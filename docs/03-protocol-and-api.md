@@ -85,6 +85,11 @@ pub enum UnifiedEventPayload {
         data_b64: String,      // ANSIエスケープを含む生バイト列 (Base64)
         exit_code: Option<i32>,
     },
+    /// 対話型コマンドへの標準入力送信 (Web UI -> エージェントPTY)
+    TerminalInput {
+        terminal_id: String,
+        data_b64: String,      // ユーザー入力キーストローク (Base64)
+    },
     /// モード・スラッシュコマンド・設定の更新通知
     CapabilitiesUpdated {
         current_mode: Option<String>,
@@ -142,6 +147,22 @@ pub enum NodeToServerMsg {
         error: Option<String>,
         session_id: Option<String>,
     },
+    /// PTY 出力データチャンク (Web Terminal -> クライアント)
+    PtyOutput {
+        pty_id: String,
+        data_b64: String,
+    },
+    /// PTY プロセス終了通知
+    PtyExit {
+        pty_id: String,
+        exit_code: Option<i32>,
+    },
+    /// ノードのGit Diff取得結果応答
+    GitDiffResult {
+        request_id: String,
+        diff: Option<WorkspaceDiffResponse>,
+        error: Option<String>,
+    },
 }
 
 /// Server -> Node への送信メッセージ
@@ -184,6 +205,42 @@ pub enum ServerToNodeMsg {
         session_id: String,
         action: SessionControlAction, // SetMode(String) | SetConfig(k, v) | Cancel | Kill
     },
+    /// ワークスペースWebターミナル (PTY) の起動要求
+    PtySpawn {
+        pty_id: String,
+        session_id: String,
+        cols: u16,
+        rows: u16,
+        shell_cmd: Option<String>,
+    },
+    /// PTY へのユーザー入力送信 (キー入力)
+    PtyInput {
+        pty_id: String,
+        data_b64: String,
+    },
+    /// PTY ウィンドウリサイズ
+    PtyResize {
+        pty_id: String,
+        cols: u16,
+        rows: u16,
+    },
+    /// PTY プロセス終了
+    PtyKill {
+        pty_id: String,
+    },
+    /// ノードのGit作業ツリー/ブランチDiff取得要求
+    GetGitDiff {
+        request_id: String,
+        session_id: String,
+        scope: DiffScope,              // Uncommitted (git diff HEAD) | BranchBase (git diff <base>...HEAD)
+        base_branch: Option<String>,
+    },
+    /// Worktree 操作要求 (作成・削除・一覧)
+    ManageWorktree {
+        command_id: String,
+        project_id: String,
+        action: WorktreeAction,        // Add { branch, new_path } | Remove { path }
+    },
 }
 ```
 
@@ -199,15 +256,26 @@ pub enum ServerToNodeMsg {
 
 - `GET /api/v1/system/info`: 接続先が `central_server` か `local_node`
   か、および Web Push の VAPID Public Key を返却。
-- `GET /api/v1/projects`:
-  プロジェクト一覧と、各プロジェクトに紐づくノード（`project_node_bindings`）を返却。
+- `GET /api/v1/projects`: プロジェクト一覧と、各プロジェクトに紐づくノードおよび
+  Worktree（`project_node_bindings`）を返却。
+- `GET /api/v1/projects/:id/worktrees`: 指定プロジェクトの各ノード上にある
+  Worktree 一覧（パス、ブランチ、HEADコミット）を取得。
+- `POST /api/v1/projects/:id/worktrees`: 指定ノード上で新規
+  Worktree（`git worktree add -b <branch> <path>`）を作成。
+- `DELETE /api/v1/projects/:id/worktrees`: 指定ノード上の Worktree
+  を削除（`git worktree remove`）。
 - `GET /api/v1/nodes`:
   ノード一覧とオンライン状態、利用可能エージェント一覧を返却。
 - `GET /api/v1/sessions?project_id=...&status=...`: セッション一覧。
 - `POST /api/v1/sessions`:
-  新規セッションの開始（または既存セッションを別ノードへContext Fork）。
+  新規セッションの開始（Worktreeパス指定可、別ノードへContext Fork可）。
 - `GET /api/v1/sessions/:id/events?after_seq=0`:
   指定シーケンス以降のイベント履歴取得。
+- `GET /api/v1/sessions/:id/diff?scope=uncommitted&base=main`:
+  ノードのリアルタイムGit差分を取得。
+  - `scope=uncommitted` (デフォルト): 現在の作業ツリー未コミット差分
+    (`git diff HEAD`)
+  - `scope=branch`: ベースブランチとの累積差分 (`git diff <base>...HEAD`)
 - `GET /api/v1/inbox`: 全セッション横断の未解決 `PermissionRequest` 一覧。
 - `POST /api/v1/search?q=...`: SQLite FTS5 を用いた全セッション横断の全文検索。
 - `POST /api/v1/push/subscribe`: Android / Desktop PWA の Web Push
@@ -223,6 +291,19 @@ pub enum ServerToNodeMsg {
    および `LiveStreamDelta`）をプッシュします。
 3. クライアントからの操作（`SendPrompt`, `RespondPermission`,
    `ControlSession`）もこのWebSocket上（またはREST POST）で送信可能です。
+
+### 3.3 Client 双方向 Web PTY WebSocket (`/api/v1/pty/ws`)
+
+Web UI / スマホPWA上のターミナル（`ghostty-web` /
+xterm互換アダプター）とノード上の ConPTY / Unix PTY
+を直接結ぶ超低遅延バイナリ/JSONストリームチャネルです。
+
+- クライアントから接続時に `{ op: "attach", pty_id: "..." }` または
+  `{ op: "spawn", session_id: "...", cols: 80, rows: 24 }` を送信。
+- ユーザーのキー入力は `{ op: "input", data_b64: "..." }`
+  で即座にノードのPTY標準入力へ書き込まれます。
+- 画面リサイズ時は `{ op: "resize", cols: N, rows: M }` を送信し、ConPTY / Unix
+  PTYのウィンドウサイズを動的変更します。
 
 ---
 

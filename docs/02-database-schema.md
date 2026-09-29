@@ -38,12 +38,13 @@ CREATE TABLE projects (
     updated_at      INTEGER NOT NULL
 );
 
--- 3. プロジェクト × ノードのローカルパス紐付け
+-- 3. プロジェクト × ノードのローカルパス紐付け (Worktree 含む)
 CREATE TABLE project_node_bindings (
     project_id      TEXT NOT NULL REFERENCES projects(project_id) ON DELETE CASCADE,
     node_id         TEXT NOT NULL REFERENCES nodes(node_id) ON DELETE CASCADE,
-    local_path      TEXT NOT NULL,                  -- 例: "D:\ghq\github.com\nazo6\flexagent"
-    git_branch      TEXT,                           -- 最終確認時のGitブランチ
+    local_path      TEXT NOT NULL,                  -- 例: "D:\ghq\github.com\nazo6\flexagent" または Worktree パス
+    is_worktree     INTEGER NOT NULL DEFAULT 0,     -- 1: Git Worktree, 0: メインリポジトリ
+    git_branch      TEXT,                           -- 最終確認時のGitブランチ (例: "main", "feat/auth")
     last_used_at    INTEGER NOT NULL,
     PRIMARY KEY (project_id, node_id, local_path)
 );
@@ -53,7 +54,9 @@ CREATE TABLE sessions (
     session_id      TEXT PRIMARY KEY,               -- UUID v7
     project_id      TEXT NOT NULL REFERENCES projects(project_id),
     node_id         TEXT NOT NULL REFERENCES nodes(node_id),
-    local_path      TEXT NOT NULL,                  -- 実行ディレクトリ
+    local_path      TEXT NOT NULL,                  -- 実行ディレクトリ (Worktree パス含む)
+    git_branch      TEXT,                           -- 起動時・現在のブランチ名
+    is_worktree     INTEGER NOT NULL DEFAULT 0,     -- Worktree 内での実行か
     agent_id        TEXT NOT NULL,                  -- "opencode2" | "antigravity-acp" 等
     agent_session_id TEXT,                          -- エージェント内部のセッションID (ACP session_id / opencode id)
     parent_session_id TEXT REFERENCES sessions(session_id), -- Fork元のセッションID
@@ -142,6 +145,8 @@ CREATE TABLE local_sessions (
     project_id      TEXT NOT NULL,
     project_name    TEXT NOT NULL,
     local_path      TEXT NOT NULL,
+    git_branch      TEXT,                           -- 起動時・現在のブランチ名
+    is_worktree     INTEGER NOT NULL DEFAULT 0,     -- Worktree 内での実行か
     agent_id        TEXT NOT NULL,
     agent_session_id TEXT,
     title           TEXT NOT NULL DEFAULT 'New Session',

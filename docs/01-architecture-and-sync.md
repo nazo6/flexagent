@@ -174,7 +174,44 @@ Windows (`D:\ghq\github.com\nazo6\flexagent`)、Linux VPS
 PWAから新規セッションを開始する際は：
 
 1. プロジェクト一覧から **`nazo6/flexagent`** をタップ
-2. 実行ノード（例: `Home-Windows` または `Home-WSL` または `Sakura-VPS`）を選択
+2. 実行ノード（例: `Home-Windows` または `Home-WSL` または `Sakura-VPS`）および
+   Worktree を選択
 3. エージェント（`opencode2`, `antigravity-acp` 等）を選択して開始
    という3ステップだけで、対象ノード上の正しいローカルパス（`D:\ghq\...` や
    `/home/...`）でエージェントが起動します。
+
+---
+
+## 5. Git Worktree の解決とマルチセッション並行作業
+
+近年のAIコーディングエージェントでは、「手元の作業ツリーを汚さずに別タスクを並行実行させる」ために
+**Git Worktree**
+を活用するパターンが急速に定着しています。FlexAgentはWorktreeを第一級オブジェクト（First-class）としてサポートします。
+
+### 5.1 リポジトリ・Worktree・セッションの階層構造
+
+```text
+Logical Project (例: github.com/nazo6/flexagent)
+ └── Node (例: Home-Win)
+      ├── Main Worktree (D:\ghq\...\flexagent) [branch: main]
+      ├── Worktree A    (D:\ghq\...\flexagent-feat-auth) [branch: feat/auth]  <-- Session #1
+      └── Worktree B    (D:\ghq\...\flexagent-fix-bug)  [branch: fix/bug]    <-- Session #2
+```
+
+- 各ノードの `fxg daemon` は `git worktree list --porcelain`
+  を定期・起動時に実行し、同一リポジトリに属するすべての
+  Worktree（パス、ブランチ、HEADコミット）を自動検出して中央サーバーへ報告します。
+- 各セッションは特定の `(node_id, local_path)`（特定の
+  Worktree）にバインドされます。これにより、同一マシン上で複数エージェントを走らせても作業ツリーやブランチの競合が発生しません。
+
+### 5.2 Worktree のライフサイクル操作
+
+GUI（Web UI / PWA）やCLIから以下のWorktree操作をシームレスに実行できます：
+
+1. **新規Worktree作成とセッション同時起動**:
+   - `fxg session new --worktree feat/new-api` または
+     GUIの「＋新規Worktreeで開始」から、`git worktree add -b feat/new-api <path> <base_branch>`
+     を自動実行してそのパスでエージェントを立ち上げます。
+2. **作業完了後の後片付け**:
+   - マージ後またはセッション完了時に、GUIからワンクリックで Worktree
+     ディレクトリを安全にクリーンアップ（`git worktree remove`）できます。

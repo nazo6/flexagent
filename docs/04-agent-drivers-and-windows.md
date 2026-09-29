@@ -187,9 +187,9 @@ OpenCode / OpenCode2
 
 ---
 
-## 5. Windows サポートの具体的実装 (`crates/fxg-pty`)
+## 5. Windows サポートと PTY 双方向制御 (`crates/fxg-pty`)
 
-### 4.1 Windows Job Object によるプロセスツリー完全終了
+### 5.1 Windows Job Object によるプロセスツリー完全終了
 
 Windowsでは `node.exe` や `.cmd` ラッパー経由で起動したエージェントを
 `Child::kill()`
@@ -220,7 +220,7 @@ impl WinJobGuard {
 }
 ```
 
-### 4.2 コマンド解決 (`which` + `PATHEXT`) とパス正規化 (`dunce`)
+### 5.2 コマンド解決 (`which` + `PATHEXT`) とパス正規化 (`dunce`)
 
 - **コマンド解決**: `npx`, `uvx`, `opencode2` などを起動する際、必ず
   `which::which_in(cmd, env::var_os("PATH"), &cwd)`
@@ -230,7 +230,25 @@ impl WinJobGuard {
   というUNCプレフィックスが付き、Node.js製エージェントや外部ツールがパス解釈に失敗することがあります。そのため、パス正規化には必ず
   **`dunce::canonicalize`** を使用し、通常の `D:\ghq\...` 形式を維持します。
 
-### 4.3 バックグラウンド常駐化 (`fxg service`)
+### 5.3 双方向 Web PTY セッションマネージャ (`PtySessionManager`)
+
+GUI (Web UI / スマホPWA)
+からの対話シェル操作、および対話コマンド実行を実現するため、`portable-pty`
+をラップした双方向 PTY 管理層を提供します。
+
+- **クロスプラットフォーム PTY**: Windows では ConPTY (`portable-pty::conpty`),
+  macOS/Linux では Unix PTY (`portable-pty::unix`) を自動選択。
+- **非同期ストリーミング**: PTY の Master `Read` を非同期ループで読み取り
+  WebSocket (`PtyOutput`) へブロードキャストし、クライアントからのキー入力
+  (`PtyInput`) を Master `Write` に即時フラッシュ。
+- **動的リサイズ**: 端末の画面サイズ変更に合わせて
+  `master.resize(PtySize { rows, cols, .. })` を即時適用。
+- **対話型ACPコマンドへの直接入力**:
+  エージェントが実行したプロセスが標準入力を待機している場合（ACP
+  `terminal_create`
+  で作成されたPTY）、UI上のターミナルからキーストローク（`TerminalInput`）を注入して対話操作を完結。
+
+### 5.4 バックグラウンド常駐化 (`fxg service`)
 
 `fxg service install`
 コマンドにより、各OS標準のユーザー権限バックグラウンドサービスとしてデーモンを登録します：

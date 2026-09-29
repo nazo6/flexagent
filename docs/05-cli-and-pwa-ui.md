@@ -44,12 +44,22 @@ PCブラウザ、ローカルフォールバック (`localhost:7860`)、およ�
   (モバイルの片手操作・ボトムシートUIと、デスクトップのマルチペインUIをレスポンシブ切替)
 - **状態管理 & 同期**: Zustand + カスタム WebSocket 差分同期ストア
   (`last_global_seq` 管理)
-- **コード・Diff・ターミナル表示**:
-  - Diff / コード表示: `@monaco-editor/react` (PC用) /
-    軽量シンタックスハイライト `shiki` + Unified Diff ビューア
-    (モバイル用高速描画)
-  - ターミナル出力表示: `@xterm/xterm` (`TerminalOutput`
-    イベントのANSIカラー出力をそのまま描画)
+- **コード・Diff・双方向ターミナル**:
+  - **Diff / コード表示**:
+    - PC: `@monaco-editor/react` (Monaco Diff Editor: Side-by-side / Inline
+      切替、ミニマップ、構文ハイライト)
+    - モバイル: 軽量シンタックスハイライト `shiki` + Unified Diff ビューア
+      (折りたたみ・変更行ハイライト)
+  - **双方向ターミナル**:
+    - **コアエンジン**: `ghostty-web` (WebAssembly版 `libghostty-vt` + Canvas 2D
+      レンダラ)
+    - **抽象化レイヤー (`ITerminalAdapter`)**:
+      将来的なレンダラ差し替え（DOMベースの `wterm`
+      など）やテスト容易性を担保する薄いラッパー設計。
+    - ノードの ConPTY / Unix PTY と WebSocket (`/api/v1/pty/ws`)
+      で直結し、キー入力・リサイズ・ANSIカラー出力を双方向ストリーミング。
+    - モバイルPWA向け: 画面下部に `Ctrl`, `Esc`, `Tab`, `↑`, `↓`, `←`, `→`
+      などの仮想キーバーを提供。
 - **型安全性**: Rustの `fxg-protocol` から `ts-rs`
   で自動生成された型定義をインポート。
 
@@ -58,28 +68,46 @@ PCブラウザ、ローカルフォールバック (`localhost:7860`)、およ�
 1. **グローバル承認 Inbox 画面 (バッジ通知付き)**:
    - 全ノード・全セッションで現在 `waiting_permission`
      になっているリクエストを一箇所に集約。
-   - 実行しようとしているコマンド（例:
-     `cargo test`）や変更ファイルのDiffを確認し、ワンタップで **Approve / Allow
-     Always / Reject** を応答。
-2. **プロジェクト & セッション一覧画面**:
+   - コマンド実行（例:
+     `cargo test`）やファイル変更のDiffをその場でプレビューし、ワンタップで
+     **Approve / Allow Always / Reject** を応答。
+2. **プロジェクト & Worktree 一覧画面**:
    - 論理プロジェクト（例: `github.com/nazo6/flexagent`）ごとにグループ化。
-   - 「＋新規セッション」ボタンから、**実行ノード（Windows PC / WSL / VPS）** と
-     **エージェント（opencode2 / antigravity-acp）** を選んでリモート起動。
-   - 既存セッションから「別ノードへ履歴を引き継いでFork」するアクションもここから実行。
+   - 各ノード上の **Git Worktree
+     一覧**（メインリポジトリ、各ブランチ、未コミット差分件数）を可視化。
+   - 「＋新規セッション」ボタンから、既存のWorktreeを選択、または
+     **「新規Worktree（ブランチ名指定）を作成して起動」** を実行。
+   - 既存セッションの別ノードへのContext
+     Forkや、不要になったWorktreeの削除もここから実行。
 3. **セッション詳細（チャット & ワークスペース）画面**:
-   - **ストリームタイムライン**:
-     ユーザー発言、思考プロセス（折りたたみ可能）、ツール実行、ファイルDiff、ターミナル出力を表示。
+   - **ヘッダー**: 実行ノード名（例:
+     `Home-Win`）、接続状態、バインドされているWorktree（例:
+     `feat/auth`）を常時表示。
+   - **マルチペイン / タブ構成** (デスクトップは左右分割、モバイルはタブ切替):
+     - **Chat ペイン**:
+       ストリームタイムライン（ユーザー発言、思考プロセス折りたたみ、ツール実行、承認カード、Pending
+       Queue）。
+     - **Diff ペイン (2段階スコープ切替)**:
+       - **「セッションの変更 (This Session)」**:
+         このセッションでエージェントが編集したファイル一覧とDiff（ノードがオフラインでも中央サーバーから100%閲覧可能）。
+       - **「ノードのGit作業ツリー (Worktree Diff)」**:
+         ノードにリアルタイム問い合わせる最新差分。
+         - `(●) vs Base (main...HEAD)`:
+           ベースブランチとの累積差分（PRレビュー感覚で全体の変更を把握）。
+         - `( ) vs HEAD (Uncommitted)`: 作業ツリーの未コミット差分。
+         - ファイルツリー（変更行数バッジ `+45 -2`）からファイルを選択して
+           Monaco Diff Editor で閲覧。
+     - **Terminal ペイン (統合 Web PTY)**:
+       - 画面下部ドロワー（開閉可能）または独立タブで展開。
+       - セッションの作業ディレクトリ（Worktree）上で動作するシェル（PowerShell
+         / bash / zsh）を直接対話操作。
+       - エージェントが実行している対話型コマンドへのキー入力送信（`TerminalInput`）にもシームレスに切り替え可能。
    - **動的コントロールバー**:
-     - `/` 入力時にACPの
-       `AvailableCommand`（エージェント固有スラッシュコマンド）をサジェスト表示。
-     - ACPの `SessionMode`（`plan` / `code` 等）および
-       `ConfigOption`（モデル選択等）のドロップダウン切替。
-     - 実行中ターンの `Cancel (中断)` ボタン、および実行中も次の指示を予約できる
-       **Pending Queue（送信予約キュー）**。
+     - スラッシュコマンド補完、モード切替 (`plan` /
+       `code`)、モデル選択、中断ボタン。
 4. **接続先スイッチャー（耐障害性サポート）**:
    - 通常は中央サーバーへ接続しますが、万が一中央サーバーがダウンしている場合は、画面上部のバナーから登録済みの各ノードのローカルWeb
-     UI（例: `http://localhost:7860` や
-     Tailscale上のノードURL）へワンタップで接続先を切り替えられます。
+     UI（`http://localhost:7860`）へワンタップで接続先を切り替え。
 
 ### 2.3 Android PWA & Web Push (VAPID) の実装詳細
 
@@ -98,6 +126,46 @@ PCブラウザ、ローカルフォールバック (`localhost:7860`)、およ�
        Workerがバックグラウンドで
        `POST /api/v1/sessions/:id/permissions/:req_id/approve`
        を叩き、アプリ画面を開くことすらなく承認が完了します。
+
+### 2.4 統合 Web ターミナルと抽象化設計 (`ITerminalAdapter`)
+
+Webターミナルは、GhosttyのネイティブVTエミュレーション精度とCanvas
+2D高速描画を持つ **`ghostty-web`**
+を標準採用します。同時に、UIコンポーネントと特定のターミナル実装を疎結合にするため、薄い抽象化インターフェースを介して利用します。
+
+```typescript
+// ui/src/components/terminal/types.ts
+export interface TerminalDimensions {
+  cols: number;
+  rows: number;
+}
+
+export interface ITerminalAdapter {
+  mount(element: HTMLElement): void;
+  write(data: string | Uint8Array): void;
+  onData(callback: (data: string) => void): { dispose: () => void };
+  onResize(
+    callback: (dims: TerminalDimensions) => void,
+  ): { dispose: () => void };
+  fit(): TerminalDimensions;
+  focus(): void;
+  dispose(): void;
+}
+```
+
+- **`GhosttyWebAdapter` (標準実装)**:
+  - `@coder/ghostty-web` をラップ。
+  - WASMによる高速なANSI/VT100シーケンス解釈とCanvas
+    2D描画により、ビルドログ等の大量出力でもUIスレッドをブロックしません。
+- **差し替え容易性 (Pluggable)**:
+  - 将来的にAndroid
+    PWAでのネイティブ文字選択・IME入力の操作性やアクセシビリティを重視したいケースが生じた場合でも、DOMレンダラを採用する
+    `wterm` (`@wterm/ghostty`) 等のアダプタへ最小限の修正で切り替え可能です。
+- **React コンポーネント (`TerminalView`)**:
+  - `ResizeObserver` による自動 `fit()` 実行とノード側PTYへの `resize`
+    メッセージ送信。
+  - モバイル仮想キーバー（タップで `Ctrl`, `Esc`, `Tab`,
+    矢印キー等のエスケープコードを送信）の統合。
 
 ---
 
@@ -144,7 +212,13 @@ PCブラウザ、ローカルフォールバック (`localhost:7860`)、およ�
 
 - [ ] `ui/` (Vite + React + TypeScript) の構築と `rust-embed` による `fxg`
       バイナリへの組み込み
-- [ ] セッション画面（思考・Diff・xterm.jsターミナル・スラッシュコマンド補完・承認Inbox）の実装
+- [ ] セッション画面の実装:
+  - [ ] チャットタイムライン（思考折りたたみ・スラッシュコマンド補完・承認Inbox）
+  - [ ] 2階層 Diff ビューア（セッション編集差分 + Worktree リアルタイムGit差分:
+        `vs Base` / `vs HEAD`）
+  - [ ] 双方向 Web ターミナル（`ITerminalAdapter` 抽象化 + `ghostty-web` 実装 +
+        ConPTY/Unix PTY WebSocket 直結 + モバイル仮想キーバー）
+- [ ] プロジェクト & Worktree 管理画面（Worktree 一覧・新規作成・削除）
 - [ ] Service Worker (`sw.js`) と `web-push` クレートによる VAPID
       Push通知（Androidバックグラウンド通知＆バナー承認）の実装
 - [ ] `fxg service install` による各OS自動起動設定の実装
