@@ -1,0 +1,196 @@
+# 04. エージェントドライバ実装 (`ACP` / `opencode2`) と Windows 対応詳細
+
+`crates/fxg-acp` および `crates/fxg-pty`
+におけるエージェント制御・プロセス管理の具体的な実装設計です。
+
+---
+
+## 1. `AgentDriver` トレイトによる抽象化
+
+将来的にACP以外の独自プロトコルを持つエージェントが増えても `fxg-node`
+本体を変更せずに済むよう、以下の非同期トレイトで統一します。
+
+```rust
+#[async_trait::async_trait]
+pub trait AgentDriver: Send + Sync {
+    /// ドライバ識別子 ("acp", "opencode2")
+    fn driver_kind(&self) -> &'static str;
+
+    /// 新規セッションを起動し、イベント送出用のストリーム/ハンドルを返す
+    async fn start_session(
+        &self,
+        req: StartSessionRequest,
+        event_tx: mpsc::Sender<DriverEvent>,
+    ) -> anyhow::Result<Box<dyn ActiveSessionHandle>>;
+}
+
+#[async_trait::async_trait]
+pub trait ActiveSessionHandle: Send + Sync {
+    /// プロンプト（通常メッセージまたはスラッシュコマンド）の送信
+    async fn send_prompt(&self, text: String) -> anyhow::Result<()>;
+
+    /// 権限リクエストへの応答
+    async fn respond_permission(
+        &self,
+        request_id: String,
+        selected_option_id: String,
+    ) -> anyhow::Result<()>;
+
+    /// モード変更 (`plan`, `code` 等)
+    async fn set_mode(&self, mode_id: String) -> anyhow::Result<()>;
+
+    /// 設定変更 (モデル選択等)
+    async fn set_config(&self, key: String, value: serde_json::Value) -> anyhow::Result<()>;
+
+    /// 現在のターンの中断 (Interrupt / Cancel)
+    async fn cancel_turn(&self) -> anyhow::Result<()>;
+
+    /// セッションプロセスの完全終了
+    async fn shutdown(&self) -> anyhow::Result<()>;
+}
+```
+
+---
+
+## 2. 任意ACPエージェント対応 (`AcpDriver` & Registry Manager)
+
+### 2.1 ACP Registry からの自動インストール・キャッシュ
+
+1. **レジストリ取得**:
+   - 公式インデックス
+     `https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json`
+     を取得し、`~/.flexagent/cache/registry.json` にキャッシュ（TTL
+     24時間、`fxg agents update` で即時更新）。
+   - ユーザー定義のカスタム `agent.json`（ローカルパスまたはURL、例:
+     `antigravity-acp/agent.json`）も `~/.flexagent/config.toml` に追加可能。
+2. **配布形態 (`distribution`) ごとの起動解決**:
+   - **`binary`**: 現在のOS/Arch（`windows-x86_64`, `darwin-aarch64`,
+     `linux-x86_64`
+     等）に対応するアーカイブURLをダウンロードし、`~/.flexagent/agents/<agent-id>/<version>/`
+     に展開して実行バイナリパスを解決。
+   - **`npx`**: `which::which("npx")`（Windowsでは `npx.cmd`
+     を自動解決）を用いて `npx -y <package> <args...>` を起動。
+   - **`uvx`**: `which::which("uvx")` を用いて `uvx <package> <args...>`
+     を起動。
+
+### 2.2 `agent-client-protocol` クレートを用いた `Client` 実装
+
+ACPでは、エディタやオーケストレータ側が **`acp::Client` トレイト**
+を実装してサブプロセスの `stdin/stdout` に接続します。
+
+`fxg-acp` の `FxgAcpClient` が処理する主要コールバック：
+
+- **`session_update(notification)`**:
+  - `AgentMessageChunk`, `AgentThoughtChunk` ➔
+    リアルタイム配信チャネルへ即時送出しつつ、バッファに蓄積。
+  - `ToolCall`, `ToolCallUpdate` ➔ `locations` や `content` (Diff) を抽出し
+    `UnifiedEventPayload::ToolCall` として `node.db` へ記録。
+  - `AvailableCommandsUpdate` ➔
+    スラッシュコマンド一覧を更新し、UIとCLIの補完リストに反映。
+  - `CurrentModeUpdate` / `ConfigOptionUpdate` ➔
+    現在のモードやモデル設定選択肢をUIへ同期。
+- **`request_permission(req) -> oneshot::Receiver<RequestPermissionResponse>`**:
+  - `oneshot::channel`
+    を生成してMapに保持し、`UnifiedEventPayload::PermissionRequest` を発行。
+  - Web Push通知（Android PWA）およびWebSocket/IPCへ即時ブロードキャスト。
+  - ユーザーがAndroid・Web・CLIのいずれかで承認を選択したら、`oneshot::Sender`
+    に結果を流してACPエージェントの処理を再開。
+- **`read_text_file` / `write_text_file`**:
+  - セッションの `local_path`
+    基準でファイルを読み書き。書き込み時は変更前後の内容からUnified
+    Diffを計算してイベントに添付。
+- **`terminal_create` / `terminal_output` / `terminal_wait_for_exit` /
+  `terminal_kill`**:
+  - `fxg-pty` クレートを呼び出し、ConPTY (Windows) または Unix PTY
+    でコマンドを実行し、出力をリアルタイムにストリーム配信。
+
+---
+
+## 3. OpenCode / OpenCode2 ハイブリッド統合 (`OpenCode2Driver`)
+
+`fxg opencode`（または
+`fxg opencode2`）を実行した際、最も快適かつ高機能に使えるよう2つのモードを提供します。
+
+### モードA: Server Bridge + 純正TUI Attach モード（デフォルト推奨）
+
+OpenCode / OpenCode2
+のクライアント・サーバー分離アーキテクチャをフル活用します：
+
+1. `fxg daemon` がバックグラウンドで
+   `opencode2 serve --hostname 127.0.0.1 --port <free_port>`
+   を起動（セキュリティのためランダムな `OPENCODE_SERVER_PASSWORD`
+   を自動生成して環境変数に注入）。
+2. `fxg daemon` は HTTP (OpenAPI) + SSE (`/event` ストリーム)
+   クライアントとしてローカルの `opencode2 serve`
+   に接続し、すべてのメッセージ・ツール実行・権限要求を `UnifiedEventPayload`
+   に変換して `node.db` および中央サーバーへ同期します。
+3. **ユーザーがPCターミナルで `fxg opencode` を叩いた場合**: `fxg` CLI
+   はローカルの `opencode2 serve` に対して
+   `opencode2 run --attach http://127.0.0.1:<port> --session <id>`
+   を実行します。
+   - **結果**: PCのターミナルでは **100%純正のOpenCode2 TUI**
+     がそのまま動き、同時にスマホ（Android
+     PWA）やWebブラウザからも同じセッションがリアルタイムに見えて双方向操作できます。
+
+### モードB: ACP モード (`opencode2 acp`)
+
+`opencode2 acp`
+サブコマンドを使って標準ACPエージェントとして起動するモードです。Web/Androidからヘッドレスで起動する場合や、`AcpDriver`
+と完全に同じ挙動に揃えたい場合に使用します。
+
+---
+
+## 4. Windows サポートの具体的実装 (`crates/fxg-pty`)
+
+### 4.1 Windows Job Object によるプロセスツリー完全終了
+
+Windowsでは `node.exe` や `.cmd` ラッパー経由で起動したエージェントを
+`Child::kill()`
+しても、孫プロセス（言語サーバーやテストランナー、開発サーバー）が生き残りファイルをロックする問題が多発します。
+これを防ぐため、すべてのエージェントプロセスとターミナルプロセスを **Windows Job
+Object** にバインドします：
+
+```rust
+#[cfg(windows)]
+pub struct WinJobGuard {
+    job: win32job::Job,
+}
+
+#[cfg(windows)]
+impl WinJobGuard {
+    pub fn new_kill_on_close() -> anyhow::Result<Self> {
+        let job = win32job::Job::create()?;
+        let mut info = job.query_extended_limit_info()?;
+        info.limit_kill_on_job_close(); // デーモン終了時・Drop時に孫プロセスまで確実にKill
+        job.set_extended_limit_info(&info)?;
+        Ok(Self { job })
+    }
+
+    pub fn assign_process(&self, process_handle: std::os::windows::io::RawHandle) -> anyhow::Result<()> {
+        self.job.assign_process(process_handle as isize)?;
+        Ok(())
+    }
+}
+```
+
+### 4.2 コマンド解決 (`which` + `PATHEXT`) とパス正規化 (`dunce`)
+
+- **コマンド解決**: `npx`, `uvx`, `opencode2` などを起動する際、必ず
+  `which::which_in(cmd, env::var_os("PATH"), &cwd)`
+  を通すことで、`opencode2.cmd` や `npx.cmd` の拡張子を確実に解決してから
+  `tokio::process::Command` に渡します。
+- **UNCパス回避**: Windowsで `std::fs::canonicalize` を使うと `\\?\D:\ghq\...`
+  というUNCプレフィックスが付き、Node.js製エージェントや外部ツールがパス解釈に失敗することがあります。そのため、パス正規化には必ず
+  **`dunce::canonicalize`** を使用し、通常の `D:\ghq\...` 形式を維持します。
+
+### 4.3 バックグラウンド常駐化 (`fxg service`)
+
+`fxg service install`
+コマンドにより、各OS標準のユーザー権限バックグラウンドサービスとしてデーモンを登録します：
+
+- **Windows**: タスクスケジューラ（ログオン時実行・コンソールウィンドウ非表示
+  `CREATE_NO_WINDOW`）またはスタートアップ登録。
+- **Linux / WSL**: `~/.config/systemd/user/fxg-daemon.service` を生成し
+  `systemctl --user enable --now fxg-daemon`。
+- **macOS**: `~/Library/LaunchAgents/dev.flexagent.daemon.plist` を生成し
+  `launchctl load`。
