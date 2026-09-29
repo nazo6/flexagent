@@ -56,7 +56,8 @@ CREATE TABLE sessions (
     local_path      TEXT NOT NULL,                  -- 実行ディレクトリ
     agent_id        TEXT NOT NULL,                  -- "opencode2" | "antigravity-acp" 等
     agent_session_id TEXT,                          -- エージェント内部のセッションID (ACP session_id / opencode id)
-    parent_session_id TEXT REFERENCES sessions(session_id), -- 別ノードへForkした際の元セッションID
+    parent_session_id TEXT REFERENCES sessions(session_id), -- Fork元のセッションID
+    fork_from_node_seq INTEGER,                     -- 親セッションのどのイベント(node_seq)時点からFork/Revertしたか
     title           TEXT NOT NULL DEFAULT 'New Session',
     status          TEXT NOT NULL,                  -- 'idle' | 'running' | 'waiting_permission' | 'stopped' | 'error'
     current_mode    TEXT,                           -- ACP SessionMode (例: 'code', 'plan')
@@ -76,7 +77,8 @@ CREATE TABLE session_events (
     event_id        TEXT NOT NULL UNIQUE,           -- UUID v7 (再送時の重複排除用)
     session_id      TEXT NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
     node_seq        INTEGER NOT NULL,               -- セッション内の順序番号 (1, 2, 3...)
-    event_type      TEXT NOT NULL,                  -- 'user_message' | 'agent_message' | 'agent_thought' | 'tool_call' | 'tool_update' | 'plan' | 'permission_request' | 'permission_resolved' | 'terminal_output' | 'status_change'
+    event_type      TEXT NOT NULL,                  -- 'user_message' | 'agent_message' | 'agent_thought' | 'tool_call' | 'tool_update' | 'plan' | 'permission_request' | 'permission_resolved' | 'terminal_output' | 'status_change' | 'turn_snapshot'
+    snapshot_tree_hash TEXT,                        -- Revert用: ターン開始時の Shadow Git Tree Hash (git write-tree)
     payload_json    TEXT NOT NULL,                  -- 構造化ペイロード (UnifiedEventPayload のJSON)
      searchable_text TEXT,                           -- FTS5全文検索用のプレーンテキスト抽出
     created_at      INTEGER NOT NULL,

@@ -140,7 +140,54 @@ OpenCode / OpenCode2
 
 ---
 
-## 4. Windows サポートの具体的実装 (`crates/fxg-pty`)
+## 4. セッションの Fork（分岐）と Revert（巻き戻し）の実装設計
+
+特定のメッセージ時点から別ルートを試す **Fork**
+と、エージェントが行ったファイル変更ごと過去のターンへ巻き戻す **Revert (Undo)**
+を、全エージェント共通でサポートします。
+
+### 4.1 ターンごとの軽量ファイルスナップショット (Shadow Git Tree 方式)
+
+ユーザーの実際の `.git`（ブランチや
+`git log`、ステージング状態）を一切汚さずに、任意のターン時点のファイル状態をミリ秒単位で保存・復元するため、Gitのプラミングコマンドと専用Indexファイル（`GIT_INDEX_FILE`）を用いた
+**Shadow Git Tree** を実装します。
+
+1. **スナップショットの取得（各ターンの `send_prompt` 直前に自動実行）**:
+   - 環境変数 `GIT_INDEX_FILE=~/.flexagent/snapshots/<project_hash>.index`
+     を指定した状態で：
+     1. `git add -A`（未追跡ファイルも含めてシャドウIndexにステージング）
+     2. `git write-tree` を実行し、返ってきた **40文字の Tree Hash
+        (`snapshot_tree_hash`)** をその `UserMessage`
+        イベントに紐付けてDBへ保存します。
+   - コミットオブジェクトすら作らないためユーザーのブランチ履歴は一切汚れず、変更がないファイルはGitオブジェクトDB内で自動的に重複排除されます。
+2. **Revert（指定したメッセージ時点へのファイル復元 ＋ 会話巻き戻し）**:
+   - ユーザーがWeb / Android /
+     CLIで特定のメッセージを選び「ここまでRevert（巻き戻し）」を実行した場合：
+     1. 対象メッセージの `snapshot_tree_hash`
+        を使い、ワークスペースのファイルをその時点へ復元（直前の状態の退避バックアップTreeも自動作成してデータロストを防止）。
+     2. エージェント側の会話をそのメッセージ時点へ巻き戻します（OpenCode2ならネイティブの
+        `POST /session/{id}/revert`
+        API、一般ACPエージェントならその時点までの履歴でセッションを再構築）。
+
+### 4.2 セッションの Fork（会話の分岐）
+
+任意のメッセージ（`node_seq`）時点から会話を分岐させ、新しい `session_id`
+を作成します：
+
+1. **OpenCode2 の場合**: OpenCode2のネイティブAPI
+   `POST /session/{id}/fork`（指定 `messageID`
+   からの分岐）を呼び出し、内部コンテキストを維持したまま子セッションを生成します。
+2. **任意ACPエージェントの場合（および別エージェントへの乗り換えFork）**:
+   - エージェントがACPの `unstable_session_fork`
+     に対応していればそれを呼び出します。
+   - 未対応のエージェント、または **「途中まで `opencode2`
+     で進めた会話を、ここから `antigravity-acp` に切り替えてForkする」**
+     といった場合は、`node.db` / `server.db` に保存されている `node_seq`
+     までの構造化イベント履歴（会話＋変更ファイル要約）を新しいACPセッションの初期コンテキストとして自動注入（Replay）します。
+
+---
+
+## 5. Windows サポートの具体的実装 (`crates/fxg-pty`)
 
 ### 4.1 Windows Job Object によるプロセスツリー完全終了
 
