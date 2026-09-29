@@ -24,10 +24,16 @@ fxg project info               # カレントフォルダの論理プロジェ�
 fxg project link <project-id>  # 非Gitフォルダを特定のプロジェクトIDに手動紐付け
 
 # 4. デーモン・サーバー・常駐サービス管理
-fxg daemon                     # ノードデーモンをフォアグラウンド起動 (ローカルWeb UI: http://localhost:7860)
+fxg daemon                     # ノードデーモンをフォアグラウンド起動 (127.0.0.1:7860 にバインド)
+fxg daemon --allow-remote-pty  # リモートからのWeb PTY起動を明示的に許可
 fxg service install            # OSログイン時の自動バックグラウンド起動を設定 (Win/Mac/Linux/WSL)
 fxg service status             # デーモン稼働状態・中央サーバー接続状態・未同期Outbox件数を表示
-fxg server --port 8080         # 中央サーバーを起動
+fxg server --port 8080         # 中央サーバーをLAN/VPN内で起動
+
+# 5. セキュリティ・認証・緊急停止 (フェーズ 1〜2)
+fxg web                        # トークン付きURL (http://localhost:7860/?token=...) でブラウザを開く
+fxg auth token                 # 現在の認証トークンを表示
+fxg kill-all                   # 【緊急停止】全ノードの稼働中セッション・子プロセスツリー・PTYを即時強制終了
 ```
 
 ---
@@ -108,6 +114,17 @@ PCブラウザ、ローカルフォールバック (`localhost:7860`)、およ�
 4. **接続先スイッチャー（耐障害性サポート）**:
    - 通常は中央サーバーへ接続しますが、万が一中央サーバーがダウンしている場合は、画面上部のバナーから登録済みの各ノードのローカルWeb
      UI（`http://localhost:7860`）へワンタップで接続先を切り替え。
+5. **緊急キルスイッチ & セキュリティ設定**:
+   - 画面ヘッダーに常時表示される **「緊急停止 (Kill Switch)」**
+     ボタン。タップ時に確認モーダルを表示し、全ノードで稼働中の全セッション・プロセスツリー・PTYを即時強制停止。
+   - 初回アクセス時または未認証時に表示される
+     **「認証トークン入力ダイアログ」**（入力成功時に `fxg_session` Cookie
+     を自動保持）。
+   - ノード側でリモートPTYが無効化（`allow_remote_pty = false`）されている場合、Terminalペインに「リモートPTYはセキュリティポリシーにより無効化されています。ローカル端末（`localhost:7860`
+     または CLI）からご利用ください」と安全にフォールバック表示。
+6. **監査ログ (Audit Log) 画面**:
+   - 誰が・いつ・どのLAN/VPN
+     IPからどの承認操作やWorktree作成を行ったかをタイムライン形式で確認。
 
 ### 2.3 Android PWA & Web Push (VAPID) の実装詳細
 
@@ -173,7 +190,7 @@ export interface ITerminalAdapter {
 
 手戻りを防ぎつつ、早い段階で実際に手元で動かせるようにする5つのフェーズです。
 
-### Milestone 1: コアプロトコル・DB・ローカルデーモン基盤
+### Milestone 1: コアプロトコル・DB・ローカルデーモン基盤 & セキュリティ基礎 (フェーズ 1)
 
 - [ ] Cargo Workspace の構築 (`fxg-protocol`, `fxg-db`, `fxg-pty`, `fxg-acp`,
       `fxg-node`, `fxg-server`, `fxg-cli`)
@@ -181,6 +198,11 @@ export interface ITerminalAdapter {
 - [ ] Git Remote URL正規化による論理プロジェクト解決 (`fxg project info`)
 - [ ] Windows Named Pipe / Unix Domain Socket による `fxg` CLI ⇔ `fxg daemon`
       ローカルIPC疎通
+- [ ] **セキュリティ基礎 (フェーズ 1)**:
+  - [ ] `fxg daemon` ローカルAPIの `127.0.0.1:7860`（ループバック）厳格バインド
+  - [ ] 認証トークン生成・永続化 (`~/.flexagent/auth_token`)
+  - [ ] Axum ミドルウェアによる `Host` ヘッダ検証 (DNS Rebinding 対策)
+  - [ ] WebSocket ハンドシェイク時の `Origin` ヘッダ検証 (CSWSH 対策)
 
 ### Milestone 2: ACP ドライバ & Windows プロセス管理
 
@@ -200,13 +222,19 @@ export interface ITerminalAdapter {
 - [ ] `fxg opencode` 実行時の純正TUI
       Attach（`opencode2 run --attach`）とデーモン側イベント記録の同時動作
 
-### Milestone 4: 中央サーバー & Store-and-Forward 同期
+### Milestone 4: 中央サーバー & Store-and-Forward 同期 & セキュリティ (フェーズ 2)
 
 - [ ] `fxg server` の Axum WebSocket Hub 実装
 - [ ] `fxg daemon` の Outbox Sync Worker 実装（中央サーバーへのOutbound
       WS接続、切断時のローカル蓄積と再接続時の一括同期）
 - [ ] 中央サーバー経由でのリモートコマンドルーティング（`StartSession`,
       `SendPrompt`, `RespondPermission`）
+- [ ] **LAN/VPNセキュリティ & 統制 (フェーズ 2)**:
+  - [ ] Node ⇔ Server 間のペアリングトークン (`node_token`) 認証
+  - [ ] `audit_logs` テーブルへの操作監査ログ記録
+  - [ ] 緊急キルスイッチ (`POST /api/v1/system/kill-switch` /
+        `ServerToNodeMsg::KillAllSessions`) の配信・プロセスツリー即時終了
+  - [ ] ノード設定 `allow_remote_pty` によるWeb PTYリモート起動拒否ハンドリング
 
 ### Milestone 5: 共通 Web UI / Android PWA & Web Push
 
@@ -219,6 +247,11 @@ export interface ITerminalAdapter {
   - [ ] 双方向 Web ターミナル（`ITerminalAdapter` 抽象化 + `ghostty-web` 実装 +
         ConPTY/Unix PTY WebSocket 直結 + モバイル仮想キーバー）
 - [ ] プロジェクト & Worktree 管理画面（Worktree 一覧・新規作成・削除）
+- [ ] **UI セキュリティ機能**:
+  - [ ] 初回トークン入力・Cookie自動保持
+  - [ ] ヘッダーの緊急停止（キルスイッチ）ボタン
+  - [ ] 監査ログ一覧画面
+  - [ ] リモートPTY無効化時の案内バナー表示
 - [ ] Service Worker (`sw.js`) と `web-push` クレートによる VAPID
       Push通知（Androidバックグラウンド通知＆バナー承認）の実装
 - [ ] `fxg service install` による各OS自動起動設定の実装

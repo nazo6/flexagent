@@ -15,16 +15,16 @@ flowchart TB
         CLI["fxg CLI / TUI<br/>(`fxg opencode`, `fxg attach`)"]
     end
 
-    subgraph Central["中央サーバー (`fxg server`)"]
-        Hub["Axum HTTP / WS Hub"]
+    subgraph Central["中央サーバー (`fxg server`) - LAN / VPN限定"]
+        Hub["Axum HTTP / WS Hub (:8080)<br/>(Auth Token / Origin検証)"]
         Push["Web Push (VAPID) Sender"]
-        ServerDB[("server.db (SQLite + FTS5)")]
+        ServerDB[("server.db (SQLite + FTS5 + Audit)")]
         Hub --> ServerDB
         Hub --> Push
     end
 
     subgraph Node["各ノード (`fxg daemon` on Win / Mac / Linux / WSL)"]
-        LocalAPI["Local HTTP/WS Server (:7860)<br/>+ Embedded PWA UI"]
+        LocalAPI["Local HTTP/WS Server (:7860)<br/>(127.0.0.1 ループバック専用 + Token)"]
         LocalIPC["Local IPC Server<br/>(Named Pipe / Unix Socket)"]
         SyncWorker["Outbox Sync Worker<br/>(Outbound WS Client)"]
         SessionMgr["Session & Agent Manager"]
@@ -37,17 +37,19 @@ flowchart TB
     end
 
     CLI <-->|"1. Named Pipe / UDS (最優先・超低遅延)"| LocalIPC
-    Browser <-->|"2a. 通常時: 中央サーバー接続"| Hub
-    Browser -.->|"2b. 障害時・ローカル直結 (:7860)"| LocalAPI
-    AndroidPWA <-->|"WebSocket / Web Push"| Hub
-    SyncWorker ===>|"常時接続 Outbound WS<br/>(自動再接続・差分同期)"| Hub
+    Browser <-->|"2a. 通常時: LAN中央サーバー接続 (:8080)"| Hub
+    Browser -.->|"2b. 障害時・同一PCローカル直結 (127.0.0.1:7860)"| LocalAPI
+    AndroidPWA <-->|"LAN / VPN (Tailscale等) 経由 WS / Push"| Hub
+    SyncWorker ===>|"常時接続 Outbound WS (Node Token認証)<br/>(自動再接続・差分同期)"| Hub
 ```
 
 ### 各モードの起動方法（単一バイナリ `fxg`）
 
-- **中央サーバー**: Linux VPS等で `fxg server --port 8080` を起動。
+- **中央サーバー**: 自宅LAN内の常時稼働マシンやミニPC等で
+  `fxg server --port 8080`
+  を起動（LANまたはTailscale等のプライベートVPN内のみ公開し、パブリック露出は行わない）。
 - **ノードデーモン**: 各開発マシン（Windows, Mac, Linux, WSL）で `fxg daemon`
-  を常駐（または `fxg <agent>` 実行時に未起動なら自動スポーン）。
+  を常駐（デフォルトで `127.0.0.1:7860` のローカルループバックのみバインド）。
 - **CLI**: 開発者がターミナルで `fxg opencode` や `fxg antigravity` を実行。
 
 ---
@@ -215,3 +217,74 @@ GUI（Web UI / PWA）やCLIから以下のWorktree操作をシームレスに実
 2. **作業完了後の後片付け**:
    - マージ後またはセッション完了時に、GUIからワンクリックで Worktree
      ディレクトリを安全にクリーンアップ（`git worktree remove`）できます。
+
+---
+
+## 6. セキュリティアーキテクチャ（LAN限定運用とブラウザ攻撃対策）
+
+FlexAgentのWeb UIは、エージェントを通じたファイル変更・コマンド実行やWeb
+PTY（対話シェル）の操作を可能にするため、実質的に**リモートコード実行（RCE）権限**を持ちます。LAN内での運用であっても、ブラウザを経由したローカル攻撃（CSRF
+/ DNS Rebinding / Cross-Site WebSocket
+Hijacking）や不正アクセスを防ぐため、以下の多層防御モデルを標準仕様として組み込みます。
+
+### 6.1 ネットワーク境界の原則（最小露出）
+
+- **中央サーバー (`fxg server`)**:
+  - 家庭内LAN、社内プライベートLAN、または **Tailscale / WireGuard**
+    などのプライベートVPNメッシュ内のみでの接続を前提とします。パブリックインターネット（0.0.0.0）への生ポート開放は行いません。
+- **ノードデーモン (`fxg daemon`)**:
+  - ローカルWeb/WSサーバー (`LocalAPI`) は、デフォルトで
+    **`127.0.0.1:7860`（ローカルループバックのみ）** に厳格バインドします。
+  - 同一LAN内の他端末から直接PCの `:7860`
+    を叩くことはできず、すべてのリモート操作は中央サーバー経由で中継されます。
+
+### 6.2 ブラウザ固有の攻撃防止（Localhost保護）
+
+開発者が日常的にPCでWebサイトを閲覧する際、悪意あるWebサイト内のJavaScriptが
+`http://localhost:7860` や `ws://localhost:7860`
+を叩いてPCを侵害することを完全に防ぎます。
+
+1. **Host ヘッダ検証 (DNS Rebinding 対策)**:
+   - リクエストの `Host` ヘッダを検査し、`localhost:7860`, `127.0.0.1:7860`,
+     または明示的に設定された中央サーバーホスト名以外は `403 Forbidden`
+     で即座に拒否します。
+2. **Origin ヘッダ検証 (Cross-Site WebSocket Hijacking 対策)**:
+   - WebSocketハンドシェイク（`/api/v1/client/ws`, `/api/v1/pty/ws`）時に
+     `Origin` ヘッダを検証し、許可されていない外部ドメイン（例:
+     `http://evil.com`）からの接続を一切受け付けません。
+
+### 6.3 認証トークンモデルとCookie注入
+
+1. **暗号論的トークンの自動生成**:
+   - 初回起動時（または
+     `fxg auth generate-token`）、安全な64文字のランダム文字列（`auth_token`）を生成し、`~/.flexagent/auth_token`
+     にパーミッション `0600` で保存します。
+2. **Web UI 初回アクセスとCookieの安全な設定**:
+   - ローカルCLIから `fxg web` を実行すると、ワンタイムURL
+     `http://localhost:7860/?token=<AUTH_TOKEN>` がブラウザで開かれます。
+   - サーバーはトークンを検証後、`Set-Cookie: fxg_session=<TOKEN>; HttpOnly; SameSite=Strict; Path=/`
+     を発行します。以降のリクエストはCookieまたは
+     `Authorization: Bearer <AUTH_TOKEN>`
+     ヘッダでのみ受け付け、未認証アクセスはローカルであっても `401 Unauthorized`
+     で遮断します。
+3. **Node ⇔ Server 間のペアリング認証**:
+   - 各ノードが中央サーバーのWebSocketへ接続する際、`Authorization: Bearer <FXG_NODE_TOKEN>`
+     で認証します。
+
+### 6.4 Web PTY の制限とリモートポリシー
+
+Web PTY（対話シェル起動）は最も権限が強いため、以下の防御ポリシーを提供します：
+
+- **リモートPTY制御設定 (`allow_remote_pty`)**:
+  - 設定（`~/.flexagent/config.toml`）により、リモート（中央サーバー経由）からの
+    `PtySpawn` を無効化可能（`allow_remote_pty = false`）。
+  - この場合、スマホ等のWebUIからは「エージェントへの指示とツールの承認/却下」のみが行え、自由なシェルの直接実行は遮断されます（ローカル端末直結時のみPTY利用可能）。
+
+### 6.5 緊急キルスイッチ（Panic Button）と監査ログ
+
+- **キルスイッチ (Panic Button)**:
+  - CLI（`fxg kill-all`）またはWeb
+    UIのヘッダーからワンタップで、現在稼働中の全ノード・全セッションのプロセスツリー（Windows
+    Job Object / POSIX Process Group）およびPTYを即時強制停止します。
+- **監査ログ (Audit Log)**:
+  - リモートからのプロンプト送信、ツール承認（`PermissionResolved`）、Worktree操作、セッション起動の送信元（IP、クライアント種別、トークンID）をすべてDBへ永続記録します。

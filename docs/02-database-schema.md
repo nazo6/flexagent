@@ -125,6 +125,22 @@ CREATE TABLE push_subscriptions (
     device_name     TEXT,                           -- 例: "Pixel 9 Chrome PWA"
     created_at      INTEGER NOT NULL
 );
+
+-- 9. 監査ログ (Audit Log)
+CREATE TABLE audit_logs (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    action          TEXT NOT NULL,                  -- 'session_start' | 'permission_resolved' | 'pty_spawn' | 'kill_switch' | 'worktree_manage'
+    session_id      TEXT,                           -- 関連セッションID (任意)
+    node_id         TEXT,                           -- 対象ノードID (任意)
+    client_ip       TEXT NOT NULL,                  -- 送信元IPアドレス (LAN/VPN IP)
+    client_user_agent TEXT,                         -- クライアントUser-Agent
+    auth_subject    TEXT NOT NULL,                  -- トークン識別子または認証主体
+    details_json    TEXT NOT NULL DEFAULT '{}',     -- 実行内容詳細 (実行コマンド、承認オプション等)
+    created_at      INTEGER NOT NULL
+);
+
+CREATE INDEX idx_audit_logs_action ON audit_logs(action, created_at DESC);
+CREATE INDEX idx_audit_logs_session ON audit_logs(session_id, created_at DESC);
 ```
 
 ---

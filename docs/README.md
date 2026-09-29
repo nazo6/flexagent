@@ -29,18 +29,24 @@
      Object によるプロセスツリー確実終了、`PATHEXT`
      解決を備えます（WSL環境はWSL内にLinux版 `fxg`
      デーモンを配置して別ノードとして統合）。
+6. **LAN/VPN限定運用とブラウザ攻撃防御 (Defense in Depth)**:
+   - 中央サーバーはLAN/プライベートVPN（Tailscale等）限定公開を前提とし、ノードデーモンは
+     `127.0.0.1`
+     のみにバインド。暗号論的トークン認証、Host/Originヘッダ検証（DNS
+     Rebinding/CSWSH対策）、リモートPTY制御、および緊急キルスイッチ（Panic
+     Button）を標準装備します。
 
 ---
 
 ## ドキュメント構成
 
-| ドキュメント                                                             | 内容                                                                                            |
-| :----------------------------------------------------------------------- | :---------------------------------------------------------------------------------------------- |
-| **[01-architecture-and-sync.md](./01-architecture-and-sync.md)**         | 全体トポロジー、ローカルファースト＆遅延同期（Outbox）プロトコル、論理プロジェクト同一性解決    |
-| **[02-database-schema.md](./02-database-schema.md)**                     | 中央サーバー (`server.db`) とノードデーモン (`node.db`) のSQLiteスキーマ定義・FTS5検索設計      |
-| **[03-protocol-and-api.md](./03-protocol-and-api.md)**                   | Rust共通型 (`fxg-protocol`)、Node⇔Server間WebSocket RPC、Client向けREST/WS API、ローカルIPC仕様 |
-| **[04-agent-drivers-and-windows.md](./04-agent-drivers-and-windows.md)** | `AgentDriver` トレイト、ACP Registry自動解決、`opencode2` ハイブリッド統合、Windows固有実装     |
-| **[05-cli-and-pwa-ui.md](./05-cli-and-pwa-ui.md)**                       | `fxg` CLIコマンド体系、PWA + Web Push (VAPID) フロントエンド設計、段階的実装ロードマップ        |
+| ドキュメント                                                             | 内容                                                                                                    |
+| :----------------------------------------------------------------------- | :------------------------------------------------------------------------------------------------------ |
+| **[01-architecture-and-sync.md](./01-architecture-and-sync.md)**         | 全体トポロジー、ローカルファースト＆遅延同期プロトコル、論理プロジェクト同一性解決、セキュリティ設計    |
+| **[02-database-schema.md](./02-database-schema.md)**                     | 中央サーバー (`server.db`) とノードデーモン (`node.db`) のSQLiteスキーマ定義・FTS5検索・監査ログ        |
+| **[03-protocol-and-api.md](./03-protocol-and-api.md)**                   | 共通型 (`fxg-protocol`)、Node⇔Server間WS、Client向けAPI（認証・キルスイッチ・PTYポリシー）、ローカルIPC |
+| **[04-agent-drivers-and-windows.md](./04-agent-drivers-and-windows.md)** | `AgentDriver` トレイト、ACP Registry自動解決、`opencode2` ハイブリッド統合、Windows固有実装             |
+| **[05-cli-and-pwa-ui.md](./05-cli-and-pwa-ui.md)**                       | `fxg` CLIコマンド体系、PWA + Web Push フロントエンド、キルスイッチUI、段階的実装ロードマップ            |
 
 ---
 

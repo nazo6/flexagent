@@ -241,6 +241,10 @@ pub enum ServerToNodeMsg {
         project_id: String,
         action: WorktreeAction,        // Add { branch, new_path } | Remove { path }
     },
+    /// 緊急キルスイッチ: ノード上で稼働中の全セッション・プロセスツリー・PTYを即時強制停止
+    KillAllSessions {
+        reason: String,
+    },
 }
 ```
 
@@ -251,6 +255,27 @@ pub enum ServerToNodeMsg {
 中央サーバー (`fxg server`) と各ノードのローカルWebサーバー (`fxg daemon` on
 `localhost:7860`)
 は**完全に同一のAPIパスとWebSocketフォーマット**を実装します。これにより、PWAフロントエンドは接続先URLを意識せずにどちらにも繋がります。
+
+### 3.0 共通セキュリティ & 認証仕様
+
+すべてのHTTPおよびWebSocketリクエストは以下のセキュリティ検証を通過する必要があります：
+
+1. **認証方式**:
+   - `Authorization: Bearer <auth_token>`
+     ヘッダ、または初回トークン検証時に発行される
+     `Cookie: fxg_session=<token>; HttpOnly; SameSite=Strict`。
+   - 未認証リクエストは即座に `401 Unauthorized` を返却。
+2. **Host ヘッダ検証 (DNS Rebinding 防御)**:
+   - リクエストの `Host` ヘッダが `localhost:<port>`, `127.0.0.1:<port>`,
+     またはサーバー設定の許可ホスト（例: Tailscale MagicDNS名 /
+     LANホスト名）に一致しない場合、`403 Forbidden` を返却。
+3. **Origin ヘッダ検証 (Cross-Site WebSocket Hijacking 防御)**:
+   - WebSocketハンドシェイク時、`Origin`
+     が自サーバーのドメインまたはローカルオリジン以外からの接続である場合、ハンドシェイクを拒否。
+4. **監査ログ記録 (Audit Logging)**:
+   - `session` 起動、`permission` 解決、`kill-switch` 実行、`worktree`
+     操作は、クライアントIP・UA・トークンIDとともに `server.db` の `audit_logs`
+     に記録。
 
 ### 3.1 REST API エンドポイント
 
@@ -280,6 +305,10 @@ pub enum ServerToNodeMsg {
 - `POST /api/v1/search?q=...`: SQLite FTS5 を用いた全セッション横断の全文検索。
 - `POST /api/v1/push/subscribe`: Android / Desktop PWA の Web Push
   サブスクリプション登録。
+- `POST /api/v1/system/kill-switch`: **緊急停止 (Panic
+  Button)**。全ノードの稼働中セッション、実行中プロセスツリー、PTYを一括強制終了。
+- `GET /api/v1/audit/logs?limit=50`:
+  監査ログ（操作日時、操作種別、送信元IP、クライアント種別）の取得。
 
 ### 3.2 Client WebSocket (`/api/v1/client/ws`)
 
@@ -298,6 +327,11 @@ Web UI / スマホPWA上のターミナル（`ghostty-web` /
 xterm互換アダプター）とノード上の ConPTY / Unix PTY
 を直接結ぶ超低遅延バイナリ/JSONストリームチャネルです。
 
+- **セキュリティ制御 (`allow_remote_pty`)**:
+  - ノード側設定で `allow_remote_pty = false`
+    の場合、リモート（中央サーバー経由）からの `spawn` 要求に対して
+    `{ op: "error", code: "FORBIDDEN", message: "Remote PTY is disabled on this node by security policy" }`
+    を返し、接続を切断します。
 - クライアントから接続時に `{ op: "attach", pty_id: "..." }` または
   `{ op: "spawn", session_id: "...", cols: 80, rows: 24 }` を送信。
 - ユーザーのキー入力は `{ op: "input", data_b64: "..." }`
