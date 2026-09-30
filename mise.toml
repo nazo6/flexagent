@@ -31,12 +31,17 @@ run = "dprint fmt"
 description = "TOML を tombi でフォーマットする"
 run = "tombi format"
 
+[tasks."fmt:ui"]
+description = "UI (TS / Svelte) を oxfmt でフォーマットする"
+run = "pnpm --dir ui run fmt"
+
 [tasks.fmt]
-description = "全言語 (Rust / Markdown / TOML) をフォーマットする (oxfmt は UI 実装後)"
+description = "全言語 (Rust / Markdown / TOML / UI) をフォーマットする"
 run = [
   { task = "fmt:rust" },
   { task = "fmt:md" },
   { task = "fmt:toml" },
+  { task = "fmt:ui" },
 ]
 
 [tasks."fmt:check:rust"]
@@ -51,12 +56,17 @@ run = "dprint check"
 description = "TOML のフォーマット差分を検証する"
 run = "tombi format --check"
 
+[tasks."fmt:check:ui"]
+description = "UI (TS / Svelte) のフォーマット差分を検証する"
+run = "pnpm --dir ui run fmt:check"
+
 [tasks."fmt:check"]
 description = "全言語のフォーマット差分を検証する"
 run = [
   { task = "fmt:check:rust" },
   { task = "fmt:check:md" },
   { task = "fmt:check:toml" },
+  { task = "fmt:check:ui" },
 ]
 
 [tasks."lint:rust"]
@@ -87,6 +97,34 @@ run = [
   { task = "fmt:check" },
   { task = "lint" },
   { task = "test" },
+]
+
+# ---------------------------------------------------------------------------
+# UI (`ui/`: SvelteKit SPA)
+# ---------------------------------------------------------------------------
+
+[tasks."ui:install"]
+description = "UI の依存関係を lockfile どおりに導入する"
+run = "pnpm --dir ui install --frozen-lockfile"
+
+[tasks."lint:ui"]
+description = "UI を oxlint + svelte-check で検査する"
+run = ["pnpm --dir ui run lint", "pnpm --dir ui run check"]
+
+[tasks."test:ui"]
+description = "UI の Vitest を実行する"
+run = "pnpm --dir ui run test"
+
+[tasks."build:ui"]
+description = "UI をビルドする (ui/build。fxg バイナリへの同梱用)"
+run = "pnpm --dir ui run build"
+
+[tasks."check:ui"]
+description = "UI の fmt:check + lint + test を一括実行する"
+run = [
+  { task = "fmt:check:ui" },
+  { task = "lint:ui" },
+  { task = "test:ui" },
 ]
 
 # ---------------------------------------------------------------------------

@@ -76,6 +76,18 @@ jobs:
           shared-key: ubuntu
       - run: mise run sqlx:check
 
+  ui:
+    name: ui (oxfmt / oxlint / svelte-check / vitest / build)
+    runs-on: ubuntu-latest
+    env:
+      MISE_DISABLE_TOOLS: cargo:sqlx-cli
+    steps:
+      - uses: actions/checkout@v5
+      - uses: jdx/mise-action@v3
+      - run: mise run ui:install
+      - run: mise run check:ui
+      - run: mise run build:ui
+
   types:
     name: ts-rs type sync
     runs-on: ubuntu-latest
