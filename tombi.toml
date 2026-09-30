@@ -1,0 +1,12 @@
+# Tombi (TOML フォーマッタ / リンタ) 設定。
+#
+# 方針: Markdown = dprint / TOML = tombi / Rust = rustfmt
+# (docs/changelog/2026-09-30-implementation-plan.md の「フォーマッタ決定」参照)。
+# ルールは既定のまま使用する (line-ending = lf / indent = space 2 /
+# key-quote = double / table-blank-lines = 1)。
+
+toml-version = "v1.0.0"
+
+[files]
+include = ["**/*.toml"]
+exclude = ["target/**", "ui/node_modules/**"]

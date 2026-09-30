@@ -12,22 +12,67 @@ rust = "stable"
 node = "24.21.0"
 pnpm = "12.8.1"
 "cargo:sqlx-cli" = { version = "0.9.0", default-features = "false", features = "sqlite,rustls" }
+dprint = "0.57.4"
+tombi = "1.5.8"
 
 # ---------------------------------------------------------------------------
 # フォーマット / Lint / テスト
 # ---------------------------------------------------------------------------
 
-[tasks.fmt]
-description = "全 Rust コードをフォーマットする (oxfmt は UI 実装後)"
+[tasks."fmt:rust"]
+description = "Rust コードを rustfmt でフォーマットする"
 run = "cargo fmt --all"
 
-[tasks."fmt:check"]
-description = "フォーマット差分がないか検証する"
+[tasks."fmt:md"]
+description = "Markdown を dprint でフォーマットする"
+run = "dprint fmt"
+
+[tasks."fmt:toml"]
+description = "TOML を tombi でフォーマットする"
+run = "tombi format"
+
+[tasks.fmt]
+description = "全言語 (Rust / Markdown / TOML) をフォーマットする (oxfmt は UI 実装後)"
+run = [
+  { task = "fmt:rust" },
+  { task = "fmt:md" },
+  { task = "fmt:toml" },
+]
+
+[tasks."fmt:check:rust"]
+description = "Rust のフォーマット差分を検証する"
 run = "cargo fmt --all --check"
 
-[tasks.lint]
+[tasks."fmt:check:md"]
+description = "Markdown のフォーマット差分を検証する"
+run = "dprint check"
+
+[tasks."fmt:check:toml"]
+description = "TOML のフォーマット差分を検証する"
+run = "tombi format --check"
+
+[tasks."fmt:check"]
+description = "全言語のフォーマット差分を検証する"
+run = [
+  { task = "fmt:check:rust" },
+  { task = "fmt:check:md" },
+  { task = "fmt:check:toml" },
+]
+
+[tasks."lint:rust"]
 description = "clippy を警告エラー扱いで実行する"
 run = "cargo clippy --workspace --all-targets -- -D warnings"
+
+[tasks."lint:toml"]
+description = "TOML を tombi で lint する (JSON Schema 検証含む)"
+run = "tombi lint"
+
+[tasks.lint]
+description = "全言語の lint を実行する"
+run = [
+  { task = "lint:rust" },
+  { task = "lint:toml" },
+]
 
 [tasks.test]
 description = "ワークスペース全体のテストを実行する (ts-rs 型出力含む)"

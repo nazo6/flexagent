@@ -1,0 +1,7 @@
+{
+  "recommendations": [
+    "dprint.dprint",
+    "tombi-toml.tombi",
+    "rust-lang.rust-analyzer"
+  ]
+}
