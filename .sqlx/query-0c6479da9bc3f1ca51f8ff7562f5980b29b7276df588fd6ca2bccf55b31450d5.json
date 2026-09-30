@@ -1,0 +1,86 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        SELECT project_id, node_id, local_path,\n               is_worktree AS \"is_worktree: bool\",\n               git_branch, last_used_at\n          FROM project_node_bindings\n         ORDER BY last_used_at DESC\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "project_id",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "project_node_bindings",
+            "name": "project_id"
+          }
+        }
+      },
+      {
+        "name": "node_id",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "project_node_bindings",
+            "name": "node_id"
+          }
+        }
+      },
+      {
+        "name": "local_path",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "project_node_bindings",
+            "name": "local_path"
+          }
+        }
+      },
+      {
+        "name": "is_worktree: bool",
+        "ordinal": 3,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "project_node_bindings",
+            "name": "is_worktree"
+          }
+        }
+      },
+      {
+        "name": "git_branch",
+        "ordinal": 4,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "project_node_bindings",
+            "name": "git_branch"
+          }
+        }
+      },
+      {
+        "name": "last_used_at",
+        "ordinal": 5,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "project_node_bindings",
+            "name": "last_used_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "0c6479da9bc3f1ca51f8ff7562f5980b29b7276df588fd6ca2bccf55b31450d5"
+}

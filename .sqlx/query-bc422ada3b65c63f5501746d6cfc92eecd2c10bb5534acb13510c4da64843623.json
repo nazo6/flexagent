@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        INSERT INTO nodes (\n            node_id, name, os, arch, version, installed_agents_json, is_ephemeral,\n            provisioner, lifecycle_status, idle_timeout_secs, is_online, last_seen_at, created_at\n        )\n        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)\n        ON CONFLICT(node_id) DO UPDATE SET\n            name = excluded.name,\n            os = excluded.os,\n            arch = excluded.arch,\n            version = excluded.version,\n            installed_agents_json = excluded.installed_agents_json,\n            is_ephemeral = excluded.is_ephemeral,\n            provisioner = excluded.provisioner,\n            lifecycle_status = excluded.lifecycle_status,\n            idle_timeout_secs = excluded.idle_timeout_secs,\n            is_online = excluded.is_online,\n            last_seen_at = excluded.last_seen_at\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 13
+    },
+    "nullable": []
+  },
+  "hash": "bc422ada3b65c63f5501746d6cfc92eecd2c10bb5534acb13510c4da64843623"
+}

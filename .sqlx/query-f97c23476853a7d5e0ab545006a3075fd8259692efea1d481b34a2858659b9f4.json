@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n                INSERT INTO permission_requests\n                    (request_id, session_id, node_id, tool_name, summary, details_json,\n                     status, created_at, resolved_at, resolved_by)\n                SELECT ?, ?, s.node_id, ?, ?, ?, 'pending', ?, NULL, NULL\n                  FROM sessions s\n                 WHERE s.session_id = ?\n                ON CONFLICT(request_id) DO UPDATE SET\n                    tool_name = excluded.tool_name,\n                    summary = excluded.summary,\n                    details_json = excluded.details_json,\n                    status = 'pending',\n                    resolved_at = NULL,\n                    resolved_by = NULL\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 7
+    },
+    "nullable": []
+  },
+  "hash": "f97c23476853a7d5e0ab545006a3075fd8259692efea1d481b34a2858659b9f4"
+}

@@ -1,0 +1,146 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        SELECT node_id AS \"node_id!\",\n               name, os, arch, version, installed_agents_json,\n               is_ephemeral AS \"is_ephemeral: bool\",\n               provisioner, lifecycle_status,\n               is_online AS \"is_online: bool\",\n               last_seen_at\n          FROM nodes\n         ORDER BY last_seen_at DESC\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "node_id!",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "nodes",
+            "name": "node_id"
+          }
+        }
+      },
+      {
+        "name": "name",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "nodes",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "name": "os",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "nodes",
+            "name": "os"
+          }
+        }
+      },
+      {
+        "name": "arch",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "nodes",
+            "name": "arch"
+          }
+        }
+      },
+      {
+        "name": "version",
+        "ordinal": 4,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "nodes",
+            "name": "version"
+          }
+        }
+      },
+      {
+        "name": "installed_agents_json",
+        "ordinal": 5,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "nodes",
+            "name": "installed_agents_json"
+          }
+        }
+      },
+      {
+        "name": "is_ephemeral: bool",
+        "ordinal": 6,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "nodes",
+            "name": "is_ephemeral"
+          }
+        }
+      },
+      {
+        "name": "provisioner",
+        "ordinal": 7,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "nodes",
+            "name": "provisioner"
+          }
+        }
+      },
+      {
+        "name": "lifecycle_status",
+        "ordinal": 8,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "nodes",
+            "name": "lifecycle_status"
+          }
+        }
+      },
+      {
+        "name": "is_online: bool",
+        "ordinal": 9,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "nodes",
+            "name": "is_online"
+          }
+        }
+      },
+      {
+        "name": "last_seen_at",
+        "ordinal": 10,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "nodes",
+            "name": "last_seen_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "2331de01755c70ebea8e136af44a0dc1a72a40703f22369e79eed9ee53556ca6"
+}

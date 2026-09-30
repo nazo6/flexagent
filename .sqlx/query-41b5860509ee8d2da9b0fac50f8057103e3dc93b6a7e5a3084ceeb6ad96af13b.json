@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM permission_requests",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "41b5860509ee8d2da9b0fac50f8057103e3dc93b6a7e5a3084ceeb6ad96af13b"
+}

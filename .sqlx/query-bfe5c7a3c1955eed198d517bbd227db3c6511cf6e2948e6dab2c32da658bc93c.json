@@ -1,0 +1,134 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        SELECT request_id AS \"request_id!\",\n               session_id, node_id, tool_name, summary, details_json,\n               status, created_at, resolved_at, resolved_by\n          FROM permission_requests\n         WHERE request_id = ?\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "request_id!",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "permission_requests",
+            "name": "request_id"
+          }
+        }
+      },
+      {
+        "name": "session_id",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "permission_requests",
+            "name": "session_id"
+          }
+        }
+      },
+      {
+        "name": "node_id",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "permission_requests",
+            "name": "node_id"
+          }
+        }
+      },
+      {
+        "name": "tool_name",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "permission_requests",
+            "name": "tool_name"
+          }
+        }
+      },
+      {
+        "name": "summary",
+        "ordinal": 4,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "permission_requests",
+            "name": "summary"
+          }
+        }
+      },
+      {
+        "name": "details_json",
+        "ordinal": 5,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "permission_requests",
+            "name": "details_json"
+          }
+        }
+      },
+      {
+        "name": "status",
+        "ordinal": 6,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "permission_requests",
+            "name": "status"
+          }
+        }
+      },
+      {
+        "name": "created_at",
+        "ordinal": 7,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "permission_requests",
+            "name": "created_at"
+          }
+        }
+      },
+      {
+        "name": "resolved_at",
+        "ordinal": 8,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "permission_requests",
+            "name": "resolved_at"
+          }
+        }
+      },
+      {
+        "name": "resolved_by",
+        "ordinal": 9,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "permission_requests",
+            "name": "resolved_by"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "bfe5c7a3c1955eed198d517bbd227db3c6511cf6e2948e6dab2c32da658bc93c"
+}

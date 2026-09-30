@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT details_json FROM permission_requests WHERE request_id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "details_json",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "permission_requests",
+            "name": "details_json"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "4bcc21e69f1e4d8d23d92613396080a8e6fccc9408b23b0b0d3a6265be6ad1ae"
+}

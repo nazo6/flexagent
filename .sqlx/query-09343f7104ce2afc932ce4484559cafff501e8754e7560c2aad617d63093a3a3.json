@@ -1,0 +1,74 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        SELECT e.event_id, e.session_id, e.node_seq, e.payload_json, e.created_at\n          FROM session_events e\n          JOIN sessions s ON s.session_id = e.session_id\n         WHERE e.node_seq > s.synced_up_to_node_seq\n         ORDER BY e.session_id ASC, e.node_seq ASC\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "event_id",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "session_events",
+            "name": "event_id"
+          }
+        }
+      },
+      {
+        "name": "session_id",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "session_events",
+            "name": "session_id"
+          }
+        }
+      },
+      {
+        "name": "node_seq",
+        "ordinal": 2,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "session_events",
+            "name": "node_seq"
+          }
+        }
+      },
+      {
+        "name": "payload_json",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "session_events",
+            "name": "payload_json"
+          }
+        }
+      },
+      {
+        "name": "created_at",
+        "ordinal": 4,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "session_events",
+            "name": "created_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "09343f7104ce2afc932ce4484559cafff501e8754e7560c2aad617d63093a3a3"
+}

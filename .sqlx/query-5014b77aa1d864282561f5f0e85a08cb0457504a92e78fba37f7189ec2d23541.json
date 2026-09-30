@@ -1,0 +1,21 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        SELECT COUNT(*)\n          FROM session_events e\n          JOIN sessions s ON s.session_id = e.session_id\n         WHERE e.node_seq > s.synced_up_to_node_seq\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "COUNT(*)",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "5014b77aa1d864282561f5f0e85a08cb0457504a92e78fba37f7189ec2d23541"
+}

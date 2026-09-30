@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        UPDATE sessions\n           SET last_node_seq = MAX(last_node_seq, ?), updated_at = MAX(updated_at, ?)\n         WHERE session_id = ?\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "9b6663caa68fec59b15efc798b2d2fab97bfe5ce1daec1ff9c90f74db77a4e9b"
+}

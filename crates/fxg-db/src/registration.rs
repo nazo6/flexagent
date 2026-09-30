@@ -1,0 +1,245 @@
+//! ノード自己登録・論理プロジェクト紐付けの upsert。
+//!
+//! ノードは起動時に `nodes` テーブルへ自分自身の行を upsert し、プロジェクト解決結果を
+//! `projects` / `project_node_bindings` へ upsert する (ハブへの `NodeHello` 報告と
+//! 同一の情報源)。設計: `docs/02-database-schema.md` §3。
+
+use fxg_protocol::common::NodeLifecycleStatus;
+use fxg_protocol::util::now_ms;
+use sqlx::SqlitePool;
+
+use crate::error::DbError;
+
+/// `nodes` テーブルへの登録内容 (ノード自己登録 / `NodeHello` 更新)。
+///
+/// `token_hash` / `token_issued_at` は [`set_node_token_hash`] で管理する
+/// (通常の upsert では変更しない)。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NodeRecord {
+    /// ノードID
+    pub node_id: String,
+    /// 表示名
+    pub name: String,
+    /// OS (`windows` / `linux` / `macos`)
+    pub os: String,
+    /// アーキテクチャ (`x86_64` / `aarch64`)
+    pub arch: String,
+    /// fxg バイナリバージョン
+    pub version: String,
+    /// 利用可能なエージェントID一覧
+    pub installed_agents: Vec<String>,
+    /// 一時VM / コンテナノードか
+    pub is_ephemeral: bool,
+    /// 一時ノードのプロビジョナー識別子
+    pub provisioner: Option<String>,
+    /// ライフサイクル状態
+    pub lifecycle_status: NodeLifecycleStatus,
+    /// アイドル自動破棄までの秒数 (一時ノード用)
+    pub idle_timeout_secs: Option<u64>,
+    /// 接続中か
+    pub is_online: bool,
+}
+
+impl NodeRecord {
+    /// 必須項目のみ指定して常駐・ready・オンラインの登録内容を作る。
+    pub fn new(
+        node_id: impl Into<String>,
+        name: impl Into<String>,
+        os: impl Into<String>,
+        arch: impl Into<String>,
+        version: impl Into<String>,
+    ) -> Self {
+        Self {
+            node_id: node_id.into(),
+            name: name.into(),
+            os: os.into(),
+            arch: arch.into(),
+            version: version.into(),
+            installed_agents: Vec::new(),
+            is_ephemeral: false,
+            provisioner: None,
+            lifecycle_status: NodeLifecycleStatus::Ready,
+            idle_timeout_secs: None,
+            is_online: true,
+        }
+    }
+
+    /// 利用可能エージェント一覧を設定する。
+    pub fn with_agents(mut self, agents: Vec<String>) -> Self {
+        self.installed_agents = agents;
+        self
+    }
+}
+
+/// `projects` テーブルへの登録内容 (論理プロジェクト)。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProjectRecord {
+    /// 論理プロジェクトID (正規化キー)
+    pub project_id: String,
+    /// 表示名
+    pub name: String,
+    /// 正規化元Git URL
+    pub canonical_git_url: Option<String>,
+}
+
+/// `project_node_bindings` への登録内容 (プロジェクト × ノードのローカルパス)。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProjectBindingRecord {
+    /// 論理プロジェクトID
+    pub project_id: String,
+    /// ノードID
+    pub node_id: String,
+    /// ノード上のローカルパス
+    pub local_path: String,
+    /// Git Worktree か
+    pub is_worktree: bool,
+    /// 最終確認時のGitブランチ
+    pub git_branch: Option<String>,
+}
+
+/// ノード情報を upsert する (`last_seen_at` は現在時刻で更新)。
+///
+/// `token_hash` / `token_issued_at` / `created_at` は既存値を保持する。
+pub async fn upsert_node(pool: &SqlitePool, record: &NodeRecord) -> Result<(), DbError> {
+    let now = now_ms();
+    let installed_agents_json = serde_json::to_string(&record.installed_agents)?;
+    let idle_timeout_secs = record
+        .idle_timeout_secs
+        .map(|secs| i64::try_from(secs).unwrap_or(i64::MAX));
+    sqlx::query!(
+        r#"
+        INSERT INTO nodes (
+            node_id, name, os, arch, version, installed_agents_json, is_ephemeral,
+            provisioner, lifecycle_status, idle_timeout_secs, is_online, last_seen_at, created_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(node_id) DO UPDATE SET
+            name = excluded.name,
+            os = excluded.os,
+            arch = excluded.arch,
+            version = excluded.version,
+            installed_agents_json = excluded.installed_agents_json,
+            is_ephemeral = excluded.is_ephemeral,
+            provisioner = excluded.provisioner,
+            lifecycle_status = excluded.lifecycle_status,
+            idle_timeout_secs = excluded.idle_timeout_secs,
+            is_online = excluded.is_online,
+            last_seen_at = excluded.last_seen_at
+        "#,
+        record.node_id,
+        record.name,
+        record.os,
+        record.arch,
+        record.version,
+        installed_agents_json,
+        record.is_ephemeral,
+        record.provisioner.as_deref(),
+        record.lifecycle_status.as_str(),
+        idle_timeout_secs,
+        record.is_online,
+        now,
+        now,
+    )
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// ノードのオンライン状態を更新する (`last_seen_at` も更新)。
+pub async fn set_node_online(
+    pool: &SqlitePool,
+    node_id: &str,
+    is_online: bool,
+) -> Result<(), DbError> {
+    let result = sqlx::query!(
+        r#"UPDATE nodes SET is_online = ?, last_seen_at = ? WHERE node_id = ?"#,
+        is_online,
+        now_ms(),
+        node_id,
+    )
+    .execute(pool)
+    .await?;
+    if result.rows_affected() == 0 {
+        return Err(DbError::NodeNotFound(node_id.to_owned()));
+    }
+    Ok(())
+}
+
+/// ノード個別トークンのハッシュを設定する (`None` で失効)。
+///
+/// 平文トークンは保存しない (設計: `docs/01-architecture-and-sync.md` §7.3)。
+pub async fn set_node_token_hash(
+    pool: &SqlitePool,
+    node_id: &str,
+    token_hash: Option<&str>,
+) -> Result<(), DbError> {
+    let issued_at = token_hash.map(|_| now_ms());
+    let result = sqlx::query!(
+        r#"UPDATE nodes SET token_hash = ?, token_issued_at = ? WHERE node_id = ?"#,
+        token_hash,
+        issued_at,
+        node_id,
+    )
+    .execute(pool)
+    .await?;
+    if result.rows_affected() == 0 {
+        return Err(DbError::NodeNotFound(node_id.to_owned()));
+    }
+    Ok(())
+}
+
+/// 論理プロジェクトを upsert する。
+///
+/// 既存行の `canonical_git_url` は `None` で上書きしない
+/// (フォールバック解決から後で Git URL が判明するケースに対応)。
+pub async fn upsert_project(pool: &SqlitePool, record: &ProjectRecord) -> Result<(), DbError> {
+    let now = now_ms();
+    sqlx::query!(
+        r#"
+        INSERT INTO projects (project_id, name, canonical_git_url, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(project_id) DO UPDATE SET
+            name = excluded.name,
+            canonical_git_url = COALESCE(excluded.canonical_git_url, projects.canonical_git_url),
+            updated_at = excluded.updated_at
+        "#,
+        record.project_id,
+        record.name,
+        record.canonical_git_url.as_deref(),
+        now,
+        now,
+    )
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// プロジェクト × ノードのローカルパス紐付けを upsert する。
+///
+/// `projects` / `nodes` の行が存在しない場合は FK 制約違反となるため、
+/// 呼び出し側で先に [`upsert_project`] / [`upsert_node`] を実行すること。
+pub async fn upsert_project_binding(
+    pool: &SqlitePool,
+    record: &ProjectBindingRecord,
+) -> Result<(), DbError> {
+    sqlx::query!(
+        r#"
+        INSERT INTO project_node_bindings
+            (project_id, node_id, local_path, is_worktree, git_branch, last_used_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(project_id, node_id, local_path) DO UPDATE SET
+            is_worktree = excluded.is_worktree,
+            git_branch = excluded.git_branch,
+            last_used_at = excluded.last_used_at
+        "#,
+        record.project_id,
+        record.node_id,
+        record.local_path,
+        record.is_worktree,
+        record.git_branch.as_deref(),
+        now_ms(),
+    )
+    .execute(pool)
+    .await?;
+    Ok(())
+}

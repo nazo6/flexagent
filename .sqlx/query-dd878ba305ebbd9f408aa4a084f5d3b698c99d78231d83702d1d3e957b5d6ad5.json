@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        UPDATE sessions\n           SET title = 'New Session',\n               status = 'idle',\n               current_mode = NULL,\n               available_commands_json = '[]',\n               config_options_json = '[]',\n               agent_session_id = NULL,\n               last_node_seq = 0,\n               updated_at = created_at\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "dd878ba305ebbd9f408aa4a084f5d3b698c99d78231d83702d1d3e957b5d6ad5"
+}

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE nodes SET is_online = ?, last_seen_at = ? WHERE node_id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "6472aaf5a5d6e81b0832a1e99520083fcc688aa9bb0b89a6a64691f0348555ff"
+}

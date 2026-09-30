@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE nodes SET token_hash = ?, token_issued_at = ? WHERE node_id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "13e025607fe97ea4c7283852dbece8e0d0aec05bc49c573d49c244ac21610e3e"
+}

@@ -1,0 +1,122 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        SELECT id, action, session_id, node_id, client_ip, client_user_agent,\n               auth_subject, details_json, created_at\n          FROM audit_logs\n         ORDER BY created_at DESC, id DESC\n         LIMIT ?\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "audit_logs",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "name": "action",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "audit_logs",
+            "name": "action"
+          }
+        }
+      },
+      {
+        "name": "session_id",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "audit_logs",
+            "name": "session_id"
+          }
+        }
+      },
+      {
+        "name": "node_id",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "audit_logs",
+            "name": "node_id"
+          }
+        }
+      },
+      {
+        "name": "client_ip",
+        "ordinal": 4,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "audit_logs",
+            "name": "client_ip"
+          }
+        }
+      },
+      {
+        "name": "client_user_agent",
+        "ordinal": 5,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "audit_logs",
+            "name": "client_user_agent"
+          }
+        }
+      },
+      {
+        "name": "auth_subject",
+        "ordinal": 6,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "audit_logs",
+            "name": "auth_subject"
+          }
+        }
+      },
+      {
+        "name": "details_json",
+        "ordinal": 7,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "audit_logs",
+            "name": "details_json"
+          }
+        }
+      },
+      {
+        "name": "created_at",
+        "ordinal": 8,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "audit_logs",
+            "name": "created_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      true,
+      false,
+      true,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "047619f6cebc9230829531fc08cb5d905aa9ec0d1744be9dfeb60ae0b667bedf"
+}

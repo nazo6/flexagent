@@ -1,0 +1,86 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        SELECT cursor, event_id, session_id, node_seq, payload_json, created_at\n          FROM session_events\n         WHERE session_id = ? AND cursor > ?\n         ORDER BY cursor ASC\n         LIMIT ?\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "cursor",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "session_events",
+            "name": "cursor"
+          }
+        }
+      },
+      {
+        "name": "event_id",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "session_events",
+            "name": "event_id"
+          }
+        }
+      },
+      {
+        "name": "session_id",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "session_events",
+            "name": "session_id"
+          }
+        }
+      },
+      {
+        "name": "node_seq",
+        "ordinal": 3,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "session_events",
+            "name": "node_seq"
+          }
+        }
+      },
+      {
+        "name": "payload_json",
+        "ordinal": 4,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "session_events",
+            "name": "payload_json"
+          }
+        }
+      },
+      {
+        "name": "created_at",
+        "ordinal": 5,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "session_events",
+            "name": "created_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "3c9520973584e3ac047c9c4d454ef8bc3686b66e1716b44c1564f045c9366233"
+}

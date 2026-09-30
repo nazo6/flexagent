@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE session_events SET event_type = ?, searchable_text = ? WHERE cursor = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "146227e2553c194575c87af008eae5d93fcaa74ad464bbfc55320144693f54ec"
+}

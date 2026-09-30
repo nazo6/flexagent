@@ -1,0 +1,21 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        SELECT MAX(e.created_at)\n          FROM session_events e\n          JOIN sessions s ON s.session_id = e.session_id\n         WHERE e.node_seq <= s.synced_up_to_node_seq\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "MAX(e.created_at)",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "9eab6d8dd945522915a5da885e28150335efb6a632e3f9bd1e0c2025dcf7a1eb"
+}

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        UPDATE sessions\n           SET synced_up_to_node_seq = MAX(synced_up_to_node_seq, ?)\n         WHERE session_id = ?\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "a1db515e0505642f1202a3d8641fff3200c191f0fe86325b51e8a07507bd954c"
+}
