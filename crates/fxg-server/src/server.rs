@@ -118,6 +118,13 @@ impl Server {
 
     /// シャットダウン要求を送り、サーバータスクの終了を待つ。
     pub async fn wait(self) {
+        let mut receiver = self.shutdown_tx.subscribe();
+        // `watch` の受信者は生成時点の値を「既読」として開始するため、
+        // 先に `shutdown()` 済みかどうかを現在値で確認してから待機する
+        // (未要求なら Ctrl-C 等による要求まで待つ)。
+        if !*receiver.borrow_and_update() {
+            let _ = receiver.changed().await;
+        }
         let _ = self.shutdown_tx.send(true);
         let _ = self.task.await;
     }
