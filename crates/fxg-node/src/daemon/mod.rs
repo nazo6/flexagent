@@ -16,8 +16,9 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
+use fxg_acp::registry::AcpRegistry;
 use fxg_db::{Db, DbRole};
-use fxg_protocol::config::fxg_home;
+use fxg_protocol::config::{GlobalConfig, fxg_home};
 use fxg_protocol::util::now_ms;
 use fxg_pty::PtySessionManager;
 use tokio::sync::watch;
@@ -25,6 +26,7 @@ use tokio::sync::watch;
 use crate::error::NodeError;
 use crate::paths::{NodePaths, ipc_endpoint};
 use crate::session::SessionEventBus;
+use crate::session_manager::{DriverFactory, SessionManager, default_driver_factory};
 
 pub use auth::{generate_token, token_matches};
 
@@ -125,6 +127,7 @@ struct Inner {
     db: Db,
     bus: SessionEventBus,
     pty: PtySessionManager,
+    sessions: SessionManager,
     paths: NodePaths,
     config: DaemonConfig,
     token: RwLock<String>,
@@ -150,7 +153,19 @@ impl std::fmt::Debug for DaemonState {
 impl DaemonState {
     /// 状態を初期化する (データディレクトリ作成 + 認証トークン読み込み +
     /// ノードID の解決)。
-    pub async fn new(mut config: DaemonConfig) -> Result<Self, NodeError> {
+    pub async fn new(config: DaemonConfig) -> Result<Self, NodeError> {
+        Self::with_driver_factory(config, default_driver_factory()).await
+    }
+
+    /// エージェントドライバファクトリを差し替えて状態を初期化する。
+    ///
+    /// 本番経路は [`Self::new`] (ACP / OpenCode2 ドライバを自動選択)。
+    /// テストではモックドライバを注入して実プロセスなしで検証する。
+    #[doc(hidden)]
+    pub async fn with_driver_factory(
+        mut config: DaemonConfig,
+        driver_factory: DriverFactory,
+    ) -> Result<Self, NodeError> {
         let paths = NodePaths::new(config.fxg_home.clone());
         paths.ensure_dirs()?;
         let db = Db::open(&paths.node_db_path(), DbRole::Node).await?;
@@ -170,11 +185,30 @@ impl DaemonState {
         let token = auth::load_or_create(&paths.auth_token_path())?;
         let bus = SessionEventBus::new(db.clone());
 
+        // ACP Registry / カスタムエージェント定義は `config.toml` から解決する
+        // (読み込み失敗時は既定設定で起動し、警告のみ残す)。
+        let agents = match GlobalConfig::load_from_path(&paths.config_path()) {
+            Ok(global) => global.agents,
+            Err(err) => {
+                tracing::warn!("failed to load config.toml (using defaults): {err}");
+                fxg_protocol::config::AgentsConfig::default()
+            }
+        };
+        let registry = AcpRegistry::new(paths.fxg_home(), &agents);
+        let sessions = SessionManager::with_factory(
+            bus.clone(),
+            paths.clone(),
+            config.node_id.clone(),
+            registry,
+            driver_factory,
+        );
+
         Ok(Self {
             inner: Arc::new(Inner {
                 db,
                 bus,
                 pty: PtySessionManager::new(),
+                sessions,
                 paths,
                 config,
                 token: RwLock::new(token),
@@ -196,6 +230,11 @@ impl DaemonState {
     /// ローカルPTYマネージャ。
     pub fn pty(&self) -> &PtySessionManager {
         &self.inner.pty
+    }
+
+    /// エージェントセッションマネージャ。
+    pub fn session_manager(&self) -> &SessionManager {
+        &self.inner.sessions
     }
 
     /// データディレクトリのパス解決。
@@ -286,8 +325,9 @@ impl DaemonState {
     ///
     /// - PTY: [`PtySessionManager::kill_all`] (Windows では Job Object 経由で
     ///   プロセスツリーごと終了)
-    /// - 稼働中セッション: `StatusChanged(Stopped)` イベントを発行
-    ///   (エージェントプロセスの停止は Phase 3 で追加する)
+    /// - エージェントセッション: [`SessionManager::shutdown_all`]
+    ///   (ドライバ経由でエージェントプロセスツリーごと終了)
+    /// - 実行中だったセッション: `StatusChanged(Stopped)` イベントを発行
     ///
     /// 監査ログ (`audit_logs`) の記録はクライアント情報 (IP / 経路) を持つ
     /// 呼び出し側 (IPC / HTTP ハンドラ) の責務とする。
@@ -302,11 +342,17 @@ impl DaemonState {
 
         let killed_ptys = self.inner.pty.kill_all();
 
+        // エージェントプロセスを停止する (プロセスツリーごと)。
+        let stopped_agents = self.inner.sessions.shutdown_all().await;
+        if !stopped_agents.is_empty() {
+            tracing::info!(count = stopped_agents.len(), "stopped local agent sessions");
+        }
+
         let sessions = self
             .inner
             .db
             .list_sessions(&fxg_db::SessionFilter {
-                statuses: vec![SessionStatus::Running, SessionStatus::WaitingPermission],
+                statuses: Self::active_statuses(),
                 ..fxg_db::SessionFilter::default()
             })
             .await?;
@@ -359,7 +405,17 @@ impl NodeDaemon {
     /// デーモンを起動する (データディレクトリ作成・ノード登録・
     /// ローカルHTTP/WS と ローカルIPC のリッスン開始)。
     pub async fn start(config: DaemonConfig) -> Result<Self, NodeError> {
-        let state = DaemonState::new(config).await?;
+        Self::start_with_driver_factory(config, default_driver_factory()).await
+    }
+
+    /// エージェントドライバファクトリを差し替えてデーモンを起動する
+    /// (テスト用。本番経路は [`Self::start`])。
+    #[doc(hidden)]
+    pub async fn start_with_driver_factory(
+        config: DaemonConfig,
+        driver_factory: DriverFactory,
+    ) -> Result<Self, NodeError> {
+        let state = DaemonState::with_driver_factory(config, driver_factory).await?;
         state.register_node().await?;
 
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
@@ -446,6 +502,10 @@ impl NodeDaemon {
         }
         let _ = self.shutdown_tx.send(true);
 
+        let stopped = self.state.session_manager().shutdown_all().await;
+        if !stopped.is_empty() {
+            tracing::info!(count = stopped.len(), "stopped agent sessions on shutdown");
+        }
         let killed = self.state.pty().kill_all();
         if !killed.is_empty() {
             tracing::info!(count = killed.len(), "killed local ptys on shutdown");
@@ -569,6 +629,54 @@ mod tests {
         let on_disk = std::fs::read_to_string(daemon.state().paths().auth_token_path())
             .expect("read token file");
         assert_eq!(on_disk.trim(), after);
+
+        daemon.shutdown();
+        daemon.wait().await;
+    }
+
+    #[tokio::test]
+    async fn kill_all_stops_agent_sessions() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        crate::testutil::write_mock_agent_config(dir.path());
+        let mut config = DaemonConfig::new(dir.path().to_path_buf(), "kill-node", "Kill Node");
+        config.listen_addr = "127.0.0.1:0".to_owned();
+        config.ipc_endpoint = crate::testutil::test_ipc_endpoint(dir.path());
+        let mock = crate::testutil::MockAgent::default();
+        let daemon = NodeDaemon::start_with_driver_factory(config, mock.factory())
+            .await
+            .expect("start");
+
+        let workdir = dir.path().join("workspace");
+        std::fs::create_dir_all(&workdir).expect("mkdir");
+        let outcome = daemon
+            .state()
+            .session_manager()
+            .ensure_session("c1", &workdir, "mock", &[])
+            .await
+            .expect("ensure session");
+        assert_eq!(daemon.state().session_manager().list_active().len(), 1);
+
+        // キルスイッチでエージェントセッションが停止し、Stopped が記録される
+        let (killed_sessions, killed_ptys) = daemon
+            .state()
+            .kill_all_local("kill switch test")
+            .await
+            .expect("kill all");
+        assert_eq!(killed_sessions, vec![outcome.session_id.clone()]);
+        assert!(killed_ptys.is_empty());
+        assert!(daemon.state().session_manager().list_active().is_empty());
+
+        let sessions = daemon
+            .state()
+            .db()
+            .list_sessions(&fxg_db::SessionFilter::default())
+            .await
+            .expect("list sessions");
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(
+            sessions[0].status,
+            fxg_protocol::common::SessionStatus::Stopped
+        );
 
         daemon.shutdown();
         daemon.wait().await;

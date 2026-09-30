@@ -490,17 +490,7 @@ async fn handle_client_ws(daemon: DaemonState, socket: WebSocket) {
                             }
                         }
                         Ok(other) => {
-                            // セッション操作コマンドは Phase 3 で実装する
-                            let response = ServerWsMessage::CommandResult {
-                                command_id: client_command_id(&other),
-                                success: false,
-                                code: Some(ErrorCode::InvalidState),
-                                error: Some(
-                                    "agent session commands are implemented in phase 3 (fxg-acp)"
-                                        .to_owned(),
-                                ),
-                                session_id: None,
-                            };
+                            let response = handle_client_command(&daemon, other).await;
                             if send_json(&mut sender, &response).await.is_err() {
                                 break;
                             }
@@ -546,13 +536,84 @@ async fn handle_client_ws(daemon: DaemonState, socket: WebSocket) {
     }
 }
 
-fn client_command_id(message: &fxg_protocol::client_api::ClientWsMessage) -> String {
+/// Client WS 経由のセッション操作コマンドを `SessionManager` へディスパッチする。
+///
+/// 結果は `command_id` 付きの `CommandResult` として要求元クライアントへ返す
+/// (`COMMAND_DUPLICATE` / `ALREADY_RESOLVED` はエラーコードで通知する)。
+async fn handle_client_command(
+    daemon: &DaemonState,
+    message: fxg_protocol::client_api::ClientWsMessage,
+) -> ServerWsMessage {
     use fxg_protocol::client_api::ClientWsMessage;
-    match message {
-        ClientWsMessage::SendPrompt { command_id, .. }
-        | ClientWsMessage::RespondPermission { command_id, .. }
-        | ClientWsMessage::ControlSession { command_id, .. } => command_id.clone(),
-        _ => String::new(),
+
+    let manager = daemon.session_manager();
+    let (command_id, result) = match message {
+        ClientWsMessage::SendPrompt {
+            command_id,
+            session_id,
+            text,
+            client_source,
+        } => {
+            let result = manager
+                .send_prompt(&command_id, &session_id, &text, &client_source)
+                .await
+                .map(|()| session_id);
+            (command_id, result)
+        }
+        ClientWsMessage::RespondPermission {
+            command_id,
+            session_id,
+            request_id,
+            selected_option_id,
+            resolved_by,
+        } => {
+            let result = manager
+                .respond_permission(
+                    &command_id,
+                    &session_id,
+                    &request_id,
+                    &selected_option_id,
+                    &resolved_by,
+                )
+                .await
+                .map(|()| session_id);
+            (command_id, result)
+        }
+        ClientWsMessage::ControlSession {
+            command_id,
+            session_id,
+            action,
+        } => {
+            let result = manager
+                .control(&command_id, &session_id, &action)
+                .await
+                .map(|()| session_id);
+            (command_id, result)
+        }
+        // Subscribe / Ping は接続ループ側で処理される
+        other => {
+            return ServerWsMessage::Error {
+                code: ErrorCode::InvalidState,
+                message: format!("unsupported client message: {other:?}"),
+            };
+        }
+    };
+
+    match result {
+        Ok(session_id) => ServerWsMessage::CommandResult {
+            command_id,
+            success: true,
+            code: None,
+            error: None,
+            session_id: Some(session_id),
+        },
+        Err(err) => ServerWsMessage::CommandResult {
+            command_id,
+            success: false,
+            code: Some(err.error_code()),
+            error: Some(err.to_string()),
+            session_id: None,
+        },
     }
 }
 
@@ -928,6 +989,54 @@ mod tests {
             .expect("send ping");
         match next_ws_message(&mut socket).await {
             ServerWsMessage::Pong => {}
+            other => panic!("unexpected message: {other:?}"),
+        }
+
+        daemon.shutdown();
+        tokio::time::timeout(std::time::Duration::from_secs(5), daemon.wait())
+            .await
+            .expect("stop");
+    }
+
+    #[tokio::test]
+    async fn client_ws_session_commands_return_structured_errors() {
+        use tokio_tungstenite::tungstenite::Message as WsMessage;
+
+        let (daemon, _dir) = test_daemon().await;
+        let host = host_of(&daemon);
+        let token = daemon.state().auth_token();
+
+        let request = ws_request(&host, &token, &format!("http://{host}"));
+        let (mut socket, _) = tokio_tungstenite::connect_async(request)
+            .await
+            .expect("handshake");
+
+        // 存在しないセッションへの送信は INVALID_STATE の CommandResult になる
+        let command = fxg_protocol::client_api::ClientWsMessage::SendPrompt {
+            command_id: "c1".to_owned(),
+            session_id: "missing-session".to_owned(),
+            text: "hello".to_owned(),
+            client_source: "web".to_owned(),
+        };
+        socket
+            .send(WsMessage::Text(
+                serde_json::to_string(&command).unwrap().into(),
+            ))
+            .await
+            .expect("send prompt");
+        match next_ws_message(&mut socket).await {
+            ServerWsMessage::CommandResult {
+                command_id,
+                success,
+                code,
+                session_id,
+                ..
+            } => {
+                assert_eq!(command_id, "c1");
+                assert!(!success);
+                assert_eq!(code, Some(ErrorCode::InvalidState));
+                assert_eq!(session_id, None);
+            }
             other => panic!("unexpected message: {other:?}"),
         }
 

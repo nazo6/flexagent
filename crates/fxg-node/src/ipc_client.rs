@@ -54,16 +54,35 @@ impl IpcClient {
         })
     }
 
-    /// 1リクエストを送信し、レスポンスを受信する。
+    /// 1メッセージを送信する (レスポンスを待たない)。
+    ///
+    /// `AttachSession` でイベントストリーミング中の接続へコマンド
+    /// (`SendPrompt` 等) を送る場合に [`Self::send`] + [`Self::recv`] を使う。
+    pub async fn send(&mut self, message: &IpcClientMessage) -> Result<(), NodeError> {
+        write_message(&mut self.stream, message).await
+    }
+
+    /// 次のサーバーメッセージを受信する (接続が閉じた場合は `None`)。
+    ///
+    /// アタッチ中は `EventBatch` / `LiveStreamDelta` とコマンド応答
+    /// (`Result` / `Error`) が混在して届くため、`command_id` で相関する。
+    pub async fn recv(&mut self) -> Result<Option<IpcServerMessage>, NodeError> {
+        let frame = read_frame(&mut self.stream).await?;
+        match frame {
+            Some(frame) => Ok(Some(serde_json::from_slice(&frame)?)),
+            None => Ok(None),
+        }
+    }
+
+    /// 1リクエストを送信し、次のレスポンスを受信する。
     pub async fn request(
         &mut self,
         message: &IpcClientMessage,
     ) -> Result<IpcServerMessage, NodeError> {
-        write_message(&mut self.stream, message).await?;
-        let frame = read_frame(&mut self.stream)
+        self.send(message).await?;
+        self.recv()
             .await?
-            .ok_or_else(|| NodeError::Server("daemon closed the connection".to_owned()))?;
-        Ok(serde_json::from_slice(&frame)?)
+            .ok_or_else(|| NodeError::Server("daemon closed the connection".to_owned()))
     }
 }
 

@@ -25,6 +25,7 @@ pub mod git;
 pub mod paths;
 pub mod project;
 pub mod session;
+pub mod session_manager;
 pub mod snapshot;
 pub mod worktree;
 

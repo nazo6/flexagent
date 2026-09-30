@@ -39,6 +39,15 @@ pub enum NodeError {
     /// セッションの状態・操作が不正
     #[error("invalid session state: {0}")]
     InvalidSession(String),
+    /// 同一 `command_id` のコマンドが既に処理済み (冪等性)
+    #[error("duplicate command: {0}")]
+    CommandDuplicate(String),
+    /// 承認リクエストが既に解決済み (2回目以降の応答)
+    #[error("already resolved: {0}")]
+    AlreadyResolved(String),
+    /// 対象のエージェント起動・ドライバ操作が失敗した
+    #[error("agent error: {0}")]
+    Agent(String),
     /// 永続化してはいけないイベントを記録しようとした
     /// (ストリーミング途中のチャンク・キーストローク等)
     #[error("event is not persistable: {0}")]
@@ -66,6 +75,26 @@ impl NodeError {
         Self::Io {
             path: path.into(),
             source,
+        }
+    }
+
+    /// IPC / WebSocket / REST 応答に載せる構造化エラーコードへ変換する。
+    ///
+    /// クライアント (CLI / PWA) はこのコードで冪等な再試行
+    /// (`COMMAND_DUPLICATE` / `ALREADY_RESOLVED`) を判定する。
+    pub fn error_code(&self) -> fxg_protocol::common::ErrorCode {
+        use fxg_protocol::common::ErrorCode;
+        match self {
+            Self::NotARepository(_)
+            | Self::InvalidWorktree(_)
+            | Self::InvalidSession(_)
+            | Self::NonPersistableEvent(_)
+            | Self::Config(_) => ErrorCode::InvalidState,
+            Self::CommandDuplicate(_) => ErrorCode::CommandDuplicate,
+            Self::AlreadyResolved(_) => ErrorCode::AlreadyResolved,
+            Self::Db(fxg_db::DbError::SessionNotFound(_))
+            | Self::Db(fxg_db::DbError::NodeNotFound(_)) => ErrorCode::NotFound,
+            _ => ErrorCode::Internal,
         }
     }
 }
