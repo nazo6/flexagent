@@ -47,8 +47,19 @@ use crate::driver::{
 const SERVER_READY_TIMEOUT: Duration = Duration::from_secs(30);
 /// 準備完了ポーリングの間隔。
 const READY_POLL_INTERVAL: Duration = Duration::from_millis(250);
+/// 起動直後は `/api/agent` / `/api/model` が空を返すため、カタログが
+/// 揃うまで再取得する上限時間。
+const CAPABILITIES_READY_TIMEOUT: Duration = Duration::from_secs(10);
+/// カタログ再取得の間隔。
+const CAPABILITIES_POLL_INTERVAL: Duration = Duration::from_millis(250);
 /// HTTP リクエストのタイムアウト。
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+/// SSE (`GET /api/event`) の接続確立タイムアウト。
+///
+/// SSE は長時間接続のため、リクエスト全体のタイムアウト ([`REQUEST_TIMEOUT`]) を
+/// 適用してはならない (適用すると一定時間でストリームが強制切断され、
+/// 切断中のイベントを恒久的に取りこぼす)。
+const SSE_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 /// SSE の再接続回数上限 (サーバー停止時は諦める)。
 const SSE_RECONNECT_LIMIT: u32 = 3;
 /// SSE 再接続の待機時間。
@@ -359,8 +370,9 @@ impl AgentDriver for OpenCode2Driver {
             agent_session_id: opencode_session_id.clone(),
         }));
 
-        // モード (agent) とモデルの選択肢を同期する
-        if let Some(capabilities) = fetch_capabilities(&http, &base_url, &password).await {
+        // モード (agent) とモデルの選択肢を同期する。
+        // `opencode2 serve` は起動直後しばらくカタログが空のため、揃うまで待つ
+        if let Some(capabilities) = wait_for_capabilities(&http, &base_url, &password).await {
             let _ = event_tx.send(DriverEvent::Event(capabilities));
         }
 
@@ -385,7 +397,11 @@ impl AgentDriver for OpenCode2Driver {
         // SSE イベントポンプ
         let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
         let stream_events = event_tx.clone();
-        let stream_http = http.clone();
+        // 長時間接続の SSE には `REQUEST_TIMEOUT` を適用しない専用クライアントを使う
+        let stream_http = reqwest::Client::builder()
+            .connect_timeout(SSE_CONNECT_TIMEOUT)
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new());
         let stream_url = base_url.clone();
         let stream_password = password.clone();
         let stream_session = opencode_session_id.clone();
@@ -419,12 +435,16 @@ impl AgentDriver for OpenCode2Driver {
 
 /// サーバープロセスをプロセスツリーごと終了させるガード。
 ///
-/// - **Windows**: Job Object (`kill on job close`) に割り当て、ガード (および
-///   セッションハンドル) が破棄されると孫プロセスを含めて確実に終了する。
+/// - **Windows**: Job Object (`kill on job close`) に割り当て、[`Self::terminate`]
+///   またはガードの破棄でジョブを閉じると孫プロセスを含めて確実に終了する。
+///   `opencode2` は mise/npm の `.cmd` シム経由で実際のサーバーが
+///   **孫プロセス**として起動されるため、直接の子を kill するだけでは
+///   サーバーが残ってしまう。
 /// - **Unix**: 追加の機構は持たない (`shutdown` 時に子プロセスを kill する)。
 struct ServerProcessGuard {
+    /// Windows のみ: Job Object。`terminate` で `None` になる (冪等)。
     #[cfg(windows)]
-    job: fxg_pty::WinJobGuard,
+    job: Mutex<Option<fxg_pty::WinJobGuard>>,
 }
 
 impl ServerProcessGuard {
@@ -432,7 +452,7 @@ impl ServerProcessGuard {
         #[cfg(windows)]
         {
             Ok(Self {
-                job: fxg_pty::WinJobGuard::new_kill_on_close()?,
+                job: Mutex::new(Some(fxg_pty::WinJobGuard::new_kill_on_close()?)),
             })
         }
         #[cfg(not(windows))]
@@ -446,7 +466,10 @@ impl ServerProcessGuard {
         #[cfg(windows)]
         {
             if let Some(handle) = child.raw_handle() {
-                self.job.assign_process(handle)?;
+                let job = self.job.lock().expect("job poisoned");
+                if let Some(job) = job.as_ref() {
+                    job.assign_process(handle)?;
+                }
             }
         }
         #[cfg(not(windows))]
@@ -454,6 +477,15 @@ impl ServerProcessGuard {
             let _ = child;
         }
         Ok(())
+    }
+
+    /// ジョブを閉じて割り当て済みプロセス (シム経由の孫プロセス含む) を終了する。
+    fn terminate(&self) {
+        #[cfg(windows)]
+        {
+            // kill-on-close: ハンドルを閉じるだけでツリー全体が終了する
+            let _ = self.job.lock().expect("job poisoned").take();
+        }
     }
 }
 
@@ -463,15 +495,19 @@ async fn supervise_server(
     mut commands: mpsc::UnboundedReceiver<ServerCommand>,
     events: mpsc::UnboundedSender<DriverEvent>,
     session_id: String,
-    _guard: Arc<ServerProcessGuard>,
+    guard: Arc<ServerProcessGuard>,
 ) {
     tokio::select! {
         _ = commands.recv() => {
             let _ = child.start_kill();
             let _ = child.wait().await;
+            // `.cmd` シム経由の孫プロセス (実際のサーバー) を取り残さない
+            guard.terminate();
             tracing::debug!(session_id, "opencode2 serve stopped");
         }
         status = child.wait() => {
+            // 自ら終了した場合も孫プロセスを残さない
+            guard.terminate();
             match status {
                 Ok(status) if status.success() => {
                     tracing::debug!(session_id, "opencode2 serve exited");
@@ -591,6 +627,28 @@ async fn request(
         return Ok(Value::Null);
     }
     Ok(serde_json::from_str(&text)?)
+}
+
+/// カタログが揃うまで [`fetch_capabilities`] をリトライする。
+///
+/// `opencode2 serve` は起動直後しばらく `/api/agent` / `/api/model` が空配列を
+/// 返すため、内容が得られるまで短い間隔で再取得する。
+async fn wait_for_capabilities(
+    http: &reqwest::Client,
+    base_url: &str,
+    password: &str,
+) -> Option<UnifiedEventPayload> {
+    let deadline = tokio::time::Instant::now() + CAPABILITIES_READY_TIMEOUT;
+    loop {
+        if let Some(capabilities) = fetch_capabilities(http, base_url, password).await {
+            return Some(capabilities);
+        }
+        if tokio::time::Instant::now() >= deadline {
+            tracing::debug!("opencode2 capabilities were still empty before timeout");
+            return None;
+        }
+        tokio::time::sleep(CAPABILITIES_POLL_INTERVAL).await;
+    }
 }
 
 /// 利用可能なモード (agent) とモデル選択肢を取得して
@@ -1341,6 +1399,29 @@ mod tests {
             .expect("start_session");
 
         assert!(handle.native_attach().is_some());
+        // 起動直後は `/api/agent` / `/api/model` が空を返すため、ドライバが
+        // カタログ取得を待って `CapabilitiesUpdated` を送ることを検証する
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+        let mut has_model_options = false;
+        while tokio::time::Instant::now() < deadline {
+            match tokio::time::timeout(Duration::from_secs(15), rx.recv()).await {
+                Ok(Some(DriverEvent::Event(UnifiedEventPayload::CapabilitiesUpdated {
+                    config_options,
+                    ..
+                }))) => {
+                    has_model_options = config_options
+                        .iter()
+                        .any(|option| option.key == "model" && !option.options.is_empty());
+                    break;
+                }
+                Ok(Some(_)) => continue,
+                Ok(None) | Err(_) => break,
+            }
+        }
+        assert!(
+            has_model_options,
+            "capabilities with model options must be emitted"
+        );
         // opencode2 の既定モデルは環境によっては利用できないため、公開プロバイダ
         // (`opencode`) のモデルを選んで明示的に設定する。
         if let Some(info) = handle.native_attach() {
