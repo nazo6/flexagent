@@ -253,31 +253,10 @@ impl PtySessionManager {
         // 破棄して Exit を配信する。破棄で master が Drop され、ConPTY / PTY が
         // クローズされてリーダーにも EOF が届く (Windows で `Exit` が永遠に
         // 発火しないバグを回避する。CI: windows-latest で検出)。
+        // セッション登録後に起動する: 超高速で終了するコマンドでも
+        // 「登録前に remove してしまう」競合を避ける。
         // リーダーの EOF を待ってから Exit を送ることで、購読者が最終出力を
         // 取りこぼさないことを保証する。
-        let exit_pty_id = request.pty_id.clone();
-        let exit_inner = Arc::clone(&self.inner);
-        std::thread::spawn(move || {
-            let mut child = child;
-            let exit_code = child
-                .wait()
-                .ok()
-                .map(|status| i32::try_from(status.exit_code()).unwrap_or(i32::MAX));
-            exit_inner
-                .sessions
-                .lock()
-                .expect("pty sessions mutex poisoned")
-                .remove(&exit_pty_id);
-            // リーダーの EOF を待つ。万一 EOF が得られない場合
-            // (孫プロセスが slave 側を保持し続ける等) でも Exit を保証するため
-            // フェイルセーフのタイムアウトを設ける。
-            let _ = reader_done_rx.recv_timeout(Duration::from_secs(5));
-            let _ = exit_inner.events.send(PtyEvent::Exit {
-                pty_id: exit_pty_id,
-                exit_code,
-            });
-        });
-
         self.lock_sessions().insert(
             info.pty_id.clone(),
             PtySession {
@@ -288,6 +267,33 @@ impl PtySessionManager {
                 _guard: guard,
             },
         );
+
+        let exit_pty_id = info.pty_id.clone();
+        let exit_inner = Arc::clone(&self.inner);
+        std::thread::spawn(move || {
+            let mut child = child;
+            let exit_code = child
+                .wait()
+                .ok()
+                .map(|status| i32::try_from(status.exit_code()).unwrap_or(i32::MAX));
+            // セッションの Drop (master → ClosePseudoConsole) はロック外で行う。
+            // ClosePseudoConsole は出力パイプの drain 状況によって待たされる
+            // ことがあるため、ロックを保持したまま実行しない。
+            let removed = exit_inner
+                .sessions
+                .lock()
+                .expect("pty sessions mutex poisoned")
+                .remove(&exit_pty_id);
+            drop(removed);
+            // リーダーの EOF を待つ。万一 EOF が得られない場合
+            // (孫プロセスが slave 側を保持し続ける等) でも Exit を保証するため
+            // フェイルセーフのタイムアウトを設ける。
+            let _ = reader_done_rx.recv_timeout(Duration::from_secs(5));
+            let _ = exit_inner.events.send(PtyEvent::Exit {
+                pty_id: exit_pty_id,
+                exit_code,
+            });
+        });
 
         Ok(info)
     }
@@ -385,6 +391,10 @@ mod tests {
     use std::time::Duration;
 
     /// 出力を Exit まで収集する (タイムアウト付き)。
+    ///
+    /// Unix PTY はプロセス終了で EOF になるため、リーダー起点の Exit 検知を
+    /// 検証する。Windows (ConPTY) は EOF にならないため使わない。
+    #[cfg(unix)]
     fn collect_until_exit(
         receiver: broadcast::Receiver<PtyEvent>,
         timeout: Duration,
@@ -488,6 +498,10 @@ mod tests {
         assert!(manager.subscribe("missing").is_err());
     }
 
+    /// Windows の ConPTY で cmd を実行し、出力・Exit 配信・セッション破棄を検証する。
+    ///
+    /// ConPTY は EOF セマンティクスが Unix PTY と異なるため、待機は
+    /// [`PtyEvent`] のポーリングで行い、失敗時は診断情報を出力する。
     #[cfg(windows)]
     #[test]
     fn spawns_cmd_on_windows() {
@@ -495,12 +509,53 @@ mod tests {
         let mut request = PtySpawnRequest::new("pty-win");
         request.shell_cmd = Some("cmd".to_owned());
         request.args = vec!["/C".to_owned(), "echo hello-pty".to_owned()];
-        manager.spawn(request).expect("spawn");
+        let info = manager.spawn(request).expect("spawn");
 
-        let receiver = manager.subscribe("pty-win").expect("subscribe");
-        let (output, exit_code) = collect_until_exit(receiver, Duration::from_secs(15));
+        let mut receiver = manager.subscribe("pty-win").expect("subscribe");
+        let deadline = std::time::Instant::now() + Duration::from_secs(30);
+        let mut output = Vec::new();
+        let mut exit_code = None;
+        while exit_code.is_none() {
+            match receiver.try_recv() {
+                Ok(PtyEvent::Output { data, .. }) => output.extend_from_slice(&data),
+                Ok(PtyEvent::Exit {
+                    exit_code: code, ..
+                }) => exit_code = Some(code),
+                Err(broadcast::error::TryRecvError::Lagged(_)) => continue,
+                Err(broadcast::error::TryRecvError::Empty) => {
+                    if std::time::Instant::now() > deadline {
+                        eprintln!(
+                            "[diag] timeout: pid={:?} output={:?} session_present={}",
+                            info.pid,
+                            String::from_utf8_lossy(&output),
+                            manager.contains("pty-win"),
+                        );
+                        break;
+                    }
+                    std::thread::sleep(Duration::from_millis(25));
+                }
+                Err(broadcast::error::TryRecvError::Closed) => break,
+            }
+        }
+
         let text = String::from_utf8_lossy(&output).to_lowercase();
-        assert!(text.contains("hello-pty"), "unexpected output: {text:?}");
-        assert_eq!(exit_code, Some(0));
+        assert!(
+            text.contains("hello-pty"),
+            "unexpected output: {text:?} (exit={exit_code:?}, session_present={})",
+            manager.contains("pty-win")
+        );
+        assert_eq!(exit_code, Some(Some(0)));
+
+        // 終了後はセッションマップから削除される
+        for _ in 0..50 {
+            if !manager.contains("pty-win") {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(
+            !manager.contains("pty-win"),
+            "session must be removed on exit"
+        );
     }
 }
