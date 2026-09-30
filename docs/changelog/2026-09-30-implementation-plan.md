@@ -82,7 +82,7 @@
 | **Phase 1** | ワークスペース・共通プロトコル・設定スキーマ・DB基盤         | `fxg-protocol`, `fxg-db`                  | 完了 (2026-09-30) |
 | **Phase 2** | プロセス/PTY制御・Windows対応・ローカルノード基盤            | `fxg-pty`, `fxg-node`, `fxg-cli`          | 完了 (2026-09-30) |
 | **Phase 3** | エージェントドライバ (ACP / OpenCode2)・CLI/TUI・Revert/Fork | `fxg-acp`, `fxg-node`, `fxg-cli`          | 完了 (2026-09-30) |
-| **Phase 4** | 中央サーバー・Outbox同期・Client API共通化・LANセキュリティ  | `fxg-server`, `fxg-node`, `fxg-cli`       | 未着手            |
+| **Phase 4** | 中央サーバー・Outbox同期・Client API共通化・LANセキュリティ  | `fxg-server`, `fxg-node`, `fxg-cli`       | 完了 (2026-10-01) |
 | **Phase 5** | Web UI / Android PWA・Web Push・単一バイナリ統合             | `ui`, `fxg-server`, `fxg-node`, `fxg-cli` | 未着手            |
 | **Phase 6** | 一時VM・サンドボックスノード (`--stdio` & Zero-Touch構築)    | `fxg-node`, `fxg-server`, `fxg-cli`, `ui` | 未着手            |
 
@@ -156,6 +156,22 @@
     `extensions.json` で dprint / tombi / rust-analyzer を推奨
   - 選定理由: 既存の整形挙動 (dprint 既定) と一致し、Node 依存を増やさない
     (TS は oxfmt 予定)。tombi は Cargo.toml 等のスキーマ検証も兼ねる
+- **2026-10-01 (Phase 4 実装時の設計判断)**:
+  - **共通 Client API レイヤの配置**: `fxg-server::api` に
+    `ClientApiBackend` trait + 汎用ルーター/WSループを置き、`fxg-node` が
+    依存して実装する。逆方向 (server → node) はセッション/エージェント機構への
+    不要な逆依存になるため採用しない
+  - **`NodeToServerMsg::WorktreeResult` 追加**: Worktree 作成の実結果 (実パス)
+    を中央サーバーの REST 応答 (`WorktreeInfo`) に反映するため、`CommandResult`
+    とは別の応答型を追加 (docs/03 §2 反映済み)
+  - **`NodeToServerMsg::PtyError` 追加**: `allow_remote_pty=false` のノードが
+    リモート `PtySpawn` を拒否したことをクライアント PTY WS へ非同期に伝える
+    (`PtyServerMessage::Error` へ変換)。docs/03 §2 反映済み
+  - **中央サーバー経由の Context Fork は Phase 6**: `fork_context_messages` /
+    `restore_git_bundle_b64` は一時VM の Replay 注入・バンドル復元と同時に
+    実装する (Phase 4 では `INVALID_STATE` で明示的に拒否)
+  - **Web Push 購読 API はスタブ**: `POST /api/v1/push/subscribe` はルートのみ
+    用意し `INVALID_STATE` を返す (VAPID 送信は Phase 5)
 
 ---
 
@@ -590,44 +606,83 @@
     (エラーコード・承認API含む):
     [`docs/03-protocol-and-api.md` §2, §3](../03-protocol-and-api.md)
 - **タスクリスト**:
-  - [ ] Client API 共通化: `fxg-node` (`127.0.0.1:7860`) と `fxg-server`
+  - [x] Client API 共通化: `fxg-node` (`127.0.0.1:7860`) と `fxg-server`
         (`:8080`) で同一の REST API
         エンドポイント群（[`docs/03-protocol-and-api.md` §3.1](../03-protocol-and-api.md)）と
         Client WS (`/api/v1/client/ws`)・PTY WS (`/api/v1/pty/ws`)
-        を提供する共通ルーター/ハンドラ設計
-  - [ ] `fxg-server`: Node Hub (`/api/v1/node/ws`)、ノード個別 `node_token`
+        を提供する共通ルーター/ハンドラ設計 →
+        完了。共通レイヤは `fxg-server::api` (ClientApiBackend trait + 汎用
+        axum ルーター + セキュリティmiddleware + Client/PTY WS ループ)
+        に集約し、
+        `fxg-node` が依存する形で実装 (中央サーバー側の投影・中継との差分は
+        トレイト実装に閉じ込め)
+  - [x] `fxg-server`: Node Hub (`/api/v1/node/ws`)、ノード個別 `node_token`
         認証（`token_hash` 照合 + `NodeHello.node_id`
         一致検証）、`fxg auth node-token issue/revoke/list`、`NodeHello` /
         `ResyncRequest`（欠落・遅延セッションの再送要求）処理、 `EventBatchPush`
         の冪等保存 (`cursor` 採番 + 投影更新) と `EventBatchAck`（水位
-        `acked_up_to_node_seq`）返却
-  - [ ] `fxg-node`: Outbox Sync Worker（Outbound WS
+        `acked_up_to_node_seq`）返却 → 完了
+  - [x] `fxg-node`: Outbox Sync Worker（Outbound WS
         接続・再接続、`synced_up_to_node_seq` より後のイベントのバッチ送信 ➔ ACK
         で水位更新、`ResyncRequest` への範囲再送、リアルタイム `LiveStreamDelta`
-        配信）
-  - [ ] コマンド応答: `CommandResult`（`command_id` / `ErrorCode`
+        配信） → 完了 (指数バックオフ再接続、Worktree 変更時の NodeHello
+        再送含む)
+  - [x] コマンド応答: `CommandResult`（`command_id` / `ErrorCode`
         付き）の要求元クライアントへの相関返却、ノードオフライン時の即時
-        `NODE_OFFLINE` 返却
-  - [ ] 承認 API: `POST /api/v1/sessions/:id/permissions/:req_id/respond`
+        `NODE_OFFLINE` 返却 → 完了 (Hub の pending 相関 + E2E で検証)
+  - [x] 承認 API: `POST /api/v1/sessions/:id/permissions/:req_id/respond`
         の実装（全クライアント横断の冪等解決、2 回目以降は `ALREADY_RESOLVED`）
-  - [ ] 監査ログ: ローカル直結操作の `node.db.audit_logs` 記録と
-        `/api/v1/audit/logs` の Local Node 対応
-  - [ ] 双方向コマンドルーティング: 中央サーバー経由での `StartSession`,
+        →
+        完了 (`always: true` の `allow_always` 昇格も実装。E2E で二重応答検証)
+  - [x] 監査ログ: ローカル直結操作の `node.db.audit_logs` 記録と
+        `/api/v1/audit/logs` の Local Node 対応 →
+        完了 (session_start / permission_resolved / worktree_manage /
+        pty_spawn / kill_switch を双方のDBへ記録)
+  - [x] 双方向コマンドルーティング: 中央サーバー経由での `StartSession`,
         `SendPrompt`, `RespondPermission`, `ControlSession`, `ManageWorktree`,
         `GetGitDiff`, `PtySpawn/Input/Resize/Kill`
         の中継と、承認リクエスト解決時のマルチクライアント即時同期
-        (`PermissionResolved`)
-  - [ ] セキュリティ & 統制: `audit_logs` 記録（server.db / node.db
+        (`PermissionResolved`) → 完了 (`WorktreeResult` 応答を追加)
+  - [x] セキュリティ & 統制: `audit_logs` 記録（server.db / node.db
         双方）、`allow_remote_pty` ポリシー判定、全ノード一括の緊急キルスイッチ
-        (`POST /api/v1/system/kill-switch` ➔ `KillAllSessions`)
+        (`POST /api/v1/system/kill-switch` ➔ `KillAllSessions`) → 完了
 - **完了条件 / 検証**:
   - `fxg server` 停止中に `fxg daemon`
     で実行したセッションイベントが、`fxg server`
     起動・再接続時に欠落・重複なく同期されること（ノード 2 プロセス + サーバー 1
     プロセスの E2E
     テストで自動検証）。また中央サーバーAPI経由でセッション操作・承認（二重承認の冪等含む）・キルスイッチが機能すること。
+    →
+    **検証済み**。`crates/fxg-node/tests/sync_e2e.rs` にて
+    (1) オフライン蓄積→再接続同期 (2 ノード・欠落/重複なし・水位ACK) と
+    (2) 中央サーバー経由の `StartSession` (REST・初期プロンプト) /
+    `SendPrompt` (Client WS 相関) / 承認の二重応答冪等化 /
+    キルスイッチ配信+監査ログ / ノード停止時 `NODE_OFFLINE` を自動検証
 - **実装ログ / 進捗メモ**:
-  - （実装時に追記）
+  - 2026-10-01: Phase 4 完了。主な実装単位 (コミット順):
+    1. `feat(fxg-server)`: 共通 Client API レイヤ
+       (`ClientApiBackend` trait + 汎用ルーター + Host/Origin/Token
+       middleware + Client WS / PTY WS) と `fxg-node` 側の実装移行
+       (DaemonState がバックエンド実装。`SessionManager::start_session` /
+       `git::workspace_diff` / `daemon::ops` (Worktree・監査の共通化) を追加)
+    2. `feat(fxg-server)`: Node Hub (トークン認証・NodeHello/Resync・
+       EventBatchPush 冪等適用 + ACK + Client WS 配信・コマンド相関中継
+       (CommandResult/GitDiffResult/WorktreeResult)・PTY 中継・切断時
+       NODE_OFFLINE・kill-switch ブロードキャスト)
+    3. `feat(fxg-node)`: Outbox Sync Worker (再接続・水位フラッシュ・
+       Resync 再送・リモートコマンド実行・`allow_remote_pty` ゲート・
+       `central_connected` 状態)
+    4. `feat(fxg-cli)`: `fxg server` / `fxg auth node-token issue|revoke|list`
+       / `fxg daemon --server-url`
+    5. `test(fxg-node)`: server + 2 nodes の E2E (`sync_e2e.rs`)
+  - プロトコル追加: `NodeToServerMsg::WorktreeResult` (Worktree 作成の実結果を
+    中央サーバー REST へ返す) と `NodeToServerMsg::PtyError`
+    (リモートPTY無効/失敗の async 通知)。docs/03 に反映済み
+  - Phase 6 送り (意図的): 中央サーバー経由の Context Fork
+    (`fork_context_messages`
+    / `restore_git_bundle_b64`)、プロビジョナー起動、Git Credential Proxy、
+    `DrainAndShutdown`、Web Push (`POST /api/v1/push/subscribe` は
+    `INVALID_STATE` を返すスタブ)
 
 ---
 

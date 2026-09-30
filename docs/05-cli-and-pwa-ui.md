@@ -573,17 +573,17 @@ export interface ITerminalAdapter {
 
 ### Milestone 4: 中央サーバー & Store-and-Forward 同期 & セキュリティ (実装計画 Phase 4 対応)
 
-- [ ] `fxg server` の Axum WebSocket Hub 実装
-- [ ] `fxg daemon` の Outbox Sync Worker 実装（中央サーバーへのOutbound
+- [x] `fxg server` の Axum WebSocket Hub 実装
+- [x] `fxg daemon` の Outbox Sync Worker 実装（中央サーバーへのOutbound
       WS接続、切断時のローカル蓄積と再接続時の一括同期）
-- [ ] 中央サーバー経由でのリモートコマンドルーティング（`StartSession`,
+- [x] 中央サーバー経由でのリモートコマンドルーティング（`StartSession`,
       `SendPrompt`, `RespondPermission`）
-- [ ] **LAN/VPNセキュリティ & 統制**:
-  - [ ] Node ⇔ Server 間のペアリングトークン (`node_token`) 認証
-  - [ ] `audit_logs` テーブルへの操作監査ログ記録
-  - [ ] 緊急キルスイッチ (`POST /api/v1/system/kill-switch` /
+- [x] **LAN/VPNセキュリティ & 統制**:
+  - [x] Node ⇔ Server 間のペアリングトークン (`node_token`) 認証
+  - [x] `audit_logs` テーブルへの操作監査ログ記録
+  - [x] 緊急キルスイッチ (`POST /api/v1/system/kill-switch` /
         `ServerToNodeMsg::KillAllSessions`) の配信・プロセスツリー即時終了
-  - [ ] ノード設定 `allow_remote_pty` によるWeb PTYリモート起動拒否ハンドリング
+  - [x] ノード設定 `allow_remote_pty` によるWeb PTYリモート起動拒否ハンドリング
 
 ### Milestone 5: 共通 Web UI / Android PWA & Web Push (実装計画 Phase 5 対応)
 

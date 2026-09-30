@@ -371,6 +371,22 @@ pub enum NodeToServerMsg {
         diff: Option<WorkspaceDiffResponse>,
         error: Option<String>,
     },
+    /// Worktree 操作 (`ManageWorktree`) の結果応答
+    /// ※成功時の Worktree 情報 (削除時は None) を返す
+    ///   (WorktreeInfo は §3.1 の client_api 型)
+    WorktreeResult {
+        command_id: String,
+        worktree: Option<WorktreeInfo>,
+        error: Option<String>,
+    },
+    /// PTY 起動・操作の失敗通知 (エラーコードは文字列。例: `PTY_DISABLED`)
+    /// ※ノード側設定 allow_remote_pty = false の場合、リモートからの
+    ///   PtySpawn に対して PTY_DISABLED を返す
+    PtyError {
+        pty_id: String,
+        code: String,
+        message: String,
+    },
     /// 一時VMからのオンメモリGit認証要求 (GIT_ASKPASS プロキシ)
     GitCredentialRequest {
         request_id: String,
