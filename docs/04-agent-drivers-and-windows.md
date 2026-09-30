@@ -253,9 +253,18 @@ GUI (Web UI / スマホPWA)
 
 - **クロスプラットフォーム PTY**: Windows では ConPTY (`portable-pty::conpty`),
   macOS/Linux では Unix PTY (`portable-pty::unix`) を自動選択。
+- **ConPTY 起動ハンドシェイク** (Windows): ConPTY は
+  `PSEUDOCONSOLE_INHERIT_CURSOR` により起動直後にカーソル位置照会 (`ESC[6n`)
+  を送り、応答 (`ESC[1;1R`) が届くまで**子プロセスのコンソール操作をブロック**
+  します。ヘッドレス実行 (CI / エージェント駆動) でも停止しないよう、
+  マネージャ (`ConPtyStartupHandshake`) が照会へ応答し、照会シーケンスは
+  出力から除去します (アプリ自身が発行する 2 回目以降の照会は、フロントエンド
+  が応答できるよう透過させます)。
 - **非同期ストリーミング**: PTY の Master `Read` を非同期ループで読み取り
   WebSocket (`PtyOutput`) へブロードキャストし、クライアントからのキー入力
-  (`PtyInput`) を Master `Write` に即時フラッシュ。
+  (`PtyInput`) を Master `Write` に即時フラッシュ。終了検知は子プロセスの
+  `wait()` 専用スレッドが担い、`Exit` は残存出力の配信完了後に配信します
+  (Windows の ConPTY は子プロセス終了だけでは EOF にならないため)。
 - **動的リサイズ**: 端末の画面サイズ変更に合わせて
   `master.resize(PtySize { rows, cols, .. })` を即時適用。
 - **対話型ACPコマンドへの直接入力**:

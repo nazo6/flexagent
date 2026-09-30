@@ -11,6 +11,11 @@
 //!   だけでは EOF にならないため、リーダーの EOF を終了の起点にはできない)。
 //! - **動的リサイズ**: [`PtySessionManager::resize`] で ConPTY / Unix PTY の
 //!   ウィンドウサイズを即時変更する。
+//! - **ConPTY 起動ハンドシェイク** (Windows): ConPTY は起動時にカーソル位置照会
+//!   (`ESC[6n`) を送り、応答が届くまで子プロセスのコンソール操作をブロックする。
+//!   マネージャが代わりに応答し、照会は出力から除去する
+//!   ([`ConPtyStartupHandshake`])。これによりヘッドレス実行でも子プロセスが
+//!   停止しない。
 //! - **プロセスツリー確実終了**: 子プロセスは [`ProcessTreeGuard`]
 //!   (Windows: Job Object) にバインドする。
 
@@ -110,6 +115,140 @@ struct PtySession {
 struct Inner {
     sessions: Mutex<HashMap<String, PtySession>>,
     events: broadcast::Sender<PtyEvent>,
+}
+
+/// ConPTY が起動時に送るカーソル位置照会 (Device Status Report)。
+#[cfg(any(windows, test))]
+const CPR_QUERY: &[u8] = b"\x1b[6n";
+
+/// 照会への応答 (カーソル位置 = 行1・列1)。
+#[cfg(windows)]
+const CPR_RESPONSE: &[u8] = b"\x1b[1;1R";
+
+/// Windows ConPTY の起動ハンドシェイク (カーソル位置照会) を処理するフィルタ。
+///
+/// ConPTY は `PSEUDOCONSOLE_INHERIT_CURSOR` により起動直後に
+/// カーソル位置照会 (`ESC[6n`) を送り、応答 (`ESC[1;1R`) が届くまで
+/// **子プロセスのコンソール操作をブロックする**
+/// (CI: windows-latest で検出。応答が無いとヘッドレス実行で子プロセスが
+/// 永久に停止する)。
+///
+/// マネージャ (ターミナル側 IO 層) が起動照会へ応答し、照会シーケンスは
+/// 出力から除去する:
+/// - ヘッドレス (購読者なし) でも子プロセスが正常に起動する
+/// - フロントエンド (xterm.js 等) の自動応答と二重応答にならない
+///
+/// 起動照会はプロセス起動前に送られるため、**最初に見つかった照会のみ**を
+/// 対象とする (アプリ自身が発行する照会はフロントエンドが応答する)。
+#[cfg(any(windows, test))]
+#[derive(Debug, Default)]
+struct ConPtyStartupHandshake {
+    /// 照会を処理済みか (以降はすべて透過)
+    done: bool,
+    /// チャンク境界で分断された照会の持ち越し (最大 `CPR_QUERY.len() - 1` バイト)
+    carry: Vec<u8>,
+}
+
+#[cfg(any(windows, test))]
+impl ConPtyStartupHandshake {
+    /// 出力チャンクを処理し、転送すべきデータと照会への応答要否を返す。
+    fn process(&mut self, chunk: &[u8]) -> (Vec<u8>, bool) {
+        if self.done {
+            return (chunk.to_vec(), false);
+        }
+        let mut data = std::mem::take(&mut self.carry);
+        data.extend_from_slice(chunk);
+
+        if let Some(pos) = find_subslice(&data, CPR_QUERY) {
+            self.done = true;
+            let mut out = data[..pos].to_vec();
+            out.extend_from_slice(&data[pos + CPR_QUERY.len()..]);
+            return (out, true);
+        }
+
+        // 照会がチャンク境界で分断され得るため、pattern の prefix になり得る
+        // 末尾のみを持ち越す (通常は 0〜3 バイト)
+        let keep = pattern_prefix_suffix_len(&data, CPR_QUERY);
+        let split = data.len() - keep;
+        let out = data[..split].to_vec();
+        self.carry = data[split..].to_vec();
+        (out, false)
+    }
+
+    /// 未処理の持ち越し (部分シーケンス) を取り出す (セッション終了時のフラッシュ用)。
+    #[cfg(windows)]
+    fn take_carry(&mut self) -> Vec<u8> {
+        std::mem::take(&mut self.carry)
+    }
+}
+
+/// スライス内で `needle` を検索する (最初の出現位置)。
+#[cfg(any(windows, test))]
+fn find_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    if needle.is_empty() || haystack.len() < needle.len() {
+        return None;
+    }
+    haystack
+        .windows(needle.len())
+        .position(|window| window == needle)
+}
+
+/// `data` の末尾が `pattern` の prefix になっている最長長 (≤ `pattern.len() - 1`)。
+#[cfg(any(windows, test))]
+fn pattern_prefix_suffix_len(data: &[u8], pattern: &[u8]) -> usize {
+    let max = (pattern.len() - 1).min(data.len());
+    (1..=max)
+        .rev()
+        .find(|&len| data[data.len() - len..] == pattern[..len])
+        .unwrap_or(0)
+}
+
+/// 出力チャンクを購読者へ配信するフォワーダ。
+struct OutputForwarder {
+    inner: Arc<Inner>,
+    pty_id: String,
+    /// Windows ConPTY の起動ハンドシェイク処理 (照会への応答送信を含む)
+    #[cfg(windows)]
+    handshake: ConPtyStartupHandshake,
+    /// 照会への応答を PTY 入力へ送るための送信チャネル
+    #[cfg(windows)]
+    input_tx: mpsc::UnboundedSender<Vec<u8>>,
+}
+
+impl OutputForwarder {
+    /// チャンクを配信する (Windows: ConPTY 起動照会の検出・除去・応答)。
+    fn forward(&mut self, chunk: &[u8]) {
+        #[cfg(windows)]
+        let (data, respond) = self.handshake.process(chunk);
+        #[cfg(windows)]
+        if respond {
+            // ConPTY の起動照会へ応答する (ヘッドレス実行でのブロック回避)
+            let _ = self.input_tx.send(CPR_RESPONSE.to_vec());
+        }
+        #[cfg(not(windows))]
+        let data = chunk.to_vec();
+
+        if !data.is_empty() {
+            let _ = self.inner.events.send(PtyEvent::Output {
+                pty_id: self.pty_id.clone(),
+                data,
+            });
+        }
+    }
+
+    /// セッション終了時に持ち越しをフラッシュする。
+    fn finish(&mut self) {
+        #[cfg(windows)]
+        let tail = self.handshake.take_carry();
+        #[cfg(not(windows))]
+        let tail: Vec<u8> = Vec::new();
+        if !tail.is_empty() {
+            let _ = self.inner.events.send(PtyEvent::Output {
+                pty_id: self.pty_id.clone(),
+                data: tail,
+            });
+        }
+    }
 }
 
 /// ConPTY / Unix PTY のセッション管理マネージャ。
@@ -229,8 +368,14 @@ impl PtySessionManager {
         // EOF は「子プロセスの終了」ではなく「セッション破棄 (master の Drop)」
         // で発生する点に注意する。Windows の ConPTY は子プロセスが終了しても
         // 出力パイプが閉じず、ConPTY 自体を閉じて初めて EOF になる。
-        let pty_id = request.pty_id.clone();
-        let inner = Arc::clone(&self.inner);
+        let mut forwarder = OutputForwarder {
+            inner: Arc::clone(&self.inner),
+            pty_id: request.pty_id.clone(),
+            #[cfg(windows)]
+            handshake: ConPtyStartupHandshake::default(),
+            #[cfg(windows)]
+            input_tx: input_tx.clone(),
+        };
         let (reader_done_tx, reader_done_rx) = std::sync::mpsc::channel::<()>();
         std::thread::spawn(move || {
             let mut reader = reader;
@@ -238,14 +383,10 @@ impl PtySessionManager {
             loop {
                 match reader.read(&mut buffer) {
                     Ok(0) | Err(_) => break,
-                    Ok(read) => {
-                        let _ = inner.events.send(PtyEvent::Output {
-                            pty_id: pty_id.clone(),
-                            data: buffer[..read].to_vec(),
-                        });
-                    }
+                    Ok(read) => forwarder.forward(&buffer[..read]),
                 }
             }
+            forwarder.finish();
             let _ = reader_done_tx.send(());
         });
 
@@ -498,13 +639,64 @@ mod tests {
         assert!(manager.subscribe("missing").is_err());
     }
 
+    /// ConPTY 起動ハンドシェイク: 起動照会 (`ESC[6n`) を除去して応答を要求し、
+    /// 2 回目以降の照会 (アプリ由来) はそのまま通す。
+    #[test]
+    fn conpty_handshake_strips_query_and_requests_response() {
+        let mut handshake = ConPtyStartupHandshake::default();
+        let (data, respond) = handshake.process(b"\x1b[6nhello");
+        assert!(respond);
+        assert_eq!(data, b"hello");
+
+        let (data, respond) = handshake.process(b"world\x1b[6n");
+        assert!(!respond);
+        assert_eq!(data, b"world\x1b[6n");
+    }
+
+    /// 起動照会がチャンク境界で分断されても検出できること。
+    #[test]
+    fn conpty_handshake_handles_split_query_across_chunks() {
+        let mut handshake = ConPtyStartupHandshake::default();
+
+        // pattern の prefix でないデータはそのまま配信される
+        let (data, respond) = handshake.process(b"hel");
+        assert!(!respond);
+        assert_eq!(data, b"hel");
+
+        // "\x1b[" は照会の prefix のため持ち越される
+        let (data, respond) = handshake.process(b"\x1b[");
+        assert!(!respond);
+        assert!(data.is_empty());
+
+        // "6n" で完成 → 照会は除去され応答要求が出る
+        let (data, respond) = handshake.process(b"6nX");
+        assert!(respond);
+        assert_eq!(data, b"X");
+    }
+
+    /// 照会が来ない場合も (最大3バイトの持ち越し以外は) すべて透過すること。
+    #[test]
+    fn conpty_handshake_passes_data_when_no_query_arrives() {
+        let mut handshake = ConPtyStartupHandshake::default();
+        let (data, respond) = handshake.process(b"plain output\n");
+        assert!(!respond);
+        assert_eq!(data, b"plain output\n");
+
+        // 末尾の部分 prefix は次チャンクへ持ち越される
+        let (data, respond) = handshake.process(b"tail\x1b");
+        assert!(!respond);
+        assert_eq!(data, b"tail");
+        let (data, respond) = handshake.process(b"X");
+        assert!(!respond);
+        assert_eq!(data, b"\x1bX");
+    }
+
     /// Windows の ConPTY で cmd を実行し、出力・Exit 配信・セッション破棄を検証する。
     ///
     /// ConPTY は EOF セマンティクスが Unix PTY と異なるため、待機は
-    /// [`PtyEvent`] のポーリングで行う。また ConPTY は起動時にカーソル位置照会
-    /// (`ESC[6n`) を送り、ターミナル (Web PTY / TUI) は応答 (`ESC[1;1R`) を
-    /// 返すことが期待される。ヘッドレス (応答者なし) での挙動を切り分けるため、
-    /// 応答を送る前後で状態を観察し、診断情報を出力する。
+    /// [`PtyEvent`] のポーリングで行う。起動時のカーソル位置照会 (`ESC[6n`) は
+    /// [`ConPtyStartupHandshake`] がマネージャ側で応答するため、
+    /// ヘッドレス (購読者なし) でも子プロセスが起動・終了する。
     #[cfg(windows)]
     #[test]
     fn spawns_cmd_on_windows() {
@@ -515,12 +707,9 @@ mod tests {
         let info = manager.spawn(request).expect("spawn");
 
         let mut receiver = manager.subscribe("pty-win").expect("subscribe");
-        let start = std::time::Instant::now();
+        let deadline = std::time::Instant::now() + Duration::from_secs(30);
         let mut output = Vec::new();
         let mut exit_code = None;
-        let mut answered_cpr = false;
-        let mut phase1_reported = false;
-        let deadline = start + Duration::from_secs(45);
         while exit_code.is_none() && std::time::Instant::now() < deadline {
             match receiver.try_recv() {
                 Ok(PtyEvent::Output { data, .. }) => output.extend_from_slice(&data),
@@ -533,31 +722,17 @@ mod tests {
                 }
                 Err(broadcast::error::TryRecvError::Closed) => break,
             }
-            if !answered_cpr && start.elapsed() > Duration::from_secs(10) && exit_code.is_none() {
-                if !phase1_reported {
-                    phase1_reported = true;
-                    let tasklist = std::process::Command::new("tasklist")
-                        .args(["/FI", &format!("PID eq {}", info.pid.unwrap_or(0)), "/NH"])
-                        .output()
-                        .map(|out| String::from_utf8_lossy(&out.stdout).trim().to_owned());
-                    eprintln!(
-                        "[diag] no exit without CPR response: output={:?} tasklist={tasklist:?}",
-                        String::from_utf8_lossy(&output),
-                    );
-                }
-                // カーソル位置照会 (ESC[6n) への応答 (ESC[1;1R) を送る
-                manager
-                    .write("pty-win", b"\x1b[1;1R")
-                    .expect("write cursor position report");
-                answered_cpr = true;
-                eprintln!("[diag] sent CPR response (ESC[1;1R)");
-            }
         }
-        eprintln!(
-            "[diag] finished: elapsed={:?} exit={exit_code:?} output={:?}",
-            start.elapsed(),
-            String::from_utf8_lossy(&output),
-        );
+        if exit_code.is_none() {
+            let tasklist = std::process::Command::new("tasklist")
+                .args(["/FI", &format!("PID eq {}", info.pid.unwrap_or(0)), "/NH"])
+                .output()
+                .map(|out| String::from_utf8_lossy(&out.stdout).trim().to_owned());
+            eprintln!(
+                "[diag] timeout: output={:?} tasklist={tasklist:?}",
+                String::from_utf8_lossy(&output),
+            );
+        }
 
         let text = String::from_utf8_lossy(&output).to_lowercase();
         assert!(
