@@ -112,6 +112,27 @@ pub enum NodeToServerMsg {
         /// 失敗時のメッセージ
         error: Option<String>,
     },
+    /// Worktree 操作 (`ManageWorktree`) の結果応答。
+    WorktreeResult {
+        /// 要求時の相関ID
+        command_id: String,
+        /// 成功時の Worktree 情報 (削除時は `None`)
+        worktree: Option<crate::client_api::WorktreeInfo>,
+        /// 失敗時のメッセージ
+        error: Option<String>,
+    },
+    /// PTY 起動・操作の失敗通知 (エラーコードは文字列。例: `PTY_DISABLED`)。
+    ///
+    /// ノード側設定 `allow_remote_pty = false` の場合、リモートからの
+    /// `PtySpawn` に対して `PTY_DISABLED` を返す (設計: docs/01 §7.4)。
+    PtyError {
+        /// PTY ID
+        pty_id: String,
+        /// エラーコード文字列
+        code: String,
+        /// 人間向けメッセージ
+        message: String,
+    },
     /// 一時VMからのオンメモリGit認証要求 (`GIT_ASKPASS` プロキシ)。
     GitCredentialRequest {
         /// 相関ID

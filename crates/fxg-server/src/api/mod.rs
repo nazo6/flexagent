@@ -410,7 +410,7 @@ pub trait ClientApiBackend: Clone + Send + Sync + 'static {
     async fn pty_attach(&self, pty_id: &str) -> Result<(), PtyChannelError>;
 
     /// PTY 出力を購読する。
-    fn pty_subscribe(
+    async fn pty_subscribe(
         &self,
         pty_id: &str,
     ) -> Result<broadcast::Receiver<PtyChannelEvent>, PtyChannelError>;

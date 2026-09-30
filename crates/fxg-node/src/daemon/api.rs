@@ -447,7 +447,7 @@ impl ClientApiBackend for DaemonState {
         }
     }
 
-    fn pty_subscribe(
+    async fn pty_subscribe(
         &self,
         pty_id: &str,
     ) -> Result<broadcast::Receiver<PtyChannelEvent>, PtyChannelError> {

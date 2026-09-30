@@ -188,6 +188,31 @@ pub async fn set_node_token_hash(
     Ok(())
 }
 
+/// ノード個別トークンのハッシュ一覧 `(node_id, token_hash)` を返す (ハブ認証用)。
+///
+/// 平文トークンは保存しないため、ハブは提示されたトークンをハッシュ化し、
+/// 定数時間比較で照合する (設計: `docs/01-architecture-and-sync.md` §7.3)。
+pub async fn list_node_tokens(pool: &SqlitePool) -> Result<Vec<(String, String)>, DbError> {
+    let rows = sqlx::query!(
+        r#"
+        SELECT node_id, token_hash
+          FROM nodes
+         WHERE token_hash IS NOT NULL
+        "#,
+    )
+    .fetch_all(pool)
+    .await?;
+    let mut tokens = Vec::with_capacity(rows.len());
+    for row in rows {
+        // SQLite のプリペアドステートメントからは NOT NULL を判別できないため
+        // sqlx は Option を生成する (WHERE 句の IS NOT NULL は実行時に保証される)
+        if let (Some(node_id), Some(hash)) = (row.node_id, row.token_hash) {
+            tokens.push((node_id, hash));
+        }
+    }
+    Ok(tokens)
+}
+
 /// プロジェクト × ノードのローカルパス紐付けを削除する (Worktree 削除時など)。
 ///
 /// 削除された行数を返す。

@@ -220,6 +220,11 @@ impl Db {
         registration::set_node_token_hash(&self.pool, node_id, token_hash).await
     }
 
+    /// ノード個別トークンのハッシュ一覧 `(node_id, token_hash)` を返す。
+    pub async fn list_node_tokens(&self) -> Result<Vec<(String, String)>, DbError> {
+        registration::list_node_tokens(&self.pool).await
+    }
+
     /// 論理プロジェクトを upsert する。
     pub async fn upsert_project(
         &self,

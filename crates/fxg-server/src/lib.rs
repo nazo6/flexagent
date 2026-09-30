@@ -9,5 +9,17 @@
 //!   **完全に同一**の REST / Client WS / PTY WS を提供するための共通ルーターと
 //!   [`ClientApiBackend`](api::ClientApiBackend) トレイト
 //!   (設計: `docs/03-protocol-and-api.md` §3)
+//! - [`hub`]: Node Hub (ノード個別トークン認証・`NodeHello`/`ResyncRequest`・
+//!   `EventBatchPush` の冪等適用と ACK・コマンド中継・PTY 中継)
+//! - [`state`]: `server.db` とノード接続レジストリを束ねる共有状態
+//! - [`Server`] は起動エントリポイント (CLI の `fxg server`)
 
 pub mod api;
+mod error;
+pub mod hub;
+mod server;
+pub mod state;
+
+pub use error::ServerError;
+pub use server::Server;
+pub use state::{ServerOptions, ServerState};

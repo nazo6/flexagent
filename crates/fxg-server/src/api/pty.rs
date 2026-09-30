@@ -81,6 +81,15 @@ pub enum PtyChannelEvent {
         /// 終了コード
         exit_code: Option<i32>,
     },
+    /// 非同期の失敗通知 (中継ノードが `PtyError` を返した場合など)。
+    ///
+    /// 受信した Client WS は `PtyServerMessage::Error` を送って PTY 状態を破棄する。
+    Error {
+        /// エラーコード文字列
+        code: String,
+        /// 人間向けメッセージ
+        message: String,
+    },
 }
 
 /// PTY 起動パラメータ (`pty_id` は呼び出し側が採番)。
@@ -183,7 +192,7 @@ pub(crate) async fn handle_pty_ws<B: ClientApiBackend>(backend: B, socket: WebSo
                             continue;
                         }
                         match backend.pty_attach(&pty_id).await {
-                            Ok(()) => match backend.pty_subscribe(&pty_id) {
+                            Ok(()) => match backend.pty_subscribe(&pty_id).await {
                                 Ok(rx) => {
                                     output_rx = Some(rx);
                                     attached = Some(AttachedPty {
@@ -321,6 +330,16 @@ pub(crate) async fn handle_pty_ws<B: ClientApiBackend>(backend: B, socket: WebSo
                     attached = None;
                     output_rx = None;
                 }
+                Ok(PtyChannelEvent::Error { code, message }) => {
+                    if send_error(&mut sender, PtyChannelError::new(code, message))
+                        .await
+                        .is_err()
+                    {
+                        break;
+                    }
+                    attached = None;
+                    output_rx = None;
+                }
                 // 出力の取りこぼしは許容する (PTY ストリームは最新表示優先)
                 Err(broadcast::error::RecvError::Lagged(skipped)) => {
                     tracing::debug!(skipped, "pty output lagged");
@@ -366,7 +385,7 @@ async fn spawn_and_subscribe<B: ClientApiBackend>(
             SpawnOutcome::Failed
         };
     }
-    match backend.pty_subscribe(&pty_id) {
+    match backend.pty_subscribe(&pty_id).await {
         Ok(rx) => {
             if send_ws_json(
                 sender,
