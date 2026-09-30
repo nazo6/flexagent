@@ -403,6 +403,11 @@
     子プロセスが停止しない。併せて、セッション破棄をロック外で行う修正と
     「登録前に remove してしまう」競合の解消、Windows 専用コードの clippy
     警告 (workspace 全体の `-D warnings`) の解消も行った。
+  - ✅ **CI 最終検証 (2026-09-30)**: 全ジョブ成功 (fmt / clippy /
+    sqlx / ts-rs 型同期 / test (ubuntu・macos・**windows-latest**))。
+    windows-latest では Job Object の孫プロセス Kill・Named Pipe IPC・
+    ConPTY 読み書きが自動検証され、Phase 2 完了条件を満たした
+    (run `36684225515` / commit `1739914`)。
 
 ---
 
