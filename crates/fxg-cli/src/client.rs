@@ -476,9 +476,11 @@ pub struct SessionRevertOutcome {
     pub removed_files: u64,
 }
 
+/// 単純な成功応答 (`Ack` / 非同期コマンドの受理) をメッセージへ正規化する。
 fn ack_message(result: IpcResult) -> Result<Option<String>> {
     match result {
         IpcResult::Ack { message } => Ok(message),
+        IpcResult::CommandAccepted { .. } => Ok(None),
         other => bail!("unexpected ipc result: {other:?}"),
     }
 }
@@ -595,5 +597,31 @@ mod tests {
     fn shortens_session_ids() {
         assert_eq!(short_id("0195f0ab-1234-7abc-8def-0123456789ab"), "0195f0ab");
         assert_eq!(short_id("abc"), "abc");
+    }
+
+    #[test]
+    fn treats_ack_and_command_accepted_as_success() {
+        assert_eq!(
+            ack_message(IpcResult::Ack {
+                message: Some("done".to_owned()),
+            })
+            .expect("ack"),
+            Some("done".to_owned())
+        );
+        // 非同期コマンドの受理 (`SendPrompt` / `RespondPermission` / `ControlSession`)
+        assert_eq!(
+            ack_message(IpcResult::CommandAccepted {
+                session_id: Some("s1".to_owned()),
+            })
+            .expect("command accepted"),
+            None
+        );
+        // それ以外の応答は想定外として失敗させる
+        assert!(
+            ack_message(IpcResult::Inbox {
+                requests: Vec::new()
+            })
+            .is_err()
+        );
     }
 }
