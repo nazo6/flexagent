@@ -23,6 +23,8 @@ CREATE TABLE nodes (
     os              TEXT NOT NULL,                  -- "windows" | "linux" | "macos"
     arch            TEXT NOT NULL,                  -- "x86_64" | "aarch64"
     version         TEXT NOT NULL,                  -- fxg バイナリバージョン
+    token_hash      TEXT,                           -- ノード個別 node_token のハッシュ (SHA-256)。NULL は未発行
+    token_issued_at INTEGER,                        -- トークン最終発行日時 (Unix epoch ms, 任意)
     installed_agents_json TEXT NOT NULL DEFAULT '[]', -- 利用可能なエージェントID一覧 (JSON配列)
     is_ephemeral    INTEGER NOT NULL DEFAULT 0,     -- 0: 常駐ノード, 1: 一時VM/コンテナノード
     provisioner     TEXT,                           -- 一時ノードのプロビジョナー識別子 (例: "local-docker", "local-incus", "colab-pro")
@@ -85,10 +87,10 @@ CREATE TABLE session_events (
     event_id        TEXT NOT NULL UNIQUE,           -- UUID v7 (再送時の重複排除用)
     session_id      TEXT NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
     node_seq        INTEGER NOT NULL,               -- セッション内の順序番号 (1, 2, 3...)
-    event_type      TEXT NOT NULL,                  -- 'user_message' | 'agent_message' | 'agent_thought' | 'tool_call' | 'tool_update' | 'plan' | 'permission_request' | 'permission_resolved' | 'terminal_output' | 'status_change' | 'turn_snapshot'
-    snapshot_tree_hash TEXT,                        -- Revert用: ターン開始時の Shadow Git Tree Hash (git write-tree)
+    event_type      TEXT NOT NULL,                  -- 'user_message' | 'agent_message' | 'agent_thought' | 'tool_call' | 'plan' | 'permission_request' | 'permission_resolved' | 'terminal_output' | 'status_change' | 'capabilities_updated' | 'bootstrap_log'
+    snapshot_tree_hash TEXT,                        -- Revert用: user_message イベントに付与されるターン開始時の Shadow Git Tree Hash (git write-tree)
     payload_json    TEXT NOT NULL,                  -- 構造化ペイロード (UnifiedEventPayload のJSON)
-     searchable_text TEXT,                           -- FTS5全文検索用のプレーンテキスト抽出
+    searchable_text TEXT,                           -- FTS5全文検索用のプレーンテキスト抽出 (受信時に payload_json から生成。terminal_output 等のバイナリ系は対象外)
     created_at      INTEGER NOT NULL,
     UNIQUE(session_id, node_seq)
 );
@@ -104,6 +106,22 @@ CREATE VIRTUAL TABLE session_events_fts USING fts5(
     content_rowid='global_seq',
     tokenize='trigram'                              -- 日本語・コード識別子の部分一致に強い trigram トークナイザ
 );
+
+-- FTS5 外部コンテンツテーブルの同期トリガー (INSERT / DELETE / UPDATE)
+CREATE TRIGGER session_events_fts_ai AFTER INSERT ON session_events BEGIN
+    INSERT INTO session_events_fts(rowid, session_id, event_type, searchable_text)
+    VALUES (new.global_seq, new.session_id, new.event_type, new.searchable_text);
+END;
+CREATE TRIGGER session_events_fts_ad AFTER DELETE ON session_events BEGIN
+    INSERT INTO session_events_fts(session_events_fts, rowid, session_id, event_type, searchable_text)
+    VALUES ('delete', old.global_seq, old.session_id, old.event_type, old.searchable_text);
+END;
+CREATE TRIGGER session_events_fts_au AFTER UPDATE ON session_events BEGIN
+    INSERT INTO session_events_fts(session_events_fts, rowid, session_id, event_type, searchable_text)
+    VALUES ('delete', old.global_seq, old.session_id, old.event_type, old.searchable_text);
+    INSERT INTO session_events_fts(rowid, session_id, event_type, searchable_text)
+    VALUES (new.global_seq, new.session_id, new.event_type, new.searchable_text);
+END;
 
 -- 7. 承認Inbox (未解決のPermission Requestを高速一覧取得するためのビュー/テーブル)
 CREATE TABLE permission_requests (
@@ -153,9 +171,10 @@ CREATE INDEX idx_audit_logs_session ON audit_logs(session_id, created_at DESC);
 ## 2. ノードデーモン DB (`node.db`)
 
 各ノード（`~/.flexagent/node.db`）がローカルに保持するスキーマです。
-中央サーバーとほぼ同じ `sessions` / `session_events` / `permission_requests`
-テーブル構造を持ち、さらに **未送信イベント管理用の `synced` フラグ**
-を備えます。
+中央サーバーと**同じ論理構造**（セッション・イベント・承認・監査ログ・FTS5）を持ち、
+ローカルWeb UI / CLI が `server.db` と同じAPIレスポンスを返せるようにします。
+さらに **未送信イベント管理用の `synced` フラグ** と、
+**ローカル差分同期カーソル (`local_seq`)** を備えます。
 
 ```sql
 PRAGMA journal_mode = WAL;
@@ -170,6 +189,9 @@ CREATE TABLE local_sessions (
     is_worktree     INTEGER NOT NULL DEFAULT 0,     -- Worktree 内での実行か
     agent_id        TEXT NOT NULL,
     agent_session_id TEXT,
+    parent_session_id TEXT,                         -- Fork元のセッションID (server.db と対称)
+    fork_from_node_seq INTEGER,                     -- 親セッションのどのイベント(node_seq)時点からFork/Revertしたか
+    git_bundle_path TEXT,                           -- 退避された git bundle ファイルパス (別ノード復元用)
     title           TEXT NOT NULL DEFAULT 'New Session',
     status          TEXT NOT NULL,
     current_mode    TEXT,
@@ -182,12 +204,14 @@ CREATE TABLE local_sessions (
 );
 
 CREATE TABLE local_session_events (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,  -- local_seq: ローカル差分同期カーソル (Subscribe.last_local_seq)
     event_id        TEXT NOT NULL UNIQUE,           -- UUID v7
     session_id      TEXT NOT NULL REFERENCES local_sessions(session_id) ON DELETE CASCADE,
     node_seq        INTEGER NOT NULL,
-    event_type      TEXT NOT NULL,
+    event_type      TEXT NOT NULL,                  -- server.db と同一の有効値
+    snapshot_tree_hash TEXT,                        -- Revert用: user_message イベントに付与
     payload_json    TEXT NOT NULL,
+    searchable_text TEXT,                           -- FTS5全文検索用プレーンテキスト (受信時に生成)
     synced          INTEGER NOT NULL DEFAULT 0,     -- 0: 未送信 (Outbox), 1: 中央サーバーACK済
     created_at      INTEGER NOT NULL,
     UNIQUE(session_id, node_seq)
@@ -195,6 +219,61 @@ CREATE TABLE local_session_events (
 
 -- Outbox ワーカーが未送信イベントを順番に取り出すためのインデックス
 CREATE INDEX idx_local_events_unsynced ON local_session_events(synced, id ASC) WHERE synced = 0;
+
+-- 承認Inbox (server.db と同一構造。ローカル直結UI/CLI が /api/v1/inbox を提供するために使用)
+CREATE TABLE permission_requests (
+    request_id      TEXT PRIMARY KEY,
+    session_id      TEXT NOT NULL REFERENCES local_sessions(session_id) ON DELETE CASCADE,
+    tool_name       TEXT NOT NULL,
+    summary         TEXT NOT NULL,
+    details_json    TEXT NOT NULL,
+    status          TEXT NOT NULL DEFAULT 'pending',
+    resolved_by     TEXT,
+    created_at      INTEGER NOT NULL,
+    resolved_at     INTEGER
+);
+
+CREATE INDEX idx_local_permission_pending ON permission_requests(status) WHERE status = 'pending';
+
+-- 監査ログ (ローカル直結の操作を記録。server.db の audit_logs と対称)
+CREATE TABLE audit_logs (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    action          TEXT NOT NULL,
+    session_id      TEXT,
+    client_ip       TEXT NOT NULL,
+    client_user_agent TEXT,
+    auth_subject    TEXT NOT NULL,
+    details_json    TEXT NOT NULL DEFAULT '{}',
+    created_at      INTEGER NOT NULL
+);
+
+CREATE INDEX idx_local_audit_logs_action ON audit_logs(action, created_at DESC);
+
+-- FTS5 全文検索インデックス (server.db と同等。content_rowid は local_seq)
+CREATE VIRTUAL TABLE local_session_events_fts USING fts5(
+    session_id UNINDEXED,
+    event_type UNINDEXED,
+    searchable_text,
+    content='local_session_events',
+    content_rowid='id',
+    tokenize='trigram'
+);
+
+-- FTS5 外部コンテンツテーブルの同期トリガー
+CREATE TRIGGER local_session_events_fts_ai AFTER INSERT ON local_session_events BEGIN
+    INSERT INTO local_session_events_fts(rowid, session_id, event_type, searchable_text)
+    VALUES (new.id, new.session_id, new.event_type, new.searchable_text);
+END;
+CREATE TRIGGER local_session_events_fts_ad AFTER DELETE ON local_session_events BEGIN
+    INSERT INTO local_session_events_fts(local_session_events_fts, rowid, session_id, event_type, searchable_text)
+    VALUES ('delete', old.id, old.session_id, old.event_type, old.searchable_text);
+END;
+CREATE TRIGGER local_session_events_fts_au AFTER UPDATE ON local_session_events BEGIN
+    INSERT INTO local_session_events_fts(local_session_events_fts, rowid, session_id, event_type, searchable_text)
+    VALUES ('delete', old.id, old.session_id, old.event_type, old.searchable_text);
+    INSERT INTO local_session_events_fts(rowid, session_id, event_type, searchable_text)
+    VALUES (new.id, new.session_id, new.event_type, new.searchable_text);
+END;
 ```
 
 ### クエリ・同期のポイント
@@ -204,6 +283,15 @@ CREATE INDEX idx_local_events_unsynced ON local_session_events(synced, id ASC) W
   UI（`http://localhost:7860`）が `node.db` を読む際も、中央サーバーWeb UIが
   `server.db` を読む際も、同じJSONレスポンス型（`SessionDetail`,
   `SessionEvent`）を返却できます。
+- **スキーマ対称性の維持**: `snapshot_tree_hash` / `permission_requests` / `audit_logs` / FTS5 は
+  `server.db` と `node.db` の両方に存在させ、マイグレーションも共通クレート `fxg-db` で管理します。
+- **ローカル差分同期カーソル (`local_seq`)**: `local_session_events.id` (AUTOINCREMENT) を
+  `Subscribe.last_local_seq` の基準として使用します（中央サーバー接続時は `global_seq` を使用）。
+- **メタデータ再送 (`metadata_synced`)**: `local_sessions.metadata_synced = 0` のセッションは、
+  中央サーバー再接続時に `SessionUpsert` として再送し、ACK 後に `1` へ更新します。
 - **日本語・ソースコード検索に強い `trigram` トークナイザ**: SQLite FTS5の
   `tokenize='trigram'`
   を使うことで、形態素解析器なしで日本語の会話（「認証エラー」「データベース」）も関数名・識別子（`OpenCode2Driver`）も高速に全文検索できます。
+  - 制約: trigram は 3 文字未満の検索語ではヒットしないため、検索 UI では 3 文字以上を要求するか、LIKE 検索へフォールバックします。
+- **`searchable_text` の生成責務**: イベントを永続化する側（ノード / サーバー双方の受信ハンドラ）が
+  `payload_json` から検索対象テキストを抽出して書き込みます（`TerminalOutput.data_b64` 等のバイナリ系は除外）。

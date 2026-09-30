@@ -2,10 +2,11 @@
 
 `crates/fxg-protocol` クレートに定義する共通データ型と、3つの通信経路（① Node ⇔
 Server WebSocket、② Client ⇔ Server/Node HTTP+WS、③ CLI ⇔ Node Local
-IPC）のプロトコル仕様です。 すべての構造体に
-`#[derive(Serialize, Deserialize, ts_rs::TS)]`
+IPC）のプロトコル仕様です。 クライアント (UI / CLI) が直接扱う型には
+`#[derive(Serialize, Deserialize, ts_rs::TS)]` + `#[ts(export)]`
 を付与し、`ui/src/lib/generated/`（SvelteKit の `$lib/generated/`）
-へTypeScriptの型定義を自動出力します。
+へTypeScriptの型定義を自動出力します（設定ファイルスキーマ等のサーバー内部型は
+`ts-rs` export 対象外とする）。
 
 ---
 
@@ -37,21 +38,26 @@ pub enum UnifiedEventPayload {
     UserMessage {
         text: String,
         attachments: Vec<AttachmentMeta>,
-        client_source: String, // "cli" | "web" | "android"
+        client_source: String,        // "cli" | "web" | "android"
+        /// ターン開始直前の Shadow Git Tree Hash (Revert用。snapshot_enabled=false 時は None)
+        snapshot_tree_hash: Option<String>,
     },
-    /// エージェントの返答メッセージ（チャンク結合済み、またはストリーム中）
+    /// エージェントの返答メッセージ（ターン完了時に is_complete=true の完成イベントのみ永続化）
+    /// ※ストリーミング途中は LiveStreamDelta として配信され、永続化されない
     AgentMessage {
         message_id: String,
         text: String,
         is_complete: bool,
     },
     /// エージェントの思考プロセス (Thinking)
+    /// ※AgentMessage と同様、ターン完了時に is_complete=true の完成イベントのみ永続化
     AgentThought {
         thought_id: String,
         text: String,
         is_complete: bool,
     },
     /// ツール呼び出しとファイルDiff等の状態
+    /// ※同一 tool_call_id のイベント追記によって状態更新を表現する (tool_update イベントは廃止)
     ToolCall {
         tool_call_id: String,
         title: String,
@@ -79,7 +85,7 @@ pub enum UnifiedEventPayload {
         selected_option_id: String,
         resolved_by: String,   // "cli" | "web" | "android_push"
     },
-    /// ACP terminal/* または PTY の出力チャンク
+    /// ACP terminal/* または PTY の出力チャンク (永続化対象。ただし FTS の searchable_text からは除外)
     TerminalOutput {
         terminal_id: String,
         command: String,
@@ -87,18 +93,19 @@ pub enum UnifiedEventPayload {
         exit_code: Option<i32>,
     },
     /// 対話型コマンドへの標準入力送信 (Web UI -> エージェントPTY)
+    /// ※入力キーストロークはエフェメラル扱いで、イベントログには永続化しない (PTY WS 経由の生配信も可)
     TerminalInput {
         terminal_id: String,
         data_b64: String,      // ユーザー入力キーストローク (Base64)
     },
-    /// モード・スラッシュコマンド・設定の更新通知
+    /// モード・スラッシュコマンド・設定の更新通知 (永続化対象: セッション復元時に使用)
     CapabilitiesUpdated {
         current_mode: Option<String>,
         available_modes: Vec<ModeInfo>,
         available_commands: Vec<CommandInfo>,
         config_options: Vec<ConfigOptionInfo>,
     },
-    /// 一時VMプロビジョニング・自動ツール構築 (stderr) の進捗ログ行
+    /// 一時VMプロビジョニング・自動ツール構築 (stderr) の進捗ログ行 (永続化対象)
     BootstrapLog {
         line: String,
     },
@@ -107,6 +114,130 @@ pub enum UnifiedEventPayload {
         status: SessionStatus,
         error_message: Option<String>,
     },
+}
+```
+
+### 1.1 共通補助型・エラーコード
+
+`UnifiedEventPayload` および各プロトコルメッセージから参照される補助型です。
+すべてクライアントが扱うため `#[derive(Serialize, Deserialize, ts_rs::TS)]` + `#[ts(export)]` を付与します。
+
+```rust
+pub struct SessionSummary {
+    pub session_id: String,
+    pub project_id: String,
+    pub node_id: String,
+    pub local_path: String,
+    pub git_branch: Option<String>,
+    pub is_worktree: bool,
+    pub agent_id: String,
+    pub agent_session_id: Option<String>,
+    pub parent_session_id: Option<String>,
+    pub fork_from_node_seq: Option<u64>,
+    pub title: String,
+    pub status: SessionStatus,
+    pub current_mode: Option<String>,
+    pub last_node_seq: u64,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+/// NodeHello で報告するプロジェクト紐付け情報
+pub struct NodeProjectReport {
+    pub project_id: String,
+    pub name: String,
+    pub canonical_git_url: Option<String>,
+    pub bindings: Vec<ProjectNodeBinding>,
+}
+
+pub struct ProjectNodeBinding {
+    pub local_path: String,
+    pub is_worktree: bool,
+    pub git_branch: Option<String>,
+    pub last_used_at: i64,
+}
+
+/// ストリーミング途中のエフェメラルチャンク (再送されず、永続化もされない)
+#[serde(tag = "delta_type", rename_all = "snake_case")]
+pub enum StreamDeltaPayload {
+    AgentMessageDelta { message_id: String, text_delta: String },
+    AgentThoughtDelta { thought_id: String, text_delta: String },
+    ToolCallProgress { tool_call_id: String, status: String, raw_output_delta: Option<String> },
+    TerminalOutputDelta { terminal_id: String, data_b64: String },
+}
+
+pub struct AttachmentMeta {
+    pub file_name: String,
+    pub mime_type: String,
+    pub size_bytes: u64,
+    pub local_path: Option<String>, // ノード上の実ファイル参照
+    pub data_b64: Option<String>,   // 小さい添付のインライン転送用
+}
+
+pub struct FileDiff {
+    pub path: String,
+    pub old_text: Option<String>,
+    pub new_text: Option<String>,
+    pub unified_diff: String,
+    pub additions: u32,
+    pub deletions: u32,
+}
+
+pub struct PlanEntry { pub id: String, pub title: String, pub status: String }
+
+pub struct PermissionOption { pub option_id: String, pub name: String, pub kind: String }
+
+pub struct ModeInfo { pub mode_id: String, pub name: String, pub description: Option<String> }
+
+pub struct CommandInfo { pub name: String, pub description: String, pub input_hint: Option<String> }
+
+pub struct ConfigOptionInfo {
+    pub key: String,
+    pub name: String,
+    pub current_value: serde_json::Value,
+    pub options: Vec<serde_json::Value>,
+}
+
+#[serde(rename_all = "snake_case")]
+pub enum SessionStatus { Provisioning, Bootstrapping, Idle, Running, WaitingPermission, Stopped, Error }
+
+#[serde(tag = "action", rename_all = "snake_case")]
+pub enum SessionControlAction {
+    SetMode { mode_id: String },
+    SetConfig { key: String, value: serde_json::Value },
+    Cancel,
+    Kill,
+}
+
+#[serde(tag = "action", rename_all = "snake_case")]
+pub enum WorktreeAction {
+    Add { branch: String, base_branch: Option<String>, new_path: Option<String> },
+    Remove { path: String, force: bool },
+}
+
+#[serde(rename_all = "snake_case")]
+pub enum DiffScope { Uncommitted, BranchBase }
+
+pub struct WorkspaceDiffResponse {
+    pub scope: DiffScope,
+    pub base_branch: Option<String>,
+    pub head_commit: String,
+    pub files: Vec<FileDiff>,
+}
+
+pub struct ForkHistoryItem { pub role: String, pub text: String, pub tool_summary: Option<String> }
+
+/// 共通エラーコード (CommandResult および REST エラーレスポンス双方で使用)
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum ErrorCode {
+    NodeOffline,
+    AlreadyResolved,
+    Busy,
+    InvalidState,
+    PtyDisabled,
+    CommandDuplicate,
+    NotFound,
+    Internal,
 }
 ```
 
@@ -119,7 +250,9 @@ pub enum UnifiedEventPayload {
 
 - **トランスポート A（常駐ノード用: Outbound WebSocket）**:
   - **エンドポイント**: `wss://<server-host>/api/v1/node/ws`
-  - **認証**: `Authorization: Bearer <FXG_NODE_TOKEN>` ヘッダ
+  - **認証**: `Authorization: Bearer <NODE_TOKEN>` ヘッダ（ノード個別トークン。
+    `server.db.nodes.token_hash` と照合し、`NodeHello.node_id` がトークン発行対象ノードと
+    一致することを検証してなりすましを拒否する）
 - **トランスポート B（一時VM・サンドボックスノード用: Stdio Pipe
   `fxg daemon --stdio`）**:
   - **チャネル**:
@@ -160,11 +293,12 @@ pub enum NodeToServerMsg {
         session_id: String,
         delta: StreamDeltaPayload,
     },
-    /// サーバーからのコマンド実行結果応答
+    /// サーバーからのコマンド実行結果応答 (要求元クライアントへ command_id 付きで返却される)
     CommandResult {
         command_id: String,
         success: bool,
-        error: Option<String>,
+        code: Option<ErrorCode>,   // 失敗時の構造化エラーコード
+        error: Option<String>,     // 人間向けメッセージ
         session_id: Option<String>,
     },
     /// PTY 出力データチャンク (Web Terminal -> クライアント)
@@ -190,6 +324,7 @@ pub enum NodeToServerMsg {
         operation: String, // "clone" | "fetch" | "push"
     },
     /// 一時VM破棄前の作業ツリー・コミット履歴バンドル退避 (`git bundle create`)
+    /// ※bundle は圧縮して Base64 化し、1メッセージ上限 (例: 16 MiB) を超える場合は分割転送する
     WorkspaceBundleUpload {
         session_id: String,
         branch: String,
@@ -207,6 +342,7 @@ pub enum NodeToServerMsg {
 #[serde(tag = "op", rename_all = "snake_case")]
 pub enum ServerToNodeMsg {
     /// EventBatchPush に対する永続化完了ACK
+    /// ※バッチはセッション単位に分割して送信し、ACK もセッション単位で返却する
     EventBatchAck {
         session_id: String,
         acked_up_to_node_seq: u64,
@@ -324,13 +460,18 @@ pub enum ServerToNodeMsg {
      が自サーバーのドメインまたはローカルオリジン以外からの接続である場合、ハンドシェイクを拒否。
 4. **監査ログ記録 (Audit Logging)**:
    - `session` 起動、`permission` 解決、`kill-switch` 実行、`worktree`
-     操作は、クライアントIP・UA・トークンIDとともに `server.db` の `audit_logs`
-     に記録。
+     操作は、クライアントIP・UA・トークンIDとともに `audit_logs` に記録。
+   - 記録先は中央サーバー経由の操作が `server.db`、ローカル直結（`localhost:7860` / CLI）の操作が
+     実行ノードの `node.db`（どちらも `/api/v1/audit/logs` で参照可能）。
+5. **エラーレスポンスの共通形式**:
+   - REST / WS のエラーは `{ "error": { "code": "<ErrorCode>", "message": "..." } }` に統一
+     （例: `NODE_OFFLINE`, `ALREADY_RESOLVED`, `PTY_DISABLED`）。
 
 ### 3.1 REST API エンドポイント
 
 - `GET /api/v1/system/info`: 接続先が `central_server` か `local_node`
-  か、および Web Push の VAPID Public Key を返却。
+  か、および Web Push の VAPID Public Key を返却。ローカルノード接続時は
+  `unsynced_event_count`（Outbox 残数）と `central_connected`（中央サーバー接続状態）も返却。
 - `GET /api/v1/projects`: プロジェクト一覧と、各プロジェクトに紐づくノードおよび
   Worktree（`project_node_bindings`）を返却。
 - `GET /api/v1/projects/:id/worktrees`: 指定プロジェクトの各ノード上にある
@@ -358,24 +499,36 @@ pub enum ServerToNodeMsg {
     (`git diff HEAD`)
   - `scope=branch`: ベースブランチとの累積差分 (`git diff <base>...HEAD`)
 - `GET /api/v1/inbox`: 全セッション横断の未解決 `PermissionRequest` 一覧。
+- `POST /api/v1/sessions/:id/permissions/:req_id/respond`: 承認リクエストへの応答
+  (`selected_option_id`, `always`, `resolved_by`)。既に解決済みの場合は `ALREADY_RESOLVED`
+  を返却し（冪等）、UI 側は正常遷移として扱う。
 - `POST /api/v1/search?q=...`: SQLite FTS5 を用いた全セッション横断の全文検索。
 - `POST /api/v1/push/subscribe`: Android / Desktop PWA の Web Push
   サブスクリプション登録。
 - `POST /api/v1/system/kill-switch`: **緊急停止 (Panic
   Button)**。全ノードの稼働中セッション、実行中プロセスツリー、PTYを一括強制終了。
 - `GET /api/v1/audit/logs?limit=50`:
-  監査ログ（操作日時、操作種別、送信元IP、クライアント種別）の取得。
+  監査ログ（操作日時、操作種別、送信元IP、クライアント種別）の取得。中央サーバーでは `server.db`、
+  ローカルノードでは `node.db` の `audit_logs` を参照する。
 
 ### 3.2 Client WebSocket (`/api/v1/client/ws`)
 
 1. 接続時にクライアントが
-   `Subscribe { last_global_seq: Option<u64>, focused_session_id: Option<String> }`
-   を送信。
-2. サーバーは `last_global_seq`
-   以降の未取得イベントを即座に流し、以降はリアルタイムイベント（`SessionEventEnvelope`
-   および `LiveStreamDelta`）をプッシュします。
+   `Subscribe { last_global_seq: Option<u64>, last_local_seq: Option<u64>, focused_session_id: Option<String> }`
+   を送信する。
+   - 中央サーバー接続時は `last_global_seq`、ローカルノード接続時は `last_local_seq` を使用する（もう一方は `None`）。
+2. サーバー / ノードは該当カーソル以降の未取得イベントを即座に流し、以降はリアルタイムイベント
+   （`SessionEventEnvelope` および `LiveStreamDelta`）をプッシュします。
+   - ローカルノード接続時は各イベントに `local_seq`（`node.db` の `id`）を付帯して返却する。ローカル接続では `global_seq` は常に `None`。
 3. クライアントからの操作（`SendPrompt`, `RespondPermission`,
-   `ControlSession`）もこのWebSocket上（またはREST POST）で送信可能です。
+   `ControlSession`）もこのWebSocket上（またはREST POST）で送信でき、結果は
+   `command_id` 付きの `CommandResult` として要求元クライアントへ応答されます。
+4. **重複排除とマージ**:
+   - クライアントは受信イベントを `event_id` / `(session_id, node_seq)` をキーに upsert し、重複配信
+     （`LiveStreamDelta` と永続イベント、再接続時のリプレイ）を無害化する。
+   - ターン途中の `LiveStreamDelta` は `message_id` / `thought_id` でマージ表示し、永続イベント
+     （`is_complete = true`）到着時に確定表示へ置き換える。
+   - セッション内の表示順は `node_seq` を正とし、`global_seq` / `local_seq` は差分再開カーソルとしてのみ使用する。
 
 ### 3.3 Client 双方向 Web PTY WebSocket (`/api/v1/pty/ws`)
 
@@ -417,7 +570,8 @@ xterm互換アダプター）とノード上の ConPTY / Unix PTY
        デーモンが管理する `opencode2 serve` に対して、CLI側が
        `opencode2 run --attach <server_url> --session <id>`
        を子プロセス実行して純正TUIを直接表示するモード。
-2. `AttachSession { session_id }`:
+2. `AttachSession { session_id, after_node_seq: Option<u64> }`:
    - 既存セッションのイベントストリーム購読＋双方向操作（プロンプト送信・承認応答・リサイズ通知）。
+     `after_node_seq` 指定時はその連番以降の履歴をリプレイしてからライブストリームへ接続する（途中切断からの再接続用）。
 3. `GetLocalStatus`:
    - ローカルで稼働中のセッション一覧、中央サーバーとのWebSocket接続状態、未送信Outboxイベント数を返却。

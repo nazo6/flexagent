@@ -153,12 +153,14 @@ OpenCode / OpenCode2
 **Shadow Git Tree** を実装します。
 
 1. **スナップショットの取得（各ターンの `send_prompt` 直前に自動実行）**:
-   - 環境変数 `GIT_INDEX_FILE=~/.flexagent/snapshots/<project_hash>.index`
+   - 環境変数 `GIT_INDEX_FILE=~/.flexagent/snapshots/<session-id>.index`
      を指定した状態で：
      1. `git add -A`（未追跡ファイルも含めてシャドウIndexにステージング）
      2. `git write-tree` を実行し、返ってきた **40文字の Tree Hash
         (`snapshot_tree_hash`)** をその `UserMessage`
-        イベントに紐付けてDBへ保存します。
+        イベントに紐付けてDB（`node.db` / `server.db` の `session_events.snapshot_tree_hash` カラム）へ保存します。
+   - **シャドウIndexはセッション単位で分離**します（`<session-id>.index`）。同一リポジトリの複数セッション（並行 Worktree 作業）が同時にスナップショットを取得しても Index ファイルを奪い合わないためです。同一セッション内のターンは直列処理されるため競合しません。
+   - `git add -A` は `.gitignore` 対象を除外しますが、巨大な未追跡ファイル（ビルド成果物等）が含まれ得るため、サイズ上限（例: 100 MB 超）を設けて超過時はスナップショットをスキップし警告ログを残します。
    - コミットオブジェクトすら作らないためユーザーのブランチ履歴は一切汚れず、変更がないファイルはGitオブジェクトDB内で自動的に重複排除されます。
 2. **Revert（指定したメッセージ時点へのファイル復元 ＋ 会話巻き戻し）**:
    - ユーザーがWeb / Android /

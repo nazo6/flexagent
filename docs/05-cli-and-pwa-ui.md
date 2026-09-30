@@ -10,7 +10,7 @@ CLI は曖昧な暗黙サブコマンド（`fxg <agent>` 短縮形）を設け�
 
 | コマンド | 説明 | 主なオプション / 引数 |
 | :--- | :--- | :--- |
-| **`fxg run <agent>`** | カレントディレクトリ（または指定Worktree/一時VM）で新規セッションを起動し、即座にターミナルを Attach | `-p, --prompt <TEXT>`: 初期プロンプト送信<br/>`-w, --worktree <BRANCH>`: Worktreeを作成/再利用して起動<br/>`--base <BRANCH>`: Worktree新規作成時のベースブランチ<br/>`--provisioner <NAME>`: 一時VM (`local-docker`, `colab-pro` 等) で起動<br/>`--mode <MODE>`: 初期モード (`code`, `plan` 等)<br/>`--acp`: `opencode2` を標準ACPモードで起動<br/>`-d, --detach`: TUIをAttachせずバックグラウンド起動しセッションIDを出力<br/>`-- <EXTRA_ARGS>...`: エージェントプロセスへのパススルー引数 |
+| **`fxg run <agent>`** | カレントディレクトリ（または指定Worktree/一時VM）で新規セッションを起動し、即座にターミナルを Attach | `-p, --prompt <TEXT>`: 初期プロンプト送信<br/>`-w, --worktree <BRANCH>`: Worktreeを作成/再利用して起動<br/>`--base <BRANCH>`: Worktree新規作成時のベースブランチ<br/>`--provisioner <NAME>`: 一時VM (`local-docker`, `colab-pro` 等) で起動（中央サーバーホスト上で起動。中央サーバー必須）<br/>`--mode <MODE>`: 初期モード (`code`, `plan` 等)<br/>`--acp`: `opencode2` を標準ACPモードで起動<br/>`-d, --detach`: TUIをAttachせずバックグラウンド起動しセッションIDを出力<br/>`-- <EXTRA_ARGS>...`: エージェントプロセスへのパススルー引数 |
 | **`fxg attach [session-id]`** | 稼働中セッションにターミナル（内蔵TUI または OpenCode2 純正TUI）を再接続 | `session-id` 省略時はカレントディレクトリ（Worktree）の直近アクティブセッションに自動接続 |
 | **`fxg ps`** | 稼働中・最近のセッション一覧を表示（`fxg session list` のエイリアス） | `-a, --all`: 停止済みセッションも含めて表示<br/>`--project <ID>`: 論理プロジェクトIDでフィルタ<br/>`--node <ID>`: ノードIDでフィルタ<br/>`--json`: JSON形式で出力 |
 | **`fxg session list`** | セッション一覧を表示（`fxg ps` と同一） | `-a, --all`, `--project <ID>`, `--node <ID>`, `--json` |
@@ -36,13 +36,13 @@ CLI は曖昧な暗黙サブコマンド（`fxg <agent>` 短縮形）を設け�
 | **`fxg agents update [id]`** | ACP Registry インデックス (`registry.json`) および導入済みエージェントを更新 | `id` 省略時は全導入済みエージェントを更新 |
 | **`fxg agents remove <id>`** | キャッシュ済みの ACP エージェントバイナリを削除 | - |
 | **`fxg provisioners list`** | `config.toml` に定義された一時VMプロビジョナー一覧を表示 | `--json` |
-| **`fxg provisioners test <name>`** | 指定プロビジョナーの起動・`fxg daemon --stdio` ハンドシェイク疎通を検証 | - |
+| **`fxg provisioners test <name>`** | 指定プロビジョナーの起動・`fxg daemon --stdio` ハンドシェイク疎通を検証（中央サーバー API 経由で実行。中央サーバー必須） | - |
 | **`fxg daemon`** | ノードデーモンをフォアグラウンド起動 | `--listen <ADDR>`: ローカルHTTP/WSバインド先 (既定 `127.0.0.1:7860`)<br/>`--server-url <WS_URL>`: 中央サーバーWS URL<br/>`--allow-remote-pty`: リモートからのWeb PTY起動を許可<br/>`--stdio`: 標準入出力パイプ (JSON Lines) モードで起動<br/>`--ephemeral`: 一時VMモード (自動Drain & Bundle退避有効)<br/>`--workspace <DIR>`: `--stdio` 時の初期対象ディレクトリ |
 | **`fxg server`** | 中央サーバーをフォアグラウンド起動 | `--listen <ADDR>`: バインド先 (既定 `0.0.0.0:8080`)<br/>`--port <PORT>`: ポート番号上書き |
 | **`fxg bootstrap-workspace`** | 一時VM内の Zero-Touch 初期化 (`git clone` + `mise`/`uv` ツール自動導入、出力はすべて `stderr`) | `--repo <GIT_URL>` (必須)<br/>`--branch <BRANCH>`<br/>`--dir <PATH>` (既定 `/tmp/workspace`) |
 | **`fxg service <action>`** | OSログイン時のバックグラウンド常駐サービス管理 (Win/Mac/Linux/WSL) | `<action>`: `install` \| `uninstall` \| `start` \| `stop` \| `restart` \| `status`<br/>`--server`: `daemon` ではなく `server` を対象にする |
-| **`fxg auth <action>`** | 認証トークンの表示・更新 | `<action>`:<br/>`token`: クライアント認証トークン (`auth_token`) を表示<br/>`rotate-token`: `auth_token` を再生成<br/>`node-token`: Node ⇔ Server 用 `node_token` を表示・生成 |
-| **`fxg web`** | トークン付きURL (`http://127.0.0.1:7860/?token=...`) をデフォルトブラウザで開く | `--server`: ローカルノードではなく中央サーバーURLを開く |
+| **`fxg auth <action>`** | 認証トークンの表示・更新 | `<action>`:<br/>`token`: クライアント認証トークン (`auth_token`) を表示<br/>`rotate-token`: `auth_token` を再生成<br/>`node-token issue <node-id>`: ノード個別トークンを発行・表示（中央サーバー上で実行。`nodes.token_hash` にハッシュを保存）<br/>`node-token revoke <node-id>`: ノード個別トークンを失効<br/>`node-token list`: 発行済みノードトークン一覧 |
+| **`fxg web`** | トークン付きURL (`http://127.0.0.1:7860/?token=...`) をデフォルトブラウザで開く | `--server`: ローカルノードではなく中央サーバーURLを開く（中央サーバー用トークンをローカルが持たない場合は、サーバー上で `fxg auth token` を確認して初回入力ダイアログに入力） |
 | **`fxg kill-all`** | **【緊急停止】** 全ノードの稼働中セッション・子プロセスツリー・一時VM・PTYを即時強制終了 | `--local-only`: 中央サーバーへ配信せずローカルノードのみ停止 |
 
 ### 1.2 代表的なCLI操作例
@@ -92,7 +92,7 @@ fxg kill-all                                     # 【緊急停止】全セッ�
 ~/.flexagent/
 ├── config.toml                 # グローバル設定ファイル (Node / Server / Agents / Provisioners)
 ├── auth_token                  # Client ⇔ Server/Node 認証トークン (パーミッション 0600)
-├── node_token                  # Node ⇔ Server ペアリングトークン (パーミッション 0600)
+├── node_token                  # このノード専用の Node ⇔ Server ペアリングトークン (サーバーで発行・パーミッション 0600)
 ├── vapid_private.pem           # Web Push VAPID 秘密鍵 (自動生成・Server用)
 ├── vapid_public.txt            # Web Push VAPID 公開鍵 (URL-safe Base64)
 ├── node.db                     # ローカルノード SQLite DB (WALモード)
@@ -138,7 +138,8 @@ listen_addr = "127.0.0.1:7860"
 # 環境変数: FXG_CENTRAL_SERVER_URL
 central_server_url = "ws://100.64.0.10:8080/api/v1/node/ws"
 
-# 中央サーバー接続時のペアリングトークン（省略時は ~/.flexagent/node_token を読み込む）
+# 中央サーバー接続時のペアリングトークン（ノード個別。中央サーバー上で `fxg auth node-token issue <node-id>` により発行）
+# 省略時は ~/.flexagent/node_token を読み込む
 # 環境変数: FXG_NODE_TOKEN
 # node_token = "..."
 
@@ -160,10 +161,8 @@ project_scan_dirs = [
   "D:/ghq/github.com",
 ]
 
-# ストリーミングチャンク (AgentMessage / AgentThought) を node.db へ結合フラッシュする間隔 (ms)
-chunk_flush_interval_ms = 500
-
 # 各ターンのプロンプト送信直前に Shadow Git Tree スナップショットを自動取得するか
+# (ストリーミング途中のチャンクは永続化せず、ターン完了時に完成イベントのみを DB へ書き込む)
 snapshot_enabled = true
 
 
@@ -172,6 +171,7 @@ snapshot_enabled = true
 # ------------------------------------------------------------------------------
 [server]
 # 中央サーバーのHTTP/WSバインドアドレス（LAN / Tailscale インターフェース等）
+# ※ パブリックインターネットへ直接露出せず、ファイアウォール / VPN で隔離された LAN 内でのみ待ち受けること
 # 環境変数: FXG_SERVER_LISTEN_ADDR
 listen_addr = "0.0.0.0:8080"
 
@@ -194,6 +194,8 @@ allowed_origins = [
 vapid_subject = "mailto:admin@example.com"
 
 # 一時VM (`fxg daemon --stdio`) からの GitCredentialRequest に対する認証プロキシ設定
+# ※ ブートストラップ（デーモン起動前の git clone）用には、プロビジョナー起動時に
+#    この設定から短命トークン (FXG_GIT_TOKEN) が生成され環境変数として注入される
 [server.git_credentials."github.com"]
 # "gh_cli" (`gh auth token` から取得) または "env" (指定環境変数から取得)
 provider = "gh_cli"
@@ -235,6 +237,8 @@ env = { LOG_LEVEL = "info" }
 # ------------------------------------------------------------------------------
 # 4. 一時VM・サンドボックスプロビジョナー設定 (`--provisioner <name>`)
 # ------------------------------------------------------------------------------
+# ※ プロビジョナーは中央サーバー (`fxg server`) ホスト上で子プロセスとして起動される
+#    (CLI の `fxg run --provisioner` もサーバー API 経由。サーバー停止中は利用不可)
 # 利用可能プレースホルダ:
 #   {BOOTSTRAP_SCRIPT} -> `fxg bootstrap-workspace` + `exec fxg daemon --stdio --ephemeral` の自動生成スクリプト
 #   {INSTANCE_NAME}    -> 一時インスタンス識別名 (例: "fxg-eph-0195f0...")
@@ -354,7 +358,9 @@ PCブラウザ、ローカルフォールバック (`localhost:7860`)、およ�
     (モバイルの片手操作・ボトムシートUIと、デスクトップのマルチペインUIをレスポンシブ切替)
 - **状態管理 & 同期**: Svelte 5 Runes (`$state`, `$derived` を用いた
   `*.svelte.ts` クラスベースのカスタム WebSocket 差分同期ストア /
-  `last_global_seq` 管理)
+  `last_global_seq`（中央サーバー接続時）・`last_local_seq`（ローカルノード接続時）の使い分け管理。
+  イベントは `event_id` / `(session_id, node_seq)` で upsert し、`LiveStreamDelta` と
+  永続イベントを `message_id` でマージする)
 - **コード・Diff・双方向ターミナル**:
   - **Diff / コード表示**:
     - PC: `monaco-editor` (Monaco Diff Editor: Side-by-side / Inline
@@ -399,7 +405,8 @@ PCブラウザ、ローカルフォールバック (`localhost:7860`)、およ�
 3. **セッション詳細（チャット & ワークスペース）画面**:
    - **ヘッダー**: 実行ノード名（例: `Home-Win` または
      `Colab Pro [Ephemeral]`）、接続状態、バインドされているWorktree（例:
-     `feat/auth`）を常時表示。
+     `feat/auth`）を常時表示。あわせて **同期状態バッジ**（未同期イベント件数 /
+     最終同期時刻。中央サーバー停止中は Outbox 残数を明示）を表示する。
    - **マルチペイン / タブ構成** (デスクトップは左右分割、モバイルはタブ切替):
      - **Chat ペイン**:
        - 一時VM起動時（`provisioning` / `bootstrapping`
@@ -457,8 +464,10 @@ PCブラウザ、ローカルフォールバック (`localhost:7860`)、およ�
      - アクションボタン: **`[Approve]`** / **`[Reject]`**
        ユーザーが通知バナー上の `[Approve]` をタップすると、Service
        Workerがバックグラウンドで
-       `POST /api/v1/sessions/:id/permissions/:req_id/approve`
-       を叩き、アプリ画面を開くことすらなく承認が完了します。
+       `POST /api/v1/sessions/:id/permissions/:req_id/respond`
+       （`{ selected_option_id: "allow_once" | "reject", resolved_by: "android_push" }`）
+       を叩き、アプリ画面を開くことすらなく承認が完了します。既に解決済み (`ALREADY_RESOLVED`)
+       の場合は正常終了として扱います。
 
 ### 3.4 統合 Web ターミナルと抽象化設計 (`ITerminalAdapter`)
 
@@ -505,8 +514,10 @@ export interface ITerminalAdapter {
 ## 4. 段階的実装ロードマップ (Milestones)
 
 詳細なフェーズ別タスクリストおよび実装進捗は **[`docs/changelog/2026-09-30-implementation-plan.md`](./changelog/2026-09-30-implementation-plan.md)** で管理します。
+本節の Milestone と実装計画の Phase の対応は各見出しの括弧書きのとおりです
+（Milestone 1 は計画の Phase 1〜2 にまたがり、Milestone 2〜3 はともに Phase 3 に対応）。
 
-### Milestone 1: コアプロトコル・DB・ローカルデーモン基盤 & セキュリティ基礎 (フェーズ 1)
+### Milestone 1: コアプロトコル・DB・ローカルデーモン基盤 & セキュリティ基礎 (実装計画 Phase 1〜2 対応)
 
 - [ ] Cargo Workspace の構築 (`fxg-protocol`, `fxg-db`, `fxg-pty`, `fxg-acp`,
       `fxg-node`, `fxg-server`, `fxg-cli`) および `mise.toml` タスク定義
@@ -514,13 +525,13 @@ export interface ITerminalAdapter {
 - [ ] Git Remote URL正規化による論理プロジェクト解決 (`fxg project info`)
 - [ ] Windows Named Pipe / Unix Domain Socket による `fxg` CLI ⇔ `fxg daemon`
       ローカルIPC疎通
-- [ ] **セキュリティ基礎 (フェーズ 1)**:
+- [ ] **セキュリティ基礎**:
   - [ ] `fxg daemon` ローカルAPIの `127.0.0.1:7860`（ループバック）厳格バインド
   - [ ] 認証トークン生成・永続化 (`~/.flexagent/auth_token`)
   - [ ] Axum ミドルウェアによる `Host` ヘッダ検証 (DNS Rebinding 対策)
   - [ ] WebSocket ハンドシェイク時の `Origin` ヘッダ検証 (CSWSH 対策)
 
-### Milestone 2: ACP ドライバ & Windows プロセス管理
+### Milestone 2: ACP ドライバ & Windows プロセス管理 (実装計画 Phase 3 対応)
 
 - [ ] `fxg-pty`: ConPTY (`portable-pty`) + Windows Job Object (`win32job`) +
       `which` コマンド解決の実装
@@ -531,28 +542,28 @@ export interface ITerminalAdapter {
 - [ ] `fxg run <acp-agent>` でローカルCLI (TUI)
       からACPエージェントを対話実行・Attachできる状態にする
 
-### Milestone 3: OpenCode2 ハイブリッド統合
+### Milestone 3: OpenCode2 ハイブリッド統合 (実装計画 Phase 3 対応)
 
 - [ ] `OpenCode2Driver` の実装（`opencode2 serve`
       の起動・SSEイベント購読・OpenAPI操作）
 - [ ] `fxg run opencode` 実行時の純正TUI
       Attach（`opencode2 run --attach`）とデーモン側イベント記録の同時動作
 
-### Milestone 4: 中央サーバー & Store-and-Forward 同期 & セキュリティ (フェーズ 2)
+### Milestone 4: 中央サーバー & Store-and-Forward 同期 & セキュリティ (実装計画 Phase 4 対応)
 
 - [ ] `fxg server` の Axum WebSocket Hub 実装
 - [ ] `fxg daemon` の Outbox Sync Worker 実装（中央サーバーへのOutbound
       WS接続、切断時のローカル蓄積と再接続時の一括同期）
 - [ ] 中央サーバー経由でのリモートコマンドルーティング（`StartSession`,
       `SendPrompt`, `RespondPermission`）
-- [ ] **LAN/VPNセキュリティ & 統制 (フェーズ 2)**:
+- [ ] **LAN/VPNセキュリティ & 統制**:
   - [ ] Node ⇔ Server 間のペアリングトークン (`node_token`) 認証
   - [ ] `audit_logs` テーブルへの操作監査ログ記録
   - [ ] 緊急キルスイッチ (`POST /api/v1/system/kill-switch` /
         `ServerToNodeMsg::KillAllSessions`) の配信・プロセスツリー即時終了
   - [ ] ノード設定 `allow_remote_pty` によるWeb PTYリモート起動拒否ハンドリング
 
-### Milestone 5: 共通 Web UI / Android PWA & Web Push
+### Milestone 5: 共通 Web UI / Android PWA & Web Push (実装計画 Phase 5 対応)
 
 - [ ] `ui/` (SvelteKit / Svelte 5 SPA + TypeScript + Tailwind v4 +
       `shadcn-svelte` + `pnpm` + `oxlint` / `oxfmt` / `svelte-check` / `Vitest`)
@@ -573,7 +584,7 @@ export interface ITerminalAdapter {
       VAPID Push通知（Androidバックグラウンド通知＆バナー承認）の実装
 - [ ] `fxg service install` による各OS自動起動設定の実装
 
-### Milestone 6: 一時VM・サンドボックスノード (`fxg daemon --stdio` & Zero-Touch Provisioner)
+### Milestone 6: 一時VM・サンドボックスノード (`fxg daemon --stdio` & Zero-Touch Provisioner) (実装計画 Phase 6 対応)
 
 - [ ] `fxg daemon --stdio --ephemeral` による標準入出力パイプ（JSON
       Lines）トランスポート実装
