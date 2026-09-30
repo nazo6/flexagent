@@ -1292,6 +1292,7 @@ dependencies = [
  "http-body-util",
  "libc",
  "rand 0.10.3",
+ "reqwest",
  "serde",
  "serde_json",
  "tempfile",
