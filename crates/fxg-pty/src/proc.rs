@@ -178,4 +178,92 @@ mod tests {
         let guard = ProcessTreeGuard::new().expect("guard");
         assert_eq!(guard.is_job_object_backend(), cfg!(windows));
     }
+
+    /// Windows Job Object: ルートプロセスが起動した**孫プロセス**が、
+    /// ガード (Job) の Drop による kill-on-close で確実に終了すること
+    /// (Phase 2 完了条件 / CI: windows-latest で自動検証)。
+    #[cfg(windows)]
+    #[test]
+    fn job_object_kills_grandchildren_on_guard_drop() {
+        use std::os::windows::io::AsRawHandle;
+        use std::process::Command as StdCommand;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let pid_file = dir.path().join("grandchild.pid");
+
+        let guard = ProcessTreeGuard::new().expect("guard");
+
+        // ルート (PowerShell) を Job へ割り当ててから、孫 (ping) を起動させる。
+        // Job メンバーが作成したプロセスは自動的に同じ Job に所属するため、
+        // ルートが終了しても孫は Job に残る。猶予 (Start-Sleep) は、孫を生む前に
+        // ルートの Job 割当が完了していることを保証するためのもの。
+        let script = format!(
+            "Start-Sleep -Milliseconds 1500; \
+             $p = Start-Process -PassThru -FilePath ping -ArgumentList '-n','30','127.0.0.1'; \
+             Set-Content -Path '{}' -Value $p.Id",
+            pid_file.display()
+        );
+        let mut root = StdCommand::new("powershell")
+            .args(["-NoProfile", "-Command", &script])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .expect("spawn root");
+        guard
+            .job
+            .assign_process(root.as_raw_handle())
+            .expect("assign root process to job");
+
+        let grandchild_pid = wait_for_pid_file(&pid_file);
+        assert!(
+            windows_process_is_running(grandchild_pid),
+            "grandchild ({grandchild_pid}) must be running before guard drop"
+        );
+        let _ = root.wait();
+
+        // ガード Drop → Job ハンドルクローズ → kill-on-close で孫が終了する
+        drop(guard);
+
+        let mut killed = false;
+        for _ in 0..100 {
+            if !windows_process_is_running(grandchild_pid) {
+                killed = true;
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        if !killed {
+            // テスト失敗時に ping を残さない (ベストエフォート)
+            let _ = StdCommand::new("taskkill")
+                .args(["/PID", &grandchild_pid.to_string(), "/T", "/F"])
+                .status();
+        }
+        assert!(killed, "grandchild process survived job object close");
+    }
+
+    /// 孫プロセスの PID がファイルに書き出されるまで待つ。
+    #[cfg(windows)]
+    fn wait_for_pid_file(path: &Path) -> u32 {
+        for _ in 0..150 {
+            if let Ok(text) = std::fs::read_to_string(path) {
+                if let Ok(pid) = text.trim().parse::<u32>() {
+                    return pid;
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        panic!("grandchild pid file was not written: {}", path.display());
+    }
+
+    /// `tasklist` で PID のプロセスが稼働中か確認する。
+    #[cfg(windows)]
+    fn windows_process_is_running(pid: u32) -> bool {
+        let output = std::process::Command::new("tasklist")
+            .args(["/FI", &format!("PID eq {pid}"), "/NH"])
+            .output()
+            .expect("tasklist");
+        let text = String::from_utf8_lossy(&output.stdout);
+        text.split_whitespace()
+            .any(|field| field == pid.to_string())
+    }
 }
