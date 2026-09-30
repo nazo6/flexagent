@@ -7,7 +7,19 @@ description = "FlexAgent PTY 制御 (ConPTY / Unix PTY) と Windows Job Object �
 repository.workspace = true
 
 [dependencies]
+dunce = { workspace = true }
 fxg-protocol = { workspace = true }
+portable-pty = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+which = { workspace = true }
+
+[target."cfg(windows)".dependencies]
+win32job = { workspace = true }
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+tempfile = { workspace = true }
