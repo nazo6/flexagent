@@ -137,7 +137,7 @@ impl Db {
         &self,
         session_id: &str,
         payload: UnifiedEventPayload,
-    ) -> Result<SessionEventEnvelope, DbError> {
+    ) -> Result<events::AppendedEvent, DbError> {
         events::append_next_event(&self.pool, session_id, payload).await
     }
 
@@ -257,6 +257,16 @@ impl Db {
         limit: u32,
     ) -> Result<SessionEventBatch, DbError> {
         queries::session_events_after(&self.pool, session_id, after_cursor, limit).await
+    }
+
+    /// 全セッション横断で `after_cursor` より後のイベントを取得する
+    /// (Client WS のリプレイ用)。
+    pub async fn events_after_cursor(
+        &self,
+        after_cursor: u64,
+        limit: u32,
+    ) -> Result<SessionEventBatch, DbError> {
+        queries::events_after_cursor(&self.pool, after_cursor, limit).await
     }
 
     /// 論理プロジェクト一覧 (ノード・Worktree 紐付け含む)。

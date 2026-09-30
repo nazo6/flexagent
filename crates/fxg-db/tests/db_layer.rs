@@ -1075,7 +1075,7 @@ async fn append_next_event_allocates_gap_free_sequences() {
         )
         .await
         .expect("second event");
-    assert_eq!(second.node_seq, 2);
+    assert_eq!(second.envelope.node_seq, 2);
 
     let third = fixture
         .db
@@ -1090,7 +1090,7 @@ async fn append_next_event_allocates_gap_free_sequences() {
         )
         .await
         .expect("third event");
-    assert_eq!(third.node_seq, 3);
+    assert_eq!(third.envelope.node_seq, 3);
 
     let summary = fixture
         .db
@@ -1144,7 +1144,7 @@ async fn append_next_event_allocates_gap_free_sequences() {
         )
         .await
         .expect("fourth event");
-    assert_eq!(fourth.node_seq, 4);
+    assert_eq!(fourth.envelope.node_seq, 4);
 }
 
 #[tokio::test]

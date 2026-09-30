@@ -109,27 +109,8 @@ fn fnv1a64(bytes: &[u8]) -> u64 {
     hash
 }
 
-/// `project_key` の解決元。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ProjectResolutionSource {
-    /// `.fxg.toml` の明示指定
-    FxgToml,
-    /// `git remote.origin.url` の正規化
-    GitRemote,
-    /// フォールバック (`local:<node_id>:<hash>`)
-    Fallback,
-}
-
-impl ProjectResolutionSource {
-    /// 表示用の識別子。
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::FxgToml => "fxg_toml",
-            Self::GitRemote => "git_remote",
-            Self::Fallback => "fallback",
-        }
-    }
-}
+/// `project_key` の解決元 ([`fxg_protocol::common::ProjectResolutionSource`] を再公開)。
+pub use fxg_protocol::common::ProjectResolutionSource;
 
 /// 解決された論理プロジェクト。
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -192,6 +192,61 @@ impl FromStr for PermissionRequestStatus {
     }
 }
 
+/// 論理プロジェクト (`project_key`) の解決元。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum ProjectResolutionSource {
+    /// `.fxg.toml` の明示指定 (最優先)
+    FxgToml,
+    /// `git remote.origin.url` の正規化
+    GitRemote,
+    /// フォールバック (`local:<node_id>:<path-hash>`)
+    Fallback,
+}
+
+impl ProjectResolutionSource {
+    /// 表示用の識別子。
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::FxgToml => "fxg_toml",
+            Self::GitRemote => "git_remote",
+            Self::Fallback => "fallback",
+        }
+    }
+}
+
+impl fmt::Display for ProjectResolutionSource {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl FromStr for ProjectResolutionSource {
+    type Err = EnumParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "fxg_toml" => Ok(Self::FxgToml),
+            "git_remote" => Ok(Self::GitRemote),
+            "fallback" => Ok(Self::Fallback),
+            other => Err(EnumParseError::new("project resolution source", other)),
+        }
+    }
+}
+
+/// Worktree 作成時の `copy_files` / `post_create` フック実行ログ。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct HookLogEntry {
+    /// 実行したコマンド文字列
+    pub command: String,
+    /// 成功したか
+    pub success: bool,
+    /// 出力 (stdout + stderr)
+    pub output: String,
+}
+
 /// API レスポンス用のセッション集約型 (`sessions` 行から構成)。
 ///
 /// ハブ側ではイベント適用による投影から生成される。Local Node と
@@ -492,6 +547,11 @@ pub struct ForkHistoryItem {
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 #[ts(export)]
 pub enum ErrorCode {
+    /// 認証トークンが無い・一致しない (HTTP `401 Unauthorized`)
+    Unauthorized,
+    /// `Host` / `Origin` 検証失敗・ポリシー違反 (HTTP `403 Forbidden`。
+    /// リモートPTY無効時の `PTY_DISABLED` とは区別する)
+    Forbidden,
     /// 対象ノードが中央サーバーから切断中 (キューイングせず即時返却)
     NodeOffline,
     /// 承認リクエストが既に解決済み (2回目以降の応答。冪等に扱う)
@@ -514,6 +574,8 @@ impl ErrorCode {
     /// JSON / WS / REST 上の文字列表現。
     pub const fn as_str(self) -> &'static str {
         match self {
+            Self::Unauthorized => "UNAUTHORIZED",
+            Self::Forbidden => "FORBIDDEN",
             Self::NodeOffline => "NODE_OFFLINE",
             Self::AlreadyResolved => "ALREADY_RESOLVED",
             Self::Busy => "BUSY",
@@ -537,6 +599,8 @@ impl FromStr for ErrorCode {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
+            "UNAUTHORIZED" => Ok(Self::Unauthorized),
+            "FORBIDDEN" => Ok(Self::Forbidden),
             "NODE_OFFLINE" => Ok(Self::NodeOffline),
             "ALREADY_RESOLVED" => Ok(Self::AlreadyResolved),
             "BUSY" => Ok(Self::Busy),

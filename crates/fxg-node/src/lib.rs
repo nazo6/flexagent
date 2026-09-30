@@ -37,6 +37,6 @@ pub use snapshot::{
     DEFAULT_SNAPSHOT_SIZE_LIMIT_BYTES, RestoreOutcome, ShadowGitTree, SnapshotOutcome,
 };
 pub use worktree::{
-    HookLog, WorktreeAddOutcome, WorktreeAddRequest, WorktreeEntry, ensure_worktree,
+    HookLogEntry, WorktreeAddOutcome, WorktreeAddRequest, WorktreeEntry, ensure_worktree,
     list_worktrees, prune_worktrees, remove_worktree, resolve_worktree_dir,
 };

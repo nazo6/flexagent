@@ -34,8 +34,13 @@ const BROADCAST_CAPACITY: usize = 2048;
 /// 購読者へ配信されるセッション単位のメッセージ。
 #[derive(Debug, Clone, PartialEq)]
 pub enum SessionBroadcast {
-    /// 永続化済みイベント (`node_seq` 確定)
-    Persisted(SessionEventEnvelope),
+    /// 永続化済みイベント (`node_seq` / `cursor` 確定)
+    Persisted {
+        /// イベント本体
+        event: SessionEventEnvelope,
+        /// `node.db` の `session_events.cursor` (差分再開カーソル)
+        cursor: u64,
+    },
     /// 永続化しないエフェメラルイベント (キーストローク等)。
     /// `node_seq` は採番されないため `0` が入る。
     Ephemeral(SessionEventEnvelope),
@@ -52,8 +57,16 @@ impl SessionBroadcast {
     /// 対象セッションID。
     pub fn session_id(&self) -> &str {
         match self {
-            Self::Persisted(envelope) | Self::Ephemeral(envelope) => &envelope.session_id,
+            Self::Persisted { event, .. } | Self::Ephemeral(event) => &event.session_id,
             Self::StreamDelta { session_id, .. } => session_id,
+        }
+    }
+
+    /// 永続化済みイベントなら `(envelope, cursor)` を返す。
+    pub fn persisted(&self) -> Option<(&SessionEventEnvelope, u64)> {
+        match self {
+            Self::Persisted { event, cursor } => Some((event, *cursor)),
+            _ => None,
         }
     }
 }
@@ -131,11 +144,15 @@ impl SessionEventBus {
             created_at: now_ms(),
             payload,
         };
-        self.inner
-            .db
+        let outcomes = self
+            .db()
             .append_events(std::slice::from_ref(&envelope))
             .await?;
-        self.broadcast(SessionBroadcast::Persisted(envelope.clone()));
+        let cursor = outcomes.first().map(|outcome| outcome.cursor).unwrap_or(0);
+        self.broadcast(SessionBroadcast::Persisted {
+            event: envelope.clone(),
+            cursor,
+        });
         Ok(envelope)
     }
 
@@ -152,9 +169,12 @@ impl SessionEventBus {
         if !payload.is_persistable() {
             return Err(NodeError::NonPersistableEvent(payload.event_type()));
         }
-        let envelope = self.inner.db.append_next_event(session_id, payload).await?;
-        self.broadcast(SessionBroadcast::Persisted(envelope.clone()));
-        Ok(envelope)
+        let appended = self.db().append_next_event(session_id, payload).await?;
+        self.broadcast(SessionBroadcast::Persisted {
+            event: appended.envelope.clone(),
+            cursor: appended.cursor,
+        });
+        Ok(appended.envelope)
     }
 
     /// ストリーミング途中の差分チャンクを即時配信する (DB へは書き込まない)。
@@ -269,10 +289,13 @@ mod tests {
             .await
             .expect("create");
         assert_eq!(envelope.node_seq, 1);
-        assert!(matches!(
-            receiver.try_recv().expect("broadcast"),
-            SessionBroadcast::Persisted(event) if event.node_seq == 1
-        ));
+        match receiver.try_recv().expect("broadcast") {
+            SessionBroadcast::Persisted { event, cursor } => {
+                assert_eq!(event.node_seq, 1);
+                assert!(cursor > 0, "cursor must be assigned");
+            }
+            other => panic!("unexpected broadcast: {other:?}"),
+        }
 
         let summary = bus
             .db()
@@ -347,7 +370,13 @@ mod tests {
             broadcasted.push(message);
         }
         assert_eq!(broadcasted.len(), 2);
-        assert!(matches!(&broadcasted[0], SessionBroadcast::Persisted(e) if e.node_seq == 2));
+        match &broadcasted[0] {
+            SessionBroadcast::Persisted { event, cursor } => {
+                assert_eq!(event.node_seq, 2);
+                assert!(*cursor > 0);
+            }
+            other => panic!("unexpected broadcast: {other:?}"),
+        }
     }
 
     #[tokio::test]

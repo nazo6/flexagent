@@ -162,6 +162,67 @@ pub async fn session_events_after(
     Ok(SessionEventBatch { events, cursor })
 }
 
+/// `(cursor, event_id, session_id, node_seq, payload_json, created_at)` 行から
+/// [`SessionEventBatch`] を組み立てる (共通処理)。
+fn batch_from_rows(
+    rows: Vec<(i64, String, String, i64, String, i64)>,
+    after_cursor: u64,
+) -> Result<SessionEventBatch, DbError> {
+    let mut cursor = after_cursor;
+    let mut events = Vec::with_capacity(rows.len());
+    for (row_cursor, event_id, session_id, node_seq, payload_json, created_at) in rows {
+        cursor = u64::try_from(row_cursor).map_err(|_| DbError::NegativeNodeSeq(row_cursor))?;
+        events.push(envelope_from_row(
+            event_id,
+            session_id,
+            node_seq,
+            payload_json,
+            created_at,
+        )?);
+    }
+    Ok(SessionEventBatch { events, cursor })
+}
+
+/// 全セッション横断で `after_cursor` より後のイベントを取得する。
+///
+/// Client WS のリプレイ (`Subscribe { since_cursor }`) や Outbox の再開で使用する。
+/// 返却するバッチの `cursor` は最後に取得できたイベントのカーソル。
+pub async fn events_after_cursor(
+    pool: &SqlitePool,
+    after_cursor: u64,
+    limit: u32,
+) -> Result<SessionEventBatch, DbError> {
+    let after = i64::try_from(after_cursor).map_err(|_| DbError::CursorOutOfRange(after_cursor))?;
+    let rows = sqlx::query!(
+        r#"
+        SELECT cursor, event_id, session_id, node_seq, payload_json, created_at
+          FROM session_events
+         WHERE cursor > ?
+         ORDER BY cursor ASC
+         LIMIT ?
+        "#,
+        after,
+        i64::from(limit),
+    )
+    .fetch_all(pool)
+    .await?;
+
+    let rows = rows
+        .into_iter()
+        .map(|row| {
+            (
+                row.cursor,
+                row.event_id,
+                row.session_id,
+                row.node_seq,
+                row.payload_json,
+                row.created_at,
+            )
+        })
+        .collect();
+    batch_from_rows(rows, after_cursor)
+}
+
 /// 論理プロジェクト一覧を取得する (ノード・Worktree 紐付け含む)。
 pub async fn list_projects(pool: &SqlitePool) -> Result<Vec<ProjectSummary>, DbError> {
     let project_rows = sqlx::query_as!(

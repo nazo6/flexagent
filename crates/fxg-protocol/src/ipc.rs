@@ -11,7 +11,11 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::common::{ErrorCode, SessionControlAction, SessionSummary, StreamDeltaPayload};
+use crate::client_api::WorktreeInfo;
+use crate::common::{
+    ErrorCode, HookLogEntry, ProjectResolutionSource, ProjectSummary, SessionControlAction,
+    SessionSummary, StreamDeltaPayload,
+};
 use crate::events::SessionEventEnvelope;
 
 /// Length-prefixed JSON の長さヘッダ長 (リトルエンディアン u32)。
@@ -45,6 +49,27 @@ pub struct LocalStatus {
     pub unsynced_event_count: u64,
     /// 最終同期日時 (Unix epoch ms)
     pub last_synced_at: Option<i64>,
+}
+
+/// 論理プロジェクト解決の詳細 (`fxg project info` の結果)。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProjectInfo {
+    /// 論理プロジェクトID (`project_key`)
+    pub project_id: String,
+    /// 表示名
+    pub name: String,
+    /// 正規化元の Git URL
+    pub canonical_git_url: Option<String>,
+    /// Git ルート (非 Git の場合は `None`)
+    pub git_root: Option<String>,
+    /// Git ルートからの相対サブパス (モノレポ)
+    pub relative_subpath: Option<String>,
+    /// 解決対象ディレクトリ
+    pub local_path: String,
+    /// Git リポジトリか
+    pub is_git_repo: bool,
+    /// 解決元
+    pub source: ProjectResolutionSource,
 }
 
 /// CLI → Daemon の要求メッセージ。
@@ -112,6 +137,96 @@ pub enum IpcClientMessage {
         /// 実行する操作
         action: SessionControlAction,
     },
+    /// 指定ディレクトリの論理プロジェクトを解決する (`fxg project info`)。
+    ProjectInfo {
+        /// 相関ID
+        command_id: String,
+        /// 解決対象ディレクトリ
+        cwd: String,
+    },
+    /// 登録済み論理プロジェクト一覧 (`fxg project list`)。
+    ProjectList {
+        /// 相関ID
+        command_id: String,
+    },
+    /// カレントディレクトリを指定の論理プロジェクトIDへ手動紐付け
+    /// (`.fxg.toml` へ保存。`fxg project link`)
+    ProjectLink {
+        /// 相関ID
+        command_id: String,
+        /// 対象ディレクトリ
+        cwd: String,
+        /// 紐付け先の論理プロジェクトID
+        project_id: String,
+    },
+    /// 指定ディレクトリ配下のGitリポジトリを一括スキャン (`fxg project scan`)。
+    ProjectScan {
+        /// 相関ID
+        command_id: String,
+        /// スキャン対象ディレクトリ (省略時は `project_scan_dirs` を走査)
+        dir: Option<String>,
+    },
+    /// Worktree 一覧 (`fxg worktree list`)。
+    WorktreeList {
+        /// 相関ID
+        command_id: String,
+        /// 対象リポジトリのディレクトリ (省略時は論理プロジェクトから解決)
+        cwd: Option<String>,
+        /// 論理プロジェクトIDで絞り込む
+        project_id: Option<String>,
+    },
+    /// Worktree 作成 (`fxg worktree add`)。
+    WorktreeAdd {
+        /// 相関ID
+        command_id: String,
+        /// メインリポジトリのディレクトリ
+        cwd: String,
+        /// 論理プロジェクトID (省略時は `cwd` から解決)
+        project_id: Option<String>,
+        /// 作成するブランチ名
+        branch: String,
+        /// 起点ブランチ (省略時は現在の HEAD)
+        base_branch: Option<String>,
+        /// 配置先パスの明示指定
+        path: Option<String>,
+    },
+    /// Worktree 削除 (`fxg worktree remove`)。
+    WorktreeRemove {
+        /// 相関ID
+        command_id: String,
+        /// メインリポジトリのディレクトリ
+        cwd: String,
+        /// 削除対象のブランチ名またはパス
+        target: String,
+        /// 未コミット変更があっても強制削除するか
+        force: bool,
+    },
+    /// 削除済み Worktree 管理情報のクリーンアップ (`fxg worktree prune`)。
+    WorktreePrune {
+        /// 相関ID
+        command_id: String,
+        /// メインリポジトリのディレクトリ
+        cwd: String,
+    },
+    /// セッション一覧 (`fxg ps` / `fxg session list`)。
+    ListSessions {
+        /// 相関ID
+        command_id: String,
+        /// 停止済みセッションも含めるか (`-a/--all`)
+        include_stopped: bool,
+    },
+    /// ローカルノード上の全セッション・プロセスツリー・PTYを強制終了 (`fxg kill-all`)。
+    KillAll {
+        /// 相関ID
+        command_id: String,
+    },
+    /// 認証トークンの取得 / 再生成 (`fxg auth token` / `fxg auth rotate-token`)。
+    AuthToken {
+        /// 相関ID
+        command_id: String,
+        /// 再生成するか
+        rotate: bool,
+    },
     /// キープアライブ
     Ping,
 }
@@ -142,6 +257,61 @@ pub enum IpcResult {
     CommandAccepted {
         /// 対象セッションID (任意)
         session_id: Option<String>,
+    },
+    /// `ProjectInfo` の結果
+    ProjectInfo {
+        /// 解決された論理プロジェクト
+        project: ProjectInfo,
+    },
+    /// `ProjectList` の結果
+    Projects {
+        /// 登録済み論理プロジェクト一覧
+        projects: Vec<ProjectSummary>,
+    },
+    /// `ProjectScan` の結果
+    ProjectScan {
+        /// スキャンで解決された論理プロジェクト一覧
+        projects: Vec<ProjectSummary>,
+        /// 実際に走査したディレクトリ
+        scanned_dirs: Vec<String>,
+    },
+    /// `WorktreeList` の結果
+    Worktrees {
+        /// Worktree 一覧
+        worktrees: Vec<WorktreeInfo>,
+    },
+    /// `WorktreeAdd` の結果
+    WorktreeAdded {
+        /// Worktree のパス
+        path: String,
+        /// ブランチ名
+        branch: String,
+        /// 新規作成されたか (`false` は既存 Worktree の再利用)
+        created: bool,
+        /// `post_create` フックの実行ログ
+        hook_logs: Vec<HookLogEntry>,
+    },
+    /// `ListSessions` の結果
+    Sessions {
+        /// セッション一覧 (更新日時降順)
+        sessions: Vec<SessionSummary>,
+    },
+    /// `KillAll` の結果
+    KillAll {
+        /// 終了させたセッションID
+        killed_sessions: Vec<String>,
+        /// 終了させた PTY ID
+        killed_ptys: Vec<String>,
+    },
+    /// `AuthToken` の結果
+    AuthToken {
+        /// クライアント認証トークン
+        token: String,
+    },
+    /// 単純な成功応答
+    Ack {
+        /// 補足メッセージ
+        message: Option<String>,
     },
 }
 
@@ -236,5 +406,104 @@ mod tests {
         let json = serde_json::to_value(&msg).unwrap();
         assert_eq!(json["type"], "error");
         assert_eq!(json["code"], "NOT_FOUND");
+    }
+
+    #[test]
+    fn project_and_worktree_methods_roundtrip() {
+        let cases = vec![
+            IpcClientMessage::ProjectInfo {
+                command_id: "c1".into(),
+                cwd: "/home/nazo/src/flexagent".into(),
+            },
+            IpcClientMessage::ProjectList {
+                command_id: "c2".into(),
+            },
+            IpcClientMessage::ProjectLink {
+                command_id: "c3".into(),
+                cwd: "/home/nazo/src/flexagent".into(),
+                project_id: "internal/tools".into(),
+            },
+            IpcClientMessage::ProjectScan {
+                command_id: "c4".into(),
+                dir: Some("/home/nazo/src".into()),
+            },
+            IpcClientMessage::WorktreeList {
+                command_id: "c5".into(),
+                cwd: Some("/home/nazo/src/flexagent".into()),
+                project_id: None,
+            },
+            IpcClientMessage::WorktreeAdd {
+                command_id: "c6".into(),
+                cwd: "/home/nazo/src/flexagent".into(),
+                project_id: None,
+                branch: "feat/auth".into(),
+                base_branch: Some("main".into()),
+                path: None,
+            },
+            IpcClientMessage::WorktreeRemove {
+                command_id: "c7".into(),
+                cwd: "/home/nazo/src/flexagent".into(),
+                target: "feat/auth".into(),
+                force: true,
+            },
+            IpcClientMessage::WorktreePrune {
+                command_id: "c8".into(),
+                cwd: "/home/nazo/src/flexagent".into(),
+            },
+            IpcClientMessage::ListSessions {
+                command_id: "c9".into(),
+                include_stopped: true,
+            },
+            IpcClientMessage::KillAll {
+                command_id: "c10".into(),
+            },
+            IpcClientMessage::AuthToken {
+                command_id: "c11".into(),
+                rotate: false,
+            },
+        ];
+        for message in cases {
+            let json = serde_json::to_value(&message).unwrap();
+            assert!(json["method"].is_string(), "method tag missing: {json}");
+            let decoded: IpcClientMessage = serde_json::from_value(json).unwrap();
+            assert_eq!(decoded, message);
+        }
+    }
+
+    #[test]
+    fn extended_results_serialize() {
+        let result = IpcResult::ProjectInfo {
+            project: ProjectInfo {
+                project_id: "github.com/nazo6/flexagent".into(),
+                name: "flexagent".into(),
+                canonical_git_url: Some("git@github.com:nazo6/flexagent.git".into()),
+                git_root: Some("/home/nazo/src/flexagent".into()),
+                relative_subpath: None,
+                local_path: "/home/nazo/src/flexagent".into(),
+                is_git_repo: true,
+                source: ProjectResolutionSource::GitRemote,
+            },
+        };
+        let json = serde_json::to_value(&result).unwrap();
+        assert_eq!(json["result"], "project_info");
+        assert_eq!(json["project"]["source"], "git_remote");
+        let decoded: IpcResult = serde_json::from_value(json).unwrap();
+        assert_eq!(decoded, result);
+
+        let added = IpcResult::WorktreeAdded {
+            path: "/home/nazo/.flexagent/worktrees/github.com-nazo6-flexagent/feat-auth".into(),
+            branch: "feat/auth".into(),
+            created: true,
+            hook_logs: vec![HookLogEntry {
+                command: "pnpm install".into(),
+                success: true,
+                output: "done".into(),
+            }],
+        };
+        let json = serde_json::to_value(&added).unwrap();
+        assert_eq!(json["result"], "worktree_added");
+        assert_eq!(json["hook_logs"][0]["success"], true);
+        let decoded: IpcResult = serde_json::from_value(json).unwrap();
+        assert_eq!(decoded, added);
     }
 }

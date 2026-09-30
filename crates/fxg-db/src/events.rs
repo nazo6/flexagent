@@ -34,6 +34,18 @@ pub struct ApplyOutcome {
     pub node_seq: u64,
     /// 新規に追記されたか (`false` は重複として破棄)
     pub inserted: bool,
+    /// このイベントの `session_events.cursor`
+    /// (配信元ストアの取り込み順。差分再開カーソルとしてクライアントへ返す)
+    pub cursor: u64,
+}
+
+/// 採番付き追記 ([`append_next_event`]) の結果。
+#[derive(Debug, Clone, PartialEq)]
+pub struct AppendedEvent {
+    /// 追記されたイベント (node_seq / event_id 確定済み)
+    pub envelope: SessionEventEnvelope,
+    /// このイベントの `session_events.cursor`
+    pub cursor: u64,
 }
 
 /// `permission_requests.details_json` に保存する構造化詳細。
@@ -81,7 +93,7 @@ pub async fn append_next_event(
     pool: &SqlitePool,
     session_id: &str,
     payload: UnifiedEventPayload,
-) -> Result<SessionEventEnvelope, DbError> {
+) -> Result<AppendedEvent, DbError> {
     let mut tx = pool.begin().await?;
 
     // 採番は必ずこの UPDATE で行い、トランザクション内でイベント追記まで完了させる
@@ -116,7 +128,10 @@ pub async fn append_next_event(
         "newly allocated node_seq must be inserted"
     );
     tx.commit().await?;
-    Ok(envelope)
+    Ok(AppendedEvent {
+        envelope,
+        cursor: outcome.cursor,
+    })
 }
 
 async fn append_event_in_tx(
@@ -156,6 +171,36 @@ async fn append_event_in_tx(
     .await?;
 
     let inserted = result.rows_affected() > 0;
+    let cursor = if inserted {
+        result.last_insert_rowid()
+    } else {
+        // 重複として破棄されたイベントは既存行のカーソルを返す
+        // (event_id 一致 → なければ (session_id, node_seq) 一致で引く)
+        let by_event_id = sqlx::query_scalar!(
+            r#"SELECT cursor FROM session_events WHERE event_id = ?"#,
+            envelope.event_id,
+        )
+        .fetch_optional(&mut **tx)
+        .await?;
+        match by_event_id {
+            Some(cursor) => cursor,
+            None => sqlx::query_scalar!(
+                r#"SELECT cursor FROM session_events WHERE session_id = ? AND node_seq = ?"#,
+                envelope.session_id,
+                node_seq,
+            )
+            .fetch_optional(&mut **tx)
+            .await?
+            .ok_or_else(|| {
+                DbError::InvalidPayload(format!(
+                    "ignored event has no stored row: {}",
+                    envelope.event_id
+                ))
+            })?,
+        }
+    };
+    let cursor = u64::try_from(cursor).map_err(|_| DbError::NegativeNodeSeq(cursor))?;
+
     if inserted {
         apply_projections(tx, envelope).await?;
     }
@@ -165,6 +210,7 @@ async fn append_event_in_tx(
         session_id: envelope.session_id.clone(),
         node_seq: envelope.node_seq,
         inserted,
+        cursor,
     })
 }
 

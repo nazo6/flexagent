@@ -41,7 +41,7 @@ pub use error::DbError;
 
 // 型の再エクスポート (利用側の import を短くする)
 pub use audit::AuditLogRecord;
-pub use events::ApplyOutcome;
+pub use events::{AppendedEvent, ApplyOutcome};
 pub use outbox::SessionOutboxBatch;
 pub use queries::SessionFilter;
 pub use registration::{NodeRecord, ProjectBindingRecord, ProjectRecord};

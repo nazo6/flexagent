@@ -157,16 +157,8 @@ pub fn resolve_worktree_dir(template: &str, ctx: &WorktreePathContext) -> PathBu
     PathBuf::from(resolved)
 }
 
-/// `post_create` などフックコマンドの実行結果。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct HookLog {
-    /// 実行したコマンド文字列
-    pub command: String,
-    /// 成功したか
-    pub success: bool,
-    /// 出力 (stdout + stderr)
-    pub output: String,
-}
+/// `post_create` などフックコマンドの実行結果 ([`HookLogEntry`] を再公開)。
+pub use fxg_protocol::common::HookLogEntry;
 
 /// Worktree 作成要求。
 #[derive(Debug, Clone)]
@@ -203,7 +195,7 @@ pub struct WorktreeAddOutcome {
     /// コピーしたファイル (リポジトリ相対パス)
     pub copied_files: Vec<String>,
     /// `post_create` フックの実行ログ
-    pub hook_logs: Vec<HookLog>,
+    pub hook_logs: Vec<HookLogEntry>,
 }
 
 /// Worktree を作成する (同一ブランチの Worktree が既にあれば再利用する)。
@@ -348,7 +340,7 @@ pub async fn prune_worktrees(repo: &Path) -> Result<String, NodeError> {
 }
 
 /// フックコマンドをシェル経由で実行する (失敗しても `Err` にはしない)。
-pub async fn run_hook_command(dir: &Path, command: &str) -> Result<HookLog, NodeError> {
+pub async fn run_hook_command(dir: &Path, command: &str) -> Result<HookLogEntry, NodeError> {
     let (program, flag) = if cfg!(windows) {
         ("cmd", "/C")
     } else {
@@ -373,7 +365,7 @@ pub async fn run_hook_command(dir: &Path, command: &str) -> Result<HookLog, Node
         }
         text.push_str(&stderr);
     }
-    Ok(HookLog {
+    Ok(HookLogEntry {
         command: command.to_owned(),
         success: output.status.success(),
         output: text,

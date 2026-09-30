@@ -7,21 +7,27 @@ description = "FlexAgent ノードデーモン (ローカルIPC・ローカルWe
 repository.workspace = true
 
 [dependencies]
+axum = { workspace = true }
+futures-util = { workspace = true }
 fxg-acp = { workspace = true }
 fxg-db = { workspace = true }
 fxg-protocol = { workspace = true }
 fxg-pty = { workspace = true }
+rand = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
+uuid = { workspace = true }
 
 [dev-dependencies]
+http-body-util = { workspace = true }
 tempfile = { workspace = true }
+tower = { workspace = true }
 
 [lints]
 workspace = true
 
 [target."cfg(unix)".dependencies]
-libc = "0.2.189"
+libc = { workspace = true }
