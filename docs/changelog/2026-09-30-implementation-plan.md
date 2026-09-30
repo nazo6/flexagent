@@ -3,7 +3,8 @@
 - **日付**: 2026-09-30
 - **対象パッケージ**: `fxg-protocol`, `fxg-db`, `fxg-pty`, `fxg-acp`,
   `fxg-node`, `fxg-server`, `fxg-cli`, `ui`
-- **対象スクリプト / 設定**: `Cargo.toml`, `mise.toml`, `ui/package.json`
+- **対象スクリプト / 設定**: `Cargo.toml`, `mise.toml`, `dprint.json`,
+  `tombi.toml`, `ui/package.json`
 
 ---
 
@@ -53,10 +54,19 @@
     リファレンス / シェル補完を生成して
     [`docs/05-cli-and-pwa-ui.md`](../05-cli-and-pwa-ui.md) §1
     のコマンドリファレンスと同期する
+- **フォーマッタは言語ごとに固定する (mise 管理)**:
+  - Rust = `rustfmt` (`cargo fmt`) / Markdown = `dprint`
+    (`dprint.json`。`textWrap: maintainAndWrap` で手動の折り返しを尊重し、
+    80桁超の行のみ折り返す。`wrapCodeSpans: false` で
+    インラインコードを行分割しない) / TOML = `tombi` (`tombi.toml`) /
+    UI (TS) = `oxfmt` (Phase 5)
+  - 編集後は `mise run fmt`、コミット前は `mise run fmt:check`
+    (CI の fmt ジョブでも検証)。TOML の lint (`mise run lint:toml`。
+    JSON Schema 検証) も `mise run check` に含まれる
 - **コミットは適切なタイミングで行う**:
   - 「フェーズ内のタスク項目が1つ完了した」「1トピックの変更が
     fmt/lint/テストを通った」 時点で、1トピック1コミットでコミットする
-  - コミット前に `cargo fmt` / `oxfmt` と該当チェック（`cargo clippy` /
+  - コミット前に `mise run fmt:check` と該当チェック（`cargo clippy` /
     `cargo test` / `svelte-check` / `oxlint` / `vitest`）を通す
   - 大きめのリファクタや複数ファイルにまたがる変更の着手前に、直前までの作業を
     コミットしておく（並行作業による巻き戻り対策）
@@ -134,6 +144,18 @@
     できないため、「派生カラムの既定値リセット +
     カーソル順の全量再生」で再構築する (イベント由来でない `git_bundle_path` /
     `synced_up_to_node_seq` は保持)
+- **2026-09-30 (フォーマッタ決定)**:
+  - Markdown = **dprint** (`dprint-plugin-markdown`。`textWrap:
+    maintainAndWrap` で手動折り返しを尊重、`wrapCodeSpans: false` で
+    インラインコードの行分割を防止)、TOML = **tombi** (formatter +
+    linter + JSON Schema 検証)、Rust = rustfmt (既存)、UI の TS = `oxfmt`
+    (Phase 5 の従来方針どおり)
+  - `mise.toml` に `dprint` / `tombi` を固定し、タスクを `fmt:rust` /
+    `fmt:md` / `fmt:toml` (集約 `fmt` / `fmt:check`) と `lint:rust` /
+    `lint:toml` へ再構成。VS Code は `.vscode/settings.json` /
+    `extensions.json` で dprint / tombi / rust-analyzer を推奨
+  - 選定理由: 既存の整形挙動 (dprint 既定) と一致し、Node 依存を増やさない
+    (TS は oxfmt 予定)。tombi は Cargo.toml 等のスキーマ検証も兼ねる
 
 ---
 

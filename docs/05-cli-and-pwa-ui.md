@@ -9,10 +9,14 @@ CLI は曖昧な暗黙サブコマンド（`fxg <agent>` 短縮形）を設け�
 
 CLI のパースには **`usage-rs`**（`usage = { package = "usage-rs", version = "6",
 features = ["completions"] }`）を使用し、`#[derive(Cli)]` / `#[derive(Args)]` /
-`#[derive(Subcommands)]` + `Run` / `RunWith` でコマンドを定義します（`clap` は使用しない）。
-`__usage_spec__` が出力する KDL spec を単一のソースとして、シェル補完（Bash / Zsh /
-Fish / PowerShell / Nushell）・manpage・Markdown リファレンスを `usage` CLI から生成し、
-本セクションのコマンドリファレンスと同期させます（`usage` CLI は `mise.toml` で固定）。
+`#[derive(Subcommands)]` + `Run` / `RunWith` でコマンドを定義します（`clap`
+は使用しない）。
+`__usage_spec__` が出力する KDL spec を単一のソースとして、シェル補完（Bash /
+Zsh /
+Fish / PowerShell / Nushell）・manpage・Markdown リファレンスを `usage` CLI
+から生成し、
+本セクションのコマンドリファレンスと同期させます（`usage` CLI は `mise.toml`
+で固定）。
 
 ### 1.1 コマンド一覧ツリー
 
@@ -538,7 +542,8 @@ export interface ITerminalAdapter {
       `fxg-node`, `fxg-server`, `fxg-cli`) および `mise.toml` タスク定義
       (Phase 1 完了: `mise run check` / `types` / `sqlx:prepare` 等)
 - [x] `node.db` / `server.db` のSQLiteマイグレーション実装
-      (Phase 1 完了: 単一スキーマ + FTS5 trigram + 投影エンジン。実装は `crates/fxg-db/`)
+      (Phase 1 完了: 単一スキーマ + FTS5 trigram + 投影エンジン。実装は
+      `crates/fxg-db/`)
 - [ ] Git Remote URL正規化による論理プロジェクト解決 (`fxg project info`)
 - [ ] Windows Named Pipe / Unix Domain Socket による `fxg` CLI ⇔ `fxg daemon`
       ローカルIPC疎通
