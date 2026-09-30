@@ -474,6 +474,9 @@ PCブラウザ、ローカルフォールバック (`localhost:7860`)、およ�
   1. **App Shell キャッシュ**: SvelteKit 標準の `$service-worker`
      モジュール（`build`, `files`,
      `version`）を用いてHTML/JS/CSSをキャッシュし、モバイル回線が不安定な場所や中央サーバー障害時でもUIが即座に立ち上がるようにします。
+     ナビゲーションはネットワーク優先 (オフライン時のみ `index.html`
+     へフォールバック) で、
+     `/api/**` は常にネットワークへ素通しします。
   2. **Web Push 受信 & アクションボタン**: 中央サーバーからVAPID Web
      Pushを受信した際、Android通知バナーに以下を表示します：
      - タイトル: `[flexagent] 承認リクエスト (Home-Win)`
@@ -485,6 +488,14 @@ PCブラウザ、ローカルフォールバック (`localhost:7860`)、およ�
        （`{ selected_option_id: "allow_once" | "reject", resolved_by: "android_push" }`）
        を叩き、アプリ画面を開くことすらなく承認が完了します。既に解決済み
        (`ALREADY_RESOLVED`) の場合は正常終了として扱います。
+
+     Push ペイロードは `PushNotificationPayload`
+     (`title` / `body` / `session_id` / `request_id` / `tag` /
+     `allow_option_id` / `reject_option_id`) で、VAPID 鍵は中央サーバーが
+     `~/.flexagent/vapid.json` に自動生成・永続化します (暗号化は RFC 8291
+     aes128gcm / 署名は RFC 8292)。購読は通知許可→`pushManager.subscribe`→
+     `POST /api/v1/push/subscribe` の順で確立し、失効した購読 (Push
+     サービスの `404` / `410`) は送信時に自動削除されます。
 
 ### 3.4 統合 Web ターミナルと抽象化設計 (`ITerminalAdapter`)
 
@@ -587,24 +598,26 @@ export interface ITerminalAdapter {
 
 ### Milestone 5: 共通 Web UI / Android PWA & Web Push (実装計画 Phase 5 対応)
 
-- [ ] `ui/` (SvelteKit / Svelte 5 SPA + TypeScript + Tailwind v4 +
+- [x] `ui/` (SvelteKit / Svelte 5 SPA + TypeScript + Tailwind v4 +
       `shadcn-svelte` + `pnpm` + `oxlint` / `oxfmt` / `svelte-check` / `Vitest`)
       の構築と `rust-embed` による `fxg` バイナリへの組み込み
-- [ ] セッション画面の実装:
-  - [ ] チャットタイムライン（思考折りたたみ・スラッシュコマンド補完・承認Inbox）
-  - [ ] 2階層 Diff ビューア（セッション編集差分 + Worktree リアルタイムGit差分:
+      (`fxg-ui-assets` クレート + 共通ルーターの SPA フォールバック)
+- [x] セッション画面の実装:
+  - [x] チャットタイムライン（思考折りたたみ・スラッシュコマンド補完・承認Inbox）
+  - [x] 2階層 Diff ビューア（セッション編集差分 + Worktree リアルタイムGit差分:
         `vs Base` / `vs HEAD`）
-  - [ ] 双方向 Web ターミナル（`ITerminalAdapter` 抽象化 + `ghostty-web` 実装 +
+  - [x] 双方向 Web ターミナル（`ITerminalAdapter` 抽象化 + `ghostty-web` 実装 +
         ConPTY/Unix PTY WebSocket 直結 + モバイル仮想キーバー）
-- [ ] プロジェクト & Worktree 管理画面（Worktree 一覧・新規作成・削除）
-- [ ] **UI セキュリティ機能**:
-  - [ ] 初回トークン入力・Cookie自動保持
-  - [ ] ヘッダーの緊急停止（キルスイッチ）ボタン
-  - [ ] 監査ログ一覧画面
-  - [ ] リモートPTY無効化時の案内バナー表示
-- [ ] Service Worker (`src/service-worker.ts`) と `web-push` クレートによる
+- [x] プロジェクト & Worktree 管理画面（Worktree 一覧・新規作成・削除）
+- [x] **UI セキュリティ機能**:
+  - [x] 初回トークン入力・Cookie自動保持 (`POST /api/v1/auth/login`)
+  - [x] ヘッダーの緊急停止（キルスイッチ）ボタン
+  - [x] 監査ログ一覧画面
+  - [x] リモートPTY無効化時の案内バナー表示
+- [x] Service Worker (`src/service-worker.ts`) と `web-push-native`
+      クレートによる
       VAPID Push通知（Androidバックグラウンド通知＆バナー承認）の実装
-- [ ] `fxg service install` による各OS自動起動設定の実装
+- [x] `fxg service install` による各OS自動起動設定の実装
 
 ### Milestone 6: 一時VM・サンドボックスノード (`fxg daemon --stdio` & Zero-Touch Provisioner) (実装計画 Phase 6 対応)
 

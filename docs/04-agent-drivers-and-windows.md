@@ -303,7 +303,16 @@ GUI (Web UI / スマホPWA)
 
 - **Windows**: タスクスケジューラ（ログオン時実行・コンソールウィンドウ非表示
   `CREATE_NO_WINDOW`）またはスタートアップ登録。
+  - 実装: `schtasks /Create /SC ONLOGON` を第一手段とする。管理者権限が無い
+    環境では `Access is denied` となるため、スタートアップフォルダ
+    (`%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\fxg-daemon.vbs`)
+    へ VBS ランチャー (`WScript.Shell.Run ..., 0, False` = ウィンドウ非表示)
+    を書き出すフォールバックを持つ。状態確認はタスク / VBS の存在と、
+    デーモンのローカルIPC接続プローブ (サーバーは TCP) で行う
 - **Linux / WSL**: `~/.config/systemd/user/fxg-daemon.service` を生成し
   `systemctl --user enable --now fxg-daemon`。
 - **macOS**: `~/Library/LaunchAgents/dev.flexagent.daemon.plist` を生成し
   `launchctl load`。
+
+`--server` を付けると `fxg daemon` ではなく `fxg server` (中央サーバー) を対象に
+同じ操作系で管理します。

@@ -83,7 +83,7 @@
 | **Phase 2** | プロセス/PTY制御・Windows対応・ローカルノード基盤            | `fxg-pty`, `fxg-node`, `fxg-cli`          | 完了 (2026-09-30) |
 | **Phase 3** | エージェントドライバ (ACP / OpenCode2)・CLI/TUI・Revert/Fork | `fxg-acp`, `fxg-node`, `fxg-cli`          | 完了 (2026-09-30) |
 | **Phase 4** | 中央サーバー・Outbox同期・Client API共通化・LANセキュリティ  | `fxg-server`, `fxg-node`, `fxg-cli`       | 完了 (2026-10-01) |
-| **Phase 5** | Web UI / Android PWA・Web Push・単一バイナリ統合             | `ui`, `fxg-server`, `fxg-node`, `fxg-cli` | 未着手            |
+| **Phase 5** | Web UI / Android PWA・Web Push・単一バイナリ統合             | `ui`, `fxg-server`, `fxg-node`, `fxg-cli` | 完了 (2026-10-01) |
 | **Phase 6** | 一時VM・サンドボックスノード (`--stdio` & Zero-Touch構築)    | `fxg-node`, `fxg-server`, `fxg-cli`, `ui` | 未着手            |
 
 ## 設計レビュー反映履歴
@@ -156,6 +156,32 @@
     `extensions.json` で dprint / tombi / rust-analyzer を推奨
   - 選定理由: 既存の整形挙動 (dprint 既定) と一致し、Node 依存を増やさない
     (TS は oxfmt 予定)。tombi は Cargo.toml 等のスキーマ検証も兼ねる
+- **2026-10-01 (Phase 5 実装時の設計判断)**:
+  - **認証フロー**: `POST /api/v1/auth/login` / `logout` を追加 (login 自体も
+    共通ミドルウェアの Bearer 認証を要求し、body のトークンを再検証して
+    `fxg_session` Cookie を発行)。Service Worker は Cookie 認証で Push
+    バナーからの承認 API を呼ぶ
+  - **接続先スイッチャーはオリジン単位のナビゲーション**:
+    クロスオリジン fetch は Host/Origin 検証と CORS の双方で拒否されるため、
+    登録済み URL へ `location.assign` で移動する方式とする (トークン/Cookie は
+    オリジンごとに独立、登録先は localStorage に保存)
+  - **UI の `$derived` はコンポーネント側で構成**: view
+    より長生きするストア内の派生値は `derived_inert`
+    で陳腐化するため、ストアは状態のみを保持し導出は消費側で行う
+    (`SessionTimeline` は state のみ)
+  - **Web Push は純 Rust 実装**: `web-push` 0.11 は `ece`
+    経由で OpenSSL を要求し Windows のシステム依存が増えるため採用せず、
+    `web-push-native` (p256 + aes-gcm + hkdf) + `reqwest`
+    で暗号化・署名・送信を行う。VAPID 鍵は `~/.flexagent/vapid.json`
+    に自動生成・永続化し、公開鍵を `GET /api/v1/system/info` で配布する
+  - **埋め込み UI は認証外のフォールバック配信**: `rust-embed`
+    (新クレート `fxg-ui-assets`) で `ui/build` を同梱し、共通ルーターの
+    fallback として配信する (UI アセット自体は非機密。API は 401
+    を返してトークンダイアログへ誘導)。`index.html` / `service-worker.js`
+    は `no-cache`、ハッシュ付きアセットは長期キャッシュ
+  - **Windows の `fxg service` フォールバック**: schtasks (ONLOGON)
+    が権限拒否された場合はスタートアップフォルダの VBS
+    ランチャー (ウィンドウ非表示) へフォールバックする (docs/04 §5.4 反映済み)
 - **2026-10-01 (Phase 5 認証フロー)**:
   `POST /api/v1/auth/login` / `POST /api/v1/auth/logout` を追加。login
   自体も共通ミドルウェアの認証 (`Authorization: Bearer`) を要求し、body の
@@ -713,49 +739,114 @@
   - バックグラウンド常駐化 (`fxg service`):
     [`docs/04-agent-drivers-and-windows.md` §5.4](../04-agent-drivers-and-windows.md)
 - **タスクリスト**:
-  - [ ] `ui/` 基盤構築: SvelteKit (`Svelte 5` Runes +
+  - [x] `ui/` 基盤構築: SvelteKit (`Svelte 5` Runes +
         `@sveltejs/adapter-static`) + TypeScript + Tailwind CSS v4 +
         `shadcn-svelte` (`bits-ui`, `vaul-svelte`) + `oxlint` / `oxfmt` /
-        `svelte-check` / `Vitest`
-  - [ ] 状態管理 & 認証UI: `ts-rs` 生成型のインポート、差分同期 WebSocket ストア
+        `svelte-check` / `Vitest` → 完了。SPA (`fallback: index.html`) +
+        shadcn-svelte (Vega preset) + `mise` タスク (`fmt:ui` / `lint:ui` /
+        `test:ui` / `build:ui` / `check:ui` / `ui:install`) と CI `ui` ジョブ
+  - [x] 状態管理 & 認証UI: `ts-rs` 生成型のインポート、差分同期 WebSocket ストア
         (`*.svelte.ts`。接続先ストアの `cursor` を保存し
         `Subscribe { since_cursor }` で差分再開、`event_id` で
         upsert・`LiveStreamDelta` を `message_id`
         でマージ)、初回トークン入力ダイアログ (`fxg_session`
         Cookie保持)、接続先スイッチャー（中央サーバー ⇔
         ローカルノード）、ヘッダー緊急停止（キルスイッチ）ボタン、同期状態バッジ（未同期件数
-        / 最終同期時刻）
-  - [ ] 主要画面実装:
-    - [ ] グローバル承認 Inbox 画面（コマンド/Diffプレビュー、Approve / Allow
-          Always / Reject ワンタップ応答）
-    - [ ] プロジェクト & Worktree
+        / 最終同期時刻） → 完了。`sync.svelte.ts` (指数バックオフ再接続 +
+        Pending Queue + `CommandResult` 相関) / `connection.svelte.ts` /
+        `reducer.ts` (純関数 + Vitest)
+  - [x] 主要画面実装:
+    - [x] グローバル承認 Inbox 画面（コマンド/Diffプレビュー、Approve / Allow
+          Always / Reject ワンタップ応答） → 完了 (`PermissionCard` は
+          Chat タイムラインと共用。`ALREADY_RESOLVED` は正常遷移)
+    - [x] プロジェクト & Worktree
           一覧画面（Worktree状態表示、新規Worktree作成、新規セッション起動、Context
-          Fork）
-    - [ ] セッション詳細画面（Chatペイン、思考折りたたみ、動的コントロールバー、スラッシュコマンド補完、`LiveStreamDelta`
-          → 完成イベントの確定置換）
-    - [ ] 2段階 Diff ペイン（セッション変更 ⇔ Worktree `vs Base` / `vs HEAD`
-          切替、PC: `monaco-editor` / モバイル: `shiki` Unified Diff）
-    - [ ] Terminal ペイン（`ITerminalAdapter` インターフェース +
+          Fork） → 完了 (`/projects` + `NewSessionDialog`。Context Fork は
+          Phase 6 のサーバー側実装待ちのため UI にも露出しない)
+    - [x] セッション詳細画面（Chatペイン、思考折りたたみ、動的コントロールバー、スラッシュコマンド補完、`LiveStreamDelta`
+          → 完成イベントの確定置換） → 完了 (`/sessions/[id]` +
+          Bootstrap Log カード + Composer (モード/設定/中断))
+    - [x] 2段階 Diff ペイン（セッション変更 ⇔ Worktree `vs Base` / `vs HEAD`
+          切替、PC: `monaco-editor` / モバイル: `shiki` Unified Diff） →
+          完了 (`DiffPane` + `DiffViewer`。モバイル判定は 768px)
+    - [x] Terminal ペイン（`ITerminalAdapter` インターフェース +
           `GhosttyWebAdapter` (`@coder/ghostty-web`) + `/api/v1/pty/ws` 直結 +
           モバイル仮想キーバー + `allow_remote_pty=false`
-          時のフォールバック表示）
-    - [ ] 監査ログ (Audit Log) 画面 & FTS5 全文検索UI
-  - [ ] Android PWA & VAPID Web Push:
+          時のフォールバック表示） → 完了。npm パッケージ名は
+          `@coder/ghostty-web`
+          ではなく `ghostty-web` (0.4.0) である点に注意
+    - [x] 監査ログ (Audit Log) 画面 & FTS5 全文検索UI → 完了 (`/audit` /
+          `/search`。FTS5 snippet の `[match]` マーカーを `<mark>` 化)
+  - [x] Android PWA & VAPID Web Push:
         `manifest.webmanifest`、`src/service-worker.ts`（`$service-worker` App
         Shellキャッシュ + Push通知バナーの `[Approve]` / `[Reject]`
         バックグラウンドAPI呼び出し →
         `POST /api/v1/sessions/:id/permissions/:req_id/respond`）、`fxg-server`
-        側の VAPID Push 送信実装
-  - [ ] 単一バイナリ統合 & OSサービス化: `rust-embed` による `ui/build` の `fxg`
+        側の VAPID Push 送信実装 → 完了。鍵は `~/.flexagent/vapid.json`
+        に自動生成·永続化し、`GET /api/v1/system/info` で公開鍵を配布。送信は
+        `web-push-native` (純 Rust) + `reqwest` (`web-push` クレートは
+        `ece` 経由で OpenSSL 必須のため不採用)
+  - [x] 単一バイナリ統合 & OSサービス化: `rust-embed` による `ui/build` の `fxg`
         バイナリ組み込み、`fxg web` コマンド（`--server`
         時の初回トークン入力フロー含む）、`fxg service install/uninstall/start/stop/restart/status`（Windows
-        タスクスケジューラ / systemd / launchd）
+        タスクスケジューラ / systemd / launchd） → 完了。`fxg-ui-assets`
+        クレート + 共通ルーターの SPA フォールバック (認証ミドルウェア外)。
+        Windows は schtasks が拒否された場合にスタートアップフォルダ
+        (VBS ランチャー / ウィンドウ非表示) へフォールバック
 - **完了条件 / 検証**:
   - `oxlint`, `oxfmt`, `svelte-check`, `vitest` がすべて通り、単一バイナリ `fxg`
     から配信されるWeb UIでチャット・Diff・Web PTY・Web
-    Push承認が一貫して動作すること。
+    Push承認が一貫して動作すること。 → **検証済み** (2026-10-01)。
+    実プロセス (`fxg daemon` + Vite dev / 埋め込みUI)
+    でのブラウザスモークテスト:
+    トークン入力→Cookie/WS 接続→プロジェクト/Worktree 表示→`opencode2`
+    セッション起動→プロンプト送信 (ユーザーメッセージ + エラーノーティス表示)→
+    監査ログ→Worktree vs HEAD Diff (shiki ハイライト)→ Web PTY spawn →
+    `echo` 往復 (ghostty-web Canvas 描画)→ `?token=` 自動ログイン→
+    埋め込み SPA 配信 (index.html / asset キャッシュヘッダ / 404 / 401) を確認。
+    Windows での `fxg service` ライフサイクル (install → start → status →
+    stop → uninstall) も確認
 - **実装ログ / 進捗メモ**:
-  - （実装時に追記）
+  - 2026-10-01: Phase 5 完了。主な実装単位 (コミット順):
+    1. `feat(fxg-protocol,fxg-server,fxg-node)`: 認証 login/logout API
+       (`fxg_session` Cookie 発行)
+    2. `feat(ui)`: SvelteKit SPA + Tailwind v4 + shadcn-svelte + Oxc
+       ツールチェイン
+       (mise / CI 統合)
+    3. `feat(ui)`: API クライアント + WS 差分同期ストア + タイムライン
+       reducer (Vitest 付き)
+    4. `feat(ui)`: アプリシェル (トークンダイアログ / 接続先切替 / キルスイッチ
+       / 同期バッジ)
+    5. `fix(ui)`: TokenDialog のマウント漏れと `derived_inert`
+       (ストア内 `$derived` → コンポーネント側導出) の修正
+    6. `feat(ui)`: 承認 Inbox + セッション詳細 (Chat / コントロールバー)
+    7. `feat(ui)`: 2段階 Diff (Monaco / shiki)
+    8. `feat(ui)`: プロジェクト & Worktree + 新規セッション
+    9. `feat(ui)`: 監査ログ + 全文検索 + dev プロキシ
+    10. `feat(ui)`: Web Terminal (ghostty-web + 仮想キーバー)
+    11. `feat(fxg-db,fxg-server)`: VAPID Web Push (純 Rust)
+    12. `feat(ui)`: PWA manifest / Service Worker / Push 購読
+    13. `feat(fxg-cli,fxg-server)`: `rust-embed` 単一バイナリ + `fxg web` /
+        `fxg service`
+  - 設計判断 (Phase 5):
+    - `POST /api/v1/auth/login` / `logout` を追加 (login 自体も Bearer
+      認証必須、body のトークンを再検証)
+    - 接続先スイッチャーは**オリジン単位のナビゲーション** (`location.assign`)。
+      クロスオリジン fetch は Host/Origin 検証と CORS の双方で拒否されるため、
+      同一オリジン厳格のまま運用する (トークン/Cookie もオリジンごとに独立)
+    - UI の `$derived` はコンポーネント側で構成する。ストア (view
+      より長生き) の `$derived` は `derived_inert` で陳腐化するため保持しない
+    - Web Push は `web-push-native` (p256 + aes-gcm + hkdf) + `reqwest` で実装。
+      `web-push` 0.11 は `ece` の OpenSSL バックエンドに依存し、Windows で
+      システム OpenSSL を要求するため採用しない
+    - 埋め込み UI は認証ミドルウェアの**外側**のフォールバックで配信する
+      (UI 自体は非機密。API は 401 を返しトークンダイアログを誘導)
+    - Windows の `fxg service` は schtasks (ONLOGON) を第一手段とし、
+      権限拒否時はスタートアップフォルダの VBS ランチャーへフォールバック
+  - 先送り (Phase 6 以降): Push 購読の明示削除 API
+    (失効時は 404/410 で自動清除)、Context Fork の UI、一時VM
+    プロビジョナー選択 UI、`fxg web --server` 時のトークン同梱
+    (中央サーバー用トークンはローカルに無いため初回入力ダイアログに委ねる)
 
 ---
 

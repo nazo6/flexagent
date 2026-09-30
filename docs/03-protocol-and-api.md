@@ -592,7 +592,9 @@ pub enum ServerToNodeMsg {
   側は正常遷移として扱う。
 - `POST /api/v1/search?q=...`: SQLite FTS5 を用いた全セッション横断の全文検索。
 - `POST /api/v1/push/subscribe`: Android / Desktop PWA の Web Push
-  サブスクリプション登録。
+  サブスクリプション登録 (中央サーバーのみ)。VAPID 鍵は初回起動時に
+  `~/.flexagent/vapid.json` へ自動生成され、公開鍵は `GET /api/v1/system/info`
+  の `vapid_public_key` (base64url) で配布される。
 - `POST /api/v1/system/kill-switch`: **緊急停止 (Panic
   Button)**。全ノードの稼働中セッション、実行中プロセスツリー、PTYを一括強制終了。
 - `GET /api/v1/audit/logs?limit=50`:
