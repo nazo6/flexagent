@@ -7,6 +7,8 @@
 //! - **非同期ストリーミング**: Master 側の `Read` を専用スレッドで読み取り、
 //!   [`PtyEvent`] として `tokio::sync::broadcast` で購読者 (WebSocket / IPC) へ
 //!   配信する。入力は専用ライタースレッドが Master の `Write` へ即時フラッシュする。
+//!   終了検知は `wait()` 専用スレッドが担う (Windows の ConPTY は子プロセス終了
+//!   だけでは EOF にならないため、リーダーの EOF を終了の起点にはできない)。
 //! - **動的リサイズ**: [`PtySessionManager::resize`] で ConPTY / Unix PTY の
 //!   ウィンドウサイズを即時変更する。
 //! - **プロセスツリー確実終了**: 子プロセスは [`ProcessTreeGuard`]
@@ -16,6 +18,7 @@ use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use portable_pty::{ChildKiller, CommandBuilder, MasterPty, PtySize, native_pty_system};
 use tokio::sync::{broadcast, mpsc};
@@ -221,12 +224,16 @@ impl PtySessionManager {
             // writer の Drop で EOF が送られる
         });
 
-        // 出力リーダースレッド (終了検知とセッション破棄も担う)
+        // 出力リーダースレッド: master 側を読み続けて Output を配信する。
+        //
+        // EOF は「子プロセスの終了」ではなく「セッション破棄 (master の Drop)」
+        // で発生する点に注意する。Windows の ConPTY は子プロセスが終了しても
+        // 出力パイプが閉じず、ConPTY 自体を閉じて初めて EOF になる。
         let pty_id = request.pty_id.clone();
         let inner = Arc::clone(&self.inner);
+        let (reader_done_tx, reader_done_rx) = std::sync::mpsc::channel::<()>();
         std::thread::spawn(move || {
             let mut reader = reader;
-            let mut child = child;
             let mut buffer = vec![0u8; 8192];
             loop {
                 match reader.read(&mut buffer) {
@@ -239,16 +246,36 @@ impl PtySessionManager {
                     }
                 }
             }
+            let _ = reader_done_tx.send(());
+        });
+
+        // 終了検知スレッド: 子プロセスの終了を `wait()` で検知し、セッションを
+        // 破棄して Exit を配信する。破棄で master が Drop され、ConPTY / PTY が
+        // クローズされてリーダーにも EOF が届く (Windows で `Exit` が永遠に
+        // 発火しないバグを回避する。CI: windows-latest で検出)。
+        // リーダーの EOF を待ってから Exit を送ることで、購読者が最終出力を
+        // 取りこぼさないことを保証する。
+        let exit_pty_id = request.pty_id.clone();
+        let exit_inner = Arc::clone(&self.inner);
+        std::thread::spawn(move || {
+            let mut child = child;
             let exit_code = child
                 .wait()
                 .ok()
                 .map(|status| i32::try_from(status.exit_code()).unwrap_or(i32::MAX));
-            inner
+            exit_inner
                 .sessions
                 .lock()
                 .expect("pty sessions mutex poisoned")
-                .remove(&pty_id);
-            let _ = inner.events.send(PtyEvent::Exit { pty_id, exit_code });
+                .remove(&exit_pty_id);
+            // リーダーの EOF を待つ。万一 EOF が得られない場合
+            // (孫プロセスが slave 側を保持し続ける等) でも Exit を保証するため
+            // フェイルセーフのタイムアウトを設ける。
+            let _ = reader_done_rx.recv_timeout(Duration::from_secs(5));
+            let _ = exit_inner.events.send(PtyEvent::Exit {
+                pty_id: exit_pty_id,
+                exit_code,
+            });
         });
 
         self.lock_sessions().insert(
