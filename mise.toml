@@ -1,0 +1,78 @@
+# FlexAgent 開発タスクランナー / ツールチェイン固定
+#
+# - ツールは mise で固定する (rust は rustup の stable を使用。MSRV は Cargo.toml の
+#   rust-version を正とする)
+# - タスクは `mise run <name>` で実行する
+# - sqlx-cli は .sqlx (オフラインクエリデータ) 生成用 (sqlite + rustls のみ)
+# - sqlx の型安全マクロは DATABASE_URL 未設定時に `.sqlx/` へ自動フォールバックする
+#   (開発時に live 検証したい場合は `mise run sqlx:prepare` が DATABASE_URL を設定する)
+
+[tools]
+rust = "stable"
+node = "24.21.0"
+pnpm = "12.8.1"
+"cargo:sqlx-cli" = { version = "0.9.0", default-features = "false", features = "sqlite,rustls" }
+
+# ---------------------------------------------------------------------------
+# フォーマット / Lint / テスト
+# ---------------------------------------------------------------------------
+
+[tasks.fmt]
+description = "全 Rust コードをフォーマットする (oxfmt は UI 実装後)"
+run = "cargo fmt --all"
+
+[tasks."fmt:check"]
+description = "フォーマット差分がないか検証する"
+run = "cargo fmt --all --check"
+
+[tasks.lint]
+description = "clippy を警告エラー扱いで実行する"
+run = "cargo clippy --workspace --all-targets -- -D warnings"
+
+[tasks.test]
+description = "ワークスペース全体のテストを実行する (ts-rs 型出力含む)"
+run = "cargo test --workspace"
+
+[tasks.check]
+description = "fmt:check + lint + test を一括実行する (コミット前チェック)"
+depends = ["fmt:check", "lint", "test"]
+
+# ---------------------------------------------------------------------------
+# 型生成 (ts-rs) / sqlx オフラインデータ
+# ---------------------------------------------------------------------------
+
+[tasks.types]
+description = "fxg-protocol から TypeScript 型を生成する (ui/src/lib/generated)"
+run = "cargo test -p fxg-protocol export_bindings"
+
+[tasks."sqlx:prepare"]
+description = "開発用DBを作成・マイグレーションし .sqlx を再生成する (要コミット)"
+run = """
+#!/usr/bin/env bash
+set -euo pipefail
+export DATABASE_URL="sqlite://$PWD/target/fxg-dev.db"
+mkdir -p target
+sqlx database create 2>/dev/null || true
+sqlx migrate run --source crates/fxg-db/migrations
+cargo sqlx prepare --workspace
+"""
+
+[tasks."sqlx:check"]
+description = ".sqlx がスキーマ・クエリと一致しているか検証する"
+run = """
+#!/usr/bin/env bash
+set -euo pipefail
+export DATABASE_URL="sqlite://$PWD/target/fxg-dev.db"
+mkdir -p target
+sqlx database create 2>/dev/null || true
+sqlx migrate run --source crates/fxg-db/migrations
+cargo sqlx prepare --workspace --check
+"""
+
+# ---------------------------------------------------------------------------
+# ビルド
+# ---------------------------------------------------------------------------
+
+[tasks.build]
+description = "`fxg` バイナリをリリースビルドする"
+run = "cargo build --release -p fxg-cli"
