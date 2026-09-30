@@ -123,5 +123,7 @@
 </ul>
 
 {#if items.length === 0}
-  <p class="text-muted-foreground text-sm">まだイベントがありません。</p>
+  <p class="text-muted-foreground text-sm">
+    まだ表示できるイベントがありません。プロンプトを送信するとここに表示されます。
+  </p>
 {/if}

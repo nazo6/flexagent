@@ -9,11 +9,24 @@
   import { formatRelativeTime } from '$lib/format';
   import { shortId } from '$lib/session-status';
   import { sync } from '$lib/stores/app.svelte';
-  import { bootstrapLogLines } from '$lib/sync/reducer';
+  import { bootstrapLogLines, buildTimelineItems, capabilitiesFromEvents } from '$lib/sync/reducer';
 
   const sessionId = $derived(page.params.id ?? '');
   const session = $derived(sync.sessions.find((entry) => entry.session_id === sessionId) ?? null);
   const timeline = $derived(sync.timelineFor(sessionId));
+  // 派生値はコンポーネント側で構成する (ストア内の $derived は derived_inert
+  // の原因になるため)
+  const items = $derived(
+    buildTimelineItems({
+      events: timeline.events,
+      messageDeltas: timeline.messageDeltas,
+      thoughtDeltas: timeline.thoughtDeltas,
+      toolProgress: timeline.toolProgress,
+      terminalDeltas: timeline.terminalDeltas,
+      pendingPrompts: sync.pendingPrompts
+    })
+  );
+  const capabilities = $derived(capabilitiesFromEvents(timeline.events));
   const bootstrapLines = $derived(bootstrapLogLines(timeline.events));
   const nodeName = $derived(
     session === null
@@ -23,7 +36,8 @@
   );
 
   let chatContainer = $state<HTMLDivElement | null>(null);
-  let loadedFor: string | null = null;
+  /** 履歴 REST ロードを実行したセッションID (1回だけ実行する)。 */
+  let loadedFor = $state<string | null>(null);
 
   // セッションを WS の優先配信対象にし、履歴未取得なら REST でフォールバック読込する
   $effect(() => {
@@ -44,8 +58,8 @@
 
   // 新規アイテム追加時に末尾へスクロール
   $effect(() => {
-    const items = timeline.items;
-    if (chatContainer !== null && items.length > 0) {
+    const currentItems = items;
+    if (chatContainer !== null && currentItems.length > 0) {
       chatContainer.scrollTop = chatContainer.scrollHeight;
     }
   });
@@ -101,13 +115,13 @@
         bind:this={chatContainer}
         class="bg-background/60 max-h-[62svh] overflow-y-auto rounded-lg border p-3"
       >
-        <ChatTimeline sessionId={sessionId} items={timeline.items} />
+        <ChatTimeline sessionId={sessionId} {items} />
       </div>
-      <Composer sessionId={sessionId} capabilities={timeline.capabilities} />
+      <Composer sessionId={sessionId} {capabilities} />
     </TabsContent>
 
     <TabsContent value="diff">
-      <DiffPane sessionId={sessionId} items={timeline.items} />
+      <DiffPane sessionId={sessionId} {items} />
     </TabsContent>
 
     <TabsContent value="terminal">

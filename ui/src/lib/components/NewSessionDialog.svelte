@@ -35,6 +35,11 @@
   const nodes = $derived(sync.nodes);
   const selectedNode = $derived(nodes.find((node) => node.node_id === nodeId) ?? null);
 
+  /** git 側は `/`、binding 側は OS 依存の区切り文字になるため正規化して比較する。 */
+  function normalizePath(path: string): string {
+    return path.replace(/\\/g, '/').toLowerCase();
+  }
+
   const nodePaths = $derived.by(() => {
     const options: { path: string; label: string }[] = [];
     for (const worktree of worktrees) {
@@ -47,7 +52,9 @@
     }
     for (const binding of project.bindings) {
       if (binding.node_id !== nodeId) continue;
-      if (options.some((option) => option.path === binding.local_path)) continue;
+      if (options.some((option) => normalizePath(option.path) === normalizePath(binding.local_path))) {
+        continue;
+      }
       options.push({
         path: binding.local_path,
         label: `${binding.git_branch ?? '(unknown)'} — ${binding.local_path}`

@@ -27,6 +27,11 @@ const apiProxy: ProxyOptions = {
 
 export default defineConfig({
   plugins: [tailwindcss(), sveltekit()],
+  optimizeDeps: {
+    // lucide はアイコンごとの deep import が非常に多く、遅延発見のたびに
+    // dep 再最適化 (強制リロード) が走るため、事前バンドル対象から除外する
+    exclude: ["@lucide/svelte"],
+  },
   server: {
     port: 5173,
     strictPort: true,

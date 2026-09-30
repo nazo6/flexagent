@@ -230,7 +230,6 @@ export class SyncStore {
     let timeline = this.#timelines.get(sessionId);
     if (!timeline) {
       timeline = new SessionTimeline(sessionId);
-      timeline.pendingPrompts = () => this.pendingPrompts;
       this.#timelines.set(sessionId, timeline);
     }
     return timeline;

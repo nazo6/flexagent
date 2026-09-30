@@ -1,19 +1,11 @@
 import type { SessionEventEnvelope } from "$lib/generated/SessionEventEnvelope";
 import type { StreamDeltaPayload } from "$lib/generated/StreamDeltaPayload";
 import {
-  buildTimelineItems,
-  capabilitiesFromEvents,
   clearStreamBuffers,
   insertEventSorted,
   applyStreamDelta,
-  latestPlanFromEvents,
-  latestStatusFromEvents,
-  type PendingPrompt,
-  type TimelineItem,
   type ToolProgress,
 } from "./reducer";
-
-const EMPTY_PENDING: ReadonlyMap<string, PendingPrompt> = new Map();
 
 /**
  * 1セッション分のイベントタイムライン (Svelte 5 Runes による差分同期状態)。
@@ -22,6 +14,9 @@ const EMPTY_PENDING: ReadonlyMap<string, PendingPrompt> = new Map();
  *   `node_seq` の再送) は無害にスキップする。
  * - `LiveStreamDelta` はバッファにマージし、確定イベント到着時に破棄して
  *   置き換える (docs/03 §3.2)。
+ * - `$derived` はここに置かず、消費側 (コンポーネント) で構成する。
+ *   view の寿命より長生きするストア内の派生値は `derived_inert` の原因に
+ *   なるため、状態のみを保持する。
  */
 export class SessionTimeline {
   readonly sessionId: string;
@@ -31,26 +26,9 @@ export class SessionTimeline {
   toolProgress = $state(new Map<string, ToolProgress>());
   terminalDeltas = $state(new Map<string, string>());
 
-  /**
-   * Pending Queue (送信済み・未確定プロンプト) のソース。
-   * `SyncStore` が生成直後に接続する。
-   */
-  pendingPrompts: () => ReadonlyMap<string, PendingPrompt> = () => EMPTY_PENDING;
-
   constructor(sessionId: string) {
     this.sessionId = sessionId;
   }
-
-  /** チャットタイムライン項目 (イベント + ストリーミングの導出値)。 */
-  items: TimelineItem[] = $derived(
-    buildTimelineItems({ ...this, pendingPrompts: this.pendingPrompts() }),
-  );
-
-  /** エージェントからの最新ステータス (イベント由来)。 */
-  status = $derived(latestStatusFromEvents(this.events)?.status ?? null);
-
-  capabilities = $derived(capabilitiesFromEvents(this.events));
-  plan = $derived(latestPlanFromEvents(this.events));
 
   /** 永続イベントを適用する (重複なら `false`)。 */
   applyEvent(event: SessionEventEnvelope): boolean {

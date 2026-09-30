@@ -22,6 +22,7 @@
 </script>
 
 <Toaster richColors position="top-center" />
+<TokenDialog />
 
 {#if !connection.ready}
   <div
