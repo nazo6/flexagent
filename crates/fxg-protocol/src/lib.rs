@@ -15,5 +15,11 @@
 //! クライアント (UI / CLI) が直接扱う型には `#[derive(ts_rs::TS)]` +
 //! `#[ts(export)]` を付与し、`ui/src/lib/generated/` へ TypeScript 型定義を
 //! 自動出力する (設定ファイルスキーマ等の内部型は export 対象外)。
-//!
-//! **Phase 1 で実装予定** (現時点ではプレースホルダ)。
+
+pub mod client_api;
+pub mod common;
+pub mod config;
+pub mod events;
+pub mod ipc;
+pub mod node_server;
+pub mod util;
