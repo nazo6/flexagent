@@ -8,6 +8,8 @@ const config = {
     // SPA モード: 全ページをクライアントレンダリングし、index.html へフォールバックする
     // (`rust-embed` で `ui/build` を `fxg` バイナリへ同梱して配信する)
     adapter: adapter({ fallback: "index.html" }),
+    // PWA: `src/service-worker.ts` を登録する (App Shell キャッシュ + Web Push)
+    serviceWorker: { register: true },
   },
 };
 

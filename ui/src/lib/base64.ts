@@ -6,7 +6,7 @@
  */
 
 /** Base64 文字列をバイト列へデコードする。 */
-export function decodeBase64ToBytes(dataB64: string): Uint8Array {
+export function decodeBase64ToBytes(dataB64: string): Uint8Array<ArrayBuffer> {
   const binary = atob(dataB64);
   const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i += 1) {

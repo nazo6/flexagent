@@ -1,11 +1,20 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
   import * as Dialog from '$lib/components/ui/dialog';
   import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
   import { Button } from '$lib/components/ui/button';
   import { Input } from '$lib/components/ui/input';
   import { Label } from '$lib/components/ui/label';
   import { connection, logoutAndStop } from '$lib/stores/app.svelte';
+  import {
+    disablePushNotifications,
+    enablePushNotifications,
+    pushCapability,
+    type PushCapability
+  } from '$lib/push';
   import { toast } from 'svelte-sonner';
+  import BellIcon from '@lucide/svelte/icons/bell';
+  import BellOffIcon from '@lucide/svelte/icons/bell-off';
   import CableIcon from '@lucide/svelte/icons/cable';
   import LogOutIcon from '@lucide/svelte/icons/log-out';
   import PlusIcon from '@lucide/svelte/icons/plus';
@@ -14,11 +23,45 @@
   let addOpen = $state(false);
   let newLabel = $state('');
   let newUrl = $state('');
+  let push = $state<PushCapability | null>(null);
+  let pushBusy = $state(false);
 
   const roleLabel = $derived(
     connection.systemInfo?.role === 'central_server' ? '中央サーバー' : 'ローカルノード'
   );
   const originLabel = $derived(connection.origin || '(同一オリジン)');
+
+  // Push 対応状況は接続先バックエンドに依存するため初回マウント時に確認する
+  onMount(() => {
+    void refreshPush();
+  });
+
+  async function refreshPush() {
+    try {
+      push = await pushCapability();
+    } catch {
+      push = null;
+    }
+  }
+
+  async function togglePush() {
+    if (push === null || pushBusy) return;
+    pushBusy = true;
+    try {
+      if (push.subscribed) {
+        await disablePushNotifications();
+        toast('Push 通知を解除しました');
+      } else {
+        await enablePushNotifications();
+        toast.success('Push 通知を有効化しました');
+      }
+      await refreshPush();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      pushBusy = false;
+    }
+  }
 
   function addTarget(event: SubmitEvent) {
     event.preventDefault();
@@ -80,6 +123,18 @@
       <PlusIcon />
       切替先を追加… (例: http://localhost:7860)
     </DropdownMenu.Item>
+    {#if push !== null && push.supported && push.serverEnabled}
+      <DropdownMenu.Separator />
+      <DropdownMenu.Item disabled={pushBusy} onSelect={() => void togglePush()}>
+        {#if push.subscribed}
+          <BellOffIcon />
+          Push 通知を解除
+        {:else}
+          <BellIcon />
+          Push 通知を有効化 (承認バナー)
+        {/if}
+      </DropdownMenu.Item>
+    {/if}
     <DropdownMenu.Item onSelect={logout}>
       <LogOutIcon />
       ログアウト
