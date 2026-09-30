@@ -81,7 +81,7 @@
 | :---------- | :----------------------------------------------------------- | :---------------------------------------- | :---------------- |
 | **Phase 1** | ワークスペース・共通プロトコル・設定スキーマ・DB基盤         | `fxg-protocol`, `fxg-db`                  | 完了 (2026-09-30) |
 | **Phase 2** | プロセス/PTY制御・Windows対応・ローカルノード基盤            | `fxg-pty`, `fxg-node`, `fxg-cli`          | 完了 (2026-09-30) |
-| **Phase 3** | エージェントドライバ (ACP / OpenCode2)・CLI/TUI・Revert/Fork | `fxg-acp`, `fxg-node`, `fxg-cli`          | 未着手            |
+| **Phase 3** | エージェントドライバ (ACP / OpenCode2)・CLI/TUI・Revert/Fork | `fxg-acp`, `fxg-node`, `fxg-cli`          | 完了 (2026-09-30) |
 | **Phase 4** | 中央サーバー・Outbox同期・Client API共通化・LANセキュリティ  | `fxg-server`, `fxg-node`, `fxg-cli`       | 未着手            |
 | **Phase 5** | Web UI / Android PWA・Web Push・単一バイナリ統合             | `ui`, `fxg-server`, `fxg-node`, `fxg-cli` | 未着手            |
 | **Phase 6** | 一時VM・サンドボックスノード (`--stdio` & Zero-Touch構築)    | `fxg-node`, `fxg-server`, `fxg-cli`, `ui` | 未着手            |
@@ -452,12 +452,12 @@
   - [x] `fxg-acp`: `AgentDriver` / `ActiveSessionHandle` トレイト定義
   - [x] `fxg-acp`: ACP Registry (`registry.json` / `[agents.custom.*]`)
         の取得・キャッシュと `binary` / `npx` / `uvx` 配布形態ごとの起動解決
-        (`fxg agents list/install/update/remove` CLI は残)
+        (`fxg agents list/install/update/remove` CLI も実装済み)
   - [x] `fxg-acp`: `agent-client-protocol` を用いた `AcpDriver` (`FxgAcpClient`)
         実装（`session_update`, `request_permission` 待機チャネル,
         `read_text_file`/`write_text_file` + Unified Diff 計算, `terminal_*` ⇔
         `fxg-pty` 連携）
-  - [ ] `fxg-acp`: `OpenCode2Driver` 実装（`opencode2 serve`
+  - [x] `fxg-acp`: `OpenCode2Driver` 実装（`opencode2 serve`
         起動・ランダムパスワード注入・SSE `/event`
         購読・OpenAPI操作・`opencode2 run --attach` 連携および `opencode2 acp`
         モード）
@@ -465,21 +465,30 @@
         を用いた Revert（`fxg session revert`）と Session
         Fork（`fxg session fork`、ネイティブAPIまたは履歴Replay注入）の実装。`snapshot_tree_hash`
         はターン開始前の `UserMessage` イベント payload に含めて保存する
-        （OpenCode2 ブリッジの統合は `OpenCode2Driver` 実装後に接続）
+        （OpenCode2 ブリッジも `default_driver_factory` から接続済み）
   - [x] `fxg-node`: コマンド冪等性 (`command_id` 重複排除 → `COMMAND_DUPLICATE`)
         と busy 時 `SendPrompt` の Pending Queue 実装
-  - [ ] `fxg-cli`: `ratatui` による内蔵TUI (`AcpTui`
-        モード)、`NativeOpenCodeAttach`
-        モード、`fxg run <agent>`、`fxg attach [session-id]`、`fxg session show/prompt/stop/kill/revert/fork`、`fxg inbox list/approve/reject`
-        の実装（`usage-rs` の `RunWith` による async
+  - [x] `fxg-cli`: `ratatui` による内蔵TUI (`AcpTui`
+        モード。トランスクリプト描画・承認ダイアログ・スクロール・Ctrl+C
+        デタッチ)、`NativeOpenCodeAttach`
+        モード、`fxg run <agent>`、`fxg attach [session-id]`、`fxg session show/prompt/stop/kill/revert/fork`、`fxg inbox list/approve/reject`、`fxg agents list/install/update/remove`
+        の実装（`usage-rs` の `RunAsync` による async
         コマンドディスパッチを使用）
 - **完了条件 / 検証**:
   - ターミナルから `fxg run <acp-agent>` および `fxg run opencode`
     を起動して対話・ツール承認・ファイル変更Diff記録・Revert/Fork
     が動作し、すべて `node.db` に記録されること。
+  - **検証状況**: `cli_e2e.rs` で IPC 往復（`EnsureSession` → セッション記録 →
+    `ps` / `session show` / `inbox` / エラーコード）を自動検証済み
+    (`mise run check` = fmt:check + clippy + test がすべて通過)。
+    実エージェント (`opencode2` / ACP Registry エージェント) との対話は
+    ネットワーク・外部CLI に依存するため CI では未検証で、手動確認
+    (`fxg run opencode` / `fxg run antigravity`) を残す。
 - **実装ログ / 進捗メモ (Phase 3)**:
-  - **コミット**: `feat(fxg-acp)` (トレイト + Registry) →
-    `feat(fxg-acp)` (AcpDriver)。以降も 1 トピック 1 コミットで進める。
+  - **コミット**: `feat(fxg-acp)` (トレイト + Registry) → `feat(fxg-acp)`
+    (AcpDriver) → `feat(fxg-node)` (SessionManager 統合 / Revert・Fork /
+    冪等性) → `feat(fxg-acp)` (OpenCode2Driver) → `feat(fxg-cli)` (CLI / TUI)。
+    以降も 1 トピック 1 コミットで進める。
   - **ACP SDK の採用 API**: `agent-client-protocol` 2.2.0 は旧 0.x 系の
     「Client トレイト実装」ではなく、`Client.builder()` +
     `on_receive_request/notification` + `ActiveSession` (build_session_from →
@@ -512,9 +521,25 @@
     インスタンスが消えると `ERROR_PIPE_BUSY` (231)
     が返るため、サーバー側は次インスタンスを
     先に作成してから接続を待ち、クライアント側は短いリトライで吸収する。
-  - **未着手 (次回以降)**: `OpenCode2Driver` / CLI
-    (`run`/`attach`/`session`/`inbox`
-    - TUI) / `fxg agents` CLI。
+  - **OpenCode2Driver (完了)**: `opencode2 serve`
+    ブリッジ（ランダムパスワード注入 + Basic 認証、SSE `/api/event`
+    購読、`permission.*` ⇔ `RespondPermission`、ネイティブ Revert API）と
+    純正TUI Attach (`opencode2 run --server <url> --session <id>`)。`--acp`
+    指定時は `opencode2 acp` を標準ACPエージェントとして起動する。
+  - **CLI / TUI (完了)**: `fxg run` / `fxg attach`（ID
+    省略時はカレントディレクトリの直近アクティブセッションへ自動接続）/
+    `fxg session show|prompt|stop|kill|revert|fork`（`prompt --wait`
+    はターン完了までイベントを出力）/ `fxg inbox list|approve|reject` /
+    `fxg agents list|install|update|remove` を実装。内蔵TUI は `ratatui` +
+    `crossterm` でイベントストリームを描画し、プロンプト送信・承認応答 (y/a/n)
+    を同一 IPC 接続から行う。Fork は `-w/--worktree` で新規 Worktree
+    へ分岐できる。
+  - **IPC / プロトコル拡張**: `EnsureSession` に `initial_mode` (`--mode`) と
+    `acp` (`--acp`)、`SessionFork` に `cwd` (Worktree 分岐) を追加し、
+    `SessionShow` / `InboxList` / 件数付き `SessionReverted` を追加した。
+  - **テスト**: `cli_e2e.rs` に Phase 3 コマンドの IPC 往復テスト
+    (未知セッションのエラーコード・承認 Inbox・起動失敗時のセッション記録 +
+    `session show` 表示) を追加。並列実行時の Named Pipe 名衝突も修正した。
 
 ---
 
