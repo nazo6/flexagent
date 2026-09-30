@@ -449,11 +449,11 @@
     [`docs/04-agent-drivers-and-windows.md` §4](../04-agent-drivers-and-windows.md)
   - CLI コマンド仕様: [`docs/05-cli-and-pwa-ui.md` §1](../05-cli-and-pwa-ui.md)
 - **タスクリスト**:
-  - [ ] `fxg-acp`: `AgentDriver` / `ActiveSessionHandle` トレイト定義
-  - [ ] `fxg-acp`: ACP Registry (`registry.json` / `[agents.custom.*]`)
+  - [x] `fxg-acp`: `AgentDriver` / `ActiveSessionHandle` トレイト定義
+  - [x] `fxg-acp`: ACP Registry (`registry.json` / `[agents.custom.*]`)
         の取得・キャッシュと `binary` / `npx` / `uvx` 配布形態ごとの起動解決
-        (`fxg agents list/install/update/remove`)
-  - [ ] `fxg-acp`: `agent-client-protocol` を用いた `AcpDriver` (`FxgAcpClient`)
+        (`fxg agents list/install/update/remove` CLI は残)
+  - [x] `fxg-acp`: `agent-client-protocol` を用いた `AcpDriver` (`FxgAcpClient`)
         実装（`session_update`, `request_permission` 待機チャネル,
         `read_text_file`/`write_text_file` + Unified Diff 計算, `terminal_*` ⇔
         `fxg-pty` 連携）
@@ -461,11 +461,12 @@
         起動・ランダムパスワード注入・SSE `/event`
         購読・OpenAPI操作・`opencode2 run --attach` 連携および `opencode2 acp`
         モード）
-  - [ ] `fxg-node`: `SessionManager` への両ドライバ統合、Shadow Git Tree
+  - [x] `fxg-node`: `SessionManager` へのドライバ統合 (ACP)、Shadow Git Tree
         を用いた Revert（`fxg session revert`）と Session
         Fork（`fxg session fork`、ネイティブAPIまたは履歴Replay注入）の実装。`snapshot_tree_hash`
         はターン開始前の `UserMessage` イベント payload に含めて保存する
-  - [ ] `fxg-node`: コマンド冪等性 (`command_id` 重複排除 → `COMMAND_DUPLICATE`)
+        （OpenCode2 ブリッジの統合は `OpenCode2Driver` 実装後に接続）
+  - [x] `fxg-node`: コマンド冪等性 (`command_id` 重複排除 → `COMMAND_DUPLICATE`)
         と busy 時 `SendPrompt` の Pending Queue 実装
   - [ ] `fxg-cli`: `ratatui` による内蔵TUI (`AcpTui`
         モード)、`NativeOpenCodeAttach`
@@ -493,9 +494,27 @@
     `shutdown()` はコマンドチャネル経由で closure を抜ける。
   - **承認のキャンセル**: ACP 仕様の MUST に従い、`session/cancel` 発行時に
     未解決の `request_permission` はすべて `cancelled` で応答する。
-  - **未着手 (次回以降)**: `OpenCode2Driver` / SessionManager 統合 (IPC
-    ディスパッチ + コマンド冪等性 + Pending Queue) / Revert・Fork /
-    CLI (`run`/`attach`/`session`/`inbox` + TUI) / `fxg agents` CLI。
+  - **SessionManager 統合 (完了)**: `default_driver_factory` による ACP ドライバ
+    起動、`DriverEvent` → `SessionEventBus` のイベントポンプ、busy 管理を行い、
+    IPC (`daemon/ipc.rs`) から `SessionEnsure` / `SessionControl` /
+    `SessionPrompt` / `PermissionRespond` / `SessionRevert` / `SessionFork`
+    をディスパッチする。
+  - **Revert / Fork (完了)**: Revert は `UserMessage.snapshot_tree_hash`
+    へファイルを復元し `SessionReverted`
+    を追記（復元直前は `backup_tree_hash` へ退避、busy 中は `Busy`
+    エラーで拒否）。Fork は履歴 Replay を 1
+    プロンプトとして新セッションへ注入する
+    (`parent_session_id` / `fork_from_node_seq` 記録、上限 16k 文字)。
+  - **コマンド冪等性 / Pending Queue (完了)**: 直近 256 件の `command_id`
+    を保持し重複を `CommandDuplicate` で拒否。busy 中の `SendPrompt`
+    はキューに積み、ターン終了 (`idle`) 時に自動送信する。
+  - **Windows Named Pipe の安定化**: 接続と接続の合間に listening
+    インスタンスが消えると `ERROR_PIPE_BUSY` (231)
+    が返るため、サーバー側は次インスタンスを
+    先に作成してから接続を待ち、クライアント側は短いリトライで吸収する。
+  - **未着手 (次回以降)**: `OpenCode2Driver` / CLI
+    (`run`/`attach`/`session`/`inbox`
+    - TUI) / `fxg agents` CLI。
 
 ---
 
