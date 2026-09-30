@@ -7,6 +7,13 @@
 CLI は曖昧な暗黙サブコマンド（`fxg <agent>` 短縮形）を設けず、すべて
 **`fxg run <agent>` 等の明示的なサブコマンド体系**に統一します。
 
+CLI のパースには **`usage-rs`**（`usage = { package = "usage-rs", version = "6",
+features = ["completions"] }`）を使用し、`#[derive(Cli)]` / `#[derive(Args)]` /
+`#[derive(Subcommands)]` + `Run` / `RunWith` でコマンドを定義します（`clap` は使用しない）。
+`__usage_spec__` が出力する KDL spec を単一のソースとして、シェル補完（Bash / Zsh /
+Fish / PowerShell / Nushell）・manpage・Markdown リファレンスを `usage` CLI から生成し、
+本セクションのコマンドリファレンスと同期させます（`usage` CLI は `mise.toml` で固定）。
+
 ### 1.1 コマンド一覧ツリー
 
 | コマンド                             | 説明                                                                                                                     | 主なオプション / 引数                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
@@ -363,9 +370,10 @@ PCブラウザ、ローカルフォールバック (`localhost:7860`)、およ�
     (モバイルの片手操作・ボトムシートUIと、デスクトップのマルチペインUIをレスポンシブ切替)
 - **状態管理 & 同期**: Svelte 5 Runes (`$state`, `$derived` を用いた
   `*.svelte.ts` クラスベースのカスタム WebSocket 差分同期ストア /
-  `last_global_seq`（中央サーバー接続時）・`last_local_seq`（ローカルノード接続時）の使い分け管理。
-  イベントは `event_id` / `(session_id, node_seq)` で upsert
-  し、`LiveStreamDelta` と 永続イベントを `message_id` でマージする)
+  **接続先ストア**（中央サーバー / ローカルノード）の `cursor` を保存し、
+  再接続時に `Subscribe { since_cursor }` で差分再開する。 イベントは `event_id`
+  / `(session_id, node_seq)` で upsert し、`LiveStreamDelta` と 永続イベントを
+  `message_id` でマージする)
 - **コード・Diff・双方向ターミナル**:
   - **Diff / コード表示**:
     - PC: `monaco-editor` (Monaco Diff Editor: Side-by-side / Inline

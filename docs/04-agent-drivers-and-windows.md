@@ -157,9 +157,11 @@ OpenCode / OpenCode2
      を指定した状態で：
      1. `git add -A`（未追跡ファイルも含めてシャドウIndexにステージング）
      2. `git write-tree` を実行し、返ってきた **40文字の Tree Hash
-        (`snapshot_tree_hash`)** をその `UserMessage`
-        イベントに紐付けてDB（`node.db` / `server.db` の
-        `session_events.snapshot_tree_hash` カラム）へ保存します。
+        (`snapshot_tree_hash`)** をその `UserMessage` イベントの
+        payload（`UnifiedEventPayload::UserMessage.snapshot_tree_hash`）に含めて
+        イベントログ（`node.db` / `server.db` の
+        `session_events.payload_json`）へ保存します。 イベント payload
+        が唯一の正であり、専用カラムへの複製は行いません。
    - **シャドウIndexはセッション単位で分離**します（`<session-id>.index`）。同一リポジトリの複数セッション（並行
      Worktree 作業）が同時にスナップショットを取得しても Index
      ファイルを奪い合わないためです。同一セッション内のターンは直列処理されるため競合しません。

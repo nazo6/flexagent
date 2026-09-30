@@ -50,7 +50,7 @@
 | ドキュメント                                                             | 内容                                                                                                                  |
 | :----------------------------------------------------------------------- | :-------------------------------------------------------------------------------------------------------------------- |
 | **[01-architecture-and-sync.md](./01-architecture-and-sync.md)**         | 全体トポロジー、ローカルファースト同期、一時VMノード (`--stdio` & 自動ツール構築)、論理プロジェクト解決、セキュリティ |
-| **[02-database-schema.md](./02-database-schema.md)**                     | 中央サーバー (`server.db`) とノードデーモン (`node.db`) のSQLiteスキーマ定義・一時ノード管理・FTS5検索・監査ログ      |
+| **[02-database-schema.md](./02-database-schema.md)**                     | `node.db` / `server.db` 共通の単一SQLiteスキーマ（ロール差分・イベント投影）・FTS5検索・監査ログ                      |
 | **[03-protocol-and-api.md](./03-protocol-and-api.md)**                   | 共通型 (`fxg-protocol`)、Node⇔Server間通信 (WS & Stdio)、Git認証プロキシ/Bundle退避、Client API、ローカルIPC          |
 | **[04-agent-drivers-and-windows.md](./04-agent-drivers-and-windows.md)** | `AgentDriver` トレイト、ACP Registry自動解決、`opencode2` ハイブリッド統合、Windows固有実装                           |
 | **[05-cli-and-pwa-ui.md](./05-cli-and-pwa-ui.md)**                       | `fxg` CLIコマンド完全リファレンス、設定ファイルスキーマ (`config.toml` / `.fxg.toml`)、PWA + Web Push 設計            |

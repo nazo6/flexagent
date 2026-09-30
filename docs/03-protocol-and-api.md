@@ -22,24 +22,56 @@ use ts_rs::TS;
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct SessionEventEnvelope {
-    pub event_id: String,       // UUID v7
+    pub event_id: String,       // UUID v7 (冪等適用・重複排除)
     pub session_id: String,     // UUID v7
-    pub node_seq: u64,          // セッション内連番
-    pub global_seq: Option<u64>,// 中央サーバー採番 (ローカル直結時は None)
+    pub node_seq: u64,          // セッション内連番 (実行ノードのみが採番。順序の正)
     pub created_at: i64,        // Unix epoch ms
     pub payload: UnifiedEventPayload,
+}
+
+/// カーソルを伴うイベントバッチ (Client WS 配信 / 履歴 API の共通型)
+/// cursor は「配信元ストア (node.db / server.db) への取り込み順」。
+/// クライアントは最後に受信したバッチの cursor を保存し、再接続時に
+/// Subscribe { since_cursor } へ渡す (接続先ストア以外の cursor は意味を持たない)
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct SessionEventBatch {
+    pub events: Vec<SessionEventEnvelope>,
+    pub cursor: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(tag = "type", content = "data", rename_all = "snake_case")]
 #[ts(export)]
 pub enum UnifiedEventPayload {
+    /// セッション生成直後の最初のイベント (node_seq = 1)。
+    /// ハブ側 sessions 投影の生成源 (別系統のメタデータ同期は行わない)
+    SessionCreated {
+        project_id: String,
+        project_name: String,
+        local_path: String,
+        git_branch: Option<String>,      // 起動時点のスナップショット
+        is_worktree: bool,
+        agent_id: String,
+        parent_session_id: Option<String>,
+        fork_from_node_seq: Option<u64>,
+        title: String,
+    },
+    /// セッションタイトル変更 (UI/CLI からのリネーム。コマンドとして実行ノードに到達してから発行される)
+    SessionTitleChanged {
+        title: String,
+    },
+    /// ACP セッション確立などによる agent_session_id の確定
+    SessionAgentBound {
+        agent_session_id: String,
+    },
     /// ユーザーが送信したプロンプト（スラッシュコマンド含む）
     UserMessage {
         text: String,
         attachments: Vec<AttachmentMeta>,
         client_source: String,        // "cli" | "web" | "android"
-        /// ターン開始直前の Shadow Git Tree Hash (Revert用。snapshot_enabled=false 時は None)
+        /// ターン開始直前の Shadow Git Tree Hash (Revert用。snapshot_enabled=false 時は None。
+        /// この payload が唯一の正であり、専用DBカラムへの複製は行わない)
         snapshot_tree_hash: Option<String>,
     },
     /// エージェントの返答メッセージ（ターン完了時に is_complete=true の完成イベントのみ永続化）
@@ -99,6 +131,7 @@ pub enum UnifiedEventPayload {
         data_b64: String,      // ユーザー入力キーストローク (Base64)
     },
     /// モード・スラッシュコマンド・設定の更新通知 (永続化対象: セッション復元時に使用)
+    /// ハブ側 sessions.current_mode / available_commands_json / config_options_json 投影の更新源
     CapabilitiesUpdated {
         current_mode: Option<String>,
         available_modes: Vec<ModeInfo>,
@@ -110,6 +143,7 @@ pub enum UnifiedEventPayload {
         line: String,
     },
     /// セッション状態の変化 ('provisioning' | 'bootstrapping' | 'idle' | 'running' | ...)
+    /// ハブ側 sessions.status 投影の更新源
     StatusChanged {
         status: SessionStatus,
         error_message: Option<String>,
@@ -124,6 +158,8 @@ pub enum UnifiedEventPayload {
 `#[ts(export)]` を付与します。
 
 ```rust
+/// API レスポンス用のセッション集約型（sessions 行から構成。
+/// ハブ側ではイベント適用による投影から生成される）
 pub struct SessionSummary {
     pub session_id: String,
     pub project_id: String,
@@ -266,11 +302,24 @@ pub enum ErrorCode {
     イベントとしてUIへストリーム配信されます。
 
 ```rust
+/// ノードが保持するセッションの同期状態（NodeHello で報告）
+/// ハブは自 DB の last_node_seq と比較し、欠落・遅延があれば ResyncRequest を返す
+pub struct SessionSyncState {
+    pub session_id: String,
+    pub last_node_seq: u64,
+}
+
+/// ハブ側で欠落・遅延しているセッションの再送指定（ResyncRequest）
+pub struct ResyncTarget {
+    pub session_id: String,
+    pub from_node_seq: u64, // この値以降 (>=) のイベントを水位に関係なく再送する
+}
+
 /// Node -> Server への送信メッセージ
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case")]
 pub enum NodeToServerMsg {
-    /// 接続直後のハンドシェイク（ノード情報・プロジェクト紐付け・アクティブセッション一覧を通知）
+    /// 接続直後のハンドシェイク（ノード情報・プロジェクト紐付け・セッション同期状態一覧を通知）
     NodeHello {
         node_id: String,
         name: String,
@@ -280,12 +329,11 @@ pub enum NodeToServerMsg {
         is_ephemeral: bool,
         installed_agents: Vec<String>,
         projects: Vec<NodeProjectReport>,
-    },
-    /// セッションメタデータの作成・更新通知
-    SessionUpsert {
-        session: SessionSummary,
+        sessions: Vec<SessionSyncState>,
     },
     /// 永続化イベントのバッチ送信 (Store-and-Forward Outbox)
+    /// ※セッションのメタデータ (SessionCreated 等) も session_events 上のイベントとして送信される。
+    ///   通常は synced_up_to_node_seq より後のイベントを node_seq 昇順で送る
     EventBatchPush {
         events: Vec<SessionEventEnvelope>,
     },
@@ -344,9 +392,16 @@ pub enum NodeToServerMsg {
 pub enum ServerToNodeMsg {
     /// EventBatchPush に対する永続化完了ACK
     /// ※バッチはセッション単位に分割して送信し、ACK もセッション単位で返却する
+    ///   ノードは受信後 sessions.synced_up_to_node_seq を水位として更新する
     EventBatchAck {
         session_id: String,
         acked_up_to_node_seq: u64,
+    },
+    /// NodeHello への応答: ハブ側で欠落・遅延しているセッションの再送要求
+    /// ノードは指定 from_node_seq 以降のイベントを水位に関係なく再送する
+    /// (from_node_seq = 1 は SessionCreated を含む全量再送を意味する)
+    ResyncRequest {
+        sessions: Vec<ResyncTarget>,
     },
     /// クライアント(Web/Android)からのセッション新規起動要求
     StartSession {
@@ -495,8 +550,8 @@ pub enum ServerToNodeMsg {
   指定のほか、`provisioner`
   指定による一時VMのオンデマンド起動＆自動セットアップ、Worktreeパス指定、別ノードや退避済みGitバンドルからのContext
   Forkに対応）。
-- `GET /api/v1/sessions/:id/events?after_seq=0`:
-  指定シーケンス以降のイベント履歴取得。
+- `GET /api/v1/sessions/:id/events?after_cursor=0`:
+  指定カーソル以降のイベント履歴取得（`SessionEventBatch` を返却）。
 - `GET /api/v1/sessions/:id/diff?scope=uncommitted&base=main`:
   ノードのリアルタイムGit差分を取得。
   - `scope=uncommitted` (デフォルト): 現在の作業ツリー未コミット差分
@@ -519,15 +574,18 @@ pub enum ServerToNodeMsg {
 ### 3.2 Client WebSocket (`/api/v1/client/ws`)
 
 1. 接続時にクライアントが
-   `Subscribe { last_global_seq: Option<u64>, last_local_seq: Option<u64>, focused_session_id: Option<String> }`
+   `Subscribe { since_cursor: Option<u64>, focused_session_id: Option<String> }`
    を送信する。
-   - 中央サーバー接続時は `last_global_seq`、ローカルノード接続時は
-     `last_local_seq` を使用する（もう一方は `None`）。
-2. サーバー /
-   ノードは該当カーソル以降の未取得イベントを即座に流し、以降はリアルタイムイベント
-   （`SessionEventEnvelope` および `LiveStreamDelta`）をプッシュします。
-   - ローカルノード接続時は各イベントに `local_seq`（`node.db` の
-     `id`）を付帯して返却する。ローカル接続では `global_seq` は常に `None`。
+   - `since_cursor` は**接続先ストア**（中央サーバーなら
+     `server.db`、ローカルノードなら `node.db`）の `session_events.cursor`
+     を指定する。接続先を切り替えた場合は
+     もう一方のカーソルは使えないため、`None`（初回全量）から開始する。
+2. サーバー / ノードは該当カーソル以降の未取得イベントを
+   `SessionEventBatch { events, cursor }`
+   として即座に流し、以降はリアルタイムイベント（同バッチ形式および
+   `LiveStreamDelta`）をプッシュします。
+   - クライアントは最後に受信したバッチの `cursor` を保存し、再接続時に
+     `since_cursor` へ渡す。
 3. クライアントからの操作（`SendPrompt`, `RespondPermission`,
    `ControlSession`）もこのWebSocket上（またはREST POST）で送信でき、結果は
    `command_id` 付きの `CommandResult` として要求元クライアントへ応答されます。
@@ -538,8 +596,8 @@ pub enum ServerToNodeMsg {
    - ターン途中の `LiveStreamDelta` は `message_id` / `thought_id`
      でマージ表示し、永続イベント
      （`is_complete = true`）到着時に確定表示へ置き換える。
-   - セッション内の表示順は `node_seq` を正とし、`global_seq` / `local_seq`
-     は差分再開カーソルとしてのみ使用する。
+   - セッション内の表示順は `node_seq` を正とし、`cursor`
+     は再開位置の記録にのみ使用する。
 
 ### 3.3 Client 双方向 Web PTY WebSocket (`/api/v1/pty/ws`)
 

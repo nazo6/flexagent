@@ -18,8 +18,8 @@
   - [`docs/01-architecture-and-sync.md`](../01-architecture-and-sync.md):
     全体トポロジー、Outbox同期、論理プロジェクト・Worktree解決、一時VM
     (`--stdio`)、セキュリティ
-  - [`docs/02-database-schema.md`](../02-database-schema.md): `server.db` /
-    `node.db` の SQLite スキーマ定義
+  - [`docs/02-database-schema.md`](../02-database-schema.md): `node.db` /
+    `server.db` 共通の単一 SQLite スキーマ定義・投影ルール・FTS5
   - [`docs/03-protocol-and-api.md`](../03-protocol-and-api.md): `fxg-protocol`
     型定義、WS/Stdio/IPC メッセージ、REST API エンドポイント
   - [`docs/04-agent-drivers-and-windows.md`](../04-agent-drivers-and-windows.md):
@@ -28,6 +28,35 @@
   - [`docs/05-cli-and-pwa-ui.md`](../05-cli-and-pwa-ui.md): CLI
     コマンド完全リファレンス、設定ファイルスキーマ (`config.toml` /
     `.fxg.toml`)、PWA / Web Push 設計、ターミナル抽象化 (`ITerminalAdapter`)
+- **依存関係は自分の記憶に頼らず、常に最新のクレート/ライブラリを確認して導入する**:
+  - Rust: `cargo add <crate>` で crates.io の最新版を解決して追加し、必要に応じて
+    `cargo outdated` で更新確認。使用前に docs.rs の該当バージョンの API を確認する
+  - UI: `pnpm add <pkg>` / `pnpm outdated` を使用し、`package.json` のバージョンを手打ちしない
+  - `Cargo.lock` / `pnpm-lock.yaml` は常にコミットする
+- **`fxg-db` の SQL は sqlx の型安全クエリマクロを必須とする**:
+  - `sqlx::query!` / `sqlx::query_as!` / `sqlx::query_scalar!`（コンパイル時検証）を使用し、
+    ランタイム文字列の `sqlx::query()` / `query_as()` は原則禁止
+  - 開発時は `DATABASE_URL` を設定し、CI / オフラインビルド用に `cargo sqlx prepare`
+    で生成した `.sqlx/` をコミットする（`SQLX_OFFLINE=true`）
+  - 動的 IN 句や FTS5 `MATCH` 等でマクロが使えない例外的ケースのみ、
+    理由コメントと単体テストを必須とする
+- **CLI パースには `usage-rs` を使用する**（`clap` は使用しない）:
+  - `usage = { package = "usage-rs", version = "6", features = ["completions"] }`
+    （dev-dependencies に `features = ["test"]`）
+  - `#[derive(Cli)]` / `#[derive(Args)]` / `#[derive(Subcommands)]` +
+    `Run` / `RunWith`（async コマンド）で定義
+  - `__usage_spec__` から KDL spec を出力し、`usage` CLI で manpage / Markdown
+    リファレンス / シェル補完を生成して
+    [`docs/05-cli-and-pwa-ui.md`](../05-cli-and-pwa-ui.md) §1 のコマンドリファレンスと同期する
+- **コミットは適切なタイミングで行う**:
+  - 「フェーズ内のタスク項目が1つ完了した」「1トピックの変更が fmt/lint/テストを通った」
+    時点で、1トピック1コミットでコミットする
+  - コミット前に `cargo fmt` / `oxfmt` と該当チェック（`cargo clippy` /
+    `cargo test` / `svelte-check` / `oxlint` / `vitest`）を通す
+  - 大きめのリファクタや複数ファイルにまたがる変更の着手前に、直前までの作業を
+    コミットしておく（並行作業による巻き戻り対策）
+  - メッセージは Conventional Commits（例: `feat(fxg-db): ...`,
+    `fix(fxg-node): ...`, `docs(plan): ...`）
 
 ---
 
@@ -49,6 +78,7 @@
   - イベント永続化はターン完了時のみ（ストリーミング途中はメモリ配信のみ。切断時の中間ロスは許容）
   - `node.db` の API/スキーマ完全対称化（FTS5 / `permission_requests` /
     `audit_logs` / `snapshot_tree_hash` / Fork系カラム）と `local_seq` 導入
+    （※同日の「DB/同期モデル簡素化レビュー」で単一スキーマへ改訂済み）
   - ノード個別 `node_token`（`nodes.token_hash`、発行/失効 CLI）
   - 承認 API の統一 (`POST .../permissions/:req_id/respond`)、二重承認の冪等化
     (`ALREADY_RESOLVED`)、共通エラーコード `ErrorCode`
@@ -59,6 +89,33 @@
     経由・サーバー必須）、Bootstrap 短命トークン認証、ベストエフォート Drain
   - 監査ログの server.db / node.db 双方記録、`fxg server` の `0.0.0.0`
     バインドは LAN/VPN 限定運用の注記整理
+- **2026-09-30 (DB/同期モデル簡素化レビュー)**:
+  ローカルファースト要件（中央サーバー停止時もローカルで継続）を維持したまま、
+  「スキーマ1本・ログ1本・権威1つ」の3原則で設計の重複を排除:
+  - **スキーマ1本化**: `node.db` / `server.db`
+    を同一DDL・同一テーブル名・単一マイグレーションセットへ統一（`local_sessions`
+    / `local_session_events` を廃止）。役割差は行スコープと実行ロールのみ
+  - **同期のイベントログ一本化**: セッションメタデータを `SessionCreated` /
+    `SessionTitleChanged` / `SessionAgentBound` イベント化し、`SessionUpsert` /
+    `metadata_synced` を廃止。ハブ側 `sessions` / `permission_requests`
+    はイベント適用の投影（同一トランザクション更新・全量再構築可能）
+  - **水位ACK**: 行単位 `synced` フラグ + partial index
+    を廃止し、`sessions.synced_up_to_node_seq` による水位管理へ
+  - **カーソル統一**: `global_seq` / `local_seq` を各DBの
+    `session_events.cursor` に統一し、`Subscribe { since_cursor }` +
+    `SessionEventBatch { events, cursor }`
+    へ変更（`SessionEventEnvelope.global_seq` 削除）
+  - **書き込み権威の一元化**:
+    セッション状態の書き込み権限は実行ノードのみ（中央サーバーはコマンド転送 +
+    イベント適用のみ）
+  - **ハンドシェイク再同期**: `NodeHello` の `SessionSyncState` 一覧と
+    `ResyncRequest` によるハブDB再構築時の自動復元
+  - **`snapshot_tree_hash` 専用カラム廃止**: `UserMessage` payload を正とする
+- **2026-09-30 (実装規約の追加)**:
+  - 依存関係は自分の記憶に頼らず、常に最新のクレート/ライブラリを確認して導入する（`cargo add` / `pnpm outdated`）
+  - `fxg-db` の SQL は `sqlx` 型安全クエリマクロ (`query!` / `query_as!` / `query_scalar!`) を必須化し、`.sqlx/` (`cargo sqlx prepare`) をコミット
+  - CLI パースに `usage-rs` を採用（`clap` 不使用。`__usage_spec__` から補完・manpage・Markdown を生成）
+  - タスク完了単位のコミット（fmt / lint / テスト通過後、Conventional Commits）を運用ルールに追加
 
 ---
 
@@ -68,18 +125,20 @@
   全クレートとUIが参照する「型」「設定スキーマ」「SQLiteスキーマ」を最初に確定させ、後続フェーズでの型変換の書き直しや仮構造体の作成を排除する。
 - **参照ドキュメント**:
   - クレート構成: [`docs/README.md` §リポジトリ・クレート構成](../README.md)
-  - イベントID・採番設計 (`node_seq` / `global_seq` /
-    `local_seq`)・永続化ライフサイクル:
-    [`docs/01-architecture-and-sync.md` §2.1〜§2.3](../01-architecture-and-sync.md)
-  - SQLite スキーマ (`server.db` / `node.db`)・FTS5:
-    [`docs/02-database-schema.md` §1, §2](../02-database-schema.md)
+  - イベントID・順序・カーソル設計 (`node_seq` / `cursor` / 水位ACK)・
+    イベントソーシング投影・永続化ライフサイクル:
+    [`docs/01-architecture-and-sync.md` §2.1〜§2.4](../01-architecture-and-sync.md)
+  - 単一SQLiteスキーマ (`node.db` / `server.db` 共通)・投影ルール・FTS5:
+    [`docs/02-database-schema.md` §0〜§2](../02-database-schema.md)
   - プロトコル・通信メッセージ・IPC型 (`ts-rs`):
     [`docs/03-protocol-and-api.md` §1〜§4](../03-protocol-and-api.md)
   - 設定ファイルスキーマ (`config.toml` / `.fxg.toml`) & `~/.flexagent/` 構成:
     [`docs/05-cli-and-pwa-ui.md` §2.1〜§2.3](../05-cli-and-pwa-ui.md)
 - **タスクリスト**:
   - [ ] Cargo Workspace (`Cargo.toml` 全7クレート構成) と
-        `mise.toml`（ビルド・`ts-rs` 型出力・lint・format タスク）の初期構築
+        `mise.toml`（ビルド・`ts-rs` 型出力・lint・format タスク）の初期構築。
+        依存クレートは `cargo add` で最新版を解決して追加する（`sqlx`, `tokio`,
+        `axum`, `usage-rs` 等。バージョンを記憶で手書きしない）
   - [ ] `fxg-protocol`: `SessionEventEnvelope` および `UnifiedEventPayload`
         の定義 (`ts-rs` derive 付与。イベント永続化ライフサイクル:
         ストリーミング途中は非永続、ターン完了時に完成イベントのみ永続化)
@@ -97,28 +156,32 @@
         環境変数オーバーライド) およびプロジェクト設定 (`.fxg.toml`)
         のデシリアライズ構造体定義（クライアントに公開する型のみ
         `#[ts(export)]`、設定等の内部型は export 対象外）
-  - [ ] `fxg-db`: `node.db` (`local_sessions`, `local_session_events` + Outbox
-        `synced = 0` インデックス + `local_seq` (AUTOINCREMENT id) /
-        `snapshot_tree_hash` / `permission_requests` / `audit_logs` / FTS5)
-        のマイグレーションとクエリ実装
-  - [ ] `fxg-db`: `server.db` (`nodes` (個別 `token_hash`), `projects`,
-        `project_node_bindings`, `sessions`, `session_events`,
-        `session_events_fts` (`tokenize='trigram'`), `permission_requests`,
-        `push_subscriptions`, `audit_logs`) のマイグレーションとクエリ実装
+  - [ ] `fxg-db`: **単一マイグレーションセット** (`migrations/`)
+        による共通スキーマ (`nodes` (個別 `token_hash`) / `projects` /
+        `project_node_bindings` / `sessions` / `session_events` (`cursor`
+        AUTOINCREMENT) / `session_events_fts` (`tokenize='trigram'`) /
+        `permission_requests` / `push_subscriptions` / `audit_logs`)
+        の実装。`node.db` / `server.db` は 同一DDLから生成し、ロール（Node /
+        Hub）による行スコープ・使用カラムの差のみ扱う
+  - [ ] `fxg-db`: イベント適用エンジン（`INSERT OR IGNORE` による冪等追記 +
+        `sessions` / `permission_requests` 投影の同一トランザクション更新）と
+        投影再構築関数（イベントログからの全量再生）の実装
+  - [ ] `fxg-db`: 水位ベース Outbox 抽出
+        (`node_seq > sessions.synced_up_to_node_seq`) と ACK 水位更新の実装
+  - [ ] `fxg-db`: クエリ実装は型安全マクロ (`sqlx::query!` / `query_as!` /
+        `query_scalar!`) に統一し、オフラインビルド用 `.sqlx/`
+        (`cargo sqlx prepare`) を整備する
   - [ ] `fxg-db`: FTS5 外部コンテンツ同期トリガー (INSERT/DELETE/UPDATE) と
         `searchable_text` 生成ロジック（`TerminalOutput`
         等のバイナリ系除外）の実装
-  - [ ] `fxg-db`: node.db / server.db
-        のカラム対称性チェック（`snapshot_tree_hash` / `parent_session_id` /
-        `fork_from_node_seq` / `git_bundle_path` / `permission_requests` /
-        `audit_logs` / FTS5 の両DB存在確認）
   - [ ] `fxg-db`: Local Node (`node.db`) と Central Server (`server.db`)
         で同一のクライアント向けレスポンス型を返す共通クエリ層の実装
 - **完了条件 / 検証**:
-  - `cargo test`
-    で設定ファイルパース・マイグレーション・Outbox未送信抽出・冪等挿入
-    (`INSERT OR IGNORE`)・FTS5 全文検索（トリガー経由含む）・node.db/server.db
-    スキーマ対称性・`ts-rs` 型生成がすべて通ること。
+  - `cargo test` で設定ファイルパース・マイグレーション・イベント適用の冪等性・
+    投影再構築とイベント適用結果の一致・水位ベース Outbox 抽出・FTS5
+    全文検索（トリガー経由含む）・`ts-rs` 型生成がすべて通ること。
+  - `SQLX_OFFLINE=true` での `cargo build`（`.sqlx/` 使用）と
+    `cargo sqlx prepare --check` が通ること。
 - **実装ログ / 進捗メモ**:
   - （実装時に追記）
 
@@ -172,7 +235,9 @@
         ヘッダ検証、WS `Origin` ヘッダ検証)
   - [ ] `fxg-cli`: 基本サブコマンド (`fxg daemon`,
         `fxg project info/list/link/scan`, `fxg worktree list/add/remove/prune`,
-        `fxg ps`, `fxg auth token/rotate-token`, ローカル `fxg kill-all`) の実装
+        `fxg ps`, `fxg auth token/rotate-token`, ローカル `fxg kill-all`) の実装。
+        コマンド定義は `usage-rs` の `#[derive(Cli)]` / `Args` / `Subcommands`
+        で行い、補完・help・`usage` spec 出力を標準装備する
   - [ ] CI: Windows (`windows-latest`) での自動テスト整備（Job Object
         による孫プロセス巻き込み Kill / Named Pipe IPC / ConPTY 読み書き）
 - **完了条件 / 検証**:
@@ -217,14 +282,13 @@
   - [ ] `fxg-node`: `SessionManager` への両ドライバ統合、Shadow Git Tree
         を用いた Revert（`fxg session revert`）と Session
         Fork（`fxg session fork`、ネイティブAPIまたは履歴Replay注入）の実装。`snapshot_tree_hash`
-        はターン開始前の `UserMessage` イベント（`node.db` / `server.db`
-        カラム）に保存する
+        はターン開始前の `UserMessage` イベント payload に含めて保存する
   - [ ] `fxg-node`: コマンド冪等性 (`command_id` 重複排除 → `COMMAND_DUPLICATE`)
         と busy 時 `SendPrompt` の Pending Queue 実装
   - [ ] `fxg-cli`: `ratatui` による内蔵TUI (`AcpTui`
         モード)、`NativeOpenCodeAttach`
         モード、`fxg run <agent>`、`fxg attach [session-id]`、`fxg session show/prompt/stop/kill/revert/fork`、`fxg inbox list/approve/reject`
-        の実装
+        の実装（`usage-rs` の `RunWith` による async コマンドディスパッチを使用）
 - **完了条件 / 検証**:
   - ターミナルから `fxg run <acp-agent>` および `fxg run opencode`
     を起動して対話・ツール承認・ファイル変更Diff記録・Revert/Fork
@@ -242,7 +306,7 @@
 - **参照ドキュメント**:
   - Outbox 同期フロー & リモート操作ルーティング & 承認競合防止 &
     同期鮮度/競合解決:
-    [`docs/01-architecture-and-sync.md` §2.2, §3, §3.1](../01-architecture-and-sync.md)
+    [`docs/01-architecture-and-sync.md` §2.2, §2.4, §3, §3.1](../01-architecture-and-sync.md)
   - LANセキュリティ・Web PTY制限・キルスイッチ・監査ログ:
     [`docs/01-architecture-and-sync.md` §7.3〜§7.5](../01-architecture-and-sync.md)
   - Node ⇔ Server プロトコル & Client REST/WS/PTY API
@@ -257,12 +321,13 @@
   - [ ] `fxg-server`: Node Hub (`/api/v1/node/ws`)、ノード個別 `node_token`
         認証（`token_hash` 照合 + `NodeHello.node_id`
         一致検証）、`fxg auth node-token issue/revoke/list`、`NodeHello` /
-        `SessionUpsert` 処理、`EventBatchPush` の冪等保存 (`global_seq` 採番) と
-        `EventBatchAck`（セッション単位）返却
+        `ResyncRequest`（欠落・遅延セッションの再送要求）処理、 `EventBatchPush`
+        の冪等保存 (`cursor` 採番 + 投影更新) と `EventBatchAck`（水位
+        `acked_up_to_node_seq`）返却
   - [ ] `fxg-node`: Outbox Sync Worker（Outbound WS
-        接続・再接続、`metadata_synced = 0` の `SessionUpsert` 再送 ➔ 未同期
-        `synced = 0` イベントのバッチ送信 ➔ ACK で `synced = 1`、リアルタイム
-        `LiveStreamDelta` 配信）
+        接続・再接続、`synced_up_to_node_seq` より後のイベントのバッチ送信 ➔ ACK
+        で水位更新、`ResyncRequest` への範囲再送、リアルタイム `LiveStreamDelta`
+        配信）
   - [ ] コマンド応答: `CommandResult`（`command_id` / `ErrorCode`
         付き）の要求元クライアントへの相関返却、ノードオフライン時の即時
         `NODE_OFFLINE` 返却
@@ -305,9 +370,10 @@
         `shadcn-svelte` (`bits-ui`, `vaul-svelte`) + `oxlint` / `oxfmt` /
         `svelte-check` / `Vitest`
   - [ ] 状態管理 & 認証UI: `ts-rs` 生成型のインポート、差分同期 WebSocket ストア
-        (`*.svelte.ts`。中央サーバーは `last_global_seq` / ローカルノードは
-        `last_local_seq` を使い分け、`event_id` で upsert・`LiveStreamDelta` を
-        `message_id` でマージ)、初回トークン入力ダイアログ (`fxg_session`
+        (`*.svelte.ts`。接続先ストアの `cursor` を保存し
+        `Subscribe { since_cursor }` で差分再開、`event_id` で
+        upsert・`LiveStreamDelta` を `message_id`
+        でマージ)、初回トークン入力ダイアログ (`fxg_session`
         Cookie保持)、接続先スイッチャー（中央サーバー ⇔
         ローカルノード）、ヘッダー緊急停止（キルスイッチ）ボタン、同期状態バッジ（未同期件数
         / 最終同期時刻）

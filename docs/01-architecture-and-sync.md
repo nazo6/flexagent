@@ -19,7 +19,7 @@ flowchart TB
         Hub["Axum HTTP / WS Hub (:8080)<br/>(Auth Token / Origin検証)"]
         Prov["Stdio Node Provisioner<br/>(docker / incus / colab / ssh)"]
         Push["Web Push (VAPID) Sender"]
-        ServerDB[("server.db (SQLite + FTS5 + Audit)")]
+        ServerDB[("server.db (SQLite)<br/>node.db と同一スキーマ")]
         Hub --> ServerDB
         Hub --> Push
         Hub <--> Prov
@@ -30,7 +30,7 @@ flowchart TB
         LocalIPC["Local IPC Server<br/>(Named Pipe / Unix Socket)"]
         SyncWorker["Outbox Sync Worker<br/>(Outbound WS Client)"]
         SessionMgr["Session & Agent Manager"]
-        NodeDB[("node.db (SQLite)")]
+        NodeDB[("node.db (SQLite)<br/>server.db と同一スキーマ")]
 
         LocalIPC --> SessionMgr
         LocalAPI --> SessionMgr
@@ -74,9 +74,24 @@ flowchart TB
 
 中央サーバーが単一障害点（SPOF）になることを防ぐため、**すべてのセッション状態とイベントの一次ソース（Primary
 Source of Truth）は実行中のノード (`node.db`)** に置きます。中央サーバー
-(`server.db`) は全ノードのレプリカ兼ルーティングハブとして機能します。
+(`server.db`) は全ノードの複製兼ルーティングハブとして機能します。
 
-### 2.1 イベントIDとシーケンス番号の設計
+この構造は「**スキーマ1本・ログ1本・権威1つ**」の3原則で運用します
+（スキーマ詳細は [`docs/02-database-schema.md`](./02-database-schema.md)）：
+
+1. **スキーマは1本**: `node.db` と `server.db` は同一DDL・同一テーブル名・単一の
+   マイグレーションセットを共有し、違いは「行のスコープ」と「実行ロール」のみ。
+   スキーマ対称性は規約ではなく単一定義で保証する。
+2. **同期はイベントログ1本**:
+   セッションのメタデータ（作成・タイトル・ステータス・モード）も
+   `session_events` 上のイベントとして記録し、中央サーバーの `sessions` /
+   `permission_requests` はイベントから適用される**投影（projection）** とする。
+   `SessionUpsert` のような別系統のメタデータ同期は行わない。
+3. **書き込み権威は1つ**: セッション状態を書き換えられるのは**実行ノードのみ**。
+   中央サーバーはコマンド転送とイベント追記・投影適用のみを行い、セッション状態を
+   クライアント要求に応じて直接書き換えない。
+
+### 2.1 イベントID・順序・カーソルの設計
 
 各セッション内で発生するイベント（メッセージ、思考チャンク、ツール呼び出し、権限要求など）は以下の識別子を持ちます：
 
@@ -84,14 +99,22 @@ Source of Truth）は実行中のノード (`node.db`)** に置きます。中�
   v7**（タイムスタンプ順序付きUUID。重複排除・冪等性保証に使用）
 - `session_id`: **UUID v7**（セッション識別子）
 - `node_seq`: **セッション単位の単調増加整数
-  (`1, 2, 3...`)**。ノード側で採番。セッション内の論理順序は常にこの値を正とする。
-- `global_seq`: 中央サーバーの `server.db`
-  に取り込まれた際にサーバー側で採番される全体シーケンス番号（中央サーバー接続クライアントが「前回取得位置からの差分」を購読するために使用）。
-- `local_seq`: `node.db` の `local_session_events.id` (AUTOINCREMENT)
-  が持つローカル連番。ローカルノード接続クライアント（`localhost:7860`）が差分同期カーソルとして使用する。
+  (`1, 2, 3...`)**。**実行ノードのみが採番**し、欠番は生じない。セッション内の論理順序は常にこの値を正とする。
+- `cursor`: `session_events.cursor` (AUTOINCREMENT)
+  が持つ**そのDBへの取り込み順の連番**。 クライアント（CLI / Web
+  UI）の差分再開カーソルとして使用する。`node.db` を購読していれば `node.db` の
+  cursor、`server.db` を購読していれば `server.db` の cursor が基準となる
+  （**接続先ストア以外の cursor は意味を持たない**）。
 - `created_at`: ノード側のローカル時計（Unix epoch
   ms）で記録。複数ノード横断の並び（承認Inbox等）は NTP
   同期された時計を前提とする。
+
+「送信済み」の管理は行単位フラグではなく、**セッション単位の水位
+`sessions.synced_up_to_node_seq`**（ハブが ACK した最大
+`node_seq`）で表現します。 `node_seq`
+は実行ノードだけが採番する欠番のない連番のため水位による表現が成立し、 Outbox
+の抽出は `node_seq > synced_up_to_node_seq` の単純な述語、ACK 時の更新も O(1)
+になります。
 
 ### 2.2 書き込みと同期のフロー (Outbox パターン)
 
@@ -105,25 +128,25 @@ sequenceDiagram
     participant RemotePWA as Android / Web PWA
 
     Agent->>Daemon: SessionUpdate (ストリーミング出力)
-    Daemon->>NodeDB: INSERT session_events (node_seq=N, synced=0)
+    Daemon->>NodeDB: INSERT session_events (node_seq=N) + sessions 更新
     Daemon->>LocalClient: 即座にIPC / Local WSへ配信 (遅延ゼロ)
 
     alt 中央サーバー接続中 (Online)
-        Daemon->>Server: WS: EventBatchPush ([node_seq=N])
-        Server->>Server: INSERT OR IGNORE into server.db (global_seq採番)
+        Daemon->>Server: WS: EventBatchPush (synced_up_to_node_seq より後のイベント)
+        Server->>Server: INSERT OR IGNORE into server.db (cursor採番)<br/>+ sessions / permission_requests 投影を同一Txで更新
         Server->>RemotePWA: WS Broadcast (または Web Push通知)
-        Server-->>Daemon: WS: EventBatchAck (session_id, up_to_node_seq=N)
-        Daemon->>NodeDB: UPDATE session_events SET synced=1<br/>WHERE session_id = ? AND node_seq <= N
+        Server-->>Daemon: WS: EventBatchAck (session_id, acked_up_to_node_seq=N)
+        Daemon->>NodeDB: UPDATE sessions SET synced_up_to_node_seq = N
     else 中央サーバー停止・オフライン (Offline)
-        Note over Daemon,NodeDB: synced=0 のまま node.db に蓄積<br/>ローカルCLI / localhost:7860 は通常通り稼働
+        Note over Daemon,NodeDB: 未ACK分は node.db に蓄積<br/>ローカルCLI / localhost:7860 は通常通り稼働
     end
 
     Note over Daemon,Server: --- 中央サーバー復旧・WebSocket再接続 ---
-    Daemon->>Server: WS: NodeHello
-    Daemon->>Server: WS: SessionUpsert (metadata_synced=0 のセッションを再送)
-    Daemon->>Server: WS: EventBatchPush (synced=0 のイベントをバッチ送信)
+    Daemon->>Server: WS: NodeHello (SessionSyncState 一覧を報告)
+    Server-->>Daemon: WS: ResyncRequest (ハブ側で欠落・遅延のあるセッションのみ)
+    Daemon->>Server: WS: EventBatchPush (synced_up_to_node_seq より後のイベントを一括送信)
     Server-->>Daemon: WS: EventBatchAck
-    Daemon->>NodeDB: UPDATE session_events SET synced=1<br/>WHERE session_id = ? AND node_seq <= N
+    Daemon->>NodeDB: UPDATE sessions SET synced_up_to_node_seq = N
 ```
 
 ### 2.3 ストリーミングチャンクの配信と永続化（Compaction）方針
@@ -148,6 +171,37 @@ sequenceDiagram
    - **トレードオフ**:
      クライアントがターン途中で切断した場合、未完了のメッセージ・思考は履歴に残りません（再接続後の履歴には完成済みイベントのみが表示されます）。`LiveStreamDelta`
      は再接続時にリプレイされません。
+
+### 2.4 メタデータのイベントソーシングと投影（権威の一元化）
+
+セッションのメタデータ（作成情報・タイトル・ステータス・モード/コマンド/設定）は専用の同期チャネルを持たず、
+`session_events` 上のイベントとして記録します：
+
+- `SessionCreated`（生成直後、`node_seq = 1`。プロジェクト・パス・エージェント・Fork元などを含む）
+- `SessionTitleChanged`（UI/CLI
+  からのリネーム。コマンドとして実行ノードに到達してから発行）
+- `SessionAgentBound`（ACP セッション確立後の `agent_session_id` 確定）
+- `StatusChanged` / `CapabilitiesUpdated`（既存。ハブ側 `sessions.status` /
+  モード・コマンド・設定投影の更新源）
+
+中央サーバーは受信イベントを `INSERT OR IGNORE`
+で追記すると**同一トランザクション**で `sessions` / `permission_requests`
+の投影を更新します（イベント→カラムの対応表は
+[`docs/02-database-schema.md` §0.3](./02-database-schema.md)）。投影はイベントログから完全に再構築可能であり、
+差分同期の ACK（水位 `synced_up_to_node_seq`）はイベントの ACK
+だけで完結します。
+
+**不変条件**: 中央サーバーはクライアント要求に応じてセッション状態（`sessions` /
+`permission_requests`）を直接書き換えない。書き込みは常に「実行ノードへのコマンド転送
+→ ノードが状態更新とイベント発行」を経由します（例外は `git_bundle_path`
+等のハブ固有管理フィールドと、
+イベント適用の結果としての投影更新のみ）。これにより「どちらの値が正か」という判定規則が1つになります。
+
+なお、ハブの投影が何らかの理由で失われた場合（DB再構築等）に備え、再接続時の
+`NodeHello` は
+セッションごとの同期状態（`SessionSyncState { session_id, last_node_seq }`）を報告し、
+ハブは欠落・遅延を検出したセッションに対して `ResyncRequest` で `from_node_seq`
+以降のイベント再送を要求します。
 
 ---
 
@@ -190,8 +244,10 @@ Android PWAやWeb UIから「プロンプト送信 (`prompt`)」「権限承認
      と永続イベント、再接続時のリプレイ）を無害化する。
    - ターン途中の `LiveStreamDelta` は `message_id` / `thought_id`
      でマージ表示し、永続イベント到着時に確定表示へ置き換える。
-   - セッション内の表示順は `node_seq` を正とし、`global_seq` / `local_seq`
-     は差分再開カーソルとしてのみ使用する。
+   - セッション内の表示順は `node_seq`
+     を正とし、`cursor`（接続先ストアが採番する取り込み順）は
+     最後に受信したバッチ位置の記録（`Subscribe { since_cursor }`
+     による差分再開）にのみ使用する。
 3. **コマンドの冪等性と競合解決**:
    - 全コマンドは `command_id` を持ち、ノードは直近の `command_id`
      を一定時間保持して重複送信（ダブルタップ・WS再送）を `COMMAND_DUPLICATE`
