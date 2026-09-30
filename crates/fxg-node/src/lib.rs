@@ -31,7 +31,11 @@ pub mod worktree;
 #[cfg(test)]
 mod testutil;
 
+pub mod ipc_client;
+pub(crate) mod ipc_framing;
+
 pub use error::NodeError;
+pub use ipc_client::IpcClient;
 pub use paths::{NodePaths, ipc_endpoint};
 pub use project::{ProjectResolutionSource, ResolvedProject, normalize_git_url, resolve_project};
 pub use session::{SessionBroadcast, SessionEventBus};

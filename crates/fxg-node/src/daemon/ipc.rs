@@ -16,15 +16,13 @@ use fxg_db::SessionFilter;
 use fxg_protocol::common::ErrorCode;
 use fxg_protocol::config::{GlobalConfig, ProjectConfig};
 use fxg_protocol::ipc::{IpcClientMessage, IpcResult, IpcServerMessage, ProjectInfo};
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::watch;
 
 use super::DaemonState;
 use crate::error::NodeError;
+use crate::ipc_framing::{read_frame, write_message};
 use crate::{git, project, worktree};
-
-/// 受信フレームの最大長 (過大なフレームによるメモリ枯渇を防ぐ)。
-const MAX_FRAME_BYTES: u32 = 16 * 1024 * 1024;
 
 /// `fxg ps` などで返すセッション一覧の上限。
 const SESSION_LIST_LIMIT: u32 = 200;
@@ -88,8 +86,9 @@ pub async fn serve(
                 match accepted {
                     Ok((stream, _addr)) => {
                         let state = state.clone();
+                        let connection_shutdown = shutdown.clone();
                         tokio::spawn(async move {
-                            if let Err(err) = handle_connection(state, stream).await {
+                            if let Err(err) = handle_connection(state, stream, connection_shutdown).await {
                                 tracing::debug!("ipc connection ended: {err}");
                             }
                         });
@@ -129,8 +128,9 @@ pub async fn serve(
                 match connected {
                     Ok(()) => {
                         let state = state.clone();
+                        let connection_shutdown = shutdown.clone();
                         tokio::spawn(async move {
-                            if let Err(err) = handle_connection(state, server).await {
+                            if let Err(err) = handle_connection(state, server, connection_shutdown).await {
                                 tracing::debug!("ipc connection ended: {err}");
                             }
                         });
@@ -144,12 +144,22 @@ pub async fn serve(
 }
 
 /// 1接続を処理する (Length-prefixed JSON のリクエスト/レスポンスループ)。
-pub(crate) async fn handle_connection<S>(state: DaemonState, mut stream: S) -> Result<(), NodeError>
+///
+/// シャットダウン要求を受けると接続を閉じる。
+pub(crate) async fn handle_connection<S>(
+    state: DaemonState,
+    mut stream: S,
+    mut shutdown: watch::Receiver<bool>,
+) -> Result<(), NodeError>
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
     loop {
-        let Some(frame) = read_frame(&mut stream).await? else {
+        let frame = tokio::select! {
+            _ = shutdown.changed() => return Ok(()),
+            frame = read_frame(&mut stream) => frame?,
+        };
+        let Some(frame) = frame else {
             return Ok(()); // クライアントが切断した
         };
         let request: IpcClientMessage = match serde_json::from_slice(&frame) {
@@ -167,49 +177,6 @@ where
         let response = dispatch(&state, request).await;
         write_message(&mut stream, &response).await?;
     }
-}
-
-async fn read_frame<S: AsyncRead + Unpin>(stream: &mut S) -> Result<Option<Vec<u8>>, NodeError> {
-    let mut length_buf = [0u8; 4];
-    match stream.read_exact(&mut length_buf).await {
-        Ok(_) => {}
-        Err(err) if err.kind() == std::io::ErrorKind::UnexpectedEof => return Ok(None),
-        Err(err) => {
-            return Err(NodeError::Server(format!("ipc length read failed: {err}")));
-        }
-    }
-    let length = u32::from_le_bytes(length_buf);
-    if length > MAX_FRAME_BYTES {
-        return Err(NodeError::Server(format!("ipc frame too large: {length}")));
-    }
-    let mut payload = vec![0u8; length as usize];
-    stream
-        .read_exact(&mut payload)
-        .await
-        .map_err(|err| NodeError::Server(format!("ipc payload read failed: {err}")))?;
-    Ok(Some(payload))
-}
-
-async fn write_message<S: AsyncWrite + Unpin>(
-    stream: &mut S,
-    message: &IpcServerMessage,
-) -> Result<(), NodeError> {
-    let payload = serde_json::to_vec(message)?;
-    let length = u32::try_from(payload.len())
-        .map_err(|_| NodeError::Server("ipc frame too large".to_owned()))?;
-    stream
-        .write_all(&length.to_le_bytes())
-        .await
-        .map_err(|err| NodeError::Server(format!("ipc write failed: {err}")))?;
-    stream
-        .write_all(&payload)
-        .await
-        .map_err(|err| NodeError::Server(format!("ipc write failed: {err}")))?;
-    stream
-        .flush()
-        .await
-        .map_err(|err| NodeError::Server(format!("ipc flush failed: {err}")))?;
-    Ok(())
 }
 
 /// ディスパッチエラー (コマンドID + 構造化エラーコード)。
@@ -829,6 +796,7 @@ mod tests {
     use super::*;
     use crate::daemon::{DaemonConfig, NodeDaemon};
     use std::time::Duration;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     async fn start_daemon() -> (NodeDaemon, tempfile::TempDir) {
         let dir = tempfile::tempdir().expect("tempdir");
