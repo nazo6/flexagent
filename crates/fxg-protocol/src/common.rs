@@ -645,7 +645,7 @@ pub struct PermissionRequestEntry {
     /// 選択肢一覧
     pub options: Vec<PermissionOption>,
     /// 引数や Diff 詳細
-    #[ts(type = "unknown")]
+    pub details: serde_json::Value,
     /// 状態
     pub status: PermissionRequestStatus,
     /// 作成日時 (Unix epoch ms)
@@ -693,7 +693,7 @@ pub struct AuditLogEntry {
     /// トークン識別子または認証主体
     pub auth_subject: String,
     /// 実行内容詳細
-    #[ts(type = "unknown")]
+    pub details: serde_json::Value,
     /// 記録日時 (Unix epoch ms)
     pub created_at: i64,
 }
