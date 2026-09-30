@@ -501,7 +501,10 @@ mod tests {
     /// Windows の ConPTY で cmd を実行し、出力・Exit 配信・セッション破棄を検証する。
     ///
     /// ConPTY は EOF セマンティクスが Unix PTY と異なるため、待機は
-    /// [`PtyEvent`] のポーリングで行い、失敗時は診断情報を出力する。
+    /// [`PtyEvent`] のポーリングで行う。また ConPTY は起動時にカーソル位置照会
+    /// (`ESC[6n`) を送り、ターミナル (Web PTY / TUI) は応答 (`ESC[1;1R`) を
+    /// 返すことが期待される。ヘッドレス (応答者なし) での挙動を切り分けるため、
+    /// 応答を送る前後で状態を観察し、診断情報を出力する。
     #[cfg(windows)]
     #[test]
     fn spawns_cmd_on_windows() {
@@ -512,31 +515,49 @@ mod tests {
         let info = manager.spawn(request).expect("spawn");
 
         let mut receiver = manager.subscribe("pty-win").expect("subscribe");
-        let deadline = std::time::Instant::now() + Duration::from_secs(30);
+        let start = std::time::Instant::now();
         let mut output = Vec::new();
         let mut exit_code = None;
-        while exit_code.is_none() {
+        let mut answered_cpr = false;
+        let mut phase1_reported = false;
+        let deadline = start + Duration::from_secs(45);
+        while exit_code.is_none() && std::time::Instant::now() < deadline {
             match receiver.try_recv() {
                 Ok(PtyEvent::Output { data, .. }) => output.extend_from_slice(&data),
                 Ok(PtyEvent::Exit {
                     exit_code: code, ..
                 }) => exit_code = Some(code),
-                Err(broadcast::error::TryRecvError::Lagged(_)) => continue,
+                Err(broadcast::error::TryRecvError::Lagged(_)) => {}
                 Err(broadcast::error::TryRecvError::Empty) => {
-                    if std::time::Instant::now() > deadline {
-                        eprintln!(
-                            "[diag] timeout: pid={:?} output={:?} session_present={}",
-                            info.pid,
-                            String::from_utf8_lossy(&output),
-                            manager.contains("pty-win"),
-                        );
-                        break;
-                    }
                     std::thread::sleep(Duration::from_millis(25));
                 }
                 Err(broadcast::error::TryRecvError::Closed) => break,
             }
+            if !answered_cpr && start.elapsed() > Duration::from_secs(10) && exit_code.is_none() {
+                if !phase1_reported {
+                    phase1_reported = true;
+                    let tasklist = std::process::Command::new("tasklist")
+                        .args(["/FI", &format!("PID eq {}", info.pid.unwrap_or(0)), "/NH"])
+                        .output()
+                        .map(|out| String::from_utf8_lossy(&out.stdout).trim().to_owned());
+                    eprintln!(
+                        "[diag] no exit without CPR response: output={:?} tasklist={tasklist:?}",
+                        String::from_utf8_lossy(&output),
+                    );
+                }
+                // カーソル位置照会 (ESC[6n) への応答 (ESC[1;1R) を送る
+                manager
+                    .write("pty-win", b"\x1b[1;1R")
+                    .expect("write cursor position report");
+                answered_cpr = true;
+                eprintln!("[diag] sent CPR response (ESC[1;1R)");
+            }
         }
+        eprintln!(
+            "[diag] finished: elapsed={:?} exit={exit_code:?} output={:?}",
+            start.elapsed(),
+            String::from_utf8_lossy(&output),
+        );
 
         let text = String::from_utf8_lossy(&output).to_lowercase();
         assert!(
