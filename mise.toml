@@ -31,7 +31,8 @@ run = "cargo clippy --workspace --all-targets -- -D warnings"
 
 [tasks.test]
 description = "ワークスペース全体のテストを実行する (ts-rs 型出力含む)"
-run = "cargo test --workspace"
+# --no-fail-fast: あるクレートが失敗しても全クレートの結果を報告する (CI 診断用)
+run = "cargo test --workspace --no-fail-fast"
 
 [tasks.check]
 description = "fmt:check + lint + test を一括実行する (コミット前チェック)"
