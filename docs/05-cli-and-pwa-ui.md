@@ -11,21 +11,26 @@
 fxg opencode                   # opencode / opencode2 を起動 (純正TUI + リモート同期)
 fxg antigravity                # ACP Registry の antigravity-acp を自動取得・起動 (内蔵TUI)
 fxg claude                     # claude-code-acp を起動
+fxg opencode --provisioner colab-pro    # Google Colab Pro を一時VMとしてスポーンしセッション起動
+fxg opencode --provisioner local-incus  # ローカル隔離VM (Incus/Docker) をスポーンしセッション起動
 fxg <agent> -- <extra-args>    # エージェント固有のCLI起動引数をパススルー
 
 # 2. セッション一覧・再アタッチ
 fxg ps                         # 現在稼働中・最近のセッション一覧を表示
 fxg attach [session-id]        # 稼働中セッションにターミナルを接続（省略時はカレントフォルダの直近セッション）
 
-# 3. プロジェクト・エージェント管理
+# 3. プロジェクト・エージェント・プロビジョナー管理
 fxg agents list                # ACP Registry の利用可能エージェント一覧とインストール状態
 fxg agents install <id>        # ACP エージェントの事前ダウンロード
+fxg provisioners list          # 設定済みの一時VMプロビジョナー一覧 (local-docker, local-incus, colab-pro 等)
 fxg project info               # カレントフォルダの論理プロジェクトID (Git正規化結果) を確認
 fxg project link <project-id>  # 非Gitフォルダを特定のプロジェクトIDに手動紐付け
 
-# 4. デーモン・サーバー・常駐サービス管理
+# 4. デーモン・サーバー・一時VMブートストラップ・常駐サービス管理
 fxg daemon                     # ノードデーモンをフォアグラウンド起動 (127.0.0.1:7860 にバインド)
 fxg daemon --allow-remote-pty  # リモートからのWeb PTY起動を明示的に許可
+fxg daemon --stdio --ephemeral # 一時VM内での標準入出力パイプ直結モード (VPN/ネットワーク設定不要)
+fxg bootstrap-workspace --repo <url> [--branch <b>] # 一時VM内のZero-Touch初期化 (git clone + mise/uv ツール自動導入)
 fxg service install            # OSログイン時の自動バックグラウンド起動を設定 (Win/Mac/Linux/WSL)
 fxg service status             # デーモン稼働状態・中央サーバー接続状態・未同期Outbox件数を表示
 fxg server --port 8080         # 中央サーバーをLAN/VPN内で起動
@@ -33,7 +38,7 @@ fxg server --port 8080         # 中央サーバーをLAN/VPN内で起動
 # 5. セキュリティ・認証・緊急停止 (フェーズ 1〜2)
 fxg web                        # トークン付きURL (http://localhost:7860/?token=...) でブラウザを開く
 fxg auth token                 # 現在の認証トークンを表示
-fxg kill-all                   # 【緊急停止】全ノードの稼働中セッション・子プロセスツリー・PTYを即時強制終了
+fxg kill-all                   # 【緊急停止】全ノードの稼働中セッション・子プロセスツリー・一時VM・PTYを即時強制終了
 ```
 
 ---
@@ -43,17 +48,31 @@ fxg kill-all                   # 【緊急停止】全ノードの稼働中セ�
 PCブラウザ、ローカルフォールバック (`localhost:7860`)、および Android
 スマートフォン（ホーム画面追加PWA）のすべてを単一のレスポンシブSPAで提供します。
 
-### 2.1 フロントエンド技術スタック
+### 2.1 フロントエンド技術スタック & 開発基盤
 
-- **ビルド & フレームワーク**: Vite + React 19 + TypeScript
-- **スタイリング**: Tailwind CSS
-  (モバイルの片手操作・ボトムシートUIと、デスクトップのマルチペインUIをレスポンシブ切替)
-- **状態管理 & 同期**: Zustand + カスタム WebSocket 差分同期ストア
-  (`last_global_seq` 管理)
+- **フレームワーク & ルーティング**: SvelteKit (`Svelte 5` Runes +
+  `@sveltejs/adapter-static` による SPA モード) + Vite + TypeScript
+- **パッケージマネージャ & タスクランナー**: `pnpm` + `mise` (`mise.toml` による
+  `ts-rs` 型生成 ➔ UIビルド ➔ Cargoビルドの一貫タスク管理)
+- **リンター・フォーマッター・テスト**:
+  - **Lint & Format**: `oxlint` / `oxfmt` (Oxc
+    ツールチェインによる高速静的解析・コード整形)
+  - **型・テンプレート検査**: `svelte-check`
+  - **単体テスト**: `Vitest` (+ `happy-dom`)
+- **スタイリング & UIコンポーネント**:
+  - **CSS**: Tailwind CSS v4 (`@tailwindcss/vite`)
+  - **UIライブラリ**: `shadcn-svelte` (`bits-ui`
+    ベースのヘッドレスプリミティブ + モバイルボトムシート用 `vaul-svelte`)
+  - **アイコン**: `@lucide/svelte`
+    (モバイルの片手操作・ボトムシートUIと、デスクトップのマルチペインUIをレスポンシブ切替)
+- **状態管理 & 同期**: Svelte 5 Runes (`$state`, `$derived` を用いた
+  `*.svelte.ts` クラスベースのカスタム WebSocket 差分同期ストア /
+  `last_global_seq` 管理)
 - **コード・Diff・双方向ターミナル**:
   - **Diff / コード表示**:
-    - PC: `@monaco-editor/react` (Monaco Diff Editor: Side-by-side / Inline
-      切替、ミニマップ、構文ハイライト)
+    - PC: `monaco-editor` (Monaco Diff Editor: Side-by-side / Inline
+      切替、ミニマップ、構文ハイライト。Svelte の Attachment / Action
+      で直接マウント)
     - モバイル: 軽量シンタックスハイライト `shiki` + Unified Diff ビューア
       (折りたたみ・変更行ハイライト)
   - **双方向ターミナル**:
@@ -81,18 +100,27 @@ PCブラウザ、ローカルフォールバック (`localhost:7860`)、およ�
    - 論理プロジェクト（例: `github.com/nazo6/flexagent`）ごとにグループ化。
    - 各ノード上の **Git Worktree
      一覧**（メインリポジトリ、各ブランチ、未コミット差分件数）を可視化。
-   - 「＋新規セッション」ボタンから、既存のWorktreeを選択、または
-     **「新規Worktree（ブランチ名指定）を作成して起動」** を実行。
-   - 既存セッションの別ノードへのContext
-     Forkや、不要になったWorktreeの削除もここから実行。
+   - 「＋新規セッション」ボタンから、以下のいずれかを選択して起動：
+     - **常駐ノードの既存Worktree**、または
+       **「新規Worktree（ブランチ名指定）を作成して起動」**
+     - **「＋一時VMをスポーンして起動（Local Docker / Local Incus VM / Google
+       Colab Pro）」**（選択したブランチを自動クローンし、`mise`/`uv`
+       で必要ツールを自動セットアップして開始）
+   - 既存セッションの別ノード（または一時VM）へのContext
+     Forkや、一時VM破棄時に退避された `git bundle`
+     からの復元、不要になったWorktreeの削除もここから実行。
 3. **セッション詳細（チャット & ワークスペース）画面**:
-   - **ヘッダー**: 実行ノード名（例:
-     `Home-Win`）、接続状態、バインドされているWorktree（例:
+   - **ヘッダー**: 実行ノード名（例: `Home-Win` または
+     `Colab Pro [Ephemeral]`）、接続状態、バインドされているWorktree（例:
      `feat/auth`）を常時表示。
    - **マルチペイン / タブ構成** (デスクトップは左右分割、モバイルはタブ切替):
      - **Chat ペイン**:
-       ストリームタイムライン（ユーザー発言、思考プロセス折りたたみ、ツール実行、承認カード、Pending
-       Queue）。
+       - 一時VM起動時（`provisioning` / `bootstrapping`
+         状態）は、最上部に折りたたみ式の **「Environment Bootstrap
+         Log」カード** を表示し、VM起動・`git clone`・`mise` ツール自動導入の
+         `stderr` 出力をリアルタイム表示。
+       - ストリームタイムライン（ユーザー発言、思考プロセス折りたたみ、ツール実行、承認カード、Pending
+         Queue）。
      - **Diff ペイン (2段階スコープ切替)**:
        - **「セッションの変更 (This Session)」**:
          このセッションでエージェントが編集したファイル一覧とDiff（ノードがオフラインでも中央サーバーから100%閲覧可能）。
@@ -131,9 +159,10 @@ PCブラウザ、ローカルフォールバック (`localhost:7860`)、およ�
 - **`manifest.webmanifest`**: `"display": "standalone"`,
   `"theme_color": "#0f172a"`
   を設定し、Androidでネイティブアプリ同等のフルスクリーン起動を実現。
-- **Service Worker (`sw.js`)**:
-  1. **App Shell キャッシュ**:
-     HTML/JS/CSSをキャッシュし、モバイル回線が不安定な場所や中央サーバー障害時でもUIが即座に立ち上がるようにします。
+- **Service Worker (`src/service-worker.ts` / `$service-worker`)**:
+  1. **App Shell キャッシュ**: SvelteKit 標準の `$service-worker`
+     モジュール（`build`, `files`,
+     `version`）を用いてHTML/JS/CSSをキャッシュし、モバイル回線が不安定な場所や中央サーバー障害時でもUIが即座に立ち上がるようにします。
   2. **Web Push 受信 & アクションボタン**: 中央サーバーからVAPID Web
      Pushを受信した際、Android通知バナーに以下を表示します：
      - タイトル: `[flexagent] 承認リクエスト (Home-Win)`
@@ -151,7 +180,7 @@ Webターミナルは、GhosttyのネイティブVTエミュレーション精�
 を標準採用します。同時に、UIコンポーネントと特定のターミナル実装を疎結合にするため、薄い抽象化インターフェースを介して利用します。
 
 ```typescript
-// ui/src/components/terminal/types.ts
+// ui/src/lib/components/terminal/types.ts
 export interface TerminalDimensions {
   cols: number;
   rows: number;
@@ -178,9 +207,9 @@ export interface ITerminalAdapter {
   - 将来的にAndroid
     PWAでのネイティブ文字選択・IME入力の操作性やアクセシビリティを重視したいケースが生じた場合でも、DOMレンダラを採用する
     `wterm` (`@wterm/ghostty`) 等のアダプタへ最小限の修正で切り替え可能です。
-- **React コンポーネント (`TerminalView`)**:
-  - `ResizeObserver` による自動 `fit()` 実行とノード側PTYへの `resize`
-    メッセージ送信。
+- **Svelte コンポーネント (`TerminalView.svelte`)**:
+  - Svelte 5 の Attachment (`{@attach ...}`) / `ResizeObserver` による自動
+    `fit()` 実行とノード側PTYへの `resize` メッセージ送信。
   - モバイル仮想キーバー（タップで `Ctrl`, `Esc`, `Tab`,
     矢印キー等のエスケープコードを送信）の統合。
 
@@ -193,7 +222,7 @@ export interface ITerminalAdapter {
 ### Milestone 1: コアプロトコル・DB・ローカルデーモン基盤 & セキュリティ基礎 (フェーズ 1)
 
 - [ ] Cargo Workspace の構築 (`fxg-protocol`, `fxg-db`, `fxg-pty`, `fxg-acp`,
-      `fxg-node`, `fxg-server`, `fxg-cli`)
+      `fxg-node`, `fxg-server`, `fxg-cli`) および `mise.toml` タスク定義
 - [ ] `node.db` / `server.db` のSQLiteマイグレーション実装
 - [ ] Git Remote URL正規化による論理プロジェクト解決 (`fxg project info`)
 - [ ] Windows Named Pipe / Unix Domain Socket による `fxg` CLI ⇔ `fxg daemon`
@@ -238,8 +267,9 @@ export interface ITerminalAdapter {
 
 ### Milestone 5: 共通 Web UI / Android PWA & Web Push
 
-- [ ] `ui/` (Vite + React + TypeScript) の構築と `rust-embed` による `fxg`
-      バイナリへの組み込み
+- [ ] `ui/` (SvelteKit / Svelte 5 SPA + TypeScript + Tailwind v4 +
+      `shadcn-svelte` + `pnpm` + `oxlint` / `oxfmt` / `svelte-check` / `Vitest`)
+      の構築と `rust-embed` による `fxg` バイナリへの組み込み
 - [ ] セッション画面の実装:
   - [ ] チャットタイムライン（思考折りたたみ・スラッシュコマンド補完・承認Inbox）
   - [ ] 2階層 Diff ビューア（セッション編集差分 + Worktree リアルタイムGit差分:
@@ -252,6 +282,20 @@ export interface ITerminalAdapter {
   - [ ] ヘッダーの緊急停止（キルスイッチ）ボタン
   - [ ] 監査ログ一覧画面
   - [ ] リモートPTY無効化時の案内バナー表示
-- [ ] Service Worker (`sw.js`) と `web-push` クレートによる VAPID
-      Push通知（Androidバックグラウンド通知＆バナー承認）の実装
+- [ ] Service Worker (`src/service-worker.ts`) と `web-push` クレートによる
+      VAPID Push通知（Androidバックグラウンド通知＆バナー承認）の実装
 - [ ] `fxg service install` による各OS自動起動設定の実装
+
+### Milestone 6: 一時VM・サンドボックスノード (`fxg daemon --stdio` & Zero-Touch Provisioner)
+
+- [ ] `fxg daemon --stdio --ephemeral` による標準入出力パイプ（JSON
+      Lines）トランスポート実装
+- [ ] `fxg server` のコマンドテンプレート型プロビジョナー管理（Docker / Rootless
+      Podman / Incus VM / `google-colab-cli` の子プロセス起動と `stderr`
+      ブートストラップ進捗配信）
+- [ ] `fxg bootstrap-workspace` の実装（`mise` / `uv`
+      単一バイナリの自動取得と、リポジトリ設定ファイルからの完全ステートレスなツール自動構築）
+- [ ] `GIT_ASKPASS` + `GitCredentialRequest`
+      パイププロキシによる一時VM内への秘密鍵・トークン非保持化
+- [ ] `DrainAndShutdown` & `WorkspaceBundleUpload`
+      による一時VM破棄前の未送信イベント完全フラッシュと `git bundle` 退避・復元

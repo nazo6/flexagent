@@ -35,18 +35,25 @@
      のみにバインド。暗号論的トークン認証、Host/Originヘッダ検証（DNS
      Rebinding/CSWSH対策）、リモートPTY制御、および緊急キルスイッチ（Panic
      Button）を標準装備します。
+7. **ネットワーク非依存の一時VM・サンドボックスノード (`fxg daemon --stdio`)**:
+   - 自前サーバー上の権限分離環境（Docker / Rootless Podman / Incus VM）や
+     **Google Colab Pro (`google-colab-cli`)**
+     などをオンデマンドにスポーンし、**標準入出力パイプ (`stdin/stdout`)
+     上のJSON通信**で直結します。特定VPN（Tailscale等）へのロックインやポート開放を一切不要とし、`mise`
+     / `uv`
+     による完全ステートレスな自動ツール構築と破棄前のGit成果物退避を備えます。
 
 ---
 
 ## ドキュメント構成
 
-| ドキュメント                                                             | 内容                                                                                                    |
-| :----------------------------------------------------------------------- | :------------------------------------------------------------------------------------------------------ |
-| **[01-architecture-and-sync.md](./01-architecture-and-sync.md)**         | 全体トポロジー、ローカルファースト＆遅延同期プロトコル、論理プロジェクト同一性解決、セキュリティ設計    |
-| **[02-database-schema.md](./02-database-schema.md)**                     | 中央サーバー (`server.db`) とノードデーモン (`node.db`) のSQLiteスキーマ定義・FTS5検索・監査ログ        |
-| **[03-protocol-and-api.md](./03-protocol-and-api.md)**                   | 共通型 (`fxg-protocol`)、Node⇔Server間WS、Client向けAPI（認証・キルスイッチ・PTYポリシー）、ローカルIPC |
-| **[04-agent-drivers-and-windows.md](./04-agent-drivers-and-windows.md)** | `AgentDriver` トレイト、ACP Registry自動解決、`opencode2` ハイブリッド統合、Windows固有実装             |
-| **[05-cli-and-pwa-ui.md](./05-cli-and-pwa-ui.md)**                       | `fxg` CLIコマンド体系、PWA + Web Push フロントエンド、キルスイッチUI、段階的実装ロードマップ            |
+| ドキュメント                                                             | 内容                                                                                                                  |
+| :----------------------------------------------------------------------- | :-------------------------------------------------------------------------------------------------------------------- |
+| **[01-architecture-and-sync.md](./01-architecture-and-sync.md)**         | 全体トポロジー、ローカルファースト同期、一時VMノード (`--stdio` & 自動ツール構築)、論理プロジェクト解決、セキュリティ |
+| **[02-database-schema.md](./02-database-schema.md)**                     | 中央サーバー (`server.db`) とノードデーモン (`node.db`) のSQLiteスキーマ定義・一時ノード管理・FTS5検索・監査ログ      |
+| **[03-protocol-and-api.md](./03-protocol-and-api.md)**                   | 共通型 (`fxg-protocol`)、Node⇔Server間通信 (WS & Stdio)、Git認証プロキシ/Bundle退避、Client API、ローカルIPC          |
+| **[04-agent-drivers-and-windows.md](./04-agent-drivers-and-windows.md)** | `AgentDriver` トレイト、ACP Registry自動解決、`opencode2` ハイブリッド統合、Windows固有実装                           |
+| **[05-cli-and-pwa-ui.md](./05-cli-and-pwa-ui.md)**                       | `fxg` CLIコマンド体系、一時VM起動UX、PWA + Web Push フロントエンド、キルスイッチUI、段階的実装ロードマップ            |
 
 ---
 
@@ -55,6 +62,7 @@
 ```text
 flexagent/
 ├── Cargo.toml                  # Rust Workspace定義
+├── mise.toml                   # ツール固定 (rust, node, pnpm) & 統合ビルド・チェックタスク定義
 ├── docs/                       # 設計・実装ドキュメント
 ├── crates/
 │   ├── fxg-protocol/           # 共通型定義・ACP正規化イベント・WS/IPCメッセージ (ts-rs対応)
@@ -64,10 +72,13 @@ flexagent/
 │   ├── fxg-node/               # ノードデーモン実装 (ローカルIPC・ローカルWeb配信・Outbox同期・Project解決)
 │   ├── fxg-server/             # 中央サーバー実装 (Axum・ノード管理・イベント集約・Web Push・PWA配信)
 │   └── fxg-cli/                # `fxg` バイナリエントリポイント (CLI / TUI / daemon / server サブコマンド)
-└── ui/                         # 共通フロントエンド (Vite + React + TypeScript + Tailwind + Service Worker)
-    ├── package.json
-    ├── public/
-    │   ├── manifest.webmanifest
-    │   └── sw.js               # Web Push & オフラインApp Shellキャッシュ
+└── ui/                         # 共通フロントエンド (SvelteKit / Svelte 5 SPA + TypeScript + Tailwind v4 + shadcn-svelte)
+    ├── package.json            # パッケージ管理: pnpm / 品質管理: oxlint, oxfmt, svelte-check, Vitest
+    ├── pnpm-lock.yaml
+    ├── static/
+    │   └── manifest.webmanifest
     └── src/
+        ├── service-worker.ts   # Web Push & オフラインApp Shellキャッシュ ($service-worker)
+        ├── lib/
+        └── routes/
 ```

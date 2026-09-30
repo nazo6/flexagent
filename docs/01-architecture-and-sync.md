@@ -1,7 +1,7 @@
-# 01. 全体アーキテクチャ・同期モデル・プロジェクト解決
+# 01. 全体アーキテクチャ・同期モデル・一時VM・プロジェクト解決
 
 本ドキュメントでは、FlexAgent (`fxg`)
-の通信トポロジー、中央サーバー停止時にも機能するローカルファースト同期（Store-and-Forward）、および異なるPC・OS間で同じプロジェクトとして認識する仕組みを定義します。
+の通信トポロジー、中央サーバー停止時にも機能するローカルファースト同期（Store-and-Forward）、ネットワーク非依存の一時VM・サンドボックスノード（`fxg daemon --stdio`）、および異なるPC・OS間で同じプロジェクトとして認識する仕組みを定義します。
 
 ---
 
@@ -17,13 +17,15 @@ flowchart TB
 
     subgraph Central["中央サーバー (`fxg server`) - LAN / VPN限定"]
         Hub["Axum HTTP / WS Hub (:8080)<br/>(Auth Token / Origin検証)"]
+        Prov["Stdio Node Provisioner<br/>(docker / incus / colab / ssh)"]
         Push["Web Push (VAPID) Sender"]
         ServerDB[("server.db (SQLite + FTS5 + Audit)")]
         Hub --> ServerDB
         Hub --> Push
+        Hub <--> Prov
     end
 
-    subgraph Node["各ノード (`fxg daemon` on Win / Mac / Linux / WSL)"]
+    subgraph Node["常駐ノード (`fxg daemon` on Win / Mac / Linux / WSL)"]
         LocalAPI["Local HTTP/WS Server (:7860)<br/>(127.0.0.1 ループバック専用 + Token)"]
         LocalIPC["Local IPC Server<br/>(Named Pipe / Unix Socket)"]
         SyncWorker["Outbox Sync Worker<br/>(Outbound WS Client)"]
@@ -36,20 +38,32 @@ flowchart TB
         NodeDB --> SyncWorker
     end
 
+    subgraph EphemeralNode["一時VM / サンドボックスノード (Docker / Incus / Colab Pro)"]
+        EphDaemon["fxg daemon --stdio --ephemeral"]
+        EphAgent["Session & Agent Manager<br/>(+ mise / uv 自動ツール環境)"]
+        EphDaemon <--> EphAgent
+    end
+
     CLI <-->|"1. Named Pipe / UDS (最優先・超低遅延)"| LocalIPC
     Browser <-->|"2a. 通常時: LAN中央サーバー接続 (:8080)"| Hub
     Browser -.->|"2b. 障害時・同一PCローカル直結 (127.0.0.1:7860)"| LocalAPI
     AndroidPWA <-->|"LAN / VPN (Tailscale等) 経由 WS / Push"| Hub
-    SyncWorker ===>|"常時接続 Outbound WS (Node Token認証)<br/>(自動再接続・差分同期)"| Hub
+    SyncWorker ===>|"3a. 常駐ノード: 常時接続 Outbound WS"| Hub
+    Prov <==>|"3b. 一時ノード: 子プロセス stdin/stdout パイプ (JSON Lines)<br/>(VPN・ポート開放・ネットワーク設定一切不要)"| EphDaemon
 ```
 
 ### 各モードの起動方法（単一バイナリ `fxg`）
 
 - **中央サーバー**: 自宅LAN内の常時稼働マシンやミニPC等で
   `fxg server --port 8080`
-  を起動（LANまたはTailscale等のプライベートVPN内のみ公開し、パブリック露出は行わない）。
-- **ノードデーモン**: 各開発マシン（Windows, Mac, Linux, WSL）で `fxg daemon`
-  を常駐（デフォルトで `127.0.0.1:7860` のローカルループバックのみバインド）。
+  を起動（LANまたはプライベートVPN内のみ公開し、パブリック露出は行わない）。
+- **常駐ノードデーモン**: 各開発マシン（Windows, Mac, Linux, WSL）で
+  `fxg daemon` を常駐（デフォルトで `127.0.0.1:7860`
+  のローカルループバックのみバインド）。
+- **一時VM / サンドボックスノード**: 中央サーバー（またはCLI）が Docker / Incus
+  / Google Colab (`google-colab-cli`)
+  等のコマンドを子プロセスとしてスポーンし、その標準入出力パイプ上で
+  `fxg daemon --stdio --ephemeral` を直結起動。
 - **CLI**: 開発者がターミナルで `fxg opencode` や `fxg antigravity` を実行。
 
 ---
@@ -220,14 +234,158 @@ GUI（Web UI / PWA）やCLIから以下のWorktree操作をシームレスに実
 
 ---
 
-## 6. セキュリティアーキテクチャ（LAN限定運用とブラウザ攻撃対策）
+## 6. 一時VM・サンドボックスノード (`fxg daemon --stdio` & Zero-Touch Provisioner)
+
+自前サーバー上でホストOSの権限・ファイル（`~/.ssh`
+や他プロジェクト）から隔離された環境でエージェントを動かしたい場合や、**Google
+Colab Pro**
+の潤沢な計算資源・GPUをオンデマンドな実行ノードとしてスポーンしたい場合のため、**一時VM・サンドボックスノード（Ephemeral
+Node）** をサポートします。
+
+### 6.1 設計原則：Stdio パイプ直結によるネットワーク・VPN完全非依存
+
+一時VMを立ち上げる際、VM側から中央サーバーへネットワーク経由で折り返し接続（WebSocketコールバック）させようとすると、Tailscale等の特定VPNへのロックインやファイアウォール/NAT越えの複雑な設定が必要になります。
+
+これを根本的に排除するため、一時ノードは
+**`fxg server`（またはCLI）が子プロセスとしてスポーンしたプロビジョナーコマンドの標準入出力
+(`stdin / stdout`) 上で直接 `NodeToServerMsg` / `ServerToNodeMsg` (JSON Lines)
+をやり取りする `fxg daemon --stdio` 方式** を採用します。
+
+```mermaid
+sequenceDiagram
+    participant UI as Web UI / CLI
+    participant Server as fxg server (Node Hub)
+    participant Child as 子プロセス (docker / incus / colab / ssh)
+    participant Eph as 一時VM内 (fxg daemon --stdio)
+
+    UI->>Server: 新規セッション要求 (provisioner = "colab-pro" or "local-incus")
+    Server->>Child: コマンド起動 (stdin / stdout / stderr パイプ接続)
+    Child->>Eph: 1. ブートストラップ実行 (fxg配置 + git clone + mise/uv ツール導入)
+    Eph-->>Server: stderr: セットアップ進捗ログをリアルタイム配信 (UIへ表示)
+    Eph->>Server: stdout: NodeHello (JSON Lines 通信開始)
+    Server->>Eph: stdin: StartSession (エージェント起動・タスク実行)
+    Note over Server,Eph: 通常のWebSocketノードと100%同一のメッセージ型で双方向通信<br/>(Git認証は GitCredentialRequest でこのパイプ経由にプロキシ)
+    Note over Server,Eph: セッション完了 or アイドルタイムアウト (例: 15分)
+    Server->>Eph: stdin: DrainAndShutdown
+    Eph->>Server: stdout: EventBatchPush (未送信ログ全フラッシュ) + WorkspaceBundleUpload (Git変更退避)
+    Eph->>Server: stdout: DrainComplete
+    Server->>Child: パイプ切断・プロセス終了 (VM / コンテナ / Colabランタイムの即時破棄)
+```
+
+- **ネットワーク設定・VPNロックインの完全排除**:
+  - Docker (`docker run --rm -i`), Incus (`incus exec`), SSH (`ssh`), Google
+    Colab (`uvx google-colab-cli ssh/exec`)
+    はすべて、起動元プロセスと対象環境の間に最初から `stdin / stdout`
+    の双方向パイプを持っています（ColabへはホストからGoogleのAPIへ通常の外向きHTTPSで接続）。
+  - そのパイプ上でそのまま通信するため、`fxg`
+    はTailscale等のVPNやポート開放を一切意識する必要がありません。
+- **完全ステートレス運用（キャッシュ不整合の排除）**:
+  - 初期設計では共有キャッシュボリュームやスナップショットによる状態持ち越しを行わず、**「毎回まっさらな環境を立ち上げ、プリビルドの単一バイナリ群を展開して使い捨てる」**
+    完全ステートレス方式とすることで、ロック残留や環境汚染を防ぎます。
+
+### 6.2 コマンドテンプレート型プロビジョナー (`~/.flexagent/config.toml`)
+
+`fxg` 本体に特定の仮想化基盤やクラウドのSDKをハードコードせず、`config.toml` に
+**「標準入出力で最終的に `fxg daemon --stdio` を起動するコマンド」**
+を定義するだけで任意の環境をプロビジョナーとして登録できます。
+
+```toml
+# ~/.flexagent/config.toml
+
+# 1. 自前サーバー上の高速コンテナ隔離 (Docker / Rootless Podman)
+[provisioners.local-docker]
+description = "Local isolated Ubuntu container (Docker)"
+command = "docker"
+args = ["run", "--rm", "-i", "ubuntu:24.04", "sh", "-c", "{BOOTSTRAP_SCRIPT}"]
+idle_timeout_secs = 900
+
+# 2. 自前サーバー上の完全VM / システムコンテナ隔離 (Incus / LXD)
+[provisioners.local-incus]
+description = "Local KVM MicroVM / LXC (Incus)"
+command = "incus"
+args = ["launch", "--ephemeral", "images:ubuntu/24.04", "{INSTANCE_NAME}", "--", "sh", "-c", "{BOOTSTRAP_SCRIPT}"]
+idle_timeout_secs = 900
+
+# 3. Google Colab Pro オンデマンドGPUノード (google-colab-cli)
+[provisioners.colab-pro]
+description = "Google Colab Pro (T4 GPU Runtime)"
+command = "uvx"
+args = ["google-colab-cli", "ssh", "--gpu", "t4", "--command", "{BOOTSTRAP_SCRIPT}"]
+idle_timeout_secs = 900
+```
+
+### 6.3 Zero-Touch 自動ツールセットアップ (`stderr` ログ分離 + `mise` / `uv`)
+
+手動での環境構築を一切不要にするため、`{BOOTSTRAP_SCRIPT}`
+内では以下の手順が全自動で実行されます。この際、**セットアップの出力はすべて
+`stderr` (`>&2`) にリダイレクト**し、`stdout` は `fxg daemon --stdio`
+のプロトコル通信専用に保護します。
+
+```bash
+# 自動生成されるブートストラップ処理の流れ
+set -eu
+{
+  echo "[fxg-bootstrap] Installing fxg & mise..."
+  curl -fsSL https://github.com/nazo6/flexagent/releases/latest/download/fxg-linux-x86_64 -o /tmp/fxg
+  chmod +x /tmp/fxg
+  /tmp/fxg bootstrap-workspace --repo "$FXG_GIT_URL" --branch "$FXG_GIT_BRANCH" --dir /tmp/workspace
+} >&2
+
+# セットアップ完了後、stdout/stdin を用いてデーモン通信を開始
+exec /tmp/fxg daemon --stdio --ephemeral --workspace /tmp/workspace
+```
+
+#### `fxg bootstrap-workspace` が自動で行うこと
+
+1. **スタンドアロンツールマネージャ (`mise` / `uv`) の配置**:
+   - 単一バイナリである `mise` と `uv` を `~/.local/bin`
+     にプリビルド取得します（root権限・`apt` 不要、数秒で完了）。
+2. **リポジトリの構成ファイルからのゼロコンフィグ自動導入**:
+   - クローンしたリポジトリのルートを検査し、設定ファイルが存在すれば対応するツールチェインのプリビルドバイナリを
+     `mise install --yes` で自動導入します：
+     - `Cargo.toml` / `rust-toolchain.toml` ➔ `rust` (`cargo`, `rustc`)
+     - `package.json` / `.node-version` ➔ `node`（およびロックファイルに応じて
+       `pnpm` / `bun` / `yarn`）
+     - `pyproject.toml` / `.python-version` ➔ `uv` による Python
+       ランタイム＆仮想環境構築
+     - `mise.toml` / `.tool-versions` ➔ 記載された全ツール
+     - 標準必須CLI（`git`, `ripgrep`, `fd`, `jq`, `gh`）
+3. **`.fxg.toml` によるプロジェクト固有初期化（任意）**:
+   - リポジトリに `.fxg.toml` の `[bootstrap]`
+     セクションがある場合は、追加指定された `tools`
+     と初期化コマンド（`setup = ["cargo fetch", "pnpm install --frozen-lockfile"]`
+     等）を自動実行します。
+
+### 6.4 秘密情報をVMに残さない Git Credential Proxy と破棄前の成果物退避
+
+1. **Git Credential Proxy（VM内への秘密鍵・PAT配置ゼロ）**:
+   - 一時VMやColabのディスクに個人のSSH秘密鍵や恒久的なGitHub
+     PATを保存しません。
+   - `fxg daemon --stdio` は自分自身を `GIT_ASKPASS`（および Git credential
+     helper）として設定します。VM内で `git clone` / `git fetch` / `git push`
+     が走ると、すでに繋がっている `stdio` パイプ上で
+     `NodeToServerMsg::GitCredentialRequest`
+     を中央サーバーへ送り、中央サーバーから対象リポジトリの認証トークンをオンメモリで受け取ってGitへ渡します。
+2. **破棄前の Graceful Drain と Git Bundle 自動退避**:
+   - 一時VMはプロセス終了とともにディスクが消滅するため、終了前に中央サーバーから
+     `ServerToNodeMsg::DrainAndShutdown` を送信します。
+   - `fxg daemon`
+     は未送信のイベントログをすべてフラッシュ（`EventBatchPush`）した上で、ワークスペースの未プッシュコミット・未コミット変更を
+     **`git bundle create` で単一バンドルデータに固め、`WorkspaceBundleUpload`
+     メッセージとして中央サーバーへ退避**します。
+   - これにより、一時VMが破棄された後でも、中央サーバーのUI上で差分を閲覧したり、別のノード（手元のWindows
+     PC等）へ引き継いでセッションを `Fork` / 再開できます。
+
+---
+
+## 7. セキュリティアーキテクチャ（LAN限定運用とブラウザ攻撃対策）
 
 FlexAgentのWeb UIは、エージェントを通じたファイル変更・コマンド実行やWeb
 PTY（対話シェル）の操作を可能にするため、実質的に**リモートコード実行（RCE）権限**を持ちます。LAN内での運用であっても、ブラウザを経由したローカル攻撃（CSRF
 / DNS Rebinding / Cross-Site WebSocket
 Hijacking）や不正アクセスを防ぐため、以下の多層防御モデルを標準仕様として組み込みます。
 
-### 6.1 ネットワーク境界の原則（最小露出）
+### 7.1 ネットワーク境界の原則（最小露出）
 
 - **中央サーバー (`fxg server`)**:
   - 家庭内LAN、社内プライベートLAN、または **Tailscale / WireGuard**
@@ -238,7 +396,7 @@ Hijacking）や不正アクセスを防ぐため、以下の多層防御モデ�
   - 同一LAN内の他端末から直接PCの `:7860`
     を叩くことはできず、すべてのリモート操作は中央サーバー経由で中継されます。
 
-### 6.2 ブラウザ固有の攻撃防止（Localhost保護）
+### 7.2 ブラウザ固有の攻撃防止（Localhost保護）
 
 開発者が日常的にPCでWebサイトを閲覧する際、悪意あるWebサイト内のJavaScriptが
 `http://localhost:7860` や `ws://localhost:7860`
@@ -253,7 +411,7 @@ Hijacking）や不正アクセスを防ぐため、以下の多層防御モデ�
      `Origin` ヘッダを検証し、許可されていない外部ドメイン（例:
      `http://evil.com`）からの接続を一切受け付けません。
 
-### 6.3 認証トークンモデルとCookie注入
+### 7.3 認証トークンモデルとCookie注入
 
 1. **暗号論的トークンの自動生成**:
    - 初回起動時（または
@@ -268,10 +426,11 @@ Hijacking）や不正アクセスを防ぐため、以下の多層防御モデ�
      ヘッダでのみ受け付け、未認証アクセスはローカルであっても `401 Unauthorized`
      で遮断します。
 3. **Node ⇔ Server 間のペアリング認証**:
-   - 各ノードが中央サーバーのWebSocketへ接続する際、`Authorization: Bearer <FXG_NODE_TOKEN>`
-     で認証します。
+   - 常駐ノードが中央サーバーのWebSocketへ接続する際、`Authorization: Bearer <FXG_NODE_TOKEN>`
+     で認証します（一時ノードは中央サーバー自身が起動した子プロセスの `stdio`
+     パイプ直結であるため、ネットワーク越しのトークン露出自体が発生しません）。
 
-### 6.4 Web PTY の制限とリモートポリシー
+### 7.4 Web PTY の制限とリモートポリシー
 
 Web PTY（対話シェル起動）は最も権限が強いため、以下の防御ポリシーを提供します：
 
@@ -280,11 +439,12 @@ Web PTY（対話シェル起動）は最も権限が強いため、以下の防�
     `PtySpawn` を無効化可能（`allow_remote_pty = false`）。
   - この場合、スマホ等のWebUIからは「エージェントへの指示とツールの承認/却下」のみが行え、自由なシェルの直接実行は遮断されます（ローカル端末直結時のみPTY利用可能）。
 
-### 6.5 緊急キルスイッチ（Panic Button）と監査ログ
+### 7.5 緊急キルスイッチ（Panic Button）と監査ログ
 
 - **キルスイッチ (Panic Button)**:
   - CLI（`fxg kill-all`）またはWeb
     UIのヘッダーからワンタップで、現在稼働中の全ノード・全セッションのプロセスツリー（Windows
-    Job Object / POSIX Process Group）およびPTYを即時強制停止します。
+    Job Object / POSIX Process
+    Group）および一時VM子プロセス・PTYを即時強制停止します。
 - **監査ログ (Audit Log)**:
-  - リモートからのプロンプト送信、ツール承認（`PermissionResolved`）、Worktree操作、セッション起動の送信元（IP、クライアント種別、トークンID）をすべてDBへ永続記録します。
+  - リモートからのプロンプト送信、ツール承認（`PermissionResolved`）、Worktree操作、一時VMプロビジョニング、セッション起動の送信元（IP、クライアント種別、トークンID）をすべてDBへ永続記録します。

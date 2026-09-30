@@ -3,7 +3,8 @@
 `crates/fxg-protocol` クレートに定義する共通データ型と、3つの通信経路（① Node ⇔
 Server WebSocket、② Client ⇔ Server/Node HTTP+WS、③ CLI ⇔ Node Local
 IPC）のプロトコル仕様です。 すべての構造体に
-`#[derive(Serialize, Deserialize, ts_rs::TS)]` を付与し、`ui/src/generated/`
+`#[derive(Serialize, Deserialize, ts_rs::TS)]`
+を付与し、`ui/src/lib/generated/`（SvelteKit の `$lib/generated/`）
 へTypeScriptの型定義を自動出力します。
 
 ---
@@ -97,7 +98,11 @@ pub enum UnifiedEventPayload {
         available_commands: Vec<CommandInfo>,
         config_options: Vec<ConfigOptionInfo>,
     },
-    /// セッション状態の変化
+    /// 一時VMプロビジョニング・自動ツール構築 (stderr) の進捗ログ行
+    BootstrapLog {
+        line: String,
+    },
+    /// セッション状態の変化 ('provisioning' | 'bootstrapping' | 'idle' | 'running' | ...)
     StatusChanged {
         status: SessionStatus,
         error_message: Option<String>,
@@ -107,10 +112,24 @@ pub enum UnifiedEventPayload {
 
 ---
 
-## 2. Node ⇔ Central Server 間 WebSocket プロトコル
+## 2. Node ⇔ Central Server 間プロトコル (WebSocket & Stdio Pipe 共通)
 
-- **エンドポイント**: `wss://<server-host>/api/v1/node/ws`
-- **認証**: `Authorization: Bearer <FXG_NODE_TOKEN>` ヘッダ
+常駐ノードと一時VMノードは、トランスポート層が異なるだけで**100%同一のメッセージ型
+(`NodeToServerMsg` / `ServerToNodeMsg`)** を共有します：
+
+- **トランスポート A（常駐ノード用: Outbound WebSocket）**:
+  - **エンドポイント**: `wss://<server-host>/api/v1/node/ws`
+  - **認証**: `Authorization: Bearer <FXG_NODE_TOKEN>` ヘッダ
+- **トランスポート B（一時VM・サンドボックスノード用: Stdio Pipe
+  `fxg daemon --stdio`）**:
+  - **チャネル**:
+    中央サーバーが子プロセスとして起動したプロビジョナーコマンド（`docker`,
+    `incus`, `uvx google-colab-cli`, `ssh` 等）の **`stdout`
+    (`NodeToServerMsg`)** および **`stdin` (`ServerToNodeMsg`)**
+  - **フレーミング**: JSON
+    Lines（1メッセージ1行の改行区切りJSON）。ブートストラップや `mise` / `uv`
+    によるツール導入ログはすべて **`stderr`** に出力され、`BootstrapLog`
+    イベントとしてUIへストリーム配信されます。
 
 ```rust
 /// Node -> Server への送信メッセージ
@@ -124,6 +143,7 @@ pub enum NodeToServerMsg {
         os: String,
         arch: String,
         version: String,
+        is_ephemeral: bool,
         installed_agents: Vec<String>,
         projects: Vec<NodeProjectReport>,
     },
@@ -163,6 +183,23 @@ pub enum NodeToServerMsg {
         diff: Option<WorkspaceDiffResponse>,
         error: Option<String>,
     },
+    /// 一時VMからのオンメモリGit認証要求 (GIT_ASKPASS プロキシ)
+    GitCredentialRequest {
+        request_id: String,
+        repo_url: String,
+        operation: String, // "clone" | "fetch" | "push"
+    },
+    /// 一時VM破棄前の作業ツリー・コミット履歴バンドル退避 (`git bundle create`)
+    WorkspaceBundleUpload {
+        session_id: String,
+        branch: String,
+        head_commit: String,
+        bundle_b64: String,
+    },
+    /// Graceful Drain 完了通知 (これを受信後に中央サーバーが子プロセス/VMを破棄)
+    DrainComplete {
+        node_id: String,
+    },
 }
 
 /// Server -> Node への送信メッセージ
@@ -183,6 +220,7 @@ pub enum ServerToNodeMsg {
         agent_id: String,
         initial_prompt: Option<String>,
         fork_context_messages: Option<Vec<ForkHistoryItem>>, // 別ノードからの履歴引き継ぎ時
+        restore_git_bundle_b64: Option<String>,              // 一時VMから退避されたGitバンドルの復元用
     },
     /// プロンプト送信（スラッシュコマンド含む）
     SendPrompt {
@@ -241,6 +279,18 @@ pub enum ServerToNodeMsg {
         project_id: String,
         action: WorktreeAction,        // Add { branch, new_path } | Remove { path }
     },
+    /// GitCredentialRequest に対する短命トークン応答
+    GitCredentialResponse {
+        request_id: String,
+        username: String,
+        token: Option<String>,
+        error: Option<String>,
+    },
+    /// 一時VMの終了前フラッシュ＆Gitバンドル退避要求
+    DrainAndShutdown {
+        reason: String,
+        create_git_bundle: bool,
+    },
     /// 緊急キルスイッチ: ノード上で稼働中の全セッション・プロセスツリー・PTYを即時強制停止
     KillAllSessions {
         reason: String,
@@ -290,10 +340,16 @@ pub enum ServerToNodeMsg {
 - `DELETE /api/v1/projects/:id/worktrees`: 指定ノード上の Worktree
   を削除（`git worktree remove`）。
 - `GET /api/v1/nodes`:
-  ノード一覧とオンライン状態、利用可能エージェント一覧を返却。
+  ノード一覧とオンライン状態、一時ノード属性（`is_ephemeral`,
+  `lifecycle_status`）、利用可能エージェント一覧を返却。
+- `GET /api/v1/provisioners`:
+  利用可能な一時VM・サンドボックスプロビジョナー一覧（`local-docker`,
+  `local-incus`, `colab-pro` 等）を返却。
 - `GET /api/v1/sessions?project_id=...&status=...`: セッション一覧。
-- `POST /api/v1/sessions`:
-  新規セッションの開始（Worktreeパス指定可、別ノードへContext Fork可）。
+- `POST /api/v1/sessions`: 新規セッションの開始（既存の常駐 `node_id`
+  指定のほか、`provisioner`
+  指定による一時VMのオンデマンド起動＆自動セットアップ、Worktreeパス指定、別ノードや退避済みGitバンドルからのContext
+  Forkに対応）。
 - `GET /api/v1/sessions/:id/events?after_seq=0`:
   指定シーケンス以降のイベント履歴取得。
 - `GET /api/v1/sessions/:id/diff?scope=uncommitted&base=main`:

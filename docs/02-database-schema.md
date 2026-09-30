@@ -16,14 +16,18 @@ Push購読情報を管理します。
 PRAGMA journal_mode = WAL;
 PRAGMA foreign_keys = ON;
 
--- 1. ノード管理テーブル
+-- 1. ノード管理テーブル (常駐ノードおよび一時VMノード)
 CREATE TABLE nodes (
-    node_id         TEXT PRIMARY KEY,               -- UUID または 固定スラッグ (例: "win-desktop")
-    name            TEXT NOT NULL,                  -- 表示名 (例: "Home Windows PC")
+    node_id         TEXT PRIMARY KEY,               -- UUID または 固定スラッグ (例: "win-desktop", "eph-0195...")
+    name            TEXT NOT NULL,                  -- 表示名 (例: "Home Windows PC", "Colab Pro (T4)")
     os              TEXT NOT NULL,                  -- "windows" | "linux" | "macos"
     arch            TEXT NOT NULL,                  -- "x86_64" | "aarch64"
     version         TEXT NOT NULL,                  -- fxg バイナリバージョン
     installed_agents_json TEXT NOT NULL DEFAULT '[]', -- 利用可能なエージェントID一覧 (JSON配列)
+    is_ephemeral    INTEGER NOT NULL DEFAULT 0,     -- 0: 常駐ノード, 1: 一時VM/コンテナノード
+    provisioner     TEXT,                           -- 一時ノードのプロビジョナー識別子 (例: "local-docker", "local-incus", "colab-pro")
+    lifecycle_status TEXT NOT NULL DEFAULT 'ready', -- 'provisioning' | 'bootstrapping' | 'ready' | 'draining' | 'terminated' | 'error'
+    idle_timeout_secs INTEGER,                      -- アイドル自動破棄までの秒数 (一時ノード用、例: 900)
     is_online       INTEGER NOT NULL DEFAULT 0,     -- 1: 接続中, 0: 切断
     last_seen_at    INTEGER NOT NULL,               -- Unix epoch (ms)
     created_at      INTEGER NOT NULL
@@ -62,10 +66,11 @@ CREATE TABLE sessions (
     parent_session_id TEXT REFERENCES sessions(session_id), -- Fork元のセッションID
     fork_from_node_seq INTEGER,                     -- 親セッションのどのイベント(node_seq)時点からFork/Revertしたか
     title           TEXT NOT NULL DEFAULT 'New Session',
-    status          TEXT NOT NULL,                  -- 'idle' | 'running' | 'waiting_permission' | 'stopped' | 'error'
+    status          TEXT NOT NULL,                  -- 'provisioning' | 'bootstrapping' | 'idle' | 'running' | 'waiting_permission' | 'stopped' | 'error'
     current_mode    TEXT,                           -- ACP SessionMode (例: 'code', 'plan')
     available_commands_json TEXT NOT NULL DEFAULT '[]', -- ACP AvailableCommand[]
     config_options_json     TEXT NOT NULL DEFAULT '[]', -- ACP ConfigOption[]
+    git_bundle_path TEXT,                           -- 一時VM破棄時に退避された git bundle ファイルパス (別ノードでのFork/復元用)
     last_node_seq   INTEGER NOT NULL DEFAULT 0,     -- ノードから受信済みの最大 node_seq
     created_at      INTEGER NOT NULL,
     updated_at      INTEGER NOT NULL
