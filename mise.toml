@@ -35,7 +35,13 @@ run = "cargo test --workspace"
 
 [tasks.check]
 description = "fmt:check + lint + test を一括実行する (コミット前チェック)"
-depends = ["fmt:check", "lint", "test"]
+# 直列実行する: 並列に走らせると cargo のビルドディレクトリロックで
+# 相互待ちになり遅くなるため (`{ task = ... }` は順次実行)
+run = [
+  { task = "fmt:check" },
+  { task = "lint" },
+  { task = "test" },
+]
 
 # ---------------------------------------------------------------------------
 # 型生成 (ts-rs) / sqlx オフラインデータ
