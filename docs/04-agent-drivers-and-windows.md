@@ -108,8 +108,8 @@ ACPでは、エディタやオーケストレータ側が **`acp::Client` トレ
 
 ## 3. OpenCode / OpenCode2 ハイブリッド統合 (`OpenCode2Driver`)
 
-`fxg opencode`（または
-`fxg opencode2`）を実行した際、最も快適かつ高機能に使えるよう2つのモードを提供します。
+`fxg run opencode`（または
+`fxg run opencode2`）を実行した際、最も快適かつ高機能に使えるよう2つのモードを提供します。
 
 ### モードA: Server Bridge + 純正TUI Attach モード（デフォルト推奨）
 
@@ -124,7 +124,7 @@ OpenCode / OpenCode2
    クライアントとしてローカルの `opencode2 serve`
    に接続し、すべてのメッセージ・ツール実行・権限要求を `UnifiedEventPayload`
    に変換して `node.db` および中央サーバーへ同期します。
-3. **ユーザーがPCターミナルで `fxg opencode` を叩いた場合**: `fxg` CLI
+3. **ユーザーがPCターミナルで `fxg run opencode` を叩いた場合**: `fxg` CLI
    はローカルの `opencode2 serve` に対して
    `opencode2 run --attach http://127.0.0.1:<port> --session <id>`
    を実行します。

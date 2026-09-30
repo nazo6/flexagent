@@ -41,10 +41,13 @@
 - [`docs/02-database-schema.md`](docs/02-database-schema.md): `server.db` / `node.db` の SQLite スキーマ定義
 - [`docs/03-protocol-and-api.md`](docs/03-protocol-and-api.md): `fxg-protocol` 型定義、WS/Stdio/IPC メッセージ、REST API エンドポイント
 - [`docs/04-agent-drivers-and-windows.md`](docs/04-agent-drivers-and-windows.md): `AgentDriver`、ACP / `opencode2` 統合、Shadow Git Revert/Fork、Windows 固有実装
-- [`docs/05-cli-and-pwa-ui.md`](docs/05-cli-and-pwa-ui.md): CLI コマンド体系、PWA / Web Push 設計、実装マイルストーン
+- [`docs/05-cli-and-pwa-ui.md`](docs/05-cli-and-pwa-ui.md): CLI コマンド完全リファレンス、設定ファイルスキーマ (`config.toml` / `.fxg.toml`)、PWA / Web Push 設計
+- [`docs/changelog/2026-09-30-implementation-plan.md`](docs/changelog/2026-09-30-implementation-plan.md): フェーズ別の段階的実装プラン・進捗管理
 
 ## 4. 開発ルール・ワークフロー
 
 - **DRY 原則の徹底と過剰な後方互換の排除**: リファクタリングや仕様変更を行う際、楽だからと冗長な後方互換コード（ラッパー、別名引数、旧仕様のフォールバック等）を追加しないこと。関連する呼び出し元コードも含めて一貫して変更し、常に DRY (Don't Repeat Yourself) 原則を重視する。
 - **編集後チェック**: 必要に応じて TS (`svelte-check`, `oxlint`) や Rust (`cargo check`, `cargo clippy`) のチェック、lint を行う。コードを編集した際はかならず format (`cargo fmt`, `oxfmt` 等) を行う。また、`fxg-protocol` の型を変更した際は `ts-rs` の型出力を同期すること。
-- **変更履歴 (Changelog) の記録**: 大きな機能追加・リファクタリング時は `docs/changelog/YYYY-MM-DD-title.md` に記録する（同セッション内の更新は同ファイルに追記）。冒頭に **日付・対象パッケージ・対象スクリプト** を明記すること。
+- **変更履歴 (Changelog) と実装プランの記録**:
+  - **初期実装期間中 (Phase 1 〜 Phase 6)**: 新しい changelog ファイルは作成せず、[`docs/changelog/2026-09-30-implementation-plan.md`](docs/changelog/2026-09-30-implementation-plan.md) を参照し、実装の進行に合わせて同ファイル内のチェックリストおよび「実装ログ / 進捗メモ」を順次更新すること。
+  - **初期実装完了後**: 大きな機能追加・リファクタリング時は `docs/changelog/YYYY-MM-DD-title.md` に記録する（同セッション内の更新は同ファイルに追記）。冒頭に **日付・対象パッケージ・対象スクリプト** を明記すること。

@@ -9,7 +9,7 @@
 ## コアコンセプト
 
 1. **単一バイナリ (`fxg`) による完結**:
-   - Rust製の単一バイナリ `fxg` に、**CLI (`fxg opencode`,
+   - Rust製の単一バイナリ `fxg` に、**CLI (`fxg run`,
      `fxg attach`)**、**ノードデーモン (`fxg daemon`)**、**中央サーバー
      (`fxg server`)**、および **Web UI / PWA (`rust-embed`)**
      をすべて内包します。
@@ -53,7 +53,7 @@
 | **[02-database-schema.md](./02-database-schema.md)**                     | 中央サーバー (`server.db`) とノードデーモン (`node.db`) のSQLiteスキーマ定義・一時ノード管理・FTS5検索・監査ログ      |
 | **[03-protocol-and-api.md](./03-protocol-and-api.md)**                   | 共通型 (`fxg-protocol`)、Node⇔Server間通信 (WS & Stdio)、Git認証プロキシ/Bundle退避、Client API、ローカルIPC          |
 | **[04-agent-drivers-and-windows.md](./04-agent-drivers-and-windows.md)** | `AgentDriver` トレイト、ACP Registry自動解決、`opencode2` ハイブリッド統合、Windows固有実装                           |
-| **[05-cli-and-pwa-ui.md](./05-cli-and-pwa-ui.md)**                       | `fxg` CLIコマンド体系、一時VM起動UX、PWA + Web Push フロントエンド、キルスイッチUI、段階的実装ロードマップ            |
+| **[05-cli-and-pwa-ui.md](./05-cli-and-pwa-ui.md)**                       | `fxg` CLIコマンド完全リファレンス、設定ファイルスキーマ (`config.toml` / `.fxg.toml`)、PWA + Web Push 設計            |
 
 ---
 

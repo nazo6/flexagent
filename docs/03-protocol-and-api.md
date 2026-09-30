@@ -409,7 +409,7 @@ xterm互換アダプター）とノード上の ConPTY / Unix PTY
 ### 主なIPCメソッド
 
 1. `EnsureSession { cwd, agent_id, extra_args } -> { session_id, attach_mode }`:
-   - `fxg opencode` 実行時に呼ばれ、デーモン側でセッションを開始します。
+   - `fxg run opencode` 実行時に呼ばれ、デーモン側でセッションを開始します。
    - `attach_mode` には以下のいずれかが返ります：
      - `AcpTui`: `fxg` CLI自身の内蔵TUI (`ratatui`)
        でIPCストリームを描画するモード。

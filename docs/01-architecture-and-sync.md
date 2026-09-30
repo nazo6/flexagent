@@ -12,7 +12,7 @@ flowchart TB
     subgraph Clients["クライアント群"]
         AndroidPWA["Android PWA<br/>(Web Push + WS)"]
         Browser["PC Browser / PWA"]
-        CLI["fxg CLI / TUI<br/>(`fxg opencode`, `fxg attach`)"]
+        CLI["fxg CLI / TUI<br/>(`fxg run`, `fxg attach`)"]
     end
 
     subgraph Central["中央サーバー (`fxg server`) - LAN / VPN限定"]
@@ -64,7 +64,7 @@ flowchart TB
   / Google Colab (`google-colab-cli`)
   等のコマンドを子プロセスとしてスポーンし、その標準入出力パイプ上で
   `fxg daemon --stdio --ephemeral` を直結起動。
-- **CLI**: 開発者がターミナルで `fxg opencode` や `fxg antigravity` を実行。
+- **CLI**: 開発者がターミナルで `fxg run opencode` や `fxg run antigravity` を実行。
 
 ---
 
@@ -209,14 +209,15 @@ PWAから新規セッションを開始する際は：
 ```text
 Logical Project (例: github.com/nazo6/flexagent)
  └── Node (例: Home-Win)
-      ├── Main Worktree (D:\ghq\...\flexagent) [branch: main]
-      ├── Worktree A    (D:\ghq\...\flexagent-feat-auth) [branch: feat/auth]  <-- Session #1
-      └── Worktree B    (D:\ghq\...\flexagent-fix-bug)  [branch: fix/bug]    <-- Session #2
+      ├── Main Worktree (D:\ghq\...\flexagent)                                    [branch: main]
+      ├── Worktree A    (~/.flexagent/worktrees/github.com-nazo6-flexagent/feat-auth) [branch: feat/auth]  <-- Session #1
+      └── Worktree B    (~/.flexagent/worktrees/github.com-nazo6-flexagent/fix-bug)   [branch: fix/bug]    <-- Session #2
 ```
 
 - 各ノードの `fxg daemon` は `git worktree list --porcelain`
   を定期・起動時に実行し、同一リポジトリに属するすべての
   Worktree（パス、ブランチ、HEADコミット）を自動検出して中央サーバーへ報告します。
+- `fxg` が新規作成する Worktree は、親フォルダを散らかさないようデフォルトで `~/.flexagent/worktrees/<project>/<branch>` に集約されます（`config.toml` / `.fxg.toml` の `worktree_dir_template` で変更可能）。
 - 各セッションは特定の `(node_id, local_path)`（特定の
   Worktree）にバインドされます。これにより、同一マシン上で複数エージェントを走らせても作業ツリーやブランチの競合が発生しません。
 
@@ -225,11 +226,11 @@ Logical Project (例: github.com/nazo6/flexagent)
 GUI（Web UI / PWA）やCLIから以下のWorktree操作をシームレスに実行できます：
 
 1. **新規Worktree作成とセッション同時起動**:
-   - `fxg session new --worktree feat/new-api` または
+   - `fxg run opencode --worktree feat/new-api`（または `fxg worktree add feat/new-api`）や
      GUIの「＋新規Worktreeで開始」から、`git worktree add -b feat/new-api <path> <base_branch>`
-     を自動実行してそのパスでエージェントを立ち上げます。
+     （および `.fxg.toml` の `copy_files` / `post_create` フック）を自動実行してそのパスでエージェントを立ち上げます。
 2. **作業完了後の後片付け**:
-   - マージ後またはセッション完了時に、GUIからワンクリックで Worktree
+   - マージ後またはセッション完了時に、CLI（`fxg worktree remove`）やGUIからワンクリックで Worktree
      ディレクトリを安全にクリーンアップ（`git worktree remove`）できます。
 
 ---
