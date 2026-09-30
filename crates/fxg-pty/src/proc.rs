@@ -119,7 +119,7 @@ impl WinJobGuard {
         let job = win32job::Job::create()?;
         let mut info = job.query_extended_limit_info()?;
         info.limit_kill_on_job_close();
-        job.set_extended_limit_info(&mut info)?;
+        job.set_extended_limit_info(&info)?;
         Ok(Self { job })
     }
 
@@ -245,10 +245,10 @@ mod tests {
     #[cfg(windows)]
     fn wait_for_pid_file(path: &Path) -> u32 {
         for _ in 0..150 {
-            if let Ok(text) = std::fs::read_to_string(path) {
-                if let Ok(pid) = text.trim().parse::<u32>() {
-                    return pid;
-                }
+            if let Ok(text) = std::fs::read_to_string(path)
+                && let Ok(pid) = text.trim().parse::<u32>()
+            {
+                return pid;
             }
             std::thread::sleep(std::time::Duration::from_millis(100));
         }
