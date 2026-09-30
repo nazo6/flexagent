@@ -42,16 +42,39 @@ impl IpcClient {
     }
 
     /// エンドポイントへ接続する (Windows: Named Pipe)。
+    ///
+    /// サーバーが次のパイプインスタンスを用意するまでの間、
+    /// `ERROR_PIPE_BUSY` (231) が返ることがある。Windows の標準手順
+    /// (`WaitNamedPipe`) と同様に短いリトライで吸収する。
     #[cfg(windows)]
     pub async fn connect(endpoint: &str) -> Result<Self, NodeError> {
         use tokio::net::windows::named_pipe::ClientOptions;
 
-        let stream = ClientOptions::new()
-            .open(endpoint)
-            .map_err(|err| NodeError::Server(format!("failed to connect to {endpoint}: {err}")))?;
-        Ok(Self {
-            stream: Box::new(stream),
-        })
+        let mut last_error: Option<std::io::Error> = None;
+        for _ in 0..100 {
+            match ClientOptions::new().open(endpoint) {
+                Ok(stream) => {
+                    return Ok(Self {
+                        stream: Box::new(stream),
+                    });
+                }
+                Err(err) if err.raw_os_error() == Some(crate::error::PIPE_BUSY) => {
+                    last_error = Some(err);
+                    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                }
+                Err(err) => {
+                    return Err(NodeError::Server(format!(
+                        "failed to connect to {endpoint}: {err}"
+                    )));
+                }
+            }
+        }
+        let err = last_error
+            .map(|err| err.to_string())
+            .unwrap_or_else(|| "all pipe instances are busy".to_owned());
+        Err(NodeError::Server(format!(
+            "failed to connect to {endpoint}: {err}"
+        )))
     }
 
     /// 1メッセージを送信する (レスポンスを待たない)。

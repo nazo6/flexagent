@@ -65,6 +65,10 @@ pub async fn check_endpoint_available(endpoint: &str) -> Result<(), NodeError> {
         Ok(_) => Err(NodeError::Server(format!(
             "another daemon is already listening on {endpoint}"
         ))),
+        // ERROR_PIPE_BUSY (231): 稼働中だが全インスタンスが接続処理中
+        Err(err) if err.raw_os_error() == Some(crate::error::PIPE_BUSY) => Err(NodeError::Server(
+            format!("another daemon is already listening on {endpoint}"),
+        )),
         // ERROR_FILE_NOT_FOUND (2) なら未起動。その他のエラーは bind 時に検出する
         Err(_) => Ok(()),
     }
@@ -119,16 +123,22 @@ pub async fn serve(
 ) -> Result<(), NodeError> {
     use tokio::net::windows::named_pipe::ServerOptions;
 
-    tracing::info!(endpoint = %endpoint, "local ipc server listening (named pipe)");
-    loop {
-        // 接続ごとに新しいパイプインスタンスを用意する
-        let server = ServerOptions::new()
-            .first_pipe_instance(false)
-            .create(&endpoint)
-            .map_err(|err| {
-                NodeError::Server(format!("failed to create named pipe {endpoint}: {err}"))
-            })?;
+    let create_instance = |first: bool| {
+        let mut options = ServerOptions::new();
+        options.first_pipe_instance(first);
+        options.create(&endpoint).map_err(|err| {
+            NodeError::Server(format!("failed to create named pipe {endpoint}: {err}"))
+        })
+    };
 
+    tracing::info!(endpoint = %endpoint, "local ipc server listening (named pipe)");
+
+    // 接続の合間に listening インスタンスが消えると、クライアントが
+    // ERROR_PIPE_BUSY (231) を受け取る (CI: windows-latest で検出)。
+    // 次のインスタンスを先に用意してから現行インスタンスの接続を待つ。
+    let mut server = create_instance(false)?;
+    loop {
+        let next = create_instance(false)?;
         tokio::select! {
             _ = shutdown.changed() => break,
             connected = server.connect() => {

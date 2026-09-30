@@ -2,6 +2,13 @@
 
 use std::path::PathBuf;
 
+/// Windows の `ERROR_PIPE_BUSY` (231)。
+///
+/// Named Pipe の全インスタンスが接続中で、`WaitNamedPipe` で待つべき状態。
+/// サーバー / クライアント双方から参照するため here に定義する。
+#[cfg(windows)]
+pub(crate) const PIPE_BUSY: i32 = 231;
+
 /// ノードデーモンのエラー。
 #[derive(Debug, thiserror::Error)]
 pub enum NodeError {
