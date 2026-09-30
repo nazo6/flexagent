@@ -283,15 +283,21 @@ END;
   UI（`http://localhost:7860`）が `node.db` を読む際も、中央サーバーWeb UIが
   `server.db` を読む際も、同じJSONレスポンス型（`SessionDetail`,
   `SessionEvent`）を返却できます。
-- **スキーマ対称性の維持**: `snapshot_tree_hash` / `permission_requests` / `audit_logs` / FTS5 は
-  `server.db` と `node.db` の両方に存在させ、マイグレーションも共通クレート `fxg-db` で管理します。
-- **ローカル差分同期カーソル (`local_seq`)**: `local_session_events.id` (AUTOINCREMENT) を
-  `Subscribe.last_local_seq` の基準として使用します（中央サーバー接続時は `global_seq` を使用）。
-- **メタデータ再送 (`metadata_synced`)**: `local_sessions.metadata_synced = 0` のセッションは、
-  中央サーバー再接続時に `SessionUpsert` として再送し、ACK 後に `1` へ更新します。
+- **スキーマ対称性の維持**: `snapshot_tree_hash` / `permission_requests` /
+  `audit_logs` / FTS5 は `server.db` と `node.db`
+  の両方に存在させ、マイグレーションも共通クレート `fxg-db` で管理します。
+- **ローカル差分同期カーソル (`local_seq`)**: `local_session_events.id`
+  (AUTOINCREMENT) を `Subscribe.last_local_seq`
+  の基準として使用します（中央サーバー接続時は `global_seq` を使用）。
+- **メタデータ再送 (`metadata_synced`)**: `local_sessions.metadata_synced = 0`
+  のセッションは、 中央サーバー再接続時に `SessionUpsert` として再送し、ACK 後に
+  `1` へ更新します。
 - **日本語・ソースコード検索に強い `trigram` トークナイザ**: SQLite FTS5の
   `tokenize='trigram'`
   を使うことで、形態素解析器なしで日本語の会話（「認証エラー」「データベース」）も関数名・識別子（`OpenCode2Driver`）も高速に全文検索できます。
-  - 制約: trigram は 3 文字未満の検索語ではヒットしないため、検索 UI では 3 文字以上を要求するか、LIKE 検索へフォールバックします。
-- **`searchable_text` の生成責務**: イベントを永続化する側（ノード / サーバー双方の受信ハンドラ）が
-  `payload_json` から検索対象テキストを抽出して書き込みます（`TerminalOutput.data_b64` 等のバイナリ系は除外）。
+  - 制約: trigram は 3 文字未満の検索語ではヒットしないため、検索 UI では 3
+    文字以上を要求するか、LIKE 検索へフォールバックします。
+- **`searchable_text` の生成責務**: イベントを永続化する側（ノード /
+  サーバー双方の受信ハンドラ）が `payload_json`
+  から検索対象テキストを抽出して書き込みます（`TerminalOutput.data_b64`
+  等のバイナリ系は除外）。

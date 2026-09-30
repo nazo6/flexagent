@@ -60,11 +60,13 @@ flowchart TB
 - **常駐ノードデーモン**: 各開発マシン（Windows, Mac, Linux, WSL）で
   `fxg daemon` を常駐（デフォルトで `127.0.0.1:7860`
   のローカルループバックのみバインド）。
-- **一時VM / サンドボックスノード**: 中央サーバーが Docker / Incus
-  / Google Colab (`google-colab-cli`)
+- **一時VM / サンドボックスノード**: 中央サーバーが Docker / Incus / Google
+  Colab (`google-colab-cli`)
   等のコマンドを子プロセスとしてスポーンし、その標準入出力パイプ上で
-  `fxg daemon --stdio --ephemeral` を直結起動（CLI の `--provisioner` も中央サーバーの API 経由で要求されるため、中央サーバー必須）。
-- **CLI**: 開発者がターミナルで `fxg run opencode` や `fxg run antigravity` を実行。
+  `fxg daemon --stdio --ephemeral` を直結起動（CLI の `--provisioner`
+  も中央サーバーの API 経由で要求されるため、中央サーバー必須）。
+- **CLI**: 開発者がターミナルで `fxg run opencode` や `fxg run antigravity`
+  を実行。
 
 ---
 
@@ -81,12 +83,15 @@ Source of Truth）は実行中のノード (`node.db`)** に置きます。中�
 - `event_id`: **UUID
   v7**（タイムスタンプ順序付きUUID。重複排除・冪等性保証に使用）
 - `session_id`: **UUID v7**（セッション識別子）
-- `node_seq`: **セッション単位の単調増加整数 (`1, 2, 3...`)**。ノード側で採番。セッション内の論理順序は常にこの値を正とする。
+- `node_seq`: **セッション単位の単調増加整数
+  (`1, 2, 3...`)**。ノード側で採番。セッション内の論理順序は常にこの値を正とする。
 - `global_seq`: 中央サーバーの `server.db`
   に取り込まれた際にサーバー側で採番される全体シーケンス番号（中央サーバー接続クライアントが「前回取得位置からの差分」を購読するために使用）。
-- `local_seq`: `node.db` の `local_session_events.id`
-  (AUTOINCREMENT) が持つローカル連番。ローカルノード接続クライアント（`localhost:7860`）が差分同期カーソルとして使用する。
-- `created_at`: ノード側のローカル時計（Unix epoch ms）で記録。複数ノード横断の並び（承認Inbox等）は NTP 同期された時計を前提とする。
+- `local_seq`: `node.db` の `local_session_events.id` (AUTOINCREMENT)
+  が持つローカル連番。ローカルノード接続クライアント（`localhost:7860`）が差分同期カーソルとして使用する。
+- `created_at`: ノード側のローカル時計（Unix epoch
+  ms）で記録。複数ノード横断の並び（承認Inbox等）は NTP
+  同期された時計を前提とする。
 
 ### 2.2 書き込みと同期のフロー (Outbox パターン)
 
@@ -125,14 +130,24 @@ sequenceDiagram
 
 思考過程やメッセージ生成のトークン単位チャンク（`AgentMessage`,
 `AgentThought`）を1トークンずつSQLiteへ `INSERT`
-するとディスクI/OとDBサイズが増大するため、`fxg daemon` は「配信」と「永続化」を分離して処理します：
+するとディスクI/OとDBサイズが増大するため、`fxg daemon`
+は「配信」と「永続化」を分離して処理します：
 
 1. **メモリ上のリアルタイム配信（全チャンク）**:
-   チャンクが到着した瞬間、メモリ上のブロードキャストチャネルを通じてローカルIPC / Local WS（CLI・ローカルUI）および中央サーバーWebSocket（`LiveStreamDelta`）へ**リアルタイム（遅延なし）**でそのまま流します。この経路はDBを経由しません。
+   チャンクが到着した瞬間、メモリ上のブロードキャストチャネルを通じてローカルIPC
+   / Local
+   WS（CLI・ローカルUI）および中央サーバーWebSocket（`LiveStreamDelta`）へ**リアルタイム（遅延なし）**でそのまま流します。この経路はDBを経由しません。
 2. **SQLiteへの永続化（ターン完了時のみ）**:
-   ストリーミング途中（`is_complete = false`）の中間状態は永続化しません。**ターン完了時に完成したイベント（`is_complete = true`）のみ**を、`node_seq` を1つ消費した単一イベントとしてSQLite (`node.db` / `server.db`) へ書き込みます。
-   - ユーザーメッセージ (`UserMessage`)、ツール呼び出し (`ToolCall`)、権限要求/解決 (`PermissionRequest` / `PermissionResolved`)、状態変化 (`StatusChanged`) などの離散イベントは発生時に即時永続化します。
-   - **トレードオフ**: クライアントがターン途中で切断した場合、未完了のメッセージ・思考は履歴に残りません（再接続後の履歴には完成済みイベントのみが表示されます）。`LiveStreamDelta` は再接続時にリプレイされません。
+   ストリーミング途中（`is_complete = false`）の中間状態は永続化しません。**ターン完了時に完成したイベント（`is_complete = true`）のみ**を、`node_seq`
+   を1つ消費した単一イベントとしてSQLite (`node.db` / `server.db`)
+   へ書き込みます。
+   - ユーザーメッセージ (`UserMessage`)、ツール呼び出し
+     (`ToolCall`)、権限要求/解決 (`PermissionRequest` /
+     `PermissionResolved`)、状態変化 (`StatusChanged`)
+     などの離散イベントは発生時に即時永続化します。
+   - **トレードオフ**:
+     クライアントがターン途中で切断した場合、未完了のメッセージ・思考は履歴に残りません（再接続後の履歴には完成済みイベントのみが表示されます）。`LiveStreamDelta`
+     は再接続時にリプレイされません。
 
 ---
 
@@ -158,21 +173,36 @@ Android PWAやWeb UIから「プロンプト送信 (`prompt`)」「権限承認
 
 ### 3.1 同期の鮮度と競合解決（マルチクライアント整合性）
 
-ローカル直結 (`localhost:7860`) と中央サーバー経由 (`:8080`) の2経路で同一セッションを閲覧・操作しても、**セッション状態の論理的な正解は常にノード (`node.db`) が一元管理**するため、データの不整合は発生しません。表示タイムラグと操作競合は以下の原則で扱います：
+ローカル直結 (`localhost:7860`) と中央サーバー経由 (`:8080`)
+の2経路で同一セッションを閲覧・操作しても、**セッション状態の論理的な正解は常にノード
+(`node.db`)
+が一元管理**するため、データの不整合は発生しません。表示タイムラグと操作競合は以下の原則で扱います：
 
 1. **表示鮮度の原則**:
    - ローカル直結: イベント発生と同時（ミリ秒未満〜数ms）に反映。
-   - 中央サーバー経由: ノード→サーバーの同期 + 配信の分だけ遅延する（目安: LAN で十数ms、VPN 越しで数十〜数百ms）。この差は許容仕様とし、UI は未同期イベント件数（Outbox 残数）と最終同期時刻を表示して状態を可視化する。
+   - 中央サーバー経由: ノード→サーバーの同期 + 配信の分だけ遅延する（目安: LAN
+     で十数ms、VPN 越しで数十〜数百ms）。この差は許容仕様とし、UI
+     は未同期イベント件数（Outbox
+     残数）と最終同期時刻を表示して状態を可視化する。
 2. **重複排除と順序付け**:
-   - クライアントは受信イベントを `event_id` / `(session_id, node_seq)` をキーに upsert し、重複配信（`LiveStreamDelta` と永続イベント、再接続時のリプレイ）を無害化する。
-   - ターン途中の `LiveStreamDelta` は `message_id` / `thought_id` でマージ表示し、永続イベント到着時に確定表示へ置き換える。
-   - セッション内の表示順は `node_seq` を正とし、`global_seq` / `local_seq` は差分再開カーソルとしてのみ使用する。
+   - クライアントは受信イベントを `event_id` / `(session_id, node_seq)` をキーに
+     upsert し、重複配信（`LiveStreamDelta`
+     と永続イベント、再接続時のリプレイ）を無害化する。
+   - ターン途中の `LiveStreamDelta` は `message_id` / `thought_id`
+     でマージ表示し、永続イベント到着時に確定表示へ置き換える。
+   - セッション内の表示順は `node_seq` を正とし、`global_seq` / `local_seq`
+     は差分再開カーソルとしてのみ使用する。
 3. **コマンドの冪等性と競合解決**:
-   - 全コマンドは `command_id` を持ち、ノードは直近の `command_id` を一定時間保持して重複送信（ダブルタップ・WS再送）を `COMMAND_DUPLICATE` として破棄する。
-   - エージェント実行中（`running`）の `SendPrompt` は、ノード側で Pending Queue に蓄積しターン完了後に順次処理する（UI 上も Pending Queue として表示）。
-   - ノードが中央サーバーから切断中のリモートコマンドは到達不能のため、サーバーは即座に `NODE_OFFLINE` エラーを返却する（キューイングしない）。
+   - 全コマンドは `command_id` を持ち、ノードは直近の `command_id`
+     を一定時間保持して重複送信（ダブルタップ・WS再送）を `COMMAND_DUPLICATE`
+     として破棄する。
+   - エージェント実行中（`running`）の `SendPrompt` は、ノード側で Pending Queue
+     に蓄積しターン完了後に順次処理する（UI 上も Pending Queue として表示）。
+   - ノードが中央サーバーから切断中のリモートコマンドは到達不能のため、サーバーは即座に
+     `NODE_OFFLINE` エラーを返却する（キューイングしない）。
 4. **コマンド結果の相関**:
-   - `ServerToNodeMsg` の各コマンドに対する `CommandResult` (`command_id` 付き) は、要求元クライアントへそのまま返却する（成功/失敗・エラーコード）。
+   - `ServerToNodeMsg` の各コマンドに対する `CommandResult` (`command_id` 付き)
+     は、要求元クライアントへそのまま返却する（成功/失敗・エラーコード）。
 
 ---
 
@@ -244,7 +274,9 @@ Logical Project (例: github.com/nazo6/flexagent)
 - 検出結果に変化（Worktree の追加・削除・ブランチ切替）があった場合、ノードは
   `NodeProjectReport` を含む `NodeHello` を再送し、`server.db` の
   `project_node_bindings` を更新します。
-- `fxg` が新規作成する Worktree は、親フォルダを散らかさないようデフォルトで `~/.flexagent/worktrees/<project>/<branch>` に集約されます（`config.toml` / `.fxg.toml` の `worktree_dir_template` で変更可能）。
+- `fxg` が新規作成する Worktree は、親フォルダを散らかさないようデフォルトで
+  `~/.flexagent/worktrees/<project>/<branch>` に集約されます（`config.toml` /
+  `.fxg.toml` の `worktree_dir_template` で変更可能）。
 - 各セッションは特定の `(node_id, local_path)`（特定の
   Worktree）にバインドされます。これにより、同一マシン上で複数エージェントを走らせても作業ツリーやブランチの競合が発生しません。
 
@@ -253,11 +285,14 @@ Logical Project (例: github.com/nazo6/flexagent)
 GUI（Web UI / PWA）やCLIから以下のWorktree操作をシームレスに実行できます：
 
 1. **新規Worktree作成とセッション同時起動**:
-   - `fxg run opencode --worktree feat/new-api`（または `fxg worktree add feat/new-api`）や
+   - `fxg run opencode --worktree feat/new-api`（または
+     `fxg worktree add feat/new-api`）や
      GUIの「＋新規Worktreeで開始」から、`git worktree add -b feat/new-api <path> <base_branch>`
-     （および `.fxg.toml` の `copy_files` / `post_create` フック）を自動実行してそのパスでエージェントを立ち上げます。
+     （および `.fxg.toml` の `copy_files` / `post_create`
+     フック）を自動実行してそのパスでエージェントを立ち上げます。
 2. **作業完了後の後片付け**:
-   - マージ後またはセッション完了時に、CLI（`fxg worktree remove`）やGUIからワンクリックで Worktree
+   - マージ後またはセッション完了時に、CLI（`fxg worktree remove`）やGUIからワンクリックで
+     Worktree
      ディレクトリを安全にクリーンアップ（`git worktree remove`）できます。
 
 ---
@@ -274,12 +309,13 @@ Node）** をサポートします。
 
 一時VMを立ち上げる際、VM側から中央サーバーへネットワーク経由で折り返し接続（WebSocketコールバック）させようとすると、Tailscale等の特定VPNへのロックインやファイアウォール/NAT越えの複雑な設定が必要になります。
 
-これを根本的に排除するため、一時ノードは
-**`fxg server` が子プロセスとしてスポーンしたプロビジョナーコマンドの標準入出力
+これを根本的に排除するため、一時ノードは **`fxg server`
+が子プロセスとしてスポーンしたプロビジョナーコマンドの標準入出力
 (`stdin / stdout`) 上で直接 `NodeToServerMsg` / `ServerToNodeMsg` (JSON Lines)
 をやり取りする `fxg daemon --stdio` 方式** を採用します。
-プロビジョナーコマンドは常に **中央サーバー (`fxg server`) ホスト上**で起動され、
-CLI の `fxg run --provisioner` も中央サーバーの API 経由で要求されます
+プロビジョナーコマンドは常に **中央サーバー (`fxg server`)
+ホスト上**で起動され、 CLI の `fxg run --provisioner` も中央サーバーの API
+経由で要求されます
 （中央サーバーが停止している環境では一時VM起動は行えません。ノード単独での一時VM起動は非対応です）。
 
 ```mermaid
@@ -367,11 +403,14 @@ exec /tmp/fxg daemon --stdio --ephemeral --workspace /tmp/workspace
 ```
 
 - **ブートストラップ時の環境変数注入**: プロビジョナー起動時に `fxg server` が
-  `FXG_GIT_URL` / `FXG_GIT_BRANCH` および**短命の `FXG_GIT_TOKEN`** を環境変数として注入します。
-  デーモン起動前の `git clone`（`bootstrap-workspace` 内）は、`bootstrap-workspace` が内部で生成する
-  `GIT_ASKPASS` ヘルパー経由で `FXG_GIT_TOKEN` を Git に渡します（URL へのトークン埋め込みは行わない）。
-  トークンは一時VMの Drain・プロセス終了とともに失効します。デーモン起動後（`exec fxg daemon --stdio` 以降）は
-  §6.4 の `GIT_ASKPASS` プロキシ（stdio パイプ経由の `GitCredentialRequest`）に切り替わります。
+  `FXG_GIT_URL` / `FXG_GIT_BRANCH` および**短命の `FXG_GIT_TOKEN`**
+  を環境変数として注入します。 デーモン起動前の
+  `git clone`（`bootstrap-workspace` 内）は、`bootstrap-workspace`
+  が内部で生成する `GIT_ASKPASS` ヘルパー経由で `FXG_GIT_TOKEN` を Git
+  に渡します（URL へのトークン埋め込みは行わない）。 トークンは一時VMの
+  Drain・プロセス終了とともに失効します。デーモン起動後（`exec fxg daemon --stdio`
+  以降）は §6.4 の `GIT_ASKPASS` プロキシ（stdio パイプ経由の
+  `GitCredentialRequest`）に切り替わります。
 
 #### `fxg bootstrap-workspace` が自動で行うこと
 
@@ -399,17 +438,22 @@ exec /tmp/fxg daemon --stdio --ephemeral --workspace /tmp/workspace
 1. **Git Credential Proxy（VM内への秘密鍵・PAT配置ゼロ）**:
    - 一時VMやColabのディスクに個人のSSH秘密鍵や恒久的なGitHub
      PATを保存しません。
-   - **ブートストラップ中**（デーモン起動前）: §6.3 のとおり、プロビジョナー起動時に注入された短命 `FXG_GIT_TOKEN` を
-     `bootstrap-workspace` の `GIT_ASKPASS` ヘルパー経由で使用します（環境変数はオンメモリで扱い、ディスクには残さない）。
-   - **デーモン起動後**: `fxg daemon --stdio` は自分自身を `GIT_ASKPASS`（および Git credential
-     helper）として設定します。VM内で `git clone` / `git fetch` / `git push`
-     が走ると、すでに繋がっている `stdio` パイプ上で
+   - **ブートストラップ中**（デーモン起動前）: §6.3
+     のとおり、プロビジョナー起動時に注入された短命 `FXG_GIT_TOKEN` を
+     `bootstrap-workspace` の `GIT_ASKPASS`
+     ヘルパー経由で使用します（環境変数はオンメモリで扱い、ディスクには残さない）。
+   - **デーモン起動後**: `fxg daemon --stdio` は自分自身を `GIT_ASKPASS`（および
+     Git credential helper）として設定します。VM内で `git clone` / `git fetch` /
+     `git push` が走ると、すでに繋がっている `stdio` パイプ上で
      `NodeToServerMsg::GitCredentialRequest`
      を中央サーバーへ送り、中央サーバーから対象リポジトリの認証トークンをオンメモリで受け取ってGitへ渡します。
 2. **破棄前の Graceful Drain と Git Bundle 自動退避（ベストエフォート）**:
    - 一時VM内のイベントは VM 内の `node.db` に蓄積し、終了時に中央サーバーから
-     `ServerToNodeMsg::DrainAndShutdown` を送信して未送信分を一括フラッシュします。
-   - **トレードオフ**: Drain 前にクラッシュ・強制終了した場合、VM 内に未送信のまま残っていたイベントは失われます（VM 内ディスクごと消滅するため）。この損失は許容仕様とします。
+     `ServerToNodeMsg::DrainAndShutdown`
+     を送信して未送信分を一括フラッシュします。
+   - **トレードオフ**: Drain 前にクラッシュ・強制終了した場合、VM
+     内に未送信のまま残っていたイベントは失われます（VM
+     内ディスクごと消滅するため）。この損失は許容仕様とします。
    - `fxg daemon`
      は未送信のイベントログをすべてフラッシュ（`EventBatchPush`）した上で、ワークスペースの未プッシュコミット・未コミット変更を
      **`git bundle create` で単一バンドルデータに固め、`WorkspaceBundleUpload`
@@ -430,7 +474,8 @@ Hijacking）や不正アクセスを防ぐため、以下の多層防御モデ�
 
 - **中央サーバー (`fxg server`)**:
   - 家庭内LAN、社内プライベートLAN、または **Tailscale / WireGuard**
-    などのプライベートVPNメッシュ内のみでの接続を前提とします。パブリックインターネットへの直接露出（ルータのポート開放・クラウドのセキュリティグループ全開放等）は行いません。`0.0.0.0` バインドはファイアウォール / VPN で隔離されたLAN内に限定して使用します。
+    などのプライベートVPNメッシュ内のみでの接続を前提とします。パブリックインターネットへの直接露出（ルータのポート開放・クラウドのセキュリティグループ全開放等）は行いません。`0.0.0.0`
+    バインドはファイアウォール / VPN で隔離されたLAN内に限定して使用します。
 - **ノードデーモン (`fxg daemon`)**:
   - ローカルWeb/WSサーバー (`LocalAPI`) は、デフォルトで
     **`127.0.0.1:7860`（ローカルループバックのみ）** に厳格バインドします。
@@ -469,12 +514,16 @@ Hijacking）や不正アクセスを防ぐため、以下の多層防御モデ�
 3. **Node ⇔ Server 間のペアリング認証（ノード個別トークン）**:
    - 常駐ノードが中央サーバーのWebSocketへ接続する際、`Authorization: Bearer <NODE_TOKEN>`
      で認証します。
-   - トークンは**ノードごとに個別発行**します。中央サーバー上で `fxg auth node-token issue <node-id>`
+   - トークンは**ノードごとに個別発行**します。中央サーバー上で
+     `fxg auth node-token issue <node-id>`
      を実行するとトークンが生成・表示され、`server.db` の `nodes` テーブルには
-     ハッシュ (`token_hash`) のみを保存します。ノード側は表示されたトークンを `~/.flexagent/node_token`
-     （または `config.toml` の `node_token`）へ設定します。
-   - サーバーは `NodeHello` の `node_id` がトークン発行対象ノードと一致することを検証し、なりすましを拒否します。
-     漏洩時は `fxg auth node-token revoke <node-id>` で個別に失効・再発行できます。
+     ハッシュ (`token_hash`) のみを保存します。ノード側は表示されたトークンを
+     `~/.flexagent/node_token` （または `config.toml` の
+     `node_token`）へ設定します。
+   - サーバーは `NodeHello` の `node_id`
+     がトークン発行対象ノードと一致することを検証し、なりすましを拒否します。
+     漏洩時は `fxg auth node-token revoke <node-id>`
+     で個別に失効・再発行できます。
    - 一時ノードは中央サーバー自身が起動した子プロセスの `stdio`
      パイプ直結であるため、ネットワーク越しのトークン露出自体が発生しません。
 
@@ -496,4 +545,6 @@ Web PTY（対話シェル起動）は最も権限が強いため、以下の防�
     Group）および一時VM子プロセス・PTYを即時強制停止します。
 - **監査ログ (Audit Log)**:
   - リモートからのプロンプト送信、ツール承認（`PermissionResolved`）、Worktree操作、一時VMプロビジョニング、セッション起動の送信元（IP、クライアント種別、トークンID）をすべてDBへ永続記録します。
-  - 中央サーバー経由の操作は `server.db`、ローカル直結（`localhost:7860` / CLI）の操作は実行ノードの `node.db` にも記録し、どちらのAPI接続でも `/api/v1/audit/logs` から参照できるようにします。
+  - 中央サーバー経由の操作は `server.db`、ローカル直結（`localhost:7860` /
+    CLI）の操作は実行ノードの `node.db` にも記録し、どちらのAPI接続でも
+    `/api/v1/audit/logs` から参照できるようにします。

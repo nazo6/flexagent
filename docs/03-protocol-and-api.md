@@ -120,7 +120,8 @@ pub enum UnifiedEventPayload {
 ### 1.1 共通補助型・エラーコード
 
 `UnifiedEventPayload` および各プロトコルメッセージから参照される補助型です。
-すべてクライアントが扱うため `#[derive(Serialize, Deserialize, ts_rs::TS)]` + `#[ts(export)]` を付与します。
+すべてクライアントが扱うため `#[derive(Serialize, Deserialize, ts_rs::TS)]` +
+`#[ts(export)]` を付与します。
 
 ```rust
 pub struct SessionSummary {
@@ -251,8 +252,8 @@ pub enum ErrorCode {
 - **トランスポート A（常駐ノード用: Outbound WebSocket）**:
   - **エンドポイント**: `wss://<server-host>/api/v1/node/ws`
   - **認証**: `Authorization: Bearer <NODE_TOKEN>` ヘッダ（ノード個別トークン。
-    `server.db.nodes.token_hash` と照合し、`NodeHello.node_id` がトークン発行対象ノードと
-    一致することを検証してなりすましを拒否する）
+    `server.db.nodes.token_hash` と照合し、`NodeHello.node_id`
+    がトークン発行対象ノードと 一致することを検証してなりすましを拒否する）
 - **トランスポート B（一時VM・サンドボックスノード用: Stdio Pipe
   `fxg daemon --stdio`）**:
   - **チャネル**:
@@ -461,17 +462,20 @@ pub enum ServerToNodeMsg {
 4. **監査ログ記録 (Audit Logging)**:
    - `session` 起動、`permission` 解決、`kill-switch` 実行、`worktree`
      操作は、クライアントIP・UA・トークンIDとともに `audit_logs` に記録。
-   - 記録先は中央サーバー経由の操作が `server.db`、ローカル直結（`localhost:7860` / CLI）の操作が
-     実行ノードの `node.db`（どちらも `/api/v1/audit/logs` で参照可能）。
+   - 記録先は中央サーバー経由の操作が
+     `server.db`、ローカル直結（`localhost:7860` / CLI）の操作が 実行ノードの
+     `node.db`（どちらも `/api/v1/audit/logs` で参照可能）。
 5. **エラーレスポンスの共通形式**:
-   - REST / WS のエラーは `{ "error": { "code": "<ErrorCode>", "message": "..." } }` に統一
-     （例: `NODE_OFFLINE`, `ALREADY_RESOLVED`, `PTY_DISABLED`）。
+   - REST / WS のエラーは
+     `{ "error": { "code": "<ErrorCode>", "message": "..." } }` に統一 （例:
+     `NODE_OFFLINE`, `ALREADY_RESOLVED`, `PTY_DISABLED`）。
 
 ### 3.1 REST API エンドポイント
 
 - `GET /api/v1/system/info`: 接続先が `central_server` か `local_node`
   か、および Web Push の VAPID Public Key を返却。ローカルノード接続時は
-  `unsynced_event_count`（Outbox 残数）と `central_connected`（中央サーバー接続状態）も返却。
+  `unsynced_event_count`（Outbox 残数）と
+  `central_connected`（中央サーバー接続状態）も返却。
 - `GET /api/v1/projects`: プロジェクト一覧と、各プロジェクトに紐づくノードおよび
   Worktree（`project_node_bindings`）を返却。
 - `GET /api/v1/projects/:id/worktrees`: 指定プロジェクトの各ノード上にある
@@ -499,36 +503,43 @@ pub enum ServerToNodeMsg {
     (`git diff HEAD`)
   - `scope=branch`: ベースブランチとの累積差分 (`git diff <base>...HEAD`)
 - `GET /api/v1/inbox`: 全セッション横断の未解決 `PermissionRequest` 一覧。
-- `POST /api/v1/sessions/:id/permissions/:req_id/respond`: 承認リクエストへの応答
-  (`selected_option_id`, `always`, `resolved_by`)。既に解決済みの場合は `ALREADY_RESOLVED`
-  を返却し（冪等）、UI 側は正常遷移として扱う。
+- `POST /api/v1/sessions/:id/permissions/:req_id/respond`:
+  承認リクエストへの応答 (`selected_option_id`, `always`,
+  `resolved_by`)。既に解決済みの場合は `ALREADY_RESOLVED` を返却し（冪等）、UI
+  側は正常遷移として扱う。
 - `POST /api/v1/search?q=...`: SQLite FTS5 を用いた全セッション横断の全文検索。
 - `POST /api/v1/push/subscribe`: Android / Desktop PWA の Web Push
   サブスクリプション登録。
 - `POST /api/v1/system/kill-switch`: **緊急停止 (Panic
   Button)**。全ノードの稼働中セッション、実行中プロセスツリー、PTYを一括強制終了。
 - `GET /api/v1/audit/logs?limit=50`:
-  監査ログ（操作日時、操作種別、送信元IP、クライアント種別）の取得。中央サーバーでは `server.db`、
-  ローカルノードでは `node.db` の `audit_logs` を参照する。
+  監査ログ（操作日時、操作種別、送信元IP、クライアント種別）の取得。中央サーバーでは
+  `server.db`、 ローカルノードでは `node.db` の `audit_logs` を参照する。
 
 ### 3.2 Client WebSocket (`/api/v1/client/ws`)
 
 1. 接続時にクライアントが
    `Subscribe { last_global_seq: Option<u64>, last_local_seq: Option<u64>, focused_session_id: Option<String> }`
    を送信する。
-   - 中央サーバー接続時は `last_global_seq`、ローカルノード接続時は `last_local_seq` を使用する（もう一方は `None`）。
-2. サーバー / ノードは該当カーソル以降の未取得イベントを即座に流し、以降はリアルタイムイベント
+   - 中央サーバー接続時は `last_global_seq`、ローカルノード接続時は
+     `last_local_seq` を使用する（もう一方は `None`）。
+2. サーバー /
+   ノードは該当カーソル以降の未取得イベントを即座に流し、以降はリアルタイムイベント
    （`SessionEventEnvelope` および `LiveStreamDelta`）をプッシュします。
-   - ローカルノード接続時は各イベントに `local_seq`（`node.db` の `id`）を付帯して返却する。ローカル接続では `global_seq` は常に `None`。
+   - ローカルノード接続時は各イベントに `local_seq`（`node.db` の
+     `id`）を付帯して返却する。ローカル接続では `global_seq` は常に `None`。
 3. クライアントからの操作（`SendPrompt`, `RespondPermission`,
    `ControlSession`）もこのWebSocket上（またはREST POST）で送信でき、結果は
    `command_id` 付きの `CommandResult` として要求元クライアントへ応答されます。
 4. **重複排除とマージ**:
-   - クライアントは受信イベントを `event_id` / `(session_id, node_seq)` をキーに upsert し、重複配信
-     （`LiveStreamDelta` と永続イベント、再接続時のリプレイ）を無害化する。
-   - ターン途中の `LiveStreamDelta` は `message_id` / `thought_id` でマージ表示し、永続イベント
+   - クライアントは受信イベントを `event_id` / `(session_id, node_seq)` をキーに
+     upsert し、重複配信 （`LiveStreamDelta`
+     と永続イベント、再接続時のリプレイ）を無害化する。
+   - ターン途中の `LiveStreamDelta` は `message_id` / `thought_id`
+     でマージ表示し、永続イベント
      （`is_complete = true`）到着時に確定表示へ置き換える。
-   - セッション内の表示順は `node_seq` を正とし、`global_seq` / `local_seq` は差分再開カーソルとしてのみ使用する。
+   - セッション内の表示順は `node_seq` を正とし、`global_seq` / `local_seq`
+     は差分再開カーソルとしてのみ使用する。
 
 ### 3.3 Client 双方向 Web PTY WebSocket (`/api/v1/pty/ws`)
 
@@ -572,6 +583,7 @@ xterm互換アダプター）とノード上の ConPTY / Unix PTY
        を子プロセス実行して純正TUIを直接表示するモード。
 2. `AttachSession { session_id, after_node_seq: Option<u64> }`:
    - 既存セッションのイベントストリーム購読＋双方向操作（プロンプト送信・承認応答・リサイズ通知）。
-     `after_node_seq` 指定時はその連番以降の履歴をリプレイしてからライブストリームへ接続する（途中切断からの再接続用）。
+     `after_node_seq`
+     指定時はその連番以降の履歴をリプレイしてからライブストリームへ接続する（途中切断からの再接続用）。
 3. `GetLocalStatus`:
    - ローカルで稼働中のセッション一覧、中央サーバーとのWebSocket接続状態、未送信Outboxイベント数を返却。
