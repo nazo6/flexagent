@@ -17,6 +17,7 @@
 pub mod auth;
 mod pty;
 mod security;
+mod static_ui;
 mod ws;
 
 use std::net::SocketAddr;
@@ -477,7 +478,7 @@ pub fn client_router<B: ClientApiBackend>(backend: B, options: ClientApiOptions)
         backend,
         options: Arc::new(options),
     };
-    Router::new()
+    let api = Router::new()
         .route("/api/v1/system/info", get(system_info::<B>))
         .route("/api/v1/system/kill-switch", post(kill_switch::<B>))
         .route("/api/v1/auth/login", post(auth_login::<B>))
@@ -514,7 +515,10 @@ pub fn client_router<B: ClientApiBackend>(backend: B, options: ClientApiOptions)
             state.clone(),
             security::security::<B>,
         ))
-        .with_state(state)
+        .with_state(state);
+    // API 以外の全パスは同梱した Web UI (SPA) を配信する。
+    // セキュリティミドルウェアの外側に置く (UI アセット自体はトークン不要) 。
+    api.fallback(get(static_ui::serve_ui))
 }
 
 // ----------------------------------------------------------------------

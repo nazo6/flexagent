@@ -16,6 +16,7 @@ use usage::{Cli, RunAsync, Subcommands};
 
 mod client;
 mod commands;
+mod service;
 mod tui;
 
 /// `fxg` ルートコマンド。
@@ -57,6 +58,10 @@ enum Commands {
     Daemon(commands::DaemonArgs),
     /// 中央サーバーをフォアグラウンド起動する (:8080)
     Server(commands::ServerArgs),
+    /// OSログイン時のバックグラウンド常駐サービスを管理する
+    Service(commands::ServiceArgs),
+    /// トークン付きURLをデフォルトブラウザで開く
+    Web(commands::WebArgs),
     /// 認証トークン管理 (token / rotate-token / node-token)
     Auth(commands::AuthArgs),
     /// 【緊急停止】ローカルの全セッション・子プロセスツリー・PTYを強制終了する

@@ -16,6 +16,7 @@ fxg-node = { path = "crates/fxg-node" }
 fxg-protocol = { path = "crates/fxg-protocol" }
 fxg-pty = { path = "crates/fxg-pty" }
 fxg-server = { path = "crates/fxg-server" }
+fxg-ui-assets = { path = "crates/fxg-ui-assets" }
 
 # 外部クレート (バージョンは cargo add / cargo outdated で解決する。手書きしない)
 agent-client-protocol = { version = "2.2.0", features = ["unstable_session_fork"] }

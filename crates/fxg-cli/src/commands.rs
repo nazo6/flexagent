@@ -127,6 +127,99 @@ impl usage::RunAsync for ServerArgs {
 }
 
 // ----------------------------------------------------------------------
+// fxg service
+// ----------------------------------------------------------------------
+
+/// `fxg service <action>` の引数。
+#[derive(Debug, Args)]
+pub struct ServiceArgs {
+    /// 実行する操作: install | uninstall | start | stop | restart | status
+    action: String,
+    /// `daemon` ではなく中央サーバー (`server`) を対象にする
+    #[usage(long)]
+    server: bool,
+}
+
+impl usage::RunAsync for ServiceArgs {
+    type Output = Result<()>;
+
+    async fn run_async(self) -> Self::Output {
+        let action = crate::service::ServiceAction::parse(&self.action).with_context(|| {
+            format!(
+                "unknown action: {} (install | uninstall | start | stop | restart | status)",
+                self.action
+            )
+        })?;
+        crate::service::run(action, self.server).await
+    }
+}
+
+// ----------------------------------------------------------------------
+// fxg web
+// ----------------------------------------------------------------------
+
+/// `fxg web` の引数。
+#[derive(Debug, Args)]
+pub struct WebArgs {
+    /// ローカルノードではなく中央サーバー URL を開く
+    #[usage(long)]
+    server: bool,
+}
+
+impl usage::RunAsync for WebArgs {
+    type Output = Result<()>;
+
+    async fn run_async(self) -> Self::Output {
+        let env = fxg_protocol::config::process_env;
+        let global = fxg_protocol::config::GlobalConfig::load(&env)
+            .context("failed to load ~/.flexagent/config.toml")?;
+
+        let url = if self.server {
+            // 中央サーバーはローカルに認証トークンを持たないため、URL のみ開いて
+            // 初回トークン入力ダイアログに委ねる (docs/05 §1.1)
+            let server_url = global
+                .node
+                .central_server_url
+                .clone()
+                .context("node.central_server_url が config.toml に設定されていません")?;
+            central_http_url(&server_url)?
+        } else {
+            let token = fxg_server::api::auth::load_or_create_token(
+                &fxg_protocol::config::fxg_home(&env)
+                    .join(fxg_protocol::config::AUTH_TOKEN_FILE_NAME),
+            )
+            .context("failed to load ~/.flexagent/auth_token")?;
+            let listen = global
+                .node
+                .listen_addr
+                .clone()
+                .unwrap_or_else(|| "127.0.0.1:7860".to_owned());
+            format!("http://{listen}/?token={token}")
+        };
+
+        println!("{url}");
+        opener::open_browser(&url).context("failed to open the default browser")?;
+        Ok(())
+    }
+}
+
+/// Node Hub の WS URL (`ws://host:8080/api/v1/node/ws`) から HTTP オリジンを取り出す。
+fn central_http_url(server_url: &str) -> Result<String> {
+    let http = server_url
+        .replacen("wss://", "https://", 1)
+        .replacen("ws://", "http://", 1);
+    if !http.starts_with("http://") && !http.starts_with("https://") {
+        bail!("central_server_url は ws:// または wss:// で指定してください: {server_url}");
+    }
+    let base = http.split("/api/").next().unwrap_or(&http);
+    let base = base.trim_end_matches('/');
+    if base.is_empty() {
+        bail!("central_server_url が不正です: {server_url}");
+    }
+    Ok(base.to_owned())
+}
+
+// ----------------------------------------------------------------------
 // fxg run / fxg attach
 // ----------------------------------------------------------------------
 

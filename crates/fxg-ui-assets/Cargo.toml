@@ -1,0 +1,13 @@
+[package]
+name = "fxg-ui-assets"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "FlexAgent Web UI (ui/build) を rust-embed で単一バイナリへ同梱する"
+repository.workspace = true
+
+[dependencies]
+rust-embed = { version = "8.12.0", features = ["interpolate-folder-path"] }
+
+[lints]
+workspace = true
