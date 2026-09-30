@@ -381,6 +381,15 @@
     (修正なしでは LF→CRLF 変換で失敗することを確認済み)。
     併せてテストタスクを `cargo test --workspace --no-fail-fast` とし、
     CI で全クレートの失敗を一度に確認できるようにした。
+  - **CI 2回目の検証結果 (2026-09-30)**: autocrlf 修正後、残る失敗は
+    `fxg-pty` の `spawns_cmd_on_windows` のみとなった。Windows の ConPTY は
+    子プロセスが終了しても出力パイプが EOF にならず、ConPTY 自体のクローズ
+    (`master` の Drop) で初めて EOF になるため、「リーダーの EOF 待ち →
+    セッション破棄」の順では `PtyEvent::Exit` が**永遠に発火しない**実バグ
+    (kill / kill_all 後もセッションが残り続ける) を検出。終了検知を
+    `wait()` 専用スレッドへ分離し、子プロセス終了 → セッション破棄
+    (master Drop → ConPTY/PTY クローズ) → リーダー EOF → `Exit` 配信の順に
+    修正した (全出力の配信完了を保証しつつ、フェイルセーフのタイムアウト付き)。
 
 ---
 
