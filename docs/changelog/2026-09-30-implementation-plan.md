@@ -476,8 +476,26 @@
   - ターミナルから `fxg run <acp-agent>` および `fxg run opencode`
     を起動して対話・ツール承認・ファイル変更Diff記録・Revert/Fork
     が動作し、すべて `node.db` に記録されること。
-- **実装ログ / 進捗メモ**:
-  - （実装時に追記）
+- **実装ログ / 進捗メモ (Phase 3)**:
+  - **コミット**: `feat(fxg-acp)` (トレイト + Registry) →
+    `feat(fxg-acp)` (AcpDriver)。以降も 1 トピック 1 コミットで進める。
+  - **ACP SDK の採用 API**: `agent-client-protocol` 2.2.0 は旧 0.x 系の
+    「Client トレイト実装」ではなく、`Client.builder()` +
+    `on_receive_request/notification` + `ActiveSession` (build_session_from →
+    start_session) というハンドラ/セッション API を採用している。
+    `ConnectionTo<Agent>` は Clone 可能で、接続タスクが所有しつつ外部から
+    cancel/set_mode/set_config を発行できる (docs/04 §1 のトレイトとは
+    シグネチャが異なるため `mpsc::UnboundedSender` でイベントを送る形に調整)。
+  - **エージェントプロセスの終了**: SDK に明示的な kill API はなく、
+    接続 future の drop (または closure return) で `AcpAgent` の ChildGuard が
+    プロセスグループごと SIGKILL する (Unix) / JT (Windows は
+    CREATE_NO_WINDOW)。
+    `shutdown()` はコマンドチャネル経由で closure を抜ける。
+  - **承認のキャンセル**: ACP 仕様の MUST に従い、`session/cancel` 発行時に
+    未解決の `request_permission` はすべて `cancelled` で応答する。
+  - **未着手 (次回以降)**: `OpenCode2Driver` / SessionManager 統合 (IPC
+    ディスパッチ + コマンド冪等性 + Pending Queue) / Revert・Fork /
+    CLI (`run`/`attach`/`session`/`inbox` + TUI) / `fxg agents` CLI。
 
 ---
 
