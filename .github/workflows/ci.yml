@@ -24,7 +24,7 @@ env:
 
 jobs:
   fmt:
-    name: fmt (rustfmt)
+    name: fmt (rustfmt / dprint / tombi)
     runs-on: ubuntu-latest
     env:
       MISE_DISABLE_TOOLS: cargo:sqlx-cli
@@ -34,7 +34,7 @@ jobs:
       - run: mise run fmt:check
 
   clippy:
-    name: clippy (-D warnings)
+    name: lint (clippy -D warnings / tombi)
     runs-on: ubuntu-latest
     env:
       MISE_DISABLE_TOOLS: cargo:sqlx-cli
