@@ -345,4 +345,28 @@ impl Db {
     pub async fn append_audit_log(&self, record: &audit::AuditLogRecord) -> Result<i64, DbError> {
         audit::append_audit_log(&self.pool, record).await
     }
+
+    // ------------------------------------------------------------------
+    // Web Push 購読 (中央サーバー)
+    // ------------------------------------------------------------------
+
+    /// Web Push 購読を登録・更新する (同一 `endpoint` は鍵を上書き)。
+    pub async fn upsert_push_subscription(
+        &self,
+        record: &crate::push::PushSubscriptionRecord,
+    ) -> Result<(), DbError> {
+        crate::push::upsert_push_subscription(&self.pool, record).await
+    }
+
+    /// 全 Web Push 購読を取得する。
+    pub async fn list_push_subscriptions(
+        &self,
+    ) -> Result<Vec<crate::push::PushSubscriptionRecord>, DbError> {
+        crate::push::list_push_subscriptions(&self.pool).await
+    }
+
+    /// Web Push 購読を削除する (失効購読のクリーンアップ)。
+    pub async fn delete_push_subscription(&self, endpoint: &str) -> Result<(), DbError> {
+        crate::push::delete_push_subscription(&self.pool, endpoint).await
+    }
 }

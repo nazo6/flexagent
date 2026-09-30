@@ -905,6 +905,9 @@ async fn apply_event_batch(
         }
     }
 
+    // Web Push 通知の対象 (新規に適用された承認リクエスト)
+    let mut notify_events: Vec<fxg_protocol::events::SessionEventEnvelope> = Vec::new();
+
     for (session_id, batch) in batches {
         let acked_up_to_node_seq = batch.last().map(|event| event.node_seq).unwrap_or(0);
         match state.db().append_events(&batch).await {
@@ -915,6 +918,12 @@ async fn apply_event_batch(
                             event: Box::new(event.clone()),
                             cursor: outcome.cursor,
                         });
+                        if matches!(
+                            event.payload,
+                            fxg_protocol::events::UnifiedEventPayload::PermissionRequest { .. }
+                        ) {
+                            notify_events.push(event.clone());
+                        }
                     }
                 }
                 let _ = state
@@ -936,5 +945,14 @@ async fn apply_event_batch(
                 );
             }
         }
+    }
+
+    // 承認リクエストの Web Push 通知 (ACK をブロックしないよう非同期で送る)
+    if !notify_events.is_empty() {
+        let push = state.push().clone();
+        let db = state.db().clone();
+        tokio::spawn(async move {
+            crate::push::notify_permission_requests(&push, &db, &notify_events).await;
+        });
     }
 }

@@ -11,11 +11,12 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use fxg_db::{Db, DbRole};
+use fxg_db::{Db, DbRole, PushSubscriptionRecord};
 use fxg_protocol::client_api::{
     ConnectionRole, CreateSessionRequest, CreateSessionResponse, CreateWorktreeRequest,
-    KillSwitchResponse, ProvisionerSummary, ProvisionersResponse, RemoveWorktreeRequest,
-    RespondPermissionRequest, RespondPermissionResponse, WorktreeInfo, WorktreesResponse,
+    KillSwitchResponse, ProvisionerSummary, ProvisionersResponse, PushSubscribeRequest,
+    PushSubscribeResponse, RemoveWorktreeRequest, RespondPermissionRequest,
+    RespondPermissionResponse, WorktreeInfo, WorktreesResponse,
 };
 use fxg_protocol::common::{
     CommandResult, DiffScope, ErrorCode, WorkspaceDiffResponse, WorktreeAction,
@@ -31,6 +32,7 @@ use crate::api::{
 };
 use crate::error::ServerError;
 use crate::hub::NodeHub;
+use crate::push::PushService;
 
 /// Client WS / Node Hub 配信用ブロードキャスト容量。
 const CLIENT_EVENT_CAPACITY: usize = 2048;
@@ -62,6 +64,7 @@ struct ServerInner {
     hub: NodeHub,
     options: ServerOptions,
     client_events: broadcast::Sender<ClientEvent>,
+    push: PushService,
 }
 
 impl std::fmt::Debug for ServerState {
@@ -84,6 +87,8 @@ impl ServerState {
         )?;
         let (client_events, _) = broadcast::channel(CLIENT_EVENT_CAPACITY);
         let hub = NodeHub::new(db.clone(), client_events.clone());
+        let push = PushService::load_or_create(&options.fxg_home)
+            .map_err(|err| ServerError::Server(format!("web push init failed: {err}")))?;
         Ok(Self {
             inner: Arc::new(ServerInner {
                 db,
@@ -91,6 +96,7 @@ impl ServerState {
                 hub,
                 options,
                 client_events,
+                push,
             }),
         })
     }
@@ -103,6 +109,11 @@ impl ServerState {
     /// ノード接続レジストリ。
     pub fn hub(&self) -> &NodeHub {
         &self.inner.hub
+    }
+
+    /// VAPID Web Push 送信サービス。
+    pub fn push(&self) -> &PushService {
+        &self.inner.push
     }
 
     /// 起動オプション。
@@ -233,8 +244,10 @@ impl ClientApiBackend for ServerState {
     }
 
     async fn system_extras(&self) -> Result<SystemExtras, ApiError> {
-        // Web Push (VAPID) は Phase 5 で実装する
-        Ok(SystemExtras::default())
+        Ok(SystemExtras {
+            vapid_public_key: Some(self.inner.push.public_key().to_owned()),
+            ..SystemExtras::default()
+        })
     }
 
     fn subscribe_client_events(&self) -> broadcast::Receiver<ClientEvent> {
@@ -606,6 +619,32 @@ impl ClientApiBackend for ServerState {
         Ok(KillSwitchResponse {
             notified_nodes: notified.len() as u64,
         })
+    }
+
+    async fn push_subscribe(
+        &self,
+        request: PushSubscribeRequest,
+        client: ClientInfo,
+    ) -> Result<PushSubscribeResponse, ApiError> {
+        if request.endpoint.trim().is_empty() {
+            return Err(ApiError::bad_request("endpoint is required"));
+        }
+        let record = PushSubscriptionRecord {
+            endpoint: request.endpoint.clone(),
+            p256dh: request.p256dh.clone(),
+            auth: request.auth.clone(),
+            device_name: request.device_name.clone(),
+        };
+        fxg_db::push::upsert_push_subscription(self.inner.db.pool(), &record)
+            .await
+            .map_err(ApiError::from)?;
+        tracing::info!(
+            endpoint = %record.endpoint,
+            device = record.device_name.as_deref().unwrap_or("unknown"),
+            client_ip = %client.ip,
+            "registered web push subscription"
+        );
+        Ok(PushSubscribeResponse { ok: true })
     }
 
     async fn pty_spawn(&self, params: PtySpawnParams) -> Result<(), PtyChannelError> {

@@ -15,6 +15,7 @@
 //! - `queries`: Local Node / Central Server 共通のクライアント向けクエリ層
 //! - `registration`: ノード自己登録・プロジェクト紐付けの upsert
 //! - `audit`: 監査ログの記録
+//! - `push`: Web Push 購読の管理
 //! - `searchable`: FTS5 `searchable_text` 生成ロジック
 //!
 //! # SQL 規約
@@ -30,6 +31,7 @@ pub mod audit;
 pub mod error;
 pub mod events;
 pub mod outbox;
+pub mod push;
 pub mod queries;
 pub mod registration;
 pub mod searchable;
@@ -43,5 +45,6 @@ pub use error::DbError;
 pub use audit::AuditLogRecord;
 pub use events::{AppendedEvent, ApplyOutcome};
 pub use outbox::SessionOutboxBatch;
+pub use push::PushSubscriptionRecord;
 pub use queries::SessionFilter;
 pub use registration::{NodeRecord, ProjectBindingRecord, ProjectRecord};
