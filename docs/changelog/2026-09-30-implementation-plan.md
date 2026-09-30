@@ -369,6 +369,18 @@
   - **`mise run check` の直列化**: `depends` (並列) だと cargo のターゲット
     ディレクトリロックで相互待ちが発生するため、`{ task = ... }` による 直列実行
     (`fmt:check` → `lint` → `test`) へ変更した。
+  - **CI 初回実行の検証結果 (2026-09-30)**: 初回 CI は fmt / ubuntu / macos が
+    成功し、windows-latest のみ `fxg-node` の snapshot テスト 2 件
+    (`snapshot_and_restore_roundtrip` / `ignored_files_are_untouched`)
+    が失敗した。原因は Windows 既定の `core.autocrlf=true` により
+    スナップショット復元時に LF が CRLF へ変換される**実バグ**
+    (`git add` + `checkout-index` の EOL 変換)。シャドウ Git 操作へ
+    `-c core.autocrlf=false -c core.eol=lf` を前置してバイト忠実な復元へ
+    修正し、`core.autocrlf=true` をリポジトリ設定で模擬する回帰テスト
+    (`restore_preserves_bytes_under_autocrlf_repo_config`) を追加した
+    (修正なしでは LF→CRLF 変換で失敗することを確認済み)。
+    併せてテストタスクを `cargo test --workspace --no-fail-fast` とし、
+    CI で全クレートの失敗を一度に確認できるようにした。
 
 ---
 
