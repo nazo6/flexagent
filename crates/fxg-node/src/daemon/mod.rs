@@ -81,6 +81,37 @@ impl DaemonConfig {
     }
 }
 
+/// デーモン再起動時に、前回のプロセスとともに消えたセッションの状態を整合する。
+///
+/// 稼働中 (`provisioning` 〜 `waiting_permission`) のまま残っているセッションは
+/// エージェントプロセスが存在しない (デーモン終了で終了済み) ため、
+/// `stopped` として記録し直す (`fxg ps` にゴーストセッションが残らないようにする)。
+async fn reconcile_stale_sessions(bus: &SessionEventBus) -> Result<(), NodeError> {
+    use fxg_db::SessionFilter;
+    use fxg_protocol::common::SessionStatus;
+    use fxg_protocol::events::UnifiedEventPayload;
+
+    let filter = SessionFilter {
+        statuses: DaemonState::active_statuses(),
+        ..SessionFilter::default()
+    };
+    for session in bus.db().list_sessions(&filter).await? {
+        tracing::info!(
+            session_id = %session.session_id,
+            "marking session as stopped (daemon restarted)"
+        );
+        bus.record(
+            &session.session_id,
+            UnifiedEventPayload::StatusChanged {
+                status: SessionStatus::Stopped,
+                error_message: None,
+            },
+        )
+        .await?;
+    }
+    Ok(())
+}
+
 /// ホスト名ベースのノード表示名を返す。
 pub fn hostname() -> String {
     std::env::var("COMPUTERNAME")
@@ -184,6 +215,8 @@ impl DaemonState {
 
         let token = auth::load_or_create(&paths.auth_token_path())?;
         let bus = SessionEventBus::new(db.clone());
+        // 前回のデーモン終了時に消えたセッションの状態を整合する
+        reconcile_stale_sessions(&bus).await?;
 
         // ACP Registry / カスタムエージェント定義は `config.toml` から解決する
         // (読み込み失敗時は既定設定で起動し、警告のみ残す)。
@@ -595,6 +628,49 @@ mod tests {
         tokio::time::timeout(Duration::from_secs(5), daemon.wait())
             .await
             .expect("daemon stops within timeout");
+    }
+
+    #[tokio::test]
+    async fn reconcile_marks_stale_sessions_stopped() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db = Db::open_in_memory(DbRole::Node).await.expect("db");
+        db.upsert_node(&fxg_db::NodeRecord::new(
+            "test-node",
+            "Test Node",
+            "windows",
+            "x86_64",
+            "0.1.0",
+        ))
+        .await
+        .expect("node");
+        let bus = SessionEventBus::new(db.clone());
+        // 前回のデーモンが強制終了され、`idle` のまま残ったセッションを再現する
+        bus.create_session(
+            "stale-session",
+            fxg_protocol::events::UnifiedEventPayload::SessionCreated {
+                node_id: "test-node".to_owned(),
+                project_id: "github.com/nazo6/flexagent".to_owned(),
+                project_name: "flexagent".to_owned(),
+                local_path: dir.path().to_string_lossy().into_owned(),
+                git_branch: None,
+                is_worktree: false,
+                agent_id: "mock".to_owned(),
+                parent_session_id: None,
+                fork_from_node_seq: None,
+                title: "stale".to_owned(),
+            },
+        )
+        .await
+        .expect("create session");
+
+        reconcile_stale_sessions(&bus).await.expect("reconcile");
+
+        let session = db
+            .get_session("stale-session")
+            .await
+            .expect("query")
+            .expect("session row");
+        assert_eq!(session.status, fxg_protocol::common::SessionStatus::Stopped);
     }
 
     #[tokio::test]

@@ -107,6 +107,11 @@ impl MockAgent {
         self.inner.prompts.lock().expect("prompts").clone()
     }
 
+    /// 稼働中セッションのイベントチャネルを閉じる (ドライバ終了の再現)。
+    pub(crate) fn close_events(&self) {
+        self.inner.events.lock().expect("events").clear();
+    }
+
     /// 承認応答 (`request_id`, `option_id`) 一覧。
     pub(crate) fn permissions(&self) -> Vec<(String, String)> {
         self.inner.permissions.lock().expect("permissions").clone()

@@ -896,14 +896,47 @@ async fn pump_events(
                     }
                     _ => {}
                 }
-                if inner.bus.record(&session_id, payload).await.is_ok() {
-                    maybe_dispatch_queued(&inner, &session_id).await;
+                match inner.bus.record(&session_id, payload).await {
+                    Ok(_) => maybe_dispatch_queued(&inner, &session_id).await,
+                    Err(err) => {
+                        tracing::warn!(session_id = %session_id, "failed to persist driver event: {err:#}");
+                    }
                 }
             }
         }
     }
-    // チャネルが閉じた = ドライバ終了
+    // チャネルが閉じた = ドライバ (エージェントプロセス) 終了。
+    // `Stopped` への遷移は DB の `sessions` 投影にも反映する必要があるため
+    // イベントとして追記する (既に Stopped / Error の場合はそのまま)。
+    let previous = {
+        let sessions = inner.sessions.lock().expect("sessions poisoned");
+        sessions
+            .active
+            .get(&session_id)
+            .map(|session| session.status)
+    };
     mark_status(&inner, &session_id, SessionStatus::Stopped, None);
+    if matches!(
+        previous,
+        Some(
+            SessionStatus::Provisioning
+                | SessionStatus::Bootstrapping
+                | SessionStatus::Idle
+                | SessionStatus::Running
+                | SessionStatus::WaitingPermission
+        )
+    ) {
+        let _ = inner
+            .bus
+            .record(
+                &session_id,
+                UnifiedEventPayload::StatusChanged {
+                    status: SessionStatus::Stopped,
+                    error_message: None,
+                },
+            )
+            .await;
+    }
     let mut sessions = inner.sessions.lock().expect("sessions poisoned");
     sessions.active.remove(&session_id);
 }
@@ -1579,6 +1612,37 @@ mod tests {
                 .expect("canonicalize child"),
             repo.canonicalize().expect("canonicalize repo")
         );
+    }
+
+    #[tokio::test]
+    async fn driver_exit_records_stopped_status() {
+        let (manager, mock, dir) = setup().await;
+        let outcome = manager
+            .ensure_session("c1", dir.path(), "mock", &[], None, false)
+            .await
+            .expect("ensure");
+        wait_idle(&manager, &outcome.session_id).await;
+
+        // ドライバ (エージェントプロセス) 終了: イベントチャネルが閉じると
+        // ポンプが `Stopped` を記録し、active 一覧から外れる
+        mock.close_events();
+        for _ in 0..200 {
+            let row = manager
+                .bus()
+                .db()
+                .get_session(&outcome.session_id)
+                .await
+                .expect("query");
+            if row.is_some_and(|session| session.status == SessionStatus::Stopped) {
+                assert!(
+                    manager.list_active().is_empty(),
+                    "停止したセッションは active 一覧から外れる"
+                );
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        panic!("driver exit did not record Stopped");
     }
 
     #[tokio::test]
