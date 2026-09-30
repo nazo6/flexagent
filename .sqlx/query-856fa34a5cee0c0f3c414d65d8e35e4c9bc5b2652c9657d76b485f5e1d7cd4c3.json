@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        DELETE FROM projects\n         WHERE NOT EXISTS (\n                   SELECT 1 FROM project_node_bindings b\n                    WHERE b.project_id = projects.project_id\n               )\n           AND NOT EXISTS (\n                   SELECT 1 FROM sessions s\n                    WHERE s.project_id = projects.project_id\n               )\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "856fa34a5cee0c0f3c414d65d8e35e4c9bc5b2652c9657d76b485f5e1d7cd4c3"
+}

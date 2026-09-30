@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        DELETE FROM project_node_bindings\n         WHERE node_id = ? AND local_path = ?\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "6ed8802599b6e46f74eefc3efe3a85321c286c6bf4745ab7c3cf1690e7180e68"
+}

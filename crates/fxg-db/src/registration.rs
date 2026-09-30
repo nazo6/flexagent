@@ -188,6 +188,73 @@ pub async fn set_node_token_hash(
     Ok(())
 }
 
+/// プロジェクト × ノードのローカルパス紐付けを削除する (Worktree 削除時など)。
+///
+/// 削除された行数を返す。
+pub async fn delete_project_binding(
+    pool: &SqlitePool,
+    node_id: &str,
+    local_path: &str,
+) -> Result<u64, DbError> {
+    let result = sqlx::query!(
+        r#"
+        DELETE FROM project_node_bindings
+         WHERE node_id = ? AND local_path = ?
+        "#,
+        node_id,
+        local_path,
+    )
+    .execute(pool)
+    .await?;
+    Ok(result.rows_affected())
+}
+
+/// 同じ `(node_id, local_path)` を持つ他プロジェクトの紐付けを削除する。
+///
+/// プロジェクトの再リンク (`fxg project link`) 時に古い紐付けを残さないために使う。
+/// 削除行数を返す。
+pub async fn delete_other_project_bindings(
+    pool: &SqlitePool,
+    node_id: &str,
+    local_path: &str,
+    keep_project_id: &str,
+) -> Result<u64, DbError> {
+    let result = sqlx::query!(
+        r#"
+        DELETE FROM project_node_bindings
+         WHERE node_id = ? AND local_path = ? AND project_id != ?
+        "#,
+        node_id,
+        local_path,
+        keep_project_id,
+    )
+    .execute(pool)
+    .await?;
+    Ok(result.rows_affected())
+}
+
+/// 紐付けもセッションも持たない孤立プロジェクトを削除する (削除行数を返す)。
+///
+/// ハブ側ではセッションから参照されるプロジェクトを削除しないようガードする。
+pub async fn delete_orphan_projects(pool: &SqlitePool) -> Result<u64, DbError> {
+    let result = sqlx::query!(
+        r#"
+        DELETE FROM projects
+         WHERE NOT EXISTS (
+                   SELECT 1 FROM project_node_bindings b
+                    WHERE b.project_id = projects.project_id
+               )
+           AND NOT EXISTS (
+                   SELECT 1 FROM sessions s
+                    WHERE s.project_id = projects.project_id
+               )
+        "#,
+    )
+    .execute(pool)
+    .await?;
+    Ok(result.rows_affected())
+}
+
 /// 論理プロジェクトを upsert する。
 ///
 /// 既存行の `canonical_git_url` は `None` で上書きしない

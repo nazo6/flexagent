@@ -55,6 +55,9 @@ pub enum NodeError {
     /// JSON 変換エラー
     #[error("json error: {0}")]
     Json(#[from] serde_json::Error),
+    /// サーバー (ローカルHTTP/WS・IPC) の起動・入出力エラー
+    #[error("server error: {0}")]
+    Server(String),
 }
 
 impl NodeError {

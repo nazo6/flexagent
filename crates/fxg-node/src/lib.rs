@@ -15,9 +15,11 @@
 //! - `worktree`: Git Worktree の検出・作成・削除とフック実行
 //! - `snapshot`: Shadow Git Tree によるターン単位スナップショット / 復元
 //! - `session`: セッションイベントの即時配信と永続化 (Compaction)
+//! - `daemon`: ノードデーモン (ローカルHTTP/WS サーバー + ローカルIPC + 認証)
 
 #![warn(missing_docs)]
 
+pub mod daemon;
 pub mod error;
 pub mod git;
 pub mod paths;

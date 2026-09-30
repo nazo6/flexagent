@@ -41,10 +41,12 @@ tokio = {
     "process",
     "rt",
     "rt-multi-thread",
+    "signal",
     "sync",
     "time",
   ]
 }
+tokio-tungstenite = "0.30.0"
 toml = "1.1.6"
 tower = { version = "0.5.3", features = ["util"] }
 tracing = "0.1.44"

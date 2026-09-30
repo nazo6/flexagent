@@ -160,20 +160,29 @@ impl ResolvedProject {
     }
 }
 
+/// `.fxg.toml` を「対象ディレクトリ → Git ルート」の順に読み込む。
+///
+/// Worktree 作成フック (`copy_files` / `post_create`) やプロジェクト別の
+/// デフォルト設定を参照するために使用する。
+pub async fn load_project_config(cwd: &Path) -> Result<Option<ProjectConfig>, NodeError> {
+    if let Some(config) = ProjectConfig::load_from_dir(cwd)? {
+        return Ok(Some(config));
+    }
+    if let Some(root) = git::toplevel(cwd).await?
+        && root != cwd
+    {
+        return Ok(ProjectConfig::load_from_dir(&root)?);
+    }
+    Ok(None)
+}
+
 /// 指定ディレクトリの論理プロジェクトを解決する。
 ///
 /// `.fxg.toml` は起動ディレクトリ → Git ルートの順に探索する。
 pub async fn resolve_project(cwd: &Path, node_id: &str) -> Result<ResolvedProject, NodeError> {
     let local_path = fxg_pty::canonicalize(cwd).unwrap_or_else(|_| cwd.to_path_buf());
     let git_root = git::toplevel(&local_path).await?;
-
-    let mut project_config = ProjectConfig::load_from_dir(&local_path)?;
-    if project_config.is_none()
-        && let Some(root) = &git_root
-        && root != &local_path
-    {
-        project_config = ProjectConfig::load_from_dir(root)?;
-    }
+    let project_config = load_project_config(&local_path).await?;
 
     let canonical_git_url = match &git_root {
         Some(root) => git::remote_origin_url(root).await?,

@@ -24,10 +24,11 @@ uuid = { workspace = true }
 [dev-dependencies]
 http-body-util = { workspace = true }
 tempfile = { workspace = true }
+tokio-tungstenite = { workspace = true }
 tower = { workspace = true }
-
-[lints]
-workspace = true
 
 [target."cfg(unix)".dependencies]
 libc = { workspace = true }
+
+[lints]
+workspace = true

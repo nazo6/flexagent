@@ -159,6 +159,29 @@ pub async fn is_inside_work_tree(cwd: &Path) -> Result<bool, NodeError> {
         .unwrap_or(false))
 }
 
+/// 指定ディレクトリが Git Worktree (メインリポジトリ以外) かどうか。
+///
+/// `--git-dir` (Worktree では `<repo>/.git/worktrees/<name>`) と
+/// `--git-common-dir` (`<repo>/.git`) の差分で判定する。
+pub async fn is_worktree(repo: &Path) -> Result<bool, NodeError> {
+    let git_dir = match try_git(repo, &["rev-parse", "--path-format=absolute", "--git-dir"]).await?
+    {
+        Some(value) => Some(value),
+        None => try_git(repo, &["rev-parse", "--git-dir"]).await?,
+    };
+    let common_dir = match try_git(
+        repo,
+        &["rev-parse", "--path-format=absolute", "--git-common-dir"],
+    )
+    .await?
+    {
+        Some(value) => Some(value),
+        None => try_git(repo, &["rev-parse", "--git-common-dir"]).await?,
+    };
+
+    Ok(matches!((git_dir, common_dir), (Some(a), Some(b)) if a != b))
+}
+
 /// 指定パス配下の Git リポジトリを再帰探索する (`.git` ディレクトリを持つディレクトリ)。
 ///
 /// `fxg project scan` から使用する。シンボリックリンクは辿らない。

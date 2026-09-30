@@ -47,6 +47,10 @@ pub fn hub_db_path(fxg_home: &Path) -> PathBuf {
 }
 
 /// SQLite DB ハンドル (接続プール + 実行ロール)。
+///
+/// `SqlitePool` はハンドル (Arc) をクローンするだけなので、`Db` 自体も
+/// 安価にクローンできる (デーモンの共有状態などで使用する)。
+#[derive(Clone)]
 pub struct Db {
     pool: SqlitePool,
     role: DbRole,
@@ -230,6 +234,36 @@ impl Db {
         record: &registration::ProjectBindingRecord,
     ) -> Result<(), DbError> {
         registration::upsert_project_binding(&self.pool, record).await
+    }
+
+    /// プロジェクト × ノードのローカルパス紐付けを削除する (削除行数を返す)。
+    pub async fn delete_project_binding(
+        &self,
+        node_id: &str,
+        local_path: &str,
+    ) -> Result<u64, DbError> {
+        registration::delete_project_binding(&self.pool, node_id, local_path).await
+    }
+
+    /// 同じ `(node_id, local_path)` を持つ他プロジェクトの紐付けを削除する。
+    pub async fn delete_other_project_bindings(
+        &self,
+        node_id: &str,
+        local_path: &str,
+        keep_project_id: &str,
+    ) -> Result<u64, DbError> {
+        registration::delete_other_project_bindings(
+            &self.pool,
+            node_id,
+            local_path,
+            keep_project_id,
+        )
+        .await
+    }
+
+    /// 紐付けもセッションも持たない孤立プロジェクトを削除する。
+    pub async fn delete_orphan_projects(&self) -> Result<u64, DbError> {
+        registration::delete_orphan_projects(&self.pool).await
     }
 
     // ------------------------------------------------------------------
