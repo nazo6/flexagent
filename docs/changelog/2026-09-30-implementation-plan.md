@@ -683,6 +683,16 @@
     / `restore_git_bundle_b64`)、プロビジョナー起動、Git Credential Proxy、
     `DrainAndShutdown`、Web Push (`POST /api/v1/push/subscribe` は
     `INVALID_STATE` を返すスタブ)
+  - 2026-10-01: 実バイナリでのスモークテスト (`fxg server` と
+    `fxg daemon --server-url` を別々の `FXG_HOME` で起動)
+    を実施し、実プロセス間の
+    ペアリング認証・`NodeHello` 接続 ("node connected")、ノード REST
+    (`/api/v1/system/info` が `local_node` / `central_connected=true`)、
+    サーバー REST (`/api/v1/nodes`
+    のオンライン表示、`/api/v1/system/kill-switch`
+    の配信、`/api/v1/audit/logs` の server/node 双方記録、未認証 401) を確認。
+    この過程で `Server::wait` が起動直後に即時シャットダウンしてしまう回帰を
+    発見・修正 (`fix(fxg-server)` + `server_lifecycle.rs` 回帰テストを追加)
 
 ---
 
