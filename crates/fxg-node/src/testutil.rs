@@ -117,7 +117,7 @@ impl MockAgent {
         self.inner.modes.lock().expect("modes").clone()
     }
 
-    /// `revert_context` が呼ばれた `target_node_seq` 一覧。
+    /// `revert_context` が呼ばれた `keep_turns` (先頭から残すターン数) 一覧。
     pub(crate) fn reverted(&self) -> Vec<u64> {
         self.inner.reverted.lock().expect("reverted").clone()
     }
@@ -178,12 +178,12 @@ impl ActiveSessionHandle for MockAgent {
         Ok(())
     }
 
-    async fn revert_context(&self, target_node_seq: u64) -> anyhow::Result<()> {
+    async fn revert_context(&self, keep_turns: u64) -> anyhow::Result<()> {
         self.inner
             .reverted
             .lock()
             .expect("reverted")
-            .push(target_node_seq);
+            .push(keep_turns);
         Ok(())
     }
 

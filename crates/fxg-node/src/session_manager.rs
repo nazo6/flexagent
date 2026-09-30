@@ -20,7 +20,9 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use fxg_acp::registry::{AcpRegistry, RegistryIndex};
-use fxg_acp::{AcpDriver, ActiveSessionHandle, AgentDriver, AgentLaunchSpec, DriverEvent};
+use fxg_acp::{
+    AcpDriver, ActiveSessionHandle, AgentDriver, AgentLaunchSpec, DriverEvent, OpenCode2Driver,
+};
 use fxg_protocol::common::{PermissionOption, SessionControlAction, SessionStatus};
 use fxg_protocol::events::{SessionEventEnvelope, UnifiedEventPayload};
 use fxg_protocol::ipc::AttachMode;
@@ -45,17 +47,26 @@ pub type DriverFactory =
 
 /// 既定のドライバファクトリ。
 ///
-/// `opencode2` (ブリッジモード) は Phase 3 の残タスクのため、現時点では
-/// `agents.opencode_mode = "acp"` を案内するエラーを返す。
+/// - `acp`: 標準ACPエージェント ([`AcpDriver`])
+/// - `opencode2`: `opencode2 serve` ブリッジ ([`OpenCode2Driver`])
 pub fn default_driver_factory() -> DriverFactory {
     Arc::new(|spec: &AgentLaunchSpec| match spec.driver_kind.as_str() {
         "acp" => Ok(Box::new(AcpDriver::new()) as Box<dyn AgentDriver>),
-        "opencode2" => Err(anyhow::anyhow!(
-            "opencode2 bridge driver is not implemented yet \
-             (set [agents] opencode_mode = \"acp\" to use ACP mode)"
-        )),
+        "opencode2" => Ok(Box::new(OpenCode2Driver::new()) as Box<dyn AgentDriver>),
         other => Err(anyhow::anyhow!("unknown driver kind: {other}")),
     })
+}
+
+/// ドライバの純正TUI Attach 情報から CLI のアタッチモードを決める。
+fn attach_mode_of(handle: &dyn ActiveSessionHandle) -> AttachMode {
+    match handle.native_attach() {
+        Some(info) => AttachMode::NativeOpenCodeAttach {
+            server_url: info.server_url,
+            session_id: info.session_id,
+            env: info.env,
+        },
+        None => AttachMode::AcpTui,
+    }
 }
 
 /// `ensure_session` の結果。
@@ -243,6 +254,7 @@ impl SessionManager {
 
         // SessionCreated (node_seq = 1)
         let (git_branch, is_worktree) = branch_and_worktree(&resolved.local_path).await;
+        let title = format!("{} @ {}", spec.display_name, resolved.name);
         self.inner
             .bus
             .create_session(
@@ -257,23 +269,24 @@ impl SessionManager {
                     agent_id: spec.agent_id.clone(),
                     parent_session_id: None,
                     fork_from_node_seq: None,
-                    title: format!("{} @ {}", spec.display_name, resolved.name),
+                    title: title.clone(),
                 },
             )
             .await?;
 
-        self.start_driver_session(
-            &session_id,
-            &resolved.local_path,
-            &spec,
-            extra_args.to_vec(),
-        )
-        .await?;
+        let handle = self
+            .start_driver_session(
+                &session_id,
+                &title,
+                &resolved.local_path,
+                &spec,
+                extra_args.to_vec(),
+            )
+            .await?;
 
         Ok(EnsureSessionOutcome {
             session_id,
-            // OpenCode2 純正TUI Attach (ブリッジモード) は Phase 3 の残タスク
-            attach_mode: AttachMode::AcpTui,
+            attach_mode: attach_mode_of(handle.as_ref()),
         })
     }
 
@@ -308,20 +321,23 @@ impl SessionManager {
 
     /// ドライバを起動し、active 一覧への登録とイベントポンプの開始を行う。
     ///
-    /// 起動失敗時は `StatusChanged(Error)` を記録する。
+    /// 起動失敗時は `StatusChanged(Error)` を記録する。成功時は CLI の
+    /// アタッチモード決定に使うハンドルを返す。
     async fn start_driver_session(
         &self,
         session_id: &str,
+        title: &str,
         cwd: &Path,
         spec: &AgentLaunchSpec,
         extra_args: Vec<String>,
-    ) -> Result<(), NodeError> {
+    ) -> Result<Arc<dyn ActiveSessionHandle>, NodeError> {
         let driver = (self.inner.factory)(spec).map_err(|err| NodeError::Agent(err.to_string()))?;
         let (event_tx, event_rx) = mpsc::unbounded_channel();
         let handle = match driver
             .start_session(
                 fxg_acp::StartSessionRequest {
                     session_id: session_id.to_owned(),
+                    title: Some(title.to_owned()),
                     cwd: cwd.to_path_buf(),
                     launch: spec.clone(),
                     extra_args,
@@ -355,7 +371,7 @@ impl SessionManager {
             sessions.active.insert(
                 session_id.to_owned(),
                 ActiveSession {
-                    handle,
+                    handle: Arc::clone(&handle),
                     cwd: cwd.to_path_buf(),
                     agent_id: spec.agent_id.clone(),
                     status: SessionStatus::Idle,
@@ -372,7 +388,7 @@ impl SessionManager {
         tokio::spawn(async move {
             pump_events(inner, pump_session_id, event_rx).await;
         });
-        Ok(())
+        Ok(handle)
     }
 
     /// セッションの永続イベントを読み込む (`up_to_node_seq` 以下に限定。`None` は全件)。
@@ -467,8 +483,13 @@ impl SessionManager {
             .await?;
 
         // エージェント側の会話巻き戻し (ネイティブ API 対応ドライバのみ)。
+        // `target_seq` 以前のユーザーメッセージ数 = 先頭から残すターン数。
         // 標準ACPは未対応のため、失敗は情報ログに留める (ファイル復元は完了している)。
-        if let Err(err) = handle.revert_context(target_seq).await {
+        let keep_turns = events
+            .iter()
+            .filter(|event| matches!(event.payload, UnifiedEventPayload::UserMessage { .. }))
+            .count() as u64;
+        if let Err(err) = handle.revert_context(keep_turns).await {
             tracing::info!(
                 session_id,
                 "agent-side revert is not supported by this driver: {err:#}"
@@ -526,6 +547,7 @@ impl SessionManager {
         let new_session_id = uuid_v7();
         let cwd = PathBuf::from(&source.local_path);
         let (git_branch, is_worktree) = branch_and_worktree(&cwd).await;
+        let title = format!("Fork of {}", source.title);
         self.inner
             .bus
             .create_session(
@@ -540,12 +562,13 @@ impl SessionManager {
                     agent_id: spec.agent_id.clone(),
                     parent_session_id: Some(source.session_id.clone()),
                     fork_from_node_seq: Some(fork_seq),
-                    title: format!("Fork of {}", source.title),
+                    title: title.clone(),
                 },
             )
             .await?;
 
-        self.start_driver_session(&new_session_id, &cwd, &spec, Vec::new())
+        let handle = self
+            .start_driver_session(&new_session_id, &title, &cwd, &spec, Vec::new())
             .await?;
 
         // 履歴 Replay 注入 (新エージェントセッションの初期コンテキスト)
@@ -560,8 +583,20 @@ impl SessionManager {
 
         Ok(EnsureSessionOutcome {
             session_id: new_session_id,
-            attach_mode: AttachMode::AcpTui,
+            attach_mode: attach_mode_of(handle.as_ref()),
         })
+    }
+
+    /// 稼働中セッションの CLI アタッチモードを返す (`fxg attach`)。
+    ///
+    /// 停止済み・未知のセッションは [`AttachMode::AcpTui`] (イベント履歴の閲覧)。
+    pub fn attach_mode(&self, session_id: &str) -> AttachMode {
+        let sessions = self.inner.sessions.lock().expect("sessions poisoned");
+        sessions
+            .active
+            .get(session_id)
+            .map(|session| attach_mode_of(session.handle.as_ref()))
+            .unwrap_or(AttachMode::AcpTui)
     }
 
     /// 論理プロジェクトの表示名を解決する (未知の場合は `project_id` を返す)。
@@ -832,6 +867,19 @@ async fn pump_events(
                                     options: options.clone(),
                                 },
                             );
+                        }
+                    }
+                    UnifiedEventPayload::PermissionResolved { request_id, .. } => {
+                        // ドライバ側 (OpenCode2 純正TUI 等) で解決された承認もここに来る。
+                        // fxg 経由の応答は `SessionManager::respond_permission` が
+                        // 記録済みのため、承認待ち一覧に残っている場合のみ記録する。
+                        let mut sessions = inner.sessions.lock().expect("sessions poisoned");
+                        let already_recorded =
+                            sessions.active.get_mut(&session_id).is_some_and(|session| {
+                                session.pending_permissions.remove(request_id).is_none()
+                            });
+                        if already_recorded {
+                            continue;
                         }
                     }
                     _ => {}
@@ -1389,8 +1437,9 @@ mod tests {
             "# test\n"
         );
 
-        // ドライバの revert_context が呼ばれる (対応ドライバ)
-        assert_eq!(mock.reverted(), vec![user_seq]);
+        // ドライバの revert_context が呼ばれる (対応ドライバ)。
+        // 引数は「先頭から残すターン数」= target_seq 以前のユーザーメッセージ数。
+        assert_eq!(mock.reverted(), vec![1]);
 
         // SessionReverted がイベントログに追記される
         let batch = manager

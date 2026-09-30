@@ -28,13 +28,17 @@ pub enum AttachMode {
     /// `fxg` CLI 自身の内蔵TUI (`ratatui`) でIPCストリームを描画するモード。
     AcpTui,
     /// デーモンが管理する `opencode2 serve` に対して CLI が
-    /// `opencode2 run --attach <server_url> --session <id>` を子プロセス実行し、
+    /// `opencode2 run --server <server_url> --session <session_id>` を子プロセス実行し、
     /// 純正TUIを直接表示するモード。
     NativeOpenCodeAttach {
         /// `opencode2 serve` のローカルURL
         server_url: String,
-        /// アタッチ対象のセッションID
+        /// アタッチ対象のエージェント側セッションID (`ses_...`)
         session_id: String,
+        /// 純正 CLI へ注入する環境変数 (例: `OPENCODE_PASSWORD`)。
+        /// ループバック限定サーバーの一時クレデンシャルを含むため、
+        /// トークン認証済みのローカルIPC 以外へは出力しないこと。
+        env: Vec<(String, String)>,
     },
 }
 
@@ -273,6 +277,10 @@ pub enum IpcResult {
     AttachSession {
         /// 対象セッションID
         session_id: String,
+        /// アタッチモード (内蔵TUI / OpenCode2 純正TUI)。
+        /// 稼働中でない (停止済み) セッションは [`AttachMode::AcpTui`]
+        /// (イベント履歴の閲覧のみ)。
+        attach_mode: AttachMode,
     },
     /// `GetLocalStatus` の結果
     LocalStatus {
@@ -419,12 +427,14 @@ mod tests {
             session_id: "s1".into(),
             attach_mode: AttachMode::NativeOpenCodeAttach {
                 server_url: "http://127.0.0.1:4096".into(),
-                session_id: "s1".into(),
+                session_id: "ses_1".into(),
+                env: vec![("OPENCODE_PASSWORD".into(), "secret".into())],
             },
         };
         let json = serde_json::to_value(&result).unwrap();
         assert_eq!(json["result"], "ensure_session");
         assert_eq!(json["attach_mode"]["mode"], "native_open_code_attach");
+        assert_eq!(json["attach_mode"]["env"][0][0], "OPENCODE_PASSWORD");
         let decoded: IpcResult = serde_json::from_value(json).unwrap();
         assert_eq!(decoded, result);
     }

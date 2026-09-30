@@ -38,6 +38,9 @@ pub struct AgentLaunchSpec {
 pub struct StartSessionRequest {
     /// fxg 側のセッションID (UUID v7)
     pub session_id: String,
+    /// セッション表示名 (`fxg` の `SessionCreated.title` と同一。
+    /// エージェント側のセッション名として使えるドライバのみ利用する)。
+    pub title: Option<String>,
     /// 作業ディレクトリ (セッションの `local_path` / Worktree パス)
     pub cwd: PathBuf,
     /// 起動スペック (解決済み)
@@ -99,17 +102,43 @@ pub trait ActiveSessionHandle: Send + Sync {
     async fn set_config(&self, key: String, value: serde_json::Value) -> anyhow::Result<()>;
     /// 現在のターンの中断。
     async fn cancel_turn(&self) -> anyhow::Result<()>;
-    /// エージェント側の会話コンテキストを指定ターン時点へ巻き戻す。
+    /// エージェント側の会話コンテキストを、先頭から `keep_turns` ターン分だけ
+    /// 残した状態へ巻き戻す。
     ///
-    /// 標準ACPには会話を巻き戻す API が無いため、既定実装は「未対応」を返す
-    /// (`fxg` はワークスペースのファイル復元のみを行い、この失敗は警告として扱う)。
-    /// ネイティブ API を持つドライバ (OpenCode2 の `POST /session/{id}/revert`
-    /// 等) が実装する。
-    async fn revert_context(&self, _target_node_seq: u64) -> anyhow::Result<()> {
+    /// `fxg` のファイル復元 (Shadow Git Tree) とは独立に、エージェント内部の
+    /// 会話履歴を巻き戻すためのフック。標準ACPには会話を巻き戻す API が無いため
+    /// 既定実装は「未対応」を返す (`fxg` はファイル復元のみを行い、この失敗は
+    /// 情報ログとして扱う)。ネイティブ API を持つドライバ (OpenCode2 の
+    /// `POST /api/session/{id}/revert` 等) が実装する。
+    async fn revert_context(&self, _keep_turns: u64) -> anyhow::Result<()> {
         anyhow::bail!("revert_context is not supported by this driver")
+    }
+    /// エージェント純正 TUI へ Attach するための情報 (OpenCode2 ブリッジのみ)。
+    ///
+    /// `Some` を返すドライバでは、CLI は `fxg` の内蔵 TUI ではなく
+    /// 純正 CLI を `server_url` / `session_id` 付きで子プロセス実行する
+    /// ([`crate::driver::NativeAttachInfo`])。
+    fn native_attach(&self) -> Option<NativeAttachInfo> {
+        None
     }
     /// セッションプロセスの完全終了 (プロセスツリーごと)。
     async fn shutdown(&self) -> anyhow::Result<()>;
+}
+
+/// エージェント純正 TUI へ Attach するための情報。
+///
+/// CLI は `server_url` / `session_id` を引数に、`env` を環境変数として
+/// 純正 CLI (例: `opencode2 run --server <url> --session <id>`) を起動する。
+/// `env` にはローカルサーバー用の一時クレデンシャルが含まれ得るため、
+/// ローカルIPC (トークン認証済み) の応答としてのみ受け渡すこと。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NativeAttachInfo {
+    /// アタッチ先のローカルサーバーURL (例: `http://127.0.0.1:38219`)
+    pub server_url: String,
+    /// アタッチ対象のエージェント側セッションID (例: `ses_...`)
+    pub session_id: String,
+    /// 純正 CLI へ注入する環境変数 (例: `OPENCODE_PASSWORD`)
+    pub env: Vec<(String, String)>,
 }
 
 #[cfg(test)]
@@ -188,6 +217,7 @@ mod tests {
             .start_session(
                 StartSessionRequest {
                     session_id: "s".to_owned(),
+                    title: None,
                     cwd: PathBuf::from("."),
                     launch,
                     extra_args: vec![],

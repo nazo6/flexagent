@@ -259,6 +259,7 @@ where
                 command_id: command_id.clone(),
                 result: IpcResult::AttachSession {
                     session_id: session_id.clone(),
+                    attach_mode: state.session_manager().attach_mode(&session_id),
                 },
             },
         )
@@ -1554,10 +1555,13 @@ mod tests {
                 result:
                     IpcResult::AttachSession {
                         session_id: attached,
+                        attach_mode,
                     },
             } => {
                 assert_eq!(command_id, "a1");
                 assert_eq!(attached, session_id);
+                // テスト用モックは内蔵TUIアタッチ
+                assert_eq!(attach_mode, fxg_protocol::ipc::AttachMode::AcpTui);
             }
             other => panic!("unexpected response: {other:?}"),
         }
