@@ -27,6 +27,25 @@ use crate::git;
 /// デフォルトのスナップショットサイズ上限 (100 MB)。
 pub const DEFAULT_SNAPSHOT_SIZE_LIMIT_BYTES: u64 = 100 * 1024 * 1024;
 
+/// シャドウ Git 操作に共通で前置する設定引数 (`git -c <key>=<value>` 形式)。
+///
+/// FXG のスナップショット/復元はワークツリーのバイト列をそのまま往復させる
+/// 必要があるため、EOL 変換 (`core.autocrlf` / `core.eol`) を無効化する。
+/// Windows の既定 (`core.autocrlf=true`) では、復元時に LF が CRLF へ
+/// 書き換えられワークスペースが破壊される (CI: windows-latest で検出)。
+/// `core.eol=lf` は `.gitattributes` の `text` 属性が付いたファイルの
+/// チェックアウト側変換をプラットフォーム非依存に固定する。
+const SHADOW_GIT_CONFIG: &[&str] = &["-c", "core.autocrlf=false", "-c", "core.eol=lf"];
+
+/// シャドウ Git 操作の引数に [`SHADOW_GIT_CONFIG`] を前置する。
+fn shadow_git_args<'a>(args: &[&'a str]) -> Vec<&'a str> {
+    SHADOW_GIT_CONFIG
+        .iter()
+        .copied()
+        .chain(args.iter().copied())
+        .collect()
+}
+
 /// スナップショット取得結果。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SnapshotOutcome {
@@ -152,8 +171,9 @@ impl ShadowGitTree {
             std::fs::create_dir_all(parent).map_err(|err| NodeError::io(parent, err))?;
         }
 
-        git::run_git_with_env(&self.repo, &["add", "-A"], &env).await?;
-        let tree_hash = git::run_git_with_env(&self.repo, &["write-tree"], &env).await?;
+        git::run_git_with_env(&self.repo, &shadow_git_args(&["add", "-A"]), &env).await?;
+        let tree_hash =
+            git::run_git_with_env(&self.repo, &shadow_git_args(&["write-tree"]), &env).await?;
 
         Ok(SnapshotOutcome::Created {
             tree_hash,
@@ -191,8 +211,18 @@ impl ShadowGitTree {
         }
 
         // 3. 目標ツリーをシャドウ Index に読み込み、ワークツリーへ展開
-        git::run_git_with_env(&self.repo, &["read-tree", tree_hash], &env).await?;
-        git::run_git_with_env(&self.repo, &["checkout-index", "-a", "-f"], &env).await?;
+        git::run_git_with_env(
+            &self.repo,
+            &shadow_git_args(&["read-tree", tree_hash]),
+            &env,
+        )
+        .await?;
+        git::run_git_with_env(
+            &self.repo,
+            &shadow_git_args(&["checkout-index", "-a", "-f"]),
+            &env,
+        )
+        .await?;
 
         Ok(RestoreOutcome {
             backup_tree_hash,
@@ -231,7 +261,7 @@ impl ShadowGitTree {
             vec!["ls-tree", "-r", "-z", "--name-only", "HEAD"],
         ];
         for args in listings {
-            let Ok(output) = git::capture(&self.repo, &args, env).await else {
+            let Ok(output) = git::capture(&self.repo, &shadow_git_args(&args), env).await else {
                 continue;
             };
             if !output.success {
@@ -251,7 +281,7 @@ impl ShadowGitTree {
     async fn list_tree_files(&self, tree_hash: &str) -> Result<BTreeSet<String>, NodeError> {
         let output = git::run_git_bytes(
             &self.repo,
-            &["ls-tree", "-r", "-z", "--name-only", tree_hash],
+            &shadow_git_args(&["ls-tree", "-r", "-z", "--name-only", tree_hash]),
         )
         .await?;
         Ok(output
@@ -414,5 +444,39 @@ mod tests {
         // 二重削除はエラーにしない
         tree.remove_index().expect("remove idempotent");
         let _ = repo;
+    }
+
+    /// Windows の既定 `core.autocrlf=true` 環境 (リポジトリ設定で模擬) でも、
+    /// スナップショット→復元がワークツリーのバイト列 (LF / CRLF) を変換しないこと。
+    #[tokio::test]
+    async fn restore_preserves_bytes_under_autocrlf_repo_config() {
+        let (_dir, repo, tree) = repo_with_snapshot().await;
+        git::run_git(&repo, &["config", "core.autocrlf", "true"])
+            .await
+            .expect("config autocrlf");
+
+        std::fs::write(repo.join("lf.txt"), "lf line\n").expect("write lf");
+        std::fs::write(repo.join("crlf.txt"), "crlf line\r\n").expect("write crlf");
+        let hash = tree
+            .snapshot()
+            .await
+            .expect("snapshot")
+            .tree_hash()
+            .unwrap()
+            .to_owned();
+
+        std::fs::write(repo.join("lf.txt"), "changed\n").expect("write changed");
+        tree.restore(&hash).await.expect("restore");
+
+        assert_eq!(
+            std::fs::read(repo.join("lf.txt")).expect("read lf"),
+            b"lf line\n",
+            "LF のファイルは LF のまま復元される"
+        );
+        assert_eq!(
+            std::fs::read(repo.join("crlf.txt")).expect("read crlf"),
+            b"crlf line\r\n",
+            "CRLF のファイルは CRLF のまま復元される"
+        );
     }
 }

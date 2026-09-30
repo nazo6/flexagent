@@ -165,6 +165,12 @@ OpenCode / OpenCode2
    - **シャドウIndexはセッション単位で分離**します（`<session-id>.index`）。同一リポジトリの複数セッション（並行
      Worktree 作業）が同時にスナップショットを取得しても Index
      ファイルを奪い合わないためです。同一セッション内のターンは直列処理されるため競合しません。
+   - シャドウGit操作（`git add -A` / `read-tree` / `checkout-index`
+     等）は、常に `-c core.autocrlf=false -c core.eol=lf`
+     を前置して実行します。ワークツリーのバイト列（LF / CRLF）を変換せずに
+     スナップショット・復元するためです（Windows の既定
+     `core.autocrlf=true` では、復元時に LF が CRLF へ書き換えられ
+     ワークスペースが破壊される）。
    - `git add -A` は `.gitignore`
      対象を除外しますが、巨大な未追跡ファイル（ビルド成果物等）が含まれ得るため、サイズ上限（例:
      100 MB 超）を設けて超過時はスナップショットをスキップし警告ログを残します。
