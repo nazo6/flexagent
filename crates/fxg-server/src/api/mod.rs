@@ -34,9 +34,9 @@ use axum::{Extension, Json, Router};
 use futures_util::SinkExt;
 use fxg_db::{Db, DbError, SessionFilter};
 use fxg_protocol::client_api::{
-    ApiErrorBody, ApiErrorResponse, AuditLogsResponse, ConnectionRole, CreateSessionRequest,
-    CreateSessionResponse, CreateWorktreeRequest, InboxResponse, KillSwitchRequest,
-    KillSwitchResponse, NodesResponse, ProjectsResponse, ProvisionersResponse,
+    ApiErrorBody, ApiErrorResponse, AuditLogsResponse, AuthLoginRequest, ConnectionRole,
+    CreateSessionRequest, CreateSessionResponse, CreateWorktreeRequest, InboxResponse,
+    KillSwitchRequest, KillSwitchResponse, NodesResponse, ProjectsResponse, ProvisionersResponse,
     PushSubscribeRequest, PushSubscribeResponse, RemoveWorktreeRequest, RespondPermissionRequest,
     RespondPermissionResponse, SearchResponse, ServerWsMessage, SessionListResponse,
     SystemInfoResponse, WorktreeInfo, WorktreesResponse,
@@ -49,6 +49,8 @@ use tokio::sync::broadcast;
 
 pub use pty::{PtyChannelError, PtyChannelEvent, PtySpawnParams};
 pub use ws::REPLAY_BATCH_SIZE;
+
+use self::auth::token_matches;
 
 // ----------------------------------------------------------------------
 // 共通型
@@ -478,6 +480,8 @@ pub fn client_router<B: ClientApiBackend>(backend: B, options: ClientApiOptions)
     Router::new()
         .route("/api/v1/system/info", get(system_info::<B>))
         .route("/api/v1/system/kill-switch", post(kill_switch::<B>))
+        .route("/api/v1/auth/login", post(auth_login::<B>))
+        .route("/api/v1/auth/logout", post(auth_logout))
         .route("/api/v1/projects", get(list_projects::<B>))
         .route(
             "/api/v1/projects/{project_id}/worktrees",
@@ -530,6 +534,32 @@ async fn system_info<B: ClientApiBackend>(State(state): State<ClientApiState<B>>
         central_connected: extras.central_connected,
     })
     .into_response()
+}
+
+/// 認証 Cookie の名前 (`docs/03` §3.0)。
+const SESSION_COOKIE: &str = "fxg_session";
+
+/// `POST /api/v1/auth/login`: Web UI のトークン入力を検証し、`fxg_session`
+/// Cookie (HttpOnly / SameSite=Strict) を発行する。
+///
+/// エンドポイント自体も共通セキュリティミドルウェアの認証を通過する必要が
+/// あるため (`Authorization: Bearer`)、body のトークンは再検証のみを行う。
+async fn auth_login<B: ClientApiBackend>(
+    State(state): State<ClientApiState<B>>,
+    Json(request): Json<AuthLoginRequest>,
+) -> Response {
+    let token = request.token.trim();
+    if !token_matches(&state.backend.auth_token(), token) {
+        return ApiError::from_code(ErrorCode::Unauthorized, "invalid auth token").into_response();
+    }
+    let cookie = format!("{SESSION_COOKIE}={token}; HttpOnly; SameSite=Strict; Path=/");
+    (StatusCode::NO_CONTENT, [(header::SET_COOKIE, cookie)]).into_response()
+}
+
+/// `POST /api/v1/auth/logout`: `fxg_session` Cookie を失効させる。
+async fn auth_logout() -> Response {
+    let cookie = format!("{SESSION_COOKIE}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0");
+    (StatusCode::NO_CONTENT, [(header::SET_COOKIE, cookie)]).into_response()
 }
 
 async fn list_projects<B: ClientApiBackend>(State(state): State<ClientApiState<B>>) -> Response {

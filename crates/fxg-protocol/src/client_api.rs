@@ -277,6 +277,18 @@ pub struct PushSubscribeResponse {
     pub ok: bool,
 }
 
+/// `POST /api/v1/auth/login` リクエスト (Web UI のトークン入力)。
+///
+/// 認証済みリクエスト (`Authorization: Bearer <auth_token>`) として呼び出し、
+/// 成功時は `Set-Cookie: fxg_session=<token>; HttpOnly; SameSite=Strict`
+/// が返却される。以降は Cookie で認証できる (docs/03 §3.0)。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct AuthLoginRequest {
+    /// 認証トークン (Web UI が保持する値。再検証のため body でも渡す)
+    pub token: String,
+}
+
 /// `POST /api/v1/system/kill-switch` リクエスト (緊急停止)。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]

@@ -181,6 +181,81 @@ mod tests {
             .expect("stop");
     }
 
+    fn post_json(host: &str, uri: &str, token: Option<&str>, body: &str) -> HttpRequest<Body> {
+        let mut builder = HttpRequest::builder()
+            .method("POST")
+            .uri(uri)
+            .header(header::HOST, host)
+            .header(header::CONTENT_TYPE, "application/json");
+        if let Some(token) = token {
+            builder = builder.header(header::AUTHORIZATION, format!("Bearer {token}"));
+        }
+        builder.body(Body::from(body.to_owned())).expect("request")
+    }
+
+    #[tokio::test]
+    async fn login_issues_session_cookie_and_logout_clears_it() {
+        let (daemon, _dir) = test_daemon().await;
+        let app = router(daemon.state().clone(), daemon.http_addr());
+        let token = daemon.state().auth_token();
+        let host = host_of(&daemon);
+
+        // 正しいトークンで login → 204 + HttpOnly / SameSite=Strict Cookie
+        let login_body = format!("{{\"token\":\"{token}\"}}");
+        let response = app
+            .clone()
+            .oneshot(post_json(
+                &host,
+                "/api/v1/auth/login",
+                Some(&token),
+                &login_body,
+            ))
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        let cookie = response
+            .headers()
+            .get(header::SET_COOKIE)
+            .and_then(|value| value.to_str().ok())
+            .expect("Set-Cookie");
+        assert!(cookie.contains(&format!("fxg_session={token}")), "{cookie}");
+        assert!(cookie.contains("HttpOnly"), "{cookie}");
+        assert!(cookie.contains("SameSite=Strict"), "{cookie}");
+
+        // body のトークンが不一致 → 401 (Bearer は正しくても拒否)
+        let response = app
+            .clone()
+            .oneshot(post_json(
+                &host,
+                "/api/v1/auth/login",
+                Some(&token),
+                "{\"token\":\"deadbeef\"}",
+            ))
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+        // logout → 204 + 失効 Cookie (Max-Age=0)
+        let response = app
+            .clone()
+            .oneshot(post_json(&host, "/api/v1/auth/logout", Some(&token), "{}"))
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        let cookie = response
+            .headers()
+            .get(header::SET_COOKIE)
+            .and_then(|value| value.to_str().ok())
+            .expect("Set-Cookie");
+        assert!(cookie.contains("fxg_session=;"), "{cookie}");
+        assert!(cookie.contains("Max-Age=0"), "{cookie}");
+
+        daemon.shutdown();
+        tokio::time::timeout(std::time::Duration::from_secs(5), daemon.wait())
+            .await
+            .expect("stop");
+    }
+
     #[tokio::test]
     async fn rejects_cross_origin_websocket_upgrade() {
         let (daemon, _dir) = test_daemon().await;

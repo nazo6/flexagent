@@ -156,6 +156,12 @@
     `extensions.json` で dprint / tombi / rust-analyzer を推奨
   - 選定理由: 既存の整形挙動 (dprint 既定) と一致し、Node 依存を増やさない
     (TS は oxfmt 予定)。tombi は Cargo.toml 等のスキーマ検証も兼ねる
+- **2026-10-01 (Phase 5 認証フロー)**:
+  `POST /api/v1/auth/login` / `POST /api/v1/auth/logout` を追加。login
+  自体も共通ミドルウェアの認証 (`Authorization: Bearer`) を要求し、body の
+  トークンを再検証したうえで `fxg_session` Cookie
+  (HttpOnly; SameSite=Strict) を発行する。PWA の Service Worker は Cookie
+  認証で Push バナーからの承認 API を呼ぶ (docs/03 §3.0, §3.1 反映済み)
 - **2026-10-01 (Phase 4 実装時の設計判断)**:
   - **共通 Client API レイヤの配置**: `fxg-server::api` に
     `ClientApiBackend` trait + 汎用ルーター/WSループを置き、`fxg-node` が

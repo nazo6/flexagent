@@ -525,7 +525,7 @@ pub enum ServerToNodeMsg {
 
 1. **認証方式**:
    - `Authorization: Bearer <auth_token>`
-     ヘッダ、または初回トークン検証時に発行される
+     ヘッダ、または初回トークン検証時 (`POST /api/v1/auth/login`) に発行される
      `Cookie: fxg_session=<token>; HttpOnly; SameSite=Strict`。
    - 未認証リクエストは即座に `401 Unauthorized` を返却。
 2. **Host ヘッダ検証 (DNS Rebinding 防御)**:
@@ -552,6 +552,13 @@ pub enum ServerToNodeMsg {
   か、および Web Push の VAPID Public Key を返却。ローカルノード接続時は
   `unsynced_event_count`（Outbox 残数）と
   `central_connected`（中央サーバー接続状態）も返却。
+- `POST /api/v1/auth/login`: Web UI のトークン入力フロー。認証済みリクエスト
+  (`Authorization: Bearer <auth_token>`) と `{ "token": "..." }` を受け取り、
+  body のトークンを再検証したうえで
+  `Set-Cookie: fxg_session=<token>; HttpOnly; SameSite=Strict; Path=/` を返す
+  (204)。以降は Cookie 認証 (Service Worker の Push 承認応答等) が使える。
+- `POST /api/v1/auth/logout`: `fxg_session` Cookie を失効させる
+  (`Max-Age=0`、204)。
 - `GET /api/v1/projects`: プロジェクト一覧と、各プロジェクトに紐づくノードおよび
   Worktree（`project_node_bindings`）を返却。
 - `GET /api/v1/projects/:id/worktrees`: 指定プロジェクトの各ノード上にある
