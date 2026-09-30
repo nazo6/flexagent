@@ -481,9 +481,15 @@
   - **検証状況**: `cli_e2e.rs` で IPC 往復（`EnsureSession` → セッション記録 →
     `ps` / `session show` / `inbox` / エラーコード）を自動検証済み
     (`mise run check` = fmt:check + clippy + test がすべて通過)。
-    実エージェント (`opencode2` / ACP Registry エージェント) との対話は
-    ネットワーク・外部CLI に依存するため CI では未検証で、手動確認
-    (`fxg run opencode` / `fxg run antigravity`) を残す。
+    実エージェント (`opencode2`) との対話も手動検証済み (2026-09-30)。
+    `fxg run opencode -d` でセッションを起動し、Client WS
+    (`/api/v1/client/ws`) 経由で `capabilities_updated` の再生 →
+    `SetConfig(model)`
+    → `SendPrompt` を実行して実ターン (AgentMessage 完了) が `node.db`
+    に記録されることを確認。プロセス強制終了 → デーモン再起動時の
+    `Stopped` 整合と、`session kill` 後の孫プロセス残存なし (Windows Job
+    Object) も確認済み。対話的TUI (`fxg run opencode` のアタッチ画面) と
+    `antigravity` (ACP Registry) は手動確認を残す。
 - **実装ログ / 進捗メモ (Phase 3)**:
   - **コミット**: `feat(fxg-acp)` (トレイト + Registry) → `feat(fxg-acp)`
     (AcpDriver) → `feat(fxg-node)` (SessionManager 統合 / Revert・Fork /
@@ -540,6 +546,32 @@
   - **テスト**: `cli_e2e.rs` に Phase 3 コマンドの IPC 往復テスト
     (未知セッションのエラーコード・承認 Inbox・起動失敗時のセッション記録 +
     `session show` 表示) を追加。並列実行時の Named Pipe 名衝突も修正した。
+  - **手動検証で発見した不具合の修正 (2026-09-30)**:
+    - **SSE の30秒タイムアウト切断**: `opencode2 serve` のイベント購読
+      (`GET /api/event`) に `REQUEST_TIMEOUT` (30 秒) 付きの共有 HTTP
+      クライアントを使っていたため、30 秒ごとにストリームが強制切断され
+      イベントを取りこぼし、再接続上限 (3 回) 到達後は恒久的にイベントが
+      届かなくなっていた。SSE 専用クライアント (`connect_timeout` のみ) に
+      分離して修正。38 秒アイドル後もターンが完了することを実機確認した。
+    - **起動直後の空カタログ**: `opencode2 serve` は起動直後しばらく
+      `/api/agent` / `/api/model` が空配列を返すため、`fetch_capabilities`
+      が `None` を返して `capabilities_updated` (モデル選択肢) が一切
+      記録されなかった。内容が揃うまで 250ms 間隔で再取得する
+      `wait_for_capabilities` を追加 (上限 10 秒)。実 opencode2
+      に対する統合テストに「モデル選択肢付き capabilities が届く」検証を追加。
+    - **ドライバ終了時の `Stopped` 記録**: イベントチャネルが閉じた
+      (エージェントプロセス終了) 時点で `StatusChanged(Stopped)` を記録し
+      active 一覧から外すようにした (`fxg ps` にゴーストセッションが
+      残らない)。
+    - **デーモン再起動時の整合**: デーモン強制終了で `idle` 等のまま残った
+      セッションを起動時に `Stopped` として記録する
+      (`reconcile_stale_sessions`)。
+    - **`CommandAccepted` の扱い**: 非同期コマンド (`SendPrompt` /
+      `RespondPermission` / `ControlSession`) の受理応答を CLI が失敗と
+      誤判定していたため、成功として扱うよう修正。
+    - **`ServerProcessGuard.terminate`**: `.cmd` シム経由の孫プロセス
+      (実サーバー) を Job Object で確実に終了させるため、ジョブを明示的に
+      閉じる `terminate` を追加 (`shutdown` 時 / サーバー自然終了時の両方)。
 
 ---
 
