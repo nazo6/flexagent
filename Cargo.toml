@@ -18,18 +18,28 @@ fxg-pty = { path = "crates/fxg-pty" }
 fxg-server = { path = "crates/fxg-server" }
 
 # 外部クレート (バージョンは cargo add / cargo outdated で解決する。手書きしない)
+agent-client-protocol = { version = "2.2.0", features = ["unstable_session_fork"] }
 anyhow = "1.0.104"
+async-trait = "0.1.92"
 axum = { version = "0.8.9", features = ["ws"] }
+base64 = "0.23.1"
+crossterm = "0.29.0"
+diffy = "0.5.2"
 dirs = "7.0.0"
 dunce = "1.0.5"
+flate2 = "1.1.10"
 futures-util = "0.3.34"
 http-body-util = "0.1.5"
 libc = "0.2.189"
 portable-pty = "0.9.0"
 rand = "0.10.3"
+ratatui = "0.30.2"
+reqwest = { version = "0.13.5", features = ["json", "stream"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
+sha2 = "0.11.0"
 sqlx = { version = "0.9.0", features = ["macros", "migrate", "runtime-tokio", "sqlite"] }
+tar = "0.4.46"
 tempfile = "3.27.0"
 thiserror = "2.0.21"
 tokio = {
@@ -58,6 +68,7 @@ usage = { package = "usage-rs", version = "6.12.0", features = ["completions"] }
 uuid = { version = "1.26.1", features = ["serde", "v7"] }
 which = "8.0.6"
 win32job = "2.0.3"
+zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
 
 [workspace.lints.clippy]
 all = "warn"

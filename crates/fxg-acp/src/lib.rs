@@ -1,7 +1,18 @@
 //! FlexAgent エージェントドライバクレート (`fxg-acp`)
 //!
-//! [`AgentDriver`](https://github.com/nazo6/flexagent/blob/master/docs/04-agent-drivers-and-windows.md)
-//! トレイト、ACP Registry 管理、`AcpDriver` (`agent-client-protocol`) および
-//! `OpenCode2Driver` (`opencode2 serve` ブリッジ + 純正TUI Attach) を提供する。
+//! 設計: `docs/04-agent-drivers-and-windows.md`
 //!
-//! **Phase 3 で実装予定** (現時点ではプレースホルダ)。
+//! - [`driver`]: [`AgentDriver`] / [`ActiveSessionHandle`] トレイト ——
+//!   独自プロトコルのエージェントを `fxg-node` 本体の変更なしに追加するための
+//!   抽象化
+//! - [`registry`]: ACP Registry (`registry.json`) の取得・キャッシュ・起動解決と
+//!   導入管理 (`fxg agents ...`)
+//! - `acp`: `AcpDriver` (`agent-client-protocol` による標準ACPエージェント制御)
+//! - `opencode2`: `OpenCode2Driver` (`opencode2 serve` ブリッジ + 純正TUI Attach)
+
+pub mod driver;
+pub mod registry;
+
+pub use driver::{
+    ActiveSessionHandle, AgentDriver, AgentLaunchSpec, DriverEvent, StartSessionRequest,
+};
