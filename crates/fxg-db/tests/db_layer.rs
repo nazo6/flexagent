@@ -1053,3 +1053,138 @@ async fn file_backed_db_persists_across_reopen() {
     assert_eq!(count_events(&db, &session_id).await, 1);
     db.close().await;
 }
+
+#[tokio::test]
+async fn append_next_event_allocates_gap_free_sequences() {
+    let mut fixture = Fixture::new(DbRole::Node).await;
+    let created = fixture.session_created();
+    fixture
+        .db
+        .append_event(&created)
+        .await
+        .expect("session created");
+
+    let second = fixture
+        .db
+        .append_next_event(
+            &fixture.session_id,
+            UnifiedEventPayload::StatusChanged {
+                status: SessionStatus::Running,
+                error_message: None,
+            },
+        )
+        .await
+        .expect("second event");
+    assert_eq!(second.node_seq, 2);
+
+    let third = fixture
+        .db
+        .append_next_event(
+            &fixture.session_id,
+            UnifiedEventPayload::UserMessage {
+                text: "続けて".to_owned(),
+                attachments: vec![],
+                client_source: "cli".to_owned(),
+                snapshot_tree_hash: None,
+            },
+        )
+        .await
+        .expect("third event");
+    assert_eq!(third.node_seq, 3);
+
+    let summary = fixture
+        .db
+        .get_session(&fixture.session_id)
+        .await
+        .expect("get")
+        .expect("exists");
+    assert_eq!(summary.last_node_seq, 3);
+    assert_eq!(count_events(&fixture.db, &fixture.session_id).await, 3);
+
+    // 未知セッションへの採番はエラー
+    let err = fixture
+        .db
+        .append_next_event(
+            "missing-session",
+            UnifiedEventPayload::StatusChanged {
+                status: SessionStatus::Idle,
+                error_message: None,
+            },
+        )
+        .await
+        .expect_err("unknown session");
+    assert!(matches!(err, DbError::SessionNotFound(_)));
+
+    // 永続化対象外のイベントは拒否される (キーストローク)
+    let err = fixture
+        .db
+        .append_next_event(
+            &fixture.session_id,
+            UnifiedEventPayload::TerminalInput {
+                terminal_id: "t1".to_owned(),
+                data_b64: "aGk=".to_owned(),
+            },
+        )
+        .await
+        .expect_err("terminal input");
+    assert!(matches!(
+        err,
+        DbError::NonPersistableEvent("terminal_input")
+    ));
+
+    // 拒否時は node_seq を消費しない (トランザクションがロールバックされる)
+    let fourth = fixture
+        .db
+        .append_next_event(
+            &fixture.session_id,
+            UnifiedEventPayload::StatusChanged {
+                status: SessionStatus::Idle,
+                error_message: None,
+            },
+        )
+        .await
+        .expect("fourth event");
+    assert_eq!(fourth.node_seq, 4);
+}
+
+#[tokio::test]
+async fn non_persistable_events_are_rejected_on_batch_append() {
+    let mut fixture = Fixture::new(DbRole::Node).await;
+    let created = fixture.session_created();
+    let partial = fixture.event(UnifiedEventPayload::AgentMessage {
+        message_id: "m1".to_owned(),
+        text: "途中".to_owned(),
+        is_complete: false,
+    });
+
+    let err = fixture
+        .db
+        .append_events(&[created.clone(), partial.clone()])
+        .await
+        .expect_err("incomplete message");
+    assert!(matches!(err, DbError::NonPersistableEvent("agent_message")));
+
+    // バッチ全体がロールバックされる (SessionCreated も入らない)
+    assert!(
+        fixture
+            .db
+            .get_session(&fixture.session_id)
+            .await
+            .expect("get")
+            .is_none()
+    );
+
+    // 完成イベントなら追記できる
+    let mut complete = partial;
+    complete.payload = UnifiedEventPayload::AgentMessage {
+        message_id: "m1".to_owned(),
+        text: "完成".to_owned(),
+        is_complete: true,
+    };
+    fixture
+        .db
+        .append_events(&[created, complete])
+        .await
+        .expect("complete message");
+    assert_eq!(count_events(&fixture.db, &fixture.session_id).await, 2);
+}

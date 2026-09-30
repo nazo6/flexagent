@@ -36,6 +36,13 @@ pub enum NodeError {
     /// Worktree / ブランチの状態が不正
     #[error("invalid worktree state: {0}")]
     InvalidWorktree(String),
+    /// セッションの状態・操作が不正
+    #[error("invalid session state: {0}")]
+    InvalidSession(String),
+    /// 永続化してはいけないイベントを記録しようとした
+    /// (ストリーミング途中のチャンク・キーストローク等)
+    #[error("event is not persistable: {0}")]
+    NonPersistableEvent(&'static str),
     /// データベースエラー (fxg-db)
     #[error("database error: {0}")]
     Db(#[from] fxg_db::DbError),

@@ -14,6 +14,7 @@
 //! - `project`: 論理プロジェクト (`project_key`) の解決
 //! - `worktree`: Git Worktree の検出・作成・削除とフック実行
 //! - `snapshot`: Shadow Git Tree によるターン単位スナップショット / 復元
+//! - `session`: セッションイベントの即時配信と永続化 (Compaction)
 
 #![warn(missing_docs)]
 
@@ -21,6 +22,7 @@ pub mod error;
 pub mod git;
 pub mod paths;
 pub mod project;
+pub mod session;
 pub mod snapshot;
 pub mod worktree;
 
@@ -30,6 +32,7 @@ mod testutil;
 pub use error::NodeError;
 pub use paths::{NodePaths, ipc_endpoint};
 pub use project::{ProjectResolutionSource, ResolvedProject, normalize_git_url, resolve_project};
+pub use session::{SessionBroadcast, SessionEventBus};
 pub use snapshot::{
     DEFAULT_SNAPSHOT_SIZE_LIMIT_BYTES, RestoreOutcome, ShadowGitTree, SnapshotOutcome,
 };

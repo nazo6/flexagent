@@ -18,6 +18,10 @@ pub enum DbError {
     /// DB 内のイベント payload がデコードできない (データ破損)
     #[error("invalid event payload in database: {0}")]
     InvalidPayload(String),
+    /// 永続化してはいけないイベントを追記しようとした
+    /// (ストリーミング途中のチャンク・キーストローク等)
+    #[error("event is not persistable: {0}")]
+    NonPersistableEvent(&'static str),
     /// `node_seq` が負値 (データ破損)
     #[error("node_seq {0} is negative")]
     NegativeNodeSeq(i64),

@@ -7,7 +7,7 @@ use fxg_protocol::common::{
     AuditLogEntry, NodeSummary, PermissionRequestEntry, ProjectSummary, SearchHit, SessionSummary,
 };
 use fxg_protocol::config::{NODE_DB_FILE_NAME, SERVER_DB_FILE_NAME};
-use fxg_protocol::events::{SessionEventBatch, SessionEventEnvelope};
+use fxg_protocol::events::{SessionEventBatch, SessionEventEnvelope, UnifiedEventPayload};
 use sqlx::SqlitePool;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
 
@@ -130,6 +130,15 @@ impl Db {
         events::append_events(&self.pool, std::slice::from_ref(event))
             .await
             .map(|mut outcomes| outcomes.remove(0))
+    }
+
+    /// セッションの次の `node_seq` を採番してイベントを追記する (実行ノード専用)。
+    pub async fn append_next_event(
+        &self,
+        session_id: &str,
+        payload: UnifiedEventPayload,
+    ) -> Result<SessionEventEnvelope, DbError> {
+        events::append_next_event(&self.pool, session_id, payload).await
     }
 
     /// イベントログ全量から `sessions` / `permission_requests` 投影を再構築する。

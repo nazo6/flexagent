@@ -68,10 +68,64 @@ pub async fn append_events(
     Ok(outcomes)
 }
 
+/// セッションの次の `node_seq` を採番してイベントを追記する (**実行ノード専用**)。
+///
+/// `sessions.last_node_seq + 1` を同一トランザクション内で採番するため、
+/// 同時実行でも欠番・重複が生じない。永続化対象外のイベント
+/// ([`UnifiedEventPayload::is_persistable`] が `false`) は拒否する。
+///
+/// # Errors
+///
+/// 対象セッションが存在しない場合は [`DbError::SessionNotFound`]。
+pub async fn append_next_event(
+    pool: &SqlitePool,
+    session_id: &str,
+    payload: UnifiedEventPayload,
+) -> Result<SessionEventEnvelope, DbError> {
+    let mut tx = pool.begin().await?;
+
+    // 採番は必ずこの UPDATE で行い、トランザクション内でイベント追記まで完了させる
+    // (ロールバック時は last_node_seq も巻き戻るため欠番が残らない)。
+    let next_node_seq = sqlx::query_scalar!(
+        r#"
+        UPDATE sessions
+           SET last_node_seq = last_node_seq + 1
+         WHERE session_id = ?
+        RETURNING last_node_seq
+        "#,
+        session_id,
+    )
+    .fetch_optional(&mut *tx)
+    .await?;
+    let Some(next_node_seq) = next_node_seq else {
+        return Err(DbError::SessionNotFound(session_id.to_owned()));
+    };
+    let node_seq =
+        u64::try_from(next_node_seq).map_err(|_| DbError::NegativeNodeSeq(next_node_seq))?;
+
+    let envelope = SessionEventEnvelope {
+        event_id: fxg_protocol::util::uuid_v7(),
+        session_id: session_id.to_owned(),
+        node_seq,
+        created_at: fxg_protocol::util::now_ms(),
+        payload,
+    };
+    let outcome = append_event_in_tx(&mut tx, &envelope).await?;
+    debug_assert!(
+        outcome.inserted,
+        "newly allocated node_seq must be inserted"
+    );
+    tx.commit().await?;
+    Ok(envelope)
+}
+
 async fn append_event_in_tx(
     tx: &mut Transaction<'_, Sqlite>,
     envelope: &SessionEventEnvelope,
 ) -> Result<ApplyOutcome, DbError> {
+    if !envelope.payload.is_persistable() {
+        return Err(DbError::NonPersistableEvent(envelope.payload.event_type()));
+    }
     let node_seq = node_seq_to_i64(&envelope.session_id, envelope.node_seq)?;
     let (event_type, searchable_text) = searchable::classify_payload(&envelope.payload);
     let payload_json = serde_json::to_string(&envelope.payload)?;

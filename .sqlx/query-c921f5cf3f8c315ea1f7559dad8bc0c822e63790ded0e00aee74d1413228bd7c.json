@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        UPDATE sessions\n           SET last_node_seq = last_node_seq + 1\n         WHERE session_id = ?\n        RETURNING last_node_seq\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "last_node_seq",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "sessions",
+            "name": "last_node_seq"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "c921f5cf3f8c315ea1f7559dad8bc0c822e63790ded0e00aee74d1413228bd7c"
+}
