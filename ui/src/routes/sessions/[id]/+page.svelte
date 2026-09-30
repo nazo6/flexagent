@@ -3,6 +3,7 @@
   import BootstrapLogCard from '$lib/components/BootstrapLogCard.svelte';
   import ChatTimeline from '$lib/components/chat/ChatTimeline.svelte';
   import Composer from '$lib/components/chat/Composer.svelte';
+  import DiffPane from '$lib/components/diff/DiffPane.svelte';
   import SessionStatusBadge from '$lib/components/SessionStatusBadge.svelte';
   import { Tabs, TabsContent, TabsList, TabsTrigger } from '$lib/components/ui/tabs';
   import { formatRelativeTime } from '$lib/format';
@@ -106,7 +107,7 @@
     </TabsContent>
 
     <TabsContent value="diff">
-      <p class="text-muted-foreground text-sm">Diff ペインは次のコミットで実装します。</p>
+      <DiffPane sessionId={sessionId} items={timeline.items} />
     </TabsContent>
 
     <TabsContent value="terminal">
