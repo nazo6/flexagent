@@ -5,6 +5,7 @@
   import Composer from '$lib/components/chat/Composer.svelte';
   import DiffPane from '$lib/components/diff/DiffPane.svelte';
   import SessionStatusBadge from '$lib/components/SessionStatusBadge.svelte';
+  import TerminalView from '$lib/components/terminal/TerminalView.svelte';
   import { Tabs, TabsContent, TabsList, TabsTrigger } from '$lib/components/ui/tabs';
   import { formatRelativeTime } from '$lib/format';
   import { shortId } from '$lib/session-status';
@@ -125,7 +126,7 @@
     </TabsContent>
 
     <TabsContent value="terminal">
-      <p class="text-muted-foreground text-sm">Terminal ペインは Phase 5 の後半で実装します。</p>
+      <TerminalView {sessionId} />
     </TabsContent>
   </Tabs>
 </div>
