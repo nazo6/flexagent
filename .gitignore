@@ -1,0 +1,19 @@
+# Rust
+/target
+**/*.rs.bk
+
+# SQLite 実データ・検証用DB (マイグレーション定義はコミットする)
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+
+# UI / Node
+node_modules/
+ui/.svelte-kit/
+ui/build/
+ui/.vite/
+
+# OS
+.DS_Store

@@ -1,0 +1,14 @@
+[package]
+name = "fxg-server"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "FlexAgent 中央サーバー (Axum Node Hub・イベント集約・Web Push・PWA 配信)"
+repository.workspace = true
+
+[dependencies]
+fxg-db = { workspace = true }
+fxg-protocol = { workspace = true }
+
+[lints]
+workspace = true

@@ -1,0 +1,22 @@
+[package]
+name = "fxg-protocol"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "FlexAgent 共通型定義・プロトコルメッセージ (ts-rs 対応)"
+repository.workspace = true
+
+[dependencies]
+dirs = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+toml = { workspace = true }
+ts-rs = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
+[lints]
+workspace = true

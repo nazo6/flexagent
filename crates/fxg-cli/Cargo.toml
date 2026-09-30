@@ -1,0 +1,22 @@
+[package]
+name = "fxg-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "FlexAgent CLI / TUI エントリポイント (fxg バイナリ)"
+repository.workspace = true
+
+[[bin]]
+name = "fxg"
+path = "src/main.rs"
+
+[dependencies]
+fxg-acp = { workspace = true }
+fxg-db = { workspace = true }
+fxg-node = { workspace = true }
+fxg-protocol = { workspace = true }
+fxg-pty = { workspace = true }
+fxg-server = { workspace = true }
+
+[lints]
+workspace = true

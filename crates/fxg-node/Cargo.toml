@@ -1,0 +1,16 @@
+[package]
+name = "fxg-node"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "FlexAgent ノードデーモン (ローカルIPC・ローカルWeb配信・Outbox同期・プロジェクト解決)"
+repository.workspace = true
+
+[dependencies]
+fxg-acp = { workspace = true }
+fxg-db = { workspace = true }
+fxg-protocol = { workspace = true }
+fxg-pty = { workspace = true }
+
+[lints]
+workspace = true

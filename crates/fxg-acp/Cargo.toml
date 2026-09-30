@@ -1,0 +1,14 @@
+[package]
+name = "fxg-acp"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "FlexAgent エージェントドライバ (ACP Registry / AcpDriver / OpenCode2Driver)"
+repository.workspace = true
+
+[dependencies]
+fxg-protocol = { workspace = true }
+fxg-pty = { workspace = true }
+
+[lints]
+workspace = true

@@ -1,0 +1,7 @@
+# ts-rs の型出力設定 (docs/03-protocol-and-api.md §1)
+# ui/src/lib/generated/ に SvelteKit から直接 import できる TS 型を出力する。
+# TS_RS_LARGE_INT=number により i64/u64 (epoch ms / node_seq) を bigint ではなく
+# number として出力する (JSON 上は数値であり、UI 側で bigint 変換を挟まないため)。
+[env]
+TS_RS_EXPORT_DIR = { value = "ui/src/lib/generated", relative = true }
+TS_RS_LARGE_INT = "number"
