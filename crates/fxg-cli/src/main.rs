@@ -55,7 +55,9 @@ enum Commands {
     Agents(commands::AgentsArgs),
     /// ノードデーモンをフォアグラウンド起動する
     Daemon(commands::DaemonArgs),
-    /// 認証トークン管理 (token / rotate-token)
+    /// 中央サーバーをフォアグラウンド起動する (:8080)
+    Server(commands::ServerArgs),
+    /// 認証トークン管理 (token / rotate-token / node-token)
     Auth(commands::AuthArgs),
     /// 【緊急停止】ローカルの全セッション・子プロセスツリー・PTYを強制終了する
     KillAll(commands::KillAllArgs),

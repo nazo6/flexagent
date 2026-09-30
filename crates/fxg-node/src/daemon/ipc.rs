@@ -489,15 +489,19 @@ async fn handle(
                 .unsynced_event_count()
                 .await
                 .map_err(|err| DispatchError::from_node_error(&command_id, err.into()))?;
+            let last_synced_at = state
+                .db()
+                .last_synced_at()
+                .await
+                .map_err(|err| DispatchError::from_node_error(&command_id, err.into()))?;
             Ok((
                 command_id,
                 IpcResult::LocalStatus {
                     status: fxg_protocol::ipc::LocalStatus {
                         sessions,
-                        // Outbox 同期ワーカーは Phase 4 で実装する
-                        central_connected: false,
+                        central_connected: state.central_connected(),
                         unsynced_event_count: unsynced,
-                        last_synced_at: None,
+                        last_synced_at,
                     },
                 },
             ))

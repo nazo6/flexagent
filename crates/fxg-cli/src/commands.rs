@@ -25,7 +25,7 @@ pub struct DaemonArgs {
     /// ローカルHTTP/WSサーバーのバインド先 (既定: 127.0.0.1:7860)
     #[usage(long)]
     listen: Option<String>,
-    /// 中央サーバーの Node Hub WebSocket URL (Outbox 同期。Phase 4 で実装)
+    /// 中央サーバーの Node Hub WebSocket URL (Outbox 同期。未指定時はスタンドアロン)
     #[usage(long)]
     server_url: Option<String>,
     /// リモート (中央サーバー経由) からの Web PTY 起動を許可する
@@ -49,9 +49,6 @@ impl usage::RunAsync for DaemonArgs {
         if self.stdio || self.ephemeral || self.workspace.is_some() {
             bail!("--stdio / --ephemeral / --workspace は Phase 6 (一時VM) で実装します");
         }
-        if self.server_url.is_some() {
-            bail!("--server-url (Outbox 同期) は Phase 4 で実装します");
-        }
 
         let env = fxg_protocol::config::process_env;
         let global = fxg_protocol::config::GlobalConfig::load(&env)
@@ -68,10 +65,64 @@ impl usage::RunAsync for DaemonArgs {
             config.listen_addr = listen;
         }
         config.allow_remote_pty = self.allow_remote_pty || global.node.allow_remote_pty;
+        // Outbox 同期 (中央サーバー接続。未指定時はスタンドアロン・ローカルのみ)
+        config.central_server_url = self
+            .server_url
+            .clone()
+            .or_else(|| global.node.central_server_url.clone());
+        config.node_token = global.node.node_token.clone();
 
         fxg_node::daemon::NodeDaemon::run(config)
             .await
             .context("fxg daemon failed")
+    }
+}
+
+// ----------------------------------------------------------------------
+// fxg server
+// ----------------------------------------------------------------------
+
+/// `fxg server` の引数。
+#[derive(Debug, Args)]
+pub struct ServerArgs {
+    /// HTTP/WS バインド先 (既定: 0.0.0.0:8080)
+    #[usage(long)]
+    listen: Option<String>,
+    /// ポート番号上書き (`--listen` より優先)
+    #[usage(long)]
+    port: Option<u16>,
+}
+
+impl usage::RunAsync for ServerArgs {
+    type Output = Result<()>;
+
+    async fn run_async(self) -> Self::Output {
+        let env = fxg_protocol::config::process_env;
+        let global = fxg_protocol::config::GlobalConfig::load(&env)
+            .context("failed to load ~/.flexagent/config.toml")?;
+
+        let mut listen_addr = self
+            .listen
+            .clone()
+            .unwrap_or_else(|| global.server.resolved_listen_addr().to_owned());
+        if let Some(port) = self.port {
+            let host = listen_addr
+                .rsplit_once(':')
+                .map(|(host, _)| host.to_owned())
+                .unwrap_or_else(|| "0.0.0.0".to_owned());
+            listen_addr = format!("{host}:{port}");
+        }
+
+        let options = fxg_server::ServerOptions {
+            fxg_home: fxg_protocol::config::fxg_home(&env),
+            listen_addr,
+            allowed_hosts: global.server.allowed_hosts.clone(),
+            allowed_origins: global.server.allowed_origins.clone(),
+            provisioners: global.provisioners.clone(),
+        };
+        fxg_server::Server::run(options)
+            .await
+            .context("fxg server failed")
     }
 }
 
@@ -1452,6 +1503,117 @@ pub enum AuthCommands {
     Token(AuthTokenArgs),
     /// クライアント認証トークンを再生成する
     RotateToken(AuthRotateArgs),
+    /// ノード個別トークン (Node ⇔ Server ペアリング) を管理する
+    #[usage(name = "node-token")]
+    NodeToken(NodeTokenArgs),
+}
+
+/// `fxg auth node-token` のサブコマンド。
+#[derive(Debug, Args)]
+#[usage(run_async, arg_required_else_help)]
+pub struct NodeTokenArgs {
+    #[usage(subcommand)]
+    command: NodeTokenCommands,
+}
+
+/// ノード個別トークン操作。
+#[derive(Debug, usage::Subcommands)]
+#[usage(run_async)]
+pub enum NodeTokenCommands {
+    /// ノード個別トークンを発行して表示する (中央サーバー上で実行)
+    Issue(NodeTokenIssueArgs),
+    /// ノード個別トークンを失効させる
+    Revoke(NodeTokenRevokeArgs),
+    /// 発行済みノードトークン一覧を表示する
+    List(NodeTokenListArgs),
+}
+
+/// `fxg auth node-token issue <node-id>`
+#[derive(Debug, Args)]
+pub struct NodeTokenIssueArgs {
+    /// 対象ノードID (fxg daemon の node_id)
+    node_id: String,
+}
+
+impl usage::RunAsync for NodeTokenIssueArgs {
+    type Output = Result<()>;
+
+    async fn run_async(self) -> Self::Output {
+        let db = open_hub_db().await?;
+        // 未登録のノードはプレースホルダで登録する
+        // (ノード接続時の `NodeHello` で実情報に上書きされる)
+        let nodes = db.list_nodes().await?;
+        if !nodes.iter().any(|node| node.node_id == self.node_id) {
+            db.upsert_node(&fxg_db::NodeRecord::new(
+                self.node_id.clone(),
+                self.node_id.clone(),
+                "unknown",
+                "unknown",
+                "unknown",
+            ))
+            .await?;
+        }
+        let token = fxg_server::api::auth::generate_token();
+        db.set_node_token_hash(
+            &self.node_id,
+            Some(&fxg_server::api::auth::hash_token(&token)),
+        )
+        .await?;
+        // 平文トークンは発行時に一度だけ表示する (サーバーにはハッシュのみ保存)
+        println!("{token}");
+        eprintln!(
+            "node_token を発行しました。ノード側の ~/.flexagent/node_token に保存してください。"
+        );
+        Ok(())
+    }
+}
+
+/// `fxg auth node-token revoke <node-id>`
+#[derive(Debug, Args)]
+pub struct NodeTokenRevokeArgs {
+    /// 対象ノードID
+    node_id: String,
+}
+
+impl usage::RunAsync for NodeTokenRevokeArgs {
+    type Output = Result<()>;
+
+    async fn run_async(self) -> Self::Output {
+        let db = open_hub_db().await?;
+        db.set_node_token_hash(&self.node_id, None).await?;
+        println!("revoked node token for {}", self.node_id);
+        Ok(())
+    }
+}
+
+/// `fxg auth node-token list`
+#[derive(Debug, Args)]
+pub struct NodeTokenListArgs {}
+
+impl usage::RunAsync for NodeTokenListArgs {
+    type Output = Result<()>;
+
+    async fn run_async(self) -> Self::Output {
+        let db = open_hub_db().await?;
+        let tokens = db.list_node_tokens().await?;
+        if tokens.is_empty() {
+            println!("(no node tokens issued)");
+            return Ok(());
+        }
+        for (node_id, hash) in tokens {
+            let prefix: String = hash.chars().take(12).collect();
+            println!("{node_id}\t{prefix}…");
+        }
+        Ok(())
+    }
+}
+
+/// 中央サーバーの DB (`~/.flexagent/server.db`) を開く。
+async fn open_hub_db() -> Result<fxg_db::Db> {
+    let env = fxg_protocol::config::process_env;
+    let home = fxg_protocol::config::fxg_home(&env);
+    let db = fxg_db::Db::open(&fxg_db::hub_db_path(&home), fxg_db::DbRole::Hub).await?;
+    Ok(db)
 }
 
 /// `fxg auth token`
@@ -1492,7 +1654,8 @@ impl usage::RunAsync for AuthRotateArgs {
 #[derive(Debug, Args)]
 pub struct KillAllArgs {
     /// 中央サーバーへ配信せずローカルノードのみ停止する
-    /// (中央サーバーへの一括配信は Phase 4 で実装)
+    /// (全ノード一括停止は中央サーバーの `POST /api/v1/system/kill-switch`
+    ///  から配信される)
     #[usage(long)]
     local_only: bool,
 }
@@ -1504,8 +1667,9 @@ impl usage::RunAsync for KillAllArgs {
         let mut client = DaemonClient::connect().await?;
         let (sessions, ptys) = client.kill_all().await?;
         if !self.local_only {
-            // Phase 4 で中央サーバー経由の全ノード停止を追加する
-            tracing::debug!("central server fan-out is implemented in phase 4");
+            tracing::debug!(
+                "all-node fan-out is issued by the central server via POST /api/v1/system/kill-switch"
+            );
         }
         println!(
             "killed {} session(s) and {} pty(s)",

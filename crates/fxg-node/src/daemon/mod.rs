@@ -183,6 +183,8 @@ struct Inner {
     client_events: broadcast::Sender<ClientEvent>,
     /// 中央サーバーの Outbox 同期ワーカーが接続中か
     central_connected: AtomicBool,
+    /// `NodeHello` 再送トリガ (Worktree 変更・プロジェクト登録時)
+    hello_refresh: tokio::sync::Notify,
 }
 
 /// デーモンの共有状態 (HTTP ハンドラ / IPC ハンドラ / CLI から共有)。
@@ -269,6 +271,7 @@ impl DaemonState {
                 started_at: now_ms(),
                 client_events,
                 central_connected: AtomicBool::new(false),
+                hello_refresh: tokio::sync::Notify::new(),
             }),
         };
 
@@ -351,6 +354,16 @@ impl DaemonState {
         self.inner
             .central_connected
             .store(connected, Ordering::Relaxed);
+    }
+
+    /// `NodeHello` の再送を要求する (Worktree 変更等でプロジェクト紐付けを報告)。
+    pub fn trigger_node_hello(&self) {
+        self.inner.hello_refresh.notify_one();
+    }
+
+    /// `NodeHello` 再送トリガの通知を受け取る (同期ワーカー専用)。
+    pub(crate) fn hello_refresh(&self) -> &tokio::sync::Notify {
+        &self.inner.hello_refresh
     }
 
     /// ノードID。
@@ -507,6 +520,37 @@ impl DaemonState {
     }
 }
 
+/// Outbox Sync Worker を起動する (中央サーバー URL 未設定時は `None`)。
+///
+/// ノード個別トークンは `config.node_token` / `FXG_NODE_TOKEN` →
+/// `~/.flexagent/node_token` の順で解決する。
+fn start_sync_worker(
+    state: &DaemonState,
+    shutdown_tx: &watch::Sender<bool>,
+) -> Result<Option<tokio::task::JoinHandle<()>>, NodeError> {
+    let Some(url) = state.config().central_server_url.clone() else {
+        return Ok(None);
+    };
+    let token = match state.config().node_token.clone() {
+        Some(token) if !token.trim().is_empty() => token,
+        _ => match std::fs::read_to_string(state.paths().node_token_path()) {
+            Ok(token) if !token.trim().is_empty() => token.trim().to_owned(),
+            _ => {
+                tracing::warn!(
+                    "central_server_url is set but node_token is missing; outbox sync disabled"
+                );
+                return Ok(None);
+            }
+        },
+    };
+    let state = state.clone();
+    let shutdown = shutdown_tx.subscribe();
+    let task = tokio::spawn(async move {
+        crate::sync::run(state, url, token, shutdown).await;
+    });
+    Ok(Some(task))
+}
+
 /// 起動済みのノードデーモン。
 pub struct NodeDaemon {
     state: DaemonState,
@@ -514,6 +558,7 @@ pub struct NodeDaemon {
     shutdown_tx: watch::Sender<bool>,
     http_task: tokio::task::JoinHandle<()>,
     ipc_task: tokio::task::JoinHandle<()>,
+    sync_task: Option<tokio::task::JoinHandle<()>>,
 }
 
 impl std::fmt::Debug for NodeDaemon {
@@ -581,6 +626,9 @@ impl NodeDaemon {
             }
         });
 
+        // Outbox Sync Worker (中央サーバー URL 設定時のみ起動)
+        let sync_task = start_sync_worker(&state, &shutdown_tx)?;
+
         tracing::info!(
             node_id = state.config().node_id,
             http = %http_addr,
@@ -594,6 +642,7 @@ impl NodeDaemon {
             shutdown_tx,
             http_task,
             ipc_task,
+            sync_task,
         })
     }
 
@@ -641,6 +690,9 @@ impl NodeDaemon {
 
         let _ = self.http_task.await;
         let _ = self.ipc_task.await;
+        if let Some(sync_task) = self.sync_task {
+            let _ = sync_task.await;
+        }
         tracing::info!("fxg daemon stopped");
     }
 

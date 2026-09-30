@@ -27,6 +27,7 @@ pub mod project;
 pub mod session;
 pub mod session_manager;
 pub mod snapshot;
+pub mod sync;
 pub mod worktree;
 
 #[cfg(test)]

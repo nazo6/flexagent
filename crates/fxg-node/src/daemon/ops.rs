@@ -119,6 +119,8 @@ impl DaemonState {
             )
             .await?;
         self.db().delete_orphan_projects().await?;
+        // 周辺の変更 (Worktree 検出・プロジェクト紐付け) をハブへ報告する
+        self.trigger_node_hello();
         Ok(resolved)
     }
 
@@ -307,6 +309,7 @@ impl DaemonState {
             }),
         )
         .await;
+        self.trigger_node_hello();
         Ok(())
     }
 
