@@ -1,0 +1,92 @@
+# FlexAgent (`fxg`) CI
+#
+# - ツールチェインは mise (`mise.toml`) で固定する (`jdx/mise-action`)
+# - テストは Linux / macOS / Windows の3プラットフォームで実行する。
+#   Windows では ProcessTreeGuard (Job Object による孫プロセス巻き込み Kill) /
+#   Named Pipe IPC / ConPTY 読み書きを自動検証する (Phase 2 完了条件)。
+# - `cargo:sqlx-cli` のビルドは重いため、必要なジョブ (sqlx) でのみ有効化する
+#   (テストはコミット済み `.sqlx` によるオフラインモードで動く)
+
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: "1"
+
+jobs:
+  fmt:
+    name: fmt (rustfmt)
+    runs-on: ubuntu-latest
+    env:
+      MISE_DISABLE_TOOLS: cargo:sqlx-cli
+    steps:
+      - uses: actions/checkout@v5
+      - uses: jdx/mise-action@v3
+      - run: mise run fmt:check
+
+  clippy:
+    name: clippy (-D warnings)
+    runs-on: ubuntu-latest
+    env:
+      MISE_DISABLE_TOOLS: cargo:sqlx-cli
+    steps:
+      - uses: actions/checkout@v5
+      - uses: jdx/mise-action@v3
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ubuntu
+      - run: mise run lint
+
+  test:
+    name: test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    env:
+      MISE_DISABLE_TOOLS: cargo:sqlx-cli
+    steps:
+      - uses: actions/checkout@v5
+      - uses: jdx/mise-action@v3
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ${{ matrix.os }}
+      - run: mise run test
+
+  sqlx:
+    name: sqlx offline data (.sqlx)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+      - uses: jdx/mise-action@v3
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ubuntu
+      - run: mise run sqlx:check
+
+  types:
+    name: ts-rs type sync
+    runs-on: ubuntu-latest
+    env:
+      MISE_DISABLE_TOOLS: cargo:sqlx-cli
+    steps:
+      - uses: actions/checkout@v5
+      - uses: jdx/mise-action@v3
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ubuntu
+      - run: mise run types
+      - name: 生成物がコミット済みの TS 型と一致するか
+        run: git diff --exit-code -- ui/src/lib/generated
