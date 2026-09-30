@@ -39,3 +39,18 @@ pub(crate) async fn init_test_repo_with_remote(dir: &Path, remote_url: &str) {
 pub(crate) fn snapshot_index_path(dir: &Path, session_id: &str) -> std::path::PathBuf {
     dir.join(format!("{session_id}.index"))
 }
+
+/// テスト用のローカルIPCエンドポイントを返す。
+///
+/// - **Windows**: Named Pipe (`\\.\pipe\fxg-test-<pid>-<n>`)。テストは同一
+///   プロセス内で並列実行されるため、連番で一意化する。
+/// - **Unix**: `dir` 配下の一時ソケット (テストごとに個別の tempdir を使う)。
+pub(crate) fn test_ipc_endpoint(dir: &Path) -> String {
+    if cfg!(windows) {
+        static COUNTER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+        let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        format!(r"\\.\pipe\fxg-test-{}-{n}", std::process::id())
+    } else {
+        dir.join("daemon.sock").to_string_lossy().into_owned()
+    }
+}

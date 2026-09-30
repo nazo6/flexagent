@@ -795,28 +795,23 @@ fn patch_project_key(dir: &Path, project_key: &str) -> Result<(), NodeError> {
 mod tests {
     use super::*;
     use crate::daemon::{DaemonConfig, NodeDaemon};
+    use crate::ipc_client::IpcClient;
     use std::time::Duration;
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     async fn start_daemon() -> (NodeDaemon, tempfile::TempDir) {
         let dir = tempfile::tempdir().expect("tempdir");
         let mut config = DaemonConfig::new(dir.path().to_path_buf(), "ipc-node", "IPC Node");
         config.listen_addr = "127.0.0.1:0".to_owned();
-        config.ipc_endpoint = dir
-            .path()
-            .join("daemon.sock")
-            .to_string_lossy()
-            .into_owned();
+        config.ipc_endpoint = crate::testutil::test_ipc_endpoint(dir.path());
         let daemon = NodeDaemon::start(config).await.expect("start");
         wait_for_endpoint(daemon.ipc_endpoint()).await;
         (daemon, dir)
     }
 
     /// IPC サーバーが接続を受け付けられるようになるまで待機する。
-    #[cfg(unix)]
     async fn wait_for_endpoint(endpoint: &str) {
         for _ in 0..200 {
-            if tokio::net::UnixStream::connect(endpoint).await.is_ok() {
+            if IpcClient::connect(endpoint).await.is_ok() {
                 return;
             }
             tokio::time::sleep(Duration::from_millis(10)).await;
@@ -824,39 +819,15 @@ mod tests {
         panic!("ipc endpoint did not become ready: {endpoint}");
     }
 
-    #[cfg(not(unix))]
-    async fn wait_for_endpoint(_endpoint: &str) {}
-
     /// IPC 接続して1リクエスト送信し、レスポンスを受信する。
-    #[cfg(unix)]
+    ///
+    /// クライアントは `IpcClient` を使う (Unix Domain Socket / Named Pipe を
+    /// 同一のテストコードで検証する)。
     async fn roundtrip(endpoint: &str, request: &IpcClientMessage) -> IpcServerMessage {
-        let stream = tokio::net::UnixStream::connect(endpoint)
-            .await
-            .expect("connect");
-        let mut stream = stream;
-        let payload = serde_json::to_vec(request).expect("encode");
-        let length = u32::try_from(payload.len()).expect("len");
-        stream
-            .write_all(&length.to_le_bytes())
-            .await
-            .expect("write length");
-        stream.write_all(&payload).await.expect("write payload");
-        stream.flush().await.expect("flush");
-
-        let mut length_buf = [0u8; 4];
-        stream
-            .read_exact(&mut length_buf)
-            .await
-            .expect("read length");
-        let mut response = vec![0u8; u32::from_le_bytes(length_buf) as usize];
-        stream
-            .read_exact(&mut response)
-            .await
-            .expect("read payload");
-        serde_json::from_slice(&response).expect("decode")
+        let mut client = IpcClient::connect(endpoint).await.expect("connect");
+        client.request(request).await.expect("request")
     }
 
-    #[cfg(unix)]
     #[tokio::test]
     async fn ipc_project_info_and_link_via_socket() {
         let (daemon, dir) = start_daemon().await;
@@ -949,7 +920,6 @@ mod tests {
             .expect("stop");
     }
 
-    #[cfg(unix)]
     #[tokio::test]
     async fn ipc_worktree_add_list_remove_and_sessions() {
         let (daemon, dir) = start_daemon().await;
@@ -1120,7 +1090,6 @@ mod tests {
             .expect("stop");
     }
 
-    #[cfg(unix)]
     #[tokio::test]
     async fn second_daemon_cannot_bind_same_socket() {
         let (daemon, dir) = start_daemon().await;

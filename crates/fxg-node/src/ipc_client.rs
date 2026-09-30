@@ -67,7 +67,6 @@ impl IpcClient {
     }
 }
 
-#[cfg(unix)]
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -80,11 +79,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let mut config = DaemonConfig::new(dir.path().to_path_buf(), "client-node", "Client Node");
         config.listen_addr = "127.0.0.1:0".to_owned();
-        config.ipc_endpoint = dir
-            .path()
-            .join("daemon.sock")
-            .to_string_lossy()
-            .into_owned();
+        config.ipc_endpoint = crate::testutil::test_ipc_endpoint(dir.path());
         let daemon = NodeDaemon::start(config).await.expect("start");
 
         // サーバーが listen を開始するまで待つ

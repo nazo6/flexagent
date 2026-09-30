@@ -510,11 +510,7 @@ mod tests {
         let mut config = DaemonConfig::new(dir.path().to_path_buf(), "test-node", "Test Node");
         // テストではポート競合を避けるため ephemeral port と一時IPCパスを使う
         config.listen_addr = "127.0.0.1:0".to_owned();
-        config.ipc_endpoint = dir
-            .path()
-            .join("daemon.sock")
-            .to_string_lossy()
-            .into_owned();
+        config.ipc_endpoint = crate::testutil::test_ipc_endpoint(dir.path());
         let daemon = NodeDaemon::start(config).await.expect("start daemon");
         (daemon, dir)
     }
@@ -546,7 +542,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let mut config = DaemonConfig::new(dir.path().to_path_buf(), "persisted-node", "Node");
         config.listen_addr = "127.0.0.1:0".to_owned();
-        config.ipc_endpoint = dir.path().join("a.sock").to_string_lossy().into_owned();
+        config.ipc_endpoint = crate::testutil::test_ipc_endpoint(dir.path());
         let daemon = NodeDaemon::start(config).await.expect("start");
         daemon.shutdown();
         daemon.wait().await;
@@ -554,7 +550,7 @@ mod tests {
         // node_id 未指定で再起動しても同じ ID を使う
         let mut config = DaemonConfig::new(dir.path().to_path_buf(), "", "");
         config.listen_addr = "127.0.0.1:0".to_owned();
-        config.ipc_endpoint = dir.path().join("b.sock").to_string_lossy().into_owned();
+        config.ipc_endpoint = crate::testutil::test_ipc_endpoint(dir.path());
         let daemon = NodeDaemon::start(config).await.expect("restart");
         assert_eq!(daemon.state().node_id(), "persisted-node");
         assert_eq!(daemon.state().config().node_name, hostname());
