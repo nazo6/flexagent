@@ -46,6 +46,9 @@ pub enum NodeError {
     /// セッションの状態・操作が不正
     #[error("invalid session state: {0}")]
     InvalidSession(String),
+    /// セッションが実行中 (busy) のため操作できない
+    #[error("session is busy: {0}")]
+    Busy(String),
     /// 同一 `command_id` のコマンドが既に処理済み (冪等性)
     #[error("duplicate command: {0}")]
     CommandDuplicate(String),
@@ -99,6 +102,7 @@ impl NodeError {
             | Self::Config(_) => ErrorCode::InvalidState,
             Self::CommandDuplicate(_) => ErrorCode::CommandDuplicate,
             Self::AlreadyResolved(_) => ErrorCode::AlreadyResolved,
+            Self::Busy(_) => ErrorCode::Busy,
             Self::Db(fxg_db::DbError::SessionNotFound(_))
             | Self::Db(fxg_db::DbError::NodeNotFound(_)) => ErrorCode::NotFound,
             _ => ErrorCode::Internal,

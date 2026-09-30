@@ -90,6 +90,7 @@ struct MockAgentInner {
     prompts: Mutex<Vec<String>>,
     permissions: Mutex<Vec<(String, String)>>,
     modes: Mutex<Vec<String>>,
+    reverted: Mutex<Vec<u64>>,
     events: Mutex<Vec<mpsc::UnboundedSender<DriverEvent>>>,
 }
 
@@ -114,6 +115,11 @@ impl MockAgent {
     /// 適用されたモード変更一覧。
     pub(crate) fn modes(&self) -> Vec<String> {
         self.inner.modes.lock().expect("modes").clone()
+    }
+
+    /// `revert_context` が呼ばれた `target_node_seq` 一覧。
+    pub(crate) fn reverted(&self) -> Vec<u64> {
+        self.inner.reverted.lock().expect("reverted").clone()
     }
 
     /// `SessionManager` へ渡すドライバファクトリ。
@@ -169,6 +175,15 @@ impl ActiveSessionHandle for MockAgent {
     }
 
     async fn cancel_turn(&self) -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    async fn revert_context(&self, target_node_seq: u64) -> anyhow::Result<()> {
+        self.inner
+            .reverted
+            .lock()
+            .expect("reverted")
+            .push(target_node_seq);
         Ok(())
     }
 

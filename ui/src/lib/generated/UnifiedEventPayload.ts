@@ -170,7 +170,27 @@ selected_option_id: string,
 /**
  * 解決主体 (`cli` / `web` / `android_push`)
  */
-resolved_by: string, } } | { "type": "terminal_output", "data": { 
+resolved_by: string, } } | { "type": "session_reverted", "data": { 
+/**
+ * Revert 基準にした `UserMessage` の `node_seq`
+ */
+target_node_seq: number, 
+/**
+ * 復元先の Tree Hash (`UserMessage.snapshot_tree_hash`)
+ */
+restored_tree_hash: string, 
+/**
+ * 復元直前の状態を退避したバックアップ Tree Hash
+ */
+backup_tree_hash: string | null, 
+/**
+ * 復元したファイル数
+ */
+restored_files: number, 
+/**
+ * 削除したファイル数
+ */
+removed_files: number, } } | { "type": "terminal_output", "data": { 
 /**
  * ターミナルID
  */

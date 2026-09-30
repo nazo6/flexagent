@@ -470,7 +470,8 @@ pub(crate) async fn apply_projections(
         | UnifiedEventPayload::PlanUpdate { .. }
         | UnifiedEventPayload::TerminalOutput { .. }
         | UnifiedEventPayload::TerminalInput { .. }
-        | UnifiedEventPayload::BootstrapLog { .. } => {}
+        | UnifiedEventPayload::BootstrapLog { .. }
+        | UnifiedEventPayload::SessionReverted { .. } => {}
     }
 
     // 全イベント共通: 投影に適用済みの最大 node_seq と更新時刻を反映する

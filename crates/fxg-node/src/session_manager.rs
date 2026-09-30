@@ -22,7 +22,7 @@ use std::sync::{Arc, Mutex};
 use fxg_acp::registry::{AcpRegistry, RegistryIndex};
 use fxg_acp::{AcpDriver, ActiveSessionHandle, AgentDriver, AgentLaunchSpec, DriverEvent};
 use fxg_protocol::common::{PermissionOption, SessionControlAction, SessionStatus};
-use fxg_protocol::events::UnifiedEventPayload;
+use fxg_protocol::events::{SessionEventEnvelope, UnifiedEventPayload};
 use fxg_protocol::ipc::AttachMode;
 use fxg_protocol::util::uuid_v7;
 use tokio::sync::mpsc;
@@ -35,6 +35,9 @@ use crate::snapshot::ShadowGitTree;
 
 /// 処理済み `command_id` を保持する上限 (冪等性判定の履歴)。
 const PROCESSED_COMMAND_HISTORY: usize = 256;
+
+/// `session_events` をページ読み込みする際のバッチサイズ。
+const EVENT_LOAD_BATCH: u32 = 200;
 
 /// エージェント起動スペックからドライバを選択するファクトリ。
 pub type DriverFactory =
@@ -62,6 +65,21 @@ pub struct EnsureSessionOutcome {
     pub session_id: String,
     /// CLI のアタッチモード
     pub attach_mode: AttachMode,
+}
+
+/// `revert` の結果。
+#[derive(Debug, Clone, PartialEq)]
+pub struct RevertOutcome {
+    /// Revert 基準にした `UserMessage` の `node_seq`
+    pub target_node_seq: u64,
+    /// 復元先の Tree Hash
+    pub restored_tree_hash: String,
+    /// 復元直前を退避したバックアップ Tree Hash
+    pub backup_tree_hash: Option<String>,
+    /// 復元したファイル数
+    pub restored_files: usize,
+    /// 削除したファイル数
+    pub removed_files: usize,
 }
 
 /// セッション一覧の 1 行 (IPC 用)。
@@ -221,28 +239,7 @@ impl SessionManager {
         let resolved = project::resolve_project(cwd, &self.inner.node_id).await?;
         let session_id = uuid_v7();
 
-        // 起動スペック解決 (カスタム/ビルトインはインデックス不要のため先に試す)
-        let spec = match self
-            .inner
-            .registry
-            .launch_spec(agent_id, &RegistryIndex::default(), extra_args)
-            .await
-        {
-            Ok(spec) => spec,
-            Err(_) => {
-                let index = self
-                    .inner
-                    .registry
-                    .index(false)
-                    .await
-                    .map_err(|err| NodeError::Agent(err.to_string()))?;
-                self.inner
-                    .registry
-                    .launch_spec(agent_id, &index, extra_args)
-                    .await
-                    .map_err(|err| NodeError::Agent(err.to_string()))?
-            }
-        };
+        let spec = self.resolve_launch_spec(agent_id, extra_args).await?;
 
         // SessionCreated (node_seq = 1)
         let (git_branch, is_worktree) = branch_and_worktree(&resolved.local_path).await;
@@ -265,17 +262,69 @@ impl SessionManager {
             )
             .await?;
 
-        // ドライバ起動 (失敗した場合はセッションを error 状態で記録する)
-        let driver =
-            (self.inner.factory)(&spec).map_err(|err| NodeError::Agent(err.to_string()))?;
+        self.start_driver_session(
+            &session_id,
+            &resolved.local_path,
+            &spec,
+            extra_args.to_vec(),
+        )
+        .await?;
+
+        Ok(EnsureSessionOutcome {
+            session_id,
+            // OpenCode2 純正TUI Attach (ブリッジモード) は Phase 3 の残タスク
+            attach_mode: AttachMode::AcpTui,
+        })
+    }
+
+    /// 起動スペックを解決する (カスタム/ビルトインはインデックス不要)。
+    async fn resolve_launch_spec(
+        &self,
+        agent_id: &str,
+        extra_args: &[String],
+    ) -> Result<AgentLaunchSpec, NodeError> {
+        match self
+            .inner
+            .registry
+            .launch_spec(agent_id, &RegistryIndex::default(), extra_args)
+            .await
+        {
+            Ok(spec) => Ok(spec),
+            Err(_) => {
+                let index = self
+                    .inner
+                    .registry
+                    .index(false)
+                    .await
+                    .map_err(|err| NodeError::Agent(err.to_string()))?;
+                self.inner
+                    .registry
+                    .launch_spec(agent_id, &index, extra_args)
+                    .await
+                    .map_err(|err| NodeError::Agent(err.to_string()))
+            }
+        }
+    }
+
+    /// ドライバを起動し、active 一覧への登録とイベントポンプの開始を行う。
+    ///
+    /// 起動失敗時は `StatusChanged(Error)` を記録する。
+    async fn start_driver_session(
+        &self,
+        session_id: &str,
+        cwd: &Path,
+        spec: &AgentLaunchSpec,
+        extra_args: Vec<String>,
+    ) -> Result<(), NodeError> {
+        let driver = (self.inner.factory)(spec).map_err(|err| NodeError::Agent(err.to_string()))?;
         let (event_tx, event_rx) = mpsc::unbounded_channel();
         let handle = match driver
             .start_session(
                 fxg_acp::StartSessionRequest {
-                    session_id: session_id.clone(),
-                    cwd: resolved.local_path.clone(),
+                    session_id: session_id.to_owned(),
+                    cwd: cwd.to_path_buf(),
                     launch: spec.clone(),
-                    extra_args: extra_args.to_vec(),
+                    extra_args,
                     initial_mode: None,
                 },
                 event_tx,
@@ -285,11 +334,11 @@ impl SessionManager {
             Ok(handle) => handle,
             Err(err) => {
                 let message = format!("failed to start agent: {err:#}");
-                tracing::warn!(session_id = %session_id, "{message}");
+                tracing::warn!(session_id, "{message}");
                 self.inner
                     .bus
                     .record(
-                        &session_id,
+                        session_id,
                         UnifiedEventPayload::StatusChanged {
                             status: SessionStatus::Error,
                             error_message: Some(message.clone()),
@@ -304,10 +353,10 @@ impl SessionManager {
         {
             let mut sessions = self.inner.sessions.lock().expect("sessions poisoned");
             sessions.active.insert(
-                session_id.clone(),
+                session_id.to_owned(),
                 ActiveSession {
                     handle,
-                    cwd: resolved.local_path.clone(),
+                    cwd: cwd.to_path_buf(),
                     agent_id: spec.agent_id.clone(),
                     status: SessionStatus::Idle,
                     busy: false,
@@ -319,16 +368,248 @@ impl SessionManager {
 
         // イベントポンプ
         let inner = Arc::clone(&self.inner);
-        let pump_session_id = session_id.clone();
+        let pump_session_id = session_id.to_owned();
         tokio::spawn(async move {
             pump_events(inner, pump_session_id, event_rx).await;
         });
+        Ok(())
+    }
+
+    /// セッションの永続イベントを読み込む (`up_to_node_seq` 以下に限定。`None` は全件)。
+    async fn load_session_events(
+        &self,
+        session_id: &str,
+        up_to_node_seq: Option<u64>,
+    ) -> Result<Vec<SessionEventEnvelope>, NodeError> {
+        let mut cursor = 0u64;
+        let mut events = Vec::new();
+        loop {
+            let batch = self
+                .inner
+                .bus
+                .db()
+                .session_events_after(session_id, cursor, EVENT_LOAD_BATCH)
+                .await?;
+            let full_batch = batch.events.len() as u32 >= EVENT_LOAD_BATCH;
+            cursor = batch.cursor;
+            for event in batch.events {
+                if let Some(limit) = up_to_node_seq
+                    && event.node_seq > limit
+                {
+                    return Ok(events);
+                }
+                events.push(event);
+            }
+            if !full_batch {
+                return Ok(events);
+            }
+        }
+    }
+
+    /// 指定ターン時点へワークスペースを復元する (`fxg session revert`)。
+    ///
+    /// - `target_node_seq` は `UserMessage` の `node_seq`
+    ///   (省略時は直近のターン)。その時点の `snapshot_tree_hash` へ
+    ///   ファイルを復元し、`SessionReverted` を追記する。
+    /// - 復元直前の状態はバックアップ Tree として退避される
+    ///   (もう一度 Revert すれば元に戻せる)。
+    /// - 実行中 (busy) のセッションは [`NodeError::Busy`] で拒否する。
+    pub async fn revert(
+        &self,
+        command_id: &str,
+        session_id: &str,
+        target_node_seq: Option<u64>,
+    ) -> Result<RevertOutcome, NodeError> {
+        if !self.begin_command(command_id) {
+            return Err(NodeError::CommandDuplicate(command_id.to_owned()));
+        }
+
+        let (cwd, handle) = {
+            let sessions = self.inner.sessions.lock().expect("sessions poisoned");
+            let session = sessions
+                .active
+                .get(session_id)
+                .ok_or_else(|| NodeError::InvalidSession(session_id.to_owned()))?;
+            if session.busy {
+                return Err(NodeError::Busy(session_id.to_owned()));
+            }
+            (session.cwd.clone(), Arc::clone(&session.handle))
+        };
+
+        let events = self
+            .load_session_events(session_id, target_node_seq)
+            .await?;
+        let (target_seq, tree_hash) = find_revert_snapshot(&events).ok_or_else(|| {
+            NodeError::InvalidSession(format!(
+                "no snapshot found at or before the specified point: {session_id}"
+            ))
+        })?;
+
+        let tree = ShadowGitTree::new(
+            &cwd,
+            self.inner.paths.snapshot_index_path(session_id),
+            session_id,
+        );
+        let outcome = tree.restore(&tree_hash).await?;
+
+        self.inner
+            .bus
+            .record(
+                session_id,
+                UnifiedEventPayload::SessionReverted {
+                    target_node_seq: target_seq,
+                    restored_tree_hash: tree_hash.clone(),
+                    backup_tree_hash: outcome.backup_tree_hash.clone(),
+                    restored_files: outcome.restored_files as u64,
+                    removed_files: outcome.removed_files as u64,
+                },
+            )
+            .await?;
+
+        // エージェント側の会話巻き戻し (ネイティブ API 対応ドライバのみ)。
+        // 標準ACPは未対応のため、失敗は情報ログに留める (ファイル復元は完了している)。
+        if let Err(err) = handle.revert_context(target_seq).await {
+            tracing::info!(
+                session_id,
+                "agent-side revert is not supported by this driver: {err:#}"
+            );
+        }
+
+        Ok(RevertOutcome {
+            restored_tree_hash: tree_hash,
+            backup_tree_hash: outcome.backup_tree_hash,
+            restored_files: outcome.restored_files,
+            removed_files: outcome.removed_files,
+            target_node_seq: target_seq,
+        })
+    }
+
+    /// 指定ターンから新しいセッションへ分岐する (`fxg session fork`)。
+    ///
+    /// - 分岐元の `SessionCreated` から `from_node_seq` までの履歴を引き継ぎ、
+    ///   新しい `SessionCreated` に `parent_session_id` / `fork_from_node_seq` を
+    ///   記録する。
+    /// - 標準ACPにはネイティブ Fork API が無いため、`node_seq` までの会話履歴を
+    ///   初期コンテキスト (1プロンプト) として注入する
+    ///   (`client_source = "fork"` の `UserMessage` として記録される)。
+    pub async fn fork(
+        &self,
+        command_id: &str,
+        session_id: &str,
+        from_node_seq: Option<u64>,
+        agent_id: Option<&str>,
+    ) -> Result<EnsureSessionOutcome, NodeError> {
+        if !self.begin_command(command_id) {
+            return Err(NodeError::CommandDuplicate(command_id.to_owned()));
+        }
+
+        let source = self
+            .inner
+            .bus
+            .db()
+            .get_session(session_id)
+            .await?
+            .ok_or_else(|| NodeError::InvalidSession(session_id.to_owned()))?;
+
+        let events = self.load_session_events(session_id, from_node_seq).await?;
+        let fork_seq = events
+            .last()
+            .map(|event| event.node_seq)
+            .or(source.fork_from_node_seq)
+            .unwrap_or(1);
+
+        let spec = self
+            .resolve_launch_spec(agent_id.unwrap_or(&source.agent_id), &[])
+            .await?;
+        let project_name = self.project_name(&source.project_id).await;
+
+        let new_session_id = uuid_v7();
+        let cwd = PathBuf::from(&source.local_path);
+        let (git_branch, is_worktree) = branch_and_worktree(&cwd).await;
+        self.inner
+            .bus
+            .create_session(
+                &new_session_id,
+                UnifiedEventPayload::SessionCreated {
+                    node_id: self.inner.node_id.clone(),
+                    project_id: source.project_id.clone(),
+                    project_name,
+                    local_path: source.local_path.clone(),
+                    git_branch,
+                    is_worktree,
+                    agent_id: spec.agent_id.clone(),
+                    parent_session_id: Some(source.session_id.clone()),
+                    fork_from_node_seq: Some(fork_seq),
+                    title: format!("Fork of {}", source.title),
+                },
+            )
+            .await?;
+
+        self.start_driver_session(&new_session_id, &cwd, &spec, Vec::new())
+            .await?;
+
+        // 履歴 Replay 注入 (新エージェントセッションの初期コンテキスト)
+        if let Some(context) = build_fork_context(&events, fork_seq)
+            && let Err(err) = self.start_turn(&new_session_id, &context, "fork").await
+        {
+            tracing::warn!(
+                session_id = %new_session_id,
+                "failed to inject fork context: {err:#}"
+            );
+        }
 
         Ok(EnsureSessionOutcome {
-            session_id,
-            // OpenCode2 純正TUI Attach (ブリッジモード) は Phase 3 の残タスク
+            session_id: new_session_id,
             attach_mode: AttachMode::AcpTui,
         })
+    }
+
+    /// 論理プロジェクトの表示名を解決する (未知の場合は `project_id` を返す)。
+    async fn project_name(&self, project_id: &str) -> String {
+        match self.inner.bus.db().list_projects().await {
+            Ok(projects) => projects
+                .into_iter()
+                .find(|project| project.project_id == project_id)
+                .map(|project| project.name)
+                .unwrap_or_else(|| project_id.to_owned()),
+            Err(_) => project_id.to_owned(),
+        }
+    }
+
+    /// ターンを開始する (busy 予約 → スナップショット → `UserMessage` → 送信)。
+    ///
+    /// 呼び出し側は事前に busy 判定 (Pending Queue への追加 or 拒否) を済ませる。
+    async fn start_turn(
+        &self,
+        session_id: &str,
+        text: &str,
+        client_source: &str,
+    ) -> Result<(), NodeError> {
+        {
+            let mut sessions = self.inner.sessions.lock().expect("sessions poisoned");
+            let session = sessions
+                .active
+                .get_mut(session_id)
+                .ok_or_else(|| NodeError::InvalidSession(session_id.to_owned()))?;
+            session.busy = true;
+        }
+        match dispatch_prompt(&self.inner, session_id, text, client_source).await {
+            Ok(()) => Ok(()),
+            Err(err) => {
+                // 送信失敗時は busy を解除して整合性を保つ
+                if let Some(session) = self
+                    .inner
+                    .sessions
+                    .lock()
+                    .expect("sessions poisoned")
+                    .active
+                    .get_mut(session_id)
+                {
+                    session.busy = false;
+                }
+                Err(err)
+            }
+        }
     }
 
     /// プロンプトを送信する (busy の場合は Pending Queue へ)。
@@ -357,68 +638,9 @@ impl SessionManager {
                 });
                 return Ok(());
             }
-            session.busy = true;
         }
 
-        match self.dispatch_prompt(session_id, text, client_source).await {
-            Ok(()) => Ok(()),
-            Err(err) => {
-                // 送信失敗時は busy を解除して整合性を保つ
-                if let Some(session) = self
-                    .inner
-                    .sessions
-                    .lock()
-                    .expect("sessions poisoned")
-                    .active
-                    .get_mut(session_id)
-                {
-                    session.busy = false;
-                }
-                Err(err)
-            }
-        }
-    }
-
-    /// 1 ターンを開始する (スナップショット → `UserMessage` 記録 → ドライバ送信)。
-    async fn dispatch_prompt(
-        &self,
-        session_id: &str,
-        text: &str,
-        client_source: &str,
-    ) -> Result<(), NodeError> {
-        let cwd = self.session_cwd(session_id)?;
-        let snapshot_tree_hash = snapshot_tree_hash(
-            &cwd,
-            &self.inner.paths.snapshot_index_path(session_id),
-            session_id,
-        )
-        .await;
-
-        self.inner
-            .bus
-            .record(
-                session_id,
-                UnifiedEventPayload::UserMessage {
-                    text: text.to_owned(),
-                    attachments: Vec::new(),
-                    client_source: client_source.to_owned(),
-                    snapshot_tree_hash,
-                },
-            )
-            .await?;
-
-        let handle = {
-            let sessions = self.inner.sessions.lock().expect("sessions poisoned");
-            sessions
-                .active
-                .get(session_id)
-                .map(|session| Arc::clone(&session.handle))
-                .ok_or_else(|| NodeError::InvalidSession(session_id.to_owned()))?
-        };
-        handle
-            .send_prompt(text.to_owned())
-            .await
-            .map_err(|err| NodeError::Server(format!("failed to send prompt: {err:#}")))
+        self.start_turn(session_id, text, client_source).await
     }
 
     /// 承認リクエストへ応答する (2 回目以降は `AlreadyResolved`)。
@@ -554,15 +776,6 @@ impl SessionManager {
         }
         stopped
     }
-
-    fn session_cwd(&self, session_id: &str) -> Result<PathBuf, NodeError> {
-        let sessions = self.inner.sessions.lock().expect("sessions poisoned");
-        sessions
-            .active
-            .get(session_id)
-            .map(|session| session.cwd.clone())
-            .ok_or_else(|| NodeError::InvalidSession(session_id.to_owned()))
-    }
 }
 
 /// ドライバイベントを永続化・配信し、ステータス遷移とキューを管理する。
@@ -674,14 +887,50 @@ async fn maybe_dispatch_queued(inner: &Arc<Inner>, session_id: &str) {
         return;
     };
 
+    // busy は呼び出し元で予約済み。失敗時は解除して整合性を保つ。
+    if let Err(err) = dispatch_prompt(inner, session_id, &prompt.text, &prompt.client_source).await
+    {
+        tracing::warn!(session_id = %session_id, "failed to dispatch queued prompt: {err:#}");
+        let _ = inner
+            .bus
+            .record(
+                session_id,
+                UnifiedEventPayload::StatusChanged {
+                    status: SessionStatus::Error,
+                    error_message: Some(format!("failed to dispatch queued prompt: {err:#}")),
+                },
+            )
+            .await;
+        if let Some(session) = inner
+            .sessions
+            .lock()
+            .expect("sessions poisoned")
+            .active
+            .get_mut(session_id)
+        {
+            session.busy = false;
+        }
+    }
+}
+
+/// 1 ターンを開始する (スナップショット → `UserMessage` 記録 → ドライバ送信)。
+///
+/// busy の予約・解除は呼び出し側 (`SessionManager::start_turn` /
+/// [`maybe_dispatch_queued`]) が行う。
+async fn dispatch_prompt(
+    inner: &Arc<Inner>,
+    session_id: &str,
+    text: &str,
+    client_source: &str,
+) -> Result<(), NodeError> {
     let cwd = {
         let sessions = inner.sessions.lock().expect("sessions poisoned");
         sessions
             .active
             .get(session_id)
             .map(|session| session.cwd.clone())
+            .ok_or_else(|| NodeError::InvalidSession(session_id.to_owned()))?
     };
-    let Some(cwd) = cwd else { return };
 
     let snapshot_tree_hash = snapshot_tree_hash(
         &cwd,
@@ -689,43 +938,111 @@ async fn maybe_dispatch_queued(inner: &Arc<Inner>, session_id: &str) {
         session_id,
     )
     .await;
-    if inner
+
+    inner
         .bus
         .record(
             session_id,
             UnifiedEventPayload::UserMessage {
-                text: prompt.text.clone(),
+                text: text.to_owned(),
                 attachments: Vec::new(),
-                client_source: prompt.client_source.clone(),
+                client_source: client_source.to_owned(),
                 snapshot_tree_hash,
             },
         )
-        .await
-        .is_err()
-    {
-        let _ = inner
-            .bus
-            .record(
-                session_id,
-                UnifiedEventPayload::StatusChanged {
-                    status: SessionStatus::Error,
-                    error_message: Some("failed to record queued prompt".to_owned()),
-                },
-            )
-            .await;
-        return;
-    }
+        .await?;
 
     let handle = {
         let sessions = inner.sessions.lock().expect("sessions poisoned");
-        let Some(session) = sessions.active.get(session_id) else {
-            return;
-        };
-        Arc::clone(&session.handle)
+        sessions
+            .active
+            .get(session_id)
+            .map(|session| Arc::clone(&session.handle))
+            .ok_or_else(|| NodeError::InvalidSession(session_id.to_owned()))?
     };
-    if let Err(err) = handle.send_prompt(prompt.text).await {
-        tracing::warn!(session_id = %session_id, "failed to dispatch queued prompt: {err:#}");
+    handle
+        .send_prompt(text.to_owned())
+        .await
+        .map_err(|err| NodeError::Server(format!("failed to send prompt: {err:#}")))
+}
+
+/// 読み込み済みイベントから Revert 基準のスナップショットを選ぶ。
+///
+/// 最後の `UserMessage.snapshot_tree_hash` を返す (`node_seq`, Tree Hash)。
+fn find_revert_snapshot(events: &[SessionEventEnvelope]) -> Option<(u64, String)> {
+    events.iter().rev().find_map(|event| match &event.payload {
+        UnifiedEventPayload::UserMessage {
+            snapshot_tree_hash: Some(tree_hash),
+            ..
+        } => Some((event.node_seq, tree_hash.clone())),
+        _ => None,
+    })
+}
+
+/// Fork 時に新エージェントセッションへ注入する会話履歴コンテキストを組み立てる。
+///
+/// 会話 (ユーザー / エージェントメッセージ) と、ツール呼び出しの要約・変更ファイルを
+/// `node_seq` 順に連結する。会話が無い (履歴なし) 場合は `None`。
+fn build_fork_context(events: &[SessionEventEnvelope], fork_seq: u64) -> Option<String> {
+    /// 注入するコンテキストの最大文字数 (過大なプロンプトを防ぐ)。
+    const MAX_CONTEXT_CHARS: usize = 16_000;
+
+    let mut parts: Vec<String> = Vec::new();
+    for event in events {
+        if event.node_seq > fork_seq {
+            break;
+        }
+        match &event.payload {
+            UnifiedEventPayload::UserMessage { text, .. } => {
+                parts.push(format!("### User\n{text}"));
+            }
+            UnifiedEventPayload::AgentMessage {
+                text,
+                is_complete: true,
+                ..
+            } => {
+                parts.push(format!("### Assistant\n{text}"));
+            }
+            UnifiedEventPayload::ToolCall {
+                title,
+                status,
+                locations,
+                diff,
+                ..
+            } => {
+                let mut line = format!("- [{status}] {title}");
+                if !locations.is_empty() {
+                    line.push_str(&format!(" ({})", locations.join(", ")));
+                }
+                if let Some(diff) = diff {
+                    line.push_str(&format!(
+                        " — {} (+{}/-{})",
+                        diff.path, diff.additions, diff.deletions
+                    ));
+                }
+                parts.push(line);
+            }
+            _ => {}
+        }
     }
+
+    if parts.is_empty() {
+        return None;
+    }
+
+    let mut context = format!(
+        "以下の履歴は、以前のセッション (node_seq <= {fork_seq}) をこの時点から \
+         Fork したものです。この文脈を引き継いで作業を続けてください。\n\n"
+    );
+    for part in parts {
+        if context.chars().count() + part.chars().count() > MAX_CONTEXT_CHARS {
+            context.push_str("\n(履歴は上限に達したため省略されました)");
+            break;
+        }
+        context.push_str(&part);
+        context.push_str("\n\n");
+    }
+    Some(context)
 }
 
 /// 作業ディレクトリの Shadow Git Tree スナップショットを取得する。
@@ -818,6 +1135,78 @@ mod tests {
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         }
         panic!("session did not become idle");
+    }
+
+    /// `busy = false` になるまで待つ (ターン完了待ち)。
+    async fn wait_not_busy(manager: &SessionManager, session_id: &str) {
+        for _ in 0..200 {
+            let busy = manager
+                .list_active()
+                .iter()
+                .find(|session| session.session_id == session_id)
+                .map(|session| session.busy);
+            match busy {
+                Some(false) | None => return,
+                _ => tokio::time::sleep(std::time::Duration::from_millis(10)).await,
+            }
+        }
+        panic!("session did not finish its turn");
+    }
+
+    /// 指定テキストの `UserMessage` が永続化されるまで待ち、`node_seq` を返す。
+    async fn wait_user_message(manager: &SessionManager, session_id: &str, text: &str) -> u64 {
+        for _ in 0..200 {
+            let batch = manager
+                .bus()
+                .db()
+                .session_events_after(session_id, 0, 100)
+                .await
+                .expect("events");
+            if let Some(event) = batch.events.iter().find(|event| {
+                matches!(&event.payload, UnifiedEventPayload::UserMessage { text: body, .. } if body == text)
+            }) {
+                return event.node_seq;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        panic!("UserMessage was not recorded: {text}");
+    }
+
+    /// 指定 `event_type` のイベントが永続化されるまで待つ。
+    async fn wait_event_type(manager: &SessionManager, session_id: &str, event_type: &str) {
+        for _ in 0..200 {
+            let batch = manager
+                .bus()
+                .db()
+                .session_events_after(session_id, 0, 100)
+                .await
+                .expect("events");
+            if batch
+                .events
+                .iter()
+                .any(|event| event.payload.event_type() == event_type)
+            {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        panic!("event was not recorded: {event_type}");
+    }
+
+    /// テスト用に Git リポジトリ (`repo`) を用意し、セッションを開始する。
+    async fn setup_repo_session(
+        manager: &SessionManager,
+        dir: &tempfile::TempDir,
+    ) -> (PathBuf, String) {
+        let repo = dir.path().join("repo");
+        std::fs::create_dir_all(&repo).expect("mkdir");
+        crate::testutil::init_test_repo(&repo).await;
+        let outcome = manager
+            .ensure_session("c1", &repo, "mock", &[])
+            .await
+            .expect("ensure");
+        wait_idle(manager, &outcome.session_id).await;
+        (repo, outcome.session_id)
     }
 
     #[tokio::test]
@@ -966,6 +1355,169 @@ mod tests {
             .await
             .expect_err("already resolved");
         assert!(matches!(err, NodeError::AlreadyResolved(_)));
+    }
+
+    #[tokio::test]
+    async fn revert_restores_workspace_files() {
+        let (manager, mock, dir) = setup().await;
+        let (repo, session_id) = setup_repo_session(&manager, &dir).await;
+
+        // ターン開始時のスナップショットを記録する
+        manager
+            .send_prompt("c2", &session_id, "first turn", "cli")
+            .await
+            .expect("prompt");
+        let user_seq = wait_user_message(&manager, &session_id, "first turn").await;
+
+        // ターン完了 → エージェントがファイルを変更した想定
+        mock.emit(DriverEvent::Event(UnifiedEventPayload::StatusChanged {
+            status: SessionStatus::Idle,
+            error_message: None,
+        }));
+        wait_not_busy(&manager, &session_id).await;
+        std::fs::write(repo.join("README.md"), "changed by agent\n").expect("write");
+
+        // Revert: 直近ターン開始時点のファイル状態へ復元する
+        let outcome = manager
+            .revert("c3", &session_id, None)
+            .await
+            .expect("revert");
+        assert_eq!(outcome.target_node_seq, user_seq);
+        assert!(outcome.restored_files >= 1);
+        assert_eq!(
+            std::fs::read_to_string(repo.join("README.md")).expect("read"),
+            "# test\n"
+        );
+
+        // ドライバの revert_context が呼ばれる (対応ドライバ)
+        assert_eq!(mock.reverted(), vec![user_seq]);
+
+        // SessionReverted がイベントログに追記される
+        let batch = manager
+            .bus()
+            .db()
+            .session_events_after(&session_id, 0, 100)
+            .await
+            .expect("events");
+        let reverted = batch
+            .events
+            .iter()
+            .find(|event| {
+                matches!(&event.payload, UnifiedEventPayload::SessionReverted { target_node_seq, .. } if *target_node_seq == user_seq)
+            })
+            .expect("session_reverted event");
+        match &reverted.payload {
+            UnifiedEventPayload::SessionReverted {
+                restored_tree_hash,
+                backup_tree_hash,
+                ..
+            } => {
+                assert!(!restored_tree_hash.is_empty());
+                assert!(backup_tree_hash.is_some(), "バックアップ Tree が退避される");
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    #[tokio::test]
+    async fn revert_rejects_busy_session() {
+        let (manager, _mock, dir) = setup().await;
+        let (_repo, session_id) = setup_repo_session(&manager, &dir).await;
+
+        // ターン実行中 (Idle イベント未受信) は Busy で拒否する
+        manager
+            .send_prompt("c2", &session_id, "running", "cli")
+            .await
+            .expect("prompt");
+        let err = manager
+            .revert("c3", &session_id, None)
+            .await
+            .expect_err("busy");
+        assert!(matches!(err, NodeError::Busy(_)));
+    }
+
+    #[tokio::test]
+    async fn fork_creates_child_session_and_injects_history() {
+        let (manager, mock, dir) = setup().await;
+        let (repo, source_id) = setup_repo_session(&manager, &dir).await;
+
+        manager
+            .send_prompt("c2", &source_id, "hello world", "cli")
+            .await
+            .expect("prompt");
+        let user_seq = wait_user_message(&manager, &source_id, "hello world").await;
+        mock.emit(DriverEvent::Event(UnifiedEventPayload::AgentMessage {
+            message_id: "m1".to_owned(),
+            text: "了解しました".to_owned(),
+            is_complete: true,
+        }));
+        wait_event_type(&manager, &source_id, "agent_message").await;
+        mock.emit(DriverEvent::Event(UnifiedEventPayload::StatusChanged {
+            status: SessionStatus::Idle,
+            error_message: None,
+        }));
+        wait_not_busy(&manager, &source_id).await;
+
+        // `user_seq` 時点から分岐する
+        let fork = manager
+            .fork("c3", &source_id, Some(user_seq), None)
+            .await
+            .expect("fork");
+        assert_ne!(fork.session_id, source_id);
+
+        // 親子関係が記録される
+        let child = manager
+            .bus()
+            .db()
+            .get_session(&fork.session_id)
+            .await
+            .expect("query")
+            .expect("child row");
+        assert_eq!(child.parent_session_id.as_deref(), Some(source_id.as_str()));
+        assert_eq!(child.fork_from_node_seq, Some(user_seq));
+        assert_eq!(child.agent_id, "mock");
+
+        // 履歴 Replay 注入: fork セッションの UserMessage として記録され、
+        // `user_seq` 時点までの会話 (ユーザー発話) が含まれる
+        let batch = manager
+            .bus()
+            .db()
+            .session_events_after(&fork.session_id, 0, 100)
+            .await
+            .expect("events");
+        let injected = batch
+            .events
+            .iter()
+            .find_map(|event| match &event.payload {
+                UnifiedEventPayload::UserMessage {
+                    text,
+                    client_source,
+                    ..
+                } if client_source == "fork" => Some(text.clone()),
+                _ => None,
+            })
+            .expect("injected fork context");
+        assert!(
+            injected.contains("hello world"),
+            "履歴が含まれる: {injected}"
+        );
+        assert!(
+            !injected.contains("了解しました"),
+            "分岐点より後の会話は含まれない: {injected}"
+        );
+        assert!(
+            mock.prompts().iter().any(|prompt| prompt == &injected),
+            "コンテキストが新エージェントへ送信される"
+        );
+
+        // 分岐先の作業ディレクトリは同じリポジトリを共有する
+        // (macOS の `/var` → `/private/var` 解決があるため canonicalize して比較)
+        assert_eq!(
+            PathBuf::from(&child.local_path)
+                .canonicalize()
+                .expect("canonicalize child"),
+            repo.canonicalize().expect("canonicalize repo")
+        );
     }
 
     #[tokio::test]

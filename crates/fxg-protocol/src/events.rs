@@ -197,6 +197,25 @@ pub enum UnifiedEventPayload {
         /// 解決主体 (`cli` / `web` / `android_push`)
         resolved_by: String,
     },
+    /// ワークスペースのファイルを指定ターンの `snapshot_tree_hash` 時点へ
+    /// 復元した (Revert)。
+    ///
+    /// イベントログは追記専用のため会話イベントは削除せず、Revert 操作の
+    /// 事実のみを追記する (`docs/04-agent-drivers-and-windows.md` §4.1)。
+    /// 復元直前の状態は Shadow Git Tree 上に `backup_tree_hash` として
+    /// 退避されており、もう一度 Revert すれば元に戻せる。
+    SessionReverted {
+        /// Revert 基準にした `UserMessage` の `node_seq`
+        target_node_seq: u64,
+        /// 復元先の Tree Hash (`UserMessage.snapshot_tree_hash`)
+        restored_tree_hash: String,
+        /// 復元直前の状態を退避したバックアップ Tree Hash
+        backup_tree_hash: Option<String>,
+        /// 復元したファイル数
+        restored_files: u64,
+        /// 削除したファイル数
+        removed_files: u64,
+    },
     /// ACP `terminal/*` または PTY の出力チャンク (永続化対象)。
     ///
     /// ただし FTS5 の `searchable_text` からは除外する (バイナリ系)。
@@ -264,6 +283,7 @@ impl UnifiedEventPayload {
             Self::PlanUpdate { .. } => "plan",
             Self::PermissionRequest { .. } => "permission_request",
             Self::PermissionResolved { .. } => "permission_resolved",
+            Self::SessionReverted { .. } => "session_reverted",
             Self::TerminalOutput { .. } => "terminal_output",
             Self::TerminalInput { .. } => "terminal_input",
             Self::CapabilitiesUpdated { .. } => "capabilities_updated",

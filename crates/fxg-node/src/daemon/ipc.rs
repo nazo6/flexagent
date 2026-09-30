@@ -151,6 +151,7 @@ pub async fn serve(
                                 tracing::debug!("ipc connection ended: {err}");
                             }
                         });
+                        server = next;
                     }
                     Err(err) => tracing::warn!("named pipe connect failed: {err}"),
                 }
@@ -922,6 +923,45 @@ async fn handle(
                 command_id,
                 IpcResult::CommandAccepted {
                     session_id: Some(session_id),
+                },
+            ))
+        }
+
+        IpcClientMessage::SessionRevert {
+            command_id,
+            session_id,
+            target_node_seq,
+        } => {
+            let outcome = state
+                .session_manager()
+                .revert(&command_id, &session_id, target_node_seq)
+                .await
+                .map_err(|err| DispatchError::from_node_error(&command_id, err))?;
+            Ok((
+                command_id,
+                IpcResult::SessionReverted {
+                    restored_tree_hash: outcome.restored_tree_hash,
+                    backup_tree_hash: outcome.backup_tree_hash,
+                },
+            ))
+        }
+
+        IpcClientMessage::SessionFork {
+            command_id,
+            session_id,
+            from_node_seq,
+            agent_id,
+        } => {
+            let outcome = state
+                .session_manager()
+                .fork(&command_id, &session_id, from_node_seq, agent_id.as_deref())
+                .await
+                .map_err(|err| DispatchError::from_node_error(&command_id, err))?;
+            Ok((
+                command_id,
+                IpcResult::SessionForked {
+                    session_id: outcome.session_id,
+                    attach_mode: outcome.attach_mode,
                 },
             ))
         }

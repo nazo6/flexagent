@@ -137,6 +137,33 @@ pub enum IpcClientMessage {
         /// 実行する操作
         action: SessionControlAction,
     },
+    /// 指定ターン時点へのファイル復元 (`fxg session revert`)。
+    ///
+    /// 会話イベントは削除せず、Revert 操作を `session_reverted` イベントとして
+    /// 追記する (`docs/04-agent-drivers-and-windows.md` §4.1)。
+    SessionRevert {
+        /// 相関ID
+        command_id: String,
+        /// 対象セッションID
+        session_id: String,
+        /// Revert 基準にする `UserMessage` の `node_seq`
+        /// (省略時は直近ターン)
+        target_node_seq: Option<u64>,
+    },
+    /// 指定ターンからの会話分岐 (`fxg session fork`)。
+    ///
+    /// 新しい `session_id` を作成し、指定 `node_seq` までの履歴を
+    /// 初期コンテキストとして新エージェントセッションへ注入する。
+    SessionFork {
+        /// 相関ID
+        command_id: String,
+        /// 分岐元セッションID
+        session_id: String,
+        /// 分岐元の `node_seq` (省略時は最新イベント)
+        from_node_seq: Option<u64>,
+        /// 分岐先で使うエージェントID (省略時は同一エージェント)
+        agent_id: Option<String>,
+    },
     /// 指定ディレクトリの論理プロジェクトを解決する (`fxg project info`)。
     ProjectInfo {
         /// 相関ID
@@ -257,6 +284,20 @@ pub enum IpcResult {
     CommandAccepted {
         /// 対象セッションID (任意)
         session_id: Option<String>,
+    },
+    /// `SessionRevert` の結果
+    SessionReverted {
+        /// 復元先の Tree Hash
+        restored_tree_hash: String,
+        /// 復元直前を退避したバックアップ Tree Hash
+        backup_tree_hash: Option<String>,
+    },
+    /// `SessionFork` の結果
+    SessionForked {
+        /// 新しいセッションID
+        session_id: String,
+        /// アタッチモード (内蔵TUI / OpenCode2 純正TUI)
+        attach_mode: AttachMode,
     },
     /// `ProjectInfo` の結果
     ProjectInfo {
@@ -468,6 +509,44 @@ mod tests {
             let decoded: IpcClientMessage = serde_json::from_value(json).unwrap();
             assert_eq!(decoded, message);
         }
+    }
+
+    #[test]
+    fn session_revert_and_fork_roundtrip() {
+        for message in [
+            IpcClientMessage::SessionRevert {
+                command_id: "c1".into(),
+                session_id: "s1".into(),
+                target_node_seq: Some(4),
+            },
+            IpcClientMessage::SessionFork {
+                command_id: "c2".into(),
+                session_id: "s1".into(),
+                from_node_seq: None,
+                agent_id: Some("antigravity-acp".into()),
+            },
+        ] {
+            let json = serde_json::to_value(&message).unwrap();
+            assert!(json["method"].is_string(), "method tag missing: {json}");
+            let decoded: IpcClientMessage = serde_json::from_value(json).unwrap();
+            assert_eq!(decoded, message);
+        }
+
+        let reverted = IpcResult::SessionReverted {
+            restored_tree_hash: "a".repeat(40),
+            backup_tree_hash: Some("b".repeat(40)),
+        };
+        let json = serde_json::to_value(&reverted).unwrap();
+        assert_eq!(json["result"], "session_reverted");
+        assert_eq!(serde_json::from_value::<IpcResult>(json).unwrap(), reverted);
+
+        let forked = IpcResult::SessionForked {
+            session_id: "child".into(),
+            attach_mode: AttachMode::AcpTui,
+        };
+        let json = serde_json::to_value(&forked).unwrap();
+        assert_eq!(json["result"], "session_forked");
+        assert_eq!(serde_json::from_value::<IpcResult>(json).unwrap(), forked);
     }
 
     #[test]
