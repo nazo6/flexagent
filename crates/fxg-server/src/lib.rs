@@ -3,4 +3,11 @@
 //! Axum による Node Hub (`/api/v1/node/ws`)、Client REST/WS API (`:8080`)、
 //! イベント投影の適用、VAPID Web Push 送信、一時VMプロビジョナー管理を含む。
 //!
-//! **Phase 4 以降で実装予定** (現時点ではプレースホルダ)。
+//! # モジュール構成
+//!
+//! - [`api`]: ローカルノード (`fxg daemon`) と中央サーバー (`fxg server`) が
+//!   **完全に同一**の REST / Client WS / PTY WS を提供するための共通ルーターと
+//!   [`ClientApiBackend`](api::ClientApiBackend) トレイト
+//!   (設計: `docs/03-protocol-and-api.md` §3)
+
+pub mod api;

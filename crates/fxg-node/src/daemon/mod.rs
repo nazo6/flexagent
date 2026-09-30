@@ -8,12 +8,15 @@
 //!   `fxg` CLI からのコマンドを受け付ける ([`ipc`])
 //! - **認証**: `~/.flexagent/auth_token` による Bearer / Cookie 認証 ([`auth`])
 
+mod api;
 mod auth;
 mod http;
 mod ipc;
+mod ops;
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 
 use fxg_acp::registry::AcpRegistry;
@@ -21,7 +24,8 @@ use fxg_db::{Db, DbRole};
 use fxg_protocol::config::{GlobalConfig, fxg_home};
 use fxg_protocol::util::now_ms;
 use fxg_pty::PtySessionManager;
-use tokio::sync::watch;
+use fxg_server::api::ClientEvent;
+use tokio::sync::{broadcast, watch};
 
 use crate::error::NodeError;
 use crate::paths::{NodePaths, ipc_endpoint};
@@ -29,9 +33,13 @@ use crate::session::SessionEventBus;
 use crate::session_manager::{DriverFactory, SessionManager, default_driver_factory};
 
 pub use auth::{generate_token, token_matches};
+pub use ops::{AuditSource, WorktreeAddOutcome};
 
 /// `fxg` のバージョン (このクレートの Cargo パッケージバージョン = ワークスペース版)。
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// Client WS 配信用イベントのブロードキャストバッファ。
+const CLIENT_EVENT_CAPACITY: usize = 2048;
 
 /// ノードデーモンの起動設定。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -46,6 +54,10 @@ pub struct DaemonConfig {
     pub ipc_endpoint: String,
     /// リモート (中央サーバー経由) からの Web PTY 起動を許可するか
     pub allow_remote_pty: bool,
+    /// 中央サーバーの Node Hub WebSocket URL (未指定時はスタンドアロン動作)
+    pub central_server_url: Option<String>,
+    /// ノード個別ペアリングトークン (省略時は `~/.flexagent/node_token` を読む)
+    pub node_token: Option<String>,
     /// データディレクトリ (`~/.flexagent`)
     pub fxg_home: PathBuf,
 }
@@ -63,6 +75,8 @@ impl DaemonConfig {
             listen_addr: fxg_protocol::config::NodeConfig::DEFAULT_LISTEN_ADDR.to_owned(),
             ipc_endpoint: ipc_endpoint(&fxg_protocol::config::process_env),
             allow_remote_pty: false,
+            central_server_url: None,
+            node_token: None,
             fxg_home: fxg_home.into(),
         }
     }
@@ -76,6 +90,8 @@ impl DaemonConfig {
             listen_addr: fxg_protocol::config::NodeConfig::DEFAULT_LISTEN_ADDR.to_owned(),
             ipc_endpoint: ipc_endpoint(env),
             allow_remote_pty: false,
+            central_server_url: env(fxg_protocol::config::env_keys::CENTRAL_SERVER_URL),
+            node_token: env(fxg_protocol::config::env_keys::NODE_TOKEN),
             fxg_home: home,
         }
     }
@@ -163,6 +179,10 @@ struct Inner {
     config: DaemonConfig,
     token: RwLock<String>,
     started_at: i64,
+    /// Client WS へ配信する正規化イベント (bus からの転送先)
+    client_events: broadcast::Sender<ClientEvent>,
+    /// 中央サーバーの Outbox 同期ワーカーが接続中か
+    central_connected: AtomicBool,
 }
 
 /// デーモンの共有状態 (HTTP ハンドラ / IPC ハンドラ / CLI から共有)。
@@ -236,7 +256,8 @@ impl DaemonState {
             driver_factory,
         );
 
-        Ok(Self {
+        let (client_events, _) = broadcast::channel(CLIENT_EVENT_CAPACITY);
+        let state = Self {
             inner: Arc::new(Inner {
                 db,
                 bus,
@@ -246,8 +267,38 @@ impl DaemonState {
                 config,
                 token: RwLock::new(token),
                 started_at: now_ms(),
+                client_events,
+                central_connected: AtomicBool::new(false),
             }),
-        })
+        };
+
+        // セッションイベントバス → Client WS 配信用イベントへ転送する
+        // (bus の Lagged は Client WS ループが cursor からのリプレイで回復する)
+        let mut bus_rx = state.inner.bus.subscribe();
+        let client_tx = state.inner.client_events.clone();
+        tokio::spawn(async move {
+            loop {
+                match bus_rx.recv().await {
+                    Ok(crate::session::SessionBroadcast::Persisted { event, cursor }) => {
+                        let _ = client_tx.send(ClientEvent::Persisted {
+                            event: Box::new(event),
+                            cursor,
+                        });
+                    }
+                    Ok(crate::session::SessionBroadcast::StreamDelta { session_id, delta }) => {
+                        let _ = client_tx.send(ClientEvent::StreamDelta { session_id, delta });
+                    }
+                    // エフェメラルイベント (キーストローク等) は PTY WS 経由で配信する
+                    Ok(crate::session::SessionBroadcast::Ephemeral(_)) => {}
+                    Err(broadcast::error::RecvError::Lagged(skipped)) => {
+                        tracing::debug!(skipped, "client event forwarder lagged");
+                    }
+                    Err(broadcast::error::RecvError::Closed) => break,
+                }
+            }
+        });
+
+        Ok(state)
     }
 
     /// ローカルノードDB。
@@ -290,6 +341,18 @@ impl DaemonState {
         now_ms().saturating_sub(self.inner.started_at)
     }
 
+    /// 中央サーバーの Outbox 同期ワーカーが接続中か。
+    pub fn central_connected(&self) -> bool {
+        self.inner.central_connected.load(Ordering::Relaxed)
+    }
+
+    /// 中央サーバー接続状態を更新する (Outbox 同期ワーカー専用)。
+    pub fn set_central_connected(&self, connected: bool) {
+        self.inner
+            .central_connected
+            .store(connected, Ordering::Relaxed);
+    }
+
     /// ノードID。
     pub fn node_id(&self) -> &str {
         &self.inner.config.node_id
@@ -321,8 +384,7 @@ impl DaemonState {
             os: std::env::consts::OS.to_owned(),
             arch: std::env::consts::ARCH.to_owned(),
             version: VERSION.to_owned(),
-            // ACP Registry の導入済みエージェント一覧 (Phase 3 で充填)
-            installed_agents: Vec::new(),
+            installed_agents: self.installed_agents().await,
             is_ephemeral: false,
             provisioner: None,
             lifecycle_status: fxg_protocol::common::NodeLifecycleStatus::Ready,
@@ -331,6 +393,36 @@ impl DaemonState {
         };
         self.inner.db.upsert_node(&record).await?;
         Ok(())
+    }
+
+    /// 利用可能なエージェントID一覧 (ACP Registry 導入済み + カスタム/ビルトイン)。
+    ///
+    /// レジストリの取得・展開に時間がかかる環境でもデーモン起動をブロックしない
+    /// よう、短いタイムアウト付きで解決する (失敗時は空一覧)。
+    pub async fn installed_agents(&self) -> Vec<String> {
+        let registry = self.inner.sessions.registry();
+        let listed = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            let index = registry.index(false).await?;
+            Ok::<_, anyhow::Error>(
+                registry
+                    .list(&index, false)
+                    .into_iter()
+                    .map(|entry| entry.id)
+                    .collect::<Vec<_>>(),
+            )
+        })
+        .await;
+        match listed {
+            Ok(Ok(agents)) => agents,
+            Ok(Err(err)) => {
+                tracing::debug!("failed to list installed agents: {err}");
+                Vec::new()
+            }
+            Err(_) => {
+                tracing::debug!("listing installed agents timed out");
+                Vec::new()
+            }
+        }
     }
 
     /// ノードをオフラインとして記録する (終了時)。

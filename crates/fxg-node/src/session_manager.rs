@@ -78,6 +78,25 @@ pub struct EnsureSessionOutcome {
     pub attach_mode: AttachMode,
 }
 
+/// 明示セッションIDでの開始要求 ([`SessionManager::start_session`])。
+///
+/// 中央サーバー (`ServerToNodeMsg::StartSession`) やローカル REST
+/// (`POST /api/v1/sessions`) から使用する。セッションIDは呼び出し側
+/// (中央サーバー) が採番し、全クライアントで相関できるようにする。
+#[derive(Debug, Clone)]
+pub struct StartSessionParams<'a> {
+    /// 相関ID (重複送信の冪等排除)
+    pub command_id: &'a str,
+    /// セッションID (呼び出し側採番の UUID v7)
+    pub session_id: &'a str,
+    /// 実行ディレクトリ (Worktree パス含む)
+    pub local_path: &'a Path,
+    /// エージェントID
+    pub agent_id: &'a str,
+    /// 初期プロンプト
+    pub initial_prompt: Option<&'a str>,
+}
+
 /// `revert` の結果。
 #[derive(Debug, Clone, PartialEq)]
 pub struct RevertOutcome {
@@ -294,6 +313,66 @@ impl SessionManager {
 
         Ok(EnsureSessionOutcome {
             session_id,
+            attach_mode: attach_mode_of(handle.as_ref()),
+        })
+    }
+
+    /// 明示セッションIDで新規セッションを開始する (`StartSession` / ローカル REST)。
+    ///
+    /// [`Self::ensure_session`] との違いは (1) `session_id` を呼び出し側が採番する、
+    /// (2) `cwd` ではなく解決済みの `local_path` を受け取る、の2点。
+    /// プロジェクト解決 (`project_id`) はノード側の正データで行う。
+    pub async fn start_session(
+        &self,
+        params: StartSessionParams<'_>,
+    ) -> Result<EnsureSessionOutcome, NodeError> {
+        if !self.begin_command(params.command_id) {
+            return Err(NodeError::CommandDuplicate(params.command_id.to_owned()));
+        }
+
+        let resolved = project::resolve_project(params.local_path, &self.inner.node_id).await?;
+        let spec = self.resolve_launch_spec(params.agent_id, &[]).await?;
+
+        // SessionCreated (node_seq = 1)
+        let (git_branch, is_worktree) = branch_and_worktree(&resolved.local_path).await;
+        let title = format!("{} @ {}", spec.display_name, resolved.name);
+        self.inner
+            .bus
+            .create_session(
+                params.session_id,
+                UnifiedEventPayload::SessionCreated {
+                    node_id: self.inner.node_id.clone(),
+                    project_id: resolved.project_id.clone(),
+                    project_name: resolved.name.clone(),
+                    local_path: resolved.local_path.to_string_lossy().into_owned(),
+                    git_branch,
+                    is_worktree,
+                    agent_id: spec.agent_id.clone(),
+                    parent_session_id: None,
+                    fork_from_node_seq: None,
+                    title: title.clone(),
+                },
+            )
+            .await?;
+
+        let handle = self
+            .start_driver_session(
+                params.session_id,
+                &title,
+                &resolved.local_path,
+                &spec,
+                Vec::new(),
+                None,
+            )
+            .await?;
+
+        // 初期プロンプト (リモートからのセッション起動時にそのまま実行する)
+        if let Some(prompt) = params.initial_prompt.filter(|text| !text.trim().is_empty()) {
+            self.start_turn(params.session_id, prompt, "web").await?;
+        }
+
+        Ok(EnsureSessionOutcome {
+            session_id: params.session_id.to_owned(),
             attach_mode: attach_mode_of(handle.as_ref()),
         })
     }

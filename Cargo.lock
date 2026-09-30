@@ -1282,11 +1282,13 @@ dependencies = [
  "anyhow",
  "async-trait",
  "axum",
+ "base64 0.23.1",
  "futures-util",
  "fxg-acp",
  "fxg-db",
  "fxg-protocol",
  "fxg-pty",
+ "fxg-server",
  "http-body-util",
  "libc",
  "rand 0.10.3",
@@ -1334,8 +1336,24 @@ dependencies = [
 name = "fxg-server"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
+ "axum",
+ "base64 0.23.1",
+ "futures-util",
  "fxg-db",
  "fxg-protocol",
+ "http-body-util",
+ "rand 0.10.3",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "tokio-tungstenite 0.30.0",
+ "tower",
+ "tracing",
+ "uuid",
 ]
 
 [[package]]

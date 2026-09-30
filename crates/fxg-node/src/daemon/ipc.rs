@@ -26,6 +26,7 @@ use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::{broadcast, watch};
 
 use super::DaemonState;
+use super::ops::AuditSource;
 use crate::error::NodeError;
 use crate::ipc_framing::{read_frame, write_message};
 use crate::session::SessionBroadcast;
@@ -611,89 +612,17 @@ async fn handle(
             base_branch,
             path,
         } => {
-            let repo = PathBuf::from(&cwd);
-            let resolved = resolve_and_register(state, &repo, &command_id).await?;
-            let repo_root = resolved.git_root.clone().ok_or_else(|| {
-                DispatchError::new(
-                    &command_id,
-                    ErrorCode::InvalidState,
-                    format!("not a git repository: {cwd}"),
+            let outcome = state
+                .worktree_add(
+                    Path::new(&cwd),
+                    project_id.as_deref(),
+                    &branch,
+                    base_branch,
+                    path.map(PathBuf::from),
+                    &AuditSource::local(),
                 )
-            })?;
-            let resolved = if let Some(project_id) = project_id
-                && project_id != resolved.project_id
-            {
-                return Err(DispatchError::new(
-                    &command_id,
-                    ErrorCode::InvalidState,
-                    format!(
-                        "project_id mismatch: {project_id} (resolved: {})",
-                        resolved.project_id
-                    ),
-                ));
-            } else {
-                resolved
-            };
-
-            let project_config = project::load_project_config(&resolved.local_path)
                 .await
-                .map_err(|err| DispatchError::from_node_error(&command_id, err))?
-                .unwrap_or_default();
-            let global_config = GlobalConfig::load_from_path(&state.paths().config_path())
-                .map_err(|err| DispatchError::from_node_error(&command_id, err.into()))?;
-            let dir_template = project_config
-                .worktree
-                .dir_template
-                .clone()
-                .unwrap_or_else(|| {
-                    global_config
-                        .node
-                        .resolved_worktree_dir_template()
-                        .to_owned()
-                });
-            let base_branch = base_branch.or_else(|| project_config.worktree.base_branch.clone());
-            let path_buf = path.map(PathBuf::from);
-
-            let outcome = worktree::ensure_worktree(&worktree::WorktreeAddRequest {
-                repo: &repo_root,
-                project_id: &resolved.project_id,
-                branch: &branch,
-                base_branch: base_branch.as_deref(),
-                dir_template: &dir_template,
-                new_path: path_buf.as_deref(),
-                fxg_home: state.paths().fxg_home(),
-                copy_files: &project_config.worktree.copy_files,
-                post_create: &project_config.worktree.post_create,
-            })
-            .await
-            .map_err(|err| DispatchError::from_node_error(&command_id, err))?;
-
-            // Worktree をノードの紐付けとして登録する
-            state
-                .db()
-                .upsert_project(&resolved.to_project_record())
-                .await
-                .map_err(|err| DispatchError::from_node_error(&command_id, err.into()))?;
-            let mut binding =
-                resolved.to_binding_record(state.node_id(), true, Some(branch.as_str()));
-            binding.local_path = outcome.path.to_string_lossy().into_owned();
-            state
-                .db()
-                .upsert_project_binding(&binding)
-                .await
-                .map_err(|err| DispatchError::from_node_error(&command_id, err.into()))?;
-
-            record_worktree_audit(
-                state,
-                "add",
-                serde_json::json!({
-                    "branch": branch,
-                    "path": outcome.path.to_string_lossy(),
-                    "created": outcome.created,
-                }),
-            )
-            .await;
-
+                .map_err(|err| DispatchError::from_node_error(&command_id, err))?;
             Ok((
                 command_id,
                 IpcResult::WorktreeAdded {
@@ -743,24 +672,10 @@ async fn handle(
                     )
                 })?;
 
-            worktree::remove_worktree(&repo, &target_path, force)
+            state
+                .worktree_remove(Some(&repo), &target_path, force, &AuditSource::local())
                 .await
                 .map_err(|err| DispatchError::from_node_error(&command_id, err))?;
-            let _ = state
-                .db()
-                .delete_project_binding(state.node_id(), &target_path.to_string_lossy())
-                .await;
-
-            record_worktree_audit(
-                state,
-                "remove",
-                serde_json::json!({
-                    "target": target,
-                    "path": target_path.to_string_lossy(),
-                    "force": force,
-                }),
-            )
-            .await;
 
             Ok((
                 command_id,
@@ -813,20 +728,18 @@ async fn handle(
                 .await
                 .map_err(|err| DispatchError::from_node_error(&command_id, err))?;
 
-            let mut audit = fxg_db::AuditLogRecord::new(
-                fxg_db::audit::actions::KILL_SWITCH,
-                "local",
-                "local-ipc",
-            );
-            audit.node_id = Some(state.node_id().to_owned());
-            audit.details = serde_json::json!({
-                "reason": "local kill-all",
-                "killed_sessions": killed_sessions,
-                "killed_ptys": killed_ptys,
-            });
-            if let Err(err) = state.db().append_audit_log(&audit).await {
-                tracing::warn!("failed to record kill-switch audit log: {err}");
-            }
+            state
+                .record_audit(
+                    fxg_db::audit::actions::KILL_SWITCH,
+                    &AuditSource::local(),
+                    None,
+                    serde_json::json!({
+                        "reason": "local kill-all",
+                        "killed_sessions": killed_sessions,
+                        "killed_ptys": killed_ptys,
+                    }),
+                )
+                .await;
 
             Ok((
                 command_id,
@@ -868,6 +781,14 @@ async fn handle(
                 )
                 .await
                 .map_err(|err| DispatchError::from_node_error(&command_id, err))?;
+            state
+                .record_audit(
+                    fxg_db::audit::actions::SESSION_START,
+                    &AuditSource::local(),
+                    Some(&outcome.session_id),
+                    serde_json::json!({ "cwd": cwd, "agent_id": agent_id }),
+                )
+                .await;
             Ok((
                 command_id,
                 IpcResult::EnsureSession {
@@ -1086,52 +1007,10 @@ async fn resolve_and_register(
     dir: &Path,
     command_id: &str,
 ) -> Result<project::ResolvedProject, DispatchError> {
-    let resolved = project::resolve_project(dir, state.node_id())
-        .await
-        .map_err(|err| DispatchError::from_node_error(command_id, err))?;
     state
-        .db()
-        .upsert_project(&resolved.to_project_record())
+        .resolve_and_register_project(dir)
         .await
-        .map_err(|err| DispatchError::from_node_error(command_id, err.into()))?;
-
-    // Worktree 内での実行かどうかと現在ブランチを記録する
-    // (取得に失敗した場合はメインリポジトリ扱いで登録する)
-    let is_worktree = match &resolved.git_root {
-        Some(root) => git::is_worktree(root).await.unwrap_or(false),
-        None => false,
-    };
-    let branch = match &resolved.git_root {
-        Some(root) => git::current_branch(root).await.unwrap_or(None),
-        None => None,
-    };
-    state
-        .db()
-        .upsert_project_binding(&resolved.to_binding_record(
-            state.node_id(),
-            is_worktree,
-            branch.as_deref(),
-        ))
-        .await
-        .map_err(|err| DispatchError::from_node_error(command_id, err.into()))?;
-
-    // 再リンク時に古いプロジェクトの紐付けを残さない
-    // (`fxg project link` で project_key を変更した場合など)
-    state
-        .db()
-        .delete_other_project_bindings(
-            state.node_id(),
-            &resolved.local_path.to_string_lossy(),
-            &resolved.project_id,
-        )
-        .await
-        .map_err(|err| DispatchError::from_node_error(command_id, err.into()))?;
-    state
-        .db()
-        .delete_orphan_projects()
-        .await
-        .map_err(|err| DispatchError::from_node_error(command_id, err.into()))?;
-    Ok(resolved)
+        .map_err(|err| DispatchError::from_node_error(command_id, err))
 }
 
 fn to_project_info(resolved: &project::ResolvedProject) -> ProjectInfo {
@@ -1157,62 +1036,10 @@ async fn list_worktrees(
     project_id: Option<&str>,
     command_id: &str,
 ) -> Result<Vec<fxg_protocol::client_api::WorktreeInfo>, DispatchError> {
-    let repos: Vec<PathBuf> = match cwd {
-        Some(cwd) => vec![PathBuf::from(cwd)],
-        None => {
-            let projects = state
-                .db()
-                .list_projects()
-                .await
-                .map_err(|err| DispatchError::from_node_error(command_id, err.into()))?;
-            projects
-                .into_iter()
-                .filter(|project| project_id.is_none_or(|id| id == project.project_id.as_str()))
-                .flat_map(|project| {
-                    project
-                        .bindings
-                        .into_iter()
-                        .filter(|binding| {
-                            binding.node_id == state.node_id() && !binding.is_worktree
-                        })
-                        .map(|binding| PathBuf::from(binding.local_path))
-                })
-                .collect()
-        }
-    };
-
-    let mut worktrees = Vec::new();
-    for repo in repos {
-        let entries = worktree::list_worktrees(&repo)
-            .await
-            .map_err(|err| DispatchError::from_node_error(command_id, err))?;
-        for entry in entries {
-            worktrees.push(fxg_protocol::client_api::WorktreeInfo {
-                node_id: state.node_id().to_owned(),
-                path: entry.path.to_string_lossy().into_owned(),
-                branch: entry.branch,
-                head_commit: entry.head,
-                is_main: entry.is_main,
-            });
-        }
-    }
-    worktrees.sort_by(|a, b| a.path.cmp(&b.path));
-    worktrees.dedup_by(|a, b| a.path == b.path);
-    Ok(worktrees)
-}
-
-/// Worktree 操作を監査ログへ記録する (`audit_logs`)。
-async fn record_worktree_audit(state: &DaemonState, action: &str, details: serde_json::Value) {
-    let mut audit = fxg_db::AuditLogRecord::new(
-        fxg_db::audit::actions::WORKTREE_MANAGE,
-        "local",
-        "local-ipc",
-    );
-    audit.node_id = Some(state.node_id().to_owned());
-    audit.details = serde_json::json!({ "action": action, "details": details });
-    if let Err(err) = state.db().append_audit_log(&audit).await {
-        tracing::warn!("failed to record worktree audit log: {err}");
-    }
+    state
+        .worktree_list(cwd.map(Path::new), project_id)
+        .await
+        .map_err(|err| DispatchError::from_node_error(command_id, err))
 }
 
 /// `.fxg.toml` に `project_key` を書き込む (既存の設定は保持する)。
