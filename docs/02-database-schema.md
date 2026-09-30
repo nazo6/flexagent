@@ -60,6 +60,8 @@ E2E暗号化を行わないため、中央サーバー側で会話履歴の構�
 SessionCreated        → sessions 行の生成（project_id / node_id / local_path /
                         git_branch / is_worktree / agent_id /
                         parent_session_id / fork_from_node_seq / title / created_at）
+                        ※ node_id は SessionCreated payload が保持する
+                          (イベントログのみから投影を完全再構築可能にするため)
 SessionTitleChanged   → sessions.title
 SessionAgentBound     → sessions.agent_session_id
 StatusChanged         → sessions.status

@@ -64,7 +64,7 @@
 
 | フェーズ    | 対象領域                                                     | 主な対象パッケージ                        | 状態   |
 | :---------- | :----------------------------------------------------------- | :---------------------------------------- | :----- |
-| **Phase 1** | ワークスペース・共通プロトコル・設定スキーマ・DB基盤         | `fxg-protocol`, `fxg-db`                  | 未着手 |
+| **Phase 1** | ワークスペース・共通プロトコル・設定スキーマ・DB基盤         | `fxg-protocol`, `fxg-db`                  | 完了 (2026-09-30) |
 | **Phase 2** | プロセス/PTY制御・Windows対応・ローカルノード基盤            | `fxg-pty`, `fxg-node`, `fxg-cli`          | 未着手 |
 | **Phase 3** | エージェントドライバ (ACP / OpenCode2)・CLI/TUI・Revert/Fork | `fxg-acp`, `fxg-node`, `fxg-cli`          | 未着手 |
 | **Phase 4** | 中央サーバー・Outbox同期・Client API共通化・LANセキュリティ  | `fxg-server`, `fxg-node`, `fxg-cli`       | 未着手 |
@@ -116,6 +116,14 @@
   - `fxg-db` の SQL は `sqlx` 型安全クエリマクロ (`query!` / `query_as!` / `query_scalar!`) を必須化し、`.sqlx/` (`cargo sqlx prepare`) をコミット
   - CLI パースに `usage-rs` を採用（`clap` 不使用。`__usage_spec__` から補完・manpage・Markdown を生成）
   - タスク完了単位のコミット（fmt / lint / テスト通過後、Conventional Commits）を運用ルールに追加
+- **2026-09-30 (Phase 1 実装時の仕様拡張)**:
+  - `SessionCreated` payload に `node_id` を追加（実行ノード自身が埋める）。
+    ハブ側 `sessions.node_id` 投影をイベントログのみから再構築可能にするため
+    (`docs/02` §0.3 / `docs/03` §1 に反映)
+  - `sessions` / `permission_requests` 投影の再構築手順を明確化:
+    `session_events` の `ON DELETE CASCADE` により `sessions` 行は DELETE
+    できないため、「派生カラムの既定値リセット + カーソル順の全量再生」で再構築する
+    (イベント由来でない `git_bundle_path` / `synced_up_to_node_seq` は保持)
 
 ---
 
@@ -135,55 +143,106 @@
   - 設定ファイルスキーマ (`config.toml` / `.fxg.toml`) & `~/.flexagent/` 構成:
     [`docs/05-cli-and-pwa-ui.md` §2.1〜§2.3](../05-cli-and-pwa-ui.md)
 - **タスクリスト**:
-  - [ ] Cargo Workspace (`Cargo.toml` 全7クレート構成) と
+  - [x] Cargo Workspace (`Cargo.toml` 全7クレート構成) と
         `mise.toml`（ビルド・`ts-rs` 型出力・lint・format タスク）の初期構築。
         依存クレートは `cargo add` で最新版を解決して追加する（`sqlx`, `tokio`,
         `axum`, `usage-rs` 等。バージョンを記憶で手書きしない）
-  - [ ] `fxg-protocol`: `SessionEventEnvelope` および `UnifiedEventPayload`
+        → 完了。`sqlx 0.9` / `ts-rs 12` / `tokio 1.53` 等を `cargo add` で解決し
+        `[workspace.dependencies]` に集約。`axum` / `usage-rs` は使用フェーズ
+        (Phase 2 / 4) で追加する（未使用依存を持たない）
+  - [x] `fxg-protocol`: `SessionEventEnvelope` および `UnifiedEventPayload`
         の定義 (`ts-rs` derive 付与。イベント永続化ライフサイクル:
         ストリーミング途中は非永続、ターン完了時に完成イベントのみ永続化)
-  - [ ] `fxg-protocol`: Node ⇔ Server メッセージ (`NodeToServerMsg`,
+        → 完了。`is_persistable()` と `event_type()` を payload 側に集約し、
+        DB の `event_type` 語彙と永続化規則の二重定義を排除
+  - [x] `fxg-protocol`: Node ⇔ Server メッセージ (`NodeToServerMsg`,
         `ServerToNodeMsg`) の定義
-  - [ ] `fxg-protocol`: Client REST API リクエスト/レスポンス型、Client WS / PTY
+  - [x] `fxg-protocol`: Client REST API リクエスト/レスポンス型、Client WS / PTY
         WS メッセージ型、Local IPC メッセージ型の定義
-  - [ ] `fxg-protocol`: 共通補助型一式（`SessionSummary`, `NodeProjectReport`,
+  - [x] `fxg-protocol`: 共通補助型一式（`SessionSummary`, `NodeProjectReport`,
         `StreamDeltaPayload`, `AttachmentMeta`, `FileDiff`, `PlanEntry`,
         `PermissionOption`, `ModeInfo`, `CommandInfo`, `ConfigOptionInfo`,
         `SessionStatus`, `SessionControlAction`, `WorktreeAction`, `DiffScope`,
         `WorkspaceDiffResponse`, `ForkHistoryItem`）と共通エラーコード
         (`ErrorCode`) の定義
-  - [ ] `fxg-protocol`: グローバル設定 (`~/.flexagent/config.toml` + `FXG_*`
+  - [x] `fxg-protocol`: グローバル設定 (`~/.flexagent/config.toml` + `FXG_*`
         環境変数オーバーライド) およびプロジェクト設定 (`.fxg.toml`)
         のデシリアライズ構造体定義（クライアントに公開する型のみ
         `#[ts(export)]`、設定等の内部型は export 対象外）
-  - [ ] `fxg-db`: **単一マイグレーションセット** (`migrations/`)
+        → 環境変数参照は `EnvLookup` 注入とし、実環境 (`process_env`) と
+        テストで差し替え可能にした
+  - [x] `fxg-db`: **単一マイグレーションセット** (`migrations/`)
         による共通スキーマ (`nodes` (個別 `token_hash`) / `projects` /
         `project_node_bindings` / `sessions` / `session_events` (`cursor`
         AUTOINCREMENT) / `session_events_fts` (`tokenize='trigram'`) /
         `permission_requests` / `push_subscriptions` / `audit_logs`)
         の実装。`node.db` / `server.db` は 同一DDLから生成し、ロール（Node /
         Hub）による行スコープ・使用カラムの差のみ扱う
-  - [ ] `fxg-db`: イベント適用エンジン（`INSERT OR IGNORE` による冪等追記 +
+        → 完了 (`migrations/0001_initial.sql`)。`PRAGMA journal_mode = WAL` /
+        `foreign_keys = ON` / `busy_timeout` はマイグレーション (トランザクション内)
+        では効果がないため接続オプションで全接続に適用する
+  - [x] `fxg-db`: イベント適用エンジン（`INSERT OR IGNORE` による冪等追記 +
         `sessions` / `permission_requests` 投影の同一トランザクション更新）と
         投影再構築関数（イベントログからの全量再生）の実装
-  - [ ] `fxg-db`: 水位ベース Outbox 抽出
+        → 投影再構築は `session_events` の `ON DELETE CASCADE` により
+        `sessions` を DELETE できないため「派生カラムの既定値リセット + カーソル順の
+        全量再生」方式。`git_bundle_path` / `synced_up_to_node_seq` (イベント由来でない
+        カラム) は保持する
+  - [x] `fxg-db`: 水位ベース Outbox 抽出
         (`node_seq > sessions.synced_up_to_node_seq`) と ACK 水位更新の実装
-  - [ ] `fxg-db`: クエリ実装は型安全マクロ (`sqlx::query!` / `query_as!` /
+        → 抽出はセッション単位の `SessionOutboxBatch`、ACK は `MAX` による
+        単調増加更新。`ResyncRequest` 用の範囲再送 (`extract_outbox_after`) と
+        未同期件数 / 最終同期時刻も実装
+  - [x] `fxg-db`: クエリ実装は型安全マクロ (`sqlx::query!` / `query_as!` /
         `query_scalar!`) に統一し、オフラインビルド用 `.sqlx/`
         (`cargo sqlx prepare`) を整備する
-  - [ ] `fxg-db`: FTS5 外部コンテンツ同期トリガー (INSERT/DELETE/UPDATE) と
+        → 例外は FTS5 `MATCH` と 3 文字未満の LIKE フォールバックのみ
+        (理由コメント + 単体テスト付き)。`cargo sqlx prepare --workspace --check`
+        と `SQLX_OFFLINE=true` / `DATABASE_URL` 未設定の双方でビルド可能
+  - [x] `fxg-db`: FTS5 外部コンテンツ同期トリガー (INSERT/DELETE/UPDATE) と
         `searchable_text` 生成ロジック（`TerminalOutput`
         等のバイナリ系除外）の実装
-  - [ ] `fxg-db`: Local Node (`node.db`) と Central Server (`server.db`)
+        → 抽出ロジック変更時の再計算用に `regenerate_searchable_text` /
+        `rebuild_fts_index` も実装
+  - [x] `fxg-db`: Local Node (`node.db`) と Central Server (`server.db`)
         で同一のクライアント向けレスポンス型を返す共通クエリ層の実装
+        → `SessionSummary` / `ProjectSummary` / `NodeSummary` /
+        `PermissionRequestEntry` / `SearchHit` / `AuditLogEntry` /
+        `SessionEventBatch` を両ロールで共通返却 (node / hub の応答一致をテスト)
 - **完了条件 / 検証**:
   - `cargo test` で設定ファイルパース・マイグレーション・イベント適用の冪等性・
     投影再構築とイベント適用結果の一致・水位ベース Outbox 抽出・FTS5
     全文検索（トリガー経由含む）・`ts-rs` 型生成がすべて通ること。
   - `SQLX_OFFLINE=true` での `cargo build`（`.sqlx/` 使用）と
     `cargo sqlx prepare --check` が通ること。
+  - ✅ 検証済み (2026-09-30): `mise run check` (fmt:check / clippy `-D warnings` /
+    `cargo test --workspace`) が通過。`fxg-protocol` 94 件 + `fxg-db` 25 件
+    (単体 12 / 統合 13) のテストが成功し、`mise run sqlx:check` と
+    `DATABASE_URL` 未設定時のフォールバックビルドも成功。
 - **実装ログ / 進捗メモ**:
-  - （実装時に追記）
+  - **コミット**: `chore(workspace)` → `feat(fxg-protocol)` →
+    `fix(fxg-protocol)` → `feat(fxg-db)` → `chore(mise)` →
+    `docs(plan)` の順で 1 トピック 1 コミット。
+  - **仕様拡張 (`SessionCreated.node_id`)**: ハブ側 `sessions` 投影の生成源である
+    `SessionCreated` payload に `node_id` を追加した。イベントは接続元ノードから
+    送られるため transport 上は暗黙に決まるが、payload に含めることで
+    **イベントログのみからハブ投影を完全再構築**できる (Resync / DB 再構築時の
+    復元を保証)。`docs/02` §0.3 と `docs/03` §1 に反映済み。
+  - **イベント適用の FK 順序**: `session_events.session_id -> sessions` の FK を
+    満たすため、`SessionCreated` のみイベント追記の**前**に `projects` /
+    `sessions` 行を upsert する (冪等)。バッチは `node_seq` 昇順で渡すため
+    未知セッションの最初のイベントは必ず `node_seq = 1` になる。
+  - **SQLite の型推論対策**: `TEXT PRIMARY KEY` は暗黙 NOT NULL にならず
+    sqlx が nullable と推定するため、共通クエリ層の `query_as!` では
+    `AS "col!"` (非NULL) / `AS "col: bool"` (INTEGER→bool) の型オーバーライドを
+    使用する。
+  - **`now_ms` 依存の値**: `nodes.last_seen_at` / `projects.updated_at` 等は
+    登録時刻で決まるため、node / hub の応答一致テストでは該当時刻を除外して比較する。
+  - **ts-rs 出力**: `.cargo/config.toml` の `TS_RS_EXPORT_DIR` で
+    `ui/src/lib/generated/` を指定し、`TS_RS_LARGE_INT = "number"` により
+    `node_seq` / epoch ms を `number` として出力する (`cargo test` が生成テストを兼ねる)。
+  - **UI ディレクトリ**: `ui/src/lib/generated/` のみ先行作成 (Phase 5 で
+    SvelteKit を構築)。生成物はコミット対象。
 
 ---
 

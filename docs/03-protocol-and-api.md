@@ -47,6 +47,11 @@ pub enum UnifiedEventPayload {
     /// セッション生成直後の最初のイベント (node_seq = 1)。
     /// ハブ側 sessions 投影の生成源 (別系統のメタデータ同期は行わない)
     SessionCreated {
+        /// 実行ノードID。イベントは接続元ノードから送られるため transport 上は
+        /// 暗黙に決まるが、payload に含めることでイベントログのみから
+        /// ハブ側 sessions 投影を完全再構築できる (NodeHello 再送・Resync /
+        /// ハブDB再構築時の復元を保証する)
+        node_id: String,
         project_id: String,
         project_name: String,
         local_path: String,

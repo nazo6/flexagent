@@ -534,9 +534,11 @@ export interface ITerminalAdapter {
 
 ### Milestone 1: コアプロトコル・DB・ローカルデーモン基盤 & セキュリティ基礎 (実装計画 Phase 1〜2 対応)
 
-- [ ] Cargo Workspace の構築 (`fxg-protocol`, `fxg-db`, `fxg-pty`, `fxg-acp`,
+- [x] Cargo Workspace の構築 (`fxg-protocol`, `fxg-db`, `fxg-pty`, `fxg-acp`,
       `fxg-node`, `fxg-server`, `fxg-cli`) および `mise.toml` タスク定義
-- [ ] `node.db` / `server.db` のSQLiteマイグレーション実装
+      (Phase 1 完了: `mise run check` / `types` / `sqlx:prepare` 等)
+- [x] `node.db` / `server.db` のSQLiteマイグレーション実装
+      (Phase 1 完了: 単一スキーマ + FTS5 trigram + 投影エンジン。実装は `crates/fxg-db/`)
 - [ ] Git Remote URL正規化による論理プロジェクト解決 (`fxg project info`)
 - [ ] Windows Named Pipe / Unix Domain Socket による `fxg` CLI ⇔ `fxg daemon`
       ローカルIPC疎通
