@@ -126,11 +126,35 @@ OpenCode / OpenCode2
    に変換して `node.db` および中央サーバーへ同期します。
 3. **ユーザーがPCターミナルで `fxg run opencode` を叩いた場合**: `fxg` CLI
    はローカルの `opencode2 serve` に対して
-   `opencode2 run --attach http://127.0.0.1:<port> --session <id>`
+   `opencode2 run --server http://127.0.0.1:<port> --session <id>`
    を実行します。
    - **結果**: PCのターミナルでは **100%純正のOpenCode2 TUI**
      がそのまま動き、同時にスマホ（Android
      PWA）やWebブラウザからも同じセッションがリアルタイムに見えて双方向操作できます。
+
+#### サーバーライフサイクルと設計判断 (2026-10-01 確定)
+
+opencode2 本体は「バックグラウンドサービス」1つを全セッション・全 TUI
+で共有する設計だが、**fxg は分離を優先し、fxg セッションごとに専用の
+`opencode2 serve`（空きポート +
+ランダムパスワード）を起動する**（現状維持と決定）。
+これにより:
+
+- あるセッションの `kill`（プロセスツリー終了）が他の fxg
+  セッションやユーザー自身の opencode2 に波及しない。
+- 純正TUI を閉じただけではサーバーは終了しない（デーモンが保持し、
+  `fxg attach` で再接続可能）。
+- `fxg daemon` の終了（正常終了は `shutdown_all`、Windows
+  の強制終了は Job Object の kill-on-close）で全セッションが停止する。
+  実行中ターン・承認待ちは失われるが、**会話履歴は opencode2 のグローバル DB
+  (`~/.local/share/opencode/opencode.db`) に永続化されるため失われない**
+  （新サーバーから過去セッションを取得できることを実証済み）。
+- 全サーバーが同一のグローバル DB を共有するため、複数サーバー同時稼働時は
+  SQLite の書き込みロック競合が起こり得る（WAL のため kill による破損はない）。
+
+将来「ノード共有サーバー」（デーモンが1サーバーを管理）へ変更する場合は、
+`fxg session kill` を「エンジンセッションの abort + active
+一覧からの除去」に変え、サーバー自体はデーモン終了時まで維持する必要がある。
 
 ### モードB: ACP モード (`opencode2 acp`)
 
