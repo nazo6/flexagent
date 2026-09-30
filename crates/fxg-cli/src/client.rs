@@ -9,9 +9,13 @@ use std::path::Path;
 use anyhow::{Context, Result, bail};
 use fxg_node::IpcClient;
 use fxg_protocol::client_api::WorktreeInfo;
-use fxg_protocol::common::{HookLogEntry, ProjectSummary, SessionSummary};
+use fxg_protocol::common::{
+    HookLogEntry, PermissionRequestEntry, ProjectSummary, SessionControlAction, SessionSummary,
+};
 use fxg_protocol::config::process_env;
-use fxg_protocol::ipc::{IpcClientMessage, IpcResult, IpcServerMessage, ProjectInfo};
+use fxg_protocol::ipc::{
+    AttachMode, IpcClientMessage, IpcResult, IpcServerMessage, ProjectInfo, SessionDetail,
+};
 
 /// デーモン (`fxg daemon`) への IPC クライアント。
 pub struct DaemonClient {
@@ -228,6 +232,248 @@ impl DaemonClient {
             other => bail!("unexpected ipc result: {other:?}"),
         }
     }
+
+    /// `fxg run <agent>` の新規セッション開始。
+    pub async fn ensure_session(
+        &mut self,
+        cwd: &Path,
+        agent_id: &str,
+        extra_args: &[String],
+        initial_mode: Option<&str>,
+        acp: bool,
+    ) -> Result<(String, AttachMode)> {
+        let command_id = self.command_id();
+        let result = self
+            .request(IpcClientMessage::EnsureSession {
+                command_id,
+                cwd: path_to_string(cwd),
+                agent_id: agent_id.to_owned(),
+                extra_args: extra_args.to_vec(),
+                initial_mode: initial_mode.map(str::to_owned),
+                acp,
+            })
+            .await?;
+        match result {
+            IpcResult::EnsureSession {
+                session_id,
+                attach_mode,
+            } => Ok((session_id, attach_mode)),
+            other => bail!("unexpected ipc result: {other:?}"),
+        }
+    }
+
+    /// `fxg session prompt` (ヘッドレス送信)。
+    pub async fn send_prompt(
+        &mut self,
+        session_id: &str,
+        text: &str,
+        client_source: &str,
+    ) -> Result<()> {
+        let command_id = self.command_id();
+        let result = self
+            .request(IpcClientMessage::SendPrompt {
+                command_id,
+                session_id: session_id.to_owned(),
+                text: text.to_owned(),
+                client_source: client_source.to_owned(),
+            })
+            .await?;
+        ack_message(result)?;
+        Ok(())
+    }
+
+    /// `fxg inbox approve` / `fxg inbox reject`。
+    pub async fn respond_permission(
+        &mut self,
+        session_id: &str,
+        request_id: &str,
+        selected_option_id: &str,
+    ) -> Result<()> {
+        let command_id = self.command_id();
+        let result = self
+            .request(IpcClientMessage::RespondPermission {
+                command_id,
+                session_id: session_id.to_owned(),
+                request_id: request_id.to_owned(),
+                selected_option_id: selected_option_id.to_owned(),
+                resolved_by: "cli".to_owned(),
+            })
+            .await?;
+        ack_message(result)?;
+        Ok(())
+    }
+
+    /// モード切替 / 設定変更 / キャンセル / Kill (`fxg session stop|kill`)。
+    pub async fn control_session(
+        &mut self,
+        session_id: &str,
+        action: SessionControlAction,
+    ) -> Result<()> {
+        let command_id = self.command_id();
+        let result = self
+            .request(IpcClientMessage::ControlSession {
+                command_id,
+                session_id: session_id.to_owned(),
+                action,
+            })
+            .await?;
+        ack_message(result)?;
+        Ok(())
+    }
+
+    /// `fxg session show`
+    pub async fn session_show(
+        &mut self,
+        session_id: &str,
+        recent_events: u32,
+    ) -> Result<SessionDetail> {
+        let command_id = self.command_id();
+        let result = self
+            .request(IpcClientMessage::SessionShow {
+                command_id,
+                session_id: session_id.to_owned(),
+                recent_events,
+            })
+            .await?;
+        match result {
+            IpcResult::SessionDetail(detail) => Ok(*detail),
+            other => bail!("unexpected ipc result: {other:?}"),
+        }
+    }
+
+    /// `fxg inbox list`
+    pub async fn inbox_list(&mut self) -> Result<Vec<PermissionRequestEntry>> {
+        let command_id = self.command_id();
+        let result = self
+            .request(IpcClientMessage::InboxList { command_id })
+            .await?;
+        match result {
+            IpcResult::Inbox { requests } => Ok(requests),
+            other => bail!("unexpected ipc result: {other:?}"),
+        }
+    }
+
+    /// `fxg session revert`
+    pub async fn revert_session(
+        &mut self,
+        session_id: &str,
+        target_node_seq: Option<u64>,
+    ) -> Result<SessionRevertOutcome> {
+        let command_id = self.command_id();
+        let result = self
+            .request(IpcClientMessage::SessionRevert {
+                command_id,
+                session_id: session_id.to_owned(),
+                target_node_seq,
+            })
+            .await?;
+        match result {
+            IpcResult::SessionReverted {
+                target_node_seq,
+                restored_tree_hash,
+                backup_tree_hash,
+                restored_files,
+                removed_files,
+            } => Ok(SessionRevertOutcome {
+                target_node_seq,
+                restored_tree_hash,
+                backup_tree_hash,
+                restored_files,
+                removed_files,
+            }),
+            other => bail!("unexpected ipc result: {other:?}"),
+        }
+    }
+
+    /// `fxg session fork`
+    pub async fn fork_session(
+        &mut self,
+        session_id: &str,
+        from_node_seq: Option<u64>,
+        agent_id: Option<String>,
+        cwd: Option<&Path>,
+    ) -> Result<(String, AttachMode)> {
+        let command_id = self.command_id();
+        let result = self
+            .request(IpcClientMessage::SessionFork {
+                command_id,
+                session_id: session_id.to_owned(),
+                from_node_seq,
+                agent_id,
+                cwd: cwd.map(path_to_string),
+            })
+            .await?;
+        match result {
+            IpcResult::SessionForked {
+                session_id,
+                attach_mode,
+            } => Ok((session_id, attach_mode)),
+            other => bail!("unexpected ipc result: {other:?}"),
+        }
+    }
+
+    /// `fxg attach` — セッションのイベントストリームを購読開始する。
+    ///
+    /// 以降のメッセージは [`Self::next_message`] で受信する
+    /// (`EventBatch` / `LiveStreamDelta` / コマンド応答が混在)。
+    pub async fn attach_session(
+        &mut self,
+        session_id: &str,
+        after_node_seq: Option<u64>,
+    ) -> Result<AttachMode> {
+        let command_id = self.command_id();
+        self.client
+            .send(&IpcClientMessage::AttachSession {
+                command_id: command_id.clone(),
+                session_id: session_id.to_owned(),
+                after_node_seq,
+            })
+            .await?;
+        // 受理応答 (`Result::AttachSession`) までを読み飛ばす
+        loop {
+            match self.next_message().await? {
+                Some(IpcServerMessage::Result {
+                    result: IpcResult::AttachSession { attach_mode, .. },
+                    ..
+                }) => return Ok(attach_mode),
+                Some(IpcServerMessage::Error { code, message, .. }) => {
+                    bail!("{code}: {message}")
+                }
+                Some(_) => continue,
+                None => bail!("デーモンがアタッチ前に接続を閉じました"),
+            }
+        }
+    }
+
+    /// アタッチ中の接続から次のメッセージを受信する。
+    pub async fn next_message(&mut self) -> Result<Option<IpcServerMessage>> {
+        Ok(self.client.recv().await?)
+    }
+
+    /// アタッチ中の接続へ相関ID付きコマンドを送信する。
+    pub async fn send_stream_command(&mut self, message: IpcClientMessage) -> Result<()> {
+        self.client.send(&message).await?;
+        Ok(())
+    }
+
+    /// 次のコマンドIDを採番する (内蔵TUI の送信直前採番用)。
+    pub fn next_command_id(&mut self) -> String {
+        self.command_id()
+    }
+}
+
+/// `fxg session revert` の表示用データ。
+pub struct SessionRevertOutcome {
+    /// 基準にした `UserMessage` の `node_seq`
+    pub target_node_seq: u64,
+    /// 復元先の Tree Hash
+    pub restored_tree_hash: String,
+    /// 復元直前を退避したバックアップ Tree Hash
+    pub backup_tree_hash: Option<String>,
+    /// 復元したファイル数
+    pub restored_files: u64,
+    /// 削除したファイル数
+    pub removed_files: u64,
 }
 
 fn ack_message(result: IpcResult) -> Result<Option<String>> {

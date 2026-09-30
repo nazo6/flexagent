@@ -34,9 +34,12 @@ impl TestEnv {
         let runtime = dir.path().join("runtime");
         std::fs::create_dir_all(&runtime).expect("mkdir runtime");
         let ipc_env = if cfg!(windows) {
+            // テストは同一プロセス内で並列実行されるため、Named Pipe 名を連番で一意化する
+            static COUNTER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+            let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             vec![(
                 "USERNAME".to_owned(),
-                format!("fxg-test-{}", std::process::id()),
+                format!("fxg-test-{}-{n}", std::process::id()),
             )]
         } else {
             vec![(
@@ -64,12 +67,15 @@ impl TestEnv {
 
     /// デーモンを起動し、IPC が応答するまで待機する。
     async fn start_daemon(&mut self) {
+        // デーモンのログは失敗時の診断用にファイルへ保存する
+        let log_path = self.dir.path().join("daemon.log");
+        let log = std::fs::File::create(&log_path).expect("create daemon log");
         let child = self
             .command()
             .args(["daemon", "--listen", "127.0.0.1:0"])
             .stdin(Stdio::null())
             .stdout(Stdio::null())
-            .stderr(Stdio::null())
+            .stderr(Stdio::from(log))
             .spawn()
             .expect("spawn fxg daemon");
         self.daemon = Some(child);
@@ -82,12 +88,18 @@ impl TestEnv {
             }
             if Instant::now() > deadline {
                 panic!(
-                    "fxg daemon did not become ready: {}",
-                    String::from_utf8_lossy(&output.stderr)
+                    "fxg daemon did not become ready: {}\n--- daemon log ---\n{}",
+                    String::from_utf8_lossy(&output.stderr),
+                    self.daemon_log()
                 );
             }
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
+    }
+
+    /// デーモンのログ (Stdio 診断用)。
+    fn daemon_log(&self) -> String {
+        std::fs::read_to_string(self.dir.path().join("daemon.log")).unwrap_or_default()
     }
 
     /// デーモンを停止する。
@@ -255,6 +267,119 @@ async fn cli_reports_missing_daemon() {
         stderr.contains("fxg daemon"),
         "stderr must guide to starting the daemon: {stderr}"
     );
+}
+
+/// Phase 3 のセッション操作系コマンド (`session show|prompt|stop|kill|revert|fork`
+/// / `inbox` / `attach`) が IPC 経由で正しくエラーを返すことを検証する。
+///
+/// 実エージェントを起動せずに検証できる範囲 (引数パース・IPC 往復・エラーコード)
+/// を対象とする。
+#[tokio::test]
+async fn phase3_session_and_inbox_commands_roundtrip_through_daemon() {
+    let mut env = TestEnv::new();
+    // 起動に失敗するカスタムエージェント (セッション記録経路の検証用)
+    std::fs::write(
+        env.home.join(fxg_protocol::config::CONFIG_FILE_NAME),
+        "[agents.custom.broken]\nname = \"Broken Agent\"\ncommand = \"fxg-definitely-not-installed\"\n",
+    )
+    .expect("write config.toml");
+    env.start_daemon().await;
+    let repo = env.dir.path().join("repo");
+    init_repo(&repo);
+
+    // --- fxg inbox list (承認待ちなし) ---
+    let output = env.run(&["inbox", "list"], Some(&repo));
+    let text = stdout_of(&output);
+    assert!(text.contains("承認待ちリクエストなし"), "got: {text}");
+
+    let output = env.run(&["inbox", "list", "--json"], Some(&repo));
+    let json: serde_json::Value = serde_json::from_str(&stdout_of(&output)).expect("valid json");
+    assert!(json.as_array().expect("array").is_empty());
+
+    // 存在しない request id への応答は拒否される
+    let output = env.run(&["inbox", "approve", "req-unknown"], Some(&repo));
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("承認待ちリクエストが見つかりません"),
+        "got: {stderr}"
+    );
+
+    // --- fxg session show (未知のセッション) ---
+    let unknown = "0195f0ab-0000-7000-8000-000000000000";
+    let output = env.run(&["session", "show", unknown], Some(&repo));
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("NOT_FOUND"), "got: {stderr}");
+
+    // --- 未知セッションへの操作は INVALID_STATE で失敗する ---
+    for args in [
+        vec!["session", "prompt", unknown, "hello"],
+        vec!["session", "stop", unknown],
+        vec!["session", "stop", unknown, "--turn-only"],
+        vec!["session", "kill", unknown],
+        vec!["session", "revert", unknown, "--to-seq", "3"],
+        vec!["session", "fork", unknown],
+    ] {
+        let output = env.run(&args, Some(&repo));
+        assert!(!output.status.success(), "{args:?} must fail");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains("INVALID_STATE"), "{args:?}: {stderr}");
+    }
+
+    // --- fxg attach (対象セッションなし) ---
+    let output = env.run(&["attach"], Some(&repo));
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("直近アクティブセッションが見つかりません"),
+        "got: {stderr}"
+    );
+
+    // --- fxg run --provisioner は Phase 6 まで未実装 ---
+    let output = env.run(
+        &["run", "opencode", "--provisioner", "colab-pro"],
+        Some(&repo),
+    );
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("Phase 6"), "got: {stderr}");
+
+    // --- 起動に失敗するエージェントでもセッションは記録される ---
+    let output = env.run(&["run", "broken", "--detach"], Some(&repo));
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("failed to start agent"),
+        "got: {stderr}\n--- daemon log ---\n{}",
+        env.daemon_log()
+    );
+
+    // `fxg ps -a --json` から記録されたセッションIDを取得する
+    let output = env.run(&["ps", "-a", "--json"], Some(&repo));
+    let sessions: serde_json::Value = serde_json::from_str(&stdout_of(&output)).expect("json");
+    let session_id = sessions
+        .as_array()
+        .expect("array")
+        .iter()
+        .find(|session| session["agent_id"] == "broken")
+        .map(|session| session["session_id"].as_str().expect("id").to_owned())
+        .expect("broken agent session must be recorded");
+
+    // --- fxg session show (詳細 + 直近イベント) ---
+    let output = env.run(&["session", "show", &session_id], Some(&repo));
+    let text = stdout_of(&output);
+    assert!(text.contains(&session_id), "got: {text}");
+    assert!(text.contains("error"), "status must be error: {text}");
+    assert!(text.contains("session_created"), "got: {text}");
+
+    // `--json` でも同じ情報が取れる
+    let output = env.run(&["session", "show", &session_id, "--json"], Some(&repo));
+    let json: serde_json::Value = serde_json::from_str(&stdout_of(&output)).expect("json");
+    assert_eq!(json["session"]["agent_id"], "broken");
+    assert_eq!(json["session"]["status"], "error");
+
+    env.stop_daemon();
 }
 
 #[tokio::test]

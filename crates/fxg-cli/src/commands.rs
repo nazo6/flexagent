@@ -4,7 +4,13 @@
 //! KDL spec・シェル補完・manpage・Markdown リファレンスを生成できる
 //! (設計: `docs/05-cli-and-pwa-ui.md` §1)。
 
+use std::path::{Path, PathBuf};
+
 use anyhow::{Context, Result, bail};
+use fxg_acp::registry::AcpRegistry;
+use fxg_protocol::common::{PermissionOption, SessionControlAction, SessionStatus};
+use fxg_protocol::events::UnifiedEventPayload;
+use fxg_protocol::ipc::{AttachMode, IpcResult, IpcServerMessage};
 use usage::Args;
 
 use crate::client::{DaemonClient, format_unix_ms_utc, print_table, short_id, truncate};
@@ -66,6 +72,152 @@ impl usage::RunAsync for DaemonArgs {
         fxg_node::daemon::NodeDaemon::run(config)
             .await
             .context("fxg daemon failed")
+    }
+}
+
+// ----------------------------------------------------------------------
+// fxg run / fxg attach
+// ----------------------------------------------------------------------
+
+/// `fxg run <agent>` の引数。
+#[derive(Debug, Args)]
+pub struct RunArgs {
+    /// エージェントID (`opencode` / `antigravity` / `claude` 等)
+    agent: String,
+    /// 初期プロンプトを送信してからアタッチする
+    #[usage(short = 'p', long)]
+    prompt: Option<String>,
+    /// TUI をアタッチせずバックグラウンド起動し、セッションIDを出力する
+    #[usage(short = 'd', long)]
+    detach: bool,
+    /// 初期モード (`code` / `plan` 等)
+    #[usage(long)]
+    mode: Option<String>,
+    /// Worktree を作成/再利用して起動する
+    #[usage(short = 'w', long)]
+    worktree: Option<String>,
+    /// Worktree 新規作成時のベースブランチ
+    #[usage(long)]
+    base: Option<String>,
+    /// 一時VMプロビジョナーで起動する (Phase 6 で実装)
+    #[usage(long)]
+    provisioner: Option<String>,
+    /// `opencode2` を標準ACPモード (`opencode2 acp`) で起動する
+    #[usage(long)]
+    acp: bool,
+    /// エージェントプロセスへのパススルー引数
+    #[usage(value_name = "EXTRA_ARGS", double_dash = "required")]
+    extra_args: Vec<String>,
+}
+
+impl usage::RunAsync for RunArgs {
+    type Output = Result<()>;
+
+    async fn run_async(self) -> Self::Output {
+        if let Some(provisioner) = &self.provisioner {
+            bail!("--provisioner {provisioner} (一時VM) は Phase 6 で実装します");
+        }
+
+        let mut client = DaemonClient::connect().await?;
+        let cwd = std::env::current_dir().context("failed to resolve current directory")?;
+        let cwd = match &self.worktree {
+            Some(branch) => create_worktree(&mut client, &cwd, branch, self.base.clone()).await?,
+            None => cwd,
+        };
+
+        let (session_id, _) = client
+            .ensure_session(
+                &cwd,
+                &self.agent,
+                &self.extra_args,
+                self.mode.as_deref(),
+                self.acp,
+            )
+            .await?;
+
+        if let Some(prompt) = &self.prompt {
+            client.send_prompt(&session_id, prompt, "cli").await?;
+        }
+
+        if self.detach {
+            println!("{session_id}");
+            return Ok(());
+        }
+        crate::tui::attach(&mut client, &session_id).await
+    }
+}
+
+/// `fxg attach [session-id]` の引数。
+#[derive(Debug, Args)]
+pub struct AttachArgs {
+    /// セッションID (省略時はカレントディレクトリの直近アクティブセッション)
+    session_id: Option<String>,
+}
+
+impl usage::RunAsync for AttachArgs {
+    type Output = Result<()>;
+
+    async fn run_async(self) -> Self::Output {
+        let mut client = DaemonClient::connect().await?;
+        let session_id = match self.session_id {
+            Some(session_id) => session_id,
+            None => latest_session_for_cwd(&mut client).await?,
+        };
+        crate::tui::attach(&mut client, &session_id).await
+    }
+}
+
+/// Worktree を作成/再利用し、そのパスを返す (`fxg run -w` / `fxg session fork -w`)。
+async fn create_worktree(
+    client: &mut DaemonClient,
+    cwd: &Path,
+    branch: &str,
+    base_branch: Option<String>,
+) -> Result<PathBuf> {
+    let (path, branch, created, hook_logs) = client
+        .add_worktree(cwd, None, branch, base_branch, None)
+        .await?;
+    if created {
+        eprintln!("created worktree {branch} at {path}");
+    } else {
+        eprintln!("reusing existing worktree {branch} at {path}");
+    }
+    for log in hook_logs {
+        let status = if log.success { "ok" } else { "failed" };
+        eprintln!("[{status}] {}", log.command);
+        for line in log.output.lines() {
+            eprintln!("  {line}");
+        }
+    }
+    Ok(PathBuf::from(path))
+}
+
+/// カレントディレクトリの直近アクティブセッションを解決する
+/// (`fxg attach` の ID 省略時)。
+async fn latest_session_for_cwd(client: &mut DaemonClient) -> Result<String> {
+    let cwd = std::env::current_dir().context("failed to resolve current directory")?;
+    let sessions = client.list_sessions(false).await?;
+    sessions
+        .into_iter()
+        .filter(|session| session.status != SessionStatus::Stopped)
+        .find(|session| same_directory(Path::new(&session.local_path), &cwd))
+        .map(|session| session.session_id)
+        .with_context(|| {
+            format!(
+                "{} の直近アクティブセッションが見つかりません (`fxg ps` で確認してください)",
+                cwd.display()
+            )
+        })
+}
+
+/// 2 つのディレクトリが同一かを判定する (表記ゆれは canonicalize で吸収)。
+fn same_directory(a: &Path, b: &Path) -> bool {
+    if a == b {
+        return true;
+    }
+    match (a.canonicalize(), b.canonicalize()) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => false,
     }
 }
 
@@ -159,6 +311,559 @@ pub struct SessionArgs {
 pub enum SessionCommands {
     /// セッション一覧を表示する
     List(SessionListArgs),
+    /// セッション詳細・状態・イベント統計を表示する
+    Show(SessionShowArgs),
+    /// 既存セッションへ非対話 (ヘッドレス) でプロンプトを送信する
+    Prompt(SessionPromptArgs),
+    /// 実行中ターンのキャンセル、またはセッションの正常停止
+    Stop(SessionStopArgs),
+    /// セッションの子プロセスツリーを強制終了する
+    Kill(SessionKillArgs),
+    /// 指定ターン時点へファイルと会話を巻き戻す
+    Revert(SessionRevertArgs),
+    /// 指定時点から会話を分岐して新規セッションを作成する
+    Fork(SessionForkArgs),
+}
+
+/// `fxg session show <id>`
+#[derive(Debug, Args)]
+pub struct SessionShowArgs {
+    /// セッションID
+    session_id: String,
+    /// 表示する直近イベント数
+    #[usage(long, default = "20")]
+    events: u32,
+    /// JSON 形式で出力する
+    #[usage(long)]
+    json: bool,
+}
+
+impl usage::RunAsync for SessionShowArgs {
+    type Output = Result<()>;
+
+    async fn run_async(self) -> Self::Output {
+        let mut client = DaemonClient::connect().await?;
+        let detail = client.session_show(&self.session_id, self.events).await?;
+        if self.json {
+            let value = serde_json::json!({
+                "session": detail.session,
+                "event_count": detail.event_count,
+                "recent_events": detail.recent_events,
+                "pending_permissions": detail.pending_permissions,
+            });
+            println!("{}", serde_json::to_string_pretty(&value)?);
+            return Ok(());
+        }
+
+        let session = &detail.session;
+        let fields = [
+            ("SESSION", session.session_id.clone()),
+            ("TITLE", session.title.clone()),
+            ("PROJECT", session.project_id.clone()),
+            ("NODE", session.node_id.clone()),
+            ("AGENT", session.agent_id.clone()),
+            ("STATUS", session.status.to_string()),
+            (
+                "MODE",
+                session
+                    .current_mode
+                    .clone()
+                    .unwrap_or_else(|| "-".to_owned()),
+            ),
+            ("PATH", session.local_path.clone()),
+            (
+                "BRANCH",
+                session.git_branch.clone().unwrap_or_else(|| "-".to_owned()),
+            ),
+            (
+                "WORKTREE",
+                if session.is_worktree { "yes" } else { "no" }.to_owned(),
+            ),
+            ("EVENTS", detail.event_count.to_string()),
+            ("CREATED", format_unix_ms_utc(session.created_at)),
+            ("UPDATED", format_unix_ms_utc(session.updated_at)),
+        ];
+        for (label, value) in fields {
+            println!("{label:<9}{value}");
+        }
+
+        if !detail.pending_permissions.is_empty() {
+            println!("\n承認待ち:");
+            let rows: Vec<Vec<String>> = detail
+                .pending_permissions
+                .iter()
+                .map(|entry| {
+                    vec![
+                        truncate(&entry.request_id, 24),
+                        truncate(&entry.tool_name, 20),
+                        truncate(&entry.summary, 48),
+                    ]
+                })
+                .collect();
+            print_table(&["REQUEST", "TOOL", "SUMMARY"], &rows);
+        }
+
+        if !detail.recent_events.is_empty() {
+            println!("\n直近イベント:");
+            for event in &detail.recent_events {
+                println!(
+                    "  {:>5}  {}  {}",
+                    event.node_seq,
+                    format_unix_ms_utc(event.created_at),
+                    describe_event(&event.payload)
+                );
+            }
+        }
+        Ok(())
+    }
+}
+
+/// イベントを CLI 表示用の 1 行へ要約する。
+fn describe_event(payload: &UnifiedEventPayload) -> String {
+    match payload {
+        UnifiedEventPayload::SessionCreated {
+            title, agent_id, ..
+        } => format!("session_created agent={agent_id} title={title}"),
+        UnifiedEventPayload::SessionTitleChanged { title } => {
+            format!("title_changed {}", truncate(title, 40))
+        }
+        UnifiedEventPayload::SessionAgentBound { agent_session_id } => {
+            format!("agent_bound {agent_session_id}")
+        }
+        UnifiedEventPayload::UserMessage {
+            text,
+            client_source,
+            ..
+        } => format!("user_message ({client_source}) {}", truncate(text, 60)),
+        UnifiedEventPayload::AgentMessage { text, .. } => {
+            format!("agent_message {}", truncate(text, 60))
+        }
+        UnifiedEventPayload::AgentThought { text, .. } => {
+            format!("agent_thought {}", truncate(text, 60))
+        }
+        UnifiedEventPayload::ToolCall { title, status, .. } => {
+            format!("tool_call [{status}] {}", truncate(title, 60))
+        }
+        UnifiedEventPayload::PlanUpdate { entries } => {
+            format!("plan_update entries={}", entries.len())
+        }
+        UnifiedEventPayload::PermissionRequest {
+            tool_name, summary, ..
+        } => format!("permission_request [{tool_name}] {}", truncate(summary, 60)),
+        UnifiedEventPayload::PermissionResolved {
+            request_id,
+            selected_option_id,
+            ..
+        } => format!("permission_resolved {request_id} → {selected_option_id}"),
+        UnifiedEventPayload::SessionReverted {
+            target_node_seq,
+            restored_files,
+            removed_files,
+            ..
+        } => format!(
+            "session_reverted seq={target_node_seq} restored={restored_files} removed={removed_files}"
+        ),
+        UnifiedEventPayload::TerminalOutput {
+            terminal_id,
+            command,
+            ..
+        } => format!("terminal_output {terminal_id} {}", truncate(command, 40)),
+        UnifiedEventPayload::TerminalInput { terminal_id, .. } => {
+            format!("terminal_input {terminal_id}")
+        }
+        UnifiedEventPayload::CapabilitiesUpdated { .. } => "capabilities_updated".to_owned(),
+        UnifiedEventPayload::StatusChanged {
+            status,
+            error_message,
+        } => match error_message {
+            Some(message) => format!("status_changed {status} ({message})"),
+            None => format!("status_changed {status}"),
+        },
+        UnifiedEventPayload::BootstrapLog { line } => {
+            format!("bootstrap {}", truncate(line, 60))
+        }
+    }
+}
+
+/// `fxg session prompt <id> <text>`
+#[derive(Debug, Args)]
+pub struct SessionPromptArgs {
+    /// セッションID
+    session_id: String,
+    /// 送信するプロンプト本文
+    text: String,
+    /// ターン完了まで待機し、エージェントの出力を表示する
+    #[usage(long)]
+    wait: bool,
+}
+
+impl usage::RunAsync for SessionPromptArgs {
+    type Output = Result<()>;
+
+    async fn run_async(self) -> Self::Output {
+        let mut client = DaemonClient::connect().await?;
+        client
+            .send_prompt(&self.session_id, &self.text, "cli")
+            .await?;
+        if !self.wait {
+            println!("accepted ({})", short_id(&self.session_id));
+            return Ok(());
+        }
+        wait_for_turn(&mut client, &self.session_id, &self.text).await
+    }
+}
+
+/// ターン完了 (`idle`) までイベントを購読して出力する
+/// (`fxg session prompt --wait`)。
+async fn wait_for_turn(client: &mut DaemonClient, session_id: &str, prompt: &str) -> Result<()> {
+    let attach_mode = client.attach_session(session_id, None).await?;
+    if !matches!(attach_mode, AttachMode::AcpTui) {
+        bail!("--wait は内蔵TUI (AcpTui) モードのセッションのみ対応しています");
+    }
+
+    let mut seen_prompt = false;
+    loop {
+        let Some(message) = client.next_message().await? else {
+            break;
+        };
+        match message {
+            IpcServerMessage::EventBatch { events, .. } => {
+                for event in events {
+                    if print_and_check_done(&event.payload, prompt, &mut seen_prompt) {
+                        return Ok(());
+                    }
+                }
+            }
+            IpcServerMessage::LiveStreamDelta { .. } => {}
+            IpcServerMessage::Result { result, .. } => match result {
+                IpcResult::Ack { .. } | IpcResult::CommandAccepted { .. } => {}
+                other => tracing::debug!("ignoring result while waiting: {other:?}"),
+            },
+            IpcServerMessage::Error { code, message, .. } => {
+                bail!("{code}: {message}");
+            }
+        }
+    }
+    Ok(())
+}
+
+/// イベントを出力し、ターン完了なら `true` を返す。
+fn print_and_check_done(
+    payload: &UnifiedEventPayload,
+    prompt: &str,
+    seen_prompt: &mut bool,
+) -> bool {
+    match payload {
+        UnifiedEventPayload::UserMessage { text, .. } if text == prompt => {
+            *seen_prompt = true;
+        }
+        UnifiedEventPayload::AgentMessage { text, .. } if !text.is_empty() => {
+            println!("{text}");
+        }
+        UnifiedEventPayload::AgentThought { text, .. } if !text.is_empty() => {
+            println!("Think ▸ {text}");
+        }
+        UnifiedEventPayload::ToolCall { title, status, .. } => {
+            println!("· tool [{status}] {title}");
+        }
+        UnifiedEventPayload::PermissionRequest {
+            tool_name, summary, ..
+        } => {
+            println!("! 承認待ち [{tool_name}] {summary} (`fxg inbox list` で確認) ");
+        }
+        UnifiedEventPayload::StatusChanged {
+            status,
+            error_message,
+        } => {
+            if let Some(message) = error_message {
+                println!("! error: {message}");
+            }
+            if *seen_prompt {
+                return matches!(
+                    status,
+                    SessionStatus::Idle | SessionStatus::Error | SessionStatus::Stopped
+                );
+            }
+        }
+        _ => {}
+    }
+    false
+}
+
+/// `fxg session stop <id>`
+#[derive(Debug, Args)]
+pub struct SessionStopArgs {
+    /// セッションID
+    session_id: String,
+    /// セッションは維持し、実行中のターンのみ中断する
+    #[usage(long)]
+    turn_only: bool,
+}
+
+impl usage::RunAsync for SessionStopArgs {
+    type Output = Result<()>;
+
+    async fn run_async(self) -> Self::Output {
+        let mut client = DaemonClient::connect().await?;
+        if self.turn_only {
+            client
+                .control_session(&self.session_id, SessionControlAction::Cancel)
+                .await?;
+            println!("cancelled current turn ({})", short_id(&self.session_id));
+        } else {
+            client
+                .control_session(&self.session_id, SessionControlAction::Kill)
+                .await?;
+            println!("stopped session ({})", short_id(&self.session_id));
+        }
+        Ok(())
+    }
+}
+
+/// `fxg session kill <id>`
+#[derive(Debug, Args)]
+pub struct SessionKillArgs {
+    /// セッションID
+    session_id: String,
+}
+
+impl usage::RunAsync for SessionKillArgs {
+    type Output = Result<()>;
+
+    async fn run_async(self) -> Self::Output {
+        let mut client = DaemonClient::connect().await?;
+        client
+            .control_session(&self.session_id, SessionControlAction::Kill)
+            .await?;
+        println!(
+            "killed session process tree ({})",
+            short_id(&self.session_id)
+        );
+        Ok(())
+    }
+}
+
+/// `fxg session revert <id> --to-seq <NODE_SEQ>`
+#[derive(Debug, Args)]
+pub struct SessionRevertArgs {
+    /// セッションID
+    session_id: String,
+    /// 巻き戻し先のイベント連番 (対象ターンの `UserMessage.node_seq`)
+    #[usage(long)]
+    to_seq: u64,
+}
+
+impl usage::RunAsync for SessionRevertArgs {
+    type Output = Result<()>;
+
+    async fn run_async(self) -> Self::Output {
+        let mut client = DaemonClient::connect().await?;
+        let outcome = client
+            .revert_session(&self.session_id, Some(self.to_seq))
+            .await?;
+        println!(
+            "reverted to node_seq={} (restored={}, removed={})",
+            outcome.target_node_seq, outcome.restored_files, outcome.removed_files
+        );
+        println!("  tree:   {}", outcome.restored_tree_hash);
+        if let Some(backup) = &outcome.backup_tree_hash {
+            println!("  backup: {backup}");
+        }
+        Ok(())
+    }
+}
+
+/// `fxg session fork <id>`
+#[derive(Debug, Args)]
+pub struct SessionForkArgs {
+    /// 分岐元のセッションID
+    session_id: String,
+    /// 分岐元の連番 (省略時は最新)
+    #[usage(long)]
+    from_seq: Option<u64>,
+    /// 分岐後のエージェントID (省略時は同一エージェント)
+    #[usage(long)]
+    agent: Option<String>,
+    /// 新規 Worktree へ分岐する
+    #[usage(short = 'w', long)]
+    worktree: Option<String>,
+    /// Worktree 新規作成時のベースブランチ
+    #[usage(long)]
+    base: Option<String>,
+    /// 一時VMプロビジョナーで分岐する (Phase 6 で実装)
+    #[usage(long)]
+    provisioner: Option<String>,
+}
+
+impl usage::RunAsync for SessionForkArgs {
+    type Output = Result<()>;
+
+    async fn run_async(self) -> Self::Output {
+        if let Some(provisioner) = &self.provisioner {
+            bail!("--provisioner {provisioner} (一時VM) は Phase 6 で実装します");
+        }
+
+        let mut client = DaemonClient::connect().await?;
+        let cwd = match &self.worktree {
+            Some(branch) => {
+                let dir = std::env::current_dir().context("failed to resolve current directory")?;
+                Some(create_worktree(&mut client, &dir, branch, self.base.clone()).await?)
+            }
+            None => None,
+        };
+
+        let (session_id, _) = client
+            .fork_session(&self.session_id, self.from_seq, self.agent, cwd.as_deref())
+            .await?;
+        println!("forked: {session_id}");
+        crate::tui::attach(&mut client, &session_id).await
+    }
+}
+
+// ----------------------------------------------------------------------
+// fxg inbox <command>
+// ----------------------------------------------------------------------
+
+/// `fxg inbox <command>`
+#[derive(Debug, Args)]
+#[usage(run_async, arg_required_else_help)]
+pub struct InboxArgs {
+    #[usage(subcommand)]
+    command: InboxCommands,
+}
+
+/// 承認待ちリクエスト (グローバル Inbox) の操作。
+#[derive(Debug, usage::Subcommands)]
+#[usage(run_async)]
+pub enum InboxCommands {
+    /// 現在承認待ちのリクエスト一覧を表示する
+    List(InboxListArgs),
+    /// 承認リクエストを許可する
+    Approve(InboxApproveArgs),
+    /// 承認リクエストを却下する
+    Reject(InboxRejectArgs),
+}
+
+/// `fxg inbox list`
+#[derive(Debug, Args)]
+pub struct InboxListArgs {
+    /// JSON 形式で出力する
+    #[usage(long)]
+    json: bool,
+}
+
+impl usage::RunAsync for InboxListArgs {
+    type Output = Result<()>;
+
+    async fn run_async(self) -> Self::Output {
+        let mut client = DaemonClient::connect().await?;
+        let requests = client.inbox_list().await?;
+        if self.json {
+            println!("{}", serde_json::to_string_pretty(&requests)?);
+            return Ok(());
+        }
+        if requests.is_empty() {
+            println!("(承認待ちリクエストなし)");
+            return Ok(());
+        }
+        let rows: Vec<Vec<String>> = requests
+            .iter()
+            .map(|entry| {
+                vec![
+                    truncate(&entry.request_id, 24),
+                    short_id(&entry.session_id),
+                    truncate(&entry.tool_name, 20),
+                    truncate(&entry.summary, 40),
+                    format_unix_ms_utc(entry.created_at),
+                ]
+            })
+            .collect();
+        print_table(&["REQUEST", "SESSION", "TOOL", "SUMMARY", "CREATED"], &rows);
+        Ok(())
+    }
+}
+
+/// `fxg inbox approve <req-id>`
+#[derive(Debug, Args)]
+pub struct InboxApproveArgs {
+    /// 承認リクエストID
+    request_id: String,
+    /// 同一ツール操作をセッション中常時許可する (`allow_always`)
+    #[usage(long)]
+    always: bool,
+}
+
+impl usage::RunAsync for InboxApproveArgs {
+    type Output = Result<()>;
+
+    async fn run_async(self) -> Self::Output {
+        let mut client = DaemonClient::connect().await?;
+        let entry = find_permission(&mut client, &self.request_id).await?;
+        let preferred = if self.always {
+            "allow_always"
+        } else {
+            "allow_once"
+        };
+        let option_id = option_by_kind(&entry.options, preferred)
+            // 該当種別が無いドライバ向けフォールバック (却下系以外の先頭)
+            .or_else(|| {
+                entry
+                    .options
+                    .iter()
+                    .find(|option| !PermissionOption::is_reject_kind(&option.kind))
+                    .map(|option| option.option_id.clone())
+            })
+            .with_context(|| format!("許可オプションがありません: {}", self.request_id))?;
+        client
+            .respond_permission(&entry.session_id, &entry.request_id, &option_id)
+            .await?;
+        println!("approved {} ({option_id})", short_id(&entry.session_id));
+        Ok(())
+    }
+}
+
+/// `fxg inbox reject <req-id>`
+#[derive(Debug, Args)]
+pub struct InboxRejectArgs {
+    /// 承認リクエストID
+    request_id: String,
+}
+
+impl usage::RunAsync for InboxRejectArgs {
+    type Output = Result<()>;
+
+    async fn run_async(self) -> Self::Output {
+        let mut client = DaemonClient::connect().await?;
+        let entry = find_permission(&mut client, &self.request_id).await?;
+        let option_id = option_by_kind(&entry.options, "reject")
+            .with_context(|| format!("却下オプションがありません: {}", self.request_id))?;
+        client
+            .respond_permission(&entry.session_id, &entry.request_id, &option_id)
+            .await?;
+        println!("rejected {} ({option_id})", short_id(&entry.session_id));
+        Ok(())
+    }
+}
+
+/// 承認待ちリクエストを `request_id` で引く。
+async fn find_permission(
+    client: &mut DaemonClient,
+    request_id: &str,
+) -> Result<fxg_protocol::common::PermissionRequestEntry> {
+    client
+        .inbox_list()
+        .await?
+        .into_iter()
+        .find(|entry| entry.request_id == request_id)
+        .with_context(|| format!("承認待ちリクエストが見つかりません: {request_id}"))
+}
+
+/// 種別の先頭一致で `option_id` を選ぶ。
+fn option_by_kind(options: &[PermissionOption], kind: &str) -> Option<String> {
+    options
+        .iter()
+        .find(|option| option.kind.starts_with(kind))
+        .map(|option| option.option_id.clone())
 }
 
 // ----------------------------------------------------------------------
@@ -496,6 +1201,233 @@ impl usage::RunAsync for WorktreePruneArgs {
         let mut client = DaemonClient::connect().await?;
         let message = client.prune_worktrees(&cwd).await?;
         println!("{}", message.unwrap_or_else(|| "pruned".to_owned()));
+        Ok(())
+    }
+}
+
+// ----------------------------------------------------------------------
+// fxg agents <command>
+// ----------------------------------------------------------------------
+
+/// `fxg agents <command>`
+#[derive(Debug, Args)]
+#[usage(run_async, arg_required_else_help)]
+pub struct AgentsArgs {
+    #[usage(subcommand)]
+    command: AgentsCommands,
+}
+
+/// ACP Registry エージェントの管理。
+#[derive(Debug, usage::Subcommands)]
+#[usage(run_async)]
+pub enum AgentsCommands {
+    /// 利用可能なエージェント一覧とインストール状態を表示する
+    List(AgentsListArgs),
+    /// ACP Registry から指定エージェントを事前ダウンロード・展開する
+    Install(AgentsInstallArgs),
+    /// レジストリインデックスおよび導入済みエージェントを更新する
+    Update(AgentsUpdateArgs),
+    /// キャッシュ済みのエージェントバイナリを削除する
+    Remove(AgentsRemoveArgs),
+}
+
+/// `~/.flexagent/config.toml` から ACP Registry を構成する。
+fn acp_registry() -> Result<AcpRegistry> {
+    let env = fxg_protocol::config::process_env;
+    let global = fxg_protocol::config::GlobalConfig::load(&env)
+        .context("failed to load ~/.flexagent/config.toml")?;
+    let paths = fxg_node::NodePaths::from_env(&env);
+    Ok(AcpRegistry::new(
+        paths.fxg_home().to_path_buf(),
+        &global.agents,
+    ))
+}
+
+/// `fxg agents list`
+#[derive(Debug, Args)]
+pub struct AgentsListArgs {
+    /// ACP Registry 上の未導入エージェントも表示する
+    #[usage(long)]
+    all: bool,
+    /// JSON 形式で出力する
+    #[usage(long)]
+    json: bool,
+}
+
+impl usage::RunAsync for AgentsListArgs {
+    type Output = Result<()>;
+
+    async fn run_async(self) -> Self::Output {
+        let registry = acp_registry()?;
+        let index = registry
+            .index(false)
+            .await
+            .context("failed to load ACP registry")?;
+        let entries = registry.list(&index, self.all);
+        if self.json {
+            let value: Vec<serde_json::Value> = entries
+                .iter()
+                .map(|entry| {
+                    serde_json::json!({
+                        "id": entry.id,
+                        "name": entry.name,
+                        "version": entry.version,
+                        "description": entry.description,
+                        "installed": entry.installed,
+                        "distributions": entry.distributions,
+                        "custom": entry.custom,
+                        "builtin": entry.builtin,
+                    })
+                })
+                .collect();
+            println!("{}", serde_json::to_string_pretty(&value)?);
+            return Ok(());
+        }
+        if entries.is_empty() {
+            println!("(導入済みエージェントなし。`fxg agents list --all` でレジストリ全体を表示)");
+            return Ok(());
+        }
+        let rows: Vec<Vec<String>> = entries
+            .iter()
+            .map(|entry| {
+                vec![
+                    entry.id.clone(),
+                    truncate(&entry.name, 24),
+                    entry.version.clone(),
+                    if entry.installed { "yes" } else { "-" }.to_owned(),
+                    entry.distributions.join(","),
+                ]
+            })
+            .collect();
+        print_table(&["ID", "NAME", "VERSION", "INSTALLED", "DIST"], &rows);
+        Ok(())
+    }
+}
+
+/// `fxg agents install <id>`
+#[derive(Debug, Args)]
+pub struct AgentsInstallArgs {
+    /// エージェントID (エイリアス可)
+    id: String,
+    /// 導入するバージョン (レジストリ提供バージョンのみ)
+    #[usage(long)]
+    version: Option<String>,
+}
+
+impl usage::RunAsync for AgentsInstallArgs {
+    type Output = Result<()>;
+
+    async fn run_async(self) -> Self::Output {
+        let registry = acp_registry()?;
+        let id = registry.resolve_alias(&self.id);
+        let index = registry
+            .index(false)
+            .await
+            .context("failed to load ACP registry")?;
+        let agent = index.find(&id).with_context(|| {
+            format!("エージェントがレジストリにありません: {id} (`fxg agents list --all`)")
+        })?;
+        if let Some(version) = &self.version
+            && version != &agent.version
+        {
+            bail!(
+                "レジストリが提供するのは {} のみです (指定: {version})",
+                agent.version
+            );
+        }
+        if agent.distribution.binary.is_empty() {
+            println!("{id} は npx/uvx 配布のため個別インストールは不要です (実行時に自動取得)");
+            return Ok(());
+        }
+        let path = registry
+            .install(&id, &index)
+            .await
+            .context("failed to install agent")?;
+        println!("installed {id} {} → {}", agent.version, path.display());
+        Ok(())
+    }
+}
+
+/// `fxg agents update [id]`
+#[derive(Debug, Args)]
+pub struct AgentsUpdateArgs {
+    /// 更新対象のエージェントID (省略時は導入済み全エージェント)
+    id: Option<String>,
+}
+
+impl usage::RunAsync for AgentsUpdateArgs {
+    type Output = Result<()>;
+
+    async fn run_async(self) -> Self::Output {
+        let registry = acp_registry()?;
+        // インデックスを強制再取得する
+        let index = registry
+            .index(true)
+            .await
+            .context("failed to fetch ACP registry")?;
+
+        let ids: Vec<String> = match &self.id {
+            Some(id) => vec![registry.resolve_alias(id)],
+            None => index
+                .agents
+                .iter()
+                .filter(|agent| registry.is_installed(agent))
+                .map(|agent| agent.id.clone())
+                .collect(),
+        };
+        if ids.is_empty() {
+            println!("(導入済みエージェントなし)");
+            return Ok(());
+        }
+
+        for id in ids {
+            let Some(agent) = index.find(&id) else {
+                eprintln!("{id}: レジストリから削除されています (スキップ)");
+                continue;
+            };
+            if agent.distribution.binary.is_empty() {
+                println!("{id}: npx/uvx 配布のため更新不要");
+                continue;
+            }
+            if registry
+                .installed_versions(&id)
+                .iter()
+                .any(|version| version == &agent.version)
+            {
+                println!("{id}: 最新 ({})", agent.version);
+                continue;
+            }
+            let path = registry
+                .install(&id, &index)
+                .await
+                .with_context(|| format!("failed to update agent: {id}"))?;
+            println!("updated {id} → {} ({})", agent.version, path.display());
+        }
+        Ok(())
+    }
+}
+
+/// `fxg agents remove <id>`
+#[derive(Debug, Args)]
+pub struct AgentsRemoveArgs {
+    /// エージェントID (エイリアス可)
+    id: String,
+}
+
+impl usage::RunAsync for AgentsRemoveArgs {
+    type Output = Result<()>;
+
+    async fn run_async(self) -> Self::Output {
+        let registry = acp_registry()?;
+        let id = registry.resolve_alias(&self.id);
+        let removed = registry
+            .remove(&id)
+            .with_context(|| format!("failed to remove agent: {id}"))?;
+        if removed {
+            println!("removed {id}");
+        } else {
+            println!("{id} は導入されていません");
+        }
         Ok(())
     }
 }

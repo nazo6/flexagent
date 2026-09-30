@@ -18,7 +18,10 @@ use std::path::{Path, PathBuf};
 use fxg_db::SessionFilter;
 use fxg_protocol::common::ErrorCode;
 use fxg_protocol::config::{GlobalConfig, ProjectConfig};
-use fxg_protocol::ipc::{IpcClientMessage, IpcResult, IpcServerMessage, ProjectInfo};
+use fxg_protocol::events::SessionEventEnvelope;
+use fxg_protocol::ipc::{
+    IpcClientMessage, IpcResult, IpcServerMessage, ProjectInfo, SessionDetail,
+};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::{broadcast, watch};
 
@@ -850,10 +853,19 @@ async fn handle(
             cwd,
             agent_id,
             extra_args,
+            initial_mode,
+            acp,
         } => {
             let outcome = state
                 .session_manager()
-                .ensure_session(&command_id, Path::new(&cwd), &agent_id, &extra_args)
+                .ensure_session(
+                    &command_id,
+                    Path::new(&cwd),
+                    &agent_id,
+                    &extra_args,
+                    initial_mode.as_deref(),
+                    acp,
+                )
                 .await
                 .map_err(|err| DispatchError::from_node_error(&command_id, err))?;
             Ok((
@@ -941,8 +953,11 @@ async fn handle(
             Ok((
                 command_id,
                 IpcResult::SessionReverted {
+                    target_node_seq: outcome.target_node_seq,
                     restored_tree_hash: outcome.restored_tree_hash,
                     backup_tree_hash: outcome.backup_tree_hash,
+                    restored_files: outcome.restored_files as u64,
+                    removed_files: outcome.removed_files as u64,
                 },
             ))
         }
@@ -952,10 +967,17 @@ async fn handle(
             session_id,
             from_node_seq,
             agent_id,
+            cwd,
         } => {
             let outcome = state
                 .session_manager()
-                .fork(&command_id, &session_id, from_node_seq, agent_id.as_deref())
+                .fork(
+                    &command_id,
+                    &session_id,
+                    from_node_seq,
+                    agent_id.as_deref(),
+                    cwd.as_deref().map(Path::new),
+                )
                 .await
                 .map_err(|err| DispatchError::from_node_error(&command_id, err))?;
             Ok((
@@ -967,6 +989,55 @@ async fn handle(
             ))
         }
 
+        IpcClientMessage::SessionShow {
+            command_id,
+            session_id,
+            recent_events,
+        } => {
+            let session = state
+                .db()
+                .get_session(&session_id)
+                .await
+                .map_err(|err| DispatchError::from_node_error(&command_id, err.into()))?
+                .ok_or_else(|| {
+                    DispatchError::new(
+                        &command_id,
+                        ErrorCode::NotFound,
+                        format!("session not found: {session_id}"),
+                    )
+                })?;
+            let (event_count, recent_events) =
+                session_event_tail(state.db(), &session_id, recent_events)
+                    .await
+                    .map_err(|err| DispatchError::from_node_error(&command_id, err))?;
+            let pending_permissions = state
+                .db()
+                .pending_permissions()
+                .await
+                .map_err(|err| DispatchError::from_node_error(&command_id, err.into()))?
+                .into_iter()
+                .filter(|entry| entry.session_id == session_id)
+                .collect();
+            Ok((
+                command_id,
+                IpcResult::SessionDetail(Box::new(SessionDetail {
+                    session,
+                    event_count,
+                    recent_events,
+                    pending_permissions,
+                })),
+            ))
+        }
+
+        IpcClientMessage::InboxList { command_id } => {
+            let requests = state
+                .db()
+                .pending_permissions()
+                .await
+                .map_err(|err| DispatchError::from_node_error(&command_id, err.into()))?;
+            Ok((command_id, IpcResult::Inbox { requests }))
+        }
+
         // `AttachSession` は接続ループ ([`handle_connection`]) が
         // ストリーミングモードへ切り替えて処理するため、ここには到達しない。
         IpcClientMessage::AttachSession { command_id, .. } => Err(DispatchError::new(
@@ -975,6 +1046,38 @@ async fn handle(
             "AttachSession must be handled by the connection loop",
         )),
     }
+}
+
+/// セッションのイベント総数と、末尾 `recent` 件 (古い順) を取得する。
+///
+/// バッチ読み込みで末尾まで進めながらリングバッファに直近分のみを保持する。
+async fn session_event_tail(
+    db: &fxg_db::Db,
+    session_id: &str,
+    recent: u32,
+) -> Result<(u64, Vec<SessionEventEnvelope>), NodeError> {
+    const BATCH: u32 = 200;
+    let mut cursor = 0u64;
+    let mut tail: std::collections::VecDeque<SessionEventEnvelope> =
+        std::collections::VecDeque::new();
+    loop {
+        let batch = db.session_events_after(session_id, cursor, BATCH).await?;
+        let fetched = batch.events.len() as u32;
+        if fetched == 0 {
+            break;
+        }
+        cursor = batch.cursor;
+        for event in batch.events {
+            tail.push_back(event);
+            if tail.len() > recent as usize {
+                tail.pop_front();
+            }
+        }
+        if fetched < BATCH {
+            break;
+        }
+    }
+    Ok((cursor, tail.into_iter().collect()))
 }
 
 /// プロジェクトを解決し、`projects` / `project_node_bindings` を更新する。
@@ -1500,6 +1603,8 @@ mod tests {
                 cwd: workdir.to_string_lossy().into_owned(),
                 agent_id: "mock".to_owned(),
                 extra_args: Vec::new(),
+                initial_mode: None,
+                acp: false,
             },
         )
         .await;
@@ -1526,6 +1631,8 @@ mod tests {
                 cwd: workdir.to_string_lossy().into_owned(),
                 agent_id: "mock".to_owned(),
                 extra_args: Vec::new(),
+                initial_mode: None,
+                acp: false,
             },
         )
         .await;

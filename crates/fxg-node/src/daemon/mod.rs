@@ -651,7 +651,7 @@ mod tests {
         let outcome = daemon
             .state()
             .session_manager()
-            .ensure_session("c1", &workdir, "mock", &[])
+            .ensure_session("c1", &workdir, "mock", &[], None, false)
             .await
             .expect("ensure session");
         assert_eq!(daemon.state().session_manager().list_active().len(), 1);

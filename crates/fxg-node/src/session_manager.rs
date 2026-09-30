@@ -19,7 +19,7 @@ use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use fxg_acp::registry::{AcpRegistry, RegistryIndex};
+use fxg_acp::registry::{AcpRegistry, OPENCODE2_ID, RegistryIndex};
 use fxg_acp::{
     AcpDriver, ActiveSessionHandle, AgentDriver, AgentLaunchSpec, DriverEvent, OpenCode2Driver,
 };
@@ -242,6 +242,8 @@ impl SessionManager {
         cwd: &Path,
         agent_id: &str,
         extra_args: &[String],
+        initial_mode: Option<&str>,
+        acp: bool,
     ) -> Result<EnsureSessionOutcome, NodeError> {
         if !self.begin_command(command_id) {
             return Err(NodeError::CommandDuplicate(command_id.to_owned()));
@@ -250,7 +252,12 @@ impl SessionManager {
         let resolved = project::resolve_project(cwd, &self.inner.node_id).await?;
         let session_id = uuid_v7();
 
-        let spec = self.resolve_launch_spec(agent_id, extra_args).await?;
+        let mut spec = self.resolve_launch_spec(agent_id, extra_args).await?;
+        // `--acp`: `opencode2` を標準ACPモード (`opencode2 acp`) で起動する
+        if acp && spec.agent_id == OPENCODE2_ID {
+            spec.args = vec!["acp".to_owned()];
+            spec.driver_kind = "acp".to_owned();
+        }
 
         // SessionCreated (node_seq = 1)
         let (git_branch, is_worktree) = branch_and_worktree(&resolved.local_path).await;
@@ -281,6 +288,7 @@ impl SessionManager {
                 &resolved.local_path,
                 &spec,
                 extra_args.to_vec(),
+                initial_mode.map(str::to_owned),
             )
             .await?;
 
@@ -330,6 +338,7 @@ impl SessionManager {
         cwd: &Path,
         spec: &AgentLaunchSpec,
         extra_args: Vec<String>,
+        initial_mode: Option<String>,
     ) -> Result<Arc<dyn ActiveSessionHandle>, NodeError> {
         let driver = (self.inner.factory)(spec).map_err(|err| NodeError::Agent(err.to_string()))?;
         let (event_tx, event_rx) = mpsc::unbounded_channel();
@@ -341,7 +350,7 @@ impl SessionManager {
                     cwd: cwd.to_path_buf(),
                     launch: spec.clone(),
                     extra_args,
-                    initial_mode: None,
+                    initial_mode,
                 },
                 event_tx,
             )
@@ -519,6 +528,7 @@ impl SessionManager {
         session_id: &str,
         from_node_seq: Option<u64>,
         agent_id: Option<&str>,
+        new_cwd: Option<&Path>,
     ) -> Result<EnsureSessionOutcome, NodeError> {
         if !self.begin_command(command_id) {
             return Err(NodeError::CommandDuplicate(command_id.to_owned()));
@@ -545,7 +555,9 @@ impl SessionManager {
         let project_name = self.project_name(&source.project_id).await;
 
         let new_session_id = uuid_v7();
-        let cwd = PathBuf::from(&source.local_path);
+        let cwd = new_cwd
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| PathBuf::from(&source.local_path));
         let (git_branch, is_worktree) = branch_and_worktree(&cwd).await;
         let title = format!("Fork of {}", source.title);
         self.inner
@@ -556,7 +568,7 @@ impl SessionManager {
                     node_id: self.inner.node_id.clone(),
                     project_id: source.project_id.clone(),
                     project_name,
-                    local_path: source.local_path.clone(),
+                    local_path: cwd.to_string_lossy().into_owned(),
                     git_branch,
                     is_worktree,
                     agent_id: spec.agent_id.clone(),
@@ -568,7 +580,7 @@ impl SessionManager {
             .await?;
 
         let handle = self
-            .start_driver_session(&new_session_id, &title, &cwd, &spec, Vec::new())
+            .start_driver_session(&new_session_id, &title, &cwd, &spec, Vec::new(), None)
             .await?;
 
         // 履歴 Replay 注入 (新エージェントセッションの初期コンテキスト)
@@ -1250,7 +1262,7 @@ mod tests {
         std::fs::create_dir_all(&repo).expect("mkdir");
         crate::testutil::init_test_repo(&repo).await;
         let outcome = manager
-            .ensure_session("c1", &repo, "mock", &[])
+            .ensure_session("c1", &repo, "mock", &[], None, false)
             .await
             .expect("ensure");
         wait_idle(manager, &outcome.session_id).await;
@@ -1261,7 +1273,7 @@ mod tests {
     async fn ensure_session_records_created_event_and_start() {
         let (manager, _mock, dir) = setup().await;
         let outcome = manager
-            .ensure_session("c1", dir.path(), "mock", &[])
+            .ensure_session("c1", dir.path(), "mock", &[], None, false)
             .await
             .expect("ensure");
         assert!(!outcome.session_id.is_empty());
@@ -1282,7 +1294,7 @@ mod tests {
     async fn send_prompt_records_user_message_and_dispatches() {
         let (manager, mock, dir) = setup().await;
         let outcome = manager
-            .ensure_session("c1", dir.path(), "mock", &[])
+            .ensure_session("c1", dir.path(), "mock", &[], None, false)
             .await
             .expect("ensure");
         wait_idle(&manager, &outcome.session_id).await;
@@ -1312,7 +1324,7 @@ mod tests {
     async fn busy_prompt_is_queued_and_drained_on_idle() {
         let (manager, mock, dir) = setup().await;
         let outcome = manager
-            .ensure_session("c1", dir.path(), "mock", &[])
+            .ensure_session("c1", dir.path(), "mock", &[], None, false)
             .await
             .expect("ensure");
         wait_idle(&manager, &outcome.session_id).await;
@@ -1352,11 +1364,11 @@ mod tests {
     async fn duplicate_command_id_is_rejected() {
         let (manager, _mock, dir) = setup().await;
         manager
-            .ensure_session("c1", dir.path(), "mock", &[])
+            .ensure_session("c1", dir.path(), "mock", &[], None, false)
             .await
             .expect("ensure");
         let err = manager
-            .ensure_session("c1", dir.path(), "mock", &[])
+            .ensure_session("c1", dir.path(), "mock", &[], None, false)
             .await
             .expect_err("duplicate");
         assert!(matches!(err, NodeError::CommandDuplicate(_)));
@@ -1366,7 +1378,7 @@ mod tests {
     async fn permission_resolution_is_idempotent() {
         let (manager, mock, dir) = setup().await;
         let outcome = manager
-            .ensure_session("c1", dir.path(), "mock", &[])
+            .ensure_session("c1", dir.path(), "mock", &[], None, false)
             .await
             .expect("ensure");
         wait_idle(&manager, &outcome.session_id).await;
@@ -1509,7 +1521,7 @@ mod tests {
 
         // `user_seq` 時点から分岐する
         let fork = manager
-            .fork("c3", &source_id, Some(user_seq), None)
+            .fork("c3", &source_id, Some(user_seq), None, None)
             .await
             .expect("fork");
         assert_ne!(fork.session_id, source_id);
@@ -1573,7 +1585,7 @@ mod tests {
     async fn session_status_transitions_on_driver_events() {
         let (manager, mock, dir) = setup().await;
         manager
-            .ensure_session("c1", dir.path(), "mock", &[])
+            .ensure_session("c1", dir.path(), "mock", &[], None, false)
             .await
             .expect("ensure");
         assert_eq!(manager.list_active().len(), 1);

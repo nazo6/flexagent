@@ -13,8 +13,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::client_api::WorktreeInfo;
 use crate::common::{
-    ErrorCode, HookLogEntry, ProjectResolutionSource, ProjectSummary, SessionControlAction,
-    SessionSummary, StreamDeltaPayload,
+    ErrorCode, HookLogEntry, PermissionRequestEntry, ProjectResolutionSource, ProjectSummary,
+    SessionControlAction, SessionSummary, StreamDeltaPayload,
 };
 use crate::events::SessionEventEnvelope;
 
@@ -90,6 +90,10 @@ pub enum IpcClientMessage {
         agent_id: String,
         /// エージェントプロセスへのパススルー引数
         extra_args: Vec<String>,
+        /// 初期モード (`--mode` 指定時。ACP の `session/set_mode` で適用)
+        initial_mode: Option<String>,
+        /// `opencode2` を標準ACPモード (`opencode2 acp`) で起動する (`--acp`)
+        acp: bool,
     },
     /// 既存セッションのイベントストリーム購読 + 双方向操作。
     ///
@@ -167,6 +171,22 @@ pub enum IpcClientMessage {
         from_node_seq: Option<u64>,
         /// 分岐先で使うエージェントID (省略時は同一エージェント)
         agent_id: Option<String>,
+        /// 分岐先の作業ディレクトリ (省略時は分岐元と同じ。`-w/--worktree` 用)
+        cwd: Option<String>,
+    },
+    /// セッション詳細の取得 (`fxg session show`)。
+    SessionShow {
+        /// 相関ID
+        command_id: String,
+        /// 対象セッションID
+        session_id: String,
+        /// 末尾から表示するイベント数
+        recent_events: u32,
+    },
+    /// 承認待ちリクエスト一覧 (`fxg inbox list`)。
+    InboxList {
+        /// 相関ID
+        command_id: String,
     },
     /// 指定ディレクトリの論理プロジェクトを解決する (`fxg project info`)。
     ProjectInfo {
@@ -295,10 +315,16 @@ pub enum IpcResult {
     },
     /// `SessionRevert` の結果
     SessionReverted {
+        /// 基準にした `UserMessage` の `node_seq`
+        target_node_seq: u64,
         /// 復元先の Tree Hash
         restored_tree_hash: String,
         /// 復元直前を退避したバックアップ Tree Hash
         backup_tree_hash: Option<String>,
+        /// 復元したファイル数
+        restored_files: u64,
+        /// 削除したファイル数
+        removed_files: u64,
     },
     /// `SessionFork` の結果
     SessionForked {
@@ -306,6 +332,13 @@ pub enum IpcResult {
         session_id: String,
         /// アタッチモード (内蔵TUI / OpenCode2 純正TUI)
         attach_mode: AttachMode,
+    },
+    /// `SessionShow` の結果
+    SessionDetail(Box<SessionDetail>),
+    /// `InboxList` の結果
+    Inbox {
+        /// 承認待ちリクエスト一覧 (全セッション横断)
+        requests: Vec<PermissionRequestEntry>,
     },
     /// `ProjectInfo` の結果
     ProjectInfo {
@@ -402,6 +435,19 @@ pub enum IpcServerMessage {
     },
 }
 
+/// `fxg session show` の応答本体。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SessionDetail {
+    /// セッション集約
+    pub session: SessionSummary,
+    /// 永続化済みイベント総数
+    pub event_count: u64,
+    /// 直近イベント (古い順)
+    pub recent_events: Vec<SessionEventEnvelope>,
+    /// このセッションの承認待ちリクエスト
+    pub pending_permissions: Vec<PermissionRequestEntry>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -413,10 +459,14 @@ mod tests {
             cwd: "/Users/nazo/src/flexagent".into(),
             agent_id: "opencode2".into(),
             extra_args: vec!["--model".into(), "sonnet".into()],
+            initial_mode: Some("plan".into()),
+            acp: false,
         };
         let json = serde_json::to_value(&msg).unwrap();
         assert_eq!(json["method"], "ensure_session");
         assert_eq!(json["extra_args"][1], "sonnet");
+        assert_eq!(json["initial_mode"], "plan");
+        assert_eq!(json["acp"], false);
         let decoded: IpcClientMessage = serde_json::from_value(json).unwrap();
         assert_eq!(decoded, msg);
     }
@@ -534,6 +584,7 @@ mod tests {
                 session_id: "s1".into(),
                 from_node_seq: None,
                 agent_id: Some("antigravity-acp".into()),
+                cwd: None,
             },
         ] {
             let json = serde_json::to_value(&message).unwrap();
@@ -543,8 +594,11 @@ mod tests {
         }
 
         let reverted = IpcResult::SessionReverted {
+            target_node_seq: 4,
             restored_tree_hash: "a".repeat(40),
             backup_tree_hash: Some("b".repeat(40)),
+            restored_files: 3,
+            removed_files: 1,
         };
         let json = serde_json::to_value(&reverted).unwrap();
         assert_eq!(json["result"], "session_reverted");

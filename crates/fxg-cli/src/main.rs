@@ -7,7 +7,8 @@
 //!
 //! Phase 2 では基本サブコマンド (`daemon` / `ps` / `session list` / `project` /
 //! `worktree` / `auth` / `kill-all`) を提供する。
-//! エージェント実行系 (`run` / `attach` / `inbox` 等) は Phase 3 で追加する。
+//! Phase 3 でエージェント実行系 (`run` / `attach` / `session show|prompt|stop|kill|revert|fork`
+//! / `inbox` / `agents`) と内蔵TUI (`tui`) を追加した。
 
 use std::process::ExitCode;
 
@@ -15,6 +16,7 @@ use usage::{Cli, RunAsync, Subcommands};
 
 mod client;
 mod commands;
+mod tui;
 
 /// `fxg` ルートコマンド。
 #[derive(Debug, Cli)]
@@ -34,17 +36,25 @@ struct Fxg {
 #[derive(Debug, Subcommands)]
 #[usage(run_async)]
 enum Commands {
-    /// ノードデーモンをフォアグラウンド起動する
-    Daemon(commands::DaemonArgs),
+    /// 新規セッションを起動し、即座にターミナルを Attach する
+    Run(commands::RunArgs),
+    /// 稼働中セッションにターミナル (内蔵TUI / OpenCode2 純正TUI) を再接続する
+    Attach(commands::AttachArgs),
     /// 稼働中・最近のセッション一覧を表示する (`fxg session list` の別名)
     Ps(commands::SessionListArgs),
-    /// セッション管理 (list)
+    /// セッション管理 (list / show / prompt / stop / kill / revert / fork)
     Session(commands::SessionArgs),
+    /// 承認待ちリクエストの確認と応答 (list / approve / reject)
+    Inbox(commands::InboxArgs),
     /// 論理プロジェクト管理 (info / list / link / scan)
     Project(commands::ProjectArgs),
     /// Git Worktree 管理 (list / add / remove / prune)
     #[usage(alias = "wt")]
     Worktree(commands::WorktreeArgs),
+    /// エージェント管理 (list / install / update / remove)
+    Agents(commands::AgentsArgs),
+    /// ノードデーモンをフォアグラウンド起動する
+    Daemon(commands::DaemonArgs),
     /// 認証トークン管理 (token / rotate-token)
     Auth(commands::AuthArgs),
     /// 【緊急停止】ローカルの全セッション・子プロセスツリー・PTYを強制終了する
