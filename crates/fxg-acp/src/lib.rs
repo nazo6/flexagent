@@ -10,9 +10,11 @@
 //! - `acp`: `AcpDriver` (`agent-client-protocol` による標準ACPエージェント制御)
 //! - `opencode2`: `OpenCode2Driver` (`opencode2 serve` ブリッジ + 純正TUI Attach)
 
+pub mod acp;
 pub mod driver;
 pub mod registry;
 
+pub use acp::AcpDriver;
 pub use driver::{
     ActiveSessionHandle, AgentDriver, AgentLaunchSpec, DriverEvent, StartSessionRequest,
 };
