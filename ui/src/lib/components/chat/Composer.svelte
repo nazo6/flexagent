@@ -1,8 +1,8 @@
 <script lang="ts">
   import { Button } from '$lib/components/ui/button';
-  import * as Select from '$lib/components/ui/select';
+  import ComposerSelect from '$lib/components/chat/ComposerSelect.svelte';
   import NodeStatusBadge from '$lib/components/NodeStatusBadge.svelte';
-  import { configChoices, configValueToString, resolveConfigChoice } from '$lib/config-options';
+  import { configChoices, resolveConfigChoice, selectedConfigValue } from '$lib/config-options';
   import { getNodeAvailability } from '$lib/node-status';
   import type { NodeSummary } from '$lib/generated/NodeSummary';
   import { sync } from '$lib/stores/app.svelte';
@@ -40,6 +40,23 @@
   );
 
   const nodeAvail = $derived(getNodeAvailability(node));
+
+  /** モードセレクタの選択肢 (value = mode_id、表示はエージェントが返す名前)。 */
+  const modeItems = $derived(
+    (capabilities?.availableModes ?? []).map((mode) => ({
+      value: mode.mode_id,
+      label: mode.name.trim() === '' ? mode.mode_id : mode.name,
+      description: mode.description
+    }))
+  );
+
+  /** 現在のモード (選択肢に存在しない ID は未選択として扱う)。 */
+  const currentMode = $derived(capabilities?.currentMode ?? null);
+  const selectedMode = $derived(
+    currentMode !== null && modeItems.some((item) => item.value === currentMode)
+      ? currentMode
+      : undefined
+  );
 
   const slashQuery = $derived(
     text.startsWith('/') && !text.includes(' ') ? text.slice(1).toLowerCase() : null
@@ -178,53 +195,30 @@
       <NodeStatusBadge {node} showNodeName={true} class="mr-1 hidden sm:inline-flex" />
     {/if}
     {#if capabilities && capabilities.availableModes.length > 0}
-      <Select.Root
-        type="single"
-        value={capabilities.currentMode ?? undefined}
-        onValueChange={(value) => {
-          if (value) void runControl({ action: 'set_mode', mode_id: value });
-        }}
-      >
-        <Select.Trigger size="sm" class="w-36">
-          <Select.Value placeholder="モード" />
-        </Select.Trigger>
-        <Select.Content>
-          {#each capabilities.availableModes as mode (mode.mode_id)}
-            <Select.Item value={mode.mode_id} label={mode.name ?? mode.mode_id}>
-              {mode.name}
-            </Select.Item>
-          {/each}
-        </Select.Content>
-      </Select.Root>
+      <ComposerSelect
+        label="モード"
+        placeholder="既定"
+        value={selectedMode}
+        items={modeItems}
+        onchange={(value) => void runControl({ action: 'set_mode', mode_id: value })}
+      />
     {/if}
 
     {#each capabilities?.configOptions ?? [] as option (option.key)}
       {@const choices = configChoices(option.options)}
       {#if choices.length > 0}
-        <Select.Root
-          type="single"
-          value={configValueToString(option.current_value)}
-          onValueChange={(value) => {
-            if (value !== null) {
-              void runControl({
-                action: 'set_config',
-                key: option.key,
-                value: resolveConfigChoice(choices, value)
-              });
-            }
-          }}
-        >
-          <Select.Trigger size="sm" class="max-w-48">
-            <Select.Value placeholder={option.name} />
-          </Select.Trigger>
-          <Select.Content>
-            {#each choices as choice (choice.value)}
-              <Select.Item value={choice.value} label={`${option.name}: ${choice.label}`}>
-                {choice.label}
-              </Select.Item>
-            {/each}
-          </Select.Content>
-        </Select.Root>
+        <ComposerSelect
+          label={option.name}
+          placeholder="既定"
+          value={selectedConfigValue(choices, option.current_value)}
+          items={choices.map((choice) => ({ value: choice.value, label: choice.label }))}
+          onchange={(value) =>
+            void runControl({
+              action: 'set_config',
+              key: option.key,
+              value: resolveConfigChoice(choices, value)
+            })}
+        />
       {/if}
     {/each}
 

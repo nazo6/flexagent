@@ -15,8 +15,9 @@ export function configValueToString(value: JsonValue): string {
   return typeof value === "string" ? value : JSON.stringify(value);
 }
 
-/** 選択肢の表示ラベルを決める (opencode2 の `{ providerID, id, name }` 等に対応)。 */
+/** 選択肢の表示ラベルを決める (真偽値・opencode2 の `{ providerID, id, name }` 等に対応)。 */
 function choiceLabel(raw: JsonValue): string {
+  if (typeof raw === "boolean") return raw ? "有効" : "無効";
   if (raw !== null && typeof raw === "object" && !Array.isArray(raw)) {
     const record = raw as Record<string, JsonValue>;
     const name = record.name;
@@ -48,4 +49,18 @@ export function configChoices(options: JsonValue): ConfigOptionChoice[] {
 /** Select で選ばれた value を `set_config` へ送る `JsonValue` に解決する。 */
 export function resolveConfigChoice(choices: ConfigOptionChoice[], value: string): JsonValue {
   return choices.find((choice) => choice.value === value)?.raw ?? value;
+}
+
+/**
+ * `ConfigOptionInfo.current_value` を Select の value 文字列へ解決する。
+ *
+ * `null` (未設定) や選択肢に存在しない値は `undefined` を返し、Select 側で
+ * プレースホルダ (未選択) を表示させる。JSON 文字列をそのまま表示してしまうのを防ぐ。
+ */
+export function selectedConfigValue(
+  choices: ConfigOptionChoice[],
+  currentValue: JsonValue,
+): string | undefined {
+  const value = configValueToString(currentValue);
+  return choices.some((choice) => choice.value === value) ? value : undefined;
 }

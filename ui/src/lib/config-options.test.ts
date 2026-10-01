@@ -3,6 +3,7 @@ import {
   configChoices,
   configValueToString,
   resolveConfigChoice,
+  selectedConfigValue,
   type ConfigOptionChoice,
 } from "./config-options";
 
@@ -31,6 +32,13 @@ describe("configChoices", () => {
     expect(configChoices(["plan", "code"])).toEqual([
       { value: "plan", label: "plan", raw: "plan" },
       { value: "code", label: "code", raw: "code" },
+    ]);
+  });
+
+  it("labels boolean options with 有効 / 無効", () => {
+    expect(configChoices([true, false])).toEqual([
+      { value: "true", label: "有効", raw: true },
+      { value: "false", label: "無効", raw: false },
     ]);
   });
 
@@ -74,5 +82,24 @@ describe("resolveConfigChoice", () => {
 
   it("falls back to the raw string for unknown values", () => {
     expect(resolveConfigChoice(choices, "unknown")).toBe("unknown");
+  });
+});
+
+describe("selectedConfigValue", () => {
+  const choices: ConfigOptionChoice[] = configChoices([
+    "plan",
+    { providerID: "opencode", id: "gpt-5", name: "GPT-5" },
+  ]);
+
+  it("returns the select value for a known current value", () => {
+    expect(selectedConfigValue(choices, "plan")).toBe("plan");
+    expect(
+      selectedConfigValue(choices, { providerID: "opencode", id: "gpt-5", name: "GPT-5" }),
+    ).toBe('{"providerID":"opencode","id":"gpt-5","name":"GPT-5"}');
+  });
+
+  it("returns undefined for unset (null) or unknown values", () => {
+    expect(selectedConfigValue(choices, null)).toBeUndefined();
+    expect(selectedConfigValue(choices, "unknown")).toBeUndefined();
   });
 });
