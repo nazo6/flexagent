@@ -936,6 +936,27 @@
         で外部エージェントプロセスを起動する際、`ProcessTreeGuard` で Windows
         Job Object にバインドし、エージェント stderr
         をログポンプに流すとともに、親終了時・セッション終了時の孫プロセスを含めた確実な終了を保証。
+      - ✅ **CI 検証通過**: GitHub Actions CI (run `36805517859`) にて全 8
+        ジョブ (fmt, clippy, sqlx, ts-rs, ui, test (ubuntu / macos /
+        windows-latest))
+        が完全成功。
+    - **Stage 3 (UI/UX & 同期堅牢化 - 未着手 / 残項目)**:
+      - **Step 3.1**: OpenCode2 モデル選択の Composer UI サポート
+        (`ui/src/lib/components/chat/Composer.svelte` でオブジェクト形式の
+        config
+        option `{ providerID, id, name }` をサポートし、JSON
+        文字列化と復元を行い `set_config` を発行)。
+      - **Step 3.2**: DB リセット時カーソル不整合防御
+        (`ui/src/lib/stores/sync.svelte.ts` / サーバー・ノード WS で DB
+        再作成・リセット時に cursor 不整合を検知して 0 または最新から再同期)。
+      - **Step 3.3**: TerminalView のセッション切り替え時再接続
+        (`ui/src/lib/components/terminal/TerminalView.svelte` で `$effect`
+        による
+        `sessionId` 監視と WS 再接続)。
+    - **Stage 4 (スキーマ対称性の完全化 - 未着手 / 残項目)**:
+      - **Step 4.1**: `sessions` テーブルへの `available_modes_json` 追加
+        (SQLite マイグレーション、DB/Protocol/UI 型、および `.sqlx`
+        クエリメタデータの完全同期)。
 
 ---
 
