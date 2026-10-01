@@ -402,7 +402,6 @@ pub async fn run_hook_command(dir: &Path, command: &str) -> Result<HookLogEntry,
         Err(_elapsed) => {
             let message = format!("hook command timed out after {HOOK_TIMEOUT_SECS}s: {command}");
             tracing::warn!("{message}");
-            drop(guard); // Job Object を閉じて孫プロセスまで強制終了
             Ok(HookLogEntry {
                 command: command.to_owned(),
                 success: false,
