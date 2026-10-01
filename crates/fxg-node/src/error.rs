@@ -44,7 +44,7 @@ pub enum NodeError {
     #[error("invalid worktree state: {0}")]
     InvalidWorktree(String),
     /// セッションの状態・操作が不正
-    #[error("invalid session state: {0}")]
+    #[error("invalid session: {0}")]
     InvalidSession(String),
     /// セッションが実行中 (busy) のため操作できない
     #[error("session is busy: {0}")]

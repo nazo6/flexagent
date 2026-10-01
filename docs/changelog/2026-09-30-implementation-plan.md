@@ -1178,3 +1178,38 @@
     - `cli_e2e.rs` にデーモン起動ログの存在確認、ログファイル内の ANSI
       エスケープシーケンス非混入アサーション、および `--log-file` / `--no-color`
       の動作検証テストを追加。
+
+### セッション中断 (Cancel) 制御とチャット UI の状態連動改善 (2026-10-01)
+
+- **課題と背景**:
+  - セッションチャット画面 (`Composer.svelte`)
+    で「中断」ボタンが常時表示・活性化しており、セッションが待機中 (Idle)
+    や停止時 (Stopped) にもクリック可能だった。
+  - 待機中や停止済みのセッションで中断を押すと、バックエンドでアクティブプロセスが見つからず
+    `invalid session state: {session_id}`
+    という分かりにくいエラーが発生していた。
+- **実装内容**:
+  - **UI 状態連動 (`ui/`)**:
+    - `routes/sessions/[id]/+page.svelte`:
+      イベントストリームから復元された最新ステータス (`currentStatus`)
+      を導出し、ヘッダーの `SessionStatusBadge` および `Composer`
+      へリアルタイムに連携。
+    - `Composer.svelte`:
+      - セッションステータスに応じた状態判定 (`isRunning` / `isStopped`)
+        を導入。
+      - エージェント実行中 (`running` / `waiting_permission`) のみ「中断」ボタン
+        (赤色アクセント、destructive)
+        を表示し、実行中の推論やツール実行を的確に中断可能に。送信ボタンは「キューに追加」ラベルに切り替え。
+      - 待機中 (`idle`)
+        は「中断」ボタンを非表示にし、無効な操作によるエラーを根絶。
+      - 停止中 (`stopped` / `error`)
+        は警告メッセージを表示し、テキストエリアおよび送信ボタンを無効化。
+      - 中断リクエスト送信成功時にトースト通知 (`中断リクエストを送信しました`)
+        を表示。
+  - **バックエンド堅牢化 (`crates/fxg-node`)**:
+    - `SessionManager::control`: `SessionControlAction::Cancel`
+      受信時、セッションがメモリ上にありつつもターン未実行 (アイドル)
+      の場合はエラーとせず安全に `Ok(())` (no-op) で即時復帰。
+    - `NodeError::InvalidSession`: エラー文言を `invalid session: {0}` /
+      `session {session_id} is not active` に改善。
+    - 単体テスト `cancel_on_idle_session_is_safe_noop` を追加。

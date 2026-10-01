@@ -11,7 +11,12 @@
   import { formatRelativeTime } from '$lib/format';
   import { shortId } from '$lib/session-status';
   import { sync } from '$lib/stores/app.svelte';
-  import { bootstrapLogLines, buildTimelineItems, capabilitiesFromEvents } from '$lib/sync/reducer';
+  import {
+    bootstrapLogLines,
+    buildTimelineItems,
+    capabilitiesFromEvents,
+    latestStatusFromEvents
+  } from '$lib/sync/reducer';
   import { cn } from '$lib/utils';
   import { toast } from 'svelte-sonner';
   import ArrowDownIcon from '@lucide/svelte/icons/arrow-down';
@@ -31,6 +36,9 @@
   );
 
   const timeline = $derived(sync.timelineFor(sessionId));
+  const currentStatus = $derived(
+    latestStatusFromEvents(timeline.events)?.status ?? session?.status ?? null
+  );
   const items = $derived(
     buildTimelineItems({
       events: timeline.events,
@@ -128,8 +136,8 @@
             <h1 class="truncate text-sm font-semibold tracking-tight">
               {session?.title ?? 'セッション'}
             </h1>
-            {#if session}
-              <SessionStatusBadge status={session.status} />
+            {#if currentStatus}
+              <SessionStatusBadge status={currentStatus} />
             {/if}
           </div>
 
@@ -277,7 +285,7 @@
       <!-- チャット入力欄 (Composer) -->
       <div class="bg-card/50 border-t px-3 py-2 md:px-6 shrink-0">
         <div class="mx-auto max-w-3xl">
-          <Composer sessionId={sessionId} {capabilities} node={sessionNode} />
+          <Composer sessionId={sessionId} {capabilities} node={sessionNode} status={currentStatus} />
         </div>
       </div>
     </div>

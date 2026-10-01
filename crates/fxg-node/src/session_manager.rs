@@ -817,10 +817,9 @@ impl SessionManager {
         // busy チェックと予約 (check-and-set)
         {
             let mut sessions = self.inner.sessions.lock().expect("sessions poisoned");
-            let session = sessions
-                .active
-                .get_mut(session_id)
-                .ok_or_else(|| NodeError::InvalidSession(session_id.to_owned()))?;
+            let session = sessions.active.get_mut(session_id).ok_or_else(|| {
+                NodeError::InvalidSession(format!("session {session_id} is not active"))
+            })?;
             if session.busy {
                 session.pending_prompts.push_back(PendingPrompt {
                     text: text.to_owned(),
@@ -848,10 +847,9 @@ impl SessionManager {
 
         let handle = {
             let mut sessions = self.inner.sessions.lock().expect("sessions poisoned");
-            let session = sessions
-                .active
-                .get_mut(session_id)
-                .ok_or_else(|| NodeError::InvalidSession(session_id.to_owned()))?;
+            let session = sessions.active.get_mut(session_id).ok_or_else(|| {
+                NodeError::InvalidSession(format!("session {session_id} is not active"))
+            })?;
             if session.pending_permissions.remove(request_id).is_none() {
                 return Err(NodeError::AlreadyResolved(request_id.to_owned()));
             }
@@ -888,13 +886,12 @@ impl SessionManager {
         }
 
         // ロックは await を跨がない (ハンドルを複製してから操作する)
-        let handle = {
+        let (handle, is_busy) = {
             let sessions = self.inner.sessions.lock().expect("sessions poisoned");
-            let session = sessions
-                .active
-                .get(session_id)
-                .ok_or_else(|| NodeError::InvalidSession(session_id.to_owned()))?;
-            Arc::clone(&session.handle)
+            let session = sessions.active.get(session_id).ok_or_else(|| {
+                NodeError::InvalidSession(format!("session {session_id} is not active"))
+            })?;
+            (Arc::clone(&session.handle), session.busy)
         };
         match action {
             SessionControlAction::SetMode { mode_id } => handle
@@ -905,10 +902,16 @@ impl SessionManager {
                 .set_config(key.clone(), value.clone())
                 .await
                 .map_err(|err| NodeError::Server(format!("failed to set config: {err:#}"))),
-            SessionControlAction::Cancel => handle
-                .cancel_turn()
-                .await
-                .map_err(|err| NodeError::Server(format!("failed to cancel: {err:#}"))),
+            SessionControlAction::Cancel => {
+                // すでにアイドル (ターン未実行) の場合はキャンセル対象がないため成功扱いとする
+                if !is_busy {
+                    return Ok(());
+                }
+                handle
+                    .cancel_turn()
+                    .await
+                    .map_err(|err| NodeError::Server(format!("failed to cancel: {err:#}")))
+            }
             SessionControlAction::Kill => handle
                 .shutdown()
                 .await
@@ -1634,6 +1637,21 @@ mod tests {
             .await
             .expect_err("duplicate");
         assert!(matches!(err, NodeError::CommandDuplicate(_)));
+    }
+
+    #[tokio::test]
+    async fn cancel_on_idle_session_is_safe_noop() {
+        let (manager, _mock, dir) = setup().await;
+        let outcome = manager
+            .ensure_session("c1", dir.path(), "mock", &[], None, false)
+            .await
+            .expect("ensure");
+        wait_idle(&manager, &outcome.session_id).await;
+
+        let res = manager
+            .control("c2", &outcome.session_id, &SessionControlAction::Cancel)
+            .await;
+        assert!(res.is_ok());
     }
 
     #[tokio::test]
