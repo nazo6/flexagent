@@ -410,6 +410,14 @@ pub(crate) async fn handle_server_message(
                 None => None,
             };
 
+            // 実行ディレクトリのプロジェクト紐付けを最新化する
+            // (一時VM はブートストラップ時点で登録済みだが、`last_used_at` の
+            //  更新を兼ねて全経路で再登録する)
+            if let Err(err) = state.resolve_and_register_project(&local_path).await {
+                send_command_result(out, command_id, Err(err)).await;
+                return;
+            }
+
             let result = state
                 .session_manager()
                 .start_session(StartSessionParams {

@@ -314,6 +314,15 @@ impl Db {
         queries::get_session(&self.pool, session_id).await
     }
 
+    /// 実行ディレクトリの既定パスを解決する (紐付け → 最新セッションの順)。
+    pub async fn resolve_default_local_path(
+        &self,
+        project_id: &str,
+        node_id: &str,
+    ) -> Result<Option<String>, DbError> {
+        queries::resolve_default_local_path(&self.pool, project_id, node_id).await
+    }
+
     /// ハブ専用: 退避済み git bundle のパスを記録する (`None` で消去)。
     pub async fn set_git_bundle_path(
         &self,

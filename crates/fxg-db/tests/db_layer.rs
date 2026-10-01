@@ -1075,6 +1075,99 @@ async fn registration_upserts_and_audit_logs() {
 }
 
 #[tokio::test]
+async fn default_local_path_prefers_recent_binding_then_session_history() {
+    let fixture = Fixture::new(DbRole::Hub).await;
+
+    // Worktree 紐付けを追加 (メインリポジトリとほぼ同時刻 → タイブレークでメイン優先)
+    fixture
+        .db
+        .upsert_project_binding(&ProjectBindingRecord {
+            project_id: PROJECT_ID.to_owned(),
+            node_id: NODE_ID.to_owned(),
+            local_path: "/home/nazo/src/flexagent-wt".to_owned(),
+            is_worktree: true,
+            git_branch: Some("feat/x".to_owned()),
+        })
+        .await
+        .expect("worktree binding");
+    // タイブレーク検証のため両紐付けの最終使用日時を揃える
+    sqlx::query("UPDATE project_node_bindings SET last_used_at = 1000")
+        .execute(fixture.db.pool())
+        .await
+        .expect("align last_used_at");
+    let path = fixture
+        .db
+        .resolve_default_local_path(PROJECT_ID, NODE_ID)
+        .await
+        .expect("resolve default");
+    assert_eq!(
+        path.as_deref(),
+        Some(LOCAL_PATH),
+        "同時刻の場合はメインリポジトリを優先する"
+    );
+
+    // メインリポジトリの最終使用を古くすると直近使用の Worktree が既定になる
+    sqlx::query("UPDATE project_node_bindings SET last_used_at = 1 WHERE local_path = ?")
+        .bind(LOCAL_PATH)
+        .execute(fixture.db.pool())
+        .await
+        .expect("age main binding");
+    let path = fixture
+        .db
+        .resolve_default_local_path(PROJECT_ID, NODE_ID)
+        .await
+        .expect("resolve default");
+    assert_eq!(
+        path.as_deref(),
+        Some("/home/nazo/src/flexagent-wt"),
+        "直近使用した Worktree を優先する"
+    );
+
+    // 紐付けの無いプロジェクトは最新セッションの local_path にフォールバックする
+    // (セッション開始時の紐付け登録を実装する前に実行されたセッションを想定)
+    let legacy_project = "github.com/nazo6/legacy";
+    let legacy_path = "/home/nazo/src/legacy";
+    let legacy_event = SessionEventEnvelope {
+        event_id: uuid_v7(),
+        session_id: uuid_v7(),
+        node_seq: 1,
+        created_at: now_ms(),
+        payload: UnifiedEventPayload::SessionCreated {
+            node_id: NODE_ID.to_owned(),
+            project_id: legacy_project.to_owned(),
+            project_name: "legacy".to_owned(),
+            local_path: legacy_path.to_owned(),
+            git_branch: None,
+            is_worktree: false,
+            agent_id: "opencode2".to_owned(),
+            parent_session_id: None,
+            fork_from_node_seq: None,
+            title: "New Session".to_owned(),
+            opencode_mode: None,
+        },
+    };
+    fixture
+        .db
+        .append_events(std::slice::from_ref(&legacy_event))
+        .await
+        .expect("append legacy session");
+    let path = fixture
+        .db
+        .resolve_default_local_path(legacy_project, NODE_ID)
+        .await
+        .expect("resolve default");
+    assert_eq!(path.as_deref(), Some(legacy_path));
+
+    // 紐付けもセッションも無い場合は None
+    let path = fixture
+        .db
+        .resolve_default_local_path("github.com/nazo6/none", NODE_ID)
+        .await
+        .expect("resolve default");
+    assert!(path.is_none());
+}
+
+#[tokio::test]
 async fn file_backed_db_persists_across_reopen() {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = fxg_db::node_db_path(dir.path());

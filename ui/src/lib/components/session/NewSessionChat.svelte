@@ -9,10 +9,16 @@
   import FolderBrowserDialog from '$lib/components/fs/FolderBrowserDialog.svelte';
   import type { ProvisionerSummary } from '$lib/generated/ProvisionerSummary';
   import type { ProvisionerTestResponse } from '$lib/generated/ProvisionerTestResponse';
+  import { formatRelativeTime } from '$lib/format';
+  import {
+    buildPathCandidates,
+    pickDefaultNode,
+    type PathCandidate
+  } from '$lib/new-session';
   import { getNodeAvailability } from '$lib/node-status';
   import { sync } from '$lib/stores/app.svelte';
   import { toast } from 'svelte-sonner';
-  import { onMount } from 'svelte';
+  import { onMount, untrack } from 'svelte';
   import BotIcon from '@lucide/svelte/icons/bot';
   import BoxIcon from '@lucide/svelte/icons/box';
   import CheckCircle2Icon from '@lucide/svelte/icons/check-circle-2';
@@ -49,6 +55,13 @@
   let browserOpen = $state(false);
   let newWorktreeBrowserOpen = $state(false);
   let useCustomPath = $state(false);
+
+  // 既定解決の制御: URL パラメータ・ノード選択の初回適用を追跡する
+  let nodeTouched = $state(false);
+  let urlProjectApplied = $state(false);
+  let urlNodeApplied = $state(false);
+  let urlAgentApplied = $state(false);
+  let lastAutoPathKey = '';
 
   // Fork 引き継ぎ
   let forkSessionId = $state('');
@@ -89,39 +102,71 @@
     provisioners.find((p) => p.name === provisionerName) ?? provisioners[0] ?? null
   );
 
+  // URL の `project` は初回のみ適用する (以降の手動選択を上書きしない)
   $effect(() => {
-    const urlProj = page.url.searchParams.get('project');
-    if (urlProj && projects.some((p) => p.project_id === urlProj)) {
-      selectedProjectId = urlProj;
-    } else if (!selectedProjectId && projects.length > 0) {
-      selectedProjectId = projects[0].project_id;
-    }
+    if (urlProjectApplied || projects.length === 0) return;
+    const urlProject = page.url.searchParams.get('project');
+    selectedProjectId =
+      urlProject && projects.some((p) => p.project_id === urlProject)
+        ? urlProject
+        : selectedProjectId || projects[0].project_id;
+    urlProjectApplied = true;
   });
 
+  // プロジェクトの実行履歴があるオンラインノードを既定にする
+  // (ユーザーがノードを選んだ後は追従しない)
   $effect(() => {
-    if (!nodeId && nodes.length > 0) {
-      const onlineNode = nodes.find((n) => n.is_online);
-      nodeId = (onlineNode ?? nodes[0]).node_id;
-    }
+    if (nodeTouched || nodes.length === 0) return;
+    const defaultNode = untrack(() => pickDefaultNode(nodes, selectedProject, sync.sessions));
+    if (defaultNode !== '' && defaultNode !== nodeId) nodeId = defaultNode;
   });
 
-  const nodePaths = $derived.by(() => {
-    if (!selectedProject) return [];
-    const options: { path: string; label: string }[] = [];
-    for (const binding of selectedProject.bindings) {
-      if (binding.node_id !== nodeId) continue;
-      options.push({
-        path: binding.local_path,
-        label: `${binding.git_branch ? `[${binding.git_branch}] ` : ''}${binding.local_path}`
-      });
+  // URL の `node` / `path` (ディープリンク) は初回のみ適用する
+  $effect(() => {
+    if (urlNodeApplied || nodes.length === 0) return;
+    const urlNode = page.url.searchParams.get('node');
+    if (urlNode && nodes.some((n) => n.node_id === urlNode)) {
+      nodeId = urlNode;
+      nodeTouched = true;
     }
-    return options;
+    const urlPath = page.url.searchParams.get('path');
+    if (urlPath) {
+      localPath = urlPath;
+      useCustomPath = true;
+    }
+    urlNodeApplied = true;
   });
 
+  // 実行ディレクトリ候補 (紐付け + 直近セッション) を直近使用順に解決する
+  const pathCandidates = $derived.by(() =>
+    buildPathCandidates(selectedProject, nodeId, sync.sessions)
+  );
+  const selectedCandidate = $derived(
+    pathCandidates.find((candidate) => candidate.path === localPath) ?? null
+  );
+  // このノードに候補が無い場合の切り替え候補 (登録がある別ノード)
+  const otherNodesWithCandidates = $derived(
+    nodes.filter(
+      (node) =>
+        node.node_id !== nodeId &&
+        buildPathCandidates(selectedProject, node.node_id, sync.sessions).length > 0
+    )
+  );
+
+  // 候補の既定選択: プロジェクト × ノードが変わったとき、または現在値が候補から
+  // 消えたときのみ更新する (セッション更新で候補順が変わっても選択は維持する)
   $effect(() => {
-    if (!useCustomPath && nodePaths.length > 0 && !nodePaths.some((opt) => opt.path === localPath)) {
-      localPath = nodePaths[0].path;
+    if (isProvisionerMode || useCustomPath) return;
+    const key = `${selectedProject?.project_id ?? ''}|${nodeId}`;
+    const containsCurrent = pathCandidates.some((candidate) => candidate.path === localPath);
+    if (
+      key === lastAutoPathKey &&
+      (containsCurrent || (localPath === '' && pathCandidates.length === 0))
+    ) {
+      return;
     }
+    lastAutoPathKey = key;
+    if (!containsCurrent) localPath = pathCandidates[0]?.path ?? '';
   });
 
   const effectiveAgent = $derived(
@@ -141,7 +186,18 @@
         : nodeId !== '' && (pathMode === 'existing' ? localPath !== '' : branch.trim() !== ''))
   );
 
+  // 未指定の理由をユーザーに明示する (無言の disabled を避ける)
+  const pathMissing = $derived(
+    !isProvisionerMode &&
+      (pathMode === 'existing' ? localPath.trim() === '' : branch.trim() === '')
+  );
+  const pathRequiredHint = $derived(
+    pathMode === 'existing' ? '実行ディレクトリを選択してください' : '新ブランチ名を入力してください'
+  );
+
+  // URL の `fork_session` / `agent` は初回のみ適用する
   $effect(() => {
+    if (urlAgentApplied || nodes.length === 0) return;
     const forkSession = page.url.searchParams.get('fork_session');
     if (forkSession) {
       forkSessionId = forkSession;
@@ -156,6 +212,7 @@
         customAgent = agentParam;
       }
     }
+    urlAgentApplied = true;
   });
 
   async function runProvisionerTest(name: string) {
@@ -246,6 +303,28 @@
     }
   }
 
+  /** プロジェクト変更時: 既定ノード・既定パスを再解決する。 */
+  function onProjectChange() {
+    nodeTouched = false;
+    useCustomPath = false;
+  }
+
+  /** ノード変更時: パスはノードごとに異なるため既定パスを再解決する。 */
+  function onNodeChange() {
+    nodeTouched = true;
+    useCustomPath = false;
+  }
+
+  /** 実行ディレクトリ候補の表示ラベル。 */
+  function candidateLabel(candidate: PathCandidate): string {
+    const parts: string[] = [];
+    if (candidate.isWorktree) parts.push('[Worktree]');
+    if (candidate.gitBranch) parts.push(`[${candidate.gitBranch}]`);
+    parts.push(candidate.path);
+    const suffix = candidate.source === 'session' ? ' (前回のセッション)' : '';
+    return `${parts.join(' ')} · ${formatRelativeTime(candidate.usedAt)}${suffix}`;
+  }
+
   const suggestionPrompts = [
     'このリポジトリの構成とアーキテクチャを説明して',
     '最近の変更点や未コミットの差分を確認して',
@@ -303,6 +382,7 @@
           {#if projects.length > 0}
             <select
               bind:value={selectedProjectId}
+              onchange={onProjectChange}
               class="border-input bg-background focus-visible:ring-ring/40 h-8 rounded-md border px-2 text-xs outline-none focus-visible:ring-1"
             >
               {#each projects as project (project.project_id)}
@@ -366,6 +446,7 @@
           {:else}
             <select
               bind:value={nodeId}
+              onchange={onNodeChange}
               class="border-input bg-background focus-visible:ring-ring/40 h-8 rounded-md border px-2 text-xs outline-none focus-visible:ring-1"
             >
               {#each nodes as node (node.node_id)}
@@ -433,6 +514,184 @@
         {/if}
       </div>
 
+      {#if !isProvisionerMode && projects.length > 0}
+        <div class="flex flex-col gap-1.5 border-t pt-3">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <Label class="text-muted-foreground flex items-center gap-1.5 text-xs">
+              <FolderGit2Icon class="size-3.5" />
+              実行ディレクトリ
+              <span class="text-destructive">*</span>
+            </Label>
+            <div class="flex items-center gap-1">
+              <button
+                type="button"
+                class="rounded-full border px-2.5 py-0.5 text-xs transition-colors {pathMode === 'existing'
+                  ? 'bg-primary text-primary-foreground border-primary'
+                  : 'text-muted-foreground hover:bg-muted'}"
+                onclick={() => (pathMode = 'existing')}
+              >
+                既存
+              </button>
+              <button
+                type="button"
+                class="rounded-full border px-2.5 py-0.5 text-xs transition-colors {pathMode === 'new_worktree'
+                  ? 'bg-primary text-primary-foreground border-primary'
+                  : 'text-muted-foreground hover:bg-muted'}"
+                onclick={() => (pathMode = 'new_worktree')}
+              >
+                新規 Worktree
+              </button>
+            </div>
+          </div>
+
+          {#if pathMode === 'existing'}
+            <div class="flex items-center gap-1.5">
+              {#if pathCandidates.length > 0 && !useCustomPath}
+                <select
+                  bind:value={localPath}
+                  aria-invalid={localPath.trim() === ''}
+                  class="border-input bg-background focus-visible:ring-ring/40 h-8 min-w-0 flex-1 rounded-md border px-2 text-xs outline-none focus-visible:ring-1 {localPath.trim() ===
+                  ''
+                    ? 'border-destructive'
+                    : ''}"
+                >
+                  {#each pathCandidates as candidate (candidate.path)}
+                    <option value={candidate.path}>{candidateLabel(candidate)}</option>
+                  {/each}
+                </select>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  class="h-8 shrink-0 gap-1.5 px-2.5 text-xs"
+                  onclick={() => {
+                    useCustomPath = true;
+                    browserOpen = true;
+                  }}
+                  title="フォルダブラウザで別のディレクトリを選択"
+                >
+                  <FolderOpenIcon class="size-3.5" />
+                  <span>参照…</span>
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  class="text-muted-foreground hover:text-foreground h-8 shrink-0 px-2 text-xs"
+                  onclick={() => (useCustomPath = true)}
+                  title="パスを直接入力する"
+                >
+                  直接入力
+                </Button>
+              {:else}
+                <Input
+                  bind:value={localPath}
+                  aria-invalid={localPath.trim() === ''}
+                  placeholder="絶対パスを入力 (例: /home/user/project or C:\repo)"
+                  class="h-8 min-w-0 flex-1 font-mono text-xs"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  class="h-8 shrink-0 gap-1.5 px-2.5 text-xs"
+                  disabled={!nodeId}
+                  onclick={() => (browserOpen = true)}
+                  title="フォルダブラウザで選択"
+                >
+                  <FolderOpenIcon class="size-3.5" />
+                  <span>参照…</span>
+                </Button>
+                {#if pathCandidates.length > 0}
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    class="text-muted-foreground hover:text-foreground h-8 shrink-0 px-2 text-xs"
+                    onclick={() => {
+                      useCustomPath = false;
+                      if (pathCandidates[0]) localPath = pathCandidates[0].path;
+                    }}
+                    title="登録済みパスの一覧に戻る"
+                  >
+                    一覧に戻る
+                  </Button>
+                {/if}
+              {/if}
+            </div>
+
+            {#if selectedCandidate}
+              <p class="text-muted-foreground text-[11px]">
+                {selectedCandidate.source === 'binding' ? '登録済み' : '前回のセッションで使用'} · 最終使用
+                {formatRelativeTime(selectedCandidate.usedAt)}
+                {#if selectedCandidate.isWorktree}
+                  · Worktree
+                {/if}
+                {#if selectedCandidate.gitBranch}
+                  · {selectedCandidate.gitBranch}
+                {/if}
+              </p>
+            {:else if localPath.trim() !== ''}
+              <p class="text-muted-foreground text-[11px]">
+                未登録のパスです (セッション開始時に自動登録されます)
+              </p>
+            {/if}
+
+            {#if pathCandidates.length === 0 && !(useCustomPath && localPath.trim() !== '')}
+              <div
+                class="flex flex-col gap-1.5 rounded-md border border-amber-500/40 bg-amber-500/10 p-2.5 text-[11px]"
+              >
+                <span>
+                  このノードでは {selectedProject?.name ?? 'このプロジェクト'} の実行ディレクトリが未登録です。フォルダを指定するか、プロジェクト設定でスキャンしてください。
+                </span>
+                <div class="flex flex-wrap items-center gap-1.5">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    class="h-7 px-2 text-[11px]"
+                    onclick={() => {
+                      useCustomPath = true;
+                      browserOpen = true;
+                    }}
+                  >
+                    フォルダを選択
+                  </Button>
+                  <a
+                    href="/projects"
+                    class="text-muted-foreground hover:text-foreground underline underline-offset-2"
+                  >
+                    プロジェクト設定へ
+                  </a>
+                  {#each otherNodesWithCandidates as otherNode (otherNode.node_id)}
+                    <button
+                      type="button"
+                      class="text-muted-foreground hover:text-foreground underline underline-offset-2"
+                      onclick={() => {
+                        nodeId = otherNode.node_id;
+                        nodeTouched = true;
+                      }}
+                    >
+                      {otherNode.name} に登録あり
+                    </button>
+                  {/each}
+                </div>
+              </div>
+            {/if}
+          {:else}
+            <Input
+              bind:value={branch}
+              aria-invalid={branch.trim() === ''}
+              placeholder="feat/new-task"
+              class="h-8 text-xs"
+            />
+            <p class="text-muted-foreground text-[11px]">
+              新しい独立ブランチを作成して Worktree で実行します (起点ブランチ・配置先は詳細設定)
+            </p>
+          {/if}
+        </div>
+      {/if}
+
       <div>
         <button
           type="button"
@@ -440,7 +699,7 @@
           onclick={() => (showAdvanced = !showAdvanced)}
         >
           <Settings2Icon class="size-3" />
-          <span>{showAdvanced ? '詳細設定を閉じる' : 'ブランチ / Worktree 設定'}</span>
+          <span>{showAdvanced ? '詳細設定を閉じる' : '詳細設定'}</span>
         </button>
 
         {#if showAdvanced}
@@ -450,118 +709,42 @@
                 <Label class="text-xs">クローンするブランチ (任意)</Label>
                 <Input bind:value={branch} placeholder="main (省略時はリモートの既定ブランチ)" class="h-8 text-xs" />
               </div>
-            {:else}
-              <div class="flex gap-4 text-xs">
-                <label class="flex items-center gap-1.5 cursor-pointer">
-                  <input type="radio" bind:group={pathMode} value="existing" />
-                  既存のリポジトリ
-                </label>
-                <label class="flex items-center gap-1.5 cursor-pointer">
-                  <input type="radio" bind:group={pathMode} value="new_worktree" />
-                  新規 Worktree を作成 (独立ブランチ)
-                </label>
-              </div>
-
-              {#if pathMode === 'existing'}
-                <div class="flex flex-col gap-1.5">
+            {:else if pathMode === 'new_worktree'}
+              <div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                <div class="flex flex-col gap-1">
+                  <Label class="text-xs">起点ブランチ (任意)</Label>
+                  <Input bind:value={baseBranch} placeholder="main" class="h-8 text-xs" />
+                </div>
+                <div class="flex flex-col gap-1">
+                  <Label class="text-xs">配置先パス (任意・省略時は既定テンプレート)</Label>
                   <div class="flex items-center gap-1.5">
-                    {#if nodePaths.length > 0 && !useCustomPath}
-                      <select
-                        bind:value={localPath}
-                        class="border-input bg-background h-8 rounded-md border px-2 text-xs flex-1 min-w-0"
-                      >
-                        {#each nodePaths as opt (opt.path)}
-                          <option value={opt.path}>{opt.label}</option>
-                        {/each}
-                      </select>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        class="h-8 px-2.5 text-xs shrink-0 gap-1.5"
-                        disabled={!nodeId}
-                        onclick={() => {
-                          useCustomPath = true;
-                          browserOpen = true;
-                        }}
-                        title="フォルダブラウザで別のディレクトリを選択"
-                      >
-                        <FolderOpenIcon class="size-3.5" />
-                        <span>フォルダ参照…</span>
-                      </Button>
-                    {:else}
-                      <Input
-                        bind:value={localPath}
-                        placeholder="絶対パスを入力 (例: /home/user/project or C:\repo)"
-                        class="h-8 text-xs font-mono flex-1 min-w-0"
-                      />
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        class="h-8 px-2.5 text-xs shrink-0 gap-1.5"
-                        disabled={!nodeId}
-                        onclick={() => (browserOpen = true)}
-                        title="フォルダブラウザで選択"
-                      >
-                        <FolderOpenIcon class="size-3.5" />
-                        <span>参照…</span>
-                      </Button>
-                      {#if nodePaths.length > 0}
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          class="h-8 px-2 text-xs shrink-0 text-muted-foreground hover:text-foreground"
-                          onclick={() => {
-                            useCustomPath = false;
-                            if (nodePaths[0]) localPath = nodePaths[0].path;
-                          }}
-                          title="登録済みパスの一覧に戻る"
-                        >
-                          一覧に戻る
-                        </Button>
-                      {/if}
-                    {/if}
+                    <Input
+                      bind:value={newPath}
+                      placeholder="配置先の絶対パス (例: /home/user/wt or C:\repo\.fxg\wt)"
+                      class="h-8 text-xs font-mono flex-1 min-w-0"
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      class="h-8 px-2.5 text-xs shrink-0 gap-1.5"
+                      disabled={!nodeId}
+                      onclick={() => (newWorktreeBrowserOpen = true)}
+                      title="フォルダブラウザで配置先ディレクトリを選択"
+                    >
+                      <FolderOpenIcon class="size-3.5" />
+                      <span>参照…</span>
+                    </Button>
                   </div>
                 </div>
-              {:else}
-                <div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                  <div class="flex flex-col gap-1">
-                    <Label class="text-xs">新ブランチ名</Label>
-                    <Input bind:value={branch} placeholder="feat/new-task" class="h-8 text-xs" />
-                  </div>
-                  <div class="flex flex-col gap-1">
-                    <Label class="text-xs">起点ブランチ (任意)</Label>
-                    <Input bind:value={baseBranch} placeholder="main" class="h-8 text-xs" />
-                  </div>
-                  <div class="flex flex-col gap-1 sm:col-span-2">
-                    <Label class="text-xs">配置先パス (任意・省略時は既定テンプレート)</Label>
-                    <div class="flex items-center gap-1.5">
-                      <Input
-                        bind:value={newPath}
-                        placeholder="配置先の絶対パス (例: /home/user/wt or C:\repo\.fxg\wt)"
-                        class="h-8 text-xs font-mono flex-1 min-w-0"
-                      />
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        class="h-8 px-2.5 text-xs shrink-0 gap-1.5"
-                        disabled={!nodeId}
-                        onclick={() => (newWorktreeBrowserOpen = true)}
-                        title="フォルダブラウザで配置先ディレクトリを選択"
-                      >
-                        <FolderOpenIcon class="size-3.5" />
-                        <span>参照…</span>
-                      </Button>
-                    </div>
-                  </div>
-                </div>
-              {/if}
+              </div>
             {/if}
 
-            <div class="border-t pt-2.5 grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+            <div
+              class="{isProvisionerMode || pathMode === 'new_worktree'
+                ? 'border-t pt-2.5 '
+                : ''}grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs"
+            >
               <div class="flex flex-col gap-1">
                 <Label class="text-xs">エージェント初期モード</Label>
                 <select
@@ -627,13 +810,16 @@
         </div>
 
         <div class="flex items-center gap-2">
+          {#if pathMissing}
+            <span class="text-destructive text-xs">{pathRequiredHint}</span>
+          {/if}
           <Button
             variant="ghost"
             size="sm"
             class="text-xs h-8 text-muted-foreground hover:text-foreground"
             disabled={!canSubmit || busy}
             onclick={() => handleStartSession('')}
-            title="プロンプトなしでセッションとターミナルだけを起動します"
+            title={pathMissing ? pathRequiredHint : 'プロンプトなしでセッションとターミナルだけを起動します'}
           >
             空で起動
           </Button>
@@ -643,6 +829,7 @@
             class="gap-1.5 h-8 text-xs font-medium"
             disabled={!canSubmit || busy}
             onclick={() => handleStartSession()}
+            title={pathMissing ? pathRequiredHint : 'セッションを開始します'}
           >
             {#if busy}
               <span>起動中…</span>

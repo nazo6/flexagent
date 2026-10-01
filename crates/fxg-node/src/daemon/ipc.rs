@@ -770,6 +770,12 @@ async fn handle(
             initial_mode,
             acp,
         } => {
+            // 実行ディレクトリのプロジェクト紐付けを最新化する
+            // (既定パス解決・直近使用の記録をセッション開始時に更新する)
+            state
+                .resolve_and_register_project(Path::new(&cwd))
+                .await
+                .map_err(|err| DispatchError::from_node_error(&command_id, err))?;
             let outcome = state
                 .session_manager()
                 .ensure_session(
@@ -1450,6 +1456,23 @@ mod tests {
             }
             other => panic!("unexpected response: {other:?}"),
         };
+
+        // セッション開始時にプロジェクト紐付けが登録される
+        // (既定パス解決・直近使用記録の基礎データ)
+        let canonical_workdir = fxg_pty::canonicalize(&workdir).expect("canonicalize");
+        let projects = daemon
+            .state()
+            .db()
+            .list_projects()
+            .await
+            .expect("list projects");
+        assert!(
+            projects.iter().any(|project| project
+                .bindings
+                .iter()
+                .any(|binding| binding.local_path == canonical_workdir.to_string_lossy())),
+            "EnsureSession must register a project binding: {projects:?}"
+        );
 
         // command_id の重複送信は COMMAND_DUPLICATE (冪等性)
         let response = roundtrip(

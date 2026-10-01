@@ -29,6 +29,7 @@
   import MessageSquareIcon from '@lucide/svelte/icons/message-square';
   import PanelRightCloseIcon from '@lucide/svelte/icons/panel-right-close';
   import PlayIcon from '@lucide/svelte/icons/play';
+  import PlusIcon from '@lucide/svelte/icons/plus';
   import SkullIcon from '@lucide/svelte/icons/skull';
   import SquareTerminalIcon from '@lucide/svelte/icons/square-terminal';
   import Undo2Icon from '@lucide/svelte/icons/undo-2';
@@ -142,6 +143,20 @@
     if (session?.project_id) params.set('project', session.project_id);
     if (session?.agent_id) params.set('agent', session.agent_id);
     if (session?.last_node_seq) params.set('fork_seq', String(session.last_node_seq));
+    // Fork 先も同じノード・実行ディレクトリで開始する (既定パスの解決を上書き)
+    if (session?.node_id) params.set('node', session.node_id);
+    if (session?.local_path) params.set('path', session.local_path);
+    void goto(`/?${params.toString()}`);
+  }
+
+  /** このセッションと同じノード・実行ディレクトリで新規セッションを開く。 */
+  function handleNewSessionHere() {
+    if (!session) return;
+    const params = new URLSearchParams();
+    params.set('project', session.project_id);
+    params.set('node', session.node_id);
+    params.set('path', session.local_path);
+    if (session.agent_id) params.set('agent', session.agent_id);
     void goto(`/?${params.toString()}`);
   }
 
@@ -359,6 +374,20 @@
           <GitForkIcon class="size-3" />
           <span class="hidden sm:inline">Fork</span>
         </Button>
+
+        <!-- 同じ場所で新規セッション (履歴は引き継がない) -->
+        {#if session && sessionNode && !sessionNode.is_ephemeral}
+          <Button
+            variant="outline"
+            size="sm"
+            class="h-7 text-xs gap-1"
+            onclick={handleNewSessionHere}
+            title="このセッションと同じノード・実行ディレクトリで新しいセッションを開始"
+          >
+            <PlusIcon class="size-3" />
+            <span class="hidden sm:inline">ここで新規</span>
+          </Button>
+        {/if}
 
         <!-- Kill ボタン (強制終了) -->
         <Button

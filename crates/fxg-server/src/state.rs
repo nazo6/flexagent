@@ -216,34 +216,25 @@ impl ServerState {
         online.first().map(|node| node.node_id.clone())
     }
 
-    /// プロジェクトのこのノード上の最新バインドパスを解決する。
+    /// プロジェクトのこのノード上の既定実行ディレクトリを解決する。
+    ///
+    /// 直近使用した紐付け (Worktree 含む) を優先し、紐付けが無ければ
+    /// 最新セッションの実行ディレクトリへフォールバックする
+    /// ([`fxg_db::queries::resolve_default_local_path`])。
     async fn project_local_path(
         &self,
         project_id: &str,
         node_id: &str,
     ) -> Result<String, ApiError> {
-        let projects = self
-            .inner
+        self.inner
             .db
-            .list_projects()
+            .resolve_default_local_path(project_id, node_id)
             .await
-            .map_err(ApiError::from)?;
-        let project = projects
-            .iter()
-            .find(|project| project.project_id == project_id)
-            .ok_or_else(|| ApiError::not_found(format!("project not found: {project_id}")))?;
-        let mut bindings: Vec<_> = project
-            .bindings
-            .iter()
-            .filter(|binding| binding.node_id == node_id)
-            .collect();
-        bindings.sort_by_key(|binding| (binding.is_worktree, -binding.last_used_at));
-        bindings
-            .first()
-            .map(|binding| binding.local_path.clone())
+            .map_err(ApiError::from)?
             .ok_or_else(|| {
                 ApiError::not_found(format!(
-                    "project {project_id} is not bound to node {node_id}"
+                    "no default directory for project {project_id} on node {node_id}; \
+                     specify local_path or register the project (scan / link / worktree)"
                 ))
             })
     }

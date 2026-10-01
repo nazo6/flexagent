@@ -167,6 +167,17 @@ impl ClientApiBackend for DaemonState {
                     "git bundle restore requires an ephemeral node (Phase 6)",
                 ));
             }
+            // Fork 元の実行ディレクトリの紐付けも最新化する
+            if let Some(source) = self
+                .db()
+                .get_session(&fork.from_session_id)
+                .await
+                .map_err(ApiError::from)?
+            {
+                self.resolve_and_register_project(Path::new(&source.local_path))
+                    .await
+                    .map_err(api_error)?;
+            }
             let outcome = self
                 .session_manager()
                 .fork(
@@ -191,8 +202,10 @@ impl ClientApiBackend for DaemonState {
             });
         }
 
-        // 実行ディレクトリ: Worktree 同時作成 or 既存パス
-        let local_path = match (&request.worktree, &request.local_path) {
+        // 実行ディレクトリ: Worktree 同時作成 or 既存パス or ノード既定
+        // (Worktree 同時作成時は `worktree_add` が紐付けを登録済みのため、
+        //  ここでは既存パス・既定解決のときのみ改めて登録する)
+        let (local_path, register_binding) = match (&request.worktree, &request.local_path) {
             (Some(spec), _) => {
                 let repo = self
                     .project_main_repo(&request.project_id)
@@ -209,15 +222,32 @@ impl ClientApiBackend for DaemonState {
                     )
                     .await
                     .map_err(api_error)?;
-                outcome.path
+                (outcome.path, false)
             }
-            (None, Some(path)) => PathBuf::from(path),
+            (None, Some(path)) => (PathBuf::from(path), true),
             (None, None) => {
-                return Err(ApiError::bad_request(
-                    "local_path or worktree is required to start a session",
-                ));
+                let path = self
+                    .db()
+                    .resolve_default_local_path(&request.project_id, self.node_id())
+                    .await
+                    .map_err(ApiError::from)?
+                    .ok_or_else(|| {
+                        ApiError::not_found(format!(
+                            "no default directory for project {} on this node; \
+                             specify local_path or create a worktree",
+                            request.project_id
+                        ))
+                    })?;
+                (PathBuf::from(path), true)
             }
         };
+
+        if register_binding {
+            // 実行ディレクトリの紐付け (last_used_at / ブランチ) を最新化する
+            self.resolve_and_register_project(&local_path)
+                .await
+                .map_err(api_error)?;
+        }
 
         let session_id = fxg_protocol::util::uuid_v7();
         let outcome = self

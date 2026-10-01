@@ -95,6 +95,14 @@
     createPath = '';
   }
 
+  /** このプロジェクトの新規セッション画面を開く (場所・ノードを指定)。 */
+  function openNewSession(projectId: string, bindingNodeId?: string, path?: string) {
+    const params = new URLSearchParams({ project: projectId });
+    if (bindingNodeId) params.set('node', bindingNodeId);
+    if (path) params.set('path', path);
+    void goto(`/?${params.toString()}`);
+  }
+
   /** オンラインノードの既定選択 (先頭)。 */
   function defaultOnlineNode(): string {
     return sync.nodes.find((node) => node.is_online)?.node_id ?? '';
@@ -290,7 +298,7 @@
             <Button
               size="sm"
               onclick={() => {
-                void goto(`/?project=${encodeURIComponent(project.project_id)}`);
+                openNewSession(project.project_id);
               }}
             >
               <PlayIcon />
@@ -311,6 +319,16 @@
                 {#if binding.is_worktree}
                   <Badge variant="secondary">worktree</Badge>
                 {/if}
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  class="text-muted-foreground hover:text-foreground"
+                  onclick={() => openNewSession(project.project_id, binding.node_id, binding.local_path)}
+                  title="この場所で新規セッションを開始"
+                >
+                  <PlayIcon class="size-3.5" />
+                  <span class="sr-only">この場所で新規セッション</span>
+                </Button>
                 <span class="text-muted-foreground ml-auto">
                   {formatRelativeTime(binding.last_used_at)}
                 </span>

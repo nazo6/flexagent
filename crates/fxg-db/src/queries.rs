@@ -336,6 +336,63 @@ pub async fn list_projects(pool: &SqlitePool) -> Result<Vec<ProjectSummary>, DbE
     Ok(projects)
 }
 
+/// 実行ディレクトリの既定パスを解決する。
+///
+/// # 解決順序
+///
+/// 1. `(project_id, node_id)` の紐付けのうち**最終使用が最も新しい**もの
+///    (Worktree を含む。[`select_default_binding_path`] 参照)
+/// 2. 紐付けが無ければ `(project_id, node_id)` の最新セッションの `local_path`
+///    (セッション開始時の紐付け登録を実装する前に実行されたセッションへのフォールバック)
+///
+/// セッション開始要求で `local_path` を省略した場合の既定として、ノード・
+/// 中央サーバーの双方が共有する (設計: docs/01-architecture-and-sync.md §4)。
+pub async fn resolve_default_local_path(
+    pool: &SqlitePool,
+    project_id: &str,
+    node_id: &str,
+) -> Result<Option<String>, DbError> {
+    let projects = list_projects(pool).await?;
+    if let Some(project) = projects
+        .iter()
+        .find(|project| project.project_id == project_id)
+        && let Some(path) = select_default_binding_path(&project.bindings, node_id)
+    {
+        return Ok(Some(path));
+    }
+
+    let sessions = list_sessions(
+        pool,
+        &SessionFilter {
+            project_id: Some(project_id.to_owned()),
+            node_id: Some(node_id.to_owned()),
+            limit: Some(1),
+            ..SessionFilter::default()
+        },
+    )
+    .await?;
+    Ok(sessions
+        .into_iter()
+        .next()
+        .map(|session| session.local_path))
+}
+
+/// 紐付け一覧から既定として使うパスを選ぶ。
+///
+/// **最終使用が最も新しい**紐付けを選ぶ (`last_used_at`)。Worktree も候補に含める
+/// (直近の作業場所を既定にする)。同時刻の場合はメインリポジトリ
+/// (`is_worktree = false`) を優先する。
+pub fn select_default_binding_path(
+    bindings: &[ProjectBindingSummary],
+    node_id: &str,
+) -> Option<String> {
+    bindings
+        .iter()
+        .filter(|binding| binding.node_id == node_id)
+        .max_by_key(|binding| (binding.last_used_at, !binding.is_worktree))
+        .map(|binding| binding.local_path.clone())
+}
+
 /// ノード一覧を取得する (オンライン状態・一時ノード属性含む)。
 pub async fn list_nodes(pool: &SqlitePool) -> Result<Vec<NodeSummary>, DbError> {
     let rows = sqlx::query_as!(
