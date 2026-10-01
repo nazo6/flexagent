@@ -1,5 +1,7 @@
 <script lang="ts">
   import { page } from '$app/state';
+  import { goto } from '$app/navigation';
+  import * as AlertDialog from '$lib/components/ui/alert-dialog';
   import BootstrapLogCard from '$lib/components/BootstrapLogCard.svelte';
   import ChatTimeline from '$lib/components/chat/ChatTimeline.svelte';
   import Composer from '$lib/components/chat/Composer.svelte';
@@ -23,8 +25,10 @@
   import ChevronLeftIcon from '@lucide/svelte/icons/chevron-left';
   import FileCodeIcon from '@lucide/svelte/icons/file-code';
   import FolderIcon from '@lucide/svelte/icons/folder';
+  import GitForkIcon from '@lucide/svelte/icons/git-fork';
   import MessageSquareIcon from '@lucide/svelte/icons/message-square';
   import PanelRightCloseIcon from '@lucide/svelte/icons/panel-right-close';
+  import SkullIcon from '@lucide/svelte/icons/skull';
   import SquareTerminalIcon from '@lucide/svelte/icons/square-terminal';
 
   type ViewMode = 'chat' | 'diff' | 'terminal';
@@ -98,6 +102,9 @@
     showScrollBottom = distanceToBottom > 150;
   }
 
+  let killDialogOpen = $state(false);
+  let killing = $state(false);
+
   function scrollToBottom() {
     if (!chatContainer) return;
     chatContainer.scrollTo({ top: chatContainer.scrollHeight, behavior: 'smooth' });
@@ -109,6 +116,35 @@
       sidePanelMode = null;
     } else {
       sidePanelMode = mode;
+    }
+  }
+
+  function handleForkSession() {
+    if (!sessionId) return;
+    const params = new URLSearchParams();
+    params.set('fork_session', sessionId);
+    if (session?.project_id) params.set('project', session.project_id);
+    if (session?.agent_id) params.set('agent', session.agent_id);
+    if (session?.last_node_seq) params.set('fork_seq', String(session.last_node_seq));
+    void goto(`/?${params.toString()}`);
+  }
+
+  async function handleKillSession() {
+    if (!sessionId || killing) return;
+    killing = true;
+    try {
+      const result = await sync.controlSession(sessionId, { action: 'kill' });
+      if (result.success) {
+        toast.success('セッションの子プロセスツリーを強制終了しました');
+        killDialogOpen = false;
+        await sync.refreshSessions();
+      } else {
+        toast.error(result.error ?? result.code ?? '強制終了に失敗しました');
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      killing = false;
     }
   }
 </script>
@@ -238,9 +274,61 @@
             <span>Terminal</span>
           </Button>
         </div>
+
+        <div class="h-4 w-px bg-border/60 mx-0.5 hidden sm:block"></div>
+
+        <!-- Fork ボタン -->
+        <Button
+          variant="outline"
+          size="sm"
+          class="h-7 text-xs gap-1"
+          onclick={handleForkSession}
+          title="このセッションの履歴を引き継いで新しいセッションへ分岐 (Fork)"
+        >
+          <GitForkIcon class="size-3" />
+          <span class="hidden sm:inline">Fork</span>
+        </Button>
+
+        <!-- Kill ボタン (強制終了) -->
+        <Button
+          variant="ghost"
+          size="sm"
+          class="h-7 text-xs gap-1 text-destructive hover:bg-destructive/10 hover:text-destructive"
+          onclick={() => (killDialogOpen = true)}
+          title="セッションの子プロセスツリー (Job Object) を即座に強制終了"
+        >
+          <SkullIcon class="size-3" />
+          <span class="hidden sm:inline">Kill</span>
+        </Button>
       </div>
     </div>
   </header>
+
+  <!-- Kill 確認モーダル -->
+  <AlertDialog.Root bind:open={killDialogOpen}>
+    <AlertDialog.Content>
+      <AlertDialog.Header>
+        <AlertDialog.Title class="flex items-center gap-2 text-destructive">
+          <SkullIcon class="size-5" />
+          セッションを強制終了しますか？
+        </AlertDialog.Title>
+        <AlertDialog.Description class="text-sm">
+          セッション <code>{sessionId}</code> で実行中の子プロセスツリー
+          (Job Object) を即座に強制停止します。未コミットの変更や実行中のコマンドは中断されます。
+        </AlertDialog.Description>
+      </AlertDialog.Header>
+      <AlertDialog.Footer>
+        <AlertDialog.Cancel disabled={killing}>キャンセル</AlertDialog.Cancel>
+        <AlertDialog.Action
+          class="bg-destructive hover:bg-destructive/90 text-destructive-foreground"
+          disabled={killing}
+          onclick={handleKillSession}
+        >
+          {killing ? '強制終了中…' : '強制終了 (Kill)'}
+        </AlertDialog.Action>
+      </AlertDialog.Footer>
+    </AlertDialog.Content>
+  </AlertDialog.Root>
 
   <!-- セッションが存在しない場合のエラー表示 -->
   {#if session === null}

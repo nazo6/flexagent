@@ -14,6 +14,7 @@ import type { PermissionRequestEntry } from "$lib/generated/PermissionRequestEnt
 import type { ProjectSummary } from "$lib/generated/ProjectSummary";
 import type { ProjectsResponse } from "$lib/generated/ProjectsResponse";
 import type { ProvisionerSummary } from "$lib/generated/ProvisionerSummary";
+import type { ProvisionerTestResponse } from "$lib/generated/ProvisionerTestResponse";
 import type { ProvisionersResponse } from "$lib/generated/ProvisionersResponse";
 import type { PushSubscribeRequest } from "$lib/generated/PushSubscribeRequest";
 import type { PushSubscribeResponse } from "$lib/generated/PushSubscribeResponse";
@@ -196,6 +197,14 @@ export class ApiClient {
   async provisioners(): Promise<ProvisionerSummary[]> {
     const response = await this.#request<ProvisionersResponse>("GET", "/api/v1/provisioners");
     return response.provisioners;
+  }
+
+  /** `POST /api/v1/provisioners/:name/test` (疎通検証)。 */
+  testProvisioner(name: string): Promise<ProvisionerTestResponse> {
+    return this.#request<ProvisionerTestResponse>(
+      "POST",
+      `/api/v1/provisioners/${encodeURIComponent(name)}/test`,
+    );
   }
 
   // ------------------------------------------------------------------

@@ -207,6 +207,12 @@ pub enum ServerToNodeMsg {
         agent_id: String,
         /// 初期プロンプト
         initial_prompt: Option<String>,
+        /// 初期モード
+        mode: Option<String>,
+        /// OpenCode2 起動モード
+        opencode_mode: Option<String>,
+        /// エージェントへの追加引数
+        extra_args: Option<Vec<String>>,
         /// 別ノードからの履歴引き継ぎ時 (Replay 注入) の会話履歴
         fork_context_messages: Option<Vec<crate::common::ForkHistoryItem>>,
         /// 一時VMから退避された Git バンドルの復元用

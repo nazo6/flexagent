@@ -1,25 +1,32 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
   import { page } from '$app/state';
+  import * as Dialog from '$lib/components/ui/dialog';
   import { Button } from '$lib/components/ui/button';
   import { Input } from '$lib/components/ui/input';
   import { Label } from '$lib/components/ui/label';
   import NodeStatusBadge from '$lib/components/NodeStatusBadge.svelte';
   import FolderBrowserDialog from '$lib/components/fs/FolderBrowserDialog.svelte';
   import type { ProvisionerSummary } from '$lib/generated/ProvisionerSummary';
+  import type { ProvisionerTestResponse } from '$lib/generated/ProvisionerTestResponse';
   import { getNodeAvailability } from '$lib/node-status';
   import { sync } from '$lib/stores/app.svelte';
   import { toast } from 'svelte-sonner';
   import { onMount } from 'svelte';
   import BotIcon from '@lucide/svelte/icons/bot';
   import BoxIcon from '@lucide/svelte/icons/box';
+  import CheckCircle2Icon from '@lucide/svelte/icons/check-circle-2';
   import CornerDownLeftIcon from '@lucide/svelte/icons/corner-down-left';
   import FolderGit2Icon from '@lucide/svelte/icons/folder-git-2';
   import FolderOpenIcon from '@lucide/svelte/icons/folder-open';
+  import GitForkIcon from '@lucide/svelte/icons/git-fork';
+  import LoaderCircleIcon from '@lucide/svelte/icons/loader-circle';
   import PlayIcon from '@lucide/svelte/icons/play';
   import ServerIcon from '@lucide/svelte/icons/server';
   import Settings2Icon from '@lucide/svelte/icons/settings-2';
   import SparklesIcon from '@lucide/svelte/icons/sparkles';
+  import XCircleIcon from '@lucide/svelte/icons/x-circle';
+  import XIcon from '@lucide/svelte/icons/x';
 
   type PathMode = 'existing' | 'new_worktree';
   type RunTarget = 'node' | 'provisioner';
@@ -42,6 +49,20 @@
   let browserOpen = $state(false);
   let newWorktreeBrowserOpen = $state(false);
   let useCustomPath = $state(false);
+
+  // Fork 引き継ぎ
+  let forkSessionId = $state('');
+  let forkNodeSeq = $state<number | null>(null);
+
+  // 起動オプション
+  let sessionMode = $state<'default' | 'code' | 'plan'>('default');
+  let opencodeMode = $state<'default' | 'bridge' | 'acp'>('default');
+  let extraArgsText = $state('');
+
+  // プロビジョナー接続テスト
+  let testBusy = $state(false);
+  let testResult = $state<ProvisionerTestResponse | null>(null);
+  let testDialogOpen = $state(false);
 
   const projects = $derived(sync.projects);
   const selectedProject = $derived(
@@ -120,11 +141,56 @@
         : nodeId !== '' && (pathMode === 'existing' ? localPath !== '' : branch.trim() !== ''))
   );
 
+  $effect(() => {
+    const forkSession = page.url.searchParams.get('fork_session');
+    if (forkSession) {
+      forkSessionId = forkSession;
+      const forkSeqStr = page.url.searchParams.get('fork_seq');
+      forkNodeSeq = forkSeqStr ? Number.parseInt(forkSeqStr, 10) : null;
+    }
+    const agentParam = page.url.searchParams.get('agent');
+    if (agentParam) {
+      if (installedAgents.includes(agentParam)) {
+        agentId = agentParam;
+      } else {
+        customAgent = agentParam;
+      }
+    }
+  });
+
+  async function runProvisionerTest(name: string) {
+    if (testBusy || !name) return;
+    testBusy = true;
+    testResult = null;
+    testDialogOpen = true;
+    try {
+      const result = await sync.connection.client.testProvisioner(name);
+      testResult = result;
+      if (result.ok) {
+        toast.success(`プロビジョナー '${name}' の疎通テストに成功しました`);
+      } else {
+        toast.error(`プロビジョナー '${name}' の疎通テストに失敗しました: ${result.error ?? '不明なエラー'}`);
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+      testResult = {
+        name,
+        ok: false,
+        node_id: null,
+        log_lines: [],
+        error: error instanceof Error ? error.message : String(error)
+      };
+    } finally {
+      testBusy = false;
+    }
+  }
+
   async function handleStartSession(initialPrompt?: string) {
     if (!canSubmit || !selectedProject) return;
     busy = true;
     const promptToSend = (initialPrompt ?? promptText).trim();
     const useProvisioner = isProvisionerMode && selectedProvisioner !== null;
+    const extraArgs = extraArgsText.trim() ? extraArgsText.trim().split(/\s+/) : null;
 
     try {
       const response = await sync.connection.client.createSession({
@@ -146,13 +212,24 @@
             : null,
         agent_id: effectiveAgent,
         initial_prompt: promptToSend === '' ? null : promptToSend,
-        fork: null
+        mode: sessionMode === 'default' ? null : sessionMode,
+        opencode_mode: opencodeMode === 'default' ? null : opencodeMode,
+        extra_args: extraArgs,
+        fork: forkSessionId
+          ? {
+              from_session_id: forkSessionId,
+              from_node_seq: forkNodeSeq,
+              restore_git_bundle_b64: null
+            }
+          : null
       });
 
       toast.success(
         useProvisioner
           ? '一時VMの起動を開始しました (ブートストラップの進捗はセッション画面に表示されます)'
-          : 'セッションを開始しました'
+          : forkSessionId
+            ? 'フォークセッションを開始しました'
+            : 'セッションを開始しました'
       );
       await sync.refreshSessions();
       await goto(`/sessions/${response.session_id}`);
@@ -188,6 +265,33 @@
         プロジェクトとエージェントを選択してプロンプトを入力すると、新しい作業セッションを開始できます。
       </p>
     </div>
+
+    {#if forkSessionId}
+      <div class="bg-primary/10 border-primary/20 flex items-center justify-between rounded-xl border p-3 text-xs">
+        <div class="flex items-center gap-2">
+          <GitForkIcon class="text-primary size-4 shrink-0" />
+          <span>
+            セッション <code class="font-mono bg-background/50 px-1 py-0.5 rounded">{forkSessionId.slice(0, 8)}</code>
+            {#if forkNodeSeq !== null}
+              (シーケンス #{forkNodeSeq})
+            {/if}
+            から分岐して新しいセッションを開始します。
+          </span>
+        </div>
+        <Button
+          variant="ghost"
+          size="sm"
+          class="h-6 px-2 text-xs"
+          onclick={() => {
+            forkSessionId = '';
+            forkNodeSeq = null;
+          }}
+        >
+          <XIcon class="size-3.5 mr-1" />
+          フォーク解除
+        </Button>
+      </div>
+    {/if}
 
     <div class="bg-card/70 rounded-xl border p-3.5 shadow-xs flex flex-col gap-3">
       <div class="grid grid-cols-1 gap-2.5 sm:grid-cols-3">
@@ -226,22 +330,39 @@
             {/if}
           </Label>
           {#if isProvisionerMode}
-            {#if provisioners.length > 0}
-              <select
-                bind:value={provisionerName}
-                class="border-input bg-background focus-visible:ring-ring/40 h-8 rounded-md border px-2 text-xs outline-none focus-visible:ring-1"
-              >
-                {#each provisioners as provisioner (provisioner.name)}
-                  <option value={provisioner.name}>
-                    {provisioner.description ?? provisioner.name}
-                  </option>
-                {/each}
-              </select>
-            {:else}
-              <span class="text-muted-foreground text-xs leading-8">
-                プロビジョナー未定義 (中央サーバーの config.toml で定義してください)
-              </span>
-            {/if}
+            <div class="flex items-center gap-1.5">
+              {#if provisioners.length > 0}
+                <select
+                  bind:value={provisionerName}
+                  class="border-input bg-background focus-visible:ring-ring/40 h-8 rounded-md border px-2 text-xs outline-none focus-visible:ring-1 flex-1 min-w-0"
+                >
+                  {#each provisioners as provisioner (provisioner.name)}
+                    <option value={provisioner.name}>
+                      {provisioner.description ?? provisioner.name}
+                    </option>
+                  {/each}
+                </select>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  class="h-8 px-2 text-xs shrink-0"
+                  disabled={!provisionerName || testBusy}
+                  onclick={() => runProvisionerTest(provisionerName)}
+                  title="プロビジョナーの起動・接続テストを実行"
+                >
+                  {#if testBusy}
+                    <LoaderCircleIcon class="size-3.5 animate-spin" />
+                  {:else}
+                    テスト
+                  {/if}
+                </Button>
+              {:else}
+                <span class="text-muted-foreground text-xs leading-8">
+                  プロビジョナー未定義 (中央サーバーの config.toml で定義してください)
+                </span>
+              {/if}
+            </div>
           {:else}
             <select
               bind:value={nodeId}
@@ -439,6 +560,41 @@
                 </div>
               {/if}
             {/if}
+
+            <div class="border-t pt-2.5 grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+              <div class="flex flex-col gap-1">
+                <Label class="text-xs">エージェント初期モード</Label>
+                <select
+                  bind:value={sessionMode}
+                  class="border-input bg-background h-8 rounded-md border px-2 text-xs outline-none focus-visible:ring-1"
+                >
+                  <option value="default">既定 (未指定)</option>
+                  <option value="code">code (コード実装・編集)</option>
+                  <option value="plan">plan (設計・プランニング)</option>
+                </select>
+              </div>
+
+              <div class="flex flex-col gap-1">
+                <Label class="text-xs">OpenCode2 実行モード</Label>
+                <select
+                  bind:value={opencodeMode}
+                  class="border-input bg-background h-8 rounded-md border px-2 text-xs outline-none focus-visible:ring-1"
+                >
+                  <option value="default">既定 (TUI + Server ブリッジ)</option>
+                  <option value="bridge">bridge (サーバーブリッジのみ)</option>
+                  <option value="acp">acp (ACP Driver 経由)</option>
+                </select>
+              </div>
+
+              <div class="flex flex-col gap-1 sm:col-span-2">
+                <Label class="text-xs">追加 CLI 引数 (スペース区切り)</Label>
+                <Input
+                  bind:value={extraArgsText}
+                  placeholder="例: --model claude-3-7-sonnet --verbose"
+                  class="h-8 text-xs font-mono"
+                />
+              </div>
+            </div>
           </div>
         {/if}
       </div>
@@ -539,3 +695,55 @@
     newPath = path;
   }}
 />
+
+<Dialog.Root bind:open={testDialogOpen}>
+  <Dialog.Content class="max-w-lg">
+    <Dialog.Header>
+      <Dialog.Title>プロビジョナー疎通テスト: {provisionerName}</Dialog.Title>
+      <Dialog.Description>
+        一時VMを実際に起動し、ノード接続と終了処理が正常に行えるか検証します。
+      </Dialog.Description>
+    </Dialog.Header>
+    <div class="py-2 text-xs flex flex-col gap-3">
+      {#if testBusy}
+        <div class="flex flex-col items-center justify-center gap-2 py-8 text-muted-foreground">
+          <LoaderCircleIcon class="size-6 animate-spin text-primary" />
+          <span>プロビジョナーを起動しています… (数十秒かかる場合があります)</span>
+        </div>
+      {:else if testResult}
+        <div class="flex items-center gap-2 font-medium">
+          {#if testResult.ok}
+            <CheckCircle2Icon class="size-5 text-green-500" />
+            <span class="text-green-600 dark:text-green-400">疎通テスト成功</span>
+            {#if testResult.node_id}
+              <span class="text-muted-foreground font-mono text-[11px]">({testResult.node_id})</span>
+            {/if}
+          {:else}
+            <XCircleIcon class="size-5 text-destructive" />
+            <span class="text-destructive">疎通テスト失敗</span>
+          {/if}
+        </div>
+
+        {#if testResult.error}
+          <div class="bg-destructive/10 text-destructive border-destructive/20 rounded-md border p-2.5 font-mono text-[11px] whitespace-pre-wrap">
+            {testResult.error}
+          </div>
+        {/if}
+
+        {#if testResult.log_lines && testResult.log_lines.length > 0}
+          <div class="flex flex-col gap-1">
+            <span class="text-muted-foreground text-[11px]">実行ログ:</span>
+            <div class="bg-muted max-h-48 overflow-y-auto rounded-md p-2 font-mono text-[11px] leading-tight text-foreground whitespace-pre-wrap">
+              {testResult.log_lines.join('\n')}
+            </div>
+          </div>
+        {/if}
+      {/if}
+    </div>
+    <Dialog.Footer>
+      <Button variant="outline" size="sm" onclick={() => (testDialogOpen = false)}>
+        閉じる
+      </Button>
+    </Dialog.Footer>
+  </Dialog.Content>
+</Dialog.Root>

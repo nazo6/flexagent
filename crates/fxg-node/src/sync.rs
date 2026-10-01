@@ -368,6 +368,9 @@ pub(crate) async fn handle_server_message(
             local_path,
             agent_id,
             initial_prompt,
+            mode,
+            opencode_mode,
+            extra_args,
             fork_context_messages,
             restore_git_bundle_b64,
         } => {
@@ -415,6 +418,9 @@ pub(crate) async fn handle_server_message(
                     local_path: &local_path,
                     agent_id: &agent_id,
                     initial_prompt: initial_prompt.as_deref(),
+                    mode: mode.as_deref(),
+                    opencode_mode: opencode_mode.as_deref(),
+                    extra_args: extra_args.as_deref(),
                     fork_context: fork_context_messages.as_deref(),
                     restore_git_bundle: restore_bundle_file.as_deref(),
                 })

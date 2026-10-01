@@ -42,6 +42,18 @@ agent_id: string,
  */
 initial_prompt: string | null, 
 /**
+ * 初期モード (`code` / `plan` 等)
+ */
+mode: string | null, 
+/**
+ * OpenCode2 起動モード ("bridge" または "acp")
+ */
+opencode_mode: string | null, 
+/**
+ * エージェントへの追加パススルー引数
+ */
+extra_args: Array<string> | null, 
+/**
  * 既存セッションからの Fork 指定
  */
 fork: SessionForkSpec | null, };

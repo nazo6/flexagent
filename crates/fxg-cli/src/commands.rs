@@ -514,6 +514,17 @@ async fn run_with_provisioner(
         worktree,
         agent_id: args.agent.clone(),
         initial_prompt: args.prompt.clone(),
+        mode: args.mode.clone(),
+        opencode_mode: if args.acp {
+            Some("acp".to_owned())
+        } else {
+            None
+        },
+        extra_args: if args.extra_args.is_empty() {
+            None
+        } else {
+            Some(args.extra_args.clone())
+        },
         fork: None,
     };
     let response = server.create_session(&request).await?;
@@ -1293,6 +1304,9 @@ impl usage::RunAsync for SessionForkArgs {
                     .clone()
                     .unwrap_or_else(|| source.agent_id.clone()),
                 initial_prompt: None,
+                mode: None,
+                opencode_mode: None,
+                extra_args: None,
                 fork: Some(fxg_protocol::client_api::SessionForkSpec {
                     from_session_id: self.session_id.clone(),
                     from_node_seq: self.from_seq,

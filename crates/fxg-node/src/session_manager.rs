@@ -97,6 +97,12 @@ pub struct StartSessionParams<'a> {
     pub agent_id: &'a str,
     /// 初期プロンプト
     pub initial_prompt: Option<&'a str>,
+    /// 初期モード (`code` / `plan` 等)
+    pub mode: Option<&'a str>,
+    /// OpenCode2 起動モード ("bridge" または "acp")
+    pub opencode_mode: Option<&'a str>,
+    /// エージェントへの追加パススルー引数
+    pub extra_args: Option<&'a [String]>,
     /// Fork 時の履歴 Replay 注入 (別ノード・一時VMからの引き継ぎ)
     pub fork_context: Option<&'a [ForkHistoryItem]>,
     /// 別ノード・一時VMから退避された Git バンドルの復元 (ローカルファイルパス)
@@ -356,7 +362,23 @@ impl SessionManager {
         }
 
         let resolved = project::resolve_project(params.local_path, &self.inner.node_id).await?;
-        let spec = self.resolve_launch_spec(params.agent_id, &[]).await?;
+        let extra_args_vec: Vec<String> = params.extra_args.map(|s| s.to_vec()).unwrap_or_default();
+        let mut spec = self
+            .resolve_launch_spec(params.agent_id, &extra_args_vec)
+            .await?;
+        if let Some(om) = params.opencode_mode {
+            if spec.agent_id == "opencode2" {
+                if om == "acp" {
+                    spec.driver_kind = "acp".to_owned();
+                    spec.args = vec!["acp".to_owned()];
+                    spec.args.extend(extra_args_vec.iter().cloned());
+                } else if om == "bridge" {
+                    spec.driver_kind = "opencode2".to_owned();
+                    spec.args = vec!["serve".to_owned()];
+                    spec.args.extend(extra_args_vec.iter().cloned());
+                }
+            }
+        }
 
         // SessionCreated (node_seq = 1)
         let (git_branch, is_worktree) = branch_and_worktree(&resolved.local_path).await;
@@ -393,8 +415,8 @@ impl SessionManager {
                 title: &title,
                 cwd: &resolved.local_path,
                 spec: &spec,
-                extra_args: Vec::new(),
-                initial_mode: None,
+                extra_args: extra_args_vec,
+                initial_mode: params.mode.map(str::to_owned),
                 has_custom_title,
             })
             .await?;
@@ -1960,6 +1982,9 @@ mod tests {
                 local_path: dir.path(),
                 agent_id: "mock",
                 initial_prompt: Some("# First Turn\nDo something"),
+                mode: None,
+                opencode_mode: None,
+                extra_args: None,
                 fork_context: None,
                 restore_git_bundle: None,
             })

@@ -264,6 +264,12 @@ pub struct SpawnSessionRequest {
     pub agent_id: String,
     /// 初期プロンプト
     pub initial_prompt: Option<String>,
+    /// 初期モード
+    pub mode: Option<String>,
+    /// OpenCode2 起動モード
+    pub opencode_mode: Option<String>,
+    /// エージェントへの追加引数
+    pub extra_args: Option<Vec<String>>,
     /// 別ノードからの Fork 履歴 (Replay 注入)
     pub fork_context: Option<Vec<ForkHistoryItem>>,
     /// 退避済み Git バンドル (Base64)
@@ -318,6 +324,9 @@ pub async fn spawn_session(
         project_id: request.project_id.clone(),
         agent_id: request.agent_id.clone(),
         initial_prompt: request.initial_prompt.clone(),
+        mode: request.mode.clone(),
+        opencode_mode: request.opencode_mode.clone(),
+        extra_args: request.extra_args.clone(),
         fork_context: request.fork_context.clone(),
         restore_bundle_b64: request.restore_bundle_b64.clone(),
     };
@@ -490,6 +499,9 @@ struct PendingStart {
     project_id: String,
     agent_id: String,
     initial_prompt: Option<String>,
+    mode: Option<String>,
+    opencode_mode: Option<String>,
+    extra_args: Option<Vec<String>>,
     fork_context: Option<Vec<ForkHistoryItem>>,
     restore_bundle_b64: Option<String>,
 }
@@ -774,6 +786,9 @@ async fn await_handshake_and_start(
         local_path: EPHEMERAL_WORKSPACE.to_owned(),
         agent_id: pending.agent_id.clone(),
         initial_prompt: pending.initial_prompt.clone(),
+        mode: pending.mode.clone(),
+        opencode_mode: pending.opencode_mode.clone(),
+        extra_args: pending.extra_args.clone(),
         fork_context_messages: pending.fork_context.clone(),
         restore_git_bundle_b64: pending.restore_bundle_b64.clone(),
     };

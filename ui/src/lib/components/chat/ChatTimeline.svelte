@@ -1,18 +1,34 @@
 <script lang="ts">
+  import { goto } from '$app/navigation';
   import PermissionCard from '$lib/components/PermissionCard.svelte';
   import MarkdownText from '$lib/components/MarkdownText.svelte';
   import ToolCallGroup from './ToolCallGroup.svelte';
   import { Badge } from '$lib/components/ui/badge';
   import { formatEpochMs } from '$lib/format';
+  import { sync } from '$lib/stores/app.svelte';
   import type { TimelineItem } from '$lib/sync/reducer';
   import AlertTriangleIcon from '@lucide/svelte/icons/alert-triangle';
   import BotIcon from '@lucide/svelte/icons/bot';
   import BrainIcon from '@lucide/svelte/icons/brain';
   import ClockIcon from '@lucide/svelte/icons/clock';
+  import GitForkIcon from '@lucide/svelte/icons/git-fork';
   import ListChecksIcon from '@lucide/svelte/icons/list-checks';
   import SquareTerminalIcon from '@lucide/svelte/icons/square-terminal';
 
   let { sessionId, items }: { sessionId: string; items: TimelineItem[] } = $props();
+
+  const currentSession = $derived(
+    sync.sessions.find((s) => s.session_id === sessionId) ?? null
+  );
+
+  function forkFromSeq(seq: number) {
+    const params = new URLSearchParams();
+    params.set('fork_session', sessionId);
+    params.set('fork_seq', String(seq));
+    if (currentSession?.project_id) params.set('project', currentSession.project_id);
+    if (currentSession?.agent_id) params.set('agent', currentSession.agent_id);
+    void goto(`/?${params.toString()}`);
+  }
 
   function planStatusClass(status: string): string {
     switch (status) {
@@ -69,7 +85,15 @@
       {:else}
         {@const item = group.item}
         {#if item.kind === 'user'}
-          <div class="flex justify-end">
+          <div class="group flex items-end justify-end gap-1.5">
+            <button
+              type="button"
+              class="hover:bg-accent text-muted-foreground hover:text-foreground opacity-0 group-hover:opacity-100 mb-1 flex size-6 items-center justify-center rounded border transition-opacity cursor-pointer"
+              title="このターンからフォーク (新規セッションを開始)"
+              onclick={() => forkFromSeq(item.seq)}
+            >
+              <GitForkIcon class="size-3" />
+            </button>
             <div class="bg-primary text-primary-foreground max-w-[85%] rounded-2xl px-3.5 py-2">
               <p class="text-sm whitespace-pre-wrap">{item.text}</p>
               <p class="text-primary-foreground/70 mt-1 text-right text-[10px]">
@@ -78,7 +102,7 @@
             </div>
           </div>
         {:else if item.kind === 'agent'}
-          <div class="flex gap-2">
+          <div class="group flex gap-2">
             <BotIcon class="text-muted-foreground mt-0.5 size-4 shrink-0" />
             <div class="max-w-[92%] flex-1">
               <MarkdownText
@@ -86,6 +110,19 @@
                 streaming={item.streaming}
                 class="text-sm leading-relaxed"
               />
+              {#if !item.streaming}
+                <div class="mt-1 flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <button
+                    type="button"
+                    class="hover:bg-accent text-muted-foreground hover:text-foreground flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] border transition-colors cursor-pointer"
+                    title="この回答時点からフォーク (新規セッションを開始)"
+                    onclick={() => forkFromSeq(item.seq)}
+                  >
+                    <GitForkIcon class="size-3" />
+                    <span>ここからフォーク</span>
+                  </button>
+                </div>
+              {/if}
             </div>
           </div>
         {:else if item.kind === 'thought'}

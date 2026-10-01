@@ -221,6 +221,12 @@ pub struct CreateSessionRequest {
     pub agent_id: String,
     /// 初期プロンプト
     pub initial_prompt: Option<String>,
+    /// 初期モード (`code` / `plan` 等)
+    pub mode: Option<String>,
+    /// OpenCode2 起動モード ("bridge" または "acp")
+    pub opencode_mode: Option<String>,
+    /// エージェントへの追加パススルー引数
+    pub extra_args: Option<Vec<String>>,
     /// 既存セッションからの Fork 指定
     pub fork: Option<SessionForkSpec>,
 }
@@ -655,6 +661,9 @@ mod tests {
             }),
             agent_id: "opencode2".into(),
             initial_prompt: Some("テストを修正して".into()),
+            mode: Some("code".into()),
+            opencode_mode: Some("bridge".into()),
+            extra_args: Some(vec!["--verbose".into()]),
             fork: None,
         };
         let json = serde_json::to_value(&req).unwrap();
