@@ -352,7 +352,7 @@ pub async fn run_hook_command(dir: &Path, command: &str) -> Result<HookLogEntry,
     let program_path = fxg_pty::resolve_command(program, dir)
         .map_err(|err| NodeError::GitUnavailable(err.to_string()))?;
 
-    let guard = fxg_pty::ProcessTreeGuard::new().map_err(|err| {
+    let _guard = fxg_pty::ProcessTreeGuard::new().map_err(|err| {
         NodeError::Server(format!("failed to initialize process tree guard: {err}"))
     })?;
 
@@ -369,7 +369,7 @@ pub async fn run_hook_command(dir: &Path, command: &str) -> Result<HookLogEntry,
     #[cfg(windows)]
     {
         if let Some(raw_handle) = child.raw_handle()
-            && let Err(err) = guard.attach_raw_handle(raw_handle)
+            && let Err(err) = _guard.attach_raw_handle(raw_handle)
         {
             tracing::warn!("failed to attach hook process to job object: {err}");
         }
