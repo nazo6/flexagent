@@ -234,6 +234,7 @@ pub fn print_daemon_banner(
     ipc_endpoint: &str,
     log_file: Option<&Path>,
     central_server_url: Option<&str>,
+    auth_token: Option<&str>,
     use_color: bool,
 ) {
     let log_str = log_file
@@ -248,7 +249,12 @@ pub fn print_daemon_banner(
         );
         eprintln!("  \x1b[1mNode ID:\x1b[0m      {node_id}");
         eprintln!("  \x1b[1mHTTP/WS API:\x1b[0m  http://{http_addr}");
-        eprintln!("  \x1b[1mWeb UI:\x1b[0m       http://{http_addr}/");
+        if let Some(token) = auth_token {
+            eprintln!("  \x1b[1mWeb UI:\x1b[0m       http://{http_addr}/?token={token}");
+            eprintln!("  \x1b[1mAuth Token:\x1b[0m   \x1b[33m{token}\x1b[0m");
+        } else {
+            eprintln!("  \x1b[1mWeb UI:\x1b[0m       http://{http_addr}/");
+        }
         eprintln!("  \x1b[1mIPC Endpoint:\x1b[0m {ipc_endpoint}");
         eprintln!("  \x1b[1mLog File:\x1b[0m     {log_str}");
         eprintln!("  \x1b[1mOutbox Sync:\x1b[0m  {sync_str}");
@@ -257,7 +263,12 @@ pub fn print_daemon_banner(
         eprintln!("FlexAgent daemon v{} started", env!("CARGO_PKG_VERSION"));
         eprintln!("  Node ID:      {node_id}");
         eprintln!("  HTTP/WS API:  http://{http_addr}");
-        eprintln!("  Web UI:       http://{http_addr}/");
+        if let Some(token) = auth_token {
+            eprintln!("  Web UI:       http://{http_addr}/?token={token}");
+            eprintln!("  Auth Token:   {token}");
+        } else {
+            eprintln!("  Web UI:       http://{http_addr}/");
+        }
         eprintln!("  IPC Endpoint: {ipc_endpoint}");
         eprintln!("  Log File:     {log_str}");
         eprintln!("  Outbox Sync:  {sync_str}");
@@ -270,6 +281,7 @@ pub fn print_server_banner(
     http_addr: &str,
     fxg_home: &Path,
     log_file: Option<&Path>,
+    auth_token: Option<&str>,
     use_color: bool,
 ) {
     let log_str = log_file
@@ -282,7 +294,12 @@ pub fn print_server_banner(
             env!("CARGO_PKG_VERSION")
         );
         eprintln!("  \x1b[1mHTTP/WS API:\x1b[0m  http://{http_addr}");
-        eprintln!("  \x1b[1mWeb UI:\x1b[0m       http://{http_addr}/");
+        if let Some(token) = auth_token {
+            eprintln!("  \x1b[1mWeb UI:\x1b[0m       http://{http_addr}/?token={token}");
+            eprintln!("  \x1b[1mAuth Token:\x1b[0m   \x1b[33m{token}\x1b[0m");
+        } else {
+            eprintln!("  \x1b[1mWeb UI:\x1b[0m       http://{http_addr}/");
+        }
         eprintln!("  \x1b[1mData Dir:\x1b[0m     {}", fxg_home.display());
         eprintln!("  \x1b[1mLog File:\x1b[0m     {log_str}");
         eprintln!("  \x1b[2mPress Ctrl+C to stop.\x1b[0m\n");
@@ -292,7 +309,12 @@ pub fn print_server_banner(
             env!("CARGO_PKG_VERSION")
         );
         eprintln!("  HTTP/WS API:  http://{http_addr}");
-        eprintln!("  Web UI:       http://{http_addr}/");
+        if let Some(token) = auth_token {
+            eprintln!("  Web UI:       http://{http_addr}/?token={token}");
+            eprintln!("  Auth Token:   {token}");
+        } else {
+            eprintln!("  Web UI:       http://{http_addr}/");
+        }
         eprintln!("  Data Dir:     {}", fxg_home.display());
         eprintln!("  Log File:     {log_str}");
         eprintln!("  Press Ctrl+C to stop.\n");
@@ -338,5 +360,36 @@ mod tests {
             resolve_log_file_path(&opts, &config, dir.path()),
             Some(dir.path().join("custom.log"))
         );
+    }
+
+    #[test]
+    fn print_banners_do_not_panic() {
+        let dir = tempfile::tempdir().unwrap();
+        print_daemon_banner(
+            "node_test",
+            "127.0.0.1:7860",
+            r"\\.\pipe\test",
+            Some(dir.path()),
+            None,
+            Some("test_token_123"),
+            true,
+        );
+        print_daemon_banner(
+            "node_test",
+            "127.0.0.1:7860",
+            r"\\.\pipe\test",
+            None,
+            None,
+            None,
+            false,
+        );
+        print_server_banner(
+            "0.0.0.0:8080",
+            dir.path(),
+            None,
+            Some("test_token_123"),
+            true,
+        );
+        print_server_banner("0.0.0.0:8080", dir.path(), None, None, false);
     }
 }

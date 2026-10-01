@@ -16,9 +16,18 @@
   import BellIcon from '@lucide/svelte/icons/bell';
   import BellOffIcon from '@lucide/svelte/icons/bell-off';
   import CableIcon from '@lucide/svelte/icons/cable';
+  import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
   import LogOutIcon from '@lucide/svelte/icons/log-out';
   import PlusIcon from '@lucide/svelte/icons/plus';
   import ServerIcon from '@lucide/svelte/icons/server';
+  import { cn } from '$lib/utils';
+
+  interface Props {
+    class?: string;
+    align?: 'start' | 'center' | 'end';
+  }
+
+  let { class: className, align = 'start' }: Props = $props();
 
   let addOpen = $state(false);
   let newLabel = $state('');
@@ -95,13 +104,22 @@
 <DropdownMenu.Root>
   <DropdownMenu.Trigger>
     {#snippet child({ props })}
-      <Button variant="outline" size="sm" {...props}>
-        <ServerIcon />
-        <span class="hidden md:inline">{roleLabel}</span>
+      <Button
+        variant="outline"
+        size="sm"
+        {...props}
+        class={cn('gap-1.5 text-xs', className)}
+        title={`現在の接続先: ${roleLabel} (${originLabel})`}
+      >
+        <div class="flex items-center gap-1.5 min-w-0">
+          <ServerIcon class="size-3.5 shrink-0 text-muted-foreground" />
+          <span class="truncate">{roleLabel}</span>
+        </div>
+        <ChevronDownIcon class="size-3 text-muted-foreground/70 shrink-0 ml-auto" />
       </Button>
     {/snippet}
   </DropdownMenu.Trigger>
-  <DropdownMenu.Content align="end" class="w-80">
+  <DropdownMenu.Content {align} class="w-80">
     <DropdownMenu.Label>現在の接続先</DropdownMenu.Label>
     <DropdownMenu.Item disabled>
       <span class="truncate">{originLabel}</span>

@@ -2,8 +2,15 @@
   import * as AlertDialog from '$lib/components/ui/alert-dialog';
   import { Button } from '$lib/components/ui/button';
   import { sync } from '$lib/stores/app.svelte';
+  import { cn } from '$lib/utils';
   import { toast } from 'svelte-sonner';
   import OctagonXIcon from '@lucide/svelte/icons/octagon-x';
+
+  interface Props {
+    class?: string;
+  }
+
+  let { class: className }: Props = $props();
 
   let busy = $state(false);
 
@@ -24,9 +31,15 @@
 <AlertDialog.Root>
   <AlertDialog.Trigger>
     {#snippet child({ props })}
-      <Button variant="destructive" size="sm" {...props}>
-        <OctagonXIcon />
-        <span class="hidden sm:inline">緊急停止</span>
+      <Button
+        variant="destructive"
+        size="sm"
+        {...props}
+        class={cn('shrink-0 gap-1.5 text-xs', className)}
+        title="全セッションを緊急停止"
+      >
+        <OctagonXIcon class="size-3.5 shrink-0" />
+        <span>緊急停止</span>
       </Button>
     {/snippet}
   </AlertDialog.Trigger>

@@ -138,6 +138,11 @@ impl ServerState {
         &self.inner.options
     }
 
+    /// クライアント認証トークン。
+    pub fn auth_token(&self) -> &str {
+        &self.inner.auth_token
+    }
+
     /// 監査ログを `server.db.audit_logs` に記録する (失敗は警告のみ)。
     pub async fn record_audit(
         &self,

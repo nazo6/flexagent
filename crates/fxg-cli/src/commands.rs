@@ -166,12 +166,18 @@ impl usage::RunAsync for DaemonArgs {
             daemon.state().paths().fxg_home(),
         );
         let use_color = crate::logging::should_use_color(self.no_color, global.log.no_color);
+        let auth_token = if cfg!(debug_assertions) {
+            Some(daemon.state().auth_token())
+        } else {
+            None
+        };
         crate::logging::print_daemon_banner(
             daemon.state().node_id(),
             &daemon.http_addr().to_string(),
             daemon.ipc_endpoint(),
             log_file.as_deref(),
             daemon.state().config().central_server_url.as_deref(),
+            auth_token.as_deref(),
             use_color,
         );
 
@@ -299,10 +305,16 @@ impl usage::RunAsync for ServerArgs {
         let log_file =
             crate::logging::resolve_log_file_path(&self.logging_options(), &global.log, &fxg_home);
         let use_color = crate::logging::should_use_color(self.no_color, global.log.no_color);
+        let auth_token = if cfg!(debug_assertions) {
+            Some(server.state().auth_token())
+        } else {
+            None
+        };
         crate::logging::print_server_banner(
             &server.listen_addr().to_string(),
             &fxg_home,
             log_file.as_deref(),
+            auth_token,
             use_color,
         );
 

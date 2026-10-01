@@ -370,7 +370,7 @@
     {/if}
   </div>
 
-  <!-- 下部フッター: 新規ボタン & ステータス -->
+  <!-- 下部フッター: 新規ボタン & 接続メニュー & ステータス -->
   <div class="border-t p-2 flex flex-col gap-2">
     <Button
       variant="outline"
@@ -385,12 +385,15 @@
       新規セッションを開始
     </Button>
 
-    <div class="flex items-center justify-between text-xs pt-1">
-      <SyncStatusBadge />
-      <div class="flex items-center gap-1">
-        <ConnectionMenu />
-        <KillSwitchButton />
+    <div class="flex items-center gap-1.5">
+      <div class="flex-1 min-w-0">
+        <ConnectionMenu class="w-full justify-between" />
       </div>
+      <KillSwitchButton />
+    </div>
+
+    <div class="pt-0.5">
+      <SyncStatusBadge />
     </div>
   </div>
 </aside>

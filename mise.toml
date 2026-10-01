@@ -160,6 +160,29 @@ cargo sqlx prepare --workspace --check
 """
 
 # ---------------------------------------------------------------------------
+# 開発
+# ---------------------------------------------------------------------------
+
+[tasks."dev:ui"]
+description = "UI (Vite) 開発サーバーを起動する (http://localhost:5173)"
+run = "pnpm --dir ui run dev"
+alias = "ui:dev"
+
+[tasks."dev:daemon"]
+description = "デバッグバイナリのローカルデーモン (`fxg daemon`) を起動する (http://127.0.0.1:7860)"
+run = "cargo run -p fxg-cli -- daemon"
+
+[tasks."dev:server"]
+description = "デバッグバイナリの中央サーバー (`fxg server`) を起動する (http://0.0.0.0:8080)"
+run = "cargo run -p fxg-cli -- server"
+
+[tasks.dev]
+description = "Vite 開発サーバーとデバッグバイナリ (fxg daemon) を並列起動する"
+run = [
+  { tasks = ["dev:ui", "dev:daemon"] },
+]
+
+# ---------------------------------------------------------------------------
 # ビルド
 # ---------------------------------------------------------------------------
 
