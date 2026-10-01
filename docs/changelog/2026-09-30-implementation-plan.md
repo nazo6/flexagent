@@ -1119,3 +1119,12 @@
   - **E2E テストの実行時間**: `provisioner_e2e.rs` は実バイナリ起動を含めて約 7
     秒で完了する (アイドルタイムアウトは 30 秒設定で、セッション Error
     検知による即時 Drain が先に走る)。
+  - **バグ修正 (CI: windows-latest で検出 / bundle 復元の EOL 変換)**:
+    `git clone` / `git fetch` / `git checkout` は Windows の既定
+    `core.autocrlf=true` で LF を CRLF
+    に変換するため、退避した作業ツリーと復元結果が
+    バイト一致しなかった (CI run `36813642172` の `test (windows-latest)` で
+    `bundle_roundtrip_restores_committed_and_uncommitted_state` が失敗)。
+    Shadow Git 操作と同じく `-c core.autocrlf=false -c core.eol=lf` を前置し、
+    テスト側のリポジトリ設定で `core.autocrlf=true` を模擬する回帰条件を追加した
+    (Phase 2 の snapshot テストと同じ対策)。

@@ -26,6 +26,22 @@ use crate::snapshot::ShadowGitTree;
 /// 退避対象のスナップショットを固定する一時ブランチ名。
 pub const SNAPSHOT_REF: &str = "refs/heads/fxg-snapshot";
 
+/// ワークツリーのバイト列をそのまま往復させるための Git 設定引数。
+///
+/// Windows の既定 (`core.autocrlf=true`) では clone / checkout 時に LF が CRLF
+/// へ変換され、退避した作業ツリーと復元結果が一致しない (CI: windows-latest で
+/// 検出。snapshot.rs の Shadow Git 操作と同じ理由)。
+const WORKTREE_GIT_CONFIG: &[&str] = &["-c", "core.autocrlf=false", "-c", "core.eol=lf"];
+
+/// ワークツリー Git 操作の引数に [`WORKTREE_GIT_CONFIG`] を前置する。
+fn worktree_git_args<'a>(args: &[&'a str]) -> Vec<&'a str> {
+    WORKTREE_GIT_CONFIG
+        .iter()
+        .copied()
+        .chain(args.iter().copied())
+        .collect()
+}
+
 /// 生成したワークスペースバンドル。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorkspaceBundle {
@@ -146,15 +162,19 @@ pub async fn restore_workspace_bundle(target: &Path, bundle_file: &Path) -> Resu
             source,
         })?;
         let target_arg = target.to_string_lossy().into_owned();
-        git::run_git(parent, &["clone", &bundle_arg, &target_arg]).await?;
+        git::run_git(
+            parent,
+            &worktree_git_args(&["clone", &bundle_arg, &target_arg]),
+        )
+        .await?;
     } else {
         git::run_git(
             target,
-            &[
+            &worktree_git_args(&[
                 "fetch",
                 &bundle_arg,
                 "+refs/heads/fxg-snapshot:refs/fxg-bundle/fxg-snapshot",
-            ],
+            ]),
         )
         .await?;
     }
@@ -179,10 +199,18 @@ pub async fn restore_workspace_bundle(target: &Path, bundle_file: &Path) -> Resu
         .filter(|branch| branch != "HEAD");
     match branch {
         Some(branch) => {
-            git::run_git(target, &["checkout", "-f", "-B", &branch, &snapshot]).await?;
+            git::run_git(
+                target,
+                &worktree_git_args(&["checkout", "-f", "-B", &branch, &snapshot]),
+            )
+            .await?;
         }
         None => {
-            git::run_git(target, &["checkout", "-f", "--detach", &snapshot]).await?;
+            git::run_git(
+                target,
+                &worktree_git_args(&["checkout", "-f", "--detach", &snapshot]),
+            )
+            .await?;
         }
     }
     tracing::info!(
@@ -229,6 +257,8 @@ mod tests {
             vec!["init", "-q", "-b", "main"],
             vec!["config", "user.email", "test@example.com"],
             vec!["config", "user.name", "fxg test"],
+            // Windows CI の既定 (core.autocrlf=true) を再現する回帰条件
+            vec!["config", "core.autocrlf", "true"],
         ] {
             git::run_git(dir, &args).await.expect("git init");
         }
