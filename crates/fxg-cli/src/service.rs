@@ -383,11 +383,18 @@ async fn status(server: bool, _exe: &std::path::Path) -> Result<()> {
         .output()
         .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_owned())
         .unwrap_or_else(|_| "unknown".to_owned());
+    let installed = enabled == "enabled" || unit.exists();
     println!("service:   {name} (systemd --user)");
     println!("unit:      {}", unit.display());
-    println!("installed: {}", yes_no(enabled == "enabled"));
+    println!("installed: {}", yes_no(installed));
     println!("running:   {}", active);
     println!("probe:     {}", yes_no(probe_running(server).await));
+    if !installed {
+        println!(
+            "hint:      `fxg service install{}` で登録できます",
+            server_flag(server)
+        );
+    }
     Ok(())
 }
 
@@ -511,6 +518,12 @@ async fn status(server: bool, _exe: &std::path::Path) -> Result<()> {
     println!("installed: {}", yes_no(installed));
     println!("running:   {}", yes_no(running));
     println!("probe:     {}", yes_no(probe_running(server).await));
+    if !installed {
+        println!(
+            "hint:      `fxg service install{}` で登録できます",
+            server_flag(server)
+        );
+    }
     Ok(())
 }
 
@@ -555,6 +568,7 @@ fn yes_no(value: bool) -> &'static str {
     if value { "yes" } else { "no" }
 }
 
+#[allow(dead_code)]
 fn server_flag(server: bool) -> &'static str {
     if server { " --server" } else { "" }
 }
