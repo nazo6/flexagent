@@ -13,6 +13,10 @@ local_path: string,
  */
 is_worktree: boolean, 
 /**
+ * 報告時点でノード上に実在するか (ディレクトリ確認)
+ */
+path_exists: boolean, 
+/**
  * 最終確認時のGitブランチ
  */
 git_branch: string | null, 

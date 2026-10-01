@@ -1241,6 +1241,7 @@ async fn apply_project_reports(
                     node_id: node_id.to_owned(),
                     local_path: binding.local_path.clone(),
                     is_worktree: binding.is_worktree,
+                    path_exists: binding.path_exists,
                     git_branch: binding.git_branch.clone(),
                 })
                 .await?;

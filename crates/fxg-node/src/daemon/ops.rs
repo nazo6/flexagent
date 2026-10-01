@@ -7,7 +7,7 @@
 use std::path::{Path, PathBuf};
 
 use fxg_protocol::client_api::{AgentSummary, AgentsResponse, WorktreeInfo};
-use fxg_protocol::common::{AgentAction, HookLogEntry};
+use fxg_protocol::common::{AgentAction, HookLogEntry, ProjectSummary};
 
 use super::DaemonState;
 use crate::error::NodeError;
@@ -130,6 +130,29 @@ impl DaemonState {
         // 周辺の変更 (Worktree 検出・プロジェクト紐付け) をハブへ報告する
         self.trigger_node_hello();
         Ok(resolved)
+    }
+
+    /// プロジェクト一覧に自ノード紐付けのパス実在確認 (ライブ) を付与して返す。
+    ///
+    /// パス実在は外部要因 (Worktree の手動削除・外部ドライブの取り外し等) で
+    /// 変わるため、クライアントへの返却時に確認する。
+    pub async fn list_projects_with_path_state(&self) -> Result<Vec<ProjectSummary>, NodeError> {
+        let mut projects = self.db().list_projects().await?;
+        self.refresh_binding_path_state(&mut projects);
+        Ok(projects)
+    }
+
+    /// 自ノードの紐付けに `path_exists` (ライブ値) を書き込む。
+    ///
+    /// ノード側 DB の紐付けは自ノード分のみのため、他ノードの確認は行わない。
+    pub fn refresh_binding_path_state(&self, projects: &mut [ProjectSummary]) {
+        for project in projects.iter_mut() {
+            for binding in project.bindings.iter_mut() {
+                if binding.node_id == self.node_id() {
+                    binding.path_exists = Path::new(&binding.local_path).is_dir();
+                }
+            }
+        }
     }
 
     /// `.fxg.toml` に `project_key` を書き込み、紐付けを即時反映する

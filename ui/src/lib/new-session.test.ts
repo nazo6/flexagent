@@ -2,7 +2,12 @@ import { describe, expect, it } from "vitest";
 import type { NodeSummary } from "$lib/generated/NodeSummary";
 import type { ProjectSummary } from "$lib/generated/ProjectSummary";
 import type { SessionSummary } from "$lib/generated/SessionSummary";
-import { buildPathCandidates, pickDefaultNode, projectRecency } from "./new-session";
+import {
+  buildPathCandidates,
+  pickDefaultCandidate,
+  pickDefaultNode,
+  projectRecency,
+} from "./new-session";
 
 function node(node_id: string, is_online = true, name = node_id): NodeSummary {
   return {
@@ -39,11 +44,13 @@ function binding(
   node_id = "n1",
   last_used_at = 0,
   is_worktree = false,
+  path_exists = true,
 ): ProjectSummary["bindings"][number] {
   return {
     node_id,
     local_path,
     is_worktree,
+    path_exists,
     git_branch: is_worktree ? "feat/x" : "main",
     last_used_at,
   };
@@ -90,9 +97,34 @@ describe("buildPathCandidates", () => {
     expect(candidates[0]).toMatchObject({
       source: "binding",
       isWorktree: true,
+      exists: true,
       gitBranch: "feat/x",
       usedAt: 300,
     });
+  });
+
+  it("sorts existing paths before stale ones and skips stale for the default", () => {
+    const candidates = buildPathCandidates(
+      project([
+        binding("/repo/stale-wt", "n1", 900, true, false),
+        binding("/repo/main", "n1", 100),
+        binding("/repo/stale-main", "n1", 800, false, false),
+      ]),
+      "n1",
+      [],
+    );
+    expect(candidates.map((c) => c.path)).toEqual([
+      "/repo/main",
+      "/repo/stale-wt",
+      "/repo/stale-main",
+    ]);
+    expect(candidates[0]).toMatchObject({ path: "/repo/main", exists: true });
+    expect(pickDefaultCandidate(candidates)?.path).toBe("/repo/main");
+
+    // 実在する候補が無い場合は先頭 (直近使用) を返す
+    const staleOnly = candidates.filter((c) => !c.exists);
+    expect(pickDefaultCandidate(staleOnly)?.path).toBe("/repo/stale-wt");
+    expect(pickDefaultCandidate([])).toBeNull();
   });
 
   it("fills session-only paths by recency and prefers bindings for duplicates", () => {

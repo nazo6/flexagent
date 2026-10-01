@@ -47,8 +47,8 @@ use fxg_protocol::client_api::{
     SystemInfoResponse, UpdateAgentsRequest, WorktreeInfo, WorktreesResponse,
 };
 use fxg_protocol::common::{
-    AgentAction, CommandResult, DiffScope, ErrorCode, SessionControlAction, SessionStatus,
-    WorkspaceDiffResponse,
+    AgentAction, CommandResult, DiffScope, ErrorCode, ProjectSummary, SessionControlAction,
+    SessionStatus, WorkspaceDiffResponse,
 };
 use fxg_protocol::events::{SessionEventBatch, SessionEventEnvelope};
 use tokio::sync::broadcast;
@@ -325,6 +325,14 @@ impl ClientCommand {
 pub trait ClientApiBackend: Clone + Send + Sync + 'static {
     /// 接続先の DB (ローカルノードは `node.db`、中央サーバーは `server.db`)。
     fn db(&self) -> &Db;
+
+    /// `GET /api/v1/projects` (論理プロジェクト一覧)。
+    ///
+    /// 既定実装は DB 投影をそのまま返す。ローカルノードは紐付けパスの
+    /// 実在確認 (ライブ) を行った一覧を返すため上書きする。
+    async fn list_projects(&self) -> Result<Vec<ProjectSummary>, ApiError> {
+        self.db().list_projects().await.map_err(ApiError::from)
+    }
 
     /// クライアント認証トークン。
     fn auth_token(&self) -> String;
@@ -740,9 +748,9 @@ async fn auth_logout() -> Response {
 }
 
 async fn list_projects<B: ClientApiBackend>(State(state): State<ClientApiState<B>>) -> Response {
-    match state.backend.db().list_projects().await {
+    match state.backend.list_projects().await {
         Ok(projects) => Json(ProjectsResponse { projects }).into_response(),
-        Err(err) => ApiError::from(err).into_response(),
+        Err(err) => err.into_response(),
     }
 }
 

@@ -310,6 +310,8 @@ pub struct ProjectNodeBinding {
     pub local_path: String,
     /// Git Worktree か (false はメインリポジトリ)
     pub is_worktree: bool,
+    /// 報告時点でノード上に実在するか (ディレクトリ確認)
+    pub path_exists: bool,
     /// 最終確認時のGitブランチ
     pub git_branch: Option<String>,
     /// 最終使用日時 (Unix epoch ms)
@@ -682,6 +684,11 @@ pub struct ProjectBindingSummary {
     pub local_path: String,
     /// Git Worktree か
     pub is_worktree: bool,
+    /// ローカルパスがノード上に実在するか
+    ///
+    /// 中央サーバーでは最後の NodeHello 報告時点、ローカルノードでは
+    /// 取得時にライブ確認した値。
+    pub path_exists: bool,
     /// 最終確認時のGitブランチ
     pub git_branch: Option<String>,
     /// 最終使用日時 (Unix epoch ms)

@@ -56,6 +56,7 @@ impl Fixture {
             node_id: NODE_ID.to_owned(),
             local_path: LOCAL_PATH.to_owned(),
             is_worktree: false,
+            path_exists: true,
             git_branch: Some("main".to_owned()),
         })
         .await
@@ -1021,7 +1022,7 @@ async fn registration_upserts_and_audit_logs() {
     let nodes = fixture.db.list_nodes().await.expect("list nodes");
     assert!(!nodes[0].is_online);
 
-    // バインドの更新 (ブランチ変更)
+    // バインドの更新 (ブランチ変更・パス消失)
     fixture
         .db
         .upsert_project_binding(&ProjectBindingRecord {
@@ -1029,6 +1030,7 @@ async fn registration_upserts_and_audit_logs() {
             node_id: NODE_ID.to_owned(),
             local_path: LOCAL_PATH.to_owned(),
             is_worktree: false,
+            path_exists: false,
             git_branch: Some("feat/rebase".to_owned()),
         })
         .await
@@ -1039,6 +1041,10 @@ async fn registration_upserts_and_audit_logs() {
     assert_eq!(
         projects[0].bindings[0].git_branch.as_deref(),
         Some("feat/rebase")
+    );
+    assert!(
+        !projects[0].bindings[0].path_exists,
+        "path_exists must round-trip through projections"
     );
 
     // 監査ログ
@@ -1086,6 +1092,7 @@ async fn default_local_path_prefers_recent_binding_then_session_history() {
             node_id: NODE_ID.to_owned(),
             local_path: "/home/nazo/src/flexagent-wt".to_owned(),
             is_worktree: true,
+            path_exists: true,
             git_branch: Some("feat/x".to_owned()),
         })
         .await
@@ -1122,6 +1129,35 @@ async fn default_local_path_prefers_recent_binding_then_session_history() {
         Some("/home/nazo/src/flexagent-wt"),
         "直近使用した Worktree を優先する"
     );
+
+    // 実在しない紐付けは既定にしない (より古い実在する紐付けへフォールバック)
+    sqlx::query("UPDATE project_node_bindings SET path_exists = 0 WHERE local_path = ?")
+        .bind("/home/nazo/src/flexagent-wt")
+        .execute(fixture.db.pool())
+        .await
+        .expect("mark worktree missing");
+    let path = fixture
+        .db
+        .resolve_default_local_path(PROJECT_ID, NODE_ID)
+        .await
+        .expect("resolve default");
+    assert_eq!(
+        path.as_deref(),
+        Some(LOCAL_PATH),
+        "実在する紐付けへフォールバックする"
+    );
+
+    // 実在する紐付けが無い場合は最終使用が最も新しいものを返す (UI が警告表示)
+    sqlx::query("UPDATE project_node_bindings SET path_exists = 0")
+        .execute(fixture.db.pool())
+        .await
+        .expect("mark all missing");
+    let path = fixture
+        .db
+        .resolve_default_local_path(PROJECT_ID, NODE_ID)
+        .await
+        .expect("resolve default");
+    assert_eq!(path.as_deref(), Some("/home/nazo/src/flexagent-wt"));
 
     // 紐付けの無いプロジェクトは最新セッションの local_path にフォールバックする
     // (セッション開始時の紐付け登録を実装する前に実行されたセッションを想定)

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        INSERT INTO project_node_bindings\n            (project_id, node_id, local_path, is_worktree, path_exists, git_branch, last_used_at)\n        VALUES (?, ?, ?, ?, ?, ?, ?)\n        ON CONFLICT(project_id, node_id, local_path) DO UPDATE SET\n            is_worktree = excluded.is_worktree,\n            path_exists = excluded.path_exists,\n            git_branch = excluded.git_branch,\n            last_used_at = excluded.last_used_at\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 7
+    },
+    "nullable": []
+  },
+  "hash": "a22db05d2ba01e2cf7605de87f38d23a254fce5e8a5ba0319412a13329dded1d"
+}

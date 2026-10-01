@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n        SELECT project_id, node_id, local_path,\n               is_worktree AS \"is_worktree: bool\",\n               git_branch, last_used_at\n          FROM project_node_bindings\n         ORDER BY last_used_at DESC\n        ",
+  "query": "\n        SELECT project_id, node_id, local_path,\n               is_worktree AS \"is_worktree: bool\",\n               path_exists AS \"path_exists: bool\",\n               git_branch, last_used_at\n          FROM project_node_bindings\n         ORDER BY last_used_at DESC\n        ",
   "describe": {
     "columns": [
       {
@@ -48,8 +48,19 @@
         }
       },
       {
-        "name": "git_branch",
+        "name": "path_exists: bool",
         "ordinal": 4,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "project_node_bindings",
+            "name": "path_exists"
+          }
+        }
+      },
+      {
+        "name": "git_branch",
+        "ordinal": 5,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -60,7 +71,7 @@
       },
       {
         "name": "last_used_at",
-        "ordinal": 5,
+        "ordinal": 6,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -78,9 +89,10 @@
       false,
       false,
       false,
+      false,
       true,
       false
     ]
   },
-  "hash": "0c6479da9bc3f1ca51f8ff7562f5980b29b7276df588fd6ca2bccf55b31450d5"
+  "hash": "38589fd4f06b7484a2a6e8d28d2c991ae17b874d7c498fc6baaeb32c2bd7691d"
 }

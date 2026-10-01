@@ -18,6 +18,8 @@ export interface PathCandidate {
   source: "binding" | "session";
   /** Git Worktree か */
   isWorktree: boolean;
+  /** ノード上に実在するか (セッション履歴のみの候補は未確認のため true 扱い) */
+  exists: boolean;
   /** 最終確認時の Git ブランチ (セッション履歴のみの候補では起動時スナップショット) */
   gitBranch: string | null;
   /** ソートキー (紐付けは最終使用日時 / セッションは最終更新日時。Unix epoch ms) */
@@ -47,6 +49,7 @@ export function buildPathCandidates(
       path: binding.local_path,
       source: "binding",
       isWorktree: binding.is_worktree,
+      exists: binding.path_exists,
       gitBranch: binding.git_branch,
       usedAt: binding.last_used_at,
     });
@@ -63,6 +66,8 @@ export function buildPathCandidates(
       path: session.local_path,
       source: "session",
       isWorktree: session.is_worktree,
+      // セッション履歴のみのパスは実在確認をしていない (既定に選ばれた時に警告する)
+      exists: true,
       gitBranch: session.git_branch,
       usedAt: session.updated_at,
     });
@@ -71,10 +76,21 @@ export function buildPathCandidates(
 
   return [...byPath.values()].toSorted(
     (a, b) =>
+      Number(b.exists) - Number(a.exists) ||
       b.usedAt - a.usedAt ||
       (a.source === b.source ? 0 : a.source === "binding" ? -1 : 1) ||
       Number(a.isWorktree) - Number(b.isWorktree),
   );
+}
+
+/**
+ * 既定として選択する候補を選ぶ。
+ *
+ * 実在する候補の先頭 (＝直近使用順) を返す。実在する候補が無ければ
+ * 先頭の候補を返し、空なら `null`。
+ */
+export function pickDefaultCandidate(candidates: readonly PathCandidate[]): PathCandidate | null {
+  return candidates.find((candidate) => candidate.exists) ?? candidates[0] ?? null;
 }
 
 /**

@@ -12,9 +12,16 @@
   import { formatRelativeTime } from '$lib/format';
   import {
     buildPathCandidates,
+    pickDefaultCandidate,
     pickDefaultNode,
     type PathCandidate
   } from '$lib/new-session';
+  import {
+    loadNewSessionPrefs,
+    saveNewSessionPrefs,
+    type SessionModePreference,
+    type OpencodeModePreference
+  } from '$lib/session-prefs';
   import { getNodeAvailability } from '$lib/node-status';
   import { sync } from '$lib/stores/app.svelte';
   import { toast } from 'svelte-sonner';
@@ -63,13 +70,19 @@
   let urlAgentApplied = $state(false);
   let lastAutoPathKey = '';
 
+  // 端末ごとの記憶 (プロジェクト単位): 復元前に保存しないための追跡
+  let prefsProjectId = '';
+  let agentTouched = $state(false);
+  let modeTouched = $state(false);
+  let opencodeTouched = $state(false);
+
   // Fork 引き継ぎ
   let forkSessionId = $state('');
   let forkNodeSeq = $state<number | null>(null);
 
   // 起動オプション
-  let sessionMode = $state<'default' | 'code' | 'plan'>('default');
-  let opencodeMode = $state<'default' | 'bridge' | 'acp'>('default');
+  let sessionMode = $state<SessionModePreference>('default');
+  let opencodeMode = $state<OpencodeModePreference>('default');
   let extraArgsText = $state('');
 
   // プロビジョナー接続テスト
@@ -166,7 +179,7 @@
       return;
     }
     lastAutoPathKey = key;
-    if (!containsCurrent) localPath = pathCandidates[0]?.path ?? '';
+    if (!containsCurrent) localPath = pickDefaultCandidate(pathCandidates)?.path ?? '';
   });
 
   const effectiveAgent = $derived(
@@ -211,8 +224,47 @@
       } else {
         customAgent = agentParam;
       }
+      // 記憶よりディープリンクを優先する
+      agentTouched = true;
     }
     urlAgentApplied = true;
+  });
+
+  // 端末ごとの記憶: プロジェクト切替時に前回の起動設定を復元する
+  // (ユーザーが明示的に変更した項目は復元で上書きしない)
+  $effect(() => {
+    const project = selectedProject;
+    if (!project) return;
+    if (project.project_id !== prefsProjectId) {
+      prefsProjectId = project.project_id;
+      agentTouched = false;
+      modeTouched = false;
+      opencodeTouched = false;
+    }
+    const prefs = untrack(() => loadNewSessionPrefs(project.project_id));
+    if (!prefs) return;
+    if (!modeTouched && prefs.mode !== 'default') sessionMode = prefs.mode;
+    if (!opencodeTouched && prefs.opencodeMode !== 'default') opencodeMode = prefs.opencodeMode;
+    if (!agentTouched && prefs.agent !== '') {
+      if (installedAgents.includes(prefs.agent)) {
+        agentId = prefs.agent;
+      } else if (installedAgents.length === 0) {
+        // エージェント一覧が取得できていない場合はカスタム指定として復元する
+        customAgent = prefs.agent;
+      }
+    }
+  });
+
+  // 起動設定の変更を端末ローカルへ記憶する
+  // (復元前に保存しないため `prefsProjectId` の一致を必須にする)
+  $effect(() => {
+    void agentId;
+    void customAgent;
+    void sessionMode;
+    void opencodeMode;
+    const projectId = selectedProject?.project_id ?? '';
+    if (projectId === '' || projectId !== prefsProjectId || isProvisionerMode) return;
+    persistPrefs();
   });
 
   async function runProvisionerTest(name: string) {
@@ -248,6 +300,8 @@
     const promptToSend = (initialPrompt ?? promptText).trim();
     const useProvisioner = isProvisionerMode && selectedProvisioner !== null;
     const extraArgs = extraArgsText.trim() ? extraArgsText.trim().split(/\s+/) : null;
+    // 次回の新規セッション作成に備えて端末ローカルへ記憶する
+    persistPrefs();
 
     try {
       const response = await sync.connection.client.createSession({
@@ -315,9 +369,22 @@
     useCustomPath = false;
   }
 
+  /** 端末ローカル (プロジェクト単位) に前回の起動設定を保存する。 */
+  function persistPrefs() {
+    const projectId = selectedProject?.project_id ?? '';
+    // 一時VM はノード別のエージェント事情が異なるため記憶しない
+    if (projectId === '' || projectId !== prefsProjectId || isProvisionerMode) return;
+    saveNewSessionPrefs(projectId, {
+      agent: effectiveAgent,
+      mode: sessionMode,
+      opencodeMode
+    });
+  }
+
   /** 実行ディレクトリ候補の表示ラベル。 */
   function candidateLabel(candidate: PathCandidate): string {
     const parts: string[] = [];
+    if (!candidate.exists) parts.push('[存在しません]');
     if (candidate.isWorktree) parts.push('[Worktree]');
     if (candidate.gitBranch) parts.push(`[${candidate.gitBranch}]`);
     parts.push(candidate.path);
@@ -610,7 +677,7 @@
                     class="text-muted-foreground hover:text-foreground h-8 shrink-0 px-2 text-xs"
                     onclick={() => {
                       useCustomPath = false;
-                      if (pathCandidates[0]) localPath = pathCandidates[0].path;
+                      localPath = pickDefaultCandidate(pathCandidates)?.path ?? '';
                     }}
                     title="登録済みパスの一覧に戻る"
                   >
@@ -634,6 +701,12 @@
             {:else if localPath.trim() !== ''}
               <p class="text-muted-foreground text-[11px]">
                 未登録のパスです (セッション開始時に自動登録されます)
+              </p>
+            {/if}
+
+            {#if selectedCandidate && !selectedCandidate.exists}
+              <p class="text-destructive text-[11px]">
+                このディレクトリはノード上に存在しません。開始するとエラーになるため、フォルダを選び直してください。
               </p>
             {/if}
 

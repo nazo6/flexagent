@@ -155,6 +155,8 @@ impl ResolvedProject {
             node_id: node_id.to_owned(),
             local_path: self.local_path.to_string_lossy().into_owned(),
             is_worktree,
+            // 解決できた時点でディレクトリは実在する
+            path_exists: true,
             git_branch: git_branch.map(str::to_owned),
         }
     }

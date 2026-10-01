@@ -516,10 +516,9 @@ async fn handle(
 
         IpcClientMessage::ProjectList { command_id } => {
             let projects = state
-                .db()
-                .list_projects()
+                .list_projects_with_path_state()
                 .await
-                .map_err(|err| DispatchError::from_node_error(&command_id, err.into()))?;
+                .map_err(|err| DispatchError::from_node_error(&command_id, err))?;
             Ok((command_id, IpcResult::Projects { projects }))
         }
 
@@ -559,10 +558,9 @@ async fn handle(
                 .await
                 .map_err(|err| DispatchError::from_node_error(&command_id, err))?;
             let projects = state
-                .db()
-                .list_projects()
+                .list_projects_with_path_state()
                 .await
-                .map_err(|err| DispatchError::from_node_error(&command_id, err.into()))?;
+                .map_err(|err| DispatchError::from_node_error(&command_id, err))?;
             Ok((
                 command_id,
                 IpcResult::ProjectScan {

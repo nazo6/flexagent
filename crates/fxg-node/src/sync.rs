@@ -191,7 +191,7 @@ async fn connect_once(
 
 /// `NodeHello` を組み立てる (ノード情報・プロジェクト・セッション同期状態)。
 pub(crate) async fn build_hello(state: &DaemonState) -> NodeToServerMsg {
-    let projects = match state.db().list_projects().await {
+    let projects = match state.list_projects_with_path_state().await {
         Ok(projects) => projects
             .into_iter()
             .map(|project| fxg_protocol::common::NodeProjectReport {
@@ -205,6 +205,7 @@ pub(crate) async fn build_hello(state: &DaemonState) -> NodeToServerMsg {
                     .map(|binding| fxg_protocol::common::ProjectNodeBinding {
                         local_path: binding.local_path,
                         is_worktree: binding.is_worktree,
+                        path_exists: binding.path_exists,
                         git_branch: binding.git_branch,
                         last_used_at: binding.last_used_at,
                     })
@@ -746,15 +747,14 @@ pub(crate) async fn handle_server_message(
         ServerToNodeMsg::ProjectScan { request_id, dir } => {
             let result: Result<fxg_protocol::client_api::ProjectScanResponse, NodeError> =
                 match state.project_scan(dir.as_deref().map(Path::new)).await {
-                    Ok(scanned_dirs) => state
-                        .db()
-                        .list_projects()
-                        .await
-                        .map(|projects| fxg_protocol::client_api::ProjectScanResponse {
-                            scanned_dirs,
-                            projects,
+                    Ok(scanned_dirs) => {
+                        state.list_projects_with_path_state().await.map(|projects| {
+                            fxg_protocol::client_api::ProjectScanResponse {
+                                scanned_dirs,
+                                projects,
+                            }
                         })
-                        .map_err(NodeError::from),
+                    }
                     Err(err) => Err(err),
                 };
             let response = match result {

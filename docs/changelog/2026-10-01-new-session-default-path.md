@@ -1,4 +1,4 @@
-# 新規セッションの実行ディレクトリ既定解決 実装記録
+# 新規セッションの実行ディレクトリ既定解決・パス実在確認 実装記録
 
 - **日付**: 2026-10-01
 - **対象パッケージ**: `fxg-db`, `fxg-server`, `fxg-node`, `ui`
@@ -74,3 +74,38 @@
 - [x] `cargo test -p fxg-node ipc_session_ensure_attach_prompt_and_permissions`
       （EnsureSession 後の紐付け登録）
 - [x] `pnpm --dir ui run check` / `lint` / `test`
+
+---
+
+## Phase C: 存在しないパスの扱い
+
+- [x] `fxg-db`: マイグレーション `0003_project_binding_path_exists`
+      （`project_node_bindings.path_exists`）+ `.sqlx` 再生成
+- [x] `fxg-protocol`: `ProjectNodeBinding` / `ProjectBindingSummary` に
+      `path_exists` を追加（ts-rs 型も再生成）
+- [x] `fxg-db`: 既定解決 `select_default_binding_path` は**実在する**紐付けを
+      優先し、実在するものが無い場合のみ最終使用が新しいものを返す
+- [x] `fxg-node`: `list_projects_with_path_state` /
+      `refresh_binding_path_state` で自ノード紐付けの実在をライブ確認
+      （Client REST / IPC / NodeHello / ProjectScan 応答に反映）
+- [x] `fxg-server`: `ClientApiBackend::list_projects` の既定実装を追加し、
+      NodeHello 集約時に `path_exists` を保存
+- [x] `ui`: 候補は実在を優先してソートし、既定選択から不在を除外
+      （全て不在の場合は警告付きで先頭を返す）。ラベルに `[存在しません]`、
+      選択中の不在警告、プロジェクトページに「存在しません」バッジを追加
+
+## Phase C: 端末ごとの記憶
+
+- [x] `ui/src/lib/session-prefs.ts`（+ テスト）: プロジェクト単位で
+      エージェント / 初期モード / OpenCode2 実行モードを localStorage に
+      保存・復元（不正値・容量超過は無視、復元前に保存しない）
+- [x] `NewSessionChat.svelte`: プロジェクト切替時に復元（URL `?agent=`
+      を優先）、
+      変更時とセッション開始時に保存（一時VM モードでは保存しない）
+
+## Phase C: 検証
+
+- [x] `cargo test -p fxg-db --test db_layer`
+      （`path_exists` の往復・実在優先フォールバック）
+- [x] `mise run check` / `mise run check:ui`
+- [x] オフライン sqlx（`DATABASE_URL` 未設定）での `cargo check`

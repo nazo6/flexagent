@@ -15,7 +15,9 @@ use fxg_protocol::client_api::{
     ResumeSessionRequest, ResumeSessionResponse, RotateAuthTokenResponse, SessionRevertRequest,
     SessionRevertResponse, WorktreeInfo, WorktreesResponse,
 };
-use fxg_protocol::common::{AgentAction, CommandResult, DiffScope, WorkspaceDiffResponse};
+use fxg_protocol::common::{
+    AgentAction, CommandResult, DiffScope, ProjectSummary, WorkspaceDiffResponse,
+};
 use fxg_server::api::{
     ApiError, ClientApiBackend, ClientCommand, ClientEvent, ClientInfo, PtyChannelError,
     PtyChannelEvent, PtySpawnParams, SystemExtras,
@@ -56,6 +58,13 @@ impl ClientApiBackend for DaemonState {
 
     fn connection_role(&self) -> ConnectionRole {
         ConnectionRole::LocalNode
+    }
+
+    /// ローカルノードは紐付けパスの実在確認をライブで行った一覧を返す。
+    async fn list_projects(&self) -> Result<Vec<ProjectSummary>, ApiError> {
+        self.list_projects_with_path_state()
+            .await
+            .map_err(api_error)
     }
 
     async fn system_extras(&self) -> Result<SystemExtras, ApiError> {

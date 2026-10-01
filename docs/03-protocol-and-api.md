@@ -200,6 +200,7 @@ pub struct NodeProjectReport {
 pub struct ProjectNodeBinding {
     pub local_path: String,
     pub is_worktree: bool,
+    pub path_exists: bool, // 報告時点でノード上に実在するか (ディレクトリ確認)
     pub git_branch: Option<String>,
     pub last_used_at: i64,
 }

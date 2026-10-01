@@ -299,6 +299,7 @@ pub async fn list_projects(pool: &SqlitePool) -> Result<Vec<ProjectSummary>, DbE
         r#"
         SELECT project_id, node_id, local_path,
                is_worktree AS "is_worktree: bool",
+               path_exists AS "path_exists: bool",
                git_branch, last_used_at
           FROM project_node_bindings
          ORDER BY last_used_at DESC
@@ -328,6 +329,7 @@ pub async fn list_projects(pool: &SqlitePool) -> Result<Vec<ProjectSummary>, DbE
                 node_id: binding.node_id,
                 local_path: binding.local_path,
                 is_worktree: binding.is_worktree,
+                path_exists: binding.path_exists,
                 git_branch: binding.git_branch,
                 last_used_at: binding.last_used_at,
             });
@@ -379,17 +381,31 @@ pub async fn resolve_default_local_path(
 
 /// 紐付け一覧から既定として使うパスを選ぶ。
 ///
-/// **最終使用が最も新しい**紐付けを選ぶ (`last_used_at`)。Worktree も候補に含める
-/// (直近の作業場所を既定にする)。同時刻の場合はメインリポジトリ
-/// (`is_worktree = false`) を優先する。
+/// **実在する**紐付けのうち最終使用が最も新しいものを選ぶ (`last_used_at`)。
+/// Worktree も候補に含める (直近の作業場所を既定にする)。同時刻の場合は
+/// メインリポジトリ (`is_worktree = false`) を優先する。
+///
+/// 実在する紐付けが無い場合は最終使用が最も新しい紐付けを返す
+/// (存在しないパスを暗黙に使わないための UX 警告は UI 側で行う)。
 pub fn select_default_binding_path(
     bindings: &[ProjectBindingSummary],
     node_id: &str,
 ) -> Option<String> {
-    bindings
+    let candidates: Vec<&ProjectBindingSummary> = bindings
         .iter()
         .filter(|binding| binding.node_id == node_id)
-        .max_by_key(|binding| (binding.last_used_at, !binding.is_worktree))
+        .collect();
+    let latest_existing = candidates
+        .iter()
+        .filter(|binding| binding.path_exists)
+        .max_by_key(|binding| (binding.last_used_at, !binding.is_worktree));
+    latest_existing
+        .copied()
+        .or_else(|| {
+            candidates
+                .into_iter()
+                .max_by_key(|binding| (binding.last_used_at, !binding.is_worktree))
+        })
         .map(|binding| binding.local_path.clone())
 }
 
@@ -654,6 +670,7 @@ struct BindingRow {
     node_id: String,
     local_path: String,
     is_worktree: bool,
+    path_exists: bool,
     git_branch: Option<String>,
     last_used_at: i64,
 }

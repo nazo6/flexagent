@@ -93,6 +93,8 @@ pub struct ProjectBindingRecord {
     pub local_path: String,
     /// Git Worktree か
     pub is_worktree: bool,
+    /// 登録時点でノード上に実在するか (ディレクトリ確認)
+    pub path_exists: bool,
     /// 最終確認時のGitブランチ
     pub git_branch: Option<String>,
 }
@@ -364,10 +366,11 @@ pub async fn upsert_project_binding(
     sqlx::query!(
         r#"
         INSERT INTO project_node_bindings
-            (project_id, node_id, local_path, is_worktree, git_branch, last_used_at)
-        VALUES (?, ?, ?, ?, ?, ?)
+            (project_id, node_id, local_path, is_worktree, path_exists, git_branch, last_used_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(project_id, node_id, local_path) DO UPDATE SET
             is_worktree = excluded.is_worktree,
+            path_exists = excluded.path_exists,
             git_branch = excluded.git_branch,
             last_used_at = excluded.last_used_at
         "#,
@@ -375,6 +378,7 @@ pub async fn upsert_project_binding(
         record.node_id,
         record.local_path,
         record.is_worktree,
+        record.path_exists,
         record.git_branch.as_deref(),
         now_ms(),
     )

@@ -17,6 +17,13 @@ local_path: string,
  */
 is_worktree: boolean, 
 /**
+ * ローカルパスがノード上に実在するか
+ *
+ * 中央サーバーでは最後の NodeHello 報告時点、ローカルノードでは
+ * 取得時にライブ確認した値。
+ */
+path_exists: boolean, 
+/**
  * 最終確認時のGitブランチ
  */
 git_branch: string | null, 

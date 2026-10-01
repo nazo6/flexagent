@@ -142,6 +142,7 @@ CREATE TABLE project_node_bindings (
     node_id         TEXT NOT NULL REFERENCES nodes(node_id) ON DELETE CASCADE,
     local_path      TEXT NOT NULL,                  -- 例: "D:\ghq\github.com\nazo6\flexagent" または Worktree パス
     is_worktree     INTEGER NOT NULL DEFAULT 0,     -- 1: Git Worktree, 0: メインリポジトリ
+    path_exists     INTEGER NOT NULL DEFAULT 1,     -- 最終報告時点でノード上に実在するか (0: 見つからない)
     git_branch      TEXT,                           -- 最終確認時のGitブランチ (例: "main", "feat/auth")
     last_used_at    INTEGER NOT NULL,
     PRIMARY KEY (project_id, node_id, local_path)

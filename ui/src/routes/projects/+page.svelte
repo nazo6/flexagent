@@ -312,7 +312,19 @@
             {#each project.bindings as binding (`${binding.node_id}|${binding.local_path}`)}
               <li class="flex flex-wrap items-center gap-2">
                 <Badge variant="outline">{nodeName(binding.node_id)}</Badge>
-                <span class="font-mono">{binding.local_path}</span>
+                <span
+                  class="font-mono {binding.path_exists ? '' : 'text-muted-foreground line-through'}"
+                  title={binding.path_exists
+                    ? binding.local_path
+                    : `${binding.local_path} (ノード上に存在しません)`}
+                >
+                  {binding.local_path}
+                </span>
+                {#if !binding.path_exists}
+                  <Badge variant="outline" class="border-destructive/50 text-destructive">
+                    存在しません
+                  </Badge>
+                {/if}
                 {#if binding.git_branch}
                   <span class="text-muted-foreground">({binding.git_branch})</span>
                 {/if}
