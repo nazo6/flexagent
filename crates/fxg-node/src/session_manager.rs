@@ -924,6 +924,7 @@ impl SessionManager {
             if let Err(err) = handle.shutdown().await {
                 tracing::warn!(session_id = %session_id, "failed to shutdown: {err:#}");
             }
+            remove_snapshot_index(&self.inner.paths, &session_id);
             stopped.push(session_id);
         }
         stopped
@@ -1048,8 +1049,21 @@ async fn pump_events(
             )
             .await;
     }
-    let mut sessions = inner.sessions.lock().expect("sessions poisoned");
-    sessions.active.remove(&session_id);
+    {
+        let mut sessions = inner.sessions.lock().expect("sessions poisoned");
+        sessions.active.remove(&session_id);
+    }
+    remove_snapshot_index(&inner.paths, &session_id);
+}
+
+/// セッションのシャドウ Git インデックスファイルを削除する (リソース解放)。
+fn remove_snapshot_index(paths: &NodePaths, session_id: &str) {
+    let path = paths.snapshot_index_path(session_id);
+    if let Err(err) = std::fs::remove_file(&path) {
+        if err.kind() != std::io::ErrorKind::NotFound {
+            tracing::warn!(session_id, path = %path.display(), "failed to remove snapshot index: {err:#}");
+        }
+    }
 }
 
 /// セッションステータスを更新する (busy も同期)。
@@ -1932,5 +1946,30 @@ mod tests {
             .expect("query")
             .expect("session");
         assert_eq!(second_row.title, "Implement login page");
+    }
+
+    #[tokio::test]
+    async fn shutdown_all_cleans_up_snapshot_index() {
+        let (manager, _mock, dir) = setup().await;
+        let outcome = manager
+            .ensure_session("c_ensure", dir.path(), "mock", &[], None, false)
+            .await
+            .expect("ensure");
+
+        // インデックスファイルを作成
+        let index_path = manager.inner.paths.snapshot_index_path(&outcome.session_id);
+        std::fs::create_dir_all(index_path.parent().unwrap()).expect("create parent dir");
+        std::fs::write(&index_path, b"test index data").expect("write index");
+        assert!(index_path.exists());
+
+        // shutdown_all を実行
+        let stopped = manager.shutdown_all().await;
+        assert_eq!(stopped, vec![outcome.session_id]);
+
+        // インデックスファイルが削除されていることを確認
+        assert!(
+            !index_path.exists(),
+            "snapshot index must be cleaned up on shutdown"
+        );
     }
 }
