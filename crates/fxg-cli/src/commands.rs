@@ -40,6 +40,52 @@ pub struct DaemonArgs {
     /// `--stdio` 時の初期対象ディレクトリ (クローン済みワークスペース)
     #[usage(long)]
     workspace: Option<String>,
+    /// タスクトレイに常駐する (状態表示 / 自動起動 / Web UI / 終了)
+    #[usage(long)]
+    tray: bool,
+    /// `[node] tray` で有効化されたトレイ常駐を無効にする
+    #[usage(long)]
+    no_tray: bool,
+}
+
+impl DaemonArgs {
+    /// 読み込み済みのグローバル設定からデーモン設定を組み立てる。
+    pub(crate) fn daemon_config_from(
+        &self,
+        global: &fxg_protocol::config::GlobalConfig,
+    ) -> fxg_node::daemon::DaemonConfig {
+        let env = fxg_protocol::config::process_env;
+        let mut config = fxg_node::daemon::DaemonConfig::from_env(&env);
+        if let Some(node_id) = global.node.node_id.clone() {
+            config.node_id = node_id;
+        }
+        if let Some(name) = global.node.name.clone() {
+            config.node_name = name;
+        }
+        if let Some(listen) = self
+            .listen
+            .clone()
+            .or_else(|| global.node.listen_addr.clone())
+        {
+            config.listen_addr = listen;
+        }
+        config.allow_remote_pty = self.allow_remote_pty || global.node.allow_remote_pty;
+        // Outbox 同期 (中央サーバー接続。未指定時はスタンドアロン・ローカルのみ)
+        config.central_server_url = self
+            .server_url
+            .clone()
+            .or_else(|| global.node.central_server_url.clone());
+        config.node_token = global.node.node_token.clone();
+        config
+    }
+
+    /// トレイ常駐が要求されているか (`--stdio` / `--ephemeral` では常に無効)。
+    pub(crate) fn tray_requested(&self, configured: Option<bool>) -> bool {
+        if self.stdio || self.ephemeral || self.workspace.is_some() {
+            return false;
+        }
+        crate::tray::resolve_enabled(self.tray, self.no_tray, configured)
+    }
 }
 
 impl usage::RunAsync for DaemonArgs {
@@ -76,27 +122,47 @@ impl usage::RunAsync for DaemonArgs {
                 .context("fxg daemon --stdio failed");
         }
 
-        let mut config = fxg_node::daemon::DaemonConfig::from_env(&env);
-        if let Some(node_id) = global.node.node_id.clone() {
-            config.node_id = node_id;
-        }
-        if let Some(name) = global.node.name.clone() {
-            config.node_name = name;
-        }
-        if let Some(listen) = self.listen.or_else(|| global.node.listen_addr.clone()) {
-            config.listen_addr = listen;
-        }
-        config.allow_remote_pty = self.allow_remote_pty || global.node.allow_remote_pty;
-        // Outbox 同期 (中央サーバー接続。未指定時はスタンドアロン・ローカルのみ)
-        config.central_server_url = self
-            .server_url
-            .clone()
-            .or_else(|| global.node.central_server_url.clone());
-        config.node_token = global.node.node_token.clone();
-
-        fxg_node::daemon::NodeDaemon::run(config)
+        let tray_enabled = self.tray_requested(global.node.tray);
+        let config = self.daemon_config_from(&global);
+        let daemon = fxg_node::daemon::NodeDaemon::start(config)
             .await
-            .context("fxg daemon failed")
+            .context("fxg daemon failed")?;
+
+        // トレイ常駐 (macOS は main.rs の早期分岐でメインスレッドにて処理される)
+        #[cfg(not(target_os = "macos"))]
+        let tray = if tray_enabled {
+            start_tray(&daemon)
+        } else {
+            None
+        };
+        #[cfg(target_os = "macos")]
+        let _ = tray_enabled;
+
+        daemon.wait().await;
+        #[cfg(not(target_os = "macos"))]
+        if let Some(tray) = tray {
+            tray.close();
+        }
+        Ok(())
+    }
+}
+
+/// トレイ常駐を開始する (失敗は警告のみでデーモンは継続する)。
+#[cfg(not(target_os = "macos"))]
+fn start_tray(daemon: &fxg_node::daemon::NodeDaemon) -> Option<crate::tray::TrayHandle> {
+    let ctx = crate::tray::TrayContext {
+        state: daemon.state().clone(),
+        shutdown: daemon.shutdown_handle(),
+    };
+    match crate::tray::spawn(&tokio::runtime::Handle::current(), ctx) {
+        Ok(tray) => {
+            tracing::info!("tray icon started");
+            Some(tray)
+        }
+        Err(err) => {
+            tracing::warn!("failed to start the tray (continuing without it): {err:#}");
+            None
+        }
     }
 }
 
@@ -217,13 +283,18 @@ impl usage::RunAsync for WebArgs {
                 .listen_addr
                 .clone()
                 .unwrap_or_else(|| "127.0.0.1:7860".to_owned());
-            format!("http://{listen}/?token={token}")
+            local_web_url(&listen, &token)
         };
 
         println!("{url}");
         opener::open_browser(&url).context("failed to open the default browser")?;
         Ok(())
     }
+}
+
+/// ローカル Web UI のトークン付き URL を組み立てる (`fxg web` / トレイで共用)。
+pub(crate) fn local_web_url(listen_addr: &str, token: &str) -> String {
+    format!("http://{listen_addr}/?token={token}")
 }
 
 // ----------------------------------------------------------------------

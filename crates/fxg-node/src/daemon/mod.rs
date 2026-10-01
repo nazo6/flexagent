@@ -592,6 +592,20 @@ impl std::fmt::Debug for NodeDaemon {
     }
 }
 
+/// デーモンのシャットダウン要求ハンドル。
+///
+/// トレイ等の別スレッド / 別コンテキストから停止を要求するために使う
+/// ([`NodeDaemon::shutdown_handle`] で取得する)。
+#[derive(Clone, Debug)]
+pub struct ShutdownHandle(watch::Sender<bool>);
+
+impl ShutdownHandle {
+    /// シャットダウンを要求する (実際の停止は [`NodeDaemon::wait`] を待つ)。
+    pub fn shutdown(&self) {
+        let _ = self.0.send(true);
+    }
+}
+
 impl NodeDaemon {
     /// デーモンを起動する (データディレクトリ作成・ノード登録・
     /// ローカルHTTP/WS と ローカルIPC のリッスン開始)。
@@ -682,9 +696,14 @@ impl NodeDaemon {
         &self.state.config().ipc_endpoint
     }
 
+    /// 別スレッド / トレイからシャットダウンを要求するためのハンドルを返す。
+    pub fn shutdown_handle(&self) -> ShutdownHandle {
+        ShutdownHandle(self.shutdown_tx.clone())
+    }
+
     /// シャットダウンを要求する (実際の停止は [`Self::wait`] を待つ)。
     pub fn shutdown(&self) {
-        let _ = self.shutdown_tx.send(true);
+        self.shutdown_handle().shutdown();
     }
 
     /// シャットダウン要求まで待機し、後処理 (PTY 停止・オフライン記録) を行って終了する。

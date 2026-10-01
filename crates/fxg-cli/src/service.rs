@@ -60,14 +60,50 @@ fn service_args(server: bool) -> &'static [&'static str] {
 
 /// `fxg service <action>` を実行する。
 pub async fn run(action: ServiceAction, server: bool) -> Result<()> {
-    let name = service_name(server);
-    let exe = std::env::current_exe().context("failed to resolve the fxg executable path")?;
-
     if action == ServiceAction::Status {
+        let exe = std::env::current_exe().context("failed to resolve the fxg executable path")?;
         return status(server, &exe).await;
     }
-    platform_run(action, server, name, &exe)?;
-    Ok(())
+    run_sync(action, server)
+}
+
+/// `fxg service <action>` の同期コア (`status` を除く。CLI 表示なし)。
+///
+/// トレイメニューの「自動起動」トグルからも同じ登録/解除ロジックを再利用する。
+pub fn run_sync(action: ServiceAction, server: bool) -> Result<()> {
+    debug_assert!(
+        action != ServiceAction::Status,
+        "status is handled by `run`"
+    );
+    let name = service_name(server);
+    let exe = std::env::current_exe().context("failed to resolve the fxg executable path")?;
+    platform_run(action, server, name, &exe)
+}
+
+/// 自動起動が登録されているか (トレイのチェック表示用。副作用なし)。
+#[cfg(windows)]
+pub fn is_installed(server: bool) -> bool {
+    let name = service_name(server);
+    task_exists(name)
+        || startup_script_path(name)
+            .map(|path| path.exists())
+            .unwrap_or(false)
+}
+
+/// 自動起動が登録されているか (systemd ユニットファイルの有無)。
+#[cfg(target_os = "linux")]
+pub fn is_installed(server: bool) -> bool {
+    unit_path(service_name(server))
+        .map(|path| path.exists())
+        .unwrap_or(false)
+}
+
+/// 自動起動が登録されているか (LaunchAgent plist の有無)。
+#[cfg(target_os = "macos")]
+pub fn is_installed(server: bool) -> bool {
+    plist_path(service_name(server))
+        .map(|path| path.exists())
+        .unwrap_or(false)
 }
 
 // ----------------------------------------------------------------------

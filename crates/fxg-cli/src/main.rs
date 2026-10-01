@@ -18,6 +18,7 @@ mod client;
 mod commands;
 mod server_api;
 mod service;
+mod tray;
 mod tui;
 
 /// `fxg` ルートコマンド。
@@ -87,6 +88,15 @@ async fn main() -> ExitCode {
         .init();
 
     let cli = Fxg::parse();
+
+    // macOS ではトレイ (NSStatusItem) をメインスレッドのイベントループ上で
+    // 作成・操作する必要があるため、`fxg daemon --tray` はここでメインスレッドを
+    // tao ループに明け渡す (デーモン本体はワーカースレッドへ退避する)。
+    #[cfg(target_os = "macos")]
+    if let Some(code) = tray::run_daemon_if_requested(&cli.command) {
+        return code;
+    }
+
     match cli.run_async().await {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {

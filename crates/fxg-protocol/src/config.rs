@@ -252,6 +252,10 @@ pub struct NodeConfig {
     /// 各ターンのプロンプト送信直前に Shadow Git Tree スナップショットを
     /// 自動取得するか。
     pub snapshot_enabled: bool,
+    /// `fxg daemon` 起動時にタスクトレイへ常駐するか (既定: 無効)。
+    ///
+    /// CLI の `--tray` / `--no-tray` が指定された場合はそちらが優先される。
+    pub tray: Option<bool>,
 }
 
 impl Default for NodeConfig {
@@ -266,6 +270,7 @@ impl Default for NodeConfig {
             worktree_dir_template: None,
             project_scan_dirs: Vec::new(),
             snapshot_enabled: true,
+            tray: None,
         }
     }
 }
@@ -600,6 +605,7 @@ allow_remote_pty = false
 worktree_dir_template = "{fxg_home}/worktrees/{project}/{branch}"
 project_scan_dirs = ["D:/ghq/github.com"]
 snapshot_enabled = true
+tray = false
 
 [server]
 listen_addr = "0.0.0.0:8080"
