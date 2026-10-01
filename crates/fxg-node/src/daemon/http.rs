@@ -328,6 +328,7 @@ mod tests {
                     parent_session_id: None,
                     fork_from_node_seq: None,
                     title: "New Session".to_owned(),
+                    opencode_mode: None,
                 },
             )
             .await
@@ -452,6 +453,7 @@ mod tests {
                     parent_session_id: None,
                     fork_from_node_seq: None,
                     title: "New Session".to_owned(),
+                    opencode_mode: None,
                 },
             )
             .await

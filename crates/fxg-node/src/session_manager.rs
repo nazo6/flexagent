@@ -15,13 +15,14 @@
 //! - **承認解決の冪等化**: 2 回目以降の応答は
 //!   [`NodeError::AlreadyResolved`] を返す。
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use fxg_acp::registry::{AcpRegistry, OPENCODE2_ID, RegistryIndex};
 use fxg_acp::{
     AcpDriver, ActiveSessionHandle, AgentDriver, AgentLaunchSpec, DriverEvent, OpenCode2Driver,
+    ResumeRequest,
 };
 use fxg_protocol::common::{
     ForkHistoryItem, PermissionOption, SessionControlAction, SessionStatus,
@@ -71,6 +72,39 @@ fn attach_mode_of(handle: &dyn ActiveSessionHandle) -> AttachMode {
     }
 }
 
+/// `opencode2` の起動モード (`"bridge"` / `"acp"`) を起動スペックへ適用する。
+///
+/// `opencode_mode` が `None` の場合はレジストリ既定 (config の
+/// `opencode_mode`) を尊重してスペックを変更しない。`SessionCreated` へ
+/// 永続化する実効モードを返す (`opencode2` 以外は `None`)。
+fn apply_opencode_mode(
+    spec: &mut AgentLaunchSpec,
+    opencode_mode: Option<&str>,
+    extra_args: &[String],
+) -> Option<String> {
+    if spec.agent_id != OPENCODE2_ID {
+        return None;
+    }
+    if let Some(mode) = opencode_mode {
+        if mode == "acp" {
+            spec.driver_kind = "acp".to_owned();
+            spec.args = vec!["acp".to_owned()];
+        } else {
+            spec.driver_kind = "opencode2".to_owned();
+            spec.args = vec!["serve".to_owned()];
+        }
+        spec.args.extend(extra_args.iter().cloned());
+    }
+    Some(
+        if spec.driver_kind == "acp" {
+            "acp"
+        } else {
+            "bridge"
+        }
+        .to_owned(),
+    )
+}
+
 /// `ensure_session` の結果。
 #[derive(Debug, Clone, PartialEq)]
 pub struct EnsureSessionOutcome {
@@ -109,6 +143,22 @@ pub struct StartSessionParams<'a> {
     pub restore_git_bundle: Option<&'a Path>,
 }
 
+/// 停止済みセッションの再開要求 ([`SessionManager::resume`])。
+///
+/// 同一 `session_id` のままエージェントを起動し、ネイティブ復元
+/// (`session/resume` → `session/load` → OpenCode2 既存セッション bind) を
+/// 優先する。復元できない場合は履歴 Replay を注入して継続する
+/// (設計: `docs/04-agent-drivers-and-windows.md` §4.3)。
+#[derive(Debug, Clone, Copy)]
+pub struct ResumeParams<'a> {
+    /// 相関ID (重複送信の冪等排除)
+    pub command_id: &'a str,
+    /// 対象セッションID
+    pub session_id: &'a str,
+    /// ネイティブ復元を試みず履歴 Replay で継続する
+    pub force_replay: bool,
+}
+
 /// `revert` の結果。
 #[derive(Debug, Clone, PartialEq)]
 pub struct RevertOutcome {
@@ -122,6 +172,17 @@ pub struct RevertOutcome {
     pub restored_files: usize,
     /// 削除したファイル数
     pub removed_files: usize,
+}
+
+/// `resume` の結果。
+#[derive(Debug, Clone, PartialEq)]
+pub struct ResumeOutcome {
+    /// 再開したセッションID (リクエスト対象と同一)
+    pub session_id: String,
+    /// CLI のアタッチモード
+    pub attach_mode: AttachMode,
+    /// ネイティブ復元できたか (`false` = 履歴 Replay で継続)
+    pub context_restored: bool,
 }
 
 /// セッション一覧の 1 行 (IPC 用)。
@@ -176,6 +237,8 @@ struct Sessions {
     active: HashMap<String, ActiveSession>,
     /// 直近に処理した `command_id` (古いものから破棄)
     processed_commands: VecDeque<String>,
+    /// 再開処理中 (二重レジュームの排他) のセッションID
+    resuming: HashSet<String>,
 }
 
 struct ActiveSession {
@@ -206,6 +269,17 @@ struct StartDriverParams<'a> {
     extra_args: Vec<String>,
     initial_mode: Option<String>,
     has_custom_title: bool,
+    /// 既存エージェントセッションからの再開指定 (`None` は新規セッション)
+    resume: Option<ResumeRequest>,
+}
+
+/// [`SessionManager::start_driver_session`] の結果 (ハンドル + 復元成否)。
+struct StartedDriverSession {
+    /// 操作ハンドル
+    handle: Arc<dyn ActiveSessionHandle>,
+    /// `true` = エージェント側コンテキストをネイティブ復元した
+    /// (`false` は呼び出し側が履歴 Replay を注入する)
+    context_restored: bool,
 }
 
 impl std::fmt::Debug for SessionManager {
@@ -297,10 +371,7 @@ impl SessionManager {
 
         let mut spec = self.resolve_launch_spec(agent_id, extra_args).await?;
         // `--acp`: `opencode2` を標準ACPモード (`opencode2 acp`) で起動する
-        if acp && spec.agent_id == OPENCODE2_ID {
-            spec.args = vec!["acp".to_owned()];
-            spec.driver_kind = "acp".to_owned();
-        }
+        let opencode_mode = apply_opencode_mode(&mut spec, acp.then_some("acp"), extra_args);
 
         // SessionCreated (node_seq = 1)
         let (git_branch, is_worktree) = branch_and_worktree(&resolved.local_path).await;
@@ -320,11 +391,12 @@ impl SessionManager {
                     parent_session_id: None,
                     fork_from_node_seq: None,
                     title: title.clone(),
+                    opencode_mode,
                 },
             )
             .await?;
 
-        let handle = self
+        let started = self
             .start_driver_session(StartDriverParams {
                 session_id: &session_id,
                 title: &title,
@@ -333,12 +405,13 @@ impl SessionManager {
                 extra_args: extra_args.to_vec(),
                 initial_mode: initial_mode.map(str::to_owned),
                 has_custom_title: false,
+                resume: None,
             })
             .await?;
 
         Ok(EnsureSessionOutcome {
             session_id,
-            attach_mode: attach_mode_of(handle.as_ref()),
+            attach_mode: attach_mode_of(started.handle.as_ref()),
         })
     }
 
@@ -366,19 +439,7 @@ impl SessionManager {
         let mut spec = self
             .resolve_launch_spec(params.agent_id, &extra_args_vec)
             .await?;
-        if let Some(om) = params.opencode_mode
-            && spec.agent_id == "opencode2"
-        {
-            if om == "acp" {
-                spec.driver_kind = "acp".to_owned();
-                spec.args = vec!["acp".to_owned()];
-                spec.args.extend(extra_args_vec.iter().cloned());
-            } else if om == "bridge" {
-                spec.driver_kind = "opencode2".to_owned();
-                spec.args = vec!["serve".to_owned()];
-                spec.args.extend(extra_args_vec.iter().cloned());
-            }
-        }
+        let opencode_mode = apply_opencode_mode(&mut spec, params.opencode_mode, &extra_args_vec);
 
         // SessionCreated (node_seq = 1)
         let (git_branch, is_worktree) = branch_and_worktree(&resolved.local_path).await;
@@ -405,11 +466,12 @@ impl SessionManager {
                     parent_session_id: None,
                     fork_from_node_seq: None,
                     title: title.clone(),
+                    opencode_mode,
                 },
             )
             .await?;
 
-        let handle = self
+        let started = self
             .start_driver_session(StartDriverParams {
                 session_id: params.session_id,
                 title: &title,
@@ -418,6 +480,7 @@ impl SessionManager {
                 extra_args: extra_args_vec,
                 initial_mode: params.mode.map(str::to_owned),
                 has_custom_title,
+                resume: None,
             })
             .await?;
 
@@ -427,7 +490,9 @@ impl SessionManager {
         }
 
         // 別ノード・一時VMからの Fork: 履歴 Replay を初期コンテキストとして注入する
-        if let Some(context) = params.fork_context.and_then(build_fork_context_from_items)
+        if let Some(context) = params
+            .fork_context
+            .and_then(|items| build_history_replay_context_from_items(items, ReplayPurpose::Fork))
             && let Err(err) = self.start_turn(params.session_id, &context, "fork").await
         {
             tracing::warn!(
@@ -438,7 +503,7 @@ impl SessionManager {
 
         Ok(EnsureSessionOutcome {
             session_id: params.session_id.to_owned(),
-            attach_mode: attach_mode_of(handle.as_ref()),
+            attach_mode: attach_mode_of(started.handle.as_ref()),
         })
     }
 
@@ -474,11 +539,11 @@ impl SessionManager {
     /// ドライバを起動し、active 一覧への登録とイベントポンプの開始を行う。
     ///
     /// 起動失敗時は `StatusChanged(Error)` を記録する。成功時は CLI の
-    /// アタッチモード決定に使うハンドルを返す。
+    /// アタッチモード決定に使うハンドルとネイティブ復元成否を返す。
     async fn start_driver_session(
         &self,
         params: StartDriverParams<'_>,
-    ) -> Result<Arc<dyn ActiveSessionHandle>, NodeError> {
+    ) -> Result<StartedDriverSession, NodeError> {
         // Git Credential Proxy (一時VM向け GIT_ASKPASS) をエージェントプロセスへ注入する。
         // スクリプトはデーモン起動時に生成済みで、`fxg git-askpass` → ローカルIPC →
         // 中央サーバーのオンメモリ中継で認証する (設計: docs/01 §6.4)。
@@ -498,7 +563,7 @@ impl SessionManager {
         let driver =
             (self.inner.factory)(params.spec).map_err(|err| NodeError::Agent(err.to_string()))?;
         let (event_tx, event_rx) = mpsc::unbounded_channel();
-        let handle = match driver
+        let started = match driver
             .start_session(
                 fxg_acp::StartSessionRequest {
                     session_id: params.session_id.to_owned(),
@@ -507,12 +572,13 @@ impl SessionManager {
                     launch: params.spec.clone(),
                     extra_args: params.extra_args,
                     initial_mode: params.initial_mode,
+                    resume: params.resume,
                 },
                 event_tx,
             )
             .await
         {
-            Ok(handle) => handle,
+            Ok(started) => started,
             Err(err) => {
                 let message = format!("failed to start agent: {err:#}");
                 tracing::warn!(session_id = params.session_id, "{message}");
@@ -530,7 +596,8 @@ impl SessionManager {
             }
         };
 
-        let handle: Arc<dyn ActiveSessionHandle> = Arc::from(handle);
+        let context_restored = started.context_restored;
+        let handle: Arc<dyn ActiveSessionHandle> = Arc::from(started.handle);
         {
             let mut sessions = self.inner.sessions.lock().expect("sessions poisoned");
             sessions.active.insert(
@@ -554,7 +621,10 @@ impl SessionManager {
         tokio::spawn(async move {
             pump_events(inner, pump_session_id, event_rx).await;
         });
-        Ok(handle)
+        Ok(StartedDriverSession {
+            handle,
+            context_restored,
+        })
     }
 
     /// セッションの永続イベントを読み込む (`up_to_node_seq` 以下に限定。`None` は全件)。
@@ -706,9 +776,11 @@ impl SessionManager {
             .or(source.fork_from_node_seq)
             .unwrap_or(1);
 
-        let spec = self
+        let mut spec = self
             .resolve_launch_spec(agent_id.unwrap_or(&source.agent_id), &[])
             .await?;
+        // 実効の opencode2 起動モードを記録する (スペックは変更しない)
+        let opencode_mode = apply_opencode_mode(&mut spec, None, &[]);
         let project_name = self.project_name(&source.project_id).await;
 
         let new_session_id = uuid_v7();
@@ -732,11 +804,12 @@ impl SessionManager {
                     parent_session_id: Some(source.session_id.clone()),
                     fork_from_node_seq: Some(fork_seq),
                     title: title.clone(),
+                    opencode_mode,
                 },
             )
             .await?;
 
-        let handle = self
+        let started = self
             .start_driver_session(StartDriverParams {
                 session_id: &new_session_id,
                 title: &title,
@@ -745,11 +818,12 @@ impl SessionManager {
                 extra_args: Vec::new(),
                 initial_mode: None,
                 has_custom_title: true,
+                resume: None,
             })
             .await?;
 
         // 履歴 Replay 注入 (新エージェントセッションの初期コンテキスト)
-        if let Some(context) = build_fork_context(&events, fork_seq)
+        if let Some(context) = build_history_replay_context(&events, fork_seq, ReplayPurpose::Fork)
             && let Err(err) = self.start_turn(&new_session_id, &context, "fork").await
         {
             tracing::warn!(
@@ -760,7 +834,142 @@ impl SessionManager {
 
         Ok(EnsureSessionOutcome {
             session_id: new_session_id,
-            attach_mode: attach_mode_of(handle.as_ref()),
+            attach_mode: attach_mode_of(started.handle.as_ref()),
+        })
+    }
+
+    /// 停止済みセッションを再開する (`fxg session resume`)。
+    ///
+    /// - 同一 `session_id` のままエージェントを起動し、ネイティブ復元
+    ///   (`session/resume` → `session/load` → OpenCode2 既存セッション bind) を
+    ///   優先する。復元できなかった場合は履歴 Replay を注入して継続する。
+    /// - 再開可否は `sessions.active` (実際の稼働状況) を正とする。
+    ///   強制終了時は `stopped` への遷移イベントが書かれないため、DB の
+    ///   `status` が `idle` / `running` のままでも再開を許可する。
+    /// - 一時VM (`provisioning` / `bootstrapping`) セッションは v1 では
+    ///   再開できない (設計: `docs/04-agent-drivers-and-windows.md` §4.3)。
+    pub async fn resume(&self, params: ResumeParams<'_>) -> Result<ResumeOutcome, NodeError> {
+        if !self.begin_command(params.command_id) {
+            return Err(NodeError::CommandDuplicate(params.command_id.to_owned()));
+        }
+
+        // 二重レジュームの排他 (active + 起動処理中の双方を拒否する)
+        {
+            let mut sessions = self.inner.sessions.lock().expect("sessions poisoned");
+            if sessions.active.contains_key(params.session_id)
+                || !sessions.resuming.insert(params.session_id.to_owned())
+            {
+                return Err(NodeError::InvalidState(format!(
+                    "session is already active or resuming: {}",
+                    params.session_id
+                )));
+            }
+        }
+        let result = self.resume_session_state(params).await;
+        self.inner
+            .sessions
+            .lock()
+            .expect("sessions poisoned")
+            .resuming
+            .remove(params.session_id);
+        result
+    }
+
+    /// [`Self::resume`] の本体 (排他ガードの解除は呼び出し側で行う)。
+    async fn resume_session_state(
+        &self,
+        params: ResumeParams<'_>,
+    ) -> Result<ResumeOutcome, NodeError> {
+        let session = self
+            .inner
+            .bus
+            .db()
+            .get_session(params.session_id)
+            .await?
+            .ok_or_else(|| NodeError::InvalidSession(params.session_id.to_owned()))?;
+
+        // 一時VM (provisioner) セッションの再開は v2 (未対応)
+        if matches!(
+            session.status,
+            SessionStatus::Provisioning | SessionStatus::Bootstrapping
+        ) {
+            return Err(NodeError::InvalidState(format!(
+                "resuming ephemeral sessions is not supported yet: {}",
+                params.session_id
+            )));
+        }
+
+        // 作業ディレクトリが消えている (Worktree 削除済み等) 場合は再開不可
+        let cwd = PathBuf::from(&session.local_path);
+        if !cwd.is_dir() {
+            return Err(NodeError::InvalidState(format!(
+                "session workspace does not exist: {}",
+                session.local_path
+            )));
+        }
+
+        let events = self.load_session_events(params.session_id, None).await?;
+        // 起動モードは SessionCreated イベントを正として復元する
+        let opencode_mode = events.iter().find_map(|event| match &event.payload {
+            UnifiedEventPayload::SessionCreated { opencode_mode, .. } => opencode_mode.clone(),
+            _ => None,
+        });
+        let mut spec = self.resolve_launch_spec(&session.agent_id, &[]).await?;
+        apply_opencode_mode(&mut spec, opencode_mode.as_deref(), &[]);
+
+        // ネイティブ復元を試みる (復元できなかった場合の Replay 注入は下で行う)
+        let resume = ResumeRequest {
+            // `--replay` 指定時はエージェント側IDを渡さず新規作成させる
+            agent_session_id: if params.force_replay {
+                None
+            } else {
+                session.agent_session_id.clone()
+            },
+            allow_fresh: true,
+        };
+        let started = self
+            .start_driver_session(StartDriverParams {
+                session_id: params.session_id,
+                title: &session.title,
+                cwd: &cwd,
+                spec: &spec,
+                extra_args: Vec::new(),
+                initial_mode: None,
+                has_custom_title: true,
+                resume: Some(resume),
+            })
+            .await?;
+
+        // 再開の事実を状態投影へ反映する (stopped / error → idle)
+        self.inner
+            .bus
+            .record(
+                params.session_id,
+                UnifiedEventPayload::StatusChanged {
+                    status: SessionStatus::Idle,
+                    error_message: None,
+                },
+            )
+            .await?;
+
+        // ネイティブ復元できなかった場合は履歴 Replay でコンテキストを継続する
+        if !started.context_restored {
+            let up_to_seq = events.last().map(|event| event.node_seq).unwrap_or(0);
+            if let Some(context) =
+                build_history_replay_context(&events, up_to_seq, ReplayPurpose::Resume)
+                && let Err(err) = self.start_turn(params.session_id, &context, "resume").await
+            {
+                tracing::warn!(
+                    session_id = params.session_id,
+                    "failed to inject resume context: {err:#}"
+                );
+            }
+        }
+
+        Ok(ResumeOutcome {
+            session_id: params.session_id.to_owned(),
+            attach_mode: attach_mode_of(started.handle.as_ref()),
+            context_restored: started.context_restored,
         })
     }
 
@@ -1296,14 +1505,44 @@ fn find_revert_snapshot(events: &[SessionEventEnvelope]) -> Option<(u64, String)
     })
 }
 
-/// Fork 時に新エージェントセッションへ注入する会話履歴コンテキストを組み立てる。
+/// 履歴 Replay を注入する目的 (プロンプト冒頭の説明文に使う)。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ReplayPurpose {
+    /// 会話の分岐 (`fxg session fork`)
+    Fork,
+    /// 停止セッションの再開 (`fxg session resume`)
+    Resume,
+}
+
+impl ReplayPurpose {
+    /// プロンプト冒頭の説明文を組み立てる。
+    fn header(self, range: &str) -> String {
+        match self {
+            Self::Fork => format!(
+                "以下の履歴は、以前のセッション{range}をこの時点から \
+                 Fork したものです。この文脈を引き継いで作業を続けてください。\n\n"
+            ),
+            Self::Resume => format!(
+                "以下の履歴は、停止していたセッション{range}を再開したものです。 \
+                 この文脈を引き継いで作業を続けてください。\n\n"
+            ),
+        }
+    }
+}
+
+/// 履歴 Replay (fork / resume) 用の会話コンテキストを組み立てる。
 ///
-/// 会話 (ユーザー / エージェントメッセージ) と、ツール呼び出しの要約・変更ファイルを
-/// `node_seq` 順に連結する。会話が無い (履歴なし) 場合は `None`。
-fn build_fork_context(events: &[SessionEventEnvelope], fork_seq: u64) -> Option<String> {
+/// 会話 (ユーザー / エージェントメッセージ) と、ツール呼び出しの要約・
+/// 変更ファイルを `node_seq` 順に連結する (`up_to_seq` で打ち切る)。
+/// 会話が無い (履歴なし) 場合は `None`。
+fn build_history_replay_context(
+    events: &[SessionEventEnvelope],
+    up_to_seq: u64,
+    purpose: ReplayPurpose,
+) -> Option<String> {
     let mut parts: Vec<String> = Vec::new();
     for event in events {
-        if event.node_seq > fork_seq {
+        if event.node_seq > up_to_seq {
             break;
         }
         match &event.payload {
@@ -1339,12 +1578,15 @@ fn build_fork_context(events: &[SessionEventEnvelope], fork_seq: u64) -> Option<
             _ => {}
         }
     }
-    assemble_fork_context(parts, fork_seq)
+    assemble_replay_context(parts, up_to_seq, purpose)
 }
 
 /// 中央サーバーから届いた構造化履歴 ([`ForkHistoryItem`]) から
 /// Replay 注入用のコンテキストを組み立てる (別ノード・一時VMへの引き継ぎ)。
-fn build_fork_context_from_items(items: &[ForkHistoryItem]) -> Option<String> {
+fn build_history_replay_context_from_items(
+    items: &[ForkHistoryItem],
+    purpose: ReplayPurpose,
+) -> Option<String> {
     let mut parts: Vec<String> = Vec::new();
     for item in items {
         let role = if item.role == "user" {
@@ -1361,26 +1603,27 @@ fn build_fork_context_from_items(items: &[ForkHistoryItem]) -> Option<String> {
             parts.push(format!("- {summary}"));
         }
     }
-    assemble_fork_context(parts, 0)
+    assemble_replay_context(parts, 0, purpose)
 }
 
 /// Replay コンテキストの共通組み立て (上限文字数で打ち切る)。
-fn assemble_fork_context(parts: Vec<String>, fork_seq: u64) -> Option<String> {
+fn assemble_replay_context(
+    parts: Vec<String>,
+    up_to_seq: u64,
+    purpose: ReplayPurpose,
+) -> Option<String> {
     /// 注入するコンテキストの最大文字数 (過大なプロンプトを防ぐ)。
     const MAX_CONTEXT_CHARS: usize = 16_000;
 
     if parts.is_empty() {
         return None;
     }
-    let range = if fork_seq > 0 {
-        format!(" (node_seq <= {fork_seq})")
+    let range = if up_to_seq > 0 {
+        format!(" (node_seq <= {up_to_seq})")
     } else {
         String::new()
     };
-    let mut context = format!(
-        "以下の履歴は、以前のセッション{range}をこの時点から \
-         Fork したものです。この文脈を引き継いで作業を続けてください。\n\n"
-    );
+    let mut context = purpose.header(&range);
     for part in parts {
         if context.chars().count() + part.chars().count() > MAX_CONTEXT_CHARS {
             context.push_str("\n(履歴は上限に達したため省略されました)");
@@ -1914,6 +2157,236 @@ mod tests {
         panic!("driver exit did not record Stopped");
     }
 
+    /// セッションが `stopped` になり active 一覧から外れるまで待つ。
+    async fn wait_stopped(manager: &SessionManager, session_id: &str) {
+        for _ in 0..200 {
+            let row = manager
+                .bus()
+                .db()
+                .get_session(session_id)
+                .await
+                .expect("query");
+            if row.is_some_and(|session| session.status == SessionStatus::Stopped) {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        panic!("session did not stop");
+    }
+
+    /// 会話 1 ターン + エージェント側ID付きの停止済みセッションを用意する。
+    ///
+    /// 戻り値は (リポジトリパス, セッションID)。
+    async fn setup_stopped_session(
+        manager: &SessionManager,
+        mock: &MockAgent,
+        dir: &tempfile::TempDir,
+        prompt: &str,
+    ) -> (PathBuf, String) {
+        let (repo, session_id) = setup_repo_session(manager, dir).await;
+        manager
+            .send_prompt("c2", &session_id, prompt, "cli")
+            .await
+            .expect("prompt");
+        wait_user_message(manager, &session_id, prompt).await;
+        mock.emit(DriverEvent::Event(UnifiedEventPayload::SessionAgentBound {
+            agent_session_id: "agent-sess-1".to_owned(),
+        }));
+        wait_event_type(manager, &session_id, "session_agent_bound").await;
+        mock.emit(DriverEvent::Event(UnifiedEventPayload::StatusChanged {
+            status: SessionStatus::Idle,
+            error_message: None,
+        }));
+        wait_not_busy(manager, &session_id).await;
+        // ドライバ (エージェントプロセス) を終了させる
+        mock.close_events();
+        wait_stopped(manager, &session_id).await;
+        (repo, session_id)
+    }
+
+    #[tokio::test]
+    async fn resume_restores_natively_without_replay() {
+        let (manager, mock, dir) = setup().await;
+        let (_repo, session_id) =
+            setup_stopped_session(&manager, &mock, &dir, "native resume").await;
+
+        mock.set_resume_supported(true);
+        let outcome = manager
+            .resume(ResumeParams {
+                command_id: "c-resume",
+                session_id: &session_id,
+                force_replay: false,
+            })
+            .await
+            .expect("resume");
+        assert_eq!(outcome.session_id, session_id);
+        assert!(outcome.context_restored);
+        assert_eq!(outcome.attach_mode, AttachMode::AcpTui);
+
+        // 再開後は status が idle に戻り、active 一覧へ復帰する
+        wait_idle(&manager, &session_id).await;
+        let row = manager
+            .bus()
+            .db()
+            .get_session(&session_id)
+            .await
+            .expect("query")
+            .expect("session row");
+        assert_eq!(row.status, SessionStatus::Idle);
+
+        // ドライバへは記録済みのエージェント側IDで再開が要求される
+        let start = mock.starts().last().cloned().expect("start_session");
+        let resume = start.resume.expect("resume request");
+        assert_eq!(resume.agent_session_id.as_deref(), Some("agent-sess-1"));
+        assert!(resume.allow_fresh);
+
+        // ネイティブ復元のため履歴 Replay は注入されない
+        let batch = manager
+            .bus()
+            .db()
+            .session_events_after(&session_id, 0, 200)
+            .await
+            .expect("events");
+        assert!(
+            !batch.events.iter().any(|event| matches!(
+                &event.payload,
+                UnifiedEventPayload::UserMessage { client_source, .. } if client_source == "resume"
+            )),
+            "native resume must not inject replay context"
+        );
+    }
+
+    #[tokio::test]
+    async fn resume_falls_back_to_replay_context() {
+        let (manager, mock, dir) = setup().await;
+        let (_repo, session_id) =
+            setup_stopped_session(&manager, &mock, &dir, "fallback resume").await;
+
+        // ネイティブ復元非対応のドライバ → Replay でコンテキストを継続する
+        let outcome = manager
+            .resume(ResumeParams {
+                command_id: "c-resume",
+                session_id: &session_id,
+                force_replay: false,
+            })
+            .await
+            .expect("resume");
+        assert!(!outcome.context_restored);
+
+        // 履歴 Replay が `client_source = "resume"` の UserMessage として注入され、
+        // エージェントへ送信される
+        let batch = manager
+            .bus()
+            .db()
+            .session_events_after(&session_id, 0, 200)
+            .await
+            .expect("events");
+        let injected = batch
+            .events
+            .iter()
+            .find_map(|event| match &event.payload {
+                UnifiedEventPayload::UserMessage {
+                    text,
+                    client_source,
+                    ..
+                } if client_source == "resume" => Some(text.clone()),
+                _ => None,
+            })
+            .expect("injected resume context");
+        assert!(injected.contains("fallback resume"), "履歴が含まれる");
+        assert!(
+            mock.prompts().iter().any(|prompt| prompt == &injected),
+            "コンテキストがエージェントへ送信される"
+        );
+        // Replay ターンの完了 (Idle) で busy が解除される
+        mock.emit(DriverEvent::Event(UnifiedEventPayload::StatusChanged {
+            status: SessionStatus::Idle,
+            error_message: None,
+        }));
+        wait_not_busy(&manager, &session_id).await;
+    }
+
+    #[tokio::test]
+    async fn resume_force_replay_skips_agent_session_id() {
+        let (manager, mock, dir) = setup().await;
+        let (_repo, session_id) =
+            setup_stopped_session(&manager, &mock, &dir, "force replay").await;
+
+        // ネイティブ復元対応でも `--replay` はエージェント側IDを渡さない
+        mock.set_resume_supported(true);
+        let outcome = manager
+            .resume(ResumeParams {
+                command_id: "c-resume",
+                session_id: &session_id,
+                force_replay: true,
+            })
+            .await
+            .expect("resume");
+        assert!(!outcome.context_restored);
+        assert_eq!(
+            mock.starts()
+                .last()
+                .and_then(|start| start.resume.as_ref())
+                .and_then(|resume| resume.agent_session_id.clone()),
+            None
+        );
+    }
+
+    #[tokio::test]
+    async fn resume_rejects_active_unknown_and_missing_workspace() {
+        let (manager, mock, dir) = setup().await;
+
+        // 未知のセッションは InvalidSession
+        let err = manager
+            .resume(ResumeParams {
+                command_id: "u1",
+                session_id: "missing-session",
+                force_replay: false,
+            })
+            .await
+            .expect_err("unknown session");
+        assert!(matches!(err, NodeError::InvalidSession(_)));
+
+        // 稼働中 (active) のセッションは InvalidState
+        let (repo, session_id) = setup_repo_session(&manager, &dir).await;
+        let err = manager
+            .resume(ResumeParams {
+                command_id: "c2",
+                session_id: &session_id,
+                force_replay: false,
+            })
+            .await
+            .expect_err("active session");
+        assert!(matches!(err, NodeError::InvalidState(_)));
+
+        // 作業ディレクトリが消えている (Worktree 削除済み等) 場合は InvalidState
+        mock.close_events();
+        wait_stopped(&manager, &session_id).await;
+        std::fs::remove_dir_all(&repo).expect("remove repo");
+        let err = manager
+            .resume(ResumeParams {
+                command_id: "c3",
+                session_id: &session_id,
+                force_replay: false,
+            })
+            .await
+            .expect_err("missing workspace");
+        assert!(matches!(err, NodeError::InvalidState(_)));
+
+        // 失敗しても排他ガード (`resuming`) は解除され、復旧後は再開できる
+        std::fs::create_dir_all(&repo).expect("mkdir repo");
+        crate::testutil::init_test_repo(&repo).await;
+        let outcome = manager
+            .resume(ResumeParams {
+                command_id: "c4",
+                session_id: &session_id,
+                force_replay: false,
+            })
+            .await
+            .expect("resume after recovery");
+        assert_eq!(outcome.session_id, session_id);
+    }
+
     #[tokio::test]
     async fn session_status_transitions_on_driver_events() {
         let (manager, mock, dir) = setup().await;
@@ -1949,6 +2422,51 @@ mod tests {
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         }
         panic!("status did not become stopped");
+    }
+
+    #[test]
+    fn apply_opencode_mode_maps_bridge_and_acp() {
+        fn opencode_spec() -> AgentLaunchSpec {
+            AgentLaunchSpec {
+                agent_id: OPENCODE2_ID.to_owned(),
+                display_name: "OpenCode2".to_owned(),
+                driver_kind: "opencode2".to_owned(),
+                program: PathBuf::from("opencode2"),
+                args: vec!["serve".to_owned()],
+                env: Vec::new(),
+            }
+        }
+
+        // acp 指定: 引数に extra_args を含めて `opencode2 acp` に切り替える
+        let mut spec = opencode_spec();
+        assert_eq!(
+            apply_opencode_mode(&mut spec, Some("acp"), &["--model".to_owned()]),
+            Some("acp".to_owned())
+        );
+        assert_eq!(spec.driver_kind, "acp");
+        assert_eq!(spec.args, vec!["acp", "--model"]);
+
+        // bridge 指定: `opencode2 serve` に戻す
+        assert_eq!(
+            apply_opencode_mode(&mut spec, Some("bridge"), &[]),
+            Some("bridge".to_owned())
+        );
+        assert_eq!(spec.driver_kind, "opencode2");
+        assert_eq!(spec.args, vec!["serve"]);
+
+        // 未指定: レジストリ既定を尊重し、実効モードのみ記録する
+        assert_eq!(
+            apply_opencode_mode(&mut spec, None, &[]),
+            Some("bridge".to_owned())
+        );
+        assert_eq!(spec.driver_kind, "opencode2");
+
+        // opencode2 以外は何もしない
+        let mut other = opencode_spec();
+        other.agent_id = "claude".to_owned();
+        other.driver_kind = "acp".to_owned();
+        assert_eq!(apply_opencode_mode(&mut other, Some("acp"), &[]), None);
+        assert_eq!(other.driver_kind, "acp");
     }
 
     #[test]

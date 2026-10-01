@@ -48,7 +48,8 @@
     permission_resolved: '承認解決',
     pty_spawn: 'PTY 起動',
     kill_switch: '緊急停止',
-    worktree_manage: 'Worktree 操作'
+    worktree_manage: 'Worktree 操作',
+    session_resume: 'セッション再開'
   };
 </script>
 

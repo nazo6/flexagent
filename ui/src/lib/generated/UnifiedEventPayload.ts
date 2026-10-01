@@ -56,7 +56,14 @@ fork_from_node_seq: number | null,
 /**
  * 初期タイトル
  */
-title: string, } } | { "type": "session_title_changed", "data": { 
+title: string, 
+/**
+ * OpenCode2 の起動モード (`"bridge"` / `"acp"`。opencode2 以外は `None`)。
+ *
+ * セッション再開 (resume) 時に起動モードを復元するために永続化する
+ * (旧イベントには存在しないため `#[serde(default)]`)。
+ */
+opencode_mode: string | null, } } | { "type": "session_title_changed", "data": { 
 /**
  * 新しいタイトル
  */

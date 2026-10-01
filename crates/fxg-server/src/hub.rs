@@ -90,6 +90,17 @@ enum PendingResponse {
         /// 失敗時のメッセージ
         error: Option<String>,
     },
+    /// セッション再開結果 (`ResumeResult`)
+    Resume {
+        /// 成功したか
+        success: bool,
+        /// 失敗時の構造化エラーコード
+        code: Option<ErrorCode>,
+        /// 成功時のネイティブ復元成否 (`false` = 履歴 Replay で継続)
+        context_restored: Option<bool>,
+        /// 失敗時のメッセージ
+        error: Option<String>,
+    },
     /// ファイルシステム閲覧結果 (`BrowseFsResult`)
     BrowseFs {
         /// 取得成功時のブラウズ結果
@@ -414,6 +425,40 @@ impl NodeHub {
                     Err(ApiError::from_code(
                         code.unwrap_or(ErrorCode::Internal),
                         error.unwrap_or_else(|| "revert failed".to_owned()),
+                    ))
+                }
+            }
+            PendingResponse::Failed { code, message } => Err(ApiError::from_code(code, message)),
+            _ => Err(ApiError::internal("unexpected node response kind")),
+        }
+    }
+
+    /// セッション再開を中継し、`command_id` 相関で結果を待つ。
+    ///
+    /// 戻り値はネイティブ復元の成否 (`false` = 履歴 Replay で継続)。
+    pub async fn resume_session(
+        &self,
+        node_id: &str,
+        command_id: &str,
+        message: ServerToNodeMsg,
+    ) -> Result<bool, ApiError> {
+        let response = self
+            .request(node_id, command_id, message, COMMAND_TIMEOUT)
+            .await?;
+        match response {
+            PendingResponse::Resume {
+                success,
+                code,
+                context_restored,
+                error,
+            } => {
+                if success {
+                    context_restored
+                        .ok_or_else(|| ApiError::internal("node returned no resume outcome"))
+                } else {
+                    Err(ApiError::from_code(
+                        code.unwrap_or(ErrorCode::Internal),
+                        error.unwrap_or_else(|| "resume failed".to_owned()),
                     ))
                 }
             }
@@ -994,6 +1039,26 @@ async fn handle_node_message(state: &ServerState, node_id: &str, text: &str) {
                         success,
                         code,
                         outcome,
+                        error,
+                    },
+                )
+                .await;
+        }
+        NodeToServerMsg::ResumeResult {
+            command_id,
+            success,
+            code,
+            context_restored,
+            error,
+        } => {
+            state
+                .hub()
+                .resolve(
+                    &command_id,
+                    PendingResponse::Resume {
+                        success,
+                        code,
+                        context_restored,
                         error,
                     },
                 )

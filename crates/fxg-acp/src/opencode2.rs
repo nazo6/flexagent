@@ -16,6 +16,9 @@
 //! - **Revert**: ネイティブ API
 //!   (`POST /api/session/{id}/revert/stage` + `/revert/commit`) で会話のみを
 //!   巻き戻す (`files: false`。ファイル復元は Shadow Git Tree が担当)。
+//! - **Resume**: 再開指定時は `GET /api/session/{id}` で存在確認し、既存
+//!   セッションへ bind する (404 の場合は `allow_fresh` に従い新規作成 +
+//!   履歴 Replay へフォールバック。設計: docs/04 §4.3)。
 //! - **承認**: SSE の `permission.asked` を [`UnifiedEventPayload::PermissionRequest`]
 //!   へ変換し、`POST /api/session/{id}/permission/{request_id}/reply` で応答する。
 //!   純正TUI から応答された場合も `permission.replied` として記録される。
@@ -41,6 +44,7 @@ use tokio::sync::mpsc;
 
 use crate::driver::{
     ActiveSessionHandle, AgentDriver, DriverEvent, NativeAttachInfo, StartSessionRequest,
+    StartedSession,
 };
 
 /// `opencode2 serve` が準備完了するまでの最大待機時間。
@@ -296,7 +300,14 @@ impl AgentDriver for OpenCode2Driver {
         &self,
         req: StartSessionRequest,
         event_tx: mpsc::UnboundedSender<DriverEvent>,
-    ) -> anyhow::Result<Box<dyn ActiveSessionHandle>> {
+    ) -> anyhow::Result<StartedSession> {
+        // 再開指定 (Some の場合は既存セッションへ bind を試みる)
+        let resume_session_id = req
+            .resume
+            .as_ref()
+            .and_then(|resume| resume.agent_session_id.clone());
+        let allow_fresh = req.resume.as_ref().is_some_and(|resume| resume.allow_fresh);
+
         // `opencode2.cmd` 等の拡張子解決 (Windows の PATHEXT 対応)
         let program = fxg_pty::resolve_command(&req.launch.program.to_string_lossy(), &req.cwd)
             .map_err(|err| {
@@ -348,27 +359,71 @@ impl AgentDriver for OpenCode2Driver {
 
         wait_until_ready(&http, &base_url, &password, &mut child).await?;
 
-        // セッション作成 (作業ディレクトリを location に指定)
-        let body = create_session_body(&req);
-        let created = request(
-            &http,
-            &base_url,
-            &password,
-            reqwest::Method::POST,
-            "/api/session",
-            Some(body),
-        )
-        .await?;
-        let opencode_session_id = created
-            .pointer("/data/id")
-            .and_then(Value::as_str)
-            .map(str::to_owned)
-            .ok_or_else(|| anyhow!("opencode2 did not return a session id: {created}"))?;
+        // セッション決定: 再開指定があれば既存セッションへ bind、なければ新規作成
+        // (新規作成時は作業ディレクトリを location に指定)
+        let (opencode_session_id, context_restored) = match resume_session_id {
+            Some(agent_session_id) => {
+                match opencode_session_exists(&http, &base_url, &password, &agent_session_id).await
+                {
+                    Ok(true) => {
+                        // bind 後の初期モード適用 (新規作成時は body で渡す)
+                        if let Some(mode_id) = req.initial_mode.as_ref()
+                            && let Err(err) = request(
+                                &http,
+                                &base_url,
+                                &password,
+                                reqwest::Method::POST,
+                                &format!("/api/session/{agent_session_id}/agent"),
+                                Some(json!({ "agent": mode_id })),
+                            )
+                            .await
+                        {
+                            tracing::warn!(
+                                %agent_session_id,
+                                "failed to apply initial mode on resume: {err:#}"
+                            );
+                        }
+                        (agent_session_id, true)
+                    }
+                    Ok(false) if !allow_fresh => {
+                        anyhow::bail!("opencode2 session not found: {agent_session_id}");
+                    }
+                    Ok(false) => {
+                        tracing::info!(
+                            %agent_session_id,
+                            "opencode2 session not found; starting fresh with replay"
+                        );
+                        (
+                            create_opencode_session(&http, &base_url, &password, &req).await?,
+                            false,
+                        )
+                    }
+                    Err(err) if !allow_fresh => return Err(err),
+                    Err(err) => {
+                        tracing::warn!(
+                            %agent_session_id,
+                            "failed to verify opencode2 session; starting fresh with replay: {err:#}"
+                        );
+                        (
+                            create_opencode_session(&http, &base_url, &password, &req).await?,
+                            false,
+                        )
+                    }
+                }
+            }
+            None => (
+                create_opencode_session(&http, &base_url, &password, &req).await?,
+                false,
+            ),
+        };
 
-        // エージェント側セッションIDの確定を記録する (Revert 基準点の対応付け)
-        let _ = event_tx.send(DriverEvent::Event(UnifiedEventPayload::SessionAgentBound {
-            agent_session_id: opencode_session_id.clone(),
-        }));
+        // 新規作成時のみエージェント側セッションIDの確定を記録する
+        // (既存セッションへの bind では既に記録済みのため再発行しない)
+        if !context_restored {
+            let _ = event_tx.send(DriverEvent::Event(UnifiedEventPayload::SessionAgentBound {
+                agent_session_id: opencode_session_id.clone(),
+            }));
+        }
 
         // モード (agent) とモデルの選択肢を同期する。
         // `opencode2 serve` は起動直後しばらくカタログが空のため、揃うまで待つ
@@ -421,15 +476,18 @@ impl AgentDriver for OpenCode2Driver {
         // SSE 接続が確立 (または失敗) するまで待ってから返す
         let _ = ready_rx.await;
 
-        Ok(Box::new(OpenCode2SessionHandle {
-            http,
-            base_url,
-            password,
-            opencode_session_id,
-            state,
-            commands,
-            _process_guard: process_guard,
-        }))
+        Ok(StartedSession {
+            handle: Box::new(OpenCode2SessionHandle {
+                http,
+                base_url,
+                password,
+                opencode_session_id,
+                state,
+                commands,
+                _process_guard: process_guard,
+            }),
+            context_restored,
+        })
     }
 }
 
@@ -568,6 +626,55 @@ fn create_session_body(req: &StartSessionRequest) -> Value {
         body["agent"] = Value::String(agent.clone());
     }
     body
+}
+
+/// 新規 opencode2 セッションを作成し ID を返す。
+async fn create_opencode_session(
+    http: &reqwest::Client,
+    base_url: &str,
+    password: &str,
+    req: &StartSessionRequest,
+) -> anyhow::Result<String> {
+    let body = create_session_body(req);
+    let created = request(
+        http,
+        base_url,
+        password,
+        reqwest::Method::POST,
+        "/api/session",
+        Some(body),
+    )
+    .await?;
+    created
+        .pointer("/data/id")
+        .and_then(Value::as_str)
+        .map(str::to_owned)
+        .ok_or_else(|| anyhow!("opencode2 did not return a session id: {created}"))
+}
+
+/// 既存 opencode2 セッションの存在を確認する。
+///
+/// 404 は `Ok(false)`、成功は `Ok(true)`、その他の失敗は `Err` を返す。
+async fn opencode_session_exists(
+    http: &reqwest::Client,
+    base_url: &str,
+    password: &str,
+    session_id: &str,
+) -> anyhow::Result<bool> {
+    let response = http
+        .get(format!("{base_url}/api/session/{session_id}"))
+        .basic_auth(AUTH_USER, Some(password.to_owned()))
+        .send()
+        .await?;
+    let status = response.status();
+    if status == reqwest::StatusCode::NOT_FOUND {
+        return Ok(false);
+    }
+    if !status.is_success() {
+        let message = response.text().await.unwrap_or_default();
+        anyhow::bail!("opencode2 api /api/session/{session_id} failed ({status}): {message}");
+    }
+    Ok(true)
 }
 
 /// サーバーが `/api/info` に応答するまで待つ (プロセス即死は即エラー)。
@@ -1390,6 +1497,7 @@ mod tests {
             },
             extra_args: Vec::new(),
             initial_mode: Some("build".to_owned()),
+            resume: None,
         };
         let body = create_session_body(&req);
         assert_eq!(body["title"], "OpenCode2 @ demo");
@@ -1409,7 +1517,7 @@ mod tests {
         let root = tempfile::tempdir().expect("tempdir");
         let driver = OpenCode2Driver::new();
         let (tx, mut rx) = mpsc::unbounded_channel();
-        let handle = driver
+        let started = driver
             .start_session(
                 StartSessionRequest {
                     session_id: "test-session".to_owned(),
@@ -1425,11 +1533,14 @@ mod tests {
                     },
                     extra_args: Vec::new(),
                     initial_mode: None,
+                    resume: None,
                 },
                 tx,
             )
             .await
             .expect("start_session");
+        assert!(!started.context_restored);
+        let handle = started.handle;
 
         assert!(handle.native_attach().is_some());
         // 起動直後は `/api/agent` / `/api/model` が空を返すため、ドライバが
@@ -1526,5 +1637,83 @@ mod tests {
         }
         assert!(completed, "no completed agent message received");
         handle.shutdown().await.expect("shutdown");
+    }
+
+    /// 既存セッションへの bind (resume) を実 opencode2 で確認する:
+    /// `FXG_TEST_OPENCODE2=1 cargo test -p fxg-acp -- --ignored` で実行する。
+    #[tokio::test]
+    #[ignore = "requires a local opencode2 install"]
+    async fn resumes_existing_session_against_real_opencode2() {
+        use std::path::PathBuf;
+
+        use crate::driver::{AgentLaunchSpec, ResumeRequest};
+
+        let root = tempfile::tempdir().expect("tempdir");
+        let driver = OpenCode2Driver::new();
+        let launch = AgentLaunchSpec {
+            agent_id: "opencode2".to_owned(),
+            display_name: "OpenCode2".to_owned(),
+            driver_kind: "opencode2".to_owned(),
+            program: PathBuf::from("opencode2"),
+            args: vec!["serve".to_owned()],
+            env: Vec::new(),
+        };
+
+        // 1) 新規セッションを作成し、エージェント側IDを取得して停止する
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let started = driver
+            .start_session(
+                StartSessionRequest {
+                    session_id: "resume-test".to_owned(),
+                    title: Some("fxg resume test".to_owned()),
+                    cwd: PathBuf::from(root.path()),
+                    launch: launch.clone(),
+                    extra_args: Vec::new(),
+                    initial_mode: None,
+                    resume: None,
+                },
+                tx,
+            )
+            .await
+            .expect("start_session");
+        assert!(!started.context_restored);
+        let agent_session_id = started
+            .handle
+            .native_attach()
+            .expect("native attach")
+            .session_id;
+        started.handle.shutdown().await.expect("shutdown");
+
+        // 2) 既存セッションへ bind して再開する (新サーバーから復元)
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let resumed = driver
+            .start_session(
+                StartSessionRequest {
+                    session_id: "resume-test".to_owned(),
+                    title: None,
+                    cwd: PathBuf::from(root.path()),
+                    launch,
+                    extra_args: Vec::new(),
+                    initial_mode: None,
+                    resume: Some(ResumeRequest {
+                        agent_session_id: Some(agent_session_id.clone()),
+                        allow_fresh: false,
+                    }),
+                },
+                tx,
+            )
+            .await
+            .expect("resume session");
+        assert!(resumed.context_restored);
+        assert_eq!(
+            resumed
+                .handle
+                .native_attach()
+                .expect("native attach")
+                .session_id,
+            agent_session_id,
+            "resume must bind to the recorded opencode2 session"
+        );
+        resumed.handle.shutdown().await.expect("shutdown");
     }
 }

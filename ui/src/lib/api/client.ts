@@ -33,6 +33,8 @@ import type { PushSubscribeResponse } from "$lib/generated/PushSubscribeResponse
 import type { RemoveWorktreeRequest } from "$lib/generated/RemoveWorktreeRequest";
 import type { RespondPermissionRequest } from "$lib/generated/RespondPermissionRequest";
 import type { RespondPermissionResponse } from "$lib/generated/RespondPermissionResponse";
+import type { ResumeSessionRequest } from "$lib/generated/ResumeSessionRequest";
+import type { ResumeSessionResponse } from "$lib/generated/ResumeSessionResponse";
 import type { RotateAuthTokenResponse } from "$lib/generated/RotateAuthTokenResponse";
 import type { SearchHit } from "$lib/generated/SearchHit";
 import type { SearchResponse } from "$lib/generated/SearchResponse";
@@ -319,6 +321,13 @@ export class ApiClient {
   /** `POST /api/v1/sessions/:id/revert` (Shadow Git Tree 巻き戻し)。 */
   revertSession(sessionId: string, request: SessionRevertRequest): Promise<SessionRevertResponse> {
     return this.#request("POST", `/api/v1/sessions/${encodeURIComponent(sessionId)}/revert`, {
+      body: request,
+    });
+  }
+
+  /** `POST /api/v1/sessions/:id/resume` (停止済みセッションの再開)。 */
+  resumeSession(sessionId: string, request: ResumeSessionRequest): Promise<ResumeSessionResponse> {
+    return this.#request("POST", `/api/v1/sessions/${encodeURIComponent(sessionId)}/resume`, {
       body: request,
     });
   }

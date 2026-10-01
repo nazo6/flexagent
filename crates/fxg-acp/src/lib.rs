@@ -18,6 +18,6 @@ pub mod registry;
 pub use acp::AcpDriver;
 pub use driver::{
     ActiveSessionHandle, AgentDriver, AgentLaunchSpec, DriverEvent, NativeAttachInfo,
-    StartSessionRequest,
+    ResumeRequest, StartSessionRequest, StartedSession,
 };
 pub use opencode2::OpenCode2Driver;

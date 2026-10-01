@@ -905,6 +905,8 @@ pub enum SessionCommands {
     Kill(SessionKillArgs),
     /// 指定ターン時点へファイルと会話を巻き戻す
     Revert(SessionRevertArgs),
+    /// 停止済みセッションを会話コンテキストを維持したまま再開する
+    Resume(SessionResumeArgs),
     /// 指定時点から会話を分岐して新規セッションを作成する
     Fork(SessionForkArgs),
 }
@@ -1333,6 +1335,40 @@ impl usage::RunAsync for SessionForkArgs {
             .await?;
         println!("forked: {session_id}");
         crate::tui::attach(&mut client, &session_id).await
+    }
+}
+
+/// `fxg session resume <id>`
+#[derive(Debug, Args)]
+pub struct SessionResumeArgs {
+    /// 再開するセッションID
+    session_id: String,
+    /// TUI を Attach せずバックグラウンドで再開し、セッションIDを出力する
+    #[usage(short = 'd', long)]
+    detach: bool,
+    /// ネイティブ復元 (session/resume・session/load・既存セッション bind) を
+    /// 試みず、履歴 Replay で継続する
+    #[usage(long)]
+    replay: bool,
+}
+
+impl usage::RunAsync for SessionResumeArgs {
+    type Output = Result<()>;
+
+    async fn run_async(self) -> Self::Output {
+        let mut client = DaemonClient::connect().await?;
+        let (_attach_mode, context_restored) =
+            client.resume_session(&self.session_id, self.replay).await?;
+        if context_restored {
+            eprintln!("resumed (agent context restored): {}", self.session_id);
+        } else {
+            eprintln!("resumed with replayed history: {}", self.session_id);
+        }
+        if self.detach {
+            println!("{}", self.session_id);
+            return Ok(());
+        }
+        crate::tui::attach(&mut client, &self.session_id).await
     }
 }
 

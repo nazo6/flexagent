@@ -30,6 +30,7 @@
   let text = $state('');
   let sending = $state(false);
   let controlBusy = $state(false);
+  let resuming = $state(false);
 
   const isRunning = $derived(
     status === 'running' || status === 'waiting_permission'
@@ -99,13 +100,42 @@
       controlBusy = false;
     }
   }
+
+  /** 停止済みセッションを再開し、続きから操作できるようにする。 */
+  async function resume() {
+    if (resuming) return;
+    resuming = true;
+    try {
+      const result = await sync.resumeSession(sessionId);
+      if (result.context_restored) {
+        toast.success('セッションを再開しました (エージェントのコンテキストを復元)');
+      } else {
+        toast.success('セッションを再開しました (履歴を引き継いで継続)');
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      resuming = false;
+    }
+  }
 </script>
 
 <div class="flex flex-col gap-2 border-t pt-2">
   {#if isStopped}
-    <div class="bg-muted text-muted-foreground flex items-center gap-2 rounded-md px-2.5 py-1 text-xs">
+    <div
+      class="bg-muted text-muted-foreground flex flex-wrap items-center gap-2 rounded-md px-2.5 py-1 text-xs"
+    >
       <AlertTriangleIcon class="size-3.5 shrink-0" />
-      <span>このセッションは停止しています。プロンプトを送信するには新しいセッションを作成してください。</span>
+      <span>このセッションは停止しています。再開すると会話の続きから操作できます。</span>
+      <Button
+        variant="outline"
+        size="sm"
+        class="ml-auto h-6 text-xs"
+        disabled={resuming}
+        onclick={resume}
+      >
+        再開 (Resume)
+      </Button>
     </div>
   {:else if node && !nodeAvail.isAvailable}
     <div class="bg-destructive/10 text-destructive flex items-center gap-2 rounded-md px-2.5 py-1 text-xs">

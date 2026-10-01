@@ -445,6 +445,29 @@ pub struct SessionRevertResponse {
     pub removed_files: u64,
 }
 
+/// `POST /api/v1/sessions/:id/resume` リクエスト。
+///
+/// 停止済みセッションを同一 `session_id` のまま再開する
+/// (設計: `docs/04-agent-drivers-and-windows.md` §4.3)。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct ResumeSessionRequest {
+    /// ネイティブ復元を試みず履歴 Replay で継続する (既定 `false`)
+    #[serde(default)]
+    pub force_replay: bool,
+}
+
+/// `POST /api/v1/sessions/:id/resume` レスポンス。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct ResumeSessionResponse {
+    /// 再開したセッションID (リクエスト対象と同一)
+    pub session_id: String,
+    /// エージェント側コンテキストをネイティブ復元できたか
+    /// (`false` = 履歴 Replay で新規エージェントセッションとして継続)
+    pub context_restored: bool,
+}
+
 /// `POST /api/v1/search` レスポンス (FTS5 全文検索)。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]

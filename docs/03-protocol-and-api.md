@@ -61,6 +61,10 @@ pub enum UnifiedEventPayload {
         parent_session_id: Option<String>,
         fork_from_node_seq: Option<u64>,
         title: String,
+        /// OpenCode2 の起動モード ("bridge" / "acp"。opencode2 以外は None)。
+        /// セッション再開 (resume) 時に起動モードを復元するために永続化する
+        /// (旧イベントには存在しないため serde default で None になる)
+        opencode_mode: Option<String>,
     },
     /// セッションタイトル変更 (UI/CLI からのリネーム。コマンドとして実行ノードに到達してから発行される)
     SessionTitleChanged {
@@ -389,6 +393,14 @@ pub enum NodeToServerMsg {
         outcome: Option<SessionRevertResponse>,
         error: Option<String>,
     },
+    /// セッション再開 (`ResumeSession`) の結果応答
+    ResumeResult {
+        command_id: String,
+        success: bool,
+        code: Option<ErrorCode>,   // 失敗時の構造化エラーコード (INVALID_STATE 等)
+        context_restored: Option<bool>, // ネイティブ復元成否 (false = 履歴 Replay で継続)
+        error: Option<String>,
+    },
     /// プロジェクト一括スキャン (`ProjectScan`) の結果応答
     ProjectScanResult {
         request_id: String,
@@ -499,6 +511,15 @@ pub enum ServerToNodeMsg {
         command_id: String,
         session_id: String,
         target_node_seq: Option<u64>, // Revert 基準の UserMessage.node_seq (None は直近ターン)
+    },
+    /// 停止済みセッションの再開 (`POST /api/v1/sessions/:id/resume`)
+    /// ※同一 session_id のままエージェントを起動し、ネイティブ復元
+    ///   (`session/resume` → `session/load` → OpenCode2 既存セッション bind) を
+    ///   優先する。復元できない場合は履歴 Replay を注入して継続する (設計: docs/04 §4.3)
+    ResumeSession {
+        command_id: String,
+        session_id: String,
+        force_replay: bool, // ネイティブ復元を試みず履歴 Replay で継続する
     },
     /// ワークスペースWebターミナル (PTY) の起動要求
     PtySpawn {
@@ -685,6 +706,15 @@ pub enum ServerToNodeMsg {
   (`target_node_seq` / Tree Hash / 復元・削除ファイル数)。実行中セッションのみ
   対象で、ターン実行中は `BUSY` を返却する。中央サーバー経由の場合は対象ノードへ
   `RevertSession` を中継する。
+- `POST /api/v1/sessions/:id/resume`:
+  停止済みセッションを同一 `session_id` のまま再開する (`fxg session resume`
+  の Web UI 版)。エージェント側コンテキストのネイティブ復元
+  (`session/resume` → `session/load` → OpenCode2 既存セッション bind) を優先し、
+  非対応の場合は履歴 Replay を注入して継続する。応答は `ResumeSessionResponse`
+  (`session_id` / `context_restored`)。稼働中セッションは `INVALID_STATE`、
+  一時VMセッションは v1 では `INVALID_STATE`
+  を返却する。中央サーバー経由の場合は
+  対象ノードへ `ResumeSession` を中継する (設計: docs/04 §4.3)。
 - `POST /api/v1/search?q=...`: SQLite FTS5 を用いた全セッション横断の全文検索。
 - `POST /api/v1/push/subscribe`: Android / Desktop PWA の Web Push
   サブスクリプション登録 (中央サーバーのみ)。VAPID 鍵は初回起動時に
@@ -811,4 +841,9 @@ xterm互換アダプター）とノード上の ConPTY / Unix PTY
      `after_node_seq`
      指定時はその連番以降の履歴をリプレイしてからライブストリームへ接続する（途中切断からの再接続用）。
 3. `GetLocalStatus`:
-   - ローカルで稼働中のセッション一覧、中央サーバーとのWebSocket接続状態、未送信Outboxイベント数を返却。
+   - ローカルで稼働中のセッション一覧、中央サーバーとのWebSocket接続状態、未送信Outboxイベント数を返却。4.
+     `SessionResume { session_id, force_replay } -> { session_id, attach_mode, context_restored }`:
+   - 停止済みセッションを同一 `session_id` のまま再開します
+     (`fxg session resume`)。ネイティブ復元を優先し、非対応時は履歴 Replay で
+     継続します (`context_restored = false`)。稼働中の再開は `INVALID_STATE`
+     を返却します (設計: docs/04 §4.3)。

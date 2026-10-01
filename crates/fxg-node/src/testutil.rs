@@ -5,12 +5,14 @@
 
 #![cfg(test)]
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use fxg_acp::{
-    ActiveSessionHandle, AgentDriver, AgentLaunchSpec, DriverEvent, StartSessionRequest,
+    ActiveSessionHandle, AgentDriver, AgentLaunchSpec, DriverEvent, ResumeRequest,
+    StartSessionRequest, StartedSession,
 };
 use tokio::sync::mpsc;
 
@@ -85,6 +87,17 @@ pub(crate) struct MockAgent {
     inner: Arc<MockAgentInner>,
 }
 
+/// テスト記録用の `start_session` 呼び出し情報。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct MockStart {
+    /// 対象セッションID
+    pub session_id: String,
+    /// 作業ディレクトリ
+    pub cwd: PathBuf,
+    /// 再開指定 (`None` は新規セッション)
+    pub resume: Option<ResumeRequest>,
+}
+
 #[derive(Default)]
 struct MockAgentInner {
     prompts: Mutex<Vec<String>>,
@@ -92,6 +105,9 @@ struct MockAgentInner {
     modes: Mutex<Vec<String>>,
     reverted: Mutex<Vec<u64>>,
     events: Mutex<Vec<mpsc::UnboundedSender<DriverEvent>>>,
+    starts: Mutex<Vec<MockStart>>,
+    /// ネイティブ復元 (resume) に対応しているか
+    resume_supported: AtomicBool,
 }
 
 impl MockAgent {
@@ -100,6 +116,18 @@ impl MockAgent {
         for tx in self.inner.events.lock().expect("events").iter() {
             let _ = tx.send(event.clone());
         }
+    }
+
+    /// `start_session` の呼び出し一覧。
+    pub(crate) fn starts(&self) -> Vec<MockStart> {
+        self.inner.starts.lock().expect("starts").clone()
+    }
+
+    /// ネイティブ復元 (resume) への対応可否を設定する。
+    pub(crate) fn set_resume_supported(&self, supported: bool) {
+        self.inner
+            .resume_supported
+            .store(supported, Ordering::SeqCst);
     }
 
     /// 送信されたプロンプト一覧。
@@ -142,11 +170,23 @@ impl AgentDriver for MockAgent {
 
     async fn start_session(
         &self,
-        _req: StartSessionRequest,
+        req: StartSessionRequest,
         event_tx: mpsc::UnboundedSender<DriverEvent>,
-    ) -> anyhow::Result<Box<dyn ActiveSessionHandle>> {
+    ) -> anyhow::Result<StartedSession> {
         self.inner.events.lock().expect("events").push(event_tx);
-        Ok(Box::new(self.clone()))
+        // ネイティブ復元対応が有効で、エージェント側IDがある場合のみ復元成功とする
+        let context_restored = req.resume.as_ref().is_some_and(|resume| {
+            resume.agent_session_id.is_some() && self.inner.resume_supported.load(Ordering::SeqCst)
+        });
+        self.inner.starts.lock().expect("starts").push(MockStart {
+            session_id: req.session_id,
+            cwd: req.cwd,
+            resume: req.resume,
+        });
+        Ok(StartedSession {
+            handle: Box::new(self.clone()),
+            context_restored,
+        })
     }
 }
 

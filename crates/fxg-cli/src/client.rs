@@ -437,6 +437,33 @@ impl DaemonClient {
         }
     }
 
+    /// `fxg session resume` — 停止済みセッションを再開する。
+    ///
+    /// 戻り値は (アタッチモード, ネイティブ復元成否)。`context_restored = false`
+    /// の場合は履歴 Replay で継続されている。
+    pub async fn resume_session(
+        &mut self,
+        session_id: &str,
+        force_replay: bool,
+    ) -> Result<(AttachMode, bool)> {
+        let command_id = self.command_id();
+        let result = self
+            .request(IpcClientMessage::SessionResume {
+                command_id,
+                session_id: session_id.to_owned(),
+                force_replay,
+            })
+            .await?;
+        match result {
+            IpcResult::SessionResumed {
+                attach_mode,
+                context_restored,
+                ..
+            } => Ok((attach_mode, context_restored)),
+            other => bail!("unexpected ipc result: {other:?}"),
+        }
+    }
+
     /// `fxg attach` — セッションのイベントストリームを購読開始する。
     ///
     /// 以降のメッセージは [`Self::next_message`] で受信する

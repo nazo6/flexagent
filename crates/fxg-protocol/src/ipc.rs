@@ -174,6 +174,18 @@ pub enum IpcClientMessage {
         /// 分岐先の作業ディレクトリ (省略時は分岐元と同じ。`-w/--worktree` 用)
         cwd: Option<String>,
     },
+    /// 停止済みセッションの再開 (`fxg session resume`)。
+    ///
+    /// 同一 `session_id` のままエージェント側コンテキストを復元して継続する
+    /// (`session/resume` → `session/load` → 履歴 Replay の順にフォールバック)。
+    SessionResume {
+        /// 相関ID
+        command_id: String,
+        /// 対象セッションID
+        session_id: String,
+        /// ネイティブ復元を試みず履歴 Replay で継続する (`--replay`)
+        force_replay: bool,
+    },
     /// セッション詳細の取得 (`fxg session show`)。
     SessionShow {
         /// 相関ID
@@ -343,6 +355,15 @@ pub enum IpcResult {
         session_id: String,
         /// アタッチモード (内蔵TUI / OpenCode2 純正TUI)
         attach_mode: AttachMode,
+    },
+    /// `SessionResume` の結果
+    SessionResumed {
+        /// 再開したセッションID (リクエスト対象と同一)
+        session_id: String,
+        /// アタッチモード (内蔵TUI / OpenCode2 純正TUI)
+        attach_mode: AttachMode,
+        /// ネイティブ復元できたか (`false` = 履歴 Replay で継続)
+        context_restored: bool,
     },
     /// `SessionShow` の結果
     SessionDetail(Box<SessionDetail>),
@@ -631,6 +652,32 @@ mod tests {
         let json = serde_json::to_value(&forked).unwrap();
         assert_eq!(json["result"], "session_forked");
         assert_eq!(serde_json::from_value::<IpcResult>(json).unwrap(), forked);
+    }
+
+    #[test]
+    fn session_resume_roundtrip() {
+        let resume = IpcClientMessage::SessionResume {
+            command_id: "c1".into(),
+            session_id: "s1".into(),
+            force_replay: true,
+        };
+        let json = serde_json::to_value(&resume).unwrap();
+        assert_eq!(json["method"], "session_resume");
+        assert_eq!(json["force_replay"], true);
+        assert_eq!(
+            serde_json::from_value::<IpcClientMessage>(json).unwrap(),
+            resume
+        );
+
+        let resumed = IpcResult::SessionResumed {
+            session_id: "s1".into(),
+            attach_mode: AttachMode::AcpTui,
+            context_restored: false,
+        };
+        let json = serde_json::to_value(&resumed).unwrap();
+        assert_eq!(json["result"], "session_resumed");
+        assert_eq!(json["context_restored"], false);
+        assert_eq!(serde_json::from_value::<IpcResult>(json).unwrap(), resumed);
     }
 
     #[test]

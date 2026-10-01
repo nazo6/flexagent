@@ -42,9 +42,9 @@ use fxg_protocol::client_api::{
     ProjectLinkResponse, ProjectScanRequest, ProjectScanResponse, ProjectsResponse,
     ProvisionersResponse, PruneWorktreesRequest, PushSubscribeRequest, PushSubscribeResponse,
     RemoveWorktreeRequest, RespondPermissionRequest, RespondPermissionResponse,
-    RotateAuthTokenResponse, SearchResponse, ServerWsMessage, SessionListResponse,
-    SessionRevertRequest, SessionRevertResponse, SystemInfoResponse, UpdateAgentsRequest,
-    WorktreeInfo, WorktreesResponse,
+    ResumeSessionRequest, ResumeSessionResponse, RotateAuthTokenResponse, SearchResponse,
+    ServerWsMessage, SessionListResponse, SessionRevertRequest, SessionRevertResponse,
+    SystemInfoResponse, UpdateAgentsRequest, WorktreeInfo, WorktreesResponse,
 };
 use fxg_protocol::common::{
     AgentAction, CommandResult, DiffScope, ErrorCode, SessionControlAction, SessionStatus,
@@ -370,6 +370,14 @@ pub trait ClientApiBackend: Clone + Send + Sync + 'static {
         client: ClientInfo,
     ) -> Result<SessionRevertResponse, ApiError>;
 
+    /// `POST /api/v1/sessions/:id/resume` (停止済みセッションの再開)。
+    async fn resume_session(
+        &self,
+        session_id: &str,
+        request: ResumeSessionRequest,
+        client: ClientInfo,
+    ) -> Result<ResumeSessionResponse, ApiError>;
+
     /// `GET /api/v1/projects/:id/worktrees`
     async fn list_worktrees(&self, project_id: &str) -> Result<WorktreesResponse, ApiError>;
 
@@ -666,6 +674,10 @@ pub fn client_router<B: ClientApiBackend>(backend: B, options: ClientApiOptions)
             "/api/v1/sessions/{session_id}/revert",
             post(revert_session::<B>),
         )
+        .route(
+            "/api/v1/sessions/{session_id}/resume",
+            post(resume_session::<B>),
+        )
         .route("/api/v1/inbox", get(inbox::<B>))
         .route("/api/v1/search", post(search::<B>))
         .route("/api/v1/push/subscribe", post(push_subscribe::<B>))
@@ -957,6 +969,22 @@ async fn revert_session<B: ClientApiBackend>(
     match state
         .backend
         .revert_session(&session_id, request, client)
+        .await
+    {
+        Ok(response) => Json(response).into_response(),
+        Err(err) => err.into_response(),
+    }
+}
+
+async fn resume_session<B: ClientApiBackend>(
+    State(state): State<ClientApiState<B>>,
+    Extension(client): Extension<ClientInfo>,
+    UrlPath(session_id): UrlPath<String>,
+    Json(request): Json<ResumeSessionRequest>,
+) -> Response {
+    match state
+        .backend
+        .resume_session(&session_id, request, client)
         .await
     {
         Ok(response) => Json(response).into_response(),

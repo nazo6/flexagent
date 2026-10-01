@@ -159,6 +159,7 @@ fn session_created_payload() -> UnifiedEventPayload {
         parent_session_id: None,
         fork_from_node_seq: None,
         title: "New Session".to_owned(),
+        opencode_mode: None,
     }
 }
 
@@ -430,6 +431,7 @@ async fn rebuild_projections_matches_incremental_apply() {
         parent_session_id: Some(parent_session_id.clone()),
         fork_from_node_seq: Some(6),
         title: "Forked Session".to_owned(),
+        opencode_mode: None,
     });
     let forked_message = fixture.event(UnifiedEventPayload::UserMessage {
         text: "Forkしたセッションです".to_owned(),

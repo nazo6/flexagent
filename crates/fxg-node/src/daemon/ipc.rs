@@ -29,6 +29,7 @@ use super::ops::AuditSource;
 use crate::error::NodeError;
 use crate::ipc_framing::{read_frame, write_message};
 use crate::session::SessionBroadcast;
+use crate::session_manager::ResumeParams;
 use crate::{project, worktree};
 
 /// `fxg ps` などで返すセッション一覧の上限。
@@ -910,6 +911,38 @@ async fn handle(
             ))
         }
 
+        IpcClientMessage::SessionResume {
+            command_id,
+            session_id,
+            force_replay,
+        } => {
+            let started = state
+                .session_manager()
+                .resume(ResumeParams {
+                    command_id: &command_id,
+                    session_id: &session_id,
+                    force_replay,
+                })
+                .await
+                .map_err(|err| DispatchError::from_node_error(&command_id, err))?;
+            state
+                .record_audit(
+                    fxg_db::audit::actions::SESSION_RESUME,
+                    &AuditSource::local(),
+                    Some(&session_id),
+                    serde_json::json!({ "force_replay": force_replay }),
+                )
+                .await;
+            Ok((
+                command_id,
+                IpcResult::SessionResumed {
+                    session_id: started.session_id,
+                    attach_mode: started.attach_mode,
+                    context_restored: started.context_restored,
+                },
+            ))
+        }
+
         IpcClientMessage::SessionShow {
             command_id,
             session_id,
@@ -1634,6 +1667,129 @@ mod tests {
         .await;
         match response {
             IpcServerMessage::Error { code, .. } => assert_eq!(code, ErrorCode::NotFound),
+            other => panic!("unexpected response: {other:?}"),
+        }
+
+        daemon.shutdown();
+        tokio::time::timeout(Duration::from_secs(5), daemon.wait())
+            .await
+            .expect("stop");
+    }
+
+    #[tokio::test]
+    async fn ipc_session_resume_replays_context_and_rejects_active() {
+        use fxg_acp::DriverEvent;
+        use fxg_protocol::common::SessionStatus;
+        use fxg_protocol::events::UnifiedEventPayload;
+
+        let (daemon, mock, dir) = start_session_daemon().await;
+        let endpoint = daemon.ipc_endpoint().to_owned();
+        let workdir = dir.path().join("workspace");
+        std::fs::create_dir_all(&workdir).expect("mkdir");
+
+        // EnsureSession → SendPrompt で会話を 1 ターン残す
+        let response = roundtrip(
+            &endpoint,
+            &IpcClientMessage::EnsureSession {
+                command_id: "e1".to_owned(),
+                cwd: workdir.to_string_lossy().into_owned(),
+                agent_id: "mock".to_owned(),
+                extra_args: Vec::new(),
+                initial_mode: None,
+                acp: false,
+            },
+        )
+        .await;
+        let session_id = match response {
+            IpcServerMessage::Result {
+                result: IpcResult::EnsureSession { session_id, .. },
+                ..
+            } => session_id,
+            other => panic!("unexpected response: {other:?}"),
+        };
+        roundtrip(
+            &endpoint,
+            &IpcClientMessage::SendPrompt {
+                command_id: "p1".to_owned(),
+                session_id: session_id.clone(),
+                text: "hello resume".to_owned(),
+                client_source: "cli".to_owned(),
+            },
+        )
+        .await;
+
+        // ドライバ終了で停止させ、再開可能な状態にする
+        mock.emit(DriverEvent::Event(UnifiedEventPayload::StatusChanged {
+            status: SessionStatus::Idle,
+            error_message: None,
+        }));
+        mock.close_events();
+        for _ in 0..200 {
+            let row = daemon
+                .state()
+                .db()
+                .get_session(&session_id)
+                .await
+                .expect("query");
+            if row.is_some_and(|session| session.status == SessionStatus::Stopped) {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+
+        // 再開 (モックドライバはネイティブ復元非対応 → 履歴 Replay で継続)
+        let response = roundtrip(
+            &endpoint,
+            &IpcClientMessage::SessionResume {
+                command_id: "r1".to_owned(),
+                session_id: session_id.clone(),
+                force_replay: false,
+            },
+        )
+        .await;
+        match response {
+            IpcServerMessage::Result {
+                result:
+                    IpcResult::SessionResumed {
+                        session_id: resumed,
+                        context_restored,
+                        ..
+                    },
+                ..
+            } => {
+                assert_eq!(resumed, session_id);
+                assert!(!context_restored, "mock driver cannot restore natively");
+            }
+            other => panic!("unexpected response: {other:?}"),
+        }
+
+        // Replay コンテキストが新エージェントセッションへ送信される
+        let mut injected = false;
+        for _ in 0..200 {
+            if mock
+                .prompts()
+                .iter()
+                .any(|prompt| prompt.contains("hello resume"))
+            {
+                injected = true;
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert!(injected, "resume context is injected to the agent");
+
+        // 稼働中 (再開済み) セッションへの再実行は INVALID_STATE
+        let response = roundtrip(
+            &endpoint,
+            &IpcClientMessage::SessionResume {
+                command_id: "r2".to_owned(),
+                session_id: session_id.clone(),
+                force_replay: false,
+            },
+        )
+        .await;
+        match response {
+            IpcServerMessage::Error { code, .. } => assert_eq!(code, ErrorCode::InvalidState),
             other => panic!("unexpected response: {other:?}"),
         }
 

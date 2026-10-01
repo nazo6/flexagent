@@ -16,12 +16,15 @@ pub trait AgentDriver: Send + Sync {
     /// ドライバ識別子 ("acp", "opencode2")
     fn driver_kind(&self) -> &'static str;
 
-    /// 新規セッションを起動し、イベント送出用のストリーム/ハンドルを返す
+    /// セッションを起動し、イベント送出用のストリーム/ハンドルを返す。
+    /// `req.resume` 指定時はネイティブ復元 (`session/resume` / `session/load` /
+    /// OpenCode2 既存セッション bind) を試み、成否を
+    /// `StartedSession::context_restored` で返す (§4.3)
     async fn start_session(
         &self,
         req: StartSessionRequest,
         event_tx: mpsc::Sender<DriverEvent>,
-    ) -> anyhow::Result<Box<dyn ActiveSessionHandle>>;
+    ) -> anyhow::Result<StartedSession>;
 }
 
 #[async_trait::async_trait]
@@ -223,6 +226,43 @@ opencode2 本体は「バックグラウンドサービス」1つを全セッシ
      で進めた会話を、ここから `antigravity-acp` に切り替えてForkする」**
      といった場合は、`node.db` / `server.db` に保存されている `node_seq`
      までの構造化イベント履歴（会話＋変更ファイル要約）を新しいACPセッションの初期コンテキストとして自動注入（Replay）します。
+
+### 4.3 セッションのレジューム (Resume)
+
+停止したセッション (`fxg daemon`
+再起動・`fxg session kill`・エージェントプロセス
+異常終了) を、**同一 `session_id` のまま**会話コンテキストを維持して再開します
+(CLI `fxg session resume` / REST `POST /api/v1/sessions/:id/resume` / Web UI)。
+
+1. **再開可否の判定**: `SessionManager` の active 一覧 (実際の稼働状況) を正と
+   します。強制終了時は `stopped` への遷移イベントが書かれないため、DB の
+   `status` が `idle` / `running` のままでも再開を許可します。一方、
+   `provisioning` / `bootstrapping` (一時VM) は v1 では拒否します
+   (`INVALID_STATE`)。
+2. **ネイティブ復元 (優先)**: エージェント内部の会話コンテキストを維持したまま
+   再開します。
+   - `opencode2` (bridge): `GET /api/session/{id}` で存在確認し、既存
+     opencode セッションへ bind します (存在しない場合は履歴 Replay へ
+     フォールバック)。
+   - ACP: `sessionCapabilities.resume` → `session/resume` (履歴 Replay なし)、
+     非対応で `agentCapabilities.loadSession` → `session/load` を使用します。
+     `session/load` の Replay 通知は fxg のイベントログと重複するため破棄します
+     (Replay は load 応答前に完了する仕様を利用して応答直後に drain)。
+3. **Replay フォールバック**: ネイティブ復元できない場合は、fork と同様に
+   履歴 (会話 + ツール要約) を `client_source = "resume"` の `UserMessage`
+   として
+   新エージェントセッションへ注入します。
+4. **イベント**: `SessionCreated` は再発行せず、`StatusChanged(Idle)` を追記して
+   状態投影を復帰させます。ネイティブ復元できたかは API 応答
+   (`context_restored`) でクライアントへ返します。
+5. **Revert との関係**: OpenCode2 を再開した場合、ドライバ内の `prompt_ids`
+   (Revert のターン対応付け) はメモリ保持のため再開後は空になり、
+   `revert_context` は会話を巻き戻しません (ファイル復元は Shadow Git Tree が
+   継続して担当)。
+
+> **v2 (将来拡張)**: 一時VM (provisioner) セッションの再開
+> (`git_bundle_path` の復元 + VM 再起動) と、`fxg daemon`
+> 起動時の自動レジューム。
 
 ---
 

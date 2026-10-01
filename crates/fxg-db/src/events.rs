@@ -232,6 +232,8 @@ async fn upsert_session_from_created(
         parent_session_id,
         fork_from_node_seq,
         title,
+        // `opencode_mode` は resume 用のメタデータで DB カラムへは投影しない
+        ..
     } = &envelope.payload
     else {
         return Ok(());

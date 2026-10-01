@@ -16,6 +16,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use fxg_acp::{
     ActiveSessionHandle, AgentDriver, AgentLaunchSpec, DriverEvent, StartSessionRequest,
+    StartedSession,
 };
 use fxg_db::{Db, DbRole};
 use fxg_node::daemon::{DaemonConfig, NodeDaemon};
@@ -54,6 +55,11 @@ impl MockAgent {
         }
     }
 
+    /// 稼働中セッションのイベントチャネルを閉じる (ドライバ終了の再現)。
+    fn close_events(&self) {
+        self.inner.events.lock().expect("events").clear();
+    }
+
     fn prompts(&self) -> Vec<String> {
         self.inner.prompts.lock().expect("prompts").clone()
     }
@@ -80,11 +86,19 @@ impl AgentDriver for MockAgent {
 
     async fn start_session(
         &self,
-        _req: StartSessionRequest,
+        req: StartSessionRequest,
         event_tx: mpsc::UnboundedSender<DriverEvent>,
-    ) -> anyhow::Result<Box<dyn ActiveSessionHandle>> {
+    ) -> anyhow::Result<StartedSession> {
         self.inner.events.lock().expect("events").push(event_tx);
-        Ok(Box::new(self.clone()))
+        // E2E ではモックエージェントは常にネイティブ復元に対応する
+        let context_restored = req
+            .resume
+            .as_ref()
+            .is_some_and(|resume| resume.agent_session_id.is_some());
+        Ok(StartedSession {
+            handle: Box::new(self.clone()),
+            context_restored,
+        })
     }
 }
 
@@ -846,6 +860,180 @@ async fn central_server_commands_permissions_and_kill_switch() {
         assert_eq!(result["code"], ErrorCode::NodeOffline.as_str());
     }
 
+    server.shutdown();
+    tokio::time::timeout(Duration::from_secs(10), server.wait())
+        .await
+        .expect("server stop");
+}
+
+// ----------------------------------------------------------------------
+// E2E テスト: 中央サーバー経由の停止済みセッション再開 (resume)
+// ----------------------------------------------------------------------
+
+#[tokio::test(flavor = "multi_thread")]
+async fn central_server_resumes_stopped_session() {
+    let server_home = tempfile::tempdir().expect("server home");
+    let node_home = tempfile::tempdir().expect("node home");
+    let repo = tempfile::tempdir().expect("repo");
+    init_repo(repo.path()).await;
+
+    let port = reserve_port();
+    let server_url = format!("ws://127.0.0.1:{port}/api/v1/node/ws");
+    let node_token = issue_node_token(server_home.path(), "node-1").await;
+    let agent = MockAgent::default();
+
+    let server = start_server(server_home.path(), port).await;
+    let node = start_node(
+        node_home.path(),
+        "node-1",
+        Some(server_url),
+        Some(node_token),
+        &agent,
+    )
+    .await;
+    wait_until("node connected", Duration::from_secs(30), || async {
+        server.state().hub().is_online("node-1").await
+    })
+    .await;
+
+    let server_db = Db::open(&fxg_db::hub_db_path(server_home.path()), DbRole::Hub)
+        .await
+        .expect("server db");
+    let node_db = Db::open(&fxg_db::node_db_path(node_home.path()), DbRole::Node)
+        .await
+        .expect("node db");
+    let client_token = fxg_server::api::auth::load_or_create_token(
+        &server_home
+            .path()
+            .join(fxg_protocol::config::AUTH_TOKEN_FILE_NAME),
+    )
+    .expect("client token");
+    let http = reqwest::Client::new();
+    let base = format!("http://127.0.0.1:{port}");
+
+    // 1. ノード上でセッションを開始し、エージェント側セッションIDを確定させる
+    node.state()
+        .resolve_and_register_project(repo.path())
+        .await
+        .expect("resolve project");
+    let session_id = fxg_protocol::util::uuid_v7();
+    node.state()
+        .session_manager()
+        .start_session(StartSessionParams {
+            command_id: "start-resume",
+            session_id: &session_id,
+            local_path: repo.path(),
+            agent_id: "mock",
+            initial_prompt: None,
+            mode: None,
+            opencode_mode: None,
+            extra_args: None,
+            fork_context: None,
+            restore_git_bundle: None,
+        })
+        .await
+        .expect("start session");
+    node.state()
+        .session_manager()
+        .send_prompt("prompt-resume", &session_id, "hello resume e2e", "cli")
+        .await
+        .expect("prompt");
+    agent.emit(DriverEvent::Event(UnifiedEventPayload::SessionAgentBound {
+        agent_session_id: "agent-sess-e2e".to_owned(),
+    }));
+    agent.emit(DriverEvent::Event(UnifiedEventPayload::StatusChanged {
+        status: SessionStatus::Idle,
+        error_message: None,
+    }));
+    wait_until("session synced to hub", Duration::from_secs(30), || async {
+        server_db
+            .get_session(&session_id)
+            .await
+            .ok()
+            .flatten()
+            .is_some_and(|session| {
+                session.agent_session_id.as_deref() == Some("agent-sess-e2e")
+                    && session.status == SessionStatus::Idle
+            })
+    })
+    .await;
+
+    // 2. ドライバ終了でセッションを停止させ、ハブへ `stopped` が同期されるまで待つ
+    agent.close_events();
+    wait_until("stopped synced to hub", Duration::from_secs(30), || async {
+        server_db
+            .get_session(&session_id)
+            .await
+            .ok()
+            .flatten()
+            .is_some_and(|session| session.status == SessionStatus::Stopped)
+    })
+    .await;
+
+    // 3. 中央サーバー REST から再開する (モックはネイティブ復元対応)
+    let response = http
+        .post(format!("{base}/api/v1/sessions/{session_id}/resume"))
+        .bearer_auth(&client_token)
+        .json(&json!({ "force_replay": false }))
+        .send()
+        .await
+        .expect("resume request");
+    assert_eq!(
+        response.status(),
+        reqwest::StatusCode::OK,
+        "resume session request must succeed"
+    );
+    let resumed: serde_json::Value = response.json().await.expect("json");
+    assert_eq!(resumed["session_id"].as_str(), Some(session_id.as_str()));
+    assert_eq!(
+        resumed["context_restored"].as_bool(),
+        Some(true),
+        "mock agent restores natively via SessionAgentBound"
+    );
+
+    // 4. 再開後は idle へ復帰し、継続プロンプトを送信できる
+    wait_until("resumed session idle", Duration::from_secs(30), || async {
+        node_db
+            .get_session(&session_id)
+            .await
+            .ok()
+            .flatten()
+            .is_some_and(|session| session.status == SessionStatus::Idle)
+    })
+    .await;
+    node.state()
+        .session_manager()
+        .send_prompt(
+            "prompt-resume-2",
+            &session_id,
+            "continue after resume",
+            "cli",
+        )
+        .await
+        .expect("continuation prompt");
+    assert_eq!(
+        agent.prompts(),
+        vec![
+            "hello resume e2e".to_owned(),
+            "continue after resume".to_owned()
+        ],
+        "native resume must not inject replay context"
+    );
+
+    // 5. 稼働中セッションへの再実行は INVALID_STATE (400)
+    let again = http
+        .post(format!("{base}/api/v1/sessions/{session_id}/resume"))
+        .bearer_auth(&client_token)
+        .json(&json!({ "force_replay": false }))
+        .send()
+        .await
+        .expect("second resume");
+    assert_eq!(again.status(), reqwest::StatusCode::BAD_REQUEST);
+
+    node.shutdown();
+    tokio::time::timeout(Duration::from_secs(10), node.wait())
+        .await
+        .expect("node stop");
     server.shutdown();
     tokio::time::timeout(Duration::from_secs(10), server.wait())
         .await

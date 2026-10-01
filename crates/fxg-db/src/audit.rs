@@ -16,6 +16,8 @@ pub mod actions {
     pub const SESSION_START: &str = "session_start";
     /// セッション巻き戻し (Shadow Git Tree Revert)
     pub const SESSION_REVERT: &str = "session_revert";
+    /// セッション再開 (停止済みセッションのレジューム)
+    pub const SESSION_RESUME: &str = "session_resume";
     /// 承認解決 (Approve / Reject)
     pub const PERMISSION_RESOLVED: &str = "permission_resolved";
     /// Web PTY 起動

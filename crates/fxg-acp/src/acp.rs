@@ -22,16 +22,16 @@ use std::sync::{Arc, Mutex};
 
 use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::schema::v1::{
-    CancelNotification, ClientCapabilities, ContentBlock, ContentChunk, CreateTerminalRequest,
-    CreateTerminalResponse, FileSystemCapabilities, Implementation, InitializeRequest,
-    KillTerminalRequest, KillTerminalResponse, NewSessionRequest, PermissionOptionKind,
-    ReadTextFileRequest, ReadTextFileResponse, ReleaseTerminalRequest, ReleaseTerminalResponse,
-    RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
-    SelectedPermissionOutcome, SessionConfigKind, SessionConfigOption, SessionId,
-    SessionNotification, SessionUpdate, SetSessionConfigOptionRequest, SetSessionModeRequest,
-    TerminalExitStatus, TerminalId, TerminalOutputRequest, TerminalOutputResponse, TextContent,
-    ToolCall, ToolCallContent, ToolCallStatus, ToolCallUpdate, ToolKind,
-    WaitForTerminalExitRequest, WaitForTerminalExitResponse, WriteTextFileRequest,
+    AgentCapabilities, CancelNotification, ClientCapabilities, ContentBlock, ContentChunk,
+    CreateTerminalRequest, CreateTerminalResponse, FileSystemCapabilities, Implementation,
+    InitializeRequest, KillTerminalRequest, KillTerminalResponse, NewSessionRequest,
+    PermissionOptionKind, ReadTextFileRequest, ReadTextFileResponse, ReleaseTerminalRequest,
+    ReleaseTerminalResponse, RequestPermissionOutcome, RequestPermissionRequest,
+    RequestPermissionResponse, SelectedPermissionOutcome, SessionConfigKind, SessionConfigOption,
+    SessionId, SessionNotification, SessionUpdate, SetSessionConfigOptionRequest,
+    SetSessionModeRequest, TerminalExitStatus, TerminalId, TerminalOutputRequest,
+    TerminalOutputResponse, TextContent, ToolCall, ToolCallContent, ToolCallStatus, ToolCallUpdate,
+    ToolKind, WaitForTerminalExitRequest, WaitForTerminalExitResponse, WriteTextFileRequest,
     WriteTextFileResponse,
 };
 use agent_client_protocol::util::MatchDispatch;
@@ -49,7 +49,10 @@ use fxg_protocol::events::UnifiedEventPayload;
 use fxg_protocol::util::uuid_v7;
 use tokio::sync::{mpsc, oneshot, watch};
 
-use crate::driver::{ActiveSessionHandle, AgentDriver, DriverEvent, StartSessionRequest};
+use crate::driver::{
+    ActiveSessionHandle, AgentDriver, DriverEvent, ResumeRequest, StartSessionRequest,
+    StartedSession,
+};
 
 /// 標準ACPエージェントを `agent-client-protocol` で制御するドライバ。
 #[derive(Debug, Default)]
@@ -84,7 +87,7 @@ impl AgentDriver for AcpDriver {
         &self,
         req: StartSessionRequest,
         event_tx: mpsc::UnboundedSender<DriverEvent>,
-    ) -> anyhow::Result<Box<dyn ActiveSessionHandle>> {
+    ) -> anyhow::Result<StartedSession> {
         // `npx` / `uvx` 等の拡張子解決 (Windows の PATHEXT 対応)
         let program = fxg_pty::resolve_command(&req.launch.program.to_string_lossy(), &req.cwd)
             .map_err(|err| {
@@ -108,6 +111,7 @@ impl AgentDriver for AcpDriver {
 
         let cwd = req.cwd.clone();
         let initial_mode = req.initial_mode.clone();
+        let resume = req.resume.clone();
         let events = event_tx.clone();
         let permissions_for_task = Arc::clone(&permissions);
         let agent = AcpAgent::new(config);
@@ -122,6 +126,7 @@ impl AgentDriver for AcpDriver {
                 events: events.clone(),
                 ready_tx,
                 initial_mode,
+                resume,
             })
             .await;
             match result {
@@ -142,11 +147,14 @@ impl AgentDriver for AcpDriver {
             cancel_pending_permissions(&permissions_for_task);
         });
 
-        let handle = ready_rx
+        let (handle, context_restored) = ready_rx
             .await
             .context("acp session task ended before becoming ready")??;
 
-        Ok(Box::new(handle))
+        Ok(StartedSession {
+            handle: Box::new(handle),
+            context_restored,
+        })
     }
 }
 
@@ -276,10 +284,12 @@ struct AcpSessionTaskParams {
     permissions: PermissionRegistry,
     /// イベント送信
     events: mpsc::UnboundedSender<DriverEvent>,
-    /// セッション準備完了通知
-    ready_tx: oneshot::Sender<anyhow::Result<AcpSessionHandle>>,
+    /// セッション準備完了通知 (ハンドル + ネイティブ復元成否)
+    ready_tx: oneshot::Sender<anyhow::Result<(AcpSessionHandle, bool)>>,
     /// 初期モード
     initial_mode: Option<String>,
+    /// 既存エージェントセッションからの再開指定 (`None` は新規セッション)
+    resume: Option<ResumeRequest>,
 }
 
 /// ACP接続を確立し、セッションを開始してコマンドループを回す。
@@ -293,6 +303,7 @@ async fn run_acp_session(params: AcpSessionTaskParams) -> Result<(), agent_clien
         events,
         ready_tx,
         initial_mode,
+        resume,
     } = params;
     let pty = Arc::new(fxg_pty::PtySessionManager::new());
     let terminals = Arc::new(TerminalRegistry::default());
@@ -542,20 +553,22 @@ async fn run_acp_session(params: AcpSessionTaskParams) -> Result<(), agent_clien
                     .read_text_file(true)
                     .write_text_file(true))
                 .terminal(true);
-            cx.send_request(
-                InitializeRequest::new(ProtocolVersion::V1)
-                    .client_capabilities(capabilities)
-                    .client_info(Implementation::new("fxg", env!("CARGO_PKG_VERSION"))),
-            )
-            .block_task()
-            .await?;
-
-            // 2) セッション作成
-            let mut session: ActiveSession<'static, Agent> = cx
-                .build_session_from(NewSessionRequest::new(cwd.clone()))
+            let initialize = cx
+                .send_request(
+                    InitializeRequest::new(ProtocolVersion::V1)
+                        .client_capabilities(capabilities)
+                        .client_info(Implementation::new("fxg", env!("CARGO_PKG_VERSION"))),
+                )
                 .block_task()
-                .start_session()
                 .await?;
+
+            // 2) セッション取得 (新規作成 / session/resume / session/load)
+            let plan = plan_resume(&initialize.agent_capabilities, resume.as_ref()).map_err(
+                |err: anyhow::Error| {
+                    agent_client_protocol::Error::internal_error().data(err.to_string())
+                },
+            )?;
+            let (mut session, context_restored) = acquire_session(&cx, plan, &cwd).await?;
             let acp_session_id = session.session_id().clone();
             let _ = events.send(DriverEvent::Event(UnifiedEventPayload::SessionAgentBound {
                 agent_session_id: acp_session_id.to_string(),
@@ -599,14 +612,17 @@ async fn run_acp_session(params: AcpSessionTaskParams) -> Result<(), agent_clien
 
             // 5) ハンドルを返して準備完了
             if let Some(tx) = ready_tx.take() {
-                let _ = tx.send(Ok(AcpSessionHandle {
-                    acp_session_id: acp_session_id.clone(),
-                    conn: cx.clone(),
-                    commands: cmd_tx.clone(),
-                    permissions: Arc::clone(&permissions),
-                    events: events.clone(),
-                    pty: Arc::clone(&pty),
-                }));
+                let _ = tx.send(Ok((
+                    AcpSessionHandle {
+                        acp_session_id: acp_session_id.clone(),
+                        conn: cx.clone(),
+                        commands: cmd_tx.clone(),
+                        permissions: Arc::clone(&permissions),
+                        events: events.clone(),
+                        pty: Arc::clone(&pty),
+                    },
+                    context_restored,
+                )));
             }
 
             // 6) コマンドループ (プロンプト送信と更新読み取りを直列化)
@@ -717,6 +733,105 @@ fn session_capabilities(
     // スラッシュコマンドは session/update (AvailableCommandsUpdate) で届くため
     // ここでは空 (以降の通知で更新される)
     (modes, Vec::new(), config_options)
+}
+
+/// `resume` 指定とエージェント capability からセッション取得方法を決める。
+enum ResumePlan {
+    /// `session/resume` (履歴 Replay なし)
+    Resume(String),
+    /// `session/load` (Replay 通知は破棄する)
+    Load(String),
+    /// 新規セッション作成 (呼び出し側が履歴 Replay を注入する)
+    Fresh,
+}
+
+/// セッション取得方法を決定する。
+///
+/// fxg は会話履歴の正本を自前のイベントログに持つため、履歴を送り返さない
+/// `session/resume` を優先する。resume 非対応の場合のみ `session/load`
+/// (Replay 通知は破棄) を使い、どちらも無ければ新規作成する
+/// (設計: `docs/04-agent-drivers-and-windows.md` §4.3)。
+fn plan_resume(
+    capabilities: &AgentCapabilities,
+    resume: Option<&ResumeRequest>,
+) -> anyhow::Result<ResumePlan> {
+    let Some(agent_session_id) = resume.and_then(|resume| resume.agent_session_id.clone()) else {
+        // 再開指定なし・エージェント側ID未記録 → 新規作成
+        return Ok(ResumePlan::Fresh);
+    };
+
+    if capabilities.session_capabilities.resume.is_some() {
+        return Ok(ResumePlan::Resume(agent_session_id));
+    }
+    if capabilities.load_session {
+        return Ok(ResumePlan::Load(agent_session_id));
+    }
+    if resume.is_some_and(|resume| resume.allow_fresh) {
+        return Ok(ResumePlan::Fresh);
+    }
+    anyhow::bail!(
+        "agent does not support session/resume or session/load (agent_session_id={agent_session_id})"
+    );
+}
+
+/// セッションを取得する ([`ResumePlan`] に従う)。
+///
+/// 戻り値の `bool` はネイティブ復元の成否 (`false` = 新規作成。呼び出し側が
+/// 履歴 Replay を注入する)。
+async fn acquire_session(
+    cx: &ConnectionTo<Agent>,
+    plan: ResumePlan,
+    cwd: &Path,
+) -> Result<(ActiveSession<'static, Agent>, bool), agent_client_protocol::Error> {
+    match plan {
+        ResumePlan::Fresh => {
+            let session = cx
+                .build_session_from(NewSessionRequest::new(cwd))
+                .block_task()
+                .start_session()
+                .await?;
+            Ok((session, false))
+        }
+        ResumePlan::Resume(agent_session_id) => {
+            let restored = cx
+                .resume_session(agent_session_id, cwd)
+                .block_task()
+                .start_session()
+                .await?;
+            let (session, _response) = restored.into_parts();
+            Ok((session, true))
+        }
+        ResumePlan::Load(agent_session_id) => {
+            let restored = cx
+                .load_session(agent_session_id, cwd)
+                .block_task()
+                .start_session()
+                .await?;
+            let (mut session, _response) = restored.into_parts();
+            discard_replay_updates(&mut session);
+            Ok((session, true))
+        }
+    }
+}
+
+/// `session/load` の応答前に届いた Replay 通知を破棄する。
+///
+/// ACP 仕様では会話履歴の Replay は load 応答前に完了し、SDK はその間の通知を
+/// 復元済みセッションにバッファする。fxg は履歴の正本を自前のイベントログに
+/// 持つため、二重記録を避けるべく応答直後にキューを drain して捨てる。
+fn discard_replay_updates(session: &mut ActiveSession<'static, Agent>) {
+    use futures_util::FutureExt;
+
+    let mut discarded = 0usize;
+    while let Some(result) = session.read_update().now_or_never() {
+        if result.is_err() {
+            break;
+        }
+        discarded += 1;
+    }
+    if discarded > 0 {
+        tracing::debug!(discarded, "discarded session/load replay updates");
+    }
 }
 
 /// ACP の設定項目を FXG の表示用型へ変換する。
@@ -1299,6 +1414,76 @@ mod tests {
         SessionUpdate::AgentMessageChunk(
             serde_json::from_value(value).expect("content chunk fixture"),
         )
+    }
+
+    /// capability の組み合わせから `AgentCapabilities` を組み立てる。
+    fn agent_capabilities(load_session: bool, resume: bool) -> AgentCapabilities {
+        // `AgentCapabilities` は non_exhaustive のため default から組み立てる
+        let mut capabilities = AgentCapabilities::default();
+        capabilities.load_session = load_session;
+        if resume {
+            capabilities.session_capabilities.resume =
+                Some(agent_client_protocol::schema::v1::SessionResumeCapabilities::default());
+        }
+        capabilities
+    }
+
+    fn resume_request(agent_session_id: Option<&str>, allow_fresh: bool) -> ResumeRequest {
+        ResumeRequest {
+            agent_session_id: agent_session_id.map(str::to_owned),
+            allow_fresh,
+        }
+    }
+
+    #[test]
+    fn plan_resume_prefers_session_resume_over_load() {
+        // 両対応の場合は履歴 Replay のない `session/resume` を優先する
+        let capabilities = agent_capabilities(true, true);
+        let resume = resume_request(Some("ses_1"), true);
+        match plan_resume(&capabilities, Some(&resume)).expect("plan") {
+            ResumePlan::Resume(id) => assert_eq!(id, "ses_1"),
+            ResumePlan::Load(_) | ResumePlan::Fresh => {
+                panic!("session/resume must be preferred")
+            }
+        }
+    }
+
+    #[test]
+    fn plan_resume_falls_back_to_load_then_fresh() {
+        // load のみ対応 → session/load (Replay は呼び出し側で破棄)
+        let capabilities = agent_capabilities(true, false);
+        let resume = resume_request(Some("ses_1"), true);
+        match plan_resume(&capabilities, Some(&resume)).expect("plan") {
+            ResumePlan::Load(id) => assert_eq!(id, "ses_1"),
+            ResumePlan::Resume(_) | ResumePlan::Fresh => panic!("session/load expected"),
+        }
+
+        // どちらも非対応 + allow_fresh → 新規作成 (Replay フォールバック)
+        let capabilities = agent_capabilities(false, false);
+        assert!(matches!(
+            plan_resume(&capabilities, Some(&resume)).expect("plan"),
+            ResumePlan::Fresh
+        ));
+
+        // どちらも非対応 + allow_fresh なし → エラー
+        let resume = resume_request(Some("ses_1"), false);
+        assert!(plan_resume(&capabilities, Some(&resume)).is_err());
+    }
+
+    #[test]
+    fn plan_resume_without_ids_is_fresh() {
+        let capabilities = agent_capabilities(true, true);
+        // 再開指定なし
+        assert!(matches!(
+            plan_resume(&capabilities, None).expect("plan"),
+            ResumePlan::Fresh
+        ));
+        // エージェント側IDが未記録 (履歴 Replay 前提の新規作成)
+        let resume = resume_request(None, true);
+        assert!(matches!(
+            plan_resume(&capabilities, Some(&resume)).expect("plan"),
+            ResumePlan::Fresh
+        ));
     }
 
     #[test]

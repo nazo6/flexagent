@@ -30,7 +30,7 @@ use tokio_tungstenite::tungstenite::Message as WsMessage;
 use crate::daemon::{AuditSource, DaemonState, VERSION};
 use crate::error::NodeError;
 use crate::session::SessionBroadcast;
-use crate::session_manager::StartSessionParams;
+use crate::session_manager::{ResumeParams, StartSessionParams};
 
 /// 再接続バックオフの初期値。
 const RECONNECT_MIN: Duration = Duration::from_secs(1);
@@ -533,6 +533,47 @@ pub(crate) async fn handle_server_message(
                     success: false,
                     code: Some(err.error_code()),
                     outcome: None,
+                    error: Some(err.to_string()),
+                },
+            };
+            let _ = out.send(message).await;
+        }
+        ServerToNodeMsg::ResumeSession {
+            command_id,
+            session_id,
+            force_replay,
+        } => {
+            let outcome = state
+                .session_manager()
+                .resume(ResumeParams {
+                    command_id: &command_id,
+                    session_id: &session_id,
+                    force_replay,
+                })
+                .await;
+            let message = match outcome {
+                Ok(outcome) => {
+                    state
+                        .record_audit(
+                            fxg_db::audit::actions::SESSION_RESUME,
+                            &AuditSource::remote(state.node_id()),
+                            Some(&session_id),
+                            serde_json::json!({ "force_replay": force_replay }),
+                        )
+                        .await;
+                    NodeToServerMsg::ResumeResult {
+                        command_id,
+                        success: true,
+                        code: None,
+                        context_restored: Some(outcome.context_restored),
+                        error: None,
+                    }
+                }
+                Err(err) => NodeToServerMsg::ResumeResult {
+                    command_id,
+                    success: false,
+                    code: Some(err.error_code()),
+                    context_restored: None,
                     error: Some(err.to_string()),
                 },
             };

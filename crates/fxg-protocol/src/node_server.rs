@@ -134,6 +134,19 @@ pub enum NodeToServerMsg {
         /// 失敗時のメッセージ
         error: Option<String>,
     },
+    /// セッション再開 (`ResumeSession`) の結果応答。
+    ResumeResult {
+        /// 要求時の相関ID
+        command_id: String,
+        /// 成功したか
+        success: bool,
+        /// 失敗時の構造化エラーコード
+        code: Option<ErrorCode>,
+        /// 成功時のネイティブ復元成否 (`false` = 履歴 Replay で継続)
+        context_restored: Option<bool>,
+        /// 失敗時のメッセージ
+        error: Option<String>,
+    },
     /// ファイルシステム閲覧 (`BrowseFs`) の結果応答。
     BrowseFsResult {
         /// 要求時の相関ID
@@ -317,6 +330,18 @@ pub enum ServerToNodeMsg {
         /// Revert 基準にする `UserMessage` の `node_seq`
         /// (省略時は直近ターン)
         target_node_seq: Option<u64>,
+    },
+    /// 停止済みセッションの再開 (`POST /api/v1/sessions/:id/resume`)。
+    ///
+    /// 同一 `session_id` のままエージェント側コンテキストを復元して継続する
+    /// (設計: `docs/04-agent-drivers-and-windows.md` §4.3)。
+    ResumeSession {
+        /// 相関ID
+        command_id: String,
+        /// 対象セッションID
+        session_id: String,
+        /// ネイティブ復元を試みず履歴 Replay で継続する
+        force_replay: bool,
     },
     /// ワークスペースWebターミナル (PTY) の起動要求。
     PtySpawn {
@@ -537,6 +562,36 @@ mod tests {
         let json = serde_json::to_value(&msg).unwrap();
         assert_eq!(json["op"], "revert_result");
         assert_eq!(json["outcome"]["restored_files"], 3);
+        let decoded: NodeToServerMsg = serde_json::from_value(json).unwrap();
+        assert_eq!(decoded, msg);
+    }
+
+    #[test]
+    fn server_to_node_resume_session_shape() {
+        let msg = ServerToNodeMsg::ResumeSession {
+            command_id: "c1".into(),
+            session_id: "s1".into(),
+            force_replay: true,
+        };
+        let json = serde_json::to_value(&msg).unwrap();
+        assert_eq!(json["op"], "resume_session");
+        assert_eq!(json["force_replay"], true);
+        let decoded: ServerToNodeMsg = serde_json::from_value(json).unwrap();
+        assert_eq!(decoded, msg);
+    }
+
+    #[test]
+    fn node_to_server_resume_result_shape() {
+        let msg = NodeToServerMsg::ResumeResult {
+            command_id: "c1".into(),
+            success: true,
+            code: None,
+            context_restored: Some(false),
+            error: None,
+        };
+        let json = serde_json::to_value(&msg).unwrap();
+        assert_eq!(json["op"], "resume_result");
+        assert_eq!(json["context_restored"], false);
         let decoded: NodeToServerMsg = serde_json::from_value(json).unwrap();
         assert_eq!(decoded, msg);
     }

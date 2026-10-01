@@ -329,6 +329,7 @@ async fn phase3_session_and_inbox_commands_roundtrip_through_daemon() {
         vec!["session", "stop", unknown, "--turn-only"],
         vec!["session", "kill", unknown],
         vec!["session", "revert", unknown, "--to-seq", "3"],
+        vec!["session", "resume", unknown, "--detach"],
         vec!["session", "fork", unknown],
     ] {
         let output = env.run(&args, Some(&repo));
@@ -388,6 +389,16 @@ async fn phase3_session_and_inbox_commands_roundtrip_through_daemon() {
     let json: serde_json::Value = serde_json::from_str(&stdout_of(&output)).expect("json");
     assert_eq!(json["session"]["agent_id"], "broken");
     assert_eq!(json["session"]["status"], "error");
+
+    // --- エージェント起動に失敗するセッションの resume もエラーになる ---
+    let output = env.run(&["session", "resume", &session_id, "--detach"], Some(&repo));
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("failed to start agent"),
+        "got: {stderr}\n--- daemon log ---\n{}",
+        env.daemon_log()
+    );
 
     env.stop_daemon();
 }

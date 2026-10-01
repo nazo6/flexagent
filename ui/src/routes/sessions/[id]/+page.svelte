@@ -28,6 +28,7 @@
   import GitForkIcon from '@lucide/svelte/icons/git-fork';
   import MessageSquareIcon from '@lucide/svelte/icons/message-square';
   import PanelRightCloseIcon from '@lucide/svelte/icons/panel-right-close';
+  import PlayIcon from '@lucide/svelte/icons/play';
   import SkullIcon from '@lucide/svelte/icons/skull';
   import SquareTerminalIcon from '@lucide/svelte/icons/square-terminal';
   import Undo2Icon from '@lucide/svelte/icons/undo-2';
@@ -106,6 +107,16 @@
   let killDialogOpen = $state(false);
   let killing = $state(false);
 
+  // Resume (停止済みセッションの再開) の実行状態
+  let resuming = $state(false);
+
+  /** 一時VMの先行作成中セッションを除き、Resume を表示する。
+   * 強制終了時は DB の status が idle / running のまま残るため、
+   * 一見実行中でも Resume を出し、実行中だった場合はノード側で拒否させる。 */
+  const canResume = $derived(
+    session !== null && session.status !== 'provisioning' && session.status !== 'bootstrapping'
+  );
+
   // Revert (Shadow Git Tree 巻き戻し) 確認ダイアログの状態
   let revertSeq = $state<number | null>(null);
   let reverting = $state(false);
@@ -132,6 +143,24 @@
     if (session?.agent_id) params.set('agent', session.agent_id);
     if (session?.last_node_seq) params.set('fork_seq', String(session.last_node_seq));
     void goto(`/?${params.toString()}`);
+  }
+
+  /** 停止済みセッションを再開する (`POST /sessions/:id/resume`)。 */
+  async function handleResumeSession() {
+    if (!sessionId || resuming) return;
+    resuming = true;
+    try {
+      const result = await sync.resumeSession(sessionId);
+      if (result.context_restored) {
+        toast.success('セッションを再開しました (エージェントのコンテキストを復元)');
+      } else {
+        toast.success('セッションを再開しました (履歴を引き継いで継続)');
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      resuming = false;
+    }
   }
 
   async function handleKillSession() {
@@ -303,6 +332,21 @@
         </div>
 
         <div class="h-4 w-px bg-border/60 mx-0.5 hidden sm:block"></div>
+
+        <!-- Resume ボタン (停止済みセッションの再開) -->
+        {#if canResume}
+          <Button
+            variant="outline"
+            size="sm"
+            class="h-7 text-xs gap-1"
+            disabled={resuming}
+            onclick={handleResumeSession}
+            title="停止したセッションを会話コンテキストを維持したまま再開"
+          >
+            <PlayIcon class="size-3" />
+            <span class="hidden sm:inline">Resume</span>
+          </Button>
+        {/if}
 
         <!-- Fork ボタン -->
         <Button

@@ -33,6 +33,19 @@ pub struct AgentLaunchSpec {
     pub env: Vec<(String, String)>,
 }
 
+/// 既存エージェントセッションからの再開指定 ([`StartSessionRequest::resume`])。
+///
+/// 設計: `docs/04-agent-drivers-and-windows.md` §4.3。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResumeRequest {
+    /// 記録済みのエージェント内部セッションID (`SessionAgentBound` の値)。
+    /// `None` は新規セッション作成 (呼び出し側の履歴 Replay 注入前提)。
+    pub agent_session_id: Option<String>,
+    /// ネイティブ復元ができない場合に新規セッション作成を許容するか
+    /// (`false` の場合はエラーを返す)。
+    pub allow_fresh: bool,
+}
+
 /// セッション開始要求。
 #[derive(Debug, Clone)]
 pub struct StartSessionRequest {
@@ -49,6 +62,19 @@ pub struct StartSessionRequest {
     pub extra_args: Vec<String>,
     /// 初期モード (`--mode` 指定時。ACP の `session/set_mode` で適用)
     pub initial_mode: Option<String>,
+    /// 既存エージェントセッションからの再開指定 (`None` は新規セッション)
+    pub resume: Option<ResumeRequest>,
+}
+
+/// [`AgentDriver::start_session`] の結果。
+pub struct StartedSession {
+    /// 起動済みセッションの操作ハンドル
+    pub handle: Box<dyn ActiveSessionHandle>,
+    /// `true` = エージェント側コンテキストをネイティブ復元した
+    /// (`session/resume` / `session/load` / opencode2 既存セッション bind)。
+    /// `false` = 新規エージェントセッションを作成した
+    /// (呼び出し側は履歴 Replay を注入してコンテキストを引き継ぐ)。
+    pub context_restored: bool,
 }
 
 /// ドライバからセッションマネージャへ送出されるイベント。
@@ -77,12 +103,17 @@ pub trait AgentDriver: Send + Sync {
 
     /// 新規セッションを起動し、操作ハンドルを返す。
     ///
+    /// `req.resume` が指定されている場合、ドライバはネイティブ復元
+    /// (`session/resume` / `session/load` / opencode2 既存セッション bind) を
+    /// 試み、成否を [`StartedSession::context_restored`] で返す。
+    /// ネイティブ復元できない場合の履歴 Replay 注入は呼び出し側の責務である。
+    ///
     /// 以降のイベントは `event_tx` へ送出される。
     async fn start_session(
         &self,
         req: StartSessionRequest,
         event_tx: mpsc::UnboundedSender<DriverEvent>,
-    ) -> anyhow::Result<Box<dyn ActiveSessionHandle>>;
+    ) -> anyhow::Result<StartedSession>;
 }
 
 /// 起動済みセッションの操作ハンドル。
@@ -188,7 +219,7 @@ mod tests {
             &self,
             req: StartSessionRequest,
             event_tx: mpsc::UnboundedSender<DriverEvent>,
-        ) -> anyhow::Result<Box<dyn ActiveSessionHandle>> {
+        ) -> anyhow::Result<StartedSession> {
             event_tx
                 .send(DriverEvent::Event(UnifiedEventPayload::AgentMessage {
                     message_id: "m1".to_owned(),
@@ -197,7 +228,10 @@ mod tests {
                 }))
                 .expect("event_tx");
             assert_eq!(req.launch.driver_kind, "mock");
-            Ok(Box::new(MockHandle))
+            Ok(StartedSession {
+                handle: Box::new(MockHandle),
+                context_restored: false,
+            })
         }
     }
 
@@ -222,12 +256,18 @@ mod tests {
                     launch,
                     extra_args: vec![],
                     initial_mode: None,
+                    resume: None,
                 },
                 tx,
             )
             .await
             .expect("start_session");
-        handle.send_prompt("hi".to_owned()).await.expect("prompt");
+        assert!(!handle.context_restored);
+        handle
+            .handle
+            .send_prompt("hi".to_owned())
+            .await
+            .expect("prompt");
         match rx.recv().await.expect("event") {
             DriverEvent::Event(payload) => {
                 assert_eq!(payload.event_type(), "agent_message");

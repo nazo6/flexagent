@@ -19,8 +19,9 @@ use fxg_protocol::client_api::{
     NodeTokenSummary, NodeTokensResponse, ProjectLinkRequest, ProjectLinkResponse,
     ProjectScanRequest, ProjectScanResponse, ProvisionerSummary, ProvisionersResponse,
     PruneWorktreesRequest, PushSubscribeRequest, PushSubscribeResponse, RemoveWorktreeRequest,
-    RespondPermissionRequest, RespondPermissionResponse, RotateAuthTokenResponse,
-    SessionRevertRequest, SessionRevertResponse, WorktreeInfo, WorktreesResponse,
+    RespondPermissionRequest, RespondPermissionResponse, ResumeSessionRequest,
+    ResumeSessionResponse, RotateAuthTokenResponse, SessionRevertRequest, SessionRevertResponse,
+    WorktreeInfo, WorktreesResponse,
 };
 use fxg_protocol::common::{
     AgentAction, CommandResult, DiffScope, ErrorCode, ForkHistoryItem, WorkspaceDiffResponse,
@@ -759,6 +760,70 @@ impl ClientApiBackend for ServerState {
         )
         .await;
         Ok(outcome)
+    }
+
+    async fn resume_session(
+        &self,
+        session_id: &str,
+        request: ResumeSessionRequest,
+        client: ClientInfo,
+    ) -> Result<ResumeSessionResponse, ApiError> {
+        let session = self
+            .inner
+            .db
+            .get_session(session_id)
+            .await
+            .map_err(ApiError::from)?
+            .ok_or_else(|| ApiError::not_found(format!("session not found: {session_id}")))?;
+
+        // 一時VM (provisioner) セッションの再開 (VM 再起動 + bundle 復元) は v2 のため
+        // v1 では拒否する (常駐ノードのみ対象)。
+        let is_ephemeral = self
+            .inner
+            .db
+            .list_nodes()
+            .await
+            .map_err(ApiError::from)?
+            .into_iter()
+            .any(|node| node.node_id == session.node_id && node.is_ephemeral);
+        if is_ephemeral {
+            return Err(ApiError::from_code(
+                ErrorCode::InvalidState,
+                "resume for ephemeral sessions is not supported yet",
+            ));
+        }
+
+        // 実行ノードへ中継 (オフラインは `NODE_OFFLINE`)
+        let node_id = self.session_node(session_id).await?;
+        let command_id = uuid_v7();
+        let context_restored = self
+            .inner
+            .hub
+            .resume_session(
+                &node_id,
+                &command_id,
+                ServerToNodeMsg::ResumeSession {
+                    command_id: command_id.clone(),
+                    session_id: session_id.to_owned(),
+                    force_replay: request.force_replay,
+                },
+            )
+            .await?;
+        self.record_audit(
+            fxg_db::audit::actions::SESSION_RESUME,
+            &client,
+            Some(session_id),
+            serde_json::json!({
+                "node_id": node_id,
+                "force_replay": request.force_replay,
+                "context_restored": context_restored,
+            }),
+        )
+        .await;
+        Ok(ResumeSessionResponse {
+            session_id: session_id.to_owned(),
+            context_restored,
+        })
     }
 
     async fn prune_worktrees(

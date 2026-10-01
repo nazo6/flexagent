@@ -842,6 +842,7 @@ mod tests {
                 parent_session_id: None,
                 fork_from_node_seq: None,
                 title: "stale".to_owned(),
+                opencode_mode: None,
             },
         )
         .await

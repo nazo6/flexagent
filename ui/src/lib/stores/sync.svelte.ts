@@ -8,6 +8,7 @@ import type { ServerWsMessage } from "$lib/generated/ServerWsMessage";
 import type { SessionControlAction } from "$lib/generated/SessionControlAction";
 import type { SessionEventEnvelope } from "$lib/generated/SessionEventEnvelope";
 import type { SessionRevertResponse } from "$lib/generated/SessionRevertResponse";
+import type { ResumeSessionResponse } from "$lib/generated/ResumeSessionResponse";
 import type { SessionSummary } from "$lib/generated/SessionSummary";
 import { mergeCursor } from "$lib/sync/cursor";
 import { SessionTimeline } from "$lib/sync/timeline.svelte";
@@ -391,6 +392,21 @@ export class SyncStore {
     const response = await this.connection.client.killSwitch(reason);
     void this.refreshAll();
     return response.notified_nodes;
+  }
+
+  /**
+   * 停止済みセッションを再開する。
+   *
+   * エージェント側コンテキストのネイティブ復元に非対応の場合は履歴 Replay で
+   * 継続され、`context_restored = false` として返る
+   * (`StatusChanged(Idle)` はイベント購読で自動反映される)。
+   */
+  async resumeSession(sessionId: string): Promise<ResumeSessionResponse> {
+    const result = await this.connection.client.resumeSession(sessionId, {
+      force_replay: false,
+    });
+    await this.refreshSessions();
+    return result;
   }
 
   #resolveCommand(result: CommandResult): void {

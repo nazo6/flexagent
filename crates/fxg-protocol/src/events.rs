@@ -97,6 +97,12 @@ pub enum UnifiedEventPayload {
         fork_from_node_seq: Option<u64>,
         /// 初期タイトル
         title: String,
+        /// OpenCode2 の起動モード (`"bridge"` / `"acp"`。opencode2 以外は `None`)。
+        ///
+        /// セッション再開 (resume) 時に起動モードを復元するために永続化する
+        /// (旧イベントには存在しないため `#[serde(default)]`)。
+        #[serde(default)]
+        opencode_mode: Option<String>,
     },
     /// セッションタイトル変更 (UI/CLI からのリネーム。
     /// コマンドとして実行ノードに到達してから発行される)。
@@ -394,6 +400,7 @@ mod tests {
                 parent_session_id: None,
                 fork_from_node_seq: None,
                 title: "t".into(),
+                opencode_mode: None,
             }
             .event_type(),
             "session_created"
@@ -410,6 +417,52 @@ mod tests {
             .event_type(),
             "status_change"
         );
+    }
+
+    #[test]
+    fn session_created_opencode_mode_roundtrip_and_backward_compat() {
+        // 新形式: opencode_mode が保存・復元される
+        let payload = UnifiedEventPayload::SessionCreated {
+            node_id: "n".into(),
+            project_id: "p".into(),
+            project_name: "P".into(),
+            local_path: "/tmp".into(),
+            git_branch: None,
+            is_worktree: false,
+            agent_id: "opencode2".into(),
+            parent_session_id: None,
+            fork_from_node_seq: None,
+            title: "t".into(),
+            opencode_mode: Some("acp".into()),
+        };
+        let json = serde_json::to_value(&payload).unwrap();
+        assert_eq!(json["data"]["opencode_mode"], "acp");
+        assert_eq!(
+            serde_json::from_value::<UnifiedEventPayload>(json).unwrap(),
+            payload
+        );
+
+        // 旧形式: opencode_mode が無くても None として読める (後方互換)
+        let legacy = serde_json::json!({
+            "type": "session_created",
+            "data": {
+                "node_id": "n",
+                "project_id": "p",
+                "project_name": "P",
+                "local_path": "/tmp",
+                "git_branch": null,
+                "is_worktree": false,
+                "agent_id": "opencode2",
+                "parent_session_id": null,
+                "fork_from_node_seq": null,
+                "title": "t",
+            }
+        });
+        let decoded: UnifiedEventPayload = serde_json::from_value(legacy).unwrap();
+        let UnifiedEventPayload::SessionCreated { opencode_mode, .. } = decoded else {
+            panic!("expected session_created");
+        };
+        assert_eq!(opencode_mode, None);
     }
 
     #[test]

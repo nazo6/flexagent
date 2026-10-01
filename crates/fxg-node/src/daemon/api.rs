@@ -12,8 +12,8 @@ use fxg_protocol::client_api::{
     CreateWorktreeRequest, KillSwitchResponse, ProjectLinkRequest, ProjectLinkResponse,
     ProjectScanRequest, ProjectScanResponse, ProvisionersResponse, PruneWorktreesRequest,
     RemoveWorktreeRequest, RespondPermissionRequest, RespondPermissionResponse,
-    RotateAuthTokenResponse, SessionRevertRequest, SessionRevertResponse, WorktreeInfo,
-    WorktreesResponse,
+    ResumeSessionRequest, ResumeSessionResponse, RotateAuthTokenResponse, SessionRevertRequest,
+    SessionRevertResponse, WorktreeInfo, WorktreesResponse,
 };
 use fxg_protocol::common::{AgentAction, CommandResult, DiffScope, WorkspaceDiffResponse};
 use fxg_server::api::{
@@ -25,7 +25,7 @@ use tokio::sync::broadcast;
 use super::DaemonState;
 use super::ops::AuditSource;
 use crate::error::NodeError;
-use crate::session_manager::StartSessionParams;
+use crate::session_manager::{ResumeParams, StartSessionParams};
 
 /// PTY WS へ転送するローカル購読のバッファ。
 const PTY_CHANNEL_CAPACITY: usize = 1024;
@@ -329,6 +329,38 @@ impl ClientApiBackend for DaemonState {
             backup_tree_hash: outcome.backup_tree_hash,
             restored_files: outcome.restored_files as u64,
             removed_files: outcome.removed_files as u64,
+        })
+    }
+
+    async fn resume_session(
+        &self,
+        session_id: &str,
+        request: ResumeSessionRequest,
+        client: ClientInfo,
+    ) -> Result<ResumeSessionResponse, ApiError> {
+        let command_id = fxg_protocol::util::uuid_v7();
+        let outcome = self
+            .session_manager()
+            .resume(ResumeParams {
+                command_id: &command_id,
+                session_id,
+                force_replay: request.force_replay,
+            })
+            .await
+            .map_err(api_error)?;
+        self.record_audit(
+            fxg_db::audit::actions::SESSION_RESUME,
+            &audit_source(&client),
+            Some(session_id),
+            serde_json::json!({
+                "force_replay": request.force_replay,
+                "context_restored": outcome.context_restored,
+            }),
+        )
+        .await;
+        Ok(ResumeSessionResponse {
+            session_id: outcome.session_id,
+            context_restored: outcome.context_restored,
         })
     }
 
