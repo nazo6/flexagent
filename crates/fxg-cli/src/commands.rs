@@ -359,7 +359,7 @@ fn same_directory(a: &Path, b: &Path) -> bool {
     if a == b {
         return true;
     }
-    match (a.canonicalize(), b.canonicalize()) {
+    match (fxg_pty::canonicalize(a), fxg_pty::canonicalize(b)) {
         (Ok(a), Ok(b)) => a == b,
         _ => false,
     }
