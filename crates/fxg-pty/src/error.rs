@@ -35,6 +35,10 @@ pub enum PtyError {
     #[cfg(windows)]
     #[error("windows job object error: {0}")]
     JobObject(#[from] win32job::JobError),
+    /// Windows API (`windows` クレート) 呼び出しエラー
+    #[cfg(windows)]
+    #[error("windows api error: {0}")]
+    WindowsApi(#[from] windows::core::Error),
 }
 
 impl PtyError {

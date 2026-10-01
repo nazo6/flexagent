@@ -68,6 +68,12 @@ impl AcpDriver {
 /// 承認リクエストの解決チャネル (`request_id` → `oneshot`)。
 type PermissionRegistry = Arc<Mutex<HashMap<String, oneshot::Sender<RequestPermissionOutcome>>>>;
 
+/// エージェントのブートストラップ (ラッパープロセス) の自然終了を待つ猶予。
+///
+/// PyInstaller onefile 型のエージェントは子 (実体) の終了後に展開済み一時
+/// ファイル (数百 MB) を削除してから終了するため、削除 I/O を見込んだ余裕を取る。
+const AGENT_EXIT_GRACE: std::time::Duration = std::time::Duration::from_secs(15);
+
 /// セッション所有タスクへのコマンド。
 #[derive(Debug)]
 enum AcpCommand {
@@ -534,10 +540,11 @@ async fn run_acp_session(params: AcpSessionTaskParams) -> Result<(), agent_clien
 
     let _process_guard = fxg_pty::ProcessTreeGuard::new()
         .map_err(agent_client_protocol::Error::into_internal_error)?;
-    #[cfg(windows)]
-    {
-        use std::os::windows::io::AsRawHandle;
-        let _ = _process_guard.attach_raw_handle(child.as_raw_handle());
+    // エージェントのプロセスツリーを終了対象として登録する
+    // (プラットフォーム差は `fxg_pty` 側に集約)。失敗しても起動は継続するが、
+    // 終了時のツリー kill が効かなくなるため警告する。
+    if let Err(err) = _process_guard.attach_pid(child.id()) {
+        tracing::warn!("failed to attach acp agent process tree to guard: {err}");
     }
 
     // エージェント stderr をデーモンのログへ流す (パイプ詰まり防止)
@@ -686,9 +693,23 @@ async fn run_acp_session(params: AcpSessionTaskParams) -> Result<(), agent_clien
         })
         .await;
 
-    // 接続完了後、プロセスを確実に終了させる
-    drop(child.kill());
-    let _ = child.status().await;
+    // 接続完了後、プロセスツリーを確実に終了させる。
+    //
+    // ラッパー型ランチャー (PyInstaller onefile 等) は「内側のプロセスが終了すると
+    // 自身で後始末 (一時ファイルの削除等) をしてから自然終了する」ため、
+    // 内側から順に終了してルートの自然終了を待つ。
+    // プラットフォーム差は `fxg_pty` 側に集約されている。
+    match _process_guard
+        .shutdown_tree(child.id(), AGENT_EXIT_GRACE)
+        .await
+    {
+        Ok(outcome) => tracing::debug!(?outcome, "acp agent process tree shut down"),
+        Err(err) => tracing::warn!("failed to shut down acp agent process tree: {err}"),
+    }
+    match child.status().await {
+        Ok(status) => tracing::debug!(?status, "acp agent process exited"),
+        Err(err) => tracing::debug!("failed to reap acp agent process: {err}"),
+    }
 
     run_result
 }

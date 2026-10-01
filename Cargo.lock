@@ -1906,6 +1906,7 @@ version = "0.1.0"
 dependencies = [
  "dunce",
  "fxg-protocol",
+ "libc",
  "portable-pty",
  "tempfile",
  "thiserror 2.0.21",
@@ -1913,6 +1914,7 @@ dependencies = [
  "tracing",
  "which",
  "win32job",
+ "windows 0.61.3",
 ]
 
 [[package]]

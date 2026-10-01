@@ -19,7 +19,7 @@ pub mod proc;
 pub mod pty;
 
 pub use error::PtyError;
-pub use proc::{ProcessTreeGuard, canonicalize, resolve_command};
+pub use proc::{ProcessTreeGuard, TreeShutdownOutcome, canonicalize, resolve_command};
 pub use pty::{PtyEvent, PtySessionInfo, PtySessionManager, PtySpawnRequest};
 
 #[cfg(windows)]
