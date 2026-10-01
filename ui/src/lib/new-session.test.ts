@@ -78,6 +78,7 @@ function session(
     last_node_seq: 1,
     created_at: updated_at,
     updated_at,
+    archived_at: null,
     ...overrides,
   };
 }

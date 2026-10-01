@@ -5,6 +5,7 @@ import type { NodeSummary } from "$lib/generated/NodeSummary";
 import type { PermissionRequestEntry } from "$lib/generated/PermissionRequestEntry";
 import type { ProjectSummary } from "$lib/generated/ProjectSummary";
 import type { ServerWsMessage } from "$lib/generated/ServerWsMessage";
+import type { SessionArchiveResponse } from "$lib/generated/SessionArchiveResponse";
 import type { SessionControlAction } from "$lib/generated/SessionControlAction";
 import type { SessionEventEnvelope } from "$lib/generated/SessionEventEnvelope";
 import type { SessionRevertResponse } from "$lib/generated/SessionRevertResponse";
@@ -186,7 +187,11 @@ export class SyncStore {
 
   async refreshSessions(): Promise<void> {
     try {
-      this.sessions = await this.connection.client.sessions({ limit: 200 });
+      // アーカイブ済みも取得し、サイドバーで「アーカイブ済み」セクションに分ける
+      this.sessions = await this.connection.client.sessions({
+        includeArchived: true,
+        limit: 200,
+      });
     } catch (error) {
       this.#warn("sessions", error);
     }
@@ -426,6 +431,28 @@ export class SyncStore {
     return result;
   }
 
+  /**
+   * セッションをアーカイブ/復元する (可逆。イベントログは保持される)。
+   */
+  async archiveSession(sessionId: string, archived: boolean): Promise<SessionArchiveResponse> {
+    const result = await this.connection.client.archiveSession(sessionId, { archived });
+    await this.refreshSessions();
+    return result;
+  }
+
+  /**
+   * セッションを削除する (会話ログを消去し復元不能)。
+   *
+   * 実行ノードは稼働中セッションを停止してから `SessionDeleted` (tombstone)
+   * を追記し、イベント本文をパージする。ローカルのタイムラインも即時破棄する。
+   */
+  async deleteSession(sessionId: string): Promise<void> {
+    await this.connection.client.deleteSession(sessionId);
+    this.#timelines.delete(sessionId);
+    this.bootstrapLogs.delete(sessionId);
+    await Promise.all([this.refreshSessions(), this.refreshInbox()]);
+  }
+
   #resolveCommand(result: CommandResult): void {
     const pending = this.#pendingCommands.get(result.command_id);
     if (!pending) return;
@@ -503,7 +530,16 @@ export class SyncStore {
         case "session_agent_bound":
         case "status_changed":
         case "capabilities_updated":
+        case "session_archived":
           sessionsDirty = true;
+          break;
+        case "session_deleted":
+          // 削除済みセッションは一覧・承認 Inbox から消え、ローカルの
+          // タイムラインも破棄する (以降は tombstone イベントのみが残る)
+          this.#timelines.delete(event.session_id);
+          this.bootstrapLogs.delete(event.session_id);
+          sessionsDirty = true;
+          inboxDirty = true;
           break;
         case "permission_request":
         case "permission_resolved":

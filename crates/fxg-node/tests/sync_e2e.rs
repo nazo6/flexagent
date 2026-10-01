@@ -1039,3 +1039,226 @@ async fn central_server_resumes_stopped_session() {
         .await
         .expect("server stop");
 }
+
+// ----------------------------------------------------------------------
+// E2E テスト: 中央サーバー経由のアーカイブ / 削除 (tombstone + 本文パージ)
+// ----------------------------------------------------------------------
+
+#[tokio::test(flavor = "multi_thread")]
+async fn central_server_archives_and_deletes_session() {
+    let server_home = tempfile::tempdir().expect("server home");
+    let node_home = tempfile::tempdir().expect("node home");
+    let repo = tempfile::tempdir().expect("repo");
+    init_repo(repo.path()).await;
+
+    let port = reserve_port();
+    let server_url = format!("ws://127.0.0.1:{port}/api/v1/node/ws");
+    let node_token = issue_node_token(server_home.path(), "node-1").await;
+    let agent = MockAgent::default();
+
+    let server = start_server(server_home.path(), port).await;
+    let node = start_node(
+        node_home.path(),
+        "node-1",
+        Some(server_url),
+        Some(node_token),
+        &agent,
+    )
+    .await;
+    wait_until("node connected", Duration::from_secs(30), || async {
+        server.state().hub().is_online("node-1").await
+    })
+    .await;
+
+    let server_db = Db::open(&fxg_db::hub_db_path(server_home.path()), DbRole::Hub)
+        .await
+        .expect("server db");
+    let node_db = Db::open(&fxg_db::node_db_path(node_home.path()), DbRole::Node)
+        .await
+        .expect("node db");
+    let client_token = fxg_server::api::auth::load_or_create_token(
+        &server_home
+            .path()
+            .join(fxg_protocol::config::AUTH_TOKEN_FILE_NAME),
+    )
+    .expect("client token");
+    let http = reqwest::Client::new();
+    let base = format!("http://127.0.0.1:{port}");
+
+    // 1. セッションを作成し、ハブへ同期されるまで待つ
+    let session_id = create_session_with_events(&node, &agent, repo.path(), "archive-e2e").await;
+    let node_last = node_db
+        .get_session(&session_id)
+        .await
+        .expect("get session")
+        .expect("session exists")
+        .last_node_seq;
+    assert!(node_last >= 3, "session must have events");
+    wait_until("session synced to hub", Duration::from_secs(30), || async {
+        server_db
+            .get_session(&session_id)
+            .await
+            .ok()
+            .flatten()
+            .is_some_and(|session| session.last_node_seq >= node_last)
+    })
+    .await;
+
+    // 2. アーカイブ (一覧から非表示。イベントログは保持)
+    let archived_at = http
+        .post(format!("{base}/api/v1/sessions/{session_id}/archive"))
+        .bearer_auth(&client_token)
+        .json(&json!({ "archived": true }))
+        .send()
+        .await
+        .expect("archive request");
+    assert_eq!(archived_at.status(), reqwest::StatusCode::OK, "archive");
+    let archived_at: serde_json::Value = archived_at.json().await.expect("json");
+    assert!(archived_at["archived_at"].as_i64().is_some());
+
+    wait_until("archive synced", Duration::from_secs(30), || async {
+        server_db
+            .get_session(&session_id)
+            .await
+            .ok()
+            .flatten()
+            .is_some_and(|session| session.archived_at.is_some())
+    })
+    .await;
+
+    // 既定の一覧からは除外され、`include_archived=true` でのみ返る
+    let visible = http
+        .get(format!("{base}/api/v1/sessions?include_archived=true"))
+        .bearer_auth(&client_token)
+        .send()
+        .await
+        .expect("list with archived")
+        .json::<fxg_protocol::client_api::SessionListResponse>()
+        .await
+        .expect("list json");
+    let hidden = http
+        .get(format!("{base}/api/v1/sessions"))
+        .bearer_auth(&client_token)
+        .send()
+        .await
+        .expect("default list")
+        .json::<fxg_protocol::client_api::SessionListResponse>()
+        .await
+        .expect("list json");
+    assert!(
+        hidden
+            .sessions
+            .iter()
+            .all(|session| session.session_id != session_id),
+        "archived session must be hidden from the default list"
+    );
+    assert!(
+        visible
+            .sessions
+            .iter()
+            .any(|session| session.session_id == session_id && session.archived_at.is_some()),
+        "archived session must be listed with include_archived=true"
+    );
+
+    // 3. アーカイブ解除で一覧に戻る
+    let restored = http
+        .post(format!("{base}/api/v1/sessions/{session_id}/archive"))
+        .bearer_auth(&client_token)
+        .json(&json!({ "archived": false }))
+        .send()
+        .await
+        .expect("unarchive request");
+    assert_eq!(restored.status(), reqwest::StatusCode::OK, "unarchive");
+    wait_until("unarchive synced", Duration::from_secs(30), || async {
+        server_db
+            .get_session(&session_id)
+            .await
+            .ok()
+            .flatten()
+            .is_some_and(|session| session.archived_at.is_none())
+    })
+    .await;
+
+    // 4. セッションを停止させてから削除する (停止→tombstone→本文パージ)
+    agent.close_events();
+    wait_until(
+        "session stopped on node",
+        Duration::from_secs(30),
+        || async {
+            node_db
+                .get_session(&session_id)
+                .await
+                .ok()
+                .flatten()
+                .is_some_and(|session| session.status == SessionStatus::Stopped)
+        },
+    )
+    .await;
+
+    let deleted = http
+        .delete(format!("{base}/api/v1/sessions/{session_id}"))
+        .bearer_auth(&client_token)
+        .send()
+        .await
+        .expect("delete request");
+    assert_eq!(
+        deleted.status(),
+        reqwest::StatusCode::NO_CONTENT,
+        "delete session"
+    );
+
+    wait_until("delete synced", Duration::from_secs(30), || async {
+        node_db
+            .get_session(&session_id)
+            .await
+            .expect("node get")
+            .is_none()
+            && server_db
+                .get_session(&session_id)
+                .await
+                .expect("server get")
+                .is_none()
+    })
+    .await;
+
+    // tombstone のみが残り、会話イベントは両 DB でパージされている
+    for db in [&node_db, &server_db] {
+        let batch = db
+            .session_events_after(&session_id, 0, 100)
+            .await
+            .expect("events");
+        assert_eq!(
+            batch.events.len(),
+            1,
+            "only the tombstone event must remain"
+        );
+        assert!(matches!(
+            batch.events[0].payload,
+            UnifiedEventPayload::SessionDeleted {}
+        ));
+    }
+
+    // 監査ログ (server.db) に両操作が残る
+    let audits = server_db.audit_logs(100).await.expect("audit logs");
+    assert!(
+        audits
+            .iter()
+            .any(|log| log.action == fxg_db::audit::actions::SESSION_ARCHIVE),
+        "session_archive must be audited"
+    );
+    assert!(
+        audits
+            .iter()
+            .any(|log| log.action == fxg_db::audit::actions::SESSION_DELETE),
+        "session_delete must be audited"
+    );
+
+    node.shutdown();
+    tokio::time::timeout(Duration::from_secs(10), node.wait())
+        .await
+        .expect("node stop");
+    server.shutdown();
+    tokio::time::timeout(Duration::from_secs(10), server.wait())
+        .await
+        .expect("server stop");
+}

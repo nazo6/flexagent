@@ -681,6 +681,7 @@ async fn handle(
         IpcClientMessage::ListSessions {
             command_id,
             include_stopped,
+            include_archived,
         } => {
             let filter = SessionFilter {
                 statuses: if include_stopped {
@@ -688,6 +689,7 @@ async fn handle(
                 } else {
                     DaemonState::active_statuses()
                 },
+                include_archived,
                 limit: Some(SESSION_LIST_LIMIT),
                 ..SessionFilter::default()
             };
@@ -945,6 +947,35 @@ async fn handle(
                     context_restored: started.context_restored,
                 },
             ))
+        }
+
+        IpcClientMessage::SessionArchive {
+            command_id,
+            session_id,
+            archived,
+        } => {
+            let archived_at = state
+                .set_session_archived(&command_id, &session_id, archived, &AuditSource::local())
+                .await
+                .map_err(|err| DispatchError::from_node_error(&command_id, err))?;
+            Ok((
+                command_id,
+                IpcResult::SessionArchived {
+                    session_id,
+                    archived_at,
+                },
+            ))
+        }
+
+        IpcClientMessage::SessionDelete {
+            command_id,
+            session_id,
+        } => {
+            state
+                .purge_session(&command_id, &session_id, &AuditSource::local())
+                .await
+                .map_err(|err| DispatchError::from_node_error(&command_id, err))?;
+            Ok((command_id, IpcResult::SessionDeleted { session_id }))
         }
 
         IpcClientMessage::SessionShow {
@@ -1347,6 +1378,7 @@ mod tests {
             &IpcClientMessage::ListSessions {
                 command_id: "s1".to_owned(),
                 include_stopped: true,
+                include_archived: true,
             },
         )
         .await;

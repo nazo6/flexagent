@@ -108,6 +108,26 @@ enum PendingResponse {
         /// 失敗時のメッセージ
         error: Option<String>,
     },
+    /// セッションのアーカイブ/復元結果 (`ArchiveResult`)
+    Archive {
+        /// 成功したか
+        success: bool,
+        /// 失敗時の構造化エラーコード
+        code: Option<ErrorCode>,
+        /// 成功時のアーカイブ日時 (Unix epoch ms)。復元時は `None`
+        archived_at: Option<i64>,
+        /// 失敗時のメッセージ
+        error: Option<String>,
+    },
+    /// セッション削除結果 (`DeleteResult`)
+    Delete {
+        /// 成功したか
+        success: bool,
+        /// 失敗時の構造化エラーコード
+        code: Option<ErrorCode>,
+        /// 失敗時のメッセージ
+        error: Option<String>,
+    },
     /// ファイルシステム閲覧結果 (`BrowseFsResult`)
     BrowseFs {
         /// 取得成功時のブラウズ結果
@@ -471,6 +491,72 @@ impl NodeHub {
                     Err(ApiError::from_code(
                         code.unwrap_or(ErrorCode::Internal),
                         error.unwrap_or_else(|| "resume failed".to_owned()),
+                    ))
+                }
+            }
+            PendingResponse::Failed { code, message } => Err(ApiError::from_code(code, message)),
+            _ => Err(ApiError::internal("unexpected node response kind")),
+        }
+    }
+
+    /// セッションのアーカイブ/復元を中継し、`command_id` 相関で結果を待つ。
+    ///
+    /// 戻り値はアーカイブ日時 (Unix epoch ms。復元時は `None`)。
+    pub async fn archive_session(
+        &self,
+        node_id: &str,
+        command_id: &str,
+        message: ServerToNodeMsg,
+    ) -> Result<Option<i64>, ApiError> {
+        let response = self
+            .request(node_id, command_id, message, COMMAND_TIMEOUT)
+            .await?;
+        match response {
+            PendingResponse::Archive {
+                success,
+                code,
+                archived_at,
+                error,
+            } => {
+                if success {
+                    Ok(archived_at)
+                } else {
+                    Err(ApiError::from_code(
+                        code.unwrap_or(ErrorCode::Internal),
+                        error.unwrap_or_else(|| "archive failed".to_owned()),
+                    ))
+                }
+            }
+            PendingResponse::Failed { code, message } => Err(ApiError::from_code(code, message)),
+            _ => Err(ApiError::internal("unexpected node response kind")),
+        }
+    }
+
+    /// セッション削除を中継し、`command_id` 相関で結果を待つ。
+    ///
+    /// 実行ノードが稼働中セッションの停止を待つため
+    /// [`SESSION_COMMAND_TIMEOUT`] で待つ。
+    pub async fn delete_session(
+        &self,
+        node_id: &str,
+        command_id: &str,
+        message: ServerToNodeMsg,
+    ) -> Result<(), ApiError> {
+        let response = self
+            .request(node_id, command_id, message, SESSION_COMMAND_TIMEOUT)
+            .await?;
+        match response {
+            PendingResponse::Delete {
+                success,
+                code,
+                error,
+            } => {
+                if success {
+                    Ok(())
+                } else {
+                    Err(ApiError::from_code(
+                        code.unwrap_or(ErrorCode::Internal),
+                        error.unwrap_or_else(|| "delete failed".to_owned()),
                     ))
                 }
             }
@@ -1071,6 +1157,44 @@ async fn handle_node_message(state: &ServerState, node_id: &str, text: &str) {
                         success,
                         code,
                         context_restored,
+                        error,
+                    },
+                )
+                .await;
+        }
+        NodeToServerMsg::ArchiveResult {
+            command_id,
+            success,
+            code,
+            archived_at,
+            error,
+        } => {
+            state
+                .hub()
+                .resolve(
+                    &command_id,
+                    PendingResponse::Archive {
+                        success,
+                        code,
+                        archived_at,
+                        error,
+                    },
+                )
+                .await;
+        }
+        NodeToServerMsg::DeleteResult {
+            command_id,
+            success,
+            code,
+            error,
+        } => {
+            state
+                .hub()
+                .resolve(
+                    &command_id,
+                    PendingResponse::Delete {
+                        success,
+                        code,
                         error,
                     },
                 )

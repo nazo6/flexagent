@@ -89,6 +89,54 @@ impl DaemonState {
         }
     }
 
+    /// セッションのアーカイブ/復元 (IPC / Client REST / 中央サーバー中継の共有実装)。
+    ///
+    /// アーカイブは可逆な可視性フラグで、イベントログは保持される。
+    /// 戻り値はアーカイブ日時 (Unix epoch ms。復元時は `None`)。
+    pub async fn set_session_archived(
+        &self,
+        command_id: &str,
+        session_id: &str,
+        archived: bool,
+        source: &AuditSource,
+    ) -> Result<Option<i64>, NodeError> {
+        let archived_at = self
+            .session_manager()
+            .set_archived(command_id, session_id, archived)
+            .await?;
+        self.record_audit(
+            fxg_db::audit::actions::SESSION_ARCHIVE,
+            source,
+            Some(session_id),
+            serde_json::json!({ "archived": archived, "archived_at": archived_at }),
+        )
+        .await;
+        Ok(archived_at)
+    }
+
+    /// セッションの削除 (IPC / Client REST / 中央サーバー中継の共有実装)。
+    ///
+    /// 稼働中セッションは停止してから `SessionDeleted` (tombstone) を追記し、
+    /// イベント本文・承認履歴をパージする (復元不能)。
+    pub async fn purge_session(
+        &self,
+        command_id: &str,
+        session_id: &str,
+        source: &AuditSource,
+    ) -> Result<(), NodeError> {
+        self.session_manager()
+            .delete(command_id, session_id)
+            .await?;
+        self.record_audit(
+            fxg_db::audit::actions::SESSION_DELETE,
+            source,
+            Some(session_id),
+            serde_json::json!({}),
+        )
+        .await;
+        Ok(())
+    }
+
     /// プロジェクトを解決し、`projects` / `project_node_bindings` を更新する。
     pub async fn resolve_and_register_project(
         &self,

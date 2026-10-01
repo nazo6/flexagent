@@ -38,6 +38,8 @@ import type { ResumeSessionResponse } from "$lib/generated/ResumeSessionResponse
 import type { RotateAuthTokenResponse } from "$lib/generated/RotateAuthTokenResponse";
 import type { SearchHit } from "$lib/generated/SearchHit";
 import type { SearchResponse } from "$lib/generated/SearchResponse";
+import type { SessionArchiveRequest } from "$lib/generated/SessionArchiveRequest";
+import type { SessionArchiveResponse } from "$lib/generated/SessionArchiveResponse";
 import type { SessionEventBatch } from "$lib/generated/SessionEventBatch";
 import type { SessionRevertRequest } from "$lib/generated/SessionRevertRequest";
 import type { SessionRevertResponse } from "$lib/generated/SessionRevertResponse";
@@ -258,6 +260,8 @@ export class ApiClient {
       projectId?: string | null;
       nodeId?: string | null;
       status?: string | null;
+      /** アーカイブ済みセッションを含めるか (既定 `false` = 除外)。 */
+      includeArchived?: boolean | null;
       limit?: number;
     } = {},
   ): Promise<SessionSummary[]> {
@@ -269,6 +273,7 @@ export class ApiClient {
           project_id: filter.projectId,
           node_id: filter.nodeId,
           status: filter.status,
+          include_archived: filter.includeArchived,
           limit: filter.limit,
         },
       },
@@ -330,6 +335,21 @@ export class ApiClient {
     return this.#request("POST", `/api/v1/sessions/${encodeURIComponent(sessionId)}/resume`, {
       body: request,
     });
+  }
+
+  /** `POST /api/v1/sessions/:id/archive` (アーカイブ/復元)。 */
+  archiveSession(
+    sessionId: string,
+    request: SessionArchiveRequest,
+  ): Promise<SessionArchiveResponse> {
+    return this.#request("POST", `/api/v1/sessions/${encodeURIComponent(sessionId)}/archive`, {
+      body: request,
+    });
+  }
+
+  /** `DELETE /api/v1/sessions/:id` (削除。会話ログを消去し復元不能)。 */
+  deleteSession(sessionId: string): Promise<void> {
+    return this.#request("DELETE", `/api/v1/sessions/${encodeURIComponent(sessionId)}`);
   }
 
   /** `POST /api/v1/search` (FTS5 全文検索)。 */

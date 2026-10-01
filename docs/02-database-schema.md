@@ -71,6 +71,9 @@ CapabilitiesUpdated   → sessions.current_mode / available_modes_json /
                         sessions.updated_at = 最新イベントの created_at
 PermissionRequest     → permission_requests 行を upsert (status = 'pending')
 PermissionResolved    → permission_requests.status / resolved_by / resolved_at
+SessionArchived       → sessions.archived_at (archived = false で NULL に戻す)
+SessionDeleted        → sessions.deleted_at = created_at + 本文イベントのパージ
+                        (本イベント (tombstone) と sessions 行は残す)
 ```
 
 - 投影はイベントログから**完全に再構築可能**です。`fxg-db` は再構築関数
@@ -79,6 +82,10 @@ PermissionResolved    → permission_requests.status / resolved_by / resolved_at
 - 未知のセッションのイベントは、バッチ内の `SessionCreated`（`node_seq = 1`）を
   先に適用することで FK 制約を満たします（イベントは `node_seq`
   昇順で送信される）。
+- **削除済みセッションへの追記は破棄**します（tombstone 適用後の Resync
+  再送や停止処理との競合で、パージ済みの会話内容が復活するのを防ぐ）。
+  未知セッションへの `SessionDeleted`（Resync 由来）は FK 制約違反にせず
+  no-op とします。
 
 ### 0.4 同期の水位（ACK）とカーソル
 
@@ -171,6 +178,8 @@ CREATE TABLE sessions (
     git_bundle_path TEXT,                           -- ハブ専用: 一時VM破棄時に退避された git bundle パス（ノード側は NULL）
     last_node_seq   INTEGER NOT NULL DEFAULT 0,     -- ノード: 永続化済み最新 node_seq（採番は +1）/ ハブ: 投影に適用済み最大 node_seq
     synced_up_to_node_seq INTEGER NOT NULL DEFAULT 0, -- ノード専用: ハブが ACK した水位（ハブ側は常に 0 で未使用）
+    archived_at     INTEGER,                        -- アーカイブ日時 (NULL = 未アーカイブ)。既定の一覧から除外される (可逆)
+    deleted_at      INTEGER,                        -- 削除 (tombstone) 日時 (NULL = 有効)。行は同期整合のため残す (復元不能)
     created_at      INTEGER NOT NULL,
     updated_at      INTEGER NOT NULL
 );
@@ -186,7 +195,7 @@ CREATE TABLE session_events (
     event_id        TEXT NOT NULL UNIQUE,           -- UUID v7 (冪等適用・重複排除)
     session_id      TEXT NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
     node_seq        INTEGER NOT NULL,               -- セッション内の順序番号 (1, 2, 3...)。実行ノードのみが採番
-    event_type      TEXT NOT NULL,                  -- 'session_created' | 'session_title_changed' | 'session_agent_bound' | 'user_message' | 'agent_message' | 'agent_thought' | 'tool_call' | 'plan' | 'permission_request' | 'permission_resolved' | 'session_reverted' | 'terminal_output' | 'status_change' | 'capabilities_updated' | 'bootstrap_log'
+    event_type      TEXT NOT NULL,                  -- 'session_created' | 'session_title_changed' | 'session_agent_bound' | 'user_message' | 'agent_message' | 'agent_thought' | 'tool_call' | 'plan' | 'permission_request' | 'permission_resolved' | 'session_reverted' | 'session_archived' | 'session_deleted' | 'terminal_output' | 'status_change' | 'capabilities_updated' | 'bootstrap_log'
     payload_json    TEXT NOT NULL,                  -- 構造化ペイロード (UnifiedEventPayload のJSON。正データ)
     searchable_text TEXT,                           -- FTS5全文検索用のプレーンテキスト抽出 (受信時に payload_json から生成。terminal_output 等のバイナリ系は対象外)
     created_at      INTEGER NOT NULL,
@@ -288,6 +297,17 @@ Truth）とするため、テーブル上の以下のカラムは
   ハブ双方の受信ハンドラ）にあります。
 - `git_bundle_path`
   はハブのみが書き込む成果物退避パスであり、イベント投影の対象外です。
+- **削除は行を消さない (tombstone)**: `SessionDeleted` の適用時も `sessions`
+  行は削除せず `deleted_at` を立て、本文イベントと `permission_requests`
+  を物理削除します。行を残すのは Outbox / Resync
+  で削除を伝播し、Fork 元参照 (`parent_session_id`)
+  の FK 整合を保つためです（保存量は数百バイト）。削除済みセッションは
+  一覧・取得の双方から除外され (`deleted_at IS NULL`)、イベント追記は
+  破棄されます（再送 tombstone 自体は冪等）。
+- **アーカイブは可逆な可視性フラグ**: `archived_at` が非 NULL
+  のセッションは既定の一覧から除外され、`include_archived`
+  指定時のみ返却されます。イベントログは保持され、`SessionArchived {
+  archived: false }` で復元できます。
 - **一時VMの仮セッション行**: 一時VMプロビジョニング中（`NodeHello` 前）は、
   中央サーバーが `sessions` 行を `status = 'provisioning'`
   で先行挿入します（`upsert_provisional_session`。イベントではなく投影行）。

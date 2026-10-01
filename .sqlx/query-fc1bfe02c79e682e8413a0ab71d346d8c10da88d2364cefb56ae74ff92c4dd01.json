@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT cursor FROM session_events WHERE session_id = ? AND node_seq = ?",
+  "query": "\n            SELECT cursor FROM session_events\n             WHERE event_id = ? OR (session_id = ? AND node_seq = ?)\n             LIMIT 1\n            ",
   "describe": {
     "columns": [
       {
@@ -16,11 +16,11 @@
       }
     ],
     "parameters": {
-      "Right": 2
+      "Right": 3
     },
     "nullable": [
       false
     ]
   },
-  "hash": "3d41931893c521ea1b537164dbe6db4dc63b54b4515966b340289f350d7b9125"
+  "hash": "fc1bfe02c79e682e8413a0ab71d346d8c10da88d2364cefb56ae74ff92c4dd01"
 }

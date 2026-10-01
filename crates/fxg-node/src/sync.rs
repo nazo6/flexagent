@@ -221,6 +221,8 @@ pub(crate) async fn build_hello(state: &DaemonState) -> NodeToServerMsg {
     let sessions = match state
         .db()
         .list_sessions(&SessionFilter {
+            // アーカイブ済みも同期対象 (Resync の安全網を効かせる)
+            include_archived: true,
             limit: Some(HELLO_SESSION_LIMIT),
             ..SessionFilter::default()
         })
@@ -583,6 +585,64 @@ pub(crate) async fn handle_server_message(
                     success: false,
                     code: Some(err.error_code()),
                     context_restored: None,
+                    error: Some(err.to_string()),
+                },
+            };
+            let _ = out.send(message).await;
+        }
+        ServerToNodeMsg::ArchiveSession {
+            command_id,
+            session_id,
+            archived,
+        } => {
+            let outcome = state
+                .set_session_archived(
+                    &command_id,
+                    &session_id,
+                    archived,
+                    &AuditSource::remote(state.node_id()),
+                )
+                .await;
+            let message = match outcome {
+                Ok(archived_at) => NodeToServerMsg::ArchiveResult {
+                    command_id,
+                    success: true,
+                    code: None,
+                    archived_at,
+                    error: None,
+                },
+                Err(err) => NodeToServerMsg::ArchiveResult {
+                    command_id,
+                    success: false,
+                    code: Some(err.error_code()),
+                    archived_at: None,
+                    error: Some(err.to_string()),
+                },
+            };
+            let _ = out.send(message).await;
+        }
+        ServerToNodeMsg::DeleteSession {
+            command_id,
+            session_id,
+        } => {
+            let outcome = state
+                .purge_session(
+                    &command_id,
+                    &session_id,
+                    &AuditSource::remote(state.node_id()),
+                )
+                .await;
+            let message = match outcome {
+                Ok(()) => NodeToServerMsg::DeleteResult {
+                    command_id,
+                    success: true,
+                    code: None,
+                    error: None,
+                },
+                Err(err) => NodeToServerMsg::DeleteResult {
+                    command_id,
+                    success: false,
+                    code: Some(err.error_code()),
                     error: Some(err.to_string()),
                 },
             };

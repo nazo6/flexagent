@@ -88,6 +88,8 @@ pub fn classify_payload(payload: &UnifiedEventPayload) -> (&'static str, Option<
         | UnifiedEventPayload::SessionAgentBound { .. }
         | UnifiedEventPayload::PermissionResolved { .. }
         | UnifiedEventPayload::SessionReverted { .. }
+        | UnifiedEventPayload::SessionArchived { .. }
+        | UnifiedEventPayload::SessionDeleted {}
         | UnifiedEventPayload::TerminalOutput { .. }
         | UnifiedEventPayload::TerminalInput { .. } => None,
     };

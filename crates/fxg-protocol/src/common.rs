@@ -286,6 +286,11 @@ pub struct SessionSummary {
     pub created_at: i64,
     /// 更新日時 (Unix epoch ms)
     pub updated_at: i64,
+    /// アーカイブ日時 (Unix epoch ms)。`None` = 未アーカイブ。
+    ///
+    /// アーカイブ済みセッションは既定の一覧から除外される
+    /// (`include_archived` 指定時のみ返却)。
+    pub archived_at: Option<i64>,
 }
 
 /// `NodeHello` で報告するプロジェクト紐付け情報。

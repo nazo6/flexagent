@@ -222,6 +222,20 @@ pub enum UnifiedEventPayload {
         /// 削除したファイル数
         removed_files: u64,
     },
+    /// セッションのアーカイブ状態変更 (一覧からの非表示/復元)。
+    ///
+    /// アーカイブは可逆な可視性フラグであり、イベントログ・会話内容は保持される
+    /// (完全な消去は [`UnifiedEventPayload::SessionDeleted`])。
+    SessionArchived {
+        /// `true` = アーカイブ、`false` = 復元
+        archived: bool,
+    },
+    /// セッションの削除 (tombstone)。
+    ///
+    /// 適用時に本イベントより前のイベント本文をパージする (復元不能)。
+    /// 本イベント自体は Outbox / Resync で削除を伝播し、Fork 元参照の整合を
+    /// 保つため tombstone として残す。
+    SessionDeleted {},
     /// ACP `terminal/*` または PTY の出力チャンク (永続化対象)。
     ///
     /// ただし FTS5 の `searchable_text` からは除外する (バイナリ系)。
@@ -290,6 +304,8 @@ impl UnifiedEventPayload {
             Self::PermissionRequest { .. } => "permission_request",
             Self::PermissionResolved { .. } => "permission_resolved",
             Self::SessionReverted { .. } => "session_reverted",
+            Self::SessionArchived { .. } => "session_archived",
+            Self::SessionDeleted {} => "session_deleted",
             Self::TerminalOutput { .. } => "terminal_output",
             Self::TerminalInput { .. } => "terminal_input",
             Self::CapabilitiesUpdated { .. } => "capabilities_updated",

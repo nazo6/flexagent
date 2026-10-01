@@ -147,6 +147,30 @@ pub enum NodeToServerMsg {
         /// 失敗時のメッセージ
         error: Option<String>,
     },
+    /// セッションのアーカイブ/復元 (`ArchiveSession`) の結果応答。
+    ArchiveResult {
+        /// 要求時の相関ID
+        command_id: String,
+        /// 成功したか
+        success: bool,
+        /// 失敗時の構造化エラーコード
+        code: Option<ErrorCode>,
+        /// 成功時のアーカイブ日時 (Unix epoch ms)。復元時は `None`
+        archived_at: Option<i64>,
+        /// 失敗時のメッセージ
+        error: Option<String>,
+    },
+    /// セッション削除 (`DeleteSession`) の結果応答。
+    DeleteResult {
+        /// 要求時の相関ID
+        command_id: String,
+        /// 成功したか
+        success: bool,
+        /// 失敗時の構造化エラーコード
+        code: Option<ErrorCode>,
+        /// 失敗時のメッセージ
+        error: Option<String>,
+    },
     /// ファイルシステム閲覧 (`BrowseFs`) の結果応答。
     BrowseFsResult {
         /// 要求時の相関ID
@@ -342,6 +366,27 @@ pub enum ServerToNodeMsg {
         session_id: String,
         /// ネイティブ復元を試みず履歴 Replay で継続する
         force_replay: bool,
+    },
+    /// セッションのアーカイブ/復元 (`POST /api/v1/sessions/:id/archive`)。
+    ///
+    /// アーカイブは一覧からの非表示/復元のみで、イベントログは保持される。
+    ArchiveSession {
+        /// 相関ID
+        command_id: String,
+        /// 対象セッションID
+        session_id: String,
+        /// `true` = アーカイブ、`false` = 復元
+        archived: bool,
+    },
+    /// セッションの削除 (`DELETE /api/v1/sessions/:id`)。
+    ///
+    /// 実行ノードは稼働中セッションを停止してから `SessionDeleted` イベント
+    /// (tombstone) を追記し、それ以前のイベント本文をパージする。
+    DeleteSession {
+        /// 相関ID
+        command_id: String,
+        /// 対象セッションID
+        session_id: String,
     },
     /// ワークスペースWebターミナル (PTY) の起動要求。
     PtySpawn {

@@ -186,6 +186,27 @@ pub enum IpcClientMessage {
         /// ネイティブ復元を試みず履歴 Replay で継続する (`--replay`)
         force_replay: bool,
     },
+    /// セッションのアーカイブ/復元 (`fxg session archive` / `unarchive`)。
+    ///
+    /// アーカイブは一覧からの非表示/復元のみで、イベントログは保持される。
+    SessionArchive {
+        /// 相関ID
+        command_id: String,
+        /// 対象セッションID
+        session_id: String,
+        /// `true` = アーカイブ、`false` = 復元
+        archived: bool,
+    },
+    /// セッションの削除 (`fxg session delete`)。
+    ///
+    /// 稼働中セッションは停止してから、イベント本文をパージする
+    /// (復元不能。同期用 tombstone のみ残る)。
+    SessionDelete {
+        /// 相関ID
+        command_id: String,
+        /// 対象セッションID
+        session_id: String,
+    },
     /// セッション詳細の取得 (`fxg session show`)。
     SessionShow {
         /// 相関ID
@@ -277,6 +298,8 @@ pub enum IpcClientMessage {
         command_id: String,
         /// 停止済みセッションも含めるか (`-a/--all`)
         include_stopped: bool,
+        /// アーカイブ済みセッションも含めるか (`--archived`)
+        include_archived: bool,
     },
     /// ローカルノード上の全セッション・プロセスツリー・PTYを強制終了 (`fxg kill-all`)。
     KillAll {
@@ -364,6 +387,18 @@ pub enum IpcResult {
         attach_mode: AttachMode,
         /// ネイティブ復元できたか (`false` = 履歴 Replay で継続)
         context_restored: bool,
+    },
+    /// `SessionArchive` の結果
+    SessionArchived {
+        /// 対象セッションID
+        session_id: String,
+        /// アーカイブ日時 (Unix epoch ms)。復元時は `None`
+        archived_at: Option<i64>,
+    },
+    /// `SessionDelete` の結果
+    SessionDeleted {
+        /// 削除したセッションID
+        session_id: String,
     },
     /// `SessionShow` の結果
     SessionDetail(Box<SessionDetail>),
@@ -595,6 +630,16 @@ mod tests {
             IpcClientMessage::ListSessions {
                 command_id: "c9".into(),
                 include_stopped: true,
+                include_archived: true,
+            },
+            IpcClientMessage::SessionArchive {
+                command_id: "c12".into(),
+                session_id: "3f6b6f3e".into(),
+                archived: true,
+            },
+            IpcClientMessage::SessionDelete {
+                command_id: "c13".into(),
+                session_id: "3f6b6f3e".into(),
             },
             IpcClientMessage::KillAll {
                 command_id: "c10".into(),

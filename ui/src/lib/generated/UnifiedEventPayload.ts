@@ -197,7 +197,11 @@ restored_files: number,
 /**
  * 削除したファイル数
  */
-removed_files: number, } } | { "type": "terminal_output", "data": { 
+removed_files: number, } } | { "type": "session_archived", "data": { 
+/**
+ * `true` = アーカイブ、`false` = 復元
+ */
+archived: boolean, } } | { "type": "session_deleted", "data": Record<symbol, never> } | { "type": "terminal_output", "data": { 
 /**
  * ターミナルID
  */

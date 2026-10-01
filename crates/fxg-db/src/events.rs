@@ -98,11 +98,13 @@ pub async fn append_next_event(
 
     // 採番は必ずこの UPDATE で行い、トランザクション内でイベント追記まで完了させる
     // (ロールバック時は last_node_seq も巻き戻るため欠番が残らない)。
+    // 削除済みセッション (tombstone 適用済み) への追記は拒否する
+    // (`SessionNotFound` として扱われる)。
     let next_node_seq = sqlx::query_scalar!(
         r#"
         UPDATE sessions
            SET last_node_seq = last_node_seq + 1
-         WHERE session_id = ?
+         WHERE session_id = ? AND deleted_at IS NULL
         RETURNING last_node_seq
         "#,
         session_id,
@@ -153,11 +155,26 @@ async fn append_event_in_tx(
         upsert_session_from_created(tx, envelope).await?;
     }
 
+    // 追記可否の判定は INSERT 文に埋め込む (`SELECT` → `INSERT` の 2 文に分けると、
+    // 読み取りスナップショット取得後に書き込みへ昇格するため
+    // `SQLITE_BUSY_SNAPSHOT` (517) を誘発する)。
+    //
+    // - 削除済み (tombstone 適用済み) セッションへは `SessionDeleted` のみ追記する
+    //   (Resync 再送や停止処理との競合で、パージ済みの会話内容が復活するのを防ぐ)
+    // - 未知セッションへは追記しない (Resync 由来の tombstone などを FK 制約違反に
+    //   せず no-op とする)
+    let is_delete_event = matches!(envelope.payload, UnifiedEventPayload::SessionDeleted {});
     let result = sqlx::query!(
         r#"
         INSERT OR IGNORE INTO session_events
             (event_id, session_id, node_seq, event_type, payload_json, searchable_text, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        SELECT ?, ?, ?, ?, ?, ?, ?
+         WHERE EXISTS (
+             SELECT 1
+               FROM sessions
+              WHERE session_id = ?
+                AND (deleted_at IS NULL OR ? = 1)
+         )
         "#,
         envelope.event_id,
         envelope.session_id,
@@ -166,6 +183,8 @@ async fn append_event_in_tx(
         payload_json,
         searchable_text,
         envelope.created_at,
+        envelope.session_id,
+        i64::from(is_delete_event),
     )
     .execute(&mut **tx)
     .await?;
@@ -174,30 +193,21 @@ async fn append_event_in_tx(
     let cursor = if inserted {
         result.last_insert_rowid()
     } else {
-        // 重複として破棄されたイベントは既存行のカーソルを返す
-        // (event_id 一致 → なければ (session_id, node_seq) 一致で引く)
-        let by_event_id = sqlx::query_scalar!(
-            r#"SELECT cursor FROM session_events WHERE event_id = ?"#,
+        // 重複 (event_id / (session_id, node_seq) 一致) なら既存行のカーソルを返す。
+        // 追記対象外 (削除済み・未知セッション) として破棄された場合は 0。
+        sqlx::query_scalar!(
+            r#"
+            SELECT cursor FROM session_events
+             WHERE event_id = ? OR (session_id = ? AND node_seq = ?)
+             LIMIT 1
+            "#,
             envelope.event_id,
+            envelope.session_id,
+            node_seq,
         )
         .fetch_optional(&mut **tx)
-        .await?;
-        match by_event_id {
-            Some(cursor) => cursor,
-            None => sqlx::query_scalar!(
-                r#"SELECT cursor FROM session_events WHERE session_id = ? AND node_seq = ?"#,
-                envelope.session_id,
-                node_seq,
-            )
-            .fetch_optional(&mut **tx)
-            .await?
-            .ok_or_else(|| {
-                DbError::InvalidPayload(format!(
-                    "ignored event has no stored row: {}",
-                    envelope.event_id
-                ))
-            })?,
-        }
+        .await?
+        .unwrap_or(0)
     };
     let cursor = u64::try_from(cursor).map_err(|_| DbError::NegativeNodeSeq(cursor))?;
 
@@ -478,6 +488,50 @@ pub(crate) async fn apply_projections(
             .execute(&mut *conn)
             .await?;
         }
+        UnifiedEventPayload::SessionArchived { archived } => {
+            // アーカイブは可逆な可視性フラグ (イベントログは保持)
+            let archived_at = archived.then_some(envelope.created_at);
+            sqlx::query!(
+                r#"
+                UPDATE sessions
+                   SET archived_at = ?
+                 WHERE session_id = ?
+                "#,
+                archived_at,
+                envelope.session_id,
+            )
+            .execute(&mut *conn)
+            .await?;
+        }
+        UnifiedEventPayload::SessionDeleted {} => {
+            // tombstone 適用: 行自体は Outbox / Resync での削除伝播と Fork 元参照の
+            // 整合を保つため残し、本文イベントと承認履歴を物理削除する。
+            sqlx::query!(
+                r#"
+                UPDATE sessions
+                   SET deleted_at = ?, archived_at = NULL
+                 WHERE session_id = ?
+                "#,
+                envelope.created_at,
+                envelope.session_id,
+            )
+            .execute(&mut *conn)
+            .await?;
+            // 本イベント (tombstone) は残し、それ以前の本文をパージする
+            sqlx::query!(
+                r#"DELETE FROM session_events WHERE session_id = ? AND node_seq < ?"#,
+                envelope.session_id,
+                node_seq,
+            )
+            .execute(&mut *conn)
+            .await?;
+            sqlx::query!(
+                r#"DELETE FROM permission_requests WHERE session_id = ?"#,
+                envelope.session_id,
+            )
+            .execute(&mut *conn)
+            .await?;
+        }
         // sessions 行の派生カラム更新を持たないイベント
         // (会話・ツール実行・ターミナル出力・BootstrapLog 等)。
         // 共通の水位/更新時刻更新のみを行う。
@@ -578,6 +632,8 @@ pub async fn rebuild_projections(pool: &SqlitePool) -> Result<(), DbError> {
                available_commands_json = '[]',
                config_options_json = '[]',
                agent_session_id = NULL,
+               archived_at = NULL,
+               deleted_at = NULL,
                last_node_seq = 0,
                updated_at = created_at
         "#,

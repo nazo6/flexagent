@@ -43,8 +43,9 @@ use fxg_protocol::client_api::{
     ProvisionersResponse, PruneWorktreesRequest, PushSubscribeRequest, PushSubscribeResponse,
     RemoveWorktreeRequest, RespondPermissionRequest, RespondPermissionResponse,
     ResumeSessionRequest, ResumeSessionResponse, RotateAuthTokenResponse, SearchResponse,
-    ServerWsMessage, SessionListResponse, SessionRevertRequest, SessionRevertResponse,
-    SystemInfoResponse, UpdateAgentsRequest, WorktreeInfo, WorktreesResponse,
+    ServerWsMessage, SessionArchiveRequest, SessionArchiveResponse, SessionListResponse,
+    SessionRevertRequest, SessionRevertResponse, SystemInfoResponse, UpdateAgentsRequest,
+    WorktreeInfo, WorktreesResponse,
 };
 use fxg_protocol::common::{
     AgentAction, CommandResult, DiffScope, ErrorCode, ProjectSummary, SessionControlAction,
@@ -389,6 +390,21 @@ pub trait ClientApiBackend: Clone + Send + Sync + 'static {
         client: ClientInfo,
     ) -> Result<ResumeSessionResponse, ApiError>;
 
+    /// `POST /api/v1/sessions/:id/archive` (アーカイブ/復元)。
+    ///
+    /// アーカイブは可逆な可視性フラグで、イベントログは保持される。
+    async fn archive_session(
+        &self,
+        session_id: &str,
+        request: SessionArchiveRequest,
+        client: ClientInfo,
+    ) -> Result<SessionArchiveResponse, ApiError>;
+
+    /// `DELETE /api/v1/sessions/:id` (削除)。
+    ///
+    /// 稼働中セッションは停止してから本文イベントをパージする (復元不能)。
+    async fn delete_session(&self, session_id: &str, client: ClientInfo) -> Result<(), ApiError>;
+
     /// `GET /api/v1/projects/:id/worktrees`
     async fn list_worktrees(&self, project_id: &str) -> Result<WorktreesResponse, ApiError>;
 
@@ -689,6 +705,11 @@ pub fn client_router<B: ClientApiBackend>(backend: B, options: ClientApiOptions)
             "/api/v1/sessions/{session_id}/resume",
             post(resume_session::<B>),
         )
+        .route(
+            "/api/v1/sessions/{session_id}/archive",
+            post(archive_session::<B>),
+        )
+        .route("/api/v1/sessions/{session_id}", delete(delete_session::<B>))
         .route("/api/v1/inbox", get(inbox::<B>))
         .route("/api/v1/search", post(search::<B>))
         .route("/api/v1/push/subscribe", post(push_subscribe::<B>))
@@ -800,6 +821,8 @@ struct SessionListQuery {
     project_id: Option<String>,
     node_id: Option<String>,
     status: Option<String>,
+    /// アーカイブ済みセッションを含めるか (既定 `false`)
+    include_archived: Option<bool>,
     limit: Option<u32>,
 }
 
@@ -818,6 +841,7 @@ async fn list_sessions<B: ClientApiBackend>(
         project_id: params.project_id,
         node_id: params.node_id,
         statuses,
+        include_archived: params.include_archived.unwrap_or(false),
         limit: Some(params.limit.unwrap_or(100)),
     };
     match state.backend.db().list_sessions(&filter).await {
@@ -999,6 +1023,33 @@ async fn resume_session<B: ClientApiBackend>(
         .await
     {
         Ok(response) => Json(response).into_response(),
+        Err(err) => err.into_response(),
+    }
+}
+
+async fn archive_session<B: ClientApiBackend>(
+    State(state): State<ClientApiState<B>>,
+    Extension(client): Extension<ClientInfo>,
+    UrlPath(session_id): UrlPath<String>,
+    Json(request): Json<SessionArchiveRequest>,
+) -> Response {
+    match state
+        .backend
+        .archive_session(&session_id, request, client)
+        .await
+    {
+        Ok(response) => Json(response).into_response(),
+        Err(err) => err.into_response(),
+    }
+}
+
+async fn delete_session<B: ClientApiBackend>(
+    State(state): State<ClientApiState<B>>,
+    Extension(client): Extension<ClientInfo>,
+    UrlPath(session_id): UrlPath<String>,
+) -> Response {
+    match state.backend.delete_session(&session_id, client).await {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(err) => err.into_response(),
     }
 }

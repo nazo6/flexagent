@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM session_events WHERE session_id = ? AND node_seq < ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "105a2306517268f4e9df331682c89ee887d1ae57b24c0f1cc3193c7b9e510f9b"
+}

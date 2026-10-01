@@ -158,6 +158,17 @@ pub enum UnifiedEventPayload {
         status: SessionStatus,
         error_message: Option<String>,
     },
+    /// セッションのアーカイブ状態変更 (可逆な可視性フラグ)
+    /// ハブ側 sessions.archived_at 投影の更新源。アーカイブ済みセッションは
+    /// 既定の一覧から除外される (include_archived 指定時のみ返却)
+    SessionArchived {
+        archived: bool,        // true = アーカイブ, false = 復元
+    },
+    /// セッションの削除 (tombstone)
+    /// 適用時に本イベントより前のイベント本文と permission_requests をパージする。
+    /// 本イベント (tombstone) と sessions 行は Outbox / Resync での削除伝播と
+    /// Fork 元参照の整合のため残す (復元不能)
+    SessionDeleted {},
 }
 ```
 
@@ -405,6 +416,21 @@ pub enum NodeToServerMsg {
         context_restored: Option<bool>, // ネイティブ復元成否 (false = 履歴 Replay で継続)
         error: Option<String>,
     },
+    /// セッションのアーカイブ/復元 (`ArchiveSession`) の結果応答
+    ArchiveResult {
+        command_id: String,
+        success: bool,
+        code: Option<ErrorCode>,
+        archived_at: Option<i64>,  // アーカイブ日時 (Unix epoch ms)。復元時は None
+        error: Option<String>,
+    },
+    /// セッション削除 (`DeleteSession`) の結果応答
+    DeleteResult {
+        command_id: String,
+        success: bool,
+        code: Option<ErrorCode>,
+        error: Option<String>,
+    },
     /// プロジェクト一括スキャン (`ProjectScan`) の結果応答
     ProjectScanResult {
         request_id: String,
@@ -527,6 +553,20 @@ pub enum ServerToNodeMsg {
         command_id: String,
         session_id: String,
         force_replay: bool, // ネイティブ復元を試みず履歴 Replay で継続する
+    },
+    /// セッションのアーカイブ/復元 (`POST /api/v1/sessions/:id/archive`)
+    /// ※アーカイブは一覧からの非表示/復元のみで、イベントログは保持される
+    ArchiveSession {
+        command_id: String,
+        session_id: String,
+        archived: bool,     // true = アーカイブ, false = 復元
+    },
+    /// セッションの削除 (`DELETE /api/v1/sessions/:id`)
+    /// ※稼働中セッションは停止を待ってから `SessionDeleted` (tombstone) を
+    ///   追記し、イベント本文をパージする (復元不能)
+    DeleteSession {
+        command_id: String,
+        session_id: String,
     },
     /// ワークスペースWebターミナル (PTY) の起動要求
     PtySpawn {
@@ -688,7 +728,9 @@ pub enum ServerToNodeMsg {
   子プロセス起動されるため）。`ProvisionerTestResponse`
   (`ok` / `node_id` / `stderr` ログ末尾 / `error`)
   を返却し、検証後は一時環境を破棄する。
-- `GET /api/v1/sessions?project_id=...&status=...`: セッション一覧。
+- `GET /api/v1/sessions?project_id=...&status=...&include_archived=true`:
+  セッション一覧。削除済み (tombstone) は常に除外され、アーカイブ済みは
+  `include_archived=true` 指定時のみ返却される (既定は除外)。
 - `POST /api/v1/sessions`: 新規セッションの開始（既存の常駐 `node_id`
   指定のほか、`provisioner`
   指定による一時VMのオンデマンド起動＆自動セットアップ、Worktreeパス指定、別ノードや退避済みGitバンドルからのContext
@@ -722,6 +764,18 @@ pub enum ServerToNodeMsg {
   一時VMセッションは v1 では `INVALID_STATE`
   を返却する。中央サーバー経由の場合は
   対象ノードへ `ResumeSession` を中継する (設計: docs/04 §4.3)。
+- `POST /api/v1/sessions/:id/archive`:
+  セッションをアーカイブ/復元する (`{ "archived": true | false }`。
+  `fxg session archive` / `unarchive` の Web UI 版)。アーカイブは
+  一覧からの非表示/復元のみで、イベントログは保持される。応答は
+  `SessionArchiveResponse` (`session_id` / `archived_at`)。中央サーバー
+  経由の場合は対象ノードへ `ArchiveSession` を中継する。
+- `DELETE /api/v1/sessions/:id`:
+  セッションを削除する (`fxg session delete` の Web UI 版。204 No Content)。
+  稼働中セッションは停止を待ってから `SessionDeleted` (tombstone) を追記し、
+  本文イベント・承認履歴をパージする (**復元不能**)。
+  アーカイブ済みでも削除できる。中央サーバー経由の場合は対象ノードへ
+  `DeleteSession` を中継する。
 - `POST /api/v1/search?q=...`: SQLite FTS5 を用いた全セッション横断の全文検索。
 - `POST /api/v1/push/subscribe`: Android / Desktop PWA の Web Push
   サブスクリプション登録 (中央サーバーのみ)。VAPID 鍵は初回起動時に
@@ -858,3 +912,13 @@ xterm互換アダプター）とノード上の ConPTY / Unix PTY
      自動実行してから送信します。ネイティブ復元不可の場合は `RESUME_REQUIRED`
      を返すため、クライアントは `SessionResume` での履歴 Replay
      再開を案内します。
+4. `SessionArchive { session_id, archived } -> { session_id, archived_at }`:
+   - セッションのアーカイブ/復元 (`fxg session archive` / `unarchive`)。
+     アーカイブは一覧からの非表示/復元のみで、イベントログは保持されます。
+5. `SessionDelete { session_id } -> { session_id }`:
+   - セッションの削除 (`fxg session delete`)。稼働中は停止を待ってから
+     `SessionDeleted` (tombstone) を追記し、本文イベントをパージします
+     (復元不能)。
+6. `ListSessions { include_stopped, include_archived }`:
+   - セッション一覧 (`fxg ps` / `fxg session list`)。削除済みは常に除外され、
+     アーカイブ済みは `include_archived` 指定時のみ含まれます。

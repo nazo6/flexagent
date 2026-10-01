@@ -7,6 +7,7 @@
   import Composer from '$lib/components/chat/Composer.svelte';
   import DiffPane from '$lib/components/diff/DiffPane.svelte';
   import NodeStatusBadge from '$lib/components/NodeStatusBadge.svelte';
+  import SessionActionsMenu from '$lib/components/session/SessionActionsMenu.svelte';
   import SessionStatusBadge from '$lib/components/SessionStatusBadge.svelte';
   import TerminalView from '$lib/components/terminal/TerminalView.svelte';
   import { Button } from '$lib/components/ui/button';
@@ -21,6 +22,7 @@
   } from '$lib/sync/reducer';
   import { cn } from '$lib/utils';
   import { toast } from 'svelte-sonner';
+  import ArchiveIcon from '@lucide/svelte/icons/archive';
   import ArrowDownIcon from '@lucide/svelte/icons/arrow-down';
   import ChevronLeftIcon from '@lucide/svelte/icons/chevron-left';
   import FileCodeIcon from '@lucide/svelte/icons/file-code';
@@ -209,6 +211,17 @@
   /** タイムラインの「この時点へ巻き戻す」から確認ダイアログを開く。 */
   function requestRevert(seq: number) {
     revertSeq = seq;
+  }
+
+  /** アーカイブを解除する (アーカイブ済みバナーから)。 */
+  async function handleUnarchive() {
+    if (!sessionId) return;
+    try {
+      await sync.archiveSession(sessionId, false);
+      toast.success('アーカイブを解除しました');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+    }
   }
 
   /** 指定ターン時点へワークスペースを巻き戻す (`POST /sessions/:id/revert`)。 */
@@ -409,9 +422,29 @@
           <SkullIcon class="size-3" />
           <span class="hidden sm:inline">Kill</span>
         </Button>
+
+        <!-- アーカイブ / 削除メニュー -->
+        {#if session}
+          <SessionActionsMenu {session} onDeleted={() => void goto('/')} />
+        {/if}
       </div>
     </div>
   </header>
+
+  <!-- アーカイブ済みバナー -->
+  {#if session && session.archived_at !== null}
+    <div
+      class="flex shrink-0 items-center justify-between gap-2 border-b border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-xs"
+    >
+      <div class="flex items-center gap-2 text-amber-700 dark:text-amber-400">
+        <ArchiveIcon class="size-3.5" />
+        <span>このセッションはアーカイブ済みです (一覧から非表示)。会話ログは保持されています。</span>
+      </div>
+      <Button variant="outline" size="sm" class="h-6 shrink-0 gap-1 text-[11px]" onclick={handleUnarchive}>
+        アーカイブを解除
+      </Button>
+    </div>
+  {/if}
 
   <!-- Kill 確認モーダル -->
   <AlertDialog.Root bind:open={killDialogOpen}>

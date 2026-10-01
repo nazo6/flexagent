@@ -20,8 +20,8 @@ use fxg_protocol::client_api::{
     ProjectScanRequest, ProjectScanResponse, ProvisionerSummary, ProvisionersResponse,
     PruneWorktreesRequest, PushSubscribeRequest, PushSubscribeResponse, RemoveWorktreeRequest,
     RespondPermissionRequest, RespondPermissionResponse, ResumeSessionRequest,
-    ResumeSessionResponse, RotateAuthTokenResponse, SessionRevertRequest, SessionRevertResponse,
-    WorktreeInfo, WorktreesResponse,
+    ResumeSessionResponse, RotateAuthTokenResponse, SessionArchiveRequest, SessionArchiveResponse,
+    SessionRevertRequest, SessionRevertResponse, WorktreeInfo, WorktreesResponse,
 };
 use fxg_protocol::common::{
     AgentAction, CommandResult, DiffScope, ErrorCode, ForkHistoryItem, WorkspaceDiffResponse,
@@ -815,6 +815,70 @@ impl ClientApiBackend for ServerState {
             session_id: session_id.to_owned(),
             context_restored,
         })
+    }
+
+    async fn archive_session(
+        &self,
+        session_id: &str,
+        request: SessionArchiveRequest,
+        client: ClientInfo,
+    ) -> Result<SessionArchiveResponse, ApiError> {
+        // 実行ノードへ中継 (存在確認・オフラインは `session_node` が返す)
+        let node_id = self.session_node(session_id).await?;
+        let command_id = uuid_v7();
+        let archived_at = self
+            .inner
+            .hub
+            .archive_session(
+                &node_id,
+                &command_id,
+                ServerToNodeMsg::ArchiveSession {
+                    command_id: command_id.clone(),
+                    session_id: session_id.to_owned(),
+                    archived: request.archived,
+                },
+            )
+            .await?;
+        self.record_audit(
+            fxg_db::audit::actions::SESSION_ARCHIVE,
+            &client,
+            Some(session_id),
+            serde_json::json!({
+                "node_id": node_id,
+                "archived": request.archived,
+                "archived_at": archived_at,
+            }),
+        )
+        .await;
+        Ok(SessionArchiveResponse {
+            session_id: session_id.to_owned(),
+            archived_at,
+        })
+    }
+
+    async fn delete_session(&self, session_id: &str, client: ClientInfo) -> Result<(), ApiError> {
+        // 実行ノードへ中継 (存在確認・オフラインは `session_node` が返す)
+        let node_id = self.session_node(session_id).await?;
+        let command_id = uuid_v7();
+        self.inner
+            .hub
+            .delete_session(
+                &node_id,
+                &command_id,
+                ServerToNodeMsg::DeleteSession {
+                    command_id: command_id.clone(),
+                    session_id: session_id.to_owned(),
+                },
+            )
+            .await?;
+        self.record_audit(
+            fxg_db::audit::actions::SESSION_DELETE,
+            &client,
+            Some(session_id),
+            serde_json::json!({ "node_id": node_id }),
+        )
+        .await;
+        Ok(())
     }
 
     async fn prune_worktrees(

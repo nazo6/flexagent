@@ -53,6 +53,9 @@ const AUTO_RESUME_TIMEOUT: Duration = Duration::from_secs(120);
 /// 他の再開処理 (明示 resume / 自動レジューム) の完了を待つポーリング間隔。
 const RESUME_WAIT_INTERVAL: Duration = Duration::from_millis(100);
 
+/// 削除前のセッション停止 (エージェントプロセス終了) の待機上限。
+const STOP_BEFORE_DELETE_TIMEOUT: Duration = Duration::from_secs(30);
+
 /// エージェント起動スペックからドライバを選択するファクトリ。
 ///
 /// ドライバインスタンスはデーモンで共有される (セッションごとに生成しない)。
@@ -1299,6 +1302,106 @@ impl SessionManager {
                 .await
                 .map_err(|err| NodeError::Server(format!("failed to shutdown: {err:#}"))),
         }
+    }
+
+    /// セッションをアーカイブ/復元する (`fxg session archive` / Web UI)。
+    ///
+    /// アーカイブは可逆な可視性フラグで、稼働状態は変更しない。
+    /// 戻り値はアーカイブ日時 (Unix epoch ms。復元時は `None`)。
+    pub async fn set_archived(
+        &self,
+        command_id: &str,
+        session_id: &str,
+        archived: bool,
+    ) -> Result<Option<i64>, NodeError> {
+        if !self.begin_command(command_id) {
+            return Err(NodeError::CommandDuplicate(command_id.to_owned()));
+        }
+        self.ensure_session_exists(session_id).await?;
+        let envelope = self
+            .inner
+            .bus
+            .record(
+                session_id,
+                UnifiedEventPayload::SessionArchived { archived },
+            )
+            .await?;
+        Ok(archived.then_some(envelope.created_at))
+    }
+
+    /// セッションを削除する (`fxg session delete` / Web UI)。
+    ///
+    /// 稼働中 (エージェントプロセス生存) の場合は停止を待ってから
+    /// `SessionDeleted` (tombstone) を追記する。本イベントより前のイベント本文は
+    /// 同一トランザクションでパージされる (復元不能)。
+    pub async fn delete(&self, command_id: &str, session_id: &str) -> Result<(), NodeError> {
+        if !self.begin_command(command_id) {
+            return Err(NodeError::CommandDuplicate(command_id.to_owned()));
+        }
+        self.ensure_session_exists(session_id).await?;
+        {
+            let sessions = self.inner.sessions.lock().expect("sessions poisoned");
+            if sessions.resuming.contains(session_id) {
+                return Err(NodeError::InvalidState(format!(
+                    "session is resuming: {session_id}"
+                )));
+            }
+        }
+        self.stop_if_active(session_id).await?;
+        self.inner
+            .bus
+            .record(session_id, UnifiedEventPayload::SessionDeleted {})
+            .await?;
+        Ok(())
+    }
+
+    /// セッションが稼働中 (エージェントプロセス生存) か。
+    pub fn is_active(&self, session_id: &str) -> bool {
+        self.inner
+            .sessions
+            .lock()
+            .expect("sessions poisoned")
+            .active
+            .contains_key(session_id)
+    }
+
+    /// セッションが存在する (削除済みでない) ことを検証する。
+    async fn ensure_session_exists(&self, session_id: &str) -> Result<(), NodeError> {
+        if self.inner.bus.db().get_session(session_id).await?.is_none() {
+            return Err(NodeError::InvalidSession(session_id.to_owned()));
+        }
+        Ok(())
+    }
+
+    /// 稼働中セッションを停止し、エージェントプロセスの終了を待つ。
+    ///
+    /// タイムアウト時は警告のみで続行する (削除を阻害しない。以降のイベントは
+    /// 削除済みセッションへの追記として破棄される)。
+    async fn stop_if_active(&self, session_id: &str) -> Result<(), NodeError> {
+        if !self.is_active(session_id) {
+            return Ok(());
+        }
+        let command_id = uuid_v7();
+        match self
+            .control(&command_id, session_id, &SessionControlAction::Kill)
+            .await
+        {
+            // チェック後に自然終了していた場合はそれで良い
+            Ok(()) | Err(NodeError::InvalidSession(_)) => {}
+            Err(err) => return Err(err),
+        }
+        let deadline = Instant::now() + STOP_BEFORE_DELETE_TIMEOUT;
+        while self.is_active(session_id) {
+            if Instant::now() >= deadline {
+                tracing::warn!(
+                    session_id,
+                    "timed out waiting for session to stop before delete"
+                );
+                break;
+            }
+            tokio::time::sleep(RESUME_WAIT_INTERVAL).await;
+        }
+        Ok(())
     }
 
     /// 稼働中セッション一覧。

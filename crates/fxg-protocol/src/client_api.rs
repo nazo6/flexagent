@@ -468,6 +468,27 @@ pub struct ResumeSessionResponse {
     pub context_restored: bool,
 }
 
+/// `POST /api/v1/sessions/:id/archive` リクエスト。
+///
+/// アーカイブは一覧からの非表示/復元のみで、イベントログは保持される
+/// (会話本文の消去は `DELETE /api/v1/sessions/:id`)。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct SessionArchiveRequest {
+    /// `true` = アーカイブ、`false` = 復元
+    pub archived: bool,
+}
+
+/// `POST /api/v1/sessions/:id/archive` レスポンス。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct SessionArchiveResponse {
+    /// 対象セッションID
+    pub session_id: String,
+    /// アーカイブ日時 (Unix epoch ms)。復元時は `None`
+    pub archived_at: Option<i64>,
+}
+
 /// `POST /api/v1/search` レスポンス (FTS5 全文検索)。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]

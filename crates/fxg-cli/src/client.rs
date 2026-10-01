@@ -192,16 +192,58 @@ impl DaemonClient {
     }
 
     /// `fxg ps` / `fxg session list`
-    pub async fn list_sessions(&mut self, include_stopped: bool) -> Result<Vec<SessionSummary>> {
+    pub async fn list_sessions(
+        &mut self,
+        include_stopped: bool,
+        include_archived: bool,
+    ) -> Result<Vec<SessionSummary>> {
         let command_id = self.command_id();
         let result = self
             .request(IpcClientMessage::ListSessions {
                 command_id,
                 include_stopped,
+                include_archived,
             })
             .await?;
         match result {
             IpcResult::Sessions { sessions } => Ok(sessions),
+            other => bail!("unexpected ipc result: {other:?}"),
+        }
+    }
+
+    /// `fxg session archive` / `unarchive` — アーカイブ/復元する。
+    ///
+    /// 戻り値はアーカイブ日時 (Unix epoch ms。復元時は `None`)。
+    pub async fn archive_session(
+        &mut self,
+        session_id: &str,
+        archived: bool,
+    ) -> Result<Option<i64>> {
+        let command_id = self.command_id();
+        let result = self
+            .request(IpcClientMessage::SessionArchive {
+                command_id,
+                session_id: session_id.to_owned(),
+                archived,
+            })
+            .await?;
+        match result {
+            IpcResult::SessionArchived { archived_at, .. } => Ok(archived_at),
+            other => bail!("unexpected ipc result: {other:?}"),
+        }
+    }
+
+    /// `fxg session delete` — セッションを削除する (イベント本文をパージ。復元不能)。
+    pub async fn delete_session(&mut self, session_id: &str) -> Result<()> {
+        let command_id = self.command_id();
+        let result = self
+            .request(IpcClientMessage::SessionDelete {
+                command_id,
+                session_id: session_id.to_owned(),
+            })
+            .await?;
+        match result {
+            IpcResult::SessionDeleted { .. } => Ok(()),
             other => bail!("unexpected ipc result: {other:?}"),
         }
     }

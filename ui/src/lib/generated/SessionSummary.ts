@@ -71,4 +71,11 @@ created_at: number,
 /**
  * 更新日時 (Unix epoch ms)
  */
-updated_at: number, };
+updated_at: number, 
+/**
+ * アーカイブ日時 (Unix epoch ms)。`None` = 未アーカイブ。
+ *
+ * アーカイブ済みセッションは既定の一覧から除外される
+ * (`include_archived` 指定時のみ返却)。
+ */
+archived_at: number | null, };

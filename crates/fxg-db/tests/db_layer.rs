@@ -1382,3 +1382,176 @@ async fn non_persistable_events_are_rejected_on_batch_append() {
         .expect("complete message");
     assert_eq!(count_events(&fixture.db, &fixture.session_id).await, 2);
 }
+
+#[tokio::test]
+async fn session_archiving_hides_from_default_list_and_is_reversible() {
+    let mut fixture = Fixture::new(DbRole::Node).await;
+    fixture.seed_typical_stream().await;
+
+    let archived = fixture.event(UnifiedEventPayload::SessionArchived { archived: true });
+    fixture.db.append_event(&archived).await.expect("archive");
+
+    // イベントログは保持される (アーカイブは可逆な可視性フラグ)
+    assert_eq!(count_events(&fixture.db, &fixture.session_id).await, 9);
+    let summary = fixture
+        .db
+        .get_session(&fixture.session_id)
+        .await
+        .expect("get")
+        .expect("exists");
+    assert_eq!(summary.archived_at, Some(archived.created_at));
+
+    // 既定の一覧からは除外され、`include_archived` で取得できる
+    assert!(
+        fixture
+            .db
+            .list_sessions(&SessionFilter::default())
+            .await
+            .expect("default list")
+            .is_empty()
+    );
+    let with_archived = fixture
+        .db
+        .list_sessions(&SessionFilter {
+            include_archived: true,
+            ..SessionFilter::default()
+        })
+        .await
+        .expect("list with archived");
+    assert_eq!(with_archived.len(), 1);
+    assert_eq!(with_archived[0].archived_at, Some(archived.created_at));
+
+    // 全量再構築でもアーカイブ状態が維持される (イベント由来の投影)
+    fixture.db.rebuild_projections().await.expect("rebuild");
+    let rebuilt = fixture
+        .db
+        .get_session(&fixture.session_id)
+        .await
+        .expect("get rebuilt")
+        .expect("exists");
+    assert_eq!(rebuilt.archived_at, Some(archived.created_at));
+
+    // 復元できる
+    let restored = fixture.event(UnifiedEventPayload::SessionArchived { archived: false });
+    fixture.db.append_event(&restored).await.expect("unarchive");
+    let summary = fixture
+        .db
+        .get_session(&fixture.session_id)
+        .await
+        .expect("get")
+        .expect("exists");
+    assert_eq!(summary.archived_at, None);
+    assert_eq!(
+        fixture
+            .db
+            .list_sessions(&SessionFilter::default())
+            .await
+            .expect("list")
+            .len(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn session_deletion_purges_content_and_keeps_tombstone() {
+    let mut fixture = Fixture::new(DbRole::Node).await;
+    fixture.seed_typical_stream().await;
+    // 全イベントを同期済みにしてから削除する (Outbox には tombstone のみが載る)
+    fixture
+        .db
+        .ack_watermark(&fixture.session_id, 8)
+        .await
+        .expect("ack");
+
+    let deleted = fixture.event(UnifiedEventPayload::SessionDeleted {});
+    fixture.db.append_event(&deleted).await.expect("delete");
+
+    // 本文イベント・承認履歴はパージされ、tombstone のみ残る
+    assert_eq!(count_events(&fixture.db, &fixture.session_id).await, 1);
+    assert!(
+        fixture
+            .db
+            .find_permission_request("req-1")
+            .await
+            .expect("find")
+            .is_none()
+    );
+    assert!(
+        fixture
+            .db
+            .get_session(&fixture.session_id)
+            .await
+            .expect("get")
+            .is_none(),
+        "削除済みセッションは取得できない (tombstone)"
+    );
+    assert!(
+        fixture
+            .db
+            .list_sessions(&SessionFilter {
+                include_archived: true,
+                ..SessionFilter::default()
+            })
+            .await
+            .expect("list")
+            .is_empty()
+    );
+
+    // 同期: tombstone のみが Outbox に載る
+    let outbox = fixture.db.extract_outbox().await.expect("outbox");
+    assert_eq!(outbox.len(), 1);
+    assert_eq!(outbox[0].events.len(), 1);
+    assert!(matches!(
+        outbox[0].events[0].payload,
+        UnifiedEventPayload::SessionDeleted {}
+    ));
+    assert_eq!(outbox[0].last_node_seq(), Some(9));
+
+    // 削除後に競合したイベント (停止処理中のターン完了など) は破棄される
+    let straggler = SessionEventEnvelope {
+        event_id: uuid_v7(),
+        session_id: fixture.session_id.clone(),
+        node_seq: 10,
+        created_at: now_ms(),
+        payload: UnifiedEventPayload::UserMessage {
+            text: "削除後に届いたイベント".to_owned(),
+            attachments: vec![],
+            client_source: "web".to_owned(),
+            snapshot_tree_hash: None,
+        },
+    };
+    let outcome = fixture
+        .db
+        .append_event(&straggler)
+        .await
+        .expect("straggler");
+    assert!(!outcome.inserted, "削除済みセッションへの追記は破棄される");
+    assert_eq!(count_events(&fixture.db, &fixture.session_id).await, 1);
+
+    // 全量再構築でも削除状態が維持される
+    fixture.db.rebuild_projections().await.expect("rebuild");
+    assert!(
+        fixture
+            .db
+            .get_session(&fixture.session_id)
+            .await
+            .expect("get rebuilt")
+            .is_none()
+    );
+    assert_eq!(count_events(&fixture.db, &fixture.session_id).await, 1);
+}
+
+#[tokio::test]
+async fn session_deleted_for_unknown_session_is_noop() {
+    // Resync 応答などで未知セッションの tombstone が届いても FK 制約違反にしない
+    let db = Db::open_in_memory(DbRole::Hub).await.expect("open db");
+    let envelope = SessionEventEnvelope {
+        event_id: uuid_v7(),
+        session_id: uuid_v7(),
+        node_seq: 5,
+        created_at: now_ms(),
+        payload: UnifiedEventPayload::SessionDeleted {},
+    };
+    let outcome = db.append_event(&envelope).await.expect("noop");
+    assert!(!outcome.inserted);
+}

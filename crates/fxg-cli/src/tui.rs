@@ -222,6 +222,17 @@ impl App {
                 self.blocks
                     .push(Block::System(format!("セッション開始: {title}")));
             }
+            UnifiedEventPayload::SessionArchived { archived } => {
+                self.blocks.push(Block::System(if *archived {
+                    "セッションをアーカイブしました".to_owned()
+                } else {
+                    "アーカイブを解除しました".to_owned()
+                }));
+            }
+            UnifiedEventPayload::SessionDeleted {} => {
+                self.blocks
+                    .push(Block::System("セッションを削除しました".to_owned()));
+            }
             UnifiedEventPayload::SessionAgentBound { agent_session_id } => {
                 self.blocks.push(Block::System(format!(
                     "エージェント接続: {agent_session_id}"

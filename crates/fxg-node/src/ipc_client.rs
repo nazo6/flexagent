@@ -141,6 +141,7 @@ mod tests {
             .request(&IpcClientMessage::ListSessions {
                 command_id: "c1".to_owned(),
                 include_stopped: true,
+                include_archived: true,
             })
             .await
             .expect("request");

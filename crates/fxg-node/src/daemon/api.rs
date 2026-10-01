@@ -12,8 +12,9 @@ use fxg_protocol::client_api::{
     CreateWorktreeRequest, KillSwitchResponse, ProjectLinkRequest, ProjectLinkResponse,
     ProjectScanRequest, ProjectScanResponse, ProvisionersResponse, PruneWorktreesRequest,
     RemoveWorktreeRequest, RespondPermissionRequest, RespondPermissionResponse,
-    ResumeSessionRequest, ResumeSessionResponse, RotateAuthTokenResponse, SessionRevertRequest,
-    SessionRevertResponse, WorktreeInfo, WorktreesResponse,
+    ResumeSessionRequest, ResumeSessionResponse, RotateAuthTokenResponse, SessionArchiveRequest,
+    SessionArchiveResponse, SessionRevertRequest, SessionRevertResponse, WorktreeInfo,
+    WorktreesResponse,
 };
 use fxg_protocol::common::{
     AgentAction, CommandResult, DiffScope, ProjectSummary, WorkspaceDiffResponse,
@@ -401,6 +402,36 @@ impl ClientApiBackend for DaemonState {
             session_id: outcome.session_id,
             context_restored: outcome.context_restored,
         })
+    }
+
+    async fn archive_session(
+        &self,
+        session_id: &str,
+        request: SessionArchiveRequest,
+        client: ClientInfo,
+    ) -> Result<SessionArchiveResponse, ApiError> {
+        let command_id = fxg_protocol::util::uuid_v7();
+        let archived_at = self
+            .set_session_archived(
+                &command_id,
+                session_id,
+                request.archived,
+                &audit_source(&client),
+            )
+            .await
+            .map_err(api_error)?;
+        Ok(SessionArchiveResponse {
+            session_id: session_id.to_owned(),
+            archived_at,
+        })
+    }
+
+    async fn delete_session(&self, session_id: &str, client: ClientInfo) -> Result<(), ApiError> {
+        let command_id = fxg_protocol::util::uuid_v7();
+        self.purge_session(&command_id, session_id, &audit_source(&client))
+            .await
+            .map_err(api_error)?;
+        Ok(())
     }
 
     async fn list_worktrees(&self, project_id: &str) -> Result<WorktreesResponse, ApiError> {

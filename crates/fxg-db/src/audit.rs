@@ -18,6 +18,10 @@ pub mod actions {
     pub const SESSION_REVERT: &str = "session_revert";
     /// セッション再開 (停止済みセッションのレジューム)
     pub const SESSION_RESUME: &str = "session_resume";
+    /// セッションのアーカイブ/復元
+    pub const SESSION_ARCHIVE: &str = "session_archive";
+    /// セッション削除 (イベント本文のパージ)
+    pub const SESSION_DELETE: &str = "session_delete";
     /// 承認解決 (Approve / Reject)
     pub const PERMISSION_RESOLVED: &str = "permission_resolved";
     /// Web PTY 起動

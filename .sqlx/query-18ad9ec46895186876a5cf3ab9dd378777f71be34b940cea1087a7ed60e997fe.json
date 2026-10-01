@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        INSERT OR IGNORE INTO session_events\n            (event_id, session_id, node_seq, event_type, payload_json, searchable_text, created_at)\n        SELECT ?, ?, ?, ?, ?, ?, ?\n         WHERE EXISTS (\n             SELECT 1\n               FROM sessions\n              WHERE session_id = ?\n                AND (deleted_at IS NULL OR ? = 1)\n         )\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 9
+    },
+    "nullable": []
+  },
+  "hash": "18ad9ec46895186876a5cf3ab9dd378777f71be34b940cea1087a7ed60e997fe"
+}

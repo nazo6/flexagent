@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n        UPDATE sessions\n           SET last_node_seq = last_node_seq + 1\n         WHERE session_id = ?\n        RETURNING last_node_seq\n        ",
+  "query": "\n        UPDATE sessions\n           SET last_node_seq = last_node_seq + 1\n         WHERE session_id = ? AND deleted_at IS NULL\n        RETURNING last_node_seq\n        ",
   "describe": {
     "columns": [
       {
@@ -22,5 +22,5 @@
       false
     ]
   },
-  "hash": "c921f5cf3f8c315ea1f7559dad8bc0c822e63790ded0e00aee74d1413228bd7c"
+  "hash": "dce665e477ea76c551dc3f07a26a8915ba1e1a3117756330ee2b078ff6166f4a"
 }

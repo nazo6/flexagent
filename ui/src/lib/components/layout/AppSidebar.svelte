@@ -8,9 +8,11 @@
   import { cn } from '$lib/utils';
   import ConnectionMenu from '$lib/components/ConnectionMenu.svelte';
   import KillSwitchButton from '$lib/components/KillSwitchButton.svelte';
+  import SessionActionsMenu from '$lib/components/session/SessionActionsMenu.svelte';
   import SyncStatusBadge from '$lib/components/SyncStatusBadge.svelte';
   import type { SessionSummary } from '$lib/generated/SessionSummary';
   import AlertCircleIcon from '@lucide/svelte/icons/alert-circle';
+  import ArchiveIcon from '@lucide/svelte/icons/archive';
   import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
   import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
   import FolderGit2Icon from '@lucide/svelte/icons/folder-git-2';
@@ -29,6 +31,7 @@
   let searchQuery = $state('');
   let collapsedProjects = $state<Record<string, boolean>>({});
   let showAttentionSection = $state(true);
+  let showArchivedSection = $state(false);
 
   const currentPath = $derived(page.url.pathname);
   const activeSessionId = $derived(
@@ -57,19 +60,36 @@
   }
 
   const filteredSessions = $derived(
-    sync.sessions.filter((session) => matchesSearch(session, searchQuery.trim()))
+    sync.sessions
+      .filter((session) => session.archived_at === null)
+      .filter((session) => matchesSearch(session, searchQuery.trim()))
+  );
+
+  // アーカイブ済みセッション (既定では折りたたみ)
+  const archivedSessions = $derived(
+    sync.sessions
+      .filter((session) => session.archived_at !== null)
+      .filter((session) => matchesSearch(session, searchQuery.trim()))
+      .toSorted((a, b) => (b.archived_at ?? 0) - (a.archived_at ?? 0))
   );
 
   const pendingSessionIds = $derived(
     new Set(sync.inbox.map((req) => req.session_id))
   );
 
-  // 全体横断の要対応セッション
-  const needsAttentionSessions = $derived(
-    filteredSessions.filter(
-      (s) => pendingSessionIds.has(s.session_id) || s.status === 'error'
-    )
-  );
+  // 全体横断の要対応セッション (承認待ちはアーカイブ済みでも見落とさない)
+  const needsAttentionSessions = $derived.by(() => {
+    const attention = new Map<string, SessionSummary>();
+    for (const session of sync.sessions) {
+      if (pendingSessionIds.has(session.session_id)) {
+        attention.set(session.session_id, session);
+      }
+    }
+    for (const session of filteredSessions) {
+      if (session.status === 'error') attention.set(session.session_id, session);
+    }
+    return [...attention.values()];
+  });
 
   interface ProjectSessionGroup {
     projectId: string;
@@ -358,6 +378,38 @@
         {/each}
       </div>
     {/if}
+
+    <!-- アーカイブ済みセッション (折りたたみ) -->
+    {#if archivedSessions.length > 0}
+      <div class="mt-3 border-t pt-2">
+        <button
+          type="button"
+          class="text-muted-foreground hover:text-foreground flex w-full items-center justify-between px-1 py-0.5 text-[11px] font-semibold tracking-wider uppercase select-none"
+          onclick={() => (showArchivedSection = !showArchivedSection)}
+        >
+          <span class="flex items-center gap-1.5">
+            <ArchiveIcon class="size-3" />
+            <span>アーカイブ済み</span>
+            <span class="bg-muted rounded-full px-1.5 py-0.2 text-[10px]">
+              {archivedSessions.length}
+            </span>
+          </span>
+          {#if showArchivedSection}
+            <ChevronDownIcon class="size-3" />
+          {:else}
+            <ChevronRightIcon class="size-3" />
+          {/if}
+        </button>
+
+        {#if showArchivedSection}
+          <ul class="mt-1 flex list-none flex-col gap-0.5 p-0">
+            {#each archivedSessions as session (session.session_id)}
+              {@render sessionRow(session, true)}
+            {/each}
+          </ul>
+        {/if}
+      </div>
+    {/if}
   </div>
 
   <!-- 下部フッター: 接続メニュー & ステータス -->
@@ -377,6 +429,7 @@
 
 {#snippet sessionRow(session: SessionSummary, showProjectBadge: boolean)}
   {@const isActive = activeSessionId === session.session_id}
+  {@const isArchived = session.archived_at !== null}
   {@const node = getNode(session.node_id)}
   {@const nodeAvail = getNodeAvailability(node)}
   {@const isPinned = pinned.isPinned(session.session_id)}
@@ -384,12 +437,13 @@
     <a
       href={`/sessions/${session.session_id}`}
       onclick={handleLinkClick}
-      title={`${session.title}\nワーキングディレクトリ: ${session.local_path}\nノード: ${node?.name ?? session.node_id}`}
+      title={`${session.title}${isArchived ? ' (アーカイブ済み)' : ''}\nワーキングディレクトリ: ${session.local_path}\nノード: ${node?.name ?? session.node_id}`}
       class={cn(
         'group flex items-center justify-between rounded-md px-2 py-1.5 text-xs transition-colors',
         isActive
           ? 'bg-accent text-accent-foreground font-medium'
-          : 'text-foreground/80 hover:bg-accent/40 hover:text-foreground'
+          : 'text-foreground/80 hover:bg-accent/40 hover:text-foreground',
+        isArchived && 'opacity-70'
       )}
     >
       <div class="flex min-w-0 flex-1 items-center gap-2">
@@ -416,6 +470,13 @@
       </div>
 
       <div class="ml-2 flex shrink-0 items-center gap-1.5 text-muted-foreground text-[10px]">
+        <!-- アーカイブ / 削除メニュー -->
+        <SessionActionsMenu
+          {session}
+          align="end"
+          buttonClass="opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+        />
+
         <!-- ピン留めボタン -->
         <button
           type="button"

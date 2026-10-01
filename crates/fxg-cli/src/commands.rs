@@ -780,7 +780,7 @@ async fn create_worktree(
 /// (`fxg attach` の ID 省略時)。
 async fn latest_session_for_cwd(client: &mut DaemonClient) -> Result<String> {
     let cwd = std::env::current_dir().context("failed to resolve current directory")?;
-    let sessions = client.list_sessions(false).await?;
+    let sessions = client.list_sessions(false, false).await?;
     sessions
         .into_iter()
         .filter(|session| session.status != SessionStatus::Stopped)
@@ -815,6 +815,9 @@ pub struct SessionListArgs {
     /// 停止済みセッションも含めて表示する
     #[usage(short = 'a', long)]
     all: bool,
+    /// アーカイブ済みセッションも含めて表示する
+    #[usage(long)]
+    archived: bool,
     /// 論理プロジェクトIDで絞り込む
     #[usage(long)]
     project: Option<String>,
@@ -831,7 +834,7 @@ impl usage::RunAsync for SessionListArgs {
 
     async fn run_async(self) -> Self::Output {
         let mut client = DaemonClient::connect().await?;
-        let sessions = client.list_sessions(self.all).await?;
+        let sessions = client.list_sessions(self.all, self.archived).await?;
         let sessions: Vec<_> = sessions
             .into_iter()
             .filter(|session| {
@@ -909,6 +912,12 @@ pub enum SessionCommands {
     Resume(SessionResumeArgs),
     /// 指定時点から会話を分岐して新規セッションを作成する
     Fork(SessionForkArgs),
+    /// セッションを一覧からアーカイブする (復元可能)
+    Archive(SessionArchiveArgs),
+    /// アーカイブ済みセッションを一覧へ戻す
+    Unarchive(SessionUnarchiveArgs),
+    /// セッションを削除する (会話ログを消去。復元不能)
+    Delete(SessionDeleteArgs),
 }
 
 /// `fxg session show <id>`
@@ -1049,6 +1058,10 @@ fn describe_event(payload: &UnifiedEventPayload) -> String {
         } => format!(
             "session_reverted seq={target_node_seq} restored={restored_files} removed={removed_files}"
         ),
+        UnifiedEventPayload::SessionArchived { archived } => {
+            format!("session_archived archived={archived}")
+        }
+        UnifiedEventPayload::SessionDeleted {} => "session_deleted".to_owned(),
         UnifiedEventPayload::TerminalOutput {
             terminal_id,
             command,
@@ -1223,6 +1236,66 @@ impl usage::RunAsync for SessionKillArgs {
             .await?;
         println!(
             "killed session process tree ({})",
+            short_id(&self.session_id)
+        );
+        Ok(())
+    }
+}
+
+/// `fxg session archive <id>`
+#[derive(Debug, Args)]
+pub struct SessionArchiveArgs {
+    /// セッションID
+    session_id: String,
+}
+
+impl usage::RunAsync for SessionArchiveArgs {
+    type Output = Result<()>;
+
+    async fn run_async(self) -> Self::Output {
+        let mut client = DaemonClient::connect().await?;
+        let archived_at = client.archive_session(&self.session_id, true).await?;
+        println!("archived session ({})", short_id(&self.session_id));
+        if let Some(archived_at) = archived_at {
+            println!("  archived_at: {}", format_unix_ms_utc(archived_at));
+        }
+        Ok(())
+    }
+}
+
+/// `fxg session unarchive <id>`
+#[derive(Debug, Args)]
+pub struct SessionUnarchiveArgs {
+    /// セッションID
+    session_id: String,
+}
+
+impl usage::RunAsync for SessionUnarchiveArgs {
+    type Output = Result<()>;
+
+    async fn run_async(self) -> Self::Output {
+        let mut client = DaemonClient::connect().await?;
+        client.archive_session(&self.session_id, false).await?;
+        println!("unarchived session ({})", short_id(&self.session_id));
+        Ok(())
+    }
+}
+
+/// `fxg session delete <id>`
+#[derive(Debug, Args)]
+pub struct SessionDeleteArgs {
+    /// セッションID
+    session_id: String,
+}
+
+impl usage::RunAsync for SessionDeleteArgs {
+    type Output = Result<()>;
+
+    async fn run_async(self) -> Self::Output {
+        let mut client = DaemonClient::connect().await?;
+        client.delete_session(&self.session_id).await?;
+        println!(
+            "deleted session ({}) — 会話ログは消去され復元できません",
             short_id(&self.session_id)
         );
         Ok(())

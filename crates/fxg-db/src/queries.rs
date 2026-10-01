@@ -42,6 +42,8 @@ pub struct SessionFilter {
     pub node_id: Option<String>,
     /// セッション状態で絞り込む (空なら全状態)
     pub statuses: Vec<SessionStatus>,
+    /// アーカイブ済みセッションを含めるか (既定 `false` = 除外)
+    pub include_archived: bool,
     /// 最大件数
     pub limit: Option<u32>,
 }
@@ -50,6 +52,9 @@ pub struct SessionFilter {
 const SNIPPET_CONTEXT_CHARS: usize = 40;
 
 /// セッション一覧を取得する (更新日時降順)。
+///
+/// 削除済み (tombstone) セッションは常に除外する。アーカイブ済みは
+/// [`SessionFilter::include_archived`] が `false` の場合に除外する。
 pub async fn list_sessions(
     pool: &SqlitePool,
     filter: &SessionFilter,
@@ -61,8 +66,10 @@ pub async fn list_sessions(
                project_id, node_id, local_path, git_branch,
                is_worktree AS "is_worktree: bool",
                agent_id, agent_session_id, parent_session_id, fork_from_node_seq,
-               title, status, current_mode, last_node_seq, created_at, updated_at
+               title, status, current_mode, last_node_seq, created_at, updated_at,
+               archived_at
           FROM sessions
+         WHERE deleted_at IS NULL
          ORDER BY updated_at DESC
         "#,
     )
@@ -82,6 +89,9 @@ pub async fn list_sessions(
             continue;
         }
         let summary = row.into_summary()?;
+        if !filter.include_archived && summary.archived_at.is_some() {
+            continue;
+        }
         if !filter.statuses.is_empty() && !filter.statuses.contains(&summary.status) {
             continue;
         }
@@ -98,7 +108,7 @@ pub async fn list_sessions(
     Ok(sessions)
 }
 
-/// セッションを1件取得する。
+/// セッションを1件取得する (削除済みは `None`)。
 pub async fn get_session(
     pool: &SqlitePool,
     session_id: &str,
@@ -110,9 +120,10 @@ pub async fn get_session(
                project_id, node_id, local_path, git_branch,
                is_worktree AS "is_worktree: bool",
                agent_id, agent_session_id, parent_session_id, fork_from_node_seq,
-               title, status, current_mode, last_node_seq, created_at, updated_at
+               title, status, current_mode, last_node_seq, created_at, updated_at,
+               archived_at
           FROM sessions
-         WHERE session_id = ?
+         WHERE session_id = ? AND deleted_at IS NULL
         "#,
         session_id,
     )
@@ -627,6 +638,7 @@ struct SessionRow {
     last_node_seq: i64,
     created_at: i64,
     updated_at: i64,
+    archived_at: Option<i64>,
 }
 
 impl SessionRow {
@@ -653,6 +665,7 @@ impl SessionRow {
                 .map_err(|_| DbError::NegativeNodeSeq(self.last_node_seq))?,
             created_at: self.created_at,
             updated_at: self.updated_at,
+            archived_at: self.archived_at,
         })
     }
 }

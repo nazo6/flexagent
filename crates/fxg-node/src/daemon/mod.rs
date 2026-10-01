@@ -115,6 +115,8 @@ async fn reconcile_stale_sessions(bus: &SessionEventBus) -> Result<(), NodeError
 
     let filter = SessionFilter {
         statuses: DaemonState::active_statuses(),
+        // アーカイブ済みでも稼働中なら停止状態へ揃える (ゴーストを残さない)
+        include_archived: true,
         ..SessionFilter::default()
     };
     for session in bus.db().list_sessions(&filter).await? {
@@ -512,6 +514,8 @@ impl DaemonState {
             .db
             .list_sessions(&fxg_db::SessionFilter {
                 statuses: Self::active_statuses(),
+                // kill-all はアーカイブ済みの稼働中セッションも停止する
+                include_archived: true,
                 ..fxg_db::SessionFilter::default()
             })
             .await?;
