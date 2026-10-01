@@ -186,6 +186,16 @@ struct PendingPrompt {
     client_source: String,
 }
 
+struct StartDriverParams<'a> {
+    session_id: &'a str,
+    title: &'a str,
+    cwd: &'a Path,
+    spec: &'a AgentLaunchSpec,
+    extra_args: Vec<String>,
+    initial_mode: Option<String>,
+    has_custom_title: bool,
+}
+
 impl std::fmt::Debug for SessionManager {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let sessions = self.inner.sessions.lock().expect("sessions poisoned");
@@ -303,15 +313,15 @@ impl SessionManager {
             .await?;
 
         let handle = self
-            .start_driver_session(
-                &session_id,
-                &title,
-                &resolved.local_path,
-                &spec,
-                extra_args.to_vec(),
-                initial_mode.map(str::to_owned),
-                false,
-            )
+            .start_driver_session(StartDriverParams {
+                session_id: &session_id,
+                title: &title,
+                cwd: &resolved.local_path,
+                spec: &spec,
+                extra_args: extra_args.to_vec(),
+                initial_mode: initial_mode.map(str::to_owned),
+                has_custom_title: false,
+            })
             .await?;
 
         Ok(EnsureSessionOutcome {
@@ -366,15 +376,15 @@ impl SessionManager {
             .await?;
 
         let handle = self
-            .start_driver_session(
-                params.session_id,
-                &title,
-                &resolved.local_path,
-                &spec,
-                Vec::new(),
-                None,
+            .start_driver_session(StartDriverParams {
+                session_id: params.session_id,
+                title: &title,
+                cwd: &resolved.local_path,
+                spec: &spec,
+                extra_args: Vec::new(),
+                initial_mode: None,
                 has_custom_title,
-            )
+            })
             .await?;
 
         // 初期プロンプト (リモートからのセッション起動時にそのまま実行する)
@@ -423,25 +433,20 @@ impl SessionManager {
     /// アタッチモード決定に使うハンドルを返す。
     async fn start_driver_session(
         &self,
-        session_id: &str,
-        title: &str,
-        cwd: &Path,
-        spec: &AgentLaunchSpec,
-        extra_args: Vec<String>,
-        initial_mode: Option<String>,
-        has_custom_title: bool,
+        params: StartDriverParams<'_>,
     ) -> Result<Arc<dyn ActiveSessionHandle>, NodeError> {
-        let driver = (self.inner.factory)(spec).map_err(|err| NodeError::Agent(err.to_string()))?;
+        let driver =
+            (self.inner.factory)(params.spec).map_err(|err| NodeError::Agent(err.to_string()))?;
         let (event_tx, event_rx) = mpsc::unbounded_channel();
         let handle = match driver
             .start_session(
                 fxg_acp::StartSessionRequest {
-                    session_id: session_id.to_owned(),
-                    title: Some(title.to_owned()),
-                    cwd: cwd.to_path_buf(),
-                    launch: spec.clone(),
-                    extra_args,
-                    initial_mode,
+                    session_id: params.session_id.to_owned(),
+                    title: Some(params.title.to_owned()),
+                    cwd: params.cwd.to_path_buf(),
+                    launch: params.spec.clone(),
+                    extra_args: params.extra_args,
+                    initial_mode: params.initial_mode,
                 },
                 event_tx,
             )
@@ -450,11 +455,11 @@ impl SessionManager {
             Ok(handle) => handle,
             Err(err) => {
                 let message = format!("failed to start agent: {err:#}");
-                tracing::warn!(session_id, "{message}");
+                tracing::warn!(session_id = params.session_id, "{message}");
                 self.inner
                     .bus
                     .record(
-                        session_id,
+                        params.session_id,
                         UnifiedEventPayload::StatusChanged {
                             status: SessionStatus::Error,
                             error_message: Some(message.clone()),
@@ -469,23 +474,23 @@ impl SessionManager {
         {
             let mut sessions = self.inner.sessions.lock().expect("sessions poisoned");
             sessions.active.insert(
-                session_id.to_owned(),
+                params.session_id.to_owned(),
                 ActiveSession {
                     handle: Arc::clone(&handle),
-                    cwd: cwd.to_path_buf(),
-                    agent_id: spec.agent_id.clone(),
+                    cwd: params.cwd.to_path_buf(),
+                    agent_id: params.spec.agent_id.clone(),
                     status: SessionStatus::Idle,
                     busy: false,
                     pending_prompts: VecDeque::new(),
                     pending_permissions: HashMap::new(),
-                    has_custom_title,
+                    has_custom_title: params.has_custom_title,
                 },
             );
         }
 
         // イベントポンプ
         let inner = Arc::clone(&self.inner);
-        let pump_session_id = session_id.to_owned();
+        let pump_session_id = params.session_id.to_owned();
         tokio::spawn(async move {
             pump_events(inner, pump_session_id, event_rx).await;
         });
@@ -672,7 +677,15 @@ impl SessionManager {
             .await?;
 
         let handle = self
-            .start_driver_session(&new_session_id, &title, &cwd, &spec, Vec::new(), None, true)
+            .start_driver_session(StartDriverParams {
+                session_id: &new_session_id,
+                title: &title,
+                cwd: &cwd,
+                spec: &spec,
+                extra_args: Vec::new(),
+                initial_mode: None,
+                has_custom_title: true,
+            })
             .await?;
 
         // 履歴 Replay 注入 (新エージェントセッションの初期コンテキスト)
@@ -1112,9 +1125,7 @@ async fn maybe_dispatch_queued(inner: &Arc<Inner>, session_id: &str) {
 pub fn derive_title_from_prompt(prompt: &str) -> Option<String> {
     for line in prompt.lines() {
         let trimmed = line.trim();
-        let cleaned = trimmed
-            .trim_start_matches(|c: char| c == '#' || c == '>' || c == '-' || c == '*' || c == '`')
-            .trim();
+        let cleaned = trimmed.trim_start_matches(['#', '>', '-', '*', '`']).trim();
         if !cleaned.is_empty() {
             let char_count = cleaned.chars().count();
             if char_count <= 40 {
@@ -1151,16 +1162,14 @@ async fn dispatch_prompt(
         (session.cwd.clone(), should_update)
     };
 
-    if should_update_title {
-        if let Some(title) = derive_title_from_prompt(text) {
-            inner
-                .bus
-                .record(
-                    session_id,
-                    UnifiedEventPayload::SessionTitleChanged { title },
-                )
-                .await?;
-        }
+    if should_update_title && let Some(title) = derive_title_from_prompt(text) {
+        inner
+            .bus
+            .record(
+                session_id,
+                UnifiedEventPayload::SessionTitleChanged { title },
+            )
+            .await?;
     }
 
     let snapshot_tree_hash = snapshot_tree_hash(
