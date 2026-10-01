@@ -514,6 +514,7 @@ export interface TerminalDimensions {
 
 export interface ITerminalAdapter {
   mount(element: HTMLElement): void;
+  clear(): void;
   write(data: string | Uint8Array): void;
   onData(callback: (data: string) => void): { dispose: () => void };
   onResize(
@@ -536,6 +537,8 @@ export interface ITerminalAdapter {
 - **Svelte コンポーネント (`TerminalView.svelte`)**:
   - Svelte 5 の Attachment (`{@attach ...}`) / `ResizeObserver` による自動
     `fit()` 実行とノード側PTYへの `resize` メッセージ送信。
+  - **セッション切替時は `$effect` で `sessionId` の変化を監視し、画面を消去して
+    PTY WS を新しいセッションへ接続し直す**（古い接続のイベントは無視する）。
   - モバイル仮想キーバー（タップで `Ctrl`, `Esc`, `Tab`,
     矢印キー等のエスケープコードを送信）の統合。
 

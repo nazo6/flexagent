@@ -74,6 +74,12 @@ export class GhosttyWebAdapter implements ITerminalAdapter {
     this.#terminal.write(data);
   }
 
+  clear(): void {
+    // WASM 初期化前の未反映 write も破棄する (切替前セッションの残像防止)
+    this.#pendingWrites = [];
+    this.#terminal?.clear();
+  }
+
   onData(callback: (data: string) => void): { dispose: () => void } {
     this.#dataListeners.add(callback);
     return { dispose: () => this.#dataListeners.delete(callback) };

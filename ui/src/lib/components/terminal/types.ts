@@ -12,6 +12,8 @@ export interface TerminalDimensions {
  */
 export interface ITerminalAdapter {
   mount(element: HTMLElement): void;
+  /** 画面表示を消去する (セッション切替時など、次の出力まで空にする)。 */
+  clear(): void;
   write(data: string | Uint8Array): void;
   onData(callback: (data: string) => void): { dispose: () => void };
   onResize(callback: (dims: TerminalDimensions) => void): { dispose: () => void };

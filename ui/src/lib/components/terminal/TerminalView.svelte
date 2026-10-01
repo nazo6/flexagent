@@ -22,6 +22,8 @@
   let adapter: GhosttyWebAdapter | null = null;
   let socket: WebSocket | null = null;
   let disposed = false;
+  /** 現在 WS を接続しているセッション (切替検知用の非リアクティブ値)。 */
+  let connectedSessionId: string | null = null;
 
   /** モバイル仮想キーバー (タップでエスケープシーケンスを送信)。 */
   const KEY_BAR: { label: string; data: string }[] = [
@@ -87,6 +89,7 @@
     socket = ws;
 
     ws.addEventListener('open', () => {
+      if (socket !== ws || disposed) return;
       const dims = adapter?.fit() ?? { cols: 80, rows: 24 };
       send({
         op: 'spawn',
@@ -98,11 +101,14 @@
     });
 
     ws.addEventListener('message', (event: MessageEvent) => {
+      if (socket !== ws || disposed) return;
       if (typeof event.data === 'string') handleMessage(event.data);
     });
 
     ws.addEventListener('close', () => {
-      if (socket === ws) socket = null;
+      // 新しい接続 (セッション切替 / 手動再接続) に置き換え済みの場合は無視する
+      if (socket !== ws) return;
+      socket = null;
       if (disposed) return;
       if (status === 'connected' || status === 'connecting') {
         status = 'disconnected';
@@ -111,6 +117,7 @@
     });
 
     ws.addEventListener('error', () => {
+      if (socket !== ws) return;
       if (status === 'connecting') {
         status = 'failed';
         statusMessage = 'PTY WebSocket に接続できませんでした。';
@@ -127,6 +134,18 @@
     ptyId = null;
     connect();
   }
+
+  // ページ内でセッションが切り替わったら PTY WS を新しいセッションへ接続し直す
+  // (同一ルートのまま `page.params.id` だけが変わるとコンポーネントは再利用される)
+  $effect(() => {
+    const id = sessionId;
+    if (id === connectedSessionId) return;
+    const initial = connectedSessionId === null;
+    connectedSessionId = id;
+    if (initial) return; // 初回の接続は onMount が行う
+    adapter?.clear();
+    reconnect();
+  });
 
   onMount(() => {
     if (container !== null) {
