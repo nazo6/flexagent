@@ -1128,3 +1128,9 @@
     Shadow Git 操作と同じく `-c core.autocrlf=false -c core.eol=lf` を前置し、
     テスト側のリポジトリ設定で `core.autocrlf=true` を模擬する回帰条件を追加した
     (Phase 2 の snapshot テストと同じ対策)。
+  - ✅ **CI 最終検証 (2026-10-01)**: 全 8 ジョブ成功 (run `36814234289`)。
+    Ubuntu / macOS / **windows-latest** の全てで Phase 6 の E2E
+    (`provisioner_runs_stdio_node_and_drains_bundle` /
+    `stdio_daemon_proxies_git_credentials_and_drains`)
+    が通過し、一時VMの stdio トランスポート・プロビジョナー・Drain/bundle 退避・
+    Git Credential Proxy が 3 プラットフォームで検証された。
