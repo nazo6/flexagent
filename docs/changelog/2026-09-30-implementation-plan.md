@@ -888,13 +888,24 @@
       へリアルタイム反映する仕組みを接続。また、エージェント側がタイトル通知を行わない場合のフォールバックとして、セッション作成時の初期プロンプトまたは初回ターン送信時のプロンプトから先頭行（最大40文字、Markdown記号トリム、超過時
       `...` 付与）を抽出してタイトルを自動導出・即時更新するロジックを実装。
   - 2026-10-01 (CI 健全化 & Phase 1〜5 段階的修正着手):
-    - **Stage 0 (CI 修正)**:
+    - **Stage 0 (CI 修正 - 完了)**:
       - Linux 環境での `fxg-cli` サービスステータス関数 (`service.rs`) を
         `async fn` 化し、`probe_running(server).await` に修正して Linux
         ビルドエラー (`E0277`, `E0308`) を解消。
       - `ui/package.json` の `"check"` スクリプトに `svelte-kit sync`
         を前置し、CI 環境での `.svelte-kit/tsconfig.json` 未生成による
         `svelte-check` 失敗を解消。
+      - `fxg-node` (`session_manager.rs`) の Clippy 警告 (`too_many_arguments`
+        を
+        `StartDriverParams` 構造体に集約、`manual_pattern_char_comparison`
+        を配列指定化、
+        `collapsible_if` を `&& let` 化) を解消。
+      - `fxg-cli` (`service.rs`) の `server_flag` を全プラットフォームの
+        `status` ヒント表示で統一利用し、Linux CI での `dead_code` 警告を解消。
+      - ✅ **CI 検証通過**: GitHub Actions CI (run `36801872999`) にて全 8
+        ジョブ
+        (fmt, clippy, sqlx, ts-rs, ui, test (ubuntu / macos / windows-latest))
+        が完全成功。
 
 ---
 
