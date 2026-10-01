@@ -213,6 +213,8 @@ mod tests {
 
         let dir = tempfile::tempdir().expect("tempdir");
         let pid_file = dir.path().join("grandchild.pid");
+        let ping_out = dir.path().join("grandchild.out");
+        let ping_err = dir.path().join("grandchild.err");
 
         let guard = ProcessTreeGuard::new().expect("guard");
 
@@ -220,10 +222,21 @@ mod tests {
         // Job メンバーが作成したプロセスは自動的に同じ Job に所属するため、
         // ルートが終了しても孫は Job に残る。猶予 (Start-Sleep) は、孫を生む前に
         // ルートの Job 割当が完了していることを保証するためのもの。
+        //
+        // `-NoNewWindow` + 出力リダイレクトで**新しいコンソールを作らない**:
+        // 既定の `Start-Process` は孫用に新しいコンソールウィンドウを作るため、
+        // テスト実行時に ping の窓が開いてしまい、さらに Job の kill-on-close と
+        // コンソール初期化が競合すると conhost が
+        // 「起動時にエラー 0x800700e8 (ERROR_NO_DATA: パイプが閉じられています)」
+        // をその窓へ出力する (テスト自体は成功するがノイズになる)。
         let script = format!(
             "Start-Sleep -Milliseconds 1500; \
-             $p = Start-Process -PassThru -FilePath ping -ArgumentList '-n','30','127.0.0.1'; \
+             $p = Start-Process -PassThru -NoNewWindow -FilePath ping \
+                  -ArgumentList '-n','30','127.0.0.1' \
+                  -RedirectStandardOutput '{}' -RedirectStandardError '{}'; \
              Set-Content -Path '{}' -Value $p.Id",
+            ping_out.display(),
+            ping_err.display(),
             pid_file.display()
         );
         let mut root = StdCommand::new("powershell")

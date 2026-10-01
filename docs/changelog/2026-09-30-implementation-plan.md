@@ -433,6 +433,13 @@
   - **Job Object の孫プロセス Kill 検証**: kill-on-close Job にルートを
     割当てた後に孫 (`ping`) を起動させ (Job メンバーの子は自動で Job 所属)、
     ガード Drop で孫が死ぬことを `tasklist` で検証する。
+    - 2026-10-01 追記: `Start-Process` の既定は孫用に新しいコンソール
+      ウィンドウを開くため、テスト実行時に ping の窓が現れ、Job の kill-on-close
+      と
+      コンソール初期化の競合で conhost が「起動時にエラー 0x800700e8
+      (ERROR_NO_DATA: パイプが閉じられています)」をその窓へ出力していた
+      (テスト自体は成功)。`-NoNewWindow` + 出力リダイレクトで新しいコンソールを
+      作らないように修正した。
   - **CI 構成**: `jdx/mise-action` でツールチェインを固定。 `cargo:sqlx-cli`
     は重いため `MISE_DISABLE_TOOLS` で sqlx ジョブ以外では 導入をスキップする
     (テストはコミット済み `.sqlx` のオフラインモードで動作)。
