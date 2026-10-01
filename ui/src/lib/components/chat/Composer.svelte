@@ -2,11 +2,11 @@
   import { Button } from '$lib/components/ui/button';
   import * as Select from '$lib/components/ui/select';
   import NodeStatusBadge from '$lib/components/NodeStatusBadge.svelte';
+  import { configChoices, configValueToString, resolveConfigChoice } from '$lib/config-options';
   import { getNodeAvailability } from '$lib/node-status';
   import type { NodeSummary } from '$lib/generated/NodeSummary';
   import { sync } from '$lib/stores/app.svelte';
   import type { SessionCapabilities } from '$lib/sync/reducer';
-  import type { JsonValue } from '$lib/generated/serde_json/JsonValue';
   import type { SessionControlAction } from '$lib/generated/SessionControlAction';
   import { toast } from 'svelte-sonner';
   import AlertTriangleIcon from '@lucide/svelte/icons/alert-triangle';
@@ -85,18 +85,6 @@
       controlBusy = false;
     }
   }
-
-  function configValueToString(value: JsonValue): string {
-    return typeof value === 'string' ? value : JSON.stringify(value);
-  }
-
-  function configOptions(current: JsonValue): { value: string; label: string }[] {
-    if (!Array.isArray(current)) return [];
-    return current.flatMap((value) => {
-      if (value === null || typeof value === 'object') return [];
-      return [{ value: configValueToString(value), label: configValueToString(value) }];
-    });
-  }
 </script>
 
 <div class="flex flex-col gap-2 border-t pt-2">
@@ -158,14 +146,18 @@
     {/if}
 
     {#each capabilities?.configOptions ?? [] as option (option.key)}
-      {@const choices = configOptions(option.options)}
+      {@const choices = configChoices(option.options)}
       {#if choices.length > 0}
         <Select.Root
           type="single"
           value={configValueToString(option.current_value)}
           onValueChange={(value) => {
             if (value !== null) {
-              void runControl({ action: 'set_config', key: option.key, value });
+              void runControl({
+                action: 'set_config',
+                key: option.key,
+                value: resolveConfigChoice(choices, value)
+              });
             }
           }}
         >
