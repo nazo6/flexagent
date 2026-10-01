@@ -59,7 +59,7 @@
   }
 </script>
 
-<div class="flex flex-col gap-4">
+<div class="mx-auto flex max-w-5xl flex-col gap-4 p-4 md:p-6">
   <div>
     <h1 class="text-xl font-semibold">全文検索</h1>
     <p class="text-muted-foreground text-sm">

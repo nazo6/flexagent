@@ -38,6 +38,23 @@ export function formatRelativeTime(
   return `${diffDay}日前`;
 }
 
+/** epoch ms を「now / 5m / 2h / 3d」などのコンパクト表現に整形する。 */
+export function formatRelativeTimeCompact(
+  ms: number | null | undefined,
+  now: number = Date.now(),
+): string {
+  if (ms == null) return "-";
+  const diffSec = Math.floor((now - ms) / 1000);
+  if (diffSec < 10) return "now";
+  if (diffSec < 60) return `${diffSec}s`;
+  const diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60) return `${diffMin}m`;
+  const diffHour = Math.floor(diffMin / 60);
+  if (diffHour < 24) return `${diffHour}h`;
+  const diffDay = Math.floor(diffHour / 24);
+  return `${diffDay}d`;
+}
+
 /** ミリ秒を「1.2s / 1m 4s」の所要時間表現に整形する。 */
 export function formatDurationMs(ms: number): string {
   if (!Number.isFinite(ms) || ms < 0) return "-";

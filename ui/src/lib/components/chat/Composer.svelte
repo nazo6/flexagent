@@ -1,23 +1,34 @@
 <script lang="ts">
   import { Button } from '$lib/components/ui/button';
   import * as Select from '$lib/components/ui/select';
+  import NodeStatusBadge from '$lib/components/NodeStatusBadge.svelte';
+  import { getNodeAvailability } from '$lib/node-status';
+  import type { NodeSummary } from '$lib/generated/NodeSummary';
   import { sync } from '$lib/stores/app.svelte';
   import type { SessionCapabilities } from '$lib/sync/reducer';
   import type { JsonValue } from '$lib/generated/serde_json/JsonValue';
   import type { SessionControlAction } from '$lib/generated/SessionControlAction';
   import { toast } from 'svelte-sonner';
+  import AlertTriangleIcon from '@lucide/svelte/icons/alert-triangle';
   import BanIcon from '@lucide/svelte/icons/ban';
   import SendIcon from '@lucide/svelte/icons/send';
   import SlashIcon from '@lucide/svelte/icons/slash';
 
   let {
     sessionId,
-    capabilities = null
-  }: { sessionId: string; capabilities?: SessionCapabilities | null } = $props();
+    capabilities = null,
+    node = null
+  }: {
+    sessionId: string;
+    capabilities?: SessionCapabilities | null;
+    node?: NodeSummary | null;
+  } = $props();
 
   let text = $state('');
   let sending = $state(false);
   let controlBusy = $state(false);
+
+  const nodeAvail = $derived(getNodeAvailability(node));
 
   const slashQuery = $derived(
     text.startsWith('/') && !text.includes(' ') ? text.slice(1).toLowerCase() : null
@@ -88,7 +99,14 @@
   }
 </script>
 
-<div class="flex flex-col gap-2 border-t pt-3">
+<div class="flex flex-col gap-2 border-t pt-2">
+  {#if node && !nodeAvail.isAvailable}
+    <div class="bg-destructive/10 text-destructive flex items-center gap-2 rounded-md px-2.5 py-1 text-xs">
+      <AlertTriangleIcon class="size-3.5 shrink-0" />
+      <span>実行ノード ({node.name}) は現在{nodeAvail.statusText}です。送信したプロンプトはノード復帰時に処理されます。</span>
+    </div>
+  {/if}
+
   {#if commandMatches.length > 0}
     <div class="flex flex-wrap gap-1">
       {#each commandMatches as command (command.name)}
@@ -115,6 +133,9 @@
   ></textarea>
 
   <div class="flex flex-wrap items-center gap-2">
+    {#if node}
+      <NodeStatusBadge {node} showNodeName={true} class="mr-1 hidden sm:inline-flex" />
+    {/if}
     {#if capabilities && capabilities.availableModes.length > 0}
       <Select.Root
         type="single"

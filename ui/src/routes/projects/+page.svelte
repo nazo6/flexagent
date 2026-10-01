@@ -1,7 +1,7 @@
 <script lang="ts">
+  import { goto } from '$app/navigation';
   import * as AlertDialog from '$lib/components/ui/alert-dialog';
   import * as Dialog from '$lib/components/ui/dialog';
-  import NewSessionDialog from '$lib/components/NewSessionDialog.svelte';
   import { Badge } from '$lib/components/ui/badge';
   import { Button } from '$lib/components/ui/button';
   import { Card } from '$lib/components/ui/card';
@@ -33,10 +33,6 @@
   // Worktree 削除確認
   let removeTarget = $state<{ projectId: string; worktree: WorktreeInfo } | null>(null);
   let removeBusy = $state(false);
-
-  // 新規セッションダイアログ
-  let sessionProject = $state<ProjectSummary | null>(null);
-  let sessionOpen = $state(false);
 
   function nodeName(nodeId: string): string {
     return sync.nodes.find((node) => node.node_id === nodeId)?.name ?? shortId(nodeId);
@@ -106,7 +102,7 @@
   }
 </script>
 
-<div class="flex flex-col gap-4">
+<div class="mx-auto flex max-w-5xl flex-col gap-4 p-4 md:p-6">
   <div class="flex items-center justify-between gap-2">
     <div>
       <h1 class="text-xl font-semibold">プロジェクト</h1>
@@ -154,9 +150,7 @@
             <Button
               size="sm"
               onclick={() => {
-                sessionProject = project;
-                sessionOpen = true;
-                void loadWorktrees(project.project_id, true);
+                void goto(`/?project=${encodeURIComponent(project.project_id)}`);
               }}
             >
               <PlayIcon />
@@ -305,11 +299,3 @@
     </AlertDialog.Footer>
   </AlertDialog.Content>
 </AlertDialog.Root>
-
-{#if sessionProject !== null}
-  <NewSessionDialog
-    bind:open={sessionOpen}
-    project={sessionProject}
-    worktrees={worktreesByProject.get(sessionProject.project_id) ?? []}
-  />
-{/if}

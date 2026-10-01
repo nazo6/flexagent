@@ -1,7 +1,7 @@
 <script lang="ts">
   import PermissionCard from '$lib/components/PermissionCard.svelte';
   import MarkdownText from '$lib/components/MarkdownText.svelte';
-  import ToolCallCard from './ToolCallCard.svelte';
+  import ToolCallGroup from './ToolCallGroup.svelte';
   import { Badge } from '$lib/components/ui/badge';
   import { formatEpochMs } from '$lib/format';
   import type { TimelineItem } from '$lib/sync/reducer';
@@ -24,48 +24,85 @@
         return 'text-muted-foreground';
     }
   }
+
+  type RenderGroup =
+    | { kind: 'single'; key: string; item: TimelineItem }
+    | { kind: 'tools'; key: string; tools: Extract<TimelineItem, { kind: 'tool' }>[] };
+
+  const groupedItems = $derived.by(() => {
+    const groups: RenderGroup[] = [];
+    let currentTools: Extract<TimelineItem, { kind: 'tool' }>[] = [];
+
+    for (const item of items) {
+      if (item.kind === 'tool') {
+        currentTools.push(item);
+      } else {
+        if (currentTools.length > 0) {
+          groups.push({
+            kind: 'tools',
+            key: `toolgroup:${currentTools[0].toolCallId}`,
+            tools: currentTools
+          });
+          currentTools = [];
+        }
+        groups.push({ kind: 'single', key: item.key, item });
+      }
+    }
+
+    if (currentTools.length > 0) {
+      groups.push({
+        kind: 'tools',
+        key: `toolgroup:${currentTools[0].toolCallId}`,
+        tools: currentTools
+      });
+    }
+
+    return groups;
+  });
 </script>
 
 <ul class="flex list-none flex-col gap-3 p-0">
-  {#each items as item (item.key)}
+  {#each groupedItems as group (group.key)}
     <li>
-      {#if item.kind === 'user'}
-        <div class="flex justify-end">
-          <div class="bg-primary text-primary-foreground max-w-[85%] rounded-2xl px-3.5 py-2">
-            <p class="text-sm whitespace-pre-wrap">{item.text}</p>
-            <p class="text-primary-foreground/70 mt-1 text-right text-[10px]">
-              {item.clientSource} · {formatEpochMs(item.createdAt)}
-            </p>
+      {#if group.kind === 'tools'}
+        <ToolCallGroup tools={group.tools} />
+      {:else}
+        {@const item = group.item}
+        {#if item.kind === 'user'}
+          <div class="flex justify-end">
+            <div class="bg-primary text-primary-foreground max-w-[85%] rounded-2xl px-3.5 py-2">
+              <p class="text-sm whitespace-pre-wrap">{item.text}</p>
+              <p class="text-primary-foreground/70 mt-1 text-right text-[10px]">
+                {item.clientSource} · {formatEpochMs(item.createdAt)}
+              </p>
+            </div>
           </div>
-        </div>
-      {:else if item.kind === 'agent'}
-        <div class="flex gap-2">
-          <BotIcon class="text-muted-foreground mt-0.5 size-4 shrink-0" />
-          <div class="max-w-[92%] flex-1">
-            <MarkdownText
-              text={item.text}
-              streaming={item.streaming}
-              class="text-sm leading-relaxed"
-            />
+        {:else if item.kind === 'agent'}
+          <div class="flex gap-2">
+            <BotIcon class="text-muted-foreground mt-0.5 size-4 shrink-0" />
+            <div class="max-w-[92%] flex-1">
+              <MarkdownText
+                text={item.text}
+                streaming={item.streaming}
+                class="text-sm leading-relaxed"
+              />
+            </div>
           </div>
-        </div>
-      {:else if item.kind === 'thought'}
-        <details class="group">
-          <summary
-            class="text-muted-foreground hover:text-foreground flex cursor-pointer items-center gap-1.5 text-xs select-none"
-          >
-            <BrainIcon class="size-3.5" />
-            思考プロセス
-            {#if item.streaming}<span class="animate-pulse">…</span>{/if}
-          </summary>
-          <div
-            class="text-muted-foreground border-muted-foreground/30 mt-1.5 border-l-2 pl-3 text-xs leading-relaxed"
-          >
-            <MarkdownText text={item.text} streaming={item.streaming} />
-          </div>
-        </details>
-      {:else if item.kind === 'tool'}
-        <ToolCallCard {item} />
+        {:else if item.kind === 'thought'}
+          <details class="group">
+            <summary
+              class="text-muted-foreground hover:text-foreground flex cursor-pointer items-center gap-1.5 text-xs select-none"
+            >
+              <BrainIcon class="size-3.5" />
+              思考プロセス
+              {#if item.streaming}<span class="animate-pulse">…</span>{/if}
+            </summary>
+            <div
+              class="text-muted-foreground border-muted-foreground/30 mt-1.5 border-l-2 pl-3 text-xs leading-relaxed"
+            >
+              <MarkdownText text={item.text} streaming={item.streaming} />
+            </div>
+          </details>
       {:else if item.kind === 'terminal'}
         <div class="bg-card/60 flex flex-col gap-1.5 rounded-lg border p-2.5">
           <div class="flex items-center gap-2 text-xs">
@@ -121,8 +158,9 @@
           <span>送信待ち: <span class="whitespace-pre-wrap">{item.text}</span></span>
         </div>
       {/if}
-    </li>
-  {/each}
+    {/if}
+  </li>
+{/each}
 </ul>
 
 {#if items.length === 0}

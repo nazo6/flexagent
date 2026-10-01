@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { formatDurationMs, formatEpochMs, formatRelativeTime } from "./format";
+import {
+  formatDurationMs,
+  formatEpochMs,
+  formatRelativeTime,
+  formatRelativeTimeCompact,
+} from "./format";
 
 describe("formatEpochMs", () => {
   it("formats an epoch to local date-time", () => {
@@ -25,6 +30,18 @@ describe("formatRelativeTime", () => {
     expect(formatRelativeTime(now - 90_000, now)).toBe("1分前");
     expect(formatRelativeTime(now - 3 * 3_600_000, now)).toBe("3時間前");
     expect(formatRelativeTime(now - 2 * 86_400_000, now)).toBe("2日前");
+  });
+});
+
+describe("formatRelativeTimeCompact", () => {
+  const now = new Date(2026, 9, 1, 12, 0, 0).getTime();
+
+  it("formats compact recent times", () => {
+    expect(formatRelativeTimeCompact(now - 2_000, now)).toBe("now");
+    expect(formatRelativeTimeCompact(now - 30_000, now)).toBe("30s");
+    expect(formatRelativeTimeCompact(now - 120_000, now)).toBe("2m");
+    expect(formatRelativeTimeCompact(now - 3 * 3_600_000, now)).toBe("3h");
+    expect(formatRelativeTimeCompact(now - 2 * 86_400_000, now)).toBe("2d");
   });
 });
 
