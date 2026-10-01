@@ -1141,3 +1141,40 @@
     `stdio_daemon_proxies_git_credentials_and_drains`)
     が通過し、一時VMの stdio トランスポート・プロビジョナー・Drain/bundle 退避・
     Git Credential Proxy が 3 プラットフォームで検証された。
+
+### ロギング基盤の刷新 (2026-10-01)
+
+- **課題と背景**:
+  - `fxg daemon` や `fxg server`
+    起動時にコンソールに何も出力されず、起動状態や接続先が不明瞭だった
+    (既定ログレベルが `warn` だったため)。
+  - ログファイルやリダイレクトされた出力に ANSI カラーエスケープシーケンス
+    (`\x1b[...]`) が混入し、閲覧性が悪化していた。
+  - OS 常駐サービスやバックグラウンド起動時にログが失われやすかった。
+- **実装内容**:
+  - **ロギング初期化モジュール (`fxg-cli::logging`) の新設**:
+    - **TTY 自動判定 & `NO_COLOR` 対応**: `std::io::stderr().is_terminal()`
+      に基づき、パイプやリダイレクト時は ANSI カラーを自動無効化。`NO_COLOR`
+      (https://no-color.org/) 環境変数を尊重。
+    - **マルチレイヤー (Console + File) ロギング**: stderr 出力 (TTYなら色付き)
+      とファイル出力 (`~/.flexagent/logs/daemon.log`, `server.log`) を Tee
+      出力。ファイル側は常に ANSI カラー完全排除 (`with_ansi(false)`)。
+  - **設定スキーマ (`fxg-protocol::config::LogConfig`) の統合**:
+    - `~/.flexagent/config.toml` に `[log]` セクション (`level`, `file`,
+      `format`, `no_color`) を追加。
+    - 環境変数 `FXG_LOG_LEVEL`, `FXG_LOG_FILE`, `FXG_LOG_FORMAT`,
+      `FXG_LOG_NO_COLOR` をサポート。
+  - **起動サマリーバナー**:
+    - `fxg daemon` / `fxg server` のフォアグラウンド実行時に、Node ID、Web UI
+      URL、HTTP/WS アドレス、IPC パス、ログファイルパスをまとめた起動バナーを
+      stderr に出力。
+    - `--stdio` モード時はプロトコル保護原則に従いバナーを完全抑止。
+  - **CLI 引数の追加**:
+    - `fxg daemon` および `fxg server` に `--log-level`, `--log-file`,
+      `--no-log-file`, `--log-format`, `--no-color` を追加。
+  - **`fxg service status` の拡張**:
+    - サービス状態表示に `log file:` パスを追加。
+  - **テスト検証**:
+    - `cli_e2e.rs` にデーモン起動ログの存在確認、ログファイル内の ANSI
+      エスケープシーケンス非混入アサーション、および `--log-file` / `--no-color`
+      の動作検証テストを追加。

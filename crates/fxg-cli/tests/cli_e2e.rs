@@ -84,6 +84,16 @@ impl TestEnv {
         loop {
             let output = self.run(&["ps"], None);
             if output.status.success() {
+                // デーモン起動メッセージが出力され、かつ ANSI カラーコードが含まれていないことを検証
+                let log = self.daemon_log();
+                assert!(
+                    log.contains("fxg daemon started") || log.contains("FlexAgent daemon"),
+                    "daemon log should contain startup message, got:\n{log}"
+                );
+                assert!(
+                    !log.contains("\x1b["),
+                    "daemon log should not contain ANSI escape sequences, got:\n{log}"
+                );
                 return;
             }
             if Instant::now() > deadline {
@@ -397,4 +407,51 @@ async fn cli_shows_help_for_missing_subcommand() {
         text.contains("info") && text.contains("scan"),
         "container command must show help: {text}"
     );
+}
+
+#[tokio::test]
+async fn daemon_logging_to_custom_file_and_no_color() {
+    let mut env = TestEnv::new();
+    let custom_log_path = env.dir.path().join("custom_daemon.log");
+    let mut cmd = env.command();
+    cmd.args([
+        "daemon",
+        "--listen",
+        "127.0.0.1:0",
+        "--log-file",
+        custom_log_path.to_str().unwrap(),
+        "--no-color",
+    ])
+    .stdin(std::process::Stdio::null())
+    .stdout(std::process::Stdio::null())
+    .stderr(std::process::Stdio::null());
+
+    let child = cmd.spawn().expect("spawn daemon");
+    env.daemon = Some(child);
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    loop {
+        let output = env.run(&["ps"], None);
+        if output.status.success() {
+            break;
+        }
+        if std::time::Instant::now() > deadline {
+            panic!("daemon did not start in time");
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+
+    // custom_daemon.log にログが書き込まれ、かつ ANSI エスケープが含まれないことを検証
+    assert!(custom_log_path.exists(), "custom log file must exist");
+    let content = std::fs::read_to_string(&custom_log_path).unwrap_or_default();
+    assert!(
+        content.contains("fxg daemon started"),
+        "custom log file should contain startup message, got:\n{content}"
+    );
+    assert!(
+        !content.contains("\x1b["),
+        "custom log file must not contain ANSI escape sequences, got:\n{content}"
+    );
+
+    env.stop_daemon();
 }

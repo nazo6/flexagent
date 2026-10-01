@@ -46,9 +46,41 @@ pub struct DaemonArgs {
     /// `[node] tray` で有効化されたトレイ常駐を無効にする
     #[usage(long)]
     no_tray: bool,
+    /// ログレベル (trace | debug | info | warn | error)
+    #[usage(long)]
+    pub(crate) log_level: Option<String>,
+    /// ログファイル出力先 (未指定時は ~/.flexagent/logs/daemon.log)
+    #[usage(long)]
+    pub(crate) log_file: Option<String>,
+    /// ログファイルへの出力を無効化する
+    #[usage(long)]
+    pub(crate) no_log_file: bool,
+    /// ログ出力フォーマット (text | json)
+    #[usage(long)]
+    pub(crate) log_format: Option<String>,
+    /// ANSI カラー出力を無効化する
+    #[usage(long)]
+    pub(crate) no_color: bool,
 }
 
 impl DaemonArgs {
+    /// ロギング設定オプションを構築する。
+    pub(crate) fn logging_options(&self) -> crate::logging::LoggingOptions {
+        crate::logging::LoggingOptions {
+            log_level: self.log_level.clone(),
+            verbose: 0,
+            quiet: false,
+            no_color: self.no_color,
+            log_file: if self.no_log_file {
+                Some("-".to_owned())
+            } else {
+                self.log_file.clone()
+            },
+            log_format: self.log_format.clone(),
+            kind: crate::logging::CommandLogKind::Daemon,
+            is_stdio: self.stdio,
+        }
+    }
     /// 読み込み済みのグローバル設定からデーモン設定を組み立てる。
     pub(crate) fn daemon_config_from(
         &self,
@@ -128,6 +160,21 @@ impl usage::RunAsync for DaemonArgs {
             .await
             .context("fxg daemon failed")?;
 
+        let log_file = crate::logging::resolve_log_file_path(
+            &self.logging_options(),
+            &global.log,
+            daemon.state().paths().fxg_home(),
+        );
+        let use_color = crate::logging::should_use_color(self.no_color, global.log.no_color);
+        crate::logging::print_daemon_banner(
+            daemon.state().node_id(),
+            &daemon.http_addr().to_string(),
+            daemon.ipc_endpoint(),
+            log_file.as_deref(),
+            daemon.state().config().central_server_url.as_deref(),
+            use_color,
+        );
+
         // トレイ常駐 (macOS は main.rs の早期分岐でメインスレッドにて処理される)
         #[cfg(not(target_os = "macos"))]
         let tray = if tray_enabled {
@@ -179,6 +226,41 @@ pub struct ServerArgs {
     /// ポート番号上書き (`--listen` より優先)
     #[usage(long)]
     port: Option<u16>,
+    /// ログレベル (trace | debug | info | warn | error)
+    #[usage(long)]
+    pub(crate) log_level: Option<String>,
+    /// ログファイル出力先 (未指定時は ~/.flexagent/logs/server.log)
+    #[usage(long)]
+    pub(crate) log_file: Option<String>,
+    /// ログファイルへの出力を無効化する
+    #[usage(long)]
+    pub(crate) no_log_file: bool,
+    /// ログ出力フォーマット (text | json)
+    #[usage(long)]
+    pub(crate) log_format: Option<String>,
+    /// ANSI カラー出力を無効化する
+    #[usage(long)]
+    pub(crate) no_color: bool,
+}
+
+impl ServerArgs {
+    /// ロギング設定オプションを構築する。
+    pub(crate) fn logging_options(&self) -> crate::logging::LoggingOptions {
+        crate::logging::LoggingOptions {
+            log_level: self.log_level.clone(),
+            verbose: 0,
+            quiet: false,
+            no_color: self.no_color,
+            log_file: if self.no_log_file {
+                Some("-".to_owned())
+            } else {
+                self.log_file.clone()
+            },
+            log_format: self.log_format.clone(),
+            kind: crate::logging::CommandLogKind::Server,
+            is_stdio: false,
+        }
+    }
 }
 
 impl usage::RunAsync for ServerArgs {
@@ -209,9 +291,23 @@ impl usage::RunAsync for ServerArgs {
             provisioners: global.provisioners.clone(),
             git_credentials: global.server.git_credentials.clone(),
         };
-        fxg_server::Server::run(options)
+        let fxg_home = options.fxg_home.clone();
+        let server = fxg_server::Server::start(options)
             .await
-            .context("fxg server failed")
+            .context("fxg server failed")?;
+
+        let log_file =
+            crate::logging::resolve_log_file_path(&self.logging_options(), &global.log, &fxg_home);
+        let use_color = crate::logging::should_use_color(self.no_color, global.log.no_color);
+        crate::logging::print_server_banner(
+            &server.listen_addr().to_string(),
+            &fxg_home,
+            log_file.as_deref(),
+            use_color,
+        );
+
+        server.wait().await;
+        Ok(())
     }
 }
 

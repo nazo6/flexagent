@@ -61,6 +61,14 @@ pub mod env_keys {
     pub const SERVER_ALLOWED_HOSTS: &str = "FXG_SERVER_ALLOWED_HOSTS";
     /// `[server] allowed_origins` (カンマ区切り)
     pub const SERVER_ALLOWED_ORIGINS: &str = "FXG_SERVER_ALLOWED_ORIGINS";
+    /// `[log] level` ("trace" | "debug" | "info" | "warn" | "error")
+    pub const LOG_LEVEL: &str = "FXG_LOG_LEVEL";
+    /// `[log] file`
+    pub const LOG_FILE: &str = "FXG_LOG_FILE";
+    /// `[log] format` ("text" | "json")
+    pub const LOG_FORMAT: &str = "FXG_LOG_FORMAT";
+    /// `[log] no_color`
+    pub const LOG_NO_COLOR: &str = "FXG_LOG_NO_COLOR";
 }
 
 /// 設定の読み込み・パース時に発生するエラー。
@@ -144,6 +152,8 @@ fn parse_list(value: &str) -> Vec<String> {
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct GlobalConfig {
+    /// ログ設定
+    pub log: LogConfig,
     /// ローカルノードデーモン設定 (`fxg daemon`)
     pub node: NodeConfig,
     /// 中央サーバー設定 (`fxg server`)
@@ -190,6 +200,18 @@ impl GlobalConfig {
 
     /// `FXG_*` 環境変数による上書きを適用する。
     pub fn apply_env_overrides(&mut self, env: EnvLookup<'_>) -> Result<(), ConfigError> {
+        if let Some(v) = env(env_keys::LOG_LEVEL) {
+            self.log.level = Some(v);
+        }
+        if let Some(v) = env(env_keys::LOG_FILE) {
+            self.log.file = Some(v);
+        }
+        if let Some(v) = env(env_keys::LOG_FORMAT) {
+            self.log.format = Some(v);
+        }
+        if let Some(v) = env(env_keys::LOG_NO_COLOR) {
+            self.log.no_color = parse_bool_env(env_keys::LOG_NO_COLOR, &v)?;
+        }
         if let Some(v) = env(env_keys::NODE_ID) {
             self.node.node_id = Some(v);
         }
@@ -219,6 +241,20 @@ impl GlobalConfig {
         }
         Ok(())
     }
+}
+
+/// `[log]` セクション: ロギング設定。
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct LogConfig {
+    /// 既定ログレベル ("trace" | "debug" | "info" | "warn" | "error")
+    pub level: Option<String>,
+    /// ログファイル出力先 (相対パスは ~/.flexagent 起算、空文字で無効)
+    pub file: Option<String>,
+    /// ログ出力フォーマット ("text" | "json")
+    pub format: Option<String>,
+    /// ANSI カラー出力を無効化するか
+    pub no_color: bool,
 }
 
 /// `[node]` セクション: ローカルノードデーモン設定。
@@ -767,11 +803,19 @@ future_option = "whatever"
             ("FXG_SERVER_LISTEN_ADDR", "0.0.0.0:9090"),
             ("FXG_SERVER_ALLOWED_HOSTS", "a.test, b.test ,, c.test"),
             ("FXG_SERVER_ALLOWED_ORIGINS", "http://a.test"),
+            ("FXG_LOG_LEVEL", "debug"),
+            ("FXG_LOG_FILE", "custom.log"),
+            ("FXG_LOG_FORMAT", "json"),
+            ("FXG_LOG_NO_COLOR", "true"),
         ]);
         config
             .apply_env_overrides(&|key| env.get(key).cloned())
             .unwrap();
 
+        assert_eq!(config.log.level.as_deref(), Some("debug"));
+        assert_eq!(config.log.file.as_deref(), Some("custom.log"));
+        assert_eq!(config.log.format.as_deref(), Some("json"));
+        assert!(config.log.no_color);
         assert_eq!(config.node.node_id.as_deref(), Some("override-node"));
         assert_eq!(config.node.name.as_deref(), Some("Overridden"));
         assert_eq!(config.node.resolved_listen_addr(), "127.0.0.1:9000");

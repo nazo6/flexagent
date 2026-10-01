@@ -16,6 +16,7 @@ use usage::{Cli, RunAsync, Subcommands};
 
 mod client;
 mod commands;
+pub mod logging;
 mod server_api;
 mod service;
 mod tray;
@@ -78,16 +79,21 @@ enum Commands {
 
 #[tokio::main]
 async fn main() -> ExitCode {
-    // ログは `RUST_LOG` で制御する (既定: warn)。CLI の出力は stdout に限定する。
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn")),
-        )
-        .with_writer(std::io::stderr)
-        .init();
-
     let cli = Fxg::parse();
+
+    let env = fxg_protocol::config::process_env;
+    let fxg_home = fxg_protocol::config::fxg_home(&env);
+    let global = fxg_protocol::config::GlobalConfig::load(&env).unwrap_or_default();
+
+    let logging_options = match &cli.command {
+        Commands::Daemon(daemon_args) => daemon_args.logging_options(),
+        Commands::Server(server_args) => server_args.logging_options(),
+        _ => logging::LoggingOptions {
+            kind: logging::CommandLogKind::Cli,
+            ..Default::default()
+        },
+    };
+    logging::init_logging(&logging_options, &global, &fxg_home);
 
     // macOS ではトレイ (NSStatusItem) をメインスレッドのイベントループ上で
     // 作成・操作する必要があるため、`fxg daemon --tray` はここでメインスレッドを

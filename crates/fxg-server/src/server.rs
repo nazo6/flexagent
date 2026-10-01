@@ -136,6 +136,7 @@ impl Server {
             .await;
 
         let _ = self.task.await;
+        tracing::info!("fxg server stopped");
     }
 
     /// サーバーを起動し、シャットダウンまで稼働する (CLI エントリポイント用)。

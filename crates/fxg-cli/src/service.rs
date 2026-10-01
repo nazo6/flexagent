@@ -303,6 +303,7 @@ async fn status(server: bool, _exe: &std::path::Path) -> Result<()> {
     );
     println!("installed: {}", yes_no(installed));
     println!("running:   {}", yes_no(running));
+    println!("log file:  {}", service_log_path(server).display());
     if !installed {
         println!(
             "hint:      `fxg service install{}` で登録できます",
@@ -425,6 +426,7 @@ async fn status(server: bool, _exe: &std::path::Path) -> Result<()> {
     println!("installed: {}", yes_no(installed));
     println!("running:   {}", active);
     println!("probe:     {}", yes_no(probe_running(server).await));
+    println!("log file:  {}", service_log_path(server).display());
     if !installed {
         println!(
             "hint:      `fxg service install{}` で登録できます",
@@ -554,6 +556,7 @@ async fn status(server: bool, _exe: &std::path::Path) -> Result<()> {
     println!("installed: {}", yes_no(installed));
     println!("running:   {}", yes_no(running));
     println!("probe:     {}", yes_no(probe_running(server).await));
+    println!("log file:  {}", service_log_path(server).display());
     if !installed {
         println!(
             "hint:      `fxg service install{}` で登録できます",
@@ -607,4 +610,11 @@ fn yes_no(value: bool) -> &'static str {
 #[allow(dead_code)]
 fn server_flag(server: bool) -> &'static str {
     if server { " --server" } else { "" }
+}
+
+fn service_log_path(server: bool) -> PathBuf {
+    let env = fxg_protocol::config::process_env;
+    let home = fxg_protocol::config::fxg_home(&env);
+    let name = if server { "server.log" } else { "daemon.log" };
+    home.join("logs").join(name)
 }
