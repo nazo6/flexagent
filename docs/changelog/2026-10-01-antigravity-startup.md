@@ -178,11 +178,36 @@ ACP クライアントには置かない)。
 - 単体テスト: プールの checkout / 返却 / TTL 失効 / 置換 / 一括破棄 / Drop
   (`fxg-acp/src/warm.rs`)。
 
+### 検証実験: 1 プロセスで複数セッションを同時ホスト (2026-10-01)
+
+Phase 3 (同一エージェントを常に 1
+プロセスにし、複数セッションを並列ホストする設計)
+の前提条件を、生 ACP ハンドシェイクの実験
+(`target/tmp/test-antigravity-concurrent.mjs`)
+で検証した。
+
+- 結果 (実エージェント, 1 プロセスに 2 セッション):
+  - 2 セッションへ同時に `session/prompt` → **両方正常完了**。`session/update`
+    は
+    sessionId で正しく振り分けられ、**混線は無し**。
+  - ターンの並列性は実行ごとに変動: ある実行では両ターンが時間的に
+    インターリーブし、別の実行では直列化した (エージェント内部のリクエスト
+    キュー依存とみられる)。どちらも結果は正常。
+  - `session/cancel` は対象セッションのみ停止 (`stopReason: cancelled`)。
+    他セッションは影響を受けず、直後の prompt が正常完了した。
+  - 参考: cancel 時にエージェント内部プロキシが接続エラーをログするが、
+    即回復して継続する (cosmetic)。
+- 結論: ACP 仕様・SDK (per-session update チャネル + 動的ハンドラ登録)・
+  実エージェントの全てで「1 プロセス複数セッション」は成立する。
+  Phase 3 の前提条件は満たされた。
+
 ### 残課題 (Phase 2 以降)
 
 - TTL の設定項目 (`config.toml` の `[agents] warm_idle_secs`。0 = 無効)
 - `session/close` のベストエフォート送信 (セッション論理終了の明示)
-- 1 プロセス複数セッション同時ホスト (スループット最適化。MVP は安全側)
+- 1 プロセス複数セッション同時ホスト (Phase 3)。検証実験済み (上記)。実装には
+  ターンループのセッション毎タスク化・稼働中セッションへの一括 `Failed` 通知・
+  Dispose 時の全セッション終了が必要
 - Unix は現状のまま (`shutdown_tree` がルートのみ終了)
 
 ## 4. 計測用スクリプト (git 管理外)
@@ -191,5 +216,7 @@ ACP クライアントには置かない)。
 - `test-antigravity-childkill.mjs`: 子のみ kill した場合の `_MEI` 自動削除検証。
 - `test-antigravity-tempredirect.mjs`: `TEMP`/`TMP` 差し替えの有効性検証。
 - `bench-smallfiles.mjs`: 小ファイル作成スループットのベースライン計測。
+- `test-antigravity-concurrent.mjs`: 1 プロセス複数セッションの同時ターン /
+  cancel 分離検証。
 - `e2e-antigravity-warm.ps1`: 一時 `FXG_HOME` での warm 再利用 /
   resume / kill-all の E2E (旧 `e2e-antigravity-leak.ps1` を包含・置換)。
