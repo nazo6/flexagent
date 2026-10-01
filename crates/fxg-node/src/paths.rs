@@ -118,8 +118,16 @@ impl NodePaths {
 /// - **Linux / macOS / WSL**: `$XDG_RUNTIME_DIR/fxg/daemon.sock` または
 ///   `/tmp/fxg-<uid>/daemon.sock`
 ///
+/// 環境変数 `FXG_IPC_ENDPOINT` が設定されている場合はそれを優先する
+/// (一時VMの隔離実行やテストでの複数インスタンス用)。
+///
 /// 設計: `docs/03-protocol-and-api.md` §4。
 pub fn ipc_endpoint(env: EnvLookup<'_>) -> String {
+    if let Some(value) =
+        env(fxg_protocol::config::env_keys::IPC_ENDPOINT).filter(|value| !value.trim().is_empty())
+    {
+        return value;
+    }
     ipc_endpoint_inner(env)
 }
 

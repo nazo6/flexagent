@@ -19,7 +19,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use fxg_protocol::node_server::NodeToServerMsg;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter};
+use tokio::io::{AsyncWriteExt, BufWriter};
 use tokio::sync::{mpsc, watch};
 
 use super::{DaemonConfig, DaemonState};
@@ -123,7 +123,23 @@ pub async fn run_stdio(config: StdioConfig) -> Result<(), NodeError> {
         shutdown: Some(&shutdown_tx),
     };
     let mut bus_rx = state.bus().subscribe();
-    let mut lines = BufReader::new(tokio::io::stdin()).lines();
+
+    // stdin は専用 OS スレッドで読む。tokio の `stdin` は blocking タスクを
+    // ランタイムに常駐させるため、Drain 後にランタイムを破棄するとプロセスが
+    // 終了できなくなる (read(0) が未完了のまま残る)。
+    let (stdin_tx, mut stdin_rx) = mpsc::channel::<Option<String>>(64);
+    std::thread::spawn(move || {
+        let stdin = std::io::stdin();
+        for line in std::io::BufRead::lines(stdin.lock()) {
+            let message = line.ok();
+            let eof = message.is_none();
+            if stdin_tx.blocking_send(message).is_err() || eof {
+                break;
+            }
+        }
+        // EOF を通知 (送信済みなら無視される)
+        let _ = stdin_tx.blocking_send(None);
+    });
 
     tracing::info!(
         node_id = state.node_id(),
@@ -134,19 +150,15 @@ pub async fn run_stdio(config: StdioConfig) -> Result<(), NodeError> {
     loop {
         tokio::select! {
             _ = shutdown_rx.changed() => break,
-            line = lines.next_line() => match line {
-                Ok(Some(line)) => {
+            line = stdin_rx.recv() => match line {
+                Some(Some(line)) => {
                     if line.trim().is_empty() {
                         continue;
                     }
                     crate::sync::handle_server_message(&state, &line, &out_tx, &ctx).await;
                 }
-                Ok(None) => {
+                Some(None) | None => {
                     tracing::info!("stdin closed; shutting down");
-                    break;
-                }
-                Err(err) => {
-                    tracing::warn!("failed to read stdin: {err}");
                     break;
                 }
             },

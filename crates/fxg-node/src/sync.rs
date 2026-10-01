@@ -815,6 +815,14 @@ async fn drain_and_shutdown(
 ) {
     tracing::info!(reason, create_git_bundle, "drain and shutdown requested");
 
+    // 1. セッション / PTY を停止する (StatusChanged(Stopped) を記録する)
+    if ctx.ephemeral
+        && let Err(err) = state.kill_all_local(&format!("drain: {reason}")).await
+    {
+        tracing::warn!("failed to stop sessions on drain: {err}");
+    }
+
+    // 2. 未送信イベントを全フラッシュ
     if let Err(err) = push_outbox(state, out).await {
         tracing::warn!("failed to flush outbox on drain: {err}");
     }

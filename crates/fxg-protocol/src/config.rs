@@ -53,6 +53,8 @@ pub mod env_keys {
     pub const NODE_TOKEN: &str = "FXG_NODE_TOKEN";
     /// `[node] allow_remote_pty`
     pub const ALLOW_REMOTE_PTY: &str = "FXG_ALLOW_REMOTE_PTY";
+    /// ローカルIPCエンドポイントの上書き (テスト・同一ホストでの複数インスタンス用)
+    pub const IPC_ENDPOINT: &str = "FXG_IPC_ENDPOINT";
     /// `[server] listen_addr`
     pub const SERVER_LISTEN_ADDR: &str = "FXG_SERVER_LISTEN_ADDR";
     /// `[server] allowed_hosts` (カンマ区切り)
