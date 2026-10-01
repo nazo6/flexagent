@@ -503,6 +503,13 @@ exec /tmp/fxg daemon --stdio --ephemeral --workspace /tmp/workspace
      `git push` が走ると、すでに繋がっている `stdio` パイプ上で
      `NodeToServerMsg::GitCredentialRequest`
      を中央サーバーへ送り、中央サーバーから対象リポジトリの認証トークンをオンメモリで受け取ってGitへ渡します。
+     - **実装**: デーモンはエージェントプロセスへ `GIT_ASKPASS`
+       （`~/.flexagent/git-askpass.sh` → `fxg git-askpass <prompt>`）と
+       `GIT_TERMINAL_PROMPT=0` を注入する。ヘルパーはローカルIPC でデーモンへ
+       問い合わせ、デーモンが Node ⇔ Server 接続（WS / stdio 共通）上で
+       `GitCredentialRequest` を中継する。トークンは
+       `[server.git_credentials.<host>]`（`provider = "gh_cli" | "env"`）
+       からサーバー側で解決する。
 2. **破棄前の Graceful Drain と Git Bundle 自動退避（ベストエフォート）**:
    - 一時VM内のイベントは VM 内の `node.db` に蓄積し、終了時に中央サーバーから
      `ServerToNodeMsg::DrainAndShutdown`
@@ -514,6 +521,22 @@ exec /tmp/fxg daemon --stdio --ephemeral --workspace /tmp/workspace
      は未送信のイベントログをすべてフラッシュ（`EventBatchPush`）した上で、ワークスペースの未プッシュコミット・未コミット変更を
      **`git bundle create` で単一バンドルデータに固め、`WorkspaceBundleUpload`
      メッセージとして中央サーバーへ退避**します。
+   - **実装順序**: `DrainAndShutdown` 受信 → (1) セッション / PTY 停止
+     (`StatusChanged(Stopped)` 記録) → (2) Outbox 全フラッシュ → (3)
+     未コミット変更を
+     Shadow Git Tree + `git commit-tree`
+     でスナップショットコミット化（`refs/heads/fxg-snapshot`）
+     した上で `git bundle create --all` → (4) `WorkspaceBundleUpload`
+     （8 MiB 単位の Base64 分割転送。サーバーは `DrainComplete`
+     までチャンクを蓄積して連結）→ (5) `DrainComplete` 送信 → 子プロセス終了。
+     復元は `restore_git_bundle_b64` を `StartSession` に載せ、別ノードが
+     `git clone <bundle>` / `git fetch <bundle>` + `checkout -f -B`
+     でスナップショットブランチを再現する。
+   - **仮セッション投影**: ブートストラップ中（`NodeHello` 前）も UI
+     にセッションを
+     見せるため、中央サーバーは `sessions` 行を `status = 'provisioning'`
+     で先行挿入する（イベントではなく投影行。ノードの `SessionCreated`
+     が派生カラムを上書きする。書き込み権威の一元化は維持）。
    - これにより、一時VMが破棄された後でも、中央サーバーのUI上で差分を閲覧したり、別のノード（手元のWindows
      PC等）へ引き継いでセッションを `Fork` / 再開できます。
 

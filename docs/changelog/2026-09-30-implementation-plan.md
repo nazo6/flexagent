@@ -84,7 +84,7 @@
 | **Phase 3** | エージェントドライバ (ACP / OpenCode2)・CLI/TUI・Revert/Fork | `fxg-acp`, `fxg-node`, `fxg-cli`          | 完了 (2026-09-30) |
 | **Phase 4** | 中央サーバー・Outbox同期・Client API共通化・LANセキュリティ  | `fxg-server`, `fxg-node`, `fxg-cli`       | 完了 (2026-10-01) |
 | **Phase 5** | Web UI / Android PWA・Web Push・単一バイナリ統合             | `ui`, `fxg-server`, `fxg-node`, `fxg-cli` | 完了 (2026-10-01) |
-| **Phase 6** | 一時VM・サンドボックスノード (`--stdio` & Zero-Touch構築)    | `fxg-node`, `fxg-server`, `fxg-cli`, `ui` | 未着手            |
+| **Phase 6** | 一時VM・サンドボックスノード (`--stdio` & Zero-Touch構築)    | `fxg-node`, `fxg-server`, `fxg-cli`, `ui` | 完了 (2026-10-01) |
 
 ## 設計レビュー反映履歴
 
@@ -991,32 +991,54 @@
   - UI Bootstrap Log 表示 & CLI `--provisioner` 起動:
     [`docs/05-cli-and-pwa-ui.md` §1, §3.2, §4 Milestone 6](../05-cli-and-pwa-ui.md)
 - **タスクリスト**:
-  - [ ] `fxg-node`: `fxg daemon --stdio --ephemeral` 実装（`NodeToServerMsg` /
+  - [x] `fxg-node`: `fxg daemon --stdio --ephemeral` 実装（`NodeToServerMsg` /
         `ServerToNodeMsg` を `stdin/stdout` JSON Lines
-        で送受信するトランスポート実装、`stderr` へのログ完全分離）
-  - [ ] `fxg-cli` / `fxg-node`: `fxg bootstrap-workspace` の実装（`mise` / `uv`
+        で送受信するトランスポート実装、`stderr` へのログ完全分離） → 完了
+        (`daemon/stdio.rs`)。ローカルIPC も起動し (`fxg git-askpass` 用)、
+        `--workspace` をプロジェクト登録して `StartSession.local_path`
+        をクローン先に固定する。`DrainAndShutdown` は「セッション停止 → Outbox
+        フラッシュ → bundle 退避 → `DrainComplete` →
+        プロセス終了」の順で処理する
+  - [x] `fxg-cli` / `fxg-node`: `fxg bootstrap-workspace` の実装（`mise` / `uv`
         単一バイナリ自動配置、`Cargo.toml` / `package.json` / `pyproject.toml` /
-        `mise.toml` / `.fxg.toml` からのツール自動導入、出力の `>&2` 保護）
-  - [ ] `fxg-server`:
+        `mise.toml` / `.fxg.toml` からのツール自動導入、出力の `>&2` 保護） →
+        完了 (`bootstrap.rs`)。`$FXG_HOME/bootstrap.env`
+        を生成し、プロビジョナー
+        スクリプトが `exec fxg daemon --stdio` 直前に `source` する
+  - [x] `fxg-server`:
         コマンドテンプレート型プロビジョナー管理（`~/.flexagent/config.toml` の
         `[provisioners.*]` からの子プロセス起動、`stderr` の `BootstrapLog`
         ストリーム配信、アイドルタイムアウト監視、プロビジョナー起動時の環境変数注入
-        `FXG_GIT_URL` / `FXG_GIT_BRANCH` / 短命 `FXG_GIT_TOKEN`）
-  - [ ] Git Credential Proxy: ブートストラップ中の `bootstrap-workspace` 内
+        `FXG_GIT_URL` / `FXG_GIT_BRANCH` / 短命 `FXG_GIT_TOKEN`） → 完了
+        (`provisioner.rs`)。一時ノードIDをサーバーが採番し `FXG_NODE_ID`
+        として注入、`NodeHello` 後に `StartSession` を送る
+  - [x] Git Credential Proxy: ブートストラップ中の `bootstrap-workspace` 内
         `GIT_ASKPASS` ヘルパー（短命トークン）と、デーモン起動後の
         `GitCredentialRequest` / `GitCredentialResponse`
-        によるオンメモリ認証トークン中継
-  - [ ] Graceful Drain & Git Bundle 退避/復元（ベストエフォート）: 破棄前の
+        によるオンメモリ認証トークン中継 → 完了。デーモンはエージェントへ
+        `GIT_ASKPASS=~/.flexagent/git-askpass.sh` を注入し、`fxg git-askpass`
+        (ローカルIPC) → `CredentialBroker` → Node⇔Server 接続 (WS / stdio 共通)
+        で中継する。サーバー側は `[server.git_credentials.<host>]`
+        (`gh_cli` / `env`) から解決する
+  - [x] Graceful Drain & Git Bundle 退避/復元（ベストエフォート）: 破棄前の
         `DrainAndShutdown` 送信 ➔ 未送信イベント全フラッシュ +
         `git bundle create` (`WorkspaceBundleUpload`、サイズ上限・分割転送)
         による `server.db` (`git_bundle_path`)
         への保存、および別ノードでのバンドル復元
         (`restore_git_bundle_b64`)。Drain
-        前クラッシュ時の中間イベント損失は許容仕様
-  - [ ] CLI & UI 連携: `fxg run <agent> --provisioner <name>`,
+        前クラッシュ時の中間イベント損失は許容仕様 → 完了。未コミット変更は
+        Shadow
+        Git Tree + `git commit-tree` で `fxg-snapshot` ブランチ化して bundle
+        に含め、
+        復元時に `checkout -f -B` で再現する。`fork_context_messages`
+        による履歴 Replay 注入も実装（中央サーバー経由の Context Fork）
+  - [x] CLI & UI 連携: `fxg run <agent> --provisioner <name>`,
         `fxg provisioners list/test`, UI
         新規セッション画面での一時VMプロビジョナー選択と Chat
-        ペインの「Environment Bootstrap Log」折りたたみカード表示
+        ペインの「Environment Bootstrap Log」折りたたみカード表示 → 完了。
+        ブートストラップログは `ServerWsMessage::BootstrapLog`
+        (`{ op: "bootstrap_log", session_id, line }`) としてエフェメラル配信し、
+        UI は該当セッションのカードにリアルタイム追記する
 - **完了条件 / 検証**:
   - 中央サーバー経由（`fxg run --provisioner` / Web
     UI）で一時コンテナ/VMが起動し、`stderr`
@@ -1024,5 +1046,76 @@
     でセッションが開始され、終了時に `git bundle`
     が中央サーバーへ退避・別ノードで復元できること。Drain
     前クラッシュ時はイベントが失われる（ベストエフォート）ことも動作確認項目に含める。
+  - ✅ 検証済み (2026-10-01): `fxg-cli/tests/provisioner_e2e.rs` が実バイナリ
+    `fxg daemon --stdio --ephemeral` を子プロセス起動し、(1) 一時ノードの登録と
+    `BootstrapLog` 配信、(2) `StartSession` 中継とエラー伝播、(3) セッション終了
+    監視による Drain ➔ `WorkspaceBundleUpload` の蓄積・
+    `~/.flexagent/bundles/<session-id>.bundle` 保存と `git_bundle_path` 記録、
+    (4) 一時ノードの `terminated` 遷移、を自動検証する。`bootstrap-workspace` は
+    ローカル Git リポジトリで clone + ツール検出 + `bootstrap.env`
+    生成を検証し、`fxg-node` の bundle roundtrip テスト
+    (未コミット変更・未追跡ファイルの復元) も追加した
 - **実装ログ / 進捗メモ**:
-  - （実装時に追記）
+  - **コミット**: `feat(fxg-protocol,fxg-db,fxg-node,fxg-cli)`
+    (stdio トランスポート + bootstrap-workspace + Git Credential Proxy + bundle)
+    → `feat(fxg-server,fxg-cli,fxg-db)` (プロビジョナー管理 + Drain/bundle
+    保存 +
+    CLI 連携 + E2E) → `feat(ui)` (プロビジョナー選択 + Bootstrap Log ライブ表示)
+    →
+    `docs(plan)` の順で 1 トピック 1 コミット。
+  - **設計判断 (一時VMの仮セッション投影)**: 一時VMはブートストラップ
+    (`git clone` + ツール導入) 中はノードが存在しないため、中央サーバーが
+    `sessions` 行を `status = 'provisioning'` で先行挿入する
+    (`upsert_provisional_session`)。ノードの `SessionCreated` が upsert
+    で派生カラムを上書きし、`status` は後続の `StatusChanged`
+    まで保持される。失敗・タイムアウト時は `set_provisional_session_status` で
+    `error` にする。書き込み権威の一元化は維持 (仮投影行のみサーバー更新)。
+  - **設計判断 (エフェメラル BootstrapLog)**: ブートストラップは一時ノードの
+    `node.db` が存在する前に発生しイベントログに永続化できないため、
+    `ServerWsMessage::BootstrapLog`
+    として中央サーバーから直接配信する (再接続時は復元されない)。ノードの
+    `.fxg.toml [bootstrap]` 出力等の以後のログはノードが `BootstrapLog`
+    イベントとして永続化する経路 (既存) と棲み分ける。
+  - **設計判断 (bundle の分割転送と復元)**: `WorkspaceBundleUpload`
+    はチャンクインデックスを持たないため、サーバーは同一 `session_id`
+    の受信順チャンクを `DrainComplete` まで蓄積して連結する (WS / stdio
+    の順序保証に依存。Drain 前クラッシュ時は失われる = 許容仕様)。
+    未コミット変更は Shadow Git Tree + `git commit-tree` で
+    `refs/heads/fxg-snapshot` に固定して bundle に含める (`git clone <bundle>`
+    は `refs/heads/*` のみ取り込むため)。復元は
+    「新規パスなら `git clone`、既存リポジトリなら `git fetch`」の 2 経路で
+    `checkout -f -B <branch> <snapshot>` する。
+  - **設計判断 (`fxg daemon --stdio` の IPC)**: 一時VM内の `fxg git-askpass`
+    はローカルIPC でデーモンへ問い合わせる。デーモンは `CredentialBroker`
+    で Node⇔Server 接続 (WS / stdio 共通) に `GitCredentialRequest`
+    を中継するため、常駐ノードでも同一コードが動作する (WS ノードでは未使用)。
+  - **設計判断 (プロビジョナー疎通検証)**:
+    `POST /api/v1/provisioners/:name/test`
+    はクローンを行わない `--workspace /tmp` 付きの `fxg daemon --stdio`
+    を起動し、`NodeHello` までの `stderr` ログを返す (Docker / Colab
+    等の到達性確認用)。検証後は Drain → 強制終了で破棄する。
+  - **Phase 5 からの先送り項目の解消**: 中央サーバー経由の Context Fork
+    (`fork_context_messages` / `restore_git_bundle_b64`) と一時VMプロビジョナー
+    選択 UI は本フェーズで実装済み。Push 購読の明示削除 API
+    (失効時 404/410 自動清除で代替) と `fxg web --server` のトークン同梱、
+    Context Fork の UI 露出は引き続き未提供 (CLI / REST では利用可能)。
+  - **`fxg run --provisioner` のアタッチ**: 一時VMセッションは CLI から
+    TUI アタッチできない (ローカルIPC 直結ではないため)。コマンドは
+    `session_id` を出力して即座に戻り、閲覧は Web UI
+    (`fxg web`) で行う。`-d/--detach` と同じ挙動となる点を仕様とする。
+  - **バグ修正 (tokio stdin とランタイム破棄)**: `fxg daemon --stdio` の
+    `stdin` を `tokio::io::stdin` で読むと blocking タスクがランタイムに残り、
+    `DrainAndShutdown` 後のプロセス終了が `Runtime` 破棄で停止する (read(0)
+    が未完了のまま)。専用 OS スレッド (`std::io::stdin().lock().lines()` +
+    `mpsc`) で読む方式へ変更し、`stdio_credential_e2e.rs` で回帰を検出・修正した
+    (修正前は「daemon did not exit after drain」で失敗することを確認済み)。
+  - **検証テスト追加**: `fxg-cli/tests/stdio_credential_e2e.rs` が実バイナリ
+    `fxg daemon --stdio` を子プロセス起動し、テスト側が中央サーバーの代役として
+    (1) `NodeHello` (`is_ephemeral = true`)、(2) `fxg git-askpass` →
+    `GitCredentialRequest` → `GitCredentialResponse` → トークン/ユーザー名の
+    出力、(3) `DrainAndShutdown` → `DrainComplete` → 正常終了、を検証する。
+    併せて `FXG_IPC_ENDPOINT` (ローカルIPC エンドポイントの上書き) を追加し、
+    テスト・同一ホスト複数インスタンスでの衝突を回避する。
+  - **E2E テストの実行時間**: `provisioner_e2e.rs` は実バイナリ起動を含めて約 7
+    秒で完了する (アイドルタイムアウトは 30 秒設定で、セッション Error
+    検知による即時 Drain が先に走る)。

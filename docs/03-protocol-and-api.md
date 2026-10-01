@@ -574,6 +574,12 @@ pub enum ServerToNodeMsg {
 - `GET /api/v1/provisioners`:
   利用可能な一時VM・サンドボックスプロビジョナー一覧（`local-docker`,
   `local-incus`, `colab-pro` 等）を返却。
+- `POST /api/v1/provisioners/:name/test`:
+  指定プロビジョナーの起動と `fxg daemon --stdio` の `NodeHello`
+  ハンドシェイク疎通を検証する（中央サーバーのみ。プロビジョナーはサーバーホスト上で
+  子プロセス起動されるため）。`ProvisionerTestResponse`
+  (`ok` / `node_id` / `stderr` ログ末尾 / `error`)
+  を返却し、検証後は一時環境を破棄する。
 - `GET /api/v1/sessions?project_id=...&status=...`: セッション一覧。
 - `POST /api/v1/sessions`: 新規セッションの開始（既存の常駐 `node_id`
   指定のほか、`provisioner`
@@ -626,6 +632,13 @@ pub enum ServerToNodeMsg {
 3. クライアントからの操作（`SendPrompt`, `RespondPermission`,
    `ControlSession`）もこのWebSocket上（またはREST POST）で送信でき、結果は
    `command_id` 付きの `CommandResult` として要求元クライアントへ応答されます。
+   - **一時VMブートストラップログ (`BootstrapLog`)**:
+     一時VMの起動中（`fxg daemon
+     --stdio` の `NodeHello` 前）はノードの `node.db` が存在しないため、中央
+     サーバーがプロビジョナーの `stderr` を `{ op: "bootstrap_log", session_id,
+     line }` として**エフェメラル配信**する（イベントログには永続化されず、
+     再接続時は復元されない）。UI はセッション詳細の「Environment Bootstrap
+     Log」カードにリアルタイム表示する。
 4. **重複排除とマージ**:
    - クライアントは受信イベントを `event_id` / `(session_id, node_seq)` をキーに
      upsert し、重複配信 （`LiveStreamDelta`

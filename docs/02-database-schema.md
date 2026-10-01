@@ -287,6 +287,12 @@ Truth）とするため、テーブル上の以下のカラムは
   ハブ双方の受信ハンドラ）にあります。
 - `git_bundle_path`
   はハブのみが書き込む成果物退避パスであり、イベント投影の対象外です。
+- **一時VMの仮セッション行**: 一時VMプロビジョニング中（`NodeHello` 前）は、
+  中央サーバーが `sessions` 行を `status = 'provisioning'`
+  で先行挿入します（`upsert_provisional_session`。イベントではなく投影行）。
+  ノードの `SessionCreated` が upsert で派生カラムを上書きし、以降は通常の
+  イベント投影に合流します（`git_bundle_path` と同様、全量再構築時には
+  失われ得るベストエフォートの表示用状態）。
 
 ---
 
