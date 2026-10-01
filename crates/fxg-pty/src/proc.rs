@@ -95,6 +95,29 @@ impl ProcessTreeGuard {
         Ok(())
     }
 
+    /// Windows の RawHandle を Job Object へ割り当てる。
+    #[cfg(windows)]
+    pub fn attach_raw_handle(
+        &self,
+        handle: std::os::windows::io::RawHandle,
+    ) -> Result<(), PtyError> {
+        self.job.assign_process(handle)
+    }
+
+    /// `std::process::Child` をガードへ参加させる (Windows: Job Object へ割当 / Unix: no-op)。
+    pub fn attach_std_child(&self, child: &std::process::Child) -> Result<(), PtyError> {
+        #[cfg(windows)]
+        {
+            use std::os::windows::io::AsRawHandle;
+            self.job.assign_process(child.as_raw_handle())?;
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = child;
+        }
+        Ok(())
+    }
+
     /// Job Object によるプロセスツリー管理が有効か (診断用)。
     pub fn is_job_object_backend(&self) -> bool {
         cfg!(windows)

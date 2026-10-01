@@ -1059,10 +1059,10 @@ async fn pump_events(
 /// セッションのシャドウ Git インデックスファイルを削除する (リソース解放)。
 fn remove_snapshot_index(paths: &NodePaths, session_id: &str) {
     let path = paths.snapshot_index_path(session_id);
-    if let Err(err) = std::fs::remove_file(&path) {
-        if err.kind() != std::io::ErrorKind::NotFound {
-            tracing::warn!(session_id, path = %path.display(), "failed to remove snapshot index: {err:#}");
-        }
+    if let Err(err) = std::fs::remove_file(&path)
+        && err.kind() != std::io::ErrorKind::NotFound
+    {
+        tracing::warn!(session_id, path = %path.display(), "failed to remove snapshot index: {err:#}");
     }
 }
 

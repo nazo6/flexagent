@@ -339,6 +339,9 @@ pub async fn prune_worktrees(repo: &Path) -> Result<String, NodeError> {
     git::run_git(repo, &["worktree", "prune"]).await
 }
 
+/// フック実行のタイムアウト (秒)。
+const HOOK_TIMEOUT_SECS: u64 = 60;
+
 /// フックコマンドをシェル経由で実行する (失敗しても `Err` にはしない)。
 pub async fn run_hook_command(dir: &Path, command: &str) -> Result<HookLogEntry, NodeError> {
     let (program, flag) = if cfg!(windows) {
@@ -348,28 +351,65 @@ pub async fn run_hook_command(dir: &Path, command: &str) -> Result<HookLogEntry,
     };
     let program_path = fxg_pty::resolve_command(program, dir)
         .map_err(|err| NodeError::GitUnavailable(err.to_string()))?;
-    let output = tokio::process::Command::new(program_path)
-        .arg(flag)
+
+    let guard = fxg_pty::ProcessTreeGuard::new().map_err(|err| {
+        NodeError::Server(format!("failed to initialize process tree guard: {err}"))
+    })?;
+
+    let mut cmd = tokio::process::Command::new(program_path);
+    cmd.arg(flag)
         .arg(command)
         .current_dir(dir)
         .stdin(std::process::Stdio::null())
-        .output()
-        .await
-        .map_err(NodeError::Plain)?;
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
 
-    let mut text = String::from_utf8_lossy(&output.stdout).trim().to_owned();
-    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
-    if !stderr.is_empty() {
-        if !text.is_empty() {
-            text.push('\n');
+    let child = cmd.spawn().map_err(NodeError::Plain)?;
+
+    #[cfg(windows)]
+    {
+        if let Some(raw_handle) = child.raw_handle()
+            && let Err(err) = guard.attach_raw_handle(raw_handle)
+        {
+            tracing::warn!("failed to attach hook process to job object: {err}");
         }
-        text.push_str(&stderr);
     }
-    Ok(HookLogEntry {
-        command: command.to_owned(),
-        success: output.status.success(),
-        output: text,
-    })
+
+    let wait_output = child.wait_with_output();
+    let result = tokio::time::timeout(
+        std::time::Duration::from_secs(HOOK_TIMEOUT_SECS),
+        wait_output,
+    )
+    .await;
+
+    match result {
+        Ok(Ok(output)) => {
+            let mut text = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+            if !stderr.is_empty() {
+                if !text.is_empty() {
+                    text.push('\n');
+                }
+                text.push_str(&stderr);
+            }
+            Ok(HookLogEntry {
+                command: command.to_owned(),
+                success: output.status.success(),
+                output: text,
+            })
+        }
+        Ok(Err(err)) => Err(NodeError::Plain(err)),
+        Err(_elapsed) => {
+            let message = format!("hook command timed out after {HOOK_TIMEOUT_SECS}s: {command}");
+            tracing::warn!("{message}");
+            drop(guard); // Job Object を閉じて孫プロセスまで強制終了
+            Ok(HookLogEntry {
+                command: command.to_owned(),
+                success: false,
+                output: message,
+            })
+        }
+    }
 }
 
 async fn ensure_repository(repo: &Path) -> Result<(), NodeError> {
@@ -575,5 +615,15 @@ detached
         let dir = tempfile::tempdir().expect("tempdir");
         let err = list_worktrees(dir.path()).await.expect_err("must fail");
         assert!(matches!(err, NodeError::NotARepository(_)));
+    }
+
+    #[tokio::test]
+    async fn hook_command_runs_and_captures_output() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let entry = run_hook_command(dir.path(), "echo hook_test_success")
+            .await
+            .expect("hook run");
+        assert!(entry.success);
+        assert!(entry.output.contains("hook_test_success"));
     }
 }
