@@ -906,6 +906,20 @@
         ジョブ
         (fmt, clippy, sqlx, ts-rs, ui, test (ubuntu / macos / windows-latest))
         が完全成功。
+    - **Stage 1 (規約準拠 & リソース管理 - 完了)**:
+      - **Step 1.1**: `fxg-cli/src/commands.rs` の `same_directory`
+        におけるパス正規化を `fxg_pty::canonicalize` (`dunce`) に統一し、Windows
+        環境での UNC プレフィックス (`\\?\`) 付与を防止。
+      - **Step 1.2**: `fxg-node/src/session_manager.rs` でセッション終了時
+        (`pump_events` 完了および `shutdown_all`) に `remove_snapshot_index`
+        を呼び出し、一時インデックスファイルの蓄積リークを解消。単体テスト
+        `shutdown_all_cleans_up_snapshot_index` を追加。
+      - **Step 1.3**: `fxg-pty/src/proc.rs` の `ProcessTreeGuard` に
+        `attach_raw_handle` を追加し、`fxg-node/src/worktree.rs` の
+        `run_hook_command` で子孫プロセスを Job Object にバインド＆60
+        秒のタイムアウト (`tokio::time::timeout`) を適用。テストを追加。
+      - ✅ **CI 検証通過**: GitHub Actions CI (run `36803865678`) にて全 8
+        ジョブが完全成功。
 
 ---
 
