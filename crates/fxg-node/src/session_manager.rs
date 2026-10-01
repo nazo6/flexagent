@@ -45,19 +45,29 @@ const PROCESSED_COMMAND_HISTORY: usize = 256;
 const EVENT_LOAD_BATCH: u32 = 200;
 
 /// エージェント起動スペックからドライバを選択するファクトリ。
+///
+/// ドライバインスタンスはデーモンで共有される (セッションごとに生成しない)。
+/// `AcpDriver` はセッション終了後のプロセスを再利用プールへ保持するため、
+/// インスタンスが分かれるとプールが機能しない。
 pub type DriverFactory =
-    Arc<dyn Fn(&AgentLaunchSpec) -> anyhow::Result<Box<dyn AgentDriver>> + Send + Sync>;
+    Arc<dyn Fn(&AgentLaunchSpec) -> anyhow::Result<Arc<dyn AgentDriver>> + Send + Sync>;
 
 /// 既定のドライバファクトリ。
 ///
 /// - `acp`: 標準ACPエージェント ([`AcpDriver`])
 /// - `opencode2`: `opencode2 serve` ブリッジ ([`OpenCode2Driver`])
+///
+/// ドライバは種類ごとに 1 個を生成し、全セッションで共有する。
 pub fn default_driver_factory() -> DriverFactory {
-    Arc::new(|spec: &AgentLaunchSpec| match spec.driver_kind.as_str() {
-        "acp" => Ok(Box::new(AcpDriver::new()) as Box<dyn AgentDriver>),
-        "opencode2" => Ok(Box::new(OpenCode2Driver::new()) as Box<dyn AgentDriver>),
-        other => Err(anyhow::anyhow!("unknown driver kind: {other}")),
-    })
+    let acp: Arc<dyn AgentDriver> = Arc::new(AcpDriver::new());
+    let opencode2: Arc<dyn AgentDriver> = Arc::new(OpenCode2Driver::new());
+    Arc::new(
+        move |spec: &AgentLaunchSpec| match spec.driver_kind.as_str() {
+            "acp" => Ok(Arc::clone(&acp)),
+            "opencode2" => Ok(Arc::clone(&opencode2)),
+            other => Err(anyhow::anyhow!("unknown driver kind: {other}")),
+        },
+    )
 }
 
 /// ドライバの純正TUI Attach 情報から CLI のアタッチモードを決める。
@@ -230,6 +240,8 @@ struct Inner {
     registry: AcpRegistry,
     factory: DriverFactory,
     sessions: Mutex<Sessions>,
+    /// ファクトリが返したドライバ (共有インスタンス。`shutdown_idle` 用に保持)
+    drivers: Mutex<Vec<Arc<dyn AgentDriver>>>,
 }
 
 #[derive(Default)]
@@ -318,6 +330,7 @@ impl SessionManager {
                 registry,
                 factory,
                 sessions: Mutex::new(Sessions::default()),
+                drivers: Mutex::new(Vec::new()),
             }),
         }
     }
@@ -330,6 +343,16 @@ impl SessionManager {
     /// セッションイベントバス。
     pub fn bus(&self) -> &SessionEventBus {
         &self.inner.bus
+    }
+
+    /// ファクトリが返した共有ドライバを記録する (重複はポインタで排除)。
+    ///
+    /// `shutdown_all` がアイドルプロセス (warm プール) を破棄するために使う。
+    fn remember_driver(&self, driver: &Arc<dyn AgentDriver>) {
+        let mut drivers = self.inner.drivers.lock().expect("drivers poisoned");
+        if !drivers.iter().any(|existing| Arc::ptr_eq(existing, driver)) {
+            drivers.push(Arc::clone(driver));
+        }
     }
 
     /// `command_id` を処理済みとして記録する。
@@ -562,6 +585,7 @@ impl SessionManager {
 
         let driver =
             (self.inner.factory)(params.spec).map_err(|err| NodeError::Agent(err.to_string()))?;
+        self.remember_driver(&driver);
         let (event_tx, event_rx) = mpsc::unbounded_channel();
         let started = match driver
             .start_session(
@@ -1193,11 +1217,25 @@ impl SessionManager {
         };
         let mut stopped = Vec::with_capacity(handles.len());
         for (session_id, handle) in handles {
-            if let Err(err) = handle.shutdown().await {
+            // 温存せず完全に破棄する (`shutdown` はプールへ返却するため使わない)
+            if let Err(err) = handle.dispose().await {
                 tracing::warn!(session_id = %session_id, "failed to shutdown: {err:#}");
             }
             remove_snapshot_index(&self.inner.paths, &session_id);
             stopped.push(session_id);
+        }
+        // アイドル (warm) プロセスも破棄してプールを空にする
+        let drivers: Vec<Arc<dyn AgentDriver>> =
+            { self.inner.drivers.lock().expect("drivers poisoned").clone() };
+        for driver in drivers {
+            let disposed = driver.shutdown_idle().await;
+            if disposed > 0 {
+                tracing::info!(
+                    driver = driver.driver_kind(),
+                    count = disposed,
+                    "disposed idle agent processes"
+                );
+            }
         }
         stopped
     }

@@ -18,6 +18,7 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use agent_client_protocol::schema::ProtocolVersion;
@@ -53,15 +54,45 @@ use crate::driver::{
     ActiveSessionHandle, AgentDriver, DriverEvent, ResumeRequest, StartSessionRequest,
     StartedSession,
 };
+use crate::warm::{DEFAULT_WARM_IDLE, LaunchKey, WarmPool, WarmProcess};
 
 /// 標準ACPエージェントを `agent-client-protocol` で制御するドライバ。
-#[derive(Debug, Default)]
-pub struct AcpDriver;
+///
+/// セッション終了後もプロセスを TTL 付きでアイドル保持し、次のセッションで
+/// 再利用する (起動が高コストなエージェントでは 2 セッション目以降の開始が
+/// `session/new` のみで済む)。プール無効化は [`AcpDriver::without_pool`]。
+pub struct AcpDriver {
+    /// アイドルプロセスの再利用プール (`None` = プール無効)
+    pool: Option<Arc<WarmPool<ProcessHandle>>>,
+}
+
+impl std::fmt::Debug for AcpDriver {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AcpDriver")
+            .field("warm_pool", &self.pool.is_some())
+            .finish()
+    }
+}
+
+impl Default for AcpDriver {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl AcpDriver {
-    /// ドライバを作成する。
+    /// アイドルプール有効 (既定 TTL 10 分) でドライバを作成する。
     pub fn new() -> Self {
-        Self
+        Self {
+            pool: Some(Arc::new(WarmPool::new(DEFAULT_WARM_IDLE))),
+        }
+    }
+
+    /// アイドルプール無効でドライバを作成する (セッション終了でプロセスを破棄)。
+    ///
+    /// セッション間でエージェント状態を共有したくない場合 (テスト・診断) に使う。
+    pub fn without_pool() -> Self {
+        Self { pool: None }
     }
 }
 
@@ -74,13 +105,201 @@ type PermissionRegistry = Arc<Mutex<HashMap<String, oneshot::Sender<RequestPermi
 /// ファイル (数百 MB) を削除してから終了するため、削除 I/O を見込んだ余裕を取る。
 const AGENT_EXIT_GRACE: std::time::Duration = std::time::Duration::from_secs(15);
 
-/// セッション所有タスクへのコマンド。
+/// セッション (ターンループ) へのコマンド。
 #[derive(Debug)]
 enum AcpCommand {
     /// プロンプト送信 (ターン完了まで実行される)
     Prompt(String),
-    /// セッション終了 (接続を畳み、エージェントプロセスを kill する)
+    /// セッション終了 (プロセスは維持し、次のセッションで再利用する)
     Shutdown,
+}
+
+/// 常駐プロセスへのコマンド。
+enum ProcessCommand {
+    /// 新規セッションを作成してターンループを開始する
+    NewSession {
+        /// セッション作成パラメータ
+        params: SessionParams,
+        /// セッションのイベント送信
+        events: mpsc::UnboundedSender<DriverEvent>,
+        /// セッションが握るプロセスの利用権
+        lease: Arc<ProcessLease>,
+        /// セッションへのコマンドチャネル (送信側はハンドルが保持)
+        commands: (
+            mpsc::UnboundedSender<AcpCommand>,
+            mpsc::UnboundedReceiver<AcpCommand>,
+        ),
+        /// セッション準備完了通知 (ハンドル + ネイティブ復元成否 / エラー)
+        ready: oneshot::Sender<anyhow::Result<(AcpSessionHandle, bool)>>,
+    },
+    /// プロセスを終了する (teardown 実行)
+    Dispose,
+}
+
+/// プロセス内で新規セッションを作るために必要なパラメータ。
+#[derive(Debug, Clone)]
+struct SessionParams {
+    /// fxg 側のセッションID (ログ用)
+    session_id: String,
+    /// 作業ディレクトリ (セッションの `local_path`)
+    cwd: PathBuf,
+    /// 初期モード
+    initial_mode: Option<String>,
+    /// 既存エージェントセッションからの再開指定 (`None` は新規セッション)
+    resume: Option<ResumeRequest>,
+}
+
+/// セッション単位の共有情報 (ハンドラが ACP の session_id から引く)。
+///
+/// 1 プロセスがセッションをまたいで再利用されるため、fs / terminal
+/// ハンドラは接続構築時の情報を閉じ込めず、ここから都度解決する。
+#[derive(Clone)]
+struct SessionContext {
+    /// 作業ディレクトリ (fs / terminal の相対パス解決に使う)
+    cwd: PathBuf,
+    /// イベント送信 (ステータス更新・承認・fs 変更通知)
+    events: mpsc::UnboundedSender<DriverEvent>,
+}
+
+/// ACP セッションID → セッション情報。
+type SessionContexts = Arc<Mutex<HashMap<String, SessionContext>>>;
+
+/// ACP セッションID でセッション情報を引く。
+fn session_context(contexts: &SessionContexts, session_id: &SessionId) -> Option<SessionContext> {
+    contexts
+        .lock()
+        .expect("session contexts poisoned")
+        .get(&session_id.to_string())
+        .cloned()
+}
+
+/// 常駐プロセスのハンドル (プール / リースが共有保持する)。
+struct ProcessHandle {
+    /// プロセスへのコマンド送信
+    control_tx: mpsc::UnboundedSender<ProcessCommand>,
+    /// 常駐タスクの JoinHandle (`dispose_process` が teardown 完了を待つ)
+    join: Mutex<Option<tokio::task::JoinHandle<()>>>,
+}
+
+impl ProcessHandle {
+    /// 新しいセッションを作成し、ハンドルとネイティブ復元成否を返す。
+    async fn new_session(
+        &self,
+        params: SessionParams,
+        events: mpsc::UnboundedSender<DriverEvent>,
+        lease: Arc<ProcessLease>,
+    ) -> anyhow::Result<(AcpSessionHandle, bool)> {
+        let commands = mpsc::unbounded_channel();
+        let (ready_tx, ready_rx) = oneshot::channel();
+        self.control_tx
+            .send(ProcessCommand::NewSession {
+                params,
+                events,
+                lease,
+                commands,
+                ready: ready_tx,
+            })
+            .map_err(|_| anyhow!("acp agent process is no longer running"))?;
+        ready_rx
+            .await
+            .context("acp agent process ended before the session became ready")?
+    }
+
+    /// プロセスを終了し、teardown の完了を待つ (完了済みなら即時)。
+    async fn dispose_process(&self) {
+        let _ = self.control_tx.send(ProcessCommand::Dispose);
+        let join = self.join.lock().expect("process join poisoned").take();
+        if let Some(join) = join {
+            let _ = join.await;
+        }
+    }
+}
+
+impl WarmProcess for ProcessHandle {
+    fn dispose(&self) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + '_>> {
+        Box::pin(self.dispose_process())
+    }
+}
+
+/// セッションが握るプロセスの利用権。終了時にプールへ返却、または破棄する。
+struct ProcessLease {
+    /// 再利用キー
+    key: LaunchKey,
+    /// 常駐プロセス
+    process: Arc<ProcessHandle>,
+    /// 返却先プール (`None` = プール無効 → 破棄)
+    pool: Option<Arc<WarmPool<ProcessHandle>>>,
+    /// [`AcpSessionHandle::dispose`] 指定 (プールへ返さずプロセスを破棄する)
+    dispose_requested: AtomicBool,
+    /// 返却 / 破棄の二重実行防止
+    finished: AtomicBool,
+    /// ターンループ終了通知の送信側 (プロセス側が serve 開始時に取り出す)
+    session_end_tx: Mutex<Option<oneshot::Sender<()>>>,
+    /// ターンループ終了通知の受信側 (`shutdown` が待つ)
+    session_end_rx: Mutex<Option<oneshot::Receiver<()>>>,
+}
+
+impl std::fmt::Debug for ProcessLease {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ProcessLease")
+            .field("key", &self.key)
+            .field("dispose_requested", &self.dispose_requested)
+            .field("finished", &self.finished)
+            .finish()
+    }
+}
+
+impl ProcessLease {
+    /// 新しい利用権を作成する (ターンループ終了通知チャネルを含む)。
+    fn new(
+        key: LaunchKey,
+        process: Arc<ProcessHandle>,
+        pool: Option<Arc<WarmPool<ProcessHandle>>>,
+    ) -> Self {
+        let (session_end_tx, session_end_rx) = oneshot::channel();
+        Self {
+            key,
+            process,
+            pool,
+            dispose_requested: AtomicBool::new(false),
+            finished: AtomicBool::new(false),
+            session_end_tx: Mutex::new(Some(session_end_tx)),
+            session_end_rx: Mutex::new(Some(session_end_rx)),
+        }
+    }
+
+    /// ターンループ終了通知の送信側を取り出す (プロセス側が一度だけ)。
+    fn take_session_end_sender(&self) -> Option<oneshot::Sender<()>> {
+        self.session_end_tx
+            .lock()
+            .expect("process lease poisoned")
+            .take()
+    }
+
+    /// ターンループ終了を待つための受信側を取り出す (`shutdown` が一度だけ)。
+    fn take_session_end_receiver(&self) -> Option<oneshot::Receiver<()>> {
+        self.session_end_rx
+            .lock()
+            .expect("process lease poisoned")
+            .take()
+    }
+
+    /// プールへ返さずプロセスを破棄するよう印を付ける (セッション異常終了時など)。
+    fn mark_dispose(&self) {
+        self.dispose_requested.store(true, Ordering::SeqCst);
+    }
+
+    /// セッション終了後の後処理 (プールへ返却 or プロセス破棄)。二重呼び出しは無視する。
+    async fn finish(&self) {
+        if self.finished.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        if self.dispose_requested.load(Ordering::SeqCst) || self.pool.is_none() {
+            self.process.dispose_process().await;
+        } else if let Some(pool) = &self.pool {
+            pool.release(self.key.clone(), Arc::clone(&self.process));
+        }
+    }
 }
 
 #[async_trait]
@@ -94,6 +313,33 @@ impl AgentDriver for AcpDriver {
         req: StartSessionRequest,
         event_tx: mpsc::UnboundedSender<DriverEvent>,
     ) -> anyhow::Result<StartedSession> {
+        match self.start_session_inner(req, &event_tx).await {
+            Ok(started) => Ok(started),
+            Err(err) => {
+                // 起動失敗をイベントに記録する (セッションは error 状態へ遷移する)
+                let _ = event_tx.send(DriverEvent::Failed {
+                    message: err.to_string(),
+                });
+                Err(err)
+            }
+        }
+    }
+
+    async fn shutdown_idle(&self) -> usize {
+        match &self.pool {
+            Some(pool) => pool.shutdown_idle().await,
+            None => 0,
+        }
+    }
+}
+
+impl AcpDriver {
+    /// セッション開始の本体 (アイドルプロセスの再利用 → コールドスタートの順)。
+    async fn start_session_inner(
+        &self,
+        req: StartSessionRequest,
+        event_tx: &mpsc::UnboundedSender<DriverEvent>,
+    ) -> anyhow::Result<StartedSession> {
         // `npx` / `uvx` 等の拡張子解決 (Windows の PATHEXT 対応)
         let program = fxg_pty::resolve_command(&req.launch.program.to_string_lossy(), &req.cwd)
             .map_err(|err| {
@@ -102,6 +348,50 @@ impl AgentDriver for AcpDriver {
                     req.launch.program.display()
                 )
             })?;
+        let key = LaunchKey::new(&req.launch, program.clone());
+        let session_params = SessionParams {
+            session_id: req.session_id.clone(),
+            cwd: req.cwd.clone(),
+            initial_mode: req.initial_mode.clone(),
+            resume: req.resume.clone(),
+        };
+
+        // 1) アイドルプロセスの再利用 (initialize 済みの接続へ session/new するだけ)
+        if let Some(pool) = &self.pool
+            && let Some(process) = pool.checkout(&key)
+        {
+            let lease = Arc::new(ProcessLease::new(
+                key.clone(),
+                Arc::clone(&process),
+                Some(Arc::clone(pool)),
+            ));
+            match process
+                .new_session(session_params.clone(), event_tx.clone(), lease)
+                .await
+            {
+                Ok((handle, context_restored)) => {
+                    tracing::debug!(
+                        session_id = %req.session_id,
+                        agent = %key.agent_id(),
+                        "reusing idle acp agent process"
+                    );
+                    return Ok(StartedSession {
+                        handle: Box::new(handle),
+                        context_restored,
+                    });
+                }
+                Err(err) => {
+                    tracing::warn!(
+                        session_id = %req.session_id,
+                        agent = %key.agent_id(),
+                        "failed to reuse idle acp agent process: {err:#}"
+                    );
+                    process.dispose_process().await;
+                }
+            }
+        }
+
+        // 2) コールドスタート (プロセス起動 → initialize → セッション作成)
         let config = AcpAgentConfig::new(program)
             .args(req.launch.args.iter().cloned())
             .envs(
@@ -110,58 +400,52 @@ impl AgentDriver for AcpDriver {
                     .iter()
                     .map(|(key, value)| (key.clone(), value.clone())),
             );
-
-        let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
-        let permissions: PermissionRegistry = Arc::new(Mutex::new(HashMap::new()));
-        let (ready_tx, ready_rx) = oneshot::channel();
-
-        let cwd = req.cwd.clone();
-        let initial_mode = req.initial_mode.clone();
-        let resume = req.resume.clone();
-        let events = event_tx.clone();
-        let permissions_for_task = Arc::clone(&permissions);
-        let agent = AcpAgent::new(config);
-        let session_id = req.session_id.clone();
-        tokio::spawn(async move {
-            let result = run_acp_session(AcpSessionTaskParams {
-                agent,
-                cwd,
-                cmd_rx,
-                cmd_tx,
-                permissions: Arc::clone(&permissions_for_task),
-                events: events.clone(),
-                ready_tx,
-                initial_mode,
-                resume,
-            })
-            .await;
-            match result {
-                Ok(()) => {
-                    let _ = events.send(DriverEvent::Event(UnifiedEventPayload::StatusChanged {
-                        status: fxg_protocol::common::SessionStatus::Stopped,
-                        error_message: None,
-                    }));
-                }
-                Err(err) => {
-                    tracing::warn!(session_id = %session_id, "acp session ended: {err}");
-                    let _ = events.send(DriverEvent::Failed {
-                        message: err.to_string(),
-                    });
-                }
-            }
-            // 未解決の承認が残っていればキャンセルで閉じる
-            cancel_pending_permissions(&permissions_for_task);
-        });
-
-        let (handle, context_restored) = ready_rx
+        let (process, ready_rx) = spawn_agent_process(AcpAgent::new(config));
+        ready_rx
             .await
-            .context("acp session task ended before becoming ready")??;
-
+            .context("acp agent process ended during startup")??;
+        let lease = Arc::new(ProcessLease::new(
+            key,
+            Arc::clone(&process),
+            self.pool.clone(),
+        ));
+        let (handle, context_restored) = process
+            .new_session(session_params, event_tx.clone(), lease)
+            .await?;
         Ok(StartedSession {
             handle: Box::new(handle),
             context_restored,
         })
     }
+}
+
+/// エージェントプロセスを起動し、常駐タスクとプロセス ready 通知を返す。
+///
+/// ready は `initialize` 完了時に通知される (セッション作成は
+/// [`ProcessHandle::new_session`] で行う)。
+fn spawn_agent_process(
+    agent: AcpAgent,
+) -> (Arc<ProcessHandle>, oneshot::Receiver<anyhow::Result<()>>) {
+    let (control_tx, control_rx) = mpsc::unbounded_channel();
+    let (ready_tx, ready_rx) = oneshot::channel();
+    let join = tokio::spawn(async move {
+        if let Err(err) = run_acp_process(AcpProcessTaskParams {
+            agent,
+            ready_tx,
+            control_rx,
+        })
+        .await
+        {
+            tracing::warn!("acp agent process ended: {err:#}");
+        }
+    });
+    (
+        Arc::new(ProcessHandle {
+            control_tx,
+            join: Mutex::new(Some(join)),
+        }),
+        ready_rx,
+    )
 }
 
 /// 起動済みACPセッションのハンドル。
@@ -170,14 +454,20 @@ struct AcpSessionHandle {
     acp_session_id: SessionId,
     /// 接続 (clone 可能。リクエスト/通知の発行に使う)
     conn: ConnectionTo<Agent>,
-    /// セッション所有タスクへのコマンド
+    /// セッション (ターンループ) へのコマンド
     commands: mpsc::UnboundedSender<AcpCommand>,
-    /// 承認解決レジストリ
+    /// 承認解決レジストリ (プロセス共有)
     permissions: PermissionRegistry,
-    /// イベント送信 (ステータス更新用)
-    events: mpsc::UnboundedSender<DriverEvent>,
-    /// PTY マネージャ (ACP terminal/* 用)
+    /// イベント送信 (ステータス更新用)。
+    ///
+    /// セッション終了 ([`ActiveSessionHandle::shutdown`]) で解放する。保持した
+    /// ままだとセッションマネージャのイベントポンプが「ドライバ終了」を検知
+    /// できず、セッションが active 一覧から外れない。
+    events: Mutex<Option<mpsc::UnboundedSender<DriverEvent>>>,
+    /// PTY マネージャ (ACP terminal/* 用。プロセス共有)
     pty: Arc<fxg_pty::PtySessionManager>,
+    /// プロセスの利用権 (終了時にプールへ返却 or 破棄)
+    lease: Arc<ProcessLease>,
 }
 
 #[async_trait]
@@ -247,22 +537,42 @@ impl ActiveSessionHandle for AcpSessionHandle {
             .map_err(|err| anyhow!("failed to cancel turn: {err}"))?;
         // 未解決の承認は仕様上 cancelled で返す (MUST)
         cancel_pending_permissions(&self.permissions);
-        let _ = self
+        if let Some(events) = self
             .events
-            .send(DriverEvent::Event(UnifiedEventPayload::StatusChanged {
+            .lock()
+            .expect("session events poisoned")
+            .as_ref()
+        {
+            let _ = events.send(DriverEvent::Event(UnifiedEventPayload::StatusChanged {
                 status: fxg_protocol::common::SessionStatus::Running,
                 error_message: None,
             }));
+        }
         Ok(())
     }
 
     async fn shutdown(&self) -> anyhow::Result<()> {
-        // コマンドループを抜けると接続が畳まれ、エージェントプロセス (ツリー) が kill される
+        // セッションを閉じ、プロセスは再利用プールへ返す (破棄は [`Self::dispose`])
+        let session_end = self.lease.take_session_end_receiver();
         let _ = self.commands.send(AcpCommand::Shutdown);
+        if let Some(session_end) = session_end {
+            // ターンループの終了を待つ (ループ未起動/異常終了時は即時 Err で返る)
+            let _ = session_end.await;
+        }
         for terminal_id in self.pty.list() {
             let _ = self.pty.kill(&terminal_id.pty_id);
         }
+        // イベント送信を解放する (セッションマネージャのポンプが「ドライバ終了」
+        // を検知し、active 一覧から外せるようにするため)
+        self.events.lock().expect("session events poisoned").take();
+        self.lease.finish().await;
         Ok(())
+    }
+
+    async fn dispose(&self) -> anyhow::Result<()> {
+        // プロセスを温存せず破棄する (`fxg kill-all` / デーモン終了)
+        self.lease.dispose_requested.store(true, Ordering::SeqCst);
+        self.shutdown().await
     }
 }
 
@@ -274,45 +584,32 @@ fn cancel_pending_permissions(permissions: &PermissionRegistry) {
     }
 }
 
-/// ACP接続を確立し、セッションを開始してコマンドループを回す。
-#[allow(clippy::too_many_lines)]
-/// `run_acp_session` の起動パラメータ。
-struct AcpSessionTaskParams {
+/// `run_acp_process` の起動パラメータ。
+struct AcpProcessTaskParams {
     /// 起動するエージェント
     agent: AcpAgent,
-    /// 作業ディレクトリ
-    cwd: PathBuf,
-    /// コマンド受信
-    cmd_rx: mpsc::UnboundedReceiver<AcpCommand>,
-    /// コマンド送信 (ハンドルへ渡す clone)
-    cmd_tx: mpsc::UnboundedSender<AcpCommand>,
-    /// 承認解決レジストリ
-    permissions: PermissionRegistry,
-    /// イベント送信
-    events: mpsc::UnboundedSender<DriverEvent>,
-    /// セッション準備完了通知 (ハンドル + ネイティブ復元成否)
-    ready_tx: oneshot::Sender<anyhow::Result<(AcpSessionHandle, bool)>>,
-    /// 初期モード
-    initial_mode: Option<String>,
-    /// 既存エージェントセッションからの再開指定 (`None` は新規セッション)
-    resume: Option<ResumeRequest>,
+    /// プロセス ready (initialize 完了) 通知
+    ready_tx: oneshot::Sender<anyhow::Result<()>>,
+    /// プロセスへのコマンド受信
+    control_rx: mpsc::UnboundedReceiver<ProcessCommand>,
 }
 
-/// ACP接続を確立し、セッションを開始してコマンドループを回す。
-async fn run_acp_session(params: AcpSessionTaskParams) -> Result<(), agent_client_protocol::Error> {
-    let AcpSessionTaskParams {
+/// ACP接続を確立し、アイドル待機とセッション処理を順に回す常駐タスク。
+///
+/// 1 プロセスにつき同時 1 セッションを担当し、セッション終了後は次の
+/// `NewSession` まで待機する (プロセスの破棄はプールの TTL / `Dispose`)。
+#[allow(clippy::too_many_lines)]
+async fn run_acp_process(params: AcpProcessTaskParams) -> Result<(), agent_client_protocol::Error> {
+    let AcpProcessTaskParams {
         agent,
-        cwd,
-        mut cmd_rx,
-        cmd_tx,
-        permissions,
-        events,
         ready_tx,
-        initial_mode,
-        resume,
+        mut control_rx,
     } = params;
+    let mut ready_tx = Some(ready_tx);
     let pty = Arc::new(fxg_pty::PtySessionManager::new());
     let terminals = Arc::new(TerminalRegistry::default());
+    let permissions: PermissionRegistry = Arc::new(Mutex::new(HashMap::new()));
+    let contexts: SessionContexts = Arc::new(Mutex::new(HashMap::new()));
 
     // ハンドラ登録 (fs / 承認 / terminal)。
     // NOTE: `impl AsyncFnMut` を返すヘルパー経由では associated future の `Send` を
@@ -323,8 +620,16 @@ async fn run_acp_session(params: AcpSessionTaskParams) -> Result<(), agent_clien
         .on_receive_request(
             {
                 let permissions = Arc::clone(&permissions);
-                let events = events.clone();
+                let contexts = Arc::clone(&contexts);
                 async move |request: RequestPermissionRequest, responder, cx| {
+                    // セッションが既に閉じている (レース) 場合は安全側に倒して
+                    // キャンセルで返す
+                    let Some(context) = session_context(&contexts, &request.session_id) else {
+                        return responder.respond(RequestPermissionResponse::new(
+                            RequestPermissionOutcome::Cancelled,
+                        ));
+                    };
+                    let events = context.events.clone();
                     let request_id = responder.id().to_string();
                     let options = request
                         .options
@@ -360,7 +665,7 @@ async fn run_acp_session(params: AcpSessionTaskParams) -> Result<(), agent_clien
                         .lock()
                         .expect("permission registry poisoned")
                         .insert(request_id, decision_tx);
-                    let events_for_task = events.clone();
+                    let events_for_task = context.events.clone();
                     cx.spawn(async move {
                         let outcome = decision_rx
                             .await
@@ -380,9 +685,12 @@ async fn run_acp_session(params: AcpSessionTaskParams) -> Result<(), agent_clien
         )
         .on_receive_request(
             {
-                let cwd = cwd.clone();
+                let contexts = Arc::clone(&contexts);
                 async move |request: ReadTextFileRequest, responder, _cx| {
-                    let path = resolve_path(&cwd, &request.path);
+                    let Some(context) = session_context(&contexts, &request.session_id) else {
+                        return responder.respond_with_internal_error("unknown session");
+                    };
+                    let path = resolve_path(&context.cwd, &request.path);
                     let result = (|| -> anyhow::Result<String> {
                         let content = std::fs::read_to_string(&path)
                             .with_context(|| format!("failed to read {}", path.display()))?;
@@ -409,17 +717,19 @@ async fn run_acp_session(params: AcpSessionTaskParams) -> Result<(), agent_clien
         )
         .on_receive_request(
             {
-                let cwd = cwd.clone();
-                let events = events.clone();
+                let contexts = Arc::clone(&contexts);
                 async move |request: WriteTextFileRequest, responder, _cx| {
-                    let path = resolve_path(&cwd, &request.path);
+                    let Some(context) = session_context(&contexts, &request.session_id) else {
+                        return responder.respond_with_internal_error("unknown session");
+                    };
+                    let path = resolve_path(&context.cwd, &request.path);
                     let old_text = std::fs::read_to_string(&path).unwrap_or_default();
                     match std::fs::write(&path, &request.content) {
                         Ok(()) => {
                             let path_string = path.to_string_lossy().into_owned();
                             let diff = build_file_diff(&path_string, &old_text, &request.content);
-                            let _ =
-                                events.send(DriverEvent::Event(UnifiedEventPayload::ToolCall {
+                            let _ = context.events.send(DriverEvent::Event(
+                                UnifiedEventPayload::ToolCall {
                                     tool_call_id: format!("fs-{}", uuid_v7()),
                                     title: format!("write_text_file: {path_string}"),
                                     kind: "edit".to_owned(),
@@ -427,7 +737,8 @@ async fn run_acp_session(params: AcpSessionTaskParams) -> Result<(), agent_clien
                                     locations: vec![path_string],
                                     diff: Some(diff),
                                     raw_output: None,
-                                }));
+                                },
+                            ));
                             responder.respond(WriteTextFileResponse::new())
                         }
                         Err(err) => responder.respond_with_internal_error(format!(
@@ -443,13 +754,16 @@ async fn run_acp_session(params: AcpSessionTaskParams) -> Result<(), agent_clien
             {
                 let pty = Arc::clone(&pty);
                 let terminals = Arc::clone(&terminals);
-                let events = events.clone();
+                let contexts = Arc::clone(&contexts);
                 async move |request: CreateTerminalRequest, responder, _cx| {
+                    let Some(context) = session_context(&contexts, &request.session_id) else {
+                        return responder.respond_with_internal_error("unknown session");
+                    };
                     // `AsyncFnMut` は複数回呼ばれるため、キャプチャは clone して渡す
                     create_terminal(
                         pty.clone(),
                         terminals.clone(),
-                        events.clone(),
+                        context.events.clone(),
                         request,
                         responder,
                     )
@@ -534,12 +848,25 @@ async fn run_acp_session(params: AcpSessionTaskParams) -> Result<(), agent_clien
         );
 
     // 外部エージェントプロセスの起動とプロセスツリー管理 (Windows: Job Object)
-    let (child_stdin, child_stdout, child_stderr, mut child) = agent
-        .spawn_process()
-        .map_err(agent_client_protocol::Error::into_internal_error)?;
+    let (child_stdin, child_stdout, child_stderr, mut child) = match agent.spawn_process() {
+        Ok(parts) => parts,
+        Err(err) => {
+            if let Some(tx) = ready_tx.take() {
+                let _ = tx.send(Err(anyhow!("failed to start agent process: {err}")));
+            }
+            return Err(err);
+        }
+    };
 
-    let _process_guard = fxg_pty::ProcessTreeGuard::new()
-        .map_err(agent_client_protocol::Error::into_internal_error)?;
+    let _process_guard = match fxg_pty::ProcessTreeGuard::new() {
+        Ok(guard) => guard,
+        Err(err) => {
+            if let Some(tx) = ready_tx.take() {
+                let _ = tx.send(Err(anyhow!("failed to create process tree guard: {err}")));
+            }
+            return Err(agent_client_protocol::Error::internal_error().data(err.to_string()));
+        }
+    };
     // エージェントのプロセスツリーを終了対象として登録する
     // (プラットフォーム差は `fxg_pty` 側に集約)。失敗しても起動は継続するが、
     // 終了時のツリー kill が効かなくなるため警告する。
@@ -550,145 +877,114 @@ async fn run_acp_session(params: AcpSessionTaskParams) -> Result<(), agent_clien
     // エージェント stderr をデーモンのログへ流す (パイプ詰まり防止)
     spawn_acp_stderr_pump(child_stderr);
 
-    let mut ready_tx = Some(ready_tx);
+    // クロージャ (async move) が `permissions` をムーブするため、
+    // teardown 用に複製を保持しておく
+    let permissions_for_teardown = Arc::clone(&permissions);
     let transport = ByteStreams::new(child_stdin, child_stdout);
     let run_result = builder
         .connect_with(transport, async move |cx: ConnectionTo<Agent>| {
-            // 1) initialize (fs 読み書き + terminal をサポート宣言)
+            // 1) initialize (プロセスにつき 1 回。fs 読み書き + terminal をサポート宣言)
             let capabilities = ClientCapabilities::new()
                 .fs(FileSystemCapabilities::new()
                     .read_text_file(true)
                     .write_text_file(true))
                 .terminal(true);
-            let initialize = cx
+            let initialize = match cx
                 .send_request(
                     InitializeRequest::new(ProtocolVersion::V1)
                         .client_capabilities(capabilities)
                         .client_info(Implementation::new("fxg", env!("CARGO_PKG_VERSION"))),
                 )
                 .block_task()
-                .await?;
-
-            // 2) セッション取得 (新規作成 / session/resume / session/load)
-            let plan = plan_resume(&initialize.agent_capabilities, resume.as_ref()).map_err(
-                |err: anyhow::Error| {
-                    agent_client_protocol::Error::internal_error().data(err.to_string())
-                },
-            )?;
-            let (mut session, context_restored) = acquire_session(&cx, plan, &cwd).await?;
-            let acp_session_id = session.session_id().clone();
-            let _ = events.send(DriverEvent::Event(UnifiedEventPayload::SessionAgentBound {
-                agent_session_id: acp_session_id.to_string(),
-            }));
-
-            // 3) 初期モード適用
-            if let Some(mode_id) = initial_mode.as_ref()
-                && let Err(err) = cx
-                    .send_request(SetSessionModeRequest::new(
-                        acp_session_id.clone(),
-                        mode_id.clone(),
-                    ))
-                    .block_task()
-                    .await
+                .await
             {
-                tracing::warn!("failed to set initial mode {mode_id}: {err}");
-            }
-
-            // 4) モード・スラッシュコマンド・設定項目を配信
-            let (modes, commands, config_options) = session_capabilities(&session);
-            let current_mode = session
-                .modes()
-                .map(|state| state.current_mode_id.to_string());
-            let mut capabilities_state = SessionCapabilitiesState {
-                current_mode: current_mode.clone(),
-                available_modes: modes.clone(),
-                available_commands: commands.clone(),
-                config_options: config_options.clone(),
+                Ok(initialize) => initialize,
+                Err(err) => {
+                    if let Some(tx) = ready_tx.take() {
+                        let _ = tx.send(Err(anyhow!("acp initialize failed: {err}")));
+                    }
+                    return Err(err);
+                }
             };
-            if !modes.is_empty()
-                || !commands.is_empty()
-                || !config_options.is_empty()
-                || current_mode.is_some()
-            {
-                let _ = events.send(DriverEvent::Event(capabilities_state.to_payload()));
-            }
-            let _ = events.send(DriverEvent::Event(UnifiedEventPayload::StatusChanged {
-                status: fxg_protocol::common::SessionStatus::Idle,
-                error_message: None,
-            }));
-
-            // 5) ハンドルを返して準備完了
+            let agent_capabilities = initialize.agent_capabilities.clone();
             if let Some(tx) = ready_tx.take() {
-                let _ = tx.send(Ok((
-                    AcpSessionHandle {
-                        acp_session_id: acp_session_id.clone(),
-                        conn: cx.clone(),
-                        commands: cmd_tx.clone(),
-                        permissions: Arc::clone(&permissions),
-                        events: events.clone(),
-                        pty: Arc::clone(&pty),
-                    },
-                    context_restored,
-                )));
+                let _ = tx.send(Ok(()));
             }
 
-            // 6) コマンドループ (プロンプト送信と更新読み取りを直列化)
-            let mut accumulator = StreamingAccumulator::default();
-            while let Some(command) = cmd_rx.recv().await {
-                match command {
-                    AcpCommand::Prompt(text) => {
-                        accumulator.reset();
+            // 2) セッション処理ループ。1 プロセスにつき同時 1 セッションを担当し、
+            //    セッション終了後は次の `NewSession` までアイドル待機する。
+            while let Some(command) = control_rx.recv().await {
+                let ProcessCommand::NewSession {
+                    params,
+                    events,
+                    lease,
+                    commands: (cmd_tx, cmd_rx),
+                    ready,
+                } = command
+                else {
+                    // Dispose = プロセス終了
+                    break;
+                };
+                // セッション構築。失敗した場合は接続の健全性が不明なため、
+                // エラーを返した上でプロセスを畳む (呼び出し側はコールド
+                // スタートへ回帰する)。
+                let (session, acp_session_id, context_restored, capabilities_state) =
+                    match build_session(&cx, &agent_capabilities, &params, &events, &contexts).await
+                    {
+                        Ok(built) => built,
+                        Err(err) => {
+                            let _ = ready.send(Err(err));
+                            lease.mark_dispose();
+                            break;
+                        }
+                    };
+                let session_end_tx = lease.take_session_end_sender();
+                let handle = AcpSessionHandle {
+                    acp_session_id: acp_session_id.clone(),
+                    conn: cx.clone(),
+                    commands: cmd_tx,
+                    permissions: Arc::clone(&permissions),
+                    events: Mutex::new(Some(events.clone())),
+                    pty: Arc::clone(&pty),
+                    lease: Arc::clone(&lease),
+                };
+                let _ = ready.send(Ok((handle, context_restored)));
+
+                // 3) ターンループ (プロンプト送信と更新読み取りを直列化)
+                let outcome = serve_session(session, cmd_rx, &events, capabilities_state).await;
+                contexts
+                    .lock()
+                    .expect("session contexts poisoned")
+                    .remove(&acp_session_id.to_string());
+                if let Some(tx) = session_end_tx {
+                    let _ = tx.send(());
+                }
+                // セッションに紐づく未解決の承認はキャンセルで閉じる
+                cancel_pending_permissions(&permissions);
+                match outcome {
+                    ServeOutcome::Closed => {
                         let _ =
                             events.send(DriverEvent::Event(UnifiedEventPayload::StatusChanged {
-                                status: fxg_protocol::common::SessionStatus::Running,
+                                status: fxg_protocol::common::SessionStatus::Stopped,
                                 error_message: None,
                             }));
-                        session.send_prompt(text)?;
-                        loop {
-                            match session.read_update().await? {
-                                SessionMessage::StopReason(reason) => {
-                                    for payload in accumulator.finish_all() {
-                                        let _ = events.send(DriverEvent::Event(payload));
-                                    }
-                                    tracing::debug!(?reason, "acp turn finished");
-                                    let _ = events.send(DriverEvent::Event(
-                                        UnifiedEventPayload::StatusChanged {
-                                            status: fxg_protocol::common::SessionStatus::Idle,
-                                            error_message: None,
-                                        },
-                                    ));
-                                    break;
-                                }
-                                SessionMessage::SessionMessage(dispatch) => {
-                                    let acc = &mut accumulator;
-                                    let ev = &events;
-                                    let caps = &mut capabilities_state;
-                                    MatchDispatch::new(dispatch)
-                                        .if_notification(
-                                            async move |notification: SessionNotification| {
-                                                for event in map_session_update(
-                                                    notification.update,
-                                                    acc,
-                                                    caps,
-                                                ) {
-                                                    let _ = ev.send(event);
-                                                }
-                                                Ok(())
-                                            },
-                                        )
-                                        .await
-                                        .otherwise_ignore()?;
-                                }
-                                // `SessionMessage` は #[non_exhaustive]
-                                _ => {}
-                            }
-                        }
                     }
-                    AcpCommand::Shutdown => break,
+                    ServeOutcome::Fatal(err) => {
+                        tracing::warn!(
+                            session_id = %params.session_id,
+                            "acp session ended: {err:#}"
+                        );
+                        let _ = events.send(DriverEvent::Failed {
+                            message: err.to_string(),
+                        });
+                        // 接続異常時はプロセスを畳む (プールへは返さない)
+                        lease.mark_dispose();
+                        break;
+                    }
                 }
             }
 
-            // ループを抜ける = 接続シャットダウン
+            // ループを抜ける = プロセスシャットダウン
             Ok(())
         })
         .await;
@@ -711,7 +1007,161 @@ async fn run_acp_session(params: AcpSessionTaskParams) -> Result<(), agent_clien
         Err(err) => tracing::debug!("failed to reap acp agent process: {err}"),
     }
 
+    // 未解決の承認が残っていればキャンセルで閉じる (プロセス終了)
+    cancel_pending_permissions(&permissions_for_teardown);
+
     run_result
+}
+
+/// ターンループの終了理由。
+enum ServeOutcome {
+    /// 正常終了 (`AcpCommand::Shutdown`)
+    Closed,
+    /// 接続・ターンの異常 (プロセスを畳む)
+    Fatal(anyhow::Error),
+}
+
+/// セッションを作成・初期化する (`session/new` | `session/resume` | `session/load`)。
+///
+/// セッション情報を [`SessionContexts`] へ登録し (fs / terminal ハンドラが参照)、
+/// 初期モード適用・モード/コマンド/設定項目の配信まで行う。
+#[allow(clippy::type_complexity)]
+async fn build_session(
+    cx: &ConnectionTo<Agent>,
+    agent_capabilities: &AgentCapabilities,
+    params: &SessionParams,
+    events: &mpsc::UnboundedSender<DriverEvent>,
+    contexts: &SessionContexts,
+) -> anyhow::Result<(
+    ActiveSession<'static, Agent>,
+    SessionId,
+    bool,
+    SessionCapabilitiesState,
+)> {
+    // セッション取得 (新規作成 / session/resume / session/load)
+    let plan = plan_resume(agent_capabilities, params.resume.as_ref())?;
+    let (session, context_restored) = acquire_session(cx, plan, &params.cwd)
+        .await
+        .map_err(|err| anyhow!("failed to create acp session: {err}"))?;
+    let acp_session_id = session.session_id().clone();
+    // セッション情報を登録する (fs / terminal ハンドラが参照する)
+    contexts.lock().expect("session contexts poisoned").insert(
+        acp_session_id.to_string(),
+        SessionContext {
+            cwd: params.cwd.clone(),
+            events: events.clone(),
+        },
+    );
+    let _ = events.send(DriverEvent::Event(UnifiedEventPayload::SessionAgentBound {
+        agent_session_id: acp_session_id.to_string(),
+    }));
+
+    // 初期モード適用
+    if let Some(mode_id) = params.initial_mode.as_ref()
+        && let Err(err) = cx
+            .send_request(SetSessionModeRequest::new(
+                acp_session_id.clone(),
+                mode_id.clone(),
+            ))
+            .block_task()
+            .await
+    {
+        tracing::warn!("failed to set initial mode {mode_id}: {err}");
+    }
+
+    // モード・スラッシュコマンド・設定項目を配信
+    let (modes, commands, config_options) = session_capabilities(&session);
+    let current_mode = session
+        .modes()
+        .map(|state| state.current_mode_id.to_string());
+    let capabilities_state = SessionCapabilitiesState {
+        current_mode: current_mode.clone(),
+        available_modes: modes.clone(),
+        available_commands: commands.clone(),
+        config_options: config_options.clone(),
+    };
+    if !modes.is_empty()
+        || !commands.is_empty()
+        || !config_options.is_empty()
+        || current_mode.is_some()
+    {
+        let _ = events.send(DriverEvent::Event(capabilities_state.to_payload()));
+    }
+    let _ = events.send(DriverEvent::Event(UnifiedEventPayload::StatusChanged {
+        status: fxg_protocol::common::SessionStatus::Idle,
+        error_message: None,
+    }));
+
+    Ok((
+        session,
+        acp_session_id,
+        context_restored,
+        capabilities_state,
+    ))
+}
+
+/// 1 セッション分のターンループ (プロンプト送信と更新読み取りを直列化)。
+async fn serve_session(
+    mut session: ActiveSession<'static, Agent>,
+    mut cmd_rx: mpsc::UnboundedReceiver<AcpCommand>,
+    events: &mpsc::UnboundedSender<DriverEvent>,
+    mut capabilities_state: SessionCapabilitiesState,
+) -> ServeOutcome {
+    let mut accumulator = StreamingAccumulator::default();
+    while let Some(command) = cmd_rx.recv().await {
+        match command {
+            AcpCommand::Prompt(text) => {
+                accumulator.reset();
+                let _ = events.send(DriverEvent::Event(UnifiedEventPayload::StatusChanged {
+                    status: fxg_protocol::common::SessionStatus::Running,
+                    error_message: None,
+                }));
+                if let Err(err) = session.send_prompt(text) {
+                    return ServeOutcome::Fatal(err.into());
+                }
+                loop {
+                    match session.read_update().await {
+                        Ok(SessionMessage::StopReason(reason)) => {
+                            for payload in accumulator.finish_all() {
+                                let _ = events.send(DriverEvent::Event(payload));
+                            }
+                            tracing::debug!(?reason, "acp turn finished");
+                            let _ = events.send(DriverEvent::Event(
+                                UnifiedEventPayload::StatusChanged {
+                                    status: fxg_protocol::common::SessionStatus::Idle,
+                                    error_message: None,
+                                },
+                            ));
+                            break;
+                        }
+                        Ok(SessionMessage::SessionMessage(dispatch)) => {
+                            let acc = &mut accumulator;
+                            let ev = events;
+                            let caps = &mut capabilities_state;
+                            let result = MatchDispatch::new(dispatch)
+                                .if_notification(async move |notification: SessionNotification| {
+                                    for event in map_session_update(notification.update, acc, caps)
+                                    {
+                                        let _ = ev.send(event);
+                                    }
+                                    Ok(())
+                                })
+                                .await
+                                .otherwise_ignore();
+                            if let Err(err) = result {
+                                return ServeOutcome::Fatal(err.into());
+                            }
+                        }
+                        // `SessionMessage` は #[non_exhaustive]
+                        Ok(_) => {}
+                        Err(err) => return ServeOutcome::Fatal(err.into()),
+                    }
+                }
+            }
+            AcpCommand::Shutdown => break,
+        }
+    }
+    ServeOutcome::Closed
 }
 
 /// エージェントプロセスの stderr をデーモンのログ (`debug`) へ流す。

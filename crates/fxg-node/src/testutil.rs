@@ -158,7 +158,7 @@ impl MockAgent {
     /// `SessionManager` へ渡すドライバファクトリ。
     pub(crate) fn factory(&self) -> DriverFactory {
         let agent = self.clone();
-        Arc::new(move |_spec: &AgentLaunchSpec| Ok(Box::new(agent.clone()) as Box<dyn AgentDriver>))
+        Arc::new(move |_spec: &AgentLaunchSpec| Ok(Arc::new(agent.clone()) as Arc<dyn AgentDriver>))
     }
 }
 

@@ -14,6 +14,7 @@ pub mod acp;
 pub mod driver;
 pub mod opencode2;
 pub mod registry;
+mod warm;
 
 pub use acp::AcpDriver;
 pub use driver::{

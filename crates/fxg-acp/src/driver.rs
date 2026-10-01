@@ -114,6 +114,16 @@ pub trait AgentDriver: Send + Sync {
         req: StartSessionRequest,
         event_tx: mpsc::UnboundedSender<DriverEvent>,
     ) -> anyhow::Result<StartedSession>;
+
+    /// アイドル状態 (セッションが接続していない) のエージェントプロセスを
+    /// すべて破棄する。
+    ///
+    /// `fxg kill-all` / デーモン終了時に呼ばれる。プロセスをセッション終了後も
+    /// 温存するドライバは、ここでそれらを確実に終了させる。戻り値は破棄した数。
+    /// プロセスを保持しないドライバの既定実装は 0 (何もしない)。
+    async fn shutdown_idle(&self) -> usize {
+        0
+    }
 }
 
 /// 起動済みセッションの操作ハンドル。
@@ -153,6 +163,17 @@ pub trait ActiveSessionHandle: Send + Sync {
         None
     }
     /// セッションプロセスの完全終了 (プロセスツリーごと)。
+    ///
+    /// プロセスをセッション終了後も温存するドライバ (`AcpDriver`) は、
+    /// ここで**温存せず破棄**する。`fxg kill-all` / デーモン終了時に使う。
+    async fn dispose(&self) -> anyhow::Result<()> {
+        self.shutdown().await
+    }
+
+    /// セッションの終了。
+    ///
+    /// プロセスをセッション終了後も温存するドライバでは、セッションを閉じて
+    /// プロセスを再利用プールへ返す (完全終了は [`Self::dispose`])。
     async fn shutdown(&self) -> anyhow::Result<()>;
 }
 
