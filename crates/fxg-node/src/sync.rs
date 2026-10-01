@@ -670,9 +670,114 @@ pub(crate) async fn handle_server_message(
                         },
                     }
                 }
+                WorktreeAction::Prune => match state.project_main_repo(&project_id).await {
+                    Ok(repo) => match state.worktree_prune(&repo, &source).await {
+                        Ok(_) => NodeToServerMsg::WorktreeResult {
+                            command_id,
+                            worktree: None,
+                            error: None,
+                        },
+                        Err(err) => NodeToServerMsg::WorktreeResult {
+                            command_id,
+                            worktree: None,
+                            error: Some(err.to_string()),
+                        },
+                    },
+                    Err(err) => NodeToServerMsg::WorktreeResult {
+                        command_id,
+                        worktree: None,
+                        error: Some(err.to_string()),
+                    },
+                },
             };
             // Worktree 変更をハブへ報告する (project_node_bindings の更新)
             state.trigger_node_hello();
+            let _ = out.send(response).await;
+        }
+        ServerToNodeMsg::ProjectScan { request_id, dir } => {
+            let result: Result<fxg_protocol::client_api::ProjectScanResponse, NodeError> =
+                match state.project_scan(dir.as_deref().map(Path::new)).await {
+                    Ok(scanned_dirs) => state
+                        .db()
+                        .list_projects()
+                        .await
+                        .map(|projects| fxg_protocol::client_api::ProjectScanResponse {
+                            scanned_dirs,
+                            projects,
+                        })
+                        .map_err(NodeError::from),
+                    Err(err) => Err(err),
+                };
+            let response = match result {
+                Ok(response) => {
+                    state
+                        .record_audit(
+                            fxg_db::audit::actions::PROJECT_LINK,
+                            &AuditSource::remote(state.node_id()),
+                            None,
+                            serde_json::json!({
+                                "action": "scan",
+                                "scanned_dirs": &response.scanned_dirs,
+                                "projects": response.projects.len(),
+                            }),
+                        )
+                        .await;
+                    NodeToServerMsg::ProjectScanResult {
+                        request_id,
+                        response: Some(response),
+                        error: None,
+                    }
+                }
+                Err(err) => NodeToServerMsg::ProjectScanResult {
+                    request_id,
+                    response: None,
+                    error: Some(err.to_string()),
+                },
+            };
+            let _ = out.send(response).await;
+        }
+        ServerToNodeMsg::ProjectLink {
+            request_id,
+            project_id,
+            local_path,
+        } => {
+            let dir = PathBuf::from(&local_path);
+            let result = if dir.is_dir() {
+                state.project_link(&dir, &project_id).await
+            } else {
+                Err(NodeError::InvalidState(format!(
+                    "directory not found: {local_path}"
+                )))
+            };
+            let response = match result {
+                Ok(resolved) => {
+                    state
+                        .record_audit(
+                            fxg_db::audit::actions::PROJECT_LINK,
+                            &AuditSource::remote(state.node_id()),
+                            None,
+                            serde_json::json!({
+                                "action": "link",
+                                "project_id": &resolved.project_id,
+                                "local_path": resolved.local_path.to_string_lossy(),
+                            }),
+                        )
+                        .await;
+                    NodeToServerMsg::ProjectLinkResult {
+                        request_id,
+                        response: Some(fxg_protocol::client_api::ProjectLinkResponse {
+                            project_id: resolved.project_id,
+                            local_path: resolved.local_path.to_string_lossy().into_owned(),
+                        }),
+                        error: None,
+                    }
+                }
+                Err(err) => NodeToServerMsg::ProjectLinkResult {
+                    request_id,
+                    response: None,
+                    error: Some(err.to_string()),
+                },
+            };
             let _ = out.send(response).await;
         }
         ServerToNodeMsg::BrowseFs { request_id, path } => {

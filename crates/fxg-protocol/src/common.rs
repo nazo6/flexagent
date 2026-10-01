@@ -503,6 +503,8 @@ pub enum WorktreeAction {
         /// 未コミット変更があっても強制削除するか
         force: bool,
     },
+    /// 削除済み Worktree の管理情報をクリーンアップ (`git worktree prune`)
+    Prune,
 }
 
 /// Diff のスコープ。

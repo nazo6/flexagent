@@ -143,6 +143,24 @@ pub enum NodeToServerMsg {
         /// 失敗時のメッセージ
         error: Option<String>,
     },
+    /// プロジェクト一括スキャン (`ProjectScan`) の結果応答。
+    ProjectScanResult {
+        /// 要求時の相関ID
+        request_id: String,
+        /// 成功時のスキャン結果
+        response: Option<crate::client_api::ProjectScanResponse>,
+        /// 失敗時のメッセージ
+        error: Option<String>,
+    },
+    /// プロジェクト手動紐付け (`ProjectLink`) の結果応答。
+    ProjectLinkResult {
+        /// 要求時の相関ID
+        request_id: String,
+        /// 成功時の紐付け結果
+        response: Option<crate::client_api::ProjectLinkResponse>,
+        /// 失敗時のメッセージ
+        error: Option<String>,
+    },
     /// PTY 起動・操作の失敗通知 (エラーコードは文字列。例: `PTY_DISABLED`)。
     ///
     /// ノード側設定 `allow_remote_pty = false` の場合、リモートからの
@@ -339,6 +357,24 @@ pub enum ServerToNodeMsg {
         /// 閲覧対象パス (未指定時はホームディレクトリ)
         path: Option<String>,
     },
+    /// 指定ディレクトリ配下の Git リポジトリ一括スキャン・登録要求
+    /// (`fxg project scan`)。
+    ProjectScan {
+        /// 相関ID
+        request_id: String,
+        /// スキャン対象ディレクトリ (未指定時は `node.project_scan_dirs`)
+        dir: Option<String>,
+    },
+    /// 任意ディレクトリの論理プロジェクトへの手動紐付け要求
+    /// (`fxg project link`。`.fxg.toml` に `project_key` を書き込む)。
+    ProjectLink {
+        /// 相関ID
+        request_id: String,
+        /// 紐付け先の論理プロジェクトID
+        project_id: String,
+        /// 対象ディレクトリ
+        local_path: String,
+    },
     /// `GitCredentialRequest` に対する短命トークン応答。
     GitCredentialResponse {
         /// 相関ID
@@ -468,6 +504,61 @@ mod tests {
         assert_eq!(json["op"], "revert_result");
         assert_eq!(json["outcome"]["restored_files"], 3);
         let decoded: NodeToServerMsg = serde_json::from_value(json).unwrap();
+        assert_eq!(decoded, msg);
+    }
+
+    #[test]
+    fn project_scan_and_link_shape() {
+        let scan = ServerToNodeMsg::ProjectScan {
+            request_id: "r1".into(),
+            dir: Some("D:/ghq".into()),
+        };
+        let json = serde_json::to_value(&scan).unwrap();
+        assert_eq!(json["op"], "project_scan");
+        assert_eq!(json["dir"], "D:/ghq");
+        assert_eq!(
+            serde_json::from_value::<ServerToNodeMsg>(json).unwrap(),
+            scan
+        );
+
+        let link = ServerToNodeMsg::ProjectLink {
+            request_id: "r2".into(),
+            project_id: "github.com/nazo6/flexagent".into(),
+            local_path: "D:/ghq/github.com/nazo6/flexagent".into(),
+        };
+        let json = serde_json::to_value(&link).unwrap();
+        assert_eq!(json["op"], "project_link");
+        assert_eq!(
+            serde_json::from_value::<ServerToNodeMsg>(json).unwrap(),
+            link
+        );
+
+        let link_result = NodeToServerMsg::ProjectLinkResult {
+            request_id: "r2".into(),
+            response: Some(crate::client_api::ProjectLinkResponse {
+                project_id: "github.com/nazo6/flexagent".into(),
+                local_path: "D:/ghq/github.com/nazo6/flexagent".into(),
+            }),
+            error: None,
+        };
+        let json = serde_json::to_value(&link_result).unwrap();
+        assert_eq!(json["op"], "project_link_result");
+        assert_eq!(
+            serde_json::from_value::<NodeToServerMsg>(json).unwrap(),
+            link_result
+        );
+    }
+
+    #[test]
+    fn worktree_prune_action_shape() {
+        let msg = ServerToNodeMsg::ManageWorktree {
+            command_id: "c1".into(),
+            project_id: "p1".into(),
+            action: crate::common::WorktreeAction::Prune,
+        };
+        let json = serde_json::to_value(&msg).unwrap();
+        assert_eq!(json["action"]["action"], "prune");
+        let decoded: ServerToNodeMsg = serde_json::from_value(json).unwrap();
         assert_eq!(decoded, msg);
     }
 }

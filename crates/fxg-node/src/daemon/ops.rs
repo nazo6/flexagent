@@ -14,6 +14,9 @@ use crate::error::NodeError;
 use crate::project::{self, ResolvedProject};
 use crate::worktree;
 
+/// Git リポジトリ一括スキャン (`fxg project scan`) の最大探索深さ。
+const SCAN_MAX_DEPTH: usize = 3;
+
 /// 監査ログの記録元 (クライアント情報)。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AuditSource {
@@ -122,6 +125,71 @@ impl DaemonState {
         // 周辺の変更 (Worktree 検出・プロジェクト紐付け) をハブへ報告する
         self.trigger_node_hello();
         Ok(resolved)
+    }
+
+    /// `.fxg.toml` に `project_key` を書き込み、紐付けを即時反映する
+    /// (`fxg project link` / Client API 共有実装)。
+    pub async fn project_link(
+        &self,
+        dir: &Path,
+        project_id: &str,
+    ) -> Result<ResolvedProject, NodeError> {
+        project::patch_project_key(dir, project_id)?;
+        self.resolve_and_register_project(dir).await
+    }
+
+    /// 指定ディレクトリ (省略時は `node.project_scan_dirs`) 配下の Git
+    /// リポジトリを一括走査して登録する (`fxg project scan`)。
+    ///
+    /// 実際に走査したディレクトリ一覧を返す。
+    pub async fn project_scan(&self, dir: Option<&Path>) -> Result<Vec<String>, NodeError> {
+        let config =
+            fxg_protocol::config::GlobalConfig::load_from_path(&self.paths().config_path())?;
+        let scan_dirs: Vec<PathBuf> = match dir {
+            Some(dir) => vec![dir.to_path_buf()],
+            None => config
+                .node
+                .project_scan_dirs
+                .iter()
+                .map(PathBuf::from)
+                .collect(),
+        };
+        if scan_dirs.is_empty() {
+            return Err(NodeError::InvalidState(
+                "no scan directories configured (set node.project_scan_dirs in config.toml)"
+                    .to_owned(),
+            ));
+        }
+        for scan_dir in &scan_dirs {
+            let repositories = crate::git::find_repositories(scan_dir, SCAN_MAX_DEPTH)?;
+            for repo in repositories {
+                self.resolve_and_register_project(&repo).await?;
+            }
+        }
+        Ok(scan_dirs
+            .iter()
+            .map(|dir| dir.to_string_lossy().into_owned())
+            .collect())
+    }
+
+    /// Worktree 管理情報をクリーンアップする (`git worktree prune`)。
+    pub async fn worktree_prune(
+        &self,
+        repo: &Path,
+        source: &AuditSource,
+    ) -> Result<String, NodeError> {
+        let output = worktree::prune_worktrees(repo).await?;
+        self.record_audit(
+            fxg_db::audit::actions::WORKTREE_PRUNE,
+            source,
+            None,
+            serde_json::json!({
+                "repo": repo.to_string_lossy(),
+                "output": output.trim(),
+            }),
+        )
+        .await;
+        Ok(output)
     }
 
     /// プロジェクトのメインリポジトリ (Worktree ではない) のローカルパスを解決する。

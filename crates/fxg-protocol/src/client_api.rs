@@ -166,6 +166,53 @@ pub struct RemoveWorktreeRequest {
     pub force: bool,
 }
 
+/// `POST /api/v1/projects/:id/worktrees/prune` リクエスト。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct PruneWorktreesRequest {
+    /// 対象ノードID
+    pub node_id: String,
+}
+
+/// `POST /api/v1/nodes/:node_id/projects/scan` リクエスト。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct ProjectScanRequest {
+    /// スキャン対象ディレクトリ
+    /// (省略時は `config.toml` の `node.project_scan_dirs` を走査)
+    pub dir: Option<String>,
+}
+
+/// `POST /api/v1/nodes/:node_id/projects/scan` レスポンス。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct ProjectScanResponse {
+    /// 実際に走査したディレクトリ
+    pub scanned_dirs: Vec<String>,
+    /// スキャン後のノード上での登録プロジェクト一覧
+    pub projects: Vec<ProjectSummary>,
+}
+
+/// `POST /api/v1/nodes/:node_id/projects/link` リクエスト。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct ProjectLinkRequest {
+    /// 紐付け先の論理プロジェクトID
+    pub project_id: String,
+    /// 対象ディレクトリ
+    pub local_path: String,
+}
+
+/// `POST /api/v1/nodes/:node_id/projects/link` レスポンス。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct ProjectLinkResponse {
+    /// 解決された論理プロジェクトID
+    pub project_id: String,
+    /// 対象ディレクトリ (解決後のローカルパス)
+    pub local_path: String,
+}
+
 /// `GET /api/v1/sessions` レスポンス。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]

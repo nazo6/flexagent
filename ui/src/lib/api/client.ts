@@ -11,11 +11,16 @@ import type { KillSwitchResponse } from "$lib/generated/KillSwitchResponse";
 import type { NodeSummary } from "$lib/generated/NodeSummary";
 import type { NodesResponse } from "$lib/generated/NodesResponse";
 import type { PermissionRequestEntry } from "$lib/generated/PermissionRequestEntry";
+import type { ProjectLinkRequest } from "$lib/generated/ProjectLinkRequest";
+import type { ProjectLinkResponse } from "$lib/generated/ProjectLinkResponse";
+import type { ProjectScanRequest } from "$lib/generated/ProjectScanRequest";
+import type { ProjectScanResponse } from "$lib/generated/ProjectScanResponse";
 import type { ProjectSummary } from "$lib/generated/ProjectSummary";
 import type { ProjectsResponse } from "$lib/generated/ProjectsResponse";
 import type { ProvisionerSummary } from "$lib/generated/ProvisionerSummary";
 import type { ProvisionerTestResponse } from "$lib/generated/ProvisionerTestResponse";
 import type { ProvisionersResponse } from "$lib/generated/ProvisionersResponse";
+import type { PruneWorktreesRequest } from "$lib/generated/PruneWorktreesRequest";
 import type { PushSubscribeRequest } from "$lib/generated/PushSubscribeRequest";
 import type { PushSubscribeResponse } from "$lib/generated/PushSubscribeResponse";
 import type { RemoveWorktreeRequest } from "$lib/generated/RemoveWorktreeRequest";
@@ -180,6 +185,15 @@ export class ApiClient {
     });
   }
 
+  /** `POST /api/v1/projects/:id/worktrees/prune` (削除済み Worktree 管理情報のクリーンアップ)。 */
+  async pruneWorktrees(projectId: string, request: PruneWorktreesRequest): Promise<void> {
+    await this.#request(
+      "POST",
+      `/api/v1/projects/${encodeURIComponent(projectId)}/worktrees/prune`,
+      { body: request },
+    );
+  }
+
   /** `GET /api/v1/nodes` */
   async nodes(): Promise<NodeSummary[]> {
     const response = await this.#request<NodesResponse>("GET", "/api/v1/nodes");
@@ -193,6 +207,20 @@ export class ApiClient {
       `/api/v1/nodes/${encodeURIComponent(nodeId)}/fs/browse`,
       { query: { path } },
     );
+  }
+
+  /** `POST /api/v1/nodes/:id/projects/scan` (Git リポジトリ一括スキャン・登録)。 */
+  scanProjects(nodeId: string, request: ProjectScanRequest): Promise<ProjectScanResponse> {
+    return this.#request("POST", `/api/v1/nodes/${encodeURIComponent(nodeId)}/projects/scan`, {
+      body: request,
+    });
+  }
+
+  /** `POST /api/v1/nodes/:id/projects/link` (任意ディレクトリの手動紐付け)。 */
+  linkProject(nodeId: string, request: ProjectLinkRequest): Promise<ProjectLinkResponse> {
+    return this.#request("POST", `/api/v1/nodes/${encodeURIComponent(nodeId)}/projects/link`, {
+      body: request,
+    });
   }
 
   /** `GET /api/v1/provisioners` */

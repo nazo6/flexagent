@@ -43,6 +43,9 @@ pub enum NodeError {
     /// Worktree / ブランチの状態が不正
     #[error("invalid worktree state: {0}")]
     InvalidWorktree(String),
+    /// 操作対象の状態・前提条件が不正 (設定不足など)
+    #[error("invalid state: {0}")]
+    InvalidState(String),
     /// セッションの状態・操作が不正
     #[error("invalid session: {0}")]
     InvalidSession(String),
@@ -98,6 +101,7 @@ impl NodeError {
             Self::NotARepository(_)
             | Self::InvalidWorktree(_)
             | Self::InvalidSession(_)
+            | Self::InvalidState(_)
             | Self::NonPersistableEvent(_)
             | Self::Config(_) => ErrorCode::InvalidState,
             Self::CommandDuplicate(_) => ErrorCode::CommandDuplicate,

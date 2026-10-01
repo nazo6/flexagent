@@ -17,7 +17,6 @@ use std::path::{Path, PathBuf};
 
 use fxg_db::SessionFilter;
 use fxg_protocol::common::ErrorCode;
-use fxg_protocol::config::{GlobalConfig, ProjectConfig};
 use fxg_protocol::events::SessionEventEnvelope;
 use fxg_protocol::ipc::{
     IpcClientMessage, IpcResult, IpcServerMessage, ProjectInfo, SessionDetail,
@@ -30,16 +29,13 @@ use super::ops::AuditSource;
 use crate::error::NodeError;
 use crate::ipc_framing::{read_frame, write_message};
 use crate::session::SessionBroadcast;
-use crate::{git, project, worktree};
+use crate::{project, worktree};
 
 /// `fxg ps` などで返すセッション一覧の上限。
 const SESSION_LIST_LIMIT: u32 = 200;
 
 /// `AttachSession` のリプレイ時に 1 バッチで送るイベント数の上限。
 const ATTACH_REPLAY_BATCH: u32 = 200;
-
-/// プロジェクトスキャンの再帰深さ上限。
-const SCAN_MAX_DEPTH: usize = 3;
 
 /// IPC エンドポイントが他デーモンに占有されていないか確認する。
 ///
@@ -539,10 +535,11 @@ async fn handle(
                     format!("directory not found: {cwd}"),
                 ));
             }
-            patch_project_key(&dir, &project_id)
-                .map_err(|err| DispatchError::from_node_error(&command_id, err))?;
             // 紐付けを即時反映する
-            let resolved = resolve_and_register(state, &dir, &command_id).await?;
+            let resolved = state
+                .project_link(&dir, &project_id)
+                .await
+                .map_err(|err| DispatchError::from_node_error(&command_id, err))?;
             Ok((
                 command_id,
                 IpcResult::Ack {
@@ -556,31 +553,10 @@ async fn handle(
         }
 
         IpcClientMessage::ProjectScan { command_id, dir } => {
-            let config = GlobalConfig::load_from_path(&state.paths().config_path())
-                .map_err(|err| DispatchError::from_node_error(&command_id, err.into()))?;
-            let scan_dirs: Vec<PathBuf> = match dir {
-                Some(dir) => vec![PathBuf::from(dir)],
-                None => config
-                    .node
-                    .project_scan_dirs
-                    .iter()
-                    .map(PathBuf::from)
-                    .collect(),
-            };
-            if scan_dirs.is_empty() {
-                return Err(DispatchError::new(
-                    &command_id,
-                    ErrorCode::InvalidState,
-                    "no scan directories configured (set node.project_scan_dirs in config.toml)",
-                ));
-            }
-            for scan_dir in &scan_dirs {
-                let repositories = git::find_repositories(scan_dir, SCAN_MAX_DEPTH)
-                    .map_err(|err| DispatchError::from_node_error(&command_id, err))?;
-                for repo in repositories {
-                    resolve_and_register(state, &repo, &command_id).await?;
-                }
-            }
+            let scanned_dirs = state
+                .project_scan(dir.as_deref().map(Path::new))
+                .await
+                .map_err(|err| DispatchError::from_node_error(&command_id, err))?;
             let projects = state
                 .db()
                 .list_projects()
@@ -590,10 +566,7 @@ async fn handle(
                 command_id,
                 IpcResult::ProjectScan {
                     projects,
-                    scanned_dirs: scan_dirs
-                        .iter()
-                        .map(|dir| dir.to_string_lossy().into_owned())
-                        .collect(),
+                    scanned_dirs,
                 },
             ))
         }
@@ -690,7 +663,8 @@ async fn handle(
         }
 
         IpcClientMessage::WorktreePrune { command_id, cwd } => {
-            let output = worktree::prune_worktrees(Path::new(&cwd))
+            let output = state
+                .worktree_prune(Path::new(&cwd), &AuditSource::local())
                 .await
                 .map_err(|err| DispatchError::from_node_error(&command_id, err))?;
             Ok((
@@ -1068,45 +1042,13 @@ async fn list_worktrees(
         .map_err(|err| DispatchError::from_node_error(command_id, err))
 }
 
-/// `.fxg.toml` に `project_key` を書き込む (既存の設定は保持する)。
-fn patch_project_key(dir: &Path, project_key: &str) -> Result<(), NodeError> {
-    let path = dir.join(fxg_protocol::config::PROJECT_CONFIG_FILE_NAME);
-    let existing = std::fs::read_to_string(&path).unwrap_or_default();
-    let mut lines: Vec<String> = existing.lines().map(str::to_owned).collect();
-
-    // TOML 文字列リテラルとして安全に埋め込む
-    let literal = format!(
-        "\"{}\"",
-        project_key.replace('\\', "\\\\").replace('"', "\\\"")
-    );
-
-    let mut replaced = false;
-    for line in lines.iter_mut() {
-        let trimmed = line.trim_start();
-        if trimmed.starts_with("project_key") && line.contains('=') {
-            *line = format!("project_key = {literal}");
-            replaced = true;
-            break;
-        }
-    }
-    if !replaced {
-        lines.insert(0, format!("project_key = {literal}"));
-    }
-
-    let mut output = lines.join("\n");
-    output.push('\n');
-    std::fs::write(&path, output).map_err(|err| NodeError::io(&path, err))?;
-
-    // 実際に読み戻せることを検証する (壊れた TOML を書かない)
-    ProjectConfig::load_from_path(&path)?;
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::daemon::{DaemonConfig, NodeDaemon};
+    use crate::git;
     use crate::ipc_client::IpcClient;
+    use fxg_protocol::config::ProjectConfig;
     use std::time::Duration;
 
     async fn start_daemon() -> (NodeDaemon, tempfile::TempDir) {
@@ -1699,39 +1641,5 @@ mod tests {
         tokio::time::timeout(Duration::from_secs(5), daemon.wait())
             .await
             .expect("stop");
-    }
-
-    #[test]
-    fn patch_project_key_preserves_other_settings() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        std::fs::write(
-            dir.path()
-                .join(fxg_protocol::config::PROJECT_CONFIG_FILE_NAME),
-            "name = \"flexagent\"\n\n[worktree]\nbase_branch = \"main\"\n",
-        )
-        .expect("write");
-        patch_project_key(dir.path(), "github.com/nazo6/flexagent").expect("patch");
-        let config = ProjectConfig::load_from_dir(dir.path())
-            .expect("load")
-            .expect("exists");
-        assert_eq!(
-            config.project_key.as_deref(),
-            Some("github.com/nazo6/flexagent")
-        );
-        assert_eq!(config.name.as_deref(), Some("flexagent"));
-        assert_eq!(config.worktree.base_branch.as_deref(), Some("main"));
-
-        // 再実行しても重複行を作らない
-        patch_project_key(dir.path(), "other/key").expect("patch again");
-        let config = ProjectConfig::load_from_dir(dir.path())
-            .expect("load")
-            .expect("exists");
-        assert_eq!(config.project_key.as_deref(), Some("other/key"));
-        let text = std::fs::read_to_string(
-            dir.path()
-                .join(fxg_protocol::config::PROJECT_CONFIG_FILE_NAME),
-        )
-        .expect("read");
-        assert_eq!(text.matches("project_key").count(), 1);
     }
 }

@@ -176,6 +176,42 @@ pub async fn load_project_config(cwd: &Path) -> Result<Option<ProjectConfig>, No
     Ok(None)
 }
 
+/// `.fxg.toml` に `project_key` を書き込む (既存の設定は保持する)。
+///
+/// `fxg project link` および Client API (`POST .../projects/link`) から共有する。
+pub fn patch_project_key(dir: &Path, project_key: &str) -> Result<(), NodeError> {
+    let path = dir.join(fxg_protocol::config::PROJECT_CONFIG_FILE_NAME);
+    let existing = std::fs::read_to_string(&path).unwrap_or_default();
+    let mut lines: Vec<String> = existing.lines().map(str::to_owned).collect();
+
+    // TOML 文字列リテラルとして安全に埋め込む
+    let literal = format!(
+        "\"{}\"",
+        project_key.replace('\\', "\\\\").replace('"', "\\\"")
+    );
+
+    let mut replaced = false;
+    for line in lines.iter_mut() {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("project_key") && line.contains('=') {
+            *line = format!("project_key = {literal}");
+            replaced = true;
+            break;
+        }
+    }
+    if !replaced {
+        lines.insert(0, format!("project_key = {literal}"));
+    }
+
+    let mut output = lines.join("\n");
+    output.push('\n');
+    std::fs::write(&path, output).map_err(|err| NodeError::io(&path, err))?;
+
+    // 実際に読み戻せることを検証する (壊れた TOML を書かない)
+    ProjectConfig::load_from_path(&path)?;
+    Ok(())
+}
+
 /// 指定ディレクトリの論理プロジェクトを解決する。
 ///
 /// `.fxg.toml` は起動ディレクトリ → Git ルートの順に探索する。
@@ -398,6 +434,40 @@ mod tests {
         assert!(resolved.is_git_repo);
         assert_eq!(resolved.source, ProjectResolutionSource::Fallback);
         assert!(resolved.project_id.starts_with("local:linux-vps:"));
+    }
+
+    #[test]
+    fn patch_project_key_preserves_other_settings() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(
+            dir.path()
+                .join(fxg_protocol::config::PROJECT_CONFIG_FILE_NAME),
+            "name = \"flexagent\"\n\n[worktree]\nbase_branch = \"main\"\n",
+        )
+        .expect("write");
+        patch_project_key(dir.path(), "github.com/nazo6/flexagent").expect("patch");
+        let config = ProjectConfig::load_from_dir(dir.path())
+            .expect("load")
+            .expect("exists");
+        assert_eq!(
+            config.project_key.as_deref(),
+            Some("github.com/nazo6/flexagent")
+        );
+        assert_eq!(config.name.as_deref(), Some("flexagent"));
+        assert_eq!(config.worktree.base_branch.as_deref(), Some("main"));
+
+        // 再実行しても重複行を作らない
+        patch_project_key(dir.path(), "other/key").expect("patch again");
+        let config = ProjectConfig::load_from_dir(dir.path())
+            .expect("load")
+            .expect("exists");
+        assert_eq!(config.project_key.as_deref(), Some("other/key"));
+        let text = std::fs::read_to_string(
+            dir.path()
+                .join(fxg_protocol::config::PROJECT_CONFIG_FILE_NAME),
+        )
+        .expect("read");
+        assert_eq!(text.matches("project_key").count(), 1);
     }
 
     fn canonical(path: &Path) -> PathBuf {

@@ -41,6 +41,11 @@ const HELLO_TIMEOUT: Duration = Duration::from_secs(10);
 /// コマンド中継の応答待ちタイムアウト。
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// プロジェクト操作 (スキャン等) の応答待ちタイムアウト。
+///
+/// ディレクトリ走査は対象規模により 30 秒を超えることがある。
+const PROJECT_OP_TIMEOUT: Duration = Duration::from_secs(120);
+
 /// ノード接続への送信キュー容量。
 const NODE_CHANNEL_CAPACITY: usize = 512;
 
@@ -80,6 +85,20 @@ enum PendingResponse {
     BrowseFs {
         /// 取得成功時のブラウズ結果
         response: Option<fxg_protocol::client_api::FsBrowseResponse>,
+        /// 失敗時のメッセージ
+        error: Option<String>,
+    },
+    /// プロジェクト一括スキャン結果 (`ProjectScanResult`)
+    ProjectScan {
+        /// 成功時のスキャン結果
+        response: Option<fxg_protocol::client_api::ProjectScanResponse>,
+        /// 失敗時のメッセージ
+        error: Option<String>,
+    },
+    /// プロジェクト手動紐付け結果 (`ProjectLinkResult`)
+    ProjectLink {
+        /// 成功時の紐付け結果
+        response: Option<fxg_protocol::client_api::ProjectLinkResponse>,
         /// 失敗時のメッセージ
         error: Option<String>,
     },
@@ -391,6 +410,51 @@ impl NodeHub {
                 (Some(resp), _) => Ok(resp),
                 (None, Some(error)) => Err(ApiError::bad_request(error)),
                 (None, None) => Err(ApiError::internal("node returned no fs browse response")),
+            },
+            PendingResponse::Failed { code, message } => Err(ApiError::from_code(code, message)),
+            _ => Err(ApiError::internal("unexpected node response kind")),
+        }
+    }
+
+    /// プロジェクト一括スキャンを中継し、`request_id` 相関で結果を待つ。
+    ///
+    /// ディレクトリ走査は時間がかかりうるため、通常コマンドより長い
+    /// [`PROJECT_OP_TIMEOUT`] で待つ。
+    pub async fn scan_projects(
+        &self,
+        node_id: &str,
+        request_id: &str,
+        message: ServerToNodeMsg,
+    ) -> Result<fxg_protocol::client_api::ProjectScanResponse, ApiError> {
+        let response = self
+            .request(node_id, request_id, message, PROJECT_OP_TIMEOUT)
+            .await?;
+        match response {
+            PendingResponse::ProjectScan { response, error } => match (response, error) {
+                (Some(resp), _) => Ok(resp),
+                (None, Some(error)) => Err(ApiError::bad_request(error)),
+                (None, None) => Err(ApiError::internal("node returned no project scan response")),
+            },
+            PendingResponse::Failed { code, message } => Err(ApiError::from_code(code, message)),
+            _ => Err(ApiError::internal("unexpected node response kind")),
+        }
+    }
+
+    /// プロジェクト手動紐付けを中継し、`request_id` 相関で結果を待つ。
+    pub async fn link_project(
+        &self,
+        node_id: &str,
+        request_id: &str,
+        message: ServerToNodeMsg,
+    ) -> Result<fxg_protocol::client_api::ProjectLinkResponse, ApiError> {
+        let response = self
+            .request(node_id, request_id, message, COMMAND_TIMEOUT)
+            .await?;
+        match response {
+            PendingResponse::ProjectLink { response, error } => match (response, error) {
+                (Some(resp), _) => Ok(resp),
+                (None, Some(error)) => Err(ApiError::bad_request(error)),
+                (None, None) => Err(ApiError::internal("node returned no project link response")),
             },
             PendingResponse::Failed { code, message } => Err(ApiError::from_code(code, message)),
             _ => Err(ApiError::internal("unexpected node response kind")),
@@ -863,6 +927,32 @@ async fn handle_node_message(state: &ServerState, node_id: &str, text: &str) {
             state
                 .hub()
                 .resolve(&request_id, PendingResponse::BrowseFs { response, error })
+                .await;
+        }
+        NodeToServerMsg::ProjectScanResult {
+            request_id,
+            response,
+            error,
+        } => {
+            state
+                .hub()
+                .resolve(
+                    &request_id,
+                    PendingResponse::ProjectScan { response, error },
+                )
+                .await;
+        }
+        NodeToServerMsg::ProjectLinkResult {
+            request_id,
+            response,
+            error,
+        } => {
+            state
+                .hub()
+                .resolve(
+                    &request_id,
+                    PendingResponse::ProjectLink { response, error },
+                )
                 .await;
         }
         NodeToServerMsg::PtyOutput { pty_id, data_b64 } => {

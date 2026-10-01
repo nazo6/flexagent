@@ -55,4 +55,18 @@ CLI (`fxg`) で提供されている機能のうち、Web UI
       (`ChatTimeline.svelte` の各ユーザーターン、`/sessions/[id]` の Revert 確認
       ダイアログ)
 - [x] 監査ログ `session_revert` を追加 (サーバー / ノード双方)
-- [x] CLI の重複型 (`SessionRevertOutcome`) を `SessionRevertResponse` へ統合 (DRY)
+- [x] CLI の重複型 (`SessionRevertOutcome`) を `SessionRevertResponse` へ統合
+      (DRY)
+
+### フェーズ C: プロジェクト & Worktree 高度管理 (完了)
+
+- [x] Worktree Prune (`git worktree prune`) の API & UI
+      (`WorktreeAction::Prune`, `POST /api/v1/projects/:id/worktrees/prune`,
+      プロジェクトカードの Prune ボタン & 確認ダイアログ)
+- [x] プロジェクト一括スキャン (`fxg project scan`) の API & UI
+      (`POST /api/v1/nodes/:node_id/projects/scan`, スキャンダイアログ)
+- [x] プロジェクト手動紐付け (`fxg project link`) の API & UI
+      (`POST /api/v1/nodes/:node_id/projects/link`, フォルダブラウザ連携)
+- [x] 共有実装の集約 (`ops.rs` の `project_scan` / `project_link` /
+      `worktree_prune`。IPC ハンドラも同じ実装を呼び出すようにリファクタ)
+- [x] 監査ログ `worktree_prune` / `project_link` を追加

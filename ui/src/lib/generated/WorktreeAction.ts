@@ -23,4 +23,4 @@ path: string,
 /**
  * 未コミット変更があっても強制削除するか
  */
-force: boolean, };
+force: boolean, } | { "action": "prune" };

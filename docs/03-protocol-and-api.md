@@ -389,6 +389,18 @@ pub enum NodeToServerMsg {
         outcome: Option<SessionRevertResponse>,
         error: Option<String>,
     },
+    /// プロジェクト一括スキャン (`ProjectScan`) の結果応答
+    ProjectScanResult {
+        request_id: String,
+        response: Option<ProjectScanResponse>, // scanned_dirs + projects (§3.1)
+        error: Option<String>,
+    },
+    /// プロジェクト手動紐付け (`ProjectLink`) の結果応答
+    ProjectLinkResult {
+        request_id: String,
+        response: Option<ProjectLinkResponse>, // project_id + local_path (§3.1)
+        error: Option<String>,
+    },
     /// PTY 起動・操作の失敗通知 (エラーコードは文字列。例: `PTY_DISABLED`)
     /// ※ノード側設定 allow_remote_pty = false の場合、リモートからの
     ///   PtySpawn に対して PTY_DISABLED を返す
@@ -508,7 +520,18 @@ pub enum ServerToNodeMsg {
     ManageWorktree {
         command_id: String,
         project_id: String,
-        action: WorktreeAction,        // Add { branch, new_path } | Remove { path }
+        action: WorktreeAction,        // Add { branch, new_path } | Remove { path } | Prune
+    },
+    /// 指定ディレクトリ配下の Git リポジトリ一括スキャン・登録要求 (`fxg project scan`)
+    ProjectScan {
+        request_id: String,
+        dir: Option<String>,          // 未指定時は node.project_scan_dirs
+    },
+    /// 任意ディレクトリの論理プロジェクトへの手動紐付け要求 (`fxg project link`)
+    ProjectLink {
+        request_id: String,
+        project_id: String,
+        local_path: String,
     },
     /// GitCredentialRequest に対する短命トークン応答
     GitCredentialResponse {
@@ -585,6 +608,21 @@ pub enum ServerToNodeMsg {
   Worktree（`git worktree add -b <branch> <path>`）を作成。
 - `DELETE /api/v1/projects/:id/worktrees`: 指定ノード上の Worktree
   を削除（`git worktree remove`）。
+- `POST /api/v1/projects/:id/worktrees/prune`:
+  指定ノード上のメインリポジトリで `git worktree prune`
+  を実行し、削除済みディレクトリの管理情報をクリーンアップする
+  (`fxg worktree prune` の Web UI 版。`{ node_id }`)。
+- `POST /api/v1/nodes/:node_id/projects/scan`:
+  指定ディレクトリ (省略時は `config.toml` の `node.project_scan_dirs`)
+  配下の Git リポジトリを一括探索し、論理プロジェクトとして登録する
+  (`fxg project scan` の Web UI 版)。`{ dir: Option<String> }` を受け取り、
+  `ProjectScanResponse` (`scanned_dirs` + ノード上での登録プロジェクト一覧)
+  を返す。
+- `POST /api/v1/nodes/:node_id/projects/link`:
+  任意ディレクトリを論理プロジェクト ID へ手動で紐付ける
+  (`fxg project link` の Web UI 版。対象の `.fxg.toml` に `project_key`
+  を書き込む)。`{ project_id, local_path }` を受け取り、解決結果
+  (`ProjectLinkResponse`) を返す。
 - `GET /api/v1/nodes`:
   ノード一覧とオンライン状態、一時ノード属性（`is_ephemeral`,
   `lifecycle_status`）、利用可能エージェント一覧を返却。

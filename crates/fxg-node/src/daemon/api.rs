@@ -9,9 +9,10 @@ use std::path::{Path, PathBuf};
 use async_trait::async_trait;
 use fxg_protocol::client_api::{
     ConnectionRole, CreateSessionRequest, CreateSessionResponse, CreateWorktreeRequest,
-    KillSwitchResponse, ProvisionersResponse, RemoveWorktreeRequest, RespondPermissionRequest,
-    RespondPermissionResponse, SessionRevertRequest, SessionRevertResponse, WorktreeInfo,
-    WorktreesResponse,
+    KillSwitchResponse, ProjectLinkRequest, ProjectLinkResponse, ProjectScanRequest,
+    ProjectScanResponse, ProvisionersResponse, PruneWorktreesRequest, RemoveWorktreeRequest,
+    RespondPermissionRequest, RespondPermissionResponse, SessionRevertRequest,
+    SessionRevertResponse, WorktreeInfo, WorktreesResponse,
 };
 use fxg_protocol::common::{CommandResult, DiffScope, WorkspaceDiffResponse};
 use fxg_server::api::{
@@ -397,6 +398,102 @@ impl ClientApiBackend for DaemonState {
         )
         .await
         .map_err(api_error)
+    }
+
+    async fn prune_worktrees(
+        &self,
+        project_id: &str,
+        request: PruneWorktreesRequest,
+        client: ClientInfo,
+    ) -> Result<(), ApiError> {
+        if request.node_id != self.node_id() {
+            return Err(ApiError::bad_request(format!(
+                "requested node {} but this node is {}",
+                request.node_id,
+                self.node_id()
+            )));
+        }
+        let repo = self
+            .project_main_repo(project_id)
+            .await
+            .map_err(api_error)?;
+        self.worktree_prune(&repo, &audit_source(&client))
+            .await
+            .map_err(api_error)?;
+        Ok(())
+    }
+
+    async fn scan_projects(
+        &self,
+        node_id: &str,
+        request: ProjectScanRequest,
+        client: ClientInfo,
+    ) -> Result<ProjectScanResponse, ApiError> {
+        if node_id != self.node_id() {
+            return Err(ApiError::bad_request(format!(
+                "requested node {node_id} but this node is {}",
+                self.node_id()
+            )));
+        }
+        let scanned_dirs = self
+            .project_scan(request.dir.as_deref().map(Path::new))
+            .await
+            .map_err(api_error)?;
+        let projects = self.db().list_projects().await.map_err(ApiError::from)?;
+        self.record_audit(
+            fxg_db::audit::actions::PROJECT_LINK,
+            &audit_source(&client),
+            None,
+            serde_json::json!({
+                "action": "scan",
+                "scanned_dirs": scanned_dirs,
+            }),
+        )
+        .await;
+        Ok(ProjectScanResponse {
+            scanned_dirs,
+            projects,
+        })
+    }
+
+    async fn link_project(
+        &self,
+        node_id: &str,
+        request: ProjectLinkRequest,
+        client: ClientInfo,
+    ) -> Result<ProjectLinkResponse, ApiError> {
+        if node_id != self.node_id() {
+            return Err(ApiError::bad_request(format!(
+                "requested node {node_id} but this node is {}",
+                self.node_id()
+            )));
+        }
+        let dir = PathBuf::from(&request.local_path);
+        if !dir.is_dir() {
+            return Err(ApiError::not_found(format!(
+                "directory not found: {}",
+                request.local_path
+            )));
+        }
+        let resolved = self
+            .project_link(&dir, &request.project_id)
+            .await
+            .map_err(api_error)?;
+        self.record_audit(
+            fxg_db::audit::actions::PROJECT_LINK,
+            &audit_source(&client),
+            None,
+            serde_json::json!({
+                "action": "link",
+                "project_id": resolved.project_id,
+                "local_path": resolved.local_path.to_string_lossy(),
+            }),
+        )
+        .await;
+        Ok(ProjectLinkResponse {
+            project_id: resolved.project_id,
+            local_path: resolved.local_path.to_string_lossy().into_owned(),
+        })
     }
 
     async fn workspace_diff(

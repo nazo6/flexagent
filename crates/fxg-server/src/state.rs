@@ -15,8 +15,9 @@ use base64::Engine as _;
 use fxg_db::{Db, DbRole, PushSubscriptionRecord};
 use fxg_protocol::client_api::{
     ConnectionRole, CreateSessionRequest, CreateSessionResponse, CreateWorktreeRequest,
-    KillSwitchResponse, ProvisionerSummary, ProvisionersResponse, PushSubscribeRequest,
-    PushSubscribeResponse, RemoveWorktreeRequest, RespondPermissionRequest,
+    KillSwitchResponse, ProjectLinkRequest, ProjectLinkResponse, ProjectScanRequest,
+    ProjectScanResponse, ProvisionerSummary, ProvisionersResponse, PruneWorktreesRequest,
+    PushSubscribeRequest, PushSubscribeResponse, RemoveWorktreeRequest, RespondPermissionRequest,
     RespondPermissionResponse, SessionRevertRequest, SessionRevertResponse, WorktreeInfo,
     WorktreesResponse,
 };
@@ -724,6 +725,125 @@ impl ClientApiBackend for ServerState {
         )
         .await;
         Ok(outcome)
+    }
+
+    async fn prune_worktrees(
+        &self,
+        project_id: &str,
+        request: PruneWorktreesRequest,
+        client: ClientInfo,
+    ) -> Result<(), ApiError> {
+        if !self.inner.hub.is_online(&request.node_id).await {
+            return Err(ApiError::from_code(
+                ErrorCode::NodeOffline,
+                format!("node is offline: {}", request.node_id),
+            ));
+        }
+        let command_id = uuid_v7();
+        self.inner
+            .hub
+            .worktree_op(
+                &request.node_id,
+                &command_id,
+                ServerToNodeMsg::ManageWorktree {
+                    command_id: command_id.clone(),
+                    project_id: project_id.to_owned(),
+                    action: WorktreeAction::Prune,
+                },
+            )
+            .await?;
+        self.record_audit(
+            fxg_db::audit::actions::WORKTREE_PRUNE,
+            &client,
+            None,
+            serde_json::json!({
+                "node_id": request.node_id,
+                "project_id": project_id,
+            }),
+        )
+        .await;
+        Ok(())
+    }
+
+    async fn scan_projects(
+        &self,
+        node_id: &str,
+        request: ProjectScanRequest,
+        client: ClientInfo,
+    ) -> Result<ProjectScanResponse, ApiError> {
+        if !self.inner.hub.is_online(node_id).await {
+            return Err(ApiError::from_code(
+                ErrorCode::NodeOffline,
+                format!("node is offline: {node_id}"),
+            ));
+        }
+        let request_id = uuid_v7();
+        let response = self
+            .inner
+            .hub
+            .scan_projects(
+                node_id,
+                &request_id,
+                ServerToNodeMsg::ProjectScan {
+                    request_id: request_id.clone(),
+                    dir: request.dir.clone(),
+                },
+            )
+            .await?;
+        self.record_audit(
+            fxg_db::audit::actions::PROJECT_LINK,
+            &client,
+            None,
+            serde_json::json!({
+                "action": "scan",
+                "node_id": node_id,
+                "dir": request.dir,
+                "scanned_dirs": response.scanned_dirs,
+            }),
+        )
+        .await;
+        Ok(response)
+    }
+
+    async fn link_project(
+        &self,
+        node_id: &str,
+        request: ProjectLinkRequest,
+        client: ClientInfo,
+    ) -> Result<ProjectLinkResponse, ApiError> {
+        if !self.inner.hub.is_online(node_id).await {
+            return Err(ApiError::from_code(
+                ErrorCode::NodeOffline,
+                format!("node is offline: {node_id}"),
+            ));
+        }
+        let request_id = uuid_v7();
+        let response = self
+            .inner
+            .hub
+            .link_project(
+                node_id,
+                &request_id,
+                ServerToNodeMsg::ProjectLink {
+                    request_id: request_id.clone(),
+                    project_id: request.project_id.clone(),
+                    local_path: request.local_path.clone(),
+                },
+            )
+            .await?;
+        self.record_audit(
+            fxg_db::audit::actions::PROJECT_LINK,
+            &client,
+            None,
+            serde_json::json!({
+                "action": "link",
+                "node_id": node_id,
+                "project_id": response.project_id,
+                "local_path": response.local_path,
+            }),
+        )
+        .await;
+        Ok(response)
     }
 
     async fn list_worktrees(&self, project_id: &str) -> Result<WorktreesResponse, ApiError> {

@@ -37,11 +37,12 @@ use fxg_db::{Db, DbError, SessionFilter};
 use fxg_protocol::client_api::{
     ApiErrorBody, ApiErrorResponse, AuditLogsResponse, AuthLoginRequest, ConnectionRole,
     CreateSessionRequest, CreateSessionResponse, CreateWorktreeRequest, InboxResponse,
-    KillSwitchRequest, KillSwitchResponse, NodesResponse, ProjectsResponse, ProvisionersResponse,
-    PushSubscribeRequest, PushSubscribeResponse, RemoveWorktreeRequest, RespondPermissionRequest,
-    RespondPermissionResponse, SearchResponse, ServerWsMessage, SessionListResponse,
-    SessionRevertRequest, SessionRevertResponse, SystemInfoResponse, WorktreeInfo,
-    WorktreesResponse,
+    KillSwitchRequest, KillSwitchResponse, NodesResponse, ProjectLinkRequest, ProjectLinkResponse,
+    ProjectScanRequest, ProjectScanResponse, ProjectsResponse, ProvisionersResponse,
+    PruneWorktreesRequest, PushSubscribeRequest, PushSubscribeResponse, RemoveWorktreeRequest,
+    RespondPermissionRequest, RespondPermissionResponse, SearchResponse, ServerWsMessage,
+    SessionListResponse, SessionRevertRequest, SessionRevertResponse, SystemInfoResponse,
+    WorktreeInfo, WorktreesResponse,
 };
 use fxg_protocol::common::{
     CommandResult, DiffScope, ErrorCode, SessionControlAction, SessionStatus, WorkspaceDiffResponse,
@@ -385,6 +386,33 @@ pub trait ClientApiBackend: Clone + Send + Sync + 'static {
         client: ClientInfo,
     ) -> Result<(), ApiError>;
 
+    /// `POST /api/v1/projects/:id/worktrees/prune`
+    /// (削除済み Worktree 管理情報のクリーンアップ)。
+    async fn prune_worktrees(
+        &self,
+        project_id: &str,
+        request: PruneWorktreesRequest,
+        client: ClientInfo,
+    ) -> Result<(), ApiError>;
+
+    /// `POST /api/v1/nodes/:node_id/projects/scan`
+    /// (指定ディレクトリ配下の Git リポジトリを一括スキャン・登録)。
+    async fn scan_projects(
+        &self,
+        node_id: &str,
+        request: ProjectScanRequest,
+        client: ClientInfo,
+    ) -> Result<ProjectScanResponse, ApiError>;
+
+    /// `POST /api/v1/nodes/:node_id/projects/link`
+    /// (任意ディレクトリを論理プロジェクトへ手動紐付け)。
+    async fn link_project(
+        &self,
+        node_id: &str,
+        request: ProjectLinkRequest,
+        client: ClientInfo,
+    ) -> Result<ProjectLinkResponse, ApiError>;
+
     /// `GET /api/v1/sessions/:id/diff`
     async fn workspace_diff(
         &self,
@@ -526,6 +554,18 @@ pub fn client_router<B: ClientApiBackend>(backend: B, options: ClientApiOptions)
             get(list_worktrees::<B>)
                 .post(create_worktree::<B>)
                 .delete(remove_worktree::<B>),
+        )
+        .route(
+            "/api/v1/projects/{project_id}/worktrees/prune",
+            post(prune_worktrees::<B>),
+        )
+        .route(
+            "/api/v1/nodes/{node_id}/projects/scan",
+            post(scan_projects::<B>),
+        )
+        .route(
+            "/api/v1/nodes/{node_id}/projects/link",
+            post(link_project::<B>),
         )
         .route("/api/v1/nodes", get(list_nodes::<B>))
         .route("/api/v1/nodes/{node_id}/fs/browse", get(browse_fs::<B>))
@@ -887,6 +927,46 @@ async fn remove_worktree<B: ClientApiBackend>(
         .await
     {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(err) => err.into_response(),
+    }
+}
+
+async fn prune_worktrees<B: ClientApiBackend>(
+    State(state): State<ClientApiState<B>>,
+    Extension(client): Extension<ClientInfo>,
+    UrlPath(project_id): UrlPath<String>,
+    Json(request): Json<PruneWorktreesRequest>,
+) -> Response {
+    match state
+        .backend
+        .prune_worktrees(&project_id, request, client)
+        .await
+    {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(err) => err.into_response(),
+    }
+}
+
+async fn scan_projects<B: ClientApiBackend>(
+    State(state): State<ClientApiState<B>>,
+    Extension(client): Extension<ClientInfo>,
+    UrlPath(node_id): UrlPath<String>,
+    Json(request): Json<ProjectScanRequest>,
+) -> Response {
+    match state.backend.scan_projects(&node_id, request, client).await {
+        Ok(response) => Json(response).into_response(),
+        Err(err) => err.into_response(),
+    }
+}
+
+async fn link_project<B: ClientApiBackend>(
+    State(state): State<ClientApiState<B>>,
+    Extension(client): Extension<ClientInfo>,
+    UrlPath(node_id): UrlPath<String>,
+    Json(request): Json<ProjectLinkRequest>,
+) -> Response {
+    match state.backend.link_project(&node_id, request, client).await {
+        Ok(response) => Json(response).into_response(),
         Err(err) => err.into_response(),
     }
 }
