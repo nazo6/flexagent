@@ -11,6 +11,7 @@
   import KillSwitchButton from '$lib/components/KillSwitchButton.svelte';
   import SyncStatusBadge from '$lib/components/SyncStatusBadge.svelte';
   import type { SessionSummary } from '$lib/generated/SessionSummary';
+  import AlertCircleIcon from '@lucide/svelte/icons/alert-circle';
   import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
   import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
   import FolderGit2Icon from '@lucide/svelte/icons/folder-git-2';
@@ -27,15 +28,21 @@
   let { onNavigate }: Props = $props();
 
   let searchQuery = $state('');
-  let collapsedSections = $state<Record<string, boolean>>({});
+  let collapsedProjects = $state<Record<string, boolean>>({});
+  let showAttentionSection = $state(true);
 
   const currentPath = $derived(page.url.pathname);
   const activeSessionId = $derived(
     currentPath.startsWith('/sessions/') ? currentPath.replace('/sessions/', '') : null
   );
 
-  function toggleSection(sectionKey: string) {
-    collapsedSections[sectionKey] = !collapsedSections[sectionKey];
+  function toggleProject(projectId: string) {
+    collapsedProjects[projectId] = !collapsedProjects[projectId];
+  }
+
+  function isProjectCollapsed(projectId: string): boolean {
+    if (searchQuery.trim() !== '') return false;
+    return collapsedProjects[projectId] ?? false;
   }
 
   function matchesSearch(session: SessionSummary, query: string): boolean {
@@ -57,37 +64,71 @@
     new Set(sync.inbox.map((req) => req.session_id))
   );
 
+  // 全体横断の要対応セッション
   const needsAttentionSessions = $derived(
     filteredSessions.filter(
       (s) => pendingSessionIds.has(s.session_id) || s.status === 'error'
     )
   );
 
-  const workingSessions = $derived(
-    filteredSessions.filter(
-      (s) =>
-        s.status === 'running' &&
-        !pendingSessionIds.has(s.session_id)
-    )
-  );
+  interface ProjectSessionGroup {
+    projectId: string;
+    projectName: string;
+    sessions: SessionSummary[];
+    pendingCount: number;
+    runningCount: number;
+  }
 
-  const pinnedSessions = $derived(
-    filteredSessions.filter(
-      (s) =>
-        pinned.isPinned(s.session_id) &&
-        !needsAttentionSessions.some((item) => item.session_id === s.session_id) &&
-        !workingSessions.some((item) => item.session_id === s.session_id)
-    )
-  );
+  // プロジェクト別のセッショングループ
+  const projectGroups = $derived.by(() => {
+    const groups: ProjectSessionGroup[] = [];
+    const projectMap = new Map<string, string>();
 
-  const recentSessions = $derived(
-    filteredSessions.filter(
-      (s) =>
-        !needsAttentionSessions.some((item) => item.session_id === s.session_id) &&
-        !workingSessions.some((item) => item.session_id === s.session_id) &&
-        !pinnedSessions.some((item) => item.session_id === s.session_id)
-    )
-  );
+    for (const p of sync.projects) {
+      projectMap.set(p.project_id, p.name);
+    }
+
+    const allProjectIds = new Set<string>();
+    for (const s of filteredSessions) {
+      allProjectIds.add(s.project_id);
+    }
+    for (const p of sync.projects) {
+      allProjectIds.add(p.project_id);
+    }
+
+    for (const pId of allProjectIds) {
+      const projSessions = filteredSessions
+        .filter((s) => s.project_id === pId)
+        .toSorted((a, b) => {
+          const aPinned = pinned.isPinned(a.session_id) ? 1 : 0;
+          const bPinned = pinned.isPinned(b.session_id) ? 1 : 0;
+          if (aPinned !== bPinned) return bPinned - aPinned;
+          return b.updated_at - a.updated_at;
+        });
+
+      if (searchQuery.trim() !== '' && projSessions.length === 0) {
+        continue;
+      }
+
+      const pendingCount = projSessions.filter((s) => pendingSessionIds.has(s.session_id)).length;
+      const runningCount = projSessions.filter((s) => s.status === 'running').length;
+
+      groups.push({
+        projectId: pId,
+        projectName: projectMap.get(pId) ?? pId,
+        sessions: projSessions,
+        pendingCount,
+        runningCount
+      });
+    }
+
+    // 直近更新セッションがあるプロジェクトを上位にソート
+    return groups.toSorted((a, b) => {
+      const aLatest = a.sessions[0]?.updated_at ?? 0;
+      const bLatest = b.sessions[0]?.updated_at ?? 0;
+      return bLatest - aLatest;
+    });
+  });
 
   function getNode(nodeId: string) {
     return sync.nodes.find((n) => n.node_id === nodeId);
@@ -99,6 +140,7 @@
 </script>
 
 <aside class="bg-card flex h-full w-full flex-col border-r">
+  <!-- サイドバーヘッダー -->
   <div class="flex items-center justify-between border-b px-3 py-2.5">
     <a
       href="/"
@@ -121,6 +163,7 @@
     </a>
   </div>
 
+  <!-- クイックナビゲーション -->
   <nav class="flex flex-col gap-0.5 border-b p-2 text-xs">
     <a
       href="/"
@@ -170,7 +213,7 @@
       )}
     >
       <FolderGit2Icon class="size-3.5" />
-      <span>プロジェクト</span>
+      <span>プロジェクト管理</span>
     </a>
 
     <a
@@ -184,7 +227,7 @@
       )}
     >
       <SearchIcon class="size-3.5" />
-      <span>検索</span>
+      <span>全文検索</span>
     </a>
 
     <a
@@ -202,132 +245,131 @@
     </a>
   </nav>
 
+  <!-- 検索バー -->
   <div class="border-b px-2 py-2">
     <div class="relative flex items-center">
       <SearchIcon class="text-muted-foreground absolute left-2 size-3.5 pointer-events-none" />
       <input
         type="text"
         bind:value={searchQuery}
-        placeholder="セッションを絞り込み…"
+        placeholder="セッション・プロジェクトを検索…"
         class="bg-muted/40 placeholder:text-muted-foreground focus-visible:ring-ring/40 w-full rounded-md border py-1 pr-2 pl-7 text-xs outline-none focus-visible:ring-1"
       />
     </div>
   </div>
 
+  <!-- セッション一覧リスト (プロジェクト別) -->
   <div class="scrollbar-thin flex-1 overflow-y-auto p-2">
-    {#if filteredSessions.length === 0}
+    <!-- 要対応セクション (承認待ち・エラーがある場合のみ最上部に表示) -->
+    {#if needsAttentionSessions.length > 0 && searchQuery.trim() === ''}
+      <div class="mb-3 rounded-lg border border-destructive/30 bg-destructive/5 p-1.5">
+        <button
+          type="button"
+          class="text-destructive flex w-full items-center justify-between px-1 py-0.5 text-[11px] font-semibold tracking-wider uppercase select-none"
+          onclick={() => (showAttentionSection = !showAttentionSection)}
+        >
+          <span class="flex items-center gap-1.5">
+            <AlertCircleIcon class="size-3" />
+            <span>NEEDS ATTENTION</span>
+            <span class="rounded-full bg-destructive/15 px-1.5 py-0.2 text-[10px] text-destructive">
+              {needsAttentionSessions.length}
+            </span>
+          </span>
+          {#if showAttentionSection}
+            <ChevronDownIcon class="size-3" />
+          {:else}
+            <ChevronRightIcon class="size-3" />
+          {/if}
+        </button>
+
+        {#if showAttentionSection}
+          <ul class="flex list-none flex-col gap-0.5 p-0 mt-1">
+            {#each needsAttentionSessions as session (session.session_id)}
+              {@render sessionRow(session, true)}
+            {/each}
+          </ul>
+        {/if}
+      </div>
+    {/if}
+
+    <!-- プロジェクト別一覧 -->
+    {#if projectGroups.length === 0}
       <div class="text-muted-foreground p-3 text-center text-xs">
-        {searchQuery ? '該当するセッションがありません' : 'セッションがまだありません'}
+        {searchQuery ? '該当するプロジェクトまたはセッションがありません' : 'プロジェクトがまだありません'}
       </div>
     {:else}
-      {#if needsAttentionSessions.length > 0}
-        <div class="mb-3">
-          <button
-            type="button"
-            class="text-muted-foreground hover:text-foreground flex w-full items-center justify-between px-1 py-1 text-[11px] font-semibold tracking-wider uppercase select-none"
-            onclick={() => toggleSection('attention')}
-          >
-            <span class="text-destructive flex items-center gap-1.5">
-              <span>NEEDS ATTENTION</span>
-              <span class="rounded-full bg-destructive/15 px-1.5 py-0.2 text-[10px] text-destructive">
-                {needsAttentionSessions.length}
-              </span>
-            </span>
-            {#if collapsedSections['attention']}
-              <ChevronRightIcon class="size-3" />
-            {:else}
-              <ChevronDownIcon class="size-3" />
-            {/if}
-          </button>
-          {#if !collapsedSections['attention']}
-            <ul class="flex list-none flex-col gap-0.5 p-0">
-              {#each needsAttentionSessions as session (session.session_id)}
-                {@render sessionRow(session)}
-              {/each}
-            </ul>
-          {/if}
-        </div>
-      {/if}
+      <div class="flex flex-col gap-2.5">
+        {#each projectGroups as group (group.projectId)}
+          {@const isCollapsed = isProjectCollapsed(group.projectId)}
+          <div class="flex flex-col">
+            <!-- プロジェクト見出しヘッダー -->
+            <div class="group/proj flex items-center justify-between rounded-md px-1.5 py-1 text-xs hover:bg-muted/40 transition-colors">
+              <button
+                type="button"
+                class="flex min-w-0 flex-1 items-center gap-1.5 text-left font-semibold text-foreground/90 select-none"
+                onclick={() => toggleProject(group.projectId)}
+              >
+                <span class="text-muted-foreground shrink-0">
+                  {#if isCollapsed}
+                    <ChevronRightIcon class="size-3.5" />
+                  {:else}
+                    <ChevronDownIcon class="size-3.5" />
+                  {/if}
+                </span>
+                <FolderGit2Icon class="size-3.5 text-muted-foreground shrink-0" />
+                <span class="truncate">{group.projectName}</span>
+                {#if group.pendingCount > 0}
+                  <Badge variant="destructive" class="px-1 py-0 text-[9px] leading-tight shrink-0">
+                    {group.pendingCount}
+                  </Badge>
+                {/if}
+                {#if group.runningCount > 0}
+                  <span class="size-1.5 rounded-full bg-emerald-500 shrink-0" title="実行中セッションあり"></span>
+                {/if}
+              </button>
 
-      {#if workingSessions.length > 0}
-        <div class="mb-3">
-          <button
-            type="button"
-            class="text-muted-foreground hover:text-foreground flex w-full items-center justify-between px-1 py-1 text-[11px] font-semibold tracking-wider uppercase select-none"
-            onclick={() => toggleSection('working')}
-          >
-            <span class="flex items-center gap-1.5">
-              <span>WORKING</span>
-              <span class="rounded-full bg-emerald-500/15 px-1.5 py-0.2 text-[10px] text-emerald-600 dark:text-emerald-400">
-                {workingSessions.length}
-              </span>
-            </span>
-            {#if collapsedSections['working']}
-              <ChevronRightIcon class="size-3" />
-            {:else}
-              <ChevronDownIcon class="size-3" />
-            {/if}
-          </button>
-          {#if !collapsedSections['working']}
-            <ul class="flex list-none flex-col gap-0.5 p-0">
-              {#each workingSessions as session (session.session_id)}
-                {@render sessionRow(session)}
-              {/each}
-            </ul>
-          {/if}
-        </div>
-      {/if}
+              <div class="flex items-center gap-1 shrink-0 ml-1">
+                <span class="text-muted-foreground text-[10px]">
+                  {group.sessions.length}
+                </span>
+                <a
+                  href={`/?project=${encodeURIComponent(group.projectId)}`}
+                  onclick={handleLinkClick}
+                  class="opacity-0 group-hover/proj:opacity-100 hover:bg-accent text-muted-foreground hover:text-foreground rounded p-0.5 transition-opacity"
+                  title={`${group.projectName} で新規セッションを開始`}
+                >
+                  <PlusIcon class="size-3" />
+                </a>
+              </div>
+            </div>
 
-      {#if pinnedSessions.length > 0}
-        <div class="mb-3">
-          <button
-            type="button"
-            class="text-muted-foreground hover:text-foreground flex w-full items-center justify-between px-1 py-1 text-[11px] font-semibold tracking-wider uppercase select-none"
-            onclick={() => toggleSection('pinned')}
-          >
-            <span>PINNED</span>
-            {#if collapsedSections['pinned']}
-              <ChevronRightIcon class="size-3" />
-            {:else}
-              <ChevronDownIcon class="size-3" />
+            <!-- プロジェクト内セッションリスト -->
+            {#if !isCollapsed}
+              <ul class="ml-2.5 border-l border-border/60 pl-2 flex list-none flex-col gap-0.5 p-0 mt-0.5">
+                {#each group.sessions as session (session.session_id)}
+                  {@render sessionRow(session, false)}
+                {/each}
+                {#if group.sessions.length === 0}
+                  <li class="py-1 px-1.5 text-[11px] text-muted-foreground">
+                    <a
+                      href={`/?project=${encodeURIComponent(group.projectId)}`}
+                      onclick={handleLinkClick}
+                      class="hover:underline flex items-center gap-1 text-primary/80"
+                    >
+                      <PlusIcon class="size-3" />
+                      <span>セッションを開始</span>
+                    </a>
+                  </li>
+                {/if}
+              </ul>
             {/if}
-          </button>
-          {#if !collapsedSections['pinned']}
-            <ul class="flex list-none flex-col gap-0.5 p-0">
-              {#each pinnedSessions as session (session.session_id)}
-                {@render sessionRow(session)}
-              {/each}
-            </ul>
-          {/if}
-        </div>
-      {/if}
-
-      {#if recentSessions.length > 0}
-        <div class="mb-3">
-          <button
-            type="button"
-            class="text-muted-foreground hover:text-foreground flex w-full items-center justify-between px-1 py-1 text-[11px] font-semibold tracking-wider uppercase select-none"
-            onclick={() => toggleSection('recent')}
-          >
-            <span>RECENT</span>
-            {#if collapsedSections['recent']}
-              <ChevronRightIcon class="size-3" />
-            {:else}
-              <ChevronDownIcon class="size-3" />
-            {/if}
-          </button>
-          {#if !collapsedSections['recent']}
-            <ul class="flex list-none flex-col gap-0.5 p-0">
-              {#each recentSessions as session (session.session_id)}
-                {@render sessionRow(session)}
-              {/each}
-            </ul>
-          {/if}
-        </div>
-      {/if}
+          </div>
+        {/each}
+      </div>
     {/if}
   </div>
 
+  <!-- 下部フッター: 新規ボタン & ステータス -->
   <div class="border-t p-2 flex flex-col gap-2">
     <Button
       variant="outline"
@@ -352,7 +394,7 @@
   </div>
 </aside>
 
-{#snippet sessionRow(session: SessionSummary)}
+{#snippet sessionRow(session: SessionSummary, showProjectBadge: boolean)}
   {@const isActive = activeSessionId === session.session_id}
   {@const node = getNode(session.node_id)}
   {@const nodeAvail = getNodeAvailability(node)}
@@ -369,14 +411,30 @@
       )}
     >
       <div class="flex min-w-0 flex-1 items-center gap-2">
+        <!-- ノードステータスドット -->
         <span
           class={cn('size-1.5 shrink-0 rounded-full', nodeAvail.dotColorClass)}
           title={`ノード: ${node?.name ?? session.node_id} (${nodeAvail.statusText})`}
         ></span>
-        <span class="truncate">{session.title}</span>
+
+        <div class="flex min-w-0 flex-1 items-center gap-1">
+          {#if showProjectBadge}
+            <span class="text-muted-foreground text-[10px] shrink-0 font-medium truncate max-w-16">
+              [{session.project_id}]
+            </span>
+          {/if}
+          {#if session.git_branch}
+            <span class="text-muted-foreground text-[10px] shrink-0 font-mono">
+              ({session.git_branch})
+            </span>
+          {/if}
+          <!-- タイトル -->
+          <span class="truncate">{session.title}</span>
+        </div>
       </div>
 
       <div class="ml-2 flex shrink-0 items-center gap-1.5 text-muted-foreground text-[10px]">
+        <!-- ピン留めボタン -->
         <button
           type="button"
           class={cn(
