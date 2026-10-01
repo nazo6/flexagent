@@ -27,6 +27,7 @@ function makeEvent(seq: number, payload: UnifiedEventPayload): SessionEventEnvel
 
 function emptySources(events: SessionEventEnvelope[] = []): TimelineSources & MutableStreamBuffers {
   return {
+    sessionId: "session-1",
     events,
     messageDeltas: new Map(),
     thoughtDeltas: new Map(),
@@ -418,6 +419,31 @@ describe("pending prompts", () => {
     };
     const items = buildTimelineItems(sources);
     expect(items.map((item) => item.kind)).toEqual(["user", "pending"]);
+  });
+
+  it("ignores pending prompts from other sessions", () => {
+    const mine: PendingPrompt = {
+      commandId: "cmd-1",
+      sessionId: "session-1",
+      text: "自分のプロンプト",
+      createdAt: 1,
+    };
+    const other: PendingPrompt = {
+      commandId: "cmd-2",
+      sessionId: "session-2",
+      text: "他セッションのプロンプト",
+      createdAt: 2,
+    };
+    const sources: TimelineSources = {
+      ...emptySources(),
+      pendingPrompts: new Map([
+        [mine.commandId, mine],
+        [other.commandId, other],
+      ]),
+    };
+    const items = buildTimelineItems(sources);
+    expect(items.map((item) => item.kind)).toEqual(["pending"]);
+    expect(items[0]).toMatchObject({ key: "pending:cmd-1", text: "自分のプロンプト" });
   });
 });
 

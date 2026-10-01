@@ -12,6 +12,7 @@
   import { toast } from 'svelte-sonner';
   import AlertTriangleIcon from '@lucide/svelte/icons/alert-triangle';
   import BanIcon from '@lucide/svelte/icons/ban';
+  import LoaderCircleIcon from '@lucide/svelte/icons/loader-circle';
   import SendIcon from '@lucide/svelte/icons/send';
   import SlashIcon from '@lucide/svelte/icons/slash';
 
@@ -199,6 +200,9 @@
         disabled={sending || resuming}
         onclick={resumeAndSend}
       >
+        {#if resuming}
+          <LoaderCircleIcon class="size-3.5 animate-spin" />
+        {/if}
         {resuming ? '再開中…' : '履歴を引き継いで再開して送信'}
       </Button>
     </div>
@@ -286,7 +290,11 @@
         disabled={sending || text.trim() === ''}
         onclick={() => void send()}
       >
-        <SendIcon class="size-3.5" />
+        {#if sending}
+          <LoaderCircleIcon class="size-3.5 animate-spin" />
+        {:else}
+          <SendIcon class="size-3.5" />
+        {/if}
         {sending ? '送信中…' : isRunning ? 'キューに追加' : '送信'}
       </Button>
     </div>

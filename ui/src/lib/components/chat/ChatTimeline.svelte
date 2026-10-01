@@ -6,6 +6,7 @@
   import { Badge } from '$lib/components/ui/badge';
   import { formatEpochMs } from '$lib/format';
   import { sync } from '$lib/stores/app.svelte';
+  import type { SessionStatus } from '$lib/generated/SessionStatus';
   import type { TimelineItem } from '$lib/sync/reducer';
   import AlertTriangleIcon from '@lucide/svelte/icons/alert-triangle';
   import BotIcon from '@lucide/svelte/icons/bot';
@@ -13,16 +14,20 @@
   import ClockIcon from '@lucide/svelte/icons/clock';
   import GitForkIcon from '@lucide/svelte/icons/git-fork';
   import ListChecksIcon from '@lucide/svelte/icons/list-checks';
+  import LoaderCircleIcon from '@lucide/svelte/icons/loader-circle';
   import SquareTerminalIcon from '@lucide/svelte/icons/square-terminal';
   import Undo2Icon from '@lucide/svelte/icons/undo-2';
 
   let {
     sessionId,
     items,
+    status = null,
     onRevert
   }: {
     sessionId: string;
     items: TimelineItem[];
+    /** セッション状態 (イベント由来)。エージェント実行中のインジケータ表示に使う。 */
+    status?: SessionStatus | null;
     /** 「この時点へ巻き戻す (Revert)」要求のコールバック (引数は対象ターンの node_seq)。 */
     onRevert?: (seq: number) => void;
   } = $props();
@@ -36,6 +41,15 @@
     onRevert !== undefined && currentSession !== null && currentSession.status !== 'stopped'
   );
 
+  /**
+   * エージェントがターンを実行中 (応答生成・ツール実行中)。
+   *
+   * 送信直後〜最初の出力到着までだけでなく、ターンが終わる (idle / stopped /
+   * error) までタイムライン末尾に処理中インジケータを表示する。承認待ち
+   * (`waiting_permission`) はユーザー操作待ちのため表示しない。
+   */
+  const agentWorking = $derived(status === 'running');
+
   function forkFromSeq(seq: number) {
     const params = new URLSearchParams();
     params.set('fork_session', sessionId);
@@ -45,8 +59,8 @@
     void goto(`/?${params.toString()}`);
   }
 
-  function planStatusClass(status: string): string {
-    switch (status) {
+  function planStatusClass(planStatus: string): string {
+    switch (planStatus) {
       case 'completed':
         return 'text-muted-foreground line-through';
       case 'in_progress':
@@ -215,17 +229,29 @@
           <p class="whitespace-pre-wrap">{item.text}</p>
         </div>
       {:else if item.kind === 'pending'}
-        <div class="text-muted-foreground flex items-center gap-2 text-sm">
-          <ClockIcon class="size-4 animate-pulse" />
+        <div class="text-muted-foreground flex items-center gap-2 text-sm" role="status">
+          <LoaderCircleIcon class="size-4 animate-spin text-primary" />
           <span>送信待ち: <span class="whitespace-pre-wrap">{item.text}</span></span>
         </div>
       {/if}
     {/if}
   </li>
 {/each}
+
+{#if agentWorking}
+  <li class="flex gap-2" role="status" aria-live="polite">
+    <BotIcon class="text-muted-foreground mt-0.5 size-4 shrink-0" />
+    <div
+      class="bg-muted/60 text-muted-foreground flex items-center gap-2 rounded-2xl px-3.5 py-2 text-sm"
+    >
+      <LoaderCircleIcon class="size-3.5 animate-spin text-primary" />
+      <span>エージェントが処理中…</span>
+    </div>
+  </li>
+{/if}
 </ul>
 
-{#if items.length === 0}
+{#if items.length === 0 && !agentWorking}
   <p class="text-muted-foreground text-sm">
     まだ表示できるイベントがありません。プロンプトを送信するとここに表示されます。
   </p>

@@ -1213,3 +1213,29 @@
     - `NodeError::InvalidSession`: エラー文言を `invalid session: {0}` /
       `session {session_id} is not active` に改善。
     - 単体テスト `cancel_on_idle_session_is_safe_noop` を追加。
+
+### チャットの処理中インジケータ表示 (2026-10-01)
+
+- **課題と背景**:
+  - セッションチャットでプロンプトを送信してから、エージェントの最初の出力
+    (ストリーミング本文 / 思考 / ツール実行) が届くまでタイムラインに何も
+    表示されず、応答待ちなのか停止しているのか判別できなかった
+    (コールドスタートや長考時は数秒〜数十秒無反応に見える)。
+- **実装内容**:
+  - `ui/src/lib/components/chat/ChatTimeline.svelte`:
+    - セッション状態が `running` の間、タイムライン末尾に
+      「エージェントが処理中…」(スピナー付き) を表示する `agentWorking`
+      を追加。ターン終了 (`idle` / `stopped` / `error`) で消え、承認待ち
+      (`waiting_permission`) はユーザー操作待ちのため表示しない。
+    - 送信待ち (Pending Queue) 行のアイコンを静止クロックからスピナー
+      (`LoaderCircleIcon`) に変更。
+  - `ui/src/routes/sessions/[id]/+page.svelte`: イベント由来のステータス
+    (`currentStatus`) を `ChatTimeline` へ連携。
+  - `ui/src/lib/components/chat/Composer.svelte`: 送信ボタンおよび
+    「履歴を引き継いで再開して送信」ボタンに実行中スピナーを追加
+    (`送信中…` / `再開中…`)。
+  - `ui/src/lib/sync/reducer.ts`: `TimelineSources` に `sessionId` を追加し、
+    `pendingPrompts` を対象セッションで絞り込む (他セッションで送信中の
+    プロンプトがタイムラインに混入するバグを修正)。
+  - **テスト**: `reducer.test.ts` に他セッションの pending を無視する
+    ケースを追加 (`mise run check:ui` 通過)。

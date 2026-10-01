@@ -25,6 +25,8 @@ export interface PendingPrompt {
 
 /** タイムライン構築の入力 (リアクティブなソースをそのまま渡せる)。 */
 export interface TimelineSources {
+  /** 対象セッションの ID (`pendingPrompts` の絞り込みに使う)。 */
+  sessionId: string;
   events: SessionEventEnvelope[];
   messageDeltas: ReadonlyMap<string, string>;
   thoughtDeltas: ReadonlyMap<string, string>;
@@ -459,6 +461,8 @@ export function buildTimelineItems(sources: TimelineSources): TimelineItem[] {
     }
   }
   for (const pending of sources.pendingPrompts?.values() ?? []) {
+    // 他セッションで送信中のプロンプトをこのタイムラインに混入させない
+    if (pending.sessionId !== sources.sessionId) continue;
     items.push({
       kind: "pending",
       key: `pending:${pending.commandId}`,

@@ -48,6 +48,7 @@
   );
   const items = $derived(
     buildTimelineItems({
+      sessionId,
       events: timeline.events,
       messageDeltas: timeline.messageDeltas,
       thoughtDeltas: timeline.thoughtDeltas,
@@ -490,7 +491,12 @@
       >
         <div class="mx-auto flex max-w-3xl flex-col gap-4">
           <BootstrapLogCard lines={bootstrapLines} />
-          <ChatTimeline sessionId={sessionId} {items} onRevert={requestRevert} />
+          <ChatTimeline
+            sessionId={sessionId}
+            {items}
+            status={currentStatus}
+            onRevert={requestRevert}
+          />
         </div>
       </div>
 
