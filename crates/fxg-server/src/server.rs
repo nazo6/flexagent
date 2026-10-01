@@ -126,6 +126,15 @@ impl Server {
             let _ = receiver.changed().await;
         }
         let _ = self.shutdown_tx.send(true);
+
+        // 稼働中の一時VMを Drain / 強制終了する (ベストエフォート)
+        let ephemeral_nodes = crate::provisioner::running_node_ids(&self.state);
+        crate::provisioner::terminate_all(&self.state).await;
+        self.state
+            .hub()
+            .detach_all_ephemeral(&ephemeral_nodes)
+            .await;
+
         let _ = self.task.await;
     }
 

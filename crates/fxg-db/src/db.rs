@@ -211,6 +211,24 @@ impl Db {
         registration::set_node_online(&self.pool, node_id, is_online).await
     }
 
+    /// ノードのライフサイクル状態を更新する (一時VMの provisioning / terminated 等)。
+    pub async fn set_node_lifecycle(
+        &self,
+        node_id: &str,
+        status: fxg_protocol::common::NodeLifecycleStatus,
+    ) -> Result<(), DbError> {
+        registration::set_node_lifecycle(&self.pool, node_id, status).await
+    }
+
+    /// 一時VMプロビジョニング中のセッション状態を更新する (ハブ専用)。
+    pub async fn set_provisional_session_status(
+        &self,
+        session_id: &str,
+        status: fxg_protocol::common::SessionStatus,
+    ) -> Result<(), DbError> {
+        registration::set_provisional_session_status(&self.pool, session_id, status).await
+    }
+
     /// ノード個別トークンのハッシュを設定 / 失効させる。
     pub async fn set_node_token_hash(
         &self,

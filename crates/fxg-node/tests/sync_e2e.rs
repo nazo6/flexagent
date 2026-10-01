@@ -204,6 +204,7 @@ async fn start_server(home: &Path, port: u16) -> Server {
         allowed_hosts: Vec::new(),
         allowed_origins: Vec::new(),
         provisioners: Default::default(),
+        git_credentials: Default::default(),
     })
     .await
     .expect("start server")

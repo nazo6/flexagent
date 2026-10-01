@@ -150,6 +150,48 @@ pub async fn upsert_node(pool: &SqlitePool, record: &NodeRecord) -> Result<(), D
     Ok(())
 }
 
+/// ノードのライフサイクル状態を更新する (一時VMの provisioning / terminated 等)。
+pub async fn set_node_lifecycle(
+    pool: &SqlitePool,
+    node_id: &str,
+    status: NodeLifecycleStatus,
+) -> Result<(), DbError> {
+    let result = sqlx::query!(
+        r#"UPDATE nodes SET lifecycle_status = ? WHERE node_id = ?"#,
+        status.as_str(),
+        node_id,
+    )
+    .execute(pool)
+    .await?;
+    if result.rows_affected() == 0 {
+        return Err(DbError::NodeNotFound(node_id.to_owned()));
+    }
+    Ok(())
+}
+
+/// 一時VMプロビジョニング中のセッション状態を更新する (ハブ専用)。
+///
+/// イベントではなく仮投影行に対する更新であり、ブートストラップ失敗・タイムアウトの
+/// 記録にのみ使用する (イベント由来の状態は実行ノードの `StatusChanged` が正)。
+pub async fn set_provisional_session_status(
+    pool: &SqlitePool,
+    session_id: &str,
+    status: SessionStatus,
+) -> Result<(), DbError> {
+    let result = sqlx::query!(
+        r#"UPDATE sessions SET status = ?, updated_at = ? WHERE session_id = ?"#,
+        status.as_str(),
+        now_ms(),
+        session_id,
+    )
+    .execute(pool)
+    .await?;
+    if result.rows_affected() == 0 {
+        return Err(DbError::SessionNotFound(session_id.to_owned()));
+    }
+    Ok(())
+}
+
 /// ノードのオンライン状態を更新する (`last_seen_at` も更新)。
 pub async fn set_node_online(
     pool: &SqlitePool,

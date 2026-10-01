@@ -1651,6 +1651,7 @@ dependencies = [
  "futures-util",
  "fxg-db",
  "fxg-protocol",
+ "fxg-pty",
  "fxg-ui-assets",
  "http",
  "http-body-util",

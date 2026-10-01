@@ -11,6 +11,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use base64::Engine as _;
 use fxg_db::{Db, DbRole, PushSubscriptionRecord};
 use fxg_protocol::client_api::{
     ConnectionRole, CreateSessionRequest, CreateSessionResponse, CreateWorktreeRequest,
@@ -19,9 +20,10 @@ use fxg_protocol::client_api::{
     RespondPermissionResponse, WorktreeInfo, WorktreesResponse,
 };
 use fxg_protocol::common::{
-    CommandResult, DiffScope, ErrorCode, WorkspaceDiffResponse, WorktreeAction,
+    CommandResult, DiffScope, ErrorCode, ForkHistoryItem, WorkspaceDiffResponse, WorktreeAction,
 };
-use fxg_protocol::config::ProvisionerConfig;
+use fxg_protocol::config::{GitCredentialConfig, ProvisionerConfig};
+use fxg_protocol::events::UnifiedEventPayload;
 use fxg_protocol::node_server::ServerToNodeMsg;
 use fxg_protocol::util::uuid_v7;
 use tokio::sync::broadcast;
@@ -32,6 +34,7 @@ use crate::api::{
 };
 use crate::error::ServerError;
 use crate::hub::NodeHub;
+use crate::provisioner::{self, ProvisionerManager, SpawnSessionRequest};
 use crate::push::PushService;
 
 /// Client WS / Node Hub 配信用ブロードキャスト容量。
@@ -50,6 +53,8 @@ pub struct ServerOptions {
     pub allowed_origins: Vec<String>,
     /// 一時VMプロビジョナー定義 (`config.toml` の `[provisioners.*]`)
     pub provisioners: BTreeMap<String, ProvisionerConfig>,
+    /// Git Credential Proxy 設定 (`config.toml` の `[server.git_credentials.*]`)
+    pub git_credentials: BTreeMap<String, GitCredentialConfig>,
 }
 
 /// 中央サーバーの共有状態。
@@ -65,6 +70,7 @@ struct ServerInner {
     options: ServerOptions,
     client_events: broadcast::Sender<ClientEvent>,
     push: PushService,
+    provisioners: ProvisionerManager,
 }
 
 impl std::fmt::Debug for ServerState {
@@ -89,6 +95,11 @@ impl ServerState {
         let hub = NodeHub::new(db.clone(), client_events.clone());
         let push = PushService::load_or_create(&options.fxg_home)
             .map_err(|err| ServerError::Server(format!("web push init failed: {err}")))?;
+        let provisioners = ProvisionerManager::new(
+            options.fxg_home.clone(),
+            options.provisioners.clone(),
+            options.git_credentials.clone(),
+        );
         Ok(Self {
             inner: Arc::new(ServerInner {
                 db,
@@ -97,8 +108,14 @@ impl ServerState {
                 options,
                 client_events,
                 push,
+                provisioners,
             }),
         })
+    }
+
+    /// 一時VMプロビジョナー管理。
+    pub fn provisioners(&self) -> &ProvisionerManager {
+        &self.inner.provisioners
     }
 
     /// `server.db`。
@@ -229,6 +246,116 @@ fn command_failure(command_id: String, err: ApiError) -> CommandResult {
     }
 }
 
+impl ServerState {
+    /// 論理プロジェクトの投影行を取得する。
+    async fn project_record(
+        &self,
+        project_id: &str,
+    ) -> Result<fxg_protocol::common::ProjectSummary, ApiError> {
+        let projects = self
+            .inner
+            .db
+            .list_projects()
+            .await
+            .map_err(ApiError::from)?;
+        projects
+            .into_iter()
+            .find(|project| project.project_id == project_id)
+            .ok_or_else(|| ApiError::not_found(format!("project not found: {project_id}")))
+    }
+
+    /// Context Fork 指定から、履歴 Replay と退避済み Git バンドルを解決する。
+    ///
+    /// - 履歴: 分岐元セッションの会話イベント (User / Agent / ToolCall) を
+    ///   `from_node_seq` まで抽出し、`StartSession.fork_context_messages` に載せる
+    /// - バンドル: `restore_git_bundle_b64` の明示指定がなければ、分岐元セッションの
+    ///   `git_bundle_path` (一時VM破壊時に退避された bundle) を読み出して Base64 化する
+    async fn prepare_fork(
+        &self,
+        request: &CreateSessionRequest,
+    ) -> Result<(Option<Vec<ForkHistoryItem>>, Option<String>), ApiError> {
+        let Some(fork) = &request.fork else {
+            return Ok((None, None));
+        };
+        // 分岐元セッションの存在確認 (応答の相関・監査の前提)
+        let source = self
+            .inner
+            .db
+            .get_session(&fork.from_session_id)
+            .await
+            .map_err(ApiError::from)?
+            .ok_or_else(|| {
+                ApiError::not_found(format!("session not found: {}", fork.from_session_id))
+            })?;
+
+        let batch = self
+            .inner
+            .db
+            .session_events_after(&source.session_id, 0, 5_000)
+            .await
+            .map_err(ApiError::from)?;
+        let mut items: Vec<ForkHistoryItem> = Vec::new();
+        for event in batch.events {
+            if let Some(limit) = fork.from_node_seq
+                && event.node_seq > limit
+            {
+                break;
+            }
+            match event.payload {
+                UnifiedEventPayload::UserMessage { text, .. } => items.push(ForkHistoryItem {
+                    role: "user".to_owned(),
+                    text,
+                    tool_summary: None,
+                }),
+                UnifiedEventPayload::AgentMessage {
+                    text,
+                    is_complete: true,
+                    ..
+                } => items.push(ForkHistoryItem {
+                    role: "agent".to_owned(),
+                    text,
+                    tool_summary: None,
+                }),
+                UnifiedEventPayload::ToolCall { title, status, .. } => {
+                    items.push(ForkHistoryItem {
+                        role: "tool".to_owned(),
+                        text: String::new(),
+                        tool_summary: Some(format!("[{status}] {title}")),
+                    })
+                }
+                _ => {}
+            }
+        }
+        let context = (!items.is_empty()).then_some(items);
+
+        let bundle = match fork.restore_git_bundle_b64.clone() {
+            Some(bundle) => Some(bundle),
+            None => {
+                match self
+                    .inner
+                    .db
+                    .get_git_bundle_path(&fork.from_session_id)
+                    .await
+                {
+                    Ok(Some(path)) => match std::fs::read(&path) {
+                        Ok(bytes) => Some(base64::engine::general_purpose::STANDARD.encode(bytes)),
+                        Err(err) => {
+                            tracing::warn!(path, "failed to read stored git bundle: {err}");
+                            None
+                        }
+                    },
+                    Ok(None) => None,
+                    Err(err) => {
+                        tracing::debug!("failed to load git bundle path: {err}");
+                        None
+                    }
+                }
+            }
+        };
+        Ok((context, bundle))
+    }
+}
+
 #[async_trait]
 impl ClientApiBackend for ServerState {
     fn db(&self) -> &Db {
@@ -311,20 +438,105 @@ impl ClientApiBackend for ServerState {
         request: CreateSessionRequest,
         client: ClientInfo,
     ) -> Result<CreateSessionResponse, ApiError> {
-        if request.provisioner.is_some() {
-            return Err(ApiError::bad_request(
-                "provisioners are not supported yet (Phase 6)",
-            ));
+        // Context Fork (別ノード・一時VMからの引き継ぎ): 履歴 Replay と
+        // 退避済み Git バンドルを解決する
+        let (fork_context, restore_bundle_b64) = self.prepare_fork(&request).await?;
+
+        // 一時VMプロビジョナー: サーバーホスト上で子プロセスを起動する
+        if let Some(provisioner_name) = request.provisioner.clone() {
+            if request.node_id.is_some() {
+                return Err(ApiError::bad_request(
+                    "node_id and provisioner are mutually exclusive",
+                ));
+            }
+            let project = self.project_record(&request.project_id).await?;
+            let git_url = project.canonical_git_url.clone().ok_or_else(|| {
+                ApiError::bad_request(format!(
+                    "project {} has no canonical git url; cannot clone into an ephemeral node",
+                    request.project_id
+                ))
+            })?;
+
+            let session_id = uuid_v7();
+            let node_id = format!("eph-{}", &session_id[..18.min(session_id.len())]);
+            let git_branch = request
+                .worktree
+                .as_ref()
+                .map(|spec| spec.branch.clone())
+                .filter(|branch| !branch.trim().is_empty());
+            let agent_id = request.agent_id.clone();
+
+            // 一時ノードの事前登録 (sessions.node_id の FK / UI 表示)
+            let idle_timeout_secs = self
+                .provisioners()
+                .config(&provisioner_name)?
+                .idle_timeout_secs
+                .unwrap_or(900);
+            provisioner::register_ephemeral_node(
+                self,
+                &node_id,
+                &provisioner_name,
+                idle_timeout_secs,
+            )
+            .await?;
+
+            // ブートストラップ中も UI にセッションを見せる仮投影行
+            if let Err(err) = self
+                .db()
+                .upsert_provisional_session(&fxg_db::registration::ProvisionalSessionRecord {
+                    session_id: session_id.clone(),
+                    project_id: request.project_id.clone(),
+                    project_name: project.name.clone(),
+                    node_id: node_id.clone(),
+                    local_path: provisioner::EPHEMERAL_WORKSPACE.to_owned(),
+                    git_branch: git_branch.clone(),
+                    agent_id: agent_id.clone(),
+                    title: format!("{agent_id} @ {}", project.name),
+                })
+                .await
+            {
+                return Err(ApiError::from(err));
+            }
+
+            provisioner::spawn_session(
+                self,
+                SpawnSessionRequest {
+                    session_id: session_id.clone(),
+                    node_id: node_id.clone(),
+                    provisioner: provisioner_name.clone(),
+                    project_id: request.project_id.clone(),
+                    git_url,
+                    git_branch,
+                    agent_id: agent_id.clone(),
+                    initial_prompt: request.initial_prompt.clone(),
+                    fork_context,
+                    restore_bundle_b64,
+                },
+            )
+            .await?;
+
+            self.record_audit(
+                fxg_db::audit::actions::SESSION_START,
+                &client,
+                Some(&session_id),
+                serde_json::json!({
+                    "node_id": node_id,
+                    "agent_id": agent_id,
+                    "provisioner": provisioner_name,
+                    "project_id": request.project_id,
+                }),
+            )
+            .await;
+            return Ok(CreateSessionResponse {
+                session_id,
+                command_id: request.command_id,
+            });
         }
-        if request.fork.is_some() {
-            return Err(ApiError::bad_request(
-                "context fork via the central server is not supported yet",
-            ));
-        }
+
         let node_id = request
             .node_id
             .clone()
-            .ok_or_else(|| ApiError::bad_request("node_id is required"))?;
+            .ok_or_else(|| ApiError::bad_request("node_id or provisioner is required"))?;
         if !self.inner.hub.is_online(&node_id).await {
             return Err(ApiError::from_code(
                 ErrorCode::NodeOffline,
@@ -375,8 +587,8 @@ impl ClientApiBackend for ServerState {
                     local_path: local_path.clone(),
                     agent_id: request.agent_id.clone(),
                     initial_prompt: request.initial_prompt.clone(),
-                    fork_context_messages: None,
-                    restore_git_bundle_b64: None,
+                    fork_context_messages: fork_context,
+                    restore_git_bundle_b64: restore_bundle_b64,
                 },
             )
             .await?;
@@ -592,6 +804,13 @@ impl ClientApiBackend for ServerState {
             })
             .collect();
         Ok(ProvisionersResponse { provisioners })
+    }
+
+    async fn provisioner_test(
+        &self,
+        name: &str,
+    ) -> Result<fxg_protocol::client_api::ProvisionerTestResponse, ApiError> {
+        crate::provisioner::provisioner_test(self, name).await
     }
 
     async fn kill_switch(

@@ -17,6 +17,7 @@ async fn server_keeps_running_until_shutdown_is_requested() {
         allowed_hosts: Vec::new(),
         allowed_origins: Vec::new(),
         provisioners: Default::default(),
+        git_credentials: Default::default(),
     })
     .await
     .expect("start server");

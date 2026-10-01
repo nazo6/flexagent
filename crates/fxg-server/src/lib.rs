@@ -11,13 +11,18 @@
 //!   (設計: `docs/03-protocol-and-api.md` §3)
 //! - [`hub`]: Node Hub (ノード個別トークン認証・`NodeHello`/`ResyncRequest`・
 //!   `EventBatchPush` の冪等適用と ACK・コマンド中継・PTY 中継)
-//! - [`push`]: VAPID Web Push (鍵生成・購読管理・承認リクエスト通知の fan-out)
-//! - [`state`]: `server.db` とノード接続レジストリを束ねる共有状態
+//! - [`push`][]: VAPID Web Push (鍵生成・購読管理・承認リクエスト通知の fan-out)
+//! - [`provisioner`][]: 一時VM・サンドボックスノードのプロビジョナー管理
+//!   (`fxg daemon --stdio` を子プロセスとして起動し、stdin/stdout を
+//!   JSON Lines トランスポートに使う)
+//! - [`state`][]: `server.db` とノード接続レジストリを束ねる共有状態
 //! - [`Server`] は起動エントリポイント (CLI の `fxg server`)
 
 pub mod api;
+mod credentials;
 mod error;
 pub mod hub;
+pub mod provisioner;
 pub mod push;
 mod server;
 pub mod state;

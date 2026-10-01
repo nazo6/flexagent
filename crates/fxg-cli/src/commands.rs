@@ -141,6 +141,7 @@ impl usage::RunAsync for ServerArgs {
             allowed_hosts: global.server.allowed_hosts.clone(),
             allowed_origins: global.server.allowed_origins.clone(),
             provisioners: global.provisioners.clone(),
+            git_credentials: global.server.git_credentials.clone(),
         };
         fxg_server::Server::run(options)
             .await

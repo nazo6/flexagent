@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE nodes SET lifecycle_status = ? WHERE node_id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "ad39e41826a29da85aca283b7a0e697dea8b6c7d2dab2fef914b6011f3325b63"
+}

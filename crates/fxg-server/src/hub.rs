@@ -147,6 +147,54 @@ impl NodeHub {
         self.inner.nodes.read().await.keys().cloned().collect()
     }
 
+    /// 一時VM (`fxg daemon --stdio`) の接続を登録する。
+    ///
+    /// 返り値の受信キューへ流れた `ServerToNodeMsg` を、プロビジョナーマネージャが
+    /// 子プロセスの `stdin` (JSON Lines) へ転送する。
+    pub(crate) async fn attach_ephemeral(
+        &self,
+        node_id: &str,
+    ) -> (mpsc::Receiver<ServerToNodeMsg>, String) {
+        let (tx, rx) = mpsc::channel(NODE_CHANNEL_CAPACITY);
+        let conn_id = uuid_v7();
+        self.register(node_id, &conn_id, tx).await;
+        tracing::info!(node_id, "ephemeral node attached (stdio)");
+        (rx, conn_id)
+    }
+
+    /// 一時VMの接続を解除する (子プロセス終了時)。
+    pub(crate) async fn detach_ephemeral(&self, node_id: &str, exit_code: Option<i32>) {
+        // 接続世代が不明なため、登録されている接続を直接取り除いて後処理する
+        let conn_id = {
+            let nodes = self.inner.nodes.read().await;
+            nodes.get(node_id).map(|entry| entry.conn_id.clone())
+        };
+        if let Some(conn_id) = conn_id {
+            self.disconnect(node_id, &conn_id).await;
+        }
+        if let Err(err) = self.db().set_node_online(node_id, false).await {
+            tracing::debug!(node_id, "failed to mark ephemeral node offline: {err}");
+        }
+        if let Err(err) = self
+            .db()
+            .set_node_lifecycle(
+                node_id,
+                fxg_protocol::common::NodeLifecycleStatus::Terminated,
+            )
+            .await
+        {
+            tracing::debug!(node_id, "failed to mark ephemeral node terminated: {err}");
+        }
+        tracing::info!(node_id, exit_code, "ephemeral node detached (stdio)");
+    }
+
+    /// 一時VMの接続を無条件で取り除く (サーバーシャットダウン等)。
+    pub(crate) async fn detach_all_ephemeral(&self, node_ids: &[String]) {
+        for node_id in node_ids {
+            self.detach_ephemeral(node_id, None).await;
+        }
+    }
+
     /// ノード接続を登録する (既存接続は置き換え)。
     async fn register(&self, node_id: &str, conn_id: &str, tx: mpsc::Sender<ServerToNodeMsg>) {
         let mut nodes = self.inner.nodes.write().await;
@@ -754,32 +802,55 @@ async fn handle_node_message(state: &ServerState, node_id: &str, text: &str) {
             repo_url,
             operation,
         } => {
-            // Git Credential Proxy は Phase 6 (一時VM) で実装する
-            tracing::info!(
-                node_id,
-                repo_url,
-                operation,
-                "git credential request received (Phase 6)"
-            );
-            let response = ServerToNodeMsg::GitCredentialResponse {
-                request_id,
-                username: "x-access-token".to_owned(),
-                token: None,
-                error: Some("git credential proxy is not configured".to_owned()),
+            // Git Credential Proxy (一時VMの GIT_ASKPASS): 設定されたプロバイダから
+            // オンメモリでトークンを解決し、stdio パイプ上で返す (docs/01 §6.4)
+            let response = crate::provisioner::resolve_git_token(state, &repo_url).await;
+            let message = match response {
+                Some(response) => ServerToNodeMsg::GitCredentialResponse {
+                    request_id,
+                    username: response.username,
+                    token: response.token,
+                    error: response.error,
+                },
+                None => ServerToNodeMsg::GitCredentialResponse {
+                    request_id,
+                    username: fxg_protocol::config::DEFAULT_GIT_USERNAME.to_owned(),
+                    token: None,
+                    error: Some(format!(
+                        "no git credential configured for {repo_url} ({operation})"
+                    )),
+                },
             };
-            let _ = state.hub().send(node_id, response).await;
+            let _ = state.hub().send(node_id, message).await;
         }
-        NodeToServerMsg::WorkspaceBundleUpload { session_id, .. } => {
-            tracing::info!(
-                node_id,
-                session_id,
-                "workspace bundle upload received (Phase 6)"
+        NodeToServerMsg::WorkspaceBundleUpload {
+            session_id,
+            branch,
+            head_commit,
+            bundle_b64,
+        } => {
+            // 分割転送された bundle を DrainComplete まで蓄積する
+            crate::provisioner::on_bundle_upload(
+                state,
+                &session_id,
+                &branch,
+                &head_commit,
+                &bundle_b64,
             );
         }
-        NodeToServerMsg::DrainComplete { .. } => {
-            tracing::info!(node_id, "drain complete (Phase 6)");
+        NodeToServerMsg::DrainComplete { node_id: drained } => {
+            tracing::info!(node_id, "drain complete");
+            crate::provisioner::on_drain_complete(state, &drained).await;
         }
     }
+}
+
+/// 一時VM (`fxg daemon --stdio`) から受信したメッセージを処理する。
+///
+/// WebSocket ノードと同一のメッセージ型・同一の処理経路
+/// ([`handle_node_message`]) を使う (設計: docs/03 §2)。
+pub(crate) async fn handle_stdio_message(state: &ServerState, node_id: &str, text: &str) {
+    handle_node_message(state, node_id, text).await;
 }
 
 /// `NodeHello` のプロジェクト報告を `projects` / `project_node_bindings` へ反映する。

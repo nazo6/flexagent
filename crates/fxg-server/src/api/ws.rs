@@ -157,6 +157,18 @@ pub(crate) async fn handle_client_ws<B: ClientApiBackend>(backend: B, socket: We
                         break;
                     }
                 }
+                Ok(ClientEvent::BootstrapLog { session_id, line }) => {
+                    // 一時VMのブートストラップログ (エフェメラル。永続化しない)
+                    if send_ws_json(
+                        &mut sender,
+                        &ServerWsMessage::BootstrapLog { session_id, line },
+                    )
+                    .await
+                    .is_err()
+                    {
+                        break;
+                    }
+                }
                 Err(broadcast::error::RecvError::Lagged(skipped)) => {
                     // 購読が遅延した場合はカーソルから履歴を取り直す
                     tracing::warn!(skipped, "client ws lagged; replaying from cursor");

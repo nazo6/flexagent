@@ -209,6 +209,13 @@ pub enum ClientEvent {
         /// 差分本体
         delta: fxg_protocol::common::StreamDeltaPayload,
     },
+    /// 一時VMブートストラップ (`stderr`) の進捗ログ (永続化されない)
+    BootstrapLog {
+        /// 対象セッションID
+        session_id: String,
+        /// ログ1行
+        line: String,
+    },
 }
 
 /// Client WS 経由のセッション操作コマンド (`Subscribe` / `Ping` を除く)。
@@ -380,6 +387,20 @@ pub trait ClientApiBackend: Clone + Send + Sync + 'static {
     /// `GET /api/v1/provisioners`
     async fn provisioners(&self) -> Result<ProvisionersResponse, ApiError>;
 
+    /// `POST /api/v1/provisioners/:name/test` (疎通検証)。
+    ///
+    /// 中央サーバーのみ対応。ローカルノードの既定実装は `INVALID_STATE`
+    /// を返す (プロビジョナーはサーバーホスト上でのみ起動される)。
+    async fn provisioner_test(
+        &self,
+        _name: &str,
+    ) -> Result<fxg_protocol::client_api::ProvisionerTestResponse, ApiError> {
+        Err(ApiError::from_code(
+            ErrorCode::InvalidState,
+            "provisioners can only be tested on the central server",
+        ))
+    }
+
     /// `POST /api/v1/system/kill-switch`
     async fn kill_switch(
         &self,
@@ -493,6 +514,10 @@ pub fn client_router<B: ClientApiBackend>(backend: B, options: ClientApiOptions)
         .route("/api/v1/nodes", get(list_nodes::<B>))
         .route("/api/v1/provisioners", get(list_provisioners::<B>))
         .route(
+            "/api/v1/provisioners/{provisioner}/test",
+            post(test_provisioner::<B>),
+        )
+        .route(
             "/api/v1/sessions",
             get(list_sessions::<B>).post(create_session::<B>),
         )
@@ -584,6 +609,17 @@ async fn list_provisioners<B: ClientApiBackend>(
     State(state): State<ClientApiState<B>>,
 ) -> Response {
     match state.backend.provisioners().await {
+        Ok(response) => Json(response).into_response(),
+        Err(err) => err.into_response(),
+    }
+}
+
+/// `POST /api/v1/provisioners/:name/test`: プロビジョナーの起動とハンドシェイクを検証する。
+async fn test_provisioner<B: ClientApiBackend>(
+    State(state): State<ClientApiState<B>>,
+    UrlPath(provisioner): UrlPath<String>,
+) -> Response {
+    match state.backend.provisioner_test(&provisioner).await {
         Ok(response) => Json(response).into_response(),
         Err(err) => err.into_response(),
     }
