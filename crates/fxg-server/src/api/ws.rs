@@ -46,7 +46,26 @@ pub(crate) async fn handle_client_ws<B: ClientApiBackend>(backend: B, socket: We
             Next::Client(Some(Ok(message))) => match message {
                 Message::Text(text) => match serde_json::from_str::<ClientWsMessage>(&text) {
                     Ok(ClientWsMessage::Subscribe { since_cursor, .. }) => {
-                        cursor = since_cursor.unwrap_or(0);
+                        let requested = since_cursor.unwrap_or(0);
+                        // DB 再作成・リセット後はクライアントの保存済みカーソルが
+                        // ストアの末尾を超える。そのままでは新ストアのイベント
+                        // (cursor が小さい) を全て重複としてスキップしてしまうため、
+                        // 0 から全量を再同期する (docs/03 §3.2)。
+                        cursor = match backend.db().latest_cursor().await {
+                            Ok(latest) if requested > latest => {
+                                tracing::warn!(
+                                    requested,
+                                    latest,
+                                    "client cursor is ahead of the store; replaying from 0"
+                                );
+                                0
+                            }
+                            Ok(_) => requested,
+                            Err(err) => {
+                                tracing::warn!("failed to load latest cursor: {err}");
+                                requested
+                            }
+                        };
                         if replay_events(&backend, &mut sender, &mut cursor)
                             .await
                             .is_err()

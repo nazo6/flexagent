@@ -375,7 +375,9 @@ PCブラウザ、ローカルフォールバック (`localhost:7860`)、およ�
 - **状態管理 & 同期**: Svelte 5 Runes (`$state`, `$derived` を用いた
   `*.svelte.ts` クラスベースのカスタム WebSocket 差分同期ストア /
   **接続先ストア**（中央サーバー / ローカルノード）の `cursor` を保存し、
-  再接続時に `Subscribe { since_cursor }` で差分再開する。 イベントは `event_id`
+  再接続時に `Subscribe { since_cursor }` で差分再開する。**DB
+  再作成・リセット時はカーソルの巻き戻りを検知してタイムラインを破棄し、
+  0 から全量を再同期する**。 イベントは `event_id`
   / `(session_id, node_seq)` で upsert し、`LiveStreamDelta` と 永続イベントを
   `message_id` でマージする)
 - **コード・Diff・双方向ターミナル**:

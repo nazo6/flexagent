@@ -308,6 +308,11 @@ impl Db {
         queries::events_after_cursor(&self.pool, after_cursor, limit).await
     }
 
+    /// `session_events` の最新カーソル (イベントが無い場合は 0)。
+    pub async fn latest_cursor(&self) -> Result<u64, DbError> {
+        queries::latest_cursor(&self.pool).await
+    }
+
     /// 論理プロジェクト一覧 (ノード・Worktree 紐付け含む)。
     pub async fn list_projects(&self) -> Result<Vec<ProjectSummary>, DbError> {
         queries::list_projects(&self.pool).await

@@ -616,6 +616,12 @@ pub enum ServerToNodeMsg {
    `LiveStreamDelta`）をプッシュします。
    - クライアントは最後に受信したバッチの `cursor` を保存し、再接続時に
      `since_cursor` へ渡す。
+   - `since_cursor` が**ストアの末尾（最大カーソル）より大きい場合は無効**
+     と判定し、0 から全量リプレイする（DB 再作成・リセット後の古いカーソルで
+     新ストアのイベントを全てスキップしてしまう事故の防御）。
+   - クライアントはバッチのカーソル巻き戻り（受信カーソルが保存値より小さい）
+     を検知したら、保存済みタイムラインを破棄して REST 投影を再取得し、
+     新しいストアとして再同期する。
 3. クライアントからの操作（`SendPrompt`, `RespondPermission`,
    `ControlSession`）もこのWebSocket上（またはREST POST）で送信でき、結果は
    `command_id` 付きの `CommandResult` として要求元クライアントへ応答されます。

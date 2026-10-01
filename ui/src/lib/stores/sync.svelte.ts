@@ -8,6 +8,7 @@ import type { ServerWsMessage } from "$lib/generated/ServerWsMessage";
 import type { SessionControlAction } from "$lib/generated/SessionControlAction";
 import type { SessionEventEnvelope } from "$lib/generated/SessionEventEnvelope";
 import type { SessionSummary } from "$lib/generated/SessionSummary";
+import { mergeCursor } from "$lib/sync/cursor";
 import { SessionTimeline } from "$lib/sync/timeline.svelte";
 import type { PendingPrompt } from "$lib/sync/reducer";
 import type { ConnectionStore } from "./connection.svelte";
@@ -399,6 +400,19 @@ export class SyncStore {
   }
 
   #applyBatch(events: SessionEventEnvelope[], cursor: number): void {
+    // 配信元ストアの再作成・リセット後はカーソルが巻き戻る (docs/03 §3.2)。
+    // 古いタイムラインを維持したままでは、新ストアのイベントを node_seq /
+    // event_id の重複として捨ててしまうため、ローカル状態を破棄して再同期する。
+    const update = mergeCursor(this.#cursor, cursor);
+    if (update.reset) {
+      console.warn("[fxg] sync store cursor was rewound; resetting local state", {
+        previous: this.#cursor,
+        cursor,
+      });
+      this.#timelines.clear();
+      void this.refreshAll();
+    }
+
     let sessionsDirty = false;
     let inboxDirty = false;
     for (const event of events) {
@@ -420,10 +434,10 @@ export class SyncStore {
           break;
       }
     }
-    if (cursor > (this.#cursor ?? 0)) {
-      this.#cursor = cursor;
+    if (this.#cursor !== update.cursor) {
+      this.#cursor = update.cursor;
       if (typeof localStorage !== "undefined") {
-        localStorage.setItem(CURSOR_KEY, String(cursor));
+        localStorage.setItem(CURSOR_KEY, String(update.cursor));
       }
     }
     if (sessionsDirty) this.#queueSessionsRefresh();

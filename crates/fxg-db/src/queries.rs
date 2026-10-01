@@ -223,6 +223,25 @@ pub async fn events_after_cursor(
     batch_from_rows(rows, after_cursor)
 }
 
+/// `session_events` の最新カーソル (イベントが1件も無い場合は 0) を返す。
+///
+/// Client WS の `Subscribe { since_cursor }` がストアの末尾を超える場合
+/// (DB 再作成・リセット後に残った古いカーソル) の検知に使用する。
+pub async fn latest_cursor(pool: &SqlitePool) -> Result<u64, DbError> {
+    let cursor = sqlx::query_scalar!(
+        r#"
+        SELECT MAX(cursor)
+          FROM session_events
+        "#,
+    )
+    .fetch_one(pool)
+    .await?;
+    match cursor {
+        Some(value) => u64::try_from(value).map_err(|_| DbError::NegativeNodeSeq(value)),
+        None => Ok(0),
+    }
+}
+
 /// 論理プロジェクト一覧を取得する (ノード・Worktree 紐付け含む)。
 pub async fn list_projects(pool: &SqlitePool) -> Result<Vec<ProjectSummary>, DbError> {
     let project_rows = sqlx::query_as!(

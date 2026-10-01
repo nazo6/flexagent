@@ -426,6 +426,72 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn client_ws_replays_from_zero_when_cursor_is_ahead_of_store() {
+        use futures_util::SinkExt;
+        use tokio_tungstenite::tungstenite::Message as WsMessage;
+
+        let (daemon, _dir) = test_daemon().await;
+        let host = host_of(&daemon);
+        let token = daemon.state().auth_token();
+
+        // 購読前に1イベントを永続化しておく (cursor は 1 以降になる)
+        let session_id = fxg_protocol::util::uuid_v7();
+        daemon
+            .state()
+            .bus()
+            .create_session(
+                &session_id,
+                fxg_protocol::events::UnifiedEventPayload::SessionCreated {
+                    node_id: daemon.state().node_id().to_owned(),
+                    project_id: "github.com/nazo6/flexagent".to_owned(),
+                    project_name: "flexagent".to_owned(),
+                    local_path: "/tmp/repo".to_owned(),
+                    git_branch: Some("main".to_owned()),
+                    is_worktree: false,
+                    agent_id: "opencode2".to_owned(),
+                    parent_session_id: None,
+                    fork_from_node_seq: None,
+                    title: "New Session".to_owned(),
+                },
+            )
+            .await
+            .expect("create session");
+
+        let request = ws_request(&host, &token, &format!("http://{host}"));
+        let (mut socket, _) = tokio_tungstenite::connect_async(request)
+            .await
+            .expect("handshake");
+
+        // DB 再作成・リセット後に残った古いカーソル (ストア末尾より先) を指定すると、
+        // スキップせず 0 から全量リプレイされる
+        let subscribe = fxg_protocol::client_api::ClientWsMessage::Subscribe {
+            since_cursor: Some(9_999),
+            focused_session_id: None,
+        };
+        socket
+            .send(WsMessage::Text(
+                serde_json::to_string(&subscribe).unwrap().into(),
+            ))
+            .await
+            .expect("send subscribe");
+
+        match next_ws_message(&mut socket).await {
+            ServerWsMessage::EventBatch { events, cursor } => {
+                assert_eq!(events.len(), 1, "stale cursor must not skip events");
+                assert_eq!(events[0].session_id, session_id);
+                assert_eq!(events[0].node_seq, 1);
+                assert!(cursor <= 9_999, "cursor must be rewound to the store");
+            }
+            other => panic!("unexpected message: {other:?}"),
+        }
+
+        daemon.shutdown();
+        tokio::time::timeout(std::time::Duration::from_secs(5), daemon.wait())
+            .await
+            .expect("stop");
+    }
+
+    #[tokio::test]
     async fn client_ws_session_commands_return_structured_errors() {
         use futures_util::SinkExt;
         use tokio_tungstenite::tungstenite::Message as WsMessage;

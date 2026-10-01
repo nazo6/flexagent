@@ -1,0 +1,21 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        SELECT MAX(cursor)\n          FROM session_events\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "MAX(cursor)",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "a839274cb66c0d780b2fb3b6e325d8435efcca3ca52e55958d4bbeaff7b9a8e3"
+}
