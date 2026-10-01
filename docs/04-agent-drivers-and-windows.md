@@ -260,6 +260,27 @@ opencode2 本体は「バックグラウンドサービス」1つを全セッシ
    `revert_context` は会話を巻き戻しません (ファイル復元は Shadow Git Tree が
    継続して担当)。
 
+#### 4.3.1 送信時の自動レジューム (ネイティブ限定)
+
+停止済みセッションへプロンプトを送信した場合、ユーザーが明示的に Resume
+しなくても、ノードが**ネイティブ復元のみ**で自動再開してからプロンプトを
+送信します (`SessionManager::send_prompt` → `auto_resume_for_prompt`)。
+
+- **ネイティブ限定**: `ResumeRequest { allow_fresh: false }` で起動し、復元
+  できない場合は新規セッションを作成せず、ドライバが
+  `NativeResumeUnavailable` を返します。ノードはこれを
+  `ErrorCode::RESUME_REQUIRED` としてクライアントへ伝えます
+  (セッションは `stopped` のまま。履歴 Replay は暗黙実行しません)。
+- **履歴 Replay は明示操作**: `RESUME_REQUIRED` を受けたクライアント
+  (Web UI のコンポーザ) は「履歴を引き継いで再開して送信」を提案し、
+  `SessionResume` (Replay フォールバック) を実行してから再送します。
+- **排他**: 明示 `resume` と同じ `resuming` ガードで直列化し、他の再開処理が
+  進行中の場合は完了を待ってから送信します。
+- **タイムアウト**: 自動レジュームはエージェントのコールドスタート (~25 秒) を
+  含みうるため、送信コマンドの中継タイムアウトを 120 秒としています
+  (`fxg-server` の `SESSION_COMMAND_TIMEOUT`。Client WS 経由では 1 コマンド
+  1 応答の同期処理のため、そのクライアント接続は完了まで待ちます)。
+
 > **v2 (将来拡張)**: 一時VM (provisioner) セッションの再開
 > (`git_bundle_path` の復元 + VM 再起動) と、`fxg daemon`
 > 起動時の自動レジューム。

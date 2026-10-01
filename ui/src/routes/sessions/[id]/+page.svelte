@@ -111,12 +111,19 @@
   // Resume (停止済みセッションの再開) の実行状態
   let resuming = $state(false);
 
-  /** 一時VMの先行作成中セッションを除き、Resume を表示する。
-   * 強制終了時は DB の status が idle / running のまま残るため、
-   * 一見実行中でも Resume を出し、実行中だった場合はノード側で拒否させる。 */
-  const canResume = $derived(
-    session !== null && session.status !== 'provisioning' && session.status !== 'bootstrapping'
-  );
+  /**
+   * ネイティブ復元非対応 (`RESUME_REQUIRED`) を検出したか。
+   *
+   * 通常、停止済みセッションは送信時の自動レジュームで再開されるため
+   * Resume ボタンは表示しない。送信が `RESUME_REQUIRED` で失敗した場合
+   * (履歴 Replay での再開が必要) にだけ表示する。Composer と共有する。
+   * 強制終了などで `status` が実態とずれている場合も、送信時の自動レジュームが
+   * 実態に基づいて再開する (または `RESUME_REQUIRED` でこのボタンを表示する)。
+   */
+  let resumeRequired = $state(false);
+
+  /** ネイティブ復元非対応を検出したセッションのみ Resume を表示する。 */
+  const canResume = $derived(resumeRequired && session !== null);
 
   // Revert (Shadow Git Tree 巻き戻し) 確認ダイアログの状態
   let revertSeq = $state<number | null>(null);
@@ -160,12 +167,13 @@
     void goto(`/?${params.toString()}`);
   }
 
-  /** 停止済みセッションを再開する (`POST /sessions/:id/resume`)。 */
+  /** 停止済みセッションを履歴 Replay で再開する (`POST /sessions/:id/resume`)。 */
   async function handleResumeSession() {
     if (!sessionId || resuming) return;
     resuming = true;
     try {
       const result = await sync.resumeSession(sessionId);
+      resumeRequired = false;
       if (result.context_restored) {
         toast.success('セッションを再開しました (エージェントのコンテキストを復元)');
       } else {
@@ -348,7 +356,7 @@
 
         <div class="h-4 w-px bg-border/60 mx-0.5 hidden sm:block"></div>
 
-        <!-- Resume ボタン (停止済みセッションの再開) -->
+        <!-- Resume ボタン (ネイティブ復元非対応の停止済みセッションのみ) -->
         {#if canResume}
           <Button
             variant="outline"
@@ -356,7 +364,7 @@
             class="h-7 text-xs gap-1"
             disabled={resuming}
             onclick={handleResumeSession}
-            title="停止したセッションを会話コンテキストを維持したまま再開"
+            title="エージェントがネイティブ復元に対応していないため、履歴を引き継いで再開します"
           >
             <PlayIcon class="size-3" />
             <span class="hidden sm:inline">Resume</span>
@@ -501,7 +509,13 @@
       <!-- チャット入力欄 (Composer) -->
       <div class="bg-card/50 border-t px-3 py-2 md:px-6 shrink-0">
         <div class="mx-auto max-w-3xl">
-          <Composer sessionId={sessionId} {capabilities} node={sessionNode} status={currentStatus} />
+          <Composer
+            sessionId={sessionId}
+            {capabilities}
+            node={sessionNode}
+            status={currentStatus}
+            bind:resumeRequired
+          />
         </div>
       </div>
     </div>

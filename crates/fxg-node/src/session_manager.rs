@@ -18,11 +18,12 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use fxg_acp::registry::{AcpRegistry, OPENCODE2_ID, RegistryIndex};
 use fxg_acp::{
-    AcpDriver, ActiveSessionHandle, AgentDriver, AgentLaunchSpec, DriverEvent, OpenCode2Driver,
-    ResumeRequest,
+    AcpDriver, ActiveSessionHandle, AgentDriver, AgentLaunchSpec, DriverEvent,
+    NativeResumeUnavailable, OpenCode2Driver, ResumeRequest,
 };
 use fxg_protocol::common::{
     ForkHistoryItem, PermissionOption, SessionControlAction, SessionStatus,
@@ -43,6 +44,14 @@ const PROCESSED_COMMAND_HISTORY: usize = 256;
 
 /// `session_events` をページ読み込みする際のバッチサイズ。
 const EVENT_LOAD_BATCH: u32 = 200;
+
+/// 送信時の自動レジューム (ネイティブ復元) の完了待ち上限。
+///
+/// コールドスタートのエージェント (PyInstaller 展開等で ~25 秒) を許容する。
+const AUTO_RESUME_TIMEOUT: Duration = Duration::from_secs(120);
+
+/// 他の再開処理 (明示 resume / 自動レジューム) の完了を待つポーリング間隔。
+const RESUME_WAIT_INTERVAL: Duration = Duration::from_millis(100);
 
 /// エージェント起動スペックからドライバを選択するファクトリ。
 ///
@@ -193,6 +202,20 @@ pub struct ResumeOutcome {
     pub attach_mode: AttachMode,
     /// ネイティブ復元できたか (`false` = 履歴 Replay で継続)
     pub context_restored: bool,
+}
+
+/// [`SessionManager::resume_stopped_session`] の復元方法。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ResumeMode {
+    /// ネイティブ復元を優先し、不可なら新規セッションを作成する
+    /// (呼び出し側が履歴 Replay を注入する)。
+    AllowReplay {
+        /// 記録済みエージェントセッションIDを使わず新規作成させる (`--replay`)
+        force_replay: bool,
+    },
+    /// ネイティブ復元のみ。不可なら [`NodeError::ResumeRequired`] を返す
+    /// (プロンプト送信時の自動レジューム)。
+    NativeOnly,
 }
 
 /// セッション一覧の 1 行 (IPC 用)。
@@ -604,6 +627,19 @@ impl SessionManager {
         {
             Ok(started) => started,
             Err(err) => {
+                // ネイティブ限定の自動レジューム (`allow_fresh = false`) では、
+                // 「ネイティブ復元不可」をセッション停止状態のまま呼び出し側へ返す
+                // (履歴 Replay は暗黙実行せず、明示的な Resume を促す)
+                if let Some(unavailable) = err.downcast_ref::<NativeResumeUnavailable>() {
+                    tracing::info!(
+                        session_id = params.session_id,
+                        "native resume is not available: {unavailable}"
+                    );
+                    return Err(NodeError::ResumeRequired(format!(
+                        "{}: {}",
+                        params.session_id, unavailable.0
+                    )));
+                }
                 let message = format!("failed to start agent: {err:#}");
                 tracing::warn!(session_id = params.session_id, "{message}");
                 self.inner
@@ -904,74 +940,11 @@ impl SessionManager {
         &self,
         params: ResumeParams<'_>,
     ) -> Result<ResumeOutcome, NodeError> {
-        let session = self
-            .inner
-            .bus
-            .db()
-            .get_session(params.session_id)
-            .await?
-            .ok_or_else(|| NodeError::InvalidSession(params.session_id.to_owned()))?;
-
-        // 一時VM (provisioner) セッションの再開は v2 (未対応)
-        if matches!(
-            session.status,
-            SessionStatus::Provisioning | SessionStatus::Bootstrapping
-        ) {
-            return Err(NodeError::InvalidState(format!(
-                "resuming ephemeral sessions is not supported yet: {}",
-                params.session_id
-            )));
-        }
-
-        // 作業ディレクトリが消えている (Worktree 削除済み等) 場合は再開不可
-        let cwd = PathBuf::from(&session.local_path);
-        if !cwd.is_dir() {
-            return Err(NodeError::InvalidState(format!(
-                "session workspace does not exist: {}",
-                session.local_path
-            )));
-        }
-
-        let events = self.load_session_events(params.session_id, None).await?;
-        // 起動モードは SessionCreated イベントを正として復元する
-        let opencode_mode = events.iter().find_map(|event| match &event.payload {
-            UnifiedEventPayload::SessionCreated { opencode_mode, .. } => opencode_mode.clone(),
-            _ => None,
-        });
-        let mut spec = self.resolve_launch_spec(&session.agent_id, &[]).await?;
-        apply_opencode_mode(&mut spec, opencode_mode.as_deref(), &[]);
-
-        // ネイティブ復元を試みる (復元できなかった場合の Replay 注入は下で行う)
-        let resume = ResumeRequest {
-            // `--replay` 指定時はエージェント側IDを渡さず新規作成させる
-            agent_session_id: if params.force_replay {
-                None
-            } else {
-                session.agent_session_id.clone()
-            },
-            allow_fresh: true,
-        };
-        let started = self
-            .start_driver_session(StartDriverParams {
-                session_id: params.session_id,
-                title: &session.title,
-                cwd: &cwd,
-                spec: &spec,
-                extra_args: Vec::new(),
-                initial_mode: None,
-                has_custom_title: true,
-                resume: Some(resume),
-            })
-            .await?;
-
-        // 再開の事実を状態投影へ反映する (stopped / error → idle)
-        self.inner
-            .bus
-            .record(
+        let (started, events) = self
+            .resume_stopped_session(
                 params.session_id,
-                UnifiedEventPayload::StatusChanged {
-                    status: SessionStatus::Idle,
-                    error_message: None,
+                ResumeMode::AllowReplay {
+                    force_replay: params.force_replay,
                 },
             )
             .await?;
@@ -995,6 +968,146 @@ impl SessionManager {
             attach_mode: attach_mode_of(started.handle.as_ref()),
             context_restored: started.context_restored,
         })
+    }
+
+    /// 停止済みセッションを検証し、ドライバを起動して `StatusChanged(Idle)` まで
+    /// 記録する (明示 resume / 送信時自動レジューム共通)。
+    ///
+    /// - 一時VM (`provisioning` / `bootstrapping`) と作業ディレクトリ消滅は
+    ///   [`NodeError::InvalidState`] で拒否する。
+    /// - [`ResumeMode::NativeOnly`] でネイティブ復元できない場合、ドライバは
+    ///   [`NativeResumeUnavailable`] を返し、[`NodeError::ResumeRequired`] として
+    ///   呼び出し側へ伝わる (セッションは停止状態のまま残る)。
+    ///
+    /// 戻り値は起動済みセッションと読み込み済みイベント (Replay 判定用)。
+    async fn resume_stopped_session(
+        &self,
+        session_id: &str,
+        mode: ResumeMode,
+    ) -> Result<(StartedDriverSession, Vec<SessionEventEnvelope>), NodeError> {
+        let session = self
+            .inner
+            .bus
+            .db()
+            .get_session(session_id)
+            .await?
+            .ok_or_else(|| NodeError::InvalidSession(session_id.to_owned()))?;
+
+        // 一時VM (provisioner) セッションの再開は v2 (未対応)
+        if matches!(
+            session.status,
+            SessionStatus::Provisioning | SessionStatus::Bootstrapping
+        ) {
+            return Err(NodeError::InvalidState(format!(
+                "resuming ephemeral sessions is not supported yet: {session_id}"
+            )));
+        }
+
+        // 作業ディレクトリが消えている (Worktree 削除済み等) 場合は再開不可
+        let cwd = PathBuf::from(&session.local_path);
+        if !cwd.is_dir() {
+            return Err(NodeError::InvalidState(format!(
+                "session workspace does not exist: {}",
+                session.local_path
+            )));
+        }
+
+        let events = self.load_session_events(session_id, None).await?;
+        // 起動モードは SessionCreated イベントを正として復元する
+        let opencode_mode = events.iter().find_map(|event| match &event.payload {
+            UnifiedEventPayload::SessionCreated { opencode_mode, .. } => opencode_mode.clone(),
+            _ => None,
+        });
+        let mut spec = self.resolve_launch_spec(&session.agent_id, &[]).await?;
+        apply_opencode_mode(&mut spec, opencode_mode.as_deref(), &[]);
+
+        // ネイティブ復元を試みる (復元できなかった場合の Replay 注入は呼び出し側)
+        let (agent_session_id, allow_fresh) = match mode {
+            // `--replay` 指定時はエージェント側IDを渡さず新規作成させる
+            ResumeMode::AllowReplay { force_replay: true } => (None, true),
+            ResumeMode::AllowReplay {
+                force_replay: false,
+            } => (session.agent_session_id.clone(), true),
+            ResumeMode::NativeOnly => (session.agent_session_id.clone(), false),
+        };
+        let started = self
+            .start_driver_session(StartDriverParams {
+                session_id,
+                title: &session.title,
+                cwd: &cwd,
+                spec: &spec,
+                extra_args: Vec::new(),
+                initial_mode: None,
+                has_custom_title: true,
+                resume: Some(ResumeRequest {
+                    agent_session_id,
+                    allow_fresh,
+                }),
+            })
+            .await?;
+
+        // 再開の事実を状態投影へ反映する (stopped / error → idle)
+        self.inner
+            .bus
+            .record(
+                session_id,
+                UnifiedEventPayload::StatusChanged {
+                    status: SessionStatus::Idle,
+                    error_message: None,
+                },
+            )
+            .await?;
+
+        Ok((started, events))
+    }
+
+    /// 停止済みセッションをネイティブ復元で自動再開する (プロンプト送信前)。
+    ///
+    /// 明示 resume と同じ `resuming` ガードで直列化し、他の再開処理が進行中の
+    /// 場合は完了を待ってから制御を返す。ネイティブ復元できない場合は
+    /// [`NodeError::ResumeRequired`] を返し、セッションは停止状態のまま残す
+    /// (履歴 Replay は暗黙実行せず、クライアントに明示的な Resume を促す)。
+    async fn auto_resume_for_prompt(&self, session_id: &str) -> Result<(), NodeError> {
+        let deadline = Instant::now() + AUTO_RESUME_TIMEOUT;
+        loop {
+            // ロックは await を跨がないよう、ガードの取得と判定をスコープで閉じる
+            let acquired = {
+                let mut sessions = self.inner.sessions.lock().expect("sessions poisoned");
+                if sessions.active.contains_key(session_id) {
+                    return Ok(());
+                }
+                sessions.resuming.insert(session_id.to_owned())
+            };
+            if acquired {
+                let result = self
+                    .resume_stopped_session(session_id, ResumeMode::NativeOnly)
+                    .await
+                    .map(|(started, _events)| {
+                        // ドライバ契約: ネイティブ限定 (`allow_fresh = false`) では
+                        // 復元できない場合に起動失敗 (Err) となるため、ここでは
+                        // `context_restored = true` のみが正常である
+                        if !started.context_restored {
+                            tracing::warn!(
+                                session_id,
+                                "native-only resume returned a fresh session"
+                            );
+                        }
+                    });
+                self.inner
+                    .sessions
+                    .lock()
+                    .expect("sessions poisoned")
+                    .resuming
+                    .remove(session_id);
+                return result;
+            }
+            if Instant::now() >= deadline {
+                return Err(NodeError::InvalidState(format!(
+                    "session is resuming: {session_id}"
+                )));
+            }
+            tokio::time::sleep(RESUME_WAIT_INTERVAL).await;
+        }
     }
 
     /// 稼働中セッションの CLI アタッチモードを返す (`fxg attach`)。
@@ -1058,6 +1171,11 @@ impl SessionManager {
     }
 
     /// プロンプトを送信する (busy の場合は Pending Queue へ)。
+    ///
+    /// セッションが停止済み (非 active) の場合は、ネイティブ復元での自動再開を
+    /// 試みてから送信する。ネイティブ復元に非対応のエージェントでは
+    /// [`NodeError::ResumeRequired`] を返すため、クライアントは明示的な Resume
+    /// (履歴 Replay) を案内する。
     pub async fn send_prompt(
         &self,
         command_id: &str,
@@ -1067,6 +1185,15 @@ impl SessionManager {
     ) -> Result<(), NodeError> {
         if !self.begin_command(command_id) {
             return Err(NodeError::CommandDuplicate(command_id.to_owned()));
+        }
+
+        let active = {
+            let sessions = self.inner.sessions.lock().expect("sessions poisoned");
+            sessions.active.contains_key(session_id)
+        };
+        if !active {
+            // 停止済みセッションは自動再開 (ネイティブ復元のみ) してから送信する
+            self.auto_resume_for_prompt(session_id).await?;
         }
 
         // busy チェックと予約 (check-and-set)
@@ -2423,6 +2550,102 @@ mod tests {
             .await
             .expect("resume after recovery");
         assert_eq!(outcome.session_id, session_id);
+    }
+
+    #[tokio::test]
+    async fn send_prompt_auto_resumes_stopped_session_natively() {
+        let (manager, mock, dir) = setup().await;
+        let (_repo, session_id) = setup_stopped_session(&manager, &mock, &dir, "first turn").await;
+
+        // ネイティブ復元対応エージェント: 明示 resume なしの送信で自動再開される
+        mock.set_resume_supported(true);
+        manager
+            .send_prompt("c-next", &session_id, "auto resumed", "web")
+            .await
+            .expect("send prompt");
+
+        // 記録済みエージェントセッションIDでネイティブ限定復元が要求される
+        let start = mock.starts().last().cloned().expect("start_session");
+        let resume = start.resume.expect("resume request");
+        assert_eq!(resume.agent_session_id.as_deref(), Some("agent-sess-1"));
+        assert!(!resume.allow_fresh, "自動レジュームはネイティブ限定");
+
+        // 自動再開の完了で状態投影が idle に戻り、プロンプトが送信される
+        wait_user_message(&manager, &session_id, "auto resumed").await;
+        let row = manager
+            .bus()
+            .db()
+            .get_session(&session_id)
+            .await
+            .expect("query")
+            .expect("session row");
+        assert_eq!(row.status, SessionStatus::Idle);
+        assert!(mock.prompts().iter().any(|prompt| prompt == "auto resumed"));
+
+        // ネイティブ復元のため履歴 Replay は注入されない
+        let batch = manager
+            .bus()
+            .db()
+            .session_events_after(&session_id, 0, 200)
+            .await
+            .expect("events");
+        assert!(
+            !batch.events.iter().any(|event| matches!(
+                &event.payload,
+                UnifiedEventPayload::UserMessage { client_source, .. } if client_source == "resume"
+            )),
+            "native auto resume must not inject replay context"
+        );
+
+        // ターン完了で busy が解除される
+        mock.emit(DriverEvent::Event(UnifiedEventPayload::StatusChanged {
+            status: SessionStatus::Idle,
+            error_message: None,
+        }));
+        wait_not_busy(&manager, &session_id).await;
+    }
+
+    #[tokio::test]
+    async fn send_prompt_requires_explicit_resume_when_native_unsupported() {
+        let (manager, mock, dir) = setup().await;
+        let (_repo, session_id) = setup_stopped_session(&manager, &mock, &dir, "first turn").await;
+
+        // ネイティブ復元非対応: 送信は ResumeRequired で失敗し、履歴 Replay は
+        // 暗黙実行されない (セッションは停止状態のまま)
+        let err = manager
+            .send_prompt("c-next", &session_id, "needs replay", "web")
+            .await
+            .expect_err("native resume is unavailable");
+        assert!(matches!(err, NodeError::ResumeRequired(_)));
+        assert_eq!(
+            err.error_code(),
+            fxg_protocol::common::ErrorCode::ResumeRequired
+        );
+
+        let row = manager
+            .bus()
+            .db()
+            .get_session(&session_id)
+            .await
+            .expect("query")
+            .expect("session row");
+        assert_eq!(row.status, SessionStatus::Stopped, "停止状態のまま残る");
+        assert!(manager.list_active().is_empty());
+        assert!(
+            !mock.prompts().iter().any(|prompt| prompt == "needs replay"),
+            "プロンプトは送信されない"
+        );
+
+        // 明示的な resume (履歴 Replay) では再開できる
+        let outcome = manager
+            .resume(ResumeParams {
+                command_id: "c-resume",
+                session_id: &session_id,
+                force_replay: false,
+            })
+            .await
+            .expect("explicit resume");
+        assert!(!outcome.context_restored);
     }
 
     #[tokio::test]

@@ -586,6 +586,10 @@ pub enum ErrorCode {
     Busy,
     /// 現在の状態では実行できない操作
     InvalidState,
+    /// 停止済みセッションへの操作だが、エージェントがネイティブ復元
+    /// (`session/resume` 等) に対応していない。履歴 Replay での明示的な
+    /// 再開 (`fxg session resume` / Web UI の Resume) が必要。
+    ResumeRequired,
     /// リモートPTYがセキュリティポリシーで無効化されている
     PtyDisabled,
     /// `command_id` の重複送信 (ダブルタップ・WS再送)
@@ -606,6 +610,7 @@ impl ErrorCode {
             Self::AlreadyResolved => "ALREADY_RESOLVED",
             Self::Busy => "BUSY",
             Self::InvalidState => "INVALID_STATE",
+            Self::ResumeRequired => "RESUME_REQUIRED",
             Self::PtyDisabled => "PTY_DISABLED",
             Self::CommandDuplicate => "COMMAND_DUPLICATE",
             Self::NotFound => "NOT_FOUND",
@@ -631,6 +636,7 @@ impl FromStr for ErrorCode {
             "ALREADY_RESOLVED" => Ok(Self::AlreadyResolved),
             "BUSY" => Ok(Self::Busy),
             "INVALID_STATE" => Ok(Self::InvalidState),
+            "RESUME_REQUIRED" => Ok(Self::ResumeRequired),
             "PTY_DISABLED" => Ok(Self::PtyDisabled),
             "COMMAND_DUPLICATE" => Ok(Self::CommandDuplicate),
             "NOT_FOUND" => Ok(Self::NotFound),

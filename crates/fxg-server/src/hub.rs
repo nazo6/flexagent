@@ -41,6 +41,13 @@ const HELLO_TIMEOUT: Duration = Duration::from_secs(10);
 /// コマンド中継の応答待ちタイムアウト。
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// セッションコマンド (プロンプト送信・承認応答・制御・レジューム) の
+/// 応答待ちタイムアウト。
+///
+/// 停止済みセッションへの送信とレジュームはノード側でエージェントを起動する
+/// ため、コールドスタート (PyInstaller 展開等で ~25 秒) を許容する。
+const SESSION_COMMAND_TIMEOUT: Duration = Duration::from_secs(120);
+
 /// プロジェクト操作 (スキャン等) の応答待ちタイムアウト。
 ///
 /// ディレクトリ走査は対象規模により 30 秒を超えることがある。
@@ -344,6 +351,9 @@ impl NodeHub {
     }
 
     /// コマンドを中継し、`command_id` 相関で `CommandResult` を待つ。
+    ///
+    /// プロンプト送信は停止済みセッションの自動レジュームを含みうるため、
+    /// [`SESSION_COMMAND_TIMEOUT`] で待つ。
     pub async fn command(
         &self,
         node_id: &str,
@@ -351,7 +361,7 @@ impl NodeHub {
         message: ServerToNodeMsg,
     ) -> Result<CommandResult, ApiError> {
         let response = self
-            .request(node_id, command_id, message, COMMAND_TIMEOUT)
+            .request(node_id, command_id, message, SESSION_COMMAND_TIMEOUT)
             .await?;
         match response {
             PendingResponse::Command(result) => Ok(result),
@@ -436,6 +446,8 @@ impl NodeHub {
     /// セッション再開を中継し、`command_id` 相関で結果を待つ。
     ///
     /// 戻り値はネイティブ復元の成否 (`false` = 履歴 Replay で継続)。
+    /// エージェントのコールドスタートを許容するため
+    /// [`SESSION_COMMAND_TIMEOUT`] で待つ。
     pub async fn resume_session(
         &self,
         node_id: &str,
@@ -443,7 +455,7 @@ impl NodeHub {
         message: ServerToNodeMsg,
     ) -> Result<bool, ApiError> {
         let response = self
-            .request(node_id, command_id, message, COMMAND_TIMEOUT)
+            .request(node_id, command_id, message, SESSION_COMMAND_TIMEOUT)
             .await?;
         match response {
             PendingResponse::Resume {

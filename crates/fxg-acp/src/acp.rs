@@ -51,8 +51,8 @@ use fxg_protocol::util::uuid_v7;
 use tokio::sync::{mpsc, oneshot, watch};
 
 use crate::driver::{
-    ActiveSessionHandle, AgentDriver, DriverEvent, ResumeRequest, StartSessionRequest,
-    StartedSession,
+    ActiveSessionHandle, AgentDriver, DriverEvent, NativeResumeUnavailable, ResumeRequest,
+    StartSessionRequest, StartedSession,
 };
 use crate::warm::{DEFAULT_WARM_IDLE, LaunchKey, WarmPool, WarmProcess};
 
@@ -1040,9 +1040,22 @@ async fn build_session(
 )> {
     // セッション取得 (新規作成 / session/resume / session/load)
     let plan = plan_resume(agent_capabilities, params.resume.as_ref())?;
-    let (session, context_restored) = acquire_session(cx, plan, &params.cwd)
-        .await
-        .map_err(|err| anyhow!("failed to create acp session: {err}"))?;
+    let (session, context_restored) = match acquire_session(cx, plan, &params.cwd).await {
+        Ok(acquired) => acquired,
+        // ネイティブ限定の再開 (`allow_fresh = false`) では、復元失敗は
+        // 「ネイティブ復元不可」として呼び出し側 (ノード) に伝える
+        Err(err)
+            if params
+                .resume
+                .as_ref()
+                .is_some_and(|resume| !resume.allow_fresh) =>
+        {
+            return Err(
+                NativeResumeUnavailable(format!("failed to resume acp session: {err}")).into(),
+            );
+        }
+        Err(err) => return Err(anyhow!("failed to create acp session: {err}")),
+    };
     let acp_session_id = session.session_id().clone();
     // セッション情報を登録する (fs / terminal ハンドラが参照する)
     contexts.lock().expect("session contexts poisoned").insert(
@@ -1207,6 +1220,7 @@ fn session_capabilities(
 }
 
 /// `resume` 指定とエージェント capability からセッション取得方法を決める。
+#[derive(Debug)]
 enum ResumePlan {
     /// `session/resume` (履歴 Replay なし)
     Resume(String),
@@ -1222,13 +1236,25 @@ enum ResumePlan {
 /// `session/resume` を優先する。resume 非対応の場合のみ `session/load`
 /// (Replay 通知は破棄) を使い、どちらも無ければ新規作成する
 /// (設計: `docs/04-agent-drivers-and-windows.md` §4.3)。
+///
+/// `resume.allow_fresh` が `false` の場合 (送信時の自動レジューム) は
+/// 新規作成せず [`NativeResumeUnavailable`] を返し、呼び出し側に履歴 Replay
+/// での明示的な再開を促す。
 fn plan_resume(
     capabilities: &AgentCapabilities,
     resume: Option<&ResumeRequest>,
 ) -> anyhow::Result<ResumePlan> {
-    let Some(agent_session_id) = resume.and_then(|resume| resume.agent_session_id.clone()) else {
-        // 再開指定なし・エージェント側ID未記録 → 新規作成
+    // 再開指定なし → 新規作成
+    let Some(resume) = resume else {
         return Ok(ResumePlan::Fresh);
+    };
+    let Some(agent_session_id) = resume.agent_session_id.clone() else {
+        // エージェント側ID未記録 (呼び出し側の履歴 Replay 注入前提)
+        return if resume.allow_fresh {
+            Ok(ResumePlan::Fresh)
+        } else {
+            Err(NativeResumeUnavailable("no agent session id recorded".to_owned()).into())
+        };
     };
 
     if capabilities.session_capabilities.resume.is_some() {
@@ -1237,12 +1263,13 @@ fn plan_resume(
     if capabilities.load_session {
         return Ok(ResumePlan::Load(agent_session_id));
     }
-    if resume.is_some_and(|resume| resume.allow_fresh) {
+    if resume.allow_fresh {
         return Ok(ResumePlan::Fresh);
     }
-    anyhow::bail!(
+    Err(NativeResumeUnavailable(format!(
         "agent does not support session/resume or session/load (agent_session_id={agent_session_id})"
-    );
+    ))
+    .into())
 }
 
 /// セッションを取得する ([`ResumePlan`] に従う)。
@@ -1936,9 +1963,10 @@ mod tests {
             ResumePlan::Fresh
         ));
 
-        // どちらも非対応 + allow_fresh なし → エラー
+        // どちらも非対応 + allow_fresh なし → ネイティブ復元不可
         let resume = resume_request(Some("ses_1"), false);
-        assert!(plan_resume(&capabilities, Some(&resume)).is_err());
+        let err = plan_resume(&capabilities, Some(&resume)).expect_err("native-only must fail");
+        assert!(err.downcast_ref::<NativeResumeUnavailable>().is_some());
     }
 
     #[test]
@@ -1949,12 +1977,17 @@ mod tests {
             plan_resume(&capabilities, None).expect("plan"),
             ResumePlan::Fresh
         ));
-        // エージェント側IDが未記録 (履歴 Replay 前提の新規作成)
+        // エージェント側IDが未記録 + allow_fresh (履歴 Replay 前提の新規作成)
         let resume = resume_request(None, true);
         assert!(matches!(
             plan_resume(&capabilities, Some(&resume)).expect("plan"),
             ResumePlan::Fresh
         ));
+        // エージェント側IDが未記録 + allow_fresh なし (自動レジューム) は
+        // ネイティブ復元不可 (履歴 Replay での明示再開が必要)
+        let resume = resume_request(None, false);
+        let err = plan_resume(&capabilities, Some(&resume)).expect_err("native-only must fail");
+        assert!(err.downcast_ref::<NativeResumeUnavailable>().is_some());
     }
 
     #[test]

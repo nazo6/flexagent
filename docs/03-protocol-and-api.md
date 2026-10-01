@@ -282,6 +282,9 @@ pub enum ErrorCode {
     AlreadyResolved,
     Busy,
     InvalidState,
+    /// 停止済みセッションへの操作だが、エージェントがネイティブ復元
+    /// (`session/resume` 等) に対応していない (履歴 Replay での明示的な再開が必要)
+    ResumeRequired,
     PtyDisabled,
     CommandDuplicate,
     NotFound,
@@ -485,6 +488,9 @@ pub enum ServerToNodeMsg {
         restore_git_bundle_b64: Option<String>,              // 一時VMから退避されたGitバンドルの復元用
     },
     /// プロンプト送信（スラッシュコマンド含む）
+    /// ※停止済みセッションへの送信はノード側でネイティブ復元 (自動レジューム) を
+    ///   試みる。非対応エージェントでは `RESUME_REQUIRED` を返し、クライアントは
+    ///   明示的な再開 (`SessionResume` = 履歴 Replay) を案内する (設計: docs/04 §4.3)
     SendPrompt {
         command_id: String,
         session_id: String,
@@ -847,4 +853,8 @@ xterm互換アダプター）とノード上の ConPTY / Unix PTY
    - 停止済みセッションを同一 `session_id` のまま再開します
      (`fxg session resume`)。ネイティブ復元を優先し、非対応時は履歴 Replay で
      継続します (`context_restored = false`)。稼働中の再開は `INVALID_STATE`
-     を返却します (設計: docs/04 §4.3)。
+     を返却します (設計: docs/04 §4.3)。 - `SendPrompt`
+     は停止済みセッションに対してこの再開 (ネイティブ限定) を
+     自動実行してから送信します。ネイティブ復元不可の場合は `RESUME_REQUIRED`
+     を返すため、クライアントは `SessionResume` での履歴 Replay
+     再開を案内します。

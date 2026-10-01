@@ -93,6 +93,9 @@ impl ApiError {
                 StatusCode::CONFLICT
             }
             ErrorCode::InvalidState => StatusCode::BAD_REQUEST,
+            // 停止済みセッションへの操作で履歴 Replay が必要 (クライアント側で
+            // 明示的な Resume を促すため 409 とする)
+            ErrorCode::ResumeRequired => StatusCode::CONFLICT,
             ErrorCode::NotFound => StatusCode::NOT_FOUND,
             ErrorCode::Internal => StatusCode::INTERNAL_SERVER_ERROR,
         };

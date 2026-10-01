@@ -42,9 +42,19 @@ pub struct ResumeRequest {
     /// `None` は新規セッション作成 (呼び出し側の履歴 Replay 注入前提)。
     pub agent_session_id: Option<String>,
     /// ネイティブ復元ができない場合に新規セッション作成を許容するか
-    /// (`false` の場合はエラーを返す)。
+    /// (`false` の場合は [`NativeResumeUnavailable`] を返す)。
     pub allow_fresh: bool,
 }
+
+/// ネイティブ復元 (`session/resume` / `session/load` / opencode2 既存セッション
+/// bind) が利用できないため、新規セッションを作成せずに再開を中断した。
+///
+/// [`ResumeRequest::allow_fresh`] が `false` のときのみ返される。呼び出し側
+/// (ノード) はこの型へダウンキャストして判別し、履歴 Replay での明示的な
+/// 再開を案内する (`ErrorCode::RESUME_REQUIRED`)。
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("native session resume is not available: {0}")]
+pub struct NativeResumeUnavailable(pub String);
 
 /// セッション開始要求。
 #[derive(Debug, Clone)]

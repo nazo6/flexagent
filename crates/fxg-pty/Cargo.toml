@@ -18,12 +18,12 @@ which = { workspace = true }
 [dev-dependencies]
 tempfile = { workspace = true }
 
+[target."cfg(unix)".dependencies]
+libc = { workspace = true }
+
 [target."cfg(windows)".dependencies]
 win32job = { workspace = true }
 windows = { version = "0.61", features = ["Win32_Foundation", "Win32_System_JobObjects", "Win32_System_Threading"] }
-
-[target."cfg(unix)".dependencies]
-libc = { workspace = true }
 
 [lints]
 workspace = true

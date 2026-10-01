@@ -173,11 +173,23 @@ impl AgentDriver for MockAgent {
         req: StartSessionRequest,
         event_tx: mpsc::UnboundedSender<DriverEvent>,
     ) -> anyhow::Result<StartedSession> {
-        self.inner.events.lock().expect("events").push(event_tx);
         // ネイティブ復元対応が有効で、エージェント側IDがある場合のみ復元成功とする
-        let context_restored = req.resume.as_ref().is_some_and(|resume| {
+        let can_restore = req.resume.as_ref().is_some_and(|resume| {
             resume.agent_session_id.is_some() && self.inner.resume_supported.load(Ordering::SeqCst)
         });
+        // ネイティブ限定 (`allow_fresh = false`) で復元できない場合は実ドライバと
+        // 同様に `NativeResumeUnavailable` を返す (セッションは作成しない)
+        if req
+            .resume
+            .as_ref()
+            .is_some_and(|resume| !resume.allow_fresh)
+            && !can_restore
+        {
+            return Err(
+                fxg_acp::NativeResumeUnavailable("mock resume unsupported".to_owned()).into(),
+            );
+        }
+        self.inner.events.lock().expect("events").push(event_tx);
         self.inner.starts.lock().expect("starts").push(MockStart {
             session_id: req.session_id,
             cwd: req.cwd,
@@ -185,7 +197,7 @@ impl AgentDriver for MockAgent {
         });
         Ok(StartedSession {
             handle: Box::new(self.clone()),
-            context_restored,
+            context_restored: can_restore,
         })
     }
 }

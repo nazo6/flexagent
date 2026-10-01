@@ -19,12 +19,19 @@
     sessionId,
     capabilities = null,
     node = null,
-    status = null
+    status = null,
+    /**
+     * 送信時にネイティブ復元非対応 (`RESUME_REQUIRED`) だった。
+     * 通常は false (停止中でも送信で自動再開される) で、真のときだけ
+     * 履歴 Replay での再開 (Resume) を案内する。
+     */
+    resumeRequired = $bindable(false)
   }: {
     sessionId: string;
     capabilities?: SessionCapabilities | null;
     node?: NodeSummary | null;
     status?: SessionStatus | null;
+    resumeRequired?: boolean;
   } = $props();
 
   let text = $state('');
@@ -38,6 +45,13 @@
   const isStopped = $derived(
     status === 'stopped' || status === 'error'
   );
+
+  // セッションが稼働状態になったら再開提案を閉じる
+  $effect(() => {
+    if (status === 'idle' || status === 'running' || status === 'waiting_permission') {
+      resumeRequired = false;
+    }
+  });
 
   const nodeAvail = $derived(getNodeAvailability(node));
 
@@ -81,10 +95,17 @@
     try {
       const result = await sync.sendPrompt(sessionId, value);
       if (!result.success) {
-        toast.error(result.error ?? result.code ?? '送信に失敗しました');
+        if (result.code === 'RESUME_REQUIRED') {
+          // 停止済みセッションの自動再開 (ネイティブ復元) に非対応。
+          // 入力は保持したまま、履歴 Replay での再開を提案する
+          resumeRequired = true;
+        } else {
+          toast.error(result.error ?? result.code ?? '送信に失敗しました');
+        }
         return;
       }
       text = '';
+      resumeRequired = false;
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
     } finally {
@@ -95,9 +116,7 @@
   function onKeydown(event: KeyboardEvent) {
     if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
       event.preventDefault();
-      if (!isStopped) {
-        void send();
-      }
+      void send();
     }
   }
 
@@ -118,10 +137,8 @@
     }
   }
 
-  /** 停止済みセッションを再開し、続きから操作できるようにする。 */
-  async function resume() {
-    if (resuming) return;
-    resuming = true;
+  /** 停止済みセッションを再開する (履歴 Replay フォールバック含む)。 */
+  async function resumeSession(): Promise<boolean> {
     try {
       const result = await sync.resumeSession(sessionId);
       if (result.context_restored) {
@@ -129,11 +146,26 @@
       } else {
         toast.success('セッションを再開しました (履歴を引き継いで継続)');
       }
+      return true;
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
+      return false;
+    }
+  }
+
+  /** ネイティブ復元非対応の停止セッションを履歴 Replay で再開し、入力を送信する。 */
+  async function resumeAndSend() {
+    if (sending || resuming || text.trim() === '') return;
+    resuming = true;
+    let ok = false;
+    try {
+      ok = await resumeSession();
     } finally {
       resuming = false;
     }
+    if (!ok) return;
+    resumeRequired = false;
+    await send();
   }
 </script>
 
@@ -143,21 +175,32 @@
       class="bg-muted text-muted-foreground flex flex-wrap items-center gap-2 rounded-md px-2.5 py-1 text-xs"
     >
       <AlertTriangleIcon class="size-3.5 shrink-0" />
-      <span>このセッションは停止しています。再開すると会話の続きから操作できます。</span>
-      <Button
-        variant="outline"
-        size="sm"
-        class="ml-auto h-6 text-xs"
-        disabled={resuming}
-        onclick={resume}
-      >
-        再開 (Resume)
-      </Button>
+      <span>
+        このセッションは停止しています。送信すると自動で再開します（ネイティブ復元非対応時は履歴を引き継いで再開）。
+      </span>
     </div>
   {:else if node && !nodeAvail.isAvailable}
     <div class="bg-destructive/10 text-destructive flex items-center gap-2 rounded-md px-2.5 py-1 text-xs">
       <AlertTriangleIcon class="size-3.5 shrink-0" />
       <span>実行ノード ({node.name}) は現在{nodeAvail.statusText}です。送信したプロンプトはノード復帰時に処理されます。</span>
+    </div>
+  {/if}
+
+  {#if resumeRequired}
+    <div
+      class="bg-muted text-muted-foreground flex flex-wrap items-center gap-2 rounded-md px-2.5 py-1 text-xs"
+    >
+      <AlertTriangleIcon class="size-3.5 shrink-0 text-amber-500/80" />
+      <span>このエージェントはネイティブ復元に対応していません。履歴を引き継いで再開してから送信できます。</span>
+      <Button
+        variant="outline"
+        size="sm"
+        class="ml-auto h-6 text-xs"
+        disabled={sending || resuming}
+        onclick={resumeAndSend}
+      >
+        {resuming ? '再開中…' : '履歴を引き継いで再開して送信'}
+      </Button>
     </div>
   {/if}
 
@@ -182,12 +225,12 @@
     onkeydown={onKeydown}
     rows="3"
     placeholder={isStopped
-      ? 'セッションは停止しています'
+      ? '停止中: 送信すると自動で再開します (Ctrl+Enter で送信)'
       : isRunning
         ? '次のプロンプトを入力 (送信するとキューに追加されます。Ctrl+Enter で送信)'
         : 'プロンプトを入力 (Ctrl+Enter で送信。`/` でスラッシュコマンド)'}
     class="border-input bg-background focus-visible:ring-ring/50 w-full resize-y rounded-md border px-3 py-2 text-sm outline-none focus-visible:ring-2 disabled:cursor-not-allowed disabled:opacity-50"
-    disabled={sending || isStopped}
+    disabled={sending}
   ></textarea>
 
   <div class="flex flex-wrap items-center gap-2">
@@ -240,7 +283,7 @@
       {/if}
       <Button
         size="sm"
-        disabled={sending || isStopped || text.trim() === ''}
+        disabled={sending || text.trim() === ''}
         onclick={() => void send()}
       >
         <SendIcon class="size-3.5" />

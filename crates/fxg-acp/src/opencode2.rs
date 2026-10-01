@@ -18,7 +18,8 @@
 //!   巻き戻す (`files: false`。ファイル復元は Shadow Git Tree が担当)。
 //! - **Resume**: 再開指定時は `GET /api/session/{id}` で存在確認し、既存
 //!   セッションへ bind する (404 の場合は `allow_fresh` に従い新規作成 +
-//!   履歴 Replay へフォールバック。設計: docs/04 §4.3)。
+//!   履歴 Replay へフォールバック。`allow_fresh = false` のネイティブ限定
+//!   再開では [`NativeResumeUnavailable`] を返す。設計: docs/04 §4.3)。
 //! - **承認**: SSE の `permission.asked` を [`UnifiedEventPayload::PermissionRequest`]
 //!   へ変換し、`POST /api/session/{id}/permission/{request_id}/reply` で応答する。
 //!   純正TUI から応答された場合も `permission.replied` として記録される。
@@ -43,8 +44,8 @@ use tokio::process::Command;
 use tokio::sync::mpsc;
 
 use crate::driver::{
-    ActiveSessionHandle, AgentDriver, DriverEvent, NativeAttachInfo, StartSessionRequest,
-    StartedSession,
+    ActiveSessionHandle, AgentDriver, DriverEvent, NativeAttachInfo, NativeResumeUnavailable,
+    StartSessionRequest, StartedSession,
 };
 
 /// `opencode2 serve` が準備完了するまでの最大待機時間。
@@ -302,6 +303,7 @@ impl AgentDriver for OpenCode2Driver {
         event_tx: mpsc::UnboundedSender<DriverEvent>,
     ) -> anyhow::Result<StartedSession> {
         // 再開指定 (Some の場合は既存セッションへ bind を試みる)
+        let resume_requested = req.resume.is_some();
         let resume_session_id = req
             .resume
             .as_ref()
@@ -386,7 +388,12 @@ impl AgentDriver for OpenCode2Driver {
                         (agent_session_id, true)
                     }
                     Ok(false) if !allow_fresh => {
-                        anyhow::bail!("opencode2 session not found: {agent_session_id}");
+                        // ネイティブ限定 (送信時の自動レジューム) は新規作成せず
+                        // 呼び出し側に履歴 Replay での明示再開を促す
+                        return Err(NativeResumeUnavailable(format!(
+                            "opencode2 session not found: {agent_session_id}"
+                        ))
+                        .into());
                     }
                     Ok(false) => {
                         tracing::info!(
@@ -398,7 +405,12 @@ impl AgentDriver for OpenCode2Driver {
                             false,
                         )
                     }
-                    Err(err) if !allow_fresh => return Err(err),
+                    Err(err) if !allow_fresh => {
+                        return Err(NativeResumeUnavailable(format!(
+                            "failed to verify opencode2 session: {err:#}"
+                        ))
+                        .into());
+                    }
                     Err(err) => {
                         tracing::warn!(
                             %agent_session_id,
@@ -410,6 +422,13 @@ impl AgentDriver for OpenCode2Driver {
                         )
                     }
                 }
+            }
+            None if resume_requested && !allow_fresh => {
+                // エージェント側ID未記録でネイティブ限定 → 復元不可
+                return Err(NativeResumeUnavailable(
+                    "no opencode2 agent session id recorded".to_owned(),
+                )
+                .into());
             }
             None => (
                 create_opencode_session(&http, &base_url, &password, &req).await?,

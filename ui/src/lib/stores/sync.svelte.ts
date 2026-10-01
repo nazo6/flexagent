@@ -18,6 +18,13 @@ import type { ConnectionStore } from "./connection.svelte";
 const CURSOR_KEY = "fxg.sync.cursor";
 /** `CommandResult` を待つタイムアウト。 */
 const COMMAND_TIMEOUT_MS = 30_000;
+/**
+ * `SendPrompt` のタイムアウト。
+ *
+ * 停止済みセッションへの送信はノード側でネイティブ復元 (自動レジューム) を
+ * 行うため、エージェントのコールドスタート (~25 秒) を許容する。
+ */
+const SEND_PROMPT_TIMEOUT_MS = 120_000;
 /** 再接続バックオフの上限。 */
 const MAX_RECONNECT_DELAY_MS = 30_000;
 
@@ -287,13 +294,17 @@ export class SyncStore {
   // コマンド (Client WS + CommandResult 相関)
   // ------------------------------------------------------------------
 
-  #dispatch(command: ClientWsMessage, sessionId: string): Promise<CommandResult> {
+  #dispatch(
+    command: ClientWsMessage,
+    sessionId: string,
+    timeoutMs = COMMAND_TIMEOUT_MS,
+  ): Promise<CommandResult> {
     const commandId = "command_id" in command ? command.command_id : "";
     return new Promise<CommandResult>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.#pendingCommands.delete(commandId);
         reject(new Error("コマンドがタイムアウトしました (ノードからの応答がありません)"));
-      }, COMMAND_TIMEOUT_MS);
+      }, timeoutMs);
       this.#pendingCommands.set(commandId, {
         sessionId,
         settle: resolve,
@@ -308,7 +319,12 @@ export class SyncStore {
     });
   }
 
-  /** プロンプトを送信する (Pending Queue として表示される)。 */
+  /**
+   * プロンプトを送信する (Pending Queue として表示される)。
+   *
+   * 停止済みセッションへの送信はノード側で自動レジュームされるため、
+   * 応答待ちを [`SEND_PROMPT_TIMEOUT_MS`] に延長する。
+   */
   sendPrompt(sessionId: string, text: string): Promise<CommandResult> {
     const commandId = crypto.randomUUID();
     this.pendingPrompts.set(commandId, {
@@ -326,6 +342,7 @@ export class SyncStore {
         client_source: "web",
       },
       sessionId,
+      SEND_PROMPT_TIMEOUT_MS,
     );
     return promise.finally(() => {
       this.pendingPrompts.delete(commandId);

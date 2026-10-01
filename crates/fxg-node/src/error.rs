@@ -49,6 +49,11 @@ pub enum NodeError {
     /// セッションの状態・操作が不正
     #[error("invalid session: {0}")]
     InvalidSession(String),
+    /// 停止済みセッションへの操作だが、エージェントがネイティブ復元
+    /// (`session/resume` / `session/load` / opencode2 既存セッション bind) に
+    /// 対応していない。履歴 Replay での明示的な再開が必要。
+    #[error("native resume is not available; resume with replayed history: {0}")]
+    ResumeRequired(String),
     /// セッションが実行中 (busy) のため操作できない
     #[error("session is busy: {0}")]
     Busy(String),
@@ -107,6 +112,7 @@ impl NodeError {
             Self::CommandDuplicate(_) => ErrorCode::CommandDuplicate,
             Self::AlreadyResolved(_) => ErrorCode::AlreadyResolved,
             Self::Busy(_) => ErrorCode::Busy,
+            Self::ResumeRequired(_) => ErrorCode::ResumeRequired,
             Self::Db(fxg_db::DbError::SessionNotFound(_))
             | Self::Db(fxg_db::DbError::NodeNotFound(_)) => ErrorCode::NotFound,
             _ => ErrorCode::Internal,

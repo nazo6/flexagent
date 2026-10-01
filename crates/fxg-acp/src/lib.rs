@@ -19,6 +19,6 @@ mod warm;
 pub use acp::AcpDriver;
 pub use driver::{
     ActiveSessionHandle, AgentDriver, AgentLaunchSpec, DriverEvent, NativeAttachInfo,
-    ResumeRequest, StartSessionRequest, StartedSession,
+    NativeResumeUnavailable, ResumeRequest, StartSessionRequest, StartedSession,
 };
 pub use opencode2::OpenCode2Driver;
