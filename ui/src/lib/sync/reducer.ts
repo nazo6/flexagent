@@ -264,24 +264,35 @@ export function buildTimelineItems(sources: TimelineSources): TimelineItem[] {
         break;
       case "tool_call": {
         const existing = toolIndex.get(payload.data.tool_call_id);
-        const item: TimelineItem = {
-          kind: "tool",
-          key: `tool:${payload.data.tool_call_id}`,
-          seq: existing === undefined ? event.node_seq : items[existing].seq,
-          createdAt: event.created_at,
-          toolCallId: payload.data.tool_call_id,
-          title: payload.data.title,
-          toolKind: payload.data.kind,
-          status: payload.data.status,
-          locations: payload.data.locations,
-          diff: payload.data.diff,
-          rawOutput: payload.data.raw_output,
-        };
         if (existing === undefined) {
           toolIndex.set(payload.data.tool_call_id, items.length);
-          items.push(item);
+          items.push({
+            kind: "tool",
+            key: `tool:${payload.data.tool_call_id}`,
+            seq: event.node_seq,
+            createdAt: event.created_at,
+            toolCallId: payload.data.tool_call_id,
+            title: payload.data.title,
+            toolKind: payload.data.kind,
+            status: payload.data.status,
+            locations: payload.data.locations,
+            diff: payload.data.diff,
+            rawOutput: payload.data.raw_output,
+          });
         } else {
-          items[existing] = item;
+          const prev = items[existing];
+          if (prev.kind === "tool") {
+            items[existing] = {
+              ...prev,
+              title: payload.data.title !== "" ? payload.data.title : prev.title,
+              toolKind: payload.data.kind !== "" ? payload.data.kind : prev.toolKind,
+              status: payload.data.status !== "" ? payload.data.status : prev.status,
+              locations:
+                payload.data.locations.length > 0 ? payload.data.locations : prev.locations,
+              diff: payload.data.diff ?? prev.diff,
+              rawOutput: payload.data.raw_output ?? prev.rawOutput,
+            };
+          }
         }
         break;
       }

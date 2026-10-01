@@ -39,24 +39,35 @@
       read: 'Read',
       edit: 'Edit',
       execute: 'Terminal',
-      search: 'Search',
-      other: 'Tool'
+      search: 'Search'
     };
 
-    const colonIdx = tool.title.indexOf(':');
-    if (colonIdx > 0 && colonIdx < 30) {
-      const rawName = tool.title.slice(0, colonIdx).trim();
-      const detail = tool.title.slice(colonIdx + 1).trim();
-      return {
-        name: rawName,
-        detail: detail !== '' ? detail : rawName
-      };
+    // ツール名ラベル (Read, Edit, Terminal, Search, またはツール識別子)
+    let name = kindMap[tool.toolKind] ?? '';
+    let detail = tool.title;
+
+    if (tool.title.startsWith('Running ')) {
+      const funcName = tool.title.replace('Running ', '').trim();
+      if (!name) name = funcName;
+      detail = tool.locations.length > 0 ? tool.locations.join(', ') : funcName;
+    } else if (tool.title.includes(':')) {
+      const colonIdx = tool.title.indexOf(':');
+      const prefix = tool.title.slice(0, colonIdx).trim();
+      const rest = tool.title.slice(colonIdx + 1).trim();
+      if (!name) name = prefix;
+      detail = rest || (tool.locations.length > 0 ? tool.locations.join(', ') : prefix);
+    } else if (tool.locations.length > 0) {
+      if (!name) name = tool.title || 'Tool';
+      detail = tool.locations.join(', ');
     }
 
-    const fallbackName = kindMap[tool.toolKind] ?? 'Tool';
+    if (!name) {
+      name = tool.title || 'Tool';
+    }
+
     return {
-      name: fallbackName,
-      detail: tool.title !== '' ? tool.title : fallbackName
+      name,
+      detail: detail || tool.title || tool.toolCallId
     };
   }
 </script>
@@ -139,17 +150,17 @@
                 <HammerIcon class="text-muted-foreground size-3.5 shrink-0" />
               {/if}
 
-              <!-- ツール名バッジ (ツール名を明示) -->
+              <!-- ツール名バッジ (Read, Edit, Terminal, Search 等) -->
               <span class="rounded bg-muted px-1.5 py-0.2 font-mono text-[10px] font-semibold text-foreground/85 shrink-0 border border-border/60">
                 {toolInfo.name}
               </span>
 
-              <!-- コマンド / 引数 / タイトル詳細 -->
+              <!-- コマンド / 引数 / 対象パス -->
               <span class="truncate font-mono text-[11px] text-foreground/90">
                 {toolInfo.detail}
               </span>
 
-              {#if tool.locations.length > 0}
+              {#if tool.locations.length > 0 && !toolInfo.detail.includes(tool.locations[0])}
                 <span class="text-muted-foreground truncate font-mono text-[10px]">
                   ({tool.locations.join(', ')})
                 </span>
@@ -180,8 +191,10 @@
               <div class="flex items-center gap-2 text-[11px]">
                 <span class="text-muted-foreground text-[10px]">ツール:</span>
                 <span class="font-mono font-semibold text-foreground">{toolInfo.name}</span>
-                <span class="text-muted-foreground text-[10px]">種別:</span>
-                <span class="font-mono text-muted-foreground">{tool.toolKind}</span>
+                {#if tool.title && tool.title !== toolInfo.name}
+                  <span class="text-muted-foreground text-[10px]">詳細:</span>
+                  <span class="font-mono text-muted-foreground truncate">{tool.title}</span>
+                {/if}
                 {#if tool.status}
                   <span class="text-muted-foreground text-[10px]">状態:</span>
                   <span class="font-mono text-muted-foreground">{tool.status}</span>

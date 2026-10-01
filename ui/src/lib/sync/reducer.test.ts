@@ -127,6 +127,46 @@ describe("tool calls", () => {
     });
   });
 
+  it("preserves title, kind, and locations when partial update arrives with empty fields", () => {
+    const sources = emptySources([
+      makeEvent(1, {
+        type: "tool_call",
+        data: {
+          tool_call_id: "t2",
+          title: "Running client_view_file",
+          kind: "read",
+          status: "in_progress",
+          locations: ["/repo/README.md"],
+          diff: null,
+          raw_output: null,
+        },
+      }),
+      makeEvent(2, {
+        type: "tool_call",
+        data: {
+          tool_call_id: "t2",
+          title: "",
+          kind: "",
+          status: "completed",
+          locations: [],
+          diff: null,
+          raw_output: "file content",
+        },
+      }),
+    ]);
+    const items = buildTimelineItems(sources);
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({
+      kind: "tool",
+      toolCallId: "t2",
+      title: "Running client_view_file",
+      toolKind: "read",
+      status: "completed",
+      locations: ["/repo/README.md"],
+      rawOutput: "file content",
+    });
+  });
+
   it("clears streamed tool progress when the completed event arrives", () => {
     const sources = emptySources();
     applyStreamDelta(sources, {
