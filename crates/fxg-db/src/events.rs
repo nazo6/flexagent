@@ -271,10 +271,11 @@ async fn upsert_session_from_created(
         INSERT INTO sessions (
             session_id, project_id, node_id, local_path, git_branch, is_worktree,
             agent_id, agent_session_id, parent_session_id, fork_from_node_seq,
-            title, status, current_mode, available_commands_json, config_options_json,
+            title, status, current_mode, available_modes_json,
+            available_commands_json, config_options_json,
             git_bundle_path, last_node_seq, synced_up_to_node_seq, created_at, updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, 'idle', NULL, '[]', '[]', NULL, ?, 0, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, 'idle', NULL, '[]', '[]', '[]', NULL, ?, 0, ?, ?)
         ON CONFLICT(session_id) DO UPDATE SET
             project_id = excluded.project_id,
             node_id = excluded.node_id,
@@ -367,10 +368,15 @@ pub(crate) async fn apply_projections(
         }
         UnifiedEventPayload::CapabilitiesUpdated {
             current_mode,
+            available_modes,
             available_commands,
             config_options,
-            ..
         } => {
+            let available_modes_json = if available_modes.is_empty() {
+                None
+            } else {
+                Some(serde_json::to_string(available_modes)?)
+            };
             let available_commands_json = if available_commands.is_empty() {
                 None
             } else {
@@ -381,11 +387,12 @@ pub(crate) async fn apply_projections(
             } else {
                 Some(serde_json::to_string(config_options)?)
             };
-            // current_mode / available_commands / config_options が未指定・空配列の場合は既存値を維持する
+            // current_mode / available_modes / available_commands / config_options が未指定・空配列の場合は既存値を維持する
             sqlx::query!(
                 r#"
                 UPDATE sessions
                    SET current_mode = COALESCE(?, current_mode),
+                       available_modes_json = COALESCE(?, available_modes_json),
                        available_commands_json = COALESCE(?, available_commands_json),
                        config_options_json = COALESCE(?, config_options_json),
                        updated_at = MAX(updated_at, ?),
@@ -393,6 +400,7 @@ pub(crate) async fn apply_projections(
                  WHERE session_id = ?
                 "#,
                 current_mode.as_deref(),
+                available_modes_json,
                 available_commands_json,
                 config_options_json,
                 envelope.created_at,
@@ -564,6 +572,7 @@ pub async fn rebuild_projections(pool: &SqlitePool) -> Result<(), DbError> {
            SET title = 'New Session',
                status = 'idle',
                current_mode = NULL,
+               available_modes_json = '[]',
                available_commands_json = '[]',
                config_options_json = '[]',
                agent_session_id = NULL,

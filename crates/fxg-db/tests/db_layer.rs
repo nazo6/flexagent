@@ -170,6 +170,17 @@ async fn count_events(db: &Db, session_id: &str) -> i64 {
     batch.events.len() as i64
 }
 
+/// `sessions.available_modes_json` を読み出してパースする。
+async fn available_modes(db: &Db, session_id: &str) -> Vec<ModeInfo> {
+    let json: String =
+        sqlx::query_scalar(r#"SELECT available_modes_json FROM sessions WHERE session_id = ?"#)
+            .bind(session_id)
+            .fetch_one(db.pool())
+            .await
+            .expect("query available_modes_json");
+    serde_json::from_str(&json).expect("parse available_modes_json")
+}
+
 #[tokio::test]
 async fn migrations_create_single_schema_with_fts_and_triggers() {
     let db = Db::open_in_memory(DbRole::Node).await.expect("migrate");
@@ -282,6 +293,16 @@ async fn event_application_updates_session_projections() {
     assert_eq!(summary.current_mode.as_deref(), Some("code"));
     assert_eq!(summary.last_node_seq, 8);
 
+    // CapabilitiesUpdated の available_modes も投影カラムに反映される
+    assert_eq!(
+        available_modes(&fixture.db, &fixture.session_id).await,
+        vec![ModeInfo {
+            mode_id: "plan".to_owned(),
+            name: "Plan".to_owned(),
+            description: None,
+        }]
+    );
+
     // 承認は解決済みとして投影される
     let request = fixture
         .db
@@ -303,6 +324,48 @@ async fn event_application_updates_session_projections() {
             .expect("pending")
             .is_empty()
     );
+}
+
+#[tokio::test]
+async fn capabilities_partial_update_keeps_available_modes_projection() {
+    let mut fixture = Fixture::new(DbRole::Node).await;
+    let created = fixture.session_created();
+    let modes = fixture.event(UnifiedEventPayload::CapabilitiesUpdated {
+        current_mode: Some("plan".to_owned()),
+        available_modes: vec![ModeInfo {
+            mode_id: "plan".to_owned(),
+            name: "Plan".to_owned(),
+            description: None,
+        }],
+        available_commands: vec![],
+        config_options: vec![],
+    });
+    // モードを含まない差分更新 (コマンドのみ) では available_modes を上書きしない
+    let commands = fixture.event(UnifiedEventPayload::CapabilitiesUpdated {
+        current_mode: None,
+        available_modes: vec![],
+        available_commands: vec![CommandInfo {
+            name: "/review".to_owned(),
+            description: "コードレビュー".to_owned(),
+            input_hint: None,
+        }],
+        config_options: vec![],
+    });
+    fixture
+        .db
+        .append_events(&[created, modes, commands])
+        .await
+        .expect("append");
+
+    let modes = available_modes(&fixture.db, &fixture.session_id).await;
+    assert_eq!(modes.len(), 1);
+    assert_eq!(modes[0].mode_id, "plan");
+
+    // 全量再構築でも同じ投影が再現される
+    fixture.db.rebuild_projections().await.expect("rebuild");
+    let rebuilt = available_modes(&fixture.db, &fixture.session_id).await;
+    assert_eq!(rebuilt.len(), 1);
+    assert_eq!(rebuilt[0].mode_id, "plan");
 }
 
 #[tokio::test]

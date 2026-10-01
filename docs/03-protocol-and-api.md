@@ -136,7 +136,8 @@ pub enum UnifiedEventPayload {
         data_b64: String,      // ユーザー入力キーストローク (Base64)
     },
     /// モード・スラッシュコマンド・設定の更新通知 (永続化対象: セッション復元時に使用)
-    /// ハブ側 sessions.current_mode / available_commands_json / config_options_json 投影の更新源
+    /// ハブ側 sessions.current_mode / available_modes_json /
+    /// available_commands_json / config_options_json 投影の更新源
     CapabilitiesUpdated {
         current_mode: Option<String>,
         available_modes: Vec<ModeInfo>,

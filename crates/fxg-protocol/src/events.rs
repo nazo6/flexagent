@@ -241,8 +241,8 @@ pub enum UnifiedEventPayload {
     },
     /// モード・スラッシュコマンド・設定の更新通知 (永続化対象)。
     ///
-    /// ハブ側 `sessions.current_mode` / `available_commands_json` /
-    /// `config_options_json` 投影の更新源。
+    /// ハブ側 `sessions.current_mode` / `available_modes_json` /
+    /// `available_commands_json` / `config_options_json` 投影の更新源。
     CapabilitiesUpdated {
         /// 現在のモード (`None` の場合は既存値を維持する)
         current_mode: Option<String>,

@@ -65,8 +65,8 @@ SessionCreated        → sessions 行の生成（project_id / node_id / local_p
 SessionTitleChanged   → sessions.title
 SessionAgentBound     → sessions.agent_session_id
 StatusChanged         → sessions.status
-CapabilitiesUpdated   → sessions.current_mode / available_commands_json /
-                        config_options_json
+CapabilitiesUpdated   → sessions.current_mode / available_modes_json /
+                        available_commands_json / config_options_json
 すべてのイベント      → sessions.last_node_seq = 適用済み最大 node_seq
                         sessions.updated_at = 最新イベントの created_at
 PermissionRequest     → permission_requests 行を upsert (status = 'pending')
@@ -164,6 +164,7 @@ CREATE TABLE sessions (
     title           TEXT NOT NULL DEFAULT 'New Session',
     status          TEXT NOT NULL,                  -- 'provisioning' | 'bootstrapping' | 'idle' | 'running' | 'waiting_permission' | 'stopped' | 'error'
     current_mode    TEXT,                           -- ACP SessionMode (例: 'code', 'plan')
+    available_modes_json    TEXT NOT NULL DEFAULT '[]', -- ACP ModeInfo[]
     available_commands_json TEXT NOT NULL DEFAULT '[]', -- ACP AvailableCommand[]
     config_options_json     TEXT NOT NULL DEFAULT '[]', -- ACP ConfigOption[]
     git_bundle_path TEXT,                           -- ハブ専用: 一時VM破棄時に退避された git bundle パス（ノード側は NULL）
