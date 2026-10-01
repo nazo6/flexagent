@@ -107,14 +107,11 @@
   }
 </script>
 
-<div class="mx-auto flex max-w-4xl flex-col gap-4 p-4 md:p-6">
+<div class="flex flex-col gap-3">
   <div class="flex flex-wrap items-center justify-between gap-2">
-    <div>
-      <h1 class="text-xl font-semibold">エージェント管理</h1>
-      <p class="text-muted-foreground text-sm">
-        ACP Registry のエージェントをノードへインストール・更新・削除します
-      </p>
-    </div>
+    <p class="text-muted-foreground text-sm">
+      ACP Registry のエージェントをノードへインストール・更新・削除します
+    </p>
     <div class="flex flex-wrap items-center gap-1.5">
       <select
         bind:value={nodeId}

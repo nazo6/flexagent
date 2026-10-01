@@ -1,7 +1,6 @@
 <script lang="ts">
   import { page } from '$app/state';
   import { Badge } from '$lib/components/ui/badge';
-  import { Button } from '$lib/components/ui/button';
   import { formatRelativeTimeCompact } from '$lib/format';
   import { getNodeAvailability } from '$lib/node-status';
   import { pinned } from '$lib/stores/pinned.svelte';
@@ -12,7 +11,6 @@
   import SyncStatusBadge from '$lib/components/SyncStatusBadge.svelte';
   import type { SessionSummary } from '$lib/generated/SessionSummary';
   import AlertCircleIcon from '@lucide/svelte/icons/alert-circle';
-  import BotIcon from '@lucide/svelte/icons/bot';
   import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
   import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
   import FolderGit2Icon from '@lucide/svelte/icons/folder-git-2';
@@ -21,7 +19,6 @@
   import PlusIcon from '@lucide/svelte/icons/plus';
   import SearchIcon from '@lucide/svelte/icons/search';
   import SettingsIcon from '@lucide/svelte/icons/settings';
-  import ShieldAlertIcon from '@lucide/svelte/icons/shield-alert';
 
   interface Props {
     onNavigate?: () => void;
@@ -155,15 +152,6 @@
       </div>
       <span class="text-sm">FlexAgent</span>
     </a>
-
-    <a
-      href="/"
-      onclick={handleLinkClick}
-      title="新規セッション"
-      class="hover:bg-accent text-muted-foreground hover:text-foreground flex size-7 items-center justify-center rounded-md border"
-    >
-      <PlusIcon class="size-4" />
-    </a>
   </div>
 
   <!-- クイックナビゲーション -->
@@ -231,34 +219,6 @@
     >
       <SearchIcon class="size-3.5" />
       <span>全文検索</span>
-    </a>
-
-    <a
-      href="/agents"
-      onclick={handleLinkClick}
-      class={cn(
-        'flex items-center gap-2 rounded-md px-2.5 py-1.5 font-medium transition-colors',
-        currentPath.startsWith('/agents')
-          ? 'bg-accent text-accent-foreground'
-          : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground'
-      )}
-    >
-      <BotIcon class="size-3.5" />
-      <span>エージェント管理</span>
-    </a>
-
-    <a
-      href="/audit"
-      onclick={handleLinkClick}
-      class={cn(
-        'flex items-center gap-2 rounded-md px-2.5 py-1.5 font-medium transition-colors',
-        currentPath.startsWith('/audit')
-          ? 'bg-accent text-accent-foreground'
-          : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground'
-      )}
-    >
-      <ShieldAlertIcon class="size-3.5" />
-      <span>監査ログ</span>
     </a>
 
     <a
@@ -400,21 +360,8 @@
     {/if}
   </div>
 
-  <!-- 下部フッター: 新規ボタン & 接続メニュー & ステータス -->
+  <!-- 下部フッター: 接続メニュー & ステータス -->
   <div class="border-t p-2 flex flex-col gap-2">
-    <Button
-      variant="outline"
-      size="sm"
-      class="w-full justify-center gap-1.5 text-xs"
-      onclick={() => {
-        handleLinkClick();
-        window.location.href = '/';
-      }}
-    >
-      <PlusIcon class="size-3.5" />
-      新規セッションを開始
-    </Button>
-
     <div class="flex items-center gap-1.5">
       <div class="flex-1 min-w-0">
         <ConnectionMenu class="w-full justify-between" />

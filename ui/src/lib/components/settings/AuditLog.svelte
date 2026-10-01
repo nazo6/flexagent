@@ -53,12 +53,9 @@
   };
 </script>
 
-<div class="mx-auto flex max-w-5xl flex-col gap-4 p-4 md:p-6">
-  <div class="flex items-center justify-between gap-2">
-    <div>
-      <h1 class="text-xl font-semibold">監査ログ</h1>
-      <p class="text-muted-foreground text-sm">記録先: <code>{roleLabel}</code> (新しい順)</p>
-    </div>
+<div class="flex flex-col gap-3">
+  <div class="flex flex-wrap items-center justify-between gap-2">
+    <p class="text-muted-foreground text-sm">記録先: <code>{roleLabel}</code> (新しい順)</p>
     <Button variant="outline" size="sm" disabled={loading} onclick={() => void load()}>
       <RefreshCwIcon />
       再読込

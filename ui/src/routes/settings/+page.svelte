@@ -1,5 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import AgentManager from '$lib/components/settings/AgentManager.svelte';
+  import AuditLog from '$lib/components/settings/AuditLog.svelte';
   import * as AlertDialog from '$lib/components/ui/alert-dialog';
   import { Badge } from '$lib/components/ui/badge';
   import { Button } from '$lib/components/ui/button';
@@ -7,6 +9,7 @@
   import * as Dialog from '$lib/components/ui/dialog';
   import { Input } from '$lib/components/ui/input';
   import { Label } from '$lib/components/ui/label';
+  import * as Tabs from '$lib/components/ui/tabs';
   import type { IssueNodeTokenResponse } from '$lib/generated/IssueNodeTokenResponse';
   import type { NodeTokenSummary } from '$lib/generated/NodeTokenSummary';
   import { sync } from '$lib/stores/app.svelte';
@@ -18,6 +21,9 @@
   import Trash2Icon from '@lucide/svelte/icons/trash-2';
 
   const isServer = $derived(sync.connection.roleHint === 'central_server');
+
+  /** 選択中の設定タブ。 */
+  let activeTab = $state('general');
 
   // --- ノードペアリング (中央サーバーのみ) ---
   let tokens = $state<NodeTokenSummary[]>([]);
@@ -114,98 +120,118 @@
   }
 </script>
 
-<div class="mx-auto flex max-w-3xl flex-col gap-4 p-4 md:p-6">
+<div class="mx-auto flex w-full max-w-4xl flex-col gap-4 p-4 md:p-6">
   <div>
     <h1 class="text-xl font-semibold">設定</h1>
-    <p class="text-muted-foreground text-sm">認証トークンとノードペアリングの管理</p>
+    <p class="text-muted-foreground text-sm">
+      認証トークン・ノードペアリング・エージェント・監査ログの管理
+    </p>
   </div>
 
-  <!-- クライアント認証トークン -->
-  <Card class="gap-3 p-4">
-    <div class="flex items-start gap-2">
-      <ShieldIcon class="text-muted-foreground mt-0.5 size-4" />
-      <div class="flex flex-1 flex-col gap-1">
-        <h2 class="font-medium">クライアント認証トークン</h2>
-        <p class="text-muted-foreground text-xs">
-          Web UI / CLI がこのバックエンドへ接続するための共通トークンです。再生成すると
-          旧トークン (Bearer / Cookie) は即時無効化され、他端末は再ログインが必要になります。
-          トークンの平文は表示できません (<code>~/.flexagent/auth_token</code> を参照)。
-        </p>
-        <div class="mt-1">
-          <Button variant="outline" size="sm" onclick={() => (rotateOpen = true)}>
-            <RefreshCwIcon />
-            トークンを再生成
-          </Button>
-        </div>
-      </div>
-    </div>
-  </Card>
+  <Tabs.Root bind:value={activeTab}>
+    <Tabs.List class="w-full max-w-xs">
+      <Tabs.Trigger value="general">全般</Tabs.Trigger>
+      <Tabs.Trigger value="agents">エージェント管理</Tabs.Trigger>
+      <Tabs.Trigger value="audit">監査ログ</Tabs.Trigger>
+    </Tabs.List>
 
-  <!-- ノードペアリング (中央サーバーのみ) -->
-  <Card class="gap-3 p-4">
-    <div class="flex items-start gap-2">
-      <KeyRoundIcon class="text-muted-foreground mt-0.5 size-4" />
-      <div class="flex flex-1 flex-col gap-2">
-        <div class="flex flex-wrap items-center justify-between gap-2">
-          <div>
-            <h2 class="font-medium">ノードペアリング</h2>
+    <Tabs.Content value="general" class="mt-2 flex flex-col gap-3">
+      <!-- クライアント認証トークン -->
+      <Card class="gap-3 p-4">
+        <div class="flex items-start gap-2">
+          <ShieldIcon class="text-muted-foreground mt-0.5 size-4" />
+          <div class="flex flex-1 flex-col gap-1">
+            <h2 class="font-medium">クライアント認証トークン</h2>
             <p class="text-muted-foreground text-xs">
-              <code>fxg daemon</code> を中央サーバーへ接続するためのノード個別トークン
-              (<code>~/.flexagent/node_token</code>) を発行・失効します。
+              Web UI / CLI がこのバックエンドへ接続するための共通トークンです。再生成すると
+              旧トークン (Bearer / Cookie) は即時無効化され、他端末は再ログインが必要になります。
+              トークンの平文は表示できません (<code>~/.flexagent/auth_token</code> を参照)。
             </p>
-          </div>
-          <div class="flex items-center gap-1.5">
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={!isServer || loadingTokens}
-              onclick={() => void loadTokens()}
-            >
-              <RefreshCwIcon />
-              再読込
-            </Button>
-            <Button size="sm" disabled={!isServer} onclick={() => (issueOpen = true)}>
-              トークン発行
-            </Button>
+            <div class="mt-1">
+              <Button variant="outline" size="sm" onclick={() => (rotateOpen = true)}>
+                <RefreshCwIcon />
+                トークンを再生成
+              </Button>
+            </div>
           </div>
         </div>
+      </Card>
 
-        {#if !isServer}
-          <p class="text-muted-foreground text-xs">
-            ノードトークンの管理は中央サーバー接続時のみ利用できます。現在はローカルノード
-            (<code>{sync.connection.origin}</code>) に接続しています。
-          </p>
-        {:else if tokens.length === 0}
-          <p class="text-muted-foreground text-xs">
-            {loadingTokens ? '読み込み中…' : '発行済みのノードトークンはありません。'}
-          </p>
-        {:else}
-          <ul class="flex list-none flex-col gap-1 p-0 text-xs">
-            {#each tokens as token (token.node_id)}
-              <li
-                class="hover:bg-muted/50 flex flex-wrap items-center gap-2 rounded-md border px-2 py-1.5"
-              >
-                <span class="font-medium">{token.node_id}</span>
-                <span class="text-muted-foreground font-mono">{token.token_prefix}…</span>
-                <Badge variant="outline" class="text-[10px]">発行済み</Badge>
+      <!-- ノードペアリング (中央サーバーのみ) -->
+      <Card class="gap-3 p-4">
+        <div class="flex items-start gap-2">
+          <KeyRoundIcon class="text-muted-foreground mt-0.5 size-4" />
+          <div class="flex flex-1 flex-col gap-2">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h2 class="font-medium">ノードペアリング</h2>
+                <p class="text-muted-foreground text-xs">
+                  <code>fxg daemon</code> を中央サーバーへ接続するためのノード個別トークン
+                  (<code>~/.flexagent/node_token</code>) を発行・失効します。
+                </p>
+              </div>
+              <div class="flex items-center gap-1.5">
                 <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  class="text-muted-foreground hover:text-destructive ml-auto"
-                  disabled={revokeBusy}
-                  onclick={() => (revokeTarget = token.node_id)}
-                  title="トークンを失効"
+                  variant="outline"
+                  size="sm"
+                  disabled={!isServer || loadingTokens}
+                  onclick={() => void loadTokens()}
                 >
-                  <Trash2Icon />
-                  <span class="sr-only">{token.node_id} のトークンを失効</span>
+                  <RefreshCwIcon />
+                  再読込
                 </Button>
-              </li>
-            {/each}
-          </ul>
-        {/if}
-      </div>
-    </div>
-  </Card>
+                <Button size="sm" disabled={!isServer} onclick={() => (issueOpen = true)}>
+                  トークン発行
+                </Button>
+              </div>
+            </div>
+
+            {#if !isServer}
+              <p class="text-muted-foreground text-xs">
+                ノードトークンの管理は中央サーバー接続時のみ利用できます。現在はローカルノード
+                (<code>{sync.connection.origin}</code>) に接続しています。
+              </p>
+            {:else if tokens.length === 0}
+              <p class="text-muted-foreground text-xs">
+                {loadingTokens ? '読み込み中…' : '発行済みのノードトークンはありません。'}
+              </p>
+            {:else}
+              <ul class="flex list-none flex-col gap-1 p-0 text-xs">
+                {#each tokens as token (token.node_id)}
+                  <li
+                    class="hover:bg-muted/50 flex flex-wrap items-center gap-2 rounded-md border px-2 py-1.5"
+                  >
+                    <span class="font-medium">{token.node_id}</span>
+                    <span class="text-muted-foreground font-mono">{token.token_prefix}…</span>
+                    <Badge variant="outline" class="text-[10px]">発行済み</Badge>
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      class="text-muted-foreground hover:text-destructive ml-auto"
+                      disabled={revokeBusy}
+                      onclick={() => (revokeTarget = token.node_id)}
+                      title="トークンを失効"
+                    >
+                      <Trash2Icon />
+                      <span class="sr-only">{token.node_id} のトークンを失効</span>
+                    </Button>
+                  </li>
+                {/each}
+              </ul>
+            {/if}
+          </div>
+        </div>
+      </Card>
+    </Tabs.Content>
+
+    <Tabs.Content value="agents" class="mt-2 flex flex-col gap-3">
+      <AgentManager />
+    </Tabs.Content>
+
+    <Tabs.Content value="audit" class="mt-2 flex flex-col gap-3">
+      <AuditLog />
+    </Tabs.Content>
+  </Tabs.Root>
 </div>
 
 <!-- ノードトークン発行 -->
