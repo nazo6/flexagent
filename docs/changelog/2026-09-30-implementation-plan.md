@@ -940,23 +940,38 @@
         ジョブ (fmt, clippy, sqlx, ts-rs, ui, test (ubuntu / macos /
         windows-latest))
         が完全成功。
-    - **Stage 3 (UI/UX & 同期堅牢化 - 未着手 / 残項目)**:
-      - **Step 3.1**: OpenCode2 モデル選択の Composer UI サポート
-        (`ui/src/lib/components/chat/Composer.svelte` でオブジェクト形式の
-        config
-        option `{ providerID, id, name }` をサポートし、JSON
-        文字列化と復元を行い `set_config` を発行)。
-      - **Step 3.2**: DB リセット時カーソル不整合防御
-        (`ui/src/lib/stores/sync.svelte.ts` / サーバー・ノード WS で DB
-        再作成・リセット時に cursor 不整合を検知して 0 または最新から再同期)。
-      - **Step 3.3**: TerminalView のセッション切り替え時再接続
-        (`ui/src/lib/components/terminal/TerminalView.svelte` で `$effect`
-        による
-        `sessionId` 監視と WS 再接続)。
-    - **Stage 4 (スキーマ対称性の完全化 - 未着手 / 残項目)**:
-      - **Step 4.1**: `sessions` テーブルへの `available_modes_json` 追加
-        (SQLite マイグレーション、DB/Protocol/UI 型、および `.sqlx`
-        クエリメタデータの完全同期)。
+    - **Stage 3 (UI/UX & 同期堅牢化 - 完了)**:
+      - **Step 3.1**: OpenCode2 モデル選択の Composer UI サポート。
+        `ui/src/lib/config-options.ts` を追加し、オブジェクト形式の config
+        option (`{ providerID, id, name }`) を `name` ラベル付きの選択肢として
+        Select に表示する (value は JSON 文字列化、`set_config`
+        送信時に元のオブジェクトへ復元)。Composer は文字列化・復元を共有
+        ヘルパー経由で行い、Vitest (`config-options.test.ts`) を追加。
+      - **Step 3.2**: DB リセット時カーソル不整合防御。`fxg-db` に
+        `latest_cursor` を追加し、共通 Client WS
+        ハンドラ (`fxg-server` / `fxg-node`) は `Subscribe { since_cursor }`
+        がストア末尾より先を指す場合 (DB 再作成・リセット) に 0
+        から全量リプレイする。UI (`sync.svelte.ts`) はバッチカーソルの
+        巻き戻りを検知したらタイムラインを破棄して REST 投影を再取得し、
+        新しいストアとして再同期する (`ui/src/lib/sync/cursor.ts` + Vitest、
+        ノード HTTP の WS テスト追加)。
+      - **Step 3.3**: TerminalView のセッション切り替え時再接続。`$effect` で
+        `sessionId` の変化を監視して画面を消去し、PTY WS
+        を新しいセッションへ接続し直す (`ITerminalAdapter.clear()` を追加)。
+        置き換え済みの古い接続の open / message / close / error
+        を無視するガードを追加し、手動再接続時の状態競合も解消。
+    - **Stage 4 (スキーマ対称性の完全化 - 完了)**:
+      - **Step 4.1**: `sessions` テーブルへの `available_modes_json` 追加。
+        マイグレーション `0002_sessions_available_modes.sql`、
+        `CapabilitiesUpdated` 投影 (空配列は既存値を維持する `COALESCE` 防護)、
+        投影再構築時のリセット、および `.sqlx` クエリメタデータを同期した。
+        `SessionSummary` / UI 型は capability 系 JSON を API
+        に公開しない方針のため変更なし (UI はイベントログから復元する)。
+        `fxg-db` テストで投影・部分更新・全量再構築の一致を検証。
+      - ✅ **CI 検証通過**: GitHub Actions CI (run `36808080725`) にて全 8
+        ジョブ (fmt, clippy, sqlx, ts-rs, ui, test (ubuntu / macos /
+        windows-latest)) が完全成功 (Stage 3 の3コミット + Stage 4 の1コミットを
+        まとめてプッシュして検証)。
 
 ---
 
