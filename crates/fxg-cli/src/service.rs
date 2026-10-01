@@ -370,7 +370,7 @@ fn systemctl(args: &[&str]) -> Result<()> {
 }
 
 #[cfg(target_os = "linux")]
-fn status(server: bool, _exe: &std::path::Path) -> Result<()> {
+async fn status(server: bool, _exe: &std::path::Path) -> Result<()> {
     let name = service_name(server);
     let unit = unit_path(name)?;
     let active = Command::new("systemctl")
@@ -387,7 +387,7 @@ fn status(server: bool, _exe: &std::path::Path) -> Result<()> {
     println!("unit:      {}", unit.display());
     println!("installed: {}", yes_no(enabled == "enabled"));
     println!("running:   {}", active);
-    println!("probe:     {}", yes_no(probe_running(server)));
+    println!("probe:     {}", yes_no(probe_running(server).await));
     Ok(())
 }
 
