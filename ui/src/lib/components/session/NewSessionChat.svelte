@@ -5,10 +5,13 @@
   import { Input } from '$lib/components/ui/input';
   import { Label } from '$lib/components/ui/label';
   import NodeStatusBadge from '$lib/components/NodeStatusBadge.svelte';
+  import type { ProvisionerSummary } from '$lib/generated/ProvisionerSummary';
   import { getNodeAvailability } from '$lib/node-status';
   import { sync } from '$lib/stores/app.svelte';
   import { toast } from 'svelte-sonner';
+  import { onMount } from 'svelte';
   import BotIcon from '@lucide/svelte/icons/bot';
+  import BoxIcon from '@lucide/svelte/icons/box';
   import CornerDownLeftIcon from '@lucide/svelte/icons/corner-down-left';
   import FolderGit2Icon from '@lucide/svelte/icons/folder-git-2';
   import PlayIcon from '@lucide/svelte/icons/play';
@@ -17,9 +20,13 @@
   import SparklesIcon from '@lucide/svelte/icons/sparkles';
 
   type PathMode = 'existing' | 'new_worktree';
+  type RunTarget = 'node' | 'provisioner';
 
   let selectedProjectId = $state('');
   let nodeId = $state('');
+  let runTarget = $state<RunTarget>('node');
+  let provisionerName = $state('');
+  const provisioners = $state<ProvisionerSummary[]>([]);
   let agentId = $state('');
   let customAgent = $state('');
   let pathMode = $state<PathMode>('existing');
@@ -39,6 +46,22 @@
   const nodes = $derived(sync.nodes);
   const selectedNode = $derived(nodes.find((n) => n.node_id === nodeId) ?? null);
   const installedAgents = $derived(selectedNode?.installed_agents ?? []);
+
+  // 一時VMプロビジョナー定義 (中央サーバー接続時のみ取得できる)
+  onMount(async () => {
+    try {
+      const list = await sync.connection.client.provisioners();
+      provisioners.splice(0, provisioners.length, ...list);
+      if (list.length > 0 && provisionerName === '') provisionerName = list[0].name;
+    } catch {
+      // ローカルノード接続時はプロビジョナーが存在しないため無視する
+    }
+  });
+
+  const isProvisionerMode = $derived(runTarget === 'provisioner');
+  const selectedProvisioner = $derived(
+    provisioners.find((p) => p.name === provisionerName) ?? provisioners[0] ?? null
+  );
 
   $effect(() => {
     const urlProj = page.url.searchParams.get('project');
@@ -76,31 +99,40 @@
   });
 
   const effectiveAgent = $derived(
-    installedAgents.length > 0 ? (agentId || installedAgents[0]) : customAgent.trim()
+    isProvisionerMode
+      ? customAgent.trim() || 'opencode2'
+      : installedAgents.length > 0
+        ? agentId || installedAgents[0]
+        : customAgent.trim()
   );
 
   const canSubmit = $derived(
     !busy &&
       selectedProject !== null &&
-      nodeId !== '' &&
       effectiveAgent !== '' &&
-      (pathMode === 'existing' ? localPath !== '' : branch.trim() !== '')
+      (isProvisionerMode
+        ? selectedProvisioner !== null
+        : nodeId !== '' && (pathMode === 'existing' ? localPath !== '' : branch.trim() !== ''))
   );
 
   async function handleStartSession(initialPrompt?: string) {
     if (!canSubmit || !selectedProject) return;
     busy = true;
     const promptToSend = (initialPrompt ?? promptText).trim();
+    const useProvisioner = isProvisionerMode && selectedProvisioner !== null;
 
     try {
       const response = await sync.connection.client.createSession({
         command_id: crypto.randomUUID(),
         project_id: selectedProject.project_id,
-        node_id: nodeId,
-        provisioner: null,
-        local_path: pathMode === 'existing' ? localPath : null,
-        worktree:
-          pathMode === 'new_worktree'
+        node_id: useProvisioner ? null : nodeId,
+        provisioner: useProvisioner ? selectedProvisioner.name : null,
+        local_path: useProvisioner || pathMode === 'new_worktree' ? null : localPath,
+        worktree: useProvisioner
+          ? branch.trim() === ''
+            ? null
+            : { branch: branch.trim(), base_branch: null, new_path: null }
+          : pathMode === 'new_worktree'
             ? {
                 branch: branch.trim(),
                 base_branch: baseBranch.trim() === '' ? null : baseBranch.trim(),
@@ -112,7 +144,11 @@
         fork: null
       });
 
-      toast.success('セッションを開始しました');
+      toast.success(
+        useProvisioner
+          ? '一時VMの起動を開始しました (ブートストラップの進捗はセッション画面に表示されます)'
+          : 'セッションを開始しました'
+      );
       await sync.refreshSessions();
       await goto(`/sessions/${response.session_id}`);
     } catch (error) {
@@ -176,20 +212,44 @@
 
         <div class="flex flex-col gap-1">
           <Label class="text-muted-foreground text-xs flex items-center gap-1.5">
-            <ServerIcon class="size-3.5" />
-            実行ノード
+            {#if isProvisionerMode}
+              <BoxIcon class="size-3.5" />
+              一時VMプロビジョナー
+            {:else}
+              <ServerIcon class="size-3.5" />
+              実行ノード
+            {/if}
           </Label>
-          <select
-            bind:value={nodeId}
-            class="border-input bg-background focus-visible:ring-ring/40 h-8 rounded-md border px-2 text-xs outline-none focus-visible:ring-1"
-          >
-            {#each nodes as node (node.node_id)}
-              {@const avail = getNodeAvailability(node)}
-              <option value={node.node_id}>
-                {node.name} ({avail.statusText})
-              </option>
-            {/each}
-          </select>
+          {#if isProvisionerMode}
+            {#if provisioners.length > 0}
+              <select
+                bind:value={provisionerName}
+                class="border-input bg-background focus-visible:ring-ring/40 h-8 rounded-md border px-2 text-xs outline-none focus-visible:ring-1"
+              >
+                {#each provisioners as provisioner (provisioner.name)}
+                  <option value={provisioner.name}>
+                    {provisioner.description ?? provisioner.name}
+                  </option>
+                {/each}
+              </select>
+            {:else}
+              <span class="text-muted-foreground text-xs leading-8">
+                プロビジョナー未定義 (中央サーバーの config.toml で定義してください)
+              </span>
+            {/if}
+          {:else}
+            <select
+              bind:value={nodeId}
+              class="border-input bg-background focus-visible:ring-ring/40 h-8 rounded-md border px-2 text-xs outline-none focus-visible:ring-1"
+            >
+              {#each nodes as node (node.node_id)}
+                {@const avail = getNodeAvailability(node)}
+                <option value={node.node_id}>
+                  {node.name} ({avail.statusText})
+                </option>
+              {/each}
+            </select>
+          {/if}
         </div>
 
         <div class="flex flex-col gap-1">
@@ -197,7 +257,7 @@
             <BotIcon class="size-3.5" />
             エージェント
           </Label>
-          {#if installedAgents.length > 0}
+          {#if !isProvisionerMode && installedAgents.length > 0}
             <select
               bind:value={agentId}
               class="border-input bg-background focus-visible:ring-ring/40 h-8 rounded-md border px-2 text-xs outline-none focus-visible:ring-1"
@@ -209,11 +269,42 @@
           {:else}
             <Input
               bind:value={customAgent}
-              placeholder="opencode2 / acp"
+              placeholder={isProvisionerMode ? 'opencode2 (一時VMに自動導入)' : 'opencode2 / acp'}
               class="h-8 text-xs"
             />
           {/if}
         </div>
+      </div>
+
+      <div class="flex items-center gap-1.5 text-xs">
+        <span class="text-muted-foreground">実行環境:</span>
+        <button
+          type="button"
+          class="rounded-full border px-2.5 py-0.5 transition-colors {runTarget === 'node'
+            ? 'bg-primary text-primary-foreground border-primary'
+            : 'text-muted-foreground hover:bg-muted'}"
+          onclick={() => (runTarget = 'node')}
+        >
+          常駐ノード
+        </button>
+        <button
+          type="button"
+          class="rounded-full border px-2.5 py-0.5 transition-colors {isProvisionerMode
+            ? 'bg-primary text-primary-foreground border-primary'
+            : 'text-muted-foreground hover:bg-muted'}"
+          onclick={() => (runTarget = 'provisioner')}
+          disabled={provisioners.length === 0}
+          title={provisioners.length === 0
+            ? 'プロビジョナーは中央サーバーの config.toml で定義します'
+            : '使い捨ての隔離環境 (Docker / Incus / Colab 等) を起動します'}
+        >
+          一時VM (隔離)
+        </button>
+        {#if isProvisionerMode}
+          <span class="text-muted-foreground">
+            · 使い捨て環境で実行し、終了時に git bundle を退避します
+          </span>
+        {/if}
       </div>
 
       <div>
@@ -228,45 +319,52 @@
 
         {#if showAdvanced}
           <div class="border-t pt-3 mt-2 flex flex-col gap-3">
-            <div class="flex gap-4 text-xs">
-              <label class="flex items-center gap-1.5 cursor-pointer">
-                <input type="radio" bind:group={pathMode} value="existing" />
-                既存のリポジトリ
-              </label>
-              <label class="flex items-center gap-1.5 cursor-pointer">
-                <input type="radio" bind:group={pathMode} value="new_worktree" />
-                新規 Worktree を作成 (独立ブランチ)
-              </label>
-            </div>
-
-            {#if pathMode === 'existing'}
-              {#if nodePaths.length > 0}
-                <select
-                  bind:value={localPath}
-                  class="border-input bg-background h-8 rounded-md border px-2 text-xs"
-                >
-                  {#each nodePaths as opt (opt.path)}
-                    <option value={opt.path}>{opt.label}</option>
-                  {/each}
-                </select>
-              {:else}
-                <Input
-                  bind:value={localPath}
-                  placeholder="絶対パスを入力 (例: /home/user/project or C:\repo)"
-                  class="h-8 text-xs"
-                />
-              {/if}
-            {:else}
-              <div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                <div class="flex flex-col gap-1">
-                  <Label class="text-xs">新ブランチ名</Label>
-                  <Input bind:value={branch} placeholder="feat/new-task" class="h-8 text-xs" />
-                </div>
-                <div class="flex flex-col gap-1">
-                  <Label class="text-xs">起点ブランチ (任意)</Label>
-                  <Input bind:value={baseBranch} placeholder="main" class="h-8 text-xs" />
-                </div>
+            {#if isProvisionerMode}
+              <div class="flex flex-col gap-1">
+                <Label class="text-xs">クローンするブランチ (任意)</Label>
+                <Input bind:value={branch} placeholder="main (省略時はリモートの既定ブランチ)" class="h-8 text-xs" />
               </div>
+            {:else}
+              <div class="flex gap-4 text-xs">
+                <label class="flex items-center gap-1.5 cursor-pointer">
+                  <input type="radio" bind:group={pathMode} value="existing" />
+                  既存のリポジトリ
+                </label>
+                <label class="flex items-center gap-1.5 cursor-pointer">
+                  <input type="radio" bind:group={pathMode} value="new_worktree" />
+                  新規 Worktree を作成 (独立ブランチ)
+                </label>
+              </div>
+
+              {#if pathMode === 'existing'}
+                {#if nodePaths.length > 0}
+                  <select
+                    bind:value={localPath}
+                    class="border-input bg-background h-8 rounded-md border px-2 text-xs"
+                  >
+                    {#each nodePaths as opt (opt.path)}
+                      <option value={opt.path}>{opt.label}</option>
+                    {/each}
+                  </select>
+                {:else}
+                  <Input
+                    bind:value={localPath}
+                    placeholder="絶対パスを入力 (例: /home/user/project or C:\repo)"
+                    class="h-8 text-xs"
+                  />
+                {/if}
+              {:else}
+                <div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  <div class="flex flex-col gap-1">
+                    <Label class="text-xs">新ブランチ名</Label>
+                    <Input bind:value={branch} placeholder="feat/new-task" class="h-8 text-xs" />
+                  </div>
+                  <div class="flex flex-col gap-1">
+                    <Label class="text-xs">起点ブランチ (任意)</Label>
+                    <Input bind:value={baseBranch} placeholder="main" class="h-8 text-xs" />
+                  </div>
+                </div>
+              {/if}
             {/if}
           </div>
         {/if}
@@ -285,7 +383,16 @@
 
       <div class="flex items-center justify-between border-t pt-2.5">
         <div class="flex items-center gap-2">
-          {#if selectedNode}
+          {#if isProvisionerMode}
+            {#if selectedProvisioner}
+              <span class="text-muted-foreground text-xs">
+                {selectedProvisioner.name}
+                {#if selectedProvisioner.idle_timeout_secs}
+                  · idle {Math.round(selectedProvisioner.idle_timeout_secs / 60)}分で自動破棄
+                {/if}
+              </span>
+            {/if}
+          {:else if selectedNode}
             <NodeStatusBadge node={selectedNode} showNodeName={true} />
           {/if}
         </div>

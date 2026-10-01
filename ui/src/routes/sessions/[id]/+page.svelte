@@ -40,7 +40,13 @@
     })
   );
   const capabilities = $derived(capabilitiesFromEvents(timeline.events));
-  const bootstrapLines = $derived(bootstrapLogLines(timeline.events));
+  // 永続イベント (ターン完了後に同期された BootstrapLog) と、
+  // サーバーが一時VMから配信するエフェメラルログを統合する
+  const bootstrapLines = $derived.by(() => {
+    const persisted = bootstrapLogLines(timeline.events);
+    const live = sync.bootstrapLinesFor(sessionId);
+    return live.length === 0 ? persisted : [...new Set([...persisted, ...live])];
+  });
 
   let chatContainer = $state<HTMLDivElement | null>(null);
   let loadedFor = $state<string | null>(null);

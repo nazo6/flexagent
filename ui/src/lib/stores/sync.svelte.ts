@@ -64,6 +64,13 @@ export class SyncStore {
   activeSessionId = $state<string | null>(null);
   /** 送信済みで `CommandResult` 未着のプロンプト (Pending Queue)。 */
   pendingPrompts = $state(new Map<string, PendingPrompt>());
+  /**
+   * 一時VMブートストラップの進捗ログ (エフェメラル。永続化されない)。
+   *
+   * ノードの `node.db` が存在する前の `stderr` 出力をサーバーが
+   * `ServerWsMessage::BootstrapLog` として配信する。再接続では復元されない。
+   */
+  bootstrapLogs = $state(new Map<string, string[]>());
 
   #timelines = $state(new Map<string, SessionTimeline>());
   #ws: WebSocket | null = null;
@@ -236,6 +243,18 @@ export class SyncStore {
     return timeline;
   }
 
+  /** エフェメラルなブートストラップログ (最新順で最大 500 行)。 */
+  bootstrapLinesFor(sessionId: string): string[] {
+    return this.bootstrapLogs.get(sessionId) ?? [];
+  }
+
+  #appendBootstrapLog(sessionId: string, line: string): void {
+    const current = this.bootstrapLogs.get(sessionId) ?? [];
+    const next = [...current, line];
+    if (next.length > 500) next.splice(0, next.length - 500);
+    this.bootstrapLogs.set(sessionId, next);
+  }
+
   /** セッションを開く (WS の優先配信ヒントを更新する)。 */
   setActiveSession(sessionId: string | null): void {
     this.activeSessionId = sessionId;
@@ -377,6 +396,9 @@ export class SyncStore {
       case "live_stream_delta":
         this.timelineFor(message.session_id).applyDelta(message.delta);
         break;
+      case "bootstrap_log":
+        this.#appendBootstrapLog(message.session_id, message.line);
+        break;
       case "command_result":
         this.#resolveCommand(message);
         break;
@@ -410,6 +432,7 @@ export class SyncStore {
         cursor,
       });
       this.#timelines.clear();
+      this.bootstrapLogs.clear();
       void this.refreshAll();
     }
 

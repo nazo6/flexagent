@@ -336,14 +336,14 @@ async fn phase3_session_and_inbox_commands_roundtrip_through_daemon() {
         "got: {stderr}"
     );
 
-    // --- fxg run --provisioner は Phase 6 まで未実装 ---
+    // --- fxg run --provisioner は中央サーバー必須 (未設定時は設定エラー) ---
     let output = env.run(
         &["run", "opencode", "--provisioner", "colab-pro"],
         Some(&repo),
     );
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("Phase 6"), "got: {stderr}");
+    assert!(stderr.contains("central_server_url"), "got: {stderr}");
 
     // --- 起動に失敗するエージェントでもセッションは記録される ---
     let output = env.run(&["run", "broken", "--detach"], Some(&repo));
