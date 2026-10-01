@@ -328,6 +328,70 @@ describe("metadata helpers", () => {
       availableCommands: [{ name: "review" }],
     });
   });
+
+  it("merges partial capabilities updates without losing previously emitted fields", () => {
+    const events = [
+      // 1) 初期 capabilities (modes と config_options)
+      makeEvent(1, {
+        type: "capabilities_updated",
+        data: {
+          current_mode: "ask",
+          available_modes: [
+            { mode_id: "ask", name: "Ask", description: null },
+            { mode_id: "code", name: "Code", description: null },
+          ],
+          available_commands: [],
+          config_options: [
+            {
+              key: "model",
+              name: "Model",
+              current_value: "gpt-4",
+              options: ["gpt-4", "gpt-3.5"],
+            },
+          ],
+        },
+      }),
+      // 2) コマンドのみの部分更新 (他が空配列)
+      makeEvent(2, {
+        type: "capabilities_updated",
+        data: {
+          current_mode: null,
+          available_modes: [],
+          available_commands: [{ name: "review", description: "コードレビュー", input_hint: null }],
+          config_options: [],
+        },
+      }),
+      // 3) モード変更のみの部分更新 (他が空配列)
+      makeEvent(3, {
+        type: "capabilities_updated",
+        data: {
+          current_mode: "code",
+          available_modes: [],
+          available_commands: [],
+          config_options: [],
+        },
+      }),
+    ];
+
+    const caps = capabilitiesFromEvents(events);
+    expect(caps).not.toBeNull();
+    expect(caps).toEqual({
+      currentMode: "code",
+      availableModes: [
+        { mode_id: "ask", name: "Ask", description: null },
+        { mode_id: "code", name: "Code", description: null },
+      ],
+      availableCommands: [{ name: "review", description: "コードレビュー", input_hint: null }],
+      configOptions: [
+        {
+          key: "model",
+          name: "Model",
+          current_value: "gpt-4",
+          options: ["gpt-4", "gpt-3.5"],
+        },
+      ],
+    });
+  });
 });
 
 describe("pending prompts", () => {

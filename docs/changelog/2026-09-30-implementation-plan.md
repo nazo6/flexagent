@@ -920,6 +920,22 @@
         秒のタイムアウト (`tokio::time::timeout`) を適用。テストを追加。
       - ✅ **CI 検証通過**: GitHub Actions CI (run `36803865678`) にて全 8
         ジョブが完全成功。
+    - **Stage 2 (Capabilities & エージェント連携基盤 - 完了)**:
+      - **Step 2.1**: `fxg-acp/src/acp.rs` で `SessionCapabilitiesState`
+        をメモリ保持し、差分更新通知 (`AvailableCommandsUpdate`,
+        `CurrentModeUpdate`, `ConfigOptionUpdate`) 受信時に既存 capabilities
+        をマージした完全な `CapabilitiesUpdated`
+        を発行するよう改善。`fxg-db/src/events.rs` の `apply_projections`
+        で空配列による上書きを防ぐ `COALESCE`
+        防護を追加。`ui/src/lib/sync/reducer.ts` の `capabilitiesFromEvents`
+        を逆順走査マージに改修。単体テスト追加。
+      - **Step 2.2**: `fxg-acp/src/acp.rs` の `map_config_option` で
+        `SessionConfigSelectOptions::Grouped`
+        の選択肢をフラットに展開する処理を追加。単体テスト追加。
+      - **Step 2.3**: `fxg-acp/src/acp.rs`
+        で外部エージェントプロセスを起動する際、`ProcessTreeGuard` で Windows
+        Job Object にバインドし、エージェント stderr
+        をログポンプに流すとともに、親終了時・セッション終了時の孫プロセスを含めた確実な終了を保証。
 
 ---
 

@@ -485,18 +485,50 @@ export interface SessionCapabilities {
 
 /** イベント列から最新の能力情報を復元する (無ければ null)。 */
 export function capabilitiesFromEvents(events: SessionEventEnvelope[]): SessionCapabilities | null {
+  let found = false;
+  let currentMode: string | null = null;
+  let availableModes: ModeInfo[] = [];
+  let availableCommands: CommandInfo[] = [];
+  let configOptions: ConfigOptionInfo[] = [];
+
+  let hasMode = false;
+  let hasModes = false;
+  let hasCommands = false;
+  let hasOptions = false;
+
   for (let i = events.length - 1; i >= 0; i -= 1) {
     const payload = events[i].payload;
     if (payload.type === "capabilities_updated") {
-      return {
-        currentMode: payload.data.current_mode,
-        availableModes: payload.data.available_modes,
-        availableCommands: payload.data.available_commands,
-        configOptions: payload.data.config_options,
-      };
+      found = true;
+      if (!hasMode && payload.data.current_mode !== null) {
+        currentMode = payload.data.current_mode;
+        hasMode = true;
+      }
+      if (!hasModes && payload.data.available_modes.length > 0) {
+        availableModes = payload.data.available_modes;
+        hasModes = true;
+      }
+      if (!hasCommands && payload.data.available_commands.length > 0) {
+        availableCommands = payload.data.available_commands;
+        hasCommands = true;
+      }
+      if (!hasOptions && payload.data.config_options.length > 0) {
+        configOptions = payload.data.config_options;
+        hasOptions = true;
+      }
+      if (hasMode && hasModes && hasCommands && hasOptions) {
+        break;
+      }
     }
   }
-  return null;
+
+  if (!found) return null;
+  return {
+    currentMode,
+    availableModes,
+    availableCommands,
+    configOptions,
+  };
 }
 
 /** イベント列から最新の `status_changed` を復元する (無ければ null)。 */

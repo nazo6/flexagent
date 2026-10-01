@@ -371,15 +371,23 @@ pub(crate) async fn apply_projections(
             config_options,
             ..
         } => {
-            let available_commands_json = serde_json::to_string(available_commands)?;
-            let config_options_json = serde_json::to_string(config_options)?;
-            // current_mode が None の場合は既存値を維持する
+            let available_commands_json = if available_commands.is_empty() {
+                None
+            } else {
+                Some(serde_json::to_string(available_commands)?)
+            };
+            let config_options_json = if config_options.is_empty() {
+                None
+            } else {
+                Some(serde_json::to_string(config_options)?)
+            };
+            // current_mode / available_commands / config_options が未指定・空配列の場合は既存値を維持する
             sqlx::query!(
                 r#"
                 UPDATE sessions
                    SET current_mode = COALESCE(?, current_mode),
-                       available_commands_json = ?,
-                       config_options_json = ?,
+                       available_commands_json = COALESCE(?, available_commands_json),
+                       config_options_json = COALESCE(?, config_options_json),
                        updated_at = MAX(updated_at, ?),
                        last_node_seq = MAX(last_node_seq, ?)
                  WHERE session_id = ?

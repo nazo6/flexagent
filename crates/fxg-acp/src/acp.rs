@@ -36,7 +36,8 @@ use agent_client_protocol::schema::v1::{
 };
 use agent_client_protocol::util::MatchDispatch;
 use agent_client_protocol::{
-    AcpAgent, AcpAgentConfig, ActiveSession, Agent, Client, ConnectionTo, SessionMessage,
+    AcpAgent, AcpAgentConfig, ActiveSession, Agent, ByteStreams, Client, ConnectionTo,
+    SessionMessage,
 };
 use anyhow::{Context, anyhow};
 use async_trait::async_trait;
@@ -515,9 +516,26 @@ async fn run_acp_session(params: AcpSessionTaskParams) -> Result<(), agent_clien
             agent_client_protocol::on_receive_request!(),
         );
 
+    // 外部エージェントプロセスの起動とプロセスツリー管理 (Windows: Job Object)
+    let (child_stdin, child_stdout, child_stderr, mut child) = agent
+        .spawn_process()
+        .map_err(agent_client_protocol::Error::into_internal_error)?;
+
+    let _process_guard = fxg_pty::ProcessTreeGuard::new()
+        .map_err(agent_client_protocol::Error::into_internal_error)?;
+    #[cfg(windows)]
+    {
+        use std::os::windows::io::AsRawHandle;
+        let _ = _process_guard.attach_raw_handle(child.as_raw_handle());
+    }
+
+    // エージェント stderr をデーモンのログへ流す (パイプ詰まり防止)
+    spawn_acp_stderr_pump(child_stderr);
+
     let mut ready_tx = Some(ready_tx);
-    builder
-        .connect_with(agent, async move |cx: ConnectionTo<Agent>| {
+    let transport = ByteStreams::new(child_stdin, child_stdout);
+    let run_result = builder
+        .connect_with(transport, async move |cx: ConnectionTo<Agent>| {
             // 1) initialize (fs 読み書き + terminal をサポート宣言)
             let capabilities = ClientCapabilities::new()
                 .fs(FileSystemCapabilities::new()
@@ -558,17 +576,21 @@ async fn run_acp_session(params: AcpSessionTaskParams) -> Result<(), agent_clien
 
             // 4) モード・スラッシュコマンド・設定項目を配信
             let (modes, commands, config_options) = session_capabilities(&session);
-            if !modes.is_empty() || !commands.is_empty() || !config_options.is_empty() {
-                let _ = events.send(DriverEvent::Event(
-                    UnifiedEventPayload::CapabilitiesUpdated {
-                        current_mode: session
-                            .modes()
-                            .map(|state| state.current_mode_id.to_string()),
-                        available_modes: modes,
-                        available_commands: commands,
-                        config_options,
-                    },
-                ));
+            let current_mode = session
+                .modes()
+                .map(|state| state.current_mode_id.to_string());
+            let mut capabilities_state = SessionCapabilitiesState {
+                current_mode: current_mode.clone(),
+                available_modes: modes.clone(),
+                available_commands: commands.clone(),
+                config_options: config_options.clone(),
+            };
+            if !modes.is_empty()
+                || !commands.is_empty()
+                || !config_options.is_empty()
+                || current_mode.is_some()
+            {
+                let _ = events.send(DriverEvent::Event(capabilities_state.to_payload()));
             }
             let _ = events.send(DriverEvent::Event(UnifiedEventPayload::StatusChanged {
                 status: fxg_protocol::common::SessionStatus::Idle,
@@ -617,12 +639,15 @@ async fn run_acp_session(params: AcpSessionTaskParams) -> Result<(), agent_clien
                                 SessionMessage::SessionMessage(dispatch) => {
                                     let acc = &mut accumulator;
                                     let ev = &events;
+                                    let caps = &mut capabilities_state;
                                     MatchDispatch::new(dispatch)
                                         .if_notification(
                                             async move |notification: SessionNotification| {
-                                                for event in
-                                                    map_session_update(notification.update, acc)
-                                                {
+                                                for event in map_session_update(
+                                                    notification.update,
+                                                    acc,
+                                                    caps,
+                                                ) {
                                                     let _ = ev.send(event);
                                                 }
                                                 Ok(())
@@ -640,10 +665,31 @@ async fn run_acp_session(params: AcpSessionTaskParams) -> Result<(), agent_clien
                 }
             }
 
-            // ループを抜ける = 接続シャットダウン → エージェントプロセスの kill
+            // ループを抜ける = 接続シャットダウン
             Ok(())
         })
-        .await
+        .await;
+
+    // 接続完了後、プロセスを確実に終了させる
+    drop(child.kill());
+    let _ = child.status().await;
+
+    run_result
+}
+
+/// エージェントプロセスの stderr をデーモンのログ (`debug`) へ流す。
+fn spawn_acp_stderr_pump<R>(reader: R)
+where
+    R: futures_util::io::AsyncRead + Unpin + Send + 'static,
+{
+    use futures_util::AsyncBufReadExt;
+    use futures_util::StreamExt;
+    tokio::spawn(async move {
+        let mut lines = futures_util::io::BufReader::new(reader).lines();
+        while let Some(Ok(line)) = lines.next().await {
+            tracing::debug!(target: "fxg_acp::acp", "acp agent: {line}");
+        }
+    });
 }
 
 /// セッションのモード・コマンド・設定項目を取り出す。
@@ -685,6 +731,13 @@ fn map_config_option(option: &SessionConfigOption) -> ConfigOptionInfo {
                     .iter()
                     .map(|value| serde_json::Value::String(value.value.to_string()))
                     .collect(),
+                agent_client_protocol::schema::v1::SessionConfigSelectOptions::Grouped(groups) => {
+                    groups
+                        .iter()
+                        .flat_map(|group| &group.options)
+                        .map(|value| serde_json::Value::String(value.value.to_string()))
+                        .collect()
+                }
                 _ => Vec::new(),
             },
         ),
@@ -702,6 +755,26 @@ fn map_config_option(option: &SessionConfigOption) -> ConfigOptionInfo {
         name: option.name.clone(),
         current_value,
         options,
+    }
+}
+
+/// セッションの能力情報 (モード・コマンド・設定項目) の追跡状態。
+#[derive(Debug, Default, Clone)]
+struct SessionCapabilitiesState {
+    current_mode: Option<String>,
+    available_modes: Vec<ModeInfo>,
+    available_commands: Vec<CommandInfo>,
+    config_options: Vec<ConfigOptionInfo>,
+}
+
+impl SessionCapabilitiesState {
+    fn to_payload(&self) -> UnifiedEventPayload {
+        UnifiedEventPayload::CapabilitiesUpdated {
+            current_mode: self.current_mode.clone(),
+            available_modes: self.available_modes.clone(),
+            available_commands: self.available_commands.clone(),
+            config_options: self.config_options.clone(),
+        }
     }
 }
 
@@ -790,6 +863,7 @@ impl StreamingAccumulator {
 fn map_session_update(
     update: SessionUpdate,
     accumulator: &mut StreamingAccumulator,
+    capabilities: &mut SessionCapabilitiesState,
 ) -> Vec<DriverEvent> {
     let mut events = Vec::new();
     match update {
@@ -868,38 +942,20 @@ fn map_session_update(
                     }),
                 })
                 .collect();
-            events.push(DriverEvent::Event(
-                UnifiedEventPayload::CapabilitiesUpdated {
-                    current_mode: None,
-                    available_modes: Vec::new(),
-                    available_commands: commands,
-                    config_options: Vec::new(),
-                },
-            ));
+            capabilities.available_commands = commands;
+            events.push(DriverEvent::Event(capabilities.to_payload()));
         }
         SessionUpdate::CurrentModeUpdate(update) => {
-            events.push(DriverEvent::Event(
-                UnifiedEventPayload::CapabilitiesUpdated {
-                    current_mode: Some(update.current_mode_id.to_string()),
-                    available_modes: Vec::new(),
-                    available_commands: Vec::new(),
-                    config_options: Vec::new(),
-                },
-            ));
+            capabilities.current_mode = Some(update.current_mode_id.to_string());
+            events.push(DriverEvent::Event(capabilities.to_payload()));
         }
         SessionUpdate::ConfigOptionUpdate(update) => {
-            events.push(DriverEvent::Event(
-                UnifiedEventPayload::CapabilitiesUpdated {
-                    current_mode: None,
-                    available_modes: Vec::new(),
-                    available_commands: Vec::new(),
-                    config_options: update
-                        .config_options
-                        .iter()
-                        .map(map_config_option)
-                        .collect(),
-                },
-            ));
+            capabilities.config_options = update
+                .config_options
+                .iter()
+                .map(map_config_option)
+                .collect();
+            events.push(DriverEvent::Event(capabilities.to_payload()));
         }
         SessionUpdate::SessionInfoUpdate(update) => {
             if let Some(title) = update.title.value() {
@@ -1248,16 +1304,17 @@ mod tests {
     #[test]
     fn accumulator_emits_completed_message_on_id_switch() {
         let mut acc = StreamingAccumulator::default();
-        let events = map_session_update(text_chunk("こん", Some("m1")), &mut acc);
+        let mut caps = SessionCapabilitiesState::default();
+        let events = map_session_update(text_chunk("こん", Some("m1")), &mut acc, &mut caps);
         assert_eq!(events.len(), 1);
         assert!(matches!(events[0], DriverEvent::Delta(_)));
 
         // 同一ID: 差分のみ
-        let events = map_session_update(text_chunk("にちは", Some("m1")), &mut acc);
+        let events = map_session_update(text_chunk("にちは", Some("m1")), &mut acc, &mut caps);
         assert_eq!(events.len(), 1);
 
         // 別ID: 直前メッセージの完成イベント + 新差分
-        let events = map_session_update(text_chunk("次", Some("m2")), &mut acc);
+        let events = map_session_update(text_chunk("次", Some("m2")), &mut acc, &mut caps);
         assert_eq!(events.len(), 2);
         match &events[0] {
             DriverEvent::Event(UnifiedEventPayload::AgentMessage {
@@ -1289,8 +1346,9 @@ mod tests {
     #[test]
     fn message_chunks_without_id_accumulate_into_single_message() {
         let mut acc = StreamingAccumulator::default();
-        map_session_update(text_chunk("a", None), &mut acc);
-        map_session_update(text_chunk("b", None), &mut acc);
+        let mut caps = SessionCapabilitiesState::default();
+        map_session_update(text_chunk("a", None), &mut acc, &mut caps);
+        map_session_update(text_chunk("b", None), &mut acc, &mut caps);
         let finished = acc.finish_all();
         assert_eq!(finished.len(), 1);
         match &finished[0] {
@@ -1345,7 +1403,8 @@ mod tests {
             agent_client_protocol::schema::v1::PlanEntryStatus::InProgress,
         )]);
         let mut acc = StreamingAccumulator::default();
-        let events = map_session_update(SessionUpdate::Plan(plan), &mut acc);
+        let mut caps = SessionCapabilitiesState::default();
+        let events = map_session_update(SessionUpdate::Plan(plan), &mut acc, &mut caps);
         match &events[0] {
             DriverEvent::Event(UnifiedEventPayload::PlanUpdate { entries }) => {
                 assert_eq!(entries.len(), 1);
@@ -1390,7 +1449,12 @@ mod tests {
 
         let update = SessionInfoUpdate::new().title("Refactor UI layout".to_owned());
         let mut acc = StreamingAccumulator::default();
-        let events = map_session_update(SessionUpdate::SessionInfoUpdate(update), &mut acc);
+        let mut caps = SessionCapabilitiesState::default();
+        let events = map_session_update(
+            SessionUpdate::SessionInfoUpdate(update),
+            &mut acc,
+            &mut caps,
+        );
         assert_eq!(events.len(), 1);
         match &events[0] {
             DriverEvent::Event(UnifiedEventPayload::SessionTitleChanged { title }) => {
@@ -1398,5 +1462,118 @@ mod tests {
             }
             other => panic!("unexpected event: {other:?}"),
         }
+    }
+
+    #[test]
+    fn capabilities_partial_updates_preserve_existing_state() {
+        use agent_client_protocol::schema::v1::{
+            AvailableCommand, AvailableCommandsUpdate, CurrentModeUpdate,
+        };
+
+        let mut acc = StreamingAccumulator::default();
+        let mut caps = SessionCapabilitiesState {
+            current_mode: Some("ask".to_owned()),
+            available_modes: vec![ModeInfo {
+                mode_id: "ask".to_owned(),
+                name: "Ask".to_owned(),
+                description: None,
+            }],
+            available_commands: Vec::new(),
+            config_options: Vec::new(),
+        };
+
+        // コマンド一覧の更新が届いたとき、既存の current_mode / available_modes が保持されること
+        let cmd_update =
+            AvailableCommandsUpdate::new(vec![AvailableCommand::new("review", "コードレビュー")]);
+        let events = map_session_update(
+            SessionUpdate::AvailableCommandsUpdate(cmd_update),
+            &mut acc,
+            &mut caps,
+        );
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            DriverEvent::Event(UnifiedEventPayload::CapabilitiesUpdated {
+                current_mode,
+                available_modes,
+                available_commands,
+                ..
+            }) => {
+                assert_eq!(current_mode.as_deref(), Some("ask"));
+                assert_eq!(available_modes.len(), 1);
+                assert_eq!(available_commands.len(), 1);
+                assert_eq!(available_commands[0].name, "review");
+            }
+            other => panic!("unexpected event: {other:?}"),
+        }
+
+        // モード変更が届いたとき、直前に追加された available_commands が保持されること
+        let mode_update = CurrentModeUpdate::new("code");
+        let events = map_session_update(
+            SessionUpdate::CurrentModeUpdate(mode_update),
+            &mut acc,
+            &mut caps,
+        );
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            DriverEvent::Event(UnifiedEventPayload::CapabilitiesUpdated {
+                current_mode,
+                available_modes,
+                available_commands,
+                ..
+            }) => {
+                assert_eq!(current_mode.as_deref(), Some("code"));
+                assert_eq!(available_modes.len(), 1);
+                assert_eq!(available_commands.len(), 1);
+                assert_eq!(available_commands[0].name, "review");
+            }
+            other => panic!("unexpected event: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn maps_grouped_select_options() {
+        use agent_client_protocol::schema::v1::{
+            SessionConfigOption, SessionConfigSelect, SessionConfigSelectGroup,
+            SessionConfigSelectOption,
+        };
+
+        let option = SessionConfigOption::new(
+            "model",
+            "Model",
+            SessionConfigKind::Select(SessionConfigSelect::new(
+                "gpt-4",
+                vec![
+                    SessionConfigSelectGroup::new(
+                        "openai",
+                        "OpenAI",
+                        vec![
+                            SessionConfigSelectOption::new("gpt-4", "GPT-4"),
+                            SessionConfigSelectOption::new("gpt-3.5", "GPT-3.5"),
+                        ],
+                    ),
+                    SessionConfigSelectGroup::new(
+                        "anthropic",
+                        "Anthropic",
+                        vec![SessionConfigSelectOption::new("claude-3", "Claude 3")],
+                    ),
+                ],
+            )),
+        );
+
+        let mapped = map_config_option(&option);
+        assert_eq!(mapped.key, "model");
+        assert_eq!(mapped.name, "Model");
+        assert_eq!(
+            mapped.current_value,
+            serde_json::Value::String("gpt-4".to_owned())
+        );
+        assert_eq!(
+            mapped.options,
+            vec![
+                serde_json::Value::String("gpt-4".to_owned()),
+                serde_json::Value::String("gpt-3.5".to_owned()),
+                serde_json::Value::String("claude-3".to_owned()),
+            ]
+        );
     }
 }
