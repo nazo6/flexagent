@@ -1,5 +1,6 @@
 <script lang="ts">
   import PermissionCard from '$lib/components/PermissionCard.svelte';
+  import MarkdownText from '$lib/components/MarkdownText.svelte';
   import ToolCallCard from './ToolCallCard.svelte';
   import { Badge } from '$lib/components/ui/badge';
   import { formatEpochMs } from '$lib/format';
@@ -41,9 +42,11 @@
         <div class="flex gap-2">
           <BotIcon class="text-muted-foreground mt-0.5 size-4 shrink-0" />
           <div class="max-w-[92%] flex-1">
-            <p class="text-sm leading-relaxed whitespace-pre-wrap">
-              {item.text}{#if item.streaming}<span class="animate-pulse">▍</span>{/if}
-            </p>
+            <MarkdownText
+              text={item.text}
+              streaming={item.streaming}
+              class="text-sm leading-relaxed"
+            />
           </div>
         </div>
       {:else if item.kind === 'thought'}
@@ -55,11 +58,11 @@
             思考プロセス
             {#if item.streaming}<span class="animate-pulse">…</span>{/if}
           </summary>
-          <p
-            class="text-muted-foreground border-muted-foreground/30 mt-1.5 border-l-2 pl-3 text-xs leading-relaxed whitespace-pre-wrap"
+          <div
+            class="text-muted-foreground border-muted-foreground/30 mt-1.5 border-l-2 pl-3 text-xs leading-relaxed"
           >
-            {item.text}{#if item.streaming}<span class="animate-pulse">▍</span>{/if}
-          </p>
+            <MarkdownText text={item.text} streaming={item.streaming} />
+          </div>
         </details>
       {:else if item.kind === 'tool'}
         <ToolCallCard {item} />

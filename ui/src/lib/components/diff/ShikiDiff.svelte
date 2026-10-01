@@ -1,13 +1,12 @@
 <script lang="ts">
   import DiffText from './DiffText.svelte';
-  import { highlightUnifiedDiff } from '$lib/highlight';
+  import { highlightUnifiedDiff, prefersDarkMode } from '$lib/highlight';
 
   let { diff, maxHeight = '60svh' }: { diff: string; maxHeight?: string } = $props();
 
   let html = $state<string | null>(null);
 
-  const prefersDark =
-    typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches;
+  const prefersDark = prefersDarkMode();
 
   $effect(() => {
     const text = diff;

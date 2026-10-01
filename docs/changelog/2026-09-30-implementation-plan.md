@@ -847,6 +847,16 @@
     (失効時は 404/410 で自動清除)、Context Fork の UI、一時VM
     プロビジョナー選択 UI、`fxg web --server` 時のトークン同梱
     (中央サーバー用トークンはローカルに無いため初回入力ダイアログに委ねる)
+  - 2026-10-01 (追加改善): チャットの Markdown レンダリング。`marked` +
+    `DOMPurify` (`ui/src/lib/markdown.ts`) でエージェントメッセージ /
+    思考プロセスを常時 Markdown 描画する (`MarkdownText.svelte`。
+    サニタイズ必須、リンクへ `target=_blank` / `rel=noopener` を付与)。
+    コードフェンスは `$lib/highlight` の共有 shiki
+    ハイライターを非同期適用する (未知言語はプレーンへフォールバック、内容
+    キャッシュ付き。150ms デバウンスでストリーミング中の再描画に追従)。
+    なお DOMPurify は happy-dom で正しく動作しない (未サポート環境)
+    ため、`markdown.test.ts` のみ `// @vitest-environment jsdom` で実行する
+    (jsdom を devDependency へ追加。実ブラウザでは問題なし)
 
 ---
 
