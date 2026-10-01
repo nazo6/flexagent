@@ -121,6 +121,44 @@ pub async fn get_session(
     row.map(SessionRow::into_summary).transpose()
 }
 
+/// ハブ専用: 一時VM破棄時に退避された git bundle のパスを記録する。
+///
+/// `None` で消去 (バンドル復元後など)。
+pub async fn set_git_bundle_path(
+    pool: &SqlitePool,
+    session_id: &str,
+    path: Option<&str>,
+) -> Result<(), DbError> {
+    let result = sqlx::query!(
+        r#"UPDATE sessions SET git_bundle_path = ? WHERE session_id = ?"#,
+        path,
+        session_id,
+    )
+    .execute(pool)
+    .await?;
+    if result.rows_affected() == 0 {
+        return Err(DbError::SessionNotFound(session_id.to_owned()));
+    }
+    Ok(())
+}
+
+/// ハブ専用: 退避済み git bundle のパスを取得する。
+pub async fn get_git_bundle_path(
+    pool: &SqlitePool,
+    session_id: &str,
+) -> Result<Option<String>, DbError> {
+    let row = sqlx::query!(
+        r#"SELECT git_bundle_path FROM sessions WHERE session_id = ?"#,
+        session_id,
+    )
+    .fetch_optional(pool)
+    .await?;
+    match row {
+        Some(row) => Ok(row.git_bundle_path),
+        None => Err(DbError::SessionNotFound(session_id.to_owned())),
+    }
+}
+
 /// `after_cursor` より後のイベント履歴をバッチで取得する (差分同期の再開用)。
 ///
 /// 返却されるバッチの `cursor` は「取得できた最後のイベントのカーソル」であり、

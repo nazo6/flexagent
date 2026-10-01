@@ -225,6 +225,8 @@ impl ClientApiBackend for DaemonState {
                 local_path: &local_path,
                 agent_id: &request.agent_id,
                 initial_prompt: request.initial_prompt.as_deref(),
+                fork_context: None,
+                restore_git_bundle: None,
             })
             .await
             .map_err(api_error)?;

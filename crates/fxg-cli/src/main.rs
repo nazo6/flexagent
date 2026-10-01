@@ -16,6 +16,7 @@ use usage::{Cli, RunAsync, Subcommands};
 
 mod client;
 mod commands;
+mod server_api;
 mod service;
 mod tui;
 
@@ -54,10 +55,16 @@ enum Commands {
     Worktree(commands::WorktreeArgs),
     /// エージェント管理 (list / install / update / remove)
     Agents(commands::AgentsArgs),
+    /// 一時VM・サンドボックスプロビジョナーの確認 (list / test)
+    Provisioners(commands::ProvisionersArgs),
     /// ノードデーモンをフォアグラウンド起動する
     Daemon(commands::DaemonArgs),
     /// 中央サーバーをフォアグラウンド起動する (:8080)
     Server(commands::ServerArgs),
+    /// 一時VM内の Zero-Touch 初期化 (git clone + ツール自動導入。出力は stderr)
+    BootstrapWorkspace(commands::BootstrapWorkspaceArgs),
+    /// Git Credential Proxy の GIT_ASKPASS ヘルパー (内部用)
+    GitAskpass(commands::GitAskpassArgs),
     /// OSログイン時のバックグラウンド常駐サービスを管理する
     Service(commands::ServiceArgs),
     /// トークン付きURLをデフォルトブラウザで開く

@@ -13,7 +13,7 @@
 //!   `RespondPermission` / `ControlSession` / `ManageWorktree` / `GetGitDiff` /
 //!   `Pty*` / `KillAllSessions` を実行し、`command_id` 相関で結果を返す
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use base64::Engine as _;
@@ -42,6 +42,23 @@ const OUTBOX_BATCH_EVENTS: usize = 200;
 const SEND_QUEUE_CAPACITY: usize = 1024;
 /// `NodeHello` で報告するセッション数の上限。
 const HELLO_SESSION_LIMIT: u32 = 1000;
+/// `WorkspaceBundleUpload` 1 メッセージあたりの Base64 チャンク上限 (8 MiB)。
+pub const BUNDLE_CHUNK_B64_BYTES: usize = 8 * 1024 * 1024;
+
+/// サーバーからのコマンド処理コンテキスト (トランスポート差の吸収)。
+///
+/// 常駐ノード (WS) は全フィールド既定値で、一時VM (`--stdio`) は
+/// ワークスペース上書き・Drain でのプロセス終了シグナルを渡す。
+#[derive(Default, Clone, Copy)]
+pub(crate) struct CommandContext<'a> {
+    /// `--stdio --workspace` の上書きディレクトリ
+    /// (`StartSession.local_path` を一定のクローン先に固定する)
+    pub workspace: Option<&'a Path>,
+    /// 一時VMモードか (`DrainAndShutdown` で Git バンドルを退避する)
+    pub ephemeral: bool,
+    /// `DrainAndShutdown` 受信時にプロセス終了を要求するシグナル
+    pub shutdown: Option<&'a watch::Sender<bool>>,
+}
 
 /// Outbox Sync Worker をシャットダウンまで稼働させる。
 ///
@@ -78,6 +95,7 @@ pub async fn run(
         }
         backoff = (backoff * 2).min(RECONNECT_MAX);
     }
+    state.credentials().detach();
     state.set_central_connected(false);
     tracing::info!("outbox sync worker stopped");
 }
@@ -103,6 +121,8 @@ async fn connect_once(
 
     // 送信キュー (PTY forwarder / コマンド応答の共通経路)
     let (out_tx, mut out_rx) = mpsc::channel::<NodeToServerMsg>(SEND_QUEUE_CAPACITY);
+    // Git Credential Proxy (一時VMの GIT_ASKPASS) をこの接続に紐付ける
+    state.credentials().attach(out_tx.clone());
 
     // 取りこぼし防止のため、flush より先にバスを購読する
     // (flush に含まれたイベントがライブ配信で重複しても、サーバー側の
@@ -155,7 +175,7 @@ async fn connect_once(
             },
             incoming = receiver.next() => match incoming {
                 Some(Ok(WsMessage::Text(text))) => {
-                    handle_server_message(state, &text, &out_tx).await;
+                    handle_server_message(state, &text, &out_tx, &CommandContext::default()).await;
                 }
                 Some(Ok(WsMessage::Ping(payload))) => {
                     sender.send(WsMessage::Pong(payload)).await?;
@@ -170,7 +190,7 @@ async fn connect_once(
 }
 
 /// `NodeHello` を組み立てる (ノード情報・プロジェクト・セッション同期状態)。
-async fn build_hello(state: &DaemonState) -> NodeToServerMsg {
+pub(crate) async fn build_hello(state: &DaemonState) -> NodeToServerMsg {
     let projects = match state.db().list_projects().await {
         Ok(projects) => projects
             .into_iter()
@@ -224,11 +244,37 @@ async fn build_hello(state: &DaemonState) -> NodeToServerMsg {
         os: std::env::consts::OS.to_owned(),
         arch: std::env::consts::ARCH.to_owned(),
         version: VERSION.to_owned(),
-        is_ephemeral: false,
+        is_ephemeral: state.config().ephemeral,
         installed_agents: state.installed_agents().await,
         projects,
         sessions,
     }
+}
+
+/// 未送信イベント (`synced_up_to_node_seq` より後) を送信メッセージ列にする。
+pub(crate) async fn outbox_messages(state: &DaemonState) -> anyhow::Result<Vec<NodeToServerMsg>> {
+    let mut messages = Vec::new();
+    for batch in state.db().extract_outbox().await? {
+        for chunk in batch.events.chunks(OUTBOX_BATCH_EVENTS) {
+            messages.push(NodeToServerMsg::EventBatchPush {
+                events: chunk.to_vec(),
+            });
+        }
+    }
+    Ok(messages)
+}
+
+/// 未送信イベントを送信キューへ流す (stdio トランスポート用)。
+pub(crate) async fn push_outbox(
+    state: &DaemonState,
+    out: &mpsc::Sender<NodeToServerMsg>,
+) -> anyhow::Result<()> {
+    for message in outbox_messages(state).await? {
+        if out.send(message).await.is_err() {
+            anyhow::bail!("outbox sink closed");
+        }
+    }
+    Ok(())
 }
 
 /// 未送信イベント (`synced_up_to_node_seq` より後) をすべて送信する。
@@ -241,17 +287,8 @@ async fn flush_outbox(
         WsMessage,
     >,
 ) -> anyhow::Result<()> {
-    let batches = state.db().extract_outbox().await?;
-    for batch in batches {
-        for chunk in batch.events.chunks(OUTBOX_BATCH_EVENTS) {
-            send_msg(
-                sender,
-                &NodeToServerMsg::EventBatchPush {
-                    events: chunk.to_vec(),
-                },
-            )
-            .await?;
-        }
+    for message in outbox_messages(state).await? {
+        send_msg(sender, &message).await?;
     }
     Ok(())
 }
@@ -268,10 +305,11 @@ where
 }
 
 /// サーバーからのメッセージを処理する。
-async fn handle_server_message(
+pub(crate) async fn handle_server_message(
     state: &DaemonState,
     text: &str,
     out: &mpsc::Sender<NodeToServerMsg>,
+    ctx: &CommandContext<'_>,
 ) {
     let message: ServerToNodeMsg = match serde_json::from_str(text) {
         Ok(message) => message,
@@ -333,24 +371,55 @@ async fn handle_server_message(
             fork_context_messages,
             restore_git_bundle_b64,
         } => {
-            let result = if fork_context_messages.is_some() || restore_git_bundle_b64.is_some() {
-                // 別ノードからの Replay 注入・Git バンドル復元は Phase 6 で実装する
-                Err(NodeError::InvalidSession(
-                    "cross-node fork is Phase 6".to_owned(),
-                ))
-            } else {
-                state
-                    .session_manager()
-                    .start_session(StartSessionParams {
-                        command_id: &command_id,
-                        session_id: &session_id,
-                        local_path: Path::new(&local_path),
-                        agent_id: &agent_id,
-                        initial_prompt: initial_prompt.as_deref(),
-                    })
-                    .await
-                    .map(|_| ())
+            // 一時VM (`--stdio --workspace`) はクローン済みディレクトリに固定する
+            // (サーバーは VM 内パスを知らないため、要求の local_path は使わない)
+            let local_path = ctx
+                .workspace
+                .map(Path::to_path_buf)
+                .unwrap_or_else(|| PathBuf::from(&local_path));
+
+            // 退避済み Git バンドルの復元 (別ノードへの引き継ぎ / 一時VM再開)
+            let restore_bundle_file = match restore_git_bundle_b64.as_deref() {
+                Some(b64) => match BASE64.decode(b64.as_bytes()) {
+                    Ok(bytes) => match crate::bundle::write_bundle_file(
+                        &state.paths().bundles_dir(),
+                        &session_id,
+                        &bytes,
+                    ) {
+                        Ok(file) => Some(file),
+                        Err(err) => {
+                            send_command_result(out, command_id, Err(err)).await;
+                            return;
+                        }
+                    },
+                    Err(err) => {
+                        send_command_result(
+                            out,
+                            command_id,
+                            Err(NodeError::InvalidSession(format!(
+                                "invalid git bundle payload: {err}"
+                            ))),
+                        )
+                        .await;
+                        return;
+                    }
+                },
+                None => None,
             };
+
+            let result = state
+                .session_manager()
+                .start_session(StartSessionParams {
+                    command_id: &command_id,
+                    session_id: &session_id,
+                    local_path: &local_path,
+                    agent_id: &agent_id,
+                    initial_prompt: initial_prompt.as_deref(),
+                    fork_context: fork_context_messages.as_deref(),
+                    restore_git_bundle: restore_bundle_file.as_deref(),
+                })
+                .await
+                .map(|_| ());
             match result {
                 Ok(()) => {
                     state
@@ -567,12 +636,26 @@ async fn handle_server_message(
             state.trigger_node_hello();
             let _ = out.send(response).await;
         }
-        ServerToNodeMsg::GitCredentialResponse { .. } => {
-            // Git Credential Proxy は Phase 6 (一時VM) で実装する
-            tracing::debug!("git credential response received (Phase 6)");
+        ServerToNodeMsg::GitCredentialResponse {
+            request_id,
+            username,
+            token,
+            error,
+        } => {
+            state.credentials().complete(
+                &request_id,
+                crate::credentials::CredentialResponse {
+                    username,
+                    token,
+                    error,
+                },
+            );
         }
-        ServerToNodeMsg::DrainAndShutdown { .. } => {
-            tracing::info!("drain and shutdown requested (Phase 6)");
+        ServerToNodeMsg::DrainAndShutdown {
+            reason,
+            create_git_bundle,
+        } => {
+            drain_and_shutdown(state, out, ctx, &reason, create_git_bundle).await;
         }
         ServerToNodeMsg::KillAllSessions { reason } => match state.kill_all_local(&reason).await {
             Ok((killed_sessions, killed_ptys)) => {
@@ -713,6 +796,103 @@ async fn handle_remote_pty_spawn(
             }
         }
     });
+}
+
+/// `DrainAndShutdown` を処理する (ベストエフォート)。
+///
+/// 1. 未送信イベントを全フラッシュ
+/// 2. 一時VM (`ctx.ephemeral`) なら `git bundle` を作成して分割アップロード
+/// 3. `DrainComplete` を送信してプロセス終了を要求
+///
+/// Drain 前にクラッシュした場合の中間イベント損失は許容仕様
+/// (設計: docs/01 §6.4)。
+async fn drain_and_shutdown(
+    state: &DaemonState,
+    out: &mpsc::Sender<NodeToServerMsg>,
+    ctx: &CommandContext<'_>,
+    reason: &str,
+    create_git_bundle: bool,
+) {
+    tracing::info!(reason, create_git_bundle, "drain and shutdown requested");
+
+    if let Err(err) = push_outbox(state, out).await {
+        tracing::warn!("failed to flush outbox on drain: {err}");
+    }
+
+    if create_git_bundle
+        && ctx.ephemeral
+        && let Some(workspace) = ctx.workspace
+    {
+        match upload_workspace_bundle(state, out, workspace).await {
+            Ok(Some(session_id)) => {
+                tracing::info!(session_id, "workspace bundle uploaded");
+            }
+            Ok(None) => {
+                tracing::info!("no session to attach workspace bundle to; skipped");
+            }
+            Err(err) => {
+                tracing::warn!("failed to create workspace bundle: {err}");
+            }
+        }
+    }
+
+    let _ = out
+        .send(NodeToServerMsg::DrainComplete {
+            node_id: state.node_id().to_owned(),
+        })
+        .await;
+
+    if let Some(shutdown) = ctx.shutdown {
+        let _ = shutdown.send(true);
+    } else {
+        tracing::warn!("drain requested but no shutdown channel is attached");
+    }
+}
+
+/// ワークスペースの Git バンドルを生成し、`WorkspaceBundleUpload`
+/// として分割アップロードする。
+///
+/// セッションが 1 件も無い場合は `Ok(None)` (退避不要)。
+async fn upload_workspace_bundle(
+    state: &DaemonState,
+    out: &mpsc::Sender<NodeToServerMsg>,
+    workspace: &Path,
+) -> Result<Option<String>, NodeError> {
+    let sessions = state
+        .db()
+        .list_sessions(&SessionFilter {
+            limit: Some(1),
+            ..SessionFilter::default()
+        })
+        .await?;
+    let Some(session) = sessions.first() else {
+        return Ok(None);
+    };
+
+    let index_path = state.paths().snapshot_index_path(&session.session_id);
+    let bundle =
+        crate::bundle::create_workspace_bundle(workspace, &index_path, &session.session_id).await?;
+
+    let encoded = BASE64.encode(&bundle.bytes);
+    let chunks: Vec<&str> = encoded
+        .as_bytes()
+        .chunks(BUNDLE_CHUNK_B64_BYTES)
+        .map(|chunk| std::str::from_utf8(chunk).unwrap_or_default())
+        .collect();
+    for chunk in chunks {
+        let message = NodeToServerMsg::WorkspaceBundleUpload {
+            session_id: session.session_id.clone(),
+            branch: bundle.branch.clone().unwrap_or_default(),
+            head_commit: bundle.head_commit.clone().unwrap_or_default(),
+            bundle_b64: chunk.to_owned(),
+        };
+        if out.send(message).await.is_err() {
+            return Err(NodeError::Server(
+                "bundle sink closed before upload completed".to_owned(),
+            ));
+        }
+    }
+    Ok(Some(session.session_id.clone()))
 }
 
 /// `CommandResult` を組み立てて送信する。

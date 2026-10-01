@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        INSERT INTO sessions (\n            session_id, project_id, node_id, local_path, git_branch, is_worktree,\n            agent_id, agent_session_id, parent_session_id, fork_from_node_seq,\n            title, status, current_mode, available_modes_json,\n            available_commands_json, config_options_json,\n            git_bundle_path, last_node_seq, synced_up_to_node_seq, created_at, updated_at\n        )\n        VALUES (?, ?, ?, ?, ?, 0, ?, NULL, NULL, NULL, ?, ?, NULL, '[]', '[]', '[]', NULL, 0, 0, ?, ?)\n        ON CONFLICT(session_id) DO NOTHING\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 10
+    },
+    "nullable": []
+  },
+  "hash": "c1577ad43bc3228ba58d37f819396d17784b863962c52995ceeca2878004400e"
+}

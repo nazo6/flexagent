@@ -97,6 +97,25 @@ pub struct ProvisionersResponse {
     pub provisioners: Vec<ProvisionerSummary>,
 }
 
+/// `POST /api/v1/provisioners/:name/test` レスポンス (疎通検証)。
+///
+/// プロビジョナーを起動し、`fxg daemon --stdio` の `NodeHello`
+/// ハンドシェイク (またはブートストラップ過程の失敗) までを確認する。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct ProvisionerTestResponse {
+    /// 対象プロビジョナー名
+    pub name: String,
+    /// ハンドシェイクまで成功したか
+    pub ok: bool,
+    /// 一時ノードID (ハンドシェイク成功時)
+    pub node_id: Option<String>,
+    /// `stderr` に出力されたブートストラップログ (末尾 N 行)
+    pub log_lines: Vec<String>,
+    /// 失敗時のメッセージ
+    pub error: Option<String>,
+}
+
 /// Git Worktree の情報 (`GET /api/v1/projects/:id/worktrees`)。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
@@ -383,6 +402,16 @@ pub enum ServerWsMessage {
         session_id: String,
         /// 差分本体
         delta: StreamDeltaPayload,
+    },
+    /// 一時VMブートストラップ (`stderr`) の進捗ログ行 (エフェメラル)。
+    ///
+    /// ブートストラップは一時ノードの `node.db` が存在する前に発生するため、
+    /// イベントログには永続化せず中央サーバーから直接ストリーム配信する。
+    BootstrapLog {
+        /// 対象セッションID
+        session_id: String,
+        /// ログ1行
+        line: String,
     },
     /// コマンド実行結果 (要求元クライアントへの相関返却)。
     CommandResult {

@@ -31,13 +31,13 @@ pub struct DaemonArgs {
     /// リモート (中央サーバー経由) からの Web PTY 起動を許可する
     #[usage(long)]
     allow_remote_pty: bool,
-    /// 標準入出力パイプ (JSON Lines) モード (一時VM。Phase 6 で実装)
+    /// 標準入出力パイプ (JSON Lines) モード (一時VM。プロビジョナーが起動する)
     #[usage(long)]
     stdio: bool,
-    /// 一時VMモード (Phase 6 で実装)
+    /// 一時VMモード (Drain 時の Git バンドル退避を有効化)
     #[usage(long)]
     ephemeral: bool,
-    /// `--stdio` 時の初期対象ディレクトリ (Phase 6 で実装)
+    /// `--stdio` 時の初期対象ディレクトリ (クローン済みワークスペース)
     #[usage(long)]
     workspace: Option<String>,
 }
@@ -46,13 +46,35 @@ impl usage::RunAsync for DaemonArgs {
     type Output = Result<()>;
 
     async fn run_async(self) -> Self::Output {
-        if self.stdio || self.ephemeral || self.workspace.is_some() {
-            bail!("--stdio / --ephemeral / --workspace は Phase 6 (一時VM) で実装します");
-        }
-
         let env = fxg_protocol::config::process_env;
         let global = fxg_protocol::config::GlobalConfig::load(&env)
             .context("failed to load ~/.flexagent/config.toml")?;
+
+        if self.stdio || self.ephemeral || self.workspace.is_some() {
+            if !self.stdio {
+                bail!("--ephemeral / --workspace は --stdio と併用してください");
+            }
+            let mut config = fxg_node::daemon::DaemonConfig::from_env(&env);
+            if let Some(node_id) = global.node.node_id.clone() {
+                config.node_id = node_id;
+            }
+            if let Some(name) = global.node.name.clone() {
+                config.node_name = name;
+            }
+            config.allow_remote_pty = self.allow_remote_pty || global.node.allow_remote_pty;
+            // stdio ではサーバーがパイプを所有するため、WS 同期設定は使用しない
+            config.central_server_url = None;
+            config.node_token = None;
+
+            let stdio = fxg_node::daemon::StdioConfig {
+                daemon: config,
+                workspace: self.workspace.map(PathBuf::from),
+                ephemeral: self.ephemeral,
+            };
+            return fxg_node::daemon::run_stdio(stdio)
+                .await
+                .context("fxg daemon --stdio failed");
+        }
 
         let mut config = fxg_node::daemon::DaemonConfig::from_env(&env);
         if let Some(node_id) = global.node.node_id.clone() {
@@ -182,7 +204,7 @@ impl usage::RunAsync for WebArgs {
                 .central_server_url
                 .clone()
                 .context("node.central_server_url が config.toml に設定されていません")?;
-            central_http_url(&server_url)?
+            crate::server_api::central_http_url(&server_url)?
         } else {
             let token = fxg_server::api::auth::load_or_create_token(
                 &fxg_protocol::config::fxg_home(&env)
@@ -201,22 +223,6 @@ impl usage::RunAsync for WebArgs {
         opener::open_browser(&url).context("failed to open the default browser")?;
         Ok(())
     }
-}
-
-/// Node Hub の WS URL (`ws://host:8080/api/v1/node/ws`) から HTTP オリジンを取り出す。
-fn central_http_url(server_url: &str) -> Result<String> {
-    let http = server_url
-        .replacen("wss://", "https://", 1)
-        .replacen("ws://", "http://", 1);
-    if !http.starts_with("http://") && !http.starts_with("https://") {
-        bail!("central_server_url は ws:// または wss:// で指定してください: {server_url}");
-    }
-    let base = http.split("/api/").next().unwrap_or(&http);
-    let base = base.trim_end_matches('/');
-    if base.is_empty() {
-        bail!("central_server_url が不正です: {server_url}");
-    }
-    Ok(base.to_owned())
 }
 
 // ----------------------------------------------------------------------
@@ -243,7 +249,7 @@ pub struct RunArgs {
     /// Worktree 新規作成時のベースブランチ
     #[usage(long)]
     base: Option<String>,
-    /// 一時VMプロビジョナーで起動する (Phase 6 で実装)
+    /// 一時VMプロビジョナーで起動する (中央サーバーホスト上で起動。中央サーバー必須)
     #[usage(long)]
     provisioner: Option<String>,
     /// `opencode2` を標準ACPモード (`opencode2 acp`) で起動する
@@ -258,12 +264,16 @@ impl usage::RunAsync for RunArgs {
     type Output = Result<()>;
 
     async fn run_async(self) -> Self::Output {
+        let env = fxg_protocol::config::process_env;
+        let cwd = std::env::current_dir().context("failed to resolve current directory")?;
+
+        // 一時VMプロビジョナー: 中央サーバー API 経由で起動する
+        // (プロビジョナーはサーバーホスト上で子プロセスとして起動されるため)
         if let Some(provisioner) = &self.provisioner {
-            bail!("--provisioner {provisioner} (一時VM) は Phase 6 で実装します");
+            return run_with_provisioner(&self, provisioner, &cwd, &env).await;
         }
 
         let mut client = DaemonClient::connect().await?;
-        let cwd = std::env::current_dir().context("failed to resolve current directory")?;
         let cwd = match &self.worktree {
             Some(branch) => create_worktree(&mut client, &cwd, branch, self.base.clone()).await?,
             None => cwd,
@@ -288,6 +298,245 @@ impl usage::RunAsync for RunArgs {
             return Ok(());
         }
         crate::tui::attach(&mut client, &session_id).await
+    }
+}
+
+/// `fxg run <agent> --provisioner <name>` (中央サーバー API 経由)。
+async fn run_with_provisioner(
+    args: &RunArgs,
+    provisioner: &str,
+    cwd: &Path,
+    env: fxg_protocol::config::EnvLookup<'_>,
+) -> Result<()> {
+    let server = crate::server_api::ServerClient::from_config(env)?;
+
+    // カレントディレクトリの論理プロジェクトを解決する (Git remote が正データ)
+    let project = fxg_node::resolve_project(cwd, "cli")
+        .await
+        .context("failed to resolve logical project (Git リポジトリ内で実行してください)")?;
+
+    // `-w/--worktree`: 一時VMでは新規 Worktree ではなくクローン先ブランチとして使う
+    let worktree = match (&args.worktree, &args.base) {
+        (Some(branch), base) => Some(fxg_protocol::client_api::WorktreeSpec {
+            branch: branch.clone(),
+            base_branch: base.clone(),
+            new_path: None,
+        }),
+        (None, _) => None,
+    };
+
+    let request = fxg_protocol::client_api::CreateSessionRequest {
+        command_id: format!("cli-{}", fxg_protocol::util::uuid_v7()),
+        project_id: project.project_id.clone(),
+        node_id: None,
+        provisioner: Some(provisioner.to_owned()),
+        local_path: None,
+        worktree,
+        agent_id: args.agent.clone(),
+        initial_prompt: args.prompt.clone(),
+        fork: None,
+    };
+    let response = server.create_session(&request).await?;
+    eprintln!(
+        "provisioning session {} via '{provisioner}' (bootstrap ログは Web UI / `fxg provisioners test` で確認できます)",
+        response.session_id
+    );
+    println!("{}", response.session_id);
+    Ok(())
+}
+
+// ----------------------------------------------------------------------
+// fxg provisioners list / test
+// ----------------------------------------------------------------------
+
+/// `fxg provisioners <command>`
+#[derive(Debug, Args)]
+#[usage(run_async, arg_required_else_help)]
+pub struct ProvisionersArgs {
+    #[usage(subcommand)]
+    command: ProvisionersCommands,
+}
+
+/// プロビジョナー管理サブコマンド。
+#[derive(Debug, usage::Subcommands)]
+#[usage(run_async)]
+pub enum ProvisionersCommands {
+    /// 設定ファイルに定義された一時VMプロビジョナー一覧を表示する
+    List(ProvisionersListArgs),
+    /// プロビジョナーの起動・`fxg daemon --stdio` ハンドシェイク疎通を検証する
+    Test(ProvisionersTestArgs),
+}
+
+/// `fxg provisioners list`
+#[derive(Debug, Args)]
+pub struct ProvisionersListArgs {
+    /// JSON 形式で出力する
+    #[usage(long)]
+    json: bool,
+}
+
+impl usage::RunAsync for ProvisionersListArgs {
+    type Output = Result<()>;
+
+    async fn run_async(self) -> Self::Output {
+        let env = fxg_protocol::config::process_env;
+        let global = fxg_protocol::config::GlobalConfig::load(&env)
+            .context("failed to load ~/.flexagent/config.toml")?;
+        let provisioners: Vec<_> = global
+            .provisioners
+            .iter()
+            .map(|(name, config)| {
+                serde_json::json!({
+                    "name": name,
+                    "description": config.description,
+                    "command": config.command,
+                    "args": config.args,
+                    "idle_timeout_secs": config.idle_timeout_secs,
+                })
+            })
+            .collect();
+        if self.json {
+            println!("{}", serde_json::to_string_pretty(&provisioners)?);
+            return Ok(());
+        }
+        if provisioners.is_empty() {
+            println!(
+                "(プロビジョナー未定義。~/.flexagent/config.toml の [provisioners.<name>] で定義します)"
+            );
+            return Ok(());
+        }
+        let rows: Vec<Vec<String>> = provisioners
+            .iter()
+            .map(|entry| {
+                vec![
+                    entry["name"].as_str().unwrap_or_default().to_owned(),
+                    entry["description"].as_str().unwrap_or_default().to_owned(),
+                    entry["command"].as_str().unwrap_or_default().to_owned(),
+                    entry["idle_timeout_secs"]
+                        .as_u64()
+                        .map(|secs| format!("{secs}s"))
+                        .unwrap_or_else(|| "-".to_owned()),
+                ]
+            })
+            .collect();
+        print_table(&["NAME", "DESCRIPTION", "COMMAND", "IDLE"], &rows);
+        Ok(())
+    }
+}
+
+/// `fxg provisioners test <name>`
+#[derive(Debug, Args)]
+pub struct ProvisionersTestArgs {
+    /// 検証するプロビジョナー名
+    name: String,
+}
+
+impl usage::RunAsync for ProvisionersTestArgs {
+    type Output = Result<()>;
+
+    async fn run_async(self) -> Self::Output {
+        let env = fxg_protocol::config::process_env;
+        let server = crate::server_api::ServerClient::from_config(&env)?;
+        eprintln!(
+            "testing provisioner '{}' via {} (bootstrap の完了まで数分かかる場合があります)",
+            self.name,
+            server.base_url()
+        );
+        let response = server.provisioner_test(&self.name).await?;
+        for line in &response.log_lines {
+            eprintln!("  {line}");
+        }
+        if response.ok {
+            println!(
+                "ok: {} (node {})",
+                response.name,
+                response.node_id.as_deref().unwrap_or("-")
+            );
+            return Ok(());
+        }
+        bail!(
+            "provisioner '{}' failed: {}",
+            response.name,
+            response.error.as_deref().unwrap_or("unknown error")
+        );
+    }
+}
+
+// ----------------------------------------------------------------------
+// fxg bootstrap-workspace
+// ----------------------------------------------------------------------
+
+/// `fxg bootstrap-workspace` の引数 (一時VM内でプロビジョナーが実行する)。
+#[derive(Debug, Args)]
+pub struct BootstrapWorkspaceArgs {
+    /// クローン元 Git URL
+    #[usage(long)]
+    repo: String,
+    /// 対象ブランチ (省略時はリモートの既定ブランチ)
+    #[usage(long)]
+    branch: Option<String>,
+    /// クローン先ディレクトリ (既定: /tmp/workspace)
+    #[usage(long)]
+    dir: Option<String>,
+}
+
+impl usage::RunAsync for BootstrapWorkspaceArgs {
+    type Output = Result<()>;
+
+    async fn run_async(self) -> Self::Output {
+        let env = fxg_protocol::config::process_env;
+        let dir = self
+            .dir
+            .clone()
+            .unwrap_or_else(|| "/tmp/workspace".to_owned());
+        let options = fxg_node::bootstrap::BootstrapOptions {
+            repo: self.repo.clone(),
+            branch: self.branch.clone(),
+            dir: PathBuf::from(&dir),
+            fxg_home: fxg_protocol::config::fxg_home(&env),
+            install_toolchain: true,
+            extra_tools: Vec::new(),
+        };
+        let outcome = fxg_node::bootstrap::bootstrap_workspace(options)
+            .await
+            .context("fxg bootstrap-workspace failed")?;
+        // stdout はプロトコル専用のため、結果も stderr に出力する
+        eprintln!(
+            "[fxg-bootstrap] ready: {} (tools: {})",
+            outcome.dir.display(),
+            outcome.tools.join(", ")
+        );
+        Ok(())
+    }
+}
+
+// ----------------------------------------------------------------------
+// fxg git-askpass (GIT_ASKPASS ヘルパー)
+// ----------------------------------------------------------------------
+
+/// `fxg git-askpass` の引数 (`GIT_ASKPASS` として Git が呼び出す内部用コマンド)。
+#[derive(Debug, Args)]
+pub struct GitAskpassArgs {
+    /// Git が渡すプロンプト文字列 (`Username for '...'` / `Password for '...'`)
+    prompt: String,
+}
+
+impl usage::RunAsync for GitAskpassArgs {
+    type Output = Result<()>;
+
+    async fn run_async(self) -> Self::Output {
+        let mut client = DaemonClient::connect().await?;
+        let (username, token, error) = client.git_credential(&self.prompt).await?;
+        if let Some(error) = error {
+            bail!("{error}");
+        }
+        let value = if fxg_node::credentials::prompt_wants_username(&self.prompt) {
+            username
+        } else {
+            token.unwrap_or_default()
+        };
+        println!("{value}");
+        Ok(())
     }
 }
 
@@ -834,7 +1083,7 @@ pub struct SessionForkArgs {
     /// Worktree 新規作成時のベースブランチ
     #[usage(long)]
     base: Option<String>,
-    /// 一時VMプロビジョナーで分岐する (Phase 6 で実装)
+    /// 一時VMプロビジョナーで分岐する (中央サーバー必須。退避済み Git バンドルを復元)
     #[usage(long)]
     provisioner: Option<String>,
 }
@@ -843,8 +1092,37 @@ impl usage::RunAsync for SessionForkArgs {
     type Output = Result<()>;
 
     async fn run_async(self) -> Self::Output {
+        // 一時VM上での分岐: 中央サーバー API 経由で Context Fork を要求する
         if let Some(provisioner) = &self.provisioner {
-            bail!("--provisioner {provisioner} (一時VM) は Phase 6 で実装します");
+            let env = fxg_protocol::config::process_env;
+            let server = crate::server_api::ServerClient::from_config(&env)?;
+            let sessions = server.sessions().await?;
+            let source = sessions
+                .iter()
+                .find(|session| session.session_id == self.session_id)
+                .with_context(|| format!("セッションが見つかりません: {}", self.session_id))?;
+            let request = fxg_protocol::client_api::CreateSessionRequest {
+                command_id: format!("cli-{}", fxg_protocol::util::uuid_v7()),
+                project_id: source.project_id.clone(),
+                node_id: None,
+                provisioner: Some(provisioner.clone()),
+                local_path: None,
+                worktree: None,
+                agent_id: self
+                    .agent
+                    .clone()
+                    .unwrap_or_else(|| source.agent_id.clone()),
+                initial_prompt: None,
+                fork: Some(fxg_protocol::client_api::SessionForkSpec {
+                    from_session_id: self.session_id.clone(),
+                    from_node_seq: self.from_seq,
+                    // 中央サーバーが退避済みバンドル (git_bundle_path) を自動で読み込む
+                    restore_git_bundle_b64: None,
+                }),
+            };
+            let response = server.create_session(&request).await?;
+            println!("{}", response.session_id);
+            return Ok(());
         }
 
         let mut client = DaemonClient::connect().await?;

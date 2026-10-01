@@ -261,6 +261,8 @@ async fn create_session_with_events(
             local_path: repo,
             agent_id: "mock",
             initial_prompt: None,
+            fork_context: None,
+            restore_git_bundle: None,
         })
         .await
         .expect("start session");

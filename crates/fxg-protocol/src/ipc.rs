@@ -278,6 +278,17 @@ pub enum IpcClientMessage {
         /// 再生成するか
         rotate: bool,
     },
+    /// Git 資格情報の解決 (`fxg git-askpass`。`GIT_ASKPASS` ヘルパーとして使う)。
+    ///
+    /// 一時VM (`fxg daemon --stdio`) 上の Git 操作は、このメソッド経由で
+    /// デーモン → 中央サーバー (`GitCredentialRequest`) へ中継され、
+    /// VM内ディスクにトークンを残さずに認証する (設計: docs/01 §6.4)。
+    GitCredential {
+        /// 相関ID
+        command_id: String,
+        /// Git (`GIT_ASKPASS`) が渡すプロンプト文字列
+        prompt: String,
+    },
     /// キープアライブ
     Ping,
 }
@@ -389,6 +400,15 @@ pub enum IpcResult {
     AuthToken {
         /// クライアント認証トークン
         token: String,
+    },
+    /// `GitCredential` の結果 (オンメモリのみ。ディスクへは保存しない)
+    GitCredential {
+        /// Basic 認証ユーザー名
+        username: String,
+        /// トークン (解決失敗時は `None`)
+        token: Option<String>,
+        /// 失敗時のメッセージ
+        error: Option<String>,
     },
     /// 単純な成功応答
     Ack {

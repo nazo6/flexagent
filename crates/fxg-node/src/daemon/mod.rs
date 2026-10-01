@@ -13,6 +13,7 @@ mod auth;
 mod http;
 mod ipc;
 mod ops;
+mod stdio;
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -34,6 +35,7 @@ use crate::session_manager::{DriverFactory, SessionManager, default_driver_facto
 
 pub use auth::{generate_token, token_matches};
 pub use ops::{AuditSource, WorktreeAddOutcome};
+pub use stdio::{StdioConfig, run_stdio};
 
 /// `fxg` のバージョン (このクレートの Cargo パッケージバージョン = ワークスペース版)。
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -58,6 +60,8 @@ pub struct DaemonConfig {
     pub central_server_url: Option<String>,
     /// ノード個別ペアリングトークン (省略時は `~/.flexagent/node_token` を読む)
     pub node_token: Option<String>,
+    /// 一時VM / サンドボックスノードか (`--ephemeral`。NodeHello と `nodes` 行に反映)
+    pub ephemeral: bool,
     /// データディレクトリ (`~/.flexagent`)
     pub fxg_home: PathBuf,
 }
@@ -77,6 +81,7 @@ impl DaemonConfig {
             allow_remote_pty: false,
             central_server_url: None,
             node_token: None,
+            ephemeral: false,
             fxg_home: fxg_home.into(),
         }
     }
@@ -92,6 +97,7 @@ impl DaemonConfig {
             allow_remote_pty: false,
             central_server_url: env(fxg_protocol::config::env_keys::CENTRAL_SERVER_URL),
             node_token: env(fxg_protocol::config::env_keys::NODE_TOKEN),
+            ephemeral: false,
             fxg_home: home,
         }
     }
@@ -185,6 +191,8 @@ struct Inner {
     central_connected: AtomicBool,
     /// `NodeHello` 再送トリガ (Worktree 変更・プロジェクト登録時)
     hello_refresh: tokio::sync::Notify,
+    /// Git Credential Proxy (一時VM向けオンメモリ認証中継)
+    credentials: crate::credentials::CredentialBroker,
 }
 
 /// デーモンの共有状態 (HTTP ハンドラ / IPC ハンドラ / CLI から共有)。
@@ -272,8 +280,16 @@ impl DaemonState {
                 client_events,
                 central_connected: AtomicBool::new(false),
                 hello_refresh: tokio::sync::Notify::new(),
+                credentials: crate::credentials::CredentialBroker::new(),
             }),
         };
+
+        // エージェントプロセスへ注入する GIT_ASKPASS ヘルパーを生成する
+        // (一時VMの Git 操作はこのスクリプト → ローカルIPC → 中央サーバーの
+        //  オンメモリ中継で認証する。設計: docs/01 §6.4)
+        if let Err(err) = crate::credentials::write_askpass_script(state.inner.paths.fxg_home()) {
+            tracing::warn!("failed to write git-askpass script: {err}");
+        }
 
         // セッションイベントバス → Client WS 配信用イベントへ転送する
         // (bus の Lagged は Client WS ループが cursor からのリプレイで回復する)
@@ -356,6 +372,11 @@ impl DaemonState {
             .store(connected, Ordering::Relaxed);
     }
 
+    /// Git Credential Proxy ブローカー。
+    pub fn credentials(&self) -> &crate::credentials::CredentialBroker {
+        &self.inner.credentials
+    }
+
     /// `NodeHello` の再送を要求する (Worktree 変更等でプロジェクト紐付けを報告)。
     pub fn trigger_node_hello(&self) {
         self.inner.hello_refresh.notify_one();
@@ -398,7 +419,7 @@ impl DaemonState {
             arch: std::env::consts::ARCH.to_owned(),
             version: VERSION.to_owned(),
             installed_agents: self.installed_agents().await,
-            is_ephemeral: false,
+            is_ephemeral: self.inner.config.ephemeral,
             provisioner: None,
             lifecycle_status: fxg_protocol::common::NodeLifecycleStatus::Ready,
             idle_timeout_secs: None,

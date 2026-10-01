@@ -4,7 +4,7 @@
 //! `projects` / `project_node_bindings` へ upsert する (ハブへの `NodeHello` 報告と
 //! 同一の情報源)。設計: `docs/02-database-schema.md` §3。
 
-use fxg_protocol::common::NodeLifecycleStatus;
+use fxg_protocol::common::{NodeLifecycleStatus, SessionStatus};
 use fxg_protocol::util::now_ms;
 use sqlx::SqlitePool;
 
@@ -100,6 +100,9 @@ pub struct ProjectBindingRecord {
 /// ノード情報を upsert する (`last_seen_at` は現在時刻で更新)。
 ///
 /// `token_hash` / `token_issued_at` / `created_at` は既存値を保持する。
+/// `provisioner` / `idle_timeout_secs` は既存値を `NULL` で上書きしない
+/// (サーバーが一時ノードを事前登録した後、NodeHello が `provisioner = None`
+/// で upsert しても失わない)。
 pub async fn upsert_node(pool: &SqlitePool, record: &NodeRecord) -> Result<(), DbError> {
     let now = now_ms();
     let installed_agents_json = serde_json::to_string(&record.installed_agents)?;
@@ -120,9 +123,11 @@ pub async fn upsert_node(pool: &SqlitePool, record: &NodeRecord) -> Result<(), D
             version = excluded.version,
             installed_agents_json = excluded.installed_agents_json,
             is_ephemeral = excluded.is_ephemeral,
-            provisioner = excluded.provisioner,
+            -- 一時ノードの provisioner / idle_timeout はサーバーが事前登録した値を
+            -- NodeHello の upsert (provisioner = NULL) で失わないよう保持する
+            provisioner = COALESCE(excluded.provisioner, nodes.provisioner),
             lifecycle_status = excluded.lifecycle_status,
-            idle_timeout_secs = excluded.idle_timeout_secs,
+            idle_timeout_secs = COALESCE(excluded.idle_timeout_secs, nodes.idle_timeout_secs),
             is_online = excluded.is_online,
             last_seen_at = excluded.last_seen_at
         "#,
@@ -330,6 +335,86 @@ pub async fn upsert_project_binding(
         record.is_worktree,
         record.git_branch.as_deref(),
         now_ms(),
+    )
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// 一時VMプロビジョニング中の仮セッション行 (`provisional session`)。
+///
+/// 一時VMは `bootstrap-workspace` (git clone + ツール導入) を経てから
+/// `fxg daemon --stdio` が `SessionCreated` を送るため、それまでの間
+/// クライアント (UI) にセッションの存在と `provisioning` 状態を見せる必要がある。
+/// 中央サーバーはイベントではなく**投影行の直接挿入**でこれを行い
+/// (書き込み権威の一元化は維持)、後続の `SessionCreated`
+/// 投影 upsert が派生カラムを上書きする (`status` は `StatusChanged` まで保持)。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProvisionalSessionRecord {
+    /// セッションID (サーバー採番)
+    pub session_id: String,
+    /// 論理プロジェクトID
+    pub project_id: String,
+    /// プロジェクト表示名 (`projects` 行が無い場合の作成用)
+    pub project_name: String,
+    /// 実行ノードID (一時VMノードの事前採番ID)
+    pub node_id: String,
+    /// 実行ディレクトリ (起動要求時のローカルパス。UI 表示用)
+    pub local_path: String,
+    /// Gitブランチ (任意)
+    pub git_branch: Option<String>,
+    /// 起動するエージェントID
+    pub agent_id: String,
+    /// 表示タイトル
+    pub title: String,
+}
+
+/// 一時VMプロビジョニング中の仮セッション行を挿入する (冪等)。
+///
+/// `sessions` 行が既に存在する場合 (ノードが既に `SessionCreated` を送信済み)
+/// は何もしない。呼び出し側は事前に [`upsert_node`] で一時ノードIDを登録すること。
+pub async fn upsert_provisional_session(
+    pool: &SqlitePool,
+    record: &ProvisionalSessionRecord,
+) -> Result<(), DbError> {
+    let now = now_ms();
+    // `sessions.project_id` の FK を満たすため、未知のプロジェクトを用意する
+    sqlx::query!(
+        r#"
+        INSERT INTO projects (project_id, name, canonical_git_url, created_at, updated_at)
+        VALUES (?, ?, NULL, ?, ?)
+        ON CONFLICT(project_id) DO NOTHING
+        "#,
+        record.project_id,
+        record.project_name,
+        now,
+        now,
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query!(
+        r#"
+        INSERT INTO sessions (
+            session_id, project_id, node_id, local_path, git_branch, is_worktree,
+            agent_id, agent_session_id, parent_session_id, fork_from_node_seq,
+            title, status, current_mode, available_modes_json,
+            available_commands_json, config_options_json,
+            git_bundle_path, last_node_seq, synced_up_to_node_seq, created_at, updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, 0, ?, NULL, NULL, NULL, ?, ?, NULL, '[]', '[]', '[]', NULL, 0, 0, ?, ?)
+        ON CONFLICT(session_id) DO NOTHING
+        "#,
+        record.session_id,
+        record.project_id,
+        record.node_id,
+        record.local_path,
+        record.git_branch.as_deref(),
+        record.agent_id,
+        record.title,
+        SessionStatus::Provisioning.as_str(),
+        now,
+        now,
     )
     .execute(pool)
     .await?;

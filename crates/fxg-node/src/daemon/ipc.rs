@@ -765,6 +765,28 @@ async fn handle(
             Ok((command_id, IpcResult::AuthToken { token }))
         }
 
+        IpcClientMessage::GitCredential { command_id, prompt } => {
+            // Git Credential Proxy: 中央サーバーへオンメモリ中継して解決する
+            // (VM内ディスクにトークンを残さない。設計: docs/01 §6.4)
+            let result = match state.credentials().resolve(&prompt).await {
+                Ok(response) => IpcResult::GitCredential {
+                    username: if response.username.is_empty() {
+                        crate::credentials::default_username().to_owned()
+                    } else {
+                        response.username
+                    },
+                    token: response.token,
+                    error: response.error,
+                },
+                Err(err) => IpcResult::GitCredential {
+                    username: crate::credentials::default_username().to_owned(),
+                    token: None,
+                    error: Some(err.to_string()),
+                },
+            };
+            Ok((command_id, result))
+        }
+
         IpcClientMessage::EnsureSession {
             command_id,
             cwd,

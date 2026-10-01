@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        INSERT INTO nodes (\n            node_id, name, os, arch, version, installed_agents_json, is_ephemeral,\n            provisioner, lifecycle_status, idle_timeout_secs, is_online, last_seen_at, created_at\n        )\n        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)\n        ON CONFLICT(node_id) DO UPDATE SET\n            name = excluded.name,\n            os = excluded.os,\n            arch = excluded.arch,\n            version = excluded.version,\n            installed_agents_json = excluded.installed_agents_json,\n            is_ephemeral = excluded.is_ephemeral,\n            -- 一時ノードの provisioner / idle_timeout はサーバーが事前登録した値を\n            -- NodeHello の upsert (provisioner = NULL) で失わないよう保持する\n            provisioner = COALESCE(excluded.provisioner, nodes.provisioner),\n            lifecycle_status = excluded.lifecycle_status,\n            idle_timeout_secs = COALESCE(excluded.idle_timeout_secs, nodes.idle_timeout_secs),\n            is_online = excluded.is_online,\n            last_seen_at = excluded.last_seen_at\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 13
+    },
+    "nullable": []
+  },
+  "hash": "f7f2f5cc0f8b1f01693b06d5234a94b667dfcceab30cee7ad3a619c802f34245"
+}

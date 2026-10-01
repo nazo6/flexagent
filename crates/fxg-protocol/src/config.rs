@@ -33,6 +33,12 @@ pub const NODE_TOKEN_FILE_NAME: &str = "node_token";
 pub const NODE_DB_FILE_NAME: &str = "node.db";
 /// 中央サーバーDBのファイル名。
 pub const SERVER_DB_FILE_NAME: &str = "server.db";
+/// 一時VM破棄時に退避された git bundle の格納ディレクトリ名 (`~/.flexagent/bundles`)。
+pub const BUNDLES_DIR_NAME: &str = "bundles";
+/// 一時VMのブートストラップが生成する環境変数ファイル名 (`~/.flexagent/bootstrap.env`)。
+pub const BOOTSTRAP_ENV_FILE_NAME: &str = "bootstrap.env";
+/// `GitCredentialRequest` のデフォルト Basic 認証ユーザー名。
+pub const DEFAULT_GIT_USERNAME: &str = "x-access-token";
 /// `FXG_*` 環境変数名の定義。
 pub mod env_keys {
     /// `[node] node_id`

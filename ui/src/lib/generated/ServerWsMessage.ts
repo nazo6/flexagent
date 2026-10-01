@@ -22,7 +22,15 @@ session_id: string,
 /**
  * 差分本体
  */
-delta: StreamDeltaPayload, } | { "op": "command_result", 
+delta: StreamDeltaPayload, } | { "op": "bootstrap_log", 
+/**
+ * 対象セッションID
+ */
+session_id: string, 
+/**
+ * ログ1行
+ */
+line: string, } | { "op": "command_result", 
 /**
  * 相関ID
  */

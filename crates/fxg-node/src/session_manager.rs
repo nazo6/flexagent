@@ -23,7 +23,9 @@ use fxg_acp::registry::{AcpRegistry, OPENCODE2_ID, RegistryIndex};
 use fxg_acp::{
     AcpDriver, ActiveSessionHandle, AgentDriver, AgentLaunchSpec, DriverEvent, OpenCode2Driver,
 };
-use fxg_protocol::common::{PermissionOption, SessionControlAction, SessionStatus};
+use fxg_protocol::common::{
+    ForkHistoryItem, PermissionOption, SessionControlAction, SessionStatus,
+};
 use fxg_protocol::events::{SessionEventEnvelope, UnifiedEventPayload};
 use fxg_protocol::ipc::AttachMode;
 use fxg_protocol::util::uuid_v7;
@@ -95,6 +97,10 @@ pub struct StartSessionParams<'a> {
     pub agent_id: &'a str,
     /// 初期プロンプト
     pub initial_prompt: Option<&'a str>,
+    /// Fork 時の履歴 Replay 注入 (別ノード・一時VMからの引き継ぎ)
+    pub fork_context: Option<&'a [ForkHistoryItem]>,
+    /// 別ノード・一時VMから退避された Git バンドルの復元 (ローカルファイルパス)
+    pub restore_git_bundle: Option<&'a Path>,
 }
 
 /// `revert` の結果。
@@ -343,6 +349,12 @@ impl SessionManager {
             return Err(NodeError::CommandDuplicate(params.command_id.to_owned()));
         }
 
+        // 退避済み Git バンドルの復元 (別ノードへの引き継ぎ)。
+        // プロジェクト解決より前にワークスペースを実体化する。
+        if let Some(bundle_file) = params.restore_git_bundle {
+            crate::bundle::restore_workspace_bundle(params.local_path, bundle_file).await?;
+        }
+
         let resolved = project::resolve_project(params.local_path, &self.inner.node_id).await?;
         let spec = self.resolve_launch_spec(params.agent_id, &[]).await?;
 
@@ -392,6 +404,16 @@ impl SessionManager {
             self.start_turn(params.session_id, prompt, "web").await?;
         }
 
+        // 別ノード・一時VMからの Fork: 履歴 Replay を初期コンテキストとして注入する
+        if let Some(context) = params.fork_context.and_then(build_fork_context_from_items)
+            && let Err(err) = self.start_turn(params.session_id, &context, "fork").await
+        {
+            tracing::warn!(
+                session_id = %params.session_id,
+                "failed to inject fork context: {err:#}"
+            );
+        }
+
         Ok(EnsureSessionOutcome {
             session_id: params.session_id.to_owned(),
             attach_mode: attach_mode_of(handle.as_ref()),
@@ -435,6 +457,22 @@ impl SessionManager {
         &self,
         params: StartDriverParams<'_>,
     ) -> Result<Arc<dyn ActiveSessionHandle>, NodeError> {
+        // Git Credential Proxy (一時VM向け GIT_ASKPASS) をエージェントプロセスへ注入する。
+        // スクリプトはデーモン起動時に生成済みで、`fxg git-askpass` → ローカルIPC →
+        // 中央サーバーのオンメモリ中継で認証する (設計: docs/01 §6.4)。
+        let mut spec = params.spec.clone();
+        let askpass = crate::credentials::askpass_script_path(self.inner.paths.fxg_home());
+        if askpass.exists() {
+            for (key, value) in crate::credentials::git_env(self.inner.paths.fxg_home()) {
+                spec.env.retain(|(k, _)| k != &key);
+                spec.env.push((key, value));
+            }
+        }
+        let params = StartDriverParams {
+            spec: &spec,
+            ..params
+        };
+
         let driver =
             (self.inner.factory)(params.spec).map_err(|err| NodeError::Agent(err.to_string()))?;
         let (event_tx, event_rx) = mpsc::unbounded_channel();
@@ -1238,9 +1276,6 @@ fn find_revert_snapshot(events: &[SessionEventEnvelope]) -> Option<(u64, String)
 /// 会話 (ユーザー / エージェントメッセージ) と、ツール呼び出しの要約・変更ファイルを
 /// `node_seq` 順に連結する。会話が無い (履歴なし) 場合は `None`。
 fn build_fork_context(events: &[SessionEventEnvelope], fork_seq: u64) -> Option<String> {
-    /// 注入するコンテキストの最大文字数 (過大なプロンプトを防ぐ)。
-    const MAX_CONTEXT_CHARS: usize = 16_000;
-
     let mut parts: Vec<String> = Vec::new();
     for event in events {
         if event.node_seq > fork_seq {
@@ -1279,13 +1314,46 @@ fn build_fork_context(events: &[SessionEventEnvelope], fork_seq: u64) -> Option<
             _ => {}
         }
     }
+    assemble_fork_context(parts, fork_seq)
+}
+
+/// 中央サーバーから届いた構造化履歴 ([`ForkHistoryItem`]) から
+/// Replay 注入用のコンテキストを組み立てる (別ノード・一時VMへの引き継ぎ)。
+fn build_fork_context_from_items(items: &[ForkHistoryItem]) -> Option<String> {
+    let mut parts: Vec<String> = Vec::new();
+    for item in items {
+        let role = if item.role == "user" {
+            "User"
+        } else {
+            "Assistant"
+        };
+        if !item.text.trim().is_empty() {
+            parts.push(format!("### {role}\n{}", item.text));
+        }
+        if let Some(summary) = item.tool_summary.as_deref()
+            && !summary.trim().is_empty()
+        {
+            parts.push(format!("- {summary}"));
+        }
+    }
+    assemble_fork_context(parts, 0)
+}
+
+/// Replay コンテキストの共通組み立て (上限文字数で打ち切る)。
+fn assemble_fork_context(parts: Vec<String>, fork_seq: u64) -> Option<String> {
+    /// 注入するコンテキストの最大文字数 (過大なプロンプトを防ぐ)。
+    const MAX_CONTEXT_CHARS: usize = 16_000;
 
     if parts.is_empty() {
         return None;
     }
-
+    let range = if fork_seq > 0 {
+        format!(" (node_seq <= {fork_seq})")
+    } else {
+        String::new()
+    };
     let mut context = format!(
-        "以下の履歴は、以前のセッション (node_seq <= {fork_seq}) をこの時点から \
+        "以下の履歴は、以前のセッション{range}をこの時点から \
          Fork したものです。この文脈を引き継いで作業を続けてください。\n\n"
     );
     for part in parts {
@@ -1874,6 +1942,8 @@ mod tests {
                 local_path: dir.path(),
                 agent_id: "mock",
                 initial_prompt: Some("# First Turn\nDo something"),
+                fork_context: None,
+                restore_git_bundle: None,
             })
             .await
             .expect("start");

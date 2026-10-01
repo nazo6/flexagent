@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT git_bundle_path FROM sessions WHERE session_id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "git_bundle_path",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "sessions",
+            "name": "git_bundle_path"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "e9ea484b8b8dc294127faac6dd1adccbe5f16d2ae74579a6d86f22a1c61edf2b"
+}

@@ -271,6 +271,14 @@ impl Db {
         registration::delete_orphan_projects(&self.pool).await
     }
 
+    /// 一時VMプロビジョニング中の仮セッション行を挿入する (ハブ専用・冪等)。
+    pub async fn upsert_provisional_session(
+        &self,
+        record: &registration::ProvisionalSessionRecord,
+    ) -> Result<(), DbError> {
+        registration::upsert_provisional_session(&self.pool, record).await
+    }
+
     // ------------------------------------------------------------------
     // 共通クライアント向けクエリ (crate::queries)
     // ------------------------------------------------------------------
@@ -286,6 +294,20 @@ impl Db {
     /// セッションを1件取得する。
     pub async fn get_session(&self, session_id: &str) -> Result<Option<SessionSummary>, DbError> {
         queries::get_session(&self.pool, session_id).await
+    }
+
+    /// ハブ専用: 退避済み git bundle のパスを記録する (`None` で消去)。
+    pub async fn set_git_bundle_path(
+        &self,
+        session_id: &str,
+        path: Option<&str>,
+    ) -> Result<(), DbError> {
+        queries::set_git_bundle_path(&self.pool, session_id, path).await
+    }
+
+    /// ハブ専用: 退避済み git bundle のパスを取得する。
+    pub async fn get_git_bundle_path(&self, session_id: &str) -> Result<Option<String>, DbError> {
+        queries::get_git_bundle_path(&self.pool, session_id).await
     }
 
     /// `after_cursor` より後のイベント履歴 (差分再開用バッチ) を取得する。

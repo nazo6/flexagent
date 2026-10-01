@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE sessions SET git_bundle_path = ? WHERE session_id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "b741fd527b5c4b1ebce6d6368f9a84dc8e2bbab42d2a1843062ccc31ce84b737"
+}

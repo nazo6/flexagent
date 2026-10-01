@@ -30,6 +30,10 @@ pub mod snapshot;
 pub mod sync;
 pub mod worktree;
 
+pub mod bootstrap;
+pub mod bundle;
+pub mod credentials;
+
 #[cfg(test)]
 mod testutil;
 

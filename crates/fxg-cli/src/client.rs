@@ -233,6 +233,31 @@ impl DaemonClient {
         }
     }
 
+    /// `fxg git-askpass` (GIT_ASKPASS ヘルパー。Git Credential Proxy)
+    ///
+    /// `(username, token, error)` を返す。一時VMではトークンはオンメモリのみで
+    /// 扱われ、ディスクには保存されない (設計: docs/01 §6.4)。
+    pub async fn git_credential(
+        &mut self,
+        prompt: &str,
+    ) -> Result<(String, Option<String>, Option<String>)> {
+        let command_id = self.command_id();
+        let result = self
+            .request(IpcClientMessage::GitCredential {
+                command_id,
+                prompt: prompt.to_owned(),
+            })
+            .await?;
+        match result {
+            IpcResult::GitCredential {
+                username,
+                token,
+                error,
+            } => Ok((username, token, error)),
+            other => bail!("unexpected ipc result: {other:?}"),
+        }
+    }
+
     /// `fxg run <agent>` の新規セッション開始。
     pub async fn ensure_session(
         &mut self,
