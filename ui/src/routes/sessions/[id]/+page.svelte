@@ -30,6 +30,7 @@
   import PanelRightCloseIcon from '@lucide/svelte/icons/panel-right-close';
   import SkullIcon from '@lucide/svelte/icons/skull';
   import SquareTerminalIcon from '@lucide/svelte/icons/square-terminal';
+  import Undo2Icon from '@lucide/svelte/icons/undo-2';
 
   type ViewMode = 'chat' | 'diff' | 'terminal';
 
@@ -105,6 +106,10 @@
   let killDialogOpen = $state(false);
   let killing = $state(false);
 
+  // Revert (Shadow Git Tree 巻き戻し) 確認ダイアログの状態
+  let revertSeq = $state<number | null>(null);
+  let reverting = $state(false);
+
   function scrollToBottom() {
     if (!chatContainer) return;
     chatContainer.scrollTo({ top: chatContainer.scrollHeight, behavior: 'smooth' });
@@ -145,6 +150,28 @@
       toast.error(error instanceof Error ? error.message : String(error));
     } finally {
       killing = false;
+    }
+  }
+
+  /** タイムラインの「この時点へ巻き戻す」から確認ダイアログを開く。 */
+  function requestRevert(seq: number) {
+    revertSeq = seq;
+  }
+
+  /** 指定ターン時点へワークスペースを巻き戻す (`POST /sessions/:id/revert`)。 */
+  async function handleRevertSession() {
+    if (!sessionId || revertSeq === null || reverting) return;
+    reverting = true;
+    try {
+      const result = await sync.revertSession(sessionId, revertSeq);
+      toast.success(
+        `node_seq=${result.target_node_seq} 時点へ巻き戻しました (復元 ${result.restored_files} 件 / 削除 ${result.removed_files} 件)`
+      );
+      revertSeq = null;
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      reverting = false;
     }
   }
 </script>
@@ -330,6 +357,34 @@
     </AlertDialog.Content>
   </AlertDialog.Root>
 
+  <!-- Revert 確認モーダル (Shadow Git Tree 巻き戻し) -->
+  <AlertDialog.Root open={revertSeq !== null} onOpenChange={(open) => !open && (revertSeq = null)}>
+    <AlertDialog.Content>
+      <AlertDialog.Header>
+        <AlertDialog.Title class="flex items-center gap-2">
+          <Undo2Icon class="size-5 text-amber-500" />
+          この時点へ巻き戻しますか？
+        </AlertDialog.Title>
+        <AlertDialog.Description class="text-sm">
+          ワークスペースのファイルを <code>node_seq={revertSeq}</code> のターン開始時の
+          スナップショットへ復元します。未コミットの変更は上書きされ、このターン以降に
+          作成されたファイルは削除されます。実行直前の状態は Shadow Git Tree にバックアップ
+          されます。
+        </AlertDialog.Description>
+      </AlertDialog.Header>
+      <AlertDialog.Footer>
+        <AlertDialog.Cancel disabled={reverting}>キャンセル</AlertDialog.Cancel>
+        <AlertDialog.Action
+          class="bg-amber-600 hover:bg-amber-600/90 text-white"
+          disabled={reverting}
+          onclick={handleRevertSession}
+        >
+          {reverting ? '巻き戻し中…' : '巻き戻し (Revert)'}
+        </AlertDialog.Action>
+      </AlertDialog.Footer>
+    </AlertDialog.Content>
+  </AlertDialog.Root>
+
   <!-- セッションが存在しない場合のエラー表示 -->
   {#if session === null}
     <div class="p-4 text-center text-sm text-muted-foreground">
@@ -354,7 +409,7 @@
       >
         <div class="mx-auto flex max-w-3xl flex-col gap-4">
           <BootstrapLogCard lines={bootstrapLines} />
-          <ChatTimeline sessionId={sessionId} {items} />
+          <ChatTimeline sessionId={sessionId} {items} onRevert={requestRevert} />
         </div>
       </div>
 

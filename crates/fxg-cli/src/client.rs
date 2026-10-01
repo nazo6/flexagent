@@ -8,7 +8,7 @@ use std::path::Path;
 
 use anyhow::{Context, Result, bail};
 use fxg_node::IpcClient;
-use fxg_protocol::client_api::WorktreeInfo;
+use fxg_protocol::client_api::{SessionRevertResponse, WorktreeInfo};
 use fxg_protocol::common::{
     HookLogEntry, PermissionRequestEntry, ProjectSummary, SessionControlAction, SessionSummary,
 };
@@ -383,7 +383,7 @@ impl DaemonClient {
         &mut self,
         session_id: &str,
         target_node_seq: Option<u64>,
-    ) -> Result<SessionRevertOutcome> {
+    ) -> Result<SessionRevertResponse> {
         let command_id = self.command_id();
         let result = self
             .request(IpcClientMessage::SessionRevert {
@@ -399,7 +399,7 @@ impl DaemonClient {
                 backup_tree_hash,
                 restored_files,
                 removed_files,
-            } => Ok(SessionRevertOutcome {
+            } => Ok(SessionRevertResponse {
                 target_node_seq,
                 restored_tree_hash,
                 backup_tree_hash,
@@ -485,20 +485,6 @@ impl DaemonClient {
     pub fn next_command_id(&mut self) -> String {
         self.command_id()
     }
-}
-
-/// `fxg session revert` の表示用データ。
-pub struct SessionRevertOutcome {
-    /// 基準にした `UserMessage` の `node_seq`
-    pub target_node_seq: u64,
-    /// 復元先の Tree Hash
-    pub restored_tree_hash: String,
-    /// 復元直前を退避したバックアップ Tree Hash
-    pub backup_tree_hash: Option<String>,
-    /// 復元したファイル数
-    pub restored_files: u64,
-    /// 削除したファイル数
-    pub removed_files: u64,
 }
 
 /// 単純な成功応答 (`Ack` / 非同期コマンドの受理) をメッセージへ正規化する。

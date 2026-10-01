@@ -10,7 +10,8 @@ use async_trait::async_trait;
 use fxg_protocol::client_api::{
     ConnectionRole, CreateSessionRequest, CreateSessionResponse, CreateWorktreeRequest,
     KillSwitchResponse, ProvisionersResponse, RemoveWorktreeRequest, RespondPermissionRequest,
-    RespondPermissionResponse, WorktreeInfo, WorktreesResponse,
+    RespondPermissionResponse, SessionRevertRequest, SessionRevertResponse, WorktreeInfo,
+    WorktreesResponse,
 };
 use fxg_protocol::common::{CommandResult, DiffScope, WorkspaceDiffResponse};
 use fxg_server::api::{
@@ -294,6 +295,39 @@ impl ClientApiBackend for DaemonState {
             }),
             Err(err) => Err(api_error(err)),
         }
+    }
+
+    async fn revert_session(
+        &self,
+        session_id: &str,
+        request: SessionRevertRequest,
+        client: ClientInfo,
+    ) -> Result<SessionRevertResponse, ApiError> {
+        let command_id = fxg_protocol::util::uuid_v7();
+        let outcome = self
+            .session_manager()
+            .revert(&command_id, session_id, request.target_node_seq)
+            .await
+            .map_err(api_error)?;
+        self.record_audit(
+            fxg_db::audit::actions::SESSION_REVERT,
+            &audit_source(&client),
+            Some(session_id),
+            serde_json::json!({
+                "target_node_seq": outcome.target_node_seq,
+                "restored_tree_hash": outcome.restored_tree_hash,
+                "restored_files": outcome.restored_files,
+                "removed_files": outcome.removed_files,
+            }),
+        )
+        .await;
+        Ok(SessionRevertResponse {
+            target_node_seq: outcome.target_node_seq,
+            restored_tree_hash: outcome.restored_tree_hash,
+            backup_tree_hash: outcome.backup_tree_hash,
+            restored_files: outcome.restored_files as u64,
+            removed_files: outcome.removed_files as u64,
+        })
     }
 
     async fn list_worktrees(&self, project_id: &str) -> Result<WorktreesResponse, ApiError> {

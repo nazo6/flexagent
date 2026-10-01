@@ -14,6 +14,8 @@ use crate::error::DbError;
 pub mod actions {
     /// セッション起動
     pub const SESSION_START: &str = "session_start";
+    /// セッション巻き戻し (Shadow Git Tree Revert)
+    pub const SESSION_REVERT: &str = "session_revert";
     /// 承認解決 (Approve / Reject)
     pub const PERMISSION_RESOLVED: &str = "permission_resolved";
     /// Web PTY 起動
@@ -22,6 +24,16 @@ pub mod actions {
     pub const KILL_SWITCH: &str = "kill_switch";
     /// Worktree 操作 (作成・削除)
     pub const WORKTREE_MANAGE: &str = "worktree_manage";
+    /// Worktree クリーンアップ (Prune)
+    pub const WORKTREE_PRUNE: &str = "worktree_prune";
+    /// プロジェクト紐付け (手動 Link / 一括 Scan)
+    pub const PROJECT_LINK: &str = "project_link";
+    /// エージェント管理 (インストール / 更新 / 削除)
+    pub const AGENT_MANAGE: &str = "agent_manage";
+    /// ノードトークン発行・失効
+    pub const NODE_TOKEN_MANAGE: &str = "node_token_manage";
+    /// クライアント認証トークン再生成
+    pub const AUTH_TOKEN_ROTATE: &str = "auth_token_rotate";
 }
 
 /// 監査ログの記録内容。

@@ -7,6 +7,7 @@ import type { ProjectSummary } from "$lib/generated/ProjectSummary";
 import type { ServerWsMessage } from "$lib/generated/ServerWsMessage";
 import type { SessionControlAction } from "$lib/generated/SessionControlAction";
 import type { SessionEventEnvelope } from "$lib/generated/SessionEventEnvelope";
+import type { SessionRevertResponse } from "$lib/generated/SessionRevertResponse";
 import type { SessionSummary } from "$lib/generated/SessionSummary";
 import { mergeCursor } from "$lib/sync/cursor";
 import { SessionTimeline } from "$lib/sync/timeline.svelte";
@@ -361,6 +362,28 @@ export class SyncStore {
       },
       sessionId,
     );
+  }
+
+  /**
+   * 指定ターン (`UserMessage.node_seq`) 時点へワークスペースを巻き戻す。
+   *
+   * ノードの Shadow Git Tree から復元する REST API を呼び、
+   * 追記された `SessionReverted` を反映するため履歴を再取得する。
+   */
+  async revertSession(
+    sessionId: string,
+    targetNodeSeq: number | null,
+  ): Promise<SessionRevertResponse> {
+    const result = await this.connection.client.revertSession(sessionId, {
+      target_node_seq: targetNodeSeq,
+    });
+    await Promise.all([
+      this.refreshSessions(),
+      this.loadSessionEvents(sessionId).catch(() => {
+        /* WS リプレイで追いつくため無視する */
+      }),
+    ]);
+    return result;
   }
 
   /** 緊急停止 (監査ログ付きの REST API)。 */

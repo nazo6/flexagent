@@ -17,7 +17,8 @@ use fxg_protocol::client_api::{
     ConnectionRole, CreateSessionRequest, CreateSessionResponse, CreateWorktreeRequest,
     KillSwitchResponse, ProvisionerSummary, ProvisionersResponse, PushSubscribeRequest,
     PushSubscribeResponse, RemoveWorktreeRequest, RespondPermissionRequest,
-    RespondPermissionResponse, WorktreeInfo, WorktreesResponse,
+    RespondPermissionResponse, SessionRevertRequest, SessionRevertResponse, WorktreeInfo,
+    WorktreesResponse,
 };
 use fxg_protocol::common::{
     CommandResult, DiffScope, ErrorCode, ForkHistoryItem, WorkspaceDiffResponse, WorktreeAction,
@@ -686,6 +687,43 @@ impl ClientApiBackend for ServerState {
                 result.error.unwrap_or_else(|| "respond failed".to_owned()),
             ))
         }
+    }
+
+    async fn revert_session(
+        &self,
+        session_id: &str,
+        request: SessionRevertRequest,
+        client: ClientInfo,
+    ) -> Result<SessionRevertResponse, ApiError> {
+        let node_id = self.session_node(session_id).await?;
+        let command_id = uuid_v7();
+        let outcome = self
+            .inner
+            .hub
+            .revert_session(
+                &node_id,
+                &command_id,
+                ServerToNodeMsg::RevertSession {
+                    command_id: command_id.clone(),
+                    session_id: session_id.to_owned(),
+                    target_node_seq: request.target_node_seq,
+                },
+            )
+            .await?;
+        self.record_audit(
+            fxg_db::audit::actions::SESSION_REVERT,
+            &client,
+            Some(session_id),
+            serde_json::json!({
+                "node_id": node_id,
+                "target_node_seq": outcome.target_node_seq,
+                "restored_tree_hash": outcome.restored_tree_hash,
+                "restored_files": outcome.restored_files,
+                "removed_files": outcome.removed_files,
+            }),
+        )
+        .await;
+        Ok(outcome)
     }
 
     async fn list_worktrees(&self, project_id: &str) -> Result<WorktreesResponse, ApiError> {

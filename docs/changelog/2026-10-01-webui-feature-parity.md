@@ -45,10 +45,14 @@ CLI (`fxg`) で提供されている機能のうち、Web UI
 - [x] プロビジョナー接続テストのモーダル & ログ表示 (`NewSessionChat.svelte`,
       `testProvisioner` API)
 
-### フェーズ B: セッション Revert (Shadow Git Tree 巻き戻し) (着手)
+### フェーズ B: セッション Revert (Shadow Git Tree 巻き戻し) (完了)
 
-- [ ] Node ⇔ Server プロトコルに Revert メッセージ
+- [x] Node ⇔ Server プロトコルに Revert メッセージ
       (`ServerToNodeMsg::RevertSession`, `NodeToServerMsg::RevertResult`) 追加
-- [ ] Central Server / Local Node REST API (`POST /api/v1/sessions/:id/revert`)
+- [x] Central Server / Local Node REST API (`POST /api/v1/sessions/:id/revert`)
       追加
-- [ ] Web UI (タイムライン / Diff ペイン) に巻き戻しボタン & 確認モーダル実装
+- [x] Web UI (タイムライン) に巻き戻しボタン & 確認モーダル実装
+      (`ChatTimeline.svelte` の各ユーザーターン、`/sessions/[id]` の Revert 確認
+      ダイアログ)
+- [x] 監査ログ `session_revert` を追加 (サーバー / ノード双方)
+- [x] CLI の重複型 (`SessionRevertOutcome`) を `SessionRevertResponse` へ統合 (DRY)

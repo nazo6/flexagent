@@ -40,7 +40,8 @@ use fxg_protocol::client_api::{
     KillSwitchRequest, KillSwitchResponse, NodesResponse, ProjectsResponse, ProvisionersResponse,
     PushSubscribeRequest, PushSubscribeResponse, RemoveWorktreeRequest, RespondPermissionRequest,
     RespondPermissionResponse, SearchResponse, ServerWsMessage, SessionListResponse,
-    SystemInfoResponse, WorktreeInfo, WorktreesResponse,
+    SessionRevertRequest, SessionRevertResponse, SystemInfoResponse, WorktreeInfo,
+    WorktreesResponse,
 };
 use fxg_protocol::common::{
     CommandResult, DiffScope, ErrorCode, SessionControlAction, SessionStatus, WorkspaceDiffResponse,
@@ -357,6 +358,14 @@ pub trait ClientApiBackend: Clone + Send + Sync + 'static {
         client: ClientInfo,
     ) -> Result<RespondPermissionResponse, ApiError>;
 
+    /// `POST /api/v1/sessions/:id/revert` (Shadow Git Tree 巻き戻し)。
+    async fn revert_session(
+        &self,
+        session_id: &str,
+        request: SessionRevertRequest,
+        client: ClientInfo,
+    ) -> Result<SessionRevertResponse, ApiError>;
+
     /// `GET /api/v1/projects/:id/worktrees`
     async fn list_worktrees(&self, project_id: &str) -> Result<WorktreesResponse, ApiError>;
 
@@ -537,6 +546,10 @@ pub fn client_router<B: ClientApiBackend>(backend: B, options: ClientApiOptions)
         .route(
             "/api/v1/sessions/{session_id}/permissions/{request_id}/respond",
             post(respond_permission::<B>),
+        )
+        .route(
+            "/api/v1/sessions/{session_id}/revert",
+            post(revert_session::<B>),
         )
         .route("/api/v1/inbox", get(inbox::<B>))
         .route("/api/v1/search", post(search::<B>))
@@ -813,6 +826,22 @@ async fn respond_permission<B: ClientApiBackend>(
     match state
         .backend
         .respond_permission(&session_id, &request_id, request, client)
+        .await
+    {
+        Ok(response) => Json(response).into_response(),
+        Err(err) => err.into_response(),
+    }
+}
+
+async fn revert_session<B: ClientApiBackend>(
+    State(state): State<ClientApiState<B>>,
+    Extension(client): Extension<ClientInfo>,
+    UrlPath(session_id): UrlPath<String>,
+    Json(request): Json<SessionRevertRequest>,
+) -> Response {
+    match state
+        .backend
+        .revert_session(&session_id, request, client)
         .await
     {
         Ok(response) => Json(response).into_response(),

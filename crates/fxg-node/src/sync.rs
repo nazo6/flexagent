@@ -505,6 +505,39 @@ pub(crate) async fn handle_server_message(
                 .map(|()| session_id);
             send_command_result(out, command_id, result).await;
         }
+        ServerToNodeMsg::RevertSession {
+            command_id,
+            session_id,
+            target_node_seq,
+        } => {
+            let outcome = state
+                .session_manager()
+                .revert(&command_id, &session_id, target_node_seq)
+                .await;
+            let message = match outcome {
+                Ok(outcome) => NodeToServerMsg::RevertResult {
+                    command_id,
+                    success: true,
+                    code: None,
+                    outcome: Some(fxg_protocol::client_api::SessionRevertResponse {
+                        target_node_seq: outcome.target_node_seq,
+                        restored_tree_hash: outcome.restored_tree_hash,
+                        backup_tree_hash: outcome.backup_tree_hash,
+                        restored_files: outcome.restored_files as u64,
+                        removed_files: outcome.removed_files as u64,
+                    }),
+                    error: None,
+                },
+                Err(err) => NodeToServerMsg::RevertResult {
+                    command_id,
+                    success: false,
+                    code: Some(err.error_code()),
+                    outcome: None,
+                    error: Some(err.to_string()),
+                },
+            };
+            let _ = out.send(message).await;
+        }
         ServerToNodeMsg::PtySpawn {
             pty_id,
             session_id,

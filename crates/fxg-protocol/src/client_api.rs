@@ -272,6 +272,35 @@ pub struct RespondPermissionResponse {
     pub already_resolved: bool,
 }
 
+/// `POST /api/v1/sessions/:id/revert` リクエスト。
+///
+/// 指定ターン (`UserMessage.node_seq`) 時点の Shadow Git Tree へ
+/// ワークスペースを復元する (`fxg session revert` の Web UI 版)。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct SessionRevertRequest {
+    /// Revert 基準にする `UserMessage` の `node_seq`
+    /// (省略時は直近ターン)
+    pub target_node_seq: Option<u64>,
+}
+
+/// `POST /api/v1/sessions/:id/revert` レスポンス。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct SessionRevertResponse {
+    /// 基準にした `UserMessage` の `node_seq`
+    pub target_node_seq: u64,
+    /// 復元先の Tree Hash
+    pub restored_tree_hash: String,
+    /// 復元直前を退避したバックアップ Tree Hash
+    /// (もう一度 Revert すれば元に戻せる)
+    pub backup_tree_hash: Option<String>,
+    /// 復元したファイル数
+    pub restored_files: u64,
+    /// 削除したファイル数
+    pub removed_files: u64,
+}
+
 /// `POST /api/v1/search` レスポンス (FTS5 全文検索)。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]

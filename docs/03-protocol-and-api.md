@@ -380,6 +380,15 @@ pub enum NodeToServerMsg {
         worktree: Option<WorktreeInfo>,
         error: Option<String>,
     },
+    /// セッション Revert (`RevertSession`) の結果応答
+    /// ※成功時は復元結果 (SessionRevertResponse は §3.1 の client_api 型) を返す
+    RevertResult {
+        command_id: String,
+        success: bool,
+        code: Option<ErrorCode>,   // 失敗時の構造化エラーコード (BUSY 等)
+        outcome: Option<SessionRevertResponse>,
+        error: Option<String>,
+    },
     /// PTY 起動・操作の失敗通知 (エラーコードは文字列。例: `PTY_DISABLED`)
     /// ※ノード側設定 allow_remote_pty = false の場合、リモートからの
     ///   PtySpawn に対して PTY_DISABLED を返す
@@ -456,6 +465,14 @@ pub enum ServerToNodeMsg {
         command_id: String,
         session_id: String,
         action: SessionControlAction, // SetMode(String) | SetConfig(k, v) | Cancel | Kill
+    },
+    /// 指定ターン時点へのファイル復元 (`fxg session revert`)
+    /// ※ノードの Shadow Git Tree からワークスペースを復元し、
+    ///   SessionReverted イベントを追記する (実行中セッションのみ。busy 時は BUSY)
+    RevertSession {
+        command_id: String,
+        session_id: String,
+        target_node_seq: Option<u64>, // Revert 基準の UserMessage.node_seq (None は直近ターン)
     },
     /// ワークスペースWebターミナル (PTY) の起動要求
     PtySpawn {
@@ -597,6 +614,14 @@ pub enum ServerToNodeMsg {
   承認リクエストへの応答 (`selected_option_id`, `always`,
   `resolved_by`)。既に解決済みの場合は `ALREADY_RESOLVED` を返却し（冪等）、UI
   側は正常遷移として扱う。
+- `POST /api/v1/sessions/:id/revert`:
+  指定ターン (`target_node_seq` = `UserMessage.node_seq`) 時点の Shadow Git Tree
+  へワークスペースのファイルを復元する (`fxg session revert` の Web UI 版)。
+  会話イベントは削除せず `SessionReverted` を追記し、復元直前の状態は
+  バックアップ Tree Hash として退避する。応答は `SessionRevertResponse`
+  (`target_node_seq` / Tree Hash / 復元・削除ファイル数)。実行中セッションのみ
+  対象で、ターン実行中は `BUSY` を返却する。中央サーバー経由の場合は対象ノードへ
+  `RevertSession` を中継する。
 - `POST /api/v1/search?q=...`: SQLite FTS5 を用いた全セッション横断の全文検索。
 - `POST /api/v1/push/subscribe`: Android / Desktop PWA の Web Push
   サブスクリプション登録 (中央サーバーのみ)。VAPID 鍵は初回起動時に

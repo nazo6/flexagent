@@ -121,6 +121,19 @@ pub enum NodeToServerMsg {
         /// 失敗時のメッセージ
         error: Option<String>,
     },
+    /// セッション Revert (`RevertSession`) の結果応答。
+    RevertResult {
+        /// 要求時の相関ID
+        command_id: String,
+        /// 成功したか
+        success: bool,
+        /// 失敗時の構造化エラーコード
+        code: Option<ErrorCode>,
+        /// 成功時の復元結果
+        outcome: Option<crate::client_api::SessionRevertResponse>,
+        /// 失敗時のメッセージ
+        error: Option<String>,
+    },
     /// ファイルシステム閲覧 (`BrowseFs`) の結果応答。
     BrowseFsResult {
         /// 要求時の相関ID
@@ -250,6 +263,20 @@ pub enum ServerToNodeMsg {
         session_id: String,
         /// 実行する操作
         action: SessionControlAction,
+    },
+    /// 指定ターン時点へのファイル復元 (`fxg session revert`)。
+    ///
+    /// ノードの Shadow Git Tree からワークスペースを復元し、
+    /// `SessionReverted` イベントを追記する
+    /// (設計: `docs/04-agent-drivers-and-windows.md` §4.1)。
+    RevertSession {
+        /// 相関ID
+        command_id: String,
+        /// 対象セッションID
+        session_id: String,
+        /// Revert 基準にする `UserMessage` の `node_seq`
+        /// (省略時は直近ターン)
+        target_node_seq: Option<u64>,
     },
     /// ワークスペースWebターミナル (PTY) の起動要求。
     PtySpawn {
@@ -405,6 +432,42 @@ mod tests {
         assert_eq!(json["op"], "get_git_diff");
         assert_eq!(json["scope"], "branch_base");
         let decoded: ServerToNodeMsg = serde_json::from_value(json).unwrap();
+        assert_eq!(decoded, msg);
+    }
+
+    #[test]
+    fn server_to_node_revert_session_shape() {
+        let msg = ServerToNodeMsg::RevertSession {
+            command_id: "c1".into(),
+            session_id: "s1".into(),
+            target_node_seq: Some(7),
+        };
+        let json = serde_json::to_value(&msg).unwrap();
+        assert_eq!(json["op"], "revert_session");
+        assert_eq!(json["target_node_seq"], 7);
+        let decoded: ServerToNodeMsg = serde_json::from_value(json).unwrap();
+        assert_eq!(decoded, msg);
+    }
+
+    #[test]
+    fn node_to_server_revert_result_shape() {
+        let msg = NodeToServerMsg::RevertResult {
+            command_id: "c1".into(),
+            success: true,
+            code: None,
+            outcome: Some(crate::client_api::SessionRevertResponse {
+                target_node_seq: 7,
+                restored_tree_hash: "abc123".into(),
+                backup_tree_hash: Some("def456".into()),
+                restored_files: 3,
+                removed_files: 1,
+            }),
+            error: None,
+        };
+        let json = serde_json::to_value(&msg).unwrap();
+        assert_eq!(json["op"], "revert_result");
+        assert_eq!(json["outcome"]["restored_files"], 3);
+        let decoded: NodeToServerMsg = serde_json::from_value(json).unwrap();
         assert_eq!(decoded, msg);
     }
 }

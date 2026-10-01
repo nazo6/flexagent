@@ -14,11 +14,26 @@
   import GitForkIcon from '@lucide/svelte/icons/git-fork';
   import ListChecksIcon from '@lucide/svelte/icons/list-checks';
   import SquareTerminalIcon from '@lucide/svelte/icons/square-terminal';
+  import Undo2Icon from '@lucide/svelte/icons/undo-2';
 
-  let { sessionId, items }: { sessionId: string; items: TimelineItem[] } = $props();
+  let {
+    sessionId,
+    items,
+    onRevert
+  }: {
+    sessionId: string;
+    items: TimelineItem[];
+    /** 「この時点へ巻き戻す (Revert)」要求のコールバック (引数は対象ターンの node_seq)。 */
+    onRevert?: (seq: number) => void;
+  } = $props();
 
   const currentSession = $derived(
     sync.sessions.find((s) => s.session_id === sessionId) ?? null
+  );
+
+  /** 停止済みセッションは Revert 不可 (ノード側で実行中セッションのみ許容)。 */
+  const canRevert = $derived(
+    onRevert !== undefined && currentSession !== null && currentSession.status !== 'stopped'
   );
 
   function forkFromSeq(seq: number) {
@@ -86,6 +101,16 @@
         {@const item = group.item}
         {#if item.kind === 'user'}
           <div class="group flex items-end justify-end gap-1.5">
+            {#if canRevert}
+              <button
+                type="button"
+                class="hover:bg-accent text-muted-foreground hover:text-foreground opacity-0 group-hover:opacity-100 mb-1 flex size-6 items-center justify-center rounded border transition-opacity cursor-pointer"
+                title="この時点へ巻き戻す (Revert: ワークスペースのファイルをこのターン開始時の状態へ復元)"
+                onclick={() => onRevert?.(item.seq)}
+              >
+                <Undo2Icon class="size-3" />
+              </button>
+            {/if}
             <button
               type="button"
               class="hover:bg-accent text-muted-foreground hover:text-foreground opacity-0 group-hover:opacity-100 mb-1 flex size-6 items-center justify-center rounded border transition-opacity cursor-pointer"

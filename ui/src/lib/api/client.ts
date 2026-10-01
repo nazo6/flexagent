@@ -24,6 +24,8 @@ import type { RespondPermissionResponse } from "$lib/generated/RespondPermission
 import type { SearchHit } from "$lib/generated/SearchHit";
 import type { SearchResponse } from "$lib/generated/SearchResponse";
 import type { SessionEventBatch } from "$lib/generated/SessionEventBatch";
+import type { SessionRevertRequest } from "$lib/generated/SessionRevertRequest";
+import type { SessionRevertResponse } from "$lib/generated/SessionRevertResponse";
 import type { SessionSummary } from "$lib/generated/SessionSummary";
 import type { SystemInfoResponse } from "$lib/generated/SystemInfoResponse";
 import type { WorkspaceDiffResponse } from "$lib/generated/WorkspaceDiffResponse";
@@ -275,6 +277,13 @@ export class ApiClient {
       `/api/v1/sessions/${encodeURIComponent(sessionId)}/permissions/${encodeURIComponent(requestId)}/respond`,
       { body: request },
     );
+  }
+
+  /** `POST /api/v1/sessions/:id/revert` (Shadow Git Tree 巻き戻し)。 */
+  revertSession(sessionId: string, request: SessionRevertRequest): Promise<SessionRevertResponse> {
+    return this.#request("POST", `/api/v1/sessions/${encodeURIComponent(sessionId)}/revert`, {
+      body: request,
+    });
   }
 
   /** `POST /api/v1/search` (FTS5 全文検索)。 */

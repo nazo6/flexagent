@@ -65,6 +65,17 @@ enum PendingResponse {
         /// 失敗時のメッセージ
         error: Option<String>,
     },
+    /// セッション Revert 結果 (`RevertResult`)
+    Revert {
+        /// 成功したか
+        success: bool,
+        /// 失敗時の構造化エラーコード
+        code: Option<ErrorCode>,
+        /// 成功時の復元結果
+        outcome: Option<fxg_protocol::client_api::SessionRevertResponse>,
+        /// 失敗時のメッセージ
+        error: Option<String>,
+    },
     /// ファイルシステム閲覧結果 (`BrowseFsResult`)
     BrowseFs {
         /// 取得成功時のブラウズ結果
@@ -329,6 +340,37 @@ impl NodeHub {
                 (None, Some(error)) => Err(ApiError::bad_request(error)),
                 (None, None) => Ok(None),
             },
+            PendingResponse::Failed { code, message } => Err(ApiError::from_code(code, message)),
+            _ => Err(ApiError::internal("unexpected node response kind")),
+        }
+    }
+
+    /// セッション Revert を中継し、`command_id` 相関で結果を待つ。
+    pub async fn revert_session(
+        &self,
+        node_id: &str,
+        command_id: &str,
+        message: ServerToNodeMsg,
+    ) -> Result<fxg_protocol::client_api::SessionRevertResponse, ApiError> {
+        let response = self
+            .request(node_id, command_id, message, COMMAND_TIMEOUT)
+            .await?;
+        match response {
+            PendingResponse::Revert {
+                success,
+                code,
+                outcome,
+                error,
+            } => {
+                if success {
+                    outcome.ok_or_else(|| ApiError::internal("node returned no revert outcome"))
+                } else {
+                    Err(ApiError::from_code(
+                        code.unwrap_or(ErrorCode::Internal),
+                        error.unwrap_or_else(|| "revert failed".to_owned()),
+                    ))
+                }
+            }
             PendingResponse::Failed { code, message } => Err(ApiError::from_code(code, message)),
             _ => Err(ApiError::internal("unexpected node response kind")),
         }
@@ -791,6 +833,26 @@ async fn handle_node_message(state: &ServerState, node_id: &str, text: &str) {
             state
                 .hub()
                 .resolve(&command_id, PendingResponse::Worktree { worktree, error })
+                .await;
+        }
+        NodeToServerMsg::RevertResult {
+            command_id,
+            success,
+            code,
+            outcome,
+            error,
+        } => {
+            state
+                .hub()
+                .resolve(
+                    &command_id,
+                    PendingResponse::Revert {
+                        success,
+                        code,
+                        outcome,
+                        error,
+                    },
+                )
                 .await;
         }
         NodeToServerMsg::BrowseFsResult {

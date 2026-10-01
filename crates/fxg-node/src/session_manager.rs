@@ -366,17 +366,17 @@ impl SessionManager {
         let mut spec = self
             .resolve_launch_spec(params.agent_id, &extra_args_vec)
             .await?;
-        if let Some(om) = params.opencode_mode {
-            if spec.agent_id == "opencode2" {
-                if om == "acp" {
-                    spec.driver_kind = "acp".to_owned();
-                    spec.args = vec!["acp".to_owned()];
-                    spec.args.extend(extra_args_vec.iter().cloned());
-                } else if om == "bridge" {
-                    spec.driver_kind = "opencode2".to_owned();
-                    spec.args = vec!["serve".to_owned()];
-                    spec.args.extend(extra_args_vec.iter().cloned());
-                }
+        if let Some(om) = params.opencode_mode
+            && spec.agent_id == "opencode2"
+        {
+            if om == "acp" {
+                spec.driver_kind = "acp".to_owned();
+                spec.args = vec!["acp".to_owned()];
+                spec.args.extend(extra_args_vec.iter().cloned());
+            } else if om == "bridge" {
+                spec.driver_kind = "opencode2".to_owned();
+                spec.args = vec!["serve".to_owned()];
+                spec.args.extend(extra_args_vec.iter().cloned());
             }
         }
 
