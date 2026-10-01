@@ -538,6 +538,40 @@ pub fn event_batch_ws(batch: SessionEventBatch) -> ServerWsMessage {
     }
 }
 
+/// `GET /api/v1/nodes/:id/fs/browse` クエリパラメータ。
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct FsBrowseQuery {
+    /// 閲覧対象のディレクトリパス (省略時はホームディレクトリ)
+    pub path: Option<String>,
+}
+
+/// ファイルシステム内のエントリ (フォルダまたはファイル)。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct FsEntry {
+    /// エントリ名 (ファイル名/フォルダ名)
+    pub name: String,
+    /// 絶対パス
+    pub path: String,
+    /// ディレクトリか
+    pub is_dir: bool,
+    /// 隠し属性 (名前が '.' で始まる、または Windows の Hidden 属性)
+    pub is_hidden: bool,
+}
+
+/// `GET /api/v1/nodes/:id/fs/browse` レスポンス。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct FsBrowseResponse {
+    /// 現在閲覧中の絶対パス (Windows では "C:\\Users\\..."、Unix では "/home/...")
+    pub current_path: String,
+    /// 親ディレクトリのパス (これ以上親がない、またはドライブ一覧なら None)
+    pub parent_path: Option<String>,
+    /// 子エントリ一覧
+    pub entries: Vec<FsEntry>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -13,9 +13,11 @@
   import { sync } from '$lib/stores/app.svelte';
   import { bootstrapLogLines, buildTimelineItems, capabilitiesFromEvents } from '$lib/sync/reducer';
   import { cn } from '$lib/utils';
+  import { toast } from 'svelte-sonner';
   import ArrowDownIcon from '@lucide/svelte/icons/arrow-down';
   import ChevronLeftIcon from '@lucide/svelte/icons/chevron-left';
   import FileCodeIcon from '@lucide/svelte/icons/file-code';
+  import FolderIcon from '@lucide/svelte/icons/folder';
   import MessageSquareIcon from '@lucide/svelte/icons/message-square';
   import PanelRightCloseIcon from '@lucide/svelte/icons/panel-right-close';
   import SquareTerminalIcon from '@lucide/svelte/icons/square-terminal';
@@ -142,6 +144,21 @@
             {/if}
             {#if session?.is_worktree}
               <span class="rounded bg-muted px-1 text-[10px]">wt</span>
+            {/if}
+            {#if session?.local_path}
+              <span class="opacity-40">/</span>
+              <button
+                type="button"
+                class="hover:text-foreground inline-flex items-center gap-1 font-mono text-[11px] truncate max-w-44 sm:max-w-xs md:max-w-md transition-colors cursor-pointer"
+                title={`ワーキングディレクトリ: ${session.local_path} (クリックでコピー)`}
+                onclick={() => {
+                  navigator.clipboard.writeText(session.local_path);
+                  toast.success('ワーキングディレクトリをコピーしました');
+                }}
+              >
+                <FolderIcon class="size-3 shrink-0 text-amber-500/80" />
+                <span class="truncate">{session.local_path}</span>
+              </button>
             {/if}
             <span class="opacity-40">/</span>
             <span>{session?.agent_id}</span>

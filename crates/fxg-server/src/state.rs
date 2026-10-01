@@ -791,6 +791,31 @@ impl ClientApiBackend for ServerState {
             .await
     }
 
+    async fn browse_fs(
+        &self,
+        node_id: &str,
+        path: Option<String>,
+    ) -> Result<fxg_protocol::client_api::FsBrowseResponse, ApiError> {
+        if !self.inner.hub.is_online(node_id).await {
+            return Err(ApiError::from_code(
+                ErrorCode::NodeOffline,
+                format!("node is offline: {node_id}"),
+            ));
+        }
+        let request_id = uuid_v7();
+        self.inner
+            .hub
+            .browse_fs(
+                node_id,
+                &request_id,
+                ServerToNodeMsg::BrowseFs {
+                    request_id: request_id.clone(),
+                    path,
+                },
+            )
+            .await
+    }
+
     async fn provisioners(&self) -> Result<ProvisionersResponse, ApiError> {
         let provisioners = self
             .inner

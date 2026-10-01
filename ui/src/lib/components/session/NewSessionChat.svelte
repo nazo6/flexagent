@@ -5,6 +5,7 @@
   import { Input } from '$lib/components/ui/input';
   import { Label } from '$lib/components/ui/label';
   import NodeStatusBadge from '$lib/components/NodeStatusBadge.svelte';
+  import FolderBrowserDialog from '$lib/components/fs/FolderBrowserDialog.svelte';
   import type { ProvisionerSummary } from '$lib/generated/ProvisionerSummary';
   import { getNodeAvailability } from '$lib/node-status';
   import { sync } from '$lib/stores/app.svelte';
@@ -14,6 +15,7 @@
   import BoxIcon from '@lucide/svelte/icons/box';
   import CornerDownLeftIcon from '@lucide/svelte/icons/corner-down-left';
   import FolderGit2Icon from '@lucide/svelte/icons/folder-git-2';
+  import FolderOpenIcon from '@lucide/svelte/icons/folder-open';
   import PlayIcon from '@lucide/svelte/icons/play';
   import ServerIcon from '@lucide/svelte/icons/server';
   import Settings2Icon from '@lucide/svelte/icons/settings-2';
@@ -37,6 +39,9 @@
   let promptText = $state('');
   let busy = $state(false);
   let showAdvanced = $state(false);
+  let browserOpen = $state(false);
+  let newWorktreeBrowserOpen = $state(false);
+  let useCustomPath = $state(false);
 
   const projects = $derived(sync.projects);
   const selectedProject = $derived(
@@ -93,7 +98,7 @@
   });
 
   $effect(() => {
-    if (nodePaths.length > 0 && !nodePaths.some((opt) => opt.path === localPath)) {
+    if (!useCustomPath && nodePaths.length > 0 && !nodePaths.some((opt) => opt.path === localPath)) {
       localPath = nodePaths[0].path;
     }
   });
@@ -337,22 +342,68 @@
               </div>
 
               {#if pathMode === 'existing'}
-                {#if nodePaths.length > 0}
-                  <select
-                    bind:value={localPath}
-                    class="border-input bg-background h-8 rounded-md border px-2 text-xs"
-                  >
-                    {#each nodePaths as opt (opt.path)}
-                      <option value={opt.path}>{opt.label}</option>
-                    {/each}
-                  </select>
-                {:else}
-                  <Input
-                    bind:value={localPath}
-                    placeholder="絶対パスを入力 (例: /home/user/project or C:\repo)"
-                    class="h-8 text-xs"
-                  />
-                {/if}
+                <div class="flex flex-col gap-1.5">
+                  <div class="flex items-center gap-1.5">
+                    {#if nodePaths.length > 0 && !useCustomPath}
+                      <select
+                        bind:value={localPath}
+                        class="border-input bg-background h-8 rounded-md border px-2 text-xs flex-1 min-w-0"
+                      >
+                        {#each nodePaths as opt (opt.path)}
+                          <option value={opt.path}>{opt.label}</option>
+                        {/each}
+                      </select>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        class="h-8 px-2.5 text-xs shrink-0 gap-1.5"
+                        disabled={!nodeId}
+                        onclick={() => {
+                          useCustomPath = true;
+                          browserOpen = true;
+                        }}
+                        title="フォルダブラウザで別のディレクトリを選択"
+                      >
+                        <FolderOpenIcon class="size-3.5" />
+                        <span>フォルダ参照…</span>
+                      </Button>
+                    {:else}
+                      <Input
+                        bind:value={localPath}
+                        placeholder="絶対パスを入力 (例: /home/user/project or C:\repo)"
+                        class="h-8 text-xs font-mono flex-1 min-w-0"
+                      />
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        class="h-8 px-2.5 text-xs shrink-0 gap-1.5"
+                        disabled={!nodeId}
+                        onclick={() => (browserOpen = true)}
+                        title="フォルダブラウザで選択"
+                      >
+                        <FolderOpenIcon class="size-3.5" />
+                        <span>参照…</span>
+                      </Button>
+                      {#if nodePaths.length > 0}
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          class="h-8 px-2 text-xs shrink-0 text-muted-foreground hover:text-foreground"
+                          onclick={() => {
+                            useCustomPath = false;
+                            if (nodePaths[0]) localPath = nodePaths[0].path;
+                          }}
+                          title="登録済みパスの一覧に戻る"
+                        >
+                          一覧に戻る
+                        </Button>
+                      {/if}
+                    {/if}
+                  </div>
+                </div>
               {:else}
                 <div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
                   <div class="flex flex-col gap-1">
@@ -362,6 +413,28 @@
                   <div class="flex flex-col gap-1">
                     <Label class="text-xs">起点ブランチ (任意)</Label>
                     <Input bind:value={baseBranch} placeholder="main" class="h-8 text-xs" />
+                  </div>
+                  <div class="flex flex-col gap-1 sm:col-span-2">
+                    <Label class="text-xs">配置先パス (任意・省略時は既定テンプレート)</Label>
+                    <div class="flex items-center gap-1.5">
+                      <Input
+                        bind:value={newPath}
+                        placeholder="配置先の絶対パス (例: /home/user/wt or C:\repo\.fxg\wt)"
+                        class="h-8 text-xs font-mono flex-1 min-w-0"
+                      />
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        class="h-8 px-2.5 text-xs shrink-0 gap-1.5"
+                        disabled={!nodeId}
+                        onclick={() => (newWorktreeBrowserOpen = true)}
+                        title="フォルダブラウザで配置先ディレクトリを選択"
+                      >
+                        <FolderOpenIcon class="size-3.5" />
+                        <span>参照…</span>
+                      </Button>
+                    </div>
                   </div>
                 </div>
               {/if}
@@ -446,3 +519,23 @@
     </div>
   </div>
 </div>
+
+<FolderBrowserDialog
+  bind:open={browserOpen}
+  {nodeId}
+  initialPath={localPath}
+  onSelect={(path) => {
+    localPath = path;
+    useCustomPath = true;
+  }}
+/>
+
+<FolderBrowserDialog
+  bind:open={newWorktreeBrowserOpen}
+  {nodeId}
+  initialPath={newPath || localPath}
+  title="Worktree 配置先フォルダを選択"
+  onSelect={(path) => {
+    newPath = path;
+  }}
+/>

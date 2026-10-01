@@ -383,6 +383,21 @@ impl ClientApiBackend for DaemonState {
         .map_err(api_error)
     }
 
+    async fn browse_fs(
+        &self,
+        node_id: &str,
+        path: Option<String>,
+    ) -> Result<fxg_protocol::client_api::FsBrowseResponse, ApiError> {
+        if node_id != self.node_id() {
+            return Err(ApiError::bad_request(format!(
+                "requested node {} but this node is {}",
+                node_id,
+                self.node_id()
+            )));
+        }
+        crate::fs_browse::browse_fs(path.as_deref()).map_err(api_error)
+    }
+
     async fn provisioners(&self) -> Result<ProvisionersResponse, ApiError> {
         // 一時VMプロビジョナーは中央サーバーでのみ実行される (設計: docs/01 §6.1)
         Ok(ProvisionersResponse {

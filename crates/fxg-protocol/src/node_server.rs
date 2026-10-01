@@ -121,6 +121,15 @@ pub enum NodeToServerMsg {
         /// 失敗時のメッセージ
         error: Option<String>,
     },
+    /// ファイルシステム閲覧 (`BrowseFs`) の結果応答。
+    BrowseFsResult {
+        /// 要求時の相関ID
+        request_id: String,
+        /// 取得成功時のブラウズ結果
+        response: Option<crate::client_api::FsBrowseResponse>,
+        /// 失敗時のメッセージ
+        error: Option<String>,
+    },
     /// PTY 起動・操作の失敗通知 (エラーコードは文字列。例: `PTY_DISABLED`)。
     ///
     /// ノード側設定 `allow_remote_pty = false` の場合、リモートからの
@@ -289,6 +298,13 @@ pub enum ServerToNodeMsg {
         project_id: String,
         /// 実行する操作
         action: crate::common::WorktreeAction,
+    },
+    /// ファイルシステム閲覧要求。
+    BrowseFs {
+        /// 相関ID
+        request_id: String,
+        /// 閲覧対象パス (未指定時はホームディレクトリ)
+        path: Option<String>,
     },
     /// `GitCredentialRequest` に対する短命トークン応答。
     GitCredentialResponse {

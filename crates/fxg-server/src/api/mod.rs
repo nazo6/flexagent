@@ -384,6 +384,13 @@ pub trait ClientApiBackend: Clone + Send + Sync + 'static {
         base_branch: Option<String>,
     ) -> Result<WorkspaceDiffResponse, ApiError>;
 
+    /// `GET /api/v1/nodes/:node_id/fs/browse`
+    async fn browse_fs(
+        &self,
+        node_id: &str,
+        path: Option<String>,
+    ) -> Result<fxg_protocol::client_api::FsBrowseResponse, ApiError>;
+
     /// `GET /api/v1/provisioners`
     async fn provisioners(&self) -> Result<ProvisionersResponse, ApiError>;
 
@@ -512,6 +519,7 @@ pub fn client_router<B: ClientApiBackend>(backend: B, options: ClientApiOptions)
                 .delete(remove_worktree::<B>),
         )
         .route("/api/v1/nodes", get(list_nodes::<B>))
+        .route("/api/v1/nodes/{node_id}/fs/browse", get(browse_fs::<B>))
         .route("/api/v1/provisioners", get(list_provisioners::<B>))
         .route(
             "/api/v1/provisioners/{provisioner}/test",
@@ -602,6 +610,17 @@ async fn list_nodes<B: ClientApiBackend>(State(state): State<ClientApiState<B>>)
     match state.backend.db().list_nodes().await {
         Ok(nodes) => Json(NodesResponse { nodes }).into_response(),
         Err(err) => ApiError::from(err).into_response(),
+    }
+}
+
+async fn browse_fs<B: ClientApiBackend>(
+    State(state): State<ClientApiState<B>>,
+    UrlPath(node_id): UrlPath<String>,
+    Query(query): Query<fxg_protocol::client_api::FsBrowseQuery>,
+) -> Response {
+    match state.backend.browse_fs(&node_id, query.path).await {
+        Ok(resp) => Json(resp).into_response(),
+        Err(err) => err.into_response(),
     }
 }
 

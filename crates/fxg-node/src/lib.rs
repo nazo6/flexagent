@@ -33,6 +33,7 @@ pub mod worktree;
 pub mod bootstrap;
 pub mod bundle;
 pub mod credentials;
+pub mod fs_browse;
 
 #[cfg(test)]
 mod testutil;

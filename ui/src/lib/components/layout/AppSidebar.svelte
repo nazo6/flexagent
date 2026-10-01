@@ -51,6 +51,7 @@
     return (
       session.title.toLowerCase().includes(q) ||
       session.project_id.toLowerCase().includes(q) ||
+      session.local_path.toLowerCase().includes(q) ||
       (session.git_branch?.toLowerCase().includes(q) ?? false) ||
       session.agent_id.toLowerCase().includes(q)
     );
@@ -403,6 +404,7 @@
     <a
       href={`/sessions/${session.session_id}`}
       onclick={handleLinkClick}
+      title={`${session.title}\nワーキングディレクトリ: ${session.local_path}\nノード: ${node?.name ?? session.node_id}`}
       class={cn(
         'group flex items-center justify-between rounded-md px-2 py-1.5 text-xs transition-colors',
         isActive

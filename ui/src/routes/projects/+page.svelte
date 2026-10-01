@@ -13,6 +13,8 @@
   import { shortId } from '$lib/session-status';
   import { sync } from '$lib/stores/app.svelte';
   import { toast } from 'svelte-sonner';
+  import FolderBrowserDialog from '$lib/components/fs/FolderBrowserDialog.svelte';
+  import FolderOpenIcon from '@lucide/svelte/icons/folder-open';
   import GitBranchIcon from '@lucide/svelte/icons/git-branch';
   import PlayIcon from '@lucide/svelte/icons/play';
   import PlusIcon from '@lucide/svelte/icons/plus';
@@ -29,6 +31,7 @@
   let createBase = $state('');
   let createPath = $state('');
   let createBusy = $state(false);
+  let browserOpen = $state(false);
 
   // Worktree 削除確認
   let removeTarget = $state<{ projectId: string; worktree: WorktreeInfo } | null>(null);
@@ -253,7 +256,21 @@
       </div>
       <div class="grid gap-2">
         <Label for="wt-path">配置先パス (任意)</Label>
-        <Input id="wt-path" bind:value={createPath} placeholder="自動解決" />
+        <div class="flex items-center gap-1.5">
+          <Input id="wt-path" bind:value={createPath} placeholder="自動解決" class="flex-1 font-mono text-xs" />
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            class="h-9 px-2.5 text-xs shrink-0 gap-1.5"
+            disabled={!createNodeId}
+            onclick={() => (browserOpen = true)}
+            title="フォルダブラウザで選択"
+          >
+            <FolderOpenIcon class="size-3.5" />
+            <span>参照…</span>
+          </Button>
+        </div>
       </div>
       <Dialog.Footer>
         <Button type="button" variant="outline" onclick={() => (createProjectId = null)}>
@@ -299,3 +316,13 @@
     </AlertDialog.Footer>
   </AlertDialog.Content>
 </AlertDialog.Root>
+
+<FolderBrowserDialog
+  bind:open={browserOpen}
+  nodeId={createNodeId}
+  initialPath={createPath}
+  title="Worktree 配置先フォルダを選択"
+  onSelect={(path) => {
+    createPath = path;
+  }}
+/>

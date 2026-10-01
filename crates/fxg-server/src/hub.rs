@@ -65,6 +65,13 @@ enum PendingResponse {
         /// 失敗時のメッセージ
         error: Option<String>,
     },
+    /// ファイルシステム閲覧結果 (`BrowseFsResult`)
+    BrowseFs {
+        /// 取得成功時のブラウズ結果
+        response: Option<fxg_protocol::client_api::FsBrowseResponse>,
+        /// 失敗時のメッセージ
+        error: Option<String>,
+    },
     /// ノード切断などによる失敗
     Failed {
         /// 構造化エラーコード
@@ -321,6 +328,27 @@ impl NodeHub {
                 (Some(worktree), _) => Ok(Some(worktree)),
                 (None, Some(error)) => Err(ApiError::bad_request(error)),
                 (None, None) => Ok(None),
+            },
+            PendingResponse::Failed { code, message } => Err(ApiError::from_code(code, message)),
+            _ => Err(ApiError::internal("unexpected node response kind")),
+        }
+    }
+
+    /// ファイルシステム閲覧を中継し、`request_id` 相関で結果を待つ。
+    pub async fn browse_fs(
+        &self,
+        node_id: &str,
+        request_id: &str,
+        message: ServerToNodeMsg,
+    ) -> Result<fxg_protocol::client_api::FsBrowseResponse, ApiError> {
+        let response = self
+            .request(node_id, request_id, message, COMMAND_TIMEOUT)
+            .await?;
+        match response {
+            PendingResponse::BrowseFs { response, error } => match (response, error) {
+                (Some(resp), _) => Ok(resp),
+                (None, Some(error)) => Err(ApiError::bad_request(error)),
+                (None, None) => Err(ApiError::internal("node returned no fs browse response")),
             },
             PendingResponse::Failed { code, message } => Err(ApiError::from_code(code, message)),
             _ => Err(ApiError::internal("unexpected node response kind")),
@@ -763,6 +791,16 @@ async fn handle_node_message(state: &ServerState, node_id: &str, text: &str) {
             state
                 .hub()
                 .resolve(&command_id, PendingResponse::Worktree { worktree, error })
+                .await;
+        }
+        NodeToServerMsg::BrowseFsResult {
+            request_id,
+            response,
+            error,
+        } => {
+            state
+                .hub()
+                .resolve(&request_id, PendingResponse::BrowseFs { response, error })
                 .await;
         }
         NodeToServerMsg::PtyOutput { pty_id, data_b64 } => {

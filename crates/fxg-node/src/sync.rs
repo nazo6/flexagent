@@ -636,6 +636,22 @@ pub(crate) async fn handle_server_message(
             state.trigger_node_hello();
             let _ = out.send(response).await;
         }
+        ServerToNodeMsg::BrowseFs { request_id, path } => {
+            let result = crate::fs_browse::browse_fs(path.as_deref());
+            let response = match result {
+                Ok(browse_resp) => NodeToServerMsg::BrowseFsResult {
+                    request_id,
+                    response: Some(browse_resp),
+                    error: None,
+                },
+                Err(err) => NodeToServerMsg::BrowseFsResult {
+                    request_id,
+                    response: None,
+                    error: Some(err.to_string()),
+                },
+            };
+            let _ = out.send(response).await;
+        }
         ServerToNodeMsg::GitCredentialResponse {
             request_id,
             username,

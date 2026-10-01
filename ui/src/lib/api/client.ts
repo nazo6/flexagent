@@ -5,6 +5,7 @@ import type { CreateSessionResponse } from "$lib/generated/CreateSessionResponse
 import type { CreateWorktreeRequest } from "$lib/generated/CreateWorktreeRequest";
 import type { DiffScope } from "$lib/generated/DiffScope";
 import type { ErrorCode } from "$lib/generated/ErrorCode";
+import type { FsBrowseResponse } from "$lib/generated/FsBrowseResponse";
 import type { InboxResponse } from "$lib/generated/InboxResponse";
 import type { KillSwitchResponse } from "$lib/generated/KillSwitchResponse";
 import type { NodeSummary } from "$lib/generated/NodeSummary";
@@ -180,6 +181,15 @@ export class ApiClient {
   async nodes(): Promise<NodeSummary[]> {
     const response = await this.#request<NodesResponse>("GET", "/api/v1/nodes");
     return response.nodes;
+  }
+
+  /** `GET /api/v1/nodes/:id/fs/browse` */
+  browseFs(nodeId: string, path?: string): Promise<FsBrowseResponse> {
+    return this.#request<FsBrowseResponse>(
+      "GET",
+      `/api/v1/nodes/${encodeURIComponent(nodeId)}/fs/browse`,
+      { query: { path } },
+    );
   }
 
   /** `GET /api/v1/provisioners` */
