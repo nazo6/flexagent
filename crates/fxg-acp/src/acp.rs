@@ -901,7 +901,19 @@ fn map_session_update(
                 },
             ));
         }
-        // SessionInfoUpdate (タイトル同期) / UsageUpdate 等は Phase 3 では未対応
+        SessionUpdate::SessionInfoUpdate(update) => {
+            if let Some(title) = update.title.value() {
+                let trimmed = title.trim();
+                if !trimmed.is_empty() {
+                    events.push(DriverEvent::Event(
+                        UnifiedEventPayload::SessionTitleChanged {
+                            title: trimmed.to_owned(),
+                        },
+                    ));
+                }
+            }
+        }
+        // UsageUpdate 等は Phase 3 では未対応
         other => {
             tracing::trace!("unhandled session update: {other:?}");
         }
@@ -1370,5 +1382,21 @@ mod tests {
     #[test]
     fn base64_encodes_terminal_output() {
         assert_eq!(base64_encode(b"hello"), "aGVsbG8=");
+    }
+
+    #[test]
+    fn maps_session_info_update() {
+        use agent_client_protocol::schema::v1::SessionInfoUpdate;
+
+        let update = SessionInfoUpdate::new().title("Refactor UI layout".to_owned());
+        let mut acc = StreamingAccumulator::default();
+        let events = map_session_update(SessionUpdate::SessionInfoUpdate(update), &mut acc);
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            DriverEvent::Event(UnifiedEventPayload::SessionTitleChanged { title }) => {
+                assert_eq!(title, "Refactor UI layout");
+            }
+            other => panic!("unexpected event: {other:?}"),
+        }
     }
 }

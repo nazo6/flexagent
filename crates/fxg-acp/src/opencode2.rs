@@ -871,6 +871,25 @@ fn map_event(state: &Arc<Mutex<SessionState>>, session_id: &str, raw: &str) -> V
     };
 
     match kind {
+        "session.updated" | "session.title.updated" => {
+            let title = data
+                .get("title")
+                .or_else(|| data.pointer("/session/title"))
+                .or_else(|| data.pointer("/info/title"))
+                .and_then(Value::as_str)
+                .map(str::trim);
+            if let Some(title) = title
+                && !title.is_empty()
+            {
+                vec![DriverEvent::Event(
+                    UnifiedEventPayload::SessionTitleChanged {
+                        title: title.to_owned(),
+                    },
+                )]
+            } else {
+                Vec::new()
+            }
+        }
         "session.execution.started" => {
             vec![DriverEvent::Event(UnifiedEventPayload::StatusChanged {
                 status: SessionStatus::Running,
@@ -1175,6 +1194,20 @@ mod tests {
 
     fn map(state: &Arc<Mutex<SessionState>>, raw: &str) -> Vec<DriverEvent> {
         map_event(state, "ses_1", raw)
+    }
+
+    #[test]
+    fn maps_session_updated_title() {
+        let state = state();
+        let events = map(
+            &state,
+            r#"{"type":"session.updated","data":{"sessionID":"ses_1","title":"New Generated Title"}}"#,
+        );
+        assert!(matches!(
+            events.as_slice(),
+            [DriverEvent::Event(UnifiedEventPayload::SessionTitleChanged { title })]
+                if title == "New Generated Title"
+        ));
     }
 
     #[test]

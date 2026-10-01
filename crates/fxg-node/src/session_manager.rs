@@ -176,6 +176,8 @@ struct ActiveSession {
     pending_prompts: VecDeque<PendingPrompt>,
     /// 承認待ち (`request_id` → 表示用情報)
     pending_permissions: HashMap<String, PendingPermissionSummary>,
+    /// 意味のあるタイトルが設定済みか (プロンプト導出またはドライバ通知)
+    has_custom_title: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -308,6 +310,7 @@ impl SessionManager {
                 &spec,
                 extra_args.to_vec(),
                 initial_mode.map(str::to_owned),
+                false,
             )
             .await?;
 
@@ -335,7 +338,14 @@ impl SessionManager {
 
         // SessionCreated (node_seq = 1)
         let (git_branch, is_worktree) = branch_and_worktree(&resolved.local_path).await;
-        let title = format!("{} @ {}", spec.display_name, resolved.name);
+        let default_title = format!("{} @ {}", spec.display_name, resolved.name);
+        let (title, has_custom_title) = if let Some(prompt) = params.initial_prompt
+            && let Some(derived) = derive_title_from_prompt(prompt)
+        {
+            (derived, true)
+        } else {
+            (default_title, false)
+        };
         self.inner
             .bus
             .create_session(
@@ -363,6 +373,7 @@ impl SessionManager {
                 &spec,
                 Vec::new(),
                 None,
+                has_custom_title,
             )
             .await?;
 
@@ -418,6 +429,7 @@ impl SessionManager {
         spec: &AgentLaunchSpec,
         extra_args: Vec<String>,
         initial_mode: Option<String>,
+        has_custom_title: bool,
     ) -> Result<Arc<dyn ActiveSessionHandle>, NodeError> {
         let driver = (self.inner.factory)(spec).map_err(|err| NodeError::Agent(err.to_string()))?;
         let (event_tx, event_rx) = mpsc::unbounded_channel();
@@ -466,6 +478,7 @@ impl SessionManager {
                     busy: false,
                     pending_prompts: VecDeque::new(),
                     pending_permissions: HashMap::new(),
+                    has_custom_title,
                 },
             );
         }
@@ -659,7 +672,7 @@ impl SessionManager {
             .await?;
 
         let handle = self
-            .start_driver_session(&new_session_id, &title, &cwd, &spec, Vec::new(), None)
+            .start_driver_session(&new_session_id, &title, &cwd, &spec, Vec::new(), None, true)
             .await?;
 
         // 履歴 Replay 注入 (新エージェントセッションの初期コンテキスト)
@@ -973,6 +986,12 @@ async fn pump_events(
                             continue;
                         }
                     }
+                    UnifiedEventPayload::SessionTitleChanged { .. } => {
+                        let mut sessions = inner.sessions.lock().expect("sessions poisoned");
+                        if let Some(session) = sessions.active.get_mut(&session_id) {
+                            session.has_custom_title = true;
+                        }
+                    }
                     _ => {}
                 }
                 match inner.bus.record(&session_id, payload).await {
@@ -1085,6 +1104,30 @@ async fn maybe_dispatch_queued(inner: &Arc<Inner>, session_id: &str) {
     }
 }
 
+/// プロンプトの先頭部分から人間が読みやすいセッションタイトルを導出する。
+///
+/// - 先頭の空白・空行・Markdown記号 (`#`, `-`, `*`, `>`, バッククォート等) をトリムする
+/// - 最初の1行を取り出す (最大40文字、超過時は `...` を付加)
+/// - 有効な文字列が抽出できない場合は `None` を返す
+pub fn derive_title_from_prompt(prompt: &str) -> Option<String> {
+    for line in prompt.lines() {
+        let trimmed = line.trim();
+        let cleaned = trimmed
+            .trim_start_matches(|c: char| c == '#' || c == '>' || c == '-' || c == '*' || c == '`')
+            .trim();
+        if !cleaned.is_empty() {
+            let char_count = cleaned.chars().count();
+            if char_count <= 40 {
+                return Some(cleaned.to_owned());
+            } else {
+                let truncated: String = cleaned.chars().take(40).collect();
+                return Some(format!("{truncated}..."));
+            }
+        }
+    }
+    None
+}
+
 /// 1 ターンを開始する (スナップショット → `UserMessage` 記録 → ドライバ送信)。
 ///
 /// busy の予約・解除は呼び出し側 (`SessionManager::start_turn` /
@@ -1095,14 +1138,30 @@ async fn dispatch_prompt(
     text: &str,
     client_source: &str,
 ) -> Result<(), NodeError> {
-    let cwd = {
-        let sessions = inner.sessions.lock().expect("sessions poisoned");
-        sessions
+    let (cwd, should_update_title) = {
+        let mut sessions = inner.sessions.lock().expect("sessions poisoned");
+        let session = sessions
             .active
-            .get(session_id)
-            .map(|session| session.cwd.clone())
-            .ok_or_else(|| NodeError::InvalidSession(session_id.to_owned()))?
+            .get_mut(session_id)
+            .ok_or_else(|| NodeError::InvalidSession(session_id.to_owned()))?;
+        let should_update = !session.has_custom_title;
+        if should_update {
+            session.has_custom_title = true;
+        }
+        (session.cwd.clone(), should_update)
     };
+
+    if should_update_title {
+        if let Some(title) = derive_title_from_prompt(text) {
+            inner
+                .bus
+                .record(
+                    session_id,
+                    UnifiedEventPayload::SessionTitleChanged { title },
+                )
+                .await?;
+        }
+    }
 
     let snapshot_tree_hash = snapshot_tree_hash(
         &cwd,
@@ -1759,5 +1818,110 @@ mod tests {
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         }
         panic!("status did not become stopped");
+    }
+
+    #[test]
+    fn derives_title_from_prompts() {
+        assert_eq!(
+            derive_title_from_prompt("Hello world"),
+            Some("Hello world".to_owned())
+        );
+        assert_eq!(
+            derive_title_from_prompt("# Task title\nSome description here"),
+            Some("Task title".to_owned())
+        );
+        assert_eq!(
+            derive_title_from_prompt("   \n\n> Blockquote prompt\nNext line"),
+            Some("Blockquote prompt".to_owned())
+        );
+        let long = "あ".repeat(50);
+        let expected = format!("{}...", "あ".repeat(40));
+        assert_eq!(derive_title_from_prompt(&long), Some(expected));
+        assert_eq!(derive_title_from_prompt("   \n\n  "), None);
+    }
+
+    #[tokio::test]
+    async fn start_session_uses_initial_prompt_for_title() {
+        let (manager, _mock, dir) = setup().await;
+        let session_id = fxg_protocol::util::uuid_v7();
+        manager
+            .start_session(StartSessionParams {
+                command_id: "c_init",
+                session_id: &session_id,
+                local_path: dir.path(),
+                agent_id: "mock",
+                initial_prompt: Some("# First Turn\nDo something"),
+            })
+            .await
+            .expect("start");
+
+        let row = manager
+            .bus()
+            .db()
+            .get_session(&session_id)
+            .await
+            .expect("query")
+            .expect("session");
+        assert_eq!(row.title, "First Turn");
+    }
+
+    #[tokio::test]
+    async fn first_prompt_updates_default_title() {
+        let (manager, _mock, dir) = setup().await;
+        let outcome = manager
+            .ensure_session("c_ensure", dir.path(), "mock", &[], None, false)
+            .await
+            .expect("ensure");
+
+        // 初期タイトルはデフォルト
+        let initial_row = manager
+            .bus()
+            .db()
+            .get_session(&outcome.session_id)
+            .await
+            .expect("query")
+            .expect("session");
+        assert!(initial_row.title.contains('@'));
+
+        // 最初のプロンプトを送信
+        manager
+            .send_prompt(
+                "c_prompt1",
+                &outcome.session_id,
+                "Implement login page",
+                "web",
+            )
+            .await
+            .expect("prompt");
+
+        // タイトルが更新される
+        let updated_row = manager
+            .bus()
+            .db()
+            .get_session(&outcome.session_id)
+            .await
+            .expect("query")
+            .expect("session");
+        assert_eq!(updated_row.title, "Implement login page");
+
+        // 2回目のプロンプトではタイトルは再更新されない (初回のみ)
+        manager
+            .send_prompt(
+                "c_prompt2",
+                &outcome.session_id,
+                "Now add logout button",
+                "web",
+            )
+            .await
+            .expect("prompt");
+
+        let second_row = manager
+            .bus()
+            .db()
+            .get_session(&outcome.session_id)
+            .await
+            .expect("query")
+            .expect("session");
+        assert_eq!(second_row.title, "Implement login page");
     }
 }
