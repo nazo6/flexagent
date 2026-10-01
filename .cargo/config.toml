@@ -1,3 +1,14 @@
+# incremental compilation を無効化する。
+# D: ドライブが ReFS のため、rustc のセッション dir finalize (rename) が
+# "Access is denied. (os error 5)" で失敗し
+# `note: did not finalize incremental compilation session directory` が出る。
+# これは rust-lang/rust#151181 (1.90 以降の ReFS 回帰) で、修正 #162366 は
+# 1.98.1 に未収録のため回避策として無効化する。target/debug/incremental の
+# 肥大 (16GB 超) 防止にもなる。一時的に有効化する場合は CARGO_INCREMENTAL=1 を
+# 設定する (環境変数が本設定より優先される)。
+[build]
+incremental = false
+
 # ts-rs の型出力設定 (docs/03-protocol-and-api.md §1)
 # ui/src/lib/generated/ に SvelteKit から直接 import できる TS 型を出力する。
 # TS_RS_LARGE_INT=number により i64/u64 (epoch ms / node_seq) を bigint ではなく
