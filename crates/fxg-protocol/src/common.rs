@@ -507,6 +507,28 @@ pub enum WorktreeAction {
     Prune,
 }
 
+/// エージェント管理アクション (`ManageAgent` コマンド / Client API 共通)。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(tag = "action", rename_all = "snake_case")]
+#[ts(export)]
+pub enum AgentAction {
+    /// ACP Registry からダウンロード・展開して導入 (`fxg agents install`)
+    Install {
+        /// エージェントID (エイリアス可)
+        agent_id: String,
+    },
+    /// 導入済みエージェントを更新 (`fxg agents update`)
+    Update {
+        /// 更新対象のエージェントID (省略時は導入済み全エージェント)
+        agent_id: Option<String>,
+    },
+    /// キャッシュ済みバイナリを削除 (`fxg agents remove`)
+    Remove {
+        /// エージェントID (エイリアス可)
+        agent_id: String,
+    },
+}
+
 /// Diff のスコープ。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "snake_case")]

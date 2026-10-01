@@ -5,7 +5,7 @@
  */
 export type WorktreeSpec = { 
 /**
- * 作成するブランチ名
+ * ブランチ名
  */
 branch: string, 
 /**

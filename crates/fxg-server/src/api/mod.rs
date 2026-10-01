@@ -30,22 +30,25 @@ use axum::extract::{Path as UrlPath, Query, Request, State};
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::middleware;
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post};
 use axum::{Extension, Json, Router};
 use futures_util::SinkExt;
 use fxg_db::{Db, DbError, SessionFilter};
 use fxg_protocol::client_api::{
-    ApiErrorBody, ApiErrorResponse, AuditLogsResponse, AuthLoginRequest, ConnectionRole,
-    CreateSessionRequest, CreateSessionResponse, CreateWorktreeRequest, InboxResponse,
-    KillSwitchRequest, KillSwitchResponse, NodesResponse, ProjectLinkRequest, ProjectLinkResponse,
-    ProjectScanRequest, ProjectScanResponse, ProjectsResponse, ProvisionersResponse,
-    PruneWorktreesRequest, PushSubscribeRequest, PushSubscribeResponse, RemoveWorktreeRequest,
-    RespondPermissionRequest, RespondPermissionResponse, SearchResponse, ServerWsMessage,
-    SessionListResponse, SessionRevertRequest, SessionRevertResponse, SystemInfoResponse,
+    AgentOpResponse, AgentsResponse, ApiErrorBody, ApiErrorResponse, AuditLogsResponse,
+    AuthLoginRequest, ConnectionRole, CreateSessionRequest, CreateSessionResponse,
+    CreateWorktreeRequest, InboxResponse, IssueNodeTokenRequest, IssueNodeTokenResponse,
+    KillSwitchRequest, KillSwitchResponse, NodeTokensResponse, NodesResponse, ProjectLinkRequest,
+    ProjectLinkResponse, ProjectScanRequest, ProjectScanResponse, ProjectsResponse,
+    ProvisionersResponse, PruneWorktreesRequest, PushSubscribeRequest, PushSubscribeResponse,
+    RemoveWorktreeRequest, RespondPermissionRequest, RespondPermissionResponse,
+    RotateAuthTokenResponse, SearchResponse, ServerWsMessage, SessionListResponse,
+    SessionRevertRequest, SessionRevertResponse, SystemInfoResponse, UpdateAgentsRequest,
     WorktreeInfo, WorktreesResponse,
 };
 use fxg_protocol::common::{
-    CommandResult, DiffScope, ErrorCode, SessionControlAction, SessionStatus, WorkspaceDiffResponse,
+    AgentAction, CommandResult, DiffScope, ErrorCode, SessionControlAction, SessionStatus,
+    WorkspaceDiffResponse,
 };
 use fxg_protocol::events::{SessionEventBatch, SessionEventEnvelope};
 use tokio::sync::broadcast;
@@ -413,6 +416,56 @@ pub trait ClientApiBackend: Clone + Send + Sync + 'static {
         client: ClientInfo,
     ) -> Result<ProjectLinkResponse, ApiError>;
 
+    /// `GET /api/v1/agents` (ACP Registry カタログ + ノード導入状態)。
+    async fn list_agents(&self) -> Result<AgentsResponse, ApiError>;
+
+    /// `POST /api/v1/nodes/:node_id/agents/...` (install / update / remove)。
+    async fn manage_agent(
+        &self,
+        node_id: &str,
+        action: AgentAction,
+        client: ClientInfo,
+    ) -> Result<AgentOpResponse, ApiError>;
+
+    /// `POST /api/v1/auth/rotate-token` (クライアント認証トークン再生成)。
+    ///
+    /// 旧トークンは即時無効化されるため、応答の新トークンへ切り替えること。
+    async fn rotate_auth_token(
+        &self,
+        client: ClientInfo,
+    ) -> Result<RotateAuthTokenResponse, ApiError>;
+
+    /// `GET /api/v1/nodes/tokens` (発行済みノード個別トークン一覧)。
+    ///
+    /// 中央サーバーのみ対応。ローカルノードの既定実装は `INVALID_STATE`
+    /// を返す (ノードトークンはサーバー (`server.db`) の概念)。
+    async fn node_tokens(&self) -> Result<NodeTokensResponse, ApiError> {
+        Err(ApiError::from_code(
+            ErrorCode::InvalidState,
+            "node tokens are only available on the central server",
+        ))
+    }
+
+    /// `POST /api/v1/nodes/tokens` (新規ノードトークン発行。中央サーバーのみ)。
+    async fn issue_node_token(
+        &self,
+        _request: IssueNodeTokenRequest,
+        _client: ClientInfo,
+    ) -> Result<IssueNodeTokenResponse, ApiError> {
+        Err(ApiError::from_code(
+            ErrorCode::InvalidState,
+            "node tokens are only available on the central server",
+        ))
+    }
+
+    /// `DELETE /api/v1/nodes/tokens/:node_id` (トークン失効。中央サーバーのみ)。
+    async fn revoke_node_token(&self, _node_id: &str, _client: ClientInfo) -> Result<(), ApiError> {
+        Err(ApiError::from_code(
+            ErrorCode::InvalidState,
+            "node tokens are only available on the central server",
+        ))
+    }
+
     /// `GET /api/v1/sessions/:id/diff`
     async fn workspace_diff(
         &self,
@@ -567,6 +620,28 @@ pub fn client_router<B: ClientApiBackend>(backend: B, options: ClientApiOptions)
             "/api/v1/nodes/{node_id}/projects/link",
             post(link_project::<B>),
         )
+        .route("/api/v1/agents", get(list_agents::<B>))
+        .route(
+            "/api/v1/nodes/{node_id}/agents/{agent_id}/install",
+            post(install_agent::<B>),
+        )
+        .route(
+            "/api/v1/nodes/{node_id}/agents/update",
+            post(update_agents::<B>),
+        )
+        .route(
+            "/api/v1/nodes/{node_id}/agents/{agent_id}",
+            delete(remove_agent::<B>),
+        )
+        .route(
+            "/api/v1/nodes/tokens",
+            get(node_tokens::<B>).post(issue_node_token::<B>),
+        )
+        .route(
+            "/api/v1/nodes/tokens/{node_id}",
+            delete(revoke_node_token::<B>),
+        )
+        .route("/api/v1/auth/rotate-token", post(rotate_auth_token::<B>))
         .route("/api/v1/nodes", get(list_nodes::<B>))
         .route("/api/v1/nodes/{node_id}/fs/browse", get(browse_fs::<B>))
         .route("/api/v1/provisioners", get(list_provisioners::<B>))
@@ -967,6 +1042,104 @@ async fn link_project<B: ClientApiBackend>(
 ) -> Response {
     match state.backend.link_project(&node_id, request, client).await {
         Ok(response) => Json(response).into_response(),
+        Err(err) => err.into_response(),
+    }
+}
+
+async fn list_agents<B: ClientApiBackend>(State(state): State<ClientApiState<B>>) -> Response {
+    match state.backend.list_agents().await {
+        Ok(response) => Json(response).into_response(),
+        Err(err) => err.into_response(),
+    }
+}
+
+async fn install_agent<B: ClientApiBackend>(
+    State(state): State<ClientApiState<B>>,
+    Extension(client): Extension<ClientInfo>,
+    UrlPath((node_id, agent_id)): UrlPath<(String, String)>,
+) -> Response {
+    match state
+        .backend
+        .manage_agent(&node_id, AgentAction::Install { agent_id }, client)
+        .await
+    {
+        Ok(response) => Json(response).into_response(),
+        Err(err) => err.into_response(),
+    }
+}
+
+async fn update_agents<B: ClientApiBackend>(
+    State(state): State<ClientApiState<B>>,
+    Extension(client): Extension<ClientInfo>,
+    UrlPath(node_id): UrlPath<String>,
+    Json(request): Json<UpdateAgentsRequest>,
+) -> Response {
+    match state
+        .backend
+        .manage_agent(
+            &node_id,
+            AgentAction::Update {
+                agent_id: request.agent_id,
+            },
+            client,
+        )
+        .await
+    {
+        Ok(response) => Json(response).into_response(),
+        Err(err) => err.into_response(),
+    }
+}
+
+async fn remove_agent<B: ClientApiBackend>(
+    State(state): State<ClientApiState<B>>,
+    Extension(client): Extension<ClientInfo>,
+    UrlPath((node_id, agent_id)): UrlPath<(String, String)>,
+) -> Response {
+    match state
+        .backend
+        .manage_agent(&node_id, AgentAction::Remove { agent_id }, client)
+        .await
+    {
+        Ok(response) => Json(response).into_response(),
+        Err(err) => err.into_response(),
+    }
+}
+
+async fn rotate_auth_token<B: ClientApiBackend>(
+    State(state): State<ClientApiState<B>>,
+    Extension(client): Extension<ClientInfo>,
+) -> Response {
+    match state.backend.rotate_auth_token(client).await {
+        Ok(response) => Json(response).into_response(),
+        Err(err) => err.into_response(),
+    }
+}
+
+async fn node_tokens<B: ClientApiBackend>(State(state): State<ClientApiState<B>>) -> Response {
+    match state.backend.node_tokens().await {
+        Ok(response) => Json(response).into_response(),
+        Err(err) => err.into_response(),
+    }
+}
+
+async fn issue_node_token<B: ClientApiBackend>(
+    State(state): State<ClientApiState<B>>,
+    Extension(client): Extension<ClientInfo>,
+    Json(request): Json<IssueNodeTokenRequest>,
+) -> Response {
+    match state.backend.issue_node_token(request, client).await {
+        Ok(response) => Json(response).into_response(),
+        Err(err) => err.into_response(),
+    }
+}
+
+async fn revoke_node_token<B: ClientApiBackend>(
+    State(state): State<ClientApiState<B>>,
+    Extension(client): Extension<ClientInfo>,
+    UrlPath(node_id): UrlPath<String>,
+) -> Response {
+    match state.backend.revoke_node_token(&node_id, client).await {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(err) => err.into_response(),
     }
 }

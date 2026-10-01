@@ -8,13 +8,14 @@ use std::path::{Path, PathBuf};
 
 use async_trait::async_trait;
 use fxg_protocol::client_api::{
-    ConnectionRole, CreateSessionRequest, CreateSessionResponse, CreateWorktreeRequest,
-    KillSwitchResponse, ProjectLinkRequest, ProjectLinkResponse, ProjectScanRequest,
-    ProjectScanResponse, ProvisionersResponse, PruneWorktreesRequest, RemoveWorktreeRequest,
-    RespondPermissionRequest, RespondPermissionResponse, SessionRevertRequest,
-    SessionRevertResponse, WorktreeInfo, WorktreesResponse,
+    AgentOpResponse, AgentsResponse, ConnectionRole, CreateSessionRequest, CreateSessionResponse,
+    CreateWorktreeRequest, KillSwitchResponse, ProjectLinkRequest, ProjectLinkResponse,
+    ProjectScanRequest, ProjectScanResponse, ProvisionersResponse, PruneWorktreesRequest,
+    RemoveWorktreeRequest, RespondPermissionRequest, RespondPermissionResponse,
+    RotateAuthTokenResponse, SessionRevertRequest, SessionRevertResponse, WorktreeInfo,
+    WorktreesResponse,
 };
-use fxg_protocol::common::{CommandResult, DiffScope, WorkspaceDiffResponse};
+use fxg_protocol::common::{AgentAction, CommandResult, DiffScope, WorkspaceDiffResponse};
 use fxg_server::api::{
     ApiError, ClientApiBackend, ClientCommand, ClientEvent, ClientInfo, PtyChannelError,
     PtyChannelEvent, PtySpawnParams, SystemExtras,
@@ -494,6 +495,55 @@ impl ClientApiBackend for DaemonState {
             project_id: resolved.project_id,
             local_path: resolved.local_path.to_string_lossy().into_owned(),
         })
+    }
+
+    async fn list_agents(&self) -> Result<AgentsResponse, ApiError> {
+        self.agents_catalog().await.map_err(api_error)
+    }
+
+    async fn manage_agent(
+        &self,
+        node_id: &str,
+        action: AgentAction,
+        client: ClientInfo,
+    ) -> Result<AgentOpResponse, ApiError> {
+        if node_id != self.node_id() {
+            return Err(ApiError::bad_request(format!(
+                "requested node {node_id} but this node is {}",
+                self.node_id()
+            )));
+        }
+        let message = DaemonState::manage_agent(self, &action)
+            .await
+            .map_err(api_error)?;
+        self.record_audit(
+            fxg_db::audit::actions::AGENT_MANAGE,
+            &audit_source(&client),
+            None,
+            serde_json::json!({ "action": action, "message": &message }),
+        )
+        .await;
+        // 導入状態の変化をハブへ報告する (nodes.installed_agents の更新)
+        self.trigger_node_hello();
+        Ok(AgentOpResponse {
+            message: Some(message),
+        })
+    }
+
+    async fn rotate_auth_token(
+        &self,
+        client: ClientInfo,
+    ) -> Result<RotateAuthTokenResponse, ApiError> {
+        let token = DaemonState::rotate_auth_token(self).map_err(api_error)?;
+        // 監査ログにはトークン本体を記録しない
+        self.record_audit(
+            fxg_db::audit::actions::AUTH_TOKEN_ROTATE,
+            &audit_source(&client),
+            None,
+            serde_json::json!({ "scope": "node" }),
+        )
+        .await;
+        Ok(RotateAuthTokenResponse { token })
     }
 
     async fn workspace_diff(

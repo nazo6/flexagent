@@ -221,11 +221,108 @@ pub struct SessionListResponse {
     pub sessions: Vec<SessionSummary>,
 }
 
+/// `GET /api/v1/agents` レスポンス (ACP Registry カタログ + 導入状態)。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct AgentsResponse {
+    /// レジストリ (ビルトイン・カスタム含む) の全エージェント
+    pub agents: Vec<AgentSummary>,
+}
+
+/// ACP エージェント 1 件 (カタログ情報 + 導入状態)。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct AgentSummary {
+    /// エージェントID
+    pub id: String,
+    /// 表示名
+    pub name: String,
+    /// レジストリ提供バージョン (ビルトイン・カスタムは `-`)
+    pub version: String,
+    /// 説明
+    pub description: Option<String>,
+    /// 配布形態 (`binary` / `npx` / `uvx` / `builtin` / `custom`)
+    pub distributions: Vec<String>,
+    /// 導入済みか (少なくとも 1 ノードに導入済み、または npx/uvx 配布)
+    pub installed: bool,
+    /// `config.toml` のカスタム定義か
+    pub custom: bool,
+    /// ビルトイン (`opencode2`) か
+    pub builtin: bool,
+    /// 導入済みバージョン一覧 (応答ノードのローカルキャッシュ)
+    pub installed_versions: Vec<String>,
+    /// 導入済みのノードID一覧 (NodeHello の報告ベース)
+    pub installed_nodes: Vec<String>,
+}
+
+/// `POST /api/v1/nodes/:node_id/agents/update` リクエスト。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct UpdateAgentsRequest {
+    /// 更新対象のエージェントID (省略時は導入済み全エージェント)
+    pub agent_id: Option<String>,
+}
+
+/// エージェント管理操作 (install / update / remove) の共通レスポンス。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct AgentOpResponse {
+    /// 実行結果の表示メッセージ (例: `installed opencode2 0.1.0`)
+    pub message: Option<String>,
+}
+
+/// `GET /api/v1/nodes/tokens` の 1 件 (発行済みノード個別トークン)。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct NodeTokenSummary {
+    /// 対象ノードID
+    pub node_id: String,
+    /// トークンハッシュの先頭プレフィックス (照合・表示用。平文は保存しない)
+    pub token_prefix: String,
+}
+
+/// `GET /api/v1/nodes/tokens` レスポンス。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct NodeTokensResponse {
+    /// 発行済みノードトークン一覧
+    pub tokens: Vec<NodeTokenSummary>,
+}
+
+/// `POST /api/v1/nodes/tokens` リクエスト (新規ノードトークン発行)。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct IssueNodeTokenRequest {
+    /// ペアリングするノードID (fxg daemon の node_id)
+    pub node_id: String,
+}
+
+/// `POST /api/v1/nodes/tokens` レスポンス。
+///
+/// 平文トークンは発行時にこの一度きりのみ返却される (サーバーには
+/// SHA-256 ハッシュのみ保存)。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct IssueNodeTokenResponse {
+    /// 対象ノードID
+    pub node_id: String,
+    /// 発行された平文トークン (`~/.flexagent/node_token` に保存する)
+    pub token: String,
+}
+
+/// `POST /api/v1/auth/rotate-token` レスポンス (クライアントトークン再生成)。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct RotateAuthTokenResponse {
+    /// 新しいクライアント認証トークン (旧トークンは即時無効化)
+    pub token: String,
+}
+
 /// セッション起動時に同時作成する Worktree の指定。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct WorktreeSpec {
-    /// 作成するブランチ名
+    /// ブランチ名
     pub branch: String,
     /// 起点ブランチ
     pub base_branch: Option<String>,

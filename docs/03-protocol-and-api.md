@@ -401,6 +401,20 @@ pub enum NodeToServerMsg {
         response: Option<ProjectLinkResponse>, // project_id + local_path (§3.1)
         error: Option<String>,
     },
+    /// ACP Registry カタログ (`ListAgents`) の結果応答
+    AgentsResult {
+        request_id: String,
+        response: Option<AgentsResponse>, // registry + installed_versions (§3.1)
+        error: Option<String>,
+    },
+    /// エージェント管理操作 (`ManageAgent`) の結果応答
+    AgentOpResult {
+        request_id: String,
+        success: bool,
+        code: Option<ErrorCode>,
+        message: Option<String>,   // 成功時の表示メッセージ
+        error: Option<String>,
+    },
     /// PTY 起動・操作の失敗通知 (エラーコードは文字列。例: `PTY_DISABLED`)
     /// ※ノード側設定 allow_remote_pty = false の場合、リモートからの
     ///   PtySpawn に対して PTY_DISABLED を返す
@@ -533,6 +547,15 @@ pub enum ServerToNodeMsg {
         project_id: String,
         local_path: String,
     },
+    /// ACP Registry カタログ + 導入状態の取得要求 (Web UI のエージェント管理)
+    ListAgents {
+        request_id: String,
+    },
+    /// エージェント管理操作要求 (install / update / remove)
+    ManageAgent {
+        request_id: String,
+        action: AgentAction,          // Install { agent_id } | Update { agent_id? } | Remove { agent_id }
+    },
     /// GitCredentialRequest に対する短命トークン応答
     GitCredentialResponse {
         request_id: String,
@@ -578,7 +601,9 @@ pub enum ServerToNodeMsg {
      が自サーバーのドメインまたはローカルオリジン以外からの接続である場合、ハンドシェイクを拒否。
 4. **監査ログ記録 (Audit Logging)**:
    - `session` 起動、`permission` 解決、`kill-switch` 実行、`worktree`
-     操作は、クライアントIP・UA・トークンIDとともに `audit_logs` に記録。
+     操作、セッション Revert、プロジェクト紐付け (scan / link)、エージェント管理
+     (install / update / remove)、ノードトークン発行・失効、クライアントトークン
+     再生成は、クライアントIP・UA・トークンIDとともに `audit_logs` に記録。
    - 記録先は中央サーバー経由の操作が
      `server.db`、ローカル直結（`localhost:7860` / CLI）の操作が 実行ノードの
      `node.db`（どちらも `/api/v1/audit/logs` で参照可能）。
@@ -670,6 +695,35 @@ pub enum ServerToNodeMsg {
 - `GET /api/v1/audit/logs?limit=50`:
   監査ログ（操作日時、操作種別、送信元IP、クライアント種別）の取得。中央サーバーでは
   `server.db`、 ローカルノードでは `node.db` の `audit_logs` を参照する。
+- `GET /api/v1/agents`:
+  ACP Registry
+  カタログと導入状態を返す。中央サーバーではオンラインのいずれかのノード
+  (`ListAgents` 中継) からカタログを取得し、全ノードの
+  `NodeHello.installed_agents`
+  を統合して `installed_nodes` (導入済みノード一覧) を埋める。
+- `POST /api/v1/nodes/:node_id/agents/:agent_id/install`:
+  指定ノード上で ACP Registry からエージェントをダウンロード・展開する
+  (`fxg agents install` の Web UI 版)。
+- `POST /api/v1/nodes/:node_id/agents/update`:
+  指定ノードの導入済みエージェントを更新する (`fxg agents update` の Web UI 版。
+  `{ agent_id: Option<String> }`。省略時は導入済み全件)。
+- `DELETE /api/v1/nodes/:node_id/agents/:agent_id`:
+  指定ノード上のキャッシュ済みバイナリを削除する (`fxg agents remove` の Web UI
+  版)。
+- `POST /api/v1/auth/rotate-token`:
+  クライアント認証トークン (`auth_token`) を再生成し `{ token }` を返す。
+  旧トークン (Bearer / `fxg_session` Cookie) は即時無効化される。
+- `GET /api/v1/nodes/tokens`:
+  発行済みノード個別トークン一覧 (`node_id` + トークンハッシュ先頭 12 文字。
+  平文は保存しない)。中央サーバーのみ。
+- `POST /api/v1/nodes/tokens`:
+  ノード個別トークンを発行
+  (`{ node_id }`)。平文トークンは**発行時の応答でのみ**返却し、
+  `server.db.nodes.token_hash` には SHA-256
+  ハッシュを保存する。中央サーバーのみ。
+  未登録のノードはプレースホルダで登録し `NodeHello` で上書きされる。
+- `DELETE /api/v1/nodes/tokens/:node_id`:
+  ノード個別トークンを失効させる。中央サーバーのみ。
 
 ### 3.2 Client WebSocket (`/api/v1/client/ws`)
 

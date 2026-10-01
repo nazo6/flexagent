@@ -161,6 +161,28 @@ pub enum NodeToServerMsg {
         /// 失敗時のメッセージ
         error: Option<String>,
     },
+    /// ACP Registry カタログ (`ListAgents`) の結果応答。
+    AgentsResult {
+        /// 要求時の相関ID
+        request_id: String,
+        /// 取得成功時のカタログ + 導入状態
+        response: Option<crate::client_api::AgentsResponse>,
+        /// 失敗時のメッセージ
+        error: Option<String>,
+    },
+    /// エージェント管理操作 (`ManageAgent`) の結果応答。
+    AgentOpResult {
+        /// 要求時の相関ID
+        request_id: String,
+        /// 成功したか
+        success: bool,
+        /// 失敗時の構造化エラーコード
+        code: Option<ErrorCode>,
+        /// 成功時の表示メッセージ (例: `installed opencode2 0.1.0`)
+        message: Option<String>,
+        /// 失敗時のメッセージ
+        error: Option<String>,
+    },
     /// PTY 起動・操作の失敗通知 (エラーコードは文字列。例: `PTY_DISABLED`)。
     ///
     /// ノード側設定 `allow_remote_pty = false` の場合、リモートからの
@@ -375,6 +397,18 @@ pub enum ServerToNodeMsg {
         /// 対象ディレクトリ
         local_path: String,
     },
+    /// ACP Registry カタログ + 導入状態の取得要求 (Web UI のエージェント管理)。
+    ListAgents {
+        /// 相関ID
+        request_id: String,
+    },
+    /// エージェント管理操作要求 (install / update / remove)。
+    ManageAgent {
+        /// 相関ID
+        request_id: String,
+        /// 実行する操作
+        action: crate::common::AgentAction,
+    },
     /// `GitCredentialRequest` に対する短命トークン応答。
     GitCredentialResponse {
         /// 相関ID
@@ -560,5 +594,45 @@ mod tests {
         assert_eq!(json["action"]["action"], "prune");
         let decoded: ServerToNodeMsg = serde_json::from_value(json).unwrap();
         assert_eq!(decoded, msg);
+    }
+
+    #[test]
+    fn manage_agent_shape() {
+        let install = ServerToNodeMsg::ManageAgent {
+            request_id: "r1".into(),
+            action: crate::common::AgentAction::Install {
+                agent_id: "antigravity".into(),
+            },
+        };
+        let json = serde_json::to_value(&install).unwrap();
+        assert_eq!(json["op"], "manage_agent");
+        assert_eq!(json["action"]["action"], "install");
+        assert_eq!(json["action"]["agent_id"], "antigravity");
+        assert_eq!(
+            serde_json::from_value::<ServerToNodeMsg>(json).unwrap(),
+            install
+        );
+
+        let update_all = ServerToNodeMsg::ManageAgent {
+            request_id: "r2".into(),
+            action: crate::common::AgentAction::Update { agent_id: None },
+        };
+        let json = serde_json::to_value(&update_all).unwrap();
+        assert_eq!(json["action"]["action"], "update");
+        assert!(json["action"]["agent_id"].is_null());
+
+        let result = NodeToServerMsg::AgentOpResult {
+            request_id: "r1".into(),
+            success: true,
+            code: None,
+            message: Some("installed antigravity 1.0.0".into()),
+            error: None,
+        };
+        let json = serde_json::to_value(&result).unwrap();
+        assert_eq!(json["op"], "agent_op_result");
+        assert_eq!(
+            serde_json::from_value::<NodeToServerMsg>(json).unwrap(),
+            result
+        );
     }
 }

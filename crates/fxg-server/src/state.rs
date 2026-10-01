@@ -14,15 +14,17 @@ use async_trait::async_trait;
 use base64::Engine as _;
 use fxg_db::{Db, DbRole, PushSubscriptionRecord};
 use fxg_protocol::client_api::{
-    ConnectionRole, CreateSessionRequest, CreateSessionResponse, CreateWorktreeRequest,
-    KillSwitchResponse, ProjectLinkRequest, ProjectLinkResponse, ProjectScanRequest,
-    ProjectScanResponse, ProvisionerSummary, ProvisionersResponse, PruneWorktreesRequest,
-    PushSubscribeRequest, PushSubscribeResponse, RemoveWorktreeRequest, RespondPermissionRequest,
-    RespondPermissionResponse, SessionRevertRequest, SessionRevertResponse, WorktreeInfo,
-    WorktreesResponse,
+    AgentOpResponse, AgentsResponse, ConnectionRole, CreateSessionRequest, CreateSessionResponse,
+    CreateWorktreeRequest, IssueNodeTokenRequest, IssueNodeTokenResponse, KillSwitchResponse,
+    NodeTokenSummary, NodeTokensResponse, ProjectLinkRequest, ProjectLinkResponse,
+    ProjectScanRequest, ProjectScanResponse, ProvisionerSummary, ProvisionersResponse,
+    PruneWorktreesRequest, PushSubscribeRequest, PushSubscribeResponse, RemoveWorktreeRequest,
+    RespondPermissionRequest, RespondPermissionResponse, RotateAuthTokenResponse,
+    SessionRevertRequest, SessionRevertResponse, WorktreeInfo, WorktreesResponse,
 };
 use fxg_protocol::common::{
-    CommandResult, DiffScope, ErrorCode, ForkHistoryItem, WorkspaceDiffResponse, WorktreeAction,
+    AgentAction, CommandResult, DiffScope, ErrorCode, ForkHistoryItem, WorkspaceDiffResponse,
+    WorktreeAction,
 };
 use fxg_protocol::config::{GitCredentialConfig, ProvisionerConfig};
 use fxg_protocol::events::UnifiedEventPayload;
@@ -67,7 +69,8 @@ pub struct ServerState {
 
 struct ServerInner {
     db: Db,
-    auth_token: String,
+    /// クライアント認証トークン (再生成時に差し替えるため `RwLock`)。
+    auth_token: std::sync::RwLock<String>,
     hub: NodeHub,
     options: ServerOptions,
     client_events: broadcast::Sender<ClientEvent>,
@@ -105,7 +108,7 @@ impl ServerState {
         Ok(Self {
             inner: Arc::new(ServerInner {
                 db,
-                auth_token,
+                auth_token: std::sync::RwLock::new(auth_token),
                 hub,
                 options,
                 client_events,
@@ -141,8 +144,29 @@ impl ServerState {
     }
 
     /// クライアント認証トークン。
-    pub fn auth_token(&self) -> &str {
-        &self.inner.auth_token
+    pub fn auth_token(&self) -> String {
+        self.inner
+            .auth_token
+            .read()
+            .expect("auth token poisoned")
+            .clone()
+    }
+
+    /// クライアント認証トークンを再生成し、ディスクへ保存する。
+    ///
+    /// 旧トークン (Bearer / `fxg_session` Cookie) は即時無効化される。
+    pub fn rotate_auth_token(&self) -> std::io::Result<String> {
+        let token = auth::generate_token();
+        auth::save_token(
+            &self
+                .inner
+                .options
+                .fxg_home
+                .join(fxg_protocol::config::AUTH_TOKEN_FILE_NAME),
+            &token,
+        )?;
+        *self.inner.auth_token.write().expect("auth token poisoned") = token.clone();
+        Ok(token)
     }
 
     /// 監査ログを `server.db.audit_logs` に記録する (失敗は警告のみ)。
@@ -179,6 +203,16 @@ impl ServerState {
             ));
         }
         Ok(session.node_id)
+    }
+
+    /// ACP Registry カタログを提供できるオンラインノードを 1 台選ぶ。
+    ///
+    /// 一時VMより常駐ノードを優先し、最終疎通が新しい順に選択する。
+    async fn select_agent_node(&self) -> Option<String> {
+        let nodes = self.inner.db.list_nodes().await.ok()?;
+        let mut online: Vec<_> = nodes.into_iter().filter(|node| node.is_online).collect();
+        online.sort_by_key(|node| (node.is_ephemeral, -node.last_seen_at));
+        online.first().map(|node| node.node_id.clone())
     }
 
     /// プロジェクトのこのノード上の最新バインドパスを解決する。
@@ -370,7 +404,7 @@ impl ClientApiBackend for ServerState {
     }
 
     fn auth_token(&self) -> String {
-        self.inner.auth_token.clone()
+        ServerState::auth_token(self)
     }
 
     fn connection_role(&self) -> ConnectionRole {
@@ -844,6 +878,167 @@ impl ClientApiBackend for ServerState {
         )
         .await;
         Ok(response)
+    }
+
+    async fn list_agents(&self) -> Result<AgentsResponse, ApiError> {
+        let Some(node_id) = self.select_agent_node().await else {
+            // カタログを提供できるオンラインノードが無い場合は空一覧を返す
+            // (UI はノード一覧からオフライン理由を表示できる)
+            return Ok(AgentsResponse { agents: Vec::new() });
+        };
+        let request_id = uuid_v7();
+        let mut response = self
+            .inner
+            .hub
+            .agents(
+                &node_id,
+                &request_id,
+                ServerToNodeMsg::ListAgents {
+                    request_id: request_id.clone(),
+                },
+            )
+            .await?;
+
+        // 全ノードの導入状態 (NodeHello の installed_agents) を統合する
+        let nodes = self.inner.db.list_nodes().await.map_err(ApiError::from)?;
+        for agent in &mut response.agents {
+            agent.installed_nodes = nodes
+                .iter()
+                .filter(|node| node.installed_agents.iter().any(|id| id == &agent.id))
+                .map(|node| node.node_id.clone())
+                .collect();
+            agent.installed = !agent.installed_nodes.is_empty();
+        }
+        Ok(response)
+    }
+
+    async fn manage_agent(
+        &self,
+        node_id: &str,
+        action: AgentAction,
+        client: ClientInfo,
+    ) -> Result<AgentOpResponse, ApiError> {
+        if !self.inner.hub.is_online(node_id).await {
+            return Err(ApiError::from_code(
+                ErrorCode::NodeOffline,
+                format!("node is offline: {node_id}"),
+            ));
+        }
+        let request_id = uuid_v7();
+        let message = self
+            .inner
+            .hub
+            .manage_agent(
+                node_id,
+                &request_id,
+                ServerToNodeMsg::ManageAgent {
+                    request_id: request_id.clone(),
+                    action: action.clone(),
+                },
+            )
+            .await?;
+        self.record_audit(
+            fxg_db::audit::actions::AGENT_MANAGE,
+            &client,
+            None,
+            serde_json::json!({
+                "node_id": node_id,
+                "action": action,
+                "message": &message,
+            }),
+        )
+        .await;
+        Ok(AgentOpResponse { message })
+    }
+
+    async fn rotate_auth_token(
+        &self,
+        client: ClientInfo,
+    ) -> Result<RotateAuthTokenResponse, ApiError> {
+        let token = ServerState::rotate_auth_token(self).map_err(ApiError::internal)?;
+        self.record_audit(
+            fxg_db::audit::actions::AUTH_TOKEN_ROTATE,
+            &client,
+            None,
+            serde_json::json!({ "scope": "server" }),
+        )
+        .await;
+        Ok(RotateAuthTokenResponse { token })
+    }
+
+    async fn node_tokens(&self) -> Result<NodeTokensResponse, ApiError> {
+        let tokens = self
+            .inner
+            .db
+            .list_node_tokens()
+            .await
+            .map_err(ApiError::from)?;
+        Ok(NodeTokensResponse {
+            tokens: tokens
+                .into_iter()
+                .map(|(node_id, hash)| NodeTokenSummary {
+                    node_id,
+                    token_prefix: hash.chars().take(12).collect(),
+                })
+                .collect(),
+        })
+    }
+
+    async fn issue_node_token(
+        &self,
+        request: IssueNodeTokenRequest,
+        client: ClientInfo,
+    ) -> Result<IssueNodeTokenResponse, ApiError> {
+        let node_id = request.node_id.trim().to_owned();
+        if node_id.is_empty() {
+            return Err(ApiError::bad_request("node_id must not be empty"));
+        }
+        // 未登録のノードはプレースホルダで登録する
+        // (ノード接続時の `NodeHello` で実情報に上書きされる)
+        let nodes = self.inner.db.list_nodes().await.map_err(ApiError::from)?;
+        if !nodes.iter().any(|node| node.node_id == node_id) {
+            self.inner
+                .db
+                .upsert_node(&fxg_db::NodeRecord::new(
+                    node_id.clone(),
+                    node_id.clone(),
+                    "unknown",
+                    "unknown",
+                    "unknown",
+                ))
+                .await
+                .map_err(ApiError::from)?;
+        }
+        let token = auth::generate_token();
+        self.inner
+            .db
+            .set_node_token_hash(&node_id, Some(&auth::hash_token(&token)))
+            .await
+            .map_err(ApiError::from)?;
+        self.record_audit(
+            fxg_db::audit::actions::NODE_TOKEN_MANAGE,
+            &client,
+            None,
+            serde_json::json!({ "action": "issue", "node_id": &node_id }),
+        )
+        .await;
+        Ok(IssueNodeTokenResponse { node_id, token })
+    }
+
+    async fn revoke_node_token(&self, node_id: &str, client: ClientInfo) -> Result<(), ApiError> {
+        self.inner
+            .db
+            .set_node_token_hash(node_id, None)
+            .await
+            .map_err(ApiError::from)?;
+        self.record_audit(
+            fxg_db::audit::actions::NODE_TOKEN_MANAGE,
+            &client,
+            None,
+            serde_json::json!({ "action": "revoke", "node_id": node_id }),
+        )
+        .await;
+        Ok(())
     }
 
     async fn list_worktrees(&self, project_id: &str) -> Result<WorktreesResponse, ApiError> {

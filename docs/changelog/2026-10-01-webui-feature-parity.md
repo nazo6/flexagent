@@ -70,3 +70,19 @@ CLI (`fxg`) で提供されている機能のうち、Web UI
 - [x] 共有実装の集約 (`ops.rs` の `project_scan` / `project_link` /
       `worktree_prune`。IPC ハンドラも同じ実装を呼び出すようにリファクタ)
 - [x] 監査ログ `worktree_prune` / `project_link` を追加
+
+### フェーズ D: エージェント管理 & ノードペアリング (完了)
+
+- [x] ACP Registry カタログ + ノード導入状態の統合 API (`GET /api/v1/agents`。
+      中央サーバーは `ListAgents` をノードへ中継し、全ノードの
+      `installed_agents` を統合)
+- [x] エージェントのインストール / 更新 / 削除 API
+      (`ManageAgent` のノード中継。`/api/v1/nodes/:id/agents/...`)
+- [x] エージェント管理画面 (`/agents`。ノード選択・インストール・一括更新・削除)
+- [x] ノードペアリング API (`GET/POST /api/v1/nodes/tokens`,
+      `DELETE /api/v1/nodes/tokens/:node_id`。平文は発行時のみ返却)
+- [x] クライアントトークン再生成 API (`POST /api/v1/auth/rotate-token`。
+      サーバーは `RwLock` 化 + `auth_token` ファイルへ永続化)
+- [x] 設定画面 (`/settings`。ノードトークン発行モーダル・失効・トークン再生成)
+- [x] サイドバーに「エージェント管理」「設定」ナビゲーションを追加
+- [x] 監査ログ `agent_manage` / `node_token_manage` / `auth_token_rotate` を追加

@@ -1,3 +1,6 @@
+import type { AgentOpResponse } from "$lib/generated/AgentOpResponse";
+import type { AgentsResponse } from "$lib/generated/AgentsResponse";
+import type { AgentSummary } from "$lib/generated/AgentSummary";
 import type { AuditLogEntry } from "$lib/generated/AuditLogEntry";
 import type { AuditLogsResponse } from "$lib/generated/AuditLogsResponse";
 import type { CreateSessionRequest } from "$lib/generated/CreateSessionRequest";
@@ -7,9 +10,13 @@ import type { DiffScope } from "$lib/generated/DiffScope";
 import type { ErrorCode } from "$lib/generated/ErrorCode";
 import type { FsBrowseResponse } from "$lib/generated/FsBrowseResponse";
 import type { InboxResponse } from "$lib/generated/InboxResponse";
+import type { IssueNodeTokenRequest } from "$lib/generated/IssueNodeTokenRequest";
+import type { IssueNodeTokenResponse } from "$lib/generated/IssueNodeTokenResponse";
 import type { KillSwitchResponse } from "$lib/generated/KillSwitchResponse";
 import type { NodeSummary } from "$lib/generated/NodeSummary";
 import type { NodesResponse } from "$lib/generated/NodesResponse";
+import type { NodeTokenSummary } from "$lib/generated/NodeTokenSummary";
+import type { NodeTokensResponse } from "$lib/generated/NodeTokensResponse";
 import type { PermissionRequestEntry } from "$lib/generated/PermissionRequestEntry";
 import type { ProjectLinkRequest } from "$lib/generated/ProjectLinkRequest";
 import type { ProjectLinkResponse } from "$lib/generated/ProjectLinkResponse";
@@ -26,6 +33,7 @@ import type { PushSubscribeResponse } from "$lib/generated/PushSubscribeResponse
 import type { RemoveWorktreeRequest } from "$lib/generated/RemoveWorktreeRequest";
 import type { RespondPermissionRequest } from "$lib/generated/RespondPermissionRequest";
 import type { RespondPermissionResponse } from "$lib/generated/RespondPermissionResponse";
+import type { RotateAuthTokenResponse } from "$lib/generated/RotateAuthTokenResponse";
 import type { SearchHit } from "$lib/generated/SearchHit";
 import type { SearchResponse } from "$lib/generated/SearchResponse";
 import type { SessionEventBatch } from "$lib/generated/SessionEventBatch";
@@ -33,6 +41,7 @@ import type { SessionRevertRequest } from "$lib/generated/SessionRevertRequest";
 import type { SessionRevertResponse } from "$lib/generated/SessionRevertResponse";
 import type { SessionSummary } from "$lib/generated/SessionSummary";
 import type { SystemInfoResponse } from "$lib/generated/SystemInfoResponse";
+import type { UpdateAgentsRequest } from "$lib/generated/UpdateAgentsRequest";
 import type { WorkspaceDiffResponse } from "$lib/generated/WorkspaceDiffResponse";
 import type { WorktreeInfo } from "$lib/generated/WorktreeInfo";
 import type { WorktreesResponse } from "$lib/generated/WorktreesResponse";
@@ -333,6 +342,60 @@ export class ApiClient {
   /** `POST /api/v1/push/subscribe` (Web Push 購読登録。中央サーバーのみ)。 */
   pushSubscribe(request: PushSubscribeRequest): Promise<PushSubscribeResponse> {
     return this.#request("POST", "/api/v1/push/subscribe", { body: request });
+  }
+
+  // ------------------------------------------------------------------
+  // エージェント管理 / 認証トークン (Phase D)
+  // ------------------------------------------------------------------
+
+  /** `GET /api/v1/agents` (ACP Registry カタログ + ノード導入状態)。 */
+  async agents(): Promise<AgentSummary[]> {
+    const response = await this.#request<AgentsResponse>("GET", "/api/v1/agents");
+    return response.agents;
+  }
+
+  /** `POST /api/v1/nodes/:id/agents/:agent_id/install` */
+  installAgent(nodeId: string, agentId: string): Promise<AgentOpResponse> {
+    return this.#request(
+      "POST",
+      `/api/v1/nodes/${encodeURIComponent(nodeId)}/agents/${encodeURIComponent(agentId)}/install`,
+    );
+  }
+
+  /** `POST /api/v1/nodes/:id/agents/update` (agent_id 省略時は導入済み全エージェント) */
+  updateAgents(nodeId: string, request: UpdateAgentsRequest): Promise<AgentOpResponse> {
+    return this.#request("POST", `/api/v1/nodes/${encodeURIComponent(nodeId)}/agents/update`, {
+      body: request,
+    });
+  }
+
+  /** `DELETE /api/v1/nodes/:id/agents/:agent_id` */
+  removeAgent(nodeId: string, agentId: string): Promise<AgentOpResponse> {
+    return this.#request(
+      "DELETE",
+      `/api/v1/nodes/${encodeURIComponent(nodeId)}/agents/${encodeURIComponent(agentId)}`,
+    );
+  }
+
+  /** `POST /api/v1/auth/rotate-token` (クライアント認証トークン再生成)。 */
+  rotateAuthToken(): Promise<RotateAuthTokenResponse> {
+    return this.#request("POST", "/api/v1/auth/rotate-token");
+  }
+
+  /** `GET /api/v1/nodes/tokens` (中央サーバーのみ)。 */
+  async nodeTokens(): Promise<NodeTokenSummary[]> {
+    const response = await this.#request<NodeTokensResponse>("GET", "/api/v1/nodes/tokens");
+    return response.tokens;
+  }
+
+  /** `POST /api/v1/nodes/tokens` (ノード個別トークン発行。中央サーバーのみ)。 */
+  issueNodeToken(request: IssueNodeTokenRequest): Promise<IssueNodeTokenResponse> {
+    return this.#request("POST", "/api/v1/nodes/tokens", { body: request });
+  }
+
+  /** `DELETE /api/v1/nodes/tokens/:node_id` (ノード個別トークン失効。中央サーバーのみ)。 */
+  async revokeNodeToken(nodeId: string): Promise<void> {
+    await this.#request("DELETE", `/api/v1/nodes/tokens/${encodeURIComponent(nodeId)}`);
   }
 }
 

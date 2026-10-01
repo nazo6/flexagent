@@ -12,6 +12,7 @@
   import SyncStatusBadge from '$lib/components/SyncStatusBadge.svelte';
   import type { SessionSummary } from '$lib/generated/SessionSummary';
   import AlertCircleIcon from '@lucide/svelte/icons/alert-circle';
+  import BotIcon from '@lucide/svelte/icons/bot';
   import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
   import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
   import FolderGit2Icon from '@lucide/svelte/icons/folder-git-2';
@@ -19,6 +20,7 @@
   import PinIcon from '@lucide/svelte/icons/pin';
   import PlusIcon from '@lucide/svelte/icons/plus';
   import SearchIcon from '@lucide/svelte/icons/search';
+  import SettingsIcon from '@lucide/svelte/icons/settings';
   import ShieldAlertIcon from '@lucide/svelte/icons/shield-alert';
 
   interface Props {
@@ -232,6 +234,20 @@
     </a>
 
     <a
+      href="/agents"
+      onclick={handleLinkClick}
+      class={cn(
+        'flex items-center gap-2 rounded-md px-2.5 py-1.5 font-medium transition-colors',
+        currentPath.startsWith('/agents')
+          ? 'bg-accent text-accent-foreground'
+          : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground'
+      )}
+    >
+      <BotIcon class="size-3.5" />
+      <span>エージェント管理</span>
+    </a>
+
+    <a
       href="/audit"
       onclick={handleLinkClick}
       class={cn(
@@ -243,6 +259,20 @@
     >
       <ShieldAlertIcon class="size-3.5" />
       <span>監査ログ</span>
+    </a>
+
+    <a
+      href="/settings"
+      onclick={handleLinkClick}
+      class={cn(
+        'flex items-center gap-2 rounded-md px-2.5 py-1.5 font-medium transition-colors',
+        currentPath.startsWith('/settings')
+          ? 'bg-accent text-accent-foreground'
+          : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground'
+      )}
+    >
+      <SettingsIcon class="size-3.5" />
+      <span>設定</span>
     </a>
   </nav>
 

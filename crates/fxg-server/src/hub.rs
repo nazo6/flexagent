@@ -46,6 +46,15 @@ const COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
 /// ディレクトリ走査は対象規模により 30 秒を超えることがある。
 const PROJECT_OP_TIMEOUT: Duration = Duration::from_secs(120);
 
+/// ACP Registry カタログ取得の応答待ちタイムアウト
+/// (インデックスのネットワーク再取得を含む)。
+const AGENTS_TIMEOUT: Duration = Duration::from_secs(120);
+
+/// エージェントのインストール・更新の応答待ちタイムアウト。
+///
+/// バイナリのダウンロード・展開は数分かかりうる。
+const AGENT_OP_TIMEOUT: Duration = Duration::from_secs(600);
+
 /// ノード接続への送信キュー容量。
 const NODE_CHANNEL_CAPACITY: usize = 512;
 
@@ -99,6 +108,24 @@ enum PendingResponse {
     ProjectLink {
         /// 成功時の紐付け結果
         response: Option<fxg_protocol::client_api::ProjectLinkResponse>,
+        /// 失敗時のメッセージ
+        error: Option<String>,
+    },
+    /// エージェント管理操作結果 (`AgentOpResult`)
+    AgentOp {
+        /// 成功したか
+        success: bool,
+        /// 失敗時の構造化エラーコード
+        code: Option<ErrorCode>,
+        /// 成功時の表示メッセージ
+        message: Option<String>,
+        /// 失敗時のメッセージ
+        error: Option<String>,
+    },
+    /// ACP Registry カタログ結果 (`AgentsResult`)
+    Agents {
+        /// 取得成功時のカタログ
+        response: Option<fxg_protocol::client_api::AgentsResponse>,
         /// 失敗時のメッセージ
         error: Option<String>,
     },
@@ -456,6 +483,59 @@ impl NodeHub {
                 (None, Some(error)) => Err(ApiError::bad_request(error)),
                 (None, None) => Err(ApiError::internal("node returned no project link response")),
             },
+            PendingResponse::Failed { code, message } => Err(ApiError::from_code(code, message)),
+            _ => Err(ApiError::internal("unexpected node response kind")),
+        }
+    }
+
+    /// ACP Registry カタログを中継し、`request_id` 相関で結果を待つ。
+    pub async fn agents(
+        &self,
+        node_id: &str,
+        request_id: &str,
+        message: ServerToNodeMsg,
+    ) -> Result<fxg_protocol::client_api::AgentsResponse, ApiError> {
+        let response = self
+            .request(node_id, request_id, message, AGENTS_TIMEOUT)
+            .await?;
+        match response {
+            PendingResponse::Agents { response, error } => match (response, error) {
+                (Some(resp), _) => Ok(resp),
+                (None, Some(error)) => Err(ApiError::bad_request(error)),
+                (None, None) => Err(ApiError::internal("node returned no agents response")),
+            },
+            PendingResponse::Failed { code, message } => Err(ApiError::from_code(code, message)),
+            _ => Err(ApiError::internal("unexpected node response kind")),
+        }
+    }
+
+    /// エージェント管理操作 (install / update / remove) を中継し、
+    /// `request_id` 相関で結果を待つ。成功時は表示メッセージを返す。
+    pub async fn manage_agent(
+        &self,
+        node_id: &str,
+        request_id: &str,
+        message: ServerToNodeMsg,
+    ) -> Result<Option<String>, ApiError> {
+        let response = self
+            .request(node_id, request_id, message, AGENT_OP_TIMEOUT)
+            .await?;
+        match response {
+            PendingResponse::AgentOp {
+                success,
+                code,
+                message,
+                error,
+            } => {
+                if success {
+                    Ok(message)
+                } else {
+                    Err(ApiError::from_code(
+                        code.unwrap_or(ErrorCode::Internal),
+                        error.unwrap_or_else(|| "agent operation failed".to_owned()),
+                    ))
+                }
+            }
             PendingResponse::Failed { code, message } => Err(ApiError::from_code(code, message)),
             _ => Err(ApiError::internal("unexpected node response kind")),
         }
@@ -952,6 +1032,36 @@ async fn handle_node_message(state: &ServerState, node_id: &str, text: &str) {
                 .resolve(
                     &request_id,
                     PendingResponse::ProjectLink { response, error },
+                )
+                .await;
+        }
+        NodeToServerMsg::AgentsResult {
+            request_id,
+            response,
+            error,
+        } => {
+            state
+                .hub()
+                .resolve(&request_id, PendingResponse::Agents { response, error })
+                .await;
+        }
+        NodeToServerMsg::AgentOpResult {
+            request_id,
+            success,
+            code,
+            message,
+            error,
+        } => {
+            state
+                .hub()
+                .resolve(
+                    &request_id,
+                    PendingResponse::AgentOp {
+                        success,
+                        code,
+                        message,
+                        error,
+                    },
                 )
                 .await;
         }

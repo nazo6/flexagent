@@ -6,8 +6,8 @@
 
 use std::path::{Path, PathBuf};
 
-use fxg_protocol::client_api::WorktreeInfo;
-use fxg_protocol::common::HookLogEntry;
+use fxg_protocol::client_api::{AgentSummary, AgentsResponse, WorktreeInfo};
+use fxg_protocol::common::{AgentAction, HookLogEntry};
 
 use super::DaemonState;
 use crate::error::NodeError;
@@ -16,6 +16,11 @@ use crate::worktree;
 
 /// Git リポジトリ一括スキャン (`fxg project scan`) の最大探索深さ。
 const SCAN_MAX_DEPTH: usize = 3;
+
+/// ACP Registry 操作のエラーを [`NodeError::Agent`] へ変換する。
+fn agent_error(err: anyhow::Error) -> NodeError {
+    NodeError::Agent(format!("{err:#}"))
+}
 
 /// 監査ログの記録元 (クライアント情報)。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -190,6 +195,120 @@ impl DaemonState {
         )
         .await;
         Ok(output)
+    }
+
+    /// ACP Registry カタログ + 導入状態を返す (`GET /api/v1/agents`)。
+    pub async fn agents_catalog(&self) -> Result<AgentsResponse, NodeError> {
+        let registry = self.session_manager().registry();
+        let index = registry.index(false).await.map_err(agent_error)?;
+        let node_id = self.node_id().to_owned();
+        let agents = registry
+            .list(&index, true)
+            .into_iter()
+            .map(|entry| AgentSummary {
+                id: entry.id.clone(),
+                name: entry.name,
+                version: entry.version,
+                description: entry.description,
+                distributions: entry
+                    .distributions
+                    .iter()
+                    .map(|kind| (*kind).to_owned())
+                    .collect(),
+                installed: entry.installed,
+                custom: entry.custom,
+                builtin: entry.builtin,
+                installed_versions: if entry.custom || entry.builtin {
+                    Vec::new()
+                } else {
+                    registry.installed_versions(&entry.id)
+                },
+                installed_nodes: if entry.installed {
+                    vec![node_id.clone()]
+                } else {
+                    Vec::new()
+                },
+            })
+            .collect();
+        Ok(AgentsResponse { agents })
+    }
+
+    /// エージェント管理操作 (install / update / remove) を実行し、
+    /// 表示メッセージを返す (`fxg agents` の Web UI 版)。
+    pub async fn manage_agent(&self, action: &AgentAction) -> Result<String, NodeError> {
+        let registry = self.session_manager().registry();
+        match action {
+            AgentAction::Install { agent_id } => {
+                let id = registry.resolve_alias(agent_id);
+                let index = registry.index(false).await.map_err(agent_error)?;
+                let agent = index.find(&id).ok_or_else(|| {
+                    NodeError::Agent(format!("agent not found in registry: {id}"))
+                })?;
+                if agent.distribution.binary.is_empty() {
+                    return Ok(format!(
+                        "{id} is distributed via npx/uvx; no explicit install required"
+                    ));
+                }
+                let path = registry.install(&id, &index).await.map_err(agent_error)?;
+                Ok(format!(
+                    "installed {id} {} → {}",
+                    agent.version,
+                    path.display()
+                ))
+            }
+            AgentAction::Update { agent_id } => {
+                let index = registry.index(true).await.map_err(agent_error)?;
+                let ids: Vec<String> = match agent_id {
+                    Some(id) => vec![registry.resolve_alias(id)],
+                    None => index
+                        .agents
+                        .iter()
+                        .filter(|agent| registry.is_installed(agent))
+                        .map(|agent| agent.id.clone())
+                        .collect(),
+                };
+                if ids.is_empty() {
+                    return Ok("(no installed agents)".to_owned());
+                }
+                let mut lines = Vec::new();
+                for id in ids {
+                    let Some(agent) = index.find(&id) else {
+                        lines.push(format!("{id}: no longer in registry (skipped)"));
+                        continue;
+                    };
+                    if agent.distribution.binary.is_empty() {
+                        lines.push(format!("{id}: npx/uvx distribution (no update required)"));
+                        continue;
+                    }
+                    if registry
+                        .installed_versions(&id)
+                        .iter()
+                        .any(|version| version == &agent.version)
+                    {
+                        lines.push(format!("{id}: up to date ({})", agent.version));
+                        continue;
+                    }
+                    let path = registry.install(&id, &index).await.map_err(|err| {
+                        NodeError::Agent(format!("failed to update agent {id}: {err:#}"))
+                    })?;
+                    lines.push(format!(
+                        "updated {id} → {} ({})",
+                        agent.version,
+                        path.display()
+                    ));
+                }
+                Ok(lines.join("\n"))
+            }
+            AgentAction::Remove { agent_id } => {
+                let id = registry.resolve_alias(agent_id);
+                let removed = registry.remove(&id).map_err(agent_error)?;
+                Ok(if removed {
+                    format!("removed {id}")
+                } else {
+                    format!("{id} is not installed")
+                })
+            }
+        }
     }
 
     /// プロジェクトのメインリポジトリ (Worktree ではない) のローカルパスを解決する。

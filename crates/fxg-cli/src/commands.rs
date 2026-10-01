@@ -314,7 +314,7 @@ impl usage::RunAsync for ServerArgs {
             &server.listen_addr().to_string(),
             &fxg_home,
             log_file.as_deref(),
-            auth_token,
+            auth_token.as_deref(),
             use_color,
         );
 

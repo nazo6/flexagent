@@ -780,6 +780,52 @@ pub(crate) async fn handle_server_message(
             };
             let _ = out.send(response).await;
         }
+        ServerToNodeMsg::ListAgents { request_id } => {
+            let response = match state.agents_catalog().await {
+                Ok(catalog) => NodeToServerMsg::AgentsResult {
+                    request_id,
+                    response: Some(catalog),
+                    error: None,
+                },
+                Err(err) => NodeToServerMsg::AgentsResult {
+                    request_id,
+                    response: None,
+                    error: Some(err.to_string()),
+                },
+            };
+            let _ = out.send(response).await;
+        }
+        ServerToNodeMsg::ManageAgent { request_id, action } => {
+            let response = match state.manage_agent(&action).await {
+                Ok(message) => {
+                    state
+                        .record_audit(
+                            fxg_db::audit::actions::AGENT_MANAGE,
+                            &AuditSource::remote(state.node_id()),
+                            None,
+                            serde_json::json!({ "action": action, "message": &message }),
+                        )
+                        .await;
+                    // 導入状態の変化をハブへ報告する
+                    state.trigger_node_hello();
+                    NodeToServerMsg::AgentOpResult {
+                        request_id,
+                        success: true,
+                        code: None,
+                        message: Some(message),
+                        error: None,
+                    }
+                }
+                Err(err) => NodeToServerMsg::AgentOpResult {
+                    request_id,
+                    success: false,
+                    code: Some(err.error_code()),
+                    message: None,
+                    error: Some(err.to_string()),
+                },
+            };
+            let _ = out.send(response).await;
+        }
         ServerToNodeMsg::BrowseFs { request_id, path } => {
             let result = crate::fs_browse::browse_fs(path.as_deref());
             let response = match result {
