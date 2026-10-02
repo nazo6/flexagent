@@ -134,7 +134,6 @@ async fn provisioner_runs_stdio_node_and_drains_bundle() {
             agent_id: "mock".to_owned(),
             initial_prompt: None,
             mode: None,
-            opencode_mode: None,
             extra_args: None,
             fork: None,
         })

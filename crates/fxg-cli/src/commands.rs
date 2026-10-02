@@ -13,7 +13,6 @@ use fxg_protocol::common::{
     SessionStatus,
 };
 use fxg_protocol::events::UnifiedEventPayload;
-use fxg_protocol::ipc::{AttachMode, IpcResult, IpcServerMessage};
 use usage::Args;
 
 use crate::client::{DaemonClient, format_unix_ms_utc, print_table, short_id, truncate};
@@ -408,21 +407,59 @@ pub(crate) fn local_web_url(listen_addr: &str, token: &str) -> String {
     format!("http://{listen_addr}/?token={token}")
 }
 
+/// セッション専用のトークン付き Web UI URL を組み立てる。
+pub(crate) fn local_session_web_url(session_id: &str) -> Result<String> {
+    let env = fxg_protocol::config::process_env;
+    let global = fxg_protocol::config::GlobalConfig::load(&env).unwrap_or_default();
+    let token = fxg_server::api::auth::load_or_create_token(
+        &fxg_protocol::config::fxg_home(&env).join(fxg_protocol::config::AUTH_TOKEN_FILE_NAME),
+    )
+    .context("failed to load ~/.flexagent/auth_token")?;
+    let listen = global
+        .node
+        .listen_addr
+        .clone()
+        .unwrap_or_else(|| "127.0.0.1:7860".to_owned());
+    Ok(format!(
+        "http://{listen}/sessions/{session_id}?token={token}"
+    ))
+}
+
+/// セッションIDと Web UI URL を表示し、指定があればブラウザで開く。
+pub(crate) fn open_session_url(session_id: &str, no_open: bool) -> Result<()> {
+    match local_session_web_url(session_id) {
+        Ok(url) => {
+            println!("Session: {session_id}");
+            println!("Web UI:  {url}");
+            if !no_open {
+                let _ = opener::open_browser(&url);
+            }
+        }
+        Err(_) => {
+            println!("{session_id}");
+        }
+    }
+    Ok(())
+}
+
 // ----------------------------------------------------------------------
-// fxg run / fxg attach
+// fxg run
 // ----------------------------------------------------------------------
 
 /// `fxg run <agent>` の引数。
 #[derive(Debug, Args)]
 pub struct RunArgs {
-    /// エージェントID (`opencode` / `antigravity` / `claude` 等)
+    /// エージェントID (`opencode` / `claude` 等)
     agent: String,
-    /// 初期プロンプトを送信してからアタッチする
+    /// 初期プロンプトを送信する
     #[usage(short = 'p', long)]
     prompt: Option<String>,
-    /// TUI をアタッチせずバックグラウンド起動し、セッションIDを出力する
+    /// ブラウザを開かずセッションIDのみ出力する
     #[usage(short = 'd', long)]
     detach: bool,
+    /// 起動後にデフォルトブラウザで Web UI を開かない
+    #[usage(long)]
+    no_open: bool,
     /// 初期モード (`code` / `plan` 等)
     #[usage(long)]
     mode: Option<String>,
@@ -435,9 +472,6 @@ pub struct RunArgs {
     /// 一時VMプロビジョナーで起動する (中央サーバーホスト上で起動。中央サーバー必須)
     #[usage(long)]
     provisioner: Option<String>,
-    /// `opencode` を標準ACPモード (`opencode acp`) で起動する
-    #[usage(long)]
-    acp: bool,
     /// エージェントプロセスへのパススルー引数
     #[usage(value_name = "EXTRA_ARGS", double_dash = "required")]
     extra_args: Vec<String>,
@@ -462,14 +496,8 @@ impl usage::RunAsync for RunArgs {
             None => cwd,
         };
 
-        let (session_id, _) = client
-            .ensure_session(
-                &cwd,
-                &self.agent,
-                &self.extra_args,
-                self.mode.as_deref(),
-                self.acp,
-            )
+        let session_id = client
+            .ensure_session(&cwd, &self.agent, &self.extra_args, self.mode.as_deref())
             .await?;
 
         if let Some(prompt) = &self.prompt {
@@ -480,7 +508,7 @@ impl usage::RunAsync for RunArgs {
             println!("{session_id}");
             return Ok(());
         }
-        crate::tui::attach(&mut client, &session_id).await
+        open_session_url(&session_id, self.no_open)
     }
 }
 
@@ -518,11 +546,6 @@ async fn run_with_provisioner(
         agent_id: args.agent.clone(),
         initial_prompt: args.prompt.clone(),
         mode: args.mode.clone(),
-        opencode_mode: if args.acp {
-            Some("acp".to_owned())
-        } else {
-            None
-        },
         extra_args: if args.extra_args.is_empty() {
             None
         } else {
@@ -535,7 +558,11 @@ async fn run_with_provisioner(
         "provisioning session {} via '{provisioner}' (bootstrap ログは Web UI / `fxg provisioners test` で確認できます)",
         response.session_id
     );
-    println!("{}", response.session_id);
+    if args.detach {
+        println!("{}", response.session_id);
+    } else {
+        open_session_url(&response.session_id, args.no_open)?;
+    }
     Ok(())
 }
 
@@ -734,26 +761,6 @@ impl usage::RunAsync for GitAskpassArgs {
     }
 }
 
-/// `fxg attach [session-id]` の引数。
-#[derive(Debug, Args)]
-pub struct AttachArgs {
-    /// セッションID (省略時はカレントディレクトリの直近アクティブセッション)
-    session_id: Option<String>,
-}
-
-impl usage::RunAsync for AttachArgs {
-    type Output = Result<()>;
-
-    async fn run_async(self) -> Self::Output {
-        let mut client = DaemonClient::connect().await?;
-        let session_id = match self.session_id {
-            Some(session_id) => session_id,
-            None => latest_session_for_cwd(&mut client).await?,
-        };
-        crate::tui::attach(&mut client, &session_id).await
-    }
-}
-
 /// Worktree を作成/再利用し、そのパスを返す (`fxg run -w` / `fxg session fork -w`)。
 async fn create_worktree(
     client: &mut DaemonClient,
@@ -777,35 +784,6 @@ async fn create_worktree(
         }
     }
     Ok(PathBuf::from(path))
-}
-
-/// カレントディレクトリの直近アクティブセッションを解決する
-/// (`fxg attach` の ID 省略時)。
-async fn latest_session_for_cwd(client: &mut DaemonClient) -> Result<String> {
-    let cwd = std::env::current_dir().context("failed to resolve current directory")?;
-    let sessions = client.list_sessions(false, false).await?;
-    sessions
-        .into_iter()
-        .filter(|session| session.status != SessionStatus::Stopped)
-        .find(|session| same_directory(Path::new(&session.local_path), &cwd))
-        .map(|session| session.session_id)
-        .with_context(|| {
-            format!(
-                "{} の直近アクティブセッションが見つかりません (`fxg ps` で確認してください)",
-                cwd.display()
-            )
-        })
-}
-
-/// 2 つのディレクトリが同一かを判定する (表記ゆれは canonicalize で吸収)。
-fn same_directory(a: &Path, b: &Path) -> bool {
-    if a == b {
-        return true;
-    }
-    match (fxg_pty::canonicalize(a), fxg_pty::canonicalize(b)) {
-        (Ok(a), Ok(b)) => a == b,
-        _ => false,
-    }
 }
 
 // ----------------------------------------------------------------------
@@ -1163,38 +1141,31 @@ impl usage::RunAsync for SessionPromptArgs {
     }
 }
 
-/// ターン完了 (`idle`) までイベントを購読して出力する
+/// ターン完了 (`idle`) までイベントをポーリングして出力する
 /// (`fxg session prompt --wait`)。
 async fn wait_for_turn(client: &mut DaemonClient, session_id: &str, prompt: &str) -> Result<()> {
-    let attach_mode = client.attach_session(session_id, None).await?;
-    if !matches!(attach_mode, AttachMode::AcpTui) {
-        bail!("--wait は内蔵TUI (AcpTui) モードのセッションのみ対応しています");
-    }
-
     let mut seen_prompt = false;
+    let mut last_seq = 0u64;
     loop {
-        let Some(message) = client.next_message().await? else {
-            break;
-        };
-        match message {
-            IpcServerMessage::EventBatch { events, .. } => {
-                for event in events {
-                    if print_and_check_done(&event.payload, prompt, &mut seen_prompt) {
-                        return Ok(());
-                    }
+        let detail = client.session_show(session_id, 100).await?;
+        for event in detail.recent_events {
+            if event.node_seq > last_seq {
+                last_seq = event.node_seq;
+                if print_and_check_done(&event.payload, prompt, &mut seen_prompt) {
+                    return Ok(());
                 }
             }
-            IpcServerMessage::LiveStreamDelta { .. } => {}
-            IpcServerMessage::Result { result, .. } => match result {
-                IpcResult::Ack { .. } | IpcResult::CommandAccepted { .. } => {}
-                other => tracing::debug!("ignoring result while waiting: {other:?}"),
-            },
-            IpcServerMessage::Error { code, message, .. } => {
-                bail!("{code}: {message}");
-            }
         }
+        if seen_prompt
+            && matches!(
+                detail.session.status,
+                SessionStatus::Idle | SessionStatus::Error | SessionStatus::Stopped
+            )
+        {
+            return Ok(());
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
     }
-    Ok(())
 }
 
 /// イベントを出力し、ターン完了なら `true` を返す。
@@ -1403,6 +1374,12 @@ pub struct SessionForkArgs {
     /// 一時VMプロビジョナーで分岐する (中央サーバー必須。退避済み Git バンドルを復元)
     #[usage(long)]
     provisioner: Option<String>,
+    /// ブラウザを開かずセッションIDのみ出力する
+    #[usage(short = 'd', long)]
+    detach: bool,
+    /// 分岐後にデフォルトブラウザで Web UI を開かない
+    #[usage(long)]
+    no_open: bool,
 }
 
 impl usage::RunAsync for SessionForkArgs {
@@ -1431,7 +1408,6 @@ impl usage::RunAsync for SessionForkArgs {
                     .unwrap_or_else(|| source.agent_id.clone()),
                 initial_prompt: None,
                 mode: None,
-                opencode_mode: None,
                 extra_args: None,
                 fork: Some(fxg_protocol::client_api::SessionForkSpec {
                     from_session_id: self.session_id.clone(),
@@ -1441,7 +1417,11 @@ impl usage::RunAsync for SessionForkArgs {
                 }),
             };
             let response = server.create_session(&request).await?;
-            println!("{}", response.session_id);
+            if self.detach {
+                println!("{}", response.session_id);
+            } else {
+                open_session_url(&response.session_id, self.no_open)?;
+            }
             return Ok(());
         }
 
@@ -1454,11 +1434,14 @@ impl usage::RunAsync for SessionForkArgs {
             None => None,
         };
 
-        let (session_id, _) = client
+        let session_id = client
             .fork_session(&self.session_id, self.from_seq, self.agent, cwd.as_deref())
             .await?;
-        println!("forked: {session_id}");
-        crate::tui::attach(&mut client, &session_id).await
+        if self.detach {
+            println!("{session_id}");
+            return Ok(());
+        }
+        open_session_url(&session_id, self.no_open)
     }
 }
 
@@ -1467,9 +1450,12 @@ impl usage::RunAsync for SessionForkArgs {
 pub struct SessionResumeArgs {
     /// 再開するセッションID
     session_id: String,
-    /// TUI を Attach せずバックグラウンドで再開し、セッションIDを出力する
+    /// ブラウザを開かずセッションIDのみ出力する
     #[usage(short = 'd', long)]
     detach: bool,
+    /// 再開後にデフォルトブラウザで Web UI を開かない
+    #[usage(long)]
+    no_open: bool,
     /// ネイティブ復元 (session/resume・session/load・既存セッション bind) を
     /// 試みず、履歴 Replay で継続する
     #[usage(long)]
@@ -1481,8 +1467,7 @@ impl usage::RunAsync for SessionResumeArgs {
 
     async fn run_async(self) -> Self::Output {
         let mut client = DaemonClient::connect().await?;
-        let (_attach_mode, context_restored) =
-            client.resume_session(&self.session_id, self.replay).await?;
+        let context_restored = client.resume_session(&self.session_id, self.replay).await?;
         if context_restored {
             eprintln!("resumed (agent context restored): {}", self.session_id);
         } else {
@@ -1492,7 +1477,7 @@ impl usage::RunAsync for SessionResumeArgs {
             println!("{}", self.session_id);
             return Ok(());
         }
-        crate::tui::attach(&mut client, &self.session_id).await
+        open_session_url(&self.session_id, self.no_open)
     }
 }
 

@@ -20,7 +20,6 @@ pub mod logging;
 mod server_api;
 mod service;
 mod tray;
-mod tui;
 
 /// `fxg` ルートコマンド。
 #[derive(Debug, Cli)]
@@ -40,10 +39,8 @@ struct Fxg {
 #[derive(Debug, Subcommands)]
 #[usage(run_async)]
 enum Commands {
-    /// 新規セッションを起動し、即座にターミナルを Attach する
+    /// 新規セッションを起動する
     Run(commands::RunArgs),
-    /// 稼働中セッションにターミナル (内蔵TUI / OpenCode2 純正TUI) を再接続する
-    Attach(commands::AttachArgs),
     /// 稼働中・最近のセッション一覧を表示する (`fxg session list` の別名)
     Ps(commands::SessionListArgs),
     /// セッション管理 (list / show / prompt / stop / kill / revert / fork)

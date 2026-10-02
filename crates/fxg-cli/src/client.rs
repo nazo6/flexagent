@@ -15,7 +15,7 @@ use fxg_protocol::common::{
 };
 use fxg_protocol::config::process_env;
 use fxg_protocol::ipc::{
-    AttachMode, IpcClientMessage, IpcResult, IpcServerMessage, ProjectInfo, SessionDetail,
+    IpcClientMessage, IpcResult, IpcServerMessage, ProjectInfo, SessionDetail,
 };
 
 /// デーモン (`fxg daemon`) への IPC クライアント。
@@ -308,8 +308,7 @@ impl DaemonClient {
         agent_id: &str,
         extra_args: &[String],
         initial_mode: Option<&str>,
-        acp: bool,
-    ) -> Result<(String, AttachMode)> {
+    ) -> Result<String> {
         let command_id = self.command_id();
         let result = self
             .request(IpcClientMessage::EnsureSession {
@@ -318,14 +317,10 @@ impl DaemonClient {
                 agent_id: agent_id.to_owned(),
                 extra_args: extra_args.to_vec(),
                 initial_mode: initial_mode.map(str::to_owned),
-                acp,
             })
             .await?;
         match result {
-            IpcResult::EnsureSession {
-                session_id,
-                attach_mode,
-            } => Ok((session_id, attach_mode)),
+            IpcResult::EnsureSession { session_id } => Ok(session_id),
             other => bail!("unexpected ipc result: {other:?}"),
         }
     }
@@ -495,7 +490,7 @@ impl DaemonClient {
         from_node_seq: Option<u64>,
         agent_id: Option<String>,
         cwd: Option<&Path>,
-    ) -> Result<(String, AttachMode)> {
+    ) -> Result<String> {
         let command_id = self.command_id();
         let result = self
             .request(IpcClientMessage::SessionFork {
@@ -507,23 +502,16 @@ impl DaemonClient {
             })
             .await?;
         match result {
-            IpcResult::SessionForked {
-                session_id,
-                attach_mode,
-            } => Ok((session_id, attach_mode)),
+            IpcResult::SessionForked { session_id } => Ok(session_id),
             other => bail!("unexpected ipc result: {other:?}"),
         }
     }
 
     /// `fxg session resume` — 停止済みセッションを再開する。
     ///
-    /// 戻り値は (アタッチモード, ネイティブ復元成否)。`context_restored = false`
+    /// 戻り値はネイティブ復元成否。`context_restored = false`
     /// の場合は履歴 Replay で継続されている。
-    pub async fn resume_session(
-        &mut self,
-        session_id: &str,
-        force_replay: bool,
-    ) -> Result<(AttachMode, bool)> {
+    pub async fn resume_session(&mut self, session_id: &str, force_replay: bool) -> Result<bool> {
         let command_id = self.command_id();
         let result = self
             .request(IpcClientMessage::SessionResume {
@@ -534,61 +522,10 @@ impl DaemonClient {
             .await?;
         match result {
             IpcResult::SessionResumed {
-                attach_mode,
-                context_restored,
-                ..
-            } => Ok((attach_mode, context_restored)),
+                context_restored, ..
+            } => Ok(context_restored),
             other => bail!("unexpected ipc result: {other:?}"),
         }
-    }
-
-    /// `fxg attach` — セッションのイベントストリームを購読開始する。
-    ///
-    /// 以降のメッセージは [`Self::next_message`] で受信する
-    /// (`EventBatch` / `LiveStreamDelta` / コマンド応答が混在)。
-    pub async fn attach_session(
-        &mut self,
-        session_id: &str,
-        after_node_seq: Option<u64>,
-    ) -> Result<AttachMode> {
-        let command_id = self.command_id();
-        self.client
-            .send(&IpcClientMessage::AttachSession {
-                command_id: command_id.clone(),
-                session_id: session_id.to_owned(),
-                after_node_seq,
-            })
-            .await?;
-        // 受理応答 (`Result::AttachSession`) までを読み飛ばす
-        loop {
-            match self.next_message().await? {
-                Some(IpcServerMessage::Result {
-                    result: IpcResult::AttachSession { attach_mode, .. },
-                    ..
-                }) => return Ok(attach_mode),
-                Some(IpcServerMessage::Error { code, message, .. }) => {
-                    bail!("{code}: {message}")
-                }
-                Some(_) => continue,
-                None => bail!("デーモンがアタッチ前に接続を閉じました"),
-            }
-        }
-    }
-
-    /// アタッチ中の接続から次のメッセージを受信する。
-    pub async fn next_message(&mut self) -> Result<Option<IpcServerMessage>> {
-        Ok(self.client.recv().await?)
-    }
-
-    /// アタッチ中の接続へ相関ID付きコマンドを送信する。
-    pub async fn send_stream_command(&mut self, message: IpcClientMessage) -> Result<()> {
-        self.client.send(&message).await?;
-        Ok(())
-    }
-
-    /// 次のコマンドIDを採番する (内蔵TUI の送信直前採番用)。
-    pub fn next_command_id(&mut self) -> String {
-        self.command_id()
     }
 }
 

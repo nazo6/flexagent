@@ -351,15 +351,6 @@ async fn phase3_session_and_inbox_commands_roundtrip_through_daemon() {
         assert!(stderr.contains("INVALID_STATE"), "{args:?}: {stderr}");
     }
 
-    // --- fxg attach (対象セッションなし) ---
-    let output = env.run(&["attach"], Some(&repo));
-    assert!(!output.status.success());
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        stderr.contains("直近アクティブセッションが見つかりません"),
-        "got: {stderr}"
-    );
-
     // --- fxg run --provisioner は中央サーバー必須 (未設定時は設定エラー) ---
     let output = env.run(
         &["run", "opencode", "--provisioner", "colab-pro"],

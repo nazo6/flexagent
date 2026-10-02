@@ -12,7 +12,6 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow = { workspace = true }
-crossterm = { workspace = true }
 dirs.workspace = true
 fxg-acp = { workspace = true }
 fxg-db = { workspace = true }
@@ -23,7 +22,6 @@ fxg-server = { workspace = true }
 libc.workspace = true
 opener = "0.9.0"
 png = "0.18"
-ratatui = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -31,7 +29,6 @@ tokio = { workspace = true }
 tracing = { workspace = true }
 tracing-appender = { workspace = true }
 tracing-subscriber = { workspace = true }
-unicode-width = { workspace = true }
 usage = { workspace = true }
 
 [dev-dependencies]
