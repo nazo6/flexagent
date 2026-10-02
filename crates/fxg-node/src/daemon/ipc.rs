@@ -968,26 +968,6 @@ mod tests {
         (daemon, mock, dir)
     }
 
-    /// 条件を満たすメッセージを受信するまで読み進める (アタッチ中のストリーム用)。
-    async fn recv_until<F>(client: &mut IpcClient, mut predicate: F) -> IpcServerMessage
-    where
-        F: FnMut(&IpcServerMessage) -> bool,
-    {
-        // 期待メッセージが来ない場合にテストが永久ブロックしないようタイムアウトする
-        let wait = std::time::Duration::from_secs(10);
-        for _ in 0..50 {
-            let message = tokio::time::timeout(wait, client.recv())
-                .await
-                .expect("timed out waiting for an expected ipc message")
-                .expect("recv")
-                .expect("daemon closed the connection");
-            if predicate(&message) {
-                return message;
-            }
-        }
-        panic!("expected message was not received");
-    }
-
     #[tokio::test]
     async fn ipc_project_info_and_link_via_socket() {
         let (daemon, dir) = start_daemon().await;
