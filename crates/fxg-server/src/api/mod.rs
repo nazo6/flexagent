@@ -41,11 +41,12 @@ use fxg_protocol::client_api::{
     KillSwitchRequest, KillSwitchResponse, MetaResponse, NodeTokensResponse, NodesResponse,
     ProjectLinkRequest, ProjectLinkResponse, ProjectScanRequest, ProjectScanResponse,
     ProjectsResponse, ProvisionersResponse, PruneWorktreesRequest, PushSubscribeRequest,
-    PushSubscribeResponse, RemoveWorktreeRequest, RespondPermissionRequest,
-    RespondPermissionResponse, ResumeSessionRequest, ResumeSessionResponse,
-    RotateAuthTokenResponse, SearchResponse, ServerWsMessage, SessionArchiveRequest,
-    SessionArchiveResponse, SessionListResponse, SessionRevertRequest, SessionRevertResponse,
-    SystemInfoResponse, UpdateAgentsRequest, WorktreeInfo, WorktreesResponse,
+    PushSubscribeResponse, RemoveWorktreeRequest, RespondElicitationRequest,
+    RespondElicitationResponse, RespondPermissionRequest, RespondPermissionResponse,
+    ResumeSessionRequest, ResumeSessionResponse, RotateAuthTokenResponse, SearchResponse,
+    ServerWsMessage, SessionArchiveRequest, SessionArchiveResponse, SessionListResponse,
+    SessionRevertRequest, SessionRevertResponse, SystemInfoResponse, UpdateAgentsRequest,
+    WorktreeInfo, WorktreesResponse,
 };
 use fxg_protocol::common::{
     AgentAction, CommandResult, DiffScope, ErrorCode, ProjectSummary, SessionControlAction,
@@ -254,6 +255,21 @@ pub enum ClientCommand {
         /// 解決主体 (`cli` / `web` / `android_push`)
         resolved_by: String,
     },
+    /// elicitation (構造化入力リクエスト) への回答
+    RespondElicitation {
+        /// 相関ID
+        command_id: String,
+        /// 対象セッションID
+        session_id: String,
+        /// ACP elicitation id
+        elicitation_id: String,
+        /// ユーザーの応答アクション (`accept` / `decline` / `cancel`)
+        action: fxg_protocol::common::ElicitationAction,
+        /// `accept` 時の回答内容 (form の `requested_schema` 準拠)
+        content: serde_json::Value,
+        /// 解決主体 (`cli` / `web` / `android_push`)
+        resolved_by: String,
+    },
     /// モード切替 / 設定変更 / キャンセル / Kill
     ControlSession {
         /// 相関ID
@@ -294,6 +310,21 @@ impl ClientCommand {
                 selected_option_id: selected_option_id.clone(),
                 resolved_by: resolved_by.clone(),
             }),
+            ClientWsMessage::RespondElicitation {
+                command_id,
+                session_id,
+                elicitation_id,
+                action,
+                content,
+                resolved_by,
+            } => Some(Self::RespondElicitation {
+                command_id: command_id.clone(),
+                session_id: session_id.clone(),
+                elicitation_id: elicitation_id.clone(),
+                action: *action,
+                content: content.clone(),
+                resolved_by: resolved_by.clone(),
+            }),
             ClientWsMessage::ControlSession {
                 command_id,
                 session_id,
@@ -312,6 +343,7 @@ impl ClientCommand {
         match self {
             Self::SendPrompt { command_id, .. }
             | Self::RespondPermission { command_id, .. }
+            | Self::RespondElicitation { command_id, .. }
             | Self::ControlSession { command_id, .. } => command_id,
         }
     }
@@ -373,6 +405,15 @@ pub trait ClientApiBackend: Clone + Send + Sync + 'static {
         request: RespondPermissionRequest,
         client: ClientInfo,
     ) -> Result<RespondPermissionResponse, ApiError>;
+
+    /// `POST /api/v1/sessions/:id/elicitations/:elicitation_id/respond` (冪等)。
+    async fn respond_elicitation(
+        &self,
+        session_id: &str,
+        elicitation_id: &str,
+        request: RespondElicitationRequest,
+        client: ClientInfo,
+    ) -> Result<RespondElicitationResponse, ApiError>;
 
     /// `POST /api/v1/sessions/:id/revert` (Shadow Git Tree 巻き戻し)。
     async fn revert_session(
@@ -705,6 +746,10 @@ pub fn client_router<B: ClientApiBackend>(backend: B, options: ClientApiOptions)
             post(respond_permission::<B>),
         )
         .route(
+            "/api/v1/sessions/{session_id}/elicitations/{elicitation_id}/respond",
+            post(respond_elicitation::<B>),
+        )
+        .route(
             "/api/v1/sessions/{session_id}/revert",
             post(revert_session::<B>),
         )
@@ -1014,6 +1059,22 @@ async fn respond_permission<B: ClientApiBackend>(
     match state
         .backend
         .respond_permission(&session_id, &request_id, request, client)
+        .await
+    {
+        Ok(response) => Json(response).into_response(),
+        Err(err) => err.into_response(),
+    }
+}
+
+async fn respond_elicitation<B: ClientApiBackend>(
+    State(state): State<ClientApiState<B>>,
+    Extension(client): Extension<ClientInfo>,
+    UrlPath((session_id, elicitation_id)): UrlPath<(String, String)>,
+    Json(request): Json<RespondElicitationRequest>,
+) -> Response {
+    match state
+        .backend
+        .respond_elicitation(&session_id, &elicitation_id, request, client)
         .await
     {
         Ok(response) => Json(response).into_response(),

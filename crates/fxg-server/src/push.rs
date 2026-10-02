@@ -244,6 +244,57 @@ pub fn permission_notification(
     }
 }
 
+/// `ElicitationRequest` イベントから通知ペイロードを組み立てる。
+///
+/// form の回答はアプリ内でのみ行えるため、承認のような直接応答ボタンは付けず、
+/// 通知タップでアプリを開く導線のみとする。
+pub fn elicitation_notification(
+    session_id: &str,
+    session_title: Option<&str>,
+    node_label: &str,
+    elicitation_id: &str,
+    message: &str,
+) -> PushNotificationPayload {
+    let title = match session_title {
+        Some(title) => format!("[flexagent] 質問 ({node_label}) — {title}"),
+        None => format!("[flexagent] 質問 ({node_label})"),
+    };
+    PushNotificationPayload {
+        title,
+        body: message.to_owned(),
+        session_id: session_id.to_owned(),
+        request_id: elicitation_id.to_owned(),
+        tag: format!("fxg-elicitation-{elicitation_id}"),
+        allow_option_id: None,
+        reject_option_id: None,
+    }
+}
+
+/// 1 ペイロードを全購読へ送る (失効した購読は削除する)。失敗は警告ログのみ。
+async fn send_to_subscriptions(
+    push: &PushService,
+    db: &Db,
+    subscriptions: &[PushSubscriptionRecord],
+    payload: &PushNotificationPayload,
+) {
+    for subscription in subscriptions {
+        match push.send(subscription, payload).await {
+            Ok(PushSendOutcome::Sent) => {
+                tracing::debug!(endpoint = %subscription.endpoint, request_id = %payload.request_id, "push sent");
+            }
+            Ok(PushSendOutcome::Gone) => {
+                tracing::info!(endpoint = %subscription.endpoint, "removing expired push subscription");
+                if let Err(err) = db.delete_push_subscription(&subscription.endpoint).await {
+                    tracing::warn!("failed to delete push subscription: {err}");
+                }
+            }
+            Err(err) => {
+                tracing::warn!(endpoint = %subscription.endpoint, "push send failed: {err}");
+            }
+        }
+    }
+}
+
 /// イベント列内の `PermissionRequest` を全購読へ通知する。
 ///
 /// 失効した購読 (`404` / `410`) は削除する。失敗は警告ログのみで継続する。
@@ -316,22 +367,71 @@ pub async fn notify_permission_requests(
             &options,
         );
 
-        for subscription in &subscriptions {
-            match push.send(subscription, &payload).await {
-                Ok(PushSendOutcome::Sent) => {
-                    tracing::debug!(endpoint = %subscription.endpoint, request_id, "push sent");
-                }
-                Ok(PushSendOutcome::Gone) => {
-                    tracing::info!(endpoint = %subscription.endpoint, "removing expired push subscription");
-                    if let Err(err) = db.delete_push_subscription(&subscription.endpoint).await {
-                        tracing::warn!("failed to delete push subscription: {err}");
-                    }
-                }
-                Err(err) => {
-                    tracing::warn!(endpoint = %subscription.endpoint, "push send failed: {err}");
-                }
-            }
+        send_to_subscriptions(push, db, &subscriptions, &payload).await;
+    }
+}
+
+/// イベント列内の `ElicitationRequest` を全購読へ通知する。
+///
+/// 失効した購読 (`404` / `410`) は削除する。失敗は警告ログのみで継続する。
+pub async fn notify_elicitations(
+    push: &PushService,
+    db: &Db,
+    events: &[fxg_protocol::events::SessionEventEnvelope],
+) {
+    use fxg_protocol::events::UnifiedEventPayload;
+
+    let requests: Vec<(String, String, String)> = events
+        .iter()
+        .filter_map(|event| match &event.payload {
+            UnifiedEventPayload::ElicitationRequest {
+                elicitation_id,
+                message,
+                ..
+            } => Some((
+                event.session_id.clone(),
+                elicitation_id.clone(),
+                message.clone(),
+            )),
+            _ => None,
+        })
+        .collect();
+    if requests.is_empty() {
+        return;
+    }
+
+    let subscriptions = match db.list_push_subscriptions().await {
+        Ok(subscriptions) => subscriptions,
+        Err(err) => {
+            tracing::warn!("failed to load push subscriptions: {err}");
+            return;
         }
+    };
+    if subscriptions.is_empty() {
+        return;
+    }
+
+    for (session_id, elicitation_id, message) in requests {
+        let session = match db.get_session(&session_id).await {
+            Ok(session) => session,
+            Err(err) => {
+                tracing::warn!(session_id, "failed to load session for push: {err}");
+                None
+            }
+        };
+        let node_label = session
+            .as_ref()
+            .map(|session| session.node_id.clone())
+            .unwrap_or_else(|| "unknown".to_owned());
+        let payload = elicitation_notification(
+            &session_id,
+            session.as_ref().map(|session| session.title.as_str()),
+            &node_label,
+            &elicitation_id,
+            &message,
+        );
+
+        send_to_subscriptions(push, db, &subscriptions, &payload).await;
     }
 }
 
@@ -454,5 +554,22 @@ mod tests {
         assert_eq!(payload.tag, "fxg-permission-req-1");
         assert_eq!(payload.allow_option_id.as_deref(), Some("allow_once"));
         assert_eq!(payload.reject_option_id.as_deref(), Some("reject"));
+    }
+
+    #[test]
+    fn elicitation_notification_has_no_direct_answer_buttons() {
+        let payload = elicitation_notification(
+            "session-1",
+            Some("Fix auth"),
+            "Home-Win",
+            "elic-1",
+            "どの戦略で進めますか?",
+        );
+        assert_eq!(payload.title, "[flexagent] 質問 (Home-Win) — Fix auth");
+        assert_eq!(payload.body, "どの戦略で進めますか?");
+        assert_eq!(payload.tag, "fxg-elicitation-elic-1");
+        // form の回答はアプリ内のみ (通知から直接応答しない)
+        assert!(payload.allow_option_id.is_none());
+        assert!(payload.reject_option_id.is_none());
     }
 }

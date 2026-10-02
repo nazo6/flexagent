@@ -24,6 +24,9 @@ pub mod actions {
     pub const SESSION_DELETE: &str = "session_delete";
     /// 承認解決 (Approve / Reject)
     pub const PERMISSION_RESOLVED: &str = "permission_resolved";
+
+    /// elicitation (質問) の解決
+    pub const ELICITATION_RESOLVED: &str = "elicitation_resolved";
     /// Web PTY 起動
     pub const PTY_SPAWN: &str = "pty_spawn";
     /// 緊急キルスイッチ実行

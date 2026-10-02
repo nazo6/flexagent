@@ -19,9 +19,10 @@ use fxg_protocol::client_api::{
     NodeTokenSummary, NodeTokensResponse, ProjectLinkRequest, ProjectLinkResponse,
     ProjectScanRequest, ProjectScanResponse, ProvisionerSummary, ProvisionersResponse,
     PruneWorktreesRequest, PushSubscribeRequest, PushSubscribeResponse, RemoveWorktreeRequest,
-    RespondPermissionRequest, RespondPermissionResponse, ResumeSessionRequest,
-    ResumeSessionResponse, RotateAuthTokenResponse, SessionArchiveRequest, SessionArchiveResponse,
-    SessionRevertRequest, SessionRevertResponse, WorktreeInfo, WorktreesResponse,
+    RespondElicitationRequest, RespondElicitationResponse, RespondPermissionRequest,
+    RespondPermissionResponse, ResumeSessionRequest, ResumeSessionResponse,
+    RotateAuthTokenResponse, SessionArchiveRequest, SessionArchiveResponse, SessionRevertRequest,
+    SessionRevertResponse, WorktreeInfo, WorktreesResponse,
 };
 use fxg_protocol::common::{
     AgentAction, CommandResult, DiffScope, ErrorCode, ForkHistoryItem, WorkspaceDiffResponse,
@@ -447,6 +448,24 @@ impl ClientApiBackend for ServerState {
                     resolved_by: resolved_by.clone(),
                 },
             ),
+            ClientCommand::RespondElicitation {
+                session_id,
+                elicitation_id,
+                action,
+                content,
+                resolved_by,
+                ..
+            } => (
+                self.session_node(session_id).await,
+                ServerToNodeMsg::RespondElicitation {
+                    command_id: command_id.clone(),
+                    session_id: session_id.clone(),
+                    elicitation_id: elicitation_id.clone(),
+                    action: *action,
+                    content: content.clone(),
+                    resolved_by: resolved_by.clone(),
+                },
+            ),
             ClientCommand::ControlSession {
                 session_id, action, ..
             } => (
@@ -706,6 +725,61 @@ impl ClientApiBackend for ServerState {
         } else if result.code == Some(ErrorCode::AlreadyResolved) {
             // 全クライアント横断の冪等解決 (2回目以降は正常遷移)
             Ok(RespondPermissionResponse {
+                already_resolved: true,
+            })
+        } else {
+            Err(ApiError::from_code(
+                result.code.unwrap_or(ErrorCode::Internal),
+                result.error.unwrap_or_else(|| "respond failed".to_owned()),
+            ))
+        }
+    }
+
+    async fn respond_elicitation(
+        &self,
+        session_id: &str,
+        elicitation_id: &str,
+        request: RespondElicitationRequest,
+        client: ClientInfo,
+    ) -> Result<RespondElicitationResponse, ApiError> {
+        let node_id = self.session_node(session_id).await?;
+        let command_id = uuid_v7();
+        let result = self
+            .inner
+            .hub
+            .command(
+                &node_id,
+                &command_id,
+                ServerToNodeMsg::RespondElicitation {
+                    command_id: command_id.clone(),
+                    session_id: session_id.to_owned(),
+                    elicitation_id: elicitation_id.to_owned(),
+                    action: request.action,
+                    content: request.content.clone(),
+                    resolved_by: request.resolved_by.clone(),
+                },
+            )
+            .await?;
+
+        if result.success {
+            self.record_audit(
+                fxg_db::audit::actions::ELICITATION_RESOLVED,
+                &client,
+                Some(session_id),
+                serde_json::json!({
+                    "elicitation_id": elicitation_id,
+                    "action": request.action.as_str(),
+                    "resolved_by": request.resolved_by,
+                    "node_id": node_id,
+                }),
+            )
+            .await;
+            Ok(RespondElicitationResponse {
+                already_resolved: false,
+            })
+        } else if result.code == Some(ErrorCode::AlreadyResolved) {
+            // 全クライアント横断の冪等解決 (2回目以降は正常遷移)
+            Ok(RespondElicitationResponse {
                 already_resolved: true,
             })
         } else {

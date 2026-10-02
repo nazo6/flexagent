@@ -11,10 +11,10 @@ use fxg_protocol::client_api::{
     AgentOpResponse, AgentsResponse, ConnectionRole, CreateSessionRequest, CreateSessionResponse,
     CreateWorktreeRequest, KillSwitchResponse, ProjectLinkRequest, ProjectLinkResponse,
     ProjectScanRequest, ProjectScanResponse, ProvisionersResponse, PruneWorktreesRequest,
-    RemoveWorktreeRequest, RespondPermissionRequest, RespondPermissionResponse,
-    ResumeSessionRequest, ResumeSessionResponse, RotateAuthTokenResponse, SessionArchiveRequest,
-    SessionArchiveResponse, SessionRevertRequest, SessionRevertResponse, WorktreeInfo,
-    WorktreesResponse,
+    RemoveWorktreeRequest, RespondElicitationRequest, RespondElicitationResponse,
+    RespondPermissionRequest, RespondPermissionResponse, ResumeSessionRequest,
+    ResumeSessionResponse, RotateAuthTokenResponse, SessionArchiveRequest, SessionArchiveResponse,
+    SessionRevertRequest, SessionRevertResponse, WorktreeInfo, WorktreesResponse,
 };
 use fxg_protocol::common::{
     AgentAction, CommandResult, DiffScope, ProjectSummary, WorkspaceDiffResponse,
@@ -113,6 +113,27 @@ impl ClientApiBackend for DaemonState {
                         &session_id,
                         &request_id,
                         &selected_option_id,
+                        &resolved_by,
+                    )
+                    .await
+                    .map(|()| session_id);
+                (command_id, result)
+            }
+            ClientCommand::RespondElicitation {
+                command_id,
+                session_id,
+                elicitation_id,
+                action,
+                content,
+                resolved_by,
+            } => {
+                let result = manager
+                    .respond_elicitation(
+                        &command_id,
+                        &session_id,
+                        &elicitation_id,
+                        action,
+                        content,
                         &resolved_by,
                     )
                     .await
@@ -333,6 +354,50 @@ impl ClientApiBackend for DaemonState {
             }
             // 全クライアント横断の冪等解決: 2回目以降は正常遷移として扱う
             Err(NodeError::AlreadyResolved(_)) => Ok(RespondPermissionResponse {
+                already_resolved: true,
+            }),
+            Err(err) => Err(api_error(err)),
+        }
+    }
+
+    async fn respond_elicitation(
+        &self,
+        session_id: &str,
+        elicitation_id: &str,
+        request: RespondElicitationRequest,
+        client: ClientInfo,
+    ) -> Result<RespondElicitationResponse, ApiError> {
+        let command_id = fxg_protocol::util::uuid_v7();
+        match self
+            .session_manager()
+            .respond_elicitation(
+                &command_id,
+                session_id,
+                elicitation_id,
+                request.action,
+                request.content.clone(),
+                &request.resolved_by,
+            )
+            .await
+        {
+            Ok(()) => {
+                self.record_audit(
+                    fxg_db::audit::actions::ELICITATION_RESOLVED,
+                    &audit_source(&client),
+                    Some(session_id),
+                    serde_json::json!({
+                        "elicitation_id": elicitation_id,
+                        "action": request.action.as_str(),
+                        "resolved_by": request.resolved_by,
+                    }),
+                )
+                .await;
+                Ok(RespondElicitationResponse {
+                    already_resolved: false,
+                })
+            }
+            // 全クライアント横断の冪等解決: 2回目以降は正常遷移として扱う
+            Err(NodeError::AlreadyResolved(_)) => Ok(RespondElicitationResponse {
                 already_resolved: true,
             }),
             Err(err) => Err(api_error(err)),

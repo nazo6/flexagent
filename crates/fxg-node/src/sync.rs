@@ -504,6 +504,42 @@ pub(crate) async fn handle_server_message(
             }
             send_command_result(out, command_id, result).await;
         }
+        ServerToNodeMsg::RespondElicitation {
+            command_id,
+            session_id,
+            elicitation_id,
+            action,
+            content,
+            resolved_by,
+        } => {
+            let result = state
+                .session_manager()
+                .respond_elicitation(
+                    &command_id,
+                    &session_id,
+                    &elicitation_id,
+                    action,
+                    content.clone(),
+                    &resolved_by,
+                )
+                .await
+                .map(|()| session_id.clone());
+            if result.is_ok() {
+                state
+                    .record_audit(
+                        fxg_db::audit::actions::ELICITATION_RESOLVED,
+                        &AuditSource::remote(state.node_id()),
+                        Some(&session_id),
+                        serde_json::json!({
+                            "elicitation_id": elicitation_id,
+                            "action": action.as_str(),
+                            "resolved_by": resolved_by,
+                        }),
+                    )
+                    .await;
+            }
+            send_command_result(out, command_id, result).await;
+        }
         ServerToNodeMsg::ControlSession {
             command_id,
             session_id,

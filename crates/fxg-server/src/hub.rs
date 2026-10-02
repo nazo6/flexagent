@@ -1520,12 +1520,14 @@ async fn apply_event_batch(
         }
     }
 
-    // 承認リクエストの Web Push 通知 (ACK をブロックしないよう非同期で送る)
+    // 承認リクエスト・質問 (elicitation) の Web Push 通知
+    // (ACK をブロックしないよう非同期で送る)
     if !notify_events.is_empty() {
         let push = state.push().clone();
         let db = state.db().clone();
         tokio::spawn(async move {
             crate::push::notify_permission_requests(&push, &db, &notify_events).await;
+            crate::push::notify_elicitations(&push, &db, &notify_events).await;
         });
     }
 }

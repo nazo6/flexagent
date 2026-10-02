@@ -11,7 +11,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::common::{ErrorCode, NodeProjectReport, SessionControlAction, WorkspaceDiffResponse};
 use crate::events::SessionEventEnvelope;
-
 /// ノードが保持するセッションの同期状態 (`NodeHello` で報告)。
 ///
 /// ハブは自 DB の `last_node_seq` と比較し、欠落・遅延があれば
@@ -329,6 +328,21 @@ pub enum ServerToNodeMsg {
         request_id: String,
         /// 選択された `option_id`
         selected_option_id: String,
+        /// 解決主体 (`cli` / `web` / `android_push`)
+        resolved_by: String,
+    },
+    /// elicitation (構造化入力リクエスト) への回答。
+    RespondElicitation {
+        /// 相関ID
+        command_id: String,
+        /// 対象セッションID
+        session_id: String,
+        /// ACP elicitation id
+        elicitation_id: String,
+        /// ユーザーの応答アクション (`accept` / `decline` / `cancel`)
+        action: crate::common::ElicitationAction,
+        /// `accept` 時の回答内容 (form の `requested_schema` 準拠)
+        content: serde_json::Value,
         /// 解決主体 (`cli` / `web` / `android_push`)
         resolved_by: String,
     },
