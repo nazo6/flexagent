@@ -396,7 +396,8 @@ impl AcpRegistry {
                 agent_id: id,
                 display_name: "OpenCode2".to_owned(),
                 driver_kind: driver_kind.to_owned(),
-                program: PathBuf::from("opencode2"),
+                // v1 / v2 ともにコマンド名は `opencode` (v2 判定は起動時に実施)
+                program: PathBuf::from("opencode"),
                 args,
                 env: Vec::new(),
             });
@@ -767,10 +768,10 @@ mod tests {
             .block_on(registry.launch_spec("opencode", &index, &["--model".to_owned()]))
             .expect("opencode spec");
         assert_eq!(spec.driver_kind, "opencode2");
-        assert_eq!(spec.program, PathBuf::from("opencode2"));
+        assert_eq!(spec.program, PathBuf::from("opencode"));
         assert_eq!(spec.args, vec!["serve", "--model"]);
 
-        // opencode_mode = acp の場合は `opencode2 acp`
+        // opencode_mode = acp の場合は `opencode acp`
         let mut config = config();
         config.opencode_mode = Some(OpencodeMode::Acp);
         let registry = AcpRegistry::new(dir.path(), &config);
@@ -778,6 +779,7 @@ mod tests {
             .block_on(registry.launch_spec("opencode2", &index, &[]))
             .expect("acp spec");
         assert_eq!(spec.driver_kind, "acp");
+        assert_eq!(spec.program, PathBuf::from("opencode"));
         assert_eq!(spec.args, vec!["acp"]);
     }
 

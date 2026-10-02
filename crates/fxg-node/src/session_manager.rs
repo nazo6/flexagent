@@ -23,7 +23,7 @@ use std::time::{Duration, Instant};
 use fxg_acp::registry::{AcpRegistry, OPENCODE2_ID, RegistryIndex};
 use fxg_acp::{
     AcpDriver, ActiveSessionHandle, AgentDriver, AgentLaunchSpec, DriverEvent,
-    NativeResumeUnavailable, OpenCode2Driver, ResumeRequest,
+    NativeResumeUnavailable, OpenCode2Driver, ResumeRequest, ensure_opencode_v2,
 };
 use fxg_protocol::common::{
     ElicitationAction, ForkHistoryItem, PermissionOption, SessionControlAction, SessionStatus,
@@ -67,7 +67,7 @@ pub type DriverFactory =
 /// 既定のドライバファクトリ。
 ///
 /// - `acp`: 標準ACPエージェント ([`AcpDriver`])
-/// - `opencode2`: `opencode2 serve` ブリッジ ([`OpenCode2Driver`])
+/// - `opencode2`: `opencode serve` ブリッジ ([`OpenCode2Driver`])
 ///
 /// ドライバは種類ごとに 1 個を生成し、全セッションで共有する。
 pub fn default_driver_factory() -> DriverFactory {
@@ -614,6 +614,25 @@ impl SessionManager {
         // スクリプトはデーモン起動時に生成済みで、`fxg git-askpass` → ローカルIPC →
         // 中央サーバーのオンメモリ中継で認証する (設計: docs/01 §6.4)。
         let mut spec = params.spec.clone();
+        // opencode は v1 / v2 が同名コマンドのため、`serve` API を持たない v1 を
+        // 誤って起動しないよう、起動前に v2 系であることを検証する。
+        if spec.agent_id == OPENCODE2_ID
+            && let Err(err) = ensure_opencode_v2(&spec.program.to_string_lossy(), params.cwd).await
+        {
+            let message = format!("{err:#}");
+            tracing::warn!(session_id = params.session_id, "{message}");
+            self.inner
+                .bus
+                .record(
+                    params.session_id,
+                    UnifiedEventPayload::StatusChanged {
+                        status: SessionStatus::Error,
+                        error_message: Some(message.clone()),
+                    },
+                )
+                .await?;
+            return Err(NodeError::Agent(message));
+        }
         let askpass = crate::credentials::askpass_script_path(self.inner.paths.fxg_home());
         if askpass.exists() {
             for (key, value) in crate::credentials::git_env(self.inner.paths.fxg_home()) {
@@ -3031,13 +3050,13 @@ mod tests {
                 agent_id: OPENCODE2_ID.to_owned(),
                 display_name: "OpenCode2".to_owned(),
                 driver_kind: "opencode2".to_owned(),
-                program: PathBuf::from("opencode2"),
+                program: PathBuf::from("opencode"),
                 args: vec!["serve".to_owned()],
                 env: Vec::new(),
             }
         }
 
-        // acp 指定: 引数に extra_args を含めて `opencode2 acp` に切り替える
+        // acp 指定: 引数に extra_args を含めて `opencode acp` に切り替える
         let mut spec = opencode_spec();
         assert_eq!(
             apply_opencode_mode(&mut spec, Some("acp"), &["--model".to_owned()]),

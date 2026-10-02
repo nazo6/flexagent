@@ -3,8 +3,8 @@
 //!
 //! 設計: `docs/04-agent-drivers-and-windows.md` §5.1〜§5.2。
 //!
-//! - **コマンド解決**: `npx` / `uvx` / `opencode2` などを起動する際は必ず
-//!   [`resolve_command`] を通し、Windows では `opencode2.cmd` や `npx.cmd` の
+//! - **コマンド解決**: `npx` / `uvx` / `opencode` などを起動する際は必ず
+//!   [`resolve_command`] を通し、Windows では `opencode.cmd` や `npx.cmd` の
 //!   拡張子 (`PATHEXT`) を解決してからプロセスを起動する。
 //! - **UNC パス回避**: Windows の `std::fs::canonicalize` は `\\?\D:\ghq\...`
 //!   という UNC プレフィックスを付けてしまい、Node.js 製エージェント等がパス解釈に

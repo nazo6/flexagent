@@ -1,9 +1,12 @@
-//! OpenCode2 ドライバ (`opencode2 serve` ブリッジ + 純正TUI Attach)。
+//! OpenCode2 ドライバ (`opencode serve` ブリッジ + 純正TUI Attach)。
 //!
 //! 設計: `docs/04-agent-drivers-and-windows.md` §3 モードA。
 //!
+//! - **バージョン検証**: opencode v1 / v2 はどちらもコマンド名が `opencode`
+//!   のため、起動前に `opencode --version` で v2 系であることを検証する
+//!   ([`ensure_opencode_v2`]。v1 は `serve` API を持たない)。
 //! - **サーバー起動**: セッションごとに
-//!   `opencode2 serve --hostname 127.0.0.1 --port <free>` を起動し、ランダムな
+//!   `opencode serve --hostname 127.0.0.1 --port <free>` を起動し、ランダムな
 //!   `OPENCODE_SERVER_PASSWORD` を注入する。以降の HTTP / SSE は Basic 認証
 //!   (`opencode:<password>`) で接続する。
 //! - **イベント**: SSE (`GET /api/event`) を購読し、`session.*` / `permission.*`
@@ -11,7 +14,7 @@
 //!   ([`StreamDeltaPayload`])、`*.ended` / `tool.*` / `permission.*` は永続化対象
 //!   ([`UnifiedEventPayload`])。
 //! - **純正TUI Attach**: サーバーはデーモンが管理し続けるため、CLI は
-//!   `opencode2 run --server <url> --session <id>` で 100% 純正の TUI を表示できる
+//!   `opencode run --server <url> --session <id>` で 100% 純正の TUI を表示できる
 //!   ([`ActiveSessionHandle::native_attach`])。
 //! - **Revert**: ネイティブ API
 //!   (`POST /api/session/{id}/revert/stage` + `/revert/commit`) で会話のみを
@@ -26,6 +29,7 @@
 
 use std::collections::HashMap;
 use std::net::TcpListener;
+use std::path::Path;
 use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -48,7 +52,7 @@ use crate::driver::{
     StartSessionRequest, StartedSession,
 };
 
-/// `opencode2 serve` が準備完了するまでの最大待機時間。
+/// `opencode serve` が準備完了するまでの最大待機時間。
 const SERVER_READY_TIMEOUT: Duration = Duration::from_secs(30);
 /// 準備完了ポーリングの間隔。
 const READY_POLL_INTERVAL: Duration = Duration::from_millis(250);
@@ -73,6 +77,59 @@ const SSE_RECONNECT_DELAY: Duration = Duration::from_millis(500);
 const AUTH_USER: &str = "opencode";
 /// 純正TUI Attach 時に CLI へ注入するパスワード環境変数名。
 pub const PASSWORD_ENV: &str = "OPENCODE_PASSWORD";
+/// 対応する `opencode` のメジャーバージョン。
+///
+/// opencode v1 / v2 はどちらもコマンド名が `opencode` のため、`serve` API を
+/// 持たない v1 を誤って起動しないようメジャーバージョンで判別する。
+const OPENCODE_MAJOR: u64 = 2;
+
+/// `opencode` 実行ファイルが対応バージョン (v2 系) であることを検証する。
+///
+/// v1 と v2 は同名コマンドだが、v1 は `serve` API・ネイティブセッション管理を
+/// 持たないため、起動前に `opencode --version` を実行してメジャーバージョンを
+/// 確認する。v2 系以外の場合は起動せずエラーを返す。
+pub async fn ensure_opencode_v2(program: &str, cwd: &Path) -> anyhow::Result<()> {
+    let resolved = fxg_pty::resolve_command(program, cwd).map_err(|err| {
+        anyhow!("opencode が見つかりません (OpenCode v{OPENCODE_MAJOR} を起動できません): {err}")
+    })?;
+    let output = Command::new(&resolved)
+        .arg("--version")
+        .current_dir(cwd)
+        .stdin(Stdio::null())
+        .output()
+        .await
+        .map_err(|err| {
+            anyhow!(
+                "failed to run opencode --version ({}): {err}",
+                resolved.display()
+            )
+        })?;
+    if !output.status.success() {
+        anyhow::bail!(
+            "opencode --version failed ({}): {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let major = parse_opencode_major(&stdout)
+        .ok_or_else(|| anyhow!("failed to parse opencode version from {:?}", stdout.trim()))?;
+    if major != OPENCODE_MAJOR {
+        anyhow::bail!(
+            "OpenCode v{OPENCODE_MAJOR} が必要です (検出: {})",
+            stdout.trim()
+        );
+    }
+    Ok(())
+}
+
+/// `opencode --version` 出力 (例: `opencode v2.0.21`) からメジャーバージョンを抽出する。
+fn parse_opencode_major(output: &str) -> Option<u64> {
+    output.split_whitespace().find_map(|token| {
+        let token = token.trim_start_matches(['v', 'V']);
+        token.split('.').next()?.parse::<u64>().ok()
+    })
+}
 
 /// `opencode2 serve` ブリッジドライバ。
 #[derive(Debug, Default)]
@@ -109,7 +166,7 @@ struct SessionState {
 /// 起動済み OpenCode2 セッションの操作ハンドル。
 struct OpenCode2SessionHandle {
     http: reqwest::Client,
-    /// `opencode2 serve` のベースURL (例: `http://127.0.0.1:38219`)
+    /// `opencode serve` のベースURL (例: `http://127.0.0.1:38219`)
     base_url: String,
     /// サーバーパスワード (Basic 認証)
     password: String,
@@ -314,7 +371,7 @@ impl AgentDriver for OpenCode2Driver {
         let program = fxg_pty::resolve_command(&req.launch.program.to_string_lossy(), &req.cwd)
             .map_err(|err| {
                 anyhow!(
-                    "failed to resolve opencode2 program {}: {err}",
+                    "failed to resolve opencode program {}: {err}",
                     req.launch.program.display()
                 )
             })?;
@@ -339,7 +396,7 @@ impl AgentDriver for OpenCode2Driver {
             .kill_on_drop(true);
         let mut child = command.spawn().map_err(|err| {
             anyhow!(
-                "failed to start opencode2 serve ({}): {err}",
+                "failed to start opencode serve ({}): {err}",
                 program.display()
             )
         })?;
@@ -445,7 +502,7 @@ impl AgentDriver for OpenCode2Driver {
         }
 
         // モード (agent) とモデルの選択肢を同期する。
-        // `opencode2 serve` は起動直後しばらくカタログが空のため、揃うまで待つ
+        // `opencode serve` は起動直後しばらくカタログが空のため、揃うまで待つ
         if let Some(capabilities) = wait_for_capabilities(&http, &base_url, &password).await {
             let _ = event_tx.send(DriverEvent::Event(capabilities));
         }
@@ -757,7 +814,7 @@ async fn request(
 
 /// カタログが揃うまで [`fetch_capabilities`] をリトライする。
 ///
-/// `opencode2 serve` は起動直後しばらく `/api/agent` / `/api/model` が空配列を
+/// `opencode serve` は起動直後しばらく `/api/agent` / `/api/model` が空配列を
 /// 返すため、内容が得られるまで短い間隔で再取得する。
 async fn wait_for_capabilities(
     http: &reqwest::Client,
@@ -974,7 +1031,7 @@ async fn read_event_stream(
 /// SSE イベント (JSON) を正規化イベントへ変換する。
 ///
 /// `data` に `sessionID` を持つイベントは、自セッション以外を無視する
-/// (1つの `opencode2 serve` は複数セッションを多重化し得る)。
+/// (1つの `opencode serve` は複数セッションを多重化し得る)。
 fn map_event(state: &Arc<Mutex<SessionState>>, session_id: &str, raw: &str) -> Vec<DriverEvent> {
     let Ok(value) = serde_json::from_str::<Value>(raw) else {
         return Vec::new();
@@ -1314,6 +1371,15 @@ fn truncate_chars(text: &str, limit: usize) -> String {
 mod tests {
     use super::*;
 
+    #[test]
+    fn parses_opencode_major_version() {
+        assert_eq!(parse_opencode_major("opencode v2.0.21\n"), Some(2));
+        assert_eq!(parse_opencode_major("opencode 2.1.0"), Some(2));
+        assert_eq!(parse_opencode_major("opencode v1.4.7"), Some(1));
+        assert_eq!(parse_opencode_major("opencode"), None);
+        assert_eq!(parse_opencode_major(""), None);
+    }
+
     fn state() -> Arc<Mutex<SessionState>> {
         Arc::new(Mutex::new(SessionState::default()))
     }
@@ -1510,7 +1576,7 @@ mod tests {
                 agent_id: "opencode2".to_owned(),
                 display_name: "OpenCode2".to_owned(),
                 driver_kind: "opencode2".to_owned(),
-                program: PathBuf::from("opencode2"),
+                program: PathBuf::from("opencode"),
                 args: vec!["serve".to_owned()],
                 env: Vec::new(),
             },
@@ -1546,7 +1612,7 @@ mod tests {
                         agent_id: "opencode2".to_owned(),
                         display_name: "OpenCode2".to_owned(),
                         driver_kind: "opencode2".to_owned(),
-                        program: PathBuf::from("opencode2"),
+                        program: PathBuf::from("opencode"),
                         args: vec!["serve".to_owned()],
                         env: Vec::new(),
                     },
@@ -1673,7 +1739,7 @@ mod tests {
             agent_id: "opencode2".to_owned(),
             display_name: "OpenCode2".to_owned(),
             driver_kind: "opencode2".to_owned(),
-            program: PathBuf::from("opencode2"),
+            program: PathBuf::from("opencode"),
             args: vec!["serve".to_owned()],
             env: Vec::new(),
         };

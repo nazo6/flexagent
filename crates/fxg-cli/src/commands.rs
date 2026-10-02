@@ -435,7 +435,7 @@ pub struct RunArgs {
     /// 一時VMプロビジョナーで起動する (中央サーバーホスト上で起動。中央サーバー必須)
     #[usage(long)]
     provisioner: Option<String>,
-    /// `opencode2` を標準ACPモード (`opencode2 acp`) で起動する
+    /// `opencode` を標準ACPモード (`opencode acp`) で起動する
     #[usage(long)]
     acp: bool,
     /// エージェントプロセスへのパススルー引数

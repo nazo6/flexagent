@@ -6,7 +6,7 @@
 //!   (`AttachSession` 以降の `EventBatch` / `LiveStreamDelta`) を描画し、
 //!   プロンプト送信と承認応答を同じ IPC 接続から行う。
 //! - **純正TUI Attach**: [`AttachMode::NativeOpenCodeAttach`] の場合は
-//!   デーモン管理下の `opencode2 serve` へ `opencode2 run --server <url>
+//!   デーモン管理下の `opencode serve` へ `opencode run --server <url>
 //!   --session <id>` で接続し、100% 純正の TUI をそのまま表示する。
 
 use std::io::{self, Stdout};
@@ -49,15 +49,15 @@ pub async fn attach(client: &mut DaemonClient, session_id: &str) -> Result<()> {
     }
 }
 
-/// デーモン管理下の `opencode2 serve` へ純正TUIを接続する。
+/// デーモン管理下の `opencode` serve へ純正TUIを接続する。
 ///
 /// デーモンがサーバーを保持し続けるため、CLI が終了してもセッションと
 /// イベント記録は継続する (`fxg attach` でいつでも再接続できる)。
 fn run_native(server_url: &str, session_id: &str, env: &[(String, String)]) -> Result<()> {
     let cwd = std::env::current_dir().context("failed to get current directory")?;
-    let program = fxg_pty::resolve_command("opencode2", &cwd)
-        .context("opencode2 が見つかりません (OpenCode2 純正TUIを起動できません)")?;
-    println!("opencode2 純正TUIでアタッチします (server: {server_url}, session: {session_id})");
+    let program = fxg_pty::resolve_command("opencode", &cwd)
+        .context("opencode が見つかりません (OpenCode 純正TUIを起動できません)")?;
+    println!("OpenCode 純正TUIでアタッチします (server: {server_url}, session: {session_id})");
     let status = std::process::Command::new(program)
         .arg("run")
         .arg("--server")
@@ -66,9 +66,9 @@ fn run_native(server_url: &str, session_id: &str, env: &[(String, String)]) -> R
         .arg(session_id)
         .envs(env.iter().cloned())
         .status()
-        .context("failed to start opencode2")?;
+        .context("failed to start opencode")?;
     if !status.success() {
-        bail!("opencode2 が異常終了しました: {status}");
+        bail!("opencode が異常終了しました: {status}");
     }
     Ok(())
 }

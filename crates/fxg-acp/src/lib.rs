@@ -8,7 +8,7 @@
 //! - [`registry`]: ACP Registry (`registry.json`) の取得・キャッシュ・起動解決と
 //!   導入管理 (`fxg agents ...`)
 //! - [`acp`][]: `AcpDriver` (`agent-client-protocol` による標準ACPエージェント制御)
-//! - [`opencode2`][]: `OpenCode2Driver` (`opencode2 serve` ブリッジ + 純正TUI Attach)
+//! - [`opencode2`][]: `OpenCode2Driver` (`opencode serve` ブリッジ + 純正TUI Attach)
 
 pub mod acp;
 pub mod driver;
@@ -21,4 +21,4 @@ pub use driver::{
     ActiveSessionHandle, AgentDriver, AgentLaunchSpec, DriverEvent, NativeAttachInfo,
     NativeResumeUnavailable, ResumeRequest, StartSessionRequest, StartedSession,
 };
-pub use opencode2::OpenCode2Driver;
+pub use opencode2::{OpenCode2Driver, ensure_opencode_v2};

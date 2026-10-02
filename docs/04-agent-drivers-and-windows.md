@@ -140,16 +140,19 @@ OpenCode / OpenCode2
 のクライアント・サーバー分離アーキテクチャをフル活用します：
 
 1. `fxg daemon` がバックグラウンドで
-   `opencode2 serve --hostname 127.0.0.1 --port <free_port>`
+   `opencode serve --hostname 127.0.0.1 --port <free_port>`
    を起動（セキュリティのためランダムな `OPENCODE_SERVER_PASSWORD`
    を自動生成して環境変数に注入）。
+   - 起動前に `opencode --version` を実行し、**v2 系以外（v1
+     等）では起動しない**
+     （v1 は同名の `opencode` コマンドだが `serve` API を持たないため）。
 2. `fxg daemon` は HTTP (OpenAPI) + SSE (`/event` ストリーム)
-   クライアントとしてローカルの `opencode2 serve`
+   クライアントとしてローカルの `opencode serve`
    に接続し、すべてのメッセージ・ツール実行・権限要求を `UnifiedEventPayload`
    に変換して `node.db` および中央サーバーへ同期します。
 3. **ユーザーがPCターミナルで `fxg run opencode` を叩いた場合**: `fxg` CLI
-   はローカルの `opencode2 serve` に対して
-   `opencode2 run --server http://127.0.0.1:<port> --session <id>`
+   はローカルの `opencode serve` に対して
+   `opencode run --server http://127.0.0.1:<port> --session <id>`
    を実行します。
    - **結果**: PCのターミナルでは **100%純正のOpenCode2 TUI**
      がそのまま動き、同時にスマホ（Android
@@ -157,9 +160,9 @@ OpenCode / OpenCode2
 
 #### サーバーライフサイクルと設計判断 (2026-10-01 確定)
 
-opencode2 本体は「バックグラウンドサービス」1つを全セッション・全 TUI
+`opencode2` 本体は「バックグラウンドサービス」1つを全セッション・全 TUI
 で共有する設計だが、**fxg は分離を優先し、fxg セッションごとに専用の
-`opencode2 serve`（空きポート +
+`opencode serve`（空きポート +
 ランダムパスワード）を起動する**（現状維持と決定）。
 これにより:
 
@@ -179,9 +182,9 @@ opencode2 本体は「バックグラウンドサービス」1つを全セッシ
 `fxg session kill` を「エンジンセッションの abort + active
 一覧からの除去」に変え、サーバー自体はデーモン終了時まで維持する必要がある。
 
-### モードB: ACP モード (`opencode2 acp`)
+### モードB: ACP モード (`opencode acp`)
 
-`opencode2 acp`
+`opencode acp`
 サブコマンドを使って標準ACPエージェントとして起動するモードです。Web/Androidからヘッドレスで起動する場合や、`AcpDriver`
 と完全に同じ挙動に揃えたい場合に使用します。
 
@@ -342,9 +345,9 @@ impl WinJobGuard {
 
 ### 5.2 コマンド解決 (`which` + `PATHEXT`) とパス正規化 (`dunce`)
 
-- **コマンド解決**: `npx`, `uvx`, `opencode2` などを起動する際、必ず
+- **コマンド解決**: `npx`, `uvx`, `opencode` などを起動する際、必ず
   `which::which_in(cmd, env::var_os("PATH"), &cwd)`
-  を通すことで、`opencode2.cmd` や `npx.cmd` の拡張子を確実に解決してから
+  を通すことで、`opencode.cmd` や `npx.cmd` の拡張子を確実に解決してから
   `tokio::process::Command` に渡します。
 - **UNCパス回避**: Windowsで `std::fs::canonicalize` を使うと `\\?\D:\ghq\...`
   というUNCプレフィックスが付き、Node.js製エージェントや外部ツールがパス解釈に失敗することがあります。そのため、パス正規化には必ず

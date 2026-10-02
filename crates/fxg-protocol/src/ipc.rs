@@ -28,11 +28,11 @@ pub const IPC_LENGTH_PREFIX_BYTES: usize = 4;
 pub enum AttachMode {
     /// `fxg` CLI 自身の内蔵TUI (`ratatui`) でIPCストリームを描画するモード。
     AcpTui,
-    /// デーモンが管理する `opencode2 serve` に対して CLI が
-    /// `opencode2 run --server <server_url> --session <session_id>` を子プロセス実行し、
+    /// デーモンが管理する `opencode serve` に対して CLI が
+    /// `opencode run --server <server_url> --session <session_id>` を子プロセス実行し、
     /// 純正TUIを直接表示するモード。
     NativeOpenCodeAttach {
-        /// `opencode2 serve` のローカルURL
+        /// `opencode serve` のローカルURL
         server_url: String,
         /// アタッチ対象のエージェント側セッションID (`ses_...`)
         session_id: String,
