@@ -145,6 +145,8 @@
 
   /** 停止済みセッションを再開する (履歴 Replay フォールバック含む)。 */
   async function resumeSession(): Promise<boolean> {
+    if (sending || resuming) return false;
+    resuming = true;
     try {
       const result = await sync.resumeSession(sessionId);
       if (result.context_restored) {
@@ -156,20 +158,15 @@
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
       return false;
+    } finally {
+      resuming = false;
     }
   }
 
   /** ネイティブ復元非対応の停止セッションを履歴 Replay で再開し、入力を送信する。 */
   async function resumeAndSend() {
-    if (sending || resuming || text.trim() === '') return;
-    resuming = true;
-    let ok = false;
-    try {
-      ok = await resumeSession();
-    } finally {
-      resuming = false;
-    }
-    if (!ok) return;
+    if (sending || text.trim() === '') return;
+    if (!(await resumeSession())) return;
     resumeRequired = false;
     await send();
   }
@@ -184,6 +181,19 @@
       <span>
         このセッションは停止しています。送信すると自動で再開します（ネイティブ復元非対応時は履歴を引き継いで再開）。
       </span>
+      <Button
+        variant="outline"
+        size="sm"
+        class="ml-auto h-6 text-xs"
+        disabled={sending || resuming}
+        title="再開するとスラッシュコマンドなどの最新の能力情報も再取得します"
+        onclick={() => void resumeSession()}
+      >
+        {#if resuming}
+          <LoaderCircleIcon class="size-3.5 animate-spin" />
+        {/if}
+        {resuming ? '再開中…' : '再開'}
+      </Button>
     </div>
   {:else if node && !nodeAvail.isAvailable}
     <div class="bg-destructive/10 text-destructive flex items-center gap-2 rounded-md px-2.5 py-1 text-xs">

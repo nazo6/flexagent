@@ -1,9 +1,10 @@
 # OpenCode2 bridge のスラッシュコマンド対応 (一覧取得 + `/command` 振り分け)
 
 - **日付**: 2026-10-02
-- **対象パッケージ**: `fxg-acp`
+- **対象パッケージ**: `fxg-acp`, `ui`
 - **対象スクリプト / 設定**: `mise run fmt`, `cargo test -p fxg-acp --lib`,
-  `cargo clippy -p fxg-acp --all-targets`
+  `cargo clippy -p fxg-acp --all-targets`, `pnpm --dir ui run check`,
+  `pnpm --dir ui run lint`, `pnpm --dir ui run test`
 
 ## 概要
 
@@ -76,3 +77,21 @@ opencode v2.0.21 の実機観測で確定した仕様に合わせて両方を実
   SSE から二重記録されないこと)。
 - `cargo test -p fxg-acp --lib -- --ignored serves_and_streams_against_real_opencode2`
   (起動時 capabilities に組み込みコマンドが含まれること)。
+
+## 追加: 停止中セッションの再開ボタン (`ui`)
+
+UI のコマンド一覧は `capabilities_updated` イベントの Replay
+から復元するため、本対応前に記録された capabilities (`available_commands` が空)
+を持つセッションでは、再開するまで候補が表示されない。コマンド一覧はドライバ起動時
+(`wait_for_capabilities`)
+にのみ再取得されるため、停止バナーから明示的に再開できる
+導線を追加した。
+
+| ファイル                                     | 内容                                                                                                             |
+| :------------------------------------------- | :--------------------------------------------------------------------------------------------------------------- |
+| `ui/src/lib/components/chat/Composer.svelte` | 停止バナーに「再開」ボタン (busy 表示付き) を追加。`resumeSession` が `resuming` を管理し `resumeAndSend` と共用 |
+
+- 再開はネイティブ復元を優先し、非対応時は履歴 Replay
+  で継続する (既存の `POST /api/v1/sessions/:id/resume` と同じ挙動)。
+- 送信時の自動再開 (`RESUME_REQUIRED` → 「履歴を引き継いで再開して送信」)
+  は従来どおり。
