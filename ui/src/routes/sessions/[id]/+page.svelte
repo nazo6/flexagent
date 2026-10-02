@@ -8,6 +8,7 @@
   import DiffPane from '$lib/components/diff/DiffPane.svelte';
   import NodeStatusBadge from '$lib/components/NodeStatusBadge.svelte';
   import SessionActionsMenu from '$lib/components/session/SessionActionsMenu.svelte';
+  import ContextMeter from '$lib/components/session/ContextMeter.svelte';
   import SessionStatusBadge from '$lib/components/SessionStatusBadge.svelte';
   import TerminalView from '$lib/components/terminal/TerminalView.svelte';
   import { Button } from '$lib/components/ui/button';
@@ -18,7 +19,8 @@
     bootstrapLogLines,
     buildTimelineItems,
     capabilitiesFromEvents,
-    latestStatusFromEvents
+    latestStatusFromEvents,
+    latestUsageFromEvents
   } from '$lib/sync/reducer';
   import { cn } from '$lib/utils';
   import { toast } from 'svelte-sonner';
@@ -60,6 +62,8 @@
     })
   );
   const capabilities = $derived(capabilitiesFromEvents(timeline.events));
+  // イベント由来の最新 usage を優先し、無ければセッション一覧 (投影) の値を使う
+  const usage = $derived(latestUsageFromEvents(timeline.events) ?? session?.usage ?? null);
   // 永続イベント (ターン完了後に同期された BootstrapLog) と、
   // サーバーが一時VMから配信するエフェメラルログを統合する
   const bootstrapLines = $derived.by(() => {
@@ -302,6 +306,10 @@
             {#if session?.updated_at}
               <span class="opacity-40">/</span>
               <span>{formatRelativeTime(session.updated_at)}</span>
+            {/if}
+            {#if usage}
+              <span class="opacity-40">/</span>
+              <ContextMeter {usage} />
             {/if}
           </div>
         </div>

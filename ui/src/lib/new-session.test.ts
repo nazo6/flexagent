@@ -75,6 +75,7 @@ function session(
     title: "New Session",
     status: "stopped",
     current_mode: null,
+    usage: null,
     last_node_seq: 1,
     created_at: updated_at,
     updated_at,

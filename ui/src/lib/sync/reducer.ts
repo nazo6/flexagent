@@ -7,6 +7,7 @@ import type { PermissionOption } from "$lib/generated/PermissionOption";
 import type { PlanEntry } from "$lib/generated/PlanEntry";
 import type { SessionEventEnvelope } from "$lib/generated/SessionEventEnvelope";
 import type { SessionStatus } from "$lib/generated/SessionStatus";
+import type { SessionUsage } from "$lib/generated/SessionUsage";
 import type { StreamDeltaPayload } from "$lib/generated/StreamDeltaPayload";
 import { decodeBase64ToText } from "$lib/base64";
 
@@ -124,7 +125,7 @@ export type TimelineItem =
       seq: number;
       createdAt: number;
       text: string;
-      tone: "info" | "error";
+      tone: "info" | "warning" | "error";
     }
   | { kind: "pending"; key: string; seq: number; createdAt: number; text: string };
 
@@ -442,6 +443,15 @@ export function buildTimelineItems(sources: TimelineSources): TimelineItem[] {
           });
         }
         break;
+      case "turn_ended":
+        items.push({
+          kind: "notice",
+          key: `turn-ended:${event.node_seq}`,
+          ...base,
+          text: payload.data.message ?? turnStopReasonLabel(payload.data.reason),
+          tone: "warning",
+        });
+        break;
       default:
         break;
     }
@@ -606,6 +616,35 @@ export function latestPlanFromEvents(events: SessionEventEnvelope[]): PlanEntry[
     if (payload.type === "plan_update") return payload.data.entries;
   }
   return null;
+}
+
+/** イベント列から最新のコンテキスト使用量・累積コストを復元する (無ければ null)。 */
+export function latestUsageFromEvents(events: SessionEventEnvelope[]): SessionUsage | null {
+  for (let i = events.length - 1; i >= 0; i -= 1) {
+    const payload = events[i].payload;
+    if (payload.type === "usage_updated") {
+      return {
+        used_tokens: payload.data.used_tokens,
+        context_size: payload.data.context_size,
+        cost: payload.data.cost,
+      };
+    }
+  }
+  return null;
+}
+
+/** `turn_ended` の打ち切り理由を日本語ラベルへ変換する。 */
+function turnStopReasonLabel(reason: string): string {
+  switch (reason) {
+    case "max_tokens":
+      return "エージェントが最大トークン数に達したためターンを終了しました";
+    case "max_turn_requests":
+      return "エージェントが1ターン内の要求回数上限に達したためターンを終了しました";
+    case "refusal":
+      return "エージェントが継続を拒否しました";
+    default:
+      return `ターンを終了しました (${reason})`;
+  }
 }
 
 /** イベント列から Bootstrap ログ行を抽出する (一時VM 起動時の `stderr` 出力)。 */

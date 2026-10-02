@@ -8,6 +8,8 @@ import type { ModeInfo } from "./ModeInfo";
 import type { PermissionOption } from "./PermissionOption";
 import type { PlanEntry } from "./PlanEntry";
 import type { SessionStatus } from "./SessionStatus";
+import type { TurnStopReason } from "./TurnStopReason";
+import type { UsageCost } from "./UsageCost";
 import type { JsonValue } from "./serde_json/JsonValue";
 
 /**
@@ -282,7 +284,27 @@ config_options: Array<ConfigOptionInfo>, } } | { "type": "bootstrap_log", "data"
 /**
  * ログ1行
  */
-line: string, } } | { "type": "status_changed", "data": { 
+line: string, } } | { "type": "usage_updated", "data": { 
+/**
+ * 現在コンテキストに含まれるトークン数
+ */
+used_tokens: number, 
+/**
+ * コンテキストウィンドウ全体のサイズ (トークン数)
+ */
+context_size: number, 
+/**
+ * 累積コスト (エージェントが報告した場合)
+ */
+cost: UsageCost | null, } } | { "type": "turn_ended", "data": { 
+/**
+ * 打ち切り理由
+ */
+reason: TurnStopReason, 
+/**
+ * ユーザー向けの説明 (任意)
+ */
+message: string | null, } } | { "type": "status_changed", "data": { 
 /**
  * 新しい状態
  */

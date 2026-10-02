@@ -230,8 +230,9 @@
         <div
           class="flex items-start gap-2 rounded-lg border p-2.5 text-sm"
           class:text-destructive={item.tone === 'error'}
+          class:text-amber-600={item.tone === 'warning'}
         >
-          {#if item.tone === 'error'}
+          {#if item.tone === 'error' || item.tone === 'warning'}
             <AlertTriangleIcon class="mt-0.5 size-4 shrink-0" />
           {:else}
             <ClockIcon class="text-muted-foreground mt-0.5 size-4 shrink-0" />

@@ -67,3 +67,11 @@ export function formatDurationMs(ms: number): string {
   const hours = Math.floor(minutes / 60);
   return `${hours}h ${minutes % 60}m`;
 }
+
+/** トークン数を「999 / 12.3k / 1.2M」のコンパクト表現に整形する。 */
+export function formatTokenCount(tokens: number): string {
+  if (!Number.isFinite(tokens) || tokens < 0) return "-";
+  if (tokens < 1000) return String(Math.round(tokens));
+  if (tokens < 1_000_000) return `${(tokens / 1000).toFixed(1)}k`;
+  return `${(tokens / 1_000_000).toFixed(1)}M`;
+}

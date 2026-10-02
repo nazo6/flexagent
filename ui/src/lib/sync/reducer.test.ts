@@ -9,6 +9,7 @@ import {
   capabilitiesFromEvents,
   clearStreamBuffers,
   insertEventSorted,
+  latestUsageFromEvents,
   type MutableStreamBuffers,
   type PendingPrompt,
   type TimelineSources,
@@ -506,5 +507,48 @@ describe("tool progress map typing", () => {
   it("exposes ToolProgress shape for the timeline", () => {
     const progress: ToolProgress = { status: "in_progress", output: "" };
     expect(progress.status).toBe("in_progress");
+  });
+});
+
+describe("usage and abnormal turn end", () => {
+  it("extracts the latest usage update (last wins)", () => {
+    const events = [
+      makeEvent(1, {
+        type: "usage_updated",
+        data: { used_tokens: 1000, context_size: 100000, cost: null },
+      }),
+      makeEvent(2, {
+        type: "usage_updated",
+        data: {
+          used_tokens: 53000,
+          context_size: 200000,
+          cost: { amount: 0.045, currency: "USD" },
+        },
+      }),
+    ];
+    expect(latestUsageFromEvents(events)).toEqual({
+      used_tokens: 53000,
+      context_size: 200000,
+      cost: { amount: 0.045, currency: "USD" },
+    });
+    expect(latestUsageFromEvents([])).toBeNull();
+  });
+
+  it("renders a warning notice with a fallback label for abnormal turn ends", () => {
+    const sources = emptySources([
+      makeEvent(1, { type: "turn_ended", data: { reason: "max_tokens", message: null } }),
+    ]);
+    const items = buildTimelineItems(sources);
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({ kind: "notice", tone: "warning" });
+    expect(items[0].kind === "notice" ? items[0].text : "").toContain("最大トークン数");
+  });
+
+  it("prefers the agent-supplied turn end message", () => {
+    const sources = emptySources([
+      makeEvent(1, { type: "turn_ended", data: { reason: "refusal", message: "拒否されました" } }),
+    ]);
+    const items = buildTimelineItems(sources);
+    expect(items[0]).toMatchObject({ kind: "notice", text: "拒否されました", tone: "warning" });
   });
 });
