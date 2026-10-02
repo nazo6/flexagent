@@ -26,7 +26,7 @@ use fxg_acp::{
     NativeResumeUnavailable, OpenCode2Driver, ResumeRequest,
 };
 use fxg_protocol::common::{
-    ForkHistoryItem, PermissionOption, SessionControlAction, SessionStatus,
+    ElicitationAction, ForkHistoryItem, PermissionOption, SessionControlAction, SessionStatus,
 };
 use fxg_protocol::events::{SessionEventEnvelope, UnifiedEventPayload};
 use fxg_protocol::ipc::AttachMode;
@@ -253,6 +253,21 @@ pub struct PendingPermissionSummary {
     pub options: Vec<PermissionOption>,
 }
 
+/// `fxg inbox` 用の回答待ち elicitation エントリ。
+#[derive(Debug, Clone, PartialEq)]
+pub struct PendingElicitationSummary {
+    /// 対象セッションID
+    pub session_id: String,
+    /// ACP elicitation id (form モードは JSON-RPC request id)
+    pub elicitation_id: String,
+    /// ユーザーへ提示するメッセージ
+    pub message: String,
+    /// 要求モード (`form` のみ対応)
+    pub mode: String,
+    /// form モードの要求 schema
+    pub requested_schema: serde_json::Value,
+}
+
 /// セッション管理 (デーモンが 1 つ保持する)。
 #[derive(Clone)]
 pub struct SessionManager {
@@ -289,6 +304,8 @@ struct ActiveSession {
     pending_prompts: VecDeque<PendingPrompt>,
     /// 承認待ち (`request_id` → 表示用情報)
     pending_permissions: HashMap<String, PendingPermissionSummary>,
+    /// 回答待ち elicitation (`elicitation_id` → 表示用情報)
+    pending_elicitations: HashMap<String, PendingElicitationSummary>,
     /// 意味のあるタイトルが設定済みか (プロンプト導出またはドライバ通知)
     has_custom_title: bool,
 }
@@ -673,6 +690,7 @@ impl SessionManager {
                     busy: false,
                     pending_prompts: VecDeque::new(),
                     pending_permissions: HashMap::new(),
+                    pending_elicitations: HashMap::new(),
                     has_custom_title: params.has_custom_title,
                 },
             );
@@ -1259,6 +1277,60 @@ impl SessionManager {
         Ok(())
     }
 
+    /// elicitation (構造化入力) へ応答する (2 回目以降は `AlreadyResolved`)。
+    pub async fn respond_elicitation(
+        &self,
+        command_id: &str,
+        session_id: &str,
+        elicitation_id: &str,
+        action: ElicitationAction,
+        content: serde_json::Value,
+        resolved_by: &str,
+    ) -> Result<(), NodeError> {
+        if !self.begin_command(command_id) {
+            return Err(NodeError::CommandDuplicate(command_id.to_owned()));
+        }
+
+        let (handle, summary) = {
+            let mut sessions = self.inner.sessions.lock().expect("sessions poisoned");
+            let session = sessions.active.get_mut(session_id).ok_or_else(|| {
+                NodeError::InvalidSession(format!("session {session_id} is not active"))
+            })?;
+            let Some(summary) = session.pending_elicitations.remove(elicitation_id) else {
+                return Err(NodeError::AlreadyResolved(elicitation_id.to_owned()));
+            };
+            (Arc::clone(&session.handle), summary)
+        };
+        if let Err(err) = handle
+            .respond_elicitation(elicitation_id.to_owned(), action, content.clone())
+            .await
+        {
+            // content の schema 違反等でドライバが受理しなかった場合は pending を
+            // 戻す (ユーザーが修正して再送できるようにする)
+            let mut sessions = self.inner.sessions.lock().expect("sessions poisoned");
+            if let Some(session) = sessions.active.get_mut(session_id) {
+                session
+                    .pending_elicitations
+                    .insert(elicitation_id.to_owned(), summary);
+            }
+            return Err(NodeError::Server(format!("failed to respond: {err:#}")));
+        }
+
+        self.inner
+            .bus
+            .record(
+                session_id,
+                UnifiedEventPayload::ElicitationResolved {
+                    elicitation_id: elicitation_id.to_owned(),
+                    action,
+                    content,
+                    resolved_by: resolved_by.to_owned(),
+                },
+            )
+            .await?;
+        Ok(())
+    }
+
     /// モード切替 / 設定変更 / キャンセル / Kill。
     pub async fn control(
         &self,
@@ -1435,6 +1507,18 @@ impl SessionManager {
         list
     }
 
+    /// 回答待ち elicitation 一覧 (`fxg inbox list`)。
+    pub fn pending_elicitations(&self) -> Vec<PendingElicitationSummary> {
+        let sessions = self.inner.sessions.lock().expect("sessions poisoned");
+        let mut list: Vec<PendingElicitationSummary> = sessions
+            .active
+            .values()
+            .flat_map(|session| session.pending_elicitations.values().cloned())
+            .collect();
+        list.sort_by(|a, b| a.elicitation_id.cmp(&b.elicitation_id));
+        list
+    }
+
     /// 全セッションのエージェントプロセスを終了する (`fxg kill-all`)。
     pub async fn shutdown_all(&self) -> Vec<String> {
         let handles: Vec<(String, Arc<dyn ActiveSessionHandle>)> = {
@@ -1535,6 +1619,44 @@ async fn pump_events(
                         let already_recorded =
                             sessions.active.get_mut(&session_id).is_some_and(|session| {
                                 session.pending_permissions.remove(request_id).is_none()
+                            });
+                        if already_recorded {
+                            continue;
+                        }
+                    }
+                    UnifiedEventPayload::ElicitationRequest {
+                        elicitation_id,
+                        message,
+                        mode,
+                        requested_schema,
+                        ..
+                    } => {
+                        let mut sessions = inner.sessions.lock().expect("sessions poisoned");
+                        if let Some(session) = sessions.active.get_mut(&session_id) {
+                            session.pending_elicitations.insert(
+                                elicitation_id.clone(),
+                                PendingElicitationSummary {
+                                    session_id: session_id.clone(),
+                                    elicitation_id: elicitation_id.clone(),
+                                    message: message.clone(),
+                                    mode: mode.clone(),
+                                    requested_schema: requested_schema.clone(),
+                                },
+                            );
+                        }
+                    }
+                    UnifiedEventPayload::ElicitationResolved { elicitation_id, .. } => {
+                        // ドライバ側 (ターンキャンセル時の自動解決等) で解決された
+                        // elicitation もここに来る。fxg 経由の応答は
+                        // `SessionManager::respond_elicitation` が記録済みのため、
+                        // 回答待ち一覧に残っている場合のみ記録する。
+                        let mut sessions = inner.sessions.lock().expect("sessions poisoned");
+                        let already_recorded =
+                            sessions.active.get_mut(&session_id).is_some_and(|session| {
+                                session
+                                    .pending_elicitations
+                                    .remove(elicitation_id)
+                                    .is_none()
                             });
                         if already_recorded {
                             continue;
@@ -2229,6 +2351,119 @@ mod tests {
             .await
             .expect_err("already resolved");
         assert!(matches!(err, NodeError::AlreadyResolved(_)));
+    }
+
+    #[tokio::test]
+    async fn elicitation_resolution_is_idempotent() {
+        let (manager, mock, dir) = setup().await;
+        let outcome = manager
+            .ensure_session("c1", dir.path(), "mock", &[], None, false)
+            .await
+            .expect("ensure");
+        wait_idle(&manager, &outcome.session_id).await;
+
+        // ドライバから elicitation (質問) を注入
+        mock.emit(DriverEvent::Event(
+            UnifiedEventPayload::ElicitationRequest {
+                elicitation_id: "elic-1".to_owned(),
+                message: "どの戦略で進めますか?".to_owned(),
+                mode: "form".to_owned(),
+                requested_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": { "strategy": { "type": "string", "enum": ["a", "b"] } },
+                    "required": ["strategy"]
+                }),
+                tool_call_id: None,
+            },
+        ));
+        for _ in 0..100 {
+            if !manager.pending_elicitations().is_empty() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        assert_eq!(manager.pending_elicitations().len(), 1);
+        assert_eq!(
+            manager.pending_elicitations()[0].message,
+            "どの戦略で進めますか?"
+        );
+
+        manager
+            .respond_elicitation(
+                "c2",
+                &outcome.session_id,
+                "elic-1",
+                ElicitationAction::Accept,
+                serde_json::json!({ "strategy": "a" }),
+                "cli",
+            )
+            .await
+            .expect("resolve");
+        assert!(manager.pending_elicitations().is_empty());
+        let recorded = mock.elicitations();
+        assert_eq!(recorded.len(), 1);
+        assert_eq!(recorded[0].0, "elic-1");
+        assert_eq!(recorded[0].1, ElicitationAction::Accept);
+        assert_eq!(recorded[0].2["strategy"], "a");
+
+        // 2 回目は ALREADY_RESOLVED
+        let err = manager
+            .respond_elicitation(
+                "c3",
+                &outcome.session_id,
+                "elic-1",
+                ElicitationAction::Decline,
+                serde_json::Value::Null,
+                "cli",
+            )
+            .await
+            .expect_err("already resolved");
+        assert!(matches!(err, NodeError::AlreadyResolved(_)));
+    }
+
+    #[tokio::test]
+    async fn driver_resolved_elicitation_clears_pending() {
+        let (manager, mock, dir) = setup().await;
+        let outcome = manager
+            .ensure_session("c1", dir.path(), "mock", &[], None, false)
+            .await
+            .expect("ensure");
+        wait_idle(&manager, &outcome.session_id).await;
+
+        // ドライバが発行した elicitation が pending に載る
+        mock.emit(DriverEvent::Event(
+            UnifiedEventPayload::ElicitationRequest {
+                elicitation_id: "elic-2".to_owned(),
+                message: "続行しますか?".to_owned(),
+                mode: "form".to_owned(),
+                requested_schema: serde_json::json!({ "type": "object", "properties": {} }),
+                tool_call_id: None,
+            },
+        ));
+        for _ in 0..100 {
+            if !manager.pending_elicitations().is_empty() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        assert_eq!(manager.pending_elicitations().len(), 1);
+
+        // ドライバ側の自動解決 (ターンキャンセル等) で pending が消える
+        mock.emit(DriverEvent::Event(
+            UnifiedEventPayload::ElicitationResolved {
+                elicitation_id: "elic-2".to_owned(),
+                action: ElicitationAction::Cancel,
+                content: serde_json::Value::Null,
+                resolved_by: "system".to_owned(),
+            },
+        ));
+        for _ in 0..100 {
+            if manager.pending_elicitations().is_empty() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        assert!(manager.pending_elicitations().is_empty());
     }
 
     #[tokio::test]

@@ -850,6 +850,34 @@ async fn handle(
             ))
         }
 
+        IpcClientMessage::RespondElicitation {
+            command_id,
+            session_id,
+            elicitation_id,
+            action,
+            content,
+            resolved_by,
+        } => {
+            state
+                .session_manager()
+                .respond_elicitation(
+                    &command_id,
+                    &session_id,
+                    &elicitation_id,
+                    action,
+                    content,
+                    &resolved_by,
+                )
+                .await
+                .map_err(|err| DispatchError::from_node_error(&command_id, err))?;
+            Ok((
+                command_id,
+                IpcResult::CommandAccepted {
+                    session_id: Some(session_id),
+                },
+            ))
+        }
+
         IpcClientMessage::ControlSession {
             command_id,
             session_id,

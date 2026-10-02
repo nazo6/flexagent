@@ -612,14 +612,10 @@ impl ActiveSessionHandle for AcpSessionHandle {
             .map_err(|err| anyhow!("failed to cancel turn: {err}"))?;
         // 未解決の承認は仕様上 cancelled で返す (MUST)
         cancel_pending_permissions(&self.permissions);
-        // 未解決の elicitation も仕様上 cancel で返す
-        cancel_pending_elicitations(&self.elicitations);
-        if let Some(events) = self
-            .events
-            .lock()
-            .expect("session events poisoned")
-            .as_ref()
-        {
+        // 未解決の elicitation も仕様上 cancel で返し、回答待ち表示を解消する
+        let events = self.events.lock().expect("session events poisoned").clone();
+        cancel_pending_elicitations(&self.elicitations, events.as_ref());
+        if let Some(events) = events.as_ref() {
             let _ = events.send(DriverEvent::Event(UnifiedEventPayload::StatusChanged {
                 status: fxg_protocol::common::SessionStatus::Running,
                 error_message: None,
@@ -663,10 +659,27 @@ fn cancel_pending_permissions(permissions: &PermissionRegistry) {
 
 /// 未解決の elicitation をすべて `cancel` で閉じる (仕様上、ターン中断時は
 /// 未解決の elicitation を cancel で解決する)。
-fn cancel_pending_elicitations(elicitations: &ElicitationRegistry) {
+///
+/// `events` がある場合は `ElicitationResolved` も発行し、UI / Inbox の
+/// 回答待ち表示を解消する (fxg 経由の応答はマネージャ側が記録済みのため、
+/// ここではドライバ側の自動解決のみを記録する)。
+fn cancel_pending_elicitations(
+    elicitations: &ElicitationRegistry,
+    events: Option<&mpsc::UnboundedSender<DriverEvent>>,
+) {
     let mut registry = elicitations.lock().expect("elicitation registry poisoned");
-    for (_, pending) in registry.drain() {
+    for (elicitation_id, pending) in registry.drain() {
         let _ = pending.sender.send(ElicitationOutcome::Cancel);
+        if let Some(events) = events {
+            let _ = events.send(DriverEvent::Event(
+                UnifiedEventPayload::ElicitationResolved {
+                    elicitation_id,
+                    action: fxg_protocol::common::ElicitationAction::Cancel,
+                    content: serde_json::Value::Null,
+                    resolved_by: "system".to_owned(),
+                },
+            ));
+        }
     }
 }
 
@@ -1156,7 +1169,7 @@ async fn run_acp_process(params: AcpProcessTaskParams) -> Result<(), agent_clien
                 }
                 // セッションに紐づく未解決の承認・質問はキャンセルで閉じる
                 cancel_pending_permissions(&permissions);
-                cancel_pending_elicitations(&elicitations);
+                cancel_pending_elicitations(&elicitations, Some(&events));
                 match outcome {
                     ServeOutcome::Closed => {
                         let _ =
@@ -1205,7 +1218,7 @@ async fn run_acp_process(params: AcpProcessTaskParams) -> Result<(), agent_clien
 
     // 未解決の承認・質問が残っていればキャンセルで閉じる (プロセス終了)
     cancel_pending_permissions(&permissions_for_teardown);
-    cancel_pending_elicitations(&elicitations_for_teardown);
+    cancel_pending_elicitations(&elicitations_for_teardown, None);
 
     run_result
 }

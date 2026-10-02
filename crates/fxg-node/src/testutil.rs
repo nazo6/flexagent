@@ -102,6 +102,13 @@ pub(crate) struct MockStart {
 struct MockAgentInner {
     prompts: Mutex<Vec<String>>,
     permissions: Mutex<Vec<(String, String)>>,
+    elicitations: Mutex<
+        Vec<(
+            String,
+            fxg_protocol::common::ElicitationAction,
+            serde_json::Value,
+        )>,
+    >,
     modes: Mutex<Vec<String>>,
     reverted: Mutex<Vec<u64>>,
     events: Mutex<Vec<mpsc::UnboundedSender<DriverEvent>>>,
@@ -143,6 +150,21 @@ impl MockAgent {
     /// 承認応答 (`request_id`, `option_id`) 一覧。
     pub(crate) fn permissions(&self) -> Vec<(String, String)> {
         self.inner.permissions.lock().expect("permissions").clone()
+    }
+
+    /// elicitation 応答 (`elicitation_id`, `action`, `content`) 一覧。
+    pub(crate) fn elicitations(
+        &self,
+    ) -> Vec<(
+        String,
+        fxg_protocol::common::ElicitationAction,
+        serde_json::Value,
+    )> {
+        self.inner
+            .elicitations
+            .lock()
+            .expect("elicitations")
+            .clone()
     }
 
     /// 適用されたモード変更一覧。
@@ -219,6 +241,20 @@ impl ActiveSessionHandle for MockAgent {
             .lock()
             .expect("permissions")
             .push((request_id, selected_option_id));
+        Ok(())
+    }
+
+    async fn respond_elicitation(
+        &self,
+        elicitation_id: String,
+        action: fxg_protocol::common::ElicitationAction,
+        content: serde_json::Value,
+    ) -> anyhow::Result<()> {
+        self.inner.elicitations.lock().expect("elicitations").push((
+            elicitation_id,
+            action,
+            content,
+        ));
         Ok(())
     }
 

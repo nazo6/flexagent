@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::client_api::WorktreeInfo;
 use crate::common::{
-    ElicitationRequestEntry, ErrorCode, HookLogEntry, PermissionRequestEntry,
+    ElicitationAction, ElicitationRequestEntry, ErrorCode, HookLogEntry, PermissionRequestEntry,
     ProjectResolutionSource, ProjectSummary, SessionControlAction, SessionSummary,
     StreamDeltaPayload,
 };
@@ -134,6 +134,21 @@ pub enum IpcClientMessage {
         request_id: String,
         /// 選択された `option_id`
         selected_option_id: String,
+        /// 解決主体 (`cli` / `web` / `android_push`)
+        resolved_by: String,
+    },
+    /// elicitation (構造化入力リクエスト) への回答。
+    RespondElicitation {
+        /// 相関ID
+        command_id: String,
+        /// 対象セッションID
+        session_id: String,
+        /// ACP elicitation id
+        elicitation_id: String,
+        /// ユーザーの応答アクション (`accept` / `decline` / `cancel`)
+        action: ElicitationAction,
+        /// `accept` 時の回答内容 (form の `requested_schema` 準拠)
+        content: serde_json::Value,
         /// 解決主体 (`cli` / `web` / `android_push`)
         resolved_by: String,
     },
