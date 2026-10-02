@@ -2,6 +2,7 @@
 import type { AttachmentMeta } from "./AttachmentMeta";
 import type { CommandInfo } from "./CommandInfo";
 import type { ConfigOptionInfo } from "./ConfigOptionInfo";
+import type { ElicitationAction } from "./ElicitationAction";
 import type { FileDiff } from "./FileDiff";
 import type { ModeInfo } from "./ModeInfo";
 import type { PermissionOption } from "./PermissionOption";
@@ -174,6 +175,42 @@ request_id: string,
  * 選択された `option_id`
  */
 selected_option_id: string, 
+/**
+ * 解決主体 (`cli` / `web` / `android_push`)
+ */
+resolved_by: string, } } | { "type": "elicitation_request", "data": { 
+/**
+ * ACP elicitation id
+ */
+elicitation_id: string, 
+/**
+ * ユーザーへ提示するメッセージ
+ */
+message: string, 
+/**
+ * 要求モード (`form` / `url`。Phase 1 は `form` のみ)
+ */
+mode: string, 
+/**
+ * form モードの要求 JSON Schema (`requestedSchema`)
+ */
+requested_schema: JsonValue, 
+/**
+ * 関連するツール呼び出しID (任意)
+ */
+tool_call_id: string | null, } } | { "type": "elicitation_resolved", "data": { 
+/**
+ * ACP elicitation id
+ */
+elicitation_id: string, 
+/**
+ * ユーザーの応答アクション
+ */
+action: ElicitationAction, 
+/**
+ * `accept` 時の回答内容 (decline / cancel では `Value::Null`)
+ */
+content: JsonValue, 
 /**
  * 解決主体 (`cli` / `web` / `android_push`)
  */

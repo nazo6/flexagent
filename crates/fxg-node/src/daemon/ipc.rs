@@ -1007,6 +1007,14 @@ async fn handle(
                 .into_iter()
                 .filter(|entry| entry.session_id == session_id)
                 .collect();
+            let pending_elicitations = state
+                .db()
+                .pending_elicitations()
+                .await
+                .map_err(|err| DispatchError::from_node_error(&command_id, err.into()))?
+                .into_iter()
+                .filter(|entry| entry.session_id == session_id)
+                .collect();
             Ok((
                 command_id,
                 IpcResult::SessionDetail(Box::new(SessionDetail {
@@ -1014,6 +1022,7 @@ async fn handle(
                     event_count,
                     recent_events,
                     pending_permissions,
+                    pending_elicitations,
                 })),
             ))
         }
@@ -1024,7 +1033,18 @@ async fn handle(
                 .pending_permissions()
                 .await
                 .map_err(|err| DispatchError::from_node_error(&command_id, err.into()))?;
-            Ok((command_id, IpcResult::Inbox { requests }))
+            let elicitations = state
+                .db()
+                .pending_elicitations()
+                .await
+                .map_err(|err| DispatchError::from_node_error(&command_id, err.into()))?;
+            Ok((
+                command_id,
+                IpcResult::Inbox {
+                    requests,
+                    elicitations,
+                },
+            ))
         }
 
         // `AttachSession` は接続ループ ([`handle_connection`]) が

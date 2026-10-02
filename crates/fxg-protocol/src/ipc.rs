@@ -13,8 +13,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::client_api::WorktreeInfo;
 use crate::common::{
-    ErrorCode, HookLogEntry, PermissionRequestEntry, ProjectResolutionSource, ProjectSummary,
-    SessionControlAction, SessionSummary, StreamDeltaPayload,
+    ElicitationRequestEntry, ErrorCode, HookLogEntry, PermissionRequestEntry,
+    ProjectResolutionSource, ProjectSummary, SessionControlAction, SessionSummary,
+    StreamDeltaPayload,
 };
 use crate::events::SessionEventEnvelope;
 
@@ -406,6 +407,8 @@ pub enum IpcResult {
     Inbox {
         /// 承認待ちリクエスト一覧 (全セッション横断)
         requests: Vec<PermissionRequestEntry>,
+        /// 回答待ち elicitation リクエスト一覧 (全セッション横断)
+        elicitations: Vec<ElicitationRequestEntry>,
     },
     /// `ProjectInfo` の結果
     ProjectInfo {
@@ -522,6 +525,8 @@ pub struct SessionDetail {
     pub recent_events: Vec<SessionEventEnvelope>,
     /// このセッションの承認待ちリクエスト
     pub pending_permissions: Vec<PermissionRequestEntry>,
+    /// このセッションの回答待ち elicitation リクエスト
+    pub pending_elicitations: Vec<ElicitationRequestEntry>,
 }
 
 #[cfg(test)]

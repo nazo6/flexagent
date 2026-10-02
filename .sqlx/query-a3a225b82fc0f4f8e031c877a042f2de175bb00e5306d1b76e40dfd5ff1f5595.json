@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n                UPDATE elicitation_requests\n                   SET status = ?, content_json = ?, resolved_by = ?, resolved_at = ?\n                 WHERE elicitation_id = ?\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 5
+    },
+    "nullable": []
+  },
+  "hash": "a3a225b82fc0f4f8e031c877a042f2de175bb00e5306d1b76e40dfd5ff1f5595"
+}

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM elicitation_requests",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "3ddf809745cb2bc5f6a7f4f3fc9c123741393f1904181dacefa291426b415624"
+}

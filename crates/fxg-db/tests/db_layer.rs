@@ -14,7 +14,8 @@ use fxg_db::{
     SessionFilter,
 };
 use fxg_protocol::common::{
-    CommandInfo, ModeInfo, PermissionOption, PermissionRequestStatus, PlanEntry, SessionStatus,
+    CommandInfo, ElicitationAction, ElicitationRequestStatus, ModeInfo, PermissionOption,
+    PermissionRequestStatus, PlanEntry, SessionStatus,
 };
 use fxg_protocol::events::{SessionEventEnvelope, UnifiedEventPayload};
 use fxg_protocol::util::{now_ms, uuid_v7};
@@ -202,6 +203,7 @@ async fn migrations_create_single_schema_with_fts_and_triggers() {
         "session_events",
         "session_events_fts",
         "permission_requests",
+        "elicitation_requests",
         "push_subscriptions",
         "audit_logs",
     ] {
@@ -410,6 +412,74 @@ async fn permission_rejection_is_projected_from_option_kind() {
         .expect("exists");
     assert_eq!(request.status, PermissionRequestStatus::Rejected);
     assert_eq!(request.resolved_by.as_deref(), Some("android_push"));
+}
+
+#[tokio::test]
+async fn elicitation_projection_tracks_pending_and_resolved() {
+    let mut fixture = Fixture::new(DbRole::Node).await;
+    let created = fixture.session_created();
+    let request = fixture.event(UnifiedEventPayload::ElicitationRequest {
+        elicitation_id: "elic-1".to_owned(),
+        message: "どの戦略で進めますか?".to_owned(),
+        mode: "form".to_owned(),
+        requested_schema: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "strategy": { "type": "string", "enum": ["a", "b"] }
+            },
+            "required": ["strategy"]
+        }),
+        tool_call_id: Some("tool-1".to_owned()),
+    });
+    fixture
+        .db
+        .append_events(&[created, request])
+        .await
+        .expect("append");
+
+    let pending = fixture.db.pending_elicitations().await.expect("pending");
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].elicitation_id, "elic-1");
+    assert_eq!(pending[0].status, ElicitationRequestStatus::Pending);
+    assert_eq!(pending[0].tool_call_id.as_deref(), Some("tool-1"));
+    assert_eq!(pending[0].requested_schema["type"], "object");
+
+    let resolved = fixture.event(UnifiedEventPayload::ElicitationResolved {
+        elicitation_id: "elic-1".to_owned(),
+        action: ElicitationAction::Accept,
+        content: serde_json::json!({ "strategy": "a" }),
+        resolved_by: "web".to_owned(),
+    });
+    fixture.db.append_event(&resolved).await.expect("append");
+
+    let entry = fixture
+        .db
+        .find_elicitation_request("elic-1")
+        .await
+        .expect("find")
+        .expect("exists");
+    assert_eq!(entry.status, ElicitationRequestStatus::Accepted);
+    assert_eq!(entry.content["strategy"], "a");
+    assert_eq!(entry.resolved_by.as_deref(), Some("web"));
+    assert!(
+        fixture
+            .db
+            .pending_elicitations()
+            .await
+            .expect("pending")
+            .is_empty()
+    );
+
+    // 全量再構築でも同じ投影が再現される
+    fixture.db.rebuild_projections().await.expect("rebuild");
+    let rebuilt = fixture
+        .db
+        .find_elicitation_request("elic-1")
+        .await
+        .expect("find after rebuild")
+        .expect("exists");
+    assert_eq!(rebuilt.status, ElicitationRequestStatus::Accepted);
+    assert_eq!(rebuilt.content["strategy"], "a");
 }
 
 #[tokio::test]

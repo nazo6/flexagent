@@ -54,6 +54,9 @@ pub fn classify_payload(payload: &UnifiedEventPayload) -> (&'static str, Option<
         UnifiedEventPayload::PermissionRequest {
             tool_name, summary, ..
         } => join_parts(vec![tool_name.clone(), summary.clone()]),
+        UnifiedEventPayload::ElicitationRequest { message, .. } => {
+            join_parts(vec![message.clone()])
+        }
         UnifiedEventPayload::CapabilitiesUpdated {
             current_mode,
             available_modes,
@@ -87,6 +90,7 @@ pub fn classify_payload(payload: &UnifiedEventPayload) -> (&'static str, Option<
         UnifiedEventPayload::SessionCreated { .. }
         | UnifiedEventPayload::SessionAgentBound { .. }
         | UnifiedEventPayload::PermissionResolved { .. }
+        | UnifiedEventPayload::ElicitationResolved { .. }
         | UnifiedEventPayload::SessionReverted { .. }
         | UnifiedEventPayload::SessionArchived { .. }
         | UnifiedEventPayload::SessionDeleted {}

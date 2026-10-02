@@ -924,9 +924,17 @@ async fn session_diff<B: ClientApiBackend>(
 }
 
 async fn inbox<B: ClientApiBackend>(State(state): State<ClientApiState<B>>) -> Response {
-    match state.backend.db().pending_permissions().await {
-        Ok(requests) => Json(InboxResponse { requests }).into_response(),
-        Err(err) => ApiError::from(err).into_response(),
+    let db = state.backend.db();
+    match (
+        db.pending_permissions().await,
+        db.pending_elicitations().await,
+    ) {
+        (Ok(requests), Ok(elicitations)) => Json(InboxResponse {
+            requests,
+            elicitations,
+        })
+        .into_response(),
+        (Err(err), _) | (_, Err(err)) => ApiError::from(err).into_response(),
     }
 }
 

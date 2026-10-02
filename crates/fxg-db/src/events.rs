@@ -3,7 +3,7 @@
 //! 設計: `docs/02-database-schema.md` §0.3 (イベント適用と投影) / §2 (正データと派生カラム)。
 //!
 //! - `append_events`: `INSERT OR IGNORE` による冪等追記 + **同一トランザクション**での
-//!   `sessions` / `permission_requests` 投影更新
+//!   `sessions` / `permission_requests` / `elicitation_requests` 投影更新
 //! - `rebuild_projections`: イベントログ全量からの投影再構築
 //!   (「イベント適用後の状態 == 全量再構築後の状態」をテストで保証する)
 //! - `regenerate_searchable_text` / `rebuild_fts_index`: FTS5 検索データの再生成
@@ -15,7 +15,9 @@
 //! された場合」のみ行うため、同一バッチの再送 (ACK 前の再送・Resync 再送) は
 //! 何度適用しても同じ状態に収束する。
 
-use fxg_protocol::common::{PermissionOption, PermissionRequestStatus};
+use fxg_protocol::common::{
+    ElicitationAction, ElicitationRequestStatus, PermissionOption, PermissionRequestStatus,
+};
 use fxg_protocol::events::{SessionEventEnvelope, UnifiedEventPayload};
 use serde::{Deserialize, Serialize};
 use sqlx::{Sqlite, SqliteConnection, SqlitePool, Transaction};
@@ -488,6 +490,69 @@ pub(crate) async fn apply_projections(
             .execute(&mut *conn)
             .await?;
         }
+        UnifiedEventPayload::ElicitationRequest {
+            elicitation_id,
+            message,
+            mode,
+            requested_schema,
+            tool_call_id,
+        } => {
+            let schema_json = serde_json::to_string(requested_schema)?;
+            sqlx::query!(
+                r#"
+                INSERT INTO elicitation_requests
+                    (elicitation_id, session_id, node_id, message, mode, schema_json,
+                     tool_call_id, status, content_json, created_at, resolved_at, resolved_by)
+                SELECT ?, ?, s.node_id, ?, ?, ?, ?, 'pending', 'null', ?, NULL, NULL
+                  FROM sessions s
+                 WHERE s.session_id = ?
+                ON CONFLICT(elicitation_id) DO UPDATE SET
+                    message = excluded.message,
+                    mode = excluded.mode,
+                    schema_json = excluded.schema_json,
+                    tool_call_id = excluded.tool_call_id,
+                    status = 'pending',
+                    content_json = 'null',
+                    resolved_at = NULL,
+                    resolved_by = NULL
+                "#,
+                elicitation_id,
+                envelope.session_id,
+                message,
+                mode,
+                schema_json,
+                tool_call_id,
+                envelope.created_at,
+                envelope.session_id,
+            )
+            .execute(&mut *conn)
+            .await?;
+        }
+        UnifiedEventPayload::ElicitationResolved {
+            elicitation_id,
+            action,
+            content,
+            resolved_by,
+        } => {
+            let status = elicitation_status(*action);
+            let content_json = serde_json::to_string(content)?;
+            // Resync が途中の node_seq から行われた等で対応する
+            // ElicitationRequest 行が無い場合は 0 行更新となる (破棄)。
+            sqlx::query!(
+                r#"
+                UPDATE elicitation_requests
+                   SET status = ?, content_json = ?, resolved_by = ?, resolved_at = ?
+                 WHERE elicitation_id = ?
+                "#,
+                status.as_str(),
+                content_json,
+                resolved_by,
+                envelope.created_at,
+                elicitation_id,
+            )
+            .execute(&mut *conn)
+            .await?;
+        }
         UnifiedEventPayload::SessionArchived { archived } => {
             // アーカイブは可逆な可視性フラグ (イベントログは保持)
             let archived_at = archived.then_some(envelope.created_at);
@@ -531,6 +596,12 @@ pub(crate) async fn apply_projections(
             )
             .execute(&mut *conn)
             .await?;
+            sqlx::query!(
+                r#"DELETE FROM elicitation_requests WHERE session_id = ?"#,
+                envelope.session_id,
+            )
+            .execute(&mut *conn)
+            .await?;
         }
         // sessions 行の派生カラム更新を持たないイベント
         // (会話・ツール実行・ターミナル出力・BootstrapLog 等)。
@@ -561,6 +632,15 @@ pub(crate) async fn apply_projections(
     .await?;
 
     Ok(())
+}
+
+/// elicitation の応答アクションを DB 投影の状態へ変換する。
+fn elicitation_status(action: ElicitationAction) -> ElicitationRequestStatus {
+    match action {
+        ElicitationAction::Accept => ElicitationRequestStatus::Accepted,
+        ElicitationAction::Decline => ElicitationRequestStatus::Declined,
+        ElicitationAction::Cancel => ElicitationRequestStatus::Cancelled,
+    }
 }
 
 /// `selected_option_id` に対応する選択肢の kind から解決状態を判定する。
@@ -595,7 +675,8 @@ fn resolve_permission_status(
     }
 }
 
-/// イベントログ全量から `sessions` / `permission_requests` 投影を再構築する。
+/// イベントログ全量から `sessions` / `permission_requests` /
+/// `elicitation_requests` 投影を再構築する。
 ///
 /// # 実装上の制約
 ///
@@ -620,6 +701,9 @@ pub async fn rebuild_projections(pool: &SqlitePool) -> Result<(), DbError> {
     let mut tx = pool.begin().await?;
 
     sqlx::query!(r#"DELETE FROM permission_requests"#)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query!(r#"DELETE FROM elicitation_requests"#)
         .execute(&mut *tx)
         .await?;
     sqlx::query!(

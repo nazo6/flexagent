@@ -19,8 +19,8 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use crate::common::{
-    AttachmentMeta, CommandInfo, ConfigOptionInfo, FileDiff, ModeInfo, PermissionOption, PlanEntry,
-    SessionStatus,
+    AttachmentMeta, CommandInfo, ConfigOptionInfo, ElicitationAction, FileDiff, ModeInfo,
+    PermissionOption, PlanEntry, SessionStatus,
 };
 
 /// セッションイベントの封筒 (永続化・同期の単位)。
@@ -203,6 +203,35 @@ pub enum UnifiedEventPayload {
         /// 解決主体 (`cli` / `web` / `android_push`)
         resolved_by: String,
     },
+    /// エージェントからの構造化入力リクエスト (ACP `elicitation/create`)。
+    ///
+    /// エージェントの「質問」ツールがこのイベントとして届き、UI / CLI は
+    /// `requested_schema` から回答フォームを生成する。回答は
+    /// [`UnifiedEventPayload::ElicitationResolved`] として追記される
+    /// (Phase 1 は form モードのみ対応)。
+    ElicitationRequest {
+        /// ACP elicitation id
+        elicitation_id: String,
+        /// ユーザーへ提示するメッセージ
+        message: String,
+        /// 要求モード (`form` / `url`。Phase 1 は `form` のみ)
+        mode: String,
+        /// form モードの要求 JSON Schema (`requestedSchema`)
+        requested_schema: serde_json::Value,
+        /// 関連するツール呼び出しID (任意)
+        tool_call_id: Option<String>,
+    },
+    /// 構造化入力リクエストの解決結果 (accept / decline / cancel)。
+    ElicitationResolved {
+        /// ACP elicitation id
+        elicitation_id: String,
+        /// ユーザーの応答アクション
+        action: ElicitationAction,
+        /// `accept` 時の回答内容 (decline / cancel では `Value::Null`)
+        content: serde_json::Value,
+        /// 解決主体 (`cli` / `web` / `android_push`)
+        resolved_by: String,
+    },
     /// ワークスペースのファイルを指定ターンの `snapshot_tree_hash` 時点へ
     /// 復元した (Revert)。
     ///
@@ -303,6 +332,8 @@ impl UnifiedEventPayload {
             Self::PlanUpdate { .. } => "plan",
             Self::PermissionRequest { .. } => "permission_request",
             Self::PermissionResolved { .. } => "permission_resolved",
+            Self::ElicitationRequest { .. } => "elicitation_request",
+            Self::ElicitationResolved { .. } => "elicitation_resolved",
             Self::SessionReverted { .. } => "session_reverted",
             Self::SessionArchived { .. } => "session_archived",
             Self::SessionDeleted {} => "session_deleted",
@@ -400,6 +431,45 @@ mod tests {
 
         let decoded: UnifiedEventPayload = serde_json::from_value(json).unwrap();
         assert_eq!(decoded, payload);
+    }
+
+    #[test]
+    fn elicitation_events_roundtrip() {
+        let payload = UnifiedEventPayload::ElicitationRequest {
+            elicitation_id: "elic-1".to_owned(),
+            message: "どの戦略で進めますか?".to_owned(),
+            mode: "form".to_owned(),
+            requested_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "strategy": { "type": "string", "enum": ["a", "b"] }
+                },
+                "required": ["strategy"]
+            }),
+            tool_call_id: Some("tool-1".to_owned()),
+        };
+        let json = serde_json::to_value(&payload).unwrap();
+        assert_eq!(json["type"], "elicitation_request");
+        assert_eq!(json["data"]["mode"], "form");
+        assert_eq!(
+            serde_json::from_value::<UnifiedEventPayload>(json).unwrap(),
+            payload
+        );
+        assert!(payload.is_persistable());
+
+        let resolved = UnifiedEventPayload::ElicitationResolved {
+            elicitation_id: "elic-1".to_owned(),
+            action: ElicitationAction::Accept,
+            content: serde_json::json!({ "strategy": "a" }),
+            resolved_by: "cli".to_owned(),
+        };
+        let json = serde_json::to_value(&resolved).unwrap();
+        assert_eq!(json["type"], "elicitation_resolved");
+        assert_eq!(json["data"]["action"], "accept");
+        assert_eq!(
+            serde_json::from_value::<UnifiedEventPayload>(json).unwrap(),
+            resolved
+        );
     }
 
     #[test]

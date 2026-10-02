@@ -4,7 +4,8 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use fxg_protocol::common::{
-    AuditLogEntry, NodeSummary, PermissionRequestEntry, ProjectSummary, SearchHit, SessionSummary,
+    AuditLogEntry, ElicitationRequestEntry, NodeSummary, PermissionRequestEntry, ProjectSummary,
+    SearchHit, SessionSummary,
 };
 use fxg_protocol::config::{NODE_DB_FILE_NAME, SERVER_DB_FILE_NAME};
 use fxg_protocol::events::{SessionEventBatch, SessionEventEnvelope, UnifiedEventPayload};
@@ -383,6 +384,19 @@ impl Db {
         request_id: &str,
     ) -> Result<Option<PermissionRequestEntry>, DbError> {
         queries::find_permission_request(&self.pool, request_id).await
+    }
+
+    /// 未解決 (`pending`) の elicitation リクエスト一覧 (質問 Inbox)。
+    pub async fn pending_elicitations(&self) -> Result<Vec<ElicitationRequestEntry>, DbError> {
+        queries::pending_elicitations(&self.pool).await
+    }
+
+    /// elicitation リクエストを1件取得する。
+    pub async fn find_elicitation_request(
+        &self,
+        elicitation_id: &str,
+    ) -> Result<Option<ElicitationRequestEntry>, DbError> {
+        queries::find_elicitation_request(&self.pool, elicitation_id).await
     }
 
     /// FTS5 全文検索 (3文字未満は LIKE フォールバック)。

@@ -1,0 +1,158 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        SELECT elicitation_id AS \"elicitation_id!\",\n               session_id, node_id, message, mode, schema_json, tool_call_id,\n               status, content_json, created_at, resolved_at, resolved_by\n          FROM elicitation_requests\n         WHERE status = 'pending'\n         ORDER BY created_at DESC\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "elicitation_id!",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "elicitation_requests",
+            "name": "elicitation_id"
+          }
+        }
+      },
+      {
+        "name": "session_id",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "elicitation_requests",
+            "name": "session_id"
+          }
+        }
+      },
+      {
+        "name": "node_id",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "elicitation_requests",
+            "name": "node_id"
+          }
+        }
+      },
+      {
+        "name": "message",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "elicitation_requests",
+            "name": "message"
+          }
+        }
+      },
+      {
+        "name": "mode",
+        "ordinal": 4,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "elicitation_requests",
+            "name": "mode"
+          }
+        }
+      },
+      {
+        "name": "schema_json",
+        "ordinal": 5,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "elicitation_requests",
+            "name": "schema_json"
+          }
+        }
+      },
+      {
+        "name": "tool_call_id",
+        "ordinal": 6,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "elicitation_requests",
+            "name": "tool_call_id"
+          }
+        }
+      },
+      {
+        "name": "status",
+        "ordinal": 7,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "elicitation_requests",
+            "name": "status"
+          }
+        }
+      },
+      {
+        "name": "content_json",
+        "ordinal": 8,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "elicitation_requests",
+            "name": "content_json"
+          }
+        }
+      },
+      {
+        "name": "created_at",
+        "ordinal": 9,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "elicitation_requests",
+            "name": "created_at"
+          }
+        }
+      },
+      {
+        "name": "resolved_at",
+        "ordinal": 10,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "elicitation_requests",
+            "name": "resolved_at"
+          }
+        }
+      },
+      {
+        "name": "resolved_by",
+        "ordinal": 11,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "elicitation_requests",
+            "name": "resolved_by"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "14d171fb32701dd70434064490cf1995e3b1f7f55c140d609d111022566d7e59"
+}

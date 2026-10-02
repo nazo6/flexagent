@@ -9,8 +9,9 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use crate::common::{
-    AuditLogEntry, CommandResult, ErrorCode, NodeSummary, PermissionRequestEntry, ProjectSummary,
-    SearchHit, SessionControlAction, SessionSummary, StreamDeltaPayload,
+    AuditLogEntry, CommandResult, ElicitationAction, ElicitationRequestEntry, ErrorCode,
+    NodeSummary, PermissionRequestEntry, ProjectSummary, SearchHit, SessionControlAction,
+    SessionSummary, StreamDeltaPayload,
 };
 use crate::events::SessionEventBatch;
 
@@ -403,6 +404,8 @@ pub struct CreateSessionResponse {
 pub struct InboxResponse {
     /// 未解決 (`pending`) の承認リクエスト一覧
     pub requests: Vec<PermissionRequestEntry>,
+    /// 未解決 (`pending`) の elicitation (構造化入力) リクエスト一覧
+    pub elicitations: Vec<ElicitationRequestEntry>,
 }
 
 /// `POST /api/v1/sessions/:id/permissions/:req_id/respond` リクエスト。
@@ -424,6 +427,28 @@ pub struct RespondPermissionRequest {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct RespondPermissionResponse {
+    /// この応答より前に既に解決済みだったか
+    pub already_resolved: bool,
+}
+
+/// `POST /api/v1/sessions/:id/elicitations/:elicitation_id/respond` リクエスト。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct RespondElicitationRequest {
+    /// ユーザーの応答アクション (`accept` / `decline` / `cancel`)
+    pub action: ElicitationAction,
+    /// `accept` 時の回答内容 (form の `requested_schema` 準拠。それ以外は `null`)
+    pub content: serde_json::Value,
+    /// 解決主体 (`cli` / `web` / `android_push`)
+    pub resolved_by: String,
+}
+
+/// `POST /api/v1/sessions/:id/elicitations/:elicitation_id/respond` レスポンス。
+///
+/// 既に解決済みの場合も 200 で返し `already_resolved = true` とする (冪等)。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct RespondElicitationResponse {
     /// この応答より前に既に解決済みだったか
     pub already_resolved: bool,
 }

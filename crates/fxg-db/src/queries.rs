@@ -23,9 +23,9 @@
 use std::str::FromStr;
 
 use fxg_protocol::common::{
-    AuditLogEntry, NodeLifecycleStatus, NodeSummary, PermissionRequestEntry,
-    PermissionRequestStatus, ProjectBindingSummary, ProjectSummary, SearchHit, SessionStatus,
-    SessionSummary,
+    AuditLogEntry, ElicitationRequestEntry, ElicitationRequestStatus, NodeLifecycleStatus,
+    NodeSummary, PermissionRequestEntry, PermissionRequestStatus, ProjectBindingSummary,
+    ProjectSummary, SearchHit, SessionStatus, SessionSummary,
 };
 use fxg_protocol::events::SessionEventBatch;
 use sqlx::SqlitePool;
@@ -501,6 +501,47 @@ pub async fn find_permission_request(
     row.map(PermissionRow::into_entry).transpose()
 }
 
+/// 未解決 (`pending`) の elicitation リクエスト一覧を取得する (質問 Inbox)。
+pub async fn pending_elicitations(
+    pool: &SqlitePool,
+) -> Result<Vec<ElicitationRequestEntry>, DbError> {
+    let rows = sqlx::query_as!(
+        ElicitationRow,
+        r#"
+        SELECT elicitation_id AS "elicitation_id!",
+               session_id, node_id, message, mode, schema_json, tool_call_id,
+               status, content_json, created_at, resolved_at, resolved_by
+          FROM elicitation_requests
+         WHERE status = 'pending'
+         ORDER BY created_at DESC
+        "#,
+    )
+    .fetch_all(pool)
+    .await?;
+    rows.into_iter().map(ElicitationRow::into_entry).collect()
+}
+
+/// elicitation リクエストを1件取得する (`ElicitationResolved` の応答判定などに使用)。
+pub async fn find_elicitation_request(
+    pool: &SqlitePool,
+    elicitation_id: &str,
+) -> Result<Option<ElicitationRequestEntry>, DbError> {
+    let row = sqlx::query_as!(
+        ElicitationRow,
+        r#"
+        SELECT elicitation_id AS "elicitation_id!",
+               session_id, node_id, message, mode, schema_json, tool_call_id,
+               status, content_json, created_at, resolved_at, resolved_by
+          FROM elicitation_requests
+         WHERE elicitation_id = ?
+        "#,
+        elicitation_id,
+    )
+    .fetch_optional(pool)
+    .await?;
+    row.map(ElicitationRow::into_entry).transpose()
+}
+
 /// FTS5 全文検索。3文字未満の検索語は LIKE フォールバックする。
 ///
 /// trigram トークナイザは 3 文字未満の検索語ではヒットしないため
@@ -728,6 +769,42 @@ impl PermissionRow {
             options: stored.options,
             details: stored.details,
             status: PermissionRequestStatus::from_str(&self.status)
+                .map_err(|err| DbError::InvalidEnumValue(err.to_string()))?,
+            created_at: self.created_at,
+            resolved_at: self.resolved_at,
+            resolved_by: self.resolved_by,
+        })
+    }
+}
+
+struct ElicitationRow {
+    elicitation_id: String,
+    session_id: String,
+    node_id: String,
+    message: String,
+    mode: String,
+    schema_json: String,
+    tool_call_id: Option<String>,
+    status: String,
+    content_json: String,
+    created_at: i64,
+    resolved_at: Option<i64>,
+    resolved_by: Option<String>,
+}
+
+impl ElicitationRow {
+    fn into_entry(self) -> Result<ElicitationRequestEntry, DbError> {
+        Ok(ElicitationRequestEntry {
+            elicitation_id: self.elicitation_id,
+            session_id: self.session_id,
+            node_id: self.node_id,
+            message: self.message,
+            mode: self.mode,
+            requested_schema: serde_json::from_str(&self.schema_json)
+                .unwrap_or(serde_json::Value::Null),
+            tool_call_id: self.tool_call_id,
+            content: serde_json::from_str(&self.content_json).unwrap_or(serde_json::Value::Null),
+            status: ElicitationRequestStatus::from_str(&self.status)
                 .map_err(|err| DbError::InvalidEnumValue(err.to_string()))?,
             created_at: self.created_at,
             resolved_at: self.resolved_at,

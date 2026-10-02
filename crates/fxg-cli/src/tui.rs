@@ -218,6 +218,19 @@ impl App {
                     "承認解決: {request_id} → {selected_option_id}"
                 )));
             }
+            UnifiedEventPayload::ElicitationRequest { message, .. } => {
+                self.blocks
+                    .push(Block::Permission(format!("質問待ち: {message}")));
+            }
+            UnifiedEventPayload::ElicitationResolved {
+                elicitation_id,
+                action,
+                ..
+            } => {
+                self.blocks.push(Block::Permission(format!(
+                    "質問解決: {elicitation_id} → {action}"
+                )));
+            }
             UnifiedEventPayload::SessionCreated { title, .. } => {
                 self.blocks
                     .push(Block::System(format!("セッション開始: {title}")));

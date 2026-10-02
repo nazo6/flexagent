@@ -415,7 +415,7 @@ impl DaemonClient {
             .request(IpcClientMessage::InboxList { command_id })
             .await?;
         match result {
-            IpcResult::Inbox { requests } => Ok(requests),
+            IpcResult::Inbox { requests, .. } => Ok(requests),
             other => bail!("unexpected ipc result: {other:?}"),
         }
     }
@@ -699,7 +699,8 @@ mod tests {
         // それ以外の応答は想定外として失敗させる
         assert!(
             ack_message(IpcResult::Inbox {
-                requests: Vec::new()
+                requests: Vec::new(),
+                elicitations: Vec::new(),
             })
             .is_err()
         );

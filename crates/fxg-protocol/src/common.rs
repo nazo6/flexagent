@@ -192,6 +192,96 @@ impl FromStr for PermissionRequestStatus {
     }
 }
 
+/// elicitation へのユーザー応答アクション (ACP `ElicitationAction` と同値)。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum ElicitationAction {
+    /// 回答を送信する (form の入力内容を `content` に含める)
+    Accept,
+    /// 明示的に辞退する
+    Decline,
+    /// 操作を取り消す (ダイアログを閉じる等)
+    Cancel,
+}
+
+impl ElicitationAction {
+    /// JSON / IPC 上の文字列表現。
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Accept => "accept",
+            Self::Decline => "decline",
+            Self::Cancel => "cancel",
+        }
+    }
+}
+
+impl fmt::Display for ElicitationAction {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl FromStr for ElicitationAction {
+    type Err = EnumParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "accept" => Ok(Self::Accept),
+            "decline" => Ok(Self::Decline),
+            "cancel" => Ok(Self::Cancel),
+            other => Err(EnumParseError::new("elicitation action", other)),
+        }
+    }
+}
+
+/// elicitation リクエストの状態 (`elicitation_requests.status` と同値)。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum ElicitationRequestStatus {
+    /// 未解決 (回答待ち)
+    Pending,
+    /// 回答済み (`accept`)
+    Accepted,
+    /// 辞退済み (`decline`)
+    Declined,
+    /// キャンセル (セッション停止等)
+    Cancelled,
+}
+
+impl ElicitationRequestStatus {
+    /// DB / JSON 上の文字列表現。
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Pending => "pending",
+            Self::Accepted => "accepted",
+            Self::Declined => "declined",
+            Self::Cancelled => "cancelled",
+        }
+    }
+}
+
+impl fmt::Display for ElicitationRequestStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl FromStr for ElicitationRequestStatus {
+    type Err = EnumParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "pending" => Ok(Self::Pending),
+            "accepted" => Ok(Self::Accepted),
+            "declined" => Ok(Self::Declined),
+            "cancelled" => Ok(Self::Cancelled),
+            other => Err(EnumParseError::new("elicitation request status", other)),
+        }
+    }
+}
+
 /// 論理プロジェクト (`project_key`) の解決元。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "snake_case")]
@@ -754,6 +844,39 @@ pub struct PermissionRequestEntry {
     pub details: serde_json::Value,
     /// 状態
     pub status: PermissionRequestStatus,
+    /// 作成日時 (Unix epoch ms)
+    pub created_at: i64,
+    /// 解決日時 (Unix epoch ms)
+    pub resolved_at: Option<i64>,
+    /// 解決主体 (`cli` / `web` / `android_push`)
+    pub resolved_by: Option<String>,
+}
+
+/// クライアント向け elicitation リクエスト投影 (質問 Inbox)。
+///
+/// エージェントが `elicitation/create` でユーザーへ構造化入力を求めた
+/// リクエストを表す (Phase 1 は form モードのみ)。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct ElicitationRequestEntry {
+    /// ACP elicitation id
+    pub elicitation_id: String,
+    /// 対象セッションID
+    pub session_id: String,
+    /// 対象ノードID
+    pub node_id: String,
+    /// ユーザーへ提示するメッセージ
+    pub message: String,
+    /// 要求モード (`form` / `url`。Phase 1 は `form` のみ)
+    pub mode: String,
+    /// form モードの要求 JSON Schema (`requestedSchema`)
+    pub requested_schema: serde_json::Value,
+    /// 関連するツール呼び出しID (任意)
+    pub tool_call_id: Option<String>,
+    /// `accept` 時の回答内容 (未回答・decline / cancel では `Value::Null`)
+    pub content: serde_json::Value,
+    /// 状態
+    pub status: ElicitationRequestStatus,
     /// 作成日時 (Unix epoch ms)
     pub created_at: i64,
     /// 解決日時 (Unix epoch ms)

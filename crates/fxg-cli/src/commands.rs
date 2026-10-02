@@ -1050,6 +1050,14 @@ fn describe_event(payload: &UnifiedEventPayload) -> String {
             selected_option_id,
             ..
         } => format!("permission_resolved {request_id} → {selected_option_id}"),
+        UnifiedEventPayload::ElicitationRequest { message, .. } => {
+            format!("elicitation_request {}", truncate(message, 60))
+        }
+        UnifiedEventPayload::ElicitationResolved {
+            elicitation_id,
+            action,
+            ..
+        } => format!("elicitation_resolved {elicitation_id} → {action}"),
         UnifiedEventPayload::SessionReverted {
             target_node_seq,
             restored_files,

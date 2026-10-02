@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n                INSERT INTO elicitation_requests\n                    (elicitation_id, session_id, node_id, message, mode, schema_json,\n                     tool_call_id, status, content_json, created_at, resolved_at, resolved_by)\n                SELECT ?, ?, s.node_id, ?, ?, ?, ?, 'pending', 'null', ?, NULL, NULL\n                  FROM sessions s\n                 WHERE s.session_id = ?\n                ON CONFLICT(elicitation_id) DO UPDATE SET\n                    message = excluded.message,\n                    mode = excluded.mode,\n                    schema_json = excluded.schema_json,\n                    tool_call_id = excluded.tool_call_id,\n                    status = 'pending',\n                    content_json = 'null',\n                    resolved_at = NULL,\n                    resolved_by = NULL\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 8
+    },
+    "nullable": []
+  },
+  "hash": "3c4a4cf675680d43ed951a3c16a2536805a4a05f0c7e4926e474cee2670e1853"
+}
