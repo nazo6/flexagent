@@ -13,6 +13,7 @@
   import AlertTriangleIcon from '@lucide/svelte/icons/alert-triangle';
   import BanIcon from '@lucide/svelte/icons/ban';
   import LoaderCircleIcon from '@lucide/svelte/icons/loader-circle';
+  import Minimize2Icon from '@lucide/svelte/icons/minimize-2';
   import SendIcon from '@lucide/svelte/icons/send';
   import SlashIcon from '@lucide/svelte/icons/slash';
 
@@ -90,6 +91,11 @@
       : []
   );
 
+  /** コンテキスト圧縮 (`/compact`) に対応しているか (合成エントリの有無で判定)。 */
+  const canCompact = $derived(
+    capabilities?.availableCommands.some((command) => command.name === 'compact') ?? false
+  );
+
   function applyCommand(name: string) {
     text = `/${name} `;
   }
@@ -135,6 +141,8 @@
         toast.error(result.error ?? result.code ?? '操作に失敗しました');
       } else if (action.action === 'cancel') {
         toast.info('中断リクエストを送信しました');
+      } else if (action.action === 'compact') {
+        toast.info('コンテキストの圧縮をリクエストしました');
       }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
@@ -287,6 +295,18 @@
     <div class="ml-auto flex items-center gap-2">
       {#if !sync.wsConnected}
         <span class="text-destructive text-xs">接続が切断されています</span>
+      {/if}
+      {#if canCompact && !isStopped}
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={controlBusy}
+          title="会話を要約してコンテキストを圧縮します（実行中の場合は次のステップ境界で実行）"
+          onclick={() => void runControl({ action: 'compact' })}
+        >
+          <Minimize2Icon class="size-3.5" />
+          圧縮
+        </Button>
       {/if}
       {#if isRunning}
         <Button

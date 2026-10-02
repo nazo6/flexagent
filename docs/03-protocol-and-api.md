@@ -182,6 +182,13 @@ pub enum UnifiedEventPayload {
         reason: TurnStopReason,  // "max_tokens" | "max_turn_requests" | "refusal"
         message: Option<String>,
     },
+    /// コンテキスト圧縮 (compaction) の進行状況 (永続化対象)
+    /// opencode2 ブリッジの session.compaction.started / .ended を正規化する。
+    /// 要約本文の session.compaction.delta はエフェメラル扱いでイベント化しない
+    CompactionUpdated {
+        status: CompactionStatus, // "started" | "completed" | "failed"
+        detail: Option<String>,   // 失敗理由などの補足 (任意)
+    },
     /// セッション状態の変化 ('provisioning' | 'bootstrapping' | 'idle' | 'running' | ...)
     /// ハブ側 sessions.status 投影の更新源
     StatusChanged {
@@ -253,6 +260,15 @@ pub enum TurnStopReason {
     Refusal,          // エージェントが継続を拒否
 }
 
+/// コンテキスト圧縮 (compaction) の進行状態 (CompactionUpdated の状態表現)
+/// 標準ACPには圧縮を開始する API が無いため、ネイティブ API を持つ
+/// ドライバ (opencode2 の POST /api/session/{id}/compact) のみが送出する
+pub enum CompactionStatus {
+    Started,    // 圧縮を開始した
+    Completed,  // 圧縮が完了した
+    Failed,     // 圧縮に失敗した
+}
+
 /// NodeHello で報告するプロジェクト紐付け情報
 pub struct NodeProjectReport {
     pub project_id: String,
@@ -318,6 +334,7 @@ pub enum SessionControlAction {
     SetMode { mode_id: String },
     SetConfig { key: String, value: serde_json::Value },
     Cancel,
+    Compact,  // コンテキスト圧縮 (要約)。対応ドライバのみ (既定は未対応エラー)
     Kill,
 }
 

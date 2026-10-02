@@ -638,6 +638,7 @@ pub(crate) async fn apply_projections(
         | UnifiedEventPayload::TerminalInput { .. }
         | UnifiedEventPayload::BootstrapLog { .. }
         | UnifiedEventPayload::TurnEnded { .. }
+        | UnifiedEventPayload::CompactionUpdated { .. }
         | UnifiedEventPayload::SessionReverted { .. } => {}
     }
 

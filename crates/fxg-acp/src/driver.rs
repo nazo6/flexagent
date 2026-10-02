@@ -176,6 +176,15 @@ pub trait ActiveSessionHandle: Send + Sync {
     async fn revert_context(&self, _keep_turns: u64) -> anyhow::Result<()> {
         anyhow::bail!("revert_context is not supported by this driver")
     }
+    /// エージェント側の会話コンテキストを圧縮する (要約して履歴を置き換える)。
+    ///
+    /// 標準ACPには圧縮 API が無い (UNSTABLE な `unstable_session_compaction` は
+    /// 圧縮**通知**の受信能力であり開始手段ではない) ため、既定実装は「未対応」を
+    /// 返す。ネイティブ API を持つドライバ (OpenCode2 の
+    /// `POST /api/session/{id}/compact`) が実装する。
+    async fn compact_context(&self) -> anyhow::Result<()> {
+        anyhow::bail!("compact_context is not supported by this driver")
+    }
     /// エージェント純正 TUI へ Attach するための情報 (OpenCode2 ブリッジのみ)。
     ///
     /// `Some` を返すドライバでは、CLI は `fxg` の内蔵 TUI ではなく

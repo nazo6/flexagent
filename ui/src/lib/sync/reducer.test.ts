@@ -552,3 +552,33 @@ describe("usage and abnormal turn end", () => {
     expect(items[0]).toMatchObject({ kind: "notice", text: "拒否されました", tone: "warning" });
   });
 });
+
+describe("compaction notices", () => {
+  it("renders info notices for started and completed compaction", () => {
+    const sources = emptySources([
+      makeEvent(1, { type: "compaction_updated", data: { status: "started", detail: null } }),
+      makeEvent(2, { type: "compaction_updated", data: { status: "completed", detail: null } }),
+    ]);
+    const items = buildTimelineItems(sources);
+    expect(items).toHaveLength(2);
+    expect(items[0]).toMatchObject({ kind: "notice", tone: "info" });
+    expect(items[0].kind === "notice" ? items[0].text : "").toContain("開始");
+    expect(items[1]).toMatchObject({ kind: "notice", tone: "info" });
+    expect(items[1].kind === "notice" ? items[1].text : "").toContain("完了");
+  });
+
+  it("renders an error notice with detail for failed compaction", () => {
+    const sources = emptySources([
+      makeEvent(1, {
+        type: "compaction_updated",
+        data: { status: "failed", detail: "要約に失敗しました" },
+      }),
+    ]);
+    const items = buildTimelineItems(sources);
+    expect(items[0]).toMatchObject({
+      kind: "notice",
+      tone: "error",
+      text: "要約に失敗しました",
+    });
+  });
+});

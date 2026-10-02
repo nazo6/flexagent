@@ -93,6 +93,7 @@ pub fn classify_payload(payload: &UnifiedEventPayload) -> (&'static str, Option<
         UnifiedEventPayload::SessionCreated { .. }
         | UnifiedEventPayload::SessionAgentBound { .. }
         | UnifiedEventPayload::UsageUpdated { .. }
+        | UnifiedEventPayload::CompactionUpdated { .. }
         | UnifiedEventPayload::PermissionResolved { .. }
         | UnifiedEventPayload::ElicitationResolved { .. }
         | UnifiedEventPayload::SessionReverted { .. }

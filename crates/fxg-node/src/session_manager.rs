@@ -1378,6 +1378,12 @@ impl SessionManager {
                 .set_config(key.clone(), value.clone())
                 .await
                 .map_err(|err| NodeError::Server(format!("failed to set config: {err:#}"))),
+            // 圧縮は1ターンとして実行されるため busy 中でも許可する
+            // (opencode2 では次のステップ境界で実行される steer 配送)
+            SessionControlAction::Compact => handle
+                .compact_context()
+                .await
+                .map_err(|err| NodeError::Server(format!("failed to compact context: {err:#}"))),
             SessionControlAction::Cancel => {
                 // すでにアイドル (ターン未実行) の場合はキャンセル対象がないため成功扱いとする
                 if !is_busy {

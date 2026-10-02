@@ -126,6 +126,9 @@ ACPでは、エディタやオーケストレータ側が **`acp::Client` トレ
 > `opencode2` はイベントストリームに usage / stop reason に相当する情報を
 > 持たないため、Phase 2 の `UsageUpdated` / `TurnEnded` は ACP ドライバのみが
 > 発行します (UI / CLI は未受信時に非表示とする)。
+> なおコンテキスト圧縮の `CompactionUpdated` は逆に opencode2
+> ブリッジ専用です (ACP には圧縮を開始する API が無い。
+> 将来の `unstable_session_compaction` 安定化待ち)。
 
 ---
 
@@ -168,12 +171,24 @@ OpenCode / OpenCode2
      と同じく先頭のコマンドのみを実行し、2 つ目以降は引数として扱います。
    - **既知のコマンドのみ**: 一覧に無い名前は通常のプロンプトとして送信します
      (opencode 側の ACP 実装も同じ挙動)。
-   - **TUI 専用コマンドは非対応**:
-     `/undo`・`/redo`・`/share`・`/help`・`/compact`
+   - **TUI 専用コマンド**: `/undo`・`/redo`・`/share`・`/help`
      など opencode の TUI がローカル処理するコマンドは `/api/command`
      に現れないため bridge からは実行できません (`opencode acp` モードでは
      ACP 経由で `/compact` のみ `session/summarize`
-     へ振り分けられます)。
+     へ振り分けられます)。例外として `/compact` は専用 API
+     (`POST /api/session/{id}/compact`) へ振り分けて bridge でも実行できます。
+   - **コンテキスト圧縮 (`/compact`)**: 圧縮 API は steer
+     配送のため、busy 中は次のステップ境界で実行されます。SSE の
+     `session.compaction.started` / `.ended` を
+     `UnifiedEventPayload::CompactionUpdated { status, detail }`
+     として記録し (要約本文の `session.compaction.delta`
+     はエフェメラル扱いで破棄)、UI / CLI
+     はタイムラインのシステム行として表示します。
+     `available_commands` には合成エントリ `compact`
+     を加え、UI のスラッシュ候補と「圧縮」ボタンに反映します
+     (同名のユーザー定義コマンドが存在する場合はそれを優先)。Web UI からは
+     `ControlSession(Compact)` =
+     `ActiveSessionHandle::compact_context()` でも実行できます。
 
 #### サーバーライフサイクルと設計判断 (2026-10-01 確定)
 

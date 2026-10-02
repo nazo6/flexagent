@@ -18,7 +18,9 @@ use crossterm::execute;
 use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
-use fxg_protocol::common::{PermissionOption, SessionControlAction, SessionStatus};
+use fxg_protocol::common::{
+    CompactionStatus, PermissionOption, SessionControlAction, SessionStatus,
+};
 use fxg_protocol::events::UnifiedEventPayload;
 use fxg_protocol::ipc::{AttachMode, IpcClientMessage, IpcResult, IpcServerMessage};
 use ratatui::Terminal;
@@ -261,6 +263,16 @@ impl App {
                     .clone()
                     .unwrap_or_else(|| format!("ターンを終了しました ({reason})"));
                 self.blocks.push(Block::System(detail));
+            }
+            UnifiedEventPayload::CompactionUpdated { status, detail } => {
+                let text = match status {
+                    CompactionStatus::Started => "コンテキストの圧縮を開始しました".to_owned(),
+                    CompactionStatus::Completed => "コンテキストの圧縮が完了しました".to_owned(),
+                    CompactionStatus::Failed => detail
+                        .clone()
+                        .unwrap_or_else(|| "コンテキストの圧縮に失敗しました".to_owned()),
+                };
+                self.blocks.push(Block::System(text));
             }
             UnifiedEventPayload::TerminalOutput { .. }
             | UnifiedEventPayload::TerminalInput { .. }

@@ -19,8 +19,8 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use crate::common::{
-    AttachmentMeta, CommandInfo, ConfigOptionInfo, ElicitationAction, FileDiff, ModeInfo,
-    PermissionOption, PlanEntry, SessionStatus, TurnStopReason, UsageCost,
+    AttachmentMeta, CommandInfo, CompactionStatus, ConfigOptionInfo, ElicitationAction, FileDiff,
+    ModeInfo, PermissionOption, PlanEntry, SessionStatus, TurnStopReason, UsageCost,
 };
 
 /// セッションイベントの封筒 (永続化・同期の単位)。
@@ -327,6 +327,19 @@ pub enum UnifiedEventPayload {
         /// ユーザー向けの説明 (任意)
         message: Option<String>,
     },
+    /// コンテキスト圧縮 (compaction) の進行状況 (永続化対象)。
+    ///
+    /// `opencode2` ブリッジの `session.compaction.started` / `.ended` を正規化する
+    /// (`/compact` または `ControlSession(Compact)` で開始。圧縮は1ターンとして
+    /// 実行されるため `StatusChanged` で実行中表示も別途更新される)。
+    /// 要約本文のストリーミング (`session.compaction.delta`) はエフェメラルとして
+    /// イベント化しない (要約はエージェント側の履歴に残る)。
+    CompactionUpdated {
+        /// 進行状態
+        status: CompactionStatus,
+        /// 失敗理由などの補足 (任意)
+        detail: Option<String>,
+    },
     /// セッション状態の変化。ハブ側 `sessions.status` 投影の更新源。
     StatusChanged {
         /// 新しい状態
@@ -363,6 +376,7 @@ impl UnifiedEventPayload {
             Self::BootstrapLog { .. } => "bootstrap_log",
             Self::UsageUpdated { .. } => "usage_updated",
             Self::TurnEnded { .. } => "turn_ended",
+            Self::CompactionUpdated { .. } => "compaction_updated",
             Self::StatusChanged { .. } => "status_change",
         }
     }

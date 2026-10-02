@@ -16,4 +16,4 @@ key: string,
 /**
  * 新しい値
  */
-value: JsonValue, } | { "action": "cancel" } | { "action": "kill" };
+value: JsonValue, } | { "action": "cancel" } | { "action": "compact" } | { "action": "kill" };

@@ -29,6 +29,10 @@
 //! - **スラッシュコマンド**: `GET /api/command` の一覧を capabilities として同期し、
 //!   `/name <本文>` は `POST /api/session/{id}/command` へ振り分ける。opencode の
 //!   ACP / 純正TUI と同じく 1 プロンプトにつき 1 コマンドだけを扱う。
+//! - **コンテキスト圧縮**: `/compact` (または `ControlSession(Compact)`) を
+//!   `POST /api/session/{id}/compact` へ振り分け、SSE の `session.compaction.*` を
+//!   [`UnifiedEventPayload::CompactionUpdated`] として同期する (要約本文の
+//!   `*.delta` はエフェメラル扱いでイベント化しない)。
 
 use std::collections::HashMap;
 use std::net::TcpListener;
@@ -42,7 +46,8 @@ use async_trait::async_trait;
 use base64::Engine;
 use futures_util::StreamExt;
 use fxg_protocol::common::{
-    CommandInfo, ConfigOptionInfo, ModeInfo, PermissionOption, SessionStatus, StreamDeltaPayload,
+    CommandInfo, CompactionStatus, ConfigOptionInfo, ModeInfo, PermissionOption, SessionStatus,
+    StreamDeltaPayload,
 };
 use fxg_protocol::events::UnifiedEventPayload;
 use serde_json::{Value, json};
@@ -86,6 +91,12 @@ pub const PASSWORD_ENV: &str = "OPENCODE_PASSWORD";
 /// 持たない v1 を誤って起動しないようメジャーバージョンで判別する。
 const OPENCODE_MAJOR: u64 = 2;
 
+/// コンテキスト圧縮のローカルコマンド名。
+///
+/// opencode の TUI がローカル処理するため `GET /api/command` には現れないが、
+/// 専用 API (`POST /api/session/{id}/compact`) で実行できる。
+const COMPACT_COMMAND: &str = "compact";
+
 /// `/name <本文>` を、既知のコマンド一覧に一致する場合のみ
 /// `(コマンド名, 本文)` へ分割する。
 ///
@@ -99,6 +110,18 @@ fn split_command<'a>(text: &'a str, commands: &[String]) -> Option<(&'a str, &'a
         return None;
     }
     Some((name, rest[name.len()..].trim_start()))
+}
+
+/// `/compact` (引数付きも許容) か。
+///
+/// `/compact` は opencode の TUI がローカル処理するコマンドで `/api/command`
+/// には現れないため、ドライバが専用 API へ振り分ける。API 由来の同名コマンドが
+/// 定義されている場合は [`split_command`] 側 (`/command` 送信) が優先される。
+fn is_compact_command(text: &str) -> bool {
+    text.trim_start()
+        .strip_prefix('/')
+        .and_then(|rest| rest.split_whitespace().next())
+        == Some(COMPACT_COMMAND)
 }
 
 /// `opencode` 実行ファイルが対応バージョン (v2 系) であることを検証する。
@@ -275,6 +298,12 @@ impl ActiveSessionHandle for OpenCode2SessionHandle {
             }
             return Ok(());
         }
+        // `/compact` はローカルコマンドのため専用 API へ振り分ける (引数は無視する。
+        // opencode の ACP 実装も `detectSlashCommand` 後に `session.summarize` へ
+        // 特別振り分けする)。
+        if is_compact_command(&text) {
+            return self.compact_context().await;
+        }
         let response = self
             .request_json(
                 reqwest::Method::POST,
@@ -383,6 +412,21 @@ impl ActiveSessionHandle for OpenCode2SessionHandle {
             .expect("state poisoned")
             .prompt_ids
             .truncate(keep);
+        Ok(())
+    }
+
+    /// 会話コンテキストを圧縮する (`/compact`)。
+    ///
+    /// `POST /api/session/{id}/compact` を呼び出す (busy 中は次のステップ境界で
+    /// 実行される steer 配送)。進捗は SSE の `session.compaction.*` から
+    /// [`UnifiedEventPayload::CompactionUpdated`] として送出される。
+    async fn compact_context(&self) -> anyhow::Result<()> {
+        self.request_json(
+            reqwest::Method::POST,
+            &format!("/api/session/{}/compact", self.opencode_session_id),
+            Some(json!({})),
+        )
+        .await?;
         Ok(())
     }
 
@@ -556,8 +600,12 @@ impl AgentDriver for OpenCode2Driver {
         // モード (agent)・スラッシュコマンド・モデルの選択肢を同期する。
         // `opencode serve` は起動直後しばらくカタログが空のため、揃うまで待つ
         let mut session_state = SessionState::default();
-        if let Some(capabilities) = wait_for_capabilities(&http, &base_url, &password).await {
+        if let Some(mut capabilities) = wait_for_capabilities(&http, &base_url, &password).await {
+            // 振り分け対象は `/api/command` 由来のコマンドのみとする。
+            // 合成エントリ `compact` は専用 API (`/compact`) へ振り分けるため、
+            // ここで `split_command` の対象に含めてはならない。
             session_state.commands = command_names(&capabilities);
+            add_compact_command(&mut capabilities);
             let _ = event_tx.send(DriverEvent::Event(capabilities));
         }
 
@@ -953,6 +1001,35 @@ fn commands_from_api(value: &Value) -> Vec<CommandInfo> {
         .unwrap_or_default()
 }
 
+/// capabilities の `available_commands` に、ローカルコマンド `compact`
+/// (要約によるコンテキスト圧縮) の合成エントリを加える。
+///
+/// `/compact` は opencode の TUI がローカル処理するため `GET /api/command` には
+/// 現れないが、ブリッジは専用 API (`POST /api/session/{id}/compact`) で実行できる。
+/// UI のスラッシュ候補・能力判定に含めるため一覧へ合成する (同名の
+/// ユーザー定義コマンドが存在する場合はそれを優先する)。
+///
+/// 実行の振り分け ([`split_command`]) はこの合成エントリを含めず、
+/// `/api/command` 由来の一覧のみを対象にすること。
+fn add_compact_command(capabilities: &mut UnifiedEventPayload) {
+    let UnifiedEventPayload::CapabilitiesUpdated {
+        available_commands, ..
+    } = capabilities
+    else {
+        return;
+    };
+    if !available_commands
+        .iter()
+        .any(|command| command.name == COMPACT_COMMAND)
+    {
+        available_commands.push(CommandInfo {
+            name: COMPACT_COMMAND.to_owned(),
+            description: "会話を要約してコンテキストを圧縮".to_owned(),
+            input_hint: None,
+        });
+    }
+}
+
 /// 利用可能なモード (agent)・スラッシュコマンド・モデル選択肢を取得して
 /// [`UnifiedEventPayload::CapabilitiesUpdated`] を組み立てる。
 async fn fetch_capabilities(
@@ -1065,6 +1142,8 @@ async fn fetch_capabilities(
             Vec::new()
         }
     };
+    // 合成エントリ `compact` はここでは加えない (振り分け用の一覧と混ざらないように
+    // 送信時に [`add_compact_command`] で追加する)
 
     if available_modes.is_empty() && available_commands.is_empty() && config_options.is_empty() {
         return None;
@@ -1241,6 +1320,23 @@ fn map_event(state: &Arc<Mutex<SessionState>>, session_id: &str, raw: &str) -> V
                 .to_owned();
             vec![DriverEvent::Failed { message }]
         }
+        // コンテキスト圧縮 (`/compact` / `ControlSession(Compact)`)。
+        // 圧縮自体は1ターンとして実行されるため `StatusChanged` で実行中表示も
+        // 別途更新される。要約本文の `session.compaction.delta` はエフェメラル扱いで
+        // イベント化しない (要約はエージェント側の履歴に残る)。
+        "session.compaction.started" => {
+            vec![DriverEvent::Event(UnifiedEventPayload::CompactionUpdated {
+                status: CompactionStatus::Started,
+                detail: None,
+            })]
+        }
+        "session.compaction.ended" => {
+            vec![DriverEvent::Event(UnifiedEventPayload::CompactionUpdated {
+                status: CompactionStatus::Completed,
+                detail: None,
+            })]
+        }
+        "session.compaction.delta" => Vec::new(),
         // テキスト / 推論のストリーミング (`*.ended` のみ永続化する)
         "session.text.delta" => vec![DriverEvent::Delta(StreamDeltaPayload::AgentMessageDelta {
             message_id: text_of("assistantMessageID"),
@@ -1691,6 +1787,101 @@ mod tests {
     }
 
     #[test]
+    fn is_compact_command_requires_slash_and_exact_name() {
+        assert!(is_compact_command("/compact"));
+        assert!(is_compact_command("/compact 引数は無視される"));
+        assert!(is_compact_command("  /compact"));
+        assert!(!is_compact_command("/compactx"));
+        assert!(!is_compact_command("/other"));
+        assert!(!is_compact_command("compact"));
+        assert!(!is_compact_command("/"));
+    }
+
+    #[test]
+    fn add_compact_command_appends_synthetic_entry_once() {
+        let mut capabilities = UnifiedEventPayload::CapabilitiesUpdated {
+            current_mode: None,
+            available_modes: Vec::new(),
+            available_commands: commands_from_api(&json!({
+                "data": [{ "name": "init" }]
+            })),
+            config_options: Vec::new(),
+        };
+        add_compact_command(&mut capabilities);
+        let UnifiedEventPayload::CapabilitiesUpdated {
+            available_commands, ..
+        } = &capabilities
+        else {
+            panic!("unexpected payload");
+        };
+        assert_eq!(available_commands.len(), 2);
+        assert_eq!(available_commands[1].name, "compact");
+        assert!(!available_commands[1].description.is_empty());
+
+        // ユーザー定義の `compact` が存在する場合は合成しない
+        let mut capabilities = UnifiedEventPayload::CapabilitiesUpdated {
+            current_mode: None,
+            available_modes: Vec::new(),
+            available_commands: commands_from_api(&json!({
+                "data": [{ "name": "compact", "description": "custom" }]
+            })),
+            config_options: Vec::new(),
+        };
+        add_compact_command(&mut capabilities);
+        let UnifiedEventPayload::CapabilitiesUpdated {
+            available_commands, ..
+        } = &capabilities
+        else {
+            panic!("unexpected payload");
+        };
+        assert_eq!(available_commands.len(), 1);
+        assert_eq!(available_commands[0].description, "custom");
+    }
+
+    #[test]
+    fn maps_compaction_lifecycle() {
+        let state = state();
+        let started = map(
+            &state,
+            r#"{"type":"session.compaction.started","data":{"sessionID":"ses_1","reason":"manual","recent":"","inputID":"msg_1"}}"#,
+        );
+        assert!(matches!(
+            started.as_slice(),
+            [DriverEvent::Event(UnifiedEventPayload::CompactionUpdated {
+                status: CompactionStatus::Started,
+                detail: None,
+            })]
+        ));
+        // 要約本文のストリーミングはエフェメラル扱いでイベント化しない
+        assert!(
+            map(
+                &state,
+                r#"{"type":"session.compaction.delta","data":{"sessionID":"ses_1","text":"part"}}"#,
+            )
+            .is_empty()
+        );
+        let ended = map(
+            &state,
+            r#"{"type":"session.compaction.ended","data":{"sessionID":"ses_1","reason":"manual","text":"summary"}}"#,
+        );
+        assert!(matches!(
+            ended.as_slice(),
+            [DriverEvent::Event(UnifiedEventPayload::CompactionUpdated {
+                status: CompactionStatus::Completed,
+                detail: None,
+            })]
+        ));
+        // 他セッションのイベントは無視する
+        assert!(
+            map(
+                &state,
+                r#"{"type":"session.compaction.started","data":{"sessionID":"ses_2"}}"#,
+            )
+            .is_empty()
+        );
+    }
+
+    #[test]
     fn maps_command_turns_from_sse_without_duplicate() {
         let state = state();
         state.lock().expect("state").pending_commands = 1;
@@ -1967,6 +2158,114 @@ mod tests {
             }
         }
         assert!(expanded, "command template must be expanded with arguments");
+        handle.shutdown().await.expect("shutdown");
+    }
+
+    /// `/compact` (専用 API) によるコンテキスト圧縮を実 opencode2 で確認する:
+    /// `FXG_TEST_OPENCODE2=1 cargo test -p fxg-acp -- --ignored` で実行する。
+    #[tokio::test]
+    #[ignore = "requires a local opencode2 install and provider auth"]
+    async fn compacts_context_against_real_opencode2() {
+        use std::path::PathBuf;
+
+        use crate::driver::AgentLaunchSpec;
+
+        let root = tempfile::tempdir().expect("tempdir");
+        let driver = OpenCode2Driver::new();
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let started = driver
+            .start_session(
+                StartSessionRequest {
+                    session_id: "test-compact".to_owned(),
+                    title: Some("fxg compact test".to_owned()),
+                    cwd: PathBuf::from(root.path()),
+                    launch: AgentLaunchSpec {
+                        agent_id: "opencode2".to_owned(),
+                        display_name: "OpenCode2".to_owned(),
+                        driver_kind: "opencode2".to_owned(),
+                        program: PathBuf::from("opencode"),
+                        args: vec!["serve".to_owned()],
+                        env: Vec::new(),
+                    },
+                    extra_args: Vec::new(),
+                    initial_mode: None,
+                    resume: None,
+                },
+                tx,
+            )
+            .await
+            .expect("start_session");
+        let handle = started.handle;
+
+        // 合成エントリ `compact` が capabilities に含まれること
+        let mut has_compact = false;
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+        while tokio::time::Instant::now() < deadline {
+            match tokio::time::timeout(Duration::from_secs(15), rx.recv()).await {
+                Ok(Some(DriverEvent::Event(UnifiedEventPayload::CapabilitiesUpdated {
+                    available_commands,
+                    ..
+                }))) => {
+                    has_compact = available_commands
+                        .iter()
+                        .any(|command| command.name == "compact");
+                    break;
+                }
+                Ok(Some(_)) => continue,
+                Ok(None) | Err(_) => break,
+            }
+        }
+        assert!(has_compact, "synthetic compact command must be listed");
+
+        select_opencode_model(handle.as_ref()).await;
+        // 圧縮対象の会話を作る (内容は問わない) ため1ターン完了を待つ
+        handle
+            .send_prompt("Reply with exactly one word: hello".to_owned())
+            .await
+            .expect("send_prompt");
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(90);
+        let mut first_turn_done = false;
+        while tokio::time::Instant::now() < deadline {
+            match tokio::time::timeout(Duration::from_secs(30), rx.recv()).await {
+                Ok(Some(DriverEvent::Event(UnifiedEventPayload::AgentMessage {
+                    is_complete: true,
+                    ..
+                }))) => {
+                    first_turn_done = true;
+                    break;
+                }
+                Ok(Some(_)) => continue,
+                Ok(None) | Err(_) => break,
+            }
+        }
+        assert!(
+            first_turn_done,
+            "first turn must complete before compacting"
+        );
+
+        // `/compact` 入力が専用 API へ振り分けられ、開始/完了イベントが届くこと
+        handle
+            .send_prompt("/compact".to_owned())
+            .await
+            .expect("send compact");
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(120);
+        let (mut started_event, mut completed_event) = (false, false);
+        while tokio::time::Instant::now() < deadline && !(started_event && completed_event) {
+            match tokio::time::timeout(Duration::from_secs(30), rx.recv()).await {
+                Ok(Some(DriverEvent::Event(UnifiedEventPayload::CompactionUpdated {
+                    status,
+                    ..
+                }))) => match status {
+                    CompactionStatus::Started => started_event = true,
+                    CompactionStatus::Completed => completed_event = true,
+                    CompactionStatus::Failed => panic!("compaction failed"),
+                },
+                Ok(Some(_)) => continue,
+                Ok(None) | Err(_) => break,
+            }
+        }
+        assert!(started_event, "session.compaction.started must be mapped");
+        assert!(completed_event, "session.compaction.ended must be mapped");
         handle.shutdown().await.expect("shutdown");
     }
 

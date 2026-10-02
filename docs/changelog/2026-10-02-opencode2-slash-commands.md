@@ -60,10 +60,12 @@ opencode v2.0.21 の実機観測で確定した仕様に合わせて両方を実
 
 ## 制約
 
-- `/undo`・`/redo`・`/share`・`/help`・`/compact` など opencode の TUI
+- `/undo`・`/redo`・`/share`・`/help` など opencode の TUI
   がローカル処理するコマンドは `/api/command` に含まれないため、bridge
   からは実行できない (`opencode_mode = "acp"` では ACP 側が `/compact` のみ
-  `session/summarize` に振り分ける)。
+  `session/summarize` に振り分ける)。`/compact` は後続の
+  [compaction 対応](2026-10-02-opencode2-compaction.md) で bridge からも
+  実行可能になった。
 - 引数の展開 (`$1`…`$n` / `$ARGUMENTS` / プレースホルダ無しの場合の本文追記) は
   opencode 側の実装に完全に委ねる。
 

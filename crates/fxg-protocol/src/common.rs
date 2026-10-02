@@ -397,6 +397,40 @@ impl fmt::Display for TurnStopReason {
     }
 }
 
+/// コンテキスト圧縮 (compaction) の進行状態。
+///
+/// `UnifiedEventPayload::CompactionUpdated` の状態表現。標準ACPには圧縮を
+/// 開始する API が無いため、ネイティブ API を持つドライバ (`opencode2` の
+/// `POST /api/session/{id}/compact`) のみが送出する。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum CompactionStatus {
+    /// 圧縮を開始した
+    Started,
+    /// 圧縮が完了した
+    Completed,
+    /// 圧縮に失敗した
+    Failed,
+}
+
+impl CompactionStatus {
+    /// DB / JSON 上の文字列表現。
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Started => "started",
+            Self::Completed => "completed",
+            Self::Failed => "failed",
+        }
+    }
+}
+
+impl fmt::Display for CompactionStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 /// API レスポンス用のセッション集約型 (`sessions` 行から構成)。
 ///
 /// ハブ側ではイベント適用による投影から生成される。Local Node と
@@ -639,6 +673,13 @@ pub enum SessionControlAction {
     },
     /// 現在のターンを中断
     Cancel,
+    /// エージェント側の会話コンテキストを圧縮する (要約して履歴を置き換える)。
+    ///
+    /// 標準ACPには圧縮 API が無いため、対応ドライバのみ実行できる
+    /// (`ActiveSessionHandle::compact_context`。既定は未対応エラー)。
+    /// `opencode2` ブリッジでは `/compact` 入力と同じ
+    /// `POST /api/session/{id}/compact` を呼び出す。
+    Compact,
     /// セッションの完全終了
     Kill,
 }

@@ -1129,6 +1129,9 @@ fn describe_event(payload: &UnifiedEventPayload) -> String {
         UnifiedEventPayload::TurnEnded { reason, .. } => {
             format!("turn_ended {reason}")
         }
+        UnifiedEventPayload::CompactionUpdated { status, .. } => {
+            format!("compaction_updated {status}")
+        }
     }
 }
 

@@ -1,4 +1,5 @@
 import type { CommandInfo } from "$lib/generated/CommandInfo";
+import type { CompactionStatus } from "$lib/generated/CompactionStatus";
 import type { ConfigOptionInfo } from "$lib/generated/ConfigOptionInfo";
 import type { ElicitationAction } from "$lib/generated/ElicitationAction";
 import type { FileDiff } from "$lib/generated/FileDiff";
@@ -452,6 +453,15 @@ export function buildTimelineItems(sources: TimelineSources): TimelineItem[] {
           tone: "warning",
         });
         break;
+      case "compaction_updated":
+        items.push({
+          kind: "notice",
+          key: `compaction:${event.node_seq}`,
+          ...base,
+          text: compactionStatusLabel(payload.data.status, payload.data.detail),
+          tone: payload.data.status === "failed" ? "error" : "info",
+        });
+        break;
       default:
         break;
     }
@@ -644,6 +654,18 @@ function turnStopReasonLabel(reason: string): string {
       return "エージェントが継続を拒否しました";
     default:
       return `ターンを終了しました (${reason})`;
+  }
+}
+
+/** `compaction_updated` の進行状態を日本語ラベルへ変換する。 */
+function compactionStatusLabel(status: CompactionStatus, detail: string | null): string {
+  switch (status) {
+    case "started":
+      return "コンテキストの圧縮を開始しました（完了までしばらくかかることがあります）";
+    case "completed":
+      return "コンテキストの圧縮が完了しました";
+    case "failed":
+      return detail ?? "コンテキストの圧縮に失敗しました";
   }
 }
 
