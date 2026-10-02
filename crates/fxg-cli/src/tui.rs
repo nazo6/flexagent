@@ -653,7 +653,9 @@ fn draw(frame: &mut ratatui::Frame<'_>, app: &mut App) {
 fn draw_header(frame: &mut ratatui::Frame<'_>, app: &App, area: Rect) {
     let status_style = match app.status {
         SessionStatus::Running => Style::default().fg(Color::Yellow),
-        SessionStatus::WaitingPermission => Style::default().fg(Color::Magenta),
+        SessionStatus::WaitingPermission | SessionStatus::WaitingInput => {
+            Style::default().fg(Color::Magenta)
+        }
         SessionStatus::Error => Style::default().fg(Color::Red),
         SessionStatus::Idle => Style::default().fg(Color::Green),
         _ => Style::default().fg(Color::DarkGray),

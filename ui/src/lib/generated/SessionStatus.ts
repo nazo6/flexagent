@@ -3,4 +3,4 @@
 /**
  * セッション状態 (`sessions.status` と同値)。
  */
-export type SessionStatus = "provisioning" | "bootstrapping" | "idle" | "running" | "waiting_permission" | "stopped" | "error";
+export type SessionStatus = "provisioning" | "bootstrapping" | "idle" | "running" | "waiting_permission" | "waiting_input" | "stopped" | "error";

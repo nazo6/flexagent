@@ -479,6 +479,7 @@ impl DaemonState {
             SessionStatus::Idle,
             SessionStatus::Running,
             SessionStatus::WaitingPermission,
+            SessionStatus::WaitingInput,
         ]
     }
 

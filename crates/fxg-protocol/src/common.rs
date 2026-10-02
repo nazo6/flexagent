@@ -46,6 +46,8 @@ pub enum SessionStatus {
     Running,
     /// 権限承認待ち
     WaitingPermission,
+    /// elicitation (質問/構造化入力) の回答待ち
+    WaitingInput,
     /// 停止済み
     Stopped,
     /// エラー
@@ -61,6 +63,7 @@ impl SessionStatus {
             Self::Idle => "idle",
             Self::Running => "running",
             Self::WaitingPermission => "waiting_permission",
+            Self::WaitingInput => "waiting_input",
             Self::Stopped => "stopped",
             Self::Error => "error",
         }
@@ -83,6 +86,7 @@ impl FromStr for SessionStatus {
             "idle" => Ok(Self::Idle),
             "running" => Ok(Self::Running),
             "waiting_permission" => Ok(Self::WaitingPermission),
+            "waiting_input" => Ok(Self::WaitingInput),
             "stopped" => Ok(Self::Stopped),
             "error" => Ok(Self::Error),
             other => Err(EnumParseError::new("session status", other)),

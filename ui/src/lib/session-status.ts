@@ -14,6 +14,8 @@ export function sessionStatusLabel(status: SessionStatus): string {
       return "実行中";
     case "waiting_permission":
       return "承認待ち";
+    case "waiting_input":
+      return "入力待ち";
     case "stopped":
       return "停止";
     case "error":
@@ -27,6 +29,8 @@ export function sessionStatusVariant(status: SessionStatus): BadgeVariant {
     case "running":
       return "default";
     case "waiting_permission":
+      return "destructive";
+    case "waiting_input":
       return "destructive";
     case "error":
       return "destructive";

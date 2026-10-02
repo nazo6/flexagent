@@ -16,24 +16,27 @@
 //!   書き込みは Unified Diff を計算してイベントへ添付する。
 //!   `terminal/*` は `fxg-pty` で実行する。
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::schema::v1::{
-    AgentCapabilities, CancelNotification, ClientCapabilities, ContentBlock, ContentChunk,
-    CreateTerminalRequest, CreateTerminalResponse, FileSystemCapabilities, Implementation,
-    InitializeRequest, KillTerminalRequest, KillTerminalResponse, NewSessionRequest,
-    PermissionOptionKind, ReadTextFileRequest, ReadTextFileResponse, ReleaseTerminalRequest,
-    ReleaseTerminalResponse, RequestPermissionOutcome, RequestPermissionRequest,
-    RequestPermissionResponse, SelectedPermissionOutcome, SessionConfigKind, SessionConfigOption,
-    SessionId, SessionNotification, SessionUpdate, SetSessionConfigOptionRequest,
-    SetSessionModeRequest, TerminalExitStatus, TerminalId, TerminalOutputRequest,
-    TerminalOutputResponse, TextContent, ToolCall, ToolCallContent, ToolCallStatus, ToolCallUpdate,
-    ToolKind, WaitForTerminalExitRequest, WaitForTerminalExitResponse, WriteTextFileRequest,
-    WriteTextFileResponse,
+    AgentCapabilities, CancelNotification, ClientCapabilities, CompleteElicitationNotification,
+    ContentBlock, ContentChunk, CreateElicitationRequest, CreateElicitationResponse,
+    CreateTerminalRequest, CreateTerminalResponse, ElicitationAcceptAction,
+    ElicitationAction as AcpElicitationAction, ElicitationCapabilities, ElicitationContentValue,
+    ElicitationFormCapabilities, ElicitationMode, ElicitationScope, FileSystemCapabilities,
+    Implementation, InitializeRequest, KillTerminalRequest, KillTerminalResponse,
+    NewSessionRequest, PermissionOptionKind, ReadTextFileRequest, ReadTextFileResponse,
+    ReleaseTerminalRequest, ReleaseTerminalResponse, RequestPermissionOutcome,
+    RequestPermissionRequest, RequestPermissionResponse, SelectedPermissionOutcome,
+    SessionConfigKind, SessionConfigOption, SessionId, SessionNotification, SessionUpdate,
+    SetSessionConfigOptionRequest, SetSessionModeRequest, TerminalExitStatus, TerminalId,
+    TerminalOutputRequest, TerminalOutputResponse, TextContent, ToolCall, ToolCallContent,
+    ToolCallStatus, ToolCallUpdate, ToolKind, WaitForTerminalExitRequest,
+    WaitForTerminalExitResponse, WriteTextFileRequest, WriteTextFileResponse,
 };
 use agent_client_protocol::util::MatchDispatch;
 use agent_client_protocol::{
@@ -98,6 +101,27 @@ impl AcpDriver {
 
 /// 承認リクエストの解決チャネル (`request_id` → `oneshot`)。
 type PermissionRegistry = Arc<Mutex<HashMap<String, oneshot::Sender<RequestPermissionOutcome>>>>;
+
+/// elicitation の解決チャネル (`elicitation_id` → 未解決情報)。
+type ElicitationRegistry = Arc<Mutex<HashMap<String, PendingElicitation>>>;
+
+/// 未解決 elicitation の状態 (応答チャネルと検証用 schema)。
+struct PendingElicitation {
+    /// UI / CLI からの応答送信側
+    sender: oneshot::Sender<ElicitationOutcome>,
+    /// form モードの要求 schema (`accept` の content 検証用)
+    schema: Option<serde_json::Value>,
+}
+
+/// elicitation への応答 (ACP 応答へ変換する前の正規化表現)。
+enum ElicitationOutcome {
+    /// accept (form content 付き)
+    Accept(BTreeMap<String, ElicitationContentValue>),
+    /// decline
+    Decline,
+    /// cancel
+    Cancel,
+}
 
 /// エージェントのブートストラップ (ラッパープロセス) の自然終了を待つ猶予。
 ///
@@ -458,6 +482,8 @@ struct AcpSessionHandle {
     commands: mpsc::UnboundedSender<AcpCommand>,
     /// 承認解決レジストリ (プロセス共有)
     permissions: PermissionRegistry,
+    /// elicitation 解決レジストリ (プロセス共有)
+    elicitations: ElicitationRegistry,
     /// イベント送信 (ステータス更新用)。
     ///
     /// セッション終了 ([`ActiveSessionHandle::shutdown`]) で解放する。保持した
@@ -503,6 +529,55 @@ impl ActiveSessionHandle for AcpSessionHandle {
             .map_err(|_| anyhow!("permission resolver dropped: {request_id}"))
     }
 
+    async fn respond_elicitation(
+        &self,
+        elicitation_id: String,
+        action: fxg_protocol::common::ElicitationAction,
+        content: serde_json::Value,
+    ) -> anyhow::Result<()> {
+        use fxg_protocol::common::ElicitationAction as FxgElicitationAction;
+
+        // schema は pending を消費せずに読む (不正な content は pending を維持して
+        // エラーを返し、クライアントが修正して再送できるようにする)
+        let schema = self
+            .elicitations
+            .lock()
+            .expect("elicitation registry poisoned")
+            .get(&elicitation_id)
+            .map(|pending| pending.schema.clone())
+            .ok_or_else(|| anyhow!("unknown or already resolved elicitation: {elicitation_id}"))?;
+        let outcome = match action {
+            FxgElicitationAction::Accept => {
+                // `content` 未指定 (null) は空オブジェクトとして扱う
+                let content = if content.is_null() {
+                    serde_json::json!({})
+                } else {
+                    content
+                };
+                if let Some(schema) = schema.as_ref() {
+                    validate_elicitation_content(schema, &content)
+                        .map_err(|err| anyhow!("invalid elicitation content: {err}"))?;
+                }
+                let content =
+                    serde_json::from_value::<BTreeMap<String, ElicitationContentValue>>(content)
+                        .map_err(|err| anyhow!("unsupported elicitation content value: {err}"))?;
+                ElicitationOutcome::Accept(content)
+            }
+            FxgElicitationAction::Decline => ElicitationOutcome::Decline,
+            FxgElicitationAction::Cancel => ElicitationOutcome::Cancel,
+        };
+        let sender = self
+            .elicitations
+            .lock()
+            .expect("elicitation registry poisoned")
+            .remove(&elicitation_id)
+            .map(|pending| pending.sender)
+            .ok_or_else(|| anyhow!("unknown or already resolved elicitation: {elicitation_id}"))?;
+        sender
+            .send(outcome)
+            .map_err(|_| anyhow!("elicitation resolver dropped: {elicitation_id}"))
+    }
+
     async fn set_mode(&self, mode_id: String) -> anyhow::Result<()> {
         self.conn
             .send_request(SetSessionModeRequest::new(
@@ -537,6 +612,8 @@ impl ActiveSessionHandle for AcpSessionHandle {
             .map_err(|err| anyhow!("failed to cancel turn: {err}"))?;
         // 未解決の承認は仕様上 cancelled で返す (MUST)
         cancel_pending_permissions(&self.permissions);
+        // 未解決の elicitation も仕様上 cancel で返す
+        cancel_pending_elicitations(&self.elicitations);
         if let Some(events) = self
             .events
             .lock()
@@ -584,6 +661,15 @@ fn cancel_pending_permissions(permissions: &PermissionRegistry) {
     }
 }
 
+/// 未解決の elicitation をすべて `cancel` で閉じる (仕様上、ターン中断時は
+/// 未解決の elicitation を cancel で解決する)。
+fn cancel_pending_elicitations(elicitations: &ElicitationRegistry) {
+    let mut registry = elicitations.lock().expect("elicitation registry poisoned");
+    for (_, pending) in registry.drain() {
+        let _ = pending.sender.send(ElicitationOutcome::Cancel);
+    }
+}
+
 /// `run_acp_process` の起動パラメータ。
 struct AcpProcessTaskParams {
     /// 起動するエージェント
@@ -609,6 +695,7 @@ async fn run_acp_process(params: AcpProcessTaskParams) -> Result<(), agent_clien
     let pty = Arc::new(fxg_pty::PtySessionManager::new());
     let terminals = Arc::new(TerminalRegistry::default());
     let permissions: PermissionRegistry = Arc::new(Mutex::new(HashMap::new()));
+    let elicitations: ElicitationRegistry = Arc::new(Mutex::new(HashMap::new()));
     let contexts: SessionContexts = Arc::new(Mutex::new(HashMap::new()));
 
     // ハンドラ登録 (fs / 承認 / terminal)。
@@ -845,6 +932,108 @@ async fn run_acp_process(params: AcpProcessTaskParams) -> Result<(), agent_clien
                 }
             },
             agent_client_protocol::on_receive_request!(),
+        )
+        .on_receive_request(
+            {
+                let elicitations = Arc::clone(&elicitations);
+                let contexts = Arc::clone(&contexts);
+                async move |request: CreateElicitationRequest, responder, cx| {
+                    // Phase 1 は form モードのみ対応 (capability で広告した範囲)。
+                    // 未広告モードの要求は Invalid params で返す (spec)。
+                    let (scope, schema) = match &request.mode {
+                        ElicitationMode::Form(form) => (
+                            form.scope.clone(),
+                            serde_json::to_value(&form.requested_schema)
+                                .unwrap_or(serde_json::Value::Null),
+                        ),
+                        other => {
+                            return responder.respond_with_error(
+                                agent_client_protocol::Error::invalid_params()
+                                    .data(format!("unsupported elicitation mode: {other:?}")),
+                            );
+                        }
+                    };
+                    // セッションスコープのみ対応 (リクエストスコープは認証フロー用で未対応)
+                    let ElicitationScope::Session(scope) = scope else {
+                        return responder.respond_with_error(
+                            agent_client_protocol::Error::invalid_params()
+                                .data("request-scoped elicitation is not supported"),
+                        );
+                    };
+                    let Some(context) = session_context(&contexts, &scope.session_id) else {
+                        return responder.respond_with_error(
+                            agent_client_protocol::Error::invalid_params().data("unknown session"),
+                        );
+                    };
+                    // form モードはプロトコル上の elicitation id を持たないため、
+                    // JSON-RPC request id を elicitation id として使う (承認と同じ)。
+                    let elicitation_id = responder.id().to_string();
+                    let events = context.events.clone();
+                    let _ = events.send(DriverEvent::Event(UnifiedEventPayload::StatusChanged {
+                        status: fxg_protocol::common::SessionStatus::WaitingInput,
+                        error_message: None,
+                    }));
+                    let _ = events.send(DriverEvent::Event(
+                        UnifiedEventPayload::ElicitationRequest {
+                            elicitation_id: elicitation_id.clone(),
+                            message: request.message.clone(),
+                            mode: "form".to_owned(),
+                            requested_schema: schema.clone(),
+                            tool_call_id: scope.tool_call_id.as_ref().map(|id| id.to_string()),
+                        },
+                    ));
+
+                    let (decision_tx, decision_rx) = oneshot::channel();
+                    elicitations
+                        .lock()
+                        .expect("elicitation registry poisoned")
+                        .insert(
+                            elicitation_id,
+                            PendingElicitation {
+                                sender: decision_tx,
+                                schema: Some(schema),
+                            },
+                        );
+                    let events_for_task = context.events.clone();
+                    cx.spawn(async move {
+                        let outcome = decision_rx.await.unwrap_or(ElicitationOutcome::Cancel);
+                        let _ = events_for_task.send(DriverEvent::Event(
+                            UnifiedEventPayload::StatusChanged {
+                                status: fxg_protocol::common::SessionStatus::Running,
+                                error_message: None,
+                            },
+                        ));
+                        let response = match outcome {
+                            ElicitationOutcome::Accept(content) => {
+                                CreateElicitationResponse::new(AcpElicitationAction::Accept(
+                                    ElicitationAcceptAction::new().content(content),
+                                ))
+                            }
+                            ElicitationOutcome::Decline => {
+                                CreateElicitationResponse::new(AcpElicitationAction::Decline)
+                            }
+                            ElicitationOutcome::Cancel => {
+                                CreateElicitationResponse::new(AcpElicitationAction::Cancel)
+                            }
+                        };
+                        responder.respond(response)
+                    })?;
+                    Ok(())
+                }
+            },
+            agent_client_protocol::on_receive_request!(),
+        )
+        .on_receive_notification(
+            async move |notification: CompleteElicitationNotification, _cx| {
+                // Phase 1 は form モードのみのため、URL モードの完了通知は
+                // 未知 ID として無視する (spec: 未知 ID は無視しなければならない)。
+                tracing::debug!(
+                    elicitation_id = %notification.elicitation_id,
+                    "elicitation/complete notification ignored (url mode not supported)"
+                );
+                Ok(())
+            },
+            agent_client_protocol::on_receive_notification!(),
         );
 
     // 外部エージェントプロセスの起動とプロセスツリー管理 (Windows: Job Object)
@@ -877,18 +1066,23 @@ async fn run_acp_process(params: AcpProcessTaskParams) -> Result<(), agent_clien
     // エージェント stderr をデーモンのログへ流す (パイプ詰まり防止)
     spawn_acp_stderr_pump(child_stderr);
 
-    // クロージャ (async move) が `permissions` をムーブするため、
+    // クロージャ (async move) が `permissions` / `elicitations` をムーブするため、
     // teardown 用に複製を保持しておく
     let permissions_for_teardown = Arc::clone(&permissions);
+    let elicitations_for_teardown = Arc::clone(&elicitations);
     let transport = ByteStreams::new(child_stdin, child_stdout);
     let run_result = builder
         .connect_with(transport, async move |cx: ConnectionTo<Agent>| {
-            // 1) initialize (プロセスにつき 1 回。fs 読み書き + terminal をサポート宣言)
+            // 1) initialize (プロセスにつき 1 回。fs 読み書き + terminal +
+            //    elicitation (form) をサポート宣言)
             let capabilities = ClientCapabilities::new()
                 .fs(FileSystemCapabilities::new()
                     .read_text_file(true)
                     .write_text_file(true))
-                .terminal(true);
+                .terminal(true)
+                .elicitation(
+                    ElicitationCapabilities::new().form(ElicitationFormCapabilities::new()),
+                );
             let initialize = match cx
                 .send_request(
                     InitializeRequest::new(ProtocolVersion::V1)
@@ -944,6 +1138,7 @@ async fn run_acp_process(params: AcpProcessTaskParams) -> Result<(), agent_clien
                     conn: cx.clone(),
                     commands: cmd_tx,
                     permissions: Arc::clone(&permissions),
+                    elicitations: Arc::clone(&elicitations),
                     events: Mutex::new(Some(events.clone())),
                     pty: Arc::clone(&pty),
                     lease: Arc::clone(&lease),
@@ -959,8 +1154,9 @@ async fn run_acp_process(params: AcpProcessTaskParams) -> Result<(), agent_clien
                 if let Some(tx) = session_end_tx {
                     let _ = tx.send(());
                 }
-                // セッションに紐づく未解決の承認はキャンセルで閉じる
+                // セッションに紐づく未解決の承認・質問はキャンセルで閉じる
                 cancel_pending_permissions(&permissions);
+                cancel_pending_elicitations(&elicitations);
                 match outcome {
                     ServeOutcome::Closed => {
                         let _ =
@@ -1007,8 +1203,9 @@ async fn run_acp_process(params: AcpProcessTaskParams) -> Result<(), agent_clien
         Err(err) => tracing::debug!("failed to reap acp agent process: {err}"),
     }
 
-    // 未解決の承認が残っていればキャンセルで閉じる (プロセス終了)
+    // 未解決の承認・質問が残っていればキャンセルで閉じる (プロセス終了)
     cancel_pending_permissions(&permissions_for_teardown);
+    cancel_pending_elicitations(&elicitations_for_teardown);
 
     run_result
 }
@@ -1737,6 +1934,93 @@ fn resolve_path(cwd: &Path, path: &Path) -> PathBuf {
     }
 }
 
+/// `accept` の content を `requested_schema` に対して軽量検証する。
+///
+/// ACP の elicitation が許す制限スキーマ (object / string (enum, oneOf) /
+/// integer / number / boolean / string array) のみを検証する (仕様上クライアント
+/// SHOULD。エージェントも再検証する)。既知の型以外 (将来拡張) は素通しする。
+fn validate_elicitation_content(
+    schema: &serde_json::Value,
+    content: &serde_json::Value,
+) -> Result<(), String> {
+    let Some(content) = content.as_object() else {
+        return Err("content must be an object".to_owned());
+    };
+    let Some(properties) = schema.get("properties").and_then(|value| value.as_object()) else {
+        // properties を持たない schema では形状検証しない
+        return Ok(());
+    };
+    if let Some(required) = schema.get("required").and_then(|value| value.as_array()) {
+        for key in required.iter().filter_map(|value| value.as_str()) {
+            if !content.contains_key(key) {
+                return Err(format!("missing required property: {key}"));
+            }
+        }
+    }
+    for (key, value) in content {
+        let Some(property) = properties.get(key) else {
+            return Err(format!("unexpected property: {key}"));
+        };
+        validate_elicitation_property(key, property, value)?;
+    }
+    Ok(())
+}
+
+/// elicitation の制限スキーマにおける 1 プロパティの型検証。
+fn validate_elicitation_property(
+    key: &str,
+    property: &serde_json::Value,
+    value: &serde_json::Value,
+) -> Result<(), String> {
+    match property.get("type").and_then(|value| value.as_str()) {
+        Some("string") => {
+            let Some(text) = value.as_str() else {
+                return Err(format!("property {key} must be a string"));
+            };
+            if let Some(values) = property.get("enum").and_then(|value| value.as_array())
+                && !values
+                    .iter()
+                    .any(|candidate| candidate.as_str() == Some(text))
+            {
+                return Err(format!("property {key} is not one of the allowed values"));
+            }
+            if let Some(options) = property.get("oneOf").and_then(|value| value.as_array())
+                && !options.iter().any(|option| {
+                    option.get("const").and_then(|value| value.as_str()) == Some(text)
+                })
+            {
+                return Err(format!("property {key} is not one of the allowed options"));
+            }
+        }
+        Some("integer") => {
+            if !value.is_i64() && !value.is_u64() {
+                return Err(format!("property {key} must be an integer"));
+            }
+        }
+        Some("number") => {
+            if !value.is_number() {
+                return Err(format!("property {key} must be a number"));
+            }
+        }
+        Some("boolean") => {
+            if !value.is_boolean() {
+                return Err(format!("property {key} must be a boolean"));
+            }
+        }
+        Some("array") => {
+            let Some(items) = value.as_array() else {
+                return Err(format!("property {key} must be an array"));
+            };
+            if !items.iter().all(|item| item.is_string()) {
+                return Err(format!("property {key} must be an array of strings"));
+            }
+        }
+        // 既知の制限スキーマ外 (将来拡張) は検証しない
+        _ => {}
+    }
+    Ok(())
+}
+
 // ----------------------------------------------------------------------
 // terminal/* (fxg-pty)
 // ----------------------------------------------------------------------
@@ -1931,6 +2215,100 @@ mod tests {
             agent_session_id: agent_session_id.map(str::to_owned),
             allow_fresh,
         }
+    }
+
+    fn elicitation_schema() -> serde_json::Value {
+        serde_json::json!({
+            "type": "object",
+            "properties": {
+                "strategy": { "type": "string", "enum": ["conservative", "balanced"] },
+                "count": { "type": "integer" },
+                "confirm": { "type": "boolean" },
+                "tags": { "type": "array" }
+            },
+            "required": ["strategy"]
+        })
+    }
+
+    #[test]
+    fn elicitation_content_validation_accepts_valid_values() {
+        let schema = elicitation_schema();
+        assert!(
+            validate_elicitation_content(
+                &schema,
+                &serde_json::json!({
+                    "strategy": "balanced",
+                    "count": 3,
+                    "confirm": true,
+                    "tags": ["a", "b"]
+                })
+            )
+            .is_ok()
+        );
+        // properties を持たない schema は検証しない
+        assert!(
+            validate_elicitation_content(
+                &serde_json::json!({ "type": "object" }),
+                &serde_json::json!({ "anything": 1 })
+            )
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn elicitation_content_validation_rejects_invalid_values() {
+        let schema = elicitation_schema();
+        // 必須欠落
+        assert!(
+            validate_elicitation_content(&schema, &serde_json::json!({}))
+                .expect_err("required")
+                .contains("missing required property")
+        );
+        // enum 外
+        assert!(
+            validate_elicitation_content(&schema, &serde_json::json!({ "strategy": "fast" }))
+                .expect_err("enum")
+                .contains("allowed values")
+        );
+        // 型不一致
+        assert!(
+            validate_elicitation_content(
+                &schema,
+                &serde_json::json!({ "strategy": "balanced", "count": "3" })
+            )
+            .expect_err("integer")
+            .contains("must be an integer")
+        );
+        // 未知プロパティ
+        assert!(
+            validate_elicitation_content(
+                &schema,
+                &serde_json::json!({ "strategy": "balanced", "extra": 1 })
+            )
+            .expect_err("unknown property")
+            .contains("unexpected property")
+        );
+    }
+
+    #[test]
+    fn elicitation_content_validation_checks_titled_enum() {
+        let schema = serde_json::json!({
+            "type": "object",
+            "properties": {
+                "country": {
+                    "type": "string",
+                    "oneOf": [{ "const": "jp", "title": "Japan" }]
+                }
+            }
+        });
+        assert!(
+            validate_elicitation_content(&schema, &serde_json::json!({ "country": "jp" })).is_ok()
+        );
+        assert!(
+            validate_elicitation_content(&schema, &serde_json::json!({ "country": "us" }))
+                .expect_err("oneOf")
+                .contains("allowed options")
+        );
     }
 
     #[test]

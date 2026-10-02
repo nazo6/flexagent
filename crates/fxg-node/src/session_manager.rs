@@ -1576,6 +1576,7 @@ async fn pump_events(
                 | SessionStatus::Idle
                 | SessionStatus::Running
                 | SessionStatus::WaitingPermission
+                | SessionStatus::WaitingInput
         )
     ) {
         let _ = inner
@@ -1617,7 +1618,7 @@ fn mark_status(
     if let Some(session) = sessions.active.get_mut(session_id) {
         session.busy = matches!(
             status,
-            SessionStatus::Running | SessionStatus::WaitingPermission
+            SessionStatus::Running | SessionStatus::WaitingPermission | SessionStatus::WaitingInput
         );
         session.status = status;
     }

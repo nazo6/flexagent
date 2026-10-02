@@ -11,7 +11,7 @@
 use std::path::PathBuf;
 
 use async_trait::async_trait;
-use fxg_protocol::common::StreamDeltaPayload;
+use fxg_protocol::common::{ElicitationAction, StreamDeltaPayload};
 use fxg_protocol::events::UnifiedEventPayload;
 use tokio::sync::mpsc;
 
@@ -147,6 +147,18 @@ pub trait ActiveSessionHandle: Send + Sync {
         request_id: String,
         selected_option_id: String,
     ) -> anyhow::Result<()>;
+    /// elicitation (構造化入力リクエスト) への応答 (`accept` / `decline` / `cancel`)。
+    ///
+    /// `accept` の `content` はリクエストの `requested_schema` (form モード) に
+    /// 準拠すること。未対応ドライバの既定実装はエラーを返す。
+    async fn respond_elicitation(
+        &self,
+        _elicitation_id: String,
+        _action: ElicitationAction,
+        _content: serde_json::Value,
+    ) -> anyhow::Result<()> {
+        anyhow::bail!("respond_elicitation is not supported by this driver")
+    }
     /// モード変更 (`plan` / `code` 等)。
     async fn set_mode(&self, mode_id: String) -> anyhow::Result<()>;
     /// 設定変更 (モデル選択等)。
