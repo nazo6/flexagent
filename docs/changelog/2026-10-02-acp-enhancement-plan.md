@@ -34,13 +34,13 @@
 
 ## Phase 一覧
 
-| Phase       | 内容                                                       | 主な対象                                       | 依存 | 状態   |
-| :---------- | :--------------------------------------------------------- | :--------------------------------------------- | :--- | :----- |
-| **Phase 1** | elicitation（質問/構造化入力）対応                         | protocol / db / acp / node / server / cli / ui | -    | 未着手 |
-| **Phase 2** | セッション状態の可視化（UsageUpdate / StopReason）         | acp / protocol / db / ui / cli                 | -    | 未着手 |
-| **Phase 3** | エージェント認証（authenticate / logout / terminal）       | acp / node / cli / ui                          | -    | 未着手 |
-| **Phase 4** | ツール出力・添付コンテンツ（ToolCallContent / multimodal） | acp / protocol / node / ui                     | -    | 未着手 |
-| **Phase 5** | 整合性の細部と unstable 対応                               | acp / db / node                                | -    | 未着手 |
+| Phase       | 内容                                                       | 主な対象                                       | 依存 | 状態              |
+| :---------- | :--------------------------------------------------------- | :--------------------------------------------- | :--- | :---------------- |
+| **Phase 1** | elicitation（質問/構造化入力）対応                         | protocol / db / acp / node / server / cli / ui | -    | 完了 (2026-10-02) |
+| **Phase 2** | セッション状態の可視化（UsageUpdate / StopReason）         | acp / protocol / db / ui / cli                 | -    | 未着手            |
+| **Phase 3** | エージェント認証（authenticate / logout / terminal）       | acp / node / cli / ui                          | -    | 未着手            |
+| **Phase 4** | ツール出力・添付コンテンツ（ToolCallContent / multimodal） | acp / protocol / node / ui                     | -    | 未着手            |
+| **Phase 5** | 整合性の細部と unstable 対応                               | acp / db / node                                | -    | 未着手            |
 
 > **参考: permission 系は elicitation と同型の先行実装がある。新機能はこれを
 > ミラーする。**
@@ -80,104 +80,108 @@
 
 ### 1-1. `fxg-protocol`（型・イベント・API）
 
-- [ ] `common.rs`: `ElicitationRequestEntry`（inbox 表示用: id / session_id /
+- [x] `common.rs`: `ElicitationRequestEntry`（inbox 表示用: id / session_id /
       message / mode / schema / created_at）を追加。`accept` の content は
       `serde_json::Value` で保持し、schema 準拠の型安全は UI 側で担保する
-- [ ] `events.rs`: `ElicitationRequest { elicitation_id, message, mode,
+- [x] `events.rs`: `ElicitationRequest { elicitation_id, message, mode,
       requested_schema, tool_call_id }` / `ElicitationResolved {
       elicitation_id, action, content, resolved_by }` を追加
       （`is_persistable = true`、`event_type` は `elicitation_request` /
       `elicitation_resolved`）
-- [ ] `client_api.rs`: `InboxResponse` に `elicitations:
+- [x] `client_api.rs`: `InboxResponse` に `elicitations:
       Vec<ElicitationRequestEntry>` を追加 / `RespondElicitationRequest {
       action, content }` / `RespondElicitationResponse { already_resolved }` /
       `ClientWsMessage::RespondElicitation`
-- [ ] `ipc.rs`: `IpcClientMessage::RespondElicitation` と inbox 応答への追加
-- [ ] `mise run types` で `ui/src/lib/generated` を同期
+- [x] `ipc.rs`: `IpcClientMessage::RespondElicitation` と inbox 応答への追加
+- [x] `mise run types` で `ui/src/lib/generated` を同期
 
 ### 1-2. `fxg-db`（投影・クエリ）
 
-- [ ] `migrations/0005_elicitation_requests.sql`: `permission_requests` と
+- [x] `migrations/0005_elicitation_requests.sql`: `permission_requests` と
       同型のテーブル（`elicitation_id` PK / `session_id` / `node_id` /
       `message` / `mode` / `schema_json` / `tool_call_id` / `status`
       （pending / accepted / declined / cancelled）/ `content_json` /
       `created_at` / `resolved_at` / `resolved_by`）+ pending partial index
-- [ ] `events.rs`: 2 イベントの投影（INSERT ... ON CONFLICT / UPDATE
+- [x] `events.rs`: 2 イベントの投影（INSERT ... ON CONFLICT / UPDATE
       status）、全量再構築（`rebuild_*`）、`SessionDeleted` 時のパージ
-- [ ] `queries.rs` / `db.rs`: `pending_elicitations` /
+- [x] `queries.rs` / `db.rs`: `pending_elicitations` /
       `find_elicitation_request`
-- [ ] `searchable.rs`: 質問文を検索対象に含める（permission と同様）
-- [ ] `mise run sqlx:prepare` → `.sqlx/` 更新
+- [x] `searchable.rs`: 質問文を検索対象に含める（permission と同様）
+- [x] `mise run sqlx:prepare` → `.sqlx/` 更新
 
 ### 1-3. `fxg-acp`（ドライバ）
 
-- [ ] `acp.rs`: capability に `elicitation(ElicitationCapabilities::new()
+- [x] `acp.rs`: capability に `elicitation(ElicitationCapabilities::new()
       .form(ElicitationFormCapabilities::new()))` を追加（URL モードは広告
       しない）
-- [ ] `ElicitationRegistry`（`PermissionRegistry` と同型の oneshot Map）を
+- [x] `ElicitationRegistry`（`PermissionRegistry` と同型の oneshot Map）を
       追加
-- [ ] `on_receive_request(CreateElicitationRequest)`: セッション context 解決
+- [x] `on_receive_request(CreateElicitationRequest)`: セッション context 解決
       → `StatusChanged`（status は未決事項参照）→ `ElicitationRequest` イベント
       → oneshot 登録 → 応答待ち
-- [ ] `ActiveSessionHandle::respond_elicitation(request_id, action, content)` を
+- [x] `ActiveSessionHandle::respond_elicitation(request_id, action, content)` を
       追加（トレイト既定実装「未対応」+ `AcpSessionHandle` 実装 +
       `driver.rs` の `MockHandle` 更新）
-- [ ] `session/cancel` 時・teardown 時に pending elicitation を `cancel` で
+- [x] `session/cancel` 時・teardown 時に pending elicitation を `cancel` で
       解決（仕様 MUST）
-- [ ] `on_receive_notification(CompleteElicitationNotification)`: 未知 ID を
+- [x] `on_receive_notification(CompleteElicitationNotification)`: 未知 ID を
       無視（form のみの間はログのみ）
-- [ ] `accept` 時の content を schema に対して検証（クライアント SHOULD）
+- [x] `accept` 時の content を schema に対して検証（クライアント SHOULD）
 
 ### 1-4. `fxg-node`（pending 管理・冪等性）
 
-- [ ] `session_manager.rs`: `PendingElicitationSummary` と
+- [x] `session_manager.rs`: `PendingElicitationSummary` と
       `ActiveSession.pending_elicitations` を追加
-- [ ] ドライバイベント処理（現在の `PermissionRequest` 処理箇所）に
+- [x] ドライバイベント処理（現在の `PermissionRequest` 処理箇所）に
       elicitation の登録 / 解除を追加
-- [ ] `SessionManager::respond_elicitation`（解決済みは
+- [x] `SessionManager::respond_elicitation`（解決済みは
       `NodeError::AlreadyResolved` → `ALREADY_RESOLVED`）
-- [ ] CLI 向け IPC ディスパッチ（`RespondElicitation`）
+- [x] CLI 向け IPC ディスパッチ（`RespondElicitation`）
 
 ### 1-5. `fxg-server`（共通 API・Push）
 
-- [ ] `api/mod.rs`: `ClientApiBackend::respond_elicitation`、REST
+- [x] `api/mod.rs`: `ClientApiBackend::respond_elicitation`、REST
       `POST /api/v1/sessions/:id/elicitations/:elicitation_id/respond`、
       WS op、`ClientCommand::RespondElicitation`
-- [ ] `state.rs`（`ServerState`）: ノード転送実装（`respond_permission` と
+- [x] `state.rs`（`ServerState`）: ノード転送実装（`respond_permission` と
       同型）
-- [ ] `daemon/api.rs`（`DaemonState`）: ローカル実装
-- [ ] `push.rs`: `notify_elicitation_requests`（通知タップでアプリを開く。
-      form の直接回答は Push からは不可）。`hub.rs` の該当箇所から呼ぶ
+- [x] `daemon/api.rs`（`DaemonState`）: ローカル実装
+- [x] `push.rs`: `notify_elicitations`（通知タップでアプリを開く。form の
+      直接回答は Push からは不可）。`hub.rs` の該当箇所から呼ぶ
 
 ### 1-6. `ui`（回答フォーム）
 
-- [ ] `sync/reducer.ts`: `kind: "elicitation"` の追加と
+- [x] `sync/reducer.ts`: `kind: "elicitation"` の追加と
       `elicitation_resolved` のマージ（解決後も質問カードを残す）
-- [ ] `ElicitationCard.svelte`: `requested_schema` からフォーム生成
-      （string / enum・oneOf / boolean / integer・number（min・max）/
+- [x] `ElicitationCard.svelte`: `requested_schema` からフォーム生成
+      （string / enum・oneOf / boolean / integer・number /
       multi-select array、required、default の事前入力、送信前レビュー）
-- [ ] `ChatTimeline.svelte` / `inbox/+page.svelte` / `Composer.svelte`
+- [x] `ChatTimeline.svelte` / `inbox/+page.svelte` / `Composer.svelte`
       （回答待ち中の送信制御）/ `session-status.ts`（status ラベル）
-- [ ] `stores/sync.svelte.ts`: `respondElicitation`（WS / REST）
-- [ ] `service-worker.ts`: 通知タップ → セッションを開く（直接応答はしない）
+- [x] `stores/sync.svelte.ts`: `respondElicitation`（WS / REST）
+- [x] `service-worker.ts`: 通知タップ → セッションを開く（直接応答は
+      しない。`allow_option_id = null` の既存経路で成立し変更不要）
 
 ### 1-7. `fxg-cli`
 
-- [ ] `fxg inbox list` に質問を表示（種別列 or セクション分け）
-- [ ] `fxg inbox answer <id>`: `--accept key=value,...` / `--decline` /
-      `--cancel`。TTY では対話選択（enum は番号選択、自由入力は簡易エディタ）
-- [ ] `tui.rs`: pending 質問ブロックと回答キー（承認と同型 + 自由入力）
+- [x] `fxg inbox list` に質問を表示（別テーブル + `--json` は
+      `{ requests, elicitations }`）
+- [x] `fxg inbox answer <id>`: `--accept` / `--set key=value` / `--json` /
+      `--decline` / `--cancel`。引数なしは質問内容と回答方法を表示
+- [x] `tui.rs`: 質問待ちブロックの表示（回答は `fxg inbox answer` を案内。
+      TUI 内での対話回答は将来対応）
 
 ### 1-8. テスト
 
-- [ ] `fxg-db`: 投影 / 全量再構築 / tombstone パージの単体テスト
-- [ ] `fxg-node`: `MockDriver` で elicitation イベント → pending → 応答 →
-      2 回目 `ALREADY_RESOLVED`（permission テストと同型）
-- [ ] `fxg-acp`: 応答レジストリ・content 検証・cancel 時の一括キャンセルの
-      単体テスト
-- [ ] `ui`: reducer / カードの vitest
+- [x] `fxg-db`: 投影 / 全量再構築 / tombstone パージの単体テスト
+- [x] `fxg-node`: `MockDriver` で elicitation イベント → pending → 応答 →
+      2 回目 `ALREADY_RESOLVED`（permission テストと同型。daemon IPC の
+      ラウンドトリップも追加）
+- [x] `fxg-acp`: content 検証の単体テスト（レジストリ / cancel は
+      モック経由の結合テストでカバー）
+- [x] `ui`: reducer の vitest
 - [ ] 可能なら SDK の Agent 側を in-process（`tokio::io::duplex` 等）で
-      接続した E2E を検討（調査項目）
+      接続した E2E を検討（調査項目。Phase 1 では未着手）
 
 **完了条件 (DoD)**: テスト用エージェントが送った elicitation が UI / CLI に
 表示され、accept（content 付き）/ decline / cancel のすべてがエージェントへ
@@ -191,6 +195,34 @@
 - URL モード: セキュリティ要件（ホスト表示・同意・prefetch 禁止・専用
   ブラウザコンテキスト）が重いため本 Phase では広告しない。必要時に別
   Phase とする
+
+### 実装メモ（2026-10-02 完了）
+
+- **コミット**:
+  `feat(fxg-protocol,fxg-db): elicitation のイベント型とDB投影を追加`
+  → `feat(fxg-acp,fxg-protocol): elicitation/create ハンドラと応答APIを追加`
+  → `feat(fxg-node,fxg-protocol): elicitation の pending 管理と冪等応答を追加`
+  → `feat(fxg-server,fxg-node): elicitation の共通API・WS転送・Web Pushを追加`
+  → `feat(ui): elicitation の回答フォームと Inbox を追加`
+  → `feat(fxg-cli): fxg inbox answer と質問一覧表示を追加`
+- **未決事項の確定**:
+  - `SessionStatus::WaitingInput` を追加（`waiting_input`。DB に CHECK
+    制約は無く migration 不要。UI / CLI / docs の状態ラベルも更新）
+  - URL モードは広告せず、`elicitation/complete` は未知 ID としてログのみ
+  - form モードはプロトコル上の elicitation id を持たないため、JSON-RPC
+    request id を `elicitation_id` として使用（承認の `request_id` と同じ）
+- **設計判断**:
+  - `accept` の content はドライバ側で `requested_schema` に対して
+    型 / enum / required / 未知プロパティの軽量検証を行い（UI でも検証）、
+    不正時は pending を維持してエラーを返す（修正再送が可能）
+  - ターンキャンセル・セッション終了時は未解決 elicitation を `cancel` で
+    解決し、`resolved_by = "system"` の `ElicitationResolved`
+    をドライバが発行して UI の回答待ち表示を解消する
+  - `fxg inbox list --json` は `{ requests, elicitations }`
+    オブジェクトへ変更（配列ではない）
+  - Service Worker は変更不要（`allow_option_id = null`
+    でアクションボタン無し + タップでアプリを開く既存経路）
+  - TUI 内での対話回答は実装せず `fxg inbox answer` を案内（将来対応）
 
 ---
 

@@ -1218,10 +1218,12 @@ mod tests {
     where
         F: FnMut(&IpcServerMessage) -> bool,
     {
+        // 期待メッセージが来ない場合にテストが永久ブロックしないようタイムアウトする
+        let wait = std::time::Duration::from_secs(10);
         for _ in 0..50 {
-            let message = client
-                .recv()
+            let message = tokio::time::timeout(wait, client.recv())
                 .await
+                .expect("timed out waiting for an expected ipc message")
                 .expect("recv")
                 .expect("daemon closed the connection");
             if predicate(&message) {
@@ -1499,7 +1501,7 @@ mod tests {
     #[tokio::test]
     async fn ipc_session_ensure_attach_prompt_and_permissions() {
         use fxg_acp::DriverEvent;
-        use fxg_protocol::common::{PermissionOption, SessionControlAction};
+        use fxg_protocol::common::{ElicitationAction, PermissionOption, SessionControlAction};
         use fxg_protocol::events::UnifiedEventPayload;
 
         let (daemon, mock, dir) = start_session_daemon().await;
@@ -1727,6 +1729,72 @@ mod tests {
         })
         .await;
         let _ = response;
+
+        // 質問 (elicitation) → イベント配信 → 応答 → 2回目は ALREADY_RESOLVED
+        mock.emit(DriverEvent::Event(
+            UnifiedEventPayload::ElicitationRequest {
+                elicitation_id: "elic-1".to_owned(),
+                message: "どの戦略で進めますか?".to_owned(),
+                mode: "form".to_owned(),
+                requested_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": { "strategy": { "type": "string", "enum": ["a", "b"] } },
+                    "required": ["strategy"]
+                }),
+                tool_call_id: None,
+            },
+        ));
+        recv_until(&mut attach, |message| {
+            matches!(
+                message,
+                IpcServerMessage::EventBatch { events, .. }
+                    if events.iter().any(|event| matches!(
+                        event.payload,
+                        UnifiedEventPayload::ElicitationRequest { .. }
+                    ))
+            )
+        })
+        .await;
+
+        attach
+            .send(&IpcClientMessage::RespondElicitation {
+                command_id: "q1".to_owned(),
+                session_id: session_id.clone(),
+                elicitation_id: "elic-1".to_owned(),
+                action: ElicitationAction::Accept,
+                content: serde_json::json!({ "strategy": "a" }),
+                resolved_by: "cli".to_owned(),
+            })
+            .await
+            .expect("respond elicitation");
+        recv_until(&mut attach, |message| {
+            matches!(message, IpcServerMessage::Result { command_id, .. } if command_id == "q1")
+        })
+        .await;
+        assert_eq!(
+            mock.elicitations(),
+            vec![(
+                "elic-1".to_owned(),
+                ElicitationAction::Accept,
+                serde_json::json!({ "strategy": "a" })
+            )]
+        );
+
+        attach
+            .send(&IpcClientMessage::RespondElicitation {
+                command_id: "q2".to_owned(),
+                session_id: session_id.clone(),
+                elicitation_id: "elic-1".to_owned(),
+                action: ElicitationAction::Decline,
+                content: serde_json::Value::Null,
+                resolved_by: "web".to_owned(),
+            })
+            .await
+            .expect("respond elicitation again");
+        recv_until(&mut attach, |message| {
+            matches!(message, IpcServerMessage::Error { code, .. } if *code == ErrorCode::AlreadyResolved)
+        })
+        .await;
 
         // ControlSession (SetMode) はドライバへ転送される
         attach

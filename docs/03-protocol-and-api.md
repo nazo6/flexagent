@@ -126,6 +126,22 @@ pub enum UnifiedEventPayload {
         selected_option_id: String,
         resolved_by: String,   // "cli" | "web" | "android_push"
     },
+    /// エージェントからの構造化入力リクエスト (ACP elicitation/create。Phase 1 は form モード)
+    /// requested_schema から UI が回答フォームを生成する
+    ElicitationRequest {
+        elicitation_id: String,       // form は JSON-RPC request id
+        message: String,
+        mode: String,                 // "form" | "url" (Phase 1 は "form" のみ)
+        requested_schema: serde_json::Value,
+        tool_call_id: Option<String>,
+    },
+    /// 構造化入力リクエストの解決結果
+    ElicitationResolved {
+        elicitation_id: String,
+        action: ElicitationAction,    // "accept" | "decline" | "cancel"
+        content: serde_json::Value,   // accept 時の回答内容 (decline/cancel は null)
+        resolved_by: String,          // "cli" | "web" | "android_push" | "system"
+    },
     /// ACP terminal/* または PTY の出力チャンク (永続化対象。ただし FTS の searchable_text からは除外)
     TerminalOutput {
         terminal_id: String,
@@ -165,7 +181,8 @@ pub enum UnifiedEventPayload {
         archived: bool,        // true = アーカイブ, false = 復元
     },
     /// セッションの削除 (tombstone)
-    /// 適用時に本イベントより前のイベント本文と permission_requests をパージする。
+    /// 適用時に本イベントより前のイベント本文と permission_requests /
+    /// elicitation_requests をパージする。
     /// 本イベント (tombstone) と sessions 行は Outbox / Resync での削除伝播と
     /// Fork 元参照の整合のため残す (復元不能)
     SessionDeleted {},
@@ -531,6 +548,15 @@ pub enum ServerToNodeMsg {
         selected_option_id: String,
         resolved_by: String,
     },
+    /// 質問 (elicitation) への回答
+    RespondElicitation {
+        command_id: String,
+        session_id: String,
+        elicitation_id: String,
+        action: ElicitationAction,    // "accept" | "decline" | "cancel"
+        content: serde_json::Value,   // accept 時の form 回答 (それ以外は null)
+        resolved_by: String,
+    },
     /// モード切替 / 設定変更 / キャンセル
     ControlSession {
         command_id: String,
@@ -750,11 +776,16 @@ pub enum ServerToNodeMsg {
   - `scope=uncommitted` (デフォルト): 現在の作業ツリー未コミット差分
     (`git diff HEAD`)
   - `scope=branch`: ベースブランチとの累積差分 (`git diff <base>...HEAD`)
-- `GET /api/v1/inbox`: 全セッション横断の未解決 `PermissionRequest` 一覧。
+- `GET /api/v1/inbox`: 全セッション横断の未解決 `PermissionRequest` と
+  `ElicitationRequest` の一覧 (`{ requests, elicitations }`)。
 - `POST /api/v1/sessions/:id/permissions/:req_id/respond`:
   承認リクエストへの応答 (`selected_option_id`, `always`,
   `resolved_by`)。既に解決済みの場合は `ALREADY_RESOLVED` を返却し（冪等）、UI
   側は正常遷移として扱う。
+- `POST /api/v1/sessions/:id/elicitations/:elicitation_id/respond`:
+  質問 (elicitation) への応答 (`action` = `accept` | `decline` | `cancel`,
+  `content` = `accept` 時の form 回答, `resolved_by`)。既に解決済みの場合は
+  `already_resolved = true` を返却し（冪等）、UI 側は正常遷移として扱う。
 - `POST /api/v1/sessions/:id/revert`:
   指定ターン (`target_node_seq` = `UserMessage.node_seq`) 時点の Shadow Git Tree
   へワークスペースのファイルを復元する (`fxg session revert` の Web UI 版)。
@@ -846,8 +877,9 @@ pub enum ServerToNodeMsg {
      を検知したら、保存済みタイムラインを破棄して REST 投影を再取得し、
      新しいストアとして再同期する。
 3. クライアントからの操作（`SendPrompt`, `RespondPermission`,
-   `ControlSession`）もこのWebSocket上（またはREST POST）で送信でき、結果は
-   `command_id` 付きの `CommandResult` として要求元クライアントへ応答されます。
+   `RespondElicitation`, `ControlSession`）もこのWebSocket上（またはREST
+   POST）で送信でき、結果は `command_id` 付きの `CommandResult`
+   として要求元クライアントへ応答されます。
    - **一時VMブートストラップログ (`BootstrapLog`)**:
      一時VMの起動中（`fxg daemon
      --stdio` の `NodeHello` 前）はノードの `node.db` が存在しないため、中央

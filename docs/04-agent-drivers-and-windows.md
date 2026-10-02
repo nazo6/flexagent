@@ -98,6 +98,15 @@ ACPでは、エディタやオーケストレータ側が **`acp::Client` トレ
   - Web Push通知（Android PWA）およびWebSocket/IPCへ即時ブロードキャスト。
   - ユーザーがAndroid・Web・CLIのいずれかで承認を選択したら、`oneshot::Sender`
     に結果を流してACPエージェントの処理を再開。
+- **`elicitation_create(req) -> oneshot::Receiver<CreateElicitationResponse>`**
+  (stable v1):
+  - エージェントの「質問」ツールを `UnifiedEventPayload::ElicitationRequest`
+    として記録し、Web / Android / CLI へブロードキャストする。回答は
+    `accept` (form content) / `decline` / `cancel` の 3 択。
+  - Phase 1 は form モードのみ広告する
+    (`clientCapabilities.elicitation.form`)。`accept` の content は送信前に
+    クライアントが `requested_schema` に対して軽量検証し、ターンキャンセル時は
+    未解決の elicitation を `cancel` で解決する (仕様 MUST)。
 - **`read_text_file` / `write_text_file`**:
   - セッションの `local_path`
     基準でファイルを読み書き。書き込み時は変更前後の内容からUnified

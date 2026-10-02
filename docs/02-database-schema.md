@@ -71,6 +71,9 @@ CapabilitiesUpdated   → sessions.current_mode / available_modes_json /
                         sessions.updated_at = 最新イベントの created_at
 PermissionRequest     → permission_requests 行を upsert (status = 'pending')
 PermissionResolved    → permission_requests.status / resolved_by / resolved_at
+ElicitationRequest    → elicitation_requests 行を upsert (status = 'pending')
+ElicitationResolved   → elicitation_requests.status / content_json / resolved_by /
+                        resolved_at
 SessionArchived       → sessions.archived_at (archived = false で NULL に戻す)
 SessionDeleted        → sessions.deleted_at = created_at + 本文イベントのパージ
                         (本イベント (tombstone) と sessions 行は残す)
@@ -195,7 +198,7 @@ CREATE TABLE session_events (
     event_id        TEXT NOT NULL UNIQUE,           -- UUID v7 (冪等適用・重複排除)
     session_id      TEXT NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
     node_seq        INTEGER NOT NULL,               -- セッション内の順序番号 (1, 2, 3...)。実行ノードのみが採番
-    event_type      TEXT NOT NULL,                  -- 'session_created' | 'session_title_changed' | 'session_agent_bound' | 'user_message' | 'agent_message' | 'agent_thought' | 'tool_call' | 'plan' | 'permission_request' | 'permission_resolved' | 'session_reverted' | 'session_archived' | 'session_deleted' | 'terminal_output' | 'status_change' | 'capabilities_updated' | 'bootstrap_log'
+    event_type      TEXT NOT NULL,                  -- 'session_created' | 'session_title_changed' | 'session_agent_bound' | 'user_message' | 'agent_message' | 'agent_thought' | 'tool_call' | 'plan' | 'permission_request' | 'permission_resolved' | 'elicitation_request' | 'elicitation_resolved' | 'session_reverted' | 'session_archived' | 'session_deleted' | 'terminal_output' | 'status_change' | 'capabilities_updated' | 'bootstrap_log'
     payload_json    TEXT NOT NULL,                  -- 構造化ペイロード (UnifiedEventPayload のJSON。正データ)
     searchable_text TEXT,                           -- FTS5全文検索用のプレーンテキスト抽出 (受信時に payload_json から生成。terminal_output 等のバイナリ系は対象外)
     created_at      INTEGER NOT NULL,
@@ -246,6 +249,24 @@ CREATE TABLE permission_requests (
 
 CREATE INDEX idx_permission_pending ON permission_requests(status) WHERE status = 'pending';
 
+-- 7b. 質問Inbox (elicitation の投影。未解決 Elicitation Request の高速一覧用)
+CREATE TABLE elicitation_requests (
+    elicitation_id  TEXT PRIMARY KEY,               -- ACP elicitation id (form は JSON-RPC request id)
+    session_id      TEXT NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
+    node_id         TEXT NOT NULL REFERENCES nodes(node_id), -- ノード側は自分自身の node_id
+    message         TEXT NOT NULL,                  -- ユーザーへ提示するメッセージ
+    mode            TEXT NOT NULL DEFAULT 'form',   -- 'form' | 'url' (Phase 1 は form のみ)
+    schema_json     TEXT NOT NULL DEFAULT '{}',     -- form モードの requestedSchema
+    tool_call_id    TEXT,                           -- 関連するツール呼び出しID (任意)
+    status          TEXT NOT NULL DEFAULT 'pending',-- 'pending' | 'accepted' | 'declined' | 'cancelled'
+    content_json    TEXT NOT NULL DEFAULT 'null',   -- accept 時の回答内容
+    resolved_by     TEXT,                           -- 'cli' | 'web' | 'android_push' | 'system'
+    created_at      INTEGER NOT NULL,
+    resolved_at     INTEGER
+);
+
+CREATE INDEX idx_elicitation_pending ON elicitation_requests(status) WHERE status = 'pending';
+
 -- 8. Web Push (VAPID) サブスクリプション管理（ハブ専用。ノード側は常に空）
 CREATE TABLE push_subscriptions (
     id               INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -260,7 +281,7 @@ CREATE TABLE push_subscriptions (
 --    各ストアが「自分の観測した操作」のみを記録する（同期対象外）
 CREATE TABLE audit_logs (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    action          TEXT NOT NULL,                  -- 'session_start' | 'permission_resolved' | 'pty_spawn' | 'kill_switch' | 'worktree_manage'
+    action          TEXT NOT NULL,                  -- 'session_start' | 'permission_resolved' | 'elicitation_resolved' | 'pty_spawn' | 'kill_switch' | 'worktree_manage'
     session_id      TEXT,                           -- 関連セッションID (任意)
     node_id         TEXT,                           -- 対象ノードID (任意。ノード側は自分自身)
     client_ip       TEXT NOT NULL,                  -- 送信元IPアドレス (LAN/VPN IP)
@@ -287,6 +308,7 @@ Truth）とするため、テーブル上の以下のカラムは
 | :----------------------------------------------------------------- | :------------------------------------------------------------------------- |
 | `sessions.*`（`git_bundle_path` / `synced_up_to_node_seq` を除く） | `session_events` の適用（§0.3 の投影規則）                                 |
 | `permission_requests`                                              | `PermissionRequest` / `PermissionResolved` イベント                        |
+| `elicitation_requests`                                             | `ElicitationRequest` / `ElicitationResolved` イベント                      |
 | `session_events.searchable_text`                                   | `payload_json` からのテキスト抽出（`TerminalOutput` 等のバイナリ系は除外） |
 
 - **Shadow Git の `snapshot_tree_hash`** は専用カラムを持たず、
@@ -298,7 +320,8 @@ Truth）とするため、テーブル上の以下のカラムは
 - `git_bundle_path`
   はハブのみが書き込む成果物退避パスであり、イベント投影の対象外です。
 - **削除は行を消さない (tombstone)**: `SessionDeleted` の適用時も `sessions`
-  行は削除せず `deleted_at` を立て、本文イベントと `permission_requests`
+  行は削除せず `deleted_at` を立て、本文イベントと `permission_requests` /
+  `elicitation_requests`
   を物理削除します。行を残すのは Outbox / Resync
   で削除を伝播し、Fork 元参照 (`parent_session_id`)
   の FK 整合を保つためです（保存量は数百バイト）。削除済みセッションは
