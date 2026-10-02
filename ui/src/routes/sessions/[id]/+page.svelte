@@ -520,38 +520,40 @@
     <!-- チャットメインエリア (デスクトップ時は常時、モバイル時は activeTab === 'chat' の時に表示) -->
     <div
       class={cn(
-        'relative flex h-full flex-1 flex-col overflow-hidden',
+        'flex h-full flex-1 flex-col overflow-hidden',
         activeTab !== 'chat' ? 'hidden md:flex' : 'flex'
       )}
     >
       <!-- スクロール可能なメッセージタイムライン -->
-      <div
-        bind:this={chatContainer}
-        onscroll={handleScroll}
-        class="flex-1 overflow-y-auto px-3 py-4 md:px-6"
-      >
-        <div class="mx-auto flex max-w-3xl flex-col gap-4">
-          <BootstrapLogCard lines={bootstrapLines} />
-          <ChatTimeline
-            sessionId={sessionId}
-            {items}
-            status={currentStatus}
-            onRevert={requestRevert}
-          />
-        </div>
-      </div>
-
-      <!-- 最下部へジャンプボタン -->
-      {#if showScrollBottom}
-        <button
-          type="button"
-          class="bg-primary text-primary-foreground absolute bottom-20 left-1/2 -translate-x-1/2 shadow-lg flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition-all hover:opacity-90 animate-in fade-in zoom-in-95"
-          onclick={scrollToBottom}
+      <div class="relative flex-1 min-h-0">
+        <div
+          bind:this={chatContainer}
+          onscroll={handleScroll}
+          class="h-full overflow-y-auto px-3 py-4 md:px-6"
         >
-          <ArrowDownIcon class="size-3.5" />
-          <span>最新へジャンプ</span>
-        </button>
-      {/if}
+          <div class="mx-auto flex max-w-3xl flex-col gap-4">
+            <BootstrapLogCard lines={bootstrapLines} />
+            <ChatTimeline
+              sessionId={sessionId}
+              {items}
+              status={currentStatus}
+              onRevert={requestRevert}
+            />
+          </div>
+        </div>
+
+        <!-- 最下部へジャンプボタン -->
+        {#if showScrollBottom}
+          <button
+            type="button"
+            class="bg-primary text-primary-foreground absolute bottom-4 left-1/2 -translate-x-1/2 z-10 shadow-lg flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition-all hover:opacity-90 animate-in fade-in zoom-in-95 cursor-pointer"
+            onclick={scrollToBottom}
+          >
+            <ArrowDownIcon class="size-3.5" />
+            <span>最新へジャンプ</span>
+          </button>
+        {/if}
+      </div>
 
       <!-- チャット入力欄 (Composer) -->
       <div class="bg-card/50 border-t px-3 py-2 md:px-6 shrink-0">
