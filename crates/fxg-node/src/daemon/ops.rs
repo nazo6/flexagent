@@ -306,7 +306,19 @@ impl DaemonState {
 
     /// エージェント管理操作 (install / update / remove) を実行し、
     /// 表示メッセージを返す (`fxg agents` の Web UI 版)。
+    ///
+    /// 成功後はノード自身の `nodes` 行 (導入済みエージェント一覧) を更新する。
+    /// ローカルノードへ直接接続した UI はこの行をセッション作成の候補
+    /// (`installed_agents`) にするため、更新しないとインストール直後に
+    /// エージェント選択一覧へ反映されない。
     pub async fn manage_agent(&self, action: &AgentAction) -> Result<String, NodeError> {
+        let message = self.manage_agent_action(action).await?;
+        self.register_node().await?;
+        Ok(message)
+    }
+
+    /// [`Self::manage_agent`] の実体 (ノード行の更新を行わない)。
+    async fn manage_agent_action(&self, action: &AgentAction) -> Result<String, NodeError> {
         let registry = self.session_manager().registry();
         match action {
             AgentAction::Install { agent_id } => {
