@@ -168,6 +168,20 @@ pub enum UnifiedEventPayload {
     BootstrapLog {
         line: String,
     },
+    /// コンテキスト使用量・累積コストの更新 (ACP usage_update)
+    /// ハブ側 sessions.usage_json 投影の更新源 (累積ではなく最新の値を保持)
+    UsageUpdated {
+        used_tokens: u64,        // 現在コンテキストに含まれるトークン数
+        context_size: u64,       // コンテキストウィンドウ全体のサイズ
+        cost: Option<UsageCost>, // 累積コスト (エージェントが報告した場合)
+    },
+    /// ターンが正常終了以外の理由で打ち切られた (ACP StopReason)
+    /// EndTurn / Cancelled は正常終了としてイベント化しない。
+    /// UI / CLI はタイムラインにシステム行として表示する
+    TurnEnded {
+        reason: TurnStopReason,  // "max_tokens" | "max_turn_requests" | "refusal"
+        message: Option<String>,
+    },
     /// セッション状態の変化 ('provisioning' | 'bootstrapping' | 'idle' | 'running' | ...)
     /// ハブ側 sessions.status 投影の更新源
     StatusChanged {
@@ -212,9 +226,31 @@ pub struct SessionSummary {
     pub title: String,
     pub status: SessionStatus,
     pub current_mode: Option<String>,
+    /// 最新のコンテキスト使用量・累積コスト (UsageUpdated の投影。None = 未受信)
+    pub usage: Option<SessionUsage>,
     pub last_node_seq: u64,
     pub created_at: i64,
     pub updated_at: i64,
+}
+
+/// セッションのコンテキスト使用量・累積コスト (ACP usage_update)
+pub struct SessionUsage {
+    pub used_tokens: u64,
+    pub context_size: u64,
+    pub cost: Option<UsageCost>,
+}
+
+/// セッションの累積コスト (ACP Cost)
+pub struct UsageCost {
+    pub amount: f64,
+    pub currency: String, // ISO 4217 (例: "USD")
+}
+
+/// ターン打ち切り理由のうち、ユーザーへ提示すべきもの (ACP StopReason)
+pub enum TurnStopReason {
+    MaxTokens,        // 最大トークン数
+    MaxTurnRequests,  // 1ターン内の要求回数上限
+    Refusal,          // エージェントが継続を拒否
 }
 
 /// NodeHello で報告するプロジェクト紐付け情報
@@ -275,7 +311,7 @@ pub struct ConfigOptionInfo {
 }
 
 #[serde(rename_all = "snake_case")]
-pub enum SessionStatus { Provisioning, Bootstrapping, Idle, Running, WaitingPermission, Stopped, Error }
+pub enum SessionStatus { Provisioning, Bootstrapping, Idle, Running, WaitingPermission, WaitingInput, Stopped, Error }
 
 #[serde(tag = "action", rename_all = "snake_case")]
 pub enum SessionControlAction {

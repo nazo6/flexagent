@@ -92,6 +92,13 @@ ACPでは、エディタやオーケストレータ側が **`acp::Client` トレ
     スラッシュコマンド一覧を更新し、UIとCLIの補完リストに反映。
   - `CurrentModeUpdate` / `ConfigOptionUpdate` ➔
     現在のモードやモデル設定選択肢をUIへ同期。
+  - `UsageUpdate` ➔ コンテキスト使用量 (`used` / `size`) と累積コスト
+    (`cost`) を `UnifiedEventPayload::UsageUpdated` として記録する (ハブ側
+    `sessions.usage_json` 投影。累積ではなく最新値を保持)。
+  - ターン終了応答の `StopReason` ➔ `EndTurn` / `Cancelled` は正常終了として
+    イベント化しない。`MaxTokens` / `MaxTurnRequests` / `Refusal` は
+    `UnifiedEventPayload::TurnEnded` として記録し、UI / CLI
+    にシステム行で表示する。
 - **`request_permission(req) -> oneshot::Receiver<RequestPermissionResponse>`**:
   - `oneshot::channel`
     を生成してMapに保持し、`UnifiedEventPayload::PermissionRequest` を発行。
@@ -115,6 +122,10 @@ ACPでは、エディタやオーケストレータ側が **`acp::Client` トレ
   `terminal_kill`**:
   - `fxg-pty` クレートを呼び出し、ConPTY (Windows) または Unix PTY
     でコマンドを実行し、出力をリアルタイムにストリーム配信。
+
+> `opencode2` はイベントストリームに usage / stop reason に相当する情報を
+> 持たないため、Phase 2 の `UsageUpdated` / `TurnEnded` は ACP ドライバのみが
+> 発行します (UI / CLI は未受信時に非表示とする)。
 
 ---
 

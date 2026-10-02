@@ -37,7 +37,7 @@
 | Phase       | 内容                                                       | 主な対象                                       | 依存 | 状態              |
 | :---------- | :--------------------------------------------------------- | :--------------------------------------------- | :--- | :---------------- |
 | **Phase 1** | elicitation（質問/構造化入力）対応                         | protocol / db / acp / node / server / cli / ui | -    | 完了 (2026-10-02) |
-| **Phase 2** | セッション状態の可視化（UsageUpdate / StopReason）         | acp / protocol / db / ui / cli                 | -    | 未着手            |
+| **Phase 2** | セッション状態の可視化（UsageUpdate / StopReason）         | acp / protocol / db / ui / cli                 | -    | 完了 (2026-10-02) |
 | **Phase 3** | エージェント認証（authenticate / logout / terminal）       | acp / node / cli / ui                          | -    | 未着手            |
 | **Phase 4** | ツール出力・添付コンテンツ（ToolCallContent / multimodal） | acp / protocol / node / ui                     | -    | 未着手            |
 | **Phase 5** | 整合性の細部と unstable 対応                               | acp / db / node                                | -    | 未着手            |
@@ -232,28 +232,48 @@
 
 **目的**: コンテキスト残量と累積コストを UI / CLI に表示する（stable v1）。
 
-- [ ] `fxg-protocol`: `UsageCost { amount, currency }` と
+- [x] `fxg-protocol`: `UsageCost { amount, currency }` と
       `UnifiedEventPayload::UsageUpdated { used_tokens, context_size, cost }`
-      を追加
-- [ ] `fxg-acp`: `map_session_update` の `SessionUpdate::UsageUpdate` を
+      を追加（`SessionUsage` 型と `SessionSummary.usage` も追加）
+- [x] `fxg-acp`: `map_session_update` の `SessionUpdate::UsageUpdate` を
       `UsageUpdated` へ変換（現在は `other => trace!` で破棄）
-- [ ] `fxg-db`: `sessions` に `usage_json` を追加（migration 0006）+ 投影 +
+- [x] `fxg-db`: `sessions` に `usage_json` を追加（migration 0006）+ 投影 +
       再構築
-- [ ] `ui`: コンテキストメーター（Composer / ヘッダ）とコスト表示
-- [ ] `fxg-cli`: `fxg session show` 等への表示
-- [ ] opencode2 に相当情報があるか調査し、あれば同一イベントへマップ
-      （無ければ ACP のみ対応と明記）
+- [x] `ui`: コンテキストメーター（セッションヘッダ）とコスト表示
+- [x] `fxg-cli`: `fxg session show` への表示
+- [x] opencode2 に相当情報があるか調査し、あれば同一イベントへマップ
+      （無ければ ACP のみ対応と明記）→ イベントストリームに usage が無く、
+      ACP のみ対応と `docs/04` に明記
 
 ### 2-2. `StopReason` の意味付け
 
 **目的**: `Refusal` / `MaxTokens` / `MaxTurnRequests` をユーザーに見せる
 （現在は debug ログのみ）。
 
-- [ ] `fxg-protocol`: `TurnEnded { reason, message }` 相当のイベントを追加
+- [x] `fxg-protocol`: `TurnEnded { reason, message }` 相当のイベントを追加
       （`EndTurn` / `Cancelled` は従来どおりイベントなし）
-- [ ] `fxg-acp`: `serve_session` で stop_reason を判定してイベント化
-- [ ] `ui` / `fxg-cli`: タイムラインにシステム行として表示
-- [ ] テスト: stop_reason ごとの分岐
+- [x] `fxg-acp`: `serve_session` で stop_reason を判定してイベント化
+- [x] `ui` / `fxg-cli`: タイムラインにシステム行として表示
+- [x] テスト: stop_reason ごとの分岐
+
+### 実装メモ（2026-10-02 完了）
+
+- **コミット**:
+  `feat(fxg-protocol,fxg-db,fxg-acp,fxg-cli): セッション状態（usage_update / stop_reason）を追加`
+  (3bc4752) → `feat(ui): コンテキスト使用量メーターとターン打ち切り理由を表示`
+  (4a95f76)
+- **設計判断**:
+  - usage は累積ではなく**最新の `usage_update` を上書き**して保持する
+    (`sessions.usage_json`。NULL = 未受信)。`SessionSummary.usage` として API /
+    CLI / UI に露出する。
+  - `TurnEnded` は `EndTurn` / `Cancelled` を除いた `MaxTokens` /
+    `MaxTurnRequests` / `Refusal` のみをイベント化し、`reason` は
+    `TurnStopReason` 列挙で保持する。UI は警告行 (tone=warning)、CLI は
+    システムブロックとして表示する。
+  - `opencode2` は usage / stop reason に相当する情報をイベントストリームに
+    持たないため、Phase 2 は ACP ドライバのみ対応（`docs/04` に明記）。
+  - migration 0006 は nullable の `sessions.usage_json` 追加のみ（既存行は
+    NULL = 未受信）。
 
 ---
 

@@ -67,6 +67,8 @@ SessionAgentBound     → sessions.agent_session_id
 StatusChanged         → sessions.status
 CapabilitiesUpdated   → sessions.current_mode / available_modes_json /
                         available_commands_json / config_options_json
+UsageUpdated          → sessions.usage_json (最新の used / size / cost。
+                        累積ではなく最新の `usage_update` を上書き)
 すべてのイベント      → sessions.last_node_seq = 適用済み最大 node_seq
                         sessions.updated_at = 最新イベントの created_at
 PermissionRequest     → permission_requests 行を upsert (status = 'pending')
@@ -173,11 +175,12 @@ CREATE TABLE sessions (
     parent_session_id TEXT REFERENCES sessions(session_id), -- Fork元のセッションID
     fork_from_node_seq INTEGER,                     -- 親セッションのどのイベント(node_seq)時点からFork/Revertしたか
     title           TEXT NOT NULL DEFAULT 'New Session',
-    status          TEXT NOT NULL,                  -- 'provisioning' | 'bootstrapping' | 'idle' | 'running' | 'waiting_permission' | 'stopped' | 'error'
+    status          TEXT NOT NULL,                  -- 'provisioning' | 'bootstrapping' | 'idle' | 'running' | 'waiting_permission' | 'waiting_input' | 'stopped' | 'error'
     current_mode    TEXT,                           -- ACP SessionMode (例: 'code', 'plan')
     available_modes_json    TEXT NOT NULL DEFAULT '[]', -- ACP ModeInfo[]
     available_commands_json TEXT NOT NULL DEFAULT '[]', -- ACP AvailableCommand[]
     config_options_json     TEXT NOT NULL DEFAULT '[]', -- ACP ConfigOption[]
+    usage_json      TEXT,                           -- SessionUsage (最新の usage_update。NULL = 未受信)
     git_bundle_path TEXT,                           -- ハブ専用: 一時VM破棄時に退避された git bundle パス（ノード側は NULL）
     last_node_seq   INTEGER NOT NULL DEFAULT 0,     -- ノード: 永続化済み最新 node_seq（採番は +1）/ ハブ: 投影に適用済み最大 node_seq
     synced_up_to_node_seq INTEGER NOT NULL DEFAULT 0, -- ノード専用: ハブが ACK した水位（ハブ側は常に 0 で未使用）
