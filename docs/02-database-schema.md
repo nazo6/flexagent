@@ -170,7 +170,7 @@ CREATE TABLE sessions (
     local_path      TEXT NOT NULL,                  -- 実行ディレクトリ (Worktree パス含む)
     git_branch      TEXT,                           -- 起動時点のスナップショット（ライブ値は Worktree API から取得）
     is_worktree     INTEGER NOT NULL DEFAULT 0,     -- Worktree 内での実行か
-    agent_id        TEXT NOT NULL,                  -- "opencode2" | "antigravity-acp" 等
+    agent_id        TEXT NOT NULL,                  -- "claude-code" | "antigravity-acp" 等
     agent_session_id TEXT,                          -- エージェント内部のセッションID (SessionAgentBound イベントで確定)
     parent_session_id TEXT REFERENCES sessions(session_id), -- Fork元のセッションID
     fork_from_node_seq INTEGER,                     -- 親セッションのどのイベント(node_seq)時点からFork/Revertしたか
@@ -366,6 +366,6 @@ Truth）とするため、テーブル上の以下のカラムは
   再送を要求します（ハブDBを再構築した場合の自動復元）。
 - **日本語・ソースコード検索に強い `trigram` トークナイザ**: SQLite FTS5の
   `tokenize='trigram'`
-  を使うことで、形態素解析器なしで日本語の会話（「認証エラー」「データベース」）も関数名・識別子（`OpenCode2Driver`）も高速に全文検索できます。
+  を使うことで、形態素解析器なしで日本語の会話（「認証エラー」「データベース」）も関数名・識別子（`AgentDriver`）も高速に全文検索できます。
   - 制約: trigram は 3 文字未満の検索語ではヒットしないため、検索 UI では 3
     文字以上を要求するか、LIKE 検索へフォールバックします。

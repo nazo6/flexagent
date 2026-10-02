@@ -12,7 +12,7 @@ flowchart TB
     subgraph Clients["クライアント群"]
         AndroidPWA["Android PWA<br/>(Web Push + WS)"]
         Browser["PC Browser / PWA"]
-        CLI["fxg CLI / TUI<br/>(`fxg run`, `fxg attach`)"]
+        CLI["fxg CLI<br/>(`fxg run` 等)"]
     end
 
     subgraph Central["中央サーバー (`fxg server`) - LAN / VPN限定"]
@@ -65,8 +65,7 @@ flowchart TB
   等のコマンドを子プロセスとしてスポーンし、その標準入出力パイプ上で
   `fxg daemon --stdio --ephemeral` を直結起動（CLI の `--provisioner`
   も中央サーバーの API 経由で要求されるため、中央サーバー必須）。
-- **CLI**: 開発者がターミナルで `fxg run opencode` や `fxg run antigravity`
-  を実行。
+- **CLI**: 開発者がターミナルで `fxg run <agent>` を実行。
 
 ---
 
@@ -120,7 +119,7 @@ Source of Truth）は実行中のノード (`node.db`)** に置きます。中�
 
 ```mermaid
 sequenceDiagram
-    participant Agent as ACP / opencode2
+    participant Agent as ACP Agent
     participant Daemon as fxg daemon (Node)
     participant NodeDB as node.db (SQLite)
     participant LocalClient as Local CLI / Local UI
@@ -302,7 +301,7 @@ PWAから新規セッションを開始する際は：
 1. プロジェクト一覧から **`nazo6/flexagent`** をタップ
 2. 実行ノード（例: `Home-Windows` または `Home-WSL` または `Sakura-VPS`）および
    Worktree を選択
-3. エージェント（`opencode2`, `antigravity-acp` 等）を選択して開始
+3. エージェント（`claude-code`, `antigravity-acp` 等）を選択して開始
    という3ステップだけで、対象ノード上の正しいローカルパス（`D:\ghq\...` や
    `/home/...`）でエージェントが起動します。
 
@@ -341,7 +340,7 @@ Logical Project (例: github.com/nazo6/flexagent)
 GUI（Web UI / PWA）やCLIから以下のWorktree操作をシームレスに実行できます：
 
 1. **新規Worktree作成とセッション同時起動**:
-   - `fxg run opencode --worktree feat/new-api`（または
+   - `fxg run <agent> --worktree feat/new-api`（または
      `fxg worktree add feat/new-api`）や
      GUIの「＋新規Worktreeで開始」から、`git worktree add -b feat/new-api <path> <base_branch>`
      （および `.fxg.toml` の `copy_files` / `post_create`

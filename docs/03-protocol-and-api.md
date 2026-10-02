@@ -61,10 +61,6 @@ pub enum UnifiedEventPayload {
         parent_session_id: Option<String>,
         fork_from_node_seq: Option<u64>,
         title: String,
-        /// OpenCode2 の起動モード ("bridge" / "acp"。opencode2 以外は None)。
-        /// セッション再開 (resume) 時に起動モードを復元するために永続化する
-        /// (旧イベントには存在しないため serde default で None になる)
-        opencode_mode: Option<String>,
     },
     /// セッションタイトル変更 (UI/CLI からのリネーム。コマンドとして実行ノードに到達してから発行される)
     SessionTitleChanged {
@@ -183,8 +179,6 @@ pub enum UnifiedEventPayload {
         message: Option<String>,
     },
     /// コンテキスト圧縮 (compaction) の進行状況 (永続化対象)
-    /// opencode2 ブリッジの session.compaction.started / .ended を正規化する。
-    /// 要約本文の session.compaction.delta はエフェメラル扱いでイベント化しない
     CompactionUpdated {
         status: CompactionStatus, // "started" | "completed" | "failed"
         detail: Option<String>,   // 失敗理由などの補足 (任意)
@@ -261,8 +255,6 @@ pub enum TurnStopReason {
 }
 
 /// コンテキスト圧縮 (compaction) の進行状態 (CompactionUpdated の状態表現)
-/// 標準ACPには圧縮を開始する API が無いため、ネイティブ API を持つ
-/// ドライバ (opencode2 の POST /api/session/{id}/compact) のみが送出する
 pub enum CompactionStatus {
     Started,    // 圧縮を開始した
     Completed,  // 圧縮が完了した
@@ -626,7 +618,7 @@ pub enum ServerToNodeMsg {
     },
     /// 停止済みセッションの再開 (`POST /api/v1/sessions/:id/resume`)
     /// ※同一 session_id のままエージェントを起動し、ネイティブ復元
-    ///   (`session/resume` → `session/load` → OpenCode2 既存セッション bind) を
+    ///   (`session/resume` → `session/load`) を
     ///   優先する。復元できない場合は履歴 Replay を注入して継続する (設計: docs/04 §4.3)
     ResumeSession {
         command_id: String,
@@ -850,7 +842,7 @@ pub enum ServerToNodeMsg {
 - `POST /api/v1/sessions/:id/resume`:
   停止済みセッションを同一 `session_id` のまま再開する (`fxg session resume`
   の Web UI 版)。エージェント側コンテキストのネイティブ復元
-  (`session/resume` → `session/load` → OpenCode2 既存セッション bind) を優先し、
+  (`session/resume` → `session/load`) を優先し、
   非対応の場合は履歴 Replay を注入して継続する。応答は `ResumeSessionResponse`
   (`session_id` / `context_restored`)。稼働中セッションは `INVALID_STATE`、
   一時VMセッションは v1 では `INVALID_STATE`
@@ -981,27 +973,16 @@ xterm互換アダプター）とノード上の ConPTY / Unix PTY
 
 ### 主なIPCメソッド
 
-1. `EnsureSession { cwd, agent_id, extra_args } -> { session_id, attach_mode }`:
-   - `fxg run opencode` 実行時に呼ばれ、デーモン側でセッションを開始します。
-   - `attach_mode` には以下のいずれかが返ります：
-     - `AcpTui`: `fxg` CLI自身の内蔵TUI (`ratatui`)
-       でIPCストリームを描画するモード。
-     - `NativeOpenCodeAttach { server_url: String, session_id: String }`:
-       デーモンが管理する `opencode2 serve` に対して、CLI側が
-       `opencode2 run --attach <server_url> --session <id>`
-       を子プロセス実行して純正TUIを直接表示するモード。
-2. `AttachSession { session_id, after_node_seq: Option<u64> }`:
-   - 既存セッションのイベントストリーム購読＋双方向操作（プロンプト送信・承認応答・リサイズ通知）。
-     `after_node_seq`
-     指定時はその連番以降の履歴をリプレイしてからライブストリームへ接続する（途中切断からの再接続用）。
-3. `GetLocalStatus`:
-   - ローカルで稼働中のセッション一覧、中央サーバーとのWebSocket接続状態、未送信Outboxイベント数を返却。4.
-     `SessionResume { session_id, force_replay } -> { session_id, attach_mode, context_restored }`:
+1. `EnsureSession { cwd, agent_id, extra_args, ... } -> { session_id, title }`:
+   - `fxg run <agent>` 実行時に呼ばれ、デーモン側でセッションを開始します。
+2. `GetLocalStatus`:
+   - ローカルで稼働中のセッション一覧、中央サーバーとのWebSocket接続状態、未送信Outboxイベント数を返却。
+3. `SessionResume { session_id, force_replay } -> { session_id, context_restored }`:
    - 停止済みセッションを同一 `session_id` のまま再開します
      (`fxg session resume`)。ネイティブ復元を優先し、非対応時は履歴 Replay で
      継続します (`context_restored = false`)。稼働中の再開は `INVALID_STATE`
-     を返却します (設計: docs/04 §4.3)。 - `SendPrompt`
-     は停止済みセッションに対してこの再開 (ネイティブ限定) を
+     を返却します。
+   - `SendPrompt` は停止済みセッションに対してこの再開 (ネイティブ限定) を
      自動実行してから送信します。ネイティブ復元不可の場合は `RESUME_REQUIRED`
      を返すため、クライアントは `SessionResume` での履歴 Replay
      再開を案内します。

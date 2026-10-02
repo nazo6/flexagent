@@ -1,4 +1,4 @@
-# 04. エージェントドライバ実装 (`ACP` / `opencode2`) と Windows 対応詳細
+# 04. エージェントドライバ実装 (ACP一本化) と Windows 対応詳細
 
 `crates/fxg-acp` および `crates/fxg-pty`
 におけるエージェント制御・プロセス管理の具体的な実装設計です。
@@ -7,19 +7,17 @@
 
 ## 1. `AgentDriver` トレイトによる抽象化
 
-将来的にACP以外の独自プロトコルを持つエージェントが増えても `fxg-node`
-本体を変更せずに済むよう、以下の非同期トレイトで統一します。
+すべてのアクション・対話は `AgentDriver` 非同期トレイトで統一します。
 
 ```rust
 #[async_trait::async_trait]
 pub trait AgentDriver: Send + Sync {
-    /// ドライバ識別子 ("acp", "opencode2")
+    /// ドライバ識別子 ("acp")
     fn driver_kind(&self) -> &'static str;
 
     /// セッションを起動し、イベント送出用のストリーム/ハンドルを返す。
-    /// `req.resume` 指定時はネイティブ復元 (`session/resume` / `session/load` /
-    /// OpenCode2 既存セッション bind) を試み、成否を
-    /// `StartedSession::context_restored` で返す (§4.3)
+    /// `req.resume` 指定時はネイティブ復元 (`session/resume` / `session/load`)
+    /// を試み、成否を `StartedSession::context_restored` で返す (§4.3)
     async fn start_session(
         &self,
         req: StartSessionRequest,
@@ -123,102 +121,26 @@ ACPでは、エディタやオーケストレータ側が **`acp::Client` トレ
   - `fxg-pty` クレートを呼び出し、ConPTY (Windows) または Unix PTY
     でコマンドを実行し、出力をリアルタイムにストリーム配信。
 
-> `opencode2` はイベントストリームに usage / stop reason に相当する情報を
-> 持たないため、Phase 2 の `UsageUpdated` / `TurnEnded` は ACP ドライバのみが
-> 発行します (UI / CLI は未受信時に非表示とする)。
-> なおコンテキスト圧縮の `CompactionUpdated` は逆に opencode2
-> ブリッジ専用です (ACP には圧縮を開始する API が無い。
-> 将来の `unstable_session_compaction` 安定化待ち)。
-
 ---
 
-## 3. OpenCode / OpenCode2 ハイブリッド統合 (`OpenCode2Driver`)
+## 3. 未登録エージェントのローカルコマンド解決 (`which` + `PATHEXT`)
 
-`fxg run opencode`（または
-`fxg run opencode2`）を実行した際、最も快適かつ高機能に使えるよう2つのモードを提供します。
+ACP Registry に登録されていないエージェント ID
+や、任意のローカルコマンド名が指定された場合、システムの `PATH`
+から自動解決して起動します。
 
-### モードA: Server Bridge + 純正TUI Attach モード（デフォルト推奨）
-
-OpenCode / OpenCode2
-のクライアント・サーバー分離アーキテクチャをフル活用します：
-
-1. `fxg daemon` がバックグラウンドで
-   `opencode serve --hostname 127.0.0.1 --port <free_port>`
-   を起動（セキュリティのためランダムな `OPENCODE_SERVER_PASSWORD`
-   を自動生成して環境変数に注入）。
-   - 起動前に `opencode --version` を実行し、**v2 系以外（v1
-     等）では起動しない**
-     （v1 は同名の `opencode` コマンドだが `serve` API を持たないため）。
-2. `fxg daemon` は HTTP (OpenAPI) + SSE (`/event` ストリーム)
-   クライアントとしてローカルの `opencode serve`
-   に接続し、すべてのメッセージ・ツール実行・権限要求を `UnifiedEventPayload`
-   に変換して `node.db` および中央サーバーへ同期します。
-3. **ユーザーがPCターミナルで `fxg run opencode` を叩いた場合**: `fxg` CLI
-   はローカルの `opencode serve` に対して
-   `opencode run --server http://127.0.0.1:<port> --session <id>`
-   を実行します。
-   - **結果**: PCのターミナルでは **100%純正のOpenCode2 TUI**
-     がそのまま動き、同時にスマホ（Android
-     PWA）やWebブラウザからも同じセッションがリアルタイムに見えて双方向操作できます。
-4. **スラッシュコマンド**: 起動時に `GET /api/command`
-   の一覧 (`init` / `review` などの組み込み +
-   `.opencode/commands/*.md` や `opencode.json` の `command`) を
-   `CapabilitiesUpdated` として同期し、UI
-   の補完候補に反映します。`/name <本文>` を受信した場合は
-   `POST /api/session/{id}/command` へ振り分け、本文は `$ARGUMENTS` /
-   `$1`… として opencode 側で展開されます。
-   - **1 プロンプト 1 コマンド**: opencode の ACP / 純正TUI
-     と同じく先頭のコマンドのみを実行し、2 つ目以降は引数として扱います。
-   - **既知のコマンドのみ**: 一覧に無い名前は通常のプロンプトとして送信します
-     (opencode 側の ACP 実装も同じ挙動)。
-   - **TUI 専用コマンド**: `/undo`・`/redo`・`/share`・`/help`
-     など opencode の TUI がローカル処理するコマンドは `/api/command`
-     に現れないため bridge からは実行できません (`opencode acp` モードでは
-     ACP 経由で `/compact` のみ `session/summarize`
-     へ振り分けられます)。例外として `/compact` は専用 API
-     (`POST /api/session/{id}/compact`) へ振り分けて bridge でも実行できます。
-   - **コンテキスト圧縮 (`/compact`)**: 圧縮 API は steer
-     配送のため、busy 中は次のステップ境界で実行されます。SSE の
-     `session.compaction.started` / `.ended` を
-     `UnifiedEventPayload::CompactionUpdated { status, detail }`
-     として記録し (要約本文の `session.compaction.delta`
-     はエフェメラル扱いで破棄)、UI / CLI
-     はタイムラインのシステム行として表示します。
-     `available_commands` には合成エントリ `compact`
-     を加え、UI のスラッシュ候補と「圧縮」ボタンに反映します
-     (同名のユーザー定義コマンドが存在する場合はそれを優先)。Web UI からは
-     `ControlSession(Compact)` =
-     `ActiveSessionHandle::compact_context()` でも実行できます。
-
-#### サーバーライフサイクルと設計判断 (2026-10-01 確定)
-
-`opencode2` 本体は「バックグラウンドサービス」1つを全セッション・全 TUI
-で共有する設計だが、**fxg は分離を優先し、fxg セッションごとに専用の
-`opencode serve`（空きポート +
-ランダムパスワード）を起動する**（現状維持と決定）。
-これにより:
-
-- あるセッションの `kill`（プロセスツリー終了）が他の fxg
-  セッションやユーザー自身の opencode2 に波及しない。
-- 純正TUI を閉じただけではサーバーは終了しない（デーモンが保持し、
-  `fxg attach` で再接続可能）。
-- `fxg daemon` の終了（正常終了は `shutdown_all`、Windows
-  の強制終了は Job Object の kill-on-close）で全セッションが停止する。
-  実行中ターン・承認待ちは失われるが、**会話履歴は opencode2 のグローバル DB
-  (`~/.local/share/opencode/opencode.db`) に永続化されるため失われない**
-  （新サーバーから過去セッションを取得できることを実証済み）。
-- 全サーバーが同一のグローバル DB を共有するため、複数サーバー同時稼働時は
-  SQLite の書き込みロック競合が起こり得る（WAL のため kill による破損はない）。
-
-将来「ノード共有サーバー」（デーモンが1サーバーを管理）へ変更する場合は、
-`fxg session kill` を「エンジンセッションの abort + active
-一覧からの除去」に変え、サーバー自体はデーモン終了時まで維持する必要がある。
-
-### モードB: ACP モード (`opencode acp`)
-
-`opencode acp`
-サブコマンドを使って標準ACPエージェントとして起動するモードです。Web/Androidからヘッドレスで起動する場合や、`AcpDriver`
-と完全に同じ挙動に揃えたい場合に使用します。
+1. **コマンド探索**:
+   - `which::which(cmd)` (Windows では `PATHEXT` を考慮した `which::which_in`)
+     を使用して実行可能バイナリを解決。
+   - `claude-code` や `my-agent`
+     などのローカル実行可能ファイルをそのまま指定可能。
+2. **ACP プロセス起動**:
+   - 解決されたバイナリを引数（`extra_args`）とともに子プロセスとしてスポーン。
+   - 標準入出力 (`stdin/stdout`) を介して ACP プロトコルで直結し、`AcpDriver`
+     経由で対話。
+3. **メリット**:
+   - ユーザー独自のエージェントや新規ツールを、設定ファイルの編集や Registry
+     登録なしに `fxg run <command>` で即座に利用できます。
 
 ---
 
@@ -262,25 +184,19 @@ OpenCode / OpenCode2
      CLIで特定のメッセージを選び「ここまでRevert（巻き戻し）」を実行した場合：
      1. 対象メッセージの `snapshot_tree_hash`
         を使い、ワークスペースのファイルをその時点へ復元（直前の状態の退避バックアップTreeも自動作成してデータロストを防止）。
-     2. エージェント側の会話をそのメッセージ時点へ巻き戻します（OpenCode2ならネイティブの
-        `POST /session/{id}/revert`
-        API、一般ACPエージェントならその時点までの履歴でセッションを再構築）。
+     2. エージェント側の会話をそのメッセージ時点までの履歴で再構築します。
 
 ### 4.2 セッションの Fork（会話の分岐）
 
 任意のメッセージ（`node_seq`）時点から会話を分岐させ、新しい `session_id`
 を作成します：
 
-1. **OpenCode2 の場合**: OpenCode2のネイティブAPI
-   `POST /session/{id}/fork`（指定 `messageID`
-   からの分岐）を呼び出し、内部コンテキストを維持したまま子セッションを生成します。
-2. **任意ACPエージェントの場合（および別エージェントへの乗り換えFork）**:
-   - エージェントがACPの `unstable_session_fork`
-     に対応していればそれを呼び出します。
-   - 未対応のエージェント、または **「途中まで `opencode2`
-     で進めた会話を、ここから `antigravity-acp` に切り替えてForkする」**
-     といった場合は、`node.db` / `server.db` に保存されている `node_seq`
-     までの構造化イベント履歴（会話＋変更ファイル要約）を新しいACPセッションの初期コンテキストとして自動注入（Replay）します。
+1. **ネイティブ Fork**: エージェントがACPの `unstable_session_fork`
+   に対応していればそれを呼び出します。
+2. **履歴 Replay**:
+   未対応のエージェント、または別エージェントに切り替えてForkする場合は、`node.db`
+   / `server.db` に保存されている `node_seq`
+   までの構造化イベント履歴（会話＋変更ファイル要約）を新しいACPセッションの初期コンテキストとして自動注入（Replay）します。
 
 ### 4.3 セッションのレジューム (Resume)
 
@@ -296,24 +212,16 @@ OpenCode / OpenCode2
    (`INVALID_STATE`)。
 2. **ネイティブ復元 (優先)**: エージェント内部の会話コンテキストを維持したまま
    再開します。
-   - `opencode2` (bridge): `GET /api/session/{id}` で存在確認し、既存
-     opencode セッションへ bind します (存在しない場合は履歴 Replay へ
-     フォールバック)。
-   - ACP: `sessionCapabilities.resume` → `session/resume` (履歴 Replay なし)、
+   - `sessionCapabilities.resume` → `session/resume` (履歴 Replay なし)、
      非対応で `agentCapabilities.loadSession` → `session/load` を使用します。
      `session/load` の Replay 通知は fxg のイベントログと重複するため破棄します
      (Replay は load 応答前に完了する仕様を利用して応答直後に drain)。
 3. **Replay フォールバック**: ネイティブ復元できない場合は、fork と同様に
    履歴 (会話 + ツール要約) を `client_source = "resume"` の `UserMessage`
-   として
-   新エージェントセッションへ注入します。
+   として新エージェントセッションへ注入します。
 4. **イベント**: `SessionCreated` は再発行せず、`StatusChanged(Idle)` を追記して
    状態投影を復帰させます。ネイティブ復元できたかは API 応答
    (`context_restored`) でクライアントへ返します。
-5. **Revert との関係**: OpenCode2 を再開した場合、ドライバ内の `prompt_ids`
-   (Revert のターン対応付け) はメモリ保持のため再開後は空になり、
-   `revert_context` は会話を巻き戻しません (ファイル復元は Shadow Git Tree が
-   継続して担当)。
 
 #### 4.3.1 送信時の自動レジューム (ネイティブ限定)
 
@@ -377,9 +285,9 @@ impl WinJobGuard {
 
 ### 5.2 コマンド解決 (`which` + `PATHEXT`) とパス正規化 (`dunce`)
 
-- **コマンド解決**: `npx`, `uvx`, `opencode` などを起動する際、必ず
+- **コマンド解決**: `npx`, `uvx`, `claude` などを起動する際、必ず
   `which::which_in(cmd, env::var_os("PATH"), &cwd)`
-  を通すことで、`opencode.cmd` や `npx.cmd` の拡張子を確実に解決してから
+  を通すことで、`claude.cmd` や `npx.cmd` の拡張子を確実に解決してから
   `tokio::process::Command` に渡します。
 - **UNCパス回避**: Windowsで `std::fs::canonicalize` を使うと `\\?\D:\ghq\...`
   というUNCプレフィックスが付き、Node.js製エージェントや外部ツールがパス解釈に失敗することがあります。そのため、パス正規化には必ず

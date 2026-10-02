@@ -1,16 +1,16 @@
 # FlexAgent (`fxg`) 設計・実装ドキュメント
 
 **FlexAgent (`fxg`)**
-は、コーディングエージェント（任意ACP対応エージェントおよび
-`opencode2`）を「好きな場所から好きな場所で動かせる」セルフホスト型・ローカルファーストのエージェントマネージャです。
+は、ACP（Agent Client
+Protocol）対応コーディングエージェントを「好きな場所から好きな場所で動かせる」セルフホスト型・ローカルファーストのエージェントマネージャです。
 
 ---
 
 ## コアコンセプト
 
 1. **単一バイナリ (`fxg`) による完結**:
-   - Rust製の単一バイナリ `fxg` に、**CLI (`fxg run`,
-     `fxg attach`)**、**ノードデーモン (`fxg daemon`)**、**中央サーバー
+   - Rust製の単一バイナリ `fxg` に、**CLI (`fxg run` 等)**、**ノードデーモン
+     (`fxg daemon`)**、**中央サーバー
      (`fxg server`)**、および **Web UI / PWA (`rust-embed`)**
      をすべて内包します。
 2. **ローカルファースト & 遅延同期 (Store-and-Forward)**:
@@ -52,7 +52,7 @@
 | **[01-architecture-and-sync.md](./01-architecture-and-sync.md)**         | 全体トポロジー、ローカルファースト同期、一時VMノード (`--stdio` & 自動ツール構築)、論理プロジェクト解決、セキュリティ |
 | **[02-database-schema.md](./02-database-schema.md)**                     | `node.db` / `server.db` 共通の単一SQLiteスキーマ（ロール差分・イベント投影）・FTS5検索・監査ログ                      |
 | **[03-protocol-and-api.md](./03-protocol-and-api.md)**                   | 共通型 (`fxg-protocol`)、Node⇔Server間通信 (WS & Stdio)、Git認証プロキシ/Bundle退避、Client API、ローカルIPC          |
-| **[04-agent-drivers-and-windows.md](./04-agent-drivers-and-windows.md)** | `AgentDriver` トレイト、ACP Registry自動解決、`opencode2` ハイブリッド統合、Windows固有実装                           |
+| **[04-agent-drivers-and-windows.md](./04-agent-drivers-and-windows.md)** | `AgentDriver` トレイト、ACP Registry・PATH探索、Shadow Git Revert/Fork、Windows固有実装                               |
 | **[05-cli-and-pwa-ui.md](./05-cli-and-pwa-ui.md)**                       | `fxg` CLIコマンド完全リファレンス、設定ファイルスキーマ (`config.toml` / `.fxg.toml`)、PWA + Web Push 設計            |
 
 ---
@@ -70,10 +70,10 @@ flexagent/
 │   ├── fxg-protocol/           # 共通型定義・ACP正規化イベント・WS/IPCメッセージ (ts-rs対応)
 │   ├── fxg-db/                 # SQLiteスキーマ管理・クエリレイヤー (server.db / node.db 共用・分離)
 │   ├── fxg-pty/                # ConPTY/Unix PTY・Windows Job Object・プロセスツリー管理
-│   ├── fxg-acp/                # ACP Registry管理・AcpDriver・OpenCode2Driver実装
+│   ├── fxg-acp/                # ACP Registry管理・AcpDriver・ローカル PATH コマンド解決
 │   ├── fxg-node/               # ノードデーモン実装 (ローカルIPC・ローカルWeb配信・Outbox同期・Project解決)
 │   ├── fxg-server/             # 中央サーバー実装 (Axum・ノード管理・イベント集約・Web Push・PWA配信)
-│   └── fxg-cli/                # `fxg` バイナリエントリポイント (CLI / TUI / daemon / server サブコマンド)
+│   └── fxg-cli/                # `fxg` バイナリエントリポイント (CLI / daemon / server サブコマンド・Web UI自動オープン)
 └── ui/                         # 共通フロントエンド (SvelteKit / Svelte 5 SPA + TypeScript + Tailwind v4 + shadcn-svelte)
     ├── package.json            # パッケージ管理: pnpm / 品質管理: oxlint, oxfmt, svelte-check, Vitest
     ├── pnpm-lock.yaml
