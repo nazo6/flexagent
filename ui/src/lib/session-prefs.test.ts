@@ -21,13 +21,12 @@ describe("session prefs", () => {
     const storage = memoryStorage();
     saveNewSessionPrefs(
       "github.com/nazo6/flexagent",
-      { agent: "opencode2", mode: "plan", opencodeMode: "acp" },
+      { agent: "claude-code", mode: "plan" },
       storage,
     );
     expect(loadNewSessionPrefs("github.com/nazo6/flexagent", storage)).toEqual({
-      agent: "opencode2",
+      agent: "claude-code",
       mode: "plan",
-      opencodeMode: "acp",
     });
     expect(loadNewSessionPrefs("github.com/nazo6/other", storage)).toBeNull();
   });
@@ -35,7 +34,7 @@ describe("session prefs", () => {
   it("returns null when nothing meaningful is stored", () => {
     const storage = memoryStorage();
     expect(loadNewSessionPrefs("p", storage)).toBeNull();
-    saveNewSessionPrefs("p", { agent: "", mode: "default", opencodeMode: "default" }, storage);
+    saveNewSessionPrefs("p", { agent: "", mode: "default" }, storage);
     expect(loadNewSessionPrefs("p", storage)).toBeNull();
     expect(loadNewSessionPrefs("", storage)).toBeNull();
     expect(loadNewSessionPrefs("p", null)).toBeNull();
@@ -49,14 +48,10 @@ describe("session prefs", () => {
     storage.setItem("fxg:new_session_prefs:p", JSON.stringify({ mode: "bogus", agent: 42 }));
     expect(loadNewSessionPrefs("p", storage)).toBeNull();
 
-    storage.setItem(
-      "fxg:new_session_prefs:p",
-      JSON.stringify({ agent: "acp-x", mode: "bogus", opencodeMode: "bridge" }),
-    );
+    storage.setItem("fxg:new_session_prefs:p", JSON.stringify({ agent: "acp-x", mode: "bogus" }));
     expect(loadNewSessionPrefs("p", storage)).toEqual({
       agent: "acp-x",
       mode: "default",
-      opencodeMode: "bridge",
     });
   });
 });

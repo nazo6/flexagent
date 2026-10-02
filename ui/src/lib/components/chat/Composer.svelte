@@ -141,13 +141,25 @@
         toast.error(result.error ?? result.code ?? '操作に失敗しました');
       } else if (action.action === 'cancel') {
         toast.info('中断リクエストを送信しました');
-      } else if (action.action === 'compact') {
-        toast.info('コンテキストの圧縮をリクエストしました');
       }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
     } finally {
       controlBusy = false;
+    }
+  }
+
+  async function requestCompact() {
+    if (sending || controlBusy) return;
+    try {
+      const result = await sync.sendPrompt(sessionId, '/compact');
+      if (!result.success) {
+        toast.error(result.error ?? result.code ?? '圧縮リクエストの送信に失敗しました');
+      } else {
+        toast.info('/compact コマンドを送信しました');
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
     }
   }
 
@@ -300,9 +312,9 @@
         <Button
           variant="outline"
           size="sm"
-          disabled={controlBusy}
-          title="会話を要約してコンテキストを圧縮します（実行中の場合は次のステップ境界で実行）"
-          onclick={() => void runControl({ action: 'compact' })}
+          disabled={controlBusy || sending}
+          title="会話を要約してコンテキストを圧縮します（/compact コマンドを送信）"
+          onclick={() => void requestCompact()}
         >
           <Minimize2Icon class="size-3.5" />
           圧縮

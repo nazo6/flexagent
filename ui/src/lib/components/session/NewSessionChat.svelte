@@ -19,8 +19,7 @@
   import {
     loadNewSessionPrefs,
     saveNewSessionPrefs,
-    type SessionModePreference,
-    type OpencodeModePreference
+    type SessionModePreference
   } from '$lib/session-prefs';
   import { getNodeAvailability } from '$lib/node-status';
   import { sync } from '$lib/stores/app.svelte';
@@ -74,7 +73,6 @@
   let prefsProjectId = '';
   let agentTouched = $state(false);
   let modeTouched = $state(false);
-  let opencodeTouched = $state(false);
 
   // Fork 引き継ぎ
   let forkSessionId = $state('');
@@ -82,7 +80,6 @@
 
   // 起動オプション
   let sessionMode = $state<SessionModePreference>('default');
-  let opencodeMode = $state<OpencodeModePreference>('default');
   let extraArgsText = $state('');
 
   // プロビジョナー接続テスト
@@ -184,7 +181,7 @@
 
   const effectiveAgent = $derived(
     isProvisionerMode
-      ? customAgent.trim() || 'opencode2'
+      ? customAgent.trim()
       : installedAgents.length > 0
         ? agentId || installedAgents[0]
         : customAgent.trim()
@@ -239,12 +236,10 @@
       prefsProjectId = project.project_id;
       agentTouched = false;
       modeTouched = false;
-      opencodeTouched = false;
     }
     const prefs = untrack(() => loadNewSessionPrefs(project.project_id));
     if (!prefs) return;
     if (!modeTouched && prefs.mode !== 'default') sessionMode = prefs.mode;
-    if (!opencodeTouched && prefs.opencodeMode !== 'default') opencodeMode = prefs.opencodeMode;
     if (!agentTouched && prefs.agent !== '') {
       if (installedAgents.includes(prefs.agent)) {
         agentId = prefs.agent;
@@ -261,7 +256,6 @@
     void agentId;
     void customAgent;
     void sessionMode;
-    void opencodeMode;
     const projectId = selectedProject?.project_id ?? '';
     if (projectId === '' || projectId !== prefsProjectId || isProvisionerMode) return;
     persistPrefs();
@@ -324,7 +318,6 @@
         agent_id: effectiveAgent,
         initial_prompt: promptToSend === '' ? null : promptToSend,
         mode: sessionMode === 'default' ? null : sessionMode,
-        opencode_mode: opencodeMode === 'default' ? null : opencodeMode,
         extra_args: extraArgs,
         fork: forkSessionId
           ? {
@@ -376,8 +369,7 @@
     if (projectId === '' || projectId !== prefsProjectId || isProvisionerMode) return;
     saveNewSessionPrefs(projectId, {
       agent: effectiveAgent,
-      mode: sessionMode,
-      opencodeMode
+      mode: sessionMode
     });
   }
 
@@ -543,7 +535,7 @@
           {:else}
             <Input
               bind:value={customAgent}
-              placeholder={isProvisionerMode ? 'opencode2 (一時VMに自動導入)' : 'opencode2 / acp'}
+              placeholder={isProvisionerMode ? 'エージェントID / コマンド' : 'エージェントID (ACP Registry または PATH)'}
               class="h-8 text-xs"
             />
           {/if}
@@ -831,18 +823,6 @@
               </div>
 
               <div class="flex flex-col gap-1">
-                <Label class="text-xs">OpenCode2 実行モード</Label>
-                <select
-                  bind:value={opencodeMode}
-                  class="border-input bg-background h-8 rounded-md border px-2 text-xs outline-none focus-visible:ring-1"
-                >
-                  <option value="default">既定 (TUI + Server ブリッジ)</option>
-                  <option value="bridge">bridge (サーバーブリッジのみ)</option>
-                  <option value="acp">acp (ACP Driver 経由)</option>
-                </select>
-              </div>
-
-              <div class="flex flex-col gap-1 sm:col-span-2">
                 <Label class="text-xs">追加 CLI 引数 (スペース区切り)</Label>
                 <Input
                   bind:value={extraArgsText}

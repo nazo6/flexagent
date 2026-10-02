@@ -5,7 +5,6 @@
  * 保持する。端末ごとの好みであり、サーバー (ノード / 中央サーバー) には保存しない。
  */
 export type SessionModePreference = "default" | "code" | "plan";
-export type OpencodeModePreference = "default" | "bridge" | "acp";
 
 /** 新規セッション画面で復元する起動設定。 */
 export interface NewSessionPrefs {
@@ -13,13 +12,10 @@ export interface NewSessionPrefs {
   agent: string;
   /** エージェント初期モード */
   mode: SessionModePreference;
-  /** OpenCode2 実行モード */
-  opencodeMode: OpencodeModePreference;
 }
 
 const KEY_PREFIX = "fxg:new_session_prefs:";
 const SESSION_MODES: readonly SessionModePreference[] = ["default", "code", "plan"];
-const OPENCODE_MODES: readonly OpencodeModePreference[] = ["default", "bridge", "acp"];
 
 /** `localStorage` を解決する (SSR / テストでは引数で差し替える)。 */
 function resolveStorage(storage?: Storage | null): Storage | null {
@@ -29,10 +25,6 @@ function resolveStorage(storage?: Storage | null): Storage | null {
 
 function isSessionMode(value: unknown): value is SessionModePreference {
   return SESSION_MODES.includes(value as SessionModePreference);
-}
-
-function isOpencodeMode(value: unknown): value is OpencodeModePreference {
-  return OPENCODE_MODES.includes(value as OpencodeModePreference);
 }
 
 /**
@@ -56,9 +48,8 @@ export function loadNewSessionPrefs(
     const prefs: NewSessionPrefs = {
       agent: typeof record.agent === "string" ? record.agent : "",
       mode: isSessionMode(record.mode) ? record.mode : "default",
-      opencodeMode: isOpencodeMode(record.opencodeMode) ? record.opencodeMode : "default",
     };
-    if (prefs.agent === "" && prefs.mode === "default" && prefs.opencodeMode === "default") {
+    if (prefs.agent === "" && prefs.mode === "default") {
       return null;
     }
     return prefs;
