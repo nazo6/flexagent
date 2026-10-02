@@ -8,7 +8,10 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 use fxg_acp::registry::AcpRegistry;
-use fxg_protocol::common::{PermissionOption, SessionControlAction, SessionStatus};
+use fxg_protocol::common::{
+    ElicitationAction, ElicitationRequestEntry, PermissionOption, SessionControlAction,
+    SessionStatus,
+};
 use fxg_protocol::events::UnifiedEventPayload;
 use fxg_protocol::ipc::{AttachMode, IpcResult, IpcServerMessage};
 use usage::Args;
@@ -1475,6 +1478,8 @@ pub enum InboxCommands {
     Approve(InboxApproveArgs),
     /// 承認リクエストを却下する
     Reject(InboxRejectArgs),
+    /// 質問 (elicitation) へ回答する
+    Answer(InboxAnswerArgs),
 }
 
 /// `fxg inbox list`
@@ -1491,27 +1496,54 @@ impl usage::RunAsync for InboxListArgs {
     async fn run_async(self) -> Self::Output {
         let mut client = DaemonClient::connect().await?;
         let requests = client.inbox_list().await?;
+        let elicitations = client.inbox_elicitations().await?;
         if self.json {
-            println!("{}", serde_json::to_string_pretty(&requests)?);
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&serde_json::json!({
+                    "requests": requests,
+                    "elicitations": elicitations,
+                }))?
+            );
             return Ok(());
         }
         if requests.is_empty() {
             println!("(承認待ちリクエストなし)");
-            return Ok(());
+        } else {
+            let rows: Vec<Vec<String>> = requests
+                .iter()
+                .map(|entry| {
+                    vec![
+                        truncate(&entry.request_id, 24),
+                        short_id(&entry.session_id),
+                        truncate(&entry.tool_name, 20),
+                        truncate(&entry.summary, 40),
+                        format_unix_ms_utc(entry.created_at),
+                    ]
+                })
+                .collect();
+            print_table(&["REQUEST", "SESSION", "TOOL", "SUMMARY", "CREATED"], &rows);
         }
-        let rows: Vec<Vec<String>> = requests
-            .iter()
-            .map(|entry| {
-                vec![
-                    truncate(&entry.request_id, 24),
-                    short_id(&entry.session_id),
-                    truncate(&entry.tool_name, 20),
-                    truncate(&entry.summary, 40),
-                    format_unix_ms_utc(entry.created_at),
-                ]
-            })
-            .collect();
-        print_table(&["REQUEST", "SESSION", "TOOL", "SUMMARY", "CREATED"], &rows);
+        if elicitations.is_empty() {
+            println!("(回答待ちの質問なし)");
+        } else {
+            let rows: Vec<Vec<String>> = elicitations
+                .iter()
+                .map(|entry| {
+                    vec![
+                        truncate(&entry.elicitation_id, 24),
+                        short_id(&entry.session_id),
+                        truncate(&entry.mode, 8),
+                        truncate(&entry.message, 40),
+                        format_unix_ms_utc(entry.created_at),
+                    ]
+                })
+                .collect();
+            print_table(
+                &["QUESTION", "SESSION", "MODE", "MESSAGE", "CREATED"],
+                &rows,
+            );
+        }
         Ok(())
     }
 }
@@ -1589,6 +1621,113 @@ async fn find_permission(
         .into_iter()
         .find(|entry| entry.request_id == request_id)
         .with_context(|| format!("承認待ちリクエストが見つかりません: {request_id}"))
+}
+
+/// `fxg inbox answer <elicitation-id>`
+#[derive(Debug, Args)]
+pub struct InboxAnswerArgs {
+    /// elicitation id (`fxg inbox list` の QUESTION 列)
+    elicitation_id: String,
+    /// accept: 回答内容を JSON オブジェクトで指定する (例: '{"strategy":"a"}')
+    #[usage(long)]
+    json: Option<String>,
+    /// accept: `key=value` 形式の回答を追加する (繰り返し指定可。値は JSON として解釈し、失敗時は文字列)
+    #[usage(long = "set")]
+    set: Vec<String>,
+    /// accept: 指定した回答内容 (無指定なら空) で回答する
+    #[usage(long)]
+    accept: bool,
+    /// 明示的に辞退する (decline)
+    #[usage(long)]
+    decline: bool,
+    /// 回答せずキャンセルする (cancel)
+    #[usage(long)]
+    cancel: bool,
+}
+
+impl usage::RunAsync for InboxAnswerArgs {
+    type Output = Result<()>;
+
+    async fn run_async(self) -> Self::Output {
+        let mut client = DaemonClient::connect().await?;
+        let entry = find_elicitation(&mut client, &self.elicitation_id).await?;
+        let has_content = self.json.is_some() || !self.set.is_empty();
+        let (action, content) = if self.decline {
+            (ElicitationAction::Decline, serde_json::Value::Null)
+        } else if self.cancel {
+            (ElicitationAction::Cancel, serde_json::Value::Null)
+        } else if self.accept || has_content {
+            (
+                ElicitationAction::Accept,
+                build_elicitation_content(&self.json, &self.set)?,
+            )
+        } else {
+            // 引数なし: 質問内容と回答方法を表示する
+            println!("質問: {}", entry.message);
+            if let Some(properties) = entry
+                .requested_schema
+                .get("properties")
+                .and_then(|value| value.as_object())
+            {
+                println!("回答項目:");
+                for (key, property) in properties {
+                    let type_name = property
+                        .get("type")
+                        .and_then(|value| value.as_str())
+                        .unwrap_or("string");
+                    println!("  {key} ({type_name})");
+                }
+            }
+            println!(
+                "回答例: fxg inbox answer {} --accept --set key=value",
+                self.elicitation_id
+            );
+            println!(
+                "        fxg inbox answer {} --decline | --cancel",
+                self.elicitation_id
+            );
+            return Ok(());
+        };
+        client
+            .respond_elicitation(&entry.session_id, &entry.elicitation_id, action, content)
+            .await?;
+        println!("answered {} ({action})", short_id(&entry.session_id));
+        Ok(())
+    }
+}
+
+/// 回答待ちの質問を `elicitation_id` で引く。
+async fn find_elicitation(
+    client: &mut DaemonClient,
+    elicitation_id: &str,
+) -> Result<ElicitationRequestEntry> {
+    client
+        .inbox_elicitations()
+        .await?
+        .into_iter()
+        .find(|entry| entry.elicitation_id == elicitation_id)
+        .with_context(|| format!("回答待ちの質問が見つかりません: {elicitation_id}"))
+}
+
+/// `--json` / `--set` から accept の content を組み立てる。
+fn build_elicitation_content(json: &Option<String>, set: &[String]) -> Result<serde_json::Value> {
+    let mut content = match json {
+        Some(raw) => serde_json::from_str::<serde_json::Value>(raw)
+            .with_context(|| format!("--json の JSON が不正です: {raw}"))?,
+        None => serde_json::json!({}),
+    };
+    let Some(object) = content.as_object_mut() else {
+        bail!("--json には JSON オブジェクトを指定してください");
+    };
+    for pair in set {
+        let (key, value) = pair
+            .split_once('=')
+            .with_context(|| format!("--set は key=value 形式で指定してください: {pair}"))?;
+        let value = serde_json::from_str::<serde_json::Value>(value)
+            .unwrap_or_else(|_| serde_json::Value::String(value.to_owned()));
+        object.insert(key.to_owned(), value);
+    }
+    Ok(content)
 }
 
 /// 種別の先頭一致で `option_id` を選ぶ。
@@ -2359,5 +2498,35 @@ impl usage::RunAsync for KillAllArgs {
             ptys.len()
         );
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn build_elicitation_content_parses_json_and_set_pairs() {
+        let content = build_elicitation_content(
+            &Some("{\"strategy\":\"a\"}".to_owned()),
+            &["count=3".to_owned(), "note=hello".to_owned()],
+        )
+        .expect("content");
+        assert_eq!(content["strategy"], "a");
+        assert_eq!(content["count"], 3);
+        // JSON として解釈できない値は文字列として扱う
+        assert_eq!(content["note"], "hello");
+    }
+
+    #[test]
+    fn build_elicitation_content_rejects_non_object_json() {
+        let err = build_elicitation_content(&Some("[1,2]".to_owned()), &[]).expect_err("array");
+        assert!(err.to_string().contains("JSON オブジェクト"), "got: {err}");
+    }
+
+    #[test]
+    fn build_elicitation_content_requires_key_value_pairs() {
+        let err = build_elicitation_content(&None, &["invalid".to_owned()]).expect_err("pair");
+        assert!(err.to_string().contains("key=value"), "got: {err}");
     }
 }

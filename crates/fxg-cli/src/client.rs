@@ -10,7 +10,8 @@ use anyhow::{Context, Result, bail};
 use fxg_node::IpcClient;
 use fxg_protocol::client_api::{SessionRevertResponse, WorktreeInfo};
 use fxg_protocol::common::{
-    HookLogEntry, PermissionRequestEntry, ProjectSummary, SessionControlAction, SessionSummary,
+    ElicitationAction, ElicitationRequestEntry, HookLogEntry, PermissionRequestEntry,
+    ProjectSummary, SessionControlAction, SessionSummary,
 };
 use fxg_protocol::config::process_env;
 use fxg_protocol::ipc::{
@@ -418,6 +419,41 @@ impl DaemonClient {
             IpcResult::Inbox { requests, .. } => Ok(requests),
             other => bail!("unexpected ipc result: {other:?}"),
         }
+    }
+
+    /// `fxg inbox list` の質問 (elicitation) 一覧。
+    pub async fn inbox_elicitations(&mut self) -> Result<Vec<ElicitationRequestEntry>> {
+        let command_id = self.command_id();
+        let result = self
+            .request(IpcClientMessage::InboxList { command_id })
+            .await?;
+        match result {
+            IpcResult::Inbox { elicitations, .. } => Ok(elicitations),
+            other => bail!("unexpected ipc result: {other:?}"),
+        }
+    }
+
+    /// `fxg inbox answer` (elicitation への応答)。
+    pub async fn respond_elicitation(
+        &mut self,
+        session_id: &str,
+        elicitation_id: &str,
+        action: ElicitationAction,
+        content: serde_json::Value,
+    ) -> Result<()> {
+        let command_id = self.command_id();
+        let result = self
+            .request(IpcClientMessage::RespondElicitation {
+                command_id,
+                session_id: session_id.to_owned(),
+                elicitation_id: elicitation_id.to_owned(),
+                action,
+                content,
+                resolved_by: "cli".to_owned(),
+            })
+            .await?;
+        ack_message(result)?;
+        Ok(())
     }
 
     /// `fxg session revert`

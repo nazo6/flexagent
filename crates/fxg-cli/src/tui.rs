@@ -218,9 +218,14 @@ impl App {
                     "承認解決: {request_id} → {selected_option_id}"
                 )));
             }
-            UnifiedEventPayload::ElicitationRequest { message, .. } => {
-                self.blocks
-                    .push(Block::Permission(format!("質問待ち: {message}")));
+            UnifiedEventPayload::ElicitationRequest {
+                elicitation_id,
+                message,
+                ..
+            } => {
+                self.blocks.push(Block::Permission(format!(
+                    "質問待ち: {message} (fxg inbox answer {elicitation_id} で回答)"
+                )));
             }
             UnifiedEventPayload::ElicitationResolved {
                 elicitation_id,

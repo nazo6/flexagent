@@ -304,7 +304,20 @@ async fn phase3_session_and_inbox_commands_roundtrip_through_daemon() {
 
     let output = env.run(&["inbox", "list", "--json"], Some(&repo));
     let json: serde_json::Value = serde_json::from_str(&stdout_of(&output)).expect("valid json");
-    assert!(json.as_array().expect("array").is_empty());
+    assert!(
+        json["requests"]
+            .as_array()
+            .expect("requests array")
+            .is_empty(),
+        "got: {json}"
+    );
+    assert!(
+        json["elicitations"]
+            .as_array()
+            .expect("elicitations array")
+            .is_empty(),
+        "got: {json}"
+    );
 
     // 存在しない request id への応答は拒否される
     let output = env.run(&["inbox", "approve", "req-unknown"], Some(&repo));
