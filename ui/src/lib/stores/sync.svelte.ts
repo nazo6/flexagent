@@ -1,6 +1,8 @@
 import { ApiError } from "$lib/api/errors";
 import type { ClientWsMessage } from "$lib/generated/ClientWsMessage";
 import type { CommandResult } from "$lib/generated/CommandResult";
+import type { ElicitationAction } from "$lib/generated/ElicitationAction";
+import type { ElicitationRequestEntry } from "$lib/generated/ElicitationRequestEntry";
 import type { NodeSummary } from "$lib/generated/NodeSummary";
 import type { PermissionRequestEntry } from "$lib/generated/PermissionRequestEntry";
 import type { ProjectSummary } from "$lib/generated/ProjectSummary";
@@ -11,6 +13,7 @@ import type { SessionEventEnvelope } from "$lib/generated/SessionEventEnvelope";
 import type { SessionRevertResponse } from "$lib/generated/SessionRevertResponse";
 import type { ResumeSessionResponse } from "$lib/generated/ResumeSessionResponse";
 import type { SessionSummary } from "$lib/generated/SessionSummary";
+import type { JsonValue } from "$lib/generated/serde_json/JsonValue";
 import { mergeCursor } from "$lib/sync/cursor";
 import { SessionTimeline } from "$lib/sync/timeline.svelte";
 import type { PendingPrompt } from "$lib/sync/reducer";
@@ -62,6 +65,8 @@ export class SyncStore {
   nodes = $state<NodeSummary[]>([]);
   projects = $state<ProjectSummary[]>([]);
   inbox = $state<PermissionRequestEntry[]>([]);
+  /** 回答待ち elicitation (質問) 一覧 (全セッション横断)。 */
+  inboxElicitations = $state<ElicitationRequestEntry[]>([]);
   /** Client WS 接続状態。 */
   wsConnected = $state(false);
   /** 中央サーバーへの接続状態 (ローカルノード接続時のみ)。 */
@@ -215,7 +220,9 @@ export class SyncStore {
 
   async refreshInbox(): Promise<void> {
     try {
-      this.inbox = await this.connection.client.inbox();
+      const inbox = await this.connection.client.inbox();
+      this.inbox = inbox.requests;
+      this.inboxElicitations = inbox.elicitations;
     } catch (error) {
       this.#warn("inbox", error);
     }
@@ -368,6 +375,28 @@ export class SyncStore {
         session_id: sessionId,
         request_id: requestId,
         selected_option_id: selectedOptionId,
+        resolved_by: resolvedBy,
+      },
+      sessionId,
+    );
+  }
+
+  /** elicitation (質問) へ応答する (WS 経由。冪等)。 */
+  respondElicitation(
+    sessionId: string,
+    elicitationId: string,
+    action: ElicitationAction,
+    content: JsonValue,
+    resolvedBy = "web",
+  ): Promise<CommandResult> {
+    return this.#dispatch(
+      {
+        op: "respond_elicitation",
+        command_id: crypto.randomUUID(),
+        session_id: sessionId,
+        elicitation_id: elicitationId,
+        action,
+        content,
         resolved_by: resolvedBy,
       },
       sessionId,

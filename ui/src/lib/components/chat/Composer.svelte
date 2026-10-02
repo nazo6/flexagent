@@ -41,7 +41,7 @@
   let resuming = $state(false);
 
   const isRunning = $derived(
-    status === 'running' || status === 'waiting_permission'
+    status === 'running' || status === 'waiting_permission' || status === 'waiting_input'
   );
   const isStopped = $derived(
     status === 'stopped' || status === 'error'
@@ -49,7 +49,12 @@
 
   // セッションが稼働状態になったら再開提案を閉じる
   $effect(() => {
-    if (status === 'idle' || status === 'running' || status === 'waiting_permission') {
+    if (
+      status === 'idle' ||
+      status === 'running' ||
+      status === 'waiting_permission' ||
+      status === 'waiting_input'
+    ) {
       resumeRequired = false;
     }
   });

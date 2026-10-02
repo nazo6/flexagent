@@ -299,6 +299,61 @@ describe("permissions", () => {
   });
 });
 
+describe("elicitations", () => {
+  it("merges elicitation_resolved into the question item", () => {
+    const sources = emptySources([
+      makeEvent(1, {
+        type: "elicitation_request",
+        data: {
+          elicitation_id: "elic-1",
+          message: "どの戦略で進めますか?",
+          mode: "form",
+          requested_schema: {
+            type: "object",
+            properties: { strategy: { type: "string", enum: ["a", "b"] } },
+            required: ["strategy"],
+          },
+          tool_call_id: null,
+        },
+      }),
+      makeEvent(2, {
+        type: "elicitation_resolved",
+        data: {
+          elicitation_id: "elic-1",
+          action: "accept",
+          content: { strategy: "a" },
+          resolved_by: "web",
+        },
+      }),
+    ]);
+    const items = buildTimelineItems(sources);
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({
+      kind: "elicitation",
+      elicitationId: "elic-1",
+      message: "どの戦略で進めますか?",
+      resolved: { action: "accept", resolvedBy: "web" },
+    });
+  });
+
+  it("renders a notice for an elicitation_resolved without its request (resync)", () => {
+    const sources = emptySources([
+      makeEvent(1, {
+        type: "elicitation_resolved",
+        data: {
+          elicitation_id: "elic-1",
+          action: "cancel",
+          content: null,
+          resolved_by: "system",
+        },
+      }),
+    ]);
+    const items = buildTimelineItems(sources);
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({ kind: "notice", tone: "info" });
+  });
+});
+
 describe("metadata helpers", () => {
   it("extracts the latest capabilities", () => {
     const events = [

@@ -18,7 +18,6 @@ import type { NodeSummary } from "$lib/generated/NodeSummary";
 import type { NodesResponse } from "$lib/generated/NodesResponse";
 import type { NodeTokenSummary } from "$lib/generated/NodeTokenSummary";
 import type { NodeTokensResponse } from "$lib/generated/NodeTokensResponse";
-import type { PermissionRequestEntry } from "$lib/generated/PermissionRequestEntry";
 import type { ProjectLinkRequest } from "$lib/generated/ProjectLinkRequest";
 import type { ProjectLinkResponse } from "$lib/generated/ProjectLinkResponse";
 import type { ProjectScanRequest } from "$lib/generated/ProjectScanRequest";
@@ -32,6 +31,8 @@ import type { PruneWorktreesRequest } from "$lib/generated/PruneWorktreesRequest
 import type { PushSubscribeRequest } from "$lib/generated/PushSubscribeRequest";
 import type { PushSubscribeResponse } from "$lib/generated/PushSubscribeResponse";
 import type { RemoveWorktreeRequest } from "$lib/generated/RemoveWorktreeRequest";
+import type { RespondElicitationRequest } from "$lib/generated/RespondElicitationRequest";
+import type { RespondElicitationResponse } from "$lib/generated/RespondElicitationResponse";
 import type { RespondPermissionRequest } from "$lib/generated/RespondPermissionRequest";
 import type { RespondPermissionResponse } from "$lib/generated/RespondPermissionResponse";
 import type { ResumeSessionRequest } from "$lib/generated/ResumeSessionRequest";
@@ -310,10 +311,9 @@ export class ApiClient {
     });
   }
 
-  /** `GET /api/v1/inbox` */
-  async inbox(): Promise<PermissionRequestEntry[]> {
-    const response = await this.#request<InboxResponse>("GET", "/api/v1/inbox");
-    return response.requests;
+  /** `GET /api/v1/inbox` (未解決の承認・質問) */
+  inbox(): Promise<InboxResponse> {
+    return this.#request<InboxResponse>("GET", "/api/v1/inbox");
   }
 
   /** `POST /api/v1/sessions/:id/permissions/:req_id/respond` (冪等)。 */
@@ -325,6 +325,19 @@ export class ApiClient {
     return this.#request(
       "POST",
       `/api/v1/sessions/${encodeURIComponent(sessionId)}/permissions/${encodeURIComponent(requestId)}/respond`,
+      { body: request },
+    );
+  }
+
+  /** `POST /api/v1/sessions/:id/elicitations/:elicitation_id/respond` (冪等)。 */
+  respondElicitation(
+    sessionId: string,
+    elicitationId: string,
+    request: RespondElicitationRequest,
+  ): Promise<RespondElicitationResponse> {
+    return this.#request(
+      "POST",
+      `/api/v1/sessions/${encodeURIComponent(sessionId)}/elicitations/${encodeURIComponent(elicitationId)}/respond`,
       { body: request },
     );
   }

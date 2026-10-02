@@ -44,6 +44,7 @@
   const ACTION_LABELS: Record<string, string> = {
     session_start: 'セッション開始',
     permission_resolved: '承認解決',
+    elicitation_resolved: '質問解決',
     pty_spawn: 'PTY 起動',
     kill_switch: '緊急停止',
     worktree_manage: 'Worktree 操作',

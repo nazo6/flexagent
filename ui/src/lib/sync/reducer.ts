@@ -1,5 +1,6 @@
 import type { CommandInfo } from "$lib/generated/CommandInfo";
 import type { ConfigOptionInfo } from "$lib/generated/ConfigOptionInfo";
+import type { ElicitationAction } from "$lib/generated/ElicitationAction";
 import type { FileDiff } from "$lib/generated/FileDiff";
 import type { ModeInfo } from "$lib/generated/ModeInfo";
 import type { PermissionOption } from "$lib/generated/PermissionOption";
@@ -104,6 +105,17 @@ export type TimelineItem =
       options: PermissionOption[];
       details: unknown;
       resolved: { selectedOptionId: string; resolvedBy: string } | null;
+    }
+  | {
+      kind: "elicitation";
+      key: string;
+      seq: number;
+      createdAt: number;
+      elicitationId: string;
+      message: string;
+      mode: string;
+      requestedSchema: unknown;
+      resolved: { action: ElicitationAction; resolvedBy: string } | null;
     }
   | { kind: "plan"; key: string; seq: number; createdAt: number; entries: PlanEntry[] }
   | {
@@ -231,6 +243,7 @@ export function buildTimelineItems(sources: TimelineSources): TimelineItem[] {
   const toolIndex = new Map<string, number>();
   const terminalIndex = new Map<string, number>();
   const permissionIndex = new Map<string, number>();
+  const elicitationIndex = new Map<string, number>();
 
   for (const event of sources.events) {
     const payload = event.payload;
@@ -358,6 +371,44 @@ export function buildTimelineItems(sources: TimelineSources): TimelineItem[] {
             key: `permission-resolved:${payload.data.request_id}`,
             ...base,
             text: `承認 ${payload.data.request_id} は ${payload.data.resolved_by} により ${payload.data.selected_option_id} で解決済み`,
+            tone: "info",
+          });
+        }
+        break;
+      }
+      case "elicitation_request": {
+        elicitationIndex.set(payload.data.elicitation_id, items.length);
+        items.push({
+          kind: "elicitation",
+          key: `elicitation:${payload.data.elicitation_id}`,
+          ...base,
+          elicitationId: payload.data.elicitation_id,
+          message: payload.data.message,
+          mode: payload.data.mode,
+          requestedSchema: payload.data.requested_schema,
+          resolved: null,
+        });
+        break;
+      }
+      case "elicitation_resolved": {
+        const index = elicitationIndex.get(payload.data.elicitation_id);
+        if (index !== undefined) {
+          const existing = items[index];
+          if (existing.kind === "elicitation") {
+            items[index] = {
+              ...existing,
+              resolved: {
+                action: payload.data.action,
+                resolvedBy: payload.data.resolved_by,
+              },
+            };
+          }
+        } else {
+          items.push({
+            kind: "notice",
+            key: `elicitation-resolved:${payload.data.elicitation_id}`,
+            ...base,
+            text: `質問 ${payload.data.elicitation_id} は ${payload.data.resolved_by} により ${payload.data.action} で解決済み`,
             tone: "info",
           });
         }

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
+  import ElicitationCard from '$lib/components/ElicitationCard.svelte';
   import PermissionCard from '$lib/components/PermissionCard.svelte';
   import MarkdownText from '$lib/components/MarkdownText.svelte';
   import ToolCallGroup from './ToolCallGroup.svelte';
@@ -201,6 +202,15 @@
           summary={item.summary}
           options={item.options}
           details={item.details}
+          resolved={item.resolved}
+          createdAt={item.createdAt}
+        />
+      {:else if item.kind === 'elicitation'}
+        <ElicitationCard
+          sessionId={sessionId}
+          elicitationId={item.elicitationId}
+          message={item.message}
+          requestedSchema={item.requestedSchema}
           resolved={item.resolved}
           createdAt={item.createdAt}
         />
