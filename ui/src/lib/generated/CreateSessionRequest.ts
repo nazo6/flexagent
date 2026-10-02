@@ -46,10 +46,6 @@ initial_prompt: string | null,
  */
 mode: string | null, 
 /**
- * OpenCode2 起動モード ("bridge" または "acp")
- */
-opencode_mode: string | null, 
-/**
  * エージェントへの追加パススルー引数
  */
 extra_args: Array<string> | null, 

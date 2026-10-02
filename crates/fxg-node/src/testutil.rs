@@ -110,7 +110,6 @@ struct MockAgentInner {
         )>,
     >,
     modes: Mutex<Vec<String>>,
-    reverted: Mutex<Vec<u64>>,
     events: Mutex<Vec<mpsc::UnboundedSender<DriverEvent>>>,
     starts: Mutex<Vec<MockStart>>,
     /// ネイティブ復元 (resume) に対応しているか
@@ -170,11 +169,6 @@ impl MockAgent {
     /// 適用されたモード変更一覧。
     pub(crate) fn modes(&self) -> Vec<String> {
         self.inner.modes.lock().expect("modes").clone()
-    }
-
-    /// `revert_context` が呼ばれた `keep_turns` (先頭から残すターン数) 一覧。
-    pub(crate) fn reverted(&self) -> Vec<u64> {
-        self.inner.reverted.lock().expect("reverted").clone()
     }
 
     /// `SessionManager` へ渡すドライバファクトリ。
@@ -268,15 +262,6 @@ impl ActiveSessionHandle for MockAgent {
     }
 
     async fn cancel_turn(&self) -> anyhow::Result<()> {
-        Ok(())
-    }
-
-    async fn revert_context(&self, keep_turns: u64) -> anyhow::Result<()> {
-        self.inner
-            .reverted
-            .lock()
-            .expect("reverted")
-            .push(keep_turns);
         Ok(())
     }
 

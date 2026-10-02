@@ -298,8 +298,6 @@ pub enum ServerToNodeMsg {
         initial_prompt: Option<String>,
         /// 初期モード
         mode: Option<String>,
-        /// OpenCode2 起動モード
-        opencode_mode: Option<String>,
         /// エージェントへの追加引数
         extra_args: Option<Vec<String>>,
         /// 別ノードからの履歴引き継ぎ時 (Replay 注入) の会話履歴

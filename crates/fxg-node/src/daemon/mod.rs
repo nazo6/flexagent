@@ -847,7 +847,6 @@ mod tests {
                 parent_session_id: None,
                 fork_from_node_seq: None,
                 title: "stale".to_owned(),
-                opencode_mode: None,
             },
         )
         .await
@@ -917,7 +916,7 @@ mod tests {
         let outcome = daemon
             .state()
             .session_manager()
-            .ensure_session("c1", &workdir, "mock", &[], None, false)
+            .ensure_session("c1", &workdir, "mock", &[], None)
             .await
             .expect("ensure session");
         assert_eq!(daemon.state().session_manager().list_active().len(), 1);

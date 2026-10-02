@@ -165,34 +165,6 @@ pub trait ActiveSessionHandle: Send + Sync {
     async fn set_config(&self, key: String, value: serde_json::Value) -> anyhow::Result<()>;
     /// 現在のターンの中断。
     async fn cancel_turn(&self) -> anyhow::Result<()>;
-    /// エージェント側の会話コンテキストを、先頭から `keep_turns` ターン分だけ
-    /// 残した状態へ巻き戻す。
-    ///
-    /// `fxg` のファイル復元 (Shadow Git Tree) とは独立に、エージェント内部の
-    /// 会話履歴を巻き戻すためのフック。標準ACPには会話を巻き戻す API が無いため
-    /// 既定実装は「未対応」を返す (`fxg` はファイル復元のみを行い、この失敗は
-    /// 情報ログとして扱う)。ネイティブ API を持つドライバ (OpenCode2 の
-    /// `POST /api/session/{id}/revert` 等) が実装する。
-    async fn revert_context(&self, _keep_turns: u64) -> anyhow::Result<()> {
-        anyhow::bail!("revert_context is not supported by this driver")
-    }
-    /// エージェント側の会話コンテキストを圧縮する (要約して履歴を置き換える)。
-    ///
-    /// 標準ACPには圧縮 API が無い (UNSTABLE な `unstable_session_compaction` は
-    /// 圧縮**通知**の受信能力であり開始手段ではない) ため、既定実装は「未対応」を
-    /// 返す。ネイティブ API を持つドライバ (OpenCode2 の
-    /// `POST /api/session/{id}/compact`) が実装する。
-    async fn compact_context(&self) -> anyhow::Result<()> {
-        anyhow::bail!("compact_context is not supported by this driver")
-    }
-    /// エージェント純正 TUI へ Attach するための情報 (OpenCode2 ブリッジのみ)。
-    ///
-    /// `Some` を返すドライバでは、CLI は `fxg` の内蔵 TUI ではなく
-    /// 純正 CLI を `server_url` / `session_id` 付きで子プロセス実行する
-    /// ([`crate::driver::NativeAttachInfo`])。
-    fn native_attach(&self) -> Option<NativeAttachInfo> {
-        None
-    }
     /// セッションプロセスの完全終了 (プロセスツリーごと)。
     ///
     /// プロセスをセッション終了後も温存するドライバ (`AcpDriver`) は、
@@ -206,22 +178,6 @@ pub trait ActiveSessionHandle: Send + Sync {
     /// プロセスをセッション終了後も温存するドライバでは、セッションを閉じて
     /// プロセスを再利用プールへ返す (完全終了は [`Self::dispose`])。
     async fn shutdown(&self) -> anyhow::Result<()>;
-}
-
-/// エージェント純正 TUI へ Attach するための情報。
-///
-/// CLI は `server_url` / `session_id` を引数に、`env` を環境変数として
-/// 純正 CLI (例: `opencode2 run --server <url> --session <id>`) を起動する。
-/// `env` にはローカルサーバー用の一時クレデンシャルが含まれ得るため、
-/// ローカルIPC (トークン認証済み) の応答としてのみ受け渡すこと。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct NativeAttachInfo {
-    /// アタッチ先のローカルサーバーURL (例: `http://127.0.0.1:38219`)
-    pub server_url: String,
-    /// アタッチ対象のエージェント側セッションID (例: `ses_...`)
-    pub session_id: String,
-    /// 純正 CLI へ注入する環境変数 (例: `OPENCODE_PASSWORD`)
-    pub env: Vec<(String, String)>,
 }
 
 #[cfg(test)]

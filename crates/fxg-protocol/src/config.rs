@@ -11,13 +11,9 @@
 //! (クライアントに公開する型のみ `#[ts(export)]` を付与する規約)。
 
 use std::collections::BTreeMap;
-use std::fmt;
 use std::path::{Path, PathBuf};
-use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
-
-use crate::common::EnumParseError;
 
 /// データディレクトリ (`~/.flexagent`) を変更する環境変数。
 pub const ENV_FXG_HOME: &str = "FXG_HOME";
@@ -394,8 +390,6 @@ pub enum GitCredentialConfig {
 pub struct AgentsConfig {
     /// `fxg run` 等でエージェント指定を省略した場合のデフォルトエージェント。
     pub default_agent: Option<String>,
-    /// OpenCode2 の起動モード (`bridge` / `acp`)。
-    pub opencode_mode: Option<OpencodeMode>,
     /// ACP 公式レジストリURL。
     pub registry_url: Option<String>,
     /// ACP レジストリキャッシュの有効期間 (秒)。
@@ -409,7 +403,7 @@ pub struct AgentsConfig {
 
 impl AgentsConfig {
     /// デフォルトエージェントの既定値。
-    pub const DEFAULT_AGENT: &'static str = "opencode2";
+    pub const DEFAULT_AGENT: &'static str = "opencode";
     /// ACP 公式レジストリURLの既定値。
     pub const DEFAULT_REGISTRY_URL: &'static str =
         "https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json";
@@ -419,7 +413,6 @@ impl AgentsConfig {
     /// 内蔵エイリアスの既定値。
     pub fn default_aliases() -> BTreeMap<String, String> {
         BTreeMap::from([
-            ("opencode".to_owned(), "opencode2".to_owned()),
             ("claude".to_owned(), "claude-code-acp".to_owned()),
             ("antigravity".to_owned(), "antigravity-acp".to_owned()),
             ("gemini".to_owned(), "gemini-cli-acp".to_owned()),
@@ -444,11 +437,6 @@ impl AgentsConfig {
             .unwrap_or(Self::DEFAULT_AGENT)
     }
 
-    /// 実効 OpenCode2 起動モードを返す。
-    pub fn resolved_opencode_mode(&self) -> OpencodeMode {
-        self.opencode_mode.unwrap_or(OpencodeMode::Bridge)
-    }
-
     /// 実効 ACP レジストリURLを返す。
     pub fn resolved_registry_url(&self) -> &str {
         self.registry_url
@@ -461,44 +449,6 @@ impl AgentsConfig {
     pub fn resolved_registry_cache_ttl_secs(&self) -> u64 {
         self.registry_cache_ttl_secs
             .unwrap_or(Self::DEFAULT_REGISTRY_CACHE_TTL_SECS)
-    }
-}
-
-/// OpenCode2 の起動モード。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum OpencodeMode {
-    /// `opencode2 serve` + 純正TUI Attach (デフォルト推奨)
-    Bridge,
-    /// `opencode2 acp` (標準ACPエージェントとして起動)
-    Acp,
-}
-
-impl OpencodeMode {
-    /// 設定ファイル / JSON 上の文字列表現。
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Bridge => "bridge",
-            Self::Acp => "acp",
-        }
-    }
-}
-
-impl fmt::Display for OpencodeMode {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-
-impl FromStr for OpencodeMode {
-    type Err = EnumParseError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "bridge" => Ok(Self::Bridge),
-            "acp" => Ok(Self::Acp),
-            other => Err(EnumParseError::new("opencode mode", other)),
-        }
     }
 }
 
@@ -658,13 +608,11 @@ provider = "env"
 token_env = "FXG_GITLAB_PAT"
 
 [agents]
-default_agent = "opencode2"
-opencode_mode = "bridge"
+default_agent = "opencode"
 registry_url = "https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json"
 registry_cache_ttl_secs = 86400
 
 [agents.aliases]
-opencode = "opencode2"
 antigravity = "antigravity-acp"
 
 [agents.custom.my-local-agent]
@@ -731,17 +679,15 @@ env = {}
             other => panic!("unexpected provider: {other:?}"),
         }
 
-        assert_eq!(config.agents.resolved_default_agent(), "opencode2");
-        assert_eq!(config.agents.resolved_opencode_mode(), OpencodeMode::Bridge);
+        assert_eq!(config.agents.resolved_default_agent(), "opencode");
         assert_eq!(
             config.agents.resolved_registry_cache_ttl_secs(),
             AgentsConfig::DEFAULT_REGISTRY_CACHE_TTL_SECS
         );
         // エイリアス: 設定の上書き + 内蔵デフォルトのマージ
         let aliases = config.agents.resolved_aliases();
-        assert_eq!(aliases.get("opencode").unwrap(), "opencode2");
         assert_eq!(aliases.get("claude").unwrap(), "claude-code-acp");
-        assert_eq!(aliases.len(), 5);
+        assert_eq!(aliases.len(), 4);
 
         let custom = config.agents.custom.get("my-local-agent").unwrap();
         assert_eq!(custom.command, "node");
@@ -773,7 +719,7 @@ env = {}
             config.agents.resolved_registry_url(),
             AgentsConfig::DEFAULT_REGISTRY_URL
         );
-        assert_eq!(config.agents.resolved_default_agent(), "opencode2");
+        assert_eq!(config.agents.resolved_default_agent(), "opencode");
         assert!(config.provisioners.is_empty());
     }
 
@@ -946,12 +892,5 @@ RUST_BACKTRACE = "1"
         std::fs::write(dir.path().join(PROJECT_CONFIG_FILE_NAME), "name = \"app\"").unwrap();
         let config = ProjectConfig::load_from_dir(dir.path()).unwrap().unwrap();
         assert_eq!(config.name.as_deref(), Some("app"));
-    }
-
-    #[test]
-    fn opencode_mode_roundtrips() {
-        assert_eq!(OpencodeMode::Bridge.to_string(), "bridge");
-        assert_eq!("acp".parse::<OpencodeMode>().unwrap(), OpencodeMode::Acp);
-        assert!("nope".parse::<OpencodeMode>().is_err());
     }
 }

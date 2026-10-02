@@ -22,27 +22,6 @@ use crate::events::SessionEventEnvelope;
 /// Length-prefixed JSON の長さヘッダ長 (リトルエンディアン u32)。
 pub const IPC_LENGTH_PREFIX_BYTES: usize = 4;
 
-/// `EnsureSession` の応答で返されるアタッチモード。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "mode", rename_all = "snake_case")]
-pub enum AttachMode {
-    /// `fxg` CLI 自身の内蔵TUI (`ratatui`) でIPCストリームを描画するモード。
-    AcpTui,
-    /// デーモンが管理する `opencode serve` に対して CLI が
-    /// `opencode run --server <server_url> --session <session_id>` を子プロセス実行し、
-    /// 純正TUIを直接表示するモード。
-    NativeOpenCodeAttach {
-        /// `opencode serve` のローカルURL
-        server_url: String,
-        /// アタッチ対象のエージェント側セッションID (`ses_...`)
-        session_id: String,
-        /// 純正 CLI へ注入する環境変数 (例: `OPENCODE_PASSWORD`)。
-        /// ループバック限定サーバーの一時クレデンシャルを含むため、
-        /// トークン認証済みのローカルIPC 以外へは出力しないこと。
-        env: Vec<(String, String)>,
-    },
-}
-
 /// ローカルノードの稼働状態 (`GetLocalStatus` 応答)。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LocalStatus {
@@ -93,20 +72,6 @@ pub enum IpcClientMessage {
         extra_args: Vec<String>,
         /// 初期モード (`--mode` 指定時。ACP の `session/set_mode` で適用)
         initial_mode: Option<String>,
-        /// `opencode2` を標準ACPモード (`opencode2 acp`) で起動する (`--acp`)
-        acp: bool,
-    },
-    /// 既存セッションのイベントストリーム購読 + 双方向操作。
-    ///
-    /// `after_node_seq` 指定時はその連番以降の履歴をリプレイしてから
-    /// ライブストリームへ接続する (途中切断からの再接続用)。
-    AttachSession {
-        /// 相関ID
-        command_id: String,
-        /// 対象セッションID
-        session_id: String,
-        /// リプレイ開始位置 (この連番以降を送信)
-        after_node_seq: Option<u64>,
     },
     /// 稼働中セッション一覧・中央サーバー接続状態・未送信 Outbox 件数を返却する。
     GetLocalStatus {
@@ -352,17 +317,6 @@ pub enum IpcResult {
     EnsureSession {
         /// 開始したセッションID
         session_id: String,
-        /// アタッチモード (内蔵TUI / OpenCode2 純正TUI)
-        attach_mode: AttachMode,
-    },
-    /// `AttachSession` の受理 (以降は [`IpcServerMessage::EventBatch`] で配信)
-    AttachSession {
-        /// 対象セッションID
-        session_id: String,
-        /// アタッチモード (内蔵TUI / OpenCode2 純正TUI)。
-        /// 稼働中でない (停止済み) セッションは [`AttachMode::AcpTui`]
-        /// (イベント履歴の閲覧のみ)。
-        attach_mode: AttachMode,
     },
     /// `GetLocalStatus` の結果
     LocalStatus {
@@ -392,15 +346,11 @@ pub enum IpcResult {
     SessionForked {
         /// 新しいセッションID
         session_id: String,
-        /// アタッチモード (内蔵TUI / OpenCode2 純正TUI)
-        attach_mode: AttachMode,
     },
     /// `SessionResume` の結果
     SessionResumed {
         /// 再開したセッションID (リクエスト対象と同一)
         session_id: String,
-        /// アタッチモード (内蔵TUI / OpenCode2 純正TUI)
-        attach_mode: AttachMode,
         /// ネイティブ復元できたか (`false` = 履歴 Replay で継続)
         context_restored: bool,
     },
@@ -553,44 +503,16 @@ mod tests {
         let msg = IpcClientMessage::EnsureSession {
             command_id: "c1".into(),
             cwd: "/Users/nazo/src/flexagent".into(),
-            agent_id: "opencode2".into(),
+            agent_id: "opencode".into(),
             extra_args: vec!["--model".into(), "sonnet".into()],
             initial_mode: Some("plan".into()),
-            acp: false,
         };
         let json = serde_json::to_value(&msg).unwrap();
         assert_eq!(json["method"], "ensure_session");
         assert_eq!(json["extra_args"][1], "sonnet");
         assert_eq!(json["initial_mode"], "plan");
-        assert_eq!(json["acp"], false);
         let decoded: IpcClientMessage = serde_json::from_value(json).unwrap();
         assert_eq!(decoded, msg);
-    }
-
-    #[test]
-    fn attach_mode_native_opencode_shape() {
-        let result = IpcResult::EnsureSession {
-            session_id: "s1".into(),
-            attach_mode: AttachMode::NativeOpenCodeAttach {
-                server_url: "http://127.0.0.1:4096".into(),
-                session_id: "ses_1".into(),
-                env: vec![("OPENCODE_PASSWORD".into(), "secret".into())],
-            },
-        };
-        let json = serde_json::to_value(&result).unwrap();
-        assert_eq!(json["result"], "ensure_session");
-        assert_eq!(json["attach_mode"]["mode"], "native_open_code_attach");
-        assert_eq!(json["attach_mode"]["env"][0][0], "OPENCODE_PASSWORD");
-        let decoded: IpcResult = serde_json::from_value(json).unwrap();
-        assert_eq!(decoded, result);
-    }
-
-    #[test]
-    fn acp_tui_attach_mode_is_unit_variant() {
-        let mode = AttachMode::AcpTui;
-        let json = serde_json::to_value(&mode).unwrap();
-        assert_eq!(json["mode"], "acp_tui");
-        assert_eq!(serde_json::from_value::<AttachMode>(json).unwrap(), mode);
     }
 
     #[test]
@@ -712,7 +634,6 @@ mod tests {
 
         let forked = IpcResult::SessionForked {
             session_id: "child".into(),
-            attach_mode: AttachMode::AcpTui,
         };
         let json = serde_json::to_value(&forked).unwrap();
         assert_eq!(json["result"], "session_forked");
@@ -736,7 +657,6 @@ mod tests {
 
         let resumed = IpcResult::SessionResumed {
             session_id: "s1".into(),
-            attach_mode: AttachMode::AcpTui,
             context_restored: false,
         };
         let json = serde_json::to_value(&resumed).unwrap();

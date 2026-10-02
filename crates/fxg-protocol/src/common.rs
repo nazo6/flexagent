@@ -673,13 +673,6 @@ pub enum SessionControlAction {
     },
     /// 現在のターンを中断
     Cancel,
-    /// エージェント側の会話コンテキストを圧縮する (要約して履歴を置き換える)。
-    ///
-    /// 標準ACPには圧縮 API が無いため、対応ドライバのみ実行できる
-    /// (`ActiveSessionHandle::compact_context`。既定は未対応エラー)。
-    /// `opencode2` ブリッジでは `/compact` 入力と同じ
-    /// `POST /api/session/{id}/compact` を呼び出す。
-    Compact,
     /// セッションの完全終了
     Kill,
 }

@@ -9,9 +9,6 @@
 //! 設計: `docs/03-protocol-and-api.md` §4。
 //!
 //! - 通常コマンドは 1 リクエスト / 1 レスポンスで処理する。
-//! - [`IpcClientMessage::AttachSession`] を受けた接続はイベントストリーミング
-//!   モードへ切り替わり、`EventBatch` / `LiveStreamDelta` をプッシュ配信しつつ、
-//!   同一接続上のコマンド (`SendPrompt` 等) にも応答する (dual-loop)。
 
 use std::path::{Path, PathBuf};
 
@@ -22,21 +19,17 @@ use fxg_protocol::ipc::{
     IpcClientMessage, IpcResult, IpcServerMessage, ProjectInfo, SessionDetail,
 };
 use tokio::io::{AsyncRead, AsyncWrite};
-use tokio::sync::{broadcast, watch};
+use tokio::sync::watch;
 
 use super::DaemonState;
 use super::ops::AuditSource;
 use crate::error::NodeError;
 use crate::ipc_framing::{read_frame, write_message};
-use crate::session::SessionBroadcast;
 use crate::session_manager::ResumeParams;
 use crate::{project, worktree};
 
 /// `fxg ps` などで返すセッション一覧の上限。
 const SESSION_LIST_LIMIT: u32 = 200;
-
-/// `AttachSession` のリプレイ時に 1 バッチで送るイベント数の上限。
-const ATTACH_REPLAY_BATCH: u32 = 200;
 
 /// IPC エンドポイントが他デーモンに占有されていないか確認する。
 ///
@@ -165,9 +158,6 @@ pub async fn serve(
 /// 1接続を処理する (Length-prefixed JSON のリクエスト/レスポンスループ)。
 ///
 /// シャットダウン要求を受けると接続を閉じる。
-///
-/// [`IpcClientMessage::AttachSession`] を受けると
-/// [`attach_session`] へ移行し、イベント配信とコマンド応答を並行して行う。
 pub(crate) async fn handle_connection<S>(
     state: DaemonState,
     stream: S,
@@ -198,230 +188,8 @@ where
             }
         };
 
-        // AttachSession はこの接続をストリーミングモードへ切り替える
-        if let IpcClientMessage::AttachSession {
-            command_id,
-            session_id,
-            after_node_seq,
-        } = request
-        {
-            attach_session(
-                &state,
-                &mut reader,
-                &mut writer,
-                &mut shutdown,
-                command_id,
-                session_id,
-                after_node_seq,
-            )
-            .await?;
-            return Ok(());
-        }
-
         let response = dispatch(&state, request).await;
         write_message(&mut writer, &response).await?;
-    }
-}
-
-/// `AttachSession` の接続処理 (リプレイ → ライブ配信 + コマンド応答)。
-///
-/// 接続が切断されるか、セッションが終了するまで戻らない。
-async fn attach_session<R, W>(
-    state: &DaemonState,
-    reader: &mut R,
-    writer: &mut W,
-    shutdown: &mut watch::Receiver<bool>,
-    mut command_id: String,
-    mut session_id: String,
-    mut after_node_seq: Option<u64>,
-) -> Result<(), NodeError>
-where
-    R: AsyncRead + Unpin,
-    W: AsyncWrite + Unpin,
-{
-    // セッション切替 (ストリーム中の再 AttachSession) に対応するため外側ループを持つ
-    'attach: loop {
-        if state.db().get_session(&session_id).await?.is_none() {
-            let response = IpcServerMessage::Error {
-                command_id: Some(command_id.clone()),
-                code: ErrorCode::NotFound,
-                message: format!("session not found: {session_id}"),
-            };
-            write_message(writer, &response).await?;
-            return Ok(());
-        }
-
-        // リプレイとライブ配信の間に落ちるイベントを防ぐため、先に購読する
-        let mut subscription = state.bus().subscribe();
-
-        write_message(
-            writer,
-            &IpcServerMessage::Result {
-                command_id: command_id.clone(),
-                result: IpcResult::AttachSession {
-                    session_id: session_id.clone(),
-                    attach_mode: state.session_manager().attach_mode(&session_id),
-                },
-            },
-        )
-        .await?;
-
-        let mut replay_state =
-            replay_session_events(state, writer, &session_id, after_node_seq).await?;
-
-        loop {
-            tokio::select! {
-                _ = shutdown.changed() => return Ok(()),
-                frame = read_frame(reader) => {
-                    let Some(frame) = frame? else {
-                        return Ok(()); // クライアントが切断した
-                    };
-                    let request: IpcClientMessage = match serde_json::from_slice(&frame) {
-                        Ok(request) => request,
-                        Err(err) => {
-                            let response = IpcServerMessage::Error {
-                                command_id: None,
-                                code: ErrorCode::InvalidState,
-                                message: format!("invalid ipc message: {err}"),
-                            };
-                            write_message(writer, &response).await?;
-                            continue;
-                        }
-                    };
-                    // 別セッションへの切替は外側ループでリプレイからやり直す
-                    if let IpcClientMessage::AttachSession { command_id: next_command_id, session_id: next, after_node_seq: next_after } = request {
-                        command_id = next_command_id;
-                        session_id = next;
-                        after_node_seq = next_after;
-                        continue 'attach;
-                    }
-                    let response = dispatch(state, request).await;
-                    write_message(writer, &response).await?;
-                }
-                event = subscription.recv() => {
-                    match event {
-                        Ok(message) => {
-                            if let Some(response) = forward_to_attached(message, &session_id, &mut replay_state) {
-                                write_message(writer, &response).await?;
-                            }
-                        }
-                        Err(broadcast::error::RecvError::Lagged(skipped)) => {
-                            // 遅延した場合はカーソル (node_seq) から履歴を取り直す
-                            tracing::warn!(skipped, session_id = %session_id, "ipc attach lagged; replaying");
-                            let last = replay_state.last_node_seq;
-                            replay_state = replay_session_events(state, writer, &session_id, Some(last)).await?;
-                        }
-                        Err(broadcast::error::RecvError::Closed) => return Ok(()),
-                    }
-                }
-            }
-        }
-    }
-}
-
-/// `AttachSession` のリプレイ進捗 (重複排除と再接続に使う)。
-struct AttachReplay {
-    /// 最後に送信した `node_seq`
-    last_node_seq: u64,
-    /// 最後に送信したイベントの `cursor`
-    cursor: u64,
-}
-
-/// `after_node_seq` より後の永続イベントをバッチ送信し、進捗を返す。
-async fn replay_session_events<W>(
-    state: &DaemonState,
-    writer: &mut W,
-    session_id: &str,
-    after_node_seq: Option<u64>,
-) -> Result<AttachReplay, NodeError>
-where
-    W: AsyncWrite + Unpin,
-{
-    let after = after_node_seq.unwrap_or(0);
-    let mut progress = AttachReplay {
-        last_node_seq: after,
-        cursor: 0,
-    };
-    loop {
-        let batch = state
-            .db()
-            .session_events_after(session_id, progress.cursor, ATTACH_REPLAY_BATCH)
-            .await?;
-        let full_batch = batch.events.len() as u32 >= ATTACH_REPLAY_BATCH;
-        progress.cursor = batch.cursor;
-        // `after_node_seq` 以前のイベントは送らずに読み飛ばす
-        let events: Vec<_> = batch
-            .events
-            .into_iter()
-            .filter(|event| event.node_seq > after)
-            .collect();
-        if events.is_empty() {
-            if !full_batch {
-                return Ok(progress);
-            }
-            continue;
-        }
-        if let Some(last) = events.iter().map(|event| event.node_seq).max() {
-            progress.last_node_seq = progress.last_node_seq.max(last);
-        }
-        write_message(
-            writer,
-            &IpcServerMessage::EventBatch {
-                session_id: session_id.to_owned(),
-                events,
-                cursor: progress.cursor,
-            },
-        )
-        .await?;
-        if !full_batch {
-            return Ok(progress);
-        }
-    }
-}
-
-/// ブロードキャストイベントをアタッチ中のクライアント向けメッセージへ変換する。
-///
-/// 対象外セッションのイベント・既にリプレイ済みのイベントは `None` を返す。
-fn forward_to_attached(
-    message: SessionBroadcast,
-    session_id: &str,
-    replay: &mut AttachReplay,
-) -> Option<IpcServerMessage> {
-    match message {
-        SessionBroadcast::Persisted { event, cursor } => {
-            if event.session_id != session_id || event.node_seq <= replay.last_node_seq {
-                return None;
-            }
-            replay.last_node_seq = event.node_seq;
-            replay.cursor = replay.cursor.max(cursor);
-            Some(IpcServerMessage::EventBatch {
-                session_id: session_id.to_owned(),
-                events: vec![event],
-                cursor,
-            })
-        }
-        SessionBroadcast::Ephemeral(event) => {
-            if event.session_id != session_id {
-                return None;
-            }
-            Some(IpcServerMessage::EventBatch {
-                session_id: session_id.to_owned(),
-                events: vec![event],
-                cursor: replay.cursor,
-            })
-        }
-        SessionBroadcast::StreamDelta {
-            session_id: event_session,
-            delta,
-        } => {
-            if event_session != session_id {
-                return None;
-            }
-            Some(IpcServerMessage::LiveStreamDelta {
-                session_id: event_session,
-                delta,
-            })
-        }
     }
 }
 
@@ -768,7 +536,6 @@ async fn handle(
             agent_id,
             extra_args,
             initial_mode,
-            acp,
         } => {
             // 実行ディレクトリのプロジェクト紐付けを最新化する
             // (既定パス解決・直近使用の記録をセッション開始時に更新する)
@@ -784,7 +551,6 @@ async fn handle(
                     &agent_id,
                     &extra_args,
                     initial_mode.as_deref(),
-                    acp,
                 )
                 .await
                 .map_err(|err| DispatchError::from_node_error(&command_id, err))?;
@@ -800,7 +566,6 @@ async fn handle(
                 command_id,
                 IpcResult::EnsureSession {
                     session_id: outcome.session_id,
-                    attach_mode: outcome.attach_mode,
                 },
             ))
         }
@@ -940,7 +705,6 @@ async fn handle(
                 command_id,
                 IpcResult::SessionForked {
                     session_id: outcome.session_id,
-                    attach_mode: outcome.attach_mode,
                 },
             ))
         }
@@ -971,7 +735,6 @@ async fn handle(
                 command_id,
                 IpcResult::SessionResumed {
                     session_id: started.session_id,
-                    attach_mode: started.attach_mode,
                     context_restored: started.context_restored,
                 },
             ))
@@ -1074,14 +837,6 @@ async fn handle(
                 },
             ))
         }
-
-        // `AttachSession` は接続ループ ([`handle_connection`]) が
-        // ストリーミングモードへ切り替えて処理するため、ここには到達しない。
-        IpcClientMessage::AttachSession { command_id, .. } => Err(DispatchError::new(
-            &command_id,
-            ErrorCode::InvalidState,
-            "AttachSession must be handled by the connection loop",
-        )),
     }
 }
 
@@ -1509,7 +1264,7 @@ mod tests {
         let workdir = dir.path().join("workspace");
         std::fs::create_dir_all(&workdir).expect("mkdir");
 
-        // EnsureSession: セッション開始 (内蔵TUI モード)
+        // EnsureSession: セッション開始
         let response = roundtrip(
             &endpoint,
             &IpcClientMessage::EnsureSession {
@@ -1518,22 +1273,14 @@ mod tests {
                 agent_id: "mock".to_owned(),
                 extra_args: Vec::new(),
                 initial_mode: None,
-                acp: false,
             },
         )
         .await;
         let session_id = match response {
             IpcServerMessage::Result {
-                result:
-                    IpcResult::EnsureSession {
-                        session_id,
-                        attach_mode,
-                    },
+                result: IpcResult::EnsureSession { session_id },
                 ..
-            } => {
-                assert_eq!(attach_mode, fxg_protocol::ipc::AttachMode::AcpTui);
-                session_id
-            }
+            } => session_id,
             other => panic!("unexpected response: {other:?}"),
         };
 
@@ -1563,7 +1310,6 @@ mod tests {
                 agent_id: "mock".to_owned(),
                 extra_args: Vec::new(),
                 initial_mode: None,
-                acp: false,
             },
         )
         .await;
@@ -1572,95 +1318,30 @@ mod tests {
             other => panic!("unexpected response: {other:?}"),
         }
 
-        // AttachSession: 結果 + 履歴リプレイ (SessionCreated)
-        let mut attach = IpcClient::connect(&endpoint).await.expect("connect");
-        attach
-            .send(&IpcClientMessage::AttachSession {
-                command_id: "a1".to_owned(),
-                session_id: session_id.clone(),
-                after_node_seq: None,
-            })
-            .await
-            .expect("attach");
-        let message = attach
-            .recv()
-            .await
-            .expect("recv")
-            .expect("daemon closed the connection");
-        match message {
-            IpcServerMessage::Result {
-                command_id,
-                result:
-                    IpcResult::AttachSession {
-                        session_id: attached,
-                        attach_mode,
-                    },
-            } => {
-                assert_eq!(command_id, "a1");
-                assert_eq!(attached, session_id);
-                // テスト用モックは内蔵TUIアタッチ
-                assert_eq!(attach_mode, fxg_protocol::ipc::AttachMode::AcpTui);
-            }
-            other => panic!("unexpected response: {other:?}"),
-        }
-        let message = recv_until(&mut attach, |message| {
-            matches!(message, IpcServerMessage::EventBatch { .. })
-        })
-        .await;
-        match message {
-            IpcServerMessage::EventBatch { events, .. } => {
-                assert_eq!(events.len(), 1, "SessionCreated のみが履歴にある");
-                assert_eq!(events[0].node_seq, 1);
-                assert!(matches!(
-                    events[0].payload,
-                    UnifiedEventPayload::SessionCreated { .. }
-                ));
-            }
-            _ => unreachable!(),
-        }
-
-        // SendPrompt: アタッチ中の同一接続から送信できる
-        attach
-            .send(&IpcClientMessage::SendPrompt {
+        // SendPrompt: プロンプト送信
+        let response = roundtrip(
+            &endpoint,
+            &IpcClientMessage::SendPrompt {
                 command_id: "p1".to_owned(),
                 session_id: session_id.clone(),
                 text: "hello".to_owned(),
                 client_source: "cli".to_owned(),
-            })
-            .await
-            .expect("send prompt");
-        let mut saw_user_message = false;
-        let mut saw_accepted = false;
-        for _ in 0..20 {
-            let message = attach
-                .recv()
-                .await
-                .expect("recv")
-                .expect("daemon closed the connection");
-            match &message {
-                IpcServerMessage::EventBatch { events, .. } => {
-                    if events.iter().any(|event| {
-                        matches!(&event.payload, UnifiedEventPayload::UserMessage { text, .. } if text == "hello")
-                    }) {
-                        saw_user_message = true;
-                    }
-                }
-                IpcServerMessage::Result {
-                    command_id,
-                    result: IpcResult::CommandAccepted { session_id: Some(sid) },
-                } => {
-                    assert_eq!(command_id, "p1");
-                    assert_eq!(sid, &session_id);
-                    saw_accepted = true;
-                }
-                other => panic!("unexpected message: {other:?}"),
+            },
+        )
+        .await;
+        match response {
+            IpcServerMessage::Result {
+                command_id,
+                result:
+                    IpcResult::CommandAccepted {
+                        session_id: Some(sid),
+                    },
+            } => {
+                assert_eq!(command_id, "p1");
+                assert_eq!(sid, session_id);
             }
-            if saw_user_message && saw_accepted {
-                break;
-            }
+            other => panic!("unexpected response: {other:?}"),
         }
-        assert!(saw_user_message, "UserMessage が配信される");
-        assert!(saw_accepted, "SendPrompt は受理される");
 
         // モックドライバへプロンプトが届いている
         for _ in 0..100 {
@@ -1671,7 +1352,7 @@ mod tests {
         }
         assert_eq!(mock.prompts(), vec!["hello"]);
 
-        // 承認要求 → イベント配信 → 応答 → 2回目は ALREADY_RESOLVED
+        // 承認要求 → 応答 → 2回目は ALREADY_RESOLVED
         mock.emit(DriverEvent::Event(UnifiedEventPayload::PermissionRequest {
             request_id: "req-1".to_owned(),
             tool_name: "terminal".to_owned(),
@@ -1683,54 +1364,45 @@ mod tests {
             }],
             details: serde_json::json!({}),
         }));
-        recv_until(&mut attach, |message| {
-            matches!(
-                message,
-                IpcServerMessage::EventBatch { events, .. }
-                    if events.iter().any(|event| matches!(
-                        event.payload,
-                        UnifiedEventPayload::PermissionRequest { .. }
-                    ))
-            )
-        })
-        .await;
+        tokio::time::sleep(Duration::from_millis(50)).await;
 
-        attach
-            .send(&IpcClientMessage::RespondPermission {
+        let response = roundtrip(
+            &endpoint,
+            &IpcClientMessage::RespondPermission {
                 command_id: "r1".to_owned(),
                 session_id: session_id.clone(),
                 request_id: "req-1".to_owned(),
                 selected_option_id: "allow_once".to_owned(),
                 resolved_by: "cli".to_owned(),
-            })
-            .await
-            .expect("respond");
-        recv_until(&mut attach, |message| {
-            matches!(message, IpcServerMessage::Result { command_id, .. } if command_id == "r1")
-        })
+            },
+        )
         .await;
+        assert!(matches!(
+            response,
+            IpcServerMessage::Result { command_id, .. } if command_id == "r1"
+        ));
         assert_eq!(
             mock.permissions(),
             vec![("req-1".to_owned(), "allow_once".to_owned())]
         );
 
-        attach
-            .send(&IpcClientMessage::RespondPermission {
+        let response = roundtrip(
+            &endpoint,
+            &IpcClientMessage::RespondPermission {
                 command_id: "r2".to_owned(),
                 session_id: session_id.clone(),
                 request_id: "req-1".to_owned(),
                 selected_option_id: "allow_once".to_owned(),
                 resolved_by: "web".to_owned(),
-            })
-            .await
-            .expect("respond again");
-        let response = recv_until(&mut attach, |message| {
-            matches!(message, IpcServerMessage::Error { code, .. } if *code == ErrorCode::AlreadyResolved)
-        })
+            },
+        )
         .await;
-        let _ = response;
+        assert!(matches!(
+            response,
+            IpcServerMessage::Error { code, .. } if code == ErrorCode::AlreadyResolved
+        ));
 
-        // 質問 (elicitation) → イベント配信 → 応答 → 2回目は ALREADY_RESOLVED
+        // 質問 (elicitation) → 応答 → 2回目は ALREADY_RESOLVED
         mock.emit(DriverEvent::Event(
             UnifiedEventPayload::ElicitationRequest {
                 elicitation_id: "elic-1".to_owned(),
@@ -1744,33 +1416,24 @@ mod tests {
                 tool_call_id: None,
             },
         ));
-        recv_until(&mut attach, |message| {
-            matches!(
-                message,
-                IpcServerMessage::EventBatch { events, .. }
-                    if events.iter().any(|event| matches!(
-                        event.payload,
-                        UnifiedEventPayload::ElicitationRequest { .. }
-                    ))
-            )
-        })
-        .await;
+        tokio::time::sleep(Duration::from_millis(50)).await;
 
-        attach
-            .send(&IpcClientMessage::RespondElicitation {
+        let response = roundtrip(
+            &endpoint,
+            &IpcClientMessage::RespondElicitation {
                 command_id: "q1".to_owned(),
                 session_id: session_id.clone(),
                 elicitation_id: "elic-1".to_owned(),
                 action: ElicitationAction::Accept,
                 content: serde_json::json!({ "strategy": "a" }),
                 resolved_by: "cli".to_owned(),
-            })
-            .await
-            .expect("respond elicitation");
-        recv_until(&mut attach, |message| {
-            matches!(message, IpcServerMessage::Result { command_id, .. } if command_id == "q1")
-        })
+            },
+        )
         .await;
+        assert!(matches!(
+            response,
+            IpcServerMessage::Result { command_id, .. } if command_id == "q1"
+        ));
         assert_eq!(
             mock.elicitations(),
             vec![(
@@ -1780,64 +1443,40 @@ mod tests {
             )]
         );
 
-        attach
-            .send(&IpcClientMessage::RespondElicitation {
+        let response = roundtrip(
+            &endpoint,
+            &IpcClientMessage::RespondElicitation {
                 command_id: "q2".to_owned(),
                 session_id: session_id.clone(),
                 elicitation_id: "elic-1".to_owned(),
                 action: ElicitationAction::Decline,
                 content: serde_json::Value::Null,
                 resolved_by: "web".to_owned(),
-            })
-            .await
-            .expect("respond elicitation again");
-        recv_until(&mut attach, |message| {
-            matches!(message, IpcServerMessage::Error { code, .. } if *code == ErrorCode::AlreadyResolved)
-        })
+            },
+        )
         .await;
+        assert!(matches!(
+            response,
+            IpcServerMessage::Error { code, .. } if code == ErrorCode::AlreadyResolved
+        ));
 
         // ControlSession (SetMode) はドライバへ転送される
-        attach
-            .send(&IpcClientMessage::ControlSession {
+        let response = roundtrip(
+            &endpoint,
+            &IpcClientMessage::ControlSession {
                 command_id: "m1".to_owned(),
                 session_id: session_id.clone(),
                 action: SessionControlAction::SetMode {
                     mode_id: "plan".to_owned(),
                 },
-            })
-            .await
-            .expect("set mode");
-        recv_until(&mut attach, |message| {
-            matches!(message, IpcServerMessage::Result { command_id, .. } if command_id == "m1")
-        })
-        .await;
-        assert_eq!(mock.modes(), vec!["plan".to_owned()]);
-
-        drop(attach);
-        daemon.shutdown();
-        tokio::time::timeout(Duration::from_secs(5), daemon.wait())
-            .await
-            .expect("stop");
-    }
-
-    #[tokio::test]
-    async fn ipc_attach_unknown_session_returns_not_found() {
-        let (daemon, _mock, _dir) = start_session_daemon().await;
-        let endpoint = daemon.ipc_endpoint().to_owned();
-
-        let response = roundtrip(
-            &endpoint,
-            &IpcClientMessage::AttachSession {
-                command_id: "a1".to_owned(),
-                session_id: "missing-session".to_owned(),
-                after_node_seq: None,
             },
         )
         .await;
-        match response {
-            IpcServerMessage::Error { code, .. } => assert_eq!(code, ErrorCode::NotFound),
-            other => panic!("unexpected response: {other:?}"),
-        }
+        assert!(matches!(
+            response,
+            IpcServerMessage::Result { command_id, .. } if command_id == "m1"
+        ));
+        assert_eq!(mock.modes(), vec!["plan".to_owned()]);
 
         daemon.shutdown();
         tokio::time::timeout(Duration::from_secs(5), daemon.wait())
@@ -1865,7 +1504,6 @@ mod tests {
                 agent_id: "mock".to_owned(),
                 extra_args: Vec::new(),
                 initial_mode: None,
-                acp: false,
             },
         )
         .await;

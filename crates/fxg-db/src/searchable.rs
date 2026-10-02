@@ -255,11 +255,10 @@ mod tests {
             local_path: "/tmp".to_owned(),
             git_branch: None,
             is_worktree: false,
-            agent_id: "opencode2".to_owned(),
+            agent_id: "opencode".to_owned(),
             parent_session_id: None,
             fork_from_node_seq: None,
             title: "New Session".to_owned(),
-            opencode_mode: None,
         };
         assert_eq!(classify_payload(&payload).1, None);
     }

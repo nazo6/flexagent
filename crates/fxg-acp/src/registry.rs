@@ -18,7 +18,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use anyhow::{Context, anyhow, bail};
-use fxg_protocol::config::{AgentsConfig, CustomAgentConfig, OpencodeMode};
+use fxg_protocol::config::{AgentsConfig, CustomAgentConfig};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -26,9 +26,6 @@ use crate::driver::AgentLaunchSpec;
 
 /// キャッシュファイル名 (`~/.flexagent/cache/registry.json`)。
 pub const REGISTRY_CACHE_FILE: &str = "registry.json";
-
-/// ビルトインエージェントID (レジストリ外。OpenCode2 ブリッジ/ACP)。
-pub const OPENCODE2_ID: &str = "opencode2";
 
 /// `agents[].distribution`。
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -169,7 +166,6 @@ pub struct AcpRegistry {
     cache_ttl: Duration,
     custom: BTreeMap<String, CustomAgentConfig>,
     aliases: BTreeMap<String, String>,
-    opencode_mode: OpencodeMode,
     http: reqwest::Client,
 }
 
@@ -194,7 +190,6 @@ impl AcpRegistry {
             ),
             custom: config.custom.clone(),
             aliases: config.resolved_aliases(),
-            opencode_mode: config.opencode_mode.unwrap_or(OpencodeMode::Bridge),
             http,
         }
     }
@@ -310,18 +305,6 @@ impl AcpRegistry {
     pub fn list(&self, index: &RegistryIndex, include_uninstalled: bool) -> Vec<AgentListEntry> {
         let mut entries = Vec::new();
 
-        // ビルトイン (opencode2)
-        entries.push(AgentListEntry {
-            id: OPENCODE2_ID.to_owned(),
-            name: "OpenCode2".to_owned(),
-            version: "-".to_owned(),
-            description: Some("opencode2 serve ブリッジ + 純正TUI Attach".to_owned()),
-            installed: true,
-            distributions: vec!["builtin"],
-            custom: false,
-            builtin: true,
-        });
-
         // カスタム定義
         for (id, custom) in &self.custom {
             entries.push(AgentListEntry {
@@ -363,10 +346,13 @@ impl AcpRegistry {
             return agent.distribution.npx.is_some() || agent.distribution.uvx.is_some();
         }
         match Self::binary_distribution(agent) {
-            Ok(dist) => self
-                .agent_version_dir(&agent.id, &agent.version)
-                .join(clean_cmd(&dist.cmd))
-                .is_file(),
+            Ok(dist) => {
+                let cmd_name = clean_cmd(&dist.cmd);
+                self.agent_version_dir(&agent.id, &agent.version)
+                    .join(&cmd_name)
+                    .is_file()
+                    || which::which(&cmd_name).is_ok()
+            }
             // 他プラットフォーム向け binary のみの場合は npx/uvx の有無で判定する
             Err(_) => agent.distribution.npx.is_some() || agent.distribution.uvx.is_some(),
         }
@@ -384,26 +370,7 @@ impl AcpRegistry {
     ) -> anyhow::Result<AgentLaunchSpec> {
         let id = self.resolve_alias(name);
 
-        // 1) ビルトイン: opencode2
-        if id == OPENCODE2_ID {
-            let (args, driver_kind) = match self.opencode_mode {
-                OpencodeMode::Bridge => (vec!["serve".to_owned()], "opencode2"),
-                OpencodeMode::Acp => (vec!["acp".to_owned()], "acp"),
-            };
-            let mut args = args;
-            args.extend(extra_args.iter().cloned());
-            return Ok(AgentLaunchSpec {
-                agent_id: id,
-                display_name: "OpenCode2".to_owned(),
-                driver_kind: driver_kind.to_owned(),
-                // v1 / v2 ともにコマンド名は `opencode` (v2 判定は起動時に実施)
-                program: PathBuf::from("opencode"),
-                args,
-                env: Vec::new(),
-            });
-        }
-
-        // 2) カスタム定義 (レジストリより優先)
+        // 1) カスタム定義 (レジストリより優先)
         if let Some(custom) = self.custom.get(&id) {
             let mut args = custom.args.clone();
             args.extend(extra_args.iter().cloned());
@@ -515,6 +482,9 @@ impl AcpRegistry {
         let cmd_path = target_dir.join(&cmd_name);
         if cmd_path.is_file() {
             return Ok(cmd_path);
+        }
+        if let Ok(system_cmd) = which::which(&cmd_name) {
+            return Ok(system_cmd);
         }
 
         tracing::info!(agent = %agent.id, version = %agent.version, "installing agent binary");
@@ -751,7 +721,7 @@ mod tests {
     }
 
     #[test]
-    fn resolves_npx_and_opencode2_specs() {
+    fn resolves_npx_specs() {
         let dir = tempfile::tempdir().expect("tempdir");
         let registry = registry(dir.path());
         let index: RegistryIndex = serde_json::from_str(FIXTURE).expect("fixture");
@@ -763,24 +733,6 @@ mod tests {
         assert_eq!(spec.program, PathBuf::from("npx"));
         assert_eq!(spec.args, vec!["-y", "demo-agent@1.2.3", "--acp"]);
         assert_eq!(spec.env, vec![("DEMO".to_owned(), "1".to_owned())]);
-
-        let spec = runtime
-            .block_on(registry.launch_spec("opencode", &index, &["--model".to_owned()]))
-            .expect("opencode spec");
-        assert_eq!(spec.driver_kind, "opencode2");
-        assert_eq!(spec.program, PathBuf::from("opencode"));
-        assert_eq!(spec.args, vec!["serve", "--model"]);
-
-        // opencode_mode = acp の場合は `opencode acp`
-        let mut config = config();
-        config.opencode_mode = Some(OpencodeMode::Acp);
-        let registry = AcpRegistry::new(dir.path(), &config);
-        let spec = runtime
-            .block_on(registry.launch_spec("opencode2", &index, &[]))
-            .expect("acp spec");
-        assert_eq!(spec.driver_kind, "acp");
-        assert_eq!(spec.program, PathBuf::from("opencode"));
-        assert_eq!(spec.args, vec!["acp"]);
     }
 
     #[test]
@@ -841,15 +793,14 @@ mod tests {
     }
 
     #[test]
-    fn list_includes_builtin_custom_and_registry_entries() {
+    fn list_includes_custom_and_registry_entries() {
         let dir = tempfile::tempdir().expect("tempdir");
         let registry = registry(dir.path());
         let index: RegistryIndex = serde_json::from_str(FIXTURE).expect("fixture");
 
         let installed_only = registry.list(&index, false);
-        // builtin + custom + demo-npx (npx 配布はダウンロード不要のため導入済み扱い)
-        assert_eq!(installed_only.len(), 3);
-        assert!(installed_only.iter().any(|e| e.builtin));
+        // custom + demo-npx (npx 配布はダウンロード不要のため導入済み扱い)
+        assert_eq!(installed_only.len(), 2);
         assert!(
             installed_only
                 .iter()
@@ -862,7 +813,7 @@ mod tests {
         );
 
         let all = registry.list(&index, true);
-        assert_eq!(all.len(), 4);
+        assert_eq!(all.len(), 3);
         let demo = all.iter().find(|e| e.id == "demo-bin").expect("demo-bin");
         assert!(!demo.installed);
     }

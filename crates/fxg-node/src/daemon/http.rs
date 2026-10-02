@@ -324,11 +324,10 @@ mod tests {
                     local_path: "/tmp/repo".to_owned(),
                     git_branch: Some("main".to_owned()),
                     is_worktree: false,
-                    agent_id: "opencode2".to_owned(),
+                    agent_id: "opencode".to_owned(),
                     parent_session_id: None,
                     fork_from_node_seq: None,
                     title: "New Session".to_owned(),
-                    opencode_mode: None,
                 },
             )
             .await
@@ -449,11 +448,10 @@ mod tests {
                     local_path: "/tmp/repo".to_owned(),
                     git_branch: Some("main".to_owned()),
                     is_worktree: false,
-                    agent_id: "opencode2".to_owned(),
+                    agent_id: "opencode".to_owned(),
                     parent_session_id: None,
                     fork_from_node_seq: None,
                     title: "New Session".to_owned(),
-                    opencode_mode: None,
                 },
             )
             .await

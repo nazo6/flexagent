@@ -12,13 +12,11 @@
 
 pub mod acp;
 pub mod driver;
-pub mod opencode2;
 pub mod registry;
 mod warm;
 
 pub use acp::AcpDriver;
 pub use driver::{
-    ActiveSessionHandle, AgentDriver, AgentLaunchSpec, DriverEvent, NativeAttachInfo,
-    NativeResumeUnavailable, ResumeRequest, StartSessionRequest, StartedSession,
+    ActiveSessionHandle, AgentDriver, AgentLaunchSpec, DriverEvent, NativeResumeUnavailable,
+    ResumeRequest, StartSessionRequest, StartedSession,
 };
-pub use opencode2::{OpenCode2Driver, ensure_opencode_v2};
