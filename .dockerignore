@@ -1,0 +1,17 @@
+# ビルド成果物・キャッシュ (イメージ内で再生成する)
+target/
+ui/node_modules/
+ui/build/
+ui/.svelte-kit/
+ui/.vite/
+
+# Git メタデータ (ビルドコンテキストに含めない)
+.git/
+
+# node サービスのデフォルト bind mount 先 (ローカルのリポジトリ群)
+workspace/
+
+# 開発用 DB (マイグレーションは crates/fxg-db/migrations で管理)
+*.db
+*.db-wal
+*.db-shm

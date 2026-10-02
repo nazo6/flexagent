@@ -63,6 +63,8 @@
 flexagent/
 ├── Cargo.toml                  # Rust Workspace定義
 ├── mise.toml                   # ツール固定 (rust, node, pnpm) & 統合ビルド・チェックタスク定義
+├── Dockerfile                  # コンテナイメージ (`mise run build:docker`)
+├── compose.yaml                # 中央サーバー (`server`) / ノード (`node`) の compose 定義
 ├── docs/                       # 設計・実装ドキュメント
 ├── crates/
 │   ├── fxg-protocol/           # 共通型定義・ACP正規化イベント・WS/IPCメッセージ (ts-rs対応)

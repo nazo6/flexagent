@@ -1,0 +1,71 @@
+# - データは named volume に永続化する (`fxg-data` = サーバー / `fxg-node-data` =
+#   ノード。どちらも `FXG_HOME` = `/data`)。
+# - `server` は既定コマンド (`fxg server`)、`node` は `fxg daemon` として起動する。
+#   ノードにリポジトリを登録する: `docker compose exec node fxg project scan /workspace`
+
+name: flexagent
+
+# server / node で共有する定義 (同一イメージの `fxg server` / `fxg daemon`)
+x-fxg: &fxg
+  platform: linux/amd64
+  build:
+    context: .
+    dockerfile: Dockerfile
+  image: fxg:dev
+  # プロビジョナー・エージェント等の子プロセスを spawn するため、PID 1 の
+  # ゾンビ回収を docker-init (tini) に任せる
+  init: true
+  restart: unless-stopped
+
+services:
+  server:
+    <<: *fxg
+    ports:
+      - "8080:8080"
+    volumes:
+      - fxg-data:/data
+    environment:
+      # コンテナ内の待受アドレス (既定: 0.0.0.0:8080)。変更する場合は `ports` と揃える
+      FXG_SERVER_LISTEN_ADDR: "0.0.0.0:8080"
+      # LAN / Tailscale 等のホスト名・IP でアクセスする場合は、Host ヘッダ検証
+      # (DNS Rebinding 対策) と Origin 検証 (CSWSH 対策) の許可リストを設定する
+      # (既定の許可は localhost / 127.0.0.1 / [::1] のみ)。
+      # FXG_SERVER_ALLOWED_HOSTS: "home-server.tailnet-xxxx.ts.net:8080,192.168.1.50:8080"
+      # FXG_SERVER_ALLOWED_ORIGINS: "http://home-server.tailnet-xxxx.ts.net:8080,http://192.168.1.50:8080"
+      # コンテナログを JSON Lines にする (省略時は text)
+      # FXG_LOG_FORMAT: json
+
+  node:
+    <<: *fxg
+    # `fxg daemon` として起動する (ローカル Web UI / エージェント実行を担う)
+    command: ["daemon"]
+    depends_on:
+      - server
+    ports:
+      # ノードのローカル Web UI。Host 検証はループバック固定のため、ホストの
+      # ループバックへ公開する (ホストで `fxg daemon` を起動していると 7860 が競合する)
+      - "127.0.0.1:7860:7860"
+    volumes:
+      # ノードのデータ (`node.db` / `auth_token` / `worktrees` / `snapshots` 等)
+      - fxg-node-data:/data
+      # エージェントに操作させるリポジトリ群 (ホスト側のパスは `FXG_WORKSPACE` で指定)
+      - ${FXG_WORKSPACE:-./workspace}:/workspace
+    environment:
+      # コンテナ内の待受アドレス (既定: 127.0.0.1:7860)。コンテナ外へ公開するため
+      # 0.0.0.0 にする (公開先は上記のとおりホストのループバックのみ)
+      FXG_NODE_LISTEN_ADDR: "0.0.0.0:7860"
+      # ノード識別子 / 表示名 (未指定時はコンテナ ID ベースの自動採番になる)
+      FXG_NODE_ID: "docker"
+      FXG_NODE_NAME: "docker"
+      # 中央サーバーへの Outbox 同期 (Node Hub WS)。宛先は compose ネットワーク内の `server`
+      FXG_CENTRAL_SERVER_URL: "ws://server:8080/api/v1/node/ws"
+      # ペアリングトークン: `docker compose exec server fxg auth node-token issue docker`
+      # で発行し、`.env` (`FXG_NODE_TOKEN=...`) か環境変数で渡す。
+      # 空の場合はローカル専用ノードとして動作する (同期は無効)
+      FXG_NODE_TOKEN: "${FXG_NODE_TOKEN:-}"
+      # 中央サーバー経由 (Web UI / PWA) からの対話型 PTY を許可する場合は true
+      # FXG_ALLOW_REMOTE_PTY: "true"
+
+volumes:
+  fxg-data:
+  fxg-node-data:

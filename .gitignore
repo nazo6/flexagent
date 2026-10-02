@@ -17,3 +17,8 @@ ui/.vite/
 
 # OS
 .DS_Store
+
+# Docker / compose (ローカル設定・シークレット・node のデフォルト workspace)
+compose.override.yaml
+.env
+workspace/
