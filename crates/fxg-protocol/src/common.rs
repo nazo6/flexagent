@@ -341,6 +341,62 @@ pub struct HookLogEntry {
     pub output: String,
 }
 
+/// セッションの累積コスト (ACP `Cost`)。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct UsageCost {
+    /// 累積コスト額
+    pub amount: f64,
+    /// ISO 4217 通貨コード (例: `USD`)
+    pub currency: String,
+}
+
+/// セッションのコンテキスト使用量・累積コスト
+/// (ACP `session/update` の `usage_update`)。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct SessionUsage {
+    /// 現在コンテキストに含まれるトークン数
+    pub used_tokens: u64,
+    /// コンテキストウィンドウ全体のサイズ (トークン数)
+    pub context_size: u64,
+    /// 累積コスト (エージェントが報告した場合)
+    pub cost: Option<UsageCost>,
+}
+
+/// エージェントがターンを終了した理由のうち、ユーザーへ提示すべきもの。
+///
+/// ACP `StopReason` のうち `EndTurn` / `Cancelled` は正常終了として
+/// イベント化しない (`UnifiedEventPayload::TurnEnded` を参照)。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum TurnStopReason {
+    /// 最大トークン数に達して打ち切り
+    MaxTokens,
+    /// 1 ターン内のエージェント要求回数上限に達して打ち切り
+    MaxTurnRequests,
+    /// エージェントが継続を拒否 (Refusal)
+    Refusal,
+}
+
+impl TurnStopReason {
+    /// DB / JSON 上の文字列表現。
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::MaxTokens => "max_tokens",
+            Self::MaxTurnRequests => "max_turn_requests",
+            Self::Refusal => "refusal",
+        }
+    }
+}
+
+impl fmt::Display for TurnStopReason {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 /// API レスポンス用のセッション集約型 (`sessions` 行から構成)。
 ///
 /// ハブ側ではイベント適用による投影から生成される。Local Node と
@@ -374,6 +430,10 @@ pub struct SessionSummary {
     pub status: SessionStatus,
     /// 現在のACR SessionMode (例: `code`, `plan`)
     pub current_mode: Option<String>,
+    /// 最新のコンテキスト使用量・累積コスト (`UsageUpdated` イベントの投影)。
+    ///
+    /// `None` = 未受信 (エージェントが `usage_update` を送らない場合を含む)。
+    pub usage: Option<SessionUsage>,
     /// 永続化済み最新の `node_seq` (ノード) / 投影に適用済みの最大 `node_seq` (ハブ)
     pub last_node_seq: u64,
     /// 作成日時 (Unix epoch ms)

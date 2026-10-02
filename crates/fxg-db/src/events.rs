@@ -17,6 +17,7 @@
 
 use fxg_protocol::common::{
     ElicitationAction, ElicitationRequestStatus, PermissionOption, PermissionRequestStatus,
+    SessionUsage,
 };
 use fxg_protocol::events::{SessionEventEnvelope, UnifiedEventPayload};
 use serde::{Deserialize, Serialize};
@@ -553,6 +554,28 @@ pub(crate) async fn apply_projections(
             .execute(&mut *conn)
             .await?;
         }
+        UnifiedEventPayload::UsageUpdated {
+            used_tokens,
+            context_size,
+            cost,
+        } => {
+            let usage_json = serde_json::to_string(&SessionUsage {
+                used_tokens: *used_tokens,
+                context_size: *context_size,
+                cost: cost.clone(),
+            })?;
+            sqlx::query!(
+                r#"
+                UPDATE sessions
+                   SET usage_json = ?
+                 WHERE session_id = ?
+                "#,
+                usage_json,
+                envelope.session_id,
+            )
+            .execute(&mut *conn)
+            .await?;
+        }
         UnifiedEventPayload::SessionArchived { archived } => {
             // アーカイブは可逆な可視性フラグ (イベントログは保持)
             let archived_at = archived.then_some(envelope.created_at);
@@ -614,6 +637,7 @@ pub(crate) async fn apply_projections(
         | UnifiedEventPayload::TerminalOutput { .. }
         | UnifiedEventPayload::TerminalInput { .. }
         | UnifiedEventPayload::BootstrapLog { .. }
+        | UnifiedEventPayload::TurnEnded { .. }
         | UnifiedEventPayload::SessionReverted { .. } => {}
     }
 
@@ -715,6 +739,7 @@ pub async fn rebuild_projections(pool: &SqlitePool) -> Result<(), DbError> {
                available_modes_json = '[]',
                available_commands_json = '[]',
                config_options_json = '[]',
+               usage_json = NULL,
                agent_session_id = NULL,
                archived_at = NULL,
                deleted_at = NULL,

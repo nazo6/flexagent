@@ -954,6 +954,28 @@ impl usage::RunAsync for SessionShowArgs {
         }
 
         let session = &detail.session;
+        let usage_display = session
+            .usage
+            .as_ref()
+            .map(|usage| {
+                let percent = if usage.context_size > 0 {
+                    format!(
+                        " ({:.1}%)",
+                        usage.used_tokens as f64 / usage.context_size as f64 * 100.0
+                    )
+                } else {
+                    String::new()
+                };
+                let tokens = format!(
+                    "{}/{} tokens{percent}",
+                    usage.used_tokens, usage.context_size
+                );
+                match &usage.cost {
+                    Some(cost) => format!("{tokens}, cost {:.4} {}", cost.amount, cost.currency),
+                    None => tokens,
+                }
+            })
+            .unwrap_or_else(|| "-".to_owned());
         let fields = [
             ("SESSION", session.session_id.clone()),
             ("TITLE", session.title.clone()),
@@ -968,6 +990,7 @@ impl usage::RunAsync for SessionShowArgs {
                     .clone()
                     .unwrap_or_else(|| "-".to_owned()),
             ),
+            ("USAGE", usage_display),
             ("PATH", session.local_path.clone()),
             (
                 "BRANCH",
@@ -1091,6 +1114,20 @@ fn describe_event(payload: &UnifiedEventPayload) -> String {
         },
         UnifiedEventPayload::BootstrapLog { line } => {
             format!("bootstrap {}", truncate(line, 60))
+        }
+        UnifiedEventPayload::UsageUpdated {
+            used_tokens,
+            context_size,
+            cost,
+        } => {
+            let tokens = format!("usage {used_tokens}/{context_size}");
+            match cost {
+                Some(cost) => format!("{tokens} cost={:.4} {}", cost.amount, cost.currency),
+                None => tokens,
+            }
+        }
+        UnifiedEventPayload::TurnEnded { reason, .. } => {
+            format!("turn_ended {reason}")
         }
     }
 }

@@ -33,9 +33,9 @@ use agent_client_protocol::schema::v1::{
     ReleaseTerminalRequest, ReleaseTerminalResponse, RequestPermissionOutcome,
     RequestPermissionRequest, RequestPermissionResponse, SelectedPermissionOutcome,
     SessionConfigKind, SessionConfigOption, SessionId, SessionNotification, SessionUpdate,
-    SetSessionConfigOptionRequest, SetSessionModeRequest, TerminalExitStatus, TerminalId,
-    TerminalOutputRequest, TerminalOutputResponse, TextContent, ToolCall, ToolCallContent,
-    ToolCallStatus, ToolCallUpdate, ToolKind, WaitForTerminalExitRequest,
+    SetSessionConfigOptionRequest, SetSessionModeRequest, StopReason, TerminalExitStatus,
+    TerminalId, TerminalOutputRequest, TerminalOutputResponse, TextContent, ToolCall,
+    ToolCallContent, ToolCallStatus, ToolCallUpdate, ToolKind, WaitForTerminalExitRequest,
     WaitForTerminalExitResponse, WriteTextFileRequest, WriteTextFileResponse,
 };
 use agent_client_protocol::util::MatchDispatch;
@@ -47,7 +47,7 @@ use anyhow::{Context, anyhow};
 use async_trait::async_trait;
 use fxg_protocol::common::{
     CommandInfo, ConfigOptionInfo, FileDiff, ModeInfo, PermissionOption, PlanEntry,
-    StreamDeltaPayload,
+    StreamDeltaPayload, TurnStopReason, UsageCost,
 };
 use fxg_protocol::events::UnifiedEventPayload;
 use fxg_protocol::util::uuid_v7;
@@ -1349,6 +1349,9 @@ async fn serve_session(
                                 let _ = events.send(DriverEvent::Event(payload));
                             }
                             tracing::debug!(?reason, "acp turn finished");
+                            if let Some(payload) = turn_ended_event(reason) {
+                                let _ = events.send(DriverEvent::Event(payload));
+                            }
                             let _ = events.send(DriverEvent::Event(
                                 UnifiedEventPayload::StatusChanged {
                                     status: fxg_protocol::common::SessionStatus::Idle,
@@ -1385,6 +1388,29 @@ async fn serve_session(
         }
     }
     ServeOutcome::Closed
+}
+
+/// ACP `StopReason` のうち、ユーザーへ提示すべき打ち切り理由をイベント化する。
+///
+/// `EndTurn` (正常終了) / `Cancelled` (ユーザーによるキャンセル) は
+/// 正常終了として `None` を返す (`StopReason` は `#[non_exhaustive]`)。
+fn turn_ended_event(reason: StopReason) -> Option<UnifiedEventPayload> {
+    let (reason, message) = match reason {
+        StopReason::MaxTokens => (
+            TurnStopReason::MaxTokens,
+            "エージェントが最大トークン数に達したためターンを終了しました",
+        ),
+        StopReason::MaxTurnRequests => (
+            TurnStopReason::MaxTurnRequests,
+            "エージェントが1ターン内の要求回数上限に達したためターンを終了しました",
+        ),
+        StopReason::Refusal => (TurnStopReason::Refusal, "エージェントが継続を拒否しました"),
+        _ => return None,
+    };
+    Some(UnifiedEventPayload::TurnEnded {
+        reason,
+        message: Some(message.to_owned()),
+    })
 }
 
 /// エージェントプロセスの stderr をデーモンのログ (`debug`) へ流す。
@@ -1792,7 +1818,17 @@ fn map_session_update(
                 }
             }
         }
-        // UsageUpdate 等は Phase 3 では未対応
+        SessionUpdate::UsageUpdate(update) => {
+            events.push(DriverEvent::Event(UnifiedEventPayload::UsageUpdated {
+                used_tokens: update.used,
+                context_size: update.size,
+                cost: update.cost.map(|cost| UsageCost {
+                    amount: cost.amount,
+                    currency: cost.currency,
+                }),
+            }));
+        }
+        // `SessionUpdate` は #[non_exhaustive]
         other => {
             tracing::trace!("unhandled session update: {other:?}");
         }
@@ -2655,5 +2691,53 @@ mod tests {
                 serde_json::Value::String("claude-3".to_owned()),
             ]
         );
+    }
+
+    #[test]
+    fn maps_usage_update_to_event() {
+        use agent_client_protocol::schema::v1::{Cost, UsageUpdate};
+
+        let update = SessionUpdate::UsageUpdate(
+            UsageUpdate::new(53_000, 200_000).cost(Cost::new(0.045, "USD")),
+        );
+        let mut acc = StreamingAccumulator::default();
+        let mut caps = SessionCapabilitiesState::default();
+        let events = map_session_update(update, &mut acc, &mut caps);
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            DriverEvent::Event(UnifiedEventPayload::UsageUpdated {
+                used_tokens,
+                context_size,
+                cost,
+            }) => {
+                assert_eq!(*used_tokens, 53_000);
+                assert_eq!(*context_size, 200_000);
+                let cost = cost.as_ref().expect("cost");
+                assert_eq!(cost.currency, "USD");
+                assert!((cost.amount - 0.045).abs() < f64::EPSILON);
+            }
+            other => panic!("unexpected event: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn stop_reason_event_only_for_abnormal_reasons() {
+        // 正常終了・ユーザーキャンセルはイベント化しない
+        assert!(turn_ended_event(StopReason::EndTurn).is_none());
+        assert!(turn_ended_event(StopReason::Cancelled).is_none());
+
+        for (reason, expected) in [
+            (StopReason::MaxTokens, TurnStopReason::MaxTokens),
+            (StopReason::MaxTurnRequests, TurnStopReason::MaxTurnRequests),
+            (StopReason::Refusal, TurnStopReason::Refusal),
+        ] {
+            match turn_ended_event(reason) {
+                Some(UnifiedEventPayload::TurnEnded { reason, message }) => {
+                    assert_eq!(reason, expected);
+                    assert!(message.is_some());
+                }
+                other => panic!("unexpected payload: {other:?}"),
+            }
+        }
     }
 }

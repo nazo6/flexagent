@@ -15,7 +15,7 @@ use fxg_db::{
 };
 use fxg_protocol::common::{
     CommandInfo, ElicitationAction, ElicitationRequestStatus, ModeInfo, PermissionOption,
-    PermissionRequestStatus, PlanEntry, SessionStatus,
+    PermissionRequestStatus, PlanEntry, SessionStatus, UsageCost,
 };
 use fxg_protocol::events::{SessionEventEnvelope, UnifiedEventPayload};
 use fxg_protocol::util::{now_ms, uuid_v7};
@@ -370,6 +370,54 @@ async fn capabilities_partial_update_keeps_available_modes_projection() {
     let rebuilt = available_modes(&fixture.db, &fixture.session_id).await;
     assert_eq!(rebuilt.len(), 1);
     assert_eq!(rebuilt[0].mode_id, "plan");
+}
+
+#[tokio::test]
+async fn usage_projection_tracks_latest_and_rebuilds() {
+    let mut fixture = Fixture::new(DbRole::Node).await;
+    let created = fixture.session_created();
+    let first = fixture.event(UnifiedEventPayload::UsageUpdated {
+        used_tokens: 1_000,
+        context_size: 100_000,
+        cost: None,
+    });
+    // 2 回目の更新で完全に上書きされる (累積ではなく最新を保持する)
+    let second = fixture.event(UnifiedEventPayload::UsageUpdated {
+        used_tokens: 53_000,
+        context_size: 200_000,
+        cost: Some(UsageCost {
+            amount: 0.045,
+            currency: "USD".to_owned(),
+        }),
+    });
+    fixture
+        .db
+        .append_events(&[created, first, second])
+        .await
+        .expect("append");
+
+    let session = fixture
+        .db
+        .get_session(&fixture.session_id)
+        .await
+        .expect("get")
+        .expect("exists");
+    let usage = session.usage.as_ref().expect("usage projected");
+    assert_eq!(usage.used_tokens, 53_000);
+    assert_eq!(usage.context_size, 200_000);
+    let cost = usage.cost.as_ref().expect("cost");
+    assert_eq!(cost.currency, "USD");
+    assert!((cost.amount - 0.045).abs() < f64::EPSILON);
+
+    // 全量再構築でも同じ投影が再現される
+    fixture.db.rebuild_projections().await.expect("rebuild");
+    let rebuilt = fixture
+        .db
+        .get_session(&fixture.session_id)
+        .await
+        .expect("get after rebuild")
+        .expect("exists");
+    assert_eq!(rebuilt.usage, session.usage);
 }
 
 #[tokio::test]

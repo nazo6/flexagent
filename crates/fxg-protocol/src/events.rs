@@ -20,7 +20,7 @@ use ts_rs::TS;
 
 use crate::common::{
     AttachmentMeta, CommandInfo, ConfigOptionInfo, ElicitationAction, FileDiff, ModeInfo,
-    PermissionOption, PlanEntry, SessionStatus,
+    PermissionOption, PlanEntry, SessionStatus, TurnStopReason, UsageCost,
 };
 
 /// セッションイベントの封筒 (永続化・同期の単位)。
@@ -307,6 +307,26 @@ pub enum UnifiedEventPayload {
         /// ログ1行
         line: String,
     },
+    /// コンテキスト使用量・累積コストの更新 (ACP `session/update` の
+    /// `usage_update`)。ハブ側 `sessions.usage_json` 投影の更新源。
+    UsageUpdated {
+        /// 現在コンテキストに含まれるトークン数
+        used_tokens: u64,
+        /// コンテキストウィンドウ全体のサイズ (トークン数)
+        context_size: u64,
+        /// 累積コスト (エージェントが報告した場合)
+        cost: Option<UsageCost>,
+    },
+    /// ターンが正常終了以外の理由で打ち切られた (ACP `StopReason`)。
+    ///
+    /// `EndTurn` / `Cancelled` は正常終了としてイベント化しない。UI / CLI は
+    /// タイムラインにシステム行として表示する。
+    TurnEnded {
+        /// 打ち切り理由
+        reason: TurnStopReason,
+        /// ユーザー向けの説明 (任意)
+        message: Option<String>,
+    },
     /// セッション状態の変化。ハブ側 `sessions.status` 投影の更新源。
     StatusChanged {
         /// 新しい状態
@@ -341,6 +361,8 @@ impl UnifiedEventPayload {
             Self::TerminalInput { .. } => "terminal_input",
             Self::CapabilitiesUpdated { .. } => "capabilities_updated",
             Self::BootstrapLog { .. } => "bootstrap_log",
+            Self::UsageUpdated { .. } => "usage_updated",
+            Self::TurnEnded { .. } => "turn_ended",
             Self::StatusChanged { .. } => "status_change",
         }
     }

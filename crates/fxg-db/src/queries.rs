@@ -25,7 +25,7 @@ use std::str::FromStr;
 use fxg_protocol::common::{
     AuditLogEntry, ElicitationRequestEntry, ElicitationRequestStatus, NodeLifecycleStatus,
     NodeSummary, PermissionRequestEntry, PermissionRequestStatus, ProjectBindingSummary,
-    ProjectSummary, SearchHit, SessionStatus, SessionSummary,
+    ProjectSummary, SearchHit, SessionStatus, SessionSummary, SessionUsage,
 };
 use fxg_protocol::events::SessionEventBatch;
 use sqlx::SqlitePool;
@@ -66,7 +66,7 @@ pub async fn list_sessions(
                project_id, node_id, local_path, git_branch,
                is_worktree AS "is_worktree: bool",
                agent_id, agent_session_id, parent_session_id, fork_from_node_seq,
-               title, status, current_mode, last_node_seq, created_at, updated_at,
+               title, status, current_mode, usage_json, last_node_seq, created_at, updated_at,
                archived_at
           FROM sessions
          WHERE deleted_at IS NULL
@@ -120,7 +120,7 @@ pub async fn get_session(
                project_id, node_id, local_path, git_branch,
                is_worktree AS "is_worktree: bool",
                agent_id, agent_session_id, parent_session_id, fork_from_node_seq,
-               title, status, current_mode, last_node_seq, created_at, updated_at,
+               title, status, current_mode, usage_json, last_node_seq, created_at, updated_at,
                archived_at
           FROM sessions
          WHERE session_id = ? AND deleted_at IS NULL
@@ -676,6 +676,7 @@ struct SessionRow {
     title: String,
     status: String,
     current_mode: Option<String>,
+    usage_json: Option<String>,
     last_node_seq: i64,
     created_at: i64,
     updated_at: i64,
@@ -702,6 +703,12 @@ impl SessionRow {
             status: SessionStatus::from_str(&self.status)
                 .map_err(|err| DbError::InvalidEnumValue(err.to_string()))?,
             current_mode: self.current_mode,
+            usage: self
+                .usage_json
+                .as_deref()
+                .map(serde_json::from_str::<SessionUsage>)
+                .transpose()
+                .map_err(|err| DbError::InvalidEnumValue(err.to_string()))?,
             last_node_seq: u64::try_from(self.last_node_seq)
                 .map_err(|_| DbError::NegativeNodeSeq(self.last_node_seq))?,
             created_at: self.created_at,

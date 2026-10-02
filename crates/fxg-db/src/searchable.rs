@@ -86,9 +86,13 @@ pub fn classify_payload(payload: &UnifiedEventPayload) -> (&'static str, Option<
             }
             join_parts(parts)
         }
+        UnifiedEventPayload::TurnEnded { message, .. } => {
+            join_parts(message.iter().cloned().collect())
+        }
         // FTS 対象外 (バイナリ系・識別子系・投影の更新源のみのイベント)
         UnifiedEventPayload::SessionCreated { .. }
         | UnifiedEventPayload::SessionAgentBound { .. }
+        | UnifiedEventPayload::UsageUpdated { .. }
         | UnifiedEventPayload::PermissionResolved { .. }
         | UnifiedEventPayload::ElicitationResolved { .. }
         | UnifiedEventPayload::SessionReverted { .. }

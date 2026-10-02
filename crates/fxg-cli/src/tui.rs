@@ -256,9 +256,16 @@ impl App {
                     "エージェント接続: {agent_session_id}"
                 )));
             }
+            UnifiedEventPayload::TurnEnded { reason, message } => {
+                let detail = message
+                    .clone()
+                    .unwrap_or_else(|| format!("ターンを終了しました ({reason})"));
+                self.blocks.push(Block::System(detail));
+            }
             UnifiedEventPayload::TerminalOutput { .. }
             | UnifiedEventPayload::TerminalInput { .. }
             | UnifiedEventPayload::PlanUpdate { .. }
+            | UnifiedEventPayload::UsageUpdated { .. }
             | UnifiedEventPayload::SessionTitleChanged { .. }
             | UnifiedEventPayload::CapabilitiesUpdated { .. }
             | UnifiedEventPayload::BootstrapLog { .. } => {}
