@@ -13,6 +13,7 @@ import type { InboxResponse } from "$lib/generated/InboxResponse";
 import type { IssueNodeTokenRequest } from "$lib/generated/IssueNodeTokenRequest";
 import type { IssueNodeTokenResponse } from "$lib/generated/IssueNodeTokenResponse";
 import type { KillSwitchResponse } from "$lib/generated/KillSwitchResponse";
+import type { MetaResponse } from "$lib/generated/MetaResponse";
 import type { NodeSummary } from "$lib/generated/NodeSummary";
 import type { NodesResponse } from "$lib/generated/NodesResponse";
 import type { NodeTokenSummary } from "$lib/generated/NodeTokenSummary";
@@ -137,6 +138,11 @@ export class ApiClient {
   // ------------------------------------------------------------------
   // 認証 / システム
   // ------------------------------------------------------------------
+
+  /** `GET /api/v1/meta` (認証不要。接続先種別の判定用)。 */
+  meta(): Promise<MetaResponse> {
+    return this.#request("GET", "/api/v1/meta");
+  }
 
   /** `GET /api/v1/system/info` */
   systemInfo(): Promise<SystemInfoResponse> {

@@ -22,7 +22,7 @@
   let removeTarget = $state<AgentSummary | null>(null);
 
   const onlineNodes = $derived(sync.nodes.filter((node) => node.is_online));
-  const isLocalNode = $derived(sync.connection.roleHint === 'local_node');
+  const isLocalNode = $derived(sync.connection.role === 'local_node');
   const busy = $derived(busyLabel !== null);
 
   onMount(() => {

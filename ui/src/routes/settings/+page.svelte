@@ -20,7 +20,7 @@
   import ShieldIcon from '@lucide/svelte/icons/shield';
   import Trash2Icon from '@lucide/svelte/icons/trash-2';
 
-  const isServer = $derived(sync.connection.roleHint === 'central_server');
+  const isServer = $derived(sync.connection.role === 'central_server');
 
   /** 選択中の設定タブ。 */
   let activeTab = $state('general');

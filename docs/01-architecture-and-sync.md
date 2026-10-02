@@ -590,6 +590,10 @@ Hijacking）や不正アクセスを防ぐため、以下の多層防御モデ�
      `Authorization: Bearer <AUTH_TOKEN>`
      ヘッダでのみ受け付け、未認証アクセスはローカルであっても `401 Unauthorized`
      で遮断します。
+   - 例外として、接続先種別のみを返す `GET /api/v1/meta` は認証を免除します
+     (Host / Origin 検証は適用)。Web UI は接続先種別の判定をこのエンドポイント
+     のみで行い（ホスト名等からの推測はしない）、トークン入力ダイアログを
+     中央サーバー / ローカルノードで正しく表示します。
 3. **Node ⇔ Server 間のペアリング認証（ノード個別トークン）**:
    - 常駐ノードが中央サーバーのWebSocketへ接続する際、`Authorization: Bearer <NODE_TOKEN>`
      で認証します。

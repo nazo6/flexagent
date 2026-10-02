@@ -41,6 +41,18 @@ pub struct SystemInfoResponse {
     pub central_connected: Option<bool>,
 }
 
+/// `GET /api/v1/meta` レスポンス (認証不要の接続先メタ情報)。
+///
+/// `GET /api/v1/system/info` は認証必須のため、未認証の Web UI はこの
+/// エンドポイントで接続先種別を判定し、トークン入力ダイアログの表示
+/// (中央サーバー / ローカルノード) を正しく切り替える (設計: `docs/03` §3.1)。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct MetaResponse {
+    /// 接続先の種別
+    pub role: ConnectionRole,
+}
+
 /// REST / WS 共通のエラーレスポンスボディ。
 ///
 /// 形式: `{ "error": { "code": "<ErrorCode>", "message": "..." } }`

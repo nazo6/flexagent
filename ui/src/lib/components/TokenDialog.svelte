@@ -42,7 +42,7 @@
         認証トークンを入力
       </Dialog.Title>
       <Dialog.Description>
-        {#if connection.roleHint === 'central_server'}
+        {#if connection.role === 'central_server'}
           中央サーバー
         {:else}
           ローカルノード
@@ -59,18 +59,23 @@
           id="fxg-token"
           type="password"
           autocomplete="off"
-          placeholder="~/.flexagent/auth_token の内容"
+          placeholder={connection.role === 'central_server'
+            ? 'サーバーの auth_token の内容'
+            : '~/.flexagent/auth_token の内容'}
           bind:value={token}
           disabled={busy}
         />
         <p class="text-muted-foreground text-xs">
-          {#if connection.roleHint === 'central_server'}
-            <code>fxg server</code>
+          {#if connection.role === 'central_server'}
+            サーバー上の <code>auth_token</code> ファイル（既定:{' '}
+            <code>~/.flexagent/auth_token</code>）を確認してください。Docker
+            の場合は <code>docker compose exec server cat /data/auth_token</code>{' '}
+            で確認できます。
           {:else}
-            <code>fxg daemon</code>
+            ノード上の <code>~/.flexagent/auth_token</code>、または{' '}
+            <code>fxg auth token</code> で確認できます（Docker の場合は{' '}
+            <code>docker compose exec node fxg auth token</code>）。
           {/if}
-          ホストの <code>~/.flexagent/auth_token</code>、または{' '}
-          <code>fxg auth token</code> で確認できます。
         </p>
       </div>
 

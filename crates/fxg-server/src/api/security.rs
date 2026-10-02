@@ -10,10 +10,12 @@
 //! 2. **Origin ヘッダ検証** (CSWSH 対策): WebSocket ハンドシェイクで自オリジン
 //!    以外は `403 Forbidden` (`Origin` 無しの非ブラウザクライアントは許可)
 //! 3. **認証**: `Authorization: Bearer <auth_token>` または
-//!    `Cookie: fxg_session=<auth_token>`。未認証は `401 Unauthorized`
+//!    `Cookie: fxg_session=<auth_token>`。未認証は `401 Unauthorized`。
+//!    例外は接続先メタ情報 (`GET /api/v1/meta`) のみで、Host / Origin 検証
+//!    だけを適用する (未認証の Web UI が接続先種別を判定するために必要)。
 
 use axum::extract::{ConnectInfo, Request, State};
-use axum::http::{HeaderMap, header};
+use axum::http::{HeaderMap, Method, header};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 
@@ -35,12 +37,21 @@ pub(crate) async fn security<B: ClientApiBackend>(
     if let Some(response) = verify_origin(&state, &request) {
         return response;
     }
-    if let Some(response) = verify_auth(&state, request.headers()) {
+    if !is_auth_exempt(&request)
+        && let Some(response) = verify_auth(&state, request.headers())
+    {
         return response;
     }
     let info = client_info(&request);
     request.extensions_mut().insert(info);
     next.run(request).await
+}
+
+/// 認証を免除するルート (`GET /api/v1/meta`) かどうか。
+///
+/// Host / Origin 検証は通常どおり適用される。
+fn is_auth_exempt(request: &Request) -> bool {
+    request.method() == Method::GET && request.uri().path() == super::META_PATH
 }
 
 /// 接続元情報から [`ClientInfo`] を組み立てる。

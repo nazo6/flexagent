@@ -38,14 +38,14 @@ use fxg_protocol::client_api::{
     AgentOpResponse, AgentsResponse, ApiErrorBody, ApiErrorResponse, AuditLogsResponse,
     AuthLoginRequest, ConnectionRole, CreateSessionRequest, CreateSessionResponse,
     CreateWorktreeRequest, InboxResponse, IssueNodeTokenRequest, IssueNodeTokenResponse,
-    KillSwitchRequest, KillSwitchResponse, NodeTokensResponse, NodesResponse, ProjectLinkRequest,
-    ProjectLinkResponse, ProjectScanRequest, ProjectScanResponse, ProjectsResponse,
-    ProvisionersResponse, PruneWorktreesRequest, PushSubscribeRequest, PushSubscribeResponse,
-    RemoveWorktreeRequest, RespondPermissionRequest, RespondPermissionResponse,
-    ResumeSessionRequest, ResumeSessionResponse, RotateAuthTokenResponse, SearchResponse,
-    ServerWsMessage, SessionArchiveRequest, SessionArchiveResponse, SessionListResponse,
-    SessionRevertRequest, SessionRevertResponse, SystemInfoResponse, UpdateAgentsRequest,
-    WorktreeInfo, WorktreesResponse,
+    KillSwitchRequest, KillSwitchResponse, MetaResponse, NodeTokensResponse, NodesResponse,
+    ProjectLinkRequest, ProjectLinkResponse, ProjectScanRequest, ProjectScanResponse,
+    ProjectsResponse, ProvisionersResponse, PruneWorktreesRequest, PushSubscribeRequest,
+    PushSubscribeResponse, RemoveWorktreeRequest, RespondPermissionRequest,
+    RespondPermissionResponse, ResumeSessionRequest, ResumeSessionResponse,
+    RotateAuthTokenResponse, SearchResponse, ServerWsMessage, SessionArchiveRequest,
+    SessionArchiveResponse, SessionListResponse, SessionRevertRequest, SessionRevertResponse,
+    SystemInfoResponse, UpdateAgentsRequest, WorktreeInfo, WorktreesResponse,
 };
 use fxg_protocol::common::{
     AgentAction, CommandResult, DiffScope, ErrorCode, ProjectSummary, SessionControlAction,
@@ -621,6 +621,12 @@ pub struct ClientApiState<B: ClientApiBackend> {
     pub options: Arc<ClientApiOptions>,
 }
 
+/// 認証不要の接続先メタ情報エンドポイント (`GET /api/v1/meta`)。
+///
+/// セキュリティミドルウェア ([`security::security`]) はこのパスのみ認証を
+/// 免除する (Host / Origin 検証は維持)。
+pub(crate) const META_PATH: &str = "/api/v1/meta";
+
 /// Client REST / WS / PTY WS の共通ルーターを構築する。
 ///
 /// 呼び出し側は
@@ -632,6 +638,7 @@ pub fn client_router<B: ClientApiBackend>(backend: B, options: ClientApiOptions)
         options: Arc::new(options),
     };
     let api = Router::new()
+        .route(META_PATH, get(meta::<B>))
         .route("/api/v1/system/info", get(system_info::<B>))
         .route("/api/v1/system/kill-switch", post(kill_switch::<B>))
         .route("/api/v1/auth/login", post(auth_login::<B>))
@@ -729,6 +736,17 @@ pub fn client_router<B: ClientApiBackend>(backend: B, options: ClientApiOptions)
 // ----------------------------------------------------------------------
 // REST ハンドラ
 // ----------------------------------------------------------------------
+
+/// `GET /api/v1/meta`: 認証不要の接続先メタ情報。
+///
+/// 未認証の Web UI がトークン入力ダイアログを正しく表示できるよう、接続先
+/// 種別のみを返す (認証なしで到達できる唯一の API。Host / Origin 検証は適用)。
+async fn meta<B: ClientApiBackend>(State(state): State<ClientApiState<B>>) -> Response {
+    Json(MetaResponse {
+        role: state.backend.connection_role(),
+    })
+    .into_response()
+}
 
 async fn system_info<B: ClientApiBackend>(State(state): State<ClientApiState<B>>) -> Response {
     let extras = match state.backend.system_extras().await {

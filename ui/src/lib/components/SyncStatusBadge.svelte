@@ -12,7 +12,7 @@
 
   let { class: className }: Props = $props();
 
-  const isLocalNode = $derived(connection.systemInfo?.role === 'local_node');
+  const isLocalNode = $derived(connection.role === 'local_node');
 </script>
 
 <div class={cn('flex flex-wrap items-center gap-1.5 text-xs', className)}>

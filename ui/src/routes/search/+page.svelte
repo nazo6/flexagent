@@ -14,9 +14,7 @@
   let searching = $state(false);
   let searched = $state(false);
 
-  const roleLabel = $derived(
-    connection.systemInfo?.role === 'central_server' ? 'server.db' : 'node.db'
-  );
+  const roleLabel = $derived(connection.role === 'central_server' ? 'server.db' : 'node.db');
 
   async function submit(event: SubmitEvent) {
     event.preventDefault();

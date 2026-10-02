@@ -659,7 +659,8 @@ pub enum ServerToNodeMsg {
    - `Authorization: Bearer <auth_token>`
      ヘッダ、または初回トークン検証時 (`POST /api/v1/auth/login`) に発行される
      `Cookie: fxg_session=<token>; HttpOnly; SameSite=Strict`。
-   - 未認証リクエストは即座に `401 Unauthorized` を返却。
+   - 未認証リクエストは即座に `401 Unauthorized` を返却。例外は認証不要の
+     メタ情報 `GET /api/v1/meta` のみ (Host / Origin 検証は適用)。
 2. **Host ヘッダ検証 (DNS Rebinding 防御)**:
    - リクエストの `Host` ヘッダが `localhost:<port>`, `127.0.0.1:<port>`,
      またはサーバー設定の許可ホスト（例: Tailscale MagicDNS名 /
@@ -682,6 +683,13 @@ pub enum ServerToNodeMsg {
 
 ### 3.1 REST API エンドポイント
 
+- `GET /api/v1/meta`: 認証不要の接続先メタ情報。`{ "role": "central_server" |
+  "local_node" }` を返却する。Web UI
+  は接続先種別の判定をこのエンドポイントのみで行い（認証済み
+  `system/info` の `role` やホスト名からは推測しない）、トークン入力ダイアログ
+  の表示（中央サーバー /
+  ローカルノード）と確認方法の案内を切り替える。取得失敗は接続エラーとして扱う
+  (Host / Origin 検証は適用)。
 - `GET /api/v1/system/info`: 接続先が `central_server` か `local_node`
   か、および Web Push の VAPID Public Key を返却。ローカルノード接続時は
   `unsynced_event_count`（Outbox 残数）と

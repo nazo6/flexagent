@@ -1,5 +1,6 @@
 import { ApiError } from "$lib/api/errors";
 import { ApiClient } from "$lib/api/client";
+import type { ConnectionRole } from "$lib/generated/ConnectionRole";
 import type { SystemInfoResponse } from "$lib/generated/SystemInfoResponse";
 
 /** 切替可能な接続先 (オリジン単位)。 */
@@ -62,6 +63,13 @@ export class ConnectionStore {
 
   /** 接続先バックエンドの情報 (未取得は null)。 */
   systemInfo = $state<SystemInfoResponse | null>(null);
+  /**
+   * 接続先種別 (`GET /api/v1/meta` の結果。接続不可時は null)。
+   *
+   * 認証不要の `meta` のみを情報源とし、`system/info` やホスト名からの推測は
+   * 行わない (接続できない場合は推測せずエラーとして扱う)。
+   */
+  role = $state<ConnectionRole | null>(null);
   /** 認証済み (Cookie / Bearer 確立済み) か。 */
   authenticated = $state(false);
   /** トークン入力ダイアログを表示すべきか。 */
@@ -73,28 +81,19 @@ export class ConnectionStore {
   /** 登録済みの切替先 (現在のオリジンは含まない)。 */
   targets = $state<ConnectionTarget[]>([]);
 
-  /**
-   * 認証前に推定する接続先種別 (401 で `system/info` が取得できない場合の
-   * 表示用ヒント)。ループバックはローカルノード、それ以外は中央サーバーとみなす。
-   */
-  get roleHint(): SystemInfoResponse["role"] {
-    if (this.systemInfo) return this.systemInfo.role;
-    if (typeof location !== "undefined") {
-      const host = location.hostname;
-      if (host === "localhost" || host === "127.0.0.1" || host === "[::1]") return "local_node";
-    }
-    return "central_server";
-  }
-
   readonly client = new ApiClient({ baseUrl: "" });
 
   constructor() {
     this.targets = loadStoredTargets();
   }
 
-  /** `GET /api/v1/system/info` で認証状態を判定する。 */
+  /**
+   * `GET /api/v1/meta` (接続先種別) → `GET /api/v1/system/info` (認証状態)
+   * の順で確認する。`meta` の取得失敗は推測せず接続エラーとして扱う。
+   */
   async probe(): Promise<void> {
     try {
+      this.role = (await this.client.meta()).role;
       this.systemInfo = await this.client.systemInfo();
       this.authenticated = true;
       this.tokenRequired = false;

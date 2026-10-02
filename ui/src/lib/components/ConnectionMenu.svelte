@@ -36,7 +36,11 @@
   let pushBusy = $state(false);
 
   const roleLabel = $derived(
-    connection.systemInfo?.role === 'central_server' ? '中央サーバー' : 'ローカルノード'
+    connection.role === 'central_server'
+      ? '中央サーバー'
+      : connection.role === 'local_node'
+        ? 'ローカルノード'
+        : '未接続'
   );
   const originLabel = $derived(connection.origin || '(同一オリジン)');
 

@@ -153,10 +153,10 @@ fn run_daemon_with_tray(
                 }
             }
             Event::UserEvent(UserEvent::Tray) => {
-                if let Some(ui) = ui.as_mut() {
-                    if !ui.apply_pending(&mut update_rx) {
-                        *control_flow = ControlFlow::Exit;
-                    }
+                if let Some(ui) = ui.as_mut()
+                    && !ui.apply_pending(&mut update_rx)
+                {
+                    *control_flow = ControlFlow::Exit;
                 }
             }
             Event::UserEvent(UserEvent::DaemonStopped(code)) => {
