@@ -157,6 +157,23 @@ OpenCode / OpenCode2
    - **結果**: PCのターミナルでは **100%純正のOpenCode2 TUI**
      がそのまま動き、同時にスマホ（Android
      PWA）やWebブラウザからも同じセッションがリアルタイムに見えて双方向操作できます。
+4. **スラッシュコマンド**: 起動時に `GET /api/command`
+   の一覧 (`init` / `review` などの組み込み +
+   `.opencode/commands/*.md` や `opencode.json` の `command`) を
+   `CapabilitiesUpdated` として同期し、UI
+   の補完候補に反映します。`/name <本文>` を受信した場合は
+   `POST /api/session/{id}/command` へ振り分け、本文は `$ARGUMENTS` /
+   `$1`… として opencode 側で展開されます。
+   - **1 プロンプト 1 コマンド**: opencode の ACP / 純正TUI
+     と同じく先頭のコマンドのみを実行し、2 つ目以降は引数として扱います。
+   - **既知のコマンドのみ**: 一覧に無い名前は通常のプロンプトとして送信します
+     (opencode 側の ACP 実装も同じ挙動)。
+   - **TUI 専用コマンドは非対応**:
+     `/undo`・`/redo`・`/share`・`/help`・`/compact`
+     など opencode の TUI がローカル処理するコマンドは `/api/command`
+     に現れないため bridge からは実行できません (`opencode acp` モードでは
+     ACP 経由で `/compact` のみ `session/summarize`
+     へ振り分けられます)。
 
 #### サーバーライフサイクルと設計判断 (2026-10-01 確定)
 

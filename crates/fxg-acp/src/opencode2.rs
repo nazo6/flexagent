@@ -26,6 +26,9 @@
 //! - **承認**: SSE の `permission.asked` を [`UnifiedEventPayload::PermissionRequest`]
 //!   へ変換し、`POST /api/session/{id}/permission/{request_id}/reply` で応答する。
 //!   純正TUI から応答された場合も `permission.replied` として記録される。
+//! - **スラッシュコマンド**: `GET /api/command` の一覧を capabilities として同期し、
+//!   `/name <本文>` は `POST /api/session/{id}/command` へ振り分ける。opencode の
+//!   ACP / 純正TUI と同じく 1 プロンプトにつき 1 コマンドだけを扱う。
 
 use std::collections::HashMap;
 use std::net::TcpListener;
@@ -39,7 +42,7 @@ use async_trait::async_trait;
 use base64::Engine;
 use futures_util::StreamExt;
 use fxg_protocol::common::{
-    ConfigOptionInfo, ModeInfo, PermissionOption, SessionStatus, StreamDeltaPayload,
+    CommandInfo, ConfigOptionInfo, ModeInfo, PermissionOption, SessionStatus, StreamDeltaPayload,
 };
 use fxg_protocol::events::UnifiedEventPayload;
 use serde_json::{Value, json};
@@ -82,6 +85,21 @@ pub const PASSWORD_ENV: &str = "OPENCODE_PASSWORD";
 /// opencode v1 / v2 はどちらもコマンド名が `opencode` のため、`serve` API を
 /// 持たない v1 を誤って起動しないようメジャーバージョンで判別する。
 const OPENCODE_MAJOR: u64 = 2;
+
+/// `/name <本文>` を、既知のコマンド一覧に一致する場合のみ
+/// `(コマンド名, 本文)` へ分割する。
+///
+/// opencode (`opencode acp` / 純正TUI) と同じく 1 プロンプトにつき 1 コマンドだけを
+/// 扱い、2 つ目以降は 1 つ目の引数 (`$ARGUMENTS`) として渡す。本文の改行は保持する。
+/// 未知の名前は `None` を返し、通常のプロンプトとして送信される。
+fn split_command<'a>(text: &'a str, commands: &[String]) -> Option<(&'a str, &'a str)> {
+    let rest = text.trim_start().strip_prefix('/')?;
+    let name = rest.split_whitespace().next()?;
+    if !commands.iter().any(|command| command == name) {
+        return None;
+    }
+    Some((name, rest[name.len()..].trim_start()))
+}
 
 /// `opencode` 実行ファイルが対応バージョン (v2 系) であることを検証する。
 ///
@@ -158,6 +176,16 @@ struct SessionState {
     /// - 純正TUI 由来プロンプトの判定 (自己送信分は `SessionManager` が
     ///   `UserMessage` を記録済みのため、再記録しない)
     prompt_ids: Vec<String>,
+    /// 利用可能なスラッシュコマンド名 (`GET /api/command`)。
+    ///
+    /// `/name <本文>` を `/command` へ振り分ける判定に用いる。
+    commands: Vec<String>,
+    /// 送信済みだが inboxID 未記録の `/command` 数。
+    ///
+    /// `/command` は 204 を返し inboxID を伴わないため、`/prompt` のように
+    /// 応答から自己送信分を判別できない。送信前にここで予約し、SSE
+    /// (`session.inbox.enqueued`) 側で消費して ID を記録する。
+    pending_commands: usize,
     /// `tool_call_id` → ツール名 (`session.tool.called` に名前が含まれないため、
     /// `session.tool.input.started` から引き継ぐ)
     tool_names: HashMap<String, String>,
@@ -223,6 +251,30 @@ impl OpenCode2SessionHandle {
 #[async_trait]
 impl ActiveSessionHandle for OpenCode2SessionHandle {
     async fn send_prompt(&self, text: String) -> anyhow::Result<()> {
+        // 既知のスラッシュコマンド (`/name <本文>`) は `/command` へ振り分ける
+        // (`/prompt` はスラッシュを解釈せず、本文がそのまま LLM へ渡る)。
+        let command = {
+            let state = self.state.lock().expect("state poisoned");
+            split_command(&text, &state.commands)
+                .map(|(name, args)| (name.to_owned(), args.to_owned()))
+        };
+        if let Some((name, args)) = command {
+            // `/command` は inboxID を返さないため、自己送信分の判別と ID 記録は
+            // 送信前の予約カウンタを介して SSE 側で行う (下記 `session.inbox.enqueued`)。
+            self.state.lock().expect("state poisoned").pending_commands += 1;
+            if let Err(err) = self
+                .request_json(
+                    reqwest::Method::POST,
+                    &format!("/api/session/{}/command", self.opencode_session_id),
+                    Some(json!({ "name": name, "text": args })),
+                )
+                .await
+            {
+                self.state.lock().expect("state poisoned").pending_commands -= 1;
+                return Err(err);
+            }
+            return Ok(());
+        }
         let response = self
             .request_json(
                 reqwest::Method::POST,
@@ -501,13 +553,15 @@ impl AgentDriver for OpenCode2Driver {
             }));
         }
 
-        // モード (agent) とモデルの選択肢を同期する。
+        // モード (agent)・スラッシュコマンド・モデルの選択肢を同期する。
         // `opencode serve` は起動直後しばらくカタログが空のため、揃うまで待つ
+        let mut session_state = SessionState::default();
         if let Some(capabilities) = wait_for_capabilities(&http, &base_url, &password).await {
+            session_state.commands = command_names(&capabilities);
             let _ = event_tx.send(DriverEvent::Event(capabilities));
         }
 
-        let state = Arc::new(Mutex::new(SessionState::default()));
+        let state = Arc::new(Mutex::new(session_state));
         let (commands, command_rx) = mpsc::unbounded_channel();
 
         // サーバープロセス管理タスク
@@ -814,27 +868,92 @@ async fn request(
 
 /// カタログが揃うまで [`fetch_capabilities`] をリトライする。
 ///
-/// `opencode serve` は起動直後しばらく `/api/agent` / `/api/model` が空配列を
-/// 返すため、内容が得られるまで短い間隔で再取得する。
+/// `opencode serve` は起動直後しばらく `/api/agent` / `/api/command` /
+/// `/api/model` が空配列を返す。さらに `/api/command` は組み込みコマンドの後に
+/// プロジェクト定義のコマンドが追加されるため、コマンド一覧が 2 回連続で同じに
+/// なるまで待ってから確定する。揃いきらないままタイムアウトした場合は、それまでに
+/// 得られた最新の内容を返す (カタログ取得の失敗でセッションを開始できなくしない)。
 async fn wait_for_capabilities(
     http: &reqwest::Client,
     base_url: &str,
     password: &str,
 ) -> Option<UnifiedEventPayload> {
     let deadline = tokio::time::Instant::now() + CAPABILITIES_READY_TIMEOUT;
+    let mut latest = None;
+    let mut previous_commands: Option<Vec<String>> = None;
     loop {
         if let Some(capabilities) = fetch_capabilities(http, base_url, password).await {
-            return Some(capabilities);
+            let commands = command_names(&capabilities);
+            let settled = previous_commands.as_ref() == Some(&commands);
+            previous_commands = Some(commands);
+            if !settled || !is_capabilities_ready(&capabilities) {
+                latest = Some(capabilities);
+            } else {
+                return Some(capabilities);
+            }
         }
         if tokio::time::Instant::now() >= deadline {
-            tracing::debug!("opencode2 capabilities were still empty before timeout");
-            return None;
+            tracing::debug!("opencode2 capabilities were still incomplete before timeout");
+            return latest;
         }
         tokio::time::sleep(CAPABILITIES_POLL_INTERVAL).await;
     }
 }
 
-/// 利用可能なモード (agent) とモデル選択肢を取得して
+/// モード / モデルのカタログが揃っているか。
+///
+/// コマンド一覧は組み込みの後にプロジェクト定義が追加されるため、ここでは
+/// 判定せず [`wait_for_capabilities`] が安定 (2 回連続で同一) を待つ。
+fn is_capabilities_ready(capabilities: &UnifiedEventPayload) -> bool {
+    match capabilities {
+        UnifiedEventPayload::CapabilitiesUpdated {
+            available_modes,
+            config_options,
+            ..
+        } => !available_modes.is_empty() || !config_options.is_empty(),
+        _ => true,
+    }
+}
+
+/// [`UnifiedEventPayload::CapabilitiesUpdated`] からスラッシュコマンド名を取り出す。
+fn command_names(capabilities: &UnifiedEventPayload) -> Vec<String> {
+    match capabilities {
+        UnifiedEventPayload::CapabilitiesUpdated {
+            available_commands, ..
+        } => available_commands
+            .iter()
+            .map(|command| command.name.clone())
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// `GET /api/command` の応答 (`{ data: [{ name, description? }] }`) を
+/// [`CommandInfo`] へ変換する (`name` を持たない要素は無視する)。
+fn commands_from_api(value: &Value) -> Vec<CommandInfo> {
+    value
+        .get("data")
+        .and_then(Value::as_array)
+        .map(|commands| {
+            commands
+                .iter()
+                .filter_map(|command| {
+                    Some(CommandInfo {
+                        name: command.get("name")?.as_str()?.to_owned(),
+                        description: command
+                            .get("description")
+                            .and_then(Value::as_str)
+                            .unwrap_or_default()
+                            .to_owned(),
+                        input_hint: None,
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// 利用可能なモード (agent)・スラッシュコマンド・モデル選択肢を取得して
 /// [`UnifiedEventPayload::CapabilitiesUpdated`] を組み立てる。
 async fn fetch_capabilities(
     http: &reqwest::Client,
@@ -930,13 +1049,30 @@ async fn fetch_capabilities(
         }
     };
 
-    if available_modes.is_empty() && config_options.is_empty() {
+    let available_commands = match request(
+        http,
+        base_url,
+        password,
+        reqwest::Method::GET,
+        "/api/command",
+        None,
+    )
+    .await
+    {
+        Ok(value) => commands_from_api(&value),
+        Err(err) => {
+            tracing::debug!("failed to fetch opencode2 commands: {err:#}");
+            Vec::new()
+        }
+    };
+
+    if available_modes.is_empty() && available_commands.is_empty() && config_options.is_empty() {
         return None;
     }
     Some(UnifiedEventPayload::CapabilitiesUpdated {
         current_mode: None,
         available_modes,
-        available_commands: Vec::new(),
+        available_commands,
         config_options,
     })
 }
@@ -1198,14 +1334,19 @@ fn map_event(state: &Arc<Mutex<SessionState>>, session_id: &str, raw: &str) -> V
         // 自己送信分 (SessionManager が `UserMessage` 記録済み) 以外を拾う。
         "session.inbox.enqueued" => {
             let inbox_id = text_of("inboxID");
-            let known = state
-                .lock()
-                .expect("state poisoned")
-                .prompt_ids
-                .iter()
-                .any(|id| id == &inbox_id);
-            if known {
-                return Vec::new();
+            {
+                let mut state = state.lock().expect("state poisoned");
+                // `/command` は inboxID を返さないため、`/prompt` のように応答から
+                // 自己送信分を判別できない。送信前に予約したカウンタを消費し、
+                // ここで Revert 対応付け用の ID を記録する。
+                if state.pending_commands > 0 {
+                    state.pending_commands -= 1;
+                    state.prompt_ids.push(inbox_id);
+                    return Vec::new();
+                }
+                if state.prompt_ids.iter().any(|id| id == &inbox_id) {
+                    return Vec::new();
+                }
             }
             let text = data
                 .pointer("/item/payload/text")
@@ -1508,6 +1649,68 @@ mod tests {
     }
 
     #[test]
+    fn split_command_requires_known_name_and_keeps_arguments() {
+        let commands = vec!["review".to_owned(), "init".to_owned()];
+        assert_eq!(
+            split_command("/review branch", &commands),
+            Some(("review", "branch"))
+        );
+        assert_eq!(split_command("/review", &commands), Some(("review", "")));
+        // 引数の改行は保持する (`$ARGUMENTS` へそのまま渡す)
+        assert_eq!(
+            split_command("/review\nline1\nline2", &commands),
+            Some(("review", "line1\nline2"))
+        );
+        // 1 プロンプト 1 コマンド: 2 つ目以降は引数として扱う
+        assert_eq!(
+            split_command("/review /init", &commands),
+            Some(("review", "/init"))
+        );
+        // 未知の名前・コマンド形式でない入力は通常のプロンプト
+        assert_eq!(split_command("/unknown arg", &commands), None);
+        assert_eq!(split_command("plain text", &commands), None);
+        assert_eq!(split_command("/", &commands), None);
+        assert_eq!(split_command("/review branch", &[]), None);
+    }
+
+    #[test]
+    fn commands_from_api_skips_entries_without_name() {
+        let commands = commands_from_api(&json!({
+            "data": [
+                { "name": "init", "description": "setup" },
+                { "name": "ping" },
+                { "description": "no name" },
+            ]
+        }));
+        assert_eq!(commands.len(), 2);
+        assert_eq!(commands[0].name, "init");
+        assert_eq!(commands[0].description, "setup");
+        assert_eq!(commands[1].name, "ping");
+        assert_eq!(commands[1].description, "");
+        assert!(commands_from_api(&json!({})).is_empty());
+    }
+
+    #[test]
+    fn maps_command_turns_from_sse_without_duplicate() {
+        let state = state();
+        state.lock().expect("state").pending_commands = 1;
+        let raw = r#"{"type":"session.inbox.enqueued","data":{"sessionID":"ses_1","inboxID":"msg_cmd","item":{"type":"user","payload":{"text":"expanded template"}}}}"#;
+        // 予約カウンタを消費しつつ、Revert 対応付け用の ID を記録する
+        assert!(map(&state, raw).is_empty());
+        {
+            let guard = state.lock().expect("state");
+            assert_eq!(guard.pending_commands, 0);
+            assert_eq!(guard.prompt_ids, vec!["msg_cmd".to_owned()]);
+        }
+        // 同じイベントが再送されても重複記録しない
+        assert!(map(&state, raw).is_empty());
+        assert_eq!(
+            state.lock().expect("state").prompt_ids,
+            vec!["msg_cmd".to_owned()]
+        );
+    }
+
+    #[test]
     fn maps_native_tui_prompts_only_once() {
         let state = state();
         state
@@ -1590,6 +1793,183 @@ mod tests {
         assert!(body["location"]["directory"].as_str().is_some());
     }
 
+    /// 実 opencode2 でモデルを選択する (既定モデルが利用できない環境向け)。
+    ///
+    /// `/api/model` から公開プロバイダ (`opencode`) のモデルを優先して選び、
+    /// 明示的に設定する。利用可能なモデルが無い場合は何もしない。
+    async fn select_opencode_model(handle: &dyn ActiveSessionHandle) {
+        let Some(info) = handle.native_attach() else {
+            return;
+        };
+        let password = info
+            .env
+            .iter()
+            .find(|(key, _)| key == PASSWORD_ENV)
+            .map(|(_, value)| value.clone())
+            .unwrap_or_default();
+        let client = reqwest::Client::new();
+        let models = request(
+            &client,
+            &info.server_url,
+            &password,
+            reqwest::Method::GET,
+            "/api/model",
+            None,
+        )
+        .await
+        .expect("model list");
+        let model = models
+            .get("data")
+            .and_then(Value::as_array)
+            .and_then(|models| {
+                models
+                    .iter()
+                    .find(|model| model.get("providerID") == Some(&Value::from("opencode")))
+                    .or_else(|| models.first())
+            })
+            .cloned();
+        if let Some(model) = model {
+            handle
+                .set_config(
+                    "model".to_owned(),
+                    json!({
+                        "providerID": model.get("providerID"),
+                        "id": model.get("modelID").or_else(|| model.get("id")),
+                    }),
+                )
+                .await
+                .expect("set model");
+        }
+    }
+
+    /// スラッシュコマンドの一覧取得・実行・自己送信の重複防止を実 opencode2 で
+    /// 確認する: `FXG_TEST_OPENCODE2=1 cargo test -p fxg-acp -- --ignored` で実行する。
+    #[tokio::test]
+    #[ignore = "requires a local opencode2 install and provider auth"]
+    async fn runs_slash_command_against_real_opencode2() {
+        use std::path::PathBuf;
+
+        use crate::driver::AgentLaunchSpec;
+
+        let root = tempfile::tempdir().expect("tempdir");
+        let command_dir = root.path().join(".opencode/commands");
+        std::fs::create_dir_all(&command_dir).expect("create command dir");
+        std::fs::write(
+            command_dir.join("ping.md"),
+            "---\ndescription: ping test\n---\nReply with exactly: pong [$ARGUMENTS]\n",
+        )
+        .expect("write command");
+
+        let driver = OpenCode2Driver::new();
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let started = driver
+            .start_session(
+                StartSessionRequest {
+                    session_id: "test-command".to_owned(),
+                    title: Some("fxg command test".to_owned()),
+                    cwd: PathBuf::from(root.path()),
+                    launch: AgentLaunchSpec {
+                        agent_id: "opencode2".to_owned(),
+                        display_name: "OpenCode2".to_owned(),
+                        driver_kind: "opencode2".to_owned(),
+                        program: PathBuf::from("opencode"),
+                        args: vec!["serve".to_owned()],
+                        env: Vec::new(),
+                    },
+                    extra_args: Vec::new(),
+                    initial_mode: None,
+                    resume: None,
+                },
+                tx,
+            )
+            .await
+            .expect("start_session");
+        let handle = started.handle;
+        select_opencode_model(handle.as_ref()).await;
+
+        // `GET /api/command` の一覧 (プロジェクトのカスタムコマンドを含む) が
+        // 起動時の capabilities に含まれること
+        let mut commands = Vec::new();
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+        while tokio::time::Instant::now() < deadline {
+            match tokio::time::timeout(Duration::from_secs(5), rx.recv()).await {
+                Ok(Some(DriverEvent::Event(UnifiedEventPayload::CapabilitiesUpdated {
+                    available_commands,
+                    ..
+                }))) => {
+                    commands = available_commands
+                        .into_iter()
+                        .map(|command| command.name)
+                        .collect();
+                    break;
+                }
+                Ok(Some(_)) => continue,
+                Ok(None) | Err(_) => break,
+            }
+        }
+        assert!(
+            commands.iter().any(|name| name == "ping"),
+            "custom command must be listed: {commands:?}"
+        );
+
+        // `/ping hello world` が `/command` として実行され、`$ARGUMENTS` が展開された
+        // ユーザーメッセージが opencode2 側に残ること (LLM 応答の内容には依存しない)
+        handle
+            .send_prompt("/ping hello world".to_owned())
+            .await
+            .expect("send command");
+        let info = handle.native_attach().expect("native attach");
+        let password = info
+            .env
+            .iter()
+            .find(|(key, _)| key == PASSWORD_ENV)
+            .map(|(_, value)| value.clone())
+            .unwrap_or_default();
+        let client = reqwest::Client::new();
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+        let mut expanded = false;
+        while tokio::time::Instant::now() < deadline {
+            // 自己送信分のターンは SSE から二重記録されないこと
+            if let Ok(Some(event)) =
+                tokio::time::timeout(Duration::from_millis(250), rx.recv()).await
+            {
+                assert!(
+                    !matches!(
+                        event,
+                        DriverEvent::Event(UnifiedEventPayload::UserMessage { .. })
+                    ),
+                    "command turn must not be re-recorded from SSE: {event:?}"
+                );
+            }
+            let messages = request(
+                &client,
+                &info.server_url,
+                &password,
+                reqwest::Method::GET,
+                &format!("/api/session/{}/message", info.session_id),
+                None,
+            )
+            .await
+            .expect("messages");
+            expanded = messages
+                .get("data")
+                .and_then(Value::as_array)
+                .map(|messages| {
+                    messages.iter().any(|message| {
+                        message.get("type").and_then(Value::as_str) == Some("user")
+                            && message.get("text").and_then(Value::as_str)
+                                == Some("Reply with exactly: pong [hello world]")
+                    })
+                })
+                .unwrap_or_default();
+            if expanded {
+                break;
+            }
+        }
+        assert!(expanded, "command template must be expanded with arguments");
+        handle.shutdown().await.expect("shutdown");
+    }
+
     /// 実挙動の確認 (opencode2 がインストール済みの環境でのみ実行):
     /// `FXG_TEST_OPENCODE2=1 cargo test -p fxg-acp -- --ignored` で実行する。
     #[tokio::test]
@@ -1632,15 +2012,21 @@ mod tests {
         // カタログ取得を待って `CapabilitiesUpdated` を送ることを検証する
         let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
         let mut has_model_options = false;
+        let mut command_names = Vec::new();
         while tokio::time::Instant::now() < deadline {
             match tokio::time::timeout(Duration::from_secs(15), rx.recv()).await {
                 Ok(Some(DriverEvent::Event(UnifiedEventPayload::CapabilitiesUpdated {
                     config_options,
+                    available_commands,
                     ..
                 }))) => {
                     has_model_options = config_options
                         .iter()
                         .any(|option| option.key == "model" && !option.options.is_empty());
+                    command_names = available_commands
+                        .into_iter()
+                        .map(|command| command.name)
+                        .collect();
                     break;
                 }
                 Ok(Some(_)) => continue,
@@ -1651,49 +2037,14 @@ mod tests {
             has_model_options,
             "capabilities with model options must be emitted"
         );
-        // opencode2 の既定モデルは環境によっては利用できないため、公開プロバイダ
-        // (`opencode`) のモデルを選んで明示的に設定する。
-        if let Some(info) = handle.native_attach() {
-            let password = info
-                .env
-                .iter()
-                .find(|(key, _)| key == PASSWORD_ENV)
-                .map(|(_, value)| value.clone())
-                .unwrap_or_default();
-            let client = reqwest::Client::new();
-            let models = request(
-                &client,
-                &info.server_url,
-                &password,
-                reqwest::Method::GET,
-                "/api/model",
-                None,
-            )
-            .await
-            .expect("model list");
-            let model = models
-                .get("data")
-                .and_then(Value::as_array)
-                .and_then(|models| {
-                    models
-                        .iter()
-                        .find(|model| model.get("providerID") == Some(&Value::from("opencode")))
-                        .or_else(|| models.first())
-                })
-                .cloned();
-            if let Some(model) = model {
-                handle
-                    .set_config(
-                        "model".to_owned(),
-                        json!({
-                            "providerID": model.get("providerID"),
-                            "id": model.get("modelID").or_else(|| model.get("id")),
-                        }),
-                    )
-                    .await
-                    .expect("set model");
-            }
-        }
+        // `GET /api/command` の一覧 (組み込みの `init` / `review` を含む) が
+        // 起動時の capabilities に含まれること
+        assert!(
+            command_names.iter().any(|name| name == "init"),
+            "available commands must include built-ins: {command_names:?}"
+        );
+        // opencode2 の既定モデルは環境によっては利用できないため明示的に設定する。
+        select_opencode_model(handle.as_ref()).await;
         handle
             .send_prompt("Reply with exactly one word: hello".to_owned())
             .await
