@@ -26,6 +26,11 @@
 //! - **承認**: SSE の `permission.asked` を [`UnifiedEventPayload::PermissionRequest`]
 //!   へ変換し、`POST /api/session/{id}/permission/{request_id}/reply` で応答する。
 //!   純正TUI から応答された場合も `permission.replied` として記録される。
+//! - **質問・フォーム (elicitation)**: SSE の `form.created` (エージェントの
+//!   `question` ツール呼び出し等) を [`UnifiedEventPayload::ElicitationRequest`] へ
+//!   変換し、`POST /api/session/{id}/form/{id}/reply` または
+//!   `DELETE /api/session/{id}/form/{id}` で応答する。純正TUI 等からの解決も
+//!   `form.replied` / `form.cancelled` として同期する。
 //! - **スラッシュコマンド**: `GET /api/command` の一覧を capabilities として同期し、
 //!   `/name <本文>` は `POST /api/session/{id}/command` へ振り分ける。opencode の
 //!   ACP / 純正TUI と同じく 1 プロンプトにつき 1 コマンドだけを扱う。
@@ -46,8 +51,8 @@ use async_trait::async_trait;
 use base64::Engine;
 use futures_util::StreamExt;
 use fxg_protocol::common::{
-    CommandInfo, CompactionStatus, ConfigOptionInfo, ModeInfo, PermissionOption, SessionStatus,
-    StreamDeltaPayload,
+    CommandInfo, CompactionStatus, ConfigOptionInfo, ElicitationAction, ModeInfo, PermissionOption,
+    SessionStatus, StreamDeltaPayload,
 };
 use fxg_protocol::events::UnifiedEventPayload;
 use serde_json::{Value, json};
@@ -340,6 +345,44 @@ impl ActiveSessionHandle for OpenCode2SessionHandle {
             Some(json!({ "decision": selected_option_id })),
         )
         .await?;
+        Ok(())
+    }
+
+    async fn respond_elicitation(
+        &self,
+        elicitation_id: String,
+        action: ElicitationAction,
+        content: Value,
+    ) -> anyhow::Result<()> {
+        match action {
+            ElicitationAction::Accept => {
+                let answer = if content.is_object() {
+                    content
+                } else {
+                    json!({})
+                };
+                self.request_json(
+                    reqwest::Method::POST,
+                    &format!(
+                        "/api/session/{}/form/{elicitation_id}/reply",
+                        self.opencode_session_id
+                    ),
+                    Some(json!({ "answer": answer })),
+                )
+                .await?;
+            }
+            ElicitationAction::Decline | ElicitationAction::Cancel => {
+                self.request_json(
+                    reqwest::Method::DELETE,
+                    &format!(
+                        "/api/session/{}/form/{elicitation_id}",
+                        self.opencode_session_id
+                    ),
+                    None,
+                )
+                .await?;
+            }
+        }
         Ok(())
     }
 
@@ -1256,7 +1299,11 @@ fn map_event(state: &Arc<Mutex<SessionState>>, session_id: &str, raw: &str) -> V
         .and_then(Value::as_str)
         .unwrap_or_default();
     let data = value.get("data").cloned().unwrap_or(Value::Null);
-    if let Some(event_session) = data.get("sessionID").and_then(Value::as_str)
+    let event_session = data
+        .get("sessionID")
+        .or_else(|| data.pointer("/form/sessionID"))
+        .and_then(Value::as_str);
+    if let Some(event_session) = event_session
         && event_session != session_id
     {
         return Vec::new();
@@ -1426,6 +1473,50 @@ fn map_event(state: &Arc<Mutex<SessionState>>, session_id: &str, raw: &str) -> V
                 resolved_by: "cli".to_owned(),
             },
         )],
+        // 構造化入力リクエスト (question ツール / MCP elicitation)
+        "form.created" => {
+            if let Some(event) = form_to_elicitation_request(&data) {
+                vec![
+                    DriverEvent::Event(UnifiedEventPayload::StatusChanged {
+                        status: SessionStatus::WaitingInput,
+                        error_message: None,
+                    }),
+                    DriverEvent::Event(event),
+                ]
+            } else {
+                Vec::new()
+            }
+        }
+        "form.replied" => {
+            let form_id = text_of("id");
+            vec![
+                DriverEvent::Event(UnifiedEventPayload::StatusChanged {
+                    status: SessionStatus::Running,
+                    error_message: None,
+                }),
+                DriverEvent::Event(UnifiedEventPayload::ElicitationResolved {
+                    elicitation_id: form_id,
+                    action: ElicitationAction::Accept,
+                    content: data.get("answer").cloned().unwrap_or(Value::Null),
+                    resolved_by: "cli".to_owned(),
+                }),
+            ]
+        }
+        "form.cancelled" => {
+            let form_id = text_of("id");
+            vec![
+                DriverEvent::Event(UnifiedEventPayload::StatusChanged {
+                    status: SessionStatus::Running,
+                    error_message: None,
+                }),
+                DriverEvent::Event(UnifiedEventPayload::ElicitationResolved {
+                    elicitation_id: form_id,
+                    action: ElicitationAction::Cancel,
+                    content: Value::Null,
+                    resolved_by: "cli".to_owned(),
+                }),
+            ]
+        }
         // 純正TUI から送信されたプロンプトは fxg 側に記録されないため、
         // 自己送信分 (SessionManager が `UserMessage` 記録済み) 以外を拾う。
         "session.inbox.enqueued" => {
@@ -1604,6 +1695,139 @@ fn truncate_chars(text: &str, limit: usize) -> String {
     out
 }
 
+/// OpenCode2 の `form.created` イベントデータから `ElicitationRequest` payload を構築する。
+fn form_to_elicitation_request(data: &Value) -> Option<UnifiedEventPayload> {
+    let form = data.get("form").unwrap_or(data);
+    let form_id = form.get("id").and_then(Value::as_str)?.to_owned();
+    let title = form
+        .get("title")
+        .and_then(Value::as_str)
+        .unwrap_or("Questions");
+    let fields = form.get("fields").and_then(Value::as_array)?;
+
+    let mut properties = serde_json::Map::new();
+    let mut required = Vec::new();
+    let mut message_parts = Vec::new();
+
+    for field in fields {
+        let key = field.get("key").and_then(Value::as_str).unwrap_or("");
+        if key.is_empty() {
+            continue;
+        }
+        let field_type = field
+            .get("type")
+            .and_then(Value::as_str)
+            .unwrap_or("string");
+        let field_title = field.get("title").and_then(Value::as_str);
+        let field_desc = field.get("description").and_then(Value::as_str);
+        // question ツールのフォームフィールドは既定で回答必須とする (明示的に false の場合のみ任意)
+        let is_required = field
+            .get("required")
+            .and_then(Value::as_bool)
+            .unwrap_or(true);
+
+        if is_required {
+            required.push(Value::String(key.to_owned()));
+        }
+
+        if let Some(desc) = field_desc {
+            if let Some(header) = field_title
+                && !header.trim().is_empty()
+            {
+                message_parts.push(format!("{header}: {desc}"));
+            } else {
+                message_parts.push(desc.to_owned());
+            }
+        }
+
+        let options = field.get("options").and_then(Value::as_array);
+        let mut prop = serde_json::Map::new();
+        if let Some(t) = field_title {
+            prop.insert("title".to_owned(), Value::String(t.to_owned()));
+        }
+        if let Some(d) = field_desc {
+            prop.insert("description".to_owned(), Value::String(d.to_owned()));
+        }
+
+        if field_type == "multiselect" {
+            prop.insert("type".to_owned(), Value::String("array".to_owned()));
+            let mut items = serde_json::Map::new();
+            items.insert("type".to_owned(), Value::String("string".to_owned()));
+            if let Some(opts) = options {
+                let enum_values: Vec<Value> = opts
+                    .iter()
+                    .filter_map(|opt| {
+                        opt.get("value")
+                            .or_else(|| opt.get("label"))
+                            .and_then(Value::as_str)
+                            .map(|s| Value::String(s.to_owned()))
+                    })
+                    .collect();
+                if !enum_values.is_empty() {
+                    items.insert("enum".to_owned(), Value::Array(enum_values));
+                }
+            }
+            prop.insert("items".to_owned(), Value::Object(items));
+        } else {
+            prop.insert("type".to_owned(), Value::String("string".to_owned()));
+            if let Some(opts) = options {
+                let one_of: Vec<Value> = opts
+                    .iter()
+                    .filter_map(|opt| {
+                        let val = opt
+                            .get("value")
+                            .or_else(|| opt.get("label"))
+                            .and_then(Value::as_str)?;
+                        let label = opt.get("label").and_then(Value::as_str).unwrap_or(val);
+                        let desc = opt.get("description").and_then(Value::as_str);
+                        let title = match desc {
+                            Some(d) if !d.trim().is_empty() => format!("{label} ({d})"),
+                            _ => label.to_owned(),
+                        };
+                        Some(json!({
+                            "const": val,
+                            "title": title,
+                        }))
+                    })
+                    .collect();
+                if !one_of.is_empty() {
+                    prop.insert("oneOf".to_owned(), Value::Array(one_of));
+                }
+            }
+        }
+
+        properties.insert(key.to_owned(), Value::Object(prop));
+    }
+
+    let message = if message_parts.is_empty() {
+        title.to_owned()
+    } else if message_parts.len() == 1 {
+        message_parts[0].clone()
+    } else {
+        format!("{title}\n{}", message_parts.join("\n"))
+    };
+
+    let mut schema = serde_json::Map::new();
+    schema.insert("type".to_owned(), Value::String("object".to_owned()));
+    schema.insert("properties".to_owned(), Value::Object(properties));
+    if !required.is_empty() {
+        schema.insert("required".to_owned(), Value::Array(required));
+    }
+
+    let tool_call_id = form
+        .pointer("/metadata/tool/id")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+
+    Some(UnifiedEventPayload::ElicitationRequest {
+        elicitation_id: form_id,
+        message,
+        mode: "form".to_owned(),
+        requested_schema: Value::Object(schema),
+        tool_call_id,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1742,6 +1966,210 @@ mod tests {
             [DriverEvent::Event(UnifiedEventPayload::PermissionResolved { request_id, selected_option_id, .. })]
                 if request_id == "per_1" && selected_option_id == "once"
         ));
+    }
+
+    #[test]
+    fn maps_form_lifecycle() {
+        let state = state();
+        let form_json = r#"{
+            "type": "form.created",
+            "data": {
+                "form": {
+                    "id": "frm_1",
+                    "sessionID": "ses_1",
+                    "title": "Questions",
+                    "metadata": {
+                        "kind": "question",
+                        "tool": { "messageID": "msg_1", "id": "call_1" }
+                    },
+                    "fields": [
+                        {
+                            "key": "q0",
+                            "title": "Layout",
+                            "description": "Which footer view should be the reference?",
+                            "type": "string",
+                            "options": [
+                                { "value": "Form", "label": "Form", "description": "Form footer" },
+                                { "value": "Prompt", "label": "Prompt", "description": "Normal composer" }
+                            ]
+                        }
+                    ]
+                }
+            }
+        }"#;
+
+        let created = map(&state, form_json);
+        match created.as_slice() {
+            [
+                DriverEvent::Event(UnifiedEventPayload::StatusChanged {
+                    status: SessionStatus::WaitingInput,
+                    ..
+                }),
+                DriverEvent::Event(UnifiedEventPayload::ElicitationRequest {
+                    elicitation_id,
+                    message,
+                    mode,
+                    requested_schema,
+                    tool_call_id,
+                }),
+            ] => {
+                assert_eq!(elicitation_id, "frm_1");
+                assert_eq!(
+                    message,
+                    "Layout: Which footer view should be the reference?"
+                );
+                assert_eq!(mode, "form");
+                assert_eq!(tool_call_id.as_deref(), Some("call_1"));
+                assert!(requested_schema.pointer("/properties/q0").is_some());
+                assert_eq!(
+                    requested_schema
+                        .pointer("/properties/q0/type")
+                        .and_then(Value::as_str),
+                    Some("string")
+                );
+                assert_eq!(
+                    requested_schema
+                        .pointer("/properties/q0/oneOf/0/const")
+                        .and_then(Value::as_str),
+                    Some("Form")
+                );
+                assert_eq!(
+                    requested_schema
+                        .pointer("/properties/q0/oneOf/0/title")
+                        .and_then(Value::as_str),
+                    Some("Form (Form footer)")
+                );
+            }
+            other => panic!("unexpected events: {other:?}"),
+        }
+
+        // 他セッションの form.created は無視する
+        let other_session = r#"{
+            "type": "form.created",
+            "data": {
+                "form": {
+                    "id": "frm_2",
+                    "sessionID": "ses_other",
+                    "fields": []
+                }
+            }
+        }"#;
+        assert!(map(&state, other_session).is_empty());
+
+        let replied = map(
+            &state,
+            r#"{"type":"form.replied","data":{"sessionID":"ses_1","id":"frm_1","answer":{"q0":"Form"}}}"#,
+        );
+        match replied.as_slice() {
+            [
+                DriverEvent::Event(UnifiedEventPayload::StatusChanged {
+                    status: SessionStatus::Running,
+                    ..
+                }),
+                DriverEvent::Event(UnifiedEventPayload::ElicitationResolved {
+                    elicitation_id,
+                    action,
+                    content,
+                    ..
+                }),
+            ] => {
+                assert_eq!(elicitation_id, "frm_1");
+                assert_eq!(*action, ElicitationAction::Accept);
+                assert_eq!(content.get("q0").and_then(Value::as_str), Some("Form"));
+            }
+            other => panic!("unexpected events: {other:?}"),
+        }
+
+        let cancelled = map(
+            &state,
+            r#"{"type":"form.cancelled","data":{"sessionID":"ses_1","id":"frm_1"}}"#,
+        );
+        match cancelled.as_slice() {
+            [
+                DriverEvent::Event(UnifiedEventPayload::StatusChanged {
+                    status: SessionStatus::Running,
+                    ..
+                }),
+                DriverEvent::Event(UnifiedEventPayload::ElicitationResolved {
+                    elicitation_id,
+                    action,
+                    content,
+                    ..
+                }),
+            ] => {
+                assert_eq!(elicitation_id, "frm_1");
+                assert_eq!(*action, ElicitationAction::Cancel);
+                assert!(content.is_null());
+            }
+            other => panic!("unexpected events: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn form_to_elicitation_request_handles_multiselect_and_custom_options() {
+        let form_json = json!({
+            "id": "frm_multi",
+            "sessionID": "ses_1",
+            "title": "Configuration",
+            "fields": [
+                {
+                    "key": "q0",
+                    "title": "Features",
+                    "description": "Select features to enable",
+                    "type": "multiselect",
+                    "options": [
+                        { "value": "feat_a", "label": "Feature A" },
+                        { "value": "feat_b", "label": "Feature B" }
+                    ]
+                },
+                {
+                    "key": "q1",
+                    "description": "Plain text question",
+                    "type": "string",
+                    "required": false
+                }
+            ]
+        });
+
+        let payload =
+            form_to_elicitation_request(&form_json).expect("should build elicitation request");
+        let UnifiedEventPayload::ElicitationRequest {
+            elicitation_id,
+            requested_schema,
+            message,
+            ..
+        } = payload
+        else {
+            panic!("unexpected payload");
+        };
+
+        assert_eq!(elicitation_id, "frm_multi");
+        assert!(message.contains("Features: Select features to enable"));
+        assert!(message.contains("Plain text question"));
+
+        // q0: multiselect => array with items.enum
+        assert_eq!(
+            requested_schema
+                .pointer("/properties/q0/type")
+                .and_then(Value::as_str),
+            Some("array")
+        );
+        let items_enum = requested_schema
+            .pointer("/properties/q0/items/enum")
+            .and_then(Value::as_array)
+            .unwrap();
+        assert_eq!(items_enum.len(), 2);
+        assert_eq!(items_enum[0].as_str(), Some("feat_a"));
+        assert_eq!(items_enum[1].as_str(), Some("feat_b"));
+
+        // q0 は既定で required
+        let req_array = requested_schema
+            .get("required")
+            .and_then(Value::as_array)
+            .unwrap();
+        assert!(req_array.iter().any(|v| v.as_str() == Some("q0")));
+        // q1 は required: false 指定なので含まれない
+        assert!(!req_array.iter().any(|v| v.as_str() == Some("q1")));
     }
 
     #[test]
