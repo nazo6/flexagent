@@ -1,11 +1,11 @@
 # AGENTS.md
 
-**FlexAgent (`fxg`)** は、ACP対応エージェントおよび `opencode2`
-を任意の場所から操作・同期できる、セルフホスト型・ローカルファーストのエージェントマネージャです。
+**FlexAgent (`fxg`)**
+は、ACP対応エージェントを任意の場所から操作・同期できる、セルフホスト型・ローカルファーストのエージェントマネージャです。
 
 ## 1. アーキテクチャ・実装の要点
 
-- **単一バイナリ構成 (`fxg`)**: CLI / TUI、ノードデーモン
+- **単一バイナリ構成 (`fxg`)**: CLI、ノードデーモン
   (`fxg daemon`)、中央サーバー (`fxg server`)、および Web UI / PWA
   (`rust-embed`) を単一の Rust バイナリに内包する。
 - **ローカルファースト & Outbox 同期**:
@@ -43,14 +43,14 @@
     / `node.db` 管理
   - `fxg-pty`: ConPTY / Unix PTY (`portable-pty`)、Windows Job Object 管理
   - `fxg-acp`: `AgentDriver` トレイト、`AcpDriver`
-    (`agent-client-protocol`)、ACP Registry、`OpenCode2Driver`
-    (`opencode2 serve` ブリッジ + 純正TUI Attach)
+    (`agent-client-protocol`)、ACP Registry、ローカル PATH 実行
   - `fxg-node`: ノードデーモン (Named Pipe / UDS ローカルIPC、Outbox 同期、Git
     Worktree 管理、Shadow Git Tree (`GIT_INDEX_FILE`)
     によるターン単位のスナップショット/Revert)
   - `fxg-server`: 中央サーバー (Axum、Node Hub、VAPID Web Push、Stdio
     Provisioner、監査ログ)
-  - `fxg-cli`: `fxg` バイナリエントリポイント、内蔵TUI (`ratatui`)
+  - `fxg-cli`: `fxg` バイナリエントリポイント (セッション開始時に Web UI
+    をブラウザで自動オープン)
 - **Frontend (`ui/`)**:
   - SvelteKit (Svelte 5 Runes + `@sveltejs/adapter-static` SPA) + TypeScript +
     Tailwind CSS v4 + `shadcn-svelte`
