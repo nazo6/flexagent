@@ -97,8 +97,7 @@
         </a>
       </header>
 
-      <!-- ページコンテンツ (フルハイト) -->
-      <main class="flex-1 overflow-y-auto">
+      <main class="relative flex-1 overflow-y-auto">
         {@render children()}
       </main>
     </div>
