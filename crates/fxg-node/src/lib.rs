@@ -19,6 +19,12 @@
 //! - `daemon`: node daemon (local HTTP/WS server + local IPC + authentication)
 
 #![warn(missing_docs)]
+// Migration baseline: remove this crate-level allow as Phase 1 of
+// `docs/changelog/2026-11-08-type-safety-plan.md` lands.
+#![allow(
+    clippy::wildcard_enum_match_arm,
+    reason = "type-safety migration baseline; see docs/06-type-safety.md"
+)]
 
 pub mod daemon;
 pub mod error;

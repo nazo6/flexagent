@@ -54,11 +54,12 @@ description = "Rust の clippy を警告エラー扱いで実行する"
 run = "cargo clippy --workspace --all-targets -- -D warnings"
 
 [tasks."lint:errors"]
-description = "エラーを握り潰すパターン (let _ = / map_err(|_|) / Result::ok / unwrap_or_default) を workspace 全体で禁止する"
-# clippy.toml の disallowed-methods (Result::ok / Result::unwrap_or_default) と
-# 併用する。全クレートの監査が完了したため workspace 全体に適用する。
+description = "エラー握り潰しと型安全境界 (生JSON / 文字列判定 / wildcard enum match) を workspace 全体で禁止する"
+# clippy.toml の disallowed-methods / disallowed-types と併用する。
+# 既存違反はクレート単位の `#![allow(..., reason = "...")]` で移行ベースラインとして
+# 残し、Phase 2/3 で削除する (docs/06-type-safety.md)。
 # OS 固有モジュール (Windows / macOS の tray など) は該当 OS でのみ検査される。
-run = "cargo clippy --workspace --all-targets -- -D warnings -D clippy::let_underscore_must_use -D clippy::map_err_ignore -D clippy::disallowed_methods"
+run = "cargo clippy --workspace --all-targets -- -D warnings -D clippy::let_underscore_must_use -D clippy::map_err_ignore -D clippy::disallowed_methods -D clippy::disallowed_types -D clippy::wildcard_enum_match_arm"
 
 [tasks."lint:toml"]
 description = "TOML を tombi で lint する (JSON Schema 検証含む)"

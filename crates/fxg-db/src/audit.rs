@@ -6,6 +6,11 @@
 //! recorded in the executing node's `node.db`
 //! (design: `docs/01-architecture-and-sync.md` §7.5).
 
+#![allow(
+    clippy::disallowed_types,
+    reason = "audit details are display-only opaque JSON; see docs/06-type-safety.md"
+)]
+
 use fxg_protocol::util::now_ms;
 use sqlx::SqlitePool;
 

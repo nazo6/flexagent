@@ -8,6 +8,11 @@
 //! [`DaemonState`] (the Client API backend implementation) and serves it locally
 //! (loopback `127.0.0.1` only).
 
+#![allow(
+    clippy::disallowed_types,
+    reason = "tests parse raw HTTP JSON; see docs/06-type-safety.md"
+)]
+
 use std::net::SocketAddr;
 
 use axum::Router;

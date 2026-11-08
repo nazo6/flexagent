@@ -11,6 +11,12 @@
 //!   server.db and node.db
 //! - Commands while the node is disconnected return immediately as `NODE_OFFLINE`
 
+#![allow(
+    clippy::disallowed_types,
+    clippy::wildcard_enum_match_arm,
+    reason = "tests assert raw JSON / protocol envelopes; see docs/06-type-safety.md"
+)]
+
 use std::path::Path;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};

@@ -76,6 +76,8 @@
 - [`docs/05-cli-and-pwa-ui.md`](docs/05-cli-and-pwa-ui.md): CLI
   コマンド完全リファレンス、設定ファイルスキーマ (`config.toml` /
   `.fxg.toml`)、PWA / Web Push 設計
+- [`docs/06-type-safety.md`](docs/06-type-safety.md): 型安全性ガイド
+  (open enum / `RawJson` / 文字列判定の禁止 / clippy による境界検査)
 - [`docs/changelog/2026-09-30-implementation-plan.md`](docs/changelog/2026-09-30-implementation-plan.md):
   フェーズ別の段階的実装プラン・進捗管理
 
@@ -105,6 +107,18 @@
   = oxfmt)。
   また、`fxg-protocol` の型を変更した際は `specta`
   の型出力 (`mise run types`) を同期すること。
+- **型安全性 (stringly-typed / 生JSON の禁止)**:
+  - ドメイン値 (`kind` / `status` / `role` / `mode` / `client_source` など) を
+    `String` で持たず、外部境界で enum に変換する。未知値は
+    `Unknown(String)` で保持し、既定値に丸めない。
+  - `serde_json::Value` は境界専用。`RawJson` (Phase 2) または
+    理由付きの file-level `#![allow(clippy::disallowed_types)]` を置いた
+    ファイルでのみ使う。
+  - `kind.starts_with(...)` / `status == "..."` のような文字列判定を書かない。
+    enum のメソッド (`is_always()` など) を使う。
+  - `mise run lint:errors` を通す。既存違反の allow は理由付きで記録し、
+    移行フェーズで削除する。
+  - 詳細: [`docs/06-type-safety.md`](docs/06-type-safety.md)
 - **変更履歴 (Changelog) と実装プランの記録**:
   - **初期実装期間中 (Phase 1 〜 Phase 6)**: 新しい changelog
     ファイルは作成せず、[`docs/changelog/2026-09-30-implementation-plan.md`](docs/changelog/2026-09-30-implementation-plan.md)

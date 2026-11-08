@@ -19,6 +19,13 @@
 //! - [`state`][]: shared state combining `server.db` with the node connection registry
 //! - [`Server`] is the startup entry point (CLI `fxg server`)
 
+// Migration baseline: remove this crate-level allow as Phase 1 of
+// `docs/changelog/2026-11-08-type-safety-plan.md` lands.
+#![allow(
+    clippy::wildcard_enum_match_arm,
+    reason = "type-safety migration baseline; see docs/06-type-safety.md"
+)]
+
 pub mod api;
 mod credentials;
 mod error;

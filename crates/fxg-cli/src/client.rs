@@ -4,6 +4,11 @@
 //! (design: `docs/03-protocol-and-api.md` §4). When the daemon is not running
 //! it returns an error that explains how to start it.
 
+#![allow(
+    clippy::disallowed_types,
+    reason = "elicitation answers are schema-defined opaque JSON; see docs/06-type-safety.md"
+)]
+
 use std::path::Path;
 
 use anyhow::{Context, Result, bail};

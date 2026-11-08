@@ -6,6 +6,11 @@
 //!
 //! Design: `docs/03-protocol-and-api.md` §4.
 
+#![allow(
+    clippy::disallowed_types,
+    reason = "tests decode raw JSON frames; see docs/06-type-safety.md"
+)]
+
 use serde::Serialize;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 

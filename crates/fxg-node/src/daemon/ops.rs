@@ -5,6 +5,11 @@
 //! management, project resolution, audit logging), so the implementation is
 //! centralized here.
 
+#![allow(
+    clippy::disallowed_types,
+    reason = "audit details are display-only opaque JSON; see docs/06-type-safety.md"
+)]
+
 use std::path::{Path, PathBuf};
 
 use fxg_acp::registry::{AcpRegistry, LocalSource};

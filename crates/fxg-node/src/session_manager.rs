@@ -15,6 +15,11 @@
 //! - **Idempotent permission resolution**: The second and later responses return
 //!   [`NodeError::AlreadyResolved`].
 
+#![allow(
+    clippy::disallowed_types,
+    reason = "elicitation payloads are Phase 2 typed; see docs/06-type-safety.md"
+)]
+
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};

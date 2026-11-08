@@ -4,6 +4,11 @@
 //! KDL spec, shell completions, manpage and Markdown reference are generated
 //! from `__usage_spec__` (design: `docs/05-cli-and-pwa-ui.md` §1).
 
+#![allow(
+    clippy::disallowed_types,
+    reason = "elicitation answers / JSON output are Phase 2 typed; see docs/06-type-safety.md"
+)]
+
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};

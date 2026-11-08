@@ -15,6 +15,12 @@
 //!   ([`PtySessionManager`])
 
 #![warn(missing_docs)]
+// Migration baseline: remove this crate-level allow as the protocol enums are
+// converted to open enums (Phase 1 of the type-safety plan).
+#![allow(
+    clippy::wildcard_enum_match_arm,
+    reason = "type-safety migration baseline; see docs/06-type-safety.md"
+)]
 
 pub mod error;
 pub mod proc;

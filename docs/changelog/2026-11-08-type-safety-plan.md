@@ -3,7 +3,7 @@
 - **日付**: 2026-11-08
 - **対象パッケージ**: `fxg-protocol`, `fxg-db`, `fxg-acp`, `fxg-node`,
   `fxg-server`, `fxg-cli`, `ui`
-- **対象スクリプト / 設定**: `mise.toml` (`lint:typed` 追加),
+- **対象スクリプト / 設定**: `mise.toml` (`lint:errors` 拡張),
   `clippy.toml`, `.github/workflows/ci.yml`, `AGENTS.md`,
   `docs/06-type-safety.md`（新規）, `ui/tsconfig.json`, `ui/.oxlintrc.json`,
   `ui/src/lib/generated/bindings.ts`（生成物）
@@ -223,18 +223,24 @@ pub enum ConfigOptionValue {
 
 ### Phase 0: 方針と検査基盤（挙動変更なし）
 
-- [ ] `docs/06-type-safety.md` を追加（allowlist / open enum / 変換責務）
-- [ ] `AGENTS.md` §4 に型安全ルールを追記
-- [ ] `clippy.toml` に `disallowed-types` を追加
-      （`serde_json::Value`。境界定義クレートは crate 単位で除外）
-- [ ] `mise run lint:errors` に `-D clippy::disallowed_types` と
+- [x] `docs/06-type-safety.md` を追加（open enum / `RawJson` / 変換責務）
+- [x] `AGENTS.md` §3 / §4 に型安全ルールと参照先を追記
+- [x] `clippy.toml` に `disallowed-types` を追加（`serde_json::Value`）
+- [x] `mise run lint:errors` に `-D clippy::disallowed_types` と
       `-D clippy::wildcard_enum_match_arm` を追加
-- [ ] `crates/xtask`（または `tools/lint`）を追加
-- [ ] `mise run lint:typed` を追加
-  - [ ] allowlist 外の `serde_json::Value`
-  - [ ] `.kind.starts_with(` / `.kind.contains(` / `.status == "` 等
-  - [ ] allowlist: `tools/typed-boundaries.toml`
-- [ ] `mise run lint` と `.github/workflows/ci.yml` に組み込む
+- [x] 既存の `serde_json::Value` 使用を理由付きの file-level
+      `#![allow(clippy::disallowed_types)]` でベースライン化
+- [x] `mise run lint` と `.github/workflows/ci.yml` に `lint:errors` を組み込む
+
+#### Phase 0 の移行メモ
+
+- 当初は独自の `xtask lint-typed` も検討したが、Phase 1 の enum 化で
+  文字列判定自体がコンパイルエラーになるため、clippy 中心に絞った。
+- `serde_json::Value` の既存使用は、ファイル（モジュール）単位の
+  `#![allow(..., reason = "...")]` で許可している。新しいファイルでの使用は
+  clippy が拒否する。Phase 2/3 で該当ファイルを型化したら allow を削除する。
+- wildcard `_ =>` は既存違反が多いため、crate ルートの allow でベースライン化し、
+  Phase 1 の enum 化に合わせて削除する。
 
 ### Phase 1: 閉じた enum 化（低リスク・高効果）
 
@@ -313,7 +319,7 @@ pub enum ConfigOptionValue {
 
 ### Phase 5: 定着
 
-- [ ] `docs/06-type-safety.md` の allowlist 更新
+- [ ] `docs/06-type-safety.md` の allow 状況を更新
 - [ ] `AGENTS.md` に「新しい String フィールド追加時のチェックリスト」を追記
 - [ ] `docs/changelog/2026-11-08-type-safety-plan.md` の進捗メモを更新
 - [ ] レビュー観点の明文化
@@ -330,7 +336,7 @@ pub enum ConfigOptionValue {
 | :---------------------------------------------------------------- | :--------------------------------------------- |
 | `clippy.toml` の `disallowed-types` で `serde_json::Value` を禁止 | 新しい生 JSON の混入を防ぐ                     |
 | `clippy::wildcard_enum_match_arm` を `-D`                         | `_ =>` による enum の握り潰しを防ぐ            |
-| `mise run lint:typed`（xtask + allowlist）                        | `String` の意味判定を機械検出                  |
+| file-level `#![allow]` の削減（`lint:errors` で検出）             | 生 JSON の残存箇所を可視化・削減する           |
 | `fxg-protocol` の specta surface audit テスト                     | 公開型に `kind: String` 等が増えたら失敗させる |
 | `as_str` / serde / `FromStr` の一元マクロ + 往復テスト            | 3重定義のドリフトを防ぐ                        |
 | DB enum 往復テスト                                                | TEXT 列と Rust enum の語彙ずれを検出           |
@@ -359,3 +365,8 @@ pub enum ConfigOptionValue {
   config 変換が `map_config_option` / `parse_config_value` に分かれている点と、
   `permission_kind_str` が未知値を `"unknown"` に落としている点を追記。
   実装状況に変化はない。
+- 2026-11-08: Phase 0 を実装。`docs/06-type-safety.md`、`AGENTS.md` の型安全
+  ルール、`clippy.toml` の `disallowed-types`、`mise run lint:errors` の
+  拡張、CI 組み込みを追加。既存の `serde_json::Value` は file-level
+  `#![allow]`、wildcard `_ =>` は crate ルートの allow でベースライン化した。
+  Phase 1 以降で allow を削減する。

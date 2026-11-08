@@ -6,6 +6,11 @@
 //! authority belongs to the executing node. Client operations are relayed to the target node
 //! through [`NodeHub`] and responses are returned correlated by `command_id`.
 
+#![allow(
+    clippy::disallowed_types,
+    reason = "audit details are display-only opaque JSON; see docs/06-type-safety.md"
+)]
+
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;

@@ -20,6 +20,10 @@
     clippy::map_err_ignore,
     reason = "integer conversion errors (TryFromIntError) carry no additional context"
 )]
+#![allow(
+    clippy::disallowed_types,
+    reason = "tool arguments are agent-defined opaque JSON; see docs/06-type-safety.md"
+)]
 
 use fxg_protocol::common::{
     ElicitationAction, ElicitationRequestStatus, PermissionOption, PermissionRequestStatus,

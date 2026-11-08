@@ -16,6 +16,11 @@
 //!   `~/.flexagent/bundles/<session-id>.bundle` and records the path in
 //!   `sessions.git_bundle_path`
 
+#![allow(
+    clippy::disallowed_types,
+    reason = "Phase 2 parses provenance lines into typed NodeToServerMsg; see docs/06-type-safety.md"
+)]
+
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex as StdMutex};

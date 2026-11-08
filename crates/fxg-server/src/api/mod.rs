@@ -14,6 +14,11 @@
 //! - Security (Host / Origin / Token validation): [`security`]
 //! - Token generation and comparison: [`auth`]
 
+#![allow(
+    clippy::disallowed_types,
+    reason = "error details / elicitation answers are display-only opaque JSON; see docs/06-type-safety.md"
+)]
+
 pub mod auth;
 mod pty;
 mod request_context;

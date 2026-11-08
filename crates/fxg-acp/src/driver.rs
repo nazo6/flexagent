@@ -8,6 +8,11 @@
 //! [`StreamDeltaPayload`]) as [`DriverEvent`]; persistence and delivery are
 //! handled centrally by the session manager (event bus).
 
+#![allow(
+    clippy::disallowed_types,
+    reason = "the driver API carries Phase 2 opaque config/elicitation payloads; see docs/06-type-safety.md"
+)]
+
 use std::path::PathBuf;
 
 use async_trait::async_trait;

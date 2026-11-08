@@ -4,6 +4,10 @@
 //! repository in a temporary directory.
 
 #![cfg(test)]
+#![allow(
+    clippy::disallowed_types,
+    reason = "test helpers build raw JSON payloads; see docs/06-type-safety.md"
+)]
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};

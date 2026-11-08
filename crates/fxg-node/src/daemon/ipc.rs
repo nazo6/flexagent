@@ -10,6 +10,11 @@
 //!
 //! - Normal commands are processed as one request / one response.
 
+#![allow(
+    clippy::disallowed_types,
+    reason = "tests build raw elicitation payloads; see docs/06-type-safety.md"
+)]
+
 use std::path::{Path, PathBuf};
 
 use fxg_db::SessionFilter;

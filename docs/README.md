@@ -54,6 +54,7 @@ Protocol）対応コーディングエージェントを「好きな場所から
 | **[03-protocol-and-api.md](./03-protocol-and-api.md)**                   | 共通型 (`fxg-protocol`)、Node⇔Server間通信 (WS & Stdio)、Git認証プロキシ/Bundle退避、Client API、ローカルIPC          |
 | **[04-agent-drivers-and-windows.md](./04-agent-drivers-and-windows.md)** | `AgentDriver` トレイト、ACP Registry・PATH探索、Shadow Git Revert/Fork、Windows固有実装                               |
 | **[05-cli-and-pwa-ui.md](./05-cli-and-pwa-ui.md)**                       | `fxg` CLIコマンド完全リファレンス、設定ファイルスキーマ (`config.toml` / `.fxg.toml`)、PWA + Web Push 設計            |
+| **[06-type-safety.md](./06-type-safety.md)**                             | 型安全性ガイド (open enum / `RawJson` / 文字列判定の禁止 / `lint:typed` / 移行状況)                                   |
 
 ---
 

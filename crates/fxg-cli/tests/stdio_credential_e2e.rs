@@ -11,6 +11,11 @@
 //! The tests also verify that `stdout` is reserved for the protocol (every
 //! line is JSON).
 
+#![allow(
+    clippy::disallowed_types,
+    reason = "tests assert raw JSON Lines; see docs/06-type-safety.md"
+)]
+
 use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
 use std::process::{Child, ChildStdin, Command, Stdio};

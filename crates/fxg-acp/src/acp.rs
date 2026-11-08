@@ -17,6 +17,11 @@
 //!   writes compute a unified diff and attach it to the event.
 //!   `terminal/*` is executed via `fxg-pty`.
 
+#![allow(
+    clippy::disallowed_types,
+    reason = "ACP elicitation/config payloads are Phase 2 typed; see docs/06-type-safety.md"
+)]
+
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};

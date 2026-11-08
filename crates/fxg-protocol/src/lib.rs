@@ -17,6 +17,14 @@
 //! `ui/src/lib/generated/bindings.ts` automatically (internal types such as the
 //! configuration file schemas are not exported).
 
+// Protocol type definitions are the declared JSON boundary. Phase 2 replaces
+// the remaining raw fields with `RawJson`.
+#![allow(
+    clippy::disallowed_types,
+    clippy::wildcard_enum_match_arm,
+    reason = "protocol boundary definitions; see docs/06-type-safety.md"
+)]
+
 pub mod client_api;
 pub mod common;
 pub mod config;

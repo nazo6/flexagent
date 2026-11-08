@@ -47,6 +47,7 @@ jobs:
         with:
           shared-key: ubuntu
       - run: mise run lint:rust
+      - run: mise run lint:errors
       - run: mise run lint:toml
 
   test:

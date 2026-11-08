@@ -8,3 +8,10 @@ disallowed-methods = [
   { path = "core::result::Result::ok", reason = "convert Result to Option only after an explicit match; otherwise propagate the error" },
   { path = "core::result::Result::unwrap_or_default", reason = "do not erase the error; handle the missing / corrupt value explicitly" },
 ]
+
+# Type-safety boundary (docs/06-type-safety.md):
+# raw JSON is only allowed at a declared boundary (`RawJson` in Phase 2) or at
+# an item that carries an explicit `#[allow(clippy::disallowed_types)]`.
+disallowed-types = [
+  { path = "serde_json::Value", reason = "parse into a domain type at the boundary; use RawJson for intentionally opaque payloads" },
+]

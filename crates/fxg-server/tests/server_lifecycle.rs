@@ -3,6 +3,11 @@
 //! The requirement for `Server::wait` is that it keeps running until shutdown is requested
 //! (this guards against regressions that return without a request).
 
+#![allow(
+    clippy::disallowed_types,
+    reason = "tests assert raw JSON responses; see docs/06-type-safety.md"
+)]
+
 use std::time::Duration;
 
 use fxg_server::Server;

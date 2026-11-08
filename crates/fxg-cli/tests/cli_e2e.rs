@@ -8,6 +8,11 @@
 //! Each test uses a temporary `FXG_HOME` and IPC endpoint, so it never collides
 //! with a real daemon.
 
+#![allow(
+    clippy::disallowed_types,
+    reason = "tests assert raw JSON output; see docs/06-type-safety.md"
+)]
+
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
 use std::time::{Duration, Instant};

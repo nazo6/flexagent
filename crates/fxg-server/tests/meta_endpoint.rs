@@ -4,6 +4,11 @@
 //! input dialog, while Host validation still applies. Other APIs must still return
 //! `401 Unauthorized` when unauthenticated.
 
+#![allow(
+    clippy::disallowed_types,
+    reason = "tests assert raw JSON responses; see docs/06-type-safety.md"
+)]
+
 use fxg_server::Server;
 use fxg_server::state::ServerOptions;
 
