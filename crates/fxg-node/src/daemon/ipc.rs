@@ -13,7 +13,7 @@
 use std::path::{Path, PathBuf};
 
 use fxg_db::SessionFilter;
-use fxg_protocol::common::ErrorCode;
+use fxg_protocol::common::{ErrorCode, ErrorInfo};
 use fxg_protocol::events::SessionEventEnvelope;
 use fxg_protocol::ipc::{
     IpcClientMessage, IpcResult, IpcServerMessage, ProjectInfo, SessionDetail,
@@ -180,8 +180,10 @@ where
             Err(err) => {
                 let response = IpcServerMessage::Error {
                     command_id: None,
-                    code: ErrorCode::InvalidState,
-                    message: format!("invalid ipc message: {err}"),
+                    error: ErrorInfo::new(
+                        ErrorCode::InvalidState,
+                        format!("invalid ipc message: {err}"),
+                    ),
                 };
                 write_message(&mut writer, &response).await?;
                 continue;
@@ -221,8 +223,7 @@ pub async fn dispatch(state: &DaemonState, request: IpcClientMessage) -> IpcServ
         Ok((command_id, result)) => IpcServerMessage::Result { command_id, result },
         Err(err) => IpcServerMessage::Error {
             command_id: err.command_id,
-            code: err.code,
-            message: err.message,
+            error: ErrorInfo::new(err.code, err.message),
         },
     }
 }
@@ -1294,7 +1295,9 @@ mod tests {
         )
         .await;
         match response {
-            IpcServerMessage::Error { code, .. } => assert_eq!(code, ErrorCode::CommandDuplicate),
+            IpcServerMessage::Error { error, .. } => {
+                assert_eq!(error.code, ErrorCode::CommandDuplicate)
+            }
             other => panic!("unexpected response: {other:?}"),
         }
 
@@ -1379,7 +1382,7 @@ mod tests {
         .await;
         assert!(matches!(
             response,
-            IpcServerMessage::Error { code, .. } if code == ErrorCode::AlreadyResolved
+            IpcServerMessage::Error { error, .. } if error.code == ErrorCode::AlreadyResolved
         ));
 
         // Question (elicitation) → response → the second attempt is ALREADY_RESOLVED
@@ -1437,7 +1440,7 @@ mod tests {
         .await;
         assert!(matches!(
             response,
-            IpcServerMessage::Error { code, .. } if code == ErrorCode::AlreadyResolved
+            IpcServerMessage::Error { error, .. } if error.code == ErrorCode::AlreadyResolved
         ));
 
         // ControlSession (SetMode) is forwarded to the driver
@@ -1576,7 +1579,9 @@ mod tests {
         )
         .await;
         match response {
-            IpcServerMessage::Error { code, .. } => assert_eq!(code, ErrorCode::InvalidState),
+            IpcServerMessage::Error { error, .. } => {
+                assert_eq!(error.code, ErrorCode::InvalidState)
+            }
             other => panic!("unexpected response: {other:?}"),
         }
 

@@ -73,22 +73,14 @@ export type AgentsResponse = {
 	agents: AgentSummary[],
 };
 
-/**  The error body. */
-export type ApiErrorBody = {
-	/**  Structured error code */
-	code: ErrorCode,
-	/**  Human-readable message */
-	message: string,
-};
-
 /**
  *  Error response body shared by REST and WS.
  * 
- *  Format: `{ "error": { "code": "<ErrorCode>", "message": "..." } }`
+ *  Format: `{ "error": { "code": "<ErrorCode>", "message": "...", ... } }`
  */
 export type ApiErrorResponse = {
-	/**  The error body */
-	error: ApiErrorBody,
+	/**  The structured error */
+	error: ErrorInfo,
 };
 
 /**  Metadata of a file attached to a user message. */
@@ -222,10 +214,8 @@ export type CommandResult = {
 	command_id: string,
 	/**  Whether it succeeded */
 	success: boolean,
-	/**  Structured error code on failure */
-	code: ErrorCode | null,
-	/**  Human-readable error message */
-	error: string | null,
+	/**  Structured error on failure */
+	error?: ErrorInfo | null,
 	/**  Target session ID (optional) */
 	session_id: string | null,
 };
@@ -328,6 +318,29 @@ export type CustomAgentConfig = {
 	env?: { [key in string]: string },
 };
 
+/**
+ *  Whether the user's data was affected by a failure.
+ * 
+ *  Every user-visible error should state this so the user knows whether they
+ *  need to recover anything.
+ */
+export type DataSafety = 
+/**  Nothing was modified */
+"unchanged" | 
+/**  The input / workspace is preserved and will be retried */
+"preserved" | 
+/**  The message / command was not sent */
+"not_sent" | 
+/**  The data can be recovered from the given location */
+{ recoverable: {
+	/**  Recovery point (snapshot tree hash, backup path, ...) */
+	location: string,
+} } | 
+/**  The data was lost */
+"lost" | 
+/**  Unknown */
+"unknown";
+
 /**  Scope of a diff. */
 export type DiffScope = 
 /**  Uncommitted diff of the working tree (`git diff HEAD`) */
@@ -388,7 +401,13 @@ export type ElicitationRequestStatus =
 /**  Cancelled (e.g. the session was stopped) */
 "cancelled";
 
-/**  Shared error code (used by both `CommandResult` and REST error responses). */
+/**
+ *  Shared error code (used by both `CommandResult` and REST error responses).
+ * 
+ *  The code is the machine-readable contract: clients use it as an i18n key and
+ *  to decide which recovery action to offer. `ErrorCode::Internal` must only be
+ *  used for genuinely unexpected failures; known failures get a dedicated code.
+ */
 export type ErrorCode = 
 /**  Missing or mismatching authentication token (HTTP `401 Unauthorized`) */
 "UNAUTHORIZED" | 
@@ -417,8 +436,73 @@ export type ErrorCode =
 "COMMAND_DUPLICATE" | 
 /**  The target was not found */
 "NOT_FOUND" | 
-/**  Internal error */
-"INTERNAL";
+/**  Internal error (a bug or an unclassified failure) */
+"INTERNAL" | 
+/**  The configuration file is invalid or cannot be read */
+"CONFIG_INVALID" | 
+/**  The requested agent is not installed / discoverable on the node */
+"AGENT_NOT_INSTALLED" | 
+/**  The agent process could not be launched or initialized */
+"AGENT_LAUNCH_FAILED" | 
+/**  The agent violated the ACP protocol or the turn failed inside the agent */
+"AGENT_PROTOCOL_ERROR" | 
+/**  The `git` executable is not available */
+"GIT_UNAVAILABLE" | 
+/**  A `git` command failed */
+"GIT_FAILED" | 
+/**  The worktree is in a conflicting state (branch checked out elsewhere, etc.) */
+"WORKTREE_CONFLICT" | 
+/**  A workspace snapshot required for revert is unavailable */
+"SNAPSHOT_UNAVAILABLE" | 
+/**  The outbox has pending events and synchronization is degraded */
+"SYNC_BACKLOG" | 
+/**  The database is corrupt or a stored value cannot be decoded */
+"DB_CORRUPT" | 
+/**  Provisioning an ephemeral VM / sandbox failed */
+"PROVISIONER_FAILED" | 
+/**  Incompatible node / server / schema versions */
+"VERSION_MISMATCH" | 
+/**  An operation timed out */
+"TIMEOUT" | 
+/**  The device is out of disk space */
+"DISK_FULL" | 
+/**  The operation was denied by the file system / OS permissions */
+"PERMISSION_DENIED" | 
+/**  A generic I/O error */
+"IO_ERROR" | 
+/**  A PTY operation failed */
+"PTY_FAILED" | 
+/**  The local or central server failed */
+"SERVER_ERROR" | 
+/**  The operation was cancelled */
+"CANCELLED";
+
+/**
+ *  Structured error exchanged by REST, Client WS, the node protocol and IPC.
+ * 
+ *  `message` is the English fallback for logs / CLI; clients translate
+ *  `code` (and interpolate `params`) for display. `details` carries
+ *  machine-readable technical context that the UI shows in an expandable
+ *  section, never as the primary message.
+ */
+export type ErrorInfo = {
+	/**  Structured error code (also the i18n key) */
+	code: ErrorCode,
+	/**  English human-readable fallback message */
+	message: string,
+	/**  Parameters for message interpolation (path, agent_id, exit_code, ...) */
+	params?: { [key in string]: string },
+	/**  Technical details for the expandable "details" section */
+	details?: JsonValue | null,
+	/**  Whether retrying may succeed without a state change */
+	retryable?: boolean,
+	/**  Recovery actions the client can offer as buttons */
+	recovery?: RecoveryAction[],
+	/**  Correlation ID shared with logs / incidents */
+	request_id?: string | null,
+	/**  Link to the troubleshooting documentation anchor */
+	docs?: string | null,
+};
 
 /**  Unified diff information of a file change. */
 export type FileDiff = {
@@ -897,6 +981,51 @@ export type PushSubscribeResponse = {
 	ok: boolean,
 };
 
+/**  Recovery action offered to the user after a failure. */
+export type RecoveryAction = 
+/**  Retry the same operation (`idempotent` = safe to resend as-is) */
+{ kind: "retry"; 
+/**  Whether the operation is idempotent / safe to retry */
+idempotent: boolean } | 
+/**  Resume a stopped session with replayed history */
+{ kind: "resume_with_replay"; 
+/**  Target session ID */
+session_id: string } | 
+/**  Reconnect to the target node */
+{ kind: "reconnect_node"; 
+/**  Target node ID */
+node_id: string } | 
+/**  Pick another online node */
+{ kind: "select_online_node" } | 
+/**  Install the missing agent on the node */
+{ kind: "reinstall_agent"; 
+/**  Target node ID */
+node_id: string; 
+/**  Agent ID */
+agent_id: string } | 
+/**  Recreate the worktree */
+{ kind: "recreate_worktree"; 
+/**  Logical project ID */
+project_id: string; 
+/**  Branch name (when known) */
+branch: string | null } | 
+/**  Revert to the nearest snapshot that can be restored */
+{ kind: "revert_to_nearest_snapshot"; 
+/**  Target session ID */
+session_id: string; 
+/**  Candidate `node_seq` (the nearest snapshot when omitted) */
+node_seq: number | null } | 
+/**  Open the configuration file */
+{ kind: "open_config"; 
+/**  Path of the configuration file */
+path: string } | 
+/**  Show the logs / diagnostics for a session */
+{ kind: "show_logs"; 
+/**  Target session ID (all logs when omitted) */
+session_id: string | null } | 
+/**  Export a support bundle */
+{ kind: "export_diagnostics" };
+
 /**  `DELETE /api/v1/projects/:id/worktrees` request. */
 export type RemoveWorktreeRequest = {
 	/**  Target node ID */
@@ -1034,10 +1163,8 @@ line: string } |
 command_id: string; 
 /**  Whether it succeeded */
 success: boolean; 
-/**  Structured error code on failure */
-code: ErrorCode | null; 
-/**  Human-readable message */
-error: string | null; 
+/**  Structured error on failure */
+error?: ErrorInfo | null; 
 /**  Target session ID (optional) */
 session_id: string | null } | 
 /**  Synchronization state notification (drives the sync badge in the UI). */
@@ -1050,10 +1177,8 @@ unsynced_event_count: number;
 last_synced_at: number | null } | 
 /**  Error notification. */
 { op: "error"; 
-/**  Structured error code */
-code: ErrorCode; 
-/**  Human-readable message */
-message: string } | 
+/**  Structured error */
+error: ErrorInfo } | 
 /**  Response to `Ping` */
 { op: "pong" };
 
@@ -1653,6 +1778,18 @@ export type UsageCost = {
 	amount: number,
 	/**  ISO 4217 currency code (e.g. `USD`) */
 	currency: string,
+};
+
+/**  Non-fatal warning attached to a successful / partially successful response. */
+export type WarningInfo = {
+	/**  Structured warning code (same vocabulary as [`ErrorCode`]) */
+	code: ErrorCode,
+	/**  English human-readable fallback message */
+	message: string,
+	/**  Technical details */
+	details?: JsonValue | null,
+	/**  Recovery actions the client can offer */
+	recovery?: RecoveryAction[],
 };
 
 /**  Result of fetching the diff of a git working tree (`GET /api/v1/sessions/:id/diff`). */

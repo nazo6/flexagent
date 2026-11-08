@@ -798,7 +798,11 @@ async fn await_handshake_and_start(
             fail_session(
                 &state,
                 &pending.session_id,
-                result.error.as_deref().unwrap_or("start session failed"),
+                result
+                    .error
+                    .as_ref()
+                    .map(|error| error.message.as_str())
+                    .unwrap_or("start session failed"),
             )
             .await;
         }

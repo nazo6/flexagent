@@ -7,6 +7,11 @@
 //! and the update on ACK is O(1)
 //! (design: `docs/01-architecture-and-sync.md` §2.2, `docs/02-database-schema.md` §0.4).
 
+#![allow(
+    clippy::map_err_ignore,
+    reason = "integer conversion errors (TryFromIntError) carry no additional context"
+)]
+
 use fxg_protocol::events::SessionEventEnvelope;
 use sqlx::SqlitePool;
 

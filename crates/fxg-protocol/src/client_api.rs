@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 
 use crate::common::{
-    AuditLogEntry, CommandResult, ElicitationAction, ElicitationRequestEntry, ErrorCode,
+    AuditLogEntry, CommandResult, ElicitationAction, ElicitationRequestEntry, ErrorInfo,
     NodeSummary, PermissionRequestEntry, ProjectSummary, SearchHit, SessionControlAction,
     SessionSummary, StreamDeltaPayload,
 };
@@ -58,22 +58,12 @@ pub struct MetaResponse {
 
 /// Error response body shared by REST and WS.
 ///
-/// Format: `{ "error": { "code": "<ErrorCode>", "message": "..." } }`
+/// Format: `{ "error": { "code": "<ErrorCode>", "message": "...", ... } }`
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct ApiErrorResponse {
-    /// The error body
-    pub error: ApiErrorBody,
-}
-
-/// The error body.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
-#[specta(collect)]
-pub struct ApiErrorBody {
-    /// Structured error code
-    pub code: ErrorCode,
-    /// Human-readable message
-    pub message: String,
+    /// The structured error
+    pub error: ErrorInfo,
 }
 
 /// `GET /api/v1/projects` response.
@@ -708,10 +698,9 @@ pub enum ServerWsMessage {
         command_id: String,
         /// Whether it succeeded
         success: bool,
-        /// Structured error code on failure
-        code: Option<ErrorCode>,
-        /// Human-readable message
-        error: Option<String>,
+        /// Structured error on failure
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        error: Option<ErrorInfo>,
         /// Target session ID (optional)
         session_id: Option<String>,
     },
@@ -726,10 +715,8 @@ pub enum ServerWsMessage {
     },
     /// Error notification.
     Error {
-        /// Structured error code
-        code: ErrorCode,
-        /// Human-readable message
-        message: String,
+        /// Structured error
+        error: ErrorInfo,
     },
     /// Response to `Ping`
     Pong,
@@ -814,7 +801,6 @@ pub fn command_result_ws(result: CommandResult) -> ServerWsMessage {
     ServerWsMessage::CommandResult {
         command_id: result.command_id,
         success: result.success,
-        code: result.code,
         error: result.error,
         session_id: result.session_id,
     }
@@ -865,6 +851,7 @@ pub struct FsBrowseResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::common::ErrorCode;
 
     #[test]
     fn client_ws_message_tags() {
@@ -885,21 +872,18 @@ mod tests {
     #[test]
     fn server_ws_error_shape() {
         let msg = ServerWsMessage::Error {
-            code: ErrorCode::NodeOffline,
-            message: "node is offline".into(),
+            error: ErrorInfo::new(ErrorCode::NodeOffline, "node is offline"),
         };
         let json = serde_json::to_value(&msg).unwrap();
         assert_eq!(json["op"], "error");
-        assert_eq!(json["code"], "NODE_OFFLINE");
+        assert_eq!(json["error"]["code"], "NODE_OFFLINE");
+        assert_eq!(json["error"]["message"], "node is offline");
     }
 
     #[test]
     fn api_error_response_shape() {
         let resp = ApiErrorResponse {
-            error: ApiErrorBody {
-                code: ErrorCode::AlreadyResolved,
-                message: "already resolved".into(),
-            },
+            error: ErrorInfo::new(ErrorCode::AlreadyResolved, "already resolved"),
         };
         let json = serde_json::to_value(&resp).unwrap();
         assert_eq!(json["error"]["code"], "ALREADY_RESOLVED");

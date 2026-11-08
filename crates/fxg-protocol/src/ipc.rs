@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::client_api::WorktreeInfo;
 use crate::common::{
-    ElicitationAction, ElicitationRequestEntry, ErrorCode, HookLogEntry, PermissionRequestEntry,
+    ElicitationAction, ElicitationRequestEntry, ErrorInfo, HookLogEntry, PermissionRequestEntry,
     ProjectResolutionSource, ProjectSummary, SessionControlAction, SessionSummary,
     StreamDeltaPayload,
 };
@@ -461,10 +461,8 @@ pub enum IpcServerMessage {
     Error {
         /// Correlation ID (`None` when unknown, e.g. before the connection is established)
         command_id: Option<String>,
-        /// Structured error code
-        code: ErrorCode,
-        /// Human-readable message
-        message: String,
+        /// Structured error
+        error: ErrorInfo,
     },
     /// Delivery of persisted events (the replay right after connecting and the
     /// realtime delivery afterwards)
@@ -503,6 +501,7 @@ pub struct SessionDetail {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::common::ErrorCode;
 
     #[test]
     fn ensure_session_roundtrip() {
@@ -525,12 +524,11 @@ mod tests {
     fn server_message_tags() {
         let msg = IpcServerMessage::Error {
             command_id: None,
-            code: ErrorCode::NotFound,
-            message: "no such session".into(),
+            error: ErrorInfo::new(ErrorCode::NotFound, "no such session"),
         };
         let json = serde_json::to_value(&msg).unwrap();
         assert_eq!(json["type"], "error");
-        assert_eq!(json["code"], "NOT_FOUND");
+        assert_eq!(json["error"]["code"], "NOT_FOUND");
     }
 
     #[test]

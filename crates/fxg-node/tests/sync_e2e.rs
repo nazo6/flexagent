@@ -859,7 +859,7 @@ async fn central_server_commands_permissions_and_kill_switch() {
         .await
         .expect("CommandResult timeout");
         assert_eq!(result["success"], false);
-        assert_eq!(result["code"], ErrorCode::NodeOffline.as_str());
+        assert_eq!(result["error"]["code"], ErrorCode::NodeOffline.as_str());
     }
 
     server.shutdown();

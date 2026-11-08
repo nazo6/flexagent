@@ -72,4 +72,11 @@ which = "8.0.6"
 win32job = "2.0.3"
 
 [workspace.lints.clippy]
-all = "warn"
+all = { level = "warn", priority = -1 }
+# The "do not discard errors" lints (`let_underscore_must_use` /
+# `map_err_ignore` / `disallowed_methods`) are enforced by the dedicated
+# `mise run lint:errors` task for migrated crates (`fxg-protocol` / `fxg-db`
+# first). Expand the package list as each crate is audited.
+# `disallowed_methods` is part of `clippy::all` in recent toolchains, so it must
+# stay `allow` here and be enabled explicitly by `lint:errors`.
+disallowed_methods = "allow"

@@ -16,6 +16,11 @@
 //! when a row was actually inserted, so resending the same batch (resend before ACK, resync
 //! resend) converges to the same state no matter how many times it is applied.
 
+#![allow(
+    clippy::map_err_ignore,
+    reason = "integer conversion errors (TryFromIntError) carry no additional context"
+)]
+
 use fxg_protocol::common::{
     ElicitationAction, ElicitationRequestStatus, PermissionOption, PermissionRequestStatus,
     SessionUsage,
@@ -681,6 +686,10 @@ fn elicitation_status(action: ElicitationAction) -> ElicitationRequestStatus {
 /// Refers to the `options` stored in `details_json`: `reject*` kinds map to `rejected`, all
 /// others to `approved`. If the options cannot be retrieved (e.g. mid-resync), falls back to
 /// the `option_id` naming convention (containing `reject` / `deny`).
+#[allow(
+    clippy::disallowed_methods,
+    reason = "mid-resync rows may lack decodable details; the documented fallback uses the option id naming"
+)]
 fn resolve_permission_status(
     details_json: Option<&str>,
     selected_option_id: &str,

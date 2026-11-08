@@ -271,13 +271,7 @@ impl ServerState {
 
 /// Helper that builds a `CommandResult`, with `session_id` on success.
 fn command_failure(command_id: String, err: ApiError) -> CommandResult {
-    CommandResult {
-        command_id,
-        success: false,
-        code: Some(err.code),
-        error: Some(err.message),
-        session_id: None,
-    }
+    CommandResult::failure(command_id, err.into_info())
 }
 
 impl ServerState {
@@ -649,12 +643,7 @@ impl ClientApiBackend for ServerState {
             )
             .await?;
         if !result.success {
-            return Err(ApiError::from_code(
-                result.code.unwrap_or(ErrorCode::Internal),
-                result
-                    .error
-                    .unwrap_or_else(|| "start session failed".to_owned()),
-            ));
+            return Err(ApiError::from_command(result));
         }
 
         self.record_audit(
@@ -720,16 +709,17 @@ impl ClientApiBackend for ServerState {
             Ok(RespondPermissionResponse {
                 already_resolved: false,
             })
-        } else if result.code == Some(ErrorCode::AlreadyResolved) {
+        } else if result
+            .error
+            .as_ref()
+            .is_some_and(|error| error.code == ErrorCode::AlreadyResolved)
+        {
             // Idempotent resolution across all clients (later calls are normal transitions)
             Ok(RespondPermissionResponse {
                 already_resolved: true,
             })
         } else {
-            Err(ApiError::from_code(
-                result.code.unwrap_or(ErrorCode::Internal),
-                result.error.unwrap_or_else(|| "respond failed".to_owned()),
-            ))
+            Err(ApiError::from_command(result))
         }
     }
 
@@ -775,16 +765,17 @@ impl ClientApiBackend for ServerState {
             Ok(RespondElicitationResponse {
                 already_resolved: false,
             })
-        } else if result.code == Some(ErrorCode::AlreadyResolved) {
+        } else if result
+            .error
+            .as_ref()
+            .is_some_and(|error| error.code == ErrorCode::AlreadyResolved)
+        {
             // Idempotent resolution across all clients (later calls are normal transitions)
             Ok(RespondElicitationResponse {
                 already_resolved: true,
             })
         } else {
-            Err(ApiError::from_code(
-                result.code.unwrap_or(ErrorCode::Internal),
-                result.error.unwrap_or_else(|| "respond failed".to_owned()),
-            ))
+            Err(ApiError::from_command(result))
         }
     }
 

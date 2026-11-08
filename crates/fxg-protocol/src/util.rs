@@ -24,6 +24,52 @@ pub fn uuid_v7() -> String {
     uuid::Uuid::now_v7().to_string()
 }
 
+/// Discards a non-critical `Result` with an explicit reason.
+///
+/// This is the sanctioned way to ignore a `Result`: the reason stays visible in
+/// the code and the error is still recorded at debug level. Use a `warn!` /
+/// propagated `Err` instead when the failure changes user-visible behavior.
+///
+/// ```ignore
+/// fxg_protocol::discard_with!(tx.send(event), "notify pty exit");
+/// ```
+#[macro_export]
+macro_rules! discard_with {
+    ($result:expr, $context:expr $(,)?) => {{
+        if let Err(err) = $result {
+            ::tracing::debug!(error = %err, context = $context, "discarded error");
+        }
+    }};
+}
+
+/// Spawns a background task and reports both `Err` and panic (`JoinError`).
+///
+/// The inner future must resolve to `Result<(), E>` where `E: Display`.
+///
+/// ```ignore
+/// fxg_protocol::spawn_logged!("outbox sync", run(state, url, token, shutdown));
+/// ```
+#[macro_export]
+macro_rules! spawn_logged {
+    ($name:expr, $future:expr $(,)?) => {{
+        ::tokio::spawn(async move {
+            match ::tokio::spawn($future).await {
+                Ok(Ok(())) => {}
+                Ok(Err(err)) => {
+                    ::tracing::error!(task = $name, "background task failed: {err}");
+                }
+                Err(join) => {
+                    ::tracing::error!(
+                        task = $name,
+                        panic = join.is_panic(),
+                        "background task terminated unexpectedly: {join}"
+                    );
+                }
+            }
+        })
+    }};
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

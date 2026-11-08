@@ -330,7 +330,7 @@ export class SyncStore {
       if (!this.#send(command)) {
         this.#pendingCommands.delete(commandId);
         clearTimeout(timer);
-        reject(new ApiError(0, "NODE_OFFLINE", m.lib_not_connected_to_server()));
+        reject(ApiError.fromCode(0, "NODE_OFFLINE", m.lib_not_connected_to_server()));
       }
     });
   }
@@ -527,12 +527,12 @@ export class SyncStore {
         this.lastSyncedAt = message.last_synced_at;
         break;
       case "error":
-        if (message.code === "UNAUTHORIZED") {
+        if (message.error.code === "UNAUTHORIZED") {
           // Token expired (e.g. server regenerated it) → go to the re-auth flow
           this.stop();
           void this.connection.probe();
         } else {
-          console.warn("[fxg] ws error", message.code, message.message);
+          console.warn("[fxg] ws error", message.error.code, message.error.message, message.error);
         }
         break;
       case "pong":

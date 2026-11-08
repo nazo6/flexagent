@@ -46,7 +46,9 @@ impl DaemonClient {
         let response = self.client.request(&message).await?;
         match response {
             IpcServerMessage::Result { result, .. } => Ok(result),
-            IpcServerMessage::Error { code, message, .. } => bail!("{code}: {message}"),
+            IpcServerMessage::Error { error, .. } => {
+                bail!("{}: {}", error.code, error.message)
+            }
             other => bail!("unexpected ipc response: {other:?}"),
         }
     }

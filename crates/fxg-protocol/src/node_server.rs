@@ -9,7 +9,9 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::common::{ErrorCode, NodeProjectReport, SessionControlAction, WorkspaceDiffResponse};
+use crate::common::{
+    ErrorCode, ErrorInfo, NodeProjectReport, SessionControlAction, WorkspaceDiffResponse,
+};
 use crate::events::SessionEventEnvelope;
 /// Synchronization state of a session held by the node (reported in `NodeHello`).
 ///
@@ -81,10 +83,8 @@ pub enum NodeToServerMsg {
         command_id: String,
         /// Whether it succeeded
         success: bool,
-        /// Structured error code on failure
-        code: Option<ErrorCode>,
-        /// Human-readable message
-        error: Option<String>,
+        /// Structured error on failure
+        error: Option<ErrorInfo>,
         /// Target session ID (optional)
         session_id: Option<String>,
     },

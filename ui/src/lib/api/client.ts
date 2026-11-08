@@ -9,7 +9,7 @@ import type {
   CreateWorktreeRequest,
   CustomAgentConfig,
   DiffScope,
-  ErrorCode,
+  ErrorInfo,
   FsBrowseResponse,
   InboxResponse,
   IssueNodeTokenRequest,
@@ -53,7 +53,6 @@ import type {
   WorktreeInfo,
   WorktreesResponse,
 } from "#lib/generated/bindings.ts";
-import { m } from "#lib/paraglide/messages.js";
 import { errorCodeMessage } from "./error-messages";
 import { ApiError } from "./errors";
 
@@ -475,7 +474,8 @@ export class ApiClient {
   }
 }
 
-/** Format a `CommandResult` error code for UI display. */
-export function commandErrorMessage(code: ErrorCode | null, message: string | null): string {
-  return message ?? errorCodeMessage(code) ?? m.error_unknown();
+/** Format a structured `CommandResult` error for UI display (`null` when absent). */
+export function commandErrorMessage(error: ErrorInfo | null | undefined): string | null {
+  if (!error) return null;
+  return errorCodeMessage(error.code) ?? error.message ?? null;
 }

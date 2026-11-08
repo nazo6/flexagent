@@ -5,6 +5,11 @@
 //! - When the UI has not been built, `build.rs` provides a placeholder `index.html`,
 //!   so the Rust build itself always succeeds.
 
+#![allow(
+    clippy::disallowed_methods,
+    reason = "the rust-embed derive expands Result::ok internally"
+)]
+
 use rust_embed::RustEmbed;
 
 /// Assets bundled from `ui/build`.

@@ -53,6 +53,13 @@ run = [
 description = "Rust の clippy を警告エラー扱いで実行する"
 run = "cargo clippy --workspace --all-targets -- -D warnings"
 
+[tasks."lint:errors"]
+description = "エラーを握り潰すパターン (let _ = / map_err(|_|) / Result::ok / unwrap_or_default) を移行済みクレートで禁止する"
+# 段階的移行: 監査済みのクレートだけを -p に追加する。
+# clippy.toml の disallowed-methods (Result::ok / Result::unwrap_or_default) と
+# 併用する。移行が完了したら workspace lints へ昇格する。
+run = "cargo clippy -p fxg-protocol -p fxg-db --all-targets -- -D warnings -D clippy::let_underscore_must_use -D clippy::map_err_ignore -D clippy::disallowed_methods"
+
 [tasks."lint:toml"]
 description = "TOML を tombi で lint する (JSON Schema 検証含む)"
 run = "tombi lint"
@@ -65,6 +72,7 @@ run = "pnpm --dir ui run lint"
 description = "全言語の lint を実行する"
 run = [
   { task = "lint:rust" },
+  { task = "lint:errors" },
   { task = "lint:toml" },
   { task = "lint:ui" },
 ]

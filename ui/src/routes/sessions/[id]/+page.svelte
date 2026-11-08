@@ -12,7 +12,7 @@
   import SessionStatusBadge from "#lib/components/SessionStatusBadge.svelte";
   import TerminalView from "#lib/components/terminal/TerminalView.svelte";
   import { Button } from "#lib/components/ui/button/index.ts";
-  import { errorCodeMessage } from "#lib/api/error-messages.ts";
+  import { commandErrorMessage } from "#lib/api/client.ts";
   import { m } from "#lib/paraglide/messages.js";
   import { formatRelativeTime } from "#lib/format.ts";
   import { shortId } from "#lib/session-status.ts";
@@ -210,7 +210,7 @@
         killDialogOpen = false;
         await sync.refreshSessions();
       } else {
-        toast.error(result.error ?? errorCodeMessage(result.code) ?? m.session_kill_failed());
+        toast.error(commandErrorMessage(result.error) ?? m.session_kill_failed());
       }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));

@@ -35,22 +35,21 @@ use axum::{Extension, Json, Router};
 use futures_util::SinkExt;
 use fxg_db::{Db, DbError, SessionFilter};
 use fxg_protocol::client_api::{
-    AgentOpResponse, AgentsResponse, ApiErrorBody, ApiErrorResponse, AuditLogsResponse,
-    AuthLoginRequest, ConnectionRole, CreateSessionRequest, CreateSessionResponse,
-    CreateWorktreeRequest, InboxResponse, IssueNodeTokenRequest, IssueNodeTokenResponse,
-    KillSwitchRequest, KillSwitchResponse, MetaResponse, NodeTokensResponse, NodesResponse,
-    ProjectLinkRequest, ProjectLinkResponse, ProjectScanRequest, ProjectScanResponse,
-    ProjectsResponse, ProvisionersResponse, PruneWorktreesRequest, PushSubscribeRequest,
-    PushSubscribeResponse, RemoveWorktreeRequest, RespondElicitationRequest,
-    RespondElicitationResponse, RespondPermissionRequest, RespondPermissionResponse,
-    ResumeSessionRequest, ResumeSessionResponse, RotateAuthTokenResponse, SearchResponse,
-    ServerWsMessage, SessionArchiveRequest, SessionArchiveResponse, SessionListResponse,
-    SessionRevertRequest, SessionRevertResponse, SystemInfoResponse, WorktreeInfo,
-    WorktreesResponse,
+    AgentOpResponse, AgentsResponse, ApiErrorResponse, AuditLogsResponse, AuthLoginRequest,
+    ConnectionRole, CreateSessionRequest, CreateSessionResponse, CreateWorktreeRequest,
+    InboxResponse, IssueNodeTokenRequest, IssueNodeTokenResponse, KillSwitchRequest,
+    KillSwitchResponse, MetaResponse, NodeTokensResponse, NodesResponse, ProjectLinkRequest,
+    ProjectLinkResponse, ProjectScanRequest, ProjectScanResponse, ProjectsResponse,
+    ProvisionersResponse, PruneWorktreesRequest, PushSubscribeRequest, PushSubscribeResponse,
+    RemoveWorktreeRequest, RespondElicitationRequest, RespondElicitationResponse,
+    RespondPermissionRequest, RespondPermissionResponse, ResumeSessionRequest,
+    ResumeSessionResponse, RotateAuthTokenResponse, SearchResponse, ServerWsMessage,
+    SessionArchiveRequest, SessionArchiveResponse, SessionListResponse, SessionRevertRequest,
+    SessionRevertResponse, SystemInfoResponse, WorktreeInfo, WorktreesResponse,
 };
 use fxg_protocol::common::{
-    AgentAction, CommandResult, DiffScope, ErrorCode, ProjectSummary, SessionControlAction,
-    SessionStatus, WorkspaceDiffResponse,
+    AgentAction, CommandResult, DiffScope, ErrorCode, ErrorInfo, ProjectSummary, RecoveryAction,
+    SessionControlAction, SessionStatus, WorkspaceDiffResponse,
 };
 use fxg_protocol::config::CustomAgentConfig;
 use fxg_protocol::events::{SessionEventBatch, SessionEventEnvelope};
@@ -72,8 +71,16 @@ pub struct ApiError {
     pub status: StatusCode,
     /// Structured error code
     pub code: ErrorCode,
-    /// Human-readable message
+    /// English human-readable fallback message
     pub message: String,
+    /// Technical details for the expandable "details" section
+    pub details: Option<Box<serde_json::Value>>,
+    /// Whether retrying may succeed without a state change
+    pub retryable: bool,
+    /// Recovery actions the client can offer
+    pub recovery: Vec<RecoveryAction>,
+    /// Correlation ID shared with logs / incidents
+    pub request_id: Option<Box<str>>,
 }
 
 impl ApiError {
@@ -83,6 +90,10 @@ impl ApiError {
             status,
             code,
             message: message.into(),
+            details: None,
+            retryable: code.is_retryable(),
+            recovery: Vec::new(),
+            request_id: None,
         }
     }
 
@@ -90,19 +101,87 @@ impl ApiError {
     pub fn from_code(code: ErrorCode, message: impl Into<String>) -> Self {
         let status = match code {
             ErrorCode::Unauthorized => StatusCode::UNAUTHORIZED,
-            ErrorCode::Forbidden | ErrorCode::PtyDisabled => StatusCode::FORBIDDEN,
-            ErrorCode::NodeOffline => StatusCode::SERVICE_UNAVAILABLE,
-            ErrorCode::AlreadyResolved | ErrorCode::Busy | ErrorCode::CommandDuplicate => {
-                StatusCode::CONFLICT
+            ErrorCode::Forbidden | ErrorCode::PtyDisabled | ErrorCode::PermissionDenied => {
+                StatusCode::FORBIDDEN
             }
-            ErrorCode::InvalidState => StatusCode::BAD_REQUEST,
-            // Operating a stopped session requires replaying history (409 so the client is
-            // prompted to resume explicitly)
-            ErrorCode::ResumeRequired => StatusCode::CONFLICT,
+            ErrorCode::NodeOffline
+            | ErrorCode::SyncBacklog
+            | ErrorCode::VersionMismatch
+            | ErrorCode::ProvisionerFailed => StatusCode::SERVICE_UNAVAILABLE,
+            ErrorCode::AlreadyResolved
+            | ErrorCode::Busy
+            | ErrorCode::CommandDuplicate
+            | ErrorCode::ResumeRequired
+            | ErrorCode::WorktreeConflict
+            | ErrorCode::SnapshotUnavailable
+            | ErrorCode::AgentNotInstalled
+            | ErrorCode::AgentLaunchFailed
+            | ErrorCode::AgentProtocolError
+            | ErrorCode::GitUnavailable
+            | ErrorCode::GitFailed
+            | ErrorCode::Cancelled => StatusCode::CONFLICT,
+            ErrorCode::InvalidState | ErrorCode::ConfigInvalid => StatusCode::BAD_REQUEST,
             ErrorCode::NotFound => StatusCode::NOT_FOUND,
-            ErrorCode::Internal => StatusCode::INTERNAL_SERVER_ERROR,
+            ErrorCode::Timeout => StatusCode::GATEWAY_TIMEOUT,
+            ErrorCode::DiskFull => StatusCode::INSUFFICIENT_STORAGE,
+            ErrorCode::Internal
+            | ErrorCode::IoError
+            | ErrorCode::PtyFailed
+            | ErrorCode::ServerError
+            | ErrorCode::DbCorrupt => StatusCode::INTERNAL_SERVER_ERROR,
         };
         Self::new(status, code, message)
+    }
+
+    /// Adds technical details.
+    pub fn with_details(mut self, details: serde_json::Value) -> Self {
+        self.details = Some(Box::new(details));
+        self
+    }
+
+    /// Adds a recovery action.
+    pub fn with_recovery(mut self, action: RecoveryAction) -> Self {
+        self.recovery.push(action);
+        self
+    }
+
+    /// Attaches the correlation ID.
+    pub fn with_request_id(mut self, request_id: impl Into<String>) -> Self {
+        self.request_id = Some(request_id.into().into_boxed_str());
+        self
+    }
+
+    /// Builds from a structured error returned by a node.
+    pub fn from_info(info: ErrorInfo) -> Self {
+        let mut api = Self::from_code(info.code, info.message);
+        api.details = info.details.map(Box::new);
+        api.retryable = info.retryable;
+        api.recovery = info.recovery;
+        api.request_id = info.request_id.map(String::into_boxed_str);
+        api
+    }
+
+    /// Builds from a failed `CommandResult`, falling back to `INTERNAL` when the
+    /// node did not attach an error body.
+    pub fn from_command(result: CommandResult) -> Self {
+        match result.error {
+            Some(info) => Self::from_info(info),
+            None => Self::internal("command failed without an error body"),
+        }
+    }
+
+    /// Converts into the structured error body.
+    pub fn into_info(self) -> ErrorInfo {
+        ErrorInfo {
+            code: self.code,
+            message: self.message,
+            params: std::collections::BTreeMap::new(),
+            details: self.details.map(|details| *details),
+            retryable: self.retryable,
+            recovery: self.recovery,
+            request_id: self.request_id.map(String::from),
+            docs: None,
+        }
     }
 
     /// `400 INVALID_STATE`
@@ -140,13 +219,11 @@ impl From<DbError> for ApiError {
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
+        let status = self.status;
         (
-            self.status,
+            status,
             Json(ApiErrorResponse {
-                error: ApiErrorBody {
-                    code: self.code,
-                    message: self.message,
-                },
+                error: self.into_info(),
             }),
         )
             .into_response()

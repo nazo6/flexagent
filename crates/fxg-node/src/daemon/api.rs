@@ -154,20 +154,8 @@ impl ClientApiBackend for DaemonState {
         };
 
         match result {
-            Ok(session_id) => CommandResult {
-                command_id,
-                success: true,
-                code: None,
-                error: None,
-                session_id: Some(session_id),
-            },
-            Err(err) => CommandResult {
-                command_id,
-                success: false,
-                code: Some(err.error_code()),
-                error: Some(err.to_string()),
-                session_id: None,
-            },
+            Ok(session_id) => CommandResult::success(command_id, session_id),
+            Err(err) => CommandResult::failure(command_id, err.info()),
         }
     }
 

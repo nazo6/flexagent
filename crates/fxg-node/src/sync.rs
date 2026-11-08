@@ -1267,21 +1267,15 @@ async fn send_command_result(
     command_id: String,
     result: Result<String, NodeError>,
 ) {
-    let message = match result {
-        Ok(session_id) => NodeToServerMsg::CommandResult {
-            command_id,
-            success: true,
-            code: None,
-            error: None,
-            session_id: Some(session_id),
-        },
-        Err(err) => NodeToServerMsg::CommandResult {
-            command_id,
-            success: false,
-            code: Some(err.error_code()),
-            error: Some(err.to_string()),
-            session_id: None,
-        },
+    let result = match result {
+        Ok(session_id) => fxg_protocol::common::CommandResult::success(command_id, session_id),
+        Err(err) => fxg_protocol::common::CommandResult::failure(command_id, err.info()),
+    };
+    let message = NodeToServerMsg::CommandResult {
+        command_id: result.command_id,
+        success: result.success,
+        error: result.error,
+        session_id: result.session_id,
     };
     let _ = out.send(message).await;
 }

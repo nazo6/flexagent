@@ -7,7 +7,7 @@
 use axum::extract::ws::{Message, WebSocket};
 use futures_util::{SinkExt, StreamExt};
 use fxg_protocol::client_api::{ClientWsMessage, ServerWsMessage};
-use fxg_protocol::common::ErrorCode;
+use fxg_protocol::common::{ErrorCode, ErrorInfo};
 use tokio::sync::broadcast;
 
 use super::{ClientApiBackend, ClientCommand, ClientEvent, replay_events, send_ws_json};
@@ -85,8 +85,10 @@ pub(crate) async fn handle_client_ws<B: ClientApiBackend>(backend: B, socket: We
                     Ok(other) => {
                         let Some(command) = ClientCommand::from_message(&other) else {
                             let response = ServerWsMessage::Error {
-                                code: ErrorCode::InvalidState,
-                                message: format!("unsupported client message: {other:?}"),
+                                error: ErrorInfo::new(
+                                    ErrorCode::InvalidState,
+                                    format!("unsupported client message: {other:?}"),
+                                ),
                             };
                             if send_ws_json(&mut sender, &response).await.is_err() {
                                 break;
@@ -97,7 +99,6 @@ pub(crate) async fn handle_client_ws<B: ClientApiBackend>(backend: B, socket: We
                         let response = ServerWsMessage::CommandResult {
                             command_id: result.command_id,
                             success: result.success,
-                            code: result.code,
                             error: result.error,
                             session_id: result.session_id,
                         };
@@ -107,8 +108,10 @@ pub(crate) async fn handle_client_ws<B: ClientApiBackend>(backend: B, socket: We
                     }
                     Err(err) => {
                         let response = ServerWsMessage::Error {
-                            code: ErrorCode::InvalidState,
-                            message: format!("invalid client message: {err}"),
+                            error: ErrorInfo::new(
+                                ErrorCode::InvalidState,
+                                format!("invalid client message: {err}"),
+                            ),
                         };
                         if send_ws_json(&mut sender, &response).await.is_err() {
                             break;

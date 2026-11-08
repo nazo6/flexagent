@@ -1084,14 +1084,12 @@ async fn handle_node_message(state: &ServerState, node_id: &str, text: &str) {
         NodeToServerMsg::CommandResult {
             command_id,
             success,
-            code,
             error,
             session_id,
         } => {
             let result = CommandResult {
                 command_id: command_id.clone(),
                 success,
-                code,
                 error,
                 session_id,
             };

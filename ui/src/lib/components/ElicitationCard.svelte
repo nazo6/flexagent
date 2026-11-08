@@ -4,7 +4,7 @@
   import { Input } from "#lib/components/ui/input/index.ts";
   import { Label } from "#lib/components/ui/label/index.ts";
   import type { ElicitationAction, JsonValue } from "#lib/generated/bindings.ts";
-  import { errorCodeMessage } from "#lib/api/error-messages.ts";
+  import { commandErrorMessage } from "#lib/api/client.ts";
   import { formatRelativeTime } from "#lib/format.ts";
   import { m } from "#lib/paraglide/messages.js";
   import { sync } from "#lib/stores/app.svelte.ts";
@@ -152,10 +152,10 @@
         action,
         action === "accept" ? buildContent() : null,
       );
-      if (result.code === "ALREADY_RESOLVED") {
+      if (result.error?.code === "ALREADY_RESOLVED") {
         toast.info(m.error_already_resolved());
       } else if (!result.success) {
-        toast.error(result.error ?? errorCodeMessage(result.code) ?? m.chat_elicitation_failed());
+        toast.error(commandErrorMessage(result.error) ?? m.chat_elicitation_failed());
       } else {
         toast.success(m.chat_elicitation_sent());
       }

@@ -5,7 +5,7 @@
   import { configChoices, resolveConfigChoice, selectedConfigValue } from "#lib/config-options.ts";
   import { getNodeAvailability } from "#lib/node-status.ts";
   import { m } from "#lib/paraglide/messages.js";
-  import { errorCodeMessage } from "#lib/api/error-messages.ts";
+  import { commandErrorMessage } from "#lib/api/client.ts";
   import type {
     NodeSummary,
     SessionControlAction,
@@ -109,12 +109,12 @@
     try {
       const result = await sync.sendPrompt(sessionId, value);
       if (!result.success) {
-        if (result.code === "RESUME_REQUIRED") {
+        if (result.error?.code === "RESUME_REQUIRED") {
           // Automatic resume (native restore) is unsupported for stopped
           // sessions. Keep the input and suggest resuming via history replay.
           resumeRequired = true;
         } else {
-          toast.error(result.error ?? errorCodeMessage(result.code) ?? m.chat_send_failed());
+          toast.error(commandErrorMessage(result.error) ?? m.chat_send_failed());
         }
         return;
       }
@@ -140,7 +140,7 @@
     try {
       const result = await sync.controlSession(sessionId, action);
       if (!result.success) {
-        toast.error(result.error ?? errorCodeMessage(result.code) ?? m.chat_control_failed());
+        toast.error(commandErrorMessage(result.error) ?? m.chat_control_failed());
       } else if (action.action === "cancel") {
         toast.info(m.chat_cancel_requested());
       }
@@ -156,7 +156,7 @@
     try {
       const result = await sync.sendPrompt(sessionId, "/compact");
       if (!result.success) {
-        toast.error(result.error ?? errorCodeMessage(result.code) ?? m.chat_compact_failed());
+        toast.error(commandErrorMessage(result.error) ?? m.chat_compact_failed());
       } else {
         toast.info(m.chat_compact_sent());
       }

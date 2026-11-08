@@ -99,23 +99,50 @@ impl NodeError {
     /// Converts to the structured error code carried in IPC / WebSocket / REST responses.
     ///
     /// Clients (CLI / PWA) use this code to decide on idempotent retries
-    /// (`COMMAND_DUPLICATE` / `ALREADY_RESOLVED`).
+    /// (`COMMAND_DUPLICATE` / `ALREADY_RESOLVED`) and to pick a recovery action.
+    /// This match is intentionally exhaustive: adding a variant forces an
+    /// explicit classification instead of silently falling back to `INTERNAL`.
     pub fn error_code(&self) -> fxg_protocol::common::ErrorCode {
         use fxg_protocol::common::ErrorCode;
         match self {
-            Self::NotARepository(_)
-            | Self::InvalidWorktree(_)
-            | Self::InvalidSession(_)
-            | Self::InvalidState(_)
-            | Self::NonPersistableEvent(_)
-            | Self::Config(_) => ErrorCode::InvalidState,
+            Self::Io { source, .. } | Self::Plain(source) => {
+                if source.kind() == std::io::ErrorKind::PermissionDenied {
+                    ErrorCode::PermissionDenied
+                } else {
+                    ErrorCode::IoError
+                }
+            }
+            Self::GitUnavailable(_) => ErrorCode::GitUnavailable,
+            Self::Git { .. } => ErrorCode::GitFailed,
+            Self::NotARepository(_) => ErrorCode::InvalidState,
+            Self::InvalidWorktree(_) => ErrorCode::WorktreeConflict,
+            Self::InvalidState(_) | Self::InvalidSession(_) | Self::NonPersistableEvent(_) => {
+                ErrorCode::InvalidState
+            }
+            Self::ResumeRequired(_) => ErrorCode::ResumeRequired,
+            Self::Busy(_) => ErrorCode::Busy,
             Self::CommandDuplicate(_) => ErrorCode::CommandDuplicate,
             Self::AlreadyResolved(_) => ErrorCode::AlreadyResolved,
-            Self::Busy(_) => ErrorCode::Busy,
-            Self::ResumeRequired(_) => ErrorCode::ResumeRequired,
-            Self::Db(fxg_db::DbError::SessionNotFound(_))
-            | Self::Db(fxg_db::DbError::NodeNotFound(_)) => ErrorCode::NotFound,
-            _ => ErrorCode::Internal,
+            Self::Agent(_) => ErrorCode::AgentLaunchFailed,
+            Self::Db(err) => match err {
+                fxg_db::DbError::SessionNotFound(_)
+                | fxg_db::DbError::NodeNotFound(_)
+                | fxg_db::DbError::PermissionRequestNotFound(_) => ErrorCode::NotFound,
+                fxg_db::DbError::InvalidPayload(_)
+                | fxg_db::DbError::NegativeNodeSeq(_)
+                | fxg_db::DbError::InvalidEnumValue(_) => ErrorCode::DbCorrupt,
+                fxg_db::DbError::EmptySearchQuery => ErrorCode::InvalidState,
+                _ => ErrorCode::Internal,
+            },
+            Self::Config(_) => ErrorCode::ConfigInvalid,
+            Self::Pty(_) => ErrorCode::PtyFailed,
+            Self::Json(_) => ErrorCode::Internal,
+            Self::Server(_) => ErrorCode::ServerError,
         }
+    }
+
+    /// Builds the structured error exchanged by REST / WS / IPC.
+    pub fn info(&self) -> fxg_protocol::common::ErrorInfo {
+        fxg_protocol::common::ErrorInfo::new(self.error_code(), self.to_string())
     }
 }

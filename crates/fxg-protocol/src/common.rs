@@ -5,6 +5,7 @@
 //! so they carry `#[derive(specta::Type)]` + `#[specta(collect)]`
 //! (design: `docs/03-protocol-and-api.md` §1.1).
 
+use std::collections::BTreeMap;
 use std::fmt;
 use std::str::FromStr;
 
@@ -770,6 +771,10 @@ pub struct ForkHistoryItem {
 }
 
 /// Shared error code (used by both `CommandResult` and REST error responses).
+///
+/// The code is the machine-readable contract: clients use it as an i18n key and
+/// to decide which recovery action to offer. `ErrorCode::Internal` must only be
+/// used for genuinely unexpected failures; known failures get a dedicated code.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 #[specta(collect)]
@@ -797,8 +802,46 @@ pub enum ErrorCode {
     CommandDuplicate,
     /// The target was not found
     NotFound,
-    /// Internal error
+    /// Internal error (a bug or an unclassified failure)
     Internal,
+    /// The configuration file is invalid or cannot be read
+    ConfigInvalid,
+    /// The requested agent is not installed / discoverable on the node
+    AgentNotInstalled,
+    /// The agent process could not be launched or initialized
+    AgentLaunchFailed,
+    /// The agent violated the ACP protocol or the turn failed inside the agent
+    AgentProtocolError,
+    /// The `git` executable is not available
+    GitUnavailable,
+    /// A `git` command failed
+    GitFailed,
+    /// The worktree is in a conflicting state (branch checked out elsewhere, etc.)
+    WorktreeConflict,
+    /// A workspace snapshot required for revert is unavailable
+    SnapshotUnavailable,
+    /// The outbox has pending events and synchronization is degraded
+    SyncBacklog,
+    /// The database is corrupt or a stored value cannot be decoded
+    DbCorrupt,
+    /// Provisioning an ephemeral VM / sandbox failed
+    ProvisionerFailed,
+    /// Incompatible node / server / schema versions
+    VersionMismatch,
+    /// An operation timed out
+    Timeout,
+    /// The device is out of disk space
+    DiskFull,
+    /// The operation was denied by the file system / OS permissions
+    PermissionDenied,
+    /// A generic I/O error
+    IoError,
+    /// A PTY operation failed
+    PtyFailed,
+    /// The local or central server failed
+    ServerError,
+    /// The operation was cancelled
+    Cancelled,
 }
 
 impl ErrorCode {
@@ -816,7 +859,38 @@ impl ErrorCode {
             Self::CommandDuplicate => "COMMAND_DUPLICATE",
             Self::NotFound => "NOT_FOUND",
             Self::Internal => "INTERNAL",
+            Self::ConfigInvalid => "CONFIG_INVALID",
+            Self::AgentNotInstalled => "AGENT_NOT_INSTALLED",
+            Self::AgentLaunchFailed => "AGENT_LAUNCH_FAILED",
+            Self::AgentProtocolError => "AGENT_PROTOCOL_ERROR",
+            Self::GitUnavailable => "GIT_UNAVAILABLE",
+            Self::GitFailed => "GIT_FAILED",
+            Self::WorktreeConflict => "WORKTREE_CONFLICT",
+            Self::SnapshotUnavailable => "SNAPSHOT_UNAVAILABLE",
+            Self::SyncBacklog => "SYNC_BACKLOG",
+            Self::DbCorrupt => "DB_CORRUPT",
+            Self::ProvisionerFailed => "PROVISIONER_FAILED",
+            Self::VersionMismatch => "VERSION_MISMATCH",
+            Self::Timeout => "TIMEOUT",
+            Self::DiskFull => "DISK_FULL",
+            Self::PermissionDenied => "PERMISSION_DENIED",
+            Self::IoError => "IO_ERROR",
+            Self::PtyFailed => "PTY_FAILED",
+            Self::ServerError => "SERVER_ERROR",
+            Self::Cancelled => "CANCELLED",
         }
+    }
+
+    /// Whether retrying the operation may succeed without any state change.
+    pub const fn is_retryable(self) -> bool {
+        matches!(
+            self,
+            Self::NodeOffline
+                | Self::Timeout
+                | Self::SyncBacklog
+                | Self::ServerError
+                | Self::AgentLaunchFailed
+        )
     }
 }
 
@@ -842,9 +916,211 @@ impl FromStr for ErrorCode {
             "COMMAND_DUPLICATE" => Ok(Self::CommandDuplicate),
             "NOT_FOUND" => Ok(Self::NotFound),
             "INTERNAL" => Ok(Self::Internal),
+            "CONFIG_INVALID" => Ok(Self::ConfigInvalid),
+            "AGENT_NOT_INSTALLED" => Ok(Self::AgentNotInstalled),
+            "AGENT_LAUNCH_FAILED" => Ok(Self::AgentLaunchFailed),
+            "AGENT_PROTOCOL_ERROR" => Ok(Self::AgentProtocolError),
+            "GIT_UNAVAILABLE" => Ok(Self::GitUnavailable),
+            "GIT_FAILED" => Ok(Self::GitFailed),
+            "WORKTREE_CONFLICT" => Ok(Self::WorktreeConflict),
+            "SNAPSHOT_UNAVAILABLE" => Ok(Self::SnapshotUnavailable),
+            "SYNC_BACKLOG" => Ok(Self::SyncBacklog),
+            "DB_CORRUPT" => Ok(Self::DbCorrupt),
+            "PROVISIONER_FAILED" => Ok(Self::ProvisionerFailed),
+            "VERSION_MISMATCH" => Ok(Self::VersionMismatch),
+            "TIMEOUT" => Ok(Self::Timeout),
+            "DISK_FULL" => Ok(Self::DiskFull),
+            "PERMISSION_DENIED" => Ok(Self::PermissionDenied),
+            "IO_ERROR" => Ok(Self::IoError),
+            "PTY_FAILED" => Ok(Self::PtyFailed),
+            "SERVER_ERROR" => Ok(Self::ServerError),
+            "CANCELLED" => Ok(Self::Cancelled),
             other => Err(EnumParseError::new("error code", other)),
         }
     }
+}
+
+/// Structured error exchanged by REST, Client WS, the node protocol and IPC.
+///
+/// `message` is the English fallback for logs / CLI; clients translate
+/// `code` (and interpolate `params`) for display. `details` carries
+/// machine-readable technical context that the UI shows in an expandable
+/// section, never as the primary message.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
+pub struct ErrorInfo {
+    /// Structured error code (also the i18n key)
+    pub code: ErrorCode,
+    /// English human-readable fallback message
+    pub message: String,
+    /// Parameters for message interpolation (path, agent_id, exit_code, ...)
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub params: BTreeMap<String, String>,
+    /// Technical details for the expandable "details" section
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub details: Option<serde_json::Value>,
+    /// Whether retrying may succeed without a state change
+    #[serde(default)]
+    pub retryable: bool,
+    /// Recovery actions the client can offer as buttons
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub recovery: Vec<RecoveryAction>,
+    /// Correlation ID shared with logs / incidents
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request_id: Option<String>,
+    /// Link to the troubleshooting documentation anchor
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub docs: Option<String>,
+}
+
+impl ErrorInfo {
+    /// Builds an error from a code and the English fallback message.
+    pub fn new(code: ErrorCode, message: impl Into<String>) -> Self {
+        Self {
+            code,
+            message: message.into(),
+            params: BTreeMap::new(),
+            details: None,
+            retryable: code.is_retryable(),
+            recovery: Vec::new(),
+            request_id: None,
+            docs: None,
+        }
+    }
+
+    /// Adds an interpolation parameter.
+    pub fn with_param(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
+        self.params.insert(key.into(), value.into());
+        self
+    }
+
+    /// Adds technical details.
+    pub fn with_details(mut self, details: serde_json::Value) -> Self {
+        self.details = Some(details);
+        self
+    }
+
+    /// Adds a recovery action.
+    pub fn with_recovery(mut self, action: RecoveryAction) -> Self {
+        self.recovery.push(action);
+        self
+    }
+
+    /// Attaches the correlation ID.
+    pub fn with_request_id(mut self, request_id: impl Into<String>) -> Self {
+        self.request_id = Some(request_id.into());
+        self
+    }
+}
+
+/// Recovery action offered to the user after a failure.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+#[specta(collect)]
+pub enum RecoveryAction {
+    /// Retry the same operation (`idempotent` = safe to resend as-is)
+    Retry {
+        /// Whether the operation is idempotent / safe to retry
+        idempotent: bool,
+    },
+    /// Resume a stopped session with replayed history
+    ResumeWithReplay {
+        /// Target session ID
+        session_id: String,
+    },
+    /// Reconnect to the target node
+    ReconnectNode {
+        /// Target node ID
+        node_id: String,
+    },
+    /// Pick another online node
+    SelectOnlineNode,
+    /// Install the missing agent on the node
+    ReinstallAgent {
+        /// Target node ID
+        node_id: String,
+        /// Agent ID
+        agent_id: String,
+    },
+    /// Recreate the worktree
+    RecreateWorktree {
+        /// Logical project ID
+        project_id: String,
+        /// Branch name (when known)
+        branch: Option<String>,
+    },
+    /// Revert to the nearest snapshot that can be restored
+    RevertToNearestSnapshot {
+        /// Target session ID
+        session_id: String,
+        /// Candidate `node_seq` (the nearest snapshot when omitted)
+        node_seq: Option<u64>,
+    },
+    /// Open the configuration file
+    OpenConfig {
+        /// Path of the configuration file
+        path: String,
+    },
+    /// Show the logs / diagnostics for a session
+    ShowLogs {
+        /// Target session ID (all logs when omitted)
+        session_id: Option<String>,
+    },
+    /// Export a support bundle
+    ExportDiagnostics,
+}
+
+/// Non-fatal warning attached to a successful / partially successful response.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
+pub struct WarningInfo {
+    /// Structured warning code (same vocabulary as [`ErrorCode`])
+    pub code: ErrorCode,
+    /// English human-readable fallback message
+    pub message: String,
+    /// Technical details
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub details: Option<serde_json::Value>,
+    /// Recovery actions the client can offer
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub recovery: Vec<RecoveryAction>,
+}
+
+impl WarningInfo {
+    /// Builds a warning from a code and the English fallback message.
+    pub fn new(code: ErrorCode, message: impl Into<String>) -> Self {
+        Self {
+            code,
+            message: message.into(),
+            details: None,
+            recovery: Vec::new(),
+        }
+    }
+}
+
+/// Whether the user's data was affected by a failure.
+///
+/// Every user-visible error should state this so the user knows whether they
+/// need to recover anything.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+#[specta(collect)]
+pub enum DataSafety {
+    /// Nothing was modified
+    Unchanged,
+    /// The input / workspace is preserved and will be retried
+    Preserved,
+    /// The message / command was not sent
+    NotSent,
+    /// The data can be recovered from the given location
+    Recoverable {
+        /// Recovery point (snapshot tree hash, backup path, ...)
+        location: String,
+    },
+    /// The data was lost
+    Lost,
+    /// Unknown
+    Unknown,
 }
 
 /// Result of a command (correlated back from the node through the server to the requesting client).
@@ -855,12 +1131,40 @@ pub struct CommandResult {
     pub command_id: String,
     /// Whether it succeeded
     pub success: bool,
-    /// Structured error code on failure
-    pub code: Option<ErrorCode>,
-    /// Human-readable error message
-    pub error: Option<String>,
+    /// Structured error on failure
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<ErrorInfo>,
     /// Target session ID (optional)
     pub session_id: Option<String>,
+}
+
+impl CommandResult {
+    /// Builds a successful result.
+    pub fn success(command_id: impl Into<String>, session_id: impl Into<String>) -> Self {
+        Self {
+            command_id: command_id.into(),
+            success: true,
+            error: None,
+            session_id: Some(session_id.into()),
+        }
+    }
+
+    /// Builds a failed result.
+    ///
+    /// The command ID is used as the correlation ID when the error does not
+    /// carry one, so the UI can quote it when reporting a problem.
+    pub fn failure(command_id: impl Into<String>, mut error: ErrorInfo) -> Self {
+        let command_id = command_id.into();
+        if error.request_id.is_none() {
+            error.request_id = Some(command_id.clone());
+        }
+        Self {
+            command_id,
+            success: false,
+            error: Some(error),
+            session_id: None,
+        }
+    }
 }
 
 /// Project projection exposed to clients (`GET /api/v1/projects`).
@@ -1031,4 +1335,91 @@ pub struct AuditLogEntry {
     pub details: serde_json::Value,
     /// Recorded time (Unix epoch ms)
     pub created_at: i64,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn error_code_roundtrip_covers_all_codes() {
+        let codes = [
+            ErrorCode::Unauthorized,
+            ErrorCode::Forbidden,
+            ErrorCode::NodeOffline,
+            ErrorCode::AlreadyResolved,
+            ErrorCode::Busy,
+            ErrorCode::InvalidState,
+            ErrorCode::ResumeRequired,
+            ErrorCode::PtyDisabled,
+            ErrorCode::CommandDuplicate,
+            ErrorCode::NotFound,
+            ErrorCode::Internal,
+            ErrorCode::ConfigInvalid,
+            ErrorCode::AgentNotInstalled,
+            ErrorCode::AgentLaunchFailed,
+            ErrorCode::AgentProtocolError,
+            ErrorCode::GitUnavailable,
+            ErrorCode::GitFailed,
+            ErrorCode::WorktreeConflict,
+            ErrorCode::SnapshotUnavailable,
+            ErrorCode::SyncBacklog,
+            ErrorCode::DbCorrupt,
+            ErrorCode::ProvisionerFailed,
+            ErrorCode::VersionMismatch,
+            ErrorCode::Timeout,
+            ErrorCode::DiskFull,
+            ErrorCode::PermissionDenied,
+            ErrorCode::IoError,
+            ErrorCode::PtyFailed,
+            ErrorCode::ServerError,
+            ErrorCode::Cancelled,
+        ];
+        for code in codes {
+            assert_eq!(ErrorCode::from_str(code.as_str()).unwrap(), code);
+        }
+    }
+
+    #[test]
+    fn error_info_omits_empty_optional_fields() {
+        let json = serde_json::to_value(ErrorInfo::new(ErrorCode::Timeout, "timed out")).unwrap();
+        assert_eq!(json["code"], "TIMEOUT");
+        assert_eq!(json["message"], "timed out");
+        assert_eq!(json["retryable"], true);
+        assert!(json.get("details").is_none());
+        assert!(json.get("recovery").is_none());
+        assert!(json.get("request_id").is_none());
+    }
+
+    #[test]
+    fn error_info_carries_recovery_and_details() {
+        let info = ErrorInfo::new(ErrorCode::ResumeRequired, "resume required")
+            .with_recovery(RecoveryAction::ResumeWithReplay {
+                session_id: "s1".to_owned(),
+            })
+            .with_details(serde_json::json!({ "session_id": "s1" }))
+            .with_param("session_id", "s1");
+        let json = serde_json::to_value(&info).unwrap();
+        assert_eq!(json["recovery"][0]["kind"], "resume_with_replay");
+        assert_eq!(json["recovery"][0]["session_id"], "s1");
+        assert_eq!(json["details"]["session_id"], "s1");
+        assert_eq!(json["params"]["session_id"], "s1");
+    }
+
+    #[test]
+    fn command_failure_uses_command_id_as_request_id() {
+        let result = CommandResult::failure("cmd-1", ErrorInfo::new(ErrorCode::Busy, "busy"));
+        assert!(!result.success);
+        let error = result.error.expect("error body");
+        assert_eq!(error.code, ErrorCode::Busy);
+        assert_eq!(error.request_id.as_deref(), Some("cmd-1"));
+    }
+
+    #[test]
+    fn retryable_codes_are_limited_to_transient_failures() {
+        assert!(ErrorCode::NodeOffline.is_retryable());
+        assert!(ErrorCode::Timeout.is_retryable());
+        assert!(!ErrorCode::NotFound.is_retryable());
+        assert!(!ErrorCode::ConfigInvalid.is_retryable());
+    }
 }

@@ -21,6 +21,11 @@
 //! columns are marked non-NULL with `AS "col!"`, and `INTEGER` boolean columns are marked as
 //! bool with `AS "col: bool"`.
 
+#![allow(
+    clippy::map_err_ignore,
+    reason = "integer conversion errors (TryFromIntError) carry no additional context"
+)]
+
 use std::str::FromStr;
 
 use fxg_protocol::common::{
@@ -442,8 +447,13 @@ pub async fn list_nodes(pool: &SqlitePool) -> Result<Vec<NodeSummary>, DbError> 
 
     rows.into_iter()
         .map(|row| {
-            let installed_agents: Vec<String> =
-                serde_json::from_str(&row.installed_agents_json).unwrap_or_default();
+            let installed_agents: Vec<String> = serde_json::from_str(&row.installed_agents_json)
+                .map_err(|err| {
+                    DbError::InvalidPayload(format!(
+                        "nodes.installed_agents_json for {}: {err}",
+                        row.node_id
+                    ))
+                })?;
             Ok(NodeSummary {
                 node_id: row.node_id,
                 name: row.name,
@@ -618,10 +628,14 @@ async fn search_like(
         .filter_map(|row| {
             let text = row.snippet.as_deref()?;
             let snippet = excerpt_around(text, needle, SNIPPET_CONTEXT_CHARS);
+            let node_seq = match u64::try_from(row.node_seq) {
+                Ok(node_seq) => node_seq,
+                Err(_) => return None,
+            };
             Some(SearchHit {
                 event_id: row.event_id,
                 session_id: row.session_id,
-                node_seq: u64::try_from(row.node_seq).ok()?,
+                node_seq,
                 event_type: row.event_type,
                 snippet,
                 created_at: row.created_at,
@@ -771,7 +785,12 @@ struct PermissionRow {
 impl PermissionRow {
     fn into_entry(self) -> Result<PermissionRequestEntry, DbError> {
         let stored: StoredPermissionDetails =
-            serde_json::from_str(&self.details_json).unwrap_or_default();
+            serde_json::from_str(&self.details_json).map_err(|err| {
+                DbError::InvalidPayload(format!(
+                    "permission_requests.details_json for {}: {err}",
+                    self.request_id
+                ))
+            })?;
         Ok(PermissionRequestEntry {
             request_id: self.request_id,
             session_id: self.session_id,
@@ -806,16 +825,27 @@ struct ElicitationRow {
 
 impl ElicitationRow {
     fn into_entry(self) -> Result<ElicitationRequestEntry, DbError> {
+        let requested_schema = serde_json::from_str(&self.schema_json).map_err(|err| {
+            DbError::InvalidPayload(format!(
+                "elicitation_requests.schema_json for {}: {err}",
+                self.elicitation_id
+            ))
+        })?;
+        let content = serde_json::from_str(&self.content_json).map_err(|err| {
+            DbError::InvalidPayload(format!(
+                "elicitation_requests.content_json for {}: {err}",
+                self.elicitation_id
+            ))
+        })?;
         Ok(ElicitationRequestEntry {
             elicitation_id: self.elicitation_id,
             session_id: self.session_id,
             node_id: self.node_id,
             message: self.message,
             mode: self.mode,
-            requested_schema: serde_json::from_str(&self.schema_json)
-                .unwrap_or(serde_json::Value::Null),
+            requested_schema,
             tool_call_id: self.tool_call_id,
-            content: serde_json::from_str(&self.content_json).unwrap_or(serde_json::Value::Null),
+            content,
             status: ElicitationRequestStatus::from_str(&self.status)
                 .map_err(|err| DbError::InvalidEnumValue(err.to_string()))?,
             created_at: self.created_at,
@@ -837,10 +867,14 @@ struct SearchRow {
 
 impl SearchRow {
     fn into_hit(self) -> Option<SearchHit> {
+        let node_seq = match u64::try_from(self.node_seq) {
+            Ok(node_seq) => node_seq,
+            Err(_) => return None,
+        };
         Some(SearchHit {
             event_id: self.event_id,
             session_id: self.session_id,
-            node_seq: u64::try_from(self.node_seq).ok()?,
+            node_seq,
             event_type: self.event_type,
             snippet: self.snippet?,
             created_at: self.created_at,

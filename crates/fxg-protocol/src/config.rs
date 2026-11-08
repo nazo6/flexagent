@@ -109,8 +109,15 @@ pub enum ConfigError {
 pub type EnvLookup<'a> = &'a dyn Fn(&str) -> Option<String>;
 
 /// [`EnvLookup`] implementation that reads the real process environment.
+#[allow(
+    clippy::manual_ok_err,
+    reason = "Result::ok is disallowed here to keep error-discarding explicit"
+)]
 pub fn process_env(key: &str) -> Option<String> {
-    std::env::var(key).ok()
+    match std::env::var(key) {
+        Ok(value) => Some(value),
+        Err(_) => None,
+    }
 }
 
 /// Resolves the FlexAgent data directory (`~/.flexagent`).

@@ -119,41 +119,84 @@
 
 ### タスクリスト
 
-- [ ] `fxg-protocol`: `ErrorCode` を拡張する
+- [x] `fxg-protocol`: `ErrorCode` を拡張する
       (`ConfigInvalid`, `AgentNotInstalled`, `AgentLaunchFailed`,
-      `AgentProtocolError`, `GitUnavailable`, `WorktreeConflict`,
-      `SnapshotUnavailable`, `SyncBacklog`, `DbCorrupt`,
-      `ProvisionerFailed`, `VersionMismatch`, `Timeout`, `DiskFull`,
-      `PermissionDenied`, `Cancelled` 等)
-- [ ] `fxg-protocol`: `ErrorInfo` / `RecoveryAction` / `WarningInfo` /
-      `DataSafety` / `ErrorContext` 型を追加する - `ErrorInfo { code, message, params, details, retryable, recovery,
-        request_id, docs }` - `RecoveryAction` は `Retry` / `ResumeWithReplay` / `ReconnectNode` /
-      `SelectOnlineNode` / `ReinstallAgent` / `RecreateWorktree` /
-      `RevertToNearestSnapshot` / `OpenConfig` / `ExportDiagnostics` 等
-- [ ] `fxg-protocol`: `ApiErrorBody` / `CommandResult` /
-      `ServerWsMessage::Error` / IPC のエラー結果を `ErrorInfo` ベースへ
-      統一する（過剰な後方互換は持たせない）
-- [ ] `fxg-node`: `NodeError::error_code()` を**ワイルドカードなしの
-      網羅マッチ**にし、`Agent(String)` / `Server(String)` は
-      `stage` + `#[source]` を持つ構造化 variant へ置き換える
-- [ ] `fxg-server`: `ApiError` に `details` / `recovery` / `request_id` を追加し、
-      `ErrorCode` → HTTP status の写像を更新する
-- [ ] `request_id`（相関 ID）を導入する - REST ミドルウェアで採番（クライアント指定があれば尊重） - Node ⇔ Server の `CommandResult` とログ span に伝播 - CLI / UI のエラー表示に短縮 ID を出し、コピー可能にする
-- [ ] `clippy.toml` と workspace lints を追加する - `let_underscore_must_use = "deny"` - `map_err_ignore = "deny"` - `unwrap_used` / `expect_used` は `warn` から開始 - `disallowed-methods`: `Result::ok` / `Result::unwrap_or_default`
-      （意図的な箇所は `#[allow(..., reason = "...")]` を必須化）
-- [ ] `[lints] workspace = true` を各クレートへ段階的に適用する
-      （`fxg-db` → `fxg-acp` → `fxg-node` → `fxg-server` → `fxg-cli`）
-- [ ] 「捨ててよいエラー」を明示する共通ヘルパを追加する
-      (`discard_with(context)` / `spawn_logged(name, future)`)
-- [ ] `mise.toml` の `lint:rust` と CI で新 lint を有効化し、
-      `mise run types` で `bindings.ts` を同期する
+      `AgentProtocolError`, `GitUnavailable`, `GitFailed`, `WorktreeConflict`,
+      `SnapshotUnavailable`, `SyncBacklog`, `DbCorrupt`, `ProvisionerFailed`,
+      `VersionMismatch`, `Timeout`, `DiskFull`, `PermissionDenied`, `IoError`,
+      `PtyFailed`, `ServerError`, `Cancelled` を追加)
+- [x] `fxg-protocol`: `ErrorInfo` / `RecoveryAction` / `WarningInfo` /
+      `DataSafety` 型を追加する
+- [x] `fxg-protocol`: `ApiErrorResponse` / `CommandResult` /
+      `ServerWsMessage::Error` / `ServerWsMessage::CommandResult` /
+      `NodeToServerMsg::CommandResult` / IPC のエラー結果を `ErrorInfo`
+      ベースへ統一する
+- [x] `fxg-node`: `NodeError::error_code()` を**ワイルドカードなしの
+      網羅マッチ**にし、Io / Git / Agent / Config / Db / Pty などを
+      `INTERNAL` から分離する - `Agent(String)` / `Server(String)` の stage + source 構造化は
+      Phase 2 の ACP エラー改善と同時に行う
+- [x] `fxg-server`: `ApiError` に `details` / `retryable` / `recovery` /
+      `request_id` を追加し、`ErrorCode` → HTTP status の写像を更新する
+- [x] `fxg-db`: JSON 列の decode 失敗を `DbError::InvalidPayload` として
+      返す（lint 有効化の前提として先行修正）
+- [x] `clippy.toml` を追加し、`mise run lint:errors` で
+      `fxg-protocol` / `fxg-db` に `let_underscore_must_use` /
+      `map_err_ignore` / `disallowed_methods` を適用する - Cargo は `[lints] workspace = true` とクレート単位 override の併用を
+      許さないため、workspace の `all = "warn"` は維持し、
+      `disallowed_methods` は `allow` のまま dedicated task の `-D` で
+      上書きする方式に変更した
+- [x] `mise run types` で `bindings.ts` を同期し、UI の型・エラー表示
+      (`ApiError` / `CommandResult` / `ServerWsMessage::Error`) を
+      `ErrorInfo` に対応する
+- [x] `cargo clippy --workspace --all-targets -- -D warnings` と
+      `mise run lint:errors` が通る
+- [ ] 残り: `request_id` の REST ミドルウェア採番とログ span 伝播
+      （Phase 3 の診断基盤と同時に実装する）
+- [x] `discard_with` / `spawn_logged` マクロを `fxg-protocol::util` に追加
+      （既存の `let _ =` / `tokio::spawn` の移行は Phase 2 で行う）
+- [ ] 残り: `lint:errors` の対象を `fxg-acp` → `fxg-node` → `fxg-server` →
+      `fxg-cli` へ拡大する
 
 ### 完了条件 / 検証
 
-- `cargo clippy --workspace --all-targets -- -D warnings` が新 lint 込みで通る
-- `mise run types` 後に `ui` の `svelte-check` が通る
-- すべての `NodeError` variant が `Internal` 以外のコードに写ることを
-  コンパイル時に保証する
+- [x] `cargo clippy --workspace --all-targets -- -D warnings` が通る
+- [x] `cargo clippy -p fxg-protocol -p fxg-db --all-targets -- -D warnings
+      -D clippy::let_underscore_must_use -D clippy::map_err_ignore
+      -D clippy::disallowed_methods` が通る
+- [x] `mise run types` 後に `ui` の `svelte-check` が通る
+- [x] すべての `NodeError` variant が `Internal` 以外のコードに写ることを
+      コンパイル時に保証する
+- [x] `cargo test --workspace --no-fail-fast` が通る
+
+### 実装ログ / 進捗メモ
+
+- **2026-11-08**: ブランチ `feat/error-handling-recovery` を切り、
+  本プランを `docs(plan)` でコミットしてから Phase 1 に着手。
+- **プロトコル**: `ErrorCode` を 30 値に拡張し、`ErrorInfo` /
+  `RecoveryAction` / `WarningInfo` / `DataSafety` を追加。エラー本文は
+  REST・Client WS・Node⇔Server・IPC で `ErrorInfo` に統一した。
+  `CommandResult::failure` は `command_id` を `request_id` として補完する。
+- **NodeError**: `error_code()` を網羅マッチに変更し、`Io` の
+  `PermissionDenied`、`Config`、`Db` の破損系、`Pty`、`Git`、`Agent` を
+  それぞれ専用コードへ写像するようにした。
+- **ApiError**: `details` / `retryable` / `recovery` / `request_id` を追加。
+  `result_large_err` を避けるため `details` と `request_id` は Box 化した。
+- **UI**: `ApiError` が `ErrorInfo` を保持するようにし、`CommandResult`
+  利用箇所を `result.error?.code` / `commandErrorMessage(result.error)` へ
+  更新。新しい `ErrorCode` には paraglide の英語メッセージを追加した。
+- **静的解析**: `clippy.toml` の `disallowed-methods` で
+  `Result::ok` / `Result::unwrap_or_default` を禁止。Cargo の制約により
+  クレート単位 override が使えないため、`mise run lint:errors` で
+  `-p fxg-protocol -p fxg-db` に限定して `-D` を渡す方式とした。
+  `fxg-db` の JSON decode は先に `InvalidPayload` へ修正し、
+  `map_err_ignore` は整数変換の理由付き `allow` で明示した。
+- **検証**: `fxg-protocol` 49 テスト、`fxg-node` の `sync_e2e` 4 テスト、
+  workspace の clippy / test、UI の svelte-check が通ることを確認。
+  既存 E2E の `CommandResult` 期待値を `error.code` へ更新した。
+- **共通ヘルパ**: `discard_with!` / `spawn_logged!` マクロを
+  `fxg-protocol::util` に追加した（呼び出し側の移行は Phase 2）。
+- **先送り**: REST の `request_id` ミドルウェアと他クレートへの lint 展開は
+  Phase 2 / 3 で実施する。
 
 ---
 
