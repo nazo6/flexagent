@@ -173,10 +173,9 @@ pub enum UnifiedEventPayload {
     },
     /// ターンが正常終了以外の理由で打ち切られた (ACP StopReason)
     /// EndTurn / Cancelled は正常終了としてイベント化しない。
-    /// UI / CLI はタイムラインにシステム行として表示する
+    /// UI / CLI はタイムラインにシステム行として表示し、文言は reason から導出する
     TurnEnded {
         reason: TurnStopReason,  // "max_tokens" | "max_turn_requests" | "refusal"
-        message: Option<String>,
     },
     /// コンテキスト圧縮 (compaction) の進行状況 (永続化対象)
     CompactionUpdated {

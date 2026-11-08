@@ -463,7 +463,7 @@ export function buildTimelineItems(sources: TimelineSources): TimelineItem[] {
           kind: "notice",
           key: `turn-ended:${event.node_seq}`,
           ...base,
-          text: payload.data.message ?? turnStopReasonLabel(payload.data.reason),
+          text: turnStopReasonLabel(payload.data.reason),
           tone: "warning",
         });
         break;

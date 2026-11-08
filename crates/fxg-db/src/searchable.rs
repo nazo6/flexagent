@@ -86,14 +86,12 @@ pub fn classify_payload(payload: &UnifiedEventPayload) -> (&'static str, Option<
             }
             join_parts(parts)
         }
-        UnifiedEventPayload::TurnEnded { message, .. } => {
-            join_parts(message.iter().cloned().collect())
-        }
         // Not FTS targets (binary, identifier, and projection-only source events)
         UnifiedEventPayload::SessionCreated { .. }
         | UnifiedEventPayload::SessionAgentBound { .. }
         | UnifiedEventPayload::UsageUpdated { .. }
         | UnifiedEventPayload::CompactionUpdated { .. }
+        | UnifiedEventPayload::TurnEnded { .. }
         | UnifiedEventPayload::PermissionResolved { .. }
         | UnifiedEventPayload::ElicitationResolved { .. }
         | UnifiedEventPayload::SessionReverted { .. }

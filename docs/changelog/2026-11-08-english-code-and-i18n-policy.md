@@ -1,9 +1,9 @@
-# 2026-11-08 コードの英語化 (Phase 0 / Phase 1 / Phase 2) と言語ポリシーの明文化
+# 2026-11-08 コードの英語化 (Phase 0 / Phase 1 / Phase 2 / Phase 3) と言語ポリシーの明文化
 
 - **日付**: 2026-11-08
 - **対象パッケージ**: `AGENTS.md`, `mise.toml`, `.github/workflows/ci.yml`,
   `fxg-protocol`, `fxg-db`, `fxg-pty`, `fxg-acp`, `fxg-server`, `fxg-node`, `fxg-cli`,
-  `fxg-ui-assets`
+  `fxg-ui-assets`, `ui`
 - **対象スクリプト**: `mise run lint:lang` / `mise run types` / `cargo test -p fxg-protocol` /
   `mise run fmt`
 
@@ -111,11 +111,25 @@
 
 `crates/fxg-protocol` に加え、上記 7 クレートを検出対象に追加した。
 
+### 8. `TurnEnded` を理由コードのみに変更 (Phase 3)
+
+- `UnifiedEventPayload::TurnEnded` から `message: Option<String>` を削除し、
+  `reason: TurnStopReason` のみにした。`message` は ACP ドライバが `reason` に
+  対応する英文を入れていた重複データで、UI / CLI は `reason` からラベルを導出できる。
+- `fxg-acp` の `turn_ended_event()` は ACP `StopReason` を `TurnStopReason` へ
+  変換するだけにした。
+- UI (`ui/src/lib/sync/reducer.ts`) は常に `turnStopReasonLabel(reason)` を使うようにし、
+  エージェント供給メッセージを優先するテストを削除した。
+- FTS (`fxg-db` の `searchable_text`) では `TurnEnded` を対象外にした
+  (理由コードは検索語として有用でないため)。
+- `mise run types` で `bindings.ts` を再生成した。
+
 ## 検証
 
 - `mise run lint:lang` — 成功 (全 8 クレート、`allow-japanese` と migrations を除く)
 - `cargo clippy --workspace --all-targets -- -D warnings` — 成功
 - `cargo test --workspace` — 全件成功
+- `pnpm --dir ui run check` / `lint` / `test` — 成功 (65 件)
 - `mise run fmt:check` — 差分なし
 - Phase 1 時点の検証:
   - `cargo test -p fxg-protocol` — 44 件すべて成功
@@ -127,7 +141,7 @@
 | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | 1 (完了) | `fxg-protocol` の英語化 + `bindings.ts` 再生成                                                                                                                                                                                 |
 | 2 (完了) | 残り全クレート (`fxg-db` → `fxg-pty` → `fxg-acp` → `fxg-server` → `fxg-node` → `fxg-cli` → `fxg-ui-assets`) のコメント・メッセージ・ユーザー向け文字列の英語化。クレートごとに 1 コミット、完了ごとに `lint:lang` の対象へ追加 |
-| 3        | ユーザー向け文字列のうち、`TurnStopReason` 等を文言ではなくコードで渡す構造変更 (文字列自体は Phase 2 で英語化済み)                                                                                                            |
+| 3 (完了) | ユーザー向け文字列のうち、`TurnStopReason` 等を文言ではなくコードで渡す構造変更。`TurnEnded` の `message` を削除し、UI / CLI が `reason` から文言を導出する                                                                    |
 | 4        | UI 文字列を `paraglide-js` のメッセージカタログ (英語のみ) へ抽出し、`ErrorCode` → 文言マップを追加                                                                                                                            |
 | 5 (将来) | 日本語カタログの追加、トレイ / Web Push のロケール対応                                                                                                                                                                         |
 | 6        | 英語化の完了後に一時タスク `lint:lang` (タスク本体 / `lint` 集約 / CI ステップ) を削除する                                                                                                                                     |

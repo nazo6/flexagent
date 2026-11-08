@@ -1369,22 +1369,13 @@ async fn serve_session(
 /// `EndTurn` (normal completion) / `Cancelled` (user cancellation) count as
 /// normal completion and return `None` (`StopReason` is `#[non_exhaustive]`).
 fn turn_ended_event(reason: StopReason) -> Option<UnifiedEventPayload> {
-    let (reason, message) = match reason {
-        StopReason::MaxTokens => (
-            TurnStopReason::MaxTokens,
-            "The agent ended the turn because it reached the maximum token count",
-        ),
-        StopReason::MaxTurnRequests => (
-            TurnStopReason::MaxTurnRequests,
-            "The agent ended the turn because it reached the per-turn request limit",
-        ),
-        StopReason::Refusal => (TurnStopReason::Refusal, "The agent refused to continue"),
+    let reason = match reason {
+        StopReason::MaxTokens => TurnStopReason::MaxTokens,
+        StopReason::MaxTurnRequests => TurnStopReason::MaxTurnRequests,
+        StopReason::Refusal => TurnStopReason::Refusal,
         _ => return None,
     };
-    Some(UnifiedEventPayload::TurnEnded {
-        reason,
-        message: Some(message.to_owned()),
-    })
+    Some(UnifiedEventPayload::TurnEnded { reason })
 }
 
 /// Extracts the session's modes, commands and config options.
@@ -2721,9 +2712,8 @@ mod tests {
             (StopReason::Refusal, TurnStopReason::Refusal),
         ] {
             match turn_ended_event(reason) {
-                Some(UnifiedEventPayload::TurnEnded { reason, message }) => {
+                Some(UnifiedEventPayload::TurnEnded { reason }) => {
                     assert_eq!(reason, expected);
-                    assert!(message.is_some());
                 }
                 other => panic!("unexpected payload: {other:?}"),
             }

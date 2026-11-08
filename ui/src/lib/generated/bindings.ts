@@ -1613,13 +1613,12 @@ export type UnifiedEventPayload =
  *  A turn was cut off for a reason other than normal completion (ACP `StopReason`).
  * 
  *  `EndTurn` / `Cancelled` end the turn normally and are not turned into an
- *  event. The UI / CLI shows this as a system line in the timeline.
+ *  event. The UI / CLI shows this as a system line in the timeline and
+ *  derives its label from `reason` (no message text is carried).
  */
 { type: "turn_ended"; data: {
 	/**  Why the turn was cut off */
 	reason: TurnStopReason,
-	/**  User-facing explanation (optional) */
-	message: string | null,
 } } | 
 /**
  *  Progress of context compaction (persisted).

@@ -560,32 +560,17 @@ describe("usage and abnormal turn end", () => {
     expect(latestUsageFromEvents([])).toBeNull();
   });
 
-  it("renders a warning notice with a fallback label for abnormal turn ends", () => {
+  it("renders a warning notice for abnormal turn ends", () => {
     const sources = emptySources([
       makeEvent(1, {
         type: "turn_ended",
-        data: { reason: "max_tokens", message: null },
+        data: { reason: "max_tokens" },
       }),
     ]);
     const items = buildTimelineItems(sources);
     expect(items).toHaveLength(1);
     expect(items[0]).toMatchObject({ kind: "notice", tone: "warning" });
     expect(items[0].kind === "notice" ? items[0].text : "").toContain("最大トークン数");
-  });
-
-  it("prefers the agent-supplied turn end message", () => {
-    const sources = emptySources([
-      makeEvent(1, {
-        type: "turn_ended",
-        data: { reason: "refusal", message: "拒否されました" },
-      }),
-    ]);
-    const items = buildTimelineItems(sources);
-    expect(items[0]).toMatchObject({
-      kind: "notice",
-      text: "拒否されました",
-      tone: "warning",
-    });
   });
 });
 

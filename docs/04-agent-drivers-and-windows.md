@@ -108,8 +108,8 @@ ACPでは、エディタやオーケストレータ側が **`acp::Client` トレ
     `sessions.usage_json` 投影。累積ではなく最新値を保持)。
   - ターン終了応答の `StopReason` ➔ `EndTurn` / `Cancelled` は正常終了として
     イベント化しない。`MaxTokens` / `MaxTurnRequests` / `Refusal` は
-    `UnifiedEventPayload::TurnEnded` として記録し、UI / CLI
-    にシステム行で表示する。
+    `UnifiedEventPayload::TurnEnded` として `reason` コードのみを記録し、
+    UI / CLI がコードから文言を導出してシステム行で表示する。
 - **`request_permission(req) -> oneshot::Receiver<RequestPermissionResponse>`**:
   - `oneshot::channel`
     を生成してMapに保持し、`UnifiedEventPayload::PermissionRequest` を発行。
