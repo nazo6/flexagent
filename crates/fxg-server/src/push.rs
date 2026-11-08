@@ -694,4 +694,3 @@ mod tests {
         assert!(payload.reject_option_id.is_none());
     }
 }
-

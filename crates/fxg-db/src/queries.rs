@@ -28,9 +28,9 @@
 
 use fxg_protocol::common::{
     AuditAction, AuditLogEntry, ElicitationMode, ElicitationRequestEntry, ElicitationRequestStatus,
-    EventType, NodeLifecycleStatus, NodeSummary, PermissionRequestEntry, PermissionRequestStatus,
-    ProjectBindingSummary, ProjectSummary, ResolvedBy, SearchHit, SessionStatus, SessionSummary,
-    SessionUsage,
+    EventType, NodeLifecycleStatus, NodeSummary, PermissionPolicy, PermissionRequestEntry,
+    PermissionRequestStatus, ProjectBindingSummary, ProjectSummary, ResolvedBy, SearchHit,
+    SessionStatus, SessionSummary, SessionUsage,
 };
 use fxg_protocol::events::SessionEventBatch;
 use fxg_protocol::{EventId, NodeId, ProjectId, SessionId};
@@ -73,7 +73,8 @@ pub async fn list_sessions(
                is_worktree AS "is_worktree: bool",
                agent_id, agent_session_id, parent_session_id AS "parent_session_id: SessionId",
                fork_from_node_seq,
-               title, status AS "status: SessionStatus", current_mode, usage_json,
+               title, status AS "status: SessionStatus", current_mode,
+               permission_policy AS "permission_policy: PermissionPolicy", usage_json,
                last_node_seq, created_at, updated_at,
                archived_at
           FROM sessions
@@ -129,7 +130,8 @@ pub async fn get_session(
                is_worktree AS "is_worktree: bool",
                agent_id, agent_session_id, parent_session_id AS "parent_session_id: SessionId",
                fork_from_node_seq,
-               title, status AS "status: SessionStatus", current_mode, usage_json,
+               title, status AS "status: SessionStatus", current_mode,
+               permission_policy AS "permission_policy: PermissionPolicy", usage_json,
                last_node_seq, created_at, updated_at,
                archived_at
           FROM sessions
@@ -714,6 +716,7 @@ struct SessionRow {
     title: String,
     status: SessionStatus,
     current_mode: Option<String>,
+    permission_policy: PermissionPolicy,
     usage_json: Option<String>,
     last_node_seq: i64,
     created_at: i64,
@@ -740,6 +743,7 @@ impl SessionRow {
             title: self.title,
             status: self.status,
             current_mode: self.current_mode,
+            permission_policy: self.permission_policy,
             usage: self
                 .usage_json
                 .as_deref()

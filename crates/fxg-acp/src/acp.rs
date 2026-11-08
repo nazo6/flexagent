@@ -26,6 +26,7 @@ use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::util::MatchDispatch;
@@ -139,10 +140,32 @@ impl Default for AcpDriver {
 }
 
 impl AcpDriver {
-    /// Creates a driver with the idle pool enabled (default TTL 10 minutes).
+    /// Creates a driver with the idle pool enabled.
+    ///
+    /// The idle TTL defaults to 10 minutes; `FXG_AGENT_WARM_IDLE_SECS` overrides
+    /// it (`0` keeps processes until daemon shutdown).
     pub fn new() -> Self {
+        let idle = match fxg_protocol::config::process_env(
+            fxg_protocol::config::env_keys::AGENT_WARM_IDLE_SECS,
+        ) {
+            Some(value) => match value.trim().parse::<u64>() {
+                Ok(secs) => Duration::from_secs(secs),
+                Err(err) => {
+                    tracing::warn!(
+                        "invalid FXG_AGENT_WARM_IDLE_SECS value {value:?}: {err}; using the default"
+                    );
+                    DEFAULT_WARM_IDLE
+                }
+            },
+            None => DEFAULT_WARM_IDLE,
+        };
+        Self::with_warm_idle(idle)
+    }
+
+    /// Creates a driver with the given warm-process idle TTL.
+    pub fn with_warm_idle(idle: Duration) -> Self {
         Self {
-            pool: Some(Arc::new(WarmPool::new(DEFAULT_WARM_IDLE))),
+            pool: Some(Arc::new(WarmPool::new(idle))),
             stderr: StderrRegistry::default(),
         }
     }
@@ -226,6 +249,8 @@ struct SessionParams {
     resume: Option<ResumeRequest>,
     /// Source ACP session ID for a native `session/fork`
     fork_from: Option<String>,
+    /// Initial configuration applied after `session/new`
+    initial_config: Vec<fxg_protocol::common::InitialConfig>,
 }
 
 /// Per-session shared information (handlers look it up by the ACP session_id).
@@ -245,11 +270,22 @@ type SessionContexts = Arc<Mutex<HashMap<String, SessionContext>>>;
 
 /// Looks up session information by ACP session ID.
 fn session_context(contexts: &SessionContexts, session_id: &SessionId) -> Option<SessionContext> {
-    contexts
-        .lock()
-        .expect("session contexts poisoned")
-        .get(&session_id.to_string())
-        .cloned()
+    let contexts = contexts.lock().expect("session contexts poisoned");
+    if let Some(context) = contexts.get(&session_id.to_string()) {
+        return Some(context.clone());
+    }
+    // Some agents (e.g. opencode subagents) send requests with a child session
+    // ID. A process hosts at most one parent session, so fall back to it when
+    // exactly one context is registered.
+    if contexts.len() == 1 {
+        let context = contexts.values().next().cloned();
+        tracing::debug!(
+            session_id = %session_id,
+            "falling back to the single active session context (child session)"
+        );
+        return context;
+    }
+    None
 }
 
 /// Handle to the resident process (shared by the pool / leases).
@@ -453,6 +489,7 @@ impl AcpDriver {
             initial_mode: req.initial_mode.clone(),
             resume: req.resume.clone(),
             fork_from: req.fork_from.clone(),
+            initial_config: req.initial_config.clone(),
         };
 
         // 1) Reuse an idle process (just session/new on an initialized connection)
@@ -1503,6 +1540,28 @@ async fn build_session(
         "notify event subscribers"
     );
 
+    // Apply initial configuration (model / thinking level, etc.)
+    for setting in &params.initial_config {
+        let value = match parse_config_value(setting.value.clone()) {
+            Ok(value) => value,
+            Err(err) => {
+                tracing::warn!(key = %setting.key, "invalid initial config value: {err}");
+                continue;
+            }
+        };
+        if let Err(err) = cx
+            .send_request(SetSessionConfigOptionRequest::new(
+                acp_session_id.clone(),
+                setting.key.clone(),
+                value,
+            ))
+            .block_task()
+            .await
+        {
+            tracing::warn!(key = %setting.key, "failed to set initial config: {err}");
+        }
+    }
+
     // Apply the initial mode
     if let Some(mode_id) = params.initial_mode.as_ref()
         && let Err(err) = cx
@@ -2312,7 +2371,7 @@ fn map_session_update(
 
 /// Converts an ACP `ToolCall` into a normalized event.
 fn tool_call_event(tool_call: &ToolCall) -> UnifiedEventPayload {
-    let (diff, _) = tool_call_contents(&tool_call.content);
+    let (diff, _, text_content) = tool_call_contents(&tool_call.content);
     UnifiedEventPayload::ToolCall {
         tool_call_id: tool_call.tool_call_id.to_string(),
         title: tool_call.title.clone(),
@@ -2324,18 +2383,22 @@ fn tool_call_event(tool_call: &ToolCall) -> UnifiedEventPayload {
             .map(|location| location.path.to_string_lossy().into_owned())
             .collect(),
         diff,
-        raw_output: tool_call.raw_output.as_ref().map(|value| value.to_string()),
+        raw_output: tool_call
+            .raw_output
+            .as_ref()
+            .map(|value| value.to_string())
+            .or_else(|| (!text_content.is_empty()).then(|| text_content.join("\n"))),
     }
 }
 
 /// Converts an ACP `ToolCallUpdate` into a normalized event (appended to the same `tool_call_id`).
 fn tool_call_update_event(update: &ToolCallUpdate) -> UnifiedEventPayload {
     let fields = &update.fields;
-    let (diff, locations) = fields
+    let (diff, locations, text_content) = fields
         .content
         .as_ref()
         .map(|content| tool_call_contents(content))
-        .unwrap_or((None, Vec::new()));
+        .unwrap_or((None, Vec::new(), Vec::new()));
     let locations = fields
         .locations
         .as_ref()
@@ -2359,23 +2422,38 @@ fn tool_call_update_event(update: &ToolCallUpdate) -> UnifiedEventPayload {
             .unwrap_or_else(|| FxgToolCallStatus::Unknown(String::new())),
         locations,
         diff,
-        raw_output: fields.raw_output.as_ref().map(|value| value.to_string()),
+        raw_output: fields
+            .raw_output
+            .as_ref()
+            .map(|value| value.to_string())
+            .or_else(|| (!text_content.is_empty()).then(|| text_content.join("\n"))),
     }
 }
 
-/// Extracts the diff and list of file paths from a `ToolCallContent` list.
-fn tool_call_contents(contents: &[ToolCallContent]) -> (Option<FileDiff>, Vec<String>) {
+/// Extracts the diff, file paths and text output from a `ToolCallContent` list.
+fn tool_call_contents(
+    contents: &[ToolCallContent],
+) -> (Option<FileDiff>, Vec<String>, Vec<String>) {
     let mut diff = None;
     let mut locations = Vec::new();
+    let mut texts = Vec::new();
     for content in contents {
-        if let ToolCallContent::Diff(acp_diff) = content {
-            let path = acp_diff.path.to_string_lossy().into_owned();
-            locations.push(path.clone());
-            let old_text = acp_diff.old_text.clone().unwrap_or_default();
-            diff = Some(build_file_diff(&path, &old_text, &acp_diff.new_text));
+        match content {
+            ToolCallContent::Diff(acp_diff) => {
+                let path = acp_diff.path.to_string_lossy().into_owned();
+                locations.push(path.clone());
+                let old_text = acp_diff.old_text.clone().unwrap_or_default();
+                diff = Some(build_file_diff(&path, &old_text, &acp_diff.new_text));
+            }
+            ToolCallContent::Content(content) => {
+                if let ContentBlock::Text(text) = &content.content {
+                    texts.push(text.text.clone());
+                }
+            }
+            _ => {}
         }
     }
-    (diff, locations)
+    (diff, locations, texts)
 }
 
 /// Computes a unified diff from the before/after text and builds a [`FileDiff`].
@@ -3486,6 +3564,19 @@ mod tests {
             }
             other => panic!("unexpected block: {other:?}"),
         }
+    }
+
+    #[test]
+    fn tool_call_contents_extracts_text_output() {
+        let contents = vec![ToolCallContent::Content(
+            agent_client_protocol::v1::schema::Content::new(ContentBlock::Text(TextContent::new(
+                "test output",
+            ))),
+        )];
+        let (diff, locations, texts) = tool_call_contents(&contents);
+        assert!(diff.is_none());
+        assert!(locations.is_empty());
+        assert_eq!(texts, vec!["test output"]);
     }
 
     #[test]

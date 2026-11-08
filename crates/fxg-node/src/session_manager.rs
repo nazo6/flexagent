@@ -28,8 +28,8 @@ use fxg_acp::{
 use fxg_protocol::CommandId;
 use fxg_protocol::common::{
     ClientSource, ElicitationAction, ElicitationContent, ElicitationMode, ElicitationSchema,
-    ForkHistoryItem, HistoryRole, PermissionOption, PromptInput, ResolvedBy, SessionControlAction,
-    SessionStatus,
+    ForkHistoryItem, HistoryRole, PermissionOption, PermissionPolicy, PromptInput, ResolvedBy,
+    SessionControlAction, SessionStatus,
 };
 use fxg_protocol::events::{SessionEventEnvelope, UnifiedEventPayload};
 use fxg_protocol::util::uuid_v7;
@@ -102,6 +102,8 @@ pub struct StartSessionParams<'a> {
     pub agent_id: &'a str,
     /// Initial prompt (text and optional attachments)
     pub initial_prompt: Option<&'a PromptInput>,
+    /// Initial session configuration (model / thinking level, etc.)
+    pub initial_config: &'a [fxg_protocol::common::InitialConfig],
     /// Initial mode (`code` / `plan` etc.)
     pub mode: Option<&'a str>,
     /// Additional pass-through arguments for the agent
@@ -255,6 +257,8 @@ struct ActiveSession {
     pending_elicitations: HashMap<String, PendingElicitationSummary>,
     /// Whether a meaningful title has been set (derived from a prompt or notified by the driver)
     has_custom_title: bool,
+    /// Approval policy for this session
+    permission_policy: PermissionPolicy,
 }
 
 #[derive(Debug, Clone)]
@@ -275,6 +279,8 @@ struct StartDriverParams<'a> {
     resume: Option<ResumeRequest>,
     /// Source ACP session ID for a native `session/fork`
     fork_from: Option<&'a str>,
+    /// Initial configuration applied after `session/new`
+    initial_config: Vec<fxg_protocol::common::InitialConfig>,
 }
 
 /// Result of [`SessionManager::start_driver_session`] (restore success).
@@ -433,6 +439,7 @@ impl SessionManager {
                 has_custom_title: false,
                 resume: None,
                 fork_from: None,
+                initial_config: Vec::new(),
             })
             .await?;
 
@@ -505,6 +512,7 @@ impl SessionManager {
                 has_custom_title,
                 resume: None,
                 fork_from: None,
+                initial_config: params.initial_config.to_vec(),
             })
             .await?;
 
@@ -612,6 +620,7 @@ impl SessionManager {
                         initial_mode: params.initial_mode.clone(),
                         resume: params.resume.clone(),
                         fork_from: fork_from.clone(),
+                        initial_config: params.initial_config.clone(),
                     },
                     event_tx.clone(),
                 )
@@ -699,6 +708,7 @@ impl SessionManager {
                     pending_permissions: HashMap::new(),
                     pending_elicitations: HashMap::new(),
                     has_custom_title: params.has_custom_title,
+                    permission_policy: PermissionPolicy::Ask,
                 },
             );
         }
@@ -899,6 +909,7 @@ impl SessionManager {
                 has_custom_title: true,
                 resume: None,
                 fork_from: None,
+                initial_config: Vec::new(),
             })
             .await?;
 
@@ -913,6 +924,64 @@ impl SessionManager {
             .await?;
         }
         Ok(())
+    }
+
+    /// Imports an existing agent session by recording its agent-side ID and
+    /// resuming it natively (`session/resume` / `session/load`).
+    pub async fn import_session(
+        &self,
+        command_id: &CommandId,
+        agent_id: &str,
+        agent_session_id: &str,
+        cwd: &Path,
+        title: Option<&str>,
+    ) -> Result<String, NodeError> {
+        if !self.begin_command(command_id) {
+            return Err(NodeError::CommandDuplicate(command_id.to_string()));
+        }
+        let resolved = project::resolve_project(cwd, &self.inner.node_id).await?;
+        let spec = self.resolve_launch_spec(agent_id, &[]).await?;
+        let session_id = uuid_v7();
+        let (git_branch, is_worktree) =
+            git_metadata_or_warn(&resolved.local_path, &session_id).await;
+        let title = title
+            .map(str::to_owned)
+            .unwrap_or_else(|| format!("{} (imported)", spec.display_name));
+        self.inner
+            .bus
+            .create_session(
+                &session_id,
+                UnifiedEventPayload::SessionCreated {
+                    node_id: self.inner.node_id.clone().into(),
+                    project_id: resolved.project_id.clone().into(),
+                    project_name: resolved.name.clone(),
+                    local_path: resolved.local_path.to_string_lossy().into_owned(),
+                    git_branch,
+                    is_worktree,
+                    agent_id: spec.agent_id.clone(),
+                    parent_session_id: None,
+                    fork_from_node_seq: None,
+                    title: title.clone(),
+                },
+            )
+            .await?;
+        self.start_driver_session(StartDriverParams {
+            session_id: &session_id,
+            title: &title,
+            cwd: &resolved.local_path,
+            spec: &spec,
+            extra_args: Vec::new(),
+            initial_mode: None,
+            has_custom_title: true,
+            resume: Some(ResumeRequest {
+                agent_session_id: Some(agent_session_id.to_owned()),
+                allow_fresh: false,
+            }),
+            fork_from: None,
+            initial_config: Vec::new(),
+        })
+        .await?;
+        Ok(session_id)
     }
 
     /// Branches from the specified turn into a new session (`fxg session fork`).
@@ -991,6 +1060,7 @@ impl SessionManager {
                 has_custom_title: true,
                 resume: None,
                 fork_from: source.agent_session_id.as_deref(),
+                initial_config: Vec::new(),
             })
             .await?;
 
@@ -1160,6 +1230,7 @@ impl SessionManager {
                     allow_fresh,
                 }),
                 fork_from: None,
+                initial_config: Vec::new(),
             })
             .await?;
 
@@ -1518,6 +1589,24 @@ impl SessionManager {
                 .set_config(key.clone(), value.clone())
                 .await
                 .map_err(|err| NodeError::Server(format!("failed to set config: {err:#}"))),
+            SessionControlAction::SetPermissionPolicy { policy } => {
+                {
+                    let mut sessions = self.inner.sessions.lock().expect("sessions poisoned");
+                    if let Some(session) = sessions.active.get_mut(session_id) {
+                        session.permission_policy = policy.clone();
+                    }
+                }
+                self.inner
+                    .bus
+                    .record(
+                        session_id,
+                        UnifiedEventPayload::SessionPermissionPolicyChanged {
+                            policy: policy.clone(),
+                        },
+                    )
+                    .await?;
+                Ok(())
+            }
             // Compaction runs as a single turn, so allow it while busy
             SessionControlAction::Cancel => {
                 // If already idle (no turn running) there is nothing to cancel, so treat as success
@@ -1805,18 +1894,74 @@ async fn pump_events(
                         options,
                         ..
                     } => {
-                        let mut sessions = inner.sessions.lock().expect("sessions poisoned");
-                        if let Some(session) = sessions.active.get_mut(&session_id) {
-                            session.pending_permissions.insert(
-                                request_id.clone(),
-                                PendingPermissionSummary {
-                                    session_id: session_id.clone(),
-                                    request_id: request_id.clone(),
-                                    tool_name: tool_name.clone(),
-                                    summary: summary.clone(),
-                                    options: options.clone(),
-                                },
-                            );
+                        let auto_option = {
+                            let mut sessions = inner.sessions.lock().expect("sessions poisoned");
+                            if let Some(session) = sessions.active.get_mut(&session_id) {
+                                session.pending_permissions.insert(
+                                    request_id.clone(),
+                                    PendingPermissionSummary {
+                                        session_id: session_id.clone(),
+                                        request_id: request_id.clone(),
+                                        tool_name: tool_name.clone(),
+                                        summary: summary.clone(),
+                                        options: options.clone(),
+                                    },
+                                );
+                                (session.permission_policy == PermissionPolicy::AutoAllowAll)
+                                    .then(|| {
+                                        options
+                                            .iter()
+                                            .find(|option| option.kind.is_allow())
+                                            .map(|option| option.option_id.clone())
+                                    })
+                                    .flatten()
+                            } else {
+                                None
+                            }
+                        };
+                        if let Some(option_id) = auto_option {
+                            let handle = inner
+                                .sessions
+                                .lock()
+                                .expect("sessions poisoned")
+                                .active
+                                .get(&session_id)
+                                .map(|session| Arc::clone(&session.handle));
+                            if let Some(handle) = handle {
+                                if let Err(err) = handle
+                                    .respond_permission(request_id.clone(), option_id.clone())
+                                    .await
+                                {
+                                    tracing::warn!(session_id, "auto-approval failed: {err:#}");
+                                } else {
+                                    inner
+                                        .sessions
+                                        .lock()
+                                        .expect("sessions poisoned")
+                                        .active
+                                        .get_mut(&session_id)
+                                        .map(|session| {
+                                            session.pending_permissions.remove(request_id)
+                                        });
+                                    if let Err(err) = inner
+                                        .bus
+                                        .record(
+                                            &session_id,
+                                            UnifiedEventPayload::PermissionResolved {
+                                                request_id: request_id.clone(),
+                                                selected_option_id: option_id,
+                                                resolved_by: ResolvedBy::Unknown("auto".to_owned()),
+                                            },
+                                        )
+                                        .await
+                                    {
+                                        tracing::warn!(
+                                            session_id,
+                                            "failed to record auto-approval: {err}"
+                                        );
+                                    }
+                                }
+                            }
                         }
                     }
                     UnifiedEventPayload::PermissionResolved { request_id, .. } => {
@@ -2654,6 +2799,55 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn auto_approve_policy_responds_to_permission_requests() {
+        let (manager, mock, dir) = setup().await;
+        let outcome = manager
+            .ensure_session(&CommandId::from("c1"), dir.path(), "mock", &[], None)
+            .await
+            .expect("ensure");
+        wait_idle(&manager, &outcome.session_id).await;
+        manager
+            .control(
+                &CommandId::from("c-policy"),
+                &outcome.session_id,
+                &SessionControlAction::SetPermissionPolicy {
+                    policy: PermissionPolicy::AutoAllowAll,
+                },
+            )
+            .await
+            .expect("set policy");
+
+        mock.emit(DriverEvent::Event(UnifiedEventPayload::PermissionRequest {
+            request_id: "req-auto".to_owned(),
+            tool_name: "terminal".to_owned(),
+            summary: "Run tests".to_owned(),
+            options: vec![
+                PermissionOption {
+                    option_id: "allow_once".to_owned(),
+                    name: "Allow once".to_owned(),
+                    kind: fxg_protocol::common::PermissionOptionKind::AllowOnce,
+                },
+                PermissionOption {
+                    option_id: "reject".to_owned(),
+                    name: "Reject".to_owned(),
+                    kind: fxg_protocol::common::PermissionOptionKind::RejectOnce,
+                },
+            ],
+            details: serde_json::json!({}).into(),
+        }));
+        for _ in 0..100 {
+            if !mock.permissions().is_empty() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        assert_eq!(
+            mock.permissions(),
+            vec![("req-auto".to_owned(), "allow_once".to_owned())]
+        );
+    }
+
+    #[tokio::test]
     async fn permission_resolution_is_idempotent() {
         let (manager, mock, dir) = setup().await;
         let outcome = manager
@@ -2920,6 +3114,38 @@ mod tests {
             .await
             .expect_err("busy");
         assert!(matches!(err, NodeError::Busy(_)));
+    }
+
+    #[tokio::test]
+    async fn import_session_records_and_resumes_an_existing_agent_session() {
+        let (manager, mock, dir) = setup().await;
+        mock.set_resume_supported(true);
+        let session_id = manager
+            .import_session(
+                &CommandId::from("c-import"),
+                "mock",
+                "agent-session-1",
+                dir.path(),
+                Some("Imported"),
+            )
+            .await
+            .expect("import");
+        let starts = mock.starts();
+        assert!(starts.iter().any(|start| {
+            start
+                .resume
+                .as_ref()
+                .and_then(|resume| resume.agent_session_id.as_deref())
+                == Some("agent-session-1")
+        }));
+        let session = manager
+            .bus()
+            .db()
+            .get_session(&session_id)
+            .await
+            .expect("query")
+            .expect("session");
+        assert_eq!(session.title, "Imported");
     }
 
     #[tokio::test]
@@ -3475,6 +3701,7 @@ mod tests {
                 local_path: dir.path(),
                 agent_id: "mock",
                 initial_prompt: Some(&initial_prompt),
+                initial_config: &[],
                 mode: None,
                 extra_args: None,
                 fork_context: None,

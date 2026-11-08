@@ -818,6 +818,7 @@ async fn run_with_provisioner(
             let input = build_prompt_input(args.prompt.as_deref().unwrap_or(""), &args.attach)?;
             if input.is_empty() { None } else { Some(input) }
         },
+        initial_config: Vec::new(),
         mode: args.mode.clone(),
         extra_args: if args.extra_args.is_empty() {
             None
@@ -1179,6 +1180,8 @@ pub enum SessionCommands {
     Resume(SessionResumeArgs),
     /// Create a new session by forking the conversation from the given point
     Fork(SessionForkArgs),
+    /// Import an existing agent session (native resume)
+    Import(SessionImportArgs),
     /// Archive a session from the list (restorable)
     Archive(SessionArchiveArgs),
     /// Move an archived session back into the list
@@ -1358,6 +1361,9 @@ fn describe_event(payload: &UnifiedEventPayload) -> String {
         ),
         UnifiedEventPayload::SessionArchived { archived } => {
             format!("session_archived archived={archived}")
+        }
+        UnifiedEventPayload::SessionPermissionPolicyChanged { policy } => {
+            format!("session_permission_policy_changed policy={policy}")
         }
         UnifiedEventPayload::SessionDeleted {} => "session_deleted".to_owned(),
         UnifiedEventPayload::TerminalOutput {
@@ -1609,6 +1615,47 @@ impl usage::RunAsync for SessionKillArgs {
     }
 }
 
+/// `fxg session import <agent-session-id>`
+#[derive(Debug, Args)]
+pub struct SessionImportArgs {
+    /// Agent-side session ID to import
+    agent_session_id: String,
+    /// Agent ID (aliases allowed)
+    #[usage(long)]
+    agent: String,
+    /// Working directory (defaults to the current directory)
+    #[usage(long)]
+    cwd: Option<String>,
+    /// Session title
+    #[usage(long)]
+    title: Option<String>,
+}
+
+impl usage::RunAsync for SessionImportArgs {
+    type Output = Result<()>;
+
+    async fn run_async(self) -> Self::Output {
+        let cwd = match self.cwd {
+            Some(cwd) => cwd,
+            None => std::env::current_dir()
+                .context("failed to resolve the current directory")?
+                .to_string_lossy()
+                .into_owned(),
+        };
+        let mut client = DaemonClient::connect().await?;
+        let session_id = client
+            .import_session(
+                &self.agent,
+                &self.agent_session_id,
+                &cwd,
+                self.title.as_deref(),
+            )
+            .await?;
+        println!("imported session: {session_id}");
+        Ok(())
+    }
+}
+
 /// `fxg session archive <id>`
 #[derive(Debug, Args)]
 pub struct SessionArchiveArgs {
@@ -1761,6 +1808,7 @@ impl usage::RunAsync for SessionForkArgs {
                     .clone()
                     .unwrap_or_else(|| source.agent_id.clone()),
                 initial_prompt: None,
+                initial_config: Vec::new(),
                 mode: None,
                 extra_args: None,
                 fork: Some(fxg_protocol::client_api::SessionForkSpec {
@@ -2484,12 +2532,12 @@ pub struct AgentsArgs {
 pub enum AgentsCommands {
     /// List available agents and their installation state
     List(AgentsListArgs),
-    /// Pre-download and unpack the given agent from the ACP Registry
-    Install(AgentsInstallArgs),
+    /// Enable an npx/uvx agent (or report that a preset is already available)
+    Enable(AgentsInstallArgs),
     /// Update the registry index and installed agents
     Update(AgentsUpdateArgs),
-    /// Delete cached agent binaries
-    Remove(AgentsRemoveArgs),
+    /// Disable an npx/uvx agent or remove a custom definition
+    Disable(AgentsRemoveArgs),
     /// Log in to an agent using its advertised ACP authentication methods
     Login(AgentsLoginArgs),
     /// Log out from an agent (when the agent supports it)
@@ -2599,7 +2647,7 @@ impl usage::RunAsync for AgentsListArgs {
     }
 }
 
-/// `fxg agents install <id>`
+/// `fxg agents enable <id>`
 #[derive(Debug, Args)]
 pub struct AgentsInstallArgs {
     /// Agent ID (aliases allowed)
@@ -2659,7 +2707,7 @@ impl usage::RunAsync for AgentsUpdateArgs {
     }
 }
 
-/// `fxg agents remove <id>`
+/// `fxg agents disable <id>`
 #[derive(Debug, Args)]
 pub struct AgentsRemoveArgs {
     /// Agent ID (aliases allowed)

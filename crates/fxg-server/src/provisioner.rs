@@ -267,6 +267,8 @@ pub struct SpawnSessionRequest {
     pub agent_id: String,
     /// Initial prompt
     pub initial_prompt: Option<PromptInput>,
+    /// Initial session configuration
+    pub initial_config: Vec<fxg_protocol::common::InitialConfig>,
     /// Initial mode
     pub mode: Option<String>,
     /// Extra arguments for the agent
@@ -325,6 +327,7 @@ pub async fn spawn_session(
         project_id: request.project_id.clone(),
         agent_id: request.agent_id.clone(),
         initial_prompt: request.initial_prompt.clone(),
+        initial_config: request.initial_config.clone(),
         mode: request.mode.clone(),
         extra_args: request.extra_args.clone(),
         fork_context: request.fork_context.clone(),
@@ -515,6 +518,7 @@ struct PendingStart {
     project_id: String,
     agent_id: String,
     initial_prompt: Option<PromptInput>,
+    initial_config: Vec<fxg_protocol::common::InitialConfig>,
     mode: Option<String>,
     extra_args: Option<Vec<String>>,
     fork_context: Option<Vec<ForkHistoryItem>>,
@@ -830,6 +834,7 @@ async fn await_handshake_and_start(
         local_path: EPHEMERAL_WORKSPACE.to_owned(),
         agent_id: pending.agent_id.clone(),
         initial_prompt: pending.initial_prompt.clone(),
+        initial_config: pending.initial_config.clone(),
         mode: pending.mode.clone(),
         extra_args: pending.extra_args.clone(),
         fork_context_messages: pending.fork_context.clone(),

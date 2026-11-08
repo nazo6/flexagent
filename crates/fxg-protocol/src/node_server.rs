@@ -311,6 +311,9 @@ pub enum ServerToNodeMsg {
         agent_id: String,
         /// Initial prompt (text and optional attachments)
         initial_prompt: Option<PromptInput>,
+        /// Initial session configuration (model / thinking level, etc.)
+        #[serde(default)]
+        initial_config: Vec<crate::common::InitialConfig>,
         /// Initial mode
         mode: Option<String>,
         /// Extra arguments passed to the agent

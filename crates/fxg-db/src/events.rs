@@ -607,6 +607,19 @@ pub(crate) async fn apply_projections(
             .execute(&mut *conn)
             .await?;
         }
+        UnifiedEventPayload::SessionPermissionPolicyChanged { policy } => {
+            sqlx::query!(
+                r#"
+                UPDATE sessions
+                   SET permission_policy = ?
+                 WHERE session_id = ?
+                "#,
+                policy.as_str(),
+                envelope.session_id,
+            )
+            .execute(&mut *conn)
+            .await?;
+        }
         UnifiedEventPayload::SessionDeleted {} => {
             // Apply tombstone: keep the row itself so that deletion propagation through
             // Outbox / Resync and references to the fork source stay consistent, and
@@ -771,6 +784,7 @@ pub async fn rebuild_projections(pool: &SqlitePool) -> Result<(), DbError> {
            SET title = 'New Session',
                status = ?,
                current_mode = NULL,
+               permission_policy = 'ask',
                available_modes_json = '[]',
                available_commands_json = '[]',
                config_options_json = '[]',

@@ -22,6 +22,7 @@
   } from "#lib/new-session.ts";
   import {
     loadNewSessionPrefs,
+    loadSessionConfig,
     saveNewSessionPrefs,
     type SessionModePreference,
   } from "#lib/session-prefs.ts";
@@ -355,6 +356,9 @@
             : null,
         agent_id: effectiveAgent,
         initial_prompt: promptToSend === "" ? null : { text: promptToSend, attachments: [] },
+        initial_config: Object.entries(loadSessionConfig(selectedProject.project_id)).map(
+          ([key, value]) => ({ key, value }),
+        ),
         mode: sessionMode === "default" ? null : sessionMode,
         extra_args: extraArgs,
         fork: forkSessionId

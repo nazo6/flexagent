@@ -1,3 +1,5 @@
+import type { ConfigOptionValue } from "#lib/generated/bindings.ts";
+
 /**
  * Per-device memory for the new session screen (localStorage).
  *
@@ -15,6 +17,7 @@ export interface NewSessionPrefs {
 }
 
 const KEY_PREFIX = "fxg:new_session_prefs:";
+const CONFIG_KEY_PREFIX = "fxg:session_config:";
 const SESSION_MODES: readonly SessionModePreference[] = ["default", "code", "plan"];
 
 /** Resolve `localStorage` (SSR / tests can inject a replacement). */
@@ -68,6 +71,42 @@ export function saveNewSessionPrefs(
   if (store === null || projectId === "") return;
   try {
     store.setItem(KEY_PREFIX + projectId, JSON.stringify(prefs));
+  } catch {
+    // Do not persist when localStorage is disabled or over quota
+  }
+}
+
+/** Load the last used session configuration (model / thinking level) for a project. */
+export function loadSessionConfig(
+  projectId: string,
+  storage?: Storage | null,
+): Record<string, ConfigOptionValue> {
+  const store = resolveStorage(storage);
+  if (store === null || projectId === "") return {};
+  const raw = store.getItem(CONFIG_KEY_PREFIX + projectId);
+  if (raw === null) return {};
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {};
+    return parsed as Record<string, ConfigOptionValue>;
+  } catch {
+    return {};
+  }
+}
+
+/** Persist one configuration value for a project (per-device preference). */
+export function saveSessionConfigOption(
+  projectId: string,
+  key: string,
+  value: ConfigOptionValue,
+  storage?: Storage | null,
+): void {
+  const store = resolveStorage(storage);
+  if (store === null || projectId === "" || key === "") return;
+  try {
+    const config = loadSessionConfig(projectId, store);
+    config[key] = value;
+    store.setItem(CONFIG_KEY_PREFIX + projectId, JSON.stringify(config));
   } catch {
     // Do not persist when localStorage is disabled or over quota
   }

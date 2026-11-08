@@ -265,6 +265,11 @@ pub enum UnifiedEventPayload {
         /// `true` = archived, `false` = restored
         archived: bool,
     },
+    /// Change of the session approval policy (`ask` / `auto_allow_all`).
+    SessionPermissionPolicyChanged {
+        /// New policy
+        policy: crate::common::PermissionPolicy,
+    },
     /// Deletion of a session (tombstone).
     ///
     /// Applying it purges the bodies of all events before it (irreversible). The
@@ -380,6 +385,9 @@ impl UnifiedEventPayload {
             Self::ElicitationResolved { .. } => EventType::ElicitationResolved,
             Self::SessionReverted { .. } => EventType::SessionReverted,
             Self::SessionArchived { .. } => EventType::SessionArchived,
+            Self::SessionPermissionPolicyChanged { .. } => {
+                EventType::SessionPermissionPolicyChanged
+            }
             Self::SessionDeleted {} => EventType::SessionDeleted,
             Self::TerminalOutput { .. } => EventType::TerminalOutput,
             Self::TerminalInput { .. } => EventType::TerminalInput,

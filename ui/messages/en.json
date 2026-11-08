@@ -613,5 +613,9 @@
   "settings_diagnostics_title": "Diagnostics",
   "settings_diagnostics_description": "Download agent stderr tails, the daemon log path and local diagnostics as JSON.",
   "settings_download_diagnostics": "Download diagnostics",
-  "settings_diagnostics_downloaded": "Diagnostics downloaded"
+  "settings_diagnostics_downloaded": "Diagnostics downloaded",
+  "chat_auto_approve": "Auto",
+  "chat_auto_approve_title": "Automatically approve tool permission requests for this session",
+  "chat_auto_approve_enabled": "Auto-approval enabled",
+  "chat_auto_approve_disabled": "Auto-approval disabled"
 }

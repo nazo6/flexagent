@@ -136,6 +136,7 @@ async fn provisioner_runs_stdio_node_and_drains_bundle() {
             worktree: None,
             agent_id: "mock".to_owned(),
             initial_prompt: None,
+            initial_config: Vec::new(),
             mode: None,
             extra_args: None,
             fork: None,

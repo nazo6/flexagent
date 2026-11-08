@@ -6,6 +6,7 @@
   import { encodeBytesToBase64 } from "#lib/base64.ts";
   import { configChoices, resolveConfigChoice, selectedConfigValue } from "#lib/config-options.ts";
   import { getNodeAvailability } from "#lib/node-status.ts";
+  import { saveSessionConfigOption } from "#lib/session-prefs.ts";
   import { m } from "#lib/paraglide/messages.js";
   import type {
     AttachmentMeta,
@@ -24,6 +25,7 @@
   import Minimize2Icon from "@lucide/svelte/icons/minimize-2";
   import PaperclipIcon from "@lucide/svelte/icons/paperclip";
   import SendIcon from "@lucide/svelte/icons/send";
+  import ShieldCheckIcon from "@lucide/svelte/icons/shield-check";
   import SlashIcon from "@lucide/svelte/icons/slash";
   import XIcon from "@lucide/svelte/icons/x";
 
@@ -32,6 +34,8 @@
     capabilities = null,
     node = null,
     status = null,
+    permissionPolicy = null,
+    projectId = "",
     /**
      * The last send failed because native restore is unsupported
      * (`RESUME_REQUIRED`). Normally false (sending resumes a stopped session
@@ -43,6 +47,8 @@
     capabilities?: SessionCapabilities | null;
     node?: NodeSummary | null;
     status?: SessionStatus | null;
+    permissionPolicy?: string | null;
+    projectId?: string;
     resumeRequired?: boolean;
   } = $props();
 
@@ -53,7 +59,26 @@
   let attachments = $state<AttachmentMeta[]>([]);
   let fileBrowserOpen = $state(false);
   let fileInput = $state<HTMLInputElement | null>(null);
+  let autoApprove = $state(false);
   const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
+
+  $effect(() => {
+    autoApprove = permissionPolicy === "auto_allow_all";
+  });
+
+  async function toggleAutoApprove() {
+    const policy = autoApprove ? "ask" : "auto_allow_all";
+    const result = await sync.controlSession(sessionId, {
+      action: "set_permission_policy",
+      policy,
+    });
+    if (!result.success) {
+      if (result.error) problems.reportInfo("permission policy", result.error);
+      return;
+    }
+    autoApprove = policy === "auto_allow_all";
+    toast.info(autoApprove ? m.chat_auto_approve_enabled() : m.chat_auto_approve_disabled());
+  }
 
   const isRunning = $derived(
     status === "running" || status === "waiting_permission" || status === "waiting_input",
@@ -257,6 +282,8 @@
         }
       } else if (action.action === "cancel") {
         toast.info(m.chat_cancel_requested());
+      } else if (action.action === "set_config" && projectId !== "") {
+        saveSessionConfigOption(projectId, action.key, action.value);
       }
     } catch (error) {
       problems.report("session control", error);
@@ -499,6 +526,16 @@
       {#if !sync.wsConnected}
         <span class="text-destructive text-xs">{m.chat_connection_lost()}</span>
       {/if}
+      <Button
+        variant={autoApprove ? "destructive" : "outline"}
+        size="sm"
+        disabled={controlBusy || sending}
+        title={m.chat_auto_approve_title()}
+        onclick={() => void toggleAutoApprove()}
+      >
+        <ShieldCheckIcon class="size-3.5" />
+        {m.chat_auto_approve()}
+      </Button>
       {#if canCompact && !isStopped}
         <Button
           variant="outline"

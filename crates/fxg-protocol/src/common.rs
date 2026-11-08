@@ -666,6 +666,9 @@ pub struct SessionSummary {
     pub status: SessionStatus,
     /// Current ACP SessionMode (e.g. `code`, `plan`)
     pub current_mode: Option<String>,
+    /// Approval policy (`ask` / `auto_allow_all`)
+    #[serde(default)]
+    pub permission_policy: PermissionPolicy,
     /// Latest context usage and accumulated cost (projection of the `UsageUpdated` event).
     ///
     /// `None` means nothing has been received yet (including the case where the
@@ -854,6 +857,16 @@ pub struct AttachmentMeta {
     pub data_b64: Option<String>,
 }
 
+/// Initial session configuration applied right after `session/new`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
+pub struct InitialConfig {
+    /// Configuration key (`model`, `thought_level`, ...)
+    pub key: String,
+    /// Value in FXG's normalized representation
+    pub value: ConfigOptionValue,
+}
+
 /// A prompt sent to an agent: text plus optional attachments.
 ///
 /// Shared by IPC, Client WS, Node⇔Server messages and REST so the same payload
@@ -924,6 +937,26 @@ crate::open_string_enum! {
         RejectOnce => "reject_once",
         /// Reject this kind of request for the rest of the session
         RejectAlways => "reject_always",
+    }
+}
+
+crate::open_string_enum! {
+    /// Per-session approval policy.
+    pub enum PermissionPolicy {
+        /// Ask the user for every request (default)
+        Ask => "ask",
+        /// Automatically approve requests using the agent's allow options
+        AutoAllowAll => "auto_allow_all",
+    }
+}
+
+#[allow(
+    clippy::derivable_impls,
+    reason = "open_string_enum does not support a #[default] variant marker"
+)]
+impl Default for PermissionPolicy {
+    fn default() -> Self {
+        Self::Ask
     }
 }
 
@@ -1097,6 +1130,11 @@ pub enum SessionControlAction {
         key: String,
         /// New value
         value: ConfigOptionValue,
+    },
+    /// Change the approval policy (ask / auto-approve)
+    SetPermissionPolicy {
+        /// New policy
+        policy: PermissionPolicy,
     },
     /// Interrupt the current turn
     Cancel,
@@ -1850,6 +1888,8 @@ crate::open_string_enum! {
         SessionReverted => "session_reverted",
         /// Session archived
         SessionArchived => "session_archived",
+        /// Session permission policy changed
+        SessionPermissionPolicyChanged => "session_permission_policy_changed",
         /// Session deleted
         SessionDeleted => "session_deleted",
         /// Terminal output

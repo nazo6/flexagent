@@ -117,6 +117,8 @@ pub struct StartSessionRequest {
     pub resume: Option<ResumeRequest>,
     /// Source ACP session ID for a native `session/fork` (`None` = no fork)
     pub fork_from: Option<String>,
+    /// Initial configuration applied after `session/new`
+    pub initial_config: Vec<fxg_protocol::common::InitialConfig>,
 }
 
 /// Result of [`AgentDriver::start_session`].
@@ -318,6 +320,7 @@ mod tests {
                     initial_mode: None,
                     resume: None,
                     fork_from: None,
+                    initial_config: Vec::new(),
                 },
                 tx,
             )

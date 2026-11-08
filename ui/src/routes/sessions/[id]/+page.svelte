@@ -584,6 +584,8 @@
             {capabilities}
             node={sessionNode}
             status={currentStatus}
+            permissionPolicy={session?.permission_policy ?? null}
+            projectId={session?.project_id ?? ""}
             bind:resumeRequired
           />
         </div>

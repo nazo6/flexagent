@@ -75,6 +75,19 @@ pub enum IpcClientMessage {
         /// Initial mode (when `--mode` is given; applied with ACP `session/set_mode`)
         initial_mode: Option<String>,
     },
+    /// Imports an existing agent session (native resume with a recorded ID).
+    SessionImport {
+        /// Correlation ID
+        command_id: CommandId,
+        /// Agent ID
+        agent_id: String,
+        /// Agent-side session ID to take over
+        agent_session_id: String,
+        /// Working directory
+        cwd: String,
+        /// Optional title
+        title: Option<String>,
+    },
     /// Returns the running sessions, the central server connection state and the
     /// number of unsent outbox events.
     GetLocalStatus {
@@ -327,6 +340,11 @@ pub enum IpcClientMessage {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "result", rename_all = "snake_case")]
 pub enum IpcResult {
+    /// Result of `SessionImport`
+    SessionImported {
+        /// New fxg session ID
+        session_id: SessionId,
+    },
     /// Result of `EnsureSession`
     EnsureSession {
         /// ID of the started session

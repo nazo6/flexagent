@@ -86,7 +86,7 @@ pub trait ActiveSessionHandle: Send + Sync {
    - 未導入のまま起動しようとした場合は、インストール方法を含むエラーを返す
      (`PATH` に既存インストールがあればそれを使うため、通常は導入不要)。
    - `npx` / `uvx` は実行時にパッケージマネージャが取得するため、fxg 側では
-     成果物を保持しない (`fxg agents remove` の対象外)。
+     成果物を保持しない (`fxg agents disable` の対象外)。
    - 実体を持たない `npx` / `uvx` 配布は **既定では一覧に出さない**。Web UI の
      「カタログから追加」でエージェントごとに**有効化**し、状態は
      `~/.flexagent/enabled_package_agents.json` に保存する
@@ -420,3 +420,20 @@ GUI (Web UI / スマホPWA)
   すべてトレイを作成したスレッド上で行う（デーモンとはチャネルで連携）。
 - **フェイルセーフ**: トレイを作成できない環境では警告のみでデーモンは稼働を
   継続する（起動の成否はデーモン本体と独立）。
+
+### 4.4 承認ポリシー (`PermissionPolicy`)
+
+セッション単位で `ask` / `auto_allow_all` を切り替えられます。
+`auto_allow_all` では、エージェントが `request_permission` で提示した
+`allow_*` オプション (`allow_always` を優先) をノードが自動選択し、
+`PermissionResolved` を `resolved_by = "auto"` として記録します。
+ポリシーは `SessionPermissionPolicyChanged` イベントで
+`sessions.permission_policy` に投影され、Web UI の Composer の
+`Auto` トグルから変更できます。
+
+### 4.5 プロジェクト別の初期設定
+
+Web UI はプロジェクトごとに最後に選択した `configOptions`
+(モデル / thinking level 等) を localStorage に保存し、新規セッション作成時に
+`CreateSessionRequest.initial_config` として送ります。ノードは
+`session/new` 後に `session/set_config_option` を順に送って適用します。

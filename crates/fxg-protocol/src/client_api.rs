@@ -405,6 +405,9 @@ pub struct CreateSessionRequest {
     pub agent_id: String,
     /// Initial prompt (text and optional attachments)
     pub initial_prompt: Option<PromptInput>,
+    /// Initial session configuration (model / thinking level, etc.)
+    #[serde(default)]
+    pub initial_config: Vec<crate::common::InitialConfig>,
     /// Initial mode (`code` / `plan` etc.)
     pub mode: Option<String>,
     /// Extra arguments passed through to the agent
@@ -960,6 +963,7 @@ mod tests {
             }),
             agent_id: "opencode".into(),
             initial_prompt: Some(PromptInput::text("Fix the failing tests")),
+            initial_config: Vec::new(),
             mode: Some("code".into()),
             extra_args: Some(vec!["--verbose".into()]),
             fork: None,

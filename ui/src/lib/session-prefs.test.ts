@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { loadNewSessionPrefs, saveNewSessionPrefs } from "./session-prefs";
+import {
+  loadNewSessionPrefs,
+  loadSessionConfig,
+  saveNewSessionPrefs,
+  saveSessionConfigOption,
+} from "./session-prefs";
 
 /** Minimal Storage implementation for tests (mimics localStorage in Node). */
 function memoryStorage(): Storage {
@@ -53,5 +58,16 @@ describe("session prefs", () => {
       agent: "acp-x",
       mode: "default",
     });
+  });
+
+  it("round-trips per-project config values", () => {
+    const storage = memoryStorage();
+    saveSessionConfigOption("p", "model", "opencode-go/deepseek-v4.1-flash", storage);
+    saveSessionConfigOption("p", "thought_level", "high", storage);
+    expect(loadSessionConfig("p", storage)).toEqual({
+      model: "opencode-go/deepseek-v4.1-flash",
+      thought_level: "high",
+    });
+    expect(loadSessionConfig("other", storage)).toEqual({});
   });
 });

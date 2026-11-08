@@ -607,6 +607,48 @@ async fn handle(
             ))
         }
 
+        IpcClientMessage::SessionImport {
+            command_id,
+            agent_id,
+            agent_session_id,
+            cwd,
+            title,
+        } => {
+            state
+                .resolve_and_register_project(Path::new(&cwd))
+                .await
+                .map_err(|err| DispatchError::from_node_error(&command_id, err))?;
+            let session_id = state
+                .session_manager()
+                .import_session(
+                    &command_id,
+                    &agent_id,
+                    &agent_session_id,
+                    Path::new(&cwd),
+                    title.as_deref(),
+                )
+                .await
+                .map_err(|err| DispatchError::from_node_error(&command_id, err))?;
+            state
+                .record_audit(
+                    fxg_db::audit::actions::SESSION_START,
+                    &AuditSource::local(),
+                    Some(&session_id),
+                    serde_json::json!({
+                        "cwd": cwd,
+                        "agent_id": agent_id,
+                        "imported_agent_session_id": agent_session_id,
+                    }),
+                )
+                .await;
+            Ok((
+                command_id,
+                IpcResult::SessionImported {
+                    session_id: session_id.into(),
+                },
+            ))
+        }
+
         IpcClientMessage::SendPrompt {
             command_id,
             session_id,

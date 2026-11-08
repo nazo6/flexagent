@@ -332,6 +332,8 @@ export type CreateSessionRequest = {
 	agent_id: string,
 	/**  Initial prompt (text and optional attachments) */
 	initial_prompt: PromptInput | null,
+	/**  Initial session configuration (model / thinking level, etc.) */
+	initial_config?: InitialConfig[],
 	/**  Initial mode (`code` / `plan` etc.) */
 	mode: string | null,
 	/**  Extra arguments passed through to the agent */
@@ -717,6 +719,14 @@ export type InboxResponse = {
 	requests: PermissionRequestEntry[],
 	/**  Unresolved (`pending`) elicitation (structured input) requests */
 	elicitations: ElicitationRequestEntry[],
+};
+
+/**  Initial session configuration applied right after `session/new`. */
+export type InitialConfig = {
+	/**  Configuration key (`model`, `thought_level`, ...) */
+	key: string,
+	/**  Value in FXG's normalized representation */
+	value: ConfigOptionValue,
 };
 
 /**  `POST /api/v1/nodes/tokens` request (issue a new node token). */
@@ -1392,6 +1402,10 @@ mode_id: string } |
 key: string; 
 /**  New value */
 value: ConfigOptionValue } | 
+/**  Change the approval policy (ask / auto-approve) */
+{ action: "set_permission_policy"; 
+/**  New policy */
+policy: string } | 
 /**  Interrupt the current turn */
 { action: "cancel" } | 
 /**  Terminate the session entirely */
@@ -1536,6 +1550,8 @@ export type SessionSummary = {
 	status: SessionStatus,
 	/**  Current ACP SessionMode (e.g. `code`, `plan`) */
 	current_mode: string | null,
+	/**  Approval policy (`ask` / `auto_allow_all`) */
+	permission_policy?: string,
 	/**
 	 *  Latest context usage and accumulated cost (projection of the `UsageUpdated` event).
 	 * 
@@ -1850,6 +1866,11 @@ export type UnifiedEventPayload =
 { type: "session_archived"; data: {
 	/**  `true` = archived, `false` = restored */
 	archived: boolean,
+} } | 
+/**  Change of the session approval policy (`ask` / `auto_allow_all`). */
+{ type: "session_permission_policy_changed"; data: {
+	/**  New policy */
+	policy: string,
 } } | 
 /**
  *  Deletion of a session (tombstone).

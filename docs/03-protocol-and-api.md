@@ -66,6 +66,10 @@ pub enum UnifiedEventPayload {
     SessionTitleChanged {
         title: String,
     },
+    /// セッション単位の承認ポリシー変更 (`ask` / `auto_allow_all`)
+    SessionPermissionPolicyChanged {
+        policy: PermissionPolicy,
+    },
     /// ACP セッション確立などによる agent_session_id の確定
     SessionAgentBound {
         agent_session_id: String,

@@ -48,6 +48,7 @@ async fn session_new_auth_required_returns_advertised_methods() {
         initial_mode: None,
         resume: None,
         fork_from: None,
+        initial_config: Vec::new(),
     };
 
     let err = match driver.start_session(request, events).await {

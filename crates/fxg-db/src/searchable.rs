@@ -97,6 +97,7 @@ pub fn classify_payload(payload: &UnifiedEventPayload) -> (EventType, Option<Str
         | UnifiedEventPayload::ElicitationResolved { .. }
         | UnifiedEventPayload::SessionReverted { .. }
         | UnifiedEventPayload::SessionArchived { .. }
+        | UnifiedEventPayload::SessionPermissionPolicyChanged { .. }
         | UnifiedEventPayload::SessionDeleted {}
         | UnifiedEventPayload::TerminalOutput { .. }
         | UnifiedEventPayload::TerminalInput { .. } => None,

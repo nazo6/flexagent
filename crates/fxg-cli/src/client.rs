@@ -508,6 +508,30 @@ impl DaemonClient {
         }
     }
 
+    /// `fxg session import <agent-session-id>`.
+    pub async fn import_session(
+        &mut self,
+        agent_id: &str,
+        agent_session_id: &str,
+        cwd: &str,
+        title: Option<&str>,
+    ) -> Result<String> {
+        let command_id = self.command_id();
+        let result = self
+            .request(IpcClientMessage::SessionImport {
+                command_id,
+                agent_id: agent_id.to_owned(),
+                agent_session_id: agent_session_id.to_owned(),
+                cwd: cwd.to_owned(),
+                title: title.map(str::to_owned),
+            })
+            .await?;
+        match result {
+            IpcResult::SessionImported { session_id } => Ok(session_id.to_string()),
+            other => bail!("unexpected ipc result: {other:?}"),
+        }
+    }
+
     /// `fxg doctor` / `fxg session diagnose` (local diagnostics).
     pub async fn diagnostics(&mut self) -> Result<DiagnosticsResponse> {
         let command_id = self.command_id();

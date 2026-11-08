@@ -61,6 +61,7 @@ fn request(script: &std::path::Path, fork_from: Option<&str>) -> StartSessionReq
         initial_mode: None,
         resume: None,
         fork_from: fork_from.map(str::to_owned),
+        initial_config: Vec::new(),
     }
 }
 

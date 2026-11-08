@@ -931,3 +931,38 @@ opencode / agy は `sessionCapabilities.list` / `load` を広告しており、
 - **未対応**: `incidents` テーブル / サポートバンドル / 詳細な
   コンポーネントヘルスは `2026-11-08-error-handling-and-recovery-plan.md`
   の Phase 3 として引き続き管理する (本 Phase では診断の取得経路を優先)。
+
+---
+
+## 16. 実装ログ (Phase 5, 2026-11-09)
+
+- **G11 ツール出力**: `ToolCallContent::Content` の `Text` を
+  `raw_output` のフォールバックとして取り込むようにした (`Terminal` の
+  カードリンクは未対応)。
+- **G10 子セッション**: 1 プロセス 1 アクティブセッションの前提で、未知の
+  ACP session ID (opencode の subagent 等) からの fs / terminal / permission
+  要求を、登録済みコンテキストが 1 つだけの場合に親へフォールバックする。
+- **G14 warm pool**: `FXG_AGENT_WARM_IDLE_SECS` で idle TTL を設定可能にした
+  (`AcpDriver::with_warm_idle` も追加)。0 はデーモン終了まで保持。
+- **G16 承認ポリシー**: `PermissionPolicy` (`ask` / `auto_allow_all`) を
+  セッション単位で追加。`SessionPermissionPolicyChanged` イベントと
+  `sessions.permission_policy` 投影、`SessionControlAction::SetPermissionPolicy`
+  を実装。`auto_allow_all` ではエージェントの `allow_*` オプションを自動選択し、
+  `PermissionResolved` を `resolved_by=auto` で記録する。UI の Composer に
+  `Auto` トグルを追加。
+- **G12 既定値**: プロジェクトごとの最後の `configOptions`
+  (モデル / thinking level) を localStorage に保存し、新規セッションの
+  `initial_config` として `session/new` 後に適用する。
+- **G15 既存セッション取り込み**: `fxg session import <agent-session-id>`
+  を追加。`--agent` / `--cwd` / `--title` を受け取り、ネイティブ復元で
+  既存のエージェントセッションを fxg セッションとして記録する。
+- **G7 コマンド整理**: `fxg agents install/remove` を
+  `fxg agents enable/disable` に改名 (バイナリ導入は行わない)。
+- **G9 Windows**: ACP SDK 5.0.0 がプロセスを直接 spawn し、Windows では
+  Job Object に載せられない。上流への spawn hook 追加が前提のため、本 Phase
+  では既知の制約として記録する (Unix は SDK の process group 終了で対応済み)。
+- **G13 CLI**: `session prompt --wait` は既存の 200ms ポーリングのまま
+  (IPC push 購読は未実装)。
+- **テスト**: tool text output、auto-approve、import、native fork、
+  diagnostics、push payload、session config prefs を追加。
+  `mise run check` 通過。

@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n        SELECT session_id AS \"session_id!\",\n               project_id, node_id, local_path, git_branch,\n               is_worktree AS \"is_worktree: bool\",\n               agent_id, agent_session_id, parent_session_id AS \"parent_session_id: SessionId\",\n               fork_from_node_seq,\n               title, status AS \"status: SessionStatus\", current_mode, usage_json,\n               last_node_seq, created_at, updated_at,\n               archived_at\n          FROM sessions\n         WHERE session_id = ? AND deleted_at IS NULL\n        ",
+  "query": "\n        SELECT session_id AS \"session_id!\",\n               project_id, node_id, local_path, git_branch,\n               is_worktree AS \"is_worktree: bool\",\n               agent_id, agent_session_id, parent_session_id AS \"parent_session_id: SessionId\",\n               fork_from_node_seq,\n               title, status AS \"status: SessionStatus\", current_mode,\n               permission_policy AS \"permission_policy: PermissionPolicy\", usage_json,\n               last_node_seq, created_at, updated_at,\n               archived_at\n          FROM sessions\n         WHERE session_id = ? AND deleted_at IS NULL\n        ",
   "describe": {
     "columns": [
       {
@@ -147,8 +147,19 @@
         }
       },
       {
-        "name": "usage_json",
+        "name": "permission_policy: PermissionPolicy",
         "ordinal": 13,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "sessions",
+            "name": "permission_policy"
+          }
+        }
+      },
+      {
+        "name": "usage_json",
+        "ordinal": 14,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -159,7 +170,7 @@
       },
       {
         "name": "last_node_seq",
-        "ordinal": 14,
+        "ordinal": 15,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -170,7 +181,7 @@
       },
       {
         "name": "created_at",
-        "ordinal": 15,
+        "ordinal": 16,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -181,7 +192,7 @@
       },
       {
         "name": "updated_at",
-        "ordinal": 16,
+        "ordinal": 17,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -192,7 +203,7 @@
       },
       {
         "name": "archived_at",
-        "ordinal": 17,
+        "ordinal": 18,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -219,6 +230,7 @@
       false,
       false,
       true,
+      false,
       true,
       false,
       false,
@@ -226,5 +238,5 @@
       true
     ]
   },
-  "hash": "4328d4ae252698294265ed785604b5ba9f3582f5bd5bb30a9eb943428e983302"
+  "hash": "249c13785cfef7fbb73378c55046568a39d5553e5fd14e18a23247cb975877b6"
 }

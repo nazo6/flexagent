@@ -63,7 +63,7 @@ enum Commands {
     /// Git worktree management (list / add / remove / prune)
     #[usage(alias = "wt")]
     Worktree(commands::WorktreeArgs),
-    /// Agent management (list / install / update / remove)
+    /// Agent management (list / enable / update / disable / login / logout)
     Agents(commands::AgentsArgs),
     /// Inspect ephemeral VM / sandbox provisioners (list / test)
     Provisioners(commands::ProvisionersArgs),

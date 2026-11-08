@@ -308,6 +308,7 @@ impl ClientApiBackend for DaemonState {
                 local_path: &local_path,
                 agent_id: &request.agent_id,
                 initial_prompt: request.initial_prompt.as_ref(),
+                initial_config: &request.initial_config,
                 mode: request.mode.as_deref(),
                 extra_args: request.extra_args.as_deref(),
                 fork_context: None,

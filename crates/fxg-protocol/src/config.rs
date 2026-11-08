@@ -56,6 +56,8 @@ pub mod env_keys {
     pub const IPC_ENDPOINT: &str = "FXG_IPC_ENDPOINT";
     /// Disable automatic `fxg daemon` startup from CLI commands (`1` / `true`)
     pub const NO_AUTO_DAEMON: &str = "FXG_NO_AUTO_DAEMON";
+    /// Idle seconds before a warm ACP agent process is disposed (0 = keep until shutdown)
+    pub const AGENT_WARM_IDLE_SECS: &str = "FXG_AGENT_WARM_IDLE_SECS";
     /// `[server] listen_addr`
     pub const SERVER_LISTEN_ADDR: &str = "FXG_SERVER_LISTEN_ADDR";
     /// `[server] allowed_hosts` (comma separated)
