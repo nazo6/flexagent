@@ -245,11 +245,16 @@ pub fn write_askpass_script(fxg_home: &Path) -> Result<PathBuf, NodeError> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        if let Ok(metadata) = std::fs::metadata(&path) {
-            let mut permissions = metadata.permissions();
-            permissions.set_mode(0o755);
-            let _ = std::fs::set_permissions(&path, permissions);
-        }
+        let metadata = std::fs::metadata(&path).map_err(|source| NodeError::Io {
+            path: path.clone(),
+            source,
+        })?;
+        let mut permissions = metadata.permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&path, permissions).map_err(|source| NodeError::Io {
+            path: path.clone(),
+            source,
+        })?;
     }
     Ok(path)
 }

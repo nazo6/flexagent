@@ -144,7 +144,9 @@ fn platform_run(
             }
         }
         ServiceAction::Uninstall => {
-            let _ = schtasks(&["/End", "/TN", name]);
+            if let Err(err) = schtasks(&["/End", "/TN", name]) {
+                tracing::warn!("failed to end scheduled task {name}: {err:#}");
+            }
             let task_removed = schtasks(&["/Delete", "/F", "/TN", name]).is_ok();
             let script_removed = if startup_script.exists() {
                 std::fs::remove_file(&startup_script)?;
@@ -177,10 +179,14 @@ fn platform_run(
         }
         ServiceAction::Restart => {
             if task_exists(name) {
-                let _ = schtasks(&["/End", "/TN", name]);
+                if let Err(err) = schtasks(&["/End", "/TN", name]) {
+                    tracing::warn!("failed to stop scheduled task {name}: {err:#}");
+                }
                 schtasks(&["/Run", "/TN", name])?;
             } else if startup_script.exists() {
-                let _ = stop_by_command_line(exe, service_args(server));
+                if let Err(err) = stop_by_command_line(exe, service_args(server)) {
+                    tracing::warn!("failed to stop service {name}: {err:#}");
+                }
                 start_via_script(&startup_script)?;
             } else {
                 bail!("service is not installed; run `fxg service install`");
@@ -365,11 +371,15 @@ fn platform_run(
             println!("service installed: {} ({})", name, unit.display());
         }
         ServiceAction::Uninstall => {
-            let _ = systemctl(&["disable", "--now", name]);
+            if let Err(err) = systemctl(&["disable", "--now", name]) {
+                tracing::warn!("failed to disable service {name}: {err:#}");
+            }
             if unit.exists() {
                 std::fs::remove_file(&unit)?;
             }
-            let _ = systemctl(&["daemon-reload"]);
+            if let Err(err) = systemctl(&["daemon-reload"]) {
+                tracing::warn!("failed to reload systemd after uninstall: {err:#}");
+            }
             println!("service uninstalled: {name}");
         }
         ServiceAction::Start => {
@@ -497,7 +507,9 @@ fn platform_run(
             println!("service installed: {} ({})", label, plist.display());
         }
         ServiceAction::Uninstall => {
-            let _ = launchctl(&["unload", "-w", &plist.display().to_string()]);
+            if let Err(err) = launchctl(&["unload", "-w", &plist.display().to_string()]) {
+                tracing::warn!("failed to unload service {label}: {err:#}");
+            }
             if plist.exists() {
                 std::fs::remove_file(&plist)?;
             }

@@ -586,21 +586,39 @@ impl DaemonState {
             })
             .collect();
         let canonical_target = fxg_pty::canonicalize(target).ok();
+        let mut failures = Vec::new();
         for root in main_roots {
-            let Ok(entries) = worktree::list_worktrees(&root).await else {
-                continue;
+            let entries = match worktree::list_worktrees(&root).await {
+                Ok(entries) => entries,
+                Err(err) => {
+                    tracing::warn!(
+                        root = %root.display(),
+                        "failed to list worktrees while resolving {}: {err}",
+                        target.display()
+                    );
+                    failures.push(format!("{}: {err}", root.display()));
+                    continue;
+                }
             };
             let found = entries.iter().any(|entry| {
+                let canonical_entry = fxg_pty::canonicalize(&entry.path).ok();
                 entry.path == target
-                    || (canonical_target.is_some()
-                        && fxg_pty::canonicalize(&entry.path).ok() == canonical_target)
+                    || (canonical_target.is_some() && canonical_entry == canonical_target)
             });
             if found {
                 return Ok(root);
             }
         }
+        let detail = if failures.is_empty() {
+            String::new()
+        } else {
+            format!(
+                " (some repositories could not be inspected: {})",
+                failures.join("; ")
+            )
+        };
         Err(NodeError::InvalidWorktree(format!(
-            "worktree not found: {}",
+            "worktree not found: {}{detail}",
             target.display()
         )))
     }

@@ -85,7 +85,15 @@ async fn main() -> ExitCode {
 
     let env = fxg_protocol::config::process_env;
     let fxg_home = fxg_protocol::config::fxg_home(&env);
-    let global = fxg_protocol::config::GlobalConfig::load(&env).unwrap_or_default();
+    let global = match fxg_protocol::config::GlobalConfig::load(&env) {
+        Ok(config) => config,
+        Err(err) => {
+            // Logging is not initialized yet, so report this on stderr. Commands
+            // that need the configuration fail with the same error later.
+            eprintln!("fxg: failed to load config (using defaults for logging): {err}");
+            fxg_protocol::config::GlobalConfig::default()
+        }
+    };
 
     let logging_options = match &cli.command {
         Commands::Daemon(daemon_args) => daemon_args.logging_options(),

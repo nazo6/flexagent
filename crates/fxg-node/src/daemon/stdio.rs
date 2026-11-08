@@ -42,6 +42,16 @@ const OUT_QUEUE_CAPACITY: usize = 1024;
 /// Upper bound on the wait time for flushing the outgoing queue after a drain.
 const FLUSH_TIMEOUT: Duration = Duration::from_secs(15);
 
+/// Event produced by the dedicated stdin reader thread.
+enum StdinEvent {
+    /// A complete JSON line.
+    Line(String),
+    /// Normal end of input (parent closed the pipe).
+    Eof,
+    /// An I/O error while reading stdin (distinct from a clean EOF).
+    Error(String),
+}
+
 /// Runs the daemon over the stdio transport (does not return until exit).
 pub async fn run_stdio(config: StdioConfig) -> Result<(), NodeError> {
     let mut daemon_config = config.daemon.clone();
@@ -127,18 +137,24 @@ pub async fn run_stdio(config: StdioConfig) -> Result<(), NodeError> {
     // Read stdin on a dedicated OS thread. tokio's `stdin` keeps a blocking task
     // resident in the runtime, so dropping the runtime after a drain would prevent
     // the process from exiting (leaving read(0) incomplete).
-    let (stdin_tx, mut stdin_rx) = mpsc::channel::<Option<String>>(64);
+    let (stdin_tx, mut stdin_rx) = mpsc::channel::<StdinEvent>(64);
     std::thread::spawn(move || {
         let stdin = std::io::stdin();
         for line in std::io::BufRead::lines(stdin.lock()) {
-            let message = line.ok();
-            let eof = message.is_none();
-            if stdin_tx.blocking_send(message).is_err() || eof {
-                break;
+            match line {
+                Ok(line) => {
+                    if stdin_tx.blocking_send(StdinEvent::Line(line)).is_err() {
+                        return;
+                    }
+                }
+                Err(err) => {
+                    let _ = stdin_tx.blocking_send(StdinEvent::Error(err.to_string()));
+                    return;
+                }
             }
         }
-        // Signal EOF (ignored if already sent)
-        let _ = stdin_tx.blocking_send(None);
+        // Signal a clean EOF (ignored if the receiver already stopped)
+        let _ = stdin_tx.blocking_send(StdinEvent::Eof);
     });
 
     tracing::info!(
@@ -150,15 +166,23 @@ pub async fn run_stdio(config: StdioConfig) -> Result<(), NodeError> {
     loop {
         tokio::select! {
             _ = shutdown_rx.changed() => break,
-            line = stdin_rx.recv() => match line {
-                Some(Some(line)) => {
+            event = stdin_rx.recv() => match event {
+                Some(StdinEvent::Line(line)) => {
                     if line.trim().is_empty() {
                         continue;
                     }
                     crate::sync::handle_server_message(&state, &line, &out_tx, &ctx).await;
                 }
-                Some(None) | None => {
+                Some(StdinEvent::Eof) => {
                     tracing::info!("stdin closed; shutting down");
+                    break;
+                }
+                Some(StdinEvent::Error(err)) => {
+                    tracing::error!("failed to read stdin: {err}; shutting down");
+                    break;
+                }
+                None => {
+                    tracing::error!("stdin reader channel closed unexpectedly; shutting down");
                     break;
                 }
             },

@@ -413,7 +413,8 @@ pub(crate) fn local_web_url(listen_addr: &str, token: &str) -> String {
 /// Build the tokenized Web UI URL for a specific session.
 pub(crate) fn local_session_web_url(session_id: &str) -> Result<String> {
     let env = fxg_protocol::config::process_env;
-    let global = fxg_protocol::config::GlobalConfig::load(&env).unwrap_or_default();
+    let global = fxg_protocol::config::GlobalConfig::load(&env)
+        .context("failed to load ~/.flexagent/config.toml")?;
     let token = fxg_server::api::auth::load_or_create_token(
         &fxg_protocol::config::fxg_home(&env).join(fxg_protocol::config::AUTH_TOKEN_FILE_NAME),
     )
@@ -763,7 +764,7 @@ impl usage::RunAsync for GitAskpassArgs {
         let value = if fxg_node::credentials::prompt_wants_username(&self.prompt) {
             username
         } else {
-            token.unwrap_or_default()
+            token.context("no credential token is available for this prompt")?
         };
         println!("{value}");
         Ok(())
