@@ -19,8 +19,9 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 
 use crate::common::{
-    AttachmentMeta, CommandInfo, CompactionStatus, ConfigOptionInfo, ElicitationAction, FileDiff,
-    ModeInfo, PermissionOption, PlanEntry, SessionStatus, TurnStopReason, UsageCost,
+    AttachmentMeta, CommandInfo, CompactionStatus, ConfigOptionInfo, ElicitationAction,
+    ElicitationMode, FileDiff, ModeInfo, PermissionOption, PlanEntry, SessionStatus, ToolCallKind,
+    ToolCallStatus, TurnStopReason, UsageCost,
 };
 
 /// Envelope of a session event (the unit of persistence and synchronization).
@@ -158,9 +159,9 @@ pub enum UnifiedEventPayload {
         /// Display title
         title: String,
         /// Kind (`read` / `edit` / `execute` / `search` / `other`)
-        kind: String,
+        kind: ToolCallKind,
         /// Status (`pending` / `in_progress` / `completed` / `failed`)
-        status: String,
+        status: ToolCallStatus,
         /// Affected file paths
         locations: Vec<String>,
         /// Unified diff / before-after of a file change
@@ -212,7 +213,7 @@ pub enum UnifiedEventPayload {
         /// Message shown to the user
         message: String,
         /// Request mode (`form` / `url`. Phase 1 supports `form` only)
-        mode: String,
+        mode: ElicitationMode,
         /// JSON Schema of the request in form mode (`requestedSchema`)
         requested_schema: serde_json::Value,
         /// Related tool call ID (optional)
@@ -404,7 +405,7 @@ impl UnifiedEventPayload {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::common::{CommandInfo, ConfigOptionInfo, ModeInfo};
+    use crate::common::{CommandInfo, ConfigOptionInfo, ElicitationMode, ModeInfo};
 
     fn sample_envelope(payload: UnifiedEventPayload) -> SessionEventEnvelope {
         SessionEventEnvelope {
@@ -478,7 +479,7 @@ mod tests {
         let payload = UnifiedEventPayload::ElicitationRequest {
             elicitation_id: "elic-1".to_owned(),
             message: "Which strategy should we use?".to_owned(),
-            mode: "form".to_owned(),
+            mode: ElicitationMode::Form,
             requested_schema: serde_json::json!({
                 "type": "object",
                 "properties": {

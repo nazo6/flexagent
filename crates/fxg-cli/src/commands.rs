@@ -14,8 +14,8 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 use fxg_acp::registry::{AcpRegistry, AgentListEntry, LocalSource};
 use fxg_protocol::common::{
-    ElicitationAction, ElicitationRequestEntry, PermissionOption, SessionControlAction,
-    SessionStatus,
+    ElicitationAction, ElicitationRequestEntry, PermissionOption, PermissionOptionKind,
+    SessionControlAction, SessionStatus,
 };
 use fxg_protocol::events::UnifiedEventPayload;
 use usage::Args;
@@ -1579,7 +1579,7 @@ impl usage::RunAsync for InboxListArgs {
                     vec![
                         truncate(&entry.elicitation_id, 24),
                         short_id(&entry.session_id),
-                        truncate(&entry.mode, 8),
+                        truncate(entry.mode.as_str(), 8),
                         truncate(&entry.message, 40),
                         format_unix_ms_utc(entry.created_at),
                     ]
@@ -1611,9 +1611,9 @@ impl usage::RunAsync for InboxApproveArgs {
         let mut client = DaemonClient::connect().await?;
         let entry = find_permission(&mut client, &self.request_id).await?;
         let preferred = if self.always {
-            "allow_always"
+            PermissionOptionKind::AllowAlways
         } else {
-            "allow_once"
+            PermissionOptionKind::AllowOnce
         };
         let option_id = option_by_kind(&entry.options, preferred)
             // Fallback for drivers without that option kind (first non-reject
@@ -1622,7 +1622,7 @@ impl usage::RunAsync for InboxApproveArgs {
                 entry
                     .options
                     .iter()
-                    .find(|option| !PermissionOption::is_reject_kind(&option.kind))
+                    .find(|option| !option.is_reject())
                     .map(|option| option.option_id.clone())
             })
             .with_context(|| format!("no allow option available: {}", self.request_id))?;
@@ -1647,7 +1647,11 @@ impl usage::RunAsync for InboxRejectArgs {
     async fn run_async(self) -> Self::Output {
         let mut client = DaemonClient::connect().await?;
         let entry = find_permission(&mut client, &self.request_id).await?;
-        let option_id = option_by_kind(&entry.options, "reject")
+        let option_id = entry
+            .options
+            .iter()
+            .find(|option| option.is_reject())
+            .map(|option| option.option_id.clone())
             .with_context(|| format!("no reject option available: {}", self.request_id))?;
         client
             .respond_permission(&entry.session_id, &entry.request_id, &option_id)
@@ -1778,11 +1782,11 @@ fn build_elicitation_content(json: &Option<String>, set: &[String]) -> Result<se
     Ok(content)
 }
 
-/// Select the first `option_id` whose kind matches.
-fn option_by_kind(options: &[PermissionOption], kind: &str) -> Option<String> {
+/// Select the first `option_id` whose kind matches exactly.
+fn option_by_kind(options: &[PermissionOption], kind: PermissionOptionKind) -> Option<String> {
     options
         .iter()
-        .find(|option| option.kind.starts_with(kind))
+        .find(|option| option.kind == kind)
         .map(|option| option.option_id.clone())
 }
 

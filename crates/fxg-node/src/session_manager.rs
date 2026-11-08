@@ -31,7 +31,8 @@ use fxg_acp::{
     NativeResumeUnavailable, ResumeRequest,
 };
 use fxg_protocol::common::{
-    ElicitationAction, ForkHistoryItem, PermissionOption, SessionControlAction, SessionStatus,
+    ElicitationAction, ElicitationMode, ForkHistoryItem, PermissionOption, SessionControlAction,
+    SessionStatus,
 };
 use fxg_protocol::events::{SessionEventEnvelope, UnifiedEventPayload};
 use fxg_protocol::util::uuid_v7;
@@ -212,7 +213,7 @@ pub struct PendingElicitationSummary {
     /// Message presented to the user
     pub message: String,
     /// Request mode (only `form` is supported)
-    pub mode: String,
+    pub mode: ElicitationMode,
     /// Request schema for form mode
     pub requested_schema: serde_json::Value,
 }
@@ -2041,6 +2042,7 @@ mod tests {
     use super::*;
     use crate::testutil::MockAgent;
     use fxg_db::{Db, DbRole};
+    use fxg_protocol::common::PermissionOptionKind;
     use fxg_protocol::config::{AgentsConfig, CustomAgentConfig};
 
     async fn setup() -> (SessionManager, MockAgent, tempfile::TempDir) {
@@ -2305,7 +2307,7 @@ mod tests {
             options: vec![PermissionOption {
                 option_id: "allow_once".to_owned(),
                 name: "Allow once".to_owned(),
-                kind: "allow_once".to_owned(),
+                kind: PermissionOptionKind::AllowOnce,
             }],
             details: serde_json::json!({}),
         }));
@@ -2345,7 +2347,7 @@ mod tests {
             UnifiedEventPayload::ElicitationRequest {
                 elicitation_id: "elic-1".to_owned(),
                 message: "Which strategy should we go with?".to_owned(),
-                mode: "form".to_owned(),
+                mode: ElicitationMode::Form,
                 requested_schema: serde_json::json!({
                     "type": "object",
                     "properties": { "strategy": { "type": "string", "enum": ["a", "b"] } },
@@ -2413,7 +2415,7 @@ mod tests {
             UnifiedEventPayload::ElicitationRequest {
                 elicitation_id: "elic-2".to_owned(),
                 message: "Do you want to continue?".to_owned(),
-                mode: "form".to_owned(),
+                mode: ElicitationMode::Form,
                 requested_schema: serde_json::json!({ "type": "object", "properties": {} }),
                 tool_call_id: None,
             },

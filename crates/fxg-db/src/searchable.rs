@@ -135,7 +135,10 @@ fn truncate_chars(text: &str, max_chars: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fxg_protocol::common::{AttachmentMeta, FileDiff, PermissionOption, PlanEntry};
+    use fxg_protocol::common::{
+        AttachmentMeta, FileDiff, PermissionOption, PermissionOptionKind, PlanEntry,
+        PlanEntryStatus, ToolCallKind, ToolCallStatus,
+    };
 
     #[test]
     fn user_message_includes_text_and_attachment_names() {
@@ -163,8 +166,8 @@ mod tests {
         let payload = UnifiedEventPayload::ToolCall {
             tool_call_id: "t1".to_owned(),
             title: "cargo test --workspace".to_owned(),
-            kind: "execute".to_owned(),
-            status: "completed".to_owned(),
+            kind: ToolCallKind::Execute,
+            status: ToolCallStatus::Completed,
             locations: vec!["crates/fxg-db/src/lib.rs".to_owned()],
             diff: Some(FileDiff {
                 path: "a.rs".to_owned(),
@@ -210,7 +213,7 @@ mod tests {
             options: vec![PermissionOption {
                 option_id: "allow_once".to_owned(),
                 name: "Allow".to_owned(),
-                kind: "allow_once".to_owned(),
+                kind: PermissionOptionKind::AllowOnce,
             }],
             details: serde_json::json!({}),
         };
@@ -225,7 +228,7 @@ mod tests {
             entries: vec![PlanEntry {
                 id: "1".to_owned(),
                 title: "Add tests".to_owned(),
-                status: "in_progress".to_owned(),
+                status: PlanEntryStatus::InProgress,
             }],
         };
         assert_eq!(classify_payload(&plan).0, "plan");

@@ -264,9 +264,7 @@ impl ServerState {
         if let Some(entry) = pending
             .iter()
             .find(|entry| entry.session_id == session_id && entry.request_id == request_id)
-            && let Some(option) = entry.options.iter().find(|option| {
-                option.kind.contains("always") || option.option_id.contains("always")
-            })
+            && let Some(option) = entry.options.iter().find(|option| option.kind.is_always())
         {
             return Ok(option.option_id.clone());
         }

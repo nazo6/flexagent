@@ -25,6 +25,8 @@
     reason = "protocol boundary definitions; see docs/06-type-safety.md"
 )]
 
+mod string_enum;
+
 pub mod client_api;
 pub mod common;
 pub mod config;

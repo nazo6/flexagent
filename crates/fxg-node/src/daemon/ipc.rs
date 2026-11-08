@@ -1348,7 +1348,7 @@ mod tests {
             options: vec![PermissionOption {
                 option_id: "allow_once".to_owned(),
                 name: "Allow once".to_owned(),
-                kind: "allow_once".to_owned(),
+                kind: fxg_protocol::common::PermissionOptionKind::AllowOnce,
             }],
             details: serde_json::json!({}),
         }));
@@ -1395,7 +1395,7 @@ mod tests {
             UnifiedEventPayload::ElicitationRequest {
                 elicitation_id: "elic-1".to_owned(),
                 message: "Which strategy should we go with?".to_owned(),
-                mode: "form".to_owned(),
+                mode: fxg_protocol::common::ElicitationMode::Form,
                 requested_schema: serde_json::json!({
                     "type": "object",
                     "properties": { "strategy": { "type": "string", "enum": ["a", "b"] } },

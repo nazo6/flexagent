@@ -535,7 +535,7 @@ pub(crate) async fn apply_projections(
                 elicitation_id,
                 envelope.session_id,
                 message,
-                mode,
+                mode.as_str(),
                 schema_json,
                 tool_call_id,
                 envelope.created_at,
@@ -709,7 +709,7 @@ fn resolve_permission_status(
         .map(|option| option.kind);
 
     match kind {
-        Some(kind) if PermissionOption::is_reject_kind(&kind) => PermissionRequestStatus::Rejected,
+        Some(kind) if kind.is_reject() => PermissionRequestStatus::Rejected,
         Some(_) => PermissionRequestStatus::Approved,
         None => {
             if selected_option_id.contains("reject") || selected_option_id.contains("deny") {

@@ -725,7 +725,7 @@ export type PermissionOption = {
 	option_id: string,
 	/**  Display name */
 	name: string,
-	/**  Kind (`allow_once` / `allow_always` / `reject_once` / `reject_always` etc.) */
+	/**  Kind (`allow_once` / `allow_always` / `reject_once` / `reject_always`) */
 	kind: string,
 };
 
@@ -772,7 +772,7 @@ export type PlanEntry = {
 	id: string,
 	/**  Display title */
 	title: string,
-	/**  Status (`pending` / `in_progress` / `completed` etc.) */
+	/**  Status (`pending` / `in_progress` / `completed`) */
 	status: string,
 };
 

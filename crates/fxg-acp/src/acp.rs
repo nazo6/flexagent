@@ -36,7 +36,8 @@ use agent_client_protocol::v1::schema::{
     ElicitationAction as AcpElicitationAction, ElicitationCapabilities, ElicitationContentValue,
     ElicitationFormCapabilities, ElicitationMode, ElicitationScope, FileSystemCapabilities,
     Implementation, InitializeRequest, KillTerminalRequest, KillTerminalResponse,
-    NewSessionRequest, PermissionOptionKind, ReadTextFileRequest, ReadTextFileResponse,
+    NewSessionRequest, PermissionOptionKind as AcpPermissionOptionKind,
+    PlanEntryStatus as AcpPlanEntryStatus, ReadTextFileRequest, ReadTextFileResponse,
     ReleaseTerminalRequest, ReleaseTerminalResponse, RequestPermissionOutcome,
     RequestPermissionRequest, RequestPermissionResponse, SelectedPermissionOutcome,
     SessionConfigKind, SessionConfigOption, SessionConfigOptionValue, SessionId, SessionModeState,
@@ -51,8 +52,10 @@ use agent_client_protocol::{AcpAgent, AcpAgentConfig, Agent, Client};
 use anyhow::{Context, anyhow};
 use async_trait::async_trait;
 use fxg_protocol::common::{
-    CommandInfo, ConfigOptionInfo, FileDiff, ModeInfo, PermissionOption, PlanEntry,
-    StreamDeltaPayload, TurnStopReason, UsageCost,
+    CommandInfo, ConfigOptionInfo, ElicitationMode as FxgElicitationMode, FileDiff, ModeInfo,
+    PermissionOption, PermissionOptionKind as FxgPermissionOptionKind, PlanEntry,
+    PlanEntryStatus as FxgPlanEntryStatus, StreamDeltaPayload, ToolCallKind as FxgToolCallKind,
+    ToolCallStatus as FxgToolCallStatus, TurnStopReason, UsageCost,
 };
 use fxg_protocol::events::UnifiedEventPayload;
 use fxg_protocol::util::uuid_v7;
@@ -800,7 +803,7 @@ async fn run_acp_process(params: AcpProcessTaskParams) -> Result<(), agent_clien
                         .map(|option| PermissionOption {
                             option_id: option.option_id.to_string(),
                             name: option.name.clone(),
-                            kind: permission_kind_str(option.kind).to_owned(),
+                            kind: permission_kind(option.kind),
                         })
                         .collect::<Vec<_>>();
                     let tool = &request.tool_call.fields;
@@ -913,8 +916,8 @@ async fn run_acp_process(params: AcpProcessTaskParams) -> Result<(), agent_clien
                                     UnifiedEventPayload::ToolCall {
                                         tool_call_id: format!("fs-{}", uuid_v7()),
                                         title: format!("write_text_file: {path_string}"),
-                                        kind: "edit".to_owned(),
-                                        status: "completed".to_owned(),
+                                        kind: FxgToolCallKind::Edit,
+                                        status: FxgToolCallStatus::Completed,
                                         locations: vec![path_string],
                                         diff: Some(diff),
                                         raw_output: None,
@@ -1087,7 +1090,7 @@ async fn run_acp_process(params: AcpProcessTaskParams) -> Result<(), agent_clien
                             UnifiedEventPayload::ElicitationRequest {
                                 elicitation_id: elicitation_id.clone(),
                                 message: request.message.clone(),
-                                mode: "form".to_owned(),
+                                mode: FxgElicitationMode::Form,
                                 requested_schema: schema.clone(),
                                 tool_call_id: scope.tool_call_id.as_ref().map(|id| id.to_string()),
                             },
@@ -1926,7 +1929,7 @@ fn map_session_update(
                 .map(|(index, entry)| PlanEntry {
                     id: format!("plan-{index}"),
                     title: entry.content.clone(),
-                    status: plan_status_str(&entry.status).to_owned(),
+                    status: plan_status(&entry.status),
                 })
                 .collect();
             events.push(DriverEvent::Event(UnifiedEventPayload::PlanUpdate {
@@ -1999,8 +2002,8 @@ fn tool_call_event(tool_call: &ToolCall) -> UnifiedEventPayload {
     UnifiedEventPayload::ToolCall {
         tool_call_id: tool_call.tool_call_id.to_string(),
         title: tool_call.title.clone(),
-        kind: tool_kind_str(tool_call.kind).to_owned(),
-        status: tool_status_str(tool_call.status).to_owned(),
+        kind: tool_kind(tool_call.kind),
+        status: tool_status(tool_call.status),
         locations: tool_call
             .locations
             .iter()
@@ -2034,12 +2037,12 @@ fn tool_call_update_event(update: &ToolCallUpdate) -> UnifiedEventPayload {
         title: fields.title.clone().unwrap_or_default(),
         kind: fields
             .kind
-            .map(|kind| tool_kind_str(kind).to_owned())
-            .unwrap_or_default(),
+            .map(tool_kind)
+            .unwrap_or_else(|| FxgToolCallKind::Unknown(String::new())),
         status: fields
             .status
-            .map(|status| tool_status_str(status).to_owned())
-            .unwrap_or_default(),
+            .map(tool_status)
+            .unwrap_or_else(|| FxgToolCallStatus::Unknown(String::new())),
         locations,
         diff,
         raw_output: fields.raw_output.as_ref().map(|value| value.to_string()),
@@ -2087,43 +2090,53 @@ pub(crate) fn build_file_diff(path: &str, old_text: &str, new_text: &str) -> Fil
     }
 }
 
-fn tool_kind_str(kind: ToolKind) -> &'static str {
+/// Serializes an ACP enum value to the snake_case string used on the wire.
+fn acp_wire_value<T: serde::Serialize>(value: &T) -> String {
+    match serde_json::to_value(value) {
+        Ok(serde_json::Value::String(text)) => text,
+        _ => "unknown".to_owned(),
+    }
+}
+
+fn tool_kind(kind: ToolKind) -> FxgToolCallKind {
     match kind {
-        ToolKind::Read => "read",
-        ToolKind::Edit | ToolKind::Delete | ToolKind::Move => "edit",
-        ToolKind::Search => "search",
-        ToolKind::Execute => "execute",
-        _ => "other",
+        ToolKind::Read => FxgToolCallKind::Read,
+        ToolKind::Edit | ToolKind::Delete | ToolKind::Move => FxgToolCallKind::Edit,
+        ToolKind::Search => FxgToolCallKind::Search,
+        ToolKind::Execute => FxgToolCallKind::Execute,
+        ToolKind::Think | ToolKind::Fetch | ToolKind::SwitchMode | ToolKind::Other => {
+            FxgToolCallKind::Other
+        }
+        _ => FxgToolCallKind::Unknown(acp_wire_value(&kind)),
     }
 }
 
-fn tool_status_str(status: ToolCallStatus) -> &'static str {
+fn tool_status(status: ToolCallStatus) -> FxgToolCallStatus {
     match status {
-        ToolCallStatus::Pending => "pending",
-        ToolCallStatus::InProgress => "in_progress",
-        ToolCallStatus::Completed => "completed",
-        ToolCallStatus::Failed => "failed",
-        _ => "pending",
+        ToolCallStatus::Pending => FxgToolCallStatus::Pending,
+        ToolCallStatus::InProgress => FxgToolCallStatus::InProgress,
+        ToolCallStatus::Completed => FxgToolCallStatus::Completed,
+        ToolCallStatus::Failed => FxgToolCallStatus::Failed,
+        _ => FxgToolCallStatus::Unknown(acp_wire_value(&status)),
     }
 }
 
-fn plan_status_str(status: &agent_client_protocol::v1::schema::PlanEntryStatus) -> &'static str {
-    use agent_client_protocol::v1::schema::PlanEntryStatus;
+fn plan_status(status: &AcpPlanEntryStatus) -> FxgPlanEntryStatus {
     match status {
-        PlanEntryStatus::Pending => "pending",
-        PlanEntryStatus::InProgress => "in_progress",
-        PlanEntryStatus::Completed => "completed",
-        _ => "pending",
+        AcpPlanEntryStatus::Pending => FxgPlanEntryStatus::Pending,
+        AcpPlanEntryStatus::InProgress => FxgPlanEntryStatus::InProgress,
+        AcpPlanEntryStatus::Completed => FxgPlanEntryStatus::Completed,
+        _ => FxgPlanEntryStatus::Unknown(acp_wire_value(status)),
     }
 }
 
-fn permission_kind_str(kind: PermissionOptionKind) -> &'static str {
+fn permission_kind(kind: AcpPermissionOptionKind) -> FxgPermissionOptionKind {
     match kind {
-        PermissionOptionKind::AllowOnce => "allow_once",
-        PermissionOptionKind::AllowAlways => "allow_always",
-        PermissionOptionKind::RejectOnce => "reject_once",
-        PermissionOptionKind::RejectAlways => "reject_always",
-        _ => "unknown",
+        AcpPermissionOptionKind::AllowOnce => FxgPermissionOptionKind::AllowOnce,
+        AcpPermissionOptionKind::AllowAlways => FxgPermissionOptionKind::AllowAlways,
+        AcpPermissionOptionKind::RejectOnce => FxgPermissionOptionKind::RejectOnce,
+        AcpPermissionOptionKind::RejectAlways => FxgPermissionOptionKind::RejectAlways,
+        _ => FxgPermissionOptionKind::Unknown(acp_wire_value(&kind)),
     }
 }
 
@@ -2757,8 +2770,8 @@ mod tests {
                 ..
             } => {
                 assert_eq!(tool_call_id, "t-1");
-                assert_eq!(kind, "edit");
-                assert_eq!(status, "completed");
+                assert_eq!(kind, FxgToolCallKind::Edit);
+                assert_eq!(status, FxgToolCallStatus::Completed);
                 assert_eq!(locations, vec!["src/lib.rs"]);
                 let diff = diff.expect("diff");
                 assert_eq!(diff.path, "src/lib.rs");
@@ -2782,7 +2795,7 @@ mod tests {
             DriverEvent::Event(UnifiedEventPayload::PlanUpdate { entries }) => {
                 assert_eq!(entries.len(), 1);
                 assert_eq!(entries[0].title, "Run tests");
-                assert_eq!(entries[0].status, "in_progress");
+                assert_eq!(entries[0].status, FxgPlanEntryStatus::InProgress);
             }
             other => panic!("unexpected event: {other:?}"),
         }

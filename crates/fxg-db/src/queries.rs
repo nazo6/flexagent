@@ -842,7 +842,10 @@ impl ElicitationRow {
             session_id: self.session_id,
             node_id: self.node_id,
             message: self.message,
-            mode: self.mode,
+            mode: match self.mode.parse() {
+                Ok(mode) => mode,
+                Err(never) => match never {},
+            },
             requested_schema,
             tool_call_id: self.tool_call_id,
             content,

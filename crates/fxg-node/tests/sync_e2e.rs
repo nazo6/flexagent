@@ -30,7 +30,9 @@ use fxg_acp::{
 use fxg_db::{Db, DbRole};
 use fxg_node::daemon::{DaemonConfig, NodeDaemon};
 use fxg_node::session_manager::{DriverFactory, StartSessionParams};
-use fxg_protocol::common::{ErrorCode, PermissionOption, SessionStatus, StreamDeltaPayload};
+use fxg_protocol::common::{
+    ErrorCode, PermissionOption, PermissionOptionKind, SessionStatus, StreamDeltaPayload,
+};
 use fxg_protocol::events::UnifiedEventPayload;
 use fxg_server::Server;
 use fxg_server::api::auth::{generate_token, hash_token};
@@ -606,12 +608,12 @@ async fn central_server_commands_permissions_and_kill_switch() {
             PermissionOption {
                 option_id: "allow_once".to_owned(),
                 name: "Allow".to_owned(),
-                kind: "allow_once".to_owned(),
+                kind: PermissionOptionKind::AllowOnce,
             },
             PermissionOption {
                 option_id: "allow_always".to_owned(),
                 name: "Allow always".to_owned(),
-                kind: "allow_always".to_owned(),
+                kind: PermissionOptionKind::AllowAlways,
             },
         ],
         details: json!({ "command": "cargo test" }),

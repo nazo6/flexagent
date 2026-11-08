@@ -245,11 +245,11 @@ pub fn permission_notification(
 ) -> PushNotificationPayload {
     let allow = options
         .iter()
-        .find(|option| option.kind.starts_with("allow"))
+        .find(|option| option.kind.is_allow())
         .map(|option| option.option_id.clone());
     let reject = options
         .iter()
-        .find(|option| option.kind.starts_with("reject"))
+        .find(|option| option.kind.is_reject())
         .map(|option| option.option_id.clone());
     let title = match session_title {
         Some(title) => format!("[flexagent] Approval request ({node_label}) — {title}"),
@@ -463,7 +463,7 @@ pub async fn notify_elicitations(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fxg_protocol::common::PermissionOption;
+    use fxg_protocol::common::{PermissionOption, PermissionOptionKind};
 
     fn test_service() -> (PushService, tempfile::TempDir) {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -553,17 +553,17 @@ mod tests {
             PermissionOption {
                 option_id: "reject".to_owned(),
                 name: "Reject".to_owned(),
-                kind: "reject_once".to_owned(),
+                kind: PermissionOptionKind::RejectOnce,
             },
             PermissionOption {
                 option_id: "allow_once".to_owned(),
                 name: "Allow".to_owned(),
-                kind: "allow_once".to_owned(),
+                kind: PermissionOptionKind::AllowOnce,
             },
             PermissionOption {
                 option_id: "allow_always".to_owned(),
                 name: "Always".to_owned(),
-                kind: "allow_always".to_owned(),
+                kind: PermissionOptionKind::AllowAlways,
             },
         ];
         let payload = permission_notification(

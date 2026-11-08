@@ -513,6 +513,58 @@ pub struct ProjectNodeBinding {
     pub last_used_at: i64,
 }
 
+crate::open_string_enum! {
+    /// Kind of a tool call (ACP `ToolKind`).
+    pub enum ToolCallKind {
+        /// Read a file or resource
+        Read => "read",
+        /// Edit / delete / move a file
+        Edit => "edit",
+        /// Search files or content
+        Search => "search",
+        /// Execute a command
+        Execute => "execute",
+        /// Any other tool
+        Other => "other",
+    }
+}
+
+crate::open_string_enum! {
+    /// Status of a tool call (ACP `ToolCallStatus`).
+    pub enum ToolCallStatus {
+        /// Waiting to start
+        Pending => "pending",
+        /// Running
+        InProgress => "in_progress",
+        /// Finished successfully
+        Completed => "completed",
+        /// Failed
+        Failed => "failed",
+    }
+}
+
+crate::open_string_enum! {
+    /// Status of a plan entry (ACP `PlanEntryStatus`).
+    pub enum PlanEntryStatus {
+        /// Not started
+        Pending => "pending",
+        /// In progress
+        InProgress => "in_progress",
+        /// Completed
+        Completed => "completed",
+    }
+}
+
+crate::open_string_enum! {
+    /// Mode of an elicitation request (ACP `ElicitationMode`).
+    pub enum ElicitationMode {
+        /// Structured form
+        Form => "form",
+        /// URL-based interaction
+        Url => "url",
+    }
+}
+
 /// Ephemeral chunk produced while streaming.
 ///
 /// It is never persisted to the DB and never resent (exclusive to
@@ -541,7 +593,7 @@ pub enum StreamDeltaPayload {
         /// Tool call ID
         tool_call_id: String,
         /// Updated status
-        status: String,
+        status: ToolCallStatus,
         /// Output delta (optional)
         raw_output_delta: Option<String>,
     },
@@ -596,8 +648,62 @@ pub struct PlanEntry {
     pub id: String,
     /// Display title
     pub title: String,
-    /// Status (`pending` / `in_progress` / `completed` etc.)
-    pub status: String,
+    /// Status (`pending` / `in_progress` / `completed`)
+    pub status: PlanEntryStatus,
+}
+
+crate::open_string_enum! {
+    /// Kind of a permission approval option (ACP `PermissionOptionKind`).
+    pub enum PermissionOptionKind {
+        /// Allow this request once
+        AllowOnce => "allow_once",
+        /// Allow this kind of request for the rest of the session
+        AllowAlways => "allow_always",
+        /// Reject this request once
+        RejectOnce => "reject_once",
+        /// Reject this kind of request for the rest of the session
+        RejectAlways => "reject_always",
+    }
+}
+
+impl PermissionOptionKind {
+    /// Whether this option allows the request.
+    ///
+    /// Unknown values fall back to the `allow*` naming convention.
+    pub fn is_allow(&self) -> bool {
+        match self {
+            Self::AllowOnce | Self::AllowAlways => true,
+            Self::RejectOnce | Self::RejectAlways => false,
+            Self::Unknown(raw) => raw.starts_with("allow"),
+        }
+    }
+
+    /// Whether this option rejects the request.
+    ///
+    /// Unknown values fall back to the `reject*` / `deny*` naming convention.
+    pub fn is_reject(&self) -> bool {
+        match self {
+            Self::RejectOnce | Self::RejectAlways => true,
+            Self::AllowOnce | Self::AllowAlways => false,
+            Self::Unknown(raw) => raw.starts_with("reject") || raw.starts_with("deny"),
+        }
+    }
+
+    /// Whether this option applies for the rest of the session.
+    ///
+    /// Unknown values fall back to the `*always` naming convention.
+    pub fn is_always(&self) -> bool {
+        match self {
+            Self::AllowAlways | Self::RejectAlways => true,
+            Self::AllowOnce | Self::RejectOnce => false,
+            Self::Unknown(raw) => raw.contains("always"),
+        }
+    }
+
+    /// Whether this option applies only to the current request.
+    pub fn is_once(&self) -> bool {
+        !self.is_always()
+    }
 }
 
 /// An option of a permission approval (ACP `PermissionOption`).
@@ -608,14 +714,14 @@ pub struct PermissionOption {
     pub option_id: String,
     /// Display name
     pub name: String,
-    /// Kind (`allow_once` / `allow_always` / `reject_once` / `reject_always` etc.)
-    pub kind: String,
+    /// Kind (`allow_once` / `allow_always` / `reject_once` / `reject_always`)
+    pub kind: PermissionOptionKind,
 }
 
 impl PermissionOption {
-    /// Whether this is a reject-kind option (the kind starts with `reject`).
-    pub fn is_reject_kind(kind: &str) -> bool {
-        kind.starts_with("reject")
+    /// Whether this option rejects the request.
+    pub fn is_reject(&self) -> bool {
+        self.kind.is_reject()
     }
 }
 

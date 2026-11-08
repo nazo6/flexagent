@@ -14,8 +14,9 @@ use fxg_db::{
     SessionFilter,
 };
 use fxg_protocol::common::{
-    CommandInfo, ElicitationAction, ElicitationRequestStatus, ModeInfo, PermissionOption,
-    PermissionRequestStatus, PlanEntry, SessionStatus, UsageCost,
+    CommandInfo, ElicitationAction, ElicitationMode, ElicitationRequestStatus, ModeInfo,
+    PermissionOption, PermissionOptionKind, PermissionRequestStatus, PlanEntry, PlanEntryStatus,
+    SessionStatus, UsageCost,
 };
 use fxg_protocol::events::{SessionEventEnvelope, UnifiedEventPayload};
 use fxg_protocol::util::{now_ms, uuid_v7};
@@ -128,12 +129,12 @@ impl Fixture {
                     PermissionOption {
                         option_id: "allow_once".to_owned(),
                         name: "Allow once".to_owned(),
-                        kind: "allow_once".to_owned(),
+                        kind: PermissionOptionKind::AllowOnce,
                     },
                     PermissionOption {
                         option_id: "reject_once".to_owned(),
                         name: "Reject".to_owned(),
-                        kind: "reject_once".to_owned(),
+                        kind: PermissionOptionKind::RejectOnce,
                     },
                 ],
                 details: serde_json::json!({ "command": "cargo test --workspace" }),
@@ -430,7 +431,7 @@ async fn permission_rejection_is_projected_from_option_kind() {
         options: vec![PermissionOption {
             option_id: "no".to_owned(),
             name: "Reject".to_owned(),
-            kind: "reject_once".to_owned(),
+            kind: PermissionOptionKind::RejectOnce,
         }],
         details: serde_json::json!({}),
     });
@@ -468,7 +469,7 @@ async fn elicitation_projection_tracks_pending_and_resolved() {
     let request = fixture.event(UnifiedEventPayload::ElicitationRequest {
         elicitation_id: "elic-1".to_owned(),
         message: "Which strategy should we use?".to_owned(),
-        mode: "form".to_owned(),
+        mode: ElicitationMode::Form,
         requested_schema: serde_json::json!({
             "type": "object",
             "properties": {
@@ -1019,7 +1020,7 @@ async fn session_filters_and_plan_projection() {
         entries: vec![PlanEntry {
             id: "1".to_owned(),
             title: "Add tests".to_owned(),
-            status: "pending".to_owned(),
+            status: PlanEntryStatus::Pending,
         }],
     });
     let stopped = fixture.event(UnifiedEventPayload::StatusChanged {
