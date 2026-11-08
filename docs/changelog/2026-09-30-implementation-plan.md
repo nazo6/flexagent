@@ -1239,3 +1239,12 @@
     プロンプトがタイムラインに混入するバグを修正)。
   - **テスト**: `reducer.test.ts` に他セッションの pending を無視する
     ケースを追加 (`mise run check:ui` 通過)。
+
+---
+
+## 後続計画
+
+Phase 1〜6 の初期実装完了後、エラー処理・診断性・復旧性の改善を
+[`2026-11-08-error-handling-and-recovery-plan.md`](2026-11-08-error-handling-and-recovery-plan.md)
+で Phase 1〜6 に分割して進める。エラー契約（`ErrorInfo` / `RecoveryAction`）、
+握り潰しの修正、診断基盤、復旧 UI、事前検証、契約テストを対象とする。
