@@ -727,7 +727,7 @@ impl NodeHub {
         match tokio::time::timeout(timeout, rx).await {
             Ok(Ok(response)) => Ok(response),
             Ok(Err(_canceled)) => Err(ApiError::node_offline(
-                &node_id,
+                node_id,
                 format!("node {node_id} disconnected"),
             )),
             Err(_) => {

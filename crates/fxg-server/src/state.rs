@@ -990,7 +990,7 @@ impl ClientApiBackend for ServerState {
     ) -> Result<ProjectScanResponse, ApiError> {
         if !self.inner.hub.is_online(node_id).await {
             return Err(ApiError::node_offline(
-                &node_id,
+                node_id,
                 format!("node is offline: {node_id}"),
             ));
         }
@@ -1030,7 +1030,7 @@ impl ClientApiBackend for ServerState {
     ) -> Result<ProjectLinkResponse, ApiError> {
         if !self.inner.hub.is_online(node_id).await {
             return Err(ApiError::node_offline(
-                &node_id,
+                node_id,
                 format!("node is offline: {node_id}"),
             ));
         }
@@ -1102,7 +1102,7 @@ impl ClientApiBackend for ServerState {
     ) -> Result<AgentOpResponse, ApiError> {
         if !self.inner.hub.is_online(node_id).await {
             return Err(ApiError::node_offline(
-                &node_id,
+                node_id,
                 format!("node is offline: {node_id}"),
             ));
         }
@@ -1344,7 +1344,7 @@ impl ClientApiBackend for ServerState {
     ) -> Result<fxg_protocol::client_api::FsBrowseResponse, ApiError> {
         if !self.inner.hub.is_online(node_id).await {
             return Err(ApiError::node_offline(
-                &node_id,
+                node_id,
                 format!("node is offline: {node_id}"),
             ));
         }
