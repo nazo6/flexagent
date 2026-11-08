@@ -14,9 +14,9 @@ use fxg_db::{
     SessionFilter,
 };
 use fxg_protocol::common::{
-    CommandInfo, ElicitationAction, ElicitationMode, ElicitationRequestStatus, ModeInfo,
-    PermissionOption, PermissionOptionKind, PermissionRequestStatus, PlanEntry, PlanEntryStatus,
-    SessionStatus, UsageCost,
+    ClientSource, CommandInfo, ElicitationAction, ElicitationMode, ElicitationRequestStatus,
+    ModeInfo, PermissionOption, PermissionOptionKind, PermissionRequestStatus, PlanEntry,
+    PlanEntryStatus, ResolvedBy, SessionStatus, UsageCost,
 };
 use fxg_protocol::events::{SessionEventEnvelope, UnifiedEventPayload};
 use fxg_protocol::util::{now_ms, uuid_v7};
@@ -118,7 +118,7 @@ impl Fixture {
             self.event(UnifiedEventPayload::UserMessage {
                 text: "Fix the authentication error".to_owned(),
                 attachments: vec![],
-                client_source: "cli".to_owned(),
+                client_source: ClientSource::Cli,
                 snapshot_tree_hash: Some("b".repeat(40)),
             }),
             self.event(UnifiedEventPayload::PermissionRequest {
@@ -142,7 +142,7 @@ impl Fixture {
             self.event(UnifiedEventPayload::PermissionResolved {
                 request_id: "req-1".to_owned(),
                 selected_option_id: "allow_once".to_owned(),
-                resolved_by: "cli".to_owned(),
+                resolved_by: ResolvedBy::Cli,
             }),
         ];
         self.db.append_events(&events).await.expect("append events");
@@ -315,7 +315,7 @@ async fn event_application_updates_session_projections() {
         .expect("find request")
         .expect("request exists");
     assert_eq!(request.status, PermissionRequestStatus::Approved);
-    assert_eq!(request.resolved_by.as_deref(), Some("cli"));
+    assert_eq!(request.resolved_by, Some(ResolvedBy::Cli));
     assert!(request.resolved_at.is_some());
     assert_eq!(request.options.len(), 2);
     assert_eq!(request.summary, "Run command: cargo test --workspace");
@@ -448,7 +448,7 @@ async fn permission_rejection_is_projected_from_option_kind() {
     let resolved = fixture.event(UnifiedEventPayload::PermissionResolved {
         request_id: "req-reject".to_owned(),
         selected_option_id: "no".to_owned(),
-        resolved_by: "android_push".to_owned(),
+        resolved_by: ResolvedBy::AndroidPush,
     });
     fixture.db.append_event(&resolved).await.expect("append");
 
@@ -459,7 +459,7 @@ async fn permission_rejection_is_projected_from_option_kind() {
         .expect("find")
         .expect("exists");
     assert_eq!(request.status, PermissionRequestStatus::Rejected);
-    assert_eq!(request.resolved_by.as_deref(), Some("android_push"));
+    assert_eq!(request.resolved_by, Some(ResolvedBy::AndroidPush));
 }
 
 #[tokio::test]
@@ -496,7 +496,7 @@ async fn elicitation_projection_tracks_pending_and_resolved() {
         elicitation_id: "elic-1".to_owned(),
         action: ElicitationAction::Accept,
         content: serde_json::json!({ "strategy": "a" }),
-        resolved_by: "web".to_owned(),
+        resolved_by: ResolvedBy::Web,
     });
     fixture.db.append_event(&resolved).await.expect("append");
 
@@ -508,7 +508,7 @@ async fn elicitation_projection_tracks_pending_and_resolved() {
         .expect("exists");
     assert_eq!(entry.status, ElicitationRequestStatus::Accepted);
     assert_eq!(entry.content["strategy"], "a");
-    assert_eq!(entry.resolved_by.as_deref(), Some("web"));
+    assert_eq!(entry.resolved_by, Some(ResolvedBy::Web));
     assert!(
         fixture
             .db
@@ -554,7 +554,7 @@ async fn rebuild_projections_matches_incremental_apply() {
     let forked_message = fixture.event(UnifiedEventPayload::UserMessage {
         text: "This is a forked session".to_owned(),
         attachments: vec![],
-        client_source: "web".to_owned(),
+        client_source: ClientSource::Web,
         snapshot_tree_hash: None,
     });
     fixture
@@ -708,7 +708,7 @@ async fn fts_search_matches_text_and_excludes_binary_events() {
     let user = fixture.event(UnifiedEventPayload::UserMessage {
         text: "認証エラーのデバッグをお願いします".to_owned(), // allow-japanese: CJK full-text search test
         attachments: vec![],
-        client_source: "cli".to_owned(),
+        client_source: ClientSource::Cli,
         snapshot_tree_hash: None,
     });
     let terminal = fixture.event(UnifiedEventPayload::TerminalOutput {
@@ -735,7 +735,10 @@ async fn fts_search_matches_text_and_excludes_binary_events() {
         .await
         .expect("search japanese");
     assert_eq!(hits.len(), 1);
-    assert_eq!(hits[0].event_type, "user_message");
+    assert_eq!(
+        hits[0].event_type,
+        fxg_protocol::common::EventType::UserMessage
+    );
     assert!(hits[0].snippet.contains("認証エラー")); // allow-japanese: CJK full-text search test
     assert!(hits[0].snippet.contains('['));
 
@@ -746,7 +749,10 @@ async fn fts_search_matches_text_and_excludes_binary_events() {
         .await
         .expect("search identifier");
     assert_eq!(hits.len(), 1);
-    assert_eq!(hits[0].event_type, "agent_message");
+    assert_eq!(
+        hits[0].event_type,
+        fxg_protocol::common::EventType::AgentMessage
+    );
 
     // TerminalOutput (binary) is excluded from FTS
     let hits = fixture
@@ -1395,7 +1401,7 @@ async fn append_next_event_allocates_gap_free_sequences() {
             UnifiedEventPayload::UserMessage {
                 text: "Continue".to_owned(),
                 attachments: vec![],
-                client_source: "cli".to_owned(),
+                client_source: ClientSource::Cli,
                 snapshot_tree_hash: None,
             },
         )
@@ -1440,7 +1446,7 @@ async fn append_next_event_allocates_gap_free_sequences() {
         .expect_err("terminal input");
     assert!(matches!(
         err,
-        DbError::NonPersistableEvent("terminal_input")
+        DbError::NonPersistableEvent(fxg_protocol::common::EventType::TerminalInput)
     ));
 
     // Rejection does not consume node_seq (the transaction is rolled back)
@@ -1473,7 +1479,10 @@ async fn non_persistable_events_are_rejected_on_batch_append() {
         .append_events(&[created.clone(), partial.clone()])
         .await
         .expect_err("incomplete message");
-    assert!(matches!(err, DbError::NonPersistableEvent("agent_message")));
+    assert!(matches!(
+        err,
+        DbError::NonPersistableEvent(fxg_protocol::common::EventType::AgentMessage)
+    ));
 
     // The whole batch is rolled back (SessionCreated is not inserted either)
     assert!(
@@ -1633,7 +1642,7 @@ async fn session_deletion_purges_content_and_keeps_tombstone() {
         payload: UnifiedEventPayload::UserMessage {
             text: "event received after deletion".to_owned(),
             attachments: vec![],
-            client_source: "web".to_owned(),
+            client_source: ClientSource::Web,
             snapshot_tree_hash: None,
         },
     };

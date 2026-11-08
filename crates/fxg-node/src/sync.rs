@@ -475,7 +475,7 @@ pub(crate) async fn handle_server_message(
         } => {
             let result = state
                 .session_manager()
-                .send_prompt(&command_id, &session_id, &text, &client_source)
+                .send_prompt(&command_id, &session_id, &text, client_source)
                 .await
                 .map(|()| session_id);
             send_command_result(out, command_id, result).await;
@@ -494,7 +494,7 @@ pub(crate) async fn handle_server_message(
                     &session_id,
                     &request_id,
                     &selected_option_id,
-                    &resolved_by,
+                    resolved_by.clone(),
                 )
                 .await
                 .map(|()| session_id.clone());
@@ -530,7 +530,7 @@ pub(crate) async fn handle_server_message(
                     &elicitation_id,
                     action,
                     content.clone(),
-                    &resolved_by,
+                    resolved_by.clone(),
                 )
                 .await
                 .map(|()| session_id.clone());

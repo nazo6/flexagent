@@ -11,51 +11,53 @@
     reason = "audit details are display-only opaque JSON; see docs/06-type-safety.md"
 )]
 
+use fxg_protocol::common::AuditAction;
 use fxg_protocol::util::now_ms;
 use sqlx::SqlitePool;
 
 use crate::error::DbError;
 
-/// Audit log `action` kinds.
+/// Audit log `action` kinds (kept for call-site readability).
 pub mod actions {
-    /// Session started
-    pub const SESSION_START: &str = "session_start";
-    /// Session reverted (Shadow Git Tree Revert)
-    pub const SESSION_REVERT: &str = "session_revert";
-    /// Session resumed (resume a stopped session)
-    pub const SESSION_RESUME: &str = "session_resume";
-    /// Session archived/restored
-    pub const SESSION_ARCHIVE: &str = "session_archive";
-    /// Session deleted (purge of event bodies)
-    pub const SESSION_DELETE: &str = "session_delete";
-    /// Permission resolved (Approve / Reject)
-    pub const PERMISSION_RESOLVED: &str = "permission_resolved";
+    use fxg_protocol::common::AuditAction;
 
+    /// Session started
+    pub const SESSION_START: AuditAction = AuditAction::SessionStart;
+    /// Session reverted (Shadow Git Tree Revert)
+    pub const SESSION_REVERT: AuditAction = AuditAction::SessionRevert;
+    /// Session resumed (resume a stopped session)
+    pub const SESSION_RESUME: AuditAction = AuditAction::SessionResume;
+    /// Session archived/restored
+    pub const SESSION_ARCHIVE: AuditAction = AuditAction::SessionArchive;
+    /// Session deleted (purge of event bodies)
+    pub const SESSION_DELETE: AuditAction = AuditAction::SessionDelete;
+    /// Permission resolved (Approve / Reject)
+    pub const PERMISSION_RESOLVED: AuditAction = AuditAction::PermissionResolved;
     /// Elicitation (question) resolved
-    pub const ELICITATION_RESOLVED: &str = "elicitation_resolved";
+    pub const ELICITATION_RESOLVED: AuditAction = AuditAction::ElicitationResolved;
     /// Web PTY spawned
-    pub const PTY_SPAWN: &str = "pty_spawn";
+    pub const PTY_SPAWN: AuditAction = AuditAction::PtySpawn;
     /// Emergency kill switch executed
-    pub const KILL_SWITCH: &str = "kill_switch";
+    pub const KILL_SWITCH: AuditAction = AuditAction::KillSwitch;
     /// Worktree operation (create / delete)
-    pub const WORKTREE_MANAGE: &str = "worktree_manage";
+    pub const WORKTREE_MANAGE: AuditAction = AuditAction::WorktreeManage;
     /// Worktree cleanup (prune)
-    pub const WORKTREE_PRUNE: &str = "worktree_prune";
+    pub const WORKTREE_PRUNE: AuditAction = AuditAction::WorktreePrune;
     /// Project binding (manual Link / bulk Scan)
-    pub const PROJECT_LINK: &str = "project_link";
+    pub const PROJECT_LINK: AuditAction = AuditAction::ProjectLink;
     /// Agent management (install / update / delete)
-    pub const AGENT_MANAGE: &str = "agent_manage";
+    pub const AGENT_MANAGE: AuditAction = AuditAction::AgentManage;
     /// Node token issuance / revocation
-    pub const NODE_TOKEN_MANAGE: &str = "node_token_manage";
+    pub const NODE_TOKEN_MANAGE: AuditAction = AuditAction::NodeTokenManage;
     /// Client auth token regeneration
-    pub const AUTH_TOKEN_ROTATE: &str = "auth_token_rotate";
+    pub const AUTH_TOKEN_ROTATE: AuditAction = AuditAction::AuthTokenRotate;
 }
 
 /// Contents of an audit log record.
 #[derive(Debug, Clone)]
 pub struct AuditLogRecord {
-    /// Operation kind (a constant from [`actions`])
-    pub action: String,
+    /// Operation kind
+    pub action: AuditAction,
     /// Related session ID (optional)
     pub session_id: Option<String>,
     /// Target node ID (optional; on the node side this is the node itself)
@@ -73,12 +75,12 @@ pub struct AuditLogRecord {
 impl AuditLogRecord {
     /// Builds a record from the required fields (details default to an empty object).
     pub fn new(
-        action: impl Into<String>,
+        action: AuditAction,
         client_ip: impl Into<String>,
         auth_subject: impl Into<String>,
     ) -> Self {
         Self {
-            action: action.into(),
+            action,
             session_id: None,
             node_id: None,
             client_ip: client_ip.into(),
@@ -99,7 +101,7 @@ pub async fn append_audit_log(pool: &SqlitePool, record: &AuditLogRecord) -> Res
              details_json, created_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         "#,
-        record.action,
+        record.action.as_str(),
         record.session_id.as_deref(),
         record.node_id.as_deref(),
         record.client_ip,

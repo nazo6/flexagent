@@ -21,7 +21,7 @@ pub enum DbError {
     /// Attempted to append an event that must not be persisted
     /// (streaming chunks, keystrokes, etc.)
     #[error("event is not persistable: {0}")]
-    NonPersistableEvent(&'static str),
+    NonPersistableEvent(fxg_protocol::common::EventType),
     /// `node_seq` is negative (data corruption)
     #[error("node_seq {0} is negative")]
     NegativeNodeSeq(i64),

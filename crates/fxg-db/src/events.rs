@@ -194,7 +194,7 @@ async fn append_event_in_tx(
         envelope.event_id,
         envelope.session_id,
         node_seq,
-        event_type,
+        event_type.as_str(),
         payload_json,
         searchable_text,
         envelope.created_at,
@@ -499,7 +499,7 @@ pub(crate) async fn apply_projections(
                  WHERE request_id = ?
                 "#,
                 status.as_str(),
-                resolved_by,
+                resolved_by.as_str(),
                 envelope.created_at,
                 request_id,
             )
@@ -562,7 +562,7 @@ pub(crate) async fn apply_projections(
                 "#,
                 status.as_str(),
                 content_json,
-                resolved_by,
+                resolved_by.as_str(),
                 envelope.created_at,
                 elicitation_id,
             )
@@ -712,13 +712,24 @@ fn resolve_permission_status(
         Some(kind) if kind.is_reject() => PermissionRequestStatus::Rejected,
         Some(_) => PermissionRequestStatus::Approved,
         None => {
-            if selected_option_id.contains("reject") || selected_option_id.contains("deny") {
+            if option_id_looks_like_reject(selected_option_id) {
                 PermissionRequestStatus::Rejected
             } else {
                 PermissionRequestStatus::Approved
             }
         }
     }
+}
+
+/// Fallback for mid-resync rows without decodable options.
+///
+/// Option IDs conventionally contain `reject` / `deny` for rejection.
+#[allow(
+    clippy::disallowed_methods,
+    reason = "documented legacy fallback for rows whose option kind is unavailable"
+)]
+fn option_id_looks_like_reject(selected_option_id: &str) -> bool {
+    selected_option_id.contains("reject") || selected_option_id.contains("deny")
 }
 
 /// Rebuilds the `sessions` / `permission_requests` / `elicitation_requests` projections from
@@ -813,7 +824,7 @@ pub async fn regenerate_searchable_text(pool: &SqlitePool) -> Result<u64, DbErro
         let (event_type, searchable_text) = searchable::classify_payload(&envelope.payload);
         let result = sqlx::query!(
             r#"UPDATE session_events SET event_type = ?, searchable_text = ? WHERE cursor = ?"#,
-            event_type,
+            event_type.as_str(),
             searchable_text,
             row.cursor,
         )
@@ -863,4 +874,58 @@ fn node_seq_to_i64(session_id: &str, node_seq: u64) -> Result<i64, DbError> {
         session_id: session_id.to_owned(),
         node_seq,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use fxg_protocol::common::PermissionOptionKind;
+
+    fn details(options: &[(&str, PermissionOptionKind)]) -> String {
+        let options = options
+            .iter()
+            .map(|(option_id, kind)| PermissionOption {
+                option_id: (*option_id).to_owned(),
+                name: (*option_id).to_owned(),
+                kind: kind.clone(),
+            })
+            .collect::<Vec<_>>();
+        serde_json::to_string(&StoredPermissionDetails {
+            details: serde_json::json!({}),
+            options,
+        })
+        .expect("details")
+    }
+
+    #[test]
+    fn permission_status_uses_the_matching_option_kind() {
+        let stored = details(&[
+            ("allow", PermissionOptionKind::AllowOnce),
+            ("deny", PermissionOptionKind::RejectOnce),
+        ]);
+        assert_eq!(
+            resolve_permission_status(Some(&stored), "allow"),
+            PermissionRequestStatus::Approved
+        );
+        assert_eq!(
+            resolve_permission_status(Some(&stored), "deny"),
+            PermissionRequestStatus::Rejected
+        );
+    }
+
+    #[test]
+    fn permission_status_falls_back_to_the_option_id() {
+        assert_eq!(
+            resolve_permission_status(None, "reject_once"),
+            PermissionRequestStatus::Rejected
+        );
+        assert_eq!(
+            resolve_permission_status(None, "deny"),
+            PermissionRequestStatus::Rejected
+        );
+        assert_eq!(
+            resolve_permission_status(None, "allow_once"),
+            PermissionRequestStatus::Approved
+        );
+    }
 }

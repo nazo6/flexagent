@@ -725,6 +725,48 @@ impl PermissionOption {
     }
 }
 
+crate::open_string_enum! {
+    /// Where a prompt / command came from.
+    pub enum ClientSource {
+        /// The CLI
+        Cli => "cli",
+        /// The Web UI
+        Web => "web",
+        /// An Android PWA client
+        Android => "android",
+        /// History injected when forking a session
+        Fork => "fork",
+        /// History injected when resuming a session
+        Resume => "resume",
+    }
+}
+
+crate::open_string_enum! {
+    /// Who resolved a permission / elicitation request.
+    pub enum ResolvedBy {
+        /// The CLI
+        Cli => "cli",
+        /// The Web UI
+        Web => "web",
+        /// An Android push notification
+        AndroidPush => "android_push",
+    }
+}
+
+crate::open_string_enum! {
+    /// Role of a conversation history item injected on fork / resume.
+    pub enum HistoryRole {
+        /// A user utterance
+        User => "user",
+        /// An agent reply
+        Agent => "agent",
+        /// A tool result
+        Tool => "tool",
+        /// An assistant message
+        Assistant => "assistant",
+    }
+}
+
 /// Information about an ACP SessionMode.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
@@ -868,8 +910,8 @@ pub struct WorkspaceDiffResponse {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct ForkHistoryItem {
-    /// Speaker role (`user` / `agent` etc.)
-    pub role: String,
+    /// Speaker role (`user` / `agent` / `tool`)
+    pub role: HistoryRole,
     /// Body text
     pub text: String,
     /// Summary of tool calls etc. (optional)
@@ -1454,7 +1496,7 @@ pub struct PermissionRequestEntry {
     /// Resolution time (Unix epoch ms)
     pub resolved_at: Option<i64>,
     /// Who resolved it (`cli` / `web` / `android_push`)
-    pub resolved_by: Option<String>,
+    pub resolved_by: Option<ResolvedBy>,
 }
 
 /// Elicitation request projection exposed to clients (the question inbox).
@@ -1473,7 +1515,7 @@ pub struct ElicitationRequestEntry {
     /// Message shown to the user
     pub message: String,
     /// Request mode (`form` / `url`. Phase 1 supports `form` only)
-    pub mode: String,
+    pub mode: ElicitationMode,
     /// JSON Schema of the request in form mode (`requestedSchema`)
     pub requested_schema: serde_json::Value,
     /// Related tool call ID (optional)
@@ -1487,7 +1529,59 @@ pub struct ElicitationRequestEntry {
     /// Resolution time (Unix epoch ms)
     pub resolved_at: Option<i64>,
     /// Who resolved it (`cli` / `web` / `android_push`)
-    pub resolved_by: Option<String>,
+    pub resolved_by: Option<ResolvedBy>,
+}
+
+crate::open_string_enum! {
+    /// Type of a persisted session event (`session_events.event_type`).
+    pub enum EventType {
+        /// Session created
+        SessionCreated => "session_created",
+        /// Session title changed
+        SessionTitleChanged => "session_title_changed",
+        /// Agent session bound
+        SessionAgentBound => "session_agent_bound",
+        /// User message
+        UserMessage => "user_message",
+        /// Agent message
+        AgentMessage => "agent_message",
+        /// Agent thought
+        AgentThought => "agent_thought",
+        /// Tool call
+        ToolCall => "tool_call",
+        /// Plan update
+        Plan => "plan",
+        /// Permission request
+        PermissionRequest => "permission_request",
+        /// Permission resolved
+        PermissionResolved => "permission_resolved",
+        /// Elicitation request
+        ElicitationRequest => "elicitation_request",
+        /// Elicitation resolved
+        ElicitationResolved => "elicitation_resolved",
+        /// Session reverted
+        SessionReverted => "session_reverted",
+        /// Session archived
+        SessionArchived => "session_archived",
+        /// Session deleted
+        SessionDeleted => "session_deleted",
+        /// Terminal output
+        TerminalOutput => "terminal_output",
+        /// Terminal input
+        TerminalInput => "terminal_input",
+        /// Capabilities updated
+        CapabilitiesUpdated => "capabilities_updated",
+        /// Bootstrap log
+        BootstrapLog => "bootstrap_log",
+        /// Usage updated
+        UsageUpdated => "usage_updated",
+        /// Turn ended
+        TurnEnded => "turn_ended",
+        /// Compaction updated
+        CompactionUpdated => "compaction_updated",
+        /// Session status changed
+        StatusChanged => "status_change",
+    }
 }
 
 /// A hit of the FTS5 full-text search.
@@ -1501,11 +1595,47 @@ pub struct SearchHit {
     /// Sequence number inside the session
     pub node_seq: u64,
     /// Event type
-    pub event_type: String,
+    pub event_type: EventType,
     /// Snippet (an excerpt containing the match)
     pub snippet: String,
     /// Event creation time (Unix epoch ms)
     pub created_at: i64,
+}
+
+crate::open_string_enum! {
+    /// Kind of an audit log action.
+    pub enum AuditAction {
+        /// Session started
+        SessionStart => "session_start",
+        /// Session reverted
+        SessionRevert => "session_revert",
+        /// Session resumed
+        SessionResume => "session_resume",
+        /// Session archived / restored
+        SessionArchive => "session_archive",
+        /// Session deleted
+        SessionDelete => "session_delete",
+        /// Permission resolved
+        PermissionResolved => "permission_resolved",
+        /// Elicitation resolved
+        ElicitationResolved => "elicitation_resolved",
+        /// Web PTY spawned
+        PtySpawn => "pty_spawn",
+        /// Emergency kill switch
+        KillSwitch => "kill_switch",
+        /// Worktree managed
+        WorktreeManage => "worktree_manage",
+        /// Worktree pruned
+        WorktreePrune => "worktree_prune",
+        /// Project binding changed
+        ProjectLink => "project_link",
+        /// Agent managed
+        AgentManage => "agent_manage",
+        /// Node token issued / revoked
+        NodeTokenManage => "node_token_manage",
+        /// Client auth token rotated
+        AuthTokenRotate => "auth_token_rotate",
+    }
 }
 
 /// An audit log entry (`GET /api/v1/audit/logs`).
@@ -1515,7 +1645,7 @@ pub struct AuditLogEntry {
     /// Log ID
     pub id: i64,
     /// Action kind (`session_start` / `permission_resolved` / `pty_spawn` / `kill_switch` / `worktree_manage`)
-    pub action: String,
+    pub action: AuditAction,
     /// Related session ID (optional)
     pub session_id: Option<String>,
     /// Target node ID (optional)

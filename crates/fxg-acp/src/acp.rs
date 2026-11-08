@@ -338,8 +338,8 @@ impl ProcessLease {
 
 #[async_trait]
 impl AgentDriver for AcpDriver {
-    fn driver_kind(&self) -> &'static str {
-        "acp"
+    fn driver_kind(&self) -> crate::driver::DriverKind {
+        crate::driver::DriverKind::Acp
     }
 
     async fn start_session(
@@ -739,7 +739,9 @@ fn cancel_pending_elicitations(
                         elicitation_id,
                         action: fxg_protocol::common::ElicitationAction::Cancel,
                         content: serde_json::Value::Null,
-                        resolved_by: "system".to_owned(),
+                        resolved_by: fxg_protocol::common::ResolvedBy::Unknown(
+                            "system".to_owned(),
+                        ),
                     },
                 )),
                 "notify event subscribers"

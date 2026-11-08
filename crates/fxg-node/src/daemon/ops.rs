@@ -77,13 +77,13 @@ impl DaemonState {
     /// Records an audit log entry in `node.db.audit_logs` (failures are only warned about).
     pub async fn record_audit(
         &self,
-        action: &str,
+        action: fxg_protocol::common::AuditAction,
         source: &AuditSource,
         session_id: Option<&str>,
         details: serde_json::Value,
     ) {
         let mut audit = fxg_db::AuditLogRecord::new(
-            action,
+            action.clone(),
             source.client_ip.clone(),
             source.auth_subject.clone(),
         );

@@ -19,9 +19,9 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 
 use crate::common::{
-    AttachmentMeta, CommandInfo, CompactionStatus, ConfigOptionInfo, ElicitationAction,
-    ElicitationMode, FileDiff, ModeInfo, PermissionOption, PlanEntry, SessionStatus, ToolCallKind,
-    ToolCallStatus, TurnStopReason, UsageCost,
+    AttachmentMeta, ClientSource, CommandInfo, CompactionStatus, ConfigOptionInfo,
+    ElicitationAction, ElicitationMode, EventType, FileDiff, ModeInfo, PermissionOption, PlanEntry,
+    ResolvedBy, SessionStatus, ToolCallKind, ToolCallStatus, TurnStopReason, UsageCost,
 };
 
 /// Envelope of a session event (the unit of persistence and synchronization).
@@ -119,8 +119,8 @@ pub enum UnifiedEventPayload {
         text: String,
         /// Attached files
         attachments: Vec<AttachmentMeta>,
-        /// Source (`cli` / `web` / `android`)
-        client_source: String,
+        /// Source (`cli` / `web` / `android` / `fork` / `resume`)
+        client_source: ClientSource,
         /// Shadow git tree hash right before the turn started (for revert).
         /// `None` when `snapshot_enabled = false`. This payload is the single
         /// source of truth and is not duplicated into dedicated DB columns.
@@ -199,7 +199,7 @@ pub enum UnifiedEventPayload {
         /// The selected `option_id`
         selected_option_id: String,
         /// Who resolved it (`cli` / `web` / `android_push`)
-        resolved_by: String,
+        resolved_by: ResolvedBy,
     },
     /// A structured input request from the agent (ACP `elicitation/create`).
     ///
@@ -228,7 +228,7 @@ pub enum UnifiedEventPayload {
         /// Answer content for `accept` (`Value::Null` on decline / cancel)
         content: serde_json::Value,
         /// Who resolved it (`cli` / `web` / `android_push`)
-        resolved_by: String,
+        resolved_by: ResolvedBy,
     },
     /// The workspace files were restored to the `snapshot_tree_hash` of a given
     /// turn (revert).
@@ -358,31 +358,31 @@ impl UnifiedEventPayload {
     ///
     /// The values match the `event_type` definitions in
     /// `docs/02-database-schema.md` §1.
-    pub const fn event_type(&self) -> &'static str {
+    pub const fn event_type(&self) -> EventType {
         match self {
-            Self::SessionCreated { .. } => "session_created",
-            Self::SessionTitleChanged { .. } => "session_title_changed",
-            Self::SessionAgentBound { .. } => "session_agent_bound",
-            Self::UserMessage { .. } => "user_message",
-            Self::AgentMessage { .. } => "agent_message",
-            Self::AgentThought { .. } => "agent_thought",
-            Self::ToolCall { .. } => "tool_call",
-            Self::PlanUpdate { .. } => "plan",
-            Self::PermissionRequest { .. } => "permission_request",
-            Self::PermissionResolved { .. } => "permission_resolved",
-            Self::ElicitationRequest { .. } => "elicitation_request",
-            Self::ElicitationResolved { .. } => "elicitation_resolved",
-            Self::SessionReverted { .. } => "session_reverted",
-            Self::SessionArchived { .. } => "session_archived",
-            Self::SessionDeleted {} => "session_deleted",
-            Self::TerminalOutput { .. } => "terminal_output",
-            Self::TerminalInput { .. } => "terminal_input",
-            Self::CapabilitiesUpdated { .. } => "capabilities_updated",
-            Self::BootstrapLog { .. } => "bootstrap_log",
-            Self::UsageUpdated { .. } => "usage_updated",
-            Self::TurnEnded { .. } => "turn_ended",
-            Self::CompactionUpdated { .. } => "compaction_updated",
-            Self::StatusChanged { .. } => "status_change",
+            Self::SessionCreated { .. } => EventType::SessionCreated,
+            Self::SessionTitleChanged { .. } => EventType::SessionTitleChanged,
+            Self::SessionAgentBound { .. } => EventType::SessionAgentBound,
+            Self::UserMessage { .. } => EventType::UserMessage,
+            Self::AgentMessage { .. } => EventType::AgentMessage,
+            Self::AgentThought { .. } => EventType::AgentThought,
+            Self::ToolCall { .. } => EventType::ToolCall,
+            Self::PlanUpdate { .. } => EventType::Plan,
+            Self::PermissionRequest { .. } => EventType::PermissionRequest,
+            Self::PermissionResolved { .. } => EventType::PermissionResolved,
+            Self::ElicitationRequest { .. } => EventType::ElicitationRequest,
+            Self::ElicitationResolved { .. } => EventType::ElicitationResolved,
+            Self::SessionReverted { .. } => EventType::SessionReverted,
+            Self::SessionArchived { .. } => EventType::SessionArchived,
+            Self::SessionDeleted {} => EventType::SessionDeleted,
+            Self::TerminalOutput { .. } => EventType::TerminalOutput,
+            Self::TerminalInput { .. } => EventType::TerminalInput,
+            Self::CapabilitiesUpdated { .. } => EventType::CapabilitiesUpdated,
+            Self::BootstrapLog { .. } => EventType::BootstrapLog,
+            Self::UsageUpdated { .. } => EventType::UsageUpdated,
+            Self::TurnEnded { .. } => EventType::TurnEnded,
+            Self::CompactionUpdated { .. } => EventType::CompactionUpdated,
+            Self::StatusChanged { .. } => EventType::StatusChanged,
         }
     }
 
@@ -405,7 +405,9 @@ impl UnifiedEventPayload {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::common::{CommandInfo, ConfigOptionInfo, ElicitationMode, ModeInfo};
+    use crate::common::{
+        ClientSource, CommandInfo, ConfigOptionInfo, ElicitationMode, ModeInfo, ResolvedBy,
+    };
 
     fn sample_envelope(payload: UnifiedEventPayload) -> SessionEventEnvelope {
         SessionEventEnvelope {
@@ -437,7 +439,7 @@ mod tests {
         let envelope = sample_envelope(UnifiedEventPayload::UserMessage {
             text: "Fix the failing tests".to_owned(),
             attachments: vec![],
-            client_source: "cli".to_owned(),
+            client_source: ClientSource::Cli,
             snapshot_tree_hash: Some("a".repeat(40)),
         });
         let json = serde_json::to_string(&envelope).unwrap();
@@ -502,7 +504,7 @@ mod tests {
             elicitation_id: "elic-1".to_owned(),
             action: ElicitationAction::Accept,
             content: serde_json::json!({ "strategy": "a" }),
-            resolved_by: "cli".to_owned(),
+            resolved_by: ResolvedBy::Cli,
         };
         let json = serde_json::to_value(&resolved).unwrap();
         assert_eq!(json["type"], "elicitation_resolved");
@@ -529,11 +531,11 @@ mod tests {
                 title: "t".into(),
             }
             .event_type(),
-            "session_created"
+            EventType::SessionCreated
         );
         assert_eq!(
             UnifiedEventPayload::PlanUpdate { entries: vec![] }.event_type(),
-            "plan"
+            EventType::Plan
         );
         assert_eq!(
             UnifiedEventPayload::StatusChanged {
@@ -541,7 +543,7 @@ mod tests {
                 error_message: None,
             }
             .event_type(),
-            "status_change"
+            EventType::StatusChanged
         );
     }
 

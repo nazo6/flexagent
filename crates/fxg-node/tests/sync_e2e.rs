@@ -24,14 +24,15 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use fxg_acp::{
-    ActiveSessionHandle, AgentDriver, AgentLaunchSpec, DriverEvent, StartSessionRequest,
-    StartedSession,
+    ActiveSessionHandle, AgentDriver, AgentLaunchSpec, DriverEvent, DriverKind,
+    StartSessionRequest, StartedSession,
 };
 use fxg_db::{Db, DbRole};
 use fxg_node::daemon::{DaemonConfig, NodeDaemon};
 use fxg_node::session_manager::{DriverFactory, StartSessionParams};
 use fxg_protocol::common::{
-    ErrorCode, PermissionOption, PermissionOptionKind, SessionStatus, StreamDeltaPayload,
+    ClientSource, ErrorCode, PermissionOption, PermissionOptionKind, SessionStatus,
+    StreamDeltaPayload,
 };
 use fxg_protocol::events::UnifiedEventPayload;
 use fxg_server::Server;
@@ -94,8 +95,8 @@ impl MockAgent {
 
 #[async_trait]
 impl AgentDriver for MockAgent {
-    fn driver_kind(&self) -> &'static str {
-        "mock"
+    fn driver_kind(&self) -> DriverKind {
+        DriverKind::Other("mock".to_owned())
     }
 
     async fn start_session(
@@ -300,7 +301,12 @@ async fn create_session_with_events(
     daemon
         .state()
         .session_manager()
-        .send_prompt(&format!("prompt-{label}"), &session_id, label, "cli")
+        .send_prompt(
+            &format!("prompt-{label}"),
+            &session_id,
+            label,
+            ClientSource::Cli,
+        )
         .await
         .expect("send prompt");
     // Inject a completed event (AgentMessage) and a streaming delta
@@ -694,7 +700,7 @@ async fn central_server_commands_permissions_and_kill_switch() {
             command_id: "prompt-1".to_owned(),
             session_id: session_id.clone(),
             text: "via ws".to_owned(),
-            client_source: "web".to_owned(),
+            client_source: ClientSource::Web,
         };
         socket
             .send(WsMessage::Text(
@@ -835,7 +841,7 @@ async fn central_server_commands_permissions_and_kill_switch() {
             command_id: "prompt-offline".to_owned(),
             session_id: session_id.clone(),
             text: "nobody home".to_owned(),
-            client_source: "web".to_owned(),
+            client_source: ClientSource::Web,
         };
         socket
             .send(WsMessage::Text(
@@ -941,7 +947,12 @@ async fn central_server_resumes_stopped_session() {
         .expect("start session");
     node.state()
         .session_manager()
-        .send_prompt("prompt-resume", &session_id, "hello resume e2e", "cli")
+        .send_prompt(
+            "prompt-resume",
+            &session_id,
+            "hello resume e2e",
+            ClientSource::Cli,
+        )
         .await
         .expect("prompt");
     agent.emit(DriverEvent::Event(UnifiedEventPayload::SessionAgentBound {
@@ -1010,7 +1021,7 @@ async fn central_server_resumes_stopped_session() {
             "prompt-resume-2",
             &session_id,
             "continue after resume",
-            "cli",
+            ClientSource::Cli,
         )
         .await
         .expect("continuation prompt");

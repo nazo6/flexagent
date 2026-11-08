@@ -54,8 +54,9 @@ use fxg_protocol::client_api::{
     SessionRevertResponse, SystemInfoResponse, WorktreeInfo, WorktreesResponse,
 };
 use fxg_protocol::common::{
-    AgentAction, CommandResult, DataSafety, DiffScope, ErrorCode, ErrorInfo, ProjectSummary,
-    RecoveryAction, SessionControlAction, SessionStatus, WorkspaceDiffResponse,
+    AgentAction, ClientSource, CommandResult, DataSafety, DiffScope, ErrorCode, ErrorInfo,
+    ProjectSummary, RecoveryAction, ResolvedBy, SessionControlAction, SessionStatus,
+    WorkspaceDiffResponse,
 };
 use fxg_protocol::config::CustomAgentConfig;
 use fxg_protocol::events::{SessionEventBatch, SessionEventEnvelope};
@@ -369,7 +370,7 @@ pub enum ClientCommand {
         /// Prompt body
         text: String,
         /// Source (`cli` / `web` / `android`)
-        client_source: String,
+        client_source: ClientSource,
     },
     /// Response to an approval request
     RespondPermission {
@@ -382,7 +383,7 @@ pub enum ClientCommand {
         /// Selected `option_id`
         selected_option_id: String,
         /// Who resolved it (`cli` / `web` / `android_push`)
-        resolved_by: String,
+        resolved_by: ResolvedBy,
     },
     /// Response to an elicitation (structured input request)
     RespondElicitation {
@@ -397,7 +398,7 @@ pub enum ClientCommand {
         /// Answer content for `accept` (per the form's `requested_schema`)
         content: serde_json::Value,
         /// Who resolved it (`cli` / `web` / `android_push`)
-        resolved_by: String,
+        resolved_by: ResolvedBy,
     },
     /// Mode switch / configuration change / cancel / kill
     ControlSession {

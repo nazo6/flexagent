@@ -24,6 +24,6 @@ mod warm;
 
 pub use acp::AcpDriver;
 pub use driver::{
-    ActiveSessionHandle, AgentDriver, AgentLaunchSpec, DriverEvent, NativeResumeUnavailable,
-    ResumeRequest, StartSessionRequest, StartedSession,
+    ActiveSessionHandle, AgentDriver, AgentLaunchSpec, DriverEvent, DriverKind,
+    NativeResumeUnavailable, ResumeRequest, StartSessionRequest, StartedSession,
 };

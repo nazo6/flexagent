@@ -244,38 +244,45 @@ pub enum ConfigOptionValue {
 
 ### Phase 1: 閉じた enum 化（低リスク・高効果）
 
-- [ ] `PermissionOptionKind` を導入
-  - [ ] `crates/fxg-protocol/src/common.rs:604-620`
-  - [ ] `crates/fxg-db/src/events.rs:693-720`
-  - [ ] `crates/fxg-server/src/state.rs:245-270`
-  - [ ] `crates/fxg-node/src/daemon/api.rs:865-890`
-  - [ ] `crates/fxg-server/src/push.rs:240-255`
-  - [ ] `crates/fxg-cli/src/commands.rs:1600-1660,1777`
-  - [ ] `selected_option_id` 推測を1関数に集約し、テストを追加
-- [ ] `DriverKind` を導入
-  - [ ] `crates/fxg-acp/src/driver.rs`
-  - [ ] `crates/fxg-acp/src/registry.rs:589,666`
-  - [ ] `crates/fxg-node/src/session_manager.rs:73`
-- [ ] `ClientSource` / `Resolver` / `HistoryRole` を導入
-  - [ ] `crates/fxg-protocol/src/events.rs:118-124`
-  - [ ] `crates/fxg-protocol/src/common.rs:760-770`
-  - [ ] `crates/fxg-server/src/state.rs:334-350`
-  - [ ] `crates/fxg-node/src/session_manager.rs:1941,2575,2725`
-  - [ ] `"fork"` / `"resume"` を enum variant に昇格
-- [ ] `ToolCallKind` / `ToolCallStatus` / `PlanEntryStatus` /
+- [x] `PermissionOptionKind` を導入
+  - [x] `crates/fxg-protocol/src/common.rs`
+  - [x] `crates/fxg-db/src/events.rs`
+  - [x] `crates/fxg-server/src/state.rs`
+  - [x] `crates/fxg-node/src/daemon/api.rs`
+  - [x] `crates/fxg-server/src/push.rs`
+  - [x] `crates/fxg-cli/src/commands.rs`
+  - [x] `selected_option_id` 推測を1関数に集約し、テストを追加
+- [x] `DriverKind` を導入
+  - [x] `crates/fxg-acp/src/driver.rs`
+  - [x] `crates/fxg-acp/src/registry.rs`
+  - [x] `crates/fxg-node/src/session_manager.rs`
+- [x] `ClientSource` / `ResolvedBy` / `HistoryRole` を導入
+  - [x] `crates/fxg-protocol/src/events.rs`
+  - [x] `crates/fxg-protocol/src/common.rs`
+  - [x] `crates/fxg-server/src/state.rs`
+  - [x] `crates/fxg-node/src/session_manager.rs`
+  - [x] `"fork"` / `"resume"` を enum variant に昇格
+- [x] `ToolCallKind` / `ToolCallStatus` / `PlanEntryStatus` /
       `ElicitationMode` を導入
-  - [ ] `crates/fxg-protocol/src/common.rs:524-560`
-  - [ ] `crates/fxg-protocol/src/events.rs:156-166,209-219`
-  - [ ] `crates/fxg-acp/src/acp.rs:2085-2123` の `_ => "pending"` /
-        `_ => "unknown"` を廃止
-  - [ ] `ui/src/lib/sync/reducer.ts:19-21,102-115` の `status: string` /
-        `toolKind: string` を生成型に置換
-  - [ ] `ui/src/lib/components/chat/ChatTimeline.svelte` /
-        `ToolCallGroup.svelte` を追従
-- [ ] `AuditAction` / `EventType` を導入
-  - [ ] `crates/fxg-db/src/audit.rs:13-45`
-  - [ ] `crates/fxg-protocol/src/events.rs:360-390`
-  - [ ] `crates/fxg-db/src/queries.rs` の row struct
+  - [x] `crates/fxg-protocol/src/common.rs`
+  - [x] `crates/fxg-protocol/src/events.rs`
+  - [x] `crates/fxg-acp/src/acp.rs` の `_ => "pending"` / `_ => "unknown"` を廃止
+  - [x] open enum の TypeScript 出力は `string` のため、UI は追従不要
+- [x] `AuditAction` / `EventType` を導入
+  - [x] `crates/fxg-db/src/audit.rs`
+  - [x] `crates/fxg-protocol/src/events.rs`
+  - [x] `crates/fxg-db/src/queries.rs` の row struct
+
+#### Phase 1 の移行メモ
+
+- `open_string_enum!` マクロ (`fxg-protocol/src/string_enum.rs`) を追加した。
+  未知値は `Unknown(String)` として保持し、JSON / DB の文字列表現は変えない。
+- `driver_kind` は `fxg-acp::DriverKind` に、`resolved_by` は `ResolvedBy` に
+  なった（計画の `Resolver` から名称変更）。
+- `AuditAction` / `EventType` は `fxg-db` の定数・DB 文字列と接続した。
+  `session_events.event_type` は引き続き TEXT。
+- UI の生成型は open enum のため `string` のまま。Rust 側の網羅性を優先し、
+  TypeScript の literal union 化は別途検討する。
 
 ### Phase 2: JSON 境界の整理
 
@@ -370,3 +377,10 @@ pub enum ConfigOptionValue {
   拡張、CI 組み込みを追加。既存の `serde_json::Value` は file-level
   `#![allow]`、wildcard `_ =>` は crate ルートの allow でベースライン化した。
   Phase 1 以降で allow を削減する。
+- 2026-11-08: Phase 1 を実装。`open_string_enum!` マクロを追加し、
+  `PermissionOptionKind` / `ToolCallKind` / `ToolCallStatus` /
+  `PlanEntryStatus` / `ElicitationMode` / `ClientSource` / `ResolvedBy` /
+  `HistoryRole` / `DriverKind` / `AuditAction` / `EventType` を導入した。
+  ACP / DB / CLI / サーバーの文字列比較を enum のメソッドに置き換え、
+  `selected_option_id` の推測は1関数に集約してテストを追加した。
+  open enum の TypeScript 出力は `string` のため、UI の生成型は変わらない。

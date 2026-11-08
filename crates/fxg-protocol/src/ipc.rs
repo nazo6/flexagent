@@ -14,9 +14,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::client_api::WorktreeInfo;
 use crate::common::{
-    ElicitationAction, ElicitationRequestEntry, ErrorInfo, HookLogEntry, PermissionRequestEntry,
-    ProjectResolutionSource, ProjectSummary, SessionControlAction, SessionSummary,
-    StreamDeltaPayload,
+    ClientSource, ElicitationAction, ElicitationRequestEntry, ErrorInfo, HookLogEntry,
+    PermissionRequestEntry, ProjectResolutionSource, ProjectSummary, ResolvedBy,
+    SessionControlAction, SessionSummary, StreamDeltaPayload,
 };
 use crate::events::SessionEventEnvelope;
 
@@ -89,7 +89,7 @@ pub enum IpcClientMessage {
         /// Prompt body
         text: String,
         /// Source (`cli` / `web` / `android`)
-        client_source: String,
+        client_source: ClientSource,
     },
     /// Answers a permission request.
     RespondPermission {
@@ -102,7 +102,7 @@ pub enum IpcClientMessage {
         /// The selected `option_id`
         selected_option_id: String,
         /// Who resolved it (`cli` / `web` / `android_push`)
-        resolved_by: String,
+        resolved_by: ResolvedBy,
     },
     /// Answers an elicitation (structured input request).
     RespondElicitation {
@@ -117,7 +117,7 @@ pub enum IpcClientMessage {
         /// Answer content for `accept` (following the form's `requested_schema`)
         content: serde_json::Value,
         /// Who resolved it (`cli` / `web` / `android_push`)
-        resolved_by: String,
+        resolved_by: ResolvedBy,
     },
     /// Mode switch / configuration change / cancel / kill.
     ControlSession {

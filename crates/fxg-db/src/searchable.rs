@@ -8,6 +8,7 @@
 //! `PermissionResolved` / `SessionAgentBound`, and other binary/identifier events are
 //! excluded from FTS (design: `docs/02-database-schema.md` §2).
 
+use fxg_protocol::common::EventType;
 use fxg_protocol::events::UnifiedEventPayload;
 
 /// Maximum length (in characters) of text fed into FTS5.
@@ -19,7 +20,7 @@ pub const MAX_SEARCHABLE_CHARS: usize = 8 * 1024;
 ///
 /// `event_type` is the same vocabulary stored in `session_events.event_type`
 /// ([`UnifiedEventPayload::event_type`]).
-pub fn classify_payload(payload: &UnifiedEventPayload) -> (&'static str, Option<String>) {
+pub fn classify_payload(payload: &UnifiedEventPayload) -> (EventType, Option<String>) {
     let event_type = payload.event_type();
     let text = match payload {
         UnifiedEventPayload::SessionTitleChanged { title } => join_parts(vec![title.clone()]),
@@ -136,8 +137,8 @@ fn truncate_chars(text: &str, max_chars: usize) -> String {
 mod tests {
     use super::*;
     use fxg_protocol::common::{
-        AttachmentMeta, FileDiff, PermissionOption, PermissionOptionKind, PlanEntry,
-        PlanEntryStatus, ToolCallKind, ToolCallStatus,
+        AttachmentMeta, ClientSource, EventType, FileDiff, PermissionOption, PermissionOptionKind,
+        PlanEntry, PlanEntryStatus, ToolCallKind, ToolCallStatus,
     };
 
     #[test]
@@ -151,11 +152,11 @@ mod tests {
                 local_path: None,
                 data_b64: None,
             }],
-            client_source: "cli".to_owned(),
+            client_source: ClientSource::Cli,
             snapshot_tree_hash: None,
         };
         let (event_type, text) = classify_payload(&payload);
-        assert_eq!(event_type, "user_message");
+        assert_eq!(event_type, EventType::UserMessage);
         let text = text.unwrap();
         assert!(text.contains("Fix the authentication error"));
         assert!(text.contains("screenshot.png"));
@@ -180,7 +181,7 @@ mod tests {
             raw_output: Some("test result: FAILED".to_owned()),
         };
         let (event_type, text) = classify_payload(&payload);
-        assert_eq!(event_type, "tool_call");
+        assert_eq!(event_type, EventType::ToolCall);
         let text = text.unwrap();
         assert!(text.contains("cargo test --workspace"));
         assert!(text.contains("crates/fxg-db/src/lib.rs"));
@@ -218,7 +219,7 @@ mod tests {
             details: serde_json::json!({}),
         };
         let (event_type, text) = classify_payload(&payload);
-        assert_eq!(event_type, "permission_request");
+        assert_eq!(event_type, EventType::PermissionRequest);
         assert!(text.unwrap().contains("cargo test --workspace"));
     }
 
@@ -231,14 +232,14 @@ mod tests {
                 status: PlanEntryStatus::InProgress,
             }],
         };
-        assert_eq!(classify_payload(&plan).0, "plan");
+        assert_eq!(classify_payload(&plan).0, EventType::Plan);
         assert!(classify_payload(&plan).1.unwrap().contains("Add tests"));
 
         let status = UnifiedEventPayload::StatusChanged {
             status: fxg_protocol::common::SessionStatus::Error,
             error_message: Some("Authentication token is invalid".to_owned()),
         };
-        assert_eq!(classify_payload(&status).0, "status_change");
+        assert_eq!(classify_payload(&status).0, EventType::StatusChanged);
         assert!(
             classify_payload(&status)
                 .1

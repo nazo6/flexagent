@@ -76,7 +76,7 @@ pub enum NodeError {
     /// Attempted to record an event that must not be persisted
     /// (mid-stream chunks, keystrokes, and so on)
     #[error("event is not persistable: {0}")]
-    NonPersistableEvent(&'static str),
+    NonPersistableEvent(fxg_protocol::common::EventType),
     /// Database error (fxg-db)
     #[error("database error: {0}")]
     Db(#[from] fxg_db::DbError),

@@ -537,7 +537,7 @@ export type FileDiff = {
 
 /**  A conversation history item injected when forking a session. */
 export type ForkHistoryItem = {
-	/**  Speaker role (`user` / `agent` etc.) */
+	/**  Speaker role (`user` / `agent` / `tool`) */
 	role: string,
 	/**  Body text */
 	text: string,
@@ -1520,7 +1520,7 @@ export type UnifiedEventPayload =
 	text: string,
 	/**  Attached files */
 	attachments: AttachmentMeta[],
-	/**  Source (`cli` / `web` / `android`) */
+	/**  Source (`cli` / `web` / `android` / `fork` / `resume`) */
 	client_source: string,
 	/**
 	 *  Shadow git tree hash right before the turn started (for revert).

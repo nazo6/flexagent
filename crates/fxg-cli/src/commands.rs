@@ -14,8 +14,8 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 use fxg_acp::registry::{AcpRegistry, AgentListEntry, LocalSource};
 use fxg_protocol::common::{
-    ElicitationAction, ElicitationRequestEntry, PermissionOption, PermissionOptionKind,
-    SessionControlAction, SessionStatus,
+    ClientSource, ElicitationAction, ElicitationRequestEntry, PermissionOption,
+    PermissionOptionKind, SessionControlAction, SessionStatus,
 };
 use fxg_protocol::events::UnifiedEventPayload;
 use usage::Args;
@@ -512,7 +512,9 @@ impl usage::RunAsync for RunArgs {
             .await?;
 
         if let Some(prompt) = &self.prompt {
-            client.send_prompt(&session_id, prompt, "cli").await?;
+            client
+                .send_prompt(&session_id, prompt, ClientSource::Cli)
+                .await?;
         }
 
         if self.detach {
@@ -1148,7 +1150,7 @@ impl usage::RunAsync for SessionPromptArgs {
     async fn run_async(self) -> Self::Output {
         let mut client = DaemonClient::connect().await?;
         client
-            .send_prompt(&self.session_id, &self.text, "cli")
+            .send_prompt(&self.session_id, &self.text, ClientSource::Cli)
             .await?;
         if !self.wait {
             println!("accepted ({})", short_id(&self.session_id));

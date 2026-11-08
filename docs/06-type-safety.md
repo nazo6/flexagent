@@ -74,10 +74,9 @@ option.kind.starts_with("reject")
 selected_option_id.contains("reject")
 item.role == "user"
 
-// Good (Phase 1 で導入する enum のメソッド)
+// Good (enum のメソッド)
 option.kind.is_always()
 option.kind.is_reject()
-entry.selected_kind == PermissionRequestStatus::Rejected
 history.role == HistoryRole::User
 ```
 
@@ -218,10 +217,13 @@ UI 側で `status: string` のような独自型を作らず、生成型を使�
 | フェーズ | 内容                                           | 状態   |
 | :------- | :--------------------------------------------- | :----- |
 | Phase 0  | 方針・clippy 基盤                              | 完了   |
-| Phase 1  | `PermissionOptionKind` などの enum 化          | 未着手 |
+| Phase 1  | `PermissionOptionKind` などの enum 化          | 完了   |
 | Phase 2  | `RawJson` / elicitation / config / provisioner | 未着手 |
 | Phase 3  | DB row / event_type / audit action             | 未着手 |
 | Phase 4  | ID newtype                                     | 未着手 |
 
 ファイル単位の `#![allow(...)]` と crate ルートの wildcard allow は、
-Phase 1〜3 の完了に合わせて削除する。
+Phase 1〜3 の完了に合わせて削除する。Phase 1 で enum 化した
+`PermissionOptionKind` / `ToolCallKind` / `ToolCallStatus` / `AuditAction` /
+`EventType` などは `open_string_enum!` で定義し、未知値を `Unknown(String)`
+として保持する。

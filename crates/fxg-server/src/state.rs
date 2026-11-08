@@ -30,8 +30,8 @@ use fxg_protocol::client_api::{
     SessionRevertResponse, WorktreeInfo, WorktreesResponse,
 };
 use fxg_protocol::common::{
-    AgentAction, CommandResult, DiffScope, ErrorCode, ForkHistoryItem, WorkspaceDiffResponse,
-    WorktreeAction,
+    AgentAction, CommandResult, DiffScope, ErrorCode, ForkHistoryItem, HistoryRole,
+    WorkspaceDiffResponse, WorktreeAction,
 };
 use fxg_protocol::config::{GitCredentialConfig, ProvisionerConfig};
 use fxg_protocol::events::UnifiedEventPayload;
@@ -179,13 +179,16 @@ impl ServerState {
     /// Records an audit log entry in `server.db.audit_logs` (failures only warn).
     pub async fn record_audit(
         &self,
-        action: &str,
+        action: fxg_protocol::common::AuditAction,
         client: &ClientInfo,
         session_id: Option<&str>,
         details: serde_json::Value,
     ) {
-        let mut audit =
-            fxg_db::AuditLogRecord::new(action, client.ip.clone(), client.auth_subject.clone());
+        let mut audit = fxg_db::AuditLogRecord::new(
+            action.clone(),
+            client.ip.clone(),
+            client.auth_subject.clone(),
+        );
         audit.session_id = session_id.map(str::to_owned);
         audit.client_user_agent = client.user_agent.clone();
         audit.details = details;
@@ -334,7 +337,7 @@ impl ServerState {
             }
             match event.payload {
                 UnifiedEventPayload::UserMessage { text, .. } => items.push(ForkHistoryItem {
-                    role: "user".to_owned(),
+                    role: HistoryRole::User,
                     text,
                     tool_summary: None,
                 }),
@@ -343,13 +346,13 @@ impl ServerState {
                     is_complete: true,
                     ..
                 } => items.push(ForkHistoryItem {
-                    role: "agent".to_owned(),
+                    role: HistoryRole::Agent,
                     text,
                     tool_summary: None,
                 }),
                 UnifiedEventPayload::ToolCall { title, status, .. } => {
                     items.push(ForkHistoryItem {
-                        role: "tool".to_owned(),
+                        role: HistoryRole::Tool,
                         text: String::new(),
                         tool_summary: Some(format!("[{status}] {title}")),
                     })

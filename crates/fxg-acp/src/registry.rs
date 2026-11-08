@@ -24,7 +24,7 @@ use anyhow::{Context, anyhow, bail};
 use fxg_protocol::config::{AgentsConfig, CustomAgentConfig};
 use serde::{Deserialize, Serialize};
 
-use crate::driver::AgentLaunchSpec;
+use crate::driver::{AgentLaunchSpec, DriverKind};
 
 /// Cache file name (`~/.flexagent/cache/registry.json`).
 pub const REGISTRY_CACHE_FILE: &str = "registry.json";
@@ -589,7 +589,7 @@ impl AcpRegistry {
             return Ok(AgentLaunchSpec {
                 agent_id: id.clone(),
                 display_name: custom.name.clone().unwrap_or_else(|| id.clone()),
-                driver_kind: "acp".to_owned(),
+                driver_kind: DriverKind::Acp,
                 program: PathBuf::from(&custom.command),
                 args,
                 env: custom
@@ -666,7 +666,7 @@ impl AcpRegistry {
         Some(AgentLaunchSpec {
             agent_id: agent.id.clone(),
             display_name: agent.name.clone(),
-            driver_kind: "acp".to_owned(),
+            driver_kind: DriverKind::Acp,
             program,
             args,
             env: env.into_iter().collect(),
@@ -797,7 +797,7 @@ mod tests {
             .unwrap()
             .block_on(registry.launch_spec("my-agent", &index, &["--extra".to_owned()]))
             .expect("custom spec");
-        assert_eq!(spec.driver_kind, "acp");
+        assert_eq!(spec.driver_kind, DriverKind::Acp);
         assert_eq!(spec.program, PathBuf::from("my-agent"));
         assert_eq!(spec.args, vec!["--flag", "--extra"]);
         assert_eq!(spec.env, vec![("KEY".to_owned(), "value".to_owned())]);

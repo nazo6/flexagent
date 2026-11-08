@@ -20,6 +20,31 @@ use fxg_protocol::common::{ElicitationAction, StreamDeltaPayload};
 use fxg_protocol::events::UnifiedEventPayload;
 use tokio::sync::mpsc;
 
+/// Kind of driver used to launch an agent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DriverKind {
+    /// Standard ACP agent (`AcpDriver`)
+    Acp,
+    /// Another driver kind, preserved for diagnostics
+    Other(String),
+}
+
+impl DriverKind {
+    /// String representation used in logs.
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Acp => "acp",
+            Self::Other(other) => other,
+        }
+    }
+}
+
+impl std::fmt::Display for DriverKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 /// How to launch the agent process (resolved from the ACP Registry / custom definitions).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentLaunchSpec {
@@ -27,8 +52,8 @@ pub struct AgentLaunchSpec {
     pub agent_id: String,
     /// Display name
     pub display_name: String,
-    /// Driver kind (a value of [`AgentDriver::driver_kind`]: `"acp"` / `"opencode2"`)
-    pub driver_kind: String,
+    /// Driver kind (see [`DriverKind`])
+    pub driver_kind: DriverKind,
     /// Executable (absolute path, or a command name on `PATH`).
     /// `PATH` resolution (`which` / `PATHEXT`) is done by the driver right before launch.
     pub program: PathBuf,
@@ -114,7 +139,7 @@ pub enum DriverEvent {
 #[async_trait]
 pub trait AgentDriver: Send + Sync {
     /// Driver identifier (`"acp"` / `"opencode2"`).
-    fn driver_kind(&self) -> &'static str;
+    fn driver_kind(&self) -> DriverKind;
 
     /// Starts a new session and returns an operation handle.
     ///
@@ -223,8 +248,8 @@ mod tests {
 
     #[async_trait]
     impl AgentDriver for MockDriver {
-        fn driver_kind(&self) -> &'static str {
-            "mock"
+        fn driver_kind(&self) -> DriverKind {
+            DriverKind::Other("mock".to_owned())
         }
 
         async fn start_session(
@@ -239,7 +264,7 @@ mod tests {
                     is_complete: true,
                 }))
                 .expect("event_tx");
-            assert_eq!(req.launch.driver_kind, "mock");
+            assert_eq!(req.launch.driver_kind, DriverKind::Other("mock".to_owned()));
             Ok(StartedSession {
                 handle: Box::new(MockHandle),
                 context_restored: false,
@@ -254,7 +279,7 @@ mod tests {
         let launch = AgentLaunchSpec {
             agent_id: "mock".to_owned(),
             display_name: "Mock".to_owned(),
-            driver_kind: "mock".to_owned(),
+            driver_kind: DriverKind::Other("mock".to_owned()),
             program: PathBuf::from("mock"),
             args: vec![],
             env: vec![],
@@ -282,7 +307,10 @@ mod tests {
             .expect("prompt");
         match rx.recv().await.expect("event") {
             DriverEvent::Event(payload) => {
-                assert_eq!(payload.event_type(), "agent_message");
+                assert_eq!(
+                    payload.event_type(),
+                    fxg_protocol::common::EventType::AgentMessage
+                );
             }
             other => panic!("unexpected event: {other:?}"),
         }

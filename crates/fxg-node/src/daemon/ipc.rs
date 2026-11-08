@@ -584,7 +584,7 @@ async fn handle(
         } => {
             state
                 .session_manager()
-                .send_prompt(&command_id, &session_id, &text, &client_source)
+                .send_prompt(&command_id, &session_id, &text, client_source)
                 .await
                 .map_err(|err| DispatchError::from_node_error(&command_id, err))?;
             Ok((
@@ -609,7 +609,7 @@ async fn handle(
                     &session_id,
                     &request_id,
                     &selected_option_id,
-                    &resolved_by,
+                    resolved_by,
                 )
                 .await
                 .map_err(|err| DispatchError::from_node_error(&command_id, err))?;
@@ -637,7 +637,7 @@ async fn handle(
                     &elicitation_id,
                     action,
                     content,
-                    &resolved_by,
+                    resolved_by,
                 )
                 .await
                 .map_err(|err| DispatchError::from_node_error(&command_id, err))?;
@@ -1313,7 +1313,7 @@ mod tests {
                 command_id: "p1".to_owned(),
                 session_id: session_id.clone(),
                 text: "hello".to_owned(),
-                client_source: "cli".to_owned(),
+                client_source: fxg_protocol::common::ClientSource::Cli,
             },
         )
         .await;
@@ -1361,7 +1361,7 @@ mod tests {
                 session_id: session_id.clone(),
                 request_id: "req-1".to_owned(),
                 selected_option_id: "allow_once".to_owned(),
-                resolved_by: "cli".to_owned(),
+                resolved_by: fxg_protocol::common::ResolvedBy::Cli,
             },
         )
         .await;
@@ -1381,7 +1381,7 @@ mod tests {
                 session_id: session_id.clone(),
                 request_id: "req-1".to_owned(),
                 selected_option_id: "allow_once".to_owned(),
-                resolved_by: "web".to_owned(),
+                resolved_by: fxg_protocol::common::ResolvedBy::Web,
             },
         )
         .await;
@@ -1414,7 +1414,7 @@ mod tests {
                 elicitation_id: "elic-1".to_owned(),
                 action: ElicitationAction::Accept,
                 content: serde_json::json!({ "strategy": "a" }),
-                resolved_by: "cli".to_owned(),
+                resolved_by: fxg_protocol::common::ResolvedBy::Cli,
             },
         )
         .await;
@@ -1439,7 +1439,7 @@ mod tests {
                 elicitation_id: "elic-1".to_owned(),
                 action: ElicitationAction::Decline,
                 content: serde_json::Value::Null,
-                resolved_by: "web".to_owned(),
+                resolved_by: fxg_protocol::common::ResolvedBy::Web,
             },
         )
         .await;
@@ -1508,7 +1508,7 @@ mod tests {
                 command_id: "p1".to_owned(),
                 session_id: session_id.clone(),
                 text: "hello resume".to_owned(),
-                client_source: "cli".to_owned(),
+                client_source: fxg_protocol::common::ClientSource::Cli,
             },
         )
         .await;

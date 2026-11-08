@@ -15,8 +15,8 @@ use anyhow::{Context, Result, bail};
 use fxg_node::IpcClient;
 use fxg_protocol::client_api::{SessionRevertResponse, WorktreeInfo};
 use fxg_protocol::common::{
-    ElicitationAction, ElicitationRequestEntry, HookLogEntry, PermissionRequestEntry,
-    ProjectSummary, SessionControlAction, SessionSummary,
+    ClientSource, ElicitationAction, ElicitationRequestEntry, HookLogEntry, PermissionRequestEntry,
+    ProjectSummary, ResolvedBy, SessionControlAction, SessionSummary,
 };
 use fxg_protocol::config::process_env;
 use fxg_protocol::ipc::{
@@ -337,7 +337,7 @@ impl DaemonClient {
         &mut self,
         session_id: &str,
         text: &str,
-        client_source: &str,
+        client_source: ClientSource,
     ) -> Result<()> {
         let command_id = self.command_id();
         let result = self
@@ -345,7 +345,7 @@ impl DaemonClient {
                 command_id,
                 session_id: session_id.to_owned(),
                 text: text.to_owned(),
-                client_source: client_source.to_owned(),
+                client_source,
             })
             .await?;
         ack_message(result)?;
@@ -366,7 +366,7 @@ impl DaemonClient {
                 session_id: session_id.to_owned(),
                 request_id: request_id.to_owned(),
                 selected_option_id: selected_option_id.to_owned(),
-                resolved_by: "cli".to_owned(),
+                resolved_by: ResolvedBy::Cli,
             })
             .await?;
         ack_message(result)?;
@@ -451,7 +451,7 @@ impl DaemonClient {
                 elicitation_id: elicitation_id.to_owned(),
                 action,
                 content,
-                resolved_by: "cli".to_owned(),
+                resolved_by: ResolvedBy::Cli,
             })
             .await?;
         ack_message(result)?;

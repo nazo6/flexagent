@@ -636,7 +636,10 @@ async fn search_like(
                 event_id: row.event_id,
                 session_id: row.session_id,
                 node_seq,
-                event_type: row.event_type,
+                event_type: match row.event_type.parse() {
+                    Ok(event_type) => event_type,
+                    Err(never) => match never {},
+                },
                 snippet,
                 created_at: row.created_at,
             })
@@ -664,7 +667,10 @@ pub async fn audit_logs(pool: &SqlitePool, limit: u32) -> Result<Vec<AuditLogEnt
         .into_iter()
         .map(|row| AuditLogEntry {
             id: row.id,
-            action: row.action,
+            action: match row.action.parse() {
+                Ok(action) => action,
+                Err(never) => match never {},
+            },
             session_id: row.session_id,
             node_id: row.node_id,
             client_ip: row.client_ip,
@@ -803,7 +809,10 @@ impl PermissionRow {
                 .map_err(|err| DbError::InvalidEnumValue(err.to_string()))?,
             created_at: self.created_at,
             resolved_at: self.resolved_at,
-            resolved_by: self.resolved_by,
+            resolved_by: self.resolved_by.map(|value| match value.parse() {
+                Ok(resolved_by) => resolved_by,
+                Err(never) => match never {},
+            }),
         })
     }
 }
@@ -853,7 +862,10 @@ impl ElicitationRow {
                 .map_err(|err| DbError::InvalidEnumValue(err.to_string()))?,
             created_at: self.created_at,
             resolved_at: self.resolved_at,
-            resolved_by: self.resolved_by,
+            resolved_by: self.resolved_by.map(|value| match value.parse() {
+                Ok(resolved_by) => resolved_by,
+                Err(never) => match never {},
+            }),
         })
     }
 }
@@ -878,7 +890,10 @@ impl SearchRow {
             event_id: self.event_id,
             session_id: self.session_id,
             node_seq,
-            event_type: self.event_type,
+            event_type: match self.event_type.parse() {
+                Ok(event_type) => event_type,
+                Err(never) => match never {},
+            },
             snippet: self.snippet?,
             created_at: self.created_at,
         })

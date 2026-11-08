@@ -400,7 +400,7 @@ mod tests {
             .expect_err("non persistable");
         assert!(matches!(
             err,
-            NodeError::NonPersistableEvent("agent_message")
+            NodeError::NonPersistableEvent(fxg_protocol::common::EventType::AgentMessage)
         ));
 
         // Keystrokes are not persisted either
@@ -416,7 +416,7 @@ mod tests {
             .expect_err("terminal input");
         assert!(matches!(
             err,
-            NodeError::NonPersistableEvent("terminal_input")
+            NodeError::NonPersistableEvent(fxg_protocol::common::EventType::TerminalInput)
         ));
 
         // Completed events can be persisted

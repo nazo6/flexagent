@@ -15,7 +15,7 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use fxg_acp::{
-    ActiveSessionHandle, AgentDriver, AgentLaunchSpec, DriverEvent, ResumeRequest,
+    ActiveSessionHandle, AgentDriver, AgentLaunchSpec, DriverEvent, DriverKind, ResumeRequest,
     StartSessionRequest, StartedSession,
 };
 use tokio::sync::mpsc;
@@ -188,8 +188,8 @@ impl MockAgent {
 
 #[async_trait]
 impl AgentDriver for MockAgent {
-    fn driver_kind(&self) -> &'static str {
-        "mock"
+    fn driver_kind(&self) -> DriverKind {
+        DriverKind::Other("mock".to_owned())
     }
 
     async fn start_session(

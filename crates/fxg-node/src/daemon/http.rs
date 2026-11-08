@@ -522,7 +522,7 @@ mod tests {
             command_id: "c1".to_owned(),
             session_id: "missing-session".to_owned(),
             text: "hello".to_owned(),
-            client_source: "web".to_owned(),
+            client_source: fxg_protocol::common::ClientSource::Web,
         };
         socket
             .send(WsMessage::Text(

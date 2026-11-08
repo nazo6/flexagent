@@ -10,9 +10,9 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 
 use crate::common::{
-    AuditLogEntry, CommandResult, ElicitationAction, ElicitationRequestEntry, ErrorInfo,
-    NodeSummary, PermissionRequestEntry, ProjectSummary, SearchHit, SessionControlAction,
-    SessionSummary, StreamDeltaPayload,
+    AuditLogEntry, ClientSource, CommandResult, ElicitationAction, ElicitationRequestEntry,
+    ErrorInfo, NodeSummary, PermissionRequestEntry, ProjectSummary, ResolvedBy, SearchHit,
+    SessionControlAction, SessionSummary, StreamDeltaPayload,
 };
 use crate::config::CustomAgentConfig;
 use crate::events::SessionEventBatch;
@@ -417,7 +417,7 @@ pub struct RespondPermissionRequest {
     /// Whether to allow the same tool operation for the rest of the session (promote to `allow_always`)
     pub always: bool,
     /// Who resolved it (`cli` / `web` / `android_push`)
-    pub resolved_by: String,
+    pub resolved_by: ResolvedBy,
 }
 
 /// `POST /api/v1/sessions/:id/permissions/:req_id/respond` response.
@@ -440,7 +440,7 @@ pub struct RespondElicitationRequest {
     /// Answer content for `accept` (following the form's `requested_schema`; `null` otherwise)
     pub content: serde_json::Value,
     /// Who resolved it (`cli` / `web` / `android_push`)
-    pub resolved_by: String,
+    pub resolved_by: ResolvedBy,
 }
 
 /// `POST /api/v1/sessions/:id/elicitations/:elicitation_id/respond` response.
@@ -618,7 +618,7 @@ pub enum ClientWsMessage {
         /// Prompt body
         text: String,
         /// Source (`cli` / `web` / `android`)
-        client_source: String,
+        client_source: ClientSource,
     },
     /// Answers a permission request.
     RespondPermission {
@@ -631,7 +631,7 @@ pub enum ClientWsMessage {
         /// The selected `option_id`
         selected_option_id: String,
         /// Who resolved it (`cli` / `web` / `android_push`)
-        resolved_by: String,
+        resolved_by: ResolvedBy,
     },
     /// Answers an elicitation (structured input request).
     RespondElicitation {
@@ -646,7 +646,7 @@ pub enum ClientWsMessage {
         /// Answer content for `accept` (following the form's `requested_schema`)
         content: serde_json::Value,
         /// Who resolved it (`cli` / `web` / `android_push`)
-        resolved_by: String,
+        resolved_by: ResolvedBy,
     },
     /// Mode switch / configuration change / cancel / kill.
     ControlSession {

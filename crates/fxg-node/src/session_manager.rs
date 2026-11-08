@@ -27,12 +27,12 @@ use std::time::{Duration, Instant};
 
 use fxg_acp::registry::{AcpRegistry, RegistryIndex};
 use fxg_acp::{
-    AcpDriver, ActiveSessionHandle, AgentDriver, AgentLaunchSpec, DriverEvent,
+    AcpDriver, ActiveSessionHandle, AgentDriver, AgentLaunchSpec, DriverEvent, DriverKind,
     NativeResumeUnavailable, ResumeRequest,
 };
 use fxg_protocol::common::{
-    ElicitationAction, ElicitationMode, ForkHistoryItem, PermissionOption, SessionControlAction,
-    SessionStatus,
+    ClientSource, ElicitationAction, ElicitationMode, ForkHistoryItem, HistoryRole,
+    PermissionOption, ResolvedBy, SessionControlAction, SessionStatus,
 };
 use fxg_protocol::events::{SessionEventEnvelope, UnifiedEventPayload};
 use fxg_protocol::util::uuid_v7;
@@ -75,12 +75,10 @@ pub type DriverFactory =
 /// The driver is shared across all sessions.
 pub fn default_driver_factory() -> DriverFactory {
     let acp: Arc<dyn AgentDriver> = Arc::new(AcpDriver::new());
-    Arc::new(
-        move |spec: &AgentLaunchSpec| match spec.driver_kind.as_str() {
-            "acp" => Ok(Arc::clone(&acp)),
-            other => Err(anyhow::anyhow!("unknown driver kind: {other}")),
-        },
-    )
+    Arc::new(move |spec: &AgentLaunchSpec| match &spec.driver_kind {
+        DriverKind::Acp => Ok(Arc::clone(&acp)),
+        DriverKind::Other(other) => Err(anyhow::anyhow!("unknown driver kind: {other}")),
+    })
 }
 
 /// Result of `ensure_session`.
@@ -263,7 +261,7 @@ struct ActiveSession {
 #[derive(Debug, Clone)]
 struct PendingPrompt {
     text: String,
-    client_source: String,
+    client_source: ClientSource,
 }
 
 struct StartDriverParams<'a> {
@@ -493,7 +491,9 @@ impl SessionManager {
 
         // Initial prompt (executed as-is when a session is started remotely)
         if let Some(prompt) = params.initial_prompt.filter(|text| !text.trim().is_empty())
-            && let Err(err) = self.start_turn(params.session_id, prompt, "web").await
+            && let Err(err) = self
+                .start_turn(params.session_id, prompt, ClientSource::Web)
+                .await
         {
             return Err(self
                 .fail_context_injection(params.session_id, "initial prompt injection", err)
@@ -504,7 +504,9 @@ impl SessionManager {
         if let Some(context) = params
             .fork_context
             .and_then(|items| build_history_replay_context_from_items(items, ReplayPurpose::Fork))
-            && let Err(err) = self.start_turn(params.session_id, &context, "fork").await
+            && let Err(err) = self
+                .start_turn(params.session_id, &context, ClientSource::Fork)
+                .await
         {
             return Err(self
                 .fail_context_injection(params.session_id, "fork context injection", err)
@@ -830,7 +832,9 @@ impl SessionManager {
 
         // History replay injection (initial context for the new agent session)
         if let Some(context) = build_history_replay_context(&events, fork_seq, ReplayPurpose::Fork)
-            && let Err(err) = self.start_turn(&new_session_id, &context, "fork").await
+            && let Err(err) = self
+                .start_turn(&new_session_id, &context, ClientSource::Fork)
+                .await
         {
             return Err(self
                 .fail_context_injection(&new_session_id, "fork context injection", err)
@@ -898,7 +902,9 @@ impl SessionManager {
             let up_to_seq = events.last().map(|event| event.node_seq).unwrap_or(0);
             if let Some(context) =
                 build_history_replay_context(&events, up_to_seq, ReplayPurpose::Resume)
-                && let Err(err) = self.start_turn(params.session_id, &context, "resume").await
+                && let Err(err) = self
+                    .start_turn(params.session_id, &context, ClientSource::Resume)
+                    .await
             {
                 return Err(self
                     .fail_context_injection(params.session_id, "resume context injection", err)
@@ -1066,7 +1072,7 @@ impl SessionManager {
         &self,
         session_id: &str,
         text: &str,
-        client_source: &str,
+        client_source: ClientSource,
     ) -> Result<(), NodeError> {
         {
             let mut sessions = self.inner.sessions.lock().expect("sessions poisoned");
@@ -1106,7 +1112,7 @@ impl SessionManager {
         command_id: &str,
         session_id: &str,
         text: &str,
-        client_source: &str,
+        client_source: ClientSource,
     ) -> Result<(), NodeError> {
         if !self.begin_command(command_id) {
             return Err(NodeError::CommandDuplicate(command_id.to_owned()));
@@ -1130,7 +1136,7 @@ impl SessionManager {
             if session.busy {
                 session.pending_prompts.push_back(PendingPrompt {
                     text: text.to_owned(),
-                    client_source: client_source.to_owned(),
+                    client_source,
                 });
                 return Ok(());
             }
@@ -1146,7 +1152,7 @@ impl SessionManager {
         session_id: &str,
         request_id: &str,
         selected_option_id: &str,
-        resolved_by: &str,
+        resolved_by: ResolvedBy,
     ) -> Result<(), NodeError> {
         if !self.begin_command(command_id) {
             return Err(NodeError::CommandDuplicate(command_id.to_owned()));
@@ -1174,7 +1180,7 @@ impl SessionManager {
                 UnifiedEventPayload::PermissionResolved {
                     request_id: request_id.to_owned(),
                     selected_option_id: selected_option_id.to_owned(),
-                    resolved_by: resolved_by.to_owned(),
+                    resolved_by,
                 },
             )
             .await?;
@@ -1189,7 +1195,7 @@ impl SessionManager {
         elicitation_id: &str,
         action: ElicitationAction,
         content: serde_json::Value,
-        resolved_by: &str,
+        resolved_by: ResolvedBy,
     ) -> Result<(), NodeError> {
         if !self.begin_command(command_id) {
             return Err(NodeError::CommandDuplicate(command_id.to_owned()));
@@ -1228,7 +1234,7 @@ impl SessionManager {
                     elicitation_id: elicitation_id.to_owned(),
                     action,
                     content,
-                    resolved_by: resolved_by.to_owned(),
+                    resolved_by,
                 },
             )
             .await?;
@@ -1492,7 +1498,7 @@ impl SessionManager {
             let disposed = driver.shutdown_idle().await;
             if disposed > 0 {
                 tracing::info!(
-                    driver = driver.driver_kind(),
+                    driver = %driver.driver_kind(),
                     count = disposed,
                     "disposed idle agent processes"
                 );
@@ -1727,7 +1733,13 @@ async fn maybe_dispatch_queued(inner: &Arc<Inner>, session_id: &str) {
     };
 
     // busy has already been reserved by the caller. Clear it on failure to keep the state consistent.
-    if let Err(err) = dispatch_prompt(inner, session_id, &prompt.text, &prompt.client_source).await
+    if let Err(err) = dispatch_prompt(
+        inner,
+        session_id,
+        &prompt.text,
+        prompt.client_source.clone(),
+    )
+    .await
     {
         tracing::warn!(session_id = %session_id, "failed to dispatch queued prompt: {err:#}");
         if let Err(record_err) = inner
@@ -1788,7 +1800,7 @@ async fn dispatch_prompt(
     inner: &Arc<Inner>,
     session_id: &str,
     text: &str,
-    client_source: &str,
+    client_source: ClientSource,
 ) -> Result<(), NodeError> {
     let (cwd, should_update_title) = {
         let mut sessions = inner.sessions.lock().expect("sessions poisoned");
@@ -1827,7 +1839,7 @@ async fn dispatch_prompt(
             UnifiedEventPayload::UserMessage {
                 text: text.to_owned(),
                 attachments: Vec::new(),
-                client_source: client_source.to_owned(),
+                client_source,
                 snapshot_tree_hash,
             },
         )
@@ -1944,7 +1956,7 @@ fn build_history_replay_context_from_items(
 ) -> Option<String> {
     let mut parts: Vec<String> = Vec::new();
     for item in items {
-        let role = if item.role == "user" {
+        let role = if item.role == HistoryRole::User {
             "User"
         } else {
             "Assistant"
@@ -2042,7 +2054,7 @@ mod tests {
     use super::*;
     use crate::testutil::MockAgent;
     use fxg_db::{Db, DbRole};
-    use fxg_protocol::common::PermissionOptionKind;
+    use fxg_protocol::common::{EventType, PermissionOptionKind};
     use fxg_protocol::config::{AgentsConfig, CustomAgentConfig};
 
     async fn setup() -> (SessionManager, MockAgent, tempfile::TempDir) {
@@ -2135,7 +2147,7 @@ mod tests {
     }
 
     /// Waits until an event with the given `event_type` is persisted.
-    async fn wait_event_type(manager: &SessionManager, session_id: &str, event_type: &str) {
+    async fn wait_event_type(manager: &SessionManager, session_id: &str, event_type: EventType) {
         for _ in 0..200 {
             let batch = manager
                 .bus()
@@ -2201,7 +2213,7 @@ mod tests {
         wait_idle(&manager, &outcome.session_id).await;
 
         manager
-            .send_prompt("c2", &outcome.session_id, "hello", "cli")
+            .send_prompt("c2", &outcome.session_id, "hello", ClientSource::Cli)
             .await
             .expect("prompt");
 
@@ -2231,12 +2243,12 @@ mod tests {
         wait_idle(&manager, &outcome.session_id).await;
 
         manager
-            .send_prompt("c2", &outcome.session_id, "first", "cli")
+            .send_prompt("c2", &outcome.session_id, "first", ClientSource::Cli)
             .await
             .expect("first");
         // Enqueued while busy
         manager
-            .send_prompt("c3", &outcome.session_id, "second", "web")
+            .send_prompt("c3", &outcome.session_id, "second", ClientSource::Web)
             .await
             .expect("second queued");
         let summary = manager
@@ -2320,14 +2332,26 @@ mod tests {
         assert_eq!(manager.pending_permissions().len(), 1);
 
         manager
-            .respond_permission("c2", &outcome.session_id, "req-1", "allow_once", "cli")
+            .respond_permission(
+                "c2",
+                &outcome.session_id,
+                "req-1",
+                "allow_once",
+                ResolvedBy::Cli,
+            )
             .await
             .expect("resolve");
         assert!(manager.pending_permissions().is_empty());
 
         // The second attempt is ALREADY_RESOLVED
         let err = manager
-            .respond_permission("c3", &outcome.session_id, "req-1", "allow_once", "cli")
+            .respond_permission(
+                "c3",
+                &outcome.session_id,
+                "req-1",
+                "allow_once",
+                ResolvedBy::Cli,
+            )
             .await
             .expect_err("already resolved");
         assert!(matches!(err, NodeError::AlreadyResolved(_)));
@@ -2375,7 +2399,7 @@ mod tests {
                 "elic-1",
                 ElicitationAction::Accept,
                 serde_json::json!({ "strategy": "a" }),
-                "cli",
+                ResolvedBy::Cli,
             )
             .await
             .expect("resolve");
@@ -2394,7 +2418,7 @@ mod tests {
                 "elic-1",
                 ElicitationAction::Decline,
                 serde_json::Value::Null,
-                "cli",
+                ResolvedBy::Cli,
             )
             .await
             .expect_err("already resolved");
@@ -2434,7 +2458,7 @@ mod tests {
                 elicitation_id: "elic-2".to_owned(),
                 action: ElicitationAction::Cancel,
                 content: serde_json::Value::Null,
-                resolved_by: "system".to_owned(),
+                resolved_by: ResolvedBy::Unknown("system".to_owned()),
             },
         ));
         for _ in 0..100 {
@@ -2453,7 +2477,7 @@ mod tests {
 
         // Record the snapshot at turn start
         manager
-            .send_prompt("c2", &session_id, "first turn", "cli")
+            .send_prompt("c2", &session_id, "first turn", ClientSource::Cli)
             .await
             .expect("prompt");
         let user_seq = wait_user_message(&manager, &session_id, "first turn").await;
@@ -2512,7 +2536,7 @@ mod tests {
 
         // A running turn (no Idle event received yet) is rejected as Busy
         manager
-            .send_prompt("c2", &session_id, "running", "cli")
+            .send_prompt("c2", &session_id, "running", ClientSource::Cli)
             .await
             .expect("prompt");
         let err = manager
@@ -2528,7 +2552,7 @@ mod tests {
         let (repo, source_id) = setup_repo_session(&manager, &dir).await;
 
         manager
-            .send_prompt("c2", &source_id, "hello world", "cli")
+            .send_prompt("c2", &source_id, "hello world", ClientSource::Cli)
             .await
             .expect("prompt");
         let user_seq = wait_user_message(&manager, &source_id, "hello world").await;
@@ -2537,7 +2561,7 @@ mod tests {
             text: "Understood".to_owned(),
             is_complete: true,
         }));
-        wait_event_type(&manager, &source_id, "agent_message").await;
+        wait_event_type(&manager, &source_id, EventType::AgentMessage).await;
         mock.emit(DriverEvent::Event(UnifiedEventPayload::StatusChanged {
             status: SessionStatus::Idle,
             error_message: None,
@@ -2579,7 +2603,7 @@ mod tests {
                     text,
                     client_source,
                     ..
-                } if client_source == "fork" => Some(text.clone()),
+                } if client_source == &ClientSource::Fork => Some(text.clone()),
                 _ => None,
             })
             .expect("injected fork context");
@@ -2665,14 +2689,14 @@ mod tests {
     ) -> (PathBuf, String) {
         let (repo, session_id) = setup_repo_session(manager, dir).await;
         manager
-            .send_prompt("c2", &session_id, prompt, "cli")
+            .send_prompt("c2", &session_id, prompt, ClientSource::Cli)
             .await
             .expect("prompt");
         wait_user_message(manager, &session_id, prompt).await;
         mock.emit(DriverEvent::Event(UnifiedEventPayload::SessionAgentBound {
             agent_session_id: "agent-sess-1".to_owned(),
         }));
-        wait_event_type(manager, &session_id, "session_agent_bound").await;
+        wait_event_type(manager, &session_id, EventType::SessionAgentBound).await;
         mock.emit(DriverEvent::Event(UnifiedEventPayload::StatusChanged {
             status: SessionStatus::Idle,
             error_message: None,
@@ -2729,7 +2753,7 @@ mod tests {
         assert!(
             !batch.events.iter().any(|event| matches!(
                 &event.payload,
-                UnifiedEventPayload::UserMessage { client_source, .. } if client_source == "resume"
+                UnifiedEventPayload::UserMessage { client_source, .. } if client_source == &ClientSource::Resume
             )),
             "native resume must not inject replay context"
         );
@@ -2768,7 +2792,7 @@ mod tests {
                     text,
                     client_source,
                     ..
-                } if client_source == "resume" => Some(text.clone()),
+                } if client_source == &ClientSource::Resume => Some(text.clone()),
                 _ => None,
             })
             .expect("injected resume context");
@@ -2874,7 +2898,7 @@ mod tests {
         // Agent with native restore support: sending without an explicit resume auto-resumes
         mock.set_resume_supported(true);
         manager
-            .send_prompt("c-next", &session_id, "auto resumed", "web")
+            .send_prompt("c-next", &session_id, "auto resumed", ClientSource::Web)
             .await
             .expect("send prompt");
 
@@ -2906,7 +2930,7 @@ mod tests {
         assert!(
             !batch.events.iter().any(|event| matches!(
                 &event.payload,
-                UnifiedEventPayload::UserMessage { client_source, .. } if client_source == "resume"
+                UnifiedEventPayload::UserMessage { client_source, .. } if client_source == &ClientSource::Resume
             )),
             "native auto resume must not inject replay context"
         );
@@ -2927,7 +2951,7 @@ mod tests {
         // Native restore unsupported: the send fails with ResumeRequired and the
         // history replay is not implicitly run (the session stays stopped)
         let err = manager
-            .send_prompt("c-next", &session_id, "needs replay", "web")
+            .send_prompt("c-next", &session_id, "needs replay", ClientSource::Web)
             .await
             .expect_err("native resume is unavailable");
         assert!(matches!(err, NodeError::ResumeRequired { .. }));
@@ -3072,7 +3096,7 @@ mod tests {
                 "c_prompt1",
                 &outcome.session_id,
                 "Implement login page",
-                "web",
+                ClientSource::Web,
             )
             .await
             .expect("prompt");
@@ -3093,7 +3117,7 @@ mod tests {
                 "c_prompt2",
                 &outcome.session_id,
                 "Now add logout button",
-                "web",
+                ClientSource::Web,
             )
             .await
             .expect("prompt");

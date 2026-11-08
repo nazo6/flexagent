@@ -10,8 +10,8 @@
 use serde::{Deserialize, Serialize};
 
 use crate::common::{
-    DataSafety, ErrorCode, ErrorInfo, NodeProjectReport, SessionControlAction, WarningInfo,
-    WorkspaceDiffResponse,
+    ClientSource, DataSafety, ErrorCode, ErrorInfo, NodeProjectReport, ResolvedBy,
+    SessionControlAction, WarningInfo, WorkspaceDiffResponse,
 };
 use crate::events::SessionEventEnvelope;
 /// Synchronization state of a session held by the node (reported in `NodeHello`).
@@ -329,7 +329,7 @@ pub enum ServerToNodeMsg {
         /// Prompt body
         text: String,
         /// Source (`cli` / `web` / `android`)
-        client_source: String,
+        client_source: ClientSource,
     },
     /// Answers a permission request.
     RespondPermission {
@@ -342,7 +342,7 @@ pub enum ServerToNodeMsg {
         /// The selected `option_id`
         selected_option_id: String,
         /// Who resolved it (`cli` / `web` / `android_push`)
-        resolved_by: String,
+        resolved_by: ResolvedBy,
     },
     /// Answers an elicitation (structured input request).
     RespondElicitation {
@@ -357,7 +357,7 @@ pub enum ServerToNodeMsg {
         /// Answer content for `accept` (following the form's `requested_schema`)
         content: serde_json::Value,
         /// Who resolved it (`cli` / `web` / `android_push`)
-        resolved_by: String,
+        resolved_by: ResolvedBy,
     },
     /// Mode switch / configuration change / cancel / kill.
     ControlSession {

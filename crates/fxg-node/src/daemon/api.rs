@@ -95,7 +95,7 @@ impl ClientApiBackend for DaemonState {
                 client_source,
             } => {
                 let result = manager
-                    .send_prompt(&command_id, &session_id, &text, &client_source)
+                    .send_prompt(&command_id, &session_id, &text, client_source)
                     .await
                     .map(|()| session_id);
                 (command_id, result)
@@ -113,7 +113,7 @@ impl ClientApiBackend for DaemonState {
                         &session_id,
                         &request_id,
                         &selected_option_id,
-                        &resolved_by,
+                        resolved_by,
                     )
                     .await
                     .map(|()| session_id);
@@ -134,7 +134,7 @@ impl ClientApiBackend for DaemonState {
                         &elicitation_id,
                         action,
                         content,
-                        &resolved_by,
+                        resolved_by,
                     )
                     .await
                     .map(|()| session_id);
@@ -321,7 +321,7 @@ impl ClientApiBackend for DaemonState {
                 session_id,
                 request_id,
                 &selected,
-                &request.resolved_by,
+                request.resolved_by.clone(),
             )
             .await
         {
@@ -366,7 +366,7 @@ impl ClientApiBackend for DaemonState {
                 elicitation_id,
                 request.action,
                 request.content.clone(),
-                &request.resolved_by,
+                request.resolved_by.clone(),
             )
             .await
         {
