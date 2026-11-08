@@ -22,7 +22,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use agent_client_protocol::schema::ProtocolVersion;
-use agent_client_protocol::schema::v1::{
+use agent_client_protocol::util::MatchDispatch;
+use agent_client_protocol::v1::schema::{
     AgentCapabilities, CancelNotification, ClientCapabilities, CompleteElicitationNotification,
     ContentBlock, ContentChunk, CreateElicitationRequest, CreateElicitationResponse,
     CreateTerminalRequest, CreateTerminalResponse, ElicitationAcceptAction,
@@ -32,17 +33,15 @@ use agent_client_protocol::schema::v1::{
     NewSessionRequest, PermissionOptionKind, ReadTextFileRequest, ReadTextFileResponse,
     ReleaseTerminalRequest, ReleaseTerminalResponse, RequestPermissionOutcome,
     RequestPermissionRequest, RequestPermissionResponse, SelectedPermissionOutcome,
-    SessionConfigKind, SessionConfigOption, SessionId, SessionNotification, SessionUpdate,
-    SetSessionConfigOptionRequest, SetSessionModeRequest, StopReason, TerminalExitStatus,
-    TerminalId, TerminalOutputRequest, TerminalOutputResponse, TextContent, ToolCall,
-    ToolCallContent, ToolCallStatus, ToolCallUpdate, ToolKind, WaitForTerminalExitRequest,
-    WaitForTerminalExitResponse, WriteTextFileRequest, WriteTextFileResponse,
+    SessionConfigKind, SessionConfigOption, SessionId, SessionModeState, SessionNotification,
+    SessionUpdate, SetSessionConfigOptionRequest, SetSessionModeRequest, StopReason,
+    TerminalExitStatus, TerminalId, TerminalOutputRequest, TerminalOutputResponse, TextContent,
+    ToolCall, ToolCallContent, ToolCallStatus, ToolCallUpdate, ToolKind,
+    WaitForTerminalExitRequest, WaitForTerminalExitResponse, WriteTextFileRequest,
+    WriteTextFileResponse,
 };
-use agent_client_protocol::util::MatchDispatch;
-use agent_client_protocol::{
-    AcpAgent, AcpAgentConfig, ActiveSession, Agent, ByteStreams, Client, ConnectionTo,
-    SessionMessage,
-};
+use agent_client_protocol::v1::{ActiveSession, ConnectionTo, SessionMessage, SessionSetup};
+use agent_client_protocol::{AcpAgent, AcpAgentConfig, Agent, Client};
 use anyhow::{Context, anyhow};
 use async_trait::async_trait;
 use fxg_protocol::common::{
@@ -122,12 +121,6 @@ enum ElicitationOutcome {
     /// cancel
     Cancel,
 }
-
-/// エージェントのブートストラップ (ラッパープロセス) の自然終了を待つ猶予。
-///
-/// PyInstaller onefile 型のエージェントは子 (実体) の終了後に展開済み一時
-/// ファイル (数百 MB) を削除してから終了するため、削除 I/O を見込んだ余裕を取る。
-const AGENT_EXIT_GRACE: std::time::Duration = std::time::Duration::from_secs(15);
 
 /// セッション (ターンループ) へのコマンド。
 #[derive(Debug)]
@@ -591,7 +584,7 @@ impl ActiveSessionHandle for AcpSessionHandle {
     }
 
     async fn set_config(&self, key: String, value: serde_json::Value) -> anyhow::Result<()> {
-        let value: agent_client_protocol::schema::v1::SessionConfigOptionValue =
+        let value: agent_client_protocol::v1::schema::SessionConfigOptionValue =
             serde_json::from_value(value)
                 .map_err(|err| anyhow!("unsupported config value for {key}: {err}"))?;
         self.conn
@@ -715,7 +708,7 @@ async fn run_acp_process(params: AcpProcessTaskParams) -> Result<(), agent_clien
     // NOTE: `impl AsyncFnMut` を返すヘルパー経由では associated future の `Send` を
     // 証明できないため、ビルダーチェーンへクロージャを直接渡す。
     let builder = Client
-        .builder()
+        .v1()
         .name("fxg")
         .on_receive_request(
             {
@@ -1049,43 +1042,20 @@ async fn run_acp_process(params: AcpProcessTaskParams) -> Result<(), agent_clien
             agent_client_protocol::on_receive_notification!(),
         );
 
-    // 外部エージェントプロセスの起動とプロセスツリー管理 (Windows: Job Object)
-    let (child_stdin, child_stdout, child_stderr, mut child) = match agent.spawn_process() {
-        Ok(parts) => parts,
-        Err(err) => {
-            if let Some(tx) = ready_tx.take() {
-                let _ = tx.send(Err(anyhow!("failed to start agent process: {err}")));
-            }
-            return Err(err);
-        }
-    };
-
-    let _process_guard = match fxg_pty::ProcessTreeGuard::new() {
-        Ok(guard) => guard,
-        Err(err) => {
-            if let Some(tx) = ready_tx.take() {
-                let _ = tx.send(Err(anyhow!("failed to create process tree guard: {err}")));
-            }
-            return Err(agent_client_protocol::Error::internal_error().data(err.to_string()));
-        }
-    };
-    // エージェントのプロセスツリーを終了対象として登録する
-    // (プラットフォーム差は `fxg_pty` 側に集約)。失敗しても起動は継続するが、
-    // 終了時のツリー kill が効かなくなるため警告する。
-    if let Err(err) = _process_guard.attach_pid(child.id()) {
-        tracing::warn!("failed to attach acp agent process tree to guard: {err}");
-    }
-
-    // エージェント stderr をデーモンのログへ流す (パイプ詰まり防止)
-    spawn_acp_stderr_pump(child_stderr);
-
     // クロージャ (async move) が `permissions` / `elicitations` をムーブするため、
     // teardown 用に複製を保持しておく
     let permissions_for_teardown = Arc::clone(&permissions);
     let elicitations_for_teardown = Arc::clone(&elicitations);
-    let transport = ByteStreams::new(child_stdin, child_stdout);
+
+    // エージェント stderr をデーモンのログへ流す
+    let agent = agent.with_debug(|line, direction| {
+        if matches!(direction, agent_client_protocol::LineDirection::Stderr) {
+            tracing::debug!(target: "fxg_acp::acp", "acp agent: {line}");
+        }
+    });
+
     let run_result = builder
-        .connect_with(transport, async move |cx: ConnectionTo<Agent>| {
+        .connect_with(agent, async move |cx: ConnectionTo<Agent>| {
             // 1) initialize (プロセスにつき 1 回。fs 読み書き + terminal +
             //    elicitation (form) をサポート宣言)
             let capabilities = ClientCapabilities::new()
@@ -1198,24 +1168,6 @@ async fn run_acp_process(params: AcpProcessTaskParams) -> Result<(), agent_clien
         })
         .await;
 
-    // 接続完了後、プロセスツリーを確実に終了させる。
-    //
-    // ラッパー型ランチャー (PyInstaller onefile 等) は「内側のプロセスが終了すると
-    // 自身で後始末 (一時ファイルの削除等) をしてから自然終了する」ため、
-    // 内側から順に終了してルートの自然終了を待つ。
-    // プラットフォーム差は `fxg_pty` 側に集約されている。
-    match _process_guard
-        .shutdown_tree(child.id(), AGENT_EXIT_GRACE)
-        .await
-    {
-        Ok(outcome) => tracing::debug!(?outcome, "acp agent process tree shut down"),
-        Err(err) => tracing::warn!("failed to shut down acp agent process tree: {err}"),
-    }
-    match child.status().await {
-        Ok(status) => tracing::debug!(?status, "acp agent process exited"),
-        Err(err) => tracing::debug!("failed to reap acp agent process: {err}"),
-    }
-
     // 未解決の承認・質問が残っていればキャンセルで閉じる (プロセス終了)
     cancel_pending_permissions(&permissions_for_teardown);
     cancel_pending_elicitations(&elicitations_for_teardown, None);
@@ -1250,7 +1202,7 @@ async fn build_session(
 )> {
     // セッション取得 (新規作成 / session/resume / session/load)
     let plan = plan_resume(agent_capabilities, params.resume.as_ref())?;
-    let (session, context_restored) = match acquire_session(cx, plan, &params.cwd).await {
+    let acquired = match acquire_session(cx, plan, &params.cwd).await {
         Ok(acquired) => acquired,
         // ネイティブ限定の再開 (`allow_fresh = false`) では、復元失敗は
         // 「ネイティブ復元不可」として呼び出し側 (ノード) に伝える
@@ -1266,6 +1218,8 @@ async fn build_session(
         }
         Err(err) => return Err(anyhow!("failed to create acp session: {err}")),
     };
+    let session = acquired.session;
+    let context_restored = acquired.is_resumed;
     let acp_session_id = session.session_id().clone();
     // セッション情報を登録する (fs / terminal ハンドラが参照する)
     contexts.lock().expect("session contexts poisoned").insert(
@@ -1293,9 +1247,11 @@ async fn build_session(
     }
 
     // モード・スラッシュコマンド・設定項目を配信
-    let (modes, commands, config_options) = session_capabilities(&session);
-    let current_mode = session
-        .modes()
+    let (modes, commands, config_options) =
+        session_capabilities(acquired.modes.as_ref(), acquired.config_options.as_deref());
+    let current_mode = acquired
+        .modes
+        .as_ref()
         .map(|state| state.current_mode_id.to_string());
     let capabilities_state = SessionCapabilitiesState {
         current_mode: current_mode.clone(),
@@ -1344,13 +1300,21 @@ async fn serve_session(
                 }
                 loop {
                     match session.read_update().await {
-                        Ok(SessionMessage::StopReason(reason)) => {
+                        Ok(SessionMessage::PromptResponse(response)) => {
                             for payload in accumulator.finish_all() {
                                 let _ = events.send(DriverEvent::Event(payload));
                             }
-                            tracing::debug!(?reason, "acp turn finished");
-                            if let Some(payload) = turn_ended_event(reason) {
-                                let _ = events.send(DriverEvent::Event(payload));
+                            match response {
+                                Ok(resp) => {
+                                    let reason = resp.stop_reason;
+                                    tracing::debug!(?reason, "acp turn finished");
+                                    if let Some(payload) = turn_ended_event(reason) {
+                                        let _ = events.send(DriverEvent::Event(payload));
+                                    }
+                                }
+                                Err(err) => {
+                                    tracing::warn!("acp prompt returned error: {err}");
+                                }
                             }
                             let _ = events.send(DriverEvent::Event(
                                 UnifiedEventPayload::StatusChanged {
@@ -1360,11 +1324,11 @@ async fn serve_session(
                             ));
                             break;
                         }
-                        Ok(SessionMessage::SessionMessage(dispatch)) => {
+                        Ok(SessionMessage::Message(dispatch)) => {
                             let acc = &mut accumulator;
                             let ev = events;
                             let caps = &mut capabilities_state;
-                            let result = MatchDispatch::new(dispatch)
+                            let result = MatchDispatch::new(dispatch.into_raw())
                                 .if_notification(async move |notification: SessionNotification| {
                                     for event in map_session_update(notification.update, acc, caps)
                                     {
@@ -1413,27 +1377,12 @@ fn turn_ended_event(reason: StopReason) -> Option<UnifiedEventPayload> {
     })
 }
 
-/// エージェントプロセスの stderr をデーモンのログ (`debug`) へ流す。
-fn spawn_acp_stderr_pump<R>(reader: R)
-where
-    R: futures_util::io::AsyncRead + Unpin + Send + 'static,
-{
-    use futures_util::AsyncBufReadExt;
-    use futures_util::StreamExt;
-    tokio::spawn(async move {
-        let mut lines = futures_util::io::BufReader::new(reader).lines();
-        while let Some(Ok(line)) = lines.next().await {
-            tracing::debug!(target: "fxg_acp::acp", "acp agent: {line}");
-        }
-    });
-}
-
 /// セッションのモード・コマンド・設定項目を取り出す。
 fn session_capabilities(
-    session: &ActiveSession<'static, Agent>,
+    modes: Option<&SessionModeState>,
+    config_options: Option<&[SessionConfigOption]>,
 ) -> (Vec<ModeInfo>, Vec<CommandInfo>, Vec<ConfigOptionInfo>) {
-    let modes = session
-        .modes()
+    let modes = modes
         .map(|state| {
             state
                 .available_modes
@@ -1446,8 +1395,7 @@ fn session_capabilities(
                 .collect()
         })
         .unwrap_or_default();
-    let config_options = session
-        .config_options()
+    let config_options = config_options
         .map(|options| options.iter().map(map_config_option).collect())
         .unwrap_or_default();
     // スラッシュコマンドは session/update (AvailableCommandsUpdate) で届くため
@@ -1508,42 +1456,70 @@ fn plan_resume(
     .into())
 }
 
+struct AcquiredSession {
+    session: ActiveSession<'static, Agent>,
+    is_resumed: bool,
+    modes: Option<SessionModeState>,
+    config_options: Option<Vec<SessionConfigOption>>,
+}
+
 /// セッションを取得する ([`ResumePlan`] に従う)。
 ///
-/// 戻り値の `bool` はネイティブ復元の成否 (`false` = 新規作成。呼び出し側が
+/// 戻り値の `is_resumed` はネイティブ復元の成否 (`false` = 新規作成。呼び出し側が
 /// 履歴 Replay を注入する)。
 async fn acquire_session(
     cx: &ConnectionTo<Agent>,
     plan: ResumePlan,
     cwd: &Path,
-) -> Result<(ActiveSession<'static, Agent>, bool), agent_client_protocol::Error> {
+) -> Result<AcquiredSession, agent_client_protocol::Error> {
     match plan {
         ResumePlan::Fresh => {
-            let session = cx
+            let SessionSetup {
+                session, response, ..
+            } = cx
                 .build_session_from(NewSessionRequest::new(cwd))
                 .block_task()
                 .start_session()
                 .await?;
-            Ok((session, false))
+            Ok(AcquiredSession {
+                session,
+                is_resumed: false,
+                modes: response.modes,
+                config_options: response.config_options,
+            })
         }
         ResumePlan::Resume(agent_session_id) => {
-            let restored = cx
+            let SessionSetup {
+                session, response, ..
+            } = cx
                 .resume_session(agent_session_id, cwd)
                 .block_task()
                 .start_session()
                 .await?;
-            let (session, _response) = restored.into_parts();
-            Ok((session, true))
+            Ok(AcquiredSession {
+                session,
+                is_resumed: true,
+                modes: response.modes,
+                config_options: response.config_options,
+            })
         }
         ResumePlan::Load(agent_session_id) => {
-            let restored = cx
+            let SessionSetup {
+                mut session,
+                response,
+                ..
+            } = cx
                 .load_session(agent_session_id, cwd)
                 .block_task()
                 .start_session()
                 .await?;
-            let (mut session, _response) = restored.into_parts();
             discard_replay_updates(&mut session);
-            Ok((session, true))
+            Ok(AcquiredSession {
+                session,
+                is_resumed: true,
+                modes: response.modes,
+                config_options: response.config_options,
+            })
         }
     }
 }
@@ -1574,13 +1550,13 @@ fn map_config_option(option: &SessionConfigOption) -> ConfigOptionInfo {
         SessionConfigKind::Select(select) => (
             serde_json::Value::String(select.current_value.to_string()),
             match &select.options {
-                agent_client_protocol::schema::v1::SessionConfigSelectOptions::Ungrouped(
+                agent_client_protocol::v1::schema::SessionConfigSelectOptions::Ungrouped(
                     values,
                 ) => values
                     .iter()
                     .map(|value| serde_json::Value::String(value.value.to_string()))
                     .collect(),
-                agent_client_protocol::schema::v1::SessionConfigSelectOptions::Grouped(groups) => {
+                agent_client_protocol::v1::schema::SessionConfigSelectOptions::Grouped(groups) => {
                     groups
                         .iter()
                         .flat_map(|group| &group.options)
@@ -1784,7 +1760,7 @@ fn map_session_update(
                     name: command.name.clone(),
                     description: command.description.clone(),
                     input_hint: command.input.as_ref().map(|input| match input {
-                        agent_client_protocol::schema::v1::AvailableCommandInput::Unstructured(
+                        agent_client_protocol::v1::schema::AvailableCommandInput::Unstructured(
                             unstructured,
                         ) => unstructured.hint.clone(),
                         _ => String::new(),
@@ -1950,8 +1926,8 @@ fn tool_status_str(status: ToolCallStatus) -> &'static str {
     }
 }
 
-fn plan_status_str(status: &agent_client_protocol::schema::v1::PlanEntryStatus) -> &'static str {
-    use agent_client_protocol::schema::v1::PlanEntryStatus;
+fn plan_status_str(status: &agent_client_protocol::v1::schema::PlanEntryStatus) -> &'static str {
+    use agent_client_protocol::v1::schema::PlanEntryStatus;
     match status {
         PlanEntryStatus::Pending => "pending",
         PlanEntryStatus::InProgress => "in_progress",
@@ -2124,7 +2100,7 @@ async fn create_terminal(
     terminals: Arc<TerminalRegistry>,
     events: mpsc::UnboundedSender<DriverEvent>,
     request: CreateTerminalRequest,
-    responder: agent_client_protocol::Responder<CreateTerminalResponse>,
+    responder: agent_client_protocol::v1::Responder<CreateTerminalResponse>,
 ) -> Result<(), agent_client_protocol::Error> {
     let terminal_id = uuid_v7();
     let mut spawn = fxg_pty::PtySpawnRequest::new(terminal_id.clone());
@@ -2232,7 +2208,7 @@ fn base64_encode(data: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use agent_client_protocol::schema::v1::{Plan, PlanEntry as AcpPlanEntry, PlanEntryPriority};
+    use agent_client_protocol::v1::schema::{Plan, PlanEntry as AcpPlanEntry, PlanEntryPriority};
 
     fn text_chunk(text: &str, message_id: Option<&str>) -> SessionUpdate {
         // `ContentChunk` は non_exhaustive のため JSON 経由で構築する
@@ -2254,7 +2230,7 @@ mod tests {
         capabilities.load_session = load_session;
         if resume {
             capabilities.session_capabilities.resume =
-                Some(agent_client_protocol::schema::v1::SessionResumeCapabilities::default());
+                Some(agent_client_protocol::v1::schema::SessionResumeCapabilities::default());
         }
         capabilities
     }
@@ -2484,10 +2460,10 @@ mod tests {
             .kind(ToolKind::Edit)
             .status(ToolCallStatus::Completed)
             .content(vec![ToolCallContent::Diff(
-                agent_client_protocol::schema::v1::Diff::new("src/lib.rs", "old\nnew\n"),
+                agent_client_protocol::v1::schema::Diff::new("src/lib.rs", "old\nnew\n"),
             )])
             .locations(vec![
-                agent_client_protocol::schema::v1::ToolCallLocation::new("src/lib.rs"),
+                agent_client_protocol::v1::schema::ToolCallLocation::new("src/lib.rs"),
             ]);
         let payload = tool_call_event(&tool_call);
         match payload {
@@ -2516,7 +2492,7 @@ mod tests {
         let plan = Plan::new(vec![AcpPlanEntry::new(
             "Run tests",
             PlanEntryPriority::High,
-            agent_client_protocol::schema::v1::PlanEntryStatus::InProgress,
+            agent_client_protocol::v1::schema::PlanEntryStatus::InProgress,
         )]);
         let mut acc = StreamingAccumulator::default();
         let mut caps = SessionCapabilitiesState::default();
@@ -2561,7 +2537,7 @@ mod tests {
 
     #[test]
     fn maps_session_info_update() {
-        use agent_client_protocol::schema::v1::SessionInfoUpdate;
+        use agent_client_protocol::v1::schema::SessionInfoUpdate;
 
         let update = SessionInfoUpdate::new().title("Refactor UI layout".to_owned());
         let mut acc = StreamingAccumulator::default();
@@ -2582,7 +2558,7 @@ mod tests {
 
     #[test]
     fn capabilities_partial_updates_preserve_existing_state() {
-        use agent_client_protocol::schema::v1::{
+        use agent_client_protocol::v1::schema::{
             AvailableCommand, AvailableCommandsUpdate, CurrentModeUpdate,
         };
 
@@ -2648,7 +2624,7 @@ mod tests {
 
     #[test]
     fn maps_grouped_select_options() {
-        use agent_client_protocol::schema::v1::{
+        use agent_client_protocol::v1::schema::{
             SessionConfigOption, SessionConfigSelect, SessionConfigSelectGroup,
             SessionConfigSelectOption,
         };
@@ -2695,7 +2671,7 @@ mod tests {
 
     #[test]
     fn maps_usage_update_to_event() {
-        use agent_client_protocol::schema::v1::{Cost, UsageUpdate};
+        use agent_client_protocol::v1::schema::{Cost, UsageUpdate};
 
         let update = SessionUpdate::UsageUpdate(
             UsageUpdate::new(53_000, 200_000).cost(Cost::new(0.045, "USD")),
