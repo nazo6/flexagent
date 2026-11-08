@@ -1,16 +1,18 @@
-//! FlexAgent PTY 制御クレート (`fxg-pty`)
+//! PTY control crate for FlexAgent (`fxg-pty`)
 //!
-//! ConPTY (Windows) / Unix PTY の双方向ストリーム管理、Windows Job Object による
-//! プロセスツリー確実終了、`which` (`PATHEXT` 対応) / `dunce` による
-//! コマンド・パス解決を提供する。
+//! Provides bidirectional stream management for ConPTY (Windows) / Unix PTY,
+//! guaranteed process tree termination via Windows Job Objects, and command /
+//! path resolution through `which` (`PATHEXT` aware) and `dunce`.
 //!
-//! 設計: `docs/04-agent-drivers-and-windows.md` §5。
+//! Design: `docs/04-agent-drivers-and-windows.md` §5.
 //!
-//! # モジュール構成
+//! # Modules
 //!
-//! - `proc`: コマンド解決 (`resolve_command`)・パス正規化 (`canonicalize`)・
-//!   プロセスツリーガード (`ProcessTreeGuard` / Windows `WinJobGuard`)
-//! - `pty`: ConPTY / Unix PTY の双方向セッション管理 ([`PtySessionManager`])
+//! - `proc`: command resolution (`resolve_command`), path normalization
+//!   (`canonicalize`), and the process tree guard (`ProcessTreeGuard` / Windows
+//!   `WinJobGuard`)
+//! - `pty`: bidirectional ConPTY / Unix PTY session management
+//!   ([`PtySessionManager`])
 
 #![warn(missing_docs)]
 

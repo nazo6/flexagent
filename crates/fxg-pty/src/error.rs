@@ -1,48 +1,48 @@
-//! `fxg-pty` のエラー型。
+//! Error types for `fxg-pty`.
 
 use std::path::PathBuf;
 
-/// PTY / プロセス管理のエラー。
+/// Errors from PTY / process management.
 #[derive(Debug, thiserror::Error)]
 pub enum PtyError {
-    /// ファイルシステム・I/O エラー
+    /// Filesystem or I/O error
     #[error("io error at {path}: {source}")]
     Io {
-        /// 対象パス
+        /// Target path
         path: PathBuf,
-        /// 元のI/Oエラー
+        /// Underlying I/O error
         #[source]
         source: std::io::Error,
     },
-    /// コマンドが PATH から解決できない
+    /// The command cannot be resolved from `PATH`
     #[error("command not found: {command} (cwd: {cwd})")]
     CommandNotFound {
-        /// 解決対象のコマンド名
+        /// Command name to resolve
         command: String,
-        /// 探索基準ディレクトリ
+        /// Directory used as the search base
         cwd: PathBuf,
     },
-    /// PTY の生成・読み書きエラー (portable-pty)
+    /// PTY creation or read/write error (portable-pty)
     #[error("pty error: {0}")]
     Pty(String),
-    /// 指定 PTY ID が存在しない
+    /// No PTY with the given ID exists
     #[error("pty session not found: {0}")]
     NotFound(String),
-    /// 同一 PTY ID が既に存在する
+    /// A PTY with the same ID already exists
     #[error("pty session already exists: {0}")]
     AlreadyExists(String),
-    /// Windows Job Object の操作エラー
+    /// Windows Job Object operation error
     #[cfg(windows)]
     #[error("windows job object error: {0}")]
     JobObject(#[from] win32job::JobError),
-    /// Windows API (`windows` クレート) 呼び出しエラー
+    /// Windows API (`windows` crate) call error
     #[cfg(windows)]
     #[error("windows api error: {0}")]
     WindowsApi(#[from] windows::core::Error),
 }
 
 impl PtyError {
-    /// `Display` 実装を持つエラー (portable-pty / anyhow 等) から変換する。
+    /// Converts from an error implementing `Display` (portable-pty / anyhow, etc.).
     pub fn from_display(err: impl std::fmt::Display) -> Self {
         Self::Pty(err.to_string())
     }

@@ -1,23 +1,26 @@
-//! `portable-pty` による ConPTY (Windows) / Unix PTY の双方向ストリーム管理。
+//! Bidirectional ConPTY (Windows) / Unix PTY stream management via
+//! `portable-pty`.
 //!
-//! 設計: `docs/04-agent-drivers-and-windows.md` §5.3。
+//! Design: `docs/04-agent-drivers-and-windows.md` §5.3.
 //!
-//! - **クロスプラットフォーム PTY**: Windows では ConPTY、macOS/Linux では
-//!   Unix PTY を `portable-pty` が自動選択する。
-//! - **非同期ストリーミング**: Master 側の `Read` を専用スレッドで読み取り、
-//!   [`PtyEvent`] として `tokio::sync::broadcast` で購読者 (WebSocket / IPC) へ
-//!   配信する。入力は専用ライタースレッドが Master の `Write` へ即時フラッシュする。
-//!   終了検知は `wait()` 専用スレッドが担う (Windows の ConPTY は子プロセス終了
-//!   だけでは EOF にならないため、リーダーの EOF を終了の起点にはできない)。
-//! - **動的リサイズ**: [`PtySessionManager::resize`] で ConPTY / Unix PTY の
-//!   ウィンドウサイズを即時変更する。
-//! - **ConPTY 起動ハンドシェイク** (Windows): ConPTY は起動時にカーソル位置照会
-//!   (`ESC[6n`) を送り、応答が届くまで子プロセスのコンソール操作をブロックする。
-//!   マネージャが代わりに応答し、照会は出力から除去する
-//!   ([`ConPtyStartupHandshake`])。これによりヘッドレス実行でも子プロセスが
-//!   停止しない。
-//! - **プロセスツリー確実終了**: 子プロセスは [`ProcessTreeGuard`]
-//!   (Windows: Job Object) にバインドする。
+//! - **Cross-platform PTY**: `portable-pty` selects ConPTY on Windows and Unix
+//!   PTY on macOS/Linux automatically.
+//! - **Asynchronous streaming**: a dedicated thread reads the Master side's
+//!   `Read` and publishes [`PtyEvent`]s to subscribers (WebSocket / IPC) via
+//!   `tokio::sync::broadcast`. Input is flushed immediately to the Master's
+//!   `Write` by a dedicated writer thread. Exit detection is handled by a
+//!   dedicated `wait()` thread (Windows ConPTY does not reach EOF just because
+//!   the child process exits, so the reader's EOF cannot be used as the exit
+//!   trigger).
+//! - **Dynamic resize**: [`PtySessionManager::resize`] changes the ConPTY / Unix
+//!   PTY window size immediately.
+//! - **ConPTY startup handshake** (Windows): on startup ConPTY sends a cursor
+//!   position query (`ESC[6n`) and blocks the child process's console operations
+//!   until a response arrives. The manager responds on its behalf and strips the
+//!   query from the output ([`ConPtyStartupHandshake`]). This keeps child
+//!   processes from stalling in headless runs.
+//! - **Guaranteed process tree termination**: child processes are bound to a
+//!   [`ProcessTreeGuard`] (Windows: Job Object).
 
 use std::collections::HashMap;
 use std::io::{Read, Write};
@@ -31,64 +34,65 @@ use tokio::sync::{broadcast, mpsc};
 use crate::error::PtyError;
 use crate::proc::{ProcessTreeGuard, resolve_command};
 
-/// 購読者へ配信される PTY イベント。
+/// PTY events delivered to subscribers.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PtyEvent {
-    /// 出力チャンク (ANSI エスケープを含む生バイト列)
+    /// Output chunk (raw bytes, including ANSI escapes)
     Output {
-        /// 対象 PTY ID
+        /// Target PTY ID
         pty_id: String,
-        /// 出力データ
+        /// Output data
         data: Vec<u8>,
     },
-    /// プロセス終了 (以降この PTY はセッションマップから削除される)
+    /// Process exit (the PTY is removed from the session map afterwards)
     Exit {
-        /// 対象 PTY ID
+        /// Target PTY ID
         pty_id: String,
-        /// 終了コード (取得できない場合は `None`)
+        /// Exit code (`None` if unavailable)
         exit_code: Option<i32>,
     },
 }
 
-/// 稼働中 PTY の情報。
+/// Information about a running PTY.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PtySessionInfo {
     /// PTY ID
     pub pty_id: String,
-    /// 紐づくエージェントセッション ID (任意)
+    /// Agent session ID this PTY belongs to (optional)
     pub session_id: Option<String>,
-    /// 子プロセスの OS プロセスID
+    /// OS process ID of the child process
     pub pid: Option<u32>,
-    /// 現在の列数
+    /// Current number of columns
     pub cols: u16,
-    /// 現在の行数
+    /// Current number of rows
     pub rows: u16,
 }
 
-/// PTY 起動要求。
+/// Request to spawn a PTY.
 #[derive(Debug, Clone)]
 pub struct PtySpawnRequest {
-    /// PTY ID (呼び出し側が採番)
+    /// PTY ID (assigned by the caller)
     pub pty_id: String,
-    /// 紐づくエージェントセッション ID (任意)
+    /// Agent session ID this PTY belongs to (optional)
     pub session_id: Option<String>,
-    /// 作業ディレクトリ (省略時は現在のディレクトリ)
+    /// Working directory (defaults to the current directory)
     pub cwd: Option<PathBuf>,
-    /// 起動するシェル/コマンド (省略時は OS 既定シェル)。
-    /// 指定時は `PATH` (`PATHEXT`) から解決する。
+    /// Shell / command to launch (defaults to the OS default shell).
+    /// When specified, it is resolved from `PATH` (`PATHEXT`).
     pub shell_cmd: Option<String>,
-    /// `shell_cmd` へ渡す引数
+    /// Arguments passed to `shell_cmd`
     pub args: Vec<String>,
-    /// 列数
+    /// Number of columns
     pub cols: u16,
-    /// 行数
+    /// Number of rows
     pub rows: u16,
-    /// 追加で設定する環境変数 (親プロセスの環境を継承する)
+    /// Extra environment variables to set (the parent process environment is
+    /// inherited)
     pub env: Vec<(String, String)>,
 }
 
 impl PtySpawnRequest {
-    /// 既定サイズ (80x24) の起動要求を作る。
+    /// Creates a spawn request with the default size (80x24).
     pub fn new(pty_id: impl Into<String>) -> Self {
         Self {
             pty_id: pty_id.into(),
@@ -108,7 +112,7 @@ struct PtySession {
     master: Box<dyn MasterPty + Send>,
     input_tx: mpsc::UnboundedSender<Vec<u8>>,
     killer: Box<dyn ChildKiller + Send + Sync>,
-    /// Drop でプロセスツリーを確実に終了させる (Windows Job Object)
+    /// Drop reliably terminates the process tree (Windows Job Object)
     _guard: ProcessTreeGuard,
 }
 
@@ -117,41 +121,46 @@ struct Inner {
     events: broadcast::Sender<PtyEvent>,
 }
 
-/// ConPTY が起動時に送るカーソル位置照会 (Device Status Report)。
+/// Cursor position query (Device Status Report) that ConPTY sends at startup.
 #[cfg(any(windows, test))]
 const CPR_QUERY: &[u8] = b"\x1b[6n";
 
-/// 照会への応答 (カーソル位置 = 行1・列1)。
+/// Response to the query (cursor position = row 1, column 1).
 #[cfg(windows)]
 const CPR_RESPONSE: &[u8] = b"\x1b[1;1R";
 
-/// Windows ConPTY の起動ハンドシェイク (カーソル位置照会) を処理するフィルタ。
+/// Filter that handles the Windows ConPTY startup handshake (cursor position
+/// query).
 ///
-/// ConPTY は `PSEUDOCONSOLE_INHERIT_CURSOR` により起動直後に
-/// カーソル位置照会 (`ESC[6n`) を送り、応答 (`ESC[1;1R`) が届くまで
-/// **子プロセスのコンソール操作をブロックする**
-/// (CI: windows-latest で検出。応答が無いとヘッドレス実行で子プロセスが
-/// 永久に停止する)。
+/// With `PSEUDOCONSOLE_INHERIT_CURSOR`, ConPTY sends a cursor position query
+/// (`ESC[6n`) right after startup and **blocks the child process's console
+/// operations** until a response (`ESC[1;1R`) arrives
+/// (CI: detected on windows-latest. Without a response, child processes hang
+/// forever in headless runs).
 ///
-/// マネージャ (ターミナル側 IO 層) が起動照会へ応答し、照会シーケンスは
-/// 出力から除去する:
-/// - ヘッドレス (購読者なし) でも子プロセスが正常に起動する
-/// - フロントエンド (xterm.js 等) の自動応答と二重応答にならない
+/// The manager (the terminal-side IO layer) answers the startup query and strips
+/// the query sequence from the output:
+/// - child processes start normally even when headless (no subscribers)
+/// - no double response with the frontend's own automatic response (xterm.js etc.)
 ///
-/// 起動照会はプロセス起動前に送られるため、**最初に見つかった照会のみ**を
-/// 対象とする (アプリ自身が発行する照会はフロントエンドが応答する)。
+/// The startup query is sent before the process starts, so **only the first
+/// query found** is handled (queries issued by the application itself are
+/// answered by the frontend).
 #[cfg(any(windows, test))]
 #[derive(Debug, Default)]
 struct ConPtyStartupHandshake {
-    /// 照会を処理済みか (以降はすべて透過)
+    /// Whether the query has been handled (everything is passed through
+    /// afterwards)
     done: bool,
-    /// チャンク境界で分断された照会の持ち越し (最大 `CPR_QUERY.len() - 1` バイト)
+    /// Query bytes carried over when split across chunk boundaries (at most
+    /// `CPR_QUERY.len() - 1` bytes)
     carry: Vec<u8>,
 }
 
 #[cfg(any(windows, test))]
 impl ConPtyStartupHandshake {
-    /// 出力チャンクを処理し、転送すべきデータと照会への応答要否を返す。
+    /// Processes an output chunk and returns the data to forward plus whether a
+    /// response to the query is required.
     fn process(&mut self, chunk: &[u8]) -> (Vec<u8>, bool) {
         if self.done {
             return (chunk.to_vec(), false);
@@ -166,8 +175,9 @@ impl ConPtyStartupHandshake {
             return (out, true);
         }
 
-        // 照会がチャンク境界で分断され得るため、pattern の prefix になり得る
-        // 末尾のみを持ち越す (通常は 0〜3 バイト)
+        // Because the query can be split across chunk boundaries, carry over
+        // only the trailing bytes that could be a prefix of the pattern (usually
+        // 0-3 bytes)
         let keep = pattern_prefix_suffix_len(&data, CPR_QUERY);
         let split = data.len() - keep;
         let out = data[..split].to_vec();
@@ -175,14 +185,15 @@ impl ConPtyStartupHandshake {
         (out, false)
     }
 
-    /// 未処理の持ち越し (部分シーケンス) を取り出す (セッション終了時のフラッシュ用)。
+    /// Extracts the unprocessed carry-over (partial sequence) for flushing at
+    /// session exit.
     #[cfg(windows)]
     fn take_carry(&mut self) -> Vec<u8> {
         std::mem::take(&mut self.carry)
     }
 }
 
-/// スライス内で `needle` を検索する (最初の出現位置)。
+/// Searches a slice for `needle` and returns the first occurrence.
 #[cfg(any(windows, test))]
 fn find_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
     if needle.is_empty() || haystack.len() < needle.len() {
@@ -193,7 +204,8 @@ fn find_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
         .position(|window| window == needle)
 }
 
-/// `data` の末尾が `pattern` の prefix になっている最長長 (≤ `pattern.len() - 1`)。
+/// Longest length (≤ `pattern.len() - 1`) such that the tail of `data` is a
+/// prefix of `pattern`.
 #[cfg(any(windows, test))]
 fn pattern_prefix_suffix_len(data: &[u8], pattern: &[u8]) -> usize {
     let max = (pattern.len() - 1).min(data.len());
@@ -203,26 +215,28 @@ fn pattern_prefix_suffix_len(data: &[u8], pattern: &[u8]) -> usize {
         .unwrap_or(0)
 }
 
-/// 出力チャンクを購読者へ配信するフォワーダ。
+/// Forwarder that publishes output chunks to subscribers.
 struct OutputForwarder {
     inner: Arc<Inner>,
     pty_id: String,
-    /// Windows ConPTY の起動ハンドシェイク処理 (照会への応答送信を含む)
+    /// Windows ConPTY startup handshake handling (including sending the query
+    /// response)
     #[cfg(windows)]
     handshake: ConPtyStartupHandshake,
-    /// 照会への応答を PTY 入力へ送るための送信チャネル
+    /// Channel for sending the query response to the PTY input
     #[cfg(windows)]
     input_tx: mpsc::UnboundedSender<Vec<u8>>,
 }
 
 impl OutputForwarder {
-    /// チャンクを配信する (Windows: ConPTY 起動照会の検出・除去・応答)。
+    /// Delivers a chunk (Windows: detect, strip, and respond to the ConPTY
+    /// startup query).
     fn forward(&mut self, chunk: &[u8]) {
         #[cfg(windows)]
         let (data, respond) = self.handshake.process(chunk);
         #[cfg(windows)]
         if respond {
-            // ConPTY の起動照会へ応答する (ヘッドレス実行でのブロック回避)
+            // Respond to ConPTY's startup query (avoids blocking in headless runs)
             let _ = self.input_tx.send(CPR_RESPONSE.to_vec());
         }
         #[cfg(not(windows))]
@@ -236,7 +250,7 @@ impl OutputForwarder {
         }
     }
 
-    /// セッション終了時に持ち越しをフラッシュする。
+    /// Flushes the carry-over when the session ends.
     fn finish(&mut self) {
         #[cfg(windows)]
         let tail = self.handshake.take_carry();
@@ -251,10 +265,10 @@ impl OutputForwarder {
     }
 }
 
-/// ConPTY / Unix PTY のセッション管理マネージャ。
+/// Session manager for ConPTY / Unix PTY.
 ///
-/// クローン可能なハンドル (`Arc<Inner>`) で、WebSocket ハンドラや IPC サーバーから
-/// 共有して使用する。
+/// A cloneable handle (`Arc<Inner>`) shared by WebSocket handlers and the IPC
+/// server.
 #[derive(Clone)]
 pub struct PtySessionManager {
     inner: Arc<Inner>,
@@ -275,7 +289,7 @@ impl Default for PtySessionManager {
 }
 
 impl PtySessionManager {
-    /// 空のマネージャを作成する。
+    /// Creates an empty manager.
     pub fn new() -> Self {
         let (events, _receiver) = broadcast::channel(1024);
         Self {
@@ -286,7 +300,7 @@ impl PtySessionManager {
         }
     }
 
-    /// PTY を起動し、非同期読み書きループを開始する。
+    /// Spawns a PTY and starts the asynchronous read/write loops.
     pub fn spawn(&self, request: PtySpawnRequest) -> Result<PtySessionInfo, PtyError> {
         {
             let sessions = self.lock_sessions();
@@ -327,7 +341,8 @@ impl PtySessionManager {
             .spawn_command(command)
             .map_err(PtyError::from_display)?;
 
-        // Windows: Job Object へバインド (デーモン終了時に孫プロセスまで確実に終了)
+        // Windows: bind to a Job Object (ensure even grandchildren are terminated
+        // when the daemon exits)
         let guard = ProcessTreeGuard::new()?;
         guard.attach(child.as_ref())?;
 
@@ -339,7 +354,8 @@ impl PtySessionManager {
             .map_err(PtyError::from_display)?;
         let writer = pair.master.take_writer().map_err(PtyError::from_display)?;
 
-        // slave 側ハンドルを閉じる: 子プロセス終了時に master 側で EOF を検出できる
+        // Close the slave-side handle: lets the master side detect EOF when the
+        // child process exits
         drop(pair.slave);
 
         let info = PtySessionInfo {
@@ -350,7 +366,7 @@ impl PtySessionManager {
             rows: request.rows,
         };
 
-        // 入力ライタースレッド
+        // Input writer thread
         let (input_tx, mut input_rx) = mpsc::unbounded_channel::<Vec<u8>>();
         std::thread::spawn(move || {
             let mut writer = writer;
@@ -360,14 +376,15 @@ impl PtySessionManager {
                 }
                 let _ = writer.flush();
             }
-            // writer の Drop で EOF が送られる
+            // Dropping the writer sends EOF
         });
 
-        // 出力リーダースレッド: master 側を読み続けて Output を配信する。
+        // Output reader thread: keeps reading the master side and publishes
+        // Output events.
         //
-        // EOF は「子プロセスの終了」ではなく「セッション破棄 (master の Drop)」
-        // で発生する点に注意する。Windows の ConPTY は子プロセスが終了しても
-        // 出力パイプが閉じず、ConPTY 自体を閉じて初めて EOF になる。
+        // Note that EOF happens on "session teardown (master Drop)", not on
+        // "child process exit". Windows ConPTY does not close the output pipe
+        // when the child exits; EOF only occurs once ConPTY itself is closed.
         let mut forwarder = OutputForwarder {
             inner: Arc::clone(&self.inner),
             pty_id: request.pty_id.clone(),
@@ -390,14 +407,14 @@ impl PtySessionManager {
             let _ = reader_done_tx.send(());
         });
 
-        // 終了検知スレッド: 子プロセスの終了を `wait()` で検知し、セッションを
-        // 破棄して Exit を配信する。破棄で master が Drop され、ConPTY / PTY が
-        // クローズされてリーダーにも EOF が届く (Windows で `Exit` が永遠に
-        // 発火しないバグを回避する。CI: windows-latest で検出)。
-        // セッション登録後に起動する: 超高速で終了するコマンドでも
-        // 「登録前に remove してしまう」競合を避ける。
-        // リーダーの EOF を待ってから Exit を送ることで、購読者が最終出力を
-        // 取りこぼさないことを保証する。
+        // Exit detection thread: detects child exit via `wait()`, tears down the
+        // session, and publishes Exit. Teardown drops the master, closes
+        // ConPTY / PTY, and delivers EOF to the reader as well (this works around
+        // a bug where `Exit` never fires on Windows. CI: detected on
+        // windows-latest). Started after the session is registered, so that even
+        // a command that exits extremely quickly cannot race with "remove before
+        // register". Waiting for the reader's EOF before sending Exit guarantees
+        // that subscribers do not miss the final output.
         self.lock_sessions().insert(
             info.pty_id.clone(),
             PtySession {
@@ -417,18 +434,18 @@ impl PtySessionManager {
                 .wait()
                 .ok()
                 .map(|status| i32::try_from(status.exit_code()).unwrap_or(i32::MAX));
-            // セッションの Drop (master → ClosePseudoConsole) はロック外で行う。
-            // ClosePseudoConsole は出力パイプの drain 状況によって待たされる
-            // ことがあるため、ロックを保持したまま実行しない。
+            // The session Drop (master → ClosePseudoConsole) is done outside the
+            // lock. ClosePseudoConsole can block depending on the drain state of
+            // the output pipe, so it must not run while holding the lock.
             let removed = exit_inner
                 .sessions
                 .lock()
                 .expect("pty sessions mutex poisoned")
                 .remove(&exit_pty_id);
             drop(removed);
-            // リーダーの EOF を待つ。万一 EOF が得られない場合
-            // (孫プロセスが slave 側を保持し続ける等) でも Exit を保証するため
-            // フェイルセーフのタイムアウトを設ける。
+            // Wait for the reader's EOF. A failsafe timeout is used so that Exit
+            // is still guaranteed if EOF never arrives (e.g. a grandchild keeps
+            // the slave side open).
             let _ = reader_done_rx.recv_timeout(Duration::from_secs(5));
             let _ = exit_inner.events.send(PtyEvent::Exit {
                 pty_id: exit_pty_id,
@@ -439,7 +456,7 @@ impl PtySessionManager {
         Ok(info)
     }
 
-    /// 出力イベントを購読する。
+    /// Subscribes to output events.
     pub fn subscribe(&self, pty_id: &str) -> Result<broadcast::Receiver<PtyEvent>, PtyError> {
         if !self.lock_sessions().contains_key(pty_id) {
             return Err(PtyError::NotFound(pty_id.to_owned()));
@@ -447,7 +464,7 @@ impl PtySessionManager {
         Ok(self.inner.events.subscribe())
     }
 
-    /// キー入力 / コマンド入力を PTY の標準入力へ送る。
+    /// Sends keyboard / command input to the PTY's standard input.
     pub fn write(&self, pty_id: &str, data: &[u8]) -> Result<usize, PtyError> {
         let sessions = self.lock_sessions();
         let session = sessions
@@ -460,7 +477,7 @@ impl PtySessionManager {
         Ok(data.len())
     }
 
-    /// ウィンドウサイズを動的に変更する。
+    /// Changes the window size dynamically.
     pub fn resize(&self, pty_id: &str, cols: u16, rows: u16) -> Result<(), PtyError> {
         let mut sessions = self.lock_sessions();
         let session = sessions
@@ -480,7 +497,8 @@ impl PtySessionManager {
         Ok(())
     }
 
-    /// PTY の子プロセスを終了する (Windows では Job Object 経由でツリーごと)。
+    /// Terminates the PTY's child process (on Windows, the whole tree via the
+    /// Job Object).
     pub fn kill(&self, pty_id: &str) -> Result<(), PtyError> {
         let mut sessions = self.lock_sessions();
         let session = sessions
@@ -490,10 +508,10 @@ impl PtySessionManager {
         Ok(())
     }
 
-    /// 稼働中の全 PTY を終了する (緊急キルスイッチ用)。
+    /// Terminates all running PTYs (emergency kill switch).
     ///
-    /// 終了要求を送った PTY ID の一覧を返す。実際の削除は各リーダースレッドが
-    /// EOF を検出したタイミングで行われる。
+    /// Returns the list of PTY IDs to which a termination request was sent.
+    /// Actual removal happens when each reader thread detects EOF.
     pub fn kill_all(&self) -> Vec<String> {
         let mut sessions = self.lock_sessions();
         let mut killed = Vec::with_capacity(sessions.len());
@@ -505,7 +523,7 @@ impl PtySessionManager {
         killed
     }
 
-    /// 稼働中 PTY の一覧。
+    /// List of running PTYs.
     pub fn list(&self) -> Vec<PtySessionInfo> {
         self.lock_sessions()
             .values()
@@ -513,7 +531,7 @@ impl PtySessionManager {
             .collect()
     }
 
-    /// 指定 PTY が稼働中か。
+    /// Whether the given PTY is running.
     pub fn contains(&self, pty_id: &str) -> bool {
         self.lock_sessions().contains_key(pty_id)
     }
@@ -531,10 +549,11 @@ mod tests {
     use super::*;
     use std::time::Duration;
 
-    /// 出力を Exit まで収集する (タイムアウト付き)。
+    /// Collects output until Exit (with a timeout).
     ///
-    /// Unix PTY はプロセス終了で EOF になるため、リーダー起点の Exit 検知を
-    /// 検証する。Windows (ConPTY) は EOF にならないため使わない。
+    /// Unix PTY reaches EOF when the process exits, so this verifies
+    /// reader-driven Exit detection. Not used on Windows (ConPTY), which does not
+    /// reach EOF.
     #[cfg(unix)]
     fn collect_until_exit(
         receiver: broadcast::Receiver<PtyEvent>,
@@ -581,7 +600,7 @@ mod tests {
         assert!(text.contains("hello-pty"), "unexpected output: {text:?}");
         assert_eq!(exit_code, Some(0));
 
-        // 終了後はセッションマップから削除される
+        // The session is removed from the session map after exit
         for _ in 0..50 {
             if !manager.contains("pty-1") {
                 break;
@@ -639,8 +658,9 @@ mod tests {
         assert!(manager.subscribe("missing").is_err());
     }
 
-    /// ConPTY 起動ハンドシェイク: 起動照会 (`ESC[6n`) を除去して応答を要求し、
-    /// 2 回目以降の照会 (アプリ由来) はそのまま通す。
+    /// ConPTY startup handshake: strips the startup query (`ESC[6n`) and requests
+    /// a response, while passing through later queries (issued by the
+    /// application).
     #[test]
     fn conpty_handshake_strips_query_and_requests_response() {
         let mut handshake = ConPtyStartupHandshake::default();
@@ -653,28 +673,30 @@ mod tests {
         assert_eq!(data, b"world\x1b[6n");
     }
 
-    /// 起動照会がチャンク境界で分断されても検出できること。
+    /// The startup query must be detected even when split across chunk
+    /// boundaries.
     #[test]
     fn conpty_handshake_handles_split_query_across_chunks() {
         let mut handshake = ConPtyStartupHandshake::default();
 
-        // pattern の prefix でないデータはそのまま配信される
+        // Data that is not a prefix of the pattern is delivered as is
         let (data, respond) = handshake.process(b"hel");
         assert!(!respond);
         assert_eq!(data, b"hel");
 
-        // "\x1b[" は照会の prefix のため持ち越される
+        // "\x1b[" is a prefix of the query, so it is carried over
         let (data, respond) = handshake.process(b"\x1b[");
         assert!(!respond);
         assert!(data.is_empty());
 
-        // "6n" で完成 → 照会は除去され応答要求が出る
+        // Completed with "6n" → the query is stripped and a response is requested
         let (data, respond) = handshake.process(b"6nX");
         assert!(respond);
         assert_eq!(data, b"X");
     }
 
-    /// 照会が来ない場合も (最大3バイトの持ち越し以外は) すべて透過すること。
+    /// All data must pass through even when no query arrives (except for the
+    /// carry-over of at most 3 bytes).
     #[test]
     fn conpty_handshake_passes_data_when_no_query_arrives() {
         let mut handshake = ConPtyStartupHandshake::default();
@@ -682,7 +704,7 @@ mod tests {
         assert!(!respond);
         assert_eq!(data, b"plain output\n");
 
-        // 末尾の部分 prefix は次チャンクへ持ち越される
+        // The trailing partial prefix is carried over to the next chunk
         let (data, respond) = handshake.process(b"tail\x1b");
         assert!(!respond);
         assert_eq!(data, b"tail");
@@ -691,12 +713,13 @@ mod tests {
         assert_eq!(data, b"\x1bX");
     }
 
-    /// Windows の ConPTY で cmd を実行し、出力・Exit 配信・セッション破棄を検証する。
+    /// Runs cmd in Windows ConPTY and verifies output, Exit delivery, and session
+    /// teardown.
     ///
-    /// ConPTY は EOF セマンティクスが Unix PTY と異なるため、待機は
-    /// [`PtyEvent`] のポーリングで行う。起動時のカーソル位置照会 (`ESC[6n`) は
-    /// [`ConPtyStartupHandshake`] がマネージャ側で応答するため、
-    /// ヘッドレス (購読者なし) でも子プロセスが起動・終了する。
+    /// ConPTY has different EOF semantics from Unix PTY, so waiting is done by
+    /// polling [`PtyEvent`]. The startup cursor position query (`ESC[6n`) is
+    /// answered by [`ConPtyStartupHandshake`] on the manager side, so the child
+    /// process starts and exits even when headless (no subscribers).
     #[cfg(windows)]
     #[test]
     fn spawns_cmd_on_windows() {
@@ -742,7 +765,7 @@ mod tests {
         );
         assert_eq!(exit_code, Some(Some(0)));
 
-        // 終了後はセッションマップから削除される
+        // The session is removed from the session map after exit
         for _ in 0..50 {
             if !manager.contains("pty-win") {
                 break;

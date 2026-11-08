@@ -3,7 +3,7 @@ name = "fxg-pty"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
-description = "FlexAgent PTY 制御 (ConPTY / Unix PTY) と Windows Job Object によるプロセスツリー管理"
+description = "FlexAgent PTY control (ConPTY / Unix PTY) and process tree management via Windows Job Objects"
 repository.workspace = true
 
 [dependencies]

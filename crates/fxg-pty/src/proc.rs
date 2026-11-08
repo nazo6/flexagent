@@ -1,22 +1,23 @@
-//! コマンド解決 (`which` + `PATHEXT`)・パス正規化 (`dunce`)・
-//! Windows Job Object (`WinJobGuard`) によるプロセスツリー管理。
+//! Command resolution (`which` + `PATHEXT`), path normalization (`dunce`), and
+//! process tree management via Windows Job Objects (`WinJobGuard`).
 //!
-//! 設計: `docs/04-agent-drivers-and-windows.md` §5.1〜§5.2。
+//! Design: `docs/04-agent-drivers-and-windows.md` §5.1–§5.2.
 //!
-//! - **コマンド解決**: `npx` / `uvx` / `opencode` などを起動する際は必ず
-//!   [`resolve_command`] を通し、Windows では `opencode.cmd` や `npx.cmd` の
-//!   拡張子 (`PATHEXT`) を解決してからプロセスを起動する。
-//! - **UNC パス回避**: Windows の `std::fs::canonicalize` は `\\?\D:\ghq\...`
-//!   という UNC プレフィックスを付けてしまい、Node.js 製エージェント等がパス解釈に
-//!   失敗することがあるため、必ず [`canonicalize`] (`dunce`) を使用する。
-//! - **プロセスツリー確実終了**: Windows では子プロセスを **Job Object** に
-//!   バインドし、デーモン終了時に孫プロセスまで確実に終了させる
-//!   ([`ProcessTreeGuard`])。
-//! - **ラッパー型ランチャーの正常終了**: `npx` → node / `uvx` → python /
-//!   PyInstaller onefile のようなラッパーは「内側のプロセスが終了すると、自身で
-//!   後始末をしてから自然終了する」。このため終了時は内側から順に終了し、ルートの
-//!   自然終了を待ってから強制終了する ([`ProcessTreeGuard::shutdown_tree`])。
-//!   公式 ACP SDK も Unix では同じ理由でプロセスグループ単位の終了を行う。
+//! - **Command resolution**: always go through [`resolve_command`] when launching
+//!   `npx` / `uvx` / `opencode` etc. On Windows the extension (`PATHEXT`) of
+//!   `opencode.cmd` / `npx.cmd` must be resolved before starting the process.
+//! - **Avoiding UNC paths**: Windows' `std::fs::canonicalize` prepends the UNC
+//!   prefix `\\?\D:\ghq\...`, which can make Node.js based agents fail to
+//!   interpret paths. Always use [`canonicalize`] (`dunce`) instead.
+//! - **Guaranteed process tree termination**: on Windows, child processes are
+//!   bound to a **Job Object** so that even grandchildren are reliably terminated
+//!   when the daemon exits ([`ProcessTreeGuard`]).
+//! - **Clean exit of wrapper launchers**: wrappers such as `npx` → node /
+//!   `uvx` → python / PyInstaller onefile "clean up after themselves and exit
+//!   naturally once the inner process exits". Shutdown therefore terminates from
+//!   the inside out and waits for the root to exit naturally before force-killing
+//!   it ([`ProcessTreeGuard::shutdown_tree`]). The official ACP SDK also
+//!   terminates whole process groups on Unix for the same reason.
 
 use std::path::{Path, PathBuf};
 
@@ -34,10 +35,10 @@ use windows::Win32::System::Threading::{
 
 use crate::error::PtyError;
 
-/// 指定ディレクトリ・`PATH` (`PATHEXT` 対応) からコマンドを解決する。
+/// Resolves a command from the given directory and `PATH` (`PATHEXT` aware).
 ///
-/// Windows では `.cmd` / `.exe` 等の拡張子を自動解決する
-/// (`which::which_in` が `PATHEXT` を考慮する)。
+/// On Windows this resolves extensions such as `.cmd` / `.exe` automatically
+/// (`which::which_in` honors `PATHEXT`).
 pub fn resolve_command(command: &str, cwd: impl AsRef<Path>) -> Result<PathBuf, PtyError> {
     let cwd = cwd.as_ref();
     which::which_in(command, std::env::var_os("PATH"), cwd).map_err(|_| PtyError::CommandNotFound {
@@ -46,7 +47,8 @@ pub fn resolve_command(command: &str, cwd: impl AsRef<Path>) -> Result<PathBuf, 
     })
 }
 
-/// パスを正規化する (UNC プレフィックス `\\?\` を付けない `dunce::canonicalize`)。
+/// Normalizes a path with `dunce::canonicalize`, which does not add the `\\?\`
+/// UNC prefix.
 pub fn canonicalize(path: impl AsRef<Path>) -> Result<PathBuf, PtyError> {
     let path = path.as_ref();
     dunce::canonicalize(path).map_err(|source| PtyError::Io {
@@ -55,28 +57,30 @@ pub fn canonicalize(path: impl AsRef<Path>) -> Result<PathBuf, PtyError> {
     })
 }
 
-/// プロセスツリーをプロセスグループ/Job Object 単位で確実に終了させるガード。
+/// Guard that reliably terminates a process tree per process group / Job Object.
 ///
-/// - **Windows**: 子プロセスを **Job Object** (`kill on job close`) にバインドする。
-///   ガード (およびデーモン) が終了すると、Job Object のハンドルが閉じられ
-///   **孫プロセスを含むツリー全体が確実に終了**する。
-/// - **Unix**: PTY セッション (セッションリーダー) の終了で子プロセスグループが
-///   終了するため、ここでは何もしない (追加の状態は持たない)。
+/// - **Windows**: child processes are bound to a **Job Object** (`kill on job
+///   close`). When the guard (and thus the daemon) exits, the Job Object handle is
+///   closed and **the whole tree, including grandchildren, is reliably
+///   terminated**.
+/// - **Unix**: terminating the PTY session (session leader) terminates the child
+///   process group, so nothing is done here (no additional state is kept).
 pub struct ProcessTreeGuard {
     #[cfg(windows)]
     job: WinJobGuard,
 }
 
-/// [`ProcessTreeGuard::shutdown_tree`] の結果。
+/// Result of [`ProcessTreeGuard::shutdown_tree`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TreeShutdownOutcome {
-    /// 終了させたルート以外のプロセス数。
+    /// Number of processes terminated other than the root.
     ///
-    /// 子孫を列挙できない Unix では常に 0 (既知の制約)。
+    /// Always 0 on Unix, where descendants cannot be enumerated (known
+    /// limitation).
     pub terminated_descendants: usize,
-    /// ルートが猶予内に自然終了したか。
+    /// Whether the root exited naturally within the grace period.
     ///
-    /// 待機を行わない Unix では常に `false`。
+    /// Always `false` on Unix, where no waiting is performed.
     pub root_exited_naturally: bool,
 }
 
@@ -92,7 +96,7 @@ impl std::fmt::Debug for ProcessTreeGuard {
 }
 
 impl ProcessTreeGuard {
-    /// 新しいガードを作成する (Windows では kill-on-close の Job Object を生成)。
+    /// Creates a new guard (on Windows, creates a kill-on-close Job Object).
     pub fn new() -> Result<Self, PtyError> {
         #[cfg(windows)]
         {
@@ -106,9 +110,11 @@ impl ProcessTreeGuard {
         }
     }
 
-    /// 子プロセスをガードへ参加させる (Windows: Job Object へ割当 / Unix: no-op)。
+    /// Adds a child process to the guard (Windows: assign to the Job Object /
+    /// Unix: no-op).
     ///
-    /// 参加済みのプロセスは、ガードが Drop された際に**プロセスツリーごと**終了する。
+    /// A member process is terminated **together with its whole process tree**
+    /// when the guard is dropped.
     pub fn attach(&self, child: &dyn portable_pty::Child) -> Result<(), PtyError> {
         #[cfg(windows)]
         {
@@ -118,14 +124,15 @@ impl ProcessTreeGuard {
         }
         #[cfg(not(windows))]
         {
-            // Unix では PTY セッションの終了に任せる (プロセスは session leader として
-            // PTY に紐づき、master 側のクローズで SIGHUP を受ける)。
+            // On Unix, leave termination to the PTY session (the process is bound
+            // to the PTY as session leader and receives SIGHUP when the master
+            // side is closed).
             let _ = child;
         }
         Ok(())
     }
 
-    /// Windows の RawHandle を Job Object へ割り当てる。
+    /// Assigns a Windows RawHandle to the Job Object.
     #[cfg(windows)]
     pub fn attach_raw_handle(
         &self,
@@ -134,7 +141,8 @@ impl ProcessTreeGuard {
         self.job.assign_process(handle)
     }
 
-    /// `std::process::Child` をガードへ参加させる (Windows: Job Object へ割当 / Unix: no-op)。
+    /// Adds a `std::process::Child` to the guard (Windows: assign to the Job
+    /// Object / Unix: no-op).
     pub fn attach_std_child(&self, child: &std::process::Child) -> Result<(), PtyError> {
         #[cfg(windows)]
         {
@@ -148,30 +156,33 @@ impl ProcessTreeGuard {
         Ok(())
     }
 
-    /// 指定した PID 以外の Job メンバーをすべて終了する (Windows のみ。ベストエフォート)。
+    /// Terminates every Job member except the given PID (Windows only, best
+    /// effort).
     ///
-    /// 戻り値は終了できたプロセス数 (既に終了済みのものは含まない)。
+    /// Returns the number of processes terminated (already-exited ones are not
+    /// counted).
     #[cfg(windows)]
     pub fn terminate_all_except(&self, keep_pid: u32) -> Result<usize, PtyError> {
         self.job.terminate_all_except(keep_pid)
     }
 
-    /// Job Object によるプロセスツリー管理が有効か (診断用)。
+    /// Whether process tree management via Job Objects is enabled (diagnostic).
     pub fn is_job_object_backend(&self) -> bool {
         cfg!(windows)
     }
 }
 
-/// プロセスツリーの終了ポリシー (Windows 実装)。
+/// Process tree shutdown policy (Windows implementation).
 ///
-/// ラッパー型ランチャー (`npx` → node / `uvx` → python / PyInstaller onefile 等) は
-/// 「内側のプロセスが終了すると、自身で後始末をしてから自然終了する」。
+/// Wrapper launchers (`npx` → node / `uvx` → python / PyInstaller onefile, etc.)
+/// "clean up after themselves and exit naturally once the inner process exits".
 #[cfg(windows)]
 impl ProcessTreeGuard {
-    /// 指定 PID のプロセスを Job Object へ割り当てる (終了時のツリー kill 対象にする)。
+    /// Assigns the process with the given PID to the Job Object (making it a
+    /// target of the tree kill on shutdown).
     ///
-    /// ハンドルを開き直すため、呼び出し側は生ハンドルを保持する必要がない
-    /// (`child.id()` だけで済み、プラットフォーム分岐が呼び出し側に漏れない)。
+    /// Because the handle is reopened, callers do not need to keep a raw handle
+    /// (`child.id()` is enough, so platform branching does not leak to callers).
     pub fn attach_pid(&self, pid: u32) -> Result<(), PtyError> {
         unsafe {
             let handle = OpenProcess(PROCESS_SET_QUOTA | PROCESS_TERMINATE, false, pid)?;
@@ -181,22 +192,26 @@ impl ProcessTreeGuard {
         }
     }
 
-    /// プロセスツリーを「内側から」終了させ、ルートの自然終了を待つ。
+    /// Terminates the process tree "from the inside out" and waits for the root
+    /// to exit naturally.
     ///
-    /// 1. ルート以外の Job メンバーを終了し、
-    /// 2. ルートが自然終了するのを `grace` まで待ち (`WaitForSingleObject`、
-    ///    ポーリングなし)、
-    /// 3. 猶予を超えた場合のみルートを強制終了する。
+    /// 1. Terminate every Job member except the root.
+    /// 2. Wait up to `grace` for the root to exit naturally
+    ///    (`WaitForSingleObject`, no polling).
+    /// 3. Only if the grace period is exceeded, force-kill the root.
     ///
-    /// ルートに子孫が居ない場合は待機せず即時終了する (通常のプロセスと同じ)。
-    /// ルートが既に終了している場合も成功として扱う。
+    /// If the root has no descendants, it is terminated immediately without
+    /// waiting (same as a regular process). A root that has already exited is
+    /// treated as success.
     pub async fn shutdown_tree(
         &self,
         root_pid: u32,
         grace: std::time::Duration,
     ) -> Result<TreeShutdownOutcome, PtyError> {
-        // 「ラッパー型か」は終了要求の成否ではなくメンバー構成で判定する
-        // (直前に内側のプロセスが自然終了していても後始末待ちを省かないため)。
+        // Whether the launcher is wrapper-style is decided by the member
+        // composition, not by the success of the termination request (so that the
+        // cleanup wait is not skipped even if an inner process exited naturally
+        // just before).
         let has_descendants = self
             .job
             .process_ids()?
@@ -210,7 +225,7 @@ impl ProcessTreeGuard {
                 root_exited_naturally: false,
             });
         }
-        // ルート (ラッパー) が後始末を終えて自ら終了するのを待つ。
+        // Wait for the root (wrapper) to finish its cleanup and exit on its own.
         let timeout_ms = u32::try_from(grace.as_millis()).unwrap_or(u32::MAX);
         let exited =
             tokio::task::spawn_blocking(move || wait_for_process_exit(root_pid, timeout_ms))
@@ -226,39 +241,41 @@ impl ProcessTreeGuard {
     }
 }
 
-/// プロセスツリーの終了ポリシー (Unix 実装、既知の制約あり)。
+/// Process tree shutdown policy (Unix implementation, with known limitations).
 ///
-/// Job Object に相当する仕組みが無いため、ルート以外のプロセスを列挙・終了
-/// できない。ルート (直接の子) を `SIGKILL` するのみで、後始末の待機は
-/// 呼び出し側の `Child::status()` に任せる。
+/// There is no equivalent of a Job Object, so processes other than the root
+/// cannot be enumerated or terminated. Only the root (the direct child) is
+/// `SIGKILL`ed, and cleanup waiting is left to the caller's `Child::status()`.
 ///
-/// このためラッパー型ランチャーの内側のプロセスは孤児になり得る (公式 ACP SDK
-/// はプロセスグループ単位の kill で対処するが、ルートごと終了するためラッパーの
-/// 後始末は走らない)。詳細: `docs/changelog/2026-10-01-antigravity-startup.md`。
+/// As a result, processes inside wrapper launchers may be orphaned (the official
+/// ACP SDK handles this by killing the process group, but that terminates the
+/// root as well, so the wrapper's cleanup does not run). Details:
+/// `docs/changelog/2026-10-01-antigravity-startup.md`.
 #[cfg(not(windows))]
 impl ProcessTreeGuard {
-    /// Unix では Job Object に相当する仕組みが無いため何もしない (API 互換用)。
+    /// Does nothing on Unix, which has no Job Object equivalent (API
+    /// compatibility only).
     pub fn attach_pid(&self, pid: u32) -> Result<(), PtyError> {
         let _ = pid;
         Ok(())
     }
 
-    /// プロセスツリーを終了させる (ルートの `SIGKILL` のみ)。
+    /// Terminates the process tree (root `SIGKILL` only).
     ///
-    /// Windows 実装と異なり待機・子孫列挙を行わない。`grace` は API 互換のため
-    /// 受け取るが使用しない。
+    /// Unlike the Windows implementation, does not wait or enumerate descendants.
+    /// `grace` is accepted for API compatibility but unused.
     pub async fn shutdown_tree(
         &self,
         root_pid: u32,
         grace: std::time::Duration,
     ) -> Result<TreeShutdownOutcome, PtyError> {
-        // 待機しない理由: ルートの reap (`waitpid`) は呼び出し側の
-        // `Child::status()` と競合するため、fxg-pty 側では行わない。
+        // Why no waiting: reaping the root (`waitpid`) would race with the
+        // caller's `Child::status()`, so it is not done on the fxg-pty side.
         let _ = grace;
         unsafe {
             if libc::kill(root_pid as libc::pid_t, libc::SIGKILL) != 0 {
                 let err = std::io::Error::last_os_error();
-                // ESRCH (既に終了済み) は正常系
+                // ESRCH (already exited) is a normal case
                 if err.raw_os_error() != Some(libc::ESRCH) {
                     tracing::debug!(root_pid, "failed to kill process: {err}");
                 }
@@ -271,12 +288,12 @@ impl ProcessTreeGuard {
     }
 }
 
-/// Windows Job Object の薄いラッパー (`kill on job close`)。
+/// Thin wrapper around a Windows Job Object (`kill on job close`).
 ///
-/// Drop 時に Job ハンドルが閉じられ、割当済みプロセス (孫プロセス含む) が
-/// すべて終了する。エージェントの子プロセスが `Child::kill()` をすり抜けても
-/// ファイルロック等が残らないようにするための必須機構
-/// (設計: `docs/04-agent-drivers-and-windows.md` §5.1)。
+/// Dropping closes the Job handle and terminates all assigned processes
+/// (including grandchildren). This is mandatory machinery so that agent child
+/// processes cannot leave file locks behind even if they slip past
+/// `Child::kill()` (design: `docs/04-agent-drivers-and-windows.md` §5.1).
 #[cfg(windows)]
 pub struct WinJobGuard {
     job: win32job::Job,
@@ -284,7 +301,7 @@ pub struct WinJobGuard {
 
 #[cfg(windows)]
 impl WinJobGuard {
-    /// kill-on-close が設定された Job Object を作成する。
+    /// Creates a Job Object with kill-on-close enabled.
     pub fn new_kill_on_close() -> Result<Self, PtyError> {
         let job = win32job::Job::create()?;
         let mut info = job.query_extended_limit_info()?;
@@ -293,7 +310,7 @@ impl WinJobGuard {
         Ok(Self { job })
     }
 
-    /// プロセスハンドルを Job Object に割り当てる。
+    /// Assigns a process handle to the Job Object.
     pub fn assign_process(
         &self,
         process_handle: std::os::windows::io::RawHandle,
@@ -302,26 +319,28 @@ impl WinJobGuard {
         Ok(())
     }
 
-    /// ガード保持プロセス (デーモン自身) を Job Object に割り当てる。
+    /// Assigns the process holding the guard (the daemon itself) to the Job
+    /// Object.
     pub fn assign_current_process(&self) -> Result<(), PtyError> {
         self.job.assign_current_process()?;
         Ok(())
     }
 
-    /// Job Object に現在割り当てられているプロセス ID の一覧を返す。
+    /// Returns the list of process IDs currently assigned to the Job Object.
     ///
-    /// ジョブのメンバーが実用上あり得ない数 (`MAX_JOB_MEMBERS`) を超えている
-    /// 場合は取得を諦めてエラーを返す (呼び出し側は従来の終了処理へ
-    /// フォールバックする)。
+    /// If the number of Job members exceeds a practically impossible limit
+    /// (`MAX_JOB_MEMBERS`), gives up and returns an error (the caller falls back
+    /// to the previous shutdown path).
     pub fn process_ids(&self) -> Result<Vec<u32>, PtyError> {
-        /// 一度に取得できる Job メンバーの上限 (エージェントツリーは通常 10 未満)。
+        /// Maximum number of Job members retrieved at once (agent trees are
+        /// usually under 10).
         const MAX_JOB_MEMBERS: usize = 1024;
-        /// `JOBOBJECT_BASIC_PROCESS_ID_LIST.ProcessIdList` までのバイトオフセット。
+        /// Byte offset to `JOBOBJECT_BASIC_PROCESS_ID_LIST.ProcessIdList`.
         const HEADER_BYTES: usize =
             std::mem::offset_of!(JOBOBJECT_BASIC_PROCESS_ID_LIST, ProcessIdList);
 
-        // `JOBOBJECT_BASIC_PROCESS_ID_LIST` は可変長 (ULONG_PTR 配列) のため、
-        // `usize` 単位で確保して整列を保証する。
+        // `JOBOBJECT_BASIC_PROCESS_ID_LIST` is variable-length (ULONG_PTR array),
+        // so allocate in `usize` units to guarantee alignment.
         let mut buffer = vec![
             0usize;
             (HEADER_BYTES + MAX_JOB_MEMBERS * std::mem::size_of::<usize>())
@@ -339,7 +358,8 @@ impl WinJobGuard {
             )?;
             let count = (*buffer.as_ptr().cast::<JOBOBJECT_BASIC_PROCESS_ID_LIST>())
                 .NumberOfProcessIdsInList as usize;
-            // ULONG_PTR 配列の先頭は `HEADER_BYTES / size_of::<usize>()` 番目のスロット。
+            // The head of the ULONG_PTR array is the slot at index
+            // `HEADER_BYTES / size_of::<usize>()`.
             let list = buffer
                 .as_ptr()
                 .add(HEADER_BYTES / std::mem::size_of::<usize>());
@@ -349,9 +369,10 @@ impl WinJobGuard {
         }
     }
 
-    /// 指定した PID 以外の Job メンバーをすべて終了する (ベストエフォート)。
+    /// Terminates every Job member except the given PID (best effort).
     ///
-    /// 戻り値は終了できたプロセス数 (既に終了済みのものは含まない)。
+    /// Returns the number of processes terminated (already-exited ones are not
+    /// counted).
     pub fn terminate_all_except(&self, keep_pid: u32) -> Result<usize, PtyError> {
         let mut terminated = 0usize;
         for pid in self.process_ids()? {
@@ -366,9 +387,9 @@ impl WinJobGuard {
     }
 }
 
-/// プロセスを強制終了する (ベストエフォート。既に終了していれば何もしない)。
+/// Force-terminates a process (best effort; does nothing if it already exited).
 ///
-/// 戻り値は `TerminateProcess` が成功したか。
+/// Returns whether `TerminateProcess` succeeded.
 #[cfg(windows)]
 fn terminate_process(pid: u32) -> bool {
     unsafe {
@@ -386,15 +407,15 @@ fn terminate_process(pid: u32) -> bool {
     }
 }
 
-/// プロセスの終了を最大 `timeout_ms` ミリ秒まで待つ (ポーリングなし)。
+/// Waits up to `timeout_ms` milliseconds for the process to exit (no polling).
 ///
-/// プロセスが既に存在しない場合も `true` を返す。プロセスハンドルのシグナル
-/// 状態を `WaitForSingleObject` で待つ。
+/// Returns `true` if the process no longer exists. Waits on the process handle's
+/// signal state via `WaitForSingleObject`.
 #[cfg(windows)]
 fn wait_for_process_exit(pid: u32, timeout_ms: u32) -> bool {
     unsafe {
         let Ok(handle) = OpenProcess(PROCESS_SYNCHRONIZE, false, pid) else {
-            // プロセスが既に終了している
+            // The process has already exited
             return true;
         };
         let result = WaitForSingleObject(handle, timeout_ms);
@@ -432,7 +453,7 @@ mod tests {
         let resolved = canonicalize(dir.path()).expect("canonicalize");
         assert!(
             !resolved.to_string_lossy().starts_with(r"\\?\"),
-            "dunce は UNC プレフィックスを付けない: {}",
+            "dunce must not add a UNC prefix: {}",
             resolved.display()
         );
     }
@@ -443,9 +464,10 @@ mod tests {
         assert_eq!(guard.is_job_object_backend(), cfg!(windows));
     }
 
-    /// Windows Job Object: ルートプロセスが起動した**孫プロセス**が、
-    /// ガード (Job) の Drop による kill-on-close で確実に終了すること
-    /// (Phase 2 完了条件 / CI: windows-latest で自動検証)。
+    /// Windows Job Object: a **grandchild** spawned by the root process must be
+    /// reliably terminated by kill-on-close when the guard (Job) is dropped
+    /// (Phase 2 completion criterion / CI: automatically verified on
+    /// windows-latest).
     #[cfg(windows)]
     #[test]
     fn job_object_kills_grandchildren_on_guard_drop() {
@@ -459,17 +481,18 @@ mod tests {
 
         let guard = ProcessTreeGuard::new().expect("guard");
 
-        // ルート (PowerShell) を Job へ割り当ててから、孫 (ping) を起動させる。
-        // Job メンバーが作成したプロセスは自動的に同じ Job に所属するため、
-        // ルートが終了しても孫は Job に残る。猶予 (Start-Sleep) は、孫を生む前に
-        // ルートの Job 割当が完了していることを保証するためのもの。
+        // Assign the root (PowerShell) to the Job first, then let it spawn the
+        // grandchild (ping). Processes created by a Job member automatically
+        // belong to the same Job, so the grandchild stays in the Job even after
+        // the root exits. The grace period (Start-Sleep) ensures the root's Job
+        // assignment completes before the grandchild is spawned.
         //
-        // `-NoNewWindow` + 出力リダイレクトで**新しいコンソールを作らない**:
-        // 既定の `Start-Process` は孫用に新しいコンソールウィンドウを作るため、
-        // テスト実行時に ping の窓が開いてしまい、さらに Job の kill-on-close と
-        // コンソール初期化が競合すると conhost が
-        // 「起動時にエラー 0x800700e8 (ERROR_NO_DATA: パイプが閉じられています)」
-        // をその窓へ出力する (テスト自体は成功するがノイズになる)。
+        // `-NoNewWindow` + output redirection avoids **creating a new console**:
+        // the default `Start-Process` would create a new console window for the
+        // grandchild, popping up a ping window during the test run, and if the
+        // Job's kill-on-close races with console initialization, conhost writes
+        // "error 0x800700e8 at startup (ERROR_NO_DATA: the pipe is being closed)"
+        // to that window (the test itself passes, but it is noise).
         let script = format!(
             "Start-Sleep -Milliseconds 1500; \
              $p = Start-Process -PassThru -NoNewWindow -FilePath ping \
@@ -498,7 +521,7 @@ mod tests {
         );
         let _ = root.wait();
 
-        // ガード Drop → Job ハンドルクローズ → kill-on-close で孫が終了する
+        // Guard drop → Job handle close → kill-on-close terminates the grandchild
         drop(guard);
 
         let mut killed = false;
@@ -510,7 +533,7 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(100));
         }
         if !killed {
-            // テスト失敗時に ping を残さない (ベストエフォート)
+            // Do not leave ping behind if the test fails (best effort)
             let _ = StdCommand::new("taskkill")
                 .args(["/PID", &grandchild_pid.to_string(), "/T", "/F"])
                 .status();
@@ -518,9 +541,10 @@ mod tests {
         assert!(killed, "grandchild process survived job object close");
     }
 
-    /// Windows Job Object: [`ProcessTreeGuard::terminate_all_except`] がルートを
-    /// 残して他のメンバーだけを終了すること (PyInstaller onefile 等の一時ファイル
-    /// 自動削除を妨げない終了処理の検証)。
+    /// Windows Job Object: [`ProcessTreeGuard::terminate_all_except`] must
+    /// terminate every member except the root (verifies shutdown behavior that
+    /// does not prevent the automatic temp-file cleanup of PyInstaller onefile
+    /// and similar).
     #[cfg(windows)]
     #[test]
     fn terminate_all_except_spares_root_but_kills_the_rest() {
@@ -534,7 +558,8 @@ mod tests {
 
         let guard = ProcessTreeGuard::new().expect("guard");
 
-        // ルート (powershell) は孫 (ping) を起動して 30 秒待機し続ける
+        // The root (powershell) spawns the grandchild (ping) and then sleeps for
+        // 30 seconds
         let script = format!(
             "$p = Start-Process -PassThru -NoNewWindow -FilePath ping \
                   -ArgumentList '-n','30','127.0.0.1' \
@@ -562,7 +587,7 @@ mod tests {
             "child ({child_pid}) must be running before termination"
         );
 
-        // ルート以外 (孫) だけを終了する
+        // Terminate everything except the root (the grandchild)
         let terminated = guard.terminate_all_except(root.id()).expect("terminate");
         assert!(terminated >= 1, "expected at least one terminated member");
 
@@ -575,7 +600,7 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(100));
         }
         if !killed {
-            // テスト失敗時に ping を残さない (ベストエフォート)
+            // Do not leave ping behind if the test fails (best effort)
             let _ = StdCommand::new("taskkill")
                 .args(["/PID", &child_pid.to_string(), "/T", "/F"])
                 .status();
@@ -586,15 +611,15 @@ mod tests {
             "root process must be spared by terminate_all_except"
         );
 
-        // 後始末 (ガード Drop の kill-on-close でルートも終了する)
+        // Cleanup (the guard drop's kill-on-close also terminates the root)
         drop(guard);
         let _ = root.kill();
         let _ = root.wait();
     }
 
-    /// Windows Job Object: [`ProcessTreeGuard::shutdown_tree`] がラッパー型
-    /// ランチャーの後始末完了 (自然終了) を待つこと。ルートは孫の終了を検知して
-    /// 自らマーカーファイルを書き込んでから終了する。
+    /// Windows Job Object: [`ProcessTreeGuard::shutdown_tree`] must wait for a
+    /// wrapper launcher to finish its cleanup (natural exit). The root detects
+    /// the grandchild's exit, writes a marker file, and then exits on its own.
     #[cfg(windows)]
     #[tokio::test]
     async fn shutdown_tree_waits_for_wrapper_cleanup() {
@@ -609,8 +634,9 @@ mod tests {
 
         let guard = ProcessTreeGuard::new().expect("guard");
 
-        // ルート (powershell) は孫 (ping) を起動し、孫の終了を待ってから
-        // 自ら後始末 (マーカーファイル) をして終了するラッパーを模す。
+        // The root (powershell) spawns the grandchild (ping), waits for it to
+        // exit, then performs its own cleanup (marker file) and exits,
+        // simulating a wrapper.
         let script = format!(
             "$p = Start-Process -PassThru -NoNewWindow -FilePath ping \
                   -ArgumentList '-n','60','127.0.0.1' \
@@ -660,7 +686,7 @@ mod tests {
         let _ = root.wait();
     }
 
-    /// 孫プロセスの PID がファイルに書き出されるまで待つ。
+    /// Waits until the grandchild's PID is written to the file.
     #[cfg(windows)]
     fn wait_for_pid_file(path: &Path) -> u32 {
         for _ in 0..150 {
@@ -674,7 +700,7 @@ mod tests {
         panic!("grandchild pid file was not written: {}", path.display());
     }
 
-    /// `tasklist` で PID のプロセスが稼働中か確認する。
+    /// Checks with `tasklist` whether the process with the given PID is running.
     #[cfg(windows)]
     fn windows_process_is_running(pid: u32) -> bool {
         let output = std::process::Command::new("tasklist")
