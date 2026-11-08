@@ -225,17 +225,26 @@ self.addEventListener("pushsubscriptionchange", (event) => {
         const info = await fetch("/api/v1/system/info", {
           credentials: "same-origin",
         });
-        if (!info.ok) return;
+        if (!info.ok) {
+          console.error("[fxg] failed to load system info for push re-subscription", info.status);
+          return;
+        }
         const body = (await info.json()) as { vapid_public_key: string | null };
-        if (!body.vapid_public_key) return;
+        if (!body.vapid_public_key) {
+          console.error("[fxg] VAPID public key is not available");
+          return;
+        }
         const applicationServerKey = urlBase64ToUint8Array(body.vapid_public_key);
         const subscription = await self.registration.pushManager.subscribe({
           userVisibleOnly: true,
           applicationServerKey,
         });
         const keys = subscription.toJSON().keys ?? {};
-        if (!keys.p256dh || !keys.auth) return;
-        await fetch("/api/v1/push/subscribe", {
+        if (!keys.p256dh || !keys.auth) {
+          console.error("[fxg] push subscription has no encryption keys");
+          return;
+        }
+        const response = await fetch("/api/v1/push/subscribe", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           credentials: "same-origin",
@@ -246,8 +255,11 @@ self.addEventListener("pushsubscriptionchange", (event) => {
             device_name: self.navigator.userAgent,
           }),
         });
-      } catch {
-        /* Can re-subscribe on the next app launch */
+        if (!response.ok) {
+          throw new Error(`push subscribe failed: ${response.status}`);
+        }
+      } catch (error) {
+        console.error("[fxg] push re-subscription failed", error);
       }
     })(),
   );

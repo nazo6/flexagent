@@ -536,6 +536,7 @@
   "terminal_blocked_notice_before": "Remote PTY is disabled by security policy. Use it from the local terminal (",
   "terminal_connect_failed": "Could not connect to the PTY WebSocket.",
   "terminal_disconnected_notice": "The PTY connection was closed.",
+  "terminal_input_not_sent": "Input was not sent because the PTY connection is closed.",
   "terminal_no_connection": "No connection.",
   "terminal_process_exited": "Process exited (exit {code})",
   "terminal_reconnect": "Reconnect",

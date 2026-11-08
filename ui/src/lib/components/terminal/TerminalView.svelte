@@ -45,14 +45,18 @@
   }
 
   function sendInput(data: string): void {
-    send({ op: "input", data_b64: encodeTextToBase64(data) });
+    if (!send({ op: "input", data_b64: encodeTextToBase64(data) })) {
+      status = "disconnected";
+      statusMessage = m.terminal_input_not_sent();
+    }
   }
 
   function handleMessage(raw: string): void {
     let message: PtyServerMessage;
     try {
       message = JSON.parse(raw) as PtyServerMessage;
-    } catch {
+    } catch (error) {
+      console.error("[fxg] failed to parse pty ws message", error, raw);
       return;
     }
     switch (message.op) {
@@ -96,13 +100,18 @@
     ws.addEventListener("open", () => {
       if (socket !== ws || disposed) return;
       const dims = adapter?.fit() ?? { cols: 80, rows: 24 };
-      send({
-        op: "spawn",
-        session_id: sessionId,
-        cols: dims.cols,
-        rows: dims.rows,
-        shell_cmd: null,
-      });
+      if (
+        !send({
+          op: "spawn",
+          session_id: sessionId,
+          cols: dims.cols,
+          rows: dims.rows,
+          shell_cmd: null,
+        })
+      ) {
+        status = "failed";
+        statusMessage = m.terminal_connect_failed();
+      }
     });
 
     ws.addEventListener("message", (event: MessageEvent) => {

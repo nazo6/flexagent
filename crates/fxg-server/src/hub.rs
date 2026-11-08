@@ -997,7 +997,11 @@ async fn handle_node_connection(state: ServerState, token_owner: String, socket:
                         break;
                     }
                 }
-                Some(Ok(Message::Close(_))) | None | Some(Err(_)) => break,
+                Some(Ok(Message::Close(_))) | None => break,
+                Some(Err(err)) => {
+                    tracing::warn!(node_id, "node websocket error: {err}");
+                    break;
+                }
                 _ => {}
             },
         }

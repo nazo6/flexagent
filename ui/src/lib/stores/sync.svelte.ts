@@ -505,7 +505,8 @@ export class SyncStore {
     let message: ServerWsMessage;
     try {
       message = JSON.parse(raw) as ServerWsMessage;
-    } catch {
+    } catch (error) {
+      console.error("[fxg] failed to parse client ws message", error, raw);
       return;
     }
     switch (message.op) {
@@ -536,6 +537,9 @@ export class SyncStore {
         }
         break;
       case "pong":
+        break;
+      default:
+        console.warn("[fxg] unknown client ws message", message);
         break;
     }
   }

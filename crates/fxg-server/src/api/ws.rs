@@ -66,10 +66,13 @@ pub(crate) async fn handle_client_ws<B: ClientApiBackend>(backend: B, socket: We
                                 requested
                             }
                         };
-                        if replay_events(&backend, &mut sender, &mut cursor)
-                            .await
-                            .is_err()
+                        if let Err(message) =
+                            replay_events(&backend, &mut sender, &mut cursor).await
                         {
+                            let error = ServerWsMessage::Error {
+                                error: ErrorInfo::new(ErrorCode::SyncBacklog, message),
+                            };
+                            let _ = send_ws_json(&mut sender, &error).await;
                             break;
                         }
                         subscribed = true;
@@ -175,10 +178,11 @@ pub(crate) async fn handle_client_ws<B: ClientApiBackend>(backend: B, socket: We
                 Err(broadcast::error::RecvError::Lagged(skipped)) => {
                     // When the subscription lags, fetch history again from the cursor
                     tracing::warn!(skipped, "client ws lagged; replaying from cursor");
-                    if replay_events(&backend, &mut sender, &mut cursor)
-                        .await
-                        .is_err()
-                    {
+                    if let Err(message) = replay_events(&backend, &mut sender, &mut cursor).await {
+                        let error = ServerWsMessage::Error {
+                            error: ErrorInfo::new(ErrorCode::SyncBacklog, message),
+                        };
+                        let _ = send_ws_json(&mut sender, &error).await;
                         break;
                     }
                 }

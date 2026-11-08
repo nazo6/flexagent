@@ -210,11 +210,11 @@ impl ServerState {
     /// Picks one online node that can serve the ACP Registry catalog.
     ///
     /// Resident nodes are preferred over temporary VMs, then the most recently seen.
-    async fn select_agent_node(&self) -> Option<String> {
-        let nodes = self.inner.db.list_nodes().await.ok()?;
+    async fn select_agent_node(&self) -> Result<Option<String>, ApiError> {
+        let nodes = self.inner.db.list_nodes().await.map_err(ApiError::from)?;
         let mut online: Vec<_> = nodes.into_iter().filter(|node| node.is_online).collect();
         online.sort_by_key(|node| (node.is_ephemeral, -node.last_seen_at));
-        online.first().map(|node| node.node_id.clone())
+        Ok(online.first().map(|node| node.node_id.clone()))
     }
 
     /// Resolves the default working directory for a project on this node.
@@ -1064,7 +1064,7 @@ impl ClientApiBackend for ServerState {
     }
 
     async fn list_agents(&self) -> Result<AgentsResponse, ApiError> {
-        let Some(node_id) = self.select_agent_node().await else {
+        let Some(node_id) = self.select_agent_node().await? else {
             // Return an empty list when no online node can serve the catalog
             // (the UI can show the offline reason from the node list)
             return Ok(AgentsResponse { agents: Vec::new() });

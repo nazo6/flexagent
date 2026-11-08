@@ -135,7 +135,12 @@ impl Server {
             .detach_all_ephemeral(&ephemeral_nodes)
             .await;
 
-        let _ = self.task.await;
+        if let Err(err) = self.task.await {
+            tracing::error!(
+                task = "server",
+                "server task terminated unexpectedly: {err}"
+            );
+        }
         tracing::info!("fxg server stopped");
     }
 

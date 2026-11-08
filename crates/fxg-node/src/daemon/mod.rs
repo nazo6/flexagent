@@ -456,10 +456,10 @@ impl DaemonState {
         match listed {
             Ok(Ok(agents)) => ids.extend(agents),
             Ok(Err(err)) => {
-                tracing::debug!("failed to list installed agents: {err}");
+                tracing::warn!("failed to list installed agents (reporting partial list): {err}");
             }
             Err(_) => {
-                tracing::debug!("listing installed agents timed out");
+                tracing::warn!("listing installed agents timed out (reporting partial list)");
             }
         }
         ids.sort();
@@ -739,10 +739,16 @@ impl NodeDaemon {
             tracing::warn!("failed to mark node offline: {err}");
         }
 
-        let _ = self.http_task.await;
-        let _ = self.ipc_task.await;
-        if let Some(sync_task) = self.sync_task {
-            let _ = sync_task.await;
+        if let Err(err) = self.http_task.await {
+            tracing::error!(task = "http", "http task terminated unexpectedly: {err}");
+        }
+        if let Err(err) = self.ipc_task.await {
+            tracing::error!(task = "ipc", "ipc task terminated unexpectedly: {err}");
+        }
+        if let Some(sync_task) = self.sync_task
+            && let Err(err) = sync_task.await
+        {
+            tracing::error!(task = "sync", "sync task terminated unexpectedly: {err}");
         }
         tracing::info!("fxg daemon stopped");
     }

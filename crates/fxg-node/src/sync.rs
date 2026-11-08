@@ -185,8 +185,12 @@ async fn connect_once(
                 Some(Ok(WsMessage::Ping(payload))) => {
                     sender.send(WsMessage::Pong(payload)).await?;
                 }
-                Some(Ok(WsMessage::Close(_))) | None | Some(Err(_)) => {
+                Some(Ok(WsMessage::Close(_))) | None => {
                     return Ok(());
+                }
+                Some(Err(err)) => {
+                    tracing::warn!(url = %server_url, "central server websocket error: {err}");
+                    return Err(err.into());
                 }
                 _ => {}
             },

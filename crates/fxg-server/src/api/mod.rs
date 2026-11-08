@@ -1513,7 +1513,7 @@ pub(crate) async fn replay_events<B: ClientApiBackend>(
     backend: &B,
     sender: &mut futures_util::stream::SplitSink<WebSocket, Message>,
     cursor: &mut u64,
-) -> Result<(), ()> {
+) -> Result<(), String> {
     loop {
         let batch: SessionEventBatch = backend
             .db()
@@ -1521,6 +1521,7 @@ pub(crate) async fn replay_events<B: ClientApiBackend>(
             .await
             .map_err(|err| {
                 tracing::warn!("failed to load events for replay: {err}");
+                format!("failed to load events for replay: {err}")
             })?;
         if batch.events.is_empty() {
             return Ok(());
@@ -1534,7 +1535,8 @@ pub(crate) async fn replay_events<B: ClientApiBackend>(
                 cursor: batch.cursor,
             },
         )
-        .await?;
+        .await
+        .map_err(|()| "failed to send replayed events".to_owned())?;
         if !full_batch {
             return Ok(());
         }
