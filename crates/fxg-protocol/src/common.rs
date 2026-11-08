@@ -2,14 +2,14 @@
 //!
 //! `UnifiedEventPayload` および各プロトコルメッセージ・REST レスポンスから
 //! 参照される型を定義する。すべてクライアント (UI / CLI) が扱うため
-//! `#[derive(ts_rs::TS)]` + `#[ts(export)]` を付与する
+//! `#[derive(specta::Type)]` + `#[specta(collect)]` を付与する
 //! (設計: `docs/03-protocol-and-api.md` §1.1)。
 
 use std::fmt;
 use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
-use ts_rs::TS;
+use specta::Type;
 
 /// 列挙型の文字列表現パースに失敗したときのエラー。
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -32,9 +32,9 @@ impl EnumParseError {
 }
 
 /// セッション状態 (`sessions.status` と同値)。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "snake_case")]
-#[ts(export)]
+#[specta(collect)]
 pub enum SessionStatus {
     /// 一時VMプロビジョニング中
     Provisioning,
@@ -95,9 +95,9 @@ impl FromStr for SessionStatus {
 }
 
 /// ノードのライフサイクル状態 (`nodes.lifecycle_status` と同値)。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "snake_case")]
-#[ts(export)]
+#[specta(collect)]
 pub enum NodeLifecycleStatus {
     /// プロビジョニング中 (一時VM)
     Provisioning,
@@ -150,9 +150,9 @@ impl FromStr for NodeLifecycleStatus {
 }
 
 /// 承認リクエストの状態 (`permission_requests.status` と同値)。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "snake_case")]
-#[ts(export)]
+#[specta(collect)]
 pub enum PermissionRequestStatus {
     /// 未解決 (承認待ち)
     Pending,
@@ -197,9 +197,9 @@ impl FromStr for PermissionRequestStatus {
 }
 
 /// elicitation へのユーザー応答アクション (ACP `ElicitationAction` と同値)。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "snake_case")]
-#[ts(export)]
+#[specta(collect)]
 pub enum ElicitationAction {
     /// 回答を送信する (form の入力内容を `content` に含める)
     Accept,
@@ -240,9 +240,9 @@ impl FromStr for ElicitationAction {
 }
 
 /// elicitation リクエストの状態 (`elicitation_requests.status` と同値)。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "snake_case")]
-#[ts(export)]
+#[specta(collect)]
 pub enum ElicitationRequestStatus {
     /// 未解決 (回答待ち)
     Pending,
@@ -287,9 +287,9 @@ impl FromStr for ElicitationRequestStatus {
 }
 
 /// 論理プロジェクト (`project_key`) の解決元。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "snake_case")]
-#[ts(export)]
+#[specta(collect)]
 pub enum ProjectResolutionSource {
     /// `.fxg.toml` の明示指定 (最優先)
     FxgToml,
@@ -330,8 +330,8 @@ impl FromStr for ProjectResolutionSource {
 }
 
 /// Worktree 作成時の `copy_files` / `post_create` フック実行ログ。
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[specta(collect)]
 pub struct HookLogEntry {
     /// 実行したコマンド文字列
     pub command: String,
@@ -342,8 +342,8 @@ pub struct HookLogEntry {
 }
 
 /// セッションの累積コスト (ACP `Cost`)。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
 pub struct UsageCost {
     /// 累積コスト額
     pub amount: f64,
@@ -353,8 +353,8 @@ pub struct UsageCost {
 
 /// セッションのコンテキスト使用量・累積コスト
 /// (ACP `session/update` の `usage_update`)。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
 pub struct SessionUsage {
     /// 現在コンテキストに含まれるトークン数
     pub used_tokens: u64,
@@ -368,9 +368,9 @@ pub struct SessionUsage {
 ///
 /// ACP `StopReason` のうち `EndTurn` / `Cancelled` は正常終了として
 /// イベント化しない (`UnifiedEventPayload::TurnEnded` を参照)。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "snake_case")]
-#[ts(export)]
+#[specta(collect)]
 pub enum TurnStopReason {
     /// 最大トークン数に達して打ち切り
     MaxTokens,
@@ -402,9 +402,9 @@ impl fmt::Display for TurnStopReason {
 /// `UnifiedEventPayload::CompactionUpdated` の状態表現。標準ACPには圧縮を
 /// 開始する API が無いため、ネイティブ API を持つドライバ (`opencode2` の
 /// `POST /api/session/{id}/compact`) のみが送出する。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "snake_case")]
-#[ts(export)]
+#[specta(collect)]
 pub enum CompactionStatus {
     /// 圧縮を開始した
     Started,
@@ -435,8 +435,8 @@ impl fmt::Display for CompactionStatus {
 ///
 /// ハブ側ではイベント適用による投影から生成される。Local Node と
 /// Central Server の双方が同一の型を返却する。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
 pub struct SessionSummary {
     /// セッションID (UUID v7)
     pub session_id: String,
@@ -482,8 +482,8 @@ pub struct SessionSummary {
 }
 
 /// `NodeHello` で報告するプロジェクト紐付け情報。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
 pub struct NodeProjectReport {
     /// 論理プロジェクトID
     pub project_id: String,
@@ -496,8 +496,8 @@ pub struct NodeProjectReport {
 }
 
 /// プロジェクト × ノードのローカルパス紐付け。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
 pub struct ProjectNodeBinding {
     /// ノード上のローカルパス
     pub local_path: String,
@@ -515,9 +515,9 @@ pub struct ProjectNodeBinding {
 ///
 /// DB へは永続化されず、再送もされない (`LiveStreamDelta` 専用)。
 /// 完成イベント (`AgentMessage` 等) 到着時にクライアント側で確定表示へ置き換える。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[serde(tag = "delta_type", rename_all = "snake_case")]
-#[ts(export)]
+#[specta(collect)]
 pub enum StreamDeltaPayload {
     /// エージェント返答メッセージの差分テキスト
     AgentMessageDelta {
@@ -552,8 +552,8 @@ pub enum StreamDeltaPayload {
 }
 
 /// ユーザーメッセージに添付されるファイルのメタデータ。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
 pub struct AttachmentMeta {
     /// ファイル名
     pub file_name: String,
@@ -568,8 +568,8 @@ pub struct AttachmentMeta {
 }
 
 /// ファイル変更の Unified Diff 情報。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
 pub struct FileDiff {
     /// 対象ファイルパス
     pub path: String,
@@ -586,8 +586,8 @@ pub struct FileDiff {
 }
 
 /// エージェントの実行計画エントリ (ACP Plan)。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
 pub struct PlanEntry {
     /// エントリID
     pub id: String,
@@ -598,8 +598,8 @@ pub struct PlanEntry {
 }
 
 /// 権限承認の選択肢 (ACP `PermissionOption`)。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
 pub struct PermissionOption {
     /// 選択肢ID (`PermissionResolved.selected_option_id` に指定する値)
     pub option_id: String,
@@ -617,8 +617,8 @@ impl PermissionOption {
 }
 
 /// ACP SessionMode の情報。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
 pub struct ModeInfo {
     /// モードID (例: `code`, `plan`)
     pub mode_id: String,
@@ -629,8 +629,8 @@ pub struct ModeInfo {
 }
 
 /// ACP スラッシュコマンドの情報。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
 pub struct CommandInfo {
     /// コマンド名
     pub name: String,
@@ -641,8 +641,8 @@ pub struct CommandInfo {
 }
 
 /// エージェント設定項目 (モデル選択等) の情報。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
 pub struct ConfigOptionInfo {
     /// 設定キー
     pub key: String,
@@ -655,9 +655,9 @@ pub struct ConfigOptionInfo {
 }
 
 /// セッション制御アクション (`ControlSession` コマンド)。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[serde(tag = "action", rename_all = "snake_case")]
-#[ts(export)]
+#[specta(collect)]
 pub enum SessionControlAction {
     /// モード切替 (`plan` / `code` 等)
     SetMode {
@@ -678,9 +678,9 @@ pub enum SessionControlAction {
 }
 
 /// Worktree 操作アクション (`ManageWorktree` コマンド)。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[serde(tag = "action", rename_all = "snake_case")]
-#[ts(export)]
+#[specta(collect)]
 pub enum WorktreeAction {
     /// 新規 Worktree 作成 (`git worktree add -b <branch> <path> <base>`)
     Add {
@@ -703,9 +703,9 @@ pub enum WorktreeAction {
 }
 
 /// エージェント管理アクション (`ManageAgent` コマンド / Client API 共通)。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[serde(tag = "action", rename_all = "snake_case")]
-#[ts(export)]
+#[specta(collect)]
 pub enum AgentAction {
     /// ACP Registry からダウンロード・展開して導入 (`fxg agents install`)
     Install {
@@ -744,9 +744,9 @@ pub enum AgentAction {
 }
 
 /// Diff のスコープ。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "snake_case")]
-#[ts(export)]
+#[specta(collect)]
 pub enum DiffScope {
     /// 作業ツリーの未コミット差分 (`git diff HEAD`)
     Uncommitted,
@@ -755,8 +755,8 @@ pub enum DiffScope {
 }
 
 /// Git 作業ツリーの Diff 取得結果 (`GET /api/v1/sessions/:id/diff`)。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
 pub struct WorkspaceDiffResponse {
     /// 取得した Diff のスコープ
     pub scope: DiffScope,
@@ -769,8 +769,8 @@ pub struct WorkspaceDiffResponse {
 }
 
 /// セッション Fork 時に履歴注入するための会話履歴アイテム。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
 pub struct ForkHistoryItem {
     /// 発話ロール (`user` / `agent` 等)
     pub role: String,
@@ -781,9 +781,9 @@ pub struct ForkHistoryItem {
 }
 
 /// 共通エラーコード (`CommandResult` および REST エラーレスポンス双方で使用)。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
-#[ts(export)]
+#[specta(collect)]
 pub enum ErrorCode {
     /// 認証トークンが無い・一致しない (HTTP `401 Unauthorized`)
     Unauthorized,
@@ -859,8 +859,8 @@ impl FromStr for ErrorCode {
 }
 
 /// コマンド実行結果 (Node → Server → 要求元クライアントへ相関返却)。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
 pub struct CommandResult {
     /// `ServerToNodeMsg` の各コマンドに付与された相関ID
     pub command_id: String,
@@ -875,8 +875,8 @@ pub struct CommandResult {
 }
 
 /// クライアント向けプロジェクト投影 (`GET /api/v1/projects`)。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
 pub struct ProjectSummary {
     /// 論理プロジェクトID
     pub project_id: String,
@@ -893,8 +893,8 @@ pub struct ProjectSummary {
 }
 
 /// クライアント向けプロジェクト × ノード紐付け。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
 pub struct ProjectBindingSummary {
     /// ノードID
     pub node_id: String,
@@ -914,8 +914,8 @@ pub struct ProjectBindingSummary {
 }
 
 /// クライアント向けノード情報 (`GET /api/v1/nodes` / `GET /api/v1/system/info`)。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
 pub struct NodeSummary {
     /// ノードID
     pub node_id: String,
@@ -942,8 +942,8 @@ pub struct NodeSummary {
 }
 
 /// クライアント向け承認リクエスト投影 (グローバル承認 Inbox)。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
 pub struct PermissionRequestEntry {
     /// ACP request id
     pub request_id: String,
@@ -973,8 +973,8 @@ pub struct PermissionRequestEntry {
 ///
 /// エージェントが `elicitation/create` でユーザーへ構造化入力を求めた
 /// リクエストを表す (Phase 1 は form モードのみ)。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
 pub struct ElicitationRequestEntry {
     /// ACP elicitation id
     pub elicitation_id: String,
@@ -1003,8 +1003,8 @@ pub struct ElicitationRequestEntry {
 }
 
 /// FTS5 全文検索のヒット。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
 pub struct SearchHit {
     /// 対象セッションID
     pub session_id: String,
@@ -1021,8 +1021,8 @@ pub struct SearchHit {
 }
 
 /// 監査ログエントリ (`GET /api/v1/audit/logs`)。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
 pub struct AuditLogEntry {
     /// ログID
     pub id: i64,

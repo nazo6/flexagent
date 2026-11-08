@@ -7,7 +7,7 @@
   import { Badge } from "$lib/components/ui/badge";
   import { formatEpochMs } from "$lib/format";
   import { sync } from "$lib/stores/app.svelte";
-  import type { SessionStatus } from "$lib/generated/SessionStatus";
+  import type { SessionStatus } from "$lib/generated/bindings";
   import type { TimelineItem } from "$lib/sync/reducer";
   import AlertTriangleIcon from "@lucide/svelte/icons/alert-triangle";
   import BotIcon from "@lucide/svelte/icons/bot";

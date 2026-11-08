@@ -7,13 +7,14 @@
 //!   による上書きをサポートする。
 //! - プロジェクト設定 ([`ProjectConfig`]): リポジトリ内の `.fxg.toml` に配置する。
 //!
-//! これらはサーバー/CLI 内部型であり `ts-rs` の export 対象外とする
-//! (クライアントに公開する型のみ `#[ts(export)]` を付与する規約)。
+//! これらはサーバー/CLI 内部型であり `specta` の export 対象外とする
+//! (クライアントに公開する型のみ `#[specta(collect)]` を付与する規約)。
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
+use specta::Type;
 
 /// データディレクトリ (`~/.flexagent`) を変更する環境変数。
 pub const ENV_FXG_HOME: &str = "FXG_HOME";
@@ -453,8 +454,8 @@ impl AgentsConfig {
 }
 
 /// レジストリ外のカスタムACPエージェント定義 (`[agents.custom.<id>]`)。
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, Type)]
+#[specta(collect)]
 #[serde(default)]
 pub struct CustomAgentConfig {
     /// 表示名

@@ -6,9 +6,7 @@
  * 2. 紐付けに無いパスは直近セッションの `local_path` で補完
  *    (セッション開始時の紐付け登録前に実行されたセッションへのフォールバック)
  */
-import type { NodeSummary } from "$lib/generated/NodeSummary";
-import type { ProjectSummary } from "$lib/generated/ProjectSummary";
-import type { SessionSummary } from "$lib/generated/SessionSummary";
+import type { NodeSummary, ProjectSummary, SessionSummary } from "$lib/generated/bindings";
 
 /** 実行ディレクトリの候補 (UI 表示・選択用)。 */
 export interface PathCandidate {

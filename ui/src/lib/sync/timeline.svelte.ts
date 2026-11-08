@@ -1,5 +1,4 @@
-import type { SessionEventEnvelope } from "$lib/generated/SessionEventEnvelope";
-import type { StreamDeltaPayload } from "$lib/generated/StreamDeltaPayload";
+import type { SessionEventEnvelope, StreamDeltaPayload } from "$lib/generated/bindings";
 import {
   clearStreamBuffers,
   insertEventSorted,

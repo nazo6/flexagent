@@ -1,5 +1,4 @@
-import type { AgentSource } from "$lib/generated/AgentSource";
-import type { AgentSummary } from "$lib/generated/AgentSummary";
+import type { AgentSource, AgentSummary } from "$lib/generated/bindings";
 
 /** 起動形態の表示ラベル。 */
 export function agentSourceLabel(source: AgentSource): string {

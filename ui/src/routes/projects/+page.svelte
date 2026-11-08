@@ -8,8 +8,7 @@
   import { Input } from "$lib/components/ui/input";
   import { Label } from "$lib/components/ui/label";
   import { formatRelativeTime } from "$lib/format";
-  import type { ProjectSummary } from "$lib/generated/ProjectSummary";
-  import type { WorktreeInfo } from "$lib/generated/WorktreeInfo";
+  import type { ProjectSummary, WorktreeInfo } from "$lib/generated/bindings";
   import { shortId } from "$lib/session-status";
   import { sync } from "$lib/stores/app.svelte";
   import { toast } from "svelte-sonner";

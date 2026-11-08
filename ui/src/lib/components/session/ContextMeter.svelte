@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { SessionUsage } from "$lib/generated/SessionUsage";
+  import type { SessionUsage } from "$lib/generated/bindings";
   import { formatTokenCount } from "$lib/format";
 
   /**

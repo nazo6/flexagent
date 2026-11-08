@@ -37,8 +37,8 @@
 ## 2. ワークスペース・技術スタック
 
 - **Rust (`crates/`)**:
-  - `fxg-protocol`: 共通型・イベント・通信メッセージ定義 (`ts-rs` で
-    `ui/src/lib/generated/` へTS型を自動生成)
+  - `fxg-protocol`: 共通型・イベント・通信メッセージ定義 (`specta` で
+    `ui/src/lib/generated/bindings.ts` へTS型を自動生成)
   - `fxg-db`: SQLite (`sqlx`, WAL, FTS5 `tokenize='trigram'`) による `server.db`
     / `node.db` 管理
   - `fxg-pty`: ConPTY / Unix PTY (`portable-pty`)、Windows Job Object 管理
@@ -89,8 +89,8 @@
   を行う。ファイルを編集した際はかならず format (`mise run fmt`) を行う
   (Rust = rustfmt / TOML = tombi / それ以外 (Markdown・JSON・YAML・HTML・TS・Svelte)
   = oxfmt)。
-  また、`fxg-protocol` の型を変更した際は `ts-rs`
-  の型出力を同期すること。
+  また、`fxg-protocol` の型を変更した際は `specta`
+  の型出力 (`mise run types`) を同期すること。
 - **変更履歴 (Changelog) と実装プランの記録**:
   - **初期実装期間中 (Phase 1 〜 Phase 6)**: 新しい changelog
     ファイルは作成せず、[`docs/changelog/2026-09-30-implementation-plan.md`](docs/changelog/2026-09-30-implementation-plan.md)

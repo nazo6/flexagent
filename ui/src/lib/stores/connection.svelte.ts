@@ -1,7 +1,6 @@
 import { ApiError } from "$lib/api/errors";
 import { ApiClient } from "$lib/api/client";
-import type { ConnectionRole } from "$lib/generated/ConnectionRole";
-import type { SystemInfoResponse } from "$lib/generated/SystemInfoResponse";
+import type { ConnectionRole, SystemInfoResponse } from "$lib/generated/bindings";
 
 /** 切替可能な接続先 (オリジン単位)。 */
 export interface ConnectionTarget {

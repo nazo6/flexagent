@@ -16,7 +16,7 @@
 //!   (別系統のメタデータ同期は行わない)。
 
 use serde::{Deserialize, Serialize};
-use ts_rs::TS;
+use specta::Type;
 
 use crate::common::{
     AttachmentMeta, CommandInfo, CompactionStatus, ConfigOptionInfo, ElicitationAction, FileDiff,
@@ -24,8 +24,8 @@ use crate::common::{
 };
 
 /// セッションイベントの封筒 (永続化・同期の単位)。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
 pub struct SessionEventEnvelope {
     /// イベントID (**UUID v7**)。冪等適用・重複排除に使用する。
     pub event_id: String,
@@ -45,8 +45,8 @@ pub struct SessionEventEnvelope {
 /// `cursor` は「**配信元ストア** (`node.db` / `server.db`) への取り込み順」。
 /// クライアントは最後に受信したバッチの `cursor` を保存し、再接続時に
 /// `Subscribe { since_cursor }` へ渡す。接続先ストア以外の `cursor` は意味を持たない。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
 pub struct SessionEventBatch {
     /// イベント列 (`node_seq` 昇順)
     pub events: Vec<SessionEventEnvelope>,
@@ -68,9 +68,9 @@ impl SessionEventBatch {
 ///
 /// ACP (`agent-client-protocol-schema`) のイベントモデルをベースに、
 /// ターミナル出力や承認解決イベントを統合した型。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[serde(tag = "type", content = "data", rename_all = "snake_case")]
-#[ts(export)]
+#[specta(collect)]
 pub enum UnifiedEventPayload {
     /// セッション生成直後の最初のイベント (`node_seq = 1`)。
     ///

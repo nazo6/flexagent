@@ -1,7 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { NodeSummary } from "$lib/generated/NodeSummary";
-import type { ProjectSummary } from "$lib/generated/ProjectSummary";
-import type { SessionSummary } from "$lib/generated/SessionSummary";
+import type { NodeSummary, ProjectSummary, SessionSummary } from "$lib/generated/bindings";
 import {
   buildPathCandidates,
   pickDefaultCandidate,

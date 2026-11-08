@@ -3,7 +3,7 @@
   import { Card } from "$lib/components/ui/card";
   import { Input } from "$lib/components/ui/input";
   import { formatRelativeTime } from "$lib/format";
-  import type { SearchHit } from "$lib/generated/SearchHit";
+  import type { SearchHit } from "$lib/generated/bindings";
   import { shortId } from "$lib/session-status";
   import { connection, sync } from "$lib/stores/app.svelte";
   import { toast } from "svelte-sonner";

@@ -1,57 +1,59 @@
-import type { AgentOpResponse } from "$lib/generated/AgentOpResponse";
-import type { AgentsResponse } from "$lib/generated/AgentsResponse";
-import type { AgentSummary } from "$lib/generated/AgentSummary";
-import type { AuditLogEntry } from "$lib/generated/AuditLogEntry";
-import type { AuditLogsResponse } from "$lib/generated/AuditLogsResponse";
-import type { CreateSessionRequest } from "$lib/generated/CreateSessionRequest";
-import type { CreateSessionResponse } from "$lib/generated/CreateSessionResponse";
-import type { CreateWorktreeRequest } from "$lib/generated/CreateWorktreeRequest";
-import type { CustomAgentConfig } from "$lib/generated/CustomAgentConfig";
-import type { DiffScope } from "$lib/generated/DiffScope";
-import type { ErrorCode } from "$lib/generated/ErrorCode";
-import type { FsBrowseResponse } from "$lib/generated/FsBrowseResponse";
-import type { InboxResponse } from "$lib/generated/InboxResponse";
-import type { IssueNodeTokenRequest } from "$lib/generated/IssueNodeTokenRequest";
-import type { IssueNodeTokenResponse } from "$lib/generated/IssueNodeTokenResponse";
-import type { KillSwitchResponse } from "$lib/generated/KillSwitchResponse";
-import type { MetaResponse } from "$lib/generated/MetaResponse";
-import type { NodeSummary } from "$lib/generated/NodeSummary";
-import type { NodesResponse } from "$lib/generated/NodesResponse";
-import type { NodeTokenSummary } from "$lib/generated/NodeTokenSummary";
-import type { NodeTokensResponse } from "$lib/generated/NodeTokensResponse";
-import type { ProjectLinkRequest } from "$lib/generated/ProjectLinkRequest";
-import type { ProjectLinkResponse } from "$lib/generated/ProjectLinkResponse";
-import type { ProjectScanRequest } from "$lib/generated/ProjectScanRequest";
-import type { ProjectScanResponse } from "$lib/generated/ProjectScanResponse";
-import type { ProjectSummary } from "$lib/generated/ProjectSummary";
-import type { ProjectsResponse } from "$lib/generated/ProjectsResponse";
-import type { ProvisionerSummary } from "$lib/generated/ProvisionerSummary";
-import type { ProvisionerTestResponse } from "$lib/generated/ProvisionerTestResponse";
-import type { ProvisionersResponse } from "$lib/generated/ProvisionersResponse";
-import type { PruneWorktreesRequest } from "$lib/generated/PruneWorktreesRequest";
-import type { PushSubscribeRequest } from "$lib/generated/PushSubscribeRequest";
-import type { PushSubscribeResponse } from "$lib/generated/PushSubscribeResponse";
-import type { RemoveWorktreeRequest } from "$lib/generated/RemoveWorktreeRequest";
-import type { RespondElicitationRequest } from "$lib/generated/RespondElicitationRequest";
-import type { RespondElicitationResponse } from "$lib/generated/RespondElicitationResponse";
-import type { RespondPermissionRequest } from "$lib/generated/RespondPermissionRequest";
-import type { RespondPermissionResponse } from "$lib/generated/RespondPermissionResponse";
-import type { ResumeSessionRequest } from "$lib/generated/ResumeSessionRequest";
-import type { ResumeSessionResponse } from "$lib/generated/ResumeSessionResponse";
-import type { RotateAuthTokenResponse } from "$lib/generated/RotateAuthTokenResponse";
-import type { SearchHit } from "$lib/generated/SearchHit";
-import type { SearchResponse } from "$lib/generated/SearchResponse";
-import type { SessionArchiveRequest } from "$lib/generated/SessionArchiveRequest";
-import type { SessionArchiveResponse } from "$lib/generated/SessionArchiveResponse";
-import type { SessionEventBatch } from "$lib/generated/SessionEventBatch";
-import type { SessionRevertRequest } from "$lib/generated/SessionRevertRequest";
-import type { SessionRevertResponse } from "$lib/generated/SessionRevertResponse";
-import type { SessionSummary } from "$lib/generated/SessionSummary";
-import type { SystemInfoResponse } from "$lib/generated/SystemInfoResponse";
-import type { UpdateAgentsRequest } from "$lib/generated/UpdateAgentsRequest";
-import type { WorkspaceDiffResponse } from "$lib/generated/WorkspaceDiffResponse";
-import type { WorktreeInfo } from "$lib/generated/WorktreeInfo";
-import type { WorktreesResponse } from "$lib/generated/WorktreesResponse";
+import type {
+  AgentOpResponse,
+  AgentSummary,
+  AgentsResponse,
+  AuditLogEntry,
+  AuditLogsResponse,
+  CreateSessionRequest,
+  CreateSessionResponse,
+  CreateWorktreeRequest,
+  CustomAgentConfig,
+  DiffScope,
+  ErrorCode,
+  FsBrowseResponse,
+  InboxResponse,
+  IssueNodeTokenRequest,
+  IssueNodeTokenResponse,
+  KillSwitchResponse,
+  MetaResponse,
+  NodeSummary,
+  NodeTokenSummary,
+  NodeTokensResponse,
+  NodesResponse,
+  ProjectLinkRequest,
+  ProjectLinkResponse,
+  ProjectScanRequest,
+  ProjectScanResponse,
+  ProjectSummary,
+  ProjectsResponse,
+  ProvisionerSummary,
+  ProvisionerTestResponse,
+  ProvisionersResponse,
+  PruneWorktreesRequest,
+  PushSubscribeRequest,
+  PushSubscribeResponse,
+  RemoveWorktreeRequest,
+  RespondElicitationRequest,
+  RespondElicitationResponse,
+  RespondPermissionRequest,
+  RespondPermissionResponse,
+  ResumeSessionRequest,
+  ResumeSessionResponse,
+  RotateAuthTokenResponse,
+  SearchHit,
+  SearchResponse,
+  SessionArchiveRequest,
+  SessionArchiveResponse,
+  SessionEventBatch,
+  SessionRevertRequest,
+  SessionRevertResponse,
+  SessionSummary,
+  SystemInfoResponse,
+  UpdateAgentsRequest,
+  WorkspaceDiffResponse,
+  WorktreeInfo,
+  WorktreesResponse,
+} from "$lib/generated/bindings";
 import { ApiError } from "./errors";
 
 /** クエリパラメータ (undefined / null は省略される)。 */

@@ -1,7 +1,7 @@
 <script lang="ts">
   import { Badge } from "$lib/components/ui/badge";
   import { sessionStatusLabel, sessionStatusVariant } from "$lib/session-status";
-  import type { SessionStatus } from "$lib/generated/SessionStatus";
+  import type { SessionStatus } from "$lib/generated/bindings";
 
   let { status }: { status: SessionStatus } = $props();
 </script>

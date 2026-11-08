@@ -1,5 +1,5 @@
 import type { BadgeVariant } from "$lib/components/ui/badge";
-import type { SessionStatus } from "$lib/generated/SessionStatus";
+import type { SessionStatus } from "$lib/generated/bindings";
 
 /** セッション状態の日本語ラベル。 */
 export function sessionStatusLabel(status: SessionStatus): string {

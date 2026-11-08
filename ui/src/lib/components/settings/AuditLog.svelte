@@ -4,7 +4,7 @@
   import { Button } from "$lib/components/ui/button";
   import { Card } from "$lib/components/ui/card";
   import { formatEpochMs } from "$lib/format";
-  import type { AuditLogEntry } from "$lib/generated/AuditLogEntry";
+  import type { AuditLogEntry } from "$lib/generated/bindings";
   import { shortId } from "$lib/session-status";
   import { connection, sync } from "$lib/stores/app.svelte";
   import { toast } from "svelte-sonner";

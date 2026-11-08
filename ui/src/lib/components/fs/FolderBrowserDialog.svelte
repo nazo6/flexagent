@@ -2,7 +2,7 @@
   import * as Dialog from "$lib/components/ui/dialog";
   import { Button } from "$lib/components/ui/button";
   import { Input } from "$lib/components/ui/input";
-  import type { FsEntry } from "$lib/generated/FsEntry";
+  import type { FsEntry } from "$lib/generated/bindings";
   import { sync } from "$lib/stores/app.svelte";
   import ArrowUpIcon from "@lucide/svelte/icons/arrow-up";
   import ChevronRightIcon from "@lucide/svelte/icons/chevron-right";

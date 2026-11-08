@@ -3,8 +3,7 @@
   import { Button } from "$lib/components/ui/button";
   import { Input } from "$lib/components/ui/input";
   import { Label } from "$lib/components/ui/label";
-  import type { ElicitationAction } from "$lib/generated/ElicitationAction";
-  import type { JsonValue } from "$lib/generated/serde_json/JsonValue";
+  import type { ElicitationAction, JsonValue } from "$lib/generated/bindings";
   import { formatRelativeTime } from "$lib/format";
   import { sync } from "$lib/stores/app.svelte";
   import { toast } from "svelte-sonner";

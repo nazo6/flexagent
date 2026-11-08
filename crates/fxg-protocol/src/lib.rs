@@ -12,9 +12,10 @@
 //! - `config`: グローバル設定 (`config.toml`) / プロジェクト設定 (`.fxg.toml`)
 //! - `util`: 時刻・ID 生成ユーティリティ
 //!
-//! クライアント (UI / CLI) が直接扱う型には `#[derive(ts_rs::TS)]` +
-//! `#[ts(export)]` を付与し、`ui/src/lib/generated/` へ TypeScript 型定義を
-//! 自動出力する (設定ファイルスキーマ等の内部型は export 対象外)。
+//! クライアント (UI / CLI) が直接扱う型には `#[derive(specta::Type)]` +
+//! `#[specta(collect)]` を付与し、`ui/src/lib/generated/bindings.ts` へ
+//! TypeScript 型定義を自動出力する (設定ファイルスキーマ等の内部型は export
+//! 対象外)。
 
 pub mod client_api;
 pub mod common;
@@ -23,3 +24,10 @@ pub mod events;
 pub mod ipc;
 pub mod node_server;
 pub mod util;
+
+/// UI 用 TypeScript 型定義の生成 (`cargo test -p fxg-protocol export_bindings`)。
+///
+/// 同一クレート内の `#[specta(collect)]` 型を収集する必要があるため、
+/// 統合テストではなく lib のユニットテストとして配置している。
+#[cfg(test)]
+mod export_bindings;

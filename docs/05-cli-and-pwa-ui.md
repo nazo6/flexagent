@@ -375,7 +375,7 @@ PCブラウザ、ローカルフォールバック (`localhost:7860`)、およ�
 - **フレームワーク & ルーティング**: SvelteKit (`Svelte 5` Runes +
   `@sveltejs/adapter-static` による SPA モード) + Vite + TypeScript
 - **パッケージマネージャ & タスクランナー**: `pnpm` + `mise` (`mise.toml` による
-  `ts-rs` 型生成 ➔ UIビルド ➔ Cargoビルドの一貫タスク管理)
+  `specta` 型生成 ➔ UIビルド ➔ Cargoビルドの一貫タスク管理)
 - **リンター・フォーマッター・テスト**:
   - **Lint & Format**: `oxlint` / `oxfmt` (Oxc
     ツールチェインによる高速静的解析・コード整形)
@@ -412,8 +412,8 @@ PCブラウザ、ローカルフォールバック (`localhost:7860`)、およ�
       で直結し、キー入力・リサイズ・ANSIカラー出力を双方向ストリーミング。
     - モバイルPWA向け: 画面下部に `Ctrl`, `Esc`, `Tab`, `↑`, `↓`, `←`, `→`
       などの仮想キーバーを提供。
-- **型安全性**: Rustの `fxg-protocol` から `ts-rs`
-  で自動生成された型定義をインポート。
+- **型安全性**: Rustの `fxg-protocol` から `specta`
+  で自動生成された型定義 (`$lib/generated/bindings`) をインポート。
 
 ### 3.2 主要画面構成
 

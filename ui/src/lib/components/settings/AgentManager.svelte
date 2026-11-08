@@ -8,7 +8,7 @@
   import { Input } from "$lib/components/ui/input";
   import { Label } from "$lib/components/ui/label";
   import { agentSourceLabel, agentsAvailableOn, isPackageEnabled } from "$lib/agents";
-  import type { AgentSummary } from "$lib/generated/AgentSummary";
+  import type { AgentSummary } from "$lib/generated/bindings";
   import { sync } from "$lib/stores/app.svelte";
   import { toast } from "svelte-sonner";
   import BotIcon from "@lucide/svelte/icons/bot";
@@ -167,7 +167,7 @@
       id: agent?.id ?? "",
       name: config?.name ?? "",
       command: config?.command ?? "",
-      args: config?.args.join(" ") ?? "",
+      args: (config?.args ?? []).join(" "),
       env: formatEnv(config?.env ?? {}),
     };
     customOpen = true;

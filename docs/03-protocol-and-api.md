@@ -3,10 +3,10 @@
 `crates/fxg-protocol` クレートに定義する共通データ型と、3つの通信経路（① Node ⇔
 Server WebSocket、② Client ⇔ Server/Node HTTP+WS、③ CLI ⇔ Node Local
 IPC）のプロトコル仕様です。 クライアント (UI / CLI) が直接扱う型には
-`#[derive(Serialize, Deserialize, ts_rs::TS)]` + `#[ts(export)]`
-を付与し、`ui/src/lib/generated/`（SvelteKit の `$lib/generated/`）
-へTypeScriptの型定義を自動出力します（設定ファイルスキーマ等のサーバー内部型は
-`ts-rs` export 対象外とする）。
+`#[derive(Serialize, Deserialize, specta::Type)]` + `#[specta(collect)]`
+を付与し、`ui/src/lib/generated/bindings.ts`（SvelteKit の
+`$lib/generated/bindings`）へTypeScriptの型定義を自動出力します（設定ファイル
+スキーマ等のサーバー内部型は `specta` export 対象外とする）。
 
 ---
 
@@ -17,10 +17,10 @@ ACP (`agent-client-protocol-schema`)
 
 ```rust
 use serde::{Deserialize, Serialize};
-use ts_rs::TS;
+use specta::Type;
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[specta(collect)]
 pub struct SessionEventEnvelope {
     pub event_id: String,       // UUID v7 (冪等適用・重複排除)
     pub session_id: String,     // UUID v7
@@ -33,16 +33,16 @@ pub struct SessionEventEnvelope {
 /// cursor は「配信元ストア (node.db / server.db) への取り込み順」。
 /// クライアントは最後に受信したバッチの cursor を保存し、再接続時に
 /// Subscribe { since_cursor } へ渡す (接続先ストア以外の cursor は意味を持たない)
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[specta(collect)]
 pub struct SessionEventBatch {
     pub events: Vec<SessionEventEnvelope>,
     pub cursor: u64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(tag = "type", content = "data", rename_all = "snake_case")]
-#[ts(export)]
+#[specta(collect)]
 pub enum UnifiedEventPayload {
     /// セッション生成直後の最初のイベント (node_seq = 1)。
     /// ハブ側 sessions 投影の生成源 (別系統のメタデータ同期は行わない)
@@ -207,8 +207,8 @@ pub enum UnifiedEventPayload {
 ### 1.1 共通補助型・エラーコード
 
 `UnifiedEventPayload` および各プロトコルメッセージから参照される補助型です。
-すべてクライアントが扱うため `#[derive(Serialize, Deserialize, ts_rs::TS)]` +
-`#[ts(export)]` を付与します。
+すべてクライアントが扱うため `#[derive(Serialize, Deserialize, specta::Type)]` +
+`#[specta(collect)]` を付与します。
 
 ```rust
 /// API レスポンス用のセッション集約型（sessions 行から構成。
@@ -756,7 +756,7 @@ pub enum ServerToNodeMsg {
 ### 3.1 REST API エンドポイント
 
 - `GET /api/v1/meta`: 認証不要の接続先メタ情報。`{ "role": "central_server" |
-  "local_node" }` を返却する。Web UI
+"local_node" }` を返却する。Web UI
   は接続先種別の判定をこのエンドポイントのみで行い（認証済み
   `system/info` の `role` やホスト名からは推測しない）、トークン入力ダイアログ
   の表示（中央サーバー /
@@ -949,9 +949,9 @@ pub enum ServerToNodeMsg {
    として要求元クライアントへ応答されます。
    - **一時VMブートストラップログ (`BootstrapLog`)**:
      一時VMの起動中（`fxg daemon
-     --stdio` の `NodeHello` 前）はノードの `node.db` が存在しないため、中央
+--stdio` の `NodeHello` 前）はノードの `node.db` が存在しないため、中央
      サーバーがプロビジョナーの `stderr` を `{ op: "bootstrap_log", session_id,
-     line }` として**エフェメラル配信**する（イベントログには永続化されず、
+line }` として**エフェメラル配信**する（イベントログには永続化されず、
      再接続時は復元されない）。UI はセッション詳細の「Environment Bootstrap
      Log」カードにリアルタイム表示する。
 4. **重複排除とマージ**:

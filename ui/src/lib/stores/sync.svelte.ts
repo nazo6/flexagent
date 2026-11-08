@@ -1,19 +1,21 @@
 import { ApiError } from "$lib/api/errors";
-import type { ClientWsMessage } from "$lib/generated/ClientWsMessage";
-import type { CommandResult } from "$lib/generated/CommandResult";
-import type { ElicitationAction } from "$lib/generated/ElicitationAction";
-import type { ElicitationRequestEntry } from "$lib/generated/ElicitationRequestEntry";
-import type { NodeSummary } from "$lib/generated/NodeSummary";
-import type { PermissionRequestEntry } from "$lib/generated/PermissionRequestEntry";
-import type { ProjectSummary } from "$lib/generated/ProjectSummary";
-import type { ServerWsMessage } from "$lib/generated/ServerWsMessage";
-import type { SessionArchiveResponse } from "$lib/generated/SessionArchiveResponse";
-import type { SessionControlAction } from "$lib/generated/SessionControlAction";
-import type { SessionEventEnvelope } from "$lib/generated/SessionEventEnvelope";
-import type { SessionRevertResponse } from "$lib/generated/SessionRevertResponse";
-import type { ResumeSessionResponse } from "$lib/generated/ResumeSessionResponse";
-import type { SessionSummary } from "$lib/generated/SessionSummary";
-import type { JsonValue } from "$lib/generated/serde_json/JsonValue";
+import type {
+  ClientWsMessage,
+  CommandResult,
+  ElicitationAction,
+  ElicitationRequestEntry,
+  JsonValue,
+  NodeSummary,
+  PermissionRequestEntry,
+  ProjectSummary,
+  ResumeSessionResponse,
+  ServerWsMessage,
+  SessionArchiveResponse,
+  SessionControlAction,
+  SessionEventEnvelope,
+  SessionRevertResponse,
+  SessionSummary,
+} from "$lib/generated/bindings";
 import { mergeCursor } from "$lib/sync/cursor";
 import { SessionTimeline } from "$lib/sync/timeline.svelte";
 import type { PendingPrompt } from "$lib/sync/reducer";

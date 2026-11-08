@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
-import type { SessionEventEnvelope } from "$lib/generated/SessionEventEnvelope";
-import type { StreamDeltaPayload } from "$lib/generated/StreamDeltaPayload";
-import type { UnifiedEventPayload } from "$lib/generated/UnifiedEventPayload";
+import type {
+  SessionEventEnvelope,
+  StreamDeltaPayload,
+  UnifiedEventPayload,
+} from "$lib/generated/bindings";
 import { encodeTextToBase64 } from "$lib/base64";
 import {
   applyStreamDelta,

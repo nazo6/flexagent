@@ -8,9 +8,11 @@
   import NodeStatusBadge from "$lib/components/NodeStatusBadge.svelte";
   import FolderBrowserDialog from "$lib/components/fs/FolderBrowserDialog.svelte";
   import { agentOptionLabel, agentsAvailableOn } from "$lib/agents";
-  import type { AgentSummary } from "$lib/generated/AgentSummary";
-  import type { ProvisionerSummary } from "$lib/generated/ProvisionerSummary";
-  import type { ProvisionerTestResponse } from "$lib/generated/ProvisionerTestResponse";
+  import type {
+    AgentSummary,
+    ProvisionerSummary,
+    ProvisionerTestResponse,
+  } from "$lib/generated/bindings";
   import { formatRelativeTime } from "$lib/format";
   import {
     buildPathCandidates,

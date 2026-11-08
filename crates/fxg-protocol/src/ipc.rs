@@ -6,7 +6,7 @@
 //! - **フレーミング**: Length-prefixed JSON
 //!   ([`IPC_LENGTH_PREFIX_BYTES`] バイトのリトルエンディアン長さヘッダ + JSON)
 //!
-//! サーバー実装の内部プロトコルであり UI には公開しないため `ts-rs` の
+//! サーバー実装の内部プロトコルであり UI には公開しないため `specta` の
 //! export 対象外とする (設計: `docs/03-protocol-and-api.md` §4)。
 
 use serde::{Deserialize, Serialize};

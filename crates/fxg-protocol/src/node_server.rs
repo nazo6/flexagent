@@ -5,7 +5,7 @@
 //! 共有する (設計: `docs/03-protocol-and-api.md` §2)。
 //!
 //! これらはサーバー側実装の内部プロトコルであり UI には公開しないため
-//! `ts-rs` の export 対象外とする。
+//! `specta` の export 対象外とする。
 
 use serde::{Deserialize, Serialize};
 

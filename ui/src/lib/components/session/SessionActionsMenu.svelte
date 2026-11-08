@@ -1,7 +1,7 @@
 <script lang="ts">
   import * as AlertDialog from "$lib/components/ui/alert-dialog";
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu";
-  import type { SessionSummary } from "$lib/generated/SessionSummary";
+  import type { SessionSummary } from "$lib/generated/bindings";
   import { sync } from "$lib/stores/app.svelte";
   import { cn } from "$lib/utils";
   import { toast } from "svelte-sonner";

@@ -11,8 +11,7 @@
   import { Input } from "$lib/components/ui/input";
   import { Label } from "$lib/components/ui/label";
   import * as Tabs from "$lib/components/ui/tabs";
-  import type { IssueNodeTokenResponse } from "$lib/generated/IssueNodeTokenResponse";
-  import type { NodeTokenSummary } from "$lib/generated/NodeTokenSummary";
+  import type { IssueNodeTokenResponse, NodeTokenSummary } from "$lib/generated/bindings";
   import { sync } from "$lib/stores/app.svelte";
   import { toast } from "svelte-sonner";
   import CopyIcon from "@lucide/svelte/icons/copy";

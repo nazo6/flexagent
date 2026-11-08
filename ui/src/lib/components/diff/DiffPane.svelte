@@ -3,8 +3,7 @@
   import { Badge } from "$lib/components/ui/badge";
   import { Button } from "$lib/components/ui/button";
   import { cn } from "$lib/utils";
-  import type { FileDiff } from "$lib/generated/FileDiff";
-  import type { WorkspaceDiffResponse } from "$lib/generated/WorkspaceDiffResponse";
+  import type { FileDiff, WorkspaceDiffResponse } from "$lib/generated/bindings";
   import { sync } from "$lib/stores/app.svelte";
   import type { TimelineItem } from "$lib/sync/reducer";
   import RefreshCwIcon from "@lucide/svelte/icons/refresh-cw";

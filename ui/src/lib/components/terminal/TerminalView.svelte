@@ -3,8 +3,7 @@
   import { Button } from "$lib/components/ui/button";
   import { Badge } from "$lib/components/ui/badge";
   import { decodeBase64ToBytes, encodeTextToBase64 } from "$lib/base64";
-  import type { PtyClientMessage } from "$lib/generated/PtyClientMessage";
-  import type { PtyServerMessage } from "$lib/generated/PtyServerMessage";
+  import type { PtyClientMessage, PtyServerMessage } from "$lib/generated/bindings";
   import { connection } from "$lib/stores/app.svelte";
   import { GhosttyWebAdapter } from "./ghostty-adapter";
   import RefreshCwIcon from "@lucide/svelte/icons/refresh-cw";

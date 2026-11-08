@@ -1,6 +1,4 @@
-import type { ApiErrorBody } from "$lib/generated/ApiErrorBody";
-import type { ApiErrorResponse } from "$lib/generated/ApiErrorResponse";
-import type { ErrorCode } from "$lib/generated/ErrorCode";
+import type { ApiErrorBody, ApiErrorResponse, ErrorCode } from "$lib/generated/bindings";
 
 /**
  * REST / WS 共通の構造化 API エラー (`{ error: { code, message } }`)。

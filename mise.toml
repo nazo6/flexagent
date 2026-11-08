@@ -70,7 +70,7 @@ description = "全言語の lint を実行する"
 run = [{ task = "lint:rust" }, { task = "lint:toml" }]
 
 [tasks.test]
-description = "ワークスペース全体のテストを実行する (ts-rs 型出力含む)"
+description = "ワークスペース全体のテストを実行する (specta 型出力含む)"
 # --no-fail-fast: あるクレートが失敗しても全クレートの結果を報告する (CI 診断用)
 run = "cargo test --workspace --no-fail-fast"
 
@@ -105,11 +105,11 @@ description = "UI の lint + test を一括実行する (フォーマットは `
 run = [{ task = "lint:ui" }, { task = "test:ui" }]
 
 # ---------------------------------------------------------------------------
-# 型生成 (ts-rs) / sqlx オフラインデータ
+# 型生成 (specta) / sqlx オフラインデータ
 # ---------------------------------------------------------------------------
 
 [tasks.types]
-description = "fxg-protocol から TypeScript 型を生成する (ui/src/lib/generated)"
+description = "fxg-protocol から TypeScript 型を生成する (ui/src/lib/generated/bindings.ts)"
 run = "cargo test -p fxg-protocol export_bindings"
 
 [tasks."sqlx:prepare"]

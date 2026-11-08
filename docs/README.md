@@ -67,7 +67,7 @@ flexagent/
 ├── compose.yaml                # 中央サーバー (`server`) / ノード (`node`) の compose 定義
 ├── docs/                       # 設計・実装ドキュメント
 ├── crates/
-│   ├── fxg-protocol/           # 共通型定義・ACP正規化イベント・WS/IPCメッセージ (ts-rs対応)
+│   ├── fxg-protocol/           # 共通型定義・ACP正規化イベント・WS/IPCメッセージ (specta対応)
 │   ├── fxg-db/                 # SQLiteスキーマ管理・クエリレイヤー (server.db / node.db 共用・分離)
 │   ├── fxg-pty/                # ConPTY/Unix PTY・Windows Job Object・プロセスツリー管理
 │   ├── fxg-acp/                # ACP Registry管理・AcpDriver・ローカル PATH コマンド解決

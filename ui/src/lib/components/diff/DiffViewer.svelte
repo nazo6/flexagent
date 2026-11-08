@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { FileDiff } from "$lib/generated/FileDiff";
+  import type { FileDiff } from "$lib/generated/bindings";
   import MonacoDiff from "./MonacoDiff.svelte";
   import ShikiDiff from "./ShikiDiff.svelte";
 

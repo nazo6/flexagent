@@ -1,15 +1,17 @@
-import type { CommandInfo } from "$lib/generated/CommandInfo";
-import type { CompactionStatus } from "$lib/generated/CompactionStatus";
-import type { ConfigOptionInfo } from "$lib/generated/ConfigOptionInfo";
-import type { ElicitationAction } from "$lib/generated/ElicitationAction";
-import type { FileDiff } from "$lib/generated/FileDiff";
-import type { ModeInfo } from "$lib/generated/ModeInfo";
-import type { PermissionOption } from "$lib/generated/PermissionOption";
-import type { PlanEntry } from "$lib/generated/PlanEntry";
-import type { SessionEventEnvelope } from "$lib/generated/SessionEventEnvelope";
-import type { SessionStatus } from "$lib/generated/SessionStatus";
-import type { SessionUsage } from "$lib/generated/SessionUsage";
-import type { StreamDeltaPayload } from "$lib/generated/StreamDeltaPayload";
+import type {
+  CommandInfo,
+  CompactionStatus,
+  ConfigOptionInfo,
+  ElicitationAction,
+  FileDiff,
+  ModeInfo,
+  PermissionOption,
+  PlanEntry,
+  SessionEventEnvelope,
+  SessionStatus,
+  SessionUsage,
+  StreamDeltaPayload,
+} from "$lib/generated/bindings";
 import { decodeBase64ToText } from "$lib/base64";
 
 /** ストリーミング中のツール実行進捗 (`tool_call_progress` の累積)。 */

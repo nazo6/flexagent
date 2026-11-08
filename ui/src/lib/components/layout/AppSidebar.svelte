@@ -10,7 +10,7 @@
   import KillSwitchButton from "$lib/components/KillSwitchButton.svelte";
   import SessionActionsMenu from "$lib/components/session/SessionActionsMenu.svelte";
   import SyncStatusBadge from "$lib/components/SyncStatusBadge.svelte";
-  import type { SessionSummary } from "$lib/generated/SessionSummary";
+  import type { SessionSummary } from "$lib/generated/bindings";
   import AlertCircleIcon from "@lucide/svelte/icons/alert-circle";
   import ArchiveIcon from "@lucide/svelte/icons/archive";
   import ChevronDownIcon from "@lucide/svelte/icons/chevron-down";

@@ -6,7 +6,7 @@
 //! UI 側は接続先 URL を意識せずに同じ型・同じコードで双方へ接続する。
 
 use serde::{Deserialize, Serialize};
-use ts_rs::TS;
+use specta::Type;
 
 use crate::common::{
     AuditLogEntry, CommandResult, ElicitationAction, ElicitationRequestEntry, ErrorCode,
@@ -17,9 +17,9 @@ use crate::config::CustomAgentConfig;
 use crate::events::SessionEventBatch;
 
 /// 接続先の種別 (`GET /api/v1/system/info`)。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "snake_case")]
-#[ts(export)]
+#[specta(collect)]
 pub enum ConnectionRole {
     /// 中央サーバー (`fxg server`) に接続中
     CentralServer,
@@ -28,8 +28,8 @@ pub enum ConnectionRole {
 }
 
 /// `GET /api/v1/system/info` レスポンス。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
 pub struct SystemInfoResponse {
     /// 接続先の種別
     pub role: ConnectionRole,
@@ -48,8 +48,8 @@ pub struct SystemInfoResponse {
 /// `GET /api/v1/system/info` は認証必須のため、未認証の Web UI はこの
 /// エンドポイントで接続先種別を判定し、トークン入力ダイアログの表示
 /// (中央サーバー / ローカルノード) を正しく切り替える (設計: `docs/03` §3.1)。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[specta(collect)]
 pub struct MetaResponse {
     /// 接続先の種別
     pub role: ConnectionRole,
@@ -58,16 +58,16 @@ pub struct MetaResponse {
 /// REST / WS 共通のエラーレスポンスボディ。
 ///
 /// 形式: `{ "error": { "code": "<ErrorCode>", "message": "..." } }`
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
 pub struct ApiErrorResponse {
     /// エラー本体
     pub error: ApiErrorBody,
 }
 
 /// エラー本体。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
 pub struct ApiErrorBody {
     /// 構造化エラーコード
     pub code: ErrorCode,
@@ -76,24 +76,24 @@ pub struct ApiErrorBody {
 }
 
 /// `GET /api/v1/projects` レスポンス。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
 pub struct ProjectsResponse {
     /// 論理プロジェクト一覧 (ノード・Worktree 紐付け含む)
     pub projects: Vec<ProjectSummary>,
 }
 
 /// `GET /api/v1/nodes` レスポンス。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
 pub struct NodesResponse {
     /// ノード一覧 (オンライン状態・一時ノード属性含む)
     pub nodes: Vec<NodeSummary>,
 }
 
 /// 利用可能な一時VM・サンドボックスプロビジョナー (`GET /api/v1/provisioners`)。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
 pub struct ProvisionerSummary {
     /// プロビジョナー識別子 (`local-docker` / `colab-pro` 等)
     pub name: String,
@@ -104,8 +104,8 @@ pub struct ProvisionerSummary {
 }
 
 /// `GET /api/v1/provisioners` レスポンス。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
 pub struct ProvisionersResponse {
     /// プロビジョナー一覧
     pub provisioners: Vec<ProvisionerSummary>,
@@ -115,8 +115,8 @@ pub struct ProvisionersResponse {
 ///
 /// プロビジョナーを起動し、`fxg daemon --stdio` の `NodeHello`
 /// ハンドシェイク (またはブートストラップ過程の失敗) までを確認する。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
 pub struct ProvisionerTestResponse {
     /// 対象プロビジョナー名
     pub name: String,
@@ -131,8 +131,8 @@ pub struct ProvisionerTestResponse {
 }
 
 /// Git Worktree の情報 (`GET /api/v1/projects/:id/worktrees`)。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
 pub struct WorktreeInfo {
     /// ノードID
     pub node_id: String,
@@ -147,16 +147,16 @@ pub struct WorktreeInfo {
 }
 
 /// `GET /api/v1/projects/:id/worktrees` レスポンス。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
 pub struct WorktreesResponse {
     /// Worktree 一覧
     pub worktrees: Vec<WorktreeInfo>,
 }
 
 /// `POST /api/v1/projects/:id/worktrees` リクエスト。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
 pub struct CreateWorktreeRequest {
     /// 対象ノードID
     pub node_id: String,
@@ -169,8 +169,8 @@ pub struct CreateWorktreeRequest {
 }
 
 /// `DELETE /api/v1/projects/:id/worktrees` リクエスト。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
 pub struct RemoveWorktreeRequest {
     /// 対象ノードID
     pub node_id: String,
@@ -181,16 +181,16 @@ pub struct RemoveWorktreeRequest {
 }
 
 /// `POST /api/v1/projects/:id/worktrees/prune` リクエスト。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
 pub struct PruneWorktreesRequest {
     /// 対象ノードID
     pub node_id: String,
 }
 
 /// `POST /api/v1/nodes/:node_id/projects/scan` リクエスト。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
 pub struct ProjectScanRequest {
     /// スキャン対象ディレクトリ
     /// (省略時は `config.toml` の `node.project_scan_dirs` を走査)
@@ -198,8 +198,8 @@ pub struct ProjectScanRequest {
 }
 
 /// `POST /api/v1/nodes/:node_id/projects/scan` レスポンス。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
 pub struct ProjectScanResponse {
     /// 実際に走査したディレクトリ
     pub scanned_dirs: Vec<String>,
@@ -208,8 +208,8 @@ pub struct ProjectScanResponse {
 }
 
 /// `POST /api/v1/nodes/:node_id/projects/link` リクエスト。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
 pub struct ProjectLinkRequest {
     /// 紐付け先の論理プロジェクトID
     pub project_id: String,
@@ -218,8 +218,8 @@ pub struct ProjectLinkRequest {
 }
 
 /// `POST /api/v1/nodes/:node_id/projects/link` レスポンス。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
 pub struct ProjectLinkResponse {
     /// 解決された論理プロジェクトID
     pub project_id: String,
@@ -228,25 +228,25 @@ pub struct ProjectLinkResponse {
 }
 
 /// `GET /api/v1/sessions` レスポンス。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
 pub struct SessionListResponse {
     /// セッション一覧 (更新日時降順)
     pub sessions: Vec<SessionSummary>,
 }
 
 /// `GET /api/v1/agents` レスポンス (ACP Registry カタログ + 導入状態)。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
 pub struct AgentsResponse {
     /// レジストリ (ビルトイン・カスタム含む) の全エージェント
     pub agents: Vec<AgentSummary>,
 }
 
 /// エージェントの起動形態 (このノードで実際に使える手段)。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "snake_case")]
-#[ts(export)]
+#[specta(collect)]
 pub enum AgentSource {
     /// fxg が `~/.flexagent/agents/<id>/<version>` へ導入したバイナリ
     Managed,
@@ -262,8 +262,8 @@ pub enum AgentSource {
 ///
 /// `sources` が空のエージェントは「カタログにはあるが、このノードではまだ
 /// 起動できない」状態を表す (`installable` が true なら導入可能)。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
 pub struct AgentSummary {
     /// エージェントID
     pub id: String,
@@ -293,24 +293,24 @@ pub struct AgentSummary {
 }
 
 /// `POST /api/v1/nodes/:node_id/agents/update` リクエスト。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
 pub struct UpdateAgentsRequest {
     /// 更新対象のエージェントID (省略時は導入済み全エージェント)
     pub agent_id: Option<String>,
 }
 
 /// エージェント管理操作 (install / update / remove) の共通レスポンス。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
 pub struct AgentOpResponse {
     /// 実行結果の表示メッセージ (例: `installed opencode2 0.1.0`)
     pub message: Option<String>,
 }
 
 /// `GET /api/v1/nodes/tokens` の 1 件 (発行済みノード個別トークン)。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
 pub struct NodeTokenSummary {
     /// 対象ノードID
     pub node_id: String,
@@ -319,16 +319,16 @@ pub struct NodeTokenSummary {
 }
 
 /// `GET /api/v1/nodes/tokens` レスポンス。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
 pub struct NodeTokensResponse {
     /// 発行済みノードトークン一覧
     pub tokens: Vec<NodeTokenSummary>,
 }
 
 /// `POST /api/v1/nodes/tokens` リクエスト (新規ノードトークン発行)。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
 pub struct IssueNodeTokenRequest {
     /// ペアリングするノードID (fxg daemon の node_id)
     pub node_id: String,
@@ -338,8 +338,8 @@ pub struct IssueNodeTokenRequest {
 ///
 /// 平文トークンは発行時にこの一度きりのみ返却される (サーバーには
 /// SHA-256 ハッシュのみ保存)。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
 pub struct IssueNodeTokenResponse {
     /// 対象ノードID
     pub node_id: String,
@@ -348,16 +348,16 @@ pub struct IssueNodeTokenResponse {
 }
 
 /// `POST /api/v1/auth/rotate-token` レスポンス (クライアントトークン再生成)。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
 pub struct RotateAuthTokenResponse {
     /// 新しいクライアント認証トークン (旧トークンは即時無効化)
     pub token: String,
 }
 
 /// セッション起動時に同時作成する Worktree の指定。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
 pub struct WorktreeSpec {
     /// ブランチ名
     pub branch: String,
@@ -368,8 +368,8 @@ pub struct WorktreeSpec {
 }
 
 /// 別ノード・別エージェントへの Context Fork 指定。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
 pub struct SessionForkSpec {
     /// 分岐元セッションID
     pub from_session_id: String,
@@ -383,8 +383,8 @@ pub struct SessionForkSpec {
 ///
 /// 既存の常駐 `node_id` 指定のほか、`provisioner` 指定による一時VMの
 /// オンデマンド起動＆自動セットアップ、Worktree 同時作成、Context Fork に対応する。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
 pub struct CreateSessionRequest {
     /// クライアント採番の相関ID (重複送信の冪等排除に使用)
     pub command_id: String,
@@ -411,8 +411,8 @@ pub struct CreateSessionRequest {
 }
 
 /// `POST /api/v1/sessions` レスポンス。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
 pub struct CreateSessionResponse {
     /// 起動したセッションID
     pub session_id: String,
@@ -421,8 +421,8 @@ pub struct CreateSessionResponse {
 }
 
 /// `GET /api/v1/inbox` レスポンス (全セッション横断の未解決承認リクエスト)。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
 pub struct InboxResponse {
     /// 未解決 (`pending`) の承認リクエスト一覧
     pub requests: Vec<PermissionRequestEntry>,
@@ -431,8 +431,8 @@ pub struct InboxResponse {
 }
 
 /// `POST /api/v1/sessions/:id/permissions/:req_id/respond` リクエスト。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
 pub struct RespondPermissionRequest {
     /// 選択された `option_id` (`allow_once` / `allow_always` / `reject` 等)
     pub selected_option_id: String,
@@ -446,16 +446,16 @@ pub struct RespondPermissionRequest {
 ///
 /// 既に解決済みの場合も 200 で返し `already_resolved = true` とする
 /// (UI 側は正常遷移として扱う。冪等)。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
 pub struct RespondPermissionResponse {
     /// この応答より前に既に解決済みだったか
     pub already_resolved: bool,
 }
 
 /// `POST /api/v1/sessions/:id/elicitations/:elicitation_id/respond` リクエスト。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
 pub struct RespondElicitationRequest {
     /// ユーザーの応答アクション (`accept` / `decline` / `cancel`)
     pub action: ElicitationAction,
@@ -468,8 +468,8 @@ pub struct RespondElicitationRequest {
 /// `POST /api/v1/sessions/:id/elicitations/:elicitation_id/respond` レスポンス。
 ///
 /// 既に解決済みの場合も 200 で返し `already_resolved = true` とする (冪等)。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
 pub struct RespondElicitationResponse {
     /// この応答より前に既に解決済みだったか
     pub already_resolved: bool,
@@ -479,8 +479,8 @@ pub struct RespondElicitationResponse {
 ///
 /// 指定ターン (`UserMessage.node_seq`) 時点の Shadow Git Tree へ
 /// ワークスペースを復元する (`fxg session revert` の Web UI 版)。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
 pub struct SessionRevertRequest {
     /// Revert 基準にする `UserMessage` の `node_seq`
     /// (省略時は直近ターン)
@@ -488,8 +488,8 @@ pub struct SessionRevertRequest {
 }
 
 /// `POST /api/v1/sessions/:id/revert` レスポンス。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
 pub struct SessionRevertResponse {
     /// 基準にした `UserMessage` の `node_seq`
     pub target_node_seq: u64,
@@ -508,8 +508,8 @@ pub struct SessionRevertResponse {
 ///
 /// 停止済みセッションを同一 `session_id` のまま再開する
 /// (設計: `docs/04-agent-drivers-and-windows.md` §4.3)。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
 pub struct ResumeSessionRequest {
     /// ネイティブ復元を試みず履歴 Replay で継続する (既定 `false`)
     #[serde(default)]
@@ -517,8 +517,8 @@ pub struct ResumeSessionRequest {
 }
 
 /// `POST /api/v1/sessions/:id/resume` レスポンス。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
 pub struct ResumeSessionResponse {
     /// 再開したセッションID (リクエスト対象と同一)
     pub session_id: String,
@@ -531,16 +531,16 @@ pub struct ResumeSessionResponse {
 ///
 /// アーカイブは一覧からの非表示/復元のみで、イベントログは保持される
 /// (会話本文の消去は `DELETE /api/v1/sessions/:id`)。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
 pub struct SessionArchiveRequest {
     /// `true` = アーカイブ、`false` = 復元
     pub archived: bool,
 }
 
 /// `POST /api/v1/sessions/:id/archive` レスポンス。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
 pub struct SessionArchiveResponse {
     /// 対象セッションID
     pub session_id: String,
@@ -549,16 +549,16 @@ pub struct SessionArchiveResponse {
 }
 
 /// `POST /api/v1/search` レスポンス (FTS5 全文検索)。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
 pub struct SearchResponse {
     /// 検索ヒット (新しい順)
     pub hits: Vec<SearchHit>,
 }
 
 /// `POST /api/v1/push/subscribe` リクエスト (PWA の Web Push 購読登録)。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
 pub struct PushSubscribeRequest {
     /// Push サービスエンドポイント URL
     pub endpoint: String,
@@ -571,8 +571,8 @@ pub struct PushSubscribeRequest {
 }
 
 /// `POST /api/v1/push/subscribe` レスポンス。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
 pub struct PushSubscribeResponse {
     /// 登録に成功したか
     pub ok: bool,
@@ -583,41 +583,41 @@ pub struct PushSubscribeResponse {
 /// 認証済みリクエスト (`Authorization: Bearer <auth_token>`) として呼び出し、
 /// 成功時は `Set-Cookie: fxg_session=<token>; HttpOnly; SameSite=Strict`
 /// が返却される。以降は Cookie で認証できる (docs/03 §3.0)。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
 pub struct AuthLoginRequest {
     /// 認証トークン (Web UI が保持する値。再検証のため body でも渡す)
     pub token: String,
 }
 
 /// `POST /api/v1/system/kill-switch` リクエスト (緊急停止)。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
 pub struct KillSwitchRequest {
     /// 実行理由 (監査ログへ記録)
     pub reason: String,
 }
 
 /// `POST /api/v1/system/kill-switch` レスポンス。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
 pub struct KillSwitchResponse {
     /// `KillAllSessions` を配信したノード数
     pub notified_nodes: u64,
 }
 
 /// `GET /api/v1/audit/logs` レスポンス。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
 pub struct AuditLogsResponse {
     /// 監査ログ (新しい順)
     pub logs: Vec<AuditLogEntry>,
 }
 
 /// Client → Server (`/api/v1/client/ws`) メッセージ。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[serde(tag = "op", rename_all = "snake_case")]
-#[ts(export)]
+#[specta(collect)]
 pub enum ClientWsMessage {
     /// 接続時の購読開始 (差分再開カーソルの指定)。
     ///
@@ -682,9 +682,9 @@ pub enum ClientWsMessage {
 }
 
 /// Server → Client (`/api/v1/client/ws`) メッセージ。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[serde(tag = "op", rename_all = "snake_case")]
-#[ts(export)]
+#[specta(collect)]
 pub enum ServerWsMessage {
     /// 差分イベントバッチ (接続直後のリプレイおよび以降のリアルタイム配信)。
     EventBatch {
@@ -748,9 +748,9 @@ pub enum ServerWsMessage {
 /// Web UI / スマホPWA のターミナルとノード上の ConPTY / Unix PTY を直接結ぶ
 /// 双方向ストリームチャネル。ノード側設定 `allow_remote_pty = false` の場合は
 /// リモート (中央サーバー経由) からの `spawn` が拒否される。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[serde(tag = "op", rename_all = "snake_case")]
-#[ts(export)]
+#[specta(collect)]
 pub enum PtyClientMessage {
     /// 既存 PTY へのアタッチ
     Attach {
@@ -785,9 +785,9 @@ pub enum PtyClientMessage {
 }
 
 /// Server → Client (`/api/v1/pty/ws`) メッセージ。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[serde(tag = "op", rename_all = "snake_case")]
-#[ts(export)]
+#[specta(collect)]
 pub enum PtyServerMessage {
     /// PTY 起動完了 (以降の出力は `attach` した PTY ID に紐づく)
     Spawned {
@@ -836,16 +836,16 @@ pub fn event_batch_ws(batch: SessionEventBatch) -> ServerWsMessage {
 }
 
 /// `GET /api/v1/nodes/:id/fs/browse` クエリパラメータ。
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[specta(collect)]
 pub struct FsBrowseQuery {
     /// 閲覧対象のディレクトリパス (省略時はホームディレクトリ)
     pub path: Option<String>,
 }
 
 /// ファイルシステム内のエントリ (フォルダまたはファイル)。
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[specta(collect)]
 pub struct FsEntry {
     /// エントリ名 (ファイル名/フォルダ名)
     pub name: String,
@@ -858,8 +858,8 @@ pub struct FsEntry {
 }
 
 /// `GET /api/v1/nodes/:id/fs/browse` レスポンス。
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[specta(collect)]
 pub struct FsBrowseResponse {
     /// 現在閲覧中の絶対パス (Windows では "C:\\Users\\..."、Unix では "/home/...")
     pub current_path: String,

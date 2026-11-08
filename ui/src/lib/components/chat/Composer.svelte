@@ -4,11 +4,9 @@
   import NodeStatusBadge from "$lib/components/NodeStatusBadge.svelte";
   import { configChoices, resolveConfigChoice, selectedConfigValue } from "$lib/config-options";
   import { getNodeAvailability } from "$lib/node-status";
-  import type { NodeSummary } from "$lib/generated/NodeSummary";
+  import type { NodeSummary, SessionControlAction, SessionStatus } from "$lib/generated/bindings";
   import { sync } from "$lib/stores/app.svelte";
   import type { SessionCapabilities } from "$lib/sync/reducer";
-  import type { SessionControlAction } from "$lib/generated/SessionControlAction";
-  import type { SessionStatus } from "$lib/generated/SessionStatus";
   import { toast } from "svelte-sonner";
   import AlertTriangleIcon from "@lucide/svelte/icons/alert-triangle";
   import BanIcon from "@lucide/svelte/icons/ban";

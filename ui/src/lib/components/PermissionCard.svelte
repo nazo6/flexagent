@@ -1,7 +1,7 @@
 <script lang="ts">
   import { Badge } from "$lib/components/ui/badge";
   import { Button } from "$lib/components/ui/button";
-  import type { PermissionOption } from "$lib/generated/PermissionOption";
+  import type { PermissionOption } from "$lib/generated/bindings";
   import { formatRelativeTime } from "$lib/format";
   import { sync } from "$lib/stores/app.svelte";
   import { toast } from "svelte-sonner";
