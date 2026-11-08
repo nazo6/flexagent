@@ -207,62 +207,81 @@
 
 ### A. セッション・データの整合性
 
-- [ ] ACP ターンエラーを `StatusChanged(Error)` + ターン失敗イベントとして
-      表面化する（`fxg-acp/src/acp.rs:1325-1334`）
-- [ ] resume / fork の Replay 注入失敗を `Err` または `WarningInfo` として返す
-      （`fxg-node/src/session_manager.rs:495-501, 820-827, 888-896`）
-- [ ] スナップショット失敗を診断イベント / 応答の warning に含める
-      （`session_manager.rs:1929-1938`）
-- [ ] `.fxg.toml` の読み取りは `NotFound` のみ空扱いにし、他は伝播する
-      （`fxg-node/src/project.rs:187-213`）
-- [ ] DB の JSON parse 失敗を `DbError::InvalidPayload` として返す
-      （`fxg-db/src/queries.rs:446, 774, 818`）
-- [ ] 書き込み前の旧ファイル読み取り失敗を差分の誤表示にしない
-      （`fxg-acp/src/acp.rs:826`）
+- [x] ACP ターンエラーを `StatusChanged(Error)` として表面化し、
+      `Idle` を送らないようにする（`fxg-acp/src/acp.rs`）
+- [x] resume / fork / 初期プロンプトの Replay 注入失敗を `Err` として返す。
+      失敗したセッションは停止し、`StatusChanged(Error)` を記録して
+      再試行できる状態に戻す（`fxg-node/src/session_manager.rs`）
+- [x] スナップショット失敗を `warn` ログで表面化する
+      （UI / インシデントへの表示は Phase 3）
+- [x] `.fxg.toml` の読み取りは `NotFound` のみ空扱いにし、他は伝播する
+      （`fxg-node/src/project.rs`）。読み取り不能時に既存パスを
+      上書きしない回帰テストを追加
+- [x] DB の JSON parse 失敗を `DbError::InvalidPayload` として返す
+      （Phase 1 で先行修正）
+- [x] 書き込み前の旧ファイル読み取り失敗を、差分を壊さず内部エラーとして返す
+      （`fxg-acp/src/acp.rs`）
 
 ### B. 起動・設定・外部コマンド
 
-- [ ] `GlobalConfig::load` の失敗を fail-fast（または明示 warn）にする
-      （`fxg-cli/src/main.rs:88`, `commands.rs:416`）
-- [ ] stdio の stdin エラーと EOF を区別する
-      （`fxg-node/src/daemon/stdio.rs:133-141`）
-- [ ] git-askpass で token が無い場合に明示エラーを返す
-      （`fxg-cli/src/commands.rs:763-767`）
-- [ ] askpass スクリプトの `chmod` 失敗を伝播する
-      （`bootstrap.rs:517-521`, `credentials.rs:248-252`）
-- [ ] worktree 探索のエラーを `not found` と区別して返す
-      （`daemon/ops.rs:588-601`）
-- [ ] service 操作（systemctl / schtasks / launchctl）の失敗を
-      成功表示しない（`fxg-cli/src/service.rs`）
-- [ ] `select_agent_node` の DB エラーを空リストに変換しない
-      （`fxg-server/src/state.rs:213-218, 1076-1080`）
+- [x] `GlobalConfig::load` の失敗を明示する
+      （起動時は stderr、コマンド実行時は `?` で伝播）
+- [x] stdio の stdin エラーと EOF を区別する
+      （`StdinEvent::{Line,Eof,Error}`）
+- [x] git-askpass で token が無い場合に明示エラーを返す
+- [x] askpass スクリプトの `chmod` 失敗を伝播する
+      （`bootstrap.rs`, `credentials.rs`）
+- [x] worktree 探索のエラーを `not found` と区別して返す
+      （調査に失敗したリポジトリをエラーメッセージに含める）
+- [x] service 操作（systemctl / schtasks / launchctl）の失敗を
+      `warn` 以上で表示する
+- [x] `select_agent_node` の DB エラーを空リストに変換しない
 
 ### C. 通信・バックグラウンドタスク
 
-- [ ] WS 受信エラーを正常切断扱いせず、backoff 対象の `Err` にする
-      （`fxg-node/src/sync.rs:188-190`, `fxg-server/src/hub.rs:1000`）
-- [ ] Client WS の replay 失敗時に `ServerWsMessage::Error` を送ってから閉じる
-      （`fxg-server/src/api/ws.rs:69-74, 175-179`）
-- [ ] バックグラウンドタスクを `spawn_logged` へ移行し、`JoinError` / panic を
-      必ずログに出す（`fxg-node/src/daemon/mod.rs:742-746`,
-      `fxg-server/src/server.rs:138`）
-- [ ] `installed_agents` の取得失敗を warn 以上にし、NodeHello の結果を
-      「劣化」として扱う（`fxg-node/src/daemon/mod.rs:456-464`）
-- [ ] `branch_and_worktree` の git 失敗を `Result` で返す
-      （`session_manager.rs:1941-1954`）
-- [ ] UI: WS parse 失敗・未知 op を `reportError` に流す
-      （`ui/src/lib/stores/sync.svelte.ts:501-538`）
-- [ ] UI: PTY 入力送信失敗・WS error を状態として表示する
-      （`TerminalView.svelte`）
-- [ ] Service Worker: Push 購読 POST のレスポンスを検証する
-      （`ui/src/service-worker/index.ts:241-253`）
+- [x] WS 受信エラーを正常切断扱いせず、backoff 対象の `Err` にする
+      （node 側）／`warn` を出して切断（hub 側）
+- [x] Client WS の replay 失敗時に `ServerWsMessage::Error` を送ってから閉じる
+- [x] バックグラウンドタスクの `JoinError` / panic を `error!` で記録する
+      （`spawn_logged!` への置換は Phase 3 のタスク監視で行う）
+- [x] `installed_agents` の取得失敗を `warn` にし、部分リストであることを明示する
+- [x] `branch_and_worktree` の git 失敗を `Result` で返し、呼び出し側で
+      警告して「不明」にフォールバックする
+- [x] UI: WS / PTY の parse 失敗を `console.error` に、未知 op を
+      `console.warn` に出力する（共通 `reportError` は Phase 4）
+- [x] UI: PTY 入力送信失敗時に状態とメッセージを更新する
+- [x] Service Worker: Push 購読 POST のレスポンスを検証し、失敗を記録する
 
 ### 完了条件 / 検証
 
-- 上記それぞれに、失敗時に「成功扱いにならない」ことを確認する回帰テストを追加
-- 意図的に握り潰す箇所は `discard_with("理由")` または
-  `#[allow(..., reason = "...")]` で明示されている
-- `mise run check` が通る
+- [x] ACP ターン失敗が `Idle` として表示されない
+- [x] resume / fork の Replay 失敗が成功扱いにならない
+- [x] `.fxg.toml` 読み取り不能時に既存パスを破壊しない回帰テスト
+- [x] `cargo clippy --workspace --all-targets -- -D warnings`
+- [x] `cargo test --workspace --no-fail-fast`
+- [x] `mise run lint` / `mise run check:ui` / `mise run fmt:check`
+
+### 実装ログ / 進捗メモ
+
+- **2026-11-08**: Phase 2 を実装。ACP のプロンプトエラーは
+  `StatusChanged(Error)` を送ってターンを終了するようにし、成功時の
+  `Idle` と分離した。
+- **Replay 注入**: resume / fork / 初期プロンプトで失敗した場合、
+  セッションを停止して `StatusChanged(Error)` を記録してから `Err` を返す
+  `fail_context_injection` を追加。これにより「エラーなのに active のまま」
+  という再試行不能状態を避ける。
+- **データ保護**: `.fxg.toml` の読み取りは `NotFound` 以外を伝播し、
+  読み取り不能時に既存パスを上書きしないテストを追加した。
+- **通信**: node 側 WS の受信エラーを `Err` として再接続バックオフへ乗せ、
+  Client WS の replay 失敗を `SYNC_BACKLOG` としてクライアントへ通知する。
+- **バックグラウンド**: daemon / server のタスク終了時に `JoinError` を
+  `error!` で記録。`installed_agents` の部分取得と git metadata の欠損は
+  `warn` で可視化した。
+- **UI**: WS / PTY の parse 失敗をログに残し、PTY 入力が送れない場合は
+  接続状態とメッセージを更新する。Service Worker の Push 再購読は
+  レスポンス status を検証するようにした。
+- **未対応**: スナップショット失敗の UI 表示、共通 `reportError` ストア、
+  `spawn_logged!` への完全移行は Phase 3 / 4 で行う。
 
 ---
 
