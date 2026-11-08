@@ -286,27 +286,46 @@ pub enum ConfigOptionValue {
 
 ### Phase 2: JSON 境界の整理
 
-- [ ] `RawJson` を `fxg-protocol` に追加し、specta 出力を確認
-  - [ ] `ui/src/lib/generated/bindings.ts` が `JsonValue` のままであること
-- [ ] 不透明フィールドを `RawJson` に置換
-  - [ ] `PermissionRequestEntry.details`
-  - [ ] `PermissionRequest.details`
-  - [ ] `ErrorInfo.details`
-  - [ ] `AuditLogEntry.details`
-- [ ] `ElicitationSchema` / `ElicitationContent` を型化
-  - [ ] `crates/fxg-acp/src/acp.rs:2144-2225` を網羅 `match` に置換
-  - [ ] `crates/fxg-cli/src/commands.rs:1690-1785` を型付き構築に変更
-  - [ ] `ui/src/lib/components/ElicitationCard.svelte` の独自 interface を削除
-- [ ] `ConfigOptionValue` を型化
-  - [ ] `crates/fxg-acp/src/acp.rs:1703-1755`
-  - [ ] `ui/src/lib/config-options.ts` を生成型ベースに
-- [ ] provisioner stdout の typed parse
-  - [ ] `crates/fxg-server/src/provisioner.rs:675,711,769-782`
-  - [ ] `NodeToServerMsg` を1回だけパースし `match` で分岐
-  - [ ] `extract_hello_node_id` を削除
-- [ ] CLI の `Value` 組み立て廃止
-  - [ ] `crates/fxg-cli/src/commands.rs:610-650` の provisioners を typed row に
-  - [ ] 他の `json!` 出力も出力用 struct を定義して `Serialize`
+- [x] `RawJson` を `fxg-protocol` に追加し、specta 出力を確認
+  - [x] `ui/src/lib/generated/bindings.ts` が `RawJson = JsonValue` のままであること
+- [x] 不透明フィールドを `RawJson` に置換
+  - [x] `PermissionRequestEntry.details`
+  - [x] `PermissionRequest.details`
+  - [x] `ErrorInfo.details`
+  - [x] `AuditLogEntry.details`
+- [x] `ElicitationSchema` / `ElicitationContent` を型化
+  - [x] `ElicitationSchema` / `ElicitationProperty` / `ElicitationValue` を追加
+  - [x] `crates/fxg-acp` の検証を網羅 `match` に置換
+  - [x] `crates/fxg-cli` の `--json` / `--set` を型付き構築に変更
+  - [x] `ui/src/lib/components/ElicitationCard.svelte` の独自 interface を削除
+- [x] `ConfigOptionValue` を型化
+  - [x] `ConfigOptionInfo.current_value` / `options` / `SetConfig.value`
+  - [x] `AgentDriver::set_config`
+  - [x] `ui/src/lib/config-options.ts` を生成型ベースに
+- [x] provisioner stdout の typed parse
+  - [x] `crates/fxg-server/src/provisioner.rs` を `NodeToServerMsg` の1回パースに変更
+  - [x] `NodeToServerMsg` を `match` で分岐
+  - [x] `extract_hello_node_id` を削除
+- [x] CLI の `Value` 組み立て廃止
+  - [x] `provisioners --json` を `ProvisionerListEntry` に
+  - [x] `agents list --json` を `AgentListOutput` に
+
+#### Phase 2 の移行メモ
+
+- `RawJson` は `#[serde(transparent)]` + `#[specta(transparent)]` のため、
+  wire format と TS の `JsonValue` は変わらない。`PermissionRequest.details` など
+  ツール引数・監査 details・エラー details だけを不透明値として残した。
+- Elicitation は schema を `ElicitationSchema`、回答を
+  `Option<ElicitationContent>` にした。未知の property type は
+  `ElicitationPropertyKind::Unknown(String)` として保持し、`extra` で
+  未知キーも roundtrip する。`RespondElicitation.content` は `null` ではなく
+  `None` で decline / cancel を表す。
+- `ConfigOptionValue` は `#[serde(untagged)]` で文字列 / 真偽値 / 任意 JSON を
+  そのまま往復する。ACP の未知 config value は `Unknown(RawJson)`。
+- provisioner は `line.contains("\"op\":...")` を廃止し、stdout の各行を
+  `NodeToServerMsg` として1回だけパースするようにした。
+- Phase 0 の file-level `disallowed_types` allow は、Phase 2 で不要になった
+  `provisioner.rs` / `cli` / `node` / `server` / `db` の該当ファイルから削除した。
 
 ### Phase 3: DB 境界の型化
 
@@ -384,3 +403,9 @@ pub enum ConfigOptionValue {
   ACP / DB / CLI / サーバーの文字列比較を enum のメソッドに置き換え、
   `selected_option_id` の推測は1関数に集約してテストを追加した。
   open enum の TypeScript 出力は `string` のため、UI の生成型は変わらない。
+- 2026-11-08: Phase 2 を実装。`RawJson`、`ElicitationSchema` /
+  `ElicitationProperty` / `ElicitationValue` / `ElicitationContent`、
+  `ConfigOptionValue` を追加した。provisioner の stdout 判定を
+  `NodeToServerMsg` の typed parse に変更し、CLI の provisioners / agents
+  JSON 出力を Serialize struct に置き換えた。不要になった file-level
+  `disallowed_types` allow も削除した。

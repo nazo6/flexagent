@@ -216,7 +216,7 @@ mod tests {
                 name: "Allow".to_owned(),
                 kind: PermissionOptionKind::AllowOnce,
             }],
-            details: serde_json::json!({}),
+            details: serde_json::json!({}).into(),
         };
         let (event_type, text) = classify_payload(&payload);
         assert_eq!(event_type, EventType::PermissionRequest);

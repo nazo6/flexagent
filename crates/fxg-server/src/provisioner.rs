@@ -16,11 +16,6 @@
 //!   `~/.flexagent/bundles/<session-id>.bundle` and records the path in
 //!   `sessions.git_bundle_path`
 
-#![allow(
-    clippy::disallowed_types,
-    reason = "Phase 2 parses provenance lines into typed NodeToServerMsg; see docs/06-type-safety.md"
-)]
-
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex as StdMutex};
@@ -32,7 +27,7 @@ use fxg_protocol::common::{ForkHistoryItem, NodeLifecycleStatus, SessionStatus};
 use fxg_protocol::config::{
     BUNDLES_DIR_NAME, DEFAULT_GIT_USERNAME, GitCredentialConfig, ProvisionerConfig,
 };
-use fxg_protocol::node_server::ServerToNodeMsg;
+use fxg_protocol::node_server::{NodeToServerMsg, ServerToNodeMsg};
 use fxg_protocol::util::uuid_v7;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter};
 use tokio::process::Command;
@@ -677,8 +672,22 @@ async fn spawn_child(state: &ServerState, request: SpawnRequest) -> Result<Spawn
                         if line.trim().is_empty() {
                             continue;
                         }
-                        let is_hello = line.contains("\"op\":\"node_hello\"");
-                        if is_hello && !attached {
+                        let message: NodeToServerMsg = match serde_json::from_str(&line) {
+                            Ok(message) => message,
+                            Err(err) => {
+                                tracing::debug!(
+                                    node_id = pump_node_id,
+                                    "stdout line is not a node message (skipped): {err}"
+                                );
+                                continue;
+                            }
+                        };
+                        if let NodeToServerMsg::NodeHello {
+                            node_id: hello_node_id,
+                            ..
+                        } = &message
+                            && !attached
+                        {
                             attached = true;
                             // Register the hub connection and forward commands (StartSession etc.)
                             // to the child process's stdin
@@ -706,17 +715,16 @@ async fn spawn_child(state: &ServerState, request: SpawnRequest) -> Result<Spawn
                                 }));
                             }
                             if let Some(tx) = hello_tx.take() {
-                                let hello_node_id = extract_hello_node_id(&line).unwrap_or_default();
                                 fxg_protocol::discard_with!(
-                                    tx.send(hello_node_id),
+                                    tx.send(hello_node_id.clone()),
                                     "report the ephemeral node id to a waiter that may be gone"
                                 );
                             }
                         }
-                        if line.contains("\"op\":\"drain_complete\"") {
+                        if matches!(&message, NodeToServerMsg::DrainComplete { .. }) {
                             pump_manager.take_drain_waiter(&pump_node_id);
                         }
-                        hub::handle_stdio_message(&pump_state, &pump_node_id, &line).await;
+                        hub::handle_stdio_message(&pump_state, &pump_node_id, message).await;
                     }
                     Ok(None) => break,
                     Err(err) => {
@@ -767,21 +775,6 @@ async fn spawn_child(state: &ServerState, request: SpawnRequest) -> Result<Spawn
         terminate: terminate_tx,
         test_log,
     })
-}
-
-/// Extracts `node_id` from a NodeHello JSON line (minimal parsing).
-fn extract_hello_node_id(line: &str) -> Option<String> {
-    let value: serde_json::Value = match serde_json::from_str(line) {
-        Ok(value) => value,
-        Err(err) => {
-            tracing::debug!("stdout line is not JSON (skipped): {err}");
-            return None;
-        }
-    };
-    value
-        .get("node_id")
-        .and_then(|node_id| node_id.as_str())
-        .map(str::to_owned)
 }
 
 /// Waits for the handshake and sends `StartSession`.

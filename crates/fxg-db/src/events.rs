@@ -20,14 +20,10 @@
     clippy::map_err_ignore,
     reason = "integer conversion errors (TryFromIntError) carry no additional context"
 )]
-#![allow(
-    clippy::disallowed_types,
-    reason = "tool arguments are agent-defined opaque JSON; see docs/06-type-safety.md"
-)]
 
 use fxg_protocol::common::{
     ElicitationAction, ElicitationRequestStatus, PermissionOption, PermissionRequestStatus,
-    SessionUsage,
+    RawJson, SessionUsage,
 };
 use fxg_protocol::events::{SessionEventEnvelope, UnifiedEventPayload};
 use serde::{Deserialize, Serialize};
@@ -69,7 +65,7 @@ pub struct AppendedEvent {
 pub(crate) struct StoredPermissionDetails {
     /// Argument and diff details
     #[serde(default)]
-    pub details: serde_json::Value,
+    pub details: RawJson,
     /// Options (option_id / name / kind)
     #[serde(default)]
     pub options: Vec<PermissionOption>,
@@ -891,7 +887,7 @@ mod tests {
             })
             .collect::<Vec<_>>();
         serde_json::to_string(&StoredPermissionDetails {
-            details: serde_json::json!({}),
+            details: serde_json::json!({}).into(),
             options,
         })
         .expect("details")

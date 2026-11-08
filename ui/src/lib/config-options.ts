@@ -1,4 +1,4 @@
-import type { JsonValue } from "#lib/generated/bindings.ts";
+import type { ConfigOptionValue, JsonValue } from "#lib/generated/bindings.ts";
 import { m } from "#lib/paraglide/messages.js";
 
 /** A config option (`ConfigOptionInfo`) choice (Select value / display label / submitted value). */
@@ -7,17 +7,17 @@ export interface ConfigOptionChoice {
   value: string;
   /** Display label. */
   label: string;
-  /** Original JSON value sent to `set_config`. */
-  raw: JsonValue;
+  /** Original value sent to `set_config`. */
+  raw: ConfigOptionValue;
 }
 
-/** Convert a `JsonValue` to a string for a Select value (non-strings are JSON-serialized). */
-export function configValueToString(value: JsonValue): string {
+/** Convert a config value to a string for a Select value (non-strings are JSON-serialized). */
+export function configValueToString(value: ConfigOptionValue | null): string {
   return typeof value === "string" ? value : JSON.stringify(value);
 }
 
 /** Resolve a choice's display label (supports booleans, opencode2's `{ providerID, id, name }`, etc.). */
-function choiceLabel(raw: JsonValue): string {
+function choiceLabel(raw: ConfigOptionValue): string {
   if (typeof raw === "boolean") return raw ? m.lib_config_enabled() : m.lib_config_disabled();
   if (raw !== null && typeof raw === "object" && !Array.isArray(raw)) {
     const record = raw as Record<string, JsonValue>;
@@ -41,15 +41,19 @@ function choiceLabel(raw: JsonValue): string {
  * as the Select value and are restored to the original object by
  * [`resolveConfigChoice`] when submitting `set_config`.
  */
-export function configChoices(options: JsonValue): ConfigOptionChoice[] {
-  if (!Array.isArray(options)) return [];
-  return options.flatMap((raw) =>
-    raw === null ? [] : [{ value: configValueToString(raw), label: choiceLabel(raw), raw }],
-  );
+export function configChoices(options: ConfigOptionValue[]): ConfigOptionChoice[] {
+  return options.map((raw) => ({
+    value: configValueToString(raw),
+    label: choiceLabel(raw),
+    raw,
+  }));
 }
 
-/** Resolve a value selected in the Select to the `JsonValue` sent to `set_config`. */
-export function resolveConfigChoice(choices: ConfigOptionChoice[], value: string): JsonValue {
+/** Resolve a value selected in the Select to the `ConfigOptionValue` sent to `set_config`. */
+export function resolveConfigChoice(
+  choices: ConfigOptionChoice[],
+  value: string,
+): ConfigOptionValue {
   return choices.find((choice) => choice.value === value)?.raw ?? value;
 }
 
@@ -62,7 +66,7 @@ export function resolveConfigChoice(choices: ConfigOptionChoice[], value: string
  */
 export function selectedConfigValue(
   choices: ConfigOptionChoice[],
-  currentValue: JsonValue,
+  currentValue: ConfigOptionValue | null,
 ): string | undefined {
   const value = configValueToString(currentValue);
   return choices.some((choice) => choice.value === value) ? value : undefined;

@@ -28,9 +28,8 @@ describe("configValueToString", () => {
 });
 
 describe("configChoices", () => {
-  it("returns an empty list for non-array input", () => {
-    expect(configChoices(null)).toEqual([]);
-    expect(configChoices("plan")).toEqual([]);
+  it("returns an empty list for an empty option list", () => {
+    expect(configChoices([])).toEqual([]);
   });
 
   it("maps primitive options with the value as label", () => {
@@ -45,10 +44,6 @@ describe("configChoices", () => {
       { value: "true", label: m.lib_config_enabled(), raw: true },
       { value: "false", label: m.lib_config_disabled(), raw: false },
     ]);
-  });
-
-  it("skips null options", () => {
-    expect(configChoices(["plan", null])).toHaveLength(1);
   });
 
   it("labels object options by name and keeps the raw object", () => {

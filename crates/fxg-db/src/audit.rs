@@ -6,12 +6,7 @@
 //! recorded in the executing node's `node.db`
 //! (design: `docs/01-architecture-and-sync.md` §7.5).
 
-#![allow(
-    clippy::disallowed_types,
-    reason = "audit details are display-only opaque JSON; see docs/06-type-safety.md"
-)]
-
-use fxg_protocol::common::AuditAction;
+use fxg_protocol::common::{AuditAction, RawJson};
 use fxg_protocol::util::now_ms;
 use sqlx::SqlitePool;
 
@@ -69,7 +64,7 @@ pub struct AuditLogRecord {
     /// Token identifier or authenticated subject
     pub auth_subject: String,
     /// Operation details (executed command, approval option, etc.)
-    pub details: serde_json::Value,
+    pub details: RawJson,
 }
 
 impl AuditLogRecord {
@@ -86,7 +81,7 @@ impl AuditLogRecord {
             client_ip: client_ip.into(),
             client_user_agent: None,
             auth_subject: auth_subject.into(),
-            details: serde_json::Value::Object(serde_json::Map::new()),
+            details: RawJson::default(),
         }
     }
 }

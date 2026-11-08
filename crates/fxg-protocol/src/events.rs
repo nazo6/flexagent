@@ -20,8 +20,9 @@ use specta::Type;
 
 use crate::common::{
     AttachmentMeta, ClientSource, CommandInfo, CompactionStatus, ConfigOptionInfo,
-    ElicitationAction, ElicitationMode, EventType, FileDiff, ModeInfo, PermissionOption, PlanEntry,
-    ResolvedBy, SessionStatus, ToolCallKind, ToolCallStatus, TurnStopReason, UsageCost,
+    ElicitationAction, ElicitationContent, ElicitationMode, ElicitationSchema, EventType, FileDiff,
+    ModeInfo, PermissionOption, PlanEntry, RawJson, ResolvedBy, SessionStatus, ToolCallKind,
+    ToolCallStatus, TurnStopReason, UsageCost,
 };
 
 /// Envelope of a session event (the unit of persistence and synchronization).
@@ -186,7 +187,7 @@ pub enum UnifiedEventPayload {
         /// Options (e.g. `allow_once` / `allow_always` / `reject`)
         options: Vec<PermissionOption>,
         /// Arguments and diff details
-        details: serde_json::Value,
+        details: RawJson,
     },
     /// The outcome of a permission request.
     ///
@@ -215,7 +216,7 @@ pub enum UnifiedEventPayload {
         /// Request mode (`form` / `url`. Phase 1 supports `form` only)
         mode: ElicitationMode,
         /// JSON Schema of the request in form mode (`requestedSchema`)
-        requested_schema: serde_json::Value,
+        requested_schema: ElicitationSchema,
         /// Related tool call ID (optional)
         tool_call_id: Option<String>,
     },
@@ -225,8 +226,8 @@ pub enum UnifiedEventPayload {
         elicitation_id: String,
         /// The user's response action
         action: ElicitationAction,
-        /// Answer content for `accept` (`Value::Null` on decline / cancel)
-        content: serde_json::Value,
+        /// Answer content for `accept` (`None` on decline / cancel)
+        content: Option<ElicitationContent>,
         /// Who resolved it (`cli` / `web` / `android_push`)
         resolved_by: ResolvedBy,
     },
@@ -406,7 +407,8 @@ impl UnifiedEventPayload {
 mod tests {
     use super::*;
     use crate::common::{
-        ClientSource, CommandInfo, ConfigOptionInfo, ElicitationMode, ModeInfo, ResolvedBy,
+        ClientSource, CommandInfo, ConfigOptionInfo, ConfigOptionValue, ElicitationMode, ModeInfo,
+        ResolvedBy,
     };
 
     fn sample_envelope(payload: UnifiedEventPayload) -> SessionEventEnvelope {
@@ -464,8 +466,11 @@ mod tests {
             config_options: vec![ConfigOptionInfo {
                 key: "model".to_owned(),
                 name: "Model".to_owned(),
-                current_value: serde_json::json!("sonnet"),
-                options: vec![serde_json::json!("sonnet"), serde_json::json!("haiku")],
+                current_value: ConfigOptionValue::Select("sonnet".to_owned()),
+                options: vec![
+                    ConfigOptionValue::Select("sonnet".to_owned()),
+                    ConfigOptionValue::Select("haiku".to_owned()),
+                ],
             }],
         };
         let json = serde_json::to_value(&payload).unwrap();
@@ -482,13 +487,14 @@ mod tests {
             elicitation_id: "elic-1".to_owned(),
             message: "Which strategy should we use?".to_owned(),
             mode: ElicitationMode::Form,
-            requested_schema: serde_json::json!({
+            requested_schema: serde_json::from_value(serde_json::json!({
                 "type": "object",
                 "properties": {
                     "strategy": { "type": "string", "enum": ["a", "b"] }
                 },
                 "required": ["strategy"]
-            }),
+            }))
+            .expect("schema"),
             tool_call_id: Some("tool-1".to_owned()),
         };
         let json = serde_json::to_value(&payload).unwrap();
@@ -503,7 +509,9 @@ mod tests {
         let resolved = UnifiedEventPayload::ElicitationResolved {
             elicitation_id: "elic-1".to_owned(),
             action: ElicitationAction::Accept,
-            content: serde_json::json!({ "strategy": "a" }),
+            content: Some(
+                serde_json::from_value(serde_json::json!({ "strategy": "a" })).expect("content"),
+            ),
             resolved_by: ResolvedBy::Cli,
         };
         let json = serde_json::to_value(&resolved).unwrap();

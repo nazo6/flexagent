@@ -3,7 +3,12 @@
   import { Button } from "#lib/components/ui/button/index.ts";
   import { Input } from "#lib/components/ui/input/index.ts";
   import { Label } from "#lib/components/ui/label/index.ts";
-  import type { ElicitationAction, JsonValue } from "#lib/generated/bindings.ts";
+  import type {
+    ElicitationAction,
+    ElicitationProperty,
+    ElicitationSchema,
+    ElicitationValue,
+  } from "#lib/generated/bindings.ts";
   import { commandErrorMessage } from "#lib/api/client.ts";
   import { formatRelativeTime } from "#lib/format.ts";
   import { m } from "#lib/paraglide/messages.js";
@@ -13,22 +18,6 @@
   import CircleHelpIcon from "@lucide/svelte/icons/circle-help";
   import SendIcon from "@lucide/svelte/icons/send";
   import XIcon from "@lucide/svelte/icons/x";
-
-  /** The subset of the restricted elicitation JSON Schema (object) needed for rendering. */
-  interface ElicitationProperty {
-    type?: string;
-    title?: string;
-    description?: string;
-    default?: unknown;
-    enum?: string[];
-    oneOf?: { const: string; title?: string }[];
-    items?: { enum?: string[] };
-  }
-
-  interface ElicitationSchema {
-    properties?: Record<string, ElicitationProperty>;
-    required?: string[];
-  }
 
   type FormValue = string | number | boolean | string[];
 
@@ -43,18 +32,13 @@
     sessionId: string;
     elicitationId: string;
     message: string;
-    requestedSchema: unknown;
+    requestedSchema: ElicitationSchema;
     resolved?: { action: ElicitationAction; resolvedBy: string } | null;
     createdAt?: number | null;
   } = $props();
 
-  const schema = $derived<ElicitationSchema>(
-    typeof requestedSchema === "object" && requestedSchema !== null
-      ? (requestedSchema as ElicitationSchema)
-      : {},
-  );
-  const properties = $derived(Object.entries(schema.properties ?? {}));
-  const required = $derived(new Set(schema.required ?? []));
+  const properties = $derived(Object.entries(requestedSchema.properties ?? {}));
+  const required = $derived(new Set(requestedSchema.required ?? []));
 
   let values = $state<Record<string, FormValue>>({});
   let busyAction = $state<ElicitationAction | null>(null);
@@ -63,7 +47,7 @@
   // (does not read `values`, so updating them does not re-run this effect)
   $effect(() => {
     const next: Record<string, FormValue> = {};
-    for (const [key, property] of Object.entries(schema.properties ?? {})) {
+    for (const [key, property] of Object.entries(requestedSchema.properties ?? {})) {
       if (property.default !== undefined) {
         next[key] = property.default as FormValue;
       } else if (property.type === "boolean") {
@@ -94,7 +78,9 @@
   };
 
   function enumOptions(property: ElicitationProperty): { value: string; label: string }[] {
-    if (property.enum) return property.enum.map((value) => ({ value, label: value }));
+    if (property.enum && property.enum.length > 0) {
+      return property.enum.map((value) => ({ value, label: value }));
+    }
     return (property.oneOf ?? []).map((option) => ({
       value: option.const,
       label: option.title ?? option.const,
@@ -123,8 +109,8 @@
   }
 
   /** Content sent with `accept` (empty optional fields are omitted). */
-  function buildContent(): { [key: string]: JsonValue } {
-    const content: { [key: string]: JsonValue } = {};
+  function buildContent(): Record<string, ElicitationValue> {
+    const content: Record<string, ElicitationValue> = {};
     for (const [key] of properties) {
       const value = values[key];
       if (typeof value === "string") {

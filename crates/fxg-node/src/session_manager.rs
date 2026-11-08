@@ -15,11 +15,6 @@
 //! - **Idempotent permission resolution**: The second and later responses return
 //!   [`NodeError::AlreadyResolved`].
 
-#![allow(
-    clippy::disallowed_types,
-    reason = "elicitation payloads are Phase 2 typed; see docs/06-type-safety.md"
-)]
-
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -31,8 +26,9 @@ use fxg_acp::{
     NativeResumeUnavailable, ResumeRequest,
 };
 use fxg_protocol::common::{
-    ClientSource, ElicitationAction, ElicitationMode, ForkHistoryItem, HistoryRole,
-    PermissionOption, ResolvedBy, SessionControlAction, SessionStatus,
+    ClientSource, ElicitationAction, ElicitationContent, ElicitationMode, ElicitationSchema,
+    ForkHistoryItem, HistoryRole, PermissionOption, ResolvedBy, SessionControlAction,
+    SessionStatus,
 };
 use fxg_protocol::events::{SessionEventEnvelope, UnifiedEventPayload};
 use fxg_protocol::util::uuid_v7;
@@ -213,7 +209,7 @@ pub struct PendingElicitationSummary {
     /// Request mode (only `form` is supported)
     pub mode: ElicitationMode,
     /// Request schema for form mode
-    pub requested_schema: serde_json::Value,
+    pub requested_schema: ElicitationSchema,
 }
 
 /// Session management (one instance held by the daemon).
@@ -1194,7 +1190,7 @@ impl SessionManager {
         session_id: &str,
         elicitation_id: &str,
         action: ElicitationAction,
-        content: serde_json::Value,
+        content: Option<ElicitationContent>,
         resolved_by: ResolvedBy,
     ) -> Result<(), NodeError> {
         if !self.begin_command(command_id) {
@@ -2321,7 +2317,7 @@ mod tests {
                 name: "Allow once".to_owned(),
                 kind: PermissionOptionKind::AllowOnce,
             }],
-            details: serde_json::json!({}),
+            details: serde_json::json!({}).into(),
         }));
         for _ in 0..100 {
             if !manager.pending_permissions().is_empty() {
@@ -2372,11 +2368,12 @@ mod tests {
                 elicitation_id: "elic-1".to_owned(),
                 message: "Which strategy should we go with?".to_owned(),
                 mode: ElicitationMode::Form,
-                requested_schema: serde_json::json!({
+                requested_schema: serde_json::from_value(serde_json::json!({
                     "type": "object",
                     "properties": { "strategy": { "type": "string", "enum": ["a", "b"] } },
                     "required": ["strategy"]
-                }),
+                }))
+                .expect("schema"),
                 tool_call_id: None,
             },
         ));
@@ -2398,7 +2395,10 @@ mod tests {
                 &outcome.session_id,
                 "elic-1",
                 ElicitationAction::Accept,
-                serde_json::json!({ "strategy": "a" }),
+                Some(
+                    serde_json::from_value(serde_json::json!({ "strategy": "a" }))
+                        .expect("content"),
+                ),
                 ResolvedBy::Cli,
             )
             .await
@@ -2408,7 +2408,12 @@ mod tests {
         assert_eq!(recorded.len(), 1);
         assert_eq!(recorded[0].0, "elic-1");
         assert_eq!(recorded[0].1, ElicitationAction::Accept);
-        assert_eq!(recorded[0].2["strategy"], "a");
+        assert_eq!(
+            recorded[0].2.as_ref().expect("content").get("strategy"),
+            Some(&fxg_protocol::common::ElicitationValue::String(
+                "a".to_owned()
+            ))
+        );
 
         // The second attempt is ALREADY_RESOLVED
         let err = manager
@@ -2417,7 +2422,7 @@ mod tests {
                 &outcome.session_id,
                 "elic-1",
                 ElicitationAction::Decline,
-                serde_json::Value::Null,
+                None,
                 ResolvedBy::Cli,
             )
             .await
@@ -2440,7 +2445,10 @@ mod tests {
                 elicitation_id: "elic-2".to_owned(),
                 message: "Do you want to continue?".to_owned(),
                 mode: ElicitationMode::Form,
-                requested_schema: serde_json::json!({ "type": "object", "properties": {} }),
+                requested_schema: serde_json::from_value(
+                    serde_json::json!({ "type": "object", "properties": {} }),
+                )
+                .expect("schema"),
                 tool_call_id: None,
             },
         ));
@@ -2457,7 +2465,7 @@ mod tests {
             UnifiedEventPayload::ElicitationResolved {
                 elicitation_id: "elic-2".to_owned(),
                 action: ElicitationAction::Cancel,
-                content: serde_json::Value::Null,
+                content: None,
                 resolved_by: ResolvedBy::Unknown("system".to_owned()),
             },
         ));

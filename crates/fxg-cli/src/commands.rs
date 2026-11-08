@@ -4,18 +4,13 @@
 //! KDL spec, shell completions, manpage and Markdown reference are generated
 //! from `__usage_spec__` (design: `docs/05-cli-and-pwa-ui.md` §1).
 
-#![allow(
-    clippy::disallowed_types,
-    reason = "elicitation answers / JSON output are Phase 2 typed; see docs/06-type-safety.md"
-)]
-
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 use fxg_acp::registry::{AcpRegistry, AgentListEntry, LocalSource};
 use fxg_protocol::common::{
-    ClientSource, ElicitationAction, ElicitationRequestEntry, PermissionOption,
-    PermissionOptionKind, SessionControlAction, SessionStatus,
+    ClientSource, ElicitationAction, ElicitationContent, ElicitationRequestEntry, ElicitationValue,
+    PermissionOption, PermissionOptionKind, SessionControlAction, SessionStatus,
 };
 use fxg_protocol::events::UnifiedEventPayload;
 use usage::Args;
@@ -611,6 +606,15 @@ pub struct ProvisionersListArgs {
     json: bool,
 }
 
+#[derive(serde::Serialize)]
+struct ProvisionerListEntry<'a> {
+    name: &'a str,
+    description: Option<&'a str>,
+    command: &'a str,
+    args: &'a [String],
+    idle_timeout_secs: Option<u64>,
+}
+
 impl usage::RunAsync for ProvisionersListArgs {
     type Output = Result<()>;
 
@@ -618,17 +622,15 @@ impl usage::RunAsync for ProvisionersListArgs {
         let env = fxg_protocol::config::process_env;
         let global = fxg_protocol::config::GlobalConfig::load(&env)
             .context("failed to load ~/.flexagent/config.toml")?;
-        let provisioners: Vec<_> = global
+        let provisioners: Vec<ProvisionerListEntry<'_>> = global
             .provisioners
             .iter()
-            .map(|(name, config)| {
-                serde_json::json!({
-                    "name": name,
-                    "description": config.description,
-                    "command": config.command,
-                    "args": config.args,
-                    "idle_timeout_secs": config.idle_timeout_secs,
-                })
+            .map(|(name, config)| ProvisionerListEntry {
+                name,
+                description: config.description.as_deref(),
+                command: &config.command,
+                args: &config.args,
+                idle_timeout_secs: config.idle_timeout_secs,
             })
             .collect();
         if self.json {
@@ -645,11 +647,11 @@ impl usage::RunAsync for ProvisionersListArgs {
             .iter()
             .map(|entry| {
                 vec![
-                    entry["name"].as_str().unwrap_or_default().to_owned(),
-                    entry["description"].as_str().unwrap_or_default().to_owned(),
-                    entry["command"].as_str().unwrap_or_default().to_owned(),
-                    entry["idle_timeout_secs"]
-                        .as_u64()
+                    entry.name.to_owned(),
+                    entry.description.unwrap_or_default().to_owned(),
+                    entry.command.to_owned(),
+                    entry
+                        .idle_timeout_secs
                         .map(|secs| format!("{secs}s"))
                         .unwrap_or_else(|| "-".to_owned()),
                 ]
@@ -1707,29 +1709,21 @@ impl usage::RunAsync for InboxAnswerArgs {
         let entry = find_elicitation(&mut client, &self.elicitation_id).await?;
         let has_content = self.json.is_some() || !self.set.is_empty();
         let (action, content) = if self.decline {
-            (ElicitationAction::Decline, serde_json::Value::Null)
+            (ElicitationAction::Decline, None)
         } else if self.cancel {
-            (ElicitationAction::Cancel, serde_json::Value::Null)
+            (ElicitationAction::Cancel, None)
         } else if self.accept || has_content {
             (
                 ElicitationAction::Accept,
-                build_elicitation_content(&self.json, &self.set)?,
+                Some(build_elicitation_content(&self.json, &self.set)?),
             )
         } else {
             // No arguments: show the question and how to answer it
             println!("Question: {}", entry.message);
-            if let Some(properties) = entry
-                .requested_schema
-                .get("properties")
-                .and_then(|value| value.as_object())
-            {
+            if !entry.requested_schema.properties.is_empty() {
                 println!("Answer fields:");
-                for (key, property) in properties {
-                    let type_name = property
-                        .get("type")
-                        .and_then(|value| value.as_str())
-                        .unwrap_or("string");
-                    println!("  {key} ({type_name})");
+                for (key, property) in &entry.requested_schema.properties {
+                    println!("  {key} ({})", property.kind.as_str());
                 }
             }
             println!(
@@ -1764,22 +1758,21 @@ async fn find_elicitation(
 }
 
 /// Build the accept content from `--json` / `--set`.
-fn build_elicitation_content(json: &Option<String>, set: &[String]) -> Result<serde_json::Value> {
+fn build_elicitation_content(json: &Option<String>, set: &[String]) -> Result<ElicitationContent> {
     let mut content = match json {
-        Some(raw) => serde_json::from_str::<serde_json::Value>(raw)
-            .with_context(|| format!("invalid JSON for --json: {raw}"))?,
-        None => serde_json::json!({}),
-    };
-    let Some(object) = content.as_object_mut() else {
-        bail!("--json requires a JSON object");
+        Some(raw) => serde_json::from_str::<ElicitationContent>(raw)
+            .with_context(|| format!("invalid JSON object for --json: {raw}"))?,
+        None => ElicitationContent::new(),
     };
     for pair in set {
         let (key, value) = pair
             .split_once('=')
             .with_context(|| format!("--set requires key=value format: {pair}"))?;
-        let value = serde_json::from_str::<serde_json::Value>(value)
-            .unwrap_or_else(|_| serde_json::Value::String(value.to_owned()));
-        object.insert(key.to_owned(), value);
+        let value = match serde_json::from_str::<ElicitationValue>(value) {
+            Ok(value) => value,
+            Err(_) => ElicitationValue::String(value.to_owned()),
+        };
+        content.insert(key.to_owned(), value);
     }
     Ok(content)
 }
@@ -2194,6 +2187,19 @@ fn source_labels(entry: &AgentListEntry) -> Vec<&'static str> {
     labels
 }
 
+#[derive(serde::Serialize)]
+struct AgentListOutput<'a> {
+    id: &'a str,
+    name: &'a str,
+    version: &'a str,
+    description: Option<&'a str>,
+    available: bool,
+    registry: bool,
+    package_available: bool,
+    sources: Vec<&'static str>,
+    custom: bool,
+}
+
 impl usage::RunAsync for AgentsListArgs {
     type Output = Result<()>;
 
@@ -2205,20 +2211,18 @@ impl usage::RunAsync for AgentsListArgs {
             .context("failed to load ACP registry")?;
         let entries = registry.list(&index, self.all);
         if self.json {
-            let value: Vec<serde_json::Value> = entries
+            let value: Vec<AgentListOutput<'_>> = entries
                 .iter()
-                .map(|entry| {
-                    serde_json::json!({
-                        "id": entry.id,
-                        "name": entry.name,
-                        "version": entry.version,
-                        "description": entry.description,
-                        "available": entry.is_available(),
-                        "registry": entry.registry,
-                        "package_available": entry.package_available,
-                        "sources": source_labels(entry),
-                        "custom": entry.custom.is_some(),
-                    })
+                .map(|entry| AgentListOutput {
+                    id: &entry.id,
+                    name: &entry.name,
+                    version: &entry.version,
+                    description: entry.description.as_deref(),
+                    available: entry.is_available(),
+                    registry: entry.registry,
+                    package_available: entry.package_available,
+                    sources: source_labels(entry),
+                    custom: entry.custom.is_some(),
                 })
                 .collect();
             println!("{}", serde_json::to_string_pretty(&value)?);
@@ -2536,10 +2540,16 @@ mod tests {
             &["count=3".to_owned(), "note=hello".to_owned()],
         )
         .expect("content");
-        assert_eq!(content["strategy"], "a");
-        assert_eq!(content["count"], 3);
+        assert_eq!(
+            content.get("strategy"),
+            Some(&ElicitationValue::String("a".to_owned()))
+        );
+        assert_eq!(content.get("count"), Some(&ElicitationValue::Integer(3)));
         // Values that do not parse as JSON are treated as strings
-        assert_eq!(content["note"], "hello");
+        assert_eq!(
+            content.get("note"),
+            Some(&ElicitationValue::String("hello".to_owned()))
+        );
     }
 
     #[test]

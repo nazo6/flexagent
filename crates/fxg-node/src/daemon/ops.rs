@@ -5,11 +5,6 @@
 //! management, project resolution, audit logging), so the implementation is
 //! centralized here.
 
-#![allow(
-    clippy::disallowed_types,
-    reason = "audit details are display-only opaque JSON; see docs/06-type-safety.md"
-)]
-
 use std::path::{Path, PathBuf};
 
 use fxg_acp::registry::{AcpRegistry, LocalSource};
@@ -80,7 +75,7 @@ impl DaemonState {
         action: fxg_protocol::common::AuditAction,
         source: &AuditSource,
         session_id: Option<&str>,
-        details: serde_json::Value,
+        details: impl Into<fxg_protocol::common::RawJson>,
     ) {
         let mut audit = fxg_db::AuditLogRecord::new(
             action.clone(),
@@ -90,7 +85,7 @@ impl DaemonState {
         audit.session_id = session_id.map(str::to_owned);
         audit.node_id = Some(self.node_id().to_owned());
         audit.client_user_agent = source.user_agent.clone();
-        audit.details = details;
+        audit.details = details.into();
         if let Err(err) = self.db().append_audit_log(&audit).await {
             tracing::warn!("failed to record audit log ({action}): {err}");
         }

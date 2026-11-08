@@ -14,11 +14,6 @@
 //! - Security (Host / Origin / Token validation): [`security`]
 //! - Token generation and comparison: [`auth`]
 
-#![allow(
-    clippy::disallowed_types,
-    reason = "error details / elicitation answers are display-only opaque JSON; see docs/06-type-safety.md"
-)]
-
 pub mod auth;
 mod pty;
 mod request_context;
@@ -54,9 +49,9 @@ use fxg_protocol::client_api::{
     SessionRevertResponse, SystemInfoResponse, WorktreeInfo, WorktreesResponse,
 };
 use fxg_protocol::common::{
-    AgentAction, ClientSource, CommandResult, DataSafety, DiffScope, ErrorCode, ErrorInfo,
-    ProjectSummary, RecoveryAction, ResolvedBy, SessionControlAction, SessionStatus,
-    WorkspaceDiffResponse,
+    AgentAction, ClientSource, CommandResult, DataSafety, DiffScope, ElicitationContent, ErrorCode,
+    ErrorInfo, ProjectSummary, RawJson, RecoveryAction, ResolvedBy, SessionControlAction,
+    SessionStatus, WorkspaceDiffResponse,
 };
 use fxg_protocol::config::CustomAgentConfig;
 use fxg_protocol::events::{SessionEventBatch, SessionEventEnvelope};
@@ -81,7 +76,7 @@ pub struct ApiError {
     /// English human-readable fallback message
     pub message: String,
     /// Technical details for the expandable "details" section
-    pub details: Option<Box<serde_json::Value>>,
+    pub details: Option<Box<RawJson>>,
     /// Whether retrying may succeed without a state change
     pub retryable: bool,
     /// Recovery actions the client can offer
@@ -144,8 +139,8 @@ impl ApiError {
     }
 
     /// Adds technical details.
-    pub fn with_details(mut self, details: serde_json::Value) -> Self {
-        self.details = Some(Box::new(details));
+    pub fn with_details(mut self, details: impl Into<RawJson>) -> Self {
+        self.details = Some(Box::new(details.into()));
         self
     }
 
@@ -396,7 +391,7 @@ pub enum ClientCommand {
         /// User response action (`accept` / `decline` / `cancel`)
         action: fxg_protocol::common::ElicitationAction,
         /// Answer content for `accept` (per the form's `requested_schema`)
-        content: serde_json::Value,
+        content: Option<ElicitationContent>,
         /// Who resolved it (`cli` / `web` / `android_push`)
         resolved_by: ResolvedBy,
     },

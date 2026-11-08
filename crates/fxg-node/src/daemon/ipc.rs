@@ -10,11 +10,6 @@
 //!
 //! - Normal commands are processed as one request / one response.
 
-#![allow(
-    clippy::disallowed_types,
-    reason = "tests build raw elicitation payloads; see docs/06-type-safety.md"
-)]
-
 use std::path::{Path, PathBuf};
 
 use fxg_db::SessionFilter;
@@ -1350,7 +1345,7 @@ mod tests {
                 name: "Allow once".to_owned(),
                 kind: fxg_protocol::common::PermissionOptionKind::AllowOnce,
             }],
-            details: serde_json::json!({}),
+            details: serde_json::json!({}).into(),
         }));
         tokio::time::sleep(Duration::from_millis(50)).await;
 
@@ -1396,11 +1391,12 @@ mod tests {
                 elicitation_id: "elic-1".to_owned(),
                 message: "Which strategy should we go with?".to_owned(),
                 mode: fxg_protocol::common::ElicitationMode::Form,
-                requested_schema: serde_json::json!({
+                requested_schema: serde_json::from_value(serde_json::json!({
                     "type": "object",
                     "properties": { "strategy": { "type": "string", "enum": ["a", "b"] } },
                     "required": ["strategy"]
-                }),
+                }))
+                .expect("schema"),
                 tool_call_id: None,
             },
         ));
@@ -1413,7 +1409,10 @@ mod tests {
                 session_id: session_id.clone(),
                 elicitation_id: "elic-1".to_owned(),
                 action: ElicitationAction::Accept,
-                content: serde_json::json!({ "strategy": "a" }),
+                content: Some(
+                    serde_json::from_value(serde_json::json!({ "strategy": "a" }))
+                        .expect("content"),
+                ),
                 resolved_by: fxg_protocol::common::ResolvedBy::Cli,
             },
         )
@@ -1427,7 +1426,10 @@ mod tests {
             vec![(
                 "elic-1".to_owned(),
                 ElicitationAction::Accept,
-                serde_json::json!({ "strategy": "a" })
+                Some(
+                    serde_json::from_value(serde_json::json!({ "strategy": "a" }))
+                        .expect("content")
+                )
             )]
         );
 
@@ -1438,7 +1440,7 @@ mod tests {
                 session_id: session_id.clone(),
                 elicitation_id: "elic-1".to_owned(),
                 action: ElicitationAction::Decline,
-                content: serde_json::Value::Null,
+                content: None,
                 resolved_by: fxg_protocol::common::ResolvedBy::Web,
             },
         )

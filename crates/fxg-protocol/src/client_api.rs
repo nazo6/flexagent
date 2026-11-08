@@ -10,9 +10,9 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 
 use crate::common::{
-    AuditLogEntry, ClientSource, CommandResult, ElicitationAction, ElicitationRequestEntry,
-    ErrorInfo, NodeSummary, PermissionRequestEntry, ProjectSummary, ResolvedBy, SearchHit,
-    SessionControlAction, SessionSummary, StreamDeltaPayload,
+    AuditLogEntry, ClientSource, CommandResult, ElicitationAction, ElicitationContent,
+    ElicitationRequestEntry, ErrorInfo, NodeSummary, PermissionRequestEntry, ProjectSummary,
+    ResolvedBy, SearchHit, SessionControlAction, SessionSummary, StreamDeltaPayload,
 };
 use crate::config::CustomAgentConfig;
 use crate::events::SessionEventBatch;
@@ -437,8 +437,8 @@ pub struct RespondPermissionResponse {
 pub struct RespondElicitationRequest {
     /// The user's response action (`accept` / `decline` / `cancel`)
     pub action: ElicitationAction,
-    /// Answer content for `accept` (following the form's `requested_schema`; `null` otherwise)
-    pub content: serde_json::Value,
+    /// Answer content for `accept` (following the form's `requested_schema`; `None` otherwise)
+    pub content: Option<ElicitationContent>,
     /// Who resolved it (`cli` / `web` / `android_push`)
     pub resolved_by: ResolvedBy,
 }
@@ -644,7 +644,7 @@ pub enum ClientWsMessage {
         /// The user's response action (`accept` / `decline` / `cancel`)
         action: ElicitationAction,
         /// Answer content for `accept` (following the form's `requested_schema`)
-        content: serde_json::Value,
+        content: Option<ElicitationContent>,
         /// Who resolved it (`cli` / `web` / `android_push`)
         resolved_by: ResolvedBy,
     },

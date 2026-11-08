@@ -141,7 +141,11 @@ impl ActiveSessionHandle for MockAgent {
         Ok(())
     }
 
-    async fn set_config(&self, _key: String, _value: serde_json::Value) -> anyhow::Result<()> {
+    async fn set_config(
+        &self,
+        _key: String,
+        _value: fxg_protocol::common::ConfigOptionValue,
+    ) -> anyhow::Result<()> {
         Ok(())
     }
 
@@ -622,7 +626,7 @@ async fn central_server_commands_permissions_and_kill_switch() {
                 kind: PermissionOptionKind::AllowAlways,
             },
         ],
-        details: json!({ "command": "cargo test" }),
+        details: json!({ "command": "cargo test" }).into(),
     }));
     wait_until(
         "permission visible in inbox",

@@ -82,8 +82,8 @@ history.role == HistoryRole::User
 
 ### 2.4 生 JSON は境界だけに置く
 
-`serde_json::Value` を直接フィールドに持たない。Phase 2 で導入する
-`RawJson` newtype を使い、「意図的に不透明である」ことを型で示す。
+`serde_json::Value` を直接フィールドに持たない。`RawJson` newtype を使い、
+「意図的に不透明である」ことを型で示す。
 
 ```rust
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -218,7 +218,7 @@ UI 側で `status: string` のような独自型を作らず、生成型を使�
 | :------- | :--------------------------------------------- | :----- |
 | Phase 0  | 方針・clippy 基盤                              | 完了   |
 | Phase 1  | `PermissionOptionKind` などの enum 化          | 完了   |
-| Phase 2  | `RawJson` / elicitation / config / provisioner | 未着手 |
+| Phase 2  | `RawJson` / elicitation / config / provisioner | 完了   |
 | Phase 3  | DB row / event_type / audit action             | 未着手 |
 | Phase 4  | ID newtype                                     | 未着手 |
 

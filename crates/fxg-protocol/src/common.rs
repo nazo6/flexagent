@@ -12,6 +12,194 @@ use std::str::FromStr;
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
+/// Intentionally opaque JSON carried across the protocol.
+///
+/// Use this only at a declared boundary (tool arguments, error details, audit
+/// details, ...). Domain data must be parsed into a typed struct or enum.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[serde(transparent)]
+#[specta(transparent)]
+pub struct RawJson(pub serde_json::Value);
+
+impl RawJson {
+    /// Wraps a JSON value.
+    pub fn new(value: serde_json::Value) -> Self {
+        Self(value)
+    }
+
+    /// Returns the wrapped JSON value.
+    pub fn as_value(&self) -> &serde_json::Value {
+        &self.0
+    }
+
+    /// Unwraps the JSON value.
+    pub fn into_inner(self) -> serde_json::Value {
+        self.0
+    }
+}
+
+impl Default for RawJson {
+    fn default() -> Self {
+        Self(serde_json::Value::Object(serde_json::Map::new()))
+    }
+}
+
+impl From<serde_json::Value> for RawJson {
+    fn from(value: serde_json::Value) -> Self {
+        Self(value)
+    }
+}
+
+impl From<RawJson> for serde_json::Value {
+    fn from(value: RawJson) -> Self {
+        value.0
+    }
+}
+
+crate::open_string_enum! {
+    /// Type discriminator of an elicitation form schema.
+    pub enum ElicitationSchemaType {
+        /// The schema describes an object
+        Object => "object",
+    }
+}
+
+/// Object of a restricted elicitation form schema (ACP `requestedSchema`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
+pub struct ElicitationSchema {
+    /// Type discriminator. ACP always uses `object`.
+    #[serde(rename = "type", default = "default_elicitation_schema_type")]
+    pub schema_type: ElicitationSchemaType,
+    /// Optional title.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    /// Optional description.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// Property definitions.
+    #[serde(default)]
+    pub properties: BTreeMap<String, ElicitationProperty>,
+    /// Required property names (`None` and `null` mean none).
+    #[serde(default)]
+    pub required: Option<Vec<String>>,
+    /// Unknown keys are preserved for forward compatibility.
+    #[serde(flatten)]
+    pub extra: BTreeMap<String, RawJson>,
+}
+
+const fn default_elicitation_schema_type() -> ElicitationSchemaType {
+    ElicitationSchemaType::Object
+}
+
+crate::open_string_enum! {
+    /// Restricted JSON Schema type of an elicitation form field.
+    pub enum ElicitationPropertyKind {
+        /// String (or single-select enum)
+        String => "string",
+        /// Integer
+        Integer => "integer",
+        /// Floating-point number
+        Number => "number",
+        /// Boolean
+        Boolean => "boolean",
+        /// Multi-select array of strings
+        Array => "array",
+    }
+}
+
+/// One property of an elicitation form.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
+pub struct ElicitationProperty {
+    /// Property type.
+    #[serde(rename = "type")]
+    pub kind: ElicitationPropertyKind,
+    /// Optional title.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    /// Optional description.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// Optional default value.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default: Option<RawJson>,
+    /// Allowed string values.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub r#enum: Vec<String>,
+    /// Allowed values with display titles.
+    #[serde(default, rename = "oneOf", skip_serializing_if = "Vec::is_empty")]
+    pub one_of: Vec<ElicitationOption>,
+    /// Array item schema.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub items: Option<ElicitationArrayItems>,
+    /// Minimum integer value.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub minimum: Option<i64>,
+    /// Maximum integer value.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub maximum: Option<i64>,
+    /// Unknown keys are preserved for forward compatibility.
+    #[serde(flatten)]
+    pub extra: BTreeMap<String, RawJson>,
+}
+
+/// One option of a single-select elicitation field (`oneOf`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
+pub struct ElicitationOption {
+    /// Submitted value.
+    #[serde(rename = "const")]
+    pub const_value: String,
+    /// Display title.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    /// Unknown keys are preserved for forward compatibility.
+    #[serde(flatten)]
+    pub extra: BTreeMap<String, RawJson>,
+}
+
+/// Item schema of a multi-select elicitation field.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
+pub struct ElicitationArrayItems {
+    /// Item type (ACP uses `string`).
+    #[serde(rename = "type", default = "default_elicitation_item_type")]
+    pub kind: ElicitationPropertyKind,
+    /// Allowed values.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub r#enum: Vec<String>,
+    /// Unknown keys are preserved for forward compatibility.
+    #[serde(flatten)]
+    pub extra: BTreeMap<String, RawJson>,
+}
+
+const fn default_elicitation_item_type() -> ElicitationPropertyKind {
+    ElicitationPropertyKind::String
+}
+
+/// One value in an elicitation answer.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[serde(untagged)]
+#[specta(collect)]
+pub enum ElicitationValue {
+    /// String value
+    String(String),
+    /// Integer value
+    Integer(i64),
+    /// Floating-point number value
+    Number(f64),
+    /// Boolean value
+    Boolean(bool),
+    /// String array (multi-select)
+    StringArray(Vec<String>),
+    /// Future / custom value, preserved as-is
+    Unknown(RawJson),
+}
+
+/// Answers to an elicitation form (`accept` only).
+pub type ElicitationContent = BTreeMap<String, ElicitationValue>;
+
 /// Error returned when parsing the string representation of an enum fails.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("unknown {kind} value: {value:?}")]
@@ -791,6 +979,19 @@ pub struct CommandInfo {
     pub input_hint: Option<String>,
 }
 
+/// Value of an agent configuration entry.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[serde(untagged)]
+#[specta(collect)]
+pub enum ConfigOptionValue {
+    /// Select / model ID
+    Select(String),
+    /// Boolean toggle
+    Boolean(bool),
+    /// Agent-specific value preserved as-is (e.g. `{ providerID, id, name }`)
+    Unknown(RawJson),
+}
+
 /// Information about an agent configuration entry (model selection etc.).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
@@ -800,9 +1001,9 @@ pub struct ConfigOptionInfo {
     /// Display name
     pub name: String,
     /// Current value
-    pub current_value: serde_json::Value,
+    pub current_value: ConfigOptionValue,
     /// List of selectable values
-    pub options: Vec<serde_json::Value>,
+    pub options: Vec<ConfigOptionValue>,
 }
 
 /// Session control action (`ControlSession` command).
@@ -820,7 +1021,7 @@ pub enum SessionControlAction {
         /// Configuration key
         key: String,
         /// New value
-        value: serde_json::Value,
+        value: ConfigOptionValue,
     },
     /// Interrupt the current turn
     Cancel,
@@ -1140,7 +1341,7 @@ pub struct ErrorInfo {
     pub params: BTreeMap<String, String>,
     /// Technical details for the expandable "details" section
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub details: Option<serde_json::Value>,
+    pub details: Option<RawJson>,
     /// Whether retrying may succeed without a state change
     #[serde(default)]
     pub retryable: bool,
@@ -1181,8 +1382,8 @@ impl ErrorInfo {
     }
 
     /// Adds technical details.
-    pub fn with_details(mut self, details: serde_json::Value) -> Self {
-        self.details = Some(details);
+    pub fn with_details(mut self, details: impl Into<RawJson>) -> Self {
+        self.details = Some(details.into());
         self
     }
 
@@ -1272,7 +1473,7 @@ pub struct WarningInfo {
     pub message: String,
     /// Technical details
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub details: Option<serde_json::Value>,
+    pub details: Option<RawJson>,
     /// Recovery actions the client can offer
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub recovery: Vec<RecoveryAction>,
@@ -1488,7 +1689,7 @@ pub struct PermissionRequestEntry {
     /// Available options
     pub options: Vec<PermissionOption>,
     /// Arguments and diff details
-    pub details: serde_json::Value,
+    pub details: RawJson,
     /// Status
     pub status: PermissionRequestStatus,
     /// Creation time (Unix epoch ms)
@@ -1517,11 +1718,11 @@ pub struct ElicitationRequestEntry {
     /// Request mode (`form` / `url`. Phase 1 supports `form` only)
     pub mode: ElicitationMode,
     /// JSON Schema of the request in form mode (`requestedSchema`)
-    pub requested_schema: serde_json::Value,
+    pub requested_schema: ElicitationSchema,
     /// Related tool call ID (optional)
     pub tool_call_id: Option<String>,
-    /// Answer content for `accept` (`Value::Null` while unanswered or on decline / cancel)
-    pub content: serde_json::Value,
+    /// Answer content for `accept` (`None` while unanswered or on decline / cancel)
+    pub content: Option<ElicitationContent>,
     /// Status
     pub status: ElicitationRequestStatus,
     /// Creation time (Unix epoch ms)
@@ -1657,7 +1858,7 @@ pub struct AuditLogEntry {
     /// Token identifier or authenticated subject
     pub auth_subject: String,
     /// Details of what was executed
-    pub details: serde_json::Value,
+    pub details: RawJson,
     /// Recorded time (Unix epoch ms)
     pub created_at: i64,
 }

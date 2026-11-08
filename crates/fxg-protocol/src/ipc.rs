@@ -14,8 +14,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::client_api::WorktreeInfo;
 use crate::common::{
-    ClientSource, ElicitationAction, ElicitationRequestEntry, ErrorInfo, HookLogEntry,
-    PermissionRequestEntry, ProjectResolutionSource, ProjectSummary, ResolvedBy,
+    ClientSource, ElicitationAction, ElicitationContent, ElicitationRequestEntry, ErrorInfo,
+    HookLogEntry, PermissionRequestEntry, ProjectResolutionSource, ProjectSummary, ResolvedBy,
     SessionControlAction, SessionSummary, StreamDeltaPayload,
 };
 use crate::events::SessionEventEnvelope;
@@ -115,7 +115,7 @@ pub enum IpcClientMessage {
         /// The user's response action (`accept` / `decline` / `cancel`)
         action: ElicitationAction,
         /// Answer content for `accept` (following the form's `requested_schema`)
-        content: serde_json::Value,
+        content: Option<ElicitationContent>,
         /// Who resolved it (`cli` / `web` / `android_push`)
         resolved_by: ResolvedBy,
     },

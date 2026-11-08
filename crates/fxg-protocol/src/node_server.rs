@@ -10,8 +10,8 @@
 use serde::{Deserialize, Serialize};
 
 use crate::common::{
-    ClientSource, DataSafety, ErrorCode, ErrorInfo, NodeProjectReport, ResolvedBy,
-    SessionControlAction, WarningInfo, WorkspaceDiffResponse,
+    ClientSource, DataSafety, ElicitationContent, ErrorCode, ErrorInfo, NodeProjectReport,
+    ResolvedBy, SessionControlAction, WarningInfo, WorkspaceDiffResponse,
 };
 use crate::events::SessionEventEnvelope;
 /// Synchronization state of a session held by the node (reported in `NodeHello`).
@@ -355,7 +355,7 @@ pub enum ServerToNodeMsg {
         /// The user's response action (`accept` / `decline` / `cancel`)
         action: crate::common::ElicitationAction,
         /// Answer content for `accept` (following the form's `requested_schema`)
-        content: serde_json::Value,
+        content: Option<ElicitationContent>,
         /// Who resolved it (`cli` / `web` / `android_push`)
         resolved_by: ResolvedBy,
     },

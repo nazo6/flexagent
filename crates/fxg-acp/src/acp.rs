@@ -19,7 +19,7 @@
 
 #![allow(
     clippy::disallowed_types,
-    reason = "ACP elicitation/config payloads are Phase 2 typed; see docs/06-type-safety.md"
+    reason = "ACP SDK <-> FXG conversions use serde_json::Value as an intermediate; see docs/06-type-safety.md"
 )]
 
 use std::collections::{BTreeMap, HashMap};
@@ -52,8 +52,10 @@ use agent_client_protocol::{AcpAgent, AcpAgentConfig, Agent, Client};
 use anyhow::{Context, anyhow};
 use async_trait::async_trait;
 use fxg_protocol::common::{
-    CommandInfo, ConfigOptionInfo, ElicitationMode as FxgElicitationMode, FileDiff, ModeInfo,
-    PermissionOption, PermissionOptionKind as FxgPermissionOptionKind, PlanEntry,
+    CommandInfo, ConfigOptionInfo, ConfigOptionValue, ElicitationContent,
+    ElicitationMode as FxgElicitationMode, ElicitationPropertyKind, ElicitationSchema,
+    ElicitationValue, FileDiff, ModeInfo, PermissionOption,
+    PermissionOptionKind as FxgPermissionOptionKind, PlanEntry,
     PlanEntryStatus as FxgPlanEntryStatus, StreamDeltaPayload, ToolCallKind as FxgToolCallKind,
     ToolCallStatus as FxgToolCallStatus, TurnStopReason, UsageCost,
 };
@@ -118,7 +120,7 @@ struct PendingElicitation {
     /// Sender for responses from the UI / CLI
     sender: oneshot::Sender<ElicitationOutcome>,
     /// request schema for form mode (for validating `accept` content)
-    schema: Option<serde_json::Value>,
+    schema: ElicitationSchema,
 }
 
 /// Elicitation response (normalized representation before conversion to an ACP response).
@@ -550,7 +552,7 @@ impl ActiveSessionHandle for AcpSessionHandle {
         &self,
         elicitation_id: String,
         action: fxg_protocol::common::ElicitationAction,
-        content: serde_json::Value,
+        content: Option<ElicitationContent>,
     ) -> anyhow::Result<()> {
         use fxg_protocol::common::ElicitationAction as FxgElicitationAction;
 
@@ -565,19 +567,13 @@ impl ActiveSessionHandle for AcpSessionHandle {
             .ok_or_else(|| anyhow!("unknown or already resolved elicitation: {elicitation_id}"))?;
         let outcome = match action {
             FxgElicitationAction::Accept => {
-                // Treat unspecified (null) `content` as an empty object
-                let content = if content.is_null() {
-                    serde_json::json!({})
-                } else {
-                    content
-                };
-                if let Some(schema) = schema.as_ref() {
-                    validate_elicitation_content(schema, &content)
-                        .map_err(|err| anyhow!("invalid elicitation content: {err}"))?;
-                }
-                let content =
-                    serde_json::from_value::<BTreeMap<String, ElicitationContentValue>>(content)
-                        .map_err(|err| anyhow!("unsupported elicitation content value: {err}"))?;
+                let content = content.unwrap_or_default();
+                validate_elicitation_content(&schema, &content)
+                    .map_err(|err| anyhow!("invalid elicitation content: {err}"))?;
+                let content = content
+                    .into_iter()
+                    .map(|(key, value)| Ok((key, elicitation_content_value(value)?)))
+                    .collect::<anyhow::Result<BTreeMap<_, _>>>()?;
                 ElicitationOutcome::Accept(content)
             }
             FxgElicitationAction::Decline => ElicitationOutcome::Decline,
@@ -608,7 +604,7 @@ impl ActiveSessionHandle for AcpSessionHandle {
         Ok(())
     }
 
-    async fn set_config(&self, key: String, value: serde_json::Value) -> anyhow::Result<()> {
+    async fn set_config(&self, key: String, value: ConfigOptionValue) -> anyhow::Result<()> {
         let value = parse_config_value(value)
             .map_err(|err| anyhow!("unsupported config value for {key}: {err}"))?;
         let response = self
@@ -738,7 +734,7 @@ fn cancel_pending_elicitations(
                     UnifiedEventPayload::ElicitationResolved {
                         elicitation_id,
                         action: fxg_protocol::common::ElicitationAction::Cancel,
-                        content: serde_json::Value::Null,
+                        content: None,
                         resolved_by: fxg_protocol::common::ResolvedBy::Unknown(
                             "system".to_owned(),
                         ),
@@ -828,7 +824,8 @@ async fn run_acp_process(params: AcpProcessTaskParams) -> Result<(), agent_clien
                             summary,
                             options,
                             details: serde_json::to_value(&request.tool_call)
-                                .unwrap_or(serde_json::Value::Null),
+                                .unwrap_or(serde_json::Value::Null)
+                                .into(),
                         })),
                         "notify event subscribers"
                     );
@@ -1051,11 +1048,19 @@ async fn run_acp_process(params: AcpProcessTaskParams) -> Result<(), agent_clien
                     // Phase 1 supports form mode only (the range advertised in capabilities).
                     // Requests for unadvertised modes return Invalid params (spec).
                     let (scope, schema) = match &request.mode {
-                        ElicitationMode::Form(form) => (
-                            form.scope.clone(),
-                            serde_json::to_value(&form.requested_schema)
-                                .unwrap_or(serde_json::Value::Null),
-                        ),
+                        ElicitationMode::Form(form) => {
+                            let value = serde_json::to_value(&form.requested_schema)
+                                .unwrap_or(serde_json::Value::Null);
+                            match serde_json::from_value::<ElicitationSchema>(value) {
+                                Ok(schema) => (form.scope.clone(), schema),
+                                Err(err) => {
+                                    return responder.respond_with_error(
+                                        agent_client_protocol::Error::invalid_params()
+                                            .data(format!("unsupported elicitation schema: {err}")),
+                                    );
+                                }
+                            }
+                        }
                         other => {
                             return responder.respond_with_error(
                                 agent_client_protocol::Error::invalid_params()
@@ -1108,7 +1113,7 @@ async fn run_acp_process(params: AcpProcessTaskParams) -> Result<(), agent_clien
                             elicitation_id,
                             PendingElicitation {
                                 sender: decision_tx,
-                                schema: Some(schema),
+                                schema,
                             },
                         );
                     let events_for_task = context.events.clone();
@@ -1713,32 +1718,35 @@ fn discard_replay_updates(session: &mut ActiveSession<'static, Agent>) {
 fn map_config_option(option: &SessionConfigOption) -> ConfigOptionInfo {
     let (current_value, options) = match &option.kind {
         SessionConfigKind::Select(select) => (
-            serde_json::Value::String(select.current_value.to_string()),
+            ConfigOptionValue::Select(select.current_value.to_string()),
             match &select.options {
                 agent_client_protocol::v1::schema::SessionConfigSelectOptions::Ungrouped(
                     values,
                 ) => values
                     .iter()
-                    .map(|value| serde_json::Value::String(value.value.to_string()))
+                    .map(|value| ConfigOptionValue::Select(value.value.to_string()))
                     .collect(),
                 agent_client_protocol::v1::schema::SessionConfigSelectOptions::Grouped(groups) => {
                     groups
                         .iter()
                         .flat_map(|group| &group.options)
-                        .map(|value| serde_json::Value::String(value.value.to_string()))
+                        .map(|value| ConfigOptionValue::Select(value.value.to_string()))
                         .collect()
                 }
                 _ => Vec::new(),
             },
         ),
         SessionConfigKind::Boolean(boolean) => (
-            serde_json::Value::Bool(boolean.current_value),
+            ConfigOptionValue::Boolean(boolean.current_value),
             vec![
-                serde_json::Value::Bool(true),
-                serde_json::Value::Bool(false),
+                ConfigOptionValue::Boolean(true),
+                ConfigOptionValue::Boolean(false),
             ],
         ),
-        _ => (serde_json::Value::Null, Vec::new()),
+        _ => (
+            ConfigOptionValue::Unknown(serde_json::Value::Null.into()),
+            Vec::new(),
+        ),
     };
     ConfigOptionInfo {
         key: option.id.to_string(),
@@ -1755,11 +1763,13 @@ fn map_config_option(option: &SessionConfigOption) -> ConfigOptionInfo {
 /// `{ "value": "..." }`. Deserializing the bare string directly into
 /// [`SessionConfigOptionValue`] fails, so map the scalar shapes explicitly and
 /// only fall back to serde for the tagged (object) forms.
-fn parse_config_value(value: serde_json::Value) -> anyhow::Result<SessionConfigOptionValue> {
+fn parse_config_value(value: ConfigOptionValue) -> anyhow::Result<SessionConfigOptionValue> {
     match value {
-        serde_json::Value::String(id) => Ok(SessionConfigOptionValue::value_id(id)),
-        serde_json::Value::Bool(enabled) => Ok(SessionConfigOptionValue::boolean(enabled)),
-        other => serde_json::from_value(other).map_err(Into::into),
+        ConfigOptionValue::Select(id) => Ok(SessionConfigOptionValue::value_id(id)),
+        ConfigOptionValue::Boolean(enabled) => Ok(SessionConfigOptionValue::boolean(enabled)),
+        ConfigOptionValue::Unknown(raw) => {
+            serde_json::from_value(raw.into_inner()).map_err(Into::into)
+        }
     }
 }
 
@@ -2162,25 +2172,22 @@ fn resolve_path(cwd: &Path, path: &Path) -> PathBuf {
 /// client SHOULD do this per the spec; the agent re-validates too). Unknown types
 /// (future extensions) pass through.
 fn validate_elicitation_content(
-    schema: &serde_json::Value,
-    content: &serde_json::Value,
+    schema: &ElicitationSchema,
+    content: &ElicitationContent,
 ) -> Result<(), String> {
-    let Some(content) = content.as_object() else {
-        return Err("content must be an object".to_owned());
-    };
-    let Some(properties) = schema.get("properties").and_then(|value| value.as_object()) else {
-        // Do not validate shape for schemas without properties
+    // Do not validate shape for schemas without properties.
+    if schema.properties.is_empty() {
         return Ok(());
-    };
-    if let Some(required) = schema.get("required").and_then(|value| value.as_array()) {
-        for key in required.iter().filter_map(|value| value.as_str()) {
+    }
+    if let Some(required) = &schema.required {
+        for key in required {
             if !content.contains_key(key) {
                 return Err(format!("missing required property: {key}"));
             }
         }
     }
     for (key, value) in content {
-        let Some(property) = properties.get(key) else {
+        let Some(property) = schema.properties.get(key) else {
             return Err(format!("unexpected property: {key}"));
         };
         validate_elicitation_property(key, property, value)?;
@@ -2191,56 +2198,64 @@ fn validate_elicitation_content(
 /// Type validation for a single property in the elicitation restricted schema.
 fn validate_elicitation_property(
     key: &str,
-    property: &serde_json::Value,
-    value: &serde_json::Value,
+    property: &fxg_protocol::common::ElicitationProperty,
+    value: &ElicitationValue,
 ) -> Result<(), String> {
-    match property.get("type").and_then(|value| value.as_str()) {
-        Some("string") => {
-            let Some(text) = value.as_str() else {
-                return Err(format!("property {key} must be a string"));
-            };
-            if let Some(values) = property.get("enum").and_then(|value| value.as_array())
-                && !values
-                    .iter()
-                    .any(|candidate| candidate.as_str() == Some(text))
-            {
+    match (&property.kind, value) {
+        (ElicitationPropertyKind::String, ElicitationValue::String(text)) => {
+            if !property.r#enum.is_empty() && !property.r#enum.iter().any(|value| value == text) {
                 return Err(format!("property {key} is not one of the allowed values"));
             }
-            if let Some(options) = property.get("oneOf").and_then(|value| value.as_array())
-                && !options.iter().any(|option| {
-                    option.get("const").and_then(|value| value.as_str()) == Some(text)
-                })
+            if !property.one_of.is_empty()
+                && !property
+                    .one_of
+                    .iter()
+                    .any(|option| option.const_value == *text)
             {
                 return Err(format!("property {key} is not one of the allowed options"));
             }
         }
-        Some("integer") => {
-            if !value.is_i64() && !value.is_u64() {
-                return Err(format!("property {key} must be an integer"));
-            }
-        }
-        Some("number") => {
-            if !value.is_number() {
-                return Err(format!("property {key} must be a number"));
-            }
-        }
-        Some("boolean") => {
-            if !value.is_boolean() {
-                return Err(format!("property {key} must be a boolean"));
-            }
-        }
-        Some("array") => {
-            let Some(items) = value.as_array() else {
-                return Err(format!("property {key} must be an array"));
-            };
-            if !items.iter().all(|item| item.is_string()) {
-                return Err(format!("property {key} must be an array of strings"));
+        (ElicitationPropertyKind::Integer, ElicitationValue::Integer(_)) => {}
+        (
+            ElicitationPropertyKind::Number,
+            ElicitationValue::Integer(_) | ElicitationValue::Number(_),
+        ) => {}
+        (ElicitationPropertyKind::Boolean, ElicitationValue::Boolean(_)) => {}
+        (ElicitationPropertyKind::Array, ElicitationValue::StringArray(items)) => {
+            if let Some(items_schema) = &property.items
+                && !items_schema.r#enum.is_empty()
+                && !items
+                    .iter()
+                    .all(|item| items_schema.r#enum.iter().any(|value| value == item))
+            {
+                return Err(format!("property {key} has a disallowed array value"));
             }
         }
         // Unknown restricted schema types (future extensions) are not validated
-        _ => {}
+        (ElicitationPropertyKind::Unknown(_), _) => {}
+        (kind, _) => {
+            let expected = match kind {
+                ElicitationPropertyKind::Integer => "an integer".to_owned(),
+                other => format!("a {}", other.as_str()),
+            };
+            return Err(format!("property {key} must be {expected}"));
+        }
     }
     Ok(())
+}
+
+/// Converts a typed answer value into the ACP wire value.
+fn elicitation_content_value(value: ElicitationValue) -> anyhow::Result<ElicitationContentValue> {
+    Ok(match value {
+        ElicitationValue::String(value) => ElicitationContentValue::String(value),
+        ElicitationValue::Integer(value) => ElicitationContentValue::Integer(value),
+        ElicitationValue::Number(value) => ElicitationContentValue::Number(value),
+        ElicitationValue::Boolean(value) => ElicitationContentValue::Boolean(value),
+        ElicitationValue::StringArray(value) => ElicitationContentValue::StringArray(value),
+        ElicitationValue::Unknown(_) => {
+            anyhow::bail!("unsupported elicitation content value")
+        }
+    })
 }
 
 // ----------------------------------------------------------------------
@@ -2462,8 +2477,8 @@ mod tests {
         }
     }
 
-    fn elicitation_schema() -> serde_json::Value {
-        serde_json::json!({
+    fn elicitation_schema() -> ElicitationSchema {
+        serde_json::from_value(serde_json::json!({
             "type": "object",
             "properties": {
                 "strategy": { "type": "string", "enum": ["conservative", "balanced"] },
@@ -2472,7 +2487,12 @@ mod tests {
                 "tags": { "type": "array" }
             },
             "required": ["strategy"]
-        })
+        }))
+        .expect("schema")
+    }
+
+    fn elicitation_content(value: serde_json::Value) -> ElicitationContent {
+        serde_json::from_value(value).expect("content")
     }
 
     #[test]
@@ -2481,20 +2501,21 @@ mod tests {
         assert!(
             validate_elicitation_content(
                 &schema,
-                &serde_json::json!({
+                &elicitation_content(serde_json::json!({
                     "strategy": "balanced",
                     "count": 3,
                     "confirm": true,
                     "tags": ["a", "b"]
-                })
+                }))
             )
             .is_ok()
         );
         // Do not validate schemas without properties
         assert!(
             validate_elicitation_content(
-                &serde_json::json!({ "type": "object" }),
-                &serde_json::json!({ "anything": 1 })
+                &serde_json::from_value(serde_json::json!({ "type": "object" }))
+                    .expect("empty schema"),
+                &elicitation_content(serde_json::json!({ "anything": 1 }))
             )
             .is_ok()
         );
@@ -2505,21 +2526,27 @@ mod tests {
         let schema = elicitation_schema();
         // Missing required property
         assert!(
-            validate_elicitation_content(&schema, &serde_json::json!({}))
+            validate_elicitation_content(&schema, &elicitation_content(serde_json::json!({})))
                 .expect_err("required")
                 .contains("missing required property")
         );
         // Not in enum
         assert!(
-            validate_elicitation_content(&schema, &serde_json::json!({ "strategy": "fast" }))
-                .expect_err("enum")
-                .contains("allowed values")
+            validate_elicitation_content(
+                &schema,
+                &elicitation_content(serde_json::json!({ "strategy": "fast" }))
+            )
+            .expect_err("enum")
+            .contains("allowed values")
         );
         // Type mismatch
         assert!(
             validate_elicitation_content(
                 &schema,
-                &serde_json::json!({ "strategy": "balanced", "count": "3" })
+                &elicitation_content(serde_json::json!({
+                    "strategy": "balanced",
+                    "count": "3"
+                }))
             )
             .expect_err("integer")
             .contains("must be an integer")
@@ -2528,7 +2555,10 @@ mod tests {
         assert!(
             validate_elicitation_content(
                 &schema,
-                &serde_json::json!({ "strategy": "balanced", "extra": 1 })
+                &elicitation_content(serde_json::json!({
+                    "strategy": "balanced",
+                    "extra": 1
+                }))
             )
             .expect_err("unknown property")
             .contains("unexpected property")
@@ -2537,7 +2567,7 @@ mod tests {
 
     #[test]
     fn elicitation_content_validation_checks_titled_enum() {
-        let schema = serde_json::json!({
+        let schema = serde_json::from_value(serde_json::json!({
             "type": "object",
             "properties": {
                 "country": {
@@ -2545,14 +2575,22 @@ mod tests {
                     "oneOf": [{ "const": "jp", "title": "Japan" }]
                 }
             }
-        });
+        }))
+        .expect("schema");
         assert!(
-            validate_elicitation_content(&schema, &serde_json::json!({ "country": "jp" })).is_ok()
+            validate_elicitation_content(
+                &schema,
+                &elicitation_content(serde_json::json!({ "country": "jp" }))
+            )
+            .is_ok()
         );
         assert!(
-            validate_elicitation_content(&schema, &serde_json::json!({ "country": "us" }))
-                .expect_err("oneOf")
-                .contains("allowed options")
+            validate_elicitation_content(
+                &schema,
+                &elicitation_content(serde_json::json!({ "country": "us" }))
+            )
+            .expect_err("oneOf")
+            .contains("allowed options")
         );
     }
 
@@ -2953,22 +2991,24 @@ mod tests {
         assert_eq!(mapped.name, "Model");
         assert_eq!(
             mapped.current_value,
-            serde_json::Value::String("gpt-4".to_owned())
+            ConfigOptionValue::Select("gpt-4".to_owned())
         );
         assert_eq!(
             mapped.options,
             vec![
-                serde_json::Value::String("gpt-4".to_owned()),
-                serde_json::Value::String("gpt-3.5".to_owned()),
-                serde_json::Value::String("claude-3".to_owned()),
+                ConfigOptionValue::Select("gpt-4".to_owned()),
+                ConfigOptionValue::Select("gpt-3.5".to_owned()),
+                ConfigOptionValue::Select("claude-3".to_owned()),
             ]
         );
     }
 
     #[test]
     fn parses_bare_config_value_ids() {
-        let value = parse_config_value(serde_json::json!("opencode-go/deepseek-v4.1-flash"))
-            .expect("bare string config value");
+        let value = parse_config_value(ConfigOptionValue::Select(
+            "opencode-go/deepseek-v4.1-flash".to_owned(),
+        ))
+        .expect("bare string config value");
         assert_eq!(
             value.as_value_id().map(ToString::to_string).as_deref(),
             Some("opencode-go/deepseek-v4.1-flash")
@@ -2977,17 +3017,24 @@ mod tests {
 
     #[test]
     fn parses_boolean_and_tagged_config_values() {
-        let bool_value = parse_config_value(serde_json::json!(true)).expect("bare boolean");
+        let bool_value =
+            parse_config_value(ConfigOptionValue::Boolean(true)).expect("bare boolean");
         assert_eq!(bool_value.as_bool(), Some(true));
 
-        let tagged = parse_config_value(serde_json::json!({
-            "type": "boolean",
-            "value": false
-        }))
+        let tagged = parse_config_value(ConfigOptionValue::Unknown(
+            serde_json::json!({
+                "type": "boolean",
+                "value": false
+            })
+            .into(),
+        ))
         .expect("tagged boolean");
         assert_eq!(tagged.as_bool(), Some(false));
 
-        let wire_id = parse_config_value(serde_json::json!({ "value": "plan" })).expect("wire id");
+        let wire_id = parse_config_value(ConfigOptionValue::Unknown(
+            serde_json::json!({ "value": "plan" }).into(),
+        ))
+        .expect("wire id");
         assert_eq!(
             wire_id.as_value_id().map(ToString::to_string).as_deref(),
             Some("plan")
@@ -2996,7 +3043,12 @@ mod tests {
 
     #[test]
     fn rejects_unknown_config_values() {
-        assert!(parse_config_value(serde_json::json!({ "unexpected": true })).is_err());
+        assert!(
+            parse_config_value(ConfigOptionValue::Unknown(
+                serde_json::json!({ "unexpected": true }).into()
+            ))
+            .is_err()
+        );
     }
 
     #[test]

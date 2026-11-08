@@ -137,7 +137,7 @@ impl Fixture {
                         kind: PermissionOptionKind::RejectOnce,
                     },
                 ],
-                details: serde_json::json!({ "command": "cargo test --workspace" }),
+                details: serde_json::json!({ "command": "cargo test --workspace" }).into(),
             }),
             self.event(UnifiedEventPayload::PermissionResolved {
                 request_id: "req-1".to_owned(),
@@ -319,7 +319,10 @@ async fn event_application_updates_session_projections() {
     assert!(request.resolved_at.is_some());
     assert_eq!(request.options.len(), 2);
     assert_eq!(request.summary, "Run command: cargo test --workspace");
-    assert_eq!(request.details["command"], "cargo test --workspace");
+    assert_eq!(
+        request.details.as_value()["command"],
+        "cargo test --workspace"
+    );
     assert!(
         fixture
             .db
@@ -433,7 +436,7 @@ async fn permission_rejection_is_projected_from_option_kind() {
             name: "Reject".to_owned(),
             kind: PermissionOptionKind::RejectOnce,
         }],
-        details: serde_json::json!({}),
+        details: serde_json::json!({}).into(),
     });
     fixture
         .db
@@ -470,13 +473,14 @@ async fn elicitation_projection_tracks_pending_and_resolved() {
         elicitation_id: "elic-1".to_owned(),
         message: "Which strategy should we use?".to_owned(),
         mode: ElicitationMode::Form,
-        requested_schema: serde_json::json!({
+        requested_schema: serde_json::from_value(serde_json::json!({
             "type": "object",
             "properties": {
                 "strategy": { "type": "string", "enum": ["a", "b"] }
             },
             "required": ["strategy"]
-        }),
+        }))
+        .expect("schema"),
         tool_call_id: Some("tool-1".to_owned()),
     });
     fixture
@@ -490,12 +494,14 @@ async fn elicitation_projection_tracks_pending_and_resolved() {
     assert_eq!(pending[0].elicitation_id, "elic-1");
     assert_eq!(pending[0].status, ElicitationRequestStatus::Pending);
     assert_eq!(pending[0].tool_call_id.as_deref(), Some("tool-1"));
-    assert_eq!(pending[0].requested_schema["type"], "object");
+    assert_eq!(pending[0].requested_schema.schema_type.as_str(), "object");
 
     let resolved = fixture.event(UnifiedEventPayload::ElicitationResolved {
         elicitation_id: "elic-1".to_owned(),
         action: ElicitationAction::Accept,
-        content: serde_json::json!({ "strategy": "a" }),
+        content: Some(
+            serde_json::from_value(serde_json::json!({ "strategy": "a" })).expect("content"),
+        ),
         resolved_by: ResolvedBy::Web,
     });
     fixture.db.append_event(&resolved).await.expect("append");
@@ -507,7 +513,12 @@ async fn elicitation_projection_tracks_pending_and_resolved() {
         .expect("find")
         .expect("exists");
     assert_eq!(entry.status, ElicitationRequestStatus::Accepted);
-    assert_eq!(entry.content["strategy"], "a");
+    assert_eq!(
+        entry.content.as_ref().expect("content").get("strategy"),
+        Some(&fxg_protocol::common::ElicitationValue::String(
+            "a".to_owned()
+        ))
+    );
     assert_eq!(entry.resolved_by, Some(ResolvedBy::Web));
     assert!(
         fixture
@@ -527,7 +538,12 @@ async fn elicitation_projection_tracks_pending_and_resolved() {
         .expect("find after rebuild")
         .expect("exists");
     assert_eq!(rebuilt.status, ElicitationRequestStatus::Accepted);
-    assert_eq!(rebuilt.content["strategy"], "a");
+    assert_eq!(
+        rebuilt.content.as_ref().expect("content").get("strategy"),
+        Some(&fxg_protocol::common::ElicitationValue::String(
+            "a".to_owned()
+        ))
+    );
 }
 
 #[tokio::test]
@@ -1176,7 +1192,7 @@ async fn registration_upserts_and_audit_logs() {
     record.session_id = Some("s-1".to_owned());
     record.node_id = Some(NODE_ID.to_owned());
     record.client_user_agent = Some("Mozilla/5.0".to_owned());
-    record.details = serde_json::json!({ "selected_option_id": "allow_once" });
+    record.details = serde_json::json!({ "selected_option_id": "allow_once" }).into();
     let id = fixture
         .db
         .append_audit_log(&record)
@@ -1188,7 +1204,10 @@ async fn registration_upserts_and_audit_logs() {
     assert_eq!(logs.len(), 1);
     assert_eq!(logs[0].action, actions::PERMISSION_RESOLVED);
     assert_eq!(logs[0].client_ip, "192.168.1.10");
-    assert_eq!(logs[0].details["selected_option_id"], "allow_once");
+    assert_eq!(
+        logs[0].details.as_value()["selected_option_id"],
+        "allow_once"
+    );
 
     let limited = fixture.db.audit_logs(1).await.expect("audit logs");
     assert_eq!(limited.len(), 1);

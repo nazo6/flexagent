@@ -6,11 +6,6 @@
 //! authority belongs to the executing node. Client operations are relayed to the target node
 //! through [`NodeHub`] and responses are returned correlated by `command_id`.
 
-#![allow(
-    clippy::disallowed_types,
-    reason = "audit details are display-only opaque JSON; see docs/06-type-safety.md"
-)]
-
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -182,7 +177,7 @@ impl ServerState {
         action: fxg_protocol::common::AuditAction,
         client: &ClientInfo,
         session_id: Option<&str>,
-        details: serde_json::Value,
+        details: impl Into<fxg_protocol::common::RawJson>,
     ) {
         let mut audit = fxg_db::AuditLogRecord::new(
             action.clone(),
@@ -191,7 +186,7 @@ impl ServerState {
         );
         audit.session_id = session_id.map(str::to_owned);
         audit.client_user_agent = client.user_agent.clone();
-        audit.details = details;
+        audit.details = details.into();
         if let Err(err) = self.inner.db.append_audit_log(&audit).await {
             tracing::warn!("failed to record audit log ({action}): {err}");
         }

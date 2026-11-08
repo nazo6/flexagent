@@ -1035,7 +1035,11 @@ async fn handle_node_message(state: &ServerState, node_id: &str, text: &str) {
             return;
         }
     };
+    handle_node_message_value(state, node_id, message).await;
+}
 
+/// Handles an already-parsed node message (shared by WS and stdio transports).
+async fn handle_node_message_value(state: &ServerState, node_id: &str, message: NodeToServerMsg) {
     match message {
         NodeToServerMsg::NodeHello {
             node_id: hello_node_id,
@@ -1375,8 +1379,12 @@ async fn handle_node_message(state: &ServerState, node_id: &str, text: &str) {
 ///
 /// Uses the same message types and the same processing path ([`handle_node_message`]) as a
 /// WebSocket node (design: docs/03 §2).
-pub(crate) async fn handle_stdio_message(state: &ServerState, node_id: &str, text: &str) {
-    handle_node_message(state, node_id, text).await;
+pub(crate) async fn handle_stdio_message(
+    state: &ServerState,
+    node_id: &str,
+    message: NodeToServerMsg,
+) {
+    handle_node_message_value(state, node_id, message).await;
 }
 
 /// Applies `NodeHello` project reports to `projects` / `project_node_bindings`.

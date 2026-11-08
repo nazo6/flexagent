@@ -4,7 +4,7 @@ import type {
   CommandResult,
   ElicitationAction,
   ElicitationRequestEntry,
-  JsonValue,
+  ElicitationValue,
   NodeSummary,
   PermissionRequestEntry,
   ProjectSummary,
@@ -427,7 +427,7 @@ export class SyncStore {
     sessionId: string,
     elicitationId: string,
     action: ElicitationAction,
-    content: JsonValue,
+    content: Record<string, ElicitationValue> | null,
     resolvedBy = "web",
   ): Promise<CommandResult> {
     return this.#dispatch(

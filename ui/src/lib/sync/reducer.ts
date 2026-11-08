@@ -3,10 +3,12 @@ import type {
   CompactionStatus,
   ConfigOptionInfo,
   ElicitationAction,
+  ElicitationSchema,
   FileDiff,
   ModeInfo,
   PermissionOption,
   PlanEntry,
+  RawJson,
   SessionEventEnvelope,
   SessionStatus,
   SessionUsage,
@@ -130,7 +132,7 @@ export type TimelineItem =
       toolName: string;
       summary: string;
       options: PermissionOption[];
-      details: unknown;
+      details: RawJson;
       resolved: { selectedOptionId: string; resolvedBy: string } | null;
     }
   | {
@@ -141,7 +143,7 @@ export type TimelineItem =
       elicitationId: string;
       message: string;
       mode: string;
-      requestedSchema: unknown;
+      requestedSchema: ElicitationSchema;
       resolved: { action: ElicitationAction; resolvedBy: string } | null;
     }
   | {

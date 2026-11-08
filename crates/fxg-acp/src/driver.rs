@@ -8,15 +8,12 @@
 //! [`StreamDeltaPayload`]) as [`DriverEvent`]; persistence and delivery are
 //! handled centrally by the session manager (event bus).
 
-#![allow(
-    clippy::disallowed_types,
-    reason = "the driver API carries Phase 2 opaque config/elicitation payloads; see docs/06-type-safety.md"
-)]
-
 use std::path::PathBuf;
 
 use async_trait::async_trait;
-use fxg_protocol::common::{ElicitationAction, StreamDeltaPayload};
+use fxg_protocol::common::{
+    ConfigOptionValue, ElicitationAction, ElicitationContent, StreamDeltaPayload,
+};
 use fxg_protocol::events::UnifiedEventPayload;
 use tokio::sync::mpsc;
 
@@ -184,14 +181,14 @@ pub trait ActiveSessionHandle: Send + Sync {
         &self,
         _elicitation_id: String,
         _action: ElicitationAction,
-        _content: serde_json::Value,
+        _content: Option<ElicitationContent>,
     ) -> anyhow::Result<()> {
         anyhow::bail!("respond_elicitation is not supported by this driver")
     }
     /// Change mode (`plan` / `code`, etc.).
     async fn set_mode(&self, mode_id: String) -> anyhow::Result<()>;
     /// Change configuration (model selection, etc.).
-    async fn set_config(&self, key: String, value: serde_json::Value) -> anyhow::Result<()>;
+    async fn set_config(&self, key: String, value: ConfigOptionValue) -> anyhow::Result<()>;
     /// Cancel the current turn.
     async fn cancel_turn(&self) -> anyhow::Result<()>;
     /// Fully terminates the session process (including the process tree).
@@ -235,7 +232,7 @@ mod tests {
         async fn set_mode(&self, _mode_id: String) -> anyhow::Result<()> {
             Ok(())
         }
-        async fn set_config(&self, _key: String, _value: serde_json::Value) -> anyhow::Result<()> {
+        async fn set_config(&self, _key: String, _value: ConfigOptionValue) -> anyhow::Result<()> {
             Ok(())
         }
         async fn cancel_turn(&self) -> anyhow::Result<()> {

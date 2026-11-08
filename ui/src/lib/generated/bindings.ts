@@ -114,7 +114,7 @@ export type AuditLogEntry = {
 	/**  Token identifier or authenticated subject */
 	auth_subject: string,
 	/**  Details of what was executed */
-	details: JsonValue,
+	details: RawJson,
 	/**  Recorded time (Unix epoch ms) */
 	created_at: number,
 };
@@ -184,7 +184,7 @@ elicitation_id: string;
 /**  The user's response action (`accept` / `decline` / `cancel`) */
 action: ElicitationAction; 
 /**  Answer content for `accept` (following the form's `requested_schema`) */
-content: JsonValue; 
+content: { [key in string]: ElicitationValue } | null; 
 /**  Who resolved it (`cli` / `web` / `android_push`) */
 resolved_by: string } | 
 /**  Mode switch / configuration change / cancel / kill. */
@@ -255,10 +255,19 @@ export type ConfigOptionInfo = {
 	/**  Display name */
 	name: string,
 	/**  Current value */
-	current_value: JsonValue,
+	current_value: ConfigOptionValue,
 	/**  List of selectable values */
-	options: JsonValue[],
+	options: ConfigOptionValue[],
 };
+
+/**  Value of an agent configuration entry. */
+export type ConfigOptionValue = 
+/**  Select / model ID */
+string | 
+/**  Boolean toggle */
+boolean | 
+/**  Agent-specific value preserved as-is (e.g. `{ providerID, id, name }`) */
+RawJson;
 
 /**  Kind of endpoint (`GET /api/v1/system/info`). */
 export type ConnectionRole = 
@@ -370,6 +379,44 @@ export type ElicitationAction =
 /**  Cancel the interaction (e.g. close the dialog) */
 "cancel";
 
+/**  Item schema of a multi-select elicitation field. */
+export type ElicitationArrayItems = {
+	/**  Item type (ACP uses `string`). */
+	type?: string,
+	/**  Allowed values. */
+	enum?: string[],
+} & { [key in string]: RawJson };
+
+/**  One option of a single-select elicitation field (`oneOf`). */
+export type ElicitationOption = {
+	/**  Submitted value. */
+	const: string,
+	/**  Display title. */
+	title?: string | null,
+} & { [key in string]: RawJson };
+
+/**  One property of an elicitation form. */
+export type ElicitationProperty = {
+	/**  Property type. */
+	type: string,
+	/**  Optional title. */
+	title?: string | null,
+	/**  Optional description. */
+	description?: string | null,
+	/**  Optional default value. */
+	default?: RawJson | null,
+	/**  Allowed string values. */
+	enum?: string[],
+	/**  Allowed values with display titles. */
+	oneOf?: ElicitationOption[],
+	/**  Array item schema. */
+	items?: ElicitationArrayItems | null,
+	/**  Minimum integer value. */
+	minimum?: number | null,
+	/**  Maximum integer value. */
+	maximum?: number | null,
+} & { [key in string]: RawJson };
+
 /**
  *  Elicitation request projection exposed to clients (the question inbox).
  * 
@@ -388,11 +435,11 @@ export type ElicitationRequestEntry = {
 	/**  Request mode (`form` / `url`. Phase 1 supports `form` only) */
 	mode: string,
 	/**  JSON Schema of the request in form mode (`requestedSchema`) */
-	requested_schema: JsonValue,
+	requested_schema: ElicitationSchema,
 	/**  Related tool call ID (optional) */
 	tool_call_id: string | null,
-	/**  Answer content for `accept` (`Value::Null` while unanswered or on decline / cancel) */
-	content: JsonValue,
+	/**  Answer content for `accept` (`None` while unanswered or on decline / cancel) */
+	content: { [key in string]: ElicitationValue } | null,
 	/**  Status */
 	status: ElicitationRequestStatus,
 	/**  Creation time (Unix epoch ms) */
@@ -413,6 +460,35 @@ export type ElicitationRequestStatus =
 "declined" | 
 /**  Cancelled (e.g. the session was stopped) */
 "cancelled";
+
+/**  Object of a restricted elicitation form schema (ACP `requestedSchema`). */
+export type ElicitationSchema = {
+	/**  Type discriminator. ACP always uses `object`. */
+	type?: string,
+	/**  Optional title. */
+	title?: string | null,
+	/**  Optional description. */
+	description?: string | null,
+	/**  Property definitions. */
+	properties?: { [key in string]: ElicitationProperty },
+	/**  Required property names (`None` and `null` mean none). */
+	required?: string[] | null,
+} & { [key in string]: RawJson };
+
+/**  One value in an elicitation answer. */
+export type ElicitationValue = 
+/**  String value */
+string | 
+/**  Integer value */
+number | 
+/**  Floating-point number value */
+number | 
+/**  Boolean value */
+boolean | 
+/**  String array (multi-select) */
+string[] | 
+/**  Future / custom value, preserved as-is */
+RawJson;
 
 /**
  *  Shared error code (used by both `CommandResult` and REST error responses).
@@ -506,7 +582,7 @@ export type ErrorInfo = {
 	/**  Parameters for message interpolation (path, agent_id, exit_code, ...) */
 	params?: { [key in string]: string },
 	/**  Technical details for the expandable "details" section */
-	details?: JsonValue | null,
+	details?: RawJson | null,
 	/**  Whether retrying may succeed without a state change */
 	retryable?: boolean,
 	/**  Recovery actions the client can offer as buttons */
@@ -744,7 +820,7 @@ export type PermissionRequestEntry = {
 	/**  Available options */
 	options: PermissionOption[],
 	/**  Arguments and diff details */
-	details: JsonValue,
+	details: RawJson,
 	/**  Status */
 	status: PermissionRequestStatus,
 	/**  Creation time (Unix epoch ms) */
@@ -996,6 +1072,14 @@ export type PushSubscribeResponse = {
 	ok: boolean,
 };
 
+/**
+ *  Intentionally opaque JSON carried across the protocol.
+ * 
+ *  Use this only at a declared boundary (tool arguments, error details, audit
+ *  details, ...). Domain data must be parsed into a typed struct or enum.
+ */
+export type RawJson = JsonValue;
+
 /**  Recovery action offered to the user after a failure. */
 export type RecoveryAction = 
 /**  Retry the same operation (`idempotent` = safe to resend as-is) */
@@ -1055,8 +1139,8 @@ export type RemoveWorktreeRequest = {
 export type RespondElicitationRequest = {
 	/**  The user's response action (`accept` / `decline` / `cancel`) */
 	action: ElicitationAction,
-	/**  Answer content for `accept` (following the form's `requested_schema`; `null` otherwise) */
-	content: JsonValue,
+	/**  Answer content for `accept` (following the form's `requested_schema`; `None` otherwise) */
+	content: { [key in string]: ElicitationValue } | null,
 	/**  Who resolved it (`cli` / `web` / `android_push`) */
 	resolved_by: string,
 };
@@ -1227,7 +1311,7 @@ mode_id: string } |
 /**  Configuration key */
 key: string; 
 /**  New value */
-value: JsonValue } | 
+value: ConfigOptionValue } | 
 /**  Interrupt the current turn */
 { action: "cancel" } | 
 /**  Terminate the session entirely */
@@ -1597,7 +1681,7 @@ export type UnifiedEventPayload =
 	/**  Options (e.g. `allow_once` / `allow_always` / `reject`) */
 	options: PermissionOption[],
 	/**  Arguments and diff details */
-	details: JsonValue,
+	details: RawJson,
 } } | 
 /**
  *  The outcome of a permission request.
@@ -1630,7 +1714,7 @@ export type UnifiedEventPayload =
 	/**  Request mode (`form` / `url`. Phase 1 supports `form` only) */
 	mode: string,
 	/**  JSON Schema of the request in form mode (`requestedSchema`) */
-	requested_schema: JsonValue,
+	requested_schema: ElicitationSchema,
 	/**  Related tool call ID (optional) */
 	tool_call_id: string | null,
 } } | 
@@ -1640,8 +1724,8 @@ export type UnifiedEventPayload =
 	elicitation_id: string,
 	/**  The user's response action */
 	action: ElicitationAction,
-	/**  Answer content for `accept` (`Value::Null` on decline / cancel) */
-	content: JsonValue,
+	/**  Answer content for `accept` (`None` on decline / cancel) */
+	content: { [key in string]: ElicitationValue } | null,
 	/**  Who resolved it (`cli` / `web` / `android_push`) */
 	resolved_by: string,
 } } | 
@@ -1802,7 +1886,7 @@ export type WarningInfo = {
 	/**  English human-readable fallback message */
 	message: string,
 	/**  Technical details */
-	details?: JsonValue | null,
+	details?: RawJson | null,
 	/**  Recovery actions the client can offer */
 	recovery?: RecoveryAction[],
 };

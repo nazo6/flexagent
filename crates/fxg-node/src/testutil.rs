@@ -111,7 +111,7 @@ struct MockAgentInner {
         Vec<(
             String,
             fxg_protocol::common::ElicitationAction,
-            serde_json::Value,
+            Option<fxg_protocol::common::ElicitationContent>,
         )>,
     >,
     modes: Mutex<Vec<String>>,
@@ -165,7 +165,7 @@ impl MockAgent {
     ) -> Vec<(
         String,
         fxg_protocol::common::ElicitationAction,
-        serde_json::Value,
+        Option<fxg_protocol::common::ElicitationContent>,
     )> {
         self.inner
             .elicitations
@@ -250,7 +250,7 @@ impl ActiveSessionHandle for MockAgent {
         &self,
         elicitation_id: String,
         action: fxg_protocol::common::ElicitationAction,
-        content: serde_json::Value,
+        content: Option<fxg_protocol::common::ElicitationContent>,
     ) -> anyhow::Result<()> {
         self.inner.elicitations.lock().expect("elicitations").push((
             elicitation_id,
@@ -265,7 +265,11 @@ impl ActiveSessionHandle for MockAgent {
         Ok(())
     }
 
-    async fn set_config(&self, _key: String, _value: serde_json::Value) -> anyhow::Result<()> {
+    async fn set_config(
+        &self,
+        _key: String,
+        _value: fxg_protocol::common::ConfigOptionValue,
+    ) -> anyhow::Result<()> {
         Ok(())
     }
 

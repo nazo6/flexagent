@@ -648,6 +648,10 @@ async fn search_like(
 }
 
 /// Retrieves the audit log list (newest first).
+#[allow(
+    clippy::manual_unwrap_or_default,
+    reason = "a corrupt audit details column degrades to an empty object"
+)]
 pub async fn audit_logs(pool: &SqlitePool, limit: u32) -> Result<Vec<AuditLogEntry>, DbError> {
     let rows = sqlx::query_as!(
         AuditRow,
@@ -676,8 +680,11 @@ pub async fn audit_logs(pool: &SqlitePool, limit: u32) -> Result<Vec<AuditLogEnt
             client_ip: row.client_ip,
             client_user_agent: row.client_user_agent,
             auth_subject: row.auth_subject,
-            details: serde_json::from_str(&row.details_json)
-                .unwrap_or(serde_json::Value::Object(serde_json::Map::new())),
+            details: match serde_json::from_str::<fxg_protocol::common::RawJson>(&row.details_json)
+            {
+                Ok(details) => details,
+                Err(_) => fxg_protocol::common::RawJson::default(),
+            },
             created_at: row.created_at,
         })
         .collect())
@@ -834,18 +841,20 @@ struct ElicitationRow {
 
 impl ElicitationRow {
     fn into_entry(self) -> Result<ElicitationRequestEntry, DbError> {
-        let requested_schema = serde_json::from_str(&self.schema_json).map_err(|err| {
-            DbError::InvalidPayload(format!(
-                "elicitation_requests.schema_json for {}: {err}",
-                self.elicitation_id
-            ))
-        })?;
-        let content = serde_json::from_str(&self.content_json).map_err(|err| {
-            DbError::InvalidPayload(format!(
-                "elicitation_requests.content_json for {}: {err}",
-                self.elicitation_id
-            ))
-        })?;
+        let requested_schema: fxg_protocol::common::ElicitationSchema =
+            serde_json::from_str(&self.schema_json).map_err(|err| {
+                DbError::InvalidPayload(format!(
+                    "elicitation_requests.schema_json for {}: {err}",
+                    self.elicitation_id
+                ))
+            })?;
+        let content: Option<fxg_protocol::common::ElicitationContent> =
+            serde_json::from_str(&self.content_json).map_err(|err| {
+                DbError::InvalidPayload(format!(
+                    "elicitation_requests.content_json for {}: {err}",
+                    self.elicitation_id
+                ))
+            })?;
         Ok(ElicitationRequestEntry {
             elicitation_id: self.elicitation_id,
             session_id: self.session_id,
