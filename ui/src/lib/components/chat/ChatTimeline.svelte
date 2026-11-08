@@ -1,14 +1,14 @@
 <script lang="ts">
   import { goto } from "$app/navigation";
-  import ElicitationCard from "$lib/components/ElicitationCard.svelte";
-  import PermissionCard from "$lib/components/PermissionCard.svelte";
-  import MarkdownText from "$lib/components/MarkdownText.svelte";
+  import ElicitationCard from "#lib/components/ElicitationCard.svelte";
+  import PermissionCard from "#lib/components/PermissionCard.svelte";
+  import MarkdownText from "#lib/components/MarkdownText.svelte";
   import ToolCallGroup from "./ToolCallGroup.svelte";
-  import { Badge } from "$lib/components/ui/badge";
-  import { formatEpochMs } from "$lib/format";
-  import { sync } from "$lib/stores/app.svelte";
-  import type { SessionStatus } from "$lib/generated/bindings";
-  import type { TimelineItem } from "$lib/sync/reducer";
+  import { Badge } from "#lib/components/ui/badge/index.ts";
+  import { formatEpochMs } from "#lib/format.ts";
+  import { sync } from "#lib/stores/app.svelte.ts";
+  import type { SessionStatus } from "#lib/generated/bindings.ts";
+  import type { TimelineItem } from "#lib/sync/reducer.ts";
   import AlertTriangleIcon from "@lucide/svelte/icons/alert-triangle";
   import BotIcon from "@lucide/svelte/icons/bot";
   import BrainIcon from "@lucide/svelte/icons/brain";

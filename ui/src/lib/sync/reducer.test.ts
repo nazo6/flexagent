@@ -3,8 +3,8 @@ import type {
   SessionEventEnvelope,
   StreamDeltaPayload,
   UnifiedEventPayload,
-} from "$lib/generated/bindings";
-import { encodeTextToBase64 } from "$lib/base64";
+} from "#lib/generated/bindings.ts";
+import { encodeTextToBase64 } from "#lib/base64.ts";
 import {
   applyStreamDelta,
   buildTimelineItems,

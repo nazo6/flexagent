@@ -1,17 +1,17 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import * as Dialog from "$lib/components/ui/dialog";
-  import * as DropdownMenu from "$lib/components/ui/dropdown-menu";
-  import { Button } from "$lib/components/ui/button";
-  import { Input } from "$lib/components/ui/input";
-  import { Label } from "$lib/components/ui/label";
-  import { connection, logoutAndStop } from "$lib/stores/app.svelte";
+  import * as Dialog from "#lib/components/ui/dialog/index.ts";
+  import * as DropdownMenu from "#lib/components/ui/dropdown-menu/index.ts";
+  import { Button } from "#lib/components/ui/button/index.ts";
+  import { Input } from "#lib/components/ui/input/index.ts";
+  import { Label } from "#lib/components/ui/label/index.ts";
+  import { connection, logoutAndStop } from "#lib/stores/app.svelte.ts";
   import {
     disablePushNotifications,
     enablePushNotifications,
     pushCapability,
     type PushCapability,
-  } from "$lib/push";
+  } from "#lib/push.ts";
   import { toast } from "svelte-sonner";
   import BellIcon from "@lucide/svelte/icons/bell";
   import BellOffIcon from "@lucide/svelte/icons/bell-off";
@@ -20,7 +20,7 @@
   import LogOutIcon from "@lucide/svelte/icons/log-out";
   import PlusIcon from "@lucide/svelte/icons/plus";
   import ServerIcon from "@lucide/svelte/icons/server";
-  import { cn } from "$lib/utils";
+  import { cn } from "#lib/utils.ts";
 
   interface Props {
     class?: string;

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import NewSessionChat from "$lib/components/session/NewSessionChat.svelte";
+  import NewSessionChat from "#lib/components/session/NewSessionChat.svelte";
 </script>
 
 <svelte:head>

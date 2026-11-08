@@ -1,3 +1,5 @@
+import adapter from "@sveltejs/adapter-static";
+import { vitePreprocess } from "@sveltejs/vite-plugin-svelte";
 import { sveltekit } from "@sveltejs/kit/vite";
 import tailwindcss from "@tailwindcss/vite";
 import type { ClientRequest } from "node:http";
@@ -26,7 +28,18 @@ const apiProxy: ProxyOptions = {
 };
 
 export default defineConfig({
-  plugins: [tailwindcss(), sveltekit()],
+  plugins: [
+    tailwindcss(),
+    sveltekit({
+      preprocess: vitePreprocess(),
+      // SPA モード: 全ページをクライアントレンダリングし、index.html へフォールバックする
+      // (`rust-embed` で `ui/build` を `fxg` バイナリへ同梱して配信する)
+      adapter: adapter({ fallback: "index.html" }),
+
+      // PWA: `src/service-worker.ts` を登録する (App Shell キャッシュ + Web Push)
+      serviceWorker: { register: true },
+    }),
+  ],
   optimizeDeps: {
     // lucide はアイコンごとの deep import が非常に多く、遅延発見のたびに
     // dep 再最適化 (強制リロード) が走るため、事前バンドル対象から除外する

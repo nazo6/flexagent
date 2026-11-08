@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Badge } from "$lib/components/ui/badge";
+  import { Badge } from "#lib/components/ui/badge/index.ts";
   import WrenchIcon from "@lucide/svelte/icons/wrench";
 
   let { lines }: { lines: string[] } = $props();

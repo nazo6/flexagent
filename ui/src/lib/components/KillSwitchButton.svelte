@@ -1,8 +1,8 @@
 <script lang="ts">
-  import * as AlertDialog from "$lib/components/ui/alert-dialog";
-  import { Button } from "$lib/components/ui/button";
-  import { sync } from "$lib/stores/app.svelte";
-  import { cn } from "$lib/utils";
+  import * as AlertDialog from "#lib/components/ui/alert-dialog/index.ts";
+  import { Button } from "#lib/components/ui/button/index.ts";
+  import { sync } from "#lib/stores/app.svelte.ts";
+  import { cn } from "#lib/utils.ts";
   import { toast } from "svelte-sonner";
   import OctagonXIcon from "@lucide/svelte/icons/octagon-x";
 

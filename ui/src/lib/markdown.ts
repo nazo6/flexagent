@@ -3,7 +3,7 @@
  *
  * ACP エージェントの出力は外部由来のため、必ず `DOMPurify` でサニタイズして
  * から `{@html}` で描画する (生 HTML / イベントハンドラ / `javascript:` URL を除去)。
- * コードフェンスのシンタックスハイライトは `$lib/highlight` が描画後に付与する。
+ * コードフェンスのシンタックスハイライトは `#lib/highlight.ts` が描画後に付与する。
  *
  * 注意: `DOMPurify` は happy-dom では正しく動作しない (未サポート環境)。
  * テストは real DOM (jsdom / ブラウザ) で実行すること (`markdown.test.ts` 参照)。

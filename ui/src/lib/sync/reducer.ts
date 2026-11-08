@@ -11,8 +11,8 @@ import type {
   SessionStatus,
   SessionUsage,
   StreamDeltaPayload,
-} from "$lib/generated/bindings";
-import { decodeBase64ToText } from "$lib/base64";
+} from "#lib/generated/bindings.ts";
+import { decodeBase64ToText } from "#lib/base64.ts";
 
 /** ストリーミング中のツール実行進捗 (`tool_call_progress` の累積)。 */
 export interface ToolProgress {

@@ -1,12 +1,16 @@
 <script lang="ts">
-  import { Button } from "$lib/components/ui/button";
-  import ComposerSelect from "$lib/components/chat/ComposerSelect.svelte";
-  import NodeStatusBadge from "$lib/components/NodeStatusBadge.svelte";
-  import { configChoices, resolveConfigChoice, selectedConfigValue } from "$lib/config-options";
-  import { getNodeAvailability } from "$lib/node-status";
-  import type { NodeSummary, SessionControlAction, SessionStatus } from "$lib/generated/bindings";
-  import { sync } from "$lib/stores/app.svelte";
-  import type { SessionCapabilities } from "$lib/sync/reducer";
+  import { Button } from "#lib/components/ui/button/index.ts";
+  import ComposerSelect from "#lib/components/chat/ComposerSelect.svelte";
+  import NodeStatusBadge from "#lib/components/NodeStatusBadge.svelte";
+  import { configChoices, resolveConfigChoice, selectedConfigValue } from "#lib/config-options.ts";
+  import { getNodeAvailability } from "#lib/node-status.ts";
+  import type {
+    NodeSummary,
+    SessionControlAction,
+    SessionStatus,
+  } from "#lib/generated/bindings.ts";
+  import { sync } from "#lib/stores/app.svelte.ts";
+  import type { SessionCapabilities } from "#lib/sync/reducer.ts";
   import { toast } from "svelte-sonner";
   import AlertTriangleIcon from "@lucide/svelte/icons/alert-triangle";
   import BanIcon from "@lucide/svelte/icons/ban";

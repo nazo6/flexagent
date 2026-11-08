@@ -1,4 +1,4 @@
-import { ApiError } from "$lib/api/errors";
+import { ApiError } from "#lib/api/errors.ts";
 import type {
   ClientWsMessage,
   CommandResult,
@@ -15,10 +15,10 @@ import type {
   SessionEventEnvelope,
   SessionRevertResponse,
   SessionSummary,
-} from "$lib/generated/bindings";
-import { mergeCursor } from "$lib/sync/cursor";
-import { SessionTimeline } from "$lib/sync/timeline.svelte";
-import type { PendingPrompt } from "$lib/sync/reducer";
+} from "#lib/generated/bindings.ts";
+import { mergeCursor } from "#lib/sync/cursor.ts";
+import { SessionTimeline } from "#lib/sync/timeline.svelte.ts";
+import type { PendingPrompt } from "#lib/sync/reducer.ts";
 import type { ConnectionStore } from "./connection.svelte";
 
 const CURSOR_KEY = "fxg.sync.cursor";

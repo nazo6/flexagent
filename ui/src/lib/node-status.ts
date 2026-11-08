@@ -1,4 +1,4 @@
-import type { NodeLifecycleStatus, NodeSummary } from "$lib/generated/bindings";
+import type { NodeLifecycleStatus, NodeSummary } from "#lib/generated/bindings.ts";
 
 export interface NodeAvailability {
   isAvailable: boolean;

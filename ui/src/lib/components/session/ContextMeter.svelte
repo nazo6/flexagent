@@ -1,6 +1,6 @@
 <script lang="ts">
-  import type { SessionUsage } from "$lib/generated/bindings";
-  import { formatTokenCount } from "$lib/format";
+  import type { SessionUsage } from "#lib/generated/bindings.ts";
+  import { formatTokenCount } from "#lib/format.ts";
 
   /**
    * コンテキスト使用量メーター (ACP `usage_update` の投影)。

@@ -1,11 +1,11 @@
 <script lang="ts">
-  import { Badge } from "$lib/components/ui/badge";
-  import { Button } from "$lib/components/ui/button";
-  import { Input } from "$lib/components/ui/input";
-  import { Label } from "$lib/components/ui/label";
-  import type { ElicitationAction, JsonValue } from "$lib/generated/bindings";
-  import { formatRelativeTime } from "$lib/format";
-  import { sync } from "$lib/stores/app.svelte";
+  import { Badge } from "#lib/components/ui/badge/index.ts";
+  import { Button } from "#lib/components/ui/button/index.ts";
+  import { Input } from "#lib/components/ui/input/index.ts";
+  import { Label } from "#lib/components/ui/label/index.ts";
+  import type { ElicitationAction, JsonValue } from "#lib/generated/bindings.ts";
+  import { formatRelativeTime } from "#lib/format.ts";
+  import { sync } from "#lib/stores/app.svelte.ts";
   import { toast } from "svelte-sonner";
   import ChevronRightIcon from "@lucide/svelte/icons/chevron-right";
   import CircleHelpIcon from "@lucide/svelte/icons/circle-help";

@@ -1,7 +1,7 @@
 <script lang="ts">
-  import DiffText from "$lib/components/diff/DiffText.svelte";
-  import type { TimelineItem } from "$lib/sync/reducer";
-  import { cn } from "$lib/utils";
+  import DiffText from "#lib/components/diff/DiffText.svelte";
+  import type { TimelineItem } from "#lib/sync/reducer.ts";
+  import { cn } from "#lib/utils.ts";
   import ChevronDownIcon from "@lucide/svelte/icons/chevron-down";
   import ChevronRightIcon from "@lucide/svelte/icons/chevron-right";
   import CircleCheckIcon from "@lucide/svelte/icons/circle-check";

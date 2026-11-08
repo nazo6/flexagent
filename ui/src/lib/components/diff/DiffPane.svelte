@@ -1,11 +1,11 @@
 <script lang="ts">
   import DiffViewer from "./DiffViewer.svelte";
-  import { Badge } from "$lib/components/ui/badge";
-  import { Button } from "$lib/components/ui/button";
-  import { cn } from "$lib/utils";
-  import type { FileDiff, WorkspaceDiffResponse } from "$lib/generated/bindings";
-  import { sync } from "$lib/stores/app.svelte";
-  import type { TimelineItem } from "$lib/sync/reducer";
+  import { Badge } from "#lib/components/ui/badge/index.ts";
+  import { Button } from "#lib/components/ui/button/index.ts";
+  import { cn } from "#lib/utils.ts";
+  import type { FileDiff, WorkspaceDiffResponse } from "#lib/generated/bindings.ts";
+  import { sync } from "#lib/stores/app.svelte.ts";
+  import type { TimelineItem } from "#lib/sync/reducer.ts";
   import RefreshCwIcon from "@lucide/svelte/icons/refresh-cw";
 
   let { sessionId, items }: { sessionId: string; items: TimelineItem[] } = $props();

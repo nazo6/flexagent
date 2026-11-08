@@ -1,11 +1,11 @@
 <script lang="ts">
-  import ElicitationCard from "$lib/components/ElicitationCard.svelte";
-  import PermissionCard from "$lib/components/PermissionCard.svelte";
-  import { Button } from "$lib/components/ui/button";
-  import { Card } from "$lib/components/ui/card";
-  import { formatRelativeTime } from "$lib/format";
-  import { shortId } from "$lib/session-status";
-  import { sync } from "$lib/stores/app.svelte";
+  import ElicitationCard from "#lib/components/ElicitationCard.svelte";
+  import PermissionCard from "#lib/components/PermissionCard.svelte";
+  import { Button } from "#lib/components/ui/button/index.ts";
+  import { Card } from "#lib/components/ui/card/index.ts";
+  import { formatRelativeTime } from "#lib/format.ts";
+  import { shortId } from "#lib/session-status.ts";
+  import { sync } from "#lib/stores/app.svelte.ts";
   import RefreshCwIcon from "@lucide/svelte/icons/refresh-cw";
 
   /** 古いリクエストから順に処理できるよう昇順で表示する。 */

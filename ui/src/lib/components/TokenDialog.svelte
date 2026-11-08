@@ -1,10 +1,10 @@
 <script lang="ts">
-  import * as Dialog from "$lib/components/ui/dialog";
-  import { Button } from "$lib/components/ui/button";
-  import { Input } from "$lib/components/ui/input";
-  import { Label } from "$lib/components/ui/label";
-  import { connection } from "$lib/stores/app.svelte";
-  import { loginAndStart } from "$lib/stores/app.svelte";
+  import * as Dialog from "#lib/components/ui/dialog/index.ts";
+  import { Button } from "#lib/components/ui/button/index.ts";
+  import { Input } from "#lib/components/ui/input/index.ts";
+  import { Label } from "#lib/components/ui/label/index.ts";
+  import { connection } from "#lib/stores/app.svelte.ts";
+  import { loginAndStart } from "#lib/stores/app.svelte.ts";
   import { toast } from "svelte-sonner";
   import KeyRoundIcon from "@lucide/svelte/icons/key-round";
 

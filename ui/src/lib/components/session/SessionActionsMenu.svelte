@@ -1,9 +1,9 @@
 <script lang="ts">
-  import * as AlertDialog from "$lib/components/ui/alert-dialog";
-  import * as DropdownMenu from "$lib/components/ui/dropdown-menu";
-  import type { SessionSummary } from "$lib/generated/bindings";
-  import { sync } from "$lib/stores/app.svelte";
-  import { cn } from "$lib/utils";
+  import * as AlertDialog from "#lib/components/ui/alert-dialog/index.ts";
+  import * as DropdownMenu from "#lib/components/ui/dropdown-menu/index.ts";
+  import type { SessionSummary } from "#lib/generated/bindings.ts";
+  import { sync } from "#lib/stores/app.svelte.ts";
+  import { cn } from "#lib/utils.ts";
   import { toast } from "svelte-sonner";
   import ArchiveIcon from "@lucide/svelte/icons/archive";
   import ArchiveRestoreIcon from "@lucide/svelte/icons/archive-restore";

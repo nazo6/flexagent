@@ -1,11 +1,11 @@
 <script lang="ts">
-  import { Button } from "$lib/components/ui/button";
-  import { Card } from "$lib/components/ui/card";
-  import { Input } from "$lib/components/ui/input";
-  import { formatRelativeTime } from "$lib/format";
-  import type { SearchHit } from "$lib/generated/bindings";
-  import { shortId } from "$lib/session-status";
-  import { connection, sync } from "$lib/stores/app.svelte";
+  import { Button } from "#lib/components/ui/button/index.ts";
+  import { Card } from "#lib/components/ui/card/index.ts";
+  import { Input } from "#lib/components/ui/input/index.ts";
+  import { formatRelativeTime } from "#lib/format.ts";
+  import type { SearchHit } from "#lib/generated/bindings.ts";
+  import { shortId } from "#lib/session-status.ts";
+  import { connection, sync } from "#lib/stores/app.svelte.ts";
   import { toast } from "svelte-sonner";
   import SearchIcon from "@lucide/svelte/icons/search";
 

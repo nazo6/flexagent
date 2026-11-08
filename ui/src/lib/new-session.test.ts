@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { NodeSummary, ProjectSummary, SessionSummary } from "$lib/generated/bindings";
+import type { NodeSummary, ProjectSummary, SessionSummary } from "#lib/generated/bindings.ts";
 import {
   buildPathCandidates,
   pickDefaultCandidate,

@@ -53,7 +53,7 @@ import type {
   WorkspaceDiffResponse,
   WorktreeInfo,
   WorktreesResponse,
-} from "$lib/generated/bindings";
+} from "#lib/generated/bindings.ts";
 import { ApiError } from "./errors";
 
 /** クエリパラメータ (undefined / null は省略される)。 */

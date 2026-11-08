@@ -1,7 +1,7 @@
 <script lang="ts">
-  import { getNodeAvailability } from "$lib/node-status";
-  import type { NodeSummary } from "$lib/generated/bindings";
-  import { cn } from "$lib/utils";
+  import { getNodeAvailability } from "#lib/node-status.ts";
+  import type { NodeSummary } from "#lib/generated/bindings.ts";
+  import { cn } from "#lib/utils.ts";
 
   interface Props {
     node?: NodeSummary | null;

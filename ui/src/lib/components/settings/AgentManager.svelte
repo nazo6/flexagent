@@ -1,15 +1,15 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import * as AlertDialog from "$lib/components/ui/alert-dialog";
-  import { Badge } from "$lib/components/ui/badge";
-  import { Button } from "$lib/components/ui/button";
-  import { Card } from "$lib/components/ui/card";
-  import * as Dialog from "$lib/components/ui/dialog";
-  import { Input } from "$lib/components/ui/input";
-  import { Label } from "$lib/components/ui/label";
-  import { agentSourceLabel, agentsAvailableOn, isPackageEnabled } from "$lib/agents";
-  import type { AgentSummary } from "$lib/generated/bindings";
-  import { sync } from "$lib/stores/app.svelte";
+  import * as AlertDialog from "#lib/components/ui/alert-dialog/index.ts";
+  import { Badge } from "#lib/components/ui/badge/index.ts";
+  import { Button } from "#lib/components/ui/button/index.ts";
+  import { Card } from "#lib/components/ui/card/index.ts";
+  import * as Dialog from "#lib/components/ui/dialog/index.ts";
+  import { Input } from "#lib/components/ui/input/index.ts";
+  import { Label } from "#lib/components/ui/label/index.ts";
+  import { agentSourceLabel, agentsAvailableOn, isPackageEnabled } from "#lib/agents.ts";
+  import type { AgentSummary } from "#lib/generated/bindings.ts";
+  import { sync } from "#lib/stores/app.svelte.ts";
   import { toast } from "svelte-sonner";
   import BotIcon from "@lucide/svelte/icons/bot";
   import DownloadIcon from "@lucide/svelte/icons/download";

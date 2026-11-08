@@ -1,13 +1,13 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import "../app.css";
-  import AppSidebar from "$lib/components/layout/AppSidebar.svelte";
-  import ConnectionMenu from "$lib/components/ConnectionMenu.svelte";
-  import TokenDialog from "$lib/components/TokenDialog.svelte";
-  import { Button } from "$lib/components/ui/button";
-  import * as Sheet from "$lib/components/ui/sheet";
-  import { Toaster } from "$lib/components/ui/sonner";
-  import { connection, initApp } from "$lib/stores/app.svelte";
+  import AppSidebar from "#lib/components/layout/AppSidebar.svelte";
+  import ConnectionMenu from "#lib/components/ConnectionMenu.svelte";
+  import TokenDialog from "#lib/components/TokenDialog.svelte";
+  import { Button } from "#lib/components/ui/button/index.ts";
+  import * as Sheet from "#lib/components/ui/sheet/index.ts";
+  import { Toaster } from "#lib/components/ui/sonner/index.ts";
+  import { connection, initApp } from "#lib/stores/app.svelte.ts";
   import LoaderCircleIcon from "@lucide/svelte/icons/loader-circle";
   import MenuIcon from "@lucide/svelte/icons/menu";
   import PlugZapIcon from "@lucide/svelte/icons/plug-zap";

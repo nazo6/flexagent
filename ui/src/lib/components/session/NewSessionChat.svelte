@@ -1,32 +1,32 @@
 <script lang="ts">
   import { goto } from "$app/navigation";
   import { page } from "$app/state";
-  import * as Dialog from "$lib/components/ui/dialog";
-  import { Button } from "$lib/components/ui/button";
-  import { Input } from "$lib/components/ui/input";
-  import { Label } from "$lib/components/ui/label";
-  import NodeStatusBadge from "$lib/components/NodeStatusBadge.svelte";
-  import FolderBrowserDialog from "$lib/components/fs/FolderBrowserDialog.svelte";
-  import { agentOptionLabel, agentsAvailableOn } from "$lib/agents";
+  import * as Dialog from "#lib/components/ui/dialog/index.ts";
+  import { Button } from "#lib/components/ui/button/index.ts";
+  import { Input } from "#lib/components/ui/input/index.ts";
+  import { Label } from "#lib/components/ui/label/index.ts";
+  import NodeStatusBadge from "#lib/components/NodeStatusBadge.svelte";
+  import FolderBrowserDialog from "#lib/components/fs/FolderBrowserDialog.svelte";
+  import { agentOptionLabel, agentsAvailableOn } from "#lib/agents.ts";
   import type {
     AgentSummary,
     ProvisionerSummary,
     ProvisionerTestResponse,
-  } from "$lib/generated/bindings";
-  import { formatRelativeTime } from "$lib/format";
+  } from "#lib/generated/bindings.ts";
+  import { formatRelativeTime } from "#lib/format.ts";
   import {
     buildPathCandidates,
     pickDefaultCandidate,
     pickDefaultNode,
     type PathCandidate,
-  } from "$lib/new-session";
+  } from "#lib/new-session.ts";
   import {
     loadNewSessionPrefs,
     saveNewSessionPrefs,
     type SessionModePreference,
-  } from "$lib/session-prefs";
-  import { getNodeAvailability } from "$lib/node-status";
-  import { sync } from "$lib/stores/app.svelte";
+  } from "#lib/session-prefs.ts";
+  import { getNodeAvailability } from "#lib/node-status.ts";
+  import { sync } from "#lib/stores/app.svelte.ts";
   import { toast } from "svelte-sonner";
   import { onMount, untrack } from "svelte";
   import BotIcon from "@lucide/svelte/icons/bot";

@@ -15,8 +15,9 @@
  *   (アプリを開かずに承認が完了する)。
  */
 
-import { build, files, version } from "$service-worker";
-import { urlBase64ToUint8Array } from "$lib/push-keys";
+import { version } from "$app/env";
+import { assets, immutable } from "$app/manifest";
+import { urlBase64ToUint8Array } from "#lib/push-keys.ts";
 
 declare const self: ServiceWorkerGlobalScope;
 
@@ -31,8 +32,20 @@ interface PushPayload {
   reject_option_id: string | null;
 }
 
+declare global {
+  interface NotificationAction {
+    action: string;
+    title: string;
+    icon?: string;
+  }
+
+  interface NotificationOptions {
+    actions?: NotificationAction[];
+  }
+}
+
 const CACHE_NAME = `fxg-${version}`;
-const APP_SHELL = [...build, ...files];
+const APP_SHELL = [...immutable.map((a) => a.path), ...assets.map((a) => a.path)];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(

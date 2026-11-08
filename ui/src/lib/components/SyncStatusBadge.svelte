@@ -1,8 +1,8 @@
 <script lang="ts">
-  import { Badge } from "$lib/components/ui/badge";
-  import { formatRelativeTime } from "$lib/format";
-  import { connection, sync } from "$lib/stores/app.svelte";
-  import { cn } from "$lib/utils";
+  import { Badge } from "#lib/components/ui/badge/index.ts";
+  import { formatRelativeTime } from "#lib/format.ts";
+  import { connection, sync } from "#lib/stores/app.svelte.ts";
+  import { cn } from "#lib/utils.ts";
   import WifiIcon from "@lucide/svelte/icons/wifi";
   import WifiOffIcon from "@lucide/svelte/icons/wifi-off";
 

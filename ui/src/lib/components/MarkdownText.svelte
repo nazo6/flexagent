@@ -7,8 +7,8 @@
    * - 描画後に `enhanceCodeBlocks` がコードフェンスへ shiki のハイライトを
    *   非同期適用する (テキストが落ち着くまでデバウンス)。
    */
-  import { enhanceCodeBlocks } from "$lib/highlight";
-  import { renderMarkdown } from "$lib/markdown";
+  import { enhanceCodeBlocks } from "#lib/highlight.ts";
+  import { renderMarkdown } from "#lib/markdown.ts";
 
   let {
     text,

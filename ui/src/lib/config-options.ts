@@ -1,4 +1,4 @@
-import type { JsonValue } from "$lib/generated/bindings";
+import type { JsonValue } from "#lib/generated/bindings.ts";
 
 /** 設定項目 (`ConfigOptionInfo`) の選択肢 (Select の value / 表示ラベル / 送信値)。 */
 export interface ConfigOptionChoice {

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { FileDiff } from "$lib/generated/bindings";
+  import type { FileDiff } from "#lib/generated/bindings.ts";
 
   let { file }: { file: FileDiff } = $props();
 

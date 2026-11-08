@@ -1,9 +1,9 @@
 <script lang="ts">
-  import * as Dialog from "$lib/components/ui/dialog";
-  import { Button } from "$lib/components/ui/button";
-  import { Input } from "$lib/components/ui/input";
-  import type { FsEntry } from "$lib/generated/bindings";
-  import { sync } from "$lib/stores/app.svelte";
+  import * as Dialog from "#lib/components/ui/dialog/index.ts";
+  import { Button } from "#lib/components/ui/button/index.ts";
+  import { Input } from "#lib/components/ui/input/index.ts";
+  import type { FsEntry } from "#lib/generated/bindings.ts";
+  import { sync } from "#lib/stores/app.svelte.ts";
   import ArrowUpIcon from "@lucide/svelte/icons/arrow-up";
   import ChevronRightIcon from "@lucide/svelte/icons/chevron-right";
   import CornerDownLeftIcon from "@lucide/svelte/icons/corner-down-left";

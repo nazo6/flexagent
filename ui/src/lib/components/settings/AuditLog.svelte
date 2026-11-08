@@ -1,12 +1,12 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { Badge } from "$lib/components/ui/badge";
-  import { Button } from "$lib/components/ui/button";
-  import { Card } from "$lib/components/ui/card";
-  import { formatEpochMs } from "$lib/format";
-  import type { AuditLogEntry } from "$lib/generated/bindings";
-  import { shortId } from "$lib/session-status";
-  import { connection, sync } from "$lib/stores/app.svelte";
+  import { Badge } from "#lib/components/ui/badge/index.ts";
+  import { Button } from "#lib/components/ui/button/index.ts";
+  import { Card } from "#lib/components/ui/card/index.ts";
+  import { formatEpochMs } from "#lib/format.ts";
+  import type { AuditLogEntry } from "#lib/generated/bindings.ts";
+  import { shortId } from "#lib/session-status.ts";
+  import { connection, sync } from "#lib/stores/app.svelte.ts";
   import { toast } from "svelte-sonner";
   import RefreshCwIcon from "@lucide/svelte/icons/refresh-cw";
 

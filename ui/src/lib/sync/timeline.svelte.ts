@@ -1,4 +1,4 @@
-import type { SessionEventEnvelope, StreamDeltaPayload } from "$lib/generated/bindings";
+import type { SessionEventEnvelope, StreamDeltaPayload } from "#lib/generated/bindings.ts";
 import {
   clearStreamBuffers,
   insertEventSorted,

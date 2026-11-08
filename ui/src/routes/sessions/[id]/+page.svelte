@@ -1,28 +1,28 @@
 <script lang="ts">
   import { page } from "$app/state";
   import { goto } from "$app/navigation";
-  import * as AlertDialog from "$lib/components/ui/alert-dialog";
-  import BootstrapLogCard from "$lib/components/BootstrapLogCard.svelte";
-  import ChatTimeline from "$lib/components/chat/ChatTimeline.svelte";
-  import Composer from "$lib/components/chat/Composer.svelte";
-  import DiffPane from "$lib/components/diff/DiffPane.svelte";
-  import NodeStatusBadge from "$lib/components/NodeStatusBadge.svelte";
-  import SessionActionsMenu from "$lib/components/session/SessionActionsMenu.svelte";
-  import ContextMeter from "$lib/components/session/ContextMeter.svelte";
-  import SessionStatusBadge from "$lib/components/SessionStatusBadge.svelte";
-  import TerminalView from "$lib/components/terminal/TerminalView.svelte";
-  import { Button } from "$lib/components/ui/button";
-  import { formatRelativeTime } from "$lib/format";
-  import { shortId } from "$lib/session-status";
-  import { sync } from "$lib/stores/app.svelte";
+  import * as AlertDialog from "#lib/components/ui/alert-dialog/index.ts";
+  import BootstrapLogCard from "#lib/components/BootstrapLogCard.svelte";
+  import ChatTimeline from "#lib/components/chat/ChatTimeline.svelte";
+  import Composer from "#lib/components/chat/Composer.svelte";
+  import DiffPane from "#lib/components/diff/DiffPane.svelte";
+  import NodeStatusBadge from "#lib/components/NodeStatusBadge.svelte";
+  import SessionActionsMenu from "#lib/components/session/SessionActionsMenu.svelte";
+  import ContextMeter from "#lib/components/session/ContextMeter.svelte";
+  import SessionStatusBadge from "#lib/components/SessionStatusBadge.svelte";
+  import TerminalView from "#lib/components/terminal/TerminalView.svelte";
+  import { Button } from "#lib/components/ui/button/index.ts";
+  import { formatRelativeTime } from "#lib/format.ts";
+  import { shortId } from "#lib/session-status.ts";
+  import { sync } from "#lib/stores/app.svelte.ts";
   import {
     bootstrapLogLines,
     buildTimelineItems,
     capabilitiesFromEvents,
     latestStatusFromEvents,
     latestUsageFromEvents,
-  } from "$lib/sync/reducer";
-  import { cn } from "$lib/utils";
+  } from "#lib/sync/reducer.ts";
+  import { cn } from "#lib/utils.ts";
   import { toast } from "svelte-sonner";
   import ArchiveIcon from "@lucide/svelte/icons/archive";
   import ArrowDownIcon from "@lucide/svelte/icons/arrow-down";

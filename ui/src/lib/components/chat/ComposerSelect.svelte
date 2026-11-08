@@ -1,6 +1,6 @@
 <script lang="ts">
-  import * as Select from "$lib/components/ui/select";
-  import { cn } from "$lib/utils";
+  import * as Select from "#lib/components/ui/select/index.ts";
+  import { cn } from "#lib/utils.ts";
 
   interface Item {
     /** Select の value (送信値) */

@@ -1,16 +1,16 @@
 <script lang="ts">
   import { page } from "$app/state";
-  import { Badge } from "$lib/components/ui/badge";
-  import { formatRelativeTimeCompact } from "$lib/format";
-  import { getNodeAvailability } from "$lib/node-status";
-  import { pinned } from "$lib/stores/pinned.svelte";
-  import { sync } from "$lib/stores/app.svelte";
-  import { cn } from "$lib/utils";
-  import ConnectionMenu from "$lib/components/ConnectionMenu.svelte";
-  import KillSwitchButton from "$lib/components/KillSwitchButton.svelte";
-  import SessionActionsMenu from "$lib/components/session/SessionActionsMenu.svelte";
-  import SyncStatusBadge from "$lib/components/SyncStatusBadge.svelte";
-  import type { SessionSummary } from "$lib/generated/bindings";
+  import { Badge } from "#lib/components/ui/badge/index.ts";
+  import { formatRelativeTimeCompact } from "#lib/format.ts";
+  import { getNodeAvailability } from "#lib/node-status.ts";
+  import { pinned } from "#lib/stores/pinned.svelte.ts";
+  import { sync } from "#lib/stores/app.svelte.ts";
+  import { cn } from "#lib/utils.ts";
+  import ConnectionMenu from "#lib/components/ConnectionMenu.svelte";
+  import KillSwitchButton from "#lib/components/KillSwitchButton.svelte";
+  import SessionActionsMenu from "#lib/components/session/SessionActionsMenu.svelte";
+  import SyncStatusBadge from "#lib/components/SyncStatusBadge.svelte";
+  import type { SessionSummary } from "#lib/generated/bindings.ts";
   import AlertCircleIcon from "@lucide/svelte/icons/alert-circle";
   import ArchiveIcon from "@lucide/svelte/icons/archive";
   import ChevronDownIcon from "@lucide/svelte/icons/chevron-down";

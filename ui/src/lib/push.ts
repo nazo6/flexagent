@@ -1,5 +1,5 @@
-import type { SystemInfoResponse } from "$lib/generated/bindings";
-import { connection } from "$lib/stores/app.svelte";
+import type { SystemInfoResponse } from "#lib/generated/bindings.ts";
+import { connection } from "#lib/stores/app.svelte.ts";
 import { isValidVapidKey, urlBase64ToUint8Array } from "./push-keys";
 
 /**

@@ -1,10 +1,10 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { Button } from "$lib/components/ui/button";
-  import { Badge } from "$lib/components/ui/badge";
-  import { decodeBase64ToBytes, encodeTextToBase64 } from "$lib/base64";
-  import type { PtyClientMessage, PtyServerMessage } from "$lib/generated/bindings";
-  import { connection } from "$lib/stores/app.svelte";
+  import { Button } from "#lib/components/ui/button/index.ts";
+  import { Badge } from "#lib/components/ui/badge/index.ts";
+  import { decodeBase64ToBytes, encodeTextToBase64 } from "#lib/base64.ts";
+  import type { PtyClientMessage, PtyServerMessage } from "#lib/generated/bindings.ts";
+  import { connection } from "#lib/stores/app.svelte.ts";
   import { GhosttyWebAdapter } from "./ghostty-adapter";
   import RefreshCwIcon from "@lucide/svelte/icons/refresh-cw";
   import TriangleAlertIcon from "@lucide/svelte/icons/triangle-alert";

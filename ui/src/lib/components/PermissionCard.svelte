@@ -1,9 +1,9 @@
 <script lang="ts">
-  import { Badge } from "$lib/components/ui/badge";
-  import { Button } from "$lib/components/ui/button";
-  import type { PermissionOption } from "$lib/generated/bindings";
-  import { formatRelativeTime } from "$lib/format";
-  import { sync } from "$lib/stores/app.svelte";
+  import { Badge } from "#lib/components/ui/badge/index.ts";
+  import { Button } from "#lib/components/ui/button/index.ts";
+  import type { PermissionOption } from "#lib/generated/bindings.ts";
+  import { formatRelativeTime } from "#lib/format.ts";
+  import { sync } from "#lib/stores/app.svelte.ts";
   import { toast } from "svelte-sonner";
   import CheckIcon from "@lucide/svelte/icons/check";
   import ChevronRightIcon from "@lucide/svelte/icons/chevron-right";
