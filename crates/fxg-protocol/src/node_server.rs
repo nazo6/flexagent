@@ -1,518 +1,528 @@
-//! Node ⇔ Central Server 間プロトコル (WebSocket & Stdio Pipe 共通)。
+//! Node <-> Central Server protocol (shared by WebSocket and stdio pipe).
 //!
-//! 常駐ノード (Outbound WebSocket) と一時VMノード (`fxg daemon --stdio` の
-//! JSON Lines) は、トランスポート層が異なるだけで **100%同一のメッセージ型**を
-//! 共有する (設計: `docs/03-protocol-and-api.md` §2)。
+//! A resident node (outbound WebSocket) and an ephemeral VM node (JSON Lines of
+//! `fxg daemon --stdio`) differ only in the transport layer and share **exactly the
+//! same message types** (design: `docs/03-protocol-and-api.md` §2).
 //!
-//! これらはサーバー側実装の内部プロトコルであり UI には公開しないため
-//! `specta` の export 対象外とする。
+//! This is the internal protocol of the server implementation and is not exposed
+//! to the UI, so it is excluded from `specta` export.
 
 use serde::{Deserialize, Serialize};
 
 use crate::common::{ErrorCode, NodeProjectReport, SessionControlAction, WorkspaceDiffResponse};
 use crate::events::SessionEventEnvelope;
-/// ノードが保持するセッションの同期状態 (`NodeHello` で報告)。
+/// Synchronization state of a session held by the node (reported in `NodeHello`).
 ///
-/// ハブは自 DB の `last_node_seq` と比較し、欠落・遅延があれば
-/// [`ServerToNodeMsg::ResyncRequest`] を返す。
+/// The hub compares it with `last_node_seq` in its own DB and returns
+/// [`ServerToNodeMsg::ResyncRequest`] when something is missing or lagging.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SessionSyncState {
-    /// 対象セッションID
+    /// Target session ID
     pub session_id: String,
-    /// ノード側に永続化済みの最新 `node_seq`
+    /// Latest `node_seq` persisted on the node
     pub last_node_seq: u64,
 }
 
-/// ハブ側で欠落・遅延しているセッションの再送指定 (`ResyncRequest`)。
+/// Resend specification for a session the hub is missing or lagging on (`ResyncRequest`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ResyncTarget {
-    /// 対象セッションID
+    /// Target session ID
     pub session_id: String,
-    /// この値以降 (`>=`) のイベントを水位に関係なく再送する
-    /// (`1` は `SessionCreated` を含む全量再送を意味する)
+    /// Resend events at or after (`>=`) this value regardless of the watermark
+    /// (`1` means a full resend including `SessionCreated`)
     pub from_node_seq: u64,
 }
 
-/// Node → Server への送信メッセージ。
+/// Message sent from the node to the server.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case")]
 pub enum NodeToServerMsg {
-    /// 接続直後のハンドシェイク
-    /// (ノード情報・プロジェクト紐付け・セッション同期状態一覧を通知)。
+    /// Handshake right after connecting
+    /// (reports node information, project bindings and session sync states).
     NodeHello {
-        /// ノードID (サーバー側でトークン発行対象と一致することを検証)
+        /// Node ID (the server verifies that it matches the token's target)
         node_id: String,
-        /// 表示名
+        /// Display name
         name: String,
         /// OS (`windows` / `linux` / `macos`)
         os: String,
-        /// アーキテクチャ (`x86_64` / `aarch64`)
+        /// Architecture (`x86_64` / `aarch64`)
         arch: String,
-        /// fxg バイナリバージョン
+        /// fxg binary version
         version: String,
-        /// 一時VM / コンテナノードか
+        /// Whether this is an ephemeral VM / container node
         is_ephemeral: bool,
-        /// 利用可能なエージェントID一覧
+        /// Agent IDs available on this node
         installed_agents: Vec<String>,
-        /// プロジェクト紐付け報告
+        /// Project binding report
         projects: Vec<NodeProjectReport>,
-        /// セッション同期状態一覧
+        /// Session sync states
         sessions: Vec<SessionSyncState>,
     },
-    /// 永続化イベントのバッチ送信 (Store-and-Forward Outbox)。
+    /// Sends a batch of persisted events (store-and-forward outbox).
     ///
-    /// セッションのメタデータ (`SessionCreated` 等) も `session_events` 上の
-    /// イベントとして送信される。通常は `synced_up_to_node_seq` より後の
-    /// イベントを `node_seq` 昇順で送る。
+    /// Session metadata (such as `SessionCreated`) is also sent as events on
+    /// `session_events`. Normally the events after `synced_up_to_node_seq` are sent
+    /// in ascending `node_seq` order.
     EventBatchPush {
-        /// 送信イベント (バッチはセッション単位に分割される)
+        /// Events to send (batches are split per session)
         events: Vec<SessionEventEnvelope>,
     },
-    /// リアルタイム・エフェメラルチャンク (DBフラッシュ前の高速表示用)。
+    /// Realtime ephemeral chunk (for fast rendering before the DB flush).
     LiveStreamDelta {
-        /// 対象セッションID
+        /// Target session ID
         session_id: String,
-        /// 差分本体
+        /// The delta body
         delta: crate::common::StreamDeltaPayload,
     },
-    /// サーバーからのコマンド実行結果応答 (要求元クライアントへ相関返却される)。
+    /// Result of a command from the server (correlated back to the requesting client).
     CommandResult {
-        /// 相関ID
+        /// Correlation ID
         command_id: String,
-        /// 成功したか
+        /// Whether it succeeded
         success: bool,
-        /// 失敗時の構造化エラーコード
+        /// Structured error code on failure
         code: Option<ErrorCode>,
-        /// 人間向けメッセージ
+        /// Human-readable message
         error: Option<String>,
-        /// 対象セッションID (任意)
+        /// Target session ID (optional)
         session_id: Option<String>,
     },
-    /// PTY 出力データチャンク (Web Terminal → クライアント)。
+    /// A PTY output data chunk (web terminal -> client).
     PtyOutput {
         /// PTY ID
         pty_id: String,
-        /// 出力バイト列 (Base64)
+        /// Output bytes (Base64)
         data_b64: String,
     },
-    /// PTY プロセス終了通知。
+    /// Notification that the PTY process exited.
     PtyExit {
         /// PTY ID
         pty_id: String,
-        /// 終了コード
+        /// Exit code
         exit_code: Option<i32>,
     },
-    /// ノードのGit Diff取得結果応答。
+    /// Response with the result of fetching the git diff on the node.
     GitDiffResult {
-        /// 要求時の相関ID
+        /// Correlation ID of the request
         request_id: String,
-        /// 取得成功時の Diff
+        /// The diff on success
         diff: Option<WorkspaceDiffResponse>,
-        /// 失敗時のメッセージ
+        /// Failure message
         error: Option<String>,
     },
-    /// Worktree 操作 (`ManageWorktree`) の結果応答。
+    /// Response with the result of a worktree operation (`ManageWorktree`).
     WorktreeResult {
-        /// 要求時の相関ID
+        /// Correlation ID of the request
         command_id: String,
-        /// 成功時の Worktree 情報 (削除時は `None`)
+        /// Worktree information on success (`None` when removed)
         worktree: Option<crate::client_api::WorktreeInfo>,
-        /// 失敗時のメッセージ
+        /// Failure message
         error: Option<String>,
     },
-    /// セッション Revert (`RevertSession`) の結果応答。
+    /// Response with the result of a session revert (`RevertSession`).
     RevertResult {
-        /// 要求時の相関ID
+        /// Correlation ID of the request
         command_id: String,
-        /// 成功したか
+        /// Whether it succeeded
         success: bool,
-        /// 失敗時の構造化エラーコード
+        /// Structured error code on failure
         code: Option<ErrorCode>,
-        /// 成功時の復元結果
+        /// Restore outcome on success
         outcome: Option<crate::client_api::SessionRevertResponse>,
-        /// 失敗時のメッセージ
+        /// Failure message
         error: Option<String>,
     },
-    /// セッション再開 (`ResumeSession`) の結果応答。
+    /// Response with the result of a session resume (`ResumeSession`).
     ResumeResult {
-        /// 要求時の相関ID
+        /// Correlation ID of the request
         command_id: String,
-        /// 成功したか
+        /// Whether it succeeded
         success: bool,
-        /// 失敗時の構造化エラーコード
+        /// Structured error code on failure
         code: Option<ErrorCode>,
-        /// 成功時のネイティブ復元成否 (`false` = 履歴 Replay で継続)
+        /// Whether native restoration succeeded (`false` = continued with history replay)
         context_restored: Option<bool>,
-        /// 失敗時のメッセージ
+        /// Failure message
         error: Option<String>,
     },
-    /// セッションのアーカイブ/復元 (`ArchiveSession`) の結果応答。
+    /// Response with the result of archiving / restoring a session (`ArchiveSession`).
     ArchiveResult {
-        /// 要求時の相関ID
+        /// Correlation ID of the request
         command_id: String,
-        /// 成功したか
+        /// Whether it succeeded
         success: bool,
-        /// 失敗時の構造化エラーコード
+        /// Structured error code on failure
         code: Option<ErrorCode>,
-        /// 成功時のアーカイブ日時 (Unix epoch ms)。復元時は `None`
+        /// Archive time on success (Unix epoch ms). `None` when restored
         archived_at: Option<i64>,
-        /// 失敗時のメッセージ
+        /// Failure message
         error: Option<String>,
     },
-    /// セッション削除 (`DeleteSession`) の結果応答。
+    /// Response with the result of deleting a session (`DeleteSession`).
     DeleteResult {
-        /// 要求時の相関ID
+        /// Correlation ID of the request
         command_id: String,
-        /// 成功したか
+        /// Whether it succeeded
         success: bool,
-        /// 失敗時の構造化エラーコード
+        /// Structured error code on failure
         code: Option<ErrorCode>,
-        /// 失敗時のメッセージ
+        /// Failure message
         error: Option<String>,
     },
-    /// ファイルシステム閲覧 (`BrowseFs`) の結果応答。
+    /// Response with the result of browsing the file system (`BrowseFs`).
     BrowseFsResult {
-        /// 要求時の相関ID
+        /// Correlation ID of the request
         request_id: String,
-        /// 取得成功時のブラウズ結果
+        /// Browse result on success
         response: Option<crate::client_api::FsBrowseResponse>,
-        /// 失敗時のメッセージ
+        /// Failure message
         error: Option<String>,
     },
-    /// プロジェクト一括スキャン (`ProjectScan`) の結果応答。
+    /// Response with the result of a bulk project scan (`ProjectScan`).
     ProjectScanResult {
-        /// 要求時の相関ID
+        /// Correlation ID of the request
         request_id: String,
-        /// 成功時のスキャン結果
+        /// Scan result on success
         response: Option<crate::client_api::ProjectScanResponse>,
-        /// 失敗時のメッセージ
+        /// Failure message
         error: Option<String>,
     },
-    /// プロジェクト手動紐付け (`ProjectLink`) の結果応答。
+    /// Response with the result of a manual project link (`ProjectLink`).
     ProjectLinkResult {
-        /// 要求時の相関ID
+        /// Correlation ID of the request
         request_id: String,
-        /// 成功時の紐付け結果
+        /// Link result on success
         response: Option<crate::client_api::ProjectLinkResponse>,
-        /// 失敗時のメッセージ
+        /// Failure message
         error: Option<String>,
     },
-    /// ACP Registry カタログ (`ListAgents`) の結果応答。
+    /// Response with the result of the ACP Registry catalog (`ListAgents`).
     AgentsResult {
-        /// 要求時の相関ID
+        /// Correlation ID of the request
         request_id: String,
-        /// 取得成功時のカタログ + 導入状態
+        /// Catalog plus installation state on success
         response: Option<crate::client_api::AgentsResponse>,
-        /// 失敗時のメッセージ
+        /// Failure message
         error: Option<String>,
     },
-    /// エージェント管理操作 (`ManageAgent`) の結果応答。
+    /// Response with the result of an agent management operation (`ManageAgent`).
     AgentOpResult {
-        /// 要求時の相関ID
+        /// Correlation ID of the request
         request_id: String,
-        /// 成功したか
+        /// Whether it succeeded
         success: bool,
-        /// 失敗時の構造化エラーコード
+        /// Structured error code on failure
         code: Option<ErrorCode>,
-        /// 成功時の表示メッセージ (例: `installed opencode2 0.1.0`)
+        /// Display message on success (e.g. `installed opencode2 0.1.0`)
         message: Option<String>,
-        /// 失敗時のメッセージ
+        /// Failure message
         error: Option<String>,
     },
-    /// PTY 起動・操作の失敗通知 (エラーコードは文字列。例: `PTY_DISABLED`)。
+    /// Failure notification for starting or operating a PTY (the error code is a
+    /// string, e.g. `PTY_DISABLED`).
     ///
-    /// ノード側設定 `allow_remote_pty = false` の場合、リモートからの
-    /// `PtySpawn` に対して `PTY_DISABLED` を返す (設計: docs/01 §7.4)。
+    /// When the node setting `allow_remote_pty = false` is in effect, a remote
+    /// `PtySpawn` gets `PTY_DISABLED` (design: docs/01 §7.4).
     PtyError {
         /// PTY ID
         pty_id: String,
-        /// エラーコード文字列
+        /// Error code string
         code: String,
-        /// 人間向けメッセージ
+        /// Human-readable message
         message: String,
     },
-    /// 一時VMからのオンメモリGit認証要求 (`GIT_ASKPASS` プロキシ)。
+    /// In-memory git authentication request from an ephemeral VM (the `GIT_ASKPASS`
+    /// proxy).
     GitCredentialRequest {
-        /// 相関ID
+        /// Correlation ID
         request_id: String,
-        /// 対象リポジトリURL
+        /// Target repository URL
         repo_url: String,
-        /// 操作種別 (`clone` / `fetch` / `push`)
+        /// Operation kind (`clone` / `fetch` / `push`)
         operation: String,
     },
-    /// 一時VM破棄前の作業ツリー・コミット履歴バンドル退避 (`git bundle create`)。
+    /// Saves the working tree and commit history bundle before an ephemeral VM is
+    /// discarded (`git bundle create`).
     ///
-    /// bundle は圧縮して Base64 化し、1メッセージ上限 (例: 16 MiB) を
-    /// 超える場合は分割転送する。
+    /// The bundle is compressed and Base64-encoded, and transferred in chunks when
+    /// it exceeds the per-message limit (e.g. 16 MiB).
     WorkspaceBundleUpload {
-        /// 対象セッションID
+        /// Target session ID
         session_id: String,
-        /// 対象ブランチ
+        /// Target branch
         branch: String,
-        /// HEAD コミット
+        /// HEAD commit
         head_commit: String,
-        /// bundle データ (圧縮 + Base64)
+        /// Bundle data (compressed + Base64)
         bundle_b64: String,
     },
-    /// Graceful Drain 完了通知 (受信後に中央サーバーが子プロセス/VMを破棄)。
+    /// Notification that a graceful drain completed (after receiving it the central
+    /// server discards the child process / VM).
     DrainComplete {
-        /// ノードID
+        /// Node ID
         node_id: String,
     },
 }
 
-/// Server → Node への送信メッセージ。
+/// Message sent from the server to the node.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case")]
 pub enum ServerToNodeMsg {
-    /// [`NodeToServerMsg::EventBatchPush`] に対する永続化完了ACK。
+    /// Persistence-complete ACK for [`NodeToServerMsg::EventBatchPush`].
     ///
-    /// バッチはセッション単位に分割して送信し、ACK もセッション単位で返却する。
-    /// ノードは受信後 `sessions.synced_up_to_node_seq` を水位として更新する。
+    /// Batches are sent split per session and the ACKs are returned per session
+    /// too. After receiving one, the node advances `sessions.synced_up_to_node_seq`
+    /// as its watermark.
     EventBatchAck {
-        /// 対象セッションID
+        /// Target session ID
         session_id: String,
-        /// この値以下の `node_seq` がハブに永続化された
+        /// Every `node_seq` at or below this value has been persisted in the hub
         acked_up_to_node_seq: u64,
     },
-    /// `NodeHello` への応答: ハブ側で欠落・遅延しているセッションの再送要求。
+    /// Response to `NodeHello`: asks for a resend of sessions the hub is missing or
+    /// lagging on.
     ///
-    /// ノードは指定 `from_node_seq` 以降のイベントを水位に関係なく再送する。
+    /// The node resends events at or after the given `from_node_seq` regardless of
+    /// the watermark.
     ResyncRequest {
-        /// 再送対象
+        /// Sessions to resend
         sessions: Vec<ResyncTarget>,
     },
-    /// クライアント (Web/Android) からのセッション新規起動要求。
+    /// Request from a client (web / Android) to start a new session.
     StartSession {
-        /// 相関ID
+        /// Correlation ID
         command_id: String,
-        /// 起動するセッションID (サーバーが採番)
+        /// Session ID to start (assigned by the server)
         session_id: String,
-        /// 論理プロジェクトID
+        /// Logical project ID
         project_id: String,
-        /// 実行ディレクトリ (Worktree パス含む)
+        /// Working directory (including the worktree path)
         local_path: String,
-        /// エージェントID
+        /// Agent ID
         agent_id: String,
-        /// 初期プロンプト
+        /// Initial prompt
         initial_prompt: Option<String>,
-        /// 初期モード
+        /// Initial mode
         mode: Option<String>,
-        /// エージェントへの追加引数
+        /// Extra arguments passed to the agent
         extra_args: Option<Vec<String>>,
-        /// 別ノードからの履歴引き継ぎ時 (Replay 注入) の会話履歴
+        /// Conversation history when taking over history from another node
+        /// (injected by replay)
         fork_context_messages: Option<Vec<crate::common::ForkHistoryItem>>,
-        /// 一時VMから退避された Git バンドルの復元用
+        /// Used to restore a git bundle saved from an ephemeral VM
         restore_git_bundle_b64: Option<String>,
     },
-    /// プロンプト送信 (スラッシュコマンド含む)。
+    /// Sends a prompt (including slash commands).
     SendPrompt {
-        /// 相関ID
+        /// Correlation ID
         command_id: String,
-        /// 対象セッションID
+        /// Target session ID
         session_id: String,
-        /// プロンプト本文
+        /// Prompt body
         text: String,
-        /// 送信元 (`cli` / `web` / `android`)
+        /// Source (`cli` / `web` / `android`)
         client_source: String,
     },
-    /// 承認リクエストへの回答。
+    /// Answers a permission request.
     RespondPermission {
-        /// 相関ID
+        /// Correlation ID
         command_id: String,
-        /// 対象セッションID
+        /// Target session ID
         session_id: String,
         /// ACP request id
         request_id: String,
-        /// 選択された `option_id`
+        /// The selected `option_id`
         selected_option_id: String,
-        /// 解決主体 (`cli` / `web` / `android_push`)
+        /// Who resolved it (`cli` / `web` / `android_push`)
         resolved_by: String,
     },
-    /// elicitation (構造化入力リクエスト) への回答。
+    /// Answers an elicitation (structured input request).
     RespondElicitation {
-        /// 相関ID
+        /// Correlation ID
         command_id: String,
-        /// 対象セッションID
+        /// Target session ID
         session_id: String,
         /// ACP elicitation id
         elicitation_id: String,
-        /// ユーザーの応答アクション (`accept` / `decline` / `cancel`)
+        /// The user's response action (`accept` / `decline` / `cancel`)
         action: crate::common::ElicitationAction,
-        /// `accept` 時の回答内容 (form の `requested_schema` 準拠)
+        /// Answer content for `accept` (following the form's `requested_schema`)
         content: serde_json::Value,
-        /// 解決主体 (`cli` / `web` / `android_push`)
+        /// Who resolved it (`cli` / `web` / `android_push`)
         resolved_by: String,
     },
-    /// モード切替 / 設定変更 / キャンセル / Kill。
+    /// Mode switch / configuration change / cancel / kill.
     ControlSession {
-        /// 相関ID
+        /// Correlation ID
         command_id: String,
-        /// 対象セッションID
+        /// Target session ID
         session_id: String,
-        /// 実行する操作
+        /// Operation to execute
         action: SessionControlAction,
     },
-    /// 指定ターン時点へのファイル復元 (`fxg session revert`)。
+    /// Restores files to a given turn (`fxg session revert`).
     ///
-    /// ノードの Shadow Git Tree からワークスペースを復元し、
-    /// `SessionReverted` イベントを追記する
-    /// (設計: `docs/04-agent-drivers-and-windows.md` §4.1)。
+    /// Restores the workspace from the node's shadow git tree and appends a
+    /// `SessionReverted` event
+    /// (design: `docs/04-agent-drivers-and-windows.md` §4.1).
     RevertSession {
-        /// 相関ID
+        /// Correlation ID
         command_id: String,
-        /// 対象セッションID
+        /// Target session ID
         session_id: String,
-        /// Revert 基準にする `UserMessage` の `node_seq`
-        /// (省略時は直近ターン)
+        /// `node_seq` of the `UserMessage` used as the revert point
+        /// (defaults to the latest turn)
         target_node_seq: Option<u64>,
     },
-    /// 停止済みセッションの再開 (`POST /api/v1/sessions/:id/resume`)。
+    /// Resumes a stopped session (`POST /api/v1/sessions/:id/resume`).
     ///
-    /// 同一 `session_id` のままエージェント側コンテキストを復元して継続する
-    /// (設計: `docs/04-agent-drivers-and-windows.md` §4.3)。
+    /// Keeps the same `session_id` and continues by restoring the agent-side
+    /// context (design: `docs/04-agent-drivers-and-windows.md` §4.3).
     ResumeSession {
-        /// 相関ID
+        /// Correlation ID
         command_id: String,
-        /// 対象セッションID
+        /// Target session ID
         session_id: String,
-        /// ネイティブ復元を試みず履歴 Replay で継続する
+        /// Skip native restoration and continue with history replay
         force_replay: bool,
     },
-    /// セッションのアーカイブ/復元 (`POST /api/v1/sessions/:id/archive`)。
+    /// Archives / restores a session (`POST /api/v1/sessions/:id/archive`).
     ///
-    /// アーカイブは一覧からの非表示/復元のみで、イベントログは保持される。
+    /// Archiving only hides or restores the session in the listing; the event log
+    /// is kept.
     ArchiveSession {
-        /// 相関ID
+        /// Correlation ID
         command_id: String,
-        /// 対象セッションID
+        /// Target session ID
         session_id: String,
-        /// `true` = アーカイブ、`false` = 復元
+        /// `true` = archive, `false` = restore
         archived: bool,
     },
-    /// セッションの削除 (`DELETE /api/v1/sessions/:id`)。
+    /// Deletes a session (`DELETE /api/v1/sessions/:id`).
     ///
-    /// 実行ノードは稼働中セッションを停止してから `SessionDeleted` イベント
-    /// (tombstone) を追記し、それ以前のイベント本文をパージする。
+    /// The running node stops the session if it is running, then appends a
+    /// `SessionDeleted` event (tombstone) and purges the bodies of earlier events.
     DeleteSession {
-        /// 相関ID
+        /// Correlation ID
         command_id: String,
-        /// 対象セッションID
+        /// Target session ID
         session_id: String,
     },
-    /// ワークスペースWebターミナル (PTY) の起動要求。
+    /// Request to start a workspace web terminal (PTY).
     PtySpawn {
         /// PTY ID
         pty_id: String,
-        /// 対象セッションID
+        /// Target session ID
         session_id: String,
-        /// 列数
+        /// Number of columns
         cols: u16,
-        /// 行数
+        /// Number of rows
         rows: u16,
-        /// シェルコマンド (省略時は既定シェル)
+        /// Shell command (defaults to the default shell)
         shell_cmd: Option<String>,
     },
-    /// PTY へのユーザー入力送信 (キー入力)。
+    /// Sends user input (keystrokes) to the PTY.
     PtyInput {
         /// PTY ID
         pty_id: String,
-        /// 入力バイト列 (Base64)
+        /// Input bytes (Base64)
         data_b64: String,
     },
-    /// PTY ウィンドウリサイズ。
+    /// Resizes the PTY window.
     PtyResize {
         /// PTY ID
         pty_id: String,
-        /// 列数
+        /// Number of columns
         cols: u16,
-        /// 行数
+        /// Number of rows
         rows: u16,
     },
-    /// PTY プロセス終了。
+    /// Terminates the PTY process.
     PtyKill {
         /// PTY ID
         pty_id: String,
     },
-    /// ノードのGit作業ツリー/ブランチDiff取得要求。
+    /// Request for the git working tree / branch diff of the node.
     GetGitDiff {
-        /// 相関ID
+        /// Correlation ID
         request_id: String,
-        /// 対象セッションID
+        /// Target session ID
         session_id: String,
-        /// 取得スコープ (未コミット / ベースブランチ累積)
+        /// Scope to fetch (uncommitted / cumulative against the base branch)
         scope: crate::common::DiffScope,
-        /// `BranchBase` 時のベースブランチ
+        /// Base branch used for `BranchBase`
         base_branch: Option<String>,
     },
-    /// Worktree 操作要求 (作成・削除)。
+    /// Request for a worktree operation (create / remove).
     ManageWorktree {
-        /// 相関ID
+        /// Correlation ID
         command_id: String,
-        /// 対象論理プロジェクトID
+        /// Target logical project ID
         project_id: String,
-        /// 実行する操作
+        /// Operation to execute
         action: crate::common::WorktreeAction,
     },
-    /// ファイルシステム閲覧要求。
+    /// Request to browse the file system.
     BrowseFs {
-        /// 相関ID
+        /// Correlation ID
         request_id: String,
-        /// 閲覧対象パス (未指定時はホームディレクトリ)
+        /// Path to browse (defaults to the home directory)
         path: Option<String>,
     },
-    /// 指定ディレクトリ配下の Git リポジトリ一括スキャン・登録要求
-    /// (`fxg project scan`)。
+    /// Request to scan and register the git repositories under a directory
+    /// (`fxg project scan`).
     ProjectScan {
-        /// 相関ID
+        /// Correlation ID
         request_id: String,
-        /// スキャン対象ディレクトリ (未指定時は `node.project_scan_dirs`)
+        /// Directory to scan (defaults to `node.project_scan_dirs`)
         dir: Option<String>,
     },
-    /// 任意ディレクトリの論理プロジェクトへの手動紐付け要求
-    /// (`fxg project link`。`.fxg.toml` に `project_key` を書き込む)。
+    /// Request to link an arbitrary directory to a logical project manually
+    /// (`fxg project link`, which writes `project_key` into `.fxg.toml`).
     ProjectLink {
-        /// 相関ID
+        /// Correlation ID
         request_id: String,
-        /// 紐付け先の論理プロジェクトID
+        /// Logical project ID to link to
         project_id: String,
-        /// 対象ディレクトリ
+        /// Target directory
         local_path: String,
     },
-    /// ACP Registry カタログ + 導入状態の取得要求 (Web UI のエージェント管理)。
+    /// Request for the ACP Registry catalog plus installation state (agent
+    /// management in the Web UI).
     ListAgents {
-        /// 相関ID
+        /// Correlation ID
         request_id: String,
     },
-    /// エージェント管理操作要求 (install / update / remove)。
+    /// Agent management operation request (install / update / remove).
     ManageAgent {
-        /// 相関ID
+        /// Correlation ID
         request_id: String,
-        /// 実行する操作
+        /// Operation to execute
         action: crate::common::AgentAction,
     },
-    /// `GitCredentialRequest` に対する短命トークン応答。
+    /// Short-lived token response to a `GitCredentialRequest`.
     GitCredentialResponse {
-        /// 相関ID
+        /// Correlation ID
         request_id: String,
-        /// Basic 認証ユーザー名
+        /// Basic authentication user name
         username: String,
-        /// トークン (オンメモリのみ。VM内ディスクへは保存しない)
+        /// Token (in memory only; never written to the VM disk)
         token: Option<String>,
-        /// 失敗時のメッセージ
+        /// Failure message
         error: Option<String>,
     },
-    /// 一時VMの終了前フラッシュ＆Gitバンドル退避要求。
+    /// Request to flush the ephemeral VM and save the git bundle before shutdown.
     DrainAndShutdown {
-        /// 終了理由 (ログ用)
+        /// Reason for shutting down (for logs)
         reason: String,
-        /// `git bundle create` による成果物退避を行うか
+        /// Whether to save the artifacts with `git bundle create`
         create_git_bundle: bool,
     },
-    /// 緊急キルスイッチ: ノード上で稼働中の全セッション・プロセスツリー・PTYを
-    /// 即時強制停止する。
+    /// Emergency kill switch: immediately and forcibly stop every session, process
+    /// tree and PTY running on the node.
     KillAllSessions {
-        /// 実行理由 (監査ログ用)
+        /// Reason for the action (for the audit log)
         reason: String,
     },
 }

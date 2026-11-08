@@ -1,24 +1,25 @@
-//! 時刻・ID 生成などの小さなユーティリティ。
+//! Small utilities such as time and ID generation.
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
-/// 現在時刻を Unix epoch ミリ秒で返す。
+/// Returns the current time as Unix epoch milliseconds.
 ///
-/// イベントの `created_at` は「ノード側のローカル時計」で記録する
-/// (複数ノード横断の並びは NTP 同期済みクロックを前提とする)。
+/// An event's `created_at` is recorded with the node's local clock (ordering
+/// across nodes assumes NTP-synchronized clocks).
 pub fn now_ms() -> i64 {
     match SystemTime::now().duration_since(UNIX_EPOCH) {
         Ok(duration) => duration.as_millis().min(i64::MAX as u128) as i64,
-        // システム時計が UNIX epoch より前の異常時は 0 を返す (パニックさせない)
+        // When the system clock is before the Unix epoch, return 0 instead of
+        // panicking.
         Err(_) => 0,
     }
 }
 
-/// タイムスタンプ順序付き UUID (**UUID v7**) を文字列で生成する。
+/// Generates a time-ordered UUID (**UUID v7**) as a string.
 ///
-/// イベントID (`event_id`)・セッションID (`session_id`)・コマンドID
-/// (`command_id`) に使用する。時刻順ソートと重複排除 (`event_id` UNIQUE) の
-/// 両方を兼ねる。
+/// Used for event IDs (`event_id`), session IDs (`session_id`) and command IDs
+/// (`command_id`). It serves both as a chronological sort key and as a
+/// deduplication key (`event_id` UNIQUE).
 pub fn uuid_v7() -> String {
     uuid::Uuid::now_v7().to_string()
 }

@@ -1,9 +1,9 @@
-//! 共通補助型・エラーコード。
+//! Shared helper types and error codes.
 //!
-//! `UnifiedEventPayload` および各プロトコルメッセージ・REST レスポンスから
-//! 参照される型を定義する。すべてクライアント (UI / CLI) が扱うため
-//! `#[derive(specta::Type)]` + `#[specta(collect)]` を付与する
-//! (設計: `docs/03-protocol-and-api.md` §1.1)。
+//! Defines the types referenced by `UnifiedEventPayload`, by each protocol
+//! message and by REST responses. All of them are handled by clients (UI / CLI),
+//! so they carry `#[derive(specta::Type)]` + `#[specta(collect)]`
+//! (design: `docs/03-protocol-and-api.md` §1.1).
 
 use std::fmt;
 use std::str::FromStr;
@@ -11,18 +11,18 @@ use std::str::FromStr;
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
-/// 列挙型の文字列表現パースに失敗したときのエラー。
+/// Error returned when parsing the string representation of an enum fails.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("unknown {kind} value: {value:?}")]
 pub struct EnumParseError {
-    /// 列挙型の種類名 (エラーメッセージ用)
+    /// Enum kind name (used in the error message)
     pub kind: &'static str,
-    /// パースに失敗した文字列
+    /// The string that failed to parse
     pub value: String,
 }
 
 impl EnumParseError {
-    /// 新しいパースエラーを生成する。
+    /// Creates a new parse error.
     pub fn new(kind: &'static str, value: impl Into<String>) -> Self {
         Self {
             kind,
@@ -31,31 +31,31 @@ impl EnumParseError {
     }
 }
 
-/// セッション状態 (`sessions.status` と同値)。
+/// Session status (same values as `sessions.status`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "snake_case")]
 #[specta(collect)]
 pub enum SessionStatus {
-    /// 一時VMプロビジョニング中
+    /// Provisioning an ephemeral VM
     Provisioning,
-    /// ブートストラップ (ツール自動構築) 中
+    /// Bootstrapping (automatically installing tools)
     Bootstrapping,
-    /// 待機中 (プロンプト入力待ち)
+    /// Idle (waiting for a prompt)
     Idle,
-    /// ターン実行中
+    /// Running a turn
     Running,
-    /// 権限承認待ち
+    /// Waiting for permission approval
     WaitingPermission,
-    /// elicitation (質問/構造化入力) の回答待ち
+    /// Waiting for an elicitation (question / structured input) answer
     WaitingInput,
-    /// 停止済み
+    /// Stopped
     Stopped,
-    /// エラー
+    /// Error
     Error,
 }
 
 impl SessionStatus {
-    /// DB / JSON 上の文字列表現。
+    /// String representation used in the DB / JSON.
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Provisioning => "provisioning",
@@ -94,27 +94,27 @@ impl FromStr for SessionStatus {
     }
 }
 
-/// ノードのライフサイクル状態 (`nodes.lifecycle_status` と同値)。
+/// Lifecycle status of a node (same values as `nodes.lifecycle_status`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "snake_case")]
 #[specta(collect)]
 pub enum NodeLifecycleStatus {
-    /// プロビジョニング中 (一時VM)
+    /// Provisioning (ephemeral VM)
     Provisioning,
-    /// ブートストラップ中 (一時VM)
+    /// Bootstrapping (ephemeral VM)
     Bootstrapping,
-    /// 稼働可能
+    /// Ready to serve
     Ready,
-    /// 終了処理中 (Drain 中)
+    /// Shutting down (draining)
     Draining,
-    /// 終了済み
+    /// Terminated
     Terminated,
-    /// エラー
+    /// Error
     Error,
 }
 
 impl NodeLifecycleStatus {
-    /// DB / JSON 上の文字列表現。
+    /// String representation used in the DB / JSON.
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Provisioning => "provisioning",
@@ -149,23 +149,23 @@ impl FromStr for NodeLifecycleStatus {
     }
 }
 
-/// 承認リクエストの状態 (`permission_requests.status` と同値)。
+/// Status of a permission request (same values as `permission_requests.status`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "snake_case")]
 #[specta(collect)]
 pub enum PermissionRequestStatus {
-    /// 未解決 (承認待ち)
+    /// Unresolved (waiting for approval)
     Pending,
-    /// 承認済み
+    /// Approved
     Approved,
-    /// 却下済み
+    /// Rejected
     Rejected,
-    /// キャンセル (セッション停止等)
+    /// Cancelled (e.g. the session was stopped)
     Cancelled,
 }
 
 impl PermissionRequestStatus {
-    /// DB / JSON 上の文字列表現。
+    /// String representation used in the DB / JSON.
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Pending => "pending",
@@ -196,21 +196,21 @@ impl FromStr for PermissionRequestStatus {
     }
 }
 
-/// elicitation へのユーザー応答アクション (ACP `ElicitationAction` と同値)。
+/// User response action for an elicitation (same values as the ACP `ElicitationAction`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "snake_case")]
 #[specta(collect)]
 pub enum ElicitationAction {
-    /// 回答を送信する (form の入力内容を `content` に含める)
+    /// Submit an answer (the form contents go into `content`)
     Accept,
-    /// 明示的に辞退する
+    /// Explicitly decline
     Decline,
-    /// 操作を取り消す (ダイアログを閉じる等)
+    /// Cancel the interaction (e.g. close the dialog)
     Cancel,
 }
 
 impl ElicitationAction {
-    /// JSON / IPC 上の文字列表現。
+    /// String representation used in JSON / IPC.
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Accept => "accept",
@@ -239,23 +239,23 @@ impl FromStr for ElicitationAction {
     }
 }
 
-/// elicitation リクエストの状態 (`elicitation_requests.status` と同値)。
+/// Status of an elicitation request (same values as `elicitation_requests.status`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "snake_case")]
 #[specta(collect)]
 pub enum ElicitationRequestStatus {
-    /// 未解決 (回答待ち)
+    /// Unresolved (waiting for an answer)
     Pending,
-    /// 回答済み (`accept`)
+    /// Answered (`accept`)
     Accepted,
-    /// 辞退済み (`decline`)
+    /// Declined (`decline`)
     Declined,
-    /// キャンセル (セッション停止等)
+    /// Cancelled (e.g. the session was stopped)
     Cancelled,
 }
 
 impl ElicitationRequestStatus {
-    /// DB / JSON 上の文字列表現。
+    /// String representation used in the DB / JSON.
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Pending => "pending",
@@ -286,21 +286,21 @@ impl FromStr for ElicitationRequestStatus {
     }
 }
 
-/// 論理プロジェクト (`project_key`) の解決元。
+/// How the logical project (`project_key`) was resolved.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "snake_case")]
 #[specta(collect)]
 pub enum ProjectResolutionSource {
-    /// `.fxg.toml` の明示指定 (最優先)
+    /// Explicitly set in `.fxg.toml` (highest priority)
     FxgToml,
-    /// `git remote.origin.url` の正規化
+    /// Normalized `git remote.origin.url`
     GitRemote,
-    /// フォールバック (`local:<node_id>:<path-hash>`)
+    /// Fallback (`local:<node_id>:<path-hash>`)
     Fallback,
 }
 
 impl ProjectResolutionSource {
-    /// 表示用の識別子。
+    /// Identifier used for display.
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::FxgToml => "fxg_toml",
@@ -329,59 +329,59 @@ impl FromStr for ProjectResolutionSource {
     }
 }
 
-/// Worktree 作成時の `copy_files` / `post_create` フック実行ログ。
+/// Execution log of the `copy_files` / `post_create` hooks run when creating a worktree.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct HookLogEntry {
-    /// 実行したコマンド文字列
+    /// Command string that was executed
     pub command: String,
-    /// 成功したか
+    /// Whether it succeeded
     pub success: bool,
-    /// 出力 (stdout + stderr)
+    /// Output (stdout + stderr)
     pub output: String,
 }
 
-/// セッションの累積コスト (ACP `Cost`)。
+/// Accumulated session cost (ACP `Cost`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct UsageCost {
-    /// 累積コスト額
+    /// Accumulated cost amount
     pub amount: f64,
-    /// ISO 4217 通貨コード (例: `USD`)
+    /// ISO 4217 currency code (e.g. `USD`)
     pub currency: String,
 }
 
-/// セッションのコンテキスト使用量・累積コスト
-/// (ACP `session/update` の `usage_update`)。
+/// Context usage and accumulated cost of a session
+/// (the `usage_update` of ACP `session/update`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct SessionUsage {
-    /// 現在コンテキストに含まれるトークン数
+    /// Number of tokens currently occupying the context
     pub used_tokens: u64,
-    /// コンテキストウィンドウ全体のサイズ (トークン数)
+    /// Total context window size (in tokens)
     pub context_size: u64,
-    /// 累積コスト (エージェントが報告した場合)
+    /// Accumulated cost (only when reported by the agent)
     pub cost: Option<UsageCost>,
 }
 
-/// エージェントがターンを終了した理由のうち、ユーザーへ提示すべきもの。
+/// Reasons an agent stopped a turn that should be surfaced to the user.
 ///
-/// ACP `StopReason` のうち `EndTurn` / `Cancelled` は正常終了として
-/// イベント化しない (`UnifiedEventPayload::TurnEnded` を参照)。
+/// Of the ACP `StopReason` values, `EndTurn` / `Cancelled` end the turn normally
+/// and are not turned into an event (see `UnifiedEventPayload::TurnEnded`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "snake_case")]
 #[specta(collect)]
 pub enum TurnStopReason {
-    /// 最大トークン数に達して打ち切り
+    /// Cut off after reaching the maximum number of tokens
     MaxTokens,
-    /// 1 ターン内のエージェント要求回数上限に達して打ち切り
+    /// Cut off after reaching the per-turn limit of agent requests
     MaxTurnRequests,
-    /// エージェントが継続を拒否 (Refusal)
+    /// The agent refused to continue (Refusal)
     Refusal,
 }
 
 impl TurnStopReason {
-    /// DB / JSON 上の文字列表現。
+    /// String representation used in the DB / JSON.
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::MaxTokens => "max_tokens",
@@ -397,25 +397,25 @@ impl fmt::Display for TurnStopReason {
     }
 }
 
-/// コンテキスト圧縮 (compaction) の進行状態。
+/// Progress of context compaction.
 ///
-/// `UnifiedEventPayload::CompactionUpdated` の状態表現。標準ACPには圧縮を
-/// 開始する API が無いため、ネイティブ API を持つドライバ (`opencode2` の
-/// `POST /api/session/{id}/compact`) のみが送出する。
+/// This is the state representation of `UnifiedEventPayload::CompactionUpdated`.
+/// The standard ACP has no API to start a compaction, so only drivers with a
+/// native API (such as `opencode2`'s `POST /api/session/{id}/compact`) emit it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "snake_case")]
 #[specta(collect)]
 pub enum CompactionStatus {
-    /// 圧縮を開始した
+    /// Compaction started
     Started,
-    /// 圧縮が完了した
+    /// Compaction completed
     Completed,
-    /// 圧縮に失敗した
+    /// Compaction failed
     Failed,
 }
 
 impl CompactionStatus {
-    /// DB / JSON 上の文字列表現。
+    /// String representation used in the DB / JSON.
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Started => "started",
@@ -431,376 +431,378 @@ impl fmt::Display for CompactionStatus {
     }
 }
 
-/// API レスポンス用のセッション集約型 (`sessions` 行から構成)。
+/// Aggregated session type used in API responses (built from a `sessions` row).
 ///
-/// ハブ側ではイベント適用による投影から生成される。Local Node と
-/// Central Server の双方が同一の型を返却する。
+/// On the hub side it is produced from the projection obtained by applying
+/// events. Both the local node and the central server return this same type.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct SessionSummary {
-    /// セッションID (UUID v7)
+    /// Session ID (UUID v7)
     pub session_id: String,
-    /// 論理プロジェクトID (例: `github.com/nazo6/flexagent`)
+    /// Logical project ID (e.g. `github.com/nazo6/flexagent`)
     pub project_id: String,
-    /// 実行ノードID
+    /// ID of the node running the session
     pub node_id: String,
-    /// 実行ディレクトリ (Worktree パス含む)
+    /// Working directory (including the worktree path)
     pub local_path: String,
-    /// 起動時点のスナップショット (ライブ値は Worktree API から取得)
+    /// Snapshot taken at start-up (live values come from the worktree API)
     pub git_branch: Option<String>,
-    /// Worktree 内での実行か
+    /// Whether it runs inside a worktree
     pub is_worktree: bool,
-    /// エージェントID (`opencode2` / `antigravity-acp` 等)
+    /// Agent ID (`opencode2` / `antigravity-acp` etc.)
     pub agent_id: String,
-    /// エージェント内部のセッションID (`SessionAgentBound` イベントで確定)
+    /// Session ID inside the agent (fixed by the `SessionAgentBound` event)
     pub agent_session_id: Option<String>,
-    /// Fork元のセッションID
+    /// Session ID this session was forked from
     pub parent_session_id: Option<String>,
-    /// 親セッションのどのイベント (`node_seq`) 時点から Fork / Revert したか
+    /// Event (`node_seq`) of the parent session the fork / revert started from
     pub fork_from_node_seq: Option<u64>,
-    /// セッションタイトル
+    /// Session title
     pub title: String,
-    /// セッション状態
+    /// Session status
     pub status: SessionStatus,
-    /// 現在のACR SessionMode (例: `code`, `plan`)
+    /// Current ACP SessionMode (e.g. `code`, `plan`)
     pub current_mode: Option<String>,
-    /// 最新のコンテキスト使用量・累積コスト (`UsageUpdated` イベントの投影)。
+    /// Latest context usage and accumulated cost (projection of the `UsageUpdated` event).
     ///
-    /// `None` = 未受信 (エージェントが `usage_update` を送らない場合を含む)。
+    /// `None` means nothing has been received yet (including the case where the
+    /// agent never sends `usage_update`).
     pub usage: Option<SessionUsage>,
-    /// 永続化済み最新の `node_seq` (ノード) / 投影に適用済みの最大 `node_seq` (ハブ)
+    /// Latest persisted `node_seq` (node) / highest `node_seq` applied to the projection (hub)
     pub last_node_seq: u64,
-    /// 作成日時 (Unix epoch ms)
+    /// Creation time (Unix epoch ms)
     pub created_at: i64,
-    /// 更新日時 (Unix epoch ms)
+    /// Last update time (Unix epoch ms)
     pub updated_at: i64,
-    /// アーカイブ日時 (Unix epoch ms)。`None` = 未アーカイブ。
+    /// Archive time (Unix epoch ms). `None` means not archived.
     ///
-    /// アーカイブ済みセッションは既定の一覧から除外される
-    /// (`include_archived` 指定時のみ返却)。
+    /// Archived sessions are excluded from the default listing (they are only
+    /// returned when `include_archived` is set).
     pub archived_at: Option<i64>,
 }
 
-/// `NodeHello` で報告するプロジェクト紐付け情報。
+/// Project binding information reported in `NodeHello`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct NodeProjectReport {
-    /// 論理プロジェクトID
+    /// Logical project ID
     pub project_id: String,
-    /// 表示名
+    /// Display name
     pub name: String,
-    /// 正規化元Git URL
+    /// Git URL the canonical form was derived from
     pub canonical_git_url: Option<String>,
-    /// このノード上のローカルパス紐付け (Worktree 含む)
+    /// Local path bindings on this node (including worktrees)
     pub bindings: Vec<ProjectNodeBinding>,
 }
 
-/// プロジェクト × ノードのローカルパス紐付け。
+/// Local path binding between a project and a node.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct ProjectNodeBinding {
-    /// ノード上のローカルパス
+    /// Local path on the node
     pub local_path: String,
-    /// Git Worktree か (false はメインリポジトリ)
+    /// Whether this is a git worktree (false means the main repository)
     pub is_worktree: bool,
-    /// 報告時点でノード上に実在するか (ディレクトリ確認)
+    /// Whether the path exists on the node at report time (directory check)
     pub path_exists: bool,
-    /// 最終確認時のGitブランチ
+    /// Git branch as of the last check
     pub git_branch: Option<String>,
-    /// 最終使用日時 (Unix epoch ms)
+    /// Last used time (Unix epoch ms)
     pub last_used_at: i64,
 }
 
-/// ストリーミング途中のエフェメラルチャンク。
+/// Ephemeral chunk produced while streaming.
 ///
-/// DB へは永続化されず、再送もされない (`LiveStreamDelta` 専用)。
-/// 完成イベント (`AgentMessage` 等) 到着時にクライアント側で確定表示へ置き換える。
+/// It is never persisted to the DB and never resent (exclusive to
+/// `LiveStreamDelta`). Once the final event (`AgentMessage` etc.) arrives, the
+/// client replaces the chunk with the committed representation.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[serde(tag = "delta_type", rename_all = "snake_case")]
 #[specta(collect)]
 pub enum StreamDeltaPayload {
-    /// エージェント返答メッセージの差分テキスト
+    /// Incremental text of an agent reply message
     AgentMessageDelta {
-        /// メッセージID (`AgentMessage.message_id` と対応)
+        /// Message ID (corresponds to `AgentMessage.message_id`)
         message_id: String,
-        /// 追加テキスト
+        /// Appended text
         text_delta: String,
     },
-    /// 思考プロセスの差分テキスト
+    /// Incremental text of the reasoning process
     AgentThoughtDelta {
-        /// 思考ID (`AgentThought.thought_id` と対応)
+        /// Thought ID (corresponds to `AgentThought.thought_id`)
         thought_id: String,
-        /// 追加テキスト
+        /// Appended text
         text_delta: String,
     },
-    /// ツール呼び出しの進捗更新
+    /// Progress update of a tool call
     ToolCallProgress {
-        /// ツール呼び出しID
+        /// Tool call ID
         tool_call_id: String,
-        /// 更新後ステータス
+        /// Updated status
         status: String,
-        /// 出力差分 (任意)
+        /// Output delta (optional)
         raw_output_delta: Option<String>,
     },
-    /// ACP terminal/* の出力差分
+    /// Output delta of an ACP terminal/*
     TerminalOutputDelta {
-        /// ターミナルID
+        /// Terminal ID
         terminal_id: String,
-        /// 出力バイト列 (Base64)
+        /// Output bytes (Base64)
         data_b64: String,
     },
 }
 
-/// ユーザーメッセージに添付されるファイルのメタデータ。
+/// Metadata of a file attached to a user message.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct AttachmentMeta {
-    /// ファイル名
+    /// File name
     pub file_name: String,
-    /// MIMEタイプ
+    /// MIME type
     pub mime_type: String,
-    /// サイズ (bytes)
+    /// Size in bytes
     pub size_bytes: u64,
-    /// ノード上の実ファイル参照
+    /// Reference to the real file on the node
     pub local_path: Option<String>,
-    /// 小さい添付のインライン転送用 (Base64)
+    /// Base64 payload for transporting small attachments inline
     pub data_b64: Option<String>,
 }
 
-/// ファイル変更の Unified Diff 情報。
+/// Unified diff information of a file change.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct FileDiff {
-    /// 対象ファイルパス
+    /// Path of the affected file
     pub path: String,
-    /// 変更前テキスト
+    /// Text before the change
     pub old_text: Option<String>,
-    /// 変更後テキスト
+    /// Text after the change
     pub new_text: Option<String>,
-    /// Unified Diff 本文
+    /// Unified diff body
     pub unified_diff: String,
-    /// 追加行数
+    /// Number of added lines
     pub additions: u32,
-    /// 削除行数
+    /// Number of deleted lines
     pub deletions: u32,
 }
 
-/// エージェントの実行計画エントリ (ACP Plan)。
+/// An execution plan entry of the agent (ACP Plan).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct PlanEntry {
-    /// エントリID
+    /// Entry ID
     pub id: String,
-    /// 表示タイトル
+    /// Display title
     pub title: String,
-    /// ステータス (`pending` / `in_progress` / `completed` 等)
+    /// Status (`pending` / `in_progress` / `completed` etc.)
     pub status: String,
 }
 
-/// 権限承認の選択肢 (ACP `PermissionOption`)。
+/// An option of a permission approval (ACP `PermissionOption`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct PermissionOption {
-    /// 選択肢ID (`PermissionResolved.selected_option_id` に指定する値)
+    /// Option ID (the value given to `PermissionResolved.selected_option_id`)
     pub option_id: String,
-    /// 表示名
+    /// Display name
     pub name: String,
-    /// 種別 (`allow_once` / `allow_always` / `reject_once` / `reject_always` 等)
+    /// Kind (`allow_once` / `allow_always` / `reject_once` / `reject_always` etc.)
     pub kind: String,
 }
 
 impl PermissionOption {
-    /// 却下系の選択肢か (種別が `reject` で始まる)。
+    /// Whether this is a reject-kind option (the kind starts with `reject`).
     pub fn is_reject_kind(kind: &str) -> bool {
         kind.starts_with("reject")
     }
 }
 
-/// ACP SessionMode の情報。
+/// Information about an ACP SessionMode.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct ModeInfo {
-    /// モードID (例: `code`, `plan`)
+    /// Mode ID (e.g. `code`, `plan`)
     pub mode_id: String,
-    /// 表示名
+    /// Display name
     pub name: String,
-    /// 説明
+    /// Description
     pub description: Option<String>,
 }
 
-/// ACP スラッシュコマンドの情報。
+/// Information about an ACP slash command.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct CommandInfo {
-    /// コマンド名
+    /// Command name
     pub name: String,
-    /// 説明
+    /// Description
     pub description: String,
-    /// 入力ヒント
+    /// Input hint
     pub input_hint: Option<String>,
 }
 
-/// エージェント設定項目 (モデル選択等) の情報。
+/// Information about an agent configuration entry (model selection etc.).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct ConfigOptionInfo {
-    /// 設定キー
+    /// Configuration key
     pub key: String,
-    /// 表示名
+    /// Display name
     pub name: String,
-    /// 現在値
+    /// Current value
     pub current_value: serde_json::Value,
-    /// 選択可能な値の一覧
+    /// List of selectable values
     pub options: Vec<serde_json::Value>,
 }
 
-/// セッション制御アクション (`ControlSession` コマンド)。
+/// Session control action (`ControlSession` command).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[serde(tag = "action", rename_all = "snake_case")]
 #[specta(collect)]
 pub enum SessionControlAction {
-    /// モード切替 (`plan` / `code` 等)
+    /// Switch mode (`plan` / `code` etc.)
     SetMode {
-        /// 切替先モードID
+        /// ID of the mode to switch to
         mode_id: String,
     },
-    /// 設定変更 (モデル選択等)
+    /// Change a configuration value (model selection etc.)
     SetConfig {
-        /// 設定キー
+        /// Configuration key
         key: String,
-        /// 新しい値
+        /// New value
         value: serde_json::Value,
     },
-    /// 現在のターンを中断
+    /// Interrupt the current turn
     Cancel,
-    /// セッションの完全終了
+    /// Terminate the session entirely
     Kill,
 }
 
-/// Worktree 操作アクション (`ManageWorktree` コマンド)。
+/// Worktree operation action (`ManageWorktree` command).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[serde(tag = "action", rename_all = "snake_case")]
 #[specta(collect)]
 pub enum WorktreeAction {
-    /// 新規 Worktree 作成 (`git worktree add -b <branch> <path> <base>`)
+    /// Create a new worktree (`git worktree add -b <branch> <path> <base>`)
     Add {
-        /// 作成するブランチ名
+        /// Name of the branch to create
         branch: String,
-        /// 起点ブランチ (省略時は現在の HEAD)
+        /// Base branch (defaults to the current HEAD)
         base_branch: Option<String>,
-        /// 配置先パスの明示指定 (省略時は `worktree_dir_template` から解決)
+        /// Explicit destination path (resolved from `worktree_dir_template` when omitted)
         new_path: Option<String>,
     },
-    /// Worktree 削除 (`git worktree remove`)
+    /// Remove a worktree (`git worktree remove`)
     Remove {
-        /// 削除対象パス
+        /// Path to remove
         path: String,
-        /// 未コミット変更があっても強制削除するか
+        /// Whether to remove even if there are uncommitted changes
         force: bool,
     },
-    /// 削除済み Worktree の管理情報をクリーンアップ (`git worktree prune`)
+    /// Clean up the administrative data of deleted worktrees (`git worktree prune`)
     Prune,
 }
 
-/// エージェント管理アクション (`ManageAgent` コマンド / Client API 共通)。
+/// Agent management action (shared by the `ManageAgent` command and the Client API).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[serde(tag = "action", rename_all = "snake_case")]
 #[specta(collect)]
 pub enum AgentAction {
-    /// ACP Registry カタログインデックスを強制再取得する (`fxg agents update`)
+    /// Force a refresh of the ACP Registry catalog index (`fxg agents update`)
     RefreshCatalog,
-    /// UI 管理のカスタムエージェント定義を作成・更新する
+    /// Create or update a UI-managed custom agent definition
     UpsertCustom {
-        /// エージェントID
+        /// Agent ID
         agent_id: String,
-        /// 実行コマンド・引数・環境変数
+        /// Command, arguments and environment variables
         config: crate::config::CustomAgentConfig,
     },
-    /// UI 管理のカスタムエージェント定義を削除する
+    /// Delete a UI-managed custom agent definition
     RemoveCustom {
-        /// エージェントID
+        /// Agent ID
         agent_id: String,
     },
-    /// `npx` / `uvx` 配布での利用を有効化・無効化する
+    /// Enable or disable usage through the `npx` / `uvx` distribution
     SetPackageEnabled {
-        /// エージェントID (エイリアス可)
+        /// Agent ID (aliases allowed)
         agent_id: String,
-        /// `true` = 一覧に表示して `npx` / `uvx` 経由で使う
+        /// `true` = show it in the list and use it through `npx` / `uvx`
         enabled: bool,
     },
 }
 
-/// Diff のスコープ。
+/// Scope of a diff.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "snake_case")]
 #[specta(collect)]
 pub enum DiffScope {
-    /// 作業ツリーの未コミット差分 (`git diff HEAD`)
+    /// Uncommitted diff of the working tree (`git diff HEAD`)
     Uncommitted,
-    /// ベースブランチとの累積差分 (`git diff <base>...HEAD`)
+    /// Cumulative diff against the base branch (`git diff <base>...HEAD`)
     BranchBase,
 }
 
-/// Git 作業ツリーの Diff 取得結果 (`GET /api/v1/sessions/:id/diff`)。
+/// Result of fetching the diff of a git working tree (`GET /api/v1/sessions/:id/diff`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct WorkspaceDiffResponse {
-    /// 取得した Diff のスコープ
+    /// Scope of the fetched diff
     pub scope: DiffScope,
-    /// 比較対象のベースブランチ (`BranchBase` 時)
+    /// Base branch used for the comparison (set for `BranchBase`)
     pub base_branch: Option<String>,
-    /// 現在の HEAD コミット
+    /// Current HEAD commit
     pub head_commit: String,
-    /// 変更ファイルごとの Diff
+    /// Diff per changed file
     pub files: Vec<FileDiff>,
 }
 
-/// セッション Fork 時に履歴注入するための会話履歴アイテム。
+/// A conversation history item injected when forking a session.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct ForkHistoryItem {
-    /// 発話ロール (`user` / `agent` 等)
+    /// Speaker role (`user` / `agent` etc.)
     pub role: String,
-    /// 本文
+    /// Body text
     pub text: String,
-    /// ツール呼び出し等の要約 (任意)
+    /// Summary of tool calls etc. (optional)
     pub tool_summary: Option<String>,
 }
 
-/// 共通エラーコード (`CommandResult` および REST エラーレスポンス双方で使用)。
+/// Shared error code (used by both `CommandResult` and REST error responses).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 #[specta(collect)]
 pub enum ErrorCode {
-    /// 認証トークンが無い・一致しない (HTTP `401 Unauthorized`)
+    /// Missing or mismatching authentication token (HTTP `401 Unauthorized`)
     Unauthorized,
-    /// `Host` / `Origin` 検証失敗・ポリシー違反 (HTTP `403 Forbidden`。
-    /// リモートPTY無効時の `PTY_DISABLED` とは区別する)
+    /// `Host` / `Origin` validation failure or policy violation (HTTP `403 Forbidden`.
+    /// Distinct from `PTY_DISABLED`, which means remote PTY is disabled)
     Forbidden,
-    /// 対象ノードが中央サーバーから切断中 (キューイングせず即時返却)
+    /// The target node is disconnected from the central server (returned immediately, not queued)
     NodeOffline,
-    /// 承認リクエストが既に解決済み (2回目以降の応答。冪等に扱う)
+    /// The permission request was already resolved (a second or later answer; treated idempotently)
     AlreadyResolved,
-    /// セッションが実行中 (busy)
+    /// The session is busy
     Busy,
-    /// 現在の状態では実行できない操作
+    /// The operation cannot run in the current state
     InvalidState,
-    /// 停止済みセッションへの操作だが、エージェントがネイティブ復元
-    /// (`session/resume` 等) に対応していない。履歴 Replay での明示的な
-    /// 再開 (`fxg session resume` / Web UI の Resume) が必要。
+    /// The operation targets a stopped session, but the agent does not support
+    /// native restoration (`session/resume` etc.). An explicit resume through
+    /// history replay (`fxg session resume` / Resume in the Web UI) is required.
     ResumeRequired,
-    /// リモートPTYがセキュリティポリシーで無効化されている
+    /// Remote PTY is disabled by the security policy
     PtyDisabled,
-    /// `command_id` の重複送信 (ダブルタップ・WS再送)
+    /// Duplicate `command_id` submission (double tap / WS resend)
     CommandDuplicate,
-    /// 対象が見つからない
+    /// The target was not found
     NotFound,
-    /// 内部エラー
+    /// Internal error
     Internal,
 }
 
 impl ErrorCode {
-    /// JSON / WS / REST 上の文字列表現。
+    /// String representation used in JSON / WS / REST.
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Unauthorized => "UNAUTHORIZED",
@@ -845,188 +847,188 @@ impl FromStr for ErrorCode {
     }
 }
 
-/// コマンド実行結果 (Node → Server → 要求元クライアントへ相関返却)。
+/// Result of a command (correlated back from the node through the server to the requesting client).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct CommandResult {
-    /// `ServerToNodeMsg` の各コマンドに付与された相関ID
+    /// Correlation ID attached to each `ServerToNodeMsg` command
     pub command_id: String,
-    /// 成功したか
+    /// Whether it succeeded
     pub success: bool,
-    /// 失敗時の構造化エラーコード
+    /// Structured error code on failure
     pub code: Option<ErrorCode>,
-    /// 人間向けエラーメッセージ
+    /// Human-readable error message
     pub error: Option<String>,
-    /// 対象セッションID (任意)
+    /// Target session ID (optional)
     pub session_id: Option<String>,
 }
 
-/// クライアント向けプロジェクト投影 (`GET /api/v1/projects`)。
+/// Project projection exposed to clients (`GET /api/v1/projects`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct ProjectSummary {
-    /// 論理プロジェクトID
+    /// Logical project ID
     pub project_id: String,
-    /// 表示名
+    /// Display name
     pub name: String,
-    /// 正規化元Git URL
+    /// Git URL the canonical form was derived from
     pub canonical_git_url: Option<String>,
-    /// 作成日時 (Unix epoch ms)
+    /// Creation time (Unix epoch ms)
     pub created_at: i64,
-    /// 更新日時 (Unix epoch ms)
+    /// Last update time (Unix epoch ms)
     pub updated_at: i64,
-    /// 参加ノードごとのローカルパス紐付け
+    /// Local path bindings for each participating node
     pub bindings: Vec<ProjectBindingSummary>,
 }
 
-/// クライアント向けプロジェクト × ノード紐付け。
+/// Project-to-node binding exposed to clients.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct ProjectBindingSummary {
-    /// ノードID
+    /// Node ID
     pub node_id: String,
-    /// ノード上のローカルパス
+    /// Local path on the node
     pub local_path: String,
-    /// Git Worktree か
+    /// Whether this is a git worktree
     pub is_worktree: bool,
-    /// ローカルパスがノード上に実在するか
+    /// Whether the local path actually exists on the node
     ///
-    /// 中央サーバーでは最後の NodeHello 報告時点、ローカルノードでは
-    /// 取得時にライブ確認した値。
+    /// On the central server this is the value from the last `NodeHello` report;
+    /// on the local node it is checked live when fetching.
     pub path_exists: bool,
-    /// 最終確認時のGitブランチ
+    /// Git branch as of the last check
     pub git_branch: Option<String>,
-    /// 最終使用日時 (Unix epoch ms)
+    /// Last used time (Unix epoch ms)
     pub last_used_at: i64,
 }
 
-/// クライアント向けノード情報 (`GET /api/v1/nodes` / `GET /api/v1/system/info`)。
+/// Node information exposed to clients (`GET /api/v1/nodes` / `GET /api/v1/system/info`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct NodeSummary {
-    /// ノードID
+    /// Node ID
     pub node_id: String,
-    /// 表示名
+    /// Display name
     pub name: String,
     /// OS (`windows` / `linux` / `macos`)
     pub os: String,
-    /// アーキテクチャ (`x86_64` / `aarch64`)
+    /// Architecture (`x86_64` / `aarch64`)
     pub arch: String,
-    /// fxg バイナリバージョン
+    /// fxg binary version
     pub version: String,
-    /// 一時VM / コンテナノードか
+    /// Whether this is an ephemeral VM / container node
     pub is_ephemeral: bool,
-    /// 一時ノードのプロビジョナー識別子
+    /// Provisioner identifier of an ephemeral node
     pub provisioner: Option<String>,
-    /// ライフサイクル状態
+    /// Lifecycle status
     pub lifecycle_status: NodeLifecycleStatus,
-    /// 接続中か
+    /// Whether it is currently connected
     pub is_online: bool,
-    /// 最終疎通日時 (Unix epoch ms)
+    /// Last successful contact time (Unix epoch ms)
     pub last_seen_at: i64,
-    /// 利用可能なエージェントID一覧
+    /// Agent IDs available on this node
     pub installed_agents: Vec<String>,
 }
 
-/// クライアント向け承認リクエスト投影 (グローバル承認 Inbox)。
+/// Permission request projection exposed to clients (the global approval inbox).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct PermissionRequestEntry {
     /// ACP request id
     pub request_id: String,
-    /// 対象セッションID
+    /// Target session ID
     pub session_id: String,
-    /// 対象ノードID
+    /// Target node ID
     pub node_id: String,
-    /// ツール名 (例: `terminal/create`)
+    /// Tool name (e.g. `terminal/create`)
     pub tool_name: String,
-    /// 要約 (例: `Run command: cargo test`)
+    /// Summary (e.g. `Run command: cargo test`)
     pub summary: String,
-    /// 選択肢一覧
+    /// Available options
     pub options: Vec<PermissionOption>,
-    /// 引数や Diff 詳細
+    /// Arguments and diff details
     pub details: serde_json::Value,
-    /// 状態
+    /// Status
     pub status: PermissionRequestStatus,
-    /// 作成日時 (Unix epoch ms)
+    /// Creation time (Unix epoch ms)
     pub created_at: i64,
-    /// 解決日時 (Unix epoch ms)
+    /// Resolution time (Unix epoch ms)
     pub resolved_at: Option<i64>,
-    /// 解決主体 (`cli` / `web` / `android_push`)
+    /// Who resolved it (`cli` / `web` / `android_push`)
     pub resolved_by: Option<String>,
 }
 
-/// クライアント向け elicitation リクエスト投影 (質問 Inbox)。
+/// Elicitation request projection exposed to clients (the question inbox).
 ///
-/// エージェントが `elicitation/create` でユーザーへ構造化入力を求めた
-/// リクエストを表す (Phase 1 は form モードのみ)。
+/// Represents a request where the agent asked the user for structured input via
+/// `elicitation/create` (Phase 1 supports form mode only).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct ElicitationRequestEntry {
     /// ACP elicitation id
     pub elicitation_id: String,
-    /// 対象セッションID
+    /// Target session ID
     pub session_id: String,
-    /// 対象ノードID
+    /// Target node ID
     pub node_id: String,
-    /// ユーザーへ提示するメッセージ
+    /// Message shown to the user
     pub message: String,
-    /// 要求モード (`form` / `url`。Phase 1 は `form` のみ)
+    /// Request mode (`form` / `url`. Phase 1 supports `form` only)
     pub mode: String,
-    /// form モードの要求 JSON Schema (`requestedSchema`)
+    /// JSON Schema of the request in form mode (`requestedSchema`)
     pub requested_schema: serde_json::Value,
-    /// 関連するツール呼び出しID (任意)
+    /// Related tool call ID (optional)
     pub tool_call_id: Option<String>,
-    /// `accept` 時の回答内容 (未回答・decline / cancel では `Value::Null`)
+    /// Answer content for `accept` (`Value::Null` while unanswered or on decline / cancel)
     pub content: serde_json::Value,
-    /// 状態
+    /// Status
     pub status: ElicitationRequestStatus,
-    /// 作成日時 (Unix epoch ms)
+    /// Creation time (Unix epoch ms)
     pub created_at: i64,
-    /// 解決日時 (Unix epoch ms)
+    /// Resolution time (Unix epoch ms)
     pub resolved_at: Option<i64>,
-    /// 解決主体 (`cli` / `web` / `android_push`)
+    /// Who resolved it (`cli` / `web` / `android_push`)
     pub resolved_by: Option<String>,
 }
 
-/// FTS5 全文検索のヒット。
+/// A hit of the FTS5 full-text search.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct SearchHit {
-    /// 対象セッションID
+    /// Target session ID
     pub session_id: String,
-    /// 対象イベントID
+    /// Target event ID
     pub event_id: String,
-    /// セッション内連番
+    /// Sequence number inside the session
     pub node_seq: u64,
-    /// イベント種別
+    /// Event type
     pub event_type: String,
-    /// スニペット (マッチ箇所を含む抜粋)
+    /// Snippet (an excerpt containing the match)
     pub snippet: String,
-    /// イベント作成日時 (Unix epoch ms)
+    /// Event creation time (Unix epoch ms)
     pub created_at: i64,
 }
 
-/// 監査ログエントリ (`GET /api/v1/audit/logs`)。
+/// An audit log entry (`GET /api/v1/audit/logs`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct AuditLogEntry {
-    /// ログID
+    /// Log ID
     pub id: i64,
-    /// 操作種別 (`session_start` / `permission_resolved` / `pty_spawn` / `kill_switch` / `worktree_manage`)
+    /// Action kind (`session_start` / `permission_resolved` / `pty_spawn` / `kill_switch` / `worktree_manage`)
     pub action: String,
-    /// 関連セッションID (任意)
+    /// Related session ID (optional)
     pub session_id: Option<String>,
-    /// 対象ノードID (任意)
+    /// Target node ID (optional)
     pub node_id: Option<String>,
-    /// 送信元IPアドレス
+    /// Source IP address
     pub client_ip: String,
-    /// クライアントUser-Agent
+    /// Client User-Agent
     pub client_user_agent: Option<String>,
-    /// トークン識別子または認証主体
+    /// Token identifier or authenticated subject
     pub auth_subject: String,
-    /// 実行内容詳細
+    /// Details of what was executed
     pub details: serde_json::Value,
-    /// 記録日時 (Unix epoch ms)
+    /// Recorded time (Unix epoch ms)
     pub created_at: i64,
 }

@@ -1,9 +1,10 @@
-//! Client (PWA / Browser / CLI) ⇔ Server (または Local Node) API 型定義。
+//! API type definitions for Client (PWA / Browser / CLI) <-> Server (or Local Node).
 //!
-//! 中央サーバー (`fxg server`, `:8080`) とノードのローカルWebサーバー
-//! (`fxg daemon`, `127.0.0.1:7860`) は完全に同一の API パスと
-//! WebSocket フォーマットを実装する (設計: `docs/03-protocol-and-api.md` §3)。
-//! UI 側は接続先 URL を意識せずに同じ型・同じコードで双方へ接続する。
+//! The central server (`fxg server`, `:8080`) and the node's local web server
+//! (`fxg daemon`, `127.0.0.1:7860`) implement exactly the same API paths and
+//! WebSocket format (design: `docs/03-protocol-and-api.md` §3). The UI connects
+//! to either of them with the same types and the same code, without caring about
+//! the endpoint URL.
 
 use serde::{Deserialize, Serialize};
 use specta::Type;
@@ -16,793 +17,799 @@ use crate::common::{
 use crate::config::CustomAgentConfig;
 use crate::events::SessionEventBatch;
 
-/// 接続先の種別 (`GET /api/v1/system/info`)。
+/// Kind of endpoint (`GET /api/v1/system/info`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "snake_case")]
 #[specta(collect)]
 pub enum ConnectionRole {
-    /// 中央サーバー (`fxg server`) に接続中
+    /// Connected to the central server (`fxg server`)
     CentralServer,
-    /// ノードのローカルWebサーバー (`fxg daemon`) に接続中
+    /// Connected to the node's local web server (`fxg daemon`)
     LocalNode,
 }
 
-/// `GET /api/v1/system/info` レスポンス。
+/// `GET /api/v1/system/info` response.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct SystemInfoResponse {
-    /// 接続先の種別
+    /// Kind of endpoint
     pub role: ConnectionRole,
-    /// fxg バイナリバージョン
+    /// fxg binary version
     pub version: String,
-    /// Web Push 用 VAPID 公開鍵 (中央サーバーのみ)
+    /// VAPID public key for Web Push (central server only)
     pub vapid_public_key: Option<String>,
-    /// 未同期 Outbox イベント件数 (ローカルノード接続時のみ)
+    /// Number of unsynced outbox events (local node only)
     pub unsynced_event_count: Option<u64>,
-    /// 中央サーバーへの WebSocket 接続状態 (ローカルノード接続時のみ)
+    /// WebSocket connection state to the central server (local node only)
     pub central_connected: Option<bool>,
 }
 
-/// `GET /api/v1/meta` レスポンス (認証不要の接続先メタ情報)。
+/// `GET /api/v1/meta` response (endpoint metadata that needs no authentication).
 ///
-/// `GET /api/v1/system/info` は認証必須のため、未認証の Web UI はこの
-/// エンドポイントで接続先種別を判定し、トークン入力ダイアログの表示
-/// (中央サーバー / ローカルノード) を正しく切り替える (設計: `docs/03` §3.1)。
+/// `GET /api/v1/system/info` requires authentication, so an unauthenticated Web UI
+/// determines the endpoint kind from this endpoint and switches the token dialog
+/// correctly (central server / local node) (design: `docs/03` §3.1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct MetaResponse {
-    /// 接続先の種別
+    /// Kind of endpoint
     pub role: ConnectionRole,
 }
 
-/// REST / WS 共通のエラーレスポンスボディ。
+/// Error response body shared by REST and WS.
 ///
-/// 形式: `{ "error": { "code": "<ErrorCode>", "message": "..." } }`
+/// Format: `{ "error": { "code": "<ErrorCode>", "message": "..." } }`
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct ApiErrorResponse {
-    /// エラー本体
+    /// The error body
     pub error: ApiErrorBody,
 }
 
-/// エラー本体。
+/// The error body.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct ApiErrorBody {
-    /// 構造化エラーコード
+    /// Structured error code
     pub code: ErrorCode,
-    /// 人間向けメッセージ
+    /// Human-readable message
     pub message: String,
 }
 
-/// `GET /api/v1/projects` レスポンス。
+/// `GET /api/v1/projects` response.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct ProjectsResponse {
-    /// 論理プロジェクト一覧 (ノード・Worktree 紐付け含む)
+    /// Logical projects (including node / worktree bindings)
     pub projects: Vec<ProjectSummary>,
 }
 
-/// `GET /api/v1/nodes` レスポンス。
+/// `GET /api/v1/nodes` response.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct NodesResponse {
-    /// ノード一覧 (オンライン状態・一時ノード属性含む)
+    /// Nodes (including online state and ephemeral-node attributes)
     pub nodes: Vec<NodeSummary>,
 }
 
-/// 利用可能な一時VM・サンドボックスプロビジョナー (`GET /api/v1/provisioners`)。
+/// An available ephemeral VM / sandbox provisioner (`GET /api/v1/provisioners`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct ProvisionerSummary {
-    /// プロビジョナー識別子 (`local-docker` / `colab-pro` 等)
+    /// Provisioner identifier (`local-docker` / `colab-pro` etc.)
     pub name: String,
-    /// 説明
+    /// Description
     pub description: Option<String>,
-    /// アイドル自動破棄までの秒数
+    /// Seconds until the idle instance is discarded automatically
     pub idle_timeout_secs: Option<u64>,
 }
 
-/// `GET /api/v1/provisioners` レスポンス。
+/// `GET /api/v1/provisioners` response.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct ProvisionersResponse {
-    /// プロビジョナー一覧
+    /// Provisioners
     pub provisioners: Vec<ProvisionerSummary>,
 }
 
-/// `POST /api/v1/provisioners/:name/test` レスポンス (疎通検証)。
+/// `POST /api/v1/provisioners/:name/test` response (connectivity check).
 ///
-/// プロビジョナーを起動し、`fxg daemon --stdio` の `NodeHello`
-/// ハンドシェイク (またはブートストラップ過程の失敗) までを確認する。
+/// Starts the provisioner and verifies up to the `NodeHello` handshake of
+/// `fxg daemon --stdio` (or reports a failure during bootstrapping).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct ProvisionerTestResponse {
-    /// 対象プロビジョナー名
+    /// Name of the tested provisioner
     pub name: String,
-    /// ハンドシェイクまで成功したか
+    /// Whether the handshake succeeded
     pub ok: bool,
-    /// 一時ノードID (ハンドシェイク成功時)
+    /// Ephemeral node ID (when the handshake succeeded)
     pub node_id: Option<String>,
-    /// `stderr` に出力されたブートストラップログ (末尾 N 行)
+    /// Bootstrap log written to `stderr` (the last N lines)
     pub log_lines: Vec<String>,
-    /// 失敗時のメッセージ
+    /// Failure message
     pub error: Option<String>,
 }
 
-/// Git Worktree の情報 (`GET /api/v1/projects/:id/worktrees`)。
+/// Information about a git worktree (`GET /api/v1/projects/:id/worktrees`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct WorktreeInfo {
-    /// ノードID
+    /// Node ID
     pub node_id: String,
-    /// Worktree のローカルパス
+    /// Local path of the worktree
     pub path: String,
-    /// チェックアウト中のブランチ
+    /// Branch currently checked out
     pub branch: Option<String>,
-    /// HEAD コミット
+    /// HEAD commit
     pub head_commit: Option<String>,
-    /// メインリポジトリ (Worktree ではない) か
+    /// Whether this is the main repository (not a worktree)
     pub is_main: bool,
 }
 
-/// `GET /api/v1/projects/:id/worktrees` レスポンス。
+/// `GET /api/v1/projects/:id/worktrees` response.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct WorktreesResponse {
-    /// Worktree 一覧
+    /// Worktrees
     pub worktrees: Vec<WorktreeInfo>,
 }
 
-/// `POST /api/v1/projects/:id/worktrees` リクエスト。
+/// `POST /api/v1/projects/:id/worktrees` request.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct CreateWorktreeRequest {
-    /// 対象ノードID
+    /// Target node ID
     pub node_id: String,
-    /// 作成するブランチ名
+    /// Name of the branch to create
     pub branch: String,
-    /// 起点ブランチ (省略時は現在の HEAD)
+    /// Base branch (defaults to the current HEAD)
     pub base_branch: Option<String>,
-    /// 配置先パスの明示指定 (省略時は `worktree_dir_template` から解決)
+    /// Explicit destination path (resolved from `worktree_dir_template` when omitted)
     pub path: Option<String>,
 }
 
-/// `DELETE /api/v1/projects/:id/worktrees` リクエスト。
+/// `DELETE /api/v1/projects/:id/worktrees` request.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct RemoveWorktreeRequest {
-    /// 対象ノードID
+    /// Target node ID
     pub node_id: String,
-    /// 削除対象パス
+    /// Path to remove
     pub path: String,
-    /// 未コミット変更があっても強制削除するか
+    /// Whether to remove even if there are uncommitted changes
     pub force: bool,
 }
 
-/// `POST /api/v1/projects/:id/worktrees/prune` リクエスト。
+/// `POST /api/v1/projects/:id/worktrees/prune` request.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct PruneWorktreesRequest {
-    /// 対象ノードID
+    /// Target node ID
     pub node_id: String,
 }
 
-/// `POST /api/v1/nodes/:node_id/projects/scan` リクエスト。
+/// `POST /api/v1/nodes/:node_id/projects/scan` request.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct ProjectScanRequest {
-    /// スキャン対象ディレクトリ
-    /// (省略時は `config.toml` の `node.project_scan_dirs` を走査)
+    /// Directory to scan
+    /// (walks `node.project_scan_dirs` of `config.toml` when omitted)
     pub dir: Option<String>,
 }
 
-/// `POST /api/v1/nodes/:node_id/projects/scan` レスポンス。
+/// `POST /api/v1/nodes/:node_id/projects/scan` response.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct ProjectScanResponse {
-    /// 実際に走査したディレクトリ
+    /// Directories that were actually scanned
     pub scanned_dirs: Vec<String>,
-    /// スキャン後のノード上での登録プロジェクト一覧
+    /// Projects registered on the node after the scan
     pub projects: Vec<ProjectSummary>,
 }
 
-/// `POST /api/v1/nodes/:node_id/projects/link` リクエスト。
+/// `POST /api/v1/nodes/:node_id/projects/link` request.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct ProjectLinkRequest {
-    /// 紐付け先の論理プロジェクトID
+    /// Logical project ID to link to
     pub project_id: String,
-    /// 対象ディレクトリ
+    /// Target directory
     pub local_path: String,
 }
 
-/// `POST /api/v1/nodes/:node_id/projects/link` レスポンス。
+/// `POST /api/v1/nodes/:node_id/projects/link` response.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct ProjectLinkResponse {
-    /// 解決された論理プロジェクトID
+    /// The resolved logical project ID
     pub project_id: String,
-    /// 対象ディレクトリ (解決後のローカルパス)
+    /// Target directory (the local path after resolution)
     pub local_path: String,
 }
 
-/// `GET /api/v1/sessions` レスポンス。
+/// `GET /api/v1/sessions` response.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct SessionListResponse {
-    /// セッション一覧 (更新日時降順)
+    /// Sessions (newest update first)
     pub sessions: Vec<SessionSummary>,
 }
 
-/// `GET /api/v1/agents` レスポンス (ACP Registry カタログ + 導入状態)。
+/// `GET /api/v1/agents` response (ACP Registry catalog plus installation state).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct AgentsResponse {
-    /// レジストリ (ビルトイン・カスタム含む) の全エージェント
+    /// Every agent of the registry (including built-in and custom ones)
     pub agents: Vec<AgentSummary>,
 }
 
-/// エージェントの起動形態 (このノードで実際に使える手段)。
+/// How an agent is launched (the means actually usable on this node).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "snake_case")]
 #[specta(collect)]
 pub enum AgentSource {
-    /// PATH 上に既にあるインストール (`which` で検出)
+    /// An installation already on PATH (detected with `which`)
     External,
-    /// npx / uvx によるパッケージ実行 (実行時に取得)
+    /// Execution of an npm / uvx package (fetched at run time)
     Package,
-    /// `config.toml` または UI で定義したカスタム ACP エージェント
+    /// A custom ACP agent defined in `config.toml` or in the UI
     Custom,
 }
 
-/// ACP エージェント 1 件 (カタログ情報 + 導入状態)。
+/// A single ACP agent (catalog information plus installation state).
 ///
-/// `sources` が空のエージェントは「カタログにはあるが、このノードではまだ
-/// 起動できない」状態を表す。
+/// An agent with an empty `sources` is "listed in the catalog but not yet
+/// startable on this node".
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct AgentSummary {
-    /// エージェントID
+    /// Agent ID
     pub id: String,
-    /// 表示名
+    /// Display name
     pub name: String,
-    /// レジストリ提供バージョン (カスタムは `-`)
+    /// Version provided by the registry (`-` for custom agents)
     pub version: String,
-    /// 説明
+    /// Description
     pub description: Option<String>,
-    /// このノードで使える起動形態 (空 = 未導入)
+    /// Launch forms usable on this node (empty = not installed)
     pub sources: Vec<AgentSource>,
-    /// ACP Registry カタログに存在するか
+    /// Whether it exists in the ACP Registry catalog
     pub registry: bool,
-    /// `npx` / `uvx` (PATH 上に存在) で実行できるか。
-    /// `true` なら UI の「有効化」で一覧に追加できる。
+    /// Whether it can run through `npx` / `uvx` (present on PATH).
+    /// When `true`, the UI's "enable" action can add it to the list.
     pub package_available: bool,
-    /// PATH から検出した実行ファイル (external のときのみ)
+    /// Executable detected on PATH (only when external)
     pub external_path: Option<String>,
-    /// カスタム定義の内容 (UI 編集用)
+    /// Contents of the custom definition (for editing in the UI)
     pub custom_config: Option<CustomAgentConfig>,
-    /// 利用可能なノードID一覧 (NodeHello の報告ベース)
+    /// Nodes where it is available (based on the NodeHello reports)
     pub installed_nodes: Vec<String>,
 }
 
-/// エージェント管理操作の共通レスポンス。
+/// Common response of agent management operations.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct AgentOpResponse {
-    /// 実行結果の表示メッセージ (例: `installed opencode2 0.1.0`)
+    /// Message describing the outcome (e.g. `installed opencode2 0.1.0`)
     pub message: Option<String>,
 }
 
-/// `GET /api/v1/nodes/tokens` の 1 件 (発行済みノード個別トークン)。
+/// One entry of `GET /api/v1/nodes/tokens` (an issued per-node token).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct NodeTokenSummary {
-    /// 対象ノードID
+    /// Target node ID
     pub node_id: String,
-    /// トークンハッシュの先頭プレフィックス (照合・表示用。平文は保存しない)
+    /// Leading prefix of the token hash (for matching and display; the plaintext is never stored)
     pub token_prefix: String,
 }
 
-/// `GET /api/v1/nodes/tokens` レスポンス。
+/// `GET /api/v1/nodes/tokens` response.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct NodeTokensResponse {
-    /// 発行済みノードトークン一覧
+    /// Issued node tokens
     pub tokens: Vec<NodeTokenSummary>,
 }
 
-/// `POST /api/v1/nodes/tokens` リクエスト (新規ノードトークン発行)。
+/// `POST /api/v1/nodes/tokens` request (issue a new node token).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct IssueNodeTokenRequest {
-    /// ペアリングするノードID (fxg daemon の node_id)
+    /// Node ID to pair (the node_id of the fxg daemon)
     pub node_id: String,
 }
 
-/// `POST /api/v1/nodes/tokens` レスポンス。
+/// `POST /api/v1/nodes/tokens` response.
 ///
-/// 平文トークンは発行時にこの一度きりのみ返却される (サーバーには
-/// SHA-256 ハッシュのみ保存)。
+/// The plaintext token is returned only once, at issue time (the server stores
+/// only its SHA-256 hash).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct IssueNodeTokenResponse {
-    /// 対象ノードID
+    /// Target node ID
     pub node_id: String,
-    /// 発行された平文トークン (`~/.flexagent/node_token` に保存する)
+    /// The issued plaintext token (stored in `~/.flexagent/node_token`)
     pub token: String,
 }
 
-/// `POST /api/v1/auth/rotate-token` レスポンス (クライアントトークン再生成)。
+/// `POST /api/v1/auth/rotate-token` response (regenerate the client token).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct RotateAuthTokenResponse {
-    /// 新しいクライアント認証トークン (旧トークンは即時無効化)
+    /// New client authentication token (the old one is invalidated immediately)
     pub token: String,
 }
 
-/// セッション起動時に同時作成する Worktree の指定。
+/// Specification of a worktree created together with the session.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct WorktreeSpec {
-    /// ブランチ名
+    /// Branch name
     pub branch: String,
-    /// 起点ブランチ
+    /// Base branch
     pub base_branch: Option<String>,
-    /// 配置先パスの明示指定
+    /// Explicit destination path
     pub new_path: Option<String>,
 }
 
-/// 別ノード・別エージェントへの Context Fork 指定。
+/// Specification of a context fork to another node or agent.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct SessionForkSpec {
-    /// 分岐元セッションID
+    /// Source session ID
     pub from_session_id: String,
-    /// 分岐元のイベント連番 (省略時は最新)
+    /// Event sequence number of the fork source (latest when omitted)
     pub from_node_seq: Option<u64>,
-    /// 一時VMから退避された Git バンドルを復元する場合の bundle データ (Base64)
+    /// Bundle data (Base64) when restoring a git bundle saved from an ephemeral VM
     pub restore_git_bundle_b64: Option<String>,
 }
 
-/// `POST /api/v1/sessions` リクエスト (新規セッション開始)。
+/// `POST /api/v1/sessions` request (start a new session).
 ///
-/// 既存の常駐 `node_id` 指定のほか、`provisioner` 指定による一時VMの
-/// オンデマンド起動＆自動セットアップ、Worktree 同時作成、Context Fork に対応する。
+/// Besides specifying an existing resident `node_id`, it supports on-demand
+/// start-up and automatic setup of an ephemeral VM via `provisioner`, creating a
+/// worktree at the same time, and a context fork.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct CreateSessionRequest {
-    /// クライアント採番の相関ID (重複送信の冪等排除に使用)
+    /// Correlation ID assigned by the client (used for idempotent duplicate rejection)
     pub command_id: String,
-    /// 論理プロジェクトID
+    /// Logical project ID
     pub project_id: String,
-    /// 実行する常駐ノードID (`provisioner` と排他)
+    /// ID of the resident node to run on (mutually exclusive with `provisioner`)
     pub node_id: Option<String>,
-    /// 一時VMプロビジョナー名 (`node_id` と排他。中央サーバー必須)
+    /// Ephemeral VM provisioner name (mutually exclusive with `node_id`; requires the central server)
     pub provisioner: Option<String>,
-    /// 実行ディレクトリ (既存 Worktree / リポジトリ直下を指定)
+    /// Working directory (an existing worktree or the repository root)
     pub local_path: Option<String>,
-    /// 新規 Worktree を作成して起動する場合の指定
+    /// Specification used when creating and starting in a new worktree
     pub worktree: Option<WorktreeSpec>,
-    /// エージェントID (`opencode2` / `antigravity-acp` 等)
+    /// Agent ID (`opencode2` / `antigravity-acp` etc.)
     pub agent_id: String,
-    /// 初期プロンプト
+    /// Initial prompt
     pub initial_prompt: Option<String>,
-    /// 初期モード (`code` / `plan` 等)
+    /// Initial mode (`code` / `plan` etc.)
     pub mode: Option<String>,
-    /// エージェントへの追加パススルー引数
+    /// Extra arguments passed through to the agent
     pub extra_args: Option<Vec<String>>,
-    /// 既存セッションからの Fork 指定
+    /// Fork specification from an existing session
     pub fork: Option<SessionForkSpec>,
 }
 
-/// `POST /api/v1/sessions` レスポンス。
+/// `POST /api/v1/sessions` response.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct CreateSessionResponse {
-    /// 起動したセッションID
+    /// ID of the started session
     pub session_id: String,
-    /// 要求時の相関ID
+    /// Correlation ID from the request
     pub command_id: String,
 }
 
-/// `GET /api/v1/inbox` レスポンス (全セッション横断の未解決承認リクエスト)。
+/// `GET /api/v1/inbox` response (unresolved permission requests across all sessions).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct InboxResponse {
-    /// 未解決 (`pending`) の承認リクエスト一覧
+    /// Unresolved (`pending`) permission requests
     pub requests: Vec<PermissionRequestEntry>,
-    /// 未解決 (`pending`) の elicitation (構造化入力) リクエスト一覧
+    /// Unresolved (`pending`) elicitation (structured input) requests
     pub elicitations: Vec<ElicitationRequestEntry>,
 }
 
-/// `POST /api/v1/sessions/:id/permissions/:req_id/respond` リクエスト。
+/// `POST /api/v1/sessions/:id/permissions/:req_id/respond` request.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct RespondPermissionRequest {
-    /// 選択された `option_id` (`allow_once` / `allow_always` / `reject` 等)
+    /// The selected `option_id` (`allow_once` / `allow_always` / `reject` etc.)
     pub selected_option_id: String,
-    /// 同一ツール操作をセッション中常時許可するか (`allow_always` 昇格)
+    /// Whether to allow the same tool operation for the rest of the session (promote to `allow_always`)
     pub always: bool,
-    /// 解決主体 (`cli` / `web` / `android_push`)
+    /// Who resolved it (`cli` / `web` / `android_push`)
     pub resolved_by: String,
 }
 
-/// `POST /api/v1/sessions/:id/permissions/:req_id/respond` レスポンス。
+/// `POST /api/v1/sessions/:id/permissions/:req_id/respond` response.
 ///
-/// 既に解決済みの場合も 200 で返し `already_resolved = true` とする
-/// (UI 側は正常遷移として扱う。冪等)。
+/// It also returns 200 with `already_resolved = true` when the request was
+/// already resolved (the UI treats it as a normal transition; idempotent).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct RespondPermissionResponse {
-    /// この応答より前に既に解決済みだったか
+    /// Whether it had already been resolved before this answer
     pub already_resolved: bool,
 }
 
-/// `POST /api/v1/sessions/:id/elicitations/:elicitation_id/respond` リクエスト。
+/// `POST /api/v1/sessions/:id/elicitations/:elicitation_id/respond` request.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct RespondElicitationRequest {
-    /// ユーザーの応答アクション (`accept` / `decline` / `cancel`)
+    /// The user's response action (`accept` / `decline` / `cancel`)
     pub action: ElicitationAction,
-    /// `accept` 時の回答内容 (form の `requested_schema` 準拠。それ以外は `null`)
+    /// Answer content for `accept` (following the form's `requested_schema`; `null` otherwise)
     pub content: serde_json::Value,
-    /// 解決主体 (`cli` / `web` / `android_push`)
+    /// Who resolved it (`cli` / `web` / `android_push`)
     pub resolved_by: String,
 }
 
-/// `POST /api/v1/sessions/:id/elicitations/:elicitation_id/respond` レスポンス。
+/// `POST /api/v1/sessions/:id/elicitations/:elicitation_id/respond` response.
 ///
-/// 既に解決済みの場合も 200 で返し `already_resolved = true` とする (冪等)。
+/// It also returns 200 with `already_resolved = true` when the request was
+/// already resolved (idempotent).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct RespondElicitationResponse {
-    /// この応答より前に既に解決済みだったか
+    /// Whether it had already been resolved before this answer
     pub already_resolved: bool,
 }
 
-/// `POST /api/v1/sessions/:id/revert` リクエスト。
+/// `POST /api/v1/sessions/:id/revert` request.
 ///
-/// 指定ターン (`UserMessage.node_seq`) 時点の Shadow Git Tree へ
-/// ワークスペースを復元する (`fxg session revert` の Web UI 版)。
+/// Restores the workspace to the shadow git tree of the given turn
+/// (`UserMessage.node_seq`) (the Web UI version of `fxg session revert`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct SessionRevertRequest {
-    /// Revert 基準にする `UserMessage` の `node_seq`
-    /// (省略時は直近ターン)
+    /// `node_seq` of the `UserMessage` used as the revert point
+    /// (defaults to the latest turn)
     pub target_node_seq: Option<u64>,
 }
 
-/// `POST /api/v1/sessions/:id/revert` レスポンス。
+/// `POST /api/v1/sessions/:id/revert` response.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct SessionRevertResponse {
-    /// 基準にした `UserMessage` の `node_seq`
+    /// `node_seq` of the `UserMessage` used as the reference
     pub target_node_seq: u64,
-    /// 復元先の Tree Hash
+    /// Tree hash to restore to
     pub restored_tree_hash: String,
-    /// 復元直前を退避したバックアップ Tree Hash
-    /// (もう一度 Revert すれば元に戻せる)
+    /// Backup tree hash holding the state right before the restore
+    /// (another revert brings it back)
     pub backup_tree_hash: Option<String>,
-    /// 復元したファイル数
+    /// Number of restored files
     pub restored_files: u64,
-    /// 削除したファイル数
+    /// Number of removed files
     pub removed_files: u64,
 }
 
-/// `POST /api/v1/sessions/:id/resume` リクエスト。
+/// `POST /api/v1/sessions/:id/resume` request.
 ///
-/// 停止済みセッションを同一 `session_id` のまま再開する
-/// (設計: `docs/04-agent-drivers-and-windows.md` §4.3)。
+/// Resumes a stopped session with the same `session_id`
+/// (design: `docs/04-agent-drivers-and-windows.md` §4.3).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct ResumeSessionRequest {
-    /// ネイティブ復元を試みず履歴 Replay で継続する (既定 `false`)
+    /// Skip native restoration and continue with history replay (default `false`)
     #[serde(default)]
     pub force_replay: bool,
 }
 
-/// `POST /api/v1/sessions/:id/resume` レスポンス。
+/// `POST /api/v1/sessions/:id/resume` response.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct ResumeSessionResponse {
-    /// 再開したセッションID (リクエスト対象と同一)
+    /// Resumed session ID (the same as the requested one)
     pub session_id: String,
-    /// エージェント側コンテキストをネイティブ復元できたか
-    /// (`false` = 履歴 Replay で新規エージェントセッションとして継続)
+    /// Whether the agent-side context could be restored natively
+    /// (`false` = continued as a new agent session through history replay)
     pub context_restored: bool,
 }
 
-/// `POST /api/v1/sessions/:id/archive` リクエスト。
+/// `POST /api/v1/sessions/:id/archive` request.
 ///
-/// アーカイブは一覧からの非表示/復元のみで、イベントログは保持される
-/// (会話本文の消去は `DELETE /api/v1/sessions/:id`)。
+/// Archiving only hides or restores the session in the listing; the event log is
+/// kept (erasing conversation bodies is done by `DELETE /api/v1/sessions/:id`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct SessionArchiveRequest {
-    /// `true` = アーカイブ、`false` = 復元
+    /// `true` = archive, `false` = restore
     pub archived: bool,
 }
 
-/// `POST /api/v1/sessions/:id/archive` レスポンス。
+/// `POST /api/v1/sessions/:id/archive` response.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct SessionArchiveResponse {
-    /// 対象セッションID
+    /// Target session ID
     pub session_id: String,
-    /// アーカイブ日時 (Unix epoch ms)。復元時は `None`
+    /// Archive time (Unix epoch ms). `None` when restored
     pub archived_at: Option<i64>,
 }
 
-/// `POST /api/v1/search` レスポンス (FTS5 全文検索)。
+/// `POST /api/v1/search` response (FTS5 full-text search).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct SearchResponse {
-    /// 検索ヒット (新しい順)
+    /// Search hits (newest first)
     pub hits: Vec<SearchHit>,
 }
 
-/// `POST /api/v1/push/subscribe` リクエスト (PWA の Web Push 購読登録)。
+/// `POST /api/v1/push/subscribe` request (register a PWA Web Push subscription).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct PushSubscribeRequest {
-    /// Push サービスエンドポイント URL
+    /// Push service endpoint URL
     pub endpoint: String,
-    /// 購読の `p256dh` 公開鍵 (Base64)
+    /// `p256dh` public key of the subscription (Base64)
     pub p256dh: String,
-    /// 購読の `auth` シークレット (Base64)
+    /// `auth` secret of the subscription (Base64)
     pub auth: String,
-    /// 端末名 (例: `Pixel 9 Chrome PWA`)
+    /// Device name (e.g. `Pixel 9 Chrome PWA`)
     pub device_name: Option<String>,
 }
 
-/// `POST /api/v1/push/subscribe` レスポンス。
+/// `POST /api/v1/push/subscribe` response.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct PushSubscribeResponse {
-    /// 登録に成功したか
+    /// Whether registration succeeded
     pub ok: bool,
 }
 
-/// `POST /api/v1/auth/login` リクエスト (Web UI のトークン入力)。
+/// `POST /api/v1/auth/login` request (token entry in the Web UI).
 ///
-/// 認証済みリクエスト (`Authorization: Bearer <auth_token>`) として呼び出し、
-/// 成功時は `Set-Cookie: fxg_session=<token>; HttpOnly; SameSite=Strict`
-/// が返却される。以降は Cookie で認証できる (docs/03 §3.0)。
+/// It is called as an authenticated request (`Authorization: Bearer <auth_token>`)
+/// and on success returns
+/// `Set-Cookie: fxg_session=<token>; HttpOnly; SameSite=Strict`.
+/// Afterwards the cookie can be used for authentication (docs/03 §3.0).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct AuthLoginRequest {
-    /// 認証トークン (Web UI が保持する値。再検証のため body でも渡す)
+    /// Authentication token (the value held by the Web UI, also sent in the body for revalidation)
     pub token: String,
 }
 
-/// `POST /api/v1/system/kill-switch` リクエスト (緊急停止)。
+/// `POST /api/v1/system/kill-switch` request (emergency stop).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct KillSwitchRequest {
-    /// 実行理由 (監査ログへ記録)
+    /// Reason for the action (recorded in the audit log)
     pub reason: String,
 }
 
-/// `POST /api/v1/system/kill-switch` レスポンス。
+/// `POST /api/v1/system/kill-switch` response.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct KillSwitchResponse {
-    /// `KillAllSessions` を配信したノード数
+    /// Number of nodes the `KillAllSessions` message was delivered to
     pub notified_nodes: u64,
 }
 
-/// `GET /api/v1/audit/logs` レスポンス。
+/// `GET /api/v1/audit/logs` response.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct AuditLogsResponse {
-    /// 監査ログ (新しい順)
+    /// Audit logs (newest first)
     pub logs: Vec<AuditLogEntry>,
 }
 
-/// Client → Server (`/api/v1/client/ws`) メッセージ。
+/// Client -> Server (`/api/v1/client/ws`) message.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[serde(tag = "op", rename_all = "snake_case")]
 #[specta(collect)]
 pub enum ClientWsMessage {
-    /// 接続時の購読開始 (差分再開カーソルの指定)。
+    /// Starts the subscription on connect (specifying the cursor to resume from).
     ///
-    /// `since_cursor` は**接続先ストア**の `session_events.cursor` を指定する。
-    /// 接続先を切り替えた場合は `None` (初回全量) から開始する。
+    /// `since_cursor` refers to `session_events.cursor` of the **connected store**.
+    /// When the endpoint is switched, start from `None` (full initial load).
     Subscribe {
-        /// 最後に受信したバッチのカーソル
+        /// Cursor of the last received batch
         since_cursor: Option<u64>,
-        /// 現在開いているセッション (優先配信のヒント)
+        /// Currently open session (a hint for prioritized delivery)
         focused_session_id: Option<String>,
     },
-    /// プロンプト送信 (スラッシュコマンド含む)。
+    /// Sends a prompt (including slash commands).
     SendPrompt {
-        /// 相関ID
+        /// Correlation ID
         command_id: String,
-        /// 対象セッションID
+        /// Target session ID
         session_id: String,
-        /// プロンプト本文
+        /// Prompt body
         text: String,
-        /// 送信元 (`cli` / `web` / `android`)
+        /// Source (`cli` / `web` / `android`)
         client_source: String,
     },
-    /// 承認リクエストへの回答。
+    /// Answers a permission request.
     RespondPermission {
-        /// 相関ID
+        /// Correlation ID
         command_id: String,
-        /// 対象セッションID
+        /// Target session ID
         session_id: String,
         /// ACP request id
         request_id: String,
-        /// 選択された `option_id`
+        /// The selected `option_id`
         selected_option_id: String,
-        /// 解決主体 (`cli` / `web` / `android_push`)
+        /// Who resolved it (`cli` / `web` / `android_push`)
         resolved_by: String,
     },
-    /// elicitation (構造化入力リクエスト) への回答。
+    /// Answers an elicitation (structured input request).
     RespondElicitation {
-        /// 相関ID
+        /// Correlation ID
         command_id: String,
-        /// 対象セッションID
+        /// Target session ID
         session_id: String,
         /// ACP elicitation id
         elicitation_id: String,
-        /// ユーザーの応答アクション (`accept` / `decline` / `cancel`)
+        /// The user's response action (`accept` / `decline` / `cancel`)
         action: ElicitationAction,
-        /// `accept` 時の回答内容 (form の `requested_schema` 準拠)
+        /// Answer content for `accept` (following the form's `requested_schema`)
         content: serde_json::Value,
-        /// 解決主体 (`cli` / `web` / `android_push`)
+        /// Who resolved it (`cli` / `web` / `android_push`)
         resolved_by: String,
     },
-    /// モード切替 / 設定変更 / キャンセル / Kill。
+    /// Mode switch / configuration change / cancel / kill.
     ControlSession {
-        /// 相関ID
+        /// Correlation ID
         command_id: String,
-        /// 対象セッションID
+        /// Target session ID
         session_id: String,
-        /// 実行する操作
+        /// Operation to execute
         action: SessionControlAction,
     },
-    /// キープアライブ
+    /// Keep-alive
     Ping,
 }
 
-/// Server → Client (`/api/v1/client/ws`) メッセージ。
+/// Server -> Client (`/api/v1/client/ws`) message.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[serde(tag = "op", rename_all = "snake_case")]
 #[specta(collect)]
 pub enum ServerWsMessage {
-    /// 差分イベントバッチ (接続直後のリプレイおよび以降のリアルタイム配信)。
+    /// A batch of incremental events (the replay right after connecting and the
+    /// realtime delivery afterwards).
     EventBatch {
-        /// イベント列 (`node_seq` 昇順)
+        /// Events (ascending `node_seq`)
         events: Vec<crate::events::SessionEventEnvelope>,
-        /// 配信元ストアのカーソル (再接続時に `since_cursor` へ渡す)
+        /// Cursor of the source store (passed as `since_cursor` when reconnecting)
         cursor: u64,
     },
-    /// ストリーミング途中のエフェメラルチャンク (永続化されない)。
+    /// An ephemeral chunk produced while streaming (never persisted).
     LiveStreamDelta {
-        /// 対象セッションID
+        /// Target session ID
         session_id: String,
-        /// 差分本体
+        /// The delta body
         delta: StreamDeltaPayload,
     },
-    /// 一時VMブートストラップ (`stderr`) の進捗ログ行 (エフェメラル)。
+    /// A progress log line of ephemeral VM bootstrapping (`stderr`) (ephemeral).
     ///
-    /// ブートストラップは一時ノードの `node.db` が存在する前に発生するため、
-    /// イベントログには永続化せず中央サーバーから直接ストリーム配信する。
+    /// Bootstrapping happens before the ephemeral node's `node.db` exists, so it is
+    /// streamed directly from the central server instead of being persisted in the
+    /// event log.
     BootstrapLog {
-        /// 対象セッションID
+        /// Target session ID
         session_id: String,
-        /// ログ1行
+        /// A single log line
         line: String,
     },
-    /// コマンド実行結果 (要求元クライアントへの相関返却)。
+    /// Result of a command (correlated back to the requesting client).
     CommandResult {
-        /// 相関ID
+        /// Correlation ID
         command_id: String,
-        /// 成功したか
+        /// Whether it succeeded
         success: bool,
-        /// 失敗時の構造化エラーコード
+        /// Structured error code on failure
         code: Option<ErrorCode>,
-        /// 人間向けメッセージ
+        /// Human-readable message
         error: Option<String>,
-        /// 対象セッションID (任意)
+        /// Target session ID (optional)
         session_id: Option<String>,
     },
-    /// 同期状態の通知 (UI の同期バッジ表示用)。
+    /// Synchronization state notification (drives the sync badge in the UI).
     SystemStatus {
-        /// 中央サーバーに接続中か (ローカルノード接続時)
+        /// Whether the central server is connected (when connected to a local node)
         central_connected: bool,
-        /// 未同期 Outbox イベント件数
+        /// Number of unsynced outbox events
         unsynced_event_count: u64,
-        /// 最終同期日時 (Unix epoch ms)
+        /// Last synchronization time (Unix epoch ms)
         last_synced_at: Option<i64>,
     },
-    /// エラー通知。
+    /// Error notification.
     Error {
-        /// 構造化エラーコード
+        /// Structured error code
         code: ErrorCode,
-        /// 人間向けメッセージ
+        /// Human-readable message
         message: String,
     },
-    /// `Ping` への応答
+    /// Response to `Ping`
     Pong,
 }
 
-/// Client → Server (`/api/v1/pty/ws`) メッセージ。
+/// Client -> Server (`/api/v1/pty/ws`) message.
 ///
-/// Web UI / スマホPWA のターミナルとノード上の ConPTY / Unix PTY を直接結ぶ
-/// 双方向ストリームチャネル。ノード側設定 `allow_remote_pty = false` の場合は
-/// リモート (中央サーバー経由) からの `spawn` が拒否される。
+/// A bidirectional stream channel that connects the terminal of the Web UI / mobile
+/// PWA directly to the ConPTY / Unix PTY on the node. When the node setting
+/// `allow_remote_pty = false` is in effect, `spawn` from remote (through the
+/// central server) is rejected.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[serde(tag = "op", rename_all = "snake_case")]
 #[specta(collect)]
 pub enum PtyClientMessage {
-    /// 既存 PTY へのアタッチ
+    /// Attach to an existing PTY
     Attach {
         /// PTY ID
         pty_id: String,
     },
-    /// 新規 PTY の起動
+    /// Start a new PTY
     Spawn {
-        /// 対象セッションID
+        /// Target session ID
         session_id: String,
-        /// 列数
+        /// Number of columns
         cols: u16,
-        /// 行数
+        /// Number of rows
         rows: u16,
-        /// シェルコマンド (省略時は既定シェル)
+        /// Shell command (defaults to the default shell)
         shell_cmd: Option<String>,
     },
-    /// キー入力送信
+    /// Send keystrokes
     Input {
-        /// 入力バイト列 (Base64)
+        /// Input bytes (Base64)
         data_b64: String,
     },
-    /// 画面リサイズ
+    /// Resize the screen
     Resize {
-        /// 列数
+        /// Number of columns
         cols: u16,
-        /// 行数
+        /// Number of rows
         rows: u16,
     },
-    /// PTY の終了
+    /// Terminate the PTY
     Kill,
 }
 
-/// Server → Client (`/api/v1/pty/ws`) メッセージ。
+/// Server -> Client (`/api/v1/pty/ws`) message.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[serde(tag = "op", rename_all = "snake_case")]
 #[specta(collect)]
 pub enum PtyServerMessage {
-    /// PTY 起動完了 (以降の出力は `attach` した PTY ID に紐づく)
+    /// The PTY has started (subsequent output belongs to the attached PTY ID)
     Spawned {
-        /// 起動した PTY ID
+        /// ID of the started PTY
         pty_id: String,
     },
-    /// PTY 出力
+    /// PTY output
     Output {
-        /// 出力バイト列 (Base64)
+        /// Output bytes (Base64)
         data_b64: String,
     },
-    /// PTY プロセス終了
+    /// The PTY process exited
     Exit {
-        /// 終了コード
+        /// Exit code
         exit_code: Option<i32>,
     },
-    /// エラー通知。
+    /// Error notification.
     ///
-    /// `code` は `ErrorCode` ではなく PTY チャネル固有の文字列
-    /// (例: リモートPTY無効時 `"FORBIDDEN"`)。
+    /// `code` is not an `ErrorCode` but a string specific to the PTY channel
+    /// (e.g. `"FORBIDDEN"` when remote PTY is disabled).
     Error {
-        /// エラーコード文字列
+        /// Error code string
         code: String,
-        /// 人間向けメッセージ
+        /// Human-readable message
         message: String,
     },
 }
 
-/// `CommandResult` を `ServerWsMessage::CommandResult` へ変換するヘルパー。
+/// Helper converting a `CommandResult` into `ServerWsMessage::CommandResult`.
 pub fn command_result_ws(result: CommandResult) -> ServerWsMessage {
     ServerWsMessage::CommandResult {
         command_id: result.command_id,
@@ -813,7 +820,7 @@ pub fn command_result_ws(result: CommandResult) -> ServerWsMessage {
     }
 }
 
-/// `SessionEventBatch` を `ServerWsMessage::EventBatch` へ変換するヘルパー。
+/// Helper converting a `SessionEventBatch` into `ServerWsMessage::EventBatch`.
 pub fn event_batch_ws(batch: SessionEventBatch) -> ServerWsMessage {
     ServerWsMessage::EventBatch {
         events: batch.events,
@@ -821,37 +828,37 @@ pub fn event_batch_ws(batch: SessionEventBatch) -> ServerWsMessage {
     }
 }
 
-/// `GET /api/v1/nodes/:id/fs/browse` クエリパラメータ。
+/// Query parameters of `GET /api/v1/nodes/:id/fs/browse`.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct FsBrowseQuery {
-    /// 閲覧対象のディレクトリパス (省略時はホームディレクトリ)
+    /// Directory path to browse (defaults to the home directory)
     pub path: Option<String>,
 }
 
-/// ファイルシステム内のエントリ (フォルダまたはファイル)。
+/// An entry inside the file system (a folder or a file).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct FsEntry {
-    /// エントリ名 (ファイル名/フォルダ名)
+    /// Entry name (file name / folder name)
     pub name: String,
-    /// 絶対パス
+    /// Absolute path
     pub path: String,
-    /// ディレクトリか
+    /// Whether it is a directory
     pub is_dir: bool,
-    /// 隠し属性 (名前が '.' で始まる、または Windows の Hidden 属性)
+    /// Hidden attribute (the name starts with '.', or the Windows Hidden attribute)
     pub is_hidden: bool,
 }
 
-/// `GET /api/v1/nodes/:id/fs/browse` レスポンス。
+/// `GET /api/v1/nodes/:id/fs/browse` response.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct FsBrowseResponse {
-    /// 現在閲覧中の絶対パス (Windows では "C:\\Users\\..."、Unix では "/home/...")
+    /// Absolute path currently being browsed ("C:\\Users\\..." on Windows, "/home/..." on Unix)
     pub current_path: String,
-    /// 親ディレクトリのパス (これ以上親がない、またはドライブ一覧なら None)
+    /// Path of the parent directory (None when there is no parent or this is the drive list)
     pub parent_path: Option<String>,
-    /// 子エントリ一覧
+    /// Child entries
     pub entries: Vec<FsEntry>,
 }
 
@@ -937,7 +944,7 @@ mod tests {
                 new_path: None,
             }),
             agent_id: "opencode".into(),
-            initial_prompt: Some("テストを修正して".into()),
+            initial_prompt: Some("Fix the failing tests".into()),
             mode: Some("code".into()),
             extra_args: Some(vec!["--verbose".into()]),
             fork: None,

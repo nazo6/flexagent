@@ -1,13 +1,14 @@
-//! CLI (`fxg`) ⇔ Local Daemon (`fxg daemon`) 間 ローカルIPC メッセージ。
+//! Local IPC messages between the CLI (`fxg`) and the local daemon (`fxg daemon`).
 //!
-//! - **トランスポート**: Windows は Named Pipe (`\\.\pipe\fxg-daemon-<username>`)、
-//!   Linux / macOS / WSL は Unix Domain Socket
-//!   (`$XDG_RUNTIME_DIR/fxg/daemon.sock` または `/tmp/fxg-<uid>/daemon.sock`)
-//! - **フレーミング**: Length-prefixed JSON
-//!   ([`IPC_LENGTH_PREFIX_BYTES`] バイトのリトルエンディアン長さヘッダ + JSON)
+//! - **Transport**: Named Pipe on Windows (`\\.\pipe\fxg-daemon-<username>`), and a
+//!   Unix Domain Socket on Linux / macOS / WSL
+//!   (`$XDG_RUNTIME_DIR/fxg/daemon.sock` or `/tmp/fxg-<uid>/daemon.sock`)
+//! - **Framing**: length-prefixed JSON
+//!   (a little-endian length header of [`IPC_LENGTH_PREFIX_BYTES`] bytes + JSON)
 //!
-//! サーバー実装の内部プロトコルであり UI には公開しないため `specta` の
-//! export 対象外とする (設計: `docs/03-protocol-and-api.md` §4)。
+//! This is the internal protocol of the server implementation and is not exposed
+//! to the UI, so it is excluded from `specta` export
+//! (design: `docs/03-protocol-and-api.md` §4).
 
 use serde::{Deserialize, Serialize};
 
@@ -19,478 +20,483 @@ use crate::common::{
 };
 use crate::events::SessionEventEnvelope;
 
-/// Length-prefixed JSON の長さヘッダ長 (リトルエンディアン u32)。
+/// Length of the length header of length-prefixed JSON (little-endian u32).
 pub const IPC_LENGTH_PREFIX_BYTES: usize = 4;
 
-/// ローカルノードの稼働状態 (`GetLocalStatus` 応答)。
+/// Runtime status of the local node (the `GetLocalStatus` response).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LocalStatus {
-    /// ローカルで稼働中・最近のセッション一覧
+    /// Sessions running locally or recently active
     pub sessions: Vec<SessionSummary>,
-    /// 中央サーバーへの WebSocket 接続状態
+    /// WebSocket connection state to the central server
     pub central_connected: bool,
-    /// 未送信 Outbox イベント件数
+    /// Number of outbox events not yet sent
     pub unsynced_event_count: u64,
-    /// 最終同期日時 (Unix epoch ms)
+    /// Last synchronization time (Unix epoch ms)
     pub last_synced_at: Option<i64>,
 }
 
-/// 論理プロジェクト解決の詳細 (`fxg project info` の結果)。
+/// Details of the logical project resolution (the result of `fxg project info`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProjectInfo {
-    /// 論理プロジェクトID (`project_key`)
+    /// Logical project ID (`project_key`)
     pub project_id: String,
-    /// 表示名
+    /// Display name
     pub name: String,
-    /// 正規化元の Git URL
+    /// Git URL the canonical form was derived from
     pub canonical_git_url: Option<String>,
-    /// Git ルート (非 Git の場合は `None`)
+    /// Git root (`None` when not a git repository)
     pub git_root: Option<String>,
-    /// Git ルートからの相対サブパス (モノレポ)
+    /// Relative subpath from the git root (monorepo)
     pub relative_subpath: Option<String>,
-    /// 解決対象ディレクトリ
+    /// Directory that was resolved
     pub local_path: String,
-    /// Git リポジトリか
+    /// Whether it is a git repository
     pub is_git_repo: bool,
-    /// 解決元
+    /// How it was resolved
     pub source: ProjectResolutionSource,
 }
 
-/// CLI → Daemon の要求メッセージ。
+/// Request message from the CLI to the daemon.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "method", rename_all = "snake_case")]
 pub enum IpcClientMessage {
-    /// `fxg run <agent>` 実行時に呼ばれ、デーモン側でセッションを開始する。
+    /// Called by `fxg run <agent>`; the daemon starts the session.
     EnsureSession {
-        /// 相関ID
+        /// Correlation ID
         command_id: String,
-        /// 実行ディレクトリ (カレントディレクトリ / Worktree)
+        /// Working directory (current directory / worktree)
         cwd: String,
-        /// エージェントID
+        /// Agent ID
         agent_id: String,
-        /// エージェントプロセスへのパススルー引数
+        /// Arguments passed through to the agent process
         extra_args: Vec<String>,
-        /// 初期モード (`--mode` 指定時。ACP の `session/set_mode` で適用)
+        /// Initial mode (when `--mode` is given; applied with ACP `session/set_mode`)
         initial_mode: Option<String>,
     },
-    /// 稼働中セッション一覧・中央サーバー接続状態・未送信 Outbox 件数を返却する。
+    /// Returns the running sessions, the central server connection state and the
+    /// number of unsent outbox events.
     GetLocalStatus {
-        /// 相関ID
+        /// Correlation ID
         command_id: String,
     },
-    /// プロンプト送信 (スラッシュコマンド含む)。
+    /// Sends a prompt (including slash commands).
     SendPrompt {
-        /// 相関ID
+        /// Correlation ID
         command_id: String,
-        /// 対象セッションID
+        /// Target session ID
         session_id: String,
-        /// プロンプト本文
+        /// Prompt body
         text: String,
-        /// 送信元 (`cli` / `web` / `android`)
+        /// Source (`cli` / `web` / `android`)
         client_source: String,
     },
-    /// 承認リクエストへの回答。
+    /// Answers a permission request.
     RespondPermission {
-        /// 相関ID
+        /// Correlation ID
         command_id: String,
-        /// 対象セッションID
+        /// Target session ID
         session_id: String,
         /// ACP request id
         request_id: String,
-        /// 選択された `option_id`
+        /// The selected `option_id`
         selected_option_id: String,
-        /// 解決主体 (`cli` / `web` / `android_push`)
+        /// Who resolved it (`cli` / `web` / `android_push`)
         resolved_by: String,
     },
-    /// elicitation (構造化入力リクエスト) への回答。
+    /// Answers an elicitation (structured input request).
     RespondElicitation {
-        /// 相関ID
+        /// Correlation ID
         command_id: String,
-        /// 対象セッションID
+        /// Target session ID
         session_id: String,
         /// ACP elicitation id
         elicitation_id: String,
-        /// ユーザーの応答アクション (`accept` / `decline` / `cancel`)
+        /// The user's response action (`accept` / `decline` / `cancel`)
         action: ElicitationAction,
-        /// `accept` 時の回答内容 (form の `requested_schema` 準拠)
+        /// Answer content for `accept` (following the form's `requested_schema`)
         content: serde_json::Value,
-        /// 解決主体 (`cli` / `web` / `android_push`)
+        /// Who resolved it (`cli` / `web` / `android_push`)
         resolved_by: String,
     },
-    /// モード切替 / 設定変更 / キャンセル / Kill。
+    /// Mode switch / configuration change / cancel / kill.
     ControlSession {
-        /// 相関ID
+        /// Correlation ID
         command_id: String,
-        /// 対象セッションID
+        /// Target session ID
         session_id: String,
-        /// 実行する操作
+        /// Operation to execute
         action: SessionControlAction,
     },
-    /// 指定ターン時点へのファイル復元 (`fxg session revert`)。
+    /// Restores files to a given turn (`fxg session revert`).
     ///
-    /// 会話イベントは削除せず、Revert 操作を `session_reverted` イベントとして
-    /// 追記する (`docs/04-agent-drivers-and-windows.md` §4.1)。
+    /// Conversation events are not deleted; the revert operation is appended as a
+    /// `session_reverted` event (`docs/04-agent-drivers-and-windows.md` §4.1).
     SessionRevert {
-        /// 相関ID
+        /// Correlation ID
         command_id: String,
-        /// 対象セッションID
+        /// Target session ID
         session_id: String,
-        /// Revert 基準にする `UserMessage` の `node_seq`
-        /// (省略時は直近ターン)
+        /// `node_seq` of the `UserMessage` used as the revert point
+        /// (defaults to the latest turn)
         target_node_seq: Option<u64>,
     },
-    /// 指定ターンからの会話分岐 (`fxg session fork`)。
+    /// Branches the conversation from a given turn (`fxg session fork`).
     ///
-    /// 新しい `session_id` を作成し、指定 `node_seq` までの履歴を
-    /// 初期コンテキストとして新エージェントセッションへ注入する。
+    /// Creates a new `session_id` and injects the history up to the given
+    /// `node_seq` into the new agent session as the initial context.
     SessionFork {
-        /// 相関ID
+        /// Correlation ID
         command_id: String,
-        /// 分岐元セッションID
+        /// Source session ID
         session_id: String,
-        /// 分岐元の `node_seq` (省略時は最新イベント)
+        /// `node_seq` of the fork source (defaults to the latest event)
         from_node_seq: Option<u64>,
-        /// 分岐先で使うエージェントID (省略時は同一エージェント)
+        /// Agent ID to use in the fork (defaults to the same agent)
         agent_id: Option<String>,
-        /// 分岐先の作業ディレクトリ (省略時は分岐元と同じ。`-w/--worktree` 用)
+        /// Working directory of the fork (defaults to the source; used by `-w/--worktree`)
         cwd: Option<String>,
     },
-    /// 停止済みセッションの再開 (`fxg session resume`)。
+    /// Resumes a stopped session (`fxg session resume`).
     ///
-    /// 同一 `session_id` のままエージェント側コンテキストを復元して継続する
-    /// (`session/resume` → `session/load` → 履歴 Replay の順にフォールバック)。
+    /// Keeps the same `session_id` and continues by restoring the agent-side
+    /// context (falling back in the order `session/resume` -> `session/load` ->
+    /// history replay).
     SessionResume {
-        /// 相関ID
+        /// Correlation ID
         command_id: String,
-        /// 対象セッションID
+        /// Target session ID
         session_id: String,
-        /// ネイティブ復元を試みず履歴 Replay で継続する (`--replay`)
+        /// Skip native restoration and continue with history replay (`--replay`)
         force_replay: bool,
     },
-    /// セッションのアーカイブ/復元 (`fxg session archive` / `unarchive`)。
+    /// Archives / restores a session (`fxg session archive` / `unarchive`).
     ///
-    /// アーカイブは一覧からの非表示/復元のみで、イベントログは保持される。
+    /// Archiving only hides or restores the session in the listing; the event log
+    /// is kept.
     SessionArchive {
-        /// 相関ID
+        /// Correlation ID
         command_id: String,
-        /// 対象セッションID
+        /// Target session ID
         session_id: String,
-        /// `true` = アーカイブ、`false` = 復元
+        /// `true` = archive, `false` = restore
         archived: bool,
     },
-    /// セッションの削除 (`fxg session delete`)。
+    /// Deletes a session (`fxg session delete`).
     ///
-    /// 稼働中セッションは停止してから、イベント本文をパージする
-    /// (復元不能。同期用 tombstone のみ残る)。
+    /// A running session is stopped first, then the event bodies are purged
+    /// (irreversible; only the tombstone used for synchronization remains).
     SessionDelete {
-        /// 相関ID
+        /// Correlation ID
         command_id: String,
-        /// 対象セッションID
+        /// Target session ID
         session_id: String,
     },
-    /// セッション詳細の取得 (`fxg session show`)。
+    /// Fetches session details (`fxg session show`).
     SessionShow {
-        /// 相関ID
+        /// Correlation ID
         command_id: String,
-        /// 対象セッションID
+        /// Target session ID
         session_id: String,
-        /// 末尾から表示するイベント数
+        /// Number of events to show from the end
         recent_events: u32,
     },
-    /// 承認待ちリクエスト一覧 (`fxg inbox list`)。
+    /// Lists requests waiting for approval (`fxg inbox list`).
     InboxList {
-        /// 相関ID
+        /// Correlation ID
         command_id: String,
     },
-    /// 指定ディレクトリの論理プロジェクトを解決する (`fxg project info`)。
+    /// Resolves the logical project of a given directory (`fxg project info`).
     ProjectInfo {
-        /// 相関ID
+        /// Correlation ID
         command_id: String,
-        /// 解決対象ディレクトリ
+        /// Directory to resolve
         cwd: String,
     },
-    /// 登録済み論理プロジェクト一覧 (`fxg project list`)。
+    /// Lists registered logical projects (`fxg project list`).
     ProjectList {
-        /// 相関ID
+        /// Correlation ID
         command_id: String,
     },
-    /// カレントディレクトリを指定の論理プロジェクトIDへ手動紐付け
-    /// (`.fxg.toml` へ保存。`fxg project link`)
+    /// Manually links the current directory to a logical project ID
+    /// (stored in `.fxg.toml`. `fxg project link`)
     ProjectLink {
-        /// 相関ID
+        /// Correlation ID
         command_id: String,
-        /// 対象ディレクトリ
+        /// Target directory
         cwd: String,
-        /// 紐付け先の論理プロジェクトID
+        /// Logical project ID to link to
         project_id: String,
     },
-    /// 指定ディレクトリ配下のGitリポジトリを一括スキャン (`fxg project scan`)。
+    /// Scans the git repositories under a directory in bulk (`fxg project scan`).
     ProjectScan {
-        /// 相関ID
+        /// Correlation ID
         command_id: String,
-        /// スキャン対象ディレクトリ (省略時は `project_scan_dirs` を走査)
+        /// Directory to scan (walks `project_scan_dirs` when omitted)
         dir: Option<String>,
     },
-    /// Worktree 一覧 (`fxg worktree list`)。
+    /// Lists worktrees (`fxg worktree list`).
     WorktreeList {
-        /// 相関ID
+        /// Correlation ID
         command_id: String,
-        /// 対象リポジトリのディレクトリ (省略時は論理プロジェクトから解決)
+        /// Directory of the target repository (resolved from the logical project when omitted)
         cwd: Option<String>,
-        /// 論理プロジェクトIDで絞り込む
+        /// Filter by logical project ID
         project_id: Option<String>,
     },
-    /// Worktree 作成 (`fxg worktree add`)。
+    /// Creates a worktree (`fxg worktree add`).
     WorktreeAdd {
-        /// 相関ID
+        /// Correlation ID
         command_id: String,
-        /// メインリポジトリのディレクトリ
+        /// Directory of the main repository
         cwd: String,
-        /// 論理プロジェクトID (省略時は `cwd` から解決)
+        /// Logical project ID (resolved from `cwd` when omitted)
         project_id: Option<String>,
-        /// 作成するブランチ名
+        /// Name of the branch to create
         branch: String,
-        /// 起点ブランチ (省略時は現在の HEAD)
+        /// Base branch (defaults to the current HEAD)
         base_branch: Option<String>,
-        /// 配置先パスの明示指定
+        /// Explicit destination path
         path: Option<String>,
     },
-    /// Worktree 削除 (`fxg worktree remove`)。
+    /// Removes a worktree (`fxg worktree remove`).
     WorktreeRemove {
-        /// 相関ID
+        /// Correlation ID
         command_id: String,
-        /// メインリポジトリのディレクトリ
+        /// Directory of the main repository
         cwd: String,
-        /// 削除対象のブランチ名またはパス
+        /// Branch name or path to remove
         target: String,
-        /// 未コミット変更があっても強制削除するか
+        /// Whether to remove even if there are uncommitted changes
         force: bool,
     },
-    /// 削除済み Worktree 管理情報のクリーンアップ (`fxg worktree prune`)。
+    /// Cleans up the administrative data of deleted worktrees (`fxg worktree prune`).
     WorktreePrune {
-        /// 相関ID
+        /// Correlation ID
         command_id: String,
-        /// メインリポジトリのディレクトリ
+        /// Directory of the main repository
         cwd: String,
     },
-    /// セッション一覧 (`fxg ps` / `fxg session list`)。
+    /// Lists sessions (`fxg ps` / `fxg session list`).
     ListSessions {
-        /// 相関ID
+        /// Correlation ID
         command_id: String,
-        /// 停止済みセッションも含めるか (`-a/--all`)
+        /// Whether to include stopped sessions (`-a/--all`)
         include_stopped: bool,
-        /// アーカイブ済みセッションも含めるか (`--archived`)
+        /// Whether to include archived sessions (`--archived`)
         include_archived: bool,
     },
-    /// ローカルノード上の全セッション・プロセスツリー・PTYを強制終了 (`fxg kill-all`)。
+    /// Forcefully terminates every session, process tree and PTY on the local node (`fxg kill-all`).
     KillAll {
-        /// 相関ID
+        /// Correlation ID
         command_id: String,
     },
-    /// 認証トークンの取得 / 再生成 (`fxg auth token` / `fxg auth rotate-token`)。
+    /// Fetches or regenerates the authentication token (`fxg auth token` / `fxg auth rotate-token`).
     AuthToken {
-        /// 相関ID
+        /// Correlation ID
         command_id: String,
-        /// 再生成するか
+        /// Whether to regenerate it
         rotate: bool,
     },
-    /// Git 資格情報の解決 (`fxg git-askpass`。`GIT_ASKPASS` ヘルパーとして使う)。
+    /// Resolves git credentials (`fxg git-askpass`, used as a `GIT_ASKPASS` helper).
     ///
-    /// 一時VM (`fxg daemon --stdio`) 上の Git 操作は、このメソッド経由で
-    /// デーモン → 中央サーバー (`GitCredentialRequest`) へ中継され、
-    /// VM内ディスクにトークンを残さずに認証する (設計: docs/01 §6.4)。
+    /// Git operations on an ephemeral VM (`fxg daemon --stdio`) are relayed through
+    /// this method from the daemon to the central server (`GitCredentialRequest`),
+    /// which authenticates without leaving the token on the VM disk
+    /// (design: docs/01 §6.4).
     GitCredential {
-        /// 相関ID
+        /// Correlation ID
         command_id: String,
-        /// Git (`GIT_ASKPASS`) が渡すプロンプト文字列
+        /// Prompt string passed by git (`GIT_ASKPASS`)
         prompt: String,
     },
-    /// キープアライブ
+    /// Keep-alive
     Ping,
 }
 
-/// Daemon → CLI の応答本体。
+/// Response body from the daemon to the CLI.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "result", rename_all = "snake_case")]
 pub enum IpcResult {
-    /// `EnsureSession` の結果
+    /// Result of `EnsureSession`
     EnsureSession {
-        /// 開始したセッションID
+        /// ID of the started session
         session_id: String,
     },
-    /// `GetLocalStatus` の結果
+    /// Result of `GetLocalStatus`
     LocalStatus {
-        /// 稼働状態
+        /// Runtime status
         status: LocalStatus,
     },
-    /// 非同期コマンド (`SendPrompt` / `RespondPermission` / `ControlSession`)
-    /// の受理
+    /// Acceptance of an asynchronous command
+    /// (`SendPrompt` / `RespondPermission` / `ControlSession`)
     CommandAccepted {
-        /// 対象セッションID (任意)
+        /// Target session ID (optional)
         session_id: Option<String>,
     },
-    /// `SessionRevert` の結果
+    /// Result of `SessionRevert`
     SessionReverted {
-        /// 基準にした `UserMessage` の `node_seq`
+        /// `node_seq` of the `UserMessage` used as the reference
         target_node_seq: u64,
-        /// 復元先の Tree Hash
+        /// Tree hash to restore to
         restored_tree_hash: String,
-        /// 復元直前を退避したバックアップ Tree Hash
+        /// Backup tree hash holding the state right before the restore
         backup_tree_hash: Option<String>,
-        /// 復元したファイル数
+        /// Number of restored files
         restored_files: u64,
-        /// 削除したファイル数
+        /// Number of removed files
         removed_files: u64,
     },
-    /// `SessionFork` の結果
+    /// Result of `SessionFork`
     SessionForked {
-        /// 新しいセッションID
+        /// New session ID
         session_id: String,
     },
-    /// `SessionResume` の結果
+    /// Result of `SessionResume`
     SessionResumed {
-        /// 再開したセッションID (リクエスト対象と同一)
+        /// Resumed session ID (the same as the requested one)
         session_id: String,
-        /// ネイティブ復元できたか (`false` = 履歴 Replay で継続)
+        /// Whether native restoration succeeded (`false` = continued with history replay)
         context_restored: bool,
     },
-    /// `SessionArchive` の結果
+    /// Result of `SessionArchive`
     SessionArchived {
-        /// 対象セッションID
+        /// Target session ID
         session_id: String,
-        /// アーカイブ日時 (Unix epoch ms)。復元時は `None`
+        /// Archive time (Unix epoch ms). `None` when restored
         archived_at: Option<i64>,
     },
-    /// `SessionDelete` の結果
+    /// Result of `SessionDelete`
     SessionDeleted {
-        /// 削除したセッションID
+        /// ID of the deleted session
         session_id: String,
     },
-    /// `SessionShow` の結果
+    /// Result of `SessionShow`
     SessionDetail(Box<SessionDetail>),
-    /// `InboxList` の結果
+    /// Result of `InboxList`
     Inbox {
-        /// 承認待ちリクエスト一覧 (全セッション横断)
+        /// Requests waiting for approval (across all sessions)
         requests: Vec<PermissionRequestEntry>,
-        /// 回答待ち elicitation リクエスト一覧 (全セッション横断)
+        /// Elicitation requests waiting for an answer (across all sessions)
         elicitations: Vec<ElicitationRequestEntry>,
     },
-    /// `ProjectInfo` の結果
+    /// Result of `ProjectInfo`
     ProjectInfo {
-        /// 解決された論理プロジェクト
+        /// The resolved logical project
         project: ProjectInfo,
     },
-    /// `ProjectList` の結果
+    /// Result of `ProjectList`
     Projects {
-        /// 登録済み論理プロジェクト一覧
+        /// Registered logical projects
         projects: Vec<ProjectSummary>,
     },
-    /// `ProjectScan` の結果
+    /// Result of `ProjectScan`
     ProjectScan {
-        /// スキャンで解決された論理プロジェクト一覧
+        /// Logical projects resolved by the scan
         projects: Vec<ProjectSummary>,
-        /// 実際に走査したディレクトリ
+        /// Directories that were actually scanned
         scanned_dirs: Vec<String>,
     },
-    /// `WorktreeList` の結果
+    /// Result of `WorktreeList`
     Worktrees {
-        /// Worktree 一覧
+        /// Worktrees
         worktrees: Vec<WorktreeInfo>,
     },
-    /// `WorktreeAdd` の結果
+    /// Result of `WorktreeAdd`
     WorktreeAdded {
-        /// Worktree のパス
+        /// Worktree path
         path: String,
-        /// ブランチ名
+        /// Branch name
         branch: String,
-        /// 新規作成されたか (`false` は既存 Worktree の再利用)
+        /// Whether it was newly created (`false` means an existing worktree was reused)
         created: bool,
-        /// `post_create` フックの実行ログ
+        /// Execution log of the `post_create` hook
         hook_logs: Vec<HookLogEntry>,
     },
-    /// `ListSessions` の結果
+    /// Result of `ListSessions`
     Sessions {
-        /// セッション一覧 (更新日時降順)
+        /// Sessions (newest update first)
         sessions: Vec<SessionSummary>,
     },
-    /// `KillAll` の結果
+    /// Result of `KillAll`
     KillAll {
-        /// 終了させたセッションID
+        /// Sessions that were terminated
         killed_sessions: Vec<String>,
-        /// 終了させた PTY ID
+        /// PTY IDs that were terminated
         killed_ptys: Vec<String>,
     },
-    /// `AuthToken` の結果
+    /// Result of `AuthToken`
     AuthToken {
-        /// クライアント認証トークン
+        /// Client authentication token
         token: String,
     },
-    /// `GitCredential` の結果 (オンメモリのみ。ディスクへは保存しない)
+    /// Result of `GitCredential` (in memory only; never written to disk)
     GitCredential {
-        /// Basic 認証ユーザー名
+        /// Basic authentication user name
         username: String,
-        /// トークン (解決失敗時は `None`)
+        /// Token (`None` when resolution failed)
         token: Option<String>,
-        /// 失敗時のメッセージ
+        /// Failure message
         error: Option<String>,
     },
-    /// 単純な成功応答
+    /// A plain success response
     Ack {
-        /// 補足メッセージ
+        /// Supplementary message
         message: Option<String>,
     },
 }
 
-/// Daemon → CLI のメッセージ。
+/// Message from the daemon to the CLI.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum IpcServerMessage {
-    /// 要求への応答
+    /// Response to a request
     Result {
-        /// 相関ID
+        /// Correlation ID
         command_id: String,
-        /// 応答本体
+        /// Response body
         result: IpcResult,
     },
-    /// エラー応答
+    /// Error response
     Error {
-        /// 相関ID (接続確立前等で不明な場合は `None`)
+        /// Correlation ID (`None` when unknown, e.g. before the connection is established)
         command_id: Option<String>,
-        /// 構造化エラーコード
+        /// Structured error code
         code: ErrorCode,
-        /// 人間向けメッセージ
+        /// Human-readable message
         message: String,
     },
-    /// 永続化イベントの配信 (接続直後のリプレイおよび以降のリアルタイム配信)
+    /// Delivery of persisted events (the replay right after connecting and the
+    /// realtime delivery afterwards)
     EventBatch {
-        /// 対象セッションID
+        /// Target session ID
         session_id: String,
-        /// イベント列 (`node_seq` 昇順)
+        /// Events (ascending `node_seq`)
         events: Vec<SessionEventEnvelope>,
-        /// ノードDBのカーソル
+        /// Cursor of the node DB
         cursor: u64,
     },
-    /// ストリーミング途中のエフェメラルチャンク (永続化されない)
+    /// An ephemeral chunk produced while streaming (never persisted)
     LiveStreamDelta {
-        /// 対象セッションID
+        /// Target session ID
         session_id: String,
-        /// 差分本体
+        /// The delta body
         delta: StreamDeltaPayload,
     },
 }
 
-/// `fxg session show` の応答本体。
+/// Response body of `fxg session show`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SessionDetail {
-    /// セッション集約
+    /// The session aggregate
     pub session: SessionSummary,
-    /// 永続化済みイベント総数
+    /// Total number of persisted events
     pub event_count: u64,
-    /// 直近イベント (古い順)
+    /// Recent events (oldest first)
     pub recent_events: Vec<SessionEventEnvelope>,
-    /// このセッションの承認待ちリクエスト
+    /// Permission requests still pending for this session
     pub pending_permissions: Vec<PermissionRequestEntry>,
-    /// このセッションの回答待ち elicitation リクエスト
+    /// Elicitation requests still waiting for an answer for this session
     pub pending_elicitations: Vec<ElicitationRequestEntry>,
 }
 

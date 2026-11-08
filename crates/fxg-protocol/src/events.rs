@@ -1,19 +1,19 @@
-//! 正規化セッションイベント型 (`UnifiedEventPayload`)。
+//! Normalized session event types (`UnifiedEventPayload`).
 //!
-//! 設計: `docs/03-protocol-and-api.md` §1、
-//! イベントソーシング/投影規則: `docs/02-database-schema.md` §0.3。
+//! Design: `docs/03-protocol-and-api.md` §1,
+//! event sourcing / projection rules: `docs/02-database-schema.md` §0.3.
 //!
-//! # 永続化ライフサイクル (docs/01 §2.3)
+//! # Persistence lifecycle (docs/01 §2.3)
 //!
-//! - 離散イベント (`UserMessage` / `ToolCall` / `PermissionRequest` /
-//!   `StatusChanged` 等) は発生時に即時永続化する。
-//! - ストリーミング系イベント (`AgentMessage` / `AgentThought`) は
-//!   ターン完了時に `is_complete = true` の完成イベントのみを永続化する
-//!   (途中経過は [`crate::common::StreamDeltaPayload`] として
-//!   メモリ上でのみ配信され、DB には書かれない)。
-//! - セッションのメタデータ (作成・タイトル・エージェント確定・状態) も
-//!   イベントログ上のイベントとして記録し、ハブ側 `sessions` はその投影とする
-//!   (別系統のメタデータ同期は行わない)。
+//! - Discrete events (`UserMessage` / `ToolCall` / `PermissionRequest` /
+//!   `StatusChanged` etc.) are persisted immediately when they occur.
+//! - Streaming events (`AgentMessage` / `AgentThought`) persist only the final
+//!   event with `is_complete = true` when the turn ends (intermediate chunks are
+//!   delivered as [`crate::common::StreamDeltaPayload`] in memory only and are
+//!   never written to the DB).
+//! - Session metadata (creation, title, bound agent, status) is also recorded as
+//!   events in the event log, and the hub-side `sessions` table is a projection of
+//!   them (no separate metadata synchronization path exists).
 
 use serde::{Deserialize, Serialize};
 use specta::Type;
@@ -23,39 +23,41 @@ use crate::common::{
     ModeInfo, PermissionOption, PlanEntry, SessionStatus, TurnStopReason, UsageCost,
 };
 
-/// セッションイベントの封筒 (永続化・同期の単位)。
+/// Envelope of a session event (the unit of persistence and synchronization).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct SessionEventEnvelope {
-    /// イベントID (**UUID v7**)。冪等適用・重複排除に使用する。
+    /// Event ID (**UUID v7**). Used for idempotent application and deduplication.
     pub event_id: String,
-    /// セッションID (**UUID v7**)。
+    /// Session ID (**UUID v7**).
     pub session_id: String,
-    /// セッション内連番 (`1, 2, 3...`)。**実行ノードのみが採番**し欠番は生じない。
-    /// セッション内の論理順序は常にこの値を正とする。
+    /// Sequence number inside the session (`1, 2, 3...`). **Only the running node
+    /// assigns it** and there are no gaps. The logical order inside a session is
+    /// always defined by this value.
     pub node_seq: u64,
-    /// ノード側のローカル時計による作成日時 (Unix epoch ms)。
+    /// Creation time according to the node's local clock (Unix epoch ms).
     pub created_at: i64,
-    /// イベント本体。
+    /// The event body.
     pub payload: UnifiedEventPayload,
 }
 
-/// カーソルを伴うイベントバッチ (Client WS 配信 / 履歴 API の共通型)。
+/// A batch of events with a cursor (shared by Client WS delivery and the history API).
 ///
-/// `cursor` は「**配信元ストア** (`node.db` / `server.db`) への取り込み順」。
-/// クライアントは最後に受信したバッチの `cursor` を保存し、再接続時に
-/// `Subscribe { since_cursor }` へ渡す。接続先ストア以外の `cursor` は意味を持たない。
+/// `cursor` is the ingestion order of the **source store** (`node.db` /
+/// `server.db`). Clients persist the `cursor` of the last batch they received and
+/// pass it as `Subscribe { since_cursor }` when reconnecting. A `cursor` is only
+/// meaningful for the store it came from.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct SessionEventBatch {
-    /// イベント列 (`node_seq` 昇順)
+    /// Events (ascending `node_seq`)
     pub events: Vec<SessionEventEnvelope>,
-    /// このバッチ時点の配信元ストアのカーソル
+    /// Cursor of the source store at the time of this batch
     pub cursor: u64,
 }
 
 impl SessionEventBatch {
-    /// 空のバッチ (初回購読でイベントが無い場合など)。
+    /// An empty batch (e.g. when a first subscription has no events yet).
     pub const fn empty(cursor: u64) -> Self {
         Self {
             events: Vec::new(),
@@ -64,289 +66,298 @@ impl SessionEventBatch {
     }
 }
 
-/// 正規化セッションイベント本体。
+/// The body of a normalized session event.
 ///
-/// ACP (`agent-client-protocol-schema`) のイベントモデルをベースに、
-/// ターミナル出力や承認解決イベントを統合した型。
+/// Based on the event model of ACP (`agent-client-protocol-schema`), with
+/// terminal output and permission resolution events merged in.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[serde(tag = "type", content = "data", rename_all = "snake_case")]
 #[specta(collect)]
 pub enum UnifiedEventPayload {
-    /// セッション生成直後の最初のイベント (`node_seq = 1`)。
+    /// The first event right after a session is created (`node_seq = 1`).
     ///
-    /// ハブ側 `sessions` 投影の生成源。別系統のメタデータ同期は行わない。
+    /// The source of the hub-side `sessions` projection. No separate metadata
+    /// synchronization path exists.
     SessionCreated {
-        /// 実行ノードID。実行ノードが自分自身の ID を埋めることで、
-        /// イベントログのみからハブ側投影を完全再構築できるようにする。
+        /// ID of the running node. The running node fills in its own ID so that
+        /// the hub-side projection can be rebuilt entirely from the event log.
         node_id: String,
-        /// 論理プロジェクトID
+        /// Logical project ID
         project_id: String,
-        /// プロジェクト表示名 (ハブ側の未知プロジェクト作成用)
+        /// Project display name (used by the hub to create unknown projects)
         project_name: String,
-        /// 実行ディレクトリ (Worktree パス含む)
+        /// Working directory (including the worktree path)
         local_path: String,
-        /// 起動時点のGitブランチ (スナップショット)
+        /// Git branch at start-up (a snapshot)
         git_branch: Option<String>,
-        /// Worktree 内での実行か
+        /// Whether it runs inside a worktree
         is_worktree: bool,
-        /// エージェントID
+        /// Agent ID
         agent_id: String,
-        /// Fork元のセッションID
+        /// Session ID this session was forked from
         parent_session_id: Option<String>,
-        /// Fork元のどのイベント (`node_seq`) 時点から分岐したか
+        /// Event (`node_seq`) of the fork source the history branched from
         fork_from_node_seq: Option<u64>,
-        /// 初期タイトル
+        /// Initial title
         title: String,
     },
-    /// セッションタイトル変更 (UI/CLI からのリネーム。
-    /// コマンドとして実行ノードに到達してから発行される)。
+    /// Session title change (a rename from the UI/CLI; emitted once the command
+    /// reaches the running node).
     SessionTitleChanged {
-        /// 新しいタイトル
+        /// New title
         title: String,
     },
-    /// ACP セッション確立などによる `agent_session_id` の確定。
+    /// The `agent_session_id` becomes known, e.g. when the ACP session is established.
     SessionAgentBound {
-        /// エージェント内部のセッションID
+        /// Session ID inside the agent
         agent_session_id: String,
     },
-    /// ユーザーが送信したプロンプト (スラッシュコマンド含む)。
+    /// A prompt submitted by the user (including slash commands).
     UserMessage {
-        /// プロンプト本文
+        /// Prompt body
         text: String,
-        /// 添付ファイル
+        /// Attached files
         attachments: Vec<AttachmentMeta>,
-        /// 送信元 (`cli` / `web` / `android`)
+        /// Source (`cli` / `web` / `android`)
         client_source: String,
-        /// ターン開始直前の Shadow Git Tree Hash (Revert 用)。
-        /// `snapshot_enabled = false` 時は `None`。この payload が唯一の正であり、
-        /// 専用DBカラムへの複製は行わない。
+        /// Shadow git tree hash right before the turn started (for revert).
+        /// `None` when `snapshot_enabled = false`. This payload is the single
+        /// source of truth and is not duplicated into dedicated DB columns.
         snapshot_tree_hash: Option<String>,
     },
-    /// エージェントの返答メッセージ。
+    /// A reply message from the agent.
     ///
-    /// ストリーミング途中は `LiveStreamDelta` として配信され、
-    /// ターン完了時に `is_complete = true` の完成イベントのみ永続化する。
+    /// While streaming it is delivered as `LiveStreamDelta`, and only the final
+    /// event with `is_complete = true` is persisted when the turn ends.
     AgentMessage {
-        /// メッセージID (`StreamDeltaPayload::AgentMessageDelta` と対応)
+        /// Message ID (corresponds to `StreamDeltaPayload::AgentMessageDelta`)
         message_id: String,
-        /// 本文
+        /// Body text
         text: String,
-        /// 完成したか (永続化されるのは `true` のみ)
+        /// Whether it is complete (only `true` is persisted)
         is_complete: bool,
     },
-    /// エージェントの思考プロセス (Thinking)。
+    /// The reasoning process of the agent (thinking).
     ///
-    /// `AgentMessage` と同様、`is_complete = true` の完成イベントのみ永続化する。
+    /// Like `AgentMessage`, only the final event with `is_complete = true` is persisted.
     AgentThought {
-        /// 思考ID (`StreamDeltaPayload::AgentThoughtDelta` と対応)
+        /// Thought ID (corresponds to `StreamDeltaPayload::AgentThoughtDelta`)
         thought_id: String,
-        /// 本文
+        /// Body text
         text: String,
-        /// 完成したか
+        /// Whether it is complete
         is_complete: bool,
     },
-    /// ツール呼び出しとファイルDiff等の状態。
+    /// A tool call and its state, including file diffs.
     ///
-    /// 同一 `tool_call_id` のイベント追記によって状態更新を表現する
-    /// (`tool_update` イベントは廃止)。
+    /// State updates are expressed by appending events with the same
+    /// `tool_call_id` (the `tool_update` event was removed).
     ToolCall {
-        /// ツール呼び出しID
+        /// Tool call ID
         tool_call_id: String,
-        /// 表示タイトル
+        /// Display title
         title: String,
-        /// 種別 (`read` / `edit` / `execute` / `search` / `other`)
+        /// Kind (`read` / `edit` / `execute` / `search` / `other`)
         kind: String,
-        /// ステータス (`pending` / `in_progress` / `completed` / `failed`)
+        /// Status (`pending` / `in_progress` / `completed` / `failed`)
         status: String,
-        /// 対象ファイルパス
+        /// Affected file paths
         locations: Vec<String>,
-        /// ファイル変更時の Unified Diff / Before-After
+        /// Unified diff / before-after of a file change
         diff: Option<FileDiff>,
-        /// 生出力 (任意)
+        /// Raw output (optional)
         raw_output: Option<String>,
     },
-    /// エージェントの実行計画 (ACP Plan)。
+    /// The execution plan of the agent (ACP Plan).
     PlanUpdate {
-        /// 計画エントリ一覧
+        /// Plan entries
         entries: Vec<PlanEntry>,
     },
-    /// エージェントからの権限承認リクエスト
-    /// (ACP `session/request_permission`)。
+    /// A permission approval request from the agent
+    /// (ACP `session/request_permission`).
     PermissionRequest {
         /// ACP request id
         request_id: String,
-        /// ツール名 (例: `terminal/create`)
+        /// Tool name (e.g. `terminal/create`)
         tool_name: String,
-        /// 要約 (例: `Run command: cargo test`)
+        /// Summary (e.g. `Run command: cargo test`)
         summary: String,
-        /// 選択肢 (例: `allow_once` / `allow_always` / `reject`)
+        /// Options (e.g. `allow_once` / `allow_always` / `reject`)
         options: Vec<PermissionOption>,
-        /// 引数やDiff詳細
+        /// Arguments and diff details
         details: serde_json::Value,
     },
-    /// 承認リクエストの解決結果。
+    /// The outcome of a permission request.
     ///
-    /// `fxg daemon` はエージェントへ応答を返すと同時に本イベントを発行し、
-    /// 他クライアントの承認ダイアログを自動的に閉じる。2番目以降の応答は
-    /// `request_id` 単位で破棄され `ALREADY_RESOLVED` が返却される。
+    /// `fxg daemon` emits this event at the same time as it answers the agent, so
+    /// that approval dialogs in other clients close automatically. Second and
+    /// later answers are dropped per `request_id` and `ALREADY_RESOLVED` is returned.
     PermissionResolved {
         /// ACP request id
         request_id: String,
-        /// 選択された `option_id`
+        /// The selected `option_id`
         selected_option_id: String,
-        /// 解決主体 (`cli` / `web` / `android_push`)
+        /// Who resolved it (`cli` / `web` / `android_push`)
         resolved_by: String,
     },
-    /// エージェントからの構造化入力リクエスト (ACP `elicitation/create`)。
+    /// A structured input request from the agent (ACP `elicitation/create`).
     ///
-    /// エージェントの「質問」ツールがこのイベントとして届き、UI / CLI は
-    /// `requested_schema` から回答フォームを生成する。回答は
-    /// [`UnifiedEventPayload::ElicitationResolved`] として追記される
-    /// (Phase 1 は form モードのみ対応)。
+    /// The agent's "question" tool arrives as this event and the UI / CLI builds
+    /// an answer form from `requested_schema`. Answers are appended as
+    /// [`UnifiedEventPayload::ElicitationResolved`]
+    /// (Phase 1 supports form mode only).
     ElicitationRequest {
         /// ACP elicitation id
         elicitation_id: String,
-        /// ユーザーへ提示するメッセージ
+        /// Message shown to the user
         message: String,
-        /// 要求モード (`form` / `url`。Phase 1 は `form` のみ)
+        /// Request mode (`form` / `url`. Phase 1 supports `form` only)
         mode: String,
-        /// form モードの要求 JSON Schema (`requestedSchema`)
+        /// JSON Schema of the request in form mode (`requestedSchema`)
         requested_schema: serde_json::Value,
-        /// 関連するツール呼び出しID (任意)
+        /// Related tool call ID (optional)
         tool_call_id: Option<String>,
     },
-    /// 構造化入力リクエストの解決結果 (accept / decline / cancel)。
+    /// The outcome of a structured input request (accept / decline / cancel).
     ElicitationResolved {
         /// ACP elicitation id
         elicitation_id: String,
-        /// ユーザーの応答アクション
+        /// The user's response action
         action: ElicitationAction,
-        /// `accept` 時の回答内容 (decline / cancel では `Value::Null`)
+        /// Answer content for `accept` (`Value::Null` on decline / cancel)
         content: serde_json::Value,
-        /// 解決主体 (`cli` / `web` / `android_push`)
+        /// Who resolved it (`cli` / `web` / `android_push`)
         resolved_by: String,
     },
-    /// ワークスペースのファイルを指定ターンの `snapshot_tree_hash` 時点へ
-    /// 復元した (Revert)。
+    /// The workspace files were restored to the `snapshot_tree_hash` of a given
+    /// turn (revert).
     ///
-    /// イベントログは追記専用のため会話イベントは削除せず、Revert 操作の
-    /// 事実のみを追記する (`docs/04-agent-drivers-and-windows.md` §4.1)。
-    /// 復元直前の状態は Shadow Git Tree 上に `backup_tree_hash` として
-    /// 退避されており、もう一度 Revert すれば元に戻せる。
+    /// The event log is append-only, so conversation events are not deleted; only
+    /// the fact that a revert happened is appended
+    /// (`docs/04-agent-drivers-and-windows.md` §4.1). The state right before the
+    /// restore is kept on the shadow git tree as `backup_tree_hash`, so another
+    /// revert brings it back.
     SessionReverted {
-        /// Revert 基準にした `UserMessage` の `node_seq`
+        /// `node_seq` of the `UserMessage` used as the revert point
         target_node_seq: u64,
-        /// 復元先の Tree Hash (`UserMessage.snapshot_tree_hash`)
+        /// Tree hash to restore to (`UserMessage.snapshot_tree_hash`)
         restored_tree_hash: String,
-        /// 復元直前の状態を退避したバックアップ Tree Hash
+        /// Backup tree hash holding the state right before the restore
         backup_tree_hash: Option<String>,
-        /// 復元したファイル数
+        /// Number of restored files
         restored_files: u64,
-        /// 削除したファイル数
+        /// Number of removed files
         removed_files: u64,
     },
-    /// セッションのアーカイブ状態変更 (一覧からの非表示/復元)。
+    /// A change of the session's archive state (hidden from / restored to the list).
     ///
-    /// アーカイブは可逆な可視性フラグであり、イベントログ・会話内容は保持される
-    /// (完全な消去は [`UnifiedEventPayload::SessionDeleted`])。
+    /// Archiving is a reversible visibility flag; the event log and conversation
+    /// content are kept (a permanent erase is
+    /// [`UnifiedEventPayload::SessionDeleted`]).
     SessionArchived {
-        /// `true` = アーカイブ、`false` = 復元
+        /// `true` = archived, `false` = restored
         archived: bool,
     },
-    /// セッションの削除 (tombstone)。
+    /// Deletion of a session (tombstone).
     ///
-    /// 適用時に本イベントより前のイベント本文をパージする (復元不能)。
-    /// 本イベント自体は Outbox / Resync で削除を伝播し、Fork 元参照の整合を
-    /// 保つため tombstone として残す。
+    /// Applying it purges the bodies of all events before it (irreversible). The
+    /// event itself remains as a tombstone so that the deletion propagates through
+    /// the outbox / resync and references from forked sessions stay consistent.
     SessionDeleted {},
-    /// ACP `terminal/*` または PTY の出力チャンク (永続化対象)。
+    /// An output chunk of ACP `terminal/*` or a PTY (persisted).
     ///
-    /// ただし FTS5 の `searchable_text` からは除外する (バイナリ系)。
+    /// It is, however, excluded from the FTS5 `searchable_text` (binary data).
     TerminalOutput {
-        /// ターミナルID
+        /// Terminal ID
         terminal_id: String,
-        /// 実行コマンド
+        /// Executed command
         command: String,
-        /// ANSIエスケープを含む生バイト列 (Base64)
+        /// Raw bytes including ANSI escapes (Base64)
         data_b64: String,
-        /// 終了コード (実行完了時)
+        /// Exit code (once execution finished)
         exit_code: Option<i32>,
     },
-    /// 対話型コマンドへの標準入力送信 (Web UI → エージェントPTY)。
+    /// A stdin write to an interactive command (Web UI -> agent PTY).
     ///
-    /// 入力キーストロークはエフェメラル扱いで、イベントログには永続化しない
-    /// (PTY WS 経由の生配信も可)。[`UnifiedEventPayload::is_persistable`] を参照。
+    /// Keystrokes are ephemeral and are not persisted to the event log (raw
+    /// delivery through the PTY WS is also possible). See
+    /// [`UnifiedEventPayload::is_persistable`].
     TerminalInput {
-        /// ターミナルID
+        /// Terminal ID
         terminal_id: String,
-        /// ユーザー入力キーストローク (Base64)
+        /// User keystrokes (Base64)
         data_b64: String,
     },
-    /// モード・スラッシュコマンド・設定の更新通知 (永続化対象)。
+    /// Notification of updated modes, slash commands and configuration (persisted).
     ///
-    /// ハブ側 `sessions.current_mode` / `available_modes_json` /
-    /// `available_commands_json` / `config_options_json` 投影の更新源。
+    /// The update source of the hub-side `sessions.current_mode` /
+    /// `available_modes_json` / `available_commands_json` / `config_options_json`
+    /// projections.
     CapabilitiesUpdated {
-        /// 現在のモード (`None` の場合は既存値を維持する)
+        /// Current mode (`None` keeps the existing value)
         current_mode: Option<String>,
-        /// 選択可能なモード一覧
+        /// Selectable modes
         available_modes: Vec<ModeInfo>,
-        /// 利用可能なスラッシュコマンド一覧
+        /// Available slash commands
         available_commands: Vec<CommandInfo>,
-        /// 設定項目一覧 (モデル選択等)
+        /// Configuration entries (model selection etc.)
         config_options: Vec<ConfigOptionInfo>,
     },
-    /// 一時VMプロビジョニング・自動ツール構築 (`stderr`) の進捗ログ行。
+    /// A progress log line of ephemeral VM provisioning / automatic tool setup (`stderr`).
     BootstrapLog {
-        /// ログ1行
+        /// A single log line
         line: String,
     },
-    /// コンテキスト使用量・累積コストの更新 (ACP `session/update` の
-    /// `usage_update`)。ハブ側 `sessions.usage_json` 投影の更新源。
+    /// An update of the context usage and accumulated cost (the `usage_update` of
+    /// ACP `session/update`). The update source of the hub-side `sessions.usage_json`
+    /// projection.
     UsageUpdated {
-        /// 現在コンテキストに含まれるトークン数
+        /// Number of tokens currently occupying the context
         used_tokens: u64,
-        /// コンテキストウィンドウ全体のサイズ (トークン数)
+        /// Total context window size (in tokens)
         context_size: u64,
-        /// 累積コスト (エージェントが報告した場合)
+        /// Accumulated cost (only when reported by the agent)
         cost: Option<UsageCost>,
     },
-    /// ターンが正常終了以外の理由で打ち切られた (ACP `StopReason`)。
+    /// A turn was cut off for a reason other than normal completion (ACP `StopReason`).
     ///
-    /// `EndTurn` / `Cancelled` は正常終了としてイベント化しない。UI / CLI は
-    /// タイムラインにシステム行として表示する。
+    /// `EndTurn` / `Cancelled` end the turn normally and are not turned into an
+    /// event. The UI / CLI shows this as a system line in the timeline.
     TurnEnded {
-        /// 打ち切り理由
+        /// Why the turn was cut off
         reason: TurnStopReason,
-        /// ユーザー向けの説明 (任意)
+        /// User-facing explanation (optional)
         message: Option<String>,
     },
-    /// コンテキスト圧縮 (compaction) の進行状況 (永続化対象)。
+    /// Progress of context compaction (persisted).
     ///
-    /// `opencode2` ブリッジの `session.compaction.started` / `.ended` を正規化する
-    /// (`/compact` または `ControlSession(Compact)` で開始。圧縮は1ターンとして
-    /// 実行されるため `StatusChanged` で実行中表示も別途更新される)。
-    /// 要約本文のストリーミング (`session.compaction.delta`) はエフェメラルとして
-    /// イベント化しない (要約はエージェント側の履歴に残る)。
+    /// Normalizes `session.compaction.started` / `.ended` of the `opencode2`
+    /// bridge (started with `/compact` or `ControlSession(Compact)`. A compaction
+    /// runs as one turn, so `StatusChanged` separately updates the running
+    /// indicator). Streaming of the summary body (`session.compaction.delta`) is
+    /// ephemeral and not turned into events (the summary stays in the agent's
+    /// history).
     CompactionUpdated {
-        /// 進行状態
+        /// Progress status
         status: CompactionStatus,
-        /// 失敗理由などの補足 (任意)
+        /// Extra information such as the failure reason (optional)
         detail: Option<String>,
     },
-    /// セッション状態の変化。ハブ側 `sessions.status` 投影の更新源。
+    /// A change of the session status. The update source of the hub-side
+    /// `sessions.status` projection.
     StatusChanged {
-        /// 新しい状態
+        /// New status
         status: SessionStatus,
-        /// エラー時のメッセージ
+        /// Message for the error case
         error_message: Option<String>,
     },
 }
 
 impl UnifiedEventPayload {
-    /// `session_events.event_type` に保存する種別文字列を返す。
+    /// Returns the kind string stored in `session_events.event_type`.
     ///
-    /// 値は `docs/02-database-schema.md` §1 の `event_type` 定義と一致する。
+    /// The values match the `event_type` definitions in
+    /// `docs/02-database-schema.md` §1.
     pub const fn event_type(&self) -> &'static str {
         match self {
             Self::SessionCreated { .. } => "session_created",
@@ -375,11 +386,11 @@ impl UnifiedEventPayload {
         }
     }
 
-    /// イベントログへ永続化してよい payload か。
+    /// Whether this payload may be persisted to the event log.
     ///
-    /// `TerminalInput` (キーストローク) はエフェメラル扱いのため `false` を返す。
-    /// ストリーミング途中の `AgentMessage` / `AgentThought`
-    /// (`is_complete = false`) も永続化しない。
+    /// `TerminalInput` (keystrokes) is ephemeral and returns `false`.
+    /// Streaming `AgentMessage` / `AgentThought` (`is_complete = false`) are not
+    /// persisted either.
     pub const fn is_persistable(&self) -> bool {
         match self {
             Self::TerminalInput { .. } => false,
@@ -424,7 +435,7 @@ mod tests {
     #[test]
     fn envelope_roundtrips_through_json() {
         let envelope = sample_envelope(UnifiedEventPayload::UserMessage {
-            text: "テストを修正して".to_owned(),
+            text: "Fix the failing tests".to_owned(),
             attachments: vec![],
             client_source: "cli".to_owned(),
             snapshot_tree_hash: Some("a".repeat(40)),
@@ -445,7 +456,7 @@ mod tests {
             }],
             available_commands: vec![CommandInfo {
                 name: "/review".to_owned(),
-                description: "レビュー".to_owned(),
+                description: "Review the changes".to_owned(),
                 input_hint: None,
             }],
             config_options: vec![ConfigOptionInfo {
@@ -467,7 +478,7 @@ mod tests {
     fn elicitation_events_roundtrip() {
         let payload = UnifiedEventPayload::ElicitationRequest {
             elicitation_id: "elic-1".to_owned(),
-            message: "どの戦略で進めますか?".to_owned(),
+            message: "Which strategy should we use?".to_owned(),
             mode: "form".to_owned(),
             requested_schema: serde_json::json!({
                 "type": "object",
@@ -546,7 +557,7 @@ mod tests {
         assert!(
             !UnifiedEventPayload::AgentMessage {
                 message_id: "m".into(),
-                text: "途中".into(),
+                text: "partial".into(),
                 is_complete: false,
             }
             .is_persistable()
@@ -554,7 +565,7 @@ mod tests {
         assert!(
             UnifiedEventPayload::AgentMessage {
                 message_id: "m".into(),
-                text: "完成".into(),
+                text: "done".into(),
                 is_complete: true,
             }
             .is_persistable()

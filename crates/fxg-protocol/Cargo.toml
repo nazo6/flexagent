@@ -3,7 +3,7 @@ name = "fxg-protocol"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
-description = "FlexAgent 共通型定義・プロトコルメッセージ (specta 対応)"
+description = "FlexAgent shared type definitions and protocol messages (specta-enabled)"
 repository.workspace = true
 
 [dependencies]

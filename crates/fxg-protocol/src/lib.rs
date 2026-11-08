@@ -1,21 +1,21 @@
-//! FlexAgent 共通プロトコル型定義 (`fxg-protocol`)
+//! Shared protocol type definitions for FlexAgent (`fxg-protocol`)
 //!
-//! 全クレートと UI が参照する「型」を一元定義する。設計仕様は
-//! [`docs/03-protocol-and-api.md`](https://github.com/nazo6/flexagent/blob/master/docs/03-protocol-and-api.md)
-//! を参照。
+//! Defines, in one place, the types referenced by every crate and by the UI.
+//! See [`docs/03-protocol-and-api.md`](https://github.com/nazo6/flexagent/blob/master/docs/03-protocol-and-api.md)
+//! for the design specification.
 //!
-//! - `events`: 正規化セッションイベント (`SessionEventEnvelope` / `UnifiedEventPayload`)
-//! - `common`: 共通補助型・エラーコード
-//! - `node_server`: Node ⇔ Central Server メッセージ (WS / Stdio 共通)
-//! - `client_api`: Client REST / Client WS / PTY WS メッセージ
-//! - `ipc`: CLI ⇔ Local Daemon ローカルIPC メッセージ
-//! - `config`: グローバル設定 (`config.toml`) / プロジェクト設定 (`.fxg.toml`)
-//! - `util`: 時刻・ID 生成ユーティリティ
+//! - `events`: normalized session events (`SessionEventEnvelope` / `UnifiedEventPayload`)
+//! - `common`: shared helper types and error codes
+//! - `node_server`: Node <-> Central Server messages (shared by WS / Stdio)
+//! - `client_api`: Client REST / Client WS / PTY WS messages
+//! - `ipc`: CLI <-> Local Daemon local IPC messages
+//! - `config`: global configuration (`config.toml`) / project configuration (`.fxg.toml`)
+//! - `util`: time and ID generation helpers
 //!
-//! クライアント (UI / CLI) が直接扱う型には `#[derive(specta::Type)]` +
-//! `#[specta(collect)]` を付与し、`ui/src/lib/generated/bindings.ts` へ
-//! TypeScript 型定義を自動出力する (設定ファイルスキーマ等の内部型は export
-//! 対象外)。
+//! Types handled directly by clients (UI / CLI) get `#[derive(specta::Type)]` +
+//! `#[specta(collect)]` so that TypeScript definitions are emitted to
+//! `ui/src/lib/generated/bindings.ts` automatically (internal types such as the
+//! configuration file schemas are not exported).
 
 pub mod client_api;
 pub mod common;
@@ -25,9 +25,9 @@ pub mod ipc;
 pub mod node_server;
 pub mod util;
 
-/// UI 用 TypeScript 型定義の生成 (`cargo test -p fxg-protocol export_bindings`)。
+/// Generates the TypeScript definitions used by the UI (`cargo test -p fxg-protocol export_bindings`).
 ///
-/// 同一クレート内の `#[specta(collect)]` 型を収集する必要があるため、
-/// 統合テストではなく lib のユニットテストとして配置している。
+/// It lives in a lib unit test rather than an integration test because the
+/// `#[specta(collect)]` types of this crate must be collected from the same crate.
 #[cfg(test)]
 mod export_bindings;

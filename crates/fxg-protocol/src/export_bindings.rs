@@ -1,13 +1,15 @@
-//! `fxg-protocol` の型から UI 用 TypeScript 型定義
-//! (`ui/src/lib/generated/bindings.ts`) を生成する。
+//! Generates the UI TypeScript definitions
+//! (`ui/src/lib/generated/bindings.ts`) from the `fxg-protocol` types.
 //!
-//! - 生成対象は `#[specta(collect)]` を付与した型 (およびそれらが参照する型)。
-//! - `i64` / `u64` などの BigInt 系整数は JSON 上は数値であり、UI 側で
-//!   `bigint` 変換を挟まないため `number` として出力する (specta は既定で
-//!   精度損失を避けるためエラーにするので、明示的に `Number` へ置換する)。
-//! - `serde_json::Value` は UI 側の慣習に合わせて `JsonValue` として出力する。
+//! - The target types are those carrying `#[specta(collect)]` (plus any type
+//!   they reference).
+//! - BigInt-like integers such as `i64` / `u64` are numbers in JSON and the UI
+//!   never goes through a `bigint` conversion, so they are emitted as `number`
+//!   (specta errors on them by default to avoid precision loss, hence the
+//!   explicit replacement with `Number`).
+//! - `serde_json::Value` is emitted as `JsonValue` to match UI conventions.
 //!
-//! 実行: `cargo test -p fxg-protocol export_bindings` (または `mise run types`)
+//! Run with: `cargo test -p fxg-protocol export_bindings` (or `mise run types`)
 
 use std::path::PathBuf;
 
@@ -18,12 +20,12 @@ use specta::datatype::{
 };
 use specta_typescript::{Layout, Typescript};
 
-/// TS の `number` として出力する整数型。
+/// Integer types that are emitted as the TS `number`.
 ///
-/// specta は精度損失を避けるため既定で BigInt 系整数を `bigint` として扱い、
-/// エラーにする。また浮動小数は JSON で `NaN` / `Infinity` を表現できないため
-/// `number | null` として出力する。本プロトコルでは JSON 上はどちらも数値であり
-/// UI 側で変換を挟まないため、すべて `number` として出力する。
+/// By default specta treats BigInt-like integers as `bigint` to avoid precision
+/// loss and errors out, and emits floats as `number | null` because JSON cannot
+/// represent `NaN` / `Infinity`. In this protocol both are plain numbers in JSON
+/// and the UI never converts them, so everything is emitted as `number`.
 fn is_ts_number(p: &Primitive) -> bool {
     matches!(
         p,
@@ -38,7 +40,7 @@ fn is_ts_number(p: &Primitive) -> bool {
     )
 }
 
-/// `specta_typescript::Number` (TS の `number`) を表す `DataType`。
+/// The `DataType` representing `specta_typescript::Number` (the TS `number`).
 fn ts_number() -> DataType {
     <specta_typescript::Number as Type>::definition(&mut Types::default())
 }
@@ -67,7 +69,7 @@ fn remap_fields(fields: Fields, number: &DataType) -> Fields {
     }
 }
 
-/// BigInt 系整数を `number` へ再帰的に置換する。
+/// Recursively replaces BigInt-like integers with `number`.
 fn remap(dt: DataType, number: &DataType) -> DataType {
     match dt {
         DataType::Primitive(ref p) if is_ts_number(p) => number.clone(),
@@ -98,8 +100,8 @@ fn remap(dt: DataType, number: &DataType) -> DataType {
         DataType::Intersection(v) => {
             DataType::Intersection(v.into_iter().map(|e| remap(e, number)).collect())
         }
-        // `Vec<T>` などは参照の内側 (インライン定義) に実体を持つため、
-        // そちらも書き換える。
+        // Types such as `Vec<T>` also carry the real definition inside the
+        // reference (an inline definition), so rewrite that one too.
         DataType::Reference(Reference::Named(mut nr)) => {
             if let NamedReferenceType::Inline { dt, .. } = &mut nr.inner {
                 let rewritten = remap((**dt).clone(), number);
@@ -111,7 +113,7 @@ fn remap(dt: DataType, number: &DataType) -> DataType {
     }
 }
 
-/// `serde_json::Value` を UI 側の慣習 (`JsonValue`) に合わせて改名する。
+/// Renames `serde_json::Value` to `JsonValue` to match UI conventions.
 fn rename_known(named: &mut NamedDataType) {
     if named.name == "Value" && named.module_path == "serde_json" {
         named.name = "JsonValue".into();
