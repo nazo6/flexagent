@@ -65,9 +65,13 @@ run = "cargo clippy --workspace --all-targets -- -D warnings"
 description = "TOML を tombi で lint する (JSON Schema 検証含む)"
 run = "tombi lint"
 
+[tasks."lint:oxc"]
+description = "TypeScript / Svelte を oxlint で lint する"
+run = "pnpm --dir ui run lint"
+
 [tasks.lint]
 description = "全言語の lint を実行する"
-run = [{ task = "lint:rust" }, { task = "lint:toml" }]
+run = [{ task = "lint:rust" }, { task = "lint:toml" }, { task = "lint:oxc" }]
 
 [tasks.test]
 description = "ワークスペース全体のテストを実行する (specta 型出力含む)"
@@ -90,7 +94,7 @@ run = "pnpm --dir ui install --frozen-lockfile"
 
 [tasks."lint:ui"]
 description = "UI を oxlint + svelte-check で検査する"
-run = ["pnpm --dir ui run lint", "pnpm --dir ui run check"]
+run = [{ task = "lint:oxc" }, "pnpm --dir ui run check"]
 
 [tasks."test:ui"]
 description = "UI の Vitest を実行する"
