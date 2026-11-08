@@ -34,10 +34,10 @@ use agent_client_protocol::v1::schema::{
     NewSessionRequest, PermissionOptionKind, ReadTextFileRequest, ReadTextFileResponse,
     ReleaseTerminalRequest, ReleaseTerminalResponse, RequestPermissionOutcome,
     RequestPermissionRequest, RequestPermissionResponse, SelectedPermissionOutcome,
-    SessionConfigKind, SessionConfigOption, SessionId, SessionModeState, SessionNotification,
-    SessionUpdate, SetSessionConfigOptionRequest, SetSessionModeRequest, StopReason,
-    TerminalExitStatus, TerminalId, TerminalOutputRequest, TerminalOutputResponse, TextContent,
-    ToolCall, ToolCallContent, ToolCallStatus, ToolCallUpdate, ToolKind,
+    SessionConfigKind, SessionConfigOption, SessionConfigOptionValue, SessionId, SessionModeState,
+    SessionNotification, SessionUpdate, SetSessionConfigOptionRequest, SetSessionModeRequest,
+    StopReason, TerminalExitStatus, TerminalId, TerminalOutputRequest, TerminalOutputResponse,
+    TextContent, ToolCall, ToolCallContent, ToolCallStatus, ToolCallUpdate, ToolKind,
     WaitForTerminalExitRequest, WaitForTerminalExitResponse, WriteTextFileRequest,
     WriteTextFileResponse,
 };
@@ -495,6 +495,8 @@ struct AcpSessionHandle {
     /// the session manager's event pump could not detect that the driver ended and
     /// the session would remain in the active list.
     events: Mutex<Option<mpsc::UnboundedSender<DriverEvent>>>,
+    /// Latest modes / commands / config options (shared with the turn loop).
+    capabilities: Arc<Mutex<SessionCapabilitiesState>>,
     /// PTY manager (for ACP terminal/*; shared per process)
     pty: Arc<fxg_pty::PtySessionManager>,
     /// Process lease (returned to the pool or disposed on end)
@@ -599,10 +601,10 @@ impl ActiveSessionHandle for AcpSessionHandle {
     }
 
     async fn set_config(&self, key: String, value: serde_json::Value) -> anyhow::Result<()> {
-        let value: agent_client_protocol::v1::schema::SessionConfigOptionValue =
-            serde_json::from_value(value)
-                .map_err(|err| anyhow!("unsupported config value for {key}: {err}"))?;
-        self.conn
+        let value = parse_config_value(value)
+            .map_err(|err| anyhow!("unsupported config value for {key}: {err}"))?;
+        let response = self
+            .conn
             .send_request(SetSessionConfigOptionRequest::new(
                 self.acp_session_id.clone(),
                 key,
@@ -611,6 +613,30 @@ impl ActiveSessionHandle for AcpSessionHandle {
             .block_task()
             .await
             .map_err(|err| anyhow!("failed to set config option: {err}"))?;
+        // ACP agents are not required to push a `config_option_update` notification
+        // after a config change, and opencode only returns the new options in the
+        // response. Publish them so the UI does not keep showing the old value.
+        if !response.config_options.is_empty() {
+            let payload = {
+                let mut capabilities = self
+                    .capabilities
+                    .lock()
+                    .expect("session capabilities poisoned");
+                capabilities.config_options = response
+                    .config_options
+                    .iter()
+                    .map(map_config_option)
+                    .collect();
+                capabilities.to_payload()
+            };
+            let events = self.events.lock().expect("session events poisoned").clone();
+            if let Some(events) = events.as_ref() {
+                fxg_protocol::discard_with!(
+                    events.send(DriverEvent::Event(payload)),
+                    "notify event subscribers"
+                );
+            }
+        }
         Ok(())
     }
 
@@ -1210,6 +1236,7 @@ async fn run_acp_process(params: AcpProcessTaskParams) -> Result<(), agent_clien
                     permissions: Arc::clone(&permissions),
                     elicitations: Arc::clone(&elicitations),
                     events: Mutex::new(Some(events.clone())),
+                    capabilities: Arc::clone(&capabilities_state),
                     pty: Arc::clone(&pty),
                     lease: Arc::clone(&lease),
                 };
@@ -1294,7 +1321,7 @@ async fn build_session(
     ActiveSession<'static, Agent>,
     SessionId,
     bool,
-    SessionCapabilitiesState,
+    Arc<Mutex<SessionCapabilitiesState>>,
 )> {
     // Acquire the session (new / session/resume / session/load)
     let plan = plan_resume(agent_capabilities, params.resume.as_ref())?;
@@ -1380,7 +1407,7 @@ async fn build_session(
         session,
         acp_session_id,
         context_restored,
-        capabilities_state,
+        Arc::new(Mutex::new(capabilities_state)),
     ))
 }
 
@@ -1389,7 +1416,7 @@ async fn serve_session(
     mut session: ActiveSession<'static, Agent>,
     mut cmd_rx: mpsc::UnboundedReceiver<AcpCommand>,
     events: &mpsc::UnboundedSender<DriverEvent>,
-    mut capabilities_state: SessionCapabilitiesState,
+    capabilities_state: Arc<Mutex<SessionCapabilitiesState>>,
 ) -> ServeOutcome {
     let mut accumulator = StreamingAccumulator::default();
     while let Some(command) = cmd_rx.recv().await {
@@ -1455,11 +1482,15 @@ async fn serve_session(
                         Ok(SessionMessage::Message(dispatch)) => {
                             let acc = &mut accumulator;
                             let ev = events;
-                            let caps = &mut capabilities_state;
+                            let caps = Arc::clone(&capabilities_state);
                             let result = MatchDispatch::new(dispatch.into_raw())
                                 .if_notification(async move |notification: SessionNotification| {
-                                    for event in map_session_update(notification.update, acc, caps)
-                                    {
+                                    let mapped = {
+                                        let mut caps =
+                                            caps.lock().expect("session capabilities poisoned");
+                                        map_session_update(notification.update, acc, &mut caps)
+                                    };
+                                    for event in mapped {
                                         fxg_protocol::discard_with!(
                                             ev.send(event),
                                             "notify event subscribers"
@@ -1704,6 +1735,21 @@ fn map_config_option(option: &SessionConfigOption) -> ConfigOptionInfo {
         name: option.name.clone(),
         current_value,
         options,
+    }
+}
+
+/// Converts an FXG config value into the ACP wire value.
+///
+/// FXG exposes select values as bare strings (for example
+/// `"opencode-go/deepseek-v4.1-flash"`), while ACP serializes the same value as
+/// `{ "value": "..." }`. Deserializing the bare string directly into
+/// [`SessionConfigOptionValue`] fails, so map the scalar shapes explicitly and
+/// only fall back to serde for the tagged (object) forms.
+fn parse_config_value(value: serde_json::Value) -> anyhow::Result<SessionConfigOptionValue> {
+    match value {
+        serde_json::Value::String(id) => Ok(SessionConfigOptionValue::value_id(id)),
+        serde_json::Value::Bool(enabled) => Ok(SessionConfigOptionValue::boolean(enabled)),
+        other => serde_json::from_value(other).map_err(Into::into),
     }
 }
 
@@ -2803,6 +2849,40 @@ mod tests {
                 serde_json::Value::String("claude-3".to_owned()),
             ]
         );
+    }
+
+    #[test]
+    fn parses_bare_config_value_ids() {
+        let value = parse_config_value(serde_json::json!("opencode-go/deepseek-v4.1-flash"))
+            .expect("bare string config value");
+        assert_eq!(
+            value.as_value_id().map(ToString::to_string).as_deref(),
+            Some("opencode-go/deepseek-v4.1-flash")
+        );
+    }
+
+    #[test]
+    fn parses_boolean_and_tagged_config_values() {
+        let bool_value = parse_config_value(serde_json::json!(true)).expect("bare boolean");
+        assert_eq!(bool_value.as_bool(), Some(true));
+
+        let tagged = parse_config_value(serde_json::json!({
+            "type": "boolean",
+            "value": false
+        }))
+        .expect("tagged boolean");
+        assert_eq!(tagged.as_bool(), Some(false));
+
+        let wire_id = parse_config_value(serde_json::json!({ "value": "plan" })).expect("wire id");
+        assert_eq!(
+            wire_id.as_value_id().map(ToString::to_string).as_deref(),
+            Some("plan")
+        );
+    }
+
+    #[test]
+    fn rejects_unknown_config_values() {
+        assert!(parse_config_value(serde_json::json!({ "unexpected": true })).is_err());
     }
 
     #[test]
