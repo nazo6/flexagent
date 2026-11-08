@@ -79,6 +79,20 @@ pub enum UnifiedEventPayload {
         /// この payload が唯一の正であり、専用DBカラムへの複製は行わない)
         snapshot_tree_hash: Option<String>,
     },
+    /// プロンプト入力（IPC / Client WS / Node⇔Server / REST 共通）
+    PromptInput {
+        text: String,
+        attachments: Vec<AttachmentMeta>,
+    },
+    /// 添付メタデータ。画像は `data_b64` (インライン) または `local_path`
+    /// (ノード上のファイル)、その他は `local_path` を使う。
+    AttachmentMeta {
+        file_name: String,
+        mime_type: String,
+        size_bytes: u64,
+        local_path: Option<String>,
+        data_b64: Option<String>,
+    },
     /// エージェントの返答メッセージ（ターン完了時に is_complete=true の完成イベントのみ永続化）
     /// ※ストリーミング途中は LiveStreamDelta として配信され、永続化されない
     AgentMessage {
@@ -570,7 +584,7 @@ pub enum ServerToNodeMsg {
         project_id: String,
         local_path: String,
         agent_id: String,
-        initial_prompt: Option<String>,
+        initial_prompt: Option<PromptInput>, // text + attachments
         fork_context_messages: Option<Vec<ForkHistoryItem>>, // 別ノードからの履歴引き継ぎ時
         restore_git_bundle_b64: Option<String>,              // 一時VMから退避されたGitバンドルの復元用
     },
@@ -581,7 +595,7 @@ pub enum ServerToNodeMsg {
     SendPrompt {
         command_id: String,
         session_id: String,
-        text: String,
+        input: PromptInput, // text + attachments
         client_source: String,
     },
     /// 承認リクエストへの回答

@@ -16,7 +16,8 @@ use fxg_protocol::CommandId;
 use fxg_protocol::client_api::{SessionRevertResponse, WorktreeInfo};
 use fxg_protocol::common::{
     ClientSource, ElicitationAction, ElicitationContent, ElicitationRequestEntry, HookLogEntry,
-    PermissionRequestEntry, ProjectSummary, ResolvedBy, SessionControlAction, SessionSummary,
+    PermissionRequestEntry, ProjectSummary, PromptInput, ResolvedBy, SessionControlAction,
+    SessionSummary,
 };
 use fxg_protocol::config::{env_keys, fxg_home, process_env};
 use fxg_protocol::ipc::{
@@ -511,7 +512,7 @@ impl DaemonClient {
     pub async fn send_prompt(
         &mut self,
         session_id: &str,
-        text: &str,
+        input: &PromptInput,
         client_source: ClientSource,
     ) -> Result<()> {
         let command_id = self.command_id();
@@ -519,7 +520,7 @@ impl DaemonClient {
             .request(IpcClientMessage::SendPrompt {
                 command_id,
                 session_id: session_id.into(),
-                text: text.to_owned(),
+                input: input.clone(),
                 client_source,
             })
             .await?;

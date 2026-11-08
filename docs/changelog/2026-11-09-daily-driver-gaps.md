@@ -853,3 +853,31 @@ opencode / agy は `sessionCapabilities.list` / `load` を広告しており、
 - **未対応 (Phase 1 の残り)**: UI からの対話ログイン実行は現状
   「設定 > エージェント管理」への導線のみ。ターミナルストリームを Web UI に
   出す実装は次段階とする。agent 型認証は実エージェントでの手動検証が必要。
+
+---
+
+## 13. 実装ログ (Phase 2, 2026-11-09)
+
+- **プロトコル**: `PromptInput { text, attachments }` を導入し、IPC /
+  Client WS / Node⇔Server / `CreateSessionRequest.initial_prompt` を
+  すべて同じ型に統一した。`UserMessage.attachments` には正規化後の
+  添付が記録される。
+- **ACP**: `send_prompt_blocks` を使い、画像は `ImageContent`、その他の
+  ファイルは `ResourceLink` (`file://...`) として送る。エージェントが
+  `promptCapabilities.image` を広告しない場合は画像をテキスト説明へ
+  フォールバックする。
+- **ノード**: 添付の `local_path` をセッション `cwd` 配下に正規化し、
+  外側へのパス脱出を拒否する。インライン `data_b64` は画像のみ、
+  上限 10 MB。サイズ未指定のローカルファイルは実サイズを補完する。
+- **CLI**: `fxg run --attach <PATH>` / `fxg session prompt --attach <PATH>`
+  を追加。MIME は拡張子から推定し、ノード側のパスとして送る。
+- **UI**: Composer で画像のクリップボード貼り付け / ドラッグ & ドロップ、
+  ノード上のファイル選択 (`FolderBrowserDialog` の `files` モード) を
+  実装。送信前プレビュー / 削除、タイムラインでの画像・ファイル表示も
+  追加した。
+- **既知の制約**: `@` によるパス補完は未実装で、代わりにノードファイル
+  選択ダイアログを使う。非画像のインラインアップロードは行わず、
+  ノード上のファイルパスとして添付する。
+- **テスト**: `prompt_blocks` の画像 / フォールバック / ResourceLink、
+  添付パスの解決と脱出拒否 (`prompt_attachments_are_resolved_and_validated`)、
+  `PromptInput` の serde / ts-rs を検証。`mise run check` 通過。

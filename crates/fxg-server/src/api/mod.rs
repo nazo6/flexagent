@@ -50,8 +50,8 @@ use fxg_protocol::client_api::{
 };
 use fxg_protocol::common::{
     AgentAction, ClientSource, CommandResult, DataSafety, DiffScope, ElicitationContent, ErrorCode,
-    ErrorInfo, ProjectSummary, RawJson, RecoveryAction, ResolvedBy, SessionControlAction,
-    SessionStatus, WorkspaceDiffResponse,
+    ErrorInfo, ProjectSummary, PromptInput, RawJson, RecoveryAction, ResolvedBy,
+    SessionControlAction, SessionStatus, WorkspaceDiffResponse,
 };
 use fxg_protocol::config::CustomAgentConfig;
 use fxg_protocol::events::{SessionEventBatch, SessionEventEnvelope};
@@ -364,8 +364,8 @@ pub enum ClientCommand {
         command_id: CommandId,
         /// Target session ID
         session_id: SessionId,
-        /// Prompt body
-        text: String,
+        /// Prompt body and attachments
+        input: PromptInput,
         /// Source (`cli` / `web` / `android`)
         client_source: ClientSource,
     },
@@ -416,12 +416,12 @@ impl ClientCommand {
             ClientWsMessage::SendPrompt {
                 command_id,
                 session_id,
-                text,
+                input,
                 client_source,
             } => Some(Self::SendPrompt {
                 command_id: command_id.clone(),
                 session_id: session_id.clone(),
-                text: text.clone(),
+                input: input.clone(),
                 client_source: client_source.clone(),
             }),
             ClientWsMessage::RespondPermission {

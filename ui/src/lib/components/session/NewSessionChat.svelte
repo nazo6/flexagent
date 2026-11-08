@@ -354,7 +354,7 @@
               }
             : null,
         agent_id: effectiveAgent,
-        initial_prompt: promptToSend === "" ? null : promptToSend,
+        initial_prompt: promptToSend === "" ? null : { text: promptToSend, attachments: [] },
         mode: sessionMode === "default" ? null : sessionMode,
         extra_args: extraArgs,
         fork: forkSessionId

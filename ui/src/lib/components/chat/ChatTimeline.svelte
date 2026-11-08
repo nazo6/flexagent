@@ -17,6 +17,7 @@
   import GitForkIcon from "@lucide/svelte/icons/git-fork";
   import ListChecksIcon from "@lucide/svelte/icons/list-checks";
   import LoaderCircleIcon from "@lucide/svelte/icons/loader-circle";
+  import PaperclipIcon from "@lucide/svelte/icons/paperclip";
   import SquareTerminalIcon from "@lucide/svelte/icons/square-terminal";
   import Undo2Icon from "@lucide/svelte/icons/undo-2";
 
@@ -139,6 +140,26 @@
               <GitForkIcon class="size-3" />
             </button>
             <div class="bg-primary text-primary-foreground max-w-[85%] rounded-2xl px-3.5 py-2">
+              {#if item.attachments.length > 0}
+                <div class="mb-1 flex flex-wrap gap-1.5">
+                  {#each item.attachments as attachment (attachment.file_name + (attachment.local_path ?? ""))}
+                    {#if attachment.data_b64 && attachment.mime_type.startsWith("image/")}
+                      <img
+                        src={`data:${attachment.mime_type};base64,${attachment.data_b64}`}
+                        alt={attachment.file_name}
+                        class="max-h-40 rounded-md object-contain"
+                      />
+                    {:else}
+                      <span
+                        class="bg-primary-foreground/15 inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px]"
+                      >
+                        <PaperclipIcon class="size-2.5" />
+                        {attachment.file_name}
+                      </span>
+                    {/if}
+                  {/each}
+                </div>
+              {/if}
               <p class="text-sm whitespace-pre-wrap">{item.text}</p>
               <p class="text-primary-foreground/70 mt-1 text-right text-[10px]">
                 {item.clientSource} &middot; {formatEpochMs(item.createdAt)}

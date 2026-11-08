@@ -15,8 +15,8 @@ use serde::{Deserialize, Serialize};
 use crate::client_api::WorktreeInfo;
 use crate::common::{
     ClientSource, ElicitationAction, ElicitationContent, ElicitationRequestEntry, ErrorInfo,
-    HookLogEntry, PermissionRequestEntry, ProjectResolutionSource, ProjectSummary, ResolvedBy,
-    SessionControlAction, SessionSummary, StreamDeltaPayload,
+    HookLogEntry, PermissionRequestEntry, ProjectResolutionSource, ProjectSummary, PromptInput,
+    ResolvedBy, SessionControlAction, SessionSummary, StreamDeltaPayload,
 };
 use crate::events::SessionEventEnvelope;
 use crate::{CommandId, ProjectId, SessionId};
@@ -81,14 +81,14 @@ pub enum IpcClientMessage {
         /// Correlation ID
         command_id: CommandId,
     },
-    /// Sends a prompt (including slash commands).
+    /// Sends a prompt (including slash commands and attachments).
     SendPrompt {
         /// Correlation ID
         command_id: CommandId,
         /// Target session ID
         session_id: SessionId,
-        /// Prompt body
-        text: String,
+        /// Prompt body and attachments
+        input: PromptInput,
         /// Source (`cli` / `web` / `android`)
         client_source: ClientSource,
     },

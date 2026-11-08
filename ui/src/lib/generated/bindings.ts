@@ -167,14 +167,14 @@ export type ClientWsMessage =
 since_cursor: number | null; 
 /**  Currently open session (a hint for prioritized delivery) */
 focused_session_id: SessionId | null } | 
-/**  Sends a prompt (including slash commands). */
+/**  Sends a prompt (including slash commands and attachments). */
 { op: "send_prompt"; 
 /**  Correlation ID */
 command_id: CommandId; 
 /**  Target session ID */
 session_id: SessionId; 
-/**  Prompt body */
-text: string; 
+/**  Prompt body and attachments */
+input: PromptInput; 
 /**  Source (`cli` / `web` / `android`) */
 client_source: string } | 
 /**  Answers a permission request. */
@@ -322,8 +322,8 @@ export type CreateSessionRequest = {
 	worktree: WorktreeSpec | null,
 	/**  Agent ID (`opencode2` / `antigravity-acp` etc.) */
 	agent_id: string,
-	/**  Initial prompt */
-	initial_prompt: string | null,
+	/**  Initial prompt (text and optional attachments) */
+	initial_prompt: PromptInput | null,
 	/**  Initial mode (`code` / `plan` etc.) */
 	mode: string | null,
 	/**  Extra arguments passed through to the agent */
@@ -992,6 +992,19 @@ export type ProjectSummary = {
 export type ProjectsResponse = {
 	/**  Logical projects (including node / worktree bindings) */
 	projects: ProjectSummary[],
+};
+
+/**
+ *  A prompt sent to an agent: text plus optional attachments.
+ * 
+ *  Shared by IPC, Client WS, Node⇔Server messages and REST so the same payload
+ *  is validated once and recorded in `UserMessage`.
+ */
+export type PromptInput = {
+	/**  Prompt body (may be empty when only attachments are sent) */
+	text: string,
+	/**  Attached images / files */
+	attachments?: AttachmentMeta[],
 };
 
 /**  An available ephemeral VM / sandbox provisioner (`GET /api/v1/provisioners`). */

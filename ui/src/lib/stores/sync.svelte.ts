@@ -8,6 +8,7 @@ import type {
   NodeSummary,
   PermissionRequestEntry,
   ProjectSummary,
+  PromptInput,
   ResumeSessionResponse,
   ServerWsMessage,
   SessionArchiveResponse,
@@ -378,12 +379,12 @@ export class SyncStore {
    * Sending to a stopped session is automatically resumed on the node, so the
    * response timeout is extended to [`SEND_PROMPT_TIMEOUT_MS`].
    */
-  sendPrompt(sessionId: string, text: string): Promise<CommandResult> {
+  sendPrompt(sessionId: string, input: PromptInput): Promise<CommandResult> {
     const commandId = crypto.randomUUID();
     this.pendingPrompts.set(commandId, {
       commandId,
       sessionId,
-      text,
+      text: input.text,
       createdAt: Date.now(),
     });
     const promise = this.#dispatch(
@@ -391,7 +392,7 @@ export class SyncStore {
         op: "send_prompt",
         command_id: commandId,
         session_id: sessionId,
-        text,
+        input,
         client_source: "web",
       },
       sessionId,

@@ -12,7 +12,7 @@ use specta::Type;
 use crate::common::{
     AuditLogEntry, ClientSource, CommandResult, ElicitationAction, ElicitationContent,
     ElicitationRequestEntry, ErrorInfo, NodeSummary, PermissionRequestEntry, ProjectSummary,
-    ResolvedBy, SearchHit, SessionControlAction, SessionSummary, StreamDeltaPayload,
+    PromptInput, ResolvedBy, SearchHit, SessionControlAction, SessionSummary, StreamDeltaPayload,
 };
 use crate::config::CustomAgentConfig;
 use crate::events::SessionEventBatch;
@@ -379,8 +379,8 @@ pub struct CreateSessionRequest {
     pub worktree: Option<WorktreeSpec>,
     /// Agent ID (`opencode2` / `antigravity-acp` etc.)
     pub agent_id: String,
-    /// Initial prompt
-    pub initial_prompt: Option<String>,
+    /// Initial prompt (text and optional attachments)
+    pub initial_prompt: Option<PromptInput>,
     /// Initial mode (`code` / `plan` etc.)
     pub mode: Option<String>,
     /// Extra arguments passed through to the agent
@@ -610,14 +610,14 @@ pub enum ClientWsMessage {
         /// Currently open session (a hint for prioritized delivery)
         focused_session_id: Option<SessionId>,
     },
-    /// Sends a prompt (including slash commands).
+    /// Sends a prompt (including slash commands and attachments).
     SendPrompt {
         /// Correlation ID
         command_id: CommandId,
         /// Target session ID
         session_id: SessionId,
-        /// Prompt body
-        text: String,
+        /// Prompt body and attachments
+        input: PromptInput,
         /// Source (`cli` / `web` / `android`)
         client_source: ClientSource,
     },
@@ -929,7 +929,7 @@ mod tests {
                 new_path: None,
             }),
             agent_id: "opencode".into(),
-            initial_prompt: Some("Fix the failing tests".into()),
+            initial_prompt: Some(PromptInput::text("Fix the failing tests")),
             mode: Some("code".into()),
             extra_args: Some(vec!["--verbose".into()]),
             fork: None,

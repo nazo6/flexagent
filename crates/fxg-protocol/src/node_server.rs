@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::common::{
     ClientSource, DataSafety, ElicitationContent, ErrorCode, ErrorInfo, NodeProjectReport,
-    ResolvedBy, SessionControlAction, WarningInfo, WorkspaceDiffResponse,
+    PromptInput, ResolvedBy, SessionControlAction, WarningInfo, WorkspaceDiffResponse,
 };
 use crate::events::SessionEventEnvelope;
 use crate::{CommandId, NodeId, ProjectId, SessionId};
@@ -309,8 +309,8 @@ pub enum ServerToNodeMsg {
         local_path: String,
         /// Agent ID
         agent_id: String,
-        /// Initial prompt
-        initial_prompt: Option<String>,
+        /// Initial prompt (text and optional attachments)
+        initial_prompt: Option<PromptInput>,
         /// Initial mode
         mode: Option<String>,
         /// Extra arguments passed to the agent
@@ -321,14 +321,14 @@ pub enum ServerToNodeMsg {
         /// Used to restore a git bundle saved from an ephemeral VM
         restore_git_bundle_b64: Option<String>,
     },
-    /// Sends a prompt (including slash commands).
+    /// Sends a prompt (including slash commands and attachments).
     SendPrompt {
         /// Correlation ID
         command_id: CommandId,
         /// Target session ID
         session_id: SessionId,
-        /// Prompt body
-        text: String,
+        /// Prompt body and attachments
+        input: PromptInput,
         /// Source (`cli` / `web` / `android`)
         client_source: ClientSource,
     },

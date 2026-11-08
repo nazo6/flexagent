@@ -603,5 +603,10 @@
   "token_label": "Token",
   "token_placeholder_node": "Contents of ~/.flexagent/auth_token",
   "token_placeholder_server": "Contents of the server's auth_token",
-  "token_verifying": "Verifying…"
+  "token_verifying": "Verifying…",
+  "chat_attach_image": "Attach image",
+  "chat_attach_file": "Attach file from node",
+  "chat_attachment_remove": "Remove attachment",
+  "chat_attachment_image_only": "Only image files can be pasted or dropped.",
+  "chat_attachment_too_large": "Attachment is too large (max {limit} MB)."
 }

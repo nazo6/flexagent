@@ -35,29 +35,30 @@ use agent_client_protocol::v1::schema::{
     CreateElicitationResponse, CreateTerminalRequest, CreateTerminalResponse,
     ElicitationAcceptAction, ElicitationAction as AcpElicitationAction, ElicitationCapabilities,
     ElicitationContentValue, ElicitationFormCapabilities, ElicitationMode, ElicitationScope,
-    FileSystemCapabilities, Implementation, InitializeRequest, KillTerminalRequest,
+    FileSystemCapabilities, ImageContent, Implementation, InitializeRequest, KillTerminalRequest,
     KillTerminalResponse, NewSessionRequest, PermissionOptionKind as AcpPermissionOptionKind,
-    PlanEntryStatus as AcpPlanEntryStatus, ReadTextFileRequest, ReadTextFileResponse,
-    ReleaseTerminalRequest, ReleaseTerminalResponse, RequestPermissionOutcome,
-    RequestPermissionRequest, RequestPermissionResponse, SelectedPermissionOutcome,
-    SessionConfigKind, SessionConfigOption, SessionConfigOptionValue, SessionId, SessionModeState,
-    SessionNotification, SessionUpdate, SetSessionConfigOptionRequest, SetSessionModeRequest,
-    StopReason, TerminalExitStatus, TerminalId, TerminalOutputRequest, TerminalOutputResponse,
-    TextContent, ToolCall, ToolCallContent, ToolCallStatus, ToolCallUpdate, ToolKind,
-    WaitForTerminalExitRequest, WaitForTerminalExitResponse, WriteTextFileRequest,
+    PlanEntryStatus as AcpPlanEntryStatus, PromptCapabilities, ReadTextFileRequest,
+    ReadTextFileResponse, ReleaseTerminalRequest, ReleaseTerminalResponse,
+    RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse, ResourceLink,
+    SelectedPermissionOutcome, SessionConfigKind, SessionConfigOption, SessionConfigOptionValue,
+    SessionId, SessionModeState, SessionNotification, SessionUpdate, SetSessionConfigOptionRequest,
+    SetSessionModeRequest, StopReason, TerminalExitStatus, TerminalId, TerminalOutputRequest,
+    TerminalOutputResponse, TextContent, ToolCall, ToolCallContent, ToolCallStatus, ToolCallUpdate,
+    ToolKind, WaitForTerminalExitRequest, WaitForTerminalExitResponse, WriteTextFileRequest,
     WriteTextFileResponse,
 };
 use agent_client_protocol::v1::{ActiveSession, ConnectionTo, SessionMessage, SessionSetup};
 use agent_client_protocol::{AcpAgent, AcpAgentConfig, Agent, Client};
-use anyhow::{Context, anyhow};
+use anyhow::{Context, anyhow, bail};
 use async_trait::async_trait;
 use fxg_protocol::common::{
     AgentAuthMethodInfo, AgentAuthMethodKind, CommandInfo, ConfigOptionInfo, ConfigOptionValue,
     ElicitationContent, ElicitationMode as FxgElicitationMode, ElicitationPropertyKind,
     ElicitationSchema, ElicitationValue, FileDiff, ModeInfo, PermissionOption,
     PermissionOptionKind as FxgPermissionOptionKind, PlanEntry,
-    PlanEntryStatus as FxgPlanEntryStatus, StreamDeltaPayload, ToolCallKind as FxgToolCallKind,
-    ToolCallStatus as FxgToolCallStatus, TurnStopReason, UsageCost,
+    PlanEntryStatus as FxgPlanEntryStatus, PromptInput, StreamDeltaPayload,
+    ToolCallKind as FxgToolCallKind, ToolCallStatus as FxgToolCallStatus, TurnStopReason,
+    UsageCost,
 };
 use fxg_protocol::events::UnifiedEventPayload;
 use fxg_protocol::util::uuid_v7;
@@ -137,7 +138,7 @@ enum ElicitationOutcome {
 #[derive(Debug)]
 enum AcpCommand {
     /// Send a prompt (runs until the turn completes)
-    Prompt(String),
+    Prompt(PromptInput),
     /// End the session (keep the process for reuse in the next session)
     Shutdown,
 }
@@ -515,8 +516,8 @@ struct AcpSessionHandle {
 
 #[async_trait]
 impl ActiveSessionHandle for AcpSessionHandle {
-    async fn send_prompt(&self, text: String) -> anyhow::Result<()> {
-        match self.commands.send(AcpCommand::Prompt(text)) {
+    async fn send_prompt(&self, input: PromptInput) -> anyhow::Result<()> {
+        match self.commands.send(AcpCommand::Prompt(input)) {
             Ok(()) => Ok(()),
             Err(_) => Err(anyhow!("acp session is no longer running")),
         }
@@ -1198,6 +1199,7 @@ async fn run_acp_process(params: AcpProcessTaskParams) -> Result<(), agent_clien
                 }
             };
             let agent_capabilities = initialize.agent_capabilities.clone();
+            let prompt_capabilities = agent_capabilities.prompt_capabilities.clone();
             let auth_methods = initialize
                 .auth_methods
                 .iter()
@@ -1263,7 +1265,14 @@ async fn run_acp_process(params: AcpProcessTaskParams) -> Result<(), agent_clien
                 }
 
                 // 3) Turn loop (serializes prompt sends with update reads)
-                let outcome = serve_session(session, cmd_rx, &events, capabilities_state).await;
+                let outcome = serve_session(
+                    session,
+                    cmd_rx,
+                    &events,
+                    capabilities_state,
+                    &prompt_capabilities,
+                )
+                .await;
                 contexts
                     .lock()
                     .expect("session contexts poisoned")
@@ -1439,11 +1448,12 @@ async fn serve_session(
     mut cmd_rx: mpsc::UnboundedReceiver<AcpCommand>,
     events: &mpsc::UnboundedSender<DriverEvent>,
     capabilities_state: Arc<Mutex<SessionCapabilitiesState>>,
+    prompt_capabilities: &PromptCapabilities,
 ) -> ServeOutcome {
     let mut accumulator = StreamingAccumulator::default();
     while let Some(command) = cmd_rx.recv().await {
         match command {
-            AcpCommand::Prompt(text) => {
+            AcpCommand::Prompt(input) => {
                 accumulator.reset();
                 fxg_protocol::discard_with!(
                     events.send(DriverEvent::Event(UnifiedEventPayload::StatusChanged {
@@ -1452,7 +1462,20 @@ async fn serve_session(
                     })),
                     "notify event subscribers"
                 );
-                if let Err(err) = session.send_prompt(text) {
+                let blocks = match prompt_blocks(input, prompt_capabilities) {
+                    Ok(blocks) => blocks,
+                    Err(err) => {
+                        fxg_protocol::discard_with!(
+                            events.send(DriverEvent::Event(UnifiedEventPayload::StatusChanged {
+                                status: fxg_protocol::common::SessionStatus::Error,
+                                error_message: Some(format!("invalid prompt: {err}")),
+                            })),
+                            "notify event subscribers"
+                        );
+                        return ServeOutcome::Fatal(err);
+                    }
+                };
+                if let Err(err) = session.send_prompt_blocks(blocks) {
                     return ServeOutcome::Fatal(err.into());
                 }
                 loop {
@@ -1733,6 +1756,78 @@ pub(crate) fn client_capabilities() -> ClientCapabilities {
         .terminal(true)
         .auth(AuthCapabilities::new().terminal(true))
         .elicitation(ElicitationCapabilities::new().form(ElicitationFormCapabilities::new()))
+}
+
+/// Builds ACP content blocks from a prompt and its attachments.
+///
+/// Images are sent as `ImageContent` when the agent advertises `image`
+/// support. Non-image attachments use `ResourceLink`, which every agent must
+/// support. When image support is unavailable, the attachment is described in
+/// text so the user's input is not lost.
+fn prompt_blocks(
+    input: PromptInput,
+    capabilities: &PromptCapabilities,
+) -> anyhow::Result<Vec<ContentBlock>> {
+    let mut blocks = Vec::new();
+    if !input.text.trim().is_empty() {
+        blocks.push(ContentBlock::Text(TextContent::new(input.text)));
+    }
+    for attachment in input.attachments {
+        if attachment.mime_type.starts_with("image/") {
+            let data = match attachment.data_b64 {
+                Some(data) => data,
+                None => {
+                    let path = attachment.local_path.as_deref().ok_or_else(|| {
+                        anyhow!(
+                            "image attachment {} has no data or local path",
+                            attachment.file_name
+                        )
+                    })?;
+                    base64_encode(
+                        &std::fs::read(path)
+                            .with_context(|| format!("failed to read image attachment {path}"))?,
+                    )
+                }
+            };
+            if capabilities.image {
+                blocks.push(ContentBlock::Image(ImageContent::new(
+                    data,
+                    attachment.mime_type,
+                )));
+            } else {
+                blocks.push(ContentBlock::Text(TextContent::new(format!(
+                    "[image attachment: {} ({})]",
+                    attachment.file_name,
+                    attachment.local_path.as_deref().unwrap_or("inline")
+                ))));
+            }
+        } else {
+            let uri = attachment
+                .local_path
+                .as_deref()
+                .map(file_uri)
+                .unwrap_or_else(|| attachment.file_name.clone());
+            blocks.push(ContentBlock::ResourceLink(
+                ResourceLink::new(attachment.file_name, uri).mime_type(attachment.mime_type),
+            ));
+        }
+    }
+    if blocks.is_empty() {
+        bail!("prompt has no content");
+    }
+    Ok(blocks)
+}
+
+/// Builds a `file://` URI for a node-local path.
+fn file_uri(path: &str) -> String {
+    #[cfg(windows)]
+    {
+        format!("file:///{}", path.replace('\\', "/"))
+    }
+    #[cfg(not(windows))]
+    {
+        format!("file://{path}")
+    }
 }
 
 /// Converts an ACP authentication method into fxg's display / login type.
@@ -3184,5 +3279,63 @@ mod tests {
         let capabilities = client_capabilities();
         assert!(capabilities.terminal);
         assert!(capabilities.auth.terminal);
+    }
+
+    #[test]
+    fn prompt_blocks_sends_images_when_supported() {
+        let input = PromptInput {
+            text: "look".to_owned(),
+            attachments: vec![fxg_protocol::common::AttachmentMeta {
+                file_name: "shot.png".to_owned(),
+                mime_type: "image/png".to_owned(),
+                size_bytes: 3,
+                local_path: None,
+                data_b64: Some("YWJj".to_owned()),
+            }],
+        };
+        let capabilities = PromptCapabilities::new().image(true).embedded_context(true);
+        let blocks = prompt_blocks(input, &capabilities).expect("blocks");
+        assert!(matches!(blocks[0], ContentBlock::Text(_)));
+        assert!(matches!(blocks[1], ContentBlock::Image(_)));
+    }
+
+    #[test]
+    fn prompt_blocks_falls_back_to_text_without_image_support() {
+        let input = PromptInput {
+            text: String::new(),
+            attachments: vec![fxg_protocol::common::AttachmentMeta {
+                file_name: "shot.png".to_owned(),
+                mime_type: "image/png".to_owned(),
+                size_bytes: 3,
+                local_path: None,
+                data_b64: Some("YWJj".to_owned()),
+            }],
+        };
+        let capabilities = PromptCapabilities::default();
+        let blocks = prompt_blocks(input, &capabilities).expect("blocks");
+        assert!(matches!(blocks[0], ContentBlock::Text(_)));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn prompt_blocks_links_non_image_files() {
+        let input = PromptInput {
+            text: "see this".to_owned(),
+            attachments: vec![fxg_protocol::common::AttachmentMeta {
+                file_name: "notes.md".to_owned(),
+                mime_type: "text/markdown".to_owned(),
+                size_bytes: 10,
+                local_path: Some("/tmp/notes.md".to_owned()),
+                data_b64: None,
+            }],
+        };
+        let blocks = prompt_blocks(input, &PromptCapabilities::default()).expect("blocks");
+        match &blocks[1] {
+            ContentBlock::ResourceLink(link) => {
+                assert_eq!(link.name, "notes.md");
+                assert_eq!(link.uri, "file:///tmp/notes.md");
+            }
+            other => panic!("unexpected block: {other:?}"),
+        }
     }
 }

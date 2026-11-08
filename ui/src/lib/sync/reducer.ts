@@ -1,4 +1,5 @@
 import type {
+  AttachmentMeta,
   CommandInfo,
   CompactionStatus,
   ConfigOptionInfo,
@@ -81,6 +82,7 @@ export type TimelineItem =
       seq: number;
       createdAt: number;
       text: string;
+      attachments: AttachmentMeta[];
       clientSource: string;
       snapshotTreeHash: string | null;
     }
@@ -309,6 +311,7 @@ export function buildTimelineItems(sources: TimelineSources): TimelineItem[] {
           key: `user:${event.node_seq}`,
           ...base,
           text: payload.data.text,
+          attachments: payload.data.attachments,
           clientSource: payload.data.client_source,
           snapshotTreeHash: payload.data.snapshot_tree_hash,
         });

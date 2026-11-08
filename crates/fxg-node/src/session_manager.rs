@@ -28,7 +28,7 @@ use fxg_acp::{
 use fxg_protocol::CommandId;
 use fxg_protocol::common::{
     ClientSource, ElicitationAction, ElicitationContent, ElicitationMode, ElicitationSchema,
-    ForkHistoryItem, HistoryRole, PermissionOption, ResolvedBy, SessionControlAction,
+    ForkHistoryItem, HistoryRole, PermissionOption, PromptInput, ResolvedBy, SessionControlAction,
     SessionStatus,
 };
 use fxg_protocol::events::{SessionEventEnvelope, UnifiedEventPayload};
@@ -100,8 +100,8 @@ pub struct StartSessionParams<'a> {
     pub local_path: &'a Path,
     /// Agent ID
     pub agent_id: &'a str,
-    /// Initial prompt
-    pub initial_prompt: Option<&'a str>,
+    /// Initial prompt (text and optional attachments)
+    pub initial_prompt: Option<&'a PromptInput>,
     /// Initial mode (`code` / `plan` etc.)
     pub mode: Option<&'a str>,
     /// Additional pass-through arguments for the agent
@@ -257,7 +257,7 @@ struct ActiveSession {
 
 #[derive(Debug, Clone)]
 struct PendingPrompt {
-    text: String,
+    input: PromptInput,
     client_source: ClientSource,
 }
 
@@ -448,7 +448,7 @@ impl SessionManager {
             git_metadata_or_warn(&resolved.local_path, params.session_id).await;
         let default_title = format!("{} @ {}", spec.display_name, resolved.name);
         let (title, has_custom_title) = if let Some(prompt) = params.initial_prompt
-            && let Some(derived) = derive_title_from_prompt(prompt)
+            && let Some(derived) = derive_title_from_prompt(&prompt.text)
         {
             (derived, true)
         } else {
@@ -487,7 +487,7 @@ impl SessionManager {
             .await?;
 
         // Initial prompt (executed as-is when a session is started remotely)
-        if let Some(prompt) = params.initial_prompt.filter(|text| !text.trim().is_empty())
+        if let Some(prompt) = params.initial_prompt.filter(|prompt| !prompt.is_empty())
             && let Err(err) = self
                 .start_turn(params.session_id, prompt, ClientSource::Web)
                 .await
@@ -502,7 +502,11 @@ impl SessionManager {
             .fork_context
             .and_then(|items| build_history_replay_context_from_items(items, ReplayPurpose::Fork))
             && let Err(err) = self
-                .start_turn(params.session_id, &context, ClientSource::Fork)
+                .start_turn(
+                    params.session_id,
+                    &PromptInput::text(context),
+                    ClientSource::Fork,
+                )
                 .await
         {
             return Err(self
@@ -854,7 +858,11 @@ impl SessionManager {
         // History replay injection (initial context for the new agent session)
         if let Some(context) = build_history_replay_context(&events, fork_seq, ReplayPurpose::Fork)
             && let Err(err) = self
-                .start_turn(&new_session_id, &context, ClientSource::Fork)
+                .start_turn(
+                    &new_session_id,
+                    &PromptInput::text(context),
+                    ClientSource::Fork,
+                )
                 .await
         {
             return Err(self
@@ -924,7 +932,11 @@ impl SessionManager {
             if let Some(context) =
                 build_history_replay_context(&events, up_to_seq, ReplayPurpose::Resume)
                 && let Err(err) = self
-                    .start_turn(params.session_id, &context, ClientSource::Resume)
+                    .start_turn(
+                        params.session_id,
+                        &PromptInput::text(context),
+                        ClientSource::Resume,
+                    )
                     .await
             {
                 return Err(self
@@ -1092,7 +1104,7 @@ impl SessionManager {
     async fn start_turn(
         &self,
         session_id: &str,
-        text: &str,
+        input: &PromptInput,
         client_source: ClientSource,
     ) -> Result<(), NodeError> {
         {
@@ -1103,7 +1115,7 @@ impl SessionManager {
                 .ok_or_else(|| NodeError::InvalidSession(session_id.to_owned()))?;
             session.busy = true;
         }
-        match dispatch_prompt(&self.inner, session_id, text, client_source).await {
+        match dispatch_prompt(&self.inner, session_id, input, client_source).await {
             Ok(()) => Ok(()),
             Err(err) => {
                 // Clear busy on send failure to keep the state consistent
@@ -1122,6 +1134,77 @@ impl SessionManager {
         }
     }
 
+    /// Validates and normalizes prompt attachments before recording them.
+    ///
+    /// Local paths must stay inside the session working directory. Inline data
+    /// is limited to images and a bounded size; larger files should be sent as
+    /// local paths (the ACP driver reads them when building prompt blocks).
+    async fn validate_prompt_attachments(
+        &self,
+        session_id: &str,
+        input: &mut PromptInput,
+    ) -> Result<(), NodeError> {
+        const MAX_INLINE_BYTES: usize = 10 * 1024 * 1024;
+        if input.attachments.is_empty() {
+            return Ok(());
+        }
+        let cwd = {
+            let sessions = self.inner.sessions.lock().expect("sessions poisoned");
+            sessions
+                .active
+                .get(session_id)
+                .map(|session| session.cwd.clone())
+                .ok_or_else(|| NodeError::InvalidSession(session_id.to_owned()))?
+        };
+        let cwd = fxg_pty::canonicalize(&cwd)?;
+        for attachment in &mut input.attachments {
+            if let Some(data) = attachment.data_b64.as_ref() {
+                if !attachment.mime_type.starts_with("image/") {
+                    return Err(NodeError::InvalidState(format!(
+                        "inline attachment {} must be an image; send a local path instead",
+                        attachment.file_name
+                    )));
+                }
+                if data.len().saturating_mul(3) / 4 > MAX_INLINE_BYTES {
+                    return Err(NodeError::InvalidState(format!(
+                        "inline attachment {} is too large (limit {MAX_INLINE_BYTES} bytes)",
+                        attachment.file_name
+                    )));
+                }
+            }
+            match attachment.local_path.as_ref() {
+                Some(path) => {
+                    let candidate = if Path::new(path).is_absolute() {
+                        PathBuf::from(path)
+                    } else {
+                        cwd.join(path)
+                    };
+                    let resolved = fxg_pty::canonicalize(&candidate)?;
+                    if !resolved.starts_with(&cwd) {
+                        return Err(NodeError::InvalidState(format!(
+                            "attachment {} is outside the session workspace",
+                            attachment.file_name
+                        )));
+                    }
+                    if attachment.size_bytes == 0
+                        && let Ok(metadata) = std::fs::metadata(&resolved)
+                    {
+                        attachment.size_bytes = metadata.len();
+                    }
+                    attachment.local_path = Some(resolved.to_string_lossy().into_owned());
+                }
+                None if attachment.data_b64.is_none() => {
+                    return Err(NodeError::InvalidState(format!(
+                        "attachment {} has neither data nor a local path",
+                        attachment.file_name
+                    )));
+                }
+                None => {}
+            }
+        }
+        Ok(())
+    }
+
     /// Sends a prompt (enqueues into the pending queue when busy).
     ///
     /// If the session is stopped (not active), first attempts auto-resume via
@@ -1132,7 +1215,7 @@ impl SessionManager {
         &self,
         command_id: &CommandId,
         session_id: &str,
-        text: &str,
+        input: &PromptInput,
         client_source: ClientSource,
     ) -> Result<(), NodeError> {
         if !self.begin_command(command_id) {
@@ -1147,6 +1230,9 @@ impl SessionManager {
             // Auto-resume stopped sessions (native restore only) before sending
             self.auto_resume_for_prompt(session_id).await?;
         }
+        let mut input = input.clone();
+        self.validate_prompt_attachments(session_id, &mut input)
+            .await?;
 
         // Busy check and reservation (check-and-set)
         {
@@ -1156,14 +1242,14 @@ impl SessionManager {
             })?;
             if session.busy {
                 session.pending_prompts.push_back(PendingPrompt {
-                    text: text.to_owned(),
+                    input,
                     client_source,
                 });
                 return Ok(());
             }
         }
 
-        self.start_turn(session_id, text, client_source).await
+        self.start_turn(session_id, &input, client_source).await
     }
 
     /// Responds to a permission request (`AlreadyResolved` on the second and later attempts).
@@ -1757,7 +1843,7 @@ async fn maybe_dispatch_queued(inner: &Arc<Inner>, session_id: &str) {
     if let Err(err) = dispatch_prompt(
         inner,
         session_id,
-        &prompt.text,
+        &prompt.input,
         prompt.client_source.clone(),
     )
     .await
@@ -1820,7 +1906,7 @@ pub fn derive_title_from_prompt(prompt: &str) -> Option<String> {
 async fn dispatch_prompt(
     inner: &Arc<Inner>,
     session_id: &str,
-    text: &str,
+    input: &PromptInput,
     client_source: ClientSource,
 ) -> Result<(), NodeError> {
     let (cwd, should_update_title) = {
@@ -1836,7 +1922,7 @@ async fn dispatch_prompt(
         (session.cwd.clone(), should_update)
     };
 
-    if should_update_title && let Some(title) = derive_title_from_prompt(text) {
+    if should_update_title && let Some(title) = derive_title_from_prompt(&input.text) {
         inner
             .bus
             .record(
@@ -1858,8 +1944,8 @@ async fn dispatch_prompt(
         .record(
             session_id,
             UnifiedEventPayload::UserMessage {
-                text: text.to_owned(),
-                attachments: Vec::new(),
+                text: input.text.clone(),
+                attachments: input.attachments.clone(),
                 client_source,
                 snapshot_tree_hash,
             },
@@ -1875,7 +1961,7 @@ async fn dispatch_prompt(
             .ok_or_else(|| NodeError::InvalidSession(session_id.to_owned()))?
     };
     handle
-        .send_prompt(text.to_owned())
+        .send_prompt(input.clone())
         .await
         .map_err(|err| NodeError::Server(format!("failed to send prompt: {err:#}")))
 }
@@ -2238,7 +2324,7 @@ mod tests {
             .send_prompt(
                 &CommandId::from("c2"),
                 &outcome.session_id,
-                "hello",
+                &PromptInput::text("hello"),
                 ClientSource::Cli,
             )
             .await
@@ -2261,6 +2347,51 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn prompt_attachments_are_resolved_and_validated() {
+        let (manager, _mock, dir) = setup().await;
+        let (repo, session_id) = setup_repo_session(&manager, &dir).await;
+        let file = repo.join("note.md");
+        std::fs::write(&file, "hello").expect("write attachment");
+
+        let mut input = PromptInput::text("read this");
+        input
+            .attachments
+            .push(fxg_protocol::common::AttachmentMeta {
+                file_name: "note.md".to_owned(),
+                mime_type: "text/markdown".to_owned(),
+                size_bytes: 0,
+                local_path: Some("note.md".to_owned()),
+                data_b64: None,
+            });
+        manager
+            .validate_prompt_attachments(&session_id, &mut input)
+            .await
+            .expect("inside workspace");
+        let expected = fxg_pty::canonicalize(&file).expect("canonical");
+        assert_eq!(
+            input.attachments[0].local_path.as_deref(),
+            Some(expected.to_string_lossy().as_ref())
+        );
+        assert_eq!(input.attachments[0].size_bytes, 5);
+
+        let mut outside = PromptInput::text("read this");
+        outside
+            .attachments
+            .push(fxg_protocol::common::AttachmentMeta {
+                file_name: "passwd".to_owned(),
+                mime_type: "text/plain".to_owned(),
+                size_bytes: 0,
+                local_path: Some("/etc/passwd".to_owned()),
+                data_b64: None,
+            });
+        let err = manager
+            .validate_prompt_attachments(&session_id, &mut outside)
+            .await
+            .expect_err("outside workspace");
+        assert!(matches!(err, NodeError::InvalidState(_)));
+    }
+
+    #[tokio::test]
     async fn busy_prompt_is_queued_and_drained_on_idle() {
         let (manager, mock, dir) = setup().await;
         let outcome = manager
@@ -2273,7 +2404,7 @@ mod tests {
             .send_prompt(
                 &CommandId::from("c2"),
                 &outcome.session_id,
-                "first",
+                &PromptInput::text("first"),
                 ClientSource::Cli,
             )
             .await
@@ -2283,7 +2414,7 @@ mod tests {
             .send_prompt(
                 &CommandId::from("c3"),
                 &outcome.session_id,
-                "second",
+                &PromptInput::text("second"),
                 ClientSource::Web,
             )
             .await
@@ -2533,7 +2664,7 @@ mod tests {
             .send_prompt(
                 &CommandId::from("c2"),
                 &session_id,
-                "first turn",
+                &PromptInput::text("first turn"),
                 ClientSource::Cli,
             )
             .await
@@ -2597,7 +2728,7 @@ mod tests {
             .send_prompt(
                 &CommandId::from("c2"),
                 &session_id,
-                "running",
+                &PromptInput::text("running"),
                 ClientSource::Cli,
             )
             .await
@@ -2618,7 +2749,7 @@ mod tests {
             .send_prompt(
                 &CommandId::from("c2"),
                 &source_id,
-                "hello world",
+                &PromptInput::text("hello world"),
                 ClientSource::Cli,
             )
             .await
@@ -2769,7 +2900,7 @@ mod tests {
             .send_prompt(
                 &CommandId::from("c2"),
                 &session_id,
-                prompt,
+                &PromptInput::text(prompt),
                 ClientSource::Cli,
             )
             .await
@@ -2983,7 +3114,7 @@ mod tests {
             .send_prompt(
                 &CommandId::from("c-next"),
                 &session_id,
-                "auto resumed",
+                &PromptInput::text("auto resumed"),
                 ClientSource::Web,
             )
             .await
@@ -3041,7 +3172,7 @@ mod tests {
             .send_prompt(
                 &CommandId::from("c-next"),
                 &session_id,
-                "needs replay",
+                &PromptInput::text("needs replay"),
                 ClientSource::Web,
             )
             .await
@@ -3139,13 +3270,14 @@ mod tests {
     async fn start_session_uses_initial_prompt_for_title() {
         let (manager, _mock, dir) = setup().await;
         let session_id = fxg_protocol::util::uuid_v7();
+        let initial_prompt = PromptInput::text("# First Turn\nDo something");
         manager
             .start_session(StartSessionParams {
                 command_id: &CommandId::from("c_init"),
                 session_id: &session_id,
                 local_path: dir.path(),
                 agent_id: "mock",
-                initial_prompt: Some("# First Turn\nDo something"),
+                initial_prompt: Some(&initial_prompt),
                 mode: None,
                 extra_args: None,
                 fork_context: None,
@@ -3187,7 +3319,7 @@ mod tests {
             .send_prompt(
                 &CommandId::from("c_prompt1"),
                 &outcome.session_id,
-                "Implement login page",
+                &PromptInput::text("Implement login page"),
                 ClientSource::Web,
             )
             .await
@@ -3208,7 +3340,7 @@ mod tests {
             .send_prompt(
                 &CommandId::from("c_prompt2"),
                 &outcome.session_id,
-                "Now add logout button",
+                &PromptInput::text("Now add logout button"),
                 ClientSource::Web,
             )
             .await

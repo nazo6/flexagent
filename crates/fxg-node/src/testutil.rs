@@ -228,8 +228,8 @@ impl AgentDriver for MockAgent {
 
 #[async_trait]
 impl ActiveSessionHandle for MockAgent {
-    async fn send_prompt(&self, text: String) -> anyhow::Result<()> {
-        self.inner.prompts.lock().expect("prompts").push(text);
+    async fn send_prompt(&self, input: fxg_protocol::common::PromptInput) -> anyhow::Result<()> {
+        self.inner.prompts.lock().expect("prompts").push(input.text);
         Ok(())
     }
 

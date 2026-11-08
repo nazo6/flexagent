@@ -12,7 +12,7 @@ use std::path::PathBuf;
 
 use async_trait::async_trait;
 use fxg_protocol::common::{
-    ConfigOptionValue, ElicitationAction, ElicitationContent, StreamDeltaPayload,
+    ConfigOptionValue, ElicitationAction, ElicitationContent, PromptInput, StreamDeltaPayload,
 };
 use fxg_protocol::events::UnifiedEventPayload;
 use tokio::sync::mpsc;
@@ -173,8 +173,8 @@ pub trait AgentDriver: Send + Sync {
 /// Operation handle for a started session.
 #[async_trait]
 pub trait ActiveSessionHandle: Send + Sync {
-    /// Send a prompt (including slash commands).
-    async fn send_prompt(&self, text: String) -> anyhow::Result<()>;
+    /// Send a prompt (including slash commands and attachments).
+    async fn send_prompt(&self, input: PromptInput) -> anyhow::Result<()>;
     /// Respond to a permission request (`ALREADY_RESOLVED` detection is handled by the manager).
     async fn respond_permission(
         &self,
@@ -227,7 +227,7 @@ mod tests {
 
     #[async_trait]
     impl ActiveSessionHandle for MockHandle {
-        async fn send_prompt(&self, _text: String) -> anyhow::Result<()> {
+        async fn send_prompt(&self, _input: PromptInput) -> anyhow::Result<()> {
             Ok(())
         }
         async fn respond_permission(
@@ -307,7 +307,7 @@ mod tests {
         assert!(!handle.context_restored);
         handle
             .handle
-            .send_prompt("hi".to_owned())
+            .send_prompt(PromptInput::text("hi"))
             .await
             .expect("prompt");
         match rx.recv().await.expect("event") {

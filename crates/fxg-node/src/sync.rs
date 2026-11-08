@@ -443,7 +443,7 @@ pub(crate) async fn handle_server_message(
                     session_id: session_id.as_str(),
                     local_path: &local_path,
                     agent_id: &agent_id,
-                    initial_prompt: initial_prompt.as_deref(),
+                    initial_prompt: initial_prompt.as_ref(),
                     mode: mode.as_deref(),
                     extra_args: extra_args.as_deref(),
                     fork_context: fork_context_messages.as_deref(),
@@ -474,12 +474,12 @@ pub(crate) async fn handle_server_message(
         ServerToNodeMsg::SendPrompt {
             command_id,
             session_id,
-            text,
+            input,
             client_source,
         } => {
             let result = state
                 .session_manager()
-                .send_prompt(&command_id, session_id.as_str(), &text, client_source)
+                .send_prompt(&command_id, session_id.as_str(), &input, client_source)
                 .await
                 .map(|()| session_id);
             send_command_result(out, command_id, result).await;

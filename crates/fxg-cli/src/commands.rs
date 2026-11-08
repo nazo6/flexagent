@@ -9,8 +9,8 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 use fxg_acp::registry::{AcpRegistry, AgentListEntry, LocalSource};
 use fxg_protocol::common::{
-    AgentAuthMethodKind, ClientSource, ElicitationAction, ElicitationContent,
-    ElicitationRequestEntry, ElicitationValue, PermissionOption, PermissionOptionKind,
+    AgentAuthMethodKind, AttachmentMeta, ClientSource, ElicitationAction, ElicitationContent,
+    ElicitationRequestEntry, ElicitationValue, PermissionOption, PermissionOptionKind, PromptInput,
     SessionControlAction, SessionStatus,
 };
 use fxg_protocol::events::UnifiedEventPayload;
@@ -452,6 +452,63 @@ pub(crate) fn open_session_url(session_id: &str, no_open: bool) -> Result<()> {
 // fxg run
 // ----------------------------------------------------------------------
 
+/// Builds a prompt from text and `--attach` paths.
+fn build_prompt_input(text: &str, attachments: &[String]) -> Result<PromptInput> {
+    let mut input = PromptInput::text(text);
+    for path in attachments {
+        let canonical = std::fs::canonicalize(path)
+            .with_context(|| format!("failed to resolve attachment {path}"))?;
+        let metadata = std::fs::metadata(&canonical)
+            .with_context(|| format!("failed to read attachment {}", canonical.display()))?;
+        if !metadata.is_file() {
+            bail!("attachment is not a file: {}", canonical.display());
+        }
+        let file_name = canonical
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "attachment".to_owned());
+        input.attachments.push(AttachmentMeta {
+            file_name,
+            mime_type: guess_mime(&canonical, metadata.len()).to_owned(),
+            size_bytes: metadata.len(),
+            local_path: Some(canonical.to_string_lossy().into_owned()),
+            data_b64: None,
+        });
+    }
+    Ok(input)
+}
+
+/// Best-effort MIME type for a local attachment.
+fn guess_mime(path: &Path, size: u64) -> &'static str {
+    let extension = path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    match extension.as_str() {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "svg" => "image/svg+xml",
+        "bmp" => "image/bmp",
+        "pdf" => "application/pdf",
+        "json" => "application/json",
+        "md" | "markdown" => "text/markdown",
+        "toml" => "application/toml",
+        "yaml" | "yml" => "application/yaml",
+        "rs" => "text/rust",
+        "ts" | "tsx" => "text/typescript",
+        "js" | "jsx" => "text/javascript",
+        "html" | "htm" => "text/html",
+        "css" => "text/css",
+        "sh" => "text/x-shellscript",
+        "txt" | "log" => "text/plain",
+        _ if size <= 256 * 1024 => "text/plain",
+        _ => "application/octet-stream",
+    }
+}
+
 /// Arguments of `fxg run <agent>`.
 #[derive(Debug, Args)]
 pub struct RunArgs {
@@ -460,6 +517,9 @@ pub struct RunArgs {
     /// Send an initial prompt
     #[usage(short = 'p', long)]
     prompt: Option<String>,
+    /// Attach a file or image to the initial prompt (repeatable)
+    #[usage(long = "attach")]
+    attach: Vec<String>,
     /// Print only the session ID and do not open a browser
     #[usage(short = 'd', long)]
     detach: bool,
@@ -507,9 +567,10 @@ impl usage::RunAsync for RunArgs {
             .ensure_session(&cwd, &self.agent, &self.extra_args, self.mode.as_deref())
             .await?;
 
-        if let Some(prompt) = &self.prompt {
+        let input = build_prompt_input(self.prompt.as_deref().unwrap_or(""), &self.attach)?;
+        if !input.is_empty() {
             client
-                .send_prompt(&session_id, prompt, ClientSource::Cli)
+                .send_prompt(&session_id, &input, ClientSource::Cli)
                 .await?;
         }
 
@@ -555,7 +616,10 @@ async fn run_with_provisioner(
         local_path: None,
         worktree,
         agent_id: args.agent.clone(),
-        initial_prompt: args.prompt.clone(),
+        initial_prompt: {
+            let input = build_prompt_input(args.prompt.as_deref().unwrap_or(""), &args.attach)?;
+            if input.is_empty() { None } else { Some(input) }
+        },
         mode: args.mode.clone(),
         extra_args: if args.extra_args.is_empty() {
             None
@@ -1142,6 +1206,9 @@ pub struct SessionPromptArgs {
     session_id: String,
     /// Prompt text to send
     text: String,
+    /// Attach a file or image to the prompt (repeatable)
+    #[usage(long = "attach")]
+    attach: Vec<String>,
     /// Wait for the turn to finish and print the agent output
     #[usage(long)]
     wait: bool,
@@ -1152,8 +1219,9 @@ impl usage::RunAsync for SessionPromptArgs {
 
     async fn run_async(self) -> Self::Output {
         let mut client = DaemonClient::connect().await?;
+        let input = build_prompt_input(&self.text, &self.attach)?;
         client
-            .send_prompt(&self.session_id, &self.text, ClientSource::Cli)
+            .send_prompt(&self.session_id, &input, ClientSource::Cli)
             .await?;
         if !self.wait {
             println!("accepted ({})", short_id(&self.session_id));

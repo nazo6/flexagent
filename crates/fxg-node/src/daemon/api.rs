@@ -92,11 +92,11 @@ impl ClientApiBackend for DaemonState {
             ClientCommand::SendPrompt {
                 command_id,
                 session_id,
-                text,
+                input,
                 client_source,
             } => {
                 let result = manager
-                    .send_prompt(&command_id, session_id.as_str(), &text, client_source)
+                    .send_prompt(&command_id, session_id.as_str(), &input, client_source)
                     .await
                     .map(|()| session_id);
                 (command_id, result)
@@ -282,7 +282,7 @@ impl ClientApiBackend for DaemonState {
                 session_id: session_id.as_str(),
                 local_path: &local_path,
                 agent_id: &request.agent_id,
-                initial_prompt: request.initial_prompt.as_deref(),
+                initial_prompt: request.initial_prompt.as_ref(),
                 mode: request.mode.as_deref(),
                 extra_args: request.extra_args.as_deref(),
                 fork_context: None,

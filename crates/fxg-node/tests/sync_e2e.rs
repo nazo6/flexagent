@@ -120,8 +120,8 @@ impl AgentDriver for MockAgent {
 
 #[async_trait]
 impl ActiveSessionHandle for MockAgent {
-    async fn send_prompt(&self, text: String) -> anyhow::Result<()> {
-        self.inner.prompts.lock().expect("prompts").push(text);
+    async fn send_prompt(&self, input: fxg_protocol::common::PromptInput) -> anyhow::Result<()> {
+        self.inner.prompts.lock().expect("prompts").push(input.text);
         Ok(())
     }
 
@@ -309,7 +309,7 @@ async fn create_session_with_events(
         .send_prompt(
             &CommandId::from(format!("prompt-{label}")),
             &session_id,
-            label,
+            &fxg_protocol::common::PromptInput::text(label),
             ClientSource::Cli,
         )
         .await
@@ -568,7 +568,7 @@ async fn central_server_commands_permissions_and_kill_switch() {
             "project_id": project_id,
             "node_id": "node-1",
             "agent_id": "mock",
-            "initial_prompt": "hello from central",
+            "initial_prompt": { "text": "hello from central" },
         }))
         .send()
         .await
@@ -708,7 +708,7 @@ async fn central_server_commands_permissions_and_kill_switch() {
         let send = fxg_protocol::client_api::ClientWsMessage::SendPrompt {
             command_id: "prompt-1".into(),
             session_id: session_id.clone().into(),
-            text: "via ws".to_owned(),
+            input: fxg_protocol::common::PromptInput::text("via ws"),
             client_source: ClientSource::Web,
         };
         socket
@@ -853,7 +853,7 @@ async fn central_server_commands_permissions_and_kill_switch() {
         let send = fxg_protocol::client_api::ClientWsMessage::SendPrompt {
             command_id: "prompt-offline".into(),
             session_id: session_id.clone().into(),
-            text: "nobody home".to_owned(),
+            input: fxg_protocol::common::PromptInput::text("nobody home"),
             client_source: ClientSource::Web,
         };
         socket
@@ -967,7 +967,7 @@ async fn central_server_resumes_stopped_session() {
         .send_prompt(
             &CommandId::from("prompt-resume"),
             &session_id,
-            "hello resume e2e",
+            &fxg_protocol::common::PromptInput::text("hello resume e2e"),
             ClientSource::Cli,
         )
         .await
@@ -1037,7 +1037,7 @@ async fn central_server_resumes_stopped_session() {
         .send_prompt(
             &CommandId::from("prompt-resume-2"),
             &session_id,
-            "continue after resume",
+            &fxg_protocol::common::PromptInput::text("continue after resume"),
             ClientSource::Cli,
         )
         .await

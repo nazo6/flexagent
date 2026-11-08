@@ -580,12 +580,12 @@ async fn handle(
         IpcClientMessage::SendPrompt {
             command_id,
             session_id,
-            text,
+            input,
             client_source,
         } => {
             state
                 .session_manager()
-                .send_prompt(&command_id, session_id.as_str(), &text, client_source)
+                .send_prompt(&command_id, session_id.as_str(), &input, client_source)
                 .await
                 .map_err(|err| DispatchError::from_node_error(&command_id, err))?;
             Ok((
@@ -1318,7 +1318,7 @@ mod tests {
             &IpcClientMessage::SendPrompt {
                 command_id: "p1".into(),
                 session_id: session_id.clone(),
-                text: "hello".to_owned(),
+                input: fxg_protocol::common::PromptInput::text("hello"),
                 client_source: fxg_protocol::common::ClientSource::Cli,
             },
         )
@@ -1520,7 +1520,7 @@ mod tests {
             &IpcClientMessage::SendPrompt {
                 command_id: "p1".into(),
                 session_id: session_id.clone(),
-                text: "hello resume".to_owned(),
+                input: fxg_protocol::common::PromptInput::text("hello resume"),
                 client_source: fxg_protocol::common::ClientSource::Cli,
             },
         )

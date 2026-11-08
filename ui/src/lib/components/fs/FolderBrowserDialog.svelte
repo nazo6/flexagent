@@ -21,6 +21,8 @@
     nodeId: string;
     initialPath?: string;
     title?: string;
+    /** Also show files and allow selecting them (default: folders only) */
+    files?: boolean;
     onSelect: (selectedPath: string) => void;
   }
 
@@ -29,6 +31,7 @@
     nodeId,
     initialPath = "",
     title = m.fs_select_folder(),
+    files = false,
     onSelect,
   }: Props = $props();
 
@@ -68,8 +71,7 @@
 
   const displayedEntries = $derived.by(() => {
     return entries.filter((e) => {
-      // This is a folder browser, so only show directories
-      if (!e.is_dir) return false;
+      if (!files && !e.is_dir) return false;
       if (!showHidden && e.is_hidden) return false;
       return true;
     });
@@ -215,7 +217,8 @@
                   ? 'bg-primary/15 text-primary font-medium'
                   : 'hover:bg-muted text-foreground/90'}"
                 onclick={() => handleSelectEntry(entry)}
-                ondblclick={() => handleOpenEntry(entry)}
+                ondblclick={() =>
+                  entry.is_dir ? handleOpenEntry(entry) : handleSelectEntry(entry)}
                 onkeydown={(e) => {
                   if (e.key === "Enter") handleOpenEntry(entry);
                 }}

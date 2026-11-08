@@ -854,6 +854,35 @@ pub struct AttachmentMeta {
     pub data_b64: Option<String>,
 }
 
+/// A prompt sent to an agent: text plus optional attachments.
+///
+/// Shared by IPC, Client WS, Node⇔Server messages and REST so the same payload
+/// is validated once and recorded in `UserMessage`.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, Type)]
+#[specta(collect)]
+pub struct PromptInput {
+    /// Prompt body (may be empty when only attachments are sent)
+    pub text: String,
+    /// Attached images / files
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attachments: Vec<AttachmentMeta>,
+}
+
+impl PromptInput {
+    /// Builds a text-only prompt.
+    pub fn text(text: impl Into<String>) -> Self {
+        Self {
+            text: text.into(),
+            attachments: Vec::new(),
+        }
+    }
+
+    /// Whether the prompt has neither text nor attachments.
+    pub fn is_empty(&self) -> bool {
+        self.text.trim().is_empty() && self.attachments.is_empty()
+    }
+}
+
 /// Unified diff information of a file change.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]

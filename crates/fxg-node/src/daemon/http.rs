@@ -521,7 +521,7 @@ mod tests {
         let command = fxg_protocol::client_api::ClientWsMessage::SendPrompt {
             command_id: "c1".into(),
             session_id: "missing-session".into(),
-            text: "hello".to_owned(),
+            input: fxg_protocol::common::PromptInput::text("hello"),
             client_source: fxg_protocol::common::ClientSource::Web,
         };
         socket

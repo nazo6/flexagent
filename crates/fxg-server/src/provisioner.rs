@@ -23,7 +23,7 @@ use std::time::{Duration, Instant};
 
 use base64::Engine as _;
 use fxg_protocol::client_api::ProvisionerTestResponse;
-use fxg_protocol::common::{ForkHistoryItem, NodeLifecycleStatus, SessionStatus};
+use fxg_protocol::common::{ForkHistoryItem, NodeLifecycleStatus, PromptInput, SessionStatus};
 use fxg_protocol::config::{
     BUNDLES_DIR_NAME, DEFAULT_GIT_USERNAME, GitCredentialConfig, ProvisionerConfig,
 };
@@ -266,7 +266,7 @@ pub struct SpawnSessionRequest {
     /// Agent ID to launch
     pub agent_id: String,
     /// Initial prompt
-    pub initial_prompt: Option<String>,
+    pub initial_prompt: Option<PromptInput>,
     /// Initial mode
     pub mode: Option<String>,
     /// Extra arguments for the agent
@@ -514,7 +514,7 @@ struct PendingStart {
     session_id: String,
     project_id: String,
     agent_id: String,
-    initial_prompt: Option<String>,
+    initial_prompt: Option<PromptInput>,
     mode: Option<String>,
     extra_args: Option<Vec<String>>,
     fork_context: Option<Vec<ForkHistoryItem>>,

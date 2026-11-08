@@ -1,11 +1,14 @@
 <script lang="ts">
   import { Button } from "#lib/components/ui/button/index.ts";
   import ComposerSelect from "#lib/components/chat/ComposerSelect.svelte";
+  import FolderBrowserDialog from "#lib/components/fs/FolderBrowserDialog.svelte";
   import NodeStatusBadge from "#lib/components/NodeStatusBadge.svelte";
+  import { encodeBytesToBase64 } from "#lib/base64.ts";
   import { configChoices, resolveConfigChoice, selectedConfigValue } from "#lib/config-options.ts";
   import { getNodeAvailability } from "#lib/node-status.ts";
   import { m } from "#lib/paraglide/messages.js";
   import type {
+    AttachmentMeta,
     NodeSummary,
     SessionControlAction,
     SessionStatus,
@@ -17,9 +20,12 @@
   import AlertTriangleIcon from "@lucide/svelte/icons/alert-triangle";
   import BanIcon from "@lucide/svelte/icons/ban";
   import LoaderCircleIcon from "@lucide/svelte/icons/loader-circle";
+  import FileIcon from "@lucide/svelte/icons/file";
   import Minimize2Icon from "@lucide/svelte/icons/minimize-2";
+  import PaperclipIcon from "@lucide/svelte/icons/paperclip";
   import SendIcon from "@lucide/svelte/icons/send";
   import SlashIcon from "@lucide/svelte/icons/slash";
+  import XIcon from "@lucide/svelte/icons/x";
 
   let {
     sessionId,
@@ -44,6 +50,10 @@
   let sending = $state(false);
   let controlBusy = $state(false);
   let resuming = $state(false);
+  let attachments = $state<AttachmentMeta[]>([]);
+  let fileBrowserOpen = $state(false);
+  let fileInput = $state<HTMLInputElement | null>(null);
+  const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 
   const isRunning = $derived(
     status === "running" || status === "waiting_permission" || status === "waiting_input",
@@ -102,12 +112,108 @@
     text = `/${name} `;
   }
 
+  /** Best-effort MIME type from a file name (mirrors the CLI helper). */
+  function guessMime(fileName: string): string {
+    const extension = fileName.split(".").pop()?.toLowerCase() ?? "";
+    switch (extension) {
+      case "png":
+        return "image/png";
+      case "jpg":
+      case "jpeg":
+        return "image/jpeg";
+      case "gif":
+        return "image/gif";
+      case "webp":
+        return "image/webp";
+      case "svg":
+        return "image/svg+xml";
+      case "pdf":
+        return "application/pdf";
+      case "json":
+        return "application/json";
+      case "md":
+        return "text/markdown";
+      case "txt":
+      case "log":
+        return "text/plain";
+      default:
+        return "application/octet-stream";
+    }
+  }
+
+  async function addImageFiles(files: FileList | File[]) {
+    for (const file of Array.from(files)) {
+      if (!file.type.startsWith("image/")) {
+        toast.error(m.chat_attachment_image_only());
+        continue;
+      }
+      if (file.size > MAX_ATTACHMENT_BYTES) {
+        toast.error(m.chat_attachment_too_large({ limit: MAX_ATTACHMENT_BYTES / (1024 * 1024) }));
+        continue;
+      }
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      attachments.push({
+        file_name: file.name || "image",
+        mime_type: file.type || guessMime(file.name),
+        size_bytes: file.size,
+        local_path: null,
+        data_b64: encodeBytesToBase64(bytes),
+      });
+    }
+  }
+
+  function addLocalFile(path: string) {
+    const fileName = path.split(/[\\/]/).pop() ?? "attachment";
+    attachments.push({
+      file_name: fileName,
+      mime_type: guessMime(fileName),
+      size_bytes: 0,
+      local_path: path,
+      data_b64: null,
+    });
+  }
+
+  function removeAttachment(index: number) {
+    attachments = attachments.filter((_, current) => current !== index);
+  }
+
+  function onPaste(event: ClipboardEvent) {
+    const files = event.clipboardData?.files;
+    if (files && files.length > 0) {
+      event.preventDefault();
+      void addImageFiles(files);
+    }
+  }
+
+  function onDragOver(event: DragEvent) {
+    event.preventDefault();
+  }
+
+  function onDrop(event: DragEvent) {
+    event.preventDefault();
+    const files = event.dataTransfer?.files;
+    if (files && files.length > 0) {
+      void addImageFiles(files);
+    }
+  }
+
+  function onFileInputChange(event: Event) {
+    const files = (event.currentTarget as HTMLInputElement).files;
+    if (files) {
+      void addImageFiles(files);
+      (event.currentTarget as HTMLInputElement).value = "";
+    }
+  }
+
   async function send() {
     const value = text.trim();
-    if (!value || sending) return;
+    if ((value === "" && attachments.length === 0) || sending) return;
     sending = true;
     try {
-      const result = await sync.sendPrompt(sessionId, value);
+      const result = await sync.sendPrompt(sessionId, {
+        text: value,
+        attachments: [...attachments],
+      });
       if (!result.success) {
         if (result.error?.code === "RESUME_REQUIRED") {
           // Automatic resume (native restore) is unsupported for stopped
@@ -121,6 +227,7 @@
         return;
       }
       text = "";
+      attachments = [];
       resumeRequired = false;
     } catch (error) {
       // Keep the composer text so the user can retry without retyping.
@@ -161,7 +268,10 @@
   async function requestCompact() {
     if (sending || controlBusy) return;
     try {
-      const result = await sync.sendPrompt(sessionId, "/compact");
+      const result = await sync.sendPrompt(sessionId, {
+        text: "/compact",
+        attachments: [],
+      });
       if (!result.success) {
         if (result.error) {
           problems.reportInfo("compact context", result.error);
@@ -198,7 +308,7 @@
 
   /** Resume a stopped session without native restore via history replay, then send the input. */
   async function resumeAndSend() {
-    if (sending || text.trim() === "") return;
+    if (sending || (text.trim() === "" && attachments.length === 0)) return;
     if (!(await resumeSession())) return;
     resumeRequired = false;
     await send();
@@ -278,9 +388,41 @@
     </div>
   {/if}
 
+  {#if attachments.length > 0}
+    <div class="flex flex-wrap gap-2">
+      {#each attachments as attachment, index (index)}
+        <div
+          class="bg-muted/40 border-border/70 flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs"
+        >
+          {#if attachment.data_b64}
+            <img
+              src={`data:${attachment.mime_type};base64,${attachment.data_b64}`}
+              alt={attachment.file_name}
+              class="size-8 rounded object-cover"
+            />
+          {:else}
+            <FileIcon class="text-muted-foreground size-3.5" />
+          {/if}
+          <span class="max-w-40 truncate">{attachment.file_name}</span>
+          <button
+            type="button"
+            class="text-muted-foreground hover:text-foreground"
+            title={m.chat_attachment_remove()}
+            onclick={() => removeAttachment(index)}
+          >
+            <XIcon class="size-3.5" />
+          </button>
+        </div>
+      {/each}
+    </div>
+  {/if}
+
   <textarea
     bind:value={text}
     onkeydown={onKeydown}
+    onpaste={onPaste}
+    ondragover={onDragOver}
+    ondrop={onDrop}
     rows="3"
     placeholder={isStopped
       ? m.chat_placeholder_stopped()
@@ -291,6 +433,34 @@
     disabled={sending}></textarea>
 
   <div class="flex flex-wrap items-center gap-2">
+    <input
+      bind:this={fileInput}
+      type="file"
+      accept="image/*"
+      multiple
+      class="hidden"
+      onchange={onFileInputChange}
+    />
+    <Button
+      variant="ghost"
+      size="sm"
+      title={m.chat_attach_image()}
+      aria-label={m.chat_attach_image()}
+      onclick={() => fileInput?.click()}
+    >
+      <PaperclipIcon class="size-3.5" />
+    </Button>
+    {#if node}
+      <Button
+        variant="ghost"
+        size="sm"
+        title={m.chat_attach_file()}
+        aria-label={m.chat_attach_file()}
+        onclick={() => (fileBrowserOpen = true)}
+      >
+        <FileIcon class="size-3.5" />
+      </Button>
+    {/if}
     {#if node}
       <NodeStatusBadge {node} showNodeName={true} class="mr-1 hidden sm:inline-flex" />
     {/if}
@@ -353,7 +523,11 @@
           {controlBusy ? m.chat_stopping() : m.chat_stop()}
         </Button>
       {/if}
-      <Button size="sm" disabled={sending || text.trim() === ""} onclick={() => void send()}>
+      <Button
+        size="sm"
+        disabled={sending || (text.trim() === "" && attachments.length === 0)}
+        onclick={() => void send()}
+      >
         {#if sending}
           <LoaderCircleIcon class="size-3.5 animate-spin" />
         {:else}
@@ -364,3 +538,11 @@
     </div>
   </div>
 </div>
+
+<FolderBrowserDialog
+  bind:open={fileBrowserOpen}
+  nodeId={node?.node_id ?? ""}
+  files={true}
+  title={m.chat_attach_file()}
+  onSelect={addLocalFile}
+/>

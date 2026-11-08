@@ -419,7 +419,7 @@ impl ClientApiBackend for ServerState {
         let (node_id, message) = match &command {
             ClientCommand::SendPrompt {
                 session_id,
-                text,
+                input,
                 client_source,
                 ..
             } => (
@@ -427,7 +427,7 @@ impl ClientApiBackend for ServerState {
                 ServerToNodeMsg::SendPrompt {
                     command_id: command_id.clone(),
                     session_id: session_id.clone(),
-                    text: text.clone(),
+                    input: input.clone(),
                     client_source: client_source.clone(),
                 },
             ),
