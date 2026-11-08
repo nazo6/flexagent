@@ -49,8 +49,8 @@ use fxg_protocol::client_api::{
     SessionRevertResponse, SystemInfoResponse, WorktreeInfo, WorktreesResponse,
 };
 use fxg_protocol::common::{
-    AgentAction, CommandResult, DiffScope, ErrorCode, ErrorInfo, ProjectSummary, RecoveryAction,
-    SessionControlAction, SessionStatus, WorkspaceDiffResponse,
+    AgentAction, CommandResult, DataSafety, DiffScope, ErrorCode, ErrorInfo, ProjectSummary,
+    RecoveryAction, SessionControlAction, SessionStatus, WorkspaceDiffResponse,
 };
 use fxg_protocol::config::CustomAgentConfig;
 use fxg_protocol::events::{SessionEventBatch, SessionEventEnvelope};
@@ -82,6 +82,8 @@ pub struct ApiError {
     pub recovery: Vec<RecoveryAction>,
     /// Correlation ID shared with logs / incidents
     pub request_id: Option<Box<str>>,
+    /// What happened to the user's data
+    pub data_safety: Option<DataSafety>,
 }
 
 impl ApiError {
@@ -95,6 +97,7 @@ impl ApiError {
             retryable: code.is_retryable(),
             recovery: Vec::new(),
             request_id: None,
+            data_safety: None,
         }
     }
 
@@ -152,6 +155,12 @@ impl ApiError {
         self
     }
 
+    /// Declares what happened to the user's data.
+    pub fn with_data_safety(mut self, data_safety: DataSafety) -> Self {
+        self.data_safety = Some(data_safety);
+        self
+    }
+
     /// Builds from a structured error returned by a node.
     pub fn from_info(info: ErrorInfo) -> Self {
         let mut api = Self::from_code(info.code, info.message);
@@ -159,6 +168,7 @@ impl ApiError {
         api.retryable = info.retryable;
         api.recovery = info.recovery;
         api.request_id = info.request_id.map(String::into_boxed_str);
+        api.data_safety = info.data_safety;
         api
     }
 
@@ -187,8 +197,18 @@ impl ApiError {
                 .request_id
                 .map(String::from)
                 .or_else(request_context::current_request_id),
+            data_safety: self.data_safety,
             docs: None,
         }
+    }
+
+    /// `503 NODE_OFFLINE` with reconnect / select-node recovery actions.
+    pub fn node_offline(node_id: &str, message: impl Into<String>) -> Self {
+        Self::from_code(ErrorCode::NodeOffline, message)
+            .with_recovery(RecoveryAction::ReconnectNode {
+                node_id: node_id.to_owned(),
+            })
+            .with_recovery(RecoveryAction::SelectOnlineNode)
     }
 
     /// `400 INVALID_STATE`

@@ -218,7 +218,20 @@ export type CommandResult = {
 	error?: ErrorInfo | null,
 	/**  Target session ID (optional) */
 	session_id: string | null,
+	/**  Non-fatal issues (the command succeeded but part of the work failed) */
+	warnings?: WarningInfo[],
+	/**  What happened to the user's data (failures and destructive operations) */
+	data_safety?: DataSafety | null,
 };
+
+/**  Three-state outcome of a command. */
+export type CommandStatus = 
+/**  Everything succeeded */
+"success" | 
+/**  The command succeeded but some work was skipped or degraded */
+"partial" | 
+/**  The command failed */
+"failed";
 
 /**
  *  Progress of context compaction.
@@ -500,6 +513,8 @@ export type ErrorInfo = {
 	recovery?: RecoveryAction[],
 	/**  Correlation ID shared with logs / incidents */
 	request_id?: string | null,
+	/**  What happened to the user's data (unchanged / not sent / recoverable / lost) */
+	data_safety?: DataSafety | null,
 	/**  Link to the troubleshooting documentation anchor */
 	docs?: string | null,
 };

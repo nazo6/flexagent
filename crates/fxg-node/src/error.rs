@@ -52,8 +52,15 @@ pub enum NodeError {
     /// The session is stopped and the agent does not support native resume
     /// (`session/resume` / `session/load` / binding an existing opencode2 session).
     /// An explicit resume with replayed history is required.
-    #[error("native resume is not available; resume with replayed history: {0}")]
-    ResumeRequired(String),
+    #[error(
+        "native resume is not available for {session_id}; resume with replayed history: {reason}"
+    )]
+    ResumeRequired {
+        /// Session that must be resumed explicitly
+        session_id: String,
+        /// Why native restore was unavailable
+        reason: String,
+    },
     /// The session is running (busy) and cannot be operated on
     #[error("session is busy: {0}")]
     Busy(String),
@@ -119,7 +126,7 @@ impl NodeError {
             Self::InvalidState(_) | Self::InvalidSession(_) | Self::NonPersistableEvent(_) => {
                 ErrorCode::InvalidState
             }
-            Self::ResumeRequired(_) => ErrorCode::ResumeRequired,
+            Self::ResumeRequired { .. } => ErrorCode::ResumeRequired,
             Self::Busy(_) => ErrorCode::Busy,
             Self::CommandDuplicate(_) => ErrorCode::CommandDuplicate,
             Self::AlreadyResolved(_) => ErrorCode::AlreadyResolved,
@@ -142,7 +149,38 @@ impl NodeError {
     }
 
     /// Builds the structured error exchanged by REST / WS / IPC.
+    ///
+    /// Recovery actions and data-safety hints are attached here so every
+    /// transport (REST / WS / IPC / stdio) exposes them consistently.
     pub fn info(&self) -> fxg_protocol::common::ErrorInfo {
-        fxg_protocol::common::ErrorInfo::new(self.error_code(), self.to_string())
+        use fxg_protocol::common::{DataSafety, RecoveryAction};
+
+        let code = self.error_code();
+        let mut info = fxg_protocol::common::ErrorInfo::new(code, self.to_string());
+        if code.is_retryable() {
+            // Every node command is correlated by `command_id` and deduplicated,
+            // so re-sending the same command is safe.
+            info = info.with_recovery(RecoveryAction::Retry { idempotent: true });
+        }
+        match self {
+            Self::ResumeRequired { session_id, .. } => {
+                info = info
+                    .with_recovery(RecoveryAction::ResumeWithReplay {
+                        session_id: session_id.clone(),
+                    })
+                    .with_data_safety(DataSafety::Preserved);
+            }
+            Self::Busy(_) => {
+                info = info.with_data_safety(DataSafety::NotSent);
+            }
+            Self::InvalidWorktree(_) | Self::NotARepository(_) => {
+                info = info.with_data_safety(DataSafety::Unchanged);
+            }
+            Self::Io { .. } | Self::Git { .. } => {
+                info = info.with_data_safety(DataSafety::Unknown);
+            }
+            _ => {}
+        }
+        info
     }
 }

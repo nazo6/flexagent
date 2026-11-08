@@ -10,7 +10,8 @@
 use serde::{Deserialize, Serialize};
 
 use crate::common::{
-    ErrorCode, ErrorInfo, NodeProjectReport, SessionControlAction, WorkspaceDiffResponse,
+    DataSafety, ErrorCode, ErrorInfo, NodeProjectReport, SessionControlAction, WarningInfo,
+    WorkspaceDiffResponse,
 };
 use crate::events::SessionEventEnvelope;
 /// Synchronization state of a session held by the node (reported in `NodeHello`).
@@ -87,6 +88,12 @@ pub enum NodeToServerMsg {
         error: Option<ErrorInfo>,
         /// Target session ID (optional)
         session_id: Option<String>,
+        /// Non-fatal issues (the command succeeded but part of the work failed)
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        warnings: Vec<WarningInfo>,
+        /// What happened to the user's data (failures and destructive operations)
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        data_safety: Option<DataSafety>,
     },
     /// A PTY output data chunk (web terminal -> client).
     PtyOutput {

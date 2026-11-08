@@ -1333,6 +1333,8 @@ async fn send_command_result(
         success: result.success,
         error: result.error,
         session_id: result.session_id,
+        warnings: result.warnings,
+        data_safety: result.data_safety,
     };
     fxg_protocol::discard_with!(
         out.send(message).await,

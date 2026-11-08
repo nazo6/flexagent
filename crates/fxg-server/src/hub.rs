@@ -726,8 +726,8 @@ impl NodeHub {
 
         match tokio::time::timeout(timeout, rx).await {
             Ok(Ok(response)) => Ok(response),
-            Ok(Err(_canceled)) => Err(ApiError::from_code(
-                ErrorCode::NodeOffline,
+            Ok(Err(_canceled)) => Err(ApiError::node_offline(
+                &node_id,
                 format!("node {node_id} disconnected"),
             )),
             Err(_) => {
@@ -840,10 +840,7 @@ impl NodeHub {
 
 /// Builds a `NODE_OFFLINE` error.
 fn offline_error(node_id: &str) -> ApiError {
-    ApiError::from_code(
-        ErrorCode::NodeOffline,
-        format!("node is not connected: {node_id}"),
-    )
+    ApiError::node_offline(node_id, format!("node is not connected: {node_id}"))
 }
 
 // ----------------------------------------------------------------------
@@ -1109,12 +1106,16 @@ async fn handle_node_message(state: &ServerState, node_id: &str, text: &str) {
             success,
             error,
             session_id,
+            warnings,
+            data_safety,
         } => {
             let result = CommandResult {
                 command_id: command_id.clone(),
                 success,
                 error,
                 session_id,
+                warnings,
+                data_safety,
             };
             state
                 .hub()

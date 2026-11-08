@@ -845,6 +845,40 @@ pub enum ErrorCode {
 }
 
 impl ErrorCode {
+    /// Every variant (contract tests and message catalogs iterate this list).
+    pub const ALL: &'static [Self] = &[
+        Self::Unauthorized,
+        Self::Forbidden,
+        Self::NodeOffline,
+        Self::AlreadyResolved,
+        Self::Busy,
+        Self::InvalidState,
+        Self::ResumeRequired,
+        Self::PtyDisabled,
+        Self::CommandDuplicate,
+        Self::NotFound,
+        Self::Internal,
+        Self::ConfigInvalid,
+        Self::AgentNotInstalled,
+        Self::AgentLaunchFailed,
+        Self::AgentProtocolError,
+        Self::GitUnavailable,
+        Self::GitFailed,
+        Self::WorktreeConflict,
+        Self::SnapshotUnavailable,
+        Self::SyncBacklog,
+        Self::DbCorrupt,
+        Self::ProvisionerFailed,
+        Self::VersionMismatch,
+        Self::Timeout,
+        Self::DiskFull,
+        Self::PermissionDenied,
+        Self::IoError,
+        Self::PtyFailed,
+        Self::ServerError,
+        Self::Cancelled,
+    ];
+
     /// String representation used in JSON / WS / REST.
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -968,6 +1002,9 @@ pub struct ErrorInfo {
     /// Correlation ID shared with logs / incidents
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub request_id: Option<String>,
+    /// What happened to the user's data (unchanged / not sent / recoverable / lost)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub data_safety: Option<DataSafety>,
     /// Link to the troubleshooting documentation anchor
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub docs: Option<String>,
@@ -984,6 +1021,7 @@ impl ErrorInfo {
             retryable: code.is_retryable(),
             recovery: Vec::new(),
             request_id: None,
+            data_safety: None,
             docs: None,
         }
     }
@@ -1009,6 +1047,12 @@ impl ErrorInfo {
     /// Attaches the correlation ID.
     pub fn with_request_id(mut self, request_id: impl Into<String>) -> Self {
         self.request_id = Some(request_id.into());
+        self
+    }
+
+    /// Declares what happened to the user's data.
+    pub fn with_data_safety(mut self, data_safety: DataSafety) -> Self {
+        self.data_safety = Some(data_safety);
         self
     }
 }
@@ -1136,6 +1180,24 @@ pub struct CommandResult {
     pub error: Option<ErrorInfo>,
     /// Target session ID (optional)
     pub session_id: Option<String>,
+    /// Non-fatal issues (the command succeeded but part of the work failed)
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<WarningInfo>,
+    /// What happened to the user's data (failures and destructive operations)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub data_safety: Option<DataSafety>,
+}
+
+/// Three-state outcome of a command.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum CommandStatus {
+    /// Everything succeeded
+    Success,
+    /// The command succeeded but some work was skipped or degraded
+    Partial,
+    /// The command failed
+    Failed,
 }
 
 impl CommandResult {
@@ -1146,6 +1208,8 @@ impl CommandResult {
             success: true,
             error: None,
             session_id: Some(session_id.into()),
+            warnings: Vec::new(),
+            data_safety: None,
         }
     }
 
@@ -1163,6 +1227,31 @@ impl CommandResult {
             success: false,
             error: Some(error),
             session_id: None,
+            warnings: Vec::new(),
+            data_safety: None,
+        }
+    }
+
+    /// Adds a non-fatal warning (turns the outcome into `Partial`).
+    pub fn with_warning(mut self, warning: WarningInfo) -> Self {
+        self.warnings.push(warning);
+        self
+    }
+
+    /// Declares what happened to the user's data.
+    pub fn with_data_safety(mut self, data_safety: DataSafety) -> Self {
+        self.data_safety = Some(data_safety);
+        self
+    }
+
+    /// Three-state outcome derived from `success` and `warnings`.
+    pub fn status(&self) -> CommandStatus {
+        if !self.success {
+            CommandStatus::Failed
+        } else if self.warnings.is_empty() {
+            CommandStatus::Success
+        } else {
+            CommandStatus::Partial
         }
     }
 }
@@ -1421,5 +1510,31 @@ mod tests {
         assert!(ErrorCode::Timeout.is_retryable());
         assert!(!ErrorCode::NotFound.is_retryable());
         assert!(!ErrorCode::ConfigInvalid.is_retryable());
+    }
+    #[test]
+    fn every_error_code_has_a_ui_message_and_troubleshooting_anchor() {
+        let workspace = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(std::path::Path::parent)
+            .expect("workspace root");
+        let messages = std::fs::read_to_string(workspace.join("ui/messages/en.json"))
+            .expect("read ui/messages/en.json");
+        let troubleshooting = std::fs::read_to_string(workspace.join("docs/troubleshooting.md"))
+            .expect("read docs/troubleshooting.md");
+
+        assert_eq!(ErrorCode::ALL.len(), 30, "update ALL when adding a code");
+        for code in ErrorCode::ALL {
+            let snake = code.as_str().to_ascii_lowercase();
+            let message_key = format!("error_{snake}");
+            assert!(
+                messages.contains(&format!("\"{message_key}\"")),
+                "missing ui/messages/en.json key: {message_key}"
+            );
+            assert!(
+                troubleshooting.contains(&format!("## {}", code.as_str())),
+                "missing docs/troubleshooting.md section: {}",
+                code.as_str()
+            );
+        }
     }
 }

@@ -593,10 +593,10 @@ impl SessionManager {
                         session_id = params.session_id,
                         "native resume is not available: {unavailable}"
                     );
-                    return Err(NodeError::ResumeRequired(format!(
-                        "{}: {}",
-                        params.session_id, unavailable.0
-                    )));
+                    return Err(NodeError::ResumeRequired {
+                        session_id: params.session_id.to_owned(),
+                        reason: unavailable.0.clone(),
+                    });
                 }
                 let message = format!("failed to start agent: {err:#}");
                 tracing::warn!(session_id = params.session_id, "{message}");
@@ -2923,7 +2923,7 @@ mod tests {
             .send_prompt("c-next", &session_id, "needs replay", "web")
             .await
             .expect_err("native resume is unavailable");
-        assert!(matches!(err, NodeError::ResumeRequired(_)));
+        assert!(matches!(err, NodeError::ResumeRequired { .. }));
         assert_eq!(
             err.error_code(),
             fxg_protocol::common::ErrorCode::ResumeRequired

@@ -199,8 +199,8 @@ impl ServerState {
             .map_err(ApiError::from)?
             .ok_or_else(|| ApiError::not_found(format!("session not found: {session_id}")))?;
         if !self.inner.hub.is_online(&session.node_id).await {
-            return Err(ApiError::from_code(
-                ErrorCode::NodeOffline,
+            return Err(ApiError::node_offline(
+                &session.node_id,
                 format!("node is offline: {}", session.node_id),
             ));
         }
@@ -586,8 +586,8 @@ impl ClientApiBackend for ServerState {
             .clone()
             .ok_or_else(|| ApiError::bad_request("node_id or provisioner is required"))?;
         if !self.inner.hub.is_online(&node_id).await {
-            return Err(ApiError::from_code(
-                ErrorCode::NodeOffline,
+            return Err(ApiError::node_offline(
+                &node_id,
                 format!("node is offline: {node_id}"),
             ));
         }
@@ -951,8 +951,8 @@ impl ClientApiBackend for ServerState {
         client: ClientInfo,
     ) -> Result<(), ApiError> {
         if !self.inner.hub.is_online(&request.node_id).await {
-            return Err(ApiError::from_code(
-                ErrorCode::NodeOffline,
+            return Err(ApiError::node_offline(
+                &request.node_id,
                 format!("node is offline: {}", request.node_id),
             ));
         }
@@ -989,8 +989,8 @@ impl ClientApiBackend for ServerState {
         client: ClientInfo,
     ) -> Result<ProjectScanResponse, ApiError> {
         if !self.inner.hub.is_online(node_id).await {
-            return Err(ApiError::from_code(
-                ErrorCode::NodeOffline,
+            return Err(ApiError::node_offline(
+                &node_id,
                 format!("node is offline: {node_id}"),
             ));
         }
@@ -1029,8 +1029,8 @@ impl ClientApiBackend for ServerState {
         client: ClientInfo,
     ) -> Result<ProjectLinkResponse, ApiError> {
         if !self.inner.hub.is_online(node_id).await {
-            return Err(ApiError::from_code(
-                ErrorCode::NodeOffline,
+            return Err(ApiError::node_offline(
+                &node_id,
                 format!("node is offline: {node_id}"),
             ));
         }
@@ -1101,8 +1101,8 @@ impl ClientApiBackend for ServerState {
         client: ClientInfo,
     ) -> Result<AgentOpResponse, ApiError> {
         if !self.inner.hub.is_online(node_id).await {
-            return Err(ApiError::from_code(
-                ErrorCode::NodeOffline,
+            return Err(ApiError::node_offline(
+                &node_id,
                 format!("node is offline: {node_id}"),
             ));
         }
@@ -1256,8 +1256,8 @@ impl ClientApiBackend for ServerState {
         _client: ClientInfo,
     ) -> Result<WorktreeInfo, ApiError> {
         if !self.inner.hub.is_online(&request.node_id).await {
-            return Err(ApiError::from_code(
-                ErrorCode::NodeOffline,
+            return Err(ApiError::node_offline(
+                &request.node_id,
                 format!("node is offline: {}", request.node_id),
             ));
         }
@@ -1290,8 +1290,8 @@ impl ClientApiBackend for ServerState {
         _client: ClientInfo,
     ) -> Result<(), ApiError> {
         if !self.inner.hub.is_online(&request.node_id).await {
-            return Err(ApiError::from_code(
-                ErrorCode::NodeOffline,
+            return Err(ApiError::node_offline(
+                &request.node_id,
                 format!("node is offline: {}", request.node_id),
             ));
         }
@@ -1343,8 +1343,8 @@ impl ClientApiBackend for ServerState {
         path: Option<String>,
     ) -> Result<fxg_protocol::client_api::FsBrowseResponse, ApiError> {
         if !self.inner.hub.is_online(node_id).await {
-            return Err(ApiError::from_code(
-                ErrorCode::NodeOffline,
+            return Err(ApiError::node_offline(
+                &node_id,
                 format!("node is offline: {node_id}"),
             ));
         }
