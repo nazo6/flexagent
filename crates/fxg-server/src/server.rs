@@ -1,9 +1,9 @@
-//! `fxg server`: 中央サーバーの起動エントリポイント。
+//! `fxg server`: startup entry point for the central server.
 //!
-//! ルーター構成:
-//! - Client REST / Client WS / PTY WS (`fxg-server::api` の共通ルーター。
-//!   ローカルノードと同一パス)
-//! - Node Hub (`/api/v1/node/ws`。ノード個別トークン認証)
+//! Router layout:
+//! - Client REST / Client WS / PTY WS (the shared router from `fxg-server::api`, using the
+//!   same paths as the local node)
+//! - Node Hub (`/api/v1/node/ws`, authenticated with per-node tokens)
 
 use std::net::SocketAddr;
 
@@ -18,7 +18,7 @@ use crate::error::ServerError;
 use crate::hub;
 use crate::state::{ServerOptions, ServerState};
 
-/// 起動済みの中央サーバー。
+/// A started central server.
 pub struct Server {
     state: ServerState,
     listen_addr: SocketAddr,
@@ -35,7 +35,7 @@ impl std::fmt::Debug for Server {
 }
 
 impl Server {
-    /// サーバーを起動する (`server.db` を開き、HTTP/WS のリッスンを開始)。
+    /// Starts the server (opens `server.db` and begins listening for HTTP/WS).
     pub async fn start(options: ServerOptions) -> Result<Self, ServerError> {
         let state = ServerState::new(options).await?;
         let listen_addr = state.options().listen_addr.clone();
@@ -48,7 +48,7 @@ impl Server {
 
         let (shutdown_tx, mut shutdown_rx) = watch::channel(false);
 
-        // Client API (ノードと同一の共通ルーター)
+        // Client API (shared router, identical to the node)
         let client = client_router(
             state.clone(),
             ClientApiOptions {
@@ -78,7 +78,7 @@ impl Server {
             }
         });
 
-        // Ctrl-C でシャットダウンを要求する
+        // Request shutdown on Ctrl-C
         let signal_tx = shutdown_tx.clone();
         tokio::spawn(async move {
             if tokio::signal::ctrl_c().await.is_ok() {
@@ -101,33 +101,33 @@ impl Server {
         })
     }
 
-    /// 共有状態。
+    /// Shared state.
     pub fn state(&self) -> &ServerState {
         &self.state
     }
 
-    /// 実際にバインドされたアドレス。
+    /// The address actually bound.
     pub fn listen_addr(&self) -> SocketAddr {
         self.listen_addr
     }
 
-    /// シャットダウンを要求する。
+    /// Requests shutdown.
     pub fn shutdown(&self) {
         let _ = self.shutdown_tx.send(true);
     }
 
-    /// シャットダウン要求を送り、サーバータスクの終了を待つ。
+    /// Requests shutdown and waits for the server task to finish.
     pub async fn wait(self) {
         let mut receiver = self.shutdown_tx.subscribe();
-        // `watch` の受信者は生成時点の値を「既読」として開始するため、
-        // 先に `shutdown()` 済みかどうかを現在値で確認してから待機する
-        // (未要求なら Ctrl-C 等による要求まで待つ)。
+        // `watch` receivers start with the value at creation marked as "seen", so check the
+        // current value first to see whether `shutdown()` already ran, then wait for a
+        // request (from Ctrl-C or otherwise).
         if !*receiver.borrow_and_update() {
             let _ = receiver.changed().await;
         }
         let _ = self.shutdown_tx.send(true);
 
-        // 稼働中の一時VMを Drain / 強制終了する (ベストエフォート)
+        // Drain / force-terminate running temporary VMs (best effort)
         let ephemeral_nodes = crate::provisioner::running_node_ids(&self.state);
         crate::provisioner::terminate_all(&self.state).await;
         self.state
@@ -139,7 +139,7 @@ impl Server {
         tracing::info!("fxg server stopped");
     }
 
-    /// サーバーを起動し、シャットダウンまで稼働する (CLI エントリポイント用)。
+    /// Starts the server and runs until shutdown (for the CLI entry point).
     pub async fn run(options: ServerOptions) -> Result<(), ServerError> {
         let server = Self::start(options).await?;
         server.wait().await;

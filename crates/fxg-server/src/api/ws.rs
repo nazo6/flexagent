@@ -1,8 +1,8 @@
-//! Client WebSocket (`/api/v1/client/ws`) の共通ハンドラ。
+//! Shared handler for the Client WebSocket (`/api/v1/client/ws`).
 //!
-//! 設計: `docs/03-protocol-and-api.md` §3.2。接続 → `Subscribe` →
-//! カーソル以降のリプレイ → ライブ配信 (永続イベント / `LiveStreamDelta`) →
-//! コマンドの `command_id` 相関応答、の流れをノード / 中央サーバーで共有する。
+//! Design: `docs/03-protocol-and-api.md` §3.2. The flow connect → `Subscribe` → replay from the
+//! cursor → live delivery (persisted events / `LiveStreamDelta`) → `command_id`-correlated
+//! command responses is shared between the node and the central server.
 
 use axum::extract::ws::{Message, WebSocket};
 use futures_util::{SinkExt, StreamExt};
@@ -12,20 +12,20 @@ use tokio::sync::broadcast;
 
 use super::{ClientApiBackend, ClientCommand, ClientEvent, replay_events, send_ws_json};
 
-/// WS リプレイの1バッチあたりの件数。
+/// Number of events per WS replay batch.
 pub const REPLAY_BATCH_SIZE: u32 = 500;
 
-/// Client WS の接続処理 (Subscribe → リプレイ → ライブ配信 + コマンド応答)。
+/// Connection handler for Client WS (Subscribe → replay → live delivery + command responses).
 pub(crate) async fn handle_client_ws<B: ClientApiBackend>(backend: B, socket: WebSocket) {
     let (mut sender, mut receiver) = socket.split();
 
-    // リプレイ完了までの間に発生したイベントも取りこぼさないよう先に購読する
-    // (リプレイ済みのカーソル以下のイベントは転送時にスキップされる)。
+    // Subscribe first so events produced during the replay are not missed
+    // (events at or below the already replayed cursor are skipped on forwarding).
     let mut subscription = backend.subscribe_client_events();
     let mut cursor: u64 = 0;
     let mut subscribed = false;
 
-    /// select で待つ次のイベント。
+    /// The next event to wait for in `select`.
     enum Next {
         Client(Option<Result<Message, axum::Error>>),
         Bus(Box<Result<ClientEvent, broadcast::error::RecvError>>),
@@ -47,10 +47,10 @@ pub(crate) async fn handle_client_ws<B: ClientApiBackend>(backend: B, socket: We
                 Message::Text(text) => match serde_json::from_str::<ClientWsMessage>(&text) {
                     Ok(ClientWsMessage::Subscribe { since_cursor, .. }) => {
                         let requested = since_cursor.unwrap_or(0);
-                        // DB 再作成・リセット後はクライアントの保存済みカーソルが
-                        // ストアの末尾を超える。そのままでは新ストアのイベント
-                        // (cursor が小さい) を全て重複としてスキップしてしまうため、
-                        // 0 から全量を再同期する (docs/03 §3.2)。
+                        // After the DB is recreated or reset, the client's stored cursor exceeds
+                        // the store's end. That would cause all events in the new store (with
+                        // smaller cursors) to be skipped as duplicates, so resync everything from
+                        // 0 (docs/03 §3.2).
                         cursor = match backend.db().latest_cursor().await {
                             Ok(latest) if requested > latest => {
                                 tracing::warn!(
@@ -128,7 +128,7 @@ pub(crate) async fn handle_client_ws<B: ClientApiBackend>(backend: B, socket: We
                     event,
                     cursor: event_cursor,
                 }) => {
-                    // リプレイで送信済みのイベントはスキップする (重複排除)
+                    // Skip events already sent during replay (deduplication)
                     if event_cursor <= cursor {
                         continue;
                     }
@@ -158,7 +158,7 @@ pub(crate) async fn handle_client_ws<B: ClientApiBackend>(backend: B, socket: We
                     }
                 }
                 Ok(ClientEvent::BootstrapLog { session_id, line }) => {
-                    // 一時VMのブートストラップログ (エフェメラル。永続化しない)
+                    // Temporary VM bootstrap log (ephemeral; not persisted)
                     if send_ws_json(
                         &mut sender,
                         &ServerWsMessage::BootstrapLog { session_id, line },
@@ -170,7 +170,7 @@ pub(crate) async fn handle_client_ws<B: ClientApiBackend>(backend: B, socket: We
                     }
                 }
                 Err(broadcast::error::RecvError::Lagged(skipped)) => {
-                    // 購読が遅延した場合はカーソルから履歴を取り直す
+                    // When the subscription lags, fetch history again from the cursor
                     tracing::warn!(skipped, "client ws lagged; replaying from cursor");
                     if replay_events(&backend, &mut sender, &mut cursor)
                         .await

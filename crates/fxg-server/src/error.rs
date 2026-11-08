@@ -1,18 +1,18 @@
-//! `fxg-server` のエラー型。
+//! Error types for `fxg-server`.
 
-/// 中央サーバーの起動・実行エラー。
+/// Central server startup and runtime errors.
 #[derive(Debug, thiserror::Error)]
 pub enum ServerError {
-    /// データベースエラー (fxg-db)
+    /// Database error (fxg-db)
     #[error("database error: {0}")]
     Db(#[from] fxg_db::DbError),
-    /// ファイルシステム・I/O エラー
+    /// Filesystem / I/O error
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
-    /// 設定ファイルエラー (fxg-protocol)
+    /// Configuration file error (fxg-protocol)
     #[error("config error: {0}")]
     Config(#[from] fxg_protocol::config::ConfigError),
-    /// ソケットのバインド失敗など
+    /// Socket bind failure, etc.
     #[error("server error: {0}")]
     Server(String),
 }

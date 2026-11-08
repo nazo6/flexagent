@@ -1,7 +1,7 @@
-//! 中央サーバーのライフサイクルテスト。
+//! Central server lifecycle tests.
 //!
-//! `Server::wait` は「シャットダウン要求があるまで稼働し続ける」ことが
-//! 要件である (要求なしに return してしまう回帰を防ぐ)。
+//! The requirement for `Server::wait` is that it keeps running until shutdown is requested
+//! (this guards against regressions that return without a request).
 
 use std::time::Duration;
 
@@ -39,8 +39,8 @@ async fn server_keeps_running_until_shutdown_is_requested() {
     let role: serde_json::Value = response.json().await.expect("json");
     assert_eq!(role["role"], "central_server");
 
-    // `wait()` を呼んでもシャットダウン要求が無いうちは稼働し続けること。
-    // (このタスクはテスト終了時にランタイムごと破棄される)
+    // Even after calling `wait()`, the server must keep running while no shutdown is requested.
+    // (This task is discarded together with the runtime when the test ends.)
     let waiter = tokio::spawn(async move {
         server.wait().await;
     });

@@ -1,15 +1,15 @@
-//! VAPID Web Push 送信 (中央サーバー)。
+//! VAPID Web Push delivery (central server).
 //!
-//! 設計: `docs/03-protocol-and-api.md` §3.1、`docs/05-cli-and-pwa-ui.md` §3.3。
+//! Design: `docs/03-protocol-and-api.md` §3.1, `docs/05-cli-and-pwa-ui.md` §3.3.
 //!
-//! - VAPID 鍵ペアは初回起動時に生成し `~/.flexagent/vapid.json` へ保存する
-//!   (公開鍵は `GET /api/v1/system/info` の `vapid_public_key` で配布)。
-//! - 承認リクエスト (`PermissionRequest` イベント) の適用時に、登録済みの
-//!   全購読へ通知を fan-out する。Android の通知バナー上の Approve / Reject は
-//!   Service Worker が `POST .../permissions/:req_id/respond` を叩く。
-//! - 暗号化 (RFC 8291 aes128gcm) と VAPID 署名 (RFC 8292) は純 Rust の
-//!   [`web_push_native`] (`p256` / `aes-gcm` / `hkdf`) で行い、OpenSSL に依存
-//!   しない。HTTP 送信はワークスペース共通の `reqwest` を使用する。
+//! - The VAPID key pair is generated on first startup and stored in `~/.flexagent/vapid.json`
+//!   (the public key is distributed via `vapid_public_key` in `GET /api/v1/system/info`).
+//! - When an approval request (a `PermissionRequest` event) is applied, a notification is
+//!   fanned out to every registered subscription. For Approve / Reject on the Android
+//!   notification banner, the Service Worker calls `POST .../permissions/:req_id/respond`.
+//! - Encryption (RFC 8291 aes128gcm) and VAPID signing (RFC 8292) use pure Rust
+//!   [`web_push_native`] (`p256` / `aes-gcm` / `hkdf`) and do not depend on OpenSSL. HTTP
+//!   delivery uses the workspace `reqwest`.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -22,79 +22,79 @@ use web_push_native::jwt_simple::algorithms::ES256KeyPair;
 use web_push_native::p256::elliptic_curve::sec1::ToEncodedPoint;
 use web_push_native::{Auth, WebPushBuilder};
 
-/// VAPID 鍵ファイル名 (`~/.flexagent/vapid.json`)。
+/// VAPID key file name (`~/.flexagent/vapid.json`).
 pub const VAPID_KEYS_FILE: &str = "vapid.json";
 
-/// VAPID の `sub` claim (連絡先)。
+/// VAPID `sub` claim (contact).
 const VAPID_CONTACT: &str = "mailto:flexagent@localhost";
 
-/// VAPID 鍵ペア (base64url / no padding)。
+/// VAPID key pair (base64url / no padding).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct VapidKeys {
-    /// P-256 秘密鍵 (32 バイトスカラの base64url)
+    /// P-256 private key (base64url of the 32-byte scalar)
     private_key: String,
-    /// P-256 公開鍵 (非圧縮点 65 バイトの base64url)
+    /// P-256 public key (base64url of the 65-byte uncompressed point)
     public_key: String,
 }
 
-/// Web Push 送信エラー。
+/// Web Push delivery error.
 #[derive(Debug, thiserror::Error)]
 pub enum PushError {
-    /// VAPID 鍵ファイルの入出力エラー
+    /// I/O error on the VAPID key file
     #[error("vapid key io error: {0}")]
     Io(#[from] std::io::Error),
-    /// VAPID 鍵 / ペイロードの JSON エラー
+    /// JSON error for VAPID keys / payload
     #[error("push json error: {0}")]
     Json(#[from] serde_json::Error),
-    /// P-256 鍵生成に失敗 (乱数が有効なスカラにならなかった)
+    /// P-256 key generation failed (no random value was a valid scalar)
     #[error("failed to generate a vapid keypair")]
     KeyGeneration,
-    /// Push エンドポイント URL が不正
+    /// The push endpoint URL is invalid
     #[error("invalid push endpoint: {0}")]
     InvalidEndpoint(String),
-    /// 購読の鍵 (`p256dh` / `auth`) が不正
+    /// The subscription keys (`p256dh` / `auth`) are invalid
     #[error("invalid push subscription keys")]
     InvalidKeys,
-    /// 署名・暗号化エラー (web-push-native)
+    /// Signing / encryption error (web-push-native)
     #[error("web push build error: {0}")]
     Build(#[from] web_push_native::Error),
-    /// HTTP 送信エラー
+    /// HTTP delivery error
     #[error("push request error: {0}")]
     Http(#[from] reqwest::Error),
-    /// Push サービスがエラーステータスを返した
+    /// The push service returned an error status
     #[error("push endpoint returned status {0}")]
     HttpStatus(u16),
 }
 
-/// 通知ペイロード (Service Worker の `push` ハンドラが解釈する)。
+/// Notification payload (interpreted by the Service Worker `push` handler).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PushNotificationPayload {
-    /// 通知タイトル (例: `[flexagent] 承認リクエスト (Home-Win)`)
+    /// Notification title (e.g. `[flexagent] Approval request (Home-Win)`)
     pub title: String,
-    /// 通知本文 (例: `opencode2: Run "cargo test --workspace"`)
+    /// Notification body (e.g. `opencode2: Run "cargo test --workspace"`)
     pub body: String,
-    /// 対象セッションID
+    /// Target session ID
     pub session_id: String,
-    /// 承認リクエストID
+    /// Approval request ID
     pub request_id: String,
-    /// 通知の置換タグ (同じリクエストの通知を上書きする)
+    /// Replacement tag for the notification (overwrites notifications for the same request)
     pub tag: String,
-    /// `[Approve]` ボタンが送る `option_id`
+    /// `option_id` sent by the `[Approve]` button
     pub allow_option_id: Option<String>,
-    /// `[Reject]` ボタンが送る `option_id`
+    /// `option_id` sent by the `[Reject]` button
     pub reject_option_id: Option<String>,
 }
 
-/// 送信結果。
+/// Delivery outcome.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PushSendOutcome {
-    /// 送信成功
+    /// Delivered successfully
     Sent,
-    /// 購読が失効 (`404` / `410`。購読を削除する)
+    /// The subscription is no longer valid (`404` / `410`; delete the subscription)
     Gone,
 }
 
-/// VAPID 鍵を保持し Web Push を送信するサービス。
+/// Service that holds the VAPID keys and sends Web Push messages.
 #[derive(Clone)]
 pub struct PushService {
     client: reqwest::Client,
@@ -103,7 +103,7 @@ pub struct PushService {
 }
 
 impl PushService {
-    /// `~/.flexagent/vapid.json` を読み込む (無ければ生成して保存する)。
+    /// Loads `~/.flexagent/vapid.json` (generating and saving it if absent).
     pub fn load_or_create(fxg_home: &Path) -> Result<Self, PushError> {
         let path = fxg_home.join(VAPID_KEYS_FILE);
         let keys = match std::fs::read_to_string(&path) {
@@ -127,12 +127,12 @@ impl PushService {
         })
     }
 
-    /// `GET /api/v1/system/info` で配布する VAPID 公開鍵 (base64url)。
+    /// VAPID public key (base64url) distributed via `GET /api/v1/system/info`.
     pub fn public_key(&self) -> &str {
         &self.public_key
     }
 
-    /// 1 購読向けの HTTP プッシュリクエスト (暗号化 + VAPID 署名済み) を構築する。
+    /// Builds the HTTP push request (already encrypted and VAPID-signed) for one subscription.
     fn build_request(
         &self,
         subscription: &PushSubscriptionRecord,
@@ -155,7 +155,7 @@ impl PushService {
         Ok(builder.build(body)?)
     }
 
-    /// 1 購読へ通知を送る。
+    /// Sends a notification to one subscription.
     pub async fn send(
         &self,
         subscription: &PushSubscriptionRecord,
@@ -164,7 +164,7 @@ impl PushService {
         let body = serde_json::to_vec(payload)?;
         let request = self.build_request(subscription, body)?;
 
-        // `http::Request` を reqwest で送る
+        // Send the `http::Request` via reqwest
         let (parts, body) = request.into_parts();
         let method = reqwest::Method::from_bytes(parts.method.as_str().as_bytes())
             .unwrap_or(reqwest::Method::POST);
@@ -185,7 +185,7 @@ impl PushService {
     }
 }
 
-/// P-256 鍵ペアを生成する (公開鍵は非圧縮 SEC1 形式で保存する)。
+/// Generates a P-256 key pair (the public key is stored in uncompressed SEC1 form).
 fn generate_vapid_keys() -> Result<VapidKeys, PushError> {
     for _ in 0..32 {
         let scalar: [u8; 32] = rand::random();
@@ -203,7 +203,7 @@ fn generate_vapid_keys() -> Result<VapidKeys, PushError> {
     Err(PushError::KeyGeneration)
 }
 
-/// base64url (no padding) または標準 base64 をデコードする。
+/// Decodes base64url (no padding) or standard base64.
 fn decode_base64(value: &str) -> Option<Vec<u8>> {
     URL_SAFE_NO_PAD
         .decode(value)
@@ -211,7 +211,7 @@ fn decode_base64(value: &str) -> Option<Vec<u8>> {
         .ok()
 }
 
-/// `PermissionRequest` イベントから通知ペイロードを組み立てる。
+/// Builds a notification payload from a `PermissionRequest` event.
 pub fn permission_notification(
     session_id: &str,
     session_title: Option<&str>,
@@ -230,8 +230,8 @@ pub fn permission_notification(
         .find(|option| option.kind.starts_with("reject"))
         .map(|option| option.option_id.clone());
     let title = match session_title {
-        Some(title) => format!("[flexagent] 承認リクエスト ({node_label}) — {title}"),
-        None => format!("[flexagent] 承認リクエスト ({node_label})"),
+        Some(title) => format!("[flexagent] Approval request ({node_label}) — {title}"),
+        None => format!("[flexagent] Approval request ({node_label})"),
     };
     PushNotificationPayload {
         title,
@@ -244,10 +244,10 @@ pub fn permission_notification(
     }
 }
 
-/// `ElicitationRequest` イベントから通知ペイロードを組み立てる。
+/// Builds a notification payload from an `ElicitationRequest` event.
 ///
-/// form の回答はアプリ内でのみ行えるため、承認のような直接応答ボタンは付けず、
-/// 通知タップでアプリを開く導線のみとする。
+/// Form answers can only be given inside the app, so instead of the direct response buttons
+/// used for approvals, the only path is tapping the notification to open the app.
 pub fn elicitation_notification(
     session_id: &str,
     session_title: Option<&str>,
@@ -256,8 +256,8 @@ pub fn elicitation_notification(
     message: &str,
 ) -> PushNotificationPayload {
     let title = match session_title {
-        Some(title) => format!("[flexagent] 質問 ({node_label}) — {title}"),
-        None => format!("[flexagent] 質問 ({node_label})"),
+        Some(title) => format!("[flexagent] Question ({node_label}) — {title}"),
+        None => format!("[flexagent] Question ({node_label})"),
     };
     PushNotificationPayload {
         title,
@@ -270,7 +270,8 @@ pub fn elicitation_notification(
     }
 }
 
-/// 1 ペイロードを全購読へ送る (失効した購読は削除する)。失敗は警告ログのみ。
+/// Sends one payload to every subscription (expired subscriptions are deleted). Failures only
+/// produce a warning log.
 async fn send_to_subscriptions(
     push: &PushService,
     db: &Db,
@@ -295,9 +296,10 @@ async fn send_to_subscriptions(
     }
 }
 
-/// イベント列内の `PermissionRequest` を全購読へ通知する。
+/// Notifies every subscription about `PermissionRequest`s in an event batch.
 ///
-/// 失効した購読 (`404` / `410`) は削除する。失敗は警告ログのみで継続する。
+/// Expired subscriptions (`404` / `410`) are deleted. Failures only produce a warning log and
+/// processing continues.
 pub async fn notify_permission_requests(
     push: &PushService,
     db: &Db,
@@ -371,9 +373,10 @@ pub async fn notify_permission_requests(
     }
 }
 
-/// イベント列内の `ElicitationRequest` を全購読へ通知する。
+/// Notifies every subscription about `ElicitationRequest`s in an event batch.
 ///
-/// 失効した購読 (`404` / `410`) は削除する。失敗は警告ログのみで継続する。
+/// Expired subscriptions (`404` / `410`) are deleted. Failures only produce a warning log and
+/// processing continues.
 pub async fn notify_elicitations(
     push: &PushService,
     db: &Db,
@@ -446,7 +449,7 @@ mod tests {
         (service, dir)
     }
 
-    /// テスト用の UA (ブラウザ) 側購読を生成する。
+    /// Generates a test UA (browser) side subscription.
     fn test_subscription(
         endpoint: &str,
     ) -> (
@@ -487,7 +490,7 @@ mod tests {
         let (service, _dir) = test_service();
         let (subscription, ua_secret, auth) = test_subscription("https://push.example.com/v1/abc");
         let payload = PushNotificationPayload {
-            title: "[flexagent] 承認リクエスト (Home-Win)".to_owned(),
+            title: "[flexagent] Approval request (Home-Win)".to_owned(),
             body: "opencode2: Run \"cargo test\"".to_owned(),
             session_id: "session-1".to_owned(),
             request_id: "req-1".to_owned(),
@@ -500,7 +503,7 @@ mod tests {
             .build_request(&subscription, body)
             .expect("build request");
 
-        // VAPID 署名ヘッダが付与される
+        // The VAPID signature header is attached
         let authorization = request
             .headers()
             .get(reqwest::header::AUTHORIZATION)
@@ -510,7 +513,7 @@ mod tests {
         assert!(authorization.contains("k="), "{authorization}");
         assert!(request.headers().contains_key("content-encoding"));
 
-        // サーバーが唯一の受信者である UA 側で復号できる (RFC 8291 の往復検証)
+        // The UA, the only recipient, can decrypt it (RFC 8291 round-trip check)
         let body = request.into_body();
         let decrypted = web_push_native::decrypt(body, &ua_secret, &auth).expect("decrypt");
         let decoded: PushNotificationPayload =
@@ -548,7 +551,7 @@ mod tests {
         );
         assert_eq!(
             payload.title,
-            "[flexagent] 承認リクエスト (Home-Win) — Fix auth"
+            "[flexagent] Approval request (Home-Win) — Fix auth"
         );
         assert_eq!(payload.body, "terminal/create: Run cargo test");
         assert_eq!(payload.tag, "fxg-permission-req-1");
@@ -563,12 +566,12 @@ mod tests {
             Some("Fix auth"),
             "Home-Win",
             "elic-1",
-            "どの戦略で進めますか?",
+            "Which strategy should we use?",
         );
-        assert_eq!(payload.title, "[flexagent] 質問 (Home-Win) — Fix auth");
-        assert_eq!(payload.body, "どの戦略で進めますか?");
+        assert_eq!(payload.title, "[flexagent] Question (Home-Win) — Fix auth");
+        assert_eq!(payload.body, "Which strategy should we use?");
         assert_eq!(payload.tag, "fxg-elicitation-elic-1");
-        // form の回答はアプリ内のみ (通知から直接応答しない)
+        // Form answers are in-app only (no direct replies from the notification)
         assert!(payload.allow_option_id.is_none());
         assert!(payload.reject_option_id.is_none());
     }

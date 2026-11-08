@@ -1,9 +1,9 @@
-//! 双方向 Web PTY WebSocket (`/api/v1/pty/ws`) の共通ハンドラ。
+//! Shared handler for the bidirectional web PTY WebSocket (`/api/v1/pty/ws`).
 //!
-//! 設計: `docs/03-protocol-and-api.md` §3.3。クライアントのターミナルと
-//! ノード上の ConPTY / Unix PTY を直接結ぶ。ノードは `PtySessionManager` へ
-//! 直結し、中央サーバーは `PtySpawn` / `PtyInput` / `PtyResize` / `PtyKill` を
-//! 対象ノードへ中継する (`allow_remote_pty=false` のノードは起動を拒否する)。
+//! Design: `docs/03-protocol-and-api.md` §3.3. Connects the client's terminal directly to a
+//! ConPTY / Unix PTY on the node. The node talks straight to `PtySessionManager`, while the
+//! central server relays `PtySpawn` / `PtyInput` / `PtyResize` / `PtyKill` to the target node
+//! (nodes with `allow_remote_pty=false` refuse to spawn).
 
 use axum::extract::ws::{Message, WebSocket};
 use base64::Engine as _;
@@ -14,18 +14,18 @@ use tokio::sync::broadcast;
 
 use super::{ClientApiBackend, send_ws_json};
 
-/// PTY チャネル固有のエラー (コードは `ErrorCode` ではなく文字列)。
+/// PTY channel specific error (the code is a string rather than an `ErrorCode`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PtyChannelError {
-    /// エラーコード文字列 (`FORBIDDEN` / `PTY_DISABLED` / `NOT_FOUND` /
+    /// Error code string (`FORBIDDEN` / `PTY_DISABLED` / `NOT_FOUND` /
     /// `NODE_OFFLINE` / `INVALID_STATE` / `INTERNAL`)
     pub code: String,
-    /// 人間向けメッセージ
+    /// Human-readable message
     pub message: String,
 }
 
 impl PtyChannelError {
-    /// 任意のコードで生成する。
+    /// Builds an error with an arbitrary code.
     pub fn new(code: impl Into<String>, message: impl Into<String>) -> Self {
         Self {
             code: code.into(),
@@ -33,12 +33,12 @@ impl PtyChannelError {
         }
     }
 
-    /// `FORBIDDEN` (ポリシー拒否・対象外操作)
+    /// `FORBIDDEN` (policy rejection / unsupported operation)
     pub fn forbidden(message: impl Into<String>) -> Self {
         Self::new("FORBIDDEN", message)
     }
 
-    /// `PTY_DISABLED` (リモート PTY がノード設定で無効)
+    /// `PTY_DISABLED` (remote PTY disabled by node configuration)
     pub fn disabled(message: impl Into<String>) -> Self {
         Self::new("PTY_DISABLED", message)
     }
@@ -48,7 +48,7 @@ impl PtyChannelError {
         Self::new("NOT_FOUND", message)
     }
 
-    /// `NODE_OFFLINE` (中央サーバー中継で対象ノードが切断中)
+    /// `NODE_OFFLINE` (target node disconnected during central server relay)
     pub fn offline(message: impl Into<String>) -> Self {
         Self::new("NODE_OFFLINE", message)
     }
@@ -59,7 +59,7 @@ impl PtyChannelError {
         Self::new("INTERNAL", err.to_string())
     }
 
-    /// Client へ送る `PtyServerMessage::Error` に変換する。
+    /// Converts to the `PtyServerMessage::Error` sent to the client.
     pub fn to_message(&self) -> PtyServerMessage {
         PtyServerMessage::Error {
             code: self.code.clone(),
@@ -68,60 +68,60 @@ impl PtyChannelError {
     }
 }
 
-/// 購読者へ配信される PTY イベント (ノード / 中継サーバー共通)。
+/// PTY event delivered to subscribers (shared by nodes / relay servers).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PtyChannelEvent {
-    /// 出力チャンク
+    /// Output chunk
     Output {
-        /// 出力バイト列
+        /// Output bytes
         data: Vec<u8>,
     },
-    /// プロセス終了
+    /// Process exit
     Exit {
-        /// 終了コード
+        /// Exit code
         exit_code: Option<i32>,
     },
-    /// 非同期の失敗通知 (中継ノードが `PtyError` を返した場合など)。
+    /// Asynchronous failure notification (e.g. when a relay node returns `PtyError`).
     ///
-    /// 受信した Client WS は `PtyServerMessage::Error` を送って PTY 状態を破棄する。
+    /// The receiving Client WS sends `PtyServerMessage::Error` and discards the PTY state.
     Error {
-        /// エラーコード文字列
+        /// Error code string
         code: String,
-        /// 人間向けメッセージ
+        /// Human-readable message
         message: String,
     },
 }
 
-/// PTY 起動パラメータ (`pty_id` は呼び出し側が採番)。
+/// PTY spawn parameters (`pty_id` is assigned by the caller).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PtySpawnParams {
     /// PTY ID
     pub pty_id: String,
-    /// 対象セッションID (作業ディレクトリ解決用)
+    /// Target session ID (used to resolve the working directory)
     pub session_id: String,
-    /// 列数
+    /// Number of columns
     pub cols: u16,
-    /// 行数
+    /// Number of rows
     pub rows: u16,
-    /// シェルコマンド (省略時は既定シェル)
+    /// Shell command (default shell when omitted)
     pub shell_cmd: Option<String>,
 }
 
-/// このソケットがアタッチしている PTY。
+/// PTY attached to this socket.
 struct AttachedPty {
     pty_id: String,
-    /// このソケットが spawn した PTY (`false` は既存への attach)。
-    /// spawn した PTY はソケット切断時に終了する。
+    /// Whether this socket spawned the PTY (`false` means attached to an existing one).
+    /// Spawned PTYs are killed when the socket disconnects.
     spawned: bool,
 }
 
-/// PTY WS の接続処理。
+/// Connection handler for the PTY WS.
 pub(crate) async fn handle_pty_ws<B: ClientApiBackend>(backend: B, socket: WebSocket) {
     let (mut sender, mut receiver) = socket.split();
     let mut attached: Option<AttachedPty> = None;
     let mut output_rx: Option<broadcast::Receiver<PtyChannelEvent>> = None;
 
-    /// select で待つ次のイベント。
+    /// The next event to wait for in `select`.
     enum Next {
         Client(Option<Result<Message, axum::Error>>),
         Pty(Result<PtyChannelEvent, broadcast::error::RecvError>),
@@ -325,8 +325,8 @@ pub(crate) async fn handle_pty_ws<B: ClientApiBackend>(backend: B, socket: WebSo
                     {
                         break;
                     }
-                    // PTY は終了済み (以降の入力は無効)。ソケットは開いたまま
-                    // 新規 spawn / attach を許可する。
+                    // The PTY has exited (subsequent input is ignored). Keep the socket open and
+                    // allow new spawn / attach requests.
                     attached = None;
                     output_rx = None;
                 }
@@ -340,7 +340,7 @@ pub(crate) async fn handle_pty_ws<B: ClientApiBackend>(backend: B, socket: WebSo
                     attached = None;
                     output_rx = None;
                 }
-                // 出力の取りこぼしは許容する (PTY ストリームは最新表示優先)
+                // Dropped output is tolerated (the PTY stream favors the latest view)
                 Err(broadcast::error::RecvError::Lagged(skipped)) => {
                     tracing::debug!(skipped, "pty output lagged");
                 }
@@ -352,8 +352,8 @@ pub(crate) async fn handle_pty_ws<B: ClientApiBackend>(backend: B, socket: WebSo
         }
     }
 
-    // このソケットが起動した PTY は切断時に終了する (ゾンビ防止)。
-    // attach した既存 PTY はデタッチのみで残す。
+    // PTYs spawned by this socket are killed on disconnect (prevents zombies).
+    // Existing attached PTYs are merely detached and left running.
     if let Some(current) = attached
         && current.spawned
     {
@@ -361,17 +361,17 @@ pub(crate) async fn handle_pty_ws<B: ClientApiBackend>(backend: B, socket: WebSo
     }
 }
 
-/// PTY spawn → 購読確立の結果。
+/// Result of PTY spawn → subscription setup.
 enum SpawnOutcome {
-    /// 購読を確立した
+    /// Subscription established
     Ready(broadcast::Receiver<PtyChannelEvent>),
-    /// エラーを送信済み (ループは継続)
+    /// Error already sent (the loop continues)
     Failed,
-    /// ソケット送信に失敗 (ループ終了)
+    /// Socket send failed (the loop ends)
     Closed,
 }
 
-/// PTY を spawn して購読を確立し、`Spawned` を送信する。
+/// Spawns a PTY, establishes the subscription and sends `Spawned`.
 async fn spawn_and_subscribe<B: ClientApiBackend>(
     backend: &B,
     sender: &mut futures_util::stream::SplitSink<WebSocket, Message>,
@@ -396,7 +396,7 @@ async fn spawn_and_subscribe<B: ClientApiBackend>(
             .await
             .is_err()
             {
-                // 正常に spawn 済みだが通知できないため終了する
+                // Spawned successfully but cannot notify, so terminate
                 backend.pty_disconnect(&pty_id).await;
                 return SpawnOutcome::Closed;
             }
@@ -413,7 +413,7 @@ async fn spawn_and_subscribe<B: ClientApiBackend>(
     }
 }
 
-/// エラーを送信する。
+/// Sends an error.
 async fn send_error(
     sender: &mut futures_util::stream::SplitSink<WebSocket, Message>,
     error: PtyChannelError,

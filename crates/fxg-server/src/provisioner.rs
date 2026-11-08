@@ -1,21 +1,20 @@
-//! 一時VM・サンドボックスノードのプロビジョナー管理 (中央サーバーホスト側)。
+//! Provisioner management for temporary VM / sandbox nodes (on the central server host).
 //!
-//! 設計: `docs/01-architecture-and-sync.md` §6.1〜§6.4、
-//! `docs/05-cli-and-pwa-ui.md` §2.2。
+//! Design: `docs/01-architecture-and-sync.md` §6.1–§6.4, `docs/05-cli-and-pwa-ui.md` §2.2.
 //!
-//! - `config.toml` の `[provisioners.<name>]` に定義されたコマンドを子プロセスとして
-//!   起動し、`stdin` / `stdout` を `NodeToServerMsg` / `ServerToNodeMsg` の
-//!   JSON Lines トランスポートとして使用する (`fxg daemon --stdio` と直結)
-//! - プロビジョナー起動時に `FXG_GIT_URL` / `FXG_GIT_BRANCH` / 短命 `FXG_GIT_TOKEN`
-//!   と一時ノードID (`FXG_NODE_ID`) を環境変数として注入する
-//! - `stderr` は `BootstrapLog` として UI へストリーム配信する (エフェメラル)
-//! - ハンドシェイク (NodeHello) 受信後、ハブ接続を登録してから `StartSession` を
-//!   送信してセッションを開始する (ブートストラップ中はノードは「オフライン」)
-//! - アイドルタイムアウト / 全セッション終了時に `DrainAndShutdown` を送り、
-//!   `DrainComplete` 後に子プロセス (VM/コンテナ) を破棄する
-//! - `WorkspaceBundleUpload` は `DrainComplete` までチャンクを蓄積し、
-//!   `~/.flexagent/bundles/<session-id>.bundle` へ保存して
-//!   `sessions.git_bundle_path` に記録する
+//! - Launches the command defined under `[provisioners.<name>]` in `config.toml` as a child
+//!   process and uses its `stdin` / `stdout` as the JSON Lines transport for
+//!   `NodeToServerMsg` / `ServerToNodeMsg` (a direct connection to `fxg daemon --stdio`)
+//! - Injects `FXG_GIT_URL` / `FXG_GIT_BRANCH` / a short-lived `FXG_GIT_TOKEN` and the ephemeral
+//!   node ID (`FXG_NODE_ID`) as environment variables at provisioner startup
+//! - Streams `stderr` to the UI as `BootstrapLog` (ephemeral)
+//! - After the handshake (NodeHello), registers the hub connection before sending
+//!   `StartSession` to start the session (the node is "offline" during bootstrap)
+//! - On idle timeout / when all sessions end, sends `DrainAndShutdown` and discards the child
+//!   process (VM/container) after `DrainComplete`
+//! - `WorkspaceBundleUpload` accumulates chunks until `DrainComplete`, saves them to
+//!   `~/.flexagent/bundles/<session-id>.bundle` and records the path in
+//!   `sessions.git_bundle_path`
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
@@ -39,32 +38,32 @@ use crate::credentials::resolve_credential;
 use crate::hub;
 use crate::state::ServerState;
 
-/// ブートストラップ完了 (NodeHello) を待つ上限。
+/// Upper bound for waiting on bootstrap completion (NodeHello).
 const HELLO_TIMEOUT: Duration = Duration::from_secs(1800);
-/// `DrainComplete` を待つ上限。
+/// Upper bound for waiting on `DrainComplete`.
 const DRAIN_TIMEOUT: Duration = Duration::from_secs(60);
-/// アイドル監視のティック間隔。
+/// Tick interval for idle monitoring.
 const MONITOR_INTERVAL: Duration = Duration::from_secs(5);
-/// `provisioners test` のハンドシェイク待ち上限。
+/// Upper bound for the `provisioners test` handshake wait.
 const TEST_TIMEOUT: Duration = Duration::from_secs(300);
-/// `provisioners test` で保持するブートストラップログ行数。
+/// Number of bootstrap log lines kept by `provisioners test`.
 const TEST_LOG_LINES: usize = 200;
-/// 一時VM内のワークスペースパス (生成スクリプトと一致させる)。
+/// Workspace path inside the temporary VM (must match the generated script).
 pub(crate) const EPHEMERAL_WORKSPACE: &str = "/tmp/workspace";
-/// 一時VM内の fxg バイナリパス。
+/// fxg binary path inside the temporary VM.
 const EPHEMERAL_BINARY: &str = "/tmp/fxg";
 
-/// 一時VMインスタンスの実行状態 (node_id をキーに管理)。
+/// Runtime state of one temporary VM instance (keyed by node_id).
 struct Instance {
     node_id: String,
     session_id: Option<String>,
-    /// 子プロセス終了シグナル (pump タスクが待機し、kill + Job Object 破棄を行う)
+    /// Child process termination signal (the pump task kills and drops the Job Object on it)
     terminate: watch::Sender<bool>,
-    /// 最終メッセージ受信時刻 (アイドルタイムアウト判定)
+    /// Time the last message was received (used for idle timeout decisions)
     last_activity: Arc<StdMutex<Instant>>,
 }
 
-/// 蓄積中の Git バンドル (session_id → Base64 チャンク列)。
+/// Git bundle being accumulated (session_id → sequence of Base64 chunks).
 #[derive(Default)]
 struct BundleAccumulator {
     chunks: Vec<String>,
@@ -81,7 +80,7 @@ struct ProvisionerInner {
     drain_waiters: StdMutex<HashMap<String, oneshot::Sender<()>>>,
 }
 
-/// 一時VMプロビジョナーの管理 (中央サーバーが 1 つ保持する)。
+/// Management of temporary VM provisioners (one instance is held by the central server).
 #[derive(Clone)]
 pub struct ProvisionerManager {
     inner: Arc<ProvisionerInner>,
@@ -103,7 +102,7 @@ impl std::fmt::Debug for ProvisionerManager {
 }
 
 impl ProvisionerManager {
-    /// 設定から管理を作成する。
+    /// Creates the manager from configuration.
     pub fn new(
         fxg_home: PathBuf,
         configs: BTreeMap<String, ProvisionerConfig>,
@@ -121,12 +120,12 @@ impl ProvisionerManager {
         }
     }
 
-    /// 定義済みプロビジョナー設定。
+    /// Configured provisioner definitions.
     pub fn configs(&self) -> &BTreeMap<String, ProvisionerConfig> {
         &self.inner.configs
     }
 
-    /// 設定を取り出す (未知の名前は `NOT_FOUND`)。
+    /// Fetches a configuration (unknown names yield `NOT_FOUND`).
     pub fn config(&self, name: &str) -> Result<&ProvisionerConfig, ApiError> {
         self.inner
             .configs
@@ -134,17 +133,17 @@ impl ProvisionerManager {
             .ok_or_else(|| ApiError::not_found(format!("provisioner not found: {name}")))
     }
 
-    /// Git Credential Proxy 設定。
+    /// Git Credential Proxy configuration.
     pub fn git_credentials(&self) -> &BTreeMap<String, GitCredentialConfig> {
         &self.inner.git_credentials
     }
 
-    /// `~/.flexagent` データディレクトリ。
+    /// `~/.flexagent` data directory.
     pub fn fxg_home(&self) -> &std::path::Path {
         &self.inner.fxg_home
     }
 
-    /// 稼働中の一時ノードか (稼働中インスタンスが存在するか)。
+    /// Whether this is a running temporary node (an active instance exists).
     pub fn is_ephemeral(&self, node_id: &str) -> bool {
         self.inner
             .instances
@@ -153,7 +152,7 @@ impl ProvisionerManager {
             .contains_key(node_id)
     }
 
-    /// セッションID (未知のノードは `None`)。
+    /// Session ID (`None` for unknown nodes).
     fn session_id(&self, node_id: &str) -> Option<String> {
         self.inner
             .instances
@@ -188,7 +187,7 @@ impl ProvisionerManager {
             .remove(node_id);
     }
 
-    /// 子プロセスへ終了 (kill + Job Object 破棄) を要求する。
+    /// Asks the child process to terminate (kill and drop the Job Object).
     fn terminate(&self, node_id: &str) {
         if let Some(instance) = self
             .inner
@@ -211,7 +210,7 @@ impl ProvisionerManager {
         rx
     }
 
-    /// `DrainComplete` を受信した (待機中があれば通知)。
+    /// A `DrainComplete` was received (notifies any waiter).
     fn take_drain_waiter(&self, node_id: &str) {
         if let Some(tx) = self
             .inner
@@ -245,36 +244,36 @@ impl ProvisionerManager {
     }
 }
 
-/// セッション開始要求 (プロビジョナー起動 + StartSession)。
+/// Session start request (provisioner launch + StartSession).
 #[derive(Debug, Clone)]
 pub struct SpawnSessionRequest {
-    /// サーバー採番のセッションID
+    /// Server-assigned session ID
     pub session_id: String,
-    /// 一時ノードID (サーバー採番。`FXG_NODE_ID` として注入)
+    /// Ephemeral node ID (server-assigned; injected as `FXG_NODE_ID`)
     pub node_id: String,
-    /// プロビジョナー名
+    /// Provisioner name
     pub provisioner: String,
-    /// 論理プロジェクトID
+    /// Logical project ID
     pub project_id: String,
-    /// クローン元 Git URL (`FXG_GIT_URL`)
+    /// Git URL to clone from (`FXG_GIT_URL`)
     pub git_url: String,
-    /// クローン対象ブランチ (`FXG_GIT_BRANCH`。`--worktree` 指定時に設定)
+    /// Branch to clone (`FXG_GIT_BRANCH`; set when `--worktree` is specified)
     pub git_branch: Option<String>,
-    /// 起動するエージェントID
+    /// Agent ID to launch
     pub agent_id: String,
-    /// 初期プロンプト
+    /// Initial prompt
     pub initial_prompt: Option<String>,
-    /// 初期モード
+    /// Initial mode
     pub mode: Option<String>,
-    /// エージェントへの追加引数
+    /// Extra arguments for the agent
     pub extra_args: Option<Vec<String>>,
-    /// 別ノードからの Fork 履歴 (Replay 注入)
+    /// Fork history from another node (replay injection)
     pub fork_context: Option<Vec<ForkHistoryItem>>,
-    /// 退避済み Git バンドル (Base64)
+    /// Saved Git bundle (Base64)
     pub restore_bundle_b64: Option<String>,
 }
 
-/// セッション用のプロビジョナーを起動する (ハンドシェイク後に StartSession を送る)。
+/// Launches a provisioner for a session (sends StartSession after the handshake).
 pub async fn spawn_session(
     state: &ServerState,
     request: SpawnSessionRequest,
@@ -360,10 +359,10 @@ pub async fn spawn_session(
     Ok(())
 }
 
-/// 一時ノードを事前登録する (`sessions.node_id` の FK と `provisioner` 表示のため)。
+/// Pre-registers an ephemeral node (for the `sessions.node_id` FK and the `provisioner` display).
 ///
-/// `NodeHello` の upsert は `provisioner = NULL` を送るが、`COALESCE` により
-/// ここで登録した値が保持される。
+/// The `NodeHello` upsert sends `provisioner = NULL`, but `COALESCE` keeps the value registered
+/// here.
 pub(crate) async fn register_ephemeral_node(
     state: &ServerState,
     node_id: &str,
@@ -389,7 +388,7 @@ pub(crate) async fn register_ephemeral_node(
         .map_err(ApiError::from)
 }
 
-/// `fxg provisioners test <name>`: プロビジョナーの起動と NodeHello 疎通を検証する。
+/// `fxg provisioners test <name>`: validates provisioner startup and the NodeHello handshake.
 pub async fn provisioner_test(
     state: &ServerState,
     name: &str,
@@ -422,7 +421,7 @@ pub async fn provisioner_test(
         .cloned()
         .collect();
 
-    // 検証後は必ず破棄する (Drain はベストエフォート)
+    // Always discard after the validation (drain is best effort)
     let _ = state
         .hub()
         .send(
@@ -472,7 +471,7 @@ pub async fn provisioner_test(
     }
 }
 
-/// 子プロセス起動要求。
+/// Child process launch request.
 struct SpawnRequest {
     node_id: String,
     provisioner: String,
@@ -481,15 +480,15 @@ struct SpawnRequest {
     mode: SpawnMode,
 }
 
-/// 起動モード (セッション用 / 疎通検証用)。
+/// Launch mode (for a session / for a connectivity check).
 enum SpawnMode {
-    /// セッション用: ブートストラップ後に `StartSession` を送る
+    /// For a session: send `StartSession` after bootstrap
     Session(Box<PendingStart>),
-    /// 疎通検証用: NodeHello を待って終了する
+    /// For a connectivity check: wait for NodeHello and then exit
     Test,
 }
 
-/// `StartSession` 送信に必要な情報 (ハンドシェイク後に使用)。
+/// Information needed to send `StartSession` (used after the handshake).
 #[derive(Clone)]
 struct PendingStart {
     session_id: String,
@@ -502,17 +501,17 @@ struct PendingStart {
     restore_bundle_b64: Option<String>,
 }
 
-/// 子プロセス起動後のハンドル。
+/// Handles obtained after launching the child process.
 struct SpawnHandles {
-    /// NodeHello 受信時にノードIDを通知する (失敗時はチャネルクローズ)
+    /// Notifies the node ID on NodeHello receipt (closes the channel on failure)
     hello: Option<oneshot::Receiver<String>>,
-    /// 子プロセス終了シグナル
+    /// Child process termination signal
     terminate: watch::Sender<bool>,
-    /// `provisioners test` の収集ログ
+    /// Logs collected by `provisioners test`
     test_log: Option<Arc<StdMutex<Vec<String>>>>,
 }
 
-/// プロビジョナーコマンドを起動し、stdin/stdout/stderr のポンプを開始する。
+/// Launches the provisioner command and starts the stdin/stdout/stderr pumps.
 async fn spawn_child(state: &ServerState, request: SpawnRequest) -> Result<SpawnHandles, ApiError> {
     let manager = state.provisioners().clone();
     let bootstrap = compose_bootstrap_script(
@@ -551,7 +550,7 @@ async fn spawn_child(state: &ServerState, request: SpawnRequest) -> Result<Spawn
         ))
     })?;
 
-    // Windows: Job Object へ割当て、サーバー終了時に VM/コンテナを確実に終了させる
+    // Windows: assign to a Job Object so the VM/container is reliably terminated on server exit
     let guard = match fxg_pty::ProcessTreeGuard::new() {
         Ok(guard) => {
             #[cfg(windows)]
@@ -599,7 +598,7 @@ async fn spawn_child(state: &ServerState, request: SpawnRequest) -> Result<Spawn
     let pump_activity = last_activity.clone();
     let pump_session_id = session_id.clone();
 
-    // stdout pump: 子プロセスの生存期間を所有し、NodeHello でハブ接続を登録する
+    // stdout pump: owns the child process lifetime and registers the hub connection on NodeHello
     tokio::spawn(async move {
         let _guard = guard;
         let mut terminate_rx = terminate_rx;
@@ -621,7 +620,7 @@ async fn spawn_child(state: &ServerState, request: SpawnRequest) -> Result<Spawn
                 }
                 line = stderr_lines.next_line() => match line {
                     Ok(Some(line)) => {
-                        // ブートストラップログはエフェメラルイベントとして UI へ配信する
+                        // Stream bootstrap logs to the UI as ephemeral events
                         if let Some(log) = &pump_log
                             && let Ok(mut lines) = log.lock()
                         {
@@ -653,8 +652,8 @@ async fn spawn_child(state: &ServerState, request: SpawnRequest) -> Result<Spawn
                         let is_hello = line.contains("\"op\":\"node_hello\"");
                         if is_hello && !attached {
                             attached = true;
-                            // ハブ接続を登録し、コマンド (StartSession 等) を
-                            // 子プロセスの stdin へ転送する
+                            // Register the hub connection and forward commands (StartSession etc.)
+                            // to the child process's stdin
                             let (mut commands, _conn_id) =
                                 pump_state.hub().attach_ephemeral(&pump_node_id).await;
                             if let Some(mut writer) = stdin_writer.take() {
@@ -697,12 +696,12 @@ async fn spawn_child(state: &ServerState, request: SpawnRequest) -> Result<Spawn
             }
         }
 
-        // 子プロセスの終了を待って後処理する (kill 済み含む)
+        // Wait for the child process to exit, then clean up (including killed processes)
         let status = child.wait().await;
         if let Some(forwarder) = stdin_forwarder {
             forwarder.abort();
         }
-        // ハンドシェイク前に終了した場合は受信側へ通知する (channel を閉じる)
+        // If it exited before the handshake, notify the receiver (close the channel)
         drop(hello_tx.take());
         pump_state
             .hub()
@@ -712,7 +711,7 @@ async fn spawn_child(state: &ServerState, request: SpawnRequest) -> Result<Spawn
         tracing::info!(node_id = pump_node_id, "ephemeral node instance ended");
     });
 
-    // アイドル監視用にインスタンスを登録 (セッション情報を保持)
+    // Register the instance for idle monitoring (keeps the session info)
     manager.insert_instance(Instance {
         node_id,
         session_id,
@@ -727,7 +726,7 @@ async fn spawn_child(state: &ServerState, request: SpawnRequest) -> Result<Spawn
     })
 }
 
-/// NodeHello の JSON 行から `node_id` を取り出す (最小限のパース)。
+/// Extracts `node_id` from a NodeHello JSON line (minimal parsing).
 fn extract_hello_node_id(line: &str) -> Option<String> {
     let value: serde_json::Value = serde_json::from_str(line).ok()?;
     value
@@ -736,7 +735,7 @@ fn extract_hello_node_id(line: &str) -> Option<String> {
         .map(str::to_owned)
 }
 
-/// ハンドシェイクを待って `StartSession` を送信する。
+/// Waits for the handshake and sends `StartSession`.
 async fn await_handshake_and_start(
     state: ServerState,
     node_id: String,
@@ -809,7 +808,7 @@ async fn await_handshake_and_start(
     }
 }
 
-/// プロビジョニング中のセッションを失敗として記録する (ベストエフォート)。
+/// Records a provisioning session as failed (best effort).
 async fn fail_session(state: &ServerState, session_id: &str, reason: &str) {
     tracing::warn!(session_id, reason, "ephemeral session failed");
     if let Err(err) = state
@@ -821,7 +820,7 @@ async fn fail_session(state: &ServerState, session_id: &str, reason: &str) {
     }
 }
 
-/// 一時ノードのアイドルタイムアウト / 全セッション終了を監視する。
+/// Monitors idle timeout / end of all sessions for a temporary node.
 async fn monitor_instance(state: ServerState, node_id: String, idle_timeout: Duration) {
     loop {
         tokio::time::sleep(MONITOR_INTERVAL).await;
@@ -838,7 +837,7 @@ async fn monitor_instance(state: ServerState, node_id: String, idle_timeout: Dur
             drain(&state, &node_id, "idle timeout", true).await;
             return;
         }
-        // セッションが終了していればアイドル扱いで破棄する
+        // If the session has ended, discard the node as idle
         if let Some(session_id) = manager.session_id(&node_id)
             && let Ok(Some(session)) = state.db().get_session(&session_id).await
             && matches!(
@@ -853,9 +852,9 @@ async fn monitor_instance(state: ServerState, node_id: String, idle_timeout: Dur
     }
 }
 
-/// `DrainAndShutdown` を送信し、`DrainComplete` (またはタイムアウト) 後に破棄する。
+/// Sends `DrainAndShutdown` and discards the node after `DrainComplete` (or a timeout).
 ///
-/// ベストエフォート: Drain 前にクラッシュした場合の未送信イベントは失われる。
+/// Best effort: events not yet sent are lost if the node crashes before draining.
 pub(crate) async fn drain(
     state: &ServerState,
     node_id: &str,
@@ -885,7 +884,7 @@ pub(crate) async fn drain(
     drained
 }
 
-/// 稼働中の全一時VMのノードID (シャットダウン処理用)。
+/// Node IDs of all running temporary VMs (for shutdown handling).
 pub fn running_node_ids(state: &ServerState) -> Vec<String> {
     state
         .provisioners()
@@ -896,7 +895,7 @@ pub fn running_node_ids(state: &ServerState) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// `WorkspaceBundleUpload` のチャンクを蓄積する。
+/// Accumulates `WorkspaceBundleUpload` chunks.
 pub(crate) fn on_bundle_upload(
     state: &ServerState,
     session_id: &str,
@@ -909,7 +908,7 @@ pub(crate) fn on_bundle_upload(
         .push_bundle_chunk(session_id, branch, head_commit, chunk);
 }
 
-/// `DrainComplete` 受信時の処理 (bundle の保存 + Drain 待機の通知)。
+/// Handling when `DrainComplete` is received (save the bundle + notify drain waiters).
 pub(crate) async fn on_drain_complete(state: &ServerState, node_id: &str) {
     state.provisioners().take_drain_waiter(node_id);
     if let Some(session_id) = state.provisioners().session_id(node_id) {
@@ -917,7 +916,7 @@ pub(crate) async fn on_drain_complete(state: &ServerState, node_id: &str) {
     }
 }
 
-/// 蓄積した bundle チャンクを連結・デコードしてファイルへ保存する。
+/// Concatenates and decodes the accumulated bundle chunks and saves them to a file.
 async fn save_bundle(state: &ServerState, session_id: &str) {
     let Some(bundle) = state.provisioners().take_bundle(session_id) else {
         return;
@@ -958,7 +957,7 @@ async fn save_bundle(state: &ServerState, session_id: &str) {
     );
 }
 
-/// 稼働中の全一時VMを終了する (サーバーシャットダウン時)。
+/// Terminates all running temporary VMs (on server shutdown).
 pub async fn terminate_all(state: &ServerState) {
     for node_id in running_node_ids(state) {
         let _ = state
@@ -975,7 +974,7 @@ pub async fn terminate_all(state: &ServerState) {
     }
 }
 
-/// Git URL のホストに対応する短命トークンを解決する (見つからなければ `None`)。
+/// Resolves the short-lived token for the Git URL's host (`None` when not found).
 pub(crate) async fn resolve_git_token(
     state: &ServerState,
     git_url: &str,
@@ -992,7 +991,7 @@ pub(crate) async fn resolve_git_token(
     }
 }
 
-/// URL (`https://github.com/...` / `git@github.com:...`) からホスト名を抽出する。
+/// Extracts the host name from a URL (`https://github.com/...` / `git@github.com:...`).
 pub(crate) fn url_host(url: &str) -> Option<String> {
     if let Some(rest) = url.split("://").nth(1) {
         let authority = rest.split('/').next()?;
@@ -1003,7 +1002,7 @@ pub(crate) fn url_host(url: &str) -> Option<String> {
         let host = host.split(':').next()?;
         return (!host.is_empty()).then(|| host.to_owned());
     }
-    // SCP 形式 (`git@github.com:owner/repo.git`)
+    // SCP form (`git@github.com:owner/repo.git`)
     if let Some((_, rest)) = url.split_once('@')
         && let Some((host, _)) = rest.split_once(':')
         && !host.is_empty()
@@ -1014,10 +1013,10 @@ pub(crate) fn url_host(url: &str) -> Option<String> {
     None
 }
 
-/// 一時VMのブートストラップスクリプト (`{BOOTSTRAP_SCRIPT}`) を生成する。
+/// Generates the temporary VM bootstrap script (`{BOOTSTRAP_SCRIPT}`).
 ///
-/// すべての出力を `stderr` (`>&2`) に流し、`stdout` は `fxg daemon --stdio`
-/// のプロトコル通信専用として保護する。
+/// Routes all output to `stderr` (`>&2`) and reserves `stdout` for `fxg daemon --stdio`
+/// protocol traffic.
 fn compose_bootstrap_script(version: &str, clone_workspace: bool) -> String {
     let clone_step = if clone_workspace {
         format!(
@@ -1027,7 +1026,7 @@ exec '{}' daemon --stdio --ephemeral --workspace {}"#,
             EPHEMERAL_BINARY, EPHEMERAL_WORKSPACE, EPHEMERAL_BINARY, EPHEMERAL_WORKSPACE
         )
     } else {
-        // 疎通検証: クローンを行わずデーモンのハンドシェイクのみ確認する
+        // Connectivity check: skip the clone and only verify the daemon handshake
         format!(
             "exec '{}' daemon --stdio --ephemeral --workspace /tmp",
             EPHEMERAL_BINARY

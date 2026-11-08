@@ -1,10 +1,10 @@
-//! 中央サーバー (`fxg server`) の共有状態と Client API バックエンド実装。
+//! Shared state and Client API backend implementation for the central server (`fxg server`).
 //!
-//! 設計: `docs/01-architecture-and-sync.md` §2.2・§3.1、`docs/03-protocol-and-api.md` §3。
+//! Design: `docs/01-architecture-and-sync.md` §2.2 and §3.1, `docs/03-protocol-and-api.md` §3.
 //!
-//! 中央サーバーはセッション状態の**投影** (`server.db`) のみを持ち、
-//! 書き込み権限は実行ノードにある。クライアントからの操作は
-//! [`NodeHub`] 経由で対象ノードへ中継し、結果を `command_id` 相関で返す。
+//! The central server holds only a **projection** of session state (`server.db`); write
+//! authority belongs to the executing node. Client operations are relayed to the target node
+//! through [`NodeHub`] and responses are returned correlated by `command_id`.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -43,27 +43,27 @@ use crate::hub::NodeHub;
 use crate::provisioner::{self, ProvisionerManager, SpawnSessionRequest};
 use crate::push::PushService;
 
-/// Client WS / Node Hub 配信用ブロードキャスト容量。
+/// Broadcast capacity for Client WS / Node Hub delivery.
 const CLIENT_EVENT_CAPACITY: usize = 2048;
 
-/// 中央サーバーの起動オプション。
+/// Startup options for the central server.
 #[derive(Debug, Clone)]
 pub struct ServerOptions {
-    /// データディレクトリ (`~/.flexagent`)
+    /// Data directory (`~/.flexagent`)
     pub fxg_home: PathBuf,
-    /// HTTP/WS バインドアドレス (既定 `0.0.0.0:8080`)
+    /// HTTP/WS bind address (default `0.0.0.0:8080`)
     pub listen_addr: String,
-    /// `localhost` / `127.0.0.1` 以外に許可する Host 一覧
+    /// Hosts allowed in addition to `localhost` / `127.0.0.1`
     pub allowed_hosts: Vec<String>,
-    /// 同一オリジン以外に許可する Origin 一覧
+    /// Origins allowed in addition to the same origin
     pub allowed_origins: Vec<String>,
-    /// 一時VMプロビジョナー定義 (`config.toml` の `[provisioners.*]`)
+    /// Temporary VM provisioner definitions (`[provisioners.*]` in `config.toml`)
     pub provisioners: BTreeMap<String, ProvisionerConfig>,
-    /// Git Credential Proxy 設定 (`config.toml` の `[server.git_credentials.*]`)
+    /// Git Credential Proxy configuration (`[server.git_credentials.*]` in `config.toml`)
     pub git_credentials: BTreeMap<String, GitCredentialConfig>,
 }
 
-/// 中央サーバーの共有状態。
+/// Shared state for the central server.
 #[derive(Clone)]
 pub struct ServerState {
     inner: Arc<ServerInner>,
@@ -71,7 +71,7 @@ pub struct ServerState {
 
 struct ServerInner {
     db: Db,
-    /// クライアント認証トークン (再生成時に差し替えるため `RwLock`)。
+    /// Client auth token (`RwLock` so it can be swapped on rotation).
     auth_token: std::sync::RwLock<String>,
     hub: NodeHub,
     options: ServerOptions,
@@ -89,7 +89,7 @@ impl std::fmt::Debug for ServerState {
 }
 
 impl ServerState {
-    /// `server.db` を開き、クライアント認証トークンを読み込んで状態を初期化する。
+    /// Opens `server.db`, loads the client auth token and initializes the state.
     pub async fn new(options: ServerOptions) -> Result<Self, ServerError> {
         std::fs::create_dir_all(&options.fxg_home)?;
         let db = Db::open(&fxg_db::hub_db_path(&options.fxg_home), DbRole::Hub).await?;
@@ -120,32 +120,32 @@ impl ServerState {
         })
     }
 
-    /// 一時VMプロビジョナー管理。
+    /// Temporary VM provisioner management.
     pub fn provisioners(&self) -> &ProvisionerManager {
         &self.inner.provisioners
     }
 
-    /// `server.db`。
+    /// `server.db`.
     pub fn db(&self) -> &Db {
         &self.inner.db
     }
 
-    /// ノード接続レジストリ。
+    /// Node connection registry.
     pub fn hub(&self) -> &NodeHub {
         &self.inner.hub
     }
 
-    /// VAPID Web Push 送信サービス。
+    /// VAPID Web Push delivery service.
     pub fn push(&self) -> &PushService {
         &self.inner.push
     }
 
-    /// 起動オプション。
+    /// Startup options.
     pub fn options(&self) -> &ServerOptions {
         &self.inner.options
     }
 
-    /// クライアント認証トークン。
+    /// Client auth token.
     pub fn auth_token(&self) -> String {
         self.inner
             .auth_token
@@ -154,9 +154,9 @@ impl ServerState {
             .clone()
     }
 
-    /// クライアント認証トークンを再生成し、ディスクへ保存する。
+    /// Regenerates the client auth token and saves it to disk.
     ///
-    /// 旧トークン (Bearer / `fxg_session` Cookie) は即時無効化される。
+    /// The old token (Bearer / `fxg_session` cookie) is invalidated immediately.
     pub fn rotate_auth_token(&self) -> std::io::Result<String> {
         let token = auth::generate_token();
         auth::save_token(
@@ -171,7 +171,7 @@ impl ServerState {
         Ok(token)
     }
 
-    /// 監査ログを `server.db.audit_logs` に記録する (失敗は警告のみ)。
+    /// Records an audit log entry in `server.db.audit_logs` (failures only warn).
     pub async fn record_audit(
         &self,
         action: &str,
@@ -189,7 +189,7 @@ impl ServerState {
         }
     }
 
-    /// 対象セッションの実行ノードを解決する (`NODE_OFFLINE` はここで即時返却)。
+    /// Resolves the executing node for a session (`NODE_OFFLINE` is returned early here).
     async fn session_node(&self, session_id: &str) -> Result<String, ApiError> {
         let session = self
             .inner
@@ -207,9 +207,9 @@ impl ServerState {
         Ok(session.node_id)
     }
 
-    /// ACP Registry カタログを提供できるオンラインノードを 1 台選ぶ。
+    /// Picks one online node that can serve the ACP Registry catalog.
     ///
-    /// 一時VMより常駐ノードを優先し、最終疎通が新しい順に選択する。
+    /// Resident nodes are preferred over temporary VMs, then the most recently seen.
     async fn select_agent_node(&self) -> Option<String> {
         let nodes = self.inner.db.list_nodes().await.ok()?;
         let mut online: Vec<_> = nodes.into_iter().filter(|node| node.is_online).collect();
@@ -217,11 +217,11 @@ impl ServerState {
         online.first().map(|node| node.node_id.clone())
     }
 
-    /// プロジェクトのこのノード上の既定実行ディレクトリを解決する。
+    /// Resolves the default working directory for a project on this node.
     ///
-    /// 直近使用した紐付け (Worktree 含む) を優先し、紐付けが無ければ
-    /// 最新セッションの実行ディレクトリへフォールバックする
-    /// ([`fxg_db::queries::resolve_default_local_path`])。
+    /// Prefers the most recently used binding (including worktrees) and falls back to the
+    /// latest session's working directory when there is no binding
+    /// ([`fxg_db::queries::resolve_default_local_path`]).
     async fn project_local_path(
         &self,
         project_id: &str,
@@ -240,7 +240,7 @@ impl ServerState {
             })
     }
 
-    /// `always = true` の場合に `allow_always` 系の選択肢へ昇格した `option_id` を返す。
+    /// When `always = true`, returns the `option_id` promoted to an `allow_always` option.
     async fn resolve_permission_option(
         &self,
         session_id: &str,
@@ -269,7 +269,7 @@ impl ServerState {
     }
 }
 
-/// `CommandResult` を成功時 `session_id` 付きで組み立てるヘルパー。
+/// Helper that builds a `CommandResult`, with `session_id` on success.
 fn command_failure(command_id: String, err: ApiError) -> CommandResult {
     CommandResult {
         command_id,
@@ -281,7 +281,7 @@ fn command_failure(command_id: String, err: ApiError) -> CommandResult {
 }
 
 impl ServerState {
-    /// 論理プロジェクトの投影行を取得する。
+    /// Fetches the projection row for a logical project.
     async fn project_record(
         &self,
         project_id: &str,
@@ -298,12 +298,12 @@ impl ServerState {
             .ok_or_else(|| ApiError::not_found(format!("project not found: {project_id}")))
     }
 
-    /// Context Fork 指定から、履歴 Replay と退避済み Git バンドルを解決する。
+    /// Resolves history replay and a saved Git bundle from a Context Fork request.
     ///
-    /// - 履歴: 分岐元セッションの会話イベント (User / Agent / ToolCall) を
-    ///   `from_node_seq` まで抽出し、`StartSession.fork_context_messages` に載せる
-    /// - バンドル: `restore_git_bundle_b64` の明示指定がなければ、分岐元セッションの
-    ///   `git_bundle_path` (一時VM破壊時に退避された bundle) を読み出して Base64 化する
+    /// - History: extract the source session's conversation events (User / Agent / ToolCall)
+    ///   up to `from_node_seq` and place them in `StartSession.fork_context_messages`
+    /// - Bundle: unless `restore_git_bundle_b64` is given explicitly, read and Base64-encode
+    ///   the source session's `git_bundle_path` (bundle saved when an ephemeral VM was destroyed)
     async fn prepare_fork(
         &self,
         request: &CreateSessionRequest,
@@ -311,7 +311,7 @@ impl ServerState {
         let Some(fork) = &request.fork else {
             return Ok((None, None));
         };
-        // 分岐元セッションの存在確認 (応答の相関・監査の前提)
+        // Verify the source session exists (prerequisite for correlation and auditing)
         let source = self
             .inner
             .db
@@ -480,7 +480,7 @@ impl ClientApiBackend for ServerState {
 
         match node_id {
             Ok(node_id) => self.run_ws_command(&node_id, &command_id, message).await,
-            // ノードがオフライン・セッション不明の場合はキューイングせず即時返却
+            // Return immediately without queueing when the node is offline or the session unknown
             Err(err) => command_failure(command_id, err),
         }
     }
@@ -490,11 +490,11 @@ impl ClientApiBackend for ServerState {
         request: CreateSessionRequest,
         client: ClientInfo,
     ) -> Result<CreateSessionResponse, ApiError> {
-        // Context Fork (別ノード・一時VMからの引き継ぎ): 履歴 Replay と
-        // 退避済み Git バンドルを解決する
+        // Context Fork (handoff from another node / a temporary VM): resolve history replay
+        // and the saved Git bundle
         let (fork_context, restore_bundle_b64) = self.prepare_fork(&request).await?;
 
-        // 一時VMプロビジョナー: サーバーホスト上で子プロセスを起動する
+        // Temporary VM provisioner: launch a child process on the server host
         if let Some(provisioner_name) = request.provisioner.clone() {
             if request.node_id.is_some() {
                 return Err(ApiError::bad_request(
@@ -518,7 +518,7 @@ impl ClientApiBackend for ServerState {
                 .filter(|branch| !branch.trim().is_empty());
             let agent_id = request.agent_id.clone();
 
-            // 一時ノードの事前登録 (sessions.node_id の FK / UI 表示)
+            // Pre-register the ephemeral node (FK for sessions.node_id / UI display)
             let idle_timeout_secs = self
                 .provisioners()
                 .config(&provisioner_name)?
@@ -532,7 +532,7 @@ impl ClientApiBackend for ServerState {
             )
             .await?;
 
-            // ブートストラップ中も UI にセッションを見せる仮投影行
+            // Provisional projection row so the UI can show the session during bootstrap
             if let Err(err) = self
                 .db()
                 .upsert_provisional_session(&fxg_db::registration::ProvisionalSessionRecord {
@@ -598,7 +598,7 @@ impl ClientApiBackend for ServerState {
             ));
         }
 
-        // Worktree を同時作成する場合はノード側で作成し、実パスを受け取る
+        // When creating a worktree at the same time, create it on the node and use the real path
         let local_path = if let Some(spec) = &request.worktree {
             let worktree_command_id = uuid_v7();
             let info = self
@@ -721,7 +721,7 @@ impl ClientApiBackend for ServerState {
                 already_resolved: false,
             })
         } else if result.code == Some(ErrorCode::AlreadyResolved) {
-            // 全クライアント横断の冪等解決 (2回目以降は正常遷移)
+            // Idempotent resolution across all clients (later calls are normal transitions)
             Ok(RespondPermissionResponse {
                 already_resolved: true,
             })
@@ -776,7 +776,7 @@ impl ClientApiBackend for ServerState {
                 already_resolved: false,
             })
         } else if result.code == Some(ErrorCode::AlreadyResolved) {
-            // 全クライアント横断の冪等解決 (2回目以降は正常遷移)
+            // Idempotent resolution across all clients (later calls are normal transitions)
             Ok(RespondElicitationResponse {
                 already_resolved: true,
             })
@@ -839,8 +839,8 @@ impl ClientApiBackend for ServerState {
             .map_err(ApiError::from)?
             .ok_or_else(|| ApiError::not_found(format!("session not found: {session_id}")))?;
 
-        // 一時VM (provisioner) セッションの再開 (VM 再起動 + bundle 復元) は v2 のため
-        // v1 では拒否する (常駐ノードのみ対象)。
+        // Resuming a temporary VM (provisioner) session (VM restart + bundle restore) is v2,
+        // so it is rejected in v1 (resident nodes only).
         let is_ephemeral = self
             .inner
             .db
@@ -856,7 +856,7 @@ impl ClientApiBackend for ServerState {
             ));
         }
 
-        // 実行ノードへ中継 (オフラインは `NODE_OFFLINE`)
+        // Relay to the executing node (offline yields `NODE_OFFLINE`)
         let node_id = self.session_node(session_id).await?;
         let command_id = uuid_v7();
         let context_restored = self
@@ -895,7 +895,7 @@ impl ClientApiBackend for ServerState {
         request: SessionArchiveRequest,
         client: ClientInfo,
     ) -> Result<SessionArchiveResponse, ApiError> {
-        // 実行ノードへ中継 (存在確認・オフラインは `session_node` が返す)
+        // Relay to the executing node (existence check / offline is returned by `session_node`)
         let node_id = self.session_node(session_id).await?;
         let command_id = uuid_v7();
         let archived_at = self
@@ -929,7 +929,7 @@ impl ClientApiBackend for ServerState {
     }
 
     async fn delete_session(&self, session_id: &str, client: ClientInfo) -> Result<(), ApiError> {
-        // 実行ノードへ中継 (存在確認・オフラインは `session_node` が返す)
+        // Relay to the executing node (existence check / offline is returned by `session_node`)
         let node_id = self.session_node(session_id).await?;
         let command_id = uuid_v7();
         self.inner
@@ -1074,8 +1074,8 @@ impl ClientApiBackend for ServerState {
 
     async fn list_agents(&self) -> Result<AgentsResponse, ApiError> {
         let Some(node_id) = self.select_agent_node().await else {
-            // カタログを提供できるオンラインノードが無い場合は空一覧を返す
-            // (UI はノード一覧からオフライン理由を表示できる)
+            // Return an empty list when no online node can serve the catalog
+            // (the UI can show the offline reason from the node list)
             return Ok(AgentsResponse { agents: Vec::new() });
         };
         let request_id = uuid_v7();
@@ -1091,7 +1091,7 @@ impl ClientApiBackend for ServerState {
             )
             .await?;
 
-        // 全ノードの利用可能状態 (NodeHello の installed_agents) を統合する
+        // Merge availability across all nodes (installed_agents from NodeHello)
         let nodes = self.inner.db.list_nodes().await.map_err(ApiError::from)?;
         for agent in &mut response.agents {
             agent.installed_nodes = nodes
@@ -1184,8 +1184,8 @@ impl ClientApiBackend for ServerState {
         if node_id.is_empty() {
             return Err(ApiError::bad_request("node_id must not be empty"));
         }
-        // 未登録のノードはプレースホルダで登録する
-        // (ノード接続時の `NodeHello` で実情報に上書きされる)
+        // Register an unregistered node as a placeholder
+        // (overwritten with real info by `NodeHello` when the node connects)
         let nodes = self.inner.db.list_nodes().await.map_err(ApiError::from)?;
         if !nodes.iter().any(|node| node.node_id == node_id) {
             self.inner
@@ -1250,7 +1250,7 @@ impl ClientApiBackend for ServerState {
                 node_id: binding.node_id.clone(),
                 path: binding.local_path.clone(),
                 branch: binding.git_branch.clone(),
-                // HEAD コミットはノードのリアルタイム報告 (NodeHello) には含まれない
+                // HEAD commits are not included in the node's real-time reports (NodeHello)
                 head_commit: None,
                 is_main: !binding.is_worktree,
             })
@@ -1565,7 +1565,7 @@ impl ClientApiBackend for ServerState {
 }
 
 impl ServerState {
-    /// WS コマンドをノードへ中継し `CommandResult` を返す。
+    /// Relays a WS command to a node and returns the `CommandResult`.
     async fn run_ws_command(
         &self,
         node_id: &str,

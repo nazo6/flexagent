@@ -1,22 +1,23 @@
-//! FlexAgent 中央サーバークレート (`fxg-server`)
+//! FlexAgent central server crate (`fxg-server`).
 //!
-//! Axum による Node Hub (`/api/v1/node/ws`)、Client REST/WS API (`:8080`)、
-//! イベント投影の適用、VAPID Web Push 送信、一時VMプロビジョナー管理を含む。
+//! Contains the Axum Node Hub (`/api/v1/node/ws`), the client REST/WS API (`:8080`), event
+//! projection application, VAPID Web Push delivery, and temporary VM provisioner management.
 //!
-//! # モジュール構成
+//! # Module layout
 //!
-//! - [`api`]: ローカルノード (`fxg daemon`) と中央サーバー (`fxg server`) が
-//!   **完全に同一**の REST / Client WS / PTY WS を提供するための共通ルーターと
-//!   [`ClientApiBackend`](api::ClientApiBackend) トレイト
-//!   (設計: `docs/03-protocol-and-api.md` §3)
-//! - [`hub`]: Node Hub (ノード個別トークン認証・`NodeHello`/`ResyncRequest`・
-//!   `EventBatchPush` の冪等適用と ACK・コマンド中継・PTY 中継)
-//! - [`push`][]: VAPID Web Push (鍵生成・購読管理・承認リクエスト通知の fan-out)
-//! - [`provisioner`][]: 一時VM・サンドボックスノードのプロビジョナー管理
-//!   (`fxg daemon --stdio` を子プロセスとして起動し、stdin/stdout を
-//!   JSON Lines トランスポートに使う)
-//! - [`state`][]: `server.db` とノード接続レジストリを束ねる共有状態
-//! - [`Server`] は起動エントリポイント (CLI の `fxg server`)
+//! - [`api`]: the shared router and the
+//!   [`ClientApiBackend`](api::ClientApiBackend) trait that let the local node (`fxg daemon`)
+//!   and the central server (`fxg server`) expose a **completely identical** REST / Client WS
+//!   / PTY WS surface (design: `docs/03-protocol-and-api.md` §3)
+//! - [`hub`]: Node Hub (per-node token auth, `NodeHello`/`ResyncRequest`, idempotent
+//!   `EventBatchPush` application and ACK, command relay, PTY relay)
+//! - [`push`][]: VAPID Web Push (key generation, subscription management, fan-out of
+//!   approval request notifications)
+//! - [`provisioner`][]: provisioner management for temporary VM / sandbox nodes (launches
+//!   `fxg daemon --stdio` as a child process and uses stdin/stdout as the JSON Lines
+//!   transport)
+//! - [`state`][]: shared state combining `server.db` with the node connection registry
+//! - [`Server`] is the startup entry point (CLI `fxg server`)
 
 pub mod api;
 mod credentials;

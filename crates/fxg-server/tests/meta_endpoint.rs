@@ -1,8 +1,8 @@
-//! `GET /api/v1/meta` (認証不要メタ情報) のテスト。
+//! Tests for `GET /api/v1/meta` (unauthenticated metadata).
 //!
-//! 未認証の Web UI がトークン入力ダイアログを正しく表示できるよう、`meta` は
-//! トークン無しで `role` を返し、Host 検証だけは維持されること。他の API は
-//! 従来どおり未認証で `401 Unauthorized` となることを検証する。
+//! `meta` must return `role` without a token so an unauthenticated Web UI can show the token
+//! input dialog, while Host validation still applies. Other APIs must still return
+//! `401 Unauthorized` when unauthenticated.
 
 use fxg_server::Server;
 use fxg_server::state::ServerOptions;
@@ -38,7 +38,7 @@ async fn meta_is_available_without_token() {
     assert_eq!(
         body.as_object().expect("object").len(),
         1,
-        "role のみを返す"
+        "returns role only"
     );
 }
 

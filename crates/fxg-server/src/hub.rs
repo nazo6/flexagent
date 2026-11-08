@@ -1,19 +1,19 @@
-//! Node Hub (`/api/v1/node/ws`): 常駐ノードとの Outbound WebSocket 接続管理。
+//! Node Hub (`/api/v1/node/ws`): manages outbound WebSocket connections from resident nodes.
 //!
-//! 設計: `docs/01-architecture-and-sync.md` §2.2・§3、`docs/03-protocol-and-api.md` §2。
+//! Design: `docs/01-architecture-and-sync.md` §2.2 and §3, `docs/03-protocol-and-api.md` §2.
 //!
-//! - **認証**: `Authorization: Bearer <NODE_TOKEN>` をハッシュ化し、
-//!   `server.db.nodes.token_hash` と照合したうえで `NodeHello.node_id` が
-//!   トークン発行対象ノードと一致することを検証する (§7.3)
-//! - **ハンドシェイク**: `NodeHello` → ハブ側で欠落・遅延しているセッションに
-//!   `ResyncRequest` を返し、ノードは指定 `from_node_seq` 以降を再送する
-//! - **イベント取り込み**: `EventBatchPush` を `INSERT OR IGNORE` +
-//!   投影更新 (同一Tx) で冪等適用し、`EventBatchAck` (水位) を返す。
-//!   新規イベントは Client WS 購読者へ配信する
-//! - **コマンド中継**: `command_id` で相関を取ってノードの `CommandResult` /
-//!   `GitDiffResult` / `WorktreeResult` を要求元クライアントへ返す
-//! - **PTY 中継**: `PtyOutput` / `PtyExit` / `PtyError` を `pty_id` 単位で
-//!   クライアントの PTY WS へ転送する
+//! - **Authentication**: hash `Authorization: Bearer <NODE_TOKEN>`, compare it against
+//!   `server.db.nodes.token_hash`, then verify that `NodeHello.node_id` matches the node the
+//!   token was issued for (§7.3)
+//! - **Handshake**: `NodeHello` → the hub replies with `ResyncRequest` for sessions that are
+//!   missing or behind, and the node resends from the given `from_node_seq` onward
+//! - **Event ingestion**: apply `EventBatchPush` idempotently with `INSERT OR IGNORE` +
+//!   projection updates (same Tx), then return `EventBatchAck` (watermark). Newly inserted
+//!   events are delivered to Client WS subscribers
+//! - **Command relay**: correlate by `command_id` and return the node's `CommandResult` /
+//!   `GitDiffResult` / `WorktreeResult` to the requesting client
+//! - **PTY relay**: forward `PtyOutput` / `PtyExit` / `PtyError` to the client's PTY WS,
+//!   keyed by `pty_id`
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -35,169 +35,168 @@ use crate::api::auth::{hash_token, token_matches};
 use crate::api::{ApiError, ClientEvent, PtyChannelError, PtyChannelEvent, send_ws_json};
 use crate::state::ServerState;
 
-/// ノード登録後のハンドシェイク (`NodeHello`) 待ちタイムアウト。
+/// Timeout for the handshake (`NodeHello`) after a node connects.
 const HELLO_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// コマンド中継の応答待ちタイムアウト。
+/// Timeout for a relayed command response.
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// セッションコマンド (プロンプト送信・承認応答・制御・レジューム) の
-/// 応答待ちタイムアウト。
+/// Timeout for session commands (prompt submission, permission responses, control, resume).
 ///
-/// 停止済みセッションへの送信とレジュームはノード側でエージェントを起動する
-/// ため、コールドスタート (PyInstaller 展開等で ~25 秒) を許容する。
+/// Sending to a stopped session and resuming start the agent on the node side, so a cold
+/// start (e.g. PyInstaller extraction, ~25 s) is allowed.
 const SESSION_COMMAND_TIMEOUT: Duration = Duration::from_secs(120);
 
-/// プロジェクト操作 (スキャン等) の応答待ちタイムアウト。
+/// Timeout for project operations (scans, etc.).
 ///
-/// ディレクトリ走査は対象規模により 30 秒を超えることがある。
+/// Directory traversal can exceed 30 seconds depending on the target size.
 const PROJECT_OP_TIMEOUT: Duration = Duration::from_secs(120);
 
-/// ACP Registry カタログ取得の応答待ちタイムアウト
-/// (インデックスのネットワーク再取得を含む)。
+/// Timeout for fetching the ACP Registry catalog
+/// (including the network re-fetch of the index).
 const AGENTS_TIMEOUT: Duration = Duration::from_secs(120);
 
-/// エージェントのインストール・更新の応答待ちタイムアウト。
+/// Timeout for agent installs and updates.
 ///
-/// バイナリのダウンロード・展開は数分かかりうる。
+/// Downloading and extracting binaries can take minutes.
 const AGENT_OP_TIMEOUT: Duration = Duration::from_secs(600);
 
-/// ノード接続への送信キュー容量。
+/// Outgoing queue capacity for a node connection.
 const NODE_CHANNEL_CAPACITY: usize = 512;
 
-/// PTY 出力のブロードキャスト容量。
+/// Broadcast capacity for PTY output.
 const PTY_CHANNEL_CAPACITY: usize = 1024;
 
-/// 中継待ちの応答種別。
+/// Kind of response a relay is waiting for.
 enum PendingResponse {
-    /// コマンド実行結果 (`CommandResult`)
+    /// Command execution result (`CommandResult`)
     Command(CommandResult),
-    /// Git Diff 取得結果 (`GitDiffResult`)
+    /// Git Diff result (`GitDiffResult`)
     GitDiff {
-        /// 取得成功時の Diff
+        /// Diff on success
         diff: Option<WorkspaceDiffResponse>,
-        /// 失敗時のメッセージ
+        /// Message on failure
         error: Option<String>,
     },
-    /// Worktree 操作結果 (`WorktreeResult`)
+    /// Worktree operation result (`WorktreeResult`)
     Worktree {
-        /// 成功時の Worktree 情報 (削除時は `None`)
+        /// Worktree info on success (`None` when deleted)
         worktree: Option<WorktreeInfo>,
-        /// 失敗時のメッセージ
+        /// Message on failure
         error: Option<String>,
     },
-    /// セッション Revert 結果 (`RevertResult`)
+    /// Session revert result (`RevertResult`)
     Revert {
-        /// 成功したか
+        /// Whether it succeeded
         success: bool,
-        /// 失敗時の構造化エラーコード
+        /// Structured error code on failure
         code: Option<ErrorCode>,
-        /// 成功時の復元結果
+        /// Restore outcome on success
         outcome: Option<fxg_protocol::client_api::SessionRevertResponse>,
-        /// 失敗時のメッセージ
+        /// Message on failure
         error: Option<String>,
     },
-    /// セッション再開結果 (`ResumeResult`)
+    /// Session resume result (`ResumeResult`)
     Resume {
-        /// 成功したか
+        /// Whether it succeeded
         success: bool,
-        /// 失敗時の構造化エラーコード
+        /// Structured error code on failure
         code: Option<ErrorCode>,
-        /// 成功時のネイティブ復元成否 (`false` = 履歴 Replay で継続)
+        /// Whether native restore succeeded on success (`false` = continue by replaying history)
         context_restored: Option<bool>,
-        /// 失敗時のメッセージ
+        /// Message on failure
         error: Option<String>,
     },
-    /// セッションのアーカイブ/復元結果 (`ArchiveResult`)
+    /// Session archive/restore result (`ArchiveResult`)
     Archive {
-        /// 成功したか
+        /// Whether it succeeded
         success: bool,
-        /// 失敗時の構造化エラーコード
+        /// Structured error code on failure
         code: Option<ErrorCode>,
-        /// 成功時のアーカイブ日時 (Unix epoch ms)。復元時は `None`
+        /// Archive timestamp on success (Unix epoch ms). `None` when restoring
         archived_at: Option<i64>,
-        /// 失敗時のメッセージ
+        /// Message on failure
         error: Option<String>,
     },
-    /// セッション削除結果 (`DeleteResult`)
+    /// Session delete result (`DeleteResult`)
     Delete {
-        /// 成功したか
+        /// Whether it succeeded
         success: bool,
-        /// 失敗時の構造化エラーコード
+        /// Structured error code on failure
         code: Option<ErrorCode>,
-        /// 失敗時のメッセージ
+        /// Message on failure
         error: Option<String>,
     },
-    /// ファイルシステム閲覧結果 (`BrowseFsResult`)
+    /// Filesystem browse result (`BrowseFsResult`)
     BrowseFs {
-        /// 取得成功時のブラウズ結果
+        /// Browse result on success
         response: Option<fxg_protocol::client_api::FsBrowseResponse>,
-        /// 失敗時のメッセージ
+        /// Message on failure
         error: Option<String>,
     },
-    /// プロジェクト一括スキャン結果 (`ProjectScanResult`)
+    /// Project bulk scan result (`ProjectScanResult`)
     ProjectScan {
-        /// 成功時のスキャン結果
+        /// Scan result on success
         response: Option<fxg_protocol::client_api::ProjectScanResponse>,
-        /// 失敗時のメッセージ
+        /// Message on failure
         error: Option<String>,
     },
-    /// プロジェクト手動紐付け結果 (`ProjectLinkResult`)
+    /// Project manual link result (`ProjectLinkResult`)
     ProjectLink {
-        /// 成功時の紐付け結果
+        /// Link result on success
         response: Option<fxg_protocol::client_api::ProjectLinkResponse>,
-        /// 失敗時のメッセージ
+        /// Message on failure
         error: Option<String>,
     },
-    /// エージェント管理操作結果 (`AgentOpResult`)
+    /// Agent management operation result (`AgentOpResult`)
     AgentOp {
-        /// 成功したか
+        /// Whether it succeeded
         success: bool,
-        /// 失敗時の構造化エラーコード
+        /// Structured error code on failure
         code: Option<ErrorCode>,
-        /// 成功時の表示メッセージ
+        /// Display message on success
         message: Option<String>,
-        /// 失敗時のメッセージ
+        /// Message on failure
         error: Option<String>,
     },
-    /// ACP Registry カタログ結果 (`AgentsResult`)
+    /// ACP Registry catalog result (`AgentsResult`)
     Agents {
-        /// 取得成功時のカタログ
+        /// Catalog on success
         response: Option<fxg_protocol::client_api::AgentsResponse>,
-        /// 失敗時のメッセージ
+        /// Message on failure
         error: Option<String>,
     },
-    /// ノード切断などによる失敗
+    /// Failure such as a node disconnect
     Failed {
-        /// 構造化エラーコード
+        /// Structured error code
         code: ErrorCode,
-        /// 人間向けメッセージ
+        /// Human-readable message
         message: String,
     },
 }
 
-/// 中継待ちエントリ。
+/// Entry for a pending relay.
 struct PendingEntry {
-    /// 応答を待っているノード
+    /// Node whose response is awaited
     node_id: String,
-    /// 応答の送り先
+    /// Destination for the response
     tx: oneshot::Sender<PendingResponse>,
 }
 
-/// 接続中のノード 1 件。
+/// One connected node.
 #[derive(Clone)]
 struct NodeConnection {
-    /// 接続世代 ID (再接続時に古い接続の後処理を無効化する)
+    /// Connection generation ID (invalidates cleanup of an old connection on reconnect)
     conn_id: String,
-    /// 送信キュー
+    /// Outgoing queue
     tx: mpsc::Sender<ServerToNodeMsg>,
 }
 
-/// PTY の中継先。
+/// PTY relay destination.
 struct PtyRoute {
-    /// 所有ノードID
+    /// Owning node ID
     node_id: String,
-    /// クライアントへ配信するブロードキャスト
+    /// Broadcast delivered to clients
     tx: broadcast::Sender<PtyChannelEvent>,
 }
 
@@ -209,14 +208,14 @@ struct HubInner {
     ptys: Mutex<HashMap<String, PtyRoute>>,
 }
 
-/// ノード接続レジストリとコマンド中継 (中央サーバーの共有状態から参照される)。
+/// Node connection registry and command relay (referenced from the central server's shared state).
 #[derive(Clone)]
 pub struct NodeHub {
     inner: Arc<HubInner>,
 }
 
 impl NodeHub {
-    /// ハブを作成する。
+    /// Creates the hub.
     pub(crate) fn new(db: Db, client_events: broadcast::Sender<ClientEvent>) -> Self {
         Self {
             inner: Arc::new(HubInner {
@@ -229,30 +228,30 @@ impl NodeHub {
         }
     }
 
-    /// サーバーDB。
+    /// Server DB.
     pub fn db(&self) -> &Db {
         &self.inner.db
     }
 
-    /// Client WS 配信用ブロードキャスト。
+    /// Broadcast for Client WS delivery.
     pub(crate) fn client_events(&self) -> &broadcast::Sender<ClientEvent> {
         &self.inner.client_events
     }
 
-    /// ノードが接続中か。
+    /// Whether the node is connected.
     pub async fn is_online(&self, node_id: &str) -> bool {
         self.inner.nodes.read().await.contains_key(node_id)
     }
 
-    /// 接続中ノードの一覧。
+    /// List of connected nodes.
     pub async fn online_nodes(&self) -> Vec<String> {
         self.inner.nodes.read().await.keys().cloned().collect()
     }
 
-    /// 一時VM (`fxg daemon --stdio`) の接続を登録する。
+    /// Registers a temporary VM (`fxg daemon --stdio`) connection.
     ///
-    /// 返り値の受信キューへ流れた `ServerToNodeMsg` を、プロビジョナーマネージャが
-    /// 子プロセスの `stdin` (JSON Lines) へ転送する。
+    /// The provisioner manager forwards `ServerToNodeMsg` items arriving on the returned receiver
+    /// to the child process's `stdin` (JSON Lines).
     pub(crate) async fn attach_ephemeral(
         &self,
         node_id: &str,
@@ -264,9 +263,9 @@ impl NodeHub {
         (rx, conn_id)
     }
 
-    /// 一時VMの接続を解除する (子プロセス終了時)。
+    /// Detaches a temporary VM connection (when the child process exits).
     pub(crate) async fn detach_ephemeral(&self, node_id: &str, exit_code: Option<i32>) {
-        // 接続世代が不明なため、登録されている接続を直接取り除いて後処理する
+        // The connection generation is unknown, so remove the registered connection and clean up
         let conn_id = {
             let nodes = self.inner.nodes.read().await;
             nodes.get(node_id).map(|entry| entry.conn_id.clone())
@@ -290,14 +289,14 @@ impl NodeHub {
         tracing::info!(node_id, exit_code, "ephemeral node detached (stdio)");
     }
 
-    /// 一時VMの接続を無条件で取り除く (サーバーシャットダウン等)。
+    /// Removes temporary VM connections unconditionally (e.g. on server shutdown).
     pub(crate) async fn detach_all_ephemeral(&self, node_ids: &[String]) {
         for node_id in node_ids {
             self.detach_ephemeral(node_id, None).await;
         }
     }
 
-    /// ノード接続を登録する (既存接続は置き換え)。
+    /// Registers a node connection (replacing any existing one).
     async fn register(&self, node_id: &str, conn_id: &str, tx: mpsc::Sender<ServerToNodeMsg>) {
         let mut nodes = self.inner.nodes.write().await;
         if nodes
@@ -314,7 +313,7 @@ impl NodeHub {
         }
     }
 
-    /// ノード接続を解除する (同一接続世代のみ)。未完了の中継と PTY を失敗させる。
+    /// Detaches a node connection (only for the same generation). Fails in-flight relays and PTYs.
     async fn disconnect(&self, node_id: &str, conn_id: &str) {
         {
             let mut nodes = self.inner.nodes.write().await;
@@ -327,7 +326,7 @@ impl NodeHub {
             }
         }
 
-        // 未完了の中継へ NODE_OFFLINE を返す
+        // Return NODE_OFFLINE for in-flight relays
         let mut pending = self.inner.pending.lock().await;
         let failed: Vec<String> = pending
             .iter()
@@ -344,7 +343,7 @@ impl NodeHub {
         }
         drop(pending);
 
-        // そのノードが所有する PTY を終了扱いにする
+        // Treat PTYs owned by this node as exited
         let mut ptys = self.inner.ptys.lock().await;
         let pty_ids: Vec<String> = ptys
             .iter()
@@ -358,7 +357,7 @@ impl NodeHub {
         }
     }
 
-    /// ノードへメッセージを送る。未接続時は `NODE_OFFLINE`。
+    /// Sends a message to a node. Returns `NODE_OFFLINE` when not connected.
     pub async fn send(&self, node_id: &str, message: ServerToNodeMsg) -> Result<(), ApiError> {
         let tx = {
             let nodes = self.inner.nodes.read().await;
@@ -370,10 +369,10 @@ impl NodeHub {
         tx.send(message).await.map_err(|_| offline_error(node_id))
     }
 
-    /// コマンドを中継し、`command_id` 相関で `CommandResult` を待つ。
+    /// Relays a command and waits for the `CommandResult` correlated by `command_id`.
     ///
-    /// プロンプト送信は停止済みセッションの自動レジュームを含みうるため、
-    /// [`SESSION_COMMAND_TIMEOUT`] で待つ。
+    /// Prompt submission may include automatic resume of a stopped session, so wait with
+    /// [`SESSION_COMMAND_TIMEOUT`].
     pub async fn command(
         &self,
         node_id: &str,
@@ -390,7 +389,7 @@ impl NodeHub {
         }
     }
 
-    /// Git Diff を中継し、`request_id` 相関で結果を待つ。
+    /// Relays a Git Diff request and waits for the result correlated by `request_id`.
     pub async fn git_diff(
         &self,
         node_id: &str,
@@ -411,7 +410,7 @@ impl NodeHub {
         }
     }
 
-    /// Worktree 操作を中継し、`command_id` 相関で結果を待つ。
+    /// Relays a Worktree operation and waits for the result correlated by `command_id`.
     pub async fn worktree_op(
         &self,
         node_id: &str,
@@ -432,7 +431,7 @@ impl NodeHub {
         }
     }
 
-    /// セッション Revert を中継し、`command_id` 相関で結果を待つ。
+    /// Relays a session revert and waits for the result correlated by `command_id`.
     pub async fn revert_session(
         &self,
         node_id: &str,
@@ -463,11 +462,10 @@ impl NodeHub {
         }
     }
 
-    /// セッション再開を中継し、`command_id` 相関で結果を待つ。
+    /// Relays a session resume and waits for the result correlated by `command_id`.
     ///
-    /// 戻り値はネイティブ復元の成否 (`false` = 履歴 Replay で継続)。
-    /// エージェントのコールドスタートを許容するため
-    /// [`SESSION_COMMAND_TIMEOUT`] で待つ。
+    /// The return value is whether native context restore succeeded (`false` = continue by
+    /// replaying history). Waits with [`SESSION_COMMAND_TIMEOUT`] to allow agent cold starts.
     pub async fn resume_session(
         &self,
         node_id: &str,
@@ -499,9 +497,9 @@ impl NodeHub {
         }
     }
 
-    /// セッションのアーカイブ/復元を中継し、`command_id` 相関で結果を待つ。
+    /// Relays a session archive/restore and waits for the result correlated by `command_id`.
     ///
-    /// 戻り値はアーカイブ日時 (Unix epoch ms。復元時は `None`)。
+    /// The return value is the archive timestamp (Unix epoch ms; `None` when restoring).
     pub async fn archive_session(
         &self,
         node_id: &str,
@@ -532,10 +530,10 @@ impl NodeHub {
         }
     }
 
-    /// セッション削除を中継し、`command_id` 相関で結果を待つ。
+    /// Relays a session delete and waits for the result correlated by `command_id`.
     ///
-    /// 実行ノードが稼働中セッションの停止を待つため
-    /// [`SESSION_COMMAND_TIMEOUT`] で待つ。
+    /// The executing node waits for a running session to stop, so wait with
+    /// [`SESSION_COMMAND_TIMEOUT`].
     pub async fn delete_session(
         &self,
         node_id: &str,
@@ -565,7 +563,7 @@ impl NodeHub {
         }
     }
 
-    /// ファイルシステム閲覧を中継し、`request_id` 相関で結果を待つ。
+    /// Relays a filesystem browse and waits for the result correlated by `request_id`.
     pub async fn browse_fs(
         &self,
         node_id: &str,
@@ -586,10 +584,10 @@ impl NodeHub {
         }
     }
 
-    /// プロジェクト一括スキャンを中継し、`request_id` 相関で結果を待つ。
+    /// Relays a project bulk scan and waits for the result correlated by `request_id`.
     ///
-    /// ディレクトリ走査は時間がかかりうるため、通常コマンドより長い
-    /// [`PROJECT_OP_TIMEOUT`] で待つ。
+    /// Directory traversal can take a while, so wait with [`PROJECT_OP_TIMEOUT`], longer than
+    /// the normal command timeout.
     pub async fn scan_projects(
         &self,
         node_id: &str,
@@ -610,7 +608,7 @@ impl NodeHub {
         }
     }
 
-    /// プロジェクト手動紐付けを中継し、`request_id` 相関で結果を待つ。
+    /// Relays a project manual link and waits for the result correlated by `request_id`.
     pub async fn link_project(
         &self,
         node_id: &str,
@@ -631,7 +629,7 @@ impl NodeHub {
         }
     }
 
-    /// ACP Registry カタログを中継し、`request_id` 相関で結果を待つ。
+    /// Relays the ACP Registry catalog and waits for the result correlated by `request_id`.
     pub async fn agents(
         &self,
         node_id: &str,
@@ -652,8 +650,8 @@ impl NodeHub {
         }
     }
 
-    /// エージェント管理操作 (install / update / remove) を中継し、
-    /// `request_id` 相関で結果を待つ。成功時は表示メッセージを返す。
+    /// Relays an agent management operation (install / update / remove) and waits for the
+    /// result correlated by `request_id`. On success, returns the display message.
     pub async fn manage_agent(
         &self,
         node_id: &str,
@@ -684,7 +682,7 @@ impl NodeHub {
         }
     }
 
-    /// 送信 → 相関待ちの共通処理。
+    /// Common send-then-wait path.
     async fn request(
         &self,
         node_id: &str,
@@ -730,7 +728,7 @@ impl NodeHub {
         }
     }
 
-    /// 中継待ちの応答を解決する。
+    /// Resolves a pending relay response.
     async fn resolve(&self, correlation_id: &str, response: PendingResponse) {
         let entry = self.inner.pending.lock().await.remove(correlation_id);
         match entry {
@@ -743,7 +741,7 @@ impl NodeHub {
         }
     }
 
-    /// 全接続ノードへメッセージを配信し、送信先のノードID一覧を返す。
+    /// Delivers a message to all connected nodes and returns the IDs of the nodes it reached.
     pub async fn broadcast(&self, message: ServerToNodeMsg) -> Vec<String> {
         let connections: Vec<(String, mpsc::Sender<ServerToNodeMsg>)> = {
             let nodes = self.inner.nodes.read().await;
@@ -762,10 +760,10 @@ impl NodeHub {
     }
 
     // ------------------------------------------------------------------
-    // PTY 中継
+    // PTY relay
     // ------------------------------------------------------------------
 
-    /// PTY の中継先を登録する (spawn 時)。
+    /// Registers a PTY relay destination (at spawn time).
     pub(crate) async fn insert_pty(&self, pty_id: &str, node_id: &str) {
         let (tx, _) = broadcast::channel(PTY_CHANNEL_CAPACITY);
         self.inner.ptys.lock().await.insert(
@@ -777,7 +775,7 @@ impl NodeHub {
         );
     }
 
-    /// PTY 出力を購読する (未登録の場合は `None`)。
+    /// Subscribes to PTY output (`None` when not registered).
     pub(crate) async fn pty_subscribe(
         &self,
         pty_id: &str,
@@ -790,7 +788,7 @@ impl NodeHub {
             .map(|route| route.tx.subscribe())
     }
 
-    /// PTY を所有するノードへメッセージを中継する。
+    /// Relays a message to the node that owns the PTY.
     pub(crate) async fn pty_send(
         &self,
         pty_id: &str,
@@ -810,12 +808,12 @@ impl NodeHub {
             .map_err(|err| PtyChannelError::new(err.code.as_str(), err.message))
     }
 
-    /// PTY の中継登録を解除する (kill / Exit 後)。
+    /// Removes a PTY relay registration (after kill / exit).
     pub(crate) async fn remove_pty(&self, pty_id: &str) {
         self.inner.ptys.lock().await.remove(pty_id);
     }
 
-    /// ノードから届いた PTY イベントを購読者へ配信する。
+    /// Publishes a PTY event from a node to its subscribers.
     async fn publish_pty(&self, pty_id: &str, event: PtyChannelEvent) {
         let route = {
             let ptys = self.inner.ptys.lock().await;
@@ -827,7 +825,7 @@ impl NodeHub {
     }
 }
 
-/// `NODE_OFFLINE` エラーを生成する。
+/// Builds a `NODE_OFFLINE` error.
 fn offline_error(node_id: &str) -> ApiError {
     ApiError::from_code(
         ErrorCode::NodeOffline,
@@ -836,10 +834,10 @@ fn offline_error(node_id: &str) -> ApiError {
 }
 
 // ----------------------------------------------------------------------
-// WebSocket ハンドラ
+// WebSocket handlers
 // ----------------------------------------------------------------------
 
-/// `/api/v1/node/ws` ハンドラ (ノード個別トークン認証 + WS アップグレード)。
+/// `/api/v1/node/ws` handler (per-node token auth + WS upgrade).
 pub(crate) async fn node_ws(
     State(state): State<ServerState>,
     headers: HeaderMap,
@@ -860,7 +858,7 @@ pub(crate) async fn node_ws(
         .into_response();
     };
 
-    // 平文トークンは保存していないため、ハッシュ化して定数時間比較で照合する
+    // Plaintext tokens are not stored, so hash the provided one and compare in constant time
     let provided_hash = hash_token(provided);
     let tokens = match state.db().list_node_tokens().await {
         Ok(tokens) => tokens,
@@ -882,11 +880,11 @@ pub(crate) async fn node_ws(
     ws.on_upgrade(move |socket| handle_node_connection(state, owner, socket))
 }
 
-/// ノード接続のメインループ (NodeHello → 登録 → 双方向メッセージ)。
+/// Main loop for a node connection (NodeHello → register → bidirectional messaging).
 async fn handle_node_connection(state: ServerState, token_owner: String, socket: WebSocket) {
     let (mut sender, mut receiver) = socket.split();
 
-    // 1. 最初のメッセージは NodeHello (タイムアウト付き)
+    // 1. The first message must be NodeHello (with timeout)
     let hello = match tokio::time::timeout(HELLO_TIMEOUT, receiver.next()).await {
         Ok(Some(Ok(Message::Text(text)))) => match serde_json::from_str::<NodeToServerMsg>(&text) {
             Ok(hello @ NodeToServerMsg::NodeHello { .. }) => hello,
@@ -922,7 +920,7 @@ async fn handle_node_connection(state: ServerState, token_owner: String, socket:
         unreachable!("hello was matched above");
     };
 
-    // なりすまし拒否: NodeHello.node_id はトークン発行対象と一致すること
+    // Reject impersonation: NodeHello.node_id must match the token owner
     if node_id != token_owner {
         tracing::warn!(
             node_id,
@@ -933,7 +931,7 @@ async fn handle_node_connection(state: ServerState, token_owner: String, socket:
         return;
     }
 
-    // 2. ノード登録 (ノードは初回 Hello 以前に自己登録している場合もある)
+    // 2. Register the node (a node may already have registered itself before the first Hello)
     let record = fxg_db::NodeRecord {
         node_id: node_id.clone(),
         name,
@@ -956,13 +954,13 @@ async fn handle_node_connection(state: ServerState, token_owner: String, socket:
         tracing::warn!(node_id, "failed to apply project reports: {err}");
     }
 
-    // 3. 接続登録
+    // 3. Register the connection
     let (tx, mut rx) = mpsc::channel(NODE_CHANNEL_CAPACITY);
     let conn_id = uuid_v7();
     state.hub().register(&node_id, &conn_id, tx).await;
     tracing::info!(node_id, "node connected");
 
-    // 4. 欠落・遅延セッションの ResyncRequest
+    // 4. ResyncRequest for missing or lagging sessions
     let targets = compute_resync(&state, &node_id, &sessions).await;
     if !targets.is_empty() {
         tracing::info!(
@@ -979,7 +977,7 @@ async fn handle_node_connection(state: ServerState, token_owner: String, socket:
             .await;
     }
 
-    // 5. 双方向メッセージループ
+    // 5. Bidirectional message loop
     loop {
         tokio::select! {
             outgoing = rx.recv() => match outgoing {
@@ -1005,7 +1003,7 @@ async fn handle_node_connection(state: ServerState, token_owner: String, socket:
         }
     }
 
-    // 6. 切断処理 (同一接続世代のみ有効)
+    // 6. Disconnect handling (only valid for the same connection generation)
     state.hub().disconnect(&node_id, &conn_id).await;
     if let Err(err) = state.db().set_node_online(&node_id, false).await {
         tracing::warn!(node_id, "failed to mark node offline: {err}");
@@ -1013,7 +1011,7 @@ async fn handle_node_connection(state: ServerState, token_owner: String, socket:
     tracing::info!(node_id, "node disconnected");
 }
 
-/// ノードからのメッセージを処理する。
+/// Handles a message from a node.
 async fn handle_node_message(state: &ServerState, node_id: &str, text: &str) {
     let message: NodeToServerMsg = match serde_json::from_str(text) {
         Ok(message) => message,
@@ -1035,7 +1033,7 @@ async fn handle_node_message(state: &ServerState, node_id: &str, text: &str) {
             projects,
             sessions,
         } => {
-            // 再接続ではなく実行中の再送 (Worktree 変更時など)
+            // Not a reconnect but an in-flight resend (e.g. after a Worktree change)
             if hello_node_id != node_id {
                 tracing::warn!(
                     node_id,
@@ -1303,8 +1301,8 @@ async fn handle_node_message(state: &ServerState, node_id: &str, text: &str) {
             repo_url,
             operation,
         } => {
-            // Git Credential Proxy (一時VMの GIT_ASKPASS): 設定されたプロバイダから
-            // オンメモリでトークンを解決し、stdio パイプ上で返す (docs/01 §6.4)
+            // Git Credential Proxy (GIT_ASKPASS for temporary VMs): resolve the token in memory
+            // from the configured provider and return it over the stdio pipe (docs/01 §6.4)
             let response = crate::provisioner::resolve_git_token(state, &repo_url).await;
             let message = match response {
                 Some(response) => ServerToNodeMsg::GitCredentialResponse {
@@ -1330,7 +1328,7 @@ async fn handle_node_message(state: &ServerState, node_id: &str, text: &str) {
             head_commit,
             bundle_b64,
         } => {
-            // 分割転送された bundle を DrainComplete まで蓄積する
+            // Accumulate chunked bundle uploads until DrainComplete
             crate::provisioner::on_bundle_upload(
                 state,
                 &session_id,
@@ -1346,15 +1344,15 @@ async fn handle_node_message(state: &ServerState, node_id: &str, text: &str) {
     }
 }
 
-/// 一時VM (`fxg daemon --stdio`) から受信したメッセージを処理する。
+/// Handles a message received from a temporary VM (`fxg daemon --stdio`).
 ///
-/// WebSocket ノードと同一のメッセージ型・同一の処理経路
-/// ([`handle_node_message`]) を使う (設計: docs/03 §2)。
+/// Uses the same message types and the same processing path ([`handle_node_message`]) as a
+/// WebSocket node (design: docs/03 §2).
 pub(crate) async fn handle_stdio_message(state: &ServerState, node_id: &str, text: &str) {
     handle_node_message(state, node_id, text).await;
 }
 
-/// `NodeHello` のプロジェクト報告を `projects` / `project_node_bindings` へ反映する。
+/// Applies `NodeHello` project reports to `projects` / `project_node_bindings`.
 async fn apply_project_reports(
     state: &ServerState,
     node_id: &str,
@@ -1386,7 +1384,7 @@ async fn apply_project_reports(
     Ok(())
 }
 
-/// ハブ側で欠落・遅延しているセッションの再送指定を計算する。
+/// Computes the resend targets for sessions that are missing or lagging on the hub side.
 async fn compute_resync(
     state: &ServerState,
     node_id: &str,
@@ -1426,7 +1424,7 @@ async fn compute_resync(
                 });
             }
             Ok(None) => {
-                // ハブにとって未知のセッション: SessionCreated を含む全量再送
+                // Session unknown to the hub: resend everything, including SessionCreated
                 targets.push(ResyncTarget {
                     session_id: sync.session_id.clone(),
                     from_node_seq: 1,
@@ -1443,15 +1441,15 @@ async fn compute_resync(
     targets
 }
 
-/// `EventBatchPush` を冪等適用し、ACK と Client WS 配信を行う。
+/// Applies `EventBatchPush` idempotently, sends an ACK and delivers to Client WS.
 ///
-/// 適用に失敗した場合は ACK を返さない (ノードの水位が進まず再送される)。
+/// If application fails, no ACK is sent (the node's watermark does not advance and it retries).
 async fn apply_event_batch(
     state: &ServerState,
     node_id: &str,
     events: Vec<fxg_protocol::events::SessionEventEnvelope>,
 ) {
-    // なりすまし防止: SessionCreated.node_id は接続元ノードと一致すること
+    // Prevent impersonation: SessionCreated.node_id must match the connecting node
     for event in &events {
         if let fxg_protocol::events::UnifiedEventPayload::SessionCreated {
             node_id: event_node_id,
@@ -1469,7 +1467,7 @@ async fn apply_event_batch(
         }
     }
 
-    // セッション単位に分割 (プロトコル上バッチはセッション単位だが防御的に)
+    // Split by session (the protocol batches per session, but be defensive)
     let mut batches: Vec<(String, Vec<fxg_protocol::events::SessionEventEnvelope>)> = Vec::new();
     for event in events {
         match batches.last_mut() {
@@ -1478,7 +1476,7 @@ async fn apply_event_batch(
         }
     }
 
-    // Web Push 通知の対象 (新規に適用された承認リクエスト)
+    // Web Push notification targets (newly applied approval requests)
     let mut notify_events: Vec<fxg_protocol::events::SessionEventEnvelope> = Vec::new();
 
     for (session_id, batch) in batches {
@@ -1520,8 +1518,8 @@ async fn apply_event_batch(
         }
     }
 
-    // 承認リクエスト・質問 (elicitation) の Web Push 通知
-    // (ACK をブロックしないよう非同期で送る)
+    // Web Push notifications for approval requests and questions (elicitations)
+    // (sent asynchronously so they do not block the ACK)
     if !notify_events.is_empty() {
         let push = state.push().clone();
         let db = state.db().clone();

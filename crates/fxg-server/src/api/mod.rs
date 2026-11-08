@@ -1,18 +1,18 @@
-//! クライアント向け共通 HTTP/WS API レイヤ。
+//! Shared HTTP/WS API layer for clients.
 //!
-//! 中央サーバー (`fxg server`, `:8080`) とノードのローカルWebサーバー
-//! (`fxg daemon`, `127.0.0.1:7860`) は**完全に同一の API パスと
-//! WebSocket フォーマット**を提供する (設計: `docs/03-protocol-and-api.md` §3)。
+//! The central server (`fxg server`, `:8080`) and the node's local web server
+//! (`fxg daemon`, `127.0.0.1:7860`) expose **exactly the same API paths and WebSocket format**
+//! (design: `docs/03-protocol-and-api.md` §3).
 //!
-//! 本モジュールはその共通ルーター/ハンドラ実装であり、双方の差分
-//! (DB の持ち主・コマンドの実行方法・ノード中継の有無) は
-//! [`ClientApiBackend`] トレイトの実装に閉じ込める。
+//! This module is the shared router/handler implementation; the differences between the two
+//! (who owns the DB, how commands execute, whether node relay is involved) are confined to
+//! implementations of the [`ClientApiBackend`] trait.
 //!
-//! - REST: [`client_router`] が構築する Axum ルーター
+//! - REST: the Axum router built by [`client_router`]
 //! - Client WS (`/api/v1/client/ws`): [`ws`]
 //! - PTY WS (`/api/v1/pty/ws`): [`pty`]
-//! - セキュリティ (Host / Origin / Token 検証): [`security`]
-//! - トークン生成・照合: [`auth`]
+//! - Security (Host / Origin / Token validation): [`security`]
+//! - Token generation and comparison: [`auth`]
 
 pub mod auth;
 mod pty;
@@ -62,22 +62,22 @@ pub use ws::REPLAY_BATCH_SIZE;
 use self::auth::token_matches;
 
 // ----------------------------------------------------------------------
-// 共通型
+// Shared types
 // ----------------------------------------------------------------------
 
-/// ロール非依存の API エラー (REST / WS の共通エラー形式へ変換される)。
+/// Role-independent API error (converted to the shared REST / WS error format).
 #[derive(Debug, Clone)]
 pub struct ApiError {
-    /// HTTP ステータス
+    /// HTTP status
     pub status: StatusCode,
-    /// 構造化エラーコード
+    /// Structured error code
     pub code: ErrorCode,
-    /// 人間向けメッセージ
+    /// Human-readable message
     pub message: String,
 }
 
 impl ApiError {
-    /// 明示的なステータス・コードで生成する。
+    /// Builds an error with an explicit status and code.
     pub fn new(status: StatusCode, code: ErrorCode, message: impl Into<String>) -> Self {
         Self {
             status,
@@ -86,7 +86,7 @@ impl ApiError {
         }
     }
 
-    /// `ErrorCode` から推奨ステータスを決めて生成する。
+    /// Builds an error, choosing the recommended status from the `ErrorCode`.
     pub fn from_code(code: ErrorCode, message: impl Into<String>) -> Self {
         let status = match code {
             ErrorCode::Unauthorized => StatusCode::UNAUTHORIZED,
@@ -96,8 +96,8 @@ impl ApiError {
                 StatusCode::CONFLICT
             }
             ErrorCode::InvalidState => StatusCode::BAD_REQUEST,
-            // 停止済みセッションへの操作で履歴 Replay が必要 (クライアント側で
-            // 明示的な Resume を促すため 409 とする)
+            // Operating a stopped session requires replaying history (409 so the client is
+            // prompted to resume explicitly)
             ErrorCode::ResumeRequired => StatusCode::CONFLICT,
             ErrorCode::NotFound => StatusCode::NOT_FOUND,
             ErrorCode::Internal => StatusCode::INTERNAL_SERVER_ERROR,
@@ -120,7 +120,7 @@ impl ApiError {
         Self::from_code(ErrorCode::Forbidden, message)
     }
 
-    /// `500 INTERNAL` (ログに残す)
+    /// `500 INTERNAL` (also logged)
     pub fn internal(err: impl std::fmt::Display) -> Self {
         tracing::warn!("api error: {err}");
         Self::from_code(ErrorCode::Internal, err.to_string())
@@ -153,19 +153,19 @@ impl IntoResponse for ApiError {
     }
 }
 
-/// 接続クライアントの情報 (監査ログ用)。
+/// Information about the connected client (for audit logs).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClientInfo {
-    /// 送信元 IP アドレス
+    /// Source IP address
     pub ip: String,
     /// User-Agent
     pub user_agent: Option<String>,
-    /// 認証主体 (`bearer` / `cookie` / `local`)
+    /// Auth subject (`bearer` / `cookie` / `local`)
     pub auth_subject: String,
 }
 
 impl ClientInfo {
-    /// リクエストヘッダと接続元から組み立てる (ConnectInfo が無い場合は `local`)。
+    /// Builds from request headers and the peer address (`local` when ConnectInfo is absent).
     pub fn from_request(headers: &HeaderMap, addr: Option<SocketAddr>) -> Self {
         let auth_subject = if headers.contains_key(header::AUTHORIZATION) {
             "bearer"
@@ -186,104 +186,104 @@ impl ClientInfo {
         }
     }
 
-    /// `audit_logs.auth_subject` へ保存する値。
+    /// Value stored in `audit_logs.auth_subject`.
     pub fn audit_subject(&self) -> String {
         format!("{}:{}", self.auth_subject, self.ip)
     }
 }
 
-/// `GET /api/v1/system/info` のロール固有フィールド。
+/// Role-specific fields of `GET /api/v1/system/info`.
 #[derive(Debug, Clone, Default)]
 pub struct SystemExtras {
-    /// Web Push 用 VAPID 公開鍵 (中央サーバーのみ)
+    /// VAPID public key for Web Push (central server only)
     pub vapid_public_key: Option<String>,
-    /// 未同期 Outbox イベント件数 (ローカルノード接続時のみ)
+    /// Number of unsynced Outbox events (only when connected to a local node)
     pub unsynced_event_count: Option<u64>,
-    /// 中央サーバーへの WebSocket 接続状態 (ローカルノード接続時のみ)
+    /// WebSocket connection state to the central server (only when connected to a local node)
     pub central_connected: Option<bool>,
 }
 
-/// Client WS で配信されるライブイベント。
+/// Live event delivered over Client WS.
 #[derive(Debug, Clone)]
 pub enum ClientEvent {
-    /// 永続化済みイベント (配信元ストアのカーソル確定済み)
+    /// Event already persisted (cursor committed in the source store)
     Persisted {
-        /// イベント本体
+        /// Event body
         event: Box<SessionEventEnvelope>,
-        /// `session_events.cursor` (差分再開カーソル)
+        /// `session_events.cursor` (delta resume cursor)
         cursor: u64,
     },
-    /// ストリーミング途中のエフェメラルチャンク (永続化されない)
+    /// Ephemeral chunk mid-stream (not persisted)
     StreamDelta {
-        /// 対象セッションID
+        /// Target session ID
         session_id: String,
-        /// 差分本体
+        /// Delta body
         delta: fxg_protocol::common::StreamDeltaPayload,
     },
-    /// 一時VMブートストラップ (`stderr`) の進捗ログ (永続化されない)
+    /// Progress log from temporary VM bootstrap (`stderr`) (not persisted)
     BootstrapLog {
-        /// 対象セッションID
+        /// Target session ID
         session_id: String,
-        /// ログ1行
+        /// One log line
         line: String,
     },
 }
 
-/// Client WS 経由のセッション操作コマンド (`Subscribe` / `Ping` を除く)。
+/// Session operation command over Client WS (excluding `Subscribe` / `Ping`).
 #[derive(Debug, Clone, PartialEq)]
 pub enum ClientCommand {
-    /// プロンプト送信
+    /// Prompt submission
     SendPrompt {
-        /// 相関ID
+        /// Correlation ID
         command_id: String,
-        /// 対象セッションID
+        /// Target session ID
         session_id: String,
-        /// プロンプト本文
+        /// Prompt body
         text: String,
-        /// 送信元 (`cli` / `web` / `android`)
+        /// Source (`cli` / `web` / `android`)
         client_source: String,
     },
-    /// 承認リクエストへの回答
+    /// Response to an approval request
     RespondPermission {
-        /// 相関ID
+        /// Correlation ID
         command_id: String,
-        /// 対象セッションID
+        /// Target session ID
         session_id: String,
         /// ACP request id
         request_id: String,
-        /// 選択された `option_id`
+        /// Selected `option_id`
         selected_option_id: String,
-        /// 解決主体 (`cli` / `web` / `android_push`)
+        /// Who resolved it (`cli` / `web` / `android_push`)
         resolved_by: String,
     },
-    /// elicitation (構造化入力リクエスト) への回答
+    /// Response to an elicitation (structured input request)
     RespondElicitation {
-        /// 相関ID
+        /// Correlation ID
         command_id: String,
-        /// 対象セッションID
+        /// Target session ID
         session_id: String,
         /// ACP elicitation id
         elicitation_id: String,
-        /// ユーザーの応答アクション (`accept` / `decline` / `cancel`)
+        /// User response action (`accept` / `decline` / `cancel`)
         action: fxg_protocol::common::ElicitationAction,
-        /// `accept` 時の回答内容 (form の `requested_schema` 準拠)
+        /// Answer content for `accept` (per the form's `requested_schema`)
         content: serde_json::Value,
-        /// 解決主体 (`cli` / `web` / `android_push`)
+        /// Who resolved it (`cli` / `web` / `android_push`)
         resolved_by: String,
     },
-    /// モード切替 / 設定変更 / キャンセル / Kill
+    /// Mode switch / configuration change / cancel / kill
     ControlSession {
-        /// 相関ID
+        /// Correlation ID
         command_id: String,
-        /// 対象セッションID
+        /// Target session ID
         session_id: String,
-        /// 実行する操作
+        /// Operation to perform
         action: SessionControlAction,
     },
 }
 
 impl ClientCommand {
-    /// WS メッセージからコマンドを取り出す (`Subscribe` / `Ping` は `None`)。
+    /// Extracts a command from a WS message (`Subscribe` / `Ping` yield `None`).
     pub fn from_message(message: &fxg_protocol::client_api::ClientWsMessage) -> Option<Self> {
         use fxg_protocol::client_api::ClientWsMessage;
         match message {
@@ -339,7 +339,7 @@ impl ClientCommand {
         }
     }
 
-    /// 相関ID。
+    /// Correlation ID.
     pub fn command_id(&self) -> &str {
         match self {
             Self::SendPrompt { command_id, .. }
@@ -351,54 +351,54 @@ impl ClientCommand {
 }
 
 // ----------------------------------------------------------------------
-// バックエンドトレイト
+// Backend trait
 // ----------------------------------------------------------------------
 
-/// 共通ルーターが利用するバックエンド (ノード / 中央サーバー) 抽象。
+/// Backend abstraction used by the shared router (node / central server).
 ///
-/// DB 読み取り系のエンドポイントは [`Self::db`] だけで完結するため、
-/// 実装側はロール固有の処理 (コマンド実行・中継) のみを提供する。
+/// DB read endpoints are self-contained in [`Self::db`], so implementations only supply
+/// role-specific behavior (command execution, relaying).
 #[async_trait]
 pub trait ClientApiBackend: Clone + Send + Sync + 'static {
-    /// 接続先の DB (ローカルノードは `node.db`、中央サーバーは `server.db`)。
+    /// The target DB (`node.db` for a local node, `server.db` for the central server).
     fn db(&self) -> &Db;
 
-    /// `GET /api/v1/projects` (論理プロジェクト一覧)。
+    /// `GET /api/v1/projects` (list of logical projects).
     ///
-    /// 既定実装は DB 投影をそのまま返す。ローカルノードは紐付けパスの
-    /// 実在確認 (ライブ) を行った一覧を返すため上書きする。
+    /// The default implementation returns the DB projection as-is. A local node overrides it to
+    /// return a list with live existence checks of binding paths.
     async fn list_projects(&self) -> Result<Vec<ProjectSummary>, ApiError> {
         self.db().list_projects().await.map_err(ApiError::from)
     }
 
-    /// クライアント認証トークン。
+    /// Client auth token.
     fn auth_token(&self) -> String;
 
-    /// 接続先の種別 (`GET /api/v1/system/info` で返却)。
+    /// Kind of connection target (returned by `GET /api/v1/system/info`).
     fn connection_role(&self) -> ConnectionRole;
 
-    /// fxg バージョン。
+    /// fxg version.
     fn version(&self) -> &'static str {
         env!("CARGO_PKG_VERSION")
     }
 
-    /// `GET /api/v1/system/info` のロール固有フィールド。
+    /// Role-specific fields of `GET /api/v1/system/info`.
     async fn system_extras(&self) -> Result<SystemExtras, ApiError>;
 
-    /// Client WS 用のライブイベントを購読する。
+    /// Subscribes to live events for Client WS.
     fn subscribe_client_events(&self) -> broadcast::Receiver<ClientEvent>;
 
-    /// Client WS 経由のコマンドを実行し、`CommandResult` を返す。
+    /// Executes a command from Client WS and returns a `CommandResult`.
     async fn dispatch_command(&self, command: ClientCommand) -> CommandResult;
 
-    /// `POST /api/v1/sessions` (新規セッション開始)。
+    /// `POST /api/v1/sessions` (start a new session).
     async fn create_session(
         &self,
         request: CreateSessionRequest,
         client: ClientInfo,
     ) -> Result<CreateSessionResponse, ApiError>;
 
-    /// `POST /api/v1/sessions/:id/permissions/:req_id/respond` (冪等)。
+    /// `POST /api/v1/sessions/:id/permissions/:req_id/respond` (idempotent).
     async fn respond_permission(
         &self,
         session_id: &str,
@@ -407,7 +407,7 @@ pub trait ClientApiBackend: Clone + Send + Sync + 'static {
         client: ClientInfo,
     ) -> Result<RespondPermissionResponse, ApiError>;
 
-    /// `POST /api/v1/sessions/:id/elicitations/:elicitation_id/respond` (冪等)。
+    /// `POST /api/v1/sessions/:id/elicitations/:elicitation_id/respond` (idempotent).
     async fn respond_elicitation(
         &self,
         session_id: &str,
@@ -416,7 +416,7 @@ pub trait ClientApiBackend: Clone + Send + Sync + 'static {
         client: ClientInfo,
     ) -> Result<RespondElicitationResponse, ApiError>;
 
-    /// `POST /api/v1/sessions/:id/revert` (Shadow Git Tree 巻き戻し)。
+    /// `POST /api/v1/sessions/:id/revert` (rewind via Shadow Git Tree).
     async fn revert_session(
         &self,
         session_id: &str,
@@ -424,7 +424,7 @@ pub trait ClientApiBackend: Clone + Send + Sync + 'static {
         client: ClientInfo,
     ) -> Result<SessionRevertResponse, ApiError>;
 
-    /// `POST /api/v1/sessions/:id/resume` (停止済みセッションの再開)。
+    /// `POST /api/v1/sessions/:id/resume` (resume a stopped session).
     async fn resume_session(
         &self,
         session_id: &str,
@@ -432,9 +432,9 @@ pub trait ClientApiBackend: Clone + Send + Sync + 'static {
         client: ClientInfo,
     ) -> Result<ResumeSessionResponse, ApiError>;
 
-    /// `POST /api/v1/sessions/:id/archive` (アーカイブ/復元)。
+    /// `POST /api/v1/sessions/:id/archive` (archive/restore).
     ///
-    /// アーカイブは可逆な可視性フラグで、イベントログは保持される。
+    /// Archive is a reversible visibility flag; the event log is retained.
     async fn archive_session(
         &self,
         session_id: &str,
@@ -442,9 +442,9 @@ pub trait ClientApiBackend: Clone + Send + Sync + 'static {
         client: ClientInfo,
     ) -> Result<SessionArchiveResponse, ApiError>;
 
-    /// `DELETE /api/v1/sessions/:id` (削除)。
+    /// `DELETE /api/v1/sessions/:id` (delete).
     ///
-    /// 稼働中セッションは停止してから本文イベントをパージする (復元不能)。
+    /// Running sessions are stopped first, then their body events are purged (irreversible).
     async fn delete_session(&self, session_id: &str, client: ClientInfo) -> Result<(), ApiError>;
 
     /// `GET /api/v1/projects/:id/worktrees`
@@ -467,7 +467,7 @@ pub trait ClientApiBackend: Clone + Send + Sync + 'static {
     ) -> Result<(), ApiError>;
 
     /// `POST /api/v1/projects/:id/worktrees/prune`
-    /// (削除済み Worktree 管理情報のクリーンアップ)。
+    /// (cleanup of management info for deleted worktrees).
     async fn prune_worktrees(
         &self,
         project_id: &str,
@@ -476,7 +476,7 @@ pub trait ClientApiBackend: Clone + Send + Sync + 'static {
     ) -> Result<(), ApiError>;
 
     /// `POST /api/v1/nodes/:node_id/projects/scan`
-    /// (指定ディレクトリ配下の Git リポジトリを一括スキャン・登録)。
+    /// (bulk scan and registration of the Git repositories under a directory).
     async fn scan_projects(
         &self,
         node_id: &str,
@@ -485,7 +485,7 @@ pub trait ClientApiBackend: Clone + Send + Sync + 'static {
     ) -> Result<ProjectScanResponse, ApiError>;
 
     /// `POST /api/v1/nodes/:node_id/projects/link`
-    /// (任意ディレクトリを論理プロジェクトへ手動紐付け)。
+    /// (manually link an arbitrary directory to a logical project).
     async fn link_project(
         &self,
         node_id: &str,
@@ -493,10 +493,10 @@ pub trait ClientApiBackend: Clone + Send + Sync + 'static {
         client: ClientInfo,
     ) -> Result<ProjectLinkResponse, ApiError>;
 
-    /// `GET /api/v1/agents` (ACP Registry カタログ + ノード導入状態)。
+    /// `GET /api/v1/agents` (ACP Registry catalog + per-node install state).
     async fn list_agents(&self) -> Result<AgentsResponse, ApiError>;
 
-    /// `POST /api/v1/nodes/:node_id/agents/...` (install / update / remove)。
+    /// `POST /api/v1/nodes/:node_id/agents/...` (install / update / remove).
     async fn manage_agent(
         &self,
         node_id: &str,
@@ -504,18 +504,18 @@ pub trait ClientApiBackend: Clone + Send + Sync + 'static {
         client: ClientInfo,
     ) -> Result<AgentOpResponse, ApiError>;
 
-    /// `POST /api/v1/auth/rotate-token` (クライアント認証トークン再生成)。
+    /// `POST /api/v1/auth/rotate-token` (regenerate the client auth token).
     ///
-    /// 旧トークンは即時無効化されるため、応答の新トークンへ切り替えること。
+    /// The old token is invalidated immediately, so switch to the new token in the response.
     async fn rotate_auth_token(
         &self,
         client: ClientInfo,
     ) -> Result<RotateAuthTokenResponse, ApiError>;
 
-    /// `GET /api/v1/nodes/tokens` (発行済みノード個別トークン一覧)。
+    /// `GET /api/v1/nodes/tokens` (list issued per-node tokens).
     ///
-    /// 中央サーバーのみ対応。ローカルノードの既定実装は `INVALID_STATE`
-    /// を返す (ノードトークンはサーバー (`server.db`) の概念)。
+    /// Central server only. The default local-node implementation returns `INVALID_STATE`
+    /// (node tokens are a server (`server.db`) concept).
     async fn node_tokens(&self) -> Result<NodeTokensResponse, ApiError> {
         Err(ApiError::from_code(
             ErrorCode::InvalidState,
@@ -523,7 +523,7 @@ pub trait ClientApiBackend: Clone + Send + Sync + 'static {
         ))
     }
 
-    /// `POST /api/v1/nodes/tokens` (新規ノードトークン発行。中央サーバーのみ)。
+    /// `POST /api/v1/nodes/tokens` (issue a new node token. Central server only).
     async fn issue_node_token(
         &self,
         _request: IssueNodeTokenRequest,
@@ -535,7 +535,7 @@ pub trait ClientApiBackend: Clone + Send + Sync + 'static {
         ))
     }
 
-    /// `DELETE /api/v1/nodes/tokens/:node_id` (トークン失効。中央サーバーのみ)。
+    /// `DELETE /api/v1/nodes/tokens/:node_id` (revoke a token. Central server only).
     async fn revoke_node_token(&self, _node_id: &str, _client: ClientInfo) -> Result<(), ApiError> {
         Err(ApiError::from_code(
             ErrorCode::InvalidState,
@@ -561,10 +561,10 @@ pub trait ClientApiBackend: Clone + Send + Sync + 'static {
     /// `GET /api/v1/provisioners`
     async fn provisioners(&self) -> Result<ProvisionersResponse, ApiError>;
 
-    /// `POST /api/v1/provisioners/:name/test` (疎通検証)。
+    /// `POST /api/v1/provisioners/:name/test` (connectivity check).
     ///
-    /// 中央サーバーのみ対応。ローカルノードの既定実装は `INVALID_STATE`
-    /// を返す (プロビジョナーはサーバーホスト上でのみ起動される)。
+    /// Central server only. The default local-node implementation returns `INVALID_STATE`
+    /// (provisioners are launched only on the server host).
     async fn provisioner_test(
         &self,
         _name: &str,
@@ -582,10 +582,10 @@ pub trait ClientApiBackend: Clone + Send + Sync + 'static {
         client: ClientInfo,
     ) -> Result<KillSwitchResponse, ApiError>;
 
-    /// `POST /api/v1/push/subscribe` (Web Push 購読登録)。
+    /// `POST /api/v1/push/subscribe` (register a Web Push subscription).
     ///
-    /// 中央サーバーのみ対応 (Phase 5)。ローカルノードの既定実装は
-    /// `INVALID_STATE` を返す。
+    /// Central server only (Phase 5). The default local-node implementation returns
+    /// `INVALID_STATE`.
     async fn push_subscribe(
         &self,
         _request: PushSubscribeRequest,
@@ -601,50 +601,50 @@ pub trait ClientApiBackend: Clone + Send + Sync + 'static {
     // PTY WS (`/api/v1/pty/ws`)
     // ------------------------------------------------------------------
 
-    /// PTY を起動する (`params.pty_id` は呼び出し側が採番)。
+    /// Spawns a PTY (`params.pty_id` is assigned by the caller).
     async fn pty_spawn(&self, params: PtySpawnParams) -> Result<(), PtyChannelError>;
 
-    /// 既存 PTY の存在確認 (アタッチ可否)。
+    /// Checks whether a PTY exists (whether it can be attached).
     async fn pty_attach(&self, pty_id: &str) -> Result<(), PtyChannelError>;
 
-    /// PTY 出力を購読する。
+    /// Subscribes to PTY output.
     async fn pty_subscribe(
         &self,
         pty_id: &str,
     ) -> Result<broadcast::Receiver<PtyChannelEvent>, PtyChannelError>;
 
-    /// PTY へキー入力を書き込む。
+    /// Writes keystrokes to the PTY.
     async fn pty_write(&self, pty_id: &str, data: &[u8]) -> Result<(), PtyChannelError>;
 
-    /// PTY をリサイズする。
+    /// Resizes the PTY.
     async fn pty_resize(&self, pty_id: &str, cols: u16, rows: u16) -> Result<(), PtyChannelError>;
 
-    /// PTY を終了する。
+    /// Kills the PTY.
     async fn pty_kill(&self, pty_id: &str) -> Result<(), PtyChannelError>;
 
-    /// PTY WS 切断時、このソケットで spawn した PTY を終了する (attach は対象外)。
+    /// Kills PTYs spawned by this socket when the PTY WS disconnects (attached ones excluded).
     async fn pty_disconnect(&self, pty_id: &str);
 }
 
 // ----------------------------------------------------------------------
-// ルーター
+// Router
 // ----------------------------------------------------------------------
 
-/// ルーター構築オプション。
+/// Router construction options.
 #[derive(Debug, Clone)]
 pub struct ClientApiOptions {
-    /// 実際にバインドされたポート (localhost / 127.0.0.1 の Host / Origin 検証用)
+    /// The port actually bound (for Host / Origin validation of localhost / 127.0.0.1)
     pub port: u16,
-    /// `localhost` 系以外に許可する Host 一覧
-    /// (中央サーバーの `server.allowed_hosts`)
+    /// Hosts allowed in addition to the `localhost` family
+    /// (the central server's `server.allowed_hosts`)
     pub extra_allowed_hosts: Vec<String>,
-    /// 同一オリジン以外に許可する Origin 一覧
-    /// (中央サーバーの `server.allowed_origins`)
+    /// Origins allowed in addition to the same origin
+    /// (the central server's `server.allowed_origins`)
     pub extra_allowed_origins: Vec<String>,
 }
 
 impl ClientApiOptions {
-    /// ローカルノード用 (ループバックのみ許可)。
+    /// For a local node (loopback only).
     pub fn local(port: u16) -> Self {
         Self {
             port,
@@ -654,26 +654,26 @@ impl ClientApiOptions {
     }
 }
 
-/// ルーターの共有状態。
+/// Shared state for the router.
 #[derive(Clone)]
 pub struct ClientApiState<B: ClientApiBackend> {
-    /// バックエンド実装
+    /// Backend implementation
     pub backend: B,
-    /// セキュリティ設定
+    /// Security configuration
     pub options: Arc<ClientApiOptions>,
 }
 
-/// 認証不要の接続先メタ情報エンドポイント (`GET /api/v1/meta`)。
+/// Unauthenticated connection metadata endpoint (`GET /api/v1/meta`).
 ///
-/// セキュリティミドルウェア ([`security::security`]) はこのパスのみ認証を
-/// 免除する (Host / Origin 検証は維持)。
+/// The security middleware ([`security::security`]) exempts only this path from authentication
+/// (Host / Origin validation still applies).
 pub(crate) const META_PATH: &str = "/api/v1/meta";
 
-/// Client REST / WS / PTY WS の共通ルーターを構築する。
+/// Builds the shared Client REST / WS / PTY WS router.
 ///
-/// 呼び出し側は
+/// The caller must serve it with
 /// `axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>())`
-/// で配信すること (クライアント IP を監査ログに記録するため)。
+/// (so the client IP is recorded in audit logs).
 pub fn client_router<B: ClientApiBackend>(backend: B, options: ClientApiOptions) -> Router {
     let state = ClientApiState {
         backend,
@@ -774,19 +774,19 @@ pub fn client_router<B: ClientApiBackend>(backend: B, options: ClientApiOptions)
             security::security::<B>,
         ))
         .with_state(state);
-    // API 以外の全パスは同梱した Web UI (SPA) を配信する。
-    // セキュリティミドルウェアの外側に置く (UI アセット自体はトークン不要) 。
+    // Serve the embedded Web UI (SPA) for every non-API path.
+    // It sits outside the security middleware (the UI assets themselves need no token).
     api.fallback(get(static_ui::serve_ui))
 }
 
 // ----------------------------------------------------------------------
-// REST ハンドラ
+// REST handlers
 // ----------------------------------------------------------------------
 
-/// `GET /api/v1/meta`: 認証不要の接続先メタ情報。
+/// `GET /api/v1/meta`: connection metadata that needs no authentication.
 ///
-/// 未認証の Web UI がトークン入力ダイアログを正しく表示できるよう、接続先
-/// 種別のみを返す (認証なしで到達できる唯一の API。Host / Origin 検証は適用)。
+/// Returns only the connection kind so an unauthenticated Web UI can show the token input
+/// dialog correctly (the only API reachable without auth. Host / Origin validation applies).
 async fn meta<B: ClientApiBackend>(State(state): State<ClientApiState<B>>) -> Response {
     Json(MetaResponse {
         role: state.backend.connection_role(),
@@ -809,14 +809,14 @@ async fn system_info<B: ClientApiBackend>(State(state): State<ClientApiState<B>>
     .into_response()
 }
 
-/// 認証 Cookie の名前 (`docs/03` §3.0)。
+/// Name of the auth cookie (`docs/03` §3.0).
 const SESSION_COOKIE: &str = "fxg_session";
 
-/// `POST /api/v1/auth/login`: Web UI のトークン入力を検証し、`fxg_session`
-/// Cookie (HttpOnly / SameSite=Strict) を発行する。
+/// `POST /api/v1/auth/login`: validates the Web UI's token input and issues an `fxg_session`
+/// cookie (HttpOnly / SameSite=Strict).
 ///
-/// エンドポイント自体も共通セキュリティミドルウェアの認証を通過する必要が
-/// あるため (`Authorization: Bearer`)、body のトークンは再検証のみを行う。
+/// The endpoint itself must also pass the shared security middleware's authentication
+/// (`Authorization: Bearer`), so the token in the body is only re-validated.
 async fn auth_login<B: ClientApiBackend>(
     State(state): State<ClientApiState<B>>,
     Json(request): Json<AuthLoginRequest>,
@@ -829,7 +829,7 @@ async fn auth_login<B: ClientApiBackend>(
     (StatusCode::NO_CONTENT, [(header::SET_COOKIE, cookie)]).into_response()
 }
 
-/// `POST /api/v1/auth/logout`: `fxg_session` Cookie を失効させる。
+/// `POST /api/v1/auth/logout`: invalidates the `fxg_session` cookie.
 async fn auth_logout() -> Response {
     let cookie = format!("{SESSION_COOKIE}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0");
     (StatusCode::NO_CONTENT, [(header::SET_COOKIE, cookie)]).into_response()
@@ -869,7 +869,7 @@ async fn list_provisioners<B: ClientApiBackend>(
     }
 }
 
-/// `POST /api/v1/provisioners/:name/test`: プロビジョナーの起動とハンドシェイクを検証する。
+/// `POST /api/v1/provisioners/:name/test`: validates provisioner startup and handshake.
 async fn test_provisioner<B: ClientApiBackend>(
     State(state): State<ClientApiState<B>>,
     UrlPath(provisioner): UrlPath<String>,
@@ -885,7 +885,7 @@ struct SessionListQuery {
     project_id: Option<String>,
     node_id: Option<String>,
     status: Option<String>,
-    /// アーカイブ済みセッションを含めるか (既定 `false`)
+    /// Whether to include archived sessions (default `false`)
     include_archived: Option<bool>,
     limit: Option<u32>,
 }
@@ -952,7 +952,7 @@ async fn session_diff<B: ClientApiBackend>(
     Query(params): Query<DiffQuery>,
 ) -> Response {
     let scope = match params.scope.as_deref() {
-        // 設計上の表記 (`scope=branch`) と enum 名の双方を受け付ける
+        // Accept both the design notation (`scope=branch`) and the enum name
         None | Some("") | Some("uncommitted") => DiffScope::Uncommitted,
         Some("branch") | Some("branch_base") | Some("branchbase") => DiffScope::BranchBase,
         Some(other) => {
@@ -1392,7 +1392,7 @@ async fn push_subscribe<B: ClientApiBackend>(
 }
 
 // ----------------------------------------------------------------------
-// WebSocket アップグレード
+// WebSocket upgrades
 // ----------------------------------------------------------------------
 
 async fn client_ws<B: ClientApiBackend>(
@@ -1412,10 +1412,10 @@ async fn pty_ws<B: ClientApiBackend>(
 }
 
 // ----------------------------------------------------------------------
-// ヘルパー
+// Helpers
 // ----------------------------------------------------------------------
 
-/// WS 送信の共通ヘルパー (`send_json`)。
+/// Shared helper for sending over WS (`send_json`).
 pub(crate) async fn send_ws_json<T: serde::Serialize>(
     sender: &mut futures_util::stream::SplitSink<WebSocket, Message>,
     message: &T,
@@ -1431,7 +1431,7 @@ pub(crate) async fn send_ws_json<T: serde::Serialize>(
         })
 }
 
-/// `cursor` 以降のイベントを `SessionEventBatch` として送り切る。
+/// Sends all events from `cursor` onward as `SessionEventBatch` messages.
 pub(crate) async fn replay_events<B: ClientApiBackend>(
     backend: &B,
     sender: &mut futures_util::stream::SplitSink<WebSocket, Message>,
@@ -1464,7 +1464,7 @@ pub(crate) async fn replay_events<B: ClientApiBackend>(
     }
 }
 
-/// `Request` が WebSocket アップグレードかどうか。
+/// Whether the `Request` is a WebSocket upgrade.
 pub(crate) fn is_websocket_upgrade(request: &Request) -> bool {
     request
         .headers()

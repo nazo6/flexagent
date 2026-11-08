@@ -1,18 +1,19 @@
-//! 共通セキュリティミドルウェア (Host / Origin / Token 検証)。
+//! Shared security middleware (Host / Origin / Token validation).
 //!
-//! 設計: `docs/03-protocol-and-api.md` §3.0 / `docs/01-architecture-and-sync.md`
-//! §7.1〜§7.3。ローカルノード (`127.0.0.1:7860`) と中央サーバー (`:8080`) で
-//! 同一の検証ロジックを共有し、許可ホスト / オリジンだけを
-//! [`ClientApiOptions`](super::ClientApiOptions) で差し替える。
+//! Design: `docs/03-protocol-and-api.md` §3.0 / `docs/01-architecture-and-sync.md` §7.1–§7.3.
+//! The local node (`127.0.0.1:7860`) and the central server (`:8080`) share the same validation
+//! logic, swapping only the allowed hosts / origins via
+//! [`ClientApiOptions`](super::ClientApiOptions).
 //!
-//! 1. **Host ヘッダ検証** (DNS Rebinding 対策): `localhost` / `127.0.0.1` / `[::1]`
-//!    と設定許可ホスト以外は `403 Forbidden`
-//! 2. **Origin ヘッダ検証** (CSWSH 対策): WebSocket ハンドシェイクで自オリジン
-//!    以外は `403 Forbidden` (`Origin` 無しの非ブラウザクライアントは許可)
-//! 3. **認証**: `Authorization: Bearer <auth_token>` または
-//!    `Cookie: fxg_session=<auth_token>`。未認証は `401 Unauthorized`。
-//!    例外は接続先メタ情報 (`GET /api/v1/meta`) のみで、Host / Origin 検証
-//!    だけを適用する (未認証の Web UI が接続先種別を判定するために必要)。
+//! 1. **Host header validation** (DNS rebinding mitigation): anything other than `localhost` /
+//!    `127.0.0.1` / `[::1]` and the configured allowed hosts gets `403 Forbidden`
+//! 2. **Origin header validation** (CSWSH mitigation): on a WebSocket handshake, anything other
+//!    than the same origin gets `403 Forbidden` (non-browser clients without `Origin` are allowed)
+//! 3. **Authentication**: `Authorization: Bearer <auth_token>` or
+//!    `Cookie: fxg_session=<auth_token>`. Unauthenticated requests get `401 Unauthorized`.
+//!    The only exception is the connection metadata (`GET /api/v1/meta`), where only Host /
+//!    Origin validation applies (an unauthenticated Web UI needs it to determine the connection
+//!    kind).
 
 use axum::extract::{ConnectInfo, Request, State};
 use axum::http::{HeaderMap, Method, header};
@@ -22,10 +23,10 @@ use axum::response::{IntoResponse, Response};
 use super::auth::token_matches;
 use super::{ApiError, ClientApiBackend, ClientApiState, ClientInfo, is_websocket_upgrade};
 
-/// Host / Origin / Token 検証を行うミドルウェア。
+/// Middleware that validates Host / Origin / Token.
 ///
-/// 認証を通ったリクエストには [`ClientInfo`] (送信元 IP / UA / 認証主体) を
-/// 拡張として挿入する (ハンドラは `Extension<ClientInfo>` で受け取る)。
+/// For authenticated requests it inserts [`ClientInfo`] (source IP / UA / auth subject) into the
+/// extensions (handlers receive it as `Extension<ClientInfo>`).
 pub(crate) async fn security<B: ClientApiBackend>(
     State(state): State<ClientApiState<B>>,
     mut request: Request,
@@ -47,17 +48,17 @@ pub(crate) async fn security<B: ClientApiBackend>(
     next.run(request).await
 }
 
-/// 認証を免除するルート (`GET /api/v1/meta`) かどうか。
+/// Whether the route is exempt from authentication (`GET /api/v1/meta`).
 ///
-/// Host / Origin 検証は通常どおり適用される。
+/// Host / Origin validation still applies as usual.
 fn is_auth_exempt(request: &Request) -> bool {
     request.method() == Method::GET && request.uri().path() == super::META_PATH
 }
 
-/// 接続元情報から [`ClientInfo`] を組み立てる。
+/// Builds [`ClientInfo`] from the connection details.
 ///
-/// `ConnectInfo` は `into_make_service_with_connect_info` 経由で拡張に挿入される
-/// (テスト等で存在しない場合は `local` 扱い)。
+/// `ConnectInfo` is inserted into the extensions via `into_make_service_with_connect_info`
+/// (treated as `local` when absent, e.g. in tests).
 fn client_info(request: &Request) -> ClientInfo {
     let addr = request
         .extensions()
@@ -66,7 +67,7 @@ fn client_info(request: &Request) -> ClientInfo {
     ClientInfo::from_request(request.headers(), addr)
 }
 
-/// Host ヘッダ検証 (DNS Rebinding 対策)。拒否時はエラーレスポンスを返す。
+/// Host header validation (DNS rebinding mitigation). Returns an error response on rejection.
 fn verify_host<B: ClientApiBackend>(
     state: &ClientApiState<B>,
     headers: &HeaderMap,
@@ -91,7 +92,7 @@ fn verify_host<B: ClientApiBackend>(
     }
 }
 
-/// `localhost` / `127.0.0.1` / `[::1]` (ポート付き含む) かどうか。
+/// Whether it is `localhost` / `127.0.0.1` / `[::1]` (including with a port).
 fn is_loopback_host(host: &str, port: u16) -> bool {
     let allowed = [
         format!("localhost:{port}"),
@@ -105,9 +106,9 @@ fn is_loopback_host(host: &str, port: u16) -> bool {
         .any(|candidate| candidate.eq_ignore_ascii_case(host))
 }
 
-/// WebSocket ハンドシェイクの Origin 検証 (CSWSH 対策)。
+/// Origin validation for WebSocket handshakes (CSWSH mitigation).
 ///
-/// 非ブラウザクライアント (CLI / native) は `Origin` を送らないため許可する。
+/// Non-browser clients (CLI / native) do not send `Origin`, so they are allowed.
 fn verify_origin<B: ClientApiBackend>(
     state: &ClientApiState<B>,
     request: &Request,
@@ -115,7 +116,7 @@ fn verify_origin<B: ClientApiBackend>(
     if !is_websocket_upgrade(request) {
         return None;
     }
-    // Origin ヘッダが無い場合 (非ブラウザクライアント) は許可する
+    // Allow requests without an Origin header (non-browser clients)
     let origin = request
         .headers()
         .get(header::ORIGIN)
@@ -139,7 +140,7 @@ fn verify_origin<B: ClientApiBackend>(
     }
 }
 
-/// 認証 (Bearer ヘッダまたは `fxg_session` Cookie)。拒否時は 401 を返す。
+/// Authentication (Bearer header or `fxg_session` cookie). Returns 401 on rejection.
 fn verify_auth<B: ClientApiBackend>(
     state: &ClientApiState<B>,
     headers: &HeaderMap,
@@ -174,7 +175,7 @@ fn verify_auth<B: ClientApiBackend>(
     )
 }
 
-/// `Cookie` ヘッダから指定キーの値を取り出す。
+/// Extracts the value of the given key from a `Cookie` header.
 fn extract_cookie(header: &str, key: &str) -> Option<String> {
     header.split(';').find_map(|part| {
         let (name, value) = part.split_once('=')?;
