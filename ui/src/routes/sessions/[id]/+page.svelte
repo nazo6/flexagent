@@ -60,6 +60,7 @@
       thoughtDeltas: timeline.thoughtDeltas,
       toolProgress: timeline.toolProgress,
       terminalDeltas: timeline.terminalDeltas,
+      streamKeys: timeline.streamKeys,
       pendingPrompts: sync.pendingPrompts,
     }),
   );

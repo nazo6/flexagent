@@ -37,6 +37,7 @@ function emptySources(events: SessionEventEnvelope[] = []): TimelineSources & Mu
     thoughtDeltas: new Map(),
     toolProgress: new Map(),
     terminalDeltas: new Map(),
+    streamKeys: [],
   };
 }
 
@@ -70,6 +71,36 @@ describe("insertEventSorted", () => {
 });
 
 describe("streaming agent messages", () => {
+  it("keeps the arrival order of reasoning and messages", () => {
+    const sources = emptySources();
+    applyStreamDelta(sources, {
+      delta_type: "agent_thought_delta",
+      thought_id: "t1",
+      text_delta: "thinking",
+    });
+    applyStreamDelta(sources, {
+      delta_type: "agent_message_delta",
+      message_id: "m1",
+      text_delta: "answer",
+    });
+
+    const items = buildTimelineItems(sources);
+    expect(items.map((item) => item.kind)).toEqual(["thought", "agent"]);
+
+    const thought = makeEvent(1, {
+      type: "agent_thought",
+      data: { thought_id: "t1", text: "thinking", is_complete: true },
+    });
+    insertEventSorted(sources.events, thought);
+    clearStreamBuffers(thought, sources);
+    expect(sources.streamKeys).toEqual(["message:m1"]);
+
+    const itemsAfter = buildTimelineItems(sources);
+    expect(itemsAfter.map((item) => item.kind)).toEqual(["thought", "agent"]);
+    expect(itemsAfter[0]).toMatchObject({ streaming: false });
+    expect(itemsAfter[1]).toMatchObject({ streaming: true });
+  });
+
   it("merges deltas and replaces them with the completed event", () => {
     const sources = emptySources();
     const delta1: StreamDeltaPayload = {

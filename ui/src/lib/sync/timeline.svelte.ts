@@ -24,6 +24,8 @@ export class SessionTimeline {
   thoughtDeltas = $state(new Map<string, string>());
   toolProgress = $state(new Map<string, ToolProgress>());
   terminalDeltas = $state(new Map<string, string>());
+  /** Streaming buffers in the order their first delta arrived (`${kind}:${id}`). */
+  streamKeys = $state<string[]>([]);
 
   constructor(sessionId: string) {
     this.sessionId = sessionId;
@@ -47,5 +49,6 @@ export class SessionTimeline {
     this.thoughtDeltas.clear();
     this.toolProgress.clear();
     this.terminalDeltas.clear();
+    this.streamKeys.length = 0;
   }
 }

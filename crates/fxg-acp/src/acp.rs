@@ -1773,7 +1773,12 @@ impl SessionCapabilitiesState {
     }
 }
 
-/// Accumulates streaming chunks and emits completion events when the message changes.
+/// Accumulates streaming chunks and emits completion events when the stream changes.
+///
+/// Only completion events are persisted (docs/01 §2.3), and they consume a
+/// `node_seq` at the moment they are emitted. A stream must therefore be
+/// finalized as soon as the agent moves on to a different stream, otherwise the
+/// reasoning would be recorded after the answer it preceded.
 #[derive(Debug, Default)]
 struct StreamingAccumulator {
     message: Option<(String, String)>,
@@ -1786,70 +1791,71 @@ impl StreamingAccumulator {
         self.thought = None;
     }
 
-    /// Appends a message chunk. When the message ID changes, returns the completion
-    /// event for the previous message.
-    fn push_message(&mut self, message_id: String, delta: &str) -> Option<UnifiedEventPayload> {
-        match &mut self.message {
-            Some((id, text)) if *id == message_id => {
-                text.push_str(delta);
-                None
-            }
-            Some((id, text)) => {
-                let finished = UnifiedEventPayload::AgentMessage {
-                    message_id: id.clone(),
-                    text: std::mem::take(text),
-                    is_complete: true,
-                };
-                self.message = Some((message_id, delta.to_owned()));
-                Some(finished)
-            }
-            None => {
-                self.message = Some((message_id, delta.to_owned()));
-                None
-            }
-        }
+    fn finish_message(&mut self) -> Option<UnifiedEventPayload> {
+        self.message
+            .take()
+            .map(|(message_id, text)| UnifiedEventPayload::AgentMessage {
+                message_id,
+                text,
+                is_complete: true,
+            })
     }
 
-    /// Appends a thought chunk (same behavior as messages).
-    fn push_thought(&mut self, thought_id: String, delta: &str) -> Option<UnifiedEventPayload> {
-        match &mut self.thought {
-            Some((id, text)) if *id == thought_id => {
-                text.push_str(delta);
-                None
-            }
-            Some((id, text)) => {
-                let finished = UnifiedEventPayload::AgentThought {
-                    thought_id: id.clone(),
-                    text: std::mem::take(text),
-                    is_complete: true,
-                };
-                self.thought = Some((thought_id, delta.to_owned()));
-                Some(finished)
-            }
-            None => {
-                self.thought = Some((thought_id, delta.to_owned()));
-                None
-            }
+    fn finish_thought(&mut self) -> Option<UnifiedEventPayload> {
+        self.thought
+            .take()
+            .map(|(thought_id, text)| UnifiedEventPayload::AgentThought {
+                thought_id,
+                text,
+                is_complete: true,
+            })
+    }
+
+    /// Appends a message chunk. Returns the completion events for any stream that
+    /// ended before this message started (a thought, or a message with another ID).
+    fn push_message(&mut self, message_id: String, delta: &str) -> Vec<UnifiedEventPayload> {
+        let mut out = Vec::new();
+        // Reasoning always precedes the answer it belongs to.
+        out.extend(self.finish_thought());
+        if self
+            .message
+            .as_ref()
+            .is_some_and(|(id, _)| *id != message_id)
+        {
+            out.extend(self.finish_message());
         }
+        match &mut self.message {
+            Some((_, text)) => text.push_str(delta),
+            None => self.message = Some((message_id, delta.to_owned())),
+        }
+        out
+    }
+
+    /// Appends a thought chunk. Returns the completion events for any stream that
+    /// ended before this thought started (a message, or a thought with another ID).
+    fn push_thought(&mut self, thought_id: String, delta: &str) -> Vec<UnifiedEventPayload> {
+        let mut out = Vec::new();
+        out.extend(self.finish_message());
+        if self
+            .thought
+            .as_ref()
+            .is_some_and(|(id, _)| *id != thought_id)
+        {
+            out.extend(self.finish_thought());
+        }
+        match &mut self.thought {
+            Some((_, text)) => text.push_str(delta),
+            None => self.thought = Some((thought_id, delta.to_owned())),
+        }
+        out
     }
 
     /// Takes the accumulated message / thought as completion events.
     fn finish_all(&mut self) -> Vec<UnifiedEventPayload> {
         let mut out = Vec::new();
-        if let Some((id, text)) = self.message.take() {
-            out.push(UnifiedEventPayload::AgentMessage {
-                message_id: id,
-                text,
-                is_complete: true,
-            });
-        }
-        if let Some((id, text)) = self.thought.take() {
-            out.push(UnifiedEventPayload::AgentThought {
-                thought_id: id,
-                text,
-                is_complete: true,
-            });
-        }
+        // Defensive ordering: reasoning precedes the answer within a turn.
+        out.extend(self.finish_thought());
+        out.extend(self.finish_message());
         out
     }
 }
@@ -1874,7 +1880,7 @@ fn map_session_update(
                 let message_id = message_id
                     .map(|id| id.to_string())
                     .unwrap_or_else(|| "acp-message".to_owned());
-                if let Some(finished) = accumulator.push_message(message_id.clone(), &text) {
+                for finished in accumulator.push_message(message_id.clone(), &text) {
                     events.push(DriverEvent::Event(finished));
                 }
                 events.push(DriverEvent::Delta(StreamDeltaPayload::AgentMessageDelta {
@@ -1892,7 +1898,7 @@ fn map_session_update(
                 let thought_id = message_id
                     .map(|id| id.to_string())
                     .unwrap_or_else(|| "acp-thought".to_owned());
-                if let Some(finished) = accumulator.push_thought(thought_id.clone(), &text) {
+                for finished in accumulator.push_thought(thought_id.clone(), &text) {
                     events.push(DriverEvent::Event(finished));
                 }
                 events.push(DriverEvent::Delta(StreamDeltaPayload::AgentThoughtDelta {
@@ -2405,6 +2411,18 @@ mod tests {
         )
     }
 
+    fn thought_chunk(text: &str, message_id: Option<&str>) -> SessionUpdate {
+        let mut value = serde_json::json!({
+            "content": { "type": "text", "text": text },
+        });
+        if let Some(id) = message_id {
+            value["messageId"] = serde_json::Value::String(id.to_owned());
+        }
+        SessionUpdate::AgentThoughtChunk(
+            serde_json::from_value(value).expect("content chunk fixture"),
+        )
+    }
+
     /// Builds `AgentCapabilities` from a combination of capabilities.
     fn agent_capabilities(load_session: bool, resume: bool) -> AgentCapabilities {
         // `AgentCapabilities` is non_exhaustive, so build it from default
@@ -2634,6 +2652,82 @@ mod tests {
             }
             other => panic!("unexpected payload: {other:?}"),
         }
+    }
+
+    #[test]
+    fn thought_is_completed_before_the_answer_that_follows_it() {
+        let mut acc = StreamingAccumulator::default();
+        let mut caps = SessionCapabilitiesState::default();
+
+        let events = map_session_update(thought_chunk("thinking", Some("m1")), &mut acc, &mut caps);
+        assert_eq!(events.len(), 1);
+        assert!(matches!(events[0], DriverEvent::Delta(_)));
+
+        // The first message chunk must finalize the reasoning stream so its
+        // completion event is recorded before the answer.
+        let events = map_session_update(text_chunk("answer", Some("m1")), &mut acc, &mut caps);
+        assert_eq!(events.len(), 2);
+        match &events[0] {
+            DriverEvent::Event(UnifiedEventPayload::AgentThought {
+                thought_id,
+                text,
+                is_complete,
+            }) => {
+                assert_eq!(thought_id, "m1");
+                assert_eq!(text, "thinking");
+                assert!(is_complete);
+            }
+            other => panic!("unexpected event: {other:?}"),
+        }
+        assert!(matches!(
+            events[1],
+            DriverEvent::Delta(StreamDeltaPayload::AgentMessageDelta { .. })
+        ));
+
+        let finished = acc.finish_all();
+        assert_eq!(finished.len(), 1);
+        assert!(matches!(
+            finished[0],
+            UnifiedEventPayload::AgentMessage { .. }
+        ));
+    }
+
+    #[test]
+    fn finish_all_emits_thought_before_message() {
+        // Defensive ordering for a state that the chunk APIs no longer produce
+        // (both streams still open at turn end).
+        let mut acc = StreamingAccumulator {
+            message: Some(("m1".to_owned(), "answer".to_owned())),
+            thought: Some(("t1".to_owned(), "thinking".to_owned())),
+        };
+        let finished = acc.finish_all();
+        assert_eq!(finished.len(), 2);
+        assert!(matches!(
+            finished[0],
+            UnifiedEventPayload::AgentThought { .. }
+        ));
+        assert!(matches!(
+            finished[1],
+            UnifiedEventPayload::AgentMessage { .. }
+        ));
+    }
+
+    #[test]
+    fn thought_after_message_finalizes_the_message_first() {
+        let mut acc = StreamingAccumulator::default();
+        let mut caps = SessionCapabilitiesState::default();
+
+        map_session_update(text_chunk("answer", Some("m1")), &mut acc, &mut caps);
+        let events = map_session_update(thought_chunk("thinking", Some("m2")), &mut acc, &mut caps);
+        assert_eq!(events.len(), 2);
+        assert!(matches!(
+            events[0],
+            DriverEvent::Event(UnifiedEventPayload::AgentMessage { .. })
+        ));
+        assert!(matches!(
+            events[1],
+            DriverEvent::Delta(StreamDeltaPayload::AgentThoughtDelta { .. })
+        ));
     }
 
     #[test]

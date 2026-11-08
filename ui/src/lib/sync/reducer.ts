@@ -39,6 +39,12 @@ export interface TimelineSources {
   toolProgress: ReadonlyMap<string, ToolProgress>;
   terminalDeltas: ReadonlyMap<string, string>;
   pendingPrompts?: ReadonlyMap<string, PendingPrompt>;
+  /**
+   * Streaming buffers in the order their first delta arrived, as
+   * `${kind}:${id}` keys. Keeps reasoning and messages interleaved correctly
+   * while they are still streaming.
+   */
+  streamKeys?: readonly string[];
 }
 
 /** Streaming buffers that can be rewritten (mutable maps). */
@@ -47,6 +53,22 @@ export interface MutableStreamBuffers {
   thoughtDeltas: Map<string, string>;
   toolProgress: Map<string, ToolProgress>;
   terminalDeltas: Map<string, string>;
+  streamKeys: string[];
+}
+
+type StreamKind = "message" | "thought" | "tool" | "terminal";
+
+function streamKey(kind: StreamKind, id: string): string {
+  return `${kind}:${id}`;
+}
+
+function trackStream(sources: MutableStreamBuffers, key: string): void {
+  if (!sources.streamKeys.includes(key)) sources.streamKeys.push(key);
+}
+
+function untrackStream(sources: MutableStreamBuffers, key: string): void {
+  const index = sources.streamKeys.indexOf(key);
+  if (index !== -1) sources.streamKeys.splice(index, 1);
 }
 
 /** One entry in the chat timeline. */
@@ -184,12 +206,14 @@ export function applyStreamDelta(sources: MutableStreamBuffers, delta: StreamDel
         delta.message_id,
         (sources.messageDeltas.get(delta.message_id) ?? "") + delta.text_delta,
       );
+      trackStream(sources, streamKey("message", delta.message_id));
       break;
     case "agent_thought_delta":
       sources.thoughtDeltas.set(
         delta.thought_id,
         (sources.thoughtDeltas.get(delta.thought_id) ?? "") + delta.text_delta,
       );
+      trackStream(sources, streamKey("thought", delta.thought_id));
       break;
     case "tool_call_progress": {
       const current = sources.toolProgress.get(delta.tool_call_id) ?? {
@@ -200,6 +224,7 @@ export function applyStreamDelta(sources: MutableStreamBuffers, delta: StreamDel
         status: delta.status,
         output: current.output + (delta.raw_output_delta ?? ""),
       });
+      trackStream(sources, streamKey("tool", delta.tool_call_id));
       break;
     }
     case "terminal_output_delta":
@@ -207,6 +232,7 @@ export function applyStreamDelta(sources: MutableStreamBuffers, delta: StreamDel
         delta.terminal_id,
         (sources.terminalDeltas.get(delta.terminal_id) ?? "") + decodeBase64ToText(delta.data_b64),
       );
+      trackStream(sources, streamKey("terminal", delta.terminal_id));
       break;
   }
 }
@@ -219,14 +245,21 @@ export function clearStreamBuffers(
   const payload = event.payload;
   switch (payload.type) {
     case "agent_message":
-      if (payload.data.is_complete) sources.messageDeltas.delete(payload.data.message_id);
+      if (payload.data.is_complete) {
+        sources.messageDeltas.delete(payload.data.message_id);
+        untrackStream(sources, streamKey("message", payload.data.message_id));
+      }
       break;
     case "agent_thought":
-      if (payload.data.is_complete) sources.thoughtDeltas.delete(payload.data.thought_id);
+      if (payload.data.is_complete) {
+        sources.thoughtDeltas.delete(payload.data.thought_id);
+        untrackStream(sources, streamKey("thought", payload.data.thought_id));
+      }
       break;
     case "tool_call":
       if (payload.data.status === "completed" || payload.data.status === "failed") {
         sources.toolProgress.delete(payload.data.tool_call_id);
+        untrackStream(sources, streamKey("tool", payload.data.tool_call_id));
       }
       break;
     case "terminal_output":
@@ -234,6 +267,7 @@ export function clearStreamBuffers(
       // arrives, discard the matching streaming buffer to avoid duplicates
       if (payload.data.exit_code !== null) {
         sources.terminalDeltas.delete(payload.data.terminal_id);
+        untrackStream(sources, streamKey("terminal", payload.data.terminal_id));
       }
       break;
     default:
@@ -499,64 +533,92 @@ export function buildTimelineItems(sources: TimelineSources): TimelineItem[] {
   let streamOffset = 0;
   const nextStreamSeq = () => STREAM_SEQ + streamOffset++;
 
-  for (const [messageId, text] of sources.messageDeltas) {
-    items.push({
-      kind: "agent",
-      key: `agent:${messageId}:stream`,
-      seq: nextStreamSeq(),
-      createdAt: items.at(-1)?.createdAt ?? 0,
-      text,
-      streaming: true,
-    });
-  }
-  for (const [thoughtId, text] of sources.thoughtDeltas) {
-    items.push({
-      kind: "thought",
-      key: `thought:${thoughtId}:stream`,
-      seq: nextStreamSeq(),
-      createdAt: items.at(-1)?.createdAt ?? 0,
-      text,
-      streaming: true,
-    });
-  }
-  for (const [toolCallId, progress] of sources.toolProgress) {
-    if (toolIndex.has(toolCallId)) continue;
-    items.push({
-      kind: "tool",
-      key: `tool:${toolCallId}`,
-      seq: nextStreamSeq(),
-      createdAt: items.at(-1)?.createdAt ?? 0,
-      toolCallId,
-      title: toolCallId,
-      toolKind: "other",
-      status: progress.status,
-      locations: [],
-      diff: null,
-      rawOutput: progress.output === "" ? null : progress.output,
-    });
-  }
-  for (const [terminalId, output] of sources.terminalDeltas) {
-    const existing = terminalIndex.get(terminalId);
-    if (existing !== undefined) {
-      const item = items[existing];
-      if (item.kind === "terminal") {
-        items[existing] = {
-          ...item,
-          output: appendTerminalText(item.output, output),
-        };
+  // Preserve the order in which each stream first received a delta, so a
+  // reasoning block and the answer that follows it keep their real order while
+  // they are still streaming.
+  const streamingOrder = sources.streamKeys ?? [
+    ...[...sources.messageDeltas.keys()].map((id) => streamKey("message", id)),
+    ...[...sources.thoughtDeltas.keys()].map((id) => streamKey("thought", id)),
+    ...[...sources.toolProgress.keys()].map((id) => streamKey("tool", id)),
+    ...[...sources.terminalDeltas.keys()].map((id) => streamKey("terminal", id)),
+  ];
+
+  for (const key of streamingOrder) {
+    const separator = key.indexOf(":");
+    const kind = key.slice(0, separator) as StreamKind;
+    const id = key.slice(separator + 1);
+    switch (kind) {
+      case "message": {
+        const text = sources.messageDeltas.get(id);
+        if (text === undefined) continue;
+        items.push({
+          kind: "agent",
+          key: `agent:${id}:stream`,
+          seq: nextStreamSeq(),
+          createdAt: items.at(-1)?.createdAt ?? 0,
+          text,
+          streaming: true,
+        });
+        break;
       }
-    } else {
-      terminalIndex.set(terminalId, items.length);
-      items.push({
-        kind: "terminal",
-        key: `terminal:${terminalId}`,
-        seq: nextStreamSeq(),
-        createdAt: items.at(-1)?.createdAt ?? 0,
-        terminalId,
-        command: "",
-        output,
-        exitCode: null,
-      });
+      case "thought": {
+        const text = sources.thoughtDeltas.get(id);
+        if (text === undefined) continue;
+        items.push({
+          kind: "thought",
+          key: `thought:${id}:stream`,
+          seq: nextStreamSeq(),
+          createdAt: items.at(-1)?.createdAt ?? 0,
+          text,
+          streaming: true,
+        });
+        break;
+      }
+      case "tool": {
+        const progress = sources.toolProgress.get(id);
+        if (progress === undefined || toolIndex.has(id)) continue;
+        items.push({
+          kind: "tool",
+          key: `tool:${id}`,
+          seq: nextStreamSeq(),
+          createdAt: items.at(-1)?.createdAt ?? 0,
+          toolCallId: id,
+          title: id,
+          toolKind: "other",
+          status: progress.status,
+          locations: [],
+          diff: null,
+          rawOutput: progress.output === "" ? null : progress.output,
+        });
+        break;
+      }
+      case "terminal": {
+        const output = sources.terminalDeltas.get(id);
+        if (output === undefined) continue;
+        const existing = terminalIndex.get(id);
+        if (existing !== undefined) {
+          const item = items[existing];
+          if (item.kind === "terminal") {
+            items[existing] = {
+              ...item,
+              output: appendTerminalText(item.output, output),
+            };
+          }
+        } else {
+          terminalIndex.set(id, items.length);
+          items.push({
+            kind: "terminal",
+            key: `terminal:${id}`,
+            seq: nextStreamSeq(),
+            createdAt: items.at(-1)?.createdAt ?? 0,
+            terminalId: id,
+            command: "",
+            output,
+            exitCode: null,
+          });
+        }
+        break;
+      }
     }
   }
   for (const pending of sources.pendingPrompts?.values() ?? []) {
