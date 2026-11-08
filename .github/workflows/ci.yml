@@ -36,7 +36,7 @@ jobs:
       - run: mise run fmt:check
 
   clippy:
-    name: lint (clippy -D warnings / tombi)
+    name: lint (clippy -D warnings / tombi / language)
     runs-on: ubuntu-latest
     env:
       MISE_DISABLE_TOOLS: cargo:sqlx-cli
@@ -46,6 +46,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: ubuntu
+      - run: mise run lint:lang
       - run: mise run lint:rust
       - run: mise run lint:toml
 

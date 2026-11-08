@@ -61,9 +61,52 @@ run = "tombi lint"
 description = "TypeScript / Svelte を oxlint で lint する"
 run = "pnpm --dir ui run lint"
 
+[tasks."lint:lang"]
+description = "英語のみに移行済みのパスに非英語 (日本語) 文字列が混入していないか検証する"
+# 【一時的なタスク】日本語から英語への移行が完了するまでのガード。
+# 移行済みパスは段階的に増やす。すべて英語化できたらこのタスク自体を削除し、
+# `lint` 集約タスクと CI (`.github/workflows/ci.yml`) のステップも取り除く
+# (英語で書く規約は AGENTS.md に残す)。
+# 意図的に日本語を残す行 (多バイト境界のテスト等) は `allow-japanese: <理由>` を
+# その行に書くと除外される。
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+
+targets=(
+  crates/fxg-protocol
+)
+
+# Han / Hiragana / Katakana + CJK 記号 + 全角形。
+pattern='[\p{Han}\p{Hiragana}\p{Katakana}\x{3000}-\x{303F}\x{FF01}-\x{FF60}]'
+
+if command -v rg >/dev/null 2>&1; then
+  hits=$(rg --line-number --no-heading --color never --pcre2 "$pattern" "${targets[@]}" | grep -v 'allow-japanese' || true)
+else
+  hits=$(grep -rnP "$pattern" "${targets[@]}" | grep -v 'allow-japanese' || true)
+fi
+
+if [ -n "$hits" ]; then
+  echo "error: non-English text found in paths that must be English only:" >&2
+  echo "" >&2
+  echo "$hits" >&2
+  echo "" >&2
+  echo "Write comments and user-facing messages in English." >&2
+  echo "If the text is intentional, mark the line with 'allow-japanese: <reason>'." >&2
+  exit 1
+fi
+
+echo "ok: ${targets[*]} contain no non-English text"
+'''
+
 [tasks.lint]
 description = "全言語の lint を実行する"
-run = [{ task = "lint:rust" }, { task = "lint:toml" }, { task = "lint:ui" }]
+run = [
+  { task = "lint:lang" },
+  { task = "lint:rust" },
+  { task = "lint:toml" },
+  { task = "lint:ui" },
+]
 
 # ---------------------------------------------------------------------------
 # テスト
