@@ -1,23 +1,25 @@
 import type { SystemInfoResponse } from "#lib/generated/bindings.ts";
+import { m } from "#lib/paraglide/messages.js";
 import { connection } from "#lib/stores/app.svelte.ts";
 import { isValidVapidKey, urlBase64ToUint8Array } from "./push-keys";
 
 /**
- * Android / Desktop PWA の Web Push 通知。
+ * Web Push notifications for Android / Desktop PWAs.
  *
- * 中央サーバーの VAPID 公開鍵 (`GET /api/v1/system/info`) で購読し、
- * `POST /api/v1/push/subscribe` に登録する。通知バナー上の Approve / Reject は
- * Service Worker (`src/service-worker.ts`) が直接 API を叩く。
+ * Subscribes with the central server's VAPID public key
+ * (`GET /api/v1/system/info`) and registers via
+ * `POST /api/v1/push/subscribe`. The Approve / Reject actions on the notification
+ * banner call the API directly from the Service Worker (`src/service-worker.ts`).
  */
 
 export interface PushCapability {
-  /** このブラウザが Service Worker / Push API に対応しているか */
+  /** Whether this browser supports Service Worker / Push API */
   supported: boolean;
-  /** 通知許可の状態 */
+  /** Notification permission state */
   permission: NotificationPermission;
-  /** 現在このオリジンで購読済みか */
+  /** Whether this origin is currently subscribed */
   subscribed: boolean;
-  /** サーバーが VAPID 公開鍵を配布しているか */
+  /** Whether the server distributes a VAPID public key */
   serverEnabled: boolean;
 }
 
@@ -37,7 +39,7 @@ async function systemInfo(): Promise<SystemInfoResponse | null> {
   }
 }
 
-/** 現在の Web Push 対応状況を取得する。 */
+/** Get the current Web Push support status. */
 export async function pushCapability(): Promise<PushCapability> {
   const info = await systemInfo();
   const serverEnabled = (info?.vapid_public_key ?? null) !== null;
@@ -60,27 +62,27 @@ export async function pushCapability(): Promise<PushCapability> {
 }
 
 /**
- * Web Push 通知を有効化する (通知許可 → 購読 → サーバー登録)。
+ * Enable Web Push notifications (permission → subscribe → server registration).
  *
- * 失敗時は日本語メッセージの `Error` を投げる。
+ * Throws an `Error` with a localized message on failure.
  */
 export async function enablePushNotifications(): Promise<void> {
   if (!hasPushSupport()) {
-    throw new Error("このブラウザは Web Push に対応していません");
+    throw new Error(m.push_unsupported_browser());
   }
   const info = await systemInfo();
   const vapidKey = info?.vapid_public_key ?? null;
   if (vapidKey === null) {
-    throw new Error("接続先サーバーでは Web Push が利用できません (中央サーバーのみ)");
+    throw new Error(m.push_server_unavailable());
   }
   const applicationServerKey = urlBase64ToUint8Array(vapidKey);
   if (!isValidVapidKey(applicationServerKey)) {
-    throw new Error("VAPID 公開鍵が不正です (サーバーの vapid.json を確認してください)");
+    throw new Error(m.push_invalid_vapid_key());
   }
 
   const permission = await Notification.requestPermission();
   if (permission !== "granted") {
-    throw new Error("通知の許可が得られませんでした");
+    throw new Error(m.push_permission_denied());
   }
 
   const registration = await navigator.serviceWorker.ready;
@@ -95,7 +97,7 @@ export async function enablePushNotifications(): Promise<void> {
   const p256dh = keys.p256dh;
   const auth = keys.auth;
   if (!p256dh || !auth) {
-    throw new Error("購読情報 (p256dh / auth) を取得できませんでした");
+    throw new Error(m.push_missing_subscription_keys());
   }
   await connection.client.pushSubscribe({
     endpoint: subscription.endpoint,
@@ -105,7 +107,7 @@ export async function enablePushNotifications(): Promise<void> {
   });
 }
 
-/** この端末の購読を解除する (サーバー側は 404/410 で自然に失効する)。 */
+/** Unsubscribe this device (the server entry expires naturally on 404/410). */
 export async function disablePushNotifications(): Promise<void> {
   if (!hasPushSupport()) return;
   const registration = await navigator.serviceWorker.ready;

@@ -6,6 +6,7 @@
   import { pinned } from "#lib/stores/pinned.svelte.ts";
   import { sync } from "#lib/stores/app.svelte.ts";
   import { cn } from "#lib/utils.ts";
+  import { m } from "#lib/paraglide/messages.js";
   import ConnectionMenu from "#lib/components/ConnectionMenu.svelte";
   import KillSwitchButton from "#lib/components/KillSwitchButton.svelte";
   import SessionActionsMenu from "#lib/components/session/SessionActionsMenu.svelte";
@@ -65,7 +66,7 @@
       .filter((session) => matchesSearch(session, searchQuery.trim())),
   );
 
-  // アーカイブ済みセッション (既定では折りたたみ)
+  // Archived sessions (collapsed by default)
   const archivedSessions = $derived(
     sync.sessions
       .filter((session) => session.archived_at !== null)
@@ -75,7 +76,7 @@
 
   const pendingSessionIds = $derived(new Set(sync.inbox.map((req) => req.session_id)));
 
-  // 全体横断の要対応セッション (承認待ちはアーカイブ済みでも見落とさない)
+  // Sessions needing attention across all projects (pending approvals are included even when archived)
   const needsAttentionSessions = $derived.by(() => {
     const attention = new Map<string, SessionSummary>();
     for (const session of sync.sessions) {
@@ -97,7 +98,7 @@
     runningCount: number;
   }
 
-  // プロジェクト別のセッショングループ
+  // Session groups by project
   const projectGroups = $derived.by(() => {
     const groups: ProjectSessionGroup[] = [];
     const projectMap = new Map<string, string>();
@@ -140,7 +141,7 @@
       });
     }
 
-    // 直近更新セッションがあるプロジェクトを上位にソート
+    // Sort projects with the most recently updated sessions first
     return groups.toSorted((a, b) => {
       const aLatest = a.sessions[0]?.updated_at ?? 0;
       const bLatest = b.sessions[0]?.updated_at ?? 0;
@@ -158,7 +159,7 @@
 </script>
 
 <aside class="bg-card flex h-full w-full flex-col border-r">
-  <!-- サイドバーヘッダー -->
+  <!-- Sidebar header -->
   <div class="flex items-center justify-between border-b px-3 py-2.5">
     <a
       href="/"
@@ -174,7 +175,7 @@
     </a>
   </div>
 
-  <!-- クイックナビゲーション -->
+  <!-- Quick navigation -->
   <nav class="flex flex-col gap-0.5 border-b p-2 text-xs">
     <a
       href="/"
@@ -188,7 +189,7 @@
     >
       <div class="flex items-center gap-2">
         <PlusIcon class="size-3.5" />
-        <span>新規セッション</span>
+        <span>{m.shell_new_session()}</span>
       </div>
     </a>
 
@@ -204,7 +205,7 @@
     >
       <div class="flex items-center gap-2">
         <InboxIcon class="size-3.5" />
-        <span>承認 Inbox</span>
+        <span>{m.shell_approval_inbox()}</span>
       </div>
       {#if sync.inbox.length > 0}
         <Badge variant="destructive" class="px-1.5 py-0 text-[10px] leading-tight">
@@ -224,7 +225,7 @@
       )}
     >
       <FolderGit2Icon class="size-3.5" />
-      <span>プロジェクト管理</span>
+      <span>{m.shell_projects()}</span>
     </a>
 
     <a
@@ -238,7 +239,7 @@
       )}
     >
       <SearchIcon class="size-3.5" />
-      <span>全文検索</span>
+      <span>{m.shell_full_text_search()}</span>
     </a>
 
     <a
@@ -252,26 +253,26 @@
       )}
     >
       <SettingsIcon class="size-3.5" />
-      <span>設定</span>
+      <span>{m.shell_settings()}</span>
     </a>
   </nav>
 
-  <!-- 検索バー -->
+  <!-- Search bar -->
   <div class="border-b px-2 py-2">
     <div class="relative flex items-center">
       <SearchIcon class="text-muted-foreground absolute left-2 size-3.5 pointer-events-none" />
       <input
         type="text"
         bind:value={searchQuery}
-        placeholder="セッション・プロジェクトを検索…"
+        placeholder={m.shell_search_placeholder()}
         class="bg-muted/40 placeholder:text-muted-foreground focus-visible:ring-ring/40 w-full rounded-md border py-1 pr-2 pl-7 text-xs outline-none focus-visible:ring-1"
       />
     </div>
   </div>
 
-  <!-- セッション一覧リスト (プロジェクト別) -->
+  <!-- Session list (grouped by project) -->
   <div class="scrollbar-thin flex-1 overflow-y-auto p-2">
-    <!-- 要対応セクション (承認待ち・エラーがある場合のみ最上部に表示) -->
+    <!-- Needs attention section (shown at the top only when there are pending approvals or errors) -->
     {#if needsAttentionSessions.length > 0 && searchQuery.trim() === ""}
       <div class="mb-3 rounded-lg border border-destructive/30 bg-destructive/5 p-1.5">
         <button
@@ -281,7 +282,7 @@
         >
           <span class="flex items-center gap-1.5">
             <AlertCircleIcon class="size-3" />
-            <span>NEEDS ATTENTION</span>
+            <span>{m.shell_needs_attention()}</span>
             <span class="rounded-full bg-destructive/15 px-1.5 py-0.2 text-[10px] text-destructive">
               {needsAttentionSessions.length}
             </span>
@@ -303,19 +304,17 @@
       </div>
     {/if}
 
-    <!-- プロジェクト別一覧 -->
+    <!-- List by project -->
     {#if projectGroups.length === 0}
       <div class="text-muted-foreground p-3 text-center text-xs">
-        {searchQuery
-          ? "該当するプロジェクトまたはセッションがありません"
-          : "プロジェクトがまだありません"}
+        {searchQuery ? m.shell_no_matching_results() : m.shell_no_projects_yet()}
       </div>
     {:else}
       <div class="flex flex-col gap-2.5">
         {#each projectGroups as group (group.projectId)}
           {@const isCollapsed = isProjectCollapsed(group.projectId)}
           <div class="flex flex-col">
-            <!-- プロジェクト見出しヘッダー -->
+            <!-- Project header -->
             <div
               class="group/proj flex items-center justify-between rounded-md px-1.5 py-1 text-xs hover:bg-muted/40 transition-colors"
             >
@@ -341,7 +340,7 @@
                 {#if group.runningCount > 0}
                   <span
                     class="size-1.5 rounded-full bg-emerald-500 shrink-0"
-                    title="実行中セッションあり"
+                    title={m.shell_has_running_sessions()}
                   ></span>
                 {/if}
               </button>
@@ -354,14 +353,14 @@
                   href={`/?project=${encodeURIComponent(group.projectId)}`}
                   onclick={handleLinkClick}
                   class="opacity-0 group-hover/proj:opacity-100 hover:bg-accent text-muted-foreground hover:text-foreground rounded p-0.5 transition-opacity"
-                  title={`${group.projectName} で新規セッションを開始`}
+                  title={m.shell_start_new_session_in_project({ project: group.projectName })}
                 >
                   <PlusIcon class="size-3" />
                 </a>
               </div>
             </div>
 
-            <!-- プロジェクト内セッションリスト -->
+            <!-- Sessions in the project -->
             {#if !isCollapsed}
               <ul
                 class="ml-2.5 border-l border-border/60 pl-2 flex list-none flex-col gap-0.5 p-0 mt-0.5"
@@ -377,7 +376,7 @@
                       class="hover:underline flex items-center gap-1 text-primary/80"
                     >
                       <PlusIcon class="size-3" />
-                      <span>セッションを開始</span>
+                      <span>{m.shell_start_session()}</span>
                     </a>
                   </li>
                 {/if}
@@ -388,7 +387,7 @@
       </div>
     {/if}
 
-    <!-- アーカイブ済みセッション (折りたたみ) -->
+    <!-- Archived sessions (collapsible) -->
     {#if archivedSessions.length > 0}
       <div class="mt-3 border-t pt-2">
         <button
@@ -398,7 +397,7 @@
         >
           <span class="flex items-center gap-1.5">
             <ArchiveIcon class="size-3" />
-            <span>アーカイブ済み</span>
+            <span>{m.shell_archived()}</span>
             <span class="bg-muted rounded-full px-1.5 py-0.2 text-[10px]">
               {archivedSessions.length}
             </span>
@@ -421,7 +420,7 @@
     {/if}
   </div>
 
-  <!-- 下部フッター: 接続メニュー & ステータス -->
+  <!-- Footer: connection menu and status -->
   <div class="border-t p-2 flex flex-col gap-2">
     <div class="flex items-center gap-1.5">
       <div class="flex-1 min-w-0">
@@ -446,7 +445,7 @@
     <a
       href={`/sessions/${session.session_id}`}
       onclick={handleLinkClick}
-      title={`${session.title}${isArchived ? " (アーカイブ済み)" : ""}\nワーキングディレクトリ: ${session.local_path}\nノード: ${node?.name ?? session.node_id}`}
+      title={`${session.title}${isArchived ? ` (${m.shell_archived()})` : ""}\n${m.shell_working_directory({ path: session.local_path })}\n${m.shell_node_label({ node: node?.name ?? session.node_id })}`}
       class={cn(
         "group flex items-center justify-between rounded-md px-2 py-1.5 text-xs transition-colors",
         isActive
@@ -456,10 +455,13 @@
       )}
     >
       <div class="flex min-w-0 flex-1 items-center gap-2">
-        <!-- ノードステータスドット -->
+        <!-- Node status dot -->
         <span
           class={cn("size-1.5 shrink-0 rounded-full", nodeAvail.dotColorClass)}
-          title={`ノード: ${node?.name ?? session.node_id} (${nodeAvail.statusText})`}
+          title={m.shell_node_status({
+            node: node?.name ?? session.node_id,
+            status: nodeAvail.statusText,
+          })}
         ></span>
 
         <div class="flex min-w-0 flex-1 items-center gap-1">
@@ -473,27 +475,27 @@
               ({session.git_branch})
             </span>
           {/if}
-          <!-- タイトル -->
+          <!-- Title -->
           <span class="truncate">{session.title}</span>
         </div>
       </div>
 
       <div class="ml-2 flex shrink-0 items-center gap-1.5 text-muted-foreground text-[10px]">
-        <!-- アーカイブ / 削除メニュー -->
+        <!-- Archive / delete menu -->
         <SessionActionsMenu
           {session}
           align="end"
           buttonClass="opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
         />
 
-        <!-- ピン留めボタン -->
+        <!-- Pin button -->
         <button
           type="button"
           class={cn(
             "hover:text-foreground p-0.5 transition-opacity",
             isPinned ? "opacity-100 text-amber-500" : "opacity-0 group-hover:opacity-100",
           )}
-          title={isPinned ? "ピン留め解除" : "ピン留め"}
+          title={isPinned ? m.shell_unpin() : m.shell_pin()}
           onclick={(e) => {
             e.preventDefault();
             e.stopPropagation();

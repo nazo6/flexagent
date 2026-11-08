@@ -1,12 +1,12 @@
 import type { ApiErrorBody, ApiErrorResponse, ErrorCode } from "#lib/generated/bindings.ts";
 
 /**
- * REST / WS 共通の構造化 API エラー (`{ error: { code, message } }`)。
+ * Structured API error common to REST / WS (`{ error: { code, message } }`).
  */
 export class ApiError extends Error {
-  /** HTTP ステータス (WS 由来の場合は 0)。 */
+  /** HTTP status (0 when originating from WS). */
   readonly status: number;
-  /** 構造化エラーコード (パース不能時は null)。 */
+  /** Structured error code (null when it cannot be parsed). */
   readonly code: ErrorCode | null;
 
   constructor(status: number, code: ErrorCode | null, message: string) {
@@ -20,7 +20,7 @@ export class ApiError extends Error {
     return this.status === 401 || this.code === "UNAUTHORIZED";
   }
 
-  /** エラーレスポンスボディから組み立てる (パース不能時は生テキストを保持)。 */
+  /** Build from an error response body (keeps the raw text when it cannot be parsed). */
   static fromBody(status: number, body: unknown, fallback: string): ApiError {
     const parsed = asApiErrorResponse(body);
     if (parsed) {

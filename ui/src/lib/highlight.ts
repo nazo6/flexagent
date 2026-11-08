@@ -1,9 +1,10 @@
 /**
- * shiki によるコードハイライト (Unified Diff / Markdown コードフェンス共用)。
+ * Code highlighting with shiki (shared by Unified Diff / Markdown code fences).
  *
- * `shiki` 本体は重いため動的 import で遅延ロードし、ハイライターは共有する。
- * Markdown のコードフェンスは言語が不定のため、必要になった言語だけを
- * 追加ロードする (未知の言語はプレーン表示へフォールバック)。
+ * `shiki` itself is heavy, so it is lazy-loaded via dynamic import and the
+ * highlighter is shared. Markdown code fences have no fixed language, so load
+ * only the languages actually needed (unknown languages fall back to plain
+ * text).
  */
 
 type ShikiModule = typeof import("shiki");
@@ -17,13 +18,13 @@ interface SharedHighlighter {
 let shikiPromise: Promise<ShikiModule> | null = null;
 let highlighterPromise: Promise<SharedHighlighter> | null = null;
 
-/** shiki 本体を遅延ロードする。 */
+/** Lazy-load the shiki module. */
 function getShiki(): Promise<ShikiModule> {
   shikiPromise ??= import("shiki");
   return shikiPromise;
 }
 
-/** shiki の共有ハイライターを遅延生成する。 */
+/** Lazily create shiki's shared highlighter. */
 export function getSharedHighlighter(): Promise<SharedHighlighter> {
   highlighterPromise ??= (async () => {
     const shiki = await getShiki();
@@ -35,12 +36,12 @@ export function getSharedHighlighter(): Promise<SharedHighlighter> {
   return highlighterPromise;
 }
 
-/** システムの配色設定が dark か (UI 本体と同じ判定を共有する)。 */
+/** Whether the system color scheme is dark (shares the same check as the UI). */
 export function prefersDarkMode(): boolean {
   return typeof window !== "undefined" && window.matchMedia("(prefers-color-scheme: dark)").matches;
 }
 
-/** Unified Diff をハイライト済み HTML に変換する。 */
+/** Convert a Unified Diff into highlighted HTML. */
 export async function highlightUnifiedDiff(diff: string, dark: boolean): Promise<string> {
   const highlighter = await getSharedHighlighter();
   return highlighter.codeToHtml(diff, {
@@ -49,7 +50,7 @@ export async function highlightUnifiedDiff(diff: string, dark: boolean): Promise
   });
 }
 
-/** Markdown の言語名 (エイリアス含む) を shiki のバンドル定義へ解決する。 */
+/** Resolve a Markdown language name (including aliases) to a shiki bundled definition. */
 function resolveBundledLanguage(
   shiki: ShikiModule,
   lang: string,
@@ -63,7 +64,7 @@ function resolveBundledLanguage(
   return { id: info.id, input: bundled[info.id] };
 }
 
-/** コードブロック 1 つをハイライト済み HTML へ変換する (未知言語は `null`)。 */
+/** Convert one code block into highlighted HTML (`null` for unknown languages). */
 export async function highlightCodeBlock(
   code: string,
   lang: string,
@@ -82,14 +83,14 @@ export async function highlightCodeBlock(
   });
 }
 
-/** 変換結果のキャッシュ上限 (ストリーミング中でも安定ブロックを再変換しない)。 */
+/** Cache limit for converted results (avoid re-converting stable blocks while streaming). */
 const CODE_CACHE_LIMIT = 128;
 const codeHtmlCache = new Map<string, string>();
 
 /**
- * `root` 配下の `pre > code.language-*` を shiki のハイライト済み HTML で
- * 置き換える。`{@html}` の再描画で DOM が作り直されるたびに呼ばれるため、
- * 内容が同じブロックはキャッシュで再利用する。
+ * Replace each `pre > code.language-*` under `root` with shiki-highlighted HTML.
+ * Called every time `{@html}` re-renders and recreates the DOM, so blocks with
+ * identical content are reused from the cache.
  */
 export async function enhanceCodeBlocks(root: ParentNode): Promise<void> {
   const dark = prefersDarkMode();
@@ -106,7 +107,7 @@ export async function enhanceCodeBlocks(root: ParentNode): Promise<void> {
       if (codeHtmlCache.size >= CODE_CACHE_LIMIT) codeHtmlCache.clear();
       codeHtmlCache.set(key, html);
     }
-    // 未知言語などハイライト不能な場合は marked の出力 (エスケープ済み) を残す
+    // Keep marked's (escaped) output when highlighting is impossible, e.g. unknown languages
     if (html === "") continue;
     const template = document.createElement("template");
     template.innerHTML = html.trim();

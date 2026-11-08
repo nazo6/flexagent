@@ -4,6 +4,7 @@
   import { Badge } from "#lib/components/ui/badge/index.ts";
   import { decodeBase64ToBytes, encodeTextToBase64 } from "#lib/base64.ts";
   import type { PtyClientMessage, PtyServerMessage } from "#lib/generated/bindings.ts";
+  import { m } from "#lib/paraglide/messages.js";
   import { connection } from "#lib/stores/app.svelte.ts";
   import { GhosttyWebAdapter } from "./ghostty-adapter";
   import RefreshCwIcon from "@lucide/svelte/icons/refresh-cw";
@@ -21,10 +22,10 @@
   let adapter: GhosttyWebAdapter | null = null;
   let socket: WebSocket | null = null;
   let disposed = false;
-  /** 現在 WS を接続しているセッション (切替検知用の非リアクティブ値)。 */
+  /** Session whose WS is currently connected (non-reactive, used to detect switches). */
   let connectedSessionId: string | null = null;
 
-  /** モバイル仮想キーバー (タップでエスケープシーケンスを送信)。 */
+  /** Mobile virtual key bar (tapping sends an escape sequence). */
   const KEY_BAR: { label: string; data: string }[] = [
     { label: "Esc", data: "\x1b" },
     { label: "Tab", data: "\t" },
@@ -66,7 +67,12 @@
         break;
       case "exit":
         status = "exited";
-        statusMessage = `プロセスが終了しました (exit ${message.exit_code ?? "不明"})`;
+        statusMessage = m.terminal_process_exited({
+          code:
+            message.exit_code === null || message.exit_code === undefined
+              ? m.terminal_unknown()
+              : String(message.exit_code),
+        });
         break;
       case "error":
         if (message.code === "PTY_DISABLED" || message.code === "FORBIDDEN") {
@@ -105,13 +111,14 @@
     });
 
     ws.addEventListener("close", () => {
-      // 新しい接続 (セッション切替 / 手動再接続) に置き換え済みの場合は無視する
+      // Ignore when this socket was already replaced by a new connection
+      // (session switch / manual reconnect)
       if (socket !== ws) return;
       socket = null;
       if (disposed) return;
       if (status === "connected" || status === "connecting") {
         status = "disconnected";
-        statusMessage = "PTY 接続が切断されました。";
+        statusMessage = m.terminal_disconnected_notice();
       }
     });
 
@@ -119,7 +126,7 @@
       if (socket !== ws) return;
       if (status === "connecting") {
         status = "failed";
-        statusMessage = "PTY WebSocket に接続できませんでした。";
+        statusMessage = m.terminal_connect_failed();
       }
     });
   }
@@ -134,14 +141,15 @@
     connect();
   }
 
-  // ページ内でセッションが切り替わったら PTY WS を新しいセッションへ接続し直す
-  // (同一ルートのまま `page.params.id` だけが変わるとコンポーネントは再利用される)
+  // When the session changes within the same page, reconnect the PTY WS to the
+  // new session (the component is reused when only `page.params.id` changes on
+  // the same route)
   $effect(() => {
     const id = sessionId;
     if (id === connectedSessionId) return;
     const initial = connectedSessionId === null;
     connectedSessionId = id;
-    if (initial) return; // 初回の接続は onMount が行う
+    if (initial) return; // onMount performs the initial connection
     adapter?.clear();
     reconnect();
   });
@@ -179,17 +187,17 @@
           : "destructive"}
     >
       {#if status === "connecting"}
-        PTY を起動しています…
+        {m.terminal_status_starting()}
       {:else if status === "connected"}
-        接続中
+        {m.terminal_status_connected()}
       {:else if status === "disconnected"}
-        切断
+        {m.terminal_status_disconnected()}
       {:else if status === "exited"}
-        終了
+        {m.terminal_status_exited()}
       {:else if status === "blocked"}
-        無効
+        {m.terminal_status_blocked()}
       {:else}
-        エラー
+        {m.terminal_status_error()}
       {/if}
     </Badge>
     {#if ptyId !== null}
@@ -203,7 +211,7 @@
       disabled={status === "connecting"}
     >
       <RefreshCwIcon />
-      再接続
+      {m.terminal_reconnect()}
     </Button>
   </div>
 
@@ -211,10 +219,8 @@
     <div class="text-destructive flex items-start gap-2 rounded-lg border p-3 text-sm">
       <TriangleAlertIcon class="mt-0.5 size-4 shrink-0" />
       <p>
-        リモート PTY はセキュリティポリシーにより無効化されています。ローカル端末 (<code
-          >localhost:7860</code
-        >
-        または CLI) からご利用ください。
+        {m.terminal_blocked_notice_before()}<code>localhost:7860</code
+        >{m.terminal_blocked_notice_after()}
         {#if statusMessage !== null}
           <span class="text-muted-foreground block text-xs">{statusMessage}</span>
         {/if}
@@ -223,7 +229,7 @@
   {:else if status === "failed" || status === "exited" || status === "disconnected"}
     <div class="flex items-start gap-2 rounded-lg border p-3 text-sm">
       <TriangleAlertIcon class="text-muted-foreground mt-0.5 size-4 shrink-0" />
-      <p>{statusMessage ?? "接続がありません。"}</p>
+      <p>{statusMessage ?? m.terminal_no_connection()}</p>
     </div>
   {/if}
 
@@ -232,7 +238,7 @@
     class="bg-[#0f172a] h-[50svh] min-h-48 w-full overflow-hidden rounded-lg border"
   ></div>
 
-  <!-- モバイル向け仮想キーバー (デスクトップでは非表示) -->
+  <!-- Mobile virtual key bar (hidden on desktop) -->
   <div class="flex gap-1 overflow-x-auto pb-1 md:hidden">
     {#each KEY_BAR as key (key.label)}
       <Button

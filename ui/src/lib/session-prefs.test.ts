@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { loadNewSessionPrefs, saveNewSessionPrefs } from "./session-prefs";
 
-/** テスト用の最小 Storage 実装 (Node 環境でも localStorage を模す)。 */
+/** Minimal Storage implementation for tests (mimics localStorage in Node). */
 function memoryStorage(): Storage {
   const map = new Map<string, string>();
   return {

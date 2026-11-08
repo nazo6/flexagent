@@ -1,9 +1,10 @@
 <script lang="ts">
   import NewSessionChat from "#lib/components/session/NewSessionChat.svelte";
+  import { m } from "#lib/paraglide/messages.js";
 </script>
 
 <svelte:head>
-  <title>新規セッション - FlexAgent</title>
+  <title>{m.shell_new_session_page_title()}</title>
 </svelte:head>
 
 <div class="h-full overflow-y-auto">

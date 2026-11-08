@@ -1,29 +1,30 @@
 import type { BadgeVariant } from "#lib/components/ui/badge/index.ts";
 import type { SessionStatus } from "#lib/generated/bindings.ts";
+import { m } from "#lib/paraglide/messages.js";
 
-/** セッション状態の日本語ラベル。 */
+/** English label for a session status. */
 export function sessionStatusLabel(status: SessionStatus): string {
   switch (status) {
     case "provisioning":
-      return "プロビジョニング";
+      return m.status_provisioning();
     case "bootstrapping":
-      return "セットアップ中";
+      return m.status_bootstrapping();
     case "idle":
-      return "待機";
+      return m.status_idle();
     case "running":
-      return "実行中";
+      return m.status_running();
     case "waiting_permission":
-      return "承認待ち";
+      return m.status_waiting_permission();
     case "waiting_input":
-      return "入力待ち";
+      return m.status_waiting_input();
     case "stopped":
-      return "停止";
+      return m.status_stopped();
     case "error":
-      return "エラー";
+      return m.status_error();
   }
 }
 
-/** セッション状態の Badge バリアント。 */
+/** Badge variant for a session status. */
 export function sessionStatusVariant(status: SessionStatus): BadgeVariant {
   switch (status) {
     case "running":
@@ -41,24 +42,24 @@ export function sessionStatusVariant(status: SessionStatus): BadgeVariant {
   }
 }
 
-/** 承認リクエストの選択肢種別から日本語ラベルを引く (見つからなければ元の名前)。 */
+/** Resolve an English label for a permission request option kind (falls back to the original name). */
 export function permissionOptionLabel(name: string, kind: string): string {
   if (name) return name;
   switch (kind) {
     case "allow_once":
-      return "一度だけ許可";
+      return m.permission_allow_once();
     case "allow_always":
-      return "常に許可";
+      return m.permission_allow_always();
     case "reject_once":
-      return "拒否";
+      return m.permission_reject_once();
     case "reject_always":
-      return "常に拒否";
+      return m.permission_reject_always();
     default:
       return kind;
   }
 }
 
-/** ノード ID を短く表示する (長い自動採番 ID を省略)。 */
+/** Abbreviate a node ID for display (truncate long auto-generated IDs). */
 export function shortId(id: string, max = 24): string {
   return id.length <= max ? id : `${id.slice(0, max - 1)}…`;
 }

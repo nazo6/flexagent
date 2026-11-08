@@ -4,15 +4,15 @@
 /// <reference lib="webworker" />
 
 /**
- * FlexAgent PWA Service Worker。
+ * FlexAgent PWA Service Worker.
  *
- * - **App Shell キャッシュ**: ビルド成果物と静的ファイルを `$service-worker`
- *   からキャッシュし、オフライン / モバイル回線不安定時でも UI を起動できる
- *   (ナビゲーションはネットワーク優先のため開発時の HMR も妨げない)。
- * - **Web Push 受信**: 中央サーバーからの VAPID 通知を表示し、通知バナーの
- *   `[Approve]` / `[Reject]` から
- *   `POST /api/v1/sessions/:id/permissions/:req_id/respond` を直接叩く
- *   (アプリを開かずに承認が完了する)。
+ * - **App Shell cache**: caches build artifacts and static files from
+ *   `$service-worker`, so the UI can start offline or on an unstable mobile
+ *   connection (navigation is network-first, so development HMR is unaffected).
+ * - **Web Push receive**: shows VAPID notifications from the central server and,
+ *   from the notification banner's `[Approve]` / `[Reject]`, calls
+ *   `POST /api/v1/sessions/:id/permissions/:req_id/respond` directly (approval
+ *   completes without opening the app).
  */
 
 import { version } from "$app/env";
@@ -21,7 +21,7 @@ import { urlBase64ToUint8Array } from "#lib/push-keys.ts";
 
 declare const self: ServiceWorkerGlobalScope;
 
-/** サーバーの `PushNotificationPayload` と対応するペイロード。 */
+/** Payload corresponding to the server's `PushNotificationPayload`. */
 interface PushPayload {
   title: string;
   body: string;
@@ -52,11 +52,11 @@ self.addEventListener("install", (event) => {
     (async () => {
       const cache = await caches.open(CACHE_NAME);
       await cache.addAll(APP_SHELL);
-      // SPA フォールバック (adapter-static の index.html) を保持する
+      // Preserve the SPA fallback (adapter-static's index.html)
       try {
         await cache.add("/index.html");
       } catch {
-        /* 開発ビルド等で存在しない場合は無視 */
+        /* Ignore if it does not exist, e.g. in development builds */
       }
       await self.skipWaiting();
     })(),
@@ -76,7 +76,7 @@ self.addEventListener("activate", (event) => {
 self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
   if (url.origin !== self.location.origin) return;
-  // API / WS は常にネットワークへ (オフラインキャッシュしない)
+  // Always send API / WS to the network (never offline-cache them)
   if (url.pathname.startsWith("/api/")) return;
   if (event.request.method !== "GET") return;
 
@@ -156,7 +156,7 @@ self.addEventListener("notificationclick", (event) => {
   event.waitUntil(openApp(payload?.session_id));
 });
 
-/** 通知バナーからの承認応答 (Cookie 認証で API を直接叩く)。 */
+/** Respond to a permission from the notification banner (calls the API directly with Cookie auth). */
 async function respondToPermission(payload: PushPayload, optionId: string): Promise<void> {
   const url =
     `/api/v1/sessions/${encodeURIComponent(payload.session_id)}` +
@@ -173,8 +173,8 @@ async function respondToPermission(payload: PushPayload, optionId: string): Prom
       credentials: "same-origin",
     });
     if (response.ok || response.status === 409) {
-      // 409 = ALREADY_RESOLVED (冪等: 他のクライアントが解決済み) は正常終了
-      await self.registration.showNotification("承認を送信しました", {
+      // 409 = ALREADY_RESOLVED (idempotent: another client resolved it) is a success
+      await self.registration.showNotification("Approval sent", {
         body: payload.body,
         tag: payload.tag,
         icon: "/icon-192.png",
@@ -182,17 +182,14 @@ async function respondToPermission(payload: PushPayload, optionId: string): Prom
       });
       return;
     }
-    await showFailure(payload, `応答に失敗しました (HTTP ${response.status})`);
+    await showFailure(payload, `Response failed (HTTP ${response.status})`);
   } catch {
-    await showFailure(
-      payload,
-      "ネットワークに接続できませんでした。アプリを開いて再試行してください。",
-    );
+    await showFailure(payload, "Could not reach the network. Open the app and try again.");
   }
 }
 
 async function showFailure(payload: PushPayload, message: string): Promise<void> {
-  await self.registration.showNotification("承認の送信に失敗", {
+  await self.registration.showNotification("Failed to send approval", {
     body: message,
     tag: payload.tag,
     icon: "/icon-192.png",
@@ -204,7 +201,7 @@ async function showFailure(payload: PushPayload, message: string): Promise<void>
   });
 }
 
-/** 既存のアプリウィンドウをフォーカスするか、新しく開く。 */
+/** Focus an existing app window, or open a new one. */
 async function openApp(sessionId: string | undefined): Promise<void> {
   const target = sessionId ? `/sessions/${sessionId}` : "/inbox";
   const windows = await self.clients.matchAll({
@@ -220,7 +217,7 @@ async function openApp(sessionId: string | undefined): Promise<void> {
   await self.clients.openWindow(target);
 }
 
-/** 購読が失効した場合に再購読し、サーバーへ再登録する (ベストエフォート)。 */
+/** Re-subscribe and re-register with the server when the subscription expires (best effort). */
 self.addEventListener("pushsubscriptionchange", (event) => {
   event.waitUntil(
     (async () => {
@@ -250,7 +247,7 @@ self.addEventListener("pushsubscriptionchange", (event) => {
           }),
         });
       } catch {
-        /* 次回のアプリ起動時に再購読できる */
+        /* Can re-subscribe on the next app launch */
       }
     })(),
   );

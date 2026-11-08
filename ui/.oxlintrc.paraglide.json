@@ -1,0 +1,18 @@
+{
+  "plugins": [],
+  "jsPlugins": [
+    {
+      "name": "paraglide",
+      "specifier": "@inlang/paraglide-js/eslint"
+    }
+  ],
+  "ignorePatterns": ["src/lib/paraglide/**"],
+  "rules": {
+    "paraglide/no-dynamic-message-access": [
+      "error",
+      {
+        "messageModuleDirectories": ["paraglide"]
+      }
+    ]
+  }
+}

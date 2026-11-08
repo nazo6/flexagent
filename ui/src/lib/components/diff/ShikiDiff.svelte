@@ -17,7 +17,7 @@
         const rendered = await highlightUnifiedDiff(text, prefersDark);
         if (!disposed) html = rendered;
       } catch {
-        // ハイライト失敗時は DiffText へフォールバックする
+        // Fall back to DiffText when highlighting fails
         if (!disposed) html = null;
       }
     })();

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { m } from "#lib/paraglide/messages.js";
 import {
   formatDurationMs,
   formatEpochMs,
@@ -23,13 +24,13 @@ describe("formatRelativeTime", () => {
   const now = new Date(2026, 9, 1, 12, 0, 0).getTime();
 
   it("formats recent times as just now", () => {
-    expect(formatRelativeTime(now - 2_000, now)).toBe("たった今");
+    expect(formatRelativeTime(now - 2_000, now)).toBe(m.lib_relative_just_now());
   });
 
   it("formats minutes, hours and days", () => {
-    expect(formatRelativeTime(now - 90_000, now)).toBe("1分前");
-    expect(formatRelativeTime(now - 3 * 3_600_000, now)).toBe("3時間前");
-    expect(formatRelativeTime(now - 2 * 86_400_000, now)).toBe("2日前");
+    expect(formatRelativeTime(now - 90_000, now)).toBe(m.lib_relative_minutes({ count: 1 }));
+    expect(formatRelativeTime(now - 3 * 3_600_000, now)).toBe(m.lib_relative_hours({ count: 3 }));
+    expect(formatRelativeTime(now - 2 * 86_400_000, now)).toBe(m.lib_relative_days({ count: 2 }));
   });
 });
 

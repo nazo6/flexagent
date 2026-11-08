@@ -6,6 +6,7 @@
   import ToolCallGroup from "./ToolCallGroup.svelte";
   import { Badge } from "#lib/components/ui/badge/index.ts";
   import { formatEpochMs } from "#lib/format.ts";
+  import { m } from "#lib/paraglide/messages.js";
   import { sync } from "#lib/stores/app.svelte.ts";
   import type { SessionStatus } from "#lib/generated/bindings.ts";
   import type { TimelineItem } from "#lib/sync/reducer.ts";
@@ -27,25 +28,26 @@
   }: {
     sessionId: string;
     items: TimelineItem[];
-    /** セッション状態 (イベント由来)。エージェント実行中のインジケータ表示に使う。 */
+    /** Session status (derived from events). Used for the running indicator. */
     status?: SessionStatus | null;
-    /** 「この時点へ巻き戻す (Revert)」要求のコールバック (引数は対象ターンの node_seq)。 */
+    /** Callback for "revert to this point" requests (argument: the target turn's node_seq). */
     onRevert?: (seq: number) => void;
   } = $props();
 
   const currentSession = $derived(sync.sessions.find((s) => s.session_id === sessionId) ?? null);
 
-  /** 停止済みセッションは Revert 不可 (ノード側で実行中セッションのみ許容)。 */
+  /** Stopped sessions cannot be reverted (the node only allows it while running). */
   const canRevert = $derived(
     onRevert !== undefined && currentSession !== null && currentSession.status !== "stopped",
   );
 
   /**
-   * エージェントがターンを実行中 (応答生成・ツール実行中)。
+   * The agent is running a turn (generating a response or executing tools).
    *
-   * 送信直後〜最初の出力到着までだけでなく、ターンが終わる (idle / stopped /
-   * error) までタイムライン末尾に処理中インジケータを表示する。承認待ち
-   * (`waiting_permission`) はユーザー操作待ちのため表示しない。
+   * The working indicator stays at the end of the timeline not only from send
+   * until the first output, but until the turn ends (idle / stopped / error).
+   * Waiting for approval (`waiting_permission`) is omitted because it depends on
+   * user action.
    */
   const agentWorking = $derived(status === "running");
 
@@ -122,7 +124,7 @@
               <button
                 type="button"
                 class="hover:bg-accent text-muted-foreground hover:text-foreground opacity-0 group-hover:opacity-100 mb-1 flex size-6 items-center justify-center rounded border transition-opacity cursor-pointer"
-                title="この時点へ巻き戻す (Revert: ワークスペースのファイルをこのターン開始時の状態へ復元)"
+                title={m.chat_revert_title()}
                 onclick={() => onRevert?.(item.seq)}
               >
                 <Undo2Icon class="size-3" />
@@ -131,7 +133,7 @@
             <button
               type="button"
               class="hover:bg-accent text-muted-foreground hover:text-foreground opacity-0 group-hover:opacity-100 mb-1 flex size-6 items-center justify-center rounded border transition-opacity cursor-pointer"
-              title="このターンからフォーク (新規セッションを開始)"
+              title={m.chat_fork_turn_title()}
               onclick={() => forkFromSeq(item.seq)}
             >
               <GitForkIcon class="size-3" />
@@ -139,7 +141,7 @@
             <div class="bg-primary text-primary-foreground max-w-[85%] rounded-2xl px-3.5 py-2">
               <p class="text-sm whitespace-pre-wrap">{item.text}</p>
               <p class="text-primary-foreground/70 mt-1 text-right text-[10px]">
-                {item.clientSource} · {formatEpochMs(item.createdAt)}
+                {item.clientSource} &middot; {formatEpochMs(item.createdAt)}
               </p>
             </div>
           </div>
@@ -159,11 +161,11 @@
                   <button
                     type="button"
                     class="hover:bg-accent text-muted-foreground hover:text-foreground flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] border transition-colors cursor-pointer"
-                    title="この回答時点からフォーク (新規セッションを開始)"
+                    title={m.chat_fork_response_title()}
                     onclick={() => forkFromSeq(item.seq)}
                   >
                     <GitForkIcon class="size-3" />
-                    <span>ここからフォーク</span>
+                    <span>{m.chat_fork_here()}</span>
                   </button>
                 </div>
               {/if}
@@ -175,7 +177,7 @@
               class="text-muted-foreground hover:text-foreground flex cursor-pointer items-center gap-1.5 text-xs select-none"
             >
               <BrainIcon class="size-3.5" />
-              思考プロセス
+              {m.chat_thought_process()}
               {#if item.streaming}<span class="animate-pulse">…</span>{/if}
             </summary>
             <div
@@ -222,7 +224,7 @@
           <div class="bg-card/60 flex flex-col gap-1.5 rounded-lg border p-2.5">
             <div class="flex items-center gap-2 text-xs font-medium">
               <ListChecksIcon class="size-3.5" />
-              実行計画
+              {m.chat_plan()}
             </div>
             <ul class="flex list-none flex-col gap-1 p-0 text-sm">
               {#each item.entries as entry (entry.id)}
@@ -246,7 +248,10 @@
         {:else if item.kind === "pending"}
           <div class="text-muted-foreground flex items-center gap-2 text-sm" role="status">
             <LoaderCircleIcon class="size-4 animate-spin text-primary" />
-            <span>送信待ち: <span class="whitespace-pre-wrap">{item.text}</span></span>
+            <span>
+              {m.chat_pending_label()}:
+              <span class="whitespace-pre-wrap">{item.text}</span>
+            </span>
           </div>
         {/if}
       {/if}
@@ -260,7 +265,7 @@
         class="bg-muted/60 text-muted-foreground flex items-center gap-2 rounded-2xl px-3.5 py-2 text-sm"
       >
         <LoaderCircleIcon class="size-3.5 animate-spin text-primary" />
-        <span>エージェントが処理中…</span>
+        <span>{m.chat_agent_working()}</span>
       </div>
     </li>
   {/if}
@@ -268,6 +273,6 @@
 
 {#if items.length === 0 && !agentWorking}
   <p class="text-muted-foreground text-sm">
-    まだ表示できるイベントがありません。プロンプトを送信するとここに表示されます。
+    {m.chat_empty_timeline()}
   </p>
 {/if}

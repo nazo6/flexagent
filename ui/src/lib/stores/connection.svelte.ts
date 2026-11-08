@@ -1,14 +1,15 @@
 import { ApiError } from "#lib/api/errors.ts";
 import { ApiClient } from "#lib/api/client.ts";
 import type { ConnectionRole, SystemInfoResponse } from "#lib/generated/bindings.ts";
+import { m } from "#lib/paraglide/messages.js";
 
-/** 切替可能な接続先 (オリジン単位)。 */
+/** A switchable connection target (per origin). */
 export interface ConnectionTarget {
-  /** 一意 ID (`current` は現在のオリジン)。 */
+  /** Unique ID (`current` is the current origin). */
   id: string;
-  /** 表示名 (例: `中央サーバー (Tailscale)`)。 */
+  /** Display name (e.g. `Central server (Tailscale)`). */
   label: string;
-  /** オリジン URL (`''` = 現在のオリジン。末尾スラッシュなし)。 */
+  /** Origin URL (`''` = current origin, no trailing slash). */
   url: string;
 }
 
@@ -49,35 +50,37 @@ function persistTargets(targets: ConnectionTarget[]): void {
 }
 
 /**
- * 接続先 (中央サーバー / ローカルノード) と認証状態を管理するストア。
+ * Store that manages the connection target (central server / local node) and auth state.
  *
- * 接続先の切替は**オリジン単位のナビゲーション** (`location.assign`) で行う。
- * クロスオリジンの fetch は共通ミドルウェアの Host/Origin 検証 (CSWSH / DNS
- * Rebinding 対策) と CORS の双方で拒否されるため、同一オリジンで完結させる
- * (`fxg_session` Cookie もオリジンごとに独立)。
+ * Connection targets are switched by **origin-level navigation**
+ * (`location.assign`). Cross-origin fetches are rejected both by the shared
+ * middleware's Host/Origin validation (CSWSH / DNS Rebinding protection) and by
+ * CORS, so everything stays same-origin (the `fxg_session` Cookie is also
+ * independent per origin).
  */
 export class ConnectionStore {
-  /** 現在のオリジン ('' の場合はビルド時)。 */
+  /** Current origin ('' at build time). */
   readonly origin = typeof location !== "undefined" ? location.origin : "";
 
-  /** 接続先バックエンドの情報 (未取得は null)。 */
+  /** Connection target backend info (null when not fetched). */
   systemInfo = $state<SystemInfoResponse | null>(null);
   /**
-   * 接続先種別 (`GET /api/v1/meta` の結果。接続不可時は null)。
+   * Connection target type (result of `GET /api/v1/meta`; null when unreachable).
    *
-   * 認証不要の `meta` のみを情報源とし、`system/info` やホスト名からの推測は
-   * 行わない (接続できない場合は推測せずエラーとして扱う)。
+   * Only the auth-free `meta` endpoint is used as the source of truth; do not
+   * infer from `system/info` or the hostname (treat an unreachable target as an
+   * error rather than guessing).
    */
   role = $state<ConnectionRole | null>(null);
-  /** 認証済み (Cookie / Bearer 確立済み) か。 */
+  /** Whether authenticated (Cookie / Bearer established). */
   authenticated = $state(false);
-  /** トークン入力ダイアログを表示すべきか。 */
+  /** Whether the token input dialog should be shown. */
   tokenRequired = $state(false);
-  /** 初回の system/info 確認が完了したか。 */
+  /** Whether the initial system/info check has completed. */
   ready = $state(false);
-  /** ネットワーク到達不能などの接続エラー。 */
+  /** Connection error such as network unreachability. */
   error = $state<string | null>(null);
-  /** 登録済みの切替先 (現在のオリジンは含まない)。 */
+  /** Registered switch targets (excluding the current origin). */
   targets = $state<ConnectionTarget[]>([]);
 
   readonly client = new ApiClient({ baseUrl: "" });
@@ -87,8 +90,9 @@ export class ConnectionStore {
   }
 
   /**
-   * `GET /api/v1/meta` (接続先種別) → `GET /api/v1/system/info` (認証状態)
-   * の順で確認する。`meta` の取得失敗は推測せず接続エラーとして扱う。
+   * Check in the order `GET /api/v1/meta` (connection type) →
+   * `GET /api/v1/system/info` (auth state). Do not guess on a `meta` failure;
+   * treat it as a connection error.
    */
   async probe(): Promise<void> {
     try {
@@ -112,19 +116,19 @@ export class ConnectionStore {
     }
   }
 
-  /** トークンを検証し、`fxg_session` Cookie を確立する。 */
+  /** Validate the token and establish the `fxg_session` Cookie. */
   async login(token: string): Promise<void> {
     const trimmed = token.trim();
-    if (!trimmed) throw new Error("トークンを入力してください");
+    if (!trimmed) throw new Error(m.lib_token_required());
     await this.client.authLogin(trimmed);
     this.tokenRequired = false;
     await this.probe();
     if (!this.authenticated) {
-      throw new Error("トークンは受け付けられましたが接続確認に失敗しました");
+      throw new Error(m.lib_token_accepted_probe_failed());
     }
   }
 
-  /** `fxg_session` Cookie を失効させる。 */
+  /** Invalidate the `fxg_session` Cookie. */
   async logout(): Promise<void> {
     try {
       await this.client.authLogout();
@@ -134,7 +138,7 @@ export class ConnectionStore {
     }
   }
 
-  /** 切替先を登録する (同一 URL は重複登録しない)。 */
+  /** Register a switch target (duplicate URLs are not added). */
   addTarget(label: string, url: string): void {
     const normalized = normalizeUrl(url);
     if (!normalized || normalized === this.origin) return;
@@ -155,12 +159,12 @@ export class ConnectionStore {
     persistTargets(this.targets);
   }
 
-  /** 現在のオリジン以外の有効な切替先 (ログアウト状態でも利用可能)。 */
+  /** Valid switch targets other than the current origin (usable even when logged out). */
   get availableTargets(): ConnectionTarget[] {
     return this.targets.filter((target) => target.url !== this.origin);
   }
 
-  /** 接続先を切替える (現在のオリジンの UI からそのオリジンの UI へ遷移する)。 */
+  /** Switch the connection target (navigate from the current origin's UI to that origin's UI). */
   switchTo(id: string): void {
     const target = this.targets.find((candidate) => candidate.id === id);
     if (!target || typeof location === "undefined") return;

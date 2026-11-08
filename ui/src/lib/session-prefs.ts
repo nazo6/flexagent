@@ -1,23 +1,23 @@
 /**
- * 新規セッション画面の端末ごとの記憶 (localStorage)。
+ * Per-device memory for the new session screen (localStorage).
  *
- * プロジェクト単位で最後に使ったエージェント / 初期モード / OpenCode2 実行モードを
- * 保持する。端末ごとの好みであり、サーバー (ノード / 中央サーバー) には保存しない。
+ * Remembers the last used agent / initial mode / OpenCode2 run mode per project.
+ * This is a per-device preference and is never stored on the server (node or central server).
  */
 export type SessionModePreference = "default" | "code" | "plan";
 
-/** 新規セッション画面で復元する起動設定。 */
+/** Startup settings restored by the new session screen. */
 export interface NewSessionPrefs {
-  /** 最後に使ったエージェントID (ノードに未導入ならカスタム入力へ復元する) */
+  /** Last used agent ID (restored into the custom input when not installed on the node) */
   agent: string;
-  /** エージェント初期モード */
+  /** Initial agent mode */
   mode: SessionModePreference;
 }
 
 const KEY_PREFIX = "fxg:new_session_prefs:";
 const SESSION_MODES: readonly SessionModePreference[] = ["default", "code", "plan"];
 
-/** `localStorage` を解決する (SSR / テストでは引数で差し替える)。 */
+/** Resolve `localStorage` (SSR / tests can inject a replacement). */
 function resolveStorage(storage?: Storage | null): Storage | null {
   if (storage !== undefined) return storage;
   return typeof localStorage === "undefined" ? null : localStorage;
@@ -28,10 +28,10 @@ function isSessionMode(value: unknown): value is SessionModePreference {
 }
 
 /**
- * 保存済みの起動設定を読み出す。
+ * Load the saved startup settings.
  *
- * 未保存・不正な JSON・意味のある値が無い場合は `null` を返す。
- * 不正な列挙値は既定値 (`default`) に丸める。
+ * Returns `null` when nothing is saved, the JSON is invalid, or no meaningful
+ * value is present. Invalid enum values are clamped to the default (`default`).
  */
 export function loadNewSessionPrefs(
   projectId: string,
@@ -58,7 +58,7 @@ export function loadNewSessionPrefs(
   }
 }
 
-/** 起動設定を保存する (容量超過等の失敗は無視する)。 */
+/** Save the startup settings (failures such as quota exceeded are ignored). */
 export function saveNewSessionPrefs(
   projectId: string,
   prefs: NewSessionPrefs,
@@ -69,6 +69,6 @@ export function saveNewSessionPrefs(
   try {
     store.setItem(KEY_PREFIX + projectId, JSON.stringify(prefs));
   } catch {
-    // localStorage 無効・容量超過時は記憶しない
+    // Do not persist when localStorage is disabled or over quota
   }
 }

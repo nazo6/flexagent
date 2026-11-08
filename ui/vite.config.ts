@@ -1,3 +1,4 @@
+import { paraglideVitePlugin } from "@inlang/paraglide-js";
 import adapter from "@sveltejs/adapter-static";
 import { vitePreprocess } from "@sveltejs/vite-plugin-svelte";
 import { sveltekit } from "@sveltejs/kit/vite";
@@ -5,13 +6,13 @@ import tailwindcss from "@tailwindcss/vite";
 import type { ClientRequest } from "node:http";
 import { defineConfig, type ProxyOptions } from "vite";
 
-/** 開発時の API プロキシ先 (既定: ローカルノードの `fxg daemon`)。 */
+/** API proxy target in development (default: the local `fxg daemon` node). */
 const proxyTarget = process.env.FXG_DEV_PROXY ?? "http://127.0.0.1:7860";
 
 /**
- * `fxg` の共通ミドルウェアは Host / Origin を検証する (DNS Rebinding / CSWSH
- * 対策)。プロキシでは Host を書き換え (`changeOrigin`)、Origin もプロキシ先
- * オリジンへ揃えて検証を通過させる (開発専用の設定)。
+ * `fxg`'s shared middleware validates the Host / Origin headers (DNS rebinding
+ * and CSWSH protection). The proxy rewrites Host (`changeOrigin`) and aligns
+ * Origin with the proxy target so validation passes (development only).
  */
 const rewriteOrigin = (proxyReq: ClientRequest) => {
   proxyReq.setHeader("origin", proxyTarget);
@@ -32,17 +33,26 @@ export default defineConfig({
     tailwindcss(),
     sveltekit({
       preprocess: vitePreprocess(),
-      // SPA モード: 全ページをクライアントレンダリングし、index.html へフォールバックする
-      // (`rust-embed` で `ui/build` を `fxg` バイナリへ同梱して配信する)
+      // SPA mode: render every page on the client and fall back to index.html
+      // (`rust-embed` embeds `ui/build` into the `fxg` binary)
       adapter: adapter({ fallback: "index.html" }),
 
-      // PWA: `src/service-worker.ts` を登録する (App Shell キャッシュ + Web Push)
+      // PWA: register `src/service-worker.ts` (App Shell cache + Web Push)
       serviceWorker: { register: true },
+    }),
+    // i18n: messages live in `messages/{locale}.json` and compile to
+    // `src/lib/paraglide` (generated, Git-ignored).
+    paraglideVitePlugin({
+      project: "./project.inlang",
+      outdir: "./src/lib/paraglide",
+      emitTsDeclarations: true,
+      strategy: ["baseLocale"],
     }),
   ],
   optimizeDeps: {
-    // lucide はアイコンごとの deep import が非常に多く、遅延発見のたびに
-    // dep 再最適化 (強制リロード) が走るため、事前バンドル対象から除外する
+    // lucide has a very large number of per-icon deep imports, so lazy
+    // discovery triggers dependency re-optimization (forced reload) each time;
+    // exclude it from pre-bundling.
     exclude: ["@lucide/svelte"],
   },
   server: {

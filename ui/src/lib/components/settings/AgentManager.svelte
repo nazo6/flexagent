@@ -9,6 +9,7 @@
   import { Label } from "#lib/components/ui/label/index.ts";
   import { agentSourceLabel, agentsAvailableOn, isPackageEnabled } from "#lib/agents.ts";
   import type { AgentSummary } from "#lib/generated/bindings.ts";
+  import { m } from "#lib/paraglide/messages.js";
   import { sync } from "#lib/stores/app.svelte.ts";
   import { toast } from "svelte-sonner";
   import BotIcon from "@lucide/svelte/icons/bot";
@@ -22,18 +23,18 @@
 
   let agents = $state<AgentSummary[]>([]);
   let loading = $state(false);
-  /** 対象ノード (カタログの取得元・操作対象)。 */
+  /** Target node (catalog source and operation target). */
   let nodeId = $state("");
-  /** 実行中の操作ラベル (例: `opencode2 をインストール中…`)。null = アイドル。 */
+  /** Label of the running operation (for example `opencode2 installing…`). null = idle. */
   let busyLabel = $state<string | null>(null);
-  /** 削除確認の対象。 */
+  /** Pending removal target. */
   let removeTarget = $state<AgentSummary | null>(null);
 
-  // カタログ (このノードで未導入のレジストリエージェント) ダイアログ
+  // Catalog dialog (registry agents not yet installed on this node)
   let catalogOpen = $state(false);
   let catalogQuery = $state("");
 
-  // カスタムエージェント定義フォーム (null = 新規作成)
+  // Custom agent definition form (null = create new)
   let customOpen = $state(false);
   let customBusy = $state(false);
   let customEditId = $state<string | null>(null);
@@ -42,9 +43,9 @@
   const onlineNodes = $derived(sync.nodes.filter((node) => node.is_online));
   const busy = $derived(busyLabel !== null);
 
-  /** このノードで使えるエージェント (npx/uvx は有効化したものだけ含まれる)。 */
+  /** Agents available on this node (npx/uvx are included only when enabled). */
   const available = $derived(agentsAvailableOn(agents, nodeId));
-  /** このノードでまだ使えないレジストリエージェント。 */
+  /** Registry agents not yet available on this node. */
   const catalogOnly = $derived(
     agents
       .filter((agent) => agent.registry && !isAvailableOn(agent))
@@ -55,7 +56,8 @@
     void loadAgents();
   });
 
-  // オンラインノードの既定選択 (接続直後はノード一覧が空のため反映時に設定)
+  // Default online node selection (set on update because the node list is empty right after
+  // connecting)
   $effect(() => {
     if (nodeId === "" && onlineNodes.length > 0) {
       nodeId = onlineNodes[0].node_id;
@@ -92,13 +94,18 @@
 
   async function setPackageEnabled(agent: AgentSummary, enabled: boolean): Promise<void> {
     if (busy || nodeId === "") return;
-    busyLabel = `${agent.id} の npx/uvx 利用を${enabled ? "有効化" : "無効化"}中…`;
+    busyLabel = enabled
+      ? m.settings_agent_package_enabling({ name: agent.id })
+      : m.settings_agent_package_disabling({ name: agent.id });
     try {
       const result = enabled
         ? await sync.connection.client.enablePackageAgent(nodeId, agent.id)
         : await sync.connection.client.disablePackageAgent(nodeId, agent.id);
       toast.success(
-        result.message ?? `${agent.id} の npx/uvx 利用を${enabled ? "有効化" : "無効化"}しました`,
+        result.message ??
+          (enabled
+            ? m.settings_agent_package_enabled({ name: agent.id })
+            : m.settings_agent_package_disabled({ name: agent.id })),
       );
       await Promise.all([loadAgents(), sync.refreshNodes()]);
     } catch (error) {
@@ -110,10 +117,10 @@
 
   async function refreshCatalog(): Promise<void> {
     if (busy || nodeId === "") return;
-    busyLabel = "カタログを更新中…";
+    busyLabel = m.settings_catalog_refreshing();
     try {
       const result = await sync.connection.client.refreshAgentsCatalog(nodeId);
-      toast.success(result.message ?? "カタログを更新しました");
+      toast.success(result.message ?? m.settings_catalog_refreshed());
       await Promise.all([loadAgents(), sync.refreshNodes()]);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
@@ -126,12 +133,12 @@
     const target = removeTarget;
     if (target === null || busy || nodeId === "") return;
     const isCustom = target.custom_config !== null;
-    busyLabel = `${target.id} を削除中…`;
+    busyLabel = m.settings_agent_removing({ name: target.id });
     try {
       const result = isCustom
         ? await sync.connection.client.removeCustomAgent(nodeId, target.id)
         : await sync.connection.client.disablePackageAgent(nodeId, target.id);
-      toast.success(result.message ?? `${target.id} を削除しました`);
+      toast.success(result.message ?? m.settings_agent_removed({ name: target.id }));
       removeTarget = null;
       await Promise.all([loadAgents(), sync.refreshNodes()]);
     } catch (error) {
@@ -141,7 +148,7 @@
     }
   }
 
-  /** カスタム定義フォームを開く (agent 省略時は新規作成)。 */
+  /** Open the custom definition form (creates a new agent when `agent` is omitted). */
   function openCustom(agent: AgentSummary | null): void {
     const config = agent?.custom_config ?? null;
     customEditId = agent?.id ?? null;
@@ -178,11 +185,11 @@
     if (customBusy || nodeId === "") return;
     const id = (customEditId ?? customForm.id).trim();
     if (id === "") {
-      toast.error("エージェントIDを入力してください");
+      toast.error(m.settings_agent_id_required());
       return;
     }
     if (customForm.command.trim() === "") {
-      toast.error("実行コマンドを入力してください");
+      toast.error(m.settings_agent_command_required());
       return;
     }
     customBusy = true;
@@ -193,7 +200,7 @@
         args: customForm.args.split(/\s+/).filter((value) => value !== ""),
         env: parseEnv(customForm.env),
       });
-      toast.success(result.message ?? `カスタムエージェント ${id} を保存しました`);
+      toast.success(result.message ?? m.settings_custom_agent_saved({ name: id }));
       customOpen = false;
       await Promise.all([loadAgents(), sync.refreshNodes()]);
     } catch (error) {
@@ -207,18 +214,17 @@
 <div class="flex flex-col gap-3">
   <div class="flex flex-wrap items-center justify-between gap-2">
     <p class="text-muted-foreground text-sm">
-      このノードで使える ACP エージェントの一覧です。PATH 上の既存インストール、npx/uvx
-      パッケージ実行、およびカスタム定義を管理します。
+      {m.settings_agents_description()}
     </p>
     <div class="flex flex-wrap items-center gap-1.5">
       <select
         bind:value={nodeId}
         class="border-input bg-background h-8 rounded-md border px-2 text-xs"
-        title="操作対象のノード"
+        title={m.settings_target_node()}
       >
         {#each sync.nodes as node (node.node_id)}
           <option value={node.node_id} disabled={!node.is_online}>
-            {node.name}{node.is_online ? "" : " — オフライン"}
+            {node.name}{node.is_online ? "" : m.settings_node_offline_suffix()}
           </option>
         {/each}
       </select>
@@ -227,18 +233,18 @@
         size="sm"
         disabled={busy || nodeId === ""}
         onclick={() => void refreshCatalog()}
-        title="ACP Registry カタログを強制再取得して更新 (fxg agents update)"
+        title={m.settings_catalog_refresh_title()}
       >
         <RefreshCwIcon />
-        カタログ更新
+        {m.settings_catalog_refresh()}
       </Button>
       <Button variant="outline" size="sm" disabled={loading} onclick={() => void loadAgents()}>
         <RefreshCwIcon />
-        再読込
+        {m.common_refresh()}
       </Button>
       <Button size="sm" disabled={nodeId === ""} onclick={() => openCustom(null)}>
         <PlusIcon />
-        カスタム追加
+        {m.settings_add_custom()}
       </Button>
     </div>
   </div>
@@ -249,15 +255,15 @@
 
   {#if onlineNodes.length === 0 && sync.nodes.length > 0}
     <p class="text-muted-foreground text-sm">
-      オンラインのノードがありません。エージェントの操作にはノードの接続が必要です。
+      {m.settings_no_online_nodes()}
     </p>
   {:else if nodeId === ""}
-    <p class="text-muted-foreground text-sm">ノードを選択してください。</p>
+    <p class="text-muted-foreground text-sm">{m.settings_select_node()}</p>
   {:else if loading && agents.length === 0}
-    <p class="text-muted-foreground text-sm">レジストリを読み込んでいます…</p>
+    <p class="text-muted-foreground text-sm">{m.settings_registry_loading()}</p>
   {:else if available.length === 0}
     <p class="text-muted-foreground text-sm">
-      このノードで使えるエージェントがありません。「カタログから追加」または「カスタム追加」から登録してください。
+      {m.settings_no_agents()}
     </p>
   {:else}
     {#each available as agent (agent.id)}
@@ -295,10 +301,10 @@
                 class="text-muted-foreground"
                 disabled={busy || nodeId === ""}
                 onclick={() => void setPackageEnabled(agent, false)}
-                title="npx/uvx 経由の利用を一覧から外します (実行ファイルは削除しません)"
+                title={m.settings_disable_package_title()}
               >
                 <PowerOffIcon />
-                npx/uvx を無効化
+                {m.settings_disable_package()}
               </Button>
             {/if}
             {#if agent.custom_config !== null}
@@ -307,10 +313,10 @@
                 size="icon-sm"
                 disabled={busy || nodeId === ""}
                 onclick={() => openCustom(agent)}
-                title="カスタム定義を編集"
+                title={m.settings_edit_custom_title()}
               >
                 <PencilIcon />
-                <span class="sr-only">{agent.id} を編集</span>
+                <span class="sr-only">{m.settings_edit_agent({ name: agent.id })}</span>
               </Button>
             {/if}
             {#if agent.custom_config !== null}
@@ -322,7 +328,7 @@
                 onclick={() => (removeTarget = agent)}
               >
                 <Trash2Icon />
-                <span class="sr-only">{agent.id} を削除</span>
+                <span class="sr-only">{m.settings_remove_agent({ name: agent.id })}</span>
               </Button>
             {/if}
           </div>
@@ -330,7 +336,7 @@
 
         {#if agent.installed_nodes.length > 1}
           <p class="text-muted-foreground text-[11px]">
-            利用可能なノード:
+            {m.settings_available_nodes()}
             {agent.installed_nodes.map((id) => nodeName(id)).join(", ")}
           </p>
         {/if}
@@ -346,52 +352,53 @@
       onclick={() => (catalogOpen = true)}
     >
       <PlusIcon />
-      カタログから追加 ({catalogOnly.length})
+      {m.settings_add_from_catalog({ count: catalogOnly.length })}
     </Button>
   </div>
 </div>
 
-<!-- エージェント削除確認 -->
+<!-- Agent removal confirmation -->
 <AlertDialog.Root
   open={removeTarget !== null}
   onOpenChange={(open) => !open && (removeTarget = null)}
 >
   <AlertDialog.Content>
     <AlertDialog.Header>
-      <AlertDialog.Title>エージェントを削除しますか？</AlertDialog.Title>
+      <AlertDialog.Title>{m.settings_remove_agent_title()}</AlertDialog.Title>
       <AlertDialog.Description class="text-sm">
         {#if removeTarget?.custom_config !== null}
+          {m.settings_remove_custom_description()}
           <code>{removeTarget?.id}</code>
-          のカスタム定義を削除します。設定ファイル (<code>config.toml</code>)
-          側に同名の定義がある場合はそちらが残ります。
+          {m.settings_remove_custom_description_suffix()}
+          <code>config.toml</code>
+          {m.settings_remove_custom_description_tail()}
         {:else}
-          {nodeName(nodeId)} 上の fxg 管理バイナリ
+          {m.settings_remove_package_description()}
           <code>{removeTarget?.id}</code>
-          を削除します。PATH 上の既存インストールには影響しません。
+          {m.settings_remove_package_description_tail({ name: nodeName(nodeId) })}
         {/if}
       </AlertDialog.Description>
     </AlertDialog.Header>
     <AlertDialog.Footer>
-      <AlertDialog.Cancel disabled={busy}>キャンセル</AlertDialog.Cancel>
+      <AlertDialog.Cancel disabled={busy}>{m.common_cancel()}</AlertDialog.Cancel>
       <AlertDialog.Action
         variant="destructive"
         disabled={busy}
         onclick={() => void confirmRemove()}
       >
-        削除
+        {m.common_delete()}
       </AlertDialog.Action>
     </AlertDialog.Footer>
   </AlertDialog.Content>
 </AlertDialog.Root>
 
-<!-- カタログ (未導入) ダイアログ -->
+<!-- Catalog dialog (not installed) -->
 <Dialog.Root open={catalogOpen} onOpenChange={(open) => (catalogOpen = open)}>
   <Dialog.Content class="sm:max-w-2xl">
     <Dialog.Header>
-      <Dialog.Title>カタログから追加</Dialog.Title>
+      <Dialog.Title>{m.settings_catalog_title()}</Dialog.Title>
       <Dialog.Description>
-        ACP Registry に登録されている未導入のエージェントです。インストール (または npx/uvx
-        を有効化) すると {nodeName(nodeId)} で利用できるようになります。
+        {m.settings_catalog_description({ name: nodeName(nodeId) })}
       </Dialog.Description>
     </Dialog.Header>
     <div class="flex flex-col gap-3">
@@ -399,7 +406,7 @@
         <SearchIcon class="text-muted-foreground absolute top-2 left-2 size-4" />
         <Input
           bind:value={catalogQuery}
-          placeholder="名前・ID・説明で検索"
+          placeholder={m.settings_catalog_search_placeholder()}
           class="h-8 pl-8 text-xs"
         />
       </div>
@@ -407,8 +414,8 @@
         {#if catalogOnly.length === 0}
           <p class="text-muted-foreground text-sm">
             {catalogQuery.trim() === ""
-              ? "未導入のエージェントはありません。"
-              : "一致するエージェントがありません。"}
+              ? m.settings_catalog_empty()
+              : m.settings_catalog_no_match()}
           </p>
         {:else}
           {#each catalogOnly as agent (agent.id)}
@@ -420,7 +427,8 @@
                   {#if agent.version !== "-"}
                     <span class="text-muted-foreground text-xs">v{agent.version}</span>
                   {/if}
-                  <Badge variant="secondary" class="text-[10px]">未導入</Badge>
+                  <Badge variant="secondary" class="text-[10px]">{m.settings_not_installed()}</Badge
+                  >
                 </div>
                 {#if agent.description}
                   <p class="text-muted-foreground text-xs">
@@ -435,14 +443,14 @@
                     size="sm"
                     disabled={busy || nodeId === ""}
                     onclick={() => void setPackageEnabled(agent, true)}
-                    title="npx/uvx は実行時にパッケージを取得します (実体は保存しません)"
+                    title={m.settings_enable_package_title()}
                   >
                     <PackageIcon />
-                    npx/uvx を有効化
+                    {m.settings_enable_package()}
                   </Button>
                 {:else}
                   <span class="text-muted-foreground text-[11px]">
-                    手動導入が必要 (PATH / カスタム追加)
+                    {m.settings_manual_install_required()}
                   </span>
                 {/if}
               </div>
@@ -454,22 +462,23 @@
   </Dialog.Content>
 </Dialog.Root>
 
-<!-- カスタムエージェント定義ダイアログ -->
+<!-- Custom agent definition dialog -->
 <Dialog.Root open={customOpen} onOpenChange={(open) => (customOpen = open)}>
   <Dialog.Content class="sm:max-w-lg">
     <Dialog.Header>
       <Dialog.Title>
-        {customEditId === null ? "カスタムエージェントを追加" : `${customEditId} を編集`}
+        {customEditId === null
+          ? m.settings_add_custom_agent()
+          : m.settings_edit_agent({ name: customEditId })}
       </Dialog.Title>
       <Dialog.Description>
-        ACP 対応の任意のコマンドをエージェントとして登録します (<code
-          >~/.flexagent/custom_agents.json</code
-        > に保存)。
+        {m.settings_custom_description()}
+        <code>~/.flexagent/custom_agents.json</code>
       </Dialog.Description>
     </Dialog.Header>
     <form class="flex flex-col gap-3" onsubmit={submitCustom}>
       <div class="grid gap-1.5">
-        <Label for="custom-id">エージェントID</Label>
+        <Label for="custom-id">{m.settings_agent_id()}</Label>
         <Input
           id="custom-id"
           bind:value={customForm.id}
@@ -479,7 +488,7 @@
         />
       </div>
       <div class="grid gap-1.5">
-        <Label for="custom-name">表示名 (任意)</Label>
+        <Label for="custom-name">{m.settings_display_name()}</Label>
         <Input
           id="custom-name"
           bind:value={customForm.name}
@@ -488,7 +497,7 @@
         />
       </div>
       <div class="grid gap-1.5">
-        <Label for="custom-command">実行コマンド</Label>
+        <Label for="custom-command">{m.settings_command()}</Label>
         <Input
           id="custom-command"
           bind:value={customForm.command}
@@ -496,11 +505,11 @@
           class="font-mono text-xs"
         />
         <p class="text-muted-foreground text-[11px]">
-          PATH 上のコマンド名、または絶対パス。ACP を stdio で話す実行ファイルを指定します。
+          {m.settings_command_hint()}
         </p>
       </div>
       <div class="grid gap-1.5">
-        <Label for="custom-args">引数 (空白区切り)</Label>
+        <Label for="custom-args">{m.settings_args()}</Label>
         <Input
           id="custom-args"
           bind:value={customForm.args}
@@ -509,7 +518,9 @@
         />
       </div>
       <div class="grid gap-1.5">
-        <Label for="custom-env">環境変数 (1行1件 <code>KEY=VALUE</code>)</Label>
+        <Label for="custom-env">
+          {m.settings_env_vars()} (<code>KEY=VALUE</code>)
+        </Label>
         <textarea
           id="custom-env"
           bind:value={customForm.env}
@@ -518,9 +529,9 @@
           placeholder="LOG_LEVEL=info"></textarea>
       </div>
       <Dialog.Footer>
-        <Dialog.Close>キャンセル</Dialog.Close>
+        <Dialog.Close>{m.common_cancel()}</Dialog.Close>
         <Button type="submit" disabled={customBusy}>
-          {customBusy ? "保存中…" : "保存"}
+          {customBusy ? m.settings_saving() : m.common_save()}
         </Button>
       </Dialog.Footer>
     </form>

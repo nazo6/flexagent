@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { m } from "#lib/paraglide/messages.js";
 import {
   configChoices,
   configValueToString,
@@ -39,10 +40,10 @@ describe("configChoices", () => {
     ]);
   });
 
-  it("labels boolean options with 有効 / 無効", () => {
+  it("labels boolean options with enabled / disabled", () => {
     expect(configChoices([true, false])).toEqual([
-      { value: "true", label: "有効", raw: true },
-      { value: "false", label: "無効", raw: false },
+      { value: "true", label: m.lib_config_enabled(), raw: true },
+      { value: "false", label: m.lib_config_disabled(), raw: false },
     ]);
   });
 

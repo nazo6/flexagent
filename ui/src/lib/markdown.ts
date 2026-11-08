@@ -1,18 +1,20 @@
 /**
- * チャットメッセージの Markdown レンダリング (`marked` + `DOMPurify`)。
+ * Markdown rendering for chat messages (`marked` + `DOMPurify`).
  *
- * ACP エージェントの出力は外部由来のため、必ず `DOMPurify` でサニタイズして
- * から `{@html}` で描画する (生 HTML / イベントハンドラ / `javascript:` URL を除去)。
- * コードフェンスのシンタックスハイライトは `#lib/highlight.ts` が描画後に付与する。
+ * ACP agent output is externally sourced, so always sanitize it with
+ * `DOMPurify` before rendering via `{@html}` (remove raw HTML / event handlers /
+ * `javascript:` URLs). Syntax highlighting for code fences is applied after
+ * rendering by `#lib/highlight.ts`.
  *
- * 注意: `DOMPurify` は happy-dom では正しく動作しない (未サポート環境)。
- * テストは real DOM (jsdom / ブラウザ) で実行すること (`markdown.test.ts` 参照)。
+ * Note: `DOMPurify` does not work correctly in happy-dom (unsupported
+ * environment). Run tests with a real DOM (jsdom / browser); see
+ * `markdown.test.ts`.
  */
 
 import DOMPurify from "dompurify";
 import { marked } from "marked";
 
-// リンクは常に新しいタブで開く (PWA のアプリ内遷移から外部へ逃がす)
+// Always open links in a new tab (escape the PWA's in-app navigation)
 DOMPurify.addHook("afterSanitizeAttributes", (node) => {
   if (node instanceof HTMLAnchorElement && node.hasAttribute("href")) {
     node.setAttribute("target", "_blank");
@@ -20,7 +22,7 @@ DOMPurify.addHook("afterSanitizeAttributes", (node) => {
   }
 });
 
-/** Markdown テキストをサニタイズ済み HTML へ変換する。 */
+/** Convert Markdown text into sanitized HTML. */
 export function renderMarkdown(text: string): string {
   const html = marked.parse(text, { async: false, gfm: true, breaks: true });
   return DOMPurify.sanitize(html);

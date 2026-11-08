@@ -4,11 +4,12 @@
   import { Button } from "#lib/components/ui/button/index.ts";
   import { Card } from "#lib/components/ui/card/index.ts";
   import { formatRelativeTime } from "#lib/format.ts";
+  import { m } from "#lib/paraglide/messages.js";
   import { shortId } from "#lib/session-status.ts";
   import { sync } from "#lib/stores/app.svelte.ts";
   import RefreshCwIcon from "@lucide/svelte/icons/refresh-cw";
 
-  /** 古いリクエストから順に処理できるよう昇順で表示する。 */
+  /** Sorted ascending so the oldest requests can be handled first. */
   const sorted = $derived(sync.inbox.toSorted((a, b) => a.created_at - b.created_at));
   const sortedElicitations = $derived(
     sync.inboxElicitations.toSorted((a, b) => a.created_at - b.created_at),
@@ -28,21 +29,21 @@
 <div class="mx-auto flex max-w-5xl flex-col gap-4 p-4 md:p-6">
   <div class="flex items-center justify-between gap-2">
     <div>
-      <h1 class="text-xl font-semibold">Inbox（承認・質問）</h1>
+      <h1 class="text-xl font-semibold">{m.inbox_title()}</h1>
       <p class="text-muted-foreground text-sm">
-        全ノード・全セッションの未解決の承認リクエストと質問
+        {m.inbox_subtitle()}
       </p>
     </div>
     <Button variant="outline" size="sm" onclick={() => void sync.refreshInbox()}>
       <RefreshCwIcon />
-      再読込
+      {m.common_refresh()}
     </Button>
   </div>
 
   <section class="flex flex-col gap-3">
-    <h2 class="text-sm font-semibold">承認リクエスト</h2>
+    <h2 class="text-sm font-semibold">{m.inbox_approvals()}</h2>
     {#if sorted.length === 0}
-      <p class="text-muted-foreground text-sm">未解決の承認リクエストはありません。</p>
+      <p class="text-muted-foreground text-sm">{m.inbox_approvals_empty()}</p>
     {:else}
       <ul class="flex list-none flex-col gap-3 p-0">
         {#each sorted as request (request.request_id)}
@@ -79,9 +80,9 @@
   </section>
 
   <section class="flex flex-col gap-3">
-    <h2 class="text-sm font-semibold">質問（エージェントからの入力リクエスト）</h2>
+    <h2 class="text-sm font-semibold">{m.inbox_questions()}</h2>
     {#if sortedElicitations.length === 0}
-      <p class="text-muted-foreground text-sm">回答待ちの質問はありません。</p>
+      <p class="text-muted-foreground text-sm">{m.inbox_questions_empty()}</p>
     {:else}
       <ul class="flex list-none flex-col gap-3 p-0">
         {#each sortedElicitations as elicitation (elicitation.elicitation_id)}

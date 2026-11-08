@@ -12,6 +12,8 @@
   import SessionStatusBadge from "#lib/components/SessionStatusBadge.svelte";
   import TerminalView from "#lib/components/terminal/TerminalView.svelte";
   import { Button } from "#lib/components/ui/button/index.ts";
+  import { errorCodeMessage } from "#lib/api/error-messages.ts";
+  import { m } from "#lib/paraglide/messages.js";
   import { formatRelativeTime } from "#lib/format.ts";
   import { shortId } from "#lib/session-status.ts";
   import { sync } from "#lib/stores/app.svelte.ts";
@@ -62,10 +64,10 @@
     }),
   );
   const capabilities = $derived(capabilitiesFromEvents(timeline.events));
-  // イベント由来の最新 usage を優先し、無ければセッション一覧 (投影) の値を使う
+  // Prefer the latest usage derived from events, and fall back to the session list (projection) value.
   const usage = $derived(latestUsageFromEvents(timeline.events) ?? session?.usage ?? null);
-  // 永続イベント (ターン完了後に同期された BootstrapLog) と、
-  // サーバーが一時VMから配信するエフェメラルログを統合する
+  // Merge persistent events (BootstrapLog synced after a turn completes) with the
+  // ephemeral log the server streams from an ephemeral VM.
   const bootstrapLines = $derived.by(() => {
     const persisted = bootstrapLogLines(timeline.events);
     const live = sync.bootstrapLinesFor(sessionId);
@@ -76,11 +78,12 @@
   let loadedFor = $state<string | null>(null);
   let showScrollBottom = $state(false);
 
-  // 表示モード (モバイル用の切り替えタブ、およびデスクトップ用の右ペイン選択)
+  // View mode (mobile tab switch and desktop right-pane selection)
   let activeTab = $state<ViewMode>("chat");
   let sidePanelMode = $state<"diff" | "terminal" | null>(null);
 
-  // セッションを WS の優先配信対象にし、履歴未取得なら REST でフォールバック読込
+  // Make the session a priority target for WS delivery, and fall back to REST
+  // loading when the history has not been fetched yet.
   $effect(() => {
     const id = sessionId;
     if (!id) return;
@@ -90,14 +93,14 @@
       const target = sync.timelineFor(id);
       if (target.events.length === 0) {
         sync.loadSessionEvents(id).catch(() => {
-          /* WS のリプレイが到着すれば表示できるため無視する */
+          /* Ignore: the WS replay will make it visible once it arrives. */
         });
       }
     }
     return () => sync.setActiveSession(null);
   });
 
-  // 新規アイテム追加時に末尾へスクロール (ユーザーが過去を閲覧中でなければ)
+  // Scroll to the end when a new item is added (unless the user is browsing the past)
   $effect(() => {
     const currentItems = items;
     if (chatContainer !== null && currentItems.length > 0 && !showScrollBottom) {
@@ -115,24 +118,25 @@
   let killDialogOpen = $state(false);
   let killing = $state(false);
 
-  // Resume (停止済みセッションの再開) の実行状態
+  // Execution state of Resume (restarting a stopped session)
   let resuming = $state(false);
 
   /**
-   * ネイティブ復元非対応 (`RESUME_REQUIRED`) を検出したか。
+   * Whether native restore is unsupported (`RESUME_REQUIRED`) was detected.
    *
-   * 通常、停止済みセッションは送信時の自動レジュームで再開されるため
-   * Resume ボタンは表示しない。送信が `RESUME_REQUIRED` で失敗した場合
-   * (履歴 Replay での再開が必要) にだけ表示する。Composer と共有する。
-   * 強制終了などで `status` が実態とずれている場合も、送信時の自動レジュームが
-   * 実態に基づいて再開する (または `RESUME_REQUIRED` でこのボタンを表示する)。
+   * Normally a stopped session is resumed automatically on send, so the
+   * Resume button is not shown. It is only shown when sending failed with
+   * `RESUME_REQUIRED` (i.e. resuming via history replay is required). Shared with Composer.
+   * Even when `status` diverges from reality (for example after a forced kill),
+   * the automatic resume on send restarts based on the actual state (or shows this
+   * button via `RESUME_REQUIRED`).
    */
   let resumeRequired = $state(false);
 
-  /** ネイティブ復元非対応を検出したセッションのみ Resume を表示する。 */
+  /** Show Resume only for sessions where unsupported native restore was detected. */
   const canResume = $derived(resumeRequired && session !== null);
 
-  // Revert (Shadow Git Tree 巻き戻し) 確認ダイアログの状態
+  // State of the Revert (Shadow Git Tree rollback) confirmation dialog
   let revertSeq = $state<number | null>(null);
   let reverting = $state(false);
 
@@ -160,13 +164,13 @@
     if (session?.project_id) params.set("project", session.project_id);
     if (session?.agent_id) params.set("agent", session.agent_id);
     if (session?.last_node_seq) params.set("fork_seq", String(session.last_node_seq));
-    // Fork 先も同じノード・実行ディレクトリで開始する (既定パスの解決を上書き)
+    // Start the fork on the same node and working directory (overrides default path resolution)
     if (session?.node_id) params.set("node", session.node_id);
     if (session?.local_path) params.set("path", session.local_path);
     void goto(`/?${params.toString()}`);
   }
 
-  /** このセッションと同じノード・実行ディレクトリで新規セッションを開く。 */
+  /** Open a new session on the same node and working directory as this session. */
   function handleNewSessionHere() {
     if (!session) return;
     const params = new URLSearchParams();
@@ -177,7 +181,7 @@
     void goto(`/?${params.toString()}`);
   }
 
-  /** 停止済みセッションを履歴 Replay で再開する (`POST /sessions/:id/resume`)。 */
+  /** Resume a stopped session via history replay (`POST /sessions/:id/resume`). */
   async function handleResumeSession() {
     if (!sessionId || resuming) return;
     resuming = true;
@@ -185,9 +189,9 @@
       const result = await sync.resumeSession(sessionId);
       resumeRequired = false;
       if (result.context_restored) {
-        toast.success("セッションを再開しました (エージェントのコンテキストを復元)");
+        toast.success(m.session_resume_success_context());
       } else {
-        toast.success("セッションを再開しました (履歴を引き継いで継続)");
+        toast.success(m.session_resume_success_replay());
       }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
@@ -202,11 +206,11 @@
     try {
       const result = await sync.controlSession(sessionId, { action: "kill" });
       if (result.success) {
-        toast.success("セッションの子プロセスツリーを強制終了しました");
+        toast.success(m.session_kill_success());
         killDialogOpen = false;
         await sync.refreshSessions();
       } else {
-        toast.error(result.error ?? result.code ?? "強制終了に失敗しました");
+        toast.error(result.error ?? errorCodeMessage(result.code) ?? m.session_kill_failed());
       }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
@@ -215,30 +219,34 @@
     }
   }
 
-  /** タイムラインの「この時点へ巻き戻す」から確認ダイアログを開く。 */
+  /** Open the confirmation dialog from the timeline's "revert to this point". */
   function requestRevert(seq: number) {
     revertSeq = seq;
   }
 
-  /** アーカイブを解除する (アーカイブ済みバナーから)。 */
+  /** Unarchive the session (from the archived banner). */
   async function handleUnarchive() {
     if (!sessionId) return;
     try {
       await sync.archiveSession(sessionId, false);
-      toast.success("アーカイブを解除しました");
+      toast.success(m.session_unarchived());
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
     }
   }
 
-  /** 指定ターン時点へワークスペースを巻き戻す (`POST /sessions/:id/revert`)。 */
+  /** Revert the workspace to the given turn (`POST /sessions/:id/revert`). */
   async function handleRevertSession() {
     if (!sessionId || revertSeq === null || reverting) return;
     reverting = true;
     try {
       const result = await sync.revertSession(sessionId, revertSeq);
       toast.success(
-        `node_seq=${result.target_node_seq} 時点へ巻き戻しました (復元 ${result.restored_files} 件 / 削除 ${result.removed_files} 件)`,
+        m.session_revert_success({
+          seq: result.target_node_seq,
+          restored: result.restored_files,
+          removed: result.removed_files,
+        }),
       );
       revertSeq = null;
     } catch (error) {
@@ -250,19 +258,19 @@
 </script>
 
 <svelte:head>
-  <title>{session?.title ?? "セッション"} - FlexAgent</title>
+  <title>{session?.title ?? m.session_title_fallback()} - FlexAgent</title>
 </svelte:head>
 
 <div class="flex h-full w-full flex-col overflow-hidden bg-background">
-  <!-- セッションヘッダー -->
+  <!-- Session header -->
   <header class="bg-card/80 border-b px-3 py-2 shrink-0 backdrop-blur">
     <div class="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5">
-      <!-- 左側: 戻るリンク + タイトル + ノード状態 -->
+      <!-- Left: back link + title + node status -->
       <div class="flex min-w-0 flex-1 items-center gap-2">
         <a
           href="/"
           class="hover:bg-accent text-muted-foreground hover:text-foreground -ml-1 flex size-7 items-center justify-center rounded-md border md:hidden"
-          title="セッション一覧に戻る"
+          title={m.session_back_to_list()}
         >
           <ChevronLeftIcon class="size-4" />
         </a>
@@ -270,7 +278,7 @@
         <div class="flex min-w-0 flex-col gap-0.5">
           <div class="flex items-center gap-2">
             <h1 class="truncate text-sm font-semibold tracking-tight">
-              {session?.title ?? "セッション"}
+              {session?.title ?? m.session_title_fallback()}
             </h1>
             {#if currentStatus}
               <SessionStatusBadge status={currentStatus} />
@@ -278,7 +286,7 @@
           </div>
 
           <div class="text-muted-foreground flex flex-wrap items-center gap-x-2 text-[11px]">
-            <!-- ノード利用可能ステータス -->
+            <!-- Node availability status -->
             <NodeStatusBadge node={sessionNode} showNodeName={true} />
             <span class="opacity-40">/</span>
             <span class="truncate">{session?.project_id}</span>
@@ -294,10 +302,10 @@
               <button
                 type="button"
                 class="hover:text-foreground inline-flex items-center gap-1 font-mono text-[11px] truncate max-w-44 sm:max-w-xs md:max-w-md transition-colors cursor-pointer"
-                title={`ワーキングディレクトリ: ${session.local_path} (クリックでコピー)`}
+                title={m.session_working_dir_copy_title({ path: session.local_path })}
                 onclick={() => {
                   navigator.clipboard.writeText(session.local_path);
-                  toast.success("ワーキングディレクトリをコピーしました");
+                  toast.success(m.session_working_dir_copied());
                 }}
               >
                 <FolderIcon class="size-3 shrink-0 text-amber-500/80" />
@@ -318,9 +326,9 @@
         </div>
       </div>
 
-      <!-- 右側: モード切替 / ペイン開閉ボタン -->
+      <!-- Right: mode switch / pane toggle buttons -->
       <div class="flex items-center gap-1.5">
-        <!-- モバイル向け: タブ切り替えボタン -->
+        <!-- Mobile: tab switch buttons -->
         <div class="flex rounded-md border bg-muted/30 p-0.5 md:hidden">
           <button
             type="button"
@@ -332,7 +340,7 @@
             )}
             onclick={() => (activeTab = "chat")}
           >
-            チャット
+            {m.session_tab_chat()}
           </button>
           <button
             type="button"
@@ -360,14 +368,14 @@
           </button>
         </div>
 
-        <!-- デスクトップ向け: サイドパネルトグル -->
+        <!-- Desktop: side panel toggles -->
         <div class="hidden items-center gap-1 md:flex">
           <Button
             variant={sidePanelMode === "diff" ? "secondary" : "outline"}
             size="sm"
             class="h-7 text-xs gap-1.5"
             onclick={() => toggleSidePanel("diff")}
-            title="コード変更差分 (Diff) パネルを右側に開閉します"
+            title={m.session_diff_panel_toggle_title()}
           >
             <FileCodeIcon class="size-3.5" />
             <span>Diff</span>
@@ -378,7 +386,7 @@
             size="sm"
             class="h-7 text-xs gap-1.5"
             onclick={() => toggleSidePanel("terminal")}
-            title="ターミナル出力を右側に開閉します"
+            title={m.session_terminal_panel_toggle_title()}
           >
             <SquareTerminalIcon class="size-3.5" />
             <span>Terminal</span>
@@ -387,7 +395,7 @@
 
         <div class="h-4 w-px bg-border/60 mx-0.5 hidden sm:block"></div>
 
-        <!-- Resume ボタン (ネイティブ復元非対応の停止済みセッションのみ) -->
+        <!-- Resume button (only for stopped sessions without native restore support) -->
         {#if canResume}
           <Button
             variant="outline"
@@ -395,52 +403,52 @@
             class="h-7 text-xs gap-1"
             disabled={resuming}
             onclick={handleResumeSession}
-            title="エージェントがネイティブ復元に対応していないため、履歴を引き継いで再開します"
+            title={m.session_resume_button_title()}
           >
             <PlayIcon class="size-3" />
             <span class="hidden sm:inline">Resume</span>
           </Button>
         {/if}
 
-        <!-- Fork ボタン -->
+        <!-- Fork button -->
         <Button
           variant="outline"
           size="sm"
           class="h-7 text-xs gap-1"
           onclick={handleForkSession}
-          title="このセッションの履歴を引き継いで新しいセッションへ分岐 (Fork)"
+          title={m.session_fork_button_title()}
         >
           <GitForkIcon class="size-3" />
           <span class="hidden sm:inline">Fork</span>
         </Button>
 
-        <!-- 同じ場所で新規セッション (履歴は引き継がない) -->
+        <!-- New session in the same place (without carrying over history) -->
         {#if session && sessionNode && !sessionNode.is_ephemeral}
           <Button
             variant="outline"
             size="sm"
             class="h-7 text-xs gap-1"
             onclick={handleNewSessionHere}
-            title="このセッションと同じノード・実行ディレクトリで新しいセッションを開始"
+            title={m.session_new_here_button_title()}
           >
             <PlusIcon class="size-3" />
-            <span class="hidden sm:inline">ここで新規</span>
+            <span class="hidden sm:inline">{m.session_new_here()}</span>
           </Button>
         {/if}
 
-        <!-- Kill ボタン (強制終了) -->
+        <!-- Kill button (forced termination) -->
         <Button
           variant="ghost"
           size="sm"
           class="h-7 text-xs gap-1 text-destructive hover:bg-destructive/10 hover:text-destructive"
           onclick={() => (killDialogOpen = true)}
-          title="セッションの子プロセスツリー (Job Object) を即座に強制終了"
+          title={m.session_kill_button_title()}
         >
           <SkullIcon class="size-3" />
           <span class="hidden sm:inline">Kill</span>
         </Button>
 
-        <!-- アーカイブ / 削除メニュー -->
+        <!-- Archive / delete menu -->
         {#if session}
           <SessionActionsMenu {session} onDeleted={() => void goto("/")} />
         {/if}
@@ -448,16 +456,14 @@
     </div>
   </header>
 
-  <!-- アーカイブ済みバナー -->
+  <!-- Archived banner -->
   {#if session && session.archived_at !== null}
     <div
       class="flex shrink-0 items-center justify-between gap-2 border-b border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-xs"
     >
       <div class="flex items-center gap-2 text-amber-700 dark:text-amber-400">
         <ArchiveIcon class="size-3.5" />
-        <span
-          >このセッションはアーカイブ済みです (一覧から非表示)。会話ログは保持されています。</span
-        >
+        <span>{m.session_archived_banner()}</span>
       </div>
       <Button
         variant="outline"
@@ -465,79 +471,80 @@
         class="h-6 shrink-0 gap-1 text-[11px]"
         onclick={handleUnarchive}
       >
-        アーカイブを解除
+        {m.session_unarchive()}
       </Button>
     </div>
   {/if}
 
-  <!-- Kill 確認モーダル -->
+  <!-- Kill confirmation modal -->
   <AlertDialog.Root bind:open={killDialogOpen}>
     <AlertDialog.Content>
       <AlertDialog.Header>
         <AlertDialog.Title class="flex items-center gap-2 text-destructive">
           <SkullIcon class="size-5" />
-          セッションを強制終了しますか？
+          {m.session_kill_confirm_title()}
         </AlertDialog.Title>
         <AlertDialog.Description class="text-sm">
-          セッション <code>{sessionId}</code> で実行中の子プロセスツリー (Job Object) を即座に強制停止します。未コミットの変更や実行中のコマンドは中断されます。
+          {m.session_kill_confirm_description_pre()}
+          <code>{sessionId}</code>{m.session_kill_confirm_description_post()}
         </AlertDialog.Description>
       </AlertDialog.Header>
       <AlertDialog.Footer>
-        <AlertDialog.Cancel disabled={killing}>キャンセル</AlertDialog.Cancel>
+        <AlertDialog.Cancel disabled={killing}>{m.common_cancel()}</AlertDialog.Cancel>
         <AlertDialog.Action
           class="bg-destructive hover:bg-destructive/90 text-destructive-foreground"
           disabled={killing}
           onclick={handleKillSession}
         >
-          {killing ? "強制終了中…" : "強制終了 (Kill)"}
+          {killing ? m.session_killing() : m.session_kill_action()}
         </AlertDialog.Action>
       </AlertDialog.Footer>
     </AlertDialog.Content>
   </AlertDialog.Root>
 
-  <!-- Revert 確認モーダル (Shadow Git Tree 巻き戻し) -->
+  <!-- Revert confirmation modal (Shadow Git Tree rollback) -->
   <AlertDialog.Root open={revertSeq !== null} onOpenChange={(open) => !open && (revertSeq = null)}>
     <AlertDialog.Content>
       <AlertDialog.Header>
         <AlertDialog.Title class="flex items-center gap-2">
           <Undo2Icon class="size-5 text-amber-500" />
-          この時点へ巻き戻しますか？
+          {m.session_revert_confirm_title()}
         </AlertDialog.Title>
         <AlertDialog.Description class="text-sm">
-          ワークスペースのファイルを <code>node_seq={revertSeq}</code> のターン開始時の スナップショットへ復元します。未コミットの変更は上書きされ、このターン以降に
-          作成されたファイルは削除されます。実行直前の状態は Shadow Git Tree にバックアップ されます。
+          {m.session_revert_confirm_description_pre()}
+          <code>node_seq={revertSeq}</code>{m.session_revert_confirm_description_post()}
         </AlertDialog.Description>
       </AlertDialog.Header>
       <AlertDialog.Footer>
-        <AlertDialog.Cancel disabled={reverting}>キャンセル</AlertDialog.Cancel>
+        <AlertDialog.Cancel disabled={reverting}>{m.common_cancel()}</AlertDialog.Cancel>
         <AlertDialog.Action
           class="bg-amber-600 hover:bg-amber-600/90 text-white"
           disabled={reverting}
           onclick={handleRevertSession}
         >
-          {reverting ? "巻き戻し中…" : "巻き戻し (Revert)"}
+          {reverting ? m.session_reverting() : m.session_revert_action()}
         </AlertDialog.Action>
       </AlertDialog.Footer>
     </AlertDialog.Content>
   </AlertDialog.Root>
 
-  <!-- セッションが存在しない場合のエラー表示 -->
+  <!-- Error display when the session does not exist -->
   {#if session === null}
     <div class="p-4 text-center text-sm text-muted-foreground">
-      このセッションは同期されていないか、存在しません。
+      {m.session_not_found()}
     </div>
   {/if}
 
-  <!-- メインコンテンツ領域 -->
+  <!-- Main content area -->
   <div class="flex flex-1 overflow-hidden">
-    <!-- チャットメインエリア (デスクトップ時は常時、モバイル時は activeTab === 'chat' の時に表示) -->
+    <!-- Chat main area (always on desktop, on mobile only when activeTab === 'chat') -->
     <div
       class={cn(
         "flex h-full flex-1 flex-col overflow-hidden",
         activeTab !== "chat" ? "hidden md:flex" : "flex",
       )}
     >
-      <!-- スクロール可能なメッセージタイムライン -->
+      <!-- Scrollable message timeline -->
       <div class="relative flex-1 min-h-0">
         <div
           bind:this={chatContainer}
@@ -550,7 +557,7 @@
           </div>
         </div>
 
-        <!-- 最下部へジャンプボタン -->
+        <!-- Jump to bottom button -->
         {#if showScrollBottom}
           <button
             type="button"
@@ -558,12 +565,12 @@
             onclick={scrollToBottom}
           >
             <ArrowDownIcon class="size-3.5" />
-            <span>最新へジャンプ</span>
+            <span>{m.session_jump_to_latest()}</span>
           </button>
         {/if}
       </div>
 
-      <!-- チャット入力欄 (Composer) -->
+      <!-- Chat input (Composer) -->
       <div class="bg-card/50 border-t px-3 py-2 md:px-6 shrink-0">
         <div class="mx-auto max-w-3xl">
           <Composer
@@ -577,20 +584,20 @@
       </div>
     </div>
 
-    <!-- デスクトップ用 右サイドパネル (Diff または Terminal) -->
+    <!-- Desktop right side panel (Diff or Terminal) -->
     {#if sidePanelMode !== null}
       <div
         class="border-border hidden md:flex md:w-1/2 lg:w-5/12 flex-col border-l bg-card/40 h-full overflow-hidden"
       >
-        <!-- サイドパネルヘッダー -->
+        <!-- Side panel header -->
         <div class="flex items-center justify-between border-b px-3 py-2">
           <div class="flex items-center gap-2 text-xs font-semibold">
             {#if sidePanelMode === "diff"}
               <FileCodeIcon class="size-4" />
-              <span>変更差分 (Diff)</span>
+              <span>{m.session_diff_panel_title()}</span>
             {:else}
               <SquareTerminalIcon class="size-4" />
-              <span>ターミナル (Terminal)</span>
+              <span>{m.session_terminal_panel_title()}</span>
             {/if}
           </div>
 
@@ -623,14 +630,14 @@
               type="button"
               class="text-muted-foreground hover:text-foreground ml-1 p-1"
               onclick={() => (sidePanelMode = null)}
-              title="パネルを閉じる"
+              title={m.session_close_panel()}
             >
               <PanelRightCloseIcon class="size-4" />
             </button>
           </div>
         </div>
 
-        <!-- サイドパネルコンテンツ -->
+        <!-- Side panel content -->
         <div class="flex-1 overflow-y-auto p-3">
           {#if sidePanelMode === "diff"}
             <DiffPane {sessionId} {items} />
@@ -641,7 +648,7 @@
       </div>
     {/if}
 
-    <!-- モバイル用 Diff / Terminal 全画面表示 (md未満でタブ選択時) -->
+    <!-- Mobile full-screen Diff / Terminal (when a tab is selected below md) -->
     {#if activeTab === "diff"}
       <div class="flex flex-1 flex-col overflow-y-auto p-3 md:hidden">
         <DiffPane {sessionId} {items} />

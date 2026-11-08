@@ -8,8 +8,8 @@ describe("base64 helpers", () => {
     );
   });
 
-  it("round-trips multi-byte text (日本語 / 絵文字)", () => {
-    const text = "こんにちは 🌊 FlexAgent";
+  it("round-trips multi-byte text (Japanese / emoji)", () => {
+    const text = "こんにちは 🌊 FlexAgent"; // allow-japanese: multi-byte (CJK/emoji) round-trip test data
     expect(decodeBase64ToText(encodeTextToBase64(text))).toBe(text);
   });
 

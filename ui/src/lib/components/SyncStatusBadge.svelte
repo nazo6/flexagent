@@ -3,6 +3,7 @@
   import { formatRelativeTime } from "#lib/format.ts";
   import { connection, sync } from "#lib/stores/app.svelte.ts";
   import { cn } from "#lib/utils.ts";
+  import { m } from "#lib/paraglide/messages.js";
   import WifiIcon from "@lucide/svelte/icons/wifi";
   import WifiOffIcon from "@lucide/svelte/icons/wifi-off";
 
@@ -22,10 +23,10 @@
   >
     {#if sync.wsConnected}
       <WifiIcon class="size-3 shrink-0" />
-      <span>接続中</span>
+      <span>{m.shell_connected()}</span>
     {:else}
       <WifiOffIcon class="size-3 shrink-0" />
-      <span>切断</span>
+      <span>{m.shell_disconnected()}</span>
     {/if}
   </Badge>
 
@@ -34,11 +35,13 @@
       variant={sync.centralConnected ? "secondary" : "outline"}
       class="px-1.5 py-0 text-[10px] font-normal"
     >
-      中央: {sync.centralConnected ? "接続" : "切断"}
+      {m.shell_central_status({
+        status: sync.centralConnected ? m.shell_connected() : m.shell_disconnected(),
+      })}
     </Badge>
     {#if sync.unsyncedEventCount > 0}
       <Badge variant="destructive" class="px-1.5 py-0 text-[10px] font-normal">
-        未同期 {sync.unsyncedEventCount}
+        {m.shell_unsynced_count({ count: sync.unsyncedEventCount })}
       </Badge>
     {/if}
   {/if}
@@ -46,9 +49,9 @@
   {#if sync.lastSyncedAt !== null}
     <span
       class="text-muted-foreground text-[10px] truncate ml-auto"
-      title={`最終同期: ${new Date(sync.lastSyncedAt).toLocaleString()}`}
+      title={m.shell_last_synced_tooltip({ time: new Date(sync.lastSyncedAt).toLocaleString() })}
     >
-      同期 {formatRelativeTime(sync.lastSyncedAt)}
+      {m.shell_synced_relative({ time: formatRelativeTime(sync.lastSyncedAt) })}
     </span>
   {/if}
 </div>

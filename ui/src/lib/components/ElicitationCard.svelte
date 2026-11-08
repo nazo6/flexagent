@@ -4,7 +4,9 @@
   import { Input } from "#lib/components/ui/input/index.ts";
   import { Label } from "#lib/components/ui/label/index.ts";
   import type { ElicitationAction, JsonValue } from "#lib/generated/bindings.ts";
+  import { errorCodeMessage } from "#lib/api/error-messages.ts";
   import { formatRelativeTime } from "#lib/format.ts";
+  import { m } from "#lib/paraglide/messages.js";
   import { sync } from "#lib/stores/app.svelte.ts";
   import { toast } from "svelte-sonner";
   import ChevronRightIcon from "@lucide/svelte/icons/chevron-right";
@@ -12,7 +14,7 @@
   import SendIcon from "@lucide/svelte/icons/send";
   import XIcon from "@lucide/svelte/icons/x";
 
-  /** elicitation の制限 JSON Schema (object) のうち表示に必要な部分。 */
+  /** The subset of the restricted elicitation JSON Schema (object) needed for rendering. */
   interface ElicitationProperty {
     type?: string;
     title?: string;
@@ -57,8 +59,8 @@
   let values = $state<Record<string, FormValue>>({});
   let busyAction = $state<ElicitationAction | null>(null);
 
-  // schema から初期値 (default / 空) を設定する
-  // (values を読まないため values 更新で再実行されない)
+  // Seed initial values from the schema (default / empty)
+  // (does not read `values`, so updating them does not re-run this effect)
   $effect(() => {
     const next: Record<string, FormValue> = {};
     for (const [key, property] of Object.entries(schema.properties ?? {})) {
@@ -86,9 +88,9 @@
   );
 
   const resolvedLabel: Record<ElicitationAction, string> = {
-    accept: "回答済み",
-    decline: "辞退済み",
-    cancel: "キャンセル済み",
+    accept: m.chat_elicitation_accepted(),
+    decline: m.chat_elicitation_declined(),
+    cancel: m.chat_elicitation_cancelled(),
   };
 
   function enumOptions(property: ElicitationProperty): { value: string; label: string }[] {
@@ -120,7 +122,7 @@
     values[key] = checked ? [...list, option] : list.filter((value) => value !== option);
   }
 
-  /** `accept` に送る content (空の任意項目は省略する)。 */
+  /** Content sent with `accept` (empty optional fields are omitted). */
   function buildContent(): { [key: string]: JsonValue } {
     const content: { [key: string]: JsonValue } = {};
     for (const [key] of properties) {
@@ -139,7 +141,7 @@
   async function respond(action: ElicitationAction) {
     if (busyAction !== null) return;
     if (action === "accept" && missingRequired.length > 0) {
-      toast.error(`必須項目を入力してください: ${missingRequired.join(", ")}`);
+      toast.error(m.chat_required_fields({ fields: missingRequired.join(", ") }));
       return;
     }
     busyAction = action;
@@ -151,11 +153,11 @@
         action === "accept" ? buildContent() : null,
       );
       if (result.code === "ALREADY_RESOLVED") {
-        toast.info("既に他のクライアントで解決済みでした");
+        toast.info(m.error_already_resolved());
       } else if (!result.success) {
-        toast.error(result.error ?? result.code ?? "応答に失敗しました");
+        toast.error(result.error ?? errorCodeMessage(result.code) ?? m.chat_elicitation_failed());
       } else {
-        toast.success("応答を送信しました");
+        toast.success(m.chat_elicitation_sent());
       }
       await sync.refreshInbox();
     } catch (error) {
@@ -171,7 +173,7 @@
     <div class="flex min-w-0 flex-col gap-1">
       <div class="flex items-center gap-2">
         <CircleHelpIcon class="text-muted-foreground size-4 shrink-0" />
-        <span class="text-xs font-medium">質問</span>
+        <span class="text-xs font-medium">{m.chat_elicitation_heading()}</span>
         {#if resolved}
           <Badge variant="secondary">
             {resolvedLabel[resolved.action]} ({resolved.resolvedBy})
@@ -186,7 +188,7 @@
       href={`/sessions/${sessionId}`}
       class="text-muted-foreground hover:text-foreground flex shrink-0 items-center gap-0.5 text-xs"
     >
-      セッションを開く
+      {m.chat_open_session()}
       <ChevronRightIcon class="size-3" />
     </a>
   </div>
@@ -210,7 +212,7 @@
               value={typeof values[key] === "string" ? values[key] : ""}
               onchange={(event) => setString(key, event.currentTarget.value)}
             >
-              <option value="">選択してください</option>
+              <option value="">{m.chat_select_option()}</option>
               {#each enumOptions(property) as option (option.value)}
                 <option value={option.value}>{option.label}</option>
               {/each}
@@ -224,7 +226,7 @@
                 checked={values[key] === true}
                 onchange={(event) => (values[key] = event.currentTarget.checked)}
               />
-              <span>はい</span>
+              <span>{m.chat_yes()}</span>
             </label>
           {:else if property.type === "array"}
             {#if property.items?.enum}
@@ -245,7 +247,7 @@
             {:else}
               <Input
                 id={inputId}
-                placeholder="カンマ区切りで入力"
+                placeholder={m.chat_comma_separated()}
                 value={Array.isArray(values[key]) ? values[key].join(", ") : ""}
                 oninput={(event) => setStringArray(key, event.currentTarget.value)}
               />
@@ -274,7 +276,7 @@
           onclick={() => void respond("accept")}
         >
           <SendIcon />
-          回答する
+          {m.chat_respond()}
         </Button>
         <Button
           size="sm"
@@ -283,7 +285,7 @@
           onclick={() => void respond("decline")}
         >
           <XIcon />
-          辞退
+          {m.chat_decline()}
         </Button>
         <Button
           size="sm"
@@ -291,7 +293,7 @@
           disabled={busyAction !== null}
           onclick={() => void respond("cancel")}
         >
-          キャンセル
+          {m.common_cancel()}
         </Button>
       </div>
     </div>

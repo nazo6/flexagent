@@ -1,18 +1,19 @@
-/** 受信バッチのカーソル適用判定結果。 */
+/** Result of matching an incoming batch cursor against the current value. */
 export interface CursorUpdate {
-  /** 配信元ストアの再作成・リセット (カーソル巻き戻り) を検知したか */
+  /** Whether a source store recreation or reset (cursor rollback) was detected */
   reset: boolean;
-  /** 適用後のカーソル */
+  /** Cursor after applying the batch */
   cursor: number;
 }
 
 /**
- * 受信バッチのカーソルを現在値と突き合わせる。
+ * Match an incoming batch cursor against the current value.
  *
- * カーソルは配信元ストアへの取り込み順で単調増加するため、`incoming` が
- * `current` より小さい場合はストアの再作成・リセット (DB リセット) を意味する。
- * その場合はリセットを通知して新しいカーソルを採用し、呼び出し側で
- * タイムライン等のローカル状態を破棄して 0 から再同期する。
+ * Cursors increase monotonically in the order events are ingested from the
+ * source store, so an `incoming` value smaller than `current` means the store
+ * was recreated or reset (database reset). In that case report the reset and
+ * adopt the new cursor; the caller discards local state such as the timeline
+ * and resynchronizes from 0.
  */
 export function mergeCursor(current: number | null, incoming: number): CursorUpdate {
   if (current !== null && incoming < current) {

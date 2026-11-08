@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { FileDiff } from "#lib/generated/bindings.ts";
+  import { m } from "#lib/paraglide/messages.js";
 
   let { file }: { file: FileDiff } = $props();
 
@@ -100,7 +101,7 @@
     <p
       class="text-muted-foreground bg-background/80 absolute inset-0 flex items-center justify-center text-xs"
     >
-      Diff エディタを読み込み中…
+      {m.diff_loading_editor()}
     </p>
   {/if}
 </div>

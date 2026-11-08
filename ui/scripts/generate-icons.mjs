@@ -1,9 +1,9 @@
 /**
- * PWA アイコン (192 / 512 / maskable-512) を依存なしで生成する。
+ * Generate the PWA icons (192 / 512 / maskable-512) without dependencies.
  *
- * `node scripts/generate-icons.mjs` で `static/` に PNG を出力する。
- * ロゴは `static/favicon.svg` と同じ「fxg」を抽象化したマーク
- * (濃紺の角丸背景 + ライトブルーの F 字バー)。
+ * `node scripts/generate-icons.mjs` writes the PNGs into `static/`.
+ * The logo is the same abstract "fxg" mark as `static/favicon.svg`
+ * (dark navy rounded background with light-blue F bars).
  */
 
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -43,7 +43,7 @@ function chunk(type, data) {
   return Buffer.concat([length, typeAndData, crc]);
 }
 
-/** RGBA ラスタを PNG へエンコードする。 */
+/** Encode an RGBA raster as a PNG. */
 function encodePng(width, height, rgba) {
   const stride = width * 4;
   const raw = Buffer.alloc((stride + 1) * height);
@@ -67,7 +67,7 @@ function encodePng(width, height, rgba) {
 const BG = [15, 23, 42]; // #0f172a
 const ACCENT = [125, 211, 252]; // #7dd3fc
 
-/** 角丸四角形の内部判定 (px 座標)。 */
+/** Point-in-rounded-rectangle test (pixel coordinates). */
 function insideRoundedRect(x, y, left, top, right, bottom, radius) {
   if (x < left || x > right || y < top || y > bottom) return false;
   const dx = Math.max(left + radius - x, x - (right - radius), 0);
@@ -75,12 +75,12 @@ function insideRoundedRect(x, y, left, top, right, bottom, radius) {
   return dx * dx + dy * dy <= radius * radius;
 }
 
-/** F 字マーク (縦棒 + 上横棒 + 中横棒) の内部判定。 */
+/** Point-in-F-mark test (vertical bar + top bar + middle bar). */
 function insideMark(x, y, size) {
   const bars = [
-    [0.3, 0.2, 0.42, 0.8], // 縦棒
-    [0.3, 0.2, 0.74, 0.34], // 上横棒
-    [0.3, 0.46, 0.66, 0.6], // 中横棒
+    [0.3, 0.2, 0.42, 0.8], // vertical bar
+    [0.3, 0.2, 0.74, 0.34], // top bar
+    [0.3, 0.46, 0.66, 0.6], // middle bar
   ];
   return bars.some(([l, t, r, b]) => {
     const left = l * size;
@@ -93,7 +93,7 @@ function insideMark(x, y, size) {
 
 function renderIcon(size, { maskable }) {
   const rgba = Buffer.alloc(size * size * 4);
-  const samples = 3; // 3x3 スーパーサンプリングでエッジを滑らかにする
+  const samples = 3; // 3x3 supersampling smooths the edges
   const radius = maskable ? 0 : size * 0.22;
   const inset = maskable ? size * 0.1 : 0;
   const inner = size - inset * 2;

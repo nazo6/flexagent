@@ -1,7 +1,7 @@
 {
   "name": "FlexAgent",
   "short_name": "fxg",
-  "description": "FlexAgent (fxg) — セルフホスト型エージェントマネージャ",
+  "description": "FlexAgent (fxg) — a self-hosted agent manager",
   "id": "/",
   "start_url": "/",
   "scope": "/",

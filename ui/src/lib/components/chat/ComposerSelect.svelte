@@ -1,22 +1,23 @@
 <script lang="ts">
   import * as Select from "#lib/components/ui/select/index.ts";
   import { cn } from "#lib/utils.ts";
+  import { m } from "#lib/paraglide/messages.js";
 
   interface Item {
-    /** Select の value (送信値) */
+    /** Select value (the value sent to the agent) */
     value: string;
-    /** トリガ・一覧に表示するラベル */
+    /** Label shown in the trigger and the list */
     label: string;
-    /** 一覧で補足表示する説明 (任意) */
+    /** Optional supplementary description shown in the list */
     description?: string | null;
   }
 
   interface Props {
-    /** 何を選択する項目なのかを示す固定ラベル (例: モード / モデル) */
+    /** Fixed label describing what is selected (for example mode / model) */
     label: string;
-    /** 現在値 (選択肢に無い場合は undefined = 未選択表示) */
+    /** Current value (undefined when it is not among the choices) */
     value?: string;
-    /** 未選択時の表示 */
+    /** Display when nothing is selected */
     placeholder?: string;
     items: Item[];
     disabled?: boolean;
@@ -27,7 +28,7 @@
   let {
     label,
     value = undefined,
-    placeholder = "未選択",
+    placeholder = m.chat_not_selected(),
     items,
     disabled = false,
     class: className = "",
@@ -36,10 +37,11 @@
 </script>
 
 <!--
-  チャット下部の設定セレクタ (モード / モデル等)。
-  - トリガには項目名を固定表示し、何を選択するのかを分かるようにする
-  - `items` を Root に渡し、トリガと一覧のラベルを常に同じ文字列へ揃える
-    (未マウント時の生の値 (mode_id / JSON / "null") 表示を防ぐ)
+  Settings selector below the chat input (mode / model, etc.).
+  - The trigger always shows the item name so it is clear what is being selected
+  - `items` is passed to Root so the trigger and list labels always use the same
+    string (this prevents raw values such as mode_id / JSON / "null" from showing
+    before mount)
 -->
 <Select.Root
   type="single"

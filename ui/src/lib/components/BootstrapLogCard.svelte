@@ -1,5 +1,6 @@
 <script lang="ts">
   import { Badge } from "#lib/components/ui/badge/index.ts";
+  import { m } from "#lib/paraglide/messages.js";
   import WrenchIcon from "@lucide/svelte/icons/wrench";
 
   let { lines }: { lines: string[] } = $props();
@@ -7,7 +8,7 @@
   let open = $state(true);
   let scrollEl = $state<HTMLPreElement | null>(null);
 
-  // 新しい行が届いたら末尾へスクロールする
+  // Scroll to the bottom when new lines arrive
   $effect(() => {
     if (lines.length > 0 && scrollEl !== null && open) {
       scrollEl.scrollTop = scrollEl.scrollHeight;
@@ -24,8 +25,14 @@
     >
       <WrenchIcon class="size-3.5" />
       Environment Bootstrap Log
-      <Badge variant="secondary">{lines.length} 行</Badge>
-      <span class="text-muted-foreground ml-auto">{open ? "折りたたむ" : "展開する"}</span>
+      <Badge variant="secondary">
+        {lines.length === 1
+          ? m.chat_bootstrap_line({ count: lines.length })
+          : m.chat_bootstrap_lines({ count: lines.length })}
+      </Badge>
+      <span class="text-muted-foreground ml-auto">
+        {open ? m.chat_collapse() : m.chat_expand()}
+      </span>
     </button>
     {#if open}
       <pre

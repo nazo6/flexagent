@@ -1,10 +1,10 @@
 import { decodeBase64ToBytes } from "./base64";
 
 /**
- * base64url (no padding) 文字列をバイト列へデコードする。
+ * Decode a base64url (no padding) string into bytes.
  *
- * Web Push の `applicationServerKey` (VAPID 公開鍵) は base64url 形式で
- * 渡されるため、標準 base64 へ変換してからデコードする。
+ * Web Push's `applicationServerKey` (VAPID public key) is provided in base64url
+ * form, so convert it to standard base64 before decoding.
  */
 export function urlBase64ToUint8Array(base64: string): Uint8Array<ArrayBuffer> {
   const padded = base64
@@ -14,7 +14,7 @@ export function urlBase64ToUint8Array(base64: string): Uint8Array<ArrayBuffer> {
   return decodeBase64ToBytes(padded);
 }
 
-/** VAPID 公開鍵として妥当な長さか (非圧縮 P-256 点 = 65 バイト)。 */
+/** Whether the bytes have a valid VAPID public key length (uncompressed P-256 point = 65 bytes). */
 export function isValidVapidKey(bytes: Uint8Array): boolean {
   return bytes.length === 65 && bytes[0] === 0x04;
 }

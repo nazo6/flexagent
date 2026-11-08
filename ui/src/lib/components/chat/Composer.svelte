@@ -4,6 +4,8 @@
   import NodeStatusBadge from "#lib/components/NodeStatusBadge.svelte";
   import { configChoices, resolveConfigChoice, selectedConfigValue } from "#lib/config-options.ts";
   import { getNodeAvailability } from "#lib/node-status.ts";
+  import { m } from "#lib/paraglide/messages.js";
+  import { errorCodeMessage } from "#lib/api/error-messages.ts";
   import type {
     NodeSummary,
     SessionControlAction,
@@ -25,9 +27,9 @@
     node = null,
     status = null,
     /**
-     * 送信時にネイティブ復元非対応 (`RESUME_REQUIRED`) だった。
-     * 通常は false (停止中でも送信で自動再開される) で、真のときだけ
-     * 履歴 Replay での再開 (Resume) を案内する。
+     * The last send failed because native restore is unsupported
+     * (`RESUME_REQUIRED`). Normally false (sending resumes a stopped session
+     * automatically); only when true do we suggest resuming via history replay.
      */
     resumeRequired = $bindable(false),
   }: {
@@ -48,7 +50,7 @@
   );
   const isStopped = $derived(status === "stopped" || status === "error");
 
-  // セッションが稼働状態になったら再開提案を閉じる
+  // Close the resume suggestion once the session becomes active
   $effect(() => {
     if (
       status === "idle" ||
@@ -62,7 +64,7 @@
 
   const nodeAvail = $derived(getNodeAvailability(node));
 
-  /** モードセレクタの選択肢 (value = mode_id、表示はエージェントが返す名前)。 */
+  /** Mode selector choices (value = mode_id, label = the name reported by the agent). */
   const modeItems = $derived(
     (capabilities?.availableModes ?? []).map((mode) => ({
       value: mode.mode_id,
@@ -71,7 +73,7 @@
     })),
   );
 
-  /** 現在のモード (選択肢に存在しない ID は未選択として扱う)。 */
+  /** Current mode (an ID that is not among the choices is treated as unselected). */
   const currentMode = $derived(capabilities?.currentMode ?? null);
   const selectedMode = $derived(
     currentMode !== null && modeItems.some((item) => item.value === currentMode)
@@ -91,7 +93,7 @@
       : [],
   );
 
-  /** コンテキスト圧縮 (`/compact`) に対応しているか (合成エントリの有無で判定)。 */
+  /** Whether context compaction (`/compact`) is supported (detected via the synthetic entry). */
   const canCompact = $derived(
     capabilities?.availableCommands.some((command) => command.name === "compact") ?? false,
   );
@@ -108,11 +110,11 @@
       const result = await sync.sendPrompt(sessionId, value);
       if (!result.success) {
         if (result.code === "RESUME_REQUIRED") {
-          // 停止済みセッションの自動再開 (ネイティブ復元) に非対応。
-          // 入力は保持したまま、履歴 Replay での再開を提案する
+          // Automatic resume (native restore) is unsupported for stopped
+          // sessions. Keep the input and suggest resuming via history replay.
           resumeRequired = true;
         } else {
-          toast.error(result.error ?? result.code ?? "送信に失敗しました");
+          toast.error(result.error ?? errorCodeMessage(result.code) ?? m.chat_send_failed());
         }
         return;
       }
@@ -138,9 +140,9 @@
     try {
       const result = await sync.controlSession(sessionId, action);
       if (!result.success) {
-        toast.error(result.error ?? result.code ?? "操作に失敗しました");
+        toast.error(result.error ?? errorCodeMessage(result.code) ?? m.chat_control_failed());
       } else if (action.action === "cancel") {
-        toast.info("中断リクエストを送信しました");
+        toast.info(m.chat_cancel_requested());
       }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
@@ -154,25 +156,25 @@
     try {
       const result = await sync.sendPrompt(sessionId, "/compact");
       if (!result.success) {
-        toast.error(result.error ?? result.code ?? "圧縮リクエストの送信に失敗しました");
+        toast.error(result.error ?? errorCodeMessage(result.code) ?? m.chat_compact_failed());
       } else {
-        toast.info("/compact コマンドを送信しました");
+        toast.info(m.chat_compact_sent());
       }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
     }
   }
 
-  /** 停止済みセッションを再開する (履歴 Replay フォールバック含む)。 */
+  /** Resume a stopped session (including the history replay fallback). */
   async function resumeSession(): Promise<boolean> {
     if (sending || resuming) return false;
     resuming = true;
     try {
       const result = await sync.resumeSession(sessionId);
       if (result.context_restored) {
-        toast.success("セッションを再開しました (エージェントのコンテキストを復元)");
+        toast.success(m.chat_session_resumed_context());
       } else {
-        toast.success("セッションを再開しました (履歴を引き継いで継続)");
+        toast.success(m.chat_session_resumed_replay());
       }
       return true;
     } catch (error) {
@@ -183,7 +185,7 @@
     }
   }
 
-  /** ネイティブ復元非対応の停止セッションを履歴 Replay で再開し、入力を送信する。 */
+  /** Resume a stopped session without native restore via history replay, then send the input. */
   async function resumeAndSend() {
     if (sending || text.trim() === "") return;
     if (!(await resumeSession())) return;
@@ -199,20 +201,20 @@
     >
       <AlertTriangleIcon class="size-3.5 shrink-0" />
       <span>
-        このセッションは停止しています。送信すると自動で再開します（ネイティブ復元非対応時は履歴を引き継いで再開）。
+        {m.chat_stopped_notice()}
       </span>
       <Button
         variant="outline"
         size="sm"
         class="ml-auto h-6 text-xs"
         disabled={sending || resuming}
-        title="再開するとスラッシュコマンドなどの最新の能力情報も再取得します"
+        title={m.chat_resume_title()}
         onclick={() => void resumeSession()}
       >
         {#if resuming}
           <LoaderCircleIcon class="size-3.5 animate-spin" />
         {/if}
-        {resuming ? "再開中…" : "再開"}
+        {resuming ? m.chat_resuming() : m.chat_resume()}
       </Button>
     </div>
   {:else if node && !nodeAvail.isAvailable}
@@ -220,9 +222,9 @@
       class="bg-destructive/10 text-destructive flex items-center gap-2 rounded-md px-2.5 py-1 text-xs"
     >
       <AlertTriangleIcon class="size-3.5 shrink-0" />
-      <span
-        >実行ノード ({node.name}) は現在{nodeAvail.statusText}です。送信したプロンプトはノード復帰時に処理されます。</span
-      >
+      <span>
+        {m.chat_node_unavailable({ name: node.name, status: nodeAvail.statusText })}
+      </span>
     </div>
   {/if}
 
@@ -231,9 +233,9 @@
       class="bg-muted text-muted-foreground flex flex-wrap items-center gap-2 rounded-md px-2.5 py-1 text-xs"
     >
       <AlertTriangleIcon class="size-3.5 shrink-0 text-amber-500/80" />
-      <span
-        >このエージェントはネイティブ復元に対応していません。履歴を引き継いで再開してから送信できます。</span
-      >
+      <span>
+        {m.chat_resume_required_notice()}
+      </span>
       <Button
         variant="outline"
         size="sm"
@@ -244,7 +246,7 @@
         {#if resuming}
           <LoaderCircleIcon class="size-3.5 animate-spin" />
         {/if}
-        {resuming ? "再開中…" : "履歴を引き継いで再開して送信"}
+        {resuming ? m.chat_resuming() : m.chat_resume_and_send()}
       </Button>
     </div>
   {/if}
@@ -270,10 +272,10 @@
     onkeydown={onKeydown}
     rows="3"
     placeholder={isStopped
-      ? "停止中: 送信すると自動で再開します (Ctrl+Enter で送信)"
+      ? m.chat_placeholder_stopped()
       : isRunning
-        ? "次のプロンプトを入力 (送信するとキューに追加されます。Ctrl+Enter で送信)"
-        : "プロンプトを入力 (Ctrl+Enter で送信。`/` でスラッシュコマンド)"}
+        ? m.chat_placeholder_running()
+        : m.chat_placeholder_idle()}
     class="border-input bg-background focus-visible:ring-ring/50 w-full resize-y rounded-md border px-3 py-2 text-sm outline-none focus-visible:ring-2 disabled:cursor-not-allowed disabled:opacity-50"
     disabled={sending}></textarea>
 
@@ -283,8 +285,8 @@
     {/if}
     {#if capabilities && capabilities.availableModes.length > 0}
       <ComposerSelect
-        label="モード"
-        placeholder="既定"
+        label={m.chat_mode_label()}
+        placeholder={m.chat_default_placeholder()}
         value={selectedMode}
         items={modeItems}
         onchange={(value) => void runControl({ action: "set_mode", mode_id: value })}
@@ -296,7 +298,7 @@
       {#if choices.length > 0}
         <ComposerSelect
           label={option.name}
-          placeholder="既定"
+          placeholder={m.chat_default_placeholder()}
           value={selectedConfigValue(choices, option.current_value)}
           items={choices.map((choice) => ({
             value: choice.value,
@@ -314,18 +316,18 @@
 
     <div class="ml-auto flex items-center gap-2">
       {#if !sync.wsConnected}
-        <span class="text-destructive text-xs">接続が切断されています</span>
+        <span class="text-destructive text-xs">{m.chat_connection_lost()}</span>
       {/if}
       {#if canCompact && !isStopped}
         <Button
           variant="outline"
           size="sm"
           disabled={controlBusy || sending}
-          title="会話を要約してコンテキストを圧縮します（/compact コマンドを送信）"
+          title={m.chat_compact_title()}
           onclick={() => void requestCompact()}
         >
           <Minimize2Icon class="size-3.5" />
-          圧縮
+          {m.chat_compact()}
         </Button>
       {/if}
       {#if isRunning}
@@ -333,11 +335,11 @@
           variant="destructive"
           size="sm"
           disabled={controlBusy}
-          title="エージェントの実行を中断します"
+          title={m.chat_stop_title()}
           onclick={() => void runControl({ action: "cancel" })}
         >
           <BanIcon class="size-3.5" />
-          {controlBusy ? "中断中…" : "中断"}
+          {controlBusy ? m.chat_stopping() : m.chat_stop()}
         </Button>
       {/if}
       <Button size="sm" disabled={sending || text.trim() === ""} onclick={() => void send()}>
@@ -346,7 +348,7 @@
         {:else}
           <SendIcon class="size-3.5" />
         {/if}
-        {sending ? "送信中…" : isRunning ? "キューに追加" : "送信"}
+        {sending ? m.chat_sending() : isRunning ? m.chat_queue() : m.chat_send()}
       </Button>
     </div>
   </div>

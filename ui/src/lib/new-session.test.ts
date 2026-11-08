@@ -121,7 +121,7 @@ describe("buildPathCandidates", () => {
     expect(candidates[0]).toMatchObject({ path: "/repo/main", exists: true });
     expect(pickDefaultCandidate(candidates)?.path).toBe("/repo/main");
 
-    // 実在する候補が無い場合は先頭 (直近使用) を返す
+    // When no candidate exists, return the first one (most recently used)
     const staleOnly = candidates.filter((c) => !c.exists);
     expect(pickDefaultCandidate(staleOnly)?.path).toBe("/repo/stale-wt");
     expect(pickDefaultCandidate([])).toBeNull();

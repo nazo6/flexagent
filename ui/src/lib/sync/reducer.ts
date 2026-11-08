@@ -13,14 +13,15 @@ import type {
   StreamDeltaPayload,
 } from "#lib/generated/bindings.ts";
 import { decodeBase64ToText } from "#lib/base64.ts";
+import { m } from "#lib/paraglide/messages.js";
 
-/** ストリーミング中のツール実行進捗 (`tool_call_progress` の累積)。 */
+/** Accumulated tool execution progress while streaming (`tool_call_progress`). */
 export interface ToolProgress {
   status: string;
   output: string;
 }
 
-/** 送信済みで `CommandResult` 未着のプロンプト (Pending Queue 表示用)。 */
+/** A prompt that was sent but has no `CommandResult` yet (shown in the pending queue). */
 export interface PendingPrompt {
   commandId: string;
   sessionId: string;
@@ -28,9 +29,9 @@ export interface PendingPrompt {
   createdAt: number;
 }
 
-/** タイムライン構築の入力 (リアクティブなソースをそのまま渡せる)。 */
+/** Inputs for timeline construction (reactive sources can be passed as-is). */
 export interface TimelineSources {
-  /** 対象セッションの ID (`pendingPrompts` の絞り込みに使う)。 */
+  /** Target session ID (used to filter `pendingPrompts`). */
   sessionId: string;
   events: SessionEventEnvelope[];
   messageDeltas: ReadonlyMap<string, string>;
@@ -40,7 +41,7 @@ export interface TimelineSources {
   pendingPrompts?: ReadonlyMap<string, PendingPrompt>;
 }
 
-/** ストリーミングバッファの書換え対象 (可変 Map)。 */
+/** Streaming buffers that can be rewritten (mutable maps). */
 export interface MutableStreamBuffers {
   messageDeltas: Map<string, string>;
   thoughtDeltas: Map<string, string>;
@@ -48,7 +49,7 @@ export interface MutableStreamBuffers {
   terminalDeltas: Map<string, string>;
 }
 
-/** チャットタイムラインの1項目。 */
+/** One entry in the chat timeline. */
 export type TimelineItem =
   | {
       kind: "user";
@@ -144,14 +145,15 @@ export type TimelineItem =
       text: string;
     };
 
-/** イベント列の末尾に挿入する仮想 `node_seq` (ストリーミング項目用)。 */
+/** Virtual `node_seq` inserted after the event list (for streaming entries). */
 const STREAM_SEQ = Number.MAX_SAFE_INTEGER - 1_000_000;
 
 /**
- * `node_seq` 昇順を保ってイベントを挿入する。
+ * Insert an event while keeping `node_seq` ascending order.
  *
- * 同一 `node_seq` が既に存在する場合は重複配信 (再接続リプレイ /
- * ライブ配信の重なり) とみなし `false` を返す。
+ * If the same `node_seq` already exists, the event is treated as a duplicate
+ * delivery (reconnect replay / overlapping live updates) and `false` is
+ * returned.
  */
 export function insertEventSorted(
   events: SessionEventEnvelope[],
@@ -170,10 +172,10 @@ export function insertEventSorted(
 }
 
 /**
- * `LiveStreamDelta` をストリーミングバッファへ適用する。
+ * Apply a `LiveStreamDelta` to the streaming buffers.
  *
- * 完成イベントの到着時に `clearCompleted` で対応バッファを破棄することで、
- * 確定表示へ置き換わる (docs/03 §3.2)。
+ * Discarding the matching buffer via `clearCompleted` when the completed event
+ * arrives replaces the streamed text with the finalized one (docs/03 §3.2).
  */
 export function applyStreamDelta(sources: MutableStreamBuffers, delta: StreamDeltaPayload): void {
   switch (delta.delta_type) {
@@ -209,7 +211,7 @@ export function applyStreamDelta(sources: MutableStreamBuffers, delta: StreamDel
   }
 }
 
-/** 確定イベント到着時に対応するストリーミングバッファを破棄する。 */
+/** Discard the streaming buffer matching a finalized event when it arrives. */
 export function clearStreamBuffers(
   event: SessionEventEnvelope,
   sources: MutableStreamBuffers,
@@ -228,8 +230,8 @@ export function clearStreamBuffers(
       }
       break;
     case "terminal_output":
-      // コマンド完了 (`exit_code` あり) の確定イベントが来たら、同じ内容の
-      // ストリーミングバッファは破棄して二重表示を防ぐ
+      // When the finalized event for command completion (with `exit_code`)
+      // arrives, discard the matching streaming buffer to avoid duplicates
       if (payload.data.exit_code !== null) {
         sources.terminalDeltas.delete(payload.data.terminal_id);
       }
@@ -239,20 +241,20 @@ export function clearStreamBuffers(
   }
 }
 
-/** ターミナル出力テキストの保持上限 (異常な大出力での肥大化防止)。 */
+/** Retention limit for terminal output text (prevents bloat from abnormally large output). */
 const MAX_TERMINAL_TEXT = 200_000;
 
 function appendTerminalText(current: string, addition: string): string {
   const combined = current + addition;
   if (combined.length <= MAX_TERMINAL_TEXT) return combined;
-  return `${combined.slice(0, MAX_TERMINAL_TEXT)}\n… (出力が長いため省略)`;
+  return `${combined.slice(0, MAX_TERMINAL_TEXT)}\n${m.timeline_output_truncated()}`;
 }
 
 /**
- * 永続イベント列 + ストリーミングバッファからチャットタイムラインを構築する。
+ * Build the chat timeline from the persisted event list and streaming buffers.
  *
- * 並び順は `node_seq` を正とし、ストリーミング中の項目 (確定イベント未着) は
- * 末尾に追加される。
+ * Ordering follows `node_seq`; streaming entries (with no finalized event yet)
+ * are appended at the end.
  */
 export function buildTimelineItems(sources: TimelineSources): TimelineItem[] {
   const items: TimelineItem[] = [];
@@ -386,7 +388,11 @@ export function buildTimelineItems(sources: TimelineSources): TimelineItem[] {
             kind: "notice",
             key: `permission-resolved:${payload.data.request_id}`,
             ...base,
-            text: `承認 ${payload.data.request_id} は ${payload.data.resolved_by} により ${payload.data.selected_option_id} で解決済み`,
+            text: m.timeline_permission_resolved({
+              id: payload.data.request_id,
+              option: payload.data.selected_option_id,
+              by: payload.data.resolved_by,
+            }),
             tone: "info",
           });
         }
@@ -424,7 +430,11 @@ export function buildTimelineItems(sources: TimelineSources): TimelineItem[] {
             kind: "notice",
             key: `elicitation-resolved:${payload.data.elicitation_id}`,
             ...base,
-            text: `質問 ${payload.data.elicitation_id} は ${payload.data.resolved_by} により ${payload.data.action} で解決済み`,
+            text: m.timeline_elicitation_resolved({
+              id: payload.data.elicitation_id,
+              action: payload.data.action,
+              by: payload.data.resolved_by,
+            }),
             tone: "info",
           });
         }
@@ -443,7 +453,11 @@ export function buildTimelineItems(sources: TimelineSources): TimelineItem[] {
           kind: "notice",
           key: `revert:${event.node_seq}`,
           ...base,
-          text: `Revert: node_seq=${payload.data.target_node_seq} 時点へ復元 (${payload.data.restored_files} ファイル復元 / ${payload.data.removed_files} 削除)`,
+          text: m.timeline_session_reverted({
+            seq: payload.data.target_node_seq,
+            restored: payload.data.restored_files,
+            removed: payload.data.removed_files,
+          }),
           tone: "info",
         });
         break;
@@ -453,7 +467,7 @@ export function buildTimelineItems(sources: TimelineSources): TimelineItem[] {
             kind: "notice",
             key: `status:${event.node_seq}`,
             ...base,
-            text: payload.data.error_message ?? "セッションでエラーが発生しました",
+            text: payload.data.error_message ?? m.timeline_session_error(),
             tone: "error",
           });
         }
@@ -481,7 +495,7 @@ export function buildTimelineItems(sources: TimelineSources): TimelineItem[] {
     }
   }
 
-  // ---- ストリーミング中の項目を末尾へ追加 ----------------------------------
+  // ---- Append streaming entries at the end ---------------------------------
   let streamOffset = 0;
   const nextStreamSeq = () => STREAM_SEQ + streamOffset++;
 
@@ -546,7 +560,7 @@ export function buildTimelineItems(sources: TimelineSources): TimelineItem[] {
     }
   }
   for (const pending of sources.pendingPrompts?.values() ?? []) {
-    // 他セッションで送信中のプロンプトをこのタイムラインに混入させない
+    // Do not mix prompts sent in other sessions into this timeline
     if (pending.sessionId !== sources.sessionId) continue;
     items.push({
       kind: "pending",
@@ -561,10 +575,10 @@ export function buildTimelineItems(sources: TimelineSources): TimelineItem[] {
 }
 
 // ----------------------------------------------------------------------
-// メタデータ抽出ヘルパー (セッションヘッダ・コントロールバー・Bootstrap ログ)
+// Metadata extraction helpers (session header, control bar, Bootstrap log)
 // ----------------------------------------------------------------------
 
-/** セッションの能力情報 (`CapabilitiesUpdated` の最新適用結果)。 */
+/** Session capabilities (the latest applied `CapabilitiesUpdated`). */
 export interface SessionCapabilities {
   currentMode: string | null;
   availableModes: ModeInfo[];
@@ -572,7 +586,7 @@ export interface SessionCapabilities {
   configOptions: ConfigOptionInfo[];
 }
 
-/** イベント列から最新の能力情報を復元する (無ければ null)。 */
+/** Restore the latest capabilities from the event list (null when absent). */
 export function capabilitiesFromEvents(events: SessionEventEnvelope[]): SessionCapabilities | null {
   let found = false;
   let currentMode: string | null = null;
@@ -620,7 +634,7 @@ export function capabilitiesFromEvents(events: SessionEventEnvelope[]): SessionC
   };
 }
 
-/** イベント列から最新の `status_changed` を復元する (無ければ null)。 */
+/** Restore the latest `status_changed` from the event list (null when absent). */
 export function latestStatusFromEvents(
   events: SessionEventEnvelope[],
 ): { status: SessionStatus; errorMessage: string | null } | null {
@@ -636,7 +650,7 @@ export function latestStatusFromEvents(
   return null;
 }
 
-/** イベント列から最新の実行計画を復元する (無ければ null)。 */
+/** Restore the latest execution plan from the event list (null when absent). */
 export function latestPlanFromEvents(events: SessionEventEnvelope[]): PlanEntry[] | null {
   for (let i = events.length - 1; i >= 0; i -= 1) {
     const payload = events[i].payload;
@@ -645,7 +659,7 @@ export function latestPlanFromEvents(events: SessionEventEnvelope[]): PlanEntry[
   return null;
 }
 
-/** イベント列から最新のコンテキスト使用量・累積コストを復元する (無ければ null)。 */
+/** Restore the latest context usage and accumulated cost from the event list (null when absent). */
 export function latestUsageFromEvents(events: SessionEventEnvelope[]): SessionUsage | null {
   for (let i = events.length - 1; i >= 0; i -= 1) {
     const payload = events[i].payload;
@@ -660,33 +674,36 @@ export function latestUsageFromEvents(events: SessionEventEnvelope[]): SessionUs
   return null;
 }
 
-/** `turn_ended` の打ち切り理由を日本語ラベルへ変換する。 */
+/** Convert a `turn_ended` stop reason into a label. */
 function turnStopReasonLabel(reason: string): string {
   switch (reason) {
     case "max_tokens":
-      return "エージェントが最大トークン数に達したためターンを終了しました";
+      return m.timeline_turn_stopped_max_tokens();
     case "max_turn_requests":
-      return "エージェントが1ターン内の要求回数上限に達したためターンを終了しました";
+      return m.timeline_turn_stopped_max_turn_requests();
     case "refusal":
-      return "エージェントが継続を拒否しました";
+      return m.timeline_turn_stopped_refusal();
     default:
-      return `ターンを終了しました (${reason})`;
+      return m.timeline_turn_stopped_unknown({ reason });
   }
 }
 
-/** `compaction_updated` の進行状態を日本語ラベルへ変換する。 */
+/** Convert a `compaction_updated` progress state into a label. */
 function compactionStatusLabel(status: CompactionStatus, detail: string | null): string {
   switch (status) {
     case "started":
-      return "コンテキストの圧縮を開始しました（完了までしばらくかかることがあります）";
+      return m.timeline_compaction_started();
     case "completed":
-      return "コンテキストの圧縮が完了しました";
+      return m.timeline_compaction_completed();
     case "failed":
-      return detail ?? "コンテキストの圧縮に失敗しました";
+      return detail ?? m.timeline_compaction_failed();
   }
 }
 
-/** イベント列から Bootstrap ログ行を抽出する (一時VM 起動時の `stderr` 出力)。 */
+/**
+ * Extract Bootstrap log lines from the event list (`stderr` output when starting
+ * a temporary VM).
+ */
 export function bootstrapLogLines(events: SessionEventEnvelope[], maxLines = 500): string[] {
   const lines: string[] = [];
   for (const event of events) {

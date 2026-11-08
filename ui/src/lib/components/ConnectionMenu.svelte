@@ -21,6 +21,7 @@
   import PlusIcon from "@lucide/svelte/icons/plus";
   import ServerIcon from "@lucide/svelte/icons/server";
   import { cn } from "#lib/utils.ts";
+  import { m } from "#lib/paraglide/messages.js";
 
   interface Props {
     class?: string;
@@ -37,14 +38,14 @@
 
   const roleLabel = $derived(
     connection.role === "central_server"
-      ? "中央サーバー"
+      ? m.connection_role_central_server()
       : connection.role === "local_node"
-        ? "ローカルノード"
-        : "未接続",
+        ? m.connection_role_local_node()
+        : m.connection_role_disconnected(),
   );
-  const originLabel = $derived(connection.origin || "(同一オリジン)");
+  const originLabel = $derived(connection.origin || m.connection_same_origin());
 
-  // Push 対応状況は接続先バックエンドに依存するため初回マウント時に確認する
+  // Push capability depends on the connected backend, so check it on first mount
   onMount(() => {
     void refreshPush();
   });
@@ -63,10 +64,10 @@
     try {
       if (push.subscribed) {
         await disablePushNotifications();
-        toast("Push 通知を解除しました");
+        toast(m.connection_push_disabled_toast());
       } else {
         await enablePushNotifications();
-        toast.success("Push 通知を有効化しました");
+        toast.success(m.connection_push_enabled_toast());
       }
       await refreshPush();
     } catch (error) {
@@ -82,23 +83,23 @@
     try {
       const parsed = new URL(newUrl.trim());
       if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-        throw new Error("http:// または https:// の URL を指定してください");
+        throw new Error(m.connection_url_scheme_error());
       }
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "URL が不正です");
+      toast.error(error instanceof Error ? error.message : m.connection_url_invalid());
       return;
     }
     connection.addTarget(newLabel, newUrl);
     addOpen = false;
     newLabel = "";
     newUrl = "";
-    toast.success("切替先を追加しました");
+    toast.success(m.connection_target_added());
   }
 
   async function logout() {
     try {
       await logoutAndStop();
-      toast("ログアウトしました");
+      toast(m.connection_logged_out());
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
     }
@@ -113,7 +114,7 @@
         size="sm"
         {...props}
         class={cn("gap-1.5 text-xs", className)}
-        title={`現在の接続先: ${roleLabel} (${originLabel})`}
+        title={m.connection_current_target_tooltip({ role: roleLabel, origin: originLabel })}
       >
         <div class="flex items-center gap-1.5 min-w-0">
           <ServerIcon class="size-3.5 shrink-0 text-muted-foreground" />
@@ -124,14 +125,14 @@
     {/snippet}
   </DropdownMenu.Trigger>
   <DropdownMenu.Content {align} class="w-80">
-    <DropdownMenu.Label>現在の接続先</DropdownMenu.Label>
+    <DropdownMenu.Label>{m.connection_current_target()}</DropdownMenu.Label>
     <DropdownMenu.Item disabled>
       <span class="truncate">{originLabel}</span>
       <span class="text-muted-foreground ml-auto text-xs">{roleLabel}</span>
     </DropdownMenu.Item>
     <DropdownMenu.Separator />
     {#if connection.availableTargets.length > 0}
-      <DropdownMenu.Label>切替先 (そのオリジンの UI へ移動)</DropdownMenu.Label>
+      <DropdownMenu.Label>{m.connection_targets_label()}</DropdownMenu.Label>
       {#each connection.availableTargets as target (target.id)}
         <DropdownMenu.Item onSelect={() => connection.switchTo(target.id)}>
           <CableIcon />
@@ -143,23 +144,23 @@
     {/if}
     <DropdownMenu.Item onSelect={() => (addOpen = true)}>
       <PlusIcon />
-      切替先を追加… (例: http://localhost:7860)
+      {m.connection_add_target_example()}
     </DropdownMenu.Item>
     {#if push !== null && push.supported && push.serverEnabled}
       <DropdownMenu.Separator />
       <DropdownMenu.Item disabled={pushBusy} onSelect={() => void togglePush()}>
         {#if push.subscribed}
           <BellOffIcon />
-          Push 通知を解除
+          {m.connection_push_disable()}
         {:else}
           <BellIcon />
-          Push 通知を有効化 (承認バナー)
+          {m.connection_push_enable()}
         {/if}
       </DropdownMenu.Item>
     {/if}
     <DropdownMenu.Item onSelect={logout}>
       <LogOutIcon />
-      ログアウト
+      {m.connection_logout()}
     </DropdownMenu.Item>
   </DropdownMenu.Content>
 </DropdownMenu.Root>
@@ -167,27 +168,26 @@
 <Dialog.Root bind:open={addOpen}>
   <Dialog.Content class="sm:max-w-md">
     <Dialog.Header>
-      <Dialog.Title>切替先を追加</Dialog.Title>
+      <Dialog.Title>{m.connection_add_target_title()}</Dialog.Title>
       <Dialog.Description>
-        中央サーバーまたはノードの Web UI の URL を登録します。切替時はそのオリジンの UI
-        へ移動します (トークンはオリジンごとに 独立して保持されます)。
+        {m.connection_add_target_description()}
       </Dialog.Description>
     </Dialog.Header>
     <form class="flex flex-col gap-4" onsubmit={addTarget}>
       <div class="grid gap-2">
-        <Label for="target-label">表示名</Label>
-        <Input id="target-label" bind:value={newLabel} placeholder="自宅サーバー" />
+        <Label for="target-label">{m.connection_display_name()}</Label>
+        <Input
+          id="target-label"
+          bind:value={newLabel}
+          placeholder={m.connection_display_name_placeholder()}
+        />
       </div>
       <div class="grid gap-2">
         <Label for="target-url">URL</Label>
-        <Input
-          id="target-url"
-          bind:value={newUrl}
-          placeholder="http://localhost:7860 または https://fxg.example.ts.net"
-        />
+        <Input id="target-url" bind:value={newUrl} placeholder={m.connection_url_placeholder()} />
       </div>
       <Dialog.Footer>
-        <Button type="submit" disabled={newUrl.trim() === ""}>追加</Button>
+        <Button type="submit" disabled={newUrl.trim() === ""}>{m.connection_add()}</Button>
       </Dialog.Footer>
     </form>
   </Dialog.Content>

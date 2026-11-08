@@ -1,11 +1,12 @@
 <script lang="ts">
   import type { FileDiff } from "#lib/generated/bindings.ts";
+  import { m } from "#lib/paraglide/messages.js";
   import MonacoDiff from "./MonacoDiff.svelte";
   import ShikiDiff from "./ShikiDiff.svelte";
 
   let { file }: { file: FileDiff | null } = $props();
 
-  /** PC (>= 768px) は Monaco Diff Editor、モバイルは shiki Unified Diff。 */
+  /** Desktop (>= 768px) uses the Monaco diff editor; mobile uses a shiki unified diff. */
   let viewportWidth = $state(typeof window === "undefined" ? 0 : window.innerWidth);
 
   function updateViewportWidth() {
@@ -25,7 +26,7 @@
 
 {#if file === null}
   <p class="text-muted-foreground flex h-full items-center justify-center text-sm">
-    ファイルを選択してください。
+    {m.diff_select_file()}
   </p>
 {:else}
   <div class="flex flex-col gap-2">
@@ -40,7 +41,7 @@
       <ShikiDiff diff={file.unified_diff} />
     {:else}
       <p class="text-muted-foreground text-sm">
-        このファイルはバイナリまたは差分テキストを取得できない形式です。
+        {m.diff_binary_or_unsupported()}
       </p>
     {/if}
   </div>

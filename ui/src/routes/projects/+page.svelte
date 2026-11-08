@@ -9,6 +9,7 @@
   import { Label } from "#lib/components/ui/label/index.ts";
   import { formatRelativeTime } from "#lib/format.ts";
   import type { ProjectSummary, WorktreeInfo } from "#lib/generated/bindings.ts";
+  import { m } from "#lib/paraglide/messages.js";
   import { shortId } from "#lib/session-status.ts";
   import { sync } from "#lib/stores/app.svelte.ts";
   import { toast } from "svelte-sonner";
@@ -26,7 +27,7 @@
   let worktreesByProject = $state(new Map<string, WorktreeInfo[]>());
   let loadingProjects = $state<string[]>([]);
 
-  // 新規 Worktree 作成ダイアログ
+  // Create worktree dialog
   let createProjectId = $state<string | null>(null);
   let createNodeId = $state("");
   let createBranch = $state("");
@@ -34,40 +35,40 @@
   let createPath = $state("");
   let createBusy = $state(false);
   let browserOpen = $state(false);
-  /** フォルダブラウザの選択結果の反映先。 */
+  /** Which field receives the folder browser selection. */
   let browserTarget = $state<"create" | "scan" | "link">("create");
 
-  // Worktree 削除確認
+  // Worktree removal confirmation
   let removeTarget = $state<{
     projectId: string;
     worktree: WorktreeInfo;
   } | null>(null);
   let removeBusy = $state(false);
 
-  // Worktree クリーンアップ (Prune) 確認
+  // Worktree cleanup (prune) confirmation
   let pruneProjectId = $state<string | null>(null);
   let pruneNodeId = $state("");
   let pruneBusy = $state(false);
 
-  // プロジェクト一括スキャン (Scan)
+  // Bulk project scan
   let scanOpen = $state(false);
   let scanNodeId = $state("");
   let scanDir = $state("");
   let scanBusy = $state(false);
 
-  // フォルダ手動紐付け (Link)
+  // Manual folder linking
   let linkOpen = $state(false);
   let linkNodeId = $state("");
   let linkProjectId = $state("");
   let linkPath = $state("");
   let linkBusy = $state(false);
 
-  /** フォルダブラウザに渡す閲覧先ノード。 */
+  /** Node the folder browser browses on. */
   const browserNodeId = $derived(
     browserTarget === "create" ? createNodeId : browserTarget === "scan" ? scanNodeId : linkNodeId,
   );
 
-  /** フォルダブラウザの現在パス。 */
+  /** Initial path for the folder browser. */
   const browserInitialPath = $derived(
     browserTarget === "create" ? createPath : browserTarget === "scan" ? scanDir : linkPath,
   );
@@ -97,7 +98,7 @@
     createPath = "";
   }
 
-  /** このプロジェクトの新規セッション画面を開く (場所・ノードを指定)。 */
+  /** Open the new session screen for this project (optionally scoped to a node and path). */
   function openNewSession(projectId: string, bindingNodeId?: string, path?: string) {
     const params = new URLSearchParams({ project: projectId });
     if (bindingNodeId) params.set("node", bindingNodeId);
@@ -105,7 +106,7 @@
     void goto(`/?${params.toString()}`);
   }
 
-  /** オンラインノードの既定選択 (先頭)。 */
+  /** Default online node selection (the first one). */
   function defaultOnlineNode(): string {
     return sync.nodes.find((node) => node.is_online)?.node_id ?? "";
   }
@@ -125,7 +126,10 @@
         dir: scanDir.trim() === "" ? null : scanDir.trim(),
       });
       toast.success(
-        `スキャン完了: ${response.scanned_dirs.length} ディレクトリを走査し、${response.projects.length} 件のプロジェクトが登録されています`,
+        m.projects_scan_complete({
+          dirs: response.scanned_dirs.length,
+          projects: response.projects.length,
+        }),
       );
       scanOpen = false;
       await sync.refreshProjects();
@@ -154,7 +158,9 @@
         project_id: linkProjectId.trim(),
         local_path: linkPath.trim(),
       });
-      toast.success(`紐付けました: ${result.local_path} → ${result.project_id}`);
+      toast.success(
+        m.projects_link_success({ path: result.local_path, project: result.project_id }),
+      );
       linkOpen = false;
       await sync.refreshProjects();
     } catch (error) {
@@ -164,7 +170,7 @@
     }
   }
 
-  /** このプロジェクトに紐付けのあるオンラインノードを優先して Prune 対象に選ぶ。 */
+  /** Prefer an online node bound to this project when choosing the prune target. */
   function openPruneDialog(projectId: string) {
     pruneProjectId = projectId;
     const project = sync.projects.find((entry) => entry.project_id === projectId);
@@ -182,7 +188,7 @@
       await sync.connection.client.pruneWorktrees(projectId, {
         node_id: pruneNodeId,
       });
-      toast.success("Worktree 管理情報をクリーンアップしました");
+      toast.success(m.projects_prune_success());
       pruneProjectId = null;
       await loadWorktrees(projectId);
     } catch (error) {
@@ -204,7 +210,7 @@
         base_branch: createBase.trim() === "" ? null : createBase.trim(),
         path: createPath.trim() === "" ? null : createPath.trim(),
       });
-      toast.success(`Worktree を作成しました: ${created.path}`);
+      toast.success(m.projects_worktree_created({ path: created.path }));
       createProjectId = null;
       await loadWorktrees(projectId);
     } catch (error) {
@@ -224,7 +230,7 @@
         path: target.worktree.path,
         force,
       });
-      toast.success("Worktree を削除しました");
+      toast.success(m.projects_worktree_removed());
       removeTarget = null;
       await loadWorktrees(target.projectId);
     } catch (error) {
@@ -238,37 +244,27 @@
 <div class="mx-auto flex max-w-5xl flex-col gap-4 p-4 md:p-6">
   <div class="flex items-center justify-between gap-2">
     <div>
-      <h1 class="text-xl font-semibold">プロジェクト</h1>
-      <p class="text-muted-foreground text-sm">論理プロジェクトごとのノード紐付けと Git Worktree</p>
+      <h1 class="text-xl font-semibold">{m.projects_title()}</h1>
+      <p class="text-muted-foreground text-sm">{m.projects_subtitle()}</p>
     </div>
     <div class="flex flex-wrap items-center gap-1.5">
-      <Button
-        variant="outline"
-        size="sm"
-        onclick={openScanDialog}
-        title="ノード上の Git リポジトリを一括スキャンして登録"
-      >
+      <Button variant="outline" size="sm" onclick={openScanDialog} title={m.projects_scan_title()}>
         <SearchIcon />
-        スキャン
+        {m.projects_scan()}
       </Button>
-      <Button
-        variant="outline"
-        size="sm"
-        onclick={openLinkDialog}
-        title="任意のフォルダを論理プロジェクトへ手動紐付け"
-      >
+      <Button variant="outline" size="sm" onclick={openLinkDialog} title={m.projects_link_title()}>
         <LinkIcon />
-        フォルダを紐付け
+        {m.projects_link()}
       </Button>
       <Button variant="outline" size="sm" onclick={() => void sync.refreshProjects()}>
         <RefreshCwIcon />
-        再読込
+        {m.common_refresh()}
       </Button>
     </div>
   </div>
 
   {#if sync.projects.length === 0}
-    <p class="text-muted-foreground text-sm">登録済みのプロジェクトがありません。</p>
+    <p class="text-muted-foreground text-sm">{m.projects_empty()}</p>
   {:else}
     {#each sync.projects as project (project.project_id)}
       <Card class="gap-3 p-4">
@@ -300,13 +296,13 @@
               onclick={() => openCreateWorktree(project.project_id)}
             >
               <PlusIcon />
-              Worktree 追加
+              {m.projects_worktree_add()}
             </Button>
             <Button
               variant="outline"
               size="sm"
               onclick={() => openPruneDialog(project.project_id)}
-              title="削除済み Worktree の管理情報をクリーンアップ (git worktree prune)"
+              title={m.projects_prune_title()}
             >
               <EraserIcon />
               Prune
@@ -318,7 +314,7 @@
               }}
             >
               <PlayIcon />
-              新規セッション
+              {m.projects_new_session()}
             </Button>
           </div>
         </div>
@@ -334,13 +330,13 @@
                     : 'text-muted-foreground line-through'}"
                   title={binding.path_exists
                     ? binding.local_path
-                    : `${binding.local_path} (ノード上に存在しません)`}
+                    : m.projects_path_missing_title({ path: binding.local_path })}
                 >
                   {binding.local_path}
                 </span>
                 {#if !binding.path_exists}
                   <Badge variant="outline" class="border-destructive/50 text-destructive">
-                    存在しません
+                    {m.projects_path_missing()}
                   </Badge>
                 {/if}
                 {#if binding.git_branch}
@@ -355,10 +351,10 @@
                   class="text-muted-foreground hover:text-foreground"
                   onclick={() =>
                     openNewSession(project.project_id, binding.node_id, binding.local_path)}
-                  title="この場所で新規セッションを開始"
+                  title={m.projects_new_session_here()}
                 >
                   <PlayIcon class="size-3.5" />
-                  <span class="sr-only">この場所で新規セッション</span>
+                  <span class="sr-only">{m.projects_new_session_here()}</span>
                 </Button>
                 <span class="text-muted-foreground ml-auto">
                   {formatRelativeTime(binding.last_used_at)}
@@ -399,7 +395,7 @@
                       })}
                   >
                     <Trash2Icon />
-                    <span class="sr-only">Worktree を削除</span>
+                    <span class="sr-only">{m.projects_worktree_delete()}</span>
                   </Button>
                 {/if}
               </li>
@@ -411,21 +407,22 @@
   {/if}
 </div>
 
-<!-- 新規 Worktree 作成 -->
+<!-- Create worktree -->
 <Dialog.Root
   open={createProjectId !== null}
   onOpenChange={(open) => !open && (createProjectId = null)}
 >
   <Dialog.Content class="sm:max-w-md">
     <Dialog.Header>
-      <Dialog.Title>Worktree を作成</Dialog.Title>
+      <Dialog.Title>{m.projects_create_worktree_title()}</Dialog.Title>
       <Dialog.Description>
-        <code>git worktree add -b &lt;branch&gt;</code> を実行します。
+        <code>git worktree add -b &lt;branch&gt;</code>
+        {m.projects_create_worktree_description()}
       </Dialog.Description>
     </Dialog.Header>
     <form class="flex flex-col gap-4" onsubmit={submitCreateWorktree}>
       <div class="grid gap-2">
-        <Label for="wt-node">ノード</Label>
+        <Label for="wt-node">{m.projects_node()}</Label>
         <select
           id="wt-node"
           bind:value={createNodeId}
@@ -433,26 +430,26 @@
         >
           {#each sync.nodes as node (node.node_id)}
             <option value={node.node_id} disabled={!node.is_online}>
-              {node.name}{node.is_online ? "" : " — オフライン"}
+              {node.name}{node.is_online ? "" : ` ${m.projects_offline_suffix()}`}
             </option>
           {/each}
         </select>
       </div>
       <div class="grid gap-2">
-        <Label for="wt-branch">ブランチ名</Label>
+        <Label for="wt-branch">{m.projects_branch_name()}</Label>
         <Input id="wt-branch" bind:value={createBranch} placeholder="feat/new-feature" />
       </div>
       <div class="grid gap-2">
-        <Label for="wt-base">起点ブランチ (任意)</Label>
+        <Label for="wt-base">{m.projects_base_branch()}</Label>
         <Input id="wt-base" bind:value={createBase} placeholder="main" />
       </div>
       <div class="grid gap-2">
-        <Label for="wt-path">配置先パス (任意)</Label>
+        <Label for="wt-path">{m.projects_target_path()}</Label>
         <div class="flex items-center gap-1.5">
           <Input
             id="wt-path"
             bind:value={createPath}
-            placeholder="自動解決"
+            placeholder={m.projects_path_auto()}
             class="flex-1 font-mono text-xs"
           />
           <Button
@@ -465,59 +462,61 @@
               browserTarget = "create";
               browserOpen = true;
             }}
-            title="フォルダブラウザで選択"
+            title={m.projects_pick_folder()}
           >
             <FolderOpenIcon class="size-3.5" />
-            <span>参照…</span>
+            <span>{m.projects_browse()}</span>
           </Button>
         </div>
       </div>
       <Dialog.Footer>
         <Button type="button" variant="outline" onclick={() => (createProjectId = null)}>
-          キャンセル
+          {m.common_cancel()}
         </Button>
         <Button type="submit" disabled={createBusy || createBranch.trim() === ""}>
-          {createBusy ? "作成中…" : "作成"}
+          {createBusy ? m.projects_creating() : m.projects_create()}
         </Button>
       </Dialog.Footer>
     </form>
   </Dialog.Content>
 </Dialog.Root>
 
-<!-- Worktree 削除確認 -->
+<!-- Worktree removal confirmation -->
 <AlertDialog.Root
   open={removeTarget !== null}
   onOpenChange={(open) => !open && (removeTarget = null)}
 >
   <AlertDialog.Content>
     <AlertDialog.Header>
-      <AlertDialog.Title>Worktree を削除しますか？</AlertDialog.Title>
+      <AlertDialog.Title>{m.projects_delete_worktree_title()}</AlertDialog.Title>
       <AlertDialog.Description>
-        {removeTarget?.worktree.path} ({nodeName(removeTarget?.worktree.node_id ?? "")})
-        を削除します。未コミットの変更がある場合、強制削除で失われます。
+        {m.projects_delete_worktree_description({
+          path: removeTarget?.worktree.path ?? "",
+          node: nodeName(removeTarget?.worktree.node_id ?? ""),
+        })}
       </AlertDialog.Description>
     </AlertDialog.Header>
     <AlertDialog.Footer>
-      <AlertDialog.Cancel>キャンセル</AlertDialog.Cancel>
+      <AlertDialog.Cancel>{m.common_cancel()}</AlertDialog.Cancel>
       <AlertDialog.Action
         variant="destructive"
         disabled={removeBusy}
         onclick={() => void confirmRemove(false)}
       >
-        削除
+        {m.common_delete()}
       </AlertDialog.Action>
       <AlertDialog.Action
         variant="destructive"
         disabled={removeBusy}
         onclick={() => void confirmRemove(true)}
       >
-        強制削除
+        {m.projects_force_delete()}
       </AlertDialog.Action>
     </AlertDialog.Footer>
   </AlertDialog.Content>
 </AlertDialog.Root>
 
-<!-- Worktree クリーンアップ (Prune) 確認 -->
+<!-- Worktree cleanup (prune) confirmation -->
 <AlertDialog.Root
   open={pruneProjectId !== null}
   onOpenChange={(open) => !open && (pruneProjectId = null)}
@@ -526,15 +525,15 @@
     <AlertDialog.Header>
       <AlertDialog.Title class="flex items-center gap-2">
         <EraserIcon class="size-5" />
-        Worktree 管理情報をクリーンアップしますか？
+        {m.projects_prune_confirm_title()}
       </AlertDialog.Title>
       <AlertDialog.Description class="text-sm">
         <code>git worktree prune</code>
-        を実行し、削除済みディレクトリの管理情報を削除します。作業中の Worktree やファイルは削除されません。
+        {m.projects_prune_description()}
       </AlertDialog.Description>
     </AlertDialog.Header>
     <div class="grid gap-2">
-      <Label for="prune-node">実行ノード</Label>
+      <Label for="prune-node">{m.projects_run_node()}</Label>
       <select
         id="prune-node"
         bind:value={pruneNodeId}
@@ -542,35 +541,35 @@
       >
         {#each sync.nodes as node (node.node_id)}
           <option value={node.node_id} disabled={!node.is_online}>
-            {node.name}{node.is_online ? "" : " — オフライン"}
+            {node.name}{node.is_online ? "" : ` ${m.projects_offline_suffix()}`}
           </option>
         {/each}
       </select>
     </div>
     <AlertDialog.Footer>
-      <AlertDialog.Cancel disabled={pruneBusy}>キャンセル</AlertDialog.Cancel>
+      <AlertDialog.Cancel disabled={pruneBusy}>{m.common_cancel()}</AlertDialog.Cancel>
       <AlertDialog.Action
         disabled={pruneBusy || pruneNodeId === ""}
         onclick={() => void confirmPrune()}
       >
-        {pruneBusy ? "実行中…" : "Prune 実行"}
+        {pruneBusy ? m.projects_prune_running() : m.projects_prune_execute()}
       </AlertDialog.Action>
     </AlertDialog.Footer>
   </AlertDialog.Content>
 </AlertDialog.Root>
 
-<!-- プロジェクト一括スキャン (Scan) -->
+<!-- Bulk project scan -->
 <Dialog.Root open={scanOpen} onOpenChange={(open) => (scanOpen = open)}>
   <Dialog.Content class="sm:max-w-md">
     <Dialog.Header>
-      <Dialog.Title>リポジトリをスキャン</Dialog.Title>
+      <Dialog.Title>{m.projects_scan_dialog_title()}</Dialog.Title>
       <Dialog.Description>
-        指定ディレクトリ配下の Git リポジトリを探索し、論理プロジェクトとして登録します。
+        {m.projects_scan_dialog_description()}
       </Dialog.Description>
     </Dialog.Header>
     <form class="flex flex-col gap-4" onsubmit={submitScan}>
       <div class="grid gap-2">
-        <Label for="scan-node">ノード</Label>
+        <Label for="scan-node">{m.projects_node()}</Label>
         <select
           id="scan-node"
           bind:value={scanNodeId}
@@ -578,18 +577,18 @@
         >
           {#each sync.nodes as node (node.node_id)}
             <option value={node.node_id} disabled={!node.is_online}>
-              {node.name}{node.is_online ? "" : " — オフライン"}
+              {node.name}{node.is_online ? "" : ` ${m.projects_offline_suffix()}`}
             </option>
           {/each}
         </select>
       </div>
       <div class="grid gap-2">
-        <Label for="scan-dir">対象ディレクトリ (任意)</Label>
+        <Label for="scan-dir">{m.projects_scan_dir()}</Label>
         <div class="flex items-center gap-1.5">
           <Input
             id="scan-dir"
             bind:value={scanDir}
-            placeholder="未指定時は config.toml の project_scan_dirs"
+            placeholder={m.projects_scan_dir_placeholder()}
             class="flex-1 font-mono text-xs"
           />
           <Button
@@ -602,38 +601,39 @@
               browserTarget = "scan";
               browserOpen = true;
             }}
-            title="フォルダブラウザで選択"
+            title={m.projects_pick_folder()}
           >
             <FolderOpenIcon class="size-3.5" />
-            <span>参照…</span>
+            <span>{m.projects_browse()}</span>
           </Button>
         </div>
       </div>
       <Dialog.Footer>
         <Button type="button" variant="outline" onclick={() => (scanOpen = false)}>
-          キャンセル
+          {m.common_cancel()}
         </Button>
         <Button type="submit" disabled={scanBusy || scanNodeId === ""}>
-          {scanBusy ? "スキャン中…" : "スキャン"}
+          {scanBusy ? m.projects_scanning() : m.projects_scan()}
         </Button>
       </Dialog.Footer>
     </form>
   </Dialog.Content>
 </Dialog.Root>
 
-<!-- フォルダ手動紐付け (Link) -->
+<!-- Manual folder linking -->
 <Dialog.Root open={linkOpen} onOpenChange={(open) => (linkOpen = open)}>
   <Dialog.Content class="sm:max-w-md">
     <Dialog.Header>
-      <Dialog.Title>フォルダを紐付け</Dialog.Title>
+      <Dialog.Title>{m.projects_link()}</Dialog.Title>
       <Dialog.Description>
-        任意のディレクトリを論理プロジェクト ID へ手動で紐付けます (`.fxg.toml` に
-        <code>project_key</code> を書き込みます)。
+        {m.projects_link_dialog_description_prefix()}
+        <code>project_key</code>
+        {m.projects_link_dialog_description_suffix()}
       </Dialog.Description>
     </Dialog.Header>
     <form class="flex flex-col gap-4" onsubmit={submitLink}>
       <div class="grid gap-2">
-        <Label for="link-node">ノード</Label>
+        <Label for="link-node">{m.projects_node()}</Label>
         <select
           id="link-node"
           bind:value={linkNodeId}
@@ -641,13 +641,13 @@
         >
           {#each sync.nodes as node (node.node_id)}
             <option value={node.node_id} disabled={!node.is_online}>
-              {node.name}{node.is_online ? "" : " — オフライン"}
+              {node.name}{node.is_online ? "" : ` ${m.projects_offline_suffix()}`}
             </option>
           {/each}
         </select>
       </div>
       <div class="grid gap-2">
-        <Label for="link-project">論理プロジェクト ID</Label>
+        <Label for="link-project">{m.projects_project_id()}</Label>
         <Input
           id="link-project"
           bind:value={linkProjectId}
@@ -656,7 +656,7 @@
         />
       </div>
       <div class="grid gap-2">
-        <Label for="link-path">対象ディレクトリ</Label>
+        <Label for="link-path">{m.projects_target_directory()}</Label>
         <div class="flex items-center gap-1.5">
           <Input
             id="link-path"
@@ -674,16 +674,16 @@
               browserTarget = "link";
               browserOpen = true;
             }}
-            title="フォルダブラウザで選択"
+            title={m.projects_pick_folder()}
           >
             <FolderOpenIcon class="size-3.5" />
-            <span>参照…</span>
+            <span>{m.projects_browse()}</span>
           </Button>
         </div>
       </div>
       <Dialog.Footer>
         <Button type="button" variant="outline" onclick={() => (linkOpen = false)}>
-          キャンセル
+          {m.common_cancel()}
         </Button>
         <Button
           type="submit"
@@ -692,7 +692,7 @@
             linkProjectId.trim() === "" ||
             linkPath.trim() === ""}
         >
-          {linkBusy ? "紐付け中…" : "紐付け"}
+          {linkBusy ? m.projects_linking() : m.projects_link_action()}
         </Button>
       </Dialog.Footer>
     </form>
@@ -704,10 +704,10 @@
   nodeId={browserNodeId}
   initialPath={browserInitialPath}
   title={browserTarget === "create"
-    ? "Worktree 配置先フォルダを選択"
+    ? m.projects_pick_worktree_folder()
     : browserTarget === "scan"
-      ? "スキャン対象フォルダを選択"
-      : "紐付け対象フォルダを選択"}
+      ? m.projects_pick_scan_folder()
+      : m.projects_pick_link_folder()}
   onSelect={(path) => {
     if (browserTarget === "create") createPath = path;
     else if (browserTarget === "scan") scanDir = path;

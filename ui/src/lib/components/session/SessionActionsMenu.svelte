@@ -2,6 +2,7 @@
   import * as AlertDialog from "#lib/components/ui/alert-dialog/index.ts";
   import * as DropdownMenu from "#lib/components/ui/dropdown-menu/index.ts";
   import type { SessionSummary } from "#lib/generated/bindings.ts";
+  import { m } from "#lib/paraglide/messages.js";
   import { sync } from "#lib/stores/app.svelte.ts";
   import { cn } from "#lib/utils.ts";
   import { toast } from "svelte-sonner";
@@ -12,11 +13,11 @@
 
   interface Props {
     session: SessionSummary;
-    /** 削除完了後に呼ばれる (開いているセッションからの遷移など)。 */
+    /** Called after deletion completes (for example to navigate away from the open session). */
     onDeleted?: () => void;
-    /** トリガーボタンの追加クラス (ホバー表示など)。 */
+    /** Extra classes for the trigger button (for example hover reveal). */
     buttonClass?: string;
-    /** トリガーアイコンのサイズクラス。 */
+    /** Size classes for the trigger icon. */
     iconClass?: string;
     align?: "start" | "center" | "end";
   }
@@ -27,13 +28,13 @@
   let confirmOpen = $state(false);
   let busy = $state(false);
 
-  /** アーカイブ/復元する (可逆。イベントログは保持される)。 */
+  /** Archive/unarchive the session (reversible; the event log is retained). */
   async function toggleArchive() {
     if (busy) return;
     busy = true;
     try {
       await sync.archiveSession(session.session_id, !archived);
-      toast.success(archived ? "アーカイブを解除しました" : "アーカイブしました");
+      toast.success(archived ? m.session_unarchived() : m.session_archived());
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
     } finally {
@@ -41,13 +42,13 @@
     }
   }
 
-  /** 削除する (会話ログを消去。復元不能)。 */
+  /** Delete the session (erasing the chat log; irreversible). */
   async function handleDelete() {
     if (busy) return;
     busy = true;
     try {
       await sync.deleteSession(session.session_id);
-      toast.success("セッションを削除しました");
+      toast.success(m.session_deleted());
       confirmOpen = false;
       onDeleted?.();
     } catch (error) {
@@ -58,7 +59,7 @@
   }
 </script>
 
-<!-- サイドバーの行 (リンク) 内でもクリックが遷移しないよう伝播を止める -->
+<!-- Stop the click from navigating when this is inside a sidebar row (link) -->
 <span
   class="inline-flex"
   role="presentation"
@@ -73,7 +74,7 @@
         "text-muted-foreground hover:text-foreground focus-visible:ring-ring/40 inline-flex items-center justify-center rounded p-0.5 outline-none transition-colors focus-visible:ring-1",
         buttonClass,
       )}
-      title="セッション操作 (アーカイブ / 削除)"
+      title={m.session_actions_title()}
     >
       <MoreHorizontalIcon class={iconClass} />
     </DropdownMenu.Trigger>
@@ -81,10 +82,10 @@
       <DropdownMenu.Item disabled={busy} onSelect={() => void toggleArchive()}>
         {#if archived}
           <ArchiveRestoreIcon />
-          アーカイブを解除
+          {m.session_unarchive()}
         {:else}
           <ArchiveIcon />
-          アーカイブ
+          {m.session_archive()}
         {/if}
       </DropdownMenu.Item>
       <DropdownMenu.Separator />
@@ -94,33 +95,32 @@
         onSelect={() => (confirmOpen = true)}
       >
         <Trash2Icon />
-        削除…
+        {m.session_delete_menu()}
       </DropdownMenu.Item>
     </DropdownMenu.Content>
   </DropdownMenu.Root>
 </span>
 
-<!-- 削除の確認ダイアログ -->
+<!-- Delete confirmation dialog -->
 <AlertDialog.Root bind:open={confirmOpen}>
   <AlertDialog.Content>
     <AlertDialog.Header>
       <AlertDialog.Title class="flex items-center gap-2 text-destructive">
         <Trash2Icon class="size-5" />
-        セッションを削除しますか？
+        {m.session_delete_confirm_title()}
       </AlertDialog.Title>
       <AlertDialog.Description class="text-sm">
-        セッション「{session.title}」の会話ログ・承認履歴・ツール実行履歴をすべて削除します。
-        この操作は取り消せません (非表示にするだけのアーカイブは復元できます)。
+        {m.session_delete_confirm_description({ title: session.title })}
       </AlertDialog.Description>
     </AlertDialog.Header>
     <AlertDialog.Footer>
-      <AlertDialog.Cancel disabled={busy}>キャンセル</AlertDialog.Cancel>
+      <AlertDialog.Cancel disabled={busy}>{m.common_cancel()}</AlertDialog.Cancel>
       <AlertDialog.Action
         class="bg-destructive hover:bg-destructive/90 text-destructive-foreground"
         disabled={busy}
         onclick={handleDelete}
       >
-        {busy ? "削除中…" : "削除"}
+        {busy ? m.session_deleting() : m.common_delete()}
       </AlertDialog.Action>
     </AlertDialog.Footer>
   </AlertDialog.Content>

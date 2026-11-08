@@ -7,15 +7,15 @@ import {
 } from "./reducer";
 
 /**
- * 1セッション分のイベントタイムライン (Svelte 5 Runes による差分同期状態)。
+ * Event timeline for a single session (differential sync state using Svelte 5 Runes).
  *
- * - 永続イベントは `node_seq` 昇順を正とし、重複配信 (`event_id` /
- *   `node_seq` の再送) は無害にスキップする。
- * - `LiveStreamDelta` はバッファにマージし、確定イベント到着時に破棄して
- *   置き換える (docs/03 §3.2)。
- * - `$derived` はここに置かず、消費側 (コンポーネント) で構成する。
- *   view の寿命より長生きするストア内の派生値は `derived_inert` の原因に
- *   なるため、状態のみを保持する。
+ * - Persisted events are ordered by `node_seq`; duplicate deliveries (retries of
+ *   the same `event_id` / `node_seq`) are skipped harmlessly.
+ * - `LiveStreamDelta` entries are merged into buffers and discarded when the
+ *   finalized event arrives (docs/03 §3.2).
+ * - `$derived` does not live here; consumers (components) compose it. Derived
+ *   values inside stores outlive the view and cause `derived_inert`, so this
+ *   class holds state only.
  */
 export class SessionTimeline {
   readonly sessionId: string;
@@ -29,19 +29,19 @@ export class SessionTimeline {
     this.sessionId = sessionId;
   }
 
-  /** 永続イベントを適用する (重複なら `false`)。 */
+  /** Apply a persisted event (`false` when it is a duplicate). */
   applyEvent(event: SessionEventEnvelope): boolean {
     if (!insertEventSorted(this.events, event)) return false;
     clearStreamBuffers(event, this);
     return true;
   }
 
-  /** `LiveStreamDelta` をマージする。 */
+  /** Merge a `LiveStreamDelta`. */
   applyDelta(delta: StreamDeltaPayload): void {
     applyStreamDelta(this, delta);
   }
 
-  /** ストリーミングバッファを全て破棄する (切断時など)。 */
+  /** Discard all streaming buffers (for example on disconnect). */
   clearStreams(): void {
     this.messageDeltas.clear();
     this.thoughtDeltas.clear();

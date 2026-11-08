@@ -1,37 +1,38 @@
 import type { AgentSource, AgentSummary } from "#lib/generated/bindings.ts";
+import { m } from "#lib/paraglide/messages.js";
 
-/** 起動形態の表示ラベル。 */
+/** Display label for how the agent is launched. */
 export function agentSourceLabel(source: AgentSource): string {
   switch (source) {
     case "external":
-      return "既存インストール";
+      return m.settings_agent_source_external();
     case "package":
       return "npx/uvx";
     case "custom":
-      return "カスタム";
+      return m.settings_agent_source_custom();
   }
 }
 
-/** 一覧に出す短い説明 (例: `既存インストール`)。 */
+/** Short description shown in lists (for example `Existing install`). */
 export function agentHint(agent: AgentSummary): string {
-  if (agent.custom_config !== null) return "カスタム";
-  if (agent.sources.includes("external")) return "既存インストール";
+  if (agent.custom_config !== null) return m.settings_agent_source_custom();
+  if (agent.sources.includes("external")) return m.settings_agent_source_external();
   if (agent.sources.includes("package")) return "npx/uvx";
-  return "未導入";
+  return m.settings_not_installed();
 }
 
-/** 選択肢用のラベル (表示名 + 起動形態、ID が異なる場合のみ ID を併記)。 */
+/** Label for select options (display name + launch type; ID included only when it differs). */
 export function agentOptionLabel(agent: AgentSummary): string {
   const name = agent.name === agent.id ? agent.id : `${agent.name} (${agent.id})`;
   return `${name} — ${agentHint(agent)}`;
 }
 
-/** ノードで利用可能なエージェントだけを返す。 */
+/** Return only the agents available on the node. */
 export function agentsAvailableOn(agents: AgentSummary[], nodeId: string): AgentSummary[] {
   return agents.filter((agent) => agent.installed_nodes.includes(nodeId));
 }
 
-/** `npx` / `uvx` 経由での利用が有効になっているか。 */
+/** Whether usage via `npx` / `uvx` is enabled. */
 export function isPackageEnabled(agent: AgentSummary): boolean {
   return agent.sources.includes("package");
 }

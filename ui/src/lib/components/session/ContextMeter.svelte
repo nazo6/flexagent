@@ -1,12 +1,13 @@
 <script lang="ts">
   import type { SessionUsage } from "#lib/generated/bindings.ts";
+  import { m } from "#lib/paraglide/messages.js";
   import { formatTokenCount } from "#lib/format.ts";
 
   /**
-   * コンテキスト使用量メーター (ACP `usage_update` の投影)。
+   * Context usage meter (a projection of ACP `usage_update`).
    *
-   * `usage` が `null` (エージェントが usage を報告しない、または未受信) の
-   * 場合は何も描画しない。
+   * Renders nothing when `usage` is `null` (the agent does not report usage,
+   * or nothing has been received yet).
    */
   let { usage }: { usage: SessionUsage | null } = $props();
 
@@ -22,8 +23,17 @@
 
   const tooltip = $derived(
     usage
-      ? `コンテキスト使用量: ${usage.used_tokens} / ${usage.context_size} tokens (${percent.toFixed(1)}%)` +
-          (usage.cost ? ` ・累積コスト: ${usage.cost.amount} ${usage.cost.currency}` : "")
+      ? m.session_context_usage({
+          used: usage.used_tokens,
+          total: usage.context_size,
+          percent: percent.toFixed(1),
+        }) +
+          (usage.cost
+            ? ` — ${m.session_context_cost({
+                amount: usage.cost.amount,
+                currency: usage.cost.currency,
+              })}`
+            : "")
       : "",
   );
 </script>

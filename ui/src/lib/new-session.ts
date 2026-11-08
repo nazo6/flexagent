@@ -1,37 +1,38 @@
 /**
- * 新規セッション作成画面の「実行ディレクトリ」候補解決。
+ * Working directory candidate resolution for the new session screen.
  *
- * 既定は **直近使用した場所を優先** する:
- * 1. プロジェクト × ノードの紐付け (`project_node_bindings`) を最終使用順
- * 2. 紐付けに無いパスは直近セッションの `local_path` で補完
- *    (セッション開始時の紐付け登録前に実行されたセッションへのフォールバック)
+ * By default the **most recently used location wins**:
+ * 1. Project × node bindings (`project_node_bindings`) in last-used order
+ * 2. Paths not covered by a binding are filled in from the `local_path` of
+ *    recent sessions (a fallback for sessions started before binding
+ *    registration was introduced)
  */
 import type { NodeSummary, ProjectSummary, SessionSummary } from "#lib/generated/bindings.ts";
 
-/** 実行ディレクトリの候補 (UI 表示・選択用)。 */
+/** Working directory candidate (for display and selection in the UI). */
 export interface PathCandidate {
-  /** 実行ディレクトリの絶対パス */
+  /** Absolute path of the working directory */
   path: string;
-  /** 候補の出典 (`binding` = プロジェクト紐付け / `session` = セッション履歴) */
+  /** Candidate origin (`binding` = project binding / `session` = session history) */
   source: "binding" | "session";
-  /** Git Worktree か */
+  /** Whether this is a Git worktree */
   isWorktree: boolean;
-  /** ノード上に実在するか (セッション履歴のみの候補は未確認のため true 扱い) */
+  /** Whether it exists on the node (session-only candidates are unverified and treated as true) */
   exists: boolean;
-  /** 最終確認時の Git ブランチ (セッション履歴のみの候補では起動時スナップショット) */
+  /** Git branch at the last check (a startup snapshot for session-only candidates) */
   gitBranch: string | null;
-  /** ソートキー (紐付けは最終使用日時 / セッションは最終更新日時。Unix epoch ms) */
+  /** Sort key (last-used time for bindings / last-updated time for sessions; Unix epoch ms) */
   usedAt: number;
 }
 
-/** セッション履歴から補完する候補の上限 (古い場所で候補が溢れないように)。 */
+/** Upper bound on candidates filled in from session history (so old locations do not flood the list). */
 const MAX_SESSION_CANDIDATES = 5;
 
 /**
- * プロジェクト × ノードの実行ディレクトリ候補を直近使用順に組み立てる。
+ * Build the working directory candidates for a project × node in last-used order.
  *
- * 同一パスが紐付けとセッション履歴の両方にある場合は紐付けを優先する
- * (Worktree 判定・ブランチが正データのため)。
+ * When the same path appears in both a binding and session history, the binding
+ * wins (its worktree flag and branch are the authoritative data).
  */
 export function buildPathCandidates(
   project: ProjectSummary | null,
@@ -64,7 +65,7 @@ export function buildPathCandidates(
       path: session.local_path,
       source: "session",
       isWorktree: session.is_worktree,
-      // セッション履歴のみのパスは実在確認をしていない (既定に選ばれた時に警告する)
+      // Paths derived from session history are unverified (warn when one is picked as the default)
       exists: true,
       gitBranch: session.git_branch,
       usedAt: session.updated_at,
@@ -82,19 +83,19 @@ export function buildPathCandidates(
 }
 
 /**
- * 既定として選択する候補を選ぶ。
+ * Pick the candidate to select by default.
  *
- * 実在する候補の先頭 (＝直近使用順) を返す。実在する候補が無ければ
- * 先頭の候補を返し、空なら `null`。
+ * Returns the first existing candidate (i.e. in last-used order). If no
+ * candidate exists, returns the first candidate, or `null` when empty.
  */
 export function pickDefaultCandidate(candidates: readonly PathCandidate[]): PathCandidate | null {
   return candidates.find((candidate) => candidate.exists) ?? candidates[0] ?? null;
 }
 
 /**
- * プロジェクト × ノードの最終使用時刻を返す (紐付け・セッション履歴の最大値)。
+ * Return the last-used time for a project × node (the maximum across bindings and session history).
  *
- * 履歴が無い場合は `0`。
+ * Returns `0` when there is no history.
  */
 export function projectRecency(
   project: ProjectSummary,
@@ -114,11 +115,11 @@ export function projectRecency(
 }
 
 /**
- * 既定ノードを選ぶ。
+ * Pick the default node.
  *
- * オンラインノードのうち、そのプロジェクトの実行履歴 (紐付け・セッション) が
- * 最も新しいノードを選ぶ。履歴が無ければオンライン先頭ノードにフォールバックする
- * (オンラインが無い場合は全ノードを対象にする)。
+ * Among online nodes, picks the one with the most recent run history (bindings
+ * and sessions) for the project. Without history it falls back to the first
+ * online node (or all nodes when none are online).
  */
 export function pickDefaultNode(
   nodes: readonly NodeSummary[],

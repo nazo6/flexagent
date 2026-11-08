@@ -5,6 +5,7 @@
   import { Card } from "#lib/components/ui/card/index.ts";
   import { formatEpochMs } from "#lib/format.ts";
   import type { AuditLogEntry } from "#lib/generated/bindings.ts";
+  import { m } from "#lib/paraglide/messages.js";
   import { shortId } from "#lib/session-status.ts";
   import { connection, sync } from "#lib/stores/app.svelte.ts";
   import { toast } from "svelte-sonner";
@@ -41,30 +42,31 @@
   }
 
   const ACTION_LABELS: Record<string, string> = {
-    session_start: "セッション開始",
-    permission_resolved: "承認解決",
-    elicitation_resolved: "質問解決",
-    pty_spawn: "PTY 起動",
-    kill_switch: "緊急停止",
-    worktree_manage: "Worktree 操作",
-    session_resume: "セッション再開",
+    session_start: m.settings_audit_action_session_start(),
+    permission_resolved: m.settings_audit_action_permission_resolved(),
+    elicitation_resolved: m.settings_audit_action_elicitation_resolved(),
+    pty_spawn: m.settings_audit_action_pty_spawn(),
+    kill_switch: m.settings_audit_action_kill_switch(),
+    worktree_manage: m.settings_audit_action_worktree_manage(),
+    session_resume: m.settings_audit_action_session_resume(),
   };
 </script>
 
 <div class="flex flex-col gap-3">
   <div class="flex flex-wrap items-center justify-between gap-2">
     <p class="text-muted-foreground text-sm">
-      記録先: <code>{roleLabel}</code> (新しい順)
+      {m.settings_audit_source()} <code>{roleLabel}</code>
+      {m.settings_audit_newest_first()}
     </p>
     <Button variant="outline" size="sm" disabled={loading} onclick={() => void load()}>
       <RefreshCwIcon />
-      再読込
+      {m.common_refresh()}
     </Button>
   </div>
 
   {#if logs.length === 0}
     <p class="text-muted-foreground text-sm">
-      {loading ? "読み込み中…" : "監査ログはまだありません。"}
+      {loading ? m.common_loading() : m.settings_audit_empty()}
     </p>
   {:else}
     <ul class="flex list-none flex-col gap-2 p-0">
@@ -98,7 +100,7 @@
                 <summary
                   class="text-muted-foreground hover:text-foreground cursor-pointer text-xs select-none"
                 >
-                  詳細
+                  {m.settings_audit_details()}
                 </summary>
                 <pre
                   class="bg-muted/40 mt-1 max-h-40 overflow-auto rounded-md p-2 font-mono text-xs whitespace-pre-wrap">{JSON.stringify(

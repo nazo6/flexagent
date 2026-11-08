@@ -16,22 +16,23 @@ import type {
   SessionRevertResponse,
   SessionSummary,
 } from "#lib/generated/bindings.ts";
+import { m } from "#lib/paraglide/messages.js";
 import { mergeCursor } from "#lib/sync/cursor.ts";
 import { SessionTimeline } from "#lib/sync/timeline.svelte.ts";
 import type { PendingPrompt } from "#lib/sync/reducer.ts";
 import type { ConnectionStore } from "./connection.svelte";
 
 const CURSOR_KEY = "fxg.sync.cursor";
-/** `CommandResult` を待つタイムアウト。 */
+/** Timeout for waiting on a `CommandResult`. */
 const COMMAND_TIMEOUT_MS = 30_000;
 /**
- * `SendPrompt` のタイムアウト。
+ * Timeout for `SendPrompt`.
  *
- * 停止済みセッションへの送信はノード側でネイティブ復元 (自動レジューム) を
- * 行うため、エージェントのコールドスタート (~25 秒) を許容する。
+ * Sending to a stopped session triggers a native restore (automatic resume) on
+ * the node, so allow for an agent cold start (~25 seconds).
  */
 const SEND_PROMPT_TIMEOUT_MS = 120_000;
-/** 再接続バックオフの上限。 */
+/** Upper bound for reconnect backoff. */
 const MAX_RECONNECT_DELAY_MS = 30_000;
 
 interface PendingCommand {
@@ -50,15 +51,16 @@ function readCursor(): number | null {
 }
 
 /**
- * Client WS (`/api/v1/client/ws`) による差分同期ストア。
+ * Incremental sync store over the Client WS (`/api/v1/client/ws`).
  *
- * - 接続時に `Subscribe { since_cursor, focused_session_id }` を送信し、
- *   未取得イベントのリプレイとその後はリアルタイムイベントを受信する。
- * - 最後に受信したバッチの `cursor` を保存し、再接続時に差分再開する
- *   (接続先ストアごとに 1 カーソル。接続先の切替はオリジン遷移のため、
- *   localStorage はオリジン単位で自然に分離される)。
- * - セッション投影 (`sessions`)、承認 Inbox、ノード一覧はイベント適用時に
- *   該当 REST API を再取得して同期する (ハブ側投影と整合させる)。
+ * - On connect it sends `Subscribe { since_cursor, focused_session_id }`,
+ *   receives a replay of unfetched events, then real-time events.
+ * - It persists the `cursor` of the last received batch and resumes
+ *   incrementally on reconnect (one cursor per target store; switching targets
+ *   is an origin navigation, so localStorage is naturally isolated per origin).
+ * - Session projections (`sessions`), the approval Inbox and the node list are
+ *   re-fetched from their REST APIs when events are applied (kept consistent
+ *   with the hub-side projection).
  */
 export class SyncStore {
   readonly connection: ConnectionStore;
@@ -67,25 +69,25 @@ export class SyncStore {
   nodes = $state<NodeSummary[]>([]);
   projects = $state<ProjectSummary[]>([]);
   inbox = $state<PermissionRequestEntry[]>([]);
-  /** 回答待ち elicitation (質問) 一覧 (全セッション横断)。 */
+  /** Pending elicitations (questions) across all sessions. */
   inboxElicitations = $state<ElicitationRequestEntry[]>([]);
-  /** Client WS 接続状態。 */
+  /** Client WS connection state. */
   wsConnected = $state(false);
-  /** 中央サーバーへの接続状態 (ローカルノード接続時のみ)。 */
+  /** Connection state to the central server (only when connected to a local node). */
   centralConnected = $state<boolean | null>(null);
-  /** 未同期 Outbox イベント件数。 */
+  /** Number of unsynced Outbox events. */
   unsyncedEventCount = $state(0);
-  /** 最終同期日時 (epoch ms)。 */
+  /** Last sync time (epoch ms). */
   lastSyncedAt = $state<number | null>(null);
-  /** 現在開いているセッション (WS の優先配信ヒント)。 */
+  /** Currently open session (WS priority delivery hint). */
   activeSessionId = $state<string | null>(null);
-  /** 送信済みで `CommandResult` 未着のプロンプト (Pending Queue)。 */
+  /** Prompts sent with no `CommandResult` yet (Pending Queue). */
   pendingPrompts = $state(new Map<string, PendingPrompt>());
   /**
-   * 一時VMブートストラップの進捗ログ (エフェメラル。永続化されない)。
+   * Progress logs for ephemeral VM bootstrap (ephemeral; not persisted).
    *
-   * ノードの `node.db` が存在する前の `stderr` 出力をサーバーが
-   * `ServerWsMessage::BootstrapLog` として配信する。再接続では復元されない。
+   * The server delivers `stderr` output from before the node's `node.db` exists
+   * as `ServerWsMessage::BootstrapLog`. It is not restored on reconnect.
    */
   bootstrapLogs = $state(new Map<string, string[]>());
 
@@ -104,10 +106,10 @@ export class SyncStore {
   }
 
   // ------------------------------------------------------------------
-  // ライフサイクル
+  // Lifecycle
   // ------------------------------------------------------------------
 
-  /** Client WS を開始する (認証確立後に呼ぶ)。 */
+  /** Start the Client WS (call after authentication is established). */
   start(): void {
     if (!this.#stopped) return;
     this.#stopped = false;
@@ -115,7 +117,7 @@ export class SyncStore {
     void this.refreshAll();
   }
 
-  /** 切断して再接続を止める (ログアウト時など)。 */
+  /** Disconnect and stop reconnecting (e.g. on logout). */
   stop(): void {
     this.#stopped = true;
     if (this.#reconnectTimer !== null) {
@@ -127,7 +129,7 @@ export class SyncStore {
     this.wsConnected = false;
   }
 
-  /** 一度停止して再接続する (ログイン直後など)。 */
+  /** Stop once and reconnect (e.g. right after login). */
   restart(): void {
     this.stop();
     this.start();
@@ -180,7 +182,7 @@ export class SyncStore {
   }
 
   // ------------------------------------------------------------------
-  // 取得 (REST)
+  // Fetch (REST)
   // ------------------------------------------------------------------
 
   async refreshAll(): Promise<void> {
@@ -194,7 +196,7 @@ export class SyncStore {
 
   async refreshSessions(): Promise<void> {
     try {
-      // アーカイブ済みも取得し、サイドバーで「アーカイブ済み」セクションに分ける
+      // Also fetch archived sessions so the sidebar can split out an "Archived" section
       this.sessions = await this.connection.client.sessions({
         includeArchived: true,
         limit: 200,
@@ -253,10 +255,10 @@ export class SyncStore {
   }
 
   // ------------------------------------------------------------------
-  // タイムライン
+  // Timeline
   // ------------------------------------------------------------------
 
-  /** セッションのタイムライン (存在しなければ作成する)。 */
+  /** A session's timeline (created if it does not exist). */
   timelineFor(sessionId: string): SessionTimeline {
     let timeline = this.#timelines.get(sessionId);
     if (!timeline) {
@@ -266,7 +268,7 @@ export class SyncStore {
     return timeline;
   }
 
-  /** エフェメラルなブートストラップログ (最新順で最大 500 行)。 */
+  /** Ephemeral bootstrap logs (most recent first, at most 500 lines). */
   bootstrapLinesFor(sessionId: string): string[] {
     return this.bootstrapLogs.get(sessionId) ?? [];
   }
@@ -278,7 +280,7 @@ export class SyncStore {
     this.bootstrapLogs.set(sessionId, next);
   }
 
-  /** セッションを開く (WS の優先配信ヒントを更新する)。 */
+  /** Open a session (updates the WS priority delivery hint). */
   setActiveSession(sessionId: string | null): void {
     this.activeSessionId = sessionId;
     this.#send({
@@ -289,9 +291,9 @@ export class SyncStore {
   }
 
   /**
-   * REST 経由でセッション履歴を読み込む (WS 接続前のフォールバック)。
+   * Load session history over REST (fallback before the WS connects).
    *
-   * 既知イベントは `node_seq` 重複として無害にスキップされる。
+   * Known events are harmlessly skipped as duplicate `node_seq` values.
    */
   async loadSessionEvents(sessionId: string): Promise<void> {
     const timeline = this.timelineFor(sessionId);
@@ -305,7 +307,7 @@ export class SyncStore {
   }
 
   // ------------------------------------------------------------------
-  // コマンド (Client WS + CommandResult 相関)
+  // Commands (Client WS + CommandResult correlation)
   // ------------------------------------------------------------------
 
   #dispatch(
@@ -317,7 +319,7 @@ export class SyncStore {
     return new Promise<CommandResult>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.#pendingCommands.delete(commandId);
-        reject(new Error("コマンドがタイムアウトしました (ノードからの応答がありません)"));
+        reject(new Error(m.lib_command_timeout()));
       }, timeoutMs);
       this.#pendingCommands.set(commandId, {
         sessionId,
@@ -328,16 +330,16 @@ export class SyncStore {
       if (!this.#send(command)) {
         this.#pendingCommands.delete(commandId);
         clearTimeout(timer);
-        reject(new ApiError(0, "NODE_OFFLINE", "サーバーに接続されていません"));
+        reject(new ApiError(0, "NODE_OFFLINE", m.lib_not_connected_to_server()));
       }
     });
   }
 
   /**
-   * プロンプトを送信する (Pending Queue として表示される)。
+   * Send a prompt (shown as a Pending Queue entry).
    *
-   * 停止済みセッションへの送信はノード側で自動レジュームされるため、
-   * 応答待ちを [`SEND_PROMPT_TIMEOUT_MS`] に延長する。
+   * Sending to a stopped session is automatically resumed on the node, so the
+   * response timeout is extended to [`SEND_PROMPT_TIMEOUT_MS`].
    */
   sendPrompt(sessionId: string, text: string): Promise<CommandResult> {
     const commandId = crypto.randomUUID();
@@ -363,7 +365,7 @@ export class SyncStore {
     });
   }
 
-  /** 承認リクエストへ応答する (WS 経由。冪等)。 */
+  /** Respond to a permission request (over WS; idempotent). */
   respondPermission(
     sessionId: string,
     requestId: string,
@@ -383,7 +385,7 @@ export class SyncStore {
     );
   }
 
-  /** elicitation (質問) へ応答する (WS 経由。冪等)。 */
+  /** Respond to an elicitation (question) (over WS; idempotent). */
   respondElicitation(
     sessionId: string,
     elicitationId: string,
@@ -405,7 +407,7 @@ export class SyncStore {
     );
   }
 
-  /** モード切替 / 設定変更 / キャンセル / Kill。 */
+  /** Mode switch / config change / cancel / kill. */
   controlSession(sessionId: string, action: SessionControlAction): Promise<CommandResult> {
     return this.#dispatch(
       {
@@ -419,10 +421,10 @@ export class SyncStore {
   }
 
   /**
-   * 指定ターン (`UserMessage.node_seq`) 時点へワークスペースを巻き戻す。
+   * Roll the workspace back to the given turn (`UserMessage.node_seq`).
    *
-   * ノードの Shadow Git Tree から復元する REST API を呼び、
-   * 追記された `SessionReverted` を反映するため履歴を再取得する。
+   * Calls the REST API that restores from the node's Shadow Git Tree and
+   * re-fetches history to reflect the appended `SessionReverted` event.
    */
   async revertSession(
     sessionId: string,
@@ -434,13 +436,13 @@ export class SyncStore {
     await Promise.all([
       this.refreshSessions(),
       this.loadSessionEvents(sessionId).catch(() => {
-        /* WS リプレイで追いつくため無視する */
+        /* Ignore; WS replay will catch up */
       }),
     ]);
     return result;
   }
 
-  /** 緊急停止 (監査ログ付きの REST API)。 */
+  /** Emergency stop (REST API with an audit log). */
   async killSwitch(reason: string): Promise<number> {
     const response = await this.connection.client.killSwitch(reason);
     void this.refreshAll();
@@ -448,11 +450,11 @@ export class SyncStore {
   }
 
   /**
-   * 停止済みセッションを再開する。
+   * Resume a stopped session.
    *
-   * エージェント側コンテキストのネイティブ復元に非対応の場合は履歴 Replay で
-   * 継続され、`context_restored = false` として返る
-   * (`StatusChanged(Idle)` はイベント購読で自動反映される)。
+   * When native restoration of the agent-side context is unsupported, the
+   * session continues via history replay and returns `context_restored = false`
+   * (`StatusChanged(Idle)` is reflected automatically by event subscription).
    */
   async resumeSession(sessionId: string): Promise<ResumeSessionResponse> {
     const result = await this.connection.client.resumeSession(sessionId, {
@@ -463,7 +465,7 @@ export class SyncStore {
   }
 
   /**
-   * セッションをアーカイブ/復元する (可逆。イベントログは保持される)。
+   * Archive / restore a session (reversible; the event log is retained).
    */
   async archiveSession(sessionId: string, archived: boolean): Promise<SessionArchiveResponse> {
     const result = await this.connection.client.archiveSession(sessionId, {
@@ -474,10 +476,11 @@ export class SyncStore {
   }
 
   /**
-   * セッションを削除する (会話ログを消去し復元不能)。
+   * Delete a session (erases the conversation log irreversibly).
    *
-   * 実行ノードは稼働中セッションを停止してから `SessionDeleted` (tombstone)
-   * を追記し、イベント本文をパージする。ローカルのタイムラインも即時破棄する。
+   * The executing node stops a running session, appends `SessionDeleted`
+   * (tombstone) and purges the event bodies. The local timeline is discarded
+   * immediately as well.
    */
   async deleteSession(sessionId: string): Promise<void> {
     await this.connection.client.deleteSession(sessionId);
@@ -495,7 +498,7 @@ export class SyncStore {
   }
 
   // ------------------------------------------------------------------
-  // WS メッセージ処理
+  // WS message handling
   // ------------------------------------------------------------------
 
   #handleMessage(raw: string): void {
@@ -525,7 +528,7 @@ export class SyncStore {
         break;
       case "error":
         if (message.code === "UNAUTHORIZED") {
-          // トークン失効 (サーバー再生成など) → 再認証フローへ
+          // Token expired (e.g. server regenerated it) → go to the re-auth flow
           this.stop();
           void this.connection.probe();
         } else {
@@ -538,9 +541,9 @@ export class SyncStore {
   }
 
   #applyBatch(events: SessionEventEnvelope[], cursor: number): void {
-    // 配信元ストアの再作成・リセット後はカーソルが巻き戻る (docs/03 §3.2)。
-    // 古いタイムラインを維持したままでは、新ストアのイベントを node_seq /
-    // event_id の重複として捨ててしまうため、ローカル状態を破棄して再同期する。
+    // After the source store is recreated or reset, the cursor rewinds (docs/03 §3.2).
+    // Keeping the old timeline would discard the new store's events as duplicate
+    // node_seq / event_id, so discard local state and resync.
     const update = mergeCursor(this.#cursor, cursor);
     if (update.reset) {
       console.warn("[fxg] sync store cursor was rewound; resetting local state", {
@@ -567,8 +570,8 @@ export class SyncStore {
           sessionsDirty = true;
           break;
         case "session_deleted":
-          // 削除済みセッションは一覧・承認 Inbox から消え、ローカルの
-          // タイムラインも破棄する (以降は tombstone イベントのみが残る)
+          // Deleted sessions disappear from the list and approval Inbox, and the
+          // local timeline is discarded (only the tombstone event remains after)
           this.#timelines.delete(event.session_id);
           this.bootstrapLogs.delete(event.session_id);
           sessionsDirty = true;

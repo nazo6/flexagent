@@ -53,30 +53,33 @@ import type {
   WorktreeInfo,
   WorktreesResponse,
 } from "#lib/generated/bindings.ts";
+import { m } from "#lib/paraglide/messages.js";
+import { errorCodeMessage } from "./error-messages";
 import { ApiError } from "./errors";
 
-/** クエリパラメータ (undefined / null は省略される)。 */
+/** Query parameters (undefined / null are omitted). */
 export type QueryParams = Record<string, string | number | boolean | null | undefined>;
 
 export interface ApiClientOptions {
-  /** ベース URL (`''` = 現在のオリジン。末尾スラッシュなし)。 */
+  /** Base URL (`''` = current origin, no trailing slash). */
   baseUrl?: string;
-  /** Bearer トークン (Cookie 認証のみの場合は null)。 */
+  /** Bearer token (null when using Cookie auth only). */
   token?: string | null;
 }
 
 interface RequestOptions {
   query?: QueryParams;
-  /** JSON body (指定時は `Content-Type: application/json` を付与)。 */
+  /** JSON body (adds `Content-Type: application/json` when set). */
   body?: unknown;
 }
 
 /**
- * `fxg server` / `fxg daemon` 共通の Client REST API クライアント。
+ * Client REST API client shared by `fxg server` / `fxg daemon`.
  *
- * 認証は Bearer ヘッダを優先しつつ、同一オリジンでは `fxg_session` Cookie も
- * 自動送信される (`credentials: 'same-origin'`)。接続先の切替はオリジン
- * 単位のナビゲーションで行うため、クロスオリジンのリクエストは発生しない。
+ * Authentication prefers the Bearer header, while same-origin requests also
+ * send the `fxg_session` Cookie automatically (`credentials: 'same-origin'`).
+ * Connection targets switch by origin-level navigation, so cross-origin
+ * requests never occur.
  */
 export class ApiClient {
   readonly baseUrl: string;
@@ -91,7 +94,7 @@ export class ApiClient {
     this.#token = token;
   }
 
-  /** REST API の絶対 URL を組み立てる。 */
+  /** Build an absolute URL for a REST API path. */
   httpUrl(path: string, query?: QueryParams): string {
     const usp = new URLSearchParams();
     for (const [key, value] of Object.entries(query ?? {})) {
@@ -102,7 +105,7 @@ export class ApiClient {
     return `${this.baseUrl}${path}${suffix}`;
   }
 
-  /** WebSocket の絶対 URL を組み立てる (`http` → `ws`)。 */
+  /** Build an absolute WebSocket URL (`http` → `ws`). */
   wsUrl(path: string): string {
     const base = this.baseUrl || (typeof location !== "undefined" ? location.origin : "");
     const url = new URL(path, base || "http://localhost");
@@ -129,7 +132,7 @@ export class ApiClient {
       try {
         body = await response.json();
       } catch {
-        /* 非 JSON エラーは fallback メッセージを使う */
+        /* Use the fallback message for non-JSON errors */
       }
       throw ApiError.fromBody(response.status, body, fallback);
     }
@@ -139,10 +142,10 @@ export class ApiClient {
   }
 
   // ------------------------------------------------------------------
-  // 認証 / システム
+  // Auth / system
   // ------------------------------------------------------------------
 
-  /** `GET /api/v1/meta` (認証不要。接続先種別の判定用)。 */
+  /** `GET /api/v1/meta` (no auth required; used to detect the connection type). */
   meta(): Promise<MetaResponse> {
     return this.#request("GET", "/api/v1/meta");
   }
@@ -152,7 +155,7 @@ export class ApiClient {
     return this.#request("GET", "/api/v1/system/info");
   }
 
-  /** `POST /api/v1/auth/login` (成功時に `fxg_session` Cookie が発行される)。 */
+  /** `POST /api/v1/auth/login` (issues the `fxg_session` Cookie on success). */
   async authLogin(token: string): Promise<void> {
     const previous = this.#token;
     this.#token = token;
@@ -166,12 +169,12 @@ export class ApiClient {
     }
   }
 
-  /** `POST /api/v1/auth/logout` (`fxg_session` Cookie を失効させる)。 */
+  /** `POST /api/v1/auth/logout` (invalidates the `fxg_session` Cookie). */
   authLogout(): Promise<void> {
     return this.#request("POST", "/api/v1/auth/logout", { body: {} });
   }
 
-  /** `POST /api/v1/system/kill-switch` (緊急停止)。 */
+  /** `POST /api/v1/system/kill-switch` (emergency stop). */
   killSwitch(reason: string): Promise<KillSwitchResponse> {
     return this.#request("POST", "/api/v1/system/kill-switch", {
       body: { reason },
@@ -179,7 +182,7 @@ export class ApiClient {
   }
 
   // ------------------------------------------------------------------
-  // プロジェクト / Worktree / ノード
+  // Projects / Worktrees / Nodes
   // ------------------------------------------------------------------
 
   /** `GET /api/v1/projects` */
@@ -211,7 +214,7 @@ export class ApiClient {
     });
   }
 
-  /** `POST /api/v1/projects/:id/worktrees/prune` (削除済み Worktree 管理情報のクリーンアップ)。 */
+  /** `POST /api/v1/projects/:id/worktrees/prune` (clean up metadata for deleted worktrees). */
   async pruneWorktrees(projectId: string, request: PruneWorktreesRequest): Promise<void> {
     await this.#request(
       "POST",
@@ -235,14 +238,14 @@ export class ApiClient {
     );
   }
 
-  /** `POST /api/v1/nodes/:id/projects/scan` (Git リポジトリ一括スキャン・登録)。 */
+  /** `POST /api/v1/nodes/:id/projects/scan` (bulk scan / register Git repositories). */
   scanProjects(nodeId: string, request: ProjectScanRequest): Promise<ProjectScanResponse> {
     return this.#request("POST", `/api/v1/nodes/${encodeURIComponent(nodeId)}/projects/scan`, {
       body: request,
     });
   }
 
-  /** `POST /api/v1/nodes/:id/projects/link` (任意ディレクトリの手動紐付け)。 */
+  /** `POST /api/v1/nodes/:id/projects/link` (manually link an arbitrary directory). */
   linkProject(nodeId: string, request: ProjectLinkRequest): Promise<ProjectLinkResponse> {
     return this.#request("POST", `/api/v1/nodes/${encodeURIComponent(nodeId)}/projects/link`, {
       body: request,
@@ -255,7 +258,7 @@ export class ApiClient {
     return response.provisioners;
   }
 
-  /** `POST /api/v1/provisioners/:name/test` (疎通検証)。 */
+  /** `POST /api/v1/provisioners/:name/test` (connectivity check). */
   testProvisioner(name: string): Promise<ProvisionerTestResponse> {
     return this.#request<ProvisionerTestResponse>(
       "POST",
@@ -264,7 +267,7 @@ export class ApiClient {
   }
 
   // ------------------------------------------------------------------
-  // セッション / 承認 / 検索 / 監査
+  // Sessions / approvals / search / audit
   // ------------------------------------------------------------------
 
   /** `GET /api/v1/sessions` */
@@ -273,7 +276,7 @@ export class ApiClient {
       projectId?: string | null;
       nodeId?: string | null;
       status?: string | null;
-      /** アーカイブ済みセッションを含めるか (既定 `false` = 除外)。 */
+      /** Whether to include archived sessions (default `false` = exclude). */
       includeArchived?: boolean | null;
       limit?: number;
     } = {},
@@ -294,7 +297,7 @@ export class ApiClient {
     return response.sessions;
   }
 
-  /** `POST /api/v1/sessions` (新規セッション開始)。 */
+  /** `POST /api/v1/sessions` (start a new session). */
   createSession(request: CreateSessionRequest): Promise<CreateSessionResponse> {
     return this.#request("POST", "/api/v1/sessions", { body: request });
   }
@@ -317,12 +320,12 @@ export class ApiClient {
     });
   }
 
-  /** `GET /api/v1/inbox` (未解決の承認・質問) */
+  /** `GET /api/v1/inbox` (unresolved approvals / questions) */
   inbox(): Promise<InboxResponse> {
     return this.#request<InboxResponse>("GET", "/api/v1/inbox");
   }
 
-  /** `POST /api/v1/sessions/:id/permissions/:req_id/respond` (冪等)。 */
+  /** `POST /api/v1/sessions/:id/permissions/:req_id/respond` (idempotent). */
   respondPermission(
     sessionId: string,
     requestId: string,
@@ -335,7 +338,7 @@ export class ApiClient {
     );
   }
 
-  /** `POST /api/v1/sessions/:id/elicitations/:elicitation_id/respond` (冪等)。 */
+  /** `POST /api/v1/sessions/:id/elicitations/:elicitation_id/respond` (idempotent). */
   respondElicitation(
     sessionId: string,
     elicitationId: string,
@@ -348,21 +351,21 @@ export class ApiClient {
     );
   }
 
-  /** `POST /api/v1/sessions/:id/revert` (Shadow Git Tree 巻き戻し)。 */
+  /** `POST /api/v1/sessions/:id/revert` (Shadow Git Tree rollback). */
   revertSession(sessionId: string, request: SessionRevertRequest): Promise<SessionRevertResponse> {
     return this.#request("POST", `/api/v1/sessions/${encodeURIComponent(sessionId)}/revert`, {
       body: request,
     });
   }
 
-  /** `POST /api/v1/sessions/:id/resume` (停止済みセッションの再開)。 */
+  /** `POST /api/v1/sessions/:id/resume` (resume a stopped session). */
   resumeSession(sessionId: string, request: ResumeSessionRequest): Promise<ResumeSessionResponse> {
     return this.#request("POST", `/api/v1/sessions/${encodeURIComponent(sessionId)}/resume`, {
       body: request,
     });
   }
 
-  /** `POST /api/v1/sessions/:id/archive` (アーカイブ/復元)。 */
+  /** `POST /api/v1/sessions/:id/archive` (archive / restore). */
   archiveSession(
     sessionId: string,
     request: SessionArchiveRequest,
@@ -372,12 +375,12 @@ export class ApiClient {
     });
   }
 
-  /** `DELETE /api/v1/sessions/:id` (削除。会話ログを消去し復元不能)。 */
+  /** `DELETE /api/v1/sessions/:id` (delete; erases the conversation log irreversibly). */
   deleteSession(sessionId: string): Promise<void> {
     return this.#request("DELETE", `/api/v1/sessions/${encodeURIComponent(sessionId)}`);
   }
 
-  /** `POST /api/v1/search` (FTS5 全文検索)。 */
+  /** `POST /api/v1/search` (FTS5 full-text search). */
   async search(query: string, limit?: number): Promise<SearchHit[]> {
     const response = await this.#request<SearchResponse>("POST", "/api/v1/search", {
       query: { q: query, limit },
@@ -393,27 +396,27 @@ export class ApiClient {
     return response.logs;
   }
 
-  /** `POST /api/v1/push/subscribe` (Web Push 購読登録。中央サーバーのみ)。 */
+  /** `POST /api/v1/push/subscribe` (register a Web Push subscription; central server only). */
   pushSubscribe(request: PushSubscribeRequest): Promise<PushSubscribeResponse> {
     return this.#request("POST", "/api/v1/push/subscribe", { body: request });
   }
 
   // ------------------------------------------------------------------
-  // エージェント管理 / 認証トークン (Phase D)
+  // Agent management / auth tokens (Phase D)
   // ------------------------------------------------------------------
 
-  /** `GET /api/v1/agents` (ACP Registry カタログ + ノード導入状態)。 */
+  /** `GET /api/v1/agents` (ACP Registry catalog + node install status). */
   async agents(): Promise<AgentSummary[]> {
     const response = await this.#request<AgentsResponse>("GET", "/api/v1/agents");
     return response.agents;
   }
 
-  /** `POST /api/v1/nodes/:id/agents/refresh` (カタログの強制再取得) */
+  /** `POST /api/v1/nodes/:id/agents/refresh` (force-refresh the catalog) */
   refreshAgentsCatalog(nodeId: string): Promise<AgentOpResponse> {
     return this.#request("POST", `/api/v1/nodes/${encodeURIComponent(nodeId)}/agents/refresh`);
   }
 
-  /** `PUT /api/v1/nodes/:id/agents/custom/:agent_id` (カスタム定義の作成・更新) */
+  /** `PUT /api/v1/nodes/:id/agents/custom/:agent_id` (create / update a custom definition) */
   upsertCustomAgent(
     nodeId: string,
     agentId: string,
@@ -426,7 +429,7 @@ export class ApiClient {
     );
   }
 
-  /** `DELETE /api/v1/nodes/:id/agents/custom/:agent_id` (カスタム定義の削除) */
+  /** `DELETE /api/v1/nodes/:id/agents/custom/:agent_id` (delete a custom definition) */
   removeCustomAgent(nodeId: string, agentId: string): Promise<AgentOpResponse> {
     return this.#request(
       "DELETE",
@@ -434,7 +437,7 @@ export class ApiClient {
     );
   }
 
-  /** `POST /api/v1/nodes/:id/agents/:agent_id/package` (npx/uvx での利用を有効化) */
+  /** `POST /api/v1/nodes/:id/agents/:agent_id/package` (enable use via npx/uvx) */
   enablePackageAgent(nodeId: string, agentId: string): Promise<AgentOpResponse> {
     return this.#request(
       "POST",
@@ -442,7 +445,7 @@ export class ApiClient {
     );
   }
 
-  /** `DELETE /api/v1/nodes/:id/agents/:agent_id/package` (npx/uvx での利用を無効化) */
+  /** `DELETE /api/v1/nodes/:id/agents/:agent_id/package` (disable use via npx/uvx) */
   disablePackageAgent(nodeId: string, agentId: string): Promise<AgentOpResponse> {
     return this.#request(
       "DELETE",
@@ -450,29 +453,29 @@ export class ApiClient {
     );
   }
 
-  /** `POST /api/v1/auth/rotate-token` (クライアント認証トークン再生成)。 */
+  /** `POST /api/v1/auth/rotate-token` (regenerate the client auth token). */
   rotateAuthToken(): Promise<RotateAuthTokenResponse> {
     return this.#request("POST", "/api/v1/auth/rotate-token");
   }
 
-  /** `GET /api/v1/nodes/tokens` (中央サーバーのみ)。 */
+  /** `GET /api/v1/nodes/tokens` (central server only). */
   async nodeTokens(): Promise<NodeTokenSummary[]> {
     const response = await this.#request<NodeTokensResponse>("GET", "/api/v1/nodes/tokens");
     return response.tokens;
   }
 
-  /** `POST /api/v1/nodes/tokens` (ノード個別トークン発行。中央サーバーのみ)。 */
+  /** `POST /api/v1/nodes/tokens` (issue a per-node token; central server only). */
   issueNodeToken(request: IssueNodeTokenRequest): Promise<IssueNodeTokenResponse> {
     return this.#request("POST", "/api/v1/nodes/tokens", { body: request });
   }
 
-  /** `DELETE /api/v1/nodes/tokens/:node_id` (ノード個別トークン失効。中央サーバーのみ)。 */
+  /** `DELETE /api/v1/nodes/tokens/:node_id` (revoke a per-node token; central server only). */
   async revokeNodeToken(nodeId: string): Promise<void> {
     await this.#request("DELETE", `/api/v1/nodes/tokens/${encodeURIComponent(nodeId)}`);
   }
 }
 
-/** `CommandResult` のエラーコードを UI 表示向けに整形する。 */
+/** Format a `CommandResult` error code for UI display. */
 export function commandErrorMessage(code: ErrorCode | null, message: string | null): string {
-  return message ?? code ?? "unknown error";
+  return message ?? errorCodeMessage(code) ?? m.error_unknown();
 }

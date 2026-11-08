@@ -3,6 +3,7 @@
   import { Button } from "#lib/components/ui/button/index.ts";
   import { Input } from "#lib/components/ui/input/index.ts";
   import type { FsEntry } from "#lib/generated/bindings.ts";
+  import { m } from "#lib/paraglide/messages.js";
   import { sync } from "#lib/stores/app.svelte.ts";
   import ArrowUpIcon from "@lucide/svelte/icons/arrow-up";
   import ChevronRightIcon from "@lucide/svelte/icons/chevron-right";
@@ -27,7 +28,7 @@
     open = $bindable(false),
     nodeId,
     initialPath = "",
-    title = "フォルダを選択",
+    title = m.fs_select_folder(),
     onSelect,
   }: Props = $props();
 
@@ -40,7 +41,7 @@
   let error = $state<string | null>(null);
   let showHidden = $state(false);
 
-  // ダイアログが開いたときに初期パスまたはホームを読み込む
+  // Load the initial path (or home) when the dialog opens
   $effect(() => {
     if (open && nodeId) {
       void loadDirectory(initialPath || undefined);
@@ -67,7 +68,7 @@
 
   const displayedEntries = $derived.by(() => {
     return entries.filter((e) => {
-      // フォルダブラウザなのでディレクトリのみを表示
+      // This is a folder browser, so only show directories
       if (!e.is_dir) return false;
       if (!showHidden && e.is_hidden) return false;
       return true;
@@ -116,11 +117,11 @@
         <span>{title}</span>
       </Dialog.Title>
       <Dialog.Description class="text-xs text-muted-foreground">
-        セッションを実行するワーキングディレクトリを選択してください。
+        {m.fs_description()}
       </Dialog.Description>
     </Dialog.Header>
 
-    <!-- パス操作ツールバー -->
+    <!-- Path toolbar -->
     <div class="flex items-center gap-1.5">
       <Button
         variant="outline"
@@ -128,7 +129,7 @@
         class="size-8 shrink-0"
         disabled={parentPath === null || loading}
         onclick={handleGoUp}
-        title="上の階層へ移動"
+        title={m.fs_go_up()}
       >
         <ArrowUpIcon class="size-3.5" />
       </Button>
@@ -139,7 +140,7 @@
         class="size-8 shrink-0"
         disabled={loading}
         onclick={handleGoDrives}
-        title="ドライブ一覧 / ルートへ移動"
+        title={m.fs_go_root()}
       >
         <HardDriveIcon class="size-3.5" />
       </Button>
@@ -147,7 +148,7 @@
       <form onsubmit={handlePathSubmit} class="flex-1 flex items-center gap-1">
         <Input
           bind:value={inputPath}
-          placeholder="パスを入力して Enter (例: C:\repos or /home/user)"
+          placeholder={m.fs_path_placeholder()}
           class="h-8 text-xs font-mono"
           disabled={loading}
         />
@@ -157,7 +158,7 @@
           size="sm"
           class="h-8 px-2 text-xs shrink-0"
           disabled={loading || !inputPath.trim()}
-          title="指定したパスへ移動"
+          title={m.fs_go_to_path()}
         >
           <CornerDownLeftIcon class="size-3" />
         </Button>
@@ -169,13 +170,13 @@
         class="size-8 shrink-0 text-muted-foreground hover:text-foreground"
         disabled={loading}
         onclick={() => loadDirectory(currentPath || undefined)}
-        title="再読み込み"
+        title={m.common_refresh()}
       >
         <RefreshCwIcon class="size-3.5 {loading ? 'animate-spin' : ''}" />
       </Button>
     </div>
 
-    <!-- フォルダ一覧領域 -->
+    <!-- Folder list area -->
     <div
       class="flex-1 min-h-60 max-h-72 overflow-y-auto rounded-md border bg-muted/20 p-1 flex flex-col"
     >
@@ -184,7 +185,7 @@
           class="flex flex-1 items-center justify-center py-12 text-muted-foreground gap-2 text-xs"
         >
           <Loader2Icon class="size-4 animate-spin text-primary" />
-          <span>フォルダを読み込み中…</span>
+          <span>{m.fs_loading_folders()}</span>
         </div>
       {:else if error}
         <div class="flex flex-1 flex-col items-center justify-center p-4 text-center gap-2">
@@ -195,12 +196,12 @@
             class="h-7 text-xs"
             onclick={() => loadDirectory(parentPath ?? "")}
           >
-            戻る
+            {m.fs_back()}
           </Button>
         </div>
       {:else if displayedEntries.length === 0}
         <div class="flex flex-1 items-center justify-center py-12 text-muted-foreground text-xs">
-          サブフォルダはありません
+          {m.fs_no_subfolders()}
         </div>
       {:else}
         <ul class="flex list-none flex-col gap-0.5 p-0 m-0">
@@ -223,14 +224,16 @@
                   <FolderIcon class="size-3.5 shrink-0 text-amber-500/80" />
                   <span class="truncate font-mono text-xs">{entry.name}</span>
                   {#if entry.is_hidden}
-                    <span class="text-[10px] text-muted-foreground opacity-60">(隠し)</span>
+                    <span class="text-[10px] text-muted-foreground opacity-60">
+                      {m.fs_hidden()}
+                    </span>
                   {/if}
                 </div>
 
                 <button
                   type="button"
                   class="opacity-0 group-hover:opacity-100 hover:bg-background/80 text-muted-foreground hover:text-foreground rounded p-1 transition-opacity"
-                  title="このフォルダの中に入る"
+                  title={m.fs_open_folder()}
                   onclick={(e) => {
                     e.stopPropagation();
                     handleOpenEntry(entry);
@@ -245,7 +248,7 @@
       {/if}
     </div>
 
-    <!-- 下部オプション & 現在の選択 -->
+    <!-- Bottom options and current selection -->
     <div class="flex items-center justify-between gap-2 text-xs pt-1">
       <button
         type="button"
@@ -254,30 +257,30 @@
       >
         {#if showHidden}
           <EyeIcon class="size-3.5" />
-          <span>隠しフォルダを表示中</span>
+          <span>{m.fs_hidden_shown()}</span>
         {:else}
           <EyeOffIcon class="size-3.5" />
-          <span>隠しフォルダを表示</span>
+          <span>{m.fs_show_hidden()}</span>
         {/if}
       </button>
 
       <div
         class="flex min-w-0 max-w-[65%] items-center gap-1 text-[11px] text-muted-foreground font-mono truncate"
       >
-        <span class="shrink-0">選択中:</span>
+        <span class="shrink-0">{m.fs_selected()}</span>
         <span
           class="truncate text-foreground font-medium"
-          title={selectedPath || currentPath || "(未選択)"}
+          title={selectedPath || currentPath || m.fs_none_selected()}
         >
-          {selectedPath || currentPath || "(未選択)"}
+          {selectedPath || currentPath || m.fs_none_selected()}
         </span>
       </div>
     </div>
 
-    <!-- ダイアログフッター -->
+    <!-- Dialog footer -->
     <Dialog.Footer class="gap-2 sm:gap-2">
       <Button variant="outline" size="sm" class="text-xs h-8" onclick={() => (open = false)}>
-        キャンセル
+        {m.common_cancel()}
       </Button>
       <Button
         size="sm"
@@ -286,7 +289,7 @@
         onclick={handleConfirm}
       >
         <FolderOpenIcon class="size-3.5" />
-        <span>このフォルダを選択</span>
+        <span>{m.fs_select_folder_confirm()}</span>
       </Button>
     </Dialog.Footer>
   </Dialog.Content>

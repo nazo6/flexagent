@@ -3,6 +3,7 @@
   import { Button } from "#lib/components/ui/button/index.ts";
   import { sync } from "#lib/stores/app.svelte.ts";
   import { cn } from "#lib/utils.ts";
+  import { m } from "#lib/paraglide/messages.js";
   import { toast } from "svelte-sonner";
   import OctagonXIcon from "@lucide/svelte/icons/octagon-x";
 
@@ -19,7 +20,7 @@
     busy = true;
     try {
       const nodes = await sync.killSwitch("web ui kill switch");
-      toast.success(`緊急停止を送信しました (${nodes} ノードへ配信)`);
+      toast.success(m.shell_kill_switch_sent({ count: nodes }));
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
     } finally {
@@ -36,25 +37,24 @@
         size="sm"
         {...props}
         class={cn("shrink-0 gap-1.5 text-xs", className)}
-        title="全セッションを緊急停止"
+        title={m.shell_kill_switch_tooltip()}
       >
         <OctagonXIcon class="size-3.5 shrink-0" />
-        <span>緊急停止</span>
+        <span>{m.shell_kill_switch()}</span>
       </Button>
     {/snippet}
   </AlertDialog.Trigger>
   <AlertDialog.Content>
     <AlertDialog.Header>
-      <AlertDialog.Title>全セッションを緊急停止しますか？</AlertDialog.Title>
+      <AlertDialog.Title>{m.shell_kill_switch_confirm_title()}</AlertDialog.Title>
       <AlertDialog.Description>
-        全ノードで稼働中のセッション・実行中プロセスツリー・PTY
-        を即時強制停止します。この操作は監査ログに記録されます。
+        {m.shell_kill_switch_confirm_description()}
       </AlertDialog.Description>
     </AlertDialog.Header>
     <AlertDialog.Footer>
-      <AlertDialog.Cancel>キャンセル</AlertDialog.Cancel>
+      <AlertDialog.Cancel>{m.common_cancel()}</AlertDialog.Cancel>
       <AlertDialog.Action variant="destructive" onclick={confirmKill} disabled={busy}>
-        {busy ? "送信中…" : "停止する"}
+        {busy ? m.shell_kill_switch_sending() : m.shell_kill_switch_confirm()}
       </AlertDialog.Action>
     </AlertDialog.Footer>
   </AlertDialog.Content>

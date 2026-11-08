@@ -1,23 +1,24 @@
 import type { JsonValue } from "#lib/generated/bindings.ts";
+import { m } from "#lib/paraglide/messages.js";
 
-/** 設定項目 (`ConfigOptionInfo`) の選択肢 (Select の value / 表示ラベル / 送信値)。 */
+/** A config option (`ConfigOptionInfo`) choice (Select value / display label / submitted value). */
 export interface ConfigOptionChoice {
-  /** `Select.Item` に渡す安定した文字列表現 (オブジェクトは JSON 文字列) */
+  /** Stable string representation passed to `Select.Item` (objects become JSON strings). */
   value: string;
-  /** 表示ラベル */
+  /** Display label. */
   label: string;
-  /** `set_config` へ送る元の JSON 値 */
+  /** Original JSON value sent to `set_config`. */
   raw: JsonValue;
 }
 
-/** `JsonValue` を Select の value 用文字列へ変換する (文字列以外は JSON 文字列化)。 */
+/** Convert a `JsonValue` to a string for a Select value (non-strings are JSON-serialized). */
 export function configValueToString(value: JsonValue): string {
   return typeof value === "string" ? value : JSON.stringify(value);
 }
 
-/** 選択肢の表示ラベルを決める (真偽値・opencode2 の `{ providerID, id, name }` 等に対応)。 */
+/** Resolve a choice's display label (supports booleans, opencode2's `{ providerID, id, name }`, etc.). */
 function choiceLabel(raw: JsonValue): string {
-  if (typeof raw === "boolean") return raw ? "有効" : "無効";
+  if (typeof raw === "boolean") return raw ? m.lib_config_enabled() : m.lib_config_disabled();
   if (raw !== null && typeof raw === "object" && !Array.isArray(raw)) {
     const record = raw as Record<string, JsonValue>;
     const name = record.name;
@@ -33,11 +34,12 @@ function choiceLabel(raw: JsonValue): string {
 }
 
 /**
- * `ConfigOptionInfo.options` を Select の選択肢一覧へ変換する。
+ * Convert `ConfigOptionInfo.options` into Select choices.
  *
- * `null` は選択不能として除外する。オブジェクト形式の値 (モデル参照
- * `{ providerID, id, name }` 等) は JSON 文字列化した値を Select の value に
- * 用い、`set_config` 送信時に [`resolveConfigChoice`] で元のオブジェクトへ復元する。
+ * `null` values are excluded because they cannot be selected. Object values
+ * (such as model references `{ providerID, id, name }`) use their JSON string
+ * as the Select value and are restored to the original object by
+ * [`resolveConfigChoice`] when submitting `set_config`.
  */
 export function configChoices(options: JsonValue): ConfigOptionChoice[] {
   if (!Array.isArray(options)) return [];
@@ -46,16 +48,17 @@ export function configChoices(options: JsonValue): ConfigOptionChoice[] {
   );
 }
 
-/** Select で選ばれた value を `set_config` へ送る `JsonValue` に解決する。 */
+/** Resolve a value selected in the Select to the `JsonValue` sent to `set_config`. */
 export function resolveConfigChoice(choices: ConfigOptionChoice[], value: string): JsonValue {
   return choices.find((choice) => choice.value === value)?.raw ?? value;
 }
 
 /**
- * `ConfigOptionInfo.current_value` を Select の value 文字列へ解決する。
+ * Resolve `ConfigOptionInfo.current_value` to a Select value string.
  *
- * `null` (未設定) や選択肢に存在しない値は `undefined` を返し、Select 側で
- * プレースホルダ (未選択) を表示させる。JSON 文字列をそのまま表示してしまうのを防ぐ。
+ * Returns `undefined` for `null` (unset) or values not present in the choices
+ * so the Select shows its placeholder (no selection) instead of the raw JSON
+ * string.
  */
 export function selectedConfigValue(
   choices: ConfigOptionChoice[],

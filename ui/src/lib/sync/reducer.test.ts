@@ -5,6 +5,7 @@ import type {
   UnifiedEventPayload,
 } from "#lib/generated/bindings.ts";
 import { encodeTextToBase64 } from "#lib/base64.ts";
+import { m } from "#lib/paraglide/messages.js";
 import {
   applyStreamDelta,
   buildTimelineItems,
@@ -330,7 +331,7 @@ describe("elicitations", () => {
         type: "elicitation_request",
         data: {
           elicitation_id: "elic-1",
-          message: "どの戦略で進めますか?",
+          message: "Which strategy should we use?",
           mode: "form",
           requested_schema: {
             type: "object",
@@ -355,7 +356,7 @@ describe("elicitations", () => {
     expect(items[0]).toMatchObject({
       kind: "elicitation",
       elicitationId: "elic-1",
-      message: "どの戦略で進めますか?",
+      message: "Which strategy should we use?",
       resolved: { action: "accept", resolvedBy: "web" },
     });
   });
@@ -398,7 +399,7 @@ describe("metadata helpers", () => {
             { mode_id: "ask", name: "Ask", description: null },
             { mode_id: "code", name: "Code", description: null },
           ],
-          available_commands: [{ name: "review", description: "レビュー", input_hint: null }],
+          available_commands: [{ name: "review", description: "Review", input_hint: null }],
           config_options: [],
         },
       }),
@@ -411,7 +412,7 @@ describe("metadata helpers", () => {
 
   it("merges partial capabilities updates without losing previously emitted fields", () => {
     const events = [
-      // 1) 初期 capabilities (modes と config_options)
+      // 1) Initial capabilities (modes and config_options)
       makeEvent(1, {
         type: "capabilities_updated",
         data: {
@@ -431,17 +432,17 @@ describe("metadata helpers", () => {
           ],
         },
       }),
-      // 2) コマンドのみの部分更新 (他が空配列)
+      // 2) Partial update with commands only (other fields are empty arrays)
       makeEvent(2, {
         type: "capabilities_updated",
         data: {
           current_mode: null,
           available_modes: [],
-          available_commands: [{ name: "review", description: "コードレビュー", input_hint: null }],
+          available_commands: [{ name: "review", description: "Code review", input_hint: null }],
           config_options: [],
         },
       }),
-      // 3) モード変更のみの部分更新 (他が空配列)
+      // 3) Partial update with a mode change only (other fields are empty arrays)
       makeEvent(3, {
         type: "capabilities_updated",
         data: {
@@ -461,7 +462,7 @@ describe("metadata helpers", () => {
         { mode_id: "ask", name: "Ask", description: null },
         { mode_id: "code", name: "Code", description: null },
       ],
-      availableCommands: [{ name: "review", description: "コードレビュー", input_hint: null }],
+      availableCommands: [{ name: "review", description: "Code review", input_hint: null }],
       configOptions: [
         {
           key: "model",
@@ -479,7 +480,7 @@ describe("pending prompts", () => {
     const pending: PendingPrompt = {
       commandId: "cmd-1",
       sessionId: "session-1",
-      text: "レビューして",
+      text: "Please review",
       createdAt: 1,
     };
     const sources: TimelineSources = {
@@ -504,13 +505,13 @@ describe("pending prompts", () => {
     const mine: PendingPrompt = {
       commandId: "cmd-1",
       sessionId: "session-1",
-      text: "自分のプロンプト",
+      text: "My prompt",
       createdAt: 1,
     };
     const other: PendingPrompt = {
       commandId: "cmd-2",
       sessionId: "session-2",
-      text: "他セッションのプロンプト",
+      text: "Prompt from another session",
       createdAt: 2,
     };
     const sources: TimelineSources = {
@@ -524,7 +525,7 @@ describe("pending prompts", () => {
     expect(items.map((item) => item.kind)).toEqual(["pending"]);
     expect(items[0]).toMatchObject({
       key: "pending:cmd-1",
-      text: "自分のプロンプト",
+      text: "My prompt",
     });
   });
 });
@@ -570,7 +571,9 @@ describe("usage and abnormal turn end", () => {
     const items = buildTimelineItems(sources);
     expect(items).toHaveLength(1);
     expect(items[0]).toMatchObject({ kind: "notice", tone: "warning" });
-    expect(items[0].kind === "notice" ? items[0].text : "").toContain("最大トークン数");
+    expect(items[0].kind === "notice" ? items[0].text : "").toBe(
+      m.timeline_turn_stopped_max_tokens(),
+    );
   });
 });
 
@@ -589,23 +592,23 @@ describe("compaction notices", () => {
     const items = buildTimelineItems(sources);
     expect(items).toHaveLength(2);
     expect(items[0]).toMatchObject({ kind: "notice", tone: "info" });
-    expect(items[0].kind === "notice" ? items[0].text : "").toContain("開始");
+    expect(items[0].kind === "notice" ? items[0].text : "").toBe(m.timeline_compaction_started());
     expect(items[1]).toMatchObject({ kind: "notice", tone: "info" });
-    expect(items[1].kind === "notice" ? items[1].text : "").toContain("完了");
+    expect(items[1].kind === "notice" ? items[1].text : "").toBe(m.timeline_compaction_completed());
   });
 
   it("renders an error notice with detail for failed compaction", () => {
     const sources = emptySources([
       makeEvent(1, {
         type: "compaction_updated",
-        data: { status: "failed", detail: "要約に失敗しました" },
+        data: { status: "failed", detail: "Summarization failed" },
       }),
     ]);
     const items = buildTimelineItems(sources);
     expect(items[0]).toMatchObject({
       kind: "notice",
       tone: "error",
-      text: "要約に失敗しました",
+      text: "Summarization failed",
     });
   });
 });

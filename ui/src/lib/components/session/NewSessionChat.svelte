@@ -26,6 +26,7 @@
     type SessionModePreference,
   } from "#lib/session-prefs.ts";
   import { getNodeAvailability } from "#lib/node-status.ts";
+  import { m } from "#lib/paraglide/messages.js";
   import { sync } from "#lib/stores/app.svelte.ts";
   import { toast } from "svelte-sonner";
   import { onMount, untrack } from "svelte";
@@ -53,9 +54,9 @@
   let provisionerName = $state("");
   const provisioners = $state<ProvisionerSummary[]>([]);
   let agentId = $state("");
-  /** カタログがある場合でも ID を直接入力する。 */
+  /** Enter the ID directly even when a catalog is available. */
   let manualAgent = $state(false);
-  /** ACP Registry カタログ + ノード別の利用可否。 */
+  /** ACP Registry catalog + per-node availability. */
   let catalog = $state<AgentSummary[]>([]);
   let pathMode = $state<PathMode>("existing");
   let localPath = $state("");
@@ -69,27 +70,27 @@
   let newWorktreeBrowserOpen = $state(false);
   let useCustomPath = $state(false);
 
-  // 既定解決の制御: URL パラメータ・ノード選択の初回適用を追跡する
+  // Default resolution control: track the first application of URL params and node selection
   let nodeTouched = $state(false);
   let urlProjectApplied = $state(false);
   let urlNodeApplied = $state(false);
   let urlAgentApplied = $state(false);
   let lastAutoPathKey = "";
 
-  // 端末ごとの記憶 (プロジェクト単位): 復元前に保存しないための追跡
+  // Per-device memory (scoped to a project): tracked so nothing is saved before restoring
   let prefsProjectId = "";
   let agentTouched = $state(false);
   let modeTouched = $state(false);
 
-  // Fork 引き継ぎ
+  // Fork inheritance
   let forkSessionId = $state("");
   let forkNodeSeq = $state<number | null>(null);
 
-  // 起動オプション
+  // Launch options
   let sessionMode = $state<SessionModePreference>("default");
   let extraArgsText = $state("");
 
-  // プロビジョナー接続テスト
+  // Provisioner connectivity test
   let testBusy = $state(false);
   let testResult = $state<ProvisionerTestResponse | null>(null);
   let testDialogOpen = $state(false);
@@ -101,21 +102,22 @@
 
   const nodes = $derived(sync.nodes);
   const selectedNode = $derived(nodes.find((n) => n.node_id === nodeId) ?? null);
-  // このノードで実際に起動できるエージェント (カタログの installed_nodes 基準。
-  // npx/uvx 配布は「カタログから追加」で有効化したものだけ含まれる)
+  // Agents that can actually be launched on this node (based on the catalog's
+  // installed_nodes; npx/uvx distributed agents are included only once enabled
+  // via "add from catalog")
   const availableAgents = $derived(agentsAvailableOn(catalog, nodeId));
   const availableAgentIds = $derived(availableAgents.map((agent) => agent.id));
 
-  // 一時VMプロビジョナー定義 (中央サーバー接続時のみ取得できる)
+  // Ephemeral VM provisioner definitions (only available when connected to the central server)
   onMount(async () => {
     try {
       const list = await sync.connection.client.provisioners();
       provisioners.splice(0, provisioners.length, ...list);
       if (list.length > 0 && provisionerName === "") provisionerName = list[0].name;
     } catch {
-      // ローカルノード接続時はプロビジョナーが存在しないため無視する
+      // Ignore: provisioners do not exist when connected to a local node
     }
-    // エージェント一覧は取得できなくても ID 直接入力で継続できる
+    // You can keep going by entering an ID directly even if the agent list cannot be fetched
     try {
       catalog = await sync.connection.client.agents();
     } catch {
@@ -128,7 +130,7 @@
     provisioners.find((p) => p.name === provisionerName) ?? provisioners[0] ?? null,
   );
 
-  // URL の `project` は初回のみ適用する (以降の手動選択を上書きしない)
+  // The URL `project` is applied only once (it must not overwrite later manual selections)
   $effect(() => {
     if (urlProjectApplied || projects.length === 0) return;
     const urlProject = page.url.searchParams.get("project");
@@ -139,15 +141,15 @@
     urlProjectApplied = true;
   });
 
-  // プロジェクトの実行履歴があるオンラインノードを既定にする
-  // (ユーザーがノードを選んだ後は追従しない)
+  // Default to an online node with run history for the project
+  // (stop following once the user has chosen a node)
   $effect(() => {
     if (nodeTouched || nodes.length === 0) return;
     const defaultNode = untrack(() => pickDefaultNode(nodes, selectedProject, sync.sessions));
     if (defaultNode !== "" && defaultNode !== nodeId) nodeId = defaultNode;
   });
 
-  // URL の `node` / `path` (ディープリンク) は初回のみ適用する
+  // URL `node` / `path` (deep link) are applied only once
   $effect(() => {
     if (urlNodeApplied || nodes.length === 0) return;
     const urlNode = page.url.searchParams.get("node");
@@ -163,14 +165,14 @@
     urlNodeApplied = true;
   });
 
-  // 実行ディレクトリ候補 (紐付け + 直近セッション) を直近使用順に解決する
+  // Resolve working directory candidates (bindings + recent sessions) in last-used order
   const pathCandidates = $derived.by(() =>
     buildPathCandidates(selectedProject, nodeId, sync.sessions),
   );
   const selectedCandidate = $derived(
     pathCandidates.find((candidate) => candidate.path === localPath) ?? null,
   );
-  // このノードに候補が無い場合の切り替え候補 (登録がある別ノード)
+  // Alternative nodes when this node has no candidates (another node with bindings)
   const otherNodesWithCandidates = $derived(
     nodes.filter(
       (node) =>
@@ -179,8 +181,9 @@
     ),
   );
 
-  // 候補の既定選択: プロジェクト × ノードが変わったとき、または現在値が候補から
-  // 消えたときのみ更新する (セッション更新で候補順が変わっても選択は維持する)
+  // Default candidate selection: update only when the project × node changes or the
+  // current value disappears from the candidates (keep the selection when the
+  // candidate order shifts due to session updates)
   $effect(() => {
     if (isProvisionerMode || useCustomPath) return;
     const key = `${selectedProject?.project_id ?? ""}|${nodeId}`;
@@ -197,7 +200,7 @@
 
   const effectiveAgent = $derived(agentId.trim());
 
-  // 既定エージェント: 未選択ならこのノードで使える先頭を選ぶ
+  // Default agent: pick the first one usable on this node when nothing is selected
   $effect(() => {
     if (agentId !== "" || isProvisionerMode) return;
     const first = availableAgentIds[0];
@@ -213,18 +216,18 @@
         : nodeId !== "" && (pathMode === "existing" ? localPath !== "" : branch.trim() !== "")),
   );
 
-  // 未指定の理由をユーザーに明示する (無言の disabled を避ける)
+  // Explain to the user why submit is unavailable (avoid a silent disabled state)
   const pathMissing = $derived(
     !isProvisionerMode &&
       (pathMode === "existing" ? localPath.trim() === "" : branch.trim() === ""),
   );
   const pathRequiredHint = $derived(
     pathMode === "existing"
-      ? "実行ディレクトリを選択してください"
-      : "新ブランチ名を入力してください",
+      ? m.new_session_path_required_existing()
+      : m.new_session_path_required_branch(),
   );
 
-  // URL の `fork_session` / `agent` は初回のみ適用する
+  // URL `fork_session` / `agent` are applied only once
   $effect(() => {
     if (urlAgentApplied || nodes.length === 0) return;
     const forkSession = page.url.searchParams.get("fork_session");
@@ -236,16 +239,16 @@
     const agentParam = page.url.searchParams.get("agent");
     if (agentParam) {
       agentId = agentParam;
-      // 一覧に無い ID は入力欄で見えるようにする
+      // Show IDs missing from the list in the input field so they are visible
       manualAgent = !availableAgentIds.includes(agentParam);
-      // 記憶よりディープリンクを優先する
+      // Deep links take precedence over memory
       agentTouched = true;
     }
     urlAgentApplied = true;
   });
 
-  // 端末ごとの記憶: プロジェクト切替時に前回の起動設定を復元する
-  // (ユーザーが明示的に変更した項目は復元で上書きしない)
+  // Per-device memory: restore the previous launch settings when the project changes
+  // (restoration must not overwrite items the user explicitly changed)
   $effect(() => {
     const project = selectedProject;
     if (!project) return;
@@ -262,8 +265,8 @@
     }
   });
 
-  // 起動設定の変更を端末ローカルへ記憶する
-  // (復元前に保存しないため `prefsProjectId` の一致を必須にする)
+  // Persist changes to the launch settings on the local device
+  // (`prefsProjectId` must match so nothing is saved before restoring)
   $effect(() => {
     void agentId;
     void sessionMode;
@@ -281,10 +284,13 @@
       const result = await sync.connection.client.testProvisioner(name);
       testResult = result;
       if (result.ok) {
-        toast.success(`プロビジョナー '${name}' の疎通テストに成功しました`);
+        toast.success(m.new_session_provisioner_test_success({ name }));
       } else {
         toast.error(
-          `プロビジョナー '${name}' の疎通テストに失敗しました: ${result.error ?? "不明なエラー"}`,
+          m.new_session_provisioner_test_failed({
+            name,
+            error: result.error ?? m.new_session_unknown_error(),
+          }),
         );
       }
     } catch (error) {
@@ -307,7 +313,7 @@
     const promptToSend = (initialPrompt ?? promptText).trim();
     const useProvisioner = isProvisionerMode && selectedProvisioner !== null;
     const extraArgs = extraArgsText.trim() ? extraArgsText.trim().split(/\s+/) : null;
-    // 次回の新規セッション作成に備えて端末ローカルへ記憶する
+    // Remember on the local device for the next new session
     persistPrefs();
 
     try {
@@ -343,10 +349,10 @@
 
       toast.success(
         useProvisioner
-          ? "一時VMの起動を開始しました (ブートストラップの進捗はセッション画面に表示されます)"
+          ? m.new_session_ephemeral_started()
           : forkSessionId
-            ? "フォークセッションを開始しました"
-            : "セッションを開始しました",
+            ? m.new_session_fork_started()
+            : m.new_session_started(),
       );
       await sync.refreshSessions();
       await goto(`/sessions/${response.session_id}`);
@@ -363,22 +369,22 @@
     }
   }
 
-  /** プロジェクト変更時: 既定ノード・既定パスを再解決する。 */
+  /** On project change: re-resolve the default node and default path. */
   function onProjectChange() {
     nodeTouched = false;
     useCustomPath = false;
   }
 
-  /** ノード変更時: パスはノードごとに異なるため既定パスを再解決する。 */
+  /** On node change: re-resolve the default path since paths are per-node. */
   function onNodeChange() {
     nodeTouched = true;
     useCustomPath = false;
   }
 
-  /** 端末ローカル (プロジェクト単位) に前回の起動設定を保存する。 */
+  /** Save the previous launch settings to the local device (scoped to the project). */
   function persistPrefs() {
     const projectId = selectedProject?.project_id ?? "";
-    // 一時VM はノード別のエージェント事情が異なるため記憶しない
+    // Do not remember ephemeral VMs because agent availability differs per node
     if (projectId === "" || projectId !== prefsProjectId || isProvisionerMode) return;
     saveNewSessionPrefs(projectId, {
       agent: effectiveAgent,
@@ -386,23 +392,24 @@
     });
   }
 
-  /** 実行ディレクトリ候補の表示ラベル。 */
+  /** Display label for a working directory candidate. */
   function candidateLabel(candidate: PathCandidate): string {
     const parts: string[] = [];
-    if (!candidate.exists) parts.push("[存在しません]");
+    if (!candidate.exists) parts.push(m.new_session_path_missing_label());
     if (candidate.isWorktree) parts.push("[Worktree]");
     if (candidate.gitBranch) parts.push(`[${candidate.gitBranch}]`);
     parts.push(candidate.path);
-    const suffix = candidate.source === "session" ? " (前回のセッション)" : "";
-    return `${parts.join(" ")} · ${formatRelativeTime(candidate.usedAt)}${suffix}`;
+    const suffix =
+      candidate.source === "session" ? ` ${m.new_session_path_from_previous_session()}` : "";
+    return `${parts.join(" ")} — ${formatRelativeTime(candidate.usedAt)}${suffix}`;
   }
 
-  const suggestionPrompts = [
-    "このリポジトリの構成とアーキテクチャを説明して",
-    "最近の変更点や未コミットの差分を確認して",
-    "テストを実行して現在のステータスを確認して",
-    "コードベース内の TODO や課題を洗い出して",
-  ];
+  const suggestionPrompts = $derived([
+    m.new_session_suggestion_1(),
+    m.new_session_suggestion_2(),
+    m.new_session_suggestion_3(),
+    m.new_session_suggestion_4(),
+  ]);
 </script>
 
 <div class="mx-auto flex h-full max-w-3xl flex-col justify-between px-4 py-6 md:py-10">
@@ -411,9 +418,9 @@
       <div class="bg-primary/10 text-primary flex size-12 items-center justify-center rounded-2xl">
         <SparklesIcon class="size-6" />
       </div>
-      <h1 class="text-2xl font-bold tracking-tight">何を作業しますか？</h1>
+      <h1 class="text-2xl font-bold tracking-tight">{m.new_session_title()}</h1>
       <p class="text-muted-foreground text-sm max-w-md">
-        プロジェクトとエージェントを選択してプロンプトを入力すると、新しい作業セッションを開始できます。
+        {m.new_session_description()}
       </p>
     </div>
 
@@ -424,13 +431,13 @@
         <div class="flex items-center gap-2">
           <GitForkIcon class="text-primary size-4 shrink-0" />
           <span>
-            セッション <code class="font-mono bg-background/50 px-1 py-0.5 rounded"
+            <code class="font-mono bg-background/50 px-1 py-0.5 rounded"
               >{forkSessionId.slice(0, 8)}</code
             >
             {#if forkNodeSeq !== null}
-              (シーケンス #{forkNodeSeq})
+              {m.new_session_fork_banner_seq({ seq: forkNodeSeq })}
             {/if}
-            から分岐して新しいセッションを開始します。
+            — {m.new_session_fork_banner_description()}
           </span>
         </div>
         <Button
@@ -443,7 +450,7 @@
           }}
         >
           <XIcon class="size-3.5 mr-1" />
-          フォーク解除
+          {m.new_session_fork_clear()}
         </Button>
       </div>
     {/if}
@@ -453,7 +460,7 @@
         <div class="flex flex-col gap-1">
           <Label class="text-muted-foreground text-xs flex items-center gap-1.5">
             <FolderGit2Icon class="size-3.5" />
-            プロジェクト
+            {m.new_session_project()}
           </Label>
           {#if projects.length > 0}
             <select
@@ -470,7 +477,7 @@
               href="/projects"
               class="border-input bg-muted/40 hover:bg-muted text-muted-foreground flex h-8 items-center justify-center rounded-md border text-xs"
             >
-              プロジェクトを登録
+              {m.new_session_register_project()}
             </a>
           {/if}
         </div>
@@ -479,10 +486,10 @@
           <Label class="text-muted-foreground text-xs flex items-center gap-1.5">
             {#if isProvisionerMode}
               <BoxIcon class="size-3.5" />
-              一時VMプロビジョナー
+              {m.new_session_provisioner()}
             {:else}
               <ServerIcon class="size-3.5" />
-              実行ノード
+              {m.new_session_node()}
             {/if}
           </Label>
           {#if isProvisionerMode}
@@ -505,17 +512,17 @@
                   class="h-8 px-2 text-xs shrink-0"
                   disabled={!provisionerName || testBusy}
                   onclick={() => runProvisionerTest(provisionerName)}
-                  title="プロビジョナーの起動・接続テストを実行"
+                  title={m.new_session_provisioner_test_button_title()}
                 >
                   {#if testBusy}
                     <LoaderCircleIcon class="size-3.5 animate-spin" />
                   {:else}
-                    テスト
+                    {m.new_session_test()}
                   {/if}
                 </Button>
               {:else}
                 <span class="text-muted-foreground text-xs leading-8">
-                  プロビジョナー未定義 (中央サーバーの config.toml で定義してください)
+                  {m.new_session_provisioner_undefined()}
                 </span>
               {/if}
             </div>
@@ -539,7 +546,7 @@
           <div class="flex items-center gap-1.5">
             <Label class="text-muted-foreground text-xs flex items-center gap-1.5">
               <BotIcon class="size-3.5" />
-              エージェント
+              {m.new_session_agent()}
             </Label>
             {#if !isProvisionerMode && availableAgents.length > 0}
               <button
@@ -547,7 +554,7 @@
                 class="text-muted-foreground hover:text-foreground ml-auto text-[10px] underline"
                 onclick={() => (manualAgent = !manualAgent)}
               >
-                {manualAgent ? "一覧から選ぶ" : "IDを直接入力"}
+                {manualAgent ? m.new_session_choose_from_list() : m.new_session_enter_id()}
               </button>
             {/if}
           </div>
@@ -557,14 +564,20 @@
               class="border-input bg-background focus-visible:ring-ring/40 h-8 rounded-md border px-2 text-xs outline-none focus-visible:ring-1"
             >
               {#if agentId !== "" && !availableAgentIds.includes(agentId)}
-                <option value={agentId}>{agentId} — 一覧にありません</option>
+                <option value={agentId}
+                  >{m.new_session_agent_not_in_list({ agent: agentId })}</option
+                >
               {/if}
               {#each availableAgents as agent (agent.id)}
                 <option value={agent.id}>{agentOptionLabel(agent)}</option>
               {/each}
             </select>
           {:else}
-            <Input bind:value={agentId} placeholder="エージェントID" class="h-8 text-xs" />
+            <Input
+              bind:value={agentId}
+              placeholder={m.new_session_agent_id_placeholder()}
+              class="h-8 text-xs"
+            />
           {/if}
           {#if !isProvisionerMode}
             <a
@@ -572,15 +585,15 @@
               class="text-muted-foreground hover:text-foreground text-[10px] underline"
             >
               {availableAgents.length === 0
-                ? "エージェントがありません — 設定から追加する"
-                : "エージェントの追加・管理"}
+                ? m.new_session_no_agents()
+                : m.new_session_manage_agents()}
             </a>
           {/if}
         </div>
       </div>
 
       <div class="flex items-center gap-1.5 text-xs">
-        <span class="text-muted-foreground">実行環境:</span>
+        <span class="text-muted-foreground">{m.new_session_run_environment()}</span>
         <button
           type="button"
           class="rounded-full border px-2.5 py-0.5 transition-colors {runTarget === 'node'
@@ -588,7 +601,7 @@
             : 'text-muted-foreground hover:bg-muted'}"
           onclick={() => (runTarget = "node")}
         >
-          常駐ノード
+          {m.new_session_resident_node()}
         </button>
         <button
           type="button"
@@ -598,14 +611,14 @@
           onclick={() => (runTarget = "provisioner")}
           disabled={provisioners.length === 0}
           title={provisioners.length === 0
-            ? "プロビジョナーは中央サーバーの config.toml で定義します"
-            : "使い捨ての隔離環境 (Docker / Incus / Colab 等) を起動します"}
+            ? m.new_session_provisioner_config_hint()
+            : m.new_session_ephemeral_hint()}
         >
-          一時VM (隔離)
+          {m.new_session_ephemeral()}
         </button>
         {#if isProvisionerMode}
           <span class="text-muted-foreground">
-            · 使い捨て環境で実行し、終了時に git bundle を退避します
+            — {m.new_session_ephemeral_note()}
           </span>
         {/if}
       </div>
@@ -615,7 +628,7 @@
           <div class="flex flex-wrap items-center justify-between gap-2">
             <Label class="text-muted-foreground flex items-center gap-1.5 text-xs">
               <FolderGit2Icon class="size-3.5" />
-              実行ディレクトリ
+              {m.new_session_working_directory()}
               <span class="text-destructive">*</span>
             </Label>
             <div class="flex items-center gap-1">
@@ -627,7 +640,7 @@
                   : 'text-muted-foreground hover:bg-muted'}"
                 onclick={() => (pathMode = "existing")}
               >
-                既存
+                {m.new_session_existing()}
               </button>
               <button
                 type="button"
@@ -637,7 +650,7 @@
                   : 'text-muted-foreground hover:bg-muted'}"
                 onclick={() => (pathMode = "new_worktree")}
               >
-                新規 Worktree
+                {m.new_session_new_worktree()}
               </button>
             </div>
           </div>
@@ -666,10 +679,10 @@
                     useCustomPath = true;
                     browserOpen = true;
                   }}
-                  title="フォルダブラウザで別のディレクトリを選択"
+                  title={m.new_session_browse_other_dir()}
                 >
                   <FolderOpenIcon class="size-3.5" />
-                  <span>参照…</span>
+                  <span>{m.new_session_browse()}</span>
                 </Button>
                 <Button
                   type="button"
@@ -677,15 +690,15 @@
                   size="sm"
                   class="text-muted-foreground hover:text-foreground h-8 shrink-0 px-2 text-xs"
                   onclick={() => (useCustomPath = true)}
-                  title="パスを直接入力する"
+                  title={m.new_session_enter_path_title()}
                 >
-                  直接入力
+                  {m.new_session_enter_path()}
                 </Button>
               {:else}
                 <Input
                   bind:value={localPath}
                   aria-invalid={localPath.trim() === ""}
-                  placeholder="絶対パスを入力 (例: /home/user/project or C:\repo)"
+                  placeholder={m.new_session_path_placeholder()}
                   class="h-8 min-w-0 flex-1 font-mono text-xs"
                 />
                 <Button
@@ -695,10 +708,10 @@
                   class="h-8 shrink-0 gap-1.5 px-2.5 text-xs"
                   disabled={!nodeId}
                   onclick={() => (browserOpen = true)}
-                  title="フォルダブラウザで選択"
+                  title={m.new_session_browse_title()}
                 >
                   <FolderOpenIcon class="size-3.5" />
-                  <span>参照…</span>
+                  <span>{m.new_session_browse()}</span>
                 </Button>
                 {#if pathCandidates.length > 0}
                   <Button
@@ -710,9 +723,9 @@
                       useCustomPath = false;
                       localPath = pickDefaultCandidate(pathCandidates)?.path ?? "";
                     }}
-                    title="登録済みパスの一覧に戻る"
+                    title={m.new_session_back_to_list_title()}
                   >
-                    一覧に戻る
+                    {m.new_session_back_to_list()}
                   </Button>
                 {/if}
               {/if}
@@ -720,24 +733,28 @@
 
             {#if selectedCandidate}
               <p class="text-muted-foreground text-[11px]">
-                {selectedCandidate.source === "binding" ? "登録済み" : "前回のセッションで使用"} · 最終使用
-                {formatRelativeTime(selectedCandidate.usedAt)}
+                {selectedCandidate.source === "binding"
+                  ? m.new_session_source_binding()
+                  : m.new_session_source_session()}
+                — {m.new_session_last_used({
+                  time: formatRelativeTime(selectedCandidate.usedAt),
+                })}
                 {#if selectedCandidate.isWorktree}
-                  · Worktree
+                  — Worktree
                 {/if}
                 {#if selectedCandidate.gitBranch}
-                  · {selectedCandidate.gitBranch}
+                  — {selectedCandidate.gitBranch}
                 {/if}
               </p>
             {:else if localPath.trim() !== ""}
               <p class="text-muted-foreground text-[11px]">
-                未登録のパスです (セッション開始時に自動登録されます)
+                {m.new_session_unregistered_path()}
               </p>
             {/if}
 
             {#if selectedCandidate && !selectedCandidate.exists}
               <p class="text-destructive text-[11px]">
-                このディレクトリはノード上に存在しません。開始するとエラーになるため、フォルダを選び直してください。
+                {m.new_session_path_not_exists()}
               </p>
             {/if}
 
@@ -746,7 +763,9 @@
                 class="flex flex-col gap-1.5 rounded-md border border-amber-500/40 bg-amber-500/10 p-2.5 text-[11px]"
               >
                 <span>
-                  このノードでは {selectedProject?.name ?? "このプロジェクト"} の実行ディレクトリが未登録です。フォルダを指定するか、プロジェクト設定でスキャンしてください。
+                  {m.new_session_no_candidate({
+                    project: selectedProject?.name ?? m.new_session_this_project(),
+                  })}
                 </span>
                 <div class="flex flex-wrap items-center gap-1.5">
                   <Button
@@ -759,13 +778,13 @@
                       browserOpen = true;
                     }}
                   >
-                    フォルダを選択
+                    {m.new_session_select_folder()}
                   </Button>
                   <a
                     href="/projects"
                     class="text-muted-foreground hover:text-foreground underline underline-offset-2"
                   >
-                    プロジェクト設定へ
+                    {m.new_session_go_to_project_settings()}
                   </a>
                   {#each otherNodesWithCandidates as otherNode (otherNode.node_id)}
                     <button
@@ -776,7 +795,7 @@
                         nodeTouched = true;
                       }}
                     >
-                      {otherNode.name} に登録あり
+                      {m.new_session_registered_on_node({ node: otherNode.name })}
                     </button>
                   {/each}
                 </div>
@@ -790,7 +809,7 @@
               class="h-8 text-xs"
             />
             <p class="text-muted-foreground text-[11px]">
-              新しい独立ブランチを作成して Worktree で実行します (起点ブランチ・配置先は詳細設定)
+              {m.new_session_worktree_description()}
             </p>
           {/if}
         </div>
@@ -803,32 +822,32 @@
           onclick={() => (showAdvanced = !showAdvanced)}
         >
           <Settings2Icon class="size-3" />
-          <span>{showAdvanced ? "詳細設定を閉じる" : "詳細設定"}</span>
+          <span>{showAdvanced ? m.new_session_hide_advanced() : m.new_session_advanced()}</span>
         </button>
 
         {#if showAdvanced}
           <div class="border-t pt-3 mt-2 flex flex-col gap-3">
             {#if isProvisionerMode}
               <div class="flex flex-col gap-1">
-                <Label class="text-xs">クローンするブランチ (任意)</Label>
+                <Label class="text-xs">{m.new_session_clone_branch()}</Label>
                 <Input
                   bind:value={branch}
-                  placeholder="main (省略時はリモートの既定ブランチ)"
+                  placeholder={m.new_session_clone_branch_placeholder()}
                   class="h-8 text-xs"
                 />
               </div>
             {:else if pathMode === "new_worktree"}
               <div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
                 <div class="flex flex-col gap-1">
-                  <Label class="text-xs">起点ブランチ (任意)</Label>
+                  <Label class="text-xs">{m.new_session_base_branch()}</Label>
                   <Input bind:value={baseBranch} placeholder="main" class="h-8 text-xs" />
                 </div>
                 <div class="flex flex-col gap-1">
-                  <Label class="text-xs">配置先パス (任意・省略時は既定テンプレート)</Label>
+                  <Label class="text-xs">{m.new_session_destination_path()}</Label>
                   <div class="flex items-center gap-1.5">
                     <Input
                       bind:value={newPath}
-                      placeholder="配置先の絶対パス (例: /home/user/wt or C:\repo\.fxg\wt)"
+                      placeholder={m.new_session_destination_placeholder()}
                       class="h-8 text-xs font-mono flex-1 min-w-0"
                     />
                     <Button
@@ -838,10 +857,10 @@
                       class="h-8 px-2.5 text-xs shrink-0 gap-1.5"
                       disabled={!nodeId}
                       onclick={() => (newWorktreeBrowserOpen = true)}
-                      title="フォルダブラウザで配置先ディレクトリを選択"
+                      title={m.new_session_browse_destination_title()}
                     >
                       <FolderOpenIcon class="size-3.5" />
-                      <span>参照…</span>
+                      <span>{m.new_session_browse()}</span>
                     </Button>
                   </div>
                 </div>
@@ -854,22 +873,22 @@
                 : ''}grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs"
             >
               <div class="flex flex-col gap-1">
-                <Label class="text-xs">エージェント初期モード</Label>
+                <Label class="text-xs">{m.new_session_initial_mode()}</Label>
                 <select
                   bind:value={sessionMode}
                   class="border-input bg-background h-8 rounded-md border px-2 text-xs outline-none focus-visible:ring-1"
                 >
-                  <option value="default">既定 (未指定)</option>
-                  <option value="code">code (コード実装・編集)</option>
-                  <option value="plan">plan (設計・プランニング)</option>
+                  <option value="default">{m.new_session_mode_default()}</option>
+                  <option value="code">{m.new_session_mode_code()}</option>
+                  <option value="plan">{m.new_session_mode_plan()}</option>
                 </select>
               </div>
 
               <div class="flex flex-col gap-1">
-                <Label class="text-xs">追加 CLI 引数 (スペース区切り)</Label>
+                <Label class="text-xs">{m.new_session_extra_args()}</Label>
                 <Input
                   bind:value={extraArgsText}
-                  placeholder="例: --model claude-3-7-sonnet --verbose"
+                  placeholder={m.new_session_extra_args_placeholder()}
                   class="h-8 text-xs font-mono"
                 />
               </div>
@@ -886,7 +905,7 @@
         bind:value={promptText}
         onkeydown={onKeydown}
         rows="4"
-        placeholder="作業内容や指示を入力してください… (例: 〇〇機能のバグを調査して修正案を出して)&#10;Ctrl + Enter でセッションを開始します"
+        placeholder={m.new_session_prompt_placeholder()}
         class="bg-transparent placeholder:text-muted-foreground w-full resize-none text-sm outline-none leading-relaxed"
         disabled={busy}></textarea>
 
@@ -897,7 +916,9 @@
               <span class="text-muted-foreground text-xs">
                 {selectedProvisioner.name}
                 {#if selectedProvisioner.idle_timeout_secs}
-                  · idle {Math.round(selectedProvisioner.idle_timeout_secs / 60)}分で自動破棄
+                  — {m.new_session_idle_discard({
+                    minutes: Math.round(selectedProvisioner.idle_timeout_secs / 60),
+                  })}
                 {/if}
               </span>
             {/if}
@@ -910,7 +931,7 @@
           {#if pathMissing}
             <span class="text-destructive text-xs">{pathRequiredHint}</span>
           {:else if effectiveAgent === ""}
-            <span class="text-destructive text-xs">エージェントを選択してください</span>
+            <span class="text-destructive text-xs">{m.new_session_agent_required()}</span>
           {/if}
           <Button
             variant="ghost"
@@ -918,11 +939,9 @@
             class="text-xs h-8 text-muted-foreground hover:text-foreground"
             disabled={!canSubmit || busy}
             onclick={() => handleStartSession("")}
-            title={pathMissing
-              ? pathRequiredHint
-              : "プロンプトなしでセッションとターミナルだけを起動します"}
+            title={pathMissing ? pathRequiredHint : m.new_session_start_empty_title()}
           >
-            空で起動
+            {m.new_session_start_empty()}
           </Button>
 
           <Button
@@ -930,13 +949,13 @@
             class="gap-1.5 h-8 text-xs font-medium"
             disabled={!canSubmit || busy}
             onclick={() => handleStartSession()}
-            title={pathMissing ? pathRequiredHint : "セッションを開始します"}
+            title={pathMissing ? pathRequiredHint : m.new_session_start_title()}
           >
             {#if busy}
-              <span>起動中…</span>
+              <span>{m.new_session_starting()}</span>
             {:else}
               <PlayIcon class="size-3.5 fill-current" />
-              <span>セッション開始</span>
+              <span>{m.new_session_start()}</span>
               <kbd class="bg-primary-foreground/20 text-[10px] px-1 py-0.5 rounded font-mono">↵</kbd
               >
             {/if}
@@ -946,7 +965,7 @@
     </div>
 
     <div class="flex flex-col gap-2">
-      <span class="text-muted-foreground text-xs">おすすめのプロンプト:</span>
+      <span class="text-muted-foreground text-xs">{m.new_session_suggestions()}</span>
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
         {#each suggestionPrompts as suggestion}
           <button
@@ -979,7 +998,7 @@
   bind:open={newWorktreeBrowserOpen}
   {nodeId}
   initialPath={newPath || localPath}
-  title="Worktree 配置先フォルダを選択"
+  title={m.new_session_worktree_folder_title()}
   onSelect={(path) => {
     newPath = path;
   }}
@@ -988,29 +1007,29 @@
 <Dialog.Root bind:open={testDialogOpen}>
   <Dialog.Content class="max-w-lg">
     <Dialog.Header>
-      <Dialog.Title>プロビジョナー疎通テスト: {provisionerName}</Dialog.Title>
+      <Dialog.Title>{m.new_session_provisioner_test_title({ name: provisionerName })}</Dialog.Title>
       <Dialog.Description>
-        一時VMを実際に起動し、ノード接続と終了処理が正常に行えるか検証します。
+        {m.new_session_provisioner_test_description()}
       </Dialog.Description>
     </Dialog.Header>
     <div class="py-2 text-xs flex flex-col gap-3">
       {#if testBusy}
         <div class="flex flex-col items-center justify-center gap-2 py-8 text-muted-foreground">
           <LoaderCircleIcon class="size-6 animate-spin text-primary" />
-          <span>プロビジョナーを起動しています… (数十秒かかる場合があります)</span>
+          <span>{m.new_session_provisioner_starting()}</span>
         </div>
       {:else if testResult}
         <div class="flex items-center gap-2 font-medium">
           {#if testResult.ok}
             <CheckCircle2Icon class="size-5 text-green-500" />
-            <span class="text-green-600 dark:text-green-400">疎通テスト成功</span>
+            <span class="text-green-600 dark:text-green-400">{m.new_session_test_success()}</span>
             {#if testResult.node_id}
               <span class="text-muted-foreground font-mono text-[11px]">({testResult.node_id})</span
               >
             {/if}
           {:else}
             <XCircleIcon class="size-5 text-destructive" />
-            <span class="text-destructive">疎通テスト失敗</span>
+            <span class="text-destructive">{m.new_session_test_failed()}</span>
           {/if}
         </div>
 
@@ -1024,7 +1043,7 @@
 
         {#if testResult.log_lines && testResult.log_lines.length > 0}
           <div class="flex flex-col gap-1">
-            <span class="text-muted-foreground text-[11px]">実行ログ:</span>
+            <span class="text-muted-foreground text-[11px]">{m.new_session_run_log()}</span>
             <div
               class="bg-muted max-h-48 overflow-y-auto rounded-md p-2 font-mono text-[11px] leading-tight text-foreground whitespace-pre-wrap"
             >
@@ -1035,7 +1054,9 @@
       {/if}
     </div>
     <Dialog.Footer>
-      <Button variant="outline" size="sm" onclick={() => (testDialogOpen = false)}>閉じる</Button>
+      <Button variant="outline" size="sm" onclick={() => (testDialogOpen = false)}
+        >{m.common_close()}</Button
+      >
     </Dialog.Footer>
   </Dialog.Content>
 </Dialog.Root>

@@ -8,6 +8,7 @@
   import * as Sheet from "#lib/components/ui/sheet/index.ts";
   import { Toaster } from "#lib/components/ui/sonner/index.ts";
   import { connection, initApp } from "#lib/stores/app.svelte.ts";
+  import { m } from "#lib/paraglide/messages.js";
   import LoaderCircleIcon from "@lucide/svelte/icons/loader-circle";
   import MenuIcon from "@lucide/svelte/icons/menu";
   import PlugZapIcon from "@lucide/svelte/icons/plug-zap";
@@ -32,21 +33,20 @@
 {#if !connection.ready}
   <div class="bg-background text-muted-foreground flex min-h-svh items-center justify-center gap-2">
     <LoaderCircleIcon class="size-4 animate-spin" />
-    接続を確認しています…
+    {m.shell_checking_connection()}
   </div>
 {:else if connection.error !== null}
   <div class="bg-background flex min-h-svh items-center justify-center p-6">
     <div class="flex max-w-md flex-col items-center gap-3 text-center">
       <PlugZapIcon class="text-destructive size-8" />
-      <h1 class="text-lg font-semibold">サーバーに接続できません</h1>
+      <h1 class="text-lg font-semibold">{m.shell_server_unreachable()}</h1>
       <p class="text-muted-foreground text-sm">{connection.error}</p>
       <p class="text-muted-foreground text-xs">
-        中央サーバーがダウンしている場合は、下のメニューからローカルノード (例: <code
-          >http://localhost:7860</code
-        >) へ接続先を切り替えられます。
+        {m.shell_server_down_hint()}
+        <code>http://localhost:7860</code>{m.shell_server_down_hint_suffix()}
       </p>
       <div class="flex items-center gap-2">
-        <Button variant="outline" onclick={retry}>再試行</Button>
+        <Button variant="outline" onclick={retry}>{m.common_retry()}</Button>
         <ConnectionMenu />
       </div>
     </div>
@@ -55,21 +55,21 @@
   <div class="bg-background min-h-svh"></div>
 {:else}
   <div class="bg-background text-foreground flex h-svh w-full overflow-hidden">
-    <!-- デスクトップ用サイドバー (md以上で常時表示) -->
+    <!-- Desktop sidebar (always visible on md and up) -->
     <div class="hidden md:flex md:w-64 lg:w-72 md:shrink-0 md:h-full">
       <AppSidebar />
     </div>
 
-    <!-- モバイル用ドロワー (Sheet) -->
+    <!-- Mobile drawer (Sheet) -->
     <Sheet.Root bind:open={mobileDrawerOpen}>
       <Sheet.Content side="left" class="p-0 w-80 max-w-[85vw]">
         <AppSidebar onNavigate={() => (mobileDrawerOpen = false)} />
       </Sheet.Content>
     </Sheet.Root>
 
-    <!-- メインエリア -->
+    <!-- Main area -->
     <div class="flex flex-1 flex-col h-full overflow-hidden">
-      <!-- モバイル用上部バー (md未満で表示) -->
+      <!-- Mobile top bar (visible below md) -->
       <header
         class="bg-background/80 flex items-center justify-between border-b px-3 py-2 md:hidden shrink-0"
       >
@@ -77,7 +77,7 @@
           type="button"
           class="hover:bg-accent flex size-8 items-center justify-center rounded-md border text-muted-foreground"
           onclick={() => (mobileDrawerOpen = true)}
-          aria-label="メニューを開く"
+          aria-label={m.shell_open_menu()}
         >
           <MenuIcon class="size-4" />
         </button>
@@ -94,7 +94,7 @@
         <a
           href="/"
           class="hover:bg-accent flex size-8 items-center justify-center rounded-md border text-muted-foreground"
-          aria-label="新規セッション"
+          aria-label={m.shell_new_session()}
         >
           <PlusIcon class="size-4" />
         </a>

@@ -2,7 +2,9 @@
   import { Badge } from "#lib/components/ui/badge/index.ts";
   import { Button } from "#lib/components/ui/button/index.ts";
   import type { PermissionOption } from "#lib/generated/bindings.ts";
+  import { errorCodeMessage } from "#lib/api/error-messages.ts";
   import { formatRelativeTime } from "#lib/format.ts";
+  import { m } from "#lib/paraglide/messages.js";
   import { sync } from "#lib/stores/app.svelte.ts";
   import { toast } from "svelte-sonner";
   import CheckIcon from "@lucide/svelte/icons/check";
@@ -46,11 +48,11 @@
     try {
       const result = await sync.respondPermission(sessionId, requestId, option.option_id);
       if (result.code === "ALREADY_RESOLVED") {
-        toast.info("既に他のクライアントで解決済みでした");
+        toast.info(m.error_already_resolved());
       } else if (!result.success) {
-        toast.error(result.error ?? result.code ?? "承認応答に失敗しました");
+        toast.error(result.error ?? errorCodeMessage(result.code) ?? m.chat_permission_failed());
       } else {
-        toast.success("応答を送信しました");
+        toast.success(m.chat_permission_sent());
       }
       await sync.refreshInbox();
     } catch (error) {
@@ -81,7 +83,7 @@
       href={`/sessions/${sessionId}`}
       class="text-muted-foreground hover:text-foreground flex shrink-0 items-center gap-0.5 text-xs"
     >
-      セッションを開く
+      {m.chat_open_session()}
       <ChevronRightIcon class="size-3" />
     </a>
   </div>
@@ -91,7 +93,7 @@
       <summary
         class="text-muted-foreground hover:text-foreground cursor-pointer text-xs select-none"
       >
-        詳細 (コマンド / Diff)
+        {m.chat_permission_details()}
       </summary>
       <pre
         class="bg-muted/50 mt-2 max-h-56 overflow-auto rounded-md p-2 font-mono text-xs whitespace-pre-wrap">{detailsJson}</pre>

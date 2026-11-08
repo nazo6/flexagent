@@ -1,7 +1,7 @@
 import { FitAddon, Terminal, init } from "ghostty-web";
 import type { ITerminalAdapter, TerminalDimensions } from "./types";
 
-/** ダークテーマの端末配色 (アプリのダーク背景に合わせる)。 */
+/** Dark terminal color palette (matches the app's dark background). */
 const TERMINAL_THEME = {
   background: "#0f172a",
   foreground: "#e2e8f0",
@@ -26,7 +26,7 @@ const TERMINAL_THEME = {
   brightWhite: "#f8fafc",
 } as const;
 
-/** `ghostty-web` (libghostty WASM + Canvas 2D) による標準アダプタ。 */
+/** Standard adapter backed by `ghostty-web` (libghostty WASM + Canvas 2D). */
 export class GhosttyWebAdapter implements ITerminalAdapter {
   #terminal: Terminal | null = null;
   #fitAddon: FitAddon | null = null;
@@ -37,7 +37,7 @@ export class GhosttyWebAdapter implements ITerminalAdapter {
 
   mount(element: HTMLElement): void {
     if (this.#terminal !== null) return;
-    // WASM 初期化は非同期のため、完了までの write はバッファリングする
+    // WASM initialization is async, so writes are buffered until it completes
     void (async () => {
       await init();
       const terminal = new Terminal({
@@ -75,7 +75,8 @@ export class GhosttyWebAdapter implements ITerminalAdapter {
   }
 
   clear(): void {
-    // WASM 初期化前の未反映 write も破棄する (切替前セッションの残像防止)
+    // Also drop writes that have not been flushed before WASM initialization
+    // completes (prevents leftovers from the previous session)
     this.#pendingWrites = [];
     this.#terminal?.clear();
   }

@@ -5,5 +5,11 @@
     "correctness": "error",
     "suspicious": "warn"
   },
-  "ignorePatterns": ["src/lib/generated/**", ".svelte-kit/**", "build/**", "node_modules/**"]
+  "ignorePatterns": [
+    "src/lib/generated/**",
+    "src/lib/paraglide/**",
+    ".svelte-kit/**",
+    "build/**",
+    "node_modules/**"
+  ]
 }

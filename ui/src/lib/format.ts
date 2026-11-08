@@ -1,12 +1,14 @@
 /**
- * UI 表示用のフォーマットヘルパー。
+ * Formatting helpers for UI display.
  *
- * 時刻表示は `SessionSummary.updated_at` / `AuditLogEntry.created_at` /
- * `system_status.last_synced_at` など epoch ms で統一されているため、
- * ここに集約する。
+ * Timestamps such as `SessionSummary.updated_at`, `AuditLogEntry.created_at` and
+ * `system_status.last_synced_at` are all epoch milliseconds, so formatting is
+ * centralized here.
  */
 
-/** epoch ms をローカル時刻 (`YYYY-MM-DD HH:mm:ss`) に整形する。 */
+import { m } from "#lib/paraglide/messages.js";
+
+/** Format epoch ms as a local date-time (`YYYY-MM-DD HH:mm:ss`). */
 export function formatEpochMs(ms: number | null | undefined): string {
   if (ms == null) return "-";
   const date = new Date(ms);
@@ -21,24 +23,24 @@ function pad2(value: number): string {
   return String(value).padStart(2, "0");
 }
 
-/** epoch ms を「たった今 / N分前 / N時間前 / N日前」の相対表現に整形する。 */
+/** Format epoch ms as a relative expression (`just now / N min ago / N hr ago / N d ago`). */
 export function formatRelativeTime(
   ms: number | null | undefined,
   now: number = Date.now(),
 ): string {
   if (ms == null) return "-";
   const diffSec = Math.floor((now - ms) / 1000);
-  if (diffSec < 5) return "たった今";
-  if (diffSec < 60) return `${diffSec}秒前`;
+  if (diffSec < 5) return m.lib_relative_just_now();
+  if (diffSec < 60) return m.lib_relative_seconds({ count: diffSec });
   const diffMin = Math.floor(diffSec / 60);
-  if (diffMin < 60) return `${diffMin}分前`;
+  if (diffMin < 60) return m.lib_relative_minutes({ count: diffMin });
   const diffHour = Math.floor(diffMin / 60);
-  if (diffHour < 24) return `${diffHour}時間前`;
+  if (diffHour < 24) return m.lib_relative_hours({ count: diffHour });
   const diffDay = Math.floor(diffHour / 24);
-  return `${diffDay}日前`;
+  return m.lib_relative_days({ count: diffDay });
 }
 
-/** epoch ms を「now / 5m / 2h / 3d」などのコンパクト表現に整形する。 */
+/** Format epoch ms as a compact expression (`now / 5m / 2h / 3d`). */
 export function formatRelativeTimeCompact(
   ms: number | null | undefined,
   now: number = Date.now(),
@@ -55,7 +57,7 @@ export function formatRelativeTimeCompact(
   return `${diffDay}d`;
 }
 
-/** ミリ秒を「1.2s / 1m 4s」の所要時間表現に整形する。 */
+/** Format milliseconds as a duration expression (`1.2s / 1m 4s`). */
 export function formatDurationMs(ms: number): string {
   if (!Number.isFinite(ms) || ms < 0) return "-";
   if (ms < 1000) return `${Math.round(ms)}ms`;
@@ -68,7 +70,7 @@ export function formatDurationMs(ms: number): string {
   return `${hours}h ${minutes % 60}m`;
 }
 
-/** トークン数を「999 / 12.3k / 1.2M」のコンパクト表現に整形する。 */
+/** Format a token count as a compact expression (`999 / 12.3k / 1.2M`). */
 export function formatTokenCount(tokens: number): string {
   if (!Number.isFinite(tokens) || tokens < 0) return "-";
   if (tokens < 1000) return String(Math.round(tokens));

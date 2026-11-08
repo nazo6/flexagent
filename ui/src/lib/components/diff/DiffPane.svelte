@@ -4,6 +4,7 @@
   import { Button } from "#lib/components/ui/button/index.ts";
   import { cn } from "#lib/utils.ts";
   import type { FileDiff, WorkspaceDiffResponse } from "#lib/generated/bindings.ts";
+  import { m } from "#lib/paraglide/messages.js";
   import { sync } from "#lib/stores/app.svelte.ts";
   import type { TimelineItem } from "#lib/sync/reducer.ts";
   import RefreshCwIcon from "@lucide/svelte/icons/refresh-cw";
@@ -18,7 +19,7 @@
   let error = $state<string | null>(null);
   let selectedPath = $state<string | null>(null);
 
-  /** 「セッションの変更」: `tool_call` の Diff をパス単位で集約する (後勝ち)。 */
+  /** "Session changes": aggregate `tool_call` diffs by path (last write wins). */
   const sessionFiles = $derived.by(() => {
     const byPath = new Map<string, FileDiff>();
     for (const item of items) {
@@ -56,7 +57,7 @@
   });
 
   const scopeOptions: { value: Scope; label: string }[] = [
-    { value: "session", label: "セッションの変更" },
+    { value: "session", label: m.diff_scope_session() },
     { value: "branch_base", label: "Worktree: vs Base" },
     { value: "uncommitted", label: "Worktree: vs HEAD" },
   ];
@@ -76,7 +77,7 @@
     {#if scope !== "session"}
       <Button size="sm" variant="ghost" disabled={loading} onclick={() => void loadWorktreeDiff()}>
         <RefreshCwIcon />
-        再取得
+        {m.diff_refetch()}
       </Button>
     {/if}
     {#if worktreeDiff !== null && scope !== "session"}
@@ -93,12 +94,12 @@
 
   {#if scope === "session" && sessionFiles.length === 0}
     <p class="text-muted-foreground text-sm">
-      このセッションでエージェントが編集したファイルはまだありません。
+      {m.diff_session_empty()}
     </p>
   {:else if scope !== "session" && loading}
-    <p class="text-muted-foreground text-sm">Diff を取得しています…</p>
+    <p class="text-muted-foreground text-sm">{m.diff_loading()}</p>
   {:else if files.length === 0 && error === null}
-    <p class="text-muted-foreground text-sm">変更はありません。</p>
+    <p class="text-muted-foreground text-sm">{m.diff_no_changes()}</p>
   {:else if files.length > 0}
     <div class="grid gap-3 lg:grid-cols-[minmax(0,20rem)_minmax(0,1fr)]">
       <ul class="flex max-h-[65svh] list-none flex-col gap-0.5 overflow-y-auto p-0">

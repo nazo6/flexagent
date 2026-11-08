@@ -4,6 +4,7 @@
   import { Input } from "#lib/components/ui/input/index.ts";
   import { formatRelativeTime } from "#lib/format.ts";
   import type { SearchHit } from "#lib/generated/bindings.ts";
+  import { m } from "#lib/paraglide/messages.js";
   import { shortId } from "#lib/session-status.ts";
   import { connection, sync } from "#lib/stores/app.svelte.ts";
   import { toast } from "svelte-sonner";
@@ -37,7 +38,7 @@
     );
   }
 
-  /** FTS5 snippet の `[match]` マーカーをセグメントへ分割する。 */
+  /** Split an FTS5 snippet into segments around its `[match]` markers. */
   function segments(snippet: string): { text: string; match: boolean }[] {
     const parts: { text: string; match: boolean }[] = [];
     let rest = snippet;
@@ -58,25 +59,24 @@
 
 <div class="mx-auto flex max-w-5xl flex-col gap-4 p-4 md:p-6">
   <div>
-    <h1 class="text-xl font-semibold">全文検索</h1>
+    <h1 class="text-xl font-semibold">{m.search_title()}</h1>
     <p class="text-muted-foreground text-sm">
-      セッションイベントの全文検索 (FTS5 trigram / 記録先: <code>{roleLabel}</code>)
+      {m.search_description()}
+      {m.search_source_label()}
+      <code>{roleLabel}</code>
     </p>
   </div>
 
   <form class="flex max-w-xl items-center gap-2" onsubmit={submit}>
-    <Input
-      bind:value={query}
-      placeholder="検索語 (3文字以上で高速、2文字以下は部分一致フォールバック)"
-    />
+    <Input bind:value={query} placeholder={m.search_placeholder()} />
     <Button type="submit" disabled={searching || query.trim() === ""}>
       <SearchIcon />
-      {searching ? "検索中…" : "検索"}
+      {searching ? m.search_searching() : m.search_submit()}
     </Button>
   </form>
 
   {#if searched && hits.length === 0}
-    <p class="text-muted-foreground text-sm">該当するイベントはありませんでした。</p>
+    <p class="text-muted-foreground text-sm">{m.search_empty()}</p>
   {:else if hits.length > 0}
     <ul class="flex list-none flex-col gap-2 p-0">
       {#each hits as hit (hit.event_id)}

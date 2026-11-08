@@ -5,6 +5,7 @@
   import { Label } from "#lib/components/ui/label/index.ts";
   import { connection } from "#lib/stores/app.svelte.ts";
   import { loginAndStart } from "#lib/stores/app.svelte.ts";
+  import { m } from "#lib/paraglide/messages.js";
   import { toast } from "svelte-sonner";
   import KeyRoundIcon from "@lucide/svelte/icons/key-round";
 
@@ -20,7 +21,7 @@
     try {
       await loginAndStart(token);
       token = "";
-      toast.success("接続しました");
+      toast.success(m.token_connected_toast());
     } catch (err) {
       error = err instanceof Error ? err.message : String(err);
     } finally {
@@ -39,41 +40,43 @@
     <Dialog.Header>
       <Dialog.Title class="flex items-center gap-2">
         <KeyRoundIcon class="size-4" />
-        認証トークンを入力
+        {m.token_dialog_title()}
       </Dialog.Title>
       <Dialog.Description>
         {#if connection.role === "central_server"}
-          中央サーバー
+          {m.token_dialog_description_central_server()}
         {:else}
-          ローカルノード
+          {m.token_dialog_description_local_node()}
         {/if}
-        の認証トークンを入力してください。成功すると <code>fxg_session</code> Cookie が保存され、以降は自動で認証されます。
+        {m.token_cookie_note_before()} <code>fxg_session</code>
+        {m.token_cookie_note_after()}
       </Dialog.Description>
     </Dialog.Header>
 
     <form class="flex flex-col gap-4" onsubmit={submit}>
       <div class="grid gap-2">
-        <Label for="fxg-token">トークン</Label>
+        <Label for="fxg-token">{m.token_label()}</Label>
         <Input
           id="fxg-token"
           type="password"
           autocomplete="off"
           placeholder={connection.role === "central_server"
-            ? "サーバーの auth_token の内容"
-            : "~/.flexagent/auth_token の内容"}
+            ? m.token_placeholder_server()
+            : m.token_placeholder_node()}
           bind:value={token}
           disabled={busy}
         />
         <p class="text-muted-foreground text-xs">
           {#if connection.role === "central_server"}
-            サーバー上の <code>auth_token</code> ファイル（既定:{" "}
-            <code>~/.flexagent/auth_token</code>）を確認してください。Docker の場合は
-            <code>docker compose exec server cat /data/auth_token</code>{" "}
-            で確認できます。
+            {m.token_help_server_prefix()} <code>auth_token</code>
+            {m.token_help_server_mid()}
+            <code>~/.flexagent/auth_token</code>{m.token_help_server_docker()}
+            <code>docker compose exec server cat /data/auth_token</code>.
           {:else}
-            ノード上の <code>~/.flexagent/auth_token</code>、または{" "}
-            <code>fxg auth token</code> で確認できます（Docker の場合は{" "}
-            <code>docker compose exec node fxg auth token</code>）。
+            {m.token_help_node_prefix()} <code>~/.flexagent/auth_token</code>
+            {m.token_help_node_mid()} <code>fxg auth token</code>
+            {m.token_help_node_docker()}
+            <code>docker compose exec node fxg auth token</code>).
           {/if}
         </p>
       </div>
@@ -83,7 +86,7 @@
       {/if}
 
       <Button type="submit" disabled={busy || token.trim() === ""}>
-        {busy ? "確認中…" : "接続"}
+        {busy ? m.token_verifying() : m.token_connect()}
       </Button>
     </form>
   </Dialog.Content>

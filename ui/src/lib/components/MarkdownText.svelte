@@ -1,11 +1,11 @@
 <script lang="ts">
   /**
-   * チャットメッセージの Markdown 描画コンポーネント。
+   * Markdown renderer for chat messages.
    *
-   * - `renderMarkdown` (`marked` + `DOMPurify`) の出力を `{@html}` で描画する。
-   *   常に Markdown として描画するため、ストリーミング中も整形済みで表示される。
-   * - 描画後に `enhanceCodeBlocks` がコードフェンスへ shiki のハイライトを
-   *   非同期適用する (テキストが落ち着くまでデバウンス)。
+   * - Renders the output of `renderMarkdown` (`marked` + `DOMPurify`) via `{@html}`.
+   *   It is always rendered as Markdown, so content stays formatted while streaming.
+   * - After rendering, `enhanceCodeBlocks` applies shiki highlighting to code
+   *   fences asynchronously (debounced until the text settles).
    */
   import { enhanceCodeBlocks } from "#lib/highlight.ts";
   import { renderMarkdown } from "#lib/markdown.ts";
@@ -20,9 +20,9 @@
 
   const html = $derived(renderMarkdown(text));
 
-  // `{@html}` の再描画で DOM が作り直されるたびに shiki を適用し直す。
-  // ストリーミング中はデルタごとに DOM が変わるため、短いデバウンスを挟む
-  // (内容が同じコードブロックは highlight.ts のキャッシュで再利用される)。
+  // Re-apply shiki every time `{@html}` re-renders and rebuilds the DOM.
+  // During streaming the DOM changes with each delta, so insert a short debounce
+  // (unchanged code blocks are reused from the highlight.ts cache).
   $effect(() => {
     const node = root;
     const current = html;
@@ -39,7 +39,7 @@
 </div>
 
 <style>
-  /* Markdown 要素のタイポグラフィ (テーマ変数と em 基準で親の文字サイズに追従) */
+  /* Markdown typography (theme variables and em units so it follows the parent font size) */
   :global(.fxg-md) {
     overflow-wrap: anywhere;
   }
