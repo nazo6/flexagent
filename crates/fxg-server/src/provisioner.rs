@@ -657,7 +657,7 @@ async fn spawn_child(state: &ServerState, request: SpawnRequest) -> Result<Spawn
                             Some(session_id) => {
                                 fxg_protocol::discard_with!(
                                     pump_state.hub().client_events().send(ClientEvent::BootstrapLog {
-                                        session_id: session_id.clone(),
+                                        session_id: session_id.clone().into(),
                                         line,
                                     }),
                                     "stream a bootstrap log line to clients"
@@ -825,7 +825,7 @@ async fn await_handshake_and_start(
     let command_id = CommandId::from(uuid_v7());
     let message = ServerToNodeMsg::StartSession {
         command_id: command_id.clone(),
-        session_id: pending.session_id.clone(),
+        session_id: pending.session_id.clone().into(),
         project_id: pending.project_id.clone(),
         local_path: EPHEMERAL_WORKSPACE.to_owned(),
         agent_id: pending.agent_id.clone(),

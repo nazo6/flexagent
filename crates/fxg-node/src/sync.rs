@@ -340,17 +340,20 @@ pub(crate) async fn handle_server_message(
         } => {
             if let Err(err) = state
                 .db()
-                .ack_watermark(&session_id, acked_up_to_node_seq)
+                .ack_watermark(session_id.as_str(), acked_up_to_node_seq)
                 .await
             {
-                tracing::warn!(session_id, "failed to update sync watermark: {err}");
+                tracing::warn!(
+                    session_id = session_id.as_str(),
+                    "failed to update sync watermark: {err}"
+                );
             }
         }
         ServerToNodeMsg::ResyncRequest { sessions } => {
             for target in sessions {
                 match state
                     .db()
-                    .extract_outbox_after(&target.session_id, target.from_node_seq)
+                    .extract_outbox_after(target.session_id.as_str(), target.from_node_seq)
                     .await
                 {
                     Ok(events) => {
@@ -368,7 +371,7 @@ pub(crate) async fn handle_server_message(
                     }
                     Err(err) => {
                         tracing::warn!(
-                            session_id = target.session_id,
+                            session_id = target.session_id.as_str(),
                             "failed to load events for resync: {err}"
                         );
                     }
@@ -401,7 +404,7 @@ pub(crate) async fn handle_server_message(
                 Some(b64) => match BASE64.decode(b64.as_bytes()) {
                     Ok(bytes) => match crate::bundle::write_bundle_file(
                         &state.paths().bundles_dir(),
-                        &session_id,
+                        session_id.as_str(),
                         &bytes,
                     ) {
                         Ok(file) => Some(file),
@@ -437,7 +440,7 @@ pub(crate) async fn handle_server_message(
                 .session_manager()
                 .start_session(StartSessionParams {
                     command_id: &command_id,
-                    session_id: &session_id,
+                    session_id: session_id.as_str(),
                     local_path: &local_path,
                     agent_id: &agent_id,
                     initial_prompt: initial_prompt.as_deref(),
@@ -454,7 +457,7 @@ pub(crate) async fn handle_server_message(
                         .record_audit(
                             fxg_db::audit::actions::SESSION_START,
                             &AuditSource::remote(state.node_id()),
-                            Some(&session_id),
+                            Some(session_id.as_str()),
                             serde_json::json!({
                                 "agent_id": agent_id,
                                 "local_path": local_path,
@@ -476,7 +479,7 @@ pub(crate) async fn handle_server_message(
         } => {
             let result = state
                 .session_manager()
-                .send_prompt(&command_id, &session_id, &text, client_source)
+                .send_prompt(&command_id, session_id.as_str(), &text, client_source)
                 .await
                 .map(|()| session_id);
             send_command_result(out, command_id, result).await;
@@ -492,7 +495,7 @@ pub(crate) async fn handle_server_message(
                 .session_manager()
                 .respond_permission(
                     &command_id,
-                    &session_id,
+                    session_id.as_str(),
                     &request_id,
                     &selected_option_id,
                     resolved_by.clone(),
@@ -504,7 +507,7 @@ pub(crate) async fn handle_server_message(
                     .record_audit(
                         fxg_db::audit::actions::PERMISSION_RESOLVED,
                         &AuditSource::remote(state.node_id()),
-                        Some(&session_id),
+                        Some(session_id.as_str()),
                         serde_json::json!({
                             "request_id": request_id,
                             "selected_option_id": selected_option_id,
@@ -527,7 +530,7 @@ pub(crate) async fn handle_server_message(
                 .session_manager()
                 .respond_elicitation(
                     &command_id,
-                    &session_id,
+                    session_id.as_str(),
                     &elicitation_id,
                     action,
                     content.clone(),
@@ -540,7 +543,7 @@ pub(crate) async fn handle_server_message(
                     .record_audit(
                         fxg_db::audit::actions::ELICITATION_RESOLVED,
                         &AuditSource::remote(state.node_id()),
-                        Some(&session_id),
+                        Some(session_id.as_str()),
                         serde_json::json!({
                             "elicitation_id": elicitation_id,
                             "action": action.as_str(),
@@ -558,7 +561,7 @@ pub(crate) async fn handle_server_message(
         } => {
             let result = state
                 .session_manager()
-                .control(&command_id, &session_id, &action)
+                .control(&command_id, session_id.as_str(), &action)
                 .await
                 .map(|()| session_id);
             send_command_result(out, command_id, result).await;
@@ -570,7 +573,7 @@ pub(crate) async fn handle_server_message(
         } => {
             let outcome = state
                 .session_manager()
-                .revert(&command_id, &session_id, target_node_seq)
+                .revert(&command_id, session_id.as_str(), target_node_seq)
                 .await;
             let message = match outcome {
                 Ok(outcome) => NodeToServerMsg::RevertResult {
@@ -608,7 +611,7 @@ pub(crate) async fn handle_server_message(
                 .session_manager()
                 .resume(ResumeParams {
                     command_id: &command_id,
-                    session_id: &session_id,
+                    session_id: session_id.as_str(),
                     force_replay,
                 })
                 .await;
@@ -618,7 +621,7 @@ pub(crate) async fn handle_server_message(
                         .record_audit(
                             fxg_db::audit::actions::SESSION_RESUME,
                             &AuditSource::remote(state.node_id()),
-                            Some(&session_id),
+                            Some(session_id.as_str()),
                             serde_json::json!({ "force_replay": force_replay }),
                         )
                         .await;
@@ -651,7 +654,7 @@ pub(crate) async fn handle_server_message(
             let outcome = state
                 .set_session_archived(
                     &command_id,
-                    &session_id,
+                    session_id.as_str(),
                     archived,
                     &AuditSource::remote(state.node_id()),
                 )
@@ -684,7 +687,7 @@ pub(crate) async fn handle_server_message(
             let outcome = state
                 .purge_session(
                     &command_id,
-                    &session_id,
+                    session_id.as_str(),
                     &AuditSource::remote(state.node_id()),
                 )
                 .await;
@@ -714,7 +717,16 @@ pub(crate) async fn handle_server_message(
             rows,
             shell_cmd,
         } => {
-            handle_remote_pty_spawn(state, out, pty_id, session_id, cols, rows, shell_cmd).await;
+            handle_remote_pty_spawn(
+                state,
+                out,
+                pty_id,
+                session_id.to_string(),
+                cols,
+                rows,
+                shell_cmd,
+            )
+            .await;
         }
         ServerToNodeMsg::PtyInput { pty_id, data_b64 } => {
             match BASE64.decode(data_b64.as_bytes()) {
@@ -744,7 +756,7 @@ pub(crate) async fn handle_server_message(
             scope,
             base_branch,
         } => {
-            let result = match state.db().get_session(&session_id).await {
+            let result = match state.db().get_session(session_id.as_str()).await {
                 Ok(Some(session)) => {
                     crate::git::workspace_diff(
                         Path::new(&session.local_path),
@@ -753,7 +765,7 @@ pub(crate) async fn handle_server_message(
                     )
                     .await
                 }
-                Ok(None) => Err(NodeError::InvalidSession(session_id.clone())),
+                Ok(None) => Err(NodeError::InvalidSession(session_id.to_string())),
                 Err(err) => Err(err.into()),
             };
             let response = match result {
@@ -1101,7 +1113,7 @@ async fn handle_remote_pty_spawn(
         return;
     }
 
-    let session = match state.db().get_session(&session_id).await {
+    let session = match state.db().get_session(session_id.as_str()).await {
         Ok(Some(session)) => session,
         Ok(None) => {
             fxg_protocol::discard_with!(
@@ -1152,7 +1164,7 @@ async fn handle_remote_pty_spawn(
         .record_audit(
             fxg_db::audit::actions::PTY_SPAWN,
             &AuditSource::remote(state.node_id()),
-            Some(&session_id),
+            Some(session_id.as_str()),
             serde_json::json!({ "pty_id": pty_id }),
         )
         .await;
@@ -1287,9 +1299,12 @@ async fn upload_workspace_bundle(
         return Ok(None);
     };
 
-    let index_path = state.paths().snapshot_index_path(&session.session_id);
+    let index_path = state
+        .paths()
+        .snapshot_index_path(session.session_id.as_str());
     let bundle =
-        crate::bundle::create_workspace_bundle(workspace, &index_path, &session.session_id).await?;
+        crate::bundle::create_workspace_bundle(workspace, &index_path, session.session_id.as_str())
+            .await?;
 
     let encoded = BASE64.encode(&bundle.bytes);
     let chunks: Vec<&str> = encoded
@@ -1316,14 +1331,14 @@ async fn upload_workspace_bundle(
             ));
         }
     }
-    Ok(Some(session.session_id.clone()))
+    Ok(Some(session.session_id.to_string()))
 }
 
 /// Builds and sends a `CommandResult`.
 async fn send_command_result(
     out: &mpsc::Sender<NodeToServerMsg>,
     command_id: CommandId,
-    result: Result<String, NodeError>,
+    result: Result<fxg_protocol::SessionId, NodeError>,
 ) {
     let result = match result {
         Ok(session_id) => fxg_protocol::common::CommandResult::success(command_id, session_id),

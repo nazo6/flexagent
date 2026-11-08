@@ -567,7 +567,7 @@ async fn handle(
             Ok((
                 command_id,
                 IpcResult::EnsureSession {
-                    session_id: outcome.session_id,
+                    session_id: outcome.session_id.into(),
                 },
             ))
         }
@@ -580,7 +580,7 @@ async fn handle(
         } => {
             state
                 .session_manager()
-                .send_prompt(&command_id, &session_id, &text, client_source)
+                .send_prompt(&command_id, session_id.as_str(), &text, client_source)
                 .await
                 .map_err(|err| DispatchError::from_node_error(&command_id, err))?;
             Ok((
@@ -602,7 +602,7 @@ async fn handle(
                 .session_manager()
                 .respond_permission(
                     &command_id,
-                    &session_id,
+                    session_id.as_str(),
                     &request_id,
                     &selected_option_id,
                     resolved_by,
@@ -629,7 +629,7 @@ async fn handle(
                 .session_manager()
                 .respond_elicitation(
                     &command_id,
-                    &session_id,
+                    session_id.as_str(),
                     &elicitation_id,
                     action,
                     content,
@@ -652,7 +652,7 @@ async fn handle(
         } => {
             state
                 .session_manager()
-                .control(&command_id, &session_id, &action)
+                .control(&command_id, session_id.as_str(), &action)
                 .await
                 .map_err(|err| DispatchError::from_node_error(&command_id, err))?;
             Ok((
@@ -670,7 +670,7 @@ async fn handle(
         } => {
             let outcome = state
                 .session_manager()
-                .revert(&command_id, &session_id, target_node_seq)
+                .revert(&command_id, session_id.as_str(), target_node_seq)
                 .await
                 .map_err(|err| DispatchError::from_node_error(&command_id, err))?;
             Ok((
@@ -696,7 +696,7 @@ async fn handle(
                 .session_manager()
                 .fork(
                     &command_id,
-                    &session_id,
+                    session_id.as_str(),
                     from_node_seq,
                     agent_id.as_deref(),
                     cwd.as_deref().map(Path::new),
@@ -706,7 +706,7 @@ async fn handle(
             Ok((
                 command_id,
                 IpcResult::SessionForked {
-                    session_id: outcome.session_id,
+                    session_id: outcome.session_id.into(),
                 },
             ))
         }
@@ -720,7 +720,7 @@ async fn handle(
                 .session_manager()
                 .resume(ResumeParams {
                     command_id: &command_id,
-                    session_id: &session_id,
+                    session_id: session_id.as_str(),
                     force_replay,
                 })
                 .await
@@ -729,14 +729,14 @@ async fn handle(
                 .record_audit(
                     fxg_db::audit::actions::SESSION_RESUME,
                     &AuditSource::local(),
-                    Some(&session_id),
+                    Some(session_id.as_str()),
                     serde_json::json!({ "force_replay": force_replay }),
                 )
                 .await;
             Ok((
                 command_id,
                 IpcResult::SessionResumed {
-                    session_id: started.session_id,
+                    session_id: started.session_id.into(),
                     context_restored: started.context_restored,
                 },
             ))
@@ -748,7 +748,12 @@ async fn handle(
             archived,
         } => {
             let archived_at = state
-                .set_session_archived(&command_id, &session_id, archived, &AuditSource::local())
+                .set_session_archived(
+                    &command_id,
+                    session_id.as_str(),
+                    archived,
+                    &AuditSource::local(),
+                )
                 .await
                 .map_err(|err| DispatchError::from_node_error(&command_id, err))?;
             Ok((
@@ -765,7 +770,7 @@ async fn handle(
             session_id,
         } => {
             state
-                .purge_session(&command_id, &session_id, &AuditSource::local())
+                .purge_session(&command_id, session_id.as_str(), &AuditSource::local())
                 .await
                 .map_err(|err| DispatchError::from_node_error(&command_id, err))?;
             Ok((command_id, IpcResult::SessionDeleted { session_id }))
@@ -778,7 +783,7 @@ async fn handle(
         } => {
             let session = state
                 .db()
-                .get_session(&session_id)
+                .get_session(session_id.as_str())
                 .await
                 .map_err(|err| DispatchError::from_node_error(&command_id, err.into()))?
                 .ok_or_else(|| {
@@ -789,7 +794,7 @@ async fn handle(
                     )
                 })?;
             let (event_count, recent_events) =
-                session_event_tail(state.db(), &session_id, recent_events)
+                session_event_tail(state.db(), session_id.as_str(), recent_events)
                     .await
                     .map_err(|err| DispatchError::from_node_error(&command_id, err))?;
             let pending_permissions = state
@@ -1526,7 +1531,7 @@ mod tests {
             let row = daemon
                 .state()
                 .db()
-                .get_session(&session_id)
+                .get_session(session_id.as_str())
                 .await
                 .expect("query");
             if row.is_some_and(|session| session.status == SessionStatus::Stopped) {

@@ -161,7 +161,7 @@ pub(crate) async fn handle_pty_ws<B: ClientApiBackend>(backend: B, socket: WebSo
                         let pty_id = fxg_protocol::util::uuid_v7();
                         let params = PtySpawnParams {
                             pty_id: pty_id.clone(),
-                            session_id,
+                            session_id: session_id.to_string(),
                             cols,
                             rows,
                             shell_cmd,

@@ -166,7 +166,7 @@ impl NodeError {
             Self::ResumeRequired { session_id, .. } => {
                 info = info
                     .with_recovery(RecoveryAction::ResumeWithReplay {
-                        session_id: session_id.clone(),
+                        session_id: session_id.clone().into(),
                     })
                     .with_data_safety(DataSafety::Preserved);
             }

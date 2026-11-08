@@ -394,8 +394,15 @@ pub enum ConfigOptionValue {
   - [x] `fxg-db` の row struct と `SessionFilter.node_id`
   - [x] `NodeId` の SQLx roundtrip
   - 内部の `HashMap<String, _>` / `DaemonConfig.node_id` は文字列のまま
-- [ ] `SessionId`
-- [ ] `EventId`
+- [x] `SessionId`
+  - [x] `SessionEventEnvelope` / `SessionSummary` / permission /
+        elicitation / recovery / IPC / client WS / REST DTO
+  - [x] `SessionManager` の内部 map は文字列のまま、境界で `as_str()` / `into()`
+  - [x] `SessionBroadcast::StreamDelta` も `SessionId`
+- [x] `EventId`
+  - [x] `SessionEventEnvelope.event_id` / `SearchHit.event_id`
+  - [x] DB / outbox / stdio の境界を型化
+  - [x] `agent_session_id`（ACP 側の ID）は `String` のまま
 
 #### Tier B: ドメイン束縛
 
@@ -510,3 +517,8 @@ pub enum ConfigOptionValue {
   ルーティング / DB row struct / `SessionFilter` を型化した。hub の
   接続・pending・PTY の内部 map と `DaemonConfig.node_id` は文字列のままにし、
   境界で `as_str()` / `into()` する。
+- 2026-11-08: Phase 4 の `SessionId` / `EventId` を実装し、Tier A が完了した。
+  protocol DTO / DB row struct / IPC / WS / NodeHub の境界を型化した。
+  `SessionManager` の `active` / `resuming` map と `DaemonConfig` は文字列のまま。
+  `agent_session_id` は ACP 側の識別子なので `String` を維持している。
+  Tier B（`ProjectId`）以降は必要になった時点で追加する。

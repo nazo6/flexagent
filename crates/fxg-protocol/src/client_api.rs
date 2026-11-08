@@ -16,7 +16,7 @@ use crate::common::{
 };
 use crate::config::CustomAgentConfig;
 use crate::events::SessionEventBatch;
-use crate::{CommandId, NodeId};
+use crate::{CommandId, NodeId, SessionId};
 
 /// Kind of endpoint (`GET /api/v1/system/info`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
@@ -350,7 +350,7 @@ pub struct WorktreeSpec {
 #[specta(collect)]
 pub struct SessionForkSpec {
     /// Source session ID
-    pub from_session_id: String,
+    pub from_session_id: SessionId,
     /// Event sequence number of the fork source (latest when omitted)
     pub from_node_seq: Option<u64>,
     /// Bundle data (Base64) when restoring a git bundle saved from an ephemeral VM
@@ -394,7 +394,7 @@ pub struct CreateSessionRequest {
 #[specta(collect)]
 pub struct CreateSessionResponse {
     /// ID of the started session
-    pub session_id: String,
+    pub session_id: SessionId,
     /// Correlation ID from the request
     pub command_id: CommandId,
 }
@@ -501,7 +501,7 @@ pub struct ResumeSessionRequest {
 #[specta(collect)]
 pub struct ResumeSessionResponse {
     /// Resumed session ID (the same as the requested one)
-    pub session_id: String,
+    pub session_id: SessionId,
     /// Whether the agent-side context could be restored natively
     /// (`false` = continued as a new agent session through history replay)
     pub context_restored: bool,
@@ -523,7 +523,7 @@ pub struct SessionArchiveRequest {
 #[specta(collect)]
 pub struct SessionArchiveResponse {
     /// Target session ID
-    pub session_id: String,
+    pub session_id: SessionId,
     /// Archive time (Unix epoch ms). `None` when restored
     pub archived_at: Option<i64>,
 }
@@ -608,14 +608,14 @@ pub enum ClientWsMessage {
         /// Cursor of the last received batch
         since_cursor: Option<u64>,
         /// Currently open session (a hint for prioritized delivery)
-        focused_session_id: Option<String>,
+        focused_session_id: Option<SessionId>,
     },
     /// Sends a prompt (including slash commands).
     SendPrompt {
         /// Correlation ID
         command_id: CommandId,
         /// Target session ID
-        session_id: String,
+        session_id: SessionId,
         /// Prompt body
         text: String,
         /// Source (`cli` / `web` / `android`)
@@ -626,7 +626,7 @@ pub enum ClientWsMessage {
         /// Correlation ID
         command_id: CommandId,
         /// Target session ID
-        session_id: String,
+        session_id: SessionId,
         /// ACP request id
         request_id: String,
         /// The selected `option_id`
@@ -639,7 +639,7 @@ pub enum ClientWsMessage {
         /// Correlation ID
         command_id: CommandId,
         /// Target session ID
-        session_id: String,
+        session_id: SessionId,
         /// ACP elicitation id
         elicitation_id: String,
         /// The user's response action (`accept` / `decline` / `cancel`)
@@ -654,7 +654,7 @@ pub enum ClientWsMessage {
         /// Correlation ID
         command_id: CommandId,
         /// Target session ID
-        session_id: String,
+        session_id: SessionId,
         /// Operation to execute
         action: SessionControlAction,
     },
@@ -678,7 +678,7 @@ pub enum ServerWsMessage {
     /// An ephemeral chunk produced while streaming (never persisted).
     LiveStreamDelta {
         /// Target session ID
-        session_id: String,
+        session_id: SessionId,
         /// The delta body
         delta: StreamDeltaPayload,
     },
@@ -689,7 +689,7 @@ pub enum ServerWsMessage {
     /// event log.
     BootstrapLog {
         /// Target session ID
-        session_id: String,
+        session_id: SessionId,
         /// A single log line
         line: String,
     },
@@ -703,7 +703,7 @@ pub enum ServerWsMessage {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         error: Option<ErrorInfo>,
         /// Target session ID (optional)
-        session_id: Option<String>,
+        session_id: Option<SessionId>,
     },
     /// Synchronization state notification (drives the sync badge in the UI).
     SystemStatus {
@@ -741,7 +741,7 @@ pub enum PtyClientMessage {
     /// Start a new PTY
     Spawn {
         /// Target session ID
-        session_id: String,
+        session_id: SessionId,
         /// Number of columns
         cols: u16,
         /// Number of rows

@@ -84,6 +84,16 @@ string_id! {
     NodeId
 }
 
+string_id! {
+    /// ID of a session (UUID v7 assigned by the running node / server).
+    SessionId
+}
+
+string_id! {
+    /// ID of a persisted session event (UUID v7).
+    EventId
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

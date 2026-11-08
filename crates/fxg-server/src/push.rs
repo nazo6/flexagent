@@ -345,7 +345,7 @@ pub async fn notify_permission_requests(
                 options,
                 ..
             } => Some((
-                event.session_id.clone(),
+                event.session_id.to_string(),
                 request_id.clone(),
                 tool_name.clone(),
                 summary.clone(),
@@ -414,7 +414,7 @@ pub async fn notify_elicitations(
                 message,
                 ..
             } => Some((
-                event.session_id.clone(),
+                event.session_id.to_string(),
                 elicitation_id.clone(),
                 message.clone(),
             )),

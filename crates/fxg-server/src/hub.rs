@@ -1430,7 +1430,7 @@ async fn handle_node_message_value(
             // Accumulate chunked bundle uploads until DrainComplete
             crate::provisioner::on_bundle_upload(
                 state,
-                &session_id,
+                session_id.as_str(),
                 &branch,
                 &head_commit,
                 &bundle_b64,
@@ -1498,7 +1498,7 @@ async fn compute_resync(
         if sync.last_node_seq == 0 {
             continue;
         }
-        match state.db().get_session(&sync.session_id).await {
+        match state.db().get_session(sync.session_id.as_str()).await {
             Ok(Some(session)) if &session.node_id == node_id => {
                 if session.last_node_seq < sync.last_node_seq {
                     targets.push(ResyncTarget {
@@ -1507,7 +1507,7 @@ async fn compute_resync(
                     });
                 } else if session.last_node_seq > sync.last_node_seq {
                     tracing::warn!(
-                        session_id = sync.session_id,
+                        session_id = sync.session_id.as_str(),
                         hub_seq = session.last_node_seq,
                         node_seq = sync.last_node_seq,
                         "hub is ahead of node for session; skipping resync"
@@ -1516,7 +1516,7 @@ async fn compute_resync(
             }
             Ok(Some(session)) => {
                 tracing::warn!(
-                    session_id = sync.session_id,
+                    session_id = sync.session_id.as_str(),
                     hub_node = session.node_id.as_str(),
                     node_id = node_id.as_str(),
                     "session is owned by a different node; requesting full resync"
@@ -1535,7 +1535,7 @@ async fn compute_resync(
             }
             Err(err) => {
                 tracing::warn!(
-                    session_id = sync.session_id,
+                    session_id = sync.session_id.as_str(),
                     "failed to read session: {err}"
                 );
             }
@@ -1563,7 +1563,7 @@ async fn apply_event_batch(
             tracing::warn!(
                 node_id = node_id.as_str(),
                 event_node_id = event_node_id.as_str(),
-                session_id = event.session_id,
+                session_id = event.session_id.as_str(),
                 "rejecting event batch with mismatched node_id"
             );
             return;
@@ -1574,8 +1574,10 @@ async fn apply_event_batch(
     let mut batches: Vec<(String, Vec<fxg_protocol::events::SessionEventEnvelope>)> = Vec::new();
     for event in events {
         match batches.last_mut() {
-            Some((session_id, batch)) if session_id == &event.session_id => batch.push(event),
-            _ => batches.push((event.session_id.clone(), vec![event])),
+            Some((session_id, batch)) if session_id.as_str() == event.session_id.as_str() => {
+                batch.push(event)
+            }
+            _ => batches.push((event.session_id.to_string(), vec![event])),
         }
     }
 
@@ -1608,7 +1610,7 @@ async fn apply_event_batch(
                     .send(
                         node_id,
                         ServerToNodeMsg::EventBatchAck {
-                            session_id,
+                            session_id: session_id.into(),
                             acked_up_to_node_seq,
                         },
                     )

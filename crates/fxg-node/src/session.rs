@@ -47,7 +47,7 @@ pub enum SessionBroadcast {
     /// A partial delta chunk mid-stream (not persisted)
     StreamDelta {
         /// Target session ID
-        session_id: String,
+        session_id: fxg_protocol::SessionId,
         /// The delta itself
         delta: StreamDeltaPayload,
     },
@@ -55,7 +55,7 @@ pub enum SessionBroadcast {
 
 impl SessionBroadcast {
     /// The target session ID.
-    pub fn session_id(&self) -> &str {
+    pub fn session_id(&self) -> &fxg_protocol::SessionId {
         match self {
             Self::Persisted { event, .. } | Self::Ephemeral(event) => &event.session_id,
             Self::StreamDelta { session_id, .. } => session_id,
@@ -138,8 +138,8 @@ impl SessionEventBus {
         }
 
         let envelope = SessionEventEnvelope {
-            event_id: uuid_v7(),
-            session_id: session_id.to_owned(),
+            event_id: uuid_v7().into(),
+            session_id: session_id.to_owned().into(),
             node_seq: 1,
             created_at: now_ms(),
             payload,
@@ -178,7 +178,11 @@ impl SessionEventBus {
     }
 
     /// Delivers a partial delta chunk mid-stream immediately (does not write to the DB).
-    pub fn publish_delta(&self, session_id: impl Into<String>, delta: StreamDeltaPayload) {
+    pub fn publish_delta(
+        &self,
+        session_id: impl Into<fxg_protocol::SessionId>,
+        delta: StreamDeltaPayload,
+    ) {
         self.broadcast(SessionBroadcast::StreamDelta {
             session_id: session_id.into(),
             delta,
@@ -190,11 +194,11 @@ impl SessionEventBus {
     /// No `node_seq` is assigned and `0` is set (so no gaps appear in the event log sequence).
     pub fn publish_ephemeral_event(
         &self,
-        session_id: impl Into<String>,
+        session_id: impl Into<fxg_protocol::SessionId>,
         payload: UnifiedEventPayload,
     ) -> SessionEventEnvelope {
         let envelope = SessionEventEnvelope {
-            event_id: uuid_v7(),
+            event_id: uuid_v7().into(),
             session_id: session_id.into(),
             node_seq: 0,
             created_at: now_ms(),
@@ -461,7 +465,7 @@ mod tests {
                     session_id: id,
                     delta,
                 } => {
-                    assert_eq!(id, session_id);
+                    assert_eq!(id.as_str(), session_id);
                     assert!(matches!(
                         delta,
                         StreamDeltaPayload::AgentMessageDelta { .. }

@@ -250,7 +250,7 @@ async fn permission_status_and_resolved_by_roundtrip_all_variants() {
         .await
         .expect("pending permissions")
         .into_iter()
-        .filter(|entry| entry.session_id == session_id)
+        .filter(|entry| entry.session_id.as_str() == session_id)
         .collect();
     assert_eq!(pending.len(), 1);
     assert_eq!(pending[0].status, PermissionRequestStatus::Pending);
@@ -340,7 +340,7 @@ async fn elicitation_mode_status_and_resolved_by_roundtrip_all_variants() {
         .await
         .expect("pending elicitations")
         .into_iter()
-        .filter(|entry| entry.session_id == session_id)
+        .filter(|entry| entry.session_id.as_str() == session_id)
         .collect();
     assert_eq!(pending.len(), 4);
     assert!(

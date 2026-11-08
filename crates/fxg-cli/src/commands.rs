@@ -571,7 +571,7 @@ async fn run_with_provisioner(
     if args.detach {
         println!("{}", response.session_id);
     } else {
-        open_session_url(&response.session_id, args.no_open)?;
+        open_session_url(response.session_id.as_str(), args.no_open)?;
     }
     Ok(())
 }
@@ -865,7 +865,7 @@ impl usage::RunAsync for SessionListArgs {
             .iter()
             .map(|session| {
                 vec![
-                    short_id(&session.session_id),
+                    short_id(session.session_id.as_str()),
                     truncate(session.node_id.as_str(), 16),
                     truncate(&session.agent_id, 16),
                     session.status.to_string(),
@@ -976,7 +976,7 @@ impl usage::RunAsync for SessionShowArgs {
             })
             .unwrap_or_else(|| "-".to_owned());
         let fields = [
-            ("SESSION", session.session_id.clone()),
+            ("SESSION", session.session_id.to_string()),
             ("TITLE", session.title.clone()),
             ("PROJECT", session.project_id.clone()),
             ("NODE", session.node_id.to_string()),
@@ -1417,7 +1417,7 @@ impl usage::RunAsync for SessionForkArgs {
             let sessions = server.sessions().await?;
             let source = sessions
                 .iter()
-                .find(|session| session.session_id == self.session_id)
+                .find(|session| session.session_id.as_str() == self.session_id)
                 .with_context(|| format!("session not found: {}", self.session_id))?;
             let request = fxg_protocol::client_api::CreateSessionRequest {
                 command_id: format!("cli-{}", fxg_protocol::util::uuid_v7()).into(),
@@ -1434,7 +1434,7 @@ impl usage::RunAsync for SessionForkArgs {
                 mode: None,
                 extra_args: None,
                 fork: Some(fxg_protocol::client_api::SessionForkSpec {
-                    from_session_id: self.session_id.clone(),
+                    from_session_id: self.session_id.clone().into(),
                     from_node_seq: self.from_seq,
                     // The central server loads the backed-up bundle
                     // (git_bundle_path) automatically
@@ -1445,7 +1445,7 @@ impl usage::RunAsync for SessionForkArgs {
             if self.detach {
                 println!("{}", response.session_id);
             } else {
-                open_session_url(&response.session_id, self.no_open)?;
+                open_session_url(response.session_id.as_str(), self.no_open)?;
             }
             return Ok(());
         }
@@ -1565,7 +1565,7 @@ impl usage::RunAsync for InboxListArgs {
                 .map(|entry| {
                     vec![
                         truncate(&entry.request_id, 24),
-                        short_id(&entry.session_id),
+                        short_id(entry.session_id.as_str()),
                         truncate(&entry.tool_name, 20),
                         truncate(&entry.summary, 40),
                         format_unix_ms_utc(entry.created_at),
@@ -1582,7 +1582,7 @@ impl usage::RunAsync for InboxListArgs {
                 .map(|entry| {
                     vec![
                         truncate(&entry.elicitation_id, 24),
-                        short_id(&entry.session_id),
+                        short_id(entry.session_id.as_str()),
                         truncate(entry.mode.as_str(), 8),
                         truncate(&entry.message, 40),
                         format_unix_ms_utc(entry.created_at),
@@ -1631,9 +1631,12 @@ impl usage::RunAsync for InboxApproveArgs {
             })
             .with_context(|| format!("no allow option available: {}", self.request_id))?;
         client
-            .respond_permission(&entry.session_id, &entry.request_id, &option_id)
+            .respond_permission(entry.session_id.as_str(), &entry.request_id, &option_id)
             .await?;
-        println!("approved {} ({option_id})", short_id(&entry.session_id));
+        println!(
+            "approved {} ({option_id})",
+            short_id(entry.session_id.as_str())
+        );
         Ok(())
     }
 }
@@ -1658,9 +1661,12 @@ impl usage::RunAsync for InboxRejectArgs {
             .map(|option| option.option_id.clone())
             .with_context(|| format!("no reject option available: {}", self.request_id))?;
         client
-            .respond_permission(&entry.session_id, &entry.request_id, &option_id)
+            .respond_permission(entry.session_id.as_str(), &entry.request_id, &option_id)
             .await?;
-        println!("rejected {} ({option_id})", short_id(&entry.session_id));
+        println!(
+            "rejected {} ({option_id})",
+            short_id(entry.session_id.as_str())
+        );
         Ok(())
     }
 }
@@ -1737,9 +1743,17 @@ impl usage::RunAsync for InboxAnswerArgs {
             return Ok(());
         };
         client
-            .respond_elicitation(&entry.session_id, &entry.elicitation_id, action, content)
+            .respond_elicitation(
+                entry.session_id.as_str(),
+                &entry.elicitation_id,
+                action,
+                content,
+            )
             .await?;
-        println!("answered {} ({action})", short_id(&entry.session_id));
+        println!(
+            "answered {} ({action})",
+            short_id(entry.session_id.as_str())
+        );
         Ok(())
     }
 }

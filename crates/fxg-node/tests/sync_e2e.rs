@@ -642,7 +642,7 @@ async fn central_server_commands_permissions_and_kill_switch() {
                 .await
                 .map(|requests| {
                     requests.iter().any(|request| {
-                        request.session_id == session_id && request.request_id == "req-1"
+                        request.session_id.as_str() == session_id && request.request_id == "req-1"
                     })
                 })
                 .unwrap_or(false)
@@ -707,7 +707,7 @@ async fn central_server_commands_permissions_and_kill_switch() {
             .expect("client ws");
         let send = fxg_protocol::client_api::ClientWsMessage::SendPrompt {
             command_id: "prompt-1".into(),
-            session_id: session_id.clone(),
+            session_id: session_id.clone().into(),
             text: "via ws".to_owned(),
             client_source: ClientSource::Web,
         };
@@ -852,7 +852,7 @@ async fn central_server_commands_permissions_and_kill_switch() {
             .expect("client ws");
         let send = fxg_protocol::client_api::ClientWsMessage::SendPrompt {
             command_id: "prompt-offline".into(),
-            session_id: session_id.clone(),
+            session_id: session_id.clone().into(),
             text: "nobody home".to_owned(),
             client_source: ClientSource::Web,
         };
@@ -1182,14 +1182,15 @@ async fn central_server_archives_and_deletes_session() {
         hidden
             .sessions
             .iter()
-            .all(|session| session.session_id != session_id),
+            .all(|session| session.session_id.as_str() != session_id),
         "archived session must be hidden from the default list"
     );
     assert!(
         visible
             .sessions
             .iter()
-            .any(|session| session.session_id == session_id && session.archived_at.is_some()),
+            .any(|session| session.session_id.as_str() == session_id
+                && session.archived_at.is_some()),
         "archived session must be listed with include_archived=true"
     );
 

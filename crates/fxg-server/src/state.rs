@@ -194,11 +194,14 @@ impl ServerState {
     }
 
     /// Resolves the executing node for a session (`NODE_OFFLINE` is returned early here).
-    async fn session_node(&self, session_id: &str) -> Result<fxg_protocol::NodeId, ApiError> {
+    async fn session_node(
+        &self,
+        session_id: &fxg_protocol::SessionId,
+    ) -> Result<fxg_protocol::NodeId, ApiError> {
         let session = self
             .inner
             .db
-            .get_session(session_id)
+            .get_session(session_id.as_str())
             .await
             .map_err(ApiError::from)?
             .ok_or_else(|| ApiError::not_found(format!("session not found: {session_id}")))?;
@@ -262,7 +265,7 @@ impl ServerState {
             .map_err(ApiError::from)?;
         if let Some(entry) = pending
             .iter()
-            .find(|entry| entry.session_id == session_id && entry.request_id == request_id)
+            .find(|entry| entry.session_id.as_str() == session_id && entry.request_id == request_id)
             && let Some(option) = entry.options.iter().find(|option| option.kind.is_always())
         {
             return Ok(option.option_id.clone());
@@ -311,7 +314,7 @@ impl ServerState {
         let source = self
             .inner
             .db
-            .get_session(&fork.from_session_id)
+            .get_session(fork.from_session_id.as_str())
             .await
             .map_err(ApiError::from)?
             .ok_or_else(|| {
@@ -321,7 +324,7 @@ impl ServerState {
         let batch = self
             .inner
             .db
-            .session_events_after(&source.session_id, 0, 5_000)
+            .session_events_after(source.session_id.as_str(), 0, 5_000)
             .await
             .map_err(ApiError::from)?;
         let mut items: Vec<ForkHistoryItem> = Vec::new();
@@ -364,7 +367,7 @@ impl ServerState {
                 match self
                     .inner
                     .db
-                    .get_git_bundle_path(&fork.from_session_id)
+                    .get_git_bundle_path(fork.from_session_id.as_str())
                     .await
                 {
                     Ok(Some(path)) => match std::fs::read(&path) {
@@ -578,7 +581,7 @@ impl ClientApiBackend for ServerState {
             )
             .await;
             return Ok(CreateSessionResponse {
-                session_id,
+                session_id: session_id.into(),
                 command_id: request.command_id,
             });
         }
@@ -632,7 +635,7 @@ impl ClientApiBackend for ServerState {
                 &request.command_id,
                 ServerToNodeMsg::StartSession {
                     command_id: request.command_id.clone(),
-                    session_id: session_id.clone(),
+                    session_id: session_id.clone().into(),
                     project_id: request.project_id.clone(),
                     local_path: local_path.clone(),
                     agent_id: request.agent_id.clone(),
@@ -662,7 +665,7 @@ impl ClientApiBackend for ServerState {
         .await;
 
         Ok(CreateSessionResponse {
-            session_id,
+            session_id: session_id.into(),
             command_id: result.command_id,
         })
     }
@@ -674,7 +677,9 @@ impl ClientApiBackend for ServerState {
         request: RespondPermissionRequest,
         client: ClientInfo,
     ) -> Result<RespondPermissionResponse, ApiError> {
-        let node_id = self.session_node(session_id).await?;
+        let node_id = self
+            .session_node(&fxg_protocol::SessionId::from(session_id))
+            .await?;
         let selected = self
             .resolve_permission_option(session_id, request_id, &request)
             .await?;
@@ -687,7 +692,7 @@ impl ClientApiBackend for ServerState {
                 &command_id,
                 ServerToNodeMsg::RespondPermission {
                     command_id: command_id.clone(),
-                    session_id: session_id.to_owned(),
+                    session_id: session_id.into(),
                     request_id: request_id.to_owned(),
                     selected_option_id: selected.clone(),
                     resolved_by: request.resolved_by.clone(),
@@ -732,7 +737,9 @@ impl ClientApiBackend for ServerState {
         request: RespondElicitationRequest,
         client: ClientInfo,
     ) -> Result<RespondElicitationResponse, ApiError> {
-        let node_id = self.session_node(session_id).await?;
+        let node_id = self
+            .session_node(&fxg_protocol::SessionId::from(session_id))
+            .await?;
         let command_id = CommandId::from(uuid_v7());
         let result = self
             .inner
@@ -742,7 +749,7 @@ impl ClientApiBackend for ServerState {
                 &command_id,
                 ServerToNodeMsg::RespondElicitation {
                     command_id: command_id.clone(),
-                    session_id: session_id.to_owned(),
+                    session_id: session_id.into(),
                     elicitation_id: elicitation_id.to_owned(),
                     action: request.action,
                     content: request.content.clone(),
@@ -787,7 +794,9 @@ impl ClientApiBackend for ServerState {
         request: SessionRevertRequest,
         client: ClientInfo,
     ) -> Result<SessionRevertResponse, ApiError> {
-        let node_id = self.session_node(session_id).await?;
+        let node_id = self
+            .session_node(&fxg_protocol::SessionId::from(session_id))
+            .await?;
         let command_id = CommandId::from(uuid_v7());
         let outcome = self
             .inner
@@ -797,7 +806,7 @@ impl ClientApiBackend for ServerState {
                 &command_id,
                 ServerToNodeMsg::RevertSession {
                     command_id: command_id.clone(),
-                    session_id: session_id.to_owned(),
+                    session_id: session_id.into(),
                     target_node_seq: request.target_node_seq,
                 },
             )
@@ -850,7 +859,9 @@ impl ClientApiBackend for ServerState {
         }
 
         // Relay to the executing node (offline yields `NODE_OFFLINE`)
-        let node_id = self.session_node(session_id).await?;
+        let node_id = self
+            .session_node(&fxg_protocol::SessionId::from(session_id))
+            .await?;
         let command_id = CommandId::from(uuid_v7());
         let context_restored = self
             .inner
@@ -860,7 +871,7 @@ impl ClientApiBackend for ServerState {
                 &command_id,
                 ServerToNodeMsg::ResumeSession {
                     command_id: command_id.clone(),
-                    session_id: session_id.to_owned(),
+                    session_id: session_id.into(),
                     force_replay: request.force_replay,
                 },
             )
@@ -877,7 +888,7 @@ impl ClientApiBackend for ServerState {
         )
         .await;
         Ok(ResumeSessionResponse {
-            session_id: session_id.to_owned(),
+            session_id: session_id.into(),
             context_restored,
         })
     }
@@ -889,7 +900,9 @@ impl ClientApiBackend for ServerState {
         client: ClientInfo,
     ) -> Result<SessionArchiveResponse, ApiError> {
         // Relay to the executing node (existence check / offline is returned by `session_node`)
-        let node_id = self.session_node(session_id).await?;
+        let node_id = self
+            .session_node(&fxg_protocol::SessionId::from(session_id))
+            .await?;
         let command_id = CommandId::from(uuid_v7());
         let archived_at = self
             .inner
@@ -899,7 +912,7 @@ impl ClientApiBackend for ServerState {
                 &command_id,
                 ServerToNodeMsg::ArchiveSession {
                     command_id: command_id.clone(),
-                    session_id: session_id.to_owned(),
+                    session_id: session_id.into(),
                     archived: request.archived,
                 },
             )
@@ -916,14 +929,16 @@ impl ClientApiBackend for ServerState {
         )
         .await;
         Ok(SessionArchiveResponse {
-            session_id: session_id.to_owned(),
+            session_id: session_id.into(),
             archived_at,
         })
     }
 
     async fn delete_session(&self, session_id: &str, client: ClientInfo) -> Result<(), ApiError> {
         // Relay to the executing node (existence check / offline is returned by `session_node`)
-        let node_id = self.session_node(session_id).await?;
+        let node_id = self
+            .session_node(&fxg_protocol::SessionId::from(session_id))
+            .await?;
         let command_id = CommandId::from(uuid_v7());
         self.inner
             .hub
@@ -932,7 +947,7 @@ impl ClientApiBackend for ServerState {
                 &command_id,
                 ServerToNodeMsg::DeleteSession {
                     command_id: command_id.clone(),
-                    session_id: session_id.to_owned(),
+                    session_id: session_id.into(),
                 },
             )
             .await?;
@@ -1340,7 +1355,9 @@ impl ClientApiBackend for ServerState {
         scope: DiffScope,
         base_branch: Option<String>,
     ) -> Result<WorkspaceDiffResponse, ApiError> {
-        let node_id = self.session_node(session_id).await?;
+        let node_id = self
+            .session_node(&fxg_protocol::SessionId::from(session_id))
+            .await?;
         let request_id = uuid_v7();
         self.inner
             .hub
@@ -1349,7 +1366,7 @@ impl ClientApiBackend for ServerState {
                 &request_id,
                 ServerToNodeMsg::GetGitDiff {
                     request_id: request_id.clone(),
-                    session_id: session_id.to_owned(),
+                    session_id: session_id.into(),
                     scope,
                     base_branch,
                 },
@@ -1489,7 +1506,7 @@ impl ClientApiBackend for ServerState {
                 &session.node_id,
                 ServerToNodeMsg::PtySpawn {
                     pty_id: params.pty_id.clone(),
-                    session_id: params.session_id.clone(),
+                    session_id: params.session_id.clone().into(),
                     cols: params.cols,
                     rows: params.rows,
                     shell_cmd: params.shell_cmd.clone(),

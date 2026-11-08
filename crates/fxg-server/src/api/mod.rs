@@ -35,7 +35,6 @@ use axum::routing::{delete, get, post, put};
 use axum::{Extension, Json, Router};
 use futures_util::SinkExt;
 use fxg_db::{Db, DbError, SessionFilter};
-use fxg_protocol::CommandId;
 use fxg_protocol::client_api::{
     AgentOpResponse, AgentsResponse, ApiErrorResponse, AuditLogsResponse, AuthLoginRequest,
     ConnectionRole, CreateSessionRequest, CreateSessionResponse, CreateWorktreeRequest,
@@ -56,6 +55,7 @@ use fxg_protocol::common::{
 };
 use fxg_protocol::config::CustomAgentConfig;
 use fxg_protocol::events::{SessionEventBatch, SessionEventEnvelope};
+use fxg_protocol::{CommandId, SessionId};
 use tokio::sync::broadcast;
 
 pub use pty::{PtyChannelError, PtyChannelEvent, PtySpawnParams};
@@ -341,14 +341,14 @@ pub enum ClientEvent {
     /// Ephemeral chunk mid-stream (not persisted)
     StreamDelta {
         /// Target session ID
-        session_id: String,
+        session_id: SessionId,
         /// Delta body
         delta: fxg_protocol::common::StreamDeltaPayload,
     },
     /// Progress log from temporary VM bootstrap (`stderr`) (not persisted)
     BootstrapLog {
         /// Target session ID
-        session_id: String,
+        session_id: SessionId,
         /// One log line
         line: String,
     },
@@ -362,7 +362,7 @@ pub enum ClientCommand {
         /// Correlation ID
         command_id: CommandId,
         /// Target session ID
-        session_id: String,
+        session_id: SessionId,
         /// Prompt body
         text: String,
         /// Source (`cli` / `web` / `android`)
@@ -373,7 +373,7 @@ pub enum ClientCommand {
         /// Correlation ID
         command_id: CommandId,
         /// Target session ID
-        session_id: String,
+        session_id: SessionId,
         /// ACP request id
         request_id: String,
         /// Selected `option_id`
@@ -386,7 +386,7 @@ pub enum ClientCommand {
         /// Correlation ID
         command_id: CommandId,
         /// Target session ID
-        session_id: String,
+        session_id: SessionId,
         /// ACP elicitation id
         elicitation_id: String,
         /// User response action (`accept` / `decline` / `cancel`)
@@ -401,7 +401,7 @@ pub enum ClientCommand {
         /// Correlation ID
         command_id: CommandId,
         /// Target session ID
-        session_id: String,
+        session_id: SessionId,
         /// Operation to perform
         action: SessionControlAction,
     },

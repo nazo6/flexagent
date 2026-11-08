@@ -61,9 +61,11 @@ pub async fn extract_outbox(pool: &SqlitePool) -> Result<Vec<SessionOutboxBatch>
             row.created_at,
         )?;
         match batches.last_mut() {
-            Some(batch) if batch.session_id == envelope.session_id => batch.events.push(envelope),
+            Some(batch) if batch.session_id.as_str() == envelope.session_id.as_str() => {
+                batch.events.push(envelope)
+            }
             _ => batches.push(SessionOutboxBatch {
-                session_id: envelope.session_id.clone(),
+                session_id: envelope.session_id.to_string(),
                 events: vec![envelope],
             }),
         }

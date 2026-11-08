@@ -227,7 +227,7 @@ impl DaemonClient {
         let result = self
             .request(IpcClientMessage::SessionArchive {
                 command_id,
-                session_id: session_id.to_owned(),
+                session_id: session_id.into(),
                 archived,
             })
             .await?;
@@ -243,7 +243,7 @@ impl DaemonClient {
         let result = self
             .request(IpcClientMessage::SessionDelete {
                 command_id,
-                session_id: session_id.to_owned(),
+                session_id: session_id.into(),
             })
             .await?;
         match result {
@@ -323,7 +323,7 @@ impl DaemonClient {
             })
             .await?;
         match result {
-            IpcResult::EnsureSession { session_id } => Ok(session_id),
+            IpcResult::EnsureSession { session_id } => Ok(session_id.to_string()),
             other => bail!("unexpected ipc result: {other:?}"),
         }
     }
@@ -339,7 +339,7 @@ impl DaemonClient {
         let result = self
             .request(IpcClientMessage::SendPrompt {
                 command_id,
-                session_id: session_id.to_owned(),
+                session_id: session_id.into(),
                 text: text.to_owned(),
                 client_source,
             })
@@ -359,7 +359,7 @@ impl DaemonClient {
         let result = self
             .request(IpcClientMessage::RespondPermission {
                 command_id,
-                session_id: session_id.to_owned(),
+                session_id: session_id.into(),
                 request_id: request_id.to_owned(),
                 selected_option_id: selected_option_id.to_owned(),
                 resolved_by: ResolvedBy::Cli,
@@ -379,7 +379,7 @@ impl DaemonClient {
         let result = self
             .request(IpcClientMessage::ControlSession {
                 command_id,
-                session_id: session_id.to_owned(),
+                session_id: session_id.into(),
                 action,
             })
             .await?;
@@ -397,7 +397,7 @@ impl DaemonClient {
         let result = self
             .request(IpcClientMessage::SessionShow {
                 command_id,
-                session_id: session_id.to_owned(),
+                session_id: session_id.into(),
                 recent_events,
             })
             .await?;
@@ -443,7 +443,7 @@ impl DaemonClient {
         let result = self
             .request(IpcClientMessage::RespondElicitation {
                 command_id,
-                session_id: session_id.to_owned(),
+                session_id: session_id.into(),
                 elicitation_id: elicitation_id.to_owned(),
                 action,
                 content,
@@ -464,7 +464,7 @@ impl DaemonClient {
         let result = self
             .request(IpcClientMessage::SessionRevert {
                 command_id,
-                session_id: session_id.to_owned(),
+                session_id: session_id.into(),
                 target_node_seq,
             })
             .await?;
@@ -498,14 +498,14 @@ impl DaemonClient {
         let result = self
             .request(IpcClientMessage::SessionFork {
                 command_id,
-                session_id: session_id.to_owned(),
+                session_id: session_id.into(),
                 from_node_seq,
                 agent_id,
                 cwd: cwd.map(path_to_string),
             })
             .await?;
         match result {
-            IpcResult::SessionForked { session_id } => Ok(session_id),
+            IpcResult::SessionForked { session_id } => Ok(session_id.to_string()),
             other => bail!("unexpected ipc result: {other:?}"),
         }
     }
@@ -519,7 +519,7 @@ impl DaemonClient {
         let result = self
             .request(IpcClientMessage::SessionResume {
                 command_id,
-                session_id: session_id.to_owned(),
+                session_id: session_id.into(),
                 force_replay,
             })
             .await?;
@@ -672,7 +672,7 @@ mod tests {
         // `ControlSession`)
         assert_eq!(
             ack_message(IpcResult::CommandAccepted {
-                session_id: Some("s1".to_owned()),
+                session_id: Some("s1".into()),
             })
             .expect("command accepted"),
             None

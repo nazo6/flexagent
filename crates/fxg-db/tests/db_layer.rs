@@ -75,8 +75,8 @@ impl Fixture {
     fn event(&mut self, payload: UnifiedEventPayload) -> SessionEventEnvelope {
         self.seq += 1;
         SessionEventEnvelope {
-            event_id: uuid_v7(),
-            session_id: self.session_id.clone(),
+            event_id: uuid_v7().into(),
+            session_id: self.session_id.clone().into(),
             node_seq: self.seq,
             created_at: now_ms(),
             payload,
@@ -254,7 +254,7 @@ async fn event_application_is_idempotent() {
 
     // Same (session_id, node_seq) but different event_id (resend with a new allocation)
     let mut duplicate_seq = created.clone();
-    duplicate_seq.event_id = uuid_v7();
+    duplicate_seq.event_id = uuid_v7().into();
     let third = fixture
         .db
         .append_event(&duplicate_seq)
@@ -564,7 +564,7 @@ async fn rebuild_projections_matches_incremental_apply() {
         git_branch: Some("feat/auth".to_owned()),
         is_worktree: true,
         agent_id: "opencode2".to_owned(),
-        parent_session_id: Some(parent_session_id.clone()),
+        parent_session_id: Some(parent_session_id.clone().into()),
         fork_from_node_seq: Some(6),
         title: "Forked Session".to_owned(),
     });
@@ -620,7 +620,10 @@ async fn rebuild_projections_matches_incremental_apply() {
         .expect("get forked")
         .expect("exists");
     assert_eq!(
-        forked.parent_session_id.as_deref(),
+        forked
+            .parent_session_id
+            .as_ref()
+            .map(fxg_protocol::SessionId::as_str),
         Some(parent_session_id.as_str())
     );
     assert_eq!(forked.fork_from_node_seq, Some(6));
@@ -1308,8 +1311,8 @@ async fn default_local_path_prefers_recent_binding_then_session_history() {
     let legacy_project = "github.com/nazo6/legacy";
     let legacy_path = "/home/nazo/src/legacy";
     let legacy_event = SessionEventEnvelope {
-        event_id: uuid_v7(),
-        session_id: uuid_v7(),
+        event_id: uuid_v7().into(),
+        session_id: uuid_v7().into(),
         node_seq: 1,
         created_at: now_ms(),
         payload: UnifiedEventPayload::SessionCreated {
@@ -1370,8 +1373,8 @@ async fn file_backed_db_persists_across_reopen() {
     .await
     .expect("upsert project");
     db.append_event(&SessionEventEnvelope {
-        event_id: uuid_v7(),
-        session_id: session_id.clone(),
+        event_id: uuid_v7().into(),
+        session_id: session_id.clone().into(),
         node_seq: 1,
         created_at: now_ms(),
         payload: session_created_payload(),
@@ -1655,8 +1658,8 @@ async fn session_deletion_purges_content_and_keeps_tombstone() {
 
     // Events racing with deletion (e.g. turn completion during stop) are discarded
     let straggler = SessionEventEnvelope {
-        event_id: uuid_v7(),
-        session_id: fixture.session_id.clone(),
+        event_id: uuid_v7().into(),
+        session_id: fixture.session_id.clone().into(),
         node_seq: 10,
         created_at: now_ms(),
         payload: UnifiedEventPayload::UserMessage {
@@ -1696,8 +1699,8 @@ async fn session_deleted_for_unknown_session_is_noop() {
     // FK violation
     let db = Db::open_in_memory(DbRole::Hub).await.expect("open db");
     let envelope = SessionEventEnvelope {
-        event_id: uuid_v7(),
-        session_id: uuid_v7(),
+        event_id: uuid_v7().into(),
+        session_id: uuid_v7().into(),
         node_seq: 5,
         created_at: now_ms(),
         payload: UnifiedEventPayload::SessionDeleted {},

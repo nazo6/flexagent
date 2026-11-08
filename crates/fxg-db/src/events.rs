@@ -128,8 +128,8 @@ pub async fn append_next_event(
         u64::try_from(next_node_seq).map_err(|_| DbError::NegativeNodeSeq(next_node_seq))?;
 
     let envelope = SessionEventEnvelope {
-        event_id: fxg_protocol::util::uuid_v7(),
-        session_id: session_id.to_owned(),
+        event_id: fxg_protocol::util::uuid_v7().into(),
+        session_id: session_id.to_owned().into(),
         node_seq,
         created_at: fxg_protocol::util::now_ms(),
         payload,
@@ -153,7 +153,7 @@ async fn append_event_in_tx(
     if !envelope.payload.is_persistable() {
         return Err(DbError::NonPersistableEvent(envelope.payload.event_type()));
     }
-    let node_seq = node_seq_to_i64(&envelope.session_id, envelope.node_seq)?;
+    let node_seq = node_seq_to_i64(envelope.session_id.as_str(), envelope.node_seq)?;
     let (event_type, searchable_text) = searchable::classify_payload(&envelope.payload);
     let payload_json = serde_json::to_string(&envelope.payload)?;
 
@@ -228,8 +228,8 @@ async fn append_event_in_tx(
     }
 
     Ok(ApplyOutcome {
-        event_id: envelope.event_id.clone(),
-        session_id: envelope.session_id.clone(),
+        event_id: envelope.event_id.to_string(),
+        session_id: envelope.session_id.to_string(),
         node_seq: envelope.node_seq,
         inserted,
         cursor,
@@ -261,7 +261,7 @@ async fn upsert_session_from_created(
         return Ok(());
     };
 
-    let node_seq = node_seq_to_i64(&envelope.session_id, envelope.node_seq)?;
+    let node_seq = node_seq_to_i64(envelope.session_id.as_str(), envelope.node_seq)?;
 
     // Prepare a row in case the project is unknown on the hub side
     // (on the node side the source data already exists when the project is resolved, so
@@ -283,7 +283,7 @@ async fn upsert_session_from_created(
     let fork_from_node_seq_value = fork_from_node_seq
         .map(|seq| {
             i64::try_from(seq).map_err(|_| DbError::NodeSeqOutOfRange {
-                session_id: envelope.session_id.clone(),
+                session_id: envelope.session_id.to_string(),
                 node_seq: seq,
             })
         })
@@ -320,7 +320,9 @@ async fn upsert_session_from_created(
         git_branch.as_deref(),
         is_worktree,
         agent_id,
-        parent_session_id.as_deref(),
+        parent_session_id
+            .as_ref()
+            .map(fxg_protocol::SessionId::as_str),
         fork_from_node_seq_value,
         title,
         SessionStatus::Idle.as_str(),
@@ -341,7 +343,7 @@ pub(crate) async fn apply_projections(
     conn: &mut SqliteConnection,
     envelope: &SessionEventEnvelope,
 ) -> Result<(), DbError> {
-    let node_seq = node_seq_to_i64(&envelope.session_id, envelope.node_seq)?;
+    let node_seq = node_seq_to_i64(envelope.session_id.as_str(), envelope.node_seq)?;
 
     match &envelope.payload {
         UnifiedEventPayload::SessionCreated { .. } => {
@@ -861,8 +863,8 @@ pub(crate) fn envelope_from_row(
         .map_err(|err| DbError::InvalidPayload(format!("event {event_id}: {err}")))?;
     let node_seq = u64::try_from(node_seq).map_err(|_| DbError::NegativeNodeSeq(node_seq))?;
     Ok(SessionEventEnvelope {
-        event_id,
-        session_id,
+        event_id: event_id.into(),
+        session_id: session_id.into(),
         node_seq,
         created_at,
         payload,

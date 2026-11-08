@@ -26,7 +26,6 @@
     reason = "integer conversion errors (TryFromIntError) carry no additional context"
 )]
 
-use fxg_protocol::NodeId;
 use fxg_protocol::common::{
     AuditAction, AuditLogEntry, ElicitationMode, ElicitationRequestEntry, ElicitationRequestStatus,
     EventType, NodeLifecycleStatus, NodeSummary, PermissionRequestEntry, PermissionRequestStatus,
@@ -34,6 +33,7 @@ use fxg_protocol::common::{
     SessionUsage,
 };
 use fxg_protocol::events::SessionEventBatch;
+use fxg_protocol::{EventId, NodeId, SessionId};
 use sqlx::SqlitePool;
 
 use crate::error::DbError;
@@ -71,7 +71,8 @@ pub async fn list_sessions(
         SELECT session_id AS "session_id!",
                project_id, node_id, local_path, git_branch,
                is_worktree AS "is_worktree: bool",
-               agent_id, agent_session_id, parent_session_id, fork_from_node_seq,
+               agent_id, agent_session_id, parent_session_id AS "parent_session_id: SessionId",
+               fork_from_node_seq,
                title, status AS "status: SessionStatus", current_mode, usage_json,
                last_node_seq, created_at, updated_at,
                archived_at
@@ -107,7 +108,7 @@ pub async fn list_sessions(
     sessions.sort_by(|a, b| {
         b.updated_at
             .cmp(&a.updated_at)
-            .then_with(|| a.session_id.cmp(&b.session_id))
+            .then_with(|| a.session_id.as_str().cmp(b.session_id.as_str()))
     });
     if let Some(limit) = filter.limit {
         sessions.truncate(limit as usize);
@@ -126,7 +127,8 @@ pub async fn get_session(
         SELECT session_id AS "session_id!",
                project_id, node_id, local_path, git_branch,
                is_worktree AS "is_worktree: bool",
-               agent_id, agent_session_id, parent_session_id, fork_from_node_seq,
+               agent_id, agent_session_id, parent_session_id AS "parent_session_id: SessionId",
+               fork_from_node_seq,
                title, status AS "status: SessionStatus", current_mode, usage_json,
                last_node_seq, created_at, updated_at,
                archived_at
@@ -660,7 +662,8 @@ pub async fn audit_logs(pool: &SqlitePool, limit: u32) -> Result<Vec<AuditLogEnt
     let rows = sqlx::query_as!(
         AuditRow,
         r#"
-        SELECT id, action AS "action: AuditAction", session_id,
+        SELECT id, action AS "action: AuditAction",
+               session_id AS "session_id: SessionId",
                node_id AS "node_id: NodeId", client_ip,
                client_user_agent,
                auth_subject, details_json, created_at
@@ -698,7 +701,7 @@ pub async fn audit_logs(pool: &SqlitePool, limit: u32) -> Result<Vec<AuditLogEnt
 // ----------------------------------------------------------------------
 
 struct SessionRow {
-    session_id: String,
+    session_id: SessionId,
     project_id: String,
     node_id: NodeId,
     local_path: String,
@@ -706,7 +709,7 @@ struct SessionRow {
     is_worktree: bool,
     agent_id: String,
     agent_session_id: Option<String>,
-    parent_session_id: Option<String>,
+    parent_session_id: Option<SessionId>,
     fork_from_node_seq: Option<i64>,
     title: String,
     status: SessionStatus,
@@ -786,7 +789,7 @@ struct NodeRow {
 
 struct PermissionRow {
     request_id: String,
-    session_id: String,
+    session_id: SessionId,
     node_id: NodeId,
     tool_name: String,
     summary: String,
@@ -824,7 +827,7 @@ impl PermissionRow {
 
 struct ElicitationRow {
     elicitation_id: String,
-    session_id: String,
+    session_id: SessionId,
     node_id: NodeId,
     message: String,
     mode: ElicitationMode,
@@ -872,8 +875,8 @@ impl ElicitationRow {
 
 #[derive(sqlx::FromRow)]
 struct SearchRow {
-    event_id: String,
-    session_id: String,
+    event_id: EventId,
+    session_id: SessionId,
     node_seq: i64,
     event_type: EventType,
     created_at: i64,
@@ -900,7 +903,7 @@ impl SearchRow {
 struct AuditRow {
     id: i64,
     action: AuditAction,
-    session_id: Option<String>,
+    session_id: Option<SessionId>,
     node_id: Option<NodeId>,
     client_ip: String,
     client_user_agent: Option<String>,

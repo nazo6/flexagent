@@ -96,7 +96,7 @@ impl ClientApiBackend for DaemonState {
                 client_source,
             } => {
                 let result = manager
-                    .send_prompt(&command_id, &session_id, &text, client_source)
+                    .send_prompt(&command_id, session_id.as_str(), &text, client_source)
                     .await
                     .map(|()| session_id);
                 (command_id, result)
@@ -111,7 +111,7 @@ impl ClientApiBackend for DaemonState {
                 let result = manager
                     .respond_permission(
                         &command_id,
-                        &session_id,
+                        session_id.as_str(),
                         &request_id,
                         &selected_option_id,
                         resolved_by,
@@ -131,7 +131,7 @@ impl ClientApiBackend for DaemonState {
                 let result = manager
                     .respond_elicitation(
                         &command_id,
-                        &session_id,
+                        session_id.as_str(),
                         &elicitation_id,
                         action,
                         content,
@@ -147,7 +147,7 @@ impl ClientApiBackend for DaemonState {
                 action,
             } => {
                 let result = manager
-                    .control(&command_id, &session_id, &action)
+                    .control(&command_id, session_id.as_str(), &action)
                     .await
                     .map(|()| session_id);
                 (command_id, result)
@@ -190,7 +190,7 @@ impl ClientApiBackend for DaemonState {
             // Also refresh the binding of the fork source's working directory
             if let Some(source) = self
                 .db()
-                .get_session(&fork.from_session_id)
+                .get_session(fork.from_session_id.as_str())
                 .await
                 .map_err(ApiError::from)?
             {
@@ -202,7 +202,7 @@ impl ClientApiBackend for DaemonState {
                 .session_manager()
                 .fork(
                     &request.command_id,
-                    &fork.from_session_id,
+                    fork.from_session_id.as_str(),
                     fork.from_node_seq,
                     Some(&request.agent_id),
                     None,
@@ -217,7 +217,7 @@ impl ClientApiBackend for DaemonState {
             )
             .await;
             return Ok(CreateSessionResponse {
-                session_id: outcome.session_id,
+                session_id: outcome.session_id.into(),
                 command_id: request.command_id,
             });
         }
@@ -279,7 +279,7 @@ impl ClientApiBackend for DaemonState {
             .session_manager()
             .start_session(StartSessionParams {
                 command_id: &request.command_id,
-                session_id: &session_id,
+                session_id: session_id.as_str(),
                 local_path: &local_path,
                 agent_id: &request.agent_id,
                 initial_prompt: request.initial_prompt.as_deref(),
@@ -302,7 +302,7 @@ impl ClientApiBackend for DaemonState {
         .await;
 
         Ok(CreateSessionResponse {
-            session_id: outcome.session_id,
+            session_id: outcome.session_id.into(),
             command_id: request.command_id,
         })
     }
@@ -459,7 +459,7 @@ impl ClientApiBackend for DaemonState {
         )
         .await;
         Ok(ResumeSessionResponse {
-            session_id: outcome.session_id,
+            session_id: outcome.session_id.into(),
             context_restored: outcome.context_restored,
         })
     }
@@ -481,7 +481,7 @@ impl ClientApiBackend for DaemonState {
             .await
             .map_err(api_error)?;
         Ok(SessionArchiveResponse {
-            session_id: session_id.to_owned(),
+            session_id: session_id.into(),
             archived_at,
         })
     }
@@ -881,7 +881,7 @@ impl DaemonState {
             .map_err(ApiError::from)?;
         if let Some(entry) = pending
             .iter()
-            .find(|entry| entry.session_id == session_id && entry.request_id == request_id)
+            .find(|entry| entry.session_id.as_str() == session_id && entry.request_id == request_id)
             && let Some(option) = entry.options.iter().find(|option| option.kind.is_always())
         {
             return Ok(option.option_id.clone());

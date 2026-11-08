@@ -1513,7 +1513,7 @@ async fn pump_events(
 ) {
     while let Some(event) = event_rx.recv().await {
         match event {
-            DriverEvent::Delta(delta) => inner.bus.publish_delta(&session_id, delta),
+            DriverEvent::Delta(delta) => inner.bus.publish_delta(session_id.as_str(), delta),
             DriverEvent::Failed { message } => {
                 mark_status(
                     &inner,
@@ -2051,6 +2051,7 @@ mod tests {
     use super::*;
     use crate::testutil::MockAgent;
     use fxg_db::{Db, DbRole};
+    use fxg_protocol::SessionId;
     use fxg_protocol::common::{EventType, PermissionOptionKind};
     use fxg_protocol::config::{AgentsConfig, CustomAgentConfig};
 
@@ -2632,7 +2633,10 @@ mod tests {
             .await
             .expect("query")
             .expect("child row");
-        assert_eq!(child.parent_session_id.as_deref(), Some(source_id.as_str()));
+        assert_eq!(
+            child.parent_session_id.as_ref().map(SessionId::as_str),
+            Some(source_id.as_str())
+        );
         assert_eq!(child.fork_from_node_seq, Some(user_seq));
         assert_eq!(child.agent_id, "mock");
 

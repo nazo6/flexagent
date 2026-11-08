@@ -14,7 +14,7 @@ use crate::common::{
     ResolvedBy, SessionControlAction, WarningInfo, WorkspaceDiffResponse,
 };
 use crate::events::SessionEventEnvelope;
-use crate::{CommandId, NodeId};
+use crate::{CommandId, NodeId, SessionId};
 /// Synchronization state of a session held by the node (reported in `NodeHello`).
 ///
 /// The hub compares it with `last_node_seq` in its own DB and returns
@@ -22,7 +22,7 @@ use crate::{CommandId, NodeId};
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SessionSyncState {
     /// Target session ID
-    pub session_id: String,
+    pub session_id: SessionId,
     /// Latest `node_seq` persisted on the node
     pub last_node_seq: u64,
 }
@@ -31,7 +31,7 @@ pub struct SessionSyncState {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ResyncTarget {
     /// Target session ID
-    pub session_id: String,
+    pub session_id: SessionId,
     /// Resend events at or after (`>=`) this value regardless of the watermark
     /// (`1` means a full resend including `SessionCreated`)
     pub from_node_seq: u64,
@@ -75,7 +75,7 @@ pub enum NodeToServerMsg {
     /// Realtime ephemeral chunk (for fast rendering before the DB flush).
     LiveStreamDelta {
         /// Target session ID
-        session_id: String,
+        session_id: SessionId,
         /// The delta body
         delta: crate::common::StreamDeltaPayload,
     },
@@ -88,7 +88,7 @@ pub enum NodeToServerMsg {
         /// Structured error on failure
         error: Option<ErrorInfo>,
         /// Target session ID (optional)
-        session_id: Option<String>,
+        session_id: Option<SessionId>,
         /// Non-fatal issues (the command succeeded but part of the work failed)
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         warnings: Vec<WarningInfo>,
@@ -257,7 +257,7 @@ pub enum NodeToServerMsg {
     /// it exceeds the per-message limit (e.g. 16 MiB).
     WorkspaceBundleUpload {
         /// Target session ID
-        session_id: String,
+        session_id: SessionId,
         /// Target branch
         branch: String,
         /// HEAD commit
@@ -284,7 +284,7 @@ pub enum ServerToNodeMsg {
     /// as its watermark.
     EventBatchAck {
         /// Target session ID
-        session_id: String,
+        session_id: SessionId,
         /// Every `node_seq` at or below this value has been persisted in the hub
         acked_up_to_node_seq: u64,
     },
@@ -302,7 +302,7 @@ pub enum ServerToNodeMsg {
         /// Correlation ID
         command_id: CommandId,
         /// Session ID to start (assigned by the server)
-        session_id: String,
+        session_id: SessionId,
         /// Logical project ID
         project_id: String,
         /// Working directory (including the worktree path)
@@ -326,7 +326,7 @@ pub enum ServerToNodeMsg {
         /// Correlation ID
         command_id: CommandId,
         /// Target session ID
-        session_id: String,
+        session_id: SessionId,
         /// Prompt body
         text: String,
         /// Source (`cli` / `web` / `android`)
@@ -337,7 +337,7 @@ pub enum ServerToNodeMsg {
         /// Correlation ID
         command_id: CommandId,
         /// Target session ID
-        session_id: String,
+        session_id: SessionId,
         /// ACP request id
         request_id: String,
         /// The selected `option_id`
@@ -350,7 +350,7 @@ pub enum ServerToNodeMsg {
         /// Correlation ID
         command_id: CommandId,
         /// Target session ID
-        session_id: String,
+        session_id: SessionId,
         /// ACP elicitation id
         elicitation_id: String,
         /// The user's response action (`accept` / `decline` / `cancel`)
@@ -365,7 +365,7 @@ pub enum ServerToNodeMsg {
         /// Correlation ID
         command_id: CommandId,
         /// Target session ID
-        session_id: String,
+        session_id: SessionId,
         /// Operation to execute
         action: SessionControlAction,
     },
@@ -378,7 +378,7 @@ pub enum ServerToNodeMsg {
         /// Correlation ID
         command_id: CommandId,
         /// Target session ID
-        session_id: String,
+        session_id: SessionId,
         /// `node_seq` of the `UserMessage` used as the revert point
         /// (defaults to the latest turn)
         target_node_seq: Option<u64>,
@@ -391,7 +391,7 @@ pub enum ServerToNodeMsg {
         /// Correlation ID
         command_id: CommandId,
         /// Target session ID
-        session_id: String,
+        session_id: SessionId,
         /// Skip native restoration and continue with history replay
         force_replay: bool,
     },
@@ -403,7 +403,7 @@ pub enum ServerToNodeMsg {
         /// Correlation ID
         command_id: CommandId,
         /// Target session ID
-        session_id: String,
+        session_id: SessionId,
         /// `true` = archive, `false` = restore
         archived: bool,
     },
@@ -415,14 +415,14 @@ pub enum ServerToNodeMsg {
         /// Correlation ID
         command_id: CommandId,
         /// Target session ID
-        session_id: String,
+        session_id: SessionId,
     },
     /// Request to start a workspace web terminal (PTY).
     PtySpawn {
         /// PTY ID
         pty_id: String,
         /// Target session ID
-        session_id: String,
+        session_id: SessionId,
         /// Number of columns
         cols: u16,
         /// Number of rows
@@ -456,7 +456,7 @@ pub enum ServerToNodeMsg {
         /// Correlation ID
         request_id: String,
         /// Target session ID
-        session_id: String,
+        session_id: SessionId,
         /// Scope to fetch (uncommitted / cumulative against the base branch)
         scope: crate::common::DiffScope,
         /// Base branch used for `BranchBase`

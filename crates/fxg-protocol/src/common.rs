@@ -12,7 +12,7 @@ use std::str::FromStr;
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
-use crate::{CommandId, NodeId};
+use crate::{CommandId, EventId, NodeId, SessionId};
 
 /// Intentionally opaque JSON carried across the protocol.
 ///
@@ -641,7 +641,7 @@ impl fmt::Display for CompactionStatus {
 #[specta(collect)]
 pub struct SessionSummary {
     /// Session ID (UUID v7)
-    pub session_id: String,
+    pub session_id: SessionId,
     /// Logical project ID (e.g. `github.com/nazo6/flexagent`)
     pub project_id: String,
     /// ID of the node running the session
@@ -657,7 +657,7 @@ pub struct SessionSummary {
     /// Session ID inside the agent (fixed by the `SessionAgentBound` event)
     pub agent_session_id: Option<String>,
     /// Session ID this session was forked from
-    pub parent_session_id: Option<String>,
+    pub parent_session_id: Option<SessionId>,
     /// Event (`node_seq`) of the parent session the fork / revert started from
     pub fork_from_node_seq: Option<u64>,
     /// Session title
@@ -1432,7 +1432,7 @@ pub enum RecoveryAction {
     /// Resume a stopped session with replayed history
     ResumeWithReplay {
         /// Target session ID
-        session_id: String,
+        session_id: SessionId,
     },
     /// Reconnect to the target node
     ReconnectNode {
@@ -1458,7 +1458,7 @@ pub enum RecoveryAction {
     /// Revert to the nearest snapshot that can be restored
     RevertToNearestSnapshot {
         /// Target session ID
-        session_id: String,
+        session_id: SessionId,
         /// Candidate `node_seq` (the nearest snapshot when omitted)
         node_seq: Option<u64>,
     },
@@ -1470,7 +1470,7 @@ pub enum RecoveryAction {
     /// Show the logs / diagnostics for a session
     ShowLogs {
         /// Target session ID (all logs when omitted)
-        session_id: Option<String>,
+        session_id: Option<SessionId>,
     },
     /// Export a support bundle
     ExportDiagnostics,
@@ -1541,7 +1541,7 @@ pub struct CommandResult {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<ErrorInfo>,
     /// Target session ID (optional)
-    pub session_id: Option<String>,
+    pub session_id: Option<SessionId>,
     /// Non-fatal issues (the command succeeded but part of the work failed)
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub warnings: Vec<WarningInfo>,
@@ -1564,7 +1564,7 @@ pub enum CommandStatus {
 
 impl CommandResult {
     /// Builds a successful result.
-    pub fn success(command_id: impl Into<CommandId>, session_id: impl Into<String>) -> Self {
+    pub fn success(command_id: impl Into<CommandId>, session_id: impl Into<SessionId>) -> Self {
         Self {
             command_id: command_id.into(),
             success: true,
@@ -1692,7 +1692,7 @@ pub struct PermissionRequestEntry {
     /// ACP request id
     pub request_id: String,
     /// Target session ID
-    pub session_id: String,
+    pub session_id: SessionId,
     /// Target node ID
     pub node_id: NodeId,
     /// Tool name (e.g. `terminal/create`)
@@ -1723,7 +1723,7 @@ pub struct ElicitationRequestEntry {
     /// ACP elicitation id
     pub elicitation_id: String,
     /// Target session ID
-    pub session_id: String,
+    pub session_id: SessionId,
     /// Target node ID
     pub node_id: NodeId,
     /// Message shown to the user
@@ -1803,9 +1803,9 @@ crate::open_string_enum! {
 #[specta(collect)]
 pub struct SearchHit {
     /// Target session ID
-    pub session_id: String,
+    pub session_id: SessionId,
     /// Target event ID
-    pub event_id: String,
+    pub event_id: EventId,
     /// Sequence number inside the session
     pub node_seq: u64,
     /// Event type
@@ -1861,7 +1861,7 @@ pub struct AuditLogEntry {
     /// Action kind (`session_start` / `permission_resolved` / `pty_spawn` / `kill_switch` / `worktree_manage`)
     pub action: AuditAction,
     /// Related session ID (optional)
-    pub session_id: Option<String>,
+    pub session_id: Option<SessionId>,
     /// Target node ID (optional)
     pub node_id: Option<NodeId>,
     /// Source IP address
@@ -1934,7 +1934,7 @@ mod tests {
     fn error_info_carries_recovery_and_details() {
         let info = ErrorInfo::new(ErrorCode::ResumeRequired, "resume required")
             .with_recovery(RecoveryAction::ResumeWithReplay {
-                session_id: "s1".to_owned(),
+                session_id: "s1".into(),
             })
             .with_details(serde_json::json!({ "session_id": "s1" }))
             .with_param("session_id", "s1");

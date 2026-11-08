@@ -127,7 +127,7 @@ async fn reconcile_stale_sessions(bus: &SessionEventBus) -> Result<(), NodeError
             "marking session as stopped (daemon restarted)"
         );
         bus.record(
-            &session.session_id,
+            session.session_id.as_str(),
             UnifiedEventPayload::StatusChanged {
                 status: SessionStatus::Stopped,
                 error_message: None,
@@ -545,7 +545,7 @@ impl DaemonState {
                 .inner
                 .bus
                 .record(
-                    &session.session_id,
+                    session.session_id.as_str(),
                     UnifiedEventPayload::StatusChanged {
                         status: SessionStatus::Stopped,
                         error_message: Some(reason.to_owned()),
@@ -553,7 +553,7 @@ impl DaemonState {
                 )
                 .await
             {
-                Ok(_) => killed_sessions.push(session.session_id),
+                Ok(_) => killed_sessions.push(session.session_id.to_string()),
                 Err(err) => {
                     tracing::warn!("failed to stop session {}: {err}", session.session_id);
                 }

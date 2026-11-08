@@ -12,7 +12,6 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::CommandId;
 use crate::client_api::WorktreeInfo;
 use crate::common::{
     ClientSource, ElicitationAction, ElicitationContent, ElicitationRequestEntry, ErrorInfo,
@@ -20,6 +19,7 @@ use crate::common::{
     SessionControlAction, SessionSummary, StreamDeltaPayload,
 };
 use crate::events::SessionEventEnvelope;
+use crate::{CommandId, SessionId};
 
 /// Length of the length header of length-prefixed JSON (little-endian u32).
 pub const IPC_LENGTH_PREFIX_BYTES: usize = 4;
@@ -86,7 +86,7 @@ pub enum IpcClientMessage {
         /// Correlation ID
         command_id: CommandId,
         /// Target session ID
-        session_id: String,
+        session_id: SessionId,
         /// Prompt body
         text: String,
         /// Source (`cli` / `web` / `android`)
@@ -97,7 +97,7 @@ pub enum IpcClientMessage {
         /// Correlation ID
         command_id: CommandId,
         /// Target session ID
-        session_id: String,
+        session_id: SessionId,
         /// ACP request id
         request_id: String,
         /// The selected `option_id`
@@ -110,7 +110,7 @@ pub enum IpcClientMessage {
         /// Correlation ID
         command_id: CommandId,
         /// Target session ID
-        session_id: String,
+        session_id: SessionId,
         /// ACP elicitation id
         elicitation_id: String,
         /// The user's response action (`accept` / `decline` / `cancel`)
@@ -125,7 +125,7 @@ pub enum IpcClientMessage {
         /// Correlation ID
         command_id: CommandId,
         /// Target session ID
-        session_id: String,
+        session_id: SessionId,
         /// Operation to execute
         action: SessionControlAction,
     },
@@ -137,7 +137,7 @@ pub enum IpcClientMessage {
         /// Correlation ID
         command_id: CommandId,
         /// Target session ID
-        session_id: String,
+        session_id: SessionId,
         /// `node_seq` of the `UserMessage` used as the revert point
         /// (defaults to the latest turn)
         target_node_seq: Option<u64>,
@@ -150,7 +150,7 @@ pub enum IpcClientMessage {
         /// Correlation ID
         command_id: CommandId,
         /// Source session ID
-        session_id: String,
+        session_id: SessionId,
         /// `node_seq` of the fork source (defaults to the latest event)
         from_node_seq: Option<u64>,
         /// Agent ID to use in the fork (defaults to the same agent)
@@ -167,7 +167,7 @@ pub enum IpcClientMessage {
         /// Correlation ID
         command_id: CommandId,
         /// Target session ID
-        session_id: String,
+        session_id: SessionId,
         /// Skip native restoration and continue with history replay (`--replay`)
         force_replay: bool,
     },
@@ -179,7 +179,7 @@ pub enum IpcClientMessage {
         /// Correlation ID
         command_id: CommandId,
         /// Target session ID
-        session_id: String,
+        session_id: SessionId,
         /// `true` = archive, `false` = restore
         archived: bool,
     },
@@ -191,14 +191,14 @@ pub enum IpcClientMessage {
         /// Correlation ID
         command_id: CommandId,
         /// Target session ID
-        session_id: String,
+        session_id: SessionId,
     },
     /// Fetches session details (`fxg session show`).
     SessionShow {
         /// Correlation ID
         command_id: CommandId,
         /// Target session ID
-        session_id: String,
+        session_id: SessionId,
         /// Number of events to show from the end
         recent_events: u32,
     },
@@ -322,7 +322,7 @@ pub enum IpcResult {
     /// Result of `EnsureSession`
     EnsureSession {
         /// ID of the started session
-        session_id: String,
+        session_id: SessionId,
     },
     /// Result of `GetLocalStatus`
     LocalStatus {
@@ -333,7 +333,7 @@ pub enum IpcResult {
     /// (`SendPrompt` / `RespondPermission` / `ControlSession`)
     CommandAccepted {
         /// Target session ID (optional)
-        session_id: Option<String>,
+        session_id: Option<SessionId>,
     },
     /// Result of `SessionRevert`
     SessionReverted {
@@ -351,26 +351,26 @@ pub enum IpcResult {
     /// Result of `SessionFork`
     SessionForked {
         /// New session ID
-        session_id: String,
+        session_id: SessionId,
     },
     /// Result of `SessionResume`
     SessionResumed {
         /// Resumed session ID (the same as the requested one)
-        session_id: String,
+        session_id: SessionId,
         /// Whether native restoration succeeded (`false` = continued with history replay)
         context_restored: bool,
     },
     /// Result of `SessionArchive`
     SessionArchived {
         /// Target session ID
-        session_id: String,
+        session_id: SessionId,
         /// Archive time (Unix epoch ms). `None` when restored
         archived_at: Option<i64>,
     },
     /// Result of `SessionDelete`
     SessionDeleted {
         /// ID of the deleted session
-        session_id: String,
+        session_id: SessionId,
     },
     /// Result of `SessionShow`
     SessionDetail(Box<SessionDetail>),
@@ -469,7 +469,7 @@ pub enum IpcServerMessage {
     /// realtime delivery afterwards)
     EventBatch {
         /// Target session ID
-        session_id: String,
+        session_id: SessionId,
         /// Events (ascending `node_seq`)
         events: Vec<SessionEventEnvelope>,
         /// Cursor of the node DB
@@ -478,7 +478,7 @@ pub enum IpcServerMessage {
     /// An ephemeral chunk produced while streaming (never persisted)
     LiveStreamDelta {
         /// Target session ID
-        session_id: String,
+        session_id: SessionId,
         /// The delta body
         delta: StreamDeltaPayload,
     },

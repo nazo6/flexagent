@@ -104,7 +104,7 @@ export type AuditLogEntry = {
 	/**  Action kind (`session_start` / `permission_resolved` / `pty_spawn` / `kill_switch` / `worktree_manage`) */
 	action: string,
 	/**  Related session ID (optional) */
-	session_id: string | null,
+	session_id: SessionId | null,
 	/**  Target node ID (optional) */
 	node_id: NodeId | null,
 	/**  Source IP address */
@@ -150,13 +150,13 @@ export type ClientWsMessage =
 /**  Cursor of the last received batch */
 since_cursor: number | null; 
 /**  Currently open session (a hint for prioritized delivery) */
-focused_session_id: string | null } | 
+focused_session_id: SessionId | null } | 
 /**  Sends a prompt (including slash commands). */
 { op: "send_prompt"; 
 /**  Correlation ID */
 command_id: CommandId; 
 /**  Target session ID */
-session_id: string; 
+session_id: SessionId; 
 /**  Prompt body */
 text: string; 
 /**  Source (`cli` / `web` / `android`) */
@@ -166,7 +166,7 @@ client_source: string } |
 /**  Correlation ID */
 command_id: CommandId; 
 /**  Target session ID */
-session_id: string; 
+session_id: SessionId; 
 /**  ACP request id */
 request_id: string; 
 /**  The selected `option_id` */
@@ -178,7 +178,7 @@ resolved_by: string } |
 /**  Correlation ID */
 command_id: CommandId; 
 /**  Target session ID */
-session_id: string; 
+session_id: SessionId; 
 /**  ACP elicitation id */
 elicitation_id: string; 
 /**  The user's response action (`accept` / `decline` / `cancel`) */
@@ -192,7 +192,7 @@ resolved_by: string } |
 /**  Correlation ID */
 command_id: CommandId; 
 /**  Target session ID */
-session_id: string; 
+session_id: SessionId; 
 /**  Operation to execute */
 action: SessionControlAction } | 
 /**  Keep-alive */
@@ -225,7 +225,7 @@ export type CommandResult = {
 	/**  Structured error on failure */
 	error?: ErrorInfo | null,
 	/**  Target session ID (optional) */
-	session_id: string | null,
+	session_id: SessionId | null,
 	/**  Non-fatal issues (the command succeeded but part of the work failed) */
 	warnings?: WarningInfo[],
 	/**  What happened to the user's data (failures and destructive operations) */
@@ -319,7 +319,7 @@ export type CreateSessionRequest = {
 /**  `POST /api/v1/sessions` response. */
 export type CreateSessionResponse = {
 	/**  ID of the started session */
-	session_id: string,
+	session_id: SessionId,
 	/**  Correlation ID from the request */
 	command_id: CommandId,
 };
@@ -435,7 +435,7 @@ export type ElicitationRequestEntry = {
 	/**  ACP elicitation id */
 	elicitation_id: string,
 	/**  Target session ID */
-	session_id: string,
+	session_id: SessionId,
 	/**  Target node ID */
 	node_id: NodeId,
 	/**  Message shown to the user */
@@ -602,6 +602,9 @@ export type ErrorInfo = {
 	/**  Link to the troubleshooting documentation anchor */
 	docs?: string | null,
 };
+
+/**  ID of a persisted session event (UUID v7). */
+export type EventId = string;
 
 /**  Unified diff information of a file change. */
 export type FileDiff = {
@@ -821,7 +824,7 @@ export type PermissionRequestEntry = {
 	/**  ACP request id */
 	request_id: string,
 	/**  Target session ID */
-	session_id: string,
+	session_id: SessionId,
 	/**  Target node ID */
 	node_id: NodeId,
 	/**  Tool name (e.g. `terminal/create`) */
@@ -1019,7 +1022,7 @@ pty_id: string } |
 /**  Start a new PTY */
 { op: "spawn"; 
 /**  Target session ID */
-session_id: string; 
+session_id: SessionId; 
 /**  Number of columns */
 cols: number; 
 /**  Number of rows */
@@ -1100,7 +1103,7 @@ idempotent: boolean } |
 /**  Resume a stopped session with replayed history */
 { kind: "resume_with_replay"; 
 /**  Target session ID */
-session_id: string } | 
+session_id: SessionId } | 
 /**  Reconnect to the target node */
 { kind: "reconnect_node"; 
 /**  Target node ID */
@@ -1122,7 +1125,7 @@ branch: string | null } |
 /**  Revert to the nearest snapshot that can be restored */
 { kind: "revert_to_nearest_snapshot"; 
 /**  Target session ID */
-session_id: string; 
+session_id: SessionId; 
 /**  Candidate `node_seq` (the nearest snapshot when omitted) */
 node_seq: number | null } | 
 /**  Open the configuration file */
@@ -1132,7 +1135,7 @@ path: string } |
 /**  Show the logs / diagnostics for a session */
 { kind: "show_logs"; 
 /**  Target session ID (all logs when omitted) */
-session_id: string | null } | 
+session_id: SessionId | null } | 
 /**  Export a support bundle */
 { kind: "export_diagnostics" };
 
@@ -1202,7 +1205,7 @@ export type ResumeSessionRequest = {
 /**  `POST /api/v1/sessions/:id/resume` response. */
 export type ResumeSessionResponse = {
 	/**  Resumed session ID (the same as the requested one) */
-	session_id: string,
+	session_id: SessionId,
 	/**
 	 *  Whether the agent-side context could be restored natively
 	 *  (`false` = continued as a new agent session through history replay)
@@ -1219,9 +1222,9 @@ export type RotateAuthTokenResponse = {
 /**  A hit of the FTS5 full-text search. */
 export type SearchHit = {
 	/**  Target session ID */
-	session_id: string,
+	session_id: SessionId,
 	/**  Target event ID */
-	event_id: string,
+	event_id: EventId,
 	/**  Sequence number inside the session */
 	node_seq: number,
 	/**  Event type */
@@ -1252,7 +1255,7 @@ cursor: number } |
 /**  An ephemeral chunk produced while streaming (never persisted). */
 { op: "live_stream_delta"; 
 /**  Target session ID */
-session_id: string; 
+session_id: SessionId; 
 /**  The delta body */
 delta: StreamDeltaPayload } | 
 /**
@@ -1264,7 +1267,7 @@ delta: StreamDeltaPayload } |
  */
 { op: "bootstrap_log"; 
 /**  Target session ID */
-session_id: string; 
+session_id: SessionId; 
 /**  A single log line */
 line: string } | 
 /**  Result of a command (correlated back to the requesting client). */
@@ -1276,7 +1279,7 @@ success: boolean;
 /**  Structured error on failure */
 error?: ErrorInfo | null; 
 /**  Target session ID (optional) */
-session_id: string | null } | 
+session_id: SessionId | null } | 
 /**  Synchronization state notification (drives the sync badge in the UI). */
 { op: "system_status"; 
 /**  Whether the central server is connected (when connected to a local node) */
@@ -1306,7 +1309,7 @@ export type SessionArchiveRequest = {
 /**  `POST /api/v1/sessions/:id/archive` response. */
 export type SessionArchiveResponse = {
 	/**  Target session ID */
-	session_id: string,
+	session_id: SessionId,
 	/**  Archive time (Unix epoch ms). `None` when restored */
 	archived_at: number | null,
 };
@@ -1346,9 +1349,9 @@ export type SessionEventBatch = {
 /**  Envelope of a session event (the unit of persistence and synchronization). */
 export type SessionEventEnvelope = {
 	/**  Event ID (**UUID v7**). Used for idempotent application and deduplication. */
-	event_id: string,
+	event_id: EventId,
 	/**  Session ID (**UUID v7**). */
-	session_id: string,
+	session_id: SessionId,
 	/**
 	 *  Sequence number inside the session (`1, 2, 3...`). **Only the running node
 	 *  assigns it** and there are no gaps. The logical order inside a session is
@@ -1364,12 +1367,15 @@ export type SessionEventEnvelope = {
 /**  Specification of a context fork to another node or agent. */
 export type SessionForkSpec = {
 	/**  Source session ID */
-	from_session_id: string,
+	from_session_id: SessionId,
 	/**  Event sequence number of the fork source (latest when omitted) */
 	from_node_seq: number | null,
 	/**  Bundle data (Base64) when restoring a git bundle saved from an ephemeral VM */
 	restore_git_bundle_b64: string | null,
 };
+
+/**  ID of a session (UUID v7 assigned by the running node / server). */
+export type SessionId = string;
 
 /**  `GET /api/v1/sessions` response. */
 export type SessionListResponse = {
@@ -1435,7 +1441,7 @@ export type SessionStatus =
  */
 export type SessionSummary = {
 	/**  Session ID (UUID v7) */
-	session_id: string,
+	session_id: SessionId,
 	/**  Logical project ID (e.g. `github.com/nazo6/flexagent`) */
 	project_id: string,
 	/**  ID of the node running the session */
@@ -1451,7 +1457,7 @@ export type SessionSummary = {
 	/**  Session ID inside the agent (fixed by the `SessionAgentBound` event) */
 	agent_session_id: string | null,
 	/**  Session ID this session was forked from */
-	parent_session_id: string | null,
+	parent_session_id: SessionId | null,
 	/**  Event (`node_seq`) of the parent session the fork / revert started from */
 	fork_from_node_seq: number | null,
 	/**  Session title */
@@ -1590,7 +1596,7 @@ export type UnifiedEventPayload =
 	/**  Agent ID */
 	agent_id: string,
 	/**  Session ID this session was forked from */
-	parent_session_id: string | null,
+	parent_session_id: SessionId | null,
 	/**  Event (`node_seq`) of the fork source the history branched from */
 	fork_from_node_seq: number | null,
 	/**  Initial title */

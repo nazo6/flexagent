@@ -18,7 +18,7 @@
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
-use crate::NodeId;
+use crate::{EventId, NodeId, SessionId};
 
 use crate::common::{
     AttachmentMeta, ClientSource, CommandInfo, CompactionStatus, ConfigOptionInfo,
@@ -32,9 +32,9 @@ use crate::common::{
 #[specta(collect)]
 pub struct SessionEventEnvelope {
     /// Event ID (**UUID v7**). Used for idempotent application and deduplication.
-    pub event_id: String,
+    pub event_id: EventId,
     /// Session ID (**UUID v7**).
-    pub session_id: String,
+    pub session_id: SessionId,
     /// Sequence number inside the session (`1, 2, 3...`). **Only the running node
     /// assigns it** and there are no gaps. The logical order inside a session is
     /// always defined by this value.
@@ -99,7 +99,7 @@ pub enum UnifiedEventPayload {
         /// Agent ID
         agent_id: String,
         /// Session ID this session was forked from
-        parent_session_id: Option<String>,
+        parent_session_id: Option<SessionId>,
         /// Event (`node_seq`) of the fork source the history branched from
         fork_from_node_seq: Option<u64>,
         /// Initial title
@@ -415,8 +415,8 @@ mod tests {
 
     fn sample_envelope(payload: UnifiedEventPayload) -> SessionEventEnvelope {
         SessionEventEnvelope {
-            event_id: crate::util::uuid_v7(),
-            session_id: crate::util::uuid_v7(),
+            event_id: crate::util::uuid_v7().into(),
+            session_id: crate::util::uuid_v7().into(),
             node_seq: 1,
             created_at: crate::util::now_ms(),
             payload,

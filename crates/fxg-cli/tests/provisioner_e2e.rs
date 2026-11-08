@@ -176,7 +176,7 @@ async fn provisioner_runs_stdio_node_and_drains_bundle() {
         let db = server_state.db().clone();
         let session_id = session_id.clone();
         async move {
-            db.get_session(&session_id)
+            db.get_session(session_id.as_str())
                 .await
                 .expect("load session")
                 .map(|session| session.status == fxg_protocol::common::SessionStatus::Error)
@@ -203,7 +203,7 @@ async fn provisioner_runs_stdio_node_and_drains_bundle() {
         let db = server_state.db().clone();
         let session_id = session_id.clone();
         async move {
-            db.get_git_bundle_path(&session_id)
+            db.get_git_bundle_path(session_id.as_str())
                 .await
                 .expect("load git bundle path")
                 .is_some()
@@ -213,7 +213,7 @@ async fn provisioner_runs_stdio_node_and_drains_bundle() {
 
     let bundle_path = server_state
         .db()
-        .get_git_bundle_path(&session_id)
+        .get_git_bundle_path(session_id.as_str())
         .await
         .expect("bundle path query")
         .expect("bundle path");

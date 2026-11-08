@@ -354,7 +354,7 @@ mod tests {
         // Subscribe → replay
         let subscribe = fxg_protocol::client_api::ClientWsMessage::Subscribe {
             since_cursor: None,
-            focused_session_id: Some(session_id.clone()),
+            focused_session_id: Some(session_id.clone().into()),
         };
         socket
             .send(WsMessage::Text(
@@ -367,7 +367,7 @@ mod tests {
         match message {
             ServerWsMessage::EventBatch { events, cursor } => {
                 assert_eq!(events.len(), 1);
-                assert_eq!(events[0].session_id, session_id);
+                assert_eq!(events[0].session_id.as_str(), session_id);
                 assert_eq!(events[0].node_seq, 1);
                 assert!(cursor > 0, "cursor must be reported");
             }
@@ -408,7 +408,7 @@ mod tests {
                 session_id: id,
                 delta,
             } => {
-                assert_eq!(id, session_id);
+                assert_eq!(id.as_str(), session_id);
                 assert!(matches!(
                     delta,
                     fxg_protocol::common::StreamDeltaPayload::AgentMessageDelta { .. }
@@ -490,7 +490,7 @@ mod tests {
         match next_ws_message(&mut socket).await {
             ServerWsMessage::EventBatch { events, cursor } => {
                 assert_eq!(events.len(), 1, "stale cursor must not skip events");
-                assert_eq!(events[0].session_id, session_id);
+                assert_eq!(events[0].session_id.as_str(), session_id);
                 assert_eq!(events[0].node_seq, 1);
                 assert!(cursor <= 9_999, "cursor must be rewound to the store");
             }
@@ -520,7 +520,7 @@ mod tests {
         // Sending to a nonexistent session returns an INVALID_STATE CommandResult
         let command = fxg_protocol::client_api::ClientWsMessage::SendPrompt {
             command_id: "c1".into(),
-            session_id: "missing-session".to_owned(),
+            session_id: "missing-session".into(),
             text: "hello".to_owned(),
             client_source: fxg_protocol::common::ClientSource::Web,
         };
