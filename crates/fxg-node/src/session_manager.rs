@@ -379,7 +379,8 @@ impl SessionManager {
         let spec = self.resolve_launch_spec(agent_id, extra_args).await?;
 
         // SessionCreated (node_seq = 1)
-        let (git_branch, is_worktree) = branch_and_worktree(&resolved.local_path).await;
+        let (git_branch, is_worktree) =
+            git_metadata_or_warn(&resolved.local_path, &session_id).await;
         let title = format!("{} @ {}", spec.display_name, resolved.name);
         self.inner
             .bus
@@ -442,7 +443,8 @@ impl SessionManager {
             .await?;
 
         // SessionCreated (node_seq = 1)
-        let (git_branch, is_worktree) = branch_and_worktree(&resolved.local_path).await;
+        let (git_branch, is_worktree) =
+            git_metadata_or_warn(&resolved.local_path, params.session_id).await;
         let default_title = format!("{} @ {}", spec.display_name, resolved.name);
         let (title, has_custom_title) = if let Some(prompt) = params.initial_prompt
             && let Some(derived) = derive_title_from_prompt(prompt)
@@ -484,8 +486,12 @@ impl SessionManager {
             .await?;
 
         // Initial prompt (executed as-is when a session is started remotely)
-        if let Some(prompt) = params.initial_prompt.filter(|text| !text.trim().is_empty()) {
-            self.start_turn(params.session_id, prompt, "web").await?;
+        if let Some(prompt) = params.initial_prompt.filter(|text| !text.trim().is_empty())
+            && let Err(err) = self.start_turn(params.session_id, prompt, "web").await
+        {
+            return Err(self
+                .fail_context_injection(params.session_id, "initial prompt injection", err)
+                .await);
         }
 
         // Fork from another node / ephemeral VM: inject the history replay as initial context
@@ -494,10 +500,9 @@ impl SessionManager {
             .and_then(|items| build_history_replay_context_from_items(items, ReplayPurpose::Fork))
             && let Err(err) = self.start_turn(params.session_id, &context, "fork").await
         {
-            tracing::warn!(
-                session_id = %params.session_id,
-                "failed to inject fork context: {err:#}"
-            );
+            return Err(self
+                .fail_context_injection(params.session_id, "fork context injection", err)
+                .await);
         }
 
         Ok(EnsureSessionOutcome {
@@ -782,7 +787,7 @@ impl SessionManager {
         let cwd = new_cwd
             .map(Path::to_path_buf)
             .unwrap_or_else(|| PathBuf::from(&source.local_path));
-        let (git_branch, is_worktree) = branch_and_worktree(&cwd).await;
+        let (git_branch, is_worktree) = git_metadata_or_warn(&cwd, &new_session_id).await;
         let title = format!("Fork of {}", source.title);
         self.inner
             .bus
@@ -820,10 +825,9 @@ impl SessionManager {
         if let Some(context) = build_history_replay_context(&events, fork_seq, ReplayPurpose::Fork)
             && let Err(err) = self.start_turn(&new_session_id, &context, "fork").await
         {
-            tracing::warn!(
-                session_id = %new_session_id,
-                "failed to inject fork context: {err:#}"
-            );
+            return Err(self
+                .fail_context_injection(&new_session_id, "fork context injection", err)
+                .await);
         }
 
         Ok(EnsureSessionOutcome {
@@ -889,10 +893,9 @@ impl SessionManager {
                 build_history_replay_context(&events, up_to_seq, ReplayPurpose::Resume)
                 && let Err(err) = self.start_turn(params.session_id, &context, "resume").await
             {
-                tracing::warn!(
-                    session_id = params.session_id,
-                    "failed to inject resume context: {err:#}"
-                );
+                return Err(self
+                    .fail_context_injection(params.session_id, "resume context injection", err)
+                    .await);
             }
         }
 
@@ -1342,6 +1345,47 @@ impl SessionManager {
 
     /// Stops an active session and waits for the agent process to exit.
     ///
+    /// Stops a session whose context injection failed and records the reason as
+    /// its error status.
+    ///
+    /// Returning a plain error while leaving the session active would make a
+    /// retry fail with "already active" and leave the user with a session that
+    /// looks usable but has no context. Stopping it first keeps the failure
+    /// recoverable.
+    async fn fail_context_injection(
+        &self,
+        session_id: &str,
+        purpose: &str,
+        err: NodeError,
+    ) -> NodeError {
+        let message = format!("{purpose} failed: {err}");
+        tracing::warn!(session_id, "{message}");
+        if let Err(stop_err) = self.stop_if_active(session_id).await {
+            tracing::warn!(
+                session_id,
+                "failed to stop session after context injection failure: {stop_err:#}"
+            );
+        }
+        if let Err(record_err) = self
+            .inner
+            .bus
+            .record(
+                session_id,
+                UnifiedEventPayload::StatusChanged {
+                    status: SessionStatus::Error,
+                    error_message: Some(message.clone()),
+                },
+            )
+            .await
+        {
+            tracing::warn!(
+                session_id,
+                "failed to record context injection failure: {record_err:#}"
+            );
+        }
+        NodeError::Agent(message)
+    }
+
     /// On timeout it only warns and continues (does not block deletion; later events
     /// are discarded as appends to a deleted session).
     async fn stop_if_active(&self, session_id: &str) -> Result<(), NodeError> {
@@ -1925,33 +1969,49 @@ fn assemble_replay_context(
 
 /// Captures a Shadow Git Tree snapshot of the working directory.
 ///
-/// `None` for non-Git directories or on failure (recorded as a turn that cannot be reverted).
+/// `None` for non-Git directories or on failure (recorded as a turn that cannot
+/// be reverted). Failures are logged at `warn` with the working directory so
+/// that a later "no snapshot" revert error can be traced back to this turn.
 async fn snapshot_tree_hash(cwd: &Path, index_path: &Path, session_id: &str) -> Option<String> {
     let tree = ShadowGitTree::new(cwd, index_path, session_id);
     match tree.snapshot().await {
         Ok(outcome) => outcome.tree_hash().map(str::to_owned),
         Err(err) => {
-            tracing::debug!(session_id, "snapshot skipped: {err}");
+            tracing::warn!(
+                session_id,
+                cwd = %cwd.display(),
+                "snapshot skipped (revert will be unavailable for this turn): {err:#}"
+            );
             None
         }
     }
 }
 
 /// Returns the current branch and the worktree determination.
-async fn branch_and_worktree(cwd: &Path) -> (Option<String>, bool) {
-    let branch = crate::git::try_git(cwd, &["rev-parse", "--abbrev-ref", "HEAD"])
-        .await
-        .ok()
-        .flatten();
-    let git_dir = crate::git::try_git(cwd, &["rev-parse", "--git-dir"])
-        .await
-        .ok()
-        .flatten();
+async fn branch_and_worktree(cwd: &Path) -> Result<(Option<String>, bool), NodeError> {
+    let branch = crate::git::try_git(cwd, &["rev-parse", "--abbrev-ref", "HEAD"]).await?;
+    let git_dir = crate::git::try_git(cwd, &["rev-parse", "--git-dir"]).await?;
     let is_worktree = git_dir
         .as_deref()
         .map(|dir| dir.contains("worktrees"))
         .unwrap_or(false);
-    (branch, is_worktree)
+    Ok((branch, is_worktree))
+}
+
+/// Resolves git metadata for `SessionCreated`, degrading to "unknown" with a
+/// warning instead of silently losing the branch / worktree flags.
+async fn git_metadata_or_warn(cwd: &Path, session_id: &str) -> (Option<String>, bool) {
+    match branch_and_worktree(cwd).await {
+        Ok(metadata) => metadata,
+        Err(err) => {
+            tracing::warn!(
+                session_id,
+                cwd = %cwd.display(),
+                "failed to resolve git metadata: {err:#}"
+            );
+            (None, false)
+        }
+    }
 }
 
 #[cfg(test)]

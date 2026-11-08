@@ -186,7 +186,11 @@ pub async fn load_project_config(cwd: &Path) -> Result<Option<ProjectConfig>, No
 /// Shared by `fxg project link` and the client API (`POST .../projects/link`).
 pub fn patch_project_key(dir: &Path, project_key: &str) -> Result<(), NodeError> {
     let path = dir.join(fxg_protocol::config::PROJECT_CONFIG_FILE_NAME);
-    let existing = std::fs::read_to_string(&path).unwrap_or_default();
+    let existing = match std::fs::read_to_string(&path) {
+        Ok(text) => text,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(err) => return Err(NodeError::io(&path, err)),
+    };
     let mut lines: Vec<String> = existing.lines().map(str::to_owned).collect();
 
     // Embed safely as a TOML string literal
@@ -473,6 +477,21 @@ mod tests {
         )
         .expect("read");
         assert_eq!(text.matches("project_key").count(), 1);
+    }
+
+    #[test]
+    fn patch_project_key_does_not_overwrite_unreadable_config() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir
+            .path()
+            .join(fxg_protocol::config::PROJECT_CONFIG_FILE_NAME);
+        // A directory at the config path makes read_to_string fail with a
+        // non-NotFound error. The existing path must not be replaced by a file.
+        std::fs::create_dir(&path).expect("create directory");
+        let err = patch_project_key(dir.path(), "github.com/nazo6/flexagent")
+            .expect_err("patch must fail");
+        assert!(matches!(err, NodeError::Io { .. }));
+        assert!(path.is_dir(), "existing path must be left untouched");
     }
 
     fn canonical(path: &Path) -> PathBuf {

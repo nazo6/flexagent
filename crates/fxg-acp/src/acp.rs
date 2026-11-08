@@ -823,7 +823,16 @@ async fn run_acp_process(params: AcpProcessTaskParams) -> Result<(), agent_clien
                         return responder.respond_with_internal_error("unknown session");
                     };
                     let path = resolve_path(&context.cwd, &request.path);
-                    let old_text = std::fs::read_to_string(&path).unwrap_or_default();
+                    let old_text = match std::fs::read_to_string(&path) {
+                        Ok(text) => text,
+                        Err(err) if err.kind() == std::io::ErrorKind::NotFound => String::new(),
+                        Err(err) => {
+                            return responder.respond_with_internal_error(format!(
+                                "failed to read {} before writing: {err}",
+                                path.display()
+                            ));
+                        }
+                    };
                     match std::fs::write(&path, &request.content) {
                         Ok(()) => {
                             let path_string = path.to_string_lossy().into_owned();
@@ -1323,7 +1332,15 @@ async fn serve_session(
                                     }
                                 }
                                 Err(err) => {
-                                    tracing::warn!("acp prompt returned error: {err}");
+                                    let message = format!("agent turn failed: {err}");
+                                    tracing::warn!("{message}");
+                                    let _ = events.send(DriverEvent::Event(
+                                        UnifiedEventPayload::StatusChanged {
+                                            status: fxg_protocol::common::SessionStatus::Error,
+                                            error_message: Some(message),
+                                        },
+                                    ));
+                                    break;
                                 }
                             }
                             let _ = events.send(DriverEvent::Event(
