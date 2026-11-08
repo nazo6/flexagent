@@ -7,6 +7,7 @@
 use std::path::{Path, PathBuf};
 
 use async_trait::async_trait;
+use fxg_protocol::CommandId;
 use fxg_protocol::client_api::{
     AgentOpResponse, AgentsResponse, ConnectionRole, CreateSessionRequest, CreateSessionResponse,
     CreateWorktreeRequest, KillSwitchResponse, ProjectLinkRequest, ProjectLinkResponse,
@@ -313,7 +314,7 @@ impl ClientApiBackend for DaemonState {
         let selected = self
             .resolve_permission_option(session_id, request_id, &request)
             .await?;
-        let command_id = fxg_protocol::util::uuid_v7();
+        let command_id = CommandId::from(fxg_protocol::util::uuid_v7());
         match self
             .session_manager()
             .respond_permission(
@@ -357,7 +358,7 @@ impl ClientApiBackend for DaemonState {
         request: RespondElicitationRequest,
         client: ClientInfo,
     ) -> Result<RespondElicitationResponse, ApiError> {
-        let command_id = fxg_protocol::util::uuid_v7();
+        let command_id = CommandId::from(fxg_protocol::util::uuid_v7());
         match self
             .session_manager()
             .respond_elicitation(
@@ -401,7 +402,7 @@ impl ClientApiBackend for DaemonState {
         request: SessionRevertRequest,
         client: ClientInfo,
     ) -> Result<SessionRevertResponse, ApiError> {
-        let command_id = fxg_protocol::util::uuid_v7();
+        let command_id = CommandId::from(fxg_protocol::util::uuid_v7());
         let outcome = self
             .session_manager()
             .revert(&command_id, session_id, request.target_node_seq)
@@ -434,7 +435,7 @@ impl ClientApiBackend for DaemonState {
         request: ResumeSessionRequest,
         client: ClientInfo,
     ) -> Result<ResumeSessionResponse, ApiError> {
-        let command_id = fxg_protocol::util::uuid_v7();
+        let command_id = CommandId::from(fxg_protocol::util::uuid_v7());
         let outcome = self
             .session_manager()
             .resume(ResumeParams {
@@ -466,7 +467,7 @@ impl ClientApiBackend for DaemonState {
         request: SessionArchiveRequest,
         client: ClientInfo,
     ) -> Result<SessionArchiveResponse, ApiError> {
-        let command_id = fxg_protocol::util::uuid_v7();
+        let command_id = CommandId::from(fxg_protocol::util::uuid_v7());
         let archived_at = self
             .set_session_archived(
                 &command_id,
@@ -483,7 +484,7 @@ impl ClientApiBackend for DaemonState {
     }
 
     async fn delete_session(&self, session_id: &str, client: ClientInfo) -> Result<(), ApiError> {
-        let command_id = fxg_protocol::util::uuid_v7();
+        let command_id = CommandId::from(fxg_protocol::util::uuid_v7());
         self.purge_session(&command_id, session_id, &audit_source(&client))
             .await
             .map_err(api_error)?;

@@ -22,6 +22,7 @@ use std::sync::{Arc, Mutex as StdMutex};
 use std::time::{Duration, Instant};
 
 use base64::Engine as _;
+use fxg_protocol::CommandId;
 use fxg_protocol::client_api::ProvisionerTestResponse;
 use fxg_protocol::common::{ForkHistoryItem, NodeLifecycleStatus, SessionStatus};
 use fxg_protocol::config::{
@@ -815,7 +816,7 @@ async fn await_handshake_and_start(
         );
     }
 
-    let command_id = uuid_v7();
+    let command_id = CommandId::from(uuid_v7());
     let message = ServerToNodeMsg::StartSession {
         command_id: command_id.clone(),
         session_id: pending.session_id.clone(),

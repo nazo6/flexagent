@@ -373,10 +373,55 @@ pub enum ConfigOptionValue {
 
 ### Phase 4: ID newtype（任意・戦略的）
 
-- [ ] `SessionId` / `NodeId` / `ProjectId` / `CommandId` / `EventId` /
-      `RequestId` / `AgentId`
-- [ ] protocol → server/node → db の順で段階導入
-- [ ] `#[serde(transparent)]` + specta で TS は `string` を維持
+全面置換はせず、**protocol の公開 DTO とクレート間 API の境界**だけを型化する。
+内部実装は `&str` のまま残し、必要箇所で `as_str()` する。
+
+#### Tier A: ルーティング / 相関 ID（必須）
+
+- [x] `CommandId`
+  - [x] `fxg-protocol/src/ids.rs` に `string_id!` マクロと `CommandId` を追加
+  - [x] `ServerToNodeMsg` / `NodeToServerMsg` / IPC / Client WS / REST の
+        `command_id` を `CommandId` に
+  - [x] `fxg-server` の hub `command` / `worktree_op` / `resume_session` /
+        `archive_session` / `delete_session` を `&CommandId` に
+  - [x] `fxg-node` の IPC dispatch / sync / session manager の command 系 API を型化
+  - [x] `fxg-cli` の `DaemonClient::command_id()` が `CommandId` を返す
+- [ ] `NodeId`
+- [ ] `SessionId`
+- [ ] `EventId`
+
+#### Tier B: ドメイン束縛
+
+- [ ] `ProjectId`
+
+#### Tier C: 必要になったときだけ
+
+- [ ] `PermissionRequestId`（`RequestId` という単一型にはしない）
+- [ ] `ElicitationId`
+- [ ] `AgentId`
+
+#### やらないこと
+
+- `option_id` / `selected_option_id` / `mode_id` / `tool_call_id` など
+  プロトコル語彙の newtype 化
+- 内部の `HashMap<String, _>` や SQL 文字列の一括置換
+- `Deref<Target = str>`（`&SessionId` が `&str` に自動変換され、型付けの意味が消える）
+- `Default`（空 ID を有効値にしない）
+- `FromStr` での UUID 形式検証（既存 DB / `project_id` の `local:` 形式を壊さない）
+
+#### Phase 4 の移行メモ
+
+- `string_id!` は `#[serde(transparent)]` + `#[specta(transparent)]` で、
+  JSON / DB / TypeScript は従来どおり `string`
+  （生成 TS は `export type CommandId = string`）。
+- `From<String>` / `From<&str>` / `as_str()` / `Display` / `AsRef<str>` /
+  infallible な `FromStr` を生成する。SQLx は `impl_sqlx_text!` を再利用。
+- テスト用の比較のために `PartialEq<str>` / `PartialEq<&str>` も生成する。
+  本番コードでは ID 同士を比較する。
+- CommandId は永続化されない（相関 ID）ため、DB migration は不要。
+- `request()` のような複数種の相関 ID を受ける汎用関数は `&str` のままにし、
+  型付きの `command()` から `.as_str()` で渡す。git diff / agents の
+  `request_id` は Tier C まで文字列のまま。
 
 ### Phase 5: 定着
 
@@ -450,3 +495,6 @@ pub enum ConfigOptionValue {
   `AuditAction` / `EventType` に型化した。`fxg-protocol` に `sqlx` feature と
   `impl_sqlx_text!` を追加し、SQL の status リテラルを bind に置き換えた。
   全 variant の INSERT → SELECT 往復テストを追加し、`.sqlx` を再生成した。
+- 2026-11-08: Phase 4 の `CommandId` パイロットを実装。`string_id!` で
+  transparent な newtype を生成し、protocol / hub / IPC / CLI の command ID を
+  型化した。`Deref` / `Default` / UUID 検証は意図的に実装していない。

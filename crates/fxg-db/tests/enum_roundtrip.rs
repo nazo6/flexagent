@@ -428,3 +428,23 @@ async fn unknown_session_status_is_not_silently_coerced() {
         "a closed enum must reject unknown DB values instead of coercing them"
     );
 }
+
+#[tokio::test]
+async fn command_id_sqlx_roundtrip() {
+    let (db, _session_id) = fixture().await;
+    sqlx::query("CREATE TEMP TABLE id_probe (id TEXT NOT NULL)")
+        .execute(db.pool())
+        .await
+        .expect("create probe table");
+    let id = fxg_protocol::CommandId::from("cmd-probe-1");
+    sqlx::query("INSERT INTO id_probe (id) VALUES (?)")
+        .bind(&id)
+        .execute(db.pool())
+        .await
+        .expect("insert id");
+    let decoded: fxg_protocol::CommandId = sqlx::query_scalar("SELECT id FROM id_probe")
+        .fetch_one(db.pool())
+        .await
+        .expect("select id");
+    assert_eq!(decoded, id);
+}

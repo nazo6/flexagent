@@ -9,6 +9,7 @@
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
+use crate::CommandId;
 use crate::common::{
     AuditLogEntry, ClientSource, CommandResult, ElicitationAction, ElicitationContent,
     ElicitationRequestEntry, ErrorInfo, NodeSummary, PermissionRequestEntry, ProjectSummary,
@@ -365,7 +366,7 @@ pub struct SessionForkSpec {
 #[specta(collect)]
 pub struct CreateSessionRequest {
     /// Correlation ID assigned by the client (used for idempotent duplicate rejection)
-    pub command_id: String,
+    pub command_id: CommandId,
     /// Logical project ID
     pub project_id: String,
     /// ID of the resident node to run on (mutually exclusive with `provisioner`)
@@ -395,7 +396,7 @@ pub struct CreateSessionResponse {
     /// ID of the started session
     pub session_id: String,
     /// Correlation ID from the request
-    pub command_id: String,
+    pub command_id: CommandId,
 }
 
 /// `GET /api/v1/inbox` response (unresolved permission requests across all sessions).
@@ -612,7 +613,7 @@ pub enum ClientWsMessage {
     /// Sends a prompt (including slash commands).
     SendPrompt {
         /// Correlation ID
-        command_id: String,
+        command_id: CommandId,
         /// Target session ID
         session_id: String,
         /// Prompt body
@@ -623,7 +624,7 @@ pub enum ClientWsMessage {
     /// Answers a permission request.
     RespondPermission {
         /// Correlation ID
-        command_id: String,
+        command_id: CommandId,
         /// Target session ID
         session_id: String,
         /// ACP request id
@@ -636,7 +637,7 @@ pub enum ClientWsMessage {
     /// Answers an elicitation (structured input request).
     RespondElicitation {
         /// Correlation ID
-        command_id: String,
+        command_id: CommandId,
         /// Target session ID
         session_id: String,
         /// ACP elicitation id
@@ -651,7 +652,7 @@ pub enum ClientWsMessage {
     /// Mode switch / configuration change / cancel / kill.
     ControlSession {
         /// Correlation ID
-        command_id: String,
+        command_id: CommandId,
         /// Target session ID
         session_id: String,
         /// Operation to execute
@@ -695,7 +696,7 @@ pub enum ServerWsMessage {
     /// Result of a command (correlated back to the requesting client).
     CommandResult {
         /// Correlation ID
-        command_id: String,
+        command_id: CommandId,
         /// Whether it succeeded
         success: bool,
         /// Structured error on failure

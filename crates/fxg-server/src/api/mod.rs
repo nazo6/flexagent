@@ -35,6 +35,7 @@ use axum::routing::{delete, get, post, put};
 use axum::{Extension, Json, Router};
 use futures_util::SinkExt;
 use fxg_db::{Db, DbError, SessionFilter};
+use fxg_protocol::CommandId;
 use fxg_protocol::client_api::{
     AgentOpResponse, AgentsResponse, ApiErrorResponse, AuditLogsResponse, AuthLoginRequest,
     ConnectionRole, CreateSessionRequest, CreateSessionResponse, CreateWorktreeRequest,
@@ -359,7 +360,7 @@ pub enum ClientCommand {
     /// Prompt submission
     SendPrompt {
         /// Correlation ID
-        command_id: String,
+        command_id: CommandId,
         /// Target session ID
         session_id: String,
         /// Prompt body
@@ -370,7 +371,7 @@ pub enum ClientCommand {
     /// Response to an approval request
     RespondPermission {
         /// Correlation ID
-        command_id: String,
+        command_id: CommandId,
         /// Target session ID
         session_id: String,
         /// ACP request id
@@ -383,7 +384,7 @@ pub enum ClientCommand {
     /// Response to an elicitation (structured input request)
     RespondElicitation {
         /// Correlation ID
-        command_id: String,
+        command_id: CommandId,
         /// Target session ID
         session_id: String,
         /// ACP elicitation id
@@ -398,7 +399,7 @@ pub enum ClientCommand {
     /// Mode switch / configuration change / cancel / kill
     ControlSession {
         /// Correlation ID
-        command_id: String,
+        command_id: CommandId,
         /// Target session ID
         session_id: String,
         /// Operation to perform
@@ -464,7 +465,7 @@ impl ClientCommand {
     }
 
     /// Correlation ID.
-    pub fn command_id(&self) -> &str {
+    pub fn command_id(&self) -> &CommandId {
         match self {
             Self::SendPrompt { command_id, .. }
             | Self::RespondPermission { command_id, .. }

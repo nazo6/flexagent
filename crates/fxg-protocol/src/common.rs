@@ -12,6 +12,8 @@ use std::str::FromStr;
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
+use crate::CommandId;
+
 /// Intentionally opaque JSON carried across the protocol.
 ///
 /// Use this only at a declared boundary (tool arguments, error details, audit
@@ -1532,7 +1534,7 @@ pub enum DataSafety {
 #[specta(collect)]
 pub struct CommandResult {
     /// Correlation ID attached to each `ServerToNodeMsg` command
-    pub command_id: String,
+    pub command_id: CommandId,
     /// Whether it succeeded
     pub success: bool,
     /// Structured error on failure
@@ -1562,7 +1564,7 @@ pub enum CommandStatus {
 
 impl CommandResult {
     /// Builds a successful result.
-    pub fn success(command_id: impl Into<String>, session_id: impl Into<String>) -> Self {
+    pub fn success(command_id: impl Into<CommandId>, session_id: impl Into<String>) -> Self {
         Self {
             command_id: command_id.into(),
             success: true,
@@ -1577,10 +1579,10 @@ impl CommandResult {
     ///
     /// The command ID is used as the correlation ID when the error does not
     /// carry one, so the UI can quote it when reporting a problem.
-    pub fn failure(command_id: impl Into<String>, mut error: ErrorInfo) -> Self {
+    pub fn failure(command_id: impl Into<CommandId>, mut error: ErrorInfo) -> Self {
         let command_id = command_id.into();
         if error.request_id.is_none() {
-            error.request_id = Some(command_id.clone());
+            error.request_id = Some(command_id.as_str().to_owned());
         }
         Self {
             command_id,

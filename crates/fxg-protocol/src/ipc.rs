@@ -12,6 +12,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::CommandId;
 use crate::client_api::WorktreeInfo;
 use crate::common::{
     ClientSource, ElicitationAction, ElicitationContent, ElicitationRequestEntry, ErrorInfo,
@@ -64,7 +65,7 @@ pub enum IpcClientMessage {
     /// Called by `fxg run <agent>`; the daemon starts the session.
     EnsureSession {
         /// Correlation ID
-        command_id: String,
+        command_id: CommandId,
         /// Working directory (current directory / worktree)
         cwd: String,
         /// Agent ID
@@ -78,12 +79,12 @@ pub enum IpcClientMessage {
     /// number of unsent outbox events.
     GetLocalStatus {
         /// Correlation ID
-        command_id: String,
+        command_id: CommandId,
     },
     /// Sends a prompt (including slash commands).
     SendPrompt {
         /// Correlation ID
-        command_id: String,
+        command_id: CommandId,
         /// Target session ID
         session_id: String,
         /// Prompt body
@@ -94,7 +95,7 @@ pub enum IpcClientMessage {
     /// Answers a permission request.
     RespondPermission {
         /// Correlation ID
-        command_id: String,
+        command_id: CommandId,
         /// Target session ID
         session_id: String,
         /// ACP request id
@@ -107,7 +108,7 @@ pub enum IpcClientMessage {
     /// Answers an elicitation (structured input request).
     RespondElicitation {
         /// Correlation ID
-        command_id: String,
+        command_id: CommandId,
         /// Target session ID
         session_id: String,
         /// ACP elicitation id
@@ -122,7 +123,7 @@ pub enum IpcClientMessage {
     /// Mode switch / configuration change / cancel / kill.
     ControlSession {
         /// Correlation ID
-        command_id: String,
+        command_id: CommandId,
         /// Target session ID
         session_id: String,
         /// Operation to execute
@@ -134,7 +135,7 @@ pub enum IpcClientMessage {
     /// `session_reverted` event (`docs/04-agent-drivers-and-windows.md` §4.1).
     SessionRevert {
         /// Correlation ID
-        command_id: String,
+        command_id: CommandId,
         /// Target session ID
         session_id: String,
         /// `node_seq` of the `UserMessage` used as the revert point
@@ -147,7 +148,7 @@ pub enum IpcClientMessage {
     /// `node_seq` into the new agent session as the initial context.
     SessionFork {
         /// Correlation ID
-        command_id: String,
+        command_id: CommandId,
         /// Source session ID
         session_id: String,
         /// `node_seq` of the fork source (defaults to the latest event)
@@ -164,7 +165,7 @@ pub enum IpcClientMessage {
     /// history replay).
     SessionResume {
         /// Correlation ID
-        command_id: String,
+        command_id: CommandId,
         /// Target session ID
         session_id: String,
         /// Skip native restoration and continue with history replay (`--replay`)
@@ -176,7 +177,7 @@ pub enum IpcClientMessage {
     /// is kept.
     SessionArchive {
         /// Correlation ID
-        command_id: String,
+        command_id: CommandId,
         /// Target session ID
         session_id: String,
         /// `true` = archive, `false` = restore
@@ -188,14 +189,14 @@ pub enum IpcClientMessage {
     /// (irreversible; only the tombstone used for synchronization remains).
     SessionDelete {
         /// Correlation ID
-        command_id: String,
+        command_id: CommandId,
         /// Target session ID
         session_id: String,
     },
     /// Fetches session details (`fxg session show`).
     SessionShow {
         /// Correlation ID
-        command_id: String,
+        command_id: CommandId,
         /// Target session ID
         session_id: String,
         /// Number of events to show from the end
@@ -204,25 +205,25 @@ pub enum IpcClientMessage {
     /// Lists requests waiting for approval (`fxg inbox list`).
     InboxList {
         /// Correlation ID
-        command_id: String,
+        command_id: CommandId,
     },
     /// Resolves the logical project of a given directory (`fxg project info`).
     ProjectInfo {
         /// Correlation ID
-        command_id: String,
+        command_id: CommandId,
         /// Directory to resolve
         cwd: String,
     },
     /// Lists registered logical projects (`fxg project list`).
     ProjectList {
         /// Correlation ID
-        command_id: String,
+        command_id: CommandId,
     },
     /// Manually links the current directory to a logical project ID
     /// (stored in `.fxg.toml`. `fxg project link`)
     ProjectLink {
         /// Correlation ID
-        command_id: String,
+        command_id: CommandId,
         /// Target directory
         cwd: String,
         /// Logical project ID to link to
@@ -231,14 +232,14 @@ pub enum IpcClientMessage {
     /// Scans the git repositories under a directory in bulk (`fxg project scan`).
     ProjectScan {
         /// Correlation ID
-        command_id: String,
+        command_id: CommandId,
         /// Directory to scan (walks `project_scan_dirs` when omitted)
         dir: Option<String>,
     },
     /// Lists worktrees (`fxg worktree list`).
     WorktreeList {
         /// Correlation ID
-        command_id: String,
+        command_id: CommandId,
         /// Directory of the target repository (resolved from the logical project when omitted)
         cwd: Option<String>,
         /// Filter by logical project ID
@@ -247,7 +248,7 @@ pub enum IpcClientMessage {
     /// Creates a worktree (`fxg worktree add`).
     WorktreeAdd {
         /// Correlation ID
-        command_id: String,
+        command_id: CommandId,
         /// Directory of the main repository
         cwd: String,
         /// Logical project ID (resolved from `cwd` when omitted)
@@ -262,7 +263,7 @@ pub enum IpcClientMessage {
     /// Removes a worktree (`fxg worktree remove`).
     WorktreeRemove {
         /// Correlation ID
-        command_id: String,
+        command_id: CommandId,
         /// Directory of the main repository
         cwd: String,
         /// Branch name or path to remove
@@ -273,14 +274,14 @@ pub enum IpcClientMessage {
     /// Cleans up the administrative data of deleted worktrees (`fxg worktree prune`).
     WorktreePrune {
         /// Correlation ID
-        command_id: String,
+        command_id: CommandId,
         /// Directory of the main repository
         cwd: String,
     },
     /// Lists sessions (`fxg ps` / `fxg session list`).
     ListSessions {
         /// Correlation ID
-        command_id: String,
+        command_id: CommandId,
         /// Whether to include stopped sessions (`-a/--all`)
         include_stopped: bool,
         /// Whether to include archived sessions (`--archived`)
@@ -289,12 +290,12 @@ pub enum IpcClientMessage {
     /// Forcefully terminates every session, process tree and PTY on the local node (`fxg kill-all`).
     KillAll {
         /// Correlation ID
-        command_id: String,
+        command_id: CommandId,
     },
     /// Fetches or regenerates the authentication token (`fxg auth token` / `fxg auth rotate-token`).
     AuthToken {
         /// Correlation ID
-        command_id: String,
+        command_id: CommandId,
         /// Whether to regenerate it
         rotate: bool,
     },
@@ -306,7 +307,7 @@ pub enum IpcClientMessage {
     /// (design: docs/01 §6.4).
     GitCredential {
         /// Correlation ID
-        command_id: String,
+        command_id: CommandId,
         /// Prompt string passed by git (`GIT_ASKPASS`)
         prompt: String,
     },
@@ -453,14 +454,14 @@ pub enum IpcServerMessage {
     /// Response to a request
     Result {
         /// Correlation ID
-        command_id: String,
+        command_id: CommandId,
         /// Response body
         result: IpcResult,
     },
     /// Error response
     Error {
         /// Correlation ID (`None` when unknown, e.g. before the connection is established)
-        command_id: Option<String>,
+        command_id: Option<CommandId>,
         /// Structured error
         error: ErrorInfo,
     },

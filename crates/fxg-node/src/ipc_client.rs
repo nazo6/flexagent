@@ -140,7 +140,7 @@ mod tests {
 
         let response = client
             .request(&IpcClientMessage::ListSessions {
-                command_id: "c1".to_owned(),
+                command_id: "c1".into(),
                 include_stopped: true,
                 include_archived: true,
             })

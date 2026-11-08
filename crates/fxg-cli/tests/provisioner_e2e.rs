@@ -128,7 +128,7 @@ async fn provisioner_runs_stdio_node_and_drains_bundle() {
         .post(format!("http://{addr}/api/v1/sessions"))
         .bearer_auth(&token)
         .json(&CreateSessionRequest {
-            command_id: "cmd-1".to_owned(),
+            command_id: "cmd-1".into(),
             project_id: project_id.to_owned(),
             node_id: None,
             provisioner: Some(provisioner_name.to_owned()),

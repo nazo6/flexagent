@@ -30,6 +30,7 @@ use fxg_acp::{
 use fxg_db::{Db, DbRole};
 use fxg_node::daemon::{DaemonConfig, NodeDaemon};
 use fxg_node::session_manager::{DriverFactory, StartSessionParams};
+use fxg_protocol::CommandId;
 use fxg_protocol::common::{
     ClientSource, ErrorCode, PermissionOption, PermissionOptionKind, SessionStatus,
     StreamDeltaPayload,
@@ -290,7 +291,7 @@ async fn create_session_with_events(
         .state()
         .session_manager()
         .start_session(StartSessionParams {
-            command_id: &format!("start-{label}"),
+            command_id: &CommandId::from(format!("start-{label}")),
             session_id: &session_id,
             local_path: repo,
             agent_id: "mock",
@@ -306,7 +307,7 @@ async fn create_session_with_events(
         .state()
         .session_manager()
         .send_prompt(
-            &format!("prompt-{label}"),
+            &CommandId::from(format!("prompt-{label}")),
             &session_id,
             label,
             ClientSource::Cli,
@@ -701,7 +702,7 @@ async fn central_server_commands_permissions_and_kill_switch() {
             .await
             .expect("client ws");
         let send = fxg_protocol::client_api::ClientWsMessage::SendPrompt {
-            command_id: "prompt-1".to_owned(),
+            command_id: "prompt-1".into(),
             session_id: session_id.clone(),
             text: "via ws".to_owned(),
             client_source: ClientSource::Web,
@@ -842,7 +843,7 @@ async fn central_server_commands_permissions_and_kill_switch() {
             .await
             .expect("client ws");
         let send = fxg_protocol::client_api::ClientWsMessage::SendPrompt {
-            command_id: "prompt-offline".to_owned(),
+            command_id: "prompt-offline".into(),
             session_id: session_id.clone(),
             text: "nobody home".to_owned(),
             client_source: ClientSource::Web,
@@ -937,7 +938,7 @@ async fn central_server_resumes_stopped_session() {
     node.state()
         .session_manager()
         .start_session(StartSessionParams {
-            command_id: "start-resume",
+            command_id: &CommandId::from("start-resume"),
             session_id: &session_id,
             local_path: repo.path(),
             agent_id: "mock",
@@ -952,7 +953,7 @@ async fn central_server_resumes_stopped_session() {
     node.state()
         .session_manager()
         .send_prompt(
-            "prompt-resume",
+            &CommandId::from("prompt-resume"),
             &session_id,
             "hello resume e2e",
             ClientSource::Cli,
@@ -1022,7 +1023,7 @@ async fn central_server_resumes_stopped_session() {
     node.state()
         .session_manager()
         .send_prompt(
-            "prompt-resume-2",
+            &CommandId::from("prompt-resume-2"),
             &session_id,
             "continue after resume",
             ClientSource::Cli,

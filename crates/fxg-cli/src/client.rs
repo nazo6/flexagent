@@ -8,6 +8,7 @@ use std::path::Path;
 
 use anyhow::{Context, Result, bail};
 use fxg_node::IpcClient;
+use fxg_protocol::CommandId;
 use fxg_protocol::client_api::{SessionRevertResponse, WorktreeInfo};
 use fxg_protocol::common::{
     ClientSource, ElicitationAction, ElicitationContent, ElicitationRequestEntry, HookLogEntry,
@@ -37,9 +38,9 @@ impl DaemonClient {
         })
     }
 
-    fn command_id(&mut self) -> String {
+    fn command_id(&mut self) -> CommandId {
         self.request_seq += 1;
-        format!("cli-{}-{}", std::process::id(), self.request_seq)
+        CommandId::from(format!("cli-{}-{}", std::process::id(), self.request_seq))
     }
 
     async fn request(&mut self, message: IpcClientMessage) -> Result<IpcResult> {

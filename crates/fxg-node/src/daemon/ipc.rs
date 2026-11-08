@@ -13,6 +13,7 @@
 use std::path::{Path, PathBuf};
 
 use fxg_db::SessionFilter;
+use fxg_protocol::CommandId;
 use fxg_protocol::common::{ErrorCode, ErrorInfo};
 use fxg_protocol::events::SessionEventEnvelope;
 use fxg_protocol::ipc::{
@@ -198,21 +199,21 @@ where
 /// Dispatch error (command ID + structured error code).
 #[derive(Debug)]
 struct DispatchError {
-    command_id: Option<String>,
+    command_id: Option<CommandId>,
     code: ErrorCode,
     message: String,
 }
 
 impl DispatchError {
-    fn new(command_id: &str, code: ErrorCode, message: impl Into<String>) -> Self {
+    fn new(command_id: &CommandId, code: ErrorCode, message: impl Into<String>) -> Self {
         Self {
-            command_id: Some(command_id.to_owned()),
+            command_id: Some(command_id.clone()),
             code,
             message: message.into(),
         }
     }
 
-    fn from_node_error(command_id: &str, err: NodeError) -> Self {
+    fn from_node_error(command_id: &CommandId, err: NodeError) -> Self {
         Self::new(command_id, err.error_code(), err.to_string())
     }
 }
@@ -231,10 +232,10 @@ pub async fn dispatch(state: &DaemonState, request: IpcClientMessage) -> IpcServ
 async fn handle(
     state: &DaemonState,
     request: IpcClientMessage,
-) -> Result<(String, IpcResult), DispatchError> {
+) -> Result<(CommandId, IpcResult), DispatchError> {
     match request {
         IpcClientMessage::Ping => Ok((
-            "ping".to_owned(),
+            CommandId::new("ping"),
             IpcResult::Ack {
                 message: Some("pong".to_owned()),
             },
@@ -877,7 +878,7 @@ async fn session_event_tail(
 async fn resolve_and_register(
     state: &DaemonState,
     dir: &Path,
-    command_id: &str,
+    command_id: &CommandId,
 ) -> Result<project::ResolvedProject, DispatchError> {
     state
         .resolve_and_register_project(dir)
@@ -906,7 +907,7 @@ async fn list_worktrees(
     state: &DaemonState,
     cwd: Option<&str>,
     project_id: Option<&str>,
-    command_id: &str,
+    command_id: &CommandId,
 ) -> Result<Vec<fxg_protocol::client_api::WorktreeInfo>, DispatchError> {
     state
         .worktree_list(cwd.map(Path::new), project_id)
@@ -995,7 +996,7 @@ mod tests {
         let response = roundtrip(
             &endpoint,
             &IpcClientMessage::ProjectInfo {
-                command_id: "c1".to_owned(),
+                command_id: "c1".into(),
                 cwd: repo.to_string_lossy().into_owned(),
             },
         )
@@ -1016,7 +1017,7 @@ mod tests {
         let response = roundtrip(
             &endpoint,
             &IpcClientMessage::ProjectLink {
-                command_id: "c2".to_owned(),
+                command_id: "c2".into(),
                 cwd: repo.to_string_lossy().into_owned(),
                 project_id: "internal/agent-tools".to_owned(),
             },
@@ -1038,7 +1039,7 @@ mod tests {
         let response = roundtrip(
             &endpoint,
             &IpcClientMessage::ProjectList {
-                command_id: "c3".to_owned(),
+                command_id: "c3".into(),
             },
         )
         .await;
@@ -1087,7 +1088,7 @@ mod tests {
         let response = roundtrip(
             &endpoint,
             &IpcClientMessage::WorktreeAdd {
-                command_id: "w1".to_owned(),
+                command_id: "w1".into(),
                 cwd: repo.to_string_lossy().into_owned(),
                 project_id: None,
                 branch: "feat/ipc".to_owned(),
@@ -1112,7 +1113,7 @@ mod tests {
         let response = roundtrip(
             &endpoint,
             &IpcClientMessage::WorktreeList {
-                command_id: "w2".to_owned(),
+                command_id: "w2".into(),
                 cwd: Some(repo.to_string_lossy().into_owned()),
                 project_id: None,
             },
@@ -1142,7 +1143,7 @@ mod tests {
         let response = roundtrip(
             &endpoint,
             &IpcClientMessage::WorktreeRemove {
-                command_id: "w3".to_owned(),
+                command_id: "w3".into(),
                 cwd: repo.to_string_lossy().into_owned(),
                 target: "feat/ipc".to_owned(),
                 force: true,
@@ -1162,7 +1163,7 @@ mod tests {
         let response = roundtrip(
             &endpoint,
             &IpcClientMessage::ListSessions {
-                command_id: "s1".to_owned(),
+                command_id: "s1".into(),
                 include_stopped: true,
                 include_archived: true,
             },
@@ -1180,7 +1181,7 @@ mod tests {
         let response = roundtrip(
             &endpoint,
             &IpcClientMessage::AuthToken {
-                command_id: "a1".to_owned(),
+                command_id: "a1".into(),
                 rotate: false,
             },
         )
@@ -1197,7 +1198,7 @@ mod tests {
         let response = roundtrip(
             &endpoint,
             &IpcClientMessage::AuthToken {
-                command_id: "a2".to_owned(),
+                command_id: "a2".into(),
                 rotate: true,
             },
         )
@@ -1249,7 +1250,7 @@ mod tests {
         let response = roundtrip(
             &endpoint,
             &IpcClientMessage::EnsureSession {
-                command_id: "e1".to_owned(),
+                command_id: "e1".into(),
                 cwd: workdir.to_string_lossy().into_owned(),
                 agent_id: "mock".to_owned(),
                 extra_args: Vec::new(),
@@ -1286,7 +1287,7 @@ mod tests {
         let response = roundtrip(
             &endpoint,
             &IpcClientMessage::EnsureSession {
-                command_id: "e1".to_owned(),
+                command_id: "e1".into(),
                 cwd: workdir.to_string_lossy().into_owned(),
                 agent_id: "mock".to_owned(),
                 extra_args: Vec::new(),
@@ -1305,7 +1306,7 @@ mod tests {
         let response = roundtrip(
             &endpoint,
             &IpcClientMessage::SendPrompt {
-                command_id: "p1".to_owned(),
+                command_id: "p1".into(),
                 session_id: session_id.clone(),
                 text: "hello".to_owned(),
                 client_source: fxg_protocol::common::ClientSource::Cli,
@@ -1352,7 +1353,7 @@ mod tests {
         let response = roundtrip(
             &endpoint,
             &IpcClientMessage::RespondPermission {
-                command_id: "r1".to_owned(),
+                command_id: "r1".into(),
                 session_id: session_id.clone(),
                 request_id: "req-1".to_owned(),
                 selected_option_id: "allow_once".to_owned(),
@@ -1372,7 +1373,7 @@ mod tests {
         let response = roundtrip(
             &endpoint,
             &IpcClientMessage::RespondPermission {
-                command_id: "r2".to_owned(),
+                command_id: "r2".into(),
                 session_id: session_id.clone(),
                 request_id: "req-1".to_owned(),
                 selected_option_id: "allow_once".to_owned(),
@@ -1405,7 +1406,7 @@ mod tests {
         let response = roundtrip(
             &endpoint,
             &IpcClientMessage::RespondElicitation {
-                command_id: "q1".to_owned(),
+                command_id: "q1".into(),
                 session_id: session_id.clone(),
                 elicitation_id: "elic-1".to_owned(),
                 action: ElicitationAction::Accept,
@@ -1436,7 +1437,7 @@ mod tests {
         let response = roundtrip(
             &endpoint,
             &IpcClientMessage::RespondElicitation {
-                command_id: "q2".to_owned(),
+                command_id: "q2".into(),
                 session_id: session_id.clone(),
                 elicitation_id: "elic-1".to_owned(),
                 action: ElicitationAction::Decline,
@@ -1454,7 +1455,7 @@ mod tests {
         let response = roundtrip(
             &endpoint,
             &IpcClientMessage::ControlSession {
-                command_id: "m1".to_owned(),
+                command_id: "m1".into(),
                 session_id: session_id.clone(),
                 action: SessionControlAction::SetMode {
                     mode_id: "plan".to_owned(),
@@ -1489,7 +1490,7 @@ mod tests {
         let response = roundtrip(
             &endpoint,
             &IpcClientMessage::EnsureSession {
-                command_id: "e1".to_owned(),
+                command_id: "e1".into(),
                 cwd: workdir.to_string_lossy().into_owned(),
                 agent_id: "mock".to_owned(),
                 extra_args: Vec::new(),
@@ -1507,7 +1508,7 @@ mod tests {
         roundtrip(
             &endpoint,
             &IpcClientMessage::SendPrompt {
-                command_id: "p1".to_owned(),
+                command_id: "p1".into(),
                 session_id: session_id.clone(),
                 text: "hello resume".to_owned(),
                 client_source: fxg_protocol::common::ClientSource::Cli,
@@ -1538,7 +1539,7 @@ mod tests {
         let response = roundtrip(
             &endpoint,
             &IpcClientMessage::SessionResume {
-                command_id: "r1".to_owned(),
+                command_id: "r1".into(),
                 session_id: session_id.clone(),
                 force_replay: false,
             },
@@ -1579,7 +1580,7 @@ mod tests {
         let response = roundtrip(
             &endpoint,
             &IpcClientMessage::SessionResume {
-                command_id: "r2".to_owned(),
+                command_id: "r2".into(),
                 session_id: session_id.clone(),
                 force_replay: false,
             },

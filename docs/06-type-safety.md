@@ -113,6 +113,7 @@ pub struct RawJson(pub serde_json::Value);
 | DB TEXT → Rust                  | `fxg-db` の row 変換             | `FromStr` / `TryFrom` を境界で1回だけ呼ぶ                                       |
 | HTTP / WS / stdio → Rust        | 各ハンドラ                       | parse 後は型だけを渡す。文字列 `op` 判定をしない                                |
 | Rust → TypeScript               | `specta` + `mise run types`      | 生成物を直接編集しない。UI は生成型を import する                               |
+| エンティティ ID → newtype       | `fxg-protocol/src/ids.rs`        | protocol の公開 DTO とクレート間 API のみ型化。内部は `&str` + `as_str()`       |
 
 ### 3.1 open enum の形
 
@@ -146,6 +147,23 @@ impl PermissionOptionKind {
 
 `as_str()` / `FromStr` / `Serialize` / `Deserialize` は同じ語彙から生成する。
 手書きで4箇所に文字列を書かない。
+
+### 3.2 ID newtype の方針
+
+- 全面置換はしない。`SessionId` などは protocol の公開フィールドと
+  クレート間の関数引数だけに使い、内部の `HashMap<String, _>` や SQL は
+  文字列のまま残す。
+- `#[serde(transparent)]` + `#[specta(transparent)]` で JSON / TS は `string`。
+  DB も TEXT のまま（`impl_sqlx_text!` を再利用）。
+- `Deref<Target = str>` は実装しない。`&SessionId` が `&str` に自動変換されると、
+  型付けした関数の取り違え防止が効かなくなる。
+- `Default` は実装しない。空 ID を有効値として扱わない。
+- `FromStr` は infallible。既存 DB や `project_id` の `local:` 形式を
+  検証で壊さない（UUID 形式の検証は作成境界で行う）。
+- 導入順は Tier A（`CommandId` / `NodeId` / `SessionId` / `EventId`）→
+  Tier B（`ProjectId`）→ Tier C（必要時）。
+- `request_id` のように用途が複数ある語彙は、単一の `RequestId` にまとめず
+  用途別の型にするか文字列のまま残す。
 
 ---
 
@@ -215,13 +233,13 @@ UI 側で `status: string` のような独自型を作らず、生成型を使�
 
 ## 7. 移行状況
 
-| フェーズ | 内容                                           | 状態   |
-| :------- | :--------------------------------------------- | :----- |
-| Phase 0  | 方針・clippy 基盤                              | 完了   |
-| Phase 1  | `PermissionOptionKind` などの enum 化          | 完了   |
-| Phase 2  | `RawJson` / elicitation / config / provisioner | 完了   |
-| Phase 3  | DB row / event_type / audit action             | 完了   |
-| Phase 4  | ID newtype                                     | 未着手 |
+| フェーズ | 内容                                           | 状態                |
+| :------- | :--------------------------------------------- | :------------------ |
+| Phase 0  | 方針・clippy 基盤                              | 完了                |
+| Phase 1  | `PermissionOptionKind` などの enum 化          | 完了                |
+| Phase 2  | `RawJson` / elicitation / config / provisioner | 完了                |
+| Phase 3  | DB row / event_type / audit action             | 完了                |
+| Phase 4  | ID newtype                                     | 進行中（CommandId） |
 
 ファイル単位の `#![allow(...)]` と crate ルートの wildcard allow は、
 Phase 1〜3 の完了に合わせて削除する。Phase 1 で enum 化した

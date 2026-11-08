@@ -22,6 +22,7 @@ use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use futures_util::{SinkExt, StreamExt};
 use fxg_db::SessionFilter;
+use fxg_protocol::CommandId;
 use fxg_protocol::client_api::WorktreeInfo;
 use fxg_protocol::common::WorktreeAction;
 use fxg_protocol::node_server::{NodeToServerMsg, ServerToNodeMsg, SessionSyncState};
@@ -1321,7 +1322,7 @@ async fn upload_workspace_bundle(
 /// Builds and sends a `CommandResult`.
 async fn send_command_result(
     out: &mpsc::Sender<NodeToServerMsg>,
-    command_id: String,
+    command_id: CommandId,
     result: Result<String, NodeError>,
 ) {
     let result = match result {

@@ -784,6 +784,7 @@ impl NodeDaemon {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use fxg_protocol::CommandId;
     use std::collections::HashMap;
     use std::time::Duration;
 
@@ -948,7 +949,7 @@ mod tests {
         let outcome = daemon
             .state()
             .session_manager()
-            .ensure_session("c1", &workdir, "mock", &[], None)
+            .ensure_session(&CommandId::from("c1"), &workdir, "mock", &[], None)
             .await
             .expect("ensure session");
         assert_eq!(daemon.state().session_manager().list_active().len(), 1);

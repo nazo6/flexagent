@@ -25,6 +25,7 @@ use fxg_acp::{
     AcpDriver, ActiveSessionHandle, AgentDriver, AgentLaunchSpec, DriverEvent, DriverKind,
     NativeResumeUnavailable, ResumeRequest,
 };
+use fxg_protocol::CommandId;
 use fxg_protocol::common::{
     ClientSource, ElicitationAction, ElicitationContent, ElicitationMode, ElicitationSchema,
     ForkHistoryItem, HistoryRole, PermissionOption, ResolvedBy, SessionControlAction,
@@ -92,7 +93,7 @@ pub struct EnsureSessionOutcome {
 #[derive(Debug, Clone)]
 pub struct StartSessionParams<'a> {
     /// Correlation ID (idempotent deduplication of duplicate submissions)
-    pub command_id: &'a str,
+    pub command_id: &'a CommandId,
     /// Session ID (a UUID v7 assigned by the caller)
     pub session_id: &'a str,
     /// Working directory (including worktree paths)
@@ -120,7 +121,7 @@ pub struct StartSessionParams<'a> {
 #[derive(Debug, Clone, Copy)]
 pub struct ResumeParams<'a> {
     /// Correlation ID (idempotent deduplication of duplicate submissions)
-    pub command_id: &'a str,
+    pub command_id: &'a CommandId,
     /// Target session ID
     pub session_id: &'a str,
     /// Continue via history replay without attempting native restore
@@ -233,7 +234,7 @@ struct Inner {
 struct Sessions {
     active: HashMap<String, ActiveSession>,
     /// Most recently processed `command_id`s (oldest discarded first)
-    processed_commands: VecDeque<String>,
+    processed_commands: VecDeque<CommandId>,
     /// Session IDs currently being resumed (excludes double resumes)
     resuming: HashSet<String>,
 }
@@ -344,7 +345,7 @@ impl SessionManager {
     ///
     /// Returns `false` if it was already processed (the caller should return
     /// [`NodeError::CommandDuplicate`]).
-    fn begin_command(&self, command_id: &str) -> bool {
+    fn begin_command(&self, command_id: &CommandId) -> bool {
         let mut sessions = self.inner.sessions.lock().expect("sessions poisoned");
         if sessions
             .processed_commands
@@ -353,7 +354,7 @@ impl SessionManager {
         {
             return false;
         }
-        sessions.processed_commands.push_back(command_id.to_owned());
+        sessions.processed_commands.push_back(command_id.clone());
         while sessions.processed_commands.len() > PROCESSED_COMMAND_HISTORY {
             sessions.processed_commands.pop_front();
         }
@@ -363,14 +364,14 @@ impl SessionManager {
     /// Starts a new session (`fxg run`).
     pub async fn ensure_session(
         &self,
-        command_id: &str,
+        command_id: &CommandId,
         cwd: &Path,
         agent_id: &str,
         extra_args: &[String],
         initial_mode: Option<&str>,
     ) -> Result<EnsureSessionOutcome, NodeError> {
         if !self.begin_command(command_id) {
-            return Err(NodeError::CommandDuplicate(command_id.to_owned()));
+            return Err(NodeError::CommandDuplicate(command_id.to_string()));
         }
 
         let resolved = project::resolve_project(cwd, &self.inner.node_id).await?;
@@ -427,7 +428,7 @@ impl SessionManager {
         params: StartSessionParams<'_>,
     ) -> Result<EnsureSessionOutcome, NodeError> {
         if !self.begin_command(params.command_id) {
-            return Err(NodeError::CommandDuplicate(params.command_id.to_owned()));
+            return Err(NodeError::CommandDuplicate(params.command_id.to_string()));
         }
 
         // Restore a saved Git bundle (handover to another node).
@@ -689,12 +690,12 @@ impl SessionManager {
     /// - Running (busy) sessions are rejected with [`NodeError::Busy`].
     pub async fn revert(
         &self,
-        command_id: &str,
+        command_id: &CommandId,
         session_id: &str,
         target_node_seq: Option<u64>,
     ) -> Result<RevertOutcome, NodeError> {
         if !self.begin_command(command_id) {
-            return Err(NodeError::CommandDuplicate(command_id.to_owned()));
+            return Err(NodeError::CommandDuplicate(command_id.to_string()));
         }
 
         let cwd = {
@@ -758,14 +759,14 @@ impl SessionManager {
     ///   (recorded as a `UserMessage` with `client_source = "fork"`).
     pub async fn fork(
         &self,
-        command_id: &str,
+        command_id: &CommandId,
         session_id: &str,
         from_node_seq: Option<u64>,
         agent_id: Option<&str>,
         new_cwd: Option<&Path>,
     ) -> Result<EnsureSessionOutcome, NodeError> {
         if !self.begin_command(command_id) {
-            return Err(NodeError::CommandDuplicate(command_id.to_owned()));
+            return Err(NodeError::CommandDuplicate(command_id.to_string()));
         }
 
         let source = self
@@ -854,7 +855,7 @@ impl SessionManager {
     ///   resumed in v1 (design: `docs/04-agent-drivers-and-windows.md` §4.3).
     pub async fn resume(&self, params: ResumeParams<'_>) -> Result<ResumeOutcome, NodeError> {
         if !self.begin_command(params.command_id) {
-            return Err(NodeError::CommandDuplicate(params.command_id.to_owned()));
+            return Err(NodeError::CommandDuplicate(params.command_id.to_string()));
         }
 
         // Exclude double resumes (reject both active and currently starting sessions)
@@ -1105,13 +1106,13 @@ impl SessionManager {
     /// an explicit Resume (history replay).
     pub async fn send_prompt(
         &self,
-        command_id: &str,
+        command_id: &CommandId,
         session_id: &str,
         text: &str,
         client_source: ClientSource,
     ) -> Result<(), NodeError> {
         if !self.begin_command(command_id) {
-            return Err(NodeError::CommandDuplicate(command_id.to_owned()));
+            return Err(NodeError::CommandDuplicate(command_id.to_string()));
         }
 
         let active = {
@@ -1144,14 +1145,14 @@ impl SessionManager {
     /// Responds to a permission request (`AlreadyResolved` on the second and later attempts).
     pub async fn respond_permission(
         &self,
-        command_id: &str,
+        command_id: &CommandId,
         session_id: &str,
         request_id: &str,
         selected_option_id: &str,
         resolved_by: ResolvedBy,
     ) -> Result<(), NodeError> {
         if !self.begin_command(command_id) {
-            return Err(NodeError::CommandDuplicate(command_id.to_owned()));
+            return Err(NodeError::CommandDuplicate(command_id.to_string()));
         }
 
         let handle = {
@@ -1186,7 +1187,7 @@ impl SessionManager {
     /// Responds to an elicitation (structured input) (`AlreadyResolved` on the second and later attempts).
     pub async fn respond_elicitation(
         &self,
-        command_id: &str,
+        command_id: &CommandId,
         session_id: &str,
         elicitation_id: &str,
         action: ElicitationAction,
@@ -1194,7 +1195,7 @@ impl SessionManager {
         resolved_by: ResolvedBy,
     ) -> Result<(), NodeError> {
         if !self.begin_command(command_id) {
-            return Err(NodeError::CommandDuplicate(command_id.to_owned()));
+            return Err(NodeError::CommandDuplicate(command_id.to_string()));
         }
 
         let (handle, summary) = {
@@ -1240,12 +1241,12 @@ impl SessionManager {
     /// Mode switching / config change / cancel / kill.
     pub async fn control(
         &self,
-        command_id: &str,
+        command_id: &CommandId,
         session_id: &str,
         action: &SessionControlAction,
     ) -> Result<(), NodeError> {
         if !self.begin_command(command_id) {
-            return Err(NodeError::CommandDuplicate(command_id.to_owned()));
+            return Err(NodeError::CommandDuplicate(command_id.to_string()));
         }
 
         // Do not hold the lock across await (clone the handle, then operate)
@@ -1289,12 +1290,12 @@ impl SessionManager {
     /// Returns the archive timestamp (Unix epoch ms; `None` when restoring).
     pub async fn set_archived(
         &self,
-        command_id: &str,
+        command_id: &CommandId,
         session_id: &str,
         archived: bool,
     ) -> Result<Option<i64>, NodeError> {
         if !self.begin_command(command_id) {
-            return Err(NodeError::CommandDuplicate(command_id.to_owned()));
+            return Err(NodeError::CommandDuplicate(command_id.to_string()));
         }
         self.ensure_session_exists(session_id).await?;
         let envelope = self
@@ -1313,9 +1314,9 @@ impl SessionManager {
     /// If active (agent process alive), waits for it to stop before appending
     /// `SessionDeleted` (tombstone). Event bodies before this event are purged in
     /// the same transaction (irreversible).
-    pub async fn delete(&self, command_id: &str, session_id: &str) -> Result<(), NodeError> {
+    pub async fn delete(&self, command_id: &CommandId, session_id: &str) -> Result<(), NodeError> {
         if !self.begin_command(command_id) {
-            return Err(NodeError::CommandDuplicate(command_id.to_owned()));
+            return Err(NodeError::CommandDuplicate(command_id.to_string()));
         }
         self.ensure_session_exists(session_id).await?;
         {
@@ -1401,7 +1402,7 @@ impl SessionManager {
         if !self.is_active(session_id) {
             return Ok(());
         }
-        let command_id = uuid_v7();
+        let command_id = CommandId::from(uuid_v7());
         match self
             .control(&command_id, session_id, &SessionControlAction::Kill)
             .await
@@ -2172,7 +2173,7 @@ mod tests {
         std::fs::create_dir_all(&repo).expect("mkdir");
         crate::testutil::init_test_repo(&repo).await;
         let outcome = manager
-            .ensure_session("c1", &repo, "mock", &[], None)
+            .ensure_session(&CommandId::from("c1"), &repo, "mock", &[], None)
             .await
             .expect("ensure");
         wait_idle(manager, &outcome.session_id).await;
@@ -2183,7 +2184,7 @@ mod tests {
     async fn ensure_session_records_created_event_and_start() {
         let (manager, _mock, dir) = setup().await;
         let outcome = manager
-            .ensure_session("c1", dir.path(), "mock", &[], None)
+            .ensure_session(&CommandId::from("c1"), dir.path(), "mock", &[], None)
             .await
             .expect("ensure");
         assert!(!outcome.session_id.is_empty());
@@ -2203,13 +2204,18 @@ mod tests {
     async fn send_prompt_records_user_message_and_dispatches() {
         let (manager, mock, dir) = setup().await;
         let outcome = manager
-            .ensure_session("c1", dir.path(), "mock", &[], None)
+            .ensure_session(&CommandId::from("c1"), dir.path(), "mock", &[], None)
             .await
             .expect("ensure");
         wait_idle(&manager, &outcome.session_id).await;
 
         manager
-            .send_prompt("c2", &outcome.session_id, "hello", ClientSource::Cli)
+            .send_prompt(
+                &CommandId::from("c2"),
+                &outcome.session_id,
+                "hello",
+                ClientSource::Cli,
+            )
             .await
             .expect("prompt");
 
@@ -2233,18 +2239,28 @@ mod tests {
     async fn busy_prompt_is_queued_and_drained_on_idle() {
         let (manager, mock, dir) = setup().await;
         let outcome = manager
-            .ensure_session("c1", dir.path(), "mock", &[], None)
+            .ensure_session(&CommandId::from("c1"), dir.path(), "mock", &[], None)
             .await
             .expect("ensure");
         wait_idle(&manager, &outcome.session_id).await;
 
         manager
-            .send_prompt("c2", &outcome.session_id, "first", ClientSource::Cli)
+            .send_prompt(
+                &CommandId::from("c2"),
+                &outcome.session_id,
+                "first",
+                ClientSource::Cli,
+            )
             .await
             .expect("first");
         // Enqueued while busy
         manager
-            .send_prompt("c3", &outcome.session_id, "second", ClientSource::Web)
+            .send_prompt(
+                &CommandId::from("c3"),
+                &outcome.session_id,
+                "second",
+                ClientSource::Web,
+            )
             .await
             .expect("second queued");
         let summary = manager
@@ -2273,11 +2289,11 @@ mod tests {
     async fn duplicate_command_id_is_rejected() {
         let (manager, _mock, dir) = setup().await;
         manager
-            .ensure_session("c1", dir.path(), "mock", &[], None)
+            .ensure_session(&CommandId::from("c1"), dir.path(), "mock", &[], None)
             .await
             .expect("ensure");
         let err = manager
-            .ensure_session("c1", dir.path(), "mock", &[], None)
+            .ensure_session(&CommandId::from("c1"), dir.path(), "mock", &[], None)
             .await
             .expect_err("duplicate");
         assert!(matches!(err, NodeError::CommandDuplicate(_)));
@@ -2287,13 +2303,17 @@ mod tests {
     async fn cancel_on_idle_session_is_safe_noop() {
         let (manager, _mock, dir) = setup().await;
         let outcome = manager
-            .ensure_session("c1", dir.path(), "mock", &[], None)
+            .ensure_session(&CommandId::from("c1"), dir.path(), "mock", &[], None)
             .await
             .expect("ensure");
         wait_idle(&manager, &outcome.session_id).await;
 
         let res = manager
-            .control("c2", &outcome.session_id, &SessionControlAction::Cancel)
+            .control(
+                &CommandId::from("c2"),
+                &outcome.session_id,
+                &SessionControlAction::Cancel,
+            )
             .await;
         assert!(res.is_ok());
     }
@@ -2302,7 +2322,7 @@ mod tests {
     async fn permission_resolution_is_idempotent() {
         let (manager, mock, dir) = setup().await;
         let outcome = manager
-            .ensure_session("c1", dir.path(), "mock", &[], None)
+            .ensure_session(&CommandId::from("c1"), dir.path(), "mock", &[], None)
             .await
             .expect("ensure");
         wait_idle(&manager, &outcome.session_id).await;
@@ -2329,7 +2349,7 @@ mod tests {
 
         manager
             .respond_permission(
-                "c2",
+                &CommandId::from("c2"),
                 &outcome.session_id,
                 "req-1",
                 "allow_once",
@@ -2342,7 +2362,7 @@ mod tests {
         // The second attempt is ALREADY_RESOLVED
         let err = manager
             .respond_permission(
-                "c3",
+                &CommandId::from("c3"),
                 &outcome.session_id,
                 "req-1",
                 "allow_once",
@@ -2357,7 +2377,7 @@ mod tests {
     async fn elicitation_resolution_is_idempotent() {
         let (manager, mock, dir) = setup().await;
         let outcome = manager
-            .ensure_session("c1", dir.path(), "mock", &[], None)
+            .ensure_session(&CommandId::from("c1"), dir.path(), "mock", &[], None)
             .await
             .expect("ensure");
         wait_idle(&manager, &outcome.session_id).await;
@@ -2391,7 +2411,7 @@ mod tests {
 
         manager
             .respond_elicitation(
-                "c2",
+                &CommandId::from("c2"),
                 &outcome.session_id,
                 "elic-1",
                 ElicitationAction::Accept,
@@ -2418,7 +2438,7 @@ mod tests {
         // The second attempt is ALREADY_RESOLVED
         let err = manager
             .respond_elicitation(
-                "c3",
+                &CommandId::from("c3"),
                 &outcome.session_id,
                 "elic-1",
                 ElicitationAction::Decline,
@@ -2434,7 +2454,7 @@ mod tests {
     async fn driver_resolved_elicitation_clears_pending() {
         let (manager, mock, dir) = setup().await;
         let outcome = manager
-            .ensure_session("c1", dir.path(), "mock", &[], None)
+            .ensure_session(&CommandId::from("c1"), dir.path(), "mock", &[], None)
             .await
             .expect("ensure");
         wait_idle(&manager, &outcome.session_id).await;
@@ -2485,7 +2505,12 @@ mod tests {
 
         // Record the snapshot at turn start
         manager
-            .send_prompt("c2", &session_id, "first turn", ClientSource::Cli)
+            .send_prompt(
+                &CommandId::from("c2"),
+                &session_id,
+                "first turn",
+                ClientSource::Cli,
+            )
             .await
             .expect("prompt");
         let user_seq = wait_user_message(&manager, &session_id, "first turn").await;
@@ -2500,7 +2525,7 @@ mod tests {
 
         // Revert: restore the file state at the start of the latest turn
         let outcome = manager
-            .revert("c3", &session_id, None)
+            .revert(&CommandId::from("c3"), &session_id, None)
             .await
             .expect("revert");
         assert_eq!(outcome.target_node_seq, user_seq);
@@ -2544,11 +2569,16 @@ mod tests {
 
         // A running turn (no Idle event received yet) is rejected as Busy
         manager
-            .send_prompt("c2", &session_id, "running", ClientSource::Cli)
+            .send_prompt(
+                &CommandId::from("c2"),
+                &session_id,
+                "running",
+                ClientSource::Cli,
+            )
             .await
             .expect("prompt");
         let err = manager
-            .revert("c3", &session_id, None)
+            .revert(&CommandId::from("c3"), &session_id, None)
             .await
             .expect_err("busy");
         assert!(matches!(err, NodeError::Busy(_)));
@@ -2560,7 +2590,12 @@ mod tests {
         let (repo, source_id) = setup_repo_session(&manager, &dir).await;
 
         manager
-            .send_prompt("c2", &source_id, "hello world", ClientSource::Cli)
+            .send_prompt(
+                &CommandId::from("c2"),
+                &source_id,
+                "hello world",
+                ClientSource::Cli,
+            )
             .await
             .expect("prompt");
         let user_seq = wait_user_message(&manager, &source_id, "hello world").await;
@@ -2578,7 +2613,13 @@ mod tests {
 
         // Fork at the `user_seq` point
         let fork = manager
-            .fork("c3", &source_id, Some(user_seq), None, None)
+            .fork(
+                &CommandId::from("c3"),
+                &source_id,
+                Some(user_seq),
+                None,
+                None,
+            )
             .await
             .expect("fork");
         assert_ne!(fork.session_id, source_id);
@@ -2642,7 +2683,7 @@ mod tests {
     async fn driver_exit_records_stopped_status() {
         let (manager, mock, dir) = setup().await;
         let outcome = manager
-            .ensure_session("c1", dir.path(), "mock", &[], None)
+            .ensure_session(&CommandId::from("c1"), dir.path(), "mock", &[], None)
             .await
             .expect("ensure");
         wait_idle(&manager, &outcome.session_id).await;
@@ -2697,7 +2738,12 @@ mod tests {
     ) -> (PathBuf, String) {
         let (repo, session_id) = setup_repo_session(manager, dir).await;
         manager
-            .send_prompt("c2", &session_id, prompt, ClientSource::Cli)
+            .send_prompt(
+                &CommandId::from("c2"),
+                &session_id,
+                prompt,
+                ClientSource::Cli,
+            )
             .await
             .expect("prompt");
         wait_user_message(manager, &session_id, prompt).await;
@@ -2725,7 +2771,7 @@ mod tests {
         mock.set_resume_supported(true);
         let outcome = manager
             .resume(ResumeParams {
-                command_id: "c-resume",
+                command_id: &CommandId::from("c-resume"),
                 session_id: &session_id,
                 force_replay: false,
             })
@@ -2776,7 +2822,7 @@ mod tests {
         // Driver without native restore support → continue the context via replay
         let outcome = manager
             .resume(ResumeParams {
-                command_id: "c-resume",
+                command_id: &CommandId::from("c-resume"),
                 session_id: &session_id,
                 force_replay: false,
             })
@@ -2827,7 +2873,7 @@ mod tests {
         mock.set_resume_supported(true);
         let outcome = manager
             .resume(ResumeParams {
-                command_id: "c-resume",
+                command_id: &CommandId::from("c-resume"),
                 session_id: &session_id,
                 force_replay: true,
             })
@@ -2850,7 +2896,7 @@ mod tests {
         // An unknown session yields InvalidSession
         let err = manager
             .resume(ResumeParams {
-                command_id: "u1",
+                command_id: &CommandId::from("u1"),
                 session_id: "missing-session",
                 force_replay: false,
             })
@@ -2862,7 +2908,7 @@ mod tests {
         let (repo, session_id) = setup_repo_session(&manager, &dir).await;
         let err = manager
             .resume(ResumeParams {
-                command_id: "c2",
+                command_id: &CommandId::from("c2"),
                 session_id: &session_id,
                 force_replay: false,
             })
@@ -2876,7 +2922,7 @@ mod tests {
         std::fs::remove_dir_all(&repo).expect("remove repo");
         let err = manager
             .resume(ResumeParams {
-                command_id: "c3",
+                command_id: &CommandId::from("c3"),
                 session_id: &session_id,
                 force_replay: false,
             })
@@ -2889,7 +2935,7 @@ mod tests {
         crate::testutil::init_test_repo(&repo).await;
         let outcome = manager
             .resume(ResumeParams {
-                command_id: "c4",
+                command_id: &CommandId::from("c4"),
                 session_id: &session_id,
                 force_replay: false,
             })
@@ -2906,7 +2952,12 @@ mod tests {
         // Agent with native restore support: sending without an explicit resume auto-resumes
         mock.set_resume_supported(true);
         manager
-            .send_prompt("c-next", &session_id, "auto resumed", ClientSource::Web)
+            .send_prompt(
+                &CommandId::from("c-next"),
+                &session_id,
+                "auto resumed",
+                ClientSource::Web,
+            )
             .await
             .expect("send prompt");
 
@@ -2959,7 +3010,12 @@ mod tests {
         // Native restore unsupported: the send fails with ResumeRequired and the
         // history replay is not implicitly run (the session stays stopped)
         let err = manager
-            .send_prompt("c-next", &session_id, "needs replay", ClientSource::Web)
+            .send_prompt(
+                &CommandId::from("c-next"),
+                &session_id,
+                "needs replay",
+                ClientSource::Web,
+            )
             .await
             .expect_err("native resume is unavailable");
         assert!(matches!(err, NodeError::ResumeRequired { .. }));
@@ -2985,7 +3041,7 @@ mod tests {
         // An explicit resume (history replay) can resume it
         let outcome = manager
             .resume(ResumeParams {
-                command_id: "c-resume",
+                command_id: &CommandId::from("c-resume"),
                 session_id: &session_id,
                 force_replay: false,
             })
@@ -2998,7 +3054,7 @@ mod tests {
     async fn session_status_transitions_on_driver_events() {
         let (manager, mock, dir) = setup().await;
         manager
-            .ensure_session("c1", dir.path(), "mock", &[], None)
+            .ensure_session(&CommandId::from("c1"), dir.path(), "mock", &[], None)
             .await
             .expect("ensure");
         assert_eq!(manager.list_active().len(), 1);
@@ -3057,7 +3113,7 @@ mod tests {
         let session_id = fxg_protocol::util::uuid_v7();
         manager
             .start_session(StartSessionParams {
-                command_id: "c_init",
+                command_id: &CommandId::from("c_init"),
                 session_id: &session_id,
                 local_path: dir.path(),
                 agent_id: "mock",
@@ -3084,7 +3140,7 @@ mod tests {
     async fn first_prompt_updates_default_title() {
         let (manager, _mock, dir) = setup().await;
         let outcome = manager
-            .ensure_session("c_ensure", dir.path(), "mock", &[], None)
+            .ensure_session(&CommandId::from("c_ensure"), dir.path(), "mock", &[], None)
             .await
             .expect("ensure");
 
@@ -3101,7 +3157,7 @@ mod tests {
         // Send the first prompt
         manager
             .send_prompt(
-                "c_prompt1",
+                &CommandId::from("c_prompt1"),
                 &outcome.session_id,
                 "Implement login page",
                 ClientSource::Web,
@@ -3122,7 +3178,7 @@ mod tests {
         // The title is not updated again on the second prompt (first time only)
         manager
             .send_prompt(
-                "c_prompt2",
+                &CommandId::from("c_prompt2"),
                 &outcome.session_id,
                 "Now add logout button",
                 ClientSource::Web,
@@ -3144,7 +3200,7 @@ mod tests {
     async fn shutdown_all_cleans_up_snapshot_index() {
         let (manager, _mock, dir) = setup().await;
         let outcome = manager
-            .ensure_session("c_ensure", dir.path(), "mock", &[], None)
+            .ensure_session(&CommandId::from("c_ensure"), dir.path(), "mock", &[], None)
             .await
             .expect("ensure");
 

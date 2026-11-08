@@ -9,6 +9,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::CommandId;
 use crate::common::{
     ClientSource, DataSafety, ElicitationContent, ErrorCode, ErrorInfo, NodeProjectReport,
     ResolvedBy, SessionControlAction, WarningInfo, WorkspaceDiffResponse,
@@ -81,7 +82,7 @@ pub enum NodeToServerMsg {
     /// Result of a command from the server (correlated back to the requesting client).
     CommandResult {
         /// Correlation ID
-        command_id: String,
+        command_id: CommandId,
         /// Whether it succeeded
         success: bool,
         /// Structured error on failure
@@ -121,7 +122,7 @@ pub enum NodeToServerMsg {
     /// Response with the result of a worktree operation (`ManageWorktree`).
     WorktreeResult {
         /// Correlation ID of the request
-        command_id: String,
+        command_id: CommandId,
         /// Worktree information on success (`None` when removed)
         worktree: Option<crate::client_api::WorktreeInfo>,
         /// Failure message
@@ -130,7 +131,7 @@ pub enum NodeToServerMsg {
     /// Response with the result of a session revert (`RevertSession`).
     RevertResult {
         /// Correlation ID of the request
-        command_id: String,
+        command_id: CommandId,
         /// Whether it succeeded
         success: bool,
         /// Structured error code on failure
@@ -143,7 +144,7 @@ pub enum NodeToServerMsg {
     /// Response with the result of a session resume (`ResumeSession`).
     ResumeResult {
         /// Correlation ID of the request
-        command_id: String,
+        command_id: CommandId,
         /// Whether it succeeded
         success: bool,
         /// Structured error code on failure
@@ -156,7 +157,7 @@ pub enum NodeToServerMsg {
     /// Response with the result of archiving / restoring a session (`ArchiveSession`).
     ArchiveResult {
         /// Correlation ID of the request
-        command_id: String,
+        command_id: CommandId,
         /// Whether it succeeded
         success: bool,
         /// Structured error code on failure
@@ -169,7 +170,7 @@ pub enum NodeToServerMsg {
     /// Response with the result of deleting a session (`DeleteSession`).
     DeleteResult {
         /// Correlation ID of the request
-        command_id: String,
+        command_id: CommandId,
         /// Whether it succeeded
         success: bool,
         /// Structured error code on failure
@@ -299,7 +300,7 @@ pub enum ServerToNodeMsg {
     /// Request from a client (web / Android) to start a new session.
     StartSession {
         /// Correlation ID
-        command_id: String,
+        command_id: CommandId,
         /// Session ID to start (assigned by the server)
         session_id: String,
         /// Logical project ID
@@ -323,7 +324,7 @@ pub enum ServerToNodeMsg {
     /// Sends a prompt (including slash commands).
     SendPrompt {
         /// Correlation ID
-        command_id: String,
+        command_id: CommandId,
         /// Target session ID
         session_id: String,
         /// Prompt body
@@ -334,7 +335,7 @@ pub enum ServerToNodeMsg {
     /// Answers a permission request.
     RespondPermission {
         /// Correlation ID
-        command_id: String,
+        command_id: CommandId,
         /// Target session ID
         session_id: String,
         /// ACP request id
@@ -347,7 +348,7 @@ pub enum ServerToNodeMsg {
     /// Answers an elicitation (structured input request).
     RespondElicitation {
         /// Correlation ID
-        command_id: String,
+        command_id: CommandId,
         /// Target session ID
         session_id: String,
         /// ACP elicitation id
@@ -362,7 +363,7 @@ pub enum ServerToNodeMsg {
     /// Mode switch / configuration change / cancel / kill.
     ControlSession {
         /// Correlation ID
-        command_id: String,
+        command_id: CommandId,
         /// Target session ID
         session_id: String,
         /// Operation to execute
@@ -375,7 +376,7 @@ pub enum ServerToNodeMsg {
     /// (design: `docs/04-agent-drivers-and-windows.md` §4.1).
     RevertSession {
         /// Correlation ID
-        command_id: String,
+        command_id: CommandId,
         /// Target session ID
         session_id: String,
         /// `node_seq` of the `UserMessage` used as the revert point
@@ -388,7 +389,7 @@ pub enum ServerToNodeMsg {
     /// context (design: `docs/04-agent-drivers-and-windows.md` §4.3).
     ResumeSession {
         /// Correlation ID
-        command_id: String,
+        command_id: CommandId,
         /// Target session ID
         session_id: String,
         /// Skip native restoration and continue with history replay
@@ -400,7 +401,7 @@ pub enum ServerToNodeMsg {
     /// is kept.
     ArchiveSession {
         /// Correlation ID
-        command_id: String,
+        command_id: CommandId,
         /// Target session ID
         session_id: String,
         /// `true` = archive, `false` = restore
@@ -412,7 +413,7 @@ pub enum ServerToNodeMsg {
     /// `SessionDeleted` event (tombstone) and purges the bodies of earlier events.
     DeleteSession {
         /// Correlation ID
-        command_id: String,
+        command_id: CommandId,
         /// Target session ID
         session_id: String,
     },
@@ -464,7 +465,7 @@ pub enum ServerToNodeMsg {
     /// Request for a worktree operation (create / remove).
     ManageWorktree {
         /// Correlation ID
-        command_id: String,
+        command_id: CommandId,
         /// Target logical project ID
         project_id: String,
         /// Operation to execute

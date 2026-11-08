@@ -547,7 +547,7 @@ async fn run_with_provisioner(
     };
 
     let request = fxg_protocol::client_api::CreateSessionRequest {
-        command_id: format!("cli-{}", fxg_protocol::util::uuid_v7()),
+        command_id: format!("cli-{}", fxg_protocol::util::uuid_v7()).into(),
         project_id: project.project_id.clone(),
         node_id: None,
         provisioner: Some(provisioner.to_owned()),
@@ -1420,7 +1420,7 @@ impl usage::RunAsync for SessionForkArgs {
                 .find(|session| session.session_id == self.session_id)
                 .with_context(|| format!("session not found: {}", self.session_id))?;
             let request = fxg_protocol::client_api::CreateSessionRequest {
-                command_id: format!("cli-{}", fxg_protocol::util::uuid_v7()),
+                command_id: format!("cli-{}", fxg_protocol::util::uuid_v7()).into(),
                 project_id: source.project_id.clone(),
                 node_id: None,
                 provisioner: Some(provisioner.clone()),

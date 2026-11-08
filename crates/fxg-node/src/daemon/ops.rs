@@ -8,6 +8,7 @@
 use std::path::{Path, PathBuf};
 
 use fxg_acp::registry::{AcpRegistry, LocalSource};
+use fxg_protocol::CommandId;
 use fxg_protocol::client_api::{AgentSource, AgentSummary, AgentsResponse, WorktreeInfo};
 use fxg_protocol::common::{AgentAction, HookLogEntry, ProjectSummary};
 
@@ -97,7 +98,7 @@ impl DaemonState {
     /// Returns the archive timestamp (Unix epoch ms; `None` when restoring).
     pub async fn set_session_archived(
         &self,
-        command_id: &str,
+        command_id: &CommandId,
         session_id: &str,
         archived: bool,
         source: &AuditSource,
@@ -123,7 +124,7 @@ impl DaemonState {
     /// (irreversible).
     pub async fn purge_session(
         &self,
-        command_id: &str,
+        command_id: &CommandId,
         session_id: &str,
         source: &AuditSource,
     ) -> Result<(), NodeError> {

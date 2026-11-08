@@ -154,7 +154,7 @@ focused_session_id: string | null } |
 /**  Sends a prompt (including slash commands). */
 { op: "send_prompt"; 
 /**  Correlation ID */
-command_id: string; 
+command_id: CommandId; 
 /**  Target session ID */
 session_id: string; 
 /**  Prompt body */
@@ -164,7 +164,7 @@ client_source: string } |
 /**  Answers a permission request. */
 { op: "respond_permission"; 
 /**  Correlation ID */
-command_id: string; 
+command_id: CommandId; 
 /**  Target session ID */
 session_id: string; 
 /**  ACP request id */
@@ -176,7 +176,7 @@ resolved_by: string } |
 /**  Answers an elicitation (structured input request). */
 { op: "respond_elicitation"; 
 /**  Correlation ID */
-command_id: string; 
+command_id: CommandId; 
 /**  Target session ID */
 session_id: string; 
 /**  ACP elicitation id */
@@ -190,13 +190,21 @@ resolved_by: string } |
 /**  Mode switch / configuration change / cancel / kill. */
 { op: "control_session"; 
 /**  Correlation ID */
-command_id: string; 
+command_id: CommandId; 
 /**  Target session ID */
 session_id: string; 
 /**  Operation to execute */
 action: SessionControlAction } | 
 /**  Keep-alive */
 { op: "ping" };
+
+/**
+ *  Correlation ID of a command.
+ * 
+ *  Attached to `ServerToNodeMsg` / IPC / client WS requests and echoed back in
+ *  `CommandResult`. It is not an entity ID and is not persisted.
+ */
+export type CommandId = string;
 
 /**  Information about an ACP slash command. */
 export type CommandInfo = {
@@ -211,7 +219,7 @@ export type CommandInfo = {
 /**  Result of a command (correlated back from the node through the server to the requesting client). */
 export type CommandResult = {
 	/**  Correlation ID attached to each `ServerToNodeMsg` command */
-	command_id: string,
+	command_id: CommandId,
 	/**  Whether it succeeded */
 	success: boolean,
 	/**  Structured error on failure */
@@ -285,7 +293,7 @@ export type ConnectionRole =
  */
 export type CreateSessionRequest = {
 	/**  Correlation ID assigned by the client (used for idempotent duplicate rejection) */
-	command_id: string,
+	command_id: CommandId,
 	/**  Logical project ID */
 	project_id: string,
 	/**  ID of the resident node to run on (mutually exclusive with `provisioner`) */
@@ -313,7 +321,7 @@ export type CreateSessionResponse = {
 	/**  ID of the started session */
 	session_id: string,
 	/**  Correlation ID from the request */
-	command_id: string,
+	command_id: CommandId,
 };
 
 /**  `POST /api/v1/projects/:id/worktrees` request. */
@@ -1259,7 +1267,7 @@ line: string } |
 /**  Result of a command (correlated back to the requesting client). */
 { op: "command_result"; 
 /**  Correlation ID */
-command_id: string; 
+command_id: CommandId; 
 /**  Whether it succeeded */
 success: boolean; 
 /**  Structured error on failure */

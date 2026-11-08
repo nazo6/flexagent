@@ -13,6 +13,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use base64::Engine as _;
 use fxg_db::{Db, DbRole, PushSubscriptionRecord};
+use fxg_protocol::CommandId;
 use fxg_protocol::client_api::{
     AgentOpResponse, AgentsResponse, ConnectionRole, CreateSessionRequest, CreateSessionResponse,
     CreateWorktreeRequest, IssueNodeTokenRequest, IssueNodeTokenResponse, KillSwitchResponse,
@@ -271,7 +272,7 @@ impl ServerState {
 }
 
 /// Helper that builds a `CommandResult`, with `session_id` on success.
-fn command_failure(command_id: String, err: ApiError) -> CommandResult {
+fn command_failure(command_id: CommandId, err: ApiError) -> CommandResult {
     CommandResult::failure(command_id, err.into_info())
 }
 
@@ -595,7 +596,7 @@ impl ClientApiBackend for ServerState {
 
         // When creating a worktree at the same time, create it on the node and use the real path
         let local_path = if let Some(spec) = &request.worktree {
-            let worktree_command_id = uuid_v7();
+            let worktree_command_id = CommandId::from(uuid_v7());
             let info = self
                 .inner
                 .hub
@@ -677,7 +678,7 @@ impl ClientApiBackend for ServerState {
         let selected = self
             .resolve_permission_option(session_id, request_id, &request)
             .await?;
-        let command_id = uuid_v7();
+        let command_id = CommandId::from(uuid_v7());
         let result = self
             .inner
             .hub
@@ -732,7 +733,7 @@ impl ClientApiBackend for ServerState {
         client: ClientInfo,
     ) -> Result<RespondElicitationResponse, ApiError> {
         let node_id = self.session_node(session_id).await?;
-        let command_id = uuid_v7();
+        let command_id = CommandId::from(uuid_v7());
         let result = self
             .inner
             .hub
@@ -787,7 +788,7 @@ impl ClientApiBackend for ServerState {
         client: ClientInfo,
     ) -> Result<SessionRevertResponse, ApiError> {
         let node_id = self.session_node(session_id).await?;
-        let command_id = uuid_v7();
+        let command_id = CommandId::from(uuid_v7());
         let outcome = self
             .inner
             .hub
@@ -850,7 +851,7 @@ impl ClientApiBackend for ServerState {
 
         // Relay to the executing node (offline yields `NODE_OFFLINE`)
         let node_id = self.session_node(session_id).await?;
-        let command_id = uuid_v7();
+        let command_id = CommandId::from(uuid_v7());
         let context_restored = self
             .inner
             .hub
@@ -889,7 +890,7 @@ impl ClientApiBackend for ServerState {
     ) -> Result<SessionArchiveResponse, ApiError> {
         // Relay to the executing node (existence check / offline is returned by `session_node`)
         let node_id = self.session_node(session_id).await?;
-        let command_id = uuid_v7();
+        let command_id = CommandId::from(uuid_v7());
         let archived_at = self
             .inner
             .hub
@@ -923,7 +924,7 @@ impl ClientApiBackend for ServerState {
     async fn delete_session(&self, session_id: &str, client: ClientInfo) -> Result<(), ApiError> {
         // Relay to the executing node (existence check / offline is returned by `session_node`)
         let node_id = self.session_node(session_id).await?;
-        let command_id = uuid_v7();
+        let command_id = CommandId::from(uuid_v7());
         self.inner
             .hub
             .delete_session(
@@ -957,7 +958,7 @@ impl ClientApiBackend for ServerState {
                 format!("node is offline: {}", request.node_id),
             ));
         }
-        let command_id = uuid_v7();
+        let command_id = CommandId::from(uuid_v7());
         self.inner
             .hub
             .worktree_op(
@@ -1262,7 +1263,7 @@ impl ClientApiBackend for ServerState {
                 format!("node is offline: {}", request.node_id),
             ));
         }
-        let command_id = uuid_v7();
+        let command_id = CommandId::from(uuid_v7());
         let info = self
             .inner
             .hub
@@ -1296,7 +1297,7 @@ impl ClientApiBackend for ServerState {
                 format!("node is offline: {}", request.node_id),
             ));
         }
-        let command_id = uuid_v7();
+        let command_id = CommandId::from(uuid_v7());
         self.inner
             .hub
             .worktree_op(
@@ -1563,12 +1564,12 @@ impl ServerState {
     async fn run_ws_command(
         &self,
         node_id: &str,
-        command_id: &str,
+        command_id: &CommandId,
         message: ServerToNodeMsg,
     ) -> CommandResult {
         match self.inner.hub.command(node_id, command_id, message).await {
             Ok(result) => result,
-            Err(err) => command_failure(command_id.to_owned(), err),
+            Err(err) => command_failure(command_id.clone(), err),
         }
     }
 }

@@ -25,6 +25,7 @@ use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use futures_util::{SinkExt, StreamExt};
 use fxg_db::Db;
+use fxg_protocol::CommandId;
 use fxg_protocol::client_api::WorktreeInfo;
 use fxg_protocol::common::{CommandResult, ErrorCode, WorkspaceDiffResponse};
 use fxg_protocol::node_server::{NodeToServerMsg, ResyncTarget, ServerToNodeMsg};
@@ -387,11 +388,16 @@ impl NodeHub {
     pub async fn command(
         &self,
         node_id: &str,
-        command_id: &str,
+        command_id: &CommandId,
         message: ServerToNodeMsg,
     ) -> Result<CommandResult, ApiError> {
         let response = self
-            .request(node_id, command_id, message, SESSION_COMMAND_TIMEOUT)
+            .request(
+                node_id,
+                command_id.as_str(),
+                message,
+                SESSION_COMMAND_TIMEOUT,
+            )
             .await?;
         match response {
             PendingResponse::Command(result) => Ok(result),
@@ -425,11 +431,11 @@ impl NodeHub {
     pub async fn worktree_op(
         &self,
         node_id: &str,
-        command_id: &str,
+        command_id: &CommandId,
         message: ServerToNodeMsg,
     ) -> Result<Option<WorktreeInfo>, ApiError> {
         let response = self
-            .request(node_id, command_id, message, COMMAND_TIMEOUT)
+            .request(node_id, command_id.as_str(), message, COMMAND_TIMEOUT)
             .await?;
         match response {
             PendingResponse::Worktree { worktree, error } => match (worktree, error) {
@@ -446,11 +452,11 @@ impl NodeHub {
     pub async fn revert_session(
         &self,
         node_id: &str,
-        command_id: &str,
+        command_id: &CommandId,
         message: ServerToNodeMsg,
     ) -> Result<fxg_protocol::client_api::SessionRevertResponse, ApiError> {
         let response = self
-            .request(node_id, command_id, message, COMMAND_TIMEOUT)
+            .request(node_id, command_id.as_str(), message, COMMAND_TIMEOUT)
             .await?;
         match response {
             PendingResponse::Revert {
@@ -480,11 +486,16 @@ impl NodeHub {
     pub async fn resume_session(
         &self,
         node_id: &str,
-        command_id: &str,
+        command_id: &CommandId,
         message: ServerToNodeMsg,
     ) -> Result<bool, ApiError> {
         let response = self
-            .request(node_id, command_id, message, SESSION_COMMAND_TIMEOUT)
+            .request(
+                node_id,
+                command_id.as_str(),
+                message,
+                SESSION_COMMAND_TIMEOUT,
+            )
             .await?;
         match response {
             PendingResponse::Resume {
@@ -514,11 +525,11 @@ impl NodeHub {
     pub async fn archive_session(
         &self,
         node_id: &str,
-        command_id: &str,
+        command_id: &CommandId,
         message: ServerToNodeMsg,
     ) -> Result<Option<i64>, ApiError> {
         let response = self
-            .request(node_id, command_id, message, COMMAND_TIMEOUT)
+            .request(node_id, command_id.as_str(), message, COMMAND_TIMEOUT)
             .await?;
         match response {
             PendingResponse::Archive {
@@ -548,11 +559,16 @@ impl NodeHub {
     pub async fn delete_session(
         &self,
         node_id: &str,
-        command_id: &str,
+        command_id: &CommandId,
         message: ServerToNodeMsg,
     ) -> Result<(), ApiError> {
         let response = self
-            .request(node_id, command_id, message, SESSION_COMMAND_TIMEOUT)
+            .request(
+                node_id,
+                command_id.as_str(),
+                message,
+                SESSION_COMMAND_TIMEOUT,
+            )
             .await?;
         match response {
             PendingResponse::Delete {
@@ -1123,7 +1139,7 @@ async fn handle_node_message_value(state: &ServerState, node_id: &str, message: 
             };
             state
                 .hub()
-                .resolve(&command_id, PendingResponse::Command(result))
+                .resolve(command_id.as_str(), PendingResponse::Command(result))
                 .await;
         }
         NodeToServerMsg::GitDiffResult {
@@ -1143,7 +1159,10 @@ async fn handle_node_message_value(state: &ServerState, node_id: &str, message: 
         } => {
             state
                 .hub()
-                .resolve(&command_id, PendingResponse::Worktree { worktree, error })
+                .resolve(
+                    command_id.as_str(),
+                    PendingResponse::Worktree { worktree, error },
+                )
                 .await;
         }
         NodeToServerMsg::RevertResult {
@@ -1156,7 +1175,7 @@ async fn handle_node_message_value(state: &ServerState, node_id: &str, message: 
             state
                 .hub()
                 .resolve(
-                    &command_id,
+                    command_id.as_str(),
                     PendingResponse::Revert {
                         success,
                         code,
@@ -1176,7 +1195,7 @@ async fn handle_node_message_value(state: &ServerState, node_id: &str, message: 
             state
                 .hub()
                 .resolve(
-                    &command_id,
+                    command_id.as_str(),
                     PendingResponse::Resume {
                         success,
                         code,
@@ -1196,7 +1215,7 @@ async fn handle_node_message_value(state: &ServerState, node_id: &str, message: 
             state
                 .hub()
                 .resolve(
-                    &command_id,
+                    command_id.as_str(),
                     PendingResponse::Archive {
                         success,
                         code,
@@ -1215,7 +1234,7 @@ async fn handle_node_message_value(state: &ServerState, node_id: &str, message: 
             state
                 .hub()
                 .resolve(
-                    &command_id,
+                    command_id.as_str(),
                     PendingResponse::Delete {
                         success,
                         code,

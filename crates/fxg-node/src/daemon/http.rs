@@ -519,7 +519,7 @@ mod tests {
 
         // Sending to a nonexistent session returns an INVALID_STATE CommandResult
         let command = fxg_protocol::client_api::ClientWsMessage::SendPrompt {
-            command_id: "c1".to_owned(),
+            command_id: "c1".into(),
             session_id: "missing-session".to_owned(),
             text: "hello".to_owned(),
             client_source: fxg_protocol::common::ClientSource::Web,
