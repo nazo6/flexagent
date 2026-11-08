@@ -77,7 +77,7 @@ async fn provisioner_runs_stdio_node_and_drains_bundle() {
         .await
         .expect("open server db");
     db.upsert_project(&fxg_db::registration::ProjectRecord {
-        project_id: project_id.to_owned(),
+        project_id: project_id.into(),
         name: "flexagent".to_owned(),
         canonical_git_url: Some(repo.to_string_lossy().into_owned()),
     })
@@ -129,7 +129,7 @@ async fn provisioner_runs_stdio_node_and_drains_bundle() {
         .bearer_auth(&token)
         .json(&CreateSessionRequest {
             command_id: "cmd-1".into(),
-            project_id: project_id.to_owned(),
+            project_id: project_id.into(),
             node_id: None,
             provisioner: Some(provisioner_name.to_owned()),
             local_path: None,

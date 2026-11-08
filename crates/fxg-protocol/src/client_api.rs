@@ -16,7 +16,7 @@ use crate::common::{
 };
 use crate::config::CustomAgentConfig;
 use crate::events::SessionEventBatch;
-use crate::{CommandId, NodeId, SessionId};
+use crate::{CommandId, NodeId, ProjectId, SessionId};
 
 /// Kind of endpoint (`GET /api/v1/system/info`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
@@ -204,7 +204,7 @@ pub struct ProjectScanResponse {
 #[specta(collect)]
 pub struct ProjectLinkRequest {
     /// Logical project ID to link to
-    pub project_id: String,
+    pub project_id: ProjectId,
     /// Target directory
     pub local_path: String,
 }
@@ -214,7 +214,7 @@ pub struct ProjectLinkRequest {
 #[specta(collect)]
 pub struct ProjectLinkResponse {
     /// The resolved logical project ID
-    pub project_id: String,
+    pub project_id: ProjectId,
     /// Target directory (the local path after resolution)
     pub local_path: String,
 }
@@ -368,7 +368,7 @@ pub struct CreateSessionRequest {
     /// Correlation ID assigned by the client (used for idempotent duplicate rejection)
     pub command_id: CommandId,
     /// Logical project ID
-    pub project_id: String,
+    pub project_id: ProjectId,
     /// ID of the resident node to run on (mutually exclusive with `provisioner`)
     pub node_id: Option<NodeId>,
     /// Ephemeral VM provisioner name (mutually exclusive with `node_id`; requires the central server)

@@ -389,7 +389,7 @@ impl SessionManager {
                 &session_id,
                 UnifiedEventPayload::SessionCreated {
                     node_id: self.inner.node_id.clone().into(),
-                    project_id: resolved.project_id.clone(),
+                    project_id: resolved.project_id.clone().into(),
                     project_name: resolved.name.clone(),
                     local_path: resolved.local_path.to_string_lossy().into_owned(),
                     git_branch,
@@ -460,7 +460,7 @@ impl SessionManager {
                 params.session_id,
                 UnifiedEventPayload::SessionCreated {
                     node_id: self.inner.node_id.clone().into(),
-                    project_id: resolved.project_id.clone(),
+                    project_id: resolved.project_id.clone().into(),
                     project_name: resolved.name.clone(),
                     local_path: resolved.local_path.to_string_lossy().into_owned(),
                     git_branch,
@@ -787,7 +787,7 @@ impl SessionManager {
         let spec = self
             .resolve_launch_spec(agent_id.unwrap_or(&source.agent_id), &[])
             .await?;
-        let project_name = self.project_name(&source.project_id).await;
+        let project_name = self.project_name(source.project_id.as_str()).await;
 
         let new_session_id = uuid_v7();
         let cwd = new_cwd
@@ -1055,7 +1055,7 @@ impl SessionManager {
         match self.inner.bus.db().list_projects().await {
             Ok(projects) => projects
                 .into_iter()
-                .find(|project| project.project_id == project_id)
+                .find(|project| project.project_id.as_str() == project_id)
                 .map(|project| project.name)
                 .unwrap_or_else(|| project_id.to_owned()),
             Err(_) => project_id.to_owned(),

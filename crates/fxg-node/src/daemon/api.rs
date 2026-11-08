@@ -230,13 +230,13 @@ impl ClientApiBackend for DaemonState {
         let (local_path, register_binding) = match (&request.worktree, &request.local_path) {
             (Some(spec), _) => {
                 let repo = self
-                    .project_main_repo(&request.project_id)
+                    .project_main_repo(request.project_id.as_str())
                     .await
                     .map_err(api_error)?;
                 let outcome = self
                     .worktree_add(
                         &repo,
-                        Some(&request.project_id),
+                        Some(request.project_id.as_str()),
                         &spec.branch,
                         spec.base_branch.clone(),
                         spec.new_path.clone().map(PathBuf::from),
@@ -639,7 +639,7 @@ impl ClientApiBackend for DaemonState {
             )));
         }
         let resolved = self
-            .project_link(&dir, &request.project_id)
+            .project_link(&dir, request.project_id.as_str())
             .await
             .map_err(api_error)?;
         self.record_audit(
@@ -654,7 +654,7 @@ impl ClientApiBackend for DaemonState {
         )
         .await;
         Ok(ProjectLinkResponse {
-            project_id: resolved.project_id,
+            project_id: resolved.project_id.into(),
             local_path: resolved.local_path.to_string_lossy().into_owned(),
         })
     }

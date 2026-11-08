@@ -12,7 +12,7 @@ use std::str::FromStr;
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
-use crate::{CommandId, EventId, NodeId, SessionId};
+use crate::{CommandId, EventId, NodeId, ProjectId, SessionId};
 
 /// Intentionally opaque JSON carried across the protocol.
 ///
@@ -643,7 +643,7 @@ pub struct SessionSummary {
     /// Session ID (UUID v7)
     pub session_id: SessionId,
     /// Logical project ID (e.g. `github.com/nazo6/flexagent`)
-    pub project_id: String,
+    pub project_id: ProjectId,
     /// ID of the node running the session
     pub node_id: NodeId,
     /// Working directory (including the worktree path)
@@ -689,7 +689,7 @@ pub struct SessionSummary {
 #[specta(collect)]
 pub struct NodeProjectReport {
     /// Logical project ID
-    pub project_id: String,
+    pub project_id: ProjectId,
     /// Display name
     pub name: String,
     /// Git URL the canonical form was derived from
@@ -1451,7 +1451,7 @@ pub enum RecoveryAction {
     /// Recreate the worktree
     RecreateWorktree {
         /// Logical project ID
-        project_id: String,
+        project_id: ProjectId,
         /// Branch name (when known)
         branch: Option<String>,
     },
@@ -1623,7 +1623,7 @@ impl CommandResult {
 #[specta(collect)]
 pub struct ProjectSummary {
     /// Logical project ID
-    pub project_id: String,
+    pub project_id: ProjectId,
     /// Display name
     pub name: String,
     /// Git URL the canonical form was derived from

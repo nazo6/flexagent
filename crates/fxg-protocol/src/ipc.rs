@@ -19,7 +19,7 @@ use crate::common::{
     SessionControlAction, SessionSummary, StreamDeltaPayload,
 };
 use crate::events::SessionEventEnvelope;
-use crate::{CommandId, SessionId};
+use crate::{CommandId, ProjectId, SessionId};
 
 /// Length of the length header of length-prefixed JSON (little-endian u32).
 pub const IPC_LENGTH_PREFIX_BYTES: usize = 4;
@@ -41,7 +41,7 @@ pub struct LocalStatus {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProjectInfo {
     /// Logical project ID (`project_key`)
-    pub project_id: String,
+    pub project_id: ProjectId,
     /// Display name
     pub name: String,
     /// Git URL the canonical form was derived from
@@ -227,7 +227,7 @@ pub enum IpcClientMessage {
         /// Target directory
         cwd: String,
         /// Logical project ID to link to
-        project_id: String,
+        project_id: ProjectId,
     },
     /// Scans the git repositories under a directory in bulk (`fxg project scan`).
     ProjectScan {
@@ -243,7 +243,7 @@ pub enum IpcClientMessage {
         /// Directory of the target repository (resolved from the logical project when omitted)
         cwd: Option<String>,
         /// Filter by logical project ID
-        project_id: Option<String>,
+        project_id: Option<ProjectId>,
     },
     /// Creates a worktree (`fxg worktree add`).
     WorktreeAdd {
@@ -252,7 +252,7 @@ pub enum IpcClientMessage {
         /// Directory of the main repository
         cwd: String,
         /// Logical project ID (resolved from `cwd` when omitted)
-        project_id: Option<String>,
+        project_id: Option<ProjectId>,
         /// Name of the branch to create
         branch: String,
         /// Base branch (defaults to the current HEAD)

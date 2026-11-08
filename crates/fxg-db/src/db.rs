@@ -322,7 +322,7 @@ impl Db {
     /// Resolves the default execution directory path (binding first, then latest session).
     pub async fn resolve_default_local_path(
         &self,
-        project_id: &str,
+        project_id: &fxg_protocol::ProjectId,
         node_id: &fxg_protocol::NodeId,
     ) -> Result<Option<String>, DbError> {
         queries::resolve_default_local_path(&self.pool, project_id, node_id).await

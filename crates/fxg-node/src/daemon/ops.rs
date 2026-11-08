@@ -391,7 +391,7 @@ impl DaemonState {
         let projects = self.db().list_projects().await?;
         let project = projects
             .iter()
-            .find(|project| project.project_id == project_id)
+            .find(|project| project.project_id.as_str() == project_id)
             .ok_or_else(|| NodeError::InvalidWorktree(format!("unknown project: {project_id}")))?;
         let mut bindings: Vec<_> = project
             .bindings

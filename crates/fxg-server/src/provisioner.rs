@@ -826,7 +826,7 @@ async fn await_handshake_and_start(
     let message = ServerToNodeMsg::StartSession {
         command_id: command_id.clone(),
         session_id: pending.session_id.clone().into(),
-        project_id: pending.project_id.clone(),
+        project_id: pending.project_id.clone().into(),
         local_path: EPHEMERAL_WORKSPACE.to_owned(),
         agent_id: pending.agent_id.clone(),
         initial_prompt: pending.initial_prompt.clone(),

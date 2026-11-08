@@ -18,7 +18,7 @@
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
-use crate::{EventId, NodeId, SessionId};
+use crate::{EventId, NodeId, ProjectId, SessionId};
 
 use crate::common::{
     AttachmentMeta, ClientSource, CommandInfo, CompactionStatus, ConfigOptionInfo,
@@ -87,7 +87,7 @@ pub enum UnifiedEventPayload {
         /// the hub-side projection can be rebuilt entirely from the event log.
         node_id: NodeId,
         /// Logical project ID
-        project_id: String,
+        project_id: ProjectId,
         /// Project display name (used by the hub to create unknown projects)
         project_name: String,
         /// Working directory (including the worktree path)

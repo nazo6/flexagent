@@ -94,6 +94,14 @@ string_id! {
     EventId
 }
 
+string_id! {
+    /// Logical project ID.
+    ///
+    /// Either an explicit `project_key` from `.fxg.toml`, a normalized git remote
+    /// URL, or a `local:<node_id>:<hash>` fallback. Treated as opaque.
+    ProjectId
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

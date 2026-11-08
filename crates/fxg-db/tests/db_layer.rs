@@ -13,7 +13,6 @@ use fxg_db::{
     AuditLogRecord, Db, DbError, DbRole, NodeRecord, ProjectBindingRecord, ProjectRecord,
     SessionFilter,
 };
-use fxg_protocol::NodeId;
 use fxg_protocol::common::{
     ClientSource, CommandInfo, ElicitationAction, ElicitationMode, ElicitationRequestStatus,
     ModeInfo, PermissionOption, PermissionOptionKind, PermissionRequestStatus, PlanEntry,
@@ -21,6 +20,7 @@ use fxg_protocol::common::{
 };
 use fxg_protocol::events::{SessionEventEnvelope, UnifiedEventPayload};
 use fxg_protocol::util::{now_ms, uuid_v7};
+use fxg_protocol::{NodeId, ProjectId};
 
 const PROJECT_ID: &str = "github.com/nazo6/flexagent";
 const NODE_ID: &str = "test-node";
@@ -48,14 +48,14 @@ impl Fixture {
         .await
         .expect("upsert node");
         db.upsert_project(&ProjectRecord {
-            project_id: PROJECT_ID.to_owned(),
+            project_id: PROJECT_ID.into(),
             name: "flexagent".to_owned(),
             canonical_git_url: Some("git@github.com:nazo6/flexagent.git".to_owned()),
         })
         .await
         .expect("upsert project");
         db.upsert_project_binding(&ProjectBindingRecord {
-            project_id: PROJECT_ID.to_owned(),
+            project_id: PROJECT_ID.into(),
             node_id: NODE_ID.into(),
             local_path: LOCAL_PATH.to_owned(),
             is_worktree: false,
@@ -154,7 +154,7 @@ impl Fixture {
 fn session_created_payload() -> UnifiedEventPayload {
     UnifiedEventPayload::SessionCreated {
         node_id: NODE_ID.into(),
-        project_id: PROJECT_ID.to_owned(),
+        project_id: PROJECT_ID.into(),
         project_name: "flexagent".to_owned(),
         local_path: LOCAL_PATH.to_owned(),
         git_branch: Some("main".to_owned()),
@@ -286,7 +286,7 @@ async fn event_application_updates_session_projections() {
         .await
         .expect("get session")
         .expect("session exists");
-    assert_eq!(summary.project_id, PROJECT_ID);
+    assert_eq!(summary.project_id.as_str(), PROJECT_ID);
     assert_eq!(summary.node_id.as_str(), NODE_ID);
     assert_eq!(summary.local_path, LOCAL_PATH);
     assert_eq!(summary.git_branch.as_deref(), Some("main"));
@@ -557,7 +557,7 @@ async fn rebuild_projections_matches_incremental_apply() {
     fixture.session_id = forked_id.clone();
     let forked_created = fixture.event(UnifiedEventPayload::SessionCreated {
         node_id: NODE_ID.into(),
-        project_id: PROJECT_ID.to_owned(),
+        project_id: PROJECT_ID.into(),
         project_name: "flexagent".to_owned(),
         local_path: "/home/nazo/.flexagent/worktrees/github.com-nazo6-flexagent/feat-auth"
             .to_owned(),
@@ -1063,7 +1063,7 @@ async fn session_filters_and_plan_projection() {
     let by_project = fixture
         .db
         .list_sessions(&SessionFilter {
-            project_id: Some(PROJECT_ID.to_owned()),
+            project_id: Some(PROJECT_ID.into()),
             ..SessionFilter::default()
         })
         .await
@@ -1073,7 +1073,7 @@ async fn session_filters_and_plan_projection() {
     let by_other_project = fixture
         .db
         .list_sessions(&SessionFilter {
-            project_id: Some("github.com/other/repo".to_owned()),
+            project_id: Some("github.com/other/repo".into()),
             ..SessionFilter::default()
         })
         .await
@@ -1170,7 +1170,7 @@ async fn registration_upserts_and_audit_logs() {
     fixture
         .db
         .upsert_project_binding(&ProjectBindingRecord {
-            project_id: PROJECT_ID.to_owned(),
+            project_id: PROJECT_ID.into(),
             node_id: NODE_ID.into(),
             local_path: LOCAL_PATH.to_owned(),
             is_worktree: false,
@@ -1235,7 +1235,7 @@ async fn default_local_path_prefers_recent_binding_then_session_history() {
     fixture
         .db
         .upsert_project_binding(&ProjectBindingRecord {
-            project_id: PROJECT_ID.to_owned(),
+            project_id: PROJECT_ID.into(),
             node_id: NODE_ID.into(),
             local_path: "/home/nazo/src/flexagent-wt".to_owned(),
             is_worktree: true,
@@ -1251,7 +1251,7 @@ async fn default_local_path_prefers_recent_binding_then_session_history() {
         .expect("align last_used_at");
     let path = fixture
         .db
-        .resolve_default_local_path(PROJECT_ID, &NodeId::from(NODE_ID))
+        .resolve_default_local_path(&ProjectId::from(PROJECT_ID), &NodeId::from(NODE_ID))
         .await
         .expect("resolve default");
     assert_eq!(
@@ -1268,7 +1268,7 @@ async fn default_local_path_prefers_recent_binding_then_session_history() {
         .expect("age main binding");
     let path = fixture
         .db
-        .resolve_default_local_path(PROJECT_ID, &NodeId::from(NODE_ID))
+        .resolve_default_local_path(&ProjectId::from(PROJECT_ID), &NodeId::from(NODE_ID))
         .await
         .expect("resolve default");
     assert_eq!(
@@ -1285,7 +1285,7 @@ async fn default_local_path_prefers_recent_binding_then_session_history() {
         .expect("mark worktree missing");
     let path = fixture
         .db
-        .resolve_default_local_path(PROJECT_ID, &NodeId::from(NODE_ID))
+        .resolve_default_local_path(&ProjectId::from(PROJECT_ID), &NodeId::from(NODE_ID))
         .await
         .expect("resolve default");
     assert_eq!(
@@ -1301,7 +1301,7 @@ async fn default_local_path_prefers_recent_binding_then_session_history() {
         .expect("mark all missing");
     let path = fixture
         .db
-        .resolve_default_local_path(PROJECT_ID, &NodeId::from(NODE_ID))
+        .resolve_default_local_path(&ProjectId::from(PROJECT_ID), &NodeId::from(NODE_ID))
         .await
         .expect("resolve default");
     assert_eq!(path.as_deref(), Some("/home/nazo/src/flexagent-wt"));
@@ -1317,7 +1317,7 @@ async fn default_local_path_prefers_recent_binding_then_session_history() {
         created_at: now_ms(),
         payload: UnifiedEventPayload::SessionCreated {
             node_id: NODE_ID.into(),
-            project_id: legacy_project.to_owned(),
+            project_id: legacy_project.into(),
             project_name: "legacy".to_owned(),
             local_path: legacy_path.to_owned(),
             git_branch: None,
@@ -1335,7 +1335,7 @@ async fn default_local_path_prefers_recent_binding_then_session_history() {
         .expect("append legacy session");
     let path = fixture
         .db
-        .resolve_default_local_path(legacy_project, &NodeId::from(NODE_ID))
+        .resolve_default_local_path(&ProjectId::from(legacy_project), &NodeId::from(NODE_ID))
         .await
         .expect("resolve default");
     assert_eq!(path.as_deref(), Some(legacy_path));
@@ -1343,7 +1343,10 @@ async fn default_local_path_prefers_recent_binding_then_session_history() {
     // None when there are neither bindings nor sessions
     let path = fixture
         .db
-        .resolve_default_local_path("github.com/nazo6/none", &NodeId::from(NODE_ID))
+        .resolve_default_local_path(
+            &ProjectId::from("github.com/nazo6/none"),
+            &NodeId::from(NODE_ID),
+        )
         .await
         .expect("resolve default");
     assert!(path.is_none());
@@ -1366,7 +1369,7 @@ async fn file_backed_db_persists_across_reopen() {
     .await
     .expect("upsert node");
     db.upsert_project(&ProjectRecord {
-        project_id: PROJECT_ID.to_owned(),
+        project_id: PROJECT_ID.into(),
         name: "flexagent".to_owned(),
         canonical_git_url: None,
     })

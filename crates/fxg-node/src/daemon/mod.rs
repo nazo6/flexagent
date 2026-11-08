@@ -871,7 +871,7 @@ mod tests {
             "stale-session",
             fxg_protocol::events::UnifiedEventPayload::SessionCreated {
                 node_id: "test-node".into(),
-                project_id: "github.com/nazo6/flexagent".to_owned(),
+                project_id: "github.com/nazo6/flexagent".into(),
                 project_name: "flexagent".to_owned(),
                 local_path: dir.path().to_string_lossy().into_owned(),
                 git_branch: None,

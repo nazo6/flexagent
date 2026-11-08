@@ -547,7 +547,7 @@ async fn central_server_commands_permissions_and_kill_switch() {
                 .await
                 .map(|projects| {
                     projects.iter().any(|project| {
-                        project.project_id == project_id
+                        project.project_id.as_str() == project_id
                             && project
                                 .bindings
                                 .iter()

@@ -231,7 +231,7 @@ impl ServerState {
     /// ([`fxg_db::queries::resolve_default_local_path`]).
     async fn project_local_path(
         &self,
-        project_id: &str,
+        project_id: &fxg_protocol::ProjectId,
         node_id: &fxg_protocol::NodeId,
     ) -> Result<String, ApiError> {
         self.inner
@@ -283,7 +283,7 @@ impl ServerState {
     /// Fetches the projection row for a logical project.
     async fn project_record(
         &self,
-        project_id: &str,
+        project_id: &fxg_protocol::ProjectId,
     ) -> Result<fxg_protocol::common::ProjectSummary, ApiError> {
         let projects = self
             .inner
@@ -293,7 +293,7 @@ impl ServerState {
             .map_err(ApiError::from)?;
         projects
             .into_iter()
-            .find(|project| project.project_id == project_id)
+            .find(|project| &project.project_id == project_id)
             .ok_or_else(|| ApiError::not_found(format!("project not found: {project_id}")))
     }
 
@@ -536,7 +536,7 @@ impl ClientApiBackend for ServerState {
                 .db()
                 .upsert_provisional_session(&fxg_db::registration::ProvisionalSessionRecord {
                     session_id: session_id.clone(),
-                    project_id: request.project_id.clone(),
+                    project_id: request.project_id.to_string(),
                     project_name: project.name.clone(),
                     node_id: node_id.clone(),
                     local_path: provisioner::EPHEMERAL_WORKSPACE.to_owned(),
@@ -555,7 +555,7 @@ impl ClientApiBackend for ServerState {
                     session_id: session_id.clone(),
                     node_id: node_id.clone(),
                     provisioner: provisioner_name.clone(),
-                    project_id: request.project_id.clone(),
+                    project_id: request.project_id.to_string(),
                     git_url,
                     git_branch,
                     agent_id: agent_id.clone(),
@@ -981,7 +981,7 @@ impl ClientApiBackend for ServerState {
                 &command_id,
                 ServerToNodeMsg::ManageWorktree {
                     command_id: command_id.clone(),
-                    project_id: project_id.to_owned(),
+                    project_id: project_id.into(),
                     action: WorktreeAction::Prune,
                 },
             )
@@ -1267,7 +1267,7 @@ impl ClientApiBackend for ServerState {
             .map_err(ApiError::from)?;
         let project = projects
             .iter()
-            .find(|project| project.project_id == project_id)
+            .find(|project| project.project_id.as_str() == project_id)
             .ok_or_else(|| ApiError::not_found(format!("project not found: {project_id}")))?;
         let worktrees = project
             .bindings
@@ -1305,7 +1305,7 @@ impl ClientApiBackend for ServerState {
                 &command_id,
                 ServerToNodeMsg::ManageWorktree {
                     command_id: command_id.clone(),
-                    project_id: project_id.to_owned(),
+                    project_id: project_id.into(),
                     action: WorktreeAction::Add {
                         branch: request.branch,
                         base_branch: request.base_branch,
@@ -1338,7 +1338,7 @@ impl ClientApiBackend for ServerState {
                 &command_id,
                 ServerToNodeMsg::ManageWorktree {
                     command_id: command_id.clone(),
-                    project_id: project_id.to_owned(),
+                    project_id: project_id.into(),
                     action: WorktreeAction::Remove {
                         path: request.path,
                         force: request.force,

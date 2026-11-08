@@ -548,7 +548,7 @@ async fn run_with_provisioner(
 
     let request = fxg_protocol::client_api::CreateSessionRequest {
         command_id: format!("cli-{}", fxg_protocol::util::uuid_v7()).into(),
-        project_id: project.project_id.clone(),
+        project_id: project.project_id.clone().into(),
         node_id: None,
         provisioner: Some(provisioner.to_owned()),
         local_path: None,
@@ -842,7 +842,7 @@ impl usage::RunAsync for SessionListArgs {
             .filter(|session| {
                 self.project
                     .as_deref()
-                    .is_none_or(|project| session.project_id == project)
+                    .is_none_or(|project| session.project_id.as_str() == project)
             })
             .filter(|session| {
                 self.node
@@ -978,7 +978,7 @@ impl usage::RunAsync for SessionShowArgs {
         let fields = [
             ("SESSION", session.session_id.to_string()),
             ("TITLE", session.title.clone()),
-            ("PROJECT", session.project_id.clone()),
+            ("PROJECT", session.project_id.to_string()),
             ("NODE", session.node_id.to_string()),
             ("AGENT", session.agent_id.clone()),
             ("STATUS", session.status.to_string()),

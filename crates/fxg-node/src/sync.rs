@@ -796,12 +796,12 @@ pub(crate) async fn handle_server_message(
                     branch,
                     base_branch,
                     new_path,
-                } => match state.project_main_repo(&project_id).await {
+                } => match state.project_main_repo(project_id.as_str()).await {
                     Ok(repo) => {
                         match state
                             .worktree_add(
                                 &repo,
-                                Some(&project_id),
+                                Some(project_id.as_str()),
                                 &branch,
                                 base_branch,
                                 new_path.map(std::path::PathBuf::from),
@@ -854,7 +854,7 @@ pub(crate) async fn handle_server_message(
                         },
                     }
                 }
-                WorktreeAction::Prune => match state.project_main_repo(&project_id).await {
+                WorktreeAction::Prune => match state.project_main_repo(project_id.as_str()).await {
                     Ok(repo) => match state.worktree_prune(&repo, &source).await {
                         Ok(_) => NodeToServerMsg::WorktreeResult {
                             command_id,
@@ -932,7 +932,7 @@ pub(crate) async fn handle_server_message(
         } => {
             let dir = PathBuf::from(&local_path);
             let result = if dir.is_dir() {
-                state.project_link(&dir, &project_id).await
+                state.project_link(&dir, project_id.as_str()).await
             } else {
                 Err(NodeError::InvalidState(format!(
                     "directory not found: {local_path}"
@@ -955,7 +955,7 @@ pub(crate) async fn handle_server_message(
                     NodeToServerMsg::ProjectLinkResult {
                         request_id,
                         response: Some(fxg_protocol::client_api::ProjectLinkResponse {
-                            project_id: resolved.project_id,
+                            project_id: resolved.project_id.into(),
                             local_path: resolved.local_path.to_string_lossy().into_owned(),
                         }),
                         error: None,

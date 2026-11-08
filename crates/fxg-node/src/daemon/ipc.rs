@@ -307,7 +307,7 @@ async fn handle(
             }
             // Apply the binding immediately
             let resolved = state
-                .project_link(&dir, &project_id)
+                .project_link(&dir, project_id.as_str())
                 .await
                 .map_err(|err| DispatchError::from_node_error(&command_id, err))?;
             Ok((
@@ -345,8 +345,13 @@ async fn handle(
             cwd,
             project_id,
         } => {
-            let worktrees =
-                list_worktrees(state, cwd.as_deref(), project_id.as_deref(), &command_id).await?;
+            let worktrees = list_worktrees(
+                state,
+                cwd.as_deref(),
+                project_id.as_ref().map(fxg_protocol::ProjectId::as_str),
+                &command_id,
+            )
+            .await?;
             Ok((command_id, IpcResult::Worktrees { worktrees }))
         }
 
@@ -361,7 +366,7 @@ async fn handle(
             let outcome = state
                 .worktree_add(
                     Path::new(&cwd),
-                    project_id.as_deref(),
+                    project_id.as_ref().map(fxg_protocol::ProjectId::as_str),
                     &branch,
                     base_branch,
                     path.map(PathBuf::from),
@@ -893,7 +898,7 @@ async fn resolve_and_register(
 
 fn to_project_info(resolved: &project::ResolvedProject) -> ProjectInfo {
     ProjectInfo {
-        project_id: resolved.project_id.clone(),
+        project_id: resolved.project_id.clone().into(),
         name: resolved.name.clone(),
         canonical_git_url: resolved.canonical_git_url.clone(),
         git_root: resolved
@@ -1011,7 +1016,7 @@ mod tests {
                 result: IpcResult::ProjectInfo { project },
                 ..
             } => {
-                assert_eq!(project.project_id, "github.com/nazo6/flexagent");
+                assert_eq!(project.project_id.as_str(), "github.com/nazo6/flexagent");
                 assert_eq!(project.source.as_str(), "git_remote");
                 assert!(project.is_git_repo);
             }
@@ -1024,7 +1029,7 @@ mod tests {
             &IpcClientMessage::ProjectLink {
                 command_id: "c2".into(),
                 cwd: repo.to_string_lossy().into_owned(),
-                project_id: "internal/agent-tools".to_owned(),
+                project_id: "internal/agent-tools".into(),
             },
         )
         .await;
@@ -1054,7 +1059,7 @@ mod tests {
                 ..
             } => {
                 assert_eq!(projects.len(), 1);
-                assert_eq!(projects[0].project_id, "internal/agent-tools");
+                assert_eq!(projects[0].project_id.as_str(), "internal/agent-tools");
                 assert_eq!(projects[0].bindings.len(), 1);
                 assert_eq!(projects[0].bindings[0].node_id.as_str(), "ipc-node");
             }

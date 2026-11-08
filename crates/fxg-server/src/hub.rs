@@ -1465,7 +1465,7 @@ async fn apply_project_reports(
         state
             .db()
             .upsert_project(&fxg_db::registration::ProjectRecord {
-                project_id: project.project_id.clone(),
+                project_id: project.project_id.to_string(),
                 name: project.name.clone(),
                 canonical_git_url: project.canonical_git_url.clone(),
             })
@@ -1474,7 +1474,7 @@ async fn apply_project_reports(
             state
                 .db()
                 .upsert_project_binding(&fxg_db::registration::ProjectBindingRecord {
-                    project_id: project.project_id.clone(),
+                    project_id: project.project_id.to_string(),
                     node_id: node_id.as_str().to_owned(),
                     local_path: binding.local_path.clone(),
                     is_worktree: binding.is_worktree,

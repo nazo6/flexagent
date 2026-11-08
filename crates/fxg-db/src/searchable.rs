@@ -252,7 +252,7 @@ mod tests {
     fn session_created_has_no_searchable_text() {
         let payload = UnifiedEventPayload::SessionCreated {
             node_id: "n".into(),
-            project_id: "github.com/nazo6/flexagent".to_owned(),
+            project_id: "github.com/nazo6/flexagent".into(),
             project_name: "flexagent".to_owned(),
             local_path: "/tmp".to_owned(),
             git_branch: None,

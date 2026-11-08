@@ -1028,7 +1028,7 @@ async fn list_sessions<B: ClientApiBackend>(
         None => Vec::new(),
     };
     let filter = SessionFilter {
-        project_id: params.project_id,
+        project_id: params.project_id.map(fxg_protocol::ProjectId::from),
         node_id: params.node_id.map(fxg_protocol::NodeId::from),
         statuses,
         include_archived: params.include_archived.unwrap_or(false),

@@ -406,7 +406,15 @@ pub enum ConfigOptionValue {
 
 #### Tier B: ドメイン束縛
 
-- [ ] `ProjectId`
+- [x] `ProjectId`
+  - [x] `SessionSummary` / `ProjectSummary` / `NodeProjectReport` /
+        worktree / recovery / IPC / REST DTO
+  - [x] `fxg-db` の `SessionRow` / `ProjectRow` / `BindingRow` /
+        `SessionFilter.project_id`
+  - [x] `resolve_default_local_path` / `project_record` /
+        `project_local_path` の境界
+  - `ProjectConfig.project_key`、`ProjectRecord` / `ProjectBindingRecord`、
+    内部 map は文字列のまま（境界で変換）
 
 #### Tier C: 必要になったときだけ
 
@@ -522,3 +530,7 @@ pub enum ConfigOptionValue {
   `SessionManager` の `active` / `resuming` map と `DaemonConfig` は文字列のまま。
   `agent_session_id` は ACP 側の識別子なので `String` を維持している。
   Tier B（`ProjectId`）以降は必要になった時点で追加する。
+- 2026-11-08: Phase 4 の Tier B `ProjectId` を実装。protocol DTO / DB row
+  struct / `SessionFilter` / プロジェクト解決の境界を型化した。`project_key`
+  と DB 登録レコードは文字列のまま。Tier C（permission / elicitation /
+  agent ID）は、用途別の型分割が必要なため保留した。

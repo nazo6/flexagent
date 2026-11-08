@@ -295,7 +295,7 @@ export type CreateSessionRequest = {
 	/**  Correlation ID assigned by the client (used for idempotent duplicate rejection) */
 	command_id: CommandId,
 	/**  Logical project ID */
-	project_id: string,
+	project_id: ProjectId,
 	/**  ID of the resident node to run on (mutually exclusive with `provisioner`) */
 	node_id: NodeId | null,
 	/**  Ephemeral VM provisioner name (mutually exclusive with `node_id`; requires the central server) */
@@ -754,7 +754,7 @@ export type NodeLifecycleStatus =
 /**  Project binding information reported in `NodeHello`. */
 export type NodeProjectReport = {
 	/**  Logical project ID */
-	project_id: string,
+	project_id: ProjectId,
 	/**  Display name */
 	name: string,
 	/**  Git URL the canonical form was derived from */
@@ -887,10 +887,18 @@ export type ProjectBindingSummary = {
 	last_used_at: number,
 };
 
+/**
+ *  Logical project ID.
+ * 
+ *  Either an explicit `project_key` from `.fxg.toml`, a normalized git remote
+ *  URL, or a `local:<node_id>:<hash>` fallback. Treated as opaque.
+ */
+export type ProjectId = string;
+
 /**  `POST /api/v1/nodes/:node_id/projects/link` request. */
 export type ProjectLinkRequest = {
 	/**  Logical project ID to link to */
-	project_id: string,
+	project_id: ProjectId,
 	/**  Target directory */
 	local_path: string,
 };
@@ -898,7 +906,7 @@ export type ProjectLinkRequest = {
 /**  `POST /api/v1/nodes/:node_id/projects/link` response. */
 export type ProjectLinkResponse = {
 	/**  The resolved logical project ID */
-	project_id: string,
+	project_id: ProjectId,
 	/**  Target directory (the local path after resolution) */
 	local_path: string,
 };
@@ -946,7 +954,7 @@ export type ProjectScanResponse = {
 /**  Project projection exposed to clients (`GET /api/v1/projects`). */
 export type ProjectSummary = {
 	/**  Logical project ID */
-	project_id: string,
+	project_id: ProjectId,
 	/**  Display name */
 	name: string,
 	/**  Git URL the canonical form was derived from */
@@ -1119,7 +1127,7 @@ agent_id: string } |
 /**  Recreate the worktree */
 { kind: "recreate_worktree"; 
 /**  Logical project ID */
-project_id: string; 
+project_id: ProjectId; 
 /**  Branch name (when known) */
 branch: string | null } | 
 /**  Revert to the nearest snapshot that can be restored */
@@ -1443,7 +1451,7 @@ export type SessionSummary = {
 	/**  Session ID (UUID v7) */
 	session_id: SessionId,
 	/**  Logical project ID (e.g. `github.com/nazo6/flexagent`) */
-	project_id: string,
+	project_id: ProjectId,
 	/**  ID of the node running the session */
 	node_id: NodeId,
 	/**  Working directory (including the worktree path) */
@@ -1584,7 +1592,7 @@ export type UnifiedEventPayload =
 	 */
 	node_id: NodeId,
 	/**  Logical project ID */
-	project_id: string,
+	project_id: ProjectId,
 	/**  Project display name (used by the hub to create unknown projects) */
 	project_name: string,
 	/**  Working directory (including the worktree path) */

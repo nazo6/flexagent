@@ -14,7 +14,7 @@ use crate::common::{
     ResolvedBy, SessionControlAction, WarningInfo, WorkspaceDiffResponse,
 };
 use crate::events::SessionEventEnvelope;
-use crate::{CommandId, NodeId, SessionId};
+use crate::{CommandId, NodeId, ProjectId, SessionId};
 /// Synchronization state of a session held by the node (reported in `NodeHello`).
 ///
 /// The hub compares it with `last_node_seq` in its own DB and returns
@@ -304,7 +304,7 @@ pub enum ServerToNodeMsg {
         /// Session ID to start (assigned by the server)
         session_id: SessionId,
         /// Logical project ID
-        project_id: String,
+        project_id: ProjectId,
         /// Working directory (including the worktree path)
         local_path: String,
         /// Agent ID
@@ -467,7 +467,7 @@ pub enum ServerToNodeMsg {
         /// Correlation ID
         command_id: CommandId,
         /// Target logical project ID
-        project_id: String,
+        project_id: ProjectId,
         /// Operation to execute
         action: crate::common::WorktreeAction,
     },
@@ -492,7 +492,7 @@ pub enum ServerToNodeMsg {
         /// Correlation ID
         request_id: String,
         /// Logical project ID to link to
-        project_id: String,
+        project_id: ProjectId,
         /// Target directory
         local_path: String,
     },

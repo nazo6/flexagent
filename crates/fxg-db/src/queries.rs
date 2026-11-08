@@ -33,7 +33,7 @@ use fxg_protocol::common::{
     SessionUsage,
 };
 use fxg_protocol::events::SessionEventBatch;
-use fxg_protocol::{EventId, NodeId, SessionId};
+use fxg_protocol::{EventId, NodeId, ProjectId, SessionId};
 use sqlx::SqlitePool;
 
 use crate::error::DbError;
@@ -43,7 +43,7 @@ use crate::events::{StoredPermissionDetails, envelope_from_row};
 #[derive(Debug, Clone, Default)]
 pub struct SessionFilter {
     /// Filter by logical project ID
-    pub project_id: Option<String>,
+    pub project_id: Option<ProjectId>,
     /// Filter by node ID
     pub node_id: Option<NodeId>,
     /// Filter by session status (all statuses if empty)
@@ -86,8 +86,8 @@ pub async fn list_sessions(
 
     let mut sessions = Vec::with_capacity(rows.len());
     for row in rows {
-        if let Some(project_id) = filter.project_id.as_deref()
-            && row.project_id != project_id
+        if let Some(project_id) = filter.project_id.as_ref()
+            && &row.project_id != project_id
         {
             continue;
         }
@@ -373,13 +373,13 @@ pub async fn list_projects(pool: &SqlitePool) -> Result<Vec<ProjectSummary>, DbE
 /// the node and the central server (design: docs/01-architecture-and-sync.md §4).
 pub async fn resolve_default_local_path(
     pool: &SqlitePool,
-    project_id: &str,
+    project_id: &ProjectId,
     node_id: &NodeId,
 ) -> Result<Option<String>, DbError> {
     let projects = list_projects(pool).await?;
     if let Some(project) = projects
         .iter()
-        .find(|project| project.project_id == project_id)
+        .find(|project| &project.project_id == project_id)
         && let Some(path) = select_default_binding_path(&project.bindings, node_id)
     {
         return Ok(Some(path));
@@ -388,7 +388,7 @@ pub async fn resolve_default_local_path(
     let sessions = list_sessions(
         pool,
         &SessionFilter {
-            project_id: Some(project_id.to_owned()),
+            project_id: Some(project_id.clone()),
             node_id: Some(node_id.clone()),
             limit: Some(1),
             ..SessionFilter::default()
@@ -702,7 +702,7 @@ pub async fn audit_logs(pool: &SqlitePool, limit: u32) -> Result<Vec<AuditLogEnt
 
 struct SessionRow {
     session_id: SessionId,
-    project_id: String,
+    project_id: ProjectId,
     node_id: NodeId,
     local_path: String,
     git_branch: Option<String>,
@@ -756,7 +756,7 @@ impl SessionRow {
 }
 
 struct ProjectRow {
-    project_id: String,
+    project_id: ProjectId,
     name: String,
     canonical_git_url: Option<String>,
     created_at: i64,
@@ -764,7 +764,7 @@ struct ProjectRow {
 }
 
 struct BindingRow {
-    project_id: String,
+    project_id: ProjectId,
     node_id: NodeId,
     local_path: String,
     is_worktree: bool,

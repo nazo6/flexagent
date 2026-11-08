@@ -88,7 +88,7 @@ impl DaemonClient {
             .request(IpcClientMessage::ProjectLink {
                 command_id,
                 cwd: path_to_string(cwd),
-                project_id: project_id.to_owned(),
+                project_id: project_id.into(),
             })
             .await?;
         ack_message(result)
@@ -123,7 +123,7 @@ impl DaemonClient {
             .request(IpcClientMessage::WorktreeList {
                 command_id,
                 cwd,
-                project_id,
+                project_id: project_id.map(fxg_protocol::ProjectId::from),
             })
             .await?;
         match result {
@@ -147,7 +147,7 @@ impl DaemonClient {
             .request(IpcClientMessage::WorktreeAdd {
                 command_id,
                 cwd: path_to_string(cwd),
-                project_id,
+                project_id: project_id.map(fxg_protocol::ProjectId::from),
                 branch: branch.to_owned(),
                 base_branch,
                 path,

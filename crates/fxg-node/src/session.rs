@@ -239,7 +239,7 @@ mod tests {
         .await
         .expect("node");
         db.upsert_project(&fxg_db::ProjectRecord {
-            project_id: PROJECT_ID.to_owned(),
+            project_id: PROJECT_ID.into(),
             name: "flexagent".to_owned(),
             canonical_git_url: None,
         })
@@ -256,7 +256,7 @@ mod tests {
     fn session_created_payload() -> UnifiedEventPayload {
         UnifiedEventPayload::SessionCreated {
             node_id: NODE_ID.into(),
-            project_id: PROJECT_ID.to_owned(),
+            project_id: PROJECT_ID.into(),
             project_name: "flexagent".to_owned(),
             local_path: "/tmp/repo".to_owned(),
             git_branch: Some("main".to_owned()),
@@ -281,7 +281,7 @@ mod tests {
         .await
         .expect("node");
         db.upsert_project(&fxg_db::ProjectRecord {
-            project_id: PROJECT_ID.to_owned(),
+            project_id: PROJECT_ID.into(),
             name: "flexagent".to_owned(),
             canonical_git_url: None,
         })
