@@ -1,18 +1,19 @@
-//! 一時VM破棄前の Git バンドル退避・復元 (ベストエフォート)。
+//! Best-effort Git bundle backup and restore before an ephemeral VM is destroyed.
 //!
-//! 設計: `docs/01-architecture-and-sync.md` §6.4。
+//! Design: `docs/01-architecture-and-sync.md` §6.4.
 //!
-//! 一時VMは Drain 時に「未プッシュコミット + 未コミット変更 (未追跡ファイル含む)」
-//! を単一の `git bundle` に固めて中央サーバーへ退避する。復元は別ノード
-//! (常駐ノード / 別の一時VM) の新規ワークスペースに対して行い、退避時の
-//! 作業ツリー状態をブランチ上のコミットとして再現する。
+//! On drain, an ephemeral VM packs "unpushed commits + uncommitted changes (including
+//! untracked files)" into a single `git bundle` and backs it up to the central server.
+//! Restore is performed into a new workspace on another node (resident node / another
+//! ephemeral VM), reproducing the backed-up working tree state as a commit on a branch.
 //!
-//! - 未コミット変更は Shadow Git Tree (`GIT_INDEX_FILE` + `git write-tree`) で
-//!   ツリー化し、`git commit-tree` でスナップショットコミットにしてから
-//!   `refs/heads/fxg-snapshot` に固定して bundle に含める
-//! - 復元は「対象ディレクトリが空/未作成なら `git clone`、既存リポジトリなら
-//!   `git fetch`」の 2 経路。どちらも `fxg-snapshot` を取得して
-//!   現在ブランチへ `checkout -f -B` する
+//! - Uncommitted changes are turned into a tree with the Shadow Git Tree
+//!   (`GIT_INDEX_FILE` + `git write-tree`), made into a snapshot commit with
+//!   `git commit-tree`, then pinned to `refs/heads/fxg-snapshot` and included in the
+//!   bundle
+//! - Restore has two paths: `git clone` if the target directory is empty or does not
+//!   exist, `git fetch` if it is an existing repository. Both obtain `fxg-snapshot`
+//!   and `checkout -f -B` it onto the current branch
 
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -23,17 +24,18 @@ use crate::error::NodeError;
 use crate::git;
 use crate::snapshot::ShadowGitTree;
 
-/// 退避対象のスナップショットを固定する一時ブランチ名。
+/// Temporary branch name that pins the snapshot to be backed up.
 pub const SNAPSHOT_REF: &str = "refs/heads/fxg-snapshot";
 
-/// ワークツリーのバイト列をそのまま往復させるための Git 設定引数。
+/// Git configuration arguments that round-trip the worktree bytes verbatim.
 ///
-/// Windows の既定 (`core.autocrlf=true`) では clone / checkout 時に LF が CRLF
-/// へ変換され、退避した作業ツリーと復元結果が一致しない (CI: windows-latest で
-/// 検出。snapshot.rs の Shadow Git 操作と同じ理由)。
+/// Under the Windows default (`core.autocrlf=true`), LF is converted to CRLF on
+/// clone / checkout, so the backed-up working tree does not match the restore result
+/// (detected in CI on windows-latest; the same reason as the Shadow Git operations in
+/// snapshot.rs).
 const WORKTREE_GIT_CONFIG: &[&str] = &["-c", "core.autocrlf=false", "-c", "core.eol=lf"];
 
-/// ワークツリー Git 操作の引数に [`WORKTREE_GIT_CONFIG`] を前置する。
+/// Prefixes the arguments of a worktree Git operation with [`WORKTREE_GIT_CONFIG`].
 fn worktree_git_args<'a>(args: &[&'a str]) -> Vec<&'a str> {
     WORKTREE_GIT_CONFIG
         .iter()
@@ -42,20 +44,21 @@ fn worktree_git_args<'a>(args: &[&'a str]) -> Vec<&'a str> {
         .collect()
 }
 
-/// 生成したワークスペースバンドル。
+/// Generated workspace bundle.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorkspaceBundle {
-    /// bundle データ (`git bundle create` の生バイト列)
+    /// Bundle data (raw bytes of `git bundle create`)
     pub bytes: Vec<u8>,
-    /// 退避時の現在ブランチ (`detached HEAD` 時は `None`)
+    /// Current branch at backup time (`None` for a detached HEAD)
     pub branch: Option<String>,
-    /// 復元先でチェックアウトすべきコミット (未コミット変更を含むスナップショット)
+    /// Commit to check out at the restore destination (snapshot including uncommitted
+    /// changes)
     pub head_commit: Option<String>,
 }
 
-/// ワークスペースの Git バンドルを作成する。
+/// Creates a Git bundle of the workspace.
 ///
-/// 非 Git ディレクトリの場合は [`NodeError::Git`] を返す。
+/// Returns [`NodeError::Git`] for a non-Git directory.
 pub async fn create_workspace_bundle(
     repo: &Path,
     index_path: &Path,
@@ -74,8 +77,9 @@ pub async fn create_workspace_bundle(
         .filter(|branch| branch != "HEAD");
     let original_head = git::try_git(repo, &["rev-parse", "HEAD"]).await?;
 
-    // 1. ワーキングツリー (未コミット変更・未追跡ファイル含む) をツリー化し、
-    //    スナップショットコミットを作る (ユーザーの実 Index / HEAD は変更しない)
+    // 1. Turn the working tree (including uncommitted changes and untracked files)
+    //    into a tree and create a snapshot commit (the user's real index / HEAD are
+    //    left unchanged)
     let tree_hash = ShadowGitTree::new(repo, index_path, session_id)
         .snapshot()
         .await?
@@ -104,17 +108,18 @@ pub async fn create_workspace_bundle(
                 .await?,
             )
         }
-        // スナップショット上限超過等で取得できない場合は HEAD のみ退避する
+        // If it cannot be obtained, e.g. because the snapshot size limit was exceeded,
+        // back up HEAD only
         None => original_head.clone(),
     };
 
-    // 2. スナップショットコミットをブランチに固定して bundle に含める
-    //    (`git clone <bundle>` は refs/heads/* のみを取り込むため)
+    // 2. Pin the snapshot commit to a branch so it is included in the bundle
+    //    (`git clone <bundle>` only imports refs/heads/*)
     if let Some(commit) = snapshot_commit.as_deref() {
         git::run_git(repo, &["update-ref", SNAPSHOT_REF, commit]).await?;
     }
 
-    // 3. bundle create (全 ref を含める)
+    // 3. bundle create (include all refs)
     let bundle_path = std::env::temp_dir().join(format!("fxg-bundle-{session_id}.bundle"));
     let bundle_arg = bundle_path.to_string_lossy().into_owned();
     let created = git::run_git(repo, &["bundle", "create", &bundle_arg, "--all"]).await;
@@ -127,7 +132,8 @@ pub async fn create_workspace_bundle(
         source,
     })?;
     let _ = std::fs::remove_file(&bundle_path);
-    // 一時ブランチを後始末する (VM内は使い捨てだが、通常ノードでの実行にも備える)
+    // Clean up the temporary branch (the VM is disposable, but this also covers
+    // execution on a regular node)
     let _ = git::try_git(repo, &["update-ref", "-d", SNAPSHOT_REF]).await;
 
     Ok(WorkspaceBundle {
@@ -137,17 +143,17 @@ pub async fn create_workspace_bundle(
     })
 }
 
-/// 退避済みバンドルを対象ディレクトリへ復元する。
+/// Restores a backed-up bundle into the target directory.
 ///
-/// - 対象が存在しない / 空ディレクトリ: `git clone <bundle> <target>`
-/// - 既存の Git リポジトリ: `git fetch <bundle>` で取り込み
+/// - Target does not exist / is an empty directory: `git clone <bundle> <target>`
+/// - Existing Git repository: import with `git fetch <bundle>`
 ///
-/// その後、バンドルのスナップショット (`fxg-snapshot`) を現在ブランチへ
-/// `checkout -f -B` して作業ツリー状態を再現する (スナップショットが無い場合は
-/// 何もしない = 通常の clone 結果のまま)。
+/// Then `checkout -f -B` the bundle snapshot (`fxg-snapshot`) onto the current branch
+/// to reproduce the working tree state (if there is no snapshot, do nothing and keep
+/// the normal clone result).
 pub async fn restore_workspace_bundle(target: &Path, bundle_file: &Path) -> Result<(), NodeError> {
     let bundle_arg = bundle_file.to_string_lossy().into_owned();
-    // 存在しないディレクトリでは git を実行できない (clone 先として使う)
+    // git cannot run in a directory that does not exist (use it as the clone destination)
     let is_repo = target.is_dir() && git::toplevel(target).await?.is_some();
 
     if !is_repo {
@@ -179,7 +185,7 @@ pub async fn restore_workspace_bundle(target: &Path, bundle_file: &Path) -> Resu
         .await?;
     }
 
-    // スナップショットコミットを解決する (clone / fetch の経路差を吸収)
+    // Resolve the snapshot commit (absorbing the clone / fetch path difference)
     let snapshot = if is_repo {
         git::try_git(target, &["rev-parse", "refs/fxg-bundle/fxg-snapshot"]).await?
     } else {
@@ -193,7 +199,8 @@ pub async fn restore_workspace_bundle(target: &Path, bundle_file: &Path) -> Resu
         return Ok(());
     };
 
-    // 現在ブランチ (clone 直後は bundle の HEAD ブランチ) へスナップショットを適用する
+    // Apply the snapshot to the current branch (right after clone, the bundle's HEAD
+    // branch)
     let branch = git::try_git(target, &["rev-parse", "--abbrev-ref", "HEAD"])
         .await?
         .filter(|branch| branch != "HEAD");
@@ -221,7 +228,7 @@ pub async fn restore_workspace_bundle(target: &Path, bundle_file: &Path) -> Resu
     Ok(())
 }
 
-/// バンドルの Base64 データをファイルへ書き出す (復元用)。
+/// Writes the bundle's Base64 data to a file (for restore).
 pub fn write_bundle_file(dir: &Path, session_id: &str, bytes: &[u8]) -> Result<PathBuf, NodeError> {
     std::fs::create_dir_all(dir).map_err(|source| NodeError::Io {
         path: dir.to_path_buf(),
@@ -235,7 +242,7 @@ pub fn write_bundle_file(dir: &Path, session_id: &str, bytes: &[u8]) -> Result<P
     Ok(path)
 }
 
-/// `git` のバージョンを取得できるか (git 未導入環境の検出用)。
+/// Whether the `git` version can be obtained (for detecting environments without git).
 pub async fn git_available() -> bool {
     Command::new("git")
         .arg("--version")
@@ -257,7 +264,7 @@ mod tests {
             vec!["init", "-q", "-b", "main"],
             vec!["config", "user.email", "test@example.com"],
             vec!["config", "user.name", "fxg test"],
-            // Windows CI の既定 (core.autocrlf=true) を再現する回帰条件
+            // Regression condition reproducing the Windows CI default (core.autocrlf=true)
             vec!["config", "core.autocrlf", "true"],
         ] {
             git::run_git(dir, &args).await.expect("git init");
@@ -275,7 +282,7 @@ mod tests {
         let home = tempfile::tempdir().expect("tempdir");
         init_repo(source.path()).await;
 
-        // 未コミット変更 + 未追跡ファイル
+        // Uncommitted changes + untracked files
         std::fs::write(source.path().join("committed.txt"), "modified\n").expect("write");
         std::fs::write(source.path().join("untracked.txt"), "new file\n").expect("write");
 
@@ -290,7 +297,7 @@ mod tests {
         let bundle_file = home.path().join("restore.bundle");
         std::fs::write(&bundle_file, &bundle.bytes).expect("write bundle");
 
-        // 新規ディレクトリへ復元
+        // Restore into a new directory
         let target = home.path().join("restored");
         restore_workspace_bundle(&target, &bundle_file)
             .await

@@ -1,12 +1,12 @@
-//! ノードデーモン (`fxg daemon`)。
+//! Node daemon (`fxg daemon`).
 //!
-//! 設計: `docs/01-architecture-and-sync.md` §1・§7、`docs/03-protocol-and-api.md` §3・§4。
+//! Design: `docs/01-architecture-and-sync.md` §1, §7; `docs/03-protocol-and-api.md` §3, §4.
 //!
-//! - **ローカルHTTP/WSサーバー** (`127.0.0.1:7860` 厳格バインド):
-//!   クライアントAPI (REST + Client WS) を提供する ([`http`])
-//! - **ローカルIPCサーバー** (Windows Named Pipe / Unix Domain Socket):
-//!   `fxg` CLI からのコマンドを受け付ける ([`ipc`])
-//! - **認証**: `~/.flexagent/auth_token` による Bearer / Cookie 認証 ([`auth`])
+//! - **Local HTTP/WS server** (strictly bound to `127.0.0.1:7860`):
+//!   serves the client API (REST + Client WS) ([`http`])
+//! - **Local IPC server** (Windows named pipe / Unix domain socket):
+//!   accepts commands from the `fxg` CLI ([`ipc`])
+//! - **Authentication**: Bearer / Cookie authentication via `~/.flexagent/auth_token` ([`auth`])
 
 mod api;
 mod auth;
@@ -37,37 +37,38 @@ pub use auth::{generate_token, token_matches};
 pub use ops::{AuditSource, WorktreeAddOutcome};
 pub use stdio::{StdioConfig, run_stdio};
 
-/// `fxg` のバージョン (このクレートの Cargo パッケージバージョン = ワークスペース版)。
+/// The `fxg` version (this crate's Cargo package version = workspace version).
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-/// Client WS 配信用イベントのブロードキャストバッファ。
+/// Broadcast buffer for events delivered to Client WS.
 const CLIENT_EVENT_CAPACITY: usize = 2048;
 
-/// ノードデーモンの起動設定。
+/// Node daemon startup configuration.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DaemonConfig {
-    /// ノードID (省略時は DB またはホスト名から自動解決)
+    /// Node ID (auto-resolved from the DB or hostname when omitted)
     pub node_id: String,
-    /// 表示名
+    /// Display name
     pub node_name: String,
-    /// ローカルHTTP/WSサーバーのバインドアドレス (既定 `127.0.0.1:7860`)
+    /// Bind address of the local HTTP/WS server (default `127.0.0.1:7860`)
     pub listen_addr: String,
-    /// ローカルIPCエンドポイント (Named Pipe / UDS パス)
+    /// Local IPC endpoint (named pipe / UDS path)
     pub ipc_endpoint: String,
-    /// リモート (中央サーバー経由) からの Web PTY 起動を許可するか
+    /// Whether to allow Web PTY spawning from remote (via the central server)
     pub allow_remote_pty: bool,
-    /// 中央サーバーの Node Hub WebSocket URL (未指定時はスタンドアロン動作)
+    /// Node Hub WebSocket URL of the central server (standalone when unset)
     pub central_server_url: Option<String>,
-    /// ノード個別ペアリングトークン (省略時は `~/.flexagent/node_token` を読む)
+    /// Per-node pairing token (reads `~/.flexagent/node_token` when omitted)
     pub node_token: Option<String>,
-    /// 一時VM / サンドボックスノードか (`--ephemeral`。NodeHello と `nodes` 行に反映)
+    /// Whether this is an ephemeral VM / sandbox node (`--ephemeral`; reflected in
+    /// NodeHello and the `nodes` row)
     pub ephemeral: bool,
-    /// データディレクトリ (`~/.flexagent`)
+    /// Data directory (`~/.flexagent`)
     pub fxg_home: PathBuf,
 }
 
 impl DaemonConfig {
-    /// 既定設定を作る (`node_id` / `node_name` は呼び出し側で解決した値)。
+    /// Builds the default configuration (`node_id` / `node_name` are values resolved by the caller).
     pub fn new(
         fxg_home: impl Into<PathBuf>,
         node_id: impl Into<String>,
@@ -86,7 +87,8 @@ impl DaemonConfig {
         }
     }
 
-    /// データディレクトリと既定 IPC エンドポイントを環境から解決して構築する。
+    /// Builds the configuration by resolving the data directory and default IPC
+    /// endpoint from the environment.
     pub fn from_env(env: fxg_protocol::config::EnvLookup<'_>) -> Self {
         let home = fxg_home(env);
         Self {
@@ -103,11 +105,11 @@ impl DaemonConfig {
     }
 }
 
-/// デーモン再起動時に、前回のプロセスとともに消えたセッションの状態を整合する。
+/// Reconciles the state of sessions lost along with the previous process on daemon restart.
 ///
-/// 稼働中 (`provisioning` 〜 `waiting_permission`) のまま残っているセッションは
-/// エージェントプロセスが存在しない (デーモン終了で終了済み) ため、
-/// `stopped` として記録し直す (`fxg ps` にゴーストセッションが残らないようにする)。
+/// Sessions still marked active (`provisioning` to `waiting_permission`) have no
+/// agent process (it exited with the daemon), so they are recorded again as
+/// `stopped` (so that ghost sessions do not linger in `fxg ps`).
 async fn reconcile_stale_sessions(bus: &SessionEventBus) -> Result<(), NodeError> {
     use fxg_db::SessionFilter;
     use fxg_protocol::common::SessionStatus;
@@ -115,7 +117,7 @@ async fn reconcile_stale_sessions(bus: &SessionEventBus) -> Result<(), NodeError
 
     let filter = SessionFilter {
         statuses: DaemonState::active_statuses(),
-        // アーカイブ済みでも稼働中なら停止状態へ揃える (ゴーストを残さない)
+        // Align even archived sessions to stopped if they are active (leave no ghosts)
         include_archived: true,
         ..SessionFilter::default()
     };
@@ -136,7 +138,7 @@ async fn reconcile_stale_sessions(bus: &SessionEventBus) -> Result<(), NodeError
     Ok(())
 }
 
-/// ホスト名ベースのノード表示名を返す。
+/// Returns the hostname-based node display name.
 pub fn hostname() -> String {
     std::env::var("COMPUTERNAME")
         .or_else(|_| std::env::var("HOSTNAME"))
@@ -151,10 +153,10 @@ pub fn hostname() -> String {
         .unwrap_or_else(|| "fxg-node".to_owned())
 }
 
-/// ホスト名ベースのスラッグ + 短IDでノードIDを自動採番する。
+/// Auto-assigns a node ID from a hostname-based slug plus a short ID.
 ///
-/// 既に `nodes` テーブルに自身の行がある場合はそれを再利用する
-/// ([`DaemonState::new`] 内で解決) ため、この関数は初回起動時のみ使用される。
+/// If a row for this node already exists in the `nodes` table it is reused
+/// (resolved inside [`DaemonState::new`]), so this function is only used on first startup.
 pub fn default_node_id() -> String {
     let host = hostname();
     let slug: String = host
@@ -173,7 +175,8 @@ pub fn default_node_id() -> String {
     } else {
         slug
     };
-    // UUID v7 の先頭はタイムスタンプ部のため短IDには使えない。乱数から生成する。
+    // The leading part of a UUID v7 is a timestamp, so it cannot be used as a short ID.
+    // Generate from randomness.
     let short_id = format!("{:08x}", rand::random::<u32>());
     format!("{slug}-{short_id}")
 }
@@ -187,17 +190,17 @@ struct Inner {
     config: DaemonConfig,
     token: RwLock<String>,
     started_at: i64,
-    /// Client WS へ配信する正規化イベント (bus からの転送先)
+    /// Normalized events delivered to Client WS (forwarded from the bus)
     client_events: broadcast::Sender<ClientEvent>,
-    /// 中央サーバーの Outbox 同期ワーカーが接続中か
+    /// Whether the central server's outbox sync worker is connected
     central_connected: AtomicBool,
-    /// `NodeHello` 再送トリガ (Worktree 変更・プロジェクト登録時)
+    /// `NodeHello` resend trigger (on worktree changes / project registration)
     hello_refresh: tokio::sync::Notify,
-    /// Git Credential Proxy (一時VM向けオンメモリ認証中継)
+    /// Git credential proxy (in-memory auth relay for ephemeral VMs)
     credentials: crate::credentials::CredentialBroker,
 }
 
-/// デーモンの共有状態 (HTTP ハンドラ / IPC ハンドラ / CLI から共有)。
+/// Shared daemon state (shared by HTTP handlers / IPC handlers / the CLI).
 #[derive(Clone)]
 pub struct DaemonState {
     inner: Arc<Inner>,
@@ -214,16 +217,16 @@ impl std::fmt::Debug for DaemonState {
 }
 
 impl DaemonState {
-    /// 状態を初期化する (データディレクトリ作成 + 認証トークン読み込み +
-    /// ノードID の解決)。
+    /// Initializes the state (creates the data directory + loads the auth token +
+    /// resolves the node ID).
     pub async fn new(config: DaemonConfig) -> Result<Self, NodeError> {
         Self::with_driver_factory(config, default_driver_factory()).await
     }
 
-    /// エージェントドライバファクトリを差し替えて状態を初期化する。
+    /// Initializes the state with a replaced agent driver factory.
     ///
-    /// 本番経路は [`Self::new`] (ACP / OpenCode2 ドライバを自動選択)。
-    /// テストではモックドライバを注入して実プロセスなしで検証する。
+    /// The production path is [`Self::new`] (auto-selects the ACP / OpenCode2 driver).
+    /// Tests inject a mock driver to verify without real processes.
     #[doc(hidden)]
     pub async fn with_driver_factory(
         mut config: DaemonConfig,
@@ -233,7 +236,7 @@ impl DaemonState {
         paths.ensure_dirs()?;
         let db = Db::open(&paths.node_db_path(), DbRole::Node).await?;
 
-        // ノードID: 設定値 → DB の既存行 → 新規自動採番 の順で解決する
+        // Node ID: resolve in the order configured value → existing DB row → new auto-assigned ID
         if config.node_id.trim().is_empty() {
             config.node_id = match db.list_nodes().await?.first() {
                 Some(existing) => existing.node_id.clone(),
@@ -247,11 +250,11 @@ impl DaemonState {
 
         let token = auth::load_or_create(&paths.auth_token_path())?;
         let bus = SessionEventBus::new(db.clone());
-        // 前回のデーモン終了時に消えたセッションの状態を整合する
+        // Reconcile the state of sessions lost when the previous daemon exited
         reconcile_stale_sessions(&bus).await?;
 
-        // ACP Registry / カスタムエージェント定義は `config.toml` から解決する
-        // (読み込み失敗時は既定設定で起動し、警告のみ残す)。
+        // Resolve the ACP Registry / custom agent definitions from `config.toml`
+        // (if loading fails, start with defaults and only leave a warning).
         let agents = match GlobalConfig::load_from_path(&paths.config_path()) {
             Ok(global) => global.agents,
             Err(err) => {
@@ -286,15 +289,15 @@ impl DaemonState {
             }),
         };
 
-        // エージェントプロセスへ注入する GIT_ASKPASS ヘルパーを生成する
-        // (一時VMの Git 操作はこのスクリプト → ローカルIPC → 中央サーバーの
-        //  オンメモリ中継で認証する。設計: docs/01 §6.4)
+        // Generate the GIT_ASKPASS helper injected into agent processes
+        // (Git operations in ephemeral VMs authenticate through this script → local IPC →
+        //  the central server's in-memory relay. Design: docs/01 §6.4)
         if let Err(err) = crate::credentials::write_askpass_script(state.inner.paths.fxg_home()) {
             tracing::warn!("failed to write git-askpass script: {err}");
         }
 
-        // セッションイベントバス → Client WS 配信用イベントへ転送する
-        // (bus の Lagged は Client WS ループが cursor からのリプレイで回復する)
+        // Forward session event bus events to the events delivered to Client WS
+        // (bus Lagged is recovered by the Client WS loop replaying from the cursor)
         let mut bus_rx = state.inner.bus.subscribe();
         let client_tx = state.inner.client_events.clone();
         tokio::spawn(async move {
@@ -309,7 +312,7 @@ impl DaemonState {
                     Ok(crate::session::SessionBroadcast::StreamDelta { session_id, delta }) => {
                         let _ = client_tx.send(ClientEvent::StreamDelta { session_id, delta });
                     }
-                    // エフェメラルイベント (キーストローク等) は PTY WS 経由で配信する
+                    // Ephemeral events (keystrokes etc.) are delivered over the PTY WS
                     Ok(crate::session::SessionBroadcast::Ephemeral(_)) => {}
                     Err(broadcast::error::RecvError::Lagged(skipped)) => {
                         tracing::debug!(skipped, "client event forwarder lagged");
@@ -322,79 +325,79 @@ impl DaemonState {
         Ok(state)
     }
 
-    /// ローカルノードDB。
+    /// The local node DB.
     pub fn db(&self) -> &Db {
         &self.inner.db
     }
 
-    /// セッションイベントバス。
+    /// Session event bus.
     pub fn bus(&self) -> &SessionEventBus {
         &self.inner.bus
     }
 
-    /// ローカルPTYマネージャ。
+    /// Local PTY manager.
     pub fn pty(&self) -> &PtySessionManager {
         &self.inner.pty
     }
 
-    /// エージェントセッションマネージャ。
+    /// Agent session manager.
     pub fn session_manager(&self) -> &SessionManager {
         &self.inner.sessions
     }
 
-    /// データディレクトリのパス解決。
+    /// Path resolution for the data directory.
     pub fn paths(&self) -> &NodePaths {
         &self.inner.paths
     }
 
-    /// 起動設定。
+    /// Startup configuration.
     pub fn config(&self) -> &DaemonConfig {
         &self.inner.config
     }
 
-    /// fxg のバージョン。
+    /// The fxg version.
     pub fn version(&self) -> &'static str {
         VERSION
     }
 
-    /// 起動からの経過ミリ秒。
+    /// Milliseconds elapsed since startup.
     pub fn uptime_ms(&self) -> i64 {
         now_ms().saturating_sub(self.inner.started_at)
     }
 
-    /// 中央サーバーの Outbox 同期ワーカーが接続中か。
+    /// Whether the central server's outbox sync worker is connected.
     pub fn central_connected(&self) -> bool {
         self.inner.central_connected.load(Ordering::Relaxed)
     }
 
-    /// 中央サーバー接続状態を更新する (Outbox 同期ワーカー専用)。
+    /// Updates the central server connection state (outbox sync worker only).
     pub fn set_central_connected(&self, connected: bool) {
         self.inner
             .central_connected
             .store(connected, Ordering::Relaxed);
     }
 
-    /// Git Credential Proxy ブローカー。
+    /// Git credential proxy broker.
     pub fn credentials(&self) -> &crate::credentials::CredentialBroker {
         &self.inner.credentials
     }
 
-    /// `NodeHello` の再送を要求する (Worktree 変更等でプロジェクト紐付けを報告)。
+    /// Requests a resend of `NodeHello` (reports project bindings on worktree changes etc.).
     pub fn trigger_node_hello(&self) {
         self.inner.hello_refresh.notify_one();
     }
 
-    /// `NodeHello` 再送トリガの通知を受け取る (同期ワーカー専用)。
+    /// Receives notifications of the `NodeHello` resend trigger (sync worker only).
     pub(crate) fn hello_refresh(&self) -> &tokio::sync::Notify {
         &self.inner.hello_refresh
     }
 
-    /// ノードID。
+    /// The node ID.
     pub fn node_id(&self) -> &str {
         &self.inner.config.node_id
     }
 
-    /// 現在のクライアント認証トークン。
+    /// The current client auth token.
     pub fn auth_token(&self) -> String {
         self.inner
             .token
@@ -403,7 +406,7 @@ impl DaemonState {
             .clone()
     }
 
-    /// 認証トークンを再生成し、ファイル (`0600`) とメモリ上の値を更新する。
+    /// Regenerates the auth token and updates the file (`0600`) and the in-memory value.
     pub fn rotate_auth_token(&self) -> Result<String, NodeError> {
         let token = auth::generate_token();
         auth::save(&self.inner.paths.auth_token_path(), &token)?;
@@ -412,7 +415,7 @@ impl DaemonState {
         Ok(token)
     }
 
-    /// `nodes` テーブルへ自身を登録する (オンライン状態で upsert)。
+    /// Registers this node in the `nodes` table (upsert with online state).
     pub async fn register_node(&self) -> Result<(), NodeError> {
         let record = fxg_db::NodeRecord {
             node_id: self.inner.config.node_id.clone(),
@@ -431,13 +434,13 @@ impl DaemonState {
         Ok(())
     }
 
-    /// 利用可能なエージェントID一覧 (ACP Registry 導入済み + カスタム + 外部インストール)。
+    /// List of available agent IDs (installed from the ACP Registry + custom + externally installed).
     ///
-    /// レジストリの取得・展開に時間がかかる環境でもデーモン起動をブロックしない
-    /// よう、短いタイムアウト付きで解決する (失敗時はカスタム定義のみ)。
+    /// Resolved with a short timeout so that daemon startup is not blocked even
+    /// where fetching/expanding the registry is slow (on failure, only custom definitions).
     pub async fn installed_agents(&self) -> Vec<String> {
         let registry = self.inner.sessions.registry();
-        // カスタム定義はレジストリ取得に依存しないため常に含める
+        // Custom definitions do not depend on fetching the registry, so always include them
         let mut ids: Vec<String> = registry.custom_agents().into_keys().collect();
         let listed = tokio::time::timeout(std::time::Duration::from_secs(5), async {
             let index = registry.index(false).await?;
@@ -464,7 +467,7 @@ impl DaemonState {
         ids
     }
 
-    /// ノードをオフラインとして記録する (終了時)。
+    /// Records the node as offline (on exit).
     pub async fn mark_offline(&self) -> Result<(), NodeError> {
         self.inner
             .db
@@ -473,7 +476,7 @@ impl DaemonState {
         Ok(())
     }
 
-    /// ローカルで稼働中とみなすセッションの状態一覧 (`fxg ps` の既定フィルタ)。
+    /// List of session statuses considered locally active (the default filter for `fxg ps`).
     pub fn active_statuses() -> Vec<fxg_protocol::common::SessionStatus> {
         use fxg_protocol::common::SessionStatus;
         vec![
@@ -486,18 +489,18 @@ impl DaemonState {
         ]
     }
 
-    /// ローカルノード上の全セッション・PTYを強制終了する (緊急キルスイッチ)。
+    /// Forcefully terminates all sessions and PTYs on the local node (emergency kill switch).
     ///
-    /// - PTY: [`PtySessionManager::kill_all`] (Windows では Job Object 経由で
-    ///   プロセスツリーごと終了)
-    /// - エージェントセッション: [`SessionManager::shutdown_all`]
-    ///   (ドライバ経由でエージェントプロセスツリーごと終了)
-    /// - 実行中だったセッション: `StatusChanged(Stopped)` イベントを発行
+    /// - PTYs: [`PtySessionManager::kill_all`] (on Windows, terminates the entire
+    ///   process tree via Job Object)
+    /// - Agent sessions: [`SessionManager::shutdown_all`]
+    ///   (terminates the entire agent process tree via the driver)
+    /// - Sessions that were running: emits a `StatusChanged(Stopped)` event
     ///
-    /// 監査ログ (`audit_logs`) の記録はクライアント情報 (IP / 経路) を持つ
-    /// 呼び出し側 (IPC / HTTP ハンドラ) の責務とする。
+    /// Recording to the audit log (`audit_logs`) is the responsibility of the
+    /// caller (IPC / HTTP handler) that holds the client information (IP / route).
     ///
-    /// 終了させたセッションIDと PTY IDの一覧を返す。
+    /// Returns the list of terminated session IDs and PTY IDs.
     pub async fn kill_all_local(
         &self,
         reason: &str,
@@ -507,7 +510,7 @@ impl DaemonState {
 
         let killed_ptys = self.inner.pty.kill_all();
 
-        // エージェントプロセスを停止する (プロセスツリーごと)。
+        // Stop agent processes (including their process trees).
         let stopped_agents = self.inner.sessions.shutdown_all().await;
         if !stopped_agents.is_empty() {
             tracing::info!(count = stopped_agents.len(), "stopped local agent sessions");
@@ -518,7 +521,7 @@ impl DaemonState {
             .db
             .list_sessions(&fxg_db::SessionFilter {
                 statuses: Self::active_statuses(),
-                // kill-all はアーカイブ済みの稼働中セッションも停止する
+                // kill-all also stops archived active sessions
                 include_archived: true,
                 ..fxg_db::SessionFilter::default()
             })
@@ -549,10 +552,10 @@ impl DaemonState {
     }
 }
 
-/// Outbox Sync Worker を起動する (中央サーバー URL 未設定時は `None`)。
+/// Starts the outbox sync worker (returns `None` when no central server URL is set).
 ///
-/// ノード個別トークンは `config.node_token` / `FXG_NODE_TOKEN` →
-/// `~/.flexagent/node_token` の順で解決する。
+/// The per-node token is resolved in the order `config.node_token` / `FXG_NODE_TOKEN` →
+/// `~/.flexagent/node_token`.
 fn start_sync_worker(
     state: &DaemonState,
     shutdown_tx: &watch::Sender<bool>,
@@ -580,7 +583,7 @@ fn start_sync_worker(
     Ok(Some(task))
 }
 
-/// 起動済みのノードデーモン。
+/// A started node daemon.
 pub struct NodeDaemon {
     state: DaemonState,
     http_addr: SocketAddr,
@@ -600,29 +603,29 @@ impl std::fmt::Debug for NodeDaemon {
     }
 }
 
-/// デーモンのシャットダウン要求ハンドル。
+/// Shutdown request handle for the daemon.
 ///
-/// トレイ等の別スレッド / 別コンテキストから停止を要求するために使う
-/// ([`NodeDaemon::shutdown_handle`] で取得する)。
+/// Used to request shutdown from another thread / context such as the system
+/// tray (obtained via [`NodeDaemon::shutdown_handle`]).
 #[derive(Clone, Debug)]
 pub struct ShutdownHandle(watch::Sender<bool>);
 
 impl ShutdownHandle {
-    /// シャットダウンを要求する (実際の停止は [`NodeDaemon::wait`] を待つ)。
+    /// Requests shutdown (actual stop is awaited via [`NodeDaemon::wait`]).
     pub fn shutdown(&self) {
         let _ = self.0.send(true);
     }
 }
 
 impl NodeDaemon {
-    /// デーモンを起動する (データディレクトリ作成・ノード登録・
-    /// ローカルHTTP/WS と ローカルIPC のリッスン開始)。
+    /// Starts the daemon (creates the data directory, registers the node,
+    /// starts listening on the local HTTP/WS and local IPC).
     pub async fn start(config: DaemonConfig) -> Result<Self, NodeError> {
         Self::start_with_driver_factory(config, default_driver_factory()).await
     }
 
-    /// エージェントドライバファクトリを差し替えてデーモンを起動する
-    /// (テスト用。本番経路は [`Self::start`])。
+    /// Starts the daemon with a replaced agent driver factory
+    /// (for tests. The production path is [`Self::start`]).
     #[doc(hidden)]
     pub async fn start_with_driver_factory(
         config: DaemonConfig,
@@ -633,7 +636,7 @@ impl NodeDaemon {
 
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
 
-        // ローカルHTTP/WS サーバー (ループバック厳格バインド)
+        // Local HTTP/WS server (strict loopback binding)
         let listen_addr = state.config().listen_addr.clone();
         let listener = tokio::net::TcpListener::bind(&listen_addr)
             .await
@@ -648,9 +651,9 @@ impl NodeDaemon {
             http::serve(http_state, listener, http_shutdown).await;
         });
 
-        // ローカルIPCサーバー (Named Pipe / UDS)。
-        // 別デーモンが同じエンドポイントで稼働していないかを先に確認する
-        // (障害を `start` の呼び出し元へ返すため)。
+        // Local IPC server (named pipe / UDS).
+        // First check whether another daemon is already running on the same endpoint
+        // (to return the failure to the caller of `start`).
         ipc::check_endpoint_available(&state.config().ipc_endpoint).await?;
         let ipc_state = state.clone();
         let ipc_endpoint = state.config().ipc_endpoint.clone();
@@ -660,7 +663,7 @@ impl NodeDaemon {
             }
         });
 
-        // Ctrl-C でシャットダウンを要求する
+        // Request shutdown on Ctrl-C
         let signal_tx = shutdown_tx.clone();
         tokio::spawn(async move {
             if tokio::signal::ctrl_c().await.is_ok() {
@@ -669,7 +672,7 @@ impl NodeDaemon {
             }
         });
 
-        // Outbox Sync Worker (中央サーバー URL 設定時のみ起動)
+        // Outbox sync worker (started only when a central server URL is configured)
         let sync_task = start_sync_worker(&state, &shutdown_tx)?;
 
         tracing::info!(
@@ -689,36 +692,36 @@ impl NodeDaemon {
         })
     }
 
-    /// 共有状態。
+    /// Shared state.
     pub fn state(&self) -> &DaemonState {
         &self.state
     }
 
-    /// ローカルHTTP/WSサーバーの実バインドアドレス。
+    /// Actual bound address of the local HTTP/WS server.
     pub fn http_addr(&self) -> SocketAddr {
         self.http_addr
     }
 
-    /// ローカルIPCエンドポイント。
+    /// Local IPC endpoint.
     pub fn ipc_endpoint(&self) -> &str {
         &self.state.config().ipc_endpoint
     }
 
-    /// 別スレッド / トレイからシャットダウンを要求するためのハンドルを返す。
+    /// Returns a handle for requesting shutdown from another thread / the tray.
     pub fn shutdown_handle(&self) -> ShutdownHandle {
         ShutdownHandle(self.shutdown_tx.clone())
     }
 
-    /// シャットダウンを要求する (実際の停止は [`Self::wait`] を待つ)。
+    /// Requests shutdown (actual stop is awaited via [`Self::wait`]).
     pub fn shutdown(&self) {
         self.shutdown_handle().shutdown();
     }
 
-    /// シャットダウン要求まで待機し、後処理 (PTY 停止・オフライン記録) を行って終了する。
+    /// Waits for a shutdown request, performs cleanup (PTY stop, offline recording), and exits.
     pub async fn wait(self) {
         let mut receiver = self.shutdown_tx.subscribe();
-        // `watch` の受信者は生成時点の値を「既読」として開始するため、
-        // 先に `shutdown()` 済みかどうかを現在値で確認してから待機する。
+        // A `watch` receiver starts with the value at creation time marked as "seen",
+        // so check the current value to see whether `shutdown()` already ran before waiting.
         if !*receiver.borrow_and_update() {
             let _ = receiver.changed().await;
         }
@@ -744,7 +747,7 @@ impl NodeDaemon {
         tracing::info!("fxg daemon stopped");
     }
 
-    /// デーモンを起動し、シャットダウンまで稼働する (CLI エントリポイント用)。
+    /// Starts the daemon and runs until shutdown (for the CLI entry point).
     pub async fn run(config: DaemonConfig) -> Result<(), NodeError> {
         let daemon = Self::start(config).await?;
         daemon.wait().await;
@@ -769,7 +772,7 @@ mod tests {
     fn default_node_id_is_slugged_and_unique() {
         let a = default_node_id();
         let b = default_node_id();
-        assert_ne!(a, b, "短IDは毎回異なる");
+        assert_ne!(a, b, "the short ID differs every time");
         assert!(!a.contains(' '));
         assert!(
             a.chars()
@@ -793,7 +796,7 @@ mod tests {
     async fn start_test_daemon() -> (NodeDaemon, tempfile::TempDir) {
         let dir = tempfile::tempdir().expect("tempdir");
         let mut config = DaemonConfig::new(dir.path().to_path_buf(), "test-node", "Test Node");
-        // テストではポート競合を避けるため ephemeral port と一時IPCパスを使う
+        // Tests use an ephemeral port and a temporary IPC path to avoid port conflicts
         config.listen_addr = "127.0.0.1:0".to_owned();
         config.ipc_endpoint = crate::testutil::test_ipc_endpoint(dir.path());
         let daemon = NodeDaemon::start(config).await.expect("start daemon");
@@ -811,7 +814,7 @@ mod tests {
         assert!(nodes[0].is_online);
         assert_eq!(nodes[0].os, std::env::consts::OS);
 
-        // 認証トークンが生成されている
+        // The auth token has been generated
         let token = daemon.state().auth_token();
         assert_eq!(token.len(), 64);
         assert!(daemon.state().paths().auth_token_path().is_file());
@@ -836,7 +839,7 @@ mod tests {
         .await
         .expect("node");
         let bus = SessionEventBus::new(db.clone());
-        // 前回のデーモンが強制終了され、`idle` のまま残ったセッションを再現する
+        // Reproduce a session left in `idle` after the previous daemon was killed
         bus.create_session(
             "stale-session",
             fxg_protocol::events::UnifiedEventPayload::SessionCreated {
@@ -875,7 +878,7 @@ mod tests {
         daemon.shutdown();
         daemon.wait().await;
 
-        // node_id 未指定で再起動しても同じ ID を使う
+        // Restarting without a node_id still uses the same ID
         let mut config = DaemonConfig::new(dir.path().to_path_buf(), "", "");
         config.listen_addr = "127.0.0.1:0".to_owned();
         config.ipc_endpoint = crate::testutil::test_ipc_endpoint(dir.path());
@@ -924,7 +927,7 @@ mod tests {
             .expect("ensure session");
         assert_eq!(daemon.state().session_manager().list_active().len(), 1);
 
-        // キルスイッチでエージェントセッションが停止し、Stopped が記録される
+        // The kill switch stops the agent session and records Stopped
         let (killed_sessions, killed_ptys) = daemon
             .state()
             .kill_all_local("kill switch test")

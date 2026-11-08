@@ -1,12 +1,12 @@
-//! `git` CLI ラッパー。
+//! `git` CLI wrapper.
 //!
-//! FlexAgent は Git のプラミングコマンド（`git worktree`, `git rev-parse`,
-//! `git write-tree` 等）を前提とするため、`git2` バインディングではなく
-//! **CLI (`git`) を呼び出す**方針を取る（ユーザーの Git 設定・フック・
-//! `GIT_*` 環境変数と常に同じ挙動になる）。
+//! FlexAgent depends on Git plumbing commands (`git worktree`, `git rev-parse`,
+//! `git write-tree`, and so on), so it invokes the **CLI (`git`)** rather than using
+//! the `git2` bindings (this always matches the user's Git configuration, hooks, and
+//! `GIT_*` environment variables).
 //!
-//! 実行ファイルは [`fxg_pty::resolve_command`] で解決する
-//! (Windows では `git.exe` を `PATHEXT` 込みで解決する)。
+//! The executable is resolved with [`fxg_pty::resolve_command`]
+//! (on Windows this resolves `git.exe` including `PATHEXT`).
 
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -16,30 +16,30 @@ use tokio::process::Command;
 
 use crate::error::NodeError;
 
-/// `git` 実行結果 (生バイト列を含む)。
+/// Result of running `git` (including the raw byte output).
 #[derive(Debug, Clone)]
 pub struct GitOutput {
-    /// 終了ステータスが成功だったか
+    /// Whether the exit status was successful
     pub success: bool,
-    /// 標準出力 (生バイト列)
+    /// Standard output (raw bytes)
     pub stdout: Vec<u8>,
-    /// 標準エラー (trim 済み文字列)
+    /// Standard error (trimmed string)
     pub stderr: String,
 }
 
 impl GitOutput {
-    /// 標準出力を UTF-8 (lossy) 文字列として返す。
+    /// Returns standard output as a UTF-8 (lossy) string.
     pub fn stdout_text(&self) -> String {
         String::from_utf8_lossy(&self.stdout).into_owned()
     }
 
-    /// 標準出力を trim した文字列として返す。
+    /// Returns standard output as a trimmed string.
     pub fn stdout_trimmed(&self) -> String {
         self.stdout_text().trim().to_owned()
     }
 }
 
-/// `git` を実行して生の出力を返す (終了コードは [`GitOutput::success`])。
+/// Runs `git` and returns the raw output (exit code is [`GitOutput::success`]).
 pub async fn capture(
     cwd: &Path,
     args: &[&str],
@@ -65,12 +65,13 @@ pub async fn capture(
     })
 }
 
-/// `git` を実行し、成功時の標準出力 (trim 済み) を返す。
+/// Runs `git` and returns the standard output (trimmed) on success.
 pub async fn run_git(cwd: &Path, args: &[&str]) -> Result<String, NodeError> {
     run_git_with_env(cwd, args, &[]).await
 }
 
-/// `git` を環境変数付きで実行し、成功時の標準出力 (trim 済み) を返す。
+/// Runs `git` with environment variables and returns the standard output (trimmed)
+/// on success.
 pub async fn run_git_with_env(
     cwd: &Path,
     args: &[&str],
@@ -87,9 +88,9 @@ pub async fn run_git_with_env(
     Ok(output.stdout_trimmed())
 }
 
-/// `git` を実行し、失敗 (非ゼロ終了) は `None` として扱う。
+/// Runs `git` and treats failure (non-zero exit) as `None`.
 ///
-/// 未設定の `remote.origin.url` や非 Git ディレクトリの判定に使用する。
+/// Used to detect an unset `remote.origin.url` or a non-Git directory.
 pub async fn try_git(cwd: &Path, args: &[&str]) -> Result<Option<String>, NodeError> {
     let output = capture(cwd, args, &[]).await?;
     if output.success {
@@ -99,9 +100,9 @@ pub async fn try_git(cwd: &Path, args: &[&str]) -> Result<Option<String>, NodeEr
     }
 }
 
-/// `git` を実行し、成功時の標準出力 (生バイト列) を返す。
+/// Runs `git` and returns the raw standard output bytes on success.
 ///
-/// `-z` (NUL 区切り) 出力のパースなどに使用する。
+/// Used for parsing `-z` (NUL-separated) output and similar cases.
 pub async fn run_git_bytes(cwd: &Path, args: &[&str]) -> Result<Vec<u8>, NodeError> {
     let output = capture(cwd, args, &[]).await?;
     if !output.success {
@@ -114,7 +115,7 @@ pub async fn run_git_bytes(cwd: &Path, args: &[&str]) -> Result<Vec<u8>, NodeErr
     Ok(output.stdout)
 }
 
-/// Git リポジトリのルート (`git rev-parse --show-toplevel`)。非 Git なら `None`。
+/// Root of the Git repository (`git rev-parse --show-toplevel`). `None` if not a Git repo.
 pub async fn toplevel(cwd: &Path) -> Result<Option<PathBuf>, NodeError> {
     let Some(root) = try_git(cwd, &["rev-parse", "--show-toplevel"]).await? else {
         return Ok(None);
@@ -122,13 +123,13 @@ pub async fn toplevel(cwd: &Path) -> Result<Option<PathBuf>, NodeError> {
     if root.is_empty() {
         return Ok(None);
     }
-    // Windows で `\\?\` が付かないよう dunce で正規化する
+    // Normalize with dunce so the `\\?\` prefix is not added on Windows
     Ok(Some(
         fxg_pty::canonicalize(&root).unwrap_or_else(|_| PathBuf::from(root)),
     ))
 }
 
-/// `remote.origin.url`。未設定なら `None`。
+/// `remote.origin.url`. `None` if unset.
 pub async fn remote_origin_url(repo: &Path) -> Result<Option<String>, NodeError> {
     match try_git(repo, &["config", "--get", "remote.origin.url"]).await? {
         Some(url) if !url.is_empty() => Ok(Some(url)),
@@ -136,7 +137,7 @@ pub async fn remote_origin_url(repo: &Path) -> Result<Option<String>, NodeError>
     }
 }
 
-/// 現在のブランチ名。detached HEAD または未コミットの場合は `None`。
+/// Current branch name. `None` for a detached HEAD or an uncommitted repository.
 pub async fn current_branch(repo: &Path) -> Result<Option<String>, NodeError> {
     match try_git(repo, &["rev-parse", "--abbrev-ref", "HEAD"]).await? {
         Some(branch) if !branch.is_empty() && branch != "HEAD" => Ok(Some(branch)),
@@ -144,7 +145,7 @@ pub async fn current_branch(repo: &Path) -> Result<Option<String>, NodeError> {
     }
 }
 
-/// 現在の HEAD コミット。コミットが無い場合は `None`。
+/// Current HEAD commit. `None` if there are no commits.
 pub async fn head_commit(repo: &Path) -> Result<Option<String>, NodeError> {
     match try_git(repo, &["rev-parse", "HEAD"]).await? {
         Some(commit) if !commit.is_empty() => Ok(Some(commit)),
@@ -152,7 +153,7 @@ pub async fn head_commit(repo: &Path) -> Result<Option<String>, NodeError> {
     }
 }
 
-/// Git リポジトリの中にいるか。
+/// Whether the directory is inside a Git repository.
 pub async fn is_inside_work_tree(cwd: &Path) -> Result<bool, NodeError> {
     Ok(try_git(cwd, &["rev-parse", "--is-inside-work-tree"])
         .await?
@@ -160,10 +161,10 @@ pub async fn is_inside_work_tree(cwd: &Path) -> Result<bool, NodeError> {
         .unwrap_or(false))
 }
 
-/// 指定ディレクトリが Git Worktree (メインリポジトリ以外) かどうか。
+/// Whether the given directory is a Git worktree (other than the main repository).
 ///
-/// `--git-dir` (Worktree では `<repo>/.git/worktrees/<name>`) と
-/// `--git-common-dir` (`<repo>/.git`) の差分で判定する。
+/// Determined by the difference between `--git-dir` (for a worktree:
+/// `<repo>/.git/worktrees/<name>`) and `--git-common-dir` (`<repo>/.git`).
 pub async fn is_worktree(repo: &Path) -> Result<bool, NodeError> {
     let git_dir = match try_git(repo, &["rev-parse", "--path-format=absolute", "--git-dir"]).await?
     {
@@ -183,13 +184,13 @@ pub async fn is_worktree(repo: &Path) -> Result<bool, NodeError> {
     Ok(matches!((git_dir, common_dir), (Some(a), Some(b)) if a != b))
 }
 
-/// ワークスペースの Git 差分を取得する (`GET /api/v1/sessions/:id/diff` /
-/// `GetGitDiff`)。
+/// Retrieves the Git diff of the workspace (`GET /api/v1/sessions/:id/diff` /
+/// `GetGitDiff`).
 ///
-/// - [`DiffScope::Uncommitted`] は未コミット差分 (`git diff HEAD`)
-/// - [`DiffScope::BranchBase`] はベースブランチとの累積差分
-///   (`git diff <base>...HEAD`。`base_branch` 省略時は `origin/HEAD` の
-///   デフォルトブランチ、それも無ければ `main` を使う)
+/// - [`DiffScope::Uncommitted`] is the uncommitted diff (`git diff HEAD`)
+/// - [`DiffScope::BranchBase`] is the cumulative diff against the base branch
+///   (`git diff <base>...HEAD`; when `base_branch` is omitted, use the default
+///   branch of `origin/HEAD`, or `main` if that is unavailable)
 pub async fn workspace_diff(
     cwd: &Path,
     scope: DiffScope,
@@ -236,7 +237,7 @@ pub async fn workspace_diff(
     })
 }
 
-/// デフォルトブランチ (`origin/HEAD`) を解決する。未知の場合は `main`。
+/// Resolves the default branch (`origin/HEAD`). Falls back to `main` if unknown.
 async fn default_branch(repo: &Path) -> Result<String, NodeError> {
     if let Some(value) = try_git(
         repo,
@@ -251,7 +252,7 @@ async fn default_branch(repo: &Path) -> Result<String, NodeError> {
     Ok("main".to_owned())
 }
 
-/// Unified Diff (`git diff` 出力) をファイル単位の [`FileDiff`] に分解する。
+/// Splits a unified diff (`git diff` output) into per-file [`FileDiff`] entries.
 pub fn parse_unified_diff(diff: &str) -> Vec<FileDiff> {
     struct FileAcc {
         path: String,
@@ -306,8 +307,8 @@ pub fn parse_unified_diff(diff: &str) -> Vec<FileDiff> {
         .into_iter()
         .map(|mut file| {
             if file.path.is_empty() {
-                // バイナリ差分等で `+++` 行が無い場合は `diff --git` ヘッダから
-                // パスを推定する (`a/<path> b/<path>`)
+                // When there is no `+++` line, as in binary diffs, infer the path
+                // from the `diff --git` header (`a/<path> b/<path>`)
                 if let Some((left, right)) = file.header.rsplit_once(" b/") {
                     let _ = left;
                     file.old_path = Some(strip_prefix_path(left, "a/"));
@@ -328,14 +329,15 @@ pub fn parse_unified_diff(diff: &str) -> Vec<FileDiff> {
         .collect()
 }
 
-/// `a/` / `b/` プレフィックスを剥がす。
+/// Strips the `a/` / `b/` prefix.
 fn strip_prefix_path(path: &str, prefix: &str) -> String {
     path.strip_prefix(prefix).unwrap_or(path).to_owned()
 }
 
-/// 指定パス配下の Git リポジトリを再帰探索する (`.git` ディレクトリを持つディレクトリ)。
+/// Recursively searches the given path for Git repositories (directories containing
+/// a `.git` directory).
 ///
-/// `fxg project scan` から使用する。シンボリックリンクは辿らない。
+/// Used by `fxg project scan`. Symbolic links are not followed.
 pub fn find_repositories(root: &Path, max_depth: usize) -> Result<Vec<PathBuf>, NodeError> {
     let mut repositories = Vec::new();
     let mut stack = vec![(root.to_path_buf(), 0usize)];
@@ -345,7 +347,7 @@ pub fn find_repositories(root: &Path, max_depth: usize) -> Result<Vec<PathBuf>, 
         }
         if dir.join(".git").exists() {
             repositories.push(dir.clone());
-            continue; // リポジトリ内部のネスト探索は行わない
+            continue; // Do not search for nested repositories inside a repository
         }
         let entries = match std::fs::read_dir(&dir) {
             Ok(entries) => entries,
@@ -475,7 +477,7 @@ new file mode 100644\n\
         init_test_repo(dir.path()).await;
         std::fs::write(dir.path().join("README.md"), "# test\n\nchanged\n").expect("write");
         std::fs::write(dir.path().join("added.txt"), "new file\n").expect("write");
-        // 未追跡ファイルは `git diff HEAD` に出ないため stage しておく
+        // Untracked files do not appear in `git diff HEAD`, so stage them first
         run_git(dir.path(), &["add", "added.txt"])
             .await
             .expect("git add");
@@ -494,7 +496,7 @@ new file mode 100644\n\
             .iter()
             .find(|file| file.path == "README.md")
             .expect("readme diff");
-        // 空行 + "changed" の2行が追加される
+        // Two lines are added: a blank line and "changed"
         assert_eq!(readme.additions, 2);
     }
 }

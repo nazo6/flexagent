@@ -1,22 +1,25 @@
-//! Shadow Git Tree (`GIT_INDEX_FILE` + `git write-tree`) によるターン単位スナップショット。
+//! Per-turn snapshots via a Shadow Git Tree (`GIT_INDEX_FILE` + `git write-tree`).
 //!
-//! 設計: `docs/04-agent-drivers-and-windows.md` §4.1。
+//! Design: `docs/04-agent-drivers-and-windows.md` §4.1.
 //!
-//! ユーザーの実インデックス (ステージング状態) やブランチ履歴を一切汚さずに、
-//! 任意のターン時点のファイル状態をミリ秒単位で保存・復元するため、Git のプラミング
-//! コマンドとセッション専用インデックスファイルを用いる:
+//! To save and restore the file state of an arbitrary turn in milliseconds without
+//! ever dirtying the user's real index (staging state) or branch history, it uses
+//! Git plumbing commands and a session-specific index file:
 //!
-//! 1. 環境変数 `GIT_INDEX_FILE=~/.flexagent/snapshots/<session-id>.index` を指定して
-//!    `git add -A` → `git write-tree` を実行し、Tree Hash を得る。
-//!    この Hash は `UnifiedEventPayload::UserMessage.snapshot_tree_hash` として
-//!    イベント payload に保存する (専用カラムへの複製は行わない)。
-//! 2. 復元は「現状を退避するバックアップ Tree の作成 → 余分なファイルの削除 →
-//!    `git read-tree` + `git checkout-index` による展開」の順で行う。
+//! 1. With `GIT_INDEX_FILE=~/.flexagent/snapshots/<session-id>.index`, run
+//!    `git add -A` -> `git write-tree` to obtain a tree hash.
+//!    This hash is stored in the event payload as
+//!    `UnifiedEventPayload::UserMessage.snapshot_tree_hash` (it is not duplicated into
+//!    a dedicated column).
+//! 2. Restore proceeds as follows: "create a backup tree that saves the current
+//!    state -> delete extra files -> expand with `git read-tree` + `git
+//!    checkout-index`".
 //!
-//! シャドウ Index は**セッション単位で分離**するため、同一リポジトリで並行する
-//! 複数セッション (Worktree) が Index ファイルを奪い合うことはない。
-//! また、巨大な未追跡ファイル（ビルド成果物等）によるスナップショット肥大化を防ぐため、
-//! サイズ上限 ([`DEFAULT_SNAPSHOT_SIZE_LIMIT_BYTES`]) を超える場合はスキップする。
+//! The shadow index is **isolated per session**, so multiple concurrent sessions
+//! (worktrees) in the same repository never contend for the index file. To prevent
+//! snapshots from bloating due to huge untracked files (build artifacts and so on),
+//! the snapshot is skipped when the size exceeds the limit
+//! ([`DEFAULT_SNAPSHOT_SIZE_LIMIT_BYTES`]).
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -24,20 +27,19 @@ use std::path::{Path, PathBuf};
 use crate::error::NodeError;
 use crate::git;
 
-/// デフォルトのスナップショットサイズ上限 (100 MB)。
+/// Default snapshot size limit (100 MB).
 pub const DEFAULT_SNAPSHOT_SIZE_LIMIT_BYTES: u64 = 100 * 1024 * 1024;
 
-/// シャドウ Git 操作に共通で前置する設定引数 (`git -c <key>=<value>` 形式)。
+/// Configuration arguments prefixed to every shadow Git operation (`git -c <key>=<value>`).
 ///
-/// FXG のスナップショット/復元はワークツリーのバイト列をそのまま往復させる
-/// 必要があるため、EOL 変換 (`core.autocrlf` / `core.eol`) を無効化する。
-/// Windows の既定 (`core.autocrlf=true`) では、復元時に LF が CRLF へ
-/// 書き換えられワークスペースが破壊される (CI: windows-latest で検出)。
-/// `core.eol=lf` は `.gitattributes` の `text` 属性が付いたファイルの
-/// チェックアウト側変換をプラットフォーム非依存に固定する。
+/// FXG snapshots and restores must round-trip the raw bytes of the worktree, so EOL
+/// conversion (`core.autocrlf` / `core.eol`) is disabled. Under the Windows default
+/// (`core.autocrlf=true`), restoring rewrites LF to CRLF and destroys the workspace
+/// (detected in CI on windows-latest). `core.eol=lf` pins the checkout-side conversion
+/// of files with the `text` attribute in `.gitattributes` to be platform-independent.
 const SHADOW_GIT_CONFIG: &[&str] = &["-c", "core.autocrlf=false", "-c", "core.eol=lf"];
 
-/// シャドウ Git 操作の引数に [`SHADOW_GIT_CONFIG`] を前置する。
+/// Prefixes the arguments of a shadow Git operation with [`SHADOW_GIT_CONFIG`].
 fn shadow_git_args<'a>(args: &[&'a str]) -> Vec<&'a str> {
     SHADOW_GIT_CONFIG
         .iter()
@@ -46,29 +48,30 @@ fn shadow_git_args<'a>(args: &[&'a str]) -> Vec<&'a str> {
         .collect()
 }
 
-/// スナップショット取得結果。
+/// Result of taking a snapshot.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SnapshotOutcome {
-    /// 取得成功
+    /// Successfully created
     Created {
-        /// 40文字の Tree Hash (`snapshot_tree_hash` として保存する値)
+        /// 40-character tree hash (the value stored as `snapshot_tree_hash`)
         tree_hash: String,
-        /// 対象ファイル数
+        /// Number of target files
         file_count: usize,
-        /// 合計サイズ (bytes)
+        /// Total size (bytes)
         total_bytes: u64,
     },
-    /// サイズ上限超過によりスキップした (警告ログを残し、イベントには記録しない)
+    /// Skipped because the size limit was exceeded (a warning is logged and nothing
+    /// is recorded in the event)
     SkippedTooLarge {
-        /// 見積もり合計サイズ (bytes)
+        /// Estimated total size (bytes)
         total_bytes: u64,
-        /// 設定された上限 (bytes)
+        /// Configured limit (bytes)
         limit_bytes: u64,
     },
 }
 
 impl SnapshotOutcome {
-    /// 取得できた Tree Hash (スキップ時は `None`)。
+    /// The tree hash, if obtained (`None` when skipped).
     pub fn tree_hash(&self) -> Option<&str> {
         match self {
             Self::Created { tree_hash, .. } => Some(tree_hash),
@@ -77,18 +80,19 @@ impl SnapshotOutcome {
     }
 }
 
-/// 復元結果。
+/// Result of a restore.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RestoreOutcome {
-    /// 復元直前の状態を退避したバックアップ Tree Hash (データロスト防止)
+    /// Tree hash of the backup that saved the state immediately before the restore
+    /// (prevents data loss)
     pub backup_tree_hash: Option<String>,
-    /// 復元したファイル数
+    /// Number of restored files
     pub restored_files: usize,
-    /// 削除したファイル数
+    /// Number of removed files
     pub removed_files: usize,
 }
 
-/// セッション単位の Shadow Git Tree。
+/// Session-scoped Shadow Git Tree.
 #[derive(Debug, Clone)]
 pub struct ShadowGitTree {
     repo: PathBuf,
@@ -99,10 +103,11 @@ pub struct ShadowGitTree {
 }
 
 impl ShadowGitTree {
-    /// リポジトリとシャドウ Index パスから作成する。
+    /// Creates an instance from the repository and the shadow index path.
     ///
-    /// Index パスは [`crate::paths::NodePaths::snapshot_index_path`]
-    /// (`~/.flexagent/snapshots/<session-id>.index`) を想定する。
+    /// The index path is expected to be
+    /// [`crate::paths::NodePaths::snapshot_index_path`]
+    /// (`~/.flexagent/snapshots/<session-id>.index`).
     pub fn new(
         repo: impl Into<PathBuf>,
         index_path: impl Into<PathBuf>,
@@ -118,28 +123,28 @@ impl ShadowGitTree {
         }
     }
 
-    /// サイズ上限を変更する。
+    /// Changes the size limit.
     pub fn with_size_limit(mut self, bytes: u64) -> Self {
         self.size_limit_bytes = bytes;
         self
     }
 
-    /// シャドウ Index ファイルのパス。
+    /// Path of the shadow index file.
     pub fn index_path(&self) -> &Path {
         &self.index_path
     }
 
-    /// 対象リポジトリ。
+    /// Target repository.
     pub fn repo(&self) -> &Path {
         &self.repo
     }
 
-    /// セッションID。
+    /// Session ID.
     pub fn session_id(&self) -> &str {
         &self.session_id
     }
 
-    /// 現在のワークスペース状態の Tree Hash を取得する。
+    /// Obtains the tree hash of the current workspace state.
     pub async fn snapshot(&self) -> Result<SnapshotOutcome, NodeError> {
         let env = self.index_env();
         let candidates = self.collect_candidate_files(&env).await?;
@@ -182,21 +187,22 @@ impl ShadowGitTree {
         })
     }
 
-    /// 指定 Tree Hash の状態へワークスペースを復元する。
+    /// Restores the workspace to the state of the given tree hash.
     ///
-    /// 復元前に現状をバックアップ Tree として退避するため、
-    /// [`RestoreOutcome::backup_tree_hash`] を使えば元に戻せる。
-    /// ユーザーの実インデックス・ブランチ・コミット履歴は変更しない。
+    /// The current state is saved as a backup tree before restoring, so it can be
+    /// reverted by passing [`RestoreOutcome::backup_tree_hash`].
+    /// The user's real index, branches, and commit history are left unchanged.
     pub async fn restore(&self, tree_hash: &str) -> Result<RestoreOutcome, NodeError> {
         let env = self.index_env();
 
-        // 0. 現状の退避 (データロスト防止)
+        // 0. Save the current state (prevent data loss)
         let backup_tree_hash = self.snapshot().await?.tree_hash().map(str::to_owned);
 
-        // 1. 目標ツリーのファイル一覧
+        // 1. File list of the target tree
         let target_files = self.list_tree_files(tree_hash).await?;
 
-        // 2. 目標ツリーに存在しないファイルを削除 (.gitignore 対象は候補に含まれない)
+        // 2. Delete files that do not exist in the target tree (.gitignore'd files are
+        //    not part of the candidates)
         let current_files = self.collect_candidate_files(&env).await?;
         let mut removed_files: usize = 0;
         for relative in &current_files {
@@ -210,7 +216,7 @@ impl ShadowGitTree {
             }
         }
 
-        // 3. 目標ツリーをシャドウ Index に読み込み、ワークツリーへ展開
+        // 3. Read the target tree into the shadow index and expand it into the worktree
         git::run_git_with_env(
             &self.repo,
             &shadow_git_args(&["read-tree", tree_hash]),
@@ -231,7 +237,7 @@ impl ShadowGitTree {
         })
     }
 
-    /// シャドウ Index ファイルを削除する (セッション終了時の後片付け)。
+    /// Deletes the shadow index file (cleanup at session end).
     pub fn remove_index(&self) -> Result<(), NodeError> {
         match std::fs::remove_file(&self.index_path) {
             Ok(()) => Ok(()),
@@ -244,12 +250,12 @@ impl ShadowGitTree {
         [("GIT_INDEX_FILE", self.index_path_env.as_str())]
     }
 
-    /// スナップショット対象になり得るファイル (リポジトリ相対パス) を列挙する。
+    /// Lists files (repository-relative paths) that can be snapshot targets.
     ///
-    /// 以下の和集合を取る (`.gitignore` 対象は含まれない):
-    /// - 未追跡ファイル (`git ls-files -o --exclude-standard`)
-    /// - シャドウ Index に登録済みのファイル (`git ls-files -c`)
-    /// - HEAD にコミット済みのファイル (`git ls-tree -r HEAD`。初回スナップショット用)
+    /// Takes the union of the following (`.gitignore`'d files are excluded):
+    /// - Untracked files (`git ls-files -o --exclude-standard`)
+    /// - Files registered in the shadow index (`git ls-files -c`)
+    /// - Files committed in HEAD (`git ls-tree -r HEAD`; for the first snapshot)
     async fn collect_candidate_files(
         &self,
         env: &[(&str, &str)],
@@ -265,7 +271,7 @@ impl ShadowGitTree {
                 continue;
             };
             if !output.success {
-                continue; // HEAD が無い (コミット前) 等は無視する
+                continue; // Ignore cases such as no HEAD (before the first commit)
             }
             for path in output.stdout.split(|byte| *byte == 0) {
                 if path.is_empty() {
@@ -277,7 +283,7 @@ impl ShadowGitTree {
         Ok(candidates)
     }
 
-    /// Tree に含まれるファイル一覧を取得する。
+    /// Retrieves the list of files contained in a tree.
     async fn list_tree_files(&self, tree_hash: &str) -> Result<BTreeSet<String>, NodeError> {
         let output = git::run_git_bytes(
             &self.repo,
@@ -325,7 +331,7 @@ mod tests {
         let second_hash = second.tree_hash().expect("hash").to_owned();
         assert_ne!(first_hash, second_hash);
 
-        // 復元: file.txt は v1 に戻り、extra.txt は削除される
+        // Restore: file.txt goes back to v1 and extra.txt is deleted
         let outcome = tree.restore(&first_hash).await.expect("restore");
         assert_eq!(
             outcome.backup_tree_hash.as_deref(),
@@ -341,7 +347,7 @@ mod tests {
         );
         assert_eq!(outcome.removed_files, 1);
 
-        // バックアップ Tree から復元すれば元に戻せる
+        // Restoring from the backup tree reverts the change
         tree.restore(&second_hash).await.expect("restore backup");
         assert_eq!(
             std::fs::read_to_string(repo.join("file.txt")).expect("read"),
@@ -364,7 +370,7 @@ mod tests {
             .unwrap()
             .to_owned();
 
-        // 実インデックスには何もステージされていない
+        // Nothing is staged in the real index
         let staged = git::run_git(&repo, &["diff", "--cached", "--name-only"])
             .await
             .expect("diff cached");
@@ -373,7 +379,7 @@ mod tests {
             "real index must stay untouched: {staged}"
         );
 
-        // ブランチ履歴も増えていない
+        // Branch history does not grow either
         let log = git::run_git(&repo, &["log", "--oneline"])
             .await
             .expect("log");
@@ -425,7 +431,7 @@ mod tests {
         assert_eq!(
             std::fs::read_to_string(repo.join("ignored.txt")).expect("read ignored"),
             "keep me\n",
-            ".gitignore 対象は復元の削除対象にならない"
+            ".gitignore'd files are not removal targets of a restore"
         );
         assert_eq!(
             std::fs::read_to_string(repo.join("tracked.txt")).expect("read tracked"),
@@ -441,13 +447,13 @@ mod tests {
         assert!(tree.index_path().is_file(), "shadow index must be created");
         tree.remove_index().expect("remove");
         assert!(!tree.index_path().exists());
-        // 二重削除はエラーにしない
+        // Deleting twice must not be an error
         tree.remove_index().expect("remove idempotent");
         let _ = repo;
     }
 
-    /// Windows の既定 `core.autocrlf=true` 環境 (リポジトリ設定で模擬) でも、
-    /// スナップショット→復元がワークツリーのバイト列 (LF / CRLF) を変換しないこと。
+    /// Snapshot -> restore must not convert the worktree bytes (LF / CRLF) even under
+    /// the Windows default `core.autocrlf=true` environment (simulated via repo config).
     #[tokio::test]
     async fn restore_preserves_bytes_under_autocrlf_repo_config() {
         let (_dir, repo, tree) = repo_with_snapshot().await;
@@ -471,12 +477,12 @@ mod tests {
         assert_eq!(
             std::fs::read(repo.join("lf.txt")).expect("read lf"),
             b"lf line\n",
-            "LF のファイルは LF のまま復元される"
+            "files with LF are restored as LF"
         );
         assert_eq!(
             std::fs::read(repo.join("crlf.txt")).expect("read crlf"),
             b"crlf line\r\n",
-            "CRLF のファイルは CRLF のまま復元される"
+            "files with CRLF are restored as CRLF"
         );
     }
 }

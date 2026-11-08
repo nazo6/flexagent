@@ -1,19 +1,19 @@
-//! セッション管理 (エージェント起動・イベント配信・プロンプトキュー)。
+//! Session management (agent launch, event delivery, prompt queue).
 //!
-//! 設計: `docs/04-agent-drivers-and-windows.md` §1〜§4、
-//! `docs/01-architecture-and-sync.md` §2.2〜§2.4。
+//! Design: `docs/04-agent-drivers-and-windows.md` §1-§4,
+//! `docs/01-architecture-and-sync.md` §2.2-§2.4.
 //!
-//! - **ドライバ統合**: [`AgentDriver`] を起動し、[`DriverEvent`] を
-//!   [`SessionEventBus`] へ流す (永続化対象は `record`、差分は `publish_delta`)。
-//! - **ターン開始スナップショット**: `SendPrompt` 直前に Shadow Git Tree で
-//!   Tree Hash を取得し、`UserMessage.snapshot_tree_hash` として記録する
-//!   (Revert の基準点)。
-//! - **コマンド冪等性**: `command_id` の重複送信を検出し
-//!   [`NodeError::CommandDuplicate`] を返す (ダブルタップ・WS 再送対策)。
-//! - **Pending Queue**: 実行中 (busy) の `SendPrompt` はキューに積み、
-//!   ターン終了 (`status = idle`) 時に自動で次を送信する。
-//! - **承認解決の冪等化**: 2 回目以降の応答は
-//!   [`NodeError::AlreadyResolved`] を返す。
+//! - **Driver integration**: Launches an [`AgentDriver`] and streams [`DriverEvent`]
+//!   into the [`SessionEventBus`] (persistent events via `record`, deltas via `publish_delta`).
+//! - **Turn-start snapshot**: Right before `SendPrompt`, captures a Tree Hash with
+//!   the Shadow Git Tree and records it as `UserMessage.snapshot_tree_hash`
+//!   (the revert baseline).
+//! - **Command idempotency**: Detects duplicate `command_id` submissions and
+//!   returns [`NodeError::CommandDuplicate`] (guards against double taps / WS resends).
+//! - **Pending queue**: `SendPrompt` while busy is queued, and the next prompt is
+//!   sent automatically when the turn ends (`status = idle`).
+//! - **Idempotent permission resolution**: The second and later responses return
+//!   [`NodeError::AlreadyResolved`].
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
@@ -38,35 +38,35 @@ use crate::project;
 use crate::session::SessionEventBus;
 use crate::snapshot::ShadowGitTree;
 
-/// 処理済み `command_id` を保持する上限 (冪等性判定の履歴)。
+/// Upper bound on retained processed `command_id`s (idempotency history).
 const PROCESSED_COMMAND_HISTORY: usize = 256;
 
-/// `session_events` をページ読み込みする際のバッチサイズ。
+/// Batch size when paging through `session_events`.
 const EVENT_LOAD_BATCH: u32 = 200;
 
-/// 送信時の自動レジューム (ネイティブ復元) の完了待ち上限。
+/// Upper bound on waiting for auto-resume (native restore) on send.
 ///
-/// コールドスタートのエージェント (PyInstaller 展開等で ~25 秒) を許容する。
+/// Tolerates agent cold starts (e.g. PyInstaller extraction taking ~25 seconds).
 const AUTO_RESUME_TIMEOUT: Duration = Duration::from_secs(120);
 
-/// 他の再開処理 (明示 resume / 自動レジューム) の完了を待つポーリング間隔。
+/// Polling interval for waiting on other resume operations (explicit resume / auto-resume) to finish.
 const RESUME_WAIT_INTERVAL: Duration = Duration::from_millis(100);
 
-/// 削除前のセッション停止 (エージェントプロセス終了) の待機上限。
+/// Upper bound on waiting for session stop (agent process exit) before deletion.
 const STOP_BEFORE_DELETE_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// エージェント起動スペックからドライバを選択するファクトリ。
+/// Factory that selects a driver from an agent launch spec.
 ///
-/// ドライバインスタンスはデーモンで共有される (セッションごとに生成しない)。
-/// `AcpDriver` はセッション終了後のプロセスを再利用プールへ保持するため、
-/// インスタンスが分かれるとプールが機能しない。
+/// Driver instances are shared across the daemon (not created per session).
+/// `AcpDriver` keeps exited processes in a reuse pool, so separate instances
+/// would break the pool.
 pub type DriverFactory =
     Arc<dyn Fn(&AgentLaunchSpec) -> anyhow::Result<Arc<dyn AgentDriver>> + Send + Sync>;
 
-/// 既定のドライバファクトリ。
+/// The default driver factory.
 ///
-/// 全エージェントで [`AcpDriver`] を使用する。
-/// ドライバは全セッションで共有する。
+/// Uses [`AcpDriver`] for all agents.
+/// The driver is shared across all sessions.
 pub fn default_driver_factory() -> DriverFactory {
     let acp: Arc<dyn AgentDriver> = Arc::new(AcpDriver::new());
     Arc::new(
@@ -77,141 +77,142 @@ pub fn default_driver_factory() -> DriverFactory {
     )
 }
 
-/// `ensure_session` の結果。
+/// Result of `ensure_session`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct EnsureSessionOutcome {
-    /// 開始したセッションID
+    /// The started session ID
     pub session_id: String,
 }
 
-/// 明示セッションIDでの開始要求 ([`SessionManager::start_session`])。
+/// Start request with an explicit session ID ([`SessionManager::start_session`]).
 ///
-/// 中央サーバー (`ServerToNodeMsg::StartSession`) やローカル REST
-/// (`POST /api/v1/sessions`) から使用する。セッションIDは呼び出し側
-/// (中央サーバー) が採番し、全クライアントで相関できるようにする。
+/// Used by the central server (`ServerToNodeMsg::StartSession`) and the local
+/// REST API (`POST /api/v1/sessions`). The session ID is assigned by the caller
+/// (central server) so that all clients can correlate it.
 #[derive(Debug, Clone)]
 pub struct StartSessionParams<'a> {
-    /// 相関ID (重複送信の冪等排除)
+    /// Correlation ID (idempotent deduplication of duplicate submissions)
     pub command_id: &'a str,
-    /// セッションID (呼び出し側採番の UUID v7)
+    /// Session ID (a UUID v7 assigned by the caller)
     pub session_id: &'a str,
-    /// 実行ディレクトリ (Worktree パス含む)
+    /// Working directory (including worktree paths)
     pub local_path: &'a Path,
-    /// エージェントID
+    /// Agent ID
     pub agent_id: &'a str,
-    /// 初期プロンプト
+    /// Initial prompt
     pub initial_prompt: Option<&'a str>,
-    /// 初期モード (`code` / `plan` 等)
+    /// Initial mode (`code` / `plan` etc.)
     pub mode: Option<&'a str>,
-    /// エージェントへの追加パススルー引数
+    /// Additional pass-through arguments for the agent
     pub extra_args: Option<&'a [String]>,
-    /// Fork 時の履歴 Replay 注入 (別ノード・一時VMからの引き継ぎ)
+    /// History replay injection on fork (handover from another node / ephemeral VM)
     pub fork_context: Option<&'a [ForkHistoryItem]>,
-    /// 別ノード・一時VMから退避された Git バンドルの復元 (ローカルファイルパス)
+    /// Restore of a Git bundle saved from another node / ephemeral VM (local file path)
     pub restore_git_bundle: Option<&'a Path>,
 }
 
-/// 停止済みセッションの再開要求 ([`SessionManager::resume`])。
+/// Resume request for a stopped session ([`SessionManager::resume`]).
 ///
-/// 同一 `session_id` のままエージェントを起動し、ネイティブ復元
-/// (`session/resume` → `session/load`) を優先する。復元できない場合は履歴 Replay を注入して継続する
-/// (設計: `docs/04-agent-drivers-and-windows.md` §4.3)。
+/// Starts the agent under the same `session_id`, preferring native restore
+/// (`session/resume` → `session/load`). If restore is impossible, continues by
+/// injecting a history replay
+/// (design: `docs/04-agent-drivers-and-windows.md` §4.3).
 #[derive(Debug, Clone, Copy)]
 pub struct ResumeParams<'a> {
-    /// 相関ID (重複送信の冪等排除)
+    /// Correlation ID (idempotent deduplication of duplicate submissions)
     pub command_id: &'a str,
-    /// 対象セッションID
+    /// Target session ID
     pub session_id: &'a str,
-    /// ネイティブ復元を試みず履歴 Replay で継続する
+    /// Continue via history replay without attempting native restore
     pub force_replay: bool,
 }
 
-/// `revert` の結果。
+/// Result of `revert`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RevertOutcome {
-    /// Revert 基準にした `UserMessage` の `node_seq`
+    /// `node_seq` of the `UserMessage` used as the revert baseline
     pub target_node_seq: u64,
-    /// 復元先の Tree Hash
+    /// Tree Hash of the restore target
     pub restored_tree_hash: String,
-    /// 復元直前を退避したバックアップ Tree Hash
+    /// Backup Tree Hash saved right before restoring
     pub backup_tree_hash: Option<String>,
-    /// 復元したファイル数
+    /// Number of restored files
     pub restored_files: usize,
-    /// 削除したファイル数
+    /// Number of removed files
     pub removed_files: usize,
 }
 
-/// `resume` の結果。
+/// Result of `resume`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ResumeOutcome {
-    /// 再開したセッションID (リクエスト対象と同一)
+    /// The resumed session ID (identical to the request target)
     pub session_id: String,
-    /// ネイティブ復元できたか (`false` = 履歴 Replay で継続)
+    /// Whether native restore succeeded (`false` = continued via history replay)
     pub context_restored: bool,
 }
 
-/// [`SessionManager::resume_stopped_session`] の復元方法。
+/// Restore strategy for [`SessionManager::resume_stopped_session`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ResumeMode {
-    /// ネイティブ復元を優先し、不可なら新規セッションを作成する
-    /// (呼び出し側が履歴 Replay を注入する)。
+    /// Prefer native restore, and create a new session if unavailable
+    /// (the caller injects the history replay).
     AllowReplay {
-        /// 記録済みエージェントセッションIDを使わず新規作成させる (`--replay`)
+        /// Create a new session without using the recorded agent session ID (`--replay`)
         force_replay: bool,
     },
-    /// ネイティブ復元のみ。不可なら [`NodeError::ResumeRequired`] を返す
-    /// (プロンプト送信時の自動レジューム)。
+    /// Native restore only. Returns [`NodeError::ResumeRequired`] if unavailable
+    /// (auto-resume on prompt send).
     NativeOnly,
 }
 
-/// セッション一覧の 1 行 (IPC 用)。
+/// One row of the session list (for IPC).
 #[derive(Debug, Clone, PartialEq)]
 pub struct ActiveSessionSummary {
-    /// セッションID
+    /// Session ID
     pub session_id: String,
-    /// エージェントID
+    /// Agent ID
     pub agent_id: String,
-    /// 作業ディレクトリ
+    /// Working directory
     pub cwd: PathBuf,
-    /// 現在の状態
+    /// Current status
     pub status: SessionStatus,
-    /// ターン実行中 (busy) か
+    /// Whether a turn is running (busy)
     pub busy: bool,
-    /// 待機中のプロンプト件数
+    /// Number of queued prompts
     pub queued_prompts: usize,
 }
 
-/// `fxg inbox` 用の承認待ちエントリ。
+/// Pending permission entry for `fxg inbox`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PendingPermissionSummary {
-    /// 対象セッションID
+    /// Target session ID
     pub session_id: String,
     /// ACP request id
     pub request_id: String,
-    /// ツール名
+    /// Tool name
     pub tool_name: String,
-    /// 要約
+    /// Summary
     pub summary: String,
-    /// 選択肢
+    /// Options
     pub options: Vec<PermissionOption>,
 }
 
-/// `fxg inbox` 用の回答待ち elicitation エントリ。
+/// Pending elicitation entry for `fxg inbox`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PendingElicitationSummary {
-    /// 対象セッションID
+    /// Target session ID
     pub session_id: String,
-    /// ACP elicitation id (form モードは JSON-RPC request id)
+    /// ACP elicitation id (the JSON-RPC request id in form mode)
     pub elicitation_id: String,
-    /// ユーザーへ提示するメッセージ
+    /// Message presented to the user
     pub message: String,
-    /// 要求モード (`form` のみ対応)
+    /// Request mode (only `form` is supported)
     pub mode: String,
-    /// form モードの要求 schema
+    /// Request schema for form mode
     pub requested_schema: serde_json::Value,
 }
 
-/// セッション管理 (デーモンが 1 つ保持する)。
+/// Session management (one instance held by the daemon).
 #[derive(Clone)]
 pub struct SessionManager {
     inner: Arc<Inner>,
@@ -224,32 +225,32 @@ struct Inner {
     registry: AcpRegistry,
     factory: DriverFactory,
     sessions: Mutex<Sessions>,
-    /// ファクトリが返したドライバ (共有インスタンス。`shutdown_idle` 用に保持)
+    /// Drivers returned by the factory (shared instances; retained for `shutdown_idle`)
     drivers: Mutex<Vec<Arc<dyn AgentDriver>>>,
 }
 
 #[derive(Default)]
 struct Sessions {
     active: HashMap<String, ActiveSession>,
-    /// 直近に処理した `command_id` (古いものから破棄)
+    /// Most recently processed `command_id`s (oldest discarded first)
     processed_commands: VecDeque<String>,
-    /// 再開処理中 (二重レジュームの排他) のセッションID
+    /// Session IDs currently being resumed (excludes double resumes)
     resuming: HashSet<String>,
 }
 
 struct ActiveSession {
-    /// 操作ハンドル (ガードを跨いで await しないよう Arc で共有)
+    /// Operation handle (shared via Arc so it is not held across await points with the guard)
     handle: Arc<dyn ActiveSessionHandle>,
     cwd: PathBuf,
     agent_id: String,
     status: SessionStatus,
     busy: bool,
     pending_prompts: VecDeque<PendingPrompt>,
-    /// 承認待ち (`request_id` → 表示用情報)
+    /// Pending permissions (`request_id` → display information)
     pending_permissions: HashMap<String, PendingPermissionSummary>,
-    /// 回答待ち elicitation (`elicitation_id` → 表示用情報)
+    /// Pending elicitations (`elicitation_id` → display information)
     pending_elicitations: HashMap<String, PendingElicitationSummary>,
-    /// 意味のあるタイトルが設定済みか (プロンプト導出またはドライバ通知)
+    /// Whether a meaningful title has been set (derived from a prompt or notified by the driver)
     has_custom_title: bool,
 }
 
@@ -267,14 +268,14 @@ struct StartDriverParams<'a> {
     extra_args: Vec<String>,
     initial_mode: Option<String>,
     has_custom_title: bool,
-    /// 既存エージェントセッションからの再開指定 (`None` は新規セッション)
+    /// Resume request from an existing agent session (`None` means a new session)
     resume: Option<ResumeRequest>,
 }
 
-/// [`SessionManager::start_driver_session`] の結果 (復元成否)。
+/// Result of [`SessionManager::start_driver_session`] (restore success).
 struct StartedDriverSession {
-    /// `true` = エージェント側コンテキストをネイティブ復元した
-    /// (`false` は呼び出し側が履歴 Replay を注入する)
+    /// `true` = the agent-side context was natively restored
+    /// (`false` means the caller injects a history replay)
     context_restored: bool,
 }
 
@@ -288,7 +289,7 @@ impl std::fmt::Debug for SessionManager {
 }
 
 impl SessionManager {
-    /// マネージャを作成する。
+    /// Creates a manager.
     pub fn new(
         bus: SessionEventBus,
         paths: NodePaths,
@@ -298,7 +299,7 @@ impl SessionManager {
         Self::with_factory(bus, paths, node_id, registry, default_driver_factory())
     }
 
-    /// ドライバファクトリを差し替えて作成する (テスト用)。
+    /// Creates a manager with a replaced driver factory (for tests).
     pub fn with_factory(
         bus: SessionEventBus,
         paths: NodePaths,
@@ -319,19 +320,19 @@ impl SessionManager {
         }
     }
 
-    /// レジストリ (CLI の `fxg agents` 等から利用)。
+    /// The registry (used by the CLI's `fxg agents` etc.).
     pub fn registry(&self) -> &AcpRegistry {
         &self.inner.registry
     }
 
-    /// セッションイベントバス。
+    /// Session event bus.
     pub fn bus(&self) -> &SessionEventBus {
         &self.inner.bus
     }
 
-    /// ファクトリが返した共有ドライバを記録する (重複はポインタで排除)。
+    /// Records a shared driver returned by the factory (deduplicated by pointer).
     ///
-    /// `shutdown_all` がアイドルプロセス (warm プール) を破棄するために使う。
+    /// `shutdown_all` uses this to discard idle processes (warm pool).
     fn remember_driver(&self, driver: &Arc<dyn AgentDriver>) {
         let mut drivers = self.inner.drivers.lock().expect("drivers poisoned");
         if !drivers.iter().any(|existing| Arc::ptr_eq(existing, driver)) {
@@ -339,10 +340,10 @@ impl SessionManager {
         }
     }
 
-    /// `command_id` を処理済みとして記録する。
+    /// Records `command_id` as processed.
     ///
-    /// 既に処理済みの場合は `false` を返す (呼び出し側で
-    /// [`NodeError::CommandDuplicate`] を返す)。
+    /// Returns `false` if it was already processed (the caller should return
+    /// [`NodeError::CommandDuplicate`]).
     fn begin_command(&self, command_id: &str) -> bool {
         let mut sessions = self.inner.sessions.lock().expect("sessions poisoned");
         if sessions
@@ -359,7 +360,7 @@ impl SessionManager {
         true
     }
 
-    /// 新規セッションを開始する (`fxg run`)。
+    /// Starts a new session (`fxg run`).
     pub async fn ensure_session(
         &self,
         command_id: &str,
@@ -415,11 +416,11 @@ impl SessionManager {
         Ok(EnsureSessionOutcome { session_id })
     }
 
-    /// 明示セッションIDで新規セッションを開始する (`StartSession` / ローカル REST)。
+    /// Starts a new session with an explicit session ID (`StartSession` / local REST).
     ///
-    /// [`Self::ensure_session`] との違いは (1) `session_id` を呼び出し側が採番する、
-    /// (2) `cwd` ではなく解決済みの `local_path` を受け取る、の2点。
-    /// プロジェクト解決 (`project_id`) はノード側の正データで行う。
+    /// Differs from [`Self::ensure_session`] in that (1) the caller assigns
+    /// `session_id` and (2) it takes a resolved `local_path` instead of `cwd`.
+    /// Project resolution (`project_id`) uses the node-side authoritative data.
     pub async fn start_session(
         &self,
         params: StartSessionParams<'_>,
@@ -428,8 +429,8 @@ impl SessionManager {
             return Err(NodeError::CommandDuplicate(params.command_id.to_owned()));
         }
 
-        // 退避済み Git バンドルの復元 (別ノードへの引き継ぎ)。
-        // プロジェクト解決より前にワークスペースを実体化する。
+        // Restore a saved Git bundle (handover to another node).
+        // Materialize the workspace before resolving the project.
         if let Some(bundle_file) = params.restore_git_bundle {
             crate::bundle::restore_workspace_bundle(params.local_path, bundle_file).await?;
         }
@@ -482,12 +483,12 @@ impl SessionManager {
             })
             .await?;
 
-        // 初期プロンプト (リモートからのセッション起動時にそのまま実行する)
+        // Initial prompt (executed as-is when a session is started remotely)
         if let Some(prompt) = params.initial_prompt.filter(|text| !text.trim().is_empty()) {
             self.start_turn(params.session_id, prompt, "web").await?;
         }
 
-        // 別ノード・一時VMからの Fork: 履歴 Replay を初期コンテキストとして注入する
+        // Fork from another node / ephemeral VM: inject the history replay as initial context
         if let Some(context) = params
             .fork_context
             .and_then(|items| build_history_replay_context_from_items(items, ReplayPurpose::Fork))
@@ -504,7 +505,7 @@ impl SessionManager {
         })
     }
 
-    /// 起動スペックを解決する (カスタム/ビルトインはインデックス不要)。
+    /// Resolves the launch spec (custom/built-in agents need no index).
     async fn resolve_launch_spec(
         &self,
         agent_id: &str,
@@ -533,17 +534,18 @@ impl SessionManager {
         }
     }
 
-    /// ドライバを起動し、active 一覧への登録とイベントポンプの開始を行う。
+    /// Launches the driver, registers it in the active list, and starts the event pump.
     ///
-    /// 起動失敗時は `StatusChanged(Error)` を記録する。成功時は CLI の
-    /// アタッチモード決定に使うハンドルとネイティブ復元成否を返す。
+    /// Records `StatusChanged(Error)` on launch failure. On success, returns the
+    /// handle used by the CLI to decide attach mode and the native restore result.
     async fn start_driver_session(
         &self,
         params: StartDriverParams<'_>,
     ) -> Result<StartedDriverSession, NodeError> {
-        // Git Credential Proxy (一時VM向け GIT_ASKPASS) をエージェントプロセスへ注入する。
-        // スクリプトはデーモン起動時に生成済みで、`fxg git-askpass` → ローカルIPC →
-        // 中央サーバーのオンメモリ中継で認証する (設計: docs/01 §6.4)。
+        // Inject the Git credential proxy (GIT_ASKPASS for ephemeral VMs) into the agent process.
+        // The script is generated at daemon startup and authenticates via
+        // `fxg git-askpass` → local IPC → the central server's in-memory relay
+        // (design: docs/01 §6.4).
         let mut spec = params.spec.clone();
         let askpass = crate::credentials::askpass_script_path(self.inner.paths.fxg_home());
         if askpass.exists() {
@@ -578,9 +580,9 @@ impl SessionManager {
         {
             Ok(started) => started,
             Err(err) => {
-                // ネイティブ限定の自動レジューム (`allow_fresh = false`) では、
-                // 「ネイティブ復元不可」をセッション停止状態のまま呼び出し側へ返す
-                // (履歴 Replay は暗黙実行せず、明示的な Resume を促す)
+                // In native-only auto-resume (`allow_fresh = false`), return
+                // "native restore unavailable" to the caller while leaving the session stopped
+                // (do not implicitly run a history replay; prompt for an explicit Resume)
                 if let Some(unavailable) = err.downcast_ref::<NativeResumeUnavailable>() {
                     tracing::info!(
                         session_id = params.session_id,
@@ -627,7 +629,7 @@ impl SessionManager {
             );
         }
 
-        // イベントポンプ
+        // Event pump
         let inner = Arc::clone(&self.inner);
         let pump_session_id = params.session_id.to_owned();
         tokio::spawn(async move {
@@ -636,7 +638,7 @@ impl SessionManager {
         Ok(StartedDriverSession { context_restored })
     }
 
-    /// セッションの永続イベントを読み込む (`up_to_node_seq` 以下に限定。`None` は全件)。
+    /// Loads the persistent events of a session (limited to `up_to_node_seq` and below; `None` means all).
     async fn load_session_events(
         &self,
         session_id: &str,
@@ -667,14 +669,14 @@ impl SessionManager {
         }
     }
 
-    /// 指定ターン時点へワークスペースを復元する (`fxg session revert`)。
+    /// Restores the workspace to the point of the specified turn (`fxg session revert`).
     ///
-    /// - `target_node_seq` は `UserMessage` の `node_seq`
-    ///   (省略時は直近のターン)。その時点の `snapshot_tree_hash` へ
-    ///   ファイルを復元し、`SessionReverted` を追記する。
-    /// - 復元直前の状態はバックアップ Tree として退避される
-    ///   (もう一度 Revert すれば元に戻せる)。
-    /// - 実行中 (busy) のセッションは [`NodeError::Busy`] で拒否する。
+    /// - `target_node_seq` is the `node_seq` of a `UserMessage`
+    ///   (the latest turn when omitted). Restores files to the `snapshot_tree_hash`
+    ///   at that point and appends `SessionReverted`.
+    /// - The state right before restoring is saved as a backup Tree
+    ///   (reverting again returns to it).
+    /// - Running (busy) sessions are rejected with [`NodeError::Busy`].
     pub async fn revert(
         &self,
         command_id: &str,
@@ -736,14 +738,14 @@ impl SessionManager {
         })
     }
 
-    /// 指定ターンから新しいセッションへ分岐する (`fxg session fork`)。
+    /// Branches from the specified turn into a new session (`fxg session fork`).
     ///
-    /// - 分岐元の `SessionCreated` から `from_node_seq` までの履歴を引き継ぎ、
-    ///   新しい `SessionCreated` に `parent_session_id` / `fork_from_node_seq` を
-    ///   記録する。
-    /// - 標準ACPにはネイティブ Fork API が無いため、`node_seq` までの会話履歴を
-    ///   初期コンテキスト (1プロンプト) として注入する
-    ///   (`client_source = "fork"` の `UserMessage` として記録される)。
+    /// - Inherits history from the source `SessionCreated` up to `from_node_seq`,
+    ///   and records `parent_session_id` / `fork_from_node_seq` on the new
+    ///   `SessionCreated`.
+    /// - Since standard ACP has no native fork API, the conversation history up to
+    ///   `node_seq` is injected as initial context (one prompt)
+    ///   (recorded as a `UserMessage` with `client_source = "fork"`).
     pub async fn fork(
         &self,
         command_id: &str,
@@ -814,7 +816,7 @@ impl SessionManager {
             })
             .await?;
 
-        // 履歴 Replay 注入 (新エージェントセッションの初期コンテキスト)
+        // History replay injection (initial context for the new agent session)
         if let Some(context) = build_history_replay_context(&events, fork_seq, ReplayPurpose::Fork)
             && let Err(err) = self.start_turn(&new_session_id, &context, "fork").await
         {
@@ -829,22 +831,22 @@ impl SessionManager {
         })
     }
 
-    /// 停止済みセッションを再開する (`fxg session resume`)。
+    /// Resumes a stopped session (`fxg session resume`).
     ///
-    /// - 同一 `session_id` のままエージェントを起動し、ネイティブ復元
-    ///   (`session/resume` → `session/load` → OpenCode2 既存セッション bind) を
-    ///   優先する。復元できなかった場合は履歴 Replay を注入して継続する。
-    /// - 再開可否は `sessions.active` (実際の稼働状況) を正とする。
-    ///   強制終了時は `stopped` への遷移イベントが書かれないため、DB の
-    ///   `status` が `idle` / `running` のままでも再開を許可する。
-    /// - 一時VM (`provisioning` / `bootstrapping`) セッションは v1 では
-    ///   再開できない (設計: `docs/04-agent-drivers-and-windows.md` §4.3)。
+    /// - Starts the agent under the same `session_id`, preferring native restore
+    ///   (`session/resume` → `session/load` → bind an existing OpenCode2 session).
+    ///   If restore fails, continues by injecting a history replay.
+    /// - Resumability is based on `sessions.active` (the actual running state).
+    ///   On forced termination no transition to `stopped` is written, so resuming
+    ///   is allowed even when the DB `status` is still `idle` / `running`.
+    /// - Ephemeral VM (`provisioning` / `bootstrapping`) sessions cannot be
+    ///   resumed in v1 (design: `docs/04-agent-drivers-and-windows.md` §4.3).
     pub async fn resume(&self, params: ResumeParams<'_>) -> Result<ResumeOutcome, NodeError> {
         if !self.begin_command(params.command_id) {
             return Err(NodeError::CommandDuplicate(params.command_id.to_owned()));
         }
 
-        // 二重レジュームの排他 (active + 起動処理中の双方を拒否する)
+        // Exclude double resumes (reject both active and currently starting sessions)
         {
             let mut sessions = self.inner.sessions.lock().expect("sessions poisoned");
             if sessions.active.contains_key(params.session_id)
@@ -866,7 +868,7 @@ impl SessionManager {
         result
     }
 
-    /// [`Self::resume`] の本体 (排他ガードの解除は呼び出し側で行う)。
+    /// The body of [`Self::resume`] (the caller releases the exclusive guard).
     async fn resume_session_state(
         &self,
         params: ResumeParams<'_>,
@@ -880,7 +882,7 @@ impl SessionManager {
             )
             .await?;
 
-        // ネイティブ復元できなかった場合は履歴 Replay でコンテキストを継続する
+        // If native restore failed, continue the context via history replay
         if !started.context_restored {
             let up_to_seq = events.last().map(|event| event.node_seq).unwrap_or(0);
             if let Some(context) =
@@ -900,16 +902,16 @@ impl SessionManager {
         })
     }
 
-    /// 停止済みセッションを検証し、ドライバを起動して `StatusChanged(Idle)` まで
-    /// 記録する (明示 resume / 送信時自動レジューム共通)。
+    /// Validates a stopped session, launches the driver, and records up to
+    /// `StatusChanged(Idle)` (shared by explicit resume / auto-resume on send).
     ///
-    /// - 一時VM (`provisioning` / `bootstrapping`) と作業ディレクトリ消滅は
-    ///   [`NodeError::InvalidState`] で拒否する。
-    /// - [`ResumeMode::NativeOnly`] でネイティブ復元できない場合、ドライバは
-    ///   [`NativeResumeUnavailable`] を返し、[`NodeError::ResumeRequired`] として
-    ///   呼び出し側へ伝わる (セッションは停止状態のまま残る)。
+    /// - Ephemeral VM (`provisioning` / `bootstrapping`) sessions and missing
+    ///   working directories are rejected with [`NodeError::InvalidState`].
+    /// - When native restore is impossible in [`ResumeMode::NativeOnly`], the driver
+    ///   returns [`NativeResumeUnavailable`], which reaches the caller as
+    ///   [`NodeError::ResumeRequired`] (the session remains stopped).
     ///
-    /// 戻り値は起動済みセッションと読み込み済みイベント (Replay 判定用)。
+    /// Returns the started session and the loaded events (for replay decisions).
     async fn resume_stopped_session(
         &self,
         session_id: &str,
@@ -923,7 +925,7 @@ impl SessionManager {
             .await?
             .ok_or_else(|| NodeError::InvalidSession(session_id.to_owned()))?;
 
-        // 一時VM (provisioner) セッションの再開は v2 (未対応)
+        // Resuming an ephemeral VM (provisioner) session is v2 (not yet supported)
         if matches!(
             session.status,
             SessionStatus::Provisioning | SessionStatus::Bootstrapping
@@ -933,7 +935,7 @@ impl SessionManager {
             )));
         }
 
-        // 作業ディレクトリが消えている (Worktree 削除済み等) 場合は再開不可
+        // Cannot resume if the working directory is gone (e.g. worktree removed)
         let cwd = PathBuf::from(&session.local_path);
         if !cwd.is_dir() {
             return Err(NodeError::InvalidState(format!(
@@ -945,9 +947,9 @@ impl SessionManager {
         let events = self.load_session_events(session_id, None).await?;
         let spec = self.resolve_launch_spec(&session.agent_id, &[]).await?;
 
-        // ネイティブ復元を試みる (復元できなかった場合の Replay 注入は呼び出し側)
+        // Attempt native restore (the caller injects a replay if it fails)
         let (agent_session_id, allow_fresh) = match mode {
-            // `--replay` 指定時はエージェント側IDを渡さず新規作成させる
+            // With `--replay`, do not pass the agent-side ID so a fresh session is created
             ResumeMode::AllowReplay { force_replay: true } => (None, true),
             ResumeMode::AllowReplay {
                 force_replay: false,
@@ -970,7 +972,7 @@ impl SessionManager {
             })
             .await?;
 
-        // 再開の事実を状態投影へ反映する (stopped / error → idle)
+        // Reflect the resume in the state projection (stopped / error → idle)
         self.inner
             .bus
             .record(
@@ -985,16 +987,17 @@ impl SessionManager {
         Ok((started, events))
     }
 
-    /// 停止済みセッションをネイティブ復元で自動再開する (プロンプト送信前)。
+    /// Automatically resumes a stopped session via native restore (before sending a prompt).
     ///
-    /// 明示 resume と同じ `resuming` ガードで直列化し、他の再開処理が進行中の
-    /// 場合は完了を待ってから制御を返す。ネイティブ復元できない場合は
-    /// [`NodeError::ResumeRequired`] を返し、セッションは停止状態のまま残す
-    /// (履歴 Replay は暗黙実行せず、クライアントに明示的な Resume を促す)。
+    /// Serialized by the same `resuming` guard as explicit resume; if another
+    /// resume is in progress, waits for it to finish before returning control.
+    /// Returns [`NodeError::ResumeRequired`] when native restore is impossible and
+    /// leaves the session stopped (does not implicitly run a history replay; prompts
+    /// the client for an explicit Resume).
     async fn auto_resume_for_prompt(&self, session_id: &str) -> Result<(), NodeError> {
         let deadline = Instant::now() + AUTO_RESUME_TIMEOUT;
         loop {
-            // ロックは await を跨がないよう、ガードの取得と判定をスコープで閉じる
+            // Confine guard acquisition and checks to a scope so the lock is not held across await
             let acquired = {
                 let mut sessions = self.inner.sessions.lock().expect("sessions poisoned");
                 if sessions.active.contains_key(session_id) {
@@ -1007,9 +1010,9 @@ impl SessionManager {
                     .resume_stopped_session(session_id, ResumeMode::NativeOnly)
                     .await
                     .map(|(started, _events)| {
-                        // ドライバ契約: ネイティブ限定 (`allow_fresh = false`) では
-                        // 復元できない場合に起動失敗 (Err) となるため、ここでは
-                        // `context_restored = true` のみが正常である
+                        // Driver contract: in native-only mode (`allow_fresh = false`)
+                        // launch fails (Err) when restore is impossible, so only
+                        // `context_restored = true` is normal here
                         if !started.context_restored {
                             tracing::warn!(
                                 session_id,
@@ -1034,7 +1037,7 @@ impl SessionManager {
         }
     }
 
-    /// 論理プロジェクトの表示名を解決する (未知の場合は `project_id` を返す)。
+    /// Resolves the display name of a logical project (returns `project_id` if unknown).
     async fn project_name(&self, project_id: &str) -> String {
         match self.inner.bus.db().list_projects().await {
             Ok(projects) => projects
@@ -1046,9 +1049,9 @@ impl SessionManager {
         }
     }
 
-    /// ターンを開始する (busy 予約 → スナップショット → `UserMessage` → 送信)。
+    /// Starts a turn (busy reservation → snapshot → `UserMessage` → send).
     ///
-    /// 呼び出し側は事前に busy 判定 (Pending Queue への追加 or 拒否) を済ませる。
+    /// The caller has already decided busy handling (append to the pending queue or reject).
     async fn start_turn(
         &self,
         session_id: &str,
@@ -1066,7 +1069,7 @@ impl SessionManager {
         match dispatch_prompt(&self.inner, session_id, text, client_source).await {
             Ok(()) => Ok(()),
             Err(err) => {
-                // 送信失敗時は busy を解除して整合性を保つ
+                // Clear busy on send failure to keep the state consistent
                 if let Some(session) = self
                     .inner
                     .sessions
@@ -1082,12 +1085,12 @@ impl SessionManager {
         }
     }
 
-    /// プロンプトを送信する (busy の場合は Pending Queue へ)。
+    /// Sends a prompt (enqueues into the pending queue when busy).
     ///
-    /// セッションが停止済み (非 active) の場合は、ネイティブ復元での自動再開を
-    /// 試みてから送信する。ネイティブ復元に非対応のエージェントでは
-    /// [`NodeError::ResumeRequired`] を返すため、クライアントは明示的な Resume
-    /// (履歴 Replay) を案内する。
+    /// If the session is stopped (not active), first attempts auto-resume via
+    /// native restore and then sends. Agents that do not support native restore
+    /// cause [`NodeError::ResumeRequired`], so the client should guide the user to
+    /// an explicit Resume (history replay).
     pub async fn send_prompt(
         &self,
         command_id: &str,
@@ -1104,11 +1107,11 @@ impl SessionManager {
             sessions.active.contains_key(session_id)
         };
         if !active {
-            // 停止済みセッションは自動再開 (ネイティブ復元のみ) してから送信する
+            // Auto-resume stopped sessions (native restore only) before sending
             self.auto_resume_for_prompt(session_id).await?;
         }
 
-        // busy チェックと予約 (check-and-set)
+        // Busy check and reservation (check-and-set)
         {
             let mut sessions = self.inner.sessions.lock().expect("sessions poisoned");
             let session = sessions.active.get_mut(session_id).ok_or_else(|| {
@@ -1126,7 +1129,7 @@ impl SessionManager {
         self.start_turn(session_id, text, client_source).await
     }
 
-    /// 承認リクエストへ応答する (2 回目以降は `AlreadyResolved`)。
+    /// Responds to a permission request (`AlreadyResolved` on the second and later attempts).
     pub async fn respond_permission(
         &self,
         command_id: &str,
@@ -1168,7 +1171,7 @@ impl SessionManager {
         Ok(())
     }
 
-    /// elicitation (構造化入力) へ応答する (2 回目以降は `AlreadyResolved`)。
+    /// Responds to an elicitation (structured input) (`AlreadyResolved` on the second and later attempts).
     pub async fn respond_elicitation(
         &self,
         command_id: &str,
@@ -1196,8 +1199,8 @@ impl SessionManager {
             .respond_elicitation(elicitation_id.to_owned(), action, content.clone())
             .await
         {
-            // content の schema 違反等でドライバが受理しなかった場合は pending を
-            // 戻す (ユーザーが修正して再送できるようにする)
+            // If the driver rejects it (e.g. schema violation in content), restore the
+            // pending entry so the user can fix and resend it
             let mut sessions = self.inner.sessions.lock().expect("sessions poisoned");
             if let Some(session) = sessions.active.get_mut(session_id) {
                 session
@@ -1222,7 +1225,7 @@ impl SessionManager {
         Ok(())
     }
 
-    /// モード切替 / 設定変更 / キャンセル / Kill。
+    /// Mode switching / config change / cancel / kill.
     pub async fn control(
         &self,
         command_id: &str,
@@ -1233,7 +1236,7 @@ impl SessionManager {
             return Err(NodeError::CommandDuplicate(command_id.to_owned()));
         }
 
-        // ロックは await を跨がない (ハンドルを複製してから操作する)
+        // Do not hold the lock across await (clone the handle, then operate)
         let (handle, is_busy) = {
             let sessions = self.inner.sessions.lock().expect("sessions poisoned");
             let session = sessions.active.get(session_id).ok_or_else(|| {
@@ -1250,9 +1253,9 @@ impl SessionManager {
                 .set_config(key.clone(), value.clone())
                 .await
                 .map_err(|err| NodeError::Server(format!("failed to set config: {err:#}"))),
-            // 圧縮は1ターンとして実行されるため busy 中でも許可する
+            // Compaction runs as a single turn, so allow it while busy
             SessionControlAction::Cancel => {
-                // すでにアイドル (ターン未実行) の場合はキャンセル対象がないため成功扱いとする
+                // If already idle (no turn running) there is nothing to cancel, so treat as success
                 if !is_busy {
                     return Ok(());
                 }
@@ -1268,10 +1271,10 @@ impl SessionManager {
         }
     }
 
-    /// セッションをアーカイブ/復元する (`fxg session archive` / Web UI)。
+    /// Archives/restores a session (`fxg session archive` / Web UI).
     ///
-    /// アーカイブは可逆な可視性フラグで、稼働状態は変更しない。
-    /// 戻り値はアーカイブ日時 (Unix epoch ms。復元時は `None`)。
+    /// Archiving is a reversible visibility flag; it does not change the running state.
+    /// Returns the archive timestamp (Unix epoch ms; `None` when restoring).
     pub async fn set_archived(
         &self,
         command_id: &str,
@@ -1293,11 +1296,11 @@ impl SessionManager {
         Ok(archived.then_some(envelope.created_at))
     }
 
-    /// セッションを削除する (`fxg session delete` / Web UI)。
+    /// Deletes a session (`fxg session delete` / Web UI).
     ///
-    /// 稼働中 (エージェントプロセス生存) の場合は停止を待ってから
-    /// `SessionDeleted` (tombstone) を追記する。本イベントより前のイベント本文は
-    /// 同一トランザクションでパージされる (復元不能)。
+    /// If active (agent process alive), waits for it to stop before appending
+    /// `SessionDeleted` (tombstone). Event bodies before this event are purged in
+    /// the same transaction (irreversible).
     pub async fn delete(&self, command_id: &str, session_id: &str) -> Result<(), NodeError> {
         if !self.begin_command(command_id) {
             return Err(NodeError::CommandDuplicate(command_id.to_owned()));
@@ -1319,7 +1322,7 @@ impl SessionManager {
         Ok(())
     }
 
-    /// セッションが稼働中 (エージェントプロセス生存) か。
+    /// Whether the session is active (agent process alive).
     pub fn is_active(&self, session_id: &str) -> bool {
         self.inner
             .sessions
@@ -1329,7 +1332,7 @@ impl SessionManager {
             .contains_key(session_id)
     }
 
-    /// セッションが存在する (削除済みでない) ことを検証する。
+    /// Verifies that the session exists (has not been deleted).
     async fn ensure_session_exists(&self, session_id: &str) -> Result<(), NodeError> {
         if self.inner.bus.db().get_session(session_id).await?.is_none() {
             return Err(NodeError::InvalidSession(session_id.to_owned()));
@@ -1337,10 +1340,10 @@ impl SessionManager {
         Ok(())
     }
 
-    /// 稼働中セッションを停止し、エージェントプロセスの終了を待つ。
+    /// Stops an active session and waits for the agent process to exit.
     ///
-    /// タイムアウト時は警告のみで続行する (削除を阻害しない。以降のイベントは
-    /// 削除済みセッションへの追記として破棄される)。
+    /// On timeout it only warns and continues (does not block deletion; later events
+    /// are discarded as appends to a deleted session).
     async fn stop_if_active(&self, session_id: &str) -> Result<(), NodeError> {
         if !self.is_active(session_id) {
             return Ok(());
@@ -1350,7 +1353,7 @@ impl SessionManager {
             .control(&command_id, session_id, &SessionControlAction::Kill)
             .await
         {
-            // チェック後に自然終了していた場合はそれで良い
+            // It is fine if it had already terminated naturally after the check
             Ok(()) | Err(NodeError::InvalidSession(_)) => {}
             Err(err) => return Err(err),
         }
@@ -1368,7 +1371,7 @@ impl SessionManager {
         Ok(())
     }
 
-    /// 稼働中セッション一覧。
+    /// List of active sessions.
     pub fn list_active(&self) -> Vec<ActiveSessionSummary> {
         let sessions = self.inner.sessions.lock().expect("sessions poisoned");
         let mut list: Vec<ActiveSessionSummary> = sessions
@@ -1387,7 +1390,7 @@ impl SessionManager {
         list
     }
 
-    /// 承認待ちリクエスト一覧 (`fxg inbox list`)。
+    /// List of pending permission requests (`fxg inbox list`).
     pub fn pending_permissions(&self) -> Vec<PendingPermissionSummary> {
         let sessions = self.inner.sessions.lock().expect("sessions poisoned");
         let mut list: Vec<PendingPermissionSummary> = sessions
@@ -1399,7 +1402,7 @@ impl SessionManager {
         list
     }
 
-    /// 回答待ち elicitation 一覧 (`fxg inbox list`)。
+    /// List of pending elicitations (`fxg inbox list`).
     pub fn pending_elicitations(&self) -> Vec<PendingElicitationSummary> {
         let sessions = self.inner.sessions.lock().expect("sessions poisoned");
         let mut list: Vec<PendingElicitationSummary> = sessions
@@ -1411,7 +1414,7 @@ impl SessionManager {
         list
     }
 
-    /// 全セッションのエージェントプロセスを終了する (`fxg kill-all`)。
+    /// Terminates the agent processes of all sessions (`fxg kill-all`).
     pub async fn shutdown_all(&self) -> Vec<String> {
         let handles: Vec<(String, Arc<dyn ActiveSessionHandle>)> = {
             let mut sessions = self.inner.sessions.lock().expect("sessions poisoned");
@@ -1423,14 +1426,15 @@ impl SessionManager {
         };
         let mut stopped = Vec::with_capacity(handles.len());
         for (session_id, handle) in handles {
-            // 温存せず完全に破棄する (`shutdown` はプールへ返却するため使わない)
+            // Discard completely instead of keeping it warm
+            // (`shutdown` returns it to the pool, so do not use it)
             if let Err(err) = handle.dispose().await {
                 tracing::warn!(session_id = %session_id, "failed to shutdown: {err:#}");
             }
             remove_snapshot_index(&self.inner.paths, &session_id);
             stopped.push(session_id);
         }
-        // アイドル (warm) プロセスも破棄してプールを空にする
+        // Also discard idle (warm) processes to empty the pool
         let drivers: Vec<Arc<dyn AgentDriver>> =
             { self.inner.drivers.lock().expect("drivers poisoned").clone() };
         for driver in drivers {
@@ -1447,7 +1451,7 @@ impl SessionManager {
     }
 }
 
-/// ドライバイベントを永続化・配信し、ステータス遷移とキューを管理する。
+/// Persists and delivers driver events, managing status transitions and queues.
 async fn pump_events(
     inner: Arc<Inner>,
     session_id: String,
@@ -1504,9 +1508,10 @@ async fn pump_events(
                         }
                     }
                     UnifiedEventPayload::PermissionResolved { request_id, .. } => {
-                        // ドライバ側 (OpenCode2 純正TUI 等) で解決された承認もここに来る。
-                        // fxg 経由の応答は `SessionManager::respond_permission` が
-                        // 記録済みのため、承認待ち一覧に残っている場合のみ記録する。
+                        // Permissions resolved on the driver side (e.g. OpenCode2's
+                        // native TUI) also arrive here. Responses via fxg are already
+                        // recorded by `SessionManager::respond_permission`,
+                        // so only record it if it is still in the pending list.
                         let mut sessions = inner.sessions.lock().expect("sessions poisoned");
                         let already_recorded =
                             sessions.active.get_mut(&session_id).is_some_and(|session| {
@@ -1538,10 +1543,10 @@ async fn pump_events(
                         }
                     }
                     UnifiedEventPayload::ElicitationResolved { elicitation_id, .. } => {
-                        // ドライバ側 (ターンキャンセル時の自動解決等) で解決された
-                        // elicitation もここに来る。fxg 経由の応答は
-                        // `SessionManager::respond_elicitation` が記録済みのため、
-                        // 回答待ち一覧に残っている場合のみ記録する。
+                        // Elicitations resolved on the driver side (e.g. automatic
+                        // resolution on turn cancel) also arrive here. Responses via fxg
+                        // are already recorded by `SessionManager::respond_elicitation`,
+                        // so only record it if it is still in the pending list.
                         let mut sessions = inner.sessions.lock().expect("sessions poisoned");
                         let already_recorded =
                             sessions.active.get_mut(&session_id).is_some_and(|session| {
@@ -1571,9 +1576,9 @@ async fn pump_events(
             }
         }
     }
-    // チャネルが閉じた = ドライバ (エージェントプロセス) 終了。
-    // `Stopped` への遷移は DB の `sessions` 投影にも反映する必要があるため
-    // イベントとして追記する (既に Stopped / Error の場合はそのまま)。
+    // Channel closed = the driver (agent process) exited.
+    // The transition to `Stopped` must also be reflected in the DB `sessions`
+    // projection, so append it as an event (leave it as-is if already Stopped / Error).
     let previous = {
         let sessions = inner.sessions.lock().expect("sessions poisoned");
         sessions
@@ -1611,7 +1616,7 @@ async fn pump_events(
     remove_snapshot_index(&inner.paths, &session_id);
 }
 
-/// セッションのシャドウ Git インデックスファイルを削除する (リソース解放)。
+/// Removes the session's shadow Git index file (releases resources).
 fn remove_snapshot_index(paths: &NodePaths, session_id: &str) {
     let path = paths.snapshot_index_path(session_id);
     if let Err(err) = std::fs::remove_file(&path)
@@ -1621,7 +1626,7 @@ fn remove_snapshot_index(paths: &NodePaths, session_id: &str) {
     }
 }
 
-/// セッションステータスを更新する (busy も同期)。
+/// Updates the session status (busy is synchronized too).
 fn mark_status(
     inner: &Inner,
     session_id: &str,
@@ -1638,7 +1643,7 @@ fn mark_status(
     }
 }
 
-/// ターン終了後にキュー先頭のプロンプトを送信する。
+/// Sends the prompt at the head of the queue after a turn ends.
 async fn maybe_dispatch_queued(inner: &Arc<Inner>, session_id: &str) {
     let next = {
         let mut sessions = inner.sessions.lock().expect("sessions poisoned");
@@ -1660,7 +1665,7 @@ async fn maybe_dispatch_queued(inner: &Arc<Inner>, session_id: &str) {
         return;
     };
 
-    // busy は呼び出し元で予約済み。失敗時は解除して整合性を保つ。
+    // busy has already been reserved by the caller. Clear it on failure to keep the state consistent.
     if let Err(err) = dispatch_prompt(inner, session_id, &prompt.text, &prompt.client_source).await
     {
         tracing::warn!(session_id = %session_id, "failed to dispatch queued prompt: {err:#}");
@@ -1686,11 +1691,11 @@ async fn maybe_dispatch_queued(inner: &Arc<Inner>, session_id: &str) {
     }
 }
 
-/// プロンプトの先頭部分から人間が読みやすいセッションタイトルを導出する。
+/// Derives a human-readable session title from the beginning of the prompt.
 ///
-/// - 先頭の空白・空行・Markdown記号 (`#`, `-`, `*`, `>`, バッククォート等) をトリムする
-/// - 最初の1行を取り出す (最大40文字、超過時は `...` を付加)
-/// - 有効な文字列が抽出できない場合は `None` を返す
+/// - Trims leading whitespace, blank lines and Markdown markers (`#`, `-`, `*`, `>`, backticks, etc.)
+/// - Takes the first line (up to 40 characters; appends `...` when exceeded)
+/// - Returns `None` if no usable string can be extracted
 pub fn derive_title_from_prompt(prompt: &str) -> Option<String> {
     for line in prompt.lines() {
         let trimmed = line.trim();
@@ -1708,10 +1713,10 @@ pub fn derive_title_from_prompt(prompt: &str) -> Option<String> {
     None
 }
 
-/// 1 ターンを開始する (スナップショット → `UserMessage` 記録 → ドライバ送信)。
+/// Starts a single turn (snapshot → record `UserMessage` → send to the driver).
 ///
-/// busy の予約・解除は呼び出し側 (`SessionManager::start_turn` /
-/// [`maybe_dispatch_queued`]) が行う。
+/// Busy reservation and release are handled by the caller (`SessionManager::start_turn` /
+/// [`maybe_dispatch_queued`]).
 async fn dispatch_prompt(
     inner: &Arc<Inner>,
     session_id: &str,
@@ -1775,9 +1780,9 @@ async fn dispatch_prompt(
         .map_err(|err| NodeError::Server(format!("failed to send prompt: {err:#}")))
 }
 
-/// 読み込み済みイベントから Revert 基準のスナップショットを選ぶ。
+/// Selects the revert baseline snapshot from the loaded events.
 ///
-/// 最後の `UserMessage.snapshot_tree_hash` を返す (`node_seq`, Tree Hash)。
+/// Returns the last `UserMessage.snapshot_tree_hash` (`node_seq`, Tree Hash).
 fn find_revert_snapshot(events: &[SessionEventEnvelope]) -> Option<(u64, String)> {
     events.iter().rev().find_map(|event| match &event.payload {
         UnifiedEventPayload::UserMessage {
@@ -1788,36 +1793,36 @@ fn find_revert_snapshot(events: &[SessionEventEnvelope]) -> Option<(u64, String)
     })
 }
 
-/// 履歴 Replay を注入する目的 (プロンプト冒頭の説明文に使う)。
+/// Purpose of injecting a history replay (used for the introductory text at the start of the prompt).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ReplayPurpose {
-    /// 会話の分岐 (`fxg session fork`)
+    /// Conversation branching (`fxg session fork`)
     Fork,
-    /// 停止セッションの再開 (`fxg session resume`)
+    /// Resuming a stopped session (`fxg session resume`)
     Resume,
 }
 
 impl ReplayPurpose {
-    /// プロンプト冒頭の説明文を組み立てる。
+    /// Builds the introductory text at the start of the prompt.
     fn header(self, range: &str) -> String {
         match self {
             Self::Fork => format!(
-                "以下の履歴は、以前のセッション{range}をこの時点から \
-                 Fork したものです。この文脈を引き継いで作業を続けてください。\n\n"
+                "The history below is from a previous session{range} forked at this point. \
+                 Continue working with this context in mind.\n\n"
             ),
             Self::Resume => format!(
-                "以下の履歴は、停止していたセッション{range}を再開したものです。 \
-                 この文脈を引き継いで作業を続けてください。\n\n"
+                "The history below is from a stopped session{range} that has been resumed. \
+                 Continue working with this context in mind.\n\n"
             ),
         }
     }
 }
 
-/// 履歴 Replay (fork / resume) 用の会話コンテキストを組み立てる。
+/// Builds the conversation context for a history replay (fork / resume).
 ///
-/// 会話 (ユーザー / エージェントメッセージ) と、ツール呼び出しの要約・
-/// 変更ファイルを `node_seq` 順に連結する (`up_to_seq` で打ち切る)。
-/// 会話が無い (履歴なし) 場合は `None`。
+/// Concatenates the conversation (user / agent messages) plus tool call summaries
+/// and changed files in `node_seq` order (truncated at `up_to_seq`).
+/// Returns `None` when there is no conversation (no history).
 fn build_history_replay_context(
     events: &[SessionEventEnvelope],
     up_to_seq: u64,
@@ -1864,8 +1869,8 @@ fn build_history_replay_context(
     assemble_replay_context(parts, up_to_seq, purpose)
 }
 
-/// 中央サーバーから届いた構造化履歴 ([`ForkHistoryItem`]) から
-/// Replay 注入用のコンテキストを組み立てる (別ノード・一時VMへの引き継ぎ)。
+/// Builds the context for replay injection from the structured history
+/// ([`ForkHistoryItem`]) received from the central server (handover to another node / ephemeral VM).
 fn build_history_replay_context_from_items(
     items: &[ForkHistoryItem],
     purpose: ReplayPurpose,
@@ -1889,13 +1894,13 @@ fn build_history_replay_context_from_items(
     assemble_replay_context(parts, 0, purpose)
 }
 
-/// Replay コンテキストの共通組み立て (上限文字数で打ち切る)。
+/// Shared assembly of the replay context (truncated at the character limit).
 fn assemble_replay_context(
     parts: Vec<String>,
     up_to_seq: u64,
     purpose: ReplayPurpose,
 ) -> Option<String> {
-    /// 注入するコンテキストの最大文字数 (過大なプロンプトを防ぐ)。
+    /// Maximum number of characters in the injected context (prevents oversized prompts).
     const MAX_CONTEXT_CHARS: usize = 16_000;
 
     if parts.is_empty() {
@@ -1909,7 +1914,7 @@ fn assemble_replay_context(
     let mut context = purpose.header(&range);
     for part in parts {
         if context.chars().count() + part.chars().count() > MAX_CONTEXT_CHARS {
-            context.push_str("\n(履歴は上限に達したため省略されました)");
+            context.push_str("\n(history omitted because it exceeded the limit)");
             break;
         }
         context.push_str(&part);
@@ -1918,9 +1923,9 @@ fn assemble_replay_context(
     Some(context)
 }
 
-/// 作業ディレクトリの Shadow Git Tree スナップショットを取得する。
+/// Captures a Shadow Git Tree snapshot of the working directory.
 ///
-/// 非 Git ディレクトリや失敗時は `None` (Revert 不可のターンとして記録)。
+/// `None` for non-Git directories or on failure (recorded as a turn that cannot be reverted).
 async fn snapshot_tree_hash(cwd: &Path, index_path: &Path, session_id: &str) -> Option<String> {
     let tree = ShadowGitTree::new(cwd, index_path, session_id);
     match tree.snapshot().await {
@@ -1932,7 +1937,7 @@ async fn snapshot_tree_hash(cwd: &Path, index_path: &Path, session_id: &str) -> 
     }
 }
 
-/// 現在のブランチと Worktree 判定を返す。
+/// Returns the current branch and the worktree determination.
 async fn branch_and_worktree(cwd: &Path) -> (Option<String>, bool) {
     let branch = crate::git::try_git(cwd, &["rev-parse", "--abbrev-ref", "HEAD"])
         .await
@@ -1972,7 +1977,7 @@ mod tests {
         let paths = NodePaths::new(dir.path().to_path_buf());
         paths.ensure_dirs().expect("dirs");
 
-        // カスタムエージェント "mock" を登録 (インデックス不要で解決される)
+        // Register a custom agent "mock" (resolved without an index)
         let mut custom = std::collections::BTreeMap::new();
         custom.insert(
             "mock".to_owned(),
@@ -1995,7 +2000,7 @@ mod tests {
         (manager, mock, dir)
     }
 
-    /// セッションが Idle になるまで待つ (ドライバの初回イベント処理を待つ)。
+    /// Waits until the session becomes Idle (waits for the driver's initial event processing).
     async fn wait_idle(manager: &SessionManager, session_id: &str) {
         for _ in 0..100 {
             if manager
@@ -2010,7 +2015,7 @@ mod tests {
         panic!("session did not become idle");
     }
 
-    /// `busy = false` になるまで待つ (ターン完了待ち)。
+    /// Waits until `busy = false` (waits for the turn to finish).
     async fn wait_not_busy(manager: &SessionManager, session_id: &str) {
         for _ in 0..200 {
             let busy = manager
@@ -2026,7 +2031,7 @@ mod tests {
         panic!("session did not finish its turn");
     }
 
-    /// 指定テキストの `UserMessage` が永続化されるまで待ち、`node_seq` を返す。
+    /// Waits until a `UserMessage` with the given text is persisted and returns its `node_seq`.
     async fn wait_user_message(manager: &SessionManager, session_id: &str, text: &str) -> u64 {
         for _ in 0..200 {
             let batch = manager
@@ -2045,7 +2050,7 @@ mod tests {
         panic!("UserMessage was not recorded: {text}");
     }
 
-    /// 指定 `event_type` のイベントが永続化されるまで待つ。
+    /// Waits until an event with the given `event_type` is persisted.
     async fn wait_event_type(manager: &SessionManager, session_id: &str, event_type: &str) {
         for _ in 0..200 {
             let batch = manager
@@ -2066,7 +2071,7 @@ mod tests {
         panic!("event was not recorded: {event_type}");
     }
 
-    /// テスト用に Git リポジトリ (`repo`) を用意し、セッションを開始する。
+    /// Prepares a Git repository (`repo`) for tests and starts a session.
     async fn setup_repo_session(
         manager: &SessionManager,
         dir: &tempfile::TempDir,
@@ -2091,7 +2096,7 @@ mod tests {
             .expect("ensure");
         assert!(!outcome.session_id.is_empty());
 
-        // SessionCreated が永続化され、sessions 投影が存在する
+        // SessionCreated is persisted and the sessions projection exists
         let session = manager
             .bus()
             .db()
@@ -2116,7 +2121,7 @@ mod tests {
             .await
             .expect("prompt");
 
-        // ドライバへ送信され、busy になる
+        // Sent to the driver and becomes busy
         for _ in 0..100 {
             if !mock.prompts().is_empty() {
                 break;
@@ -2145,7 +2150,7 @@ mod tests {
             .send_prompt("c2", &outcome.session_id, "first", "cli")
             .await
             .expect("first");
-        // busy 中は キューへ
+        // Enqueued while busy
         manager
             .send_prompt("c3", &outcome.session_id, "second", "web")
             .await
@@ -2158,7 +2163,7 @@ mod tests {
         assert_eq!(summary.queued_prompts, 1);
         assert_eq!(mock.prompts(), vec!["first"]);
 
-        // ターン完了 (idle) → キューが自動送信される
+        // Turn complete (idle) → the queue is dispatched automatically
         mock.emit(DriverEvent::Event(UnifiedEventPayload::StatusChanged {
             status: SessionStatus::Idle,
             error_message: None,
@@ -2210,7 +2215,7 @@ mod tests {
             .expect("ensure");
         wait_idle(&manager, &outcome.session_id).await;
 
-        // ドライバから承認リクエストを注入
+        // Inject a permission request from the driver
         mock.emit(DriverEvent::Event(UnifiedEventPayload::PermissionRequest {
             request_id: "req-1".to_owned(),
             tool_name: "terminal".to_owned(),
@@ -2236,7 +2241,7 @@ mod tests {
             .expect("resolve");
         assert!(manager.pending_permissions().is_empty());
 
-        // 2 回目は ALREADY_RESOLVED
+        // The second attempt is ALREADY_RESOLVED
         let err = manager
             .respond_permission("c3", &outcome.session_id, "req-1", "allow_once", "cli")
             .await
@@ -2253,11 +2258,11 @@ mod tests {
             .expect("ensure");
         wait_idle(&manager, &outcome.session_id).await;
 
-        // ドライバから elicitation (質問) を注入
+        // Inject an elicitation (question) from the driver
         mock.emit(DriverEvent::Event(
             UnifiedEventPayload::ElicitationRequest {
                 elicitation_id: "elic-1".to_owned(),
-                message: "どの戦略で進めますか?".to_owned(),
+                message: "Which strategy should we go with?".to_owned(),
                 mode: "form".to_owned(),
                 requested_schema: serde_json::json!({
                     "type": "object",
@@ -2276,7 +2281,7 @@ mod tests {
         assert_eq!(manager.pending_elicitations().len(), 1);
         assert_eq!(
             manager.pending_elicitations()[0].message,
-            "どの戦略で進めますか?"
+            "Which strategy should we go with?"
         );
 
         manager
@@ -2297,7 +2302,7 @@ mod tests {
         assert_eq!(recorded[0].1, ElicitationAction::Accept);
         assert_eq!(recorded[0].2["strategy"], "a");
 
-        // 2 回目は ALREADY_RESOLVED
+        // The second attempt is ALREADY_RESOLVED
         let err = manager
             .respond_elicitation(
                 "c3",
@@ -2321,11 +2326,11 @@ mod tests {
             .expect("ensure");
         wait_idle(&manager, &outcome.session_id).await;
 
-        // ドライバが発行した elicitation が pending に載る
+        // An elicitation issued by the driver appears in pending
         mock.emit(DriverEvent::Event(
             UnifiedEventPayload::ElicitationRequest {
                 elicitation_id: "elic-2".to_owned(),
-                message: "続行しますか?".to_owned(),
+                message: "Do you want to continue?".to_owned(),
                 mode: "form".to_owned(),
                 requested_schema: serde_json::json!({ "type": "object", "properties": {} }),
                 tool_call_id: None,
@@ -2339,7 +2344,7 @@ mod tests {
         }
         assert_eq!(manager.pending_elicitations().len(), 1);
 
-        // ドライバ側の自動解決 (ターンキャンセル等) で pending が消える
+        // Automatic resolution on the driver side (e.g. turn cancel) removes it from pending
         mock.emit(DriverEvent::Event(
             UnifiedEventPayload::ElicitationResolved {
                 elicitation_id: "elic-2".to_owned(),
@@ -2362,14 +2367,14 @@ mod tests {
         let (manager, mock, dir) = setup().await;
         let (repo, session_id) = setup_repo_session(&manager, &dir).await;
 
-        // ターン開始時のスナップショットを記録する
+        // Record the snapshot at turn start
         manager
             .send_prompt("c2", &session_id, "first turn", "cli")
             .await
             .expect("prompt");
         let user_seq = wait_user_message(&manager, &session_id, "first turn").await;
 
-        // ターン完了 → エージェントがファイルを変更した想定
+        // Turn complete → assume the agent changed files
         mock.emit(DriverEvent::Event(UnifiedEventPayload::StatusChanged {
             status: SessionStatus::Idle,
             error_message: None,
@@ -2377,7 +2382,7 @@ mod tests {
         wait_not_busy(&manager, &session_id).await;
         std::fs::write(repo.join("README.md"), "changed by agent\n").expect("write");
 
-        // Revert: 直近ターン開始時点のファイル状態へ復元する
+        // Revert: restore the file state at the start of the latest turn
         let outcome = manager
             .revert("c3", &session_id, None)
             .await
@@ -2389,7 +2394,7 @@ mod tests {
             "# test\n"
         );
 
-        // SessionReverted がイベントログに追記される
+        // SessionReverted is appended to the event log
         let batch = manager
             .bus()
             .db()
@@ -2410,7 +2415,7 @@ mod tests {
                 ..
             } => {
                 assert!(!restored_tree_hash.is_empty());
-                assert!(backup_tree_hash.is_some(), "バックアップ Tree が退避される");
+                assert!(backup_tree_hash.is_some(), "a backup Tree is saved");
             }
             _ => unreachable!(),
         }
@@ -2421,7 +2426,7 @@ mod tests {
         let (manager, _mock, dir) = setup().await;
         let (_repo, session_id) = setup_repo_session(&manager, &dir).await;
 
-        // ターン実行中 (Idle イベント未受信) は Busy で拒否する
+        // A running turn (no Idle event received yet) is rejected as Busy
         manager
             .send_prompt("c2", &session_id, "running", "cli")
             .await
@@ -2445,7 +2450,7 @@ mod tests {
         let user_seq = wait_user_message(&manager, &source_id, "hello world").await;
         mock.emit(DriverEvent::Event(UnifiedEventPayload::AgentMessage {
             message_id: "m1".to_owned(),
-            text: "了解しました".to_owned(),
+            text: "Understood".to_owned(),
             is_complete: true,
         }));
         wait_event_type(&manager, &source_id, "agent_message").await;
@@ -2455,14 +2460,14 @@ mod tests {
         }));
         wait_not_busy(&manager, &source_id).await;
 
-        // `user_seq` 時点から分岐する
+        // Fork at the `user_seq` point
         let fork = manager
             .fork("c3", &source_id, Some(user_seq), None, None)
             .await
             .expect("fork");
         assert_ne!(fork.session_id, source_id);
 
-        // 親子関係が記録される
+        // The parent-child relationship is recorded
         let child = manager
             .bus()
             .db()
@@ -2474,8 +2479,8 @@ mod tests {
         assert_eq!(child.fork_from_node_seq, Some(user_seq));
         assert_eq!(child.agent_id, "mock");
 
-        // 履歴 Replay 注入: fork セッションの UserMessage として記録され、
-        // `user_seq` 時点までの会話 (ユーザー発話) が含まれる
+        // History replay injection: recorded as a UserMessage of the fork session and
+        // includes the conversation (user utterances) up to the `user_seq` point
         let batch = manager
             .bus()
             .db()
@@ -2496,19 +2501,19 @@ mod tests {
             .expect("injected fork context");
         assert!(
             injected.contains("hello world"),
-            "履歴が含まれる: {injected}"
+            "history is included: {injected}"
         );
         assert!(
-            !injected.contains("了解しました"),
-            "分岐点より後の会話は含まれない: {injected}"
+            !injected.contains("Understood"),
+            "conversation after the fork point is excluded: {injected}"
         );
         assert!(
             mock.prompts().iter().any(|prompt| prompt == &injected),
-            "コンテキストが新エージェントへ送信される"
+            "the context is sent to the new agent"
         );
 
-        // 分岐先の作業ディレクトリは同じリポジトリを共有する
-        // (macOS の `/var` → `/private/var` 解決があるため canonicalize して比較)
+        // The fork's working directory shares the same repository
+        // (canonicalize before comparing because macOS resolves `/var` → `/private/var`)
         assert_eq!(
             PathBuf::from(&child.local_path)
                 .canonicalize()
@@ -2526,8 +2531,8 @@ mod tests {
             .expect("ensure");
         wait_idle(&manager, &outcome.session_id).await;
 
-        // ドライバ (エージェントプロセス) 終了: イベントチャネルが閉じると
-        // ポンプが `Stopped` を記録し、active 一覧から外れる
+        // Driver (agent process) exit: when the event channel closes, the
+        // pump records `Stopped` and removes it from the active list
         mock.close_events();
         for _ in 0..200 {
             let row = manager
@@ -2539,7 +2544,7 @@ mod tests {
             if row.is_some_and(|session| session.status == SessionStatus::Stopped) {
                 assert!(
                     manager.list_active().is_empty(),
-                    "停止したセッションは active 一覧から外れる"
+                    "a stopped session is removed from the active list"
                 );
                 return;
             }
@@ -2548,7 +2553,7 @@ mod tests {
         panic!("driver exit did not record Stopped");
     }
 
-    /// セッションが `stopped` になり active 一覧から外れるまで待つ。
+    /// Waits until the session becomes `stopped` and is removed from the active list.
     async fn wait_stopped(manager: &SessionManager, session_id: &str) {
         for _ in 0..200 {
             let row = manager
@@ -2565,9 +2570,9 @@ mod tests {
         panic!("session did not stop");
     }
 
-    /// 会話 1 ターン + エージェント側ID付きの停止済みセッションを用意する。
+    /// Prepares a stopped session with one conversation turn plus an agent-side ID.
     ///
-    /// 戻り値は (リポジトリパス, セッションID)。
+    /// Returns (repository path, session ID).
     async fn setup_stopped_session(
         manager: &SessionManager,
         mock: &MockAgent,
@@ -2589,7 +2594,7 @@ mod tests {
             error_message: None,
         }));
         wait_not_busy(manager, &session_id).await;
-        // ドライバ (エージェントプロセス) を終了させる
+        // Terminate the driver (agent process)
         mock.close_events();
         wait_stopped(manager, &session_id).await;
         (repo, session_id)
@@ -2613,7 +2618,7 @@ mod tests {
         assert_eq!(outcome.session_id, session_id);
         assert!(outcome.context_restored);
 
-        // 再開後は status が idle に戻り、active 一覧へ復帰する
+        // After resume, status returns to idle and it rejoins the active list
         wait_idle(&manager, &session_id).await;
         let row = manager
             .bus()
@@ -2624,13 +2629,13 @@ mod tests {
             .expect("session row");
         assert_eq!(row.status, SessionStatus::Idle);
 
-        // ドライバへは記録済みのエージェント側IDで再開が要求される
+        // The driver is asked to resume with the recorded agent-side ID
         let start = mock.starts().last().cloned().expect("start_session");
         let resume = start.resume.expect("resume request");
         assert_eq!(resume.agent_session_id.as_deref(), Some("agent-sess-1"));
         assert!(resume.allow_fresh);
 
-        // ネイティブ復元のため履歴 Replay は注入されない
+        // No history replay is injected because of native restore
         let batch = manager
             .bus()
             .db()
@@ -2652,7 +2657,7 @@ mod tests {
         let (_repo, session_id) =
             setup_stopped_session(&manager, &mock, &dir, "fallback resume").await;
 
-        // ネイティブ復元非対応のドライバ → Replay でコンテキストを継続する
+        // Driver without native restore support → continue the context via replay
         let outcome = manager
             .resume(ResumeParams {
                 command_id: "c-resume",
@@ -2663,8 +2668,8 @@ mod tests {
             .expect("resume");
         assert!(!outcome.context_restored);
 
-        // 履歴 Replay が `client_source = "resume"` の UserMessage として注入され、
-        // エージェントへ送信される
+        // The history replay is injected as a UserMessage with `client_source = "resume"`
+        // and sent to the agent
         let batch = manager
             .bus()
             .db()
@@ -2683,12 +2688,12 @@ mod tests {
                 _ => None,
             })
             .expect("injected resume context");
-        assert!(injected.contains("fallback resume"), "履歴が含まれる");
+        assert!(injected.contains("fallback resume"), "history is included");
         assert!(
             mock.prompts().iter().any(|prompt| prompt == &injected),
-            "コンテキストがエージェントへ送信される"
+            "the context is sent to the agent"
         );
-        // Replay ターンの完了 (Idle) で busy が解除される
+        // Busy is cleared when the replay turn completes (Idle)
         mock.emit(DriverEvent::Event(UnifiedEventPayload::StatusChanged {
             status: SessionStatus::Idle,
             error_message: None,
@@ -2702,7 +2707,7 @@ mod tests {
         let (_repo, session_id) =
             setup_stopped_session(&manager, &mock, &dir, "force replay").await;
 
-        // ネイティブ復元対応でも `--replay` はエージェント側IDを渡さない
+        // Even with native restore support, `--replay` does not pass the agent-side ID
         mock.set_resume_supported(true);
         let outcome = manager
             .resume(ResumeParams {
@@ -2726,7 +2731,7 @@ mod tests {
     async fn resume_rejects_active_unknown_and_missing_workspace() {
         let (manager, mock, dir) = setup().await;
 
-        // 未知のセッションは InvalidSession
+        // An unknown session yields InvalidSession
         let err = manager
             .resume(ResumeParams {
                 command_id: "u1",
@@ -2737,7 +2742,7 @@ mod tests {
             .expect_err("unknown session");
         assert!(matches!(err, NodeError::InvalidSession(_)));
 
-        // 稼働中 (active) のセッションは InvalidState
+        // An active session yields InvalidState
         let (repo, session_id) = setup_repo_session(&manager, &dir).await;
         let err = manager
             .resume(ResumeParams {
@@ -2749,7 +2754,7 @@ mod tests {
             .expect_err("active session");
         assert!(matches!(err, NodeError::InvalidState(_)));
 
-        // 作業ディレクトリが消えている (Worktree 削除済み等) 場合は InvalidState
+        // A missing working directory (e.g. worktree removed) yields InvalidState
         mock.close_events();
         wait_stopped(&manager, &session_id).await;
         std::fs::remove_dir_all(&repo).expect("remove repo");
@@ -2763,7 +2768,7 @@ mod tests {
             .expect_err("missing workspace");
         assert!(matches!(err, NodeError::InvalidState(_)));
 
-        // 失敗しても排他ガード (`resuming`) は解除され、復旧後は再開できる
+        // Even on failure the exclusive guard (`resuming`) is released, so resume works after recovery
         std::fs::create_dir_all(&repo).expect("mkdir repo");
         crate::testutil::init_test_repo(&repo).await;
         let outcome = manager
@@ -2782,20 +2787,20 @@ mod tests {
         let (manager, mock, dir) = setup().await;
         let (_repo, session_id) = setup_stopped_session(&manager, &mock, &dir, "first turn").await;
 
-        // ネイティブ復元対応エージェント: 明示 resume なしの送信で自動再開される
+        // Agent with native restore support: sending without an explicit resume auto-resumes
         mock.set_resume_supported(true);
         manager
             .send_prompt("c-next", &session_id, "auto resumed", "web")
             .await
             .expect("send prompt");
 
-        // 記録済みエージェントセッションIDでネイティブ限定復元が要求される
+        // Native-only restore is requested with the recorded agent session ID
         let start = mock.starts().last().cloned().expect("start_session");
         let resume = start.resume.expect("resume request");
         assert_eq!(resume.agent_session_id.as_deref(), Some("agent-sess-1"));
-        assert!(!resume.allow_fresh, "自動レジュームはネイティブ限定");
+        assert!(!resume.allow_fresh, "auto-resume is native-only");
 
-        // 自動再開の完了で状態投影が idle に戻り、プロンプトが送信される
+        // When auto-resume completes, the state projection returns to idle and the prompt is sent
         wait_user_message(&manager, &session_id, "auto resumed").await;
         let row = manager
             .bus()
@@ -2807,7 +2812,7 @@ mod tests {
         assert_eq!(row.status, SessionStatus::Idle);
         assert!(mock.prompts().iter().any(|prompt| prompt == "auto resumed"));
 
-        // ネイティブ復元のため履歴 Replay は注入されない
+        // No history replay is injected because of native restore
         let batch = manager
             .bus()
             .db()
@@ -2822,7 +2827,7 @@ mod tests {
             "native auto resume must not inject replay context"
         );
 
-        // ターン完了で busy が解除される
+        // Busy is cleared when the turn completes
         mock.emit(DriverEvent::Event(UnifiedEventPayload::StatusChanged {
             status: SessionStatus::Idle,
             error_message: None,
@@ -2835,8 +2840,8 @@ mod tests {
         let (manager, mock, dir) = setup().await;
         let (_repo, session_id) = setup_stopped_session(&manager, &mock, &dir, "first turn").await;
 
-        // ネイティブ復元非対応: 送信は ResumeRequired で失敗し、履歴 Replay は
-        // 暗黙実行されない (セッションは停止状態のまま)
+        // Native restore unsupported: the send fails with ResumeRequired and the
+        // history replay is not implicitly run (the session stays stopped)
         let err = manager
             .send_prompt("c-next", &session_id, "needs replay", "web")
             .await
@@ -2854,14 +2859,14 @@ mod tests {
             .await
             .expect("query")
             .expect("session row");
-        assert_eq!(row.status, SessionStatus::Stopped, "停止状態のまま残る");
+        assert_eq!(row.status, SessionStatus::Stopped, "it remains stopped");
         assert!(manager.list_active().is_empty());
         assert!(
             !mock.prompts().iter().any(|prompt| prompt == "needs replay"),
-            "プロンプトは送信されない"
+            "the prompt is not sent"
         );
 
-        // 明示的な resume (履歴 Replay) では再開できる
+        // An explicit resume (history replay) can resume it
         let outcome = manager
             .resume(ResumeParams {
                 command_id: "c-resume",
@@ -2882,7 +2887,7 @@ mod tests {
             .expect("ensure");
         assert_eq!(manager.list_active().len(), 1);
 
-        // ドライバからの StatusChanged がセッション状態へ反映される
+        // StatusChanged from the driver is reflected in the session state
         mock.emit(DriverEvent::Event(UnifiedEventPayload::StatusChanged {
             status: SessionStatus::Stopped,
             error_message: None,
@@ -2893,7 +2898,7 @@ mod tests {
                 .iter()
                 .any(|session| session.status == SessionStatus::Stopped)
             {
-                // ステータスは node.db の sessions 投影にも反映される
+                // The status is also reflected in the node.db sessions projection
                 let session_id = active[0].session_id.clone();
                 let row = manager
                     .bus()
@@ -2924,8 +2929,8 @@ mod tests {
             derive_title_from_prompt("   \n\n> Blockquote prompt\nNext line"),
             Some("Blockquote prompt".to_owned())
         );
-        let long = "あ".repeat(50);
-        let expected = format!("{}...", "あ".repeat(40));
+        let long = "あ".repeat(50); // allow-japanese: exercises multibyte character truncation
+        let expected = format!("{}...", "あ".repeat(40)); // allow-japanese: same multibyte truncation
         assert_eq!(derive_title_from_prompt(&long), Some(expected));
         assert_eq!(derive_title_from_prompt("   \n\n  "), None);
     }
@@ -2967,7 +2972,7 @@ mod tests {
             .await
             .expect("ensure");
 
-        // 初期タイトルはデフォルト
+        // The initial title is the default
         let initial_row = manager
             .bus()
             .db()
@@ -2977,7 +2982,7 @@ mod tests {
             .expect("session");
         assert!(initial_row.title.contains('@'));
 
-        // 最初のプロンプトを送信
+        // Send the first prompt
         manager
             .send_prompt(
                 "c_prompt1",
@@ -2988,7 +2993,7 @@ mod tests {
             .await
             .expect("prompt");
 
-        // タイトルが更新される
+        // The title is updated
         let updated_row = manager
             .bus()
             .db()
@@ -2998,7 +3003,7 @@ mod tests {
             .expect("session");
         assert_eq!(updated_row.title, "Implement login page");
 
-        // 2回目のプロンプトではタイトルは再更新されない (初回のみ)
+        // The title is not updated again on the second prompt (first time only)
         manager
             .send_prompt(
                 "c_prompt2",
@@ -3027,17 +3032,17 @@ mod tests {
             .await
             .expect("ensure");
 
-        // インデックスファイルを作成
+        // Create the index file
         let index_path = manager.inner.paths.snapshot_index_path(&outcome.session_id);
         std::fs::create_dir_all(index_path.parent().unwrap()).expect("create parent dir");
         std::fs::write(&index_path, b"test index data").expect("write index");
         assert!(index_path.exists());
 
-        // shutdown_all を実行
+        // Run shutdown_all
         let stopped = manager.shutdown_all().await;
         assert_eq!(stopped, vec![outcome.session_id]);
 
-        // インデックスファイルが削除されていることを確認
+        // Confirm the index file has been deleted
         assert!(
             !index_path.exists(),
             "snapshot index must be cleaned up on shutdown"

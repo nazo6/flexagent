@@ -1,13 +1,14 @@
-//! 論理プロジェクト (`Logical Project`) の同一性解決。
+//! Identity resolution for logical projects (`Logical Project`).
 //!
-//! 設計: `docs/01-architecture-and-sync.md` §4。
-//! Windows (`D:\ghq\github.com\nazo6\flexagent`)、Linux VPS、WSL など異なるノード上の
-//! 異なるパスを「同一プロジェクト」として束ねるための `project_key` を決定する。
+//! Design: `docs/01-architecture-and-sync.md` §4.
+//! Determines the `project_key` that ties together different paths on different
+//! nodes (Windows `D:\ghq\github.com\nazo6\flexagent`, a Linux VPS, WSL, and so on)
+//! as the "same project".
 //!
-//! 決定順序:
-//! 1. `.fxg.toml` の `project_key` (明示指定。最優先)
-//! 2. `git remote.origin.url` の正規化 ([`normalize_git_url`])
-//! 3. フォールバック `local:<node_id>:<path-hash>` (非 Git かつ `.fxg.toml` なし)
+//! Resolution order:
+//! 1. `project_key` in `.fxg.toml` (explicit, highest priority)
+//! 2. Normalized `git remote.origin.url` ([`normalize_git_url`])
+//! 3. Fallback `local:<node_id>:<path-hash>` (not Git and no `.fxg.toml`)
 
 use std::path::{Path, PathBuf};
 
@@ -16,7 +17,7 @@ use fxg_protocol::config::ProjectConfig;
 use crate::error::NodeError;
 use crate::git;
 
-/// `git remote` URL を論理プロジェクトキーへ正規化する。
+/// Normalizes a `git remote` URL into a logical project key.
 ///
 /// ```text
 /// "git@github.com:nazo6/flexagent.git"          -> "github.com/nazo6/flexagent"
@@ -24,22 +25,22 @@ use crate::git;
 /// "ssh://git@gitlab.example.com:2222/team/app.git" -> "gitlab.example.com/team/app"
 /// ```
 ///
-/// モノレポ等で Git ルートのサブディレクトリで起動された場合は、
-/// `github.com/nazo6/flexagent#packages/sub` のように相対パス (POSIX スラッシュ正規化)
-/// を付与する。
+/// When started in a subdirectory of the Git root (as in a monorepo), appends the
+/// relative path (POSIX slash normalized) as in
+/// `github.com/nazo6/flexagent#packages/sub`.
 pub fn normalize_git_url(raw_url: &str, subpath_from_root: &str) -> String {
     let trimmed = raw_url.trim();
-    // 1. scheme (`https://`, `ssh://`, `git://` 等) を除去
+    // 1. Strip the scheme (`https://`, `ssh://`, `git://`, etc.)
     let without_scheme = trimmed
         .split_once("://")
         .map(|(_, rest)| rest)
         .unwrap_or(trimmed);
-    // 2. userinfo (`git@` 等) を除去
+    // 2. Strip the userinfo (`git@`, etc.)
     let without_auth = without_scheme
         .rsplit_once('@')
         .map(|(_, rest)| rest)
         .unwrap_or(without_scheme);
-    // 3. scp 形式 (`host:path`) / URL 形式 (`host/path`) の分離
+    // 3. Separate scp form (`host:path`) / URL form (`host/path`)
     let (host, path) = match without_auth.split_once(':') {
         Some((host, path)) => (host, path),
         None => match without_auth.split_once('/') {
@@ -47,7 +48,7 @@ pub fn normalize_git_url(raw_url: &str, subpath_from_root: &str) -> String {
             None => (without_auth, ""),
         },
     };
-    // 4. ポート番号の除去 (`gitlab.example.com:2222/team/app.git`)
+    // 4. Strip the port number (`gitlab.example.com:2222/team/app.git`)
     let path = match path.split_once('/') {
         Some((maybe_port, rest))
             if !maybe_port.is_empty() && maybe_port.chars().all(|ch| ch.is_ascii_digit()) =>
@@ -56,7 +57,7 @@ pub fn normalize_git_url(raw_url: &str, subpath_from_root: &str) -> String {
         }
         _ => path,
     };
-    // 5. `.git` 接尾辞と前後のスラッシュを除去
+    // 5. Strip the `.git` suffix and leading/trailing slashes
     let path = path.strip_suffix(".git").unwrap_or(path);
     let path = path.trim_matches('/');
     let host = host.trim_matches('/').to_ascii_lowercase();
@@ -75,7 +76,7 @@ pub fn normalize_git_url(raw_url: &str, subpath_from_root: &str) -> String {
     key
 }
 
-/// サブパスを POSIX スラッシュへ正規化する (`\` や `./` を除去)。
+/// Normalizes a subpath to POSIX slashes (stripping `\` and `./`).
 fn normalize_subpath(subpath: &str) -> String {
     subpath
         .replace('\\', "/")
@@ -85,11 +86,12 @@ fn normalize_subpath(subpath: &str) -> String {
         .join("/")
 }
 
-/// 非 Git プロジェクト (かつ `.fxg.toml` なし) 用のフォールバックプロジェクトID。
+/// Fallback project ID for non-Git projects (and projects without `.fxg.toml`).
 ///
-/// 形式は `local:<node_id>:<hash>` (設計: `docs/01-architecture-and-sync.md` §4.1)。
-/// ハッシュは**正規化済み絶対パス**の FNV-1a (64bit) とし、同一ノード上の
-/// 同名フォルダ同士が衝突しないようにする。
+/// The format is `local:<node_id>:<hash>` (design:
+/// `docs/01-architecture-and-sync.md` §4.1). The hash is FNV-1a (64-bit) of the
+/// **normalized absolute path** so that same-named folders on the same node do not
+/// collide.
 pub fn fallback_project_id(node_id: &str, path: &Path) -> String {
     let canonical = fxg_pty::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
     let normalized = canonical
@@ -99,7 +101,7 @@ pub fn fallback_project_id(node_id: &str, path: &Path) -> String {
     format!("local:{node_id}:{:016x}", fnv1a64(normalized.as_bytes()))
 }
 
-/// FNV-1a (64bit) ハッシュ。
+/// FNV-1a (64-bit) hash.
 fn fnv1a64(bytes: &[u8]) -> u64 {
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
     for byte in bytes {
@@ -109,32 +111,33 @@ fn fnv1a64(bytes: &[u8]) -> u64 {
     hash
 }
 
-/// `project_key` の解決元 ([`fxg_protocol::common::ProjectResolutionSource`] を再公開)。
+/// Source of the `project_key` resolution (re-export of
+/// [`fxg_protocol::common::ProjectResolutionSource`]).
 pub use fxg_protocol::common::ProjectResolutionSource;
 
-/// 解決された論理プロジェクト。
+/// A resolved logical project.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedProject {
-    /// 論理プロジェクトID (`project_key`)
+    /// Logical project ID (`project_key`)
     pub project_id: String,
-    /// 表示名
+    /// Display name
     pub name: String,
-    /// 正規化元の Git URL
+    /// Git URL before normalization
     pub canonical_git_url: Option<String>,
-    /// Git ルート (非 Git の場合は `None`)
+    /// Git root (`None` for non-Git projects)
     pub git_root: Option<PathBuf>,
-    /// Git ルートからの相対サブパス (モノレポ。ルート直下なら `None`)
+    /// Relative subpath from the Git root (monorepo; `None` directly under the root)
     pub relative_subpath: Option<String>,
-    /// 解決対象ディレクトリ (正規化済み絶対パス)
+    /// Directory being resolved (normalized absolute path)
     pub local_path: PathBuf,
-    /// Git リポジトリか
+    /// Whether this is a Git repository
     pub is_git_repo: bool,
-    /// 解決元
+    /// Resolution source
     pub source: ProjectResolutionSource,
 }
 
 impl ResolvedProject {
-    /// `projects` テーブルへの登録レコード。
+    /// Record to register in the `projects` table.
     pub fn to_project_record(&self) -> fxg_db::ProjectRecord {
         fxg_db::ProjectRecord {
             project_id: self.project_id.clone(),
@@ -143,7 +146,7 @@ impl ResolvedProject {
         }
     }
 
-    /// `project_node_bindings` への登録レコード。
+    /// Record to register in `project_node_bindings`.
     pub fn to_binding_record(
         &self,
         node_id: &str,
@@ -155,17 +158,17 @@ impl ResolvedProject {
             node_id: node_id.to_owned(),
             local_path: self.local_path.to_string_lossy().into_owned(),
             is_worktree,
-            // 解決できた時点でディレクトリは実在する
+            // The directory exists once resolution has succeeded
             path_exists: true,
             git_branch: git_branch.map(str::to_owned),
         }
     }
 }
 
-/// `.fxg.toml` を「対象ディレクトリ → Git ルート」の順に読み込む。
+/// Loads `.fxg.toml` in the order "target directory -> Git root".
 ///
-/// Worktree 作成フック (`copy_files` / `post_create`) やプロジェクト別の
-/// デフォルト設定を参照するために使用する。
+/// Used to look up worktree creation hooks (`copy_files` / `post_create`) and
+/// per-project default settings.
 pub async fn load_project_config(cwd: &Path) -> Result<Option<ProjectConfig>, NodeError> {
     if let Some(config) = ProjectConfig::load_from_dir(cwd)? {
         return Ok(Some(config));
@@ -178,15 +181,15 @@ pub async fn load_project_config(cwd: &Path) -> Result<Option<ProjectConfig>, No
     Ok(None)
 }
 
-/// `.fxg.toml` に `project_key` を書き込む (既存の設定は保持する)。
+/// Writes `project_key` into `.fxg.toml` (preserving the existing settings).
 ///
-/// `fxg project link` および Client API (`POST .../projects/link`) から共有する。
+/// Shared by `fxg project link` and the client API (`POST .../projects/link`).
 pub fn patch_project_key(dir: &Path, project_key: &str) -> Result<(), NodeError> {
     let path = dir.join(fxg_protocol::config::PROJECT_CONFIG_FILE_NAME);
     let existing = std::fs::read_to_string(&path).unwrap_or_default();
     let mut lines: Vec<String> = existing.lines().map(str::to_owned).collect();
 
-    // TOML 文字列リテラルとして安全に埋め込む
+    // Embed safely as a TOML string literal
     let literal = format!(
         "\"{}\"",
         project_key.replace('\\', "\\\\").replace('"', "\\\"")
@@ -209,14 +212,14 @@ pub fn patch_project_key(dir: &Path, project_key: &str) -> Result<(), NodeError>
     output.push('\n');
     std::fs::write(&path, output).map_err(|err| NodeError::io(&path, err))?;
 
-    // 実際に読み戻せることを検証する (壊れた TOML を書かない)
+    // Verify that it can actually be read back (never write broken TOML)
     ProjectConfig::load_from_path(&path)?;
     Ok(())
 }
 
-/// 指定ディレクトリの論理プロジェクトを解決する。
+/// Resolves the logical project of the given directory.
 ///
-/// `.fxg.toml` は起動ディレクトリ → Git ルートの順に探索する。
+/// `.fxg.toml` is searched in the order starting directory -> Git root.
 pub async fn resolve_project(cwd: &Path, node_id: &str) -> Result<ResolvedProject, NodeError> {
     let local_path = fxg_pty::canonicalize(cwd).unwrap_or_else(|_| cwd.to_path_buf());
     let git_root = git::toplevel(&local_path).await?;
@@ -303,32 +306,32 @@ mod tests {
 
     #[test]
     fn normalizes_variants() {
-        // scheme / userinfo なし
+        // scheme / no userinfo
         assert_eq!(
             normalize_git_url("github.com/nazo6/flexagent", ""),
             "github.com/nazo6/flexagent"
         );
-        // 大文字ホスト / 末尾スラッシュ / .git なし
+        // Uppercase host / trailing slash / no .git
         assert_eq!(
             normalize_git_url(" HTTPS://GitHub.com/nazo6/flexagent/ ", ""),
             "github.com/nazo6/flexagent"
         );
-        // ポート付き https
+        // https with a port
         assert_eq!(
             normalize_git_url("http://192.168.1.5:8080/team/app.git", ""),
             "192.168.1.5/team/app"
         );
-        // サブパス (モノレポ)
+        // Subpath (monorepo)
         assert_eq!(
             normalize_git_url("git@github.com:nazo6/flexagent.git", "./packages/sub/"),
             "github.com/nazo6/flexagent#packages/sub"
         );
-        // バックスラッシュのサブパス (Windows 入力)
+        // Backslash subpath (Windows input)
         assert_eq!(
             normalize_git_url("git@github.com:nazo6/flexagent.git", r"packages\sub"),
             "github.com/nazo6/flexagent#packages/sub"
         );
-        // グループ階層
+        // Group hierarchy
         assert_eq!(
             normalize_git_url("git@github.com:org/team/repo.git", ""),
             "github.com/org/team/repo"
@@ -346,8 +349,8 @@ mod tests {
         let id_a1 = fallback_project_id("win-desktop", &a);
         let id_a2 = fallback_project_id("win-desktop", &a);
         let id_b = fallback_project_id("win-desktop", &b);
-        assert_eq!(id_a1, id_a2, "同一パスは同一ID");
-        assert_ne!(id_a1, id_b, "異なるパスは異なるID");
+        assert_eq!(id_a1, id_a2, "same path must give same ID");
+        assert_ne!(id_a1, id_b, "different paths must give different IDs");
         assert!(id_a1.starts_with("local:win-desktop:"));
     }
 
@@ -388,7 +391,7 @@ mod tests {
             "github.com/nazo6/flexagent#packages/sub"
         );
         assert_eq!(resolved.relative_subpath.as_deref(), Some("packages/sub"));
-        // Git ルートの解決も併せて行われる
+        // The Git root is resolved as well
         assert_eq!(
             resolved.git_root.as_deref(),
             Some(canonical(dir.path()).as_path())
@@ -458,7 +461,7 @@ mod tests {
         assert_eq!(config.name.as_deref(), Some("flexagent"));
         assert_eq!(config.worktree.base_branch.as_deref(), Some("main"));
 
-        // 再実行しても重複行を作らない
+        // Re-running must not create duplicate lines
         patch_project_key(dir.path(), "other/key").expect("patch again");
         let config = ProjectConfig::load_from_dir(dir.path())
             .expect("load")

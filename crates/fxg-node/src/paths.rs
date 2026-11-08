@@ -1,16 +1,16 @@
-//! `~/.flexagent/` 以下のデータディレクトリ・ファイルパス解決。
+//! Resolution of data directories and file paths under `~/.flexagent/`.
 //!
-//! 設計: `docs/05-cli-and-pwa-ui.md` §2.1。
+//! Design: `docs/05-cli-and-pwa-ui.md` §2.1.
 //!
 //! ```text
 //! ~/.flexagent/
-//! ├── config.toml            # グローバル設定
-//! ├── auth_token             # Client ⇔ Server/Node 認証トークン (0600)
-//! ├── node_token             # Node ⇔ Server ペアリングトークン (0600)
-//! ├── node.db                # ローカルノード SQLite DB
-//! ├── server.db              # 中央サーバー SQLite DB
-//! ├── worktrees/             # fxg が自動作成する Git Worktree
-//! └── snapshots/             # Shadow Git Tree のセッション別インデックス
+//! ├── config.toml            # Global configuration
+//! ├── auth_token             # Client <-> Server/Node auth token (0600)
+//! ├── node_token             # Node <-> Server pairing token (0600)
+//! ├── node.db                # Local node SQLite DB
+//! ├── server.db              # Central server SQLite DB
+//! ├── worktrees/             # Git worktrees created automatically by fxg
+//! └── snapshots/             # Per-session Shadow Git Tree indexes
 //! ```
 
 use std::path::{Path, PathBuf};
@@ -19,86 +19,86 @@ use fxg_protocol::config::{
     AUTH_TOKEN_FILE_NAME, CONFIG_FILE_NAME, EnvLookup, NODE_TOKEN_FILE_NAME, fxg_home,
 };
 
-/// `~/.flexagent/` 配下のパス解決ヘルパー。
+/// Path resolution helper for entries under `~/.flexagent/`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NodePaths {
     fxg_home: PathBuf,
 }
 
 impl NodePaths {
-    /// 指定ディレクトリをデータディレクトリとして扱う。
+    /// Uses the given directory as the data directory.
     pub fn new(fxg_home: impl Into<PathBuf>) -> Self {
         Self {
             fxg_home: fxg_home.into(),
         }
     }
 
-    /// 環境変数 (`FXG_HOME`) または `~/.flexagent` から解決する。
+    /// Resolves from the environment variable (`FXG_HOME`) or `~/.flexagent`.
     pub fn from_env(env: EnvLookup<'_>) -> Self {
         Self::new(fxg_home(env))
     }
 
-    /// データディレクトリ本体。
+    /// The data directory itself.
     pub fn fxg_home(&self) -> &Path {
         &self.fxg_home
     }
 
-    /// グローバル設定ファイル (`config.toml`)。
+    /// Global configuration file (`config.toml`).
     pub fn config_path(&self) -> PathBuf {
         self.fxg_home.join(CONFIG_FILE_NAME)
     }
 
-    /// クライアント認証トークン (`auth_token`)。
+    /// Client auth token (`auth_token`).
     pub fn auth_token_path(&self) -> PathBuf {
         self.fxg_home.join(AUTH_TOKEN_FILE_NAME)
     }
 
-    /// ノード個別ペアリングトークン (`node_token`)。
+    /// Node-specific pairing token (`node_token`).
     pub fn node_token_path(&self) -> PathBuf {
         self.fxg_home.join(NODE_TOKEN_FILE_NAME)
     }
 
-    /// ローカルノードDB (`node.db`)。
+    /// Local node DB (`node.db`).
     pub fn node_db_path(&self) -> PathBuf {
         fxg_db::node_db_path(&self.fxg_home)
     }
 
-    /// 中央サーバーDB (`server.db`)。
+    /// Central server DB (`server.db`).
     pub fn hub_db_path(&self) -> PathBuf {
         fxg_db::hub_db_path(&self.fxg_home)
     }
 
-    /// Worktree 集約ディレクトリ (`worktrees/`)。
+    /// Directory aggregating worktrees (`worktrees/`).
     pub fn worktrees_dir(&self) -> PathBuf {
         self.fxg_home.join("worktrees")
     }
 
-    /// Shadow Git Tree のインデックス置き場 (`snapshots/`)。
+    /// Storage location for Shadow Git Tree indexes (`snapshots/`).
     pub fn snapshots_dir(&self) -> PathBuf {
         self.fxg_home.join("snapshots")
     }
 
-    /// セッション用 Shadow Git Index のパス (`snapshots/<session-id>.index`)。
+    /// Path of the Shadow Git index used for a session (`snapshots/<session-id>.index`).
     pub fn snapshot_index_path(&self, session_id: &str) -> PathBuf {
         self.snapshots_dir().join(format!("{session_id}.index"))
     }
 
-    /// ACP Registry キャッシュディレクトリ (`cache/`)。
+    /// ACP Registry cache directory (`cache/`).
     pub fn cache_dir(&self) -> PathBuf {
         self.fxg_home.join("cache")
     }
 
-    /// エージェントバイナリ配置ディレクトリ (`agents/`)。
+    /// Directory holding agent binaries (`agents/`).
     pub fn agents_dir(&self) -> PathBuf {
         self.fxg_home.join("agents")
     }
 
-    /// 退避 Git bundle 置き場 (`bundles/`)。
+    /// Storage location for backup Git bundles (`bundles/`).
     pub fn bundles_dir(&self) -> PathBuf {
         self.fxg_home.join("bundles")
     }
 
-    /// データディレクトリ (および主要サブディレクトリ) を作成する。
+    /// Creates the data directory (and the main subdirectories).
     pub fn ensure_dirs(&self) -> Result<(), crate::NodeError> {
         for dir in [
             self.fxg_home.clone(),
@@ -112,16 +112,16 @@ impl NodePaths {
     }
 }
 
-/// CLI ⇔ Daemon ローカルIPC のエンドポイントを解決する。
+/// Resolves the endpoint of the CLI <-> daemon local IPC.
 ///
 /// - **Windows**: Named Pipe `\\.\pipe\fxg-daemon-<username>`
-/// - **Linux / macOS / WSL**: `$XDG_RUNTIME_DIR/fxg/daemon.sock` または
+/// - **Linux / macOS / WSL**: `$XDG_RUNTIME_DIR/fxg/daemon.sock` or
 ///   `/tmp/fxg-<uid>/daemon.sock`
 ///
-/// 環境変数 `FXG_IPC_ENDPOINT` が設定されている場合はそれを優先する
-/// (一時VMの隔離実行やテストでの複数インスタンス用)。
+/// If the environment variable `FXG_IPC_ENDPOINT` is set, it takes precedence
+/// (for isolated execution in ephemeral VMs and for multiple instances in tests).
 ///
-/// 設計: `docs/03-protocol-and-api.md` §4。
+/// Design: `docs/03-protocol-and-api.md` §4.
 pub fn ipc_endpoint(env: EnvLookup<'_>) -> String {
     if let Some(value) =
         env(fxg_protocol::config::env_keys::IPC_ENDPOINT).filter(|value| !value.trim().is_empty())
@@ -166,7 +166,7 @@ fn ipc_endpoint_inner(env: EnvLookup<'_>) -> String {
 
 #[cfg(unix)]
 fn current_uid() -> u32 {
-    // SAFETY: `getuid` は引数を持たず常に成功する POSIX システムコール。
+    // SAFETY: `getuid` is a POSIX system call that takes no arguments and always succeeds.
     unsafe { libc::getuid() }
 }
 

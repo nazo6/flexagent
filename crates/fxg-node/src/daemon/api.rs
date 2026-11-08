@@ -1,8 +1,8 @@
-//! ローカルノード (`fxg daemon`) の Client API バックエンド実装。
+//! Client API backend implementation for the local node (`fxg daemon`).
 //!
-//! `fxg-server` の共通ルーター ([`fxg_server::api::client_router`]) に対し、
-//! デーモンの `SessionManager` / `PtySessionManager` / Git 操作を提供する
-//! (設計: `docs/03-protocol-and-api.md` §3)。
+//! Supplies the daemon's `SessionManager` / `PtySessionManager` / Git operations
+//! to the shared router of `fxg-server` ([`fxg_server::api::client_router`])
+//! (design: `docs/03-protocol-and-api.md` §3).
 
 use std::path::{Path, PathBuf};
 
@@ -30,15 +30,15 @@ use super::ops::AuditSource;
 use crate::error::NodeError;
 use crate::session_manager::{ResumeParams, StartSessionParams};
 
-/// PTY WS へ転送するローカル購読のバッファ。
+/// Buffer for the local subscription forwarded to the PTY WS.
 const PTY_CHANNEL_CAPACITY: usize = 1024;
 
-/// ノードエラーを API エラーへ変換する。
+/// Converts a node error into an API error.
 fn api_error(err: NodeError) -> ApiError {
     ApiError::from_code(err.error_code(), err.to_string())
 }
 
-/// `ClientInfo` を監査ログの記録元へ変換する。
+/// Converts a `ClientInfo` into the audit log source.
 fn audit_source(client: &ClientInfo) -> AuditSource {
     AuditSource {
         client_ip: client.ip.clone(),
@@ -61,7 +61,7 @@ impl ClientApiBackend for DaemonState {
         ConnectionRole::LocalNode
     }
 
-    /// ローカルノードは紐付けパスの実在確認をライブで行った一覧を返す。
+    /// The local node returns a list verified live for the existence of linked paths.
     async fn list_projects(&self) -> Result<Vec<ProjectSummary>, ApiError> {
         self.list_projects_with_path_state()
             .await
@@ -191,14 +191,14 @@ impl ClientApiBackend for DaemonState {
         }
         let source = audit_source(&client);
 
-        // 既存セッションからの Context Fork (同一ノード内)
+        // Context fork from an existing session (within the same node)
         if let Some(fork) = &request.fork {
             if fork.restore_git_bundle_b64.is_some() {
                 return Err(ApiError::bad_request(
                     "git bundle restore requires an ephemeral node (Phase 6)",
                 ));
             }
-            // Fork 元の実行ディレクトリの紐付けも最新化する
+            // Also refresh the binding of the fork source's working directory
             if let Some(source) = self
                 .db()
                 .get_session(&fork.from_session_id)
@@ -233,9 +233,11 @@ impl ClientApiBackend for DaemonState {
             });
         }
 
-        // 実行ディレクトリ: Worktree 同時作成 or 既存パス or ノード既定
-        // (Worktree 同時作成時は `worktree_add` が紐付けを登録済みのため、
-        //  ここでは既存パス・既定解決のときのみ改めて登録する)
+        // Working directory: create a worktree at the same time, use an existing
+        // path, or fall back to the node default
+        // (when creating a worktree simultaneously, `worktree_add` has already
+        //  registered the binding, so only existing-path and default resolution
+        //  are registered again here)
         let (local_path, register_binding) = match (&request.worktree, &request.local_path) {
             (Some(spec), _) => {
                 let repo = self
@@ -274,7 +276,7 @@ impl ClientApiBackend for DaemonState {
         };
 
         if register_binding {
-            // 実行ディレクトリの紐付け (last_used_at / ブランチ) を最新化する
+            // Refresh the working directory binding (last_used_at / branch)
             self.resolve_and_register_project(&local_path)
                 .await
                 .map_err(api_error)?;
@@ -351,7 +353,8 @@ impl ClientApiBackend for DaemonState {
                     already_resolved: false,
                 })
             }
-            // 全クライアント横断の冪等解決: 2回目以降は正常遷移として扱う
+            // Idempotent resolution across all clients: the second and later calls are
+            // treated as normal transitions
             Err(NodeError::AlreadyResolved(_)) => Ok(RespondPermissionResponse {
                 already_resolved: true,
             }),
@@ -395,7 +398,8 @@ impl ClientApiBackend for DaemonState {
                     already_resolved: false,
                 })
             }
-            // 全クライアント横断の冪等解決: 2回目以降は正常遷移として扱う
+            // Idempotent resolution across all clients: the second and later calls are
+            // treated as normal transitions
             Err(NodeError::AlreadyResolved(_)) => Ok(RespondElicitationResponse {
                 already_resolved: true,
             }),
@@ -689,7 +693,7 @@ impl ClientApiBackend for DaemonState {
             serde_json::json!({ "action": action, "message": &message }),
         )
         .await;
-        // 導入状態の変化をハブへ報告する (nodes.installed_agents の更新)
+        // Report the change in install state to the hub (updates nodes.installed_agents)
         self.trigger_node_hello();
         Ok(AgentOpResponse {
             message: Some(message),
@@ -701,7 +705,7 @@ impl ClientApiBackend for DaemonState {
         client: ClientInfo,
     ) -> Result<RotateAuthTokenResponse, ApiError> {
         let token = DaemonState::rotate_auth_token(self).map_err(api_error)?;
-        // 監査ログにはトークン本体を記録しない
+        // Never record the token itself in the audit log
         self.record_audit(
             fxg_db::audit::actions::AUTH_TOKEN_ROTATE,
             &audit_source(&client),
@@ -749,7 +753,7 @@ impl ClientApiBackend for DaemonState {
     }
 
     async fn provisioners(&self) -> Result<ProvisionersResponse, ApiError> {
-        // 一時VMプロビジョナーは中央サーバーでのみ実行される (設計: docs/01 §6.1)
+        // Ephemeral VM provisioners only run on the central server (design: docs/01 §6.1)
         Ok(ProvisionersResponse {
             provisioners: Vec::new(),
         })
@@ -863,9 +867,9 @@ impl ClientApiBackend for DaemonState {
 }
 
 impl DaemonState {
-    /// `always = true` の場合に `allow_always` 系の選択肢へ昇格した `option_id` を返す。
+    /// Returns the `option_id` promoted to an `allow_always` option when `always = true`.
     ///
-    /// 承認リクエストの選択肢はノードの投影 (`permission_requests`) から取得する。
+    /// Permission request options are taken from the node projection (`permission_requests`).
     async fn resolve_permission_option(
         &self,
         session_id: &str,
@@ -893,7 +897,7 @@ impl DaemonState {
     }
 }
 
-/// `fxg-pty` エラーを PTY チャネルエラーへ変換する。
+/// Converts a `fxg-pty` error into a PTY channel error.
 fn map_pty_error(err: fxg_pty::PtyError) -> PtyChannelError {
     match err {
         fxg_pty::PtyError::NotFound(id) => {

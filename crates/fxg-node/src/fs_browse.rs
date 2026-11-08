@@ -1,4 +1,4 @@
-//! ノードのローカルファイルシステム走査 (`/api/v1/nodes/:id/fs/browse`)。
+//! Local filesystem browsing on the node (`/api/v1/nodes/:id/fs/browse`).
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -7,10 +7,12 @@ use fxg_protocol::client_api::{FsBrowseResponse, FsEntry};
 
 use crate::error::NodeError;
 
-/// パスを解決し、指定されたディレクトリの内容をブラウズする。
+/// Resolves the path and browses the contents of the given directory.
 ///
-/// - `path` が `None` の場合は既定 (ホームディレクトリ、取得できなければルート) を閲覧する。
-/// - Windows で `path` が空文字 `Some("")` の場合、利用可能なドライブ一覧を返す。
+/// - If `path` is `None`, browse the default (the home directory, or the root if
+///   unavailable).
+/// - On Windows, if `path` is the empty string `Some("")`, return the list of
+///   available drives.
 pub fn browse_fs(path: Option<&str>) -> Result<FsBrowseResponse, NodeError> {
     match path {
         Some("") => {
@@ -67,7 +69,7 @@ pub fn browse_fs(path: Option<&str>) -> Result<FsBrowseResponse, NodeError> {
     }
 }
 
-/// 単一ディレクトリの内容を読み込み、`FsBrowseResponse` を組み立てる。
+/// Reads the contents of a single directory and builds an `FsBrowseResponse`.
 fn browse_directory(dir: &Path) -> Result<FsBrowseResponse, NodeError> {
     let current_path = dir.to_string_lossy().to_string();
 
@@ -81,7 +83,8 @@ fn browse_directory(dir: &Path) -> Result<FsBrowseResponse, NodeError> {
     } else {
         #[cfg(windows)]
         {
-            // Windows でドライブ直下 (例: "C:\\") の場合、親は空文字 (ドライブ一覧) に戻れるようにする
+            // On Windows, at a drive root (e.g. "C:\\") make the parent the empty string
+            // so the user can go back to the drive list
             Some(String::new())
         }
         #[cfg(not(windows))]
@@ -135,7 +138,7 @@ fn browse_directory(dir: &Path) -> Result<FsBrowseResponse, NodeError> {
     })
 }
 
-/// 隠し属性かどうかを判定する。
+/// Determines whether the entry has the hidden attribute.
 fn is_entry_hidden(entry: &fs::DirEntry) -> bool {
     let name = entry.file_name();
     let name_str = name.to_string_lossy();

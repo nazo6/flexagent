@@ -1,14 +1,14 @@
-//! CLI (`fxg`) ⇔ Daemon のローカルIPCサーバー。
+//! Local IPC server between the CLI (`fxg`) and the daemon.
 //!
-//! - **トランスポート**: Windows は Named Pipe (`\\.\pipe\fxg-daemon-<username>`)、
-//!   Linux / macOS / WSL は Unix Domain Socket (`$XDG_RUNTIME_DIR/fxg/daemon.sock`
-//!   または `/tmp/fxg-<uid>/daemon.sock`)
-//! - **フレーミング**: Length-prefixed JSON
-//!   (4バイト LE 長さヘッダ + JSON ペイロード)
+//! - **Transport**: Windows uses a named pipe (`\\.\pipe\fxg-daemon-<username>`);
+//!   Linux / macOS / WSL use a Unix domain socket (`$XDG_RUNTIME_DIR/fxg/daemon.sock`
+//!   or `/tmp/fxg-<uid>/daemon.sock`)
+//! - **Framing**: Length-prefixed JSON
+//!   (4-byte LE length header + JSON payload)
 //!
-//! 設計: `docs/03-protocol-and-api.md` §4。
+//! Design: `docs/03-protocol-and-api.md` §4.
 //!
-//! - 通常コマンドは 1 リクエスト / 1 レスポンスで処理する。
+//! - Normal commands are processed as one request / one response.
 
 use std::path::{Path, PathBuf};
 
@@ -28,13 +28,13 @@ use crate::ipc_framing::{read_frame, write_message};
 use crate::session_manager::ResumeParams;
 use crate::{project, worktree};
 
-/// `fxg ps` などで返すセッション一覧の上限。
+/// Upper limit of the session list returned by `fxg ps` etc.
 const SESSION_LIST_LIMIT: u32 = 200;
 
-/// IPC エンドポイントが他デーモンに占有されていないか確認する。
+/// Checks whether the IPC endpoint is taken by another daemon.
 ///
-/// 接続可能なソケットが残っている場合は別のデーモンが稼働中と見なしエラーにする。
-/// 接続できない残骸ソケットは削除する。
+/// If a connectable socket remains, it is treated as another running daemon and
+/// results in an error. A leftover socket that cannot be connected to is removed.
 #[cfg(unix)]
 pub async fn check_endpoint_available(endpoint: &str) -> Result<(), NodeError> {
     let path = Path::new(endpoint);
@@ -50,7 +50,7 @@ pub async fn check_endpoint_available(endpoint: &str) -> Result<(), NodeError> {
     Ok(())
 }
 
-/// IPC エンドポイントが他デーモンに占有されていないか確認する (Windows: Named Pipe)。
+/// Checks whether the IPC endpoint is taken by another daemon (Windows: named pipe).
 #[cfg(windows)]
 pub async fn check_endpoint_available(endpoint: &str) -> Result<(), NodeError> {
     use tokio::net::windows::named_pipe::ClientOptions;
@@ -59,16 +59,16 @@ pub async fn check_endpoint_available(endpoint: &str) -> Result<(), NodeError> {
         Ok(_) => Err(NodeError::Server(format!(
             "another daemon is already listening on {endpoint}"
         ))),
-        // ERROR_PIPE_BUSY (231): 稼働中だが全インスタンスが接続処理中
+        // ERROR_PIPE_BUSY (231): running, but all instances are handling connections
         Err(err) if err.raw_os_error() == Some(crate::error::PIPE_BUSY) => Err(NodeError::Server(
             format!("another daemon is already listening on {endpoint}"),
         )),
-        // ERROR_FILE_NOT_FOUND (2) なら未起動。その他のエラーは bind 時に検出する
+        // ERROR_FILE_NOT_FOUND (2) means not started. Other errors are detected at bind time
         Err(_) => Ok(()),
     }
 }
 
-/// ローカルIPCサーバーを起動し、シャットダウンまで接続を受け付ける。
+/// Starts the local IPC server and accepts connections until shutdown.
 #[cfg(unix)]
 pub async fn serve(
     state: DaemonState,
@@ -108,7 +108,7 @@ pub async fn serve(
     Ok(())
 }
 
-/// ローカルIPCサーバーを起動する (Windows: Named Pipe)。
+/// Starts the local IPC server (Windows: named pipe).
 #[cfg(windows)]
 pub async fn serve(
     state: DaemonState,
@@ -127,9 +127,9 @@ pub async fn serve(
 
     tracing::info!(endpoint = %endpoint, "local ipc server listening (named pipe)");
 
-    // 接続の合間に listening インスタンスが消えると、クライアントが
-    // ERROR_PIPE_BUSY (231) を受け取る (CI: windows-latest で検出)。
-    // 次のインスタンスを先に用意してから現行インスタンスの接続を待つ。
+    // If the listening instance disappears between connections, clients receive
+    // ERROR_PIPE_BUSY (231) (observed on CI: windows-latest).
+    // Prepare the next instance first, then wait for a connection on the current one.
     let mut server = create_instance(false)?;
     loop {
         let next = create_instance(false)?;
@@ -155,9 +155,9 @@ pub async fn serve(
     Ok(())
 }
 
-/// 1接続を処理する (Length-prefixed JSON のリクエスト/レスポンスループ)。
+/// Handles a single connection (length-prefixed JSON request/response loop).
 ///
-/// シャットダウン要求を受けると接続を閉じる。
+/// Closes the connection when a shutdown request is received.
 pub(crate) async fn handle_connection<S>(
     state: DaemonState,
     stream: S,
@@ -173,7 +173,7 @@ where
             frame = read_frame(&mut reader) => frame?,
         };
         let Some(frame) = frame else {
-            return Ok(()); // クライアントが切断した
+            return Ok(()); // The client disconnected
         };
         let request: IpcClientMessage = match serde_json::from_slice(&frame) {
             Ok(request) => request,
@@ -193,7 +193,7 @@ where
     }
 }
 
-/// ディスパッチエラー (コマンドID + 構造化エラーコード)。
+/// Dispatch error (command ID + structured error code).
 #[derive(Debug)]
 struct DispatchError {
     command_id: Option<String>,
@@ -215,7 +215,7 @@ impl DispatchError {
     }
 }
 
-/// 1リクエストを処理してレスポンスメッセージを返す。
+/// Processes a single request and returns the response message.
 pub async fn dispatch(state: &DaemonState, request: IpcClientMessage) -> IpcServerMessage {
     match handle(state, request).await {
         Ok((command_id, result)) => IpcServerMessage::Result { command_id, result },
@@ -303,7 +303,7 @@ async fn handle(
                     format!("directory not found: {cwd}"),
                 ));
             }
-            // 紐付けを即時反映する
+            // Apply the binding immediately
             let resolved = state
                 .project_link(&dir, &project_id)
                 .await
@@ -509,8 +509,8 @@ async fn handle(
         }
 
         IpcClientMessage::GitCredential { command_id, prompt } => {
-            // Git Credential Proxy: 中央サーバーへオンメモリ中継して解決する
-            // (VM内ディスクにトークンを残さない。設計: docs/01 §6.4)
+            // Git credential proxy: resolve by relaying in memory to the central server
+            // (without leaving the token on disk inside the VM. Design: docs/01 §6.4)
             let result = match state.credentials().resolve(&prompt).await {
                 Ok(response) => IpcResult::GitCredential {
                     username: if response.username.is_empty() {
@@ -537,8 +537,8 @@ async fn handle(
             extra_args,
             initial_mode,
         } => {
-            // 実行ディレクトリのプロジェクト紐付けを最新化する
-            // (既定パス解決・直近使用の記録をセッション開始時に更新する)
+            // Refresh the project binding of the working directory
+            // (updates default path resolution and recent-use records at session start)
             state
                 .resolve_and_register_project(Path::new(&cwd))
                 .await
@@ -840,9 +840,9 @@ async fn handle(
     }
 }
 
-/// セッションのイベント総数と、末尾 `recent` 件 (古い順) を取得する。
+/// Retrieves the total session event count and the last `recent` entries (oldest first).
 ///
-/// バッチ読み込みで末尾まで進めながらリングバッファに直近分のみを保持する。
+/// Advances to the end in batches while keeping only the most recent entries in a ring buffer.
 async fn session_event_tail(
     db: &fxg_db::Db,
     session_id: &str,
@@ -872,7 +872,7 @@ async fn session_event_tail(
     Ok((cursor, tail.into_iter().collect()))
 }
 
-/// プロジェクトを解決し、`projects` / `project_node_bindings` を更新する。
+/// Resolves a project and updates `projects` / `project_node_bindings`.
 async fn resolve_and_register(
     state: &DaemonState,
     dir: &Path,
@@ -900,7 +900,7 @@ fn to_project_info(resolved: &project::ResolvedProject) -> ProjectInfo {
     }
 }
 
-/// Worktree 一覧を返す (`cwd` または登録済みプロジェクトのメインリポジトリから解決)。
+/// Returns the worktree list (resolved from `cwd` or the main repositories of registered projects).
 async fn list_worktrees(
     state: &DaemonState,
     cwd: Option<&str>,
@@ -932,7 +932,7 @@ mod tests {
         (daemon, dir)
     }
 
-    /// IPC サーバーが接続を受け付けられるようになるまで待機する。
+    /// Waits until the IPC server is ready to accept connections.
     async fn wait_for_endpoint(endpoint: &str) {
         for _ in 0..200 {
             if IpcClient::connect(endpoint).await.is_ok() {
@@ -943,16 +943,16 @@ mod tests {
         panic!("ipc endpoint did not become ready: {endpoint}");
     }
 
-    /// IPC 接続して1リクエスト送信し、レスポンスを受信する。
+    /// Connects over IPC, sends one request, and receives the response.
     ///
-    /// クライアントは `IpcClient` を使う (Unix Domain Socket / Named Pipe を
-    /// 同一のテストコードで検証する)。
+    /// The client uses `IpcClient` (verifying Unix domain sockets / named pipes
+    /// with the same test code).
     async fn roundtrip(endpoint: &str, request: &IpcClientMessage) -> IpcServerMessage {
         let mut client = IpcClient::connect(endpoint).await.expect("connect");
         client.request(request).await.expect("request")
     }
 
-    /// モックエージェントドライバを注入したデーモンを起動する (セッション操作用)。
+    /// Starts a daemon with a mock agent driver injected (for session operations).
     async fn start_session_daemon() -> (NodeDaemon, crate::testutil::MockAgent, tempfile::TempDir) {
         let dir = tempfile::tempdir().expect("tempdir");
         crate::testutil::write_mock_agent_config(dir.path());
@@ -973,7 +973,7 @@ mod tests {
         let (daemon, dir) = start_daemon().await;
         let endpoint = daemon.ipc_endpoint().to_owned();
 
-        // Git リポジトリを作成してから問い合わせる
+        // Create a Git repository before querying
         let repo = dir.path().join("repo");
         std::fs::create_dir_all(&repo).expect("mkdir");
         git::run_git(&repo, &["init", "-q", "-b", "main"])
@@ -1011,7 +1011,7 @@ mod tests {
             other => panic!("unexpected response: {other:?}"),
         }
 
-        // project link は .fxg.toml を書き込む
+        // project link writes .fxg.toml
         let response = roundtrip(
             &endpoint,
             &IpcClientMessage::ProjectLink {
@@ -1033,7 +1033,7 @@ mod tests {
             .expect(".fxg.toml exists");
         assert_eq!(config.project_key.as_deref(), Some("internal/agent-tools"));
 
-        // 一覧に載る
+        // It appears in the list
         let response = roundtrip(
             &endpoint,
             &IpcClientMessage::ProjectList {
@@ -1065,7 +1065,7 @@ mod tests {
         let (daemon, dir) = start_daemon().await;
         let endpoint = daemon.ipc_endpoint().to_owned();
 
-        // Git リポジトリ + 1コミット
+        // Git repository + 1 commit
         let repo = dir.path().join("repo");
         std::fs::create_dir_all(&repo).expect("mkdir");
         git::run_git(&repo, &["init", "-q", "-b", "main"])
@@ -1107,7 +1107,7 @@ mod tests {
         };
         assert!(Path::new(&worktree_path).join("README.md").is_file());
 
-        // 一覧 (cwd 指定)
+        // List (with cwd specified)
         let response = roundtrip(
             &endpoint,
             &IpcClientMessage::WorktreeList {
@@ -1137,7 +1137,7 @@ mod tests {
             other => panic!("unexpected response: {other:?}"),
         }
 
-        // ブランチ名で削除
+        // Remove by branch name
         let response = roundtrip(
             &endpoint,
             &IpcClientMessage::WorktreeRemove {
@@ -1157,7 +1157,7 @@ mod tests {
         ));
         assert!(!Path::new(&worktree_path).exists());
 
-        // セッション一覧 (空)
+        // Session list (empty)
         let response = roundtrip(
             &endpoint,
             &IpcClientMessage::ListSessions {
@@ -1175,7 +1175,7 @@ mod tests {
             other => panic!("unexpected response: {other:?}"),
         }
 
-        // 認証トークンの取得とローテーション
+        // Getting and rotating the auth token
         let response = roundtrip(
             &endpoint,
             &IpcClientMessage::AuthToken {
@@ -1244,7 +1244,7 @@ mod tests {
         let workdir = dir.path().join("workspace");
         std::fs::create_dir_all(&workdir).expect("mkdir");
 
-        // EnsureSession: セッション開始
+        // EnsureSession: start a session
         let response = roundtrip(
             &endpoint,
             &IpcClientMessage::EnsureSession {
@@ -1264,8 +1264,8 @@ mod tests {
             other => panic!("unexpected response: {other:?}"),
         };
 
-        // セッション開始時にプロジェクト紐付けが登録される
-        // (既定パス解決・直近使用記録の基礎データ)
+        // A project binding is registered when the session starts
+        // (foundation for default path resolution and recent-use records)
         let canonical_workdir = fxg_pty::canonicalize(&workdir).expect("canonicalize");
         let projects = daemon
             .state()
@@ -1281,7 +1281,7 @@ mod tests {
             "EnsureSession must register a project binding: {projects:?}"
         );
 
-        // command_id の重複送信は COMMAND_DUPLICATE (冪等性)
+        // Sending a duplicate command_id yields COMMAND_DUPLICATE (idempotency)
         let response = roundtrip(
             &endpoint,
             &IpcClientMessage::EnsureSession {
@@ -1298,7 +1298,7 @@ mod tests {
             other => panic!("unexpected response: {other:?}"),
         }
 
-        // SendPrompt: プロンプト送信
+        // SendPrompt: send a prompt
         let response = roundtrip(
             &endpoint,
             &IpcClientMessage::SendPrompt {
@@ -1323,7 +1323,7 @@ mod tests {
             other => panic!("unexpected response: {other:?}"),
         }
 
-        // モックドライバへプロンプトが届いている
+        // The prompt has reached the mock driver
         for _ in 0..100 {
             if !mock.prompts().is_empty() {
                 break;
@@ -1332,7 +1332,7 @@ mod tests {
         }
         assert_eq!(mock.prompts(), vec!["hello"]);
 
-        // 承認要求 → 応答 → 2回目は ALREADY_RESOLVED
+        // Permission request → response → the second attempt is ALREADY_RESOLVED
         mock.emit(DriverEvent::Event(UnifiedEventPayload::PermissionRequest {
             request_id: "req-1".to_owned(),
             tool_name: "terminal".to_owned(),
@@ -1382,11 +1382,11 @@ mod tests {
             IpcServerMessage::Error { code, .. } if code == ErrorCode::AlreadyResolved
         ));
 
-        // 質問 (elicitation) → 応答 → 2回目は ALREADY_RESOLVED
+        // Question (elicitation) → response → the second attempt is ALREADY_RESOLVED
         mock.emit(DriverEvent::Event(
             UnifiedEventPayload::ElicitationRequest {
                 elicitation_id: "elic-1".to_owned(),
-                message: "どの戦略で進めますか?".to_owned(),
+                message: "Which strategy should we go with?".to_owned(),
                 mode: "form".to_owned(),
                 requested_schema: serde_json::json!({
                     "type": "object",
@@ -1440,7 +1440,7 @@ mod tests {
             IpcServerMessage::Error { code, .. } if code == ErrorCode::AlreadyResolved
         ));
 
-        // ControlSession (SetMode) はドライバへ転送される
+        // ControlSession (SetMode) is forwarded to the driver
         let response = roundtrip(
             &endpoint,
             &IpcClientMessage::ControlSession {
@@ -1475,7 +1475,7 @@ mod tests {
         let workdir = dir.path().join("workspace");
         std::fs::create_dir_all(&workdir).expect("mkdir");
 
-        // EnsureSession → SendPrompt で会話を 1 ターン残す
+        // Leave one conversation turn via EnsureSession → SendPrompt
         let response = roundtrip(
             &endpoint,
             &IpcClientMessage::EnsureSession {
@@ -1505,7 +1505,7 @@ mod tests {
         )
         .await;
 
-        // ドライバ終了で停止させ、再開可能な状態にする
+        // Stop it by closing the driver so it can be resumed
         mock.emit(DriverEvent::Event(UnifiedEventPayload::StatusChanged {
             status: SessionStatus::Idle,
             error_message: None,
@@ -1524,7 +1524,7 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
 
-        // 再開 (モックドライバはネイティブ復元非対応 → 履歴 Replay で継続)
+        // Resume (the mock driver has no native restore support → continue via history replay)
         let response = roundtrip(
             &endpoint,
             &IpcClientMessage::SessionResume {
@@ -1550,7 +1550,7 @@ mod tests {
             other => panic!("unexpected response: {other:?}"),
         }
 
-        // Replay コンテキストが新エージェントセッションへ送信される
+        // The replay context is sent to the new agent session
         let mut injected = false;
         for _ in 0..200 {
             if mock
@@ -1565,7 +1565,7 @@ mod tests {
         }
         assert!(injected, "resume context is injected to the agent");
 
-        // 稼働中 (再開済み) セッションへの再実行は INVALID_STATE
+        // Re-running on an active (already resumed) session is INVALID_STATE
         let response = roundtrip(
             &endpoint,
             &IpcClientMessage::SessionResume {

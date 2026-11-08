@@ -1,7 +1,7 @@
-//! テスト用ヘルパー (`cfg(test)` のみ)。
+//! Test helpers (`cfg(test)` only).
 //!
-//! 一時ディレクトリに Git リポジトリを構築するなど、複数モジュールの
-//! テストで共有する処理をまとめる。
+//! Collects utilities shared by tests in several modules, such as building a Git
+//! repository in a temporary directory.
 
 #![cfg(test)]
 
@@ -19,7 +19,7 @@ use tokio::sync::mpsc;
 use crate::git;
 use crate::session_manager::DriverFactory;
 
-/// 一時ディレクトリに Git リポジトリを作成し、1コミット入れておく。
+/// Creates a Git repository in a temporary directory with a single commit.
 pub(crate) async fn init_test_repo(dir: &Path) {
     git::run_git(dir, &["init", "-q", "-b", "main"])
         .await
@@ -37,7 +37,7 @@ pub(crate) async fn init_test_repo(dir: &Path) {
         .expect("git commit");
 }
 
-/// Git リポジトリを作成し、`origin` remote を設定する。
+/// Creates a Git repository and configures an `origin` remote.
 pub(crate) async fn init_test_repo_with_remote(dir: &Path, remote_url: &str) {
     init_test_repo(dir).await;
     git::run_git(dir, &["remote", "add", "origin", remote_url])
@@ -45,16 +45,16 @@ pub(crate) async fn init_test_repo_with_remote(dir: &Path, remote_url: &str) {
         .expect("git remote add");
 }
 
-/// テスト用の Shadow Git Index パスを作る (一時ディレクトリ配下)。
+/// Builds a Shadow Git index path for tests (under a temporary directory).
 pub(crate) fn snapshot_index_path(dir: &Path, session_id: &str) -> std::path::PathBuf {
     dir.join(format!("{session_id}.index"))
 }
 
-/// テスト用のローカルIPCエンドポイントを返す。
+/// Returns a local IPC endpoint for tests.
 ///
-/// - **Windows**: Named Pipe (`\\.\pipe\fxg-test-<pid>-<n>`)。テストは同一
-///   プロセス内で並列実行されるため、連番で一意化する。
-/// - **Unix**: `dir` 配下の一時ソケット (テストごとに個別の tempdir を使う)。
+/// - **Windows**: Named pipe (`\\.\pipe\fxg-test-<pid>-<n>`). Tests run in
+///   parallel within the same process, so a sequence number keeps them unique.
+/// - **Unix**: A temporary socket under `dir` (each test uses its own tempdir).
 pub(crate) fn test_ipc_endpoint(dir: &Path) -> String {
     if cfg!(windows) {
         static COUNTER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
@@ -65,10 +65,10 @@ pub(crate) fn test_ipc_endpoint(dir: &Path) -> String {
     }
 }
 
-/// `fxg_home` の `config.toml` にテスト用カスタムエージェント (`mock`) を書き込む。
+/// Writes a test custom agent (`mock`) into `config.toml` under `fxg_home`.
 ///
-/// デーモン経由の `EnsureSession` はレジストリから起動スペックを解決するため、
-/// モックドライバのテストでもエージェント定義が必要になる。
+/// `EnsureSession` through the daemon resolves launch specs from the registry,
+/// so even mock driver tests need an agent definition.
 pub(crate) fn write_mock_agent_config(fxg_home: &Path) {
     std::fs::write(
         fxg_home.join(fxg_protocol::config::CONFIG_FILE_NAME),
@@ -77,24 +77,25 @@ pub(crate) fn write_mock_agent_config(fxg_home: &Path) {
     .expect("write config.toml");
 }
 
-/// テスト用モックエージェントドライバの共有状態 (ドライバ本体も兼ねる)。
+/// Shared state of the test mock agent driver (also serves as the driver itself).
 ///
-/// 実プロセスを起動せず、送信されたプロンプト・承認応答・モード変更を記録し、
-/// テストから [`Self::emit`] でドライバイベント (ターン進行・承認要求等) を
-/// 注入できる。`SessionManager` へは [`Self::factory`] で渡す。
+/// It does not spawn a real process; it records sent prompts, permission
+/// responses and mode changes, and lets tests inject driver events (turn
+/// progress, permission requests, etc.) via [`Self::emit`]. It is passed to
+/// `SessionManager` via [`Self::factory`].
 #[derive(Clone, Default)]
 pub(crate) struct MockAgent {
     inner: Arc<MockAgentInner>,
 }
 
-/// テスト記録用の `start_session` 呼び出し情報。
+/// Recorded `start_session` invocation for tests.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct MockStart {
-    /// 対象セッションID
+    /// Target session ID
     pub session_id: String,
-    /// 作業ディレクトリ
+    /// Working directory
     pub cwd: PathBuf,
-    /// 再開指定 (`None` は新規セッション)
+    /// Resume request (`None` means a new session)
     pub resume: Option<ResumeRequest>,
 }
 
@@ -112,46 +113,46 @@ struct MockAgentInner {
     modes: Mutex<Vec<String>>,
     events: Mutex<Vec<mpsc::UnboundedSender<DriverEvent>>>,
     starts: Mutex<Vec<MockStart>>,
-    /// ネイティブ復元 (resume) に対応しているか
+    /// Whether native restore (resume) is supported
     resume_supported: AtomicBool,
 }
 
 impl MockAgent {
-    /// 稼働中セッションへドライバイベントを注入する。
+    /// Injects a driver event into running sessions.
     pub(crate) fn emit(&self, event: DriverEvent) {
         for tx in self.inner.events.lock().expect("events").iter() {
             let _ = tx.send(event.clone());
         }
     }
 
-    /// `start_session` の呼び出し一覧。
+    /// List of `start_session` invocations.
     pub(crate) fn starts(&self) -> Vec<MockStart> {
         self.inner.starts.lock().expect("starts").clone()
     }
 
-    /// ネイティブ復元 (resume) への対応可否を設定する。
+    /// Sets whether native restore (resume) is supported.
     pub(crate) fn set_resume_supported(&self, supported: bool) {
         self.inner
             .resume_supported
             .store(supported, Ordering::SeqCst);
     }
 
-    /// 送信されたプロンプト一覧。
+    /// List of sent prompts.
     pub(crate) fn prompts(&self) -> Vec<String> {
         self.inner.prompts.lock().expect("prompts").clone()
     }
 
-    /// 稼働中セッションのイベントチャネルを閉じる (ドライバ終了の再現)。
+    /// Closes the event channels of running sessions (simulates driver exit).
     pub(crate) fn close_events(&self) {
         self.inner.events.lock().expect("events").clear();
     }
 
-    /// 承認応答 (`request_id`, `option_id`) 一覧。
+    /// List of permission responses (`request_id`, `option_id`).
     pub(crate) fn permissions(&self) -> Vec<(String, String)> {
         self.inner.permissions.lock().expect("permissions").clone()
     }
 
-    /// elicitation 応答 (`elicitation_id`, `action`, `content`) 一覧。
+    /// List of elicitation responses (`elicitation_id`, `action`, `content`).
     pub(crate) fn elicitations(
         &self,
     ) -> Vec<(
@@ -166,12 +167,12 @@ impl MockAgent {
             .clone()
     }
 
-    /// 適用されたモード変更一覧。
+    /// List of applied mode changes.
     pub(crate) fn modes(&self) -> Vec<String> {
         self.inner.modes.lock().expect("modes").clone()
     }
 
-    /// `SessionManager` へ渡すドライバファクトリ。
+    /// Driver factory passed to `SessionManager`.
     pub(crate) fn factory(&self) -> DriverFactory {
         let agent = self.clone();
         Arc::new(move |_spec: &AgentLaunchSpec| Ok(Arc::new(agent.clone()) as Arc<dyn AgentDriver>))
@@ -189,12 +190,12 @@ impl AgentDriver for MockAgent {
         req: StartSessionRequest,
         event_tx: mpsc::UnboundedSender<DriverEvent>,
     ) -> anyhow::Result<StartedSession> {
-        // ネイティブ復元対応が有効で、エージェント側IDがある場合のみ復元成功とする
+        // Restore succeeds only when native resume support is enabled and an agent-side ID exists
         let can_restore = req.resume.as_ref().is_some_and(|resume| {
             resume.agent_session_id.is_some() && self.inner.resume_supported.load(Ordering::SeqCst)
         });
-        // ネイティブ限定 (`allow_fresh = false`) で復元できない場合は実ドライバと
-        // 同様に `NativeResumeUnavailable` を返す (セッションは作成しない)
+        // If restore is impossible in native-only mode (`allow_fresh = false`), return
+        // `NativeResumeUnavailable` like the real driver (no session is created)
         if req
             .resume
             .as_ref()

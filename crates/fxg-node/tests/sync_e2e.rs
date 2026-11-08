@@ -1,12 +1,15 @@
-//! 中央サーバー + 複数ノードの E2E テスト。
+//! End-to-end tests for the central server + multiple nodes.
 //!
-//! 検証項目 (Phase 4 完了条件):
-//! - サーバー停止中にノードで発生したイベントが、起動・再接続時に欠落・重複なく
-//!   同期される (NodeHello → ResyncRequest → EventBatchPush → EventBatchAck)
-//! - 中央サーバー API 経由のセッション操作・プロンプト送信が動作する
-//! - 承認応答の二重送信が `ALREADY_RESOLVED` (200 `already_resolved`) で冪等になる
-//! - キルスイッチが全ノードへ配信され、監査ログが server.db / node.db 双方に残る
-//! - ノード切断中のコマンドは `NODE_OFFLINE` として即時返却される
+//! Verification items (Phase 4 completion criteria):
+//! - Events generated on a node while the server is stopped are synced without loss
+//!   or duplication when it starts and reconnects (NodeHello -> ResyncRequest ->
+//!   EventBatchPush -> EventBatchAck)
+//! - Session operations and prompt sending through the central server API work
+//! - A duplicate approval response becomes idempotent with `ALREADY_RESOLVED`
+//!   (200 `already_resolved`)
+//! - The kill switch is delivered to all nodes, and the audit log is recorded in both
+//!   server.db and node.db
+//! - Commands while the node is disconnected return immediately as `NODE_OFFLINE`
 
 use std::path::Path;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -30,11 +33,11 @@ use serde_json::json;
 use tokio::sync::mpsc;
 
 // ----------------------------------------------------------------------
-// モックエージェントドライバ
+// Mock agent driver
 // ----------------------------------------------------------------------
 
-/// テスト用モックドライバ (プロセスを起動せず、送信内容を記録して
-/// テストから任意のドライバ/エージェントイベントを注入できる)。
+/// Mock driver for tests (does not spawn a process; it records what is sent and lets
+/// tests inject arbitrary driver / agent events).
 #[derive(Clone, Default)]
 struct MockAgent {
     inner: Arc<MockInner>,
@@ -55,7 +58,7 @@ impl MockAgent {
         }
     }
 
-    /// 稼働中セッションのイベントチャネルを閉じる (ドライバ終了の再現)。
+    /// Closes the event channels of running sessions (simulates driver exit).
     fn close_events(&self) {
         self.inner.events.lock().expect("events").clear();
     }
@@ -90,7 +93,7 @@ impl AgentDriver for MockAgent {
         event_tx: mpsc::UnboundedSender<DriverEvent>,
     ) -> anyhow::Result<StartedSession> {
         self.inner.events.lock().expect("events").push(event_tx);
-        // E2E ではモックエージェントは常にネイティブ復元に対応する
+        // In the E2E tests the mock agent always supports native resume
         let context_restored = req
             .resume
             .as_ref()
@@ -141,10 +144,10 @@ impl ActiveSessionHandle for MockAgent {
 }
 
 // ----------------------------------------------------------------------
-// テストヘルパー
+// Test helpers
 // ----------------------------------------------------------------------
 
-/// 未使用ポートを予約する (テスト内でサーバー再起動に使う固定ポート)。
+/// Reserves an unused port (a fixed port used for server restarts within a test).
 fn reserve_port() -> u16 {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
     let port = listener.local_addr().expect("addr").port();
@@ -152,7 +155,7 @@ fn reserve_port() -> u16 {
     port
 }
 
-/// テスト用ローカルIPCエンドポイント (テスト間で衝突しない名前)。
+/// Local IPC endpoint for tests (a name that does not collide between tests).
 fn test_ipc_endpoint(dir: &Path) -> String {
     if cfg!(windows) {
         static COUNTER: AtomicU32 = AtomicU32::new(0);
@@ -163,7 +166,7 @@ fn test_ipc_endpoint(dir: &Path) -> String {
     }
 }
 
-/// テスト用 Git リポジトリを作成する (1コミット)。
+/// Creates a Git repository for tests (one commit).
 async fn init_repo(dir: &Path) {
     for args in [
         vec!["init", "-q", "-b", "main"],
@@ -181,7 +184,7 @@ async fn init_repo(dir: &Path) {
         .expect("commit");
 }
 
-/// ノードの `config.toml` にモックエージェント定義を書き込む。
+/// Writes the mock agent definition into the node's `config.toml`.
 fn write_mock_agent_config(fxg_home: &Path) {
     std::fs::create_dir_all(fxg_home).expect("mkdir home");
     std::fs::write(
@@ -191,7 +194,7 @@ fn write_mock_agent_config(fxg_home: &Path) {
     .expect("write config");
 }
 
-/// テストノードを起動する。
+/// Starts a test node.
 async fn start_node(
     home: &Path,
     node_id: &str,
@@ -210,7 +213,7 @@ async fn start_node(
         .expect("start node")
 }
 
-/// 中央サーバーを起動する。
+/// Starts the central server.
 async fn start_server(home: &Path, port: u16) -> Server {
     Server::start(ServerOptions {
         fxg_home: home.to_path_buf(),
@@ -224,7 +227,7 @@ async fn start_server(home: &Path, port: u16) -> Server {
     .expect("start server")
 }
 
-/// サーバーDB (`server.db`) を開き、ノード個別トークンを発行する。
+/// Opens the server DB (`server.db`) and issues a node-specific token.
 async fn issue_node_token(server_home: &Path, node_id: &str) -> String {
     let db = Db::open(&fxg_db::hub_db_path(server_home), DbRole::Hub)
         .await
@@ -241,7 +244,7 @@ async fn issue_node_token(server_home: &Path, node_id: &str) -> String {
     token
 }
 
-/// 条件が満たされるまでポーリングする (タイムアウトで panic)。
+/// Polls until the condition is met (panics on timeout).
 async fn wait_until<F, Fut>(what: &str, timeout: Duration, mut check: F)
 where
     F: FnMut() -> Fut,
@@ -259,7 +262,7 @@ where
     }
 }
 
-/// ノード上でセッションを作成し、数件のイベントを記録する。
+/// Creates a session on the node and records a few events.
 async fn create_session_with_events(
     daemon: &NodeDaemon,
     agent: &MockAgent,
@@ -289,7 +292,7 @@ async fn create_session_with_events(
         .send_prompt(&format!("prompt-{label}"), &session_id, label, "cli")
         .await
         .expect("send prompt");
-    // 完成イベント (AgentMessage) とストリーミング差分を注入する
+    // Inject a completed event (AgentMessage) and a streaming delta
     agent.emit(DriverEvent::Delta(StreamDeltaPayload::AgentMessageDelta {
         message_id: "m1".to_owned(),
         text_delta: "po".to_owned(),
@@ -303,7 +306,7 @@ async fn create_session_with_events(
 }
 
 // ----------------------------------------------------------------------
-// E2E テスト 1: オフライン蓄積 → 再接続同期 (2 ノード)
+// E2E test 1: offline accumulation -> reconnect sync (2 nodes)
 // ----------------------------------------------------------------------
 
 #[tokio::test(flavor = "multi_thread")]
@@ -324,7 +327,7 @@ async fn offline_events_sync_without_loss_or_duplication() {
     let agent_a = MockAgent::default();
     let agent_b = MockAgent::default();
 
-    // 1. サーバー停止中にノード A を起動し、イベントを蓄積する
+    // 1. Start node A while the server is stopped and accumulate events
     let node_a = start_node(
         node_a_home.path(),
         "node-a",
@@ -335,7 +338,7 @@ async fn offline_events_sync_without_loss_or_duplication() {
     .await;
     let session_a = create_session_with_events(&node_a, &agent_a, repo_a.path(), "offline").await;
 
-    // 2. 中央サーバーを起動し、ノード B を接続する
+    // 2. Start the central server and connect node B
     let server = start_server(server_home.path(), port).await;
     let node_b = start_node(
         node_b_home.path(),
@@ -347,7 +350,7 @@ async fn offline_events_sync_without_loss_or_duplication() {
     .await;
     let session_b = create_session_with_events(&node_b, &agent_b, repo_b.path(), "online").await;
 
-    // 3. 両ノードの接続と同期完了を待つ
+    // 3. Wait for both nodes to connect and finish syncing
     wait_until("nodes connected", Duration::from_secs(30), || async {
         let hub = server.state().hub();
         hub.is_online("node-a").await && hub.is_online("node-b").await
@@ -399,7 +402,7 @@ async fn offline_events_sync_without_loss_or_duplication() {
     })
     .await;
 
-    // 4. 欠落・重複なしを検証する (イベント数 == 最大 node_seq)
+    // 4. Verify no loss or duplication (event count == max node_seq)
     let count_events = |db: Db, session_id: String| async move {
         let mut cursor = 0u64;
         let mut count = 0usize;
@@ -427,7 +430,7 @@ async fn offline_events_sync_without_loss_or_duplication() {
     let server_b_count = count_events(server_db.clone(), session_b.clone()).await;
     assert_eq!(server_b_count, node_b_count, "no loss / no duplication (B)");
 
-    // 5. 水位 (ACK) がノード側で進んでいる
+    // 5. The watermark (ACK) has advanced on the node side
     wait_until("watermarks acked", Duration::from_secs(30), || async {
         let node_a_sync = node_a_db.unsynced_event_count().await.unwrap_or(1);
         let node_b_sync = node_b_db.unsynced_event_count().await.unwrap_or(1);
@@ -435,14 +438,14 @@ async fn offline_events_sync_without_loss_or_duplication() {
     })
     .await;
 
-    // 6. サーバー側のノード状態 (オンライン・エージェント一覧) を確認する
+    // 6. Check the node state on the server side (online status, agent list)
     let nodes = server_db.list_nodes().await.expect("nodes");
     assert_eq!(nodes.len(), 2);
     assert!(nodes.iter().all(|node| node.is_online));
 
-    // 7. セッションのストリーミング差分が LiveStreamDelta として配信済みである
-    //    (永続化されないため、イベント数には含まれない)
-    //    — ここではモックが差分を受け取り済みであることのみ確認する
+    // 7. The session's streaming deltas have been delivered as LiveStreamDelta
+    //    (they are not persisted, so they are not counted as events)
+    //    Here we only check that the mock has received the deltas
     assert!(agent_a.prompts().contains(&"offline".to_owned()));
 
     node_a.shutdown();
@@ -460,7 +463,7 @@ async fn offline_events_sync_without_loss_or_duplication() {
 }
 
 // ----------------------------------------------------------------------
-// E2E テスト 2: 中央サーバー経由のコマンド・承認・キルスイッチ
+// E2E test 2: commands, permissions, and kill switch via the central server
 // ----------------------------------------------------------------------
 
 #[tokio::test(flavor = "multi_thread")]
@@ -504,7 +507,7 @@ async fn central_server_commands_permissions_and_kill_switch() {
     let http = reqwest::Client::new();
     let base = format!("http://127.0.0.1:{port}");
 
-    // 1. ノード上でプロジェクトを登録し、中央サーバーへバインドを同期させる
+    // 1. Register a project on the node and sync the binding to the central server
     let resolved = node
         .state()
         .resolve_and_register_project(repo.path())
@@ -532,7 +535,7 @@ async fn central_server_commands_permissions_and_kill_switch() {
     )
     .await;
 
-    // 2. 中央サーバーの REST API から新規セッションを起動する
+    // 2. Start a new session from the central server's REST API
     let create = http
         .post(format!("{base}/api/v1/sessions"))
         .bearer_auth(&client_token)
@@ -566,14 +569,14 @@ async fn central_server_commands_permissions_and_kill_switch() {
         },
     )
     .await;
-    // 初期プロンプトがエージェントへ届く
+    // The initial prompt reaches the agent
     wait_until(
         "initial prompt dispatched",
         Duration::from_secs(30),
         || async { agent.prompts().iter().any(|p| p == "hello from central") },
     )
     .await;
-    // ターン完了 (idle) を注入して後続プロンプトを即時 dispatch できるようにする
+    // Inject turn completion (idle) so subsequent prompts can be dispatched immediately
     agent.emit(DriverEvent::Event(UnifiedEventPayload::StatusChanged {
         status: SessionStatus::Idle,
         error_message: None,
@@ -589,7 +592,7 @@ async fn central_server_commands_permissions_and_kill_switch() {
     })
     .await;
 
-    // 3. 承認リクエストを発行し、二重応答の冪等性を検証する
+    // 3. Issue an approval request and verify the idempotency of a duplicate response
     agent.emit(DriverEvent::Event(UnifiedEventPayload::PermissionRequest {
         request_id: "req-1".to_owned(),
         tool_name: "terminal/create".to_owned(),
@@ -631,7 +634,7 @@ async fn central_server_commands_permissions_and_kill_switch() {
         .bearer_auth(&client_token)
         .json(&json!({
             "selected_option_id": "allow_once",
-            "always": true, // allow_always へ昇格される
+            "always": true, // promoted to allow_always
             "resolved_by": "web",
         }))
         .send()
@@ -656,7 +659,7 @@ async fn central_server_commands_permissions_and_kill_switch() {
     let second_body: serde_json::Value = second.json().await.expect("json");
     assert_eq!(second_body["already_resolved"], true, "idempotent resolve");
 
-    // エージェントへは 1 回だけ応答される (allow_always へ昇格)
+    // The agent is answered only once (promoted to allow_always)
     wait_until(
         "permission delivered once",
         Duration::from_secs(30),
@@ -664,7 +667,7 @@ async fn central_server_commands_permissions_and_kill_switch() {
     )
     .await;
 
-    // 4. Client WS (中央サーバー) からプロンプトを送信する
+    // 4. Send a prompt from the client WS (central server)
     {
         use futures_util::SinkExt;
         use tokio_tungstenite::tungstenite::Message as WsMessage;
@@ -693,7 +696,7 @@ async fn central_server_commands_permissions_and_kill_switch() {
             .await
             .expect("send prompt");
 
-        // CommandResult が返るまで受信する (リプレイの EventBatch 等を読み飛ばす)
+        // Receive until CommandResult arrives (skip replayed EventBatches and so on)
         let result = tokio::time::timeout(Duration::from_secs(30), async {
             use futures_util::StreamExt;
             while let Some(message) = socket.next().await {
@@ -720,7 +723,7 @@ async fn central_server_commands_permissions_and_kill_switch() {
     })
     .await;
 
-    // 5. キルスイッチ: 全ノードへ配信され、両DBのセッションが stopped になる
+    // 5. Kill switch: delivered to all nodes, and sessions become stopped in both DBs
     let kill = http
         .post(format!("{base}/api/v1/system/kill-switch"))
         .bearer_auth(&client_token)
@@ -765,7 +768,7 @@ async fn central_server_commands_permissions_and_kill_switch() {
     )
     .await;
 
-    // 6. 監査ログが server.db / node.db 双方に記録されている
+    // 6. The audit log is recorded in both server.db and node.db
     let server_audits = server_db.audit_logs(100).await.expect("audit logs");
     let actions: Vec<&str> = server_audits
         .iter()
@@ -798,7 +801,7 @@ async fn central_server_commands_permissions_and_kill_switch() {
         "node audit: {node_actions:?}"
     );
 
-    // 7. ノード停止中のコマンドは NODE_OFFLINE で即時返却される
+    // 7. Commands while the node is stopped return immediately with NODE_OFFLINE
     node.shutdown();
     tokio::time::timeout(Duration::from_secs(10), node.wait())
         .await
@@ -866,7 +869,7 @@ async fn central_server_commands_permissions_and_kill_switch() {
 }
 
 // ----------------------------------------------------------------------
-// E2E テスト: 中央サーバー経由の停止済みセッション再開 (resume)
+// E2E test: resuming a stopped session via the central server (resume)
 // ----------------------------------------------------------------------
 
 #[tokio::test(flavor = "multi_thread")]
@@ -910,7 +913,7 @@ async fn central_server_resumes_stopped_session() {
     let http = reqwest::Client::new();
     let base = format!("http://127.0.0.1:{port}");
 
-    // 1. ノード上でセッションを開始し、エージェント側セッションIDを確定させる
+    // 1. Start a session on the node and settle the agent-side session ID
     node.state()
         .resolve_and_register_project(repo.path())
         .await
@@ -956,7 +959,7 @@ async fn central_server_resumes_stopped_session() {
     })
     .await;
 
-    // 2. ドライバ終了でセッションを停止させ、ハブへ `stopped` が同期されるまで待つ
+    // 2. Stop the session via driver exit and wait until `stopped` is synced to the hub
     agent.close_events();
     wait_until("stopped synced to hub", Duration::from_secs(30), || async {
         server_db
@@ -968,7 +971,7 @@ async fn central_server_resumes_stopped_session() {
     })
     .await;
 
-    // 3. 中央サーバー REST から再開する (モックはネイティブ復元対応)
+    // 3. Resume from the central server REST API (the mock supports native resume)
     let response = http
         .post(format!("{base}/api/v1/sessions/{session_id}/resume"))
         .bearer_auth(&client_token)
@@ -989,7 +992,7 @@ async fn central_server_resumes_stopped_session() {
         "mock agent restores natively via SessionAgentBound"
     );
 
-    // 4. 再開後は idle へ復帰し、継続プロンプトを送信できる
+    // 4. After resuming it returns to idle, and a continuation prompt can be sent
     wait_until("resumed session idle", Duration::from_secs(30), || async {
         node_db
             .get_session(&session_id)
@@ -1018,7 +1021,7 @@ async fn central_server_resumes_stopped_session() {
         "native resume must not inject replay context"
     );
 
-    // 5. 稼働中セッションへの再実行は INVALID_STATE (400)
+    // 5. Re-running against a running session is INVALID_STATE (400)
     let again = http
         .post(format!("{base}/api/v1/sessions/{session_id}/resume"))
         .bearer_auth(&client_token)
@@ -1039,7 +1042,7 @@ async fn central_server_resumes_stopped_session() {
 }
 
 // ----------------------------------------------------------------------
-// E2E テスト: 中央サーバー経由のアーカイブ / 削除 (tombstone + 本文パージ)
+// E2E test: archiving / deleting via the central server (tombstone + body purge)
 // ----------------------------------------------------------------------
 
 #[tokio::test(flavor = "multi_thread")]
@@ -1083,7 +1086,7 @@ async fn central_server_archives_and_deletes_session() {
     let http = reqwest::Client::new();
     let base = format!("http://127.0.0.1:{port}");
 
-    // 1. セッションを作成し、ハブへ同期されるまで待つ
+    // 1. Create a session and wait until it is synced to the hub
     let session_id = create_session_with_events(&node, &agent, repo.path(), "archive-e2e").await;
     let node_last = node_db
         .get_session(&session_id)
@@ -1102,7 +1105,7 @@ async fn central_server_archives_and_deletes_session() {
     })
     .await;
 
-    // 2. アーカイブ (一覧から非表示。イベントログは保持)
+    // 2. Archive (hidden from the list; the event log is preserved)
     let archived_at = http
         .post(format!("{base}/api/v1/sessions/{session_id}/archive"))
         .bearer_auth(&client_token)
@@ -1124,7 +1127,7 @@ async fn central_server_archives_and_deletes_session() {
     })
     .await;
 
-    // 既定の一覧からは除外され、`include_archived=true` でのみ返る
+    // Excluded from the default list, returned only with `include_archived=true`
     let visible = http
         .get(format!("{base}/api/v1/sessions?include_archived=true"))
         .bearer_auth(&client_token)
@@ -1158,7 +1161,7 @@ async fn central_server_archives_and_deletes_session() {
         "archived session must be listed with include_archived=true"
     );
 
-    // 3. アーカイブ解除で一覧に戻る
+    // 3. Unarchiving returns it to the list
     let restored = http
         .post(format!("{base}/api/v1/sessions/{session_id}/archive"))
         .bearer_auth(&client_token)
@@ -1177,7 +1180,7 @@ async fn central_server_archives_and_deletes_session() {
     })
     .await;
 
-    // 4. セッションを停止させてから削除する (停止→tombstone→本文パージ)
+    // 4. Stop the session before deleting it (stop -> tombstone -> body purge)
     agent.close_events();
     wait_until(
         "session stopped on node",
@@ -1219,7 +1222,7 @@ async fn central_server_archives_and_deletes_session() {
     })
     .await;
 
-    // tombstone のみが残り、会話イベントは両 DB でパージされている
+    // Only the tombstone remains, and the conversation events are purged in both DBs
     for db in [&node_db, &server_db] {
         let batch = db
             .session_events_after(&session_id, 0, 100)
@@ -1236,7 +1239,7 @@ async fn central_server_archives_and_deletes_session() {
         ));
     }
 
-    // 監査ログ (server.db) に両操作が残る
+    // Both operations remain in the audit log (server.db)
     let audits = server_db.audit_logs(100).await.expect("audit logs");
     assert!(
         audits

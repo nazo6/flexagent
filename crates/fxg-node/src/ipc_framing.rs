@@ -1,21 +1,22 @@
-//! ローカルIPC のフレーミング (Length-prefixed JSON)。
+//! Local IPC framing (length-prefixed JSON).
 //!
-//! サーバー (`daemon::ipc`) とクライアント ([`crate::ipc_client::IpcClient`]) の
-//! 双方から使用する: **4バイトのリトルエンディアン長さヘッダ + JSON ペイロード**。
+//! Used by both the server (`daemon::ipc`) and the client
+//! ([`crate::ipc_client::IpcClient`]): **a 4-byte little-endian length header
+//! followed by a JSON payload**.
 //!
-//! 設計: `docs/03-protocol-and-api.md` §4。
+//! Design: `docs/03-protocol-and-api.md` §4.
 
 use serde::Serialize;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 use crate::error::NodeError;
 
-/// 受信フレームの最大長 (過大なフレームによるメモリ枯渇を防ぐ)。
+/// Maximum length of an incoming frame (prevents memory exhaustion from oversized frames).
 pub(crate) const MAX_FRAME_BYTES: u32 = 16 * 1024 * 1024;
 
-/// Length-prefixed JSON フレームを1つ読み込む。
+/// Reads a single length-prefixed JSON frame.
 ///
-/// 相手が正常に切断した場合 (EOF) は `Ok(None)` を返す。
+/// Returns `Ok(None)` when the peer closed the connection cleanly (EOF).
 pub(crate) async fn read_frame<S>(stream: &mut S) -> Result<Option<Vec<u8>>, NodeError>
 where
     S: AsyncRead + Unpin,
@@ -40,7 +41,7 @@ where
     Ok(Some(payload))
 }
 
-/// 任意のシリアライズ可能なメッセージを Length-prefixed JSON フレームとして書き込む。
+/// Writes any serializable message as a length-prefixed JSON frame.
 pub(crate) async fn write_message<S, M>(stream: &mut S, message: &M) -> Result<(), NodeError>
 where
     S: AsyncWrite + Unpin,
@@ -73,7 +74,7 @@ mod tests {
         let (mut a, mut b) = tokio::io::duplex(4096);
         let message = serde_json::json!({ "op": "ping", "value": 42 });
         write_message(&mut a, &message).await.expect("write");
-        drop(a); // EOF を伝える
+        drop(a); // signal EOF
 
         let frame = read_frame(&mut b)
             .await

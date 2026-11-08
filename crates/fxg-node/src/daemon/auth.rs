@@ -1,20 +1,21 @@
-//! クライアント認証トークン (`~/.flexagent/auth_token`) の生成・読み書き。
+//! Generation and persistence of the client auth token (`~/.flexagent/auth_token`).
 //!
-//! 設計: `docs/01-architecture-and-sync.md` §7.3。
+//! Design: `docs/01-architecture-and-sync.md` §7.3.
 //!
-//! - 初回起動時に **64文字のランダム文字列** (32 バイトの乱数を hex 表現) を生成し、
-//!   パーミッション `0600` で `~/.flexagent/auth_token` に保存する。
-//! - 以降のリクエストは `Authorization: Bearer <token>` または
-//!   `Cookie: fxg_session=<token>` で認証する。
+//! - On first start, a **64-character random string** (a 32-byte random value in
+//!   hex form) is generated and stored in `~/.flexagent/auth_token` with
+//!   permission `0600`.
+//! - Subsequent requests authenticate with `Authorization: Bearer <token>` or
+//!   `Cookie: fxg_session=<token>`.
 
 use std::path::Path;
 
 use crate::error::NodeError;
 
-/// トークンの乱数バイト数 (hex 表現で 64 文字)。
+/// Number of random bytes in a token (64 characters in hex form).
 pub const TOKEN_BYTES: usize = 32;
 
-/// 新しいランダムトークンを生成する (64 文字の hex 文字列)。
+/// Generates a new random token (a 64-character hex string).
 pub fn generate_token() -> String {
     let bytes: [u8; TOKEN_BYTES] = rand::random();
     let mut token = String::with_capacity(TOKEN_BYTES * 2);
@@ -24,11 +25,11 @@ pub fn generate_token() -> String {
     token
 }
 
-/// トークンをファイルから読み込む (存在しなければ生成して保存する)。
+/// Loads the token from a file (generating and saving one if it does not exist).
 pub fn load_or_create(path: &Path) -> Result<String, NodeError> {
     match std::fs::read_to_string(path) {
         Ok(token) if !token.trim().is_empty() => return Ok(token.trim().to_owned()),
-        Ok(_) => { /* 空ファイルは再生成する */ }
+        Ok(_) => { /* regenerate an empty file */ }
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
         Err(err) => return Err(NodeError::io(path, err)),
     }
@@ -37,7 +38,7 @@ pub fn load_or_create(path: &Path) -> Result<String, NodeError> {
     Ok(token)
 }
 
-/// トークンをファイルへ保存する (可能な環境ではオーナーのみ読み書き可 `0600`)。
+/// Saves the token to a file (owner read/write only, `0600`, where supported).
 pub fn save(path: &Path, token: &str) -> Result<(), NodeError> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|err| NodeError::io(parent, err))?;
@@ -47,7 +48,7 @@ pub fn save(path: &Path, token: &str) -> Result<(), NodeError> {
     Ok(())
 }
 
-/// トークンを定数時間で比較する (タイミング攻撃の緩和)。
+/// Compares tokens in constant time (mitigates timing attacks).
 pub fn token_matches(expected: &str, provided: &str) -> bool {
     let expected = expected.as_bytes();
     let provided = provided.as_bytes();
@@ -70,8 +71,8 @@ fn set_owner_only_permissions(path: &Path) -> Result<(), NodeError> {
 
 #[cfg(not(unix))]
 fn set_owner_only_permissions(_path: &Path) -> Result<(), NodeError> {
-    // Windows ではユーザープロファイル配下 (`~/.flexagent`) の ACL に従う
-    // (追加の ACL 操作は Phase 5 の `fxg service install` で扱う)。
+    // On Windows, rely on the ACL of the user profile directory (`~/.flexagent`)
+    // (additional ACL handling is covered by `fxg service install` in Phase 5).
     Ok(())
 }
 
@@ -97,7 +98,7 @@ mod tests {
         let second = load_or_create(&path).expect("load");
         assert_eq!(first, second);
 
-        // 空ファイルは再生成される
+        // An empty file is regenerated
         std::fs::write(&path, "").expect("write empty");
         let third = load_or_create(&path).expect("regenerate");
         assert_ne!(third, first);
@@ -114,7 +115,7 @@ mod tests {
             .expect("metadata")
             .permissions()
             .mode();
-        assert_eq!(mode & 0o777, 0o600, "auth_token は 0600 で保存する");
+        assert_eq!(mode & 0o777, 0o600, "auth_token must be saved with 0600");
     }
 
     #[test]

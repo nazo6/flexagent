@@ -3,7 +3,7 @@ name = "fxg-node"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
-description = "FlexAgent ノードデーモン (ローカルIPC・ローカルWeb配信・Outbox同期・プロジェクト解決)"
+description = "FlexAgent node daemon (local IPC, local web serving, Outbox sync, project resolution)"
 repository.workspace = true
 
 [dependencies]

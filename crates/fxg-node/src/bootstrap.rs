@@ -1,16 +1,17 @@
-//! `fxg bootstrap-workspace`: 一時VM内の Zero-Touch 初期化。
+//! `fxg bootstrap-workspace`: zero-touch initialization inside an ephemeral VM.
 //!
-//! 設計: `docs/01-architecture-and-sync.md` §6.3、`docs/05-cli-and-pwa-ui.md` §2.3。
+//! Design: `docs/01-architecture-and-sync.md` §6.3, `docs/05-cli-and-pwa-ui.md` §2.3.
 //!
-//! 中央サーバーが注入した短命トークン (`FXG_GIT_TOKEN`) を使ってリポジトリを
-//! `git clone` し、リポジトリの構成ファイルからツールチェインを自動検出して
-//! `mise` / `uv` で導入する。**この関数の出力はすべて `stderr` に限定する**
-//! (`stdout` は後続の `fxg daemon --stdio` の JSON Lines 専用として保護する)。
+//! Clones the repository using the short-lived token injected by the central server
+//! (`FXG_GIT_TOKEN`), auto-detects the toolchain from the repository's manifest files,
+//! and installs it with `mise` / `uv`. **All output of this function is restricted to
+//! `stderr`** (`stdout` is protected as JSON Lines dedicated to the subsequent
+//! `fxg daemon --stdio`).
 //!
-//! 終了時に `$FXG_HOME/bootstrap.env` へ環境変数 (PATH 追加 + `.fxg.toml` の
-//! `[bootstrap.env]`) を書き出す。生成されるプロビジョナースクリプトが
-//! `exec fxg daemon --stdio` の直前にこれを `source` することで、導入した
-//! ツールがエージェントプロセスへ引き継がれる。
+//! On exit it writes the environment variables (PATH additions + `[bootstrap.env]` from
+//! `.fxg.toml`) to `$FXG_HOME/bootstrap.env`. The generated provisioner script sources
+//! this right before `exec fxg daemon --stdio`, so the installed tools are inherited by
+//! the agent process.
 
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -22,44 +23,44 @@ use tokio::process::Command;
 use crate::error::NodeError;
 use crate::git;
 
-/// `bootstrap-workspace` の実行オプション。
+/// Execution options for `bootstrap-workspace`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BootstrapOptions {
-    /// クローン元 Git URL (必須)
+    /// Git URL to clone from (required)
     pub repo: String,
-    /// 対象ブランチ (省略時はリモートの既定ブランチ)
+    /// Target branch (the remote default branch if omitted)
     pub branch: Option<String>,
-    /// クローン先ディレクトリ
+    /// Destination directory of the clone
     pub dir: PathBuf,
-    /// データディレクトリ (`~/.flexagent`)
+    /// Data directory (`~/.flexagent`)
     pub fxg_home: PathBuf,
-    /// ツールチェイン (`mise` / `uv`) の導入とツールインストールを行うか
-    /// (テストでは `false` にしてネットワークアクセスを避ける)
+    /// Whether to install the toolchain (`mise` / `uv`) and the tools
+    /// (tests set this to `false` to avoid network access)
     pub install_toolchain: bool,
-    /// 検出ツールに追加するツール (テスト・デバッグ用)
+    /// Tools added to the detected ones (for tests and debugging)
     pub extra_tools: Vec<String>,
 }
 
-/// 自動導入する標準必須 CLI (設計: docs/01 §6.3)。
+/// Standard required CLIs installed automatically (design: docs/01 §6.3).
 pub const STANDARD_CLI_TOOLS: &[&str] = &["ripgrep", "fd", "jq", "gh"];
 
-/// `bootstrap-workspace` の実行結果。
+/// Execution result of `bootstrap-workspace`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BootstrapOutcome {
-    /// クローン済みワークスペース
+    /// Cloned workspace
     pub dir: PathBuf,
-    /// 導入した (導入を試みた) ツール一覧
+    /// Tools that were installed (or attempted)
     pub tools: Vec<String>,
-    /// 生成した環境変数ファイル
+    /// Generated environment variable file
     pub env_file: PathBuf,
 }
 
-/// ブートストラップの進捗ログ (すべて `stderr` へ)。
+/// Bootstrap progress log (all to `stderr`).
 fn log(message: impl std::fmt::Display) {
     eprintln!("[fxg-bootstrap] {message}");
 }
 
-/// 一時VM内のワークスペースを初期化する。
+/// Initializes the workspace inside the ephemeral VM.
 pub async fn bootstrap_workspace(options: BootstrapOptions) -> Result<BootstrapOutcome, NodeError> {
     std::fs::create_dir_all(&options.fxg_home).map_err(|source| NodeError::Io {
         path: options.fxg_home.clone(),
@@ -77,7 +78,7 @@ pub async fn bootstrap_workspace(options: BootstrapOptions) -> Result<BootstrapO
         .map_err(|err| NodeError::Server(err.to_string()))?
         .unwrap_or_default();
 
-    // ツール検出 (構成ファイル + `.fxg.toml` の明示指定)
+    // Tool detection (manifest files + explicit entries in `.fxg.toml`)
     let mut tools = detect_tools(&options.dir, &config);
     for tool in &options.extra_tools {
         if !tools.contains(tool) {
@@ -104,12 +105,12 @@ pub async fn bootstrap_workspace(options: BootstrapOptions) -> Result<BootstrapO
         log("toolchain installation skipped (install_toolchain = false)");
     }
 
-    // `git` は最優先で使うため、見つからない場合のみ導入を試みる
+    // `git` is used with the highest priority, so only try to install it when missing
     if options.install_toolchain && !crate::bundle::git_available().await {
         log("git is missing after setup; setup commands may fail");
     }
 
-    // `.fxg.toml [bootstrap] setup` を実行する (出力は stderr へ)
+    // Run `.fxg.toml [bootstrap] setup` (output goes to stderr)
     for command in &config.bootstrap.setup {
         log(format!("setup: {command}"));
         let status = run_streaming(&options.dir, command, &[]).await?;
@@ -131,9 +132,9 @@ pub async fn bootstrap_workspace(options: BootstrapOptions) -> Result<BootstrapO
     })
 }
 
-/// リポジトリをクローンする (既にクローン済みなら再利用)。
+/// Clones the repository (reuses an existing clone).
 async fn clone_repository(options: &BootstrapOptions) -> Result<(), NodeError> {
-    // 存在しないディレクトリでは git を実行できない
+    // git cannot run in a directory that does not exist
     if options.dir.is_dir() && git::toplevel(&options.dir).await?.is_some() {
         log(format!(
             "workspace already cloned: {}",
@@ -160,8 +161,9 @@ async fn clone_repository(options: &BootstrapOptions) -> Result<(), NodeError> {
         })?;
     }
 
-    // 短命トークン (FXG_GIT_TOKEN) を GIT_ASKPASS 経由で渡す。
-    // URL へのトークン埋め込みは行わず、環境変数はオンメモリのみで扱う。
+    // Pass the short-lived token (FXG_GIT_TOKEN) through GIT_ASKPASS.
+    // The token is never embedded in the URL; environment variables are kept in memory
+    // only.
     let askpass = write_bootstrap_askpass(&options.fxg_home)?;
     let mut git_env: Vec<(String, String)> = vec![
         (
@@ -211,7 +213,7 @@ async fn clone_repository(options: &BootstrapOptions) -> Result<(), NodeError> {
     Ok(())
 }
 
-/// リポジトリの構成ファイルから導入するツールを検出する。
+/// Detects the tools to install from the repository's manifest files.
 pub fn detect_tools(dir: &Path, config: &ProjectConfig) -> Vec<String> {
     let mut tools: Vec<String> = Vec::new();
     let mut push = |tool: &str| {
@@ -236,18 +238,18 @@ pub fn detect_tools(dir: &Path, config: &ProjectConfig) -> Vec<String> {
     if dir.join("pyproject.toml").exists() || dir.join(".python-version").exists() {
         push("python");
     }
-    // `mise.toml` / `.tool-versions` に記載された全ツール
+    // Every tool listed in `mise.toml` / `.tool-versions`
     for tool in read_mise_tools(dir) {
         push(&tool);
     }
-    // `.fxg.toml [bootstrap] tools` の明示指定
+    // Explicit entries in `.fxg.toml [bootstrap] tools`
     for tool in &config.bootstrap.tools {
         push(tool);
     }
     tools
 }
 
-/// `mise.toml` の `[tools]` / `.tool-versions` からツール名を読み取る。
+/// Reads tool names from `[tools]` in `mise.toml` / `.tool-versions`.
 fn read_mise_tools(dir: &Path) -> Vec<String> {
     let mut tools = Vec::new();
     if let Ok(text) = std::fs::read_to_string(dir.join("mise.toml"))
@@ -270,15 +272,15 @@ fn read_mise_tools(dir: &Path) -> Vec<String> {
     tools
 }
 
-/// Python プロジェクトか (uv による仮想環境構築を行うか)。
+/// Whether this is a Python project (whether to build a virtual environment with uv).
 fn wants_python(dir: &Path) -> bool {
     dir.join("pyproject.toml").exists() || dir.join(".python-version").exists()
 }
 
-/// `~/.local/bin` (ツール配置先)。
+/// `~/.local/bin` (tool installation destination).
 fn default_bin_dir() -> PathBuf {
     if let Ok(fxg_home) = std::env::var("FXG_HOME") {
-        // テストではデータディレクトリ配下へ隔離する
+        // Tests isolate into a directory under the data directory
         return PathBuf::from(fxg_home).join("bin");
     }
     dirs::home_dir()
@@ -287,7 +289,7 @@ fn default_bin_dir() -> PathBuf {
         .join("bin")
 }
 
-/// mise の shim ディレクトリ。
+/// mise's shim directory.
 fn mise_shims_dir() -> PathBuf {
     dirs::home_dir()
         .unwrap_or_else(|| PathBuf::from("."))
@@ -297,7 +299,7 @@ fn mise_shims_dir() -> PathBuf {
         .join("shims")
 }
 
-/// `mise` を単一バイナリで導入する (root 権限・apt 不要)。
+/// Installs `mise` as a single binary (no root privileges or apt required).
 async fn install_mise(bin_dir: &Path) {
     let mise = bin_dir.join(if cfg!(windows) { "mise.exe" } else { "mise" });
     if mise.exists() {
@@ -316,7 +318,7 @@ async fn install_mise(bin_dir: &Path) {
     }
 }
 
-/// `uv` をプリビルドバイナリで導入する。
+/// Installs `uv` from a prebuilt binary.
 async fn install_uv(bin_dir: &Path) {
     let uv = bin_dir.join(if cfg!(windows) { "uv.exe" } else { "uv" });
     if uv.exists() {
@@ -354,7 +356,7 @@ async fn install_uv(bin_dir: &Path) {
     }
 }
 
-/// uv の配布ターゲット名 (OS / アーキテクチャ)。
+/// uv distribution target name (OS / architecture).
 fn uv_target() -> Option<&'static str> {
     match (std::env::consts::OS, std::env::consts::ARCH) {
         ("linux", "x86_64") => Some("x86_64-unknown-linux-gnu"),
@@ -365,7 +367,7 @@ fn uv_target() -> Option<&'static str> {
     }
 }
 
-/// `curl` (なければ `wget`) でファイルをダウンロードする。
+/// Downloads a file with `curl` (or `wget` if unavailable).
 async fn download_file(url: &str, dest: &Path) -> bool {
     let dest_arg = dest.to_string_lossy().into_owned();
     let curl = format!("curl -fsSL '{url}' -o '{dest_arg}'");
@@ -376,7 +378,7 @@ async fn download_file(url: &str, dest: &Path) -> bool {
     matches!(run_shell(Path::new("."), &wget).await, Ok(true))
 }
 
-/// `mise install --yes <tools>` でツールを導入する (失敗は警告のみ)。
+/// Installs tools with `mise install --yes <tools>` (failures are warnings only).
 async fn install_tools(bin_dir: &Path, tools: &[String]) {
     let mut all: Vec<String> = tools
         .iter()
@@ -412,7 +414,7 @@ async fn install_tools(bin_dir: &Path, tools: &[String]) {
     }
 }
 
-/// `uv venv` / `uv sync` による Python 環境の構築 (ベストエフォート)。
+/// Best-effort Python environment setup via `uv venv` / `uv sync`.
 async fn prepare_python_environment(dir: &Path) {
     let uv = default_bin_dir().join(if cfg!(windows) { "uv.exe" } else { "uv" });
     if !uv.exists() {
@@ -428,10 +430,10 @@ async fn prepare_python_environment(dir: &Path) {
     }
 }
 
-/// `$FXG_HOME/bootstrap.env` を書き出す。
+/// Writes `$FXG_HOME/bootstrap.env`.
 ///
-/// 生成形式は POSIX `sh` で `source` できる `export KEY='value'` 行。
-/// `PATH` には導入ツール (`~/.local/bin` / mise shims / uv) を前置する。
+/// The generated format is `export KEY='value'` lines that POSIX `sh` can `source`.
+/// `PATH` is prefixed with the installed tools (`~/.local/bin` / mise shims / uv).
 fn write_env_file(
     options: &BootstrapOptions,
     config: &ProjectConfig,
@@ -463,16 +465,18 @@ fn write_env_file(
     Ok(path)
 }
 
-/// POSIX シェル用にシングルクオートで安全に包む。
+/// Safely wraps in single quotes for a POSIX shell.
 fn sh_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
 }
 
-/// bootstrap 中の Git 認証用 `GIT_ASKPASS` ヘルパー (短命トークン) を生成する。
+/// Generates the `GIT_ASKPASS` helper for Git authentication during bootstrap
+/// (short-lived token).
 ///
-/// `bootstrap-workspace` はデーモン起動前のため、ローカルIPC を経由せず
-/// 環境変数 `FXG_GIT_TOKEN` を直接読み出す最軽量なヘルパーを使う
-/// (トークンは環境変数のみで、ディスクには保存しない)。
+/// Because `bootstrap-workspace` runs before the daemon starts, it uses the lightest
+/// helper that reads the environment variable `FXG_GIT_TOKEN` directly instead of going
+/// through local IPC (the token lives only in the environment and is never written to
+/// disk).
 pub fn write_bootstrap_askpass(fxg_home: &Path) -> Result<PathBuf, NodeError> {
     std::fs::create_dir_all(fxg_home).map_err(|source| NodeError::Io {
         path: fxg_home.to_path_buf(),
@@ -519,7 +523,7 @@ pub fn write_bootstrap_askpass(fxg_home: &Path) -> Result<PathBuf, NodeError> {
     Ok(path)
 }
 
-/// コマンドをシェル経由で実行し、stdout / stderr を **stderr へ** ストリームする。
+/// Runs a command through the shell and streams stdout / stderr **to stderr**.
 async fn run_streaming(cwd: &Path, command: &str, env: &[(&str, &str)]) -> Result<bool, NodeError> {
     let mut process = shell_command(command);
     process
@@ -555,7 +559,7 @@ async fn run_streaming(cwd: &Path, command: &str, env: &[(&str, &str)]) -> Resul
     Ok(status.success())
 }
 
-/// シェル (Windows は `cmd /C`、それ以外は `sh -c`) のコマンドを組み立てる。
+/// Builds a shell command (Windows `cmd /C`, otherwise `sh -c`).
 fn shell_command(command: &str) -> Command {
     if cfg!(windows) {
         let mut process = Command::new("cmd");
@@ -568,7 +572,7 @@ fn shell_command(command: &str) -> Command {
     }
 }
 
-/// シェルコマンドを実行する (結果のみ、出力は stderr へ)。
+/// Runs a shell command (result only; output goes to stderr).
 async fn run_shell(cwd: &Path, command: &str) -> Result<bool, NodeError> {
     run_streaming(cwd, command, &[]).await
 }
@@ -593,7 +597,7 @@ mod tests {
         assert!(tools.contains(&"rust".to_owned()));
         assert!(tools.contains(&"node".to_owned()));
         assert!(tools.contains(&"pnpm".to_owned()));
-        // 重複しない
+        // No duplicates
         assert_eq!(tools.iter().filter(|tool| *tool == "rust").count(), 1);
     }
 
@@ -634,7 +638,7 @@ mod tests {
         let home = tempfile::tempdir().expect("tempdir");
         let workspace = home.path().join("workspace");
 
-        // ローカル Git リポジトリ (file:// URL でクローン)
+        // Local Git repository (cloned via a file:// URL)
         for args in [
             vec!["init", "-q", "-b", "main"],
             vec!["config", "user.email", "test@example.com"],
@@ -672,7 +676,7 @@ mod tests {
         assert!(env.contains("export FXG_WORKSPACE="));
         assert!(env.contains("export PATH="));
 
-        // 再実行は冪等 (既存クローンを再利用)
+        // Re-running is idempotent (reuses the existing clone)
         let again = bootstrap_workspace(BootstrapOptions {
             repo: repo_dir.path().display().to_string(),
             branch: Some("main".to_owned()),

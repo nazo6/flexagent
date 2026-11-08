@@ -1,94 +1,94 @@
-//! `fxg-node` のエラー型。
+//! Error types for `fxg-node`.
 
 use std::path::PathBuf;
 
-/// Windows の `ERROR_PIPE_BUSY` (231)。
+/// Windows `ERROR_PIPE_BUSY` (231).
 ///
-/// Named Pipe の全インスタンスが接続中で、`WaitNamedPipe` で待つべき状態。
-/// サーバー / クライアント双方から参照するため here に定義する。
+/// Every instance of the named pipe is connected, so `WaitNamedPipe` should be used.
+/// Defined here because both the server and the client refer to it.
 #[cfg(windows)]
 pub(crate) const PIPE_BUSY: i32 = 231;
 
-/// ノードデーモンのエラー。
+/// Node daemon error.
 #[derive(Debug, thiserror::Error)]
 pub enum NodeError {
-    /// ファイルシステム・I/O エラー
+    /// Filesystem / I/O error
     #[error("io error at {path}: {source}")]
     Io {
-        /// 対象パス
+        /// Target path
         path: PathBuf,
-        /// 元のI/Oエラー
+        /// Original I/O error
         #[source]
         source: std::io::Error,
     },
-    /// パスを伴わないI/Oエラー
+    /// I/O error without an associated path
     #[error("io error: {0}")]
     Plain(#[from] std::io::Error),
-    /// `git` コマンドが存在しない
+    /// `git` command is not available
     #[error("git is not available: {0}")]
     GitUnavailable(String),
-    /// `git` コマンドがエラー終了した
+    /// `git` command exited with an error
     #[error("git {args} failed in {cwd}: {message}")]
     Git {
-        /// 実行ディレクトリ
+        /// Working directory
         cwd: PathBuf,
-        /// 引数 (表示用)
+        /// Arguments (for display)
         args: String,
-        /// stderr 由来のメッセージ
+        /// Message derived from stderr
         message: String,
     },
-    /// Git リポジトリではない
+    /// Not a Git repository
     #[error("not a git repository: {0}")]
     NotARepository(PathBuf),
-    /// Worktree / ブランチの状態が不正
+    /// Invalid worktree / branch state
     #[error("invalid worktree state: {0}")]
     InvalidWorktree(String),
-    /// 操作対象の状態・前提条件が不正 (設定不足など)
+    /// Invalid state or unmet precondition for the operation (e.g. missing configuration)
     #[error("invalid state: {0}")]
     InvalidState(String),
-    /// セッションの状態・操作が不正
+    /// Invalid session state or operation
     #[error("invalid session: {0}")]
     InvalidSession(String),
-    /// 停止済みセッションへの操作だが、エージェントがネイティブ復元
-    /// (`session/resume` / `session/load` / opencode2 既存セッション bind) に
-    /// 対応していない。履歴 Replay での明示的な再開が必要。
+    /// The session is stopped and the agent does not support native resume
+    /// (`session/resume` / `session/load` / binding an existing opencode2 session).
+    /// An explicit resume with replayed history is required.
     #[error("native resume is not available; resume with replayed history: {0}")]
     ResumeRequired(String),
-    /// セッションが実行中 (busy) のため操作できない
+    /// The session is running (busy) and cannot be operated on
     #[error("session is busy: {0}")]
     Busy(String),
-    /// 同一 `command_id` のコマンドが既に処理済み (冪等性)
+    /// A command with the same `command_id` was already processed (idempotency)
     #[error("duplicate command: {0}")]
     CommandDuplicate(String),
-    /// 承認リクエストが既に解決済み (2回目以降の応答)
+    /// The approval request was already resolved (second or later response)
     #[error("already resolved: {0}")]
     AlreadyResolved(String),
-    /// 対象のエージェント起動・ドライバ操作が失敗した
+    /// Starting the target agent or operating its driver failed
     #[error("agent error: {0}")]
     Agent(String),
-    /// 永続化してはいけないイベントを記録しようとした
-    /// (ストリーミング途中のチャンク・キーストローク等)
+    /// Attempted to record an event that must not be persisted
+    /// (mid-stream chunks, keystrokes, and so on)
     #[error("event is not persistable: {0}")]
     NonPersistableEvent(&'static str),
-    /// データベースエラー (fxg-db)
+    /// Database error (fxg-db)
     #[error("database error: {0}")]
     Db(#[from] fxg_db::DbError),
-    /// 設定ファイルエラー (fxg-protocol)
+    /// Configuration file error (fxg-protocol)
     #[error("config error: {0}")]
     Config(#[from] fxg_protocol::config::ConfigError),
-    /// PTY / プロセスエラー (fxg-pty)
+    /// PTY / process error (fxg-pty)
     #[error("pty error: {0}")]
     Pty(#[from] fxg_pty::PtyError),
-    /// JSON 変換エラー
+    /// JSON conversion error
     #[error("json error: {0}")]
     Json(#[from] serde_json::Error),
-    /// サーバー (ローカルHTTP/WS・IPC) の起動・入出力エラー
+    /// Startup or I/O error of the server (local HTTP/WS / IPC)
     #[error("server error: {0}")]
     Server(String),
 }
 
 impl NodeError {
-    /// パス付きI/Oエラーを生成する。
+    /// Creates an I/O error with an associated path.
     pub fn io(path: impl Into<PathBuf>, source: std::io::Error) -> Self {
         Self::Io {
             path: path.into(),
@@ -96,10 +96,10 @@ impl NodeError {
         }
     }
 
-    /// IPC / WebSocket / REST 応答に載せる構造化エラーコードへ変換する。
+    /// Converts to the structured error code carried in IPC / WebSocket / REST responses.
     ///
-    /// クライアント (CLI / PWA) はこのコードで冪等な再試行
-    /// (`COMMAND_DUPLICATE` / `ALREADY_RESOLVED`) を判定する。
+    /// Clients (CLI / PWA) use this code to decide on idempotent retries
+    /// (`COMMAND_DUPLICATE` / `ALREADY_RESOLVED`).
     pub fn error_code(&self) -> fxg_protocol::common::ErrorCode {
         use fxg_protocol::common::ErrorCode;
         match self {

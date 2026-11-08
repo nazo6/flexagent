@@ -1,20 +1,20 @@
-//! セッションイベントの即時配信と永続化 (Compaction)。
+//! Immediate delivery and persistence (compaction) of session events.
 //!
-//! 設計: `docs/01-architecture-and-sync.md` §2.3。
+//! Design: `docs/01-architecture-and-sync.md` §2.3.
 //!
-//! - **配信と永続化の分離**: ストリーミング途中のトークンチャンクは
-//!   [`SessionEventBus::publish_delta`] でメモリ上のブロードキャストチャネルへ
-//!   即時配信し、SQLite へは書き込まない。
-//! - **ターン完了時の永続化**: 完成したイベント (`is_complete = true` 等) は
-//!   [`SessionEventBus::record`] が `node_seq` を採番して `node.db` へ追記し、
-//!   その後で確定イベントとして配信する。
-//! - **エフェメラルイベント**: キーストローク (`TerminalInput`) のように
-//!   永続化しない離散イベントは [`SessionEventBus::publish_ephemeral_event`] で
-//!   配信のみ行う (`node_seq` を消費しない)。
+//! - **Separation of delivery and persistence**: token chunks mid-stream are
+//!   delivered immediately to the in-memory broadcast channel via
+//!   [`SessionEventBus::publish_delta`] and are not written to SQLite.
+//! - **Persistence on turn completion**: completed events (`is_complete = true` etc.)
+//!   are assigned a `node_seq` by [`SessionEventBus::record`], appended to `node.db`,
+//!   and then delivered as finalized events.
+//! - **Ephemeral events**: discrete events that are not persisted, such as
+//!   keystrokes (`TerminalInput`), are only delivered via
+//!   [`SessionEventBus::publish_ephemeral_event`] (they do not consume a `node_seq`).
 //!
-//! クライアントは受信イベントを `event_id` / `(session_id, node_seq)` で upsert し、
-//! `StreamDeltaPayload` は `message_id` / `thought_id` でマージ表示したうえで、
-//! 完成イベント到着時に確定表示へ置き換える。
+//! Clients upsert received events by `event_id` / `(session_id, node_seq)`, merge
+//! and display `StreamDeltaPayload` by `message_id` / `thought_id`, and replace
+//! them with the final rendering when the completed event arrives.
 
 use std::sync::Arc;
 
@@ -26,35 +26,35 @@ use tokio::sync::broadcast;
 
 use crate::error::NodeError;
 
-/// ブロードキャストチャネルのバッファサイズ
-/// (トークンチャンクの流入が速いため広めに取る。遅延した購読者は `Lagged` を検知し
-/// `node.db` から履歴を取り直す)。
+/// Buffer size of the broadcast channel
+/// (generous because token chunks arrive quickly. Lagging subscribers detect
+/// `Lagged` and re-fetch the history from `node.db`).
 const BROADCAST_CAPACITY: usize = 2048;
 
-/// 購読者へ配信されるセッション単位のメッセージ。
+/// Per-session message delivered to subscribers.
 #[derive(Debug, Clone, PartialEq)]
 pub enum SessionBroadcast {
-    /// 永続化済みイベント (`node_seq` / `cursor` 確定)
+    /// A persisted event (`node_seq` / `cursor` finalized)
     Persisted {
-        /// イベント本体
+        /// The event itself
         event: SessionEventEnvelope,
-        /// `node.db` の `session_events.cursor` (差分再開カーソル)
+        /// `session_events.cursor` in `node.db` (incremental resume cursor)
         cursor: u64,
     },
-    /// 永続化しないエフェメラルイベント (キーストローク等)。
-    /// `node_seq` は採番されないため `0` が入る。
+    /// An ephemeral event that is not persisted (keystrokes etc.).
+    /// No `node_seq` is assigned, so `0` is stored.
     Ephemeral(SessionEventEnvelope),
-    /// ストリーミング途中の差分チャンク (永続化されない)
+    /// A partial delta chunk mid-stream (not persisted)
     StreamDelta {
-        /// 対象セッションID
+        /// Target session ID
         session_id: String,
-        /// 差分本体
+        /// The delta itself
         delta: StreamDeltaPayload,
     },
 }
 
 impl SessionBroadcast {
-    /// 対象セッションID。
+    /// The target session ID.
     pub fn session_id(&self) -> &str {
         match self {
             Self::Persisted { event, .. } | Self::Ephemeral(event) => &event.session_id,
@@ -62,7 +62,7 @@ impl SessionBroadcast {
         }
     }
 
-    /// 永続化済みイベントなら `(envelope, cursor)` を返す。
+    /// Returns `(envelope, cursor)` if this is a persisted event.
     pub fn persisted(&self) -> Option<(&SessionEventEnvelope, u64)> {
         match self {
             Self::Persisted { event, cursor } => Some((event, *cursor)),
@@ -71,7 +71,7 @@ impl SessionBroadcast {
     }
 }
 
-/// セッションイベントのバス (即時配信 + 冪等永続化)。
+/// Session event bus (immediate delivery + idempotent persistence).
 #[derive(Clone)]
 pub struct SessionEventBus {
     inner: Arc<Inner>,
@@ -91,7 +91,7 @@ impl std::fmt::Debug for SessionEventBus {
 }
 
 impl SessionEventBus {
-    /// DB ハンドルから新しいバスを作成する。
+    /// Creates a new bus from a DB handle.
     pub fn new(db: Db) -> Self {
         let (events, _receiver) = broadcast::channel(BROADCAST_CAPACITY);
         Self {
@@ -99,27 +99,27 @@ impl SessionEventBus {
         }
     }
 
-    /// 永続化先の DB ハンドル。
+    /// The DB handle for persistence.
     pub fn db(&self) -> &Db {
         &self.inner.db
     }
 
-    /// イベントストリームを購読する (IPC / ローカルWS / Outbox ワーカー用)。
+    /// Subscribes to the event stream (for IPC / local WS / the outbox worker).
     pub fn subscribe(&self) -> broadcast::Receiver<SessionBroadcast> {
         self.inner.events.subscribe()
     }
 
-    /// 現在の購読者数。
+    /// The current number of subscribers.
     pub fn subscriber_count(&self) -> usize {
         self.inner.events.receiver_count()
     }
 
-    /// 新規セッションを作成する (`SessionCreated` を `node_seq = 1` として永続化)。
+    /// Creates a new session (persists `SessionCreated` as `node_seq = 1`).
     ///
     /// # Errors
     ///
-    /// - `payload` が [`UnifiedEventPayload::SessionCreated`] でない
-    /// - 同一 `session_id` が既に存在する
+    /// - `payload` is not [`UnifiedEventPayload::SessionCreated`]
+    /// - The same `session_id` already exists
     pub async fn create_session(
         &self,
         session_id: &str,
@@ -156,11 +156,11 @@ impl SessionEventBus {
         Ok(envelope)
     }
 
-    /// 完成イベントを `node_seq` 採番のうえ永続化し、確定イベントとして配信する。
+    /// Persists a completed event with an allocated `node_seq` and delivers it as a finalized event.
     ///
-    /// 永続化対象外のイベント ([`UnifiedEventPayload::is_persistable`] が `false`) は
-    /// [`NodeError::NonPersistableEvent`] で拒否する
-    /// (ストリーミング途中のチャンクは [`Self::publish_delta`] を使う)。
+    /// Events that are not persistable ([`UnifiedEventPayload::is_persistable`] is `false`)
+    /// are rejected with [`NodeError::NonPersistableEvent`]
+    /// (use [`Self::publish_delta`] for chunks mid-stream).
     pub async fn record(
         &self,
         session_id: &str,
@@ -177,7 +177,7 @@ impl SessionEventBus {
         Ok(appended.envelope)
     }
 
-    /// ストリーミング途中の差分チャンクを即時配信する (DB へは書き込まない)。
+    /// Delivers a partial delta chunk mid-stream immediately (does not write to the DB).
     pub fn publish_delta(&self, session_id: impl Into<String>, delta: StreamDeltaPayload) {
         self.broadcast(SessionBroadcast::StreamDelta {
             session_id: session_id.into(),
@@ -185,9 +185,9 @@ impl SessionEventBus {
         });
     }
 
-    /// 永続化しない離散イベント (キーストローク等) を配信する。
+    /// Delivers a discrete event that is not persisted (keystrokes etc.).
     ///
-    /// `node_seq` は採番せず `0` を設定する (イベントログの連番に欠番を作らない)。
+    /// No `node_seq` is assigned and `0` is set (so no gaps appear in the event log sequence).
     pub fn publish_ephemeral_event(
         &self,
         session_id: impl Into<String>,
@@ -204,7 +204,7 @@ impl SessionEventBus {
         envelope
     }
 
-    /// 購読者へ送信する (購読者がいない場合の失敗は無視する)。
+    /// Sends to subscribers (ignores failures when there are no subscribers).
     fn broadcast(&self, message: SessionBroadcast) {
         let _ = self.inner.events.send(message);
     }
@@ -305,14 +305,14 @@ mod tests {
             .expect("exists");
         assert_eq!(summary.last_node_seq, 1);
 
-        // 二重作成は拒否される
+        // Duplicate creation is rejected
         let err = bus
             .create_session(&session_id, session_created_payload())
             .await
             .expect_err("duplicate");
         assert!(matches!(err, NodeError::InvalidSession(_)));
 
-        // SessionCreated 以外の payload も拒否される
+        // Payloads other than SessionCreated are also rejected
         let other = uuid_v7();
         let err = bus
             .create_session(
@@ -355,7 +355,7 @@ mod tests {
             .expect("record 2");
         assert_eq!(second.node_seq, 3);
 
-        // 永続化されている (履歴 API で取得できる)
+        // It is persisted (retrievable via the history API)
         let batch = bus
             .db()
             .session_events_after(&session_id, 0, 100)
@@ -364,7 +364,7 @@ mod tests {
         assert_eq!(batch.events.len(), 3);
         assert_eq!(batch.events[2].node_seq, 3);
 
-        // 確定イベントとして配信される
+        // Delivered as a finalized event
         let mut broadcasted = Vec::new();
         while let Ok(message) = receiver.try_recv() {
             broadcasted.push(message);
@@ -383,7 +383,7 @@ mod tests {
     async fn record_rejects_non_persistable_payloads() {
         let (bus, session_id) = setup().await;
 
-        // ストリーミング途中 (is_complete = false) は永続化されない
+        // Mid-stream (is_complete = false) is not persisted
         let err = bus
             .record(
                 &session_id,
@@ -400,7 +400,7 @@ mod tests {
             NodeError::NonPersistableEvent("agent_message")
         ));
 
-        // キーストロークも永続化されない
+        // Keystrokes are not persisted either
         let err = bus
             .record(
                 &session_id,
@@ -416,7 +416,7 @@ mod tests {
             NodeError::NonPersistableEvent("terminal_input")
         ));
 
-        // 完成イベントは永続化できる
+        // Completed events can be persisted
         let envelope = bus
             .record(
                 &session_id,
@@ -470,7 +470,7 @@ mod tests {
         }
         assert_eq!(deltas, 2);
 
-        // DB には何も書かれていない (SessionCreated のみ)
+        // Nothing is written to the DB (only SessionCreated)
         let batch = bus
             .db()
             .session_events_after(&session_id, 0, 100)
@@ -492,13 +492,13 @@ mod tests {
                 data_b64: "bHM=".to_owned(),
             },
         );
-        assert_eq!(envelope.node_seq, 0, "エフェメラルは node_seq を持たない");
+        assert_eq!(envelope.node_seq, 0, "ephemeral events have no node_seq");
         assert!(matches!(
             receiver.try_recv().expect("broadcast"),
             SessionBroadcast::Ephemeral(_)
         ));
 
-        // 採番されていないため、次の永続イベントは node_seq = 2
+        // Since no sequence was allocated, the next persisted event is node_seq = 2
         let next = bus
             .record(
                 &session_id,

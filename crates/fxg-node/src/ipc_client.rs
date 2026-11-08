@@ -1,9 +1,9 @@
-//! CLI (`fxg`) → Daemon のローカルIPCクライアント。
+//! Local IPC client from the CLI (`fxg`) to the daemon.
 //!
-//! デーモン (`fxg daemon`) のIPCエンドポイントへ接続し、
-//! Length-prefixed JSON で1リクエスト/1レスポンスをやり取りする。
+//! Connects to the daemon's (`fxg daemon`) IPC endpoint and exchanges
+//! one request and one response at a time as length-prefixed JSON.
 //!
-//! 設計: `docs/03-protocol-and-api.md` §4。
+//! Design: `docs/03-protocol-and-api.md` §4.
 
 use fxg_protocol::ipc::{IpcClientMessage, IpcServerMessage};
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -11,11 +11,11 @@ use tokio::io::{AsyncRead, AsyncWrite};
 use crate::error::NodeError;
 use crate::ipc_framing::{read_frame, write_message};
 
-/// ローカルIPCの双方向ストリーム (Unix Domain Socket / Named Pipe)。
+/// Bidirectional stream for local IPC (Unix domain socket / named pipe).
 trait AsyncStream: AsyncRead + AsyncWrite + Unpin + Send {}
 impl<T: AsyncRead + AsyncWrite + Unpin + Send> AsyncStream for T {}
 
-/// ローカルIPCクライアント。
+/// Local IPC client.
 pub struct IpcClient {
     stream: Box<dyn AsyncStream>,
 }
@@ -27,10 +27,10 @@ impl std::fmt::Debug for IpcClient {
 }
 
 impl IpcClient {
-    /// エンドポイントへ接続する。
+    /// Connects to the endpoint.
     ///
-    /// エンドポイントは [`crate::ipc_endpoint`] で解決する
-    /// (Windows: Named Pipe / Unix: Unix Domain Socket)。
+    /// The endpoint is resolved by [`crate::ipc_endpoint`]
+    /// (Windows: named pipe / Unix: Unix domain socket).
     #[cfg(unix)]
     pub async fn connect(endpoint: &str) -> Result<Self, NodeError> {
         let stream = tokio::net::UnixStream::connect(endpoint)
@@ -41,11 +41,11 @@ impl IpcClient {
         })
     }
 
-    /// エンドポイントへ接続する (Windows: Named Pipe)。
+    /// Connects to the endpoint (Windows: named pipe).
     ///
-    /// サーバーが次のパイプインスタンスを用意するまでの間、
-    /// `ERROR_PIPE_BUSY` (231) が返ることがある。Windows の標準手順
-    /// (`WaitNamedPipe`) と同様に短いリトライで吸収する。
+    /// Until the server provides the next pipe instance, it may return
+    /// `ERROR_PIPE_BUSY` (231). Absorb that with short retries, following the
+    /// standard Windows procedure (`WaitNamedPipe`).
     #[cfg(windows)]
     pub async fn connect(endpoint: &str) -> Result<Self, NodeError> {
         use tokio::net::windows::named_pipe::ClientOptions;
@@ -77,18 +77,19 @@ impl IpcClient {
         )))
     }
 
-    /// 1メッセージを送信する (レスポンスを待たない)。
+    /// Sends a single message (without waiting for a response).
     ///
-    /// `AttachSession` でイベントストリーミング中の接続へコマンド
-    /// (`SendPrompt` 等) を送る場合に [`Self::send`] + [`Self::recv`] を使う。
+    /// Use [`Self::send`] + [`Self::recv`] when sending commands (`SendPrompt`
+    /// etc.) over a connection that is streaming events via `AttachSession`.
     pub async fn send(&mut self, message: &IpcClientMessage) -> Result<(), NodeError> {
         write_message(&mut self.stream, message).await
     }
 
-    /// 次のサーバーメッセージを受信する (接続が閉じた場合は `None`)。
+    /// Receives the next server message (`None` if the connection closed).
     ///
-    /// アタッチ中は `EventBatch` / `LiveStreamDelta` とコマンド応答
-    /// (`Result` / `Error`) が混在して届くため、`command_id` で相関する。
+    /// While attached, `EventBatch` / `LiveStreamDelta` and command responses
+    /// (`Result` / `Error`) arrive interleaved, so they are correlated by
+    /// `command_id`.
     pub async fn recv(&mut self) -> Result<Option<IpcServerMessage>, NodeError> {
         let frame = read_frame(&mut self.stream).await?;
         match frame {
@@ -97,7 +98,7 @@ impl IpcClient {
         }
     }
 
-    /// 1リクエストを送信し、次のレスポンスを受信する。
+    /// Sends a single request and receives the next response.
     pub async fn request(
         &mut self,
         message: &IpcClientMessage,
@@ -124,7 +125,7 @@ mod tests {
         config.ipc_endpoint = crate::testutil::test_ipc_endpoint(dir.path());
         let daemon = NodeDaemon::start(config).await.expect("start");
 
-        // サーバーが listen を開始するまで待つ
+        // Wait until the server starts listening
         let mut client = None;
         for _ in 0..200 {
             match IpcClient::connect(daemon.ipc_endpoint()).await {
@@ -156,7 +157,7 @@ mod tests {
             other => panic!("unexpected response: {other:?}"),
         }
 
-        // デーモン側から接続が切れた場合はエラーになる
+        // Requests fail once the daemon side closes the connection
         daemon.shutdown();
         tokio::time::timeout(Duration::from_secs(5), daemon.wait())
             .await
@@ -182,7 +183,7 @@ mod tests {
 
     #[tokio::test]
     async fn framing_helpers_are_shared_with_server() {
-        // サーバー側のフレーミングと同じ関数をクライアントが使っていることを確認する
+        // Verify that the client uses the same framing functions as the server
         let (mut a, mut b) = tokio::io::duplex(1024);
         write_message(&mut a, &IpcClientMessage::Ping)
             .await

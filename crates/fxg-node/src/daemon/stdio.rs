@@ -1,19 +1,19 @@
-//! `fxg daemon --stdio`: 一時VM・サンドボックスノード用の標準入出力トランスポート。
+//! `fxg daemon --stdio`: standard I/O transport for ephemeral VM and sandbox nodes.
 //!
-//! 設計: `docs/01-architecture-and-sync.md` §6.1、`docs/03-protocol-and-api.md` §2。
+//! Design: `docs/01-architecture-and-sync.md` §6.1, `docs/03-protocol-and-api.md` §2.
 //!
-//! 中央サーバー (`fxg server`) が子プロセスとして起動したプロビジョナーコマンドの
-//! **`stdin` (`ServerToNodeMsg`) / `stdout` (`NodeToServerMsg`)** 上で
-//! JSON Lines 通信を行う (ネットワーク・VPN 完全非依存)。ブートストラップや
-//! `mise` / `uv` によるツール導入ログはすべて `stderr` に出力され、
-//! `stdout` はプロトコル通信専用として保護する。
+//! Speaks JSON Lines over **`stdin` (`ServerToNodeMsg`) / `stdout`
+//! (`NodeToServerMsg`)** of the provisioner command that the central server
+//! (`fxg server`) starts as a child process (fully independent of any network
+//! or VPN). Bootstrap and `mise` / `uv` tool installation logs all go to
+//! `stderr`, keeping `stdout` reserved for protocol traffic.
 //!
-//! - 常駐ノードと同じ [`SessionManager`](crate::session_manager::SessionManager) /
-//!   イベントバス / Outbox を使用し、メッセージ型も 100% 共通
-//! - `--workspace <DIR>`: クローン済みワークスペースをプロジェクトとして登録し、
-//!   `StartSession` の `local_path` をこのディレクトリに固定する
-//! - `--ephemeral`: `DrainAndShutdown` 受信時に Git バンドルを退避して終了する
-//! - ローカルIPCサーバーも起動する (`fxg git-askpass` → Git Credential Proxy 用)
+//! - Uses the same [`SessionManager`](crate::session_manager::SessionManager) /
+//!   event bus / outbox as persistent nodes, with 100% shared message types
+//! - `--workspace <DIR>`: registers the cloned workspace as a project and pins
+//!   `StartSession`'s `local_path` to this directory
+//! - `--ephemeral`: on `DrainAndShutdown`, saves a Git bundle and exits
+//! - Also starts a local IPC server (`fxg git-askpass` → Git credential proxy)
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -25,32 +25,32 @@ use tokio::sync::{mpsc, watch};
 use super::{DaemonConfig, DaemonState};
 use crate::error::NodeError;
 
-/// `fxg daemon --stdio` の起動設定。
+/// Startup configuration for `fxg daemon --stdio`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StdioConfig {
-    /// 基本設定 (ノードID / データディレクトリ等)
+    /// Base configuration (node ID / data directory, etc.)
     pub daemon: DaemonConfig,
-    /// `--workspace`: 初期対象ディレクトリ (クローン済みワークスペース)
+    /// `--workspace`: initial target directory (the cloned workspace)
     pub workspace: Option<PathBuf>,
-    /// `--ephemeral`: 一時VMモード (Drain 時の Git バンドル退避を有効化)
+    /// `--ephemeral`: ephemeral VM mode (enables Git bundle saving on drain)
     pub ephemeral: bool,
 }
 
-/// 送信キューの容量 (PTY forwarder 含む)。
+/// Capacity of the outgoing queue (including the PTY forwarder).
 const OUT_QUEUE_CAPACITY: usize = 1024;
 
-/// Drain 後に送信キューをフラッシュする待ち時間の上限。
+/// Upper bound on the wait time for flushing the outgoing queue after a drain.
 const FLUSH_TIMEOUT: Duration = Duration::from_secs(15);
 
-/// stdio トランスポートでデーモンを稼働させる (終了まで戻らない)。
+/// Runs the daemon over the stdio transport (does not return until exit).
 pub async fn run_stdio(config: StdioConfig) -> Result<(), NodeError> {
     let mut daemon_config = config.daemon.clone();
     daemon_config.ephemeral = config.ephemeral;
     let state = DaemonState::new(daemon_config).await?;
     state.register_node().await?;
 
-    // `--workspace` を論理プロジェクトとして登録する
-    // (NodeHello のプロジェクト報告に含まれ、サーバー側でセッション起動に使われる)
+    // Register `--workspace` as a logical project
+    // (it is included in the NodeHello project report and used server-side to start sessions)
     if let Some(workspace) = config.workspace.as_deref() {
         if !workspace.is_dir() {
             return Err(NodeError::Server(format!(
@@ -73,7 +73,7 @@ pub async fn run_stdio(config: StdioConfig) -> Result<(), NodeError> {
         }
     }
 
-    // ローカルIPCサーバー (GIT_ASKPASS ヘルパー / ローカル CLI 用)
+    // Local IPC server (for the GIT_ASKPASS helper / local CLI)
     let (ipc_shutdown_tx, ipc_shutdown_rx) = watch::channel(false);
     let ipc_task = tokio::spawn({
         let state = state.clone();
@@ -85,7 +85,7 @@ pub async fn run_stdio(config: StdioConfig) -> Result<(), NodeError> {
         }
     });
 
-    // stdout はプロトコル通信専用 (JSON Lines)。書き込みは専用タスクに直列化する。
+    // stdout is reserved for protocol traffic (JSON Lines). Writes are serialized in a dedicated task.
     let (out_tx, mut out_rx) = mpsc::channel::<NodeToServerMsg>(OUT_QUEUE_CAPACITY);
     let writer = tokio::spawn(async move {
         let mut writer = BufWriter::new(tokio::io::stdout());
@@ -105,17 +105,17 @@ pub async fn run_stdio(config: StdioConfig) -> Result<(), NodeError> {
         let _ = writer.flush().await;
     });
 
-    // Git Credential Proxy をこのトランスポートに紐付ける
+    // Bind the Git credential proxy to this transport
     state.credentials().attach(out_tx.clone());
 
-    // 1. ハンドシェイク + 未送信イベントのフラッシュ
+    // 1. Handshake + flush of unsent events
     let hello = crate::sync::build_hello(&state).await;
     let _ = out_tx.send(hello).await;
     if let Err(err) = crate::sync::push_outbox(&state, &out_tx).await {
         tracing::warn!("failed to flush outbox at startup: {err}");
     }
 
-    // 2. 双方向ループ (stdin の ServerToNodeMsg / イベントバス → stdout)
+    // 2. Bidirectional loop (stdin `ServerToNodeMsg` / event bus → stdout)
     let (shutdown_tx, mut shutdown_rx) = watch::channel(false);
     let ctx = crate::sync::CommandContext {
         workspace: config.workspace.as_deref(),
@@ -124,9 +124,9 @@ pub async fn run_stdio(config: StdioConfig) -> Result<(), NodeError> {
     };
     let mut bus_rx = state.bus().subscribe();
 
-    // stdin は専用 OS スレッドで読む。tokio の `stdin` は blocking タスクを
-    // ランタイムに常駐させるため、Drain 後にランタイムを破棄するとプロセスが
-    // 終了できなくなる (read(0) が未完了のまま残る)。
+    // Read stdin on a dedicated OS thread. tokio's `stdin` keeps a blocking task
+    // resident in the runtime, so dropping the runtime after a drain would prevent
+    // the process from exiting (leaving read(0) incomplete).
     let (stdin_tx, mut stdin_rx) = mpsc::channel::<Option<String>>(64);
     std::thread::spawn(move || {
         let stdin = std::io::stdin();
@@ -137,7 +137,7 @@ pub async fn run_stdio(config: StdioConfig) -> Result<(), NodeError> {
                 break;
             }
         }
-        // EOF を通知 (送信済みなら無視される)
+        // Signal EOF (ignored if already sent)
         let _ = stdin_tx.blocking_send(None);
     });
 
@@ -173,7 +173,7 @@ pub async fn run_stdio(config: StdioConfig) -> Result<(), NodeError> {
                         .send(NodeToServerMsg::LiveStreamDelta { session_id, delta })
                         .await;
                 }
-                // エフェメラルイベント (キーストローク等) は同期しない
+                // Ephemeral events (keystrokes etc.) are not synchronized
                 Ok(crate::session::SessionBroadcast::Ephemeral(_)) => {}
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
                     tracing::warn!(skipped, "session bus lagged; flushing outbox");
@@ -184,8 +184,8 @@ pub async fn run_stdio(config: StdioConfig) -> Result<(), NodeError> {
         }
     }
 
-    // 3. 終了処理 (ベストエフォート): エージェント / PTY を停止し、
-    //    未送信イベントをフラッシュしてから stdout を閉じる
+    // 3. Shutdown (best effort): stop agents / PTYs, flush unsent events,
+    //    then close stdout
     if let Err(err) = state.kill_all_local("stdio transport ending").await {
         tracing::warn!("failed to stop sessions on shutdown: {err}");
     }
@@ -194,7 +194,8 @@ pub async fn run_stdio(config: StdioConfig) -> Result<(), NodeError> {
     }
     state.credentials().detach();
     if !state.config().ephemeral {
-        // 一時VMはサーバー側でノード行を破棄するため、オフライン記録は通常ノードのみ
+        // Ephemeral VMs have their node row dropped server-side, so offline state is only
+        // recorded for regular nodes
         if let Err(err) = state.mark_offline().await {
             tracing::warn!("failed to mark node offline: {err}");
         }

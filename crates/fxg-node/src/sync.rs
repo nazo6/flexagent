@@ -1,17 +1,19 @@
-//! Outbox Sync Worker (Node ⇔ Central Server)。
+//! Outbox sync worker (Node <-> Central Server).
 //!
-//! 設計: `docs/01-architecture-and-sync.md` §2.2、`docs/03-protocol-and-api.md` §2。
+//! Design: `docs/01-architecture-and-sync.md` §2.2, `docs/03-protocol-and-api.md` §2.
 //!
-//! - **Outbound WebSocket**: 中央サーバーの Node Hub (`/api/v1/node/ws`) へ
-//!   `Authorization: Bearer <NODE_TOKEN>` で接続し、切断時は指数バックオフで再接続する
-//! - **Store-and-Forward**: `NodeHello` (セッション同期状態) → サーバーが必要に応じて
-//!   `ResyncRequest` → `synced_up_to_node_seq` より後のイベントを `EventBatchPush`
-//!   でバッチ送信し、`EventBatchAck` で水位を更新する
-//! - **リアルタイム配信**: 完成イベントは即時 `EventBatchPush`、ストリーミング
-//!   差分は `LiveStreamDelta` として配信する (永続化はターン完了時のみ)
-//! - **リモートコマンド実行**: `StartSession` / `SendPrompt` /
+//! - **Outbound WebSocket**: connects to the central server's node hub
+//!   (`/api/v1/node/ws`) with `Authorization: Bearer <NODE_TOKEN>` and reconnects with
+//!   exponential backoff on disconnect
+//! - **Store-and-Forward**: `NodeHello` (session sync state) -> the server sends
+//!   `ResyncRequest` when needed -> events after `synced_up_to_node_seq` are sent in
+//!   batches with `EventBatchPush`, and `EventBatchAck` updates the watermark
+//! - **Real-time delivery**: completed events are pushed immediately with
+//!   `EventBatchPush`, streaming deltas are delivered as `LiveStreamDelta` (persistence
+//!   happens only when the turn completes)
+//! - **Remote command execution**: executes `StartSession` / `SendPrompt` /
 //!   `RespondPermission` / `ControlSession` / `ManageWorktree` / `GetGitDiff` /
-//!   `Pty*` / `KillAllSessions` を実行し、`command_id` 相関で結果を返す
+//!   `Pty*` / `KillAllSessions` and returns results correlated by `command_id`
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -32,37 +34,38 @@ use crate::error::NodeError;
 use crate::session::SessionBroadcast;
 use crate::session_manager::{ResumeParams, StartSessionParams};
 
-/// 再接続バックオフの初期値。
+/// Initial reconnect backoff.
 const RECONNECT_MIN: Duration = Duration::from_secs(1);
-/// 再接続バックオフの上限。
+/// Upper bound of the reconnect backoff.
 const RECONNECT_MAX: Duration = Duration::from_secs(30);
-/// `EventBatchPush` 1 メッセージあたりのイベント数上限。
+/// Maximum number of events per `EventBatchPush` message.
 const OUTBOX_BATCH_EVENTS: usize = 200;
-/// 送信キュー容量 (PTY forwarder 含む)。
+/// Send queue capacity (including the PTY forwarder).
 const SEND_QUEUE_CAPACITY: usize = 1024;
-/// `NodeHello` で報告するセッション数の上限。
+/// Maximum number of sessions reported in `NodeHello`.
 const HELLO_SESSION_LIMIT: u32 = 1000;
-/// `WorkspaceBundleUpload` 1 メッセージあたりの Base64 チャンク上限 (8 MiB)。
+/// Maximum Base64 chunk size per `WorkspaceBundleUpload` message (8 MiB).
 pub const BUNDLE_CHUNK_B64_BYTES: usize = 8 * 1024 * 1024;
 
-/// サーバーからのコマンド処理コンテキスト (トランスポート差の吸収)。
+/// Processing context for commands from the server (absorbs transport differences).
 ///
-/// 常駐ノード (WS) は全フィールド既定値で、一時VM (`--stdio`) は
-/// ワークスペース上書き・Drain でのプロセス終了シグナルを渡す。
+/// A resident node (WS) uses the default values for all fields; an ephemeral VM
+/// (`--stdio`) passes the workspace override and the process shutdown signal used on
+/// drain.
 #[derive(Default, Clone, Copy)]
 pub(crate) struct CommandContext<'a> {
-    /// `--stdio --workspace` の上書きディレクトリ
-    /// (`StartSession.local_path` を一定のクローン先に固定する)
+    /// Override directory of `--stdio --workspace`
+    /// (pins `StartSession.local_path` to a fixed clone destination)
     pub workspace: Option<&'a Path>,
-    /// 一時VMモードか (`DrainAndShutdown` で Git バンドルを退避する)
+    /// Whether this is ephemeral VM mode (`DrainAndShutdown` backs up a Git bundle)
     pub ephemeral: bool,
-    /// `DrainAndShutdown` 受信時にプロセス終了を要求するシグナル
+    /// Signal that requests process shutdown when `DrainAndShutdown` is received
     pub shutdown: Option<&'a watch::Sender<bool>>,
 }
 
-/// Outbox Sync Worker をシャットダウンまで稼働させる。
+/// Runs the Outbox sync worker until shutdown.
 ///
-/// `NodeDaemon::start` からタスクとして起動される。
+/// Started as a task by `NodeDaemon::start`.
 pub async fn run(
     state: DaemonState,
     server_url: String,
@@ -88,7 +91,7 @@ pub async fn run(
             break;
         }
 
-        // 指数バックオフ (シャットダウン要求で即時中断)
+        // Exponential backoff (interrupted immediately by a shutdown request)
         tokio::select! {
             _ = tokio::time::sleep(backoff) => {}
             _ = shutdown.changed() => break,
@@ -100,7 +103,8 @@ pub async fn run(
     tracing::info!("outbox sync worker stopped");
 }
 
-/// サーバーへ 1 接続分の同期を行う (接続が切れるまで戻らない)。
+/// Performs one connection's worth of sync with the server (does not return until the
+/// connection drops).
 async fn connect_once(
     state: &DaemonState,
     server_url: &str,
@@ -119,23 +123,24 @@ async fn connect_once(
     state.set_central_connected(true);
     tracing::info!(url = %server_url, "connected to central server");
 
-    // 送信キュー (PTY forwarder / コマンド応答の共通経路)
+    // Send queue (shared path for the PTY forwarder / command responses)
     let (out_tx, mut out_rx) = mpsc::channel::<NodeToServerMsg>(SEND_QUEUE_CAPACITY);
-    // Git Credential Proxy (一時VMの GIT_ASKPASS) をこの接続に紐付ける
+    // Bind the Git credential proxy (the ephemeral VM's GIT_ASKPASS) to this connection
     state.credentials().attach(out_tx.clone());
 
-    // 取りこぼし防止のため、flush より先にバスを購読する
-    // (flush に含まれたイベントがライブ配信で重複しても、サーバー側の
-    //  INSERT OR IGNORE と水位 ACK の MAX 更新で無害化される)
+    // Subscribe to the bus before flushing to avoid missing events
+    // (even if events included in the flush are duplicated by live delivery, the
+    //  server's INSERT OR IGNORE and the MAX update of the watermark ACK make it
+    //  harmless)
     let mut bus_rx = state.bus().subscribe();
 
-    // 1. ハンドシェイク
+    // 1. Handshake
     send_msg(&mut sender, &build_hello(state).await).await?;
 
-    // 2. 未送信イベントのフラッシュ
+    // 2. Flush unsent events
     flush_outbox(state, &mut sender).await?;
 
-    // 3. 双方向ループ
+    // 3. Bidirectional loop
     loop {
         tokio::select! {
             _ = shutdown.changed() => {
@@ -146,7 +151,7 @@ async fn connect_once(
                 None => return Ok(()),
             },
             _ = state.hello_refresh().notified() => {
-                // Worktree 変更等でプロジェクト紐付けを報告し直す
+                // Re-report project bindings after a worktree change and so on
                 send_msg(&mut sender, &build_hello(state).await).await?;
             }
             bus = bus_rx.recv() => match bus {
@@ -164,10 +169,10 @@ async fn connect_once(
                     )
                     .await?;
                 }
-                // エフェメラルイベント (キーストローク等) は同期しない
+                // Ephemeral events (keystrokes and so on) are not synced
                 Ok(SessionBroadcast::Ephemeral(_)) => {}
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
-                    // 取りこぼしは Outbox (水位ベース) から回復する
+                    // Recover missed events from the Outbox (watermark based)
                     tracing::warn!(skipped, "session bus lagged; flushing outbox");
                     flush_outbox(state, &mut sender).await?;
                 }
@@ -189,7 +194,7 @@ async fn connect_once(
     }
 }
 
-/// `NodeHello` を組み立てる (ノード情報・プロジェクト・セッション同期状態)。
+/// Builds `NodeHello` (node info, projects, and session sync state).
 pub(crate) async fn build_hello(state: &DaemonState) -> NodeToServerMsg {
     let projects = match state.list_projects_with_path_state().await {
         Ok(projects) => projects
@@ -221,7 +226,7 @@ pub(crate) async fn build_hello(state: &DaemonState) -> NodeToServerMsg {
     let sessions = match state
         .db()
         .list_sessions(&SessionFilter {
-            // アーカイブ済みも同期対象 (Resync の安全網を効かせる)
+            // Archived sessions are also synced (so the resync safety net covers them)
             include_archived: true,
             limit: Some(HELLO_SESSION_LIMIT),
             ..SessionFilter::default()
@@ -254,7 +259,8 @@ pub(crate) async fn build_hello(state: &DaemonState) -> NodeToServerMsg {
     }
 }
 
-/// 未送信イベント (`synced_up_to_node_seq` より後) を送信メッセージ列にする。
+/// Turns unsent events (after `synced_up_to_node_seq`) into a sequence of outgoing
+/// messages.
 pub(crate) async fn outbox_messages(state: &DaemonState) -> anyhow::Result<Vec<NodeToServerMsg>> {
     let mut messages = Vec::new();
     for batch in state.db().extract_outbox().await? {
@@ -267,7 +273,7 @@ pub(crate) async fn outbox_messages(state: &DaemonState) -> anyhow::Result<Vec<N
     Ok(messages)
 }
 
-/// 未送信イベントを送信キューへ流す (stdio トランスポート用)。
+/// Pushes unsent events into the send queue (for the stdio transport).
 pub(crate) async fn push_outbox(
     state: &DaemonState,
     out: &mpsc::Sender<NodeToServerMsg>,
@@ -280,7 +286,7 @@ pub(crate) async fn push_outbox(
     Ok(())
 }
 
-/// 未送信イベント (`synced_up_to_node_seq` より後) をすべて送信する。
+/// Sends all unsent events (after `synced_up_to_node_seq`).
 async fn flush_outbox(
     state: &DaemonState,
     sender: &mut futures_util::stream::SplitSink<
@@ -296,7 +302,7 @@ async fn flush_outbox(
     Ok(())
 }
 
-/// WS へ 1 メッセージ送信する。
+/// Sends a single message over the WS.
 async fn send_msg<S>(sender: &mut S, message: &NodeToServerMsg) -> anyhow::Result<()>
 where
     S: futures_util::Sink<WsMessage> + Unpin,
@@ -307,7 +313,7 @@ where
     Ok(())
 }
 
-/// サーバーからのメッセージを処理する。
+/// Handles messages from the server.
 pub(crate) async fn handle_server_message(
     state: &DaemonState,
     text: &str,
@@ -376,14 +382,16 @@ pub(crate) async fn handle_server_message(
             fork_context_messages,
             restore_git_bundle_b64,
         } => {
-            // 一時VM (`--stdio --workspace`) はクローン済みディレクトリに固定する
-            // (サーバーは VM 内パスを知らないため、要求の local_path は使わない)
+            // An ephemeral VM (`--stdio --workspace`) is pinned to the cloned directory
+            // (the server does not know the path inside the VM, so the requested
+            // local_path is not used)
             let local_path = ctx
                 .workspace
                 .map(Path::to_path_buf)
                 .unwrap_or_else(|| PathBuf::from(&local_path));
 
-            // 退避済み Git バンドルの復元 (別ノードへの引き継ぎ / 一時VM再開)
+            // Restore the backed-up Git bundle (handover to another node / resuming an
+            // ephemeral VM)
             let restore_bundle_file = match restore_git_bundle_b64.as_deref() {
                 Some(b64) => match BASE64.decode(b64.as_bytes()) {
                     Ok(bytes) => match crate::bundle::write_bundle_file(
@@ -412,9 +420,9 @@ pub(crate) async fn handle_server_message(
                 None => None,
             };
 
-            // 実行ディレクトリのプロジェクト紐付けを最新化する
-            // (一時VM はブートストラップ時点で登録済みだが、`last_used_at` の
-            //  更新を兼ねて全経路で再登録する)
+            // Bring the project binding of the working directory up to date
+            // (an ephemeral VM already registered it at bootstrap, but re-register on
+            //  every path to also refresh `last_used_at`)
             if let Err(err) = state.resolve_and_register_project(&local_path).await {
                 send_command_result(out, command_id, Err(err)).await;
                 return;
@@ -834,7 +842,7 @@ pub(crate) async fn handle_server_message(
                     },
                 },
             };
-            // Worktree 変更をハブへ報告する (project_node_bindings の更新)
+            // Report the worktree change to the hub (update of project_node_bindings)
             state.trigger_node_hello();
             let _ = out.send(response).await;
         }
@@ -949,7 +957,7 @@ pub(crate) async fn handle_server_message(
                             serde_json::json!({ "action": action, "message": &message }),
                         )
                         .await;
-                    // 導入状態の変化をハブへ報告する
+                    // Report the change of installation state to the hub
                     state.trigger_node_hello();
                     NodeToServerMsg::AgentOpResult {
                         request_id,
@@ -1028,7 +1036,7 @@ pub(crate) async fn handle_server_message(
     }
 }
 
-/// リモートからの PTY 起動要求を処理する (`allow_remote_pty` ポリシー適用)。
+/// Handles a remote PTY spawn request (applies the `allow_remote_pty` policy).
 async fn handle_remote_pty_spawn(
     state: &DaemonState,
     out: &mpsc::Sender<NodeToServerMsg>,
@@ -1103,7 +1111,7 @@ async fn handle_remote_pty_spawn(
         )
         .await;
 
-    // PTY 出力をサーバーへ転送する
+    // Forward PTY output to the server
     let events = match state.pty().subscribe(&pty_id) {
         Ok(events) => events,
         Err(err) => {
@@ -1137,7 +1145,7 @@ async fn handle_remote_pty_spawn(
                         .await;
                     break;
                 }
-                // 出力の取りこぼしは許容する (最新表示優先)
+                // Dropped output is acceptable (prefer showing the latest)
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
                     tracing::debug!(skipped, "remote pty forwarder lagged");
                 }
@@ -1147,14 +1155,15 @@ async fn handle_remote_pty_spawn(
     });
 }
 
-/// `DrainAndShutdown` を処理する (ベストエフォート)。
+/// Handles `DrainAndShutdown` (best effort).
 ///
-/// 1. 未送信イベントを全フラッシュ
-/// 2. 一時VM (`ctx.ephemeral`) なら `git bundle` を作成して分割アップロード
-/// 3. `DrainComplete` を送信してプロセス終了を要求
+/// 1. Flush all unsent events
+/// 2. If this is an ephemeral VM (`ctx.ephemeral`), create a `git bundle` and upload it
+///    in chunks
+/// 3. Send `DrainComplete` and request process shutdown
 ///
-/// Drain 前にクラッシュした場合の中間イベント損失は許容仕様
-/// (設計: docs/01 §6.4)。
+/// Losing intermediate events when the process crashes before drain is acceptable by
+/// design (design: docs/01 §6.4).
 async fn drain_and_shutdown(
     state: &DaemonState,
     out: &mpsc::Sender<NodeToServerMsg>,
@@ -1164,14 +1173,14 @@ async fn drain_and_shutdown(
 ) {
     tracing::info!(reason, create_git_bundle, "drain and shutdown requested");
 
-    // 1. セッション / PTY を停止する (StatusChanged(Stopped) を記録する)
+    // 1. Stop sessions / PTYs (records StatusChanged(Stopped))
     if ctx.ephemeral
         && let Err(err) = state.kill_all_local(&format!("drain: {reason}")).await
     {
         tracing::warn!("failed to stop sessions on drain: {err}");
     }
 
-    // 2. 未送信イベントを全フラッシュ
+    // 2. Flush all unsent events
     if let Err(err) = push_outbox(state, out).await {
         tracing::warn!("failed to flush outbox on drain: {err}");
     }
@@ -1206,10 +1215,10 @@ async fn drain_and_shutdown(
     }
 }
 
-/// ワークスペースの Git バンドルを生成し、`WorkspaceBundleUpload`
-/// として分割アップロードする。
+/// Generates the workspace Git bundle and uploads it in chunks as
+/// `WorkspaceBundleUpload`.
 ///
-/// セッションが 1 件も無い場合は `Ok(None)` (退避不要)。
+/// Returns `Ok(None)` if there are no sessions (no backup needed).
 async fn upload_workspace_bundle(
     state: &DaemonState,
     out: &mpsc::Sender<NodeToServerMsg>,
@@ -1252,7 +1261,7 @@ async fn upload_workspace_bundle(
     Ok(Some(session.session_id.clone()))
 }
 
-/// `CommandResult` を組み立てて送信する。
+/// Builds and sends a `CommandResult`.
 async fn send_command_result(
     out: &mpsc::Sender<NodeToServerMsg>,
     command_id: String,

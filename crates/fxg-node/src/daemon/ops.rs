@@ -1,8 +1,9 @@
-//! デーモン操作の共有実装 (IPC / Client REST 双方から利用)。
+//! Shared implementation of daemon operations (used by both IPC and Client REST).
 //!
-//! ローカルIPC (`fxg` CLI) と Client REST API (`localhost:7860` /
-//! 中央サーバー中継) は同じ実体操作 (Worktree 管理・プロジェクト解決・監査ログ)
-//! を行うため、実装をここへ集約する。
+//! The local IPC (`fxg` CLI) and the Client REST API (`localhost:7860` /
+//! central server relay) perform the same entity operations (worktree
+//! management, project resolution, audit logging), so the implementation is
+//! centralized here.
 
 use std::path::{Path, PathBuf};
 
@@ -15,27 +16,27 @@ use crate::error::NodeError;
 use crate::project::{self, ResolvedProject};
 use crate::worktree;
 
-/// Git リポジトリ一括スキャン (`fxg project scan`) の最大探索深さ。
+/// Maximum search depth for the bulk Git repository scan (`fxg project scan`).
 const SCAN_MAX_DEPTH: usize = 3;
 
-/// ACP Registry 操作のエラーを [`NodeError::Agent`] へ変換する。
+/// Converts an ACP Registry operation error into [`NodeError::Agent`].
 fn agent_error(err: anyhow::Error) -> NodeError {
     NodeError::Agent(format!("{err:#}"))
 }
 
-/// 監査ログの記録元 (クライアント情報)。
+/// Audit log source (client information).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AuditSource {
-    /// 送信元 IP アドレス
+    /// Source IP address
     pub client_ip: String,
-    /// 認証主体 (`local-ipc` / `bearer:<ip>` 等)
+    /// Authenticated subject (`local-ipc` / `bearer:<ip>` etc.)
     pub auth_subject: String,
     /// User-Agent
     pub user_agent: Option<String>,
 }
 
 impl AuditSource {
-    /// ローカル CLI (IPC) 由来の操作。
+    /// Operation originating from the local CLI (IPC).
     pub fn local() -> Self {
         Self {
             client_ip: "local".to_owned(),
@@ -44,7 +45,7 @@ impl AuditSource {
         }
     }
 
-    /// リモート (中央サーバー経由) 操作。
+    /// Operation from a remote client (via the central server).
     pub fn remote(node_id: &str) -> Self {
         Self {
             client_ip: "server".to_owned(),
@@ -54,21 +55,21 @@ impl AuditSource {
     }
 }
 
-/// Worktree 作成結果。
+/// Worktree creation result.
 #[derive(Debug, Clone)]
 pub struct WorktreeAddOutcome {
-    /// 作成/再利用されたパス
+    /// Created/reused path
     pub path: PathBuf,
-    /// チェックアウトされたブランチ
+    /// Checked-out branch
     pub branch: String,
-    /// 新規作成だったか (`false` は既存 Worktree の再利用)
+    /// Whether it was newly created (`false` means an existing worktree was reused)
     pub created: bool,
-    /// `post_create` フックの実行ログ
+    /// Execution log of the `post_create` hook
     pub hook_logs: Vec<HookLogEntry>,
 }
 
 impl DaemonState {
-    /// 監査ログを `node.db.audit_logs` に記録する (失敗は警告のみ)。
+    /// Records an audit log entry in `node.db.audit_logs` (failures are only warned about).
     pub async fn record_audit(
         &self,
         action: &str,
@@ -90,10 +91,10 @@ impl DaemonState {
         }
     }
 
-    /// セッションのアーカイブ/復元 (IPC / Client REST / 中央サーバー中継の共有実装)。
+    /// Archives/restores a session (shared implementation for IPC / Client REST / central server relay).
     ///
-    /// アーカイブは可逆な可視性フラグで、イベントログは保持される。
-    /// 戻り値はアーカイブ日時 (Unix epoch ms。復元時は `None`)。
+    /// Archiving is a reversible visibility flag; the event log is retained.
+    /// Returns the archive timestamp (Unix epoch ms; `None` when restoring).
     pub async fn set_session_archived(
         &self,
         command_id: &str,
@@ -115,10 +116,11 @@ impl DaemonState {
         Ok(archived_at)
     }
 
-    /// セッションの削除 (IPC / Client REST / 中央サーバー中継の共有実装)。
+    /// Deletes a session (shared implementation for IPC / Client REST / central server relay).
     ///
-    /// 稼働中セッションは停止してから `SessionDeleted` (tombstone) を追記し、
-    /// イベント本文・承認履歴をパージする (復元不能)。
+    /// A running session is stopped first, then `SessionDeleted` (tombstone) is
+    /// appended and the event bodies and permission history are purged
+    /// (irreversible).
     pub async fn purge_session(
         &self,
         command_id: &str,
@@ -138,7 +140,7 @@ impl DaemonState {
         Ok(())
     }
 
-    /// プロジェクトを解決し、`projects` / `project_node_bindings` を更新する。
+    /// Resolves a project and updates `projects` / `project_node_bindings`.
     pub async fn resolve_and_register_project(
         &self,
         dir: &Path,
@@ -148,8 +150,8 @@ impl DaemonState {
             .upsert_project(&resolved.to_project_record())
             .await?;
 
-        // Worktree 内での実行かどうかと現在ブランチを記録する
-        // (取得に失敗した場合はメインリポジトリ扱いで登録する)
+        // Record whether this runs inside a worktree and the current branch
+        // (if retrieval fails, register it as the main repository)
         let is_worktree = match &resolved.git_root {
             Some(root) => crate::git::is_worktree(root).await.unwrap_or(false),
             None => false,
@@ -166,8 +168,8 @@ impl DaemonState {
             ))
             .await?;
 
-        // 再リンク時に古いプロジェクトの紐付けを残さない
-        // (`fxg project link` で project_key を変更した場合など)
+        // Do not leave the old project binding behind when re-linking
+        // (e.g. when the project_key is changed via `fxg project link`)
         self.db()
             .delete_other_project_bindings(
                 self.node_id(),
@@ -176,24 +178,24 @@ impl DaemonState {
             )
             .await?;
         self.db().delete_orphan_projects().await?;
-        // 周辺の変更 (Worktree 検出・プロジェクト紐付け) をハブへ報告する
+        // Report surrounding changes (worktree detection, project binding) to the hub
         self.trigger_node_hello();
         Ok(resolved)
     }
 
-    /// プロジェクト一覧に自ノード紐付けのパス実在確認 (ライブ) を付与して返す。
+    /// Returns the project list with a live check of path existence for the bindings of this node.
     ///
-    /// パス実在は外部要因 (Worktree の手動削除・外部ドライブの取り外し等) で
-    /// 変わるため、クライアントへの返却時に確認する。
+    /// Path existence depends on external factors (manual worktree deletion,
+    /// external drive removal, etc.), so it is checked when returning to clients.
     pub async fn list_projects_with_path_state(&self) -> Result<Vec<ProjectSummary>, NodeError> {
         let mut projects = self.db().list_projects().await?;
         self.refresh_binding_path_state(&mut projects);
         Ok(projects)
     }
 
-    /// 自ノードの紐付けに `path_exists` (ライブ値) を書き込む。
+    /// Writes `path_exists` (live value) into this node's bindings.
     ///
-    /// ノード側 DB の紐付けは自ノード分のみのため、他ノードの確認は行わない。
+    /// The node-side DB only holds this node's bindings, so other nodes are not checked.
     pub fn refresh_binding_path_state(&self, projects: &mut [ProjectSummary]) {
         for project in projects.iter_mut() {
             for binding in project.bindings.iter_mut() {
@@ -204,8 +206,8 @@ impl DaemonState {
         }
     }
 
-    /// `.fxg.toml` に `project_key` を書き込み、紐付けを即時反映する
-    /// (`fxg project link` / Client API 共有実装)。
+    /// Writes `project_key` into `.fxg.toml` and applies the binding immediately
+    /// (`fxg project link` / Client API shared implementation).
     pub async fn project_link(
         &self,
         dir: &Path,
@@ -215,10 +217,10 @@ impl DaemonState {
         self.resolve_and_register_project(dir).await
     }
 
-    /// 指定ディレクトリ (省略時は `node.project_scan_dirs`) 配下の Git
-    /// リポジトリを一括走査して登録する (`fxg project scan`)。
+    /// Scans and registers Git repositories under the given directory (or
+    /// `node.project_scan_dirs` when omitted) (`fxg project scan`).
     ///
-    /// 実際に走査したディレクトリ一覧を返す。
+    /// Returns the list of directories actually scanned.
     pub async fn project_scan(&self, dir: Option<&Path>) -> Result<Vec<String>, NodeError> {
         let config =
             fxg_protocol::config::GlobalConfig::load_from_path(&self.paths().config_path())?;
@@ -249,7 +251,7 @@ impl DaemonState {
             .collect())
     }
 
-    /// Worktree 管理情報をクリーンアップする (`git worktree prune`)。
+    /// Cleans up worktree administrative data (`git worktree prune`).
     pub async fn worktree_prune(
         &self,
         repo: &Path,
@@ -269,10 +271,10 @@ impl DaemonState {
         Ok(output)
     }
 
-    /// ACP Registry カタログ + 導入状態を返す (`GET /api/v1/agents`)。
+    /// Returns the ACP Registry catalog plus install state (`GET /api/v1/agents`).
     pub async fn agents_catalog(&self) -> Result<AgentsResponse, NodeError> {
         let registry = self.session_manager().registry();
-        // レジストリが取得できなくてもカスタム定義は返せるようにする
+        // Custom definitions should still be returnable even if the registry cannot be fetched
         let index = registry.index(false).await.unwrap_or_else(|err| {
             tracing::warn!("failed to load ACP registry: {err:#}");
             Default::default()
@@ -322,16 +324,16 @@ impl DaemonState {
         Ok(AgentsResponse { agents })
     }
 
-    /// エージェント管理操作を実行し、表示メッセージを返す (`fxg agents` の Web UI 版)。
+    /// Runs an agent management action and returns a display message (Web UI version of `fxg agents`).
     ///
-    /// 成功後はノード自身の `nodes` 行 (利用可能エージェント一覧) を更新する。
+    /// On success, updates the node's own `nodes` row (the list of available agents).
     pub async fn manage_agent(&self, action: &AgentAction) -> Result<String, NodeError> {
         let message = self.manage_agent_action(action).await?;
         self.register_node().await?;
         Ok(message)
     }
 
-    /// [`Self::manage_agent`] の実体 (ノード行の更新を行わない)。
+    /// The body of [`Self::manage_agent`] (does not update the node row).
     async fn manage_agent_action(&self, action: &AgentAction) -> Result<String, NodeError> {
         let registry = self.session_manager().registry();
         match action {
@@ -381,9 +383,9 @@ impl DaemonState {
         }
     }
 
-    /// プロジェクトのメインリポジトリ (Worktree ではない) のローカルパスを解決する。
+    /// Resolves the local path of the project's main repository (not a worktree).
     ///
-    /// メイン紐付けが無い場合は最初の紐付けのパスを返す。
+    /// If there is no main binding, returns the path of the first binding.
     pub async fn project_main_repo(&self, project_id: &str) -> Result<PathBuf, NodeError> {
         let projects = self.db().list_projects().await?;
         let project = projects
@@ -404,7 +406,7 @@ impl DaemonState {
         Ok(PathBuf::from(&bindings[0].local_path))
     }
 
-    /// Worktree 一覧を返す (`cwd` または登録済みプロジェクトのメインリポジトリから解決)。
+    /// Returns the worktree list (resolved from `cwd` or the main repositories of registered projects).
     pub async fn worktree_list(
         &self,
         cwd: Option<&Path>,
@@ -448,10 +450,10 @@ impl DaemonState {
         Ok(worktrees)
     }
 
-    /// 新規 Worktree を作成し、紐付けと監査ログを更新する。
+    /// Creates a new worktree and updates the binding and audit log.
     ///
-    /// `expected_project_id` が指定された場合、`repo` の解決結果と一致しなければ
-    /// 拒否する (CLI からの指定ミス検出)。
+    /// If `expected_project_id` is given and does not match the resolution of
+    /// `repo`, the request is rejected (detects mistakes from the CLI).
     pub async fn worktree_add(
         &self,
         repo: &Path,
@@ -505,7 +507,7 @@ impl DaemonState {
         })
         .await?;
 
-        // Worktree をノードの紐付けとして登録する
+        // Register the worktree as a node binding
         self.db()
             .upsert_project(&resolved.to_project_record())
             .await?;
@@ -534,10 +536,10 @@ impl DaemonState {
         })
     }
 
-    /// Worktree を削除し、紐付けと監査ログを更新する。
+    /// Removes a worktree and updates the binding and audit log.
     ///
-    /// `repo_hint` が無い場合は、登録済みのメインリポジトリの Worktree 一覧から
-    /// `target` を含むリポジトリを探索する。
+    /// Without `repo_hint`, searches the worktree lists of registered main
+    /// repositories for the repository containing `target`.
     pub async fn worktree_remove(
         &self,
         repo_hint: Option<&Path>,
@@ -570,7 +572,7 @@ impl DaemonState {
         Ok(())
     }
 
-    /// `target` の Worktree を含むメインリポジトリを探索する。
+    /// Finds the main repository containing the worktree at `target`.
     async fn find_repo_for_worktree(&self, target: &Path) -> Result<PathBuf, NodeError> {
         let projects = self.db().list_projects().await?;
         let main_roots: Vec<PathBuf> = projects

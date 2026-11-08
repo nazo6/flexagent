@@ -1,12 +1,12 @@
-//! ローカルHTTP/WSサーバー (`127.0.0.1:7860`)。
+//! Local HTTP/WS server (`127.0.0.1:7860`).
 //!
-//! 設計: `docs/03-protocol-and-api.md` §3.0〜§3.3、
-//! `docs/01-architecture-and-sync.md` §7.1〜§7.3。
+//! Design: `docs/03-protocol-and-api.md` §3.0-§3.3,
+//! `docs/01-architecture-and-sync.md` §7.1-§7.3.
 //!
-//! ルーター・ハンドラ・検証ロジックは中央サーバー (`fxg server`) と共通の
-//! [`fxg_server::api`] に集約されており、本モジュールは
-//! [`DaemonState`] (Client API バックエンド実装) を渡してローカル
-//! (`127.0.0.1` ループバック限定) で配信するだけである。
+//! The router, handlers and validation logic are shared with the central server
+//! (`fxg server`) in [`fxg_server::api`]; this module only supplies the
+//! [`DaemonState`] (the Client API backend implementation) and serves it locally
+//! (loopback `127.0.0.1` only).
 
 use std::net::SocketAddr;
 
@@ -16,7 +16,7 @@ use tokio::sync::watch;
 
 use super::DaemonState;
 
-/// HTTPサーバーを起動する (シャットダウン要求まで稼働)。
+/// Starts the HTTP server (runs until a shutdown request arrives).
 pub async fn serve(
     state: DaemonState,
     listener: tokio::net::TcpListener,
@@ -39,10 +39,10 @@ pub async fn serve(
     }
 }
 
-/// ルーターを構築する (テストから直接利用できるよう `pub(crate)`)。
+/// Builds the router (`pub(crate)` so tests can use it directly).
 ///
-/// ローカルノードはループバック (`localhost` / `127.0.0.1` / `[::1]`) のみを
-/// 許可する (DNS Rebinding / CSWSH 対策。設計: `docs/01` §7.1)。
+/// Local nodes only allow loopback (`localhost` / `127.0.0.1` / `[::1]`)
+/// (DNS rebinding / CSWSH mitigation; design: `docs/01` §7.1).
 pub(crate) fn router(daemon: DaemonState, http_addr: SocketAddr) -> Router {
     client_router(daemon, ClientApiOptions::local(http_addr.port()))
 }
@@ -69,7 +69,7 @@ mod tests {
         (daemon, dir)
     }
 
-    /// テスト用の `Host` ヘッダ値 (実際にバインドされたポートを使う)。
+    /// `Host` header value for tests (uses the actually bound port).
     fn host_of(daemon: &NodeDaemon) -> String {
         format!("127.0.0.1:{}", daemon.http_addr().port())
     }
@@ -103,7 +103,7 @@ mod tests {
         let token = daemon.state().auth_token();
         let host = host_of(&daemon);
 
-        // 未認証 → 401
+        // Unauthenticated → 401
         let response = app
             .clone()
             .oneshot(get(&host, "/api/v1/system/info", None))
@@ -113,7 +113,7 @@ mod tests {
         let body = body_json(response).await;
         assert_eq!(body["error"]["code"], "UNAUTHORIZED");
 
-        // 不正な Host → 403 (DNS Rebinding 対策)
+        // Invalid Host → 403 (DNS rebinding mitigation)
         let request = HttpRequest::builder()
             .method("GET")
             .uri("/api/v1/system/info")
@@ -126,7 +126,7 @@ mod tests {
         let body = body_json(response).await;
         assert_eq!(body["error"]["code"], "FORBIDDEN");
 
-        // 誤ったトークン → 401
+        // Wrong token → 401
         let response = app
             .clone()
             .oneshot(get(&host, "/api/v1/system/info", Some("deadbeef")))
@@ -134,7 +134,7 @@ mod tests {
             .expect("response");
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 
-        // 正しいトークン (Bearer) → 200
+        // Correct token (Bearer) → 200
         let response = app
             .clone()
             .oneshot(get(&host, "/api/v1/system/info", Some(&token)))
@@ -200,7 +200,7 @@ mod tests {
         let token = daemon.state().auth_token();
         let host = host_of(&daemon);
 
-        // 正しいトークンで login → 204 + HttpOnly / SameSite=Strict Cookie
+        // Login with the correct token → 204 + HttpOnly / SameSite=Strict cookie
         let login_body = format!("{{\"token\":\"{token}\"}}");
         let response = app
             .clone()
@@ -222,7 +222,7 @@ mod tests {
         assert!(cookie.contains("HttpOnly"), "{cookie}");
         assert!(cookie.contains("SameSite=Strict"), "{cookie}");
 
-        // body のトークンが不一致 → 401 (Bearer は正しくても拒否)
+        // Mismatched body token → 401 (rejected even with a valid Bearer header)
         let response = app
             .clone()
             .oneshot(post_json(
@@ -235,7 +235,7 @@ mod tests {
             .expect("response");
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 
-        // logout → 204 + 失効 Cookie (Max-Age=0)
+        // Logout → 204 + expiring cookie (Max-Age=0)
         let response = app
             .clone()
             .oneshot(post_json(&host, "/api/v1/auth/logout", Some(&token), "{}"))
@@ -262,7 +262,7 @@ mod tests {
         let host = host_of(&daemon);
         let token = daemon.state().auth_token();
 
-        // 外部オリジンからの WS ハンドシェイクは 403 で拒否される (CSWSH 対策)
+        // WS handshakes from external origins are rejected with 403 (CSWSH mitigation)
         let request = ws_request(&host, &token, "http://evil.example.com");
         let err = tokio_tungstenite::connect_async(request)
             .await
@@ -280,7 +280,7 @@ mod tests {
             .expect("stop");
     }
 
-    /// WS ハンドシェイク用のリクエストを組み立てる。
+    /// Builds a request for a WS handshake.
     fn ws_request(
         host: &str,
         token: &str,
@@ -310,7 +310,7 @@ mod tests {
         let host = host_of(&daemon);
         let token = daemon.state().auth_token();
 
-        // 購読前に1イベントを永続化しておく (リプレイの検証用)
+        // Persist one event before subscribing (to verify replay)
         let session_id = fxg_protocol::util::uuid_v7();
         daemon
             .state()
@@ -339,7 +339,7 @@ mod tests {
             .expect("handshake");
         assert_eq!(response.status(), 101, "self origin must upgrade");
 
-        // Subscribe → リプレイ
+        // Subscribe → replay
         let subscribe = fxg_protocol::client_api::ClientWsMessage::Subscribe {
             since_cursor: None,
             focused_session_id: Some(session_id.clone()),
@@ -362,7 +362,7 @@ mod tests {
             other => panic!("unexpected message: {other:?}"),
         }
 
-        // ライブ配信: 新規イベントが push される
+        // Live streaming: new events are pushed
         daemon
             .state()
             .bus()
@@ -383,7 +383,7 @@ mod tests {
             other => panic!("unexpected message: {other:?}"),
         }
 
-        // ストリーミング差分はライブ配信される (永続化されない)
+        // Streaming deltas are delivered live (not persisted)
         daemon.state().bus().publish_delta(
             session_id.clone(),
             fxg_protocol::common::StreamDeltaPayload::AgentMessageDelta {
@@ -434,7 +434,7 @@ mod tests {
         let host = host_of(&daemon);
         let token = daemon.state().auth_token();
 
-        // 購読前に1イベントを永続化しておく (cursor は 1 以降になる)
+        // Persist one event before subscribing (the cursor becomes 1 or later)
         let session_id = fxg_protocol::util::uuid_v7();
         daemon
             .state()
@@ -462,8 +462,8 @@ mod tests {
             .await
             .expect("handshake");
 
-        // DB 再作成・リセット後に残った古いカーソル (ストア末尾より先) を指定すると、
-        // スキップせず 0 から全量リプレイされる
+        // Passing a stale cursor left over from a DB rebuild/reset (beyond the end of
+        // the store) replays everything from 0 instead of skipping
         let subscribe = fxg_protocol::client_api::ClientWsMessage::Subscribe {
             since_cursor: Some(9_999),
             focused_session_id: None,
@@ -505,7 +505,7 @@ mod tests {
             .await
             .expect("handshake");
 
-        // 存在しないセッションへの送信は INVALID_STATE の CommandResult になる
+        // Sending to a nonexistent session returns an INVALID_STATE CommandResult
         let command = fxg_protocol::client_api::ClientWsMessage::SendPrompt {
             command_id: "c1".to_owned(),
             session_id: "missing-session".to_owned(),
@@ -540,7 +540,7 @@ mod tests {
             .expect("stop");
     }
 
-    /// WS から次の `ServerWsMessage` を受信する (タイムアウト付き)。
+    /// Receives the next `ServerWsMessage` from the WS (with a timeout).
     async fn next_ws_message<S>(socket: &mut S) -> ServerWsMessage
     where
         S: futures_util::Sink<tokio_tungstenite::tungstenite::Message>

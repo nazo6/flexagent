@@ -1,21 +1,22 @@
-//! FlexAgent ノードデーモンクレート (`fxg-node`)
+//! FlexAgent node daemon crate (`fxg-node`)
 //!
-//! 常駐ノード (`fxg daemon`) の中核実装。ローカルIPCサーバー (Named Pipe / UDS)、
-//! ローカル HTTP/WS サーバー (`127.0.0.1:7860`)、論理プロジェクト解決、
-//! Git Worktree 管理、Shadow Git Tree スナップショット、Outbox 同期ワーカーを含む。
+//! Core implementation of the resident node (`fxg daemon`). It provides the local IPC
+//! server (Named Pipe / UDS), the local HTTP/WS server (`127.0.0.1:7860`), logical
+//! project resolution, Git Worktree management, Shadow Git Tree snapshots, and the
+//! Outbox sync worker.
 //!
-//! 設計: `docs/01-architecture-and-sync.md` / `docs/04-agent-drivers-and-windows.md`
-//! / `docs/05-cli-and-pwa-ui.md`。
+//! Design: `docs/01-architecture-and-sync.md` / `docs/04-agent-drivers-and-windows.md`
+//! / `docs/05-cli-and-pwa-ui.md`.
 //!
-//! # モジュール構成
+//! # Modules
 //!
-//! - `paths`: `~/.flexagent/` のパス解決とローカルIPC エンドポイント
-//! - `git`: `git` CLI ラッパー
-//! - `project`: 論理プロジェクト (`project_key`) の解決
-//! - `worktree`: Git Worktree の検出・作成・削除とフック実行
-//! - `snapshot`: Shadow Git Tree によるターン単位スナップショット / 復元
-//! - `session`: セッションイベントの即時配信と永続化 (Compaction)
-//! - `daemon`: ノードデーモン (ローカルHTTP/WS サーバー + ローカルIPC + 認証)
+//! - `paths`: `~/.flexagent/` path resolution and local IPC endpoints
+//! - `git`: `git` CLI wrapper
+//! - `project`: logical project (`project_key`) resolution
+//! - `worktree`: Git Worktree detection, creation, removal, and hook execution
+//! - `snapshot`: per-turn snapshots / restore via Shadow Git Tree
+//! - `session`: immediate delivery and persistence of session events (compaction)
+//! - `daemon`: node daemon (local HTTP/WS server + local IPC + authentication)
 
 #![warn(missing_docs)]
 

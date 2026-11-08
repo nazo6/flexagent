@@ -1,45 +1,46 @@
-//! Git Worktree の解決・作成・削除。
+//! Resolving, creating, and removing Git worktrees.
 //!
-//! 設計: `docs/01-architecture-and-sync.md` §5、`docs/05-cli-and-pwa-ui.md` §2.2/§2.3。
+//! Design: `docs/01-architecture-and-sync.md` §5, `docs/05-cli-and-pwa-ui.md`
+//! §2.2/§2.3.
 //!
-//! - `fxg` が新規作成する Worktree は、親フォルダを散らかさないようデフォルトで
-//!   `~/.flexagent/worktrees/<project>/<branch>` に集約する
-//!   (`worktree_dir_template` で変更可能)。
-//! - 作成時は `.fxg.toml` の `copy_files` (`.env` 等の未追跡ファイルコピー) と
-//!   `post_create` (初期化コマンド) フックを実行する。
-//! - 検出は `git worktree list --porcelain` を用い、メインリポジトリを含む
-//!   すべての Worktree を列挙する。
+//! - Worktrees created by `fxg` are aggregated under
+//!   `~/.flexagent/worktrees/<project>/<branch>` by default so that the parent folder
+//!   is not cluttered (`worktree_dir_template` can change this).
+//! - On creation, the `copy_files` (copying untracked files such as `.env`) and
+//!   `post_create` (initialization command) hooks from `.fxg.toml` are executed.
+//! - Detection uses `git worktree list --porcelain` and lists every worktree including
+//!   the main repository.
 
 use std::path::{Path, PathBuf};
 
 use crate::error::NodeError;
 use crate::git;
 
-/// `git worktree list --porcelain` の1エントリ。
+/// One entry of `git worktree list --porcelain`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorktreeEntry {
-    /// Worktree の絶対パス
+    /// Absolute path of the worktree
     pub path: PathBuf,
-    /// HEAD コミット
+    /// HEAD commit
     pub head: Option<String>,
-    /// チェックアウト中のブランチ名 (`refs/heads/` を除いた短縮名)
+    /// Name of the checked-out branch (short name without `refs/heads/`)
     pub branch: Option<String>,
-    /// bare リポジトリか
+    /// Whether this is a bare repository
     pub is_bare: bool,
-    /// detached HEAD か
+    /// Whether HEAD is detached
     pub is_detached: bool,
-    /// メインリポジトリ (最初のエントリ) か
+    /// Whether this is the main repository (the first entry)
     pub is_main: bool,
 }
 
-/// Worktree 一覧を取得する (メインリポジトリを先頭に返す)。
+/// Retrieves the worktree list (the main repository comes first).
 pub async fn list_worktrees(repo: &Path) -> Result<Vec<WorktreeEntry>, NodeError> {
     ensure_repository(repo).await?;
     let output = git::run_git(repo, &["worktree", "list", "--porcelain"]).await?;
     Ok(parse_worktree_list(&output))
 }
 
-/// `git worktree list --porcelain` の出力をパースする。
+/// Parses the output of `git worktree list --porcelain`.
 pub fn parse_worktree_list(output: &str) -> Vec<WorktreeEntry> {
     let mut entries: Vec<WorktreeEntry> = Vec::new();
     let mut current = WorktreeEntry {
@@ -97,20 +98,21 @@ pub fn parse_worktree_list(output: &str) -> Vec<WorktreeEntry> {
     entries
 }
 
-/// Worktree 配置先テンプレートのプレースホルダ解決に使う入力。
+/// Input used to resolve placeholders in the worktree location template.
 #[derive(Debug, Clone)]
 pub struct WorktreePathContext {
     /// `~/.flexagent`
     pub fxg_home: PathBuf,
-    /// 論理プロジェクトID (`github.com/nazo6/flexagent` 等)
+    /// Logical project ID (`github.com/nazo6/flexagent`, etc.)
     pub project_id: String,
-    /// メインリポジトリのパス
+    /// Path of the main repository
     pub repo_path: PathBuf,
-    /// 作成するブランチ名 (`feat/auth` 等)
+    /// Branch name to create (`feat/auth`, etc.)
     pub branch: String,
 }
 
-/// テンプレート中の `{project}` / `{branch}` 用にスラッシュ等をハイフンへ正規化する。
+/// Normalizes slashes and similar characters to hyphens for `{project}` / `{branch}`
+/// in templates.
 pub fn slugify_project(project_id: &str) -> String {
     project_id
         .chars()
@@ -121,7 +123,7 @@ pub fn slugify_project(project_id: &str) -> String {
         .collect()
 }
 
-/// ブランチ名をディレクトリ名向けに正規化する (`feat/auth` → `feat-auth`)。
+/// Normalizes a branch name for use as a directory name (`feat/auth` -> `feat-auth`).
 pub fn slugify_branch(branch: &str) -> String {
     branch
         .chars()
@@ -132,10 +134,10 @@ pub fn slugify_branch(branch: &str) -> String {
         .collect()
 }
 
-/// `worktree_dir_template` を解決する。
+/// Resolves `worktree_dir_template`.
 ///
-/// 利用可能プレースホルダ: `{fxg_home}` / `{project}` / `{repo}` / `{repo_parent}` /
-/// `{branch}`。
+/// Available placeholders: `{fxg_home}` / `{project}` / `{repo}` / `{repo_parent}` /
+/// `{branch}`.
 pub fn resolve_worktree_dir(template: &str, ctx: &WorktreePathContext) -> PathBuf {
     let repo_name = ctx
         .repo_path
@@ -157,61 +159,62 @@ pub fn resolve_worktree_dir(template: &str, ctx: &WorktreePathContext) -> PathBu
     PathBuf::from(resolved)
 }
 
-/// `post_create` などフックコマンドの実行結果 ([`HookLogEntry`] を再公開)。
+/// Result of running a hook command such as `post_create` (re-export of
+/// [`HookLogEntry`]).
 pub use fxg_protocol::common::HookLogEntry;
 
-/// Worktree 作成要求。
+/// Request to create a worktree.
 #[derive(Debug, Clone)]
 pub struct WorktreeAddRequest<'a> {
-    /// メインリポジトリのパス (Git ルート)
+    /// Path of the main repository (Git root)
     pub repo: &'a Path,
-    /// 論理プロジェクトID
+    /// Logical project ID
     pub project_id: &'a str,
-    /// 作成するブランチ名
+    /// Branch name to create
     pub branch: &'a str,
-    /// 起点ブランチ (省略時は現在の HEAD)
+    /// Base branch (current HEAD if omitted)
     pub base_branch: Option<&'a str>,
-    /// 配置先テンプレート (省略時はデフォルト)
+    /// Location template (default if omitted)
     pub dir_template: &'a str,
-    /// 配置先の明示指定 (テンプレートより優先)
+    /// Explicit location (takes precedence over the template)
     pub new_path: Option<&'a Path>,
     /// `~/.flexagent`
     pub fxg_home: &'a Path,
-    /// メインリポジトリからコピーする未追跡ファイル
+    /// Untracked files to copy from the main repository
     pub copy_files: &'a [String],
-    /// 作成直後に実行する初期化コマンド
+    /// Initialization command to run right after creation
     pub post_create: &'a [String],
 }
 
-/// Worktree 作成結果。
+/// Result of creating a worktree.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorktreeAddOutcome {
-    /// Worktree のパス
+    /// Path of the worktree
     pub path: PathBuf,
-    /// ブランチ名
+    /// Branch name
     pub branch: String,
-    /// 新規作成されたか (`false` は既存 Worktree の再利用)
+    /// Whether it was newly created (`false` means an existing worktree was reused)
     pub created: bool,
-    /// コピーしたファイル (リポジトリ相対パス)
+    /// Copied files (repository-relative paths)
     pub copied_files: Vec<String>,
-    /// `post_create` フックの実行ログ
+    /// Execution logs of the `post_create` hook
     pub hook_logs: Vec<HookLogEntry>,
 }
 
-/// Worktree を作成する (同一ブランチの Worktree が既にあれば再利用する)。
+/// Creates a worktree (reuses an existing worktree on the same branch if present).
 pub async fn ensure_worktree(
     request: &WorktreeAddRequest<'_>,
 ) -> Result<WorktreeAddOutcome, NodeError> {
     ensure_repository(request.repo).await?;
 
-    // 既存 Worktree の再利用 (同一ブランチ)
+    // Reuse an existing worktree (same branch)
     let existing = list_worktrees(request.repo).await?;
     if let Some(entry) = existing
         .iter()
         .find(|entry| entry.branch.as_deref() == Some(request.branch) && entry.path != request.repo)
     {
-        // `git worktree list` はシンボリックリンクを解決したパスを返すため
-        // (macOS の /var → /private/var 等)、返却パスを正規化して揃える
+        // `git worktree list` returns symlink-resolved paths (e.g. /var ->
+        // /private/var on macOS), so normalize the returned path to match
         let path = fxg_pty::canonicalize(&entry.path).unwrap_or_else(|_| entry.path.clone());
         return Ok(WorktreeAddOutcome {
             path,
@@ -249,7 +252,7 @@ pub async fn ensure_worktree(
         std::fs::create_dir_all(parent).map_err(|source| NodeError::io(parent, source))?;
     }
 
-    // ブランチが既存なら checkout、未作成なら -b で新規作成
+    // If the branch already exists, check it out; otherwise create it with -b
     let branch_exists = git::try_git(
         request.repo,
         &[
@@ -276,7 +279,7 @@ pub async fn ensure_worktree(
         git::run_git(request.repo, &args).await?;
     }
 
-    // copy_files: メインリポジトリから未追跡ファイルをコピー
+    // copy_files: copy untracked files from the main repository
     let mut copied_files = Vec::new();
     for relative in request.copy_files {
         let source = request.repo.join(relative);
@@ -294,7 +297,7 @@ pub async fn ensure_worktree(
         copied_files.push(relative.clone());
     }
 
-    // post_create: 新規 Worktree 内で初期化コマンドを実行
+    // post_create: run the initialization command inside the new worktree
     let mut hook_logs = Vec::new();
     for command in request.post_create {
         let log = run_hook_command(&path, command).await?;
@@ -308,7 +311,7 @@ pub async fn ensure_worktree(
         hook_logs.push(log);
     }
 
-    // シンボリックリンク解決後のパスへ揃える (git 側の記録と一致させる)
+    // Normalize to the symlink-resolved path (to match what git records)
     let path = fxg_pty::canonicalize(&path).unwrap_or(path);
 
     Ok(WorktreeAddOutcome {
@@ -320,7 +323,7 @@ pub async fn ensure_worktree(
     })
 }
 
-/// Worktree を削除する (`git worktree remove`)。
+/// Removes a worktree (`git worktree remove`).
 pub async fn remove_worktree(repo: &Path, path: &Path, force: bool) -> Result<(), NodeError> {
     ensure_repository(repo).await?;
     let path_str = path.to_string_lossy().into_owned();
@@ -333,16 +336,16 @@ pub async fn remove_worktree(repo: &Path, path: &Path, force: bool) -> Result<()
     Ok(())
 }
 
-/// 削除済みディレクトリの Worktree 管理情報をクリーンアップする。
+/// Cleans up worktree bookkeeping for deleted directories.
 pub async fn prune_worktrees(repo: &Path) -> Result<String, NodeError> {
     ensure_repository(repo).await?;
     git::run_git(repo, &["worktree", "prune"]).await
 }
 
-/// フック実行のタイムアウト (秒)。
+/// Hook execution timeout (seconds).
 const HOOK_TIMEOUT_SECS: u64 = 60;
 
-/// フックコマンドをシェル経由で実行する (失敗しても `Err` にはしない)。
+/// Runs a hook command through the shell (a failure does not become `Err`).
 pub async fn run_hook_command(dir: &Path, command: &str) -> Result<HookLogEntry, NodeError> {
     let (program, flag) = if cfg!(windows) {
         ("cmd", "/C")
@@ -545,7 +548,7 @@ detached
         assert!(outcome.hook_logs[0].success);
         assert!(outcome.hook_logs[0].output.contains("hook-ok"));
 
-        // 一覧に現れる
+        // Appears in the list
         let entries = list_worktrees(&repo).await.expect("list");
         assert!(
             entries
@@ -553,15 +556,15 @@ detached
                 .any(|entry| entry.branch.as_deref() == Some("feat/auth"))
         );
 
-        // 2 回目は再利用 (作成しない)
+        // The second call reuses it (does not create)
         let again = ensure_worktree(&request).await.expect("ensure again");
         assert!(!again.created);
         assert_eq!(again.path, outcome.path);
 
-        // 未追跡ファイル (.env) があるため force なしでは削除できない
+        // An untracked file (.env) exists, so it cannot be removed without force
         assert!(
             remove_worktree(&repo, &outcome.path, false).await.is_err(),
-            "未追跡ファイルがある場合は force が必要"
+            "an untracked file exists, so force is required"
         );
         remove_worktree(&repo, &outcome.path, true)
             .await
@@ -578,7 +581,7 @@ detached
         let home = dir.path().join("fxg-home");
         std::fs::create_dir_all(&repo).expect("mkdir");
         testutil::init_test_repo(&repo).await;
-        // main から派生した base ブランチを作る
+        // Create a base branch derived from main
         git::run_git(&repo, &["checkout", "-q", "-b", "develop"])
             .await
             .expect("checkout");
@@ -605,7 +608,7 @@ detached
         let outcome = ensure_worktree(&request).await.expect("ensure");
         assert!(
             outcome.path.join("dev.txt").is_file(),
-            "base_branch の内容がチェックアウトされる"
+            "the contents of base_branch are checked out"
         );
     }
 
