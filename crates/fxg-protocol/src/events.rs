@@ -252,6 +252,9 @@ pub enum UnifiedEventPayload {
         restored_files: u64,
         /// Number of removed files
         removed_files: u64,
+        /// Whether the agent conversation was rebuilt (files always restore)
+        #[serde(default)]
+        context_rebuilt: bool,
     },
     /// A change of the session's archive state (hidden from / restored to the list).
     ///

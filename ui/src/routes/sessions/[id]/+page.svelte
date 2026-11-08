@@ -140,6 +140,7 @@
   // State of the Revert (Shadow Git Tree rollback) confirmation dialog
   let revertSeq = $state<number | null>(null);
   let reverting = $state(false);
+  let revertFilesOnly = $state(false);
 
   function scrollToBottom() {
     if (!chatContainer) return;
@@ -241,7 +242,7 @@
     if (!sessionId || revertSeq === null || reverting) return;
     reverting = true;
     try {
-      const result = await sync.revertSession(sessionId, revertSeq);
+      const result = await sync.revertSession(sessionId, revertSeq, revertFilesOnly);
       toast.success(
         m.session_revert_success({
           seq: result.target_node_seq,
@@ -516,6 +517,10 @@
           <code>node_seq={revertSeq}</code>{m.session_revert_confirm_description_post()}
         </AlertDialog.Description>
       </AlertDialog.Header>
+      <label class="flex items-center gap-2 text-xs">
+        <input type="checkbox" bind:checked={revertFilesOnly} />
+        {m.session_revert_files_only()}
+      </label>
       <AlertDialog.Footer>
         <AlertDialog.Cancel disabled={reverting}>{m.common_cancel()}</AlertDialog.Cancel>
         <AlertDialog.Action

@@ -639,6 +639,7 @@ impl DaemonClient {
         &mut self,
         session_id: &str,
         target_node_seq: Option<u64>,
+        files_only: bool,
     ) -> Result<SessionRevertResponse> {
         let command_id = self.command_id();
         let result = self
@@ -646,6 +647,7 @@ impl DaemonClient {
                 command_id,
                 session_id: session_id.into(),
                 target_node_seq,
+                files_only,
             })
             .await?;
         match result {
@@ -655,12 +657,14 @@ impl DaemonClient {
                 backup_tree_hash,
                 restored_files,
                 removed_files,
+                context_rebuilt,
             } => Ok(SessionRevertResponse {
                 target_node_seq,
                 restored_tree_hash,
                 backup_tree_hash,
                 restored_files,
                 removed_files,
+                context_rebuilt,
             }),
             other => bail!("unexpected ipc result: {other:?}"),
         }

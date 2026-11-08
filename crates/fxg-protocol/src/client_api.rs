@@ -465,6 +465,9 @@ pub struct SessionRevertRequest {
     /// `node_seq` of the `UserMessage` used as the revert point
     /// (defaults to the latest turn)
     pub target_node_seq: Option<u64>,
+    /// Restore only files and keep the current agent conversation
+    #[serde(default)]
+    pub files_only: bool,
 }
 
 /// `POST /api/v1/sessions/:id/revert` response.
@@ -482,6 +485,9 @@ pub struct SessionRevertResponse {
     pub restored_files: u64,
     /// Number of removed files
     pub removed_files: u64,
+    /// Whether the agent conversation was rebuilt (files always restore)
+    #[serde(default)]
+    pub context_rebuilt: bool,
 }
 
 /// `POST /api/v1/sessions/:id/resume` request.

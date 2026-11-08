@@ -91,6 +91,11 @@ pub struct NativeResumeUnavailable(pub String);
 #[error("agent authentication is required")]
 pub struct AgentAuthRequired(pub Vec<fxg_protocol::common::AgentAuthMethodInfo>);
 
+/// Native `session/fork` is unavailable; the caller should fall back to replay.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("native session fork is not available: {0}")]
+pub struct NativeForkUnavailable(pub String);
+
 /// Session start request.
 #[derive(Debug, Clone)]
 pub struct StartSessionRequest {
@@ -109,6 +114,8 @@ pub struct StartSessionRequest {
     pub initial_mode: Option<String>,
     /// Resume selection from an existing agent session (`None` means a fresh session)
     pub resume: Option<ResumeRequest>,
+    /// Source ACP session ID for a native `session/fork` (`None` = no fork)
+    pub fork_from: Option<String>,
 }
 
 /// Result of [`AgentDriver::start_session`].
@@ -299,6 +306,7 @@ mod tests {
                     extra_args: vec![],
                     initial_mode: None,
                     resume: None,
+                    fork_from: None,
                 },
                 tx,
             )

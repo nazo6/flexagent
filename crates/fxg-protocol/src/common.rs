@@ -999,6 +999,8 @@ crate::open_string_enum! {
         Fork => "fork",
         /// History injected when resuming a session
         Resume => "resume",
+        /// History injected when reverting a session
+        Revert => "revert",
     }
 }
 

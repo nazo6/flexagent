@@ -141,6 +141,9 @@ pub enum IpcClientMessage {
         /// `node_seq` of the `UserMessage` used as the revert point
         /// (defaults to the latest turn)
         target_node_seq: Option<u64>,
+        /// Restore only files and keep the current agent conversation
+        #[serde(default)]
+        files_only: bool,
     },
     /// Branches the conversation from a given turn (`fxg session fork`).
     ///
@@ -347,6 +350,8 @@ pub enum IpcResult {
         restored_files: u64,
         /// Number of removed files
         removed_files: u64,
+        /// Whether the agent conversation was rebuilt
+        context_rebuilt: bool,
     },
     /// Result of `SessionFork`
     SessionForked {
@@ -611,6 +616,7 @@ mod tests {
                 command_id: "c1".into(),
                 session_id: "s1".into(),
                 target_node_seq: Some(4),
+                files_only: false,
             },
             IpcClientMessage::SessionFork {
                 command_id: "c2".into(),
@@ -632,6 +638,7 @@ mod tests {
             backup_tree_hash: Some("b".repeat(40)),
             restored_files: 3,
             removed_files: 1,
+            context_rebuilt: true,
         };
         let json = serde_json::to_value(&reverted).unwrap();
         assert_eq!(json["result"], "session_reverted");

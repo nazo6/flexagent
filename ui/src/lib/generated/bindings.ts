@@ -1441,6 +1441,8 @@ export type SessionRevertRequest = {
 	 *  (defaults to the latest turn)
 	 */
 	target_node_seq: number | null,
+	/**  Restore only files and keep the current agent conversation */
+	files_only?: boolean,
 };
 
 /**  `POST /api/v1/sessions/:id/revert` response. */
@@ -1458,6 +1460,8 @@ export type SessionRevertResponse = {
 	restored_files: number,
 	/**  Number of removed files */
 	removed_files: number,
+	/**  Whether the agent conversation was rebuilt (files always restore) */
+	context_rebuilt?: boolean,
 };
 
 /**  Session status (same values as `sessions.status`). */
@@ -1813,6 +1817,8 @@ export type UnifiedEventPayload =
 	restored_files: number,
 	/**  Number of removed files */
 	removed_files: number,
+	/**  Whether the agent conversation was rebuilt (files always restore) */
+	context_rebuilt?: boolean,
 } } | 
 /**
  *  A change of the session's archive state (hidden from / restored to the list).

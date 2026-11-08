@@ -467,9 +467,11 @@ export class SyncStore {
   async revertSession(
     sessionId: string,
     targetNodeSeq: number | null,
+    filesOnly = false,
   ): Promise<SessionRevertResponse> {
     const result = await this.connection.client.revertSession(sessionId, {
       target_node_seq: targetNodeSeq,
+      files_only: filesOnly,
     });
     await Promise.all([
       this.refreshSessions(),

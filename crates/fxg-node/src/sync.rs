@@ -570,10 +570,16 @@ pub(crate) async fn handle_server_message(
             command_id,
             session_id,
             target_node_seq,
+            files_only,
         } => {
             let outcome = state
                 .session_manager()
-                .revert(&command_id, session_id.as_str(), target_node_seq)
+                .revert(
+                    &command_id,
+                    session_id.as_str(),
+                    target_node_seq,
+                    files_only,
+                )
                 .await;
             let message = match outcome {
                 Ok(outcome) => NodeToServerMsg::RevertResult {
@@ -586,6 +592,7 @@ pub(crate) async fn handle_server_message(
                         backup_tree_hash: outcome.backup_tree_hash,
                         restored_files: outcome.restored_files as u64,
                         removed_files: outcome.removed_files as u64,
+                        context_rebuilt: outcome.context_rebuilt,
                     }),
                     error: None,
                 },

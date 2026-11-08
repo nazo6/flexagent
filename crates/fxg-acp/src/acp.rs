@@ -31,12 +31,13 @@ use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::util::MatchDispatch;
 use agent_client_protocol::v1::schema::{
     AgentCapabilities, AuthCapabilities, AuthMethod, CancelNotification, ClientCapabilities,
-    CompleteElicitationNotification, ContentBlock, ContentChunk, CreateElicitationRequest,
-    CreateElicitationResponse, CreateTerminalRequest, CreateTerminalResponse,
-    ElicitationAcceptAction, ElicitationAction as AcpElicitationAction, ElicitationCapabilities,
-    ElicitationContentValue, ElicitationFormCapabilities, ElicitationMode, ElicitationScope,
-    FileSystemCapabilities, ImageContent, Implementation, InitializeRequest, KillTerminalRequest,
-    KillTerminalResponse, NewSessionRequest, PermissionOptionKind as AcpPermissionOptionKind,
+    CloseSessionRequest, CompleteElicitationNotification, ContentBlock, ContentChunk,
+    CreateElicitationRequest, CreateElicitationResponse, CreateTerminalRequest,
+    CreateTerminalResponse, ElicitationAcceptAction, ElicitationAction as AcpElicitationAction,
+    ElicitationCapabilities, ElicitationContentValue, ElicitationFormCapabilities, ElicitationMode,
+    ElicitationScope, FileSystemCapabilities, ForkSessionRequest, ForkSessionResponse,
+    ImageContent, Implementation, InitializeRequest, KillTerminalRequest, KillTerminalResponse,
+    NewSessionRequest, PermissionOptionKind as AcpPermissionOptionKind,
     PlanEntryStatus as AcpPlanEntryStatus, PromptCapabilities, ReadTextFileRequest,
     ReadTextFileResponse, ReleaseTerminalRequest, ReleaseTerminalResponse,
     RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse, ResourceLink,
@@ -65,8 +66,8 @@ use fxg_protocol::util::uuid_v7;
 use tokio::sync::{mpsc, oneshot, watch};
 
 use crate::driver::{
-    ActiveSessionHandle, AgentAuthRequired, AgentDriver, DriverEvent, NativeResumeUnavailable,
-    ResumeRequest, StartSessionRequest, StartedSession,
+    ActiveSessionHandle, AgentAuthRequired, AgentDriver, DriverEvent, NativeForkUnavailable,
+    NativeResumeUnavailable, ResumeRequest, StartSessionRequest, StartedSession,
 };
 use crate::warm::{DEFAULT_WARM_IDLE, LaunchKey, WarmPool, WarmProcess};
 
@@ -176,6 +177,8 @@ struct SessionParams {
     initial_mode: Option<String>,
     /// Resume selection from an existing agent session (`None` means a fresh session)
     resume: Option<ResumeRequest>,
+    /// Source ACP session ID for a native `session/fork`
+    fork_from: Option<String>,
 }
 
 /// Per-session shared information (handlers look it up by the ACP session_id).
@@ -394,6 +397,7 @@ impl AcpDriver {
             cwd: req.cwd.clone(),
             initial_mode: req.initial_mode.clone(),
             resume: req.resume.clone(),
+            fork_from: req.fork_from.clone(),
         };
 
         // 1) Reuse an idle process (just session/new on an initialized connection)
@@ -679,6 +683,23 @@ impl ActiveSessionHandle for AcpSessionHandle {
             // Wait for the turn loop to end (returns Err immediately if the loop never
             // started or failed)
             fxg_protocol::discard_with!(session_end.await, "wait for the ACP turn loop to end");
+        }
+        // Best-effort logical close (the process is kept for the warm pool).
+        match tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            self.conn
+                .send_request(CloseSessionRequest::new(self.acp_session_id.clone()))
+                .block_task(),
+        )
+        .await
+        {
+            Ok(Ok(_)) => {}
+            Ok(Err(err)) => {
+                tracing::debug!(session_id = %self.acp_session_id, "session/close failed: {err}");
+            }
+            Err(_) => {
+                tracing::debug!(session_id = %self.acp_session_id, "session/close timed out");
+            }
         }
         for terminal_id in self.pty.list() {
             fxg_protocol::discard_with!(
@@ -1351,26 +1372,47 @@ async fn build_session(
     bool,
     Arc<Mutex<SessionCapabilitiesState>>,
 )> {
-    // Acquire the session (new / session/resume / session/load)
-    let plan = plan_resume(agent_capabilities, params.resume.as_ref())?;
-    let acquired = match acquire_session(cx, plan, &params.cwd).await {
-        Ok(acquired) => acquired,
-        Err(err) if err.code == agent_client_protocol::ErrorCode::AUTH_REQUIRED => {
-            return Err(AgentAuthRequired(auth_methods.to_vec()).into());
-        }
-        // For native-only resume (`allow_fresh = false`), report a restore failure to
-        // the caller (the node) as "native resume unavailable"
-        Err(err)
-            if params
-                .resume
-                .as_ref()
-                .is_some_and(|resume| !resume.allow_fresh) =>
+    // Acquire the session (native fork / new / session/resume / session/load)
+    let acquired = if let Some(source_id) = params.fork_from.as_deref() {
+        if agent_capabilities.session_capabilities.fork.is_none()
+            || !agent_capabilities.load_session
         {
-            return Err(
-                NativeResumeUnavailable(format!("failed to resume acp session: {err}")).into(),
-            );
+            return Err(NativeForkUnavailable(
+                "agent does not support session/fork + loadSession".to_owned(),
+            )
+            .into());
         }
-        Err(err) => return Err(anyhow!("failed to create acp session: {err}")),
+        match fork_and_load_session(cx, source_id, &params.cwd).await {
+            Ok(acquired) => acquired,
+            Err(err) if err.code == agent_client_protocol::ErrorCode::AUTH_REQUIRED => {
+                return Err(AgentAuthRequired(auth_methods.to_vec()).into());
+            }
+            Err(err) => {
+                return Err(NativeForkUnavailable(format!("session/fork failed: {err}")).into());
+            }
+        }
+    } else {
+        let plan = plan_resume(agent_capabilities, params.resume.as_ref())?;
+        match acquire_session(cx, plan, &params.cwd).await {
+            Ok(acquired) => acquired,
+            Err(err) if err.code == agent_client_protocol::ErrorCode::AUTH_REQUIRED => {
+                return Err(AgentAuthRequired(auth_methods.to_vec()).into());
+            }
+            // For native-only resume (`allow_fresh = false`), report a restore failure to
+            // the caller (the node) as "native resume unavailable"
+            Err(err)
+                if params
+                    .resume
+                    .as_ref()
+                    .is_some_and(|resume| !resume.allow_fresh) =>
+            {
+                return Err(NativeResumeUnavailable(format!(
+                    "failed to resume acp session: {err}"
+                ))
+                .into());
+            }
+            Err(err) => return Err(anyhow!("failed to create acp session: {err}")),
+        }
     };
     let session = acquired.session;
     let context_restored = acquired.is_resumed;
@@ -1721,6 +1763,42 @@ async fn acquire_session(
             })
         }
     }
+}
+
+/// Creates a native fork and attaches to it via `session/load`.
+///
+/// The ACP SDK does not expose a v1 fork builder, so the unstable
+/// `session/fork` request is sent directly. `session/load` then attaches the
+/// returned session to an `ActiveSession`; its replay notifications are
+/// discarded because fxg keeps the canonical history itself.
+async fn fork_and_load_session(
+    cx: &ConnectionTo<Agent>,
+    source_session_id: &str,
+    cwd: &Path,
+) -> Result<AcquiredSession, agent_client_protocol::Error> {
+    let fork: ForkSessionResponse = cx
+        .send_request(ForkSessionRequest::new(
+            SessionId::new(source_session_id),
+            cwd,
+        ))
+        .block_task()
+        .await?;
+    let SessionSetup {
+        mut session,
+        response,
+        ..
+    } = cx
+        .load_session(fork.session_id, cwd)
+        .block_task()
+        .start_session()
+        .await?;
+    discard_replay_updates(&mut session);
+    Ok(AcquiredSession {
+        session,
+        is_resumed: true,
+        modes: response.modes.or(fork.modes),
+        config_options: response.config_options.or(fork.config_options),
+    })
 }
 
 /// Discards replay notifications that arrived before the `session/load` response.

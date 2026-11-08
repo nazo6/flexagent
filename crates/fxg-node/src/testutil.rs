@@ -278,6 +278,10 @@ impl ActiveSessionHandle for MockAgent {
     }
 
     async fn shutdown(&self) -> anyhow::Result<()> {
+        // Close the event sender so the session manager's pump observes the end
+        // (the real ACP driver drops its sender on shutdown).
+        let sender = self.inner.events.lock().expect("events").pop();
+        drop(sender);
         Ok(())
     }
 }

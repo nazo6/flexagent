@@ -808,6 +808,7 @@ impl ClientApiBackend for ServerState {
                     command_id: command_id.clone(),
                     session_id: session_id.into(),
                     target_node_seq: request.target_node_seq,
+                    files_only: request.files_only,
                 },
             )
             .await?;

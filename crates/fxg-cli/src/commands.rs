@@ -1423,6 +1423,9 @@ pub struct SessionRevertArgs {
     /// `UserMessage.node_seq`)
     #[usage(long)]
     to_seq: u64,
+    /// Restore only files and keep the current agent conversation
+    #[usage(long)]
+    files_only: bool,
 }
 
 impl usage::RunAsync for SessionRevertArgs {
@@ -1431,11 +1434,14 @@ impl usage::RunAsync for SessionRevertArgs {
     async fn run_async(self) -> Self::Output {
         let mut client = DaemonClient::connect().await?;
         let outcome = client
-            .revert_session(&self.session_id, Some(self.to_seq))
+            .revert_session(&self.session_id, Some(self.to_seq), self.files_only)
             .await?;
         println!(
-            "reverted to node_seq={} (restored={}, removed={})",
-            outcome.target_node_seq, outcome.restored_files, outcome.removed_files
+            "reverted to node_seq={} (restored={}, removed={}, context_rebuilt={})",
+            outcome.target_node_seq,
+            outcome.restored_files,
+            outcome.removed_files,
+            outcome.context_rebuilt
         );
         println!("  tree:   {}", outcome.restored_tree_hash);
         if let Some(backup) = &outcome.backup_tree_hash {

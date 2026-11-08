@@ -382,6 +382,9 @@ pub enum ServerToNodeMsg {
         /// `node_seq` of the `UserMessage` used as the revert point
         /// (defaults to the latest turn)
         target_node_seq: Option<u64>,
+        /// Restore only files and keep the current agent conversation
+        #[serde(default)]
+        files_only: bool,
     },
     /// Resumes a stopped session (`POST /api/v1/sessions/:id/resume`).
     ///
@@ -611,6 +614,7 @@ mod tests {
             command_id: "c1".into(),
             session_id: "s1".into(),
             target_node_seq: Some(7),
+            files_only: false,
         };
         let json = serde_json::to_value(&msg).unwrap();
         assert_eq!(json["op"], "revert_session");
@@ -631,6 +635,7 @@ mod tests {
                 backup_tree_hash: Some("def456".into()),
                 restored_files: 3,
                 removed_files: 1,
+                context_rebuilt: true,
             }),
             error: None,
         };

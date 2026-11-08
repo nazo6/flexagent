@@ -881,3 +881,27 @@ opencode / agy は `sessionCapabilities.list` / `load` を広告しており、
 - **テスト**: `prompt_blocks` の画像 / フォールバック / ResourceLink、
   添付パスの解決と脱出拒否 (`prompt_attachments_are_resolved_and_validated`)、
   `PromptInput` の serde / ts-rs を検証。`mise run check` 通過。
+
+---
+
+## 14. 実装ログ (Phase 3, 2026-11-09)
+
+- **ネイティブ Fork**: ACP SDK に v1 fork builder がないため、
+  `session/fork` を直接送り、返った session ID を `session/load` で
+  attach する方式を実装した。Replay 通知は破棄し、`context_restored=true` を
+  返す。`session/fork` が使えない / 空セッションで失敗する場合は
+  `NativeForkUnavailable` を返し、ノードが既存の履歴 Replay へ
+  フォールバックする。擬似 ACP エージェントの統合テスト
+  (`fxg-acp/tests/native_fork.rs`) で両経路を検証。
+- **Revert の会話再構築**: ファイル復元後にエージェントセッションを停止し、
+  同じ fxg `session_id` で新しいセッションを開始、`target_node_seq` までの
+  履歴を Replay する。`SessionReverted.context_rebuilt` /
+  `RevertOutcome.context_rebuilt` / REST 応答に結果を追加。
+  `--files-only` (CLI) と UI の「ファイルのみ」では再構築をスキップする。
+- **Replay の改善**: 上限を 16,000 → 64,000 文字に拡大し、超過時は
+  **直近のターンを優先**して古い履歴を落とす。`ReplayPurpose::Revert` と
+  `ClientSource::Revert` を追加。
+- **`session/close`**: セッション終了時にベストエフォートで送信 (5 秒
+  タイムアウト、失敗は debug ログ)。プロセスは warm pool のため維持する。
+- **テスト**: ネイティブ fork / フォールバック、Revert のファイル復元 +
+  context rebuild、busy 拒否、Replay の直近優先を検証。`mise run check` 通過。

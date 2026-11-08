@@ -23,7 +23,7 @@ use std::time::{Duration, Instant};
 use fxg_acp::registry::{AcpRegistry, RegistryIndex};
 use fxg_acp::{
     AcpDriver, ActiveSessionHandle, AgentAuthRequired, AgentDriver, AgentLaunchSpec, DriverEvent,
-    DriverKind, NativeResumeUnavailable, ResumeRequest,
+    DriverKind, NativeForkUnavailable, NativeResumeUnavailable, ResumeRequest,
 };
 use fxg_protocol::CommandId;
 use fxg_protocol::common::{
@@ -141,6 +141,8 @@ pub struct RevertOutcome {
     pub restored_files: usize,
     /// Number of removed files
     pub removed_files: usize,
+    /// Whether the agent conversation was rebuilt (files always restore)
+    pub context_rebuilt: bool,
 }
 
 /// Result of `resume`.
@@ -271,6 +273,8 @@ struct StartDriverParams<'a> {
     has_custom_title: bool,
     /// Resume request from an existing agent session (`None` means a new session)
     resume: Option<ResumeRequest>,
+    /// Source ACP session ID for a native `session/fork`
+    fork_from: Option<&'a str>,
 }
 
 /// Result of [`SessionManager::start_driver_session`] (restore success).
@@ -412,6 +416,7 @@ impl SessionManager {
                 initial_mode: initial_mode.map(str::to_owned),
                 has_custom_title: false,
                 resume: None,
+                fork_from: None,
             })
             .await?;
 
@@ -483,6 +488,7 @@ impl SessionManager {
                 initial_mode: params.mode.map(str::to_owned),
                 has_custom_title,
                 resume: None,
+                fork_from: None,
             })
             .await?;
 
@@ -577,73 +583,87 @@ impl SessionManager {
             (self.inner.factory)(params.spec).map_err(|err| NodeError::Agent(err.to_string()))?;
         self.remember_driver(&driver);
         let (event_tx, event_rx) = mpsc::unbounded_channel();
-        let started = match driver
-            .start_session(
-                fxg_acp::StartSessionRequest {
-                    session_id: params.session_id.to_owned(),
-                    title: Some(params.title.to_owned()),
-                    cwd: params.cwd.to_path_buf(),
-                    launch: params.spec.clone(),
-                    extra_args: params.extra_args,
-                    initial_mode: params.initial_mode,
-                    resume: params.resume,
-                },
-                event_tx,
-            )
-            .await
-        {
-            Ok(started) => started,
-            Err(err) => {
-                // The agent requires authentication before a session can be created.
-                // Surface the advertised methods so CLI / UI can guide the login flow.
-                if let Some(required) = err.downcast_ref::<AgentAuthRequired>() {
-                    let message = format!(
-                        "agent {} requires authentication ({} method(s) advertised)",
-                        params.spec.agent_id,
-                        required.0.len()
+        let mut fork_from = params.fork_from.map(str::to_owned);
+        let started = loop {
+            let result = driver
+                .start_session(
+                    fxg_acp::StartSessionRequest {
+                        session_id: params.session_id.to_owned(),
+                        title: Some(params.title.to_owned()),
+                        cwd: params.cwd.to_path_buf(),
+                        launch: params.spec.clone(),
+                        extra_args: params.extra_args.clone(),
+                        initial_mode: params.initial_mode.clone(),
+                        resume: params.resume.clone(),
+                        fork_from: fork_from.clone(),
+                    },
+                    event_tx.clone(),
+                )
+                .await;
+            match result {
+                Ok(started) => break started,
+                Err(err)
+                    if fork_from.is_some()
+                        && err.downcast_ref::<NativeForkUnavailable>().is_some() =>
+                {
+                    tracing::info!(
+                        session_id = params.session_id,
+                        "native session fork unavailable; falling back to history replay"
                     );
-                    tracing::info!(session_id = params.session_id, "{message}");
+                    fork_from = None;
+                }
+                Err(err) => {
+                    // The agent requires authentication before a session can be created.
+                    // Surface the advertised methods so CLI / UI can guide the login flow.
+                    if let Some(required) = err.downcast_ref::<AgentAuthRequired>() {
+                        let message = format!(
+                            "agent {} requires authentication ({} method(s) advertised)",
+                            params.spec.agent_id,
+                            required.0.len()
+                        );
+                        tracing::info!(session_id = params.session_id, "{message}");
+                        self.inner
+                            .bus
+                            .record(
+                                params.session_id,
+                                UnifiedEventPayload::StatusChanged {
+                                    status: SessionStatus::Error,
+                                    error_message: Some(message),
+                                },
+                            )
+                            .await?;
+                        return Err(NodeError::AuthRequired {
+                            agent_id: params.spec.agent_id.clone(),
+                            methods: required.0.clone(),
+                        });
+                    }
+                    // In native-only auto-resume (`allow_fresh = false`), return
+                    // "native restore unavailable" to the caller while leaving the session stopped
+                    // (do not implicitly run a history replay; prompt for an explicit Resume)
+                    if let Some(unavailable) = err.downcast_ref::<NativeResumeUnavailable>() {
+                        tracing::info!(
+                            session_id = params.session_id,
+                            "native resume is not available: {unavailable}"
+                        );
+                        return Err(NodeError::ResumeRequired {
+                            session_id: params.session_id.to_owned(),
+                            reason: unavailable.0.clone(),
+                        });
+                    }
+                    let message = format!("failed to start agent: {err:#}");
+                    tracing::warn!(session_id = params.session_id, "{message}");
                     self.inner
                         .bus
                         .record(
                             params.session_id,
                             UnifiedEventPayload::StatusChanged {
                                 status: SessionStatus::Error,
-                                error_message: Some(message),
+                                error_message: Some(message.clone()),
                             },
                         )
                         .await?;
-                    return Err(NodeError::AuthRequired {
-                        agent_id: params.spec.agent_id.clone(),
-                        methods: required.0.clone(),
-                    });
+                    return Err(NodeError::Agent(message));
                 }
-                // In native-only auto-resume (`allow_fresh = false`), return
-                // "native restore unavailable" to the caller while leaving the session stopped
-                // (do not implicitly run a history replay; prompt for an explicit Resume)
-                if let Some(unavailable) = err.downcast_ref::<NativeResumeUnavailable>() {
-                    tracing::info!(
-                        session_id = params.session_id,
-                        "native resume is not available: {unavailable}"
-                    );
-                    return Err(NodeError::ResumeRequired {
-                        session_id: params.session_id.to_owned(),
-                        reason: unavailable.0.clone(),
-                    });
-                }
-                let message = format!("failed to start agent: {err:#}");
-                tracing::warn!(session_id = params.session_id, "{message}");
-                self.inner
-                    .bus
-                    .record(
-                        params.session_id,
-                        UnifiedEventPayload::StatusChanged {
-                            status: SessionStatus::Error,
-                            error_message: Some(message.clone()),
-                        },
-                    )
-                    .await?;
-                return Err(NodeError::Agent(message));
             }
         };
 
@@ -721,22 +741,28 @@ impl SessionManager {
         command_id: &CommandId,
         session_id: &str,
         target_node_seq: Option<u64>,
+        files_only: bool,
     ) -> Result<RevertOutcome, NodeError> {
         if !self.begin_command(command_id) {
             return Err(NodeError::CommandDuplicate(command_id.to_string()));
         }
 
-        let cwd = {
+        let session = self
+            .inner
+            .bus
+            .db()
+            .get_session(session_id)
+            .await?
+            .ok_or_else(|| NodeError::InvalidSession(session_id.to_owned()))?;
+        let cwd = PathBuf::from(&session.local_path);
+        {
             let sessions = self.inner.sessions.lock().expect("sessions poisoned");
-            let session = sessions
-                .active
-                .get(session_id)
-                .ok_or_else(|| NodeError::InvalidSession(session_id.to_owned()))?;
-            if session.busy {
+            if let Some(active) = sessions.active.get(session_id)
+                && active.busy
+            {
                 return Err(NodeError::Busy(session_id.to_owned()));
             }
-            session.cwd.clone()
-        };
+        }
 
         let events = self
             .load_session_events(session_id, target_node_seq)
@@ -754,6 +780,28 @@ impl SessionManager {
         );
         let outcome = tree.restore(&tree_hash).await?;
 
+        // Rebuild the agent conversation so the next prompt does not see the
+        // turns that were just reverted. File restoration is the primary effect;
+        // a rebuild failure leaves the files restored and is reported as a
+        // partial success (`context_rebuilt = false`).
+        let context_rebuilt = if files_only {
+            false
+        } else {
+            match self
+                .rebuild_session_context(session_id, &session, target_seq, &events)
+                .await
+            {
+                Ok(()) => true,
+                Err(err) => {
+                    tracing::warn!(
+                        session_id,
+                        "failed to rebuild the agent context after revert: {err}"
+                    );
+                    false
+                }
+            }
+        };
+
         self.inner
             .bus
             .record(
@@ -764,6 +812,7 @@ impl SessionManager {
                     backup_tree_hash: outcome.backup_tree_hash.clone(),
                     restored_files: outcome.restored_files as u64,
                     removed_files: outcome.removed_files as u64,
+                    context_rebuilt,
                 },
             )
             .await?;
@@ -774,7 +823,80 @@ impl SessionManager {
             restored_files: outcome.restored_files,
             removed_files: outcome.removed_files,
             target_node_seq: target_seq,
+            context_rebuilt,
         })
+    }
+
+    /// Stops the current agent session (if any) and starts a fresh one with a
+    /// replay of the events up to `target_seq` (used by [`Self::revert`]).
+    async fn rebuild_session_context(
+        &self,
+        session_id: &str,
+        session: &fxg_protocol::common::SessionSummary,
+        target_seq: u64,
+        events: &[SessionEventEnvelope],
+    ) -> Result<(), NodeError> {
+        let handle = {
+            let sessions = self.inner.sessions.lock().expect("sessions poisoned");
+            sessions
+                .active
+                .get(session_id)
+                .map(|active| Arc::clone(&active.handle))
+        };
+        if let Some(handle) = handle {
+            handle
+                .shutdown()
+                .await
+                .map_err(|err| NodeError::Server(format!("failed to stop agent: {err:#}")))?;
+            let mut stopped = false;
+            for _ in 0..200 {
+                let active = self
+                    .inner
+                    .sessions
+                    .lock()
+                    .expect("sessions poisoned")
+                    .active
+                    .contains_key(session_id);
+                if !active {
+                    stopped = true;
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            }
+            if !stopped {
+                return Err(NodeError::InvalidState(format!(
+                    "session {session_id} did not stop for the context rebuild"
+                )));
+            }
+        }
+
+        let spec = self.resolve_launch_spec(&session.agent_id, &[]).await?;
+        let cwd = PathBuf::from(&session.local_path);
+        let _started = self
+            .start_driver_session(StartDriverParams {
+                session_id,
+                title: &session.title,
+                cwd: &cwd,
+                spec: &spec,
+                extra_args: Vec::new(),
+                initial_mode: None,
+                has_custom_title: true,
+                resume: None,
+                fork_from: None,
+            })
+            .await?;
+
+        if let Some(context) =
+            build_history_replay_context(events, target_seq, ReplayPurpose::Revert)
+        {
+            self.start_turn(
+                session_id,
+                &PromptInput::text(context),
+                ClientSource::Revert,
+            )
+            .await?;
+        }
+        Ok(())
     }
 
     /// Branches from the specified turn into a new session (`fxg session fork`).
@@ -842,7 +964,7 @@ impl SessionManager {
             )
             .await?;
 
-        let _started = self
+        let started = self
             .start_driver_session(StartDriverParams {
                 session_id: &new_session_id,
                 title: &title,
@@ -852,11 +974,14 @@ impl SessionManager {
                 initial_mode: None,
                 has_custom_title: true,
                 resume: None,
+                fork_from: source.agent_session_id.as_deref(),
             })
             .await?;
 
-        // History replay injection (initial context for the new agent session)
-        if let Some(context) = build_history_replay_context(&events, fork_seq, ReplayPurpose::Fork)
+        // Native fork preserves the agent context; only replay when it was unavailable.
+        if !started.context_restored
+            && let Some(context) =
+                build_history_replay_context(&events, fork_seq, ReplayPurpose::Fork)
             && let Err(err) = self
                 .start_turn(
                     &new_session_id,
@@ -1018,6 +1143,7 @@ impl SessionManager {
                     agent_session_id,
                     allow_fresh,
                 }),
+                fork_from: None,
             })
             .await?;
 
@@ -1986,6 +2112,8 @@ enum ReplayPurpose {
     Fork,
     /// Resuming a stopped session (`fxg session resume`)
     Resume,
+    /// Rebuilding the conversation after a revert (`fxg session revert`)
+    Revert,
 }
 
 impl ReplayPurpose {
@@ -1998,6 +2126,10 @@ impl ReplayPurpose {
             ),
             Self::Resume => format!(
                 "The history below is from a stopped session{range} that has been resumed. \
+                 Continue working with this context in mind.\n\n"
+            ),
+            Self::Revert => format!(
+                "The history below is from this conversation{range} before a revert. \
                  Continue working with this context in mind.\n\n"
             ),
         }
@@ -2081,13 +2213,17 @@ fn build_history_replay_context_from_items(
 }
 
 /// Shared assembly of the replay context (truncated at the character limit).
+///
+/// When the history exceeds the limit, the **most recent** turns are kept
+/// (older turns are dropped) so a resumed / reverted / forked agent keeps the
+/// context closest to the current request.
 fn assemble_replay_context(
     parts: Vec<String>,
     up_to_seq: u64,
     purpose: ReplayPurpose,
 ) -> Option<String> {
     /// Maximum number of characters in the injected context (prevents oversized prompts).
-    const MAX_CONTEXT_CHARS: usize = 16_000;
+    const MAX_CONTEXT_CHARS: usize = 64_000;
 
     if parts.is_empty() {
         return None;
@@ -2097,10 +2233,37 @@ fn assemble_replay_context(
     } else {
         String::new()
     };
-    let mut context = purpose.header(&range);
-    for part in parts {
+    let header = purpose.header(&range);
+
+    let mut selected: Vec<String> = Vec::new();
+    let mut used = header.chars().count();
+    for part in parts.iter().rev() {
+        let part_chars = part.chars().count() + 2;
+        if used + part_chars > MAX_CONTEXT_CHARS && !selected.is_empty() {
+            break;
+        }
+        selected.push(part.clone());
+        used += part_chars;
+    }
+    selected.reverse();
+    let truncated = selected.len() < parts.len();
+
+    let mut context = header;
+    if truncated {
+        context.push_str("[older history omitted because it exceeded the limit]\n\n");
+    }
+    for part in selected {
         if context.chars().count() + part.chars().count() > MAX_CONTEXT_CHARS {
-            context.push_str("\n(history omitted because it exceeded the limit)");
+            let remaining = MAX_CONTEXT_CHARS.saturating_sub(context.chars().count());
+            let tail: String = part
+                .chars()
+                .rev()
+                .take(remaining)
+                .collect::<Vec<_>>()
+                .into_iter()
+                .rev()
+                .collect();
+            context.push_str(&tail);
             break;
         }
         context.push_str(&part);
@@ -2681,10 +2844,11 @@ mod tests {
 
         // Revert: restore the file state at the start of the latest turn
         let outcome = manager
-            .revert(&CommandId::from("c3"), &session_id, None)
+            .revert(&CommandId::from("c3"), &session_id, None, false)
             .await
             .expect("revert");
         assert_eq!(outcome.target_node_seq, user_seq);
+        assert!(outcome.context_rebuilt);
         assert!(outcome.restored_files >= 1);
         assert_eq!(
             std::fs::read_to_string(repo.join("README.md")).expect("read"),
@@ -2709,10 +2873,12 @@ mod tests {
             UnifiedEventPayload::SessionReverted {
                 restored_tree_hash,
                 backup_tree_hash,
+                context_rebuilt,
                 ..
             } => {
                 assert!(!restored_tree_hash.is_empty());
                 assert!(backup_tree_hash.is_some(), "a backup Tree is saved");
+                assert!(context_rebuilt);
             }
             _ => unreachable!(),
         }
@@ -2734,7 +2900,7 @@ mod tests {
             .await
             .expect("prompt");
         let err = manager
-            .revert(&CommandId::from("c3"), &session_id, None)
+            .revert(&CommandId::from("c3"), &session_id, None, false)
             .await
             .expect_err("busy");
         assert!(matches!(err, NodeError::Busy(_)));
@@ -3244,6 +3410,21 @@ mod tests {
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         }
         panic!("status did not become stopped");
+    }
+
+    #[test]
+    fn replay_context_keeps_most_recent_turns_when_truncated() {
+        let old = "a".repeat(70_000);
+        let context = assemble_replay_context(
+            vec![old, "RECENT TURN".to_owned()],
+            10,
+            ReplayPurpose::Revert,
+        )
+        .expect("context");
+        assert!(context.contains("RECENT TURN"));
+        assert!(context.contains("older history omitted"));
+        assert!(!context.contains(&"a".repeat(1_000)));
+        assert!(context.chars().count() <= 64_000);
     }
 
     #[test]

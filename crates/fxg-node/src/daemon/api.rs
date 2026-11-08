@@ -408,7 +408,12 @@ impl ClientApiBackend for DaemonState {
         let command_id = CommandId::from(fxg_protocol::util::uuid_v7());
         let outcome = self
             .session_manager()
-            .revert(&command_id, session_id, request.target_node_seq)
+            .revert(
+                &command_id,
+                session_id,
+                request.target_node_seq,
+                request.files_only,
+            )
             .await
             .map_err(api_error)?;
         self.record_audit(
@@ -429,6 +434,7 @@ impl ClientApiBackend for DaemonState {
             backup_tree_hash: outcome.backup_tree_hash,
             restored_files: outcome.restored_files as u64,
             removed_files: outcome.removed_files as u64,
+            context_rebuilt: outcome.context_rebuilt,
         })
     }
 
