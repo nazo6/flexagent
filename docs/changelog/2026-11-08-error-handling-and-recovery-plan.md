@@ -505,6 +505,71 @@ Phase 3 は `incidents` テーブル・新 API・`fxg doctor` など変更範囲
 
 ---
 
+## 残タスク（TODO）
+
+Phase 1・2・2.5 は完了。以下は未着手で、Phase 3 以降で対応する。
+チェックボックスは着手時に更新する。
+
+### 最優先: Phase 3（診断基盤）
+
+- [ ] `fxg-db`: `incidents` テーブルと上限付きリングバッファ / 保持期間
+- [ ] node / server のエラー境界でインシデントを記録し、同一原因をグルーピング
+- [ ] コンポーネントヘルス（db / ipc / http / central sync / registry /
+      agent spawn / disk / migrations）
+- [ ] `GET /healthz` / `GET /readyz`（DB・マイグレーション異常時 503）
+- [ ] `SystemInfoResponse` / `SystemStatus` にヘルスと劣化理由を追加
+- [ ] エージェント stderr のセッション別リングバッファ
+- [ ] 同期・配信のドロップカウンタ
+      （dropped_events / lagged_broadcasts / replay_failures / outbox_retries /
+      push_failures / stale_registry_served）
+- [ ] `GET /api/v1/diagnostics` / `GET /api/v1/diagnostics/incidents`
+- [ ] `fxg doctor`（設定・DB・ディスク・バージョン・直近インシデント・ヘルス）
+- [ ] `fxg status --verbose` / `fxg logs` / `fxg session diagnose <id>`
+- [ ] `fxg diagnostics export` + UI からのサポートバンドル出力
+- [ ] サポートバンドルの redaction（トークン・Cookie・環境変数・プロンプト・パス）
+- [ ] インシデントの UI 表示（バナー / 診断画面）
+
+### Phase 4（残り）
+
+- [ ] 復旧アクションの専用ハンドラ
+      （現状は画面遷移・再同期・再接続のみ。エージェント再インストール、
+      Replay 再開、worktree 再作成などを実際に実行する）
+- [ ] `WarningInfo` を生成する経路の追加
+      （fork 成功 + Replay 失敗、resume 成功 + snapshot なし など）
+- [ ] 破壊的操作の応答に `DataSafety` を付与
+- [ ] oxlint の `no-floating-promises` / `no-misused-promises` 導入検討
+
+### Phase 5（事前検証・安全な再試行）
+
+- [ ] セッション / worktree / 一時 VM 作成の preflight
+- [ ] `PreflightFailed { checks: [...] }` と UI のコントロール無効化
+- [ ] `NodeHello` のバージョン交渉と `VERSION_MISMATCH` の明示
+- [ ] `retryable` / `idempotent` の全コマンド付与と `command_id` 再利用方針
+- [ ] worktree 削除前の未コミット変更検出、セッション削除の不可逆性明示、
+      DB マイグレーション前の自動バックアップ、revert 前の backup tree 応答
+- [ ] CLI の `--dry-run` / `--json` エラー出力
+
+### Phase 6（品質・テスト）
+
+- [ ] エラー文型（何が起きたか / なぜ / データ安全 / 次に / 詳細）の全経路適用
+- [ ] i18n の未翻訳・表記ゆれ監査（`docs/troubleshooting.md` との一致を含む）
+- [ ] 障害注入テスト
+      （ターン中のノード kill、DB / キャッシュ破損、権限拒否、ディスク満杯、
+      トークン失効、バージョン不一致）
+- [ ] 復旧ドリル（オフライン→再同期、エージェント未導入→導入→再試行、
+      worktree 競合→解消）
+- [ ] `AGENTS.md` / 設計ドキュメントへエラー処理規約を追記
+
+### その他の積み残し
+
+- [ ] `spawn_logged!` / `spawn_guarded!` への完全移行
+      （現状はハンドル保持・abort が必要なタスクを除いて移行済み）
+- [ ] Windows / macOS 固有モジュールの `lint:errors` を CI で実行
+      （Linux では該当モジュールがコンパイルされない）
+- [ ] REST 以外（IPC / stdio）の `request_id` 伝播の確認
+
+---
+
 ## 4. 横断的な完了条件
 
 - `mise run check`（fmt:check / lint / check:ui / test）が全フェーズ後に通る
