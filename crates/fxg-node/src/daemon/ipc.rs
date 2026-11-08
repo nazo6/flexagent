@@ -1321,7 +1321,7 @@ mod tests {
                         session_id: Some(sid),
                     },
             } => {
-                assert_eq!(command_id, "p1");
+                assert_eq!(command_id.as_str(), "p1");
                 assert_eq!(sid, session_id);
             }
             other => panic!("unexpected response: {other:?}"),
@@ -1363,7 +1363,7 @@ mod tests {
         .await;
         assert!(matches!(
             response,
-            IpcServerMessage::Result { command_id, .. } if command_id == "r1"
+            IpcServerMessage::Result { command_id, .. } if command_id.as_str() == "r1"
         ));
         assert_eq!(
             mock.permissions(),
@@ -1420,7 +1420,7 @@ mod tests {
         .await;
         assert!(matches!(
             response,
-            IpcServerMessage::Result { command_id, .. } if command_id == "q1"
+            IpcServerMessage::Result { command_id, .. } if command_id.as_str() == "q1"
         ));
         assert_eq!(
             mock.elicitations(),
@@ -1465,7 +1465,7 @@ mod tests {
         .await;
         assert!(matches!(
             response,
-            IpcServerMessage::Result { command_id, .. } if command_id == "m1"
+            IpcServerMessage::Result { command_id, .. } if command_id.as_str() == "m1"
         ));
         assert_eq!(mock.modes(), vec!["plan".to_owned()]);
 

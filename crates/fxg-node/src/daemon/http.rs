@@ -537,7 +537,7 @@ mod tests {
                 error,
                 session_id,
             } => {
-                assert_eq!(command_id, "c1");
+                assert_eq!(command_id.as_str(), "c1");
                 assert!(!success);
                 assert_eq!(error.map(|err| err.code), Some(ErrorCode::InvalidState));
                 assert_eq!(session_id, None);

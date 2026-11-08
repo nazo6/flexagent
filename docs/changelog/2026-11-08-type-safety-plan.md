@@ -416,8 +416,9 @@ pub enum ConfigOptionValue {
   （生成 TS は `export type CommandId = string`）。
 - `From<String>` / `From<&str>` / `as_str()` / `Display` / `AsRef<str>` /
   infallible な `FromStr` を生成する。SQLx は `impl_sqlx_text!` を再利用。
-- テスト用の比較のために `PartialEq<str>` / `PartialEq<&str>` も生成する。
-  本番コードでは ID 同士を比較する。
+- 実装する trait は実際に使うものだけに絞る。現時点では `Hash` / `Ord` /
+  `AsRef<str>` / `From<Id> for String` / `PartialEq<str>` は生成しない
+  （必要になった ID を追加するときに足す）。
 - CommandId は永続化されない（相関 ID）ため、DB migration は不要。
 - `request()` のような複数種の相関 ID を受ける汎用関数は `&str` のままにし、
   型付きの `command()` から `.as_str()` で渡す。git diff / agents の

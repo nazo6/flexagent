@@ -22,9 +22,7 @@ macro_rules! string_id {
         $name:ident
     ) => {
         $(#[$meta])*
-        #[derive(
-            Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, Type,
-        )]
+        #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
         #[serde(transparent)]
         #[specta(transparent)]
         pub struct $name(String);
@@ -38,11 +36,6 @@ macro_rules! string_id {
             /// Returns the identifier as a string slice.
             pub fn as_str(&self) -> &str {
                 &self.0
-            }
-
-            /// Returns the identifier as an owned string.
-            pub fn into_string(self) -> String {
-                self.0
             }
         }
 
@@ -72,32 +65,8 @@ macro_rules! string_id {
             }
         }
 
-        impl From<$name> for String {
-            fn from(value: $name) -> Self {
-                value.0
-            }
-        }
-
-        impl AsRef<str> for $name {
-            fn as_ref(&self) -> &str {
-                &self.0
-            }
-        }
-
-        // Convenience for tests / log filters. Production code should still compare
-        // typed IDs with each other.
-        impl PartialEq<str> for $name {
-            fn eq(&self, other: &str) -> bool {
-                self.0 == other
-            }
-        }
-
-        impl PartialEq<&str> for $name {
-            fn eq(&self, other: &&str) -> bool {
-                self.0 == *other
-            }
-        }
-
+        // Used by DB-backed IDs (SessionId / NodeId next). `CommandId` itself is
+        // not persisted, but sharing the macro avoids a second implementation.
         $crate::maybe_impl_sqlx_text!($name);
     };
 }

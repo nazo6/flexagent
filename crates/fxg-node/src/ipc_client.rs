@@ -151,7 +151,7 @@ mod tests {
                 result: fxg_protocol::ipc::IpcResult::Sessions { sessions },
                 command_id,
             } => {
-                assert_eq!(command_id, "c1");
+                assert_eq!(command_id.as_str(), "c1");
                 assert!(sessions.is_empty());
             }
             other => panic!("unexpected response: {other:?}"),
