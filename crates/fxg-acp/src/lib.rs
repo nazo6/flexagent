@@ -18,12 +18,13 @@
 )]
 
 pub mod acp;
+pub mod auth;
 pub mod driver;
 pub mod registry;
 mod warm;
 
 pub use acp::AcpDriver;
 pub use driver::{
-    ActiveSessionHandle, AgentDriver, AgentLaunchSpec, DriverEvent, DriverKind,
+    ActiveSessionHandle, AgentAuthRequired, AgentDriver, AgentLaunchSpec, DriverEvent, DriverKind,
     NativeResumeUnavailable, ResumeRequest, StartSessionRequest, StartedSession,
 };

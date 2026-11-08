@@ -164,11 +164,20 @@ async fn wait_for_ipc(endpoint: &str, timeout: Duration) -> bool {
 
 /// Whether a startup lock is old enough to be considered abandoned.
 fn lock_is_stale(path: &Path) -> bool {
-    std::fs::metadata(path)
-        .and_then(|metadata| metadata.modified())
-        .ok()
-        .and_then(|modified| modified.elapsed().ok())
-        .is_some_and(|age| age > DAEMON_START_LOCK_STALE)
+    let Ok(metadata) = std::fs::metadata(path) else {
+        return false;
+    };
+    let Ok(modified) = metadata.modified() else {
+        tracing::debug!(path = %path.display(), "startup lock has no modification time");
+        return false;
+    };
+    match modified.elapsed() {
+        Ok(age) => age > DAEMON_START_LOCK_STALE,
+        Err(err) => {
+            tracing::debug!(path = %path.display(), "startup lock mtime is in the future: {err}");
+            false
+        }
+    }
 }
 
 /// Removes the startup lock (best effort).

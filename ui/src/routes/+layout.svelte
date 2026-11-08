@@ -66,6 +66,9 @@
       case "export_diagnostics":
         void goto("/settings");
         break;
+      case "login_agent":
+        void goto("/settings?tab=agents");
+        break;
     }
     problems.dismiss(problem.id);
   }

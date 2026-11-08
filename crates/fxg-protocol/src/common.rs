@@ -807,6 +807,37 @@ pub enum StreamDeltaPayload {
     },
 }
 
+crate::open_string_enum! {
+    /// Authentication method kind (`agent` / `terminal`).
+    pub enum AgentAuthMethodKind {
+        /// The agent handles authentication through `authenticate`.
+        Agent => "agent",
+        /// The client runs the agent CLI interactively (`--login` etc.).
+        Terminal => "terminal",
+    }
+}
+
+/// An authentication method advertised by an ACP agent.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[specta(collect)]
+pub struct AgentAuthMethodInfo {
+    /// Method ID passed to `authenticate` (agent methods) or selected locally (terminal)
+    pub id: String,
+    /// Human-readable name
+    pub name: String,
+    /// Optional description shown in the login UI
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// How the method is executed
+    pub kind: AgentAuthMethodKind,
+    /// Additional arguments for terminal methods (appended to the launch command)
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub args: Vec<String>,
+    /// Additional environment variables for terminal methods
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub env: BTreeMap<String, String>,
+}
+
 /// Metadata of a file attached to a user message.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
@@ -1158,6 +1189,9 @@ pub enum ErrorCode {
     /// native restoration (`session/resume` etc.). An explicit resume through
     /// history replay (`fxg session resume` / Resume in the Web UI) is required.
     ResumeRequired,
+    /// The agent requires authentication before a session can be created.
+    /// The advertised methods are carried in [`ErrorInfo::details`].
+    AuthRequired,
     /// Remote PTY is disabled by the security policy
     PtyDisabled,
     /// Duplicate `command_id` submission (double tap / WS resend)
@@ -1216,6 +1250,7 @@ impl ErrorCode {
         Self::Busy,
         Self::InvalidState,
         Self::ResumeRequired,
+        Self::AuthRequired,
         Self::PtyDisabled,
         Self::CommandDuplicate,
         Self::NotFound,
@@ -1251,6 +1286,7 @@ impl ErrorCode {
             Self::Busy => "BUSY",
             Self::InvalidState => "INVALID_STATE",
             Self::ResumeRequired => "RESUME_REQUIRED",
+            Self::AuthRequired => "AUTH_REQUIRED",
             Self::PtyDisabled => "PTY_DISABLED",
             Self::CommandDuplicate => "COMMAND_DUPLICATE",
             Self::NotFound => "NOT_FOUND",
@@ -1308,6 +1344,7 @@ impl FromStr for ErrorCode {
             "BUSY" => Ok(Self::Busy),
             "INVALID_STATE" => Ok(Self::InvalidState),
             "RESUME_REQUIRED" => Ok(Self::ResumeRequired),
+            "AUTH_REQUIRED" => Ok(Self::AuthRequired),
             "PTY_DISABLED" => Ok(Self::PtyDisabled),
             "COMMAND_DUPLICATE" => Ok(Self::CommandDuplicate),
             "NOT_FOUND" => Ok(Self::NotFound),
@@ -1446,6 +1483,11 @@ pub enum RecoveryAction {
         /// Target node ID
         node_id: NodeId,
         /// Agent ID
+        agent_id: String,
+    },
+    /// Log in to the agent (run `fxg agents login <agent_id>` / open the login UI)
+    LoginAgent {
+        /// Target agent ID
         agent_id: String,
     },
     /// Recreate the worktree
@@ -1972,7 +2014,7 @@ mod tests {
         let troubleshooting = std::fs::read_to_string(workspace.join("docs/troubleshooting.md"))
             .expect("read docs/troubleshooting.md");
 
-        assert_eq!(ErrorCode::ALL.len(), 30, "update ALL when adding a code");
+        assert_eq!(ErrorCode::ALL.len(), 31, "update ALL when adding a code");
         for code in ErrorCode::ALL {
             let snake = code.as_str().to_ascii_lowercase();
             let message_key = format!("error_{snake}");

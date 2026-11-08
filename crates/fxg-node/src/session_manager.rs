@@ -22,8 +22,8 @@ use std::time::{Duration, Instant};
 
 use fxg_acp::registry::{AcpRegistry, RegistryIndex};
 use fxg_acp::{
-    AcpDriver, ActiveSessionHandle, AgentDriver, AgentLaunchSpec, DriverEvent, DriverKind,
-    NativeResumeUnavailable, ResumeRequest,
+    AcpDriver, ActiveSessionHandle, AgentAuthRequired, AgentDriver, AgentLaunchSpec, DriverEvent,
+    DriverKind, NativeResumeUnavailable, ResumeRequest,
 };
 use fxg_protocol::CommandId;
 use fxg_protocol::common::{
@@ -590,6 +590,30 @@ impl SessionManager {
         {
             Ok(started) => started,
             Err(err) => {
+                // The agent requires authentication before a session can be created.
+                // Surface the advertised methods so CLI / UI can guide the login flow.
+                if let Some(required) = err.downcast_ref::<AgentAuthRequired>() {
+                    let message = format!(
+                        "agent {} requires authentication ({} method(s) advertised)",
+                        params.spec.agent_id,
+                        required.0.len()
+                    );
+                    tracing::info!(session_id = params.session_id, "{message}");
+                    self.inner
+                        .bus
+                        .record(
+                            params.session_id,
+                            UnifiedEventPayload::StatusChanged {
+                                status: SessionStatus::Error,
+                                error_message: Some(message),
+                            },
+                        )
+                        .await?;
+                    return Err(NodeError::AuthRequired {
+                        agent_id: params.spec.agent_id.clone(),
+                        methods: required.0.clone(),
+                    });
+                }
                 // In native-only auto-resume (`allow_fresh = false`), return
                 // "native restore unavailable" to the caller while leaving the session stopped
                 // (do not implicitly run a history replay; prompt for an explicit Resume)

@@ -820,3 +820,36 @@ opencode / agy は `sessionCapabilities.list` / `load` を広告しており、
   二重表現をどう正規化するか。`configOptions` を正とする。
 - **warm pool**: 1 プロセス複数セッション化した場合のメモリ上限と、
   agy の `_MEI` 相当の一時展開ディレクトリの扱い。
+
+---
+
+## 12. 実装ログ (Phase 1, 2026-11-09)
+
+- **G1 preset**: `fxg-acp` に `AGENT_PRESETS` (`opencode acp` /
+  `agy acp`) を追加。起動解決は custom → preset → registry の順になり、
+  `antigravity` alias は `agy` に解決される。`fxg agents list` は preset を
+  PATH 上の既存インストールとして表示する。
+- **G2 daemon 自動起動**: `DaemonClient::connect` が IPC 接続失敗時に
+  `fxg daemon` をデタッチ起動する。`daemon.start.lock` で多重起動を防ぎ、
+  `FXG_NO_AUTO_DAEMON=1` で無効化できる。ログは
+  `~/.flexagent/logs/daemon.log`。
+- **G3 認証**: `clientCapabilities.auth.terminal = true` を広告し、
+  `initialize.authMethods` を `AgentAuthMethodInfo` として保持。
+  `session/new` の `-32000` を `AUTH_REQUIRED` + methods に変換し、
+  `RecoveryAction::LoginAgent` を付与する。`fxg agents login/logout` を追加。
+  terminal 型は「起動コマンド + method.args」を対話実行する
+  (`agy acp --login` / `opencode acp --login`)。
+- **既存バグ修正**: `session/new` の生成エラーが per-session の `ready`
+  channel ではなく初期化用 channel に送られ、「channel closed」に化けていた。
+  `ready.send(Err(err))` に修正し、`AUTH_REQUIRED` を含むセッション生成
+  エラーが正しく伝播するようになった。
+- **E2E 確認**: 一時 `FXG_HOME` で `fxg run antigravity -d` を実行し、
+  preset 経由で `agy acp` が起動、`fxg ps` に `agy` セッションが
+  `idle` で表示されることを確認した。
+- **テスト**: `auth_required` の shell mock が UUID 形式の JSON-RPC id を
+  解釈できず initialize に応答しないため、テストがハングしていた。
+  id 抽出を文字列／数値両対応にし、`ready` channel の修正と合わせて
+  0.01 秒で完了するようにした。
+- **未対応 (Phase 1 の残り)**: UI からの対話ログイン実行は現状
+  「設定 > エージェント管理」への導線のみ。ターミナルストリームを Web UI に
+  出す実装は次段階とする。agent 型認証は実エージェントでの手動検証が必要。

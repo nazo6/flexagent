@@ -83,6 +83,14 @@ pub struct ResumeRequest {
 #[error("native session resume is not available: {0}")]
 pub struct NativeResumeUnavailable(pub String);
 
+/// The agent requires authentication before a session can be created.
+///
+/// Carries the authentication methods advertised by the agent so the caller can
+/// surface a login guide (CLI / UI) without another handshake.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("agent authentication is required")]
+pub struct AgentAuthRequired(pub Vec<fxg_protocol::common::AgentAuthMethodInfo>);
+
 /// Session start request.
 #[derive(Debug, Clone)]
 pub struct StartSessionRequest {

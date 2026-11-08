@@ -225,7 +225,16 @@ pub const AGENT_PRESETS: &[AgentPreset] = &[
 
 /// Default preset lookup: resolves the executable name on `PATH`.
 fn default_preset_lookup(preset: &AgentPreset) -> Option<PathBuf> {
-    which::which(preset.program).ok()
+    match which::which(preset.program) {
+        Ok(path) => Some(path),
+        Err(err) => {
+            tracing::debug!(
+                program = preset.program,
+                "preset executable was not found on PATH: {err}"
+            );
+            None
+        }
+    }
 }
 
 /// ACP Registry management (fetch, cache, resolve, install).
@@ -258,6 +267,14 @@ impl AcpRegistry {
     /// installation step.
     pub fn preset_available(&self, id: &str) -> Option<PathBuf> {
         Self::preset(id).and_then(|preset| self.preset_path(preset))
+    }
+
+    /// Builds a launch spec from a built-in preset without requiring the registry.
+    pub fn preset_launch_spec(&self, name: &str, extra_args: &[String]) -> Option<AgentLaunchSpec> {
+        let id = self.resolve_alias(name);
+        let preset = Self::preset(&id)?;
+        let path = self.preset_path(preset)?;
+        Some(Self::preset_spec(preset, path, extra_args))
     }
 
     /// Builds a launch spec from a built-in preset.
@@ -709,10 +726,8 @@ impl AcpRegistry {
         }
 
         // 2) Built-in preset: a known CLI already installed on PATH.
-        if let Some(preset) = Self::preset(&id)
-            && let Some(path) = self.preset_path(preset)
-        {
-            return Ok(Self::preset_spec(preset, path, extra_args));
+        if let Some(spec) = self.preset_launch_spec(&id, extra_args) {
+            return Ok(spec);
         }
 
         // 3) Registry (only sources usable on this node; `npx` / `uvx` do not require

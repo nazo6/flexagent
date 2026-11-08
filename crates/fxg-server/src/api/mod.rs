@@ -118,6 +118,7 @@ impl ApiError {
             | ErrorCode::Busy
             | ErrorCode::CommandDuplicate
             | ErrorCode::ResumeRequired
+            | ErrorCode::AuthRequired
             | ErrorCode::WorktreeConflict
             | ErrorCode::SnapshotUnavailable
             | ErrorCode::AgentNotInstalled

@@ -14,6 +14,8 @@ export function recoveryActionLabel(action: RecoveryAction): string {
       return m.recovery_select_online_node();
     case "reinstall_agent":
       return m.recovery_reinstall_agent();
+    case "login_agent":
+      return m.recovery_login_agent();
     case "recreate_worktree":
       return m.recovery_recreate_worktree();
     case "revert_to_nearest_snapshot":
@@ -38,6 +40,8 @@ export function recoveryActionKey(action: RecoveryAction): string {
       return `reconnect:${action.node_id}`;
     case "reinstall_agent":
       return `reinstall:${action.node_id}:${action.agent_id}`;
+    case "login_agent":
+      return `login:${action.agent_id}`;
     case "recreate_worktree":
       return `worktree:${action.project_id}:${action.branch ?? ""}`;
     case "revert_to_nearest_snapshot":

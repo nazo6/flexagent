@@ -34,13 +34,13 @@
 
 ## Phase 一覧
 
-| Phase       | 内容                                                       | 主な対象                                       | 依存 | 状態              |
-| :---------- | :--------------------------------------------------------- | :--------------------------------------------- | :--- | :---------------- |
-| **Phase 1** | elicitation（質問/構造化入力）対応                         | protocol / db / acp / node / server / cli / ui | -    | 完了 (2026-10-02) |
-| **Phase 2** | セッション状態の可視化（UsageUpdate / StopReason）         | acp / protocol / db / ui / cli                 | -    | 完了 (2026-10-02) |
-| **Phase 3** | エージェント認証（authenticate / logout / terminal）       | acp / node / cli / ui                          | -    | 未着手            |
-| **Phase 4** | ツール出力・添付コンテンツ（ToolCallContent / multimodal） | acp / protocol / node / ui                     | -    | 未着手            |
-| **Phase 5** | 整合性の細部と unstable 対応                               | acp / db / node                                | -    | 未着手            |
+| Phase       | 内容                                                       | 主な対象                                       | 依存 | 状態                  |
+| :---------- | :--------------------------------------------------------- | :--------------------------------------------- | :--- | :-------------------- |
+| **Phase 1** | elicitation（質問/構造化入力）対応                         | protocol / db / acp / node / server / cli / ui | -    | 完了 (2026-10-02)     |
+| **Phase 2** | セッション状態の可視化（UsageUpdate / StopReason）         | acp / protocol / db / ui / cli                 | -    | 完了 (2026-10-02)     |
+| **Phase 3** | エージェント認証（authenticate / logout / terminal）       | acp / node / cli / ui                          | -    | 一部完了 (2026-11-09) |
+| **Phase 4** | ツール出力・添付コンテンツ（ToolCallContent / multimodal） | acp / protocol / node / ui                     | -    | 未着手                |
+| **Phase 5** | 整合性の細部と unstable 対応                               | acp / db / node                                | -    | 未着手                |
 
 > **参考: permission 系は elicitation と同型の先行実装がある。新機能はこれを
 > ミラーする。**
@@ -282,19 +282,20 @@
 **目的**: 認証必須のエージェント（`authMethods` を広告し `auth_required` を
 返すもの）を扱えるようにする。
 
-- [ ] `fxg-acp`: `InitializeResponse.auth_methods` を保持し、
+- [x] `fxg-acp`: `InitializeResponse.auth_methods` を保持し、
       `authenticate(methodId)`（agent 型）を送れる API を追加
-- [ ] `fxg-acp`: `clientCapabilities.auth.terminal = true` を広告（terminal
-      型メソッドは広告時のみエージェントが出せる）。terminal 型は fxg PTY で
-      エージェント本体を対話実行し、exit 0 で成功・再接続（`docs/04` の
-      純正 TUI 実行基盤を流用）
-- [ ] `fxg-node` / `fxg-cli`: `fxg agents login <agent> [--method <id>]` を
+- [x] `fxg-acp`: `clientCapabilities.auth.terminal = true` を広告（terminal
+      型メソッドは広告時のみエージェントが出せる）。terminal 型は
+      「起動コマンド + method.args」を対話実行し、exit 0 で成功とする
+- [x] `fxg-node` / `fxg-cli`: `fxg agents login <agent> [--method <id>]` を
       追加（メソッド一覧表示 → 選択 → 実行）。`logout` は
       `agentCapabilities.auth.logout` 広告時のみ `fxg agents logout`
-- [ ] `session/new` の `auth_required` エラーを判別してログイン導線を案内
-      （`ErrorCode` 追加）
-- [ ] `ui`: エラー時のログイン案内（コマンド表示）
-- [ ] テスト: 擬似認証エージェントでのフロー
+- [x] `session/new` の `auth_required` エラーを判別してログイン導線を案内
+      （`ErrorCode::AuthRequired` + `RecoveryAction::LoginAgent`）
+- [ ] `ui`: エラー時のログイン案内（現状は設定 > エージェント管理への
+      導線。対話ログインを Web UI に埋め込むのは次段階）
+- [x] テスト: 擬似認証エージェント (`auth_required` を返す shell mock) で
+      `AUTH_REQUIRED` + methods の伝播を検証 (`fxg-acp/tests/auth_required.rs`)
 
 ---
 

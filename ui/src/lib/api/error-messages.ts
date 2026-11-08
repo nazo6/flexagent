@@ -7,7 +7,10 @@ import { m } from "#lib/paraglide/messages.js";
  * Server responses also carry an English fallback `message`; this map lets the
  * UI show a localized explanation when the code is known.
  */
-export function errorCodeMessage(code: ErrorCode | null): string | null {
+export function errorCodeMessage(
+  code: ErrorCode | null,
+  params?: Record<string, string>,
+): string | null {
   switch (code) {
     case null:
       return null;
@@ -25,6 +28,8 @@ export function errorCodeMessage(code: ErrorCode | null): string | null {
       return m.error_invalid_state();
     case "RESUME_REQUIRED":
       return m.error_resume_required();
+    case "AUTH_REQUIRED":
+      return m.error_auth_required({ agent: params?.agent_id ?? "the agent" });
     case "PTY_DISABLED":
       return m.error_pty_disabled();
     case "COMMAND_DUPLICATE":

@@ -20,6 +20,22 @@ agent_id: string;
 /**  `true` = show it in the list and use it through `npx` / `uvx` */
 enabled: boolean };
 
+/**  An authentication method advertised by an ACP agent. */
+export type AgentAuthMethodInfo = {
+	/**  Method ID passed to `authenticate` (agent methods) or selected locally (terminal) */
+	id: string,
+	/**  Human-readable name */
+	name: string,
+	/**  Optional description shown in the login UI */
+	description?: string | null,
+	/**  How the method is executed */
+	kind: string,
+	/**  Additional arguments for terminal methods (appended to the launch command) */
+	args?: string[],
+	/**  Additional environment variables for terminal methods */
+	env?: { [key in string]: string },
+};
+
 /**  Common response of agent management operations. */
 export type AgentOpResponse = {
 	/**  Message describing the outcome (e.g. `installed opencode2 0.1.0`) */
@@ -527,6 +543,11 @@ export type ErrorCode =
  *  history replay (`fxg session resume` / Resume in the Web UI) is required.
  */
 "RESUME_REQUIRED" | 
+/**
+ *  The agent requires authentication before a session can be created.
+ *  The advertised methods are carried in [`ErrorInfo::details`].
+ */
+"AUTH_REQUIRED" | 
 /**  Remote PTY is disabled by the security policy */
 "PTY_DISABLED" | 
 /**  Duplicate `command_id` submission (double tap / WS resend) */
@@ -1123,6 +1144,10 @@ node_id: NodeId } |
 /**  Target node ID */
 node_id: NodeId; 
 /**  Agent ID */
+agent_id: string } | 
+/**  Log in to the agent (run `fxg agents login <agent_id>` / open the login UI) */
+{ kind: "login_agent"; 
+/**  Target agent ID */
 agent_id: string } | 
 /**  Recreate the worktree */
 { kind: "recreate_worktree"; 

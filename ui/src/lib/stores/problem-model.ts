@@ -78,7 +78,7 @@ export function normalizeError(error: unknown): NormalizedError {
     const info = error.info;
     return {
       message:
-        errorCodeMessage(info?.code ?? null) ??
+        errorCodeMessage(info?.code ?? null, info?.params) ??
         info?.message ??
         error.message ??
         UNKNOWN_ERROR_MESSAGE,

@@ -30,13 +30,13 @@ use std::sync::{Arc, Mutex};
 use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::util::MatchDispatch;
 use agent_client_protocol::v1::schema::{
-    AgentCapabilities, CancelNotification, ClientCapabilities, CompleteElicitationNotification,
-    ContentBlock, ContentChunk, CreateElicitationRequest, CreateElicitationResponse,
-    CreateTerminalRequest, CreateTerminalResponse, ElicitationAcceptAction,
-    ElicitationAction as AcpElicitationAction, ElicitationCapabilities, ElicitationContentValue,
-    ElicitationFormCapabilities, ElicitationMode, ElicitationScope, FileSystemCapabilities,
-    Implementation, InitializeRequest, KillTerminalRequest, KillTerminalResponse,
-    NewSessionRequest, PermissionOptionKind as AcpPermissionOptionKind,
+    AgentCapabilities, AuthCapabilities, AuthMethod, CancelNotification, ClientCapabilities,
+    CompleteElicitationNotification, ContentBlock, ContentChunk, CreateElicitationRequest,
+    CreateElicitationResponse, CreateTerminalRequest, CreateTerminalResponse,
+    ElicitationAcceptAction, ElicitationAction as AcpElicitationAction, ElicitationCapabilities,
+    ElicitationContentValue, ElicitationFormCapabilities, ElicitationMode, ElicitationScope,
+    FileSystemCapabilities, Implementation, InitializeRequest, KillTerminalRequest,
+    KillTerminalResponse, NewSessionRequest, PermissionOptionKind as AcpPermissionOptionKind,
     PlanEntryStatus as AcpPlanEntryStatus, ReadTextFileRequest, ReadTextFileResponse,
     ReleaseTerminalRequest, ReleaseTerminalResponse, RequestPermissionOutcome,
     RequestPermissionRequest, RequestPermissionResponse, SelectedPermissionOutcome,
@@ -52,9 +52,9 @@ use agent_client_protocol::{AcpAgent, AcpAgentConfig, Agent, Client};
 use anyhow::{Context, anyhow};
 use async_trait::async_trait;
 use fxg_protocol::common::{
-    CommandInfo, ConfigOptionInfo, ConfigOptionValue, ElicitationContent,
-    ElicitationMode as FxgElicitationMode, ElicitationPropertyKind, ElicitationSchema,
-    ElicitationValue, FileDiff, ModeInfo, PermissionOption,
+    AgentAuthMethodInfo, AgentAuthMethodKind, CommandInfo, ConfigOptionInfo, ConfigOptionValue,
+    ElicitationContent, ElicitationMode as FxgElicitationMode, ElicitationPropertyKind,
+    ElicitationSchema, ElicitationValue, FileDiff, ModeInfo, PermissionOption,
     PermissionOptionKind as FxgPermissionOptionKind, PlanEntry,
     PlanEntryStatus as FxgPlanEntryStatus, StreamDeltaPayload, ToolCallKind as FxgToolCallKind,
     ToolCallStatus as FxgToolCallStatus, TurnStopReason, UsageCost,
@@ -64,8 +64,8 @@ use fxg_protocol::util::uuid_v7;
 use tokio::sync::{mpsc, oneshot, watch};
 
 use crate::driver::{
-    ActiveSessionHandle, AgentDriver, DriverEvent, NativeResumeUnavailable, ResumeRequest,
-    StartSessionRequest, StartedSession,
+    ActiveSessionHandle, AgentAuthRequired, AgentDriver, DriverEvent, NativeResumeUnavailable,
+    ResumeRequest, StartSessionRequest, StartedSession,
 };
 use crate::warm::{DEFAULT_WARM_IDLE, LaunchKey, WarmPool, WarmProcess};
 
@@ -1177,18 +1177,10 @@ async fn run_acp_process(params: AcpProcessTaskParams) -> Result<(), agent_clien
         .connect_with(agent, async move |cx: ConnectionTo<Agent>| {
             // 1) initialize (once per process; declare support for fs read/write +
             //    terminal + elicitation (form))
-            let capabilities = ClientCapabilities::new()
-                .fs(FileSystemCapabilities::new()
-                    .read_text_file(true)
-                    .write_text_file(true))
-                .terminal(true)
-                .elicitation(
-                    ElicitationCapabilities::new().form(ElicitationFormCapabilities::new()),
-                );
             let initialize = match cx
                 .send_request(
                     InitializeRequest::new(ProtocolVersion::V1)
-                        .client_capabilities(capabilities)
+                        .client_capabilities(client_capabilities())
                         .client_info(Implementation::new("fxg", env!("CARGO_PKG_VERSION"))),
                 )
                 .block_task()
@@ -1206,6 +1198,11 @@ async fn run_acp_process(params: AcpProcessTaskParams) -> Result<(), agent_clien
                 }
             };
             let agent_capabilities = initialize.agent_capabilities.clone();
+            let auth_methods = initialize
+                .auth_methods
+                .iter()
+                .map(map_auth_method)
+                .collect::<Vec<_>>();
             if let Some(tx) = ready_tx.take() {
                 fxg_protocol::discard_with!(tx.send(Ok(())), "discard a non-critical result");
             }
@@ -1228,13 +1225,19 @@ async fn run_acp_process(params: AcpProcessTaskParams) -> Result<(), agent_clien
                 // return the error and shut the process down (the caller falls back
                 // to a cold start).
                 let (session, acp_session_id, context_restored, capabilities_state) =
-                    match build_session(&cx, &agent_capabilities, &params, &events, &contexts).await
+                    match build_session(
+                        &cx,
+                        &agent_capabilities,
+                        &params,
+                        &events,
+                        &contexts,
+                        &auth_methods,
+                    )
+                    .await
                     {
                         Ok(built) => built,
                         Err(err) => {
-                            if let Some(tx) = ready_tx.take()
-                                && tx.send(Err(err)).is_err()
-                            {
+                            if ready.send(Err(err)).is_err() {
                                 tracing::debug!(
                                     "session waiter dropped before the start failure was reported"
                                 );
@@ -1332,6 +1335,7 @@ async fn build_session(
     params: &SessionParams,
     events: &mpsc::UnboundedSender<DriverEvent>,
     contexts: &SessionContexts,
+    auth_methods: &[AgentAuthMethodInfo],
 ) -> anyhow::Result<(
     ActiveSession<'static, Agent>,
     SessionId,
@@ -1342,6 +1346,9 @@ async fn build_session(
     let plan = plan_resume(agent_capabilities, params.resume.as_ref())?;
     let acquired = match acquire_session(cx, plan, &params.cwd).await {
         Ok(acquired) => acquired,
+        Err(err) if err.code == agent_client_protocol::ErrorCode::AUTH_REQUIRED => {
+            return Err(AgentAuthRequired(auth_methods.to_vec()).into());
+        }
         // For native-only resume (`allow_fresh = false`), report a restore failure to
         // the caller (the node) as "native resume unavailable"
         Err(err)
@@ -1711,6 +1718,57 @@ fn discard_replay_updates(session: &mut ActiveSession<'static, Agent>) {
     }
     if discarded > 0 {
         tracing::debug!(discarded, "discarded session/load replay updates");
+    }
+}
+
+/// Client capabilities advertised to every ACP agent.
+///
+/// `auth.terminal` is enabled because fxg can reproduce the configured agent
+/// invocation in an interactive terminal (`fxg agents login`).
+pub(crate) fn client_capabilities() -> ClientCapabilities {
+    ClientCapabilities::new()
+        .fs(FileSystemCapabilities::new()
+            .read_text_file(true)
+            .write_text_file(true))
+        .terminal(true)
+        .auth(AuthCapabilities::new().terminal(true))
+        .elicitation(ElicitationCapabilities::new().form(ElicitationFormCapabilities::new()))
+}
+
+/// Converts an ACP authentication method into fxg's display / login type.
+pub(crate) fn map_auth_method(method: &AuthMethod) -> AgentAuthMethodInfo {
+    let id = method.id().to_string();
+    let name = method.name().to_owned();
+    let description = method.description().map(ToOwned::to_owned);
+    match method {
+        AuthMethod::Agent(_) => AgentAuthMethodInfo {
+            id,
+            name,
+            description,
+            kind: AgentAuthMethodKind::Agent,
+            args: Vec::new(),
+            env: BTreeMap::new(),
+        },
+        AuthMethod::Terminal(terminal) => AgentAuthMethodInfo {
+            id,
+            name,
+            description,
+            kind: AgentAuthMethodKind::Terminal,
+            args: terminal.args.clone(),
+            env: terminal
+                .env
+                .iter()
+                .map(|(key, value)| (key.clone(), value.clone()))
+                .collect(),
+        },
+        _ => AgentAuthMethodInfo {
+            id,
+            name,
+            description,
+            kind: AgentAuthMethodKind::Unknown("unknown".to_owned()),
+            args: Vec::new(),
+            env: BTreeMap::new(),
+        },
     }
 }
 
@@ -2431,7 +2489,9 @@ fn base64_encode(data: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use agent_client_protocol::v1::schema::{Plan, PlanEntry as AcpPlanEntry, PlanEntryPriority};
+    use agent_client_protocol::v1::schema::{
+        AuthMethodAgent, AuthMethodTerminal, Plan, PlanEntry as AcpPlanEntry, PlanEntryPriority,
+    };
 
     fn text_chunk(text: &str, message_id: Option<&str>) -> SessionUpdate {
         // `ContentChunk` is non_exhaustive, so construct it via JSON
@@ -3096,5 +3156,33 @@ mod tests {
                 other => panic!("unexpected payload: {other:?}"),
             }
         }
+    }
+
+    #[test]
+    fn maps_agent_and_terminal_auth_methods() {
+        let agent = AuthMethod::Agent(
+            AuthMethodAgent::new("agent-login", "Agent login").description("browser login"),
+        );
+        let mapped = map_auth_method(&agent);
+        assert_eq!(mapped.id, "agent-login");
+        assert_eq!(mapped.kind, AgentAuthMethodKind::Agent);
+        assert_eq!(mapped.description.as_deref(), Some("browser login"));
+        assert!(mapped.args.is_empty());
+
+        let terminal = AuthMethod::Terminal(
+            AuthMethodTerminal::new("terminal-login", "Terminal login")
+                .args(vec!["--login".to_owned()]),
+        );
+        let mapped = map_auth_method(&terminal);
+        assert_eq!(mapped.id, "terminal-login");
+        assert_eq!(mapped.kind, AgentAuthMethodKind::Terminal);
+        assert_eq!(mapped.args, vec!["--login"]);
+    }
+
+    #[test]
+    fn client_capabilities_advertise_terminal_auth() {
+        let capabilities = client_capabilities();
+        assert!(capabilities.terminal);
+        assert!(capabilities.auth.terminal);
     }
 }

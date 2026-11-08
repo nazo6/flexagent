@@ -61,6 +61,14 @@ pub enum NodeError {
         /// Why native restore was unavailable
         reason: String,
     },
+    /// The agent requires authentication before a session can be created
+    #[error("agent {agent_id} requires authentication")]
+    AuthRequired {
+        /// Agent ID
+        agent_id: String,
+        /// Authentication methods advertised by the agent
+        methods: Vec<fxg_protocol::common::AgentAuthMethodInfo>,
+    },
     /// The session is running (busy) and cannot be operated on
     #[error("session is busy: {0}")]
     Busy(String),
@@ -127,6 +135,7 @@ impl NodeError {
                 ErrorCode::InvalidState
             }
             Self::ResumeRequired { .. } => ErrorCode::ResumeRequired,
+            Self::AuthRequired { .. } => ErrorCode::AuthRequired,
             Self::Busy(_) => ErrorCode::Busy,
             Self::CommandDuplicate(_) => ErrorCode::CommandDuplicate,
             Self::AlreadyResolved(_) => ErrorCode::AlreadyResolved,
@@ -170,6 +179,18 @@ impl NodeError {
                     })
                     .with_data_safety(DataSafety::Preserved);
             }
+            Self::AuthRequired { agent_id, methods } => {
+                info = info
+                    .with_param("agent_id", agent_id)
+                    .with_details(serde_json::json!({
+                        "agent_id": agent_id,
+                        "methods": methods,
+                    }))
+                    .with_recovery(RecoveryAction::LoginAgent {
+                        agent_id: agent_id.clone(),
+                    })
+                    .with_data_safety(DataSafety::Preserved);
+            }
             Self::Busy(_) => {
                 info = info.with_data_safety(DataSafety::NotSent);
             }
@@ -182,5 +203,39 @@ impl NodeError {
             _ => {}
         }
         info
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use fxg_protocol::common::{
+        AgentAuthMethodInfo, AgentAuthMethodKind, ErrorCode, RecoveryAction,
+    };
+
+    #[test]
+    fn auth_required_error_carries_methods_and_login_action() {
+        let error = NodeError::AuthRequired {
+            agent_id: "agy".to_owned(),
+            methods: vec![AgentAuthMethodInfo {
+                id: "terminal-login".to_owned(),
+                name: "Terminal login".to_owned(),
+                description: None,
+                kind: AgentAuthMethodKind::Terminal,
+                args: vec!["--login".to_owned()],
+                env: Default::default(),
+            }],
+        };
+        assert_eq!(error.error_code(), ErrorCode::AuthRequired);
+        let info = error.info();
+        assert_eq!(info.code, ErrorCode::AuthRequired);
+        assert_eq!(info.params.get("agent_id").map(String::as_str), Some("agy"));
+        assert!(info.details.is_some());
+        assert!(info.recovery.iter().any(|action| {
+            matches!(
+                action,
+                RecoveryAction::LoginAgent { agent_id } if agent_id == "agy"
+            )
+        }));
     }
 }

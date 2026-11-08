@@ -131,6 +131,15 @@ ACPでは、エディタやオーケストレータ側が **`acp::Client` トレ
     (`clientCapabilities.elicitation.form`)。`accept` の content は送信前に
     クライアントが `requested_schema` に対して軽量検証し、ターンキャンセル時は
     未解決の elicitation を `cancel` で解決する (仕様 MUST)。
+- **認証 (`authMethods` / `authenticate` / `logout`)**:
+  - `initialize` の `authMethods` を `AgentAuthMethodInfo` として保持し、
+    `session/new` が `-32000` (`auth_required`) を返した場合は
+    `AUTH_REQUIRED` + methods をクライアントへ返す。
+  - `clientCapabilities.auth.terminal = true` を広告する。terminal 型は
+    `fxg agents login <agent>` で「起動コマンド + method.args」を対話実行する
+    (`agy acp --login` など)。agent 型は `authenticate` を送る。
+  - `auth.logout` を広告しているエージェントは `fxg agents logout` で
+    `logout` を送る。
 - **`read_text_file` / `write_text_file`**:
   - セッションの `local_path`
     基準でファイルを読み書き。書き込み時は変更前後の内容からUnified
