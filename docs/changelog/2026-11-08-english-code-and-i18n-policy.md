@@ -1,11 +1,12 @@
-# 2026-11-08 コードの英語化 (Phase 0 / Phase 1 / Phase 2 / Phase 3) と言語ポリシーの明文化
+# 2026-11-08 コードの英語化 (Phase 0〜4) と言語ポリシーの明文化
 
 - **日付**: 2026-11-08
 - **対象パッケージ**: `AGENTS.md`, `mise.toml`, `.github/workflows/ci.yml`,
   `fxg-protocol`, `fxg-db`, `fxg-pty`, `fxg-acp`, `fxg-server`, `fxg-node`, `fxg-cli`,
   `fxg-ui-assets`, `ui`
-- **対象スクリプト**: `mise run lint:lang` / `mise run types` / `cargo test -p fxg-protocol` /
-  `mise run fmt`
+- **対象スクリプト**: `mise run lint:lang` / `mise run types` /
+  `cargo test -p fxg-protocol` / `pnpm --dir ui run i18n:compile` /
+  `pnpm --dir ui run check` / `mise run build:ui` / `mise run fmt`
 
 ## 背景
 
@@ -124,12 +125,34 @@
   (理由コードは検索語として有用でないため)。
 - `mise run types` で `bindings.ts` を再生成した。
 
+### 9. UI のメッセージカタログ化 (Phase 4)
+
+- `paraglide-js` 3.2.1 を導入し、inlang プロジェクト (`ui/project.inlang/settings.json`)
+  を追加した。`baseLocale` / `locales` は `en` のみ。
+- UI の全ユーザー向け文字列を `ui/messages/en.json` (556 キー) へ抽出した。
+  生成物 `ui/src/lib/paraglide/` は Git 管理外とし、`pnpm --dir ui run i18n:compile`
+  で再生成する (`check` 実行時に自動で走る)。
+- `ui/vite.config.ts` に `paraglideVitePlugin` を追加した (`strategy: ["baseLocale"]`)。
+- `ErrorCode` → 英語文言マップ `ui/src/lib/api/error-messages.ts` を追加した。
+  `commandErrorMessage` と `CommandResult` のトーストは
+  `message ?? errorCodeMessage(code) ?? <fallback>` の順で表示する。
+- UI のコメントも英語化した。`ui/src/app.html` の `lang` を `en` に、
+  `ui/static/manifest.webmanifest` の説明も英語にした。
+- Service Worker (`ui/src/service-worker/index.ts`) は paraglide を読み込まず、
+  通知文言を英語リテラルで持つ。Web Push のロケール対応は Phase 5 で扱う。
+- `oxlint` の paraglide ルール (`no-dynamic-message-access`) を追加し、
+  `ui/.oxlintrc.paraglide.json` を `pnpm --dir ui run lint` から実行する。
+- `mise run lint:lang` の対象に `ui/src`, `ui/scripts`, `ui/static`, `ui/messages`,
+  `ui/*.ts` を追加した。日本語を残したのはマルチバイトの base64 テスト 1 行のみ
+  (`// allow-japanese`)。
+
 ## 検証
 
-- `mise run lint:lang` — 成功 (全 8 クレート、`allow-japanese` と migrations を除く)
+- `mise run lint:lang` — 成功 (全クレート + UI ソース、`allow-japanese` と migrations を除く)
 - `cargo clippy --workspace --all-targets -- -D warnings` — 成功
 - `cargo test --workspace` — 全件成功
-- `pnpm --dir ui run check` / `lint` / `test` — 成功 (65 件)
+- `pnpm --dir ui run i18n:compile` / `check` / `lint` / `test` — 成功 (65 件)
+- `mise run build:ui` — 成功
 - `mise run fmt:check` — 差分なし
 - Phase 1 時点の検証:
   - `cargo test -p fxg-protocol` — 44 件すべて成功
@@ -142,7 +165,7 @@
 | 1 (完了) | `fxg-protocol` の英語化 + `bindings.ts` 再生成                                                                                                                                                                                 |
 | 2 (完了) | 残り全クレート (`fxg-db` → `fxg-pty` → `fxg-acp` → `fxg-server` → `fxg-node` → `fxg-cli` → `fxg-ui-assets`) のコメント・メッセージ・ユーザー向け文字列の英語化。クレートごとに 1 コミット、完了ごとに `lint:lang` の対象へ追加 |
 | 3 (完了) | ユーザー向け文字列のうち、`TurnStopReason` 等を文言ではなくコードで渡す構造変更。`TurnEnded` の `message` を削除し、UI / CLI が `reason` から文言を導出する                                                                    |
-| 4        | UI 文字列を `paraglide-js` のメッセージカタログ (英語のみ) へ抽出し、`ErrorCode` → 文言マップを追加                                                                                                                            |
+| 4 (完了) | UI 文字列を `paraglide-js` のメッセージカタログ (英語のみ) へ抽出し、`ErrorCode` → 文言マップを追加                                                                                                                            |
 | 5 (将来) | 日本語カタログの追加、トレイ / Web Push のロケール対応                                                                                                                                                                         |
 | 6        | 英語化の完了後に一時タスク `lint:lang` (タスク本体 / `lint` 集約 / CI ステップ) を削除する                                                                                                                                     |
 

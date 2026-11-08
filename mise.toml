@@ -82,6 +82,11 @@ targets=(
   crates/fxg-node
   crates/fxg-cli
   crates/fxg-ui-assets
+  ui/src
+  ui/scripts
+  ui/static
+  ui/messages
+  ui/*.ts
 )
 
 # Han / Hiragana / Katakana + CJK 記号 + 全角形。
