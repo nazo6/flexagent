@@ -285,6 +285,86 @@
 
 ---
 
+## Phase 2.5: エラーハンドリング仕上げ（Phase 3 の前倒し）
+
+Phase 3 は `incidents` テーブル・新 API・`fxg doctor` など変更範囲が大きい。
+先に「エラーハンドリングとして完結する残り」を実装し、その後 Phase 3 に進む方針とした。
+
+### A. 基盤の積み残し
+
+- [x] REST の `request_id` ミドルウェアを追加
+      （`x-request-id` の再利用 / 応答ヘッダ / `ErrorInfo.request_id` /
+      リクエストの tracing span）
+- [x] `mise run lint:errors` を workspace 全体に拡張
+      （`let _ =` / `map_err(|_|)` / `Result::ok` / `Result::unwrap_or_default`）
+- [x] `discard_with!` を非 `Display` のエラーにも使えるようにし、
+      意図的な破棄には理由を必須化
+- [x] `spawn_guarded!` を追加し、`()` を返す fire-and-forget タスクの panic を記録
+- [x] 主要な `tokio::spawn` を `spawn_guarded!` / `spawn_logged!` へ移行
+      （タスクハンドルを保持・abort する箇所は直接 spawn のまま、
+      JoinError を明示的に記録）
+
+### B. UI のエラー提示
+
+- [x] `problems` ストア（`reportError`）を追加
+      （`ApiError` / `Error` / 任意値の正規化、`ErrorCode` の翻訳、
+      同一原因の重複排除、最大 20 件）
+- [x] `unhandledrejection` / `error` をグローバルに収集
+- [x] 共通 `ErrorBanner` を追加
+      （メッセージ / Details / 相関 ID コピー / 復旧アクション /
+      データ安全表示 / troubleshooting リンク）
+- [x] 永続的な問題はトーストではなくバナーで表示
+      （REST 更新失敗、WS エラー、未処理例外）
+- [x] 空 / 読み込み中 / エラーを別状態として描画
+      （プロジェクト、worktree、Inbox、エージェント / プロビジョナー、
+      新規セッションのプロジェクト選択）
+- [x] 失敗時に Composer / 新規セッションの入力・下書きを保持
+- [x] oxlint の `no-empty` を `allowEmptyCatch: false` で有効化
+
+### C. 復旧アクション・部分成功・データ安全
+
+- [x] `NODE_OFFLINE` に `ReconnectNode` / `SelectOnlineNode` を付与
+- [x] `RESUME_REQUIRED` に `ResumeWithReplay` と `DataSafety::Preserved` を付与
+- [x] 再試行可能な `NodeError` に `Retry { idempotent: true }` を付与
+- [x] `CommandResult` に `warnings` / `data_safety` / `status()`
+      （`success` / `partial` / `failed`）を追加
+- [x] `ErrorInfo` に `data_safety` を追加し、node → server → client へ伝播
+- [x] UI で復旧アクションをボタン表示し、画面遷移 / 再同期 / 再接続を実行
+
+### D. メッセージ品質・ドキュメント・契約テスト
+
+- [x] `docs/troubleshooting.md` を ErrorCode ごとに作成
+      （原因 / 確認 / 復旧、エラー処理規約）
+- [x] ErrorCode ↔ UI 翻訳 ↔ troubleshooting アンカーの契約テストを追加
+      （`fxg-protocol`）
+- [x] UI の Details から troubleshooting の該当アンカーへリンク
+- [x] エラーの表示項目を「何が起きたか / 詳細 / データ安全 / 次の操作 /
+      相関 ID」に統一
+
+### 検証
+
+- [x] `mise run check`（fmt / lint / clippy / Rust テスト / UI テスト）
+- [x] `mise run types` の生成物を同期
+
+### 実装ログ / 進捗メモ
+
+- **2026-11-08**: Phase 3 着手前に A〜D を前倒しで実装。
+  Phase 3 のインシデント永続化・`/healthz` / `/readyz`・`fxg doctor`・
+  サポートバンドルは当初どおり Phase 3 で行う。
+- **request_id**: REST の全リクエストに相関 ID を付与し、エラー本文と
+  ログの両方から同じ値で追跡できるようにした。
+- **lint 全展開**: 未監査だった `fxg-acp` / `fxg-node` / `fxg-server` /
+  `fxg-cli` の破棄箇所を整理。重要なものは `warn` に昇格し、
+  それ以外は `discard_with!` に理由を残した。
+- **UI**: トーストで消えていた失敗をバナーに集約。`request_id` のコピーと
+  troubleshooting への導線を付けた。空・読み込み中・エラーを分離した。
+- **未対応（Phase 3 以降）**: インシデントの永続化と画面表示、
+  `spawn_logged!` の完全移行、復旧アクションの専用ハンドラ
+  （現状は画面遷移 / 再同期）、`fxg doctor` / サポートバンドル、
+  障害注入テストと復旧ドリル。
+
+---
+
 ## Phase 3: 診断基盤（インシデント・ヘルス・ログ・doctor）
 
 - **目的**: リモートのノードでも「何が起きたか」をユーザーと運用者が
