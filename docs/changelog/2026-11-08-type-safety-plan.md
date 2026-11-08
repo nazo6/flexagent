@@ -329,12 +329,47 @@ pub enum ConfigOptionValue {
 
 ### Phase 3: DB 境界の型化
 
-- [ ] `crates/fxg-db/src/queries.rs` の row struct を enum に
-- [ ] `AuditLogEntry.action` / `SearchHit.event_type` を enum に
-- [ ] `crates/fxg-db/src/events.rs` の SQL 直書き status を bind に
-- [ ] `sqlx::Type` derive（feature gate）または decode/encode ヘルパーを整備
-- [ ] 全 enum variant の INSERT → SELECT 往復テストを追加
-- [ ] 既存 DB の文字列は変更しない（`Unknown(String)` で旧データを読む）
+- [x] `crates/fxg-db/src/queries.rs` の row struct を enum に
+  - [x] `SessionRow.status` → `SessionStatus`
+  - [x] `NodeRow.lifecycle_status` → `NodeLifecycleStatus`
+  - [x] `PermissionRow.status` / `resolved_by` → `PermissionRequestStatus` /
+        `Option<ResolvedBy>`
+  - [x] `ElicitationRow.mode` / `status` / `resolved_by` → `ElicitationMode` /
+        `ElicitationRequestStatus` / `Option<ResolvedBy>`
+  - [x] `SearchRow.event_type` → `EventType`
+  - [x] `AuditRow.action` → `AuditAction`
+- [x] `AuditLogEntry.action` / `SearchHit.event_type` を enum に
+      （row の decode 時点で型付きになった）
+- [x] `crates/fxg-db/src/events.rs` の SQL 直書き status を bind に
+  - [x] `'idle'` / `'pending'` を `SessionStatus::Idle.as_str()` などに
+  - [x] `ON CONFLICT` は `excluded.status` を使い二重 bind を回避
+  - [x] `queries.rs` の `WHERE status = 'pending'` も bind に
+- [x] `sqlx::Type` derive（feature gate）または decode/encode ヘルパーを整備
+  - [x] `fxg-protocol` に `sqlx` feature を追加
+  - [x] `impl_sqlx_text!` で `Type` / `Encode` / `Decode` を実装
+  - [x] `fxg-db` が `fxg-protocol/sqlx` を有効化
+- [x] 全 enum variant の INSERT → SELECT 往復テストを追加
+  - [x] `crates/fxg-db/tests/enum_roundtrip.rs`
+- [x] 既存 DB の文字列は変更しない
+  - [x] migration / `as_str()` / JSON の語彙はそのまま
+  - [x] open enum（`AuditAction` / `EventType` / `ElicitationMode` /
+        `ResolvedBy`）は `Unknown(String)` で往復
+  - [x] 閉じた status enum は未知値を decode エラーにする（従来の
+        `FromStr` 挙動と同じ。新しい status はプロトコル追加として扱う）
+
+#### Phase 3 の移行メモ
+
+- DB の TEXT 表現は変えていない。`fxg-protocol` の `sqlx` feature で
+  `Type<Sqlite>` / `Encode` / `Decode` を実装し、`query_as!` の row フィールドを
+  直接 enum にした。SQL 側は `AS "status: SessionStatus"` の型注釈で
+  `From<String>` を要求させない。
+- `SessionStatus` などの閉じた enum は、未知の DB 値を既定値に丸めず
+  decode エラーにする（`unknown_session_status_is_not_silently_coerced`）。
+  未知値を許容する必要がある列は Phase 1 の open enum を使う。
+- SQL の `'pending'` / `'idle'` は `as_str()` の bind に置き換えた。
+  既存 DB のインデックス（`WHERE status = 'pending'`）は migration 側に残る。
+- `.sqlx` キャッシュはクエリ文字列の変更に合わせて再生成した
+  （`mise run sqlx:prepare`）。
 
 ### Phase 4: ID newtype（任意・戦略的）
 
@@ -409,3 +444,9 @@ pub enum ConfigOptionValue {
   `NodeToServerMsg` の typed parse に変更し、CLI の provisioners / agents
   JSON 出力を Serialize struct に置き換えた。不要になった file-level
   `disallowed_types` allow も削除した。
+- 2026-11-08: Phase 3 を実装。`fxg-db` の row struct を `SessionStatus` /
+  `NodeLifecycleStatus` / `PermissionRequestStatus` /
+  `ElicitationRequestStatus` / `ElicitationMode` / `ResolvedBy` /
+  `AuditAction` / `EventType` に型化した。`fxg-protocol` に `sqlx` feature と
+  `impl_sqlx_text!` を追加し、SQL の status リテラルを bind に置き換えた。
+  全 variant の INSERT → SELECT 往復テストを追加し、`.sqlx` を再生成した。

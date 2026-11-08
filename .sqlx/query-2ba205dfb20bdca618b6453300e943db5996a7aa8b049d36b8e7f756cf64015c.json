@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n        SELECT session_id AS \"session_id!\",\n               project_id, node_id, local_path, git_branch,\n               is_worktree AS \"is_worktree: bool\",\n               agent_id, agent_session_id, parent_session_id, fork_from_node_seq,\n               title, status, current_mode, usage_json, last_node_seq, created_at, updated_at,\n               archived_at\n          FROM sessions\n         WHERE session_id = ? AND deleted_at IS NULL\n        ",
+  "query": "\n        SELECT session_id AS \"session_id!\",\n               project_id, node_id, local_path, git_branch,\n               is_worktree AS \"is_worktree: bool\",\n               agent_id, agent_session_id, parent_session_id, fork_from_node_seq,\n               title, status AS \"status: SessionStatus\", current_mode, usage_json,\n               last_node_seq, created_at, updated_at,\n               archived_at\n          FROM sessions\n         WHERE deleted_at IS NULL\n         ORDER BY updated_at DESC\n        ",
   "describe": {
     "columns": [
       {
@@ -125,7 +125,7 @@
         }
       },
       {
-        "name": "status",
+        "name": "status: SessionStatus",
         "ordinal": 11,
         "type_info": "Text",
         "origin": {
@@ -203,7 +203,7 @@
       }
     ],
     "parameters": {
-      "Right": 1
+      "Right": 0
     },
     "nullable": [
       true,
@@ -226,5 +226,5 @@
       true
     ]
   },
-  "hash": "64f1c47ca252add1a0786c354d0eb6223bc81fe62642453b61cf82e61df113e4"
+  "hash": "2ba205dfb20bdca618b6453300e943db5996a7aa8b049d36b8e7f756cf64015c"
 }

@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n        SELECT elicitation_id AS \"elicitation_id!\",\n               session_id, node_id, message, mode, schema_json, tool_call_id,\n               status, content_json, created_at, resolved_at, resolved_by\n          FROM elicitation_requests\n         WHERE elicitation_id = ?\n        ",
+  "query": "\n        SELECT elicitation_id AS \"elicitation_id!\",\n               session_id, node_id, message, mode AS \"mode: ElicitationMode\", schema_json,\n               tool_call_id, status AS \"status: ElicitationRequestStatus\", content_json,\n               created_at, resolved_at, resolved_by AS \"resolved_by: ResolvedBy\"\n          FROM elicitation_requests\n         WHERE status = ?\n         ORDER BY created_at DESC\n        ",
   "describe": {
     "columns": [
       {
@@ -48,7 +48,7 @@
         }
       },
       {
-        "name": "mode",
+        "name": "mode: ElicitationMode",
         "ordinal": 4,
         "type_info": "Text",
         "origin": {
@@ -81,7 +81,7 @@
         }
       },
       {
-        "name": "status",
+        "name": "status: ElicitationRequestStatus",
         "ordinal": 7,
         "type_info": "Text",
         "origin": {
@@ -125,7 +125,7 @@
         }
       },
       {
-        "name": "resolved_by",
+        "name": "resolved_by: ResolvedBy",
         "ordinal": 11,
         "type_info": "Text",
         "origin": {
@@ -154,5 +154,5 @@
       true
     ]
   },
-  "hash": "e854a22c1b289ebbe918c694c72cfc973a27ef25736ae388d0e840272ae8cc1b"
+  "hash": "d937933ed7479e221f50675dea911da4551fc3e82c91f05cb09a956fa59f305c"
 }

@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n        SELECT node_id AS \"node_id!\",\n               name, os, arch, version, installed_agents_json,\n               is_ephemeral AS \"is_ephemeral: bool\",\n               provisioner, lifecycle_status,\n               is_online AS \"is_online: bool\",\n               last_seen_at\n          FROM nodes\n         ORDER BY last_seen_at DESC\n        ",
+  "query": "\n        SELECT node_id AS \"node_id!\",\n               name, os, arch, version, installed_agents_json,\n               is_ephemeral AS \"is_ephemeral: bool\",\n               provisioner, lifecycle_status AS \"lifecycle_status: NodeLifecycleStatus\",\n               is_online AS \"is_online: bool\",\n               last_seen_at\n          FROM nodes\n         ORDER BY last_seen_at DESC\n        ",
   "describe": {
     "columns": [
       {
@@ -92,7 +92,7 @@
         }
       },
       {
-        "name": "lifecycle_status",
+        "name": "lifecycle_status: NodeLifecycleStatus",
         "ordinal": 8,
         "type_info": "Text",
         "origin": {
@@ -142,5 +142,5 @@
       false
     ]
   },
-  "hash": "2331de01755c70ebea8e136af44a0dc1a72a40703f22369e79eed9ee53556ca6"
+  "hash": "fc21a2b8ba169243675cf45ee4e48254a70c8a60f4c630f00d55d4e496df7b16"
 }

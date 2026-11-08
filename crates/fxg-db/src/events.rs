@@ -23,7 +23,7 @@
 
 use fxg_protocol::common::{
     ElicitationAction, ElicitationRequestStatus, PermissionOption, PermissionRequestStatus,
-    RawJson, SessionUsage,
+    RawJson, SessionStatus, SessionUsage,
 };
 use fxg_protocol::events::{SessionEventEnvelope, UnifiedEventPayload};
 use serde::{Deserialize, Serialize};
@@ -300,7 +300,7 @@ async fn upsert_session_from_created(
             available_commands_json, config_options_json,
             git_bundle_path, last_node_seq, synced_up_to_node_seq, created_at, updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, 'idle', NULL, '[]', '[]', '[]', NULL, ?, 0, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, NULL, '[]', '[]', '[]', NULL, ?, 0, ?, ?)
         ON CONFLICT(session_id) DO UPDATE SET
             project_id = excluded.project_id,
             node_id = excluded.node_id,
@@ -323,6 +323,7 @@ async fn upsert_session_from_created(
         parent_session_id.as_deref(),
         fork_from_node_seq_value,
         title,
+        SessionStatus::Idle.as_str(),
         node_seq,
         envelope.created_at,
         envelope.created_at,
@@ -452,14 +453,14 @@ pub(crate) async fn apply_projections(
                 INSERT INTO permission_requests
                     (request_id, session_id, node_id, tool_name, summary, details_json,
                      status, created_at, resolved_at, resolved_by)
-                SELECT ?, ?, s.node_id, ?, ?, ?, 'pending', ?, NULL, NULL
+                SELECT ?, ?, s.node_id, ?, ?, ?, ?, ?, NULL, NULL
                   FROM sessions s
                  WHERE s.session_id = ?
                 ON CONFLICT(request_id) DO UPDATE SET
                     tool_name = excluded.tool_name,
                     summary = excluded.summary,
                     details_json = excluded.details_json,
-                    status = 'pending',
+                    status = excluded.status,
                     resolved_at = NULL,
                     resolved_by = NULL
                 "#,
@@ -468,6 +469,7 @@ pub(crate) async fn apply_projections(
                 tool_name,
                 summary,
                 details_json,
+                PermissionRequestStatus::Pending.as_str(),
                 envelope.created_at,
                 envelope.session_id,
             )
@@ -515,7 +517,7 @@ pub(crate) async fn apply_projections(
                 INSERT INTO elicitation_requests
                     (elicitation_id, session_id, node_id, message, mode, schema_json,
                      tool_call_id, status, content_json, created_at, resolved_at, resolved_by)
-                SELECT ?, ?, s.node_id, ?, ?, ?, ?, 'pending', 'null', ?, NULL, NULL
+                SELECT ?, ?, s.node_id, ?, ?, ?, ?, ?, 'null', ?, NULL, NULL
                   FROM sessions s
                  WHERE s.session_id = ?
                 ON CONFLICT(elicitation_id) DO UPDATE SET
@@ -523,7 +525,7 @@ pub(crate) async fn apply_projections(
                     mode = excluded.mode,
                     schema_json = excluded.schema_json,
                     tool_call_id = excluded.tool_call_id,
-                    status = 'pending',
+                    status = excluded.status,
                     content_json = 'null',
                     resolved_at = NULL,
                     resolved_by = NULL
@@ -534,6 +536,7 @@ pub(crate) async fn apply_projections(
                 mode.as_str(),
                 schema_json,
                 tool_call_id,
+                ElicitationRequestStatus::Pending.as_str(),
                 envelope.created_at,
                 envelope.session_id,
             )
@@ -764,7 +767,7 @@ pub async fn rebuild_projections(pool: &SqlitePool) -> Result<(), DbError> {
         r#"
         UPDATE sessions
            SET title = 'New Session',
-               status = 'idle',
+               status = ?,
                current_mode = NULL,
                available_modes_json = '[]',
                available_commands_json = '[]',
@@ -776,6 +779,7 @@ pub async fn rebuild_projections(pool: &SqlitePool) -> Result<(), DbError> {
                last_node_seq = 0,
                updated_at = created_at
         "#,
+        SessionStatus::Idle.as_str(),
     )
     .execute(&mut *tx)
     .await?;

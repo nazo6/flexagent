@@ -26,12 +26,11 @@
     reason = "integer conversion errors (TryFromIntError) carry no additional context"
 )]
 
-use std::str::FromStr;
-
 use fxg_protocol::common::{
-    AuditLogEntry, ElicitationRequestEntry, ElicitationRequestStatus, NodeLifecycleStatus,
-    NodeSummary, PermissionRequestEntry, PermissionRequestStatus, ProjectBindingSummary,
-    ProjectSummary, SearchHit, SessionStatus, SessionSummary, SessionUsage,
+    AuditAction, AuditLogEntry, ElicitationMode, ElicitationRequestEntry, ElicitationRequestStatus,
+    EventType, NodeLifecycleStatus, NodeSummary, PermissionRequestEntry, PermissionRequestStatus,
+    ProjectBindingSummary, ProjectSummary, ResolvedBy, SearchHit, SessionStatus, SessionSummary,
+    SessionUsage,
 };
 use fxg_protocol::events::SessionEventBatch;
 use sqlx::SqlitePool;
@@ -72,7 +71,8 @@ pub async fn list_sessions(
                project_id, node_id, local_path, git_branch,
                is_worktree AS "is_worktree: bool",
                agent_id, agent_session_id, parent_session_id, fork_from_node_seq,
-               title, status, current_mode, usage_json, last_node_seq, created_at, updated_at,
+               title, status AS "status: SessionStatus", current_mode, usage_json,
+               last_node_seq, created_at, updated_at,
                archived_at
           FROM sessions
          WHERE deleted_at IS NULL
@@ -126,7 +126,8 @@ pub async fn get_session(
                project_id, node_id, local_path, git_branch,
                is_worktree AS "is_worktree: bool",
                agent_id, agent_session_id, parent_session_id, fork_from_node_seq,
-               title, status, current_mode, usage_json, last_node_seq, created_at, updated_at,
+               title, status AS "status: SessionStatus", current_mode, usage_json,
+               last_node_seq, created_at, updated_at,
                archived_at
           FROM sessions
          WHERE session_id = ? AND deleted_at IS NULL
@@ -435,7 +436,7 @@ pub async fn list_nodes(pool: &SqlitePool) -> Result<Vec<NodeSummary>, DbError> 
         SELECT node_id AS "node_id!",
                name, os, arch, version, installed_agents_json,
                is_ephemeral AS "is_ephemeral: bool",
-               provisioner, lifecycle_status,
+               provisioner, lifecycle_status AS "lifecycle_status: NodeLifecycleStatus",
                is_online AS "is_online: bool",
                last_seen_at
           FROM nodes
@@ -462,8 +463,7 @@ pub async fn list_nodes(pool: &SqlitePool) -> Result<Vec<NodeSummary>, DbError> 
                 version: row.version,
                 is_ephemeral: row.is_ephemeral,
                 provisioner: row.provisioner,
-                lifecycle_status: NodeLifecycleStatus::from_str(&row.lifecycle_status)
-                    .map_err(|err| DbError::InvalidEnumValue(err.to_string()))?,
+                lifecycle_status: row.lifecycle_status,
                 is_online: row.is_online,
                 last_seen_at: row.last_seen_at,
                 installed_agents,
@@ -481,11 +481,13 @@ pub async fn pending_permissions(
         r#"
         SELECT request_id AS "request_id!",
                session_id, node_id, tool_name, summary, details_json,
-               status, created_at, resolved_at, resolved_by
+               status AS "status: PermissionRequestStatus", created_at, resolved_at,
+               resolved_by AS "resolved_by: ResolvedBy"
           FROM permission_requests
-         WHERE status = 'pending'
+         WHERE status = ?
          ORDER BY created_at DESC
         "#,
+        PermissionRequestStatus::Pending.as_str(),
     )
     .fetch_all(pool)
     .await?;
@@ -503,7 +505,8 @@ pub async fn find_permission_request(
         r#"
         SELECT request_id AS "request_id!",
                session_id, node_id, tool_name, summary, details_json,
-               status, created_at, resolved_at, resolved_by
+               status AS "status: PermissionRequestStatus", created_at, resolved_at,
+               resolved_by AS "resolved_by: ResolvedBy"
           FROM permission_requests
          WHERE request_id = ?
         "#,
@@ -522,12 +525,14 @@ pub async fn pending_elicitations(
         ElicitationRow,
         r#"
         SELECT elicitation_id AS "elicitation_id!",
-               session_id, node_id, message, mode, schema_json, tool_call_id,
-               status, content_json, created_at, resolved_at, resolved_by
+               session_id, node_id, message, mode AS "mode: ElicitationMode", schema_json,
+               tool_call_id, status AS "status: ElicitationRequestStatus", content_json,
+               created_at, resolved_at, resolved_by AS "resolved_by: ResolvedBy"
           FROM elicitation_requests
-         WHERE status = 'pending'
+         WHERE status = ?
          ORDER BY created_at DESC
         "#,
+        ElicitationRequestStatus::Pending.as_str(),
     )
     .fetch_all(pool)
     .await?;
@@ -544,8 +549,9 @@ pub async fn find_elicitation_request(
         ElicitationRow,
         r#"
         SELECT elicitation_id AS "elicitation_id!",
-               session_id, node_id, message, mode, schema_json, tool_call_id,
-               status, content_json, created_at, resolved_at, resolved_by
+               session_id, node_id, message, mode AS "mode: ElicitationMode", schema_json,
+               tool_call_id, status AS "status: ElicitationRequestStatus", content_json,
+               created_at, resolved_at, resolved_by AS "resolved_by: ResolvedBy"
           FROM elicitation_requests
          WHERE elicitation_id = ?
         "#,
@@ -636,10 +642,7 @@ async fn search_like(
                 event_id: row.event_id,
                 session_id: row.session_id,
                 node_seq,
-                event_type: match row.event_type.parse() {
-                    Ok(event_type) => event_type,
-                    Err(never) => match never {},
-                },
+                event_type: row.event_type,
                 snippet,
                 created_at: row.created_at,
             })
@@ -656,7 +659,8 @@ pub async fn audit_logs(pool: &SqlitePool, limit: u32) -> Result<Vec<AuditLogEnt
     let rows = sqlx::query_as!(
         AuditRow,
         r#"
-        SELECT id, action, session_id, node_id, client_ip, client_user_agent,
+        SELECT id, action AS "action: AuditAction", session_id, node_id, client_ip,
+               client_user_agent,
                auth_subject, details_json, created_at
           FROM audit_logs
          ORDER BY created_at DESC, id DESC
@@ -671,10 +675,7 @@ pub async fn audit_logs(pool: &SqlitePool, limit: u32) -> Result<Vec<AuditLogEnt
         .into_iter()
         .map(|row| AuditLogEntry {
             id: row.id,
-            action: match row.action.parse() {
-                Ok(action) => action,
-                Err(never) => match never {},
-            },
+            action: row.action,
             session_id: row.session_id,
             node_id: row.node_id,
             client_ip: row.client_ip,
@@ -706,7 +707,7 @@ struct SessionRow {
     parent_session_id: Option<String>,
     fork_from_node_seq: Option<i64>,
     title: String,
-    status: String,
+    status: SessionStatus,
     current_mode: Option<String>,
     usage_json: Option<String>,
     last_node_seq: i64,
@@ -732,8 +733,7 @@ impl SessionRow {
                 .map(|value| u64::try_from(value).map_err(|_| DbError::NegativeNodeSeq(value)))
                 .transpose()?,
             title: self.title,
-            status: SessionStatus::from_str(&self.status)
-                .map_err(|err| DbError::InvalidEnumValue(err.to_string()))?,
+            status: self.status,
             current_mode: self.current_mode,
             usage: self
                 .usage_json
@@ -777,7 +777,7 @@ struct NodeRow {
     installed_agents_json: String,
     is_ephemeral: bool,
     provisioner: Option<String>,
-    lifecycle_status: String,
+    lifecycle_status: NodeLifecycleStatus,
     is_online: bool,
     last_seen_at: i64,
 }
@@ -789,10 +789,10 @@ struct PermissionRow {
     tool_name: String,
     summary: String,
     details_json: String,
-    status: String,
+    status: PermissionRequestStatus,
     created_at: i64,
     resolved_at: Option<i64>,
-    resolved_by: Option<String>,
+    resolved_by: Option<ResolvedBy>,
 }
 
 impl PermissionRow {
@@ -812,14 +812,10 @@ impl PermissionRow {
             summary: self.summary,
             options: stored.options,
             details: stored.details,
-            status: PermissionRequestStatus::from_str(&self.status)
-                .map_err(|err| DbError::InvalidEnumValue(err.to_string()))?,
+            status: self.status,
             created_at: self.created_at,
             resolved_at: self.resolved_at,
-            resolved_by: self.resolved_by.map(|value| match value.parse() {
-                Ok(resolved_by) => resolved_by,
-                Err(never) => match never {},
-            }),
+            resolved_by: self.resolved_by,
         })
     }
 }
@@ -829,14 +825,14 @@ struct ElicitationRow {
     session_id: String,
     node_id: String,
     message: String,
-    mode: String,
+    mode: ElicitationMode,
     schema_json: String,
     tool_call_id: Option<String>,
-    status: String,
+    status: ElicitationRequestStatus,
     content_json: String,
     created_at: i64,
     resolved_at: Option<i64>,
-    resolved_by: Option<String>,
+    resolved_by: Option<ResolvedBy>,
 }
 
 impl ElicitationRow {
@@ -860,21 +856,14 @@ impl ElicitationRow {
             session_id: self.session_id,
             node_id: self.node_id,
             message: self.message,
-            mode: match self.mode.parse() {
-                Ok(mode) => mode,
-                Err(never) => match never {},
-            },
+            mode: self.mode,
             requested_schema,
             tool_call_id: self.tool_call_id,
             content,
-            status: ElicitationRequestStatus::from_str(&self.status)
-                .map_err(|err| DbError::InvalidEnumValue(err.to_string()))?,
+            status: self.status,
             created_at: self.created_at,
             resolved_at: self.resolved_at,
-            resolved_by: self.resolved_by.map(|value| match value.parse() {
-                Ok(resolved_by) => resolved_by,
-                Err(never) => match never {},
-            }),
+            resolved_by: self.resolved_by,
         })
     }
 }
@@ -884,7 +873,7 @@ struct SearchRow {
     event_id: String,
     session_id: String,
     node_seq: i64,
-    event_type: String,
+    event_type: EventType,
     created_at: i64,
     snippet: Option<String>,
 }
@@ -899,10 +888,7 @@ impl SearchRow {
             event_id: self.event_id,
             session_id: self.session_id,
             node_seq,
-            event_type: match self.event_type.parse() {
-                Ok(event_type) => event_type,
-                Err(never) => match never {},
-            },
+            event_type: self.event_type,
             snippet: self.snippet?,
             created_at: self.created_at,
         })
@@ -911,7 +897,7 @@ impl SearchRow {
 
 struct AuditRow {
     id: i64,
-    action: String,
+    action: AuditAction,
     session_id: Option<String>,
     node_id: Option<String>,
     client_ip: String,

@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n        SELECT request_id AS \"request_id!\",\n               session_id, node_id, tool_name, summary, details_json,\n               status, created_at, resolved_at, resolved_by\n          FROM permission_requests\n         WHERE status = 'pending'\n         ORDER BY created_at DESC\n        ",
+  "query": "\n        SELECT request_id AS \"request_id!\",\n               session_id, node_id, tool_name, summary, details_json,\n               status AS \"status: PermissionRequestStatus\", created_at, resolved_at,\n               resolved_by AS \"resolved_by: ResolvedBy\"\n          FROM permission_requests\n         WHERE status = ?\n         ORDER BY created_at DESC\n        ",
   "describe": {
     "columns": [
       {
@@ -70,7 +70,7 @@
         }
       },
       {
-        "name": "status",
+        "name": "status: PermissionRequestStatus",
         "ordinal": 6,
         "type_info": "Text",
         "origin": {
@@ -103,7 +103,7 @@
         }
       },
       {
-        "name": "resolved_by",
+        "name": "resolved_by: ResolvedBy",
         "ordinal": 9,
         "type_info": "Text",
         "origin": {
@@ -115,7 +115,7 @@
       }
     ],
     "parameters": {
-      "Right": 0
+      "Right": 1
     },
     "nullable": [
       true,
@@ -130,5 +130,5 @@
       true
     ]
   },
-  "hash": "a970873e330b33700c006b0cd368fb2dd954bf8671acc0ce2b0ef54a41277ec5"
+  "hash": "8195507df2ff7eeb7d1790f9746acd3dab0ad50d636f8df4cfe2b5cdcd1e39f6"
 }

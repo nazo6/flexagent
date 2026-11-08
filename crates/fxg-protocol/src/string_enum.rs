@@ -4,6 +4,85 @@
 //! rejected or coerced to a default. The wire representation is the same as the
 //! plain string field it replaces, so this is not a protocol change.
 
+/// Implements `sqlx` TEXT encode / decode for string enums.
+///
+/// Enabled by the `sqlx` feature so `fxg-db` can use the domain enums directly as
+/// row fields while the wire format stays a plain string. Decoding a closed enum
+/// fails for unknown values (data corruption); open enums decode into
+/// `Unknown(String)` instead.
+#[cfg(feature = "sqlx")]
+#[doc(hidden)]
+#[macro_export]
+macro_rules! impl_sqlx_text {
+    ($($ty:ty),* $(,)?) => {
+        $(
+            impl ::sqlx::Type<::sqlx::Sqlite> for $ty {
+                fn type_info() -> <::sqlx::Sqlite as ::sqlx::Database>::TypeInfo {
+                    <::std::string::String as ::sqlx::Type<::sqlx::Sqlite>>::type_info()
+                }
+
+                fn compatible(
+                    ty: &<::sqlx::Sqlite as ::sqlx::Database>::TypeInfo,
+                ) -> bool {
+                    <::std::string::String as ::sqlx::Type<::sqlx::Sqlite>>::compatible(ty)
+                }
+            }
+
+            impl<'q> ::sqlx::Encode<'q, ::sqlx::Sqlite> for $ty {
+                fn encode_by_ref(
+                    &self,
+                    buf: &mut <::sqlx::Sqlite as ::sqlx::Database>::ArgumentBuffer,
+                ) -> ::std::result::Result<
+                    ::sqlx::encode::IsNull,
+                    ::std::boxed::Box<dyn ::std::error::Error + Send + Sync>,
+                > {
+                    <&str as ::sqlx::Encode<::sqlx::Sqlite>>::encode(self.as_str(), buf)
+                }
+            }
+
+            impl<'r> ::sqlx::Decode<'r, ::sqlx::Sqlite> for $ty {
+                fn decode(
+                    value: <::sqlx::Sqlite as ::sqlx::Database>::ValueRef<'r>,
+                ) -> ::std::result::Result<
+                    Self,
+                    ::std::boxed::Box<dyn ::std::error::Error + Send + Sync>,
+                > {
+                    let text =
+                        <&str as ::sqlx::Decode<::sqlx::Sqlite>>::decode(value)?;
+                    <Self as ::std::str::FromStr>::from_str(text).map_err(|err| {
+                        ::std::format!(
+                            "invalid {} value: {err}",
+                            ::std::stringify!($ty)
+                        )
+                        .into()
+                    })
+                }
+            }
+        )*
+    };
+}
+
+/// Calls [`impl_sqlx_text!`] only when the `sqlx` feature is enabled.
+///
+/// The `cfg` is resolved where this macro is defined, so expanding
+/// `open_string_enum!` in another crate does not depend on that crate's features.
+#[cfg(feature = "sqlx")]
+#[doc(hidden)]
+#[macro_export]
+macro_rules! maybe_impl_sqlx_text {
+    ($ty:ty) => {
+        $crate::impl_sqlx_text!($ty);
+    };
+}
+
+/// Calls [`impl_sqlx_text!`] only when the `sqlx` feature is enabled.
+#[cfg(not(feature = "sqlx"))]
+#[doc(hidden)]
+#[macro_export]
+macro_rules! maybe_impl_sqlx_text {
+    ($ty:ty) => {};
+}
+
 /// Defines a string enum with an `Unknown(String)` fallback.
 ///
 /// The macro generates `as_str`, `Display`, `FromStr`, `Serialize`,
@@ -93,5 +172,7 @@ macro_rules! open_string_enum {
                 <::std::string::String as ::specta::Type>::definition(types)
             }
         }
+
+        $crate::maybe_impl_sqlx_text!($name);
     };
 }

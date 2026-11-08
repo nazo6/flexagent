@@ -105,13 +105,14 @@ pub struct RawJson(pub serde_json::Value);
 
 ## 3. 変換の責務
 
-| 境界                            | 変換する場所                | ルール                                                                       |
-| :------------------------------ | :-------------------------- | :--------------------------------------------------------------------------- |
-| ACP SDK → `UnifiedEventPayload` | `fxg-acp` の変換関数        | SDK の enum を必ず enum へ写す。`_ =>` の既定値丸め禁止                      |
-| JSON → Rust                     | `serde`                     | `Unknown` を持つ open enum。同期 payload に `deny_unknown_fields` を付けない |
-| DB TEXT → Rust                  | `fxg-db` の row 変換        | `FromStr` / `TryFrom` を境界で1回だけ呼ぶ                                    |
-| HTTP / WS / stdio → Rust        | 各ハンドラ                  | parse 後は型だけを渡す。文字列 `op` 判定をしない                             |
-| Rust → TypeScript               | `specta` + `mise run types` | 生成物を直接編集しない。UI は生成型を import する                            |
+| 境界                            | 変換する場所                     | ルール                                                                          |
+| :------------------------------ | :------------------------------- | :------------------------------------------------------------------------------ |
+| ACP SDK → `UnifiedEventPayload` | `fxg-acp` の変換関数             | SDK の enum を必ず enum へ写す。`_ =>` の既定値丸め禁止                         |
+| DB TEXT → Rust                  | `fxg-protocol` の `sqlx` feature | row struct のフィールドを直接 enum にする。閉じた enum の未知値は decode エラー |
+| JSON → Rust                     | `serde`                          | `Unknown` を持つ open enum。同期 payload に `deny_unknown_fields` を付けない    |
+| DB TEXT → Rust                  | `fxg-db` の row 変換             | `FromStr` / `TryFrom` を境界で1回だけ呼ぶ                                       |
+| HTTP / WS / stdio → Rust        | 各ハンドラ                       | parse 後は型だけを渡す。文字列 `op` 判定をしない                                |
+| Rust → TypeScript               | `specta` + `mise run types`      | 生成物を直接編集しない。UI は生成型を import する                               |
 
 ### 3.1 open enum の形
 
@@ -219,7 +220,7 @@ UI 側で `status: string` のような独自型を作らず、生成型を使�
 | Phase 0  | 方針・clippy 基盤                              | 完了   |
 | Phase 1  | `PermissionOptionKind` などの enum 化          | 完了   |
 | Phase 2  | `RawJson` / elicitation / config / provisioner | 完了   |
-| Phase 3  | DB row / event_type / audit action             | 未着手 |
+| Phase 3  | DB row / event_type / audit action             | 完了   |
 | Phase 4  | ID newtype                                     | 未着手 |
 
 ファイル単位の `#![allow(...)]` と crate ルートの wildcard allow は、

@@ -475,6 +475,17 @@ impl FromStr for ElicitationRequestStatus {
     }
 }
 
+// Closed enums stored in TEXT columns (`sessions.status` etc.). Unlike the open
+// enums above, an unknown DB value is data corruption rather than a future peer
+// value, so decoding fails instead of preserving it.
+#[cfg(feature = "sqlx")]
+crate::impl_sqlx_text!(
+    SessionStatus,
+    NodeLifecycleStatus,
+    PermissionRequestStatus,
+    ElicitationRequestStatus,
+);
+
 /// How the logical project (`project_key`) was resolved.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "snake_case")]
