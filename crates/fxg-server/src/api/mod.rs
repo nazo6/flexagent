@@ -16,6 +16,7 @@
 
 pub mod auth;
 mod pty;
+mod request_context;
 mod security;
 mod static_ui;
 mod ws;
@@ -171,6 +172,9 @@ impl ApiError {
     }
 
     /// Converts into the structured error body.
+    ///
+    /// Fills in the request correlation ID from the current request when the
+    /// error itself did not come with one (e.g. errors raised by handlers).
     pub fn into_info(self) -> ErrorInfo {
         ErrorInfo {
             code: self.code,
@@ -179,7 +183,10 @@ impl ApiError {
             details: self.details.map(|details| *details),
             retryable: self.retryable,
             recovery: self.recovery,
-            request_id: self.request_id.map(String::from),
+            request_id: self
+                .request_id
+                .map(String::from)
+                .or_else(request_context::current_request_id),
             docs: None,
         }
     }
@@ -206,6 +213,14 @@ impl ApiError {
     }
 }
 
+impl std::fmt::Display for ApiError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} ({})", self.message, self.code)
+    }
+}
+
+impl std::error::Error for ApiError {}
+
 impl From<DbError> for ApiError {
     fn from(err: DbError) -> Self {
         match &err {
@@ -227,6 +242,20 @@ impl IntoResponse for ApiError {
             }),
         )
             .into_response()
+    }
+}
+
+/// Returns a header value as `&str` (`None` for a missing or non-UTF-8 value).
+// `Result::ok` is disallowed by the error-handling policy, so the explicit
+// match below is intentional.
+#[allow(clippy::manual_ok_err)]
+pub(crate) fn header_str(headers: &HeaderMap, name: header::HeaderName) -> Option<&str> {
+    match headers.get(name) {
+        Some(value) => match value.to_str() {
+            Ok(value) => Some(value),
+            Err(_) => None,
+        },
+        None => None,
     }
 }
 
@@ -255,10 +284,7 @@ impl ClientInfo {
             ip: addr
                 .map(|addr| addr.ip().to_string())
                 .unwrap_or_else(|| "local".to_owned()),
-            user_agent: headers
-                .get(header::USER_AGENT)
-                .and_then(|value| value.to_str().ok())
-                .map(str::to_owned),
+            user_agent: header_str(headers, header::USER_AGENT).map(str::to_owned),
             auth_subject: auth_subject.to_owned(),
         }
     }
@@ -850,6 +876,7 @@ pub fn client_router<B: ClientApiBackend>(backend: B, options: ClientApiOptions)
             state.clone(),
             security::security::<B>,
         ))
+        .layer(middleware::from_fn(request_context::request_context))
         .with_state(state);
     // Serve the embedded Web UI (SPA) for every non-API path.
     // It sits outside the security middleware (the UI assets themselves need no token).
@@ -1545,10 +1572,7 @@ pub(crate) async fn replay_events<B: ClientApiBackend>(
 
 /// Whether the `Request` is a WebSocket upgrade.
 pub(crate) fn is_websocket_upgrade(request: &Request) -> bool {
-    request
-        .headers()
-        .get(header::UPGRADE)
-        .and_then(|value| value.to_str().ok())
+    header_str(request.headers(), header::UPGRADE)
         .map(|value| value.eq_ignore_ascii_case("websocket"))
         .unwrap_or(false)
 }

@@ -21,7 +21,9 @@ use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 
 use super::auth::token_matches;
-use super::{ApiError, ClientApiBackend, ClientApiState, ClientInfo, is_websocket_upgrade};
+use super::{
+    ApiError, ClientApiBackend, ClientApiState, ClientInfo, header_str, is_websocket_upgrade,
+};
 
 /// Middleware that validates Host / Origin / Token.
 ///
@@ -72,10 +74,7 @@ fn verify_host<B: ClientApiBackend>(
     state: &ClientApiState<B>,
     headers: &HeaderMap,
 ) -> Option<Response> {
-    let Some(host) = headers
-        .get(header::HOST)
-        .and_then(|value| value.to_str().ok())
-    else {
+    let Some(host) = header_str(headers, header::HOST) else {
         return Some(ApiError::forbidden("missing Host header").into_response());
     };
     let port = state.options.port;
@@ -117,10 +116,7 @@ fn verify_origin<B: ClientApiBackend>(
         return None;
     }
     // Allow requests without an Origin header (non-browser clients)
-    let origin = request
-        .headers()
-        .get(header::ORIGIN)
-        .and_then(|value| value.to_str().ok())?;
+    let origin = header_str(request.headers(), header::ORIGIN)?;
     let port = state.options.port;
     let allowed = [
         format!("http://localhost:{port}"),
@@ -147,18 +143,14 @@ fn verify_auth<B: ClientApiBackend>(
 ) -> Option<Response> {
     let expected = state.backend.auth_token();
 
-    if let Some(value) = headers
-        .get(header::AUTHORIZATION)
-        .and_then(|value| value.to_str().ok())
+    if let Some(value) = header_str(headers, header::AUTHORIZATION)
         && let Some(provided) = value.strip_prefix("Bearer ")
         && token_matches(&expected, provided.trim())
     {
         return None;
     }
 
-    if let Some(cookie_header) = headers
-        .get(header::COOKIE)
-        .and_then(|value| value.to_str().ok())
+    if let Some(cookie_header) = header_str(headers, header::COOKIE)
         && let Some(provided) = extract_cookie(cookie_header, "fxg_session")
         && token_matches(&expected, &provided)
     {
