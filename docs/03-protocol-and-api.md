@@ -756,7 +756,7 @@ pub enum ServerToNodeMsg {
 ### 3.1 REST API エンドポイント
 
 - `GET /api/v1/meta`: 認証不要の接続先メタ情報。`{ "role": "central_server" |
-"local_node" }` を返却する。Web UI
+  "local_node" }` を返却する。Web UI
   は接続先種別の判定をこのエンドポイントのみで行い（認証済み
   `system/info` の `role` やホスト名からは推測しない）、トークン入力ダイアログ
   の表示（中央サーバー /
@@ -949,9 +949,9 @@ pub enum ServerToNodeMsg {
    として要求元クライアントへ応答されます。
    - **一時VMブートストラップログ (`BootstrapLog`)**:
      一時VMの起動中（`fxg daemon
---stdio` の `NodeHello` 前）はノードの `node.db` が存在しないため、中央
+     --stdio` の `NodeHello` 前）はノードの `node.db` が存在しないため、中央
      サーバーがプロビジョナーの `stderr` を `{ op: "bootstrap_log", session_id,
-line }` として**エフェメラル配信**する（イベントログには永続化されず、
+     line }` として**エフェメラル配信**する（イベントログには永続化されず、
      再接続時は復元されない）。UI はセッション詳細の「Environment Bootstrap
      Log」カードにリアルタイム表示する。
 4. **重複排除とマージ**:
