@@ -330,7 +330,7 @@ mod tests {
             .create_session(
                 &session_id,
                 fxg_protocol::events::UnifiedEventPayload::SessionCreated {
-                    node_id: daemon.state().node_id().to_owned(),
+                    node_id: daemon.state().node_id().into(),
                     project_id: "github.com/nazo6/flexagent".to_owned(),
                     project_name: "flexagent".to_owned(),
                     local_path: "/tmp/repo".to_owned(),
@@ -454,7 +454,7 @@ mod tests {
             .create_session(
                 &session_id,
                 fxg_protocol::events::UnifiedEventPayload::SessionCreated {
-                    node_id: daemon.state().node_id().to_owned(),
+                    node_id: daemon.state().node_id().into(),
                     project_id: "github.com/nazo6/flexagent".to_owned(),
                     project_name: "flexagent".to_owned(),
                     local_path: "/tmp/repo".to_owned(),

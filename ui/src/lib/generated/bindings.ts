@@ -106,7 +106,7 @@ export type AuditLogEntry = {
 	/**  Related session ID (optional) */
 	session_id: string | null,
 	/**  Target node ID (optional) */
-	node_id: string | null,
+	node_id: NodeId | null,
 	/**  Source IP address */
 	client_ip: string,
 	/**  Client User-Agent */
@@ -297,7 +297,7 @@ export type CreateSessionRequest = {
 	/**  Logical project ID */
 	project_id: string,
 	/**  ID of the resident node to run on (mutually exclusive with `provisioner`) */
-	node_id: string | null,
+	node_id: NodeId | null,
 	/**  Ephemeral VM provisioner name (mutually exclusive with `node_id`; requires the central server) */
 	provisioner: string | null,
 	/**  Working directory (an existing worktree or the repository root) */
@@ -327,7 +327,7 @@ export type CreateSessionResponse = {
 /**  `POST /api/v1/projects/:id/worktrees` request. */
 export type CreateWorktreeRequest = {
 	/**  Target node ID */
-	node_id: string,
+	node_id: NodeId,
 	/**  Name of the branch to create */
 	branch: string,
 	/**  Base branch (defaults to the current HEAD) */
@@ -437,7 +437,7 @@ export type ElicitationRequestEntry = {
 	/**  Target session ID */
 	session_id: string,
 	/**  Target node ID */
-	node_id: string,
+	node_id: NodeId,
 	/**  Message shown to the user */
 	message: string,
 	/**  Request mode (`form` / `url`. Phase 1 supports `form` only) */
@@ -678,7 +678,7 @@ export type InboxResponse = {
 /**  `POST /api/v1/nodes/tokens` request (issue a new node token). */
 export type IssueNodeTokenRequest = {
 	/**  Node ID to pair (the node_id of the fxg daemon) */
-	node_id: string,
+	node_id: NodeId,
 };
 
 /**
@@ -689,7 +689,7 @@ export type IssueNodeTokenRequest = {
  */
 export type IssueNodeTokenResponse = {
 	/**  Target node ID */
-	node_id: string,
+	node_id: NodeId,
 	/**  The issued plaintext token (stored in `~/.flexagent/node_token`) */
 	token: string,
 };
@@ -730,6 +730,9 @@ export type ModeInfo = {
 	description: string | null,
 };
 
+/**  ID of a node (resident daemon or ephemeral VM). */
+export type NodeId = string;
+
 /**  Lifecycle status of a node (same values as `nodes.lifecycle_status`). */
 export type NodeLifecycleStatus = 
 /**  Provisioning (ephemeral VM) */
@@ -760,7 +763,7 @@ export type NodeProjectReport = {
 /**  Node information exposed to clients (`GET /api/v1/nodes` / `GET /api/v1/system/info`). */
 export type NodeSummary = {
 	/**  Node ID */
-	node_id: string,
+	node_id: NodeId,
 	/**  Display name */
 	name: string,
 	/**  OS (`windows` / `linux` / `macos`) */
@@ -786,7 +789,7 @@ export type NodeSummary = {
 /**  One entry of `GET /api/v1/nodes/tokens` (an issued per-node token). */
 export type NodeTokenSummary = {
 	/**  Target node ID */
-	node_id: string,
+	node_id: NodeId,
 	/**  Leading prefix of the token hash (for matching and display; the plaintext is never stored) */
 	token_prefix: string,
 };
@@ -820,7 +823,7 @@ export type PermissionRequestEntry = {
 	/**  Target session ID */
 	session_id: string,
 	/**  Target node ID */
-	node_id: string,
+	node_id: NodeId,
 	/**  Tool name (e.g. `terminal/create`) */
 	tool_name: string,
 	/**  Summary (e.g. `Run command: cargo test`) */
@@ -863,7 +866,7 @@ export type PlanEntry = {
 /**  Project-to-node binding exposed to clients. */
 export type ProjectBindingSummary = {
 	/**  Node ID */
-	node_id: string,
+	node_id: NodeId,
 	/**  Local path on the node */
 	local_path: string,
 	/**  Whether this is a git worktree */
@@ -981,7 +984,7 @@ export type ProvisionerTestResponse = {
 	/**  Whether the handshake succeeded */
 	ok: boolean,
 	/**  Ephemeral node ID (when the handshake succeeded) */
-	node_id: string | null,
+	node_id: NodeId | null,
 	/**  Bootstrap log written to `stderr` (the last N lines) */
 	log_lines: string[],
 	/**  Failure message */
@@ -997,7 +1000,7 @@ export type ProvisionersResponse = {
 /**  `POST /api/v1/projects/:id/worktrees/prune` request. */
 export type PruneWorktreesRequest = {
 	/**  Target node ID */
-	node_id: string,
+	node_id: NodeId,
 };
 
 /**
@@ -1101,13 +1104,13 @@ session_id: string } |
 /**  Reconnect to the target node */
 { kind: "reconnect_node"; 
 /**  Target node ID */
-node_id: string } | 
+node_id: NodeId } | 
 /**  Pick another online node */
 { kind: "select_online_node" } | 
 /**  Install the missing agent on the node */
 { kind: "reinstall_agent"; 
 /**  Target node ID */
-node_id: string; 
+node_id: NodeId; 
 /**  Agent ID */
 agent_id: string } | 
 /**  Recreate the worktree */
@@ -1136,7 +1139,7 @@ session_id: string | null } |
 /**  `DELETE /api/v1/projects/:id/worktrees` request. */
 export type RemoveWorktreeRequest = {
 	/**  Target node ID */
-	node_id: string,
+	node_id: NodeId,
 	/**  Path to remove */
 	path: string,
 	/**  Whether to remove even if there are uncommitted changes */
@@ -1436,7 +1439,7 @@ export type SessionSummary = {
 	/**  Logical project ID (e.g. `github.com/nazo6/flexagent`) */
 	project_id: string,
 	/**  ID of the node running the session */
-	node_id: string,
+	node_id: NodeId,
 	/**  Working directory (including the worktree path) */
 	local_path: string,
 	/**  Snapshot taken at start-up (live values come from the worktree API) */
@@ -1573,7 +1576,7 @@ export type UnifiedEventPayload =
 	 *  ID of the running node. The running node fills in its own ID so that
 	 *  the hub-side projection can be rebuilt entirely from the event log.
 	 */
-	node_id: string,
+	node_id: NodeId,
 	/**  Logical project ID */
 	project_id: string,
 	/**  Project display name (used by the hub to create unknown projects) */
@@ -1933,7 +1936,7 @@ force: boolean } |
 /**  Information about a git worktree (`GET /api/v1/projects/:id/worktrees`). */
 export type WorktreeInfo = {
 	/**  Node ID */
-	node_id: string,
+	node_id: NodeId,
 	/**  Local path of the worktree */
 	path: string,
 	/**  Branch currently checked out */

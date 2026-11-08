@@ -30,12 +30,12 @@ use fxg_acp::{
 use fxg_db::{Db, DbRole};
 use fxg_node::daemon::{DaemonConfig, NodeDaemon};
 use fxg_node::session_manager::{DriverFactory, StartSessionParams};
-use fxg_protocol::CommandId;
 use fxg_protocol::common::{
     ClientSource, ErrorCode, PermissionOption, PermissionOptionKind, SessionStatus,
     StreamDeltaPayload,
 };
 use fxg_protocol::events::UnifiedEventPayload;
+use fxg_protocol::{CommandId, NodeId};
 use fxg_server::Server;
 use fxg_server::api::auth::{generate_token, hash_token};
 use fxg_server::state::ServerOptions;
@@ -375,7 +375,7 @@ async fn offline_events_sync_without_loss_or_duplication() {
     // 3. Wait for both nodes to connect and finish syncing
     wait_until("nodes connected", Duration::from_secs(30), || async {
         let hub = server.state().hub();
-        hub.is_online("node-a").await && hub.is_online("node-b").await
+        hub.is_online(&NodeId::from("node-a")).await && hub.is_online(&NodeId::from("node-b")).await
     })
     .await;
 
@@ -508,7 +508,11 @@ async fn central_server_commands_permissions_and_kill_switch() {
     )
     .await;
     wait_until("node connected", Duration::from_secs(30), || async {
-        server.state().hub().is_online("node-1").await
+        server
+            .state()
+            .hub()
+            .is_online(&NodeId::from("node-1"))
+            .await
     })
     .await;
 
@@ -547,7 +551,7 @@ async fn central_server_commands_permissions_and_kill_switch() {
                             && project
                                 .bindings
                                 .iter()
-                                .any(|binding| binding.node_id == "node-1")
+                                .any(|binding| binding.node_id.as_str() == "node-1")
                     })
                 })
                 .unwrap_or(false)
@@ -823,7 +827,11 @@ async fn central_server_commands_permissions_and_kill_switch() {
         .await
         .expect("node stop");
     wait_until("node offline", Duration::from_secs(30), || async {
-        !server.state().hub().is_online("node-1").await
+        !server
+            .state()
+            .hub()
+            .is_online(&NodeId::from("node-1"))
+            .await
     })
     .await;
 
@@ -910,7 +918,11 @@ async fn central_server_resumes_stopped_session() {
     )
     .await;
     wait_until("node connected", Duration::from_secs(30), || async {
-        server.state().hub().is_online("node-1").await
+        server
+            .state()
+            .hub()
+            .is_online(&NodeId::from("node-1"))
+            .await
     })
     .await;
 
@@ -1085,7 +1097,11 @@ async fn central_server_archives_and_deletes_session() {
     )
     .await;
     wait_until("node connected", Duration::from_secs(30), || async {
-        server.state().hub().is_online("node-1").await
+        server
+            .state()
+            .hub()
+            .is_online(&NodeId::from("node-1"))
+            .await
     })
     .await;
 

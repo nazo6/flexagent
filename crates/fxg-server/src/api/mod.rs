@@ -208,7 +208,7 @@ impl ApiError {
     pub fn node_offline(node_id: &str, message: impl Into<String>) -> Self {
         Self::from_code(ErrorCode::NodeOffline, message)
             .with_recovery(RecoveryAction::ReconnectNode {
-                node_id: node_id.to_owned(),
+                node_id: node_id.into(),
             })
             .with_recovery(RecoveryAction::SelectOnlineNode)
     }
@@ -1029,7 +1029,7 @@ async fn list_sessions<B: ClientApiBackend>(
     };
     let filter = SessionFilter {
         project_id: params.project_id,
-        node_id: params.node_id,
+        node_id: params.node_id.map(fxg_protocol::NodeId::from),
         statuses,
         include_archived: params.include_archived.unwrap_or(false),
         limit: Some(params.limit.unwrap_or(100)),

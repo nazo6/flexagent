@@ -211,7 +211,7 @@ pub(crate) async fn build_hello(state: &DaemonState) -> NodeToServerMsg {
                 bindings: project
                     .bindings
                     .into_iter()
-                    .filter(|binding| binding.node_id == state.node_id())
+                    .filter(|binding| binding.node_id.as_str() == state.node_id())
                     .map(|binding| fxg_protocol::common::ProjectNodeBinding {
                         local_path: binding.local_path,
                         is_worktree: binding.is_worktree,
@@ -252,7 +252,7 @@ pub(crate) async fn build_hello(state: &DaemonState) -> NodeToServerMsg {
     };
 
     NodeToServerMsg::NodeHello {
-        node_id: state.node_id().to_owned(),
+        node_id: state.node_id().into(),
         name: state.config().node_name.clone(),
         os: std::env::consts::OS.to_owned(),
         arch: std::env::consts::ARCH.to_owned(),
@@ -803,7 +803,7 @@ pub(crate) async fn handle_server_message(
                                 NodeToServerMsg::WorktreeResult {
                                     command_id,
                                     worktree: Some(WorktreeInfo {
-                                        node_id: state.node_id().to_owned(),
+                                        node_id: state.node_id().into(),
                                         path: outcome.path.to_string_lossy().into_owned(),
                                         branch: Some(outcome.branch),
                                         head_commit,
@@ -1254,7 +1254,7 @@ async fn drain_and_shutdown(
 
     fxg_protocol::discard_with!(
         out.send(NodeToServerMsg::DrainComplete {
-            node_id: state.node_id().to_owned(),
+            node_id: state.node_id().into(),
         })
         .await,
         "send a message to the central server"

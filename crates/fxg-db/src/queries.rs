@@ -26,6 +26,7 @@
     reason = "integer conversion errors (TryFromIntError) carry no additional context"
 )]
 
+use fxg_protocol::NodeId;
 use fxg_protocol::common::{
     AuditAction, AuditLogEntry, ElicitationMode, ElicitationRequestEntry, ElicitationRequestStatus,
     EventType, NodeLifecycleStatus, NodeSummary, PermissionRequestEntry, PermissionRequestStatus,
@@ -44,7 +45,7 @@ pub struct SessionFilter {
     /// Filter by logical project ID
     pub project_id: Option<String>,
     /// Filter by node ID
-    pub node_id: Option<String>,
+    pub node_id: Option<NodeId>,
     /// Filter by session status (all statuses if empty)
     pub statuses: Vec<SessionStatus>,
     /// Whether to include archived sessions (default `false` = excluded)
@@ -89,8 +90,8 @@ pub async fn list_sessions(
         {
             continue;
         }
-        if let Some(node_id) = filter.node_id.as_deref()
-            && row.node_id != node_id
+        if let Some(node_id) = filter.node_id.as_ref()
+            && &row.node_id != node_id
         {
             continue;
         }
@@ -371,7 +372,7 @@ pub async fn list_projects(pool: &SqlitePool) -> Result<Vec<ProjectSummary>, DbE
 pub async fn resolve_default_local_path(
     pool: &SqlitePool,
     project_id: &str,
-    node_id: &str,
+    node_id: &NodeId,
 ) -> Result<Option<String>, DbError> {
     let projects = list_projects(pool).await?;
     if let Some(project) = projects
@@ -386,7 +387,7 @@ pub async fn resolve_default_local_path(
         pool,
         &SessionFilter {
             project_id: Some(project_id.to_owned()),
-            node_id: Some(node_id.to_owned()),
+            node_id: Some(node_id.clone()),
             limit: Some(1),
             ..SessionFilter::default()
         },
@@ -408,11 +409,11 @@ pub async fn resolve_default_local_path(
 /// (the UI is responsible for UX warnings so that non-existent paths are not used silently).
 pub fn select_default_binding_path(
     bindings: &[ProjectBindingSummary],
-    node_id: &str,
+    node_id: &NodeId,
 ) -> Option<String> {
     let candidates: Vec<&ProjectBindingSummary> = bindings
         .iter()
-        .filter(|binding| binding.node_id == node_id)
+        .filter(|binding| &binding.node_id == node_id)
         .collect();
     let latest_existing = candidates
         .iter()
@@ -659,7 +660,8 @@ pub async fn audit_logs(pool: &SqlitePool, limit: u32) -> Result<Vec<AuditLogEnt
     let rows = sqlx::query_as!(
         AuditRow,
         r#"
-        SELECT id, action AS "action: AuditAction", session_id, node_id, client_ip,
+        SELECT id, action AS "action: AuditAction", session_id,
+               node_id AS "node_id: NodeId", client_ip,
                client_user_agent,
                auth_subject, details_json, created_at
           FROM audit_logs
@@ -698,7 +700,7 @@ pub async fn audit_logs(pool: &SqlitePool, limit: u32) -> Result<Vec<AuditLogEnt
 struct SessionRow {
     session_id: String,
     project_id: String,
-    node_id: String,
+    node_id: NodeId,
     local_path: String,
     git_branch: Option<String>,
     is_worktree: bool,
@@ -760,7 +762,7 @@ struct ProjectRow {
 
 struct BindingRow {
     project_id: String,
-    node_id: String,
+    node_id: NodeId,
     local_path: String,
     is_worktree: bool,
     path_exists: bool,
@@ -769,7 +771,7 @@ struct BindingRow {
 }
 
 struct NodeRow {
-    node_id: String,
+    node_id: NodeId,
     name: String,
     os: String,
     arch: String,
@@ -785,7 +787,7 @@ struct NodeRow {
 struct PermissionRow {
     request_id: String,
     session_id: String,
-    node_id: String,
+    node_id: NodeId,
     tool_name: String,
     summary: String,
     details_json: String,
@@ -823,7 +825,7 @@ impl PermissionRow {
 struct ElicitationRow {
     elicitation_id: String,
     session_id: String,
-    node_id: String,
+    node_id: NodeId,
     message: String,
     mode: ElicitationMode,
     schema_json: String,
@@ -899,7 +901,7 @@ struct AuditRow {
     id: i64,
     action: AuditAction,
     session_id: Option<String>,
-    node_id: Option<String>,
+    node_id: Option<NodeId>,
     client_ip: String,
     client_user_agent: Option<String>,
     auth_subject: String,

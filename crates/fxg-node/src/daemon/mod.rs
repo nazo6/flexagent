@@ -245,7 +245,7 @@ impl DaemonState {
         // Node ID: resolve in the order configured value → existing DB row → new auto-assigned ID
         if config.node_id.trim().is_empty() {
             config.node_id = match db.list_nodes().await?.first() {
-                Some(existing) => existing.node_id.clone(),
+                Some(existing) => existing.node_id.as_str().to_owned(),
                 None => default_node_id(),
             };
         }
@@ -837,7 +837,7 @@ mod tests {
 
         let nodes = daemon.state().db().list_nodes().await.expect("nodes");
         assert_eq!(nodes.len(), 1);
-        assert_eq!(nodes[0].node_id, "test-node");
+        assert_eq!(nodes[0].node_id.as_str(), "test-node");
         assert!(nodes[0].is_online);
         assert_eq!(nodes[0].os, std::env::consts::OS);
 
@@ -870,7 +870,7 @@ mod tests {
         bus.create_session(
             "stale-session",
             fxg_protocol::events::UnifiedEventPayload::SessionCreated {
-                node_id: "test-node".to_owned(),
+                node_id: "test-node".into(),
                 project_id: "github.com/nazo6/flexagent".to_owned(),
                 project_name: "flexagent".to_owned(),
                 local_path: dir.path().to_string_lossy().into_owned(),

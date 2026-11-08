@@ -688,7 +688,7 @@ impl usage::RunAsync for ProvisionersTestArgs {
             println!(
                 "ok: {} (node {})",
                 response.name,
-                response.node_id.as_deref().unwrap_or("-")
+                response.node_id.as_ref().map_or("-", |id| id.as_str())
             );
             return Ok(());
         }
@@ -847,7 +847,7 @@ impl usage::RunAsync for SessionListArgs {
             .filter(|session| {
                 self.node
                     .as_deref()
-                    .is_none_or(|node| session.node_id == node)
+                    .is_none_or(|node| session.node_id.as_str() == node)
             })
             .collect();
 
@@ -866,7 +866,7 @@ impl usage::RunAsync for SessionListArgs {
             .map(|session| {
                 vec![
                     short_id(&session.session_id),
-                    truncate(&session.node_id, 16),
+                    truncate(session.node_id.as_str(), 16),
                     truncate(&session.agent_id, 16),
                     session.status.to_string(),
                     format_unix_ms_utc(session.updated_at),
@@ -979,7 +979,7 @@ impl usage::RunAsync for SessionShowArgs {
             ("SESSION", session.session_id.clone()),
             ("TITLE", session.title.clone()),
             ("PROJECT", session.project_id.clone()),
-            ("NODE", session.node_id.clone()),
+            ("NODE", session.node_id.to_string()),
             ("AGENT", session.agent_id.clone()),
             ("STATUS", session.status.to_string()),
             (
@@ -2393,7 +2393,10 @@ impl usage::RunAsync for NodeTokenIssueArgs {
         // Register unknown nodes with placeholder values
         // (overwritten with real values by `NodeHello` when the node connects)
         let nodes = db.list_nodes().await?;
-        if !nodes.iter().any(|node| node.node_id == self.node_id) {
+        if !nodes
+            .iter()
+            .any(|node| node.node_id.as_str() == self.node_id)
+        {
             db.upsert_node(&fxg_db::NodeRecord::new(
                 self.node_id.clone(),
                 self.node_id.clone(),

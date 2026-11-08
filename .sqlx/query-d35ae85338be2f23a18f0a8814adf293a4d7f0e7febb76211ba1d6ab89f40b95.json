@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n        SELECT id, action AS \"action: AuditAction\", session_id, node_id, client_ip,\n               client_user_agent,\n               auth_subject, details_json, created_at\n          FROM audit_logs\n         ORDER BY created_at DESC, id DESC\n         LIMIT ?\n        ",
+  "query": "\n        SELECT id, action AS \"action: AuditAction\", session_id,\n               node_id AS \"node_id: NodeId\", client_ip,\n               client_user_agent,\n               auth_subject, details_json, created_at\n          FROM audit_logs\n         ORDER BY created_at DESC, id DESC\n         LIMIT ?\n        ",
   "describe": {
     "columns": [
       {
@@ -37,7 +37,7 @@
         }
       },
       {
-        "name": "node_id",
+        "name": "node_id: NodeId",
         "ordinal": 3,
         "type_info": "Text",
         "origin": {
@@ -118,5 +118,5 @@
       false
     ]
   },
-  "hash": "40aa49102f05f53d32e4e4ad980f96e5a5080547c11382749051989a0e6cec14"
+  "hash": "d35ae85338be2f23a18f0a8814adf293a4d7f0e7febb76211ba1d6ab89f40b95"
 }

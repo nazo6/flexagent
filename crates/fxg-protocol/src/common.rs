@@ -12,7 +12,7 @@ use std::str::FromStr;
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
-use crate::CommandId;
+use crate::{CommandId, NodeId};
 
 /// Intentionally opaque JSON carried across the protocol.
 ///
@@ -645,7 +645,7 @@ pub struct SessionSummary {
     /// Logical project ID (e.g. `github.com/nazo6/flexagent`)
     pub project_id: String,
     /// ID of the node running the session
-    pub node_id: String,
+    pub node_id: NodeId,
     /// Working directory (including the worktree path)
     pub local_path: String,
     /// Snapshot taken at start-up (live values come from the worktree API)
@@ -1437,14 +1437,14 @@ pub enum RecoveryAction {
     /// Reconnect to the target node
     ReconnectNode {
         /// Target node ID
-        node_id: String,
+        node_id: NodeId,
     },
     /// Pick another online node
     SelectOnlineNode,
     /// Install the missing agent on the node
     ReinstallAgent {
         /// Target node ID
-        node_id: String,
+        node_id: NodeId,
         /// Agent ID
         agent_id: String,
     },
@@ -1641,7 +1641,7 @@ pub struct ProjectSummary {
 #[specta(collect)]
 pub struct ProjectBindingSummary {
     /// Node ID
-    pub node_id: String,
+    pub node_id: NodeId,
     /// Local path on the node
     pub local_path: String,
     /// Whether this is a git worktree
@@ -1662,7 +1662,7 @@ pub struct ProjectBindingSummary {
 #[specta(collect)]
 pub struct NodeSummary {
     /// Node ID
-    pub node_id: String,
+    pub node_id: NodeId,
     /// Display name
     pub name: String,
     /// OS (`windows` / `linux` / `macos`)
@@ -1694,7 +1694,7 @@ pub struct PermissionRequestEntry {
     /// Target session ID
     pub session_id: String,
     /// Target node ID
-    pub node_id: String,
+    pub node_id: NodeId,
     /// Tool name (e.g. `terminal/create`)
     pub tool_name: String,
     /// Summary (e.g. `Run command: cargo test`)
@@ -1725,7 +1725,7 @@ pub struct ElicitationRequestEntry {
     /// Target session ID
     pub session_id: String,
     /// Target node ID
-    pub node_id: String,
+    pub node_id: NodeId,
     /// Message shown to the user
     pub message: String,
     /// Request mode (`form` / `url`. Phase 1 supports `form` only)
@@ -1863,7 +1863,7 @@ pub struct AuditLogEntry {
     /// Related session ID (optional)
     pub session_id: Option<String>,
     /// Target node ID (optional)
-    pub node_id: Option<String>,
+    pub node_id: Option<NodeId>,
     /// Source IP address
     pub client_ip: String,
     /// Client User-Agent

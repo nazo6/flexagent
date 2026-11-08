@@ -1051,7 +1051,7 @@ mod tests {
                 assert_eq!(projects.len(), 1);
                 assert_eq!(projects[0].project_id, "internal/agent-tools");
                 assert_eq!(projects[0].bindings.len(), 1);
-                assert_eq!(projects[0].bindings[0].node_id, "ipc-node");
+                assert_eq!(projects[0].bindings[0].node_id.as_str(), "ipc-node");
             }
             other => panic!("unexpected response: {other:?}"),
         }

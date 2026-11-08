@@ -18,6 +18,8 @@
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
+use crate::NodeId;
+
 use crate::common::{
     AttachmentMeta, ClientSource, CommandInfo, CompactionStatus, ConfigOptionInfo,
     ElicitationAction, ElicitationContent, ElicitationMode, ElicitationSchema, EventType, FileDiff,
@@ -83,7 +85,7 @@ pub enum UnifiedEventPayload {
     SessionCreated {
         /// ID of the running node. The running node fills in its own ID so that
         /// the hub-side projection can be rebuilt entirely from the event log.
-        node_id: String,
+        node_id: NodeId,
         /// Logical project ID
         project_id: String,
         /// Project display name (used by the hub to create unknown projects)

@@ -251,7 +251,7 @@ mod tests {
 
     fn session_created_payload() -> UnifiedEventPayload {
         UnifiedEventPayload::SessionCreated {
-            node_id: NODE_ID.to_owned(),
+            node_id: NODE_ID.into(),
             project_id: PROJECT_ID.to_owned(),
             project_name: "flexagent".to_owned(),
             local_path: "/tmp/repo".to_owned(),

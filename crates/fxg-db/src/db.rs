@@ -323,7 +323,7 @@ impl Db {
     pub async fn resolve_default_local_path(
         &self,
         project_id: &str,
-        node_id: &str,
+        node_id: &fxg_protocol::NodeId,
     ) -> Result<Option<String>, DbError> {
         queries::resolve_default_local_path(&self.pool, project_id, node_id).await
     }

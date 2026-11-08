@@ -79,6 +79,11 @@ string_id! {
     CommandId
 }
 
+string_id! {
+    /// ID of a node (resident daemon or ephemeral VM).
+    NodeId
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

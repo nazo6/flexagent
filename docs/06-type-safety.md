@@ -233,13 +233,13 @@ UI 側で `status: string` のような独自型を作らず、生成型を使�
 
 ## 7. 移行状況
 
-| フェーズ | 内容                                           | 状態                |
-| :------- | :--------------------------------------------- | :------------------ |
-| Phase 0  | 方針・clippy 基盤                              | 完了                |
-| Phase 1  | `PermissionOptionKind` などの enum 化          | 完了                |
-| Phase 2  | `RawJson` / elicitation / config / provisioner | 完了                |
-| Phase 3  | DB row / event_type / audit action             | 完了                |
-| Phase 4  | ID newtype                                     | 進行中（CommandId） |
+| フェーズ | 内容                                           | 状態                         |
+| :------- | :--------------------------------------------- | :--------------------------- |
+| Phase 0  | 方針・clippy 基盤                              | 完了                         |
+| Phase 1  | `PermissionOptionKind` などの enum 化          | 完了                         |
+| Phase 2  | `RawJson` / elicitation / config / provisioner | 完了                         |
+| Phase 3  | DB row / event_type / audit action             | 完了                         |
+| Phase 4  | ID newtype                                     | 進行中（CommandId / NodeId） |
 
 ファイル単位の `#![allow(...)]` と crate ルートの wildcard allow は、
 Phase 1〜3 の完了に合わせて削除する。Phase 1 で enum 化した

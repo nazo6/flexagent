@@ -25,11 +25,11 @@ use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use futures_util::{SinkExt, StreamExt};
 use fxg_db::Db;
-use fxg_protocol::CommandId;
 use fxg_protocol::client_api::WorktreeInfo;
 use fxg_protocol::common::{CommandResult, ErrorCode, WorkspaceDiffResponse};
 use fxg_protocol::node_server::{NodeToServerMsg, ResyncTarget, ServerToNodeMsg};
 use fxg_protocol::util::uuid_v7;
+use fxg_protocol::{CommandId, NodeId};
 use tokio::sync::{Mutex, RwLock, broadcast, mpsc, oneshot};
 
 use crate::api::auth::{hash_token, token_matches};
@@ -179,7 +179,7 @@ enum PendingResponse {
 /// Entry for a pending relay.
 struct PendingEntry {
     /// Node whose response is awaited
-    node_id: String,
+    node_id: NodeId,
     /// Destination for the response
     tx: oneshot::Sender<PendingResponse>,
 }
@@ -196,7 +196,7 @@ struct NodeConnection {
 /// PTY relay destination.
 struct PtyRoute {
     /// Owning node ID
-    node_id: String,
+    node_id: NodeId,
     /// Broadcast delivered to clients
     tx: broadcast::Sender<PtyChannelEvent>,
 }
@@ -240,8 +240,8 @@ impl NodeHub {
     }
 
     /// Whether the node is connected.
-    pub async fn is_online(&self, node_id: &str) -> bool {
-        self.inner.nodes.read().await.contains_key(node_id)
+    pub async fn is_online(&self, node_id: &NodeId) -> bool {
+        self.inner.nodes.read().await.contains_key(node_id.as_str())
     }
 
     /// List of connected nodes.
@@ -255,54 +255,70 @@ impl NodeHub {
     /// to the child process's `stdin` (JSON Lines).
     pub(crate) async fn attach_ephemeral(
         &self,
-        node_id: &str,
+        node_id: &NodeId,
     ) -> (mpsc::Receiver<ServerToNodeMsg>, String) {
         let (tx, rx) = mpsc::channel(NODE_CHANNEL_CAPACITY);
         let conn_id = uuid_v7();
         self.register(node_id, &conn_id, tx).await;
-        tracing::info!(node_id, "ephemeral node attached (stdio)");
+        tracing::info!(
+            node_id = node_id.as_str(),
+            "ephemeral node attached (stdio)"
+        );
         (rx, conn_id)
     }
 
     /// Detaches a temporary VM connection (when the child process exits).
-    pub(crate) async fn detach_ephemeral(&self, node_id: &str, exit_code: Option<i32>) {
+    pub(crate) async fn detach_ephemeral(&self, node_id: &NodeId, exit_code: Option<i32>) {
         // The connection generation is unknown, so remove the registered connection and clean up
         let conn_id = {
             let nodes = self.inner.nodes.read().await;
-            nodes.get(node_id).map(|entry| entry.conn_id.clone())
+            nodes
+                .get(node_id.as_str())
+                .map(|entry| entry.conn_id.clone())
         };
         if let Some(conn_id) = conn_id {
             self.disconnect(node_id, &conn_id).await;
         }
-        if let Err(err) = self.db().set_node_online(node_id, false).await {
-            tracing::debug!(node_id, "failed to mark ephemeral node offline: {err}");
+        if let Err(err) = self.db().set_node_online(node_id.as_str(), false).await {
+            tracing::debug!(
+                node_id = node_id.as_str(),
+                "failed to mark ephemeral node offline: {err}"
+            );
         }
         if let Err(err) = self
             .db()
             .set_node_lifecycle(
-                node_id,
+                node_id.as_str(),
                 fxg_protocol::common::NodeLifecycleStatus::Terminated,
             )
             .await
         {
-            tracing::debug!(node_id, "failed to mark ephemeral node terminated: {err}");
+            tracing::debug!(
+                node_id = node_id.as_str(),
+                "failed to mark ephemeral node terminated: {err}"
+            );
         }
-        tracing::info!(node_id, exit_code, "ephemeral node detached (stdio)");
+        tracing::info!(
+            node_id = node_id.as_str(),
+            exit_code,
+            "ephemeral node detached (stdio)"
+        );
     }
 
     /// Removes temporary VM connections unconditionally (e.g. on server shutdown).
     pub(crate) async fn detach_all_ephemeral(&self, node_ids: &[String]) {
         for node_id in node_ids {
-            self.detach_ephemeral(node_id, None).await;
+            self.detach_ephemeral(&NodeId::from(node_id.as_str()), None)
+                .await;
         }
     }
 
     /// Registers a node connection (replacing any existing one).
-    async fn register(&self, node_id: &str, conn_id: &str, tx: mpsc::Sender<ServerToNodeMsg>) {
+    async fn register(&self, node_id: &NodeId, conn_id: &str, tx: mpsc::Sender<ServerToNodeMsg>) {
         let mut nodes = self.inner.nodes.write().await;
         if nodes
             .insert(
-                node_id.to_owned(),
+                node_id.as_str().to_owned(),
                 NodeConnection {
                     conn_id: conn_id.to_owned(),
                     tx,
@@ -310,20 +326,23 @@ impl NodeHub {
             )
             .is_some()
         {
-            tracing::info!(node_id, "node reconnected; replaced previous connection");
+            tracing::info!(
+                node_id = node_id.as_str(),
+                "node reconnected; replaced previous connection"
+            );
         }
     }
 
     /// Detaches a node connection (only for the same generation). Fails in-flight relays and PTYs.
-    async fn disconnect(&self, node_id: &str, conn_id: &str) {
+    async fn disconnect(&self, node_id: &NodeId, conn_id: &str) {
         {
             let mut nodes = self.inner.nodes.write().await;
             let is_current = nodes
-                .get(node_id)
+                .get(node_id.as_str())
                 .map(|entry| entry.conn_id == conn_id)
                 .unwrap_or(false);
             if is_current {
-                nodes.remove(node_id);
+                nodes.remove(node_id.as_str());
             }
         }
 
@@ -331,7 +350,7 @@ impl NodeHub {
         let mut pending = self.inner.pending.lock().await;
         let failed: Vec<String> = pending
             .iter()
-            .filter(|(_, entry)| entry.node_id == node_id)
+            .filter(|(_, entry)| entry.node_id.as_str() == node_id.as_str())
             .map(|(command_id, _)| command_id.clone())
             .collect();
         for command_id in failed {
@@ -353,7 +372,7 @@ impl NodeHub {
         let mut ptys = self.inner.ptys.lock().await;
         let pty_ids: Vec<String> = ptys
             .iter()
-            .filter(|(_, route)| route.node_id == node_id)
+            .filter(|(_, route)| route.node_id.as_str() == node_id.as_str())
             .map(|(pty_id, _)| pty_id.clone())
             .collect();
         for pty_id in pty_ids {
@@ -367,10 +386,10 @@ impl NodeHub {
     }
 
     /// Sends a message to a node. Returns `NODE_OFFLINE` when not connected.
-    pub async fn send(&self, node_id: &str, message: ServerToNodeMsg) -> Result<(), ApiError> {
+    pub async fn send(&self, node_id: &NodeId, message: ServerToNodeMsg) -> Result<(), ApiError> {
         let tx = {
             let nodes = self.inner.nodes.read().await;
-            nodes.get(node_id).map(|entry| entry.tx.clone())
+            nodes.get(node_id.as_str()).map(|entry| entry.tx.clone())
         };
         let Some(tx) = tx else {
             return Err(offline_error(node_id));
@@ -387,7 +406,7 @@ impl NodeHub {
     /// [`SESSION_COMMAND_TIMEOUT`].
     pub async fn command(
         &self,
-        node_id: &str,
+        node_id: &NodeId,
         command_id: &CommandId,
         message: ServerToNodeMsg,
     ) -> Result<CommandResult, ApiError> {
@@ -409,7 +428,7 @@ impl NodeHub {
     /// Relays a Git Diff request and waits for the result correlated by `request_id`.
     pub async fn git_diff(
         &self,
-        node_id: &str,
+        node_id: &NodeId,
         request_id: &str,
         message: ServerToNodeMsg,
     ) -> Result<WorkspaceDiffResponse, ApiError> {
@@ -430,7 +449,7 @@ impl NodeHub {
     /// Relays a Worktree operation and waits for the result correlated by `command_id`.
     pub async fn worktree_op(
         &self,
-        node_id: &str,
+        node_id: &NodeId,
         command_id: &CommandId,
         message: ServerToNodeMsg,
     ) -> Result<Option<WorktreeInfo>, ApiError> {
@@ -451,7 +470,7 @@ impl NodeHub {
     /// Relays a session revert and waits for the result correlated by `command_id`.
     pub async fn revert_session(
         &self,
-        node_id: &str,
+        node_id: &NodeId,
         command_id: &CommandId,
         message: ServerToNodeMsg,
     ) -> Result<fxg_protocol::client_api::SessionRevertResponse, ApiError> {
@@ -485,7 +504,7 @@ impl NodeHub {
     /// replaying history). Waits with [`SESSION_COMMAND_TIMEOUT`] to allow agent cold starts.
     pub async fn resume_session(
         &self,
-        node_id: &str,
+        node_id: &NodeId,
         command_id: &CommandId,
         message: ServerToNodeMsg,
     ) -> Result<bool, ApiError> {
@@ -524,7 +543,7 @@ impl NodeHub {
     /// The return value is the archive timestamp (Unix epoch ms; `None` when restoring).
     pub async fn archive_session(
         &self,
-        node_id: &str,
+        node_id: &NodeId,
         command_id: &CommandId,
         message: ServerToNodeMsg,
     ) -> Result<Option<i64>, ApiError> {
@@ -558,7 +577,7 @@ impl NodeHub {
     /// [`SESSION_COMMAND_TIMEOUT`].
     pub async fn delete_session(
         &self,
-        node_id: &str,
+        node_id: &NodeId,
         command_id: &CommandId,
         message: ServerToNodeMsg,
     ) -> Result<(), ApiError> {
@@ -593,7 +612,7 @@ impl NodeHub {
     /// Relays a filesystem browse and waits for the result correlated by `request_id`.
     pub async fn browse_fs(
         &self,
-        node_id: &str,
+        node_id: &NodeId,
         request_id: &str,
         message: ServerToNodeMsg,
     ) -> Result<fxg_protocol::client_api::FsBrowseResponse, ApiError> {
@@ -617,7 +636,7 @@ impl NodeHub {
     /// the normal command timeout.
     pub async fn scan_projects(
         &self,
-        node_id: &str,
+        node_id: &NodeId,
         request_id: &str,
         message: ServerToNodeMsg,
     ) -> Result<fxg_protocol::client_api::ProjectScanResponse, ApiError> {
@@ -638,7 +657,7 @@ impl NodeHub {
     /// Relays a project manual link and waits for the result correlated by `request_id`.
     pub async fn link_project(
         &self,
-        node_id: &str,
+        node_id: &NodeId,
         request_id: &str,
         message: ServerToNodeMsg,
     ) -> Result<fxg_protocol::client_api::ProjectLinkResponse, ApiError> {
@@ -659,7 +678,7 @@ impl NodeHub {
     /// Relays the ACP Registry catalog and waits for the result correlated by `request_id`.
     pub async fn agents(
         &self,
-        node_id: &str,
+        node_id: &NodeId,
         request_id: &str,
         message: ServerToNodeMsg,
     ) -> Result<fxg_protocol::client_api::AgentsResponse, ApiError> {
@@ -681,7 +700,7 @@ impl NodeHub {
     /// result correlated by `request_id`. On success, returns the display message.
     pub async fn manage_agent(
         &self,
-        node_id: &str,
+        node_id: &NodeId,
         request_id: &str,
         message: ServerToNodeMsg,
     ) -> Result<Option<String>, ApiError> {
@@ -712,7 +731,7 @@ impl NodeHub {
     /// Common send-then-wait path.
     async fn request(
         &self,
-        node_id: &str,
+        node_id: &NodeId,
         correlation_id: &str,
         message: ServerToNodeMsg,
         timeout: Duration,
@@ -743,7 +762,7 @@ impl NodeHub {
         match tokio::time::timeout(timeout, rx).await {
             Ok(Ok(response)) => Ok(response),
             Ok(Err(_canceled)) => Err(ApiError::node_offline(
-                node_id,
+                node_id.as_str(),
                 format!("node {node_id} disconnected"),
             )),
             Err(_) => {
@@ -793,7 +812,7 @@ impl NodeHub {
     // ------------------------------------------------------------------
 
     /// Registers a PTY relay destination (at spawn time).
-    pub(crate) async fn insert_pty(&self, pty_id: &str, node_id: &str) {
+    pub(crate) async fn insert_pty(&self, pty_id: &str, node_id: &NodeId) {
         let (tx, _) = broadcast::channel(PTY_CHANNEL_CAPACITY);
         self.inner.ptys.lock().await.insert(
             pty_id.to_owned(),
@@ -855,8 +874,11 @@ impl NodeHub {
 }
 
 /// Builds a `NODE_OFFLINE` error.
-fn offline_error(node_id: &str) -> ApiError {
-    ApiError::node_offline(node_id, format!("node is not connected: {node_id}"))
+fn offline_error(node_id: &NodeId) -> ApiError {
+    ApiError::node_offline(
+        node_id.as_str(),
+        format!("node is not connected: {node_id}"),
+    )
 }
 
 // ----------------------------------------------------------------------
@@ -945,9 +967,9 @@ async fn handle_node_connection(state: ServerState, token_owner: String, socket:
     };
 
     // Reject impersonation: NodeHello.node_id must match the token owner
-    if node_id != token_owner {
+    if node_id.as_str() != token_owner {
         tracing::warn!(
-            node_id,
+            node_id = node_id.as_str(),
             token_owner,
             "node hello node_id does not match token owner; rejecting"
         );
@@ -957,7 +979,7 @@ async fn handle_node_connection(state: ServerState, token_owner: String, socket:
 
     // 2. Register the node (a node may already have registered itself before the first Hello)
     let record = fxg_db::NodeRecord {
-        node_id: node_id.clone(),
+        node_id: node_id.as_str().to_owned(),
         name,
         os,
         arch,
@@ -970,25 +992,31 @@ async fn handle_node_connection(state: ServerState, token_owner: String, socket:
         is_online: true,
     };
     if let Err(err) = state.db().upsert_node(&record).await {
-        tracing::warn!(node_id, "failed to upsert node from hello: {err}");
+        tracing::warn!(
+            node_id = node_id.as_str(),
+            "failed to upsert node from hello: {err}"
+        );
         fxg_protocol::discard_with!(sender.close().await, "close the node websocket");
         return;
     }
     if let Err(err) = apply_project_reports(&state, &node_id, &projects).await {
-        tracing::warn!(node_id, "failed to apply project reports: {err}");
+        tracing::warn!(
+            node_id = node_id.as_str(),
+            "failed to apply project reports: {err}"
+        );
     }
 
     // 3. Register the connection
     let (tx, mut rx) = mpsc::channel(NODE_CHANNEL_CAPACITY);
     let conn_id = uuid_v7();
     state.hub().register(&node_id, &conn_id, tx).await;
-    tracing::info!(node_id, "node connected");
+    tracing::info!(node_id = node_id.as_str(), "node connected");
 
     // 4. ResyncRequest for missing or lagging sessions
     let targets = compute_resync(&state, &node_id, &sessions).await;
     if !targets.is_empty() {
         tracing::info!(
-            node_id,
+            node_id = node_id.as_str(),
             sessions = targets.len(),
             "requesting session resync from node"
         );
@@ -1000,7 +1028,11 @@ async fn handle_node_connection(state: ServerState, token_owner: String, socket:
             )
             .await
         {
-            tracing::warn!(node_id, "failed to request session resync: {}", err.message);
+            tracing::warn!(
+                node_id = node_id.as_str(),
+                "failed to request session resync: {}",
+                err.message
+            );
         }
     }
 
@@ -1026,7 +1058,7 @@ async fn handle_node_connection(state: ServerState, token_owner: String, socket:
                 }
                 Some(Ok(Message::Close(_))) | None => break,
                 Some(Err(err)) => {
-                    tracing::warn!(node_id, "node websocket error: {err}");
+                    tracing::warn!(node_id = node_id.as_str(), "node websocket error: {err}");
                     break;
                 }
                 _ => {}
@@ -1036,18 +1068,21 @@ async fn handle_node_connection(state: ServerState, token_owner: String, socket:
 
     // 6. Disconnect handling (only valid for the same connection generation)
     state.hub().disconnect(&node_id, &conn_id).await;
-    if let Err(err) = state.db().set_node_online(&node_id, false).await {
-        tracing::warn!(node_id, "failed to mark node offline: {err}");
+    if let Err(err) = state.db().set_node_online(node_id.as_str(), false).await {
+        tracing::warn!(
+            node_id = node_id.as_str(),
+            "failed to mark node offline: {err}"
+        );
     }
-    tracing::info!(node_id, "node disconnected");
+    tracing::info!(node_id = node_id.as_str(), "node disconnected");
 }
 
 /// Handles a message from a node.
-async fn handle_node_message(state: &ServerState, node_id: &str, text: &str) {
+async fn handle_node_message(state: &ServerState, node_id: &NodeId, text: &str) {
     let message: NodeToServerMsg = match serde_json::from_str(text) {
         Ok(message) => message,
         Err(err) => {
-            tracing::warn!(node_id, "invalid node message: {err}");
+            tracing::warn!(node_id = node_id.as_str(), "invalid node message: {err}");
             return;
         }
     };
@@ -1055,7 +1090,11 @@ async fn handle_node_message(state: &ServerState, node_id: &str, text: &str) {
 }
 
 /// Handles an already-parsed node message (shared by WS and stdio transports).
-async fn handle_node_message_value(state: &ServerState, node_id: &str, message: NodeToServerMsg) {
+async fn handle_node_message_value(
+    state: &ServerState,
+    node_id: &NodeId,
+    message: NodeToServerMsg,
+) {
     match message {
         NodeToServerMsg::NodeHello {
             node_id: hello_node_id,
@@ -1069,16 +1108,16 @@ async fn handle_node_message_value(state: &ServerState, node_id: &str, message: 
             sessions,
         } => {
             // Not a reconnect but an in-flight resend (e.g. after a Worktree change)
-            if hello_node_id != node_id {
+            if &hello_node_id != node_id {
                 tracing::warn!(
-                    node_id,
-                    hello_node_id,
+                    node_id = node_id.as_str(),
+                    hello_node_id = hello_node_id.as_str(),
                     "node hello node_id mismatch; ignoring"
                 );
                 return;
             }
             let record = fxg_db::NodeRecord {
-                node_id: node_id.to_owned(),
+                node_id: node_id.as_str().to_owned(),
                 name,
                 os,
                 arch,
@@ -1091,10 +1130,16 @@ async fn handle_node_message_value(state: &ServerState, node_id: &str, message: 
                 is_online: true,
             };
             if let Err(err) = state.db().upsert_node(&record).await {
-                tracing::warn!(node_id, "failed to update node from hello: {err}");
+                tracing::warn!(
+                    node_id = node_id.as_str(),
+                    "failed to update node from hello: {err}"
+                );
             }
             if let Err(err) = apply_project_reports(state, node_id, &projects).await {
-                tracing::warn!(node_id, "failed to apply project reports: {err}");
+                tracing::warn!(
+                    node_id = node_id.as_str(),
+                    "failed to apply project reports: {err}"
+                );
             }
             let targets = compute_resync(state, node_id, &sessions).await;
             if !targets.is_empty()
@@ -1106,7 +1151,11 @@ async fn handle_node_message_value(state: &ServerState, node_id: &str, message: 
                     )
                     .await
             {
-                tracing::warn!(node_id, "failed to request session resync: {}", err.message);
+                tracing::warn!(
+                    node_id = node_id.as_str(),
+                    "failed to request session resync: {}",
+                    err.message
+                );
             }
         }
         NodeToServerMsg::EventBatchPush { events } => {
@@ -1367,7 +1416,7 @@ async fn handle_node_message_value(state: &ServerState, node_id: &str, message: 
             };
             if let Err(err) = state.hub().send(node_id, message).await {
                 tracing::warn!(
-                    node_id,
+                    node_id = node_id.as_str(),
                     "failed to send the git credential error to the node: {err:#}"
                 );
             }
@@ -1388,8 +1437,8 @@ async fn handle_node_message_value(state: &ServerState, node_id: &str, message: 
             );
         }
         NodeToServerMsg::DrainComplete { node_id: drained } => {
-            tracing::info!(node_id, "drain complete");
-            crate::provisioner::on_drain_complete(state, &drained).await;
+            tracing::info!(node_id = node_id.as_str(), "drain complete");
+            crate::provisioner::on_drain_complete(state, drained.as_str()).await;
         }
     }
 }
@@ -1400,7 +1449,7 @@ async fn handle_node_message_value(state: &ServerState, node_id: &str, message: 
 /// WebSocket node (design: docs/03 §2).
 pub(crate) async fn handle_stdio_message(
     state: &ServerState,
-    node_id: &str,
+    node_id: &NodeId,
     message: NodeToServerMsg,
 ) {
     handle_node_message_value(state, node_id, message).await;
@@ -1409,7 +1458,7 @@ pub(crate) async fn handle_stdio_message(
 /// Applies `NodeHello` project reports to `projects` / `project_node_bindings`.
 async fn apply_project_reports(
     state: &ServerState,
-    node_id: &str,
+    node_id: &NodeId,
     projects: &[fxg_protocol::common::NodeProjectReport],
 ) -> Result<(), fxg_db::DbError> {
     for project in projects {
@@ -1426,7 +1475,7 @@ async fn apply_project_reports(
                 .db()
                 .upsert_project_binding(&fxg_db::registration::ProjectBindingRecord {
                     project_id: project.project_id.clone(),
-                    node_id: node_id.to_owned(),
+                    node_id: node_id.as_str().to_owned(),
                     local_path: binding.local_path.clone(),
                     is_worktree: binding.is_worktree,
                     path_exists: binding.path_exists,
@@ -1441,7 +1490,7 @@ async fn apply_project_reports(
 /// Computes the resend targets for sessions that are missing or lagging on the hub side.
 async fn compute_resync(
     state: &ServerState,
-    node_id: &str,
+    node_id: &NodeId,
     sessions: &[fxg_protocol::node_server::SessionSyncState],
 ) -> Vec<ResyncTarget> {
     let mut targets = Vec::new();
@@ -1450,7 +1499,7 @@ async fn compute_resync(
             continue;
         }
         match state.db().get_session(&sync.session_id).await {
-            Ok(Some(session)) if session.node_id == node_id => {
+            Ok(Some(session)) if &session.node_id == node_id => {
                 if session.last_node_seq < sync.last_node_seq {
                     targets.push(ResyncTarget {
                         session_id: sync.session_id.clone(),
@@ -1468,8 +1517,8 @@ async fn compute_resync(
             Ok(Some(session)) => {
                 tracing::warn!(
                     session_id = sync.session_id,
-                    hub_node = session.node_id,
-                    node_id,
+                    hub_node = session.node_id.as_str(),
+                    node_id = node_id.as_str(),
                     "session is owned by a different node; requesting full resync"
                 );
                 targets.push(ResyncTarget {
@@ -1500,7 +1549,7 @@ async fn compute_resync(
 /// If application fails, no ACK is sent (the node's watermark does not advance and it retries).
 async fn apply_event_batch(
     state: &ServerState,
-    node_id: &str,
+    node_id: &NodeId,
     events: Vec<fxg_protocol::events::SessionEventEnvelope>,
 ) {
     // Prevent impersonation: SessionCreated.node_id must match the connecting node
@@ -1512,8 +1561,8 @@ async fn apply_event_batch(
             && event_node_id != node_id
         {
             tracing::warn!(
-                node_id,
-                event_node_id,
+                node_id = node_id.as_str(),
+                event_node_id = event_node_id.as_str(),
                 session_id = event.session_id,
                 "rejecting event batch with mismatched node_id"
             );
@@ -1565,12 +1614,15 @@ async fn apply_event_batch(
                     )
                     .await
                 {
-                    tracing::warn!(node_id, "failed to acknowledge the event batch: {err:#}");
+                    tracing::warn!(
+                        node_id = node_id.as_str(),
+                        "failed to acknowledge the event batch: {err:#}"
+                    );
                 }
             }
             Err(err) => {
                 tracing::warn!(
-                    node_id,
+                    node_id = node_id.as_str(),
                     session_id,
                     "failed to apply event batch (will retry): {err}"
                 );

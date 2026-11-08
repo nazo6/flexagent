@@ -9,7 +9,6 @@
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
-use crate::CommandId;
 use crate::common::{
     AuditLogEntry, ClientSource, CommandResult, ElicitationAction, ElicitationContent,
     ElicitationRequestEntry, ErrorInfo, NodeSummary, PermissionRequestEntry, ProjectSummary,
@@ -17,6 +16,7 @@ use crate::common::{
 };
 use crate::config::CustomAgentConfig;
 use crate::events::SessionEventBatch;
+use crate::{CommandId, NodeId};
 
 /// Kind of endpoint (`GET /api/v1/system/info`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
@@ -115,7 +115,7 @@ pub struct ProvisionerTestResponse {
     /// Whether the handshake succeeded
     pub ok: bool,
     /// Ephemeral node ID (when the handshake succeeded)
-    pub node_id: Option<String>,
+    pub node_id: Option<NodeId>,
     /// Bootstrap log written to `stderr` (the last N lines)
     pub log_lines: Vec<String>,
     /// Failure message
@@ -127,7 +127,7 @@ pub struct ProvisionerTestResponse {
 #[specta(collect)]
 pub struct WorktreeInfo {
     /// Node ID
-    pub node_id: String,
+    pub node_id: NodeId,
     /// Local path of the worktree
     pub path: String,
     /// Branch currently checked out
@@ -151,7 +151,7 @@ pub struct WorktreesResponse {
 #[specta(collect)]
 pub struct CreateWorktreeRequest {
     /// Target node ID
-    pub node_id: String,
+    pub node_id: NodeId,
     /// Name of the branch to create
     pub branch: String,
     /// Base branch (defaults to the current HEAD)
@@ -165,7 +165,7 @@ pub struct CreateWorktreeRequest {
 #[specta(collect)]
 pub struct RemoveWorktreeRequest {
     /// Target node ID
-    pub node_id: String,
+    pub node_id: NodeId,
     /// Path to remove
     pub path: String,
     /// Whether to remove even if there are uncommitted changes
@@ -177,7 +177,7 @@ pub struct RemoveWorktreeRequest {
 #[specta(collect)]
 pub struct PruneWorktreesRequest {
     /// Target node ID
-    pub node_id: String,
+    pub node_id: NodeId,
 }
 
 /// `POST /api/v1/nodes/:node_id/projects/scan` request.
@@ -291,7 +291,7 @@ pub struct AgentOpResponse {
 #[specta(collect)]
 pub struct NodeTokenSummary {
     /// Target node ID
-    pub node_id: String,
+    pub node_id: NodeId,
     /// Leading prefix of the token hash (for matching and display; the plaintext is never stored)
     pub token_prefix: String,
 }
@@ -309,7 +309,7 @@ pub struct NodeTokensResponse {
 #[specta(collect)]
 pub struct IssueNodeTokenRequest {
     /// Node ID to pair (the node_id of the fxg daemon)
-    pub node_id: String,
+    pub node_id: NodeId,
 }
 
 /// `POST /api/v1/nodes/tokens` response.
@@ -320,7 +320,7 @@ pub struct IssueNodeTokenRequest {
 #[specta(collect)]
 pub struct IssueNodeTokenResponse {
     /// Target node ID
-    pub node_id: String,
+    pub node_id: NodeId,
     /// The issued plaintext token (stored in `~/.flexagent/node_token`)
     pub token: String,
 }
@@ -370,7 +370,7 @@ pub struct CreateSessionRequest {
     /// Logical project ID
     pub project_id: String,
     /// ID of the resident node to run on (mutually exclusive with `provisioner`)
-    pub node_id: Option<String>,
+    pub node_id: Option<NodeId>,
     /// Ephemeral VM provisioner name (mutually exclusive with `node_id`; requires the central server)
     pub provisioner: Option<String>,
     /// Working directory (an existing worktree or the repository root)

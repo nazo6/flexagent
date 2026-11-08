@@ -194,7 +194,7 @@ impl ServerState {
     }
 
     /// Resolves the executing node for a session (`NODE_OFFLINE` is returned early here).
-    async fn session_node(&self, session_id: &str) -> Result<String, ApiError> {
+    async fn session_node(&self, session_id: &str) -> Result<fxg_protocol::NodeId, ApiError> {
         let session = self
             .inner
             .db
@@ -204,7 +204,7 @@ impl ServerState {
             .ok_or_else(|| ApiError::not_found(format!("session not found: {session_id}")))?;
         if !self.inner.hub.is_online(&session.node_id).await {
             return Err(ApiError::node_offline(
-                &session.node_id,
+                session.node_id.as_str(),
                 format!("node is offline: {}", session.node_id),
             ));
         }
@@ -214,7 +214,7 @@ impl ServerState {
     /// Picks one online node that can serve the ACP Registry catalog.
     ///
     /// Resident nodes are preferred over temporary VMs, then the most recently seen.
-    async fn select_agent_node(&self) -> Result<Option<String>, ApiError> {
+    async fn select_agent_node(&self) -> Result<Option<fxg_protocol::NodeId>, ApiError> {
         let nodes = self.inner.db.list_nodes().await.map_err(ApiError::from)?;
         let mut online: Vec<_> = nodes.into_iter().filter(|node| node.is_online).collect();
         online.sort_by_key(|node| (node.is_ephemeral, -node.last_seen_at));
@@ -229,7 +229,7 @@ impl ServerState {
     async fn project_local_path(
         &self,
         project_id: &str,
-        node_id: &str,
+        node_id: &fxg_protocol::NodeId,
     ) -> Result<String, ApiError> {
         self.inner
             .db
@@ -589,7 +589,7 @@ impl ClientApiBackend for ServerState {
             .ok_or_else(|| ApiError::bad_request("node_id or provisioner is required"))?;
         if !self.inner.hub.is_online(&node_id).await {
             return Err(ApiError::node_offline(
-                &node_id,
+                node_id.as_str(),
                 format!("node is offline: {node_id}"),
             ));
         }
@@ -954,7 +954,7 @@ impl ClientApiBackend for ServerState {
     ) -> Result<(), ApiError> {
         if !self.inner.hub.is_online(&request.node_id).await {
             return Err(ApiError::node_offline(
-                &request.node_id,
+                request.node_id.as_str(),
                 format!("node is offline: {}", request.node_id),
             ));
         }
@@ -990,7 +990,12 @@ impl ClientApiBackend for ServerState {
         request: ProjectScanRequest,
         client: ClientInfo,
     ) -> Result<ProjectScanResponse, ApiError> {
-        if !self.inner.hub.is_online(node_id).await {
+        if !self
+            .inner
+            .hub
+            .is_online(&fxg_protocol::NodeId::from(node_id))
+            .await
+        {
             return Err(ApiError::node_offline(
                 node_id,
                 format!("node is offline: {node_id}"),
@@ -1001,7 +1006,7 @@ impl ClientApiBackend for ServerState {
             .inner
             .hub
             .scan_projects(
-                node_id,
+                &fxg_protocol::NodeId::from(node_id),
                 &request_id,
                 ServerToNodeMsg::ProjectScan {
                     request_id: request_id.clone(),
@@ -1030,7 +1035,12 @@ impl ClientApiBackend for ServerState {
         request: ProjectLinkRequest,
         client: ClientInfo,
     ) -> Result<ProjectLinkResponse, ApiError> {
-        if !self.inner.hub.is_online(node_id).await {
+        if !self
+            .inner
+            .hub
+            .is_online(&fxg_protocol::NodeId::from(node_id))
+            .await
+        {
             return Err(ApiError::node_offline(
                 node_id,
                 format!("node is offline: {node_id}"),
@@ -1041,7 +1051,7 @@ impl ClientApiBackend for ServerState {
             .inner
             .hub
             .link_project(
-                node_id,
+                &fxg_protocol::NodeId::from(node_id),
                 &request_id,
                 ServerToNodeMsg::ProjectLink {
                     request_id: request_id.clone(),
@@ -1090,7 +1100,7 @@ impl ClientApiBackend for ServerState {
             agent.installed_nodes = nodes
                 .iter()
                 .filter(|node| node.installed_agents.iter().any(|id| id == &agent.id))
-                .map(|node| node.node_id.clone())
+                .map(|node| node.node_id.as_str().to_owned())
                 .collect();
         }
         Ok(response)
@@ -1102,7 +1112,12 @@ impl ClientApiBackend for ServerState {
         action: AgentAction,
         client: ClientInfo,
     ) -> Result<AgentOpResponse, ApiError> {
-        if !self.inner.hub.is_online(node_id).await {
+        if !self
+            .inner
+            .hub
+            .is_online(&fxg_protocol::NodeId::from(node_id))
+            .await
+        {
             return Err(ApiError::node_offline(
                 node_id,
                 format!("node is offline: {node_id}"),
@@ -1113,7 +1128,7 @@ impl ClientApiBackend for ServerState {
             .inner
             .hub
             .manage_agent(
-                node_id,
+                &fxg_protocol::NodeId::from(node_id),
                 &request_id,
                 ServerToNodeMsg::ManageAgent {
                     request_id: request_id.clone(),
@@ -1161,7 +1176,7 @@ impl ClientApiBackend for ServerState {
             tokens: tokens
                 .into_iter()
                 .map(|(node_id, hash)| NodeTokenSummary {
-                    node_id,
+                    node_id: node_id.into(),
                     token_prefix: hash.chars().take(12).collect(),
                 })
                 .collect(),
@@ -1173,14 +1188,14 @@ impl ClientApiBackend for ServerState {
         request: IssueNodeTokenRequest,
         client: ClientInfo,
     ) -> Result<IssueNodeTokenResponse, ApiError> {
-        let node_id = request.node_id.trim().to_owned();
+        let node_id = request.node_id.as_str().trim().to_owned();
         if node_id.is_empty() {
             return Err(ApiError::bad_request("node_id must not be empty"));
         }
         // Register an unregistered node as a placeholder
         // (overwritten with real info by `NodeHello` when the node connects)
         let nodes = self.inner.db.list_nodes().await.map_err(ApiError::from)?;
-        if !nodes.iter().any(|node| node.node_id == node_id) {
+        if !nodes.iter().any(|node| node.node_id.as_str() == node_id) {
             self.inner
                 .db
                 .upsert_node(&fxg_db::NodeRecord::new(
@@ -1206,7 +1221,10 @@ impl ClientApiBackend for ServerState {
             serde_json::json!({ "action": "issue", "node_id": &node_id }),
         )
         .await;
-        Ok(IssueNodeTokenResponse { node_id, token })
+        Ok(IssueNodeTokenResponse {
+            node_id: node_id.into(),
+            token,
+        })
     }
 
     async fn revoke_node_token(&self, node_id: &str, client: ClientInfo) -> Result<(), ApiError> {
@@ -1259,7 +1277,7 @@ impl ClientApiBackend for ServerState {
     ) -> Result<WorktreeInfo, ApiError> {
         if !self.inner.hub.is_online(&request.node_id).await {
             return Err(ApiError::node_offline(
-                &request.node_id,
+                request.node_id.as_str(),
                 format!("node is offline: {}", request.node_id),
             ));
         }
@@ -1293,7 +1311,7 @@ impl ClientApiBackend for ServerState {
     ) -> Result<(), ApiError> {
         if !self.inner.hub.is_online(&request.node_id).await {
             return Err(ApiError::node_offline(
-                &request.node_id,
+                request.node_id.as_str(),
                 format!("node is offline: {}", request.node_id),
             ));
         }
@@ -1344,7 +1362,12 @@ impl ClientApiBackend for ServerState {
         node_id: &str,
         path: Option<String>,
     ) -> Result<fxg_protocol::client_api::FsBrowseResponse, ApiError> {
-        if !self.inner.hub.is_online(node_id).await {
+        if !self
+            .inner
+            .hub
+            .is_online(&fxg_protocol::NodeId::from(node_id))
+            .await
+        {
             return Err(ApiError::node_offline(
                 node_id,
                 format!("node is offline: {node_id}"),
@@ -1354,7 +1377,7 @@ impl ClientApiBackend for ServerState {
         self.inner
             .hub
             .browse_fs(
-                node_id,
+                &fxg_protocol::NodeId::from(node_id),
                 &request_id,
                 ServerToNodeMsg::BrowseFs {
                     request_id: request_id.clone(),
@@ -1563,7 +1586,7 @@ impl ServerState {
     /// Relays a WS command to a node and returns the `CommandResult`.
     async fn run_ws_command(
         &self,
-        node_id: &str,
+        node_id: &fxg_protocol::NodeId,
         command_id: &CommandId,
         message: ServerToNodeMsg,
     ) -> CommandResult {

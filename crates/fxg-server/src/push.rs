@@ -379,7 +379,7 @@ pub async fn notify_permission_requests(
         };
         let node_label = session
             .as_ref()
-            .map(|session| session.node_id.clone())
+            .map(|session| session.node_id.as_str().to_owned())
             .unwrap_or_else(|| "unknown".to_owned());
         let payload = permission_notification(
             &session_id,
@@ -446,7 +446,7 @@ pub async fn notify_elicitations(
         };
         let node_label = session
             .as_ref()
-            .map(|session| session.node_id.clone())
+            .map(|session| session.node_id.as_str().to_owned())
             .unwrap_or_else(|| "unknown".to_owned());
         let payload = elicitation_notification(
             &session_id,

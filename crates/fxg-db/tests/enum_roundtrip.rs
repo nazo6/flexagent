@@ -180,7 +180,7 @@ async fn node_lifecycle_status_roundtrips_every_variant() {
             .await
             .expect("list nodes")
             .into_iter()
-            .find(|node| node.node_id == NODE_ID)
+            .find(|node| node.node_id.as_str() == NODE_ID)
             .expect("node exists");
         assert_eq!(node.lifecycle_status, *status);
     }

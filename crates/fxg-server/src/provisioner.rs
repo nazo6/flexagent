@@ -22,7 +22,6 @@ use std::sync::{Arc, Mutex as StdMutex};
 use std::time::{Duration, Instant};
 
 use base64::Engine as _;
-use fxg_protocol::CommandId;
 use fxg_protocol::client_api::ProvisionerTestResponse;
 use fxg_protocol::common::{ForkHistoryItem, NodeLifecycleStatus, SessionStatus};
 use fxg_protocol::config::{
@@ -30,6 +29,7 @@ use fxg_protocol::config::{
 };
 use fxg_protocol::node_server::{NodeToServerMsg, ServerToNodeMsg};
 use fxg_protocol::util::uuid_v7;
+use fxg_protocol::{CommandId, NodeId};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter};
 use tokio::process::Command;
 use tokio::sync::{oneshot, watch};
@@ -356,7 +356,7 @@ pub async fn spawn_session(
         )
     );
     tracing::info!(
-        node_id,
+        node_id = node_id.as_str(),
         session_id,
         provisioner = request.provisioner,
         "ephemeral node provisioning started"
@@ -430,7 +430,7 @@ pub async fn provisioner_test(
     if let Err(err) = state
         .hub()
         .send(
-            &node_id,
+            &NodeId::from(node_id.as_str()),
             ServerToNodeMsg::DrainAndShutdown {
                 reason: "provisioner test completed".to_owned(),
                 create_git_bundle: false,
@@ -439,7 +439,7 @@ pub async fn provisioner_test(
         .await
     {
         tracing::warn!(
-            node_id,
+            node_id = node_id.as_str(),
             "failed to request drain after the provisioner test: {err:#}"
         );
     }
@@ -448,20 +448,26 @@ pub async fn provisioner_test(
         terminate.send(true),
         "terminate the provisioner test instance"
     );
-    state.hub().detach_ephemeral(&node_id, None).await;
+    state
+        .hub()
+        .detach_ephemeral(&NodeId::from(node_id.as_str()), None)
+        .await;
     if let Err(err) = state
         .db()
-        .set_node_lifecycle(&node_id, NodeLifecycleStatus::Terminated)
+        .set_node_lifecycle(node_id.as_str(), NodeLifecycleStatus::Terminated)
         .await
     {
-        tracing::debug!(node_id, "failed to mark test node terminated: {err}");
+        tracing::debug!(
+            node_id = node_id.as_str(),
+            "failed to mark test node terminated: {err}"
+        );
     }
 
     match outcome {
         Ok(Ok(hello_node_id)) => Ok(ProvisionerTestResponse {
             name: name.to_owned(),
             ok: true,
-            node_id: Some(hello_node_id),
+            node_id: Some(hello_node_id.into()),
             log_lines,
             error: None,
         }),
@@ -693,7 +699,7 @@ async fn spawn_child(state: &ServerState, request: SpawnRequest) -> Result<Spawn
                             // Register the hub connection and forward commands (StartSession etc.)
                             // to the child process's stdin
                             let (mut commands, _conn_id) =
-                                pump_state.hub().attach_ephemeral(&pump_node_id).await;
+                                pump_state.hub().attach_ephemeral(&NodeId::from(pump_node_id.as_str())).await;
                             if let Some(mut writer) = stdin_writer.take() {
                                 stdin_forwarder = Some(tokio::spawn(async move {
                                     while let Some(message) = commands.recv().await {
@@ -717,7 +723,7 @@ async fn spawn_child(state: &ServerState, request: SpawnRequest) -> Result<Spawn
                             }
                             if let Some(tx) = hello_tx.take() {
                                 fxg_protocol::discard_with!(
-                                    tx.send(hello_node_id.clone()),
+                                    tx.send(hello_node_id.as_str().to_owned()),
                                     "report the ephemeral node id to a waiter that may be gone"
                                 );
                             }
@@ -725,7 +731,7 @@ async fn spawn_child(state: &ServerState, request: SpawnRequest) -> Result<Spawn
                         if matches!(&message, NodeToServerMsg::DrainComplete { .. }) {
                             pump_manager.take_drain_waiter(&pump_node_id);
                         }
-                        hub::handle_stdio_message(&pump_state, &pump_node_id, message).await;
+                        hub::handle_stdio_message(&pump_state, &NodeId::from(pump_node_id.as_str()), message).await;
                     }
                     Ok(None) => break,
                     Err(err) => {
@@ -746,7 +752,7 @@ async fn spawn_child(state: &ServerState, request: SpawnRequest) -> Result<Spawn
         pump_state
             .hub()
             .detach_ephemeral(
-                &pump_node_id,
+                &NodeId::from(pump_node_id.as_str()),
                 match status {
                     Ok(status) => status.code(),
                     Err(err) => {
@@ -810,7 +816,7 @@ async fn await_handshake_and_start(
     };
     if !hello_node_id.is_empty() && hello_node_id != node_id {
         tracing::warn!(
-            node_id,
+            node_id = node_id.as_str(),
             hello_node_id,
             "ephemeral node reported an unexpected node_id"
         );
@@ -829,10 +835,14 @@ async fn await_handshake_and_start(
         fork_context_messages: pending.fork_context.clone(),
         restore_git_bundle_b64: pending.restore_bundle_b64.clone(),
     };
-    match state.hub().command(&node_id, &command_id, message).await {
+    match state
+        .hub()
+        .command(&NodeId::from(node_id.as_str()), &command_id, message)
+        .await
+    {
         Ok(result) if result.success => {
             tracing::info!(
-                node_id,
+                node_id = node_id.as_str(),
                 session_id = pending.session_id,
                 "ephemeral session started"
             );
@@ -878,12 +888,15 @@ async fn monitor_instance(state: ServerState, node_id: String, idle_timeout: Dur
         let idle = match activity.lock() {
             Ok(value) => value.elapsed(),
             Err(err) => {
-                tracing::error!(node_id, "activity lock poisoned: {err}");
+                tracing::error!(node_id = node_id.as_str(), "activity lock poisoned: {err}");
                 continue;
             }
         };
         if idle >= idle_timeout {
-            tracing::info!(node_id, "ephemeral node idle timeout; draining");
+            tracing::info!(
+                node_id = node_id.as_str(),
+                "ephemeral node idle timeout; draining"
+            );
             drain(&state, &node_id, "idle timeout", true).await;
             return;
         }
@@ -895,7 +908,11 @@ async fn monitor_instance(state: ServerState, node_id: String, idle_timeout: Dur
                 SessionStatus::Stopped | SessionStatus::Error
             )
         {
-            tracing::info!(node_id, session_id, "ephemeral session ended; draining");
+            tracing::info!(
+                node_id = node_id.as_str(),
+                session_id,
+                "ephemeral session ended; draining"
+            );
             drain(&state, &node_id, "session ended", true).await;
             return;
         }
@@ -919,7 +936,7 @@ pub(crate) async fn drain(
     if let Err(err) = state
         .hub()
         .send(
-            node_id,
+            &NodeId::from(node_id),
             ServerToNodeMsg::DrainAndShutdown {
                 reason: reason.to_owned(),
                 create_git_bundle,
@@ -1016,7 +1033,7 @@ pub async fn terminate_all(state: &ServerState) {
         if let Err(err) = state
             .hub()
             .send(
-                &node_id,
+                &NodeId::from(node_id.as_str()),
                 ServerToNodeMsg::DrainAndShutdown {
                     reason: "server shutting down".to_owned(),
                     create_git_bundle: false,
@@ -1024,8 +1041,7 @@ pub async fn terminate_all(state: &ServerState) {
             )
             .await
         {
-            tracing::warn!(
-                node_id,
+            tracing::warn!(node_id = %node_id,
                 "failed to request drain during shutdown; terminating instead: {err:#}"
             );
         }

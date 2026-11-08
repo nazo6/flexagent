@@ -388,7 +388,7 @@ impl SessionManager {
             .create_session(
                 &session_id,
                 UnifiedEventPayload::SessionCreated {
-                    node_id: self.inner.node_id.clone(),
+                    node_id: self.inner.node_id.clone().into(),
                     project_id: resolved.project_id.clone(),
                     project_name: resolved.name.clone(),
                     local_path: resolved.local_path.to_string_lossy().into_owned(),
@@ -459,7 +459,7 @@ impl SessionManager {
             .create_session(
                 params.session_id,
                 UnifiedEventPayload::SessionCreated {
-                    node_id: self.inner.node_id.clone(),
+                    node_id: self.inner.node_id.clone().into(),
                     project_id: resolved.project_id.clone(),
                     project_name: resolved.name.clone(),
                     local_path: resolved.local_path.to_string_lossy().into_owned(),
@@ -800,7 +800,7 @@ impl SessionManager {
             .create_session(
                 &new_session_id,
                 UnifiedEventPayload::SessionCreated {
-                    node_id: self.inner.node_id.clone(),
+                    node_id: self.inner.node_id.clone().into(),
                     project_id: source.project_id.clone(),
                     project_name,
                     local_path: cwd.to_string_lossy().into_owned(),

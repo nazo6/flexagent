@@ -9,12 +9,12 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::CommandId;
 use crate::common::{
     ClientSource, DataSafety, ElicitationContent, ErrorCode, ErrorInfo, NodeProjectReport,
     ResolvedBy, SessionControlAction, WarningInfo, WorkspaceDiffResponse,
 };
 use crate::events::SessionEventEnvelope;
+use crate::{CommandId, NodeId};
 /// Synchronization state of a session held by the node (reported in `NodeHello`).
 ///
 /// The hub compares it with `last_node_seq` in its own DB and returns
@@ -45,7 +45,7 @@ pub enum NodeToServerMsg {
     /// (reports node information, project bindings and session sync states).
     NodeHello {
         /// Node ID (the server verifies that it matches the token's target)
-        node_id: String,
+        node_id: NodeId,
         /// Display name
         name: String,
         /// OS (`windows` / `linux` / `macos`)
@@ -269,7 +269,7 @@ pub enum NodeToServerMsg {
     /// server discards the child process / VM).
     DrainComplete {
         /// Node ID
-        node_id: String,
+        node_id: NodeId,
     },
 }
 

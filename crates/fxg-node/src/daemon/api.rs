@@ -171,7 +171,7 @@ impl ClientApiBackend for DaemonState {
             ));
         }
         if let Some(node_id) = &request.node_id
-            && node_id != self.node_id()
+            && node_id.as_str() != self.node_id()
         {
             return Err(ApiError::bad_request(format!(
                 "requested node {node_id} but this node is {}",
@@ -250,7 +250,10 @@ impl ClientApiBackend for DaemonState {
             (None, None) => {
                 let path = self
                     .db()
-                    .resolve_default_local_path(&request.project_id, self.node_id())
+                    .resolve_default_local_path(
+                        &request.project_id,
+                        &fxg_protocol::NodeId::from(self.node_id()),
+                    )
                     .await
                     .map_err(ApiError::from)?
                     .ok_or_else(|| {
@@ -505,7 +508,7 @@ impl ClientApiBackend for DaemonState {
         request: CreateWorktreeRequest,
         client: ClientInfo,
     ) -> Result<WorktreeInfo, ApiError> {
-        if request.node_id != self.node_id() {
+        if request.node_id.as_str() != self.node_id() {
             return Err(ApiError::bad_request(format!(
                 "requested node {} but this node is {}",
                 request.node_id,
@@ -529,7 +532,7 @@ impl ClientApiBackend for DaemonState {
             .map_err(api_error)?;
         let head_commit = crate::git::head_commit(&outcome.path).await.unwrap_or(None);
         Ok(WorktreeInfo {
-            node_id: self.node_id().to_owned(),
+            node_id: self.node_id().into(),
             path: outcome.path.to_string_lossy().into_owned(),
             branch: Some(outcome.branch),
             head_commit,
@@ -543,7 +546,7 @@ impl ClientApiBackend for DaemonState {
         request: RemoveWorktreeRequest,
         client: ClientInfo,
     ) -> Result<(), ApiError> {
-        if request.node_id != self.node_id() {
+        if request.node_id.as_str() != self.node_id() {
             return Err(ApiError::bad_request(format!(
                 "requested node {} but this node is {}",
                 request.node_id,
@@ -566,7 +569,7 @@ impl ClientApiBackend for DaemonState {
         request: PruneWorktreesRequest,
         client: ClientInfo,
     ) -> Result<(), ApiError> {
-        if request.node_id != self.node_id() {
+        if request.node_id.as_str() != self.node_id() {
             return Err(ApiError::bad_request(format!(
                 "requested node {} but this node is {}",
                 request.node_id,

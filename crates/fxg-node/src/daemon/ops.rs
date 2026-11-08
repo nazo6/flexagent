@@ -200,7 +200,7 @@ impl DaemonState {
     pub fn refresh_binding_path_state(&self, projects: &mut [ProjectSummary]) {
         for project in projects.iter_mut() {
             for binding in project.bindings.iter_mut() {
-                if binding.node_id == self.node_id() {
+                if binding.node_id.as_str() == self.node_id() {
                     binding.path_exists = Path::new(&binding.local_path).is_dir();
                 }
             }
@@ -396,7 +396,7 @@ impl DaemonState {
         let mut bindings: Vec<_> = project
             .bindings
             .iter()
-            .filter(|binding| binding.node_id == self.node_id())
+            .filter(|binding| binding.node_id.as_str() == self.node_id())
             .collect();
         if bindings.is_empty() {
             return Err(NodeError::InvalidWorktree(format!(
@@ -425,7 +425,7 @@ impl DaemonState {
                             .bindings
                             .into_iter()
                             .filter(|binding| {
-                                binding.node_id == self.node_id() && !binding.is_worktree
+                                binding.node_id.as_str() == self.node_id() && !binding.is_worktree
                             })
                             .map(|binding| PathBuf::from(binding.local_path))
                     })
@@ -438,7 +438,7 @@ impl DaemonState {
             let entries = worktree::list_worktrees(&repo).await?;
             for entry in entries {
                 worktrees.push(WorktreeInfo {
-                    node_id: self.node_id().to_owned(),
+                    node_id: self.node_id().into(),
                     path: entry.path.to_string_lossy().into_owned(),
                     branch: entry.branch,
                     head_commit: entry.head,
@@ -588,7 +588,9 @@ impl DaemonState {
                 project
                     .bindings
                     .iter()
-                    .filter(|binding| binding.node_id == self.node_id() && !binding.is_worktree)
+                    .filter(|binding| {
+                        binding.node_id.as_str() == self.node_id() && !binding.is_worktree
+                    })
                     .map(|binding| PathBuf::from(&binding.local_path))
             })
             .collect();

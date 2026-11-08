@@ -36,7 +36,7 @@ pub mod ipc;
 pub mod node_server;
 pub mod util;
 
-pub use ids::CommandId;
+pub use ids::{CommandId, NodeId};
 
 /// Generates the TypeScript definitions used by the UI (`cargo test -p fxg-protocol export_bindings`).
 ///

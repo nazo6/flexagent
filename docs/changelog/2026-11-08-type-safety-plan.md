@@ -386,7 +386,14 @@ pub enum ConfigOptionValue {
         `archive_session` / `delete_session` を `&CommandId` に
   - [x] `fxg-node` の IPC dispatch / sync / session manager の command 系 API を型化
   - [x] `fxg-cli` の `DaemonClient::command_id()` が `CommandId` を返す
-- [ ] `NodeId`
+- [x] `NodeId`
+  - [x] `NodeSummary` / `SessionSummary` / `ProjectBindingSummary` /
+        permission / elicitation / audit / worktree / token DTO
+  - [x] `NodeHello` / `SessionCreated` / `DrainComplete` / recovery actions
+  - [x] `fxg-server` の `NodeHub` ルーティング API
+  - [x] `fxg-db` の row struct と `SessionFilter.node_id`
+  - [x] `NodeId` の SQLx roundtrip
+  - 内部の `HashMap<String, _>` / `DaemonConfig.node_id` は文字列のまま
 - [ ] `SessionId`
 - [ ] `EventId`
 
@@ -499,3 +506,7 @@ pub enum ConfigOptionValue {
 - 2026-11-08: Phase 4 の `CommandId` パイロットを実装。`string_id!` で
   transparent な newtype を生成し、protocol / hub / IPC / CLI の command ID を
   型化した。`Deref` / `Default` / UUID 検証は意図的に実装していない。
+- 2026-11-08: Phase 4 の `NodeId` を実装。protocol DTO / `NodeHub` の
+  ルーティング / DB row struct / `SessionFilter` を型化した。hub の
+  接続・pending・PTY の内部 map と `DaemonConfig.node_id` は文字列のままにし、
+  境界で `as_str()` / `into()` する。
