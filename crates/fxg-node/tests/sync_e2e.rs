@@ -54,7 +54,10 @@ struct MockInner {
 impl MockAgent {
     fn emit(&self, event: DriverEvent) {
         for tx in self.inner.events.lock().expect("events").iter() {
-            let _ = tx.send(event.clone());
+            fxg_protocol::discard_with!(
+                tx.send(event.clone()),
+                "deliver an event to a mock session channel"
+            );
         }
     }
 
@@ -385,8 +388,7 @@ async fn offline_events_sync_without_loss_or_duplication() {
         server_db
             .get_session(&session_a)
             .await
-            .ok()
-            .flatten()
+            .expect("failed to load session")
             .map(|session| session.last_node_seq >= node_a_last)
             .unwrap_or(false)
     })
@@ -395,8 +397,7 @@ async fn offline_events_sync_without_loss_or_duplication() {
         server_db
             .get_session(&session_b)
             .await
-            .ok()
-            .flatten()
+            .expect("failed to load session")
             .map(|session| session.last_node_seq >= node_b_last)
             .unwrap_or(false)
     })
@@ -563,8 +564,7 @@ async fn central_server_commands_permissions_and_kill_switch() {
             server_db
                 .get_session(&session_id)
                 .await
-                .ok()
-                .flatten()
+                .expect("failed to load session")
                 .is_some()
         },
     )
@@ -585,8 +585,7 @@ async fn central_server_commands_permissions_and_kill_switch() {
         node_db
             .get_session(&session_id)
             .await
-            .ok()
-            .flatten()
+            .expect("failed to load session")
             .map(|session| session.status == SessionStatus::Idle)
             .unwrap_or(false)
     })
@@ -742,8 +741,7 @@ async fn central_server_commands_permissions_and_kill_switch() {
             node_db
                 .get_session(&session_id)
                 .await
-                .ok()
-                .flatten()
+                .expect("failed to load session")
                 .map(|session| session.status == SessionStatus::Stopped)
                 .unwrap_or(false)
         },
@@ -760,8 +758,7 @@ async fn central_server_commands_permissions_and_kill_switch() {
             server_db
                 .get_session(&session_id)
                 .await
-                .ok()
-                .flatten()
+                .expect("failed to load session")
                 .map(|session| session.status == SessionStatus::Stopped)
                 .unwrap_or(false)
         },
@@ -950,8 +947,7 @@ async fn central_server_resumes_stopped_session() {
         server_db
             .get_session(&session_id)
             .await
-            .ok()
-            .flatten()
+            .expect("failed to load session")
             .is_some_and(|session| {
                 session.agent_session_id.as_deref() == Some("agent-sess-e2e")
                     && session.status == SessionStatus::Idle
@@ -965,8 +961,7 @@ async fn central_server_resumes_stopped_session() {
         server_db
             .get_session(&session_id)
             .await
-            .ok()
-            .flatten()
+            .expect("failed to load session")
             .is_some_and(|session| session.status == SessionStatus::Stopped)
     })
     .await;
@@ -997,8 +992,7 @@ async fn central_server_resumes_stopped_session() {
         node_db
             .get_session(&session_id)
             .await
-            .ok()
-            .flatten()
+            .expect("failed to load session")
             .is_some_and(|session| session.status == SessionStatus::Idle)
     })
     .await;
@@ -1099,8 +1093,7 @@ async fn central_server_archives_and_deletes_session() {
         server_db
             .get_session(&session_id)
             .await
-            .ok()
-            .flatten()
+            .expect("failed to load session")
             .is_some_and(|session| session.last_node_seq >= node_last)
     })
     .await;
@@ -1121,8 +1114,7 @@ async fn central_server_archives_and_deletes_session() {
         server_db
             .get_session(&session_id)
             .await
-            .ok()
-            .flatten()
+            .expect("failed to load session")
             .is_some_and(|session| session.archived_at.is_some())
     })
     .await;
@@ -1174,8 +1166,7 @@ async fn central_server_archives_and_deletes_session() {
         server_db
             .get_session(&session_id)
             .await
-            .ok()
-            .flatten()
+            .expect("failed to load session")
             .is_some_and(|session| session.archived_at.is_none())
     })
     .await;
@@ -1189,8 +1180,7 @@ async fn central_server_archives_and_deletes_session() {
             node_db
                 .get_session(&session_id)
                 .await
-                .ok()
-                .flatten()
+                .expect("failed to load session")
                 .is_some_and(|session| session.status == SessionStatus::Stopped)
         },
     )

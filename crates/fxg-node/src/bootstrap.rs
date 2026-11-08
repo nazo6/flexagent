@@ -559,8 +559,12 @@ async fn run_streaming(cwd: &Path, command: &str, env: &[(&str, &str)]) -> Resul
         }
     });
     let status = child.wait().await.map_err(NodeError::Plain)?;
-    let _ = stdout_task.await;
-    let _ = stderr_task.await;
+    if let Err(err) = stdout_task.await {
+        tracing::warn!("bootstrap stdout task terminated unexpectedly: {err}");
+    }
+    if let Err(err) = stderr_task.await {
+        tracing::warn!("bootstrap stderr task terminated unexpectedly: {err}");
+    }
     Ok(status.success())
 }
 

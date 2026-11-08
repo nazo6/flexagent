@@ -112,14 +112,14 @@ impl TestEnv {
 
     /// Daemon log (for Stdio diagnostics).
     fn daemon_log(&self) -> String {
-        std::fs::read_to_string(self.dir.path().join("daemon.log")).unwrap_or_default()
+        std::fs::read_to_string(self.dir.path().join("daemon.log")).expect("read daemon.log")
     }
 
     /// Stop the daemon.
     fn stop_daemon(&mut self) {
         if let Some(mut child) = self.daemon.take() {
-            let _ = child.kill();
-            let _ = child.wait();
+            fxg_protocol::discard_with!(child.kill(), "kill the test daemon");
+            fxg_protocol::discard_with!(child.wait(), "reap the test daemon");
         }
     }
 
@@ -466,7 +466,7 @@ async fn daemon_logging_to_custom_file_and_no_color() {
     // Verify that the log is written to custom_daemon.log and contains no ANSI
     // escapes
     assert!(custom_log_path.exists(), "custom log file must exist");
-    let content = std::fs::read_to_string(&custom_log_path).unwrap_or_default();
+    let content = std::fs::read_to_string(&custom_log_path).expect("read the custom daemon log");
     assert!(
         content.contains("fxg daemon started"),
         "custom log file should contain startup message, got:\n{content}"

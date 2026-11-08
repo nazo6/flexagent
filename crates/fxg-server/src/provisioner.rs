@@ -196,7 +196,10 @@ impl ProvisionerManager {
             .expect("instances lock poisoned")
             .get(node_id)
         {
-            let _ = instance.terminate.send(true);
+            fxg_protocol::discard_with!(
+                instance.terminate.send(true),
+                "request termination of an ephemeral node instance"
+            );
         }
     }
 
@@ -219,7 +222,7 @@ impl ProvisionerManager {
             .expect("drain lock poisoned")
             .remove(node_id)
         {
-            let _ = tx.send(());
+            fxg_protocol::discard_with!(tx.send(()), "notify a drain waiter that the node drained");
         }
     }
 
@@ -339,17 +342,18 @@ pub async fn spawn_session(
         .hello
         .ok_or_else(|| ApiError::internal("ephemeral spawn returned no handshake channel"))?;
 
-    tokio::spawn(await_handshake_and_start(
-        state.clone(),
-        node_id.clone(),
-        hello,
-        pending,
-    ));
-    tokio::spawn(monitor_instance(
-        state.clone(),
-        node_id.clone(),
-        Duration::from_secs(idle_timeout_secs),
-    ));
+    fxg_protocol::spawn_guarded!(
+        "ephemeral handshake",
+        await_handshake_and_start(state.clone(), node_id.clone(), hello, pending)
+    );
+    fxg_protocol::spawn_guarded!(
+        "ephemeral idle monitor",
+        monitor_instance(
+            state.clone(),
+            node_id.clone(),
+            Duration::from_secs(idle_timeout_secs),
+        )
+    );
     tracing::info!(
         node_id,
         session_id,
@@ -422,7 +426,7 @@ pub async fn provisioner_test(
         .collect();
 
     // Always discard after the validation (drain is best effort)
-    let _ = state
+    if let Err(err) = state
         .hub()
         .send(
             &node_id,
@@ -431,9 +435,18 @@ pub async fn provisioner_test(
                 create_git_bundle: false,
             },
         )
-        .await;
+        .await
+    {
+        tracing::warn!(
+            node_id,
+            "failed to request drain after the provisioner test: {err:#}"
+        );
+    }
     tokio::time::sleep(Duration::from_secs(2)).await;
-    let _ = terminate.send(true);
+    fxg_protocol::discard_with!(
+        terminate.send(true),
+        "terminate the provisioner test instance"
+    );
     state.hub().detach_ephemeral(&node_id, None).await;
     if let Err(err) = state
         .db()
@@ -555,7 +568,11 @@ async fn spawn_child(state: &ServerState, request: SpawnRequest) -> Result<Spawn
         Ok(guard) => {
             #[cfg(windows)]
             if let Some(handle) = child.raw_handle() {
-                let _ = guard.attach_raw_handle(handle);
+                if let Err(err) = guard.attach_raw_handle(handle) {
+                    tracing::warn!(
+                        "failed to attach the provisioner to a job object; it may outlive the server: {err}"
+                    );
+                }
             }
             Some(guard)
         }
@@ -599,7 +616,7 @@ async fn spawn_child(state: &ServerState, request: SpawnRequest) -> Result<Spawn
     let pump_session_id = session_id.clone();
 
     // stdout pump: owns the child process lifetime and registers the hub connection on NodeHello
-    tokio::spawn(async move {
+    fxg_protocol::spawn_guarded!("ephemeral stdio pump", async move {
         let _guard = guard;
         let mut terminate_rx = terminate_rx;
         let mut child = child;
@@ -614,7 +631,10 @@ async fn spawn_child(state: &ServerState, request: SpawnRequest) -> Result<Spawn
             tokio::select! {
                 _ = terminate_rx.changed() => {
                     if *terminate_rx.borrow() {
-                        let _ = child.start_kill();
+                        fxg_protocol::discard_with!(
+                            child.start_kill(),
+                            "request termination of the ephemeral node child"
+                        );
                     }
                     break;
                 }
@@ -628,10 +648,13 @@ async fn spawn_child(state: &ServerState, request: SpawnRequest) -> Result<Spawn
                         }
                         match &pump_session_id {
                             Some(session_id) => {
-                                let _ = pump_state.hub().client_events().send(ClientEvent::BootstrapLog {
-                                    session_id: session_id.clone(),
-                                    line,
-                                });
+                                fxg_protocol::discard_with!(
+                                    pump_state.hub().client_events().send(ClientEvent::BootstrapLog {
+                                        session_id: session_id.clone(),
+                                        line,
+                                    }),
+                                    "stream a bootstrap log line to clients"
+                                );
                             }
                             None => tracing::debug!(node_id = pump_node_id, "{line}"),
                         }
@@ -679,7 +702,10 @@ async fn spawn_child(state: &ServerState, request: SpawnRequest) -> Result<Spawn
                             }
                             if let Some(tx) = hello_tx.take() {
                                 let hello_node_id = extract_hello_node_id(&line).unwrap_or_default();
-                                let _ = tx.send(hello_node_id);
+                                fxg_protocol::discard_with!(
+                                    tx.send(hello_node_id),
+                                    "report the ephemeral node id to a waiter that may be gone"
+                                );
                             }
                         }
                         if line.contains("\"op\":\"drain_complete\"") {
@@ -705,7 +731,19 @@ async fn spawn_child(state: &ServerState, request: SpawnRequest) -> Result<Spawn
         drop(hello_tx.take());
         pump_state
             .hub()
-            .detach_ephemeral(&pump_node_id, status.ok().and_then(|status| status.code()))
+            .detach_ephemeral(
+                &pump_node_id,
+                match status {
+                    Ok(status) => status.code(),
+                    Err(err) => {
+                        tracing::warn!(
+                            node_id = pump_node_id,
+                            "failed to wait for the ephemeral node: {err}"
+                        );
+                        None
+                    }
+                },
+            )
             .await;
         pump_manager.remove_instance(&pump_node_id);
         tracing::info!(node_id = pump_node_id, "ephemeral node instance ended");
@@ -728,7 +766,13 @@ async fn spawn_child(state: &ServerState, request: SpawnRequest) -> Result<Spawn
 
 /// Extracts `node_id` from a NodeHello JSON line (minimal parsing).
 fn extract_hello_node_id(line: &str) -> Option<String> {
-    let value: serde_json::Value = serde_json::from_str(line).ok()?;
+    let value: serde_json::Value = match serde_json::from_str(line) {
+        Ok(value) => value,
+        Err(err) => {
+            tracing::debug!("stdout line is not JSON (skipped): {err}");
+            return None;
+        }
+    };
     value
         .get("node_id")
         .and_then(|node_id| node_id.as_str())
@@ -832,10 +876,13 @@ async fn monitor_instance(state: ServerState, node_id: String, idle_timeout: Dur
         let Some(activity) = manager.activity(&node_id) else {
             return;
         };
-        let idle = activity
-            .lock()
-            .map(|value| value.elapsed())
-            .unwrap_or_default();
+        let idle = match activity.lock() {
+            Ok(value) => value.elapsed(),
+            Err(err) => {
+                tracing::error!(node_id, "activity lock poisoned: {err}");
+                continue;
+            }
+        };
         if idle >= idle_timeout {
             tracing::info!(node_id, "ephemeral node idle timeout; draining");
             drain(&state, &node_id, "idle timeout", true).await;
@@ -870,7 +917,7 @@ pub(crate) async fn drain(
     }
     let drain_rx = state.provisioners().register_drain_waiter(node_id);
     tracing::info!(node_id, reason, "draining ephemeral node");
-    let _ = state
+    if let Err(err) = state
         .hub()
         .send(
             node_id,
@@ -879,7 +926,10 @@ pub(crate) async fn drain(
                 create_git_bundle,
             },
         )
-        .await;
+        .await
+    {
+        tracing::warn!(node_id, "failed to request drain: {err:#}");
+    }
     let drained = tokio::time::timeout(DRAIN_TIMEOUT, drain_rx).await.is_ok();
     if !drained {
         tracing::warn!(node_id, "drain timed out; forcing termination");
@@ -890,13 +940,13 @@ pub(crate) async fn drain(
 
 /// Node IDs of all running temporary VMs (for shutdown handling).
 pub fn running_node_ids(state: &ServerState) -> Vec<String> {
-    state
-        .provisioners()
-        .inner
-        .instances
-        .lock()
-        .map(|instances| instances.keys().cloned().collect())
-        .unwrap_or_default()
+    match state.provisioners().inner.instances.lock() {
+        Ok(instances) => instances.keys().cloned().collect(),
+        Err(err) => {
+            tracing::error!("instances lock poisoned: {err}");
+            Vec::new()
+        }
+    }
 }
 
 /// Accumulates `WorkspaceBundleUpload` chunks.
@@ -964,7 +1014,7 @@ async fn save_bundle(state: &ServerState, session_id: &str) {
 /// Terminates all running temporary VMs (on server shutdown).
 pub async fn terminate_all(state: &ServerState) {
     for node_id in running_node_ids(state) {
-        let _ = state
+        if let Err(err) = state
             .hub()
             .send(
                 &node_id,
@@ -973,7 +1023,13 @@ pub async fn terminate_all(state: &ServerState) {
                     create_git_bundle: false,
                 },
             )
-            .await;
+            .await
+        {
+            tracing::warn!(
+                node_id,
+                "failed to request drain during shutdown; terminating instead: {err:#}"
+            );
+        }
         state.provisioners().terminate(&node_id);
     }
 }

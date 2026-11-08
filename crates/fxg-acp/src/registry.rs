@@ -425,19 +425,65 @@ impl AcpRegistry {
     }
 
     /// Reads the cache (`ttl_fresh` = only entries within the TTL).
+    ///
+    /// A missing or corrupt cache is a normal miss (logged at debug), not an
+    /// error for the caller.
     fn read_cache(&self, ttl_fresh: bool) -> Option<RegistryIndex> {
         let path = self.cache_path();
         if ttl_fresh {
-            let modified = std::fs::metadata(&path).ok()?.modified().ok()?;
-            let age = std::time::SystemTime::now()
-                .duration_since(modified)
-                .unwrap_or_default();
+            let modified = match std::fs::metadata(&path) {
+                Ok(metadata) => match metadata.modified() {
+                    Ok(modified) => modified,
+                    Err(err) => {
+                        tracing::debug!(
+                            path = %path.display(),
+                            "registry cache has no modification time: {err}"
+                        );
+                        return None;
+                    }
+                },
+                Err(err) => {
+                    tracing::debug!(
+                        path = %path.display(),
+                        "registry cache is not readable: {err}"
+                    );
+                    return None;
+                }
+            };
+            let age = match std::time::SystemTime::now().duration_since(modified) {
+                Ok(age) => age,
+                Err(err) => {
+                    tracing::debug!(
+                        path = %path.display(),
+                        "registry cache mtime is in the future: {err}"
+                    );
+                    std::time::Duration::ZERO
+                }
+            };
             if age > self.cache_ttl {
                 return None;
             }
         }
-        let text = std::fs::read_to_string(&path).ok()?;
-        serde_json::from_str(&text).ok()
+        let text = match std::fs::read_to_string(&path) {
+            Ok(text) => text,
+            Err(err) => {
+                tracing::debug!(
+                    path = %path.display(),
+                    "failed to read the registry cache: {err}"
+                );
+                return None;
+            }
+        };
+        match serde_json::from_str(&text) {
+            Ok(index) => Some(index),
+            Err(err) => {
+                tracing::warn!(
+                    path = %path.display(),
+                    "registry cache is corrupt; ignoring it: {err}"
+                );
+                None
+            }
+        }
     }
 
     /// Writes the cache.
@@ -588,7 +634,16 @@ impl AcpRegistry {
     ) -> Option<AgentLaunchSpec> {
         let (program, args, env) = match source {
             LocalSource::External(path) => {
-                let dist = Self::binary_distribution(agent).ok()?;
+                let dist = match Self::binary_distribution(agent) {
+                    Ok(dist) => dist,
+                    Err(err) => {
+                        tracing::warn!(
+                            agent_id = %agent.id,
+                            "cannot launch external agent; its binary distribution is invalid: {err}"
+                        );
+                        return None;
+                    }
+                };
                 let mut args = dist.args.clone();
                 args.extend(extra_args.iter().cloned());
                 (path, args, dist.env.clone())

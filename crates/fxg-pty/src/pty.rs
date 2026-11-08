@@ -237,16 +237,22 @@ impl OutputForwarder {
         #[cfg(windows)]
         if respond {
             // Respond to ConPTY's startup query (avoids blocking in headless runs)
-            let _ = self.input_tx.send(CPR_RESPONSE.to_vec());
+            fxg_protocol::discard_with!(
+                self.input_tx.send(CPR_RESPONSE.to_vec()),
+                "respond to the ConPTY startup query"
+            );
         }
         #[cfg(not(windows))]
         let data = chunk.to_vec();
 
         if !data.is_empty() {
-            let _ = self.inner.events.send(PtyEvent::Output {
-                pty_id: self.pty_id.clone(),
-                data,
-            });
+            fxg_protocol::discard_with!(
+                self.inner.events.send(PtyEvent::Output {
+                    pty_id: self.pty_id.clone(),
+                    data,
+                }),
+                "broadcast pty output"
+            );
         }
     }
 
@@ -257,10 +263,13 @@ impl OutputForwarder {
         #[cfg(not(windows))]
         let tail: Vec<u8> = Vec::new();
         if !tail.is_empty() {
-            let _ = self.inner.events.send(PtyEvent::Output {
-                pty_id: self.pty_id.clone(),
-                data: tail,
-            });
+            fxg_protocol::discard_with!(
+                self.inner.events.send(PtyEvent::Output {
+                    pty_id: self.pty_id.clone(),
+                    data: tail,
+                }),
+                "broadcast trailing pty output"
+            );
         }
     }
 }
@@ -374,7 +383,9 @@ impl PtySessionManager {
                 if writer.write_all(&data).is_err() {
                     break;
                 }
-                let _ = writer.flush();
+                if writer.flush().is_err() {
+                    break;
+                }
             }
             // Dropping the writer sends EOF
         });
@@ -404,7 +415,10 @@ impl PtySessionManager {
                 }
             }
             forwarder.finish();
-            let _ = reader_done_tx.send(());
+            fxg_protocol::discard_with!(
+                reader_done_tx.send(()),
+                "signal that the pty output reader finished"
+            );
         });
 
         // Exit detection thread: detects child exit via `wait()`, tears down the
@@ -430,10 +444,16 @@ impl PtySessionManager {
         let exit_inner = Arc::clone(&self.inner);
         std::thread::spawn(move || {
             let mut child = child;
-            let exit_code = child
-                .wait()
-                .ok()
-                .map(|status| i32::try_from(status.exit_code()).unwrap_or(i32::MAX));
+            let exit_code = match child.wait() {
+                Ok(status) => Some(i32::try_from(status.exit_code()).unwrap_or(i32::MAX)),
+                Err(err) => {
+                    tracing::warn!(
+                        pty_id = %exit_pty_id,
+                        "failed to wait for the pty child process (exit code unknown): {err}"
+                    );
+                    None
+                }
+            };
             // The session Drop (master → ClosePseudoConsole) is done outside the
             // lock. ClosePseudoConsole can block depending on the drain state of
             // the output pipe, so it must not run while holding the lock.
@@ -446,11 +466,17 @@ impl PtySessionManager {
             // Wait for the reader's EOF. A failsafe timeout is used so that Exit
             // is still guaranteed if EOF never arrives (e.g. a grandchild keeps
             // the slave side open).
-            let _ = reader_done_rx.recv_timeout(Duration::from_secs(5));
-            let _ = exit_inner.events.send(PtyEvent::Exit {
-                pty_id: exit_pty_id,
-                exit_code,
-            });
+            fxg_protocol::discard_with!(
+                reader_done_rx.recv_timeout(Duration::from_secs(5)),
+                "wait for the pty output reader before publishing exit"
+            );
+            fxg_protocol::discard_with!(
+                exit_inner.events.send(PtyEvent::Exit {
+                    pty_id: exit_pty_id,
+                    exit_code,
+                }),
+                "broadcast pty exit"
+            );
         });
 
         Ok(info)
@@ -470,10 +496,9 @@ impl PtySessionManager {
         let session = sessions
             .get(pty_id)
             .ok_or_else(|| PtyError::NotFound(pty_id.to_owned()))?;
-        session
-            .input_tx
-            .send(data.to_vec())
-            .map_err(|_| PtyError::NotFound(pty_id.to_owned()))?;
+        if session.input_tx.send(data.to_vec()).is_err() {
+            return Err(PtyError::InputClosed(pty_id.to_owned()));
+        }
         Ok(data.len())
     }
 
@@ -577,7 +602,10 @@ mod tests {
                     Err(broadcast::error::RecvError::Closed) => break,
                 }
             }
-            let _ = tx.send((output, exit_code));
+            fxg_protocol::discard_with!(
+                tx.send((output, exit_code)),
+                "report the pty exit to the test waiter"
+            );
         });
         rx.recv_timeout(timeout)
             .expect("pty did not exit before the timeout")

@@ -552,10 +552,16 @@ impl DaemonState {
             None => self.find_repo_for_worktree(target).await?,
         };
         worktree::remove_worktree(&repo, target, force).await?;
-        let _ = self
+        if let Err(err) = self
             .db()
             .delete_project_binding(self.node_id(), &target.to_string_lossy())
-            .await;
+            .await
+        {
+            tracing::warn!(
+                path = %target.display(),
+                "worktree removed but its project binding could not be deleted: {err}"
+            );
+        }
 
         self.record_audit(
             fxg_db::audit::actions::WORKTREE_MANAGE,
@@ -585,7 +591,16 @@ impl DaemonState {
                     .map(|binding| PathBuf::from(&binding.local_path))
             })
             .collect();
-        let canonical_target = fxg_pty::canonicalize(target).ok();
+        let canonical_target = match fxg_pty::canonicalize(target) {
+            Ok(path) => Some(path),
+            Err(err) => {
+                tracing::debug!(
+                    path = %target.display(),
+                    "failed to canonicalize the target worktree: {err}"
+                );
+                None
+            }
+        };
         let mut failures = Vec::new();
         for root in main_roots {
             let entries = match worktree::list_worktrees(&root).await {
@@ -601,7 +616,16 @@ impl DaemonState {
                 }
             };
             let found = entries.iter().any(|entry| {
-                let canonical_entry = fxg_pty::canonicalize(&entry.path).ok();
+                let canonical_entry = match fxg_pty::canonicalize(&entry.path) {
+                    Ok(path) => Some(path),
+                    Err(err) => {
+                        tracing::debug!(
+                            path = %entry.path.display(),
+                            "failed to canonicalize a worktree entry: {err}"
+                        );
+                        None
+                    }
+                };
                 entry.path == target
                     || (canonical_target.is_some() && canonical_entry == canonical_target)
             });

@@ -234,13 +234,23 @@ pub async fn resolve_project(cwd: &Path, node_id: &str) -> Result<ResolvedProjec
         None => None,
     };
 
-    let relative_subpath = git_root.as_ref().and_then(|root| {
-        local_path
-            .strip_prefix(root)
-            .ok()
-            .filter(|subpath| !subpath.as_os_str().is_empty())
-            .map(|subpath| subpath.to_string_lossy().replace('\\', "/"))
-    });
+    let relative_subpath = match git_root.as_ref() {
+        Some(root) => match local_path.strip_prefix(root) {
+            Ok(subpath) if !subpath.as_os_str().is_empty() => {
+                Some(subpath.to_string_lossy().replace('\\', "/"))
+            }
+            Ok(_) => None,
+            Err(err) => {
+                tracing::debug!(
+                    path = %local_path.display(),
+                    root = %root.display(),
+                    "failed to compute the path relative to the git root: {err}"
+                );
+                None
+            }
+        },
+        None => None,
+    };
 
     let folder_name = local_path
         .file_name()

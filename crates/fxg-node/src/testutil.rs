@@ -121,7 +121,10 @@ impl MockAgent {
     /// Injects a driver event into running sessions.
     pub(crate) fn emit(&self, event: DriverEvent) {
         for tx in self.inner.events.lock().expect("events").iter() {
-            let _ = tx.send(event.clone());
+            fxg_protocol::discard_with!(
+                tx.send(event.clone()),
+                "send a message to a channel that may be closed"
+            );
         }
     }
 

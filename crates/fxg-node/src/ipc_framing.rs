@@ -49,7 +49,7 @@ where
 {
     let payload = serde_json::to_vec(message)?;
     let length = u32::try_from(payload.len())
-        .map_err(|_| NodeError::Server("ipc frame too large".to_owned()))?;
+        .map_err(|err| NodeError::Server(format!("ipc frame is too large ({err})")))?;
     stream
         .write_all(&length.to_le_bytes())
         .await

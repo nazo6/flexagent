@@ -140,17 +140,23 @@ async fn reconcile_stale_sessions(bus: &SessionEventBus) -> Result<(), NodeError
 
 /// Returns the hostname-based node display name.
 pub fn hostname() -> String {
-    std::env::var("COMPUTERNAME")
-        .or_else(|_| std::env::var("HOSTNAME"))
-        .ok()
-        .filter(|value| !value.trim().is_empty())
-        .or_else(|| {
-            std::fs::read_to_string("/etc/hostname")
-                .ok()
-                .map(|value| value.trim().to_owned())
-                .filter(|value| !value.is_empty())
-        })
-        .unwrap_or_else(|| "fxg-node".to_owned())
+    for variable in ["COMPUTERNAME", "HOSTNAME"] {
+        if let Ok(value) = std::env::var(variable)
+            && !value.trim().is_empty()
+        {
+            return value;
+        }
+    }
+    match std::fs::read_to_string("/etc/hostname") {
+        Ok(value) => {
+            let value = value.trim();
+            if !value.is_empty() {
+                return value.to_owned();
+            }
+        }
+        Err(err) => tracing::debug!("failed to read /etc/hostname: {err}"),
+    }
+    "fxg-node".to_owned()
 }
 
 /// Auto-assigns a node ID from a hostname-based slug plus a short ID.
@@ -300,17 +306,23 @@ impl DaemonState {
         // (bus Lagged is recovered by the Client WS loop replaying from the cursor)
         let mut bus_rx = state.inner.bus.subscribe();
         let client_tx = state.inner.client_events.clone();
-        tokio::spawn(async move {
+        fxg_protocol::spawn_guarded!("local client event forwarder", async move {
             loop {
                 match bus_rx.recv().await {
                     Ok(crate::session::SessionBroadcast::Persisted { event, cursor }) => {
-                        let _ = client_tx.send(ClientEvent::Persisted {
-                            event: Box::new(event),
-                            cursor,
-                        });
+                        fxg_protocol::discard_with!(
+                            client_tx.send(ClientEvent::Persisted {
+                                event: Box::new(event),
+                                cursor,
+                            }),
+                            "broadcast an event to local clients"
+                        );
                     }
                     Ok(crate::session::SessionBroadcast::StreamDelta { session_id, delta }) => {
-                        let _ = client_tx.send(ClientEvent::StreamDelta { session_id, delta });
+                        fxg_protocol::discard_with!(
+                            client_tx.send(ClientEvent::StreamDelta { session_id, delta }),
+                            "broadcast an event to local clients"
+                        );
                     }
                     // Ephemeral events (keystrokes etc.) are delivered over the PTY WS
                     Ok(crate::session::SessionBroadcast::Ephemeral(_)) => {}
@@ -613,7 +625,7 @@ pub struct ShutdownHandle(watch::Sender<bool>);
 impl ShutdownHandle {
     /// Requests shutdown (actual stop is awaited via [`NodeDaemon::wait`]).
     pub fn shutdown(&self) {
-        let _ = self.0.send(true);
+        fxg_protocol::discard_with!(self.0.send(true), "request node shutdown");
     }
 }
 
@@ -665,10 +677,13 @@ impl NodeDaemon {
 
         // Request shutdown on Ctrl-C
         let signal_tx = shutdown_tx.clone();
-        tokio::spawn(async move {
+        fxg_protocol::spawn_guarded!("ctrl-c handler", async move {
             if tokio::signal::ctrl_c().await.is_ok() {
                 tracing::info!("received Ctrl-C, shutting down");
-                let _ = signal_tx.send(true);
+                fxg_protocol::discard_with!(
+                    signal_tx.send(true),
+                    "request node shutdown after Ctrl-C"
+                );
             }
         });
 
@@ -722,10 +737,15 @@ impl NodeDaemon {
         let mut receiver = self.shutdown_tx.subscribe();
         // A `watch` receiver starts with the value at creation time marked as "seen",
         // so check the current value to see whether `shutdown()` already ran before waiting.
-        if !*receiver.borrow_and_update() {
-            let _ = receiver.changed().await;
+        if !*receiver.borrow_and_update()
+            && let Err(err) = receiver.changed().await
+        {
+            tracing::debug!("shutdown sender dropped while waiting: {err}");
         }
-        let _ = self.shutdown_tx.send(true);
+        fxg_protocol::discard_with!(
+            self.shutdown_tx.send(true),
+            "request node shutdown while waiting"
+        );
 
         let stopped = self.state.session_manager().shutdown_all().await;
         if !stopped.is_empty() {

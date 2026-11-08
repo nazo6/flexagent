@@ -166,7 +166,7 @@ impl TrayUi {
                 None
             };
             if let Some(action) = action {
-                let _ = actions.send(action);
+                fxg_protocol::discard_with!(actions.send(action), "forward a tray action");
             }
         }));
 
@@ -195,11 +195,14 @@ impl TrayUi {
             TrayUpdate::Status(status) => {
                 self.status.set_text(status_line(&status));
                 self.sessions.set_text(session_line(status.active_sessions));
-                let _ = self.tray.set_tooltip(Some(tooltip(
-                    &self.node_name,
-                    self.version,
-                    Some(&status),
-                )));
+                fxg_protocol::discard_with!(
+                    self.tray.set_tooltip(Some(tooltip(
+                        &self.node_name,
+                        self.version,
+                        Some(&status),
+                    ))),
+                    "update the tray tooltip"
+                );
                 match build_icon(status.central_connected) {
                     Ok(icon) => {
                         if let Err(err) = self.tray.set_icon(Some(icon)) {

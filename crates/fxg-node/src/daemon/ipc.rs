@@ -92,7 +92,7 @@ pub async fn serve(
                     Ok((stream, _addr)) => {
                         let state = state.clone();
                         let connection_shutdown = shutdown.clone();
-                        tokio::spawn(async move {
+                        fxg_protocol::spawn_guarded!("ipc connection", async move {
                             if let Err(err) = handle_connection(state, stream, connection_shutdown).await {
                                 tracing::debug!("ipc connection ended: {err}");
                             }
@@ -104,7 +104,7 @@ pub async fn serve(
         }
     }
 
-    let _ = std::fs::remove_file(&path);
+    fxg_protocol::discard_with!(std::fs::remove_file(&path), "remove the stale IPC socket");
     Ok(())
 }
 
@@ -140,7 +140,7 @@ pub async fn serve(
                     Ok(()) => {
                         let state = state.clone();
                         let connection_shutdown = shutdown.clone();
-                        tokio::spawn(async move {
+                        fxg_protocol::spawn_guarded!("ipc connection", async move {
                             if let Err(err) = handle_connection(state, server, connection_shutdown).await {
                                 tracing::debug!("ipc connection ended: {err}");
                             }

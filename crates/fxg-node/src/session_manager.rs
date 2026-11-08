@@ -637,9 +637,10 @@ impl SessionManager {
         // Event pump
         let inner = Arc::clone(&self.inner);
         let pump_session_id = params.session_id.to_owned();
-        tokio::spawn(async move {
-            pump_events(inner, pump_session_id, event_rx).await;
-        });
+        fxg_protocol::spawn_guarded!(
+            "session event pump",
+            pump_events(inner, pump_session_id, event_rx)
+        );
         Ok(StartedDriverSession { context_restored })
     }
 
@@ -1511,7 +1512,7 @@ async fn pump_events(
                     SessionStatus::Error,
                     Some(message.clone()),
                 );
-                let _ = inner
+                if let Err(err) = inner
                     .bus
                     .record(
                         &session_id,
@@ -1520,7 +1521,13 @@ async fn pump_events(
                             error_message: Some(message),
                         },
                     )
-                    .await;
+                    .await
+                {
+                    tracing::warn!(
+                        session_id = %session_id,
+                        "failed to record the driver failure: {err}"
+                    );
+                }
             }
             DriverEvent::Event(payload) => {
                 match &payload {
@@ -1641,17 +1648,21 @@ async fn pump_events(
                 | SessionStatus::WaitingPermission
                 | SessionStatus::WaitingInput
         )
-    ) {
-        let _ = inner
-            .bus
-            .record(
-                &session_id,
-                UnifiedEventPayload::StatusChanged {
-                    status: SessionStatus::Stopped,
-                    error_message: None,
-                },
-            )
-            .await;
+    ) && let Err(err) = inner
+        .bus
+        .record(
+            &session_id,
+            UnifiedEventPayload::StatusChanged {
+                status: SessionStatus::Stopped,
+                error_message: None,
+            },
+        )
+        .await
+    {
+        tracing::warn!(
+            session_id = %session_id,
+            "failed to record the stopped status: {err}"
+        );
     }
     {
         let mut sessions = inner.sessions.lock().expect("sessions poisoned");
@@ -1713,7 +1724,7 @@ async fn maybe_dispatch_queued(inner: &Arc<Inner>, session_id: &str) {
     if let Err(err) = dispatch_prompt(inner, session_id, &prompt.text, &prompt.client_source).await
     {
         tracing::warn!(session_id = %session_id, "failed to dispatch queued prompt: {err:#}");
-        let _ = inner
+        if let Err(record_err) = inner
             .bus
             .record(
                 session_id,
@@ -1722,7 +1733,13 @@ async fn maybe_dispatch_queued(inner: &Arc<Inner>, session_id: &str) {
                     error_message: Some(format!("failed to dispatch queued prompt: {err:#}")),
                 },
             )
-            .await;
+            .await
+        {
+            tracing::warn!(
+                session_id = %session_id,
+                "failed to record the queued prompt failure: {record_err}"
+            );
+        }
         if let Some(session) = inner
             .sessions
             .lock()

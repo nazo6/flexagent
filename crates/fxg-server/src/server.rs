@@ -70,7 +70,9 @@ impl Server {
                 app.into_make_service_with_connect_info::<SocketAddr>(),
             )
             .with_graceful_shutdown(async move {
-                let _ = shutdown_rx.changed().await;
+                if let Err(err) = shutdown_rx.changed().await {
+                    tracing::debug!("shutdown sender dropped; shutting down: {err}");
+                }
             });
             tracing::info!(addr = %bound, "fxg server listening");
             if let Err(err) = server.await {
@@ -80,10 +82,10 @@ impl Server {
 
         // Request shutdown on Ctrl-C
         let signal_tx = shutdown_tx.clone();
-        tokio::spawn(async move {
+        fxg_protocol::spawn_guarded!("ctrl-c handler", async move {
             if tokio::signal::ctrl_c().await.is_ok() {
                 tracing::info!("received Ctrl-C, shutting down");
-                let _ = signal_tx.send(true);
+                fxg_protocol::discard_with!(signal_tx.send(true), "request shutdown after Ctrl-C");
             }
         });
 
@@ -113,7 +115,7 @@ impl Server {
 
     /// Requests shutdown.
     pub fn shutdown(&self) {
-        let _ = self.shutdown_tx.send(true);
+        fxg_protocol::discard_with!(self.shutdown_tx.send(true), "request server shutdown");
     }
 
     /// Requests shutdown and waits for the server task to finish.
@@ -122,10 +124,15 @@ impl Server {
         // `watch` receivers start with the value at creation marked as "seen", so check the
         // current value first to see whether `shutdown()` already ran, then wait for a
         // request (from Ctrl-C or otherwise).
-        if !*receiver.borrow_and_update() {
-            let _ = receiver.changed().await;
+        if !*receiver.borrow_and_update()
+            && let Err(err) = receiver.changed().await
+        {
+            tracing::debug!("shutdown sender dropped while waiting: {err}");
         }
-        let _ = self.shutdown_tx.send(true);
+        fxg_protocol::discard_with!(
+            self.shutdown_tx.send(true),
+            "request server shutdown while waiting"
+        );
 
         // Drain / force-terminate running temporary VMs (best effort)
         let ephemeral_nodes = crate::provisioner::running_node_ids(&self.state);

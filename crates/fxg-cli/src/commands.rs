@@ -436,8 +436,8 @@ pub(crate) fn open_session_url(session_id: &str, no_open: bool) -> Result<()> {
         Ok(url) => {
             println!("Session: {session_id}");
             println!("Web UI:  {url}");
-            if !no_open {
-                let _ = opener::open_browser(&url);
+            if !no_open && let Err(err) = opener::open_browser(&url) {
+                tracing::warn!("failed to open the Web UI in a browser: {err}");
             }
         }
         Err(_) => {

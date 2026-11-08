@@ -46,7 +46,7 @@ pub async fn resolve_credential(
                 Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
             })
             .await
-            .map_err(|_| "`gh auth token` timed out".to_owned())??;
+            .map_err(|err| format!("`gh auth token` timed out: {err}"))??;
             if token.is_empty() {
                 return Err("`gh auth token` returned an empty token".to_owned());
             }

@@ -37,7 +37,7 @@ pub fn uuid_v7() -> String {
 macro_rules! discard_with {
     ($result:expr, $context:expr $(,)?) => {{
         if let Err(err) = $result {
-            ::tracing::debug!(error = %err, context = $context, "discarded error");
+            ::tracing::debug!(error = ?err, context = $context, "discarded error");
         }
     }};
 }
@@ -52,8 +52,9 @@ macro_rules! discard_with {
 #[macro_export]
 macro_rules! spawn_logged {
     ($name:expr, $future:expr $(,)?) => {{
+        let future = $future;
         ::tokio::spawn(async move {
-            match ::tokio::spawn($future).await {
+            match ::tokio::spawn(future).await {
                 Ok(Ok(())) => {}
                 Ok(Err(err)) => {
                     ::tracing::error!(task = $name, "background task failed: {err}");
@@ -65,6 +66,31 @@ macro_rules! spawn_logged {
                         "background task terminated unexpectedly: {join}"
                     );
                 }
+            }
+        })
+    }};
+}
+
+/// Spawns a fire-and-forget background task and reports a panic (`JoinError`).
+///
+/// Use this for tasks whose future returns `()`. When the future returns
+/// `Result<(), E>`, use [`spawn_logged!`](crate::spawn_logged) instead so the
+/// error is logged as well.
+///
+/// ```ignore
+/// fxg_protocol::spawn_guarded!("tray event loop", run_tray(rx));
+/// ```
+#[macro_export]
+macro_rules! spawn_guarded {
+    ($name:expr, $future:expr $(,)?) => {{
+        let future = $future;
+        ::tokio::spawn(async move {
+            if let Err(join) = ::tokio::spawn(future).await {
+                ::tracing::error!(
+                    task = $name,
+                    panic = join.is_panic(),
+                    "background task terminated unexpectedly: {join}"
+                );
             }
         })
     }};

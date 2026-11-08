@@ -1,8 +1,8 @@
 # Clippy configuration for FlexAgent.
 #
-# The "do not erase error information" lints are enforced per crate first
-# (`fxg-protocol` / `fxg-db`). Add more crates to `[lints.clippy]` as their
-# existing call sites are audited.
+# The "do not erase error information" lints are enforced workspace-wide by
+# `mise run lint:errors` (Cargo cannot override `[lints] workspace = true` per
+# crate, so the task passes `-D` explicitly).
 
 disallowed-methods = [
   { path = "core::result::Result::ok", reason = "convert Result to Option only after an explicit match; otherwise propagate the error" },

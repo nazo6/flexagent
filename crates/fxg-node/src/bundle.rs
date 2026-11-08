@@ -124,17 +124,26 @@ pub async fn create_workspace_bundle(
     let bundle_arg = bundle_path.to_string_lossy().into_owned();
     let created = git::run_git(repo, &["bundle", "create", &bundle_arg, "--all"]).await;
     if let Err(err) = created {
-        let _ = std::fs::remove_file(&bundle_path);
+        fxg_protocol::discard_with!(
+            std::fs::remove_file(&bundle_path),
+            "remove the temporary bundle after a failed creation"
+        );
         return Err(err);
     }
     let bytes = std::fs::read(&bundle_path).map_err(|source| NodeError::Io {
         path: bundle_path.clone(),
         source,
     })?;
-    let _ = std::fs::remove_file(&bundle_path);
+    fxg_protocol::discard_with!(
+        std::fs::remove_file(&bundle_path),
+        "remove the temporary bundle file"
+    );
     // Clean up the temporary branch (the VM is disposable, but this also covers
     // execution on a regular node)
-    let _ = git::try_git(repo, &["update-ref", "-d", SNAPSHOT_REF]).await;
+    fxg_protocol::discard_with!(
+        git::try_git(repo, &["update-ref", "-d", SNAPSHOT_REF]).await,
+        "delete the temporary snapshot ref"
+    );
 
     Ok(WorkspaceBundle {
         bytes,

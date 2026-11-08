@@ -334,11 +334,16 @@ impl NodeHub {
             .map(|(command_id, _)| command_id.clone())
             .collect();
         for command_id in failed {
-            if let Some(entry) = pending.remove(&command_id) {
-                let _ = entry.tx.send(PendingResponse::Failed {
-                    code: ErrorCode::NodeOffline,
-                    message: format!("node {node_id} disconnected"),
-                });
+            if let Some(entry) = pending.remove(&command_id)
+                && entry
+                    .tx
+                    .send(PendingResponse::Failed {
+                        code: ErrorCode::NodeOffline,
+                        message: format!("node {node_id} disconnected"),
+                    })
+                    .is_err()
+            {
+                tracing::debug!(command_id, "pending command waiter was already gone");
             }
         }
         drop(pending);
@@ -352,7 +357,10 @@ impl NodeHub {
             .collect();
         for pty_id in pty_ids {
             if let Some(route) = ptys.remove(&pty_id) {
-                let _ = route.tx.send(PtyChannelEvent::Exit { exit_code: None });
+                fxg_protocol::discard_with!(
+                    route.tx.send(PtyChannelEvent::Exit { exit_code: None }),
+                    "notify pty subscribers that the node disconnected"
+                );
             }
         }
     }
@@ -366,7 +374,10 @@ impl NodeHub {
         let Some(tx) = tx else {
             return Err(offline_error(node_id));
         };
-        tx.send(message).await.map_err(|_| offline_error(node_id))
+        match tx.send(message).await {
+            Ok(()) => Ok(()),
+            Err(_) => Err(offline_error(node_id)),
+        }
     }
 
     /// Relays a command and waits for the `CommandResult` correlated by `command_id`.
@@ -733,7 +744,9 @@ impl NodeHub {
         let entry = self.inner.pending.lock().await.remove(correlation_id);
         match entry {
             Some(entry) => {
-                let _ = entry.tx.send(response);
+                if entry.tx.send(response).is_err() {
+                    tracing::debug!(correlation_id, "relay response waiter was already gone");
+                }
             }
             None => {
                 tracing::debug!(correlation_id, "late node response (no waiter)");
@@ -820,7 +833,7 @@ impl NodeHub {
             ptys.get(pty_id).map(|route| route.tx.clone())
         };
         if let Some(tx) = route {
-            let _ = tx.send(event);
+            fxg_protocol::discard_with!(tx.send(event), "publish a pty event to subscribers");
         }
     }
 }
@@ -843,9 +856,7 @@ pub(crate) async fn node_ws(
     headers: HeaderMap,
     ws: WebSocketUpgrade,
 ) -> Response {
-    let Some(provided) = headers
-        .get(header::AUTHORIZATION)
-        .and_then(|value| value.to_str().ok())
+    let Some(provided) = crate::api::header_str(&headers, header::AUTHORIZATION)
         .and_then(|value| value.strip_prefix("Bearer "))
         .map(str::trim)
         .filter(|token| !token.is_empty())
@@ -890,12 +901,12 @@ async fn handle_node_connection(state: ServerState, token_owner: String, socket:
             Ok(hello @ NodeToServerMsg::NodeHello { .. }) => hello,
             Ok(other) => {
                 tracing::warn!(op = ?std::mem::discriminant(&other), "node sent a non-hello first message");
-                let _ = sender.close().await;
+                fxg_protocol::discard_with!(sender.close().await, "close the node websocket");
                 return;
             }
             Err(err) => {
                 tracing::warn!("invalid node hello: {err}");
-                let _ = sender.close().await;
+                fxg_protocol::discard_with!(sender.close().await, "close the node websocket");
                 return;
             }
         },
@@ -927,7 +938,7 @@ async fn handle_node_connection(state: ServerState, token_owner: String, socket:
             token_owner,
             "node hello node_id does not match token owner; rejecting"
         );
-        let _ = sender.close().await;
+        fxg_protocol::discard_with!(sender.close().await, "close the node websocket");
         return;
     }
 
@@ -947,7 +958,7 @@ async fn handle_node_connection(state: ServerState, token_owner: String, socket:
     };
     if let Err(err) = state.db().upsert_node(&record).await {
         tracing::warn!(node_id, "failed to upsert node from hello: {err}");
-        let _ = sender.close().await;
+        fxg_protocol::discard_with!(sender.close().await, "close the node websocket");
         return;
     }
     if let Err(err) = apply_project_reports(&state, &node_id, &projects).await {
@@ -968,13 +979,16 @@ async fn handle_node_connection(state: ServerState, token_owner: String, socket:
             sessions = targets.len(),
             "requesting session resync from node"
         );
-        let _ = state
+        if let Err(err) = state
             .hub()
             .send(
                 &node_id,
                 ServerToNodeMsg::ResyncRequest { sessions: targets },
             )
-            .await;
+            .await
+        {
+            tracing::warn!(node_id, "failed to request session resync: {}", err.message);
+        }
     }
 
     // 5. Bidirectional message loop
@@ -1066,24 +1080,29 @@ async fn handle_node_message(state: &ServerState, node_id: &str, text: &str) {
                 tracing::warn!(node_id, "failed to apply project reports: {err}");
             }
             let targets = compute_resync(state, node_id, &sessions).await;
-            if !targets.is_empty() {
-                let _ = state
+            if !targets.is_empty()
+                && let Err(err) = state
                     .hub()
                     .send(
                         node_id,
                         ServerToNodeMsg::ResyncRequest { sessions: targets },
                     )
-                    .await;
+                    .await
+            {
+                tracing::warn!(node_id, "failed to request session resync: {}", err.message);
             }
         }
         NodeToServerMsg::EventBatchPush { events } => {
             apply_event_batch(state, node_id, events).await;
         }
         NodeToServerMsg::LiveStreamDelta { session_id, delta } => {
-            let _ = state
-                .hub()
-                .client_events()
-                .send(ClientEvent::StreamDelta { session_id, delta });
+            fxg_protocol::discard_with!(
+                state
+                    .hub()
+                    .client_events()
+                    .send(ClientEvent::StreamDelta { session_id, delta }),
+                "broadcast a live stream delta to clients"
+            );
         }
         NodeToServerMsg::CommandResult {
             command_id,
@@ -1322,7 +1341,12 @@ async fn handle_node_message(state: &ServerState, node_id: &str, text: &str) {
                     )),
                 },
             };
-            let _ = state.hub().send(node_id, message).await;
+            if let Err(err) = state.hub().send(node_id, message).await {
+                tracing::warn!(
+                    node_id,
+                    "failed to send the git credential error to the node: {err:#}"
+                );
+            }
         }
         NodeToServerMsg::WorkspaceBundleUpload {
             session_id,
@@ -1487,10 +1511,13 @@ async fn apply_event_batch(
             Ok(outcomes) => {
                 for (event, outcome) in batch.iter().zip(outcomes.iter()) {
                     if outcome.inserted {
-                        let _ = state.hub().client_events().send(ClientEvent::Persisted {
-                            event: Box::new(event.clone()),
-                            cursor: outcome.cursor,
-                        });
+                        fxg_protocol::discard_with!(
+                            state.hub().client_events().send(ClientEvent::Persisted {
+                                event: Box::new(event.clone()),
+                                cursor: outcome.cursor,
+                            }),
+                            "broadcast a persisted event to clients"
+                        );
                         if matches!(
                             event.payload,
                             fxg_protocol::events::UnifiedEventPayload::PermissionRequest { .. }
@@ -1499,7 +1526,7 @@ async fn apply_event_batch(
                         }
                     }
                 }
-                let _ = state
+                if let Err(err) = state
                     .hub()
                     .send(
                         node_id,
@@ -1508,7 +1535,10 @@ async fn apply_event_batch(
                             acked_up_to_node_seq,
                         },
                     )
-                    .await;
+                    .await
+                {
+                    tracing::warn!(node_id, "failed to acknowledge the event batch: {err:#}");
+                }
             }
             Err(err) => {
                 tracing::warn!(
@@ -1525,7 +1555,7 @@ async fn apply_event_batch(
     if !notify_events.is_empty() {
         let push = state.push().clone();
         let db = state.db().clone();
-        tokio::spawn(async move {
+        fxg_protocol::spawn_guarded!("web push notification", async move {
             crate::push::notify_permission_requests(&push, &db, &notify_events).await;
             crate::push::notify_elicitations(&push, &db, &notify_events).await;
         });

@@ -112,7 +112,9 @@ pub async fn run_stdio(config: StdioConfig) -> Result<(), NodeError> {
                 break;
             }
         }
-        let _ = writer.flush().await;
+        if let Err(err) = writer.flush().await {
+            tracing::debug!("failed to flush stdout at the end of the transport: {err}");
+        }
     });
 
     // Bind the Git credential proxy to this transport
@@ -120,7 +122,9 @@ pub async fn run_stdio(config: StdioConfig) -> Result<(), NodeError> {
 
     // 1. Handshake + flush of unsent events
     let hello = crate::sync::build_hello(&state).await;
-    let _ = out_tx.send(hello).await;
+    if let Err(err) = out_tx.send(hello).await {
+        tracing::warn!("failed to send NodeHello over stdio: {err}");
+    }
     if let Err(err) = crate::sync::push_outbox(&state, &out_tx).await {
         tracing::warn!("failed to flush outbox at startup: {err}");
     }
@@ -148,13 +152,20 @@ pub async fn run_stdio(config: StdioConfig) -> Result<(), NodeError> {
                     }
                 }
                 Err(err) => {
-                    let _ = stdin_tx.blocking_send(StdinEvent::Error(err.to_string()));
+                    if stdin_tx
+                        .blocking_send(StdinEvent::Error(err.to_string()))
+                        .is_err()
+                    {
+                        tracing::debug!("stdin reader receiver is gone");
+                    }
                     return;
                 }
             }
         }
         // Signal a clean EOF (ignored if the receiver already stopped)
-        let _ = stdin_tx.blocking_send(StdinEvent::Eof);
+        if stdin_tx.blocking_send(StdinEvent::Eof).is_err() {
+            tracing::debug!("stdin reader receiver is gone");
+        }
     });
 
     tracing::info!(
@@ -188,20 +199,28 @@ pub async fn run_stdio(config: StdioConfig) -> Result<(), NodeError> {
             },
             bus = bus_rx.recv() => match bus {
                 Ok(crate::session::SessionBroadcast::Persisted { event, .. }) => {
-                    let _ = out_tx
-                        .send(NodeToServerMsg::EventBatchPush { events: vec![event] })
-                        .await;
+                    fxg_protocol::discard_with!(
+                        out_tx
+                            .send(NodeToServerMsg::EventBatchPush { events: vec![event] })
+                            .await,
+                        "push a persisted event to the central server"
+                    );
                 }
                 Ok(crate::session::SessionBroadcast::StreamDelta { session_id, delta }) => {
-                    let _ = out_tx
-                        .send(NodeToServerMsg::LiveStreamDelta { session_id, delta })
-                        .await;
+                    fxg_protocol::discard_with!(
+                        out_tx
+                            .send(NodeToServerMsg::LiveStreamDelta { session_id, delta })
+                            .await,
+                        "push a live stream delta to the central server"
+                    );
                 }
                 // Ephemeral events (keystrokes etc.) are not synchronized
                 Ok(crate::session::SessionBroadcast::Ephemeral(_)) => {}
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
                     tracing::warn!(skipped, "session bus lagged; flushing outbox");
-                    let _ = crate::sync::push_outbox(&state, &out_tx).await;
+                    if let Err(err) = crate::sync::push_outbox(&state, &out_tx).await {
+                        tracing::warn!("failed to flush the outbox after the bus lagged: {err}");
+                    }
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
             },
@@ -224,10 +243,14 @@ pub async fn run_stdio(config: StdioConfig) -> Result<(), NodeError> {
             tracing::warn!("failed to mark node offline: {err}");
         }
     }
-    let _ = ipc_shutdown_tx.send(true);
+    fxg_protocol::discard_with!(ipc_shutdown_tx.send(true), "request local IPC shutdown");
     drop(out_tx);
-    let _ = tokio::time::timeout(FLUSH_TIMEOUT, writer).await;
-    let _ = ipc_task.await;
+    if let Err(err) = tokio::time::timeout(FLUSH_TIMEOUT, writer).await {
+        tracing::warn!("timed out waiting for stdout to flush: {err}");
+    }
+    if let Err(err) = ipc_task.await {
+        tracing::warn!("local IPC task terminated unexpectedly: {err}");
+    }
     tracing::info!("fxg daemon stopped (stdio transport)");
     Ok(())
 }

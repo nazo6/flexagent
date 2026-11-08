@@ -1541,16 +1541,18 @@ impl ClientApiBackend for ServerState {
     }
 
     async fn pty_disconnect(&self, pty_id: &str) {
-        let _ = self
-            .inner
-            .hub
-            .pty_send(
-                pty_id,
-                ServerToNodeMsg::PtyKill {
-                    pty_id: pty_id.to_owned(),
-                },
-            )
-            .await;
+        fxg_protocol::discard_with!(
+            self.inner
+                .hub
+                .pty_send(
+                    pty_id,
+                    ServerToNodeMsg::PtyKill {
+                        pty_id: pty_id.to_owned(),
+                    },
+                )
+                .await,
+            "notify the node that a pty websocket disconnected"
+        );
         self.inner.hub.remove_pty(pty_id).await;
     }
 }

@@ -593,7 +593,10 @@ pub(crate) async fn handle_server_message(
                     error: Some(err.to_string()),
                 },
             };
-            let _ = out.send(message).await;
+            fxg_protocol::discard_with!(
+                out.send(message).await,
+                "send a message to a channel that may be closed"
+            );
         }
         ServerToNodeMsg::ResumeSession {
             command_id,
@@ -634,7 +637,10 @@ pub(crate) async fn handle_server_message(
                     error: Some(err.to_string()),
                 },
             };
-            let _ = out.send(message).await;
+            fxg_protocol::discard_with!(
+                out.send(message).await,
+                "send a message to a channel that may be closed"
+            );
         }
         ServerToNodeMsg::ArchiveSession {
             command_id,
@@ -665,7 +671,10 @@ pub(crate) async fn handle_server_message(
                     error: Some(err.to_string()),
                 },
             };
-            let _ = out.send(message).await;
+            fxg_protocol::discard_with!(
+                out.send(message).await,
+                "send a message to a channel that may be closed"
+            );
         }
         ServerToNodeMsg::DeleteSession {
             command_id,
@@ -692,7 +701,10 @@ pub(crate) async fn handle_server_message(
                     error: Some(err.to_string()),
                 },
             };
-            let _ = out.send(message).await;
+            fxg_protocol::discard_with!(
+                out.send(message).await,
+                "send a message to a channel that may be closed"
+            );
         }
         ServerToNodeMsg::PtySpawn {
             pty_id,
@@ -755,7 +767,10 @@ pub(crate) async fn handle_server_message(
                     error: Some(err.to_string()),
                 },
             };
-            let _ = out.send(response).await;
+            fxg_protocol::discard_with!(
+                out.send(response).await,
+                "send a message to a channel that may be closed"
+            );
         }
         ServerToNodeMsg::ManageWorktree {
             command_id,
@@ -848,7 +863,10 @@ pub(crate) async fn handle_server_message(
             };
             // Report the worktree change to the hub (update of project_node_bindings)
             state.trigger_node_hello();
-            let _ = out.send(response).await;
+            fxg_protocol::discard_with!(
+                out.send(response).await,
+                "send a message to a channel that may be closed"
+            );
         }
         ServerToNodeMsg::ProjectScan { request_id, dir } => {
             let result: Result<fxg_protocol::client_api::ProjectScanResponse, NodeError> =
@@ -889,7 +907,10 @@ pub(crate) async fn handle_server_message(
                     error: Some(err.to_string()),
                 },
             };
-            let _ = out.send(response).await;
+            fxg_protocol::discard_with!(
+                out.send(response).await,
+                "send a message to a channel that may be closed"
+            );
         }
         ServerToNodeMsg::ProjectLink {
             request_id,
@@ -933,7 +954,10 @@ pub(crate) async fn handle_server_message(
                     error: Some(err.to_string()),
                 },
             };
-            let _ = out.send(response).await;
+            fxg_protocol::discard_with!(
+                out.send(response).await,
+                "send a message to a channel that may be closed"
+            );
         }
         ServerToNodeMsg::ListAgents { request_id } => {
             let response = match state.agents_catalog().await {
@@ -948,7 +972,10 @@ pub(crate) async fn handle_server_message(
                     error: Some(err.to_string()),
                 },
             };
-            let _ = out.send(response).await;
+            fxg_protocol::discard_with!(
+                out.send(response).await,
+                "send a message to a channel that may be closed"
+            );
         }
         ServerToNodeMsg::ManageAgent { request_id, action } => {
             let response = match state.manage_agent(&action).await {
@@ -979,7 +1006,10 @@ pub(crate) async fn handle_server_message(
                     error: Some(err.to_string()),
                 },
             };
-            let _ = out.send(response).await;
+            fxg_protocol::discard_with!(
+                out.send(response).await,
+                "send a message to a channel that may be closed"
+            );
         }
         ServerToNodeMsg::BrowseFs { request_id, path } => {
             let result = crate::fs_browse::browse_fs(path.as_deref());
@@ -995,7 +1025,10 @@ pub(crate) async fn handle_server_message(
                     error: Some(err.to_string()),
                 },
             };
-            let _ = out.send(response).await;
+            fxg_protocol::discard_with!(
+                out.send(response).await,
+                "send a message to a channel that may be closed"
+            );
         }
         ServerToNodeMsg::GitCredentialResponse {
             request_id,
@@ -1055,36 +1088,42 @@ async fn handle_remote_pty_spawn(
             node_id = state.node_id(),
             "remote pty spawn rejected by policy"
         );
-        let _ = out
-            .send(NodeToServerMsg::PtyError {
+        fxg_protocol::discard_with!(
+            out.send(NodeToServerMsg::PtyError {
                 pty_id,
                 code: "PTY_DISABLED".to_owned(),
                 message: "Remote PTY is disabled on this node by security policy".to_owned(),
             })
-            .await;
+            .await,
+            "send a message to the central server"
+        );
         return;
     }
 
     let session = match state.db().get_session(&session_id).await {
         Ok(Some(session)) => session,
         Ok(None) => {
-            let _ = out
-                .send(NodeToServerMsg::PtyError {
+            fxg_protocol::discard_with!(
+                out.send(NodeToServerMsg::PtyError {
                     pty_id,
                     code: "NOT_FOUND".to_owned(),
                     message: format!("session not found: {session_id}"),
                 })
-                .await;
+                .await,
+                "send a message to the central server"
+            );
             return;
         }
         Err(err) => {
-            let _ = out
-                .send(NodeToServerMsg::PtyError {
+            fxg_protocol::discard_with!(
+                out.send(NodeToServerMsg::PtyError {
                     pty_id,
                     code: "INTERNAL".to_owned(),
                     message: err.to_string(),
                 })
-                .await;
+                .await,
+                "send a message to the central server"
+            );
             return;
         }
     };
@@ -1096,13 +1135,15 @@ async fn handle_remote_pty_spawn(
     request.cols = cols;
     request.rows = rows;
     if let Err(err) = state.pty().spawn(request) {
-        let _ = out
-            .send(NodeToServerMsg::PtyError {
+        fxg_protocol::discard_with!(
+            out.send(NodeToServerMsg::PtyError {
                 pty_id,
                 code: "INTERNAL".to_owned(),
                 message: err.to_string(),
             })
-            .await;
+            .await,
+            "send a message to the central server"
+        );
         return;
     }
 
@@ -1119,18 +1160,20 @@ async fn handle_remote_pty_spawn(
     let events = match state.pty().subscribe(&pty_id) {
         Ok(events) => events,
         Err(err) => {
-            let _ = out
-                .send(NodeToServerMsg::PtyError {
+            fxg_protocol::discard_with!(
+                out.send(NodeToServerMsg::PtyError {
                     pty_id,
                     code: "INTERNAL".to_owned(),
                     message: err.to_string(),
                 })
-                .await;
+                .await,
+                "send a message to the central server"
+            );
             return;
         }
     };
     let out = out.clone();
-    tokio::spawn(async move {
+    fxg_protocol::spawn_guarded!("pty event forwarder", async move {
         let mut events = events;
         loop {
             match events.recv().await {
@@ -1144,9 +1187,11 @@ async fn handle_remote_pty_spawn(
                     }
                 }
                 Ok(fxg_pty::PtyEvent::Exit { exit_code, .. }) => {
-                    let _ = out
-                        .send(NodeToServerMsg::PtyExit { pty_id, exit_code })
-                        .await;
+                    fxg_protocol::discard_with!(
+                        out.send(NodeToServerMsg::PtyExit { pty_id, exit_code })
+                            .await,
+                        "send a message to the central server"
+                    );
                     break;
                 }
                 // Dropped output is acceptable (prefer showing the latest)
@@ -1206,14 +1251,16 @@ async fn drain_and_shutdown(
         }
     }
 
-    let _ = out
-        .send(NodeToServerMsg::DrainComplete {
+    fxg_protocol::discard_with!(
+        out.send(NodeToServerMsg::DrainComplete {
             node_id: state.node_id().to_owned(),
         })
-        .await;
+        .await,
+        "send a message to the central server"
+    );
 
     if let Some(shutdown) = ctx.shutdown {
-        let _ = shutdown.send(true);
+        fxg_protocol::discard_with!(shutdown.send(true), "request shutdown");
     } else {
         tracing::warn!("drain requested but no shutdown channel is attached");
     }
@@ -1247,7 +1294,13 @@ async fn upload_workspace_bundle(
     let chunks: Vec<&str> = encoded
         .as_bytes()
         .chunks(BUNDLE_CHUNK_B64_BYTES)
-        .map(|chunk| std::str::from_utf8(chunk).unwrap_or_default())
+        .filter_map(|chunk| match std::str::from_utf8(chunk) {
+            Ok(chunk) => Some(chunk),
+            Err(err) => {
+                tracing::error!("base64 chunk is not valid UTF-8: {err}");
+                None
+            }
+        })
         .collect();
     for chunk in chunks {
         let message = NodeToServerMsg::WorkspaceBundleUpload {
@@ -1281,5 +1334,8 @@ async fn send_command_result(
         error: result.error,
         session_id: result.session_id,
     };
-    let _ = out.send(message).await;
+    fxg_protocol::discard_with!(
+        out.send(message).await,
+        "send a message to a channel that may be closed"
+    );
 }

@@ -72,7 +72,10 @@ pub(crate) async fn handle_client_ws<B: ClientApiBackend>(backend: B, socket: We
                             let error = ServerWsMessage::Error {
                                 error: ErrorInfo::new(ErrorCode::SyncBacklog, message),
                             };
-                            let _ = send_ws_json(&mut sender, &error).await;
+                            fxg_protocol::discard_with!(
+                                send_ws_json(&mut sender, &error).await,
+                                "notify the client that replay failed"
+                            );
                             break;
                         }
                         subscribed = true;
@@ -182,7 +185,10 @@ pub(crate) async fn handle_client_ws<B: ClientApiBackend>(backend: B, socket: We
                         let error = ServerWsMessage::Error {
                             error: ErrorInfo::new(ErrorCode::SyncBacklog, message),
                         };
-                        let _ = send_ws_json(&mut sender, &error).await;
+                        fxg_protocol::discard_with!(
+                            send_ws_json(&mut sender, &error).await,
+                            "notify the client that replay failed"
+                        );
                         break;
                     }
                 }

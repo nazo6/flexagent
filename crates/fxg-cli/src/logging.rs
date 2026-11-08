@@ -174,8 +174,13 @@ pub fn init_logging(
 
     // Log file layer (ANSI color forcibly disabled)
     let file_layer = if let Some(ref path) = log_file_path {
-        if let Some(parent) = path.parent() {
-            let _ = std::fs::create_dir_all(parent);
+        if let Some(parent) = path.parent()
+            && let Err(err) = std::fs::create_dir_all(parent)
+        {
+            eprintln!(
+                "fxg: failed to create the log directory {}: {err}",
+                parent.display()
+            );
         }
         let file_name = path
             .file_name()
@@ -225,7 +230,10 @@ pub fn init_logging(
         .with(stderr_layer)
         .with(file_layer);
 
-    let _ = subscriber.try_init();
+    if let Err(err) = subscriber.try_init() {
+        // Another (test) subscriber may already be installed; logging still works.
+        eprintln!("fxg: tracing subscriber was not installed: {err}");
+    }
 
     log_file_path
 }

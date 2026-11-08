@@ -124,7 +124,7 @@ impl<P: WarmProcess> WarmPool<P> {
         // itself from being dropped (so Drop can dispose all remaining idle processes at once).
         let ttl = self.ttl;
         let pool = Arc::downgrade(self);
-        tokio::spawn(async move {
+        fxg_protocol::spawn_guarded!("warm pool ttl timer", async move {
             tokio::time::sleep(ttl).await;
             let Some(pool) = pool.upgrade() else {
                 return;

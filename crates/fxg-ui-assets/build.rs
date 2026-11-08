@@ -34,6 +34,8 @@ fn main() {
     {
         // Guarantee the directory exists for rust-embed even if the write fails
         println!("cargo:warning=failed to prepare ui/build placeholder: {err}");
-        let _ = std::fs::create_dir_all(&ui_build);
+        if let Err(retry_err) = std::fs::create_dir_all(&ui_build) {
+            println!("cargo:warning=failed to create ui/build: {retry_err}");
+        }
     }
 }

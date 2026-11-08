@@ -41,10 +41,14 @@ use crate::error::PtyError;
 /// (`which::which_in` honors `PATHEXT`).
 pub fn resolve_command(command: &str, cwd: impl AsRef<Path>) -> Result<PathBuf, PtyError> {
     let cwd = cwd.as_ref();
-    which::which_in(command, std::env::var_os("PATH"), cwd).map_err(|_| PtyError::CommandNotFound {
-        command: command.to_owned(),
-        cwd: cwd.to_path_buf(),
-    })
+    match which::which_in(command, std::env::var_os("PATH"), cwd) {
+        Ok(path) => Ok(path),
+        Err(err) => Err(PtyError::CommandNotFound {
+            command: command.to_owned(),
+            cwd: cwd.to_path_buf(),
+            reason: err.to_string(),
+        }),
+    }
 }
 
 /// Normalizes a path with `dunce::canonicalize`, which does not add the `\\?\`

@@ -812,7 +812,7 @@ impl ClientApiBackend for DaemonState {
     ) -> Result<broadcast::Receiver<PtyChannelEvent>, PtyChannelError> {
         let mut events = self.pty().subscribe(pty_id).map_err(map_pty_error)?;
         let (tx, rx) = broadcast::channel(PTY_CHANNEL_CAPACITY);
-        tokio::spawn(async move {
+        fxg_protocol::spawn_guarded!("pty subscriber forwarder", async move {
             loop {
                 match events.recv().await {
                     Ok(fxg_pty::PtyEvent::Output { data, .. }) => {
@@ -821,7 +821,10 @@ impl ClientApiBackend for DaemonState {
                         }
                     }
                     Ok(fxg_pty::PtyEvent::Exit { exit_code, .. }) => {
-                        let _ = tx.send(PtyChannelEvent::Exit { exit_code });
+                        fxg_protocol::discard_with!(
+                            tx.send(PtyChannelEvent::Exit { exit_code }),
+                            "broadcast a pty event"
+                        );
                         break;
                     }
                     Err(broadcast::error::RecvError::Lagged(skipped)) => {
@@ -850,7 +853,7 @@ impl ClientApiBackend for DaemonState {
     }
 
     async fn pty_disconnect(&self, pty_id: &str) {
-        let _ = self.pty().kill(pty_id);
+        fxg_protocol::discard_with!(self.pty().kill(pty_id), "kill the pty terminal");
     }
 }
 

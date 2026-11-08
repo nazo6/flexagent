@@ -31,7 +31,9 @@ pub async fn serve(
         app.into_make_service_with_connect_info::<SocketAddr>(),
     )
     .with_graceful_shutdown(async move {
-        let _ = shutdown.changed().await;
+        if let Err(err) = shutdown.changed().await {
+            tracing::debug!("shutdown sender dropped; stopping local http server: {err}");
+        }
     });
     tracing::info!(addr = %http_addr, "local http server listening");
     if let Err(err) = server.await {
@@ -49,6 +51,19 @@ pub(crate) fn router(daemon: DaemonState, http_addr: SocketAddr) -> Router {
 
 #[cfg(test)]
 mod tests {
+
+    fn set_cookie(response: &axum::response::Response) -> &str {
+        match response
+            .headers()
+            .get(header::SET_COOKIE)
+            .expect("Set-Cookie")
+            .to_str()
+        {
+            Ok(value) => value,
+            Err(_) => panic!("Set-Cookie is not ASCII"),
+        }
+    }
+
     use super::*;
     use crate::daemon::{DaemonConfig, NodeDaemon};
     use axum::body::Body;
@@ -213,11 +228,7 @@ mod tests {
             .await
             .expect("response");
         assert_eq!(response.status(), StatusCode::NO_CONTENT);
-        let cookie = response
-            .headers()
-            .get(header::SET_COOKIE)
-            .and_then(|value| value.to_str().ok())
-            .expect("Set-Cookie");
+        let cookie = set_cookie(&response);
         assert!(cookie.contains(&format!("fxg_session={token}")), "{cookie}");
         assert!(cookie.contains("HttpOnly"), "{cookie}");
         assert!(cookie.contains("SameSite=Strict"), "{cookie}");
@@ -242,11 +253,7 @@ mod tests {
             .await
             .expect("response");
         assert_eq!(response.status(), StatusCode::NO_CONTENT);
-        let cookie = response
-            .headers()
-            .get(header::SET_COOKIE)
-            .and_then(|value| value.to_str().ok())
-            .expect("Set-Cookie");
+        let cookie = set_cookie(&response);
         assert!(cookie.contains("fxg_session=;"), "{cookie}");
         assert!(cookie.contains("Max-Age=0"), "{cookie}");
 

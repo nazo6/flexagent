@@ -15,16 +15,21 @@ pub enum PtyError {
         source: std::io::Error,
     },
     /// The command cannot be resolved from `PATH`
-    #[error("command not found: {command} (cwd: {cwd})")]
+    #[error("command not found: {command} (cwd: {cwd}; {reason})")]
     CommandNotFound {
         /// Command name to resolve
         command: String,
         /// Directory used as the search base
         cwd: PathBuf,
+        /// Resolver error (search paths and the underlying reason)
+        reason: String,
     },
     /// PTY creation or read/write error (portable-pty)
     #[error("pty error: {0}")]
     Pty(String),
+    /// The PTY input writer has stopped, so the session can no longer receive input
+    #[error("pty input is closed: {0}")]
+    InputClosed(String),
     /// No PTY with the given ID exists
     #[error("pty session not found: {0}")]
     NotFound(String),

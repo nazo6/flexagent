@@ -28,8 +28,10 @@ impl TrayHandle {
     pub fn close(mut self) {
         if self.join.is_some() {
             (self.notifier)(TrayUpdate::Close);
-            if let Some(join) = self.join.take() {
-                let _ = join.join();
+            if let Some(join) = self.join.take()
+                && let Err(err) = join.join()
+            {
+                tracing::warn!("tray thread panicked: {err:?}");
             }
         }
     }
@@ -58,7 +60,10 @@ pub fn spawn(handle: &tokio::runtime::Handle, ctx: TrayContext) -> Result<TrayHa
             let mut ui = match TrayUi::new(&loop_ctx, action_tx) {
                 Ok(ui) => ui,
                 Err(err) => {
-                    let _ = ready_tx.send(Err(format!("{err:#}")));
+                    fxg_protocol::discard_with!(
+                        ready_tx.send(Err(format!("{err:#}"))),
+                        "report the tray initialization failure"
+                    );
                     return;
                 }
             };
@@ -78,17 +83,21 @@ pub fn spawn(handle: &tokio::runtime::Handle, ctx: TrayContext) -> Result<TrayHa
     match ready_rx.recv() {
         Ok(Ok(())) => {}
         Ok(Err(err)) => {
-            let _ = join.join();
+            if let Err(join_err) = join.join() {
+                tracing::warn!("tray thread panicked: {join_err:?}");
+            }
             bail!("{err}");
         }
         Err(_) => {
-            let _ = join.join();
+            if let Err(join_err) = join.join() {
+                tracing::warn!("tray thread panicked: {join_err:?}");
+            }
             bail!("the tray thread exited before initializing");
         }
     }
 
     let notifier: Notifier = Arc::new(move |update: TrayUpdate| {
-        let _ = update_tx.send(update);
+        fxg_protocol::discard_with!(update_tx.send(update), "notify the tray thread");
     });
     spawn_controller(handle, ctx, notifier.clone(), action_rx);
     Ok(TrayHandle {

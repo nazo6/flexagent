@@ -209,15 +209,16 @@ impl ProcessHandle {
     ) -> anyhow::Result<(AcpSessionHandle, bool)> {
         let commands = mpsc::unbounded_channel();
         let (ready_tx, ready_rx) = oneshot::channel();
-        self.control_tx
-            .send(ProcessCommand::NewSession {
-                params,
-                events,
-                lease,
-                commands,
-                ready: ready_tx,
-            })
-            .map_err(|_| anyhow!("acp agent process is no longer running"))?;
+        match self.control_tx.send(ProcessCommand::NewSession {
+            params,
+            events,
+            lease,
+            commands,
+            ready: ready_tx,
+        }) {
+            Ok(()) => {}
+            Err(_) => return Err(anyhow!("acp agent process is no longer running")),
+        }
         ready_rx
             .await
             .context("acp agent process ended before the session became ready")?
@@ -225,10 +226,15 @@ impl ProcessHandle {
 
     /// Terminates the process and waits for teardown to finish (immediate if already done).
     async fn dispose_process(&self) {
-        let _ = self.control_tx.send(ProcessCommand::Dispose);
+        fxg_protocol::discard_with!(
+            self.control_tx.send(ProcessCommand::Dispose),
+            "request process disposal"
+        );
         let join = self.join.lock().expect("process join poisoned").take();
-        if let Some(join) = join {
-            let _ = join.await;
+        if let Some(join) = join
+            && let Err(err) = join.await
+        {
+            tracing::warn!("acp process task terminated unexpectedly: {err}");
         }
     }
 }
@@ -337,9 +343,12 @@ impl AgentDriver for AcpDriver {
             Ok(started) => Ok(started),
             Err(err) => {
                 // Record the start failure as an event (the session moves to the error state)
-                let _ = event_tx.send(DriverEvent::Failed {
-                    message: err.to_string(),
-                });
+                fxg_protocol::discard_with!(
+                    event_tx.send(DriverEvent::Failed {
+                        message: err.to_string(),
+                    }),
+                    "notify event subscribers"
+                );
                 Err(err)
             }
         }
@@ -495,9 +504,10 @@ struct AcpSessionHandle {
 #[async_trait]
 impl ActiveSessionHandle for AcpSessionHandle {
     async fn send_prompt(&self, text: String) -> anyhow::Result<()> {
-        self.commands
-            .send(AcpCommand::Prompt(text))
-            .map_err(|_| anyhow!("acp session is no longer running"))
+        match self.commands.send(AcpCommand::Prompt(text)) {
+            Ok(()) => Ok(()),
+            Err(_) => Err(anyhow!("acp session is no longer running")),
+        }
     }
 
     async fn respond_permission(
@@ -520,9 +530,10 @@ impl ActiveSessionHandle for AcpSessionHandle {
         } else {
             RequestPermissionOutcome::Selected(SelectedPermissionOutcome::new(selected_option_id))
         };
-        sender
-            .send(outcome)
-            .map_err(|_| anyhow!("permission resolver dropped: {request_id}"))
+        if sender.send(outcome).is_err() {
+            return Err(anyhow!("permission resolver dropped: {request_id}"));
+        }
+        Ok(())
     }
 
     async fn respond_elicitation(
@@ -569,9 +580,10 @@ impl ActiveSessionHandle for AcpSessionHandle {
             .remove(&elicitation_id)
             .map(|pending| pending.sender)
             .ok_or_else(|| anyhow!("unknown or already resolved elicitation: {elicitation_id}"))?;
-        sender
-            .send(outcome)
-            .map_err(|_| anyhow!("elicitation resolver dropped: {elicitation_id}"))
+        if sender.send(outcome).is_err() {
+            return Err(anyhow!("elicitation resolver dropped: {elicitation_id}"));
+        }
+        Ok(())
     }
 
     async fn set_mode(&self, mode_id: String) -> anyhow::Result<()> {
@@ -613,10 +625,13 @@ impl ActiveSessionHandle for AcpSessionHandle {
         let events = self.events.lock().expect("session events poisoned").clone();
         cancel_pending_elicitations(&self.elicitations, events.as_ref());
         if let Some(events) = events.as_ref() {
-            let _ = events.send(DriverEvent::Event(UnifiedEventPayload::StatusChanged {
-                status: fxg_protocol::common::SessionStatus::Running,
-                error_message: None,
-            }));
+            fxg_protocol::discard_with!(
+                events.send(DriverEvent::Event(UnifiedEventPayload::StatusChanged {
+                    status: fxg_protocol::common::SessionStatus::Running,
+                    error_message: None,
+                })),
+                "notify event subscribers"
+            );
         }
         Ok(())
     }
@@ -625,14 +640,20 @@ impl ActiveSessionHandle for AcpSessionHandle {
         // Close the session and return the process to the reuse pool (disposal is
         // [`Self::dispose`])
         let session_end = self.lease.take_session_end_receiver();
-        let _ = self.commands.send(AcpCommand::Shutdown);
+        fxg_protocol::discard_with!(
+            self.commands.send(AcpCommand::Shutdown),
+            "send a command to the ACP session"
+        );
         if let Some(session_end) = session_end {
             // Wait for the turn loop to end (returns Err immediately if the loop never
             // started or failed)
-            let _ = session_end.await;
+            fxg_protocol::discard_with!(session_end.await, "wait for the ACP turn loop to end");
         }
         for terminal_id in self.pty.list() {
-            let _ = self.pty.kill(&terminal_id.pty_id);
+            fxg_protocol::discard_with!(
+                self.pty.kill(&terminal_id.pty_id),
+                "kill the pty terminal on session shutdown"
+            );
         }
         // Release the event sender (so the session manager's pump detects that the
         // driver ended and removes the session from the active list)
@@ -652,7 +673,10 @@ impl ActiveSessionHandle for AcpSessionHandle {
 fn cancel_pending_permissions(permissions: &PermissionRegistry) {
     let mut registry = permissions.lock().expect("permission registry poisoned");
     for (_, sender) in registry.drain() {
-        let _ = sender.send(RequestPermissionOutcome::Cancelled);
+        fxg_protocol::discard_with!(
+            sender.send(RequestPermissionOutcome::Cancelled),
+            "discard a non-critical result"
+        );
     }
 }
 
@@ -668,16 +692,24 @@ fn cancel_pending_elicitations(
 ) {
     let mut registry = elicitations.lock().expect("elicitation registry poisoned");
     for (elicitation_id, pending) in registry.drain() {
-        let _ = pending.sender.send(ElicitationOutcome::Cancel);
+        if pending.sender.send(ElicitationOutcome::Cancel).is_err() {
+            tracing::debug!(
+                elicitation_id = %elicitation_id,
+                "elicitation waiter dropped before the cancel was delivered"
+            );
+        }
         if let Some(events) = events {
-            let _ = events.send(DriverEvent::Event(
-                UnifiedEventPayload::ElicitationResolved {
-                    elicitation_id,
-                    action: fxg_protocol::common::ElicitationAction::Cancel,
-                    content: serde_json::Value::Null,
-                    resolved_by: "system".to_owned(),
-                },
-            ));
+            fxg_protocol::discard_with!(
+                events.send(DriverEvent::Event(
+                    UnifiedEventPayload::ElicitationResolved {
+                        elicitation_id,
+                        action: fxg_protocol::common::ElicitationAction::Cancel,
+                        content: serde_json::Value::Null,
+                        resolved_by: "system".to_owned(),
+                    },
+                )),
+                "notify event subscribers"
+            );
         }
     }
 }
@@ -746,11 +778,14 @@ async fn run_acp_process(params: AcpProcessTaskParams) -> Result<(), agent_clien
                         .clone()
                         .unwrap_or_else(|| request.tool_call.tool_call_id.to_string());
 
-                    let _ = events.send(DriverEvent::Event(UnifiedEventPayload::StatusChanged {
-                        status: fxg_protocol::common::SessionStatus::WaitingPermission,
-                        error_message: None,
-                    }));
-                    let _ =
+                    fxg_protocol::discard_with!(
+                        events.send(DriverEvent::Event(UnifiedEventPayload::StatusChanged {
+                            status: fxg_protocol::common::SessionStatus::WaitingPermission,
+                            error_message: None,
+                        })),
+                        "notify event subscribers"
+                    );
+                    fxg_protocol::discard_with!(
                         events.send(DriverEvent::Event(UnifiedEventPayload::PermissionRequest {
                             request_id: request_id.clone(),
                             tool_name: tool.name.clone().unwrap_or_else(|| "tool".to_owned()),
@@ -758,7 +793,9 @@ async fn run_acp_process(params: AcpProcessTaskParams) -> Result<(), agent_clien
                             options,
                             details: serde_json::to_value(&request.tool_call)
                                 .unwrap_or(serde_json::Value::Null),
-                        }));
+                        })),
+                        "notify event subscribers"
+                    );
 
                     let (decision_tx, decision_rx) = oneshot::channel();
                     permissions
@@ -770,12 +807,15 @@ async fn run_acp_process(params: AcpProcessTaskParams) -> Result<(), agent_clien
                         let outcome = decision_rx
                             .await
                             .unwrap_or(RequestPermissionOutcome::Cancelled);
-                        let _ = events_for_task.send(DriverEvent::Event(
-                            UnifiedEventPayload::StatusChanged {
-                                status: fxg_protocol::common::SessionStatus::Running,
-                                error_message: None,
-                            },
-                        ));
+                        fxg_protocol::discard_with!(
+                            events_for_task.send(DriverEvent::Event(
+                                UnifiedEventPayload::StatusChanged {
+                                    status: fxg_protocol::common::SessionStatus::Running,
+                                    error_message: None,
+                                },
+                            )),
+                            "notify event subscribers"
+                        );
                         responder.respond(RequestPermissionResponse::new(outcome))
                     })?;
                     Ok(())
@@ -837,17 +877,20 @@ async fn run_acp_process(params: AcpProcessTaskParams) -> Result<(), agent_clien
                         Ok(()) => {
                             let path_string = path.to_string_lossy().into_owned();
                             let diff = build_file_diff(&path_string, &old_text, &request.content);
-                            let _ = context.events.send(DriverEvent::Event(
-                                UnifiedEventPayload::ToolCall {
-                                    tool_call_id: format!("fs-{}", uuid_v7()),
-                                    title: format!("write_text_file: {path_string}"),
-                                    kind: "edit".to_owned(),
-                                    status: "completed".to_owned(),
-                                    locations: vec![path_string],
-                                    diff: Some(diff),
-                                    raw_output: None,
-                                },
-                            ));
+                            fxg_protocol::discard_with!(
+                                context.events.send(DriverEvent::Event(
+                                    UnifiedEventPayload::ToolCall {
+                                        tool_call_id: format!("fs-{}", uuid_v7()),
+                                        title: format!("write_text_file: {path_string}"),
+                                        kind: "edit".to_owned(),
+                                        status: "completed".to_owned(),
+                                        locations: vec![path_string],
+                                        diff: Some(diff),
+                                        raw_output: None,
+                                    },
+                                )),
+                                "notify event subscribers"
+                            );
                             responder.respond(WriteTextFileResponse::new())
                         }
                         Err(err) => responder.respond_with_internal_error(format!(
@@ -916,7 +959,10 @@ async fn run_acp_process(params: AcpProcessTaskParams) -> Result<(), agent_clien
                     cx.spawn(async move {
                         // Return the current value if already exited; otherwise wait for a change
                         if exit_rx.borrow().is_none() {
-                            let _ = exit_rx.changed().await;
+                            fxg_protocol::discard_with!(
+                                exit_rx.changed().await,
+                                "wait for a terminal exit change"
+                            );
                         }
                         let status = exit_status_of(*exit_rx.borrow());
                         responder.respond(WaitForTerminalExitResponse::new(status))
@@ -934,7 +980,10 @@ async fn run_acp_process(params: AcpProcessTaskParams) -> Result<(), agent_clien
                     .get(&request.terminal_id.to_string())
                 {
                     Ok((pty_id, ..)) => {
-                        let _ = pty.kill(&pty_id);
+                        fxg_protocol::discard_with!(
+                            pty.kill(&pty_id),
+                            "kill the pty terminal on a kill-terminal request"
+                        );
                         responder.respond(KillTerminalResponse::new())
                     }
                     Err(err) => responder.respond_with_internal_error(err),
@@ -948,7 +997,10 @@ async fn run_acp_process(params: AcpProcessTaskParams) -> Result<(), agent_clien
                 let terminals = Arc::clone(&terminals);
                 async move |request: ReleaseTerminalRequest, responder, _cx| {
                     if let Some(state) = terminals.remove(&request.terminal_id.to_string()) {
-                        let _ = pty.kill(&state.pty_id);
+                        fxg_protocol::discard_with!(
+                            pty.kill(&state.pty_id),
+                            "kill the pty terminal on a release-terminal request"
+                        );
                     }
                     responder.respond(ReleaseTerminalResponse::new())
                 }
@@ -992,19 +1044,25 @@ async fn run_acp_process(params: AcpProcessTaskParams) -> Result<(), agent_clien
                     // JSON-RPC request id as the elicitation id (same as approvals).
                     let elicitation_id = responder.id().to_string();
                     let events = context.events.clone();
-                    let _ = events.send(DriverEvent::Event(UnifiedEventPayload::StatusChanged {
-                        status: fxg_protocol::common::SessionStatus::WaitingInput,
-                        error_message: None,
-                    }));
-                    let _ = events.send(DriverEvent::Event(
-                        UnifiedEventPayload::ElicitationRequest {
-                            elicitation_id: elicitation_id.clone(),
-                            message: request.message.clone(),
-                            mode: "form".to_owned(),
-                            requested_schema: schema.clone(),
-                            tool_call_id: scope.tool_call_id.as_ref().map(|id| id.to_string()),
-                        },
-                    ));
+                    fxg_protocol::discard_with!(
+                        events.send(DriverEvent::Event(UnifiedEventPayload::StatusChanged {
+                            status: fxg_protocol::common::SessionStatus::WaitingInput,
+                            error_message: None,
+                        })),
+                        "notify event subscribers"
+                    );
+                    fxg_protocol::discard_with!(
+                        events.send(DriverEvent::Event(
+                            UnifiedEventPayload::ElicitationRequest {
+                                elicitation_id: elicitation_id.clone(),
+                                message: request.message.clone(),
+                                mode: "form".to_owned(),
+                                requested_schema: schema.clone(),
+                                tool_call_id: scope.tool_call_id.as_ref().map(|id| id.to_string()),
+                            },
+                        )),
+                        "notify event subscribers"
+                    );
 
                     let (decision_tx, decision_rx) = oneshot::channel();
                     elicitations
@@ -1020,12 +1078,15 @@ async fn run_acp_process(params: AcpProcessTaskParams) -> Result<(), agent_clien
                     let events_for_task = context.events.clone();
                     cx.spawn(async move {
                         let outcome = decision_rx.await.unwrap_or(ElicitationOutcome::Cancel);
-                        let _ = events_for_task.send(DriverEvent::Event(
-                            UnifiedEventPayload::StatusChanged {
-                                status: fxg_protocol::common::SessionStatus::Running,
-                                error_message: None,
-                            },
-                        ));
+                        fxg_protocol::discard_with!(
+                            events_for_task.send(DriverEvent::Event(
+                                UnifiedEventPayload::StatusChanged {
+                                    status: fxg_protocol::common::SessionStatus::Running,
+                                    error_message: None,
+                                },
+                            )),
+                            "notify event subscribers"
+                        );
                         let response = match outcome {
                             ElicitationOutcome::Accept(content) => {
                                 CreateElicitationResponse::new(AcpElicitationAction::Accept(
@@ -1095,14 +1156,17 @@ async fn run_acp_process(params: AcpProcessTaskParams) -> Result<(), agent_clien
                 Ok(initialize) => initialize,
                 Err(err) => {
                     if let Some(tx) = ready_tx.take() {
-                        let _ = tx.send(Err(anyhow!("acp initialize failed: {err}")));
+                        fxg_protocol::discard_with!(
+                            tx.send(Err(anyhow!("acp initialize failed: {err}"))),
+                            "discard a non-critical result"
+                        );
                     }
                     return Err(err);
                 }
             };
             let agent_capabilities = initialize.agent_capabilities.clone();
             if let Some(tx) = ready_tx.take() {
-                let _ = tx.send(Ok(()));
+                fxg_protocol::discard_with!(tx.send(Ok(())), "discard a non-critical result");
             }
 
             // 2) Session processing loop. Handles one session at a time per process,
@@ -1127,7 +1191,13 @@ async fn run_acp_process(params: AcpProcessTaskParams) -> Result<(), agent_clien
                     {
                         Ok(built) => built,
                         Err(err) => {
-                            let _ = ready.send(Err(err));
+                            if let Some(tx) = ready_tx.take()
+                                && tx.send(Err(err)).is_err()
+                            {
+                                tracing::debug!(
+                                    "session waiter dropped before the start failure was reported"
+                                );
+                            }
                             lease.mark_dispose();
                             break;
                         }
@@ -1143,7 +1213,9 @@ async fn run_acp_process(params: AcpProcessTaskParams) -> Result<(), agent_clien
                     pty: Arc::clone(&pty),
                     lease: Arc::clone(&lease),
                 };
-                let _ = ready.send(Ok((handle, context_restored)));
+                if ready.send(Ok((handle, context_restored))).is_err() {
+                    tracing::debug!("session waiter dropped before the session became ready");
+                }
 
                 // 3) Turn loop (serializes prompt sends with update reads)
                 let outcome = serve_session(session, cmd_rx, &events, capabilities_state).await;
@@ -1152,27 +1224,32 @@ async fn run_acp_process(params: AcpProcessTaskParams) -> Result<(), agent_clien
                     .expect("session contexts poisoned")
                     .remove(&acp_session_id.to_string());
                 if let Some(tx) = session_end_tx {
-                    let _ = tx.send(());
+                    fxg_protocol::discard_with!(tx.send(()), "discard a non-critical result");
                 }
                 // Close unresolved approvals and questions tied to the session with cancel
                 cancel_pending_permissions(&permissions);
                 cancel_pending_elicitations(&elicitations, Some(&events));
                 match outcome {
                     ServeOutcome::Closed => {
-                        let _ =
+                        fxg_protocol::discard_with!(
                             events.send(DriverEvent::Event(UnifiedEventPayload::StatusChanged {
                                 status: fxg_protocol::common::SessionStatus::Stopped,
                                 error_message: None,
-                            }));
+                            })),
+                            "notify event subscribers"
+                        );
                     }
                     ServeOutcome::Fatal(err) => {
                         tracing::warn!(
                             session_id = %params.session_id,
                             "acp session ended: {err:#}"
                         );
-                        let _ = events.send(DriverEvent::Failed {
-                            message: err.to_string(),
-                        });
+                        fxg_protocol::discard_with!(
+                            events.send(DriverEvent::Failed {
+                                message: err.to_string(),
+                            }),
+                            "notify event subscribers"
+                        );
                         // Shut the process down on connection failure (do not return it
                         // to the pool)
                         lease.mark_dispose();
@@ -1248,9 +1325,12 @@ async fn build_session(
             events: events.clone(),
         },
     );
-    let _ = events.send(DriverEvent::Event(UnifiedEventPayload::SessionAgentBound {
-        agent_session_id: acp_session_id.to_string(),
-    }));
+    fxg_protocol::discard_with!(
+        events.send(DriverEvent::Event(UnifiedEventPayload::SessionAgentBound {
+            agent_session_id: acp_session_id.to_string(),
+        })),
+        "notify event subscribers"
+    );
 
     // Apply the initial mode
     if let Some(mode_id) = params.initial_mode.as_ref()
@@ -1283,12 +1363,18 @@ async fn build_session(
         || !config_options.is_empty()
         || current_mode.is_some()
     {
-        let _ = events.send(DriverEvent::Event(capabilities_state.to_payload()));
+        fxg_protocol::discard_with!(
+            events.send(DriverEvent::Event(capabilities_state.to_payload())),
+            "notify event subscribers"
+        );
     }
-    let _ = events.send(DriverEvent::Event(UnifiedEventPayload::StatusChanged {
-        status: fxg_protocol::common::SessionStatus::Idle,
-        error_message: None,
-    }));
+    fxg_protocol::discard_with!(
+        events.send(DriverEvent::Event(UnifiedEventPayload::StatusChanged {
+            status: fxg_protocol::common::SessionStatus::Idle,
+            error_message: None,
+        })),
+        "notify event subscribers"
+    );
 
     Ok((
         session,
@@ -1310,10 +1396,13 @@ async fn serve_session(
         match command {
             AcpCommand::Prompt(text) => {
                 accumulator.reset();
-                let _ = events.send(DriverEvent::Event(UnifiedEventPayload::StatusChanged {
-                    status: fxg_protocol::common::SessionStatus::Running,
-                    error_message: None,
-                }));
+                fxg_protocol::discard_with!(
+                    events.send(DriverEvent::Event(UnifiedEventPayload::StatusChanged {
+                        status: fxg_protocol::common::SessionStatus::Running,
+                        error_message: None,
+                    })),
+                    "notify event subscribers"
+                );
                 if let Err(err) = session.send_prompt(text) {
                     return ServeOutcome::Fatal(err.into());
                 }
@@ -1321,34 +1410,46 @@ async fn serve_session(
                     match session.read_update().await {
                         Ok(SessionMessage::PromptResponse(response)) => {
                             for payload in accumulator.finish_all() {
-                                let _ = events.send(DriverEvent::Event(payload));
+                                fxg_protocol::discard_with!(
+                                    events.send(DriverEvent::Event(payload)),
+                                    "notify event subscribers"
+                                );
                             }
                             match response {
                                 Ok(resp) => {
                                     let reason = resp.stop_reason;
                                     tracing::debug!(?reason, "acp turn finished");
                                     if let Some(payload) = turn_ended_event(reason) {
-                                        let _ = events.send(DriverEvent::Event(payload));
+                                        fxg_protocol::discard_with!(
+                                            events.send(DriverEvent::Event(payload)),
+                                            "notify event subscribers"
+                                        );
                                     }
                                 }
                                 Err(err) => {
                                     let message = format!("agent turn failed: {err}");
                                     tracing::warn!("{message}");
-                                    let _ = events.send(DriverEvent::Event(
-                                        UnifiedEventPayload::StatusChanged {
-                                            status: fxg_protocol::common::SessionStatus::Error,
-                                            error_message: Some(message),
-                                        },
-                                    ));
+                                    fxg_protocol::discard_with!(
+                                        events.send(DriverEvent::Event(
+                                            UnifiedEventPayload::StatusChanged {
+                                                status: fxg_protocol::common::SessionStatus::Error,
+                                                error_message: Some(message),
+                                            },
+                                        )),
+                                        "notify event subscribers"
+                                    );
                                     break;
                                 }
                             }
-                            let _ = events.send(DriverEvent::Event(
-                                UnifiedEventPayload::StatusChanged {
-                                    status: fxg_protocol::common::SessionStatus::Idle,
-                                    error_message: None,
-                                },
-                            ));
+                            fxg_protocol::discard_with!(
+                                events.send(DriverEvent::Event(
+                                    UnifiedEventPayload::StatusChanged {
+                                        status: fxg_protocol::common::SessionStatus::Idle,
+                                        error_message: None,
+                                    },
+                                )),
+                                "notify event subscribers"
+                            );
                             break;
                         }
                         Ok(SessionMessage::Message(dispatch)) => {
@@ -1359,7 +1460,10 @@ async fn serve_session(
                                 .if_notification(async move |notification: SessionNotification| {
                                     for event in map_session_update(notification.update, acc, caps)
                                     {
-                                        let _ = ev.send(event);
+                                        fxg_protocol::discard_with!(
+                                            ev.send(event),
+                                            "notify event subscribers"
+                                        );
                                     }
                                     Ok(())
                                 })
@@ -2148,7 +2252,7 @@ async fn create_terminal(
             let events_for_task = events.clone();
             let command_for_task = command_line.clone();
             let terminal_id_for_task = terminal_id.clone();
-            tokio::spawn(async move {
+            fxg_protocol::spawn_guarded!("terminal output collector", async move {
                 loop {
                     match receiver.recv().await {
                         Ok(fxg_pty::PtyEvent::Output { data, .. }) => {
@@ -2163,26 +2267,35 @@ async fn create_terminal(
                                     buffer.drain(..excess);
                                 }
                             }
-                            let _ = events_for_task.send(DriverEvent::Delta(
-                                StreamDeltaPayload::TerminalOutputDelta {
-                                    terminal_id: terminal_id_for_task.clone(),
-                                    data_b64: base64_encode(&data),
-                                },
-                            ));
+                            fxg_protocol::discard_with!(
+                                events_for_task.send(DriverEvent::Delta(
+                                    StreamDeltaPayload::TerminalOutputDelta {
+                                        terminal_id: terminal_id_for_task.clone(),
+                                        data_b64: base64_encode(&data),
+                                    },
+                                )),
+                                "notify event subscribers"
+                            );
                         }
                         Ok(fxg_pty::PtyEvent::Exit { exit_code, .. }) => {
                             let data = std::mem::take(
                                 &mut *output_for_task.lock().expect("terminal output poisoned"),
                             );
-                            let _ = events_for_task.send(DriverEvent::Event(
-                                UnifiedEventPayload::TerminalOutput {
-                                    terminal_id: terminal_id_for_task.clone(),
-                                    command: command_for_task.clone(),
-                                    data_b64: base64_encode(&data),
-                                    exit_code,
-                                },
-                            ));
-                            let _ = exit_tx.send(exit_code);
+                            fxg_protocol::discard_with!(
+                                events_for_task.send(DriverEvent::Event(
+                                    UnifiedEventPayload::TerminalOutput {
+                                        terminal_id: terminal_id_for_task.clone(),
+                                        command: command_for_task.clone(),
+                                        data_b64: base64_encode(&data),
+                                        exit_code,
+                                    },
+                                )),
+                                "notify event subscribers"
+                            );
+                            fxg_protocol::discard_with!(
+                                exit_tx.send(exit_code),
+                                "discard a non-critical result"
+                            );
                             break;
                         }
                         Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
@@ -2214,7 +2327,9 @@ async fn create_terminal(
 /// Builds an ACP `TerminalExitStatus` from an exit code.
 fn exit_status_of(code: Option<i32>) -> TerminalExitStatus {
     let mut status = TerminalExitStatus::new();
-    if let Some(code) = code.and_then(|code| u32::try_from(code).ok()) {
+    if let Some(code) = code
+        && let Ok(code) = u32::try_from(code)
+    {
         status = status.exit_code(code);
     }
     status

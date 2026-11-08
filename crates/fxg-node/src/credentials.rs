@@ -116,7 +116,10 @@ impl CredentialBroker {
             .expect("pending lock poisoned")
             .remove(request_id)
         {
-            let _ = tx.send(response);
+            fxg_protocol::discard_with!(
+                tx.send(response),
+                "send a message to a channel that may be closed"
+            );
         }
     }
 

@@ -206,7 +206,10 @@ impl SessionEventBus {
 
     /// Sends to subscribers (ignores failures when there are no subscribers).
     fn broadcast(&self, message: SessionBroadcast) {
-        let _ = self.inner.events.send(message);
+        fxg_protocol::discard_with!(
+            self.inner.events.send(message),
+            "send a message to a channel that may be closed"
+        );
     }
 }
 

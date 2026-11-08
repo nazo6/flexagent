@@ -118,8 +118,13 @@ impl PushService {
             Err(err) => return Err(err.into()),
         };
         let private_bytes = decode_base64(&keys.private_key).ok_or(PushError::InvalidKeys)?;
-        let key_pair =
-            ES256KeyPair::from_bytes(&private_bytes).map_err(|_| PushError::InvalidKeys)?;
+        let key_pair = match ES256KeyPair::from_bytes(&private_bytes) {
+            Ok(key_pair) => key_pair,
+            Err(err) => {
+                tracing::warn!("failed to load the VAPID key pair: {err}");
+                return Err(PushError::InvalidKeys);
+            }
+        };
         Ok(Self {
             client: reqwest::Client::new(),
             key_pair: Arc::new(key_pair),
@@ -138,13 +143,24 @@ impl PushService {
         subscription: &PushSubscriptionRecord,
         body: Vec<u8>,
     ) -> Result<http::Request<Vec<u8>>, PushError> {
-        let endpoint: http::Uri = subscription
-            .endpoint
-            .parse()
-            .map_err(|_| PushError::InvalidEndpoint(subscription.endpoint.clone()))?;
+        let endpoint: http::Uri = match subscription.endpoint.parse() {
+            Ok(endpoint) => endpoint,
+            Err(err) => {
+                tracing::debug!(
+                    endpoint = %subscription.endpoint,
+                    "push subscription endpoint is not a valid URI: {err}"
+                );
+                return Err(PushError::InvalidEndpoint(subscription.endpoint.clone()));
+            }
+        };
         let ua_public_bytes = decode_base64(&subscription.p256dh).ok_or(PushError::InvalidKeys)?;
-        let ua_public = web_push_native::p256::PublicKey::from_sec1_bytes(&ua_public_bytes)
-            .map_err(|_| PushError::InvalidKeys)?;
+        let ua_public = match web_push_native::p256::PublicKey::from_sec1_bytes(&ua_public_bytes) {
+            Ok(key) => key,
+            Err(err) => {
+                tracing::debug!("push subscription p256dh key is invalid: {err}");
+                return Err(PushError::InvalidKeys);
+            }
+        };
         let auth_bytes = decode_base64(&subscription.auth).ok_or(PushError::InvalidKeys)?;
         if auth_bytes.len() != 16 {
             return Err(PushError::InvalidKeys);
@@ -205,10 +221,16 @@ fn generate_vapid_keys() -> Result<VapidKeys, PushError> {
 
 /// Decodes base64url (no padding) or standard base64.
 fn decode_base64(value: &str) -> Option<Vec<u8>> {
-    URL_SAFE_NO_PAD
-        .decode(value)
-        .or_else(|_| STANDARD.decode(value))
-        .ok()
+    match URL_SAFE_NO_PAD.decode(value) {
+        Ok(bytes) => Some(bytes),
+        Err(url_err) => match STANDARD.decode(value) {
+            Ok(bytes) => Some(bytes),
+            Err(standard_err) => {
+                tracing::debug!("failed to decode base64 ({url_err}; {standard_err})");
+                None
+            }
+        },
+    }
 }
 
 /// Builds a notification payload from a `PermissionRequest` event.
@@ -504,11 +526,15 @@ mod tests {
             .expect("build request");
 
         // The VAPID signature header is attached
-        let authorization = request
+        let authorization = match request
             .headers()
             .get(reqwest::header::AUTHORIZATION)
-            .and_then(|value| value.to_str().ok())
-            .expect("authorization header");
+            .expect("authorization header")
+            .to_str()
+        {
+            Ok(value) => value,
+            Err(_) => panic!("authorization header is not ASCII"),
+        };
         assert!(authorization.starts_with("vapid t="), "{authorization}");
         assert!(authorization.contains("k="), "{authorization}");
         assert!(request.headers().contains_key("content-encoding"));

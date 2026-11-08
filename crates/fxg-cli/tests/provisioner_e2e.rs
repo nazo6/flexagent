@@ -148,7 +148,7 @@ async fn provisioner_runs_stdio_node_and_drains_bundle() {
         status,
         200,
         "create session failed: {}",
-        response.text().await.unwrap_or_default()
+        response.text().await.expect("response body")
     );
     let created: CreateSessionResponse = response.json().await.expect("decode");
     let session_id = created.session_id.clone();
@@ -178,8 +178,7 @@ async fn provisioner_runs_stdio_node_and_drains_bundle() {
         async move {
             db.get_session(&session_id)
                 .await
-                .ok()
-                .flatten()
+                .expect("load session")
                 .map(|session| session.status == fxg_protocol::common::SessionStatus::Error)
                 .unwrap_or(false)
         }
@@ -206,8 +205,7 @@ async fn provisioner_runs_stdio_node_and_drains_bundle() {
         async move {
             db.get_git_bundle_path(&session_id)
                 .await
-                .ok()
-                .flatten()
+                .expect("load git bundle path")
                 .is_some()
         }
     })
