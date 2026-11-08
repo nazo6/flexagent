@@ -75,15 +75,26 @@ set -euo pipefail
 
 targets=(
   crates/fxg-protocol
+  crates/fxg-db
+  crates/fxg-pty
+  crates/fxg-acp
+  crates/fxg-server
+  crates/fxg-node
+  crates/fxg-cli
+  crates/fxg-ui-assets
 )
 
 # Han / Hiragana / Katakana + CJK 記号 + 全角形。
 pattern='[\p{Han}\p{Hiragana}\p{Katakana}\x{3000}-\x{303F}\x{FF01}-\x{FF60}]'
 
 if command -v rg >/dev/null 2>&1; then
-  hits=$(rg --line-number --no-heading --color never --pcre2 "$pattern" "${targets[@]}" | grep -v 'allow-japanese' || true)
+  # Migration SQL is frozen: sqlx validates the checksum of applied migrations,
+  # so translating comments there would break existing databases.
+  hits=$(rg --line-number --no-heading --color never --pcre2 \
+    --glob '!crates/fxg-db/migrations/**' \
+    "$pattern" "${targets[@]}" | grep -v 'allow-japanese' || true)
 else
-  hits=$(grep -rnP "$pattern" "${targets[@]}" | grep -v 'allow-japanese' || true)
+  hits=$(grep -rnP --exclude-dir=migrations "$pattern" "${targets[@]}" | grep -v 'allow-japanese' || true)
 fi
 
 if [ -n "$hits" ]; then
