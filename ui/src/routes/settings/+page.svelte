@@ -16,6 +16,7 @@
   import { sync } from "#lib/stores/app.svelte.ts";
   import { toast } from "svelte-sonner";
   import CopyIcon from "@lucide/svelte/icons/copy";
+  import FileDownIcon from "@lucide/svelte/icons/file-down";
   import KeyRoundIcon from "@lucide/svelte/icons/key-round";
   import RefreshCwIcon from "@lucide/svelte/icons/refresh-cw";
   import ShieldIcon from "@lucide/svelte/icons/shield";
@@ -25,6 +26,31 @@
 
   /** Selected settings tab (reflects deep links such as `?tab=agents`). */
   let activeTab = $state(page.url.searchParams.get("tab") ?? "general");
+
+  // --- Diagnostics ---
+  let diagnosticsBusy = $state(false);
+
+  async function downloadDiagnostics() {
+    if (diagnosticsBusy) return;
+    diagnosticsBusy = true;
+    try {
+      const response = await sync.connection.client.diagnostics();
+      const blob = new Blob([JSON.stringify(response, null, 2)], {
+        type: "application/json",
+      });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `fxg-diagnostics-${Date.now()}.json`;
+      anchor.click();
+      URL.revokeObjectURL(url);
+      toast.success(m.settings_diagnostics_downloaded());
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      diagnosticsBusy = false;
+    }
+  }
 
   // --- Node pairing (central server only) ---
   let tokens = $state<NodeTokenSummary[]>([]);
@@ -224,6 +250,30 @@
                 {/each}
               </ul>
             {/if}
+          </div>
+        </div>
+      </Card>
+
+      <!-- Diagnostics -->
+      <Card class="gap-3 p-4">
+        <div class="flex items-start gap-2">
+          <FileDownIcon class="text-muted-foreground mt-0.5 size-4" />
+          <div class="flex flex-1 flex-col gap-1">
+            <h2 class="font-medium">{m.settings_diagnostics_title()}</h2>
+            <p class="text-muted-foreground text-xs">
+              {m.settings_diagnostics_description()}
+            </p>
+            <div class="mt-1">
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={diagnosticsBusy}
+                onclick={() => void downloadDiagnostics()}
+              >
+                <FileDownIcon />
+                {m.settings_download_diagnostics()}
+              </Button>
+            </div>
           </div>
         </div>
       </Card>

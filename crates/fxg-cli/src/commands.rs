@@ -405,6 +405,204 @@ impl usage::RunAsync for WebArgs {
     }
 }
 
+// ----------------------------------------------------------------------
+// fxg logs / fxg doctor
+// ----------------------------------------------------------------------
+
+/// Arguments of `fxg logs`.
+#[derive(Debug, Args)]
+pub struct LogsArgs {
+    /// Only show logs related to this session (uses agent stderr diagnostics)
+    #[usage(long)]
+    session: Option<String>,
+    /// Follow appended daemon log lines
+    #[usage(short = 'f', long)]
+    follow: bool,
+    /// Number of lines to show
+    #[usage(long, default = "100")]
+    lines: usize,
+}
+
+impl usage::RunAsync for LogsArgs {
+    type Output = Result<()>;
+
+    async fn run_async(self) -> Self::Output {
+        let env = fxg_protocol::config::process_env;
+        let home = fxg_protocol::config::fxg_home(&env);
+        if let Some(session_id) = self.session.as_deref() {
+            let mut client = DaemonClient::connect().await?;
+            let detail = client.session_show(session_id, 1).await?;
+            let agent_id = detail.session.agent_id;
+            let diagnostics = client.diagnostics().await?;
+            let Some(agent) = diagnostics
+                .agents
+                .iter()
+                .find(|agent| agent.agent_id == agent_id)
+            else {
+                println!("(no agent stderr captured for {agent_id})");
+                return Ok(());
+            };
+            let start = agent.stderr_tail.len().saturating_sub(self.lines);
+            for line in &agent.stderr_tail[start..] {
+                println!("{line}");
+            }
+            return Ok(());
+        }
+
+        let path = home.join("logs").join("daemon.log");
+        if !path.exists() {
+            println!("(daemon log not found: {})", path.display());
+            return Ok(());
+        }
+        let mut offset;
+        if !self.follow {
+            let text = std::fs::read_to_string(&path)
+                .with_context(|| format!("failed to read {}", path.display()))?;
+            let lines: Vec<&str> = text.lines().collect();
+            let start = lines.len().saturating_sub(self.lines);
+            for line in &lines[start..] {
+                println!("{line}");
+            }
+            return Ok(());
+        }
+        // Follow mode: print the initial tail, then poll for appended bytes.
+        let mut file = std::fs::File::open(&path)
+            .with_context(|| format!("failed to open {}", path.display()))?;
+        let initial = std::fs::read_to_string(&path)?;
+        let lines: Vec<&str> = initial.lines().collect();
+        let start = lines.len().saturating_sub(self.lines);
+        for line in &lines[start..] {
+            println!("{line}");
+        }
+        offset = match file.metadata() {
+            Ok(metadata) => metadata.len(),
+            Err(err) => {
+                tracing::warn!(path = %path.display(), "failed to read log metadata: {err}");
+                0
+            }
+        };
+        loop {
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            let len = std::fs::metadata(&path)
+                .map(|metadata| metadata.len())
+                .unwrap_or(offset);
+            if len < offset {
+                offset = 0;
+            }
+            if len > offset {
+                use std::io::{Read, Seek, SeekFrom};
+                file.seek(SeekFrom::Start(offset))?;
+                let mut appended = String::new();
+                file.read_to_string(&mut appended)?;
+                print!("{appended}");
+                use std::io::Write;
+                std::io::stdout().flush()?;
+                offset = len;
+            }
+        }
+    }
+}
+
+/// Arguments of `fxg doctor`.
+#[derive(Debug, Args)]
+pub struct DoctorArgs {
+    /// Output as JSON
+    #[usage(long)]
+    json: bool,
+}
+
+impl usage::RunAsync for DoctorArgs {
+    type Output = Result<()>;
+
+    async fn run_async(self) -> Self::Output {
+        let env = fxg_protocol::config::process_env;
+        let home = fxg_protocol::config::fxg_home(&env);
+        let mut checks: Vec<(String, bool, String)> = Vec::new();
+
+        let config_ok = match fxg_protocol::config::GlobalConfig::load(&env) {
+            Ok(_) => (true, "config.toml is readable".to_owned()),
+            Err(err) => (false, format!("config.toml: {err}")),
+        };
+        checks.push(("config".to_owned(), config_ok.0, config_ok.1));
+
+        checks.push((
+            "home".to_owned(),
+            true,
+            if home.is_dir() {
+                home.display().to_string()
+            } else {
+                format!("{} (created on first daemon start)", home.display())
+            },
+        ));
+
+        let token_path = home.join(fxg_protocol::config::AUTH_TOKEN_FILE_NAME);
+        checks.push((
+            "auth_token".to_owned(),
+            true,
+            if token_path.is_file() {
+                token_path.display().to_string()
+            } else {
+                format!("{} (created on first daemon start)", token_path.display())
+            },
+        ));
+
+        let db_path = home.join("node.db");
+        let db_ok = if db_path.is_file() {
+            match fxg_db::Db::open(&db_path, fxg_db::DbRole::Node).await {
+                Ok(_) => (true, "node.db opened".to_owned()),
+                Err(err) => (false, format!("node.db: {err}")),
+            }
+        } else {
+            (true, "not initialized yet".to_owned())
+        };
+        checks.push(("database".to_owned(), db_ok.0, db_ok.1));
+
+        let log_path = home.join("logs").join("daemon.log");
+        checks.push((
+            "logs".to_owned(),
+            true,
+            if log_path.is_file() {
+                log_path.display().to_string()
+            } else {
+                format!("{} (not created yet)", log_path.display())
+            },
+        ));
+
+        let git_ok = std::process::Command::new("git")
+            .arg("--version")
+            .output()
+            .map(|output| output.status.success())
+            .unwrap_or(false);
+        checks.push((
+            "git".to_owned(),
+            git_ok,
+            if git_ok {
+                "git is available".to_owned()
+            } else {
+                "git was not found on PATH".to_owned()
+            },
+        ));
+
+        if self.json {
+            let value: Vec<_> = checks
+                .iter()
+                .map(|(name, ok, detail)| {
+                    serde_json::json!({ "check": name, "ok": ok, "detail": detail })
+                })
+                .collect();
+            println!("{}", serde_json::to_string_pretty(&value)?);
+        } else {
+            for (name, ok, detail) in &checks {
+                println!("{} {name}: {detail}", if *ok { "OK  " } else { "FAIL" });
+            }
+        }
+        if checks.iter().any(|(_, ok, _)| !ok) {
+            bail!("doctor found failing checks");
+        }
+        Ok(())
+    }
+}
+
 /// Build the tokenized URL of the local Web UI (shared by `fxg web` and the
 /// tray).
 pub(crate) fn local_web_url(listen_addr: &str, token: &str) -> String {
@@ -967,6 +1165,8 @@ pub enum SessionCommands {
     List(SessionListArgs),
     /// Show session details, state and event statistics
     Show(SessionShowArgs),
+    /// Show session diagnostics (agent stderr tail, status, last error)
+    Diagnose(SessionDiagnoseArgs),
     /// Send a prompt to an existing session non-interactively (headless)
     Prompt(SessionPromptArgs),
     /// Cancel the running turn, or stop the session gracefully
@@ -1196,6 +1396,61 @@ fn describe_event(payload: &UnifiedEventPayload) -> String {
         UnifiedEventPayload::CompactionUpdated { status, .. } => {
             format!("compaction_updated {status}")
         }
+    }
+}
+
+/// `fxg session diagnose <id>`
+#[derive(Debug, Args)]
+pub struct SessionDiagnoseArgs {
+    /// Session ID
+    session_id: String,
+    /// Output as JSON
+    #[usage(long)]
+    json: bool,
+}
+
+impl usage::RunAsync for SessionDiagnoseArgs {
+    type Output = Result<()>;
+
+    async fn run_async(self) -> Self::Output {
+        let mut client = DaemonClient::connect().await?;
+        let detail = client.session_show(&self.session_id, 5).await?;
+        let diagnostics = client.diagnostics().await?;
+        let agent_id = &detail.session.agent_id;
+        let stderr_tail = diagnostics
+            .agents
+            .iter()
+            .find(|agent| &agent.agent_id == agent_id)
+            .map(|agent| agent.stderr_tail.clone())
+            .unwrap_or_default();
+        if self.json {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&serde_json::json!({
+                    "session": detail.session,
+                    "agent_id": agent_id,
+                    "stderr_tail": stderr_tail,
+                    "daemon_log": diagnostics.daemon_log,
+                }))?
+            );
+            return Ok(());
+        }
+        println!("Session: {} ({})", detail.session.title, self.session_id);
+        println!("Agent:   {agent_id}");
+        println!("Status:  {:?}", detail.session.status);
+        println!("Path:    {}", detail.session.local_path);
+        if stderr_tail.is_empty() {
+            println!("stderr:  (none captured)");
+        } else {
+            println!("stderr (last {}):", stderr_tail.len());
+            for line in &stderr_tail {
+                println!("  {line}");
+            }
+        }
+        if let Some(log) = diagnostics.daemon_log {
+            println!("Daemon log: {log}");
+        }
+        Ok(())
     }
 }
 

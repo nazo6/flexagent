@@ -40,6 +40,7 @@ import type {
   ResumeSessionRequest,
   ResumeSessionResponse,
   RotateAuthTokenResponse,
+  DiagnosticsResponse,
   SearchHit,
   SearchResponse,
   SessionArchiveRequest,
@@ -226,6 +227,11 @@ export class ApiClient {
   async nodes(): Promise<NodeSummary[]> {
     const response = await this.#request<NodesResponse>("GET", "/api/v1/nodes");
     return response.nodes;
+  }
+
+  /** `GET /api/v1/diagnostics` (agent stderr tails + daemon log path). */
+  diagnostics(): Promise<DiagnosticsResponse> {
+    return this.#request("GET", "/api/v1/diagnostics");
   }
 
   /** `GET /api/v1/nodes/:id/fs/browse` */

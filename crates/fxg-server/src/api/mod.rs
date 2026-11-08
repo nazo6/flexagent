@@ -38,15 +38,16 @@ use fxg_db::{Db, DbError, SessionFilter};
 use fxg_protocol::client_api::{
     AgentOpResponse, AgentsResponse, ApiErrorResponse, AuditLogsResponse, AuthLoginRequest,
     ConnectionRole, CreateSessionRequest, CreateSessionResponse, CreateWorktreeRequest,
-    InboxResponse, IssueNodeTokenRequest, IssueNodeTokenResponse, KillSwitchRequest,
-    KillSwitchResponse, MetaResponse, NodeTokensResponse, NodesResponse, ProjectLinkRequest,
-    ProjectLinkResponse, ProjectScanRequest, ProjectScanResponse, ProjectsResponse,
-    ProvisionersResponse, PruneWorktreesRequest, PushSubscribeRequest, PushSubscribeResponse,
-    RemoveWorktreeRequest, RespondElicitationRequest, RespondElicitationResponse,
-    RespondPermissionRequest, RespondPermissionResponse, ResumeSessionRequest,
-    ResumeSessionResponse, RotateAuthTokenResponse, SearchResponse, ServerWsMessage,
-    SessionArchiveRequest, SessionArchiveResponse, SessionListResponse, SessionRevertRequest,
-    SessionRevertResponse, SystemInfoResponse, WorktreeInfo, WorktreesResponse,
+    DiagnosticsResponse, InboxResponse, IssueNodeTokenRequest, IssueNodeTokenResponse,
+    KillSwitchRequest, KillSwitchResponse, MetaResponse, NodeTokensResponse, NodesResponse,
+    ProjectLinkRequest, ProjectLinkResponse, ProjectScanRequest, ProjectScanResponse,
+    ProjectsResponse, ProvisionersResponse, PruneWorktreesRequest, PushSubscribeRequest,
+    PushSubscribeResponse, RemoveWorktreeRequest, RespondElicitationRequest,
+    RespondElicitationResponse, RespondPermissionRequest, RespondPermissionResponse,
+    ResumeSessionRequest, ResumeSessionResponse, RotateAuthTokenResponse, SearchResponse,
+    ServerWsMessage, SessionArchiveRequest, SessionArchiveResponse, SessionListResponse,
+    SessionRevertRequest, SessionRevertResponse, SystemInfoResponse, WorktreeInfo,
+    WorktreesResponse,
 };
 use fxg_protocol::common::{
     AgentAction, ClientSource, CommandResult, DataSafety, DiffScope, ElicitationContent, ErrorCode,
@@ -497,6 +498,16 @@ pub trait ClientApiBackend: Clone + Send + Sync + 'static {
         self.db().list_projects().await.map_err(ApiError::from)
     }
 
+    /// Diagnostics (`GET /api/v1/diagnostics`).
+    ///
+    /// The default implementation reports that diagnostics are unavailable; the
+    /// local node overrides it with the agent stderr tails.
+    async fn diagnostics(&self) -> Result<DiagnosticsResponse, ApiError> {
+        Err(ApiError::not_found(
+            "diagnostics are not available on this endpoint",
+        ))
+    }
+
     /// Client auth token.
     fn auth_token(&self) -> String;
 
@@ -807,8 +818,11 @@ pub fn client_router<B: ClientApiBackend>(backend: B, options: ClientApiOptions)
     };
     let api = Router::new()
         .route(META_PATH, get(meta::<B>))
+        .route("/healthz", get(healthz))
+        .route("/readyz", get(readyz::<B>))
         .route("/api/v1/system/info", get(system_info::<B>))
         .route("/api/v1/system/kill-switch", post(kill_switch::<B>))
+        .route("/api/v1/diagnostics", get(diagnostics::<B>))
         .route("/api/v1/auth/login", post(auth_login::<B>))
         .route("/api/v1/auth/logout", post(auth_logout))
         .route("/api/v1/projects", get(list_projects::<B>))
@@ -919,6 +933,28 @@ async fn meta<B: ClientApiBackend>(State(state): State<ClientApiState<B>>) -> Re
         role: state.backend.connection_role(),
     })
     .into_response()
+}
+
+async fn healthz() -> Response {
+    (StatusCode::OK, "ok").into_response()
+}
+
+async fn readyz<B: ClientApiBackend>(State(state): State<ClientApiState<B>>) -> Response {
+    match state.backend.db().list_projects().await {
+        Ok(_) => (StatusCode::OK, "ok").into_response(),
+        Err(err) => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            format!("database not ready: {err}"),
+        )
+            .into_response(),
+    }
+}
+
+async fn diagnostics<B: ClientApiBackend>(State(state): State<ClientApiState<B>>) -> Response {
+    match state.backend.diagnostics().await {
+        Ok(response) => Json(response).into_response(),
+        Err(err) => err.into_response(),
+    }
 }
 
 async fn system_info<B: ClientApiBackend>(State(state): State<ClientApiState<B>>) -> Response {

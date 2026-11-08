@@ -905,3 +905,29 @@ opencode / agy は `sessionCapabilities.list` / `load` を広告しており、
   タイムアウト、失敗は debug ログ)。プロセスは warm pool のため維持する。
 - **テスト**: ネイティブ fork / フォールバック、Revert のファイル復元 +
   context rebuild、busy 拒否、Replay の直近優先を検証。`mise run check` 通過。
+
+---
+
+## 15. 実装ログ (Phase 4, 2026-11-09)
+
+- **エージェント stderr**: `AcpDriver` にエージェント別リングバッファ
+  (`StderrRegistry`、最大 200 行) を追加。`AgentDriver::stderr_snapshot` →
+  `SessionManager::agent_diagnostics` で取得できる。
+- **Diagnostics API**: `GET /api/v1/diagnostics` (`DiagnosticsResponse`) を
+  追加。ローカルノードは `agents[].stderr_tail` と `daemon_log` を返し、
+  中央サーバーは空の agents を返す。`/healthz` (liveness) と `/readyz`
+  (DB クエリ込み readiness) も認証不要で追加。
+- **CLI**: `fxg logs` (`--session` / `--follow` / `--lines`)、`fxg doctor`
+  (設定・ホーム・トークン・DB・ログ・git)、`fxg session diagnose <id>`
+  (状態 + agent stderr) を追加。`fxg doctor` は未初期化のホームを
+  正常扱いする。
+- **完了通知**: Hub が `Running` を観測したセッションの
+  `Idle` / `Error` でのみ Web Push を送る (`notify_turn_finished`)。
+  通知にはセッション名とノード名を含め、アクションボタンは付けない。
+- **UI**: 設定 > 一般に「Diagnostics をダウンロード」を追加し、
+  `/api/v1/diagnostics` の JSON を保存できる。
+- **テスト**: stderr ring の上限・エージェント分離、完了通知 payload、
+  既存の Push テストを追加。`mise run check` 通過。
+- **未対応**: `incidents` テーブル / サポートバンドル / 詳細な
+  コンポーネントヘルスは `2026-11-08-error-handling-and-recovery-plan.md`
+  の Phase 3 として引き続き管理する (本 Phase では診断の取得経路を優先)。

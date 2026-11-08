@@ -45,6 +45,30 @@ pub struct SystemInfoResponse {
     pub central_connected: Option<bool>,
 }
 
+/// Recent stderr lines for one agent (diagnostics).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
+pub struct AgentDiagnostics {
+    /// Agent ID
+    pub agent_id: String,
+    /// Recent stderr lines (oldest first, bounded)
+    pub stderr_tail: Vec<String>,
+}
+
+/// `GET /api/v1/diagnostics` response.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
+pub struct DiagnosticsResponse {
+    /// Endpoint identifier (`local-node` / `central-server`)
+    pub node_id: String,
+    /// Generation time (Unix epoch ms)
+    pub generated_at: i64,
+    /// Per-agent stderr tails
+    pub agents: Vec<AgentDiagnostics>,
+    /// Daemon log path (local node only)
+    pub daemon_log: Option<String>,
+}
+
 /// `GET /api/v1/meta` response (endpoint metadata that needs no authentication).
 ///
 /// `GET /api/v1/system/info` requires authentication, so an unauthenticated Web UI

@@ -273,6 +273,36 @@ async fn handle(
                 },
             ))
         }
+        IpcClientMessage::Diagnostics { command_id } => {
+            let agents = state
+                .session_manager()
+                .agent_diagnostics()
+                .into_iter()
+                .map(
+                    |(agent_id, stderr_tail)| fxg_protocol::client_api::AgentDiagnostics {
+                        agent_id,
+                        stderr_tail,
+                    },
+                )
+                .collect();
+            let daemon_log = DaemonState::paths(state)
+                .fxg_home()
+                .join("logs")
+                .join("daemon.log")
+                .to_string_lossy()
+                .into_owned();
+            Ok((
+                command_id,
+                IpcResult::Diagnostics {
+                    diagnostics: fxg_protocol::client_api::DiagnosticsResponse {
+                        node_id: state.node_id().to_owned(),
+                        generated_at: fxg_protocol::util::now_ms(),
+                        agents,
+                        daemon_log: Some(daemon_log),
+                    },
+                },
+            ))
+        }
 
         IpcClientMessage::ProjectInfo { command_id, cwd } => {
             let resolved = resolve_and_register(state, Path::new(&cwd), &command_id).await?;

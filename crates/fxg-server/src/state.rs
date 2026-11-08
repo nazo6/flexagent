@@ -16,14 +16,14 @@ use fxg_db::{Db, DbRole, PushSubscriptionRecord};
 use fxg_protocol::CommandId;
 use fxg_protocol::client_api::{
     AgentOpResponse, AgentsResponse, ConnectionRole, CreateSessionRequest, CreateSessionResponse,
-    CreateWorktreeRequest, IssueNodeTokenRequest, IssueNodeTokenResponse, KillSwitchResponse,
-    NodeTokenSummary, NodeTokensResponse, ProjectLinkRequest, ProjectLinkResponse,
-    ProjectScanRequest, ProjectScanResponse, ProvisionerSummary, ProvisionersResponse,
-    PruneWorktreesRequest, PushSubscribeRequest, PushSubscribeResponse, RemoveWorktreeRequest,
-    RespondElicitationRequest, RespondElicitationResponse, RespondPermissionRequest,
-    RespondPermissionResponse, ResumeSessionRequest, ResumeSessionResponse,
-    RotateAuthTokenResponse, SessionArchiveRequest, SessionArchiveResponse, SessionRevertRequest,
-    SessionRevertResponse, WorktreeInfo, WorktreesResponse,
+    CreateWorktreeRequest, DiagnosticsResponse, IssueNodeTokenRequest, IssueNodeTokenResponse,
+    KillSwitchResponse, NodeTokenSummary, NodeTokensResponse, ProjectLinkRequest,
+    ProjectLinkResponse, ProjectScanRequest, ProjectScanResponse, ProvisionerSummary,
+    ProvisionersResponse, PruneWorktreesRequest, PushSubscribeRequest, PushSubscribeResponse,
+    RemoveWorktreeRequest, RespondElicitationRequest, RespondElicitationResponse,
+    RespondPermissionRequest, RespondPermissionResponse, ResumeSessionRequest,
+    ResumeSessionResponse, RotateAuthTokenResponse, SessionArchiveRequest, SessionArchiveResponse,
+    SessionRevertRequest, SessionRevertResponse, WorktreeInfo, WorktreesResponse,
 };
 use fxg_protocol::common::{
     AgentAction, CommandResult, DiffScope, ErrorCode, ForkHistoryItem, HistoryRole,
@@ -401,6 +401,15 @@ impl ClientApiBackend for ServerState {
 
     fn connection_role(&self) -> ConnectionRole {
         ConnectionRole::CentralServer
+    }
+
+    async fn diagnostics(&self) -> Result<DiagnosticsResponse, ApiError> {
+        Ok(DiagnosticsResponse {
+            node_id: "central-server".to_owned(),
+            generated_at: fxg_protocol::util::now_ms(),
+            agents: Vec::new(),
+            daemon_log: None,
+        })
     }
 
     async fn system_extras(&self) -> Result<SystemExtras, ApiError> {

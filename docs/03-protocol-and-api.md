@@ -779,6 +779,12 @@ pub enum ServerToNodeMsg {
   か、および Web Push の VAPID Public Key を返却。ローカルノード接続時は
   `unsynced_event_count`（Outbox 残数）と
   `central_connected`（中央サーバー接続状態）も返却。
+- `GET /healthz` / `GET /readyz`: 認証不要の liveness / readiness。
+  `readyz` は DB クエリが成功した場合のみ 200、失敗時は 503 を返す。
+- `GET /api/v1/diagnostics`: ローカルノードの診断情報
+  (`DiagnosticsResponse`)。エージェントごとの直近 stderr
+  (`agents[].stderr_tail`、最大 200 行) と `daemon_log` のパスを返す。
+  中央サーバーでは `agents=[]` を返す。
 - `POST /api/v1/auth/login`: Web UI のトークン入力フロー。認証済みリクエスト
   (`Authorization: Bearer <auth_token>`) と `{ "token": "..." }` を受け取り、
   body のトークンを再検証したうえで

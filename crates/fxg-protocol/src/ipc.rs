@@ -81,6 +81,11 @@ pub enum IpcClientMessage {
         /// Correlation ID
         command_id: CommandId,
     },
+    /// Returns local diagnostics (agent stderr tails, daemon log path).
+    Diagnostics {
+        /// Correlation ID
+        command_id: CommandId,
+    },
     /// Sends a prompt (including slash commands and attachments).
     SendPrompt {
         /// Correlation ID
@@ -326,6 +331,11 @@ pub enum IpcResult {
     EnsureSession {
         /// ID of the started session
         session_id: SessionId,
+    },
+    /// Result of `Diagnostics`
+    Diagnostics {
+        /// Diagnostics payload
+        diagnostics: crate::client_api::DiagnosticsResponse,
     },
     /// Result of `GetLocalStatus`
     LocalStatus {

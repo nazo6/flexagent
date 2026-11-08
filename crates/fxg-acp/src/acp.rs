@@ -22,7 +22,7 @@
     reason = "ACP SDK <-> FXG conversions use serde_json::Value as an intermediate; see docs/06-type-safety.md"
 )]
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -79,6 +79,49 @@ use crate::warm::{DEFAULT_WARM_IDLE, LaunchKey, WarmPool, WarmProcess};
 pub struct AcpDriver {
     /// Reuse pool for idle processes (`None` = pool disabled)
     pool: Option<Arc<WarmPool<ProcessHandle>>>,
+    /// Recent agent stderr lines for diagnostics
+    stderr: StderrRegistry,
+}
+
+/// Bounded per-agent stderr buffer used by diagnostics.
+#[derive(Debug, Clone, Default)]
+pub struct StderrRegistry {
+    lines: Arc<Mutex<BTreeMap<String, VecDeque<String>>>>,
+}
+
+impl StderrRegistry {
+    /// Maximum retained lines per agent.
+    const MAX_LINES: usize = 200;
+
+    /// Appends one stderr line, dropping the oldest when over the limit.
+    pub fn push(&self, agent_id: &str, line: &str) {
+        let mut lines = self.lines.lock().expect("stderr registry poisoned");
+        let buffer = lines.entry(agent_id.to_owned()).or_default();
+        if buffer.len() >= Self::MAX_LINES {
+            buffer.pop_front();
+        }
+        buffer.push_back(line.to_owned());
+    }
+
+    /// Returns the retained stderr lines for one agent.
+    pub fn tail(&self, agent_id: &str) -> Vec<String> {
+        self.lines
+            .lock()
+            .expect("stderr registry poisoned")
+            .get(agent_id)
+            .map(|lines| lines.iter().cloned().collect())
+            .unwrap_or_default()
+    }
+
+    /// Returns a snapshot of all retained stderr lines.
+    pub fn snapshot(&self) -> BTreeMap<String, Vec<String>> {
+        self.lines
+            .lock()
+            .expect("stderr registry poisoned")
+            .iter()
+            .map(|(agent, lines)| (agent.clone(), lines.iter().cloned().collect()))
+            .collect()
+    }
 }
 
 impl std::fmt::Debug for AcpDriver {
@@ -100,6 +143,7 @@ impl AcpDriver {
     pub fn new() -> Self {
         Self {
             pool: Some(Arc::new(WarmPool::new(DEFAULT_WARM_IDLE))),
+            stderr: StderrRegistry::default(),
         }
     }
 
@@ -107,7 +151,10 @@ impl AcpDriver {
     ///
     /// Use when agent state should not be shared across sessions (tests / diagnostics).
     pub fn without_pool() -> Self {
-        Self { pool: None }
+        Self {
+            pool: None,
+            stderr: StderrRegistry::default(),
+        }
     }
 }
 
@@ -374,6 +421,14 @@ impl AgentDriver for AcpDriver {
             None => 0,
         }
     }
+
+    fn stderr_tail(&self, agent_id: &str) -> Vec<String> {
+        self.stderr.tail(agent_id)
+    }
+
+    fn stderr_snapshot(&self) -> BTreeMap<String, Vec<String>> {
+        self.stderr.snapshot()
+    }
 }
 
 impl AcpDriver {
@@ -444,7 +499,11 @@ impl AcpDriver {
                     .iter()
                     .map(|(key, value)| (key.clone(), value.clone())),
             );
-        let (process, ready_rx) = spawn_agent_process(AcpAgent::new(config));
+        let (process, ready_rx) = spawn_agent_process(
+            AcpAgent::new(config),
+            req.launch.agent_id.clone(),
+            self.stderr.clone(),
+        );
         ready_rx
             .await
             .context("acp agent process ended during startup")??;
@@ -469,12 +528,16 @@ impl AcpDriver {
 /// [`ProcessHandle::new_session`]).
 fn spawn_agent_process(
     agent: AcpAgent,
+    agent_id: String,
+    stderr: StderrRegistry,
 ) -> (Arc<ProcessHandle>, oneshot::Receiver<anyhow::Result<()>>) {
     let (control_tx, control_rx) = mpsc::unbounded_channel();
     let (ready_tx, ready_rx) = oneshot::channel();
     let join = tokio::spawn(async move {
         if let Err(err) = run_acp_process(AcpProcessTaskParams {
             agent,
+            agent_id,
+            stderr,
             ready_tx,
             control_rx,
         })
@@ -772,6 +835,10 @@ fn cancel_pending_elicitations(
 struct AcpProcessTaskParams {
     /// Agent to launch
     agent: AcpAgent,
+    /// Agent ID (diagnostics key)
+    agent_id: String,
+    /// Recent stderr buffer shared with the driver
+    stderr: StderrRegistry,
     /// Process ready (initialize complete) notification
     ready_tx: oneshot::Sender<anyhow::Result<()>>,
     /// Command receiver for the process
@@ -787,6 +854,8 @@ struct AcpProcessTaskParams {
 async fn run_acp_process(params: AcpProcessTaskParams) -> Result<(), agent_client_protocol::Error> {
     let AcpProcessTaskParams {
         agent,
+        agent_id,
+        stderr,
         ready_tx,
         mut control_rx,
     } = params;
@@ -1189,8 +1258,10 @@ async fn run_acp_process(params: AcpProcessTaskParams) -> Result<(), agent_clien
     let elicitations_for_teardown = Arc::clone(&elicitations);
 
     // Forward agent stderr to the daemon log
-    let agent = agent.with_debug(|line, direction| {
+    let stderr_for_debug = stderr.clone();
+    let agent = agent.with_debug(move |line, direction| {
         if matches!(direction, agent_client_protocol::LineDirection::Stderr) {
+            stderr_for_debug.push(&agent_id, line);
             tracing::debug!(target: "fxg_acp::acp", "acp agent: {line}");
         }
     });
@@ -3415,5 +3486,19 @@ mod tests {
             }
             other => panic!("unexpected block: {other:?}"),
         }
+    }
+
+    #[test]
+    fn stderr_registry_is_bounded_and_per_agent() {
+        let registry = StderrRegistry::default();
+        for index in 0..(StderrRegistry::MAX_LINES + 5) {
+            registry.push("agy", &format!("line {index}"));
+        }
+        registry.push("opencode", "other");
+        let agy = registry.tail("agy");
+        assert_eq!(agy.len(), StderrRegistry::MAX_LINES);
+        assert_eq!(agy.last().map(String::as_str), Some("line 204"));
+        assert_eq!(registry.tail("opencode"), vec!["other"]);
+        assert_eq!(registry.snapshot().len(), 2);
     }
 }

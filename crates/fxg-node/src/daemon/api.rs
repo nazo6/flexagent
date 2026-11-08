@@ -9,13 +9,14 @@ use std::path::{Path, PathBuf};
 use async_trait::async_trait;
 use fxg_protocol::CommandId;
 use fxg_protocol::client_api::{
-    AgentOpResponse, AgentsResponse, ConnectionRole, CreateSessionRequest, CreateSessionResponse,
-    CreateWorktreeRequest, KillSwitchResponse, ProjectLinkRequest, ProjectLinkResponse,
-    ProjectScanRequest, ProjectScanResponse, ProvisionersResponse, PruneWorktreesRequest,
-    RemoveWorktreeRequest, RespondElicitationRequest, RespondElicitationResponse,
-    RespondPermissionRequest, RespondPermissionResponse, ResumeSessionRequest,
-    ResumeSessionResponse, RotateAuthTokenResponse, SessionArchiveRequest, SessionArchiveResponse,
-    SessionRevertRequest, SessionRevertResponse, WorktreeInfo, WorktreesResponse,
+    AgentDiagnostics, AgentOpResponse, AgentsResponse, ConnectionRole, CreateSessionRequest,
+    CreateSessionResponse, CreateWorktreeRequest, DiagnosticsResponse, KillSwitchResponse,
+    ProjectLinkRequest, ProjectLinkResponse, ProjectScanRequest, ProjectScanResponse,
+    ProvisionersResponse, PruneWorktreesRequest, RemoveWorktreeRequest, RespondElicitationRequest,
+    RespondElicitationResponse, RespondPermissionRequest, RespondPermissionResponse,
+    ResumeSessionRequest, ResumeSessionResponse, RotateAuthTokenResponse, SessionArchiveRequest,
+    SessionArchiveResponse, SessionRevertRequest, SessionRevertResponse, WorktreeInfo,
+    WorktreesResponse,
 };
 use fxg_protocol::common::{
     AgentAction, CommandResult, DiffScope, ProjectSummary, WorkspaceDiffResponse,
@@ -67,6 +68,30 @@ impl ClientApiBackend for DaemonState {
         self.list_projects_with_path_state()
             .await
             .map_err(api_error)
+    }
+
+    async fn diagnostics(&self) -> Result<DiagnosticsResponse, ApiError> {
+        let agents = self
+            .session_manager()
+            .agent_diagnostics()
+            .into_iter()
+            .map(|(agent_id, stderr_tail)| AgentDiagnostics {
+                agent_id,
+                stderr_tail,
+            })
+            .collect();
+        let daemon_log = DaemonState::paths(self)
+            .fxg_home()
+            .join("logs")
+            .join("daemon.log")
+            .to_string_lossy()
+            .into_owned();
+        Ok(DiagnosticsResponse {
+            node_id: self.node_id().to_owned(),
+            generated_at: fxg_protocol::util::now_ms(),
+            agents,
+            daemon_log: Some(daemon_log),
+        })
     }
 
     async fn system_extras(&self) -> Result<SystemExtras, ApiError> {

@@ -292,6 +292,32 @@ pub fn elicitation_notification(
     }
 }
 
+/// Builds a notification payload when a turn finishes (normal completion or error).
+pub fn turn_finished_notification(
+    session_id: &str,
+    session_title: Option<&str>,
+    node_label: &str,
+    failed: bool,
+) -> PushNotificationPayload {
+    let title = match session_title {
+        Some(title) => format!("[flexagent] Turn finished ({node_label}) — {title}"),
+        None => format!("[flexagent] Turn finished ({node_label})"),
+    };
+    PushNotificationPayload {
+        title,
+        body: if failed {
+            "The turn ended with an error. Tap to open the session.".to_owned()
+        } else {
+            "The agent finished the turn. Tap to open the session.".to_owned()
+        },
+        session_id: session_id.to_owned(),
+        request_id: session_id.to_owned(),
+        tag: format!("fxg-turn-{session_id}"),
+        allow_option_id: None,
+        reject_option_id: None,
+    }
+}
+
 /// Sends one payload to every subscription (expired subscriptions are deleted). Failures only
 /// produce a warning log.
 async fn send_to_subscriptions(
@@ -460,6 +486,60 @@ pub async fn notify_elicitations(
     }
 }
 
+/// Sends a completion notification for finished turns.
+pub async fn notify_turn_finished(
+    push: &PushService,
+    db: &Db,
+    events: &[fxg_protocol::events::SessionEventEnvelope],
+) {
+    use fxg_protocol::common::SessionStatus;
+    use fxg_protocol::events::UnifiedEventPayload;
+
+    let finished: Vec<(String, bool)> = events
+        .iter()
+        .filter_map(|event| match &event.payload {
+            UnifiedEventPayload::StatusChanged { status, .. }
+                if matches!(status, SessionStatus::Idle | SessionStatus::Error) =>
+            {
+                Some((
+                    event.session_id.to_string(),
+                    *status == SessionStatus::Error,
+                ))
+            }
+            _ => None,
+        })
+        .collect();
+    if finished.is_empty() {
+        return;
+    }
+    let subscriptions = match db.list_push_subscriptions().await {
+        Ok(subscriptions) => subscriptions,
+        Err(err) => {
+            tracing::warn!("failed to load push subscriptions: {err}");
+            return;
+        }
+    };
+    if subscriptions.is_empty() {
+        return;
+    }
+    for (session_id, failed) in finished {
+        let session = match db.get_session(&session_id).await {
+            Ok(session) => session,
+            Err(err) => {
+                tracing::warn!(session_id, "failed to load session for push: {err}");
+                continue;
+            }
+        };
+        let Some(session) = session else {
+            continue;
+        };
+        let node_label = session.node_id.to_string();
+        let payload =
+            turn_finished_notification(&session_id, Some(&session.title), &node_label, failed);
+        send_to_subscriptions(push, db, &subscriptions, &payload).await;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -601,4 +681,17 @@ mod tests {
         assert!(payload.allow_option_id.is_none());
         assert!(payload.reject_option_id.is_none());
     }
+
+    #[test]
+    fn turn_finished_notification_has_no_action_buttons() {
+        let payload = turn_finished_notification("session-1", Some("Fix auth"), "Home-Win", false);
+        assert_eq!(
+            payload.title,
+            "[flexagent] Turn finished (Home-Win) — Fix auth"
+        );
+        assert_eq!(payload.tag, "fxg-turn-session-1");
+        assert!(payload.allow_option_id.is_none());
+        assert!(payload.reject_option_id.is_none());
+    }
 }
+

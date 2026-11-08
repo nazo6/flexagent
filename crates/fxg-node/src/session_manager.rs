@@ -15,7 +15,7 @@
 //! - **Idempotent permission resolution**: The second and later responses return
 //!   [`NodeError::AlreadyResolved`].
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -343,6 +343,22 @@ impl SessionManager {
         if !drivers.iter().any(|existing| Arc::ptr_eq(existing, driver)) {
             drivers.push(Arc::clone(driver));
         }
+    }
+
+    /// Recent agent stderr lines from every registered driver (diagnostics).
+    pub fn agent_diagnostics(&self) -> BTreeMap<String, Vec<String>> {
+        let drivers: Vec<Arc<dyn AgentDriver>> =
+            { self.inner.drivers.lock().expect("drivers poisoned").clone() };
+        let mut result = BTreeMap::new();
+        for driver in drivers {
+            for (agent_id, lines) in driver.stderr_snapshot() {
+                result
+                    .entry(agent_id)
+                    .or_insert_with(Vec::new)
+                    .extend(lines);
+            }
+        }
+        result
     }
 
     /// Records `command_id` as processed.

@@ -609,5 +609,9 @@
   "chat_attachment_remove": "Remove attachment",
   "chat_attachment_image_only": "Only image files can be pasted or dropped.",
   "chat_attachment_too_large": "Attachment is too large (max {limit} MB).",
-  "session_revert_files_only": "Files only (keep the current conversation)"
+  "session_revert_files_only": "Files only (keep the current conversation)",
+  "settings_diagnostics_title": "Diagnostics",
+  "settings_diagnostics_description": "Download agent stderr tails, the daemon log path and local diagnostics as JSON.",
+  "settings_download_diagnostics": "Download diagnostics",
+  "settings_diagnostics_downloaded": "Diagnostics downloaded"
 }

@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result, anyhow, bail};
 use fxg_node::IpcClient;
 use fxg_protocol::CommandId;
-use fxg_protocol::client_api::{SessionRevertResponse, WorktreeInfo};
+use fxg_protocol::client_api::{DiagnosticsResponse, SessionRevertResponse, WorktreeInfo};
 use fxg_protocol::common::{
     ClientSource, ElicitationAction, ElicitationContent, ElicitationRequestEntry, HookLogEntry,
     PermissionRequestEntry, ProjectSummary, PromptInput, ResolvedBy, SessionControlAction,
@@ -504,6 +504,18 @@ impl DaemonClient {
             .await?;
         match result {
             IpcResult::EnsureSession { session_id } => Ok(session_id.to_string()),
+            other => bail!("unexpected ipc result: {other:?}"),
+        }
+    }
+
+    /// `fxg doctor` / `fxg session diagnose` (local diagnostics).
+    pub async fn diagnostics(&mut self) -> Result<DiagnosticsResponse> {
+        let command_id = self.command_id();
+        let result = self
+            .request(IpcClientMessage::Diagnostics { command_id })
+            .await?;
+        match result {
+            IpcResult::Diagnostics { diagnostics } => Ok(diagnostics),
             other => bail!("unexpected ipc result: {other:?}"),
         }
     }

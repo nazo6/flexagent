@@ -36,6 +36,14 @@ export type AgentAuthMethodInfo = {
 	env?: { [key in string]: string },
 };
 
+/**  Recent stderr lines for one agent (diagnostics). */
+export type AgentDiagnostics = {
+	/**  Agent ID */
+	agent_id: string,
+	/**  Recent stderr lines (oldest first, bounded) */
+	stderr_tail: string[],
+};
+
 /**  Common response of agent management operations. */
 export type AgentOpResponse = {
 	/**  Message describing the outcome (e.g. `installed opencode2 0.1.0`) */
@@ -386,6 +394,18 @@ export type DataSafety =
 "lost" | 
 /**  Unknown */
 "unknown";
+
+/**  `GET /api/v1/diagnostics` response. */
+export type DiagnosticsResponse = {
+	/**  Endpoint identifier (`local-node` / `central-server`) */
+	node_id: string,
+	/**  Generation time (Unix epoch ms) */
+	generated_at: number,
+	/**  Per-agent stderr tails */
+	agents: AgentDiagnostics[],
+	/**  Daemon log path (local node only) */
+	daemon_log: string | null,
+};
 
 /**  Scope of a diff. */
 export type DiffScope = 

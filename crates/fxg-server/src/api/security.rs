@@ -50,11 +50,15 @@ pub(crate) async fn security<B: ClientApiBackend>(
     next.run(request).await
 }
 
-/// Whether the route is exempt from authentication (`GET /api/v1/meta`).
+/// Whether the route is exempt from authentication (`GET /api/v1/meta` and health probes).
 ///
 /// Host / Origin validation still applies as usual.
 fn is_auth_exempt(request: &Request) -> bool {
-    request.method() == Method::GET && request.uri().path() == super::META_PATH
+    request.method() == Method::GET
+        && matches!(
+            request.uri().path(),
+            super::META_PATH | "/healthz" | "/readyz"
+        )
 }
 
 /// Builds [`ClientInfo`] from the connection details.

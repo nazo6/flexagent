@@ -1581,8 +1581,10 @@ async fn apply_event_batch(
         }
     }
 
-    // Web Push notification targets (newly applied approval requests)
+    // Web Push notification targets (newly applied approval requests / finished turns)
     let mut notify_events: Vec<fxg_protocol::events::SessionEventEnvelope> = Vec::new();
+    let mut running_sessions: std::collections::BTreeSet<String> =
+        std::collections::BTreeSet::new();
 
     for (session_id, batch) in batches {
         let acked_up_to_node_seq = batch.last().map(|event| event.node_seq).unwrap_or(0);
@@ -1597,11 +1599,25 @@ async fn apply_event_batch(
                             }),
                             "broadcast a persisted event to clients"
                         );
-                        if matches!(
-                            event.payload,
-                            fxg_protocol::events::UnifiedEventPayload::PermissionRequest { .. }
-                        ) {
-                            notify_events.push(event.clone());
+                        match &event.payload {
+                            fxg_protocol::events::UnifiedEventPayload::PermissionRequest {
+                                ..
+                            } => notify_events.push(event.clone()),
+                            fxg_protocol::events::UnifiedEventPayload::StatusChanged {
+                                status: fxg_protocol::common::SessionStatus::Running,
+                                ..
+                            } => {
+                                running_sessions.insert(event.session_id.to_string());
+                            }
+                            fxg_protocol::events::UnifiedEventPayload::StatusChanged {
+                                status:
+                                    fxg_protocol::common::SessionStatus::Idle
+                                    | fxg_protocol::common::SessionStatus::Error,
+                                ..
+                            } if running_sessions.remove(event.session_id.as_str()) => {
+                                notify_events.push(event.clone());
+                            }
+                            _ => {}
                         }
                     }
                 }
@@ -1640,6 +1656,7 @@ async fn apply_event_batch(
         fxg_protocol::spawn_guarded!("web push notification", async move {
             crate::push::notify_permission_requests(&push, &db, &notify_events).await;
             crate::push::notify_elicitations(&push, &db, &notify_events).await;
+            crate::push::notify_turn_finished(&push, &db, &notify_events).await;
         });
     }
 }

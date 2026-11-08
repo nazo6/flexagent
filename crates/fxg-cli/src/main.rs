@@ -67,6 +67,10 @@ enum Commands {
     Agents(commands::AgentsArgs),
     /// Inspect ephemeral VM / sandbox provisioners (list / test)
     Provisioners(commands::ProvisionersArgs),
+    /// Show local logs (daemon log / per-agent stderr)
+    Logs(commands::LogsArgs),
+    /// Check the local configuration, database, logs and toolchain
+    Doctor(commands::DoctorArgs),
     /// Start the node daemon in the foreground
     Daemon(commands::DaemonArgs),
     /// Start the central server in the foreground (:8080)

@@ -8,6 +8,7 @@
 //! [`StreamDeltaPayload`]) as [`DriverEvent`]; persistence and delivery are
 //! handled centrally by the session manager (event bus).
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use async_trait::async_trait;
@@ -174,6 +175,16 @@ pub trait AgentDriver: Send + Sync {
     /// The default implementation for drivers that hold no processes returns 0 (no-op).
     async fn shutdown_idle(&self) -> usize {
         0
+    }
+
+    /// Recent stderr lines for an agent (diagnostics; empty when unsupported).
+    fn stderr_tail(&self, _agent_id: &str) -> Vec<String> {
+        Vec::new()
+    }
+
+    /// Snapshot of recent stderr lines for every agent (diagnostics).
+    fn stderr_snapshot(&self) -> BTreeMap<String, Vec<String>> {
+        BTreeMap::new()
     }
 }
 
