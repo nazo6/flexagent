@@ -1,23 +1,24 @@
-//! FlexAgent Web UI (`ui/build`) を `rust-embed` でバイナリへ同梱する。
+//! Embeds the FlexAgent Web UI (`ui/build`) into the binary via `rust-embed`.
 //!
-//! - SvelteKit + `@sveltejs/adapter-static` (SPA) のビルド成果物を埋め込み、
-//!   `fxg server` / `fxg daemon` が同一オリジンで配信する。
-//! - UI 未ビルド時は `build.rs` がプレースホルダ `index.html` を用意するため、
-//!   Rust のビルド自体は常に成功する。
+//! - Embeds the SvelteKit + `@sveltejs/adapter-static` (SPA) build output so that
+//!   `fxg server` / `fxg daemon` serve it from the same origin.
+//! - When the UI has not been built, `build.rs` provides a placeholder `index.html`,
+//!   so the Rust build itself always succeeds.
 
 use rust_embed::RustEmbed;
 
-/// `ui/build` の同梱アセット。
+/// Assets bundled from `ui/build`.
 #[derive(RustEmbed)]
 #[folder = "$CARGO_MANIFEST_DIR/../../ui/build"]
 pub struct UiAssets;
 
-/// アセットを取得する (`path` は先頭 `/` なしの相対パス)。
+/// Fetches an asset (`path` is a relative path without a leading `/`).
 pub fn get(path: &str) -> Option<rust_embed::EmbeddedFile> {
     UiAssets::get(path)
 }
 
-/// SPA 配信向けの解決: そのまま見つからず拡張子なしのパスなら `index.html` を返す。
+/// Resolution for SPA delivery: if the path is not found as-is and has no extension,
+/// return `index.html`.
 pub fn resolve(path: &str) -> Option<rust_embed::EmbeddedFile> {
     let normalized = path.trim_start_matches('/');
     let normalized = if normalized.is_empty() {
@@ -28,7 +29,7 @@ pub fn resolve(path: &str) -> Option<rust_embed::EmbeddedFile> {
     if let Some(file) = get(normalized) {
         return Some(file);
     }
-    // クライアントサイドルーティング (`/sessions/<id>` 等) は index.html へ
+    // Client-side routes (e.g. `/sessions/<id>`) fall back to index.html
     let last_segment = normalized.rsplit('/').next().unwrap_or_default();
     if !last_segment.contains('.') {
         return get("index.html");
@@ -36,7 +37,7 @@ pub fn resolve(path: &str) -> Option<rust_embed::EmbeddedFile> {
     None
 }
 
-/// 拡張子から Content-Type を推定する (外部クレートを増やさない最小の対応表)。
+/// Infers the Content-Type from the extension (minimal mapping to avoid extra crates).
 pub fn content_type(path: &str) -> &'static str {
     match path.rsplit('.').next().unwrap_or_default() {
         "html" => "text/html; charset=utf-8",
@@ -55,7 +56,7 @@ pub fn content_type(path: &str) -> &'static str {
     }
 }
 
-/// キャッシュ可否: `index.html` と Service Worker は更新を即時反映させる。
+/// Cacheability: `index.html` and the Service Worker must reflect updates immediately.
 pub fn cache_control(path: &str) -> &'static str {
     if path == "index.html" || path == "service-worker.js" {
         "no-cache"

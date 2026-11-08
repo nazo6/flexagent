@@ -3,7 +3,7 @@ name = "fxg-ui-assets"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
-description = "FlexAgent Web UI (ui/build) を rust-embed で単一バイナリへ同梱する"
+description = "Embeds the FlexAgent Web UI (ui/build) into a single binary via rust-embed"
 repository.workspace = true
 
 [dependencies]
