@@ -276,9 +276,16 @@ async fn cli_commands_work_through_daemon_ipc() {
 }
 
 #[tokio::test]
-async fn cli_reports_missing_daemon() {
+async fn cli_reports_missing_daemon_when_auto_start_is_disabled() {
     let env = TestEnv::new();
-    let output = env.run(&["ps"], None);
+    // Auto-start is on by default; disable it to keep testing the error path.
+    let output = env
+        .command()
+        .env(fxg_protocol::config::env_keys::NO_AUTO_DAEMON, "1")
+        .arg("ps")
+        .stdin(Stdio::null())
+        .output()
+        .expect("run fxg ps");
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(

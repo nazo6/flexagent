@@ -97,6 +97,12 @@ fxg web                                          # トークン付きURLでブ�
 fxg kill-all                                     # 【緊急停止】全セッション・子プロセスツリー・PTYを強制終了
 ```
 
+`fxg ps` / `fxg run` / `fxg session ...` などの IPC を使うコマンドは、デーモンが
+起動していない場合に `fxg daemon` をバックグラウンドで自動起動します
+(ログ: `~/.flexagent/logs/daemon.log`)。自動起動を無効化するには
+`FXG_NO_AUTO_DAEMON=1` を設定してください。`fxg daemon` をフォアグラウンドで
+起動している場合や、`fxg service` で常駐させている場合はそちらが優先されます。
+
 ---
 
 ## 2. 設定ファイルスキーマ & ディレクトリ構造 (`config.toml` / `.fxg.toml`)

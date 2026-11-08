@@ -54,6 +54,8 @@ pub mod env_keys {
     pub const ALLOW_REMOTE_PTY: &str = "FXG_ALLOW_REMOTE_PTY";
     /// Override of the local IPC endpoint (for tests and multiple instances on one host)
     pub const IPC_ENDPOINT: &str = "FXG_IPC_ENDPOINT";
+    /// Disable automatic `fxg daemon` startup from CLI commands (`1` / `true`)
+    pub const NO_AUTO_DAEMON: &str = "FXG_NO_AUTO_DAEMON";
     /// `[server] listen_addr`
     pub const SERVER_LISTEN_ADDR: &str = "FXG_SERVER_LISTEN_ADDR";
     /// `[server] allowed_hosts` (comma separated)
