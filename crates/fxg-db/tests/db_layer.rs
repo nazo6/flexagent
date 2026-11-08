@@ -1,12 +1,12 @@
-//! `fxg-db` の統合テスト。
+//! Integration tests for `fxg-db`.
 //!
-//! Phase 1 完了条件の検証:
-//! - マイグレーション適用 (単一スキーマ + FTS5 + トリガー)
-//! - イベント適用の冪等性 (`INSERT OR IGNORE` + 同一トランザクション投影)
-//! - 投影再構築とイベント適用結果の一致
-//! - 水位ベース Outbox 抽出と ACK
-//! - FTS5 全文検索 (トリガー経由・`searchable_text` 除外規則・LIKE フォールバック)
-//! - Local Node (`node.db`) と Central Server (`server.db`) が同一レスポンス型を返すこと
+//! Verification of the Phase 1 completion criteria:
+//! - Migration application (single schema + FTS5 + triggers)
+//! - Idempotency of event application (`INSERT OR IGNORE` + same-transaction projections)
+//! - Projection rebuild matches event application results
+//! - Watermark-based outbox extraction and ACK
+//! - FTS5 full-text search (via triggers, `searchable_text` exclusion rules, LIKE fallback)
+//! - Local Node (`node.db`) and Central Server (`server.db`) return identical response types
 
 use fxg_db::audit::actions;
 use fxg_db::{
@@ -24,7 +24,7 @@ const PROJECT_ID: &str = "github.com/nazo6/flexagent";
 const NODE_ID: &str = "test-node";
 const LOCAL_PATH: &str = "/home/nazo/src/flexagent";
 
-/// テスト用の環境 (ノード・プロジェクト登録済みの DB とイベント採番ヘルパー)。
+/// Test environment (DB with node/project registered, plus an event sequencing helper).
 struct Fixture {
     db: Db,
     session_id: String,
@@ -69,7 +69,7 @@ impl Fixture {
         }
     }
 
-    /// 新しいイベント (node_seq を自動採番) を作る。
+    /// Builds a new event (auto-allocating node_seq).
     fn event(&mut self, payload: UnifiedEventPayload) -> SessionEventEnvelope {
         self.seq += 1;
         SessionEventEnvelope {
@@ -85,13 +85,13 @@ impl Fixture {
         self.event(session_created_payload())
     }
 
-    /// 典型的なイベント列 (SessionCreated → タイトル → エージェント確定 → 状態 →
-    /// ケイパビリティ → ユーザーメッセージ → 権限要求 → 権限解決) を流し込む。
+    /// Feeds a typical event stream (SessionCreated → title → agent bound → status →
+    /// capabilities → user message → permission request → permission resolution).
     async fn seed_typical_stream(&mut self) -> Vec<SessionEventEnvelope> {
         let events = vec![
             self.session_created(),
             self.event(UnifiedEventPayload::SessionTitleChanged {
-                title: "認証エラーの修正".to_owned(),
+                title: "Fix authentication error".to_owned(),
             }),
             self.event(UnifiedEventPayload::SessionAgentBound {
                 agent_session_id: "agent-sess-1".to_owned(),
@@ -109,13 +109,13 @@ impl Fixture {
                 }],
                 available_commands: vec![CommandInfo {
                     name: "/review".to_owned(),
-                    description: "コードレビュー".to_owned(),
+                    description: "Code review".to_owned(),
                     input_hint: None,
                 }],
                 config_options: vec![],
             }),
             self.event(UnifiedEventPayload::UserMessage {
-                text: "認証エラーを修正して".to_owned(),
+                text: "Fix the authentication error".to_owned(),
                 attachments: vec![],
                 client_source: "cli".to_owned(),
                 snapshot_tree_hash: Some("b".repeat(40)),
@@ -172,7 +172,7 @@ async fn count_events(db: &Db, session_id: &str) -> i64 {
     batch.events.len() as i64
 }
 
-/// `sessions.available_modes_json` を読み出してパースする。
+/// Reads and parses `sessions.available_modes_json`.
 async fn available_modes(db: &Db, session_id: &str) -> Vec<ModeInfo> {
     let json: String =
         sqlx::query_scalar(r#"SELECT available_modes_json FROM sessions WHERE session_id = ?"#)
@@ -242,7 +242,7 @@ async fn event_application_is_idempotent() {
         .expect("first append");
     assert!(first.inserted);
 
-    // 同一イベント (event_id も同一) の再送
+    // Resend of the same event (same event_id)
     let second = fixture
         .db
         .append_event(&created)
@@ -250,7 +250,7 @@ async fn event_application_is_idempotent() {
         .expect("second append");
     assert!(!second.inserted, "duplicate event must be ignored");
 
-    // 同一 (session_id, node_seq) で event_id だけ異なるイベント (再送の別採番)
+    // Same (session_id, node_seq) but different event_id (resend with a new allocation)
     let mut duplicate_seq = created.clone();
     duplicate_seq.event_id = uuid_v7();
     let third = fixture
@@ -262,7 +262,7 @@ async fn event_application_is_idempotent() {
 
     assert_eq!(count_events(&fixture.db, &fixture.session_id).await, 1);
 
-    // 投影も重複適用されていない (タイトル・水位が変わらない)
+    // Projections are not applied twice either (title and watermark unchanged)
     let summary = fixture
         .db
         .get_session(&fixture.session_id)
@@ -291,12 +291,12 @@ async fn event_application_updates_session_projections() {
     assert!(!summary.is_worktree);
     assert_eq!(summary.agent_id, "opencode2");
     assert_eq!(summary.agent_session_id.as_deref(), Some("agent-sess-1"));
-    assert_eq!(summary.title, "認証エラーの修正");
+    assert_eq!(summary.title, "Fix authentication error");
     assert_eq!(summary.status, SessionStatus::Running);
     assert_eq!(summary.current_mode.as_deref(), Some("code"));
     assert_eq!(summary.last_node_seq, 8);
 
-    // CapabilitiesUpdated の available_modes も投影カラムに反映される
+    // available_modes from CapabilitiesUpdated are also reflected in projection columns
     assert_eq!(
         available_modes(&fixture.db, &fixture.session_id).await,
         vec![ModeInfo {
@@ -306,7 +306,7 @@ async fn event_application_updates_session_projections() {
         }]
     );
 
-    // 承認は解決済みとして投影される
+    // The permission is projected as resolved
     let request = fixture
         .db
         .find_permission_request("req-1")
@@ -343,13 +343,13 @@ async fn capabilities_partial_update_keeps_available_modes_projection() {
         available_commands: vec![],
         config_options: vec![],
     });
-    // モードを含まない差分更新 (コマンドのみ) では available_modes を上書きしない
+    // Partial updates without modes (commands only) do not overwrite available_modes
     let commands = fixture.event(UnifiedEventPayload::CapabilitiesUpdated {
         current_mode: None,
         available_modes: vec![],
         available_commands: vec![CommandInfo {
             name: "/review".to_owned(),
-            description: "コードレビュー".to_owned(),
+            description: "Code review".to_owned(),
             input_hint: None,
         }],
         config_options: vec![],
@@ -364,7 +364,7 @@ async fn capabilities_partial_update_keeps_available_modes_projection() {
     assert_eq!(modes.len(), 1);
     assert_eq!(modes[0].mode_id, "plan");
 
-    // 全量再構築でも同じ投影が再現される
+    // A full rebuild reproduces the same projections
     fixture.db.rebuild_projections().await.expect("rebuild");
     let rebuilt = available_modes(&fixture.db, &fixture.session_id).await;
     assert_eq!(rebuilt.len(), 1);
@@ -380,7 +380,7 @@ async fn usage_projection_tracks_latest_and_rebuilds() {
         context_size: 100_000,
         cost: None,
     });
-    // 2 回目の更新で完全に上書きされる (累積ではなく最新を保持する)
+    // The second update fully overwrites the first (keeps the latest, not cumulative)
     let second = fixture.event(UnifiedEventPayload::UsageUpdated {
         used_tokens: 53_000,
         context_size: 200_000,
@@ -408,7 +408,7 @@ async fn usage_projection_tracks_latest_and_rebuilds() {
     assert_eq!(cost.currency, "USD");
     assert!((cost.amount - 0.045).abs() < f64::EPSILON);
 
-    // 全量再構築でも同じ投影が再現される
+    // A full rebuild reproduces the same projections
     fixture.db.rebuild_projections().await.expect("rebuild");
     let rebuilt = fixture
         .db
@@ -467,7 +467,7 @@ async fn elicitation_projection_tracks_pending_and_resolved() {
     let created = fixture.session_created();
     let request = fixture.event(UnifiedEventPayload::ElicitationRequest {
         elicitation_id: "elic-1".to_owned(),
-        message: "どの戦略で進めますか?".to_owned(),
+        message: "Which strategy should we use?".to_owned(),
         mode: "form".to_owned(),
         requested_schema: serde_json::json!({
             "type": "object",
@@ -517,7 +517,7 @@ async fn elicitation_projection_tracks_pending_and_resolved() {
             .is_empty()
     );
 
-    // 全量再構築でも同じ投影が再現される
+    // A full rebuild reproduces the same projections
     fixture.db.rebuild_projections().await.expect("rebuild");
     let rebuilt = fixture
         .db
@@ -533,7 +533,7 @@ async fn elicitation_projection_tracks_pending_and_resolved() {
 async fn rebuild_projections_matches_incremental_apply() {
     let mut fixture = Fixture::new(DbRole::Hub).await;
     fixture.seed_typical_stream().await;
-    // 2つ目のセッション (Fork 相当) も追加して、複数セッションの再構築を検証する
+    // Add a second session (equivalent to a fork) to verify rebuilding multiple sessions
     let parent_session_id = fixture.session_id.clone();
     let forked_id = uuid_v7();
     fixture.session_id = forked_id.clone();
@@ -551,7 +551,7 @@ async fn rebuild_projections_matches_incremental_apply() {
         title: "Forked Session".to_owned(),
     });
     let forked_message = fixture.event(UnifiedEventPayload::UserMessage {
-        text: "Forkしたセッションです".to_owned(),
+        text: "This is a forked session".to_owned(),
         attachments: vec![],
         client_source: "web".to_owned(),
         snapshot_tree_hash: None,
@@ -590,11 +590,11 @@ async fn rebuild_projections_matches_incremental_apply() {
 
     assert_eq!(
         sessions_after, sessions_before,
-        "全量再構築の結果はイベント適用結果と一致しなければならない"
+        "a full rebuild must match incremental event application"
     );
     assert_eq!(request_after, request_before);
 
-    // Fork 元の情報が保持されている
+    // The fork source information is preserved
     let forked = fixture
         .db
         .get_session(&forked_id)
@@ -608,7 +608,7 @@ async fn rebuild_projections_matches_incremental_apply() {
     assert_eq!(forked.fork_from_node_seq, Some(6));
     assert!(forked.is_worktree);
 
-    // 冪等: もう一度再構築しても変化しない
+    // Idempotent: rebuilding again changes nothing
     fixture
         .db
         .rebuild_projections()
@@ -627,7 +627,7 @@ async fn outbox_watermark_extraction_and_ack() {
     let mut fixture = Fixture::new(DbRole::Node).await;
     let events = fixture.seed_typical_stream().await;
 
-    // 未 ACK のうちは全イベントが Outbox に載る (セッション単位のバッチ)
+    // Until ACKed, all events are in the outbox (batched per session)
     let outbox = fixture.db.extract_outbox().await.expect("outbox");
     assert_eq!(outbox.len(), 1);
     assert_eq!(outbox[0].session_id, fixture.session_id);
@@ -636,7 +636,7 @@ async fn outbox_watermark_extraction_and_ack() {
     assert_eq!(fixture.db.unsynced_event_count().await.expect("count"), 8);
     assert_eq!(fixture.db.last_synced_at().await.expect("synced at"), None);
 
-    // 3件目までの ACK で水位が進む
+    // ACKing up to the third event advances the watermark
     fixture
         .db
         .ack_watermark(&fixture.session_id, 3)
@@ -651,7 +651,7 @@ async fn outbox_watermark_extraction_and_ack() {
         Some(events[2].created_at)
     );
 
-    // 巻き戻る ACK は無視される (MAX 更新)
+    // A rewinding ACK is ignored (MAX update)
     fixture
         .db
         .ack_watermark(&fixture.session_id, 1)
@@ -659,7 +659,7 @@ async fn outbox_watermark_extraction_and_ack() {
         .expect("ack older");
     assert_eq!(fixture.db.unsynced_event_count().await.expect("count"), 5);
 
-    // 全 ACK で Outbox が空になる
+    // ACKing everything empties the outbox
     fixture
         .db
         .ack_watermark(&fixture.session_id, 8)
@@ -675,7 +675,7 @@ async fn outbox_watermark_extraction_and_ack() {
     );
     assert_eq!(fixture.db.unsynced_event_count().await.expect("count"), 0);
 
-    // ResyncRequest 用の範囲再送は水位に関係なく取得できる
+    // Range resend for ResyncRequest works regardless of the watermark
     let resend = fixture
         .db
         .extract_outbox_after(&fixture.session_id, 6)
@@ -683,7 +683,7 @@ async fn outbox_watermark_extraction_and_ack() {
         .expect("resync");
     assert_eq!(resend.len(), 3);
     assert_eq!(resend[0].node_seq, 6);
-    // from_node_seq = 1 は SessionCreated を含む全量再送
+    // from_node_seq = 1 resends everything including SessionCreated
     let full = fixture
         .db
         .extract_outbox_after(&fixture.session_id, 1)
@@ -691,7 +691,7 @@ async fn outbox_watermark_extraction_and_ack() {
         .expect("full resync");
     assert_eq!(full.len(), 8);
 
-    // 未知セッションへの ACK はエラー
+    // ACK for an unknown session is an error
     let err = fixture
         .db
         .ack_watermark("missing-session", 1)
@@ -705,7 +705,7 @@ async fn fts_search_matches_text_and_excludes_binary_events() {
     let mut fixture = Fixture::new(DbRole::Node).await;
     let created = fixture.session_created();
     let user = fixture.event(UnifiedEventPayload::UserMessage {
-        text: "認証エラーのデバッグをお願いします".to_owned(),
+        text: "認証エラーのデバッグをお願いします".to_owned(), // allow-japanese: CJK full-text search test
         attachments: vec![],
         client_source: "cli".to_owned(),
         snapshot_tree_hash: None,
@@ -718,7 +718,7 @@ async fn fts_search_matches_text_and_excludes_binary_events() {
     });
     let message = fixture.event(UnifiedEventPayload::AgentMessage {
         message_id: "m-1".to_owned(),
-        text: "OpenCode2Driver の接続を修正しました".to_owned(),
+        text: "Fixed the OpenCode2Driver connection".to_owned(),
         is_complete: true,
     });
     fixture
@@ -727,18 +727,18 @@ async fn fts_search_matches_text_and_excludes_binary_events() {
         .await
         .expect("append");
 
-    // FTS 経由 (トリガーで同期された検索インデックス) で日本語を検索できる
+    // Japanese text can be searched through FTS (search index synced by triggers)
     let hits = fixture
         .db
-        .search("認証エラー", 10)
+        .search("認証エラー", 10) // allow-japanese: CJK full-text search test
         .await
         .expect("search japanese");
     assert_eq!(hits.len(), 1);
     assert_eq!(hits[0].event_type, "user_message");
-    assert!(hits[0].snippet.contains("認証エラー"));
+    assert!(hits[0].snippet.contains("認証エラー")); // allow-japanese: CJK full-text search test
     assert!(hits[0].snippet.contains('['));
 
-    // コード識別子の部分一致
+    // Partial match on a code identifier
     let hits = fixture
         .db
         .search("OpenCode2Driver", 10)
@@ -747,7 +747,7 @@ async fn fts_search_matches_text_and_excludes_binary_events() {
     assert_eq!(hits.len(), 1);
     assert_eq!(hits[0].event_type, "agent_message");
 
-    // TerminalOutput (バイナリ系) は FTS 対象外
+    // TerminalOutput (binary) is excluded from FTS
     let hits = fixture
         .db
         .search("c2VjcmV0LXRva2VuLXZhbHVl", 10)
@@ -755,26 +755,26 @@ async fn fts_search_matches_text_and_excludes_binary_events() {
         .expect("search base64");
     assert!(hits.is_empty(), "terminal output must be excluded from FTS");
 
-    // ヒットしない語
+    // A term that does not hit
     let hits = fixture
         .db
-        .search("存在しない検索語", 10)
+        .search("存在しない検索語", 10) // allow-japanese: CJK full-text search test
         .await
         .expect("search missing");
     assert!(hits.is_empty());
 
-    // 3文字未満は LIKE フォールバック
-    let hits = fixture.db.search("認証", 10).await.expect("short query");
+    // Queries shorter than 3 characters use the LIKE fallback
+    let hits = fixture.db.search("認証", 10).await.expect("short query"); // allow-japanese: CJK short-query test
     assert_eq!(hits.len(), 1);
-    assert!(hits[0].snippet.contains("認証"));
+    assert!(hits[0].snippet.contains("認証")); // allow-japanese: CJK short-query test
 
-    // 空クエリはエラー
+    // An empty query is an error
     assert!(matches!(
         fixture.db.search("   ", 10).await.expect_err("empty"),
         DbError::EmptySearchQuery
     ));
 
-    // LIKE メタ文字を含む検索語でもエラーにならない
+    // Search terms containing LIKE metacharacters do not error
     let hits = fixture.db.search("100%", 10).await.expect("like meta");
     assert!(hits.is_empty());
 }
@@ -785,7 +785,7 @@ async fn fts_index_stays_in_sync_on_regenerate_and_delete() {
     let created = fixture.session_created();
     let message = fixture.event(UnifiedEventPayload::AgentMessage {
         message_id: "m-1".to_owned(),
-        text: "マイグレーションを適用しました".to_owned(),
+        text: "Applied the migration".to_owned(),
         is_complete: true,
     });
     fixture
@@ -794,14 +794,14 @@ async fn fts_index_stays_in_sync_on_regenerate_and_delete() {
         .await
         .expect("append");
 
-    // searchable_text を破壊してから再生成 → 再度検索できる (UPDATE トリガー検証)
+    // Corrupt searchable_text, regenerate, then search again (UPDATE trigger check)
     sqlx::query("UPDATE session_events SET searchable_text = NULL")
         .execute(fixture.db.pool())
         .await
         .expect("corrupt searchable text");
     let hits = fixture
         .db
-        .search("マイグレーション", 10)
+        .search("migration", 10)
         .await
         .expect("search after corrupt");
     assert!(hits.is_empty());
@@ -814,21 +814,22 @@ async fn fts_index_stays_in_sync_on_regenerate_and_delete() {
     assert_eq!(updated, 2);
     let hits = fixture
         .db
-        .search("マイグレーション", 10)
+        .search("migration", 10)
         .await
         .expect("search after regenerate");
     assert_eq!(hits.len(), 1);
 
-    // FTS インデックスを content テーブルから全再構築しても同じ結果
+    // Rebuilding the whole FTS index from the content table gives the same result
     fixture.db.rebuild_fts_index().await.expect("rebuild fts");
     let hits = fixture
         .db
-        .search("マイグレーション", 10)
+        .search("migration", 10)
         .await
         .expect("search after rebuild");
     assert_eq!(hits.len(), 1);
 
-    // セッション削除 (CASCADE) でイベントと検索インデックスが同期する (DELETE トリガー検証)
+    // Deleting the session (CASCADE) keeps events and the search index in sync
+    // (DELETE trigger check)
     sqlx::query("DELETE FROM sessions WHERE session_id = ?")
         .bind(&fixture.session_id)
         .execute(fixture.db.pool())
@@ -836,7 +837,7 @@ async fn fts_index_stays_in_sync_on_regenerate_and_delete() {
         .expect("delete session");
     let hits = fixture
         .db
-        .search("マイグレーション", 10)
+        .search("migration", 10)
         .await
         .expect("search after delete");
     assert!(hits.is_empty(), "FTS index must follow cascade deletes");
@@ -872,7 +873,7 @@ async fn session_events_after_paginates_by_cursor() {
     assert!(page3.events.is_empty());
     assert_eq!(page3.cursor, page2.cursor, "empty page keeps the cursor");
 
-    // イベントの payload が正しく復元される
+    // Event payloads are restored correctly
     let all = fixture
         .db
         .session_events_after(&fixture.session_id, 0, 100)
@@ -913,7 +914,7 @@ async fn node_and_hub_return_identical_client_responses() {
         .expect("hub sessions");
     assert_eq!(node_sessions, hub_sessions);
 
-    // ノード投影は登録時刻 (last_seen_at) を除いて一致する
+    // Node projections match except for the registration time (last_seen_at)
     let normalize_nodes = |nodes: Vec<fxg_protocol::common::NodeSummary>| {
         nodes
             .into_iter()
@@ -937,7 +938,7 @@ async fn node_and_hub_return_identical_client_responses() {
         normalize_nodes(node_fixture.db.list_nodes().await.expect("node nodes")),
         normalize_nodes(hub_fixture.db.list_nodes().await.expect("hub nodes"))
     );
-    // プロジェクト投影も登録時刻を除いて一致する
+    // Project projections also match except for the registration time
     let normalize_projects = |projects: Vec<fxg_protocol::common::ProjectSummary>| {
         projects
             .into_iter()
@@ -1017,7 +1018,7 @@ async fn session_filters_and_plan_projection() {
     let plan = fixture.event(UnifiedEventPayload::PlanUpdate {
         entries: vec![PlanEntry {
             id: "1".to_owned(),
-            title: "テストを追加する".to_owned(),
+            title: "Add tests".to_owned(),
             status: "pending".to_owned(),
         }],
     });
@@ -1031,7 +1032,7 @@ async fn session_filters_and_plan_projection() {
         .await
         .expect("append");
 
-    // プロジェクト / ノード / 状態によるフィルタ
+    // Filters by project / node / status
     let by_project = fixture
         .db
         .list_sessions(&SessionFilter {
@@ -1087,7 +1088,7 @@ async fn session_filters_and_plan_projection() {
 async fn registration_upserts_and_audit_logs() {
     let fixture = Fixture::new(DbRole::Hub).await;
 
-    // ノード情報の更新
+    // Update node information
     fixture
         .db
         .upsert_node(
@@ -1102,7 +1103,7 @@ async fn registration_upserts_and_audit_logs() {
     assert_eq!(nodes[0].installed_agents.len(), 2);
     assert!(nodes[0].is_online);
 
-    // node_token ハッシュの発行と失効
+    // Issue and revoke the node_token hash
     fixture
         .db
         .set_node_token_hash(NODE_ID, Some("sha256-hash"))
@@ -1129,7 +1130,7 @@ async fn registration_upserts_and_audit_logs() {
         .expect("read token");
     assert!(hash.is_none(), "revoked token hash must be cleared");
 
-    // オンライン状態の更新
+    // Update the online state
     fixture
         .db
         .set_node_online(NODE_ID, false)
@@ -1138,7 +1139,7 @@ async fn registration_upserts_and_audit_logs() {
     let nodes = fixture.db.list_nodes().await.expect("list nodes");
     assert!(!nodes[0].is_online);
 
-    // バインドの更新 (ブランチ変更・パス消失)
+    // Update the binding (branch change, path missing)
     fixture
         .db
         .upsert_project_binding(&ProjectBindingRecord {
@@ -1163,7 +1164,7 @@ async fn registration_upserts_and_audit_logs() {
         "path_exists must round-trip through projections"
     );
 
-    // 監査ログ
+    // Audit log
     let mut record = AuditLogRecord::new(actions::PERMISSION_RESOLVED, "192.168.1.10", "token:web");
     record.session_id = Some("s-1".to_owned());
     record.node_id = Some(NODE_ID.to_owned());
@@ -1185,7 +1186,7 @@ async fn registration_upserts_and_audit_logs() {
     let limited = fixture.db.audit_logs(1).await.expect("audit logs");
     assert_eq!(limited.len(), 1);
 
-    // 未知ノードへの操作はエラー
+    // Operations on an unknown node are errors
     assert!(matches!(
         fixture
             .db
@@ -1200,7 +1201,7 @@ async fn registration_upserts_and_audit_logs() {
 async fn default_local_path_prefers_recent_binding_then_session_history() {
     let fixture = Fixture::new(DbRole::Hub).await;
 
-    // Worktree 紐付けを追加 (メインリポジトリとほぼ同時刻 → タイブレークでメイン優先)
+    // Add a Worktree binding (almost the same time as the main repo → tie-break favors main)
     fixture
         .db
         .upsert_project_binding(&ProjectBindingRecord {
@@ -1213,7 +1214,7 @@ async fn default_local_path_prefers_recent_binding_then_session_history() {
         })
         .await
         .expect("worktree binding");
-    // タイブレーク検証のため両紐付けの最終使用日時を揃える
+    // Align the last-used time of both bindings to verify the tie-break
     sqlx::query("UPDATE project_node_bindings SET last_used_at = 1000")
         .execute(fixture.db.pool())
         .await
@@ -1226,10 +1227,10 @@ async fn default_local_path_prefers_recent_binding_then_session_history() {
     assert_eq!(
         path.as_deref(),
         Some(LOCAL_PATH),
-        "同時刻の場合はメインリポジトリを優先する"
+        "the main repository wins on ties"
     );
 
-    // メインリポジトリの最終使用を古くすると直近使用の Worktree が既定になる
+    // Aging the main repository's last use makes the most recently used Worktree the default
     sqlx::query("UPDATE project_node_bindings SET last_used_at = 1 WHERE local_path = ?")
         .bind(LOCAL_PATH)
         .execute(fixture.db.pool())
@@ -1243,10 +1244,10 @@ async fn default_local_path_prefers_recent_binding_then_session_history() {
     assert_eq!(
         path.as_deref(),
         Some("/home/nazo/src/flexagent-wt"),
-        "直近使用した Worktree を優先する"
+        "the most recently used Worktree wins"
     );
 
-    // 実在しない紐付けは既定にしない (より古い実在する紐付けへフォールバック)
+    // A non-existent binding is not used as default (falls back to an older existing binding)
     sqlx::query("UPDATE project_node_bindings SET path_exists = 0 WHERE local_path = ?")
         .bind("/home/nazo/src/flexagent-wt")
         .execute(fixture.db.pool())
@@ -1260,10 +1261,10 @@ async fn default_local_path_prefers_recent_binding_then_session_history() {
     assert_eq!(
         path.as_deref(),
         Some(LOCAL_PATH),
-        "実在する紐付けへフォールバックする"
+        "falls back to an existing binding"
     );
 
-    // 実在する紐付けが無い場合は最終使用が最も新しいものを返す (UI が警告表示)
+    // With no existing bindings, returns the most recently used one (the UI shows a warning)
     sqlx::query("UPDATE project_node_bindings SET path_exists = 0")
         .execute(fixture.db.pool())
         .await
@@ -1275,8 +1276,8 @@ async fn default_local_path_prefers_recent_binding_then_session_history() {
         .expect("resolve default");
     assert_eq!(path.as_deref(), Some("/home/nazo/src/flexagent-wt"));
 
-    // 紐付けの無いプロジェクトは最新セッションの local_path にフォールバックする
-    // (セッション開始時の紐付け登録を実装する前に実行されたセッションを想定)
+    // A project without bindings falls back to the latest session's local_path
+    // (assuming a session started before binding registration on session start existed)
     let legacy_project = "github.com/nazo6/legacy";
     let legacy_path = "/home/nazo/src/legacy";
     let legacy_event = SessionEventEnvelope {
@@ -1309,7 +1310,7 @@ async fn default_local_path_prefers_recent_binding_then_session_history() {
         .expect("resolve default");
     assert_eq!(path.as_deref(), Some(legacy_path));
 
-    // 紐付けもセッションも無い場合は None
+    // None when there are neither bindings nor sessions
     let path = fixture
         .db
         .resolve_default_local_path("github.com/nazo6/none", NODE_ID)
@@ -1391,7 +1392,7 @@ async fn append_next_event_allocates_gap_free_sequences() {
         .append_next_event(
             &fixture.session_id,
             UnifiedEventPayload::UserMessage {
-                text: "続けて".to_owned(),
+                text: "Continue".to_owned(),
                 attachments: vec![],
                 client_source: "cli".to_owned(),
                 snapshot_tree_hash: None,
@@ -1410,7 +1411,7 @@ async fn append_next_event_allocates_gap_free_sequences() {
     assert_eq!(summary.last_node_seq, 3);
     assert_eq!(count_events(&fixture.db, &fixture.session_id).await, 3);
 
-    // 未知セッションへの採番はエラー
+    // Allocation for an unknown session is an error
     let err = fixture
         .db
         .append_next_event(
@@ -1424,7 +1425,7 @@ async fn append_next_event_allocates_gap_free_sequences() {
         .expect_err("unknown session");
     assert!(matches!(err, DbError::SessionNotFound(_)));
 
-    // 永続化対象外のイベントは拒否される (キーストローク)
+    // Events that must not be persisted are rejected (keystroke)
     let err = fixture
         .db
         .append_next_event(
@@ -1441,7 +1442,7 @@ async fn append_next_event_allocates_gap_free_sequences() {
         DbError::NonPersistableEvent("terminal_input")
     ));
 
-    // 拒否時は node_seq を消費しない (トランザクションがロールバックされる)
+    // Rejection does not consume node_seq (the transaction is rolled back)
     let fourth = fixture
         .db
         .append_next_event(
@@ -1462,7 +1463,7 @@ async fn non_persistable_events_are_rejected_on_batch_append() {
     let created = fixture.session_created();
     let partial = fixture.event(UnifiedEventPayload::AgentMessage {
         message_id: "m1".to_owned(),
-        text: "途中".to_owned(),
+        text: "partial".to_owned(),
         is_complete: false,
     });
 
@@ -1473,7 +1474,7 @@ async fn non_persistable_events_are_rejected_on_batch_append() {
         .expect_err("incomplete message");
     assert!(matches!(err, DbError::NonPersistableEvent("agent_message")));
 
-    // バッチ全体がロールバックされる (SessionCreated も入らない)
+    // The whole batch is rolled back (SessionCreated is not inserted either)
     assert!(
         fixture
             .db
@@ -1483,11 +1484,11 @@ async fn non_persistable_events_are_rejected_on_batch_append() {
             .is_none()
     );
 
-    // 完成イベントなら追記できる
+    // A completed event can be appended
     let mut complete = partial;
     complete.payload = UnifiedEventPayload::AgentMessage {
         message_id: "m1".to_owned(),
-        text: "完成".to_owned(),
+        text: "complete".to_owned(),
         is_complete: true,
     };
     fixture
@@ -1506,7 +1507,7 @@ async fn session_archiving_hides_from_default_list_and_is_reversible() {
     let archived = fixture.event(UnifiedEventPayload::SessionArchived { archived: true });
     fixture.db.append_event(&archived).await.expect("archive");
 
-    // イベントログは保持される (アーカイブは可逆な可視性フラグ)
+    // The event log is retained (archiving is a reversible visibility flag)
     assert_eq!(count_events(&fixture.db, &fixture.session_id).await, 9);
     let summary = fixture
         .db
@@ -1516,7 +1517,7 @@ async fn session_archiving_hides_from_default_list_and_is_reversible() {
         .expect("exists");
     assert_eq!(summary.archived_at, Some(archived.created_at));
 
-    // 既定の一覧からは除外され、`include_archived` で取得できる
+    // Excluded from the default list but retrievable with `include_archived`
     assert!(
         fixture
             .db
@@ -1536,7 +1537,7 @@ async fn session_archiving_hides_from_default_list_and_is_reversible() {
     assert_eq!(with_archived.len(), 1);
     assert_eq!(with_archived[0].archived_at, Some(archived.created_at));
 
-    // 全量再構築でもアーカイブ状態が維持される (イベント由来の投影)
+    // Archive state is preserved through a full rebuild (event-derived projection)
     fixture.db.rebuild_projections().await.expect("rebuild");
     let rebuilt = fixture
         .db
@@ -1546,7 +1547,7 @@ async fn session_archiving_hides_from_default_list_and_is_reversible() {
         .expect("exists");
     assert_eq!(rebuilt.archived_at, Some(archived.created_at));
 
-    // 復元できる
+    // Can be restored
     let restored = fixture.event(UnifiedEventPayload::SessionArchived { archived: false });
     fixture.db.append_event(&restored).await.expect("unarchive");
     let summary = fixture
@@ -1571,7 +1572,7 @@ async fn session_archiving_hides_from_default_list_and_is_reversible() {
 async fn session_deletion_purges_content_and_keeps_tombstone() {
     let mut fixture = Fixture::new(DbRole::Node).await;
     fixture.seed_typical_stream().await;
-    // 全イベントを同期済みにしてから削除する (Outbox には tombstone のみが載る)
+    // Sync all events before deleting (only the tombstone goes into the outbox)
     fixture
         .db
         .ack_watermark(&fixture.session_id, 8)
@@ -1581,7 +1582,7 @@ async fn session_deletion_purges_content_and_keeps_tombstone() {
     let deleted = fixture.event(UnifiedEventPayload::SessionDeleted {});
     fixture.db.append_event(&deleted).await.expect("delete");
 
-    // 本文イベント・承認履歴はパージされ、tombstone のみ残る
+    // Body events and approval history are purged, leaving only the tombstone
     assert_eq!(count_events(&fixture.db, &fixture.session_id).await, 1);
     assert!(
         fixture
@@ -1598,7 +1599,7 @@ async fn session_deletion_purges_content_and_keeps_tombstone() {
             .await
             .expect("get")
             .is_none(),
-        "削除済みセッションは取得できない (tombstone)"
+        "a deleted session cannot be retrieved (tombstone)"
     );
     assert!(
         fixture
@@ -1612,7 +1613,7 @@ async fn session_deletion_purges_content_and_keeps_tombstone() {
             .is_empty()
     );
 
-    // 同期: tombstone のみが Outbox に載る
+    // Sync: only the tombstone goes into the outbox
     let outbox = fixture.db.extract_outbox().await.expect("outbox");
     assert_eq!(outbox.len(), 1);
     assert_eq!(outbox[0].events.len(), 1);
@@ -1622,14 +1623,14 @@ async fn session_deletion_purges_content_and_keeps_tombstone() {
     ));
     assert_eq!(outbox[0].last_node_seq(), Some(9));
 
-    // 削除後に競合したイベント (停止処理中のターン完了など) は破棄される
+    // Events racing with deletion (e.g. turn completion during stop) are discarded
     let straggler = SessionEventEnvelope {
         event_id: uuid_v7(),
         session_id: fixture.session_id.clone(),
         node_seq: 10,
         created_at: now_ms(),
         payload: UnifiedEventPayload::UserMessage {
-            text: "削除後に届いたイベント".to_owned(),
+            text: "event received after deletion".to_owned(),
             attachments: vec![],
             client_source: "web".to_owned(),
             snapshot_tree_hash: None,
@@ -1640,10 +1641,13 @@ async fn session_deletion_purges_content_and_keeps_tombstone() {
         .append_event(&straggler)
         .await
         .expect("straggler");
-    assert!(!outcome.inserted, "削除済みセッションへの追記は破棄される");
+    assert!(
+        !outcome.inserted,
+        "appends to a deleted session are discarded"
+    );
     assert_eq!(count_events(&fixture.db, &fixture.session_id).await, 1);
 
-    // 全量再構築でも削除状態が維持される
+    // Deletion state is preserved through a full rebuild
     fixture.db.rebuild_projections().await.expect("rebuild");
     assert!(
         fixture
@@ -1658,7 +1662,8 @@ async fn session_deletion_purges_content_and_keeps_tombstone() {
 
 #[tokio::test]
 async fn session_deleted_for_unknown_session_is_noop() {
-    // Resync 応答などで未知セッションの tombstone が届いても FK 制約違反にしない
+    // A tombstone for an unknown session (e.g. from a resync response) must not cause an
+    // FK violation
     let db = Db::open_in_memory(DbRole::Hub).await.expect("open db");
     let envelope = SessionEventEnvelope {
         event_id: uuid_v7(),

@@ -1,4 +1,4 @@
-//! SQLite 接続管理とマイグレーション適用。
+//! SQLite connection management and migration application.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -15,20 +15,21 @@ use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, S
 use crate::error::DbError;
 use crate::{audit, events, outbox, queries, registration};
 
-/// DB の実行ロール。
+/// Execution role of a DB.
 ///
-/// `node.db` / `server.db` は同一スキーマを共有し、挙動差はこのロールで分岐する
-/// (実行ロールによる分岐は Phase 4 以降で Outbox 同期・中継・Web Push などに現れる)。
+/// `node.db` / `server.db` share the same schema, and behavioral differences branch on this
+/// role (role-based branching appears in outbox sync, relaying, Web Push, etc. from Phase 4
+/// onward).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DbRole {
-    /// 各ノードのローカルDB (`node.db`)。セッション状態の**権威**。
+    /// Each node's local DB (`node.db`). The **authority** for session state.
     Node,
-    /// 中央サーバーのDB (`server.db`)。イベント適用による**投影**のみ更新する。
+    /// Central server DB (`server.db`). Only updates **projections** via event application.
     Hub,
 }
 
 impl DbRole {
-    /// ロール名 (`node` / `hub`)。
+    /// Role name (`node` / `hub`).
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Node => "node",
@@ -37,20 +38,20 @@ impl DbRole {
     }
 }
 
-/// `~/.flexagent/node.db` のパスを返す。
+/// Returns the path to `~/.flexagent/node.db`.
 pub fn node_db_path(fxg_home: &Path) -> PathBuf {
     fxg_home.join(NODE_DB_FILE_NAME)
 }
 
-/// `~/.flexagent/server.db` のパスを返す。
+/// Returns the path to `~/.flexagent/server.db`.
 pub fn hub_db_path(fxg_home: &Path) -> PathBuf {
     fxg_home.join(SERVER_DB_FILE_NAME)
 }
 
-/// SQLite DB ハンドル (接続プール + 実行ロール)。
+/// SQLite DB handle (connection pool + execution role).
 ///
-/// `SqlitePool` はハンドル (Arc) をクローンするだけなので、`Db` 自体も
-/// 安価にクローンできる (デーモンの共有状態などで使用する)。
+/// `SqlitePool` only clones a handle (Arc), so `Db` itself is also cheap to clone
+/// (used for shared daemon state, etc.).
 #[derive(Clone)]
 pub struct Db {
     pool: SqlitePool,
@@ -58,10 +59,10 @@ pub struct Db {
 }
 
 impl Db {
-    /// ファイルDBを開く。親ディレクトリを作成し、マイグレーションを適用する。
+    /// Opens a file-backed DB. Creates the parent directory and applies migrations.
     ///
-    /// WAL モード / `foreign_keys = ON` / `busy_timeout` は全接続に適用する
-    /// (マイグレーション内の `PRAGMA` はトランザクション中では効果がないため)。
+    /// WAL mode / `foreign_keys = ON` / `busy_timeout` are applied to every connection
+    /// (`PRAGMA` inside migrations has no effect within a transaction).
     pub async fn open(path: &Path, role: DbRole) -> Result<Self, DbError> {
         if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
             std::fs::create_dir_all(parent)?;
@@ -80,9 +81,10 @@ impl Db {
         Self::from_pool(pool, role).await
     }
 
-    /// インメモリDBを開く (テスト用)。
+    /// Opens an in-memory DB (for tests).
     ///
-    /// インメモリDBは接続ごとに独立するため、プールを1接続に固定する。
+    /// Because in-memory DBs are independent per connection, the pool is pinned to a single
+    /// connection.
     pub async fn open_in_memory(role: DbRole) -> Result<Self, DbError> {
         let options = SqliteConnectOptions::new()
             .in_memory(true)
@@ -100,26 +102,26 @@ impl Db {
         Ok(Self { pool, role })
     }
 
-    /// 接続プールへの参照を返す (共通クエリ層を直接利用する場合)。
+    /// Returns a reference to the connection pool (when using the shared query layer directly).
     pub fn pool(&self) -> &SqlitePool {
         &self.pool
     }
 
-    /// 実行ロールを返す。
+    /// Returns the execution role.
     pub fn role(&self) -> DbRole {
         self.role
     }
 
-    /// 接続プールを閉じる。
+    /// Closes the connection pool.
     pub async fn close(self) {
         self.pool.close().await;
     }
 
     // ------------------------------------------------------------------
-    // イベント適用エンジン (crate::events)
+    // Event application engine (crate::events)
     // ------------------------------------------------------------------
 
-    /// イベントを冪等に追記し、同一トランザクションで投影を更新する。
+    /// Appends events idempotently and updates projections in the same transaction.
     pub async fn append_events(
         &self,
         events: &[SessionEventEnvelope],
@@ -127,7 +129,7 @@ impl Db {
         events::append_events(&self.pool, events).await
     }
 
-    /// 単一イベントを冪等に追記し、投影を更新する。
+    /// Appends a single event idempotently and updates projections.
     pub async fn append_event(
         &self,
         event: &SessionEventEnvelope,
@@ -137,7 +139,7 @@ impl Db {
             .map(|mut outcomes| outcomes.remove(0))
     }
 
-    /// セッションの次の `node_seq` を採番してイベントを追記する (実行ノード専用)。
+    /// Allocates the session's next `node_seq` and appends the event (executing node only).
     pub async fn append_next_event(
         &self,
         session_id: &str,
@@ -146,31 +148,32 @@ impl Db {
         events::append_next_event(&self.pool, session_id, payload).await
     }
 
-    /// イベントログ全量から `sessions` / `permission_requests` 投影を再構築する。
+    /// Rebuilds the `sessions` / `permission_requests` projections from the full event log.
     pub async fn rebuild_projections(&self) -> Result<(), DbError> {
         events::rebuild_projections(&self.pool).await
     }
 
-    /// `searchable_text` / `event_type` を payload から再生成する。
+    /// Regenerates `searchable_text` / `event_type` from the payloads.
     pub async fn regenerate_searchable_text(&self) -> Result<u64, DbError> {
         events::regenerate_searchable_text(&self.pool).await
     }
 
-    /// FTS5 外部コンテンツインデックスを content テーブルから再構築する。
+    /// Rebuilds the FTS5 external content index from the content table.
     pub async fn rebuild_fts_index(&self) -> Result<(), DbError> {
         events::rebuild_fts_index(&self.pool).await
     }
 
     // ------------------------------------------------------------------
-    // 水位ベース Outbox (crate::outbox)
+    // Watermark-based outbox (crate::outbox)
     // ------------------------------------------------------------------
 
-    /// 未送信イベントをセッション単位にまとめて抽出する。
+    /// Extracts unsent events grouped by session.
     pub async fn extract_outbox(&self) -> Result<Vec<outbox::SessionOutboxBatch>, DbError> {
         outbox::extract_outbox(&self.pool).await
     }
 
-    /// `ResyncRequest` 用: 指定セッションの `from_node_seq` 以降を水位に関係なく抽出する。
+    /// For `ResyncRequest`: extracts the given session from `from_node_seq` onward regardless
+    /// of the watermark.
     pub async fn extract_outbox_after(
         &self,
         session_id: &str,
@@ -179,7 +182,7 @@ impl Db {
         outbox::extract_outbox_after(&self.pool, session_id, from_node_seq).await
     }
 
-    /// `EventBatchAck` 受信時の水位更新 (`synced_up_to_node_seq`)。
+    /// Watermark update upon receiving `EventBatchAck` (`synced_up_to_node_seq`).
     pub async fn ack_watermark(
         &self,
         session_id: &str,
@@ -188,31 +191,31 @@ impl Db {
         outbox::ack_watermark(&self.pool, session_id, acked_up_to_node_seq).await
     }
 
-    /// 未同期 Outbox イベント件数 (UI の同期バッジ用)。
+    /// Number of unsynced outbox events (for the sync badge in the UI).
     pub async fn unsynced_event_count(&self) -> Result<u64, DbError> {
         outbox::unsynced_event_count(&self.pool).await
     }
 
-    /// 最後に ACK されたイベントの時刻 (最終同期時刻)。
+    /// Time of the last ACKed event (last sync time).
     pub async fn last_synced_at(&self) -> Result<Option<i64>, DbError> {
         outbox::last_synced_at(&self.pool).await
     }
 
     // ------------------------------------------------------------------
-    // ノード自己登録・プロジェクト紐付け (crate::registration)
+    // Node self-registration and project binding (crate::registration)
     // ------------------------------------------------------------------
 
-    /// ノード情報を upsert する (`token_hash` は保持)。
+    /// Upserts node information (`token_hash` is preserved).
     pub async fn upsert_node(&self, record: &registration::NodeRecord) -> Result<(), DbError> {
         registration::upsert_node(&self.pool, record).await
     }
 
-    /// ノードのオンライン状態を更新する。
+    /// Updates the node's online state.
     pub async fn set_node_online(&self, node_id: &str, is_online: bool) -> Result<(), DbError> {
         registration::set_node_online(&self.pool, node_id, is_online).await
     }
 
-    /// ノードのライフサイクル状態を更新する (一時VMの provisioning / terminated 等)。
+    /// Updates the node's lifecycle state (ephemeral VM provisioning / terminated, etc.).
     pub async fn set_node_lifecycle(
         &self,
         node_id: &str,
@@ -221,7 +224,7 @@ impl Db {
         registration::set_node_lifecycle(&self.pool, node_id, status).await
     }
 
-    /// 一時VMプロビジョニング中のセッション状態を更新する (ハブ専用)。
+    /// Updates the session state while an ephemeral VM is being provisioned (hub only).
     pub async fn set_provisional_session_status(
         &self,
         session_id: &str,
@@ -230,7 +233,7 @@ impl Db {
         registration::set_provisional_session_status(&self.pool, session_id, status).await
     }
 
-    /// ノード個別トークンのハッシュを設定 / 失効させる。
+    /// Sets or revokes the hash of a per-node token.
     pub async fn set_node_token_hash(
         &self,
         node_id: &str,
@@ -239,12 +242,12 @@ impl Db {
         registration::set_node_token_hash(&self.pool, node_id, token_hash).await
     }
 
-    /// ノード個別トークンのハッシュ一覧 `(node_id, token_hash)` を返す。
+    /// Returns the list of per-node token hashes `(node_id, token_hash)`.
     pub async fn list_node_tokens(&self) -> Result<Vec<(String, String)>, DbError> {
         registration::list_node_tokens(&self.pool).await
     }
 
-    /// 論理プロジェクトを upsert する。
+    /// Upserts a logical project.
     pub async fn upsert_project(
         &self,
         record: &registration::ProjectRecord,
@@ -252,7 +255,7 @@ impl Db {
         registration::upsert_project(&self.pool, record).await
     }
 
-    /// プロジェクト × ノードのローカルパス紐付けを upsert する。
+    /// Upserts a project × node local path binding.
     pub async fn upsert_project_binding(
         &self,
         record: &registration::ProjectBindingRecord,
@@ -260,7 +263,7 @@ impl Db {
         registration::upsert_project_binding(&self.pool, record).await
     }
 
-    /// プロジェクト × ノードのローカルパス紐付けを削除する (削除行数を返す)。
+    /// Deletes a project × node local path binding (returns the number of deleted rows).
     pub async fn delete_project_binding(
         &self,
         node_id: &str,
@@ -269,7 +272,7 @@ impl Db {
         registration::delete_project_binding(&self.pool, node_id, local_path).await
     }
 
-    /// 同じ `(node_id, local_path)` を持つ他プロジェクトの紐付けを削除する。
+    /// Deletes bindings of other projects that share the same `(node_id, local_path)`.
     pub async fn delete_other_project_bindings(
         &self,
         node_id: &str,
@@ -285,12 +288,13 @@ impl Db {
         .await
     }
 
-    /// 紐付けもセッションも持たない孤立プロジェクトを削除する。
+    /// Deletes orphan projects that have neither bindings nor sessions.
     pub async fn delete_orphan_projects(&self) -> Result<u64, DbError> {
         registration::delete_orphan_projects(&self.pool).await
     }
 
-    /// 一時VMプロビジョニング中の仮セッション行を挿入する (ハブ専用・冪等)。
+    /// Inserts a provisional session row while an ephemeral VM is provisioning (hub only,
+    /// idempotent).
     pub async fn upsert_provisional_session(
         &self,
         record: &registration::ProvisionalSessionRecord,
@@ -299,10 +303,10 @@ impl Db {
     }
 
     // ------------------------------------------------------------------
-    // 共通クライアント向けクエリ (crate::queries)
+    // Shared client-facing queries (crate::queries)
     // ------------------------------------------------------------------
 
-    /// セッション一覧 (更新日時降順)。
+    /// Session list (descending by update time).
     pub async fn list_sessions(
         &self,
         filter: &queries::SessionFilter,
@@ -310,12 +314,12 @@ impl Db {
         queries::list_sessions(&self.pool, filter).await
     }
 
-    /// セッションを1件取得する。
+    /// Retrieves a single session.
     pub async fn get_session(&self, session_id: &str) -> Result<Option<SessionSummary>, DbError> {
         queries::get_session(&self.pool, session_id).await
     }
 
-    /// 実行ディレクトリの既定パスを解決する (紐付け → 最新セッションの順)。
+    /// Resolves the default execution directory path (binding first, then latest session).
     pub async fn resolve_default_local_path(
         &self,
         project_id: &str,
@@ -324,7 +328,7 @@ impl Db {
         queries::resolve_default_local_path(&self.pool, project_id, node_id).await
     }
 
-    /// ハブ専用: 退避済み git bundle のパスを記録する (`None` で消去)。
+    /// Hub only: records the path of a salvaged git bundle (cleared with `None`).
     pub async fn set_git_bundle_path(
         &self,
         session_id: &str,
@@ -333,12 +337,12 @@ impl Db {
         queries::set_git_bundle_path(&self.pool, session_id, path).await
     }
 
-    /// ハブ専用: 退避済み git bundle のパスを取得する。
+    /// Hub only: retrieves the path of a salvaged git bundle.
     pub async fn get_git_bundle_path(&self, session_id: &str) -> Result<Option<String>, DbError> {
         queries::get_git_bundle_path(&self.pool, session_id).await
     }
 
-    /// `after_cursor` より後のイベント履歴 (差分再開用バッチ) を取得する。
+    /// Retrieves the event history after `after_cursor` (batch for incremental resume).
     pub async fn session_events_after(
         &self,
         session_id: &str,
@@ -348,8 +352,8 @@ impl Db {
         queries::session_events_after(&self.pool, session_id, after_cursor, limit).await
     }
 
-    /// 全セッション横断で `after_cursor` より後のイベントを取得する
-    /// (Client WS のリプレイ用)。
+    /// Retrieves events after `after_cursor` across all sessions
+    /// (for Client WS replay).
     pub async fn events_after_cursor(
         &self,
         after_cursor: u64,
@@ -358,27 +362,27 @@ impl Db {
         queries::events_after_cursor(&self.pool, after_cursor, limit).await
     }
 
-    /// `session_events` の最新カーソル (イベントが無い場合は 0)。
+    /// Latest cursor of `session_events` (0 when there are no events).
     pub async fn latest_cursor(&self) -> Result<u64, DbError> {
         queries::latest_cursor(&self.pool).await
     }
 
-    /// 論理プロジェクト一覧 (ノード・Worktree 紐付け含む)。
+    /// Logical project list (including node / Worktree bindings).
     pub async fn list_projects(&self) -> Result<Vec<ProjectSummary>, DbError> {
         queries::list_projects(&self.pool).await
     }
 
-    /// ノード一覧 (オンライン状態・一時ノード属性含む)。
+    /// Node list (including online state and ephemeral node attributes).
     pub async fn list_nodes(&self) -> Result<Vec<NodeSummary>, DbError> {
         queries::list_nodes(&self.pool).await
     }
 
-    /// 未解決 (`pending`) の承認リクエスト一覧 (グローバル承認 Inbox)。
+    /// Unresolved (`pending`) permission requests (global approval inbox).
     pub async fn pending_permissions(&self) -> Result<Vec<PermissionRequestEntry>, DbError> {
         queries::pending_permissions(&self.pool).await
     }
 
-    /// 承認リクエストを1件取得する。
+    /// Retrieves a single permission request.
     pub async fn find_permission_request(
         &self,
         request_id: &str,
@@ -386,12 +390,12 @@ impl Db {
         queries::find_permission_request(&self.pool, request_id).await
     }
 
-    /// 未解決 (`pending`) の elicitation リクエスト一覧 (質問 Inbox)。
+    /// Unresolved (`pending`) elicitation requests (question inbox).
     pub async fn pending_elicitations(&self) -> Result<Vec<ElicitationRequestEntry>, DbError> {
         queries::pending_elicitations(&self.pool).await
     }
 
-    /// elicitation リクエストを1件取得する。
+    /// Retrieves a single elicitation request.
     pub async fn find_elicitation_request(
         &self,
         elicitation_id: &str,
@@ -399,26 +403,26 @@ impl Db {
         queries::find_elicitation_request(&self.pool, elicitation_id).await
     }
 
-    /// FTS5 全文検索 (3文字未満は LIKE フォールバック)。
+    /// FTS5 full-text search (falls back to LIKE for queries shorter than 3 characters).
     pub async fn search(&self, query: &str, limit: u32) -> Result<Vec<SearchHit>, DbError> {
         queries::search(&self.pool, query, limit).await
     }
 
-    /// 監査ログ一覧 (新しい順)。
+    /// Audit log list (newest first).
     pub async fn audit_logs(&self, limit: u32) -> Result<Vec<AuditLogEntry>, DbError> {
         queries::audit_logs(&self.pool, limit).await
     }
 
-    /// 監査ログを記録する。
+    /// Records an audit log entry.
     pub async fn append_audit_log(&self, record: &audit::AuditLogRecord) -> Result<i64, DbError> {
         audit::append_audit_log(&self.pool, record).await
     }
 
     // ------------------------------------------------------------------
-    // Web Push 購読 (中央サーバー)
+    // Web Push subscriptions (central server)
     // ------------------------------------------------------------------
 
-    /// Web Push 購読を登録・更新する (同一 `endpoint` は鍵を上書き)。
+    /// Registers or updates a Web Push subscription (same `endpoint` overwrites the keys).
     pub async fn upsert_push_subscription(
         &self,
         record: &crate::push::PushSubscriptionRecord,
@@ -426,14 +430,14 @@ impl Db {
         crate::push::upsert_push_subscription(&self.pool, record).await
     }
 
-    /// 全 Web Push 購読を取得する。
+    /// Retrieves all Web Push subscriptions.
     pub async fn list_push_subscriptions(
         &self,
     ) -> Result<Vec<crate::push::PushSubscriptionRecord>, DbError> {
         crate::push::list_push_subscriptions(&self.pool).await
     }
 
-    /// Web Push 購読を削除する (失効購読のクリーンアップ)。
+    /// Deletes a Web Push subscription (cleanup of expired subscriptions).
     pub async fn delete_push_subscription(&self, endpoint: &str) -> Result<(), DbError> {
         crate::push::delete_push_subscription(&self.pool, endpoint).await
     }

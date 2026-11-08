@@ -1,28 +1,28 @@
-//! Web Push 購読 (`push_subscriptions`) の管理。
+//! Web Push subscription management (`push_subscriptions`).
 //!
-//! 中央サーバーのみが使用する (Android / Desktop PWA の Web Push 通知)。
-//! 購読は端末ごとに `endpoint` で一意化し、再登録時は鍵を更新する
-//! (設計: `docs/03-protocol-and-api.md` §3.1、`docs/05-cli-and-pwa-ui.md` §3.3)。
+//! Used only by the central server (Web Push notifications for Android / Desktop PWA).
+//! Subscriptions are keyed per device by `endpoint`, and keys are updated on re-registration
+//! (design: `docs/03-protocol-and-api.md` §3.1, `docs/05-cli-and-pwa-ui.md` §3.3).
 
 use fxg_protocol::util::now_ms;
 use sqlx::SqlitePool;
 
 use crate::error::DbError;
 
-/// Web Push 購読レコード。
+/// Web Push subscription record.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PushSubscriptionRecord {
-    /// Push サービスエンドポイント URL
+    /// Push service endpoint URL
     pub endpoint: String,
-    /// 購読の `p256dh` 公開鍵 (Base64)
+    /// Subscription's `p256dh` public key (Base64)
     pub p256dh: String,
-    /// 購読の `auth` シークレット (Base64)
+    /// Subscription's `auth` secret (Base64)
     pub auth: String,
-    /// 端末名 (例: `Pixel 9 Chrome PWA`)
+    /// Device name (e.g. `Pixel 9 Chrome PWA`)
     pub device_name: Option<String>,
 }
 
-/// 購読を登録・更新する (同一 `endpoint` は鍵を上書きする)。
+/// Registers or updates a subscription (same `endpoint` overwrites the keys).
 pub async fn upsert_push_subscription(
     pool: &SqlitePool,
     record: &PushSubscriptionRecord,
@@ -47,7 +47,7 @@ pub async fn upsert_push_subscription(
     Ok(())
 }
 
-/// 全購読を取得する (通知送信用)。
+/// Lists all subscriptions (for sending notifications).
 pub async fn list_push_subscriptions(
     pool: &SqlitePool,
 ) -> Result<Vec<PushSubscriptionRecord>, DbError> {
@@ -73,7 +73,7 @@ pub async fn list_push_subscriptions(
         .collect())
 }
 
-/// 失効した購読 (`404` / `410` 応答) を削除する。
+/// Deletes an expired subscription (`404` / `410` responses).
 pub async fn delete_push_subscription(pool: &SqlitePool, endpoint: &str) -> Result<(), DbError> {
     sqlx::query!(
         r#"
@@ -87,7 +87,7 @@ pub async fn delete_push_subscription(pool: &SqlitePool, endpoint: &str) -> Resu
     Ok(())
 }
 
-/// sqlx の型安全マクロ用行構造体。
+/// Row struct for the type-safe sqlx macros.
 struct PushSubscriptionRow {
     endpoint: String,
     p256dh: String,

@@ -1,29 +1,29 @@
-//! FlexAgent SQLite スキーマ管理・イベント適用エンジン・共通クエリ層 (`fxg-db`)
+//! FlexAgent SQLite schema management, event application engine, and shared query layer (`fxg-db`)
 //!
-//! `node.db` (各ノード) と `server.db` (中央サーバー) は
-//! [単一のマイグレーションセット](./migrations) から生成される同一スキーマを共有する。
-//! 違いは「行のスコープ」と「実行ロール ([`DbRole`])」のみ。
+//! `node.db` (each node) and `server.db` (the central server) share the same schema
+//! generated from [a single migration set](./migrations). The only differences are the
+//! "row scope" and the "execution role" ([`DbRole`]).
 //!
-//! 設計仕様は
+//! See
 //! [`docs/02-database-schema.md`](https://github.com/nazo6/flexagent/blob/master/docs/02-database-schema.md)
-//! を参照。
+//! for the design specification.
 //!
-//! # モジュール構成
+//! # Module layout
 //!
-//! - `events`: イベント適用エンジン (冪等追記 + 投影更新) と投影再構築
-//! - `outbox`: 水位ベース Outbox 抽出と ACK 水位更新
-//! - `queries`: Local Node / Central Server 共通のクライアント向けクエリ層
-//! - `registration`: ノード自己登録・プロジェクト紐付けの upsert
-//! - `audit`: 監査ログの記録
-//! - `push`: Web Push 購読の管理
-//! - `searchable`: FTS5 `searchable_text` 生成ロジック
+//! - `events`: event application engine (idempotent append + projection update) and rebuild
+//! - `outbox`: watermark-based outbox extraction and ACK watermark updates
+//! - `queries`: client-facing query layer shared by Local Node / Central Server
+//! - `registration`: upsert for node self-registration and project binding
+//! - `audit`: audit log recording
+//! - `push`: Web Push subscription management
+//! - `searchable`: FTS5 `searchable_text` generation logic
 //!
-//! # SQL 規約
+//! # SQL conventions
 //!
-//! SQL は `sqlx::query!` / `query_as!` / `query_scalar!` (コンパイル時検証) を
-//! 必須とし、ランタイム文字列の `sqlx::query()` は例外規定
-//! (FTS5 `MATCH` 等の特殊構文) のみとする。オフラインビルド用の `.sqlx/` は
-//! `cargo sqlx prepare` で生成してコミットする (`SQLX_OFFLINE=true`)。
+//! SQL must use `sqlx::query!` / `query_as!` / `query_scalar!` (compile-time verification).
+//! Runtime string `sqlx::query()` is only an exception for special syntax such as FTS5
+//! `MATCH`. The `.sqlx/` directory for offline builds is generated with `cargo sqlx prepare`
+//! and committed (`SQLX_OFFLINE=true`).
 
 #![warn(missing_docs)]
 
@@ -41,7 +41,7 @@ mod db;
 pub use db::{Db, DbRole, hub_db_path, node_db_path};
 pub use error::DbError;
 
-// 型の再エクスポート (利用側の import を短くする)
+// Re-exported types (keeps imports on the caller side short)
 pub use audit::AuditLogRecord;
 pub use events::{AppendedEvent, ApplyOutcome};
 pub use outbox::SessionOutboxBatch;

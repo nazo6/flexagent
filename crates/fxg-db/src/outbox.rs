@@ -1,10 +1,11 @@
-//! 水位ベース Outbox 抽出と ACK 水位更新。
+//! Watermark-based outbox extraction and ACK watermark updates.
 //!
-//! 「送信済み」は行単位フラグではなく、セッション単位の水位
-//! `sessions.synced_up_to_node_seq` (ハブが ACK した最大 `node_seq`) で表現する。
-//! `node_seq` は実行ノードだけが採番する欠番のない連番のため、Outbox の抽出は
-//! `node_seq > synced_up_to_node_seq` の単純な述語になり、ACK 時の更新も O(1) になる
-//! (設計: `docs/01-architecture-and-sync.md` §2.2, `docs/02-database-schema.md` §0.4)。
+//! "Sent" is not represented by a per-row flag but by a per-session watermark,
+//! `sessions.synced_up_to_node_seq` (the highest `node_seq` ACKed by the hub).
+//! Because `node_seq` is a gap-free sequence allocated only by the executing node,
+//! outbox extraction becomes the simple predicate `node_seq > synced_up_to_node_seq`,
+//! and the update on ACK is O(1)
+//! (design: `docs/01-architecture-and-sync.md` §2.2, `docs/02-database-schema.md` §0.4).
 
 use fxg_protocol::events::SessionEventEnvelope;
 use sqlx::SqlitePool;
@@ -12,26 +13,26 @@ use sqlx::SqlitePool;
 use crate::error::DbError;
 use crate::events::envelope_from_row;
 
-/// セッション単位にまとめた未送信イベント。
+/// Unsent events grouped by session.
 ///
-/// `EventBatchPush` はセッション単位に分割して送信し、ACK もセッション単位で
-/// 返却するため、抽出結果もセッションごとのバッチとする。
+/// `EventBatchPush` sends events split by session and ACKs are returned per session,
+/// so extraction results are also batched per session.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SessionOutboxBatch {
-    /// 対象セッションID
+    /// Target session ID
     pub session_id: String,
-    /// 未送信イベント (`node_seq` 昇順)
+    /// Unsent events (ascending by `node_seq`)
     pub events: Vec<SessionEventEnvelope>,
 }
 
 impl SessionOutboxBatch {
-    /// バッチ内の最大 `node_seq` (ACK 待ち水位の検証用)。
+    /// Highest `node_seq` in the batch (used to validate the ACK watermark).
     pub fn last_node_seq(&self) -> Option<u64> {
         self.events.last().map(|event| event.node_seq)
     }
 }
 
-/// 未送信イベントをセッション単位にまとめて抽出する。
+/// Extracts unsent events grouped by session.
 pub async fn extract_outbox(pool: &SqlitePool) -> Result<Vec<SessionOutboxBatch>, DbError> {
     let rows = sqlx::query!(
         r#"
@@ -65,8 +66,9 @@ pub async fn extract_outbox(pool: &SqlitePool) -> Result<Vec<SessionOutboxBatch>
     Ok(batches)
 }
 
-/// `ResyncRequest` 用: 指定セッションの `from_node_seq` 以降 (`>=`) のイベントを
-/// 水位に関係なく抽出する (`from_node_seq = 1` は `SessionCreated` を含む全量再送)。
+/// For `ResyncRequest`: extracts events of the given session from `from_node_seq`
+/// onward (`>=`) regardless of the watermark (`from_node_seq = 1` resends everything
+/// including `SessionCreated`).
 pub async fn extract_outbox_after(
     pool: &SqlitePool,
     session_id: &str,
@@ -102,9 +104,9 @@ pub async fn extract_outbox_after(
         .collect()
 }
 
-/// `EventBatchAck` 受信時の水位更新。
+/// Watermark update upon receiving `EventBatchAck`.
 ///
-/// 水位は単調増加 (`MAX`) とし、遅延して届いた古い ACK で巻き戻らないようにする。
+/// The watermark is monotonic (`MAX`) so that a delayed old ACK cannot rewind it.
 pub async fn ack_watermark(
     pool: &SqlitePool,
     session_id: &str,
@@ -131,7 +133,7 @@ pub async fn ack_watermark(
     Ok(())
 }
 
-/// 未同期 Outbox イベント件数 (UI の同期状態バッジ用)。
+/// Number of unsynced outbox events (for the sync status badge in the UI).
 pub async fn unsynced_event_count(pool: &SqlitePool) -> Result<u64, DbError> {
     let count = sqlx::query_scalar!(
         r#"
@@ -146,9 +148,9 @@ pub async fn unsynced_event_count(pool: &SqlitePool) -> Result<u64, DbError> {
     Ok(u64::try_from(count).unwrap_or(0))
 }
 
-/// 最後に ACK されたイベントの `created_at` (最終同期時刻)。
+/// `created_at` of the last ACKed event (last sync time).
 ///
-/// 1件も同期していない場合は `None`。
+/// `None` when nothing has been synced yet.
 pub async fn last_synced_at(pool: &SqlitePool) -> Result<Option<i64>, DbError> {
     let value = sqlx::query_scalar!(
         r#"

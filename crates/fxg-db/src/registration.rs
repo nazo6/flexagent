@@ -1,8 +1,8 @@
-//! ノード自己登録・論理プロジェクト紐付けの upsert。
+//! Upsert for node self-registration and logical project binding.
 //!
-//! ノードは起動時に `nodes` テーブルへ自分自身の行を upsert し、プロジェクト解決結果を
-//! `projects` / `project_node_bindings` へ upsert する (ハブへの `NodeHello` 報告と
-//! 同一の情報源)。設計: `docs/02-database-schema.md` §3。
+//! On startup a node upserts its own row into the `nodes` table and upserts project resolution
+//! results into `projects` / `project_node_bindings` (the same information source as the
+//! `NodeHello` report to the hub). Design: `docs/02-database-schema.md` §3.
 
 use fxg_protocol::common::{NodeLifecycleStatus, SessionStatus};
 use fxg_protocol::util::now_ms;
@@ -10,38 +10,38 @@ use sqlx::SqlitePool;
 
 use crate::error::DbError;
 
-/// `nodes` テーブルへの登録内容 (ノード自己登録 / `NodeHello` 更新)。
+/// Registration contents for the `nodes` table (node self-registration / `NodeHello` update).
 ///
-/// `token_hash` / `token_issued_at` は [`set_node_token_hash`] で管理する
-/// (通常の upsert では変更しない)。
+/// `token_hash` / `token_issued_at` are managed by [`set_node_token_hash`]
+/// (they are not modified by the regular upsert).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NodeRecord {
-    /// ノードID
+    /// Node ID
     pub node_id: String,
-    /// 表示名
+    /// Display name
     pub name: String,
     /// OS (`windows` / `linux` / `macos`)
     pub os: String,
-    /// アーキテクチャ (`x86_64` / `aarch64`)
+    /// Architecture (`x86_64` / `aarch64`)
     pub arch: String,
-    /// fxg バイナリバージョン
+    /// fxg binary version
     pub version: String,
-    /// 利用可能なエージェントID一覧
+    /// List of available agent IDs
     pub installed_agents: Vec<String>,
-    /// 一時VM / コンテナノードか
+    /// Whether this is an ephemeral VM / container node
     pub is_ephemeral: bool,
-    /// 一時ノードのプロビジョナー識別子
+    /// Provisioner identifier of the ephemeral node
     pub provisioner: Option<String>,
-    /// ライフサイクル状態
+    /// Lifecycle status
     pub lifecycle_status: NodeLifecycleStatus,
-    /// アイドル自動破棄までの秒数 (一時ノード用)
+    /// Seconds until idle auto-destruction (for ephemeral nodes)
     pub idle_timeout_secs: Option<u64>,
-    /// 接続中か
+    /// Whether connected
     pub is_online: bool,
 }
 
 impl NodeRecord {
-    /// 必須項目のみ指定して常駐・ready・オンラインの登録内容を作る。
+    /// Creates a resident, ready, online registration with only the required fields.
     pub fn new(
         node_id: impl Into<String>,
         name: impl Into<String>,
@@ -64,47 +64,47 @@ impl NodeRecord {
         }
     }
 
-    /// 利用可能エージェント一覧を設定する。
+    /// Sets the list of available agents.
     pub fn with_agents(mut self, agents: Vec<String>) -> Self {
         self.installed_agents = agents;
         self
     }
 }
 
-/// `projects` テーブルへの登録内容 (論理プロジェクト)。
+/// Registration contents for the `projects` table (logical project).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProjectRecord {
-    /// 論理プロジェクトID (正規化キー)
+    /// Logical project ID (normalization key)
     pub project_id: String,
-    /// 表示名
+    /// Display name
     pub name: String,
-    /// 正規化元Git URL
+    /// Git URL before normalization
     pub canonical_git_url: Option<String>,
 }
 
-/// `project_node_bindings` への登録内容 (プロジェクト × ノードのローカルパス)。
+/// Registration contents for `project_node_bindings` (project × node local path).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProjectBindingRecord {
-    /// 論理プロジェクトID
+    /// Logical project ID
     pub project_id: String,
-    /// ノードID
+    /// Node ID
     pub node_id: String,
-    /// ノード上のローカルパス
+    /// Local path on the node
     pub local_path: String,
-    /// Git Worktree か
+    /// Whether this is a Git Worktree
     pub is_worktree: bool,
-    /// 登録時点でノード上に実在するか (ディレクトリ確認)
+    /// Whether it actually exists on the node at registration time (directory check)
     pub path_exists: bool,
-    /// 最終確認時のGitブランチ
+    /// Git branch at the last check
     pub git_branch: Option<String>,
 }
 
-/// ノード情報を upsert する (`last_seen_at` は現在時刻で更新)。
+/// Upserts node information (`last_seen_at` is updated to the current time).
 ///
-/// `token_hash` / `token_issued_at` / `created_at` は既存値を保持する。
-/// `provisioner` / `idle_timeout_secs` は既存値を `NULL` で上書きしない
-/// (サーバーが一時ノードを事前登録した後、NodeHello が `provisioner = None`
-/// で upsert しても失わない)。
+/// `token_hash` / `token_issued_at` / `created_at` keep their existing values.
+/// `provisioner` / `idle_timeout_secs` are not overwritten with `NULL` from existing values
+/// (so that they are not lost when a NodeHello upsert with `provisioner = None` arrives after
+/// the server pre-registered an ephemeral node).
 pub async fn upsert_node(pool: &SqlitePool, record: &NodeRecord) -> Result<(), DbError> {
     let now = now_ms();
     let installed_agents_json = serde_json::to_string(&record.installed_agents)?;
@@ -125,8 +125,8 @@ pub async fn upsert_node(pool: &SqlitePool, record: &NodeRecord) -> Result<(), D
             version = excluded.version,
             installed_agents_json = excluded.installed_agents_json,
             is_ephemeral = excluded.is_ephemeral,
-            -- 一時ノードの provisioner / idle_timeout はサーバーが事前登録した値を
-            -- NodeHello の upsert (provisioner = NULL) で失わないよう保持する
+            -- Preserve the provisioner / idle_timeout that the server pre-registered for an
+            -- ephemeral node, so the NodeHello upsert (provisioner = NULL) cannot lose them
             provisioner = COALESCE(excluded.provisioner, nodes.provisioner),
             lifecycle_status = excluded.lifecycle_status,
             idle_timeout_secs = COALESCE(excluded.idle_timeout_secs, nodes.idle_timeout_secs),
@@ -152,7 +152,7 @@ pub async fn upsert_node(pool: &SqlitePool, record: &NodeRecord) -> Result<(), D
     Ok(())
 }
 
-/// ノードのライフサイクル状態を更新する (一時VMの provisioning / terminated 等)。
+/// Updates the node's lifecycle state (ephemeral VM provisioning / terminated, etc.).
 pub async fn set_node_lifecycle(
     pool: &SqlitePool,
     node_id: &str,
@@ -171,10 +171,11 @@ pub async fn set_node_lifecycle(
     Ok(())
 }
 
-/// 一時VMプロビジョニング中のセッション状態を更新する (ハブ専用)。
+/// Updates the session state while an ephemeral VM is being provisioned (hub only).
 ///
-/// イベントではなく仮投影行に対する更新であり、ブートストラップ失敗・タイムアウトの
-/// 記録にのみ使用する (イベント由来の状態は実行ノードの `StatusChanged` が正)。
+/// This updates a provisional projection row rather than an event, and is used only to record
+/// bootstrap failures and timeouts (event-derived state is authoritative via the executing
+/// node's `StatusChanged`).
 pub async fn set_provisional_session_status(
     pool: &SqlitePool,
     session_id: &str,
@@ -194,7 +195,7 @@ pub async fn set_provisional_session_status(
     Ok(())
 }
 
-/// ノードのオンライン状態を更新する (`last_seen_at` も更新)。
+/// Updates the node's online state (`last_seen_at` is also updated).
 pub async fn set_node_online(
     pool: &SqlitePool,
     node_id: &str,
@@ -214,9 +215,9 @@ pub async fn set_node_online(
     Ok(())
 }
 
-/// ノード個別トークンのハッシュを設定する (`None` で失効)。
+/// Sets the hash of a per-node token (`None` revokes it).
 ///
-/// 平文トークンは保存しない (設計: `docs/01-architecture-and-sync.md` §7.3)。
+/// Plaintext tokens are never stored (design: `docs/01-architecture-and-sync.md` §7.3).
 pub async fn set_node_token_hash(
     pool: &SqlitePool,
     node_id: &str,
@@ -237,10 +238,10 @@ pub async fn set_node_token_hash(
     Ok(())
 }
 
-/// ノード個別トークンのハッシュ一覧 `(node_id, token_hash)` を返す (ハブ認証用)。
+/// Returns the list of per-node token hashes `(node_id, token_hash)` (for hub authentication).
 ///
-/// 平文トークンは保存しないため、ハブは提示されたトークンをハッシュ化し、
-/// 定数時間比較で照合する (設計: `docs/01-architecture-and-sync.md` §7.3)。
+/// Because plaintext tokens are never stored, the hub hashes the presented token and compares
+/// it in constant time (design: `docs/01-architecture-and-sync.md` §7.3).
 pub async fn list_node_tokens(pool: &SqlitePool) -> Result<Vec<(String, String)>, DbError> {
     let rows = sqlx::query!(
         r#"
@@ -253,8 +254,8 @@ pub async fn list_node_tokens(pool: &SqlitePool) -> Result<Vec<(String, String)>
     .await?;
     let mut tokens = Vec::with_capacity(rows.len());
     for row in rows {
-        // SQLite のプリペアドステートメントからは NOT NULL を判別できないため
-        // sqlx は Option を生成する (WHERE 句の IS NOT NULL は実行時に保証される)
+        // SQLite prepared statements cannot report NOT NULL, so sqlx generates Option
+        // (the WHERE clause's IS NOT NULL is guaranteed at runtime)
         if let (Some(node_id), Some(hash)) = (row.node_id, row.token_hash) {
             tokens.push((node_id, hash));
         }
@@ -262,9 +263,9 @@ pub async fn list_node_tokens(pool: &SqlitePool) -> Result<Vec<(String, String)>
     Ok(tokens)
 }
 
-/// プロジェクト × ノードのローカルパス紐付けを削除する (Worktree 削除時など)。
+/// Deletes a project × node local path binding (e.g. when a Worktree is deleted).
 ///
-/// 削除された行数を返す。
+/// Returns the number of deleted rows.
 pub async fn delete_project_binding(
     pool: &SqlitePool,
     node_id: &str,
@@ -283,10 +284,10 @@ pub async fn delete_project_binding(
     Ok(result.rows_affected())
 }
 
-/// 同じ `(node_id, local_path)` を持つ他プロジェクトの紐付けを削除する。
+/// Deletes bindings of other projects that share the same `(node_id, local_path)`.
 ///
-/// プロジェクトの再リンク (`fxg project link`) 時に古い紐付けを残さないために使う。
-/// 削除行数を返す。
+/// Used to avoid leaving old bindings when relinking a project (`fxg project link`).
+/// Returns the number of deleted rows.
 pub async fn delete_other_project_bindings(
     pool: &SqlitePool,
     node_id: &str,
@@ -307,9 +308,10 @@ pub async fn delete_other_project_bindings(
     Ok(result.rows_affected())
 }
 
-/// 紐付けもセッションも持たない孤立プロジェクトを削除する (削除行数を返す)。
+/// Deletes orphan projects that have neither bindings nor sessions (returns the number of
+/// deleted rows).
 ///
-/// ハブ側ではセッションから参照されるプロジェクトを削除しないようガードする。
+/// On the hub side this guards against deleting projects referenced by sessions.
 pub async fn delete_orphan_projects(pool: &SqlitePool) -> Result<u64, DbError> {
     let result = sqlx::query!(
         r#"
@@ -329,10 +331,10 @@ pub async fn delete_orphan_projects(pool: &SqlitePool) -> Result<u64, DbError> {
     Ok(result.rows_affected())
 }
 
-/// 論理プロジェクトを upsert する。
+/// Upserts a logical project.
 ///
-/// 既存行の `canonical_git_url` は `None` で上書きしない
-/// (フォールバック解決から後で Git URL が判明するケースに対応)。
+/// The existing row's `canonical_git_url` is not overwritten with `None`
+/// (handles the case where the Git URL is discovered later through fallback resolution).
 pub async fn upsert_project(pool: &SqlitePool, record: &ProjectRecord) -> Result<(), DbError> {
     let now = now_ms();
     sqlx::query!(
@@ -355,10 +357,10 @@ pub async fn upsert_project(pool: &SqlitePool, record: &ProjectRecord) -> Result
     Ok(())
 }
 
-/// プロジェクト × ノードのローカルパス紐付けを upsert する。
+/// Upserts a project × node local path binding.
 ///
-/// `projects` / `nodes` の行が存在しない場合は FK 制約違反となるため、
-/// 呼び出し側で先に [`upsert_project`] / [`upsert_node`] を実行すること。
+/// If the `projects` / `nodes` rows do not exist, this violates the FK constraint, so callers
+/// must run [`upsert_project`] / [`upsert_node`] first.
 pub async fn upsert_project_binding(
     pool: &SqlitePool,
     record: &ProjectBindingRecord,
@@ -387,44 +389,45 @@ pub async fn upsert_project_binding(
     Ok(())
 }
 
-/// 一時VMプロビジョニング中の仮セッション行 (`provisional session`)。
+/// Provisional session row while an ephemeral VM is being provisioned.
 ///
-/// 一時VMは `bootstrap-workspace` (git clone + ツール導入) を経てから
-/// `fxg daemon --stdio` が `SessionCreated` を送るため、それまでの間
-/// クライアント (UI) にセッションの存在と `provisioning` 状態を見せる必要がある。
-/// 中央サーバーはイベントではなく**投影行の直接挿入**でこれを行い
-/// (書き込み権威の一元化は維持)、後続の `SessionCreated`
-/// 投影 upsert が派生カラムを上書きする (`status` は `StatusChanged` まで保持)。
+/// An ephemeral VM goes through `bootstrap-workspace` (git clone + tool installation) before
+/// `fxg daemon --stdio` sends `SessionCreated`, so until then the client (UI) needs to see the
+/// session's existence and its `provisioning` state. The central server does this by directly
+/// inserting a projection row rather than an event (preserving the single write authority), and
+/// the subsequent `SessionCreated` projection upsert overwrites the derived columns (`status` is
+/// retained until `StatusChanged`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProvisionalSessionRecord {
-    /// セッションID (サーバー採番)
+    /// Session ID (assigned by the server)
     pub session_id: String,
-    /// 論理プロジェクトID
+    /// Logical project ID
     pub project_id: String,
-    /// プロジェクト表示名 (`projects` 行が無い場合の作成用)
+    /// Project display name (used to create the `projects` row if absent)
     pub project_name: String,
-    /// 実行ノードID (一時VMノードの事前採番ID)
+    /// Executing node ID (the pre-assigned ID of the ephemeral VM node)
     pub node_id: String,
-    /// 実行ディレクトリ (起動要求時のローカルパス。UI 表示用)
+    /// Execution directory (local path from the start request; for UI display)
     pub local_path: String,
-    /// Gitブランチ (任意)
+    /// Git branch (optional)
     pub git_branch: Option<String>,
-    /// 起動するエージェントID
+    /// Agent ID to start
     pub agent_id: String,
-    /// 表示タイトル
+    /// Display title
     pub title: String,
 }
 
-/// 一時VMプロビジョニング中の仮セッション行を挿入する (冪等)。
+/// Inserts a provisional session row while an ephemeral VM is provisioning (idempotent).
 ///
-/// `sessions` 行が既に存在する場合 (ノードが既に `SessionCreated` を送信済み)
-/// は何もしない。呼び出し側は事前に [`upsert_node`] で一時ノードIDを登録すること。
+/// Does nothing if the `sessions` row already exists (the node has already sent
+/// `SessionCreated`). Callers must register the ephemeral node ID with [`upsert_node`]
+/// beforehand.
 pub async fn upsert_provisional_session(
     pool: &SqlitePool,
     record: &ProvisionalSessionRecord,
 ) -> Result<(), DbError> {
     let now = now_ms();
-    // `sessions.project_id` の FK を満たすため、未知のプロジェクトを用意する
+    // Prepare an unknown project to satisfy the FK on `sessions.project_id`
     sqlx::query!(
         r#"
         INSERT INTO projects (project_id, name, canonical_git_url, created_at, updated_at)

@@ -1,24 +1,24 @@
-//! `searchable_text` 生成ロジック。
+//! `searchable_text` generation logic.
 //!
-//! イベントを永続化する側 (ノード / ハブ双方の受信ハンドラ) が
-//! [`classify_payload`] を用いて `session_events.event_type` と
-//! `searchable_text` (FTS5 `tokenize='trigram'` の検索対象) を生成する。
+//! The side that persists events (the receive handlers on both node and hub) uses
+//! [`classify_payload`] to generate `session_events.event_type` and
+//! `searchable_text` (the FTS5 `tokenize='trigram'` search target).
 //!
-//! `TerminalOutput` (ANSI エスケープを含む生バイト列) や `TerminalInput`
-//! (キーストローク)、`PermissionResolved` / `SessionAgentBound` などの
-//! バイナリ系・識別子系は FTS 対象外とする (設計: `docs/02-database-schema.md` §2)。
+//! `TerminalOutput` (raw bytes including ANSI escapes), `TerminalInput` (keystrokes),
+//! `PermissionResolved` / `SessionAgentBound`, and other binary/identifier events are
+//! excluded from FTS (design: `docs/02-database-schema.md` §2).
 
 use fxg_protocol::events::UnifiedEventPayload;
 
-/// FTS5 へ投入するテキストの上限 (文字数)。
+/// Maximum length (in characters) of text fed into FTS5.
 ///
-/// 巨大なツール出力でインデックスが肥大化するのを防ぐ。
+/// Prevents the index from bloating on huge tool outputs.
 pub const MAX_SEARCHABLE_CHARS: usize = 8 * 1024;
 
-/// payload から (`event_type`, `searchable_text`) を生成する。
+/// Generates (`event_type`, `searchable_text`) from a payload.
 ///
-/// `event_type` は `session_events.event_type` に保存する語彙
-/// ([`UnifiedEventPayload::event_type`]) と同一。
+/// `event_type` is the same vocabulary stored in `session_events.event_type`
+/// ([`UnifiedEventPayload::event_type`]).
 pub fn classify_payload(payload: &UnifiedEventPayload) -> (&'static str, Option<String>) {
     let event_type = payload.event_type();
     let text = match payload {
@@ -89,7 +89,7 @@ pub fn classify_payload(payload: &UnifiedEventPayload) -> (&'static str, Option<
         UnifiedEventPayload::TurnEnded { message, .. } => {
             join_parts(message.iter().cloned().collect())
         }
-        // FTS 対象外 (バイナリ系・識別子系・投影の更新源のみのイベント)
+        // Not FTS targets (binary, identifier, and projection-only source events)
         UnifiedEventPayload::SessionCreated { .. }
         | UnifiedEventPayload::SessionAgentBound { .. }
         | UnifiedEventPayload::UsageUpdated { .. }
@@ -109,7 +109,7 @@ pub fn classify_payload(payload: &UnifiedEventPayload) -> (&'static str, Option<
     )
 }
 
-/// 空要素を除いて改行で連結する。全要素が空なら `None`。
+/// Joins non-empty parts with newlines. Returns `None` if every part is empty.
 fn join_parts(parts: Vec<String>) -> Option<String> {
     let joined = parts
         .into_iter()
@@ -124,7 +124,7 @@ fn join_parts(parts: Vec<String>) -> Option<String> {
     }
 }
 
-/// 文字境界を壊さずに `max_chars` 文字へ切り詰める。
+/// Truncates to `max_chars` characters without breaking character boundaries.
 fn truncate_chars(text: &str, max_chars: usize) -> String {
     if text.chars().count() <= max_chars {
         return text.to_owned();
@@ -142,7 +142,7 @@ mod tests {
     #[test]
     fn user_message_includes_text_and_attachment_names() {
         let payload = UnifiedEventPayload::UserMessage {
-            text: "認証エラーを修正して".to_owned(),
+            text: "Fix the authentication error".to_owned(),
             attachments: vec![AttachmentMeta {
                 file_name: "screenshot.png".to_owned(),
                 mime_type: "image/png".to_owned(),
@@ -156,7 +156,7 @@ mod tests {
         let (event_type, text) = classify_payload(&payload);
         assert_eq!(event_type, "user_message");
         let text = text.unwrap();
-        assert!(text.contains("認証エラーを修正して"));
+        assert!(text.contains("Fix the authentication error"));
         assert!(text.contains("screenshot.png"));
     }
 
@@ -226,23 +226,23 @@ mod tests {
         let plan = UnifiedEventPayload::PlanUpdate {
             entries: vec![PlanEntry {
                 id: "1".to_owned(),
-                title: "テストを追加".to_owned(),
+                title: "Add tests".to_owned(),
                 status: "in_progress".to_owned(),
             }],
         };
         assert_eq!(classify_payload(&plan).0, "plan");
-        assert!(classify_payload(&plan).1.unwrap().contains("テストを追加"));
+        assert!(classify_payload(&plan).1.unwrap().contains("Add tests"));
 
         let status = UnifiedEventPayload::StatusChanged {
             status: fxg_protocol::common::SessionStatus::Error,
-            error_message: Some("認証トークンが無効です".to_owned()),
+            error_message: Some("Authentication token is invalid".to_owned()),
         };
         assert_eq!(classify_payload(&status).0, "status_change");
         assert!(
             classify_payload(&status)
                 .1
                 .unwrap()
-                .contains("認証トークンが無効です")
+                .contains("Authentication token is invalid")
         );
     }
 
@@ -265,14 +265,14 @@ mod tests {
 
     #[test]
     fn long_text_is_truncated_on_char_boundary() {
-        let long = "あ".repeat(MAX_SEARCHABLE_CHARS + 100);
+        let long = "あ".repeat(MAX_SEARCHABLE_CHARS + 100); // allow-japanese: multibyte truncation test
         let payload = UnifiedEventPayload::AgentMessage {
             message_id: "m".to_owned(),
             text: long,
             is_complete: true,
         };
         let text = classify_payload(&payload).1.unwrap();
-        assert_eq!(text.chars().count(), MAX_SEARCHABLE_CHARS + 1); // + 省略記号
+        assert_eq!(text.chars().count(), MAX_SEARCHABLE_CHARS + 1); // + ellipsis character
         assert!(text.ends_with('…'));
     }
 

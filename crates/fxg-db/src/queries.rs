@@ -1,24 +1,25 @@
-//! 共通クライアント向けクエリ層。
+//! Shared client-facing query layer.
 //!
-//! `node.db` (ローカル直結 UI / CLI) と `server.db` (中央サーバー UI) の双方が
-//! **同一のレスポンス型** ([`SessionSummary`] / [`PermissionRequestEntry`] 等) を
-//! 返せるようにする (設計: `docs/02-database-schema.md` §3)。
+//! Lets both `node.db` (local direct UI / CLI) and `server.db` (central server UI) return
+//! **the same response types** ([`SessionSummary`] / [`PermissionRequestEntry`], etc.)
+//! (design: `docs/02-database-schema.md` §3).
 //!
-//! # 方針: 動的 SQL の回避
+//! # Policy: avoiding dynamic SQL
 //!
-//! 型安全マクロ (`query!` / `query_as!` / `query_scalar!`) を維持するため、
-//! 一覧系クエリの絞り込みは SQL を動的組み立てせず、取得後に Rust 側で適用する
-//! (セルフホスト・単一テナント規模を前提とした単純化)。
+//! To keep the type-safe macros (`query!` / `query_as!` / `query_scalar!`), list filters are
+//! applied in Rust after fetching instead of dynamically composing SQL
+//! (a simplification assuming self-hosted, single-tenant scale).
 //!
-//! 例外は FTS5 `MATCH` と、3文字未満の検索語に対する LIKE フォールバックのみ。
-//! どちらもプレースホルダを介せない特殊構文のため、理由コメント付きで
-//! `query_as` (ランタイム文字列) を使用する (規約上の例外。単体テストで担保)。
+//! The only exceptions are FTS5 `MATCH` and the LIKE fallback for search terms shorter than
+//! 3 characters. Both are special syntaxes that cannot go through placeholders, so
+//! `query_as` (runtime strings) is used with an explanatory comment (a documented exception,
+//! covered by unit tests).
 //!
-//! # 型オーバーライド
+//! # Type overrides
 //!
-//! SQLite では `TEXT PRIMARY KEY` 列に暗黙の NOT NULL が付かないため、
-//! 主キー列は `AS "col!"` で非 NULL を、`INTEGER` の真偽値列は
-//! `AS "col: bool"` で bool を明示する。
+//! SQLite does not add an implicit NOT NULL to `TEXT PRIMARY KEY` columns, so primary key
+//! columns are marked non-NULL with `AS "col!"`, and `INTEGER` boolean columns are marked as
+//! bool with `AS "col: bool"`.
 
 use std::str::FromStr;
 
@@ -33,28 +34,28 @@ use sqlx::SqlitePool;
 use crate::error::DbError;
 use crate::events::{StoredPermissionDetails, envelope_from_row};
 
-/// セッション一覧の絞り込み条件。
+/// Filter conditions for the session list.
 #[derive(Debug, Clone, Default)]
 pub struct SessionFilter {
-    /// 論理プロジェクトIDで絞り込む
+    /// Filter by logical project ID
     pub project_id: Option<String>,
-    /// ノードIDで絞り込む
+    /// Filter by node ID
     pub node_id: Option<String>,
-    /// セッション状態で絞り込む (空なら全状態)
+    /// Filter by session status (all statuses if empty)
     pub statuses: Vec<SessionStatus>,
-    /// アーカイブ済みセッションを含めるか (既定 `false` = 除外)
+    /// Whether to include archived sessions (default `false` = excluded)
     pub include_archived: bool,
-    /// 最大件数
+    /// Maximum number of results
     pub limit: Option<u32>,
 }
 
-/// LIKE 検索・スニペット生成のコンテキスト文字数。
+/// Context character count for LIKE search and snippet generation.
 const SNIPPET_CONTEXT_CHARS: usize = 40;
 
-/// セッション一覧を取得する (更新日時降順)。
+/// Retrieves the session list (descending by update time).
 ///
-/// 削除済み (tombstone) セッションは常に除外する。アーカイブ済みは
-/// [`SessionFilter::include_archived`] が `false` の場合に除外する。
+/// Deleted (tombstone) sessions are always excluded. Archived sessions are excluded when
+/// [`SessionFilter::include_archived`] is `false`.
 pub async fn list_sessions(
     pool: &SqlitePool,
     filter: &SessionFilter,
@@ -108,7 +109,7 @@ pub async fn list_sessions(
     Ok(sessions)
 }
 
-/// セッションを1件取得する (削除済みは `None`)。
+/// Retrieves a single session (`None` if deleted).
 pub async fn get_session(
     pool: &SqlitePool,
     session_id: &str,
@@ -132,9 +133,9 @@ pub async fn get_session(
     row.map(SessionRow::into_summary).transpose()
 }
 
-/// ハブ専用: 一時VM破棄時に退避された git bundle のパスを記録する。
+/// Hub only: records the path of a git bundle salvaged when an ephemeral VM is destroyed.
 ///
-/// `None` で消去 (バンドル復元後など)。
+/// Cleared with `None` (e.g. after restoring the bundle).
 pub async fn set_git_bundle_path(
     pool: &SqlitePool,
     session_id: &str,
@@ -153,7 +154,7 @@ pub async fn set_git_bundle_path(
     Ok(())
 }
 
-/// ハブ専用: 退避済み git bundle のパスを取得する。
+/// Hub only: retrieves the path of a salvaged git bundle.
 pub async fn get_git_bundle_path(
     pool: &SqlitePool,
     session_id: &str,
@@ -170,10 +171,10 @@ pub async fn get_git_bundle_path(
     }
 }
 
-/// `after_cursor` より後のイベント履歴をバッチで取得する (差分同期の再開用)。
+/// Retrieves the event history after `after_cursor` in batches (for resuming incremental sync).
 ///
-/// 返却されるバッチの `cursor` は「取得できた最後のイベントのカーソル」であり、
-/// 該当イベントが無い場合は `after_cursor` をそのまま返す。
+/// The returned batch's `cursor` is the cursor of the last event that could be retrieved; if
+/// there are no matching events, `after_cursor` is returned unchanged.
 pub async fn session_events_after(
     pool: &SqlitePool,
     session_id: &str,
@@ -211,8 +212,8 @@ pub async fn session_events_after(
     Ok(SessionEventBatch { events, cursor })
 }
 
-/// `(cursor, event_id, session_id, node_seq, payload_json, created_at)` 行から
-/// [`SessionEventBatch`] を組み立てる (共通処理)。
+/// Builds a [`SessionEventBatch`] from `(cursor, event_id, session_id, node_seq, payload_json,
+/// created_at)` rows (shared routine).
 fn batch_from_rows(
     rows: Vec<(i64, String, String, i64, String, i64)>,
     after_cursor: u64,
@@ -232,10 +233,10 @@ fn batch_from_rows(
     Ok(SessionEventBatch { events, cursor })
 }
 
-/// 全セッション横断で `after_cursor` より後のイベントを取得する。
+/// Retrieves events after `after_cursor` across all sessions.
 ///
-/// Client WS のリプレイ (`Subscribe { since_cursor }`) や Outbox の再開で使用する。
-/// 返却するバッチの `cursor` は最後に取得できたイベントのカーソル。
+/// Used for Client WS replay (`Subscribe { since_cursor }`) and outbox resumption.
+/// The returned batch's `cursor` is the cursor of the last event retrieved.
 pub async fn events_after_cursor(
     pool: &SqlitePool,
     after_cursor: u64,
@@ -272,10 +273,10 @@ pub async fn events_after_cursor(
     batch_from_rows(rows, after_cursor)
 }
 
-/// `session_events` の最新カーソル (イベントが1件も無い場合は 0) を返す。
+/// Returns the latest cursor of `session_events` (0 when there are no events).
 ///
-/// Client WS の `Subscribe { since_cursor }` がストアの末尾を超える場合
-/// (DB 再作成・リセット後に残った古いカーソル) の検知に使用する。
+/// Used to detect when Client WS `Subscribe { since_cursor }` exceeds the end of the store
+/// (stale cursor left after DB recreation / reset).
 pub async fn latest_cursor(pool: &SqlitePool) -> Result<u64, DbError> {
     let cursor = sqlx::query_scalar!(
         r#"
@@ -291,7 +292,7 @@ pub async fn latest_cursor(pool: &SqlitePool) -> Result<u64, DbError> {
     }
 }
 
-/// 論理プロジェクト一覧を取得する (ノード・Worktree 紐付け含む)。
+/// Retrieves the logical project list (including node / Worktree bindings).
 pub async fn list_projects(pool: &SqlitePool) -> Result<Vec<ProjectSummary>, DbError> {
     let project_rows = sqlx::query_as!(
         ProjectRow,
@@ -349,17 +350,18 @@ pub async fn list_projects(pool: &SqlitePool) -> Result<Vec<ProjectSummary>, DbE
     Ok(projects)
 }
 
-/// 実行ディレクトリの既定パスを解決する。
+/// Resolves the default execution directory path.
 ///
-/// # 解決順序
+/// # Resolution order
 ///
-/// 1. `(project_id, node_id)` の紐付けのうち**最終使用が最も新しい**もの
-///    (Worktree を含む。[`select_default_binding_path`] 参照)
-/// 2. 紐付けが無ければ `(project_id, node_id)` の最新セッションの `local_path`
-///    (セッション開始時の紐付け登録を実装する前に実行されたセッションへのフォールバック)
+/// 1. Among the `(project_id, node_id)` bindings, the one **most recently used**
+///    (including Worktrees; see [`select_default_binding_path`])
+/// 2. If there is no binding, the `local_path` of the latest `(project_id, node_id)` session
+///    (fallback for sessions executed before binding registration on session start was
+///    implemented)
 ///
-/// セッション開始要求で `local_path` を省略した場合の既定として、ノード・
-/// 中央サーバーの双方が共有する (設計: docs/01-architecture-and-sync.md §4)。
+/// Used as the default when `local_path` is omitted in a session start request, shared by both
+/// the node and the central server (design: docs/01-architecture-and-sync.md §4).
 pub async fn resolve_default_local_path(
     pool: &SqlitePool,
     project_id: &str,
@@ -390,14 +392,14 @@ pub async fn resolve_default_local_path(
         .map(|session| session.local_path))
 }
 
-/// 紐付け一覧から既定として使うパスを選ぶ。
+/// Chooses the default path from a list of bindings.
 ///
-/// **実在する**紐付けのうち最終使用が最も新しいものを選ぶ (`last_used_at`)。
-/// Worktree も候補に含める (直近の作業場所を既定にする)。同時刻の場合は
-/// メインリポジトリ (`is_worktree = false`) を優先する。
+/// Chooses the most recently used (`last_used_at`) among **existing** bindings. Worktrees are
+/// also candidates (the most recent working location becomes the default). On ties, the main
+/// repository (`is_worktree = false`) is preferred.
 ///
-/// 実在する紐付けが無い場合は最終使用が最も新しい紐付けを返す
-/// (存在しないパスを暗黙に使わないための UX 警告は UI 側で行う)。
+/// If there is no existing binding, returns the most recently used binding
+/// (the UI is responsible for UX warnings so that non-existent paths are not used silently).
 pub fn select_default_binding_path(
     bindings: &[ProjectBindingSummary],
     node_id: &str,
@@ -420,7 +422,7 @@ pub fn select_default_binding_path(
         .map(|binding| binding.local_path.clone())
 }
 
-/// ノード一覧を取得する (オンライン状態・一時ノード属性含む)。
+/// Retrieves the node list (including online state and ephemeral node attributes).
 pub async fn list_nodes(pool: &SqlitePool) -> Result<Vec<NodeSummary>, DbError> {
     let rows = sqlx::query_as!(
         NodeRow,
@@ -460,7 +462,7 @@ pub async fn list_nodes(pool: &SqlitePool) -> Result<Vec<NodeSummary>, DbError> 
         .collect()
 }
 
-/// 未解決 (`pending`) の承認リクエスト一覧を取得する (グローバル承認 Inbox)。
+/// Retrieves unresolved (`pending`) permission requests (global approval inbox).
 pub async fn pending_permissions(
     pool: &SqlitePool,
 ) -> Result<Vec<PermissionRequestEntry>, DbError> {
@@ -480,7 +482,8 @@ pub async fn pending_permissions(
     rows.into_iter().map(PermissionRow::into_entry).collect()
 }
 
-/// 承認リクエストを1件取得する (`PermissionResolved` の応答判定などに使用)。
+/// Retrieves a single permission request (used e.g. to determine the response to
+/// `PermissionResolved`).
 pub async fn find_permission_request(
     pool: &SqlitePool,
     request_id: &str,
@@ -501,7 +504,7 @@ pub async fn find_permission_request(
     row.map(PermissionRow::into_entry).transpose()
 }
 
-/// 未解決 (`pending`) の elicitation リクエスト一覧を取得する (質問 Inbox)。
+/// Retrieves unresolved (`pending`) elicitation requests (question inbox).
 pub async fn pending_elicitations(
     pool: &SqlitePool,
 ) -> Result<Vec<ElicitationRequestEntry>, DbError> {
@@ -521,7 +524,8 @@ pub async fn pending_elicitations(
     rows.into_iter().map(ElicitationRow::into_entry).collect()
 }
 
-/// elicitation リクエストを1件取得する (`ElicitationResolved` の応答判定などに使用)。
+/// Retrieves a single elicitation request (used e.g. to determine the response to
+/// `ElicitationResolved`).
 pub async fn find_elicitation_request(
     pool: &SqlitePool,
     elicitation_id: &str,
@@ -542,10 +546,10 @@ pub async fn find_elicitation_request(
     row.map(ElicitationRow::into_entry).transpose()
 }
 
-/// FTS5 全文検索。3文字未満の検索語は LIKE フォールバックする。
+/// FTS5 full-text search. Search terms shorter than 3 characters fall back to LIKE.
 ///
-/// trigram トークナイザは 3 文字未満の検索語ではヒットしないため
-/// (設計: `docs/02-database-schema.md` §3)。
+/// The trigram tokenizer does not match search terms shorter than 3 characters
+/// (design: `docs/02-database-schema.md` §3).
 pub async fn search(pool: &SqlitePool, query: &str, limit: u32) -> Result<Vec<SearchHit>, DbError> {
     let needle = query.trim();
     if needle.is_empty() {
@@ -557,10 +561,10 @@ pub async fn search(pool: &SqlitePool, query: &str, limit: u32) -> Result<Vec<Se
         return search_like(pool, needle, limit).await;
     }
 
-    // FTS5 の MATCH はフレーズ引用符を SQL 文字列へ埋め込む必要があり、
-    // プレースホルダだけでは構文を表現できない (規約上の例外)。
-    // 検索語はダブルクォートで囲んだフレーズとして渡し、
-    // `-` や `"` 等の FTS5 演算子解釈によるエラーを避ける。
+    // FTS5 MATCH requires embedding phrase quotes into the SQL string, which cannot be
+    // expressed with placeholders alone (a documented exception).
+    // The search term is passed as a double-quoted phrase to avoid errors from FTS5 operator
+    // interpretation of `-`, `"`, etc.
     let match_query = format!("\"{}\"", needle.replace('"', "\"\""));
     let rows = sqlx::query_as::<_, SearchRow>(
         r#"
@@ -585,13 +589,14 @@ pub async fn search(pool: &SqlitePool, query: &str, limit: u32) -> Result<Vec<Se
     Ok(rows.into_iter().filter_map(SearchRow::into_hit).collect())
 }
 
-/// 3文字未満の検索語用の LIKE フォールバック。
+/// LIKE fallback for search terms shorter than 3 characters.
 async fn search_like(
     pool: &SqlitePool,
     needle: &str,
     limit: i64,
 ) -> Result<Vec<SearchHit>, DbError> {
-    // LIKE のパターンもプレースホルダで表現できない (ワイルドカードの連結が必要)。
+    // The LIKE pattern also cannot be expressed with placeholders (wildcards must be
+    // concatenated).
     let pattern = format!("%{}%", escape_like_pattern(needle));
     let rows = sqlx::query_as::<_, SearchRow>(
         r#"
@@ -625,7 +630,7 @@ async fn search_like(
         .collect())
 }
 
-/// 監査ログ一覧を取得する (新しい順)。
+/// Retrieves the audit log list (newest first).
 pub async fn audit_logs(pool: &SqlitePool, limit: u32) -> Result<Vec<AuditLogEntry>, DbError> {
     let rows = sqlx::query_as!(
         AuditRow,
@@ -659,7 +664,7 @@ pub async fn audit_logs(pool: &SqlitePool, limit: u32) -> Result<Vec<AuditLogEnt
 }
 
 // ----------------------------------------------------------------------
-// 行構造体 (sqlx の型安全マクロ用)
+// Row structs (for the type-safe sqlx macros)
 // ----------------------------------------------------------------------
 
 struct SessionRow {
@@ -856,12 +861,12 @@ struct AuditRow {
 }
 
 // ----------------------------------------------------------------------
-// ヘルパー
+// Helpers
 // ----------------------------------------------------------------------
 
-/// LIKE パターンのメタ文字 (`%` / `_` / `\`) をエスケープする。
+/// Escapes LIKE pattern metacharacters (`%` / `_` / `\`).
 ///
-/// `ESCAPE '\'` を指定した LIKE と併用すること。
+/// Use together with LIKE specifying `ESCAPE '\'`.
 fn escape_like_pattern(needle: &str) -> String {
     let mut escaped = String::with_capacity(needle.len());
     for ch in needle.chars() {
@@ -873,10 +878,10 @@ fn escape_like_pattern(needle: &str) -> String {
     escaped
 }
 
-/// マッチ位置を中心に前後 `context_chars` 文字を抜き出してスニペットを作る。
+/// Extracts `context_chars` characters before and after the match position to build a snippet.
 ///
-/// 見つからない場合は先頭から切り出す (大文字小文字変換で長さが変わる言語等の
-/// フォールバック)。バイト境界は常に文字境界へスナップする。
+/// If no match is found, cuts from the beginning (a fallback for languages whose length changes
+/// under case folding, etc.). Byte positions always snap to character boundaries.
 fn excerpt_around(text: &str, needle: &str, context_chars: usize) -> String {
     let lower_text = text.to_lowercase();
     let lower_needle = needle.to_lowercase();
@@ -931,9 +936,9 @@ mod tests {
 
     #[test]
     fn excerpt_around_centers_on_match() {
-        let text = "0123456789あいうえおかきくけこabcdefghij";
-        let snippet = excerpt_around(text, "あいうえお", 4);
-        assert_eq!(snippet, "…6789あいうえおかきくけ…");
+        let text = "0123456789あいうえおかきくけこabcdefghij"; // allow-japanese: multibyte snippet boundary test
+        let snippet = excerpt_around(text, "あいうえお", 4); // allow-japanese: multibyte snippet boundary test
+        assert_eq!(snippet, "…6789あいうえおかきくけ…"); // allow-japanese: multibyte snippet boundary test
     }
 
     #[test]
@@ -944,9 +949,9 @@ mod tests {
 
     #[test]
     fn excerpt_around_keeps_multibyte_intact() {
-        let text = "こんにちは世界、これはテストです";
-        let snippet = excerpt_around(text, "世界", 3);
-        assert!(snippet.contains("世界"));
+        let text = "こんにちは世界、これはテストです"; // allow-japanese: multibyte snippet test
+        let snippet = excerpt_around(text, "世界", 3); // allow-japanese: multibyte snippet test
+        assert!(snippet.contains("世界")); // allow-japanese: multibyte snippet test
         assert!(!snippet.is_empty());
     }
 }

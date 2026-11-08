@@ -1,19 +1,20 @@
-//! イベント適用エンジン (冪等追記 + 投影更新) と投影再構築。
+//! Event application engine (idempotent append + projection update) and projection rebuild.
 //!
-//! 設計: `docs/02-database-schema.md` §0.3 (イベント適用と投影) / §2 (正データと派生カラム)。
+//! Design: `docs/02-database-schema.md` §0.3 (event application and projections) / §2 (source
+//! data and derived columns).
 //!
-//! - `append_events`: `INSERT OR IGNORE` による冪等追記 + **同一トランザクション**での
-//!   `sessions` / `permission_requests` / `elicitation_requests` 投影更新
-//! - `rebuild_projections`: イベントログ全量からの投影再構築
-//!   (「イベント適用後の状態 == 全量再構築後の状態」をテストで保証する)
-//! - `regenerate_searchable_text` / `rebuild_fts_index`: FTS5 検索データの再生成
+//! - `append_events`: idempotent append via `INSERT OR IGNORE` plus projection updates for
+//!   `sessions` / `permission_requests` / `elicitation_requests` in the **same transaction**
+//! - `rebuild_projections`: rebuild projections from the full event log
+//!   (tests guarantee that "state after applying events == state after full rebuild")
+//! - `regenerate_searchable_text` / `rebuild_fts_index`: regeneration of FTS5 search data
 //!
-//! # 冪等性
+//! # Idempotency
 //!
-//! `session_events` の `event_id` UNIQUE / `UNIQUE(session_id, node_seq)` により
-//! 重複イベントは `INSERT OR IGNORE` で破棄される。投影の更新は「実際に INSERT
-//! された場合」のみ行うため、同一バッチの再送 (ACK 前の再送・Resync 再送) は
-//! 何度適用しても同じ状態に収束する。
+//! The `event_id` UNIQUE / `UNIQUE(session_id, node_seq)` constraints on `session_events`
+//! cause duplicate events to be discarded by `INSERT OR IGNORE`. Projections are only updated
+//! when a row was actually inserted, so resending the same batch (resend before ACK, resync
+//! resend) converges to the same state no matter how many times it is applied.
 
 use fxg_protocol::common::{
     ElicitationAction, ElicitationRequestStatus, PermissionOption, PermissionRequestStatus,
@@ -26,50 +27,50 @@ use sqlx::{Sqlite, SqliteConnection, SqlitePool, Transaction};
 use crate::error::DbError;
 use crate::searchable;
 
-/// 1イベント分の適用結果。
+/// Application result for a single event.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ApplyOutcome {
-    /// イベントID
+    /// Event ID
     pub event_id: String,
-    /// 対象セッションID
+    /// Target session ID
     pub session_id: String,
-    /// セッション内連番
+    /// In-session sequence number
     pub node_seq: u64,
-    /// 新規に追記されたか (`false` は重複として破棄)
+    /// Whether the event was newly appended (`false` means discarded as a duplicate)
     pub inserted: bool,
-    /// このイベントの `session_events.cursor`
-    /// (配信元ストアの取り込み順。差分再開カーソルとしてクライアントへ返す)
+    /// `session_events.cursor` of this event
+    /// (ingest order in the source store; returned to clients as the incremental resume cursor)
     pub cursor: u64,
 }
 
-/// 採番付き追記 ([`append_next_event`]) の結果。
+/// Result of sequence-numbered append ([`append_next_event`]).
 #[derive(Debug, Clone, PartialEq)]
 pub struct AppendedEvent {
-    /// 追記されたイベント (node_seq / event_id 確定済み)
+    /// The appended event (node_seq / event_id already assigned)
     pub envelope: SessionEventEnvelope,
-    /// このイベントの `session_events.cursor`
+    /// `session_events.cursor` of this event
     pub cursor: u64,
 }
 
-/// `permission_requests.details_json` に保存する構造化詳細。
+/// Structured details stored in `permission_requests.details_json`.
 ///
-/// `PermissionRequest` イベントの `details` と `options` の双方を保持し、
-/// 承認 Inbox の表示と `PermissionResolved` の状態判定に使用する。
+/// Holds both `details` and `options` of the `PermissionRequest` event, used for rendering the
+/// approval inbox and for determining the state of `PermissionResolved`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub(crate) struct StoredPermissionDetails {
-    /// 引数や Diff 詳細
+    /// Argument and diff details
     #[serde(default)]
     pub details: serde_json::Value,
-    /// 選択肢 (option_id / name / kind)
+    /// Options (option_id / name / kind)
     #[serde(default)]
     pub options: Vec<PermissionOption>,
 }
 
-/// イベント列を冪等に追記し、同一トランザクションで投影を更新する。
+/// Appends a sequence of events idempotently and updates projections in the same transaction.
 ///
-/// 呼び出し側はバッチ内のイベントを `node_seq` 昇順で渡すこと
-/// (未知セッションの `SessionCreated` (`node_seq = 1`) が最初に適用され、
-/// `sessions` への FK 制約を満たす)。
+/// Callers must pass the events in a batch ordered by ascending `node_seq`
+/// (so that `SessionCreated` for an unknown session (`node_seq = 1`) is applied first and
+/// satisfies the FK constraint to `sessions`).
 pub async fn append_events(
     pool: &SqlitePool,
     events: &[SessionEventEnvelope],
@@ -83,15 +84,15 @@ pub async fn append_events(
     Ok(outcomes)
 }
 
-/// セッションの次の `node_seq` を採番してイベントを追記する (**実行ノード専用**)。
+/// Allocates the session's next `node_seq` and appends the event (**executing node only**).
 ///
-/// `sessions.last_node_seq + 1` を同一トランザクション内で採番するため、
-/// 同時実行でも欠番・重複が生じない。永続化対象外のイベント
-/// ([`UnifiedEventPayload::is_persistable`] が `false`) は拒否する。
+/// Because `sessions.last_node_seq + 1` is allocated within the same transaction, concurrent
+/// execution cannot produce gaps or duplicates. Events that must not be persisted
+/// ([`UnifiedEventPayload::is_persistable`] returns `false`) are rejected.
 ///
 /// # Errors
 ///
-/// 対象セッションが存在しない場合は [`DbError::SessionNotFound`]。
+/// [`DbError::SessionNotFound`] if the target session does not exist.
 pub async fn append_next_event(
     pool: &SqlitePool,
     session_id: &str,
@@ -99,10 +100,11 @@ pub async fn append_next_event(
 ) -> Result<AppendedEvent, DbError> {
     let mut tx = pool.begin().await?;
 
-    // 採番は必ずこの UPDATE で行い、トランザクション内でイベント追記まで完了させる
-    // (ロールバック時は last_node_seq も巻き戻るため欠番が残らない)。
-    // 削除済みセッション (tombstone 適用済み) への追記は拒否する
-    // (`SessionNotFound` として扱われる)。
+    // Allocation must always happen through this UPDATE, and the event append must complete
+    // within the same transaction (on rollback, last_node_seq is also rewound, so no gaps
+    // remain).
+    // Appends to deleted sessions (tombstone applied) are rejected
+    // (treated as `SessionNotFound`).
     let next_node_seq = sqlx::query_scalar!(
         r#"
         UPDATE sessions
@@ -150,22 +152,23 @@ async fn append_event_in_tx(
     let (event_type, searchable_text) = searchable::classify_payload(&envelope.payload);
     let payload_json = serde_json::to_string(&envelope.payload)?;
 
-    // SessionCreated は `session_events.session_id -> sessions` の FK を満たすため、
-    // イベント追記の**前**に sessions 行 (および未知プロジェクト行) を用意する。
-    // (バッチ内のイベントは node_seq 昇順で渡されるため、未知セッションの最初の
-    //  イベントは必ず SessionCreated = node_seq 1 になる)
+    // SessionCreated must satisfy the `session_events.session_id -> sessions` FK, so prepare
+    // the sessions row (and any unknown project row) **before** appending the event.
+    // (Events in a batch are passed in ascending node_seq order, so the first event of an
+    //  unknown session is always SessionCreated = node_seq 1.)
     if let UnifiedEventPayload::SessionCreated { .. } = &envelope.payload {
         upsert_session_from_created(tx, envelope).await?;
     }
 
-    // 追記可否の判定は INSERT 文に埋め込む (`SELECT` → `INSERT` の 2 文に分けると、
-    // 読み取りスナップショット取得後に書き込みへ昇格するため
-    // `SQLITE_BUSY_SNAPSHOT` (517) を誘発する)。
+    // The append decision is embedded in the INSERT statement (splitting it into `SELECT` then
+    // `INSERT` would upgrade a read snapshot to a write and trigger `SQLITE_BUSY_SNAPSHOT`
+    // (517)).
     //
-    // - 削除済み (tombstone 適用済み) セッションへは `SessionDeleted` のみ追記する
-    //   (Resync 再送や停止処理との競合で、パージ済みの会話内容が復活するのを防ぐ)
-    // - 未知セッションへは追記しない (Resync 由来の tombstone などを FK 制約違反に
-    //   せず no-op とする)
+    // - For deleted (tombstone-applied) sessions, only `SessionDeleted` is appended
+    //   (prevents purged conversation content from reappearing when resync resends race with
+    //   the stop handler).
+    // - Nothing is appended for unknown sessions (so resync-originated tombstones become a
+    //   no-op instead of an FK violation).
     let is_delete_event = matches!(envelope.payload, UnifiedEventPayload::SessionDeleted {});
     let result = sqlx::query!(
         r#"
@@ -196,8 +199,9 @@ async fn append_event_in_tx(
     let cursor = if inserted {
         result.last_insert_rowid()
     } else {
-        // 重複 (event_id / (session_id, node_seq) 一致) なら既存行のカーソルを返す。
-        // 追記対象外 (削除済み・未知セッション) として破棄された場合は 0。
+        // If it is a duplicate (matching event_id / (session_id, node_seq)), return the cursor
+        // of the existing row. If it was discarded as non-appendable (deleted / unknown
+        // session), return 0.
         sqlx::query_scalar!(
             r#"
             SELECT cursor FROM session_events
@@ -227,9 +231,10 @@ async fn append_event_in_tx(
     })
 }
 
-/// `SessionCreated` イベントから `projects` / `sessions` 行を upsert する。
+/// Upserts `projects` / `sessions` rows from a `SessionCreated` event.
 ///
-/// 冪等 (再構築時の再生・重複適用の双方で同じ状態に収束する)。
+/// Idempotent (converges to the same state for both replay during rebuild and duplicate
+/// application).
 async fn upsert_session_from_created(
     conn: &mut SqliteConnection,
     envelope: &SessionEventEnvelope,
@@ -253,8 +258,9 @@ async fn upsert_session_from_created(
 
     let node_seq = node_seq_to_i64(&envelope.session_id, envelope.node_seq)?;
 
-    // ハブ側で未知のプロジェクトだった場合に備えて行を用意する
-    // (ノード側はプロジェクト解決時に正データが既に存在するため DO NOTHING)。
+    // Prepare a row in case the project is unknown on the hub side
+    // (on the node side the source data already exists when the project is resolved, so
+    // DO NOTHING).
     sqlx::query!(
         r#"
         INSERT INTO projects (project_id, name, canonical_git_url, created_at, updated_at)
@@ -278,8 +284,8 @@ async fn upsert_session_from_created(
         })
         .transpose()?;
 
-    // 再構築時に備えて全カラムを上書きする (INSERT OR REPLACE は
-    // ON DELETE CASCADE でイベントログを消してしまうため使用しない)。
+    // Overwrite all columns to support rebuild (do not use INSERT OR REPLACE, since it would
+    // delete the event log through ON DELETE CASCADE).
     sqlx::query!(
         r#"
         INSERT INTO sessions (
@@ -322,9 +328,9 @@ async fn upsert_session_from_created(
     Ok(())
 }
 
-/// イベント1件分の投影更新を適用する (イベントログへの追記は行わない)。
+/// Applies the projection updates for a single event (does not append to the event log).
 ///
-/// [`append_events`] と [`rebuild_projections`] の双方から呼ばれる共通ルーチン。
+/// Shared routine called from both [`append_events`] and [`rebuild_projections`].
 pub(crate) async fn apply_projections(
     conn: &mut SqliteConnection,
     envelope: &SessionEventEnvelope,
@@ -401,7 +407,8 @@ pub(crate) async fn apply_projections(
             } else {
                 Some(serde_json::to_string(config_options)?)
             };
-            // current_mode / available_modes / available_commands / config_options が未指定・空配列の場合は既存値を維持する
+            // Keep existing values when current_mode / available_modes / available_commands /
+            // config_options are unspecified or empty arrays
             sqlx::query!(
                 r#"
                 UPDATE sessions
@@ -474,8 +481,8 @@ pub(crate) async fn apply_projections(
             .fetch_optional(&mut *conn)
             .await?;
             let status = resolve_permission_status(stored.as_deref(), selected_option_id);
-            // Resync が途中の node_seq から行われた等で対応する
-            // PermissionRequest 行が無い場合は 0 行更新となる (破棄)。
+            // If there is no matching PermissionRequest row (e.g. resync started from a
+            // mid-stream node_seq), this updates 0 rows (discarded).
             sqlx::query!(
                 r#"
                 UPDATE permission_requests
@@ -536,8 +543,8 @@ pub(crate) async fn apply_projections(
         } => {
             let status = elicitation_status(*action);
             let content_json = serde_json::to_string(content)?;
-            // Resync が途中の node_seq から行われた等で対応する
-            // ElicitationRequest 行が無い場合は 0 行更新となる (破棄)。
+            // If there is no matching ElicitationRequest row (e.g. resync started from a
+            // mid-stream node_seq), this updates 0 rows (discarded).
             sqlx::query!(
                 r#"
                 UPDATE elicitation_requests
@@ -576,7 +583,7 @@ pub(crate) async fn apply_projections(
             .await?;
         }
         UnifiedEventPayload::SessionArchived { archived } => {
-            // アーカイブは可逆な可視性フラグ (イベントログは保持)
+            // Archiving is a reversible visibility flag (the event log is retained)
             let archived_at = archived.then_some(envelope.created_at);
             sqlx::query!(
                 r#"
@@ -591,8 +598,9 @@ pub(crate) async fn apply_projections(
             .await?;
         }
         UnifiedEventPayload::SessionDeleted {} => {
-            // tombstone 適用: 行自体は Outbox / Resync での削除伝播と Fork 元参照の
-            // 整合を保つため残し、本文イベントと承認履歴を物理削除する。
+            // Apply tombstone: keep the row itself so that deletion propagation through
+            // Outbox / Resync and references to the fork source stay consistent, and
+            // physically delete body events and approval history.
             sqlx::query!(
                 r#"
                 UPDATE sessions
@@ -604,7 +612,7 @@ pub(crate) async fn apply_projections(
             )
             .execute(&mut *conn)
             .await?;
-            // 本イベント (tombstone) は残し、それ以前の本文をパージする
+            // Keep this event (the tombstone) and purge earlier bodies
             sqlx::query!(
                 r#"DELETE FROM session_events WHERE session_id = ? AND node_seq < ?"#,
                 envelope.session_id,
@@ -625,9 +633,9 @@ pub(crate) async fn apply_projections(
             .execute(&mut *conn)
             .await?;
         }
-        // sessions 行の派生カラム更新を持たないイベント
-        // (会話・ツール実行・ターミナル出力・BootstrapLog 等)。
-        // 共通の水位/更新時刻更新のみを行う。
+        // Events without derived-column updates on the sessions row
+        // (conversation, tool execution, terminal output, BootstrapLog, etc.).
+        // Only the shared watermark / update-time update is applied.
         UnifiedEventPayload::UserMessage { .. }
         | UnifiedEventPayload::AgentMessage { .. }
         | UnifiedEventPayload::AgentThought { .. }
@@ -641,7 +649,8 @@ pub(crate) async fn apply_projections(
         | UnifiedEventPayload::SessionReverted { .. } => {}
     }
 
-    // 全イベント共通: 投影に適用済みの最大 node_seq と更新時刻を反映する
+    // Common to all events: reflect the highest applied node_seq and the update time in the
+    // projections
     sqlx::query!(
         r#"
         UPDATE sessions
@@ -658,7 +667,7 @@ pub(crate) async fn apply_projections(
     Ok(())
 }
 
-/// elicitation の応答アクションを DB 投影の状態へ変換する。
+/// Converts an elicitation response action into the DB projection state.
 fn elicitation_status(action: ElicitationAction) -> ElicitationRequestStatus {
     match action {
         ElicitationAction::Accept => ElicitationRequestStatus::Accepted,
@@ -667,11 +676,11 @@ fn elicitation_status(action: ElicitationAction) -> ElicitationRequestStatus {
     }
 }
 
-/// `selected_option_id` に対応する選択肢の kind から解決状態を判定する。
+/// Determines the resolution state from the kind of the option matching `selected_option_id`.
 ///
-/// `details_json` に保存した `options` を参照し、`reject*` 系なら `rejected`、
-/// それ以外は `approved` とする。options が取得できない場合 (Resync 途中など) は
-/// `option_id` の命名規則 (`reject` / `deny` を含む) でフォールバックする。
+/// Refers to the `options` stored in `details_json`: `reject*` kinds map to `rejected`, all
+/// others to `approved`. If the options cannot be retrieved (e.g. mid-resync), falls back to
+/// the `option_id` naming convention (containing `reject` / `deny`).
 fn resolve_permission_status(
     details_json: Option<&str>,
     selected_option_id: &str,
@@ -699,18 +708,19 @@ fn resolve_permission_status(
     }
 }
 
-/// イベントログ全量から `sessions` / `permission_requests` /
-/// `elicitation_requests` 投影を再構築する。
+/// Rebuilds the `sessions` / `permission_requests` / `elicitation_requests` projections from
+/// the full event log.
 ///
-/// # 実装上の制約
+/// # Implementation constraints
 ///
-/// - `session_events.session_id` は `ON DELETE CASCADE` で `sessions` を参照するため、
-///   `sessions` 行を DELETE することはできない (イベントログごと消えてしまう)。
-///   そこで「派生カラムを既定値にリセット → カーソル順に `SessionCreated` から再生」
-///   という手順を取る。
-/// - `git_bundle_path` (ハブ固有管理フィールド) と `synced_up_to_node_seq`
-///   (ノード固有の水位) はイベント由来ではないため保持する。
-/// - イベント全量をメモリに読み出す (セルフホスト・単一テナント規模を前提とした単純化)。
+/// - `session_events.session_id` references `sessions` with `ON DELETE CASCADE`, so `sessions`
+///   rows cannot be DELETEd (it would also wipe the event log).
+///   The procedure is therefore "reset derived columns to defaults → replay from
+///   `SessionCreated` in cursor order".
+/// - `git_bundle_path` (hub-specific management field) and `synced_up_to_node_seq`
+///   (node-specific watermark) are preserved because they do not come from events.
+/// - The entire event log is loaded into memory (a simplification assuming self-hosted,
+///   single-tenant scale).
 pub async fn rebuild_projections(pool: &SqlitePool) -> Result<(), DbError> {
     let rows = sqlx::query!(
         r#"
@@ -765,11 +775,11 @@ pub async fn rebuild_projections(pool: &SqlitePool) -> Result<(), DbError> {
     Ok(())
 }
 
-/// `searchable_text` / `event_type` を payload から再生成する
-/// (抽出ロジックを変更した際の再計算用)。
+/// Regenerates `searchable_text` / `event_type` from payloads
+/// (for recomputation after changing the extraction logic).
 ///
-/// `session_events` の UPDATE は FTS5 同期トリガー (`session_events_fts_au`) を
-/// 経由して検索インデックスにも反映される。
+/// The `session_events` UPDATE is also reflected in the search index through the FTS5 sync
+/// trigger (`session_events_fts_au`).
 pub async fn regenerate_searchable_text(pool: &SqlitePool) -> Result<u64, DbError> {
     let rows = sqlx::query!(
         r#"SELECT cursor, event_id, session_id, node_seq, payload_json, created_at FROM session_events"#,
@@ -802,20 +812,20 @@ pub async fn regenerate_searchable_text(pool: &SqlitePool) -> Result<u64, DbErro
     Ok(updated_rows)
 }
 
-/// FTS5 外部コンテンツインデックスを content テーブルから再構築する。
+/// Rebuilds the FTS5 external content index from the content table.
 ///
-/// `searchable_text` は content テーブル (`session_events`) から読み直されるため、
-/// 適用前に [`regenerate_searchable_text`] を実行しておくこと。
+/// Since `searchable_text` is re-read from the content table (`session_events`), run
+/// [`regenerate_searchable_text`] beforehand.
 pub async fn rebuild_fts_index(pool: &SqlitePool) -> Result<(), DbError> {
-    // FTS5 の 'rebuild' コマンドはプレースホルダを持たない特殊構文のため
-    // sqlx の型安全マクロ (`query!`) は使用できない (規約上の例外。単体テストで担保)。
+    // The FTS5 'rebuild' command has a special syntax with no placeholders, so the type-safe
+    // sqlx macro (`query!`) cannot be used (a documented exception, covered by unit tests).
     sqlx::query(r#"INSERT INTO session_events_fts(session_events_fts) VALUES('rebuild')"#)
         .execute(pool)
         .await?;
     Ok(())
 }
 
-/// DB 行 (payload_json) から [`SessionEventEnvelope`] を復元する。
+/// Restores a [`SessionEventEnvelope`] from a DB row (`payload_json`).
 pub(crate) fn envelope_from_row(
     event_id: String,
     session_id: String,

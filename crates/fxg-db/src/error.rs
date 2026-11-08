@@ -1,54 +1,54 @@
-//! `fxg-db` のエラー型。
+//! Error types for `fxg-db`.
 
-/// `fxg-db` の操作で発生するエラー。
+/// Error raised by `fxg-db` operations.
 #[derive(Debug, thiserror::Error)]
 pub enum DbError {
-    /// SQLite 操作エラー
+    /// SQLite operation error
     #[error("database error: {0}")]
     Sqlx(#[from] sqlx::Error),
-    /// マイグレーション適用エラー
+    /// Migration application error
     #[error("migration error: {0}")]
     Migrate(#[from] sqlx::migrate::MigrateError),
-    /// JSON 変換エラー
+    /// JSON conversion error
     #[error("json error: {0}")]
     Json(#[from] serde_json::Error),
-    /// ファイルシステム操作エラー
+    /// Filesystem operation error
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
-    /// DB 内のイベント payload がデコードできない (データ破損)
+    /// Event payload in the DB cannot be decoded (data corruption)
     #[error("invalid event payload in database: {0}")]
     InvalidPayload(String),
-    /// 永続化してはいけないイベントを追記しようとした
-    /// (ストリーミング途中のチャンク・キーストローク等)
+    /// Attempted to append an event that must not be persisted
+    /// (streaming chunks, keystrokes, etc.)
     #[error("event is not persistable: {0}")]
     NonPersistableEvent(&'static str),
-    /// `node_seq` が負値 (データ破損)
+    /// `node_seq` is negative (data corruption)
     #[error("node_seq {0} is negative")]
     NegativeNodeSeq(i64),
-    /// `node_seq` が i64 に収まらない
+    /// `node_seq` does not fit into an i64
     #[error("node_seq {node_seq} of session {session_id} does not fit into i64")]
     NodeSeqOutOfRange {
-        /// 対象セッションID
+        /// Target session ID
         session_id: String,
-        /// 変換に失敗した連番
+        /// Sequence number that failed conversion
         node_seq: u64,
     },
-    /// セッションが見つからない
+    /// Session not found
     #[error("session not found: {0}")]
     SessionNotFound(String),
-    /// ノードが見つからない
+    /// Node not found
     #[error("node not found: {0}")]
     NodeNotFound(String),
-    /// DB 内の列挙値が未知 (データ破損)
+    /// Enum value in the DB is unknown (data corruption)
     #[error("invalid enum value in database: {0}")]
     InvalidEnumValue(String),
-    /// カーソル値が i64 に収まらない
+    /// Cursor value does not fit into an i64
     #[error("cursor {0} does not fit into i64")]
     CursorOutOfRange(u64),
-    /// 承認リクエストが見つからない
+    /// Permission request not found
     #[error("permission request not found: {0}")]
     PermissionRequestNotFound(String),
-    /// 検索クエリが空
+    /// Search query is empty
     #[error("search query must not be empty")]
     EmptySearchQuery,
 }

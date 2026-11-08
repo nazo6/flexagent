@@ -1,71 +1,72 @@
-//! 監査ログの記録 (`audit_logs`)。
+//! Audit log recording (`audit_logs`).
 //!
-//! 各ストアが「自分の観測した操作」のみを記録する (同期対象外)。
-//! 中央サーバー経由の操作は `server.db`、ローカル直結 (CLI / `localhost:7860`) の
-//! 操作は実行ノードの `node.db` にも記録する
-//! (設計: `docs/01-architecture-and-sync.md` §7.5)。
+//! Each store records only the operations it observed itself (not subject to sync).
+//! Operations routed through the central server are recorded in `server.db`, while
+//! operations made directly against the local node (CLI / `localhost:7860`) are also
+//! recorded in the executing node's `node.db`
+//! (design: `docs/01-architecture-and-sync.md` §7.5).
 
 use fxg_protocol::util::now_ms;
 use sqlx::SqlitePool;
 
 use crate::error::DbError;
 
-/// 監査ログの `action` 種別。
+/// Audit log `action` kinds.
 pub mod actions {
-    /// セッション起動
+    /// Session started
     pub const SESSION_START: &str = "session_start";
-    /// セッション巻き戻し (Shadow Git Tree Revert)
+    /// Session reverted (Shadow Git Tree Revert)
     pub const SESSION_REVERT: &str = "session_revert";
-    /// セッション再開 (停止済みセッションのレジューム)
+    /// Session resumed (resume a stopped session)
     pub const SESSION_RESUME: &str = "session_resume";
-    /// セッションのアーカイブ/復元
+    /// Session archived/restored
     pub const SESSION_ARCHIVE: &str = "session_archive";
-    /// セッション削除 (イベント本文のパージ)
+    /// Session deleted (purge of event bodies)
     pub const SESSION_DELETE: &str = "session_delete";
-    /// 承認解決 (Approve / Reject)
+    /// Permission resolved (Approve / Reject)
     pub const PERMISSION_RESOLVED: &str = "permission_resolved";
 
-    /// elicitation (質問) の解決
+    /// Elicitation (question) resolved
     pub const ELICITATION_RESOLVED: &str = "elicitation_resolved";
-    /// Web PTY 起動
+    /// Web PTY spawned
     pub const PTY_SPAWN: &str = "pty_spawn";
-    /// 緊急キルスイッチ実行
+    /// Emergency kill switch executed
     pub const KILL_SWITCH: &str = "kill_switch";
-    /// Worktree 操作 (作成・削除)
+    /// Worktree operation (create / delete)
     pub const WORKTREE_MANAGE: &str = "worktree_manage";
-    /// Worktree クリーンアップ (Prune)
+    /// Worktree cleanup (prune)
     pub const WORKTREE_PRUNE: &str = "worktree_prune";
-    /// プロジェクト紐付け (手動 Link / 一括 Scan)
+    /// Project binding (manual Link / bulk Scan)
     pub const PROJECT_LINK: &str = "project_link";
-    /// エージェント管理 (インストール / 更新 / 削除)
+    /// Agent management (install / update / delete)
     pub const AGENT_MANAGE: &str = "agent_manage";
-    /// ノードトークン発行・失効
+    /// Node token issuance / revocation
     pub const NODE_TOKEN_MANAGE: &str = "node_token_manage";
-    /// クライアント認証トークン再生成
+    /// Client auth token regeneration
     pub const AUTH_TOKEN_ROTATE: &str = "auth_token_rotate";
 }
 
-/// 監査ログの記録内容。
+/// Contents of an audit log record.
 #[derive(Debug, Clone)]
 pub struct AuditLogRecord {
-    /// 操作種別 ([`actions`] の定数)
+    /// Operation kind (a constant from [`actions`])
     pub action: String,
-    /// 関連セッションID (任意)
+    /// Related session ID (optional)
     pub session_id: Option<String>,
-    /// 対象ノードID (任意。ノード側は自分自身)
+    /// Target node ID (optional; on the node side this is the node itself)
     pub node_id: Option<String>,
-    /// 送信元IPアドレス
+    /// Source IP address
     pub client_ip: String,
-    /// クライアントUser-Agent
+    /// Client User-Agent
     pub client_user_agent: Option<String>,
-    /// トークン識別子または認証主体
+    /// Token identifier or authenticated subject
     pub auth_subject: String,
-    /// 実行内容詳細 (実行コマンド・承認オプション等)
+    /// Operation details (executed command, approval option, etc.)
     pub details: serde_json::Value,
 }
 
 impl AuditLogRecord {
-    /// 必須項目から記録内容を作る (詳細は空オブジェクト)。
+    /// Builds a record from the required fields (details default to an empty object).
     pub fn new(
         action: impl Into<String>,
         client_ip: impl Into<String>,
@@ -83,7 +84,7 @@ impl AuditLogRecord {
     }
 }
 
-/// 監査ログを1件記録し、採番された `id` を返す。
+/// Records a single audit log entry and returns the assigned `id`.
 pub async fn append_audit_log(pool: &SqlitePool, record: &AuditLogRecord) -> Result<i64, DbError> {
     let details_json = serde_json::to_string(&record.details)?;
     let result = sqlx::query!(
