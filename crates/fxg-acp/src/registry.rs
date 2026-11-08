@@ -185,6 +185,49 @@ impl AgentListEntry {
     }
 }
 
+/// A built-in launch preset for a well-known ACP CLI.
+///
+/// A preset is not a distribution channel: it only supplies the correct
+/// arguments when the CLI is already installed on `PATH` (for example
+/// `agy acp`). User custom definitions always take priority.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AgentPreset {
+    /// Stable agent ID (used by `fxg run` and `AgentSummary.id`)
+    pub id: &'static str,
+    /// Display name
+    pub display_name: &'static str,
+    /// Executable name on `PATH` (resolved with `which` / `PATHEXT`)
+    pub program: &'static str,
+    /// Arguments that start the CLI's ACP server
+    pub args: &'static [&'static str],
+}
+
+/// Built-in presets for well-known ACP CLIs.
+///
+/// Keep this list small and verified. Agents that are distributed through the
+/// ACP Registry do not need a preset unless their registry `cmd` is not the
+/// user-facing CLI (for example `antigravity-acp` expects a bundled
+/// `agy_acp_server.par`, while the `agy` CLI exposes `agy acp`).
+pub const AGENT_PRESETS: &[AgentPreset] = &[
+    AgentPreset {
+        id: "opencode",
+        display_name: "OpenCode",
+        program: "opencode",
+        args: &["acp"],
+    },
+    AgentPreset {
+        id: "agy",
+        display_name: "Antigravity",
+        program: "agy",
+        args: &["acp"],
+    },
+];
+
+/// Default preset lookup: resolves the executable name on `PATH`.
+fn default_preset_lookup(preset: &AgentPreset) -> Option<PathBuf> {
+    which::which(preset.program).ok()
+}
+
 /// ACP Registry management (fetch, cache, resolve, install).
 #[derive(Debug, Clone)]
 pub struct AcpRegistry {
@@ -193,10 +236,52 @@ pub struct AcpRegistry {
     cache_ttl: Duration,
     custom: BTreeMap<String, CustomAgentConfig>,
     aliases: BTreeMap<String, String>,
+    /// Preset executable lookup (injectable for tests)
+    preset_lookup: fn(&AgentPreset) -> Option<PathBuf>,
     http: reqwest::Client,
 }
 
 impl AcpRegistry {
+    /// Returns the built-in preset for an agent ID.
+    fn preset(id: &str) -> Option<&'static AgentPreset> {
+        AGENT_PRESETS.iter().find(|preset| preset.id == id)
+    }
+
+    /// Resolves a preset's executable on `PATH`.
+    fn preset_path(&self, preset: &AgentPreset) -> Option<PathBuf> {
+        (self.preset_lookup)(preset)
+    }
+
+    /// Returns the resolved executable for a built-in preset, if installed.
+    ///
+    /// This is used by `fxg agents install` to explain that a known CLI needs no
+    /// installation step.
+    pub fn preset_available(&self, id: &str) -> Option<PathBuf> {
+        Self::preset(id).and_then(|preset| self.preset_path(preset))
+    }
+
+    /// Builds a launch spec from a built-in preset.
+    fn preset_spec(
+        preset: &AgentPreset,
+        program: PathBuf,
+        extra_args: &[String],
+    ) -> AgentLaunchSpec {
+        let mut args = preset
+            .args
+            .iter()
+            .map(|arg| (*arg).to_owned())
+            .collect::<Vec<_>>();
+        args.extend(extra_args.iter().cloned());
+        AgentLaunchSpec {
+            agent_id: preset.id.to_owned(),
+            display_name: preset.display_name.to_owned(),
+            driver_kind: DriverKind::Acp,
+            program,
+            args,
+            env: Vec::new(),
+        }
+    }
+
     /// Creates from `~/.flexagent` and the `[agents]` configuration.
     pub fn new(home: impl Into<PathBuf>, config: &AgentsConfig) -> Self {
         let http = reqwest::Client::builder()
@@ -217,6 +302,7 @@ impl AcpRegistry {
             ),
             custom: config.custom.clone(),
             aliases: config.resolved_aliases(),
+            preset_lookup: default_preset_lookup,
             http,
         }
     }
@@ -520,6 +606,27 @@ impl AcpRegistry {
             });
         }
 
+        // Built-in presets (known CLI on PATH). Skip IDs already handled by a
+        // custom definition or the registry to avoid duplicate rows.
+        for preset in AGENT_PRESETS {
+            if custom.contains_key(preset.id) || index.find(preset.id).is_some() {
+                continue;
+            }
+            let Some(path) = self.preset_path(preset) else {
+                continue;
+            };
+            entries.push(AgentListEntry {
+                id: preset.id.to_owned(),
+                name: preset.display_name.to_owned(),
+                version: "-".to_owned(),
+                description: Some("Known ACP CLI".to_owned()),
+                registry: false,
+                package_available: false,
+                sources: vec![LocalSource::External(path)],
+                custom: None,
+            });
+        }
+
         // Registry
         for agent in &index.agents {
             // Prefer a custom definition with the same name (same as launch resolution)
@@ -573,7 +680,8 @@ impl AcpRegistry {
 
     /// Resolves the launch spec for an agent.
     ///
-    /// Resolution order: custom definition → existing install on `PATH` → `npx` → `uvx`.
+    /// Resolution order: custom definition → built-in preset → existing install
+    /// on `PATH` → `npx` → `uvx`.
     pub async fn launch_spec(
         &self,
         name: &str,
@@ -600,7 +708,14 @@ impl AcpRegistry {
             });
         }
 
-        // 2) Registry (only sources usable on this node; `npx` / `uvx` do not require
+        // 2) Built-in preset: a known CLI already installed on PATH.
+        if let Some(preset) = Self::preset(&id)
+            && let Some(path) = self.preset_path(preset)
+        {
+            return Ok(Self::preset_spec(preset, path, extra_args));
+        }
+
+        // 3) Registry (only sources usable on this node; `npx` / `uvx` do not require
         // explicit enablement)
         let agent = index
             .find(&id)
@@ -748,7 +863,10 @@ mod tests {
     }
 
     fn registry(dir: &Path) -> AcpRegistry {
-        AcpRegistry::new(dir, &config())
+        let mut registry = AcpRegistry::new(dir, &config());
+        // Keep tests independent of the host's PATH.
+        registry.preset_lookup = |_| None;
+        registry
     }
 
     #[test]
@@ -789,6 +907,7 @@ mod tests {
         let registry = registry(dir.path());
         // Built-in alias
         assert_eq!(registry.resolve_alias("claude"), "claude-code-acp");
+        assert_eq!(registry.resolve_alias("antigravity"), "agy");
         // Unknown names pass through unchanged
         assert_eq!(registry.resolve_alias("unknown-agent"), "unknown-agent");
 
@@ -937,5 +1056,71 @@ mod tests {
             .block_on(registry.launch_spec("missing", &index, &[]))
             .expect_err("must fail");
         assert!(err.to_string().contains("unknown agent"));
+    }
+
+    #[test]
+    fn preset_definitions_are_unique_and_use_acp_arguments() {
+        let mut ids = BTreeSet::new();
+        for preset in AGENT_PRESETS {
+            assert!(ids.insert(preset.id), "duplicate preset id: {}", preset.id);
+            assert!(!preset.program.is_empty());
+            assert_eq!(preset.args, ["acp"]);
+        }
+        assert!(AcpRegistry::preset("agy").is_some());
+        assert!(AcpRegistry::preset("opencode").is_some());
+    }
+
+    #[test]
+    fn builds_preset_spec_with_passthrough_arguments() {
+        let preset = AcpRegistry::preset("agy").expect("agy preset");
+        let spec = AcpRegistry::preset_spec(
+            preset,
+            PathBuf::from("/opt/agy/bin/agy"),
+            &["--verbose".to_owned()],
+        );
+        assert_eq!(spec.agent_id, "agy");
+        assert_eq!(spec.display_name, "Antigravity");
+        assert_eq!(spec.driver_kind, DriverKind::Acp);
+        assert_eq!(spec.program, PathBuf::from("/opt/agy/bin/agy"));
+        assert_eq!(spec.args, vec!["acp", "--verbose"]);
+        assert!(spec.env.is_empty());
+    }
+
+    #[test]
+    fn resolves_preset_alias_to_installed_cli() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut registry = AcpRegistry::new(dir.path(), &config());
+        registry.preset_lookup =
+            |preset| (preset.id == "agy").then(|| PathBuf::from("/fake/bin/agy"));
+        let index: RegistryIndex = serde_json::from_str(FIXTURE).expect("fixture");
+
+        let spec = tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(registry.launch_spec("antigravity", &index, &[]))
+            .expect("preset spec");
+        assert_eq!(spec.agent_id, "agy");
+        assert_eq!(spec.program, PathBuf::from("/fake/bin/agy"));
+        assert_eq!(spec.args, vec!["acp"]);
+    }
+
+    #[test]
+    fn lists_installed_presets_without_registry_entry() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut registry = AcpRegistry::new(dir.path(), &config());
+        registry.preset_lookup =
+            |preset| (preset.id == "agy").then(|| PathBuf::from("/fake/bin/agy"));
+        let index: RegistryIndex = serde_json::from_str(FIXTURE).expect("fixture");
+
+        let entries = registry.list(&index, false);
+        let agy = entries
+            .iter()
+            .find(|entry| entry.id == "agy")
+            .expect("agy preset entry");
+        assert!(!agy.registry);
+        assert!(agy.is_available());
+        assert_eq!(
+            agy.sources,
+            vec![LocalSource::External(PathBuf::from("/fake/bin/agy"))]
+        );
     }
 }

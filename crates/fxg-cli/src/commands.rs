@@ -2281,6 +2281,13 @@ impl usage::RunAsync for AgentsInstallArgs {
     async fn run_async(self) -> Self::Output {
         let registry = acp_registry()?;
         let id = registry.resolve_alias(&self.id);
+        if let Some(path) = registry.preset_available(&id) {
+            println!(
+                "{id} is already available on PATH ({}); no installation is needed",
+                path.display()
+            );
+            return Ok(());
+        }
         let index = registry
             .index(false)
             .await

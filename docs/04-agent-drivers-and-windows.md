@@ -68,15 +68,21 @@ pub trait ActiveSessionHandle: Send + Sync {
      §3 のカスタムエージェントとして明示登録する)。
 2. **起動解決の優先順位 (ローカル優先)**:
    1. カスタム定義 (`config.toml` / `~/.flexagent/custom_agents.json`)
-   2. fxg 管理バイナリ (`~/.flexagent/agents/<id>/<version>/`
-      の現行レジストリ版)
-   3. `PATH` 上の既存インストール (`which::which`、Windows は `PATHEXT` 対応)
+   2. **ビルトイン preset**: 既知の CLI が `PATH` にあれば、その ACP
+      起動引数で起動する (`opencode acp` / `agy acp`)。ユーザーが同名の
+      custom を定義した場合は custom が優先される。
+   3. `PATH` 上の既存インストール (`which::which`、Windows は `PATHEXT`
+      対応)
    4. `npx` 配布 (`npx -y <package> <args...>`)
    5. `uvx` 配布 (`uvx <package> <args...>`)
+   - 代表例: `fxg run antigravity` は `agy acp`、`fxg run opencode` は
+     `opencode acp` として起動する。registry の `antigravity-acp` が
+     `agy_acp_server.par` を前提としていても、`agy` CLI が PATH にあれば
+     preset が優先される。
 3. **インストールは明示操作のみ**:
-   - `binary`
-     配布は **起動時に暗黙ダウンロードしない**。`fxg agents install <id>` /
-     Web UI (設定 > エージェント管理) で明示的に導入する。
+   - fxg はバイナリ配布のダウンロード・展開を行わない。binary 配布のみの
+     エージェントは、各ツールの配布元から導入して `PATH` に置くか、custom
+     定義で起動コマンドを指定する。
    - 未導入のまま起動しようとした場合は、インストール方法を含むエラーを返す
      (`PATH` に既存インストールがあればそれを使うため、通常は導入不要)。
    - `npx` / `uvx` は実行時にパッケージマネージャが取得するため、fxg 側では

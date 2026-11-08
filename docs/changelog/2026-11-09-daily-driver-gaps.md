@@ -146,10 +146,10 @@ const PRESETS: &[AgentPreset] = &[
   custom を優先する (現行の custom 優先を維持)。
 - **alias**: `resolve_alias` で `antigravity` → `agy` に寄せる。
   `antigravity-acp` という registry ID も互換のため残す。
-- **AgentSource**: `AgentSource` に `Preset` を追加する
-  (`crates/fxg-protocol/src/client_api.rs`)。`AgentSummary.external_path` は
-  PowerShell 等の解決済みパスを返す。`installed_agents` にも preset 由来の
-  ID を含める。
+- **AgentSource / 表示**: 新しい enum は追加せず、preset は
+  `AgentSource::External` + `registry: false` の「既知 CLI」として返す
+  (`AgentSummary.external_path` は解決済みパス)。`installed_agents` にも
+  preset 由来の ID を含める。
 - **UI**: `ui/src/lib/agents.ts` の `agentSourceLabel` に「既知 CLI」を追加。
   `AgentManager.svelte` のカタログに preset を表示し、`custom` と同様に
   「このノードで利用可能」として扱う。新規セッションの選択肢にも出す。
