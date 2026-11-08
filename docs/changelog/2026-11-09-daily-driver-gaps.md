@@ -966,3 +966,17 @@ opencode / agy は `sessionCapabilities.list` / `load` を広告しており、
 - **テスト**: tool text output、auto-approve、import、native fork、
   diagnostics、push payload、session config prefs を追加。
   `mise run check` 通過。
+
+---
+
+## 17. ブランチ・マージ履歴
+
+- `docs/plan` を `master` にコミット後、以下のブランチを順に fast-forward
+  マージした。
+  - `feat/daily-driver-phase1` (preset / daemon 自動起動 / 認証)
+  - `feat/daily-driver-phase2` (添付 / 画像 / ファイル参照)
+  - `feat/daily-driver-phase3` (native fork / Revert 再構築 / session close)
+  - `feat/daily-driver-phase4` (stderr 診断 / logs / doctor / 完了通知)
+  - `feat/daily-driver-phase5` (承認ポリシー / 初期設定 / import / tool output)
+- 最終確認: `mise run check` が exit 0 (fmt / clippy / lint:errors / Rust
+  テスト / `svelte-check` / Vitest)。
