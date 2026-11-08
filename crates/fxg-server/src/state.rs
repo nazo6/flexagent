@@ -1091,7 +1091,7 @@ impl ClientApiBackend for ServerState {
             )
             .await?;
 
-        // 全ノードの導入状態 (NodeHello の installed_agents) を統合する
+        // 全ノードの利用可能状態 (NodeHello の installed_agents) を統合する
         let nodes = self.inner.db.list_nodes().await.map_err(ApiError::from)?;
         for agent in &mut response.agents {
             agent.installed_nodes = nodes
@@ -1099,7 +1099,6 @@ impl ClientApiBackend for ServerState {
                 .filter(|node| node.installed_agents.iter().any(|id| id == &agent.id))
                 .map(|node| node.node_id.clone())
                 .collect();
-            agent.installed = !agent.installed_nodes.is_empty();
         }
         Ok(response)
     }

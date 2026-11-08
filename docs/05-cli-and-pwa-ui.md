@@ -47,8 +47,8 @@ Fish / PowerShell / Nushell）・manpage・Markdown リファレンスを `usage
 | **`fxg project list`**                  | 登録済み論理プロジェクト一覧と各ノードのローカルパス紐付けを表示                                                                                                                  | `--json`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | **`fxg project link <project-id>`**     | カレントディレクトリを指定の論理プロジェクトIDに手動紐付け（`.fxg.toml` に保存）                                                                                                  | -                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | **`fxg project scan [dir]`**            | 指定ディレクトリ配下のGitリポジトリを一括スキャンしデーモンへ登録                                                                                                                 | `dir` 省略時は `config.toml` の `project_scan_dirs` を走査                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| **`fxg agents list`**                   | 利用可能なエージェント一覧とインストール状態を表示                                                                                                                                | `--all`: ACP Registry 上の全未導入エージェントも表示<br/>`--json`                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| **`fxg agents install <id>`**           | ACP Registry から指定エージェントを事前ダウンロード・展開                                                                                                                         | `--version <VER>`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| **`fxg agents list`**                   | このノードで利用可能なエージェント (fxg 管理 / PATH 上の既存 / npx・uvx / カスタム) を表示                                                                                        | `--all`: ACP Registry 上の未導入エージェントも表示<br/>`--json`                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| **`fxg agents install <id>`**           | ACP Registry から指定エージェントを明示的にダウンロード・展開 (起動時の暗黙導入は行わない)                                                                                        | `--version <VER>`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | **`fxg agents update [id]`**            | ACP Registry インデックス (`registry.json`) および導入済みエージェントを更新                                                                                                      | `id` 省略時は全導入済みエージェントを更新                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | **`fxg agents remove <id>`**            | キャッシュ済みの ACP エージェントバイナリを削除                                                                                                                                   | -                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | **`fxg provisioners list`**             | `config.toml` に定義された一時VMプロビジョナー一覧を表示                                                                                                                          | `--json`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
@@ -125,6 +125,8 @@ fxg kill-all                                     # 【緊急停止】全セッ�
 │   └── registry.json           # ACP Registry インデックスキャッシュ
 ├── agents/                     # ACP Registry から取得したエージェント実行バイナリ
 │   └── <agent-id>/<version>/
+├── custom_agents.json          # UI 管理のカスタム ACP エージェント定義
+├── enabled_package_agents.json # npx/uvx 配布を有効化したエージェントID
 ├── worktrees/                  # fxg が自動作成する Git Worktree のデフォルト集約ディレクトリ
 │   └── <project-slug>/<branch-slug>/
 ├── snapshots/                  # Shadow Git Tree 用のセッション別一時インデックス (GIT_INDEX_FILE)
@@ -253,7 +255,9 @@ antigravity = "antigravity-acp"
 gemini = "gemini-cli-acp"
 codex = "codex-acp"
 
-# レジストリ外のカスタムACPエージェント定義（ローカルコマンドまたは外部 agent.json 指定）
+# レジストリ外のカスタムACPエージェント定義
+# (Web UI の「カスタム追加」は ~/.flexagent/custom_agents.json へ保存する。
+#  同名 ID は UI 管理側が優先される)
 [agents.custom.my-local-agent]
 name = "My Custom ACP Agent"
 command = "node"
@@ -494,8 +498,13 @@ PCブラウザ、ローカルフォールバック (`localhost:7860`)、およ�
 6. **設定画面（タブ構成）**:
    - **全般**:
      クライアント認証トークンの再生成とノードペアリング（ノード個別トークンの発行・失効）。
-   - **エージェント管理**: ACP Registry
-     のエージェントをノードへインストール・更新・削除。
+   - **エージェント管理**: ノードで利用可能なエージェント (fxg 管理 / PATH
+     上の既存インストール / npx・uvx / カスタム) を一覧表示し、カタログからの
+     明示インストール・更新・削除と、カスタム ACP
+     エージェントの追加・編集・削除を行う。`npx` / `uvx`
+     配布は既定では一覧に出さず、「カタログから追加」でエージェントごとに
+     有効化・無効化する (状態はノードローカルに保存され、新規セッションの
+     選択肢にも反映される)。
    - **監査ログ**: 誰が・いつ・どのLAN/VPN
      IPからどの承認操作やWorktree作成を行ったかをタイムライン形式で確認。
 

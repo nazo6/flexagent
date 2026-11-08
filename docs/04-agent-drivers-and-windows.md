@@ -55,24 +55,37 @@ pub trait ActiveSessionHandle: Send + Sync {
 
 ## 2. 任意ACPエージェント対応 (`AcpDriver` & Registry Manager)
 
-### 2.1 ACP Registry からの自動インストール・キャッシュ
+### 2.1 ACP Registry カタログとローカル起動解決
 
-1. **レジストリ取得**:
+1. **レジストリ取得 (カタログ用途)**:
    - 公式インデックス
      `https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json`
      を取得し、`~/.flexagent/cache/registry.json` にキャッシュ（TTL
      24時間、`fxg agents update` で即時更新）。
-   - ユーザー定義のカスタム `agent.json`（ローカルパスまたはURL、例:
-     `antigravity-acp/agent.json`）も `~/.flexagent/config.toml` に追加可能。
-2. **配布形態 (`distribution`) ごとの起動解決**:
-   - **`binary`**: 現在のOS/Arch（`windows-x86_64`, `darwin-aarch64`,
-     `linux-x86_64`
-     等）に対応するアーカイブURLをダウンロードし、`~/.flexagent/agents/<agent-id>/<version>/`
-     に展開して実行バイナリパスを解決。
-   - **`npx`**: `which::which("npx")`（Windowsでは `npx.cmd`
-     を自動解決）を用いて `npx -y <package> <args...>` を起動。
-   - **`uvx`**: `which::which("uvx")` を用いて `uvx <package> <args...>`
-     を起動。
+   - レジストリは「表示名・説明・配布形態を知るためのカタログ」として使い、
+     起動できるのは **このノードに実体があるものだけ** とする (未登録 ID を
+     `PATH` から暗黙解決するフォールバックは行わない。任意のコマンドは
+     §3 のカスタムエージェントとして明示登録する)。
+2. **起動解決の優先順位 (ローカル優先)**:
+   1. カスタム定義 (`config.toml` / `~/.flexagent/custom_agents.json`)
+   2. fxg 管理バイナリ (`~/.flexagent/agents/<id>/<version>/`
+      の現行レジストリ版)
+   3. `PATH` 上の既存インストール (`which::which`、Windows は `PATHEXT` 対応)
+   4. `npx` 配布 (`npx -y <package> <args...>`)
+   5. `uvx` 配布 (`uvx <package> <args...>`)
+3. **インストールは明示操作のみ**:
+   - `binary`
+     配布は **起動時に暗黙ダウンロードしない**。`fxg agents install <id>` /
+     Web UI (設定 > エージェント管理) で明示的に導入する。
+   - 未導入のまま起動しようとした場合は、インストール方法を含むエラーを返す
+     (`PATH` に既存インストールがあればそれを使うため、通常は導入不要)。
+   - `npx` / `uvx` は実行時にパッケージマネージャが取得するため、fxg 側では
+     成果物を保持しない (`fxg agents remove` の対象外)。
+   - 実体を持たない `npx` / `uvx` 配布は **既定では一覧に出さない**。Web UI の
+     「カタログから追加」でエージェントごとに**有効化**し、状態は
+     `~/.flexagent/enabled_package_agents.json` に保存する
+     (`AgentAction::SetPackageEnabled`)。有効化は一覧・選択肢の制御のみで、
+     起動解決 (`launch_spec`) は引き続き `npx` / `uvx` を利用できる。
 
 ### 2.2 `agent-client-protocol` クレートを用いた `Client` 実装
 
@@ -123,24 +136,27 @@ ACPでは、エディタやオーケストレータ側が **`acp::Client` トレ
 
 ---
 
-## 3. 未登録エージェントのローカルコマンド解決 (`which` + `PATHEXT`)
+## 3. カスタム ACP エージェント (任意コマンド)
 
-ACP Registry に登録されていないエージェント ID
-や、任意のローカルコマンド名が指定された場合、システムの `PATH`
-から自動解決して起動します。
+ACP Registry に載っていないエージェントや自前の ACP 実装は、**明示的なカスタム
+定義**として登録して起動する。
 
-1. **コマンド探索**:
-   - `which::which(cmd)` (Windows では `PATHEXT` を考慮した `which::which_in`)
-     を使用して実行可能バイナリを解決。
-   - `claude-code` や `my-agent`
-     などのローカル実行可能ファイルをそのまま指定可能。
-2. **ACP プロセス起動**:
-   - 解決されたバイナリを引数（`extra_args`）とともに子プロセスとしてスポーン。
-   - 標準入出力 (`stdin/stdout`) を介して ACP プロトコルで直結し、`AcpDriver`
-     経由で対話。
-3. **メリット**:
-   - ユーザー独自のエージェントや新規ツールを、設定ファイルの編集や Registry
-     登録なしに `fxg run <command>` で即座に利用できます。
+1. **定義方法**:
+   - `~/.flexagent/config.toml` の `[agents.custom.<id>]`
+     (`name` / `command` / `args` / `env`)。宣言的なブートストラップ用で、
+     ノード再起動時に読み込まれる。
+   - Web UI (設定 > エージェント管理 > カスタム追加) は
+     `~/.flexagent/custom_agents.json` に保存する。同名 ID は UI 管理側が優先。
+   - API: `PUT /api/v1/nodes/:node_id/agents/custom/:agent_id` (upsert) /
+     `DELETE /api/v1/nodes/:node_id/agents/custom/:agent_id`。
+2. **解決と起動**:
+   - `command` は `PATH` 上のコマンド名または絶対パス。シェル経由ではないため
+     グロブ・`~`・環境変数の展開は行わない。
+   - 起動直前に `fxg_pty::resolve_command` が `which` (`PATHEXT`) で解決し、
+     `args` / `env` を付けて ACP プロセスとしてスポーンする。
+3. **一覧表示**:
+   - カスタム定義は常に「利用可能」として扱い、`sources: ["custom"]` で返す。
+   - レジストリに同名 ID がある場合はカスタム定義を優先し、重複表示しない。
 
 ---
 

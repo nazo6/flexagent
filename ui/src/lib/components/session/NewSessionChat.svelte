@@ -7,6 +7,8 @@
   import { Label } from '$lib/components/ui/label';
   import NodeStatusBadge from '$lib/components/NodeStatusBadge.svelte';
   import FolderBrowserDialog from '$lib/components/fs/FolderBrowserDialog.svelte';
+  import { agentOptionLabel, agentsAvailableOn } from '$lib/agents';
+  import type { AgentSummary } from '$lib/generated/AgentSummary';
   import type { ProvisionerSummary } from '$lib/generated/ProvisionerSummary';
   import type { ProvisionerTestResponse } from '$lib/generated/ProvisionerTestResponse';
   import { formatRelativeTime } from '$lib/format';
@@ -49,7 +51,10 @@
   let provisionerName = $state('');
   const provisioners = $state<ProvisionerSummary[]>([]);
   let agentId = $state('');
-  let customAgent = $state('');
+  /** カタログがある場合でも ID を直接入力する。 */
+  let manualAgent = $state(false);
+  /** ACP Registry カタログ + ノード別の利用可否。 */
+  let catalog = $state<AgentSummary[]>([]);
   let pathMode = $state<PathMode>('existing');
   let localPath = $state('');
   let branch = $state('');
@@ -94,7 +99,10 @@
 
   const nodes = $derived(sync.nodes);
   const selectedNode = $derived(nodes.find((n) => n.node_id === nodeId) ?? null);
-  const installedAgents = $derived(selectedNode?.installed_agents ?? []);
+  // このノードで実際に起動できるエージェント (カタログの installed_nodes 基準。
+  // npx/uvx 配布は「カタログから追加」で有効化したものだけ含まれる)
+  const availableAgents = $derived(agentsAvailableOn(catalog, nodeId));
+  const availableAgentIds = $derived(availableAgents.map((agent) => agent.id));
 
   // 一時VMプロビジョナー定義 (中央サーバー接続時のみ取得できる)
   onMount(async () => {
@@ -104,6 +112,12 @@
       if (list.length > 0 && provisionerName === '') provisionerName = list[0].name;
     } catch {
       // ローカルノード接続時はプロビジョナーが存在しないため無視する
+    }
+    // エージェント一覧は取得できなくても ID 直接入力で継続できる
+    try {
+      catalog = await sync.connection.client.agents();
+    } catch {
+      catalog = [];
     }
   });
 
@@ -179,13 +193,14 @@
     if (!containsCurrent) localPath = pickDefaultCandidate(pathCandidates)?.path ?? '';
   });
 
-  const effectiveAgent = $derived(
-    isProvisionerMode
-      ? customAgent.trim()
-      : installedAgents.length > 0
-        ? agentId || installedAgents[0]
-        : customAgent.trim()
-  );
+  const effectiveAgent = $derived(agentId.trim());
+
+  // 既定エージェント: 未選択ならこのノードで使える先頭を選ぶ
+  $effect(() => {
+    if (agentId !== '' || isProvisionerMode) return;
+    const first = availableAgentIds[0];
+    if (first !== undefined) agentId = first;
+  });
 
   const canSubmit = $derived(
     !busy &&
@@ -216,11 +231,9 @@
     }
     const agentParam = page.url.searchParams.get('agent');
     if (agentParam) {
-      if (installedAgents.includes(agentParam)) {
-        agentId = agentParam;
-      } else {
-        customAgent = agentParam;
-      }
+      agentId = agentParam;
+      // 一覧に無い ID は入力欄で見えるようにする
+      manualAgent = !availableAgentIds.includes(agentParam);
       // 記憶よりディープリンクを優先する
       agentTouched = true;
     }
@@ -240,13 +253,8 @@
     const prefs = untrack(() => loadNewSessionPrefs(project.project_id));
     if (!prefs) return;
     if (!modeTouched && prefs.mode !== 'default') sessionMode = prefs.mode;
-    if (!agentTouched && prefs.agent !== '') {
-      if (installedAgents.includes(prefs.agent)) {
-        agentId = prefs.agent;
-      } else if (installedAgents.length === 0) {
-        // エージェント一覧が取得できていない場合はカスタム指定として復元する
-        customAgent = prefs.agent;
-      }
+    if (!agentTouched && prefs.agent !== '' && availableAgentIds.includes(prefs.agent)) {
+      agentId = prefs.agent;
     }
   });
 
@@ -254,7 +262,6 @@
   // (復元前に保存しないため `prefsProjectId` の一致を必須にする)
   $effect(() => {
     void agentId;
-    void customAgent;
     void sessionMode;
     const projectId = selectedProject?.project_id ?? '';
     if (projectId === '' || projectId !== prefsProjectId || isProvisionerMode) return;
@@ -519,25 +526,45 @@
         </div>
 
         <div class="flex flex-col gap-1">
-          <Label class="text-muted-foreground text-xs flex items-center gap-1.5">
-            <BotIcon class="size-3.5" />
-            エージェント
-          </Label>
-          {#if !isProvisionerMode && installedAgents.length > 0}
+          <div class="flex items-center gap-1.5">
+            <Label class="text-muted-foreground text-xs flex items-center gap-1.5">
+              <BotIcon class="size-3.5" />
+              エージェント
+            </Label>
+            {#if !isProvisionerMode && availableAgents.length > 0}
+              <button
+                type="button"
+                class="text-muted-foreground hover:text-foreground ml-auto text-[10px] underline"
+                onclick={() => (manualAgent = !manualAgent)}
+              >
+                {manualAgent ? '一覧から選ぶ' : 'IDを直接入力'}
+              </button>
+            {/if}
+          </div>
+          {#if !isProvisionerMode && availableAgents.length > 0 && !manualAgent}
             <select
               bind:value={agentId}
               class="border-input bg-background focus-visible:ring-ring/40 h-8 rounded-md border px-2 text-xs outline-none focus-visible:ring-1"
             >
-              {#each installedAgents as agent (agent)}
-                <option value={agent}>{agent}</option>
+              {#if agentId !== '' && !availableAgentIds.includes(agentId)}
+                <option value={agentId}>{agentId} — 一覧にありません</option>
+              {/if}
+              {#each availableAgents as agent (agent.id)}
+                <option value={agent.id}>{agentOptionLabel(agent)}</option>
               {/each}
             </select>
           {:else}
-            <Input
-              bind:value={customAgent}
-              placeholder={isProvisionerMode ? 'エージェントID / コマンド' : 'エージェントID (ACP Registry または PATH)'}
-              class="h-8 text-xs"
-            />
+            <Input bind:value={agentId} placeholder="エージェントID" class="h-8 text-xs" />
+          {/if}
+          {#if !isProvisionerMode}
+            <a
+              href="/settings?tab=agents"
+              class="text-muted-foreground hover:text-foreground text-[10px] underline"
+            >
+              {availableAgents.length === 0
+                ? 'エージェントがありません — 設定から追加する'
+                : 'エージェントの追加・管理'}
+            </a>
           {/if}
         </div>
       </div>
@@ -865,6 +892,8 @@
         <div class="flex items-center gap-2">
           {#if pathMissing}
             <span class="text-destructive text-xs">{pathRequiredHint}</span>
+          {:else if effectiveAgent === ''}
+            <span class="text-destructive text-xs">エージェントを選択してください</span>
           {/if}
           <Button
             variant="ghost"

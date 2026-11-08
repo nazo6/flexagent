@@ -13,6 +13,7 @@ use crate::common::{
     NodeSummary, PermissionRequestEntry, ProjectSummary, SearchHit, SessionControlAction,
     SessionSummary, StreamDeltaPayload,
 };
+use crate::config::CustomAgentConfig;
 use crate::events::SessionEventBatch;
 
 /// 接続先の種別 (`GET /api/v1/system/info`)。
@@ -242,7 +243,25 @@ pub struct AgentsResponse {
     pub agents: Vec<AgentSummary>,
 }
 
+/// エージェントの起動形態 (このノードで実際に使える手段)。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum AgentSource {
+    /// fxg が `~/.flexagent/agents/<id>/<version>` へ導入したバイナリ
+    Managed,
+    /// PATH 上に既にあるインストール (`which` で検出)
+    External,
+    /// npx / uvx によるパッケージ実行 (実行時に取得)
+    Package,
+    /// `config.toml` または UI で定義したカスタム ACP エージェント
+    Custom,
+}
+
 /// ACP エージェント 1 件 (カタログ情報 + 導入状態)。
+///
+/// `sources` が空のエージェントは「カタログにはあるが、このノードではまだ
+/// 起動できない」状態を表す (`installable` が true なら導入可能)。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct AgentSummary {
@@ -250,21 +269,26 @@ pub struct AgentSummary {
     pub id: String,
     /// 表示名
     pub name: String,
-    /// レジストリ提供バージョン (ビルトイン・カスタムは `-`)
+    /// レジストリ提供バージョン (カスタムは `-`)
     pub version: String,
     /// 説明
     pub description: Option<String>,
-    /// 配布形態 (`binary` / `npx` / `uvx` / `builtin` / `custom`)
-    pub distributions: Vec<String>,
-    /// 導入済みか (少なくとも 1 ノードに導入済み、または npx/uvx 配布)
-    pub installed: bool,
-    /// `config.toml` のカスタム定義か
-    pub custom: bool,
-    /// ビルトイン (`opencode2`) か
-    pub builtin: bool,
-    /// 導入済みバージョン一覧 (応答ノードのローカルキャッシュ)
-    pub installed_versions: Vec<String>,
-    /// 導入済みのノードID一覧 (NodeHello の報告ベース)
+    /// このノードで使える起動形態 (空 = 未導入)
+    pub sources: Vec<AgentSource>,
+    /// ACP Registry カタログに存在するか
+    pub registry: bool,
+    /// 現在のプラットフォーム向け binary を fxg で導入できるか
+    pub installable: bool,
+    /// `npx` / `uvx` (PATH 上に存在) で実行できるか。
+    /// `true` なら UI の「有効化」で一覧に追加できる。
+    pub package_available: bool,
+    /// fxg が導入済みのバージョン一覧
+    pub managed_versions: Vec<String>,
+    /// PATH から検出した実行ファイル (external のときのみ)
+    pub external_path: Option<String>,
+    /// カスタム定義の内容 (UI 編集用)
+    pub custom_config: Option<CustomAgentConfig>,
+    /// 利用可能なノードID一覧 (NodeHello の報告ベース)
     pub installed_nodes: Vec<String>,
 }
 

@@ -722,6 +722,25 @@ pub enum AgentAction {
         /// エージェントID (エイリアス可)
         agent_id: String,
     },
+    /// UI 管理のカスタムエージェント定義を作成・更新する
+    UpsertCustom {
+        /// エージェントID
+        agent_id: String,
+        /// 実行コマンド・引数・環境変数
+        config: crate::config::CustomAgentConfig,
+    },
+    /// UI 管理のカスタムエージェント定義を削除する
+    RemoveCustom {
+        /// エージェントID
+        agent_id: String,
+    },
+    /// `npx` / `uvx` 配布での利用を有効化・無効化する
+    SetPackageEnabled {
+        /// エージェントID (エイリアス可)
+        agent_id: String,
+        /// `true` = 一覧に表示して `npx` / `uvx` 経由で使う
+        enabled: bool,
+    },
 }
 
 /// Diff のスコープ。

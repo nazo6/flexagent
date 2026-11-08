@@ -6,7 +6,8 @@
 
 use std::path::{Path, PathBuf};
 
-use fxg_protocol::client_api::{AgentSummary, AgentsResponse, WorktreeInfo};
+use fxg_acp::registry::{AcpRegistry, LocalSource};
+use fxg_protocol::client_api::{AgentSource, AgentSummary, AgentsResponse, WorktreeInfo};
 use fxg_protocol::common::{AgentAction, HookLogEntry, ProjectSummary};
 
 use super::DaemonState;
@@ -271,34 +272,54 @@ impl DaemonState {
     /// ACP Registry カタログ + 導入状態を返す (`GET /api/v1/agents`)。
     pub async fn agents_catalog(&self) -> Result<AgentsResponse, NodeError> {
         let registry = self.session_manager().registry();
-        let index = registry.index(false).await.map_err(agent_error)?;
+        // レジストリが取得できなくてもカスタム定義は返せるようにする
+        let index = registry.index(false).await.unwrap_or_else(|err| {
+            tracing::warn!("failed to load ACP registry: {err:#}");
+            Default::default()
+        });
         let node_id = self.node_id().to_owned();
         let agents = registry
             .list(&index, true)
             .into_iter()
-            .map(|entry| AgentSummary {
-                id: entry.id.clone(),
-                name: entry.name,
-                version: entry.version,
-                description: entry.description,
-                distributions: entry
-                    .distributions
-                    .iter()
-                    .map(|kind| (*kind).to_owned())
-                    .collect(),
-                installed: entry.installed,
-                custom: entry.custom,
-                builtin: entry.builtin,
-                installed_versions: if entry.custom || entry.builtin {
-                    Vec::new()
-                } else {
-                    registry.installed_versions(&entry.id)
-                },
-                installed_nodes: if entry.installed {
-                    vec![node_id.clone()]
-                } else {
-                    Vec::new()
-                },
+            .map(|entry| {
+                let available = entry.is_available();
+                let mut sources = Vec::new();
+                if entry.custom.is_some() {
+                    sources.push(AgentSource::Custom);
+                }
+                let mut external_path = None;
+                for source in &entry.sources {
+                    match source {
+                        LocalSource::Managed(_) => sources.push(AgentSource::Managed),
+                        LocalSource::External(path) => {
+                            external_path = Some(path.to_string_lossy().into_owned());
+                            sources.push(AgentSource::External);
+                        }
+                        LocalSource::Npx | LocalSource::Uvx => {
+                            if !sources.contains(&AgentSource::Package) {
+                                sources.push(AgentSource::Package);
+                            }
+                        }
+                    }
+                }
+                AgentSummary {
+                    id: entry.id,
+                    name: entry.name,
+                    version: entry.version,
+                    description: entry.description,
+                    sources,
+                    registry: entry.registry,
+                    installable: entry.installable,
+                    package_available: entry.package_available,
+                    managed_versions: entry.managed_versions,
+                    external_path,
+                    custom_config: entry.custom,
+                    installed_nodes: if available {
+                        vec![node_id.clone()]
+                    } else {
+                        Vec::new()
+                    },
+                }
             })
             .collect();
         Ok(AgentsResponse { agents })
@@ -329,7 +350,7 @@ impl DaemonState {
                 })?;
                 if agent.distribution.binary.is_empty() {
                     return Ok(format!(
-                        "{id} is distributed via npx/uvx; no explicit install required"
+                        "{id} は npx/uvx 配布です。個別インストールは不要で、Web UI (設定 > エージェント管理) で有効化すると一覧に表示されます"
                     ));
                 }
                 let path = registry.install(&id, &index).await.map_err(agent_error)?;
@@ -346,7 +367,7 @@ impl DaemonState {
                     None => index
                         .agents
                         .iter()
-                        .filter(|agent| registry.is_installed(agent))
+                        .filter(|agent| !registry.installed_versions(&agent.id).is_empty())
                         .map(|agent| agent.id.clone())
                         .collect(),
                 };
@@ -390,6 +411,45 @@ impl DaemonState {
                 } else {
                     format!("{id} is not installed")
                 })
+            }
+            AgentAction::UpsertCustom { agent_id, config } => {
+                registry
+                    .upsert_custom(agent_id, config.clone())
+                    .map_err(agent_error)?;
+                Ok(format!(
+                    "saved custom agent {agent_id} ({})",
+                    config.command
+                ))
+            }
+            AgentAction::RemoveCustom { agent_id } => {
+                let removed = registry.remove_custom(agent_id).map_err(agent_error)?;
+                Ok(if removed {
+                    format!("removed custom agent {agent_id}")
+                } else {
+                    format!("custom agent {agent_id} is not defined in the UI store")
+                })
+            }
+            AgentAction::SetPackageEnabled { agent_id, enabled } => {
+                let id = registry.resolve_alias(agent_id);
+                if !enabled {
+                    registry
+                        .set_package_enabled(&id, false)
+                        .map_err(agent_error)?;
+                    return Ok(format!("disabled npx/uvx for {id}"));
+                }
+                let index = registry.index(false).await.map_err(agent_error)?;
+                let agent = index.find(&id).ok_or_else(|| {
+                    NodeError::Agent(format!("agent not found in registry: {id}"))
+                })?;
+                let runner = AcpRegistry::package_runner(agent).ok_or_else(|| {
+                    NodeError::Agent(format!(
+                        "{id} cannot run via npx/uvx on this node (npx/uvx not found in PATH, or no package distribution)"
+                    ))
+                })?;
+                registry
+                    .set_package_enabled(&id, true)
+                    .map_err(agent_error)?;
+                Ok(format!("enabled {id} via {runner}"))
             }
         }
     }

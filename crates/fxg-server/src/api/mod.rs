@@ -30,7 +30,7 @@ use axum::extract::{Path as UrlPath, Query, Request, State};
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::middleware;
 use axum::response::{IntoResponse, Response};
-use axum::routing::{delete, get, post};
+use axum::routing::{delete, get, post, put};
 use axum::{Extension, Json, Router};
 use futures_util::SinkExt;
 use fxg_db::{Db, DbError, SessionFilter};
@@ -52,6 +52,7 @@ use fxg_protocol::common::{
     AgentAction, CommandResult, DiffScope, ErrorCode, ProjectSummary, SessionControlAction,
     SessionStatus, WorkspaceDiffResponse,
 };
+use fxg_protocol::config::CustomAgentConfig;
 use fxg_protocol::events::{SessionEventBatch, SessionEventEnvelope};
 use tokio::sync::broadcast;
 
@@ -717,6 +718,14 @@ pub fn client_router<B: ClientApiBackend>(backend: B, options: ClientApiOptions)
             delete(remove_agent::<B>),
         )
         .route(
+            "/api/v1/nodes/{node_id}/agents/custom/{agent_id}",
+            put(upsert_custom_agent::<B>).delete(remove_custom_agent::<B>),
+        )
+        .route(
+            "/api/v1/nodes/{node_id}/agents/{agent_id}/package",
+            post(enable_package_agent::<B>).delete(disable_package_agent::<B>),
+        )
+        .route(
             "/api/v1/nodes/tokens",
             get(node_tokens::<B>).post(issue_node_token::<B>),
         )
@@ -1275,6 +1284,85 @@ async fn remove_agent<B: ClientApiBackend>(
     match state
         .backend
         .manage_agent(&node_id, AgentAction::Remove { agent_id }, client)
+        .await
+    {
+        Ok(response) => Json(response).into_response(),
+        Err(err) => err.into_response(),
+    }
+}
+
+async fn upsert_custom_agent<B: ClientApiBackend>(
+    State(state): State<ClientApiState<B>>,
+    Extension(client): Extension<ClientInfo>,
+    UrlPath((node_id, agent_id)): UrlPath<(String, String)>,
+    Json(config): Json<CustomAgentConfig>,
+) -> Response {
+    match state
+        .backend
+        .manage_agent(
+            &node_id,
+            AgentAction::UpsertCustom { agent_id, config },
+            client,
+        )
+        .await
+    {
+        Ok(response) => Json(response).into_response(),
+        Err(err) => err.into_response(),
+    }
+}
+
+async fn remove_custom_agent<B: ClientApiBackend>(
+    State(state): State<ClientApiState<B>>,
+    Extension(client): Extension<ClientInfo>,
+    UrlPath((node_id, agent_id)): UrlPath<(String, String)>,
+) -> Response {
+    match state
+        .backend
+        .manage_agent(&node_id, AgentAction::RemoveCustom { agent_id }, client)
+        .await
+    {
+        Ok(response) => Json(response).into_response(),
+        Err(err) => err.into_response(),
+    }
+}
+
+async fn enable_package_agent<B: ClientApiBackend>(
+    State(state): State<ClientApiState<B>>,
+    Extension(client): Extension<ClientInfo>,
+    UrlPath((node_id, agent_id)): UrlPath<(String, String)>,
+) -> Response {
+    match state
+        .backend
+        .manage_agent(
+            &node_id,
+            AgentAction::SetPackageEnabled {
+                agent_id,
+                enabled: true,
+            },
+            client,
+        )
+        .await
+    {
+        Ok(response) => Json(response).into_response(),
+        Err(err) => err.into_response(),
+    }
+}
+
+async fn disable_package_agent<B: ClientApiBackend>(
+    State(state): State<ClientApiState<B>>,
+    Extension(client): Extension<ClientInfo>,
+    UrlPath((node_id, agent_id)): UrlPath<(String, String)>,
+) -> Response {
+    match state
+        .backend
+        .manage_agent(
+            &node_id,
+            AgentAction::SetPackageEnabled {
+                agent_id,
+                enabled: false,
+            },
+            client,
+        )
         .await
     {
         Ok(response) => Json(response).into_response(),

@@ -6,6 +6,7 @@ import type { AuditLogsResponse } from "$lib/generated/AuditLogsResponse";
 import type { CreateSessionRequest } from "$lib/generated/CreateSessionRequest";
 import type { CreateSessionResponse } from "$lib/generated/CreateSessionResponse";
 import type { CreateWorktreeRequest } from "$lib/generated/CreateWorktreeRequest";
+import type { CustomAgentConfig } from "$lib/generated/CustomAgentConfig";
 import type { DiffScope } from "$lib/generated/DiffScope";
 import type { ErrorCode } from "$lib/generated/ErrorCode";
 import type { FsBrowseResponse } from "$lib/generated/FsBrowseResponse";
@@ -422,6 +423,43 @@ export class ApiClient {
     return this.#request(
       "DELETE",
       `/api/v1/nodes/${encodeURIComponent(nodeId)}/agents/${encodeURIComponent(agentId)}`,
+    );
+  }
+
+  /** `PUT /api/v1/nodes/:id/agents/custom/:agent_id` (カスタム定義の作成・更新) */
+  upsertCustomAgent(
+    nodeId: string,
+    agentId: string,
+    config: CustomAgentConfig,
+  ): Promise<AgentOpResponse> {
+    return this.#request(
+      "PUT",
+      `/api/v1/nodes/${encodeURIComponent(nodeId)}/agents/custom/${encodeURIComponent(agentId)}`,
+      { body: config },
+    );
+  }
+
+  /** `DELETE /api/v1/nodes/:id/agents/custom/:agent_id` (カスタム定義の削除) */
+  removeCustomAgent(nodeId: string, agentId: string): Promise<AgentOpResponse> {
+    return this.#request(
+      "DELETE",
+      `/api/v1/nodes/${encodeURIComponent(nodeId)}/agents/custom/${encodeURIComponent(agentId)}`,
+    );
+  }
+
+  /** `POST /api/v1/nodes/:id/agents/:agent_id/package` (npx/uvx での利用を有効化) */
+  enablePackageAgent(nodeId: string, agentId: string): Promise<AgentOpResponse> {
+    return this.#request(
+      "POST",
+      `/api/v1/nodes/${encodeURIComponent(nodeId)}/agents/${encodeURIComponent(agentId)}/package`,
+    );
+  }
+
+  /** `DELETE /api/v1/nodes/:id/agents/:agent_id/package` (npx/uvx での利用を無効化) */
+  disablePackageAgent(nodeId: string, agentId: string): Promise<AgentOpResponse> {
+    return this.#request(
+      "DELETE",
+      `/api/v1/nodes/${encodeURIComponent(nodeId)}/agents/${encodeURIComponent(agentId)}/package`,
     );
   }
 

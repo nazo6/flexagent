@@ -7,7 +7,7 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
-use fxg_acp::registry::AcpRegistry;
+use fxg_acp::registry::{AcpRegistry, AgentListEntry, LocalSource};
 use fxg_protocol::common::{
     ElicitationAction, ElicitationRequestEntry, PermissionOption, SessionControlAction,
     SessionStatus,
@@ -2151,6 +2151,23 @@ pub struct AgentsListArgs {
     json: bool,
 }
 
+/// エージェントの起動形態ラベル (表示用)。
+fn source_labels(entry: &AgentListEntry) -> Vec<&'static str> {
+    let mut labels = Vec::new();
+    if entry.custom.is_some() {
+        labels.push("custom");
+    }
+    for source in &entry.sources {
+        labels.push(match source {
+            LocalSource::Managed(_) => "managed",
+            LocalSource::External(_) => "external",
+            LocalSource::Npx => "npx",
+            LocalSource::Uvx => "uvx",
+        });
+    }
+    labels
+}
+
 impl usage::RunAsync for AgentsListArgs {
     type Output = Result<()>;
 
@@ -2170,10 +2187,13 @@ impl usage::RunAsync for AgentsListArgs {
                         "name": entry.name,
                         "version": entry.version,
                         "description": entry.description,
-                        "installed": entry.installed,
-                        "distributions": entry.distributions,
-                        "custom": entry.custom,
-                        "builtin": entry.builtin,
+                        "available": entry.is_available(),
+                        "registry": entry.registry,
+                        "installable": entry.installable,
+                        "package_available": entry.package_available,
+                        "sources": source_labels(entry),
+                        "custom": entry.custom.is_some(),
+                        "managed_versions": entry.managed_versions,
                     })
                 })
                 .collect();
@@ -2181,7 +2201,9 @@ impl usage::RunAsync for AgentsListArgs {
             return Ok(());
         }
         if entries.is_empty() {
-            println!("(導入済みエージェントなし。`fxg agents list --all` でレジストリ全体を表示)");
+            println!(
+                "(利用可能なエージェントなし。`fxg agents list --all` でレジストリ全体を表示)"
+            );
             return Ok(());
         }
         let rows: Vec<Vec<String>> = entries
@@ -2191,12 +2213,12 @@ impl usage::RunAsync for AgentsListArgs {
                     entry.id.clone(),
                     truncate(&entry.name, 24),
                     entry.version.clone(),
-                    if entry.installed { "yes" } else { "-" }.to_owned(),
-                    entry.distributions.join(","),
+                    if entry.is_available() { "yes" } else { "-" }.to_owned(),
+                    source_labels(entry).join(","),
                 ]
             })
             .collect();
-        print_table(&["ID", "NAME", "VERSION", "INSTALLED", "DIST"], &rows);
+        print_table(&["ID", "NAME", "VERSION", "AVAILABLE", "SOURCES"], &rows);
         Ok(())
     }
 }
@@ -2233,7 +2255,9 @@ impl usage::RunAsync for AgentsInstallArgs {
             );
         }
         if agent.distribution.binary.is_empty() {
-            println!("{id} は npx/uvx 配布のため個別インストールは不要です (実行時に自動取得)");
+            println!(
+                "{id} は npx/uvx 配布です。個別インストールは不要で、Web UI (設定 > エージェント管理) で有効化すると一覧に表示されます"
+            );
             return Ok(());
         }
         let path = registry
@@ -2268,7 +2292,7 @@ impl usage::RunAsync for AgentsUpdateArgs {
             None => index
                 .agents
                 .iter()
-                .filter(|agent| registry.is_installed(agent))
+                .filter(|agent| !registry.installed_versions(&agent.id).is_empty())
                 .map(|agent| agent.id.clone())
                 .collect(),
         };

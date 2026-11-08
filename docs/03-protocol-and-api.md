@@ -694,6 +694,7 @@ pub enum ServerToNodeMsg {
     ManageAgent {
         request_id: String,
         action: AgentAction,          // Install { agent_id } | Update { agent_id? } | Remove { agent_id }
+                                      // | UpsertCustom { agent_id, config } | RemoveCustom { agent_id }
     },
     /// GitCredentialRequest に対する短命トークン応答
     GitCredentialResponse {
@@ -872,19 +873,40 @@ pub enum ServerToNodeMsg {
   `server.db`、 ローカルノードでは `node.db` の `audit_logs` を参照する。
 - `GET /api/v1/agents`:
   ACP Registry
-  カタログと導入状態を返す。中央サーバーではオンラインのいずれかのノード
+  カタログとノード別の利用可否を返す (`AgentSummary[]`)。各エージェントは
+  `sources` (`managed` / `external` / `package` / `custom`)、`installable`、
+  `package_available` (このノードで npx/uvx を有効化できるか)、
+  `managed_versions`、`external_path`、`custom_config` を持つ。`sources` が空 =
+  そのノードでは未導入。`npx` / `uvx` は既定では `sources` に含まれず、
+  `package_available` が true のものだけ UI から有効化できる。
+  中央サーバーではオンラインのいずれかのノード
   (`ListAgents` 中継) からカタログを取得し、全ノードの
   `NodeHello.installed_agents`
-  を統合して `installed_nodes` (導入済みノード一覧) を埋める。
+  を統合して `installed_nodes` (利用可能なノード一覧) を埋める。
 - `POST /api/v1/nodes/:node_id/agents/:agent_id/install`:
-  指定ノード上で ACP Registry からエージェントをダウンロード・展開する
-  (`fxg agents install` の Web UI 版)。
+  指定ノード上で ACP Registry
+  からエージェントを**明示的に**ダウンロード・展開する
+  (`fxg agents install` の Web UI 版)。起動時に暗黙ダウンロードは行わない。
 - `POST /api/v1/nodes/:node_id/agents/update`:
-  指定ノードの導入済みエージェントを更新する (`fxg agents update` の Web UI 版。
+  指定ノードの fxg 管理エージェントを更新する (`fxg agents update` の Web UI
+  版。
   `{ agent_id: Option<String> }`。省略時は導入済み全件)。
 - `DELETE /api/v1/nodes/:node_id/agents/:agent_id`:
-  指定ノード上のキャッシュ済みバイナリを削除する (`fxg agents remove` の Web UI
-  版)。
+  指定ノード上の fxg 管理バイナリを削除する (`fxg agents remove` の Web UI 版)。
+- `PUT /api/v1/nodes/:node_id/agents/custom/:agent_id`:
+  カスタム ACP エージェント定義を作成・更新する (body: `CustomAgentConfig` =
+  `{ name, command, args, env }`)。`AgentAction::UpsertCustom`
+  として中継される。
+- `DELETE /api/v1/nodes/:node_id/agents/custom/:agent_id`:
+  UI 管理のカスタム定義を削除する (`AgentAction::RemoveCustom`)。
+  `config.toml` 側の同名定義は残る。
+- `POST /api/v1/nodes/:node_id/agents/:agent_id/package`:
+  指定ノードで `npx` / `uvx` 経由の利用を**有効化**する
+  (`AgentAction::SetPackageEnabled { enabled: true }`)。
+  有効化状態は `~/.flexagent/enabled_package_agents.json` に保存される。
+- `DELETE /api/v1/nodes/:node_id/agents/:agent_id/package`:
+  `npx` / `uvx` 経由の利用を**無効化**する
+  (`AgentAction::SetPackageEnabled { enabled: false }`)。実行ファイルは削除しない。
 - `POST /api/v1/auth/rotate-token`:
   クライアント認証トークン (`auth_token`) を再生成し `{ token }` を返す。
   旧トークン (Bearer / `fxg_session` Cookie) は即時無効化される。

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { page } from '$app/state';
   import AgentManager from '$lib/components/settings/AgentManager.svelte';
   import AuditLog from '$lib/components/settings/AuditLog.svelte';
   import * as AlertDialog from '$lib/components/ui/alert-dialog';
@@ -22,8 +23,8 @@
 
   const isServer = $derived(sync.connection.role === 'central_server');
 
-  /** 選択中の設定タブ。 */
-  let activeTab = $state('general');
+  /** 選択中の設定タブ (`?tab=agents` などのディープリンクを反映する)。 */
+  let activeTab = $state(page.url.searchParams.get('tab') ?? 'general');
 
   // --- ノードペアリング (中央サーバーのみ) ---
   let tokens = $state<NodeTokenSummary[]>([]);

@@ -1,19 +1,19 @@
 //! ACP Registry (`registry.json`) の取得・キャッシュ・起動解決と導入管理。
 //!
-//! 設計: `docs/04-agent-drivers-and-windows.md` §2.1、
+//! 設計: `docs/04-agent-drivers-and-windows.md` §2、
 //! CLI コマンド: `docs/05-cli-and-pwa-ui.md` §1 (`fxg agents ...`)。
 //!
 //! - 公式インデックス (既定
 //!   `https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json`)
 //!   を `~/.flexagent/cache/registry.json` へキャッシュする
 //!   (既定 TTL 24 時間。`fxg agents update` は強制更新)。
-//! - `config.toml` の `[agents.custom.<id>]` はレジストリより優先して解決する。
-//! - `distribution` (binary / npx / uvx) から現在の OS / Arch で起動可能な
-//!   [`AgentLaunchSpec`] を解決する。binary は
-//!   `~/.flexagent/agents/<id>/<version>/` へ展開して使用する
-//!   (SHA-256 検証付き。未導入なら [`AcpRegistry::install`] が自動取得する)。
+//! - 起動解決は「ローカル優先」: fxg 管理の導入済みバイナリ →
+//!   `PATH` 上の既存インストール → `npx` / `uvx`。**起動時の暗黙ダウンロードは
+//!   行わない** (導入は `fxg agents install` / UI の明示操作のみ)。
+//! - カスタム定義は `config.toml` の `[agents.custom.<id>]` と、UI が管理する
+//!   `~/.flexagent/custom_agents.json` をマージして解決する (ファイル側が優先)。
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -26,6 +26,13 @@ use crate::driver::AgentLaunchSpec;
 
 /// キャッシュファイル名 (`~/.flexagent/cache/registry.json`)。
 pub const REGISTRY_CACHE_FILE: &str = "registry.json";
+
+/// UI 管理のカスタムエージェント定義ファイル名 (`~/.flexagent/custom_agents.json`)。
+pub const CUSTOM_AGENTS_FILE: &str = "custom_agents.json";
+
+/// `npx` / `uvx` 配布を有効化したエージェントIDのファイル名
+/// (`~/.flexagent/enabled_package_agents.json`)。
+pub const ENABLED_PACKAGES_FILE: &str = "enabled_package_agents.json";
 
 /// `agents[].distribution`。
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -137,7 +144,20 @@ impl RegistryIndex {
     }
 }
 
-/// `fxg agents list` 表示用のエージェント情報。
+/// このノードで使える起動経路。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LocalSource {
+    /// fxg が `~/.flexagent/agents/<id>/<version>` へ導入したバイナリ
+    Managed(PathBuf),
+    /// `PATH` 上に既にある実行ファイル
+    External(PathBuf),
+    /// `npx` で実行 (実行時に取得)
+    Npx,
+    /// `uvx` で実行 (実行時に取得)
+    Uvx,
+}
+
+/// `fxg agents list` / カタログ表示用のエージェント情報。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentListEntry {
     /// エージェントID
@@ -148,14 +168,25 @@ pub struct AgentListEntry {
     pub version: String,
     /// 説明
     pub description: Option<String>,
-    /// 導入済みか (binary 展開済み / npx・uvx / カスタム)
-    pub installed: bool,
-    /// 配布形態
-    pub distributions: Vec<&'static str>,
-    /// `config.toml` のカスタム定義か
-    pub custom: bool,
-    /// ビルトイン (`opencode2`) か
-    pub builtin: bool,
+    /// ACP Registry カタログに存在するか
+    pub registry: bool,
+    /// 現在のプラットフォーム向け binary を fxg で導入できるか
+    pub installable: bool,
+    /// `npx` / `uvx` (PATH 上に存在) で実行できるか
+    pub package_available: bool,
+    /// このノードで使える起動経路 (優先順)
+    pub sources: Vec<LocalSource>,
+    /// fxg が導入済みのバージョン一覧
+    pub managed_versions: Vec<String>,
+    /// カスタム定義 (config.toml / UI 管理)
+    pub custom: Option<CustomAgentConfig>,
+}
+
+impl AgentListEntry {
+    /// このノードで起動できるか。
+    pub fn is_available(&self) -> bool {
+        self.custom.is_some() || !self.sources.is_empty()
+    }
 }
 
 /// ACP Registry 管理 (取得・キャッシュ・解決・導入)。
@@ -207,6 +238,141 @@ impl AcpRegistry {
     /// 指定エージェントのバージョンディレクトリ (`~/.flexagent/agents/<id>/<version>`)。
     pub fn agent_version_dir(&self, id: &str, version: &str) -> PathBuf {
         self.agents_dir().join(id).join(version)
+    }
+
+    /// UI 管理のカスタムエージェント定義ファイル (`~/.flexagent/custom_agents.json`)。
+    pub fn custom_store_path(&self) -> PathBuf {
+        self.home.join(CUSTOM_AGENTS_FILE)
+    }
+
+    /// `config.toml` と UI 管理ファイルをマージしたカスタム定義を返す
+    /// (同名は UI 管理ファイルが優先)。
+    pub fn custom_agents(&self) -> BTreeMap<String, CustomAgentConfig> {
+        let mut agents = self.custom.clone();
+        agents.extend(self.read_custom_store());
+        agents
+    }
+
+    /// UI 管理ファイルを読む (存在しない・壊れている場合は空)。
+    fn read_custom_store(&self) -> BTreeMap<String, CustomAgentConfig> {
+        let path = self.custom_store_path();
+        let Ok(text) = std::fs::read_to_string(&path) else {
+            return BTreeMap::new();
+        };
+        match serde_json::from_str(&text) {
+            Ok(agents) => agents,
+            Err(err) => {
+                tracing::warn!(path = %path.display(), "failed to parse custom agents: {err}");
+                BTreeMap::new()
+            }
+        }
+    }
+
+    /// UI 管理ファイルを書く (一時ファイル経由で原子的に置換)。
+    fn write_custom_store(
+        &self,
+        agents: &BTreeMap<String, CustomAgentConfig>,
+    ) -> anyhow::Result<()> {
+        let path = self.custom_store_path();
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("failed to create {}", parent.display()))?;
+        }
+        let tmp = path.with_extension("json.tmp");
+        std::fs::write(&tmp, serde_json::to_string_pretty(agents)?)
+            .with_context(|| format!("failed to write {}", tmp.display()))?;
+        std::fs::rename(&tmp, &path)
+            .with_context(|| format!("failed to replace {}", path.display()))?;
+        Ok(())
+    }
+
+    /// カスタムエージェント定義を作成・更新する。
+    pub fn upsert_custom(&self, id: &str, config: CustomAgentConfig) -> anyhow::Result<()> {
+        let id = Self::validate_custom_id(id)?;
+        if config.command.trim().is_empty() {
+            bail!("custom agent `{id}` requires a non-empty command");
+        }
+        let mut agents = self.read_custom_store();
+        agents.insert(id.to_owned(), config);
+        self.write_custom_store(&agents)
+    }
+
+    /// UI 管理のカスタム定義を削除する (`config.toml` 側の定義は残る)。
+    pub fn remove_custom(&self, id: &str) -> anyhow::Result<bool> {
+        let mut agents = self.read_custom_store();
+        let removed = agents.remove(id).is_some();
+        if removed {
+            self.write_custom_store(&agents)?;
+        }
+        Ok(removed)
+    }
+
+    /// カスタムIDとして使える文字列か検証する。
+    fn validate_custom_id(id: &str) -> anyhow::Result<&str> {
+        let id = id.trim();
+        if id.is_empty() || id.contains(|c: char| c.is_whitespace() || c == '/' || c == '\\') {
+            bail!("invalid custom agent id: {id:?}");
+        }
+        Ok(id)
+    }
+
+    /// `npx` / `uvx` 有効化ファイル (`~/.flexagent/enabled_package_agents.json`)。
+    pub fn enabled_packages_path(&self) -> PathBuf {
+        self.home.join(ENABLED_PACKAGES_FILE)
+    }
+
+    /// `npx` / `uvx` 配布での利用を有効化したエージェントID一覧。
+    ///
+    /// `npx` / `uvx` は実体を持たず実行時に取得されるため、既定では一覧に出さず、
+    /// ユーザーが明示的に有効化したものだけを候補にする。
+    pub fn enabled_package_agents(&self) -> BTreeSet<String> {
+        let path = self.enabled_packages_path();
+        let Ok(text) = std::fs::read_to_string(&path) else {
+            return BTreeSet::new();
+        };
+        match serde_json::from_str::<Vec<String>>(&text) {
+            Ok(ids) => ids.into_iter().collect(),
+            Err(err) => {
+                tracing::warn!(path = %path.display(), "failed to parse enabled package agents: {err}");
+                BTreeSet::new()
+            }
+        }
+    }
+
+    /// `npx` / `uvx` 配布での利用を有効化・無効化する。
+    pub fn set_package_enabled(&self, id: &str, enabled: bool) -> anyhow::Result<()> {
+        let mut ids = self.enabled_package_agents();
+        let changed = if enabled {
+            ids.insert(id.to_owned())
+        } else {
+            ids.remove(id)
+        };
+        if !changed {
+            return Ok(());
+        }
+        let path = self.enabled_packages_path();
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("failed to create {}", parent.display()))?;
+        }
+        let tmp = path.with_extension("json.tmp");
+        let values: Vec<&String> = ids.iter().collect();
+        std::fs::write(&tmp, serde_json::to_string_pretty(&values)?)
+            .with_context(|| format!("failed to write {}", tmp.display()))?;
+        std::fs::rename(&tmp, &path)
+            .with_context(|| format!("failed to replace {}", path.display()))?;
+        Ok(())
+    }
+
+    /// `npx` / `uvx` 配布で起動できるランナー (両方無ければ `None`)。
+    pub fn package_runner(agent: &RegistryAgent) -> Option<&'static str> {
+        if agent.distribution.npx.is_some() && which::which("npx").is_ok() {
+            return Some("npx");
+        }
+        if agent.distribution.uvx.is_some() && which::which("uvx").is_ok() {
+            return Some("uvx");
+        }
+        None
     }
 
     /// 現在のプラットフォームキー (`darwin-aarch64` / `windows-x86_64` 等)。
@@ -299,30 +465,39 @@ impl AcpRegistry {
         std::fs::write(&path, json).with_context(|| format!("failed to write {}", path.display()))
     }
 
-    /// `fxg agents list` 用の一覧を作る。
+    /// エージェント一覧を作る。
     ///
-    /// `include_uninstalled = false` の場合は導入済み (`installed = true`) のみ返す。
-    pub fn list(&self, index: &RegistryIndex, include_uninstalled: bool) -> Vec<AgentListEntry> {
+    /// `include_unavailable = false` の場合はこのノードで起動できるものだけ返す。
+    pub fn list(&self, index: &RegistryIndex, include_unavailable: bool) -> Vec<AgentListEntry> {
         let mut entries = Vec::new();
+        let custom = self.custom_agents();
+        // `npx` / `uvx` は明示的に有効化されたものだけ候補にする
+        let enabled = self.enabled_package_agents();
 
-        // カスタム定義
-        for (id, custom) in &self.custom {
+        // カスタム定義 (config.toml / UI 管理)
+        for (id, config) in &custom {
             entries.push(AgentListEntry {
                 id: id.clone(),
-                name: custom.name.clone().unwrap_or_else(|| id.clone()),
+                name: config.name.clone().unwrap_or_else(|| id.clone()),
                 version: "-".to_owned(),
                 description: None,
-                installed: true,
-                distributions: vec!["custom"],
-                custom: true,
-                builtin: false,
+                registry: index.find(id).is_some(),
+                installable: false,
+                package_available: false,
+                sources: Vec::new(),
+                managed_versions: Vec::new(),
+                custom: Some(config.clone()),
             });
         }
 
         // レジストリ
         for agent in &index.agents {
-            let installed = self.is_installed(agent);
-            if !installed && !include_uninstalled {
+            // カスタム定義が同名で存在する場合はそちらを優先する (起動解決と同じ)
+            if custom.contains_key(&agent.id) {
+                continue;
+            }
+            let sources = self.local_sources(agent, enabled.contains(&agent.id));
+            if sources.is_empty() && !include_unavailable {
                 continue;
             }
             entries.push(AgentListEntry {
@@ -330,38 +505,61 @@ impl AcpRegistry {
                 name: agent.name.clone(),
                 version: agent.version.clone(),
                 description: agent.description.clone(),
-                installed,
-                distributions: agent.distribution.kinds(),
-                custom: false,
-                builtin: false,
+                registry: true,
+                installable: Self::binary_distribution(agent).is_ok(),
+                package_available: Self::package_runner(agent).is_some(),
+                sources,
+                managed_versions: self.installed_versions(&agent.id),
+                custom: None,
             });
         }
 
         entries
     }
 
-    /// binary 配布が導入済みか。
-    pub fn is_installed(&self, agent: &RegistryAgent) -> bool {
-        if agent.distribution.binary.is_empty() {
-            return agent.distribution.npx.is_some() || agent.distribution.uvx.is_some();
+    /// 現在のレジストリバージョンの fxg 管理バイナリ (未導入なら `None`)。
+    fn managed_command(&self, agent: &RegistryAgent) -> Option<PathBuf> {
+        let dist = Self::binary_distribution(agent).ok()?;
+        let path = self
+            .agent_version_dir(&agent.id, &agent.version)
+            .join(clean_cmd(&dist.cmd));
+        path.is_file().then_some(path)
+    }
+
+    /// このノードで使える起動経路を優先順に返す。
+    ///
+    /// `include_package` が `false` のときは `npx` / `uvx` を候補に含めない
+    /// (一覧表示用。起動解決では常に許可する)。
+    fn local_sources(&self, agent: &RegistryAgent, include_package: bool) -> Vec<LocalSource> {
+        let mut sources = Vec::new();
+        if let Some(path) = self.managed_command(agent) {
+            sources.push(LocalSource::Managed(path));
         }
-        match Self::binary_distribution(agent) {
-            Ok(dist) => {
-                let cmd_name = clean_cmd(&dist.cmd);
-                self.agent_version_dir(&agent.id, &agent.version)
-                    .join(&cmd_name)
-                    .is_file()
-                    || which::which(&cmd_name).is_ok()
+        if let Ok(dist) = Self::binary_distribution(agent) {
+            let cmd = clean_cmd(&dist.cmd);
+            // ディレクトリを含む `cmd` はカレントディレクトリ相対と解釈されるため
+            // PATH 探索の対象にしない。
+            if cmd.components().count() == 1
+                && let Ok(path) = which::which(&cmd)
+            {
+                sources.push(LocalSource::External(path));
             }
-            // 他プラットフォーム向け binary のみの場合は npx/uvx の有無で判定する
-            Err(_) => agent.distribution.npx.is_some() || agent.distribution.uvx.is_some(),
         }
+        if include_package {
+            match Self::package_runner(agent) {
+                Some("npx") => sources.push(LocalSource::Npx),
+                Some(_) => sources.push(LocalSource::Uvx),
+                None => {}
+            }
+        }
+        sources
     }
 
     /// エージェントの起動スペックを解決する。
     ///
-    /// binary 配布で未導入の場合は自動的にダウンロード・展開する
-    /// (`fxg run antigravity` が初回に自動取得する挙動)。
+    /// 解決順は「カスタム定義 → fxg 管理バイナリ → `PATH` 上の既存インストール →
+    /// `npx` → `uvx`」。**未導入でも暗黙にダウンロードはしない**
+    /// (導入は `fxg agents install` / UI の明示操作のみ)。
     pub async fn launch_spec(
         &self,
         name: &str,
@@ -371,7 +569,7 @@ impl AcpRegistry {
         let id = self.resolve_alias(name);
 
         // 1) カスタム定義 (レジストリより優先)
-        if let Some(custom) = self.custom.get(&id) {
+        if let Some(custom) = self.custom_agents().remove(&id) {
             let mut args = custom.args.clone();
             args.extend(extra_args.iter().cloned());
             return Ok(AgentLaunchSpec {
@@ -388,74 +586,67 @@ impl AcpRegistry {
             });
         }
 
-        // 3) レジストリ
+        // 2) レジストリ (このノードで使える経路のみ。`npx` / `uvx` は明示有効化に依存しない)
         let agent = index
             .find(&id)
             .ok_or_else(|| anyhow!("unknown agent: {name} (registry: {id})"))?;
+        let source = self
+            .local_sources(agent, true)
+            .into_iter()
+            .next()
+            .ok_or_else(|| {
+            anyhow!(
+                "agent {id} is not available on this node: install it with `fxg agents install {id}` or put its binary on PATH (distributions: {:?})",
+                agent.distribution.kinds()
+            )
+        })?;
+        self.spec_for_source(agent, source, extra_args)
+            .ok_or_else(|| {
+                anyhow!(
+                    "agent {id} has no usable distribution for {} (available: {:?})",
+                    Self::platform_key(),
+                    agent.distribution.kinds()
+                )
+            })
+    }
 
-        // 3a) binary (現在のプラットフォーム向けがある場合は優先)
-        if let Ok(dist) = Self::binary_distribution(agent) {
-            let dist = dist.clone();
-            let cmd_path = self.install(&id, index).await?;
-            let mut args = dist.args.clone();
-            args.extend(extra_args.iter().cloned());
-            return Ok(AgentLaunchSpec {
-                agent_id: id,
-                display_name: agent.name.clone(),
-                driver_kind: "acp".to_owned(),
-                program: cmd_path,
-                args,
-                env: dist
-                    .env
-                    .iter()
-                    .map(|(k, v)| (k.clone(), v.clone()))
-                    .collect(),
-            });
-        }
-
-        // 3b) npx
-        if let Some(npx) = &agent.distribution.npx {
-            let mut args = vec!["-y".to_owned(), npx.package.clone()];
-            args.extend(npx.args.iter().cloned());
-            args.extend(extra_args.iter().cloned());
-            return Ok(AgentLaunchSpec {
-                agent_id: id,
-                display_name: agent.name.clone(),
-                driver_kind: "acp".to_owned(),
-                program: PathBuf::from("npx"),
-                args,
-                env: npx
-                    .env
-                    .iter()
-                    .map(|(k, v)| (k.clone(), v.clone()))
-                    .collect(),
-            });
-        }
-
-        // 3c) uvx
-        if let Some(uvx) = &agent.distribution.uvx {
-            let mut args = vec![uvx.package.clone()];
-            args.extend(uvx.args.iter().cloned());
-            args.extend(extra_args.iter().cloned());
-            return Ok(AgentLaunchSpec {
-                agent_id: id,
-                display_name: agent.name.clone(),
-                driver_kind: "acp".to_owned(),
-                program: PathBuf::from("uvx"),
-                args,
-                env: uvx
-                    .env
-                    .iter()
-                    .map(|(k, v)| (k.clone(), v.clone()))
-                    .collect(),
-            });
-        }
-
-        bail!(
-            "agent {id} has no distribution for {} (available: {:?})",
-            Self::platform_key(),
-            agent.distribution.kinds()
-        )
+    /// 起動経路から起動スペックを組み立てる。
+    fn spec_for_source(
+        &self,
+        agent: &RegistryAgent,
+        source: LocalSource,
+        extra_args: &[String],
+    ) -> Option<AgentLaunchSpec> {
+        let (program, args, env) = match source {
+            LocalSource::Managed(path) | LocalSource::External(path) => {
+                let dist = Self::binary_distribution(agent).ok()?;
+                let mut args = dist.args.clone();
+                args.extend(extra_args.iter().cloned());
+                (path, args, dist.env.clone())
+            }
+            LocalSource::Npx => {
+                let npx = agent.distribution.npx.as_ref()?;
+                let mut args = vec!["-y".to_owned(), npx.package.clone()];
+                args.extend(npx.args.iter().cloned());
+                args.extend(extra_args.iter().cloned());
+                (PathBuf::from("npx"), args, npx.env.clone())
+            }
+            LocalSource::Uvx => {
+                let uvx = agent.distribution.uvx.as_ref()?;
+                let mut args = vec![uvx.package.clone()];
+                args.extend(uvx.args.iter().cloned());
+                args.extend(extra_args.iter().cloned());
+                (PathBuf::from("uvx"), args, uvx.env.clone())
+            }
+        };
+        Some(AgentLaunchSpec {
+            agent_id: agent.id.clone(),
+            display_name: agent.name.clone(),
+            driver_kind: "acp".to_owned(),
+            program,
+            args,
+            env: env.into_iter().collect(),
+        })
     }
 
     /// 現在のプラットフォーム向け binary 配布を返す。
@@ -471,7 +662,8 @@ impl AcpRegistry {
 
     /// binary 配布を導入済みにし、実行ファイルの絶対パスを返す。
     ///
-    /// 既に展開済みならダウンロードせずにそのパスを返す。
+    /// 既に展開済みならダウンロードせずにそのパスを返す。`PATH` 上の同名
+    /// コマンドは使用しない (外部インストールは起動解決側で扱う)。
     pub async fn install(&self, id: &str, index: &RegistryIndex) -> anyhow::Result<PathBuf> {
         let agent = index
             .find(id)
@@ -482,9 +674,6 @@ impl AcpRegistry {
         let cmd_path = target_dir.join(&cmd_name);
         if cmd_path.is_file() {
             return Ok(cmd_path);
-        }
-        if let Ok(system_cmd) = which::which(&cmd_name) {
-            return Ok(system_cmd);
         }
 
         tracing::info!(agent = %agent.id, version = %agent.version, "installing agent binary");
@@ -725,14 +914,122 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let registry = registry(dir.path());
         let index: RegistryIndex = serde_json::from_str(FIXTURE).expect("fixture");
-        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let agent = index.find("demo-npx").expect("demo-npx");
 
-        let spec = runtime
-            .block_on(registry.launch_spec("demo-npx", &index, &[]))
+        let spec = registry
+            .spec_for_source(agent, LocalSource::Npx, &[])
             .expect("npx spec");
         assert_eq!(spec.program, PathBuf::from("npx"));
         assert_eq!(spec.args, vec!["-y", "demo-agent@1.2.3", "--acp"]);
         assert_eq!(spec.env, vec![("DEMO".to_owned(), "1".to_owned())]);
+    }
+
+    #[test]
+    fn unavailable_agent_reports_install_hint() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let registry = registry(dir.path());
+        let index: RegistryIndex = serde_json::from_str(FIXTURE).expect("fixture");
+        let err = tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(registry.launch_spec("demo-bin", &index, &[]))
+            .expect_err("must fail");
+        assert!(
+            err.to_string().contains("not available"),
+            "unexpected: {err}"
+        );
+        assert!(err.to_string().contains("install"), "unexpected: {err}");
+    }
+
+    #[test]
+    fn list_hides_unavailable_and_prioritizes_custom() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let registry = registry(dir.path());
+        let index: RegistryIndex = serde_json::from_str(FIXTURE).expect("fixture");
+
+        // 既定では利用可能なものだけが返る (npx の有無は環境依存なので個別には見ない)
+        let available = registry.list(&index, false);
+        assert!(
+            available
+                .iter()
+                .any(|entry| entry.id == "my-agent" && entry.custom.is_some())
+        );
+        assert!(available.iter().all(|entry| entry.is_available()));
+        assert!(!available.iter().any(|entry| entry.id == "demo-bin"));
+
+        // 全件表示ではレジストリ分も含む
+        let all = registry.list(&index, true);
+        assert_eq!(all.len(), 3);
+        let demo = all
+            .iter()
+            .find(|entry| entry.id == "demo-bin")
+            .expect("demo-bin");
+        assert!(!demo.is_available());
+    }
+
+    #[test]
+    fn custom_store_roundtrip() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let registry = registry(dir.path());
+        let config = CustomAgentConfig {
+            name: Some("Store Agent".to_owned()),
+            command: "node".to_owned(),
+            args: vec!["agent.js".to_owned()],
+            env: BTreeMap::new(),
+        };
+        registry
+            .upsert_custom("store-agent", config)
+            .expect("upsert custom");
+
+        let index: RegistryIndex = serde_json::from_str(FIXTURE).expect("fixture");
+        let spec = tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(registry.launch_spec("store-agent", &index, &[]))
+            .expect("custom spec");
+        assert_eq!(spec.display_name, "Store Agent");
+        assert_eq!(spec.program, PathBuf::from("node"));
+        assert_eq!(spec.args, vec!["agent.js"]);
+
+        assert!(registry.remove_custom("store-agent").expect("remove"));
+        let err = tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(registry.launch_spec("store-agent", &index, &[]))
+            .expect_err("removed custom must fail");
+        assert!(err.to_string().contains("unknown agent"));
+    }
+
+    #[test]
+    fn custom_store_rejects_invalid_id() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let registry = registry(dir.path());
+        let config = CustomAgentConfig {
+            command: "node".to_owned(),
+            ..CustomAgentConfig::default()
+        };
+        assert!(registry.upsert_custom("bad id", config.clone()).is_err());
+        assert!(registry.upsert_custom("", config).is_err());
+    }
+
+    #[test]
+    fn package_enablement_roundtrip() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let registry = registry(dir.path());
+        assert!(registry.enabled_package_agents().is_empty());
+
+        registry
+            .set_package_enabled("demo-npx", true)
+            .expect("enable");
+        assert!(registry.enabled_package_agents().contains("demo-npx"));
+
+        // 同じ値の再設定は no-op で壊れない
+        registry
+            .set_package_enabled("demo-npx", true)
+            .expect("idempotent");
+        assert_eq!(registry.enabled_package_agents().len(), 1);
+
+        registry
+            .set_package_enabled("demo-npx", false)
+            .expect("disable");
+        assert!(registry.enabled_package_agents().is_empty());
     }
 
     #[test]
@@ -790,32 +1087,6 @@ mod tests {
         let dest = dir.path().join("out");
         extract_archive_bytes("https://example.com/demo.zip", &zip_bytes, &dest).expect("extract");
         assert!(dest.join("bin/demo.exe").is_file());
-    }
-
-    #[test]
-    fn list_includes_custom_and_registry_entries() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let registry = registry(dir.path());
-        let index: RegistryIndex = serde_json::from_str(FIXTURE).expect("fixture");
-
-        let installed_only = registry.list(&index, false);
-        // custom + demo-npx (npx 配布はダウンロード不要のため導入済み扱い)
-        assert_eq!(installed_only.len(), 2);
-        assert!(
-            installed_only
-                .iter()
-                .any(|e| e.custom && e.id == "my-agent")
-        );
-        assert!(
-            installed_only
-                .iter()
-                .any(|e| e.id == "demo-npx" && e.installed)
-        );
-
-        let all = registry.list(&index, true);
-        assert_eq!(all.len(), 3);
-        let demo = all.iter().find(|e| e.id == "demo-bin").expect("demo-bin");
-        assert!(!demo.installed);
     }
 
     #[test]

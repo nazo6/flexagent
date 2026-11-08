@@ -431,12 +431,14 @@ impl DaemonState {
         Ok(())
     }
 
-    /// 利用可能なエージェントID一覧 (ACP Registry 導入済み + カスタム/ビルトイン)。
+    /// 利用可能なエージェントID一覧 (ACP Registry 導入済み + カスタム + 外部インストール)。
     ///
     /// レジストリの取得・展開に時間がかかる環境でもデーモン起動をブロックしない
-    /// よう、短いタイムアウト付きで解決する (失敗時は空一覧)。
+    /// よう、短いタイムアウト付きで解決する (失敗時はカスタム定義のみ)。
     pub async fn installed_agents(&self) -> Vec<String> {
         let registry = self.inner.sessions.registry();
+        // カスタム定義はレジストリ取得に依存しないため常に含める
+        let mut ids: Vec<String> = registry.custom_agents().into_keys().collect();
         let listed = tokio::time::timeout(std::time::Duration::from_secs(5), async {
             let index = registry.index(false).await?;
             Ok::<_, anyhow::Error>(
@@ -449,16 +451,17 @@ impl DaemonState {
         })
         .await;
         match listed {
-            Ok(Ok(agents)) => agents,
+            Ok(Ok(agents)) => ids.extend(agents),
             Ok(Err(err)) => {
                 tracing::debug!("failed to list installed agents: {err}");
-                Vec::new()
             }
             Err(_) => {
                 tracing::debug!("listing installed agents timed out");
-                Vec::new()
             }
         }
+        ids.sort();
+        ids.dedup();
+        ids
     }
 
     /// ノードをオフラインとして記録する (終了時)。

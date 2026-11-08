@@ -453,7 +453,8 @@ impl AgentsConfig {
 }
 
 /// レジストリ外のカスタムACPエージェント定義 (`[agents.custom.<id>]`)。
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 #[serde(default)]
 pub struct CustomAgentConfig {
     /// 表示名
