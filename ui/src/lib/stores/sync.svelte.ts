@@ -17,6 +17,7 @@ import type {
   SessionSummary,
 } from "#lib/generated/bindings.ts";
 import { m } from "#lib/paraglide/messages.js";
+import { problems } from "#lib/stores/problems.svelte.ts";
 import { mergeCursor } from "#lib/sync/cursor.ts";
 import { SessionTimeline } from "#lib/sync/timeline.svelte.ts";
 import type { PendingPrompt } from "#lib/sync/reducer.ts";
@@ -40,6 +41,10 @@ interface PendingCommand {
   settle(result: CommandResult): void;
   reject(error: Error): void;
   timer: ReturnType<typeof setTimeout>;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function readCursor(): number | null {
@@ -66,9 +71,19 @@ export class SyncStore {
   readonly connection: ConnectionStore;
 
   sessions = $state<SessionSummary[]>([]);
+  /** Whether the initial / latest session refresh is in flight. */
+  sessionsLoading = $state(false);
+  /** Last session refresh error (null when the latest refresh succeeded). */
+  sessionsError = $state<string | null>(null);
   nodes = $state<NodeSummary[]>([]);
+  nodesLoading = $state(false);
+  nodesError = $state<string | null>(null);
   projects = $state<ProjectSummary[]>([]);
+  projectsLoading = $state(false);
+  projectsError = $state<string | null>(null);
   inbox = $state<PermissionRequestEntry[]>([]);
+  inboxLoading = $state(false);
+  inboxError = $state<string | null>(null);
   /** Pending elicitations (questions) across all sessions. */
   inboxElicitations = $state<ElicitationRequestEntry[]>([]);
   /** Client WS connection state. */
@@ -195,40 +210,60 @@ export class SyncStore {
   }
 
   async refreshSessions(): Promise<void> {
+    this.sessionsLoading = true;
     try {
       // Also fetch archived sessions so the sidebar can split out an "Archived" section
       this.sessions = await this.connection.client.sessions({
         includeArchived: true,
         limit: 200,
       });
+      this.sessionsError = null;
     } catch (error) {
+      this.sessionsError = errorMessage(error);
       this.#warn("sessions", error);
+    } finally {
+      this.sessionsLoading = false;
     }
   }
 
   async refreshNodes(): Promise<void> {
+    this.nodesLoading = true;
     try {
       this.nodes = await this.connection.client.nodes();
+      this.nodesError = null;
     } catch (error) {
+      this.nodesError = errorMessage(error);
       this.#warn("nodes", error);
+    } finally {
+      this.nodesLoading = false;
     }
   }
 
   async refreshProjects(): Promise<void> {
+    this.projectsLoading = true;
     try {
       this.projects = await this.connection.client.projects();
+      this.projectsError = null;
     } catch (error) {
+      this.projectsError = errorMessage(error);
       this.#warn("projects", error);
+    } finally {
+      this.projectsLoading = false;
     }
   }
 
   async refreshInbox(): Promise<void> {
+    this.inboxLoading = true;
     try {
       const inbox = await this.connection.client.inbox();
       this.inbox = inbox.requests;
       this.inboxElicitations = inbox.elicitations;
+      this.inboxError = null;
     } catch (error) {
+      this.inboxError = errorMessage(error);
       this.#warn("inbox", error);
+    } finally {
+      this.inboxLoading = false;
     }
   }
 
@@ -251,7 +286,9 @@ export class SyncStore {
   }
 
   #warn(label: string, error: unknown): void {
-    console.warn(`[fxg] failed to refresh ${label}`, error);
+    // Background refresh failures are persistent (the banner keeps them visible
+    // instead of a toast that disappears).
+    problems.report(label, error, "warning");
   }
 
   // ------------------------------------------------------------------
@@ -533,7 +570,7 @@ export class SyncStore {
           this.stop();
           void this.connection.probe();
         } else {
-          console.warn("[fxg] ws error", message.error.code, message.error.message, message.error);
+          problems.reportInfo("sync", message.error);
         }
         break;
       case "pong":

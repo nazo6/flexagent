@@ -40,79 +40,97 @@
     </Button>
   </div>
 
-  <section class="flex flex-col gap-3">
-    <h2 class="text-sm font-semibold">{m.inbox_approvals()}</h2>
-    {#if sorted.length === 0}
-      <p class="text-muted-foreground text-sm">{m.inbox_approvals_empty()}</p>
-    {:else}
-      <ul class="flex list-none flex-col gap-3 p-0">
-        {#each sorted as request (request.request_id)}
-          <li>
-            <Card class="gap-0 p-0">
-              <div
-                class="bg-muted/40 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-t-lg border-b px-3 py-2 text-xs"
-              >
-                <a href={`/sessions/${request.session_id}`} class="font-medium hover:underline">
-                  {sessionTitle(request.session_id)}
-                </a>
-                <span class="text-muted-foreground">{nodeName(request.node_id)}</span>
-                <span class="text-muted-foreground ml-auto">
-                  {formatRelativeTime(request.created_at)}
-                </span>
-              </div>
-              <div class="p-3">
-                <PermissionCard
-                  sessionId={request.session_id}
-                  requestId={request.request_id}
-                  toolName={request.tool_name}
-                  summary={request.summary}
-                  options={request.options}
-                  details={request.details}
-                  resolved={null}
-                  createdAt={request.created_at}
-                />
-              </div>
-            </Card>
-          </li>
-        {/each}
-      </ul>
-    {/if}
-  </section>
+  {#if sync.inboxLoading && sorted.length === 0 && sortedElicitations.length === 0}
+    <p class="text-muted-foreground text-sm">{m.common_loading()}</p>
+  {:else if sync.inboxError !== null && sorted.length === 0 && sortedElicitations.length === 0}
+    <div class="flex flex-col items-start gap-2 rounded-md border border-destructive/40 p-3">
+      <p class="text-destructive text-sm">
+        {m.common_load_failed()}
+        {sync.inboxError}
+      </p>
+      <Button variant="outline" size="sm" onclick={() => void sync.refreshInbox()}>
+        <RefreshCwIcon />
+        {m.common_retry()}
+      </Button>
+    </div>
+  {:else}
+    <section class="flex flex-col gap-3">
+      <h2 class="text-sm font-semibold">{m.inbox_approvals()}</h2>
+      {#if sorted.length === 0}
+        <p class="text-muted-foreground text-sm">{m.inbox_approvals_empty()}</p>
+      {:else}
+        <ul class="flex list-none flex-col gap-3 p-0">
+          {#each sorted as request (request.request_id)}
+            <li>
+              <Card class="gap-0 p-0">
+                <div
+                  class="bg-muted/40 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-t-lg border-b px-3 py-2 text-xs"
+                >
+                  <a href={`/sessions/${request.session_id}`} class="font-medium hover:underline">
+                    {sessionTitle(request.session_id)}
+                  </a>
+                  <span class="text-muted-foreground">{nodeName(request.node_id)}</span>
+                  <span class="text-muted-foreground ml-auto">
+                    {formatRelativeTime(request.created_at)}
+                  </span>
+                </div>
+                <div class="p-3">
+                  <PermissionCard
+                    sessionId={request.session_id}
+                    requestId={request.request_id}
+                    toolName={request.tool_name}
+                    summary={request.summary}
+                    options={request.options}
+                    details={request.details}
+                    resolved={null}
+                    createdAt={request.created_at}
+                  />
+                </div>
+              </Card>
+            </li>
+          {/each}
+        </ul>
+      {/if}
+    </section>
 
-  <section class="flex flex-col gap-3">
-    <h2 class="text-sm font-semibold">{m.inbox_questions()}</h2>
-    {#if sortedElicitations.length === 0}
-      <p class="text-muted-foreground text-sm">{m.inbox_questions_empty()}</p>
-    {:else}
-      <ul class="flex list-none flex-col gap-3 p-0">
-        {#each sortedElicitations as elicitation (elicitation.elicitation_id)}
-          <li>
-            <Card class="gap-0 p-0">
-              <div
-                class="bg-muted/40 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-t-lg border-b px-3 py-2 text-xs"
-              >
-                <a href={`/sessions/${elicitation.session_id}`} class="font-medium hover:underline">
-                  {sessionTitle(elicitation.session_id)}
-                </a>
-                <span class="text-muted-foreground">{nodeName(elicitation.node_id)}</span>
-                <span class="text-muted-foreground ml-auto">
-                  {formatRelativeTime(elicitation.created_at)}
-                </span>
-              </div>
-              <div class="p-3">
-                <ElicitationCard
-                  sessionId={elicitation.session_id}
-                  elicitationId={elicitation.elicitation_id}
-                  message={elicitation.message}
-                  requestedSchema={elicitation.requested_schema}
-                  resolved={null}
-                  createdAt={elicitation.created_at}
-                />
-              </div>
-            </Card>
-          </li>
-        {/each}
-      </ul>
-    {/if}
-  </section>
+    <section class="flex flex-col gap-3">
+      <h2 class="text-sm font-semibold">{m.inbox_questions()}</h2>
+      {#if sortedElicitations.length === 0}
+        <p class="text-muted-foreground text-sm">{m.inbox_questions_empty()}</p>
+      {:else}
+        <ul class="flex list-none flex-col gap-3 p-0">
+          {#each sortedElicitations as elicitation (elicitation.elicitation_id)}
+            <li>
+              <Card class="gap-0 p-0">
+                <div
+                  class="bg-muted/40 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-t-lg border-b px-3 py-2 text-xs"
+                >
+                  <a
+                    href={`/sessions/${elicitation.session_id}`}
+                    class="font-medium hover:underline"
+                  >
+                    {sessionTitle(elicitation.session_id)}
+                  </a>
+                  <span class="text-muted-foreground">{nodeName(elicitation.node_id)}</span>
+                  <span class="text-muted-foreground ml-auto">
+                    {formatRelativeTime(elicitation.created_at)}
+                  </span>
+                </div>
+                <div class="p-3">
+                  <ElicitationCard
+                    sessionId={elicitation.session_id}
+                    elicitationId={elicitation.elicitation_id}
+                    message={elicitation.message}
+                    requestedSchema={elicitation.requested_schema}
+                    resolved={null}
+                    createdAt={elicitation.created_at}
+                  />
+                </div>
+              </Card>
+            </li>
+          {/each}
+        </ul>
+      {/if}
+    </section>
+  {/if}
 </div>

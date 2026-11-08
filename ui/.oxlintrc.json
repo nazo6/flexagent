@@ -5,6 +5,9 @@
     "correctness": "error",
     "suspicious": "warn"
   },
+  "rules": {
+    "no-empty": ["error", { "allowEmptyCatch": false }]
+  },
   "ignorePatterns": [
     "src/lib/generated/**",
     "src/lib/paraglide/**",

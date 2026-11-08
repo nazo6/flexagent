@@ -12,6 +12,7 @@
   import { m } from "#lib/paraglide/messages.js";
   import { shortId } from "#lib/session-status.ts";
   import { sync } from "#lib/stores/app.svelte.ts";
+  import { problems } from "#lib/stores/problems.svelte.ts";
   import { toast } from "svelte-sonner";
   import FolderBrowserDialog from "#lib/components/fs/FolderBrowserDialog.svelte";
   import EraserIcon from "@lucide/svelte/icons/eraser";
@@ -25,6 +26,7 @@
   import Trash2Icon from "@lucide/svelte/icons/trash-2";
 
   let worktreesByProject = $state(new Map<string, WorktreeInfo[]>());
+  let worktreeErrors = $state(new Map<string, string>());
   let loadingProjects = $state<string[]>([]);
 
   // Create worktree dialog
@@ -83,8 +85,14 @@
     try {
       const list = await sync.connection.client.worktrees(projectId);
       worktreesByProject = new Map(worktreesByProject).set(projectId, list);
+      worktreeErrors = new Map(worktreeErrors);
+      worktreeErrors.delete(projectId);
     } catch (error) {
-      if (!silent) toast.error(error instanceof Error ? error.message : String(error));
+      worktreeErrors = new Map(worktreeErrors).set(
+        projectId,
+        error instanceof Error ? error.message : String(error),
+      );
+      if (!silent) problems.report("load worktrees", error);
     } finally {
       loadingProjects = loadingProjects.filter((id) => id !== projectId);
     }
@@ -263,7 +271,20 @@
     </div>
   </div>
 
-  {#if sync.projects.length === 0}
+  {#if sync.projectsLoading && sync.projects.length === 0}
+    <p class="text-muted-foreground text-sm">{m.common_loading()}</p>
+  {:else if sync.projectsError !== null && sync.projects.length === 0}
+    <div class="flex flex-col items-start gap-2 rounded-md border border-destructive/40 p-3">
+      <p class="text-destructive text-sm">
+        {m.common_load_failed()}
+        {sync.projectsError}
+      </p>
+      <Button variant="outline" size="sm" onclick={() => void sync.refreshProjects()}>
+        <RefreshCwIcon />
+        {m.common_retry()}
+      </Button>
+    </div>
+  {:else if sync.projects.length === 0}
     <p class="text-muted-foreground text-sm">{m.projects_empty()}</p>
   {:else}
     {#each sync.projects as project (project.project_id)}
@@ -365,6 +386,23 @@
         {/if}
 
         {@const worktrees = worktreesByProject.get(project.project_id) ?? []}
+        {#if loadingProjects.includes(project.project_id) && worktrees.length === 0}
+          <p class="text-muted-foreground text-xs">{m.common_loading()}</p>
+        {:else if worktreeErrors.has(project.project_id) && worktrees.length === 0}
+          <div class="flex items-center gap-2 text-xs">
+            <p class="text-destructive">
+              {m.common_load_failed()}
+              {worktreeErrors.get(project.project_id)}
+            </p>
+            <Button
+              variant="ghost"
+              size="xs"
+              onclick={() => void loadWorktrees(project.project_id)}
+            >
+              {m.common_retry()}
+            </Button>
+          </div>
+        {/if}
         {#if worktrees.length > 0}
           <ul class="flex list-none flex-col gap-1 p-0 text-xs">
             {#each worktrees as worktree (`${worktree.node_id}|${worktree.path}`)}

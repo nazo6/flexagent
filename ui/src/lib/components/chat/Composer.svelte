@@ -5,13 +5,13 @@
   import { configChoices, resolveConfigChoice, selectedConfigValue } from "#lib/config-options.ts";
   import { getNodeAvailability } from "#lib/node-status.ts";
   import { m } from "#lib/paraglide/messages.js";
-  import { commandErrorMessage } from "#lib/api/client.ts";
   import type {
     NodeSummary,
     SessionControlAction,
     SessionStatus,
   } from "#lib/generated/bindings.ts";
   import { sync } from "#lib/stores/app.svelte.ts";
+  import { problems } from "#lib/stores/problems.svelte.ts";
   import type { SessionCapabilities } from "#lib/sync/reducer.ts";
   import { toast } from "svelte-sonner";
   import AlertTriangleIcon from "@lucide/svelte/icons/alert-triangle";
@@ -113,15 +113,18 @@
           // Automatic resume (native restore) is unsupported for stopped
           // sessions. Keep the input and suggest resuming via history replay.
           resumeRequired = true;
+        } else if (result.error) {
+          problems.reportInfo("send prompt", result.error);
         } else {
-          toast.error(commandErrorMessage(result.error) ?? m.chat_send_failed());
+          problems.warn("send prompt", m.chat_send_failed());
         }
         return;
       }
       text = "";
       resumeRequired = false;
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : String(error));
+      // Keep the composer text so the user can retry without retyping.
+      problems.report("send prompt", error);
     } finally {
       sending = false;
     }
@@ -140,12 +143,16 @@
     try {
       const result = await sync.controlSession(sessionId, action);
       if (!result.success) {
-        toast.error(commandErrorMessage(result.error) ?? m.chat_control_failed());
+        if (result.error) {
+          problems.reportInfo("session control", result.error);
+        } else {
+          problems.warn("session control", m.chat_control_failed());
+        }
       } else if (action.action === "cancel") {
         toast.info(m.chat_cancel_requested());
       }
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : String(error));
+      problems.report("session control", error);
     } finally {
       controlBusy = false;
     }
@@ -156,12 +163,16 @@
     try {
       const result = await sync.sendPrompt(sessionId, "/compact");
       if (!result.success) {
-        toast.error(commandErrorMessage(result.error) ?? m.chat_compact_failed());
+        if (result.error) {
+          problems.reportInfo("compact context", result.error);
+        } else {
+          problems.warn("compact context", m.chat_compact_failed());
+        }
       } else {
         toast.info(m.chat_compact_sent());
       }
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : String(error));
+      problems.report("compact context", error);
     }
   }
 
@@ -178,7 +189,7 @@
       }
       return true;
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : String(error));
+      problems.report("resume session", error);
       return false;
     } finally {
       resuming = false;

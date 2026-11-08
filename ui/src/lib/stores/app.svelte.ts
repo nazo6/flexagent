@@ -1,4 +1,5 @@
 import { ConnectionStore } from "./connection.svelte";
+import { problems } from "./problems.svelte.ts";
 import { SyncStore } from "./sync.svelte";
 
 /** Singleton for the connection target (central server / local node) and auth state. */
@@ -22,8 +23,10 @@ export async function initApp(): Promise<void> {
     try {
       await loginAndStart(urlToken);
       return;
-    } catch {
-      /* Fall back to dialog input for an invalid token */
+    } catch (error) {
+      // An invalid URL token is expected (expired link); fall back to the
+      // dialog. Report it so the user understands why the token was rejected.
+      problems.report("login", error, "warning");
     }
   }
   await connection.probe();

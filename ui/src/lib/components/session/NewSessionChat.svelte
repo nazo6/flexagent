@@ -28,6 +28,7 @@
   import { getNodeAvailability } from "#lib/node-status.ts";
   import { m } from "#lib/paraglide/messages.js";
   import { sync } from "#lib/stores/app.svelte.ts";
+  import { problems } from "#lib/stores/problems.svelte.ts";
   import { toast } from "svelte-sonner";
   import { onMount, untrack } from "svelte";
   import BotIcon from "@lucide/svelte/icons/bot";
@@ -58,6 +59,9 @@
   let manualAgent = $state(false);
   /** ACP Registry catalog + per-node availability. */
   let catalog = $state<AgentSummary[]>([]);
+  let catalogLoading = $state(true);
+  let catalogError = $state<string | null>(null);
+  let provisionerLoadError = $state<string | null>(null);
   let pathMode = $state<PathMode>("existing");
   let localPath = $state("");
   let branch = $state("");
@@ -108,21 +112,36 @@
   const availableAgents = $derived(agentsAvailableOn(catalog, nodeId));
   const availableAgentIds = $derived(availableAgents.map((agent) => agent.id));
 
-  // Ephemeral VM provisioner definitions (only available when connected to the central server)
-  onMount(async () => {
+  /** Loads provisioners and the agent catalog (retryable from the UI). */
+  async function loadOptions(): Promise<void> {
+    catalogLoading = true;
     try {
       const list = await sync.connection.client.provisioners();
       provisioners.splice(0, provisioners.length, ...list);
+      provisionerLoadError = null;
       if (list.length > 0 && provisionerName === "") provisionerName = list[0].name;
-    } catch {
-      // Ignore: provisioners do not exist when connected to a local node
+    } catch (error) {
+      // A local node has no provisioners, so treat this as a warning rather than
+      // a hard failure; the user can still start resident-node sessions.
+      provisionerLoadError = error instanceof Error ? error.message : String(error);
+      problems.report("load provisioners", error, "warning");
     }
     // You can keep going by entering an ID directly even if the agent list cannot be fetched
     try {
       catalog = await sync.connection.client.agents();
-    } catch {
+      catalogError = null;
+    } catch (error) {
       catalog = [];
+      catalogError = error instanceof Error ? error.message : String(error);
+      problems.report("load agents", error);
+    } finally {
+      catalogLoading = false;
     }
+  }
+
+  // Ephemeral VM provisioner definitions (only available when connected to the central server)
+  onMount(() => {
+    void loadOptions();
   });
 
   const isProvisionerMode = $derived(runTarget === "provisioner");
@@ -357,7 +376,9 @@
       await sync.refreshSessions();
       await goto(`/sessions/${response.session_id}`);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : String(error));
+      // The form state (including the prompt) is intentionally kept so the
+      // user can retry without retyping.
+      problems.report("create session", error);
       busy = false;
     }
   }
@@ -472,6 +493,19 @@
                 <option value={project.project_id}>{project.name}</option>
               {/each}
             </select>
+          {:else if sync.projectsLoading}
+            <span class="text-muted-foreground flex h-8 items-center text-xs">
+              {m.common_loading()}
+            </span>
+          {:else if sync.projectsError !== null}
+            <div class="flex h-8 items-center gap-1.5 text-xs">
+              <span class="text-destructive truncate" title={sync.projectsError}>
+                {m.common_load_failed()}
+              </span>
+              <Button variant="ghost" size="xs" onclick={() => void sync.refreshProjects()}>
+                {m.common_retry()}
+              </Button>
+            </div>
           {:else}
             <a
               href="/projects"
@@ -520,6 +554,11 @@
                     {m.new_session_test()}
                   {/if}
                 </Button>
+              {:else if provisionerLoadError !== null}
+                <span class="text-destructive text-xs leading-8">
+                  {m.common_load_failed()}
+                  {provisionerLoadError}
+                </span>
               {:else}
                 <span class="text-muted-foreground text-xs leading-8">
                   {m.new_session_provisioner_undefined()}
@@ -580,6 +619,19 @@
             />
           {/if}
           {#if !isProvisionerMode}
+            {#if catalogError !== null}
+              <div class="flex items-center gap-1.5 text-[10px]">
+                <span class="text-destructive">
+                  {m.common_load_failed()}
+                  {catalogError}
+                </span>
+                <Button type="button" variant="ghost" size="xs" onclick={() => void loadOptions()}>
+                  {m.common_retry()}
+                </Button>
+              </div>
+            {:else if catalogLoading}
+              <span class="text-muted-foreground text-[10px]">{m.common_loading()}</span>
+            {/if}
             <a
               href="/settings?tab=agents"
               class="text-muted-foreground hover:text-foreground text-[10px] underline"

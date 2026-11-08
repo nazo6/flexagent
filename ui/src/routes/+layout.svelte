@@ -1,13 +1,17 @@
 <script lang="ts">
+  import { goto } from "$app/navigation";
   import { onMount } from "svelte";
   import "../app.css";
   import AppSidebar from "#lib/components/layout/AppSidebar.svelte";
   import ConnectionMenu from "#lib/components/ConnectionMenu.svelte";
+  import ErrorBanner from "#lib/components/ErrorBanner.svelte";
   import TokenDialog from "#lib/components/TokenDialog.svelte";
   import { Button } from "#lib/components/ui/button/index.ts";
   import * as Sheet from "#lib/components/ui/sheet/index.ts";
   import { Toaster } from "#lib/components/ui/sonner/index.ts";
-  import { connection, initApp } from "#lib/stores/app.svelte.ts";
+  import { connection, initApp, sync } from "#lib/stores/app.svelte.ts";
+  import { problems, type AppProblem } from "#lib/stores/problems.svelte.ts";
+  import type { RecoveryAction } from "#lib/generated/bindings.ts";
   import { m } from "#lib/paraglide/messages.js";
   import LoaderCircleIcon from "@lucide/svelte/icons/loader-circle";
   import MenuIcon from "@lucide/svelte/icons/menu";
@@ -18,9 +22,53 @@
 
   let mobileDrawerOpen = $state(false);
 
+  function onUnhandledRejection(event: PromiseRejectionEvent): void {
+    problems.report("unhandled error", event.reason);
+  }
+
+  function onUncaughtError(event: ErrorEvent): void {
+    problems.report("uncaught error", event.error ?? event.message);
+  }
+
   onMount(() => {
+    window.addEventListener("unhandledrejection", onUnhandledRejection);
+    window.addEventListener("error", onUncaughtError);
     void initApp();
+    return () => {
+      window.removeEventListener("unhandledrejection", onUnhandledRejection);
+      window.removeEventListener("error", onUncaughtError);
+    };
   });
+
+  /**
+   * Executes a server-provided recovery action.
+   *
+   * Navigation-based actions open the screen where the fix is made; execution
+   * of the fix itself stays in that screen (Phase 5 will add bespoke handlers).
+   */
+  function handleProblemAction(problem: AppProblem, action: RecoveryAction): void {
+    switch (action.kind) {
+      case "retry":
+        void sync.refreshAll();
+        break;
+      case "reconnect_node":
+        sync.restart();
+        break;
+      case "resume_with_replay":
+      case "revert_to_nearest_snapshot":
+      case "show_logs":
+        void goto(`/sessions/${action.session_id}`);
+        break;
+      case "reinstall_agent":
+      case "open_config":
+      case "select_online_node":
+      case "recreate_worktree":
+      case "export_diagnostics":
+        void goto("/settings");
+        break;
+    }
+    problems.dismiss(problem.id);
+  }
 
   async function retry() {
     await initApp();
@@ -99,6 +147,8 @@
           <PlusIcon class="size-4" />
         </a>
       </header>
+
+      <ErrorBanner onaction={handleProblemAction} />
 
       <main class="relative flex-1 overflow-y-auto">
         {@render children()}
