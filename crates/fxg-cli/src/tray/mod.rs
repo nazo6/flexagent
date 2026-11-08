@@ -1,20 +1,22 @@
-//! デーモンのタスクトレイ常駐 (Windows / Linux / macOS)。
+//! Daemon task-tray integration (Windows / Linux / macOS).
 //!
-//! 設計: `docs/04-agent-drivers-and-windows.md` §5.4。
+//! Design: `docs/04-agent-drivers-and-windows.md` §5.4.
 //!
-//! `tray-icon` (tauri) はトレイのイベントループを自前で持たないため、
-//! OS ごとに「ループをどこで動かすか」が異なる点をバックエンドで吸収する:
+//! `tray-icon` (tauri) does not own a tray event loop, so the backend absorbs
+//! the platform difference in where the loop runs:
 //!
-//! - **Windows** ([`windows`]): トレイを作成したスレッドで Win32
-//!   メッセージループが必要なため、専用スレッドで `GetMessageW` ループを回す。
-//! - **Linux** ([`linux`]): `ksni` (D-Bus) バックエンドは自前のワーカースレッドを
-//!   持つためイベントループ不要。専用スレッド + チャネル駆動でメニューを操作する。
-//! - **macOS** ([`macos`]): `NSStatusItem` はメインスレッドのイベントループ上で
-//!   作成・操作する必要があるため、`main.rs` の早期分岐からメインスレッドで
-//!   tao ループを回す (デーモン本体はワーカースレッドへ退避)。
+//! - **Windows** ([`windows`]): the thread that created the tray needs a Win32
+//!   message loop, so `GetMessageW` runs on a dedicated thread.
+//! - **Linux** ([`linux`]): the `ksni` (D-Bus) backend owns its worker thread,
+//!   so no event loop is needed. A dedicated thread driven by a channel
+//!   manipulates the menu.
+//! - **macOS** ([`macos`]): `NSStatusItem` must be created and driven on the
+//!   main thread's event loop, so the early branch in `main.rs` runs the tao
+//!   loop on the main thread (the daemon body moves to a worker thread).
 //!
-//! メニュー構築・ステータス整形・アイコン生成・アクション処理は全 OS 共通。
-//! `muda` のメニュー項目は `!Send` のため、**作成したスレッド上でのみ**操作する。
+//! Menu construction, status formatting, icon rendering and action handling
+//! are shared by all platforms. `muda` menu items are `!Send`, so they are
+//! touched **only on the thread that created them**.
 
 #[cfg(target_os = "linux")]
 mod linux;
@@ -42,65 +44,65 @@ use tray_icon::menu::{CheckMenuItem, Menu, MenuEvent, MenuId, MenuItem, Predefin
 
 use crate::service::{ServiceAction, is_installed, run_sync};
 
-/// ステータス表示の更新間隔。
+/// Interval at which the status display is refreshed.
 const STATUS_INTERVAL: Duration = Duration::from_secs(3);
-/// トレイアイコンのサイズ (px)。元画像 (192px) の約数であること。
+/// Tray icon size in px. Must divide the source image size (192px).
 const ICON_SIZE: u32 = 32;
-/// 自動起動メニュー項目のラベル。
-const AUTOSTART_LABEL: &str = "ログイン時に自動起動";
-/// ステータス取得前のプレースホルダ。
-const STATUS_FETCHING: &str = "状態: 取得中…";
-/// セッション数取得前のプレースホルダ。
-const SESSIONS_FETCHING: &str = "セッション: 取得中…";
-/// 同梱アイコン (UI の PWA アイコンと共通のアセット)。
+/// Label of the auto-start menu item.
+const AUTOSTART_LABEL: &str = "Start at login";
+/// Placeholder shown before the status is fetched.
+const STATUS_FETCHING: &str = "Status: fetching…";
+/// Placeholder shown before the session count is fetched.
+const SESSIONS_FETCHING: &str = "Sessions: fetching…";
+/// Bundled icon (the same asset as the UI's PWA icon).
 const ICON_PNG: &[u8] = include_bytes!("../../../../ui/static/icon-192.png");
 
-/// トレイが利用するデーモンの状態。
+/// Daemon state the tray relies on.
 #[derive(Clone)]
 pub struct TrayContext {
-    /// ノードデーモンの共有状態 (ステータス表示に使う)
+    /// Shared node daemon state (used for the status display)
     pub state: DaemonState,
-    /// graceful shutdown ハンドル (「終了」メニュー)
+    /// Graceful shutdown handle (the "Quit" menu item)
     pub shutdown: ShutdownHandle,
 }
 
-/// デーモン → トレイスレッド / メインループへ送る更新。
+/// Update sent from the daemon to the tray thread / main loop.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum TrayUpdate {
-    /// ステータス表示の更新
+    /// Status display refresh
     Status(TrayStatus),
-    /// 自動起動の登録状態
+    /// Whether auto-start is registered
     Autostart(bool),
-    /// トレイを閉じてループを終了する
+    /// Close the tray and stop the loop
     Close,
 }
 
-/// メニューから要求されたアクション (トレイ → デーモン)。
+/// Action requested from the menu (tray → daemon).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TrayAction {
-    /// 自動起動の登録/解除をトグルする
+    /// Toggle the auto-start registration
     ToggleAutostart,
-    /// Web UI をブラウザで開く
+    /// Open the Web UI in a browser
     OpenWeb,
-    /// デーモンを終了する
+    /// Stop the daemon
     Quit,
 }
 
-/// トレイ側へ更新を通知するクロージャ (起床手段は OS 別)。
+/// Closure that notifies the tray side (the wake-up mechanism is per OS).
 pub(crate) type Notifier = Arc<dyn Fn(TrayUpdate) + Send + Sync>;
 
-/// メニューに表示するステータス。
+/// Status shown in the menu.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct TrayStatus {
-    /// 中央サーバーへ接続中か
+    /// Whether the central server is connected
     central_connected: bool,
-    /// 未同期 Outbox イベント件数
+    /// Number of unsynced Outbox events
     unsynced: u64,
-    /// 稼働中セッション数
+    /// Number of active sessions
     active_sessions: usize,
 }
 
-/// メニュー項目の ID (イベントの振り分けに使う)。
+/// Menu item IDs (used to dispatch events).
 #[derive(Clone)]
 struct TrayMenuIds {
     autostart: MenuId,
@@ -108,9 +110,10 @@ struct TrayMenuIds {
     quit: MenuId,
 }
 
-/// トレイ本体とメニュー項目 (トレイを作成したスレッドだけが触れる)。
+/// Tray body and menu items (only the thread that created the tray may touch
+/// them).
 pub(crate) struct TrayUi {
-    /// トレイ本体 (メニューを所有する。Drop でアイコンが消える)
+    /// Tray body (owns the menu; dropping it removes the icon)
     tray: TrayIcon,
     status: MenuItem,
     sessions: MenuItem,
@@ -120,10 +123,10 @@ pub(crate) struct TrayUi {
 }
 
 impl TrayUi {
-    /// メニューとアイコンを生成してトレイを表示する。
+    /// Create the menu and icon and show the tray.
     ///
-    /// **トレイを作成するスレッドから呼ぶこと** (Windows/Linux: 専用スレッド、
-    /// macOS: メインスレッド)。
+    /// **Must be called from the thread that creates the tray** (Windows and
+    /// Linux: a dedicated thread; macOS: the main thread).
     pub(crate) fn new(ctx: &TrayContext, actions: UnboundedSender<TrayAction>) -> Result<Self> {
         let node_name = ctx.state.config().node_name.clone();
         let version = ctx.state.version();
@@ -132,8 +135,8 @@ impl TrayUi {
         let status = MenuItem::new(STATUS_FETCHING, false, None);
         let sessions = MenuItem::new(SESSIONS_FETCHING, false, None);
         let autostart = CheckMenuItem::new(AUTOSTART_LABEL, true, false, None);
-        let web = MenuItem::new("Web UI を開く", true, None);
-        let quit = MenuItem::new("終了", true, None);
+        let web = MenuItem::new("Open Web UI", true, None);
+        let quit = MenuItem::new("Quit", true, None);
         let menu = Menu::new();
         menu.append_items(&[
             &header,
@@ -186,7 +189,7 @@ impl TrayUi {
         })
     }
 
-    /// 更新を 1 件反映する。`false` を返したらトレイを閉じてループを終了する。
+    /// Apply one update. Returning `false` closes the tray and stops the loop.
     pub(crate) fn apply(&mut self, update: TrayUpdate) -> bool {
         match update {
             TrayUpdate::Status(status) => {
@@ -212,7 +215,7 @@ impl TrayUi {
         true
     }
 
-    /// 受信済みの更新をまとめて反映する (Windows / macOS のイベントループ用)。
+    /// Apply every pending update (used by the Windows / macOS event loop).
     #[cfg(not(target_os = "linux"))]
     pub(crate) fn apply_pending(&mut self, updates: &mut UnboundedReceiver<TrayUpdate>) -> bool {
         while let Ok(update) = updates.try_recv() {
@@ -224,7 +227,8 @@ impl TrayUi {
     }
 }
 
-/// トレイ常駐を有効にするか (`--tray` / `--no-tray` / `[node] tray` の優先順)。
+/// Whether tray residency is enabled (priority: `--tray` / `--no-tray` /
+/// `[node] tray`).
 pub(crate) fn resolve_enabled(force: bool, disabled: bool, configured: Option<bool>) -> bool {
     if disabled {
         false
@@ -235,7 +239,7 @@ pub(crate) fn resolve_enabled(force: bool, disabled: bool, configured: Option<bo
     }
 }
 
-/// ステータス収集とメニューアクション処理を行うタスクを起動する。
+/// Spawn the task that collects status and handles menu actions.
 pub(crate) fn spawn_controller(
     handle: &tokio::runtime::Handle,
     ctx: TrayContext,
@@ -295,7 +299,7 @@ pub(crate) fn spawn_controller(
     });
 }
 
-/// デーモンの状態からトレイ表示用のスナップショットを収集する。
+/// Collect a snapshot for the tray display from the daemon state.
 async fn collect_status(state: &DaemonState) -> TrayStatus {
     let unsynced = state.db().unsynced_event_count().await.unwrap_or(0);
     let active_sessions = state
@@ -314,46 +318,51 @@ async fn collect_status(state: &DaemonState) -> TrayStatus {
     }
 }
 
-/// ステータス行 (中央サーバー接続状態 + 未同期件数)。
+/// Status line (central server connection state + unsynced count).
 fn status_line(status: &TrayStatus) -> String {
     if status.central_connected {
-        format!("状態: ● 中央サーバー接続中 (未同期 {})", status.unsynced)
+        format!(
+            "Status: ● connected to central server ({} unsynced)",
+            status.unsynced
+        )
     } else {
-        "状態: ○ スタンドアロン".to_owned()
+        "Status: ○ standalone".to_owned()
     }
 }
 
-/// 稼働中セッション数。
+/// Number of active sessions.
 fn session_line(active_sessions: usize) -> String {
-    format!("セッション: 稼働中 {active_sessions} 件")
+    format!("Sessions: {active_sessions} active")
 }
 
-/// ツールチップ (アイコンホバー時の表示)。
+/// Tooltip (shown on icon hover).
 fn tooltip(node_name: &str, version: &str, status: Option<&TrayStatus>) -> String {
     match status {
         Some(status) => {
             let mode = if status.central_connected {
-                "接続中"
+                "connected"
             } else {
-                "スタンドアロン"
+                "standalone"
             };
             format!(
-                "FlexAgent v{version} — {node_name} ({mode} / セッション {})",
+                "FlexAgent v{version} — {node_name} ({mode} / {} sessions)",
                 status.active_sessions
             )
         }
-        None => format!("FlexAgent v{version} — {node_name} (起動中)"),
+        None => format!("FlexAgent v{version} — {node_name} (starting)"),
     }
 }
 
-/// 同梱アイコンを縮小し、接続状態ドットを合成したトレイアイコンを作る。
+/// Build the tray icon by downscaling the bundled icon and compositing the
+/// connection-state dot.
 fn build_icon(central_connected: bool) -> Result<tray_icon::Icon> {
     let rgba = render_icon_rgba(ICON_PNG, central_connected)?;
     tray_icon::Icon::from_rgba(rgba, ICON_SIZE, ICON_SIZE)
         .map_err(|err| anyhow::anyhow!("invalid tray icon image: {err}"))
 }
 
-/// PNG をデコードし `ICON_SIZE` へ縮小して状態ドットを描画する (テスト可能な純関数)。
+/// Decode the PNG, downscale it to `ICON_SIZE` and draw the state dot (a pure
+/// function so it can be tested).
 fn render_icon_rgba(png_bytes: &[u8], central_connected: bool) -> Result<Vec<u8>> {
     let (source, width, height) = decode_png_rgba(png_bytes)?;
     let mut rgba = downsample_rgba(&source, width, height, ICON_SIZE)?;
@@ -361,7 +370,7 @@ fn render_icon_rgba(png_bytes: &[u8], central_connected: bool) -> Result<Vec<u8>
     Ok(rgba)
 }
 
-/// PNG (8bit RGB / RGBA) を RGBA8 へデコードする。
+/// Decode a PNG (8-bit RGB / RGBA) into RGBA8.
 fn decode_png_rgba(png_bytes: &[u8]) -> Result<(Vec<u8>, u32, u32)> {
     let mut decoder = png::Decoder::new(std::io::Cursor::new(png_bytes));
     decoder.set_transformations(png::Transformations::EXPAND | png::Transformations::ALPHA);
@@ -398,7 +407,8 @@ fn decode_png_rgba(png_bytes: &[u8]) -> Result<(Vec<u8>, u32, u32)> {
     Ok((rgba, frame.width, frame.height))
 }
 
-/// ブロック平均による縮小 (元画像は `size` の整数倍であること)。
+/// Downscale by block averaging (the source dimensions must be a multiple of
+/// `size`).
 fn downsample_rgba(source: &[u8], width: u32, height: u32, size: u32) -> Result<Vec<u8>> {
     if !width.is_multiple_of(size) || !height.is_multiple_of(size) {
         bail!("tray icon size {width}x{height} is not a multiple of {size}");
@@ -426,13 +436,14 @@ fn downsample_rgba(source: &[u8], width: u32, height: u32, size: u32) -> Result<
     Ok(output)
 }
 
-/// 右下に中央サーバー接続状態のドット (緑=接続中 / グレー=スタンドアロン) を描く。
+/// Draw the central server connection-state dot in the bottom-right corner
+/// (green = connected / grey = standalone).
 fn draw_status_dot(rgba: &mut [u8], size: u32, central_connected: bool) {
-    // #22c55e (接続中)
+    // #22c55e (connected)
     const CONNECTED: [u8; 4] = [34, 197, 94, u8::MAX];
-    // #9ca3af (スタンドアロン)
+    // #9ca3af (standalone)
     const STANDALONE: [u8; 4] = [156, 163, 175, u8::MAX];
-    // #0f172a (視認性のための縁取り)
+    // #0f172a (outline for visibility)
     const OUTLINE: [u8; 4] = [15, 23, 42, u8::MAX];
 
     let color = if central_connected {
@@ -471,12 +482,12 @@ mod tests {
 
     #[test]
     fn resolve_enabled_priority() {
-        // --no-tray が最優先
+        // --no-tray takes the highest priority
         assert!(!resolve_enabled(true, true, Some(true)));
-        // --tray は config より優先
+        // --tray overrides the config
         assert!(resolve_enabled(true, false, Some(false)));
         assert!(resolve_enabled(true, false, None));
-        // 指定が無ければ config に従う (未設定は無効)
+        // Without a flag, follow the config (unset means disabled)
         assert!(resolve_enabled(false, false, Some(true)));
         assert!(!resolve_enabled(false, false, Some(false)));
         assert!(!resolve_enabled(false, false, None));
@@ -486,26 +497,26 @@ mod tests {
     fn status_and_session_lines() {
         assert_eq!(
             status_line(&status(true, 3, 2)),
-            "状態: ● 中央サーバー接続中 (未同期 3)"
+            "Status: ● connected to central server (3 unsynced)"
         );
-        assert_eq!(status_line(&status(false, 0, 0)), "状態: ○ スタンドアロン");
-        assert_eq!(session_line(0), "セッション: 稼働中 0 件");
-        assert_eq!(session_line(12), "セッション: 稼働中 12 件");
+        assert_eq!(status_line(&status(false, 0, 0)), "Status: ○ standalone");
+        assert_eq!(session_line(0), "Sessions: 0 active");
+        assert_eq!(session_line(12), "Sessions: 12 active");
     }
 
     #[test]
     fn tooltip_reflects_status() {
         assert_eq!(
             tooltip("home-pc", "0.1.0", Some(&status(true, 1, 2))),
-            "FlexAgent v0.1.0 — home-pc (接続中 / セッション 2)"
+            "FlexAgent v0.1.0 — home-pc (connected / 2 sessions)"
         );
         assert_eq!(
             tooltip("home-pc", "0.1.0", Some(&status(false, 0, 0))),
-            "FlexAgent v0.1.0 — home-pc (スタンドアロン / セッション 0)"
+            "FlexAgent v0.1.0 — home-pc (standalone / 0 sessions)"
         );
         assert_eq!(
             tooltip("home-pc", "0.1.0", None),
-            "FlexAgent v0.1.0 — home-pc (起動中)"
+            "FlexAgent v0.1.0 — home-pc (starting)"
         );
     }
 
@@ -516,11 +527,12 @@ mod tests {
         let expected_len = (ICON_SIZE * ICON_SIZE * 4) as usize;
         assert_eq!(connected.len(), expected_len);
         assert_eq!(standalone.len(), expected_len);
-        // 右下のドット中心付近が状態色になっている (緑 / グレー)
+        // The pixels near the center of the bottom-right dot use the state color
+        // (green / grey)
         let dot = ((ICON_SIZE - 8) * ICON_SIZE + ICON_SIZE - 8) as usize * 4;
         assert_eq!(&connected[dot..dot + 3], &[34, 197, 94]);
         assert_eq!(&standalone[dot..dot + 3], &[156, 163, 175]);
-        // 状態が違えば画像も異なる
+        // A different state produces a different image
         assert_ne!(connected, standalone);
     }
 

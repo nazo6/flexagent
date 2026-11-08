@@ -1,9 +1,10 @@
-//! Windows: トレイを作成したスレッドで Win32 メッセージループを回すバックエンド。
+//! Windows: backend that runs the Win32 message loop on the thread that created
+//! the tray.
 //!
-//! `tray-icon` は `Shell_NotifyIconW` を隠しウィンドウで受けるため、トレイを
-//! 作成したスレッドでメッセージループが動作している必要がある。ここでは専用
-//! スレッドを立てて `GetMessageW` ループを回し、デーモン本体 (tokio) とは
-//! チャネルで連携する。
+//! `tray-icon` receives `Shell_NotifyIconW` through a hidden window, so the
+//! message loop must run on the thread that created the tray. This backend
+//! sets up a dedicated thread that runs a `GetMessageW` loop and cooperates
+//! with the daemon body (tokio) over channels.
 
 use std::sync::Arc;
 use std::sync::mpsc;
@@ -18,17 +19,19 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 
 use super::{Notifier, TrayAction, TrayContext, TrayUi, TrayUpdate, spawn_controller};
 
-/// ステータス更新をトレイスレッドへ知らせるスレッドメッセージ (`wndproc` を持たない)。
+/// Thread message that wakes the tray thread for a status update (no
+/// `wndproc`).
 const WM_FXG_TRAY_WAKE: u32 = WM_APP + 1;
 
-/// トレイ常駐ハンドル。`close` でトレイを削除しスレッドの終了を待つ。
+/// Handle for the tray residency. `close` removes the tray and waits for the
+/// thread to exit.
 pub struct TrayHandle {
     notifier: Notifier,
     join: Option<JoinHandle<()>>,
 }
 
 impl TrayHandle {
-    /// トレイを削除し、トレイスレッドの終了を待つ。
+    /// Remove the tray and wait for the tray thread to exit.
     pub fn close(mut self) {
         if self.join.is_some() {
             (self.notifier)(TrayUpdate::Close);
@@ -42,13 +45,14 @@ impl TrayHandle {
 impl Drop for TrayHandle {
     fn drop(&mut self) {
         if self.join.is_some() {
-            // 明示的な `close` なしで破棄された場合もトレイを消す (join はしない)
+            // Also remove the tray when dropped without an explicit `close`
+            // (without joining)
             (self.notifier)(TrayUpdate::Close);
         }
     }
 }
 
-/// トレイ常駐を開始する (専用スレッド + Win32 メッセージループ)。
+/// Start the tray residency (dedicated thread + Win32 message loop).
 pub fn spawn(handle: &tokio::runtime::Handle, ctx: TrayContext) -> Result<TrayHandle> {
     let (ready_tx, ready_rx) = mpsc::channel::<Result<u32, String>>();
     let (update_tx, mut update_rx) = unbounded_channel::<TrayUpdate>();
@@ -58,8 +62,9 @@ pub fn spawn(handle: &tokio::runtime::Handle, ctx: TrayContext) -> Result<TrayHa
     let join = std::thread::Builder::new()
         .name("fxg-tray".to_owned())
         .spawn(move || {
-            // トレイ作成 (隠しウィンドウ生成) でメッセージキューが作られるため、
-            // ready を返した後の `PostThreadMessageW` は取りこぼされない。
+            // Creating the tray (spawning the hidden window) creates the message
+            // queue, so `PostThreadMessageW` calls after ready is sent are not
+            // lost.
             let mut ui = match TrayUi::new(&loop_ctx, action_tx) {
                 Ok(ui) => ui,
                 Err(err) => {
@@ -76,8 +81,8 @@ pub fn spawn(handle: &tokio::runtime::Handle, ctx: TrayContext) -> Result<TrayHa
                 if !ui.apply_pending(&mut update_rx) {
                     break;
                 }
-                // 更新通知は `PostThreadMessageW` で起こされる。WM_QUIT (0) /
-                // エラー (-1) で終了する。
+                // Update notifications are delivered by `PostThreadMessageW`.
+                // The loop ends on WM_QUIT (0) or an error (-1).
                 if unsafe { GetMessageW(&mut message, std::ptr::null_mut(), 0, 0) } <= 0 {
                     break;
                 }

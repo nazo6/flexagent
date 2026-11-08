@@ -1,14 +1,16 @@
-//! `fxg` バイナリのエントリポイント (CLI / TUI)。
+//! Entry point of the `fxg` binary (CLI / TUI).
 //!
-//! CLI パースには **`usage-rs`** (`usage` クレート) を使用する (`clap` は使用しない)。
-//! `#[derive(Cli)]` / `Args` / `Subcommands` の宣言が単一のソースとなり、
-//! `__usage_spec__` から KDL spec・シェル補完・manpage・Markdown リファレンスを
-//! 生成できる (設計: `docs/05-cli-and-pwa-ui.md` §1)。
+//! CLI parsing uses **`usage-rs`** (the `usage` crate), not `clap`.
+//! The `#[derive(Cli)]` / `Args` / `Subcommands` declarations are the single
+//! source of truth, and the KDL spec, shell completions, manpage and Markdown
+//! reference are generated from `__usage_spec__` (design:
+//! `docs/05-cli-and-pwa-ui.md` §1).
 //!
-//! Phase 2 では基本サブコマンド (`daemon` / `ps` / `session list` / `project` /
-//! `worktree` / `auth` / `kill-all`) を提供する。
-//! Phase 3 でエージェント実行系 (`run` / `attach` / `session show|prompt|stop|kill|revert|fork`
-//! / `inbox` / `agents`) と内蔵TUI (`tui`) を追加した。
+//! Phase 2 provides the basic subcommands (`daemon` / `ps` / `session list` /
+//! `project` / `worktree` / `auth` / `kill-all`). Phase 3 added the agent
+//! execution commands (`run` / `attach` / `session
+//! show|prompt|stop|kill|revert|fork` / `inbox` / `agents`) and the built-in
+//! TUI (`tui`).
 
 extern crate usage_rs as usage;
 
@@ -23,13 +25,13 @@ mod server_api;
 mod service;
 mod tray;
 
-/// `fxg` ルートコマンド。
+/// Root command of `fxg`.
 #[derive(Debug, Cli)]
 #[usage(run_async)]
 #[usage(
     bin = "fxg",
     version = env!("CARGO_PKG_VERSION"),
-    about = "FlexAgent: ローカルファーストなエージェントマネージャ",
+    about = "FlexAgent: a local-first agent manager",
     arg_required_else_help
 )]
 struct Fxg {
@@ -37,42 +39,43 @@ struct Fxg {
     command: Commands,
 }
 
-/// トップレベルサブコマンド。
+/// Top-level subcommands.
 #[derive(Debug, Subcommands)]
 #[usage(run_async)]
 enum Commands {
-    /// 新規セッションを起動する
+    /// Start a new session
     Run(commands::RunArgs),
-    /// 稼働中・最近のセッション一覧を表示する (`fxg session list` の別名)
+    /// List running and recent sessions (alias for `fxg session list`)
     Ps(commands::SessionListArgs),
-    /// セッション管理 (list / show / prompt / stop / kill / revert / fork)
+    /// Session management (list / show / prompt / stop / kill / revert / fork)
     Session(commands::SessionArgs),
-    /// 承認待ちリクエストの確認と応答 (list / approve / reject)
+    /// Review and answer pending approval requests (list / approve / reject)
     Inbox(commands::InboxArgs),
-    /// 論理プロジェクト管理 (info / list / link / scan)
+    /// Logical project management (info / list / link / scan)
     Project(commands::ProjectArgs),
-    /// Git Worktree 管理 (list / add / remove / prune)
+    /// Git worktree management (list / add / remove / prune)
     #[usage(alias = "wt")]
     Worktree(commands::WorktreeArgs),
-    /// エージェント管理 (list / install / update / remove)
+    /// Agent management (list / install / update / remove)
     Agents(commands::AgentsArgs),
-    /// 一時VM・サンドボックスプロビジョナーの確認 (list / test)
+    /// Inspect ephemeral VM / sandbox provisioners (list / test)
     Provisioners(commands::ProvisionersArgs),
-    /// ノードデーモンをフォアグラウンド起動する
+    /// Start the node daemon in the foreground
     Daemon(commands::DaemonArgs),
-    /// 中央サーバーをフォアグラウンド起動する (:8080)
+    /// Start the central server in the foreground (:8080)
     Server(commands::ServerArgs),
-    /// 一時VM内の Zero-Touch 初期化 (git clone + ツール自動導入。出力は stderr)
+    /// Zero-touch initialization inside an ephemeral VM (git clone + automatic
+    /// tool install; output goes to stderr)
     BootstrapWorkspace(commands::BootstrapWorkspaceArgs),
-    /// Git Credential Proxy の GIT_ASKPASS ヘルパー (内部用)
+    /// GIT_ASKPASS helper for the Git credential proxy (internal use)
     GitAskpass(commands::GitAskpassArgs),
-    /// OSログイン時のバックグラウンド常駐サービスを管理する
+    /// Manage the background service that starts at OS login
     Service(commands::ServiceArgs),
-    /// トークン付きURLをデフォルトブラウザで開く
+    /// Open a tokenized URL in the default browser
     Web(commands::WebArgs),
-    /// 認証トークン管理 (token / rotate-token / node-token)
+    /// Auth token management (token / rotate-token / node-token)
     Auth(commands::AuthArgs),
-    /// 【緊急停止】ローカルの全セッション・子プロセスツリー・PTYを強制終了する
+    /// [Emergency stop] Force-terminate every local session, child process tree and PTY
     KillAll(commands::KillAllArgs),
 }
 
@@ -94,9 +97,9 @@ async fn main() -> ExitCode {
     };
     logging::init_logging(&logging_options, &global, &fxg_home);
 
-    // macOS ではトレイ (NSStatusItem) をメインスレッドのイベントループ上で
-    // 作成・操作する必要があるため、`fxg daemon --tray` はここでメインスレッドを
-    // tao ループに明け渡す (デーモン本体はワーカースレッドへ退避する)。
+    // On macOS the tray (NSStatusItem) must be created and driven on the main
+    // thread's event loop, so `fxg daemon --tray` hands the main thread over to
+    // the tao loop here (the daemon body moves to a worker thread).
     #[cfg(target_os = "macos")]
     if let Some(code) = tray::run_daemon_if_requested(&cli.command) {
         return code;

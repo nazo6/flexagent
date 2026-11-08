@@ -1,13 +1,14 @@
-//! 中央サーバー REST API クライアント (CLI 用)。
+//! Central server REST API client (for the CLI).
 //!
-//! ローカルIPC (デーモン直結) では提供できない操作 — 一時VMプロビジョナーの
-//! 起動 (`fxg run --provisioner`) と疎通検証 (`fxg provisioners test`) — は、
-//! `config.toml` の `[node] central_server_url` が指す中央サーバーの API を
-//! 直接呼び出す (設計: docs/05 §1.1。中央サーバー停止中は利用不可)。
+//! Operations that local IPC (a direct daemon connection) cannot provide —
+//! starting an ephemeral VM provisioner (`fxg run --provisioner`) and checking
+//! reachability (`fxg provisioners test`) — call the central server API named
+//! by `[node] central_server_url` in `config.toml` directly (design: docs/05
+//! §1.1; unavailable while the central server is stopped).
 //!
-//! 認証は `~/.flexagent/auth_token` の Bearer トークンを用いる。CLI を
-//! 中央サーバーと同一ホストで実行する場合は同一ファイルがサーバーのトークン
-//! と一致するため、そのまま認証できる。
+//! Authentication uses the Bearer token from `~/.flexagent/auth_token`. When
+//! the CLI runs on the same host as the central server, the same file matches
+//! the server token, so authentication works as-is.
 
 use anyhow::{Context, Result, bail};
 use fxg_protocol::client_api::{
@@ -17,7 +18,7 @@ use fxg_protocol::client_api::{
 use fxg_protocol::common::SessionSummary;
 use fxg_protocol::config::{AUTH_TOKEN_FILE_NAME, EnvLookup, GlobalConfig, fxg_home};
 
-/// 中央サーバー REST クライアント。
+/// Central server REST client.
 pub struct ServerClient {
     base: String,
     token: String,
@@ -25,11 +26,12 @@ pub struct ServerClient {
 }
 
 impl ServerClient {
-    /// `config.toml` の `[node] central_server_url` と `auth_token` から構築する。
+    /// Build a client from `[node] central_server_url` and `auth_token` in
+    /// `config.toml`.
     pub fn from_config(env: EnvLookup<'_>) -> Result<Self> {
         let global = GlobalConfig::load(env).context("failed to load ~/.flexagent/config.toml")?;
         let server_url = global.node.central_server_url.clone().context(
-            "node.central_server_url が config.toml に設定されていません (中央サーバー必須)",
+            "node.central_server_url is not set in config.toml (a central server is required)",
         )?;
         let base = central_http_url(&server_url)?;
         let token =
@@ -42,7 +44,7 @@ impl ServerClient {
         })
     }
 
-    /// HTTP オリジン (`http://host:8080`)。
+    /// HTTP origin (`http://host:8080`).
     pub fn base_url(&self) -> &str {
         &self.base
     }
@@ -51,7 +53,7 @@ impl ServerClient {
         format!("{}{path}", self.base)
     }
 
-    /// GET リクエストを送り、JSON レスポンスをデコードする。
+    /// Send a GET request and decode the JSON response.
     async fn get<T: serde::de::DeserializeOwned>(&self, path: &str) -> Result<T> {
         let response = self
             .http
@@ -63,7 +65,7 @@ impl ServerClient {
         decode(response).await
     }
 
-    /// POST リクエスト (JSON ボディ付き) を送る。
+    /// Send a POST request with a JSON body.
     async fn post<B: serde::Serialize, T: serde::de::DeserializeOwned>(
         &self,
         path: &str,
@@ -101,7 +103,7 @@ impl ServerClient {
     }
 }
 
-/// HTTP レスポンスをデコードする (エラーボディ `{ error: { code, message } }` を展開)。
+/// Decode an HTTP response (unwraps the error body `{ error: { code, message } }`).
 async fn decode<T: serde::de::DeserializeOwned>(response: reqwest::Response) -> Result<T> {
     let status = response.status();
     let bytes = response.bytes().await.context("failed to read response")?;
@@ -121,18 +123,18 @@ async fn decode<T: serde::de::DeserializeOwned>(response: reqwest::Response) -> 
     serde_json::from_slice(&bytes).context("failed to decode central server response")
 }
 
-/// Node Hub の WS URL (`ws://host:8080/api/v1/node/ws`) から HTTP オリジンを取り出す。
+/// Extract the HTTP origin from a Node Hub WS URL (`ws://host:8080/api/v1/node/ws`).
 pub fn central_http_url(server_url: &str) -> Result<String> {
     let http = server_url
         .replacen("wss://", "https://", 1)
         .replacen("ws://", "http://", 1);
     if !http.starts_with("http://") && !http.starts_with("https://") {
-        bail!("central_server_url は ws:// または wss:// で指定してください: {server_url}");
+        bail!("central_server_url must use ws:// or wss://: {server_url}");
     }
     let base = http.split("/api/").next().unwrap_or(&http);
     let base = base.trim_end_matches('/');
     if base.is_empty() {
-        bail!("central_server_url が不正です: {server_url}");
+        bail!("invalid central_server_url: {server_url}");
     }
     Ok(base.to_owned())
 }

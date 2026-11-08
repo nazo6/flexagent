@@ -3,7 +3,7 @@ name = "fxg-cli"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
-description = "FlexAgent CLI / TUI エントリポイント (fxg バイナリ)"
+description = "FlexAgent CLI / TUI entry point (the fxg binary)"
 repository.workspace = true
 
 [[bin]]

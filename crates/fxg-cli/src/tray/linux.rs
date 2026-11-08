@@ -1,9 +1,11 @@
-//! Linux (ksni バックエンド): D-Bus ワーカースレッドを持つためイベントループ不要。
+//! Linux (ksni backend): the D-Bus backend has its own worker thread, so no
+//! event loop is needed.
 //!
-//! 専用スレッドでトレイを作成し、更新をチャネルで受けてメニューを操作する
-//! (`muda` のメニュー項目は `!Send` のため、作成したスレッド上でのみ操作する)。
-//! `libappindicator` (GTK3) ではなく純 Rust の `ksni` を利用するため、
-//! GTK のビルド依存やデスクトップセッションは不要 (D-Bus セッションのみ必要)。
+//! The tray is created on a dedicated thread, which then receives updates over
+//! a channel and drives the menu (`muda` menu items are `!Send`, so they are
+//! touched only on the creating thread). Because this uses the pure-Rust
+//! `ksni` instead of `libappindicator` (GTK3), no GTK build dependency or
+//! desktop session is required (only a D-Bus session).
 
 use std::sync::Arc;
 use std::sync::mpsc;
@@ -14,14 +16,15 @@ use tokio::sync::mpsc::unbounded_channel;
 
 use super::{Notifier, TrayAction, TrayContext, TrayUi, TrayUpdate, spawn_controller};
 
-/// トレイ常駐ハンドル。`close` でトレイを削除しスレッドの終了を待つ。
+/// Handle for the tray residency. `close` removes the tray and waits for the
+/// thread to exit.
 pub struct TrayHandle {
     notifier: Notifier,
     join: Option<JoinHandle<()>>,
 }
 
 impl TrayHandle {
-    /// トレイを削除し、トレイスレッドの終了を待つ。
+    /// Remove the tray and wait for the tray thread to exit.
     pub fn close(mut self) {
         if self.join.is_some() {
             (self.notifier)(TrayUpdate::Close);
@@ -35,13 +38,14 @@ impl TrayHandle {
 impl Drop for TrayHandle {
     fn drop(&mut self) {
         if self.join.is_some() {
-            // 明示的な `close` なしで破棄された場合もトレイを消す (join はしない)
+            // Also remove the tray when dropped without an explicit `close`
+            // (without joining)
             (self.notifier)(TrayUpdate::Close);
         }
     }
 }
 
-/// トレイ常駐を開始する (専用スレッド + チャネル駆動ループ)。
+/// Start the tray residency (dedicated thread + channel-driven loop).
 pub fn spawn(handle: &tokio::runtime::Handle, ctx: TrayContext) -> Result<TrayHandle> {
     let (ready_tx, ready_rx) = mpsc::channel::<Result<(), String>>();
     let (update_tx, mut update_rx) = unbounded_channel::<TrayUpdate>();
@@ -61,8 +65,8 @@ pub fn spawn(handle: &tokio::runtime::Handle, ctx: TrayContext) -> Result<TrayHa
             if ready_tx.send(Ok(())).is_err() {
                 return;
             }
-            // ksni は自前のワーカースレッドで D-Bus を処理するため、
-            // ここは更新待ちのブロッキングループでよい (起床処理は不要)。
+            // ksni handles D-Bus on its own worker thread, so a blocking loop
+            // waiting for updates is fine here (no wake-up handling needed).
             while let Some(update) = update_rx.blocking_recv() {
                 if !ui.apply(update) {
                     break;

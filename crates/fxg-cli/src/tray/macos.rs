@@ -1,12 +1,12 @@
-//! macOS: メインスレッドで tao ループを回すバックエンド。
+//! macOS: backend that runs the tao loop on the main thread.
 //!
-//! `NSStatusItem` は**メインスレッドのイベントループが動作している状態**で
-//! 作成・操作する必要があるため、`fxg daemon --tray` ではメインスレッドを
-//! tao (NSApplication ループ) に明け渡し、デーモン本体 (tokio ランタイム) を
-//! ワーカースレッドで起動する (`main.rs` の早期分岐から呼ばれる)。
+//! `NSStatusItem` must be created and driven **while the main thread's event
+//! loop is running**, so `fxg daemon --tray` hands the main thread over to tao
+//! (the NSApplication loop) and starts the daemon body (tokio runtime) on a
+//! worker thread (called from the early branch in `main.rs`).
 //!
-//! トレイが作成できない環境 (ウィンドウサーバーなし等) では警告のみで
-//! デーモンはそのまま稼働を続ける。
+//! In environments where the tray cannot be created (no window server, etc.) the
+//! daemon logs a warning and keeps running without it.
 
 use std::process::ExitCode;
 use std::sync::Arc;
@@ -22,26 +22,30 @@ use super::{Notifier, TrayAction, TrayContext, TrayUi, TrayUpdate, spawn_control
 use crate::Commands;
 use crate::commands::DaemonArgs;
 
-/// 起動済みデーモンのハンドル群 (ワーカースレッド → メインスレッドへ渡す)。
+/// Handles of the started daemon (passed from the worker thread to the main
+/// thread).
 type ReadyPayload = (DaemonState, ShutdownHandle, tokio::runtime::Handle);
 
-/// メインループへ送るユーザーイベント。
+/// User event sent to the main loop.
 enum UserEvent {
-    /// トレイ更新が届いた
+    /// A tray update arrived
     Tray,
-    /// デーモンが停止した (プロセス終了コード)
+    /// The daemon stopped (process exit code)
     DaemonStopped(i32),
 }
 
-/// `fxg daemon --tray` (macOS) ならメインスレッドでトレイ付きデーモンを起動する。
+/// If this is `fxg daemon --tray` (macOS), start the daemon with a tray on the
+/// main thread.
 ///
-/// `Some` を返した場合は呼び出し元 (`main`) がその終了コードで終了する。
-/// `None` なら通常経路 (tokio ランタイムをメインスレッドで実行) に任せる。
+/// When it returns `Some`, the caller (`main`) exits with that exit code. When
+/// it returns `None`, the normal path (tokio runtime on the main thread)
+/// handles the command.
 pub fn run_daemon_if_requested(command: &Commands) -> Option<ExitCode> {
     let Commands::Daemon(args) = command else {
         return None;
     };
-    // 設定が読めない場合は通常経路に任せる (エラー表示はそちらで行う)
+    // If the config cannot be loaded, leave it to the normal path (which reports
+    // the error)
     let global =
         fxg_protocol::config::GlobalConfig::load(&fxg_protocol::config::process_env).ok()?;
     if !args.tray_requested(global.node.tray) {
@@ -50,14 +54,15 @@ pub fn run_daemon_if_requested(command: &Commands) -> Option<ExitCode> {
     Some(run_daemon_with_tray(args, &global))
 }
 
-/// `fxg daemon --tray` (macOS) を実行する。デーモン停止まで戻らない。
+/// Run `fxg daemon --tray` (macOS). Does not return until the daemon stops.
 fn run_daemon_with_tray(
     args: &DaemonArgs,
     global: &fxg_protocol::config::GlobalConfig,
 ) -> ExitCode {
     let config = args.daemon_config_from(global);
 
-    // デーモン本体 (tokio) はワーカースレッドで起動する (メインスレッドは tao が占有)
+    // The daemon body (tokio) starts on a worker thread (tao owns the main
+    // thread)
     let (ready_tx, ready_rx) = mpsc::channel::<Result<ReadyPayload, String>>();
     let worker = match std::thread::Builder::new()
         .name("fxg-daemon".to_owned())
@@ -111,7 +116,7 @@ fn run_daemon_with_tray(
     let event_loop = EventLoopBuilder::<UserEvent>::with_user_event().build();
 
     let proxy = event_loop.create_proxy();
-    // ワーカースレッド (デーモン) の終了をメインループへ通知する
+    // Notify the main loop when the worker thread (daemon) exits
     let proxy_done = proxy.clone();
     std::thread::spawn(move || {
         let code = worker.join().unwrap_or(1);
@@ -127,7 +132,7 @@ fn run_daemon_with_tray(
         *control_flow = ControlFlow::Wait;
         match event {
             Event::NewEvents(StartCause::Init) => {
-                // トレイはイベントループが動作し始めてから作成する必要がある
+                // The tray must be created after the event loop starts running
                 let ctx = TrayContext {
                     state: state.clone(),
                     shutdown: shutdown.clone(),

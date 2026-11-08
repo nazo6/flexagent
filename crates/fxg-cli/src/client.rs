@@ -1,8 +1,8 @@
-//! デーモン IPC クライアントと CLI 出力ヘルパー。
+//! Daemon IPC client and CLI output helpers.
 //!
-//! `fxg` CLI はローカルIPC (`fxg daemon`) 経由でノードを操作する
-//! (設計: `docs/03-protocol-and-api.md` §4)。デーモンが起動していない場合は
-//! 起動方法を案内するエラーを返す。
+//! The `fxg` CLI drives the node through local IPC (`fxg daemon`)
+//! (design: `docs/03-protocol-and-api.md` §4). When the daemon is not running
+//! it returns an error that explains how to start it.
 
 use std::path::Path;
 
@@ -18,18 +18,18 @@ use fxg_protocol::ipc::{
     IpcClientMessage, IpcResult, IpcServerMessage, ProjectInfo, SessionDetail,
 };
 
-/// デーモン (`fxg daemon`) への IPC クライアント。
+/// IPC client for the daemon (`fxg daemon`).
 pub struct DaemonClient {
     client: IpcClient,
     request_seq: u64,
 }
 
 impl DaemonClient {
-    /// ローカルIPCエンドポイントへ接続する。
+    /// Connect to the local IPC endpoint.
     pub async fn connect() -> Result<Self> {
         let endpoint = fxg_node::ipc_endpoint(&process_env);
         let client = IpcClient::connect(&endpoint).await.with_context(|| {
-            format!("デーモンに接続できません ({endpoint})。先に `fxg daemon` を起動してください")
+            format!("cannot connect to the daemon ({endpoint}); start `fxg daemon` first")
         })?;
         Ok(Self {
             client,
@@ -212,9 +212,9 @@ impl DaemonClient {
         }
     }
 
-    /// `fxg session archive` / `unarchive` — アーカイブ/復元する。
+    /// `fxg session archive` / `unarchive` — archive or restore a session.
     ///
-    /// 戻り値はアーカイブ日時 (Unix epoch ms。復元時は `None`)。
+    /// Returns the archive timestamp (Unix epoch ms; `None` when restored).
     pub async fn archive_session(
         &mut self,
         session_id: &str,
@@ -234,7 +234,7 @@ impl DaemonClient {
         }
     }
 
-    /// `fxg session delete` — セッションを削除する (イベント本文をパージ。復元不能)。
+    /// `fxg session delete` — delete a session (purges event bodies; irreversible).
     pub async fn delete_session(&mut self, session_id: &str) -> Result<()> {
         let command_id = self.command_id();
         let result = self
@@ -276,10 +276,10 @@ impl DaemonClient {
         }
     }
 
-    /// `fxg git-askpass` (GIT_ASKPASS ヘルパー。Git Credential Proxy)
+    /// `fxg git-askpass` (GIT_ASKPASS helper; Git credential proxy)
     ///
-    /// `(username, token, error)` を返す。一時VMではトークンはオンメモリのみで
-    /// 扱われ、ディスクには保存されない (設計: docs/01 §6.4)。
+    /// Returns `(username, token, error)`. In an ephemeral VM the token is kept
+    /// in memory only and never written to disk (design: docs/01 §6.4).
     pub async fn git_credential(
         &mut self,
         prompt: &str,
@@ -301,7 +301,7 @@ impl DaemonClient {
         }
     }
 
-    /// `fxg run <agent>` の新規セッション開始。
+    /// Start a new session for `fxg run <agent>`.
     pub async fn ensure_session(
         &mut self,
         cwd: &Path,
@@ -325,7 +325,7 @@ impl DaemonClient {
         }
     }
 
-    /// `fxg session prompt` (ヘッドレス送信)。
+    /// `fxg session prompt` (headless send).
     pub async fn send_prompt(
         &mut self,
         session_id: &str,
@@ -345,7 +345,7 @@ impl DaemonClient {
         Ok(())
     }
 
-    /// `fxg inbox approve` / `fxg inbox reject`。
+    /// `fxg inbox approve` / `fxg inbox reject`.
     pub async fn respond_permission(
         &mut self,
         session_id: &str,
@@ -366,7 +366,7 @@ impl DaemonClient {
         Ok(())
     }
 
-    /// モード切替 / 設定変更 / キャンセル / Kill (`fxg session stop|kill`)。
+    /// Mode switch / config change / cancel / kill (`fxg session stop|kill`).
     pub async fn control_session(
         &mut self,
         session_id: &str,
@@ -416,7 +416,7 @@ impl DaemonClient {
         }
     }
 
-    /// `fxg inbox list` の質問 (elicitation) 一覧。
+    /// List of the questions (elicitations) from `fxg inbox list`.
     pub async fn inbox_elicitations(&mut self) -> Result<Vec<ElicitationRequestEntry>> {
         let command_id = self.command_id();
         let result = self
@@ -428,7 +428,7 @@ impl DaemonClient {
         }
     }
 
-    /// `fxg inbox answer` (elicitation への応答)。
+    /// `fxg inbox answer` (answer an elicitation).
     pub async fn respond_elicitation(
         &mut self,
         session_id: &str,
@@ -507,10 +507,10 @@ impl DaemonClient {
         }
     }
 
-    /// `fxg session resume` — 停止済みセッションを再開する。
+    /// `fxg session resume` — resume a stopped session.
     ///
-    /// 戻り値はネイティブ復元成否。`context_restored = false`
-    /// の場合は履歴 Replay で継続されている。
+    /// Returns whether native context was restored. When `context_restored =
+    /// false` the session continues by replaying its history.
     pub async fn resume_session(&mut self, session_id: &str, force_replay: bool) -> Result<bool> {
         let command_id = self.command_id();
         let result = self
@@ -529,7 +529,8 @@ impl DaemonClient {
     }
 }
 
-/// 単純な成功応答 (`Ack` / 非同期コマンドの受理) をメッセージへ正規化する。
+/// Normalize a simple success response (`Ack` / acceptance of an async
+/// command) into an optional message.
 fn ack_message(result: IpcResult) -> Result<Option<String>> {
     match result {
         IpcResult::Ack { message } => Ok(message),
@@ -542,7 +543,7 @@ fn path_to_string(path: &Path) -> String {
     path.to_string_lossy().into_owned()
 }
 
-/// ヘッダと行から簡易テーブルを標準出力へ表示する。
+/// Print a simple table made of a header and rows to stdout.
 pub fn print_table(headers: &[&str], rows: &[Vec<String>]) {
     let mut widths: Vec<usize> = headers
         .iter()
@@ -576,9 +577,10 @@ pub fn print_table(headers: &[&str], rows: &[Vec<String>]) {
     }
 }
 
-/// Unix epoch ミリ秒を `YYYY-MM-DD HH:MM:SSZ` (UTC) へ整形する。
+/// Format Unix epoch milliseconds as `YYYY-MM-DD HH:MM:SSZ` (UTC).
 ///
-/// CLI の一覧表示用の最小実装 (chrono 等の日時クレートを追加しない)。
+/// Minimal implementation for CLI listings (avoids adding a date-time crate
+/// such as chrono).
 pub fn format_unix_ms_utc(ms: i64) -> String {
     let total_seconds = ms.div_euclid(1000);
     let seconds_of_day = total_seconds.rem_euclid(86_400);
@@ -591,7 +593,8 @@ pub fn format_unix_ms_utc(ms: i64) -> String {
     format!("{year:04}-{month:02}-{day:02} {hour:02}:{minute:02}:{second:02}Z")
 }
 
-/// 1970-01-01 からの日数から (年, 月, 日) を求める (Howard Hinnant の civil_from_days)。
+/// Compute (year, month, day) from days since 1970-01-01 (Howard Hinnant's
+/// civil_from_days).
 fn civil_from_days(days: i64) -> (i64, u32, u32) {
     let z = days + 719_468;
     let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
@@ -606,7 +609,8 @@ fn civil_from_days(days: i64) -> (i64, u32, u32) {
     (year, month, day)
 }
 
-/// 文字数を制限して末尾を省略する。
+/// Truncate a string to a maximum number of characters, marking the cut with
+/// an ellipsis.
 pub fn truncate(text: &str, max_chars: usize) -> String {
     if text.chars().count() <= max_chars {
         return text.to_owned();
@@ -615,7 +619,7 @@ pub fn truncate(text: &str, max_chars: usize) -> String {
     format!("{head}…")
 }
 
-/// セッションIDを短縮表示する (`0195f0ab-1234-...` → `0195f0ab`)。
+/// Render a session ID in short form (`0195f0ab-1234-...` → `0195f0ab`).
 pub fn short_id(id: &str) -> String {
     id.chars().take(8).collect()
 }
@@ -635,7 +639,7 @@ mod tests {
             format_unix_ms_utc(1_752_000_000_000),
             "2025-07-08 18:40:00Z"
         );
-        // 負の epoch (1970 以前) も破綻しない
+        // Negative epochs (before 1970) must not break either.
         assert_eq!(format_unix_ms_utc(-86_400_000), "1969-12-31 00:00:00Z");
     }
 
@@ -643,7 +647,7 @@ mod tests {
     fn truncates_long_text_on_char_boundary() {
         assert_eq!(truncate("short", 10), "short");
         assert_eq!(truncate("abcdefghij", 5), "abcd…");
-        assert_eq!(truncate("日本語テキスト", 4), "日本語…");
+        assert_eq!(truncate("日本語テキスト", 4), "日本語…"); // allow-japanese: multibyte truncation
     }
 
     #[test]
@@ -661,7 +665,8 @@ mod tests {
             .expect("ack"),
             Some("done".to_owned())
         );
-        // 非同期コマンドの受理 (`SendPrompt` / `RespondPermission` / `ControlSession`)
+        // Acceptance of an async command (`SendPrompt` / `RespondPermission` /
+        // `ControlSession`)
         assert_eq!(
             ack_message(IpcResult::CommandAccepted {
                 session_id: Some("s1".to_owned()),
@@ -669,7 +674,7 @@ mod tests {
             .expect("command accepted"),
             None
         );
-        // それ以外の応答は想定外として失敗させる
+        // Any other response is unexpected and must fail.
         assert!(
             ack_message(IpcResult::Inbox {
                 requests: Vec::new(),

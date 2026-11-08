@@ -1,8 +1,8 @@
-//! サブコマンドの引数定義と実行処理。
+//! Subcommand argument definitions and their execution logic.
 //!
-//! CLI の宣言 (`usage` の derive) が単一のソースであり、`__usage_spec__` から
-//! KDL spec・シェル補完・manpage・Markdown リファレンスを生成できる
-//! (設計: `docs/05-cli-and-pwa-ui.md` §1)。
+//! The CLI declaration (`usage` derives) is the single source of truth, and the
+//! KDL spec, shell completions, manpage and Markdown reference are generated
+//! from `__usage_spec__` (design: `docs/05-cli-and-pwa-ui.md` §1).
 
 use std::path::{Path, PathBuf};
 
@@ -21,52 +21,52 @@ use crate::client::{DaemonClient, format_unix_ms_utc, print_table, short_id, tru
 // fxg daemon
 // ----------------------------------------------------------------------
 
-/// `fxg daemon` の引数。
+/// Arguments of `fxg daemon`.
 #[derive(Debug, Args)]
 pub struct DaemonArgs {
-    /// ローカルHTTP/WSサーバーのバインド先 (既定: 127.0.0.1:7860)
+    /// Bind address of the local HTTP/WS server (default: 127.0.0.1:7860)
     #[usage(long)]
     listen: Option<String>,
-    /// 中央サーバーの Node Hub WebSocket URL (Outbox 同期。未指定時はスタンドアロン)
+    /// Node Hub WebSocket URL of the central server (Outbox sync; standalone when unset)
     #[usage(long)]
     server_url: Option<String>,
-    /// リモート (中央サーバー経由) からの Web PTY 起動を許可する
+    /// Allow Web PTY launches from remote clients (through the central server)
     #[usage(long)]
     allow_remote_pty: bool,
-    /// 標準入出力パイプ (JSON Lines) モード (一時VM。プロビジョナーが起動する)
+    /// Standard I/O pipe (JSON Lines) mode (ephemeral VM; launched by a provisioner)
     #[usage(long)]
     stdio: bool,
-    /// 一時VMモード (Drain 時の Git バンドル退避を有効化)
+    /// Ephemeral VM mode (enables Git bundle backup on drain)
     #[usage(long)]
     ephemeral: bool,
-    /// `--stdio` 時の初期対象ディレクトリ (クローン済みワークスペース)
+    /// Initial target directory in `--stdio` mode (the cloned workspace)
     #[usage(long)]
     workspace: Option<String>,
-    /// タスクトレイに常駐する (状態表示 / 自動起動 / Web UI / 終了)
+    /// Reside in the task tray (status / auto-start / Web UI / quit)
     #[usage(long)]
     tray: bool,
-    /// `[node] tray` で有効化されたトレイ常駐を無効にする
+    /// Disable the tray residency enabled by `[node] tray`
     #[usage(long)]
     no_tray: bool,
-    /// ログレベル (trace | debug | info | warn | error)
+    /// Log level (trace | debug | info | warn | error)
     #[usage(long)]
     pub(crate) log_level: Option<String>,
-    /// ログファイル出力先 (未指定時は ~/.flexagent/logs/daemon.log)
+    /// Log file destination (default: ~/.flexagent/logs/daemon.log)
     #[usage(long)]
     pub(crate) log_file: Option<String>,
-    /// ログファイルへの出力を無効化する
+    /// Disable writing to the log file
     #[usage(long)]
     pub(crate) no_log_file: bool,
-    /// ログ出力フォーマット (text | json)
+    /// Log output format (text | json)
     #[usage(long)]
     pub(crate) log_format: Option<String>,
-    /// ANSI カラー出力を無効化する
+    /// Disable ANSI color output
     #[usage(long)]
     pub(crate) no_color: bool,
 }
 
 impl DaemonArgs {
-    /// ロギング設定オプションを構築する。
+    /// Build the logging options.
     pub(crate) fn logging_options(&self) -> crate::logging::LoggingOptions {
         crate::logging::LoggingOptions {
             log_level: self.log_level.clone(),
@@ -83,7 +83,7 @@ impl DaemonArgs {
             is_stdio: self.stdio,
         }
     }
-    /// 読み込み済みのグローバル設定からデーモン設定を組み立てる。
+    /// Build the daemon config from the loaded global config.
     pub(crate) fn daemon_config_from(
         &self,
         global: &fxg_protocol::config::GlobalConfig,
@@ -104,7 +104,7 @@ impl DaemonArgs {
             config.listen_addr = listen;
         }
         config.allow_remote_pty = self.allow_remote_pty || global.node.allow_remote_pty;
-        // Outbox 同期 (中央サーバー接続。未指定時はスタンドアロン・ローカルのみ)
+        // Outbox sync (central server connection; standalone / local only when unset)
         config.central_server_url = self
             .server_url
             .clone()
@@ -113,7 +113,8 @@ impl DaemonArgs {
         config
     }
 
-    /// トレイ常駐が要求されているか (`--stdio` / `--ephemeral` では常に無効)。
+    /// Whether tray residency is requested (always disabled for `--stdio` /
+    /// `--ephemeral`).
     pub(crate) fn tray_requested(&self, configured: Option<bool>) -> bool {
         if self.stdio || self.ephemeral || self.workspace.is_some() {
             return false;
@@ -132,7 +133,7 @@ impl usage::RunAsync for DaemonArgs {
 
         if self.stdio || self.ephemeral || self.workspace.is_some() {
             if !self.stdio {
-                bail!("--ephemeral / --workspace は --stdio と併用してください");
+                bail!("--ephemeral / --workspace require --stdio");
             }
             let mut config = fxg_node::daemon::DaemonConfig::from_env(&env);
             if let Some(node_id) = global.node.node_id.clone() {
@@ -142,7 +143,7 @@ impl usage::RunAsync for DaemonArgs {
                 config.node_name = name;
             }
             config.allow_remote_pty = self.allow_remote_pty || global.node.allow_remote_pty;
-            // stdio ではサーバーがパイプを所有するため、WS 同期設定は使用しない
+            // In stdio mode the server owns the pipe, so WS sync settings are unused
             config.central_server_url = None;
             config.node_token = None;
 
@@ -183,7 +184,8 @@ impl usage::RunAsync for DaemonArgs {
             use_color,
         );
 
-        // トレイ常駐 (macOS は main.rs の早期分岐でメインスレッドにて処理される)
+        // Tray residency (on macOS it is handled on the main thread by the early
+        // branch in main.rs)
         #[cfg(not(target_os = "macos"))]
         let tray = if tray_enabled {
             start_tray(&daemon)
@@ -202,7 +204,7 @@ impl usage::RunAsync for DaemonArgs {
     }
 }
 
-/// トレイ常駐を開始する (失敗は警告のみでデーモンは継続する)。
+/// Start the tray residency (failures only warn; the daemon keeps running).
 #[cfg(not(target_os = "macos"))]
 fn start_tray(daemon: &fxg_node::daemon::NodeDaemon) -> Option<crate::tray::TrayHandle> {
     let ctx = crate::tray::TrayContext {
@@ -225,34 +227,34 @@ fn start_tray(daemon: &fxg_node::daemon::NodeDaemon) -> Option<crate::tray::Tray
 // fxg server
 // ----------------------------------------------------------------------
 
-/// `fxg server` の引数。
+/// Arguments of `fxg server`.
 #[derive(Debug, Args)]
 pub struct ServerArgs {
-    /// HTTP/WS バインド先 (既定: 0.0.0.0:8080)
+    /// HTTP/WS bind address (default: 0.0.0.0:8080)
     #[usage(long)]
     listen: Option<String>,
-    /// ポート番号上書き (`--listen` より優先)
+    /// Port override (takes precedence over `--listen`)
     #[usage(long)]
     port: Option<u16>,
-    /// ログレベル (trace | debug | info | warn | error)
+    /// Log level (trace | debug | info | warn | error)
     #[usage(long)]
     pub(crate) log_level: Option<String>,
-    /// ログファイル出力先 (未指定時は ~/.flexagent/logs/server.log)
+    /// Log file destination (default: ~/.flexagent/logs/server.log)
     #[usage(long)]
     pub(crate) log_file: Option<String>,
-    /// ログファイルへの出力を無効化する
+    /// Disable writing to the log file
     #[usage(long)]
     pub(crate) no_log_file: bool,
-    /// ログ出力フォーマット (text | json)
+    /// Log output format (text | json)
     #[usage(long)]
     pub(crate) log_format: Option<String>,
-    /// ANSI カラー出力を無効化する
+    /// Disable ANSI color output
     #[usage(long)]
     pub(crate) no_color: bool,
 }
 
 impl ServerArgs {
-    /// ロギング設定オプションを構築する。
+    /// Build the logging options.
     pub(crate) fn logging_options(&self) -> crate::logging::LoggingOptions {
         crate::logging::LoggingOptions {
             log_level: self.log_level.clone(),
@@ -329,12 +331,12 @@ impl usage::RunAsync for ServerArgs {
 // fxg service
 // ----------------------------------------------------------------------
 
-/// `fxg service <action>` の引数。
+/// Arguments of `fxg service <action>`.
 #[derive(Debug, Args)]
 pub struct ServiceArgs {
-    /// 実行する操作: install | uninstall | start | stop | restart | status
+    /// Operation to run: install | uninstall | start | stop | restart | status
     action: String,
-    /// `daemon` ではなく中央サーバー (`server`) を対象にする
+    /// Target the central server (`server`) instead of the `daemon`
     #[usage(long)]
     server: bool,
 }
@@ -357,10 +359,10 @@ impl usage::RunAsync for ServiceArgs {
 // fxg web
 // ----------------------------------------------------------------------
 
-/// `fxg web` の引数。
+/// Arguments of `fxg web`.
 #[derive(Debug, Args)]
 pub struct WebArgs {
-    /// ローカルノードではなく中央サーバー URL を開く
+    /// Open the central server URL instead of the local node
     #[usage(long)]
     server: bool,
 }
@@ -374,13 +376,13 @@ impl usage::RunAsync for WebArgs {
             .context("failed to load ~/.flexagent/config.toml")?;
 
         let url = if self.server {
-            // 中央サーバーはローカルに認証トークンを持たないため、URL のみ開いて
-            // 初回トークン入力ダイアログに委ねる (docs/05 §1.1)
+            // The central server keeps no local auth token, so open the URL only
+            // and leave it to the first-run token prompt (docs/05 §1.1)
             let server_url = global
                 .node
                 .central_server_url
                 .clone()
-                .context("node.central_server_url が config.toml に設定されていません")?;
+                .context("node.central_server_url is not set in config.toml")?;
             crate::server_api::central_http_url(&server_url)?
         } else {
             let token = fxg_server::api::auth::load_or_create_token(
@@ -402,12 +404,13 @@ impl usage::RunAsync for WebArgs {
     }
 }
 
-/// ローカル Web UI のトークン付き URL を組み立てる (`fxg web` / トレイで共用)。
+/// Build the tokenized URL of the local Web UI (shared by `fxg web` and the
+/// tray).
 pub(crate) fn local_web_url(listen_addr: &str, token: &str) -> String {
     format!("http://{listen_addr}/?token={token}")
 }
 
-/// セッション専用のトークン付き Web UI URL を組み立てる。
+/// Build the tokenized Web UI URL for a specific session.
 pub(crate) fn local_session_web_url(session_id: &str) -> Result<String> {
     let env = fxg_protocol::config::process_env;
     let global = fxg_protocol::config::GlobalConfig::load(&env).unwrap_or_default();
@@ -425,7 +428,8 @@ pub(crate) fn local_session_web_url(session_id: &str) -> Result<String> {
     ))
 }
 
-/// セッションIDと Web UI URL を表示し、指定があればブラウザで開く。
+/// Print the session ID and Web UI URL, and open it in a browser unless
+/// disabled.
 pub(crate) fn open_session_url(session_id: &str, no_open: bool) -> Result<()> {
     match local_session_web_url(session_id) {
         Ok(url) => {
@@ -446,33 +450,34 @@ pub(crate) fn open_session_url(session_id: &str, no_open: bool) -> Result<()> {
 // fxg run
 // ----------------------------------------------------------------------
 
-/// `fxg run <agent>` の引数。
+/// Arguments of `fxg run <agent>`.
 #[derive(Debug, Args)]
 pub struct RunArgs {
-    /// エージェントID (`opencode` / `claude` 等)
+    /// Agent ID (`opencode` / `claude`, etc.)
     agent: String,
-    /// 初期プロンプトを送信する
+    /// Send an initial prompt
     #[usage(short = 'p', long)]
     prompt: Option<String>,
-    /// ブラウザを開かずセッションIDのみ出力する
+    /// Print only the session ID and do not open a browser
     #[usage(short = 'd', long)]
     detach: bool,
-    /// 起動後にデフォルトブラウザで Web UI を開かない
+    /// Do not open the Web UI in the default browser after start
     #[usage(long)]
     no_open: bool,
-    /// 初期モード (`code` / `plan` 等)
+    /// Initial mode (`code` / `plan`, etc.)
     #[usage(long)]
     mode: Option<String>,
-    /// Worktree を作成/再利用して起動する
+    /// Create or reuse a worktree for the session
     #[usage(short = 'w', long)]
     worktree: Option<String>,
-    /// Worktree 新規作成時のベースブランチ
+    /// Base branch used when creating a new worktree
     #[usage(long)]
     base: Option<String>,
-    /// 一時VMプロビジョナーで起動する (中央サーバーホスト上で起動。中央サーバー必須)
+    /// Start through an ephemeral VM provisioner (runs on the central server
+    /// host; requires the central server)
     #[usage(long)]
     provisioner: Option<String>,
-    /// エージェントプロセスへのパススルー引数
+    /// Arguments passed through to the agent process
     #[usage(value_name = "EXTRA_ARGS", double_dash = "required")]
     extra_args: Vec<String>,
 }
@@ -484,8 +489,8 @@ impl usage::RunAsync for RunArgs {
         let env = fxg_protocol::config::process_env;
         let cwd = std::env::current_dir().context("failed to resolve current directory")?;
 
-        // 一時VMプロビジョナー: 中央サーバー API 経由で起動する
-        // (プロビジョナーはサーバーホスト上で子プロセスとして起動されるため)
+        // Ephemeral VM provisioner: start through the central server API
+        // (the provisioner runs as a child process on the server host)
         if let Some(provisioner) = &self.provisioner {
             return run_with_provisioner(&self, provisioner, &cwd, &env).await;
         }
@@ -512,7 +517,7 @@ impl usage::RunAsync for RunArgs {
     }
 }
 
-/// `fxg run <agent> --provisioner <name>` (中央サーバー API 経由)。
+/// `fxg run <agent> --provisioner <name>` (through the central server API).
 async fn run_with_provisioner(
     args: &RunArgs,
     provisioner: &str,
@@ -521,12 +526,14 @@ async fn run_with_provisioner(
 ) -> Result<()> {
     let server = crate::server_api::ServerClient::from_config(env)?;
 
-    // カレントディレクトリの論理プロジェクトを解決する (Git remote が正データ)
+    // Resolve the logical project of the current directory (the Git remote is
+    // the source of truth)
     let project = fxg_node::resolve_project(cwd, "cli")
         .await
-        .context("failed to resolve logical project (Git リポジトリ内で実行してください)")?;
+        .context("failed to resolve logical project (run inside a Git repository)")?;
 
-    // `-w/--worktree`: 一時VMでは新規 Worktree ではなくクローン先ブランチとして使う
+    // `-w/--worktree`: in an ephemeral VM this selects the branch to clone
+    // instead of creating a new worktree
     let worktree = match (&args.worktree, &args.base) {
         (Some(branch), base) => Some(fxg_protocol::client_api::WorktreeSpec {
             branch: branch.clone(),
@@ -555,7 +562,7 @@ async fn run_with_provisioner(
     };
     let response = server.create_session(&request).await?;
     eprintln!(
-        "provisioning session {} via '{provisioner}' (bootstrap ログは Web UI / `fxg provisioners test` で確認できます)",
+        "provisioning session {} via '{provisioner}' (bootstrap logs are available in the Web UI / `fxg provisioners test`)",
         response.session_id
     );
     if args.detach {
@@ -578,20 +585,20 @@ pub struct ProvisionersArgs {
     command: ProvisionersCommands,
 }
 
-/// プロビジョナー管理サブコマンド。
+/// Provisioner management subcommands.
 #[derive(Debug, usage::Subcommands)]
 #[usage(run_async)]
 pub enum ProvisionersCommands {
-    /// 設定ファイルに定義された一時VMプロビジョナー一覧を表示する
+    /// List the ephemeral VM provisioners defined in the config file
     List(ProvisionersListArgs),
-    /// プロビジョナーの起動・`fxg daemon --stdio` ハンドシェイク疎通を検証する
+    /// Verify that a provisioner starts and completes the `fxg daemon --stdio` handshake
     Test(ProvisionersTestArgs),
 }
 
 /// `fxg provisioners list`
 #[derive(Debug, Args)]
 pub struct ProvisionersListArgs {
-    /// JSON 形式で出力する
+    /// Output as JSON
     #[usage(long)]
     json: bool,
 }
@@ -622,7 +629,7 @@ impl usage::RunAsync for ProvisionersListArgs {
         }
         if provisioners.is_empty() {
             println!(
-                "(プロビジョナー未定義。~/.flexagent/config.toml の [provisioners.<name>] で定義します)"
+                "(no provisioners defined; add [provisioners.<name>] to ~/.flexagent/config.toml)"
             );
             return Ok(());
         }
@@ -648,7 +655,7 @@ impl usage::RunAsync for ProvisionersListArgs {
 /// `fxg provisioners test <name>`
 #[derive(Debug, Args)]
 pub struct ProvisionersTestArgs {
-    /// 検証するプロビジョナー名
+    /// Name of the provisioner to verify
     name: String,
 }
 
@@ -659,7 +666,7 @@ impl usage::RunAsync for ProvisionersTestArgs {
         let env = fxg_protocol::config::process_env;
         let server = crate::server_api::ServerClient::from_config(&env)?;
         eprintln!(
-            "testing provisioner '{}' via {} (bootstrap の完了まで数分かかる場合があります)",
+            "testing provisioner '{}' via {} (bootstrap can take a few minutes)",
             self.name,
             server.base_url()
         );
@@ -687,16 +694,17 @@ impl usage::RunAsync for ProvisionersTestArgs {
 // fxg bootstrap-workspace
 // ----------------------------------------------------------------------
 
-/// `fxg bootstrap-workspace` の引数 (一時VM内でプロビジョナーが実行する)。
+/// Arguments of `fxg bootstrap-workspace` (run by the provisioner inside an
+/// ephemeral VM).
 #[derive(Debug, Args)]
 pub struct BootstrapWorkspaceArgs {
-    /// クローン元 Git URL
+    /// Git URL to clone from
     #[usage(long)]
     repo: String,
-    /// 対象ブランチ (省略時はリモートの既定ブランチ)
+    /// Target branch (defaults to the remote's default branch)
     #[usage(long)]
     branch: Option<String>,
-    /// クローン先ディレクトリ (既定: /tmp/workspace)
+    /// Destination directory (default: /tmp/workspace)
     #[usage(long)]
     dir: Option<String>,
 }
@@ -721,7 +729,7 @@ impl usage::RunAsync for BootstrapWorkspaceArgs {
         let outcome = fxg_node::bootstrap::bootstrap_workspace(options)
             .await
             .context("fxg bootstrap-workspace failed")?;
-        // stdout はプロトコル専用のため、結果も stderr に出力する
+        // stdout is reserved for the protocol, so the result goes to stderr too
         eprintln!(
             "[fxg-bootstrap] ready: {} (tools: {})",
             outcome.dir.display(),
@@ -732,13 +740,14 @@ impl usage::RunAsync for BootstrapWorkspaceArgs {
 }
 
 // ----------------------------------------------------------------------
-// fxg git-askpass (GIT_ASKPASS ヘルパー)
+// fxg git-askpass (GIT_ASKPASS helper)
 // ----------------------------------------------------------------------
 
-/// `fxg git-askpass` の引数 (`GIT_ASKPASS` として Git が呼び出す内部用コマンド)。
+/// Arguments of `fxg git-askpass` (an internal command Git invokes as
+/// `GIT_ASKPASS`).
 #[derive(Debug, Args)]
 pub struct GitAskpassArgs {
-    /// Git が渡すプロンプト文字列 (`Username for '...'` / `Password for '...'`)
+    /// Prompt string passed by Git (`Username for '...'` / `Password for '...'`)
     prompt: String,
 }
 
@@ -761,7 +770,8 @@ impl usage::RunAsync for GitAskpassArgs {
     }
 }
 
-/// Worktree を作成/再利用し、そのパスを返す (`fxg run -w` / `fxg session fork -w`)。
+/// Create or reuse a worktree and return its path (`fxg run -w` /
+/// `fxg session fork -w`).
 async fn create_worktree(
     client: &mut DaemonClient,
     cwd: &Path,
@@ -790,22 +800,23 @@ async fn create_worktree(
 // fxg ps / fxg session list
 // ----------------------------------------------------------------------
 
-/// セッション一覧の表示オプション (`fxg ps` と `fxg session list` で共通)。
+/// Display options for the session list (shared by `fxg ps` and
+/// `fxg session list`).
 #[derive(Debug, Args)]
 pub struct SessionListArgs {
-    /// 停止済みセッションも含めて表示する
+    /// Include stopped sessions
     #[usage(short = 'a', long)]
     all: bool,
-    /// アーカイブ済みセッションも含めて表示する
+    /// Include archived sessions
     #[usage(long)]
     archived: bool,
-    /// 論理プロジェクトIDで絞り込む
+    /// Filter by logical project ID
     #[usage(long)]
     project: Option<String>,
-    /// ノードIDで絞り込む
+    /// Filter by node ID
     #[usage(long)]
     node: Option<String>,
-    /// JSON 形式で出力する
+    /// Output as JSON
     #[usage(long)]
     json: bool,
 }
@@ -836,7 +847,7 @@ impl usage::RunAsync for SessionListArgs {
         }
 
         if sessions.is_empty() {
-            println!("(セッションなし)");
+            println!("(no sessions)");
             return Ok(());
         }
 
@@ -873,43 +884,43 @@ pub struct SessionArgs {
     command: SessionCommands,
 }
 
-/// セッション管理サブコマンド。
+/// Session management subcommands.
 #[derive(Debug, usage::Subcommands)]
 #[usage(run_async)]
 pub enum SessionCommands {
-    /// セッション一覧を表示する
+    /// List sessions
     List(SessionListArgs),
-    /// セッション詳細・状態・イベント統計を表示する
+    /// Show session details, state and event statistics
     Show(SessionShowArgs),
-    /// 既存セッションへ非対話 (ヘッドレス) でプロンプトを送信する
+    /// Send a prompt to an existing session non-interactively (headless)
     Prompt(SessionPromptArgs),
-    /// 実行中ターンのキャンセル、またはセッションの正常停止
+    /// Cancel the running turn, or stop the session gracefully
     Stop(SessionStopArgs),
-    /// セッションの子プロセスツリーを強制終了する
+    /// Force-terminate the session's child process tree
     Kill(SessionKillArgs),
-    /// 指定ターン時点へファイルと会話を巻き戻す
+    /// Rewind files and conversation to the given turn
     Revert(SessionRevertArgs),
-    /// 停止済みセッションを会話コンテキストを維持したまま再開する
+    /// Resume a stopped session while keeping its conversation context
     Resume(SessionResumeArgs),
-    /// 指定時点から会話を分岐して新規セッションを作成する
+    /// Create a new session by forking the conversation from the given point
     Fork(SessionForkArgs),
-    /// セッションを一覧からアーカイブする (復元可能)
+    /// Archive a session from the list (restorable)
     Archive(SessionArchiveArgs),
-    /// アーカイブ済みセッションを一覧へ戻す
+    /// Move an archived session back into the list
     Unarchive(SessionUnarchiveArgs),
-    /// セッションを削除する (会話ログを消去。復元不能)
+    /// Delete a session (purges the conversation log; irreversible)
     Delete(SessionDeleteArgs),
 }
 
 /// `fxg session show <id>`
 #[derive(Debug, Args)]
 pub struct SessionShowArgs {
-    /// セッションID
+    /// Session ID
     session_id: String,
-    /// 表示する直近イベント数
+    /// Number of recent events to show
     #[usage(long, default = "20")]
     events: u32,
-    /// JSON 形式で出力する
+    /// Output as JSON
     #[usage(long)]
     json: bool,
 }
@@ -987,7 +998,7 @@ impl usage::RunAsync for SessionShowArgs {
         }
 
         if !detail.pending_permissions.is_empty() {
-            println!("\n承認待ち:");
+            println!("\nPending approvals:");
             let rows: Vec<Vec<String>> = detail
                 .pending_permissions
                 .iter()
@@ -1003,7 +1014,7 @@ impl usage::RunAsync for SessionShowArgs {
         }
 
         if !detail.recent_events.is_empty() {
-            println!("\n直近イベント:");
+            println!("\nRecent events:");
             for event in &detail.recent_events {
                 println!(
                     "  {:>5}  {}  {}",
@@ -1017,7 +1028,7 @@ impl usage::RunAsync for SessionShowArgs {
     }
 }
 
-/// イベントを CLI 表示用の 1 行へ要約する。
+/// Summarize an event into a single line for CLI display.
 fn describe_event(payload: &UnifiedEventPayload) -> String {
     match payload {
         UnifiedEventPayload::SessionCreated {
@@ -1116,11 +1127,11 @@ fn describe_event(payload: &UnifiedEventPayload) -> String {
 /// `fxg session prompt <id> <text>`
 #[derive(Debug, Args)]
 pub struct SessionPromptArgs {
-    /// セッションID
+    /// Session ID
     session_id: String,
-    /// 送信するプロンプト本文
+    /// Prompt text to send
     text: String,
-    /// ターン完了まで待機し、エージェントの出力を表示する
+    /// Wait for the turn to finish and print the agent output
     #[usage(long)]
     wait: bool,
 }
@@ -1141,8 +1152,8 @@ impl usage::RunAsync for SessionPromptArgs {
     }
 }
 
-/// ターン完了 (`idle`) までイベントをポーリングして出力する
-/// (`fxg session prompt --wait`)。
+/// Poll events until the turn finishes (`idle`) and print them
+/// (`fxg session prompt --wait`).
 async fn wait_for_turn(client: &mut DaemonClient, session_id: &str, prompt: &str) -> Result<()> {
     let mut seen_prompt = false;
     let mut last_seq = 0u64;
@@ -1168,7 +1179,7 @@ async fn wait_for_turn(client: &mut DaemonClient, session_id: &str, prompt: &str
     }
 }
 
-/// イベントを出力し、ターン完了なら `true` を返す。
+/// Print an event and return `true` when the turn is done.
 fn print_and_check_done(
     payload: &UnifiedEventPayload,
     prompt: &str,
@@ -1185,12 +1196,12 @@ fn print_and_check_done(
             println!("Think ▸ {text}");
         }
         UnifiedEventPayload::ToolCall { title, status, .. } => {
-            println!("· tool [{status}] {title}");
+            println!("• tool [{status}] {title}");
         }
         UnifiedEventPayload::PermissionRequest {
             tool_name, summary, ..
         } => {
-            println!("! 承認待ち [{tool_name}] {summary} (`fxg inbox list` で確認) ");
+            println!("! pending approval [{tool_name}] {summary} (see `fxg inbox list`) ");
         }
         UnifiedEventPayload::StatusChanged {
             status,
@@ -1214,9 +1225,9 @@ fn print_and_check_done(
 /// `fxg session stop <id>`
 #[derive(Debug, Args)]
 pub struct SessionStopArgs {
-    /// セッションID
+    /// Session ID
     session_id: String,
-    /// セッションは維持し、実行中のターンのみ中断する
+    /// Keep the session and only interrupt the running turn
     #[usage(long)]
     turn_only: bool,
 }
@@ -1244,7 +1255,7 @@ impl usage::RunAsync for SessionStopArgs {
 /// `fxg session kill <id>`
 #[derive(Debug, Args)]
 pub struct SessionKillArgs {
-    /// セッションID
+    /// Session ID
     session_id: String,
 }
 
@@ -1267,7 +1278,7 @@ impl usage::RunAsync for SessionKillArgs {
 /// `fxg session archive <id>`
 #[derive(Debug, Args)]
 pub struct SessionArchiveArgs {
-    /// セッションID
+    /// Session ID
     session_id: String,
 }
 
@@ -1288,7 +1299,7 @@ impl usage::RunAsync for SessionArchiveArgs {
 /// `fxg session unarchive <id>`
 #[derive(Debug, Args)]
 pub struct SessionUnarchiveArgs {
-    /// セッションID
+    /// Session ID
     session_id: String,
 }
 
@@ -1306,7 +1317,7 @@ impl usage::RunAsync for SessionUnarchiveArgs {
 /// `fxg session delete <id>`
 #[derive(Debug, Args)]
 pub struct SessionDeleteArgs {
-    /// セッションID
+    /// Session ID
     session_id: String,
 }
 
@@ -1317,7 +1328,7 @@ impl usage::RunAsync for SessionDeleteArgs {
         let mut client = DaemonClient::connect().await?;
         client.delete_session(&self.session_id).await?;
         println!(
-            "deleted session ({}) — 会話ログは消去され復元できません",
+            "deleted session ({}) — the conversation log is purged and cannot be restored",
             short_id(&self.session_id)
         );
         Ok(())
@@ -1327,9 +1338,10 @@ impl usage::RunAsync for SessionDeleteArgs {
 /// `fxg session revert <id> --to-seq <NODE_SEQ>`
 #[derive(Debug, Args)]
 pub struct SessionRevertArgs {
-    /// セッションID
+    /// Session ID
     session_id: String,
-    /// 巻き戻し先のイベント連番 (対象ターンの `UserMessage.node_seq`)
+    /// Event sequence number to rewind to (the target turn's
+    /// `UserMessage.node_seq`)
     #[usage(long)]
     to_seq: u64,
 }
@@ -1357,27 +1369,28 @@ impl usage::RunAsync for SessionRevertArgs {
 /// `fxg session fork <id>`
 #[derive(Debug, Args)]
 pub struct SessionForkArgs {
-    /// 分岐元のセッションID
+    /// Session ID to fork from
     session_id: String,
-    /// 分岐元の連番 (省略時は最新)
+    /// Sequence number to fork from (latest when omitted)
     #[usage(long)]
     from_seq: Option<u64>,
-    /// 分岐後のエージェントID (省略時は同一エージェント)
+    /// Agent ID after the fork (same agent when omitted)
     #[usage(long)]
     agent: Option<String>,
-    /// 新規 Worktree へ分岐する
+    /// Fork into a new worktree
     #[usage(short = 'w', long)]
     worktree: Option<String>,
-    /// Worktree 新規作成時のベースブランチ
+    /// Base branch used when creating a new worktree
     #[usage(long)]
     base: Option<String>,
-    /// 一時VMプロビジョナーで分岐する (中央サーバー必須。退避済み Git バンドルを復元)
+    /// Fork through an ephemeral VM provisioner (requires the central server;
+    /// restores the backed-up Git bundle)
     #[usage(long)]
     provisioner: Option<String>,
-    /// ブラウザを開かずセッションIDのみ出力する
+    /// Print only the session ID and do not open a browser
     #[usage(short = 'd', long)]
     detach: bool,
-    /// 分岐後にデフォルトブラウザで Web UI を開かない
+    /// Do not open the Web UI in the default browser after the fork
     #[usage(long)]
     no_open: bool,
 }
@@ -1386,7 +1399,8 @@ impl usage::RunAsync for SessionForkArgs {
     type Output = Result<()>;
 
     async fn run_async(self) -> Self::Output {
-        // 一時VM上での分岐: 中央サーバー API 経由で Context Fork を要求する
+        // Fork inside an ephemeral VM: request a context fork through the central
+        // server API
         if let Some(provisioner) = &self.provisioner {
             let env = fxg_protocol::config::process_env;
             let server = crate::server_api::ServerClient::from_config(&env)?;
@@ -1394,7 +1408,7 @@ impl usage::RunAsync for SessionForkArgs {
             let source = sessions
                 .iter()
                 .find(|session| session.session_id == self.session_id)
-                .with_context(|| format!("セッションが見つかりません: {}", self.session_id))?;
+                .with_context(|| format!("session not found: {}", self.session_id))?;
             let request = fxg_protocol::client_api::CreateSessionRequest {
                 command_id: format!("cli-{}", fxg_protocol::util::uuid_v7()),
                 project_id: source.project_id.clone(),
@@ -1412,7 +1426,8 @@ impl usage::RunAsync for SessionForkArgs {
                 fork: Some(fxg_protocol::client_api::SessionForkSpec {
                     from_session_id: self.session_id.clone(),
                     from_node_seq: self.from_seq,
-                    // 中央サーバーが退避済みバンドル (git_bundle_path) を自動で読み込む
+                    // The central server loads the backed-up bundle
+                    // (git_bundle_path) automatically
                     restore_git_bundle_b64: None,
                 }),
             };
@@ -1448,16 +1463,16 @@ impl usage::RunAsync for SessionForkArgs {
 /// `fxg session resume <id>`
 #[derive(Debug, Args)]
 pub struct SessionResumeArgs {
-    /// 再開するセッションID
+    /// Session ID to resume
     session_id: String,
-    /// ブラウザを開かずセッションIDのみ出力する
+    /// Print only the session ID and do not open a browser
     #[usage(short = 'd', long)]
     detach: bool,
-    /// 再開後にデフォルトブラウザで Web UI を開かない
+    /// Do not open the Web UI in the default browser after resuming
     #[usage(long)]
     no_open: bool,
-    /// ネイティブ復元 (session/resume・session/load・既存セッション bind) を
-    /// 試みず、履歴 Replay で継続する
+    /// Skip native restoration (session/resume, session/load, existing-session
+    /// bind) and continue by replaying history
     #[usage(long)]
     replay: bool,
 }
@@ -1493,24 +1508,24 @@ pub struct InboxArgs {
     command: InboxCommands,
 }
 
-/// 承認待ちリクエスト (グローバル Inbox) の操作。
+/// Operations on pending approval requests (the global inbox).
 #[derive(Debug, usage::Subcommands)]
 #[usage(run_async)]
 pub enum InboxCommands {
-    /// 現在承認待ちのリクエスト一覧を表示する
+    /// List the requests currently waiting for approval
     List(InboxListArgs),
-    /// 承認リクエストを許可する
+    /// Approve an approval request
     Approve(InboxApproveArgs),
-    /// 承認リクエストを却下する
+    /// Reject an approval request
     Reject(InboxRejectArgs),
-    /// 質問 (elicitation) へ回答する
+    /// Answer a question (elicitation)
     Answer(InboxAnswerArgs),
 }
 
 /// `fxg inbox list`
 #[derive(Debug, Args)]
 pub struct InboxListArgs {
-    /// JSON 形式で出力する
+    /// Output as JSON
     #[usage(long)]
     json: bool,
 }
@@ -1533,7 +1548,7 @@ impl usage::RunAsync for InboxListArgs {
             return Ok(());
         }
         if requests.is_empty() {
-            println!("(承認待ちリクエストなし)");
+            println!("(no pending approval requests)");
         } else {
             let rows: Vec<Vec<String>> = requests
                 .iter()
@@ -1550,7 +1565,7 @@ impl usage::RunAsync for InboxListArgs {
             print_table(&["REQUEST", "SESSION", "TOOL", "SUMMARY", "CREATED"], &rows);
         }
         if elicitations.is_empty() {
-            println!("(回答待ちの質問なし)");
+            println!("(no unanswered questions)");
         } else {
             let rows: Vec<Vec<String>> = elicitations
                 .iter()
@@ -1576,9 +1591,9 @@ impl usage::RunAsync for InboxListArgs {
 /// `fxg inbox approve <req-id>`
 #[derive(Debug, Args)]
 pub struct InboxApproveArgs {
-    /// 承認リクエストID
+    /// Approval request ID
     request_id: String,
-    /// 同一ツール操作をセッション中常時許可する (`allow_always`)
+    /// Allow the same tool action for the rest of the session (`allow_always`)
     #[usage(long)]
     always: bool,
 }
@@ -1595,7 +1610,8 @@ impl usage::RunAsync for InboxApproveArgs {
             "allow_once"
         };
         let option_id = option_by_kind(&entry.options, preferred)
-            // 該当種別が無いドライバ向けフォールバック (却下系以外の先頭)
+            // Fallback for drivers without that option kind (first non-reject
+            // option)
             .or_else(|| {
                 entry
                     .options
@@ -1603,7 +1619,7 @@ impl usage::RunAsync for InboxApproveArgs {
                     .find(|option| !PermissionOption::is_reject_kind(&option.kind))
                     .map(|option| option.option_id.clone())
             })
-            .with_context(|| format!("許可オプションがありません: {}", self.request_id))?;
+            .with_context(|| format!("no allow option available: {}", self.request_id))?;
         client
             .respond_permission(&entry.session_id, &entry.request_id, &option_id)
             .await?;
@@ -1615,7 +1631,7 @@ impl usage::RunAsync for InboxApproveArgs {
 /// `fxg inbox reject <req-id>`
 #[derive(Debug, Args)]
 pub struct InboxRejectArgs {
-    /// 承認リクエストID
+    /// Approval request ID
     request_id: String,
 }
 
@@ -1626,7 +1642,7 @@ impl usage::RunAsync for InboxRejectArgs {
         let mut client = DaemonClient::connect().await?;
         let entry = find_permission(&mut client, &self.request_id).await?;
         let option_id = option_by_kind(&entry.options, "reject")
-            .with_context(|| format!("却下オプションがありません: {}", self.request_id))?;
+            .with_context(|| format!("no reject option available: {}", self.request_id))?;
         client
             .respond_permission(&entry.session_id, &entry.request_id, &option_id)
             .await?;
@@ -1635,7 +1651,7 @@ impl usage::RunAsync for InboxRejectArgs {
     }
 }
 
-/// 承認待ちリクエストを `request_id` で引く。
+/// Look up a pending approval request by `request_id`.
 async fn find_permission(
     client: &mut DaemonClient,
     request_id: &str,
@@ -1645,27 +1661,28 @@ async fn find_permission(
         .await?
         .into_iter()
         .find(|entry| entry.request_id == request_id)
-        .with_context(|| format!("承認待ちリクエストが見つかりません: {request_id}"))
+        .with_context(|| format!("pending approval request not found: {request_id}"))
 }
 
 /// `fxg inbox answer <elicitation-id>`
 #[derive(Debug, Args)]
 pub struct InboxAnswerArgs {
-    /// elicitation id (`fxg inbox list` の QUESTION 列)
+    /// elicitation ID (the QUESTION column of `fxg inbox list`)
     elicitation_id: String,
-    /// accept: 回答内容を JSON オブジェクトで指定する (例: '{"strategy":"a"}')
+    /// accept: supply the answer as a JSON object (e.g. '{"strategy":"a"}')
     #[usage(long)]
     json: Option<String>,
-    /// accept: `key=value` 形式の回答を追加する (繰り返し指定可。値は JSON として解釈し、失敗時は文字列)
+    /// accept: add a `key=value` answer (repeatable; the value is parsed as
+    /// JSON and falls back to a string)
     #[usage(long = "set")]
     set: Vec<String>,
-    /// accept: 指定した回答内容 (無指定なら空) で回答する
+    /// accept: answer with the given content (empty when nothing is specified)
     #[usage(long)]
     accept: bool,
-    /// 明示的に辞退する (decline)
+    /// Explicitly decline
     #[usage(long)]
     decline: bool,
-    /// 回答せずキャンセルする (cancel)
+    /// Cancel without answering
     #[usage(long)]
     cancel: bool,
 }
@@ -1687,14 +1704,14 @@ impl usage::RunAsync for InboxAnswerArgs {
                 build_elicitation_content(&self.json, &self.set)?,
             )
         } else {
-            // 引数なし: 質問内容と回答方法を表示する
-            println!("質問: {}", entry.message);
+            // No arguments: show the question and how to answer it
+            println!("Question: {}", entry.message);
             if let Some(properties) = entry
                 .requested_schema
                 .get("properties")
                 .and_then(|value| value.as_object())
             {
-                println!("回答項目:");
+                println!("Answer fields:");
                 for (key, property) in properties {
                     let type_name = property
                         .get("type")
@@ -1704,7 +1721,7 @@ impl usage::RunAsync for InboxAnswerArgs {
                 }
             }
             println!(
-                "回答例: fxg inbox answer {} --accept --set key=value",
+                "Example: fxg inbox answer {} --accept --set key=value",
                 self.elicitation_id
             );
             println!(
@@ -1721,7 +1738,7 @@ impl usage::RunAsync for InboxAnswerArgs {
     }
 }
 
-/// 回答待ちの質問を `elicitation_id` で引く。
+/// Look up an unanswered question by `elicitation_id`.
 async fn find_elicitation(
     client: &mut DaemonClient,
     elicitation_id: &str,
@@ -1731,23 +1748,23 @@ async fn find_elicitation(
         .await?
         .into_iter()
         .find(|entry| entry.elicitation_id == elicitation_id)
-        .with_context(|| format!("回答待ちの質問が見つかりません: {elicitation_id}"))
+        .with_context(|| format!("unanswered question not found: {elicitation_id}"))
 }
 
-/// `--json` / `--set` から accept の content を組み立てる。
+/// Build the accept content from `--json` / `--set`.
 fn build_elicitation_content(json: &Option<String>, set: &[String]) -> Result<serde_json::Value> {
     let mut content = match json {
         Some(raw) => serde_json::from_str::<serde_json::Value>(raw)
-            .with_context(|| format!("--json の JSON が不正です: {raw}"))?,
+            .with_context(|| format!("invalid JSON for --json: {raw}"))?,
         None => serde_json::json!({}),
     };
     let Some(object) = content.as_object_mut() else {
-        bail!("--json には JSON オブジェクトを指定してください");
+        bail!("--json requires a JSON object");
     };
     for pair in set {
         let (key, value) = pair
             .split_once('=')
-            .with_context(|| format!("--set は key=value 形式で指定してください: {pair}"))?;
+            .with_context(|| format!("--set requires key=value format: {pair}"))?;
         let value = serde_json::from_str::<serde_json::Value>(value)
             .unwrap_or_else(|_| serde_json::Value::String(value.to_owned()));
         object.insert(key.to_owned(), value);
@@ -1755,7 +1772,7 @@ fn build_elicitation_content(json: &Option<String>, set: &[String]) -> Result<se
     Ok(content)
 }
 
-/// 種別の先頭一致で `option_id` を選ぶ。
+/// Select the first `option_id` whose kind matches.
 fn option_by_kind(options: &[PermissionOption], kind: &str) -> Option<String> {
     options
         .iter()
@@ -1775,24 +1792,24 @@ pub struct ProjectArgs {
     command: ProjectCommands,
 }
 
-/// 論理プロジェクト管理サブコマンド。
+/// Logical project management subcommands.
 #[derive(Debug, usage::Subcommands)]
 #[usage(run_async)]
 pub enum ProjectCommands {
-    /// カレントディレクトリの論理プロジェクト情報を表示する
+    /// Show the logical project info for the current directory
     Info(ProjectInfoArgs),
-    /// 登録済み論理プロジェクト一覧を表示する
+    /// List registered logical projects
     List(ProjectListArgs),
-    /// カレントディレクトリを指定の論理プロジェクトIDへ紐付ける
+    /// Link the current directory to the given logical project ID
     Link(ProjectLinkArgs),
-    /// ディレクトリ配下のGitリポジトリを一括スキャンして登録する
+    /// Scan and register the Git repositories under a directory
     Scan(ProjectScanArgs),
 }
 
 /// `fxg project info`
 #[derive(Debug, Args)]
 pub struct ProjectInfoArgs {
-    /// JSON 形式で出力する
+    /// Output as JSON
     #[usage(long)]
     json: bool,
 }
@@ -1833,7 +1850,7 @@ impl usage::RunAsync for ProjectInfoArgs {
 /// `fxg project list`
 #[derive(Debug, Args)]
 pub struct ProjectListArgs {
-    /// JSON 形式で出力する
+    /// Output as JSON
     #[usage(long)]
     json: bool,
 }
@@ -1851,9 +1868,7 @@ impl usage::RunAsync for ProjectListArgs {
         }
 
         if projects.is_empty() {
-            println!(
-                "(プロジェクトなし。`fxg project scan` または `fxg project link` で登録できます)"
-            );
+            println!("(no projects; register one with `fxg project scan` or `fxg project link`)");
             return Ok(());
         }
 
@@ -1879,7 +1894,7 @@ impl usage::RunAsync for ProjectListArgs {
 /// `fxg project link <project-id>`
 #[derive(Debug, Args)]
 pub struct ProjectLinkArgs {
-    /// 紐付け先の論理プロジェクトID (例: github.com/nazo6/flexagent)
+    /// Logical project ID to link to (e.g. github.com/nazo6/flexagent)
     project_id: String,
 }
 
@@ -1901,9 +1916,9 @@ impl usage::RunAsync for ProjectLinkArgs {
 /// `fxg project scan [dir]`
 #[derive(Debug, Args)]
 pub struct ProjectScanArgs {
-    /// スキャン対象ディレクトリ (省略時は config.toml の project_scan_dirs)
+    /// Directory to scan (defaults to project_scan_dirs in config.toml)
     dir: Option<String>,
-    /// JSON 形式で出力する
+    /// Output as JSON
     #[usage(long)]
     json: bool,
 }
@@ -1950,27 +1965,27 @@ pub struct WorktreeArgs {
     command: WorktreeCommands,
 }
 
-/// Git Worktree 管理サブコマンド。
+/// Git worktree management subcommands.
 #[derive(Debug, usage::Subcommands)]
 #[usage(run_async)]
 pub enum WorktreeCommands {
-    /// Worktree 一覧を表示する
+    /// List worktrees
     List(WorktreeListArgs),
-    /// 新規 Worktree を作成する
+    /// Create a new worktree
     Add(WorktreeAddArgs),
-    /// Worktree を削除する
+    /// Remove a worktree
     Remove(WorktreeRemoveArgs),
-    /// 削除済み Worktree の管理情報をクリーンアップする
+    /// Clean up metadata of worktrees that were deleted
     Prune(WorktreePruneArgs),
 }
 
 /// `fxg worktree list`
 #[derive(Debug, Args)]
 pub struct WorktreeListArgs {
-    /// 論理プロジェクトIDで絞り込む
+    /// Filter by logical project ID
     #[usage(long)]
     project: Option<String>,
-    /// JSON 形式で出力する
+    /// Output as JSON
     #[usage(long)]
     json: bool,
 }
@@ -1991,7 +2006,7 @@ impl usage::RunAsync for WorktreeListArgs {
         }
 
         if worktrees.is_empty() {
-            println!("(Worktree なし)");
+            println!("(no worktrees)");
             return Ok(());
         }
 
@@ -2021,15 +2036,15 @@ impl usage::RunAsync for WorktreeListArgs {
 /// `fxg worktree add <branch>`
 #[derive(Debug, Args)]
 pub struct WorktreeAddArgs {
-    /// 作成するブランチ名 (例: feat/auth)
+    /// Branch name to create (e.g. feat/auth)
     branch: String,
-    /// 起点ブランチ (省略時は現在の HEAD)
+    /// Base branch (defaults to the current HEAD)
     #[usage(long)]
     base: Option<String>,
-    /// 配置先パスの明示指定 (省略時は worktree_dir_template から解決)
+    /// Explicit destination path (defaults to a path resolved from worktree_dir_template)
     #[usage(long)]
     path: Option<String>,
-    /// 論理プロジェクトID (省略時はカレントディレクトリから解決)
+    /// Logical project ID (defaults to resolving from the current directory)
     #[usage(long)]
     project: Option<String>,
 }
@@ -2065,9 +2080,9 @@ impl usage::RunAsync for WorktreeAddArgs {
 /// `fxg worktree remove <target>`
 #[derive(Debug, Args)]
 pub struct WorktreeRemoveArgs {
-    /// 削除対象のブランチ名またはパス
+    /// Branch name or path to remove
     target: String,
-    /// 未コミット変更があっても強制削除する
+    /// Force removal even with uncommitted changes
     #[usage(short = 'f', long)]
     force: bool,
 }
@@ -2114,21 +2129,21 @@ pub struct AgentsArgs {
     command: AgentsCommands,
 }
 
-/// ACP Registry エージェントの管理。
+/// ACP Registry agent management.
 #[derive(Debug, usage::Subcommands)]
 #[usage(run_async)]
 pub enum AgentsCommands {
-    /// 利用可能なエージェント一覧とインストール状態を表示する
+    /// List available agents and their installation state
     List(AgentsListArgs),
-    /// ACP Registry から指定エージェントを事前ダウンロード・展開する
+    /// Pre-download and unpack the given agent from the ACP Registry
     Install(AgentsInstallArgs),
-    /// レジストリインデックスおよび導入済みエージェントを更新する
+    /// Update the registry index and installed agents
     Update(AgentsUpdateArgs),
-    /// キャッシュ済みのエージェントバイナリを削除する
+    /// Delete cached agent binaries
     Remove(AgentsRemoveArgs),
 }
 
-/// `~/.flexagent/config.toml` から ACP Registry を構成する。
+/// Build an ACP Registry from `~/.flexagent/config.toml`.
 fn acp_registry() -> Result<AcpRegistry> {
     let env = fxg_protocol::config::process_env;
     let global = fxg_protocol::config::GlobalConfig::load(&env)
@@ -2143,15 +2158,15 @@ fn acp_registry() -> Result<AcpRegistry> {
 /// `fxg agents list`
 #[derive(Debug, Args)]
 pub struct AgentsListArgs {
-    /// ACP Registry 上の未導入エージェントも表示する
+    /// Also show agents that are not installed in the ACP Registry
     #[usage(long)]
     all: bool,
-    /// JSON 形式で出力する
+    /// Output as JSON
     #[usage(long)]
     json: bool,
 }
 
-/// エージェントの起動形態ラベル (表示用)。
+/// Agent launch-form labels (for display).
 fn source_labels(entry: &AgentListEntry) -> Vec<&'static str> {
     let mut labels = Vec::new();
     if entry.custom.is_some() {
@@ -2199,7 +2214,7 @@ impl usage::RunAsync for AgentsListArgs {
         }
         if entries.is_empty() {
             println!(
-                "(利用可能なエージェントなし。`fxg agents list --all` でレジストリ全体を表示)"
+                "(no agents available; use `fxg agents list --all` to show the whole registry)"
             );
             return Ok(());
         }
@@ -2223,9 +2238,9 @@ impl usage::RunAsync for AgentsListArgs {
 /// `fxg agents install <id>`
 #[derive(Debug, Args)]
 pub struct AgentsInstallArgs {
-    /// エージェントID (エイリアス可)
+    /// Agent ID (aliases allowed)
     id: String,
-    /// 導入するバージョン (レジストリ提供バージョンのみ)
+    /// Version to install (only versions offered by the registry)
     #[usage(long)]
     version: Option<String>,
 }
@@ -2241,7 +2256,7 @@ impl usage::RunAsync for AgentsInstallArgs {
             .await
             .context("failed to load ACP registry")?;
         let agent = index.find(&id).with_context(|| {
-            format!("エージェントがレジストリにありません: {id} (`fxg agents list --all`)")
+            format!("agent not found in the registry: {id} (`fxg agents list --all`)")
         })?;
         if agent.distribution.npx.is_some() || agent.distribution.uvx.is_some() {
             registry.set_package_enabled(&id, true)?;
@@ -2249,7 +2264,7 @@ impl usage::RunAsync for AgentsInstallArgs {
             return Ok(());
         }
         bail!(
-            "fxg はバイナリの自動ダウンロードを行いません。各ツールの配布元からバイナリをインストールして PATH に配置するか、カスタムエージェント (`config.toml` または Web UI) として設定してください"
+            "fxg does not download binaries automatically. Install the binary from the tool's distributor and put it on PATH, or configure it as a custom agent (in `config.toml` or the Web UI)"
         );
     }
 }
@@ -2263,7 +2278,7 @@ impl usage::RunAsync for AgentsUpdateArgs {
 
     async fn run_async(self) -> Self::Output {
         let registry = acp_registry()?;
-        // インデックスを強制再取得する
+        // Force a refetch of the index
         let index = registry
             .index(true)
             .await
@@ -2276,7 +2291,7 @@ impl usage::RunAsync for AgentsUpdateArgs {
 /// `fxg agents remove <id>`
 #[derive(Debug, Args)]
 pub struct AgentsRemoveArgs {
-    /// エージェントID (エイリアス可)
+    /// Agent ID (aliases allowed)
     id: String,
 }
 
@@ -2296,7 +2311,7 @@ impl usage::RunAsync for AgentsRemoveArgs {
         if removed_custom || disabled_package {
             println!("removed/disabled {id}");
         } else {
-            println!("{id} は設定されていません");
+            println!("{id} is not configured");
         }
         Ok(())
     }
@@ -2314,20 +2329,20 @@ pub struct AuthArgs {
     command: AuthCommands,
 }
 
-/// 認証トークン管理サブコマンド。
+/// Auth token management subcommands.
 #[derive(Debug, usage::Subcommands)]
 #[usage(run_async)]
 pub enum AuthCommands {
-    /// クライアント認証トークン (auth_token) を表示する
+    /// Show the client auth token (auth_token)
     Token(AuthTokenArgs),
-    /// クライアント認証トークンを再生成する
+    /// Regenerate the client auth token
     RotateToken(AuthRotateArgs),
-    /// ノード個別トークン (Node ⇔ Server ペアリング) を管理する
+    /// Manage per-node tokens (Node ⇔ Server pairing)
     #[usage(name = "node-token")]
     NodeToken(NodeTokenArgs),
 }
 
-/// `fxg auth node-token` のサブコマンド。
+/// Subcommands of `fxg auth node-token`.
 #[derive(Debug, Args)]
 #[usage(run_async, arg_required_else_help)]
 pub struct NodeTokenArgs {
@@ -2335,22 +2350,22 @@ pub struct NodeTokenArgs {
     command: NodeTokenCommands,
 }
 
-/// ノード個別トークン操作。
+/// Per-node token operations.
 #[derive(Debug, usage::Subcommands)]
 #[usage(run_async)]
 pub enum NodeTokenCommands {
-    /// ノード個別トークンを発行して表示する (中央サーバー上で実行)
+    /// Issue and print a per-node token (run on the central server)
     Issue(NodeTokenIssueArgs),
-    /// ノード個別トークンを失効させる
+    /// Revoke a per-node token
     Revoke(NodeTokenRevokeArgs),
-    /// 発行済みノードトークン一覧を表示する
+    /// List issued node tokens
     List(NodeTokenListArgs),
 }
 
 /// `fxg auth node-token issue <node-id>`
 #[derive(Debug, Args)]
 pub struct NodeTokenIssueArgs {
-    /// 対象ノードID (fxg daemon の node_id)
+    /// Target node ID (the `fxg daemon` node_id)
     node_id: String,
 }
 
@@ -2359,8 +2374,8 @@ impl usage::RunAsync for NodeTokenIssueArgs {
 
     async fn run_async(self) -> Self::Output {
         let db = open_hub_db().await?;
-        // 未登録のノードはプレースホルダで登録する
-        // (ノード接続時の `NodeHello` で実情報に上書きされる)
+        // Register unknown nodes with placeholder values
+        // (overwritten with real values by `NodeHello` when the node connects)
         let nodes = db.list_nodes().await?;
         if !nodes.iter().any(|node| node.node_id == self.node_id) {
             db.upsert_node(&fxg_db::NodeRecord::new(
@@ -2378,11 +2393,10 @@ impl usage::RunAsync for NodeTokenIssueArgs {
             Some(&fxg_server::api::auth::hash_token(&token)),
         )
         .await?;
-        // 平文トークンは発行時に一度だけ表示する (サーバーにはハッシュのみ保存)
+        // The plaintext token is shown only once at issuance (the server stores
+        // only the hash)
         println!("{token}");
-        eprintln!(
-            "node_token を発行しました。ノード側の ~/.flexagent/node_token に保存してください。"
-        );
+        eprintln!("issued a node_token; save it to ~/.flexagent/node_token on the node side.");
         Ok(())
     }
 }
@@ -2390,7 +2404,7 @@ impl usage::RunAsync for NodeTokenIssueArgs {
 /// `fxg auth node-token revoke <node-id>`
 #[derive(Debug, Args)]
 pub struct NodeTokenRevokeArgs {
-    /// 対象ノードID
+    /// Target node ID
     node_id: String,
 }
 
@@ -2427,7 +2441,7 @@ impl usage::RunAsync for NodeTokenListArgs {
     }
 }
 
-/// 中央サーバーの DB (`~/.flexagent/server.db`) を開く。
+/// Open the central server DB (`~/.flexagent/server.db`).
 async fn open_hub_db() -> Result<fxg_db::Db> {
     let env = fxg_protocol::config::process_env;
     let home = fxg_protocol::config::fxg_home(&env);
@@ -2460,7 +2474,7 @@ impl usage::RunAsync for AuthRotateArgs {
         let mut client = DaemonClient::connect().await?;
         let token = client.auth_token(true).await?;
         println!("{token}");
-        eprintln!("auth token を再生成しました (ブラウザ等の再接続時に再入力が必要です)");
+        eprintln!("regenerated the auth token (browsers and other clients must enter it again)");
         Ok(())
     }
 }
@@ -2469,12 +2483,12 @@ impl usage::RunAsync for AuthRotateArgs {
 // fxg kill-all
 // ----------------------------------------------------------------------
 
-/// `fxg kill-all` の引数。
+/// Arguments of `fxg kill-all`.
 #[derive(Debug, Args)]
 pub struct KillAllArgs {
-    /// 中央サーバーへ配信せずローカルノードのみ停止する
-    /// (全ノード一括停止は中央サーバーの `POST /api/v1/system/kill-switch`
-    ///  から配信される)
+    /// Stop only the local node without fanning out through the central server
+    /// (stopping every node at once is fanned out by the central server's
+    /// `POST /api/v1/system/kill-switch`)
     #[usage(long)]
     local_only: bool,
 }
@@ -2512,14 +2526,14 @@ mod tests {
         .expect("content");
         assert_eq!(content["strategy"], "a");
         assert_eq!(content["count"], 3);
-        // JSON として解釈できない値は文字列として扱う
+        // Values that do not parse as JSON are treated as strings
         assert_eq!(content["note"], "hello");
     }
 
     #[test]
     fn build_elicitation_content_rejects_non_object_json() {
         let err = build_elicitation_content(&Some("[1,2]".to_owned()), &[]).expect_err("array");
-        assert!(err.to_string().contains("JSON オブジェクト"), "got: {err}");
+        assert!(err.to_string().contains("JSON object"), "got: {err}");
     }
 
     #[test]

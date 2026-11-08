@@ -1,14 +1,15 @@
-//! `fxg daemon --stdio` の Git Credential Proxy / Drain E2E テスト。
+//! Git credential proxy / drain E2E tests for `fxg daemon --stdio`.
 //!
-//! 実バイナリを子プロセスとして起動し、テスト側が中央サーバーの代役として
-//! JSON Lines を読み書きする:
+//! The tests start the real binary as a child process and the test side acts as
+//! the central server, reading and writing JSON Lines:
 //!
-//! - `NodeHello` の受信 (一時ノードとして `is_ephemeral = true` を報告)
-//! - `fxg git-askpass` (ローカルIPC) → `GitCredentialRequest` →
-//!   テスト側 `GitCredentialResponse` → askpass がトークンを出力する
-//! - `DrainAndShutdown` → `DrainComplete` → プロセス正常終了
+//! - Receive `NodeHello` (reporting `is_ephemeral = true` as an ephemeral node)
+//! - `fxg git-askpass` (local IPC) → `GitCredentialRequest` →
+//!   test-side `GitCredentialResponse` → askpass prints the token
+//! - `DrainAndShutdown` → `DrainComplete` → the process exits cleanly
 //!
-//! `stdout` はプロトコル専用 (すべての行が JSON) であることも検証する。
+//! The tests also verify that `stdout` is reserved for the protocol (every
+//! line is JSON).
 
 use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
@@ -18,7 +19,7 @@ use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 
-/// テスト用の一時環境。
+/// Temporary environment for the tests.
 struct TestEnv {
     home: std::path::PathBuf,
     ipc_endpoint: String,
@@ -56,7 +57,8 @@ fn fxg() -> &'static str {
     env!("CARGO_BIN_EXE_fxg")
 }
 
-/// 子プロセスの stdout を行単位で読み、JSON としてチャネルへ流すスレッドを起動する。
+/// Start a thread that reads the child process's stdout line by line and sends
+/// the JSON values over a channel.
 fn spawn_line_reader(stdout: impl std::io::Read + Send + 'static) -> Receiver<String> {
     let (tx, rx) = channel();
     std::thread::spawn(move || {
@@ -71,7 +73,7 @@ fn spawn_line_reader(stdout: impl std::io::Read + Send + 'static) -> Receiver<St
     rx
 }
 
-/// チャネルから条件に一致するメッセージを待つ (タイムアウトで panic)。
+/// Wait on the channel for a message matching the predicate (panics on timeout).
 fn wait_for_message(
     rx: &Receiver<String>,
     what: &str,
@@ -104,7 +106,7 @@ fn write_message(stdin: &mut ChildStdin, message: &Value) {
     stdin.flush().expect("flush stdin");
 }
 
-/// `fxg git-askpass` を実行し、stdout の 1 行を返す。
+/// Run `fxg git-askpass` and return the single stdout line.
 fn run_askpass(env: &TestEnv, prompt: &str) -> String {
     let mut command = Command::new(fxg());
     command.args(["git-askpass", prompt]);
@@ -148,14 +150,14 @@ fn stdio_daemon_proxies_git_credentials_and_drains() {
     let mut stdin = stdin;
     let lines = spawn_line_reader(stdout);
 
-    // 1. NodeHello (一時ノードとしてハンドシェイク)
+    // 1. NodeHello (handshake as an ephemeral node)
     let hello = wait_for_message(&lines, "node_hello", Duration::from_secs(60), |value| {
         value["op"] == "node_hello"
     });
     assert_eq!(hello["node_id"], env.node_id);
     assert_eq!(hello["is_ephemeral"], true);
 
-    // 2. Password プロンプト → GitCredentialRequest → 応答 → トークン出力
+    // 2. Password prompt → GitCredentialRequest → response → token output
     let askpass = {
         let env_home = env.home.clone();
         let env_ipc = env.ipc_endpoint.clone();
@@ -189,7 +191,7 @@ fn stdio_daemon_proxies_git_credentials_and_drains() {
     );
     assert_eq!(askpass.join().expect("askpass thread"), "secret-token");
 
-    // 3. Username プロンプト → ユーザー名を返す
+    // 3. Username prompt → returns the username
     let askpass = {
         let env_home = env.home.clone();
         let env_ipc = env.ipc_endpoint.clone();
@@ -220,7 +222,7 @@ fn stdio_daemon_proxies_git_credentials_and_drains() {
     );
     assert_eq!(askpass.join().expect("askpass thread"), "x-access-token");
 
-    // 4. DrainAndShutdown → DrainComplete → 正常終了
+    // 4. DrainAndShutdown → DrainComplete → clean exit
     write_message(
         &mut stdin,
         &json!({

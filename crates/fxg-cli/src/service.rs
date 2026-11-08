@@ -1,40 +1,39 @@
-//! `fxg service` — OS ログイン時のバックグラウンド常駐サービス管理。
+//! `fxg service` — manage the background service that starts at OS login.
 //!
-//! 設計: `docs/04-agent-drivers-and-windows.md` §5.4、`docs/05-cli-and-pwa-ui.md` §1。
+//! Design: `docs/04-agent-drivers-and-windows.md` §5.4,
+//! `docs/05-cli-and-pwa-ui.md` §1.
 //!
-//! - **Windows**: タスクスケジューラ (ログオン時実行。コンソールウィンドウは
-//!   表示されない)
-//! - **Linux / WSL**: `~/.config/systemd/user/<name>.service` +
-//!   `systemctl --user`
-//! - **macOS**: `~/Library/LaunchAgents/dev.flexagent.<name>.plist` +
-//!   `launchctl`
+//! - **Windows**: Task Scheduler (runs at logon; no console window is shown)
+//! - **Linux / WSL**: `~/.config/systemd/user/<name>.service` + `systemctl --user`
+//! - **macOS**: `~/Library/LaunchAgents/dev.flexagent.<name>.plist` + `launchctl`
 //!
-//! `--server` 指定時はデーモンではなく中央サーバーをサービス化する。
+//! With `--server`, the central server is installed as the service instead of
+//! the daemon.
 
 use std::path::PathBuf;
 use std::process::Command;
 
 use anyhow::{Context, Result, bail};
 
-/// サービスの動作。
+/// Service action.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ServiceAction {
-    /// サービスを登録する (自動起動を有効化)
+    /// Register the service (enable auto-start)
     Install,
-    /// サービス登録を解除する
+    /// Remove the service registration
     Uninstall,
-    /// サービスを開始する
+    /// Start the service
     Start,
-    /// サービスを停止する
+    /// Stop the service
     Stop,
-    /// サービスを再起動する
+    /// Restart the service
     Restart,
-    /// サービスの状態を表示する
+    /// Show the service status
     Status,
 }
 
 impl ServiceAction {
-    /// CLI の `<action>` 文字列を解析する。
+    /// Parse the CLI `<action>` string.
     pub fn parse(value: &str) -> Option<Self> {
         match value {
             "install" => Some(Self::Install),
@@ -48,17 +47,17 @@ impl ServiceAction {
     }
 }
 
-/// サービス名 (`fxg-daemon` / `fxg-server`)。
+/// Service name (`fxg-daemon` / `fxg-server`).
 fn service_name(server: bool) -> &'static str {
     if server { "fxg-server" } else { "fxg-daemon" }
 }
 
-/// サービスが実行するサブコマンド引数。
+/// Subcommand arguments the service runs.
 fn service_args(server: bool) -> &'static [&'static str] {
     if server { &["server"] } else { &["daemon"] }
 }
 
-/// `fxg service <action>` を実行する。
+/// Run `fxg service <action>`.
 pub async fn run(action: ServiceAction, server: bool) -> Result<()> {
     if action == ServiceAction::Status {
         let exe = std::env::current_exe().context("failed to resolve the fxg executable path")?;
@@ -67,9 +66,11 @@ pub async fn run(action: ServiceAction, server: bool) -> Result<()> {
     run_sync(action, server)
 }
 
-/// `fxg service <action>` の同期コア (`status` を除く。CLI 表示なし)。
+/// Synchronous core of `fxg service <action>` (everything except `status`; no
+/// CLI output).
 ///
-/// トレイメニューの「自動起動」トグルからも同じ登録/解除ロジックを再利用する。
+/// The "auto-start" toggle in the tray menu reuses the same install/uninstall
+/// logic.
 pub fn run_sync(action: ServiceAction, server: bool) -> Result<()> {
     debug_assert!(
         action != ServiceAction::Status,
@@ -80,7 +81,7 @@ pub fn run_sync(action: ServiceAction, server: bool) -> Result<()> {
     platform_run(action, server, name, &exe)
 }
 
-/// 自動起動が登録されているか (トレイのチェック表示用。副作用なし)。
+/// Whether auto-start is registered (for the tray check mark; no side effects).
 #[cfg(windows)]
 pub fn is_installed(server: bool) -> bool {
     let name = service_name(server);
@@ -90,7 +91,7 @@ pub fn is_installed(server: bool) -> bool {
             .unwrap_or(false)
 }
 
-/// 自動起動が登録されているか (systemd ユニットファイルの有無)。
+/// Whether auto-start is registered (whether the systemd unit file exists).
 #[cfg(target_os = "linux")]
 pub fn is_installed(server: bool) -> bool {
     unit_path(service_name(server))
@@ -98,7 +99,7 @@ pub fn is_installed(server: bool) -> bool {
         .unwrap_or(false)
 }
 
-/// 自動起動が登録されているか (LaunchAgent plist の有無)。
+/// Whether auto-start is registered (whether the LaunchAgent plist exists).
 #[cfg(target_os = "macos")]
 pub fn is_installed(server: bool) -> bool {
     plist_path(service_name(server))
@@ -107,7 +108,7 @@ pub fn is_installed(server: bool) -> bool {
 }
 
 // ----------------------------------------------------------------------
-// Windows: タスクスケジューラ
+// Windows: Task Scheduler
 // ----------------------------------------------------------------------
 
 #[cfg(windows)]
@@ -117,26 +118,26 @@ fn platform_run(
     name: &str,
     exe: &std::path::Path,
 ) -> Result<()> {
-    // `/TR "\"<exe>\" <sub>"` の形へ組み立てる (schtasks は空白パスを引用符で受ける)
+    // Build `/TR "\"<exe>\" <sub>"` (schtasks accepts quoted paths with spaces)
     let args = service_args(server).join(" ");
     let task_run = format!("\"\\\"{}\\\" {args}\"", exe.display());
     let startup_script = startup_script_path(name)?;
 
     match action {
         ServiceAction::Install => {
-            // まずタスクスケジューラを試す。管理者権限が無い環境では
-            // スタートアップフォルダ (VBS ランチャー) へフォールバックする。
+            // Try Task Scheduler first. On machines without administrator
+            // rights, fall back to the Startup folder (VBS launcher).
             match schtasks(&[
                 "/Create", "/F", "/SC", "ONLOGON", "/TN", name, "/TR", &task_run,
             ]) {
                 Ok(()) => {
-                    println!("サービスを登録しました (タスクスケジューラ / ログオン時): {name}");
+                    println!("service installed (Task Scheduler, at logon): {name}");
                 }
                 Err(err) => {
-                    eprintln!("タスクスケジューラへの登録に失敗しました: {err}");
+                    eprintln!("failed to register the Task Scheduler task: {err}");
                     write_startup_script(&startup_script, exe, server)?;
                     println!(
-                        "サービスを登録しました (スタートアップフォルダ): {}",
+                        "service installed (Startup folder): {}",
                         startup_script.display()
                     );
                 }
@@ -152,9 +153,9 @@ fn platform_run(
                 false
             };
             if !task_removed && !script_removed {
-                bail!("サービス登録が見つかりません: {name}");
+                bail!("no service registration found: {name}");
             }
-            println!("サービス登録を解除しました: {name}");
+            println!("service uninstalled: {name}");
         }
         ServiceAction::Start => {
             if task_exists(name) {
@@ -162,9 +163,9 @@ fn platform_run(
             } else if startup_script.exists() {
                 start_via_script(&startup_script)?;
             } else {
-                bail!("サービスが登録されていません。`fxg service install` を実行してください");
+                bail!("service is not installed; run `fxg service install`");
             }
-            println!("サービスを開始しました: {name}");
+            println!("service started: {name}");
         }
         ServiceAction::Stop => {
             if task_exists(name) {
@@ -172,7 +173,7 @@ fn platform_run(
             } else {
                 stop_by_command_line(exe, service_args(server))?;
             }
-            println!("サービスを停止しました: {name}");
+            println!("service stopped: {name}");
         }
         ServiceAction::Restart => {
             if task_exists(name) {
@@ -182,9 +183,9 @@ fn platform_run(
                 let _ = stop_by_command_line(exe, service_args(server));
                 start_via_script(&startup_script)?;
             } else {
-                bail!("サービスが登録されていません。`fxg service install` を実行してください");
+                bail!("service is not installed; run `fxg service install`");
             }
-            println!("サービスを再起動しました: {name}");
+            println!("service restarted: {name}");
         }
         ServiceAction::Status => unreachable!("status is handled by the caller"),
     }
@@ -219,12 +220,12 @@ fn task_exists(name: &str) -> bool {
         .unwrap_or(false)
 }
 
-/// スタートアップフォルダの VBS ランチャーパス (`%APPDATA%\...\Startup\<name>.vbs`)。
+/// VBS launcher path in the Startup folder (`%APPDATA%\...\Startup\<name>.vbs`).
 #[cfg(windows)]
 fn startup_script_path(name: &str) -> Result<PathBuf> {
     let appdata = std::env::var_os("APPDATA")
         .map(PathBuf::from)
-        .context("APPDATA が設定されていません")?;
+        .context("APPDATA is not set")?;
     Ok(appdata
         .join("Microsoft")
         .join("Windows")
@@ -234,14 +235,14 @@ fn startup_script_path(name: &str) -> Result<PathBuf> {
         .join(format!("{name}.vbs")))
 }
 
-/// コンソールウィンドウを表示せずに起動する VBS ランチャーを書き出す。
+/// Write a VBS launcher that starts the target without showing a console window.
 #[cfg(windows)]
 fn write_startup_script(path: &std::path::Path, exe: &std::path::Path, server: bool) -> Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
     let args = service_args(server).join(" ");
-    // 第2引数 0 = ウィンドウ非表示 (CREATE_NO_WINDOW 相当)
+    // Second argument 0 = hide the window (equivalent to CREATE_NO_WINDOW)
     let body = format!(
         "' FlexAgent auto-start launcher (generated by `fxg service install`)\r\n\
          CreateObject(\"WScript.Shell\").Run \"\"\"{exe}\"\" {args}\", 0, False\r\n",
@@ -260,7 +261,7 @@ fn start_via_script(path: &std::path::Path) -> Result<()> {
     Ok(())
 }
 
-/// 実行中の fxg プロセス (引数一致) を PowerShell CIM 経由で停止する。
+/// Stop the running fxg process (matching arguments) through PowerShell CIM.
 #[cfg(windows)]
 fn stop_by_command_line(exe: &std::path::Path, args: &[&str]) -> Result<()> {
     let exe_name = exe
@@ -306,7 +307,7 @@ async fn status(server: bool, _exe: &std::path::Path) -> Result<()> {
     println!("log file:  {}", service_log_path(server).display());
     if !installed {
         println!(
-            "hint:      `fxg service install{}` で登録できます",
+            "hint:      register it with `fxg service install{}`",
             server_flag(server)
         );
     }
@@ -361,7 +362,7 @@ fn platform_run(
             std::fs::write(&unit, unit_body)?;
             systemctl(&["daemon-reload"])?;
             systemctl(&["enable", "--now", name])?;
-            println!("サービスを登録しました: {} ({})", name, unit.display());
+            println!("service installed: {} ({})", name, unit.display());
         }
         ServiceAction::Uninstall => {
             let _ = systemctl(&["disable", "--now", name]);
@@ -369,19 +370,19 @@ fn platform_run(
                 std::fs::remove_file(&unit)?;
             }
             let _ = systemctl(&["daemon-reload"]);
-            println!("サービス登録を解除しました: {name}");
+            println!("service uninstalled: {name}");
         }
         ServiceAction::Start => {
             systemctl(&["start", name])?;
-            println!("サービスを開始しました: {name}");
+            println!("service started: {name}");
         }
         ServiceAction::Stop => {
             systemctl(&["stop", name])?;
-            println!("サービスを停止しました: {name}");
+            println!("service stopped: {name}");
         }
         ServiceAction::Restart => {
             systemctl(&["restart", name])?;
-            println!("サービスを再起動しました: {name}");
+            println!("service restarted: {name}");
         }
         ServiceAction::Status => unreachable!("status is handled by the caller"),
     }
@@ -394,7 +395,7 @@ fn systemctl(args: &[&str]) -> Result<()> {
         .arg("--user")
         .args(args)
         .output()
-        .context("failed to run systemctl (systemd --user が必要です)")?;
+        .context("failed to run systemctl (systemd --user is required)")?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         bail!(
@@ -429,7 +430,7 @@ async fn status(server: bool, _exe: &std::path::Path) -> Result<()> {
     println!("log file:  {}", service_log_path(server).display());
     if !installed {
         println!(
-            "hint:      `fxg service install{}` で登録できます",
+            "hint:      register it with `fxg service install{}`",
             server_flag(server)
         );
     }
@@ -493,28 +494,28 @@ fn platform_run(
             );
             std::fs::write(&plist, body)?;
             launchctl(&["load", "-w", &plist.display().to_string()])?;
-            println!("サービスを登録しました: {} ({})", label, plist.display());
+            println!("service installed: {} ({})", label, plist.display());
         }
         ServiceAction::Uninstall => {
             let _ = launchctl(&["unload", "-w", &plist.display().to_string()]);
             if plist.exists() {
                 std::fs::remove_file(&plist)?;
             }
-            println!("サービス登録を解除しました: {label}");
+            println!("service uninstalled: {label}");
         }
         ServiceAction::Start => {
             launchctl(&["load", "-w", &plist.display().to_string()])?;
-            println!("サービスを開始しました: {label}");
+            println!("service started: {label}");
         }
         ServiceAction::Stop => {
             let target = format!("gui/{}", uid());
             launchctl(&["kill", "SIGTERM", &format!("{target}/{label}")])?;
-            println!("サービスを停止しました: {label}");
+            println!("service stopped: {label}");
         }
         ServiceAction::Restart => {
             let target = format!("gui/{}", uid());
             launchctl(&["kickstart", "-k", &format!("{target}/{label}")])?;
-            println!("サービスを再起動しました: {label}");
+            println!("service restarted: {label}");
         }
         ServiceAction::Status => unreachable!("status is handled by the caller"),
     }
@@ -523,7 +524,7 @@ fn platform_run(
 
 #[cfg(target_os = "macos")]
 fn uid() -> u32 {
-    // SAFETY: `getuid` は常に成功する
+    // SAFETY: `getuid` always succeeds
     unsafe { libc::getuid() }
 }
 
@@ -559,7 +560,7 @@ async fn status(server: bool, _exe: &std::path::Path) -> Result<()> {
     println!("log file:  {}", service_log_path(server).display());
     if !installed {
         println!(
-            "hint:      `fxg service install{}` で登録できます",
+            "hint:      register it with `fxg service install{}`",
             server_flag(server)
         );
     }
@@ -567,13 +568,14 @@ async fn status(server: bool, _exe: &std::path::Path) -> Result<()> {
 }
 
 // ----------------------------------------------------------------------
-// 共通ヘルパー
+// Shared helpers
 // ----------------------------------------------------------------------
 
-/// サービスが実際に応答しているかを確認する (OS 非依存の疎通確認)。
+/// Check whether the service actually responds (an OS-independent probe).
 ///
-/// - daemon: ローカルIPC (Named Pipe / UDS) へ接続できるか
-/// - server: `~/.flexagent/config.toml` の listen addr へ TCP 接続できるか
+/// - daemon: whether the local IPC endpoint (Named Pipe / UDS) is reachable
+/// - server: whether a TCP connection to the listen addr in
+///   `~/.flexagent/config.toml` succeeds
 async fn probe_running(server: bool) -> bool {
     let env = fxg_protocol::config::process_env;
     if server {

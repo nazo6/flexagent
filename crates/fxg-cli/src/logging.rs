@@ -1,8 +1,11 @@
-//! FlexAgent ロギング基盤。
+//! FlexAgent logging infrastructure.
 //!
-//! - stderr (Console): TTY 判定および `NO_COLOR` 環境変数に基づき ANSI カラーを自動制御
-//! - file (Logs): ANSI カラーを強制排除し、ミリ秒精度の ISO 8601 タイムスタンプで保存
-//! - 起動バナー: デーモン・サーバーフォアグラウンド実行時に接続先や状態を出力
+//! - stderr (Console): ANSI color is auto-controlled from the TTY check and the
+//!   `NO_COLOR` environment variable
+//! - file (Logs): ANSI color is stripped and records are stored with
+//!   millisecond-precision ISO 8601 timestamps
+//! - startup banner: prints endpoints and state when the daemon or server runs
+//!   in the foreground
 
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
@@ -12,45 +15,46 @@ use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{EnvFilter, Layer};
 
-/// サブコマンドの種類に応じたロギング種別。
+/// Logging kind for the subcommand being run.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum CommandLogKind {
-    /// 常駐デーモン (`fxg daemon`)
+    /// Resident daemon (`fxg daemon`)
     Daemon,
-    /// 中央サーバー (`fxg server`)
+    /// Central server (`fxg server`)
     Server,
-    /// 通常の CLI コマンド (`fxg ps`, `fxg session ...` 等)
+    /// Ordinary CLI command (`fxg ps`, `fxg session ...`, etc.)
     #[default]
     Cli,
 }
 
-/// ロギング初期化オプション。
+/// Logging initialization options.
 #[derive(Debug, Clone, Default)]
 pub struct LoggingOptions {
-    /// コマンドラインで指定されたログレベル
+    /// Log level given on the command line
     pub log_level: Option<String>,
-    /// 詳細化 (-v: 1, -vv: 2)
+    /// Verbosity (-v: 1, -vv: 2)
     pub verbose: u8,
-    /// 抑制 (-q)
+    /// Suppression (-q)
     pub quiet: bool,
-    /// カラー無効化フラグ
+    /// Flag that disables color
     pub no_color: bool,
-    /// ログファイル出力先 (None: デフォルト動作, Some("-"): 出力なし)
+    /// Log file destination (None: default behavior, Some("-"): no output)
     pub log_file: Option<String>,
-    /// ログフォーマット ("text" | "json")
+    /// Log format ("text" | "json")
     pub log_format: Option<String>,
-    /// コマンド種別
+    /// Command kind
     pub kind: CommandLogKind,
-    /// stdio モードか (一時VM)
+    /// Whether stdio mode is active (ephemeral VM)
     pub is_stdio: bool,
 }
 
-/// ANSI カラーを出力すべきかを判定する。
+/// Decide whether ANSI color should be emitted.
 ///
-/// 1. `--no-color` または `config.no_color` が true なら無効
-/// 2. `NO_COLOR` 環境変数が設定されていれば無効 (https://no-color.org/)
-/// 3. `CLICOLOR_FORCE` が "0" 以外で設定されていれば有効
-/// 4. それ以外は `stderr.is_terminal()` (ファイルやパイプへのリダイレクト時は自動で無効)
+/// 1. Disabled when `--no-color` or `config.no_color` is true
+/// 2. Disabled when the `NO_COLOR` environment variable is set (https://no-color.org/)
+/// 3. Enabled when `CLICOLOR_FORCE` is set to anything other than "0"
+/// 4. Otherwise `stderr.is_terminal()` (automatically disabled when redirected to
+///    a file or pipe)
 pub fn should_use_color(no_color_flag: bool, config_no_color: bool) -> bool {
     if no_color_flag || config_no_color {
         return false;
@@ -66,14 +70,14 @@ pub fn should_use_color(no_color_flag: bool, config_no_color: bool) -> bool {
     std::io::stderr().is_terminal()
 }
 
-/// ログレベルの文字列・フィルタを解決する。
+/// Resolve the log level string and filter.
 fn resolve_filter(opts: &LoggingOptions, config: &LogConfig) -> EnvFilter {
-    // 1. RUST_LOG 環境変数が最優先
+    // 1. RUST_LOG environment variable has the highest priority
     if let Ok(env_filter) = EnvFilter::try_from_default_env() {
         return env_filter;
     }
 
-    // 2. CLI フラグによるレベル解決
+    // 2. Level resolution from CLI flags
     if opts.quiet {
         return EnvFilter::new("error");
     }
@@ -88,32 +92,32 @@ fn resolve_filter(opts: &LoggingOptions, config: &LogConfig) -> EnvFilter {
         return EnvFilter::new(format!("fxg={level},{level}"));
     }
 
-    // 3. 設定ファイル (config.toml) の level
+    // 3. `level` from the configuration file (config.toml)
     if let Some(level) = config.level.as_deref() {
         let level = level.trim().to_ascii_lowercase();
         return EnvFilter::new(format!("fxg={level},{level}"));
     }
 
-    // 4. コマンド種別ごとのデフォルト
+    // 4. Default per command kind
     match opts.kind {
         CommandLogKind::Daemon | CommandLogKind::Server => {
-            // デーモン・サーバーは fxg 内部は info、サードパーティのノイズは warn
+            // Daemon and server: info for fxg internals, warn for third-party noise
             EnvFilter::new("fxg=info,warn")
         }
         CommandLogKind::Cli => {
-            // 通常の CLI は出力を邪魔しないよう warn
+            // Ordinary CLI: warn so command output stays clean
             EnvFilter::new("warn")
         }
     }
 }
 
-/// ログファイルの出力先パスを解決する。
+/// Resolve the destination path of the log file.
 pub fn resolve_log_file_path(
     opts: &LoggingOptions,
     config: &LogConfig,
     fxg_home: &Path,
 ) -> Option<PathBuf> {
-    // 1. CLI オプション
+    // 1. CLI option
     if let Some(path_str) = opts.log_file.as_deref() {
         if path_str == "-" || path_str.eq_ignore_ascii_case("none") || path_str.is_empty() {
             return None;
@@ -121,7 +125,7 @@ pub fn resolve_log_file_path(
         return Some(resolve_relative_path(path_str, fxg_home));
     }
 
-    // 2. 設定ファイル
+    // 2. Configuration file
     if let Some(path_str) = config.file.as_deref() {
         if path_str == "-" || path_str.eq_ignore_ascii_case("none") || path_str.is_empty() {
             return None;
@@ -129,8 +133,9 @@ pub fn resolve_log_file_path(
         return Some(resolve_relative_path(path_str, fxg_home));
     }
 
-    // 3. デフォルト動作:
-    //    Daemon / Server の常駐プロセスかつ stdio 以外なら自動で ~/.flexagent/logs/<kind>.log
+    // 3. Default behavior:
+    //    For a resident Daemon / Server process outside stdio mode, use
+    //    ~/.flexagent/logs/<kind>.log automatically.
     if opts.is_stdio {
         return None;
     }
@@ -150,7 +155,7 @@ fn resolve_relative_path(path_str: &str, base: &Path) -> PathBuf {
     }
 }
 
-/// ロギングを初期化する。
+/// Initialize logging.
 pub fn init_logging(
     opts: &LoggingOptions,
     global: &GlobalConfig,
@@ -167,7 +172,7 @@ pub fn init_logging(
 
     let log_file_path = resolve_log_file_path(opts, &global.log, fxg_home);
 
-    // ログファイル出力レイヤー (ANSI カラーは強制無効)
+    // Log file layer (ANSI color forcibly disabled)
     let file_layer = if let Some(ref path) = log_file_path {
         if let Some(parent) = path.parent() {
             let _ = std::fs::create_dir_all(parent);
@@ -200,7 +205,7 @@ pub fn init_logging(
         None
     };
 
-    // stderr レイヤー (TTY判定に基づくANSIカラー制御)
+    // stderr layer (ANSI color controlled by the TTY check)
     let stderr_layer = if is_json {
         tracing_subscriber::fmt::layer()
             .json()
@@ -225,9 +230,9 @@ pub fn init_logging(
     log_file_path
 }
 
-/// デーモン起動バナーを stderr に出力する。
+/// Print the daemon startup banner to stderr.
 ///
-/// ※ `--stdio` モード時はプロトコル保護のため呼ばない。
+/// Do not call this in `--stdio` mode, where it would corrupt the protocol.
 pub fn print_daemon_banner(
     node_id: &str,
     http_addr: &str,
@@ -276,7 +281,7 @@ pub fn print_daemon_banner(
     }
 }
 
-/// サーバー起動バナーを stderr に出力する。
+/// Print the server startup banner to stderr.
 pub fn print_server_banner(
     http_addr: &str,
     fxg_home: &Path,

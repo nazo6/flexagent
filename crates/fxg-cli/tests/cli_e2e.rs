@@ -1,27 +1,28 @@
-//! `fxg` CLI のエンドツーエンドテスト。
+//! End-to-end tests for the `fxg` CLI.
 //!
-//! 実際に `fxg daemon` を子プロセスとして起動し、**IPC 経由**で
+//! The tests actually start `fxg daemon` as a child process and verify that
 //! `fxg project info` / `fxg project list` / `fxg worktree add|list|remove` /
-//! `fxg ps` / `fxg auth token` が動作することを検証する
-//! (Phase 2 完了条件: 「`fxg daemon` 起動後、IPC経由で各コマンドが動作」)。
+//! `fxg ps` / `fxg auth token` work **through IPC** (Phase 2 exit criterion:
+//! "after `fxg daemon` starts, each command works through IPC").
 //!
-//! テストは一時的な `FXG_HOME` と IPC エンドポイントを使うため、
-//! 実環境のデーモンと衝突しない。
+//! Each test uses a temporary `FXG_HOME` and IPC endpoint, so it never collides
+//! with a real daemon.
 
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
 use std::time::{Duration, Instant};
 
-/// `fxg` バイナリのパス (cargo がテスト用に提供する)。
+/// Path of the `fxg` binary (provided by cargo for tests).
 fn fxg_bin() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_fxg"))
 }
 
-/// テスト用の分離された環境。
+/// Isolated environment for a test.
 struct TestEnv {
     dir: tempfile::TempDir,
     home: PathBuf,
-    /// IPC エンドポイント決定に使う環境変数 (unix: XDG_RUNTIME_DIR / windows: USERNAME)
+    /// Environment variables that determine the IPC endpoint
+    /// (unix: XDG_RUNTIME_DIR / windows: USERNAME)
     ipc_env: Vec<(String, String)>,
     daemon: Option<Child>,
 }
@@ -34,7 +35,8 @@ impl TestEnv {
         let runtime = dir.path().join("runtime");
         std::fs::create_dir_all(&runtime).expect("mkdir runtime");
         let ipc_env = if cfg!(windows) {
-            // テストは同一プロセス内で並列実行されるため、Named Pipe 名を連番で一意化する
+            // Tests run in parallel within the same process, so make the Named
+            // Pipe name unique with a counter
             static COUNTER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
             let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             vec![(
@@ -55,7 +57,7 @@ impl TestEnv {
         }
     }
 
-    /// 子プロセス用の環境変数を組み立てる。
+    /// Build the environment variables for the child process.
     fn command(&self) -> Command {
         let mut command = Command::new(fxg_bin());
         command.env("FXG_HOME", &self.home);
@@ -65,9 +67,9 @@ impl TestEnv {
         command
     }
 
-    /// デーモンを起動し、IPC が応答するまで待機する。
+    /// Start the daemon and wait until IPC responds.
     async fn start_daemon(&mut self) {
-        // デーモンのログは失敗時の診断用にファイルへ保存する
+        // Save daemon logs to a file for diagnostics on failure
         let log_path = self.dir.path().join("daemon.log");
         let log = std::fs::File::create(&log_path).expect("create daemon log");
         let child = self
@@ -84,7 +86,8 @@ impl TestEnv {
         loop {
             let output = self.run(&["ps"], None);
             if output.status.success() {
-                // デーモン起動メッセージが出力され、かつ ANSI カラーコードが含まれていないことを検証
+                // Verify the daemon startup message was printed and that the log
+                // contains no ANSI color codes
                 let log = self.daemon_log();
                 assert!(
                     log.contains("fxg daemon started") || log.contains("FlexAgent daemon"),
@@ -107,12 +110,12 @@ impl TestEnv {
         }
     }
 
-    /// デーモンのログ (Stdio 診断用)。
+    /// Daemon log (for Stdio diagnostics).
     fn daemon_log(&self) -> String {
         std::fs::read_to_string(self.dir.path().join("daemon.log")).unwrap_or_default()
     }
 
-    /// デーモンを停止する。
+    /// Stop the daemon.
     fn stop_daemon(&mut self) {
         if let Some(mut child) = self.daemon.take() {
             let _ = child.kill();
@@ -120,7 +123,7 @@ impl TestEnv {
         }
     }
 
-    /// `fxg` を実行する。
+    /// Run `fxg`.
     fn run(&self, args: &[&str], cwd: Option<&Path>) -> Output {
         let mut command = self.command();
         command.args(args);
@@ -161,7 +164,7 @@ fn run_git(dir: &Path, args: &[&str]) {
     assert!(status.success(), "git {args:?} failed");
 }
 
-/// 一時ディレクトリに Git リポジトリ + origin remote を作る。
+/// Create a Git repository with an origin remote in a temporary directory.
 fn init_repo(dir: &Path) {
     std::fs::create_dir_all(dir).expect("mkdir repo");
     run_git(dir, &["init", "-q", "-b", "main"]);
@@ -230,7 +233,7 @@ async fn cli_commands_work_through_daemon_ipc() {
     assert!(text.contains("created worktree"), "got: {text}");
     assert!(worktree_dir.join("README.md").is_file());
 
-    // 別名 `fxg wt list` でも一覧できる
+    // The alias `fxg wt list` must list them too
     let output = env.run(&["wt", "list"], Some(&repo));
     let text = stdout_of(&output);
     assert!(text.contains("feat/cli-e2e"), "got: {text}");
@@ -243,17 +246,17 @@ async fn cli_commands_work_through_daemon_ipc() {
     let text = stdout_of(&output);
     assert!(text.contains("removed worktree"), "got: {text}");
 
-    // --- fxg ps (セッションはまだ無い) ---
+    // --- fxg ps (there are no sessions yet) ---
     let output = env.run(&["ps"], Some(&repo));
     let text = stdout_of(&output);
-    assert!(text.contains("セッションなし"), "got: {text}");
+    assert!(text.contains("no sessions"), "got: {text}");
 
-    // `fxg session list --json` も同じ経路
+    // `fxg session list --json` uses the same path
     let output = env.run(&["session", "list", "--json"], Some(&repo));
     let json: serde_json::Value = serde_json::from_str(&stdout_of(&output)).expect("valid json");
     assert!(json.as_array().expect("array").is_empty());
 
-    // --- fxg auth token (64文字の hex) ---
+    // --- fxg auth token (64 hex characters) ---
     let output = env.run(&["auth", "token"], Some(&repo));
     let token = stdout_of(&output).trim().to_owned();
     assert_eq!(token.len(), 64, "token length: {token}");
@@ -279,15 +282,17 @@ async fn cli_reports_missing_daemon() {
     );
 }
 
-/// Phase 3 のセッション操作系コマンド (`session show|prompt|stop|kill|revert|fork`
-/// / `inbox` / `attach`) が IPC 経由で正しくエラーを返すことを検証する。
+/// Verify that the Phase 3 session commands (`session
+/// show|prompt|stop|kill|revert|fork` / `inbox` / `attach`) return errors
+/// correctly through IPC.
 ///
-/// 実エージェントを起動せずに検証できる範囲 (引数パース・IPC 往復・エラーコード)
-/// を対象とする。
+/// The tests cover what can be verified without launching a real agent
+/// (argument parsing, IPC round-trips, error codes).
 #[tokio::test]
 async fn phase3_session_and_inbox_commands_roundtrip_through_daemon() {
     let mut env = TestEnv::new();
-    // 起動に失敗するカスタムエージェント (セッション記録経路の検証用)
+    // A custom agent that fails to start (for verifying the session recording
+    // path)
     std::fs::write(
         env.home.join(fxg_protocol::config::CONFIG_FILE_NAME),
         "[agents.custom.broken]\nname = \"Broken Agent\"\ncommand = \"fxg-definitely-not-installed\"\n",
@@ -297,10 +302,10 @@ async fn phase3_session_and_inbox_commands_roundtrip_through_daemon() {
     let repo = env.dir.path().join("repo");
     init_repo(&repo);
 
-    // --- fxg inbox list (承認待ちなし) ---
+    // --- fxg inbox list (nothing pending) ---
     let output = env.run(&["inbox", "list"], Some(&repo));
     let text = stdout_of(&output);
-    assert!(text.contains("承認待ちリクエストなし"), "got: {text}");
+    assert!(text.contains("no pending approval requests"), "got: {text}");
 
     let output = env.run(&["inbox", "list", "--json"], Some(&repo));
     let json: serde_json::Value = serde_json::from_str(&stdout_of(&output)).expect("valid json");
@@ -319,23 +324,23 @@ async fn phase3_session_and_inbox_commands_roundtrip_through_daemon() {
         "got: {json}"
     );
 
-    // 存在しない request id への応答は拒否される
+    // Responding to a nonexistent request ID is rejected
     let output = env.run(&["inbox", "approve", "req-unknown"], Some(&repo));
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.contains("承認待ちリクエストが見つかりません"),
+        stderr.contains("pending approval request not found"),
         "got: {stderr}"
     );
 
-    // --- fxg session show (未知のセッション) ---
+    // --- fxg session show (unknown session) ---
     let unknown = "0195f0ab-0000-7000-8000-000000000000";
     let output = env.run(&["session", "show", unknown], Some(&repo));
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("NOT_FOUND"), "got: {stderr}");
 
-    // --- 未知セッションへの操作は INVALID_STATE で失敗する ---
+    // --- Operations on an unknown session fail with INVALID_STATE ---
     for args in [
         vec!["session", "prompt", unknown, "hello"],
         vec!["session", "stop", unknown],
@@ -351,7 +356,8 @@ async fn phase3_session_and_inbox_commands_roundtrip_through_daemon() {
         assert!(stderr.contains("INVALID_STATE"), "{args:?}: {stderr}");
     }
 
-    // --- fxg run --provisioner は中央サーバー必須 (未設定時は設定エラー) ---
+    // --- fxg run --provisioner requires the central server (a config error
+    // when unset) ---
     let output = env.run(
         &["run", "opencode", "--provisioner", "colab-pro"],
         Some(&repo),
@@ -360,7 +366,7 @@ async fn phase3_session_and_inbox_commands_roundtrip_through_daemon() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("central_server_url"), "got: {stderr}");
 
-    // --- 起動に失敗するエージェントでもセッションは記録される ---
+    // --- Sessions are recorded even when the agent fails to start ---
     let output = env.run(&["run", "broken", "--detach"], Some(&repo));
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -370,7 +376,7 @@ async fn phase3_session_and_inbox_commands_roundtrip_through_daemon() {
         env.daemon_log()
     );
 
-    // `fxg ps -a --json` から記録されたセッションIDを取得する
+    // Get the recorded session ID from `fxg ps -a --json`
     let output = env.run(&["ps", "-a", "--json"], Some(&repo));
     let sessions: serde_json::Value = serde_json::from_str(&stdout_of(&output)).expect("json");
     let session_id = sessions
@@ -381,20 +387,20 @@ async fn phase3_session_and_inbox_commands_roundtrip_through_daemon() {
         .map(|session| session["session_id"].as_str().expect("id").to_owned())
         .expect("broken agent session must be recorded");
 
-    // --- fxg session show (詳細 + 直近イベント) ---
+    // --- fxg session show (details + recent events) ---
     let output = env.run(&["session", "show", &session_id], Some(&repo));
     let text = stdout_of(&output);
     assert!(text.contains(&session_id), "got: {text}");
     assert!(text.contains("error"), "status must be error: {text}");
     assert!(text.contains("session_created"), "got: {text}");
 
-    // `--json` でも同じ情報が取れる
+    // `--json` returns the same information
     let output = env.run(&["session", "show", &session_id, "--json"], Some(&repo));
     let json: serde_json::Value = serde_json::from_str(&stdout_of(&output)).expect("json");
     assert_eq!(json["session"]["agent_id"], "broken");
     assert_eq!(json["session"]["status"], "error");
 
-    // --- エージェント起動に失敗するセッションの resume もエラーになる ---
+    // --- Resuming a session whose agent failed to start also errors ---
     let output = env.run(&["session", "resume", &session_id, "--detach"], Some(&repo));
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -411,7 +417,8 @@ async fn phase3_session_and_inbox_commands_roundtrip_through_daemon() {
 async fn cli_shows_help_for_missing_subcommand() {
     let env = TestEnv::new();
     let output = env.run(&["project"], None);
-    // サブコマンド未指定は usage エラー扱いで help を stderr へ出力する (clap 互換)
+    // A missing subcommand is a usage error and prints help to stderr (clap
+    // compatible)
     assert!(!output.status.success());
     let text = format!(
         "{}{}",
@@ -456,7 +463,8 @@ async fn daemon_logging_to_custom_file_and_no_color() {
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
     }
 
-    // custom_daemon.log にログが書き込まれ、かつ ANSI エスケープが含まれないことを検証
+    // Verify that the log is written to custom_daemon.log and contains no ANSI
+    // escapes
     assert!(custom_log_path.exists(), "custom log file must exist");
     let content = std::fs::read_to_string(&custom_log_path).unwrap_or_default();
     assert!(

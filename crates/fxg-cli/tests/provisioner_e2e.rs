@@ -1,9 +1,10 @@
-//! Phase 6: 一時VMプロビジョナーの E2E テスト。
+//! Phase 6: end-to-end tests for ephemeral VM provisioners.
 //!
-//! 実バイナリ `fxg daemon --stdio --ephemeral` をプロビジョナーとして子プロセス起動し、
-//! 中央サーバーとの stdio JSON Lines 通信・`StartSession` 中継・ブートストラップログの
-//! ストリーム配信・セッション終了時の `DrainAndShutdown` → `WorkspaceBundleUpload` →
-//! `sessions.git_bundle_path` 保存までを検証する。
+//! The tests start the real `fxg daemon --stdio --ephemeral` binary as a child
+//! process through a provisioner and verify stdio JSON Lines traffic with the
+//! central server, `StartSession` relaying, streamed bootstrap logs, and the
+//! `DrainAndShutdown` → `WorkspaceBundleUpload` →
+//! `sessions.git_bundle_path` persistence at session end.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -16,7 +17,7 @@ use fxg_server::Server;
 use fxg_server::api::{ClientApiBackend, ClientEvent};
 use fxg_server::state::ServerOptions;
 
-/// Git コマンドを実行する (失敗は panic)。
+/// Run a Git command (panics on failure).
 fn git(dir: &Path, args: &[&str]) {
     let status = std::process::Command::new("git")
         .args(args)
@@ -28,7 +29,7 @@ fn git(dir: &Path, args: &[&str]) {
     assert!(status.success(), "git {args:?} failed");
 }
 
-/// 条件が満たされるまでポーリングする。
+/// Poll until the condition holds.
 async fn wait_until<F, Fut>(what: &str, timeout: Duration, mut check: F)
 where
     F: FnMut() -> Fut,
@@ -60,8 +61,9 @@ async fn provisioner_runs_stdio_node_and_drains_bundle() {
     git(&repo, &["add", "-A"]);
     git(&repo, &["commit", "-q", "-m", "initial"]);
 
-    // 子プロセス (一時ノード) の config.toml: 存在しないモックエージェントを定義し、
-    // StartSession が確実に失敗するようにする (stdio 経路とエラー伝播の検証)
+    // config.toml of the child process (the ephemeral node): define a
+    // nonexistent mock agent so StartSession fails deterministically (verifying
+    // the stdio path and error propagation)
     std::fs::create_dir_all(&node_home).expect("mkdir node home");
     std::fs::write(
         node_home.join("config.toml"),
@@ -69,7 +71,7 @@ async fn provisioner_runs_stdio_node_and_drains_bundle() {
     )
     .expect("write node config");
 
-    // サーバー側にプロジェクトを登録する (`canonical_git_url` が必須)
+    // Register the project on the server side (`canonical_git_url` is required)
     let project_id = "github.com/nazo6/flexagent";
     let db = Db::open(&fxg_db::hub_db_path(&server_home), DbRole::Hub)
         .await
@@ -83,8 +85,9 @@ async fn provisioner_runs_stdio_node_and_drains_bundle() {
     .expect("register project");
     drop(db);
 
-    // プロビジョナー: 実バイナリを `daemon --stdio --ephemeral` で起動する
-    // (`{BOOTSTRAP_SCRIPT}` を使わない自由形式の定義。ブートストラップなしの経路検証)
+    // Provisioner: start the real binary with `daemon --stdio --ephemeral`
+    // (a free-form definition that avoids `{BOOTSTRAP_SCRIPT}`; verifies the
+    // path without bootstrap)
     let provisioner = ProvisionerConfig {
         description: Some("test stdio provisioner".to_owned()),
         command: env!("CARGO_BIN_EXE_fxg").to_owned(),
@@ -118,7 +121,7 @@ async fn provisioner_runs_stdio_node_and_drains_bundle() {
             .expect("token");
     let http = reqwest::Client::new();
 
-    // ブートストラップログ (エフェメラルイベント) を購読する
+    // Subscribe to bootstrap logs (ephemeral events)
     let mut events = server.state().subscribe_client_events();
 
     let response = http
@@ -150,7 +153,8 @@ async fn provisioner_runs_stdio_node_and_drains_bundle() {
     let created: CreateSessionResponse = response.json().await.expect("decode");
     let session_id = created.session_id.clone();
 
-    // 1. 一時ノードが登録され、ライフサイクルが進む (provisioning → ready)
+    // 1. The ephemeral node registers and its lifecycle advances
+    //    (provisioning → ready)
     let server_state = server.state().clone();
     wait_until("ephemeral node ready", Duration::from_secs(60), || {
         let db = server_state.db().clone();
@@ -167,7 +171,7 @@ async fn provisioner_runs_stdio_node_and_drains_bundle() {
     })
     .await;
 
-    // 2. セッション状態が error になる (モックエージェントが見つからない)
+    // 2. The session status becomes error (the mock agent is missing)
     wait_until("session error", Duration::from_secs(60), || {
         let db = server_state.db().clone();
         let session_id = session_id.clone();
@@ -182,7 +186,7 @@ async fn provisioner_runs_stdio_node_and_drains_bundle() {
     })
     .await;
 
-    // 3. ブートストラップログが Client WS へ配信されている
+    // 3. Bootstrap logs are delivered to the Client WS
     let mut bootstrap_lines = Vec::new();
     while let Ok(event) = events.try_recv() {
         if let ClientEvent::BootstrapLog {
@@ -195,7 +199,7 @@ async fn provisioner_runs_stdio_node_and_drains_bundle() {
         }
     }
 
-    // 4. アイドル/セッション終了監視による Drain → Git バンドル退避
+    // 4. Idle / session-end monitoring triggers Drain → Git bundle backup
     wait_until("workspace bundle stored", Duration::from_secs(90), || {
         let db = server_state.db().clone();
         let session_id = session_id.clone();
@@ -222,7 +226,7 @@ async fn provisioner_runs_stdio_node_and_drains_bundle() {
         "bundle path must live under the server home: {bundle_path}"
     );
 
-    // 5. 一時ノードは terminated として記録される
+    // 5. The ephemeral node is recorded as terminated
     wait_until("node terminated", Duration::from_secs(60), || {
         let db = server_state.db().clone();
         async move {
@@ -240,7 +244,7 @@ async fn provisioner_runs_stdio_node_and_drains_bundle() {
     })
     .await;
 
-    // REST でも一時ノードが見える (`GET /api/v1/nodes`)
+    // The ephemeral node is visible through REST as well (`GET /api/v1/nodes`)
     let nodes: NodesResponse = http
         .get(format!("http://{addr}/api/v1/nodes"))
         .bearer_auth(&token)
