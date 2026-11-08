@@ -1,6 +1,6 @@
 <script lang="ts">
-  import { Badge } from '$lib/components/ui/badge';
-  import WrenchIcon from '@lucide/svelte/icons/wrench';
+  import { Badge } from "$lib/components/ui/badge";
+  import WrenchIcon from "@lucide/svelte/icons/wrench";
 
   let { lines }: { lines: string[] } = $props();
 
@@ -25,12 +25,14 @@
       <WrenchIcon class="size-3.5" />
       Environment Bootstrap Log
       <Badge variant="secondary">{lines.length} 行</Badge>
-      <span class="text-muted-foreground ml-auto">{open ? '折りたたむ' : '展開する'}</span>
+      <span class="text-muted-foreground ml-auto">{open ? "折りたたむ" : "展開する"}</span>
     </button>
     {#if open}
       <pre
         bind:this={scrollEl}
-        class="bg-muted/30 max-h-48 overflow-auto border-t p-2 font-mono text-xs whitespace-pre-wrap">{lines.join('\n')}</pre>
+        class="bg-muted/30 max-h-48 overflow-auto border-t p-2 font-mono text-xs whitespace-pre-wrap">{lines.join(
+          "\n",
+        )}</pre>
     {/if}
   </div>
 {/if}

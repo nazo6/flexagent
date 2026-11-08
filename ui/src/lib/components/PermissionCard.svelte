@@ -1,14 +1,14 @@
 <script lang="ts">
-  import { Badge } from '$lib/components/ui/badge';
-  import { Button } from '$lib/components/ui/button';
-  import type { PermissionOption } from '$lib/generated/PermissionOption';
-  import { formatRelativeTime } from '$lib/format';
-  import { sync } from '$lib/stores/app.svelte';
-  import { toast } from 'svelte-sonner';
-  import CheckIcon from '@lucide/svelte/icons/check';
-  import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
-  import ShieldCheckIcon from '@lucide/svelte/icons/shield-check';
-  import XIcon from '@lucide/svelte/icons/x';
+  import { Badge } from "$lib/components/ui/badge";
+  import { Button } from "$lib/components/ui/button";
+  import type { PermissionOption } from "$lib/generated/PermissionOption";
+  import { formatRelativeTime } from "$lib/format";
+  import { sync } from "$lib/stores/app.svelte";
+  import { toast } from "svelte-sonner";
+  import CheckIcon from "@lucide/svelte/icons/check";
+  import ChevronRightIcon from "@lucide/svelte/icons/chevron-right";
+  import ShieldCheckIcon from "@lucide/svelte/icons/shield-check";
+  import XIcon from "@lucide/svelte/icons/x";
 
   let {
     sessionId,
@@ -18,7 +18,7 @@
     options,
     details = null,
     resolved = null,
-    createdAt = null
+    createdAt = null,
   }: {
     sessionId: string;
     requestId: string;
@@ -33,11 +33,11 @@
   let busyOptionId = $state<string | null>(null);
 
   const detailsJson = $derived(
-    details === null || details === undefined ? null : JSON.stringify(details, null, 2)
+    details === null || details === undefined ? null : JSON.stringify(details, null, 2),
   );
 
   function isAllowOption(kind: string): boolean {
-    return kind.startsWith('allow');
+    return kind.startsWith("allow");
   }
 
   async function respond(option: PermissionOption) {
@@ -45,12 +45,12 @@
     busyOptionId = option.option_id;
     try {
       const result = await sync.respondPermission(sessionId, requestId, option.option_id);
-      if (result.code === 'ALREADY_RESOLVED') {
-        toast.info('既に他のクライアントで解決済みでした');
+      if (result.code === "ALREADY_RESOLVED") {
+        toast.info("既に他のクライアントで解決済みでした");
       } else if (!result.success) {
-        toast.error(result.error ?? result.code ?? '承認応答に失敗しました');
+        toast.error(result.error ?? result.code ?? "承認応答に失敗しました");
       } else {
-        toast.success('応答を送信しました');
+        toast.success("応答を送信しました");
       }
       await sync.refreshInbox();
     } catch (error) {
@@ -88,7 +88,9 @@
 
   {#if detailsJson !== null}
     <details class="group">
-      <summary class="text-muted-foreground hover:text-foreground cursor-pointer text-xs select-none">
+      <summary
+        class="text-muted-foreground hover:text-foreground cursor-pointer text-xs select-none"
+      >
         詳細 (コマンド / Diff)
       </summary>
       <pre
@@ -101,7 +103,7 @@
       {#each options as option (option.option_id)}
         <Button
           size="sm"
-          variant={isAllowOption(option.kind) ? 'default' : 'outline'}
+          variant={isAllowOption(option.kind) ? "default" : "outline"}
           disabled={busyOptionId !== null}
           onclick={() => void respond(option)}
         >

@@ -1,30 +1,30 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
-  import * as AlertDialog from '$lib/components/ui/alert-dialog';
-  import { Badge } from '$lib/components/ui/badge';
-  import { Button } from '$lib/components/ui/button';
-  import { Card } from '$lib/components/ui/card';
-  import * as Dialog from '$lib/components/ui/dialog';
-  import { Input } from '$lib/components/ui/input';
-  import { Label } from '$lib/components/ui/label';
-  import { agentSourceLabel, agentsAvailableOn, isPackageEnabled } from '$lib/agents';
-  import type { AgentSummary } from '$lib/generated/AgentSummary';
-  import { sync } from '$lib/stores/app.svelte';
-  import { toast } from 'svelte-sonner';
-  import BotIcon from '@lucide/svelte/icons/bot';
-  import DownloadIcon from '@lucide/svelte/icons/download';
-  import PencilIcon from '@lucide/svelte/icons/pencil';
-  import PlusIcon from '@lucide/svelte/icons/plus';
-  import PackageIcon from '@lucide/svelte/icons/package';
-  import PowerOffIcon from '@lucide/svelte/icons/power-off';
-  import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
-  import SearchIcon from '@lucide/svelte/icons/search';
-  import Trash2Icon from '@lucide/svelte/icons/trash-2';
+  import { onMount } from "svelte";
+  import * as AlertDialog from "$lib/components/ui/alert-dialog";
+  import { Badge } from "$lib/components/ui/badge";
+  import { Button } from "$lib/components/ui/button";
+  import { Card } from "$lib/components/ui/card";
+  import * as Dialog from "$lib/components/ui/dialog";
+  import { Input } from "$lib/components/ui/input";
+  import { Label } from "$lib/components/ui/label";
+  import { agentSourceLabel, agentsAvailableOn, isPackageEnabled } from "$lib/agents";
+  import type { AgentSummary } from "$lib/generated/AgentSummary";
+  import { sync } from "$lib/stores/app.svelte";
+  import { toast } from "svelte-sonner";
+  import BotIcon from "@lucide/svelte/icons/bot";
+  import DownloadIcon from "@lucide/svelte/icons/download";
+  import PencilIcon from "@lucide/svelte/icons/pencil";
+  import PlusIcon from "@lucide/svelte/icons/plus";
+  import PackageIcon from "@lucide/svelte/icons/package";
+  import PowerOffIcon from "@lucide/svelte/icons/power-off";
+  import RefreshCwIcon from "@lucide/svelte/icons/refresh-cw";
+  import SearchIcon from "@lucide/svelte/icons/search";
+  import Trash2Icon from "@lucide/svelte/icons/trash-2";
 
   let agents = $state<AgentSummary[]>([]);
   let loading = $state(false);
   /** 対象ノード (カタログの取得元・操作対象)。 */
-  let nodeId = $state('');
+  let nodeId = $state("");
   /** 実行中の操作ラベル (例: `opencode2 をインストール中…`)。null = アイドル。 */
   let busyLabel = $state<string | null>(null);
   /** 削除確認の対象。 */
@@ -32,13 +32,13 @@
 
   // カタログ (このノードで未導入のレジストリエージェント) ダイアログ
   let catalogOpen = $state(false);
-  let catalogQuery = $state('');
+  let catalogQuery = $state("");
 
   // カスタムエージェント定義フォーム (null = 新規作成)
   let customOpen = $state(false);
   let customBusy = $state(false);
   let customEditId = $state<string | null>(null);
-  let customForm = $state({ id: '', name: '', command: '', args: '', env: '' });
+  let customForm = $state({ id: "", name: "", command: "", args: "", env: "" });
 
   const onlineNodes = $derived(sync.nodes.filter((node) => node.is_online));
   const busy = $derived(busyLabel !== null);
@@ -58,7 +58,7 @@
 
   // オンラインノードの既定選択 (接続直後はノード一覧が空のため反映時に設定)
   $effect(() => {
-    if (nodeId === '' && onlineNodes.length > 0) {
+    if (nodeId === "" && onlineNodes.length > 0) {
       nodeId = onlineNodes[0].node_id;
     }
   });
@@ -69,8 +69,8 @@
 
   function matchesQuery(agent: AgentSummary, query: string): boolean {
     const needle = query.trim().toLowerCase();
-    if (needle === '') return true;
-    return [agent.id, agent.name, agent.description ?? ''].some((value) =>
+    if (needle === "") return true;
+    return [agent.id, agent.name, agent.description ?? ""].some((value) =>
       value.toLowerCase().includes(needle),
     );
   }
@@ -92,7 +92,7 @@
   }
 
   async function installAgent(agent: AgentSummary, closeCatalog = false): Promise<void> {
-    if (busy || nodeId === '') return;
+    if (busy || nodeId === "") return;
     busyLabel = `${agent.id} をインストール中…`;
     try {
       const result = await sync.connection.client.installAgent(nodeId, agent.id);
@@ -107,15 +107,14 @@
   }
 
   async function setPackageEnabled(agent: AgentSummary, enabled: boolean): Promise<void> {
-    if (busy || nodeId === '') return;
-    busyLabel = `${agent.id} の npx/uvx 利用を${enabled ? '有効化' : '無効化'}中…`;
+    if (busy || nodeId === "") return;
+    busyLabel = `${agent.id} の npx/uvx 利用を${enabled ? "有効化" : "無効化"}中…`;
     try {
       const result = enabled
         ? await sync.connection.client.enablePackageAgent(nodeId, agent.id)
         : await sync.connection.client.disablePackageAgent(nodeId, agent.id);
       toast.success(
-        result.message ??
-          `${agent.id} の npx/uvx 利用を${enabled ? '有効化' : '無効化'}しました`
+        result.message ?? `${agent.id} の npx/uvx 利用を${enabled ? "有効化" : "無効化"}しました`,
       );
       await Promise.all([loadAgents(), sync.refreshNodes()]);
     } catch (error) {
@@ -126,11 +125,13 @@
   }
 
   async function updateAllAgents(): Promise<void> {
-    if (busy || nodeId === '') return;
-    busyLabel = '導入済みエージェントを更新中…';
+    if (busy || nodeId === "") return;
+    busyLabel = "導入済みエージェントを更新中…";
     try {
-      const result = await sync.connection.client.updateAgents(nodeId, { agent_id: null });
-      toast.success(result.message ?? '更新を実行しました');
+      const result = await sync.connection.client.updateAgents(nodeId, {
+        agent_id: null,
+      });
+      toast.success(result.message ?? "更新を実行しました");
       await Promise.all([loadAgents(), sync.refreshNodes()]);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
@@ -141,7 +142,7 @@
 
   async function confirmRemove(): Promise<void> {
     const target = removeTarget;
-    if (target === null || busy || nodeId === '') return;
+    if (target === null || busy || nodeId === "") return;
     const isCustom = target.custom_config !== null;
     busyLabel = `${target.id} を削除中…`;
     try {
@@ -163,10 +164,10 @@
     const config = agent?.custom_config ?? null;
     customEditId = agent?.id ?? null;
     customForm = {
-      id: agent?.id ?? '',
-      name: config?.name ?? '',
-      command: config?.command ?? '',
-      args: config?.args.join(' ') ?? '',
+      id: agent?.id ?? "",
+      name: config?.name ?? "",
+      command: config?.command ?? "",
+      args: config?.args.join(" ") ?? "",
       env: formatEnv(config?.env ?? {}),
     };
     customOpen = true;
@@ -175,15 +176,15 @@
   function formatEnv(env: Record<string, string>): string {
     return Object.entries(env)
       .map(([key, value]) => `${key}=${value}`)
-      .join('\n');
+      .join("\n");
   }
 
   function parseEnv(text: string): Record<string, string> {
     const env: Record<string, string> = {};
-    for (const line of text.split('\n')) {
+    for (const line of text.split("\n")) {
       const trimmed = line.trim();
-      if (trimmed === '' || trimmed.startsWith('#')) continue;
-      const index = trimmed.indexOf('=');
+      if (trimmed === "" || trimmed.startsWith("#")) continue;
+      const index = trimmed.indexOf("=");
       if (index <= 0) continue;
       env[trimmed.slice(0, index).trim()] = trimmed.slice(index + 1).trim();
     }
@@ -192,22 +193,22 @@
 
   async function submitCustom(event: SubmitEvent): Promise<void> {
     event.preventDefault();
-    if (customBusy || nodeId === '') return;
+    if (customBusy || nodeId === "") return;
     const id = (customEditId ?? customForm.id).trim();
-    if (id === '') {
-      toast.error('エージェントIDを入力してください');
+    if (id === "") {
+      toast.error("エージェントIDを入力してください");
       return;
     }
-    if (customForm.command.trim() === '') {
-      toast.error('実行コマンドを入力してください');
+    if (customForm.command.trim() === "") {
+      toast.error("実行コマンドを入力してください");
       return;
     }
     customBusy = true;
     try {
       const result = await sync.connection.client.upsertCustomAgent(nodeId, id, {
-        name: customForm.name.trim() === '' ? null : customForm.name.trim(),
+        name: customForm.name.trim() === "" ? null : customForm.name.trim(),
         command: customForm.command.trim(),
-        args: customForm.args.split(/\s+/).filter((value) => value !== ''),
+        args: customForm.args.split(/\s+/).filter((value) => value !== ""),
         env: parseEnv(customForm.env),
       });
       toast.success(result.message ?? `カスタムエージェント ${id} を保存しました`);
@@ -235,14 +236,14 @@
       >
         {#each sync.nodes as node (node.node_id)}
           <option value={node.node_id} disabled={!node.is_online}>
-            {node.name}{node.is_online ? '' : ' — オフライン'}
+            {node.name}{node.is_online ? "" : " — オフライン"}
           </option>
         {/each}
       </select>
       <Button
         variant="outline"
         size="sm"
-        disabled={busy || nodeId === ''}
+        disabled={busy || nodeId === ""}
         onclick={() => void updateAllAgents()}
         title="選択ノードの fxg 管理エージェントを最新へ更新 (fxg agents update)"
       >
@@ -253,7 +254,7 @@
         <RefreshCwIcon />
         再読込
       </Button>
-      <Button size="sm" disabled={nodeId === ''} onclick={() => openCustom(null)}>
+      <Button size="sm" disabled={nodeId === ""} onclick={() => openCustom(null)}>
         <PlusIcon />
         カスタム追加
       </Button>
@@ -268,7 +269,7 @@
     <p class="text-muted-foreground text-sm">
       オンラインのノードがありません。エージェントの操作にはノードの接続が必要です。
     </p>
-  {:else if nodeId === ''}
+  {:else if nodeId === ""}
     <p class="text-muted-foreground text-sm">ノードを選択してください。</p>
   {:else if loading && agents.length === 0}
     <p class="text-muted-foreground text-sm">レジストリを読み込んでいます…</p>
@@ -285,7 +286,7 @@
               <BotIcon class="text-muted-foreground size-4" />
               <h2 class="font-medium">{agent.name}</h2>
               <span class="text-muted-foreground font-mono text-xs">{agent.id}</span>
-              {#if agent.version !== '-'}
+              {#if agent.version !== "-"}
                 <span class="text-muted-foreground text-xs">v{agent.version}</span>
               {/if}
             </div>
@@ -312,7 +313,7 @@
               <Button
                 variant="outline"
                 size="sm"
-                disabled={busy || nodeId === ''}
+                disabled={busy || nodeId === ""}
                 onclick={() => void installAgent(agent)}
                 title="PATH 上の既存インストールを優先して使います。fxg 管理に切り替えるにはインストールしてください"
               >
@@ -325,7 +326,7 @@
                 variant="ghost"
                 size="sm"
                 class="text-muted-foreground"
-                disabled={busy || nodeId === ''}
+                disabled={busy || nodeId === ""}
                 onclick={() => void setPackageEnabled(agent, false)}
                 title="npx/uvx 経由の利用を一覧から外します (実行ファイルは削除しません)"
               >
@@ -337,7 +338,7 @@
               <Button
                 variant="ghost"
                 size="icon-sm"
-                disabled={busy || nodeId === ''}
+                disabled={busy || nodeId === ""}
                 onclick={() => openCustom(agent)}
                 title="カスタム定義を編集"
               >
@@ -350,7 +351,7 @@
                 variant="ghost"
                 size="icon-sm"
                 class="text-muted-foreground hover:text-destructive"
-                disabled={busy || nodeId === ''}
+                disabled={busy || nodeId === ""}
                 onclick={() => (removeTarget = agent)}
               >
                 <Trash2Icon />
@@ -363,7 +364,7 @@
         {#if agent.installed_nodes.length > 1}
           <p class="text-muted-foreground text-[11px]">
             利用可能なノード:
-            {agent.installed_nodes.map((id) => nodeName(id)).join(', ')}
+            {agent.installed_nodes.map((id) => nodeName(id)).join(", ")}
           </p>
         {/if}
       </Card>
@@ -374,7 +375,7 @@
     <Button
       variant="outline"
       size="sm"
-      disabled={nodeId === ''}
+      disabled={nodeId === ""}
       onclick={() => (catalogOpen = true)}
     >
       <PlusIcon />
@@ -393,17 +394,23 @@
       <AlertDialog.Title>エージェントを削除しますか？</AlertDialog.Title>
       <AlertDialog.Description class="text-sm">
         {#if removeTarget?.custom_config !== null}
-          <code>{removeTarget?.id}</code> のカスタム定義を削除します。設定ファイル
-          (<code>config.toml</code>) 側に同名の定義がある場合はそちらが残ります。
+          <code>{removeTarget?.id}</code>
+          のカスタム定義を削除します。設定ファイル (<code>config.toml</code>)
+          側に同名の定義がある場合はそちらが残ります。
         {:else}
-          {nodeName(nodeId)} 上の fxg 管理バイナリ <code>{removeTarget?.id}</code>
+          {nodeName(nodeId)} 上の fxg 管理バイナリ
+          <code>{removeTarget?.id}</code>
           を削除します。PATH 上の既存インストールには影響しません。
         {/if}
       </AlertDialog.Description>
     </AlertDialog.Header>
     <AlertDialog.Footer>
       <AlertDialog.Cancel disabled={busy}>キャンセル</AlertDialog.Cancel>
-      <AlertDialog.Action variant="destructive" disabled={busy} onclick={() => void confirmRemove()}>
+      <AlertDialog.Action
+        variant="destructive"
+        disabled={busy}
+        onclick={() => void confirmRemove()}
+      >
         削除
       </AlertDialog.Action>
     </AlertDialog.Footer>
@@ -423,14 +430,18 @@
     <div class="flex flex-col gap-3">
       <div class="relative">
         <SearchIcon class="text-muted-foreground absolute top-2 left-2 size-4" />
-        <Input bind:value={catalogQuery} placeholder="名前・ID・説明で検索" class="h-8 pl-8 text-xs" />
+        <Input
+          bind:value={catalogQuery}
+          placeholder="名前・ID・説明で検索"
+          class="h-8 pl-8 text-xs"
+        />
       </div>
       <div class="flex max-h-[60vh] flex-col gap-2 overflow-y-auto">
         {#if catalogOnly.length === 0}
           <p class="text-muted-foreground text-sm">
-            {catalogQuery.trim() === ''
-              ? '未導入のエージェントはありません。'
-              : '一致するエージェントがありません。'}
+            {catalogQuery.trim() === ""
+              ? "未導入のエージェントはありません。"
+              : "一致するエージェントがありません。"}
           </p>
         {:else}
           {#each catalogOnly as agent (agent.id)}
@@ -439,20 +450,22 @@
                 <div class="flex flex-wrap items-center gap-2">
                   <span class="text-sm font-medium">{agent.name}</span>
                   <span class="text-muted-foreground font-mono text-xs">{agent.id}</span>
-                  {#if agent.version !== '-'}
+                  {#if agent.version !== "-"}
                     <span class="text-muted-foreground text-xs">v{agent.version}</span>
                   {/if}
                   <Badge variant="secondary" class="text-[10px]">未導入</Badge>
                 </div>
                 {#if agent.description}
-                  <p class="text-muted-foreground text-xs">{agent.description}</p>
+                  <p class="text-muted-foreground text-xs">
+                    {agent.description}
+                  </p>
                 {/if}
               </div>
               <div class="flex flex-wrap items-center gap-1.5">
                 {#if agent.installable}
                   <Button
                     size="sm"
-                    disabled={busy || nodeId === ''}
+                    disabled={busy || nodeId === ""}
                     onclick={() => void installAgent(agent, true)}
                   >
                     <DownloadIcon />
@@ -463,7 +476,7 @@
                   <Button
                     variant="outline"
                     size="sm"
-                    disabled={busy || nodeId === ''}
+                    disabled={busy || nodeId === ""}
                     onclick={() => void setPackageEnabled(agent, true)}
                     title="npx/uvx は実行時にパッケージを取得します (実体は保存しません)"
                   >
@@ -490,7 +503,7 @@
   <Dialog.Content class="sm:max-w-lg">
     <Dialog.Header>
       <Dialog.Title>
-        {customEditId === null ? 'カスタムエージェントを追加' : `${customEditId} を編集`}
+        {customEditId === null ? "カスタムエージェントを追加" : `${customEditId} を編集`}
       </Dialog.Title>
       <Dialog.Description>
         ACP 対応の任意のコマンドをエージェントとして登録します (<code
@@ -511,7 +524,12 @@
       </div>
       <div class="grid gap-1.5">
         <Label for="custom-name">表示名 (任意)</Label>
-        <Input id="custom-name" bind:value={customForm.name} placeholder="My Agent" class="text-xs" />
+        <Input
+          id="custom-name"
+          bind:value={customForm.name}
+          placeholder="My Agent"
+          class="text-xs"
+        />
       </div>
       <div class="grid gap-1.5">
         <Label for="custom-command">実行コマンド</Label>
@@ -541,13 +559,12 @@
           bind:value={customForm.env}
           rows="3"
           class="border-input bg-background focus-visible:ring-ring/40 rounded-md border px-2 py-1.5 font-mono text-xs outline-none focus-visible:ring-1"
-          placeholder="LOG_LEVEL=info"
-        ></textarea>
+          placeholder="LOG_LEVEL=info"></textarea>
       </div>
       <Dialog.Footer>
         <Dialog.Close>キャンセル</Dialog.Close>
         <Button type="submit" disabled={customBusy}>
-          {customBusy ? '保存中…' : '保存'}
+          {customBusy ? "保存中…" : "保存"}
         </Button>
       </Dialog.Footer>
     </form>

@@ -24,13 +24,15 @@ env:
 
 jobs:
   fmt:
-    name: fmt (rustfmt / dprint / tombi)
+    name: fmt (rustfmt / tombi / oxfmt)
     runs-on: ubuntu-latest
     env:
       MISE_DISABLE_TOOLS: cargo:sqlx-cli
     steps:
       - uses: actions/checkout@v5
       - uses: jdx/mise-action@v3
+      # oxfmt は ui の devDependency (.svelte の整形に ui/node_modules/svelte が要る)
+      - run: mise run ui:install
       - run: mise run fmt:check
 
   clippy:
@@ -77,7 +79,7 @@ jobs:
       - run: mise run sqlx:check
 
   ui:
-    name: ui (oxfmt / oxlint / svelte-check / vitest / build)
+    name: ui (oxlint / svelte-check / vitest / build)
     runs-on: ubuntu-latest
     env:
       MISE_DISABLE_TOOLS: cargo:sqlx-cli

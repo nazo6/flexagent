@@ -1,66 +1,66 @@
 <script lang="ts">
-  import { goto } from '$app/navigation';
-  import { page } from '$app/state';
-  import * as Dialog from '$lib/components/ui/dialog';
-  import { Button } from '$lib/components/ui/button';
-  import { Input } from '$lib/components/ui/input';
-  import { Label } from '$lib/components/ui/label';
-  import NodeStatusBadge from '$lib/components/NodeStatusBadge.svelte';
-  import FolderBrowserDialog from '$lib/components/fs/FolderBrowserDialog.svelte';
-  import { agentOptionLabel, agentsAvailableOn } from '$lib/agents';
-  import type { AgentSummary } from '$lib/generated/AgentSummary';
-  import type { ProvisionerSummary } from '$lib/generated/ProvisionerSummary';
-  import type { ProvisionerTestResponse } from '$lib/generated/ProvisionerTestResponse';
-  import { formatRelativeTime } from '$lib/format';
+  import { goto } from "$app/navigation";
+  import { page } from "$app/state";
+  import * as Dialog from "$lib/components/ui/dialog";
+  import { Button } from "$lib/components/ui/button";
+  import { Input } from "$lib/components/ui/input";
+  import { Label } from "$lib/components/ui/label";
+  import NodeStatusBadge from "$lib/components/NodeStatusBadge.svelte";
+  import FolderBrowserDialog from "$lib/components/fs/FolderBrowserDialog.svelte";
+  import { agentOptionLabel, agentsAvailableOn } from "$lib/agents";
+  import type { AgentSummary } from "$lib/generated/AgentSummary";
+  import type { ProvisionerSummary } from "$lib/generated/ProvisionerSummary";
+  import type { ProvisionerTestResponse } from "$lib/generated/ProvisionerTestResponse";
+  import { formatRelativeTime } from "$lib/format";
   import {
     buildPathCandidates,
     pickDefaultCandidate,
     pickDefaultNode,
-    type PathCandidate
-  } from '$lib/new-session';
+    type PathCandidate,
+  } from "$lib/new-session";
   import {
     loadNewSessionPrefs,
     saveNewSessionPrefs,
-    type SessionModePreference
-  } from '$lib/session-prefs';
-  import { getNodeAvailability } from '$lib/node-status';
-  import { sync } from '$lib/stores/app.svelte';
-  import { toast } from 'svelte-sonner';
-  import { onMount, untrack } from 'svelte';
-  import BotIcon from '@lucide/svelte/icons/bot';
-  import BoxIcon from '@lucide/svelte/icons/box';
-  import CheckCircle2Icon from '@lucide/svelte/icons/check-circle-2';
-  import CornerDownLeftIcon from '@lucide/svelte/icons/corner-down-left';
-  import FolderGit2Icon from '@lucide/svelte/icons/folder-git-2';
-  import FolderOpenIcon from '@lucide/svelte/icons/folder-open';
-  import GitForkIcon from '@lucide/svelte/icons/git-fork';
-  import LoaderCircleIcon from '@lucide/svelte/icons/loader-circle';
-  import PlayIcon from '@lucide/svelte/icons/play';
-  import ServerIcon from '@lucide/svelte/icons/server';
-  import Settings2Icon from '@lucide/svelte/icons/settings-2';
-  import SparklesIcon from '@lucide/svelte/icons/sparkles';
-  import XCircleIcon from '@lucide/svelte/icons/x-circle';
-  import XIcon from '@lucide/svelte/icons/x';
+    type SessionModePreference,
+  } from "$lib/session-prefs";
+  import { getNodeAvailability } from "$lib/node-status";
+  import { sync } from "$lib/stores/app.svelte";
+  import { toast } from "svelte-sonner";
+  import { onMount, untrack } from "svelte";
+  import BotIcon from "@lucide/svelte/icons/bot";
+  import BoxIcon from "@lucide/svelte/icons/box";
+  import CheckCircle2Icon from "@lucide/svelte/icons/check-circle-2";
+  import CornerDownLeftIcon from "@lucide/svelte/icons/corner-down-left";
+  import FolderGit2Icon from "@lucide/svelte/icons/folder-git-2";
+  import FolderOpenIcon from "@lucide/svelte/icons/folder-open";
+  import GitForkIcon from "@lucide/svelte/icons/git-fork";
+  import LoaderCircleIcon from "@lucide/svelte/icons/loader-circle";
+  import PlayIcon from "@lucide/svelte/icons/play";
+  import ServerIcon from "@lucide/svelte/icons/server";
+  import Settings2Icon from "@lucide/svelte/icons/settings-2";
+  import SparklesIcon from "@lucide/svelte/icons/sparkles";
+  import XCircleIcon from "@lucide/svelte/icons/x-circle";
+  import XIcon from "@lucide/svelte/icons/x";
 
-  type PathMode = 'existing' | 'new_worktree';
-  type RunTarget = 'node' | 'provisioner';
+  type PathMode = "existing" | "new_worktree";
+  type RunTarget = "node" | "provisioner";
 
-  let selectedProjectId = $state('');
-  let nodeId = $state('');
-  let runTarget = $state<RunTarget>('node');
-  let provisionerName = $state('');
+  let selectedProjectId = $state("");
+  let nodeId = $state("");
+  let runTarget = $state<RunTarget>("node");
+  let provisionerName = $state("");
   const provisioners = $state<ProvisionerSummary[]>([]);
-  let agentId = $state('');
+  let agentId = $state("");
   /** カタログがある場合でも ID を直接入力する。 */
   let manualAgent = $state(false);
   /** ACP Registry カタログ + ノード別の利用可否。 */
   let catalog = $state<AgentSummary[]>([]);
-  let pathMode = $state<PathMode>('existing');
-  let localPath = $state('');
-  let branch = $state('');
-  let baseBranch = $state('');
-  let newPath = $state('');
-  let promptText = $state('');
+  let pathMode = $state<PathMode>("existing");
+  let localPath = $state("");
+  let branch = $state("");
+  let baseBranch = $state("");
+  let newPath = $state("");
+  let promptText = $state("");
   let busy = $state(false);
   let showAdvanced = $state(false);
   let browserOpen = $state(false);
@@ -72,20 +72,20 @@
   let urlProjectApplied = $state(false);
   let urlNodeApplied = $state(false);
   let urlAgentApplied = $state(false);
-  let lastAutoPathKey = '';
+  let lastAutoPathKey = "";
 
   // 端末ごとの記憶 (プロジェクト単位): 復元前に保存しないための追跡
-  let prefsProjectId = '';
+  let prefsProjectId = "";
   let agentTouched = $state(false);
   let modeTouched = $state(false);
 
   // Fork 引き継ぎ
-  let forkSessionId = $state('');
+  let forkSessionId = $state("");
   let forkNodeSeq = $state<number | null>(null);
 
   // 起動オプション
-  let sessionMode = $state<SessionModePreference>('default');
-  let extraArgsText = $state('');
+  let sessionMode = $state<SessionModePreference>("default");
+  let extraArgsText = $state("");
 
   // プロビジョナー接続テスト
   let testBusy = $state(false);
@@ -94,7 +94,7 @@
 
   const projects = $derived(sync.projects);
   const selectedProject = $derived(
-    projects.find((p) => p.project_id === selectedProjectId) ?? projects[0] ?? null
+    projects.find((p) => p.project_id === selectedProjectId) ?? projects[0] ?? null,
   );
 
   const nodes = $derived(sync.nodes);
@@ -109,7 +109,7 @@
     try {
       const list = await sync.connection.client.provisioners();
       provisioners.splice(0, provisioners.length, ...list);
-      if (list.length > 0 && provisionerName === '') provisionerName = list[0].name;
+      if (list.length > 0 && provisionerName === "") provisionerName = list[0].name;
     } catch {
       // ローカルノード接続時はプロビジョナーが存在しないため無視する
     }
@@ -121,15 +121,15 @@
     }
   });
 
-  const isProvisionerMode = $derived(runTarget === 'provisioner');
+  const isProvisionerMode = $derived(runTarget === "provisioner");
   const selectedProvisioner = $derived(
-    provisioners.find((p) => p.name === provisionerName) ?? provisioners[0] ?? null
+    provisioners.find((p) => p.name === provisionerName) ?? provisioners[0] ?? null,
   );
 
   // URL の `project` は初回のみ適用する (以降の手動選択を上書きしない)
   $effect(() => {
     if (urlProjectApplied || projects.length === 0) return;
-    const urlProject = page.url.searchParams.get('project');
+    const urlProject = page.url.searchParams.get("project");
     selectedProjectId =
       urlProject && projects.some((p) => p.project_id === urlProject)
         ? urlProject
@@ -142,18 +142,18 @@
   $effect(() => {
     if (nodeTouched || nodes.length === 0) return;
     const defaultNode = untrack(() => pickDefaultNode(nodes, selectedProject, sync.sessions));
-    if (defaultNode !== '' && defaultNode !== nodeId) nodeId = defaultNode;
+    if (defaultNode !== "" && defaultNode !== nodeId) nodeId = defaultNode;
   });
 
   // URL の `node` / `path` (ディープリンク) は初回のみ適用する
   $effect(() => {
     if (urlNodeApplied || nodes.length === 0) return;
-    const urlNode = page.url.searchParams.get('node');
+    const urlNode = page.url.searchParams.get("node");
     if (urlNode && nodes.some((n) => n.node_id === urlNode)) {
       nodeId = urlNode;
       nodeTouched = true;
     }
-    const urlPath = page.url.searchParams.get('path');
+    const urlPath = page.url.searchParams.get("path");
     if (urlPath) {
       localPath = urlPath;
       useCustomPath = true;
@@ -163,41 +163,41 @@
 
   // 実行ディレクトリ候補 (紐付け + 直近セッション) を直近使用順に解決する
   const pathCandidates = $derived.by(() =>
-    buildPathCandidates(selectedProject, nodeId, sync.sessions)
+    buildPathCandidates(selectedProject, nodeId, sync.sessions),
   );
   const selectedCandidate = $derived(
-    pathCandidates.find((candidate) => candidate.path === localPath) ?? null
+    pathCandidates.find((candidate) => candidate.path === localPath) ?? null,
   );
   // このノードに候補が無い場合の切り替え候補 (登録がある別ノード)
   const otherNodesWithCandidates = $derived(
     nodes.filter(
       (node) =>
         node.node_id !== nodeId &&
-        buildPathCandidates(selectedProject, node.node_id, sync.sessions).length > 0
-    )
+        buildPathCandidates(selectedProject, node.node_id, sync.sessions).length > 0,
+    ),
   );
 
   // 候補の既定選択: プロジェクト × ノードが変わったとき、または現在値が候補から
   // 消えたときのみ更新する (セッション更新で候補順が変わっても選択は維持する)
   $effect(() => {
     if (isProvisionerMode || useCustomPath) return;
-    const key = `${selectedProject?.project_id ?? ''}|${nodeId}`;
+    const key = `${selectedProject?.project_id ?? ""}|${nodeId}`;
     const containsCurrent = pathCandidates.some((candidate) => candidate.path === localPath);
     if (
       key === lastAutoPathKey &&
-      (containsCurrent || (localPath === '' && pathCandidates.length === 0))
+      (containsCurrent || (localPath === "" && pathCandidates.length === 0))
     ) {
       return;
     }
     lastAutoPathKey = key;
-    if (!containsCurrent) localPath = pickDefaultCandidate(pathCandidates)?.path ?? '';
+    if (!containsCurrent) localPath = pickDefaultCandidate(pathCandidates)?.path ?? "";
   });
 
   const effectiveAgent = $derived(agentId.trim());
 
   // 既定エージェント: 未選択ならこのノードで使える先頭を選ぶ
   $effect(() => {
-    if (agentId !== '' || isProvisionerMode) return;
+    if (agentId !== "" || isProvisionerMode) return;
     const first = availableAgentIds[0];
     if (first !== undefined) agentId = first;
   });
@@ -205,31 +205,33 @@
   const canSubmit = $derived(
     !busy &&
       selectedProject !== null &&
-      effectiveAgent !== '' &&
+      effectiveAgent !== "" &&
       (isProvisionerMode
         ? selectedProvisioner !== null
-        : nodeId !== '' && (pathMode === 'existing' ? localPath !== '' : branch.trim() !== ''))
+        : nodeId !== "" && (pathMode === "existing" ? localPath !== "" : branch.trim() !== "")),
   );
 
   // 未指定の理由をユーザーに明示する (無言の disabled を避ける)
   const pathMissing = $derived(
     !isProvisionerMode &&
-      (pathMode === 'existing' ? localPath.trim() === '' : branch.trim() === '')
+      (pathMode === "existing" ? localPath.trim() === "" : branch.trim() === ""),
   );
   const pathRequiredHint = $derived(
-    pathMode === 'existing' ? '実行ディレクトリを選択してください' : '新ブランチ名を入力してください'
+    pathMode === "existing"
+      ? "実行ディレクトリを選択してください"
+      : "新ブランチ名を入力してください",
   );
 
   // URL の `fork_session` / `agent` は初回のみ適用する
   $effect(() => {
     if (urlAgentApplied || nodes.length === 0) return;
-    const forkSession = page.url.searchParams.get('fork_session');
+    const forkSession = page.url.searchParams.get("fork_session");
     if (forkSession) {
       forkSessionId = forkSession;
-      const forkSeqStr = page.url.searchParams.get('fork_seq');
+      const forkSeqStr = page.url.searchParams.get("fork_seq");
       forkNodeSeq = forkSeqStr ? Number.parseInt(forkSeqStr, 10) : null;
     }
-    const agentParam = page.url.searchParams.get('agent');
+    const agentParam = page.url.searchParams.get("agent");
     if (agentParam) {
       agentId = agentParam;
       // 一覧に無い ID は入力欄で見えるようにする
@@ -252,8 +254,8 @@
     }
     const prefs = untrack(() => loadNewSessionPrefs(project.project_id));
     if (!prefs) return;
-    if (!modeTouched && prefs.mode !== 'default') sessionMode = prefs.mode;
-    if (!agentTouched && prefs.agent !== '' && availableAgentIds.includes(prefs.agent)) {
+    if (!modeTouched && prefs.mode !== "default") sessionMode = prefs.mode;
+    if (!agentTouched && prefs.agent !== "" && availableAgentIds.includes(prefs.agent)) {
       agentId = prefs.agent;
     }
   });
@@ -263,8 +265,8 @@
   $effect(() => {
     void agentId;
     void sessionMode;
-    const projectId = selectedProject?.project_id ?? '';
-    if (projectId === '' || projectId !== prefsProjectId || isProvisionerMode) return;
+    const projectId = selectedProject?.project_id ?? "";
+    if (projectId === "" || projectId !== prefsProjectId || isProvisionerMode) return;
     persistPrefs();
   });
 
@@ -279,7 +281,9 @@
       if (result.ok) {
         toast.success(`プロビジョナー '${name}' の疎通テストに成功しました`);
       } else {
-        toast.error(`プロビジョナー '${name}' の疎通テストに失敗しました: ${result.error ?? '不明なエラー'}`);
+        toast.error(
+          `プロビジョナー '${name}' の疎通テストに失敗しました: ${result.error ?? "不明なエラー"}`,
+        );
       }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
@@ -288,7 +292,7 @@
         ok: false,
         node_id: null,
         log_lines: [],
-        error: error instanceof Error ? error.message : String(error)
+        error: error instanceof Error ? error.message : String(error),
       };
     } finally {
       testBusy = false;
@@ -310,37 +314,37 @@
         project_id: selectedProject.project_id,
         node_id: useProvisioner ? null : nodeId,
         provisioner: useProvisioner ? selectedProvisioner.name : null,
-        local_path: useProvisioner || pathMode === 'new_worktree' ? null : localPath,
+        local_path: useProvisioner || pathMode === "new_worktree" ? null : localPath,
         worktree: useProvisioner
-          ? branch.trim() === ''
+          ? branch.trim() === ""
             ? null
             : { branch: branch.trim(), base_branch: null, new_path: null }
-          : pathMode === 'new_worktree'
+          : pathMode === "new_worktree"
             ? {
                 branch: branch.trim(),
-                base_branch: baseBranch.trim() === '' ? null : baseBranch.trim(),
-                new_path: newPath.trim() === '' ? null : newPath.trim()
+                base_branch: baseBranch.trim() === "" ? null : baseBranch.trim(),
+                new_path: newPath.trim() === "" ? null : newPath.trim(),
               }
             : null,
         agent_id: effectiveAgent,
-        initial_prompt: promptToSend === '' ? null : promptToSend,
-        mode: sessionMode === 'default' ? null : sessionMode,
+        initial_prompt: promptToSend === "" ? null : promptToSend,
+        mode: sessionMode === "default" ? null : sessionMode,
         extra_args: extraArgs,
         fork: forkSessionId
           ? {
               from_session_id: forkSessionId,
               from_node_seq: forkNodeSeq,
-              restore_git_bundle_b64: null
+              restore_git_bundle_b64: null,
             }
-          : null
+          : null,
       });
 
       toast.success(
         useProvisioner
-          ? '一時VMの起動を開始しました (ブートストラップの進捗はセッション画面に表示されます)'
+          ? "一時VMの起動を開始しました (ブートストラップの進捗はセッション画面に表示されます)"
           : forkSessionId
-            ? 'フォークセッションを開始しました'
-            : 'セッションを開始しました'
+            ? "フォークセッションを開始しました"
+            : "セッションを開始しました",
       );
       await sync.refreshSessions();
       await goto(`/sessions/${response.session_id}`);
@@ -351,7 +355,7 @@
   }
 
   function onKeydown(event: KeyboardEvent) {
-    if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+    if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
       event.preventDefault();
       void handleStartSession();
     }
@@ -371,31 +375,31 @@
 
   /** 端末ローカル (プロジェクト単位) に前回の起動設定を保存する。 */
   function persistPrefs() {
-    const projectId = selectedProject?.project_id ?? '';
+    const projectId = selectedProject?.project_id ?? "";
     // 一時VM はノード別のエージェント事情が異なるため記憶しない
-    if (projectId === '' || projectId !== prefsProjectId || isProvisionerMode) return;
+    if (projectId === "" || projectId !== prefsProjectId || isProvisionerMode) return;
     saveNewSessionPrefs(projectId, {
       agent: effectiveAgent,
-      mode: sessionMode
+      mode: sessionMode,
     });
   }
 
   /** 実行ディレクトリ候補の表示ラベル。 */
   function candidateLabel(candidate: PathCandidate): string {
     const parts: string[] = [];
-    if (!candidate.exists) parts.push('[存在しません]');
-    if (candidate.isWorktree) parts.push('[Worktree]');
+    if (!candidate.exists) parts.push("[存在しません]");
+    if (candidate.isWorktree) parts.push("[Worktree]");
     if (candidate.gitBranch) parts.push(`[${candidate.gitBranch}]`);
     parts.push(candidate.path);
-    const suffix = candidate.source === 'session' ? ' (前回のセッション)' : '';
-    return `${parts.join(' ')} · ${formatRelativeTime(candidate.usedAt)}${suffix}`;
+    const suffix = candidate.source === "session" ? " (前回のセッション)" : "";
+    return `${parts.join(" ")} · ${formatRelativeTime(candidate.usedAt)}${suffix}`;
   }
 
   const suggestionPrompts = [
-    'このリポジトリの構成とアーキテクチャを説明して',
-    '最近の変更点や未コミットの差分を確認して',
-    'テストを実行して現在のステータスを確認して',
-    'コードベース内の TODO や課題を洗い出して'
+    "このリポジトリの構成とアーキテクチャを説明して",
+    "最近の変更点や未コミットの差分を確認して",
+    "テストを実行して現在のステータスを確認して",
+    "コードベース内の TODO や課題を洗い出して",
   ];
 </script>
 
@@ -412,11 +416,15 @@
     </div>
 
     {#if forkSessionId}
-      <div class="bg-primary/10 border-primary/20 flex items-center justify-between rounded-xl border p-3 text-xs">
+      <div
+        class="bg-primary/10 border-primary/20 flex items-center justify-between rounded-xl border p-3 text-xs"
+      >
         <div class="flex items-center gap-2">
           <GitForkIcon class="text-primary size-4 shrink-0" />
           <span>
-            セッション <code class="font-mono bg-background/50 px-1 py-0.5 rounded">{forkSessionId.slice(0, 8)}</code>
+            セッション <code class="font-mono bg-background/50 px-1 py-0.5 rounded"
+              >{forkSessionId.slice(0, 8)}</code
+            >
             {#if forkNodeSeq !== null}
               (シーケンス #{forkNodeSeq})
             {/if}
@@ -428,7 +436,7 @@
           size="sm"
           class="h-6 px-2 text-xs"
           onclick={() => {
-            forkSessionId = '';
+            forkSessionId = "";
             forkNodeSeq = null;
           }}
         >
@@ -537,7 +545,7 @@
                 class="text-muted-foreground hover:text-foreground ml-auto text-[10px] underline"
                 onclick={() => (manualAgent = !manualAgent)}
               >
-                {manualAgent ? '一覧から選ぶ' : 'IDを直接入力'}
+                {manualAgent ? "一覧から選ぶ" : "IDを直接入力"}
               </button>
             {/if}
           </div>
@@ -546,7 +554,7 @@
               bind:value={agentId}
               class="border-input bg-background focus-visible:ring-ring/40 h-8 rounded-md border px-2 text-xs outline-none focus-visible:ring-1"
             >
-              {#if agentId !== '' && !availableAgentIds.includes(agentId)}
+              {#if agentId !== "" && !availableAgentIds.includes(agentId)}
                 <option value={agentId}>{agentId} — 一覧にありません</option>
               {/if}
               {#each availableAgents as agent (agent.id)}
@@ -562,8 +570,8 @@
               class="text-muted-foreground hover:text-foreground text-[10px] underline"
             >
               {availableAgents.length === 0
-                ? 'エージェントがありません — 設定から追加する'
-                : 'エージェントの追加・管理'}
+                ? "エージェントがありません — 設定から追加する"
+                : "エージェントの追加・管理"}
             </a>
           {/if}
         </div>
@@ -576,7 +584,7 @@
           class="rounded-full border px-2.5 py-0.5 transition-colors {runTarget === 'node'
             ? 'bg-primary text-primary-foreground border-primary'
             : 'text-muted-foreground hover:bg-muted'}"
-          onclick={() => (runTarget = 'node')}
+          onclick={() => (runTarget = "node")}
         >
           常駐ノード
         </button>
@@ -585,11 +593,11 @@
           class="rounded-full border px-2.5 py-0.5 transition-colors {isProvisionerMode
             ? 'bg-primary text-primary-foreground border-primary'
             : 'text-muted-foreground hover:bg-muted'}"
-          onclick={() => (runTarget = 'provisioner')}
+          onclick={() => (runTarget = "provisioner")}
           disabled={provisioners.length === 0}
           title={provisioners.length === 0
-            ? 'プロビジョナーは中央サーバーの config.toml で定義します'
-            : '使い捨ての隔離環境 (Docker / Incus / Colab 等) を起動します'}
+            ? "プロビジョナーは中央サーバーの config.toml で定義します"
+            : "使い捨ての隔離環境 (Docker / Incus / Colab 等) を起動します"}
         >
           一時VM (隔離)
         </button>
@@ -611,31 +619,33 @@
             <div class="flex items-center gap-1">
               <button
                 type="button"
-                class="rounded-full border px-2.5 py-0.5 text-xs transition-colors {pathMode === 'existing'
+                class="rounded-full border px-2.5 py-0.5 text-xs transition-colors {pathMode ===
+                'existing'
                   ? 'bg-primary text-primary-foreground border-primary'
                   : 'text-muted-foreground hover:bg-muted'}"
-                onclick={() => (pathMode = 'existing')}
+                onclick={() => (pathMode = "existing")}
               >
                 既存
               </button>
               <button
                 type="button"
-                class="rounded-full border px-2.5 py-0.5 text-xs transition-colors {pathMode === 'new_worktree'
+                class="rounded-full border px-2.5 py-0.5 text-xs transition-colors {pathMode ===
+                'new_worktree'
                   ? 'bg-primary text-primary-foreground border-primary'
                   : 'text-muted-foreground hover:bg-muted'}"
-                onclick={() => (pathMode = 'new_worktree')}
+                onclick={() => (pathMode = "new_worktree")}
               >
                 新規 Worktree
               </button>
             </div>
           </div>
 
-          {#if pathMode === 'existing'}
+          {#if pathMode === "existing"}
             <div class="flex items-center gap-1.5">
               {#if pathCandidates.length > 0 && !useCustomPath}
                 <select
                   bind:value={localPath}
-                  aria-invalid={localPath.trim() === ''}
+                  aria-invalid={localPath.trim() === ""}
                   class="border-input bg-background focus-visible:ring-ring/40 h-8 min-w-0 flex-1 rounded-md border px-2 text-xs outline-none focus-visible:ring-1 {localPath.trim() ===
                   ''
                     ? 'border-destructive'
@@ -672,7 +682,7 @@
               {:else}
                 <Input
                   bind:value={localPath}
-                  aria-invalid={localPath.trim() === ''}
+                  aria-invalid={localPath.trim() === ""}
                   placeholder="絶対パスを入力 (例: /home/user/project or C:\repo)"
                   class="h-8 min-w-0 flex-1 font-mono text-xs"
                 />
@@ -696,7 +706,7 @@
                     class="text-muted-foreground hover:text-foreground h-8 shrink-0 px-2 text-xs"
                     onclick={() => {
                       useCustomPath = false;
-                      localPath = pickDefaultCandidate(pathCandidates)?.path ?? '';
+                      localPath = pickDefaultCandidate(pathCandidates)?.path ?? "";
                     }}
                     title="登録済みパスの一覧に戻る"
                   >
@@ -708,7 +718,7 @@
 
             {#if selectedCandidate}
               <p class="text-muted-foreground text-[11px]">
-                {selectedCandidate.source === 'binding' ? '登録済み' : '前回のセッションで使用'} · 最終使用
+                {selectedCandidate.source === "binding" ? "登録済み" : "前回のセッションで使用"} · 最終使用
                 {formatRelativeTime(selectedCandidate.usedAt)}
                 {#if selectedCandidate.isWorktree}
                   · Worktree
@@ -717,7 +727,7 @@
                   · {selectedCandidate.gitBranch}
                 {/if}
               </p>
-            {:else if localPath.trim() !== ''}
+            {:else if localPath.trim() !== ""}
               <p class="text-muted-foreground text-[11px]">
                 未登録のパスです (セッション開始時に自動登録されます)
               </p>
@@ -729,12 +739,12 @@
               </p>
             {/if}
 
-            {#if pathCandidates.length === 0 && !(useCustomPath && localPath.trim() !== '')}
+            {#if pathCandidates.length === 0 && !(useCustomPath && localPath.trim() !== "")}
               <div
                 class="flex flex-col gap-1.5 rounded-md border border-amber-500/40 bg-amber-500/10 p-2.5 text-[11px]"
               >
                 <span>
-                  このノードでは {selectedProject?.name ?? 'このプロジェクト'} の実行ディレクトリが未登録です。フォルダを指定するか、プロジェクト設定でスキャンしてください。
+                  このノードでは {selectedProject?.name ?? "このプロジェクト"} の実行ディレクトリが未登録です。フォルダを指定するか、プロジェクト設定でスキャンしてください。
                 </span>
                 <div class="flex flex-wrap items-center gap-1.5">
                   <Button
@@ -773,7 +783,7 @@
           {:else}
             <Input
               bind:value={branch}
-              aria-invalid={branch.trim() === ''}
+              aria-invalid={branch.trim() === ""}
               placeholder="feat/new-task"
               class="h-8 text-xs"
             />
@@ -791,7 +801,7 @@
           onclick={() => (showAdvanced = !showAdvanced)}
         >
           <Settings2Icon class="size-3" />
-          <span>{showAdvanced ? '詳細設定を閉じる' : '詳細設定'}</span>
+          <span>{showAdvanced ? "詳細設定を閉じる" : "詳細設定"}</span>
         </button>
 
         {#if showAdvanced}
@@ -799,9 +809,13 @@
             {#if isProvisionerMode}
               <div class="flex flex-col gap-1">
                 <Label class="text-xs">クローンするブランチ (任意)</Label>
-                <Input bind:value={branch} placeholder="main (省略時はリモートの既定ブランチ)" class="h-8 text-xs" />
+                <Input
+                  bind:value={branch}
+                  placeholder="main (省略時はリモートの既定ブランチ)"
+                  class="h-8 text-xs"
+                />
               </div>
-            {:else if pathMode === 'new_worktree'}
+            {:else if pathMode === "new_worktree"}
               <div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
                 <div class="flex flex-col gap-1">
                   <Label class="text-xs">起点ブランチ (任意)</Label>
@@ -863,15 +877,16 @@
       </div>
     </div>
 
-    <div class="bg-card rounded-2xl border shadow-sm p-3 flex flex-col gap-2 focus-within:border-primary/50 transition-colors">
+    <div
+      class="bg-card rounded-2xl border shadow-sm p-3 flex flex-col gap-2 focus-within:border-primary/50 transition-colors"
+    >
       <textarea
         bind:value={promptText}
         onkeydown={onKeydown}
         rows="4"
         placeholder="作業内容や指示を入力してください… (例: 〇〇機能のバグを調査して修正案を出して)&#10;Ctrl + Enter でセッションを開始します"
         class="bg-transparent placeholder:text-muted-foreground w-full resize-none text-sm outline-none leading-relaxed"
-        disabled={busy}
-      ></textarea>
+        disabled={busy}></textarea>
 
       <div class="flex items-center justify-between border-t pt-2.5">
         <div class="flex items-center gap-2">
@@ -892,7 +907,7 @@
         <div class="flex items-center gap-2">
           {#if pathMissing}
             <span class="text-destructive text-xs">{pathRequiredHint}</span>
-          {:else if effectiveAgent === ''}
+          {:else if effectiveAgent === ""}
             <span class="text-destructive text-xs">エージェントを選択してください</span>
           {/if}
           <Button
@@ -900,8 +915,10 @@
             size="sm"
             class="text-xs h-8 text-muted-foreground hover:text-foreground"
             disabled={!canSubmit || busy}
-            onclick={() => handleStartSession('')}
-            title={pathMissing ? pathRequiredHint : 'プロンプトなしでセッションとターミナルだけを起動します'}
+            onclick={() => handleStartSession("")}
+            title={pathMissing
+              ? pathRequiredHint
+              : "プロンプトなしでセッションとターミナルだけを起動します"}
           >
             空で起動
           </Button>
@@ -911,14 +928,15 @@
             class="gap-1.5 h-8 text-xs font-medium"
             disabled={!canSubmit || busy}
             onclick={() => handleStartSession()}
-            title={pathMissing ? pathRequiredHint : 'セッションを開始します'}
+            title={pathMissing ? pathRequiredHint : "セッションを開始します"}
           >
             {#if busy}
               <span>起動中…</span>
             {:else}
               <PlayIcon class="size-3.5 fill-current" />
               <span>セッション開始</span>
-              <kbd class="bg-primary-foreground/20 text-[10px] px-1 py-0.5 rounded font-mono">↵</kbd>
+              <kbd class="bg-primary-foreground/20 text-[10px] px-1 py-0.5 rounded font-mono">↵</kbd
+              >
             {/if}
           </Button>
         </div>
@@ -985,7 +1003,8 @@
             <CheckCircle2Icon class="size-5 text-green-500" />
             <span class="text-green-600 dark:text-green-400">疎通テスト成功</span>
             {#if testResult.node_id}
-              <span class="text-muted-foreground font-mono text-[11px]">({testResult.node_id})</span>
+              <span class="text-muted-foreground font-mono text-[11px]">({testResult.node_id})</span
+              >
             {/if}
           {:else}
             <XCircleIcon class="size-5 text-destructive" />
@@ -994,7 +1013,9 @@
         </div>
 
         {#if testResult.error}
-          <div class="bg-destructive/10 text-destructive border-destructive/20 rounded-md border p-2.5 font-mono text-[11px] whitespace-pre-wrap">
+          <div
+            class="bg-destructive/10 text-destructive border-destructive/20 rounded-md border p-2.5 font-mono text-[11px] whitespace-pre-wrap"
+          >
             {testResult.error}
           </div>
         {/if}
@@ -1002,17 +1023,17 @@
         {#if testResult.log_lines && testResult.log_lines.length > 0}
           <div class="flex flex-col gap-1">
             <span class="text-muted-foreground text-[11px]">実行ログ:</span>
-            <div class="bg-muted max-h-48 overflow-y-auto rounded-md p-2 font-mono text-[11px] leading-tight text-foreground whitespace-pre-wrap">
-              {testResult.log_lines.join('\n')}
+            <div
+              class="bg-muted max-h-48 overflow-y-auto rounded-md p-2 font-mono text-[11px] leading-tight text-foreground whitespace-pre-wrap"
+            >
+              {testResult.log_lines.join("\n")}
             </div>
           </div>
         {/if}
       {/if}
     </div>
     <Dialog.Footer>
-      <Button variant="outline" size="sm" onclick={() => (testDialogOpen = false)}>
-        閉じる
-      </Button>
+      <Button variant="outline" size="sm" onclick={() => (testDialogOpen = false)}>閉じる</Button>
     </Dialog.Footer>
   </Dialog.Content>
 </Dialog.Root>

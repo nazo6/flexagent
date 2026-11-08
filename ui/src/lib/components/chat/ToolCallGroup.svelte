@@ -1,20 +1,20 @@
 <script lang="ts">
-  import DiffText from '$lib/components/diff/DiffText.svelte';
-  import type { TimelineItem } from '$lib/sync/reducer';
-  import { cn } from '$lib/utils';
-  import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
-  import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
-  import CircleCheckIcon from '@lucide/svelte/icons/circle-check';
-  import CircleXIcon from '@lucide/svelte/icons/circle-x';
-  import FileSearchIcon from '@lucide/svelte/icons/file-search';
-  import HammerIcon from '@lucide/svelte/icons/hammer';
-  import LoaderCircleIcon from '@lucide/svelte/icons/loader-circle';
-  import PencilIcon from '@lucide/svelte/icons/pencil';
-  import SearchIcon from '@lucide/svelte/icons/search';
-  import SquareTerminalIcon from '@lucide/svelte/icons/square-terminal';
-  import WrenchIcon from '@lucide/svelte/icons/wrench';
+  import DiffText from "$lib/components/diff/DiffText.svelte";
+  import type { TimelineItem } from "$lib/sync/reducer";
+  import { cn } from "$lib/utils";
+  import ChevronDownIcon from "@lucide/svelte/icons/chevron-down";
+  import ChevronRightIcon from "@lucide/svelte/icons/chevron-right";
+  import CircleCheckIcon from "@lucide/svelte/icons/circle-check";
+  import CircleXIcon from "@lucide/svelte/icons/circle-x";
+  import FileSearchIcon from "@lucide/svelte/icons/file-search";
+  import HammerIcon from "@lucide/svelte/icons/hammer";
+  import LoaderCircleIcon from "@lucide/svelte/icons/loader-circle";
+  import PencilIcon from "@lucide/svelte/icons/pencil";
+  import SearchIcon from "@lucide/svelte/icons/search";
+  import SquareTerminalIcon from "@lucide/svelte/icons/square-terminal";
+  import WrenchIcon from "@lucide/svelte/icons/wrench";
 
-  type ToolItem = Extract<TimelineItem, { kind: 'tool' }>;
+  type ToolItem = Extract<TimelineItem, { kind: "tool" }>;
 
   interface Props {
     tools: ToolItem[];
@@ -30,49 +30,51 @@
     expandedDetails[toolCallId] = !expandedDetails[toolCallId];
   }
 
-  const hasInProgress = $derived(tools.some((t) => t.status === 'in_progress'));
-  const hasFailed = $derived(tools.some((t) => t.status === 'failed'));
-  const allCompleted = $derived(tools.every((t) => t.status === 'completed'));
+  const hasInProgress = $derived(tools.some((t) => t.status === "in_progress"));
+  const hasFailed = $derived(tools.some((t) => t.status === "failed"));
+  const allCompleted = $derived(tools.every((t) => t.status === "completed"));
 
   function getToolInfo(tool: ToolItem): { name: string; detail: string } {
     const kindMap: Record<string, string> = {
-      read: 'Read',
-      edit: 'Edit',
-      execute: 'Terminal',
-      search: 'Search'
+      read: "Read",
+      edit: "Edit",
+      execute: "Terminal",
+      search: "Search",
     };
 
     // ツール名ラベル (Read, Edit, Terminal, Search, またはツール識別子)
-    let name = kindMap[tool.toolKind] ?? '';
+    let name = kindMap[tool.toolKind] ?? "";
     let detail = tool.title;
 
-    if (tool.title.startsWith('Running ')) {
-      const funcName = tool.title.replace('Running ', '').trim();
+    if (tool.title.startsWith("Running ")) {
+      const funcName = tool.title.replace("Running ", "").trim();
       if (!name) name = funcName;
-      detail = tool.locations.length > 0 ? tool.locations.join(', ') : funcName;
-    } else if (tool.title.includes(':')) {
-      const colonIdx = tool.title.indexOf(':');
+      detail = tool.locations.length > 0 ? tool.locations.join(", ") : funcName;
+    } else if (tool.title.includes(":")) {
+      const colonIdx = tool.title.indexOf(":");
       const prefix = tool.title.slice(0, colonIdx).trim();
       const rest = tool.title.slice(colonIdx + 1).trim();
       if (!name) name = prefix;
-      detail = rest || (tool.locations.length > 0 ? tool.locations.join(', ') : prefix);
+      detail = rest || (tool.locations.length > 0 ? tool.locations.join(", ") : prefix);
     } else if (tool.locations.length > 0) {
-      if (!name) name = tool.title || 'Tool';
-      detail = tool.locations.join(', ');
+      if (!name) name = tool.title || "Tool";
+      detail = tool.locations.join(", ");
     }
 
     if (!name) {
-      name = tool.title || 'Tool';
+      name = tool.title || "Tool";
     }
 
     return {
       name,
-      detail: detail || tool.title || tool.toolCallId
+      detail: detail || tool.title || tool.toolCallId,
     };
   }
 </script>
 
-<div class="bg-card/70 border-border/70 overflow-hidden rounded-xl border text-xs shadow-2xs transition-colors">
+<div
+  class="bg-card/70 border-border/70 overflow-hidden rounded-xl border text-xs shadow-2xs transition-colors"
+>
   <!-- グループヘッダー -->
   <button
     type="button"
@@ -116,21 +118,24 @@
       {#each tools as tool (tool.toolCallId)}
         {@const isExpanded = expandedDetails[tool.toolCallId]}
         {@const toolInfo = getToolInfo(tool)}
-        {@const hasDetailContent = tool.diff !== null || (tool.rawOutput !== null && tool.rawOutput !== '') || tool.locations.length > 0}
+        {@const hasDetailContent =
+          tool.diff !== null ||
+          (tool.rawOutput !== null && tool.rawOutput !== "") ||
+          tool.locations.length > 0}
         <div class="flex flex-col">
           <!-- ツール単行サマリー -->
           <div
             role="button"
             tabindex="0"
             class={cn(
-              'flex items-center justify-between px-3 py-1.5 text-xs transition-colors',
-              hasDetailContent ? 'cursor-pointer hover:bg-accent/30' : 'cursor-default'
+              "flex items-center justify-between px-3 py-1.5 text-xs transition-colors",
+              hasDetailContent ? "cursor-pointer hover:bg-accent/30" : "cursor-default",
             )}
             onclick={(e) => {
               if (hasDetailContent) toggleDetail(tool.toolCallId, e);
             }}
             onkeydown={(e) => {
-              if (hasDetailContent && (e.key === 'Enter' || e.key === ' ')) {
+              if (hasDetailContent && (e.key === "Enter" || e.key === " ")) {
                 e.preventDefault();
                 expandedDetails[tool.toolCallId] = !expandedDetails[tool.toolCallId];
               }
@@ -138,20 +143,22 @@
           >
             <div class="flex min-w-0 flex-1 items-center gap-2">
               <!-- アイコン -->
-              {#if tool.toolKind === 'read'}
+              {#if tool.toolKind === "read"}
                 <FileSearchIcon class="text-muted-foreground size-3.5 shrink-0" />
-              {:else if tool.toolKind === 'edit'}
+              {:else if tool.toolKind === "edit"}
                 <PencilIcon class="text-muted-foreground size-3.5 shrink-0" />
-              {:else if tool.toolKind === 'execute'}
+              {:else if tool.toolKind === "execute"}
                 <SquareTerminalIcon class="text-muted-foreground size-3.5 shrink-0" />
-              {:else if tool.toolKind === 'search'}
+              {:else if tool.toolKind === "search"}
                 <SearchIcon class="text-muted-foreground size-3.5 shrink-0" />
               {:else}
                 <HammerIcon class="text-muted-foreground size-3.5 shrink-0" />
               {/if}
 
               <!-- ツール名バッジ (Read, Edit, Terminal, Search 等) -->
-              <span class="rounded bg-muted px-1.5 py-0.2 font-mono text-[10px] font-semibold text-foreground/85 shrink-0 border border-border/60">
+              <span
+                class="rounded bg-muted px-1.5 py-0.2 font-mono text-[10px] font-semibold text-foreground/85 shrink-0 border border-border/60"
+              >
                 {toolInfo.name}
               </span>
 
@@ -162,24 +169,24 @@
 
               {#if tool.locations.length > 0 && !toolInfo.detail.includes(tool.locations[0])}
                 <span class="text-muted-foreground truncate font-mono text-[10px]">
-                  ({tool.locations.join(', ')})
+                  ({tool.locations.join(", ")})
                 </span>
               {/if}
             </div>
 
             <!-- ステータス & 展開トグル -->
             <div class="ml-2 flex shrink-0 items-center gap-2">
-              {#if tool.status === 'in_progress'}
+              {#if tool.status === "in_progress"}
                 <LoaderCircleIcon class="size-3 animate-spin text-primary" />
-              {:else if tool.status === 'completed'}
+              {:else if tool.status === "completed"}
                 <CircleCheckIcon class="size-3.5 text-emerald-500" />
-              {:else if tool.status === 'failed'}
+              {:else if tool.status === "failed"}
                 <CircleXIcon class="size-3.5 text-destructive" />
               {/if}
 
               {#if hasDetailContent}
                 <span class="text-muted-foreground text-[10px]">
-                  {isExpanded ? '▲' : '▼'}
+                  {isExpanded ? "▲" : "▼"}
                 </span>
               {/if}
             </div>
@@ -219,10 +226,11 @@
                 </div>
               {/if}
 
-              {#if tool.rawOutput !== null && tool.rawOutput !== ''}
+              {#if tool.rawOutput !== null && tool.rawOutput !== ""}
                 <div class="flex flex-col gap-1">
                   <span class="text-muted-foreground text-[10px]">出力:</span>
-                  <pre class="bg-muted/40 max-h-40 overflow-auto rounded-md border p-2 font-mono text-[11px] whitespace-pre-wrap">{tool.rawOutput}</pre>
+                  <pre
+                    class="bg-muted/40 max-h-40 overflow-auto rounded-md border p-2 font-mono text-[11px] whitespace-pre-wrap">{tool.rawOutput}</pre>
                 </div>
               {/if}
             </div>

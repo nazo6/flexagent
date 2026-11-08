@@ -1,0 +1,28 @@
+{
+  "$schema": "./ui/node_modules/oxfmt/configuration_schema.json",
+  "printWidth": 100,
+  "endOfLine": "lf",
+  "proseWrap": "preserve",
+  "svelte": true,
+  "overrides": [
+    {
+      "files": ["**/*.md"],
+      "options": {
+        "embeddedLanguageFormatting": "off"
+      }
+    }
+  ],
+  "ignorePatterns": [
+    "target/**",
+    ".sqlx/**",
+    ".git/**",
+    "workspace/**",
+    "**/node_modules/**",
+    "ui/build/**",
+    "ui/.svelte-kit/**",
+    "ui/.vite/**",
+    "ui/src/lib/generated/**",
+    "**/pnpm-lock.yaml",
+    "**/*.toml"
+  ]
+}

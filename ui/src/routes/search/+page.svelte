@@ -1,25 +1,25 @@
 <script lang="ts">
-  import { Button } from '$lib/components/ui/button';
-  import { Card } from '$lib/components/ui/card';
-  import { Input } from '$lib/components/ui/input';
-  import { formatRelativeTime } from '$lib/format';
-  import type { SearchHit } from '$lib/generated/SearchHit';
-  import { shortId } from '$lib/session-status';
-  import { connection, sync } from '$lib/stores/app.svelte';
-  import { toast } from 'svelte-sonner';
-  import SearchIcon from '@lucide/svelte/icons/search';
+  import { Button } from "$lib/components/ui/button";
+  import { Card } from "$lib/components/ui/card";
+  import { Input } from "$lib/components/ui/input";
+  import { formatRelativeTime } from "$lib/format";
+  import type { SearchHit } from "$lib/generated/SearchHit";
+  import { shortId } from "$lib/session-status";
+  import { connection, sync } from "$lib/stores/app.svelte";
+  import { toast } from "svelte-sonner";
+  import SearchIcon from "@lucide/svelte/icons/search";
 
-  let query = $state('');
+  let query = $state("");
   let hits = $state<SearchHit[]>([]);
   let searching = $state(false);
   let searched = $state(false);
 
-  const roleLabel = $derived(connection.role === 'central_server' ? 'server.db' : 'node.db');
+  const roleLabel = $derived(connection.role === "central_server" ? "server.db" : "node.db");
 
   async function submit(event: SubmitEvent) {
     event.preventDefault();
     const needle = query.trim();
-    if (needle === '' || searching) return;
+    if (needle === "" || searching) return;
     searching = true;
     try {
       hits = await connection.client.search(needle, 50);
@@ -33,8 +33,7 @@
 
   function sessionTitle(sessionId: string): string {
     return (
-      sync.sessions.find((session) => session.session_id === sessionId)?.title ??
-      shortId(sessionId)
+      sync.sessions.find((session) => session.session_id === sessionId)?.title ?? shortId(sessionId)
     );
   }
 
@@ -42,9 +41,9 @@
   function segments(snippet: string): { text: string; match: boolean }[] {
     const parts: { text: string; match: boolean }[] = [];
     let rest = snippet;
-    while (rest !== '') {
-      const start = rest.indexOf('[');
-      const end = start >= 0 ? rest.indexOf(']', start + 1) : -1;
+    while (rest !== "") {
+      const start = rest.indexOf("[");
+      const end = start >= 0 ? rest.indexOf("]", start + 1) : -1;
       if (start < 0 || end < 0) {
         parts.push({ text: rest, match: false });
         break;
@@ -70,9 +69,9 @@
       bind:value={query}
       placeholder="検索語 (3文字以上で高速、2文字以下は部分一致フォールバック)"
     />
-    <Button type="submit" disabled={searching || query.trim() === ''}>
+    <Button type="submit" disabled={searching || query.trim() === ""}>
       <SearchIcon />
-      {searching ? '検索中…' : '検索'}
+      {searching ? "検索中…" : "検索"}
     </Button>
   </form>
 

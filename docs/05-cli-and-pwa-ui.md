@@ -539,6 +539,7 @@ PCブラウザ、ローカルフォールバック (`localhost:7860`)、およ�
      aes128gcm / 署名は RFC 8292)。購読は通知許可→`pushManager.subscribe`→
      `POST /api/v1/push/subscribe` の順で確立し、失効した購読 (Push
      サービスの `404` / `410`) は送信時に自動削除されます。
+
   3. **質問 (elicitation) の通知**: エージェントが質問した場合も
      `[flexagent] 質問 (Home-Win)` として通知します。form の回答はアプリ内
      でしか行えないため、承認のような `[Approve]` / `[Reject]`

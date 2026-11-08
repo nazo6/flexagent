@@ -1,23 +1,22 @@
 <script lang="ts">
-  import ElicitationCard from '$lib/components/ElicitationCard.svelte';
-  import PermissionCard from '$lib/components/PermissionCard.svelte';
-  import { Button } from '$lib/components/ui/button';
-  import { Card } from '$lib/components/ui/card';
-  import { formatRelativeTime } from '$lib/format';
-  import { shortId } from '$lib/session-status';
-  import { sync } from '$lib/stores/app.svelte';
-  import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
+  import ElicitationCard from "$lib/components/ElicitationCard.svelte";
+  import PermissionCard from "$lib/components/PermissionCard.svelte";
+  import { Button } from "$lib/components/ui/button";
+  import { Card } from "$lib/components/ui/card";
+  import { formatRelativeTime } from "$lib/format";
+  import { shortId } from "$lib/session-status";
+  import { sync } from "$lib/stores/app.svelte";
+  import RefreshCwIcon from "@lucide/svelte/icons/refresh-cw";
 
   /** 古いリクエストから順に処理できるよう昇順で表示する。 */
   const sorted = $derived(sync.inbox.toSorted((a, b) => a.created_at - b.created_at));
   const sortedElicitations = $derived(
-    sync.inboxElicitations.toSorted((a, b) => a.created_at - b.created_at)
+    sync.inboxElicitations.toSorted((a, b) => a.created_at - b.created_at),
   );
 
   function sessionTitle(sessionId: string): string {
     return (
-      sync.sessions.find((session) => session.session_id === sessionId)?.title ??
-      shortId(sessionId)
+      sync.sessions.find((session) => session.session_id === sessionId)?.title ?? shortId(sessionId)
     );
   }
 
@@ -91,10 +90,7 @@
               <div
                 class="bg-muted/40 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-t-lg border-b px-3 py-2 text-xs"
               >
-                <a
-                  href={`/sessions/${elicitation.session_id}`}
-                  class="font-medium hover:underline"
-                >
+                <a href={`/sessions/${elicitation.session_id}`} class="font-medium hover:underline">
                   {sessionTitle(elicitation.session_id)}
                 </a>
                 <span class="text-muted-foreground">{nodeName(elicitation.node_id)}</span>

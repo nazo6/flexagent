@@ -87,7 +87,8 @@
 - **編集後チェック**: 必要に応じて TS (`svelte-check`, `oxlint`) や Rust
   (`cargo check`, `cargo clippy`) のチェック、lint
   を行う。ファイルを編集した際はかならず format (`mise run fmt`) を行う
-  (Rust = rustfmt / Markdown = dprint / TOML = tombi / UI = oxfmt)。
+  (Rust = rustfmt / TOML = tombi / それ以外 (Markdown・JSON・YAML・HTML・TS・Svelte)
+  = oxfmt)。
   また、`fxg-protocol` の型を変更した際は `ts-rs`
   の型出力を同期すること。
 - **変更履歴 (Changelog) と実装プランの記録**:

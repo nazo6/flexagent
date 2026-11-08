@@ -1,8 +1,8 @@
 <script lang="ts">
-  import DiffText from './DiffText.svelte';
-  import { highlightUnifiedDiff, prefersDarkMode } from '$lib/highlight';
+  import DiffText from "./DiffText.svelte";
+  import { highlightUnifiedDiff, prefersDarkMode } from "$lib/highlight";
 
-  let { diff, maxHeight = '60svh' }: { diff: string; maxHeight?: string } = $props();
+  let { diff, maxHeight = "60svh" }: { diff: string; maxHeight?: string } = $props();
 
   let html = $state<string | null>(null);
 

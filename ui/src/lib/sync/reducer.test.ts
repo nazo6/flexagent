@@ -40,9 +40,18 @@ function emptySources(events: SessionEventEnvelope[] = []): TimelineSources & Mu
 describe("insertEventSorted", () => {
   it("keeps events ordered by node_seq and skips duplicates", () => {
     const events: SessionEventEnvelope[] = [];
-    const first = makeEvent(2, { type: "session_title_changed", data: { title: "b" } });
-    const second = makeEvent(1, { type: "session_title_changed", data: { title: "a" } });
-    const third = makeEvent(3, { type: "session_title_changed", data: { title: "c" } });
+    const first = makeEvent(2, {
+      type: "session_title_changed",
+      data: { title: "b" },
+    });
+    const second = makeEvent(1, {
+      type: "session_title_changed",
+      data: { title: "a" },
+    });
+    const third = makeEvent(3, {
+      type: "session_title_changed",
+      data: { title: "c" },
+    });
 
     expect(insertEventSorted(events, first)).toBe(true);
     expect(insertEventSorted(events, second)).toBe(true);
@@ -75,7 +84,11 @@ describe("streaming agent messages", () => {
 
     let items = buildTimelineItems(sources);
     expect(items).toHaveLength(1);
-    expect(items[0]).toMatchObject({ kind: "agent", text: "Hello world", streaming: true });
+    expect(items[0]).toMatchObject({
+      kind: "agent",
+      text: "Hello world",
+      streaming: true,
+    });
 
     const complete = makeEvent(1, {
       type: "agent_message",
@@ -86,7 +99,11 @@ describe("streaming agent messages", () => {
 
     items = buildTimelineItems(sources);
     expect(items).toHaveLength(1);
-    expect(items[0]).toMatchObject({ kind: "agent", text: "Hello world!", streaming: false });
+    expect(items[0]).toMatchObject({
+      kind: "agent",
+      text: "Hello world!",
+      streaming: false,
+    });
   });
 });
 
@@ -200,7 +217,11 @@ describe("tool calls", () => {
     clearStreamBuffers(complete, sources);
     const items = buildTimelineItems(sources);
     expect(items).toHaveLength(1);
-    expect(items[0]).toMatchObject({ kind: "tool", status: "completed", rawOutput: "done" });
+    expect(items[0]).toMatchObject({
+      kind: "tool",
+      status: "completed",
+      rawOutput: "done",
+    });
   });
 });
 
@@ -499,7 +520,10 @@ describe("pending prompts", () => {
     };
     const items = buildTimelineItems(sources);
     expect(items.map((item) => item.kind)).toEqual(["pending"]);
-    expect(items[0]).toMatchObject({ key: "pending:cmd-1", text: "自分のプロンプト" });
+    expect(items[0]).toMatchObject({
+      key: "pending:cmd-1",
+      text: "自分のプロンプト",
+    });
   });
 });
 
@@ -536,7 +560,10 @@ describe("usage and abnormal turn end", () => {
 
   it("renders a warning notice with a fallback label for abnormal turn ends", () => {
     const sources = emptySources([
-      makeEvent(1, { type: "turn_ended", data: { reason: "max_tokens", message: null } }),
+      makeEvent(1, {
+        type: "turn_ended",
+        data: { reason: "max_tokens", message: null },
+      }),
     ]);
     const items = buildTimelineItems(sources);
     expect(items).toHaveLength(1);
@@ -546,18 +573,31 @@ describe("usage and abnormal turn end", () => {
 
   it("prefers the agent-supplied turn end message", () => {
     const sources = emptySources([
-      makeEvent(1, { type: "turn_ended", data: { reason: "refusal", message: "拒否されました" } }),
+      makeEvent(1, {
+        type: "turn_ended",
+        data: { reason: "refusal", message: "拒否されました" },
+      }),
     ]);
     const items = buildTimelineItems(sources);
-    expect(items[0]).toMatchObject({ kind: "notice", text: "拒否されました", tone: "warning" });
+    expect(items[0]).toMatchObject({
+      kind: "notice",
+      text: "拒否されました",
+      tone: "warning",
+    });
   });
 });
 
 describe("compaction notices", () => {
   it("renders info notices for started and completed compaction", () => {
     const sources = emptySources([
-      makeEvent(1, { type: "compaction_updated", data: { status: "started", detail: null } }),
-      makeEvent(2, { type: "compaction_updated", data: { status: "completed", detail: null } }),
+      makeEvent(1, {
+        type: "compaction_updated",
+        data: { status: "started", detail: null },
+      }),
+      makeEvent(2, {
+        type: "compaction_updated",
+        data: { status: "completed", detail: null },
+      }),
     ]);
     const items = buildTimelineItems(sources);
     expect(items).toHaveLength(2);

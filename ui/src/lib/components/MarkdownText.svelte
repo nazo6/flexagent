@@ -7,13 +7,13 @@
    * - 描画後に `enhanceCodeBlocks` がコードフェンスへ shiki のハイライトを
    *   非同期適用する (テキストが落ち着くまでデバウンス)。
    */
-  import { enhanceCodeBlocks } from '$lib/highlight';
-  import { renderMarkdown } from '$lib/markdown';
+  import { enhanceCodeBlocks } from "$lib/highlight";
+  import { renderMarkdown } from "$lib/markdown";
 
   let {
     text,
     streaming = false,
-    class: className = '',
+    class: className = "",
   }: { text: string; streaming?: boolean; class?: string } = $props();
 
   let root: HTMLDivElement | undefined = $state(undefined);
@@ -26,7 +26,7 @@
   $effect(() => {
     const node = root;
     const current = html;
-    if (node === undefined || !current.includes('language-')) return;
+    if (node === undefined || !current.includes("language-")) return;
     const timer = setTimeout(() => {
       void enhanceCodeBlocks(node);
     }, 150);
@@ -92,10 +92,10 @@
   :global(.fxg-md li > p) {
     margin-block: 0.2em;
   }
-  :global(.fxg-md li:has(> input[type='checkbox'])) {
+  :global(.fxg-md li:has(> input[type="checkbox"])) {
     list-style: none;
   }
-  :global(.fxg-md input[type='checkbox']) {
+  :global(.fxg-md input[type="checkbox"]) {
     margin-inline-end: 0.4em;
     vertical-align: middle;
   }

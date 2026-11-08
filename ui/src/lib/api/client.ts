@@ -156,7 +156,9 @@ export class ApiClient {
     const previous = this.#token;
     this.#token = token;
     try {
-      await this.#request<undefined>("POST", "/api/v1/auth/login", { body: { token } });
+      await this.#request<undefined>("POST", "/api/v1/auth/login", {
+        body: { token },
+      });
     } catch (error) {
       this.#token = previous;
       throw error;
@@ -170,7 +172,9 @@ export class ApiClient {
 
   /** `POST /api/v1/system/kill-switch` (緊急停止)。 */
   killSwitch(reason: string): Promise<KillSwitchResponse> {
-    return this.#request("POST", "/api/v1/system/kill-switch", { body: { reason } });
+    return this.#request("POST", "/api/v1/system/kill-switch", {
+      body: { reason },
+    });
   }
 
   // ------------------------------------------------------------------

@@ -1,6 +1,6 @@
 <script lang="ts">
-  import * as Select from '$lib/components/ui/select';
-  import { cn } from '$lib/utils';
+  import * as Select from "$lib/components/ui/select";
+  import { cn } from "$lib/utils";
 
   interface Item {
     /** Select の value (送信値) */
@@ -27,11 +27,11 @@
   let {
     label,
     value = undefined,
-    placeholder = '未選択',
+    placeholder = "未選択",
     items,
     disabled = false,
-    class: className = '',
-    onchange
+    class: className = "",
+    onchange,
   }: Props = $props();
 </script>
 
@@ -47,10 +47,10 @@
   {disabled}
   {value}
   onValueChange={(next) => {
-    if (typeof next === 'string' && next !== '') onchange(next);
+    if (typeof next === "string" && next !== "") onchange(next);
   }}
 >
-  <Select.Trigger size="sm" class={cn('max-w-64', className)}>
+  <Select.Trigger size="sm" class={cn("max-w-64", className)}>
     <span class="text-muted-foreground shrink-0 text-xs">{label}</span>
     <Select.Value {placeholder} />
   </Select.Trigger>

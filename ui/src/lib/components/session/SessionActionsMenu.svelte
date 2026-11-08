@@ -1,14 +1,14 @@
 <script lang="ts">
-  import * as AlertDialog from '$lib/components/ui/alert-dialog';
-  import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
-  import type { SessionSummary } from '$lib/generated/SessionSummary';
-  import { sync } from '$lib/stores/app.svelte';
-  import { cn } from '$lib/utils';
-  import { toast } from 'svelte-sonner';
-  import ArchiveIcon from '@lucide/svelte/icons/archive';
-  import ArchiveRestoreIcon from '@lucide/svelte/icons/archive-restore';
-  import MoreHorizontalIcon from '@lucide/svelte/icons/more-horizontal';
-  import Trash2Icon from '@lucide/svelte/icons/trash-2';
+  import * as AlertDialog from "$lib/components/ui/alert-dialog";
+  import * as DropdownMenu from "$lib/components/ui/dropdown-menu";
+  import type { SessionSummary } from "$lib/generated/SessionSummary";
+  import { sync } from "$lib/stores/app.svelte";
+  import { cn } from "$lib/utils";
+  import { toast } from "svelte-sonner";
+  import ArchiveIcon from "@lucide/svelte/icons/archive";
+  import ArchiveRestoreIcon from "@lucide/svelte/icons/archive-restore";
+  import MoreHorizontalIcon from "@lucide/svelte/icons/more-horizontal";
+  import Trash2Icon from "@lucide/svelte/icons/trash-2";
 
   interface Props {
     session: SessionSummary;
@@ -18,10 +18,10 @@
     buttonClass?: string;
     /** トリガーアイコンのサイズクラス。 */
     iconClass?: string;
-    align?: 'start' | 'center' | 'end';
+    align?: "start" | "center" | "end";
   }
 
-  let { session, onDeleted, buttonClass, iconClass = 'size-3.5', align = 'end' }: Props = $props();
+  let { session, onDeleted, buttonClass, iconClass = "size-3.5", align = "end" }: Props = $props();
 
   const archived = $derived(session.archived_at !== null);
   let confirmOpen = $state(false);
@@ -33,7 +33,7 @@
     busy = true;
     try {
       await sync.archiveSession(session.session_id, !archived);
-      toast.success(archived ? 'アーカイブを解除しました' : 'アーカイブしました');
+      toast.success(archived ? "アーカイブを解除しました" : "アーカイブしました");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
     } finally {
@@ -47,7 +47,7 @@
     busy = true;
     try {
       await sync.deleteSession(session.session_id);
-      toast.success('セッションを削除しました');
+      toast.success("セッションを削除しました");
       confirmOpen = false;
       onDeleted?.();
     } catch (error) {
@@ -70,8 +70,8 @@
   <DropdownMenu.Root>
     <DropdownMenu.Trigger
       class={cn(
-        'text-muted-foreground hover:text-foreground focus-visible:ring-ring/40 inline-flex items-center justify-center rounded p-0.5 outline-none transition-colors focus-visible:ring-1',
-        buttonClass
+        "text-muted-foreground hover:text-foreground focus-visible:ring-ring/40 inline-flex items-center justify-center rounded p-0.5 outline-none transition-colors focus-visible:ring-1",
+        buttonClass,
       )}
       title="セッション操作 (アーカイブ / 削除)"
     >
@@ -120,7 +120,7 @@
         disabled={busy}
         onclick={handleDelete}
       >
-        {busy ? '削除中…' : '削除'}
+        {busy ? "削除中…" : "削除"}
       </AlertDialog.Action>
     </AlertDialog.Footer>
   </AlertDialog.Content>

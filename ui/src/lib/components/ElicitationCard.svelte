@@ -1,17 +1,17 @@
 <script lang="ts">
-  import { Badge } from '$lib/components/ui/badge';
-  import { Button } from '$lib/components/ui/button';
-  import { Input } from '$lib/components/ui/input';
-  import { Label } from '$lib/components/ui/label';
-  import type { ElicitationAction } from '$lib/generated/ElicitationAction';
-  import type { JsonValue } from '$lib/generated/serde_json/JsonValue';
-  import { formatRelativeTime } from '$lib/format';
-  import { sync } from '$lib/stores/app.svelte';
-  import { toast } from 'svelte-sonner';
-  import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
-  import CircleHelpIcon from '@lucide/svelte/icons/circle-help';
-  import SendIcon from '@lucide/svelte/icons/send';
-  import XIcon from '@lucide/svelte/icons/x';
+  import { Badge } from "$lib/components/ui/badge";
+  import { Button } from "$lib/components/ui/button";
+  import { Input } from "$lib/components/ui/input";
+  import { Label } from "$lib/components/ui/label";
+  import type { ElicitationAction } from "$lib/generated/ElicitationAction";
+  import type { JsonValue } from "$lib/generated/serde_json/JsonValue";
+  import { formatRelativeTime } from "$lib/format";
+  import { sync } from "$lib/stores/app.svelte";
+  import { toast } from "svelte-sonner";
+  import ChevronRightIcon from "@lucide/svelte/icons/chevron-right";
+  import CircleHelpIcon from "@lucide/svelte/icons/circle-help";
+  import SendIcon from "@lucide/svelte/icons/send";
+  import XIcon from "@lucide/svelte/icons/x";
 
   /** elicitation の制限 JSON Schema (object) のうち表示に必要な部分。 */
   interface ElicitationProperty {
@@ -37,7 +37,7 @@
     message,
     requestedSchema,
     resolved = null,
-    createdAt = null
+    createdAt = null,
   }: {
     sessionId: string;
     elicitationId: string;
@@ -48,9 +48,9 @@
   } = $props();
 
   const schema = $derived<ElicitationSchema>(
-    typeof requestedSchema === 'object' && requestedSchema !== null
+    typeof requestedSchema === "object" && requestedSchema !== null
       ? (requestedSchema as ElicitationSchema)
-      : {}
+      : {},
   );
   const properties = $derived(Object.entries(schema.properties ?? {}));
   const required = $derived(new Set(schema.required ?? []));
@@ -65,12 +65,12 @@
     for (const [key, property] of Object.entries(schema.properties ?? {})) {
       if (property.default !== undefined) {
         next[key] = property.default as FormValue;
-      } else if (property.type === 'boolean') {
+      } else if (property.type === "boolean") {
         next[key] = false;
-      } else if (property.type === 'array') {
+      } else if (property.type === "array") {
         next[key] = [];
       } else {
-        next[key] = '';
+        next[key] = "";
       }
     }
     values = next;
@@ -80,23 +80,23 @@
     [...required].filter((key) => {
       const value = values[key];
       if (value === undefined) return true;
-      if (typeof value === 'string') return value.trim() === '';
+      if (typeof value === "string") return value.trim() === "";
       if (Array.isArray(value)) return value.length === 0;
       return false;
-    })
+    }),
   );
 
   const resolvedLabel: Record<ElicitationAction, string> = {
-    accept: '回答済み',
-    decline: '辞退済み',
-    cancel: 'キャンセル済み'
+    accept: "回答済み",
+    decline: "辞退済み",
+    cancel: "キャンセル済み",
   };
 
   function enumOptions(property: ElicitationProperty): { value: string; label: string }[] {
     if (property.enum) return property.enum.map((value) => ({ value, label: value }));
     return (property.oneOf ?? []).map((option) => ({
       value: option.const,
-      label: option.title ?? option.const
+      label: option.title ?? option.const,
     }));
   }
 
@@ -105,14 +105,14 @@
   }
 
   function setNumber(key: string, raw: string): void {
-    values[key] = raw === '' ? '' : Number(raw);
+    values[key] = raw === "" ? "" : Number(raw);
   }
 
   function setStringArray(key: string, raw: string): void {
     values[key] = raw
-      .split(',')
+      .split(",")
       .map((part) => part.trim())
-      .filter((part) => part !== '');
+      .filter((part) => part !== "");
   }
 
   function toggleArrayValue(key: string, option: string, checked: boolean): void {
@@ -126,8 +126,8 @@
     const content: { [key: string]: JsonValue } = {};
     for (const [key] of properties) {
       const value = values[key];
-      if (typeof value === 'string') {
-        if (value.trim() !== '') content[key] = value;
+      if (typeof value === "string") {
+        if (value.trim() !== "") content[key] = value;
       } else if (Array.isArray(value)) {
         if (value.length > 0) content[key] = value;
       } else if (value !== undefined) {
@@ -139,8 +139,8 @@
 
   async function respond(action: ElicitationAction) {
     if (busyAction !== null) return;
-    if (action === 'accept' && missingRequired.length > 0) {
-      toast.error(`必須項目を入力してください: ${missingRequired.join(', ')}`);
+    if (action === "accept" && missingRequired.length > 0) {
+      toast.error(`必須項目を入力してください: ${missingRequired.join(", ")}`);
       return;
     }
     busyAction = action;
@@ -149,14 +149,14 @@
         sessionId,
         elicitationId,
         action,
-        action === 'accept' ? buildContent() : null
+        action === "accept" ? buildContent() : null,
       );
-      if (result.code === 'ALREADY_RESOLVED') {
-        toast.info('既に他のクライアントで解決済みでした');
+      if (result.code === "ALREADY_RESOLVED") {
+        toast.info("既に他のクライアントで解決済みでした");
       } else if (!result.success) {
-        toast.error(result.error ?? result.code ?? '応答に失敗しました');
+        toast.error(result.error ?? result.code ?? "応答に失敗しました");
       } else {
-        toast.success('応答を送信しました');
+        toast.success("応答を送信しました");
       }
       await sync.refreshInbox();
     } catch (error) {
@@ -208,7 +208,7 @@
             <select
               id={inputId}
               class="border-input bg-background h-9 rounded-md border px-2 text-sm"
-              value={typeof values[key] === 'string' ? values[key] : ''}
+              value={typeof values[key] === "string" ? values[key] : ""}
               onchange={(event) => setString(key, event.currentTarget.value)}
             >
               <option value="">選択してください</option>
@@ -216,7 +216,7 @@
                 <option value={option.value}>{option.label}</option>
               {/each}
             </select>
-          {:else if property.type === 'boolean'}
+          {:else if property.type === "boolean"}
             <label class="flex items-center gap-2 text-sm">
               <input
                 id={inputId}
@@ -227,7 +227,7 @@
               />
               <span>はい</span>
             </label>
-          {:else if property.type === 'array'}
+          {:else if property.type === "array"}
             {#if property.items?.enum}
               <div class="flex flex-col gap-1.5">
                 {#each property.items.enum as option (option)}
@@ -247,21 +247,21 @@
               <Input
                 id={inputId}
                 placeholder="カンマ区切りで入力"
-                value={Array.isArray(values[key]) ? values[key].join(', ') : ''}
+                value={Array.isArray(values[key]) ? values[key].join(", ") : ""}
                 oninput={(event) => setStringArray(key, event.currentTarget.value)}
               />
             {/if}
-          {:else if property.type === 'integer' || property.type === 'number'}
+          {:else if property.type === "integer" || property.type === "number"}
             <Input
               id={inputId}
               type="number"
-              value={typeof values[key] === 'number' ? String(values[key]) : ''}
+              value={typeof values[key] === "number" ? String(values[key]) : ""}
               oninput={(event) => setNumber(key, event.currentTarget.value)}
             />
           {:else}
             <Input
               id={inputId}
-              value={typeof values[key] === 'string' ? values[key] : ''}
+              value={typeof values[key] === "string" ? values[key] : ""}
               oninput={(event) => setString(key, event.currentTarget.value)}
             />
           {/if}
@@ -272,7 +272,7 @@
         <Button
           size="sm"
           disabled={busyAction !== null || missingRequired.length > 0}
-          onclick={() => void respond('accept')}
+          onclick={() => void respond("accept")}
         >
           <SendIcon />
           回答する
@@ -281,7 +281,7 @@
           size="sm"
           variant="outline"
           disabled={busyAction !== null}
-          onclick={() => void respond('decline')}
+          onclick={() => void respond("decline")}
         >
           <XIcon />
           辞退
@@ -290,7 +290,7 @@
           size="sm"
           variant="ghost"
           disabled={busyAction !== null}
-          onclick={() => void respond('cancel')}
+          onclick={() => void respond("cancel")}
         >
           キャンセル
         </Button>

@@ -1,19 +1,19 @@
 <script lang="ts">
-  import DiffViewer from './DiffViewer.svelte';
-  import { Badge } from '$lib/components/ui/badge';
-  import { Button } from '$lib/components/ui/button';
-  import { cn } from '$lib/utils';
-  import type { FileDiff } from '$lib/generated/FileDiff';
-  import type { WorkspaceDiffResponse } from '$lib/generated/WorkspaceDiffResponse';
-  import { sync } from '$lib/stores/app.svelte';
-  import type { TimelineItem } from '$lib/sync/reducer';
-  import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
+  import DiffViewer from "./DiffViewer.svelte";
+  import { Badge } from "$lib/components/ui/badge";
+  import { Button } from "$lib/components/ui/button";
+  import { cn } from "$lib/utils";
+  import type { FileDiff } from "$lib/generated/FileDiff";
+  import type { WorkspaceDiffResponse } from "$lib/generated/WorkspaceDiffResponse";
+  import { sync } from "$lib/stores/app.svelte";
+  import type { TimelineItem } from "$lib/sync/reducer";
+  import RefreshCwIcon from "@lucide/svelte/icons/refresh-cw";
 
   let { sessionId, items }: { sessionId: string; items: TimelineItem[] } = $props();
 
-  type Scope = 'session' | 'branch_base' | 'uncommitted';
+  type Scope = "session" | "branch_base" | "uncommitted";
 
-  let scope = $state<Scope>('session');
+  let scope = $state<Scope>("session");
   let worktreeDiff = $state<WorkspaceDiffResponse | null>(null);
   let loading = $state(false);
   let error = $state<string | null>(null);
@@ -23,20 +23,20 @@
   const sessionFiles = $derived.by(() => {
     const byPath = new Map<string, FileDiff>();
     for (const item of items) {
-      if (item.kind === 'tool' && item.diff !== null) {
+      if (item.kind === "tool" && item.diff !== null) {
         byPath.set(item.diff.path, item.diff);
       }
     }
     return [...byPath.values()];
   });
 
-  const files = $derived(scope === 'session' ? sessionFiles : (worktreeDiff?.files ?? []));
+  const files = $derived(scope === "session" ? sessionFiles : (worktreeDiff?.files ?? []));
   const selected = $derived(
-    files.find((file) => file.path === selectedPath) ?? files.at(0) ?? null
+    files.find((file) => file.path === selectedPath) ?? files.at(0) ?? null,
   );
 
   async function loadWorktreeDiff(): Promise<void> {
-    if (scope === 'session') return;
+    if (scope === "session") return;
     loading = true;
     error = null;
     try {
@@ -52,14 +52,14 @@
 
   $effect(() => {
     const current = scope;
-    if (current === 'session') return;
+    if (current === "session") return;
     void loadWorktreeDiff();
   });
 
   const scopeOptions: { value: Scope; label: string }[] = [
-    { value: 'session', label: 'セッションの変更' },
-    { value: 'branch_base', label: 'Worktree: vs Base' },
-    { value: 'uncommitted', label: 'Worktree: vs HEAD' }
+    { value: "session", label: "セッションの変更" },
+    { value: "branch_base", label: "Worktree: vs Base" },
+    { value: "uncommitted", label: "Worktree: vs HEAD" },
   ];
 </script>
 
@@ -68,27 +68,22 @@
     {#each scopeOptions as option (option.value)}
       <Button
         size="sm"
-        variant={scope === option.value ? 'default' : 'outline'}
+        variant={scope === option.value ? "default" : "outline"}
         onclick={() => (scope = option.value)}
       >
         {option.label}
       </Button>
     {/each}
-    {#if scope !== 'session'}
-      <Button
-        size="sm"
-        variant="ghost"
-        disabled={loading}
-        onclick={() => void loadWorktreeDiff()}
-      >
+    {#if scope !== "session"}
+      <Button size="sm" variant="ghost" disabled={loading} onclick={() => void loadWorktreeDiff()}>
         <RefreshCwIcon />
         再取得
       </Button>
     {/if}
-    {#if worktreeDiff !== null && scope !== 'session'}
+    {#if worktreeDiff !== null && scope !== "session"}
       <span class="text-muted-foreground ml-auto text-xs">
         {worktreeDiff.base_branch ?? worktreeDiff.scope}
-        {#if worktreeDiff.head_commit !== ''}@ {worktreeDiff.head_commit.slice(0, 8)}{/if}
+        {#if worktreeDiff.head_commit !== ""}@ {worktreeDiff.head_commit.slice(0, 8)}{/if}
       </span>
     {/if}
   </div>
@@ -97,11 +92,11 @@
     <p class="text-destructive text-sm">{error}</p>
   {/if}
 
-  {#if scope === 'session' && sessionFiles.length === 0}
+  {#if scope === "session" && sessionFiles.length === 0}
     <p class="text-muted-foreground text-sm">
       このセッションでエージェントが編集したファイルはまだありません。
     </p>
-  {:else if scope !== 'session' && loading}
+  {:else if scope !== "session" && loading}
     <p class="text-muted-foreground text-sm">Diff を取得しています…</p>
   {:else if files.length === 0 && error === null}
     <p class="text-muted-foreground text-sm">変更はありません。</p>
@@ -113,8 +108,10 @@
             <button
               type="button"
               class={cn(
-                'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs',
-                selected?.path === file.path ? 'bg-accent text-accent-foreground' : 'hover:bg-muted'
+                "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs",
+                selected?.path === file.path
+                  ? "bg-accent text-accent-foreground"
+                  : "hover:bg-muted",
               )}
               onclick={() => (selectedPath = file.path)}
             >

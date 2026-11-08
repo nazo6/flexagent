@@ -1,25 +1,25 @@
 <script lang="ts">
-  import type { FileDiff } from '$lib/generated/FileDiff';
-  import MonacoDiff from './MonacoDiff.svelte';
-  import ShikiDiff from './ShikiDiff.svelte';
+  import type { FileDiff } from "$lib/generated/FileDiff";
+  import MonacoDiff from "./MonacoDiff.svelte";
+  import ShikiDiff from "./ShikiDiff.svelte";
 
   let { file }: { file: FileDiff | null } = $props();
 
   /** PC (>= 768px) は Monaco Diff Editor、モバイルは shiki Unified Diff。 */
-  let viewportWidth = $state(typeof window === 'undefined' ? 0 : window.innerWidth);
+  let viewportWidth = $state(typeof window === "undefined" ? 0 : window.innerWidth);
 
   function updateViewportWidth() {
     viewportWidth = window.innerWidth;
   }
 
   $effect(() => {
-    if (typeof window === 'undefined') return;
-    window.addEventListener('resize', updateViewportWidth);
-    return () => window.removeEventListener('resize', updateViewportWidth);
+    if (typeof window === "undefined") return;
+    window.addEventListener("resize", updateViewportWidth);
+    return () => window.removeEventListener("resize", updateViewportWidth);
   });
 
   const canUseMonaco = $derived(
-    viewportWidth >= 768 && file !== null && file.old_text !== null && file.new_text !== null
+    viewportWidth >= 768 && file !== null && file.old_text !== null && file.new_text !== null,
   );
 </script>
 
@@ -36,7 +36,7 @@
     </div>
     {#if canUseMonaco && file !== null}
       <MonacoDiff {file} />
-    {:else if file.unified_diff !== ''}
+    {:else if file.unified_diff !== ""}
       <ShikiDiff diff={file.unified_diff} />
     {:else}
       <p class="text-muted-foreground text-sm">

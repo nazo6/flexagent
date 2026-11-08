@@ -12,7 +12,6 @@ rust = "stable"
 node = "24.21.0"
 pnpm = "12.8.1"
 "cargo:sqlx-cli" = { version = "0.9.0", default-features = "false", features = "sqlite,rustls" }
-dprint = "0.57.4"
 tombi = "1.5.8"
 
 # ---------------------------------------------------------------------------
@@ -23,50 +22,39 @@ tombi = "1.5.8"
 description = "Rust コードを rustfmt でフォーマットする"
 run = "cargo fmt --all"
 
-[tasks."fmt:md"]
-description = "Markdown を dprint でフォーマットする"
-run = "dprint fmt"
-
 [tasks."fmt:toml"]
 description = "TOML を tombi でフォーマットする"
 run = "tombi format"
 
-[tasks."fmt:ui"]
-description = "UI (TS / Svelte) を oxfmt でフォーマットする"
-run = "pnpm --dir ui run fmt"
+[tasks."fmt:oxc"]
+description = "Markdown / JSON / YAML / HTML / TypeScript / Svelte を oxfmt でフォーマットする"
+# `oxfmt` は `ui` の devDependency。`.svelte` の整形には oxfmt と同じ
+# node_modules に `svelte` が要るため ui に置いたまま、その bin を node で起動する
+# (`ui/node_modules/.bin` のシェルスクリプトを避けて Windows でも動くようにする)。
+run = "node ui/node_modules/oxfmt/bin/oxfmt -c .oxfmtrc.json ."
 
 [tasks.fmt]
-description = "全言語 (Rust / Markdown / TOML / UI) をフォーマットする"
-run = [
-  { task = "fmt:rust" },
-  { task = "fmt:md" },
-  { task = "fmt:toml" },
-  { task = "fmt:ui" },
-]
+description = "全言語 (Rust / TOML / Markdown / JSON / YAML / UI) をフォーマットする"
+run = [{ task = "fmt:rust" }, { task = "fmt:toml" }, { task = "fmt:oxc" }]
 
 [tasks."fmt:check:rust"]
 description = "Rust のフォーマット差分を検証する"
 run = "cargo fmt --all --check"
 
-[tasks."fmt:check:md"]
-description = "Markdown のフォーマット差分を検証する"
-run = "dprint check"
-
 [tasks."fmt:check:toml"]
 description = "TOML のフォーマット差分を検証する"
 run = "tombi format --check"
 
-[tasks."fmt:check:ui"]
-description = "UI (TS / Svelte) のフォーマット差分を検証する"
-run = "pnpm --dir ui run fmt:check"
+[tasks."fmt:check:oxc"]
+description = "Markdown / JSON / YAML / HTML / TypeScript / Svelte のフォーマット差分を検証する"
+run = "node ui/node_modules/oxfmt/bin/oxfmt -c .oxfmtrc.json --check ."
 
 [tasks."fmt:check"]
 description = "全言語のフォーマット差分を検証する"
 run = [
   { task = "fmt:check:rust" },
-  { task = "fmt:check:md" },
   { task = "fmt:check:toml" },
-  { task = "fmt:check:ui" },
+  { task = "fmt:check:oxc" },
 ]
 
 [tasks."lint:rust"]
@@ -79,10 +67,7 @@ run = "tombi lint"
 
 [tasks.lint]
 description = "全言語の lint を実行する"
-run = [
-  { task = "lint:rust" },
-  { task = "lint:toml" },
-]
+run = [{ task = "lint:rust" }, { task = "lint:toml" }]
 
 [tasks.test]
 description = "ワークスペース全体のテストを実行する (ts-rs 型出力含む)"
@@ -93,11 +78,7 @@ run = "cargo test --workspace --no-fail-fast"
 description = "fmt:check + lint + test を一括実行する (コミット前チェック)"
 # 直列実行する: 並列に走らせると cargo のビルドディレクトリロックで
 # 相互待ちになり遅くなるため (`{ task = ... }` は順次実行)
-run = [
-  { task = "fmt:check" },
-  { task = "lint" },
-  { task = "test" },
-]
+run = [{ task = "fmt:check" }, { task = "lint" }, { task = "test" }]
 
 # ---------------------------------------------------------------------------
 # UI (`ui/`: SvelteKit SPA)
@@ -120,12 +101,8 @@ description = "UI をビルドする (ui/build。fxg バイナリへの同梱用
 run = "pnpm --dir ui run build"
 
 [tasks."check:ui"]
-description = "UI の fmt:check + lint + test を一括実行する"
-run = [
-  { task = "fmt:check:ui" },
-  { task = "lint:ui" },
-  { task = "test:ui" },
-]
+description = "UI の lint + test を一括実行する (フォーマットは `fmt:check` が全体を検査する)"
+run = [{ task = "lint:ui" }, { task = "test:ui" }]
 
 # ---------------------------------------------------------------------------
 # 型生成 (ts-rs) / sqlx オフラインデータ
@@ -178,9 +155,7 @@ run = "cargo run -p fxg-cli -- server"
 
 [tasks.dev]
 description = "Vite 開発サーバーとデバッグバイナリ (fxg daemon) を並列起動する"
-run = [
-  { tasks = ["dev:ui", "dev:daemon"] },
-]
+run = [{ tasks = ["dev:ui", "dev:daemon"] }]
 
 # ---------------------------------------------------------------------------
 # ビルド

@@ -464,7 +464,9 @@ export class SyncStore {
    * セッションをアーカイブ/復元する (可逆。イベントログは保持される)。
    */
   async archiveSession(sessionId: string, archived: boolean): Promise<SessionArchiveResponse> {
-    const result = await this.connection.client.archiveSession(sessionId, { archived });
+    const result = await this.connection.client.archiveSession(sessionId, {
+      archived,
+    });
     await this.refreshSessions();
     return result;
   }

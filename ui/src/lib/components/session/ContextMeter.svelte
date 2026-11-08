@@ -1,6 +1,6 @@
 <script lang="ts">
-  import type { SessionUsage } from '$lib/generated/SessionUsage';
-  import { formatTokenCount } from '$lib/format';
+  import type { SessionUsage } from "$lib/generated/SessionUsage";
+  import { formatTokenCount } from "$lib/format";
 
   /**
    * コンテキスト使用量メーター (ACP `usage_update` の投影)。
@@ -13,18 +13,18 @@
   const percent = $derived(
     usage && usage.context_size > 0
       ? Math.min(100, Math.max(0, (usage.used_tokens / usage.context_size) * 100))
-      : 0
+      : 0,
   );
 
   const barClass = $derived(
-    percent >= 90 ? 'bg-destructive' : percent >= 70 ? 'bg-amber-500' : 'bg-primary'
+    percent >= 90 ? "bg-destructive" : percent >= 70 ? "bg-amber-500" : "bg-primary",
   );
 
   const tooltip = $derived(
     usage
       ? `コンテキスト使用量: ${usage.used_tokens} / ${usage.context_size} tokens (${percent.toFixed(1)}%)` +
-        (usage.cost ? ` ・累積コスト: ${usage.cost.amount} ${usage.cost.currency}` : '')
-      : ''
+          (usage.cost ? ` ・累積コスト: ${usage.cost.amount} ${usage.cost.currency}` : "")
+      : "",
   );
 </script>
 
@@ -38,7 +38,8 @@
     </span>
     {#if usage.cost}
       <span class="whitespace-nowrap font-mono">
-        {usage.cost.currency} {usage.cost.amount.toFixed(4)}
+        {usage.cost.currency}
+        {usage.cost.amount.toFixed(4)}
       </span>
     {/if}
   </span>

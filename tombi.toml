@@ -1,7 +1,9 @@
 # Tombi (TOML フォーマッタ / リンタ) 設定。
 #
-# 方針: Markdown = dprint / TOML = tombi / Rust = rustfmt
-# (docs/changelog/2026-09-30-implementation-plan.md の「フォーマッタ決定」参照)。
+# 方針: TOML = tombi / TOML 以外 (Markdown・JSON・YAML・HTML・TS・Svelte) =
+# oxfmt (`/ .oxfmtrc.json`) / Rust = rustfmt。
+# oxfmt の TOML 整形は配列を 1 行に潰して printWidth を超えるため採用しない
+# (tombi は JSON Schema による lint も担う)。
 # ルールは既定のまま使用する (line-ending = lf / indent = space 2 /
 # key-quote = double / table-blank-lines = 1)。
 

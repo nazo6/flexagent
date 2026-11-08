@@ -142,7 +142,11 @@ export class ConnectionStore {
     if (this.targets.some((target) => target.url === normalized)) return;
     this.targets = [
       ...this.targets,
-      { id: `target-${crypto.randomUUID()}`, label: label.trim() || normalized, url: normalized },
+      {
+        id: `target-${crypto.randomUUID()}`,
+        label: label.trim() || normalized,
+        url: normalized,
+      },
     ];
     persistTargets(this.targets);
   }

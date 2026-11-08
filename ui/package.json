@@ -12,8 +12,6 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "oxlint",
-    "fmt": "oxfmt .",
-    "fmt:check": "oxfmt --check .",
     "icons": "node scripts/generate-icons.mjs"
   },
   "dependencies": {
@@ -40,7 +38,7 @@
     "happy-dom": "^20.14.5",
     "jsdom": "^30.1.1",
     "mode-watcher": "^1.1.0",
-    "oxfmt": "^0.71.0",
+    "oxfmt": "^0.77.0",
     "oxlint": "^1.86.0",
     "shadcn-svelte": "^1.7.0",
     "svelte": "^5.57.1",

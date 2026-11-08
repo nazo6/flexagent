@@ -1,10 +1,10 @@
 <script lang="ts">
-  import { Badge } from '$lib/components/ui/badge';
-  import { formatRelativeTime } from '$lib/format';
-  import { connection, sync } from '$lib/stores/app.svelte';
-  import { cn } from '$lib/utils';
-  import WifiIcon from '@lucide/svelte/icons/wifi';
-  import WifiOffIcon from '@lucide/svelte/icons/wifi-off';
+  import { Badge } from "$lib/components/ui/badge";
+  import { formatRelativeTime } from "$lib/format";
+  import { connection, sync } from "$lib/stores/app.svelte";
+  import { cn } from "$lib/utils";
+  import WifiIcon from "@lucide/svelte/icons/wifi";
+  import WifiOffIcon from "@lucide/svelte/icons/wifi-off";
 
   interface Props {
     class?: string;
@@ -12,12 +12,12 @@
 
   let { class: className }: Props = $props();
 
-  const isLocalNode = $derived(connection.role === 'local_node');
+  const isLocalNode = $derived(connection.role === "local_node");
 </script>
 
-<div class={cn('flex flex-wrap items-center gap-1.5 text-xs', className)}>
+<div class={cn("flex flex-wrap items-center gap-1.5 text-xs", className)}>
   <Badge
-    variant={sync.wsConnected ? 'secondary' : 'destructive'}
+    variant={sync.wsConnected ? "secondary" : "destructive"}
     class="gap-1 px-1.5 py-0 text-[10px] font-normal"
   >
     {#if sync.wsConnected}
@@ -31,10 +31,10 @@
 
   {#if isLocalNode}
     <Badge
-      variant={sync.centralConnected ? 'secondary' : 'outline'}
+      variant={sync.centralConnected ? "secondary" : "outline"}
       class="px-1.5 py-0 text-[10px] font-normal"
     >
-      中央: {sync.centralConnected ? '接続' : '切断'}
+      中央: {sync.centralConnected ? "接続" : "切断"}
     </Badge>
     {#if sync.unsyncedEventCount > 0}
       <Badge variant="destructive" class="px-1.5 py-0 text-[10px] font-normal">
@@ -44,7 +44,10 @@
   {/if}
 
   {#if sync.lastSyncedAt !== null}
-    <span class="text-muted-foreground text-[10px] truncate ml-auto" title={`最終同期: ${new Date(sync.lastSyncedAt).toLocaleString()}`}>
+    <span
+      class="text-muted-foreground text-[10px] truncate ml-auto"
+      title={`最終同期: ${new Date(sync.lastSyncedAt).toLocaleString()}`}
+    >
       同期 {formatRelativeTime(sync.lastSyncedAt)}
     </span>
   {/if}

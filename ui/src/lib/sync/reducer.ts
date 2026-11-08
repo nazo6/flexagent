@@ -119,7 +119,13 @@ export type TimelineItem =
       requestedSchema: unknown;
       resolved: { action: ElicitationAction; resolvedBy: string } | null;
     }
-  | { kind: "plan"; key: string; seq: number; createdAt: number; entries: PlanEntry[] }
+  | {
+      kind: "plan";
+      key: string;
+      seq: number;
+      createdAt: number;
+      entries: PlanEntry[];
+    }
   | {
       kind: "notice";
       key: string;
@@ -128,7 +134,13 @@ export type TimelineItem =
       text: string;
       tone: "info" | "warning" | "error";
     }
-  | { kind: "pending"; key: string; seq: number; createdAt: number; text: string };
+  | {
+      kind: "pending";
+      key: string;
+      seq: number;
+      createdAt: number;
+      text: string;
+    };
 
 /** イベント列の末尾に挿入する仮想 `node_seq` (ストリーミング項目用)。 */
 const STREAM_SEQ = Number.MAX_SAFE_INTEGER - 1_000_000;
@@ -613,7 +625,10 @@ export function latestStatusFromEvents(
   for (let i = events.length - 1; i >= 0; i -= 1) {
     const payload = events[i].payload;
     if (payload.type === "status_changed") {
-      return { status: payload.data.status, errorMessage: payload.data.error_message };
+      return {
+        status: payload.data.status,
+        errorMessage: payload.data.error_message,
+      };
     }
   }
   return null;

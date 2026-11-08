@@ -16,7 +16,9 @@ export interface ITerminalAdapter {
   clear(): void;
   write(data: string | Uint8Array): void;
   onData(callback: (data: string) => void): { dispose: () => void };
-  onResize(callback: (dims: TerminalDimensions) => void): { dispose: () => void };
+  onResize(callback: (dims: TerminalDimensions) => void): {
+    dispose: () => void;
+  };
   fit(): TerminalDimensions;
   focus(): void;
   dispose(): void;

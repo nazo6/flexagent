@@ -1,26 +1,26 @@
 <script lang="ts">
-  import { page } from '$app/state';
-  import { Badge } from '$lib/components/ui/badge';
-  import { formatRelativeTimeCompact } from '$lib/format';
-  import { getNodeAvailability } from '$lib/node-status';
-  import { pinned } from '$lib/stores/pinned.svelte';
-  import { sync } from '$lib/stores/app.svelte';
-  import { cn } from '$lib/utils';
-  import ConnectionMenu from '$lib/components/ConnectionMenu.svelte';
-  import KillSwitchButton from '$lib/components/KillSwitchButton.svelte';
-  import SessionActionsMenu from '$lib/components/session/SessionActionsMenu.svelte';
-  import SyncStatusBadge from '$lib/components/SyncStatusBadge.svelte';
-  import type { SessionSummary } from '$lib/generated/SessionSummary';
-  import AlertCircleIcon from '@lucide/svelte/icons/alert-circle';
-  import ArchiveIcon from '@lucide/svelte/icons/archive';
-  import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
-  import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
-  import FolderGit2Icon from '@lucide/svelte/icons/folder-git-2';
-  import InboxIcon from '@lucide/svelte/icons/inbox';
-  import PinIcon from '@lucide/svelte/icons/pin';
-  import PlusIcon from '@lucide/svelte/icons/plus';
-  import SearchIcon from '@lucide/svelte/icons/search';
-  import SettingsIcon from '@lucide/svelte/icons/settings';
+  import { page } from "$app/state";
+  import { Badge } from "$lib/components/ui/badge";
+  import { formatRelativeTimeCompact } from "$lib/format";
+  import { getNodeAvailability } from "$lib/node-status";
+  import { pinned } from "$lib/stores/pinned.svelte";
+  import { sync } from "$lib/stores/app.svelte";
+  import { cn } from "$lib/utils";
+  import ConnectionMenu from "$lib/components/ConnectionMenu.svelte";
+  import KillSwitchButton from "$lib/components/KillSwitchButton.svelte";
+  import SessionActionsMenu from "$lib/components/session/SessionActionsMenu.svelte";
+  import SyncStatusBadge from "$lib/components/SyncStatusBadge.svelte";
+  import type { SessionSummary } from "$lib/generated/SessionSummary";
+  import AlertCircleIcon from "@lucide/svelte/icons/alert-circle";
+  import ArchiveIcon from "@lucide/svelte/icons/archive";
+  import ChevronDownIcon from "@lucide/svelte/icons/chevron-down";
+  import ChevronRightIcon from "@lucide/svelte/icons/chevron-right";
+  import FolderGit2Icon from "@lucide/svelte/icons/folder-git-2";
+  import InboxIcon from "@lucide/svelte/icons/inbox";
+  import PinIcon from "@lucide/svelte/icons/pin";
+  import PlusIcon from "@lucide/svelte/icons/plus";
+  import SearchIcon from "@lucide/svelte/icons/search";
+  import SettingsIcon from "@lucide/svelte/icons/settings";
 
   interface Props {
     onNavigate?: () => void;
@@ -28,14 +28,14 @@
 
   let { onNavigate }: Props = $props();
 
-  let searchQuery = $state('');
+  let searchQuery = $state("");
   let collapsedProjects = $state<Record<string, boolean>>({});
   let showAttentionSection = $state(true);
   let showArchivedSection = $state(false);
 
   const currentPath = $derived(page.url.pathname);
   const activeSessionId = $derived(
-    currentPath.startsWith('/sessions/') ? currentPath.replace('/sessions/', '') : null
+    currentPath.startsWith("/sessions/") ? currentPath.replace("/sessions/", "") : null,
   );
 
   function toggleProject(projectId: string) {
@@ -43,7 +43,7 @@
   }
 
   function isProjectCollapsed(projectId: string): boolean {
-    if (searchQuery.trim() !== '') return false;
+    if (searchQuery.trim() !== "") return false;
     return collapsedProjects[projectId] ?? false;
   }
 
@@ -62,7 +62,7 @@
   const filteredSessions = $derived(
     sync.sessions
       .filter((session) => session.archived_at === null)
-      .filter((session) => matchesSearch(session, searchQuery.trim()))
+      .filter((session) => matchesSearch(session, searchQuery.trim())),
   );
 
   // アーカイブ済みセッション (既定では折りたたみ)
@@ -70,12 +70,10 @@
     sync.sessions
       .filter((session) => session.archived_at !== null)
       .filter((session) => matchesSearch(session, searchQuery.trim()))
-      .toSorted((a, b) => (b.archived_at ?? 0) - (a.archived_at ?? 0))
+      .toSorted((a, b) => (b.archived_at ?? 0) - (a.archived_at ?? 0)),
   );
 
-  const pendingSessionIds = $derived(
-    new Set(sync.inbox.map((req) => req.session_id))
-  );
+  const pendingSessionIds = $derived(new Set(sync.inbox.map((req) => req.session_id)));
 
   // 全体横断の要対応セッション (承認待ちはアーカイブ済みでも見落とさない)
   const needsAttentionSessions = $derived.by(() => {
@@ -86,7 +84,7 @@
       }
     }
     for (const session of filteredSessions) {
-      if (session.status === 'error') attention.set(session.session_id, session);
+      if (session.status === "error") attention.set(session.session_id, session);
     }
     return [...attention.values()];
   });
@@ -126,19 +124,19 @@
           return b.updated_at - a.updated_at;
         });
 
-      if (searchQuery.trim() !== '' && projSessions.length === 0) {
+      if (searchQuery.trim() !== "" && projSessions.length === 0) {
         continue;
       }
 
       const pendingCount = projSessions.filter((s) => pendingSessionIds.has(s.session_id)).length;
-      const runningCount = projSessions.filter((s) => s.status === 'running').length;
+      const runningCount = projSessions.filter((s) => s.status === "running").length;
 
       groups.push({
         projectId: pId,
         projectName: projectMap.get(pId) ?? pId,
         sessions: projSessions,
         pendingCount,
-        runningCount
+        runningCount,
       });
     }
 
@@ -167,7 +165,9 @@
       class="flex items-center gap-2 font-semibold tracking-tight hover:opacity-80 transition-opacity"
       onclick={handleLinkClick}
     >
-      <div class="bg-primary text-primary-foreground flex size-6 items-center justify-center rounded font-mono text-xs font-bold">
+      <div
+        class="bg-primary text-primary-foreground flex size-6 items-center justify-center rounded font-mono text-xs font-bold"
+      >
         fxg
       </div>
       <span class="text-sm">FlexAgent</span>
@@ -180,10 +180,10 @@
       href="/"
       onclick={handleLinkClick}
       class={cn(
-        'flex items-center justify-between rounded-md px-2.5 py-1.5 font-medium transition-colors',
-        currentPath === '/'
-          ? 'bg-accent text-accent-foreground'
-          : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground'
+        "flex items-center justify-between rounded-md px-2.5 py-1.5 font-medium transition-colors",
+        currentPath === "/"
+          ? "bg-accent text-accent-foreground"
+          : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
       )}
     >
       <div class="flex items-center gap-2">
@@ -196,10 +196,10 @@
       href="/inbox"
       onclick={handleLinkClick}
       class={cn(
-        'flex items-center justify-between rounded-md px-2.5 py-1.5 font-medium transition-colors',
-        currentPath.startsWith('/inbox')
-          ? 'bg-accent text-accent-foreground'
-          : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground'
+        "flex items-center justify-between rounded-md px-2.5 py-1.5 font-medium transition-colors",
+        currentPath.startsWith("/inbox")
+          ? "bg-accent text-accent-foreground"
+          : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
       )}
     >
       <div class="flex items-center gap-2">
@@ -217,10 +217,10 @@
       href="/projects"
       onclick={handleLinkClick}
       class={cn(
-        'flex items-center gap-2 rounded-md px-2.5 py-1.5 font-medium transition-colors',
-        currentPath.startsWith('/projects')
-          ? 'bg-accent text-accent-foreground'
-          : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground'
+        "flex items-center gap-2 rounded-md px-2.5 py-1.5 font-medium transition-colors",
+        currentPath.startsWith("/projects")
+          ? "bg-accent text-accent-foreground"
+          : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
       )}
     >
       <FolderGit2Icon class="size-3.5" />
@@ -231,10 +231,10 @@
       href="/search"
       onclick={handleLinkClick}
       class={cn(
-        'flex items-center gap-2 rounded-md px-2.5 py-1.5 font-medium transition-colors',
-        currentPath.startsWith('/search')
-          ? 'bg-accent text-accent-foreground'
-          : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground'
+        "flex items-center gap-2 rounded-md px-2.5 py-1.5 font-medium transition-colors",
+        currentPath.startsWith("/search")
+          ? "bg-accent text-accent-foreground"
+          : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
       )}
     >
       <SearchIcon class="size-3.5" />
@@ -245,10 +245,10 @@
       href="/settings"
       onclick={handleLinkClick}
       class={cn(
-        'flex items-center gap-2 rounded-md px-2.5 py-1.5 font-medium transition-colors',
-        currentPath.startsWith('/settings')
-          ? 'bg-accent text-accent-foreground'
-          : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground'
+        "flex items-center gap-2 rounded-md px-2.5 py-1.5 font-medium transition-colors",
+        currentPath.startsWith("/settings")
+          ? "bg-accent text-accent-foreground"
+          : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
       )}
     >
       <SettingsIcon class="size-3.5" />
@@ -272,7 +272,7 @@
   <!-- セッション一覧リスト (プロジェクト別) -->
   <div class="scrollbar-thin flex-1 overflow-y-auto p-2">
     <!-- 要対応セクション (承認待ち・エラーがある場合のみ最上部に表示) -->
-    {#if needsAttentionSessions.length > 0 && searchQuery.trim() === ''}
+    {#if needsAttentionSessions.length > 0 && searchQuery.trim() === ""}
       <div class="mb-3 rounded-lg border border-destructive/30 bg-destructive/5 p-1.5">
         <button
           type="button"
@@ -306,7 +306,9 @@
     <!-- プロジェクト別一覧 -->
     {#if projectGroups.length === 0}
       <div class="text-muted-foreground p-3 text-center text-xs">
-        {searchQuery ? '該当するプロジェクトまたはセッションがありません' : 'プロジェクトがまだありません'}
+        {searchQuery
+          ? "該当するプロジェクトまたはセッションがありません"
+          : "プロジェクトがまだありません"}
       </div>
     {:else}
       <div class="flex flex-col gap-2.5">
@@ -314,7 +316,9 @@
           {@const isCollapsed = isProjectCollapsed(group.projectId)}
           <div class="flex flex-col">
             <!-- プロジェクト見出しヘッダー -->
-            <div class="group/proj flex items-center justify-between rounded-md px-1.5 py-1 text-xs hover:bg-muted/40 transition-colors">
+            <div
+              class="group/proj flex items-center justify-between rounded-md px-1.5 py-1 text-xs hover:bg-muted/40 transition-colors"
+            >
               <button
                 type="button"
                 class="flex min-w-0 flex-1 items-center gap-1.5 text-left font-semibold text-foreground/90 select-none"
@@ -335,7 +339,10 @@
                   </Badge>
                 {/if}
                 {#if group.runningCount > 0}
-                  <span class="size-1.5 rounded-full bg-emerald-500 shrink-0" title="実行中セッションあり"></span>
+                  <span
+                    class="size-1.5 rounded-full bg-emerald-500 shrink-0"
+                    title="実行中セッションあり"
+                  ></span>
                 {/if}
               </button>
 
@@ -356,7 +363,9 @@
 
             <!-- プロジェクト内セッションリスト -->
             {#if !isCollapsed}
-              <ul class="ml-2.5 border-l border-border/60 pl-2 flex list-none flex-col gap-0.5 p-0 mt-0.5">
+              <ul
+                class="ml-2.5 border-l border-border/60 pl-2 flex list-none flex-col gap-0.5 p-0 mt-0.5"
+              >
                 {#each group.sessions as session (session.session_id)}
                   {@render sessionRow(session, false)}
                 {/each}
@@ -437,19 +446,19 @@
     <a
       href={`/sessions/${session.session_id}`}
       onclick={handleLinkClick}
-      title={`${session.title}${isArchived ? ' (アーカイブ済み)' : ''}\nワーキングディレクトリ: ${session.local_path}\nノード: ${node?.name ?? session.node_id}`}
+      title={`${session.title}${isArchived ? " (アーカイブ済み)" : ""}\nワーキングディレクトリ: ${session.local_path}\nノード: ${node?.name ?? session.node_id}`}
       class={cn(
-        'group flex items-center justify-between rounded-md px-2 py-1.5 text-xs transition-colors',
+        "group flex items-center justify-between rounded-md px-2 py-1.5 text-xs transition-colors",
         isActive
-          ? 'bg-accent text-accent-foreground font-medium'
-          : 'text-foreground/80 hover:bg-accent/40 hover:text-foreground',
-        isArchived && 'opacity-70'
+          ? "bg-accent text-accent-foreground font-medium"
+          : "text-foreground/80 hover:bg-accent/40 hover:text-foreground",
+        isArchived && "opacity-70",
       )}
     >
       <div class="flex min-w-0 flex-1 items-center gap-2">
         <!-- ノードステータスドット -->
         <span
-          class={cn('size-1.5 shrink-0 rounded-full', nodeAvail.dotColorClass)}
+          class={cn("size-1.5 shrink-0 rounded-full", nodeAvail.dotColorClass)}
           title={`ノード: ${node?.name ?? session.node_id} (${nodeAvail.statusText})`}
         ></span>
 
@@ -481,17 +490,17 @@
         <button
           type="button"
           class={cn(
-            'hover:text-foreground p-0.5 transition-opacity',
-            isPinned ? 'opacity-100 text-amber-500' : 'opacity-0 group-hover:opacity-100'
+            "hover:text-foreground p-0.5 transition-opacity",
+            isPinned ? "opacity-100 text-amber-500" : "opacity-0 group-hover:opacity-100",
           )}
-          title={isPinned ? 'ピン留め解除' : 'ピン留め'}
+          title={isPinned ? "ピン留め解除" : "ピン留め"}
           onclick={(e) => {
             e.preventDefault();
             e.stopPropagation();
             pinned.toggle(session.session_id);
           }}
         >
-          <PinIcon class="size-3" fill={isPinned ? 'currentColor' : 'none'} />
+          <PinIcon class="size-3" fill={isPinned ? "currentColor" : "none"} />
         </button>
 
         <span>{formatRelativeTimeCompact(session.updated_at)}</span>

@@ -1,20 +1,20 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
-  import { Button } from '$lib/components/ui/button';
-  import { Badge } from '$lib/components/ui/badge';
-  import { decodeBase64ToBytes, encodeTextToBase64 } from '$lib/base64';
-  import type { PtyClientMessage } from '$lib/generated/PtyClientMessage';
-  import type { PtyServerMessage } from '$lib/generated/PtyServerMessage';
-  import { connection } from '$lib/stores/app.svelte';
-  import { GhosttyWebAdapter } from './ghostty-adapter';
-  import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
-  import TriangleAlertIcon from '@lucide/svelte/icons/triangle-alert';
+  import { onMount } from "svelte";
+  import { Button } from "$lib/components/ui/button";
+  import { Badge } from "$lib/components/ui/badge";
+  import { decodeBase64ToBytes, encodeTextToBase64 } from "$lib/base64";
+  import type { PtyClientMessage } from "$lib/generated/PtyClientMessage";
+  import type { PtyServerMessage } from "$lib/generated/PtyServerMessage";
+  import { connection } from "$lib/stores/app.svelte";
+  import { GhosttyWebAdapter } from "./ghostty-adapter";
+  import RefreshCwIcon from "@lucide/svelte/icons/refresh-cw";
+  import TriangleAlertIcon from "@lucide/svelte/icons/triangle-alert";
 
   let { sessionId }: { sessionId: string } = $props();
 
-  type Status = 'disconnected' | 'connecting' | 'connected' | 'exited' | 'blocked' | 'failed';
+  type Status = "disconnected" | "connecting" | "connected" | "exited" | "blocked" | "failed";
 
-  let status = $state<Status>('disconnected');
+  let status = $state<Status>("disconnected");
   let statusMessage = $state<string | null>(null);
   let container = $state<HTMLDivElement | null>(null);
   let ptyId = $state<string | null>(null);
@@ -27,15 +27,15 @@
 
   /** モバイル仮想キーバー (タップでエスケープシーケンスを送信)。 */
   const KEY_BAR: { label: string; data: string }[] = [
-    { label: 'Esc', data: '\x1b' },
-    { label: 'Tab', data: '\t' },
-    { label: 'Ctrl+C', data: '\x03' },
-    { label: 'Ctrl+D', data: '\x04' },
-    { label: '↑', data: '\x1b[A' },
-    { label: '↓', data: '\x1b[B' },
-    { label: '→', data: '\x1b[C' },
-    { label: '←', data: '\x1b[D' },
-    { label: '⏎', data: '\r' }
+    { label: "Esc", data: "\x1b" },
+    { label: "Tab", data: "\t" },
+    { label: "Ctrl+C", data: "\x03" },
+    { label: "Ctrl+D", data: "\x04" },
+    { label: "↑", data: "\x1b[A" },
+    { label: "↓", data: "\x1b[B" },
+    { label: "→", data: "\x1b[C" },
+    { label: "←", data: "\x1b[D" },
+    { label: "⏎", data: "\r" },
   ];
 
   function send(message: PtyClientMessage): boolean {
@@ -45,7 +45,7 @@
   }
 
   function sendInput(data: string): void {
-    send({ op: 'input', data_b64: encodeTextToBase64(data) });
+    send({ op: "input", data_b64: encodeTextToBase64(data) });
   }
 
   function handleMessage(raw: string): void {
@@ -56,24 +56,24 @@
       return;
     }
     switch (message.op) {
-      case 'spawned':
+      case "spawned":
         ptyId = message.pty_id;
-        status = 'connected';
+        status = "connected";
         statusMessage = null;
         adapter?.focus();
         break;
-      case 'output':
+      case "output":
         adapter?.write(decodeBase64ToBytes(message.data_b64));
         break;
-      case 'exit':
-        status = 'exited';
-        statusMessage = `プロセスが終了しました (exit ${message.exit_code ?? '不明'})`;
+      case "exit":
+        status = "exited";
+        statusMessage = `プロセスが終了しました (exit ${message.exit_code ?? "不明"})`;
         break;
-      case 'error':
-        if (message.code === 'PTY_DISABLED' || message.code === 'FORBIDDEN') {
-          status = 'blocked';
+      case "error":
+        if (message.code === "PTY_DISABLED" || message.code === "FORBIDDEN") {
+          status = "blocked";
         } else {
-          status = 'failed';
+          status = "failed";
         }
         statusMessage = message.message;
         break;
@@ -82,45 +82,45 @@
 
   function connect(): void {
     if (socket !== null) return;
-    status = 'connecting';
+    status = "connecting";
     statusMessage = null;
 
-    const ws = new WebSocket(connection.client.wsUrl('/api/v1/pty/ws'));
+    const ws = new WebSocket(connection.client.wsUrl("/api/v1/pty/ws"));
     socket = ws;
 
-    ws.addEventListener('open', () => {
+    ws.addEventListener("open", () => {
       if (socket !== ws || disposed) return;
       const dims = adapter?.fit() ?? { cols: 80, rows: 24 };
       send({
-        op: 'spawn',
+        op: "spawn",
         session_id: sessionId,
         cols: dims.cols,
         rows: dims.rows,
-        shell_cmd: null
+        shell_cmd: null,
       });
     });
 
-    ws.addEventListener('message', (event: MessageEvent) => {
+    ws.addEventListener("message", (event: MessageEvent) => {
       if (socket !== ws || disposed) return;
-      if (typeof event.data === 'string') handleMessage(event.data);
+      if (typeof event.data === "string") handleMessage(event.data);
     });
 
-    ws.addEventListener('close', () => {
+    ws.addEventListener("close", () => {
       // 新しい接続 (セッション切替 / 手動再接続) に置き換え済みの場合は無視する
       if (socket !== ws) return;
       socket = null;
       if (disposed) return;
-      if (status === 'connected' || status === 'connecting') {
-        status = 'disconnected';
-        statusMessage = 'PTY 接続が切断されました。';
+      if (status === "connected" || status === "connecting") {
+        status = "disconnected";
+        statusMessage = "PTY 接続が切断されました。";
       }
     });
 
-    ws.addEventListener('error', () => {
+    ws.addEventListener("error", () => {
       if (socket !== ws) return;
-      if (status === 'connecting') {
-        status = 'failed';
-        statusMessage = 'PTY WebSocket に接続できませんでした。';
+      if (status === "connecting") {
+        status = "failed";
+        statusMessage = "PTY WebSocket に接続できませんでした。";
       }
     });
   }
@@ -154,7 +154,7 @@
     }
     const dataDisposer = adapter?.onData((data) => sendInput(data));
     const resizeDisposer = adapter?.onResize(({ cols, rows }) => {
-      send({ op: 'resize', cols, rows });
+      send({ op: "resize", cols, rows });
     });
     connect();
 
@@ -173,21 +173,21 @@
 <div class="flex flex-col gap-2">
   <div class="flex flex-wrap items-center gap-2 text-xs">
     <Badge
-      variant={status === 'connected'
-        ? 'secondary'
-        : status === 'connecting'
-          ? 'outline'
-          : 'destructive'}
+      variant={status === "connected"
+        ? "secondary"
+        : status === "connecting"
+          ? "outline"
+          : "destructive"}
     >
-      {#if status === 'connecting'}
+      {#if status === "connecting"}
         PTY を起動しています…
-      {:else if status === 'connected'}
+      {:else if status === "connected"}
         接続中
-      {:else if status === 'disconnected'}
+      {:else if status === "disconnected"}
         切断
-      {:else if status === 'exited'}
+      {:else if status === "exited"}
         終了
-      {:else if status === 'blocked'}
+      {:else if status === "blocked"}
         無効
       {:else}
         エラー
@@ -201,28 +201,30 @@
       size="sm"
       class="ml-auto"
       onclick={reconnect}
-      disabled={status === 'connecting'}
+      disabled={status === "connecting"}
     >
       <RefreshCwIcon />
       再接続
     </Button>
   </div>
 
-  {#if status === 'blocked'}
+  {#if status === "blocked"}
     <div class="text-destructive flex items-start gap-2 rounded-lg border p-3 text-sm">
       <TriangleAlertIcon class="mt-0.5 size-4 shrink-0" />
       <p>
-        リモート PTY はセキュリティポリシーにより無効化されています。ローカル端末
-        (<code>localhost:7860</code> または CLI) からご利用ください。
+        リモート PTY はセキュリティポリシーにより無効化されています。ローカル端末 (<code
+          >localhost:7860</code
+        >
+        または CLI) からご利用ください。
         {#if statusMessage !== null}
           <span class="text-muted-foreground block text-xs">{statusMessage}</span>
         {/if}
       </p>
     </div>
-  {:else if status === 'failed' || status === 'exited' || status === 'disconnected'}
+  {:else if status === "failed" || status === "exited" || status === "disconnected"}
     <div class="flex items-start gap-2 rounded-lg border p-3 text-sm">
       <TriangleAlertIcon class="text-muted-foreground mt-0.5 size-4 shrink-0" />
-      <p>{statusMessage ?? '接続がありません。'}</p>
+      <p>{statusMessage ?? "接続がありません。"}</p>
     </div>
   {/if}
 

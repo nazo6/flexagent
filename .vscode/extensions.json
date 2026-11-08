@@ -1,7 +1,3 @@
 {
-  "recommendations": [
-    "dprint.dprint",
-    "tombi-toml.tombi",
-    "rust-lang.rust-analyzer"
-  ]
+  "recommendations": ["oxc.oxc-vscode", "tombi-toml.tombi", "rust-lang.rust-analyzer"]
 }

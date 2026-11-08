@@ -16,9 +16,13 @@ describe("configValueToString", () => {
     expect(configValueToString(42)).toBe("42");
     expect(configValueToString(true)).toBe("true");
     expect(configValueToString(null)).toBe("null");
-    expect(configValueToString({ providerID: "opencode", id: "gpt-5", name: "GPT-5" })).toBe(
-      '{"providerID":"opencode","id":"gpt-5","name":"GPT-5"}',
-    );
+    expect(
+      configValueToString({
+        providerID: "opencode",
+        id: "gpt-5",
+        name: "GPT-5",
+      }),
+    ).toBe('{"providerID":"opencode","id":"gpt-5","name":"GPT-5"}');
   });
 });
 
@@ -53,7 +57,11 @@ describe("configChoices", () => {
     ]);
     expect(choices.map((choice) => choice.label)).toEqual(["GPT-5", "Claude"]);
     expect(choices[0].value).toBe('{"providerID":"opencode","id":"gpt-5","name":"GPT-5"}');
-    expect(choices[0].raw).toEqual({ providerID: "opencode", id: "gpt-5", name: "GPT-5" });
+    expect(choices[0].raw).toEqual({
+      providerID: "opencode",
+      id: "gpt-5",
+      name: "GPT-5",
+    });
   });
 
   it("falls back to provider/id or id when name is missing", () => {
@@ -94,7 +102,11 @@ describe("selectedConfigValue", () => {
   it("returns the select value for a known current value", () => {
     expect(selectedConfigValue(choices, "plan")).toBe("plan");
     expect(
-      selectedConfigValue(choices, { providerID: "opencode", id: "gpt-5", name: "GPT-5" }),
+      selectedConfigValue(choices, {
+        providerID: "opencode",
+        id: "gpt-5",
+        name: "GPT-5",
+      }),
     ).toBe('{"providerID":"opencode","id":"gpt-5","name":"GPT-5"}');
   });
 

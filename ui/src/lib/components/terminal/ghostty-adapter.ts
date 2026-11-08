@@ -85,7 +85,9 @@ export class GhosttyWebAdapter implements ITerminalAdapter {
     return { dispose: () => this.#dataListeners.delete(callback) };
   }
 
-  onResize(callback: (dims: TerminalDimensions) => void): { dispose: () => void } {
+  onResize(callback: (dims: TerminalDimensions) => void): {
+    dispose: () => void;
+  } {
     this.#resizeListeners.add(callback);
     return { dispose: () => this.#resizeListeners.delete(callback) };
   }

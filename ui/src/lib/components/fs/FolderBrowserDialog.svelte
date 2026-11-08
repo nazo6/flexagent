@@ -1,19 +1,19 @@
 <script lang="ts">
-  import * as Dialog from '$lib/components/ui/dialog';
-  import { Button } from '$lib/components/ui/button';
-  import { Input } from '$lib/components/ui/input';
-  import type { FsEntry } from '$lib/generated/FsEntry';
-  import { sync } from '$lib/stores/app.svelte';
-  import ArrowUpIcon from '@lucide/svelte/icons/arrow-up';
-  import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
-  import CornerDownLeftIcon from '@lucide/svelte/icons/corner-down-left';
-  import EyeIcon from '@lucide/svelte/icons/eye';
-  import EyeOffIcon from '@lucide/svelte/icons/eye-off';
-  import FolderIcon from '@lucide/svelte/icons/folder';
-  import FolderOpenIcon from '@lucide/svelte/icons/folder-open';
-  import HardDriveIcon from '@lucide/svelte/icons/hard-drive';
-  import Loader2Icon from '@lucide/svelte/icons/loader-2';
-  import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
+  import * as Dialog from "$lib/components/ui/dialog";
+  import { Button } from "$lib/components/ui/button";
+  import { Input } from "$lib/components/ui/input";
+  import type { FsEntry } from "$lib/generated/FsEntry";
+  import { sync } from "$lib/stores/app.svelte";
+  import ArrowUpIcon from "@lucide/svelte/icons/arrow-up";
+  import ChevronRightIcon from "@lucide/svelte/icons/chevron-right";
+  import CornerDownLeftIcon from "@lucide/svelte/icons/corner-down-left";
+  import EyeIcon from "@lucide/svelte/icons/eye";
+  import EyeOffIcon from "@lucide/svelte/icons/eye-off";
+  import FolderIcon from "@lucide/svelte/icons/folder";
+  import FolderOpenIcon from "@lucide/svelte/icons/folder-open";
+  import HardDriveIcon from "@lucide/svelte/icons/hard-drive";
+  import Loader2Icon from "@lucide/svelte/icons/loader-2";
+  import RefreshCwIcon from "@lucide/svelte/icons/refresh-cw";
 
   interface Props {
     open: boolean;
@@ -26,16 +26,16 @@
   let {
     open = $bindable(false),
     nodeId,
-    initialPath = '',
-    title = 'フォルダを選択',
-    onSelect
+    initialPath = "",
+    title = "フォルダを選択",
+    onSelect,
   }: Props = $props();
 
-  let currentPath = $state('');
+  let currentPath = $state("");
   let parentPath = $state<string | null>(null);
   let entries = $state<FsEntry[]>([]);
-  let selectedPath = $state('');
-  let inputPath = $state('');
+  let selectedPath = $state("");
+  let inputPath = $state("");
   let loading = $state(false);
   let error = $state<string | null>(null);
   let showHidden = $state(false);
@@ -89,7 +89,7 @@
   }
 
   function handleGoDrives() {
-    void loadDirectory('');
+    void loadDirectory("");
   }
 
   function handlePathSubmit(e: SubmitEvent) {
@@ -176,9 +176,13 @@
     </div>
 
     <!-- フォルダ一覧領域 -->
-    <div class="flex-1 min-h-60 max-h-72 overflow-y-auto rounded-md border bg-muted/20 p-1 flex flex-col">
+    <div
+      class="flex-1 min-h-60 max-h-72 overflow-y-auto rounded-md border bg-muted/20 p-1 flex flex-col"
+    >
       {#if loading}
-        <div class="flex flex-1 items-center justify-center py-12 text-muted-foreground gap-2 text-xs">
+        <div
+          class="flex flex-1 items-center justify-center py-12 text-muted-foreground gap-2 text-xs"
+        >
           <Loader2Icon class="size-4 animate-spin text-primary" />
           <span>フォルダを読み込み中…</span>
         </div>
@@ -189,7 +193,7 @@
             variant="outline"
             size="sm"
             class="h-7 text-xs"
-            onclick={() => loadDirectory(parentPath ?? '')}
+            onclick={() => loadDirectory(parentPath ?? "")}
           >
             戻る
           </Button>
@@ -212,7 +216,7 @@
                 onclick={() => handleSelectEntry(entry)}
                 ondblclick={() => handleOpenEntry(entry)}
                 onkeydown={(e) => {
-                  if (e.key === 'Enter') handleOpenEntry(entry);
+                  if (e.key === "Enter") handleOpenEntry(entry);
                 }}
               >
                 <div class="flex min-w-0 flex-1 items-center gap-2">
@@ -257,22 +261,22 @@
         {/if}
       </button>
 
-      <div class="flex min-w-0 max-w-[65%] items-center gap-1 text-[11px] text-muted-foreground font-mono truncate">
+      <div
+        class="flex min-w-0 max-w-[65%] items-center gap-1 text-[11px] text-muted-foreground font-mono truncate"
+      >
         <span class="shrink-0">選択中:</span>
-        <span class="truncate text-foreground font-medium" title={selectedPath || currentPath || '(未選択)'}>
-          {selectedPath || currentPath || '(未選択)'}
+        <span
+          class="truncate text-foreground font-medium"
+          title={selectedPath || currentPath || "(未選択)"}
+        >
+          {selectedPath || currentPath || "(未選択)"}
         </span>
       </div>
     </div>
 
     <!-- ダイアログフッター -->
     <Dialog.Footer class="gap-2 sm:gap-2">
-      <Button
-        variant="outline"
-        size="sm"
-        class="text-xs h-8"
-        onclick={() => (open = false)}
-      >
+      <Button variant="outline" size="sm" class="text-xs h-8" onclick={() => (open = false)}>
         キャンセル
       </Button>
       <Button

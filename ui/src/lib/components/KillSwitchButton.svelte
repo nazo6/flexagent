@@ -1,10 +1,10 @@
 <script lang="ts">
-  import * as AlertDialog from '$lib/components/ui/alert-dialog';
-  import { Button } from '$lib/components/ui/button';
-  import { sync } from '$lib/stores/app.svelte';
-  import { cn } from '$lib/utils';
-  import { toast } from 'svelte-sonner';
-  import OctagonXIcon from '@lucide/svelte/icons/octagon-x';
+  import * as AlertDialog from "$lib/components/ui/alert-dialog";
+  import { Button } from "$lib/components/ui/button";
+  import { sync } from "$lib/stores/app.svelte";
+  import { cn } from "$lib/utils";
+  import { toast } from "svelte-sonner";
+  import OctagonXIcon from "@lucide/svelte/icons/octagon-x";
 
   interface Props {
     class?: string;
@@ -18,7 +18,7 @@
     if (busy) return;
     busy = true;
     try {
-      const nodes = await sync.killSwitch('web ui kill switch');
+      const nodes = await sync.killSwitch("web ui kill switch");
       toast.success(`緊急停止を送信しました (${nodes} ノードへ配信)`);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
@@ -35,7 +35,7 @@
         variant="destructive"
         size="sm"
         {...props}
-        class={cn('shrink-0 gap-1.5 text-xs', className)}
+        class={cn("shrink-0 gap-1.5 text-xs", className)}
         title="全セッションを緊急停止"
       >
         <OctagonXIcon class="size-3.5 shrink-0" />
@@ -54,7 +54,7 @@
     <AlertDialog.Footer>
       <AlertDialog.Cancel>キャンセル</AlertDialog.Cancel>
       <AlertDialog.Action variant="destructive" onclick={confirmKill} disabled={busy}>
-        {busy ? '送信中…' : '停止する'}
+        {busy ? "送信中…" : "停止する"}
       </AlertDialog.Action>
     </AlertDialog.Footer>
   </AlertDialog.Content>

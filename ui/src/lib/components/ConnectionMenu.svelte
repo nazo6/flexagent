@@ -1,48 +1,48 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
-  import * as Dialog from '$lib/components/ui/dialog';
-  import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
-  import { Button } from '$lib/components/ui/button';
-  import { Input } from '$lib/components/ui/input';
-  import { Label } from '$lib/components/ui/label';
-  import { connection, logoutAndStop } from '$lib/stores/app.svelte';
+  import { onMount } from "svelte";
+  import * as Dialog from "$lib/components/ui/dialog";
+  import * as DropdownMenu from "$lib/components/ui/dropdown-menu";
+  import { Button } from "$lib/components/ui/button";
+  import { Input } from "$lib/components/ui/input";
+  import { Label } from "$lib/components/ui/label";
+  import { connection, logoutAndStop } from "$lib/stores/app.svelte";
   import {
     disablePushNotifications,
     enablePushNotifications,
     pushCapability,
-    type PushCapability
-  } from '$lib/push';
-  import { toast } from 'svelte-sonner';
-  import BellIcon from '@lucide/svelte/icons/bell';
-  import BellOffIcon from '@lucide/svelte/icons/bell-off';
-  import CableIcon from '@lucide/svelte/icons/cable';
-  import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
-  import LogOutIcon from '@lucide/svelte/icons/log-out';
-  import PlusIcon from '@lucide/svelte/icons/plus';
-  import ServerIcon from '@lucide/svelte/icons/server';
-  import { cn } from '$lib/utils';
+    type PushCapability,
+  } from "$lib/push";
+  import { toast } from "svelte-sonner";
+  import BellIcon from "@lucide/svelte/icons/bell";
+  import BellOffIcon from "@lucide/svelte/icons/bell-off";
+  import CableIcon from "@lucide/svelte/icons/cable";
+  import ChevronDownIcon from "@lucide/svelte/icons/chevron-down";
+  import LogOutIcon from "@lucide/svelte/icons/log-out";
+  import PlusIcon from "@lucide/svelte/icons/plus";
+  import ServerIcon from "@lucide/svelte/icons/server";
+  import { cn } from "$lib/utils";
 
   interface Props {
     class?: string;
-    align?: 'start' | 'center' | 'end';
+    align?: "start" | "center" | "end";
   }
 
-  let { class: className, align = 'start' }: Props = $props();
+  let { class: className, align = "start" }: Props = $props();
 
   let addOpen = $state(false);
-  let newLabel = $state('');
-  let newUrl = $state('');
+  let newLabel = $state("");
+  let newUrl = $state("");
   let push = $state<PushCapability | null>(null);
   let pushBusy = $state(false);
 
   const roleLabel = $derived(
-    connection.role === 'central_server'
-      ? '中央サーバー'
-      : connection.role === 'local_node'
-        ? 'ローカルノード'
-        : '未接続'
+    connection.role === "central_server"
+      ? "中央サーバー"
+      : connection.role === "local_node"
+        ? "ローカルノード"
+        : "未接続",
   );
-  const originLabel = $derived(connection.origin || '(同一オリジン)');
+  const originLabel = $derived(connection.origin || "(同一オリジン)");
 
   // Push 対応状況は接続先バックエンドに依存するため初回マウント時に確認する
   onMount(() => {
@@ -63,10 +63,10 @@
     try {
       if (push.subscribed) {
         await disablePushNotifications();
-        toast('Push 通知を解除しました');
+        toast("Push 通知を解除しました");
       } else {
         await enablePushNotifications();
-        toast.success('Push 通知を有効化しました');
+        toast.success("Push 通知を有効化しました");
       }
       await refreshPush();
     } catch (error) {
@@ -81,24 +81,24 @@
     if (!newUrl.trim()) return;
     try {
       const parsed = new URL(newUrl.trim());
-      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-        throw new Error('http:// または https:// の URL を指定してください');
+      if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+        throw new Error("http:// または https:// の URL を指定してください");
       }
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'URL が不正です');
+      toast.error(error instanceof Error ? error.message : "URL が不正です");
       return;
     }
     connection.addTarget(newLabel, newUrl);
     addOpen = false;
-    newLabel = '';
-    newUrl = '';
-    toast.success('切替先を追加しました');
+    newLabel = "";
+    newUrl = "";
+    toast.success("切替先を追加しました");
   }
 
   async function logout() {
     try {
       await logoutAndStop();
-      toast('ログアウトしました');
+      toast("ログアウトしました");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
     }
@@ -112,7 +112,7 @@
         variant="outline"
         size="sm"
         {...props}
-        class={cn('gap-1.5 text-xs', className)}
+        class={cn("gap-1.5 text-xs", className)}
         title={`現在の接続先: ${roleLabel} (${originLabel})`}
       >
         <div class="flex items-center gap-1.5 min-w-0">
@@ -169,9 +169,8 @@
     <Dialog.Header>
       <Dialog.Title>切替先を追加</Dialog.Title>
       <Dialog.Description>
-        中央サーバーまたはノードの Web UI の URL
-        を登録します。切替時はそのオリジンの UI へ移動します (トークンはオリジンごとに
-        独立して保持されます)。
+        中央サーバーまたはノードの Web UI の URL を登録します。切替時はそのオリジンの UI
+        へ移動します (トークンはオリジンごとに 独立して保持されます)。
       </Dialog.Description>
     </Dialog.Header>
     <form class="flex flex-col gap-4" onsubmit={addTarget}>
@@ -188,7 +187,7 @@
         />
       </div>
       <Dialog.Footer>
-        <Button type="submit" disabled={newUrl.trim() === ''}>追加</Button>
+        <Button type="submit" disabled={newUrl.trim() === ""}>追加</Button>
       </Dialog.Footer>
     </form>
   </Dialog.Content>

@@ -1,30 +1,30 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
-  import { page } from '$app/state';
-  import AgentManager from '$lib/components/settings/AgentManager.svelte';
-  import AuditLog from '$lib/components/settings/AuditLog.svelte';
-  import * as AlertDialog from '$lib/components/ui/alert-dialog';
-  import { Badge } from '$lib/components/ui/badge';
-  import { Button } from '$lib/components/ui/button';
-  import { Card } from '$lib/components/ui/card';
-  import * as Dialog from '$lib/components/ui/dialog';
-  import { Input } from '$lib/components/ui/input';
-  import { Label } from '$lib/components/ui/label';
-  import * as Tabs from '$lib/components/ui/tabs';
-  import type { IssueNodeTokenResponse } from '$lib/generated/IssueNodeTokenResponse';
-  import type { NodeTokenSummary } from '$lib/generated/NodeTokenSummary';
-  import { sync } from '$lib/stores/app.svelte';
-  import { toast } from 'svelte-sonner';
-  import CopyIcon from '@lucide/svelte/icons/copy';
-  import KeyRoundIcon from '@lucide/svelte/icons/key-round';
-  import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
-  import ShieldIcon from '@lucide/svelte/icons/shield';
-  import Trash2Icon from '@lucide/svelte/icons/trash-2';
+  import { onMount } from "svelte";
+  import { page } from "$app/state";
+  import AgentManager from "$lib/components/settings/AgentManager.svelte";
+  import AuditLog from "$lib/components/settings/AuditLog.svelte";
+  import * as AlertDialog from "$lib/components/ui/alert-dialog";
+  import { Badge } from "$lib/components/ui/badge";
+  import { Button } from "$lib/components/ui/button";
+  import { Card } from "$lib/components/ui/card";
+  import * as Dialog from "$lib/components/ui/dialog";
+  import { Input } from "$lib/components/ui/input";
+  import { Label } from "$lib/components/ui/label";
+  import * as Tabs from "$lib/components/ui/tabs";
+  import type { IssueNodeTokenResponse } from "$lib/generated/IssueNodeTokenResponse";
+  import type { NodeTokenSummary } from "$lib/generated/NodeTokenSummary";
+  import { sync } from "$lib/stores/app.svelte";
+  import { toast } from "svelte-sonner";
+  import CopyIcon from "@lucide/svelte/icons/copy";
+  import KeyRoundIcon from "@lucide/svelte/icons/key-round";
+  import RefreshCwIcon from "@lucide/svelte/icons/refresh-cw";
+  import ShieldIcon from "@lucide/svelte/icons/shield";
+  import Trash2Icon from "@lucide/svelte/icons/trash-2";
 
-  const isServer = $derived(sync.connection.role === 'central_server');
+  const isServer = $derived(sync.connection.role === "central_server");
 
   /** 選択中の設定タブ (`?tab=agents` などのディープリンクを反映する)。 */
-  let activeTab = $state(page.url.searchParams.get('tab') ?? 'general');
+  let activeTab = $state(page.url.searchParams.get("tab") ?? "general");
 
   // --- ノードペアリング (中央サーバーのみ) ---
   let tokens = $state<NodeTokenSummary[]>([]);
@@ -32,7 +32,7 @@
 
   // 新規ノードトークン発行
   let issueOpen = $state(false);
-  let issueNodeId = $state('');
+  let issueNodeId = $state("");
   let issueBusy = $state(false);
   /** 発行直後の平文トークン (このダイアログを閉じると再表示できない)。 */
   let issued = $state<IssueNodeTokenResponse | null>(null);
@@ -63,12 +63,14 @@
 
   async function submitIssue(event: SubmitEvent): Promise<void> {
     event.preventDefault();
-    if (issueBusy || issueNodeId.trim() === '') return;
+    if (issueBusy || issueNodeId.trim() === "") return;
     issueBusy = true;
     try {
-      issued = await sync.connection.client.issueNodeToken({ node_id: issueNodeId.trim() });
+      issued = await sync.connection.client.issueNodeToken({
+        node_id: issueNodeId.trim(),
+      });
       issueOpen = false;
-      issueNodeId = '';
+      issueNodeId = "";
       await loadTokens();
       await sync.refreshNodes();
     } catch (error) {
@@ -99,7 +101,7 @@
       await navigator.clipboard.writeText(text);
       toast.success(`${label}をコピーしました`);
     } catch {
-      toast.error('クリップボードへコピーできませんでした');
+      toast.error("クリップボードへコピーできませんでした");
     }
   }
 
@@ -111,7 +113,7 @@
       // 旧トークンは即時無効化されるため、新トークンで即座に再認証する
       await sync.connection.login(result.token);
       sync.restart();
-      toast.success('クライアント認証トークンを再生成しました');
+      toast.success("クライアント認証トークンを再生成しました");
       rotateOpen = false;
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
@@ -167,8 +169,10 @@
               <div>
                 <h2 class="font-medium">ノードペアリング</h2>
                 <p class="text-muted-foreground text-xs">
-                  <code>fxg daemon</code> を中央サーバーへ接続するためのノード個別トークン
-                  (<code>~/.flexagent/node_token</code>) を発行・失効します。
+                  <code>fxg daemon</code>
+                  を中央サーバーへ接続するためのノード個別トークン (<code
+                    >~/.flexagent/node_token</code
+                  >) を発行・失効します。
                 </p>
               </div>
               <div class="flex items-center gap-1.5">
@@ -189,12 +193,13 @@
 
             {#if !isServer}
               <p class="text-muted-foreground text-xs">
-                ノードトークンの管理は中央サーバー接続時のみ利用できます。現在はローカルノード
-                (<code>{sync.connection.origin}</code>) に接続しています。
+                ノードトークンの管理は中央サーバー接続時のみ利用できます。現在はローカルノード (<code
+                  >{sync.connection.origin}</code
+                >) に接続しています。
               </p>
             {:else if tokens.length === 0}
               <p class="text-muted-foreground text-xs">
-                {loadingTokens ? '読み込み中…' : '発行済みのノードトークンはありません。'}
+                {loadingTokens ? "読み込み中…" : "発行済みのノードトークンはありません。"}
               </p>
             {:else}
               <ul class="flex list-none flex-col gap-1 p-0 text-xs">
@@ -248,14 +253,19 @@
     <form class="flex flex-col gap-4" onsubmit={submitIssue}>
       <div class="grid gap-2">
         <Label for="node-id">ノードID</Label>
-        <Input id="node-id" bind:value={issueNodeId} placeholder="home-win" class="font-mono text-xs" />
+        <Input
+          id="node-id"
+          bind:value={issueNodeId}
+          placeholder="home-win"
+          class="font-mono text-xs"
+        />
       </div>
       <Dialog.Footer>
         <Button type="button" variant="outline" onclick={() => (issueOpen = false)}>
           キャンセル
         </Button>
-        <Button type="submit" disabled={issueBusy || issueNodeId.trim() === ''}>
-          {issueBusy ? '発行中…' : '発行'}
+        <Button type="submit" disabled={issueBusy || issueNodeId.trim() === ""}>
+          {issueBusy ? "発行中…" : "発行"}
         </Button>
       </Dialog.Footer>
     </form>
@@ -280,15 +290,17 @@
       <div class="grid gap-2">
         <Label>トークン</Label>
         <div class="flex items-center gap-1.5">
-          <code class="bg-muted min-w-0 flex-1 truncate rounded-md border px-2 py-1 font-mono text-xs">
-            {issued?.token ?? ''}
+          <code
+            class="bg-muted min-w-0 flex-1 truncate rounded-md border px-2 py-1 font-mono text-xs"
+          >
+            {issued?.token ?? ""}
           </code>
           <Button
             type="button"
             variant="outline"
             size="sm"
             class="h-8 shrink-0 gap-1.5 px-2.5 text-xs"
-            onclick={() => issued && void copyText(issued.token, 'トークン')}
+            onclick={() => issued && void copyText(issued.token, "トークン")}
           >
             <CopyIcon class="size-3.5" />
             コピー
@@ -297,13 +309,13 @@
       </div>
       <pre
         class="bg-muted overflow-x-auto rounded-md border p-2 text-[11px] leading-relaxed">{`# ノード側 (保存後に fxg daemon を再起動)
-echo "${issued?.token ?? ''}" > ~/.flexagent/node_token`}</pre>
+echo "${issued?.token ?? ""}" > ~/.flexagent/node_token`}</pre>
     </div>
     <Dialog.Footer>
       <Button
         type="button"
         variant="outline"
-        onclick={() => issued && void copyText(issued.token, 'トークン')}
+        onclick={() => issued && void copyText(issued.token, "トークン")}
       >
         <CopyIcon />
         トークンをコピー
@@ -322,14 +334,17 @@ echo "${issued?.token ?? ''}" > ~/.flexagent/node_token`}</pre>
     <AlertDialog.Header>
       <AlertDialog.Title>ノードトークンを失効しますか？</AlertDialog.Title>
       <AlertDialog.Description class="text-sm">
-        <code>{revokeTarget}</code> のトークンを失効します。接続中の該当ノードは切断され、
-        再ペアリングするまで中央サーバーへ接続できなくなります。
+        <code>{revokeTarget}</code> のトークンを失効します。接続中の該当ノードは切断され、 再ペアリングするまで中央サーバーへ接続できなくなります。
       </AlertDialog.Description>
     </AlertDialog.Header>
     <AlertDialog.Footer>
       <AlertDialog.Cancel disabled={revokeBusy}>キャンセル</AlertDialog.Cancel>
-      <AlertDialog.Action variant="destructive" disabled={revokeBusy} onclick={() => void confirmRevoke()}>
-        {revokeBusy ? '失効中…' : '失効'}
+      <AlertDialog.Action
+        variant="destructive"
+        disabled={revokeBusy}
+        onclick={() => void confirmRevoke()}
+      >
+        {revokeBusy ? "失効中…" : "失効"}
       </AlertDialog.Action>
     </AlertDialog.Footer>
   </AlertDialog.Content>
@@ -348,7 +363,7 @@ echo "${issued?.token ?? ''}" > ~/.flexagent/node_token`}</pre>
     <AlertDialog.Footer>
       <AlertDialog.Cancel disabled={rotateBusy}>キャンセル</AlertDialog.Cancel>
       <AlertDialog.Action disabled={rotateBusy} onclick={() => void confirmRotate()}>
-        {rotateBusy ? '再生成中…' : '再生成'}
+        {rotateBusy ? "再生成中…" : "再生成"}
       </AlertDialog.Action>
     </AlertDialog.Footer>
   </AlertDialog.Content>
