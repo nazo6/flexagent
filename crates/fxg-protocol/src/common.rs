@@ -707,21 +707,8 @@ pub enum WorktreeAction {
 #[serde(tag = "action", rename_all = "snake_case")]
 #[specta(collect)]
 pub enum AgentAction {
-    /// ACP Registry からダウンロード・展開して導入 (`fxg agents install`)
-    Install {
-        /// エージェントID (エイリアス可)
-        agent_id: String,
-    },
-    /// 導入済みエージェントを更新 (`fxg agents update`)
-    Update {
-        /// 更新対象のエージェントID (省略時は導入済み全エージェント)
-        agent_id: Option<String>,
-    },
-    /// キャッシュ済みバイナリを削除 (`fxg agents remove`)
-    Remove {
-        /// エージェントID (エイリアス可)
-        agent_id: String,
-    },
+    /// ACP Registry カタログインデックスを強制再取得する (`fxg agents update`)
+    RefreshCatalog,
     /// UI 管理のカスタムエージェント定義を作成・更新する
     UpsertCustom {
         /// エージェントID

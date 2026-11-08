@@ -290,7 +290,6 @@ impl DaemonState {
                 let mut external_path = None;
                 for source in &entry.sources {
                     match source {
-                        LocalSource::Managed(_) => sources.push(AgentSource::Managed),
                         LocalSource::External(path) => {
                             external_path = Some(path.to_string_lossy().into_owned());
                             sources.push(AgentSource::External);
@@ -309,9 +308,7 @@ impl DaemonState {
                     description: entry.description,
                     sources,
                     registry: entry.registry,
-                    installable: entry.installable,
                     package_available: entry.package_available,
-                    managed_versions: entry.managed_versions,
                     external_path,
                     custom_config: entry.custom,
                     installed_nodes: if available {
@@ -325,13 +322,9 @@ impl DaemonState {
         Ok(AgentsResponse { agents })
     }
 
-    /// エージェント管理操作 (install / update / remove) を実行し、
-    /// 表示メッセージを返す (`fxg agents` の Web UI 版)。
+    /// エージェント管理操作を実行し、表示メッセージを返す (`fxg agents` の Web UI 版)。
     ///
-    /// 成功後はノード自身の `nodes` 行 (導入済みエージェント一覧) を更新する。
-    /// ローカルノードへ直接接続した UI はこの行をセッション作成の候補
-    /// (`installed_agents`) にするため、更新しないとインストール直後に
-    /// エージェント選択一覧へ反映されない。
+    /// 成功後はノード自身の `nodes` 行 (利用可能エージェント一覧) を更新する。
     pub async fn manage_agent(&self, action: &AgentAction) -> Result<String, NodeError> {
         let message = self.manage_agent_action(action).await?;
         self.register_node().await?;
@@ -342,75 +335,9 @@ impl DaemonState {
     async fn manage_agent_action(&self, action: &AgentAction) -> Result<String, NodeError> {
         let registry = self.session_manager().registry();
         match action {
-            AgentAction::Install { agent_id } => {
-                let id = registry.resolve_alias(agent_id);
-                let index = registry.index(false).await.map_err(agent_error)?;
-                let agent = index.find(&id).ok_or_else(|| {
-                    NodeError::Agent(format!("agent not found in registry: {id}"))
-                })?;
-                if agent.distribution.binary.is_empty() {
-                    return Ok(format!(
-                        "{id} は npx/uvx 配布です。個別インストールは不要で、Web UI (設定 > エージェント管理) で有効化すると一覧に表示されます"
-                    ));
-                }
-                let path = registry.install(&id, &index).await.map_err(agent_error)?;
-                Ok(format!(
-                    "installed {id} {} → {}",
-                    agent.version,
-                    path.display()
-                ))
-            }
-            AgentAction::Update { agent_id } => {
-                let index = registry.index(true).await.map_err(agent_error)?;
-                let ids: Vec<String> = match agent_id {
-                    Some(id) => vec![registry.resolve_alias(id)],
-                    None => index
-                        .agents
-                        .iter()
-                        .filter(|agent| !registry.installed_versions(&agent.id).is_empty())
-                        .map(|agent| agent.id.clone())
-                        .collect(),
-                };
-                if ids.is_empty() {
-                    return Ok("(no installed agents)".to_owned());
-                }
-                let mut lines = Vec::new();
-                for id in ids {
-                    let Some(agent) = index.find(&id) else {
-                        lines.push(format!("{id}: no longer in registry (skipped)"));
-                        continue;
-                    };
-                    if agent.distribution.binary.is_empty() {
-                        lines.push(format!("{id}: npx/uvx distribution (no update required)"));
-                        continue;
-                    }
-                    if registry
-                        .installed_versions(&id)
-                        .iter()
-                        .any(|version| version == &agent.version)
-                    {
-                        lines.push(format!("{id}: up to date ({})", agent.version));
-                        continue;
-                    }
-                    let path = registry.install(&id, &index).await.map_err(|err| {
-                        NodeError::Agent(format!("failed to update agent {id}: {err:#}"))
-                    })?;
-                    lines.push(format!(
-                        "updated {id} → {} ({})",
-                        agent.version,
-                        path.display()
-                    ));
-                }
-                Ok(lines.join("\n"))
-            }
-            AgentAction::Remove { agent_id } => {
-                let id = registry.resolve_alias(agent_id);
-                let removed = registry.remove(&id).map_err(agent_error)?;
-                Ok(if removed {
-                    format!("removed {id}")
-                } else {
-                    format!("{id} is not installed")
-                })
+            AgentAction::RefreshCatalog => {
+                registry.index(true).await.map_err(agent_error)?;
+                Ok("refreshed catalog".to_owned())
             }
             AgentAction::UpsertCustom { agent_id, config } => {
                 registry

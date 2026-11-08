@@ -3,8 +3,6 @@ import type { AgentSource, AgentSummary } from "#lib/generated/bindings.ts";
 /** 起動形態の表示ラベル。 */
 export function agentSourceLabel(source: AgentSource): string {
   switch (source) {
-    case "managed":
-      return "fxg 管理";
     case "external":
       return "既存インストール";
     case "package":
@@ -18,7 +16,6 @@ export function agentSourceLabel(source: AgentSource): string {
 export function agentHint(agent: AgentSummary): string {
   if (agent.custom_config !== null) return "カスタム";
   if (agent.sources.includes("external")) return "既存インストール";
-  if (agent.sources.includes("managed")) return "fxg 管理";
   if (agent.sources.includes("package")) return "npx/uvx";
   return "未導入";
 }

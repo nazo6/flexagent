@@ -49,7 +49,6 @@ import type {
   SessionRevertResponse,
   SessionSummary,
   SystemInfoResponse,
-  UpdateAgentsRequest,
   WorkspaceDiffResponse,
   WorktreeInfo,
   WorktreesResponse,
@@ -409,27 +408,9 @@ export class ApiClient {
     return response.agents;
   }
 
-  /** `POST /api/v1/nodes/:id/agents/:agent_id/install` */
-  installAgent(nodeId: string, agentId: string): Promise<AgentOpResponse> {
-    return this.#request(
-      "POST",
-      `/api/v1/nodes/${encodeURIComponent(nodeId)}/agents/${encodeURIComponent(agentId)}/install`,
-    );
-  }
-
-  /** `POST /api/v1/nodes/:id/agents/update` (agent_id 省略時は導入済み全エージェント) */
-  updateAgents(nodeId: string, request: UpdateAgentsRequest): Promise<AgentOpResponse> {
-    return this.#request("POST", `/api/v1/nodes/${encodeURIComponent(nodeId)}/agents/update`, {
-      body: request,
-    });
-  }
-
-  /** `DELETE /api/v1/nodes/:id/agents/:agent_id` */
-  removeAgent(nodeId: string, agentId: string): Promise<AgentOpResponse> {
-    return this.#request(
-      "DELETE",
-      `/api/v1/nodes/${encodeURIComponent(nodeId)}/agents/${encodeURIComponent(agentId)}`,
-    );
+  /** `POST /api/v1/nodes/:id/agents/refresh` (カタログの強制再取得) */
+  refreshAgentsCatalog(nodeId: string): Promise<AgentOpResponse> {
+    return this.#request("POST", `/api/v1/nodes/${encodeURIComponent(nodeId)}/agents/refresh`);
   }
 
   /** `PUT /api/v1/nodes/:id/agents/custom/:agent_id` (カスタム定義の作成・更新) */

@@ -12,7 +12,6 @@
   import { sync } from "#lib/stores/app.svelte.ts";
   import { toast } from "svelte-sonner";
   import BotIcon from "@lucide/svelte/icons/bot";
-  import DownloadIcon from "@lucide/svelte/icons/download";
   import PencilIcon from "@lucide/svelte/icons/pencil";
   import PlusIcon from "@lucide/svelte/icons/plus";
   import PackageIcon from "@lucide/svelte/icons/package";
@@ -91,21 +90,6 @@
     }
   }
 
-  async function installAgent(agent: AgentSummary, closeCatalog = false): Promise<void> {
-    if (busy || nodeId === "") return;
-    busyLabel = `${agent.id} をインストール中…`;
-    try {
-      const result = await sync.connection.client.installAgent(nodeId, agent.id);
-      toast.success(result.message ?? `${agent.id} をインストールしました`);
-      if (closeCatalog) catalogOpen = false;
-      await Promise.all([loadAgents(), sync.refreshNodes()]);
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : String(error));
-    } finally {
-      busyLabel = null;
-    }
-  }
-
   async function setPackageEnabled(agent: AgentSummary, enabled: boolean): Promise<void> {
     if (busy || nodeId === "") return;
     busyLabel = `${agent.id} の npx/uvx 利用を${enabled ? "有効化" : "無効化"}中…`;
@@ -124,14 +108,12 @@
     }
   }
 
-  async function updateAllAgents(): Promise<void> {
+  async function refreshCatalog(): Promise<void> {
     if (busy || nodeId === "") return;
-    busyLabel = "導入済みエージェントを更新中…";
+    busyLabel = "カタログを更新中…";
     try {
-      const result = await sync.connection.client.updateAgents(nodeId, {
-        agent_id: null,
-      });
-      toast.success(result.message ?? "更新を実行しました");
+      const result = await sync.connection.client.refreshAgentsCatalog(nodeId);
+      toast.success(result.message ?? "カタログを更新しました");
       await Promise.all([loadAgents(), sync.refreshNodes()]);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
@@ -148,7 +130,7 @@
     try {
       const result = isCustom
         ? await sync.connection.client.removeCustomAgent(nodeId, target.id)
-        : await sync.connection.client.removeAgent(nodeId, target.id);
+        : await sync.connection.client.disablePackageAgent(nodeId, target.id);
       toast.success(result.message ?? `${target.id} を削除しました`);
       removeTarget = null;
       await Promise.all([loadAgents(), sync.refreshNodes()]);
@@ -225,8 +207,8 @@
 <div class="flex flex-col gap-3">
   <div class="flex flex-wrap items-center justify-between gap-2">
     <p class="text-muted-foreground text-sm">
-      このノードで使える ACP エージェントの一覧です。fxg 管理のインストールに加え、PATH
-      上の既存インストールとカスタム定義も検出します。
+      このノードで使える ACP エージェントの一覧です。PATH 上の既存インストール、npx/uvx
+      パッケージ実行、およびカスタム定義を管理します。
     </p>
     <div class="flex flex-wrap items-center gap-1.5">
       <select
@@ -244,11 +226,11 @@
         variant="outline"
         size="sm"
         disabled={busy || nodeId === ""}
-        onclick={() => void updateAllAgents()}
-        title="選択ノードの fxg 管理エージェントを最新へ更新 (fxg agents update)"
+        onclick={() => void refreshCatalog()}
+        title="ACP Registry カタログを強制再取得して更新 (fxg agents update)"
       >
         <RefreshCwIcon />
-        更新
+        カタログ更新
       </Button>
       <Button variant="outline" size="sm" disabled={loading} onclick={() => void loadAgents()}>
         <RefreshCwIcon />
@@ -297,9 +279,6 @@
               {#each agent.sources as source (source)}
                 <Badge variant="outline" class="text-[10px]">{agentSourceLabel(source)}</Badge>
               {/each}
-              {#each agent.managed_versions as version (version)}
-                <Badge class="text-[10px]">v{version}</Badge>
-              {/each}
             </div>
             {#if agent.external_path}
               <p class="text-muted-foreground font-mono text-[11px] break-all">
@@ -309,18 +288,6 @@
           </div>
 
           <div class="flex flex-wrap items-center gap-1.5">
-            {#if agent.installable && agent.managed_versions.length === 0}
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={busy || nodeId === ""}
-                onclick={() => void installAgent(agent)}
-                title="PATH 上の既存インストールを優先して使います。fxg 管理に切り替えるにはインストールしてください"
-              >
-                <DownloadIcon />
-                fxg でインストール
-              </Button>
-            {/if}
             {#if isPackageEnabled(agent)}
               <Button
                 variant="ghost"
@@ -346,7 +313,7 @@
                 <span class="sr-only">{agent.id} を編集</span>
               </Button>
             {/if}
-            {#if agent.custom_config !== null || agent.managed_versions.length > 0}
+            {#if agent.custom_config !== null}
               <Button
                 variant="ghost"
                 size="icon-sm"
@@ -462,16 +429,6 @@
                 {/if}
               </div>
               <div class="flex flex-wrap items-center gap-1.5">
-                {#if agent.installable}
-                  <Button
-                    size="sm"
-                    disabled={busy || nodeId === ""}
-                    onclick={() => void installAgent(agent, true)}
-                  >
-                    <DownloadIcon />
-                    インストール
-                  </Button>
-                {/if}
                 {#if agent.package_available}
                   <Button
                     variant="outline"
@@ -483,10 +440,9 @@
                     <PackageIcon />
                     npx/uvx を有効化
                   </Button>
-                {/if}
-                {#if !agent.installable && !agent.package_available}
+                {:else}
                   <span class="text-muted-foreground text-[11px]">
-                    このノードでは利用できません
+                    手動導入が必要 (PATH / カスタム追加)
                   </span>
                 {/if}
               </div>

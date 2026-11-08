@@ -45,8 +45,8 @@ use fxg_protocol::client_api::{
     RespondElicitationResponse, RespondPermissionRequest, RespondPermissionResponse,
     ResumeSessionRequest, ResumeSessionResponse, RotateAuthTokenResponse, SearchResponse,
     ServerWsMessage, SessionArchiveRequest, SessionArchiveResponse, SessionListResponse,
-    SessionRevertRequest, SessionRevertResponse, SystemInfoResponse, UpdateAgentsRequest,
-    WorktreeInfo, WorktreesResponse,
+    SessionRevertRequest, SessionRevertResponse, SystemInfoResponse, WorktreeInfo,
+    WorktreesResponse,
 };
 use fxg_protocol::common::{
     AgentAction, CommandResult, DiffScope, ErrorCode, ProjectSummary, SessionControlAction,
@@ -706,16 +706,8 @@ pub fn client_router<B: ClientApiBackend>(backend: B, options: ClientApiOptions)
         )
         .route("/api/v1/agents", get(list_agents::<B>))
         .route(
-            "/api/v1/nodes/{node_id}/agents/{agent_id}/install",
-            post(install_agent::<B>),
-        )
-        .route(
-            "/api/v1/nodes/{node_id}/agents/update",
-            post(update_agents::<B>),
-        )
-        .route(
-            "/api/v1/nodes/{node_id}/agents/{agent_id}",
-            delete(remove_agent::<B>),
+            "/api/v1/nodes/{node_id}/agents/refresh",
+            post(refresh_catalog::<B>),
         )
         .route(
             "/api/v1/nodes/{node_id}/agents/custom/{agent_id}",
@@ -1239,51 +1231,14 @@ async fn list_agents<B: ClientApiBackend>(State(state): State<ClientApiState<B>>
     }
 }
 
-async fn install_agent<B: ClientApiBackend>(
-    State(state): State<ClientApiState<B>>,
-    Extension(client): Extension<ClientInfo>,
-    UrlPath((node_id, agent_id)): UrlPath<(String, String)>,
-) -> Response {
-    match state
-        .backend
-        .manage_agent(&node_id, AgentAction::Install { agent_id }, client)
-        .await
-    {
-        Ok(response) => Json(response).into_response(),
-        Err(err) => err.into_response(),
-    }
-}
-
-async fn update_agents<B: ClientApiBackend>(
+async fn refresh_catalog<B: ClientApiBackend>(
     State(state): State<ClientApiState<B>>,
     Extension(client): Extension<ClientInfo>,
     UrlPath(node_id): UrlPath<String>,
-    Json(request): Json<UpdateAgentsRequest>,
 ) -> Response {
     match state
         .backend
-        .manage_agent(
-            &node_id,
-            AgentAction::Update {
-                agent_id: request.agent_id,
-            },
-            client,
-        )
-        .await
-    {
-        Ok(response) => Json(response).into_response(),
-        Err(err) => err.into_response(),
-    }
-}
-
-async fn remove_agent<B: ClientApiBackend>(
-    State(state): State<ClientApiState<B>>,
-    Extension(client): Extension<ClientInfo>,
-    UrlPath((node_id, agent_id)): UrlPath<(String, String)>,
-) -> Response {
-    match state
-        .backend
-        .manage_agent(&node_id, AgentAction::Remove { agent_id }, client)
+        .manage_agent(&node_id, AgentAction::RefreshCatalog, client)
         .await
     {
         Ok(response) => Json(response).into_response(),

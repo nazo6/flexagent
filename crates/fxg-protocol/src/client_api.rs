@@ -248,8 +248,6 @@ pub struct AgentsResponse {
 #[serde(rename_all = "snake_case")]
 #[specta(collect)]
 pub enum AgentSource {
-    /// fxg が `~/.flexagent/agents/<id>/<version>` へ導入したバイナリ
-    Managed,
     /// PATH 上に既にあるインストール (`which` で検出)
     External,
     /// npx / uvx によるパッケージ実行 (実行時に取得)
@@ -261,7 +259,7 @@ pub enum AgentSource {
 /// ACP エージェント 1 件 (カタログ情報 + 導入状態)。
 ///
 /// `sources` が空のエージェントは「カタログにはあるが、このノードではまだ
-/// 起動できない」状態を表す (`installable` が true なら導入可能)。
+/// 起動できない」状態を表す。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct AgentSummary {
@@ -277,13 +275,9 @@ pub struct AgentSummary {
     pub sources: Vec<AgentSource>,
     /// ACP Registry カタログに存在するか
     pub registry: bool,
-    /// 現在のプラットフォーム向け binary を fxg で導入できるか
-    pub installable: bool,
     /// `npx` / `uvx` (PATH 上に存在) で実行できるか。
     /// `true` なら UI の「有効化」で一覧に追加できる。
     pub package_available: bool,
-    /// fxg が導入済みのバージョン一覧
-    pub managed_versions: Vec<String>,
     /// PATH から検出した実行ファイル (external のときのみ)
     pub external_path: Option<String>,
     /// カスタム定義の内容 (UI 編集用)
@@ -292,15 +286,7 @@ pub struct AgentSummary {
     pub installed_nodes: Vec<String>,
 }
 
-/// `POST /api/v1/nodes/:node_id/agents/update` リクエスト。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
-#[specta(collect)]
-pub struct UpdateAgentsRequest {
-    /// 更新対象のエージェントID (省略時は導入済み全エージェント)
-    pub agent_id: Option<String>,
-}
-
-/// エージェント管理操作 (install / update / remove) の共通レスポンス。
+/// エージェント管理操作の共通レスポンス。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct AgentOpResponse {

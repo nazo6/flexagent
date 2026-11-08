@@ -710,34 +710,35 @@ mod tests {
 
     #[test]
     fn manage_agent_shape() {
-        let install = ServerToNodeMsg::ManageAgent {
+        let refresh = ServerToNodeMsg::ManageAgent {
             request_id: "r1".into(),
-            action: crate::common::AgentAction::Install {
-                agent_id: "antigravity".into(),
-            },
+            action: crate::common::AgentAction::RefreshCatalog,
         };
-        let json = serde_json::to_value(&install).unwrap();
+        let json = serde_json::to_value(&refresh).unwrap();
         assert_eq!(json["op"], "manage_agent");
-        assert_eq!(json["action"]["action"], "install");
-        assert_eq!(json["action"]["agent_id"], "antigravity");
+        assert_eq!(json["action"]["action"], "refresh_catalog");
         assert_eq!(
             serde_json::from_value::<ServerToNodeMsg>(json).unwrap(),
-            install
+            refresh
         );
 
-        let update_all = ServerToNodeMsg::ManageAgent {
+        let set_pkg = ServerToNodeMsg::ManageAgent {
             request_id: "r2".into(),
-            action: crate::common::AgentAction::Update { agent_id: None },
+            action: crate::common::AgentAction::SetPackageEnabled {
+                agent_id: "demo".into(),
+                enabled: true,
+            },
         };
-        let json = serde_json::to_value(&update_all).unwrap();
-        assert_eq!(json["action"]["action"], "update");
-        assert!(json["action"]["agent_id"].is_null());
+        let json = serde_json::to_value(&set_pkg).unwrap();
+        assert_eq!(json["action"]["action"], "set_package_enabled");
+        assert_eq!(json["action"]["agent_id"], "demo");
+        assert_eq!(json["action"]["enabled"], true);
 
         let result = NodeToServerMsg::AgentOpResult {
             request_id: "r1".into(),
             success: true,
             code: None,
-            message: Some("installed antigravity 1.0.0".into()),
+            message: Some("refreshed catalog".into()),
             error: None,
         };
         let json = serde_json::to_value(&result).unwrap();

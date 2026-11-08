@@ -1,4 +1,4 @@
-//! ACP Registry (`registry.json`) の取得・キャッシュ・起動解決と導入管理。
+//! ACP Registry (`registry.json`) の取得・キャッシュ・起動解決とカスタム管理。
 //!
 //! 設計: `docs/04-agent-drivers-and-windows.md` §2、
 //! CLI コマンド: `docs/05-cli-and-pwa-ui.md` §1 (`fxg agents ...`)。
@@ -7,20 +7,20 @@
 //!   `https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json`)
 //!   を `~/.flexagent/cache/registry.json` へキャッシュする
 //!   (既定 TTL 24 時間。`fxg agents update` は強制更新)。
-//! - 起動解決は「ローカル優先」: fxg 管理の導入済みバイナリ →
-//!   `PATH` 上の既存インストール → `npx` / `uvx`。**起動時の暗黙ダウンロードは
-//!   行わない** (導入は `fxg agents install` / UI の明示操作のみ)。
+//! - 起動解決は「ローカル優先」: カスタムエージェント →
+//!   `PATH` 上の既存インストール → `npx` / `uvx`。
+//!   fxg 自体はバイナリアーカイブの直接ダウンロード・展開は行わない
+//!   (外部パッケージマネージャ / システム PATH / カスタム定義へ委任)。
 //! - カスタム定義は `config.toml` の `[agents.custom.<id>]` と、UI が管理する
 //!   `~/.flexagent/custom_agents.json` をマージして解決する (ファイル側が優先)。
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::{Context, anyhow, bail};
 use fxg_protocol::config::{AgentsConfig, CustomAgentConfig};
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 
 use crate::driver::AgentLaunchSpec;
 
@@ -147,8 +147,6 @@ impl RegistryIndex {
 /// このノードで使える起動経路。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LocalSource {
-    /// fxg が `~/.flexagent/agents/<id>/<version>` へ導入したバイナリ
-    Managed(PathBuf),
     /// `PATH` 上に既にある実行ファイル
     External(PathBuf),
     /// `npx` で実行 (実行時に取得)
@@ -170,14 +168,10 @@ pub struct AgentListEntry {
     pub description: Option<String>,
     /// ACP Registry カタログに存在するか
     pub registry: bool,
-    /// 現在のプラットフォーム向け binary を fxg で導入できるか
-    pub installable: bool,
     /// `npx` / `uvx` (PATH 上に存在) で実行できるか
     pub package_available: bool,
     /// このノードで使える起動経路 (優先順)
     pub sources: Vec<LocalSource>,
-    /// fxg が導入済みのバージョン一覧
-    pub managed_versions: Vec<String>,
     /// カスタム定義 (config.toml / UI 管理)
     pub custom: Option<CustomAgentConfig>,
 }
@@ -228,16 +222,6 @@ impl AcpRegistry {
     /// キャッシュファイルのパス (`~/.flexagent/cache/registry.json`)。
     pub fn cache_path(&self) -> PathBuf {
         self.home.join("cache").join(REGISTRY_CACHE_FILE)
-    }
-
-    /// エージェント導入ディレクトリ (`~/.flexagent/agents`)。
-    pub fn agents_dir(&self) -> PathBuf {
-        self.home.join("agents")
-    }
-
-    /// 指定エージェントのバージョンディレクトリ (`~/.flexagent/agents/<id>/<version>`)。
-    pub fn agent_version_dir(&self, id: &str, version: &str) -> PathBuf {
-        self.agents_dir().join(id).join(version)
     }
 
     /// UI 管理のカスタムエージェント定義ファイル (`~/.flexagent/custom_agents.json`)。
@@ -482,10 +466,8 @@ impl AcpRegistry {
                 version: "-".to_owned(),
                 description: None,
                 registry: index.find(id).is_some(),
-                installable: false,
                 package_available: false,
                 sources: Vec::new(),
-                managed_versions: Vec::new(),
                 custom: Some(config.clone()),
             });
         }
@@ -506,24 +488,13 @@ impl AcpRegistry {
                 version: agent.version.clone(),
                 description: agent.description.clone(),
                 registry: true,
-                installable: Self::binary_distribution(agent).is_ok(),
                 package_available: Self::package_runner(agent).is_some(),
                 sources,
-                managed_versions: self.installed_versions(&agent.id),
                 custom: None,
             });
         }
 
         entries
-    }
-
-    /// 現在のレジストリバージョンの fxg 管理バイナリ (未導入なら `None`)。
-    fn managed_command(&self, agent: &RegistryAgent) -> Option<PathBuf> {
-        let dist = Self::binary_distribution(agent).ok()?;
-        let path = self
-            .agent_version_dir(&agent.id, &agent.version)
-            .join(clean_cmd(&dist.cmd));
-        path.is_file().then_some(path)
     }
 
     /// このノードで使える起動経路を優先順に返す。
@@ -532,9 +503,6 @@ impl AcpRegistry {
     /// (一覧表示用。起動解決では常に許可する)。
     fn local_sources(&self, agent: &RegistryAgent, include_package: bool) -> Vec<LocalSource> {
         let mut sources = Vec::new();
-        if let Some(path) = self.managed_command(agent) {
-            sources.push(LocalSource::Managed(path));
-        }
         if let Ok(dist) = Self::binary_distribution(agent) {
             let cmd = clean_cmd(&dist.cmd);
             // ディレクトリを含む `cmd` はカレントディレクトリ相対と解釈されるため
@@ -557,9 +525,7 @@ impl AcpRegistry {
 
     /// エージェントの起動スペックを解決する。
     ///
-    /// 解決順は「カスタム定義 → fxg 管理バイナリ → `PATH` 上の既存インストール →
-    /// `npx` → `uvx`」。**未導入でも暗黙にダウンロードはしない**
-    /// (導入は `fxg agents install` / UI の明示操作のみ)。
+    /// 解決順は「カスタム定義 → `PATH` 上の既存インストール → `npx` → `uvx`」。
     pub async fn launch_spec(
         &self,
         name: &str,
@@ -596,7 +562,7 @@ impl AcpRegistry {
             .next()
             .ok_or_else(|| {
             anyhow!(
-                "agent {id} is not available on this node: install it with `fxg agents install {id}` or put its binary on PATH (distributions: {:?})",
+                "agent {id} is not available on this node: put its binary on PATH or configure custom agent (distributions: {:?})",
                 agent.distribution.kinds()
             )
         })?;
@@ -618,7 +584,7 @@ impl AcpRegistry {
         extra_args: &[String],
     ) -> Option<AgentLaunchSpec> {
         let (program, args, env) = match source {
-            LocalSource::Managed(path) | LocalSource::External(path) => {
+            LocalSource::External(path) => {
                 let dist = Self::binary_distribution(agent).ok()?;
                 let mut args = dist.args.clone();
                 args.extend(extra_args.iter().cloned());
@@ -659,113 +625,6 @@ impl AcpRegistry {
             )
         })
     }
-
-    /// binary 配布を導入済みにし、実行ファイルの絶対パスを返す。
-    ///
-    /// 既に展開済みならダウンロードせずにそのパスを返す。`PATH` 上の同名
-    /// コマンドは使用しない (外部インストールは起動解決側で扱う)。
-    pub async fn install(&self, id: &str, index: &RegistryIndex) -> anyhow::Result<PathBuf> {
-        let agent = index
-            .find(id)
-            .ok_or_else(|| anyhow!("unknown agent in registry: {id}"))?;
-        let dist = Self::binary_distribution(agent)?.clone();
-        let target_dir = self.agent_version_dir(&agent.id, &agent.version);
-        let cmd_name = clean_cmd(&dist.cmd);
-        let cmd_path = target_dir.join(&cmd_name);
-        if cmd_path.is_file() {
-            return Ok(cmd_path);
-        }
-
-        tracing::info!(agent = %agent.id, version = %agent.version, "installing agent binary");
-        let bytes = self
-            .http
-            .get(&dist.archive)
-            .send()
-            .await
-            .with_context(|| format!("failed to download {}", dist.archive))?
-            .error_for_status()
-            .with_context(|| format!("download failed: {}", dist.archive))?
-            .bytes()
-            .await
-            .context("failed to read archive body")?;
-
-        if let Some(expected) = &dist.sha256 {
-            let actual = sha256_hex(&bytes);
-            if !actual.eq_ignore_ascii_case(expected) {
-                bail!(
-                    "sha256 mismatch for {}: expected {expected}, got {actual}",
-                    dist.archive
-                );
-            }
-        }
-
-        // 一時ディレクトリへ展開してから rename する (中断時の部分展開を防ぐ)
-        let tmp_dir = self
-            .agents_dir()
-            .join(&agent.id)
-            .join(format!(".tmp-{}", agent.version));
-        if tmp_dir.exists() {
-            std::fs::remove_dir_all(&tmp_dir).ok();
-        }
-        extract_archive_bytes(&dist.archive, &bytes, &tmp_dir)
-            .with_context(|| format!("failed to extract {}", dist.archive))?;
-
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let path = tmp_dir.join(&cmd_name);
-            if path.is_file() {
-                let mut perms = std::fs::metadata(&path)?.permissions();
-                perms.set_mode(0o755);
-                std::fs::set_permissions(&path, perms)?;
-            }
-        }
-
-        if target_dir.exists() {
-            std::fs::remove_dir_all(&target_dir).ok();
-        }
-        if let Some(parent) = target_dir.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        std::fs::rename(&tmp_dir, &target_dir)
-            .with_context(|| format!("failed to move into {}", target_dir.display()))?;
-
-        if !cmd_path.is_file() {
-            bail!(
-                "archive {} did not contain expected command {}",
-                dist.archive,
-                cmd_name.display()
-            );
-        }
-        Ok(cmd_path)
-    }
-
-    /// 導入済みバージョン一覧 (`~/.flexagent/agents/<id>/<version>`)。
-    pub fn installed_versions(&self, id: &str) -> Vec<String> {
-        let dir = self.agents_dir().join(id);
-        let Ok(entries) = std::fs::read_dir(&dir) else {
-            return Vec::new();
-        };
-        let mut versions: Vec<String> = entries
-            .filter_map(|entry| entry.ok())
-            .filter(|entry| entry.file_type().map(|t| t.is_dir()).unwrap_or(false))
-            .filter_map(|entry| entry.file_name().into_string().ok())
-            .filter(|name| !name.starts_with('.'))
-            .collect();
-        versions.sort();
-        versions
-    }
-
-    /// 導入済み binary (全バージョン) を削除する。
-    pub fn remove(&self, id: &str) -> anyhow::Result<bool> {
-        let dir = self.agents_dir().join(id);
-        if !dir.exists() {
-            return Ok(false);
-        }
-        std::fs::remove_dir_all(&dir)
-            .with_context(|| format!("failed to remove {}", dir.display()))?;
-        Ok(true)
-    }
 }
 
 /// `./name` 形式の `cmd` を相対パスへ正規化する。
@@ -773,33 +632,10 @@ fn clean_cmd(cmd: &str) -> PathBuf {
     PathBuf::from(cmd.trim_start_matches("./"))
 }
 
-/// SHA-256 を 16 進文字列で返す。
-pub fn sha256_hex(data: &[u8]) -> String {
-    let digest = Sha256::digest(data);
-    digest.iter().map(|byte| format!("{byte:02x}")).collect()
-}
-
-/// アーカイブバイト列 (`.tar.gz` / `.zip`) を `dest` へ展開する。
-fn extract_archive_bytes(url: &str, bytes: &[u8], dest: &Path) -> anyhow::Result<()> {
-    std::fs::create_dir_all(dest)?;
-    if url.ends_with(".zip") {
-        let reader = std::io::Cursor::new(bytes);
-        let mut archive = zip::ZipArchive::new(reader).context("invalid zip archive")?;
-        archive
-            .extract(dest)
-            .context("failed to extract zip archive")?;
-    } else {
-        let decoder = flate2::read::GzDecoder::new(std::io::Cursor::new(bytes));
-        let mut archive = tar::Archive::new(decoder);
-        archive
-            .unpack(dest)
-            .context("failed to extract tar.gz archive")?;
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+
     use super::*;
 
     const FIXTURE: &str = r#"
@@ -937,7 +773,7 @@ mod tests {
             err.to_string().contains("not available"),
             "unexpected: {err}"
         );
-        assert!(err.to_string().contains("install"), "unexpected: {err}");
+        assert!(err.to_string().contains("PATH"), "unexpected: {err}");
     }
 
     #[test]
@@ -1042,59 +878,5 @@ mod tests {
             .block_on(registry.launch_spec("missing", &index, &[]))
             .expect_err("must fail");
         assert!(err.to_string().contains("unknown agent"));
-    }
-
-    #[test]
-    fn extracts_tar_gz_archive() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        // tar.gz を組み立てる
-        let mut tar_bytes = Vec::new();
-        {
-            let encoder =
-                flate2::write::GzEncoder::new(&mut tar_bytes, flate2::Compression::default());
-            let mut builder = tar::Builder::new(encoder);
-            let data = b"#!/bin/sh\necho demo\n";
-            let mut header = tar::Header::new_gnu();
-            header.set_size(data.len() as u64);
-            header.set_mode(0o755);
-            header.set_cksum();
-            builder
-                .append_data(&mut header, "bin/demo", &data[..])
-                .expect("append");
-            builder.finish().expect("finish");
-            // GzEncoder は finish で内部 writer を閉じる
-            let encoder = builder.into_inner().expect("into inner");
-            encoder.finish().expect("gz finish");
-        }
-        let dest = dir.path().join("out");
-        extract_archive_bytes("https://example.com/demo.tar.gz", &tar_bytes, &dest)
-            .expect("extract");
-        assert!(dest.join("bin/demo").is_file());
-    }
-
-    #[test]
-    fn extracts_zip_archive() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let mut zip_bytes = Vec::new();
-        {
-            let mut writer = zip::ZipWriter::new(std::io::Cursor::new(&mut zip_bytes));
-            writer
-                .start_file("bin/demo.exe", zip::write::SimpleFileOptions::default())
-                .expect("start_file");
-            std::io::Write::write_all(&mut writer, b"demo").expect("write");
-            writer.finish().expect("finish");
-        }
-        let dest = dir.path().join("out");
-        extract_archive_bytes("https://example.com/demo.zip", &zip_bytes, &dest).expect("extract");
-        assert!(dest.join("bin/demo.exe").is_file());
-    }
-
-    #[test]
-    fn sha256_hex_formats_digest() {
-        // 空文字列の SHA-256
-        assert_eq!(
-            sha256_hex(b""),
-            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-        );
     }
 }

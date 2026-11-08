@@ -2159,7 +2159,6 @@ fn source_labels(entry: &AgentListEntry) -> Vec<&'static str> {
     }
     for source in &entry.sources {
         labels.push(match source {
-            LocalSource::Managed(_) => "managed",
             LocalSource::External(_) => "external",
             LocalSource::Npx => "npx",
             LocalSource::Uvx => "uvx",
@@ -2189,11 +2188,9 @@ impl usage::RunAsync for AgentsListArgs {
                         "description": entry.description,
                         "available": entry.is_available(),
                         "registry": entry.registry,
-                        "installable": entry.installable,
                         "package_available": entry.package_available,
                         "sources": source_labels(entry),
                         "custom": entry.custom.is_some(),
-                        "managed_versions": entry.managed_versions,
                     })
                 })
                 .collect();
@@ -2246,35 +2243,20 @@ impl usage::RunAsync for AgentsInstallArgs {
         let agent = index.find(&id).with_context(|| {
             format!("エージェントがレジストリにありません: {id} (`fxg agents list --all`)")
         })?;
-        if let Some(version) = &self.version
-            && version != &agent.version
-        {
-            bail!(
-                "レジストリが提供するのは {} のみです (指定: {version})",
-                agent.version
-            );
-        }
-        if agent.distribution.binary.is_empty() {
-            println!(
-                "{id} は npx/uvx 配布です。個別インストールは不要で、Web UI (設定 > エージェント管理) で有効化すると一覧に表示されます"
-            );
+        if agent.distribution.npx.is_some() || agent.distribution.uvx.is_some() {
+            registry.set_package_enabled(&id, true)?;
+            println!("enabled package agent {id} (npx/uvx)");
             return Ok(());
         }
-        let path = registry
-            .install(&id, &index)
-            .await
-            .context("failed to install agent")?;
-        println!("installed {id} {} → {}", agent.version, path.display());
-        Ok(())
+        bail!(
+            "fxg はバイナリの自動ダウンロードを行いません。各ツールの配布元からバイナリをインストールして PATH に配置するか、カスタムエージェント (`config.toml` または Web UI) として設定してください"
+        );
     }
 }
 
-/// `fxg agents update [id]`
+/// `fxg agents update`
 #[derive(Debug, Args)]
-pub struct AgentsUpdateArgs {
-    /// 更新対象のエージェントID (省略時は導入済み全エージェント)
-    id: Option<String>,
-}
+pub struct AgentsUpdateArgs {}
 
 impl usage::RunAsync for AgentsUpdateArgs {
     type Output = Result<()>;
@@ -2286,44 +2268,7 @@ impl usage::RunAsync for AgentsUpdateArgs {
             .index(true)
             .await
             .context("failed to fetch ACP registry")?;
-
-        let ids: Vec<String> = match &self.id {
-            Some(id) => vec![registry.resolve_alias(id)],
-            None => index
-                .agents
-                .iter()
-                .filter(|agent| !registry.installed_versions(&agent.id).is_empty())
-                .map(|agent| agent.id.clone())
-                .collect(),
-        };
-        if ids.is_empty() {
-            println!("(導入済みエージェントなし)");
-            return Ok(());
-        }
-
-        for id in ids {
-            let Some(agent) = index.find(&id) else {
-                eprintln!("{id}: レジストリから削除されています (スキップ)");
-                continue;
-            };
-            if agent.distribution.binary.is_empty() {
-                println!("{id}: npx/uvx 配布のため更新不要");
-                continue;
-            }
-            if registry
-                .installed_versions(&id)
-                .iter()
-                .any(|version| version == &agent.version)
-            {
-                println!("{id}: 最新 ({})", agent.version);
-                continue;
-            }
-            let path = registry
-                .install(&id, &index)
-                .await
-                .with_context(|| format!("failed to update agent: {id}"))?;
-            println!("updated {id} → {} ({})", agent.version, path.display());
-        }
+        println!("updated ACP registry index ({} agents)", index.agents.len());
         Ok(())
     }
 }
@@ -2341,13 +2286,17 @@ impl usage::RunAsync for AgentsRemoveArgs {
     async fn run_async(self) -> Self::Output {
         let registry = acp_registry()?;
         let id = registry.resolve_alias(&self.id);
-        let removed = registry
-            .remove(&id)
-            .with_context(|| format!("failed to remove agent: {id}"))?;
-        if removed {
-            println!("removed {id}");
+        let removed_custom = registry.remove_custom(&id)?;
+        let disabled_package = if registry.enabled_package_agents().contains(&id) {
+            registry.set_package_enabled(&id, false)?;
+            true
         } else {
-            println!("{id} は導入されていません");
+            false
+        };
+        if removed_custom || disabled_package {
+            println!("removed/disabled {id}");
+        } else {
+            println!("{id} は設定されていません");
         }
         Ok(())
     }
