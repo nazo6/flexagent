@@ -1,16 +1,18 @@
-//! アイドル状態のエージェントプロセスの再利用プール (warm pool)。
+//! Reuse pool for idle agent processes (warm pool).
 //!
-//! 起動に時間がかかるエージェント (例: PyInstaller onefile の自己展開に十数秒)
-//! は、セッション終了のたびにプロセスを破棄すると次のセッションで再びフル
-//! コストがかかる。本モジュールは「セッション終了後のプロセス」を起動スペック
-//! 単位でアイドル保持し、次のセッション開始時に再利用する (initialize 済みの
-//! 接続へ `session/new` を発行するだけ = 数秒で開始できる)。
+//! Agents that are slow to start (e.g. PyInstaller onefile self-extraction taking
+//! a dozen seconds) pay the full cost again on the next session if the process is
+//! discarded at every session end. This module keeps post-session processes idle
+//! per launch spec and reuses them at the next session start (just issuing
+//! `session/new` on an initialized connection starts the session in seconds).
 //!
-//! - 保持は **起動スペック ([`LaunchKey`]) 単位で最大 1 プロセス**。
-//! - TTL ([`DEFAULT_WARM_IDLE`]) を超えたアイドルは自動破棄する。
-//! - 返却時に同一キーのアイドルが既にある場合は、古い方を破棄する。
-//! - プール自体が Drop された場合も、ベストエフォートでアイドルを破棄する
-//!   (それも叶わない場合はプロセスツリーの Job Object が OS 側で回収する)。
+//! - At most **one process per launch spec ([`LaunchKey`])** is kept.
+//! - Idle processes older than the TTL ([`DEFAULT_WARM_IDLE`]) are disposed automatically.
+//! - When a process is released while an idle process with the same key exists, the
+//!   older one is disposed.
+//! - If the pool itself is dropped, idle processes are disposed on a best-effort
+//!   basis (if even that fails, the process tree's Job Object reclaims them at the
+//!   OS level).
 
 use std::collections::HashMap;
 use std::future::Future;
@@ -21,19 +23,19 @@ use std::time::Duration;
 
 use crate::driver::AgentLaunchSpec;
 
-/// アイドルプロセスの既定保持時間。
+/// Default idle retention time for processes.
 pub(crate) const DEFAULT_WARM_IDLE: Duration = Duration::from_secs(10 * 60);
 
-/// プールが保持するプロセス (呼び出し側が実装する)。
+/// Process held by the pool (implemented by the caller).
 pub(crate) trait WarmProcess: Send + Sync + 'static {
-    /// プロセスを終了し、teardown の完了を待つ (完了済みなら即時)。
+    /// Terminates the process and waits for teardown to finish (immediate if already done).
     fn dispose(&self) -> Pin<Box<dyn Future<Output = ()> + Send + '_>>;
 }
 
-/// プロセスの再利用キー。これが一致するプロセスのみ再利用する。
+/// Process reuse key. Only processes whose key matches are reused.
 ///
-/// セッション単位の情報 (cwd / 初期モード / resume 指定) は含めない
-/// (これらは `session/new` の引数であり、プロセス再利用の可否に影響しない)。
+/// Per-session information (cwd / initial mode / resume selection) is not included
+/// (those are `session/new` arguments and do not affect whether a process can be reused).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct LaunchKey {
     agent_id: String,
@@ -43,10 +45,10 @@ pub(crate) struct LaunchKey {
 }
 
 impl LaunchKey {
-    /// 起動スペックと解決済み実行ファイルからキーを作る。
+    /// Builds a key from the launch spec and the resolved executable.
     pub(crate) fn new(spec: &AgentLaunchSpec, program: PathBuf) -> Self {
         let mut env = spec.env.clone();
-        // 環境変数の順序差で別キー扱いにならないよう正規化する
+        // Normalize so that environment variable ordering does not produce a different key
         env.sort();
         Self {
             agent_id: spec.agent_id.clone(),
@@ -56,24 +58,24 @@ impl LaunchKey {
         }
     }
 
-    /// エージェントID (ログ用)。
+    /// Agent ID (for logging).
     pub(crate) fn agent_id(&self) -> &str {
         &self.agent_id
     }
 }
 
-/// アイドルプロセスの再利用プール。
+/// Reuse pool for idle processes.
 pub(crate) struct WarmPool<P: WarmProcess> {
-    /// アイドル保持時間
+    /// Idle retention time
     ttl: Duration,
-    /// プール状態 (await を跨がないため `std::sync::Mutex`)
+    /// Pool state (`std::sync::Mutex` because it is never held across an await)
     inner: Mutex<PoolState<P>>,
 }
 
 struct PoolState<P: WarmProcess> {
-    /// キーごとのアイドルプロセス
+    /// Idle process per key
     idle: HashMap<LaunchKey, IdleEntry<P>>,
-    /// TTL 失効判定用の単調トークン
+    /// Monotonic token for TTL expiry checks
     next_token: u64,
 }
 
@@ -83,7 +85,7 @@ struct IdleEntry<P: WarmProcess> {
 }
 
 impl<P: WarmProcess> WarmPool<P> {
-    /// TTL 付きでプールを作成する。
+    /// Creates a pool with a TTL.
     pub(crate) fn new(ttl: Duration) -> Self {
         Self {
             ttl,
@@ -94,7 +96,7 @@ impl<P: WarmProcess> WarmPool<P> {
         }
     }
 
-    /// キーに一致するアイドルプロセスを取り出す (なければ `None`)。
+    /// Takes the idle process matching the key (`None` if absent).
     pub(crate) fn checkout(&self, key: &LaunchKey) -> Option<Arc<P>> {
         self.inner
             .lock()
@@ -104,7 +106,7 @@ impl<P: WarmProcess> WarmPool<P> {
             .map(|entry| entry.process)
     }
 
-    /// セッション終了後のプロセスを返却する (`ttl` 経過後に自動破棄)。
+    /// Returns a process after session end (disposed automatically after `ttl`).
     pub(crate) fn release(self: &Arc<Self>, key: LaunchKey, process: Arc<P>) {
         let (token, replaced) = {
             let mut state = self.inner.lock().expect("warm pool poisoned");
@@ -114,12 +116,12 @@ impl<P: WarmProcess> WarmPool<P> {
             let replaced = state.idle.insert(key.clone(), entry);
             (token, replaced)
         };
-        // 同一キーのアイドルが既にあった場合は古い方を破棄する (保持は最大 1)
+        // If an idle process with the same key already exists, dispose the older one (max 1 kept)
         if let Some(old) = replaced {
             spawn_dispose(old.process);
         }
-        // TTL 失効タイマー。プール自体の Drop を妨げないよう `Weak` で参照する
-        // (Drop 時に残りのアイドルをまとめて破棄できるようにするため)。
+        // TTL expiry timer. Holds a `Weak` reference so it does not prevent the pool
+        // itself from being dropped (so Drop can dispose all remaining idle processes at once).
         let ttl = self.ttl;
         let pool = Arc::downgrade(self);
         tokio::spawn(async move {
@@ -142,9 +144,9 @@ impl<P: WarmProcess> WarmPool<P> {
         });
     }
 
-    /// アイドルプロセスをすべて破棄する (`fxg kill-all` / デーモン終了時)。
+    /// Disposes all idle processes (`fxg kill-all` / daemon shutdown).
     ///
-    /// 戻り値は破棄した (dispose を待った) プロセス数。
+    /// The return value is the number of processes disposed (waited on).
     pub(crate) async fn shutdown_idle(&self) -> usize {
         let drained: Vec<Arc<P>> = {
             let mut state = self.inner.lock().expect("warm pool poisoned");
@@ -164,15 +166,15 @@ impl<P: WarmProcess> Drop for WarmPool<P> {
             let mut state = self.inner.lock().expect("warm pool poisoned");
             state.idle.drain().map(|(_, entry)| entry.process).collect()
         };
-        // ランタイム停止中は dispose を駆動できないため、その場合は
-        // プロセスツリーの Job Object (kill-on-close) に任せる。
+        // dispose cannot be driven while the runtime is shutting down, so leave it to
+        // the process tree's Job Object (kill-on-close).
         for process in drained {
             spawn_dispose(process);
         }
     }
 }
 
-/// 破棄処理を切り離して実行する (待たない)。
+/// Runs disposal detached (without waiting).
 fn spawn_dispose<P: WarmProcess>(process: Arc<P>) {
     if let Ok(handle) = tokio::runtime::Handle::try_current() {
         handle.spawn(async move {
@@ -186,7 +188,7 @@ mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    /// テスト用プロセス: dispose 回数を共有カウンタへ記録する。
+    /// Test process: records dispose calls in a shared counter.
     struct MockProcess {
         dispose_count: Arc<AtomicUsize>,
     }
@@ -214,7 +216,7 @@ mod tests {
         })
     }
 
-    /// カウンタが `expected` になるまで待つ (ベストエフォート)。
+    /// Waits until the counter reaches `expected` (best effort).
     async fn wait_for(counter: &Arc<AtomicUsize>, expected: usize) {
         for _ in 0..200 {
             if counter.load(Ordering::SeqCst) >= expected {
@@ -233,9 +235,9 @@ mod tests {
 
         let checked_out = pool.checkout(&key("a")).expect("idle process");
         assert!(Arc::ptr_eq(&checked_out, &process));
-        // 取り出した後は再利用できない
+        // Cannot be reused after checkout
         assert!(pool.checkout(&key("a")).is_none());
-        // 取り出しでは破棄されない
+        // Checkout does not dispose it
         assert_eq!(counter.load(Ordering::SeqCst), 0);
     }
 
@@ -256,10 +258,10 @@ mod tests {
         let second = mock(&counter);
         pool.release(key("a"), Arc::clone(&second));
 
-        // 古いアイドルが破棄される
+        // The older idle process is disposed
         wait_for(&counter, 1).await;
         assert_eq!(counter.load(Ordering::SeqCst), 1);
-        // 残っているのは新しい方
+        // The newer one remains
         let checked_out = pool.checkout(&key("a")).expect("idle process");
         assert!(Arc::ptr_eq(&checked_out, &second));
     }

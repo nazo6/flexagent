@@ -1,12 +1,12 @@
-//! エージェントドライバ抽象化 (`AgentDriver` / `ActiveSessionHandle`)。
+//! Agent driver abstraction (`AgentDriver` / `ActiveSessionHandle`).
 //!
-//! 設計: `docs/04-agent-drivers-and-windows.md` §1。
+//! Design: `docs/04-agent-drivers-and-windows.md` §1.
 //!
-//! `fxg-node` のセッションマネージャはこのトレイトにのみ依存し、
-//! ACP (`AcpDriver`) / OpenCode2 (`OpenCode2Driver`) の差を吸収する。
-//! ドライバは正規化済みイベント ([`UnifiedEventPayload`] /
-//! [`StreamDeltaPayload`]) を [`DriverEvent`] として送出し、永続化・配信は
-//! セッションマネージャ (イベントバス) が一元して行う。
+//! The `fxg-node` session manager depends only on this trait and hides the
+//! differences between ACP (`AcpDriver`) and OpenCode2 (`OpenCode2Driver`).
+//! Drivers emit normalized events ([`UnifiedEventPayload`] /
+//! [`StreamDeltaPayload`]) as [`DriverEvent`]; persistence and delivery are
+//! handled centrally by the session manager (event bus).
 
 use std::path::PathBuf;
 
@@ -15,142 +15,141 @@ use fxg_protocol::common::{ElicitationAction, StreamDeltaPayload};
 use fxg_protocol::events::UnifiedEventPayload;
 use tokio::sync::mpsc;
 
-/// エージェントプロセスの起動方法 (ACP Registry / カスタム定義から解決済み)。
+/// How to launch the agent process (resolved from the ACP Registry / custom definitions).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentLaunchSpec {
-    /// 解決後のエージェントID (registry id / カスタム名 / `opencode2`)
+    /// Resolved agent ID (registry id / custom name / `opencode2`)
     pub agent_id: String,
-    /// 表示名
+    /// Display name
     pub display_name: String,
-    /// ドライバ種別 ([`AgentDriver::driver_kind`] の値: `"acp"` / `"opencode2"`)
+    /// Driver kind (a value of [`AgentDriver::driver_kind`]: `"acp"` / `"opencode2"`)
     pub driver_kind: String,
-    /// 実行ファイル (絶対パス、または `PATH` 上のコマンド名)。
-    /// `PATH` 解決 (`which` / `PATHEXT`) は起動直前にドライバが行う。
+    /// Executable (absolute path, or a command name on `PATH`).
+    /// `PATH` resolution (`which` / `PATHEXT`) is done by the driver right before launch.
     pub program: PathBuf,
-    /// コマンド引数 (base。パススルー引数は [`StartSessionRequest::extra_args`])
+    /// Command arguments (base; pass-through arguments go in [`StartSessionRequest::extra_args`])
     pub args: Vec<String>,
-    /// プロセスへ追加注入する環境変数 (親の環境を継承した上で上書き)
+    /// Additional environment variables injected into the process (overrides inherited ones)
     pub env: Vec<(String, String)>,
 }
 
-/// 既存エージェントセッションからの再開指定 ([`StartSessionRequest::resume`])。
+/// Resume selection from an existing agent session ([`StartSessionRequest::resume`]).
 ///
-/// 設計: `docs/04-agent-drivers-and-windows.md` §4.3。
+/// Design: `docs/04-agent-drivers-and-windows.md` §4.3.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResumeRequest {
-    /// 記録済みのエージェント内部セッションID (`SessionAgentBound` の値)。
-    /// `None` は新規セッション作成 (呼び出し側の履歴 Replay 注入前提)。
+    /// Recorded internal agent session ID (the `SessionAgentBound` value).
+    /// `None` means create a fresh session (the caller is expected to inject history replay).
     pub agent_session_id: Option<String>,
-    /// ネイティブ復元ができない場合に新規セッション作成を許容するか
-    /// (`false` の場合は [`NativeResumeUnavailable`] を返す)。
+    /// Whether creating a fresh session is allowed when native restore is unavailable
+    /// (`false` returns [`NativeResumeUnavailable`]).
     pub allow_fresh: bool,
 }
 
-/// ネイティブ復元 (`session/resume` / `session/load` / opencode2 既存セッション
-/// bind) が利用できないため、新規セッションを作成せずに再開を中断した。
+/// Resume was aborted without creating a fresh session because native restore
+/// (`session/resume` / `session/load` / opencode2 existing-session bind) is unavailable.
 ///
-/// [`ResumeRequest::allow_fresh`] が `false` のときのみ返される。呼び出し側
-/// (ノード) はこの型へダウンキャストして判別し、履歴 Replay での明示的な
-/// 再開を案内する (`ErrorCode::RESUME_REQUIRED`)。
+/// Returned only when [`ResumeRequest::allow_fresh`] is `false`. The caller (the
+/// node) downcasts to this type to detect it and directs the user to an explicit
+/// resume via history replay (`ErrorCode::RESUME_REQUIRED`).
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("native session resume is not available: {0}")]
 pub struct NativeResumeUnavailable(pub String);
 
-/// セッション開始要求。
+/// Session start request.
 #[derive(Debug, Clone)]
 pub struct StartSessionRequest {
-    /// fxg 側のセッションID (UUID v7)
+    /// fxg-side session ID (UUID v7)
     pub session_id: String,
-    /// セッション表示名 (`fxg` の `SessionCreated.title` と同一。
-    /// エージェント側のセッション名として使えるドライバのみ利用する)。
+    /// Session display name (identical to `fxg`'s `SessionCreated.title`).
+    /// Only drivers that can use it as the agent-side session name apply it.
     pub title: Option<String>,
-    /// 作業ディレクトリ (セッションの `local_path` / Worktree パス)
+    /// Working directory (the session's `local_path` / worktree path)
     pub cwd: PathBuf,
-    /// 起動スペック (解決済み)
+    /// Launch spec (resolved)
     pub launch: AgentLaunchSpec,
-    /// エージェントプロセスへのパススルー引数 (`fxg run <agent> -- ...`)
+    /// Pass-through arguments for the agent process (`fxg run <agent> -- ...`)
     pub extra_args: Vec<String>,
-    /// 初期モード (`--mode` 指定時。ACP の `session/set_mode` で適用)
+    /// Initial mode (when `--mode` is given; applied via ACP `session/set_mode`)
     pub initial_mode: Option<String>,
-    /// 既存エージェントセッションからの再開指定 (`None` は新規セッション)
+    /// Resume selection from an existing agent session (`None` means a fresh session)
     pub resume: Option<ResumeRequest>,
 }
 
-/// [`AgentDriver::start_session`] の結果。
+/// Result of [`AgentDriver::start_session`].
 pub struct StartedSession {
-    /// 起動済みセッションの操作ハンドル
+    /// Handle for operating a started session
     pub handle: Box<dyn ActiveSessionHandle>,
-    /// `true` = エージェント側コンテキストをネイティブ復元した
-    /// (`session/resume` / `session/load` / opencode2 既存セッション bind)。
-    /// `false` = 新規エージェントセッションを作成した
-    /// (呼び出し側は履歴 Replay を注入してコンテキストを引き継ぐ)。
+    /// `true` = the agent-side context was restored natively
+    /// (`session/resume` / `session/load` / opencode2 existing-session bind).
+    /// `false` = a fresh agent session was created
+    /// (the caller injects history replay to carry the context over).
     pub context_restored: bool,
 }
 
-/// ドライバからセッションマネージャへ送出されるイベント。
+/// Events sent from a driver to the session manager.
 ///
-/// 設計 (docs/04 §1) の `mpsc::Sender<DriverEvent>` から
-/// [`mpsc::UnboundedSender`] へ変更している (ドライバは接続イベントループ上で
-/// 動くため、送信でブロックしないことを保証する)。
+/// This uses [`mpsc::UnboundedSender`] instead of the `mpsc::Sender<DriverEvent>`
+/// from the design (docs/04 §1); drivers run on the connection event loop, so
+/// sends must never block.
 #[derive(Debug, Clone)]
 pub enum DriverEvent {
-    /// 永続化対象の完全イベント (`node_seq` 採番・配信はマネージャが行う)
+    /// Complete event to persist (`node_seq` assignment and delivery are done by the manager)
     Event(UnifiedEventPayload),
-    /// ストリーミング途中の差分 (メモリ配信のみ。永続化しない)
+    /// In-progress streaming delta (in-memory delivery only; not persisted)
     Delta(StreamDeltaPayload),
-    /// ドライバ側の異常 (セッションを `error` 状態へ遷移させる)
+    /// Driver-side failure (moves the session to the `error` state)
     Failed {
-        /// エラーメッセージ
+        /// Error message
         message: String,
     },
 }
 
-/// エージェントドライバ (ACP / OpenCode2 等)。
+/// Agent driver (ACP / OpenCode2, etc.).
 #[async_trait]
 pub trait AgentDriver: Send + Sync {
-    /// ドライバ識別子 (`"acp"` / `"opencode2"`)。
+    /// Driver identifier (`"acp"` / `"opencode2"`).
     fn driver_kind(&self) -> &'static str;
 
-    /// 新規セッションを起動し、操作ハンドルを返す。
+    /// Starts a new session and returns an operation handle.
     ///
-    /// `req.resume` が指定されている場合、ドライバはネイティブ復元
-    /// (`session/resume` / `session/load` / opencode2 既存セッション bind) を
-    /// 試み、成否を [`StartedSession::context_restored`] で返す。
-    /// ネイティブ復元できない場合の履歴 Replay 注入は呼び出し側の責務である。
+    /// When `req.resume` is set, the driver attempts native restore
+    /// (`session/resume` / `session/load` / opencode2 existing-session bind) and
+    /// reports success via [`StartedSession::context_restored`].
+    /// Injecting history replay when native restore is unavailable is the caller's responsibility.
     ///
-    /// 以降のイベントは `event_tx` へ送出される。
+    /// Subsequent events are sent to `event_tx`.
     async fn start_session(
         &self,
         req: StartSessionRequest,
         event_tx: mpsc::UnboundedSender<DriverEvent>,
     ) -> anyhow::Result<StartedSession>;
 
-    /// アイドル状態 (セッションが接続していない) のエージェントプロセスを
-    /// すべて破棄する。
+    /// Disposes all idle agent processes (those not attached to a session).
     ///
-    /// `fxg kill-all` / デーモン終了時に呼ばれる。プロセスをセッション終了後も
-    /// 温存するドライバは、ここでそれらを確実に終了させる。戻り値は破棄した数。
-    /// プロセスを保持しないドライバの既定実装は 0 (何もしない)。
+    /// Called by `fxg kill-all` / daemon shutdown. Drivers that keep processes alive
+    /// after session end must terminate them here. The return value is the number disposed.
+    /// The default implementation for drivers that hold no processes returns 0 (no-op).
     async fn shutdown_idle(&self) -> usize {
         0
     }
 }
 
-/// 起動済みセッションの操作ハンドル。
+/// Operation handle for a started session.
 #[async_trait]
 pub trait ActiveSessionHandle: Send + Sync {
-    /// プロンプト送信 (スラッシュコマンド含む)。
+    /// Send a prompt (including slash commands).
     async fn send_prompt(&self, text: String) -> anyhow::Result<()>;
-    /// 権限リクエストへの応答 (`ALREADY_RESOLVED` 判定はマネージャ側)。
+    /// Respond to a permission request (`ALREADY_RESOLVED` detection is handled by the manager).
     async fn respond_permission(
         &self,
         request_id: String,
         selected_option_id: String,
     ) -> anyhow::Result<()>;
-    /// elicitation (構造化入力リクエスト) への応答 (`accept` / `decline` / `cancel`)。
+    /// Respond to an elicitation (structured input request) (`accept` / `decline` / `cancel`).
     ///
-    /// `accept` の `content` はリクエストの `requested_schema` (form モード) に
-    /// 準拠すること。未対応ドライバの既定実装はエラーを返す。
+    /// The `content` for `accept` must conform to the request's `requested_schema`
+    /// (form mode). The default implementation for unsupported drivers returns an error.
     async fn respond_elicitation(
         &self,
         _elicitation_id: String,
@@ -159,24 +158,24 @@ pub trait ActiveSessionHandle: Send + Sync {
     ) -> anyhow::Result<()> {
         anyhow::bail!("respond_elicitation is not supported by this driver")
     }
-    /// モード変更 (`plan` / `code` 等)。
+    /// Change mode (`plan` / `code`, etc.).
     async fn set_mode(&self, mode_id: String) -> anyhow::Result<()>;
-    /// 設定変更 (モデル選択等)。
+    /// Change configuration (model selection, etc.).
     async fn set_config(&self, key: String, value: serde_json::Value) -> anyhow::Result<()>;
-    /// 現在のターンの中断。
+    /// Cancel the current turn.
     async fn cancel_turn(&self) -> anyhow::Result<()>;
-    /// セッションプロセスの完全終了 (プロセスツリーごと)。
+    /// Fully terminates the session process (including the process tree).
     ///
-    /// プロセスをセッション終了後も温存するドライバ (`AcpDriver`) は、
-    /// ここで**温存せず破棄**する。`fxg kill-all` / デーモン終了時に使う。
+    /// Drivers that keep processes alive after session end (`AcpDriver`) **discard
+    /// them here instead of keeping them**. Used by `fxg kill-all` / daemon shutdown.
     async fn dispose(&self) -> anyhow::Result<()> {
         self.shutdown().await
     }
 
-    /// セッションの終了。
+    /// End the session.
     ///
-    /// プロセスをセッション終了後も温存するドライバでは、セッションを閉じて
-    /// プロセスを再利用プールへ返す (完全終了は [`Self::dispose`])。
+    /// Drivers that keep processes alive after session end close the session and
+    /// return the process to the reuse pool (full termination is [`Self::dispose`]).
     async fn shutdown(&self) -> anyhow::Result<()>;
 }
 
@@ -185,8 +184,8 @@ mod tests {
     use super::*;
     use tokio::sync::mpsc;
 
-    /// トレイトがオブジェクト安全で、モック実装から `Box<dyn ...>` を
-    /// 返せることを検証する。
+    /// Verifies that the trait is object safe and that a mock implementation can
+    /// return `Box<dyn ...>`.
     struct MockDriver;
 
     struct MockHandle;

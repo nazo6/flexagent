@@ -1,14 +1,14 @@
-//! FlexAgent エージェントドライバクレート (`fxg-acp`)
+//! FlexAgent agent driver crate (`fxg-acp`)
 //!
-//! 設計: `docs/04-agent-drivers-and-windows.md`
+//! Design: `docs/04-agent-drivers-and-windows.md`
 //!
-//! - [`driver`]: [`AgentDriver`] / [`ActiveSessionHandle`] トレイト ——
-//!   独自プロトコルのエージェントを `fxg-node` 本体の変更なしに追加するための
-//!   抽象化
-//! - [`registry`]: ACP Registry (`registry.json`) の取得・キャッシュ・起動解決と
-//!   導入管理 (`fxg agents ...`)
-//! - [`acp`][]: `AcpDriver` (`agent-client-protocol` による標準ACPエージェント制御)
-//! - [`opencode2`][]: `OpenCode2Driver` (`opencode serve` ブリッジ + 純正TUI Attach)
+//! - [`driver`]: [`AgentDriver`] / [`ActiveSessionHandle`] traits — the
+//!   abstraction for adding agents with custom protocols without changing
+//!   `fxg-node` itself
+//! - [`registry`]: fetching, caching and launch resolution for the ACP Registry
+//!   (`registry.json`), plus install management (`fxg agents ...`)
+//! - [`acp`][]: `AcpDriver` (standard ACP agent control via `agent-client-protocol`)
+//! - [`opencode2`][]: `OpenCode2Driver` (`opencode serve` bridge + native TUI attach)
 
 pub mod acp;
 pub mod driver;

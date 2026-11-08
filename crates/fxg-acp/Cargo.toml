@@ -3,7 +3,7 @@ name = "fxg-acp"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
-description = "FlexAgent エージェントドライバ (ACP Registry / AcpDriver / OpenCode2Driver)"
+description = "FlexAgent agent drivers (ACP Registry / AcpDriver / OpenCode2Driver)"
 repository.workspace = true
 
 [dependencies]

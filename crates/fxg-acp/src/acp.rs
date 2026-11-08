@@ -1,20 +1,21 @@
-//! 標準ACPエージェントのドライバ (`AcpDriver`)。
+//! Driver for standard ACP agents (`AcpDriver`).
 //!
-//! 設計: `docs/04-agent-drivers-and-windows.md` §2.2。
+//! Design: `docs/04-agent-drivers-and-windows.md` §2.2.
 //!
-//! `agent-client-protocol` (ACP SDK) のクライアントとして外部エージェント
-//! プロセスへ接続し、`session/update` 通知・`session/request_permission`・
-//! `fs/*`・`terminal/*` を FXG の正規化イベント ([`DriverEvent`]) へ変換する。
+//! Acts as a client for `agent-client-protocol` (the ACP SDK), connects to external
+//! agent processes, and converts `session/update` notifications,
+//! `session/request_permission`, `fs/*` and `terminal/*` into FXG normalized
+//! events ([`DriverEvent`]).
 //!
-//! - **セッション所有**: ACP接続は専用タスクが所有し、
-//!   [`ActiveSession`] の更新読み取りとプロンプト送信を直列化する。
-//!   外部からの操作は [`ConnectionTo`] (clone 可能) とコマンドチャネル経由。
-//! - **承認**: `request_permission` は `oneshot` を登録して
-//!   [`ActiveSessionHandle::respond_permission`] から解決する
-//!   (未解決のままターンがキャンセルされた場合は `cancelled` を返す)。
-//! - **fs/terminal**: セッションの `local_path` 基準で読み書きし、
-//!   書き込みは Unified Diff を計算してイベントへ添付する。
-//!   `terminal/*` は `fxg-pty` で実行する。
+//! - **Session ownership**: a dedicated task owns the ACP connection and serializes
+//!   reading updates from [`ActiveSession`] with prompt sends.
+//!   External operations go through [`ConnectionTo`] (clonable) and a command channel.
+//! - **Approval**: `request_permission` registers a `oneshot` and is resolved from
+//!   [`ActiveSessionHandle::respond_permission`]
+//!   (returns `cancelled` if the turn is cancelled while unresolved).
+//! - **fs/terminal**: reads and writes relative to the session's `local_path`;
+//!   writes compute a unified diff and attach it to the event.
+//!   `terminal/*` is executed via `fxg-pty`.
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
@@ -58,13 +59,13 @@ use crate::driver::{
 };
 use crate::warm::{DEFAULT_WARM_IDLE, LaunchKey, WarmPool, WarmProcess};
 
-/// 標準ACPエージェントを `agent-client-protocol` で制御するドライバ。
+/// Driver that controls standard ACP agents via `agent-client-protocol`.
 ///
-/// セッション終了後もプロセスを TTL 付きでアイドル保持し、次のセッションで
-/// 再利用する (起動が高コストなエージェントでは 2 セッション目以降の開始が
-/// `session/new` のみで済む)。プール無効化は [`AcpDriver::without_pool`]。
+/// Keeps the process idle with a TTL after session end and reuses it in the next
+/// session (for costly-to-start agents, the second and later sessions start with
+/// just `session/new`). Disable the pool with [`AcpDriver::without_pool`].
 pub struct AcpDriver {
-    /// アイドルプロセスの再利用プール (`None` = プール無効)
+    /// Reuse pool for idle processes (`None` = pool disabled)
     pool: Option<Arc<WarmPool<ProcessHandle>>>,
 }
 
@@ -83,38 +84,38 @@ impl Default for AcpDriver {
 }
 
 impl AcpDriver {
-    /// アイドルプール有効 (既定 TTL 10 分) でドライバを作成する。
+    /// Creates a driver with the idle pool enabled (default TTL 10 minutes).
     pub fn new() -> Self {
         Self {
             pool: Some(Arc::new(WarmPool::new(DEFAULT_WARM_IDLE))),
         }
     }
 
-    /// アイドルプール無効でドライバを作成する (セッション終了でプロセスを破棄)。
+    /// Creates a driver with the idle pool disabled (process disposed at session end).
     ///
-    /// セッション間でエージェント状態を共有したくない場合 (テスト・診断) に使う。
+    /// Use when agent state should not be shared across sessions (tests / diagnostics).
     pub fn without_pool() -> Self {
         Self { pool: None }
     }
 }
 
-/// 承認リクエストの解決チャネル (`request_id` → `oneshot`)。
+/// Resolution channel for permission requests (`request_id` → `oneshot`).
 type PermissionRegistry = Arc<Mutex<HashMap<String, oneshot::Sender<RequestPermissionOutcome>>>>;
 
-/// elicitation の解決チャネル (`elicitation_id` → 未解決情報)。
+/// Resolution channel for elicitations (`elicitation_id` → pending info).
 type ElicitationRegistry = Arc<Mutex<HashMap<String, PendingElicitation>>>;
 
-/// 未解決 elicitation の状態 (応答チャネルと検証用 schema)。
+/// State of a pending elicitation (response channel and validation schema).
 struct PendingElicitation {
-    /// UI / CLI からの応答送信側
+    /// Sender for responses from the UI / CLI
     sender: oneshot::Sender<ElicitationOutcome>,
-    /// form モードの要求 schema (`accept` の content 検証用)
+    /// request schema for form mode (for validating `accept` content)
     schema: Option<serde_json::Value>,
 }
 
-/// elicitation への応答 (ACP 応答へ変換する前の正規化表現)。
+/// Elicitation response (normalized representation before conversion to an ACP response).
 enum ElicitationOutcome {
-    /// accept (form content 付き)
+    /// accept (with form content)
     Accept(BTreeMap<String, ElicitationContentValue>),
     /// decline
     Decline,
@@ -122,66 +123,66 @@ enum ElicitationOutcome {
     Cancel,
 }
 
-/// セッション (ターンループ) へのコマンド。
+/// Commands for a session (turn loop).
 #[derive(Debug)]
 enum AcpCommand {
-    /// プロンプト送信 (ターン完了まで実行される)
+    /// Send a prompt (runs until the turn completes)
     Prompt(String),
-    /// セッション終了 (プロセスは維持し、次のセッションで再利用する)
+    /// End the session (keep the process for reuse in the next session)
     Shutdown,
 }
 
-/// 常駐プロセスへのコマンド。
+/// Commands for the resident process.
 enum ProcessCommand {
-    /// 新規セッションを作成してターンループを開始する
+    /// Create a new session and start its turn loop
     NewSession {
-        /// セッション作成パラメータ
+        /// Session creation parameters
         params: SessionParams,
-        /// セッションのイベント送信
+        /// Event sender for the session
         events: mpsc::UnboundedSender<DriverEvent>,
-        /// セッションが握るプロセスの利用権
+        /// Process lease held by the session
         lease: Arc<ProcessLease>,
-        /// セッションへのコマンドチャネル (送信側はハンドルが保持)
+        /// Command channel to the session (the handle holds the sender)
         commands: (
             mpsc::UnboundedSender<AcpCommand>,
             mpsc::UnboundedReceiver<AcpCommand>,
         ),
-        /// セッション準備完了通知 (ハンドル + ネイティブ復元成否 / エラー)
+        /// Session ready notification (handle + native restore status / error)
         ready: oneshot::Sender<anyhow::Result<(AcpSessionHandle, bool)>>,
     },
-    /// プロセスを終了する (teardown 実行)
+    /// Terminate the process (run teardown)
     Dispose,
 }
 
-/// プロセス内で新規セッションを作るために必要なパラメータ。
+/// Parameters required to create a new session within a process.
 #[derive(Debug, Clone)]
 struct SessionParams {
-    /// fxg 側のセッションID (ログ用)
+    /// fxg-side session ID (for logging)
     session_id: String,
-    /// 作業ディレクトリ (セッションの `local_path`)
+    /// Working directory (the session's `local_path`)
     cwd: PathBuf,
-    /// 初期モード
+    /// Initial mode
     initial_mode: Option<String>,
-    /// 既存エージェントセッションからの再開指定 (`None` は新規セッション)
+    /// Resume selection from an existing agent session (`None` means a fresh session)
     resume: Option<ResumeRequest>,
 }
 
-/// セッション単位の共有情報 (ハンドラが ACP の session_id から引く)。
+/// Per-session shared information (handlers look it up by the ACP session_id).
 ///
-/// 1 プロセスがセッションをまたいで再利用されるため、fs / terminal
-/// ハンドラは接続構築時の情報を閉じ込めず、ここから都度解決する。
+/// A single process is reused across sessions, so the fs / terminal handlers do
+/// not capture connection-build-time information and instead resolve it here each time.
 #[derive(Clone)]
 struct SessionContext {
-    /// 作業ディレクトリ (fs / terminal の相対パス解決に使う)
+    /// Working directory (used to resolve relative paths for fs / terminal)
     cwd: PathBuf,
-    /// イベント送信 (ステータス更新・承認・fs 変更通知)
+    /// Event sender (status updates, approvals, fs change notifications)
     events: mpsc::UnboundedSender<DriverEvent>,
 }
 
-/// ACP セッションID → セッション情報。
+/// ACP session ID → session information.
 type SessionContexts = Arc<Mutex<HashMap<String, SessionContext>>>;
 
-/// ACP セッションID でセッション情報を引く。
+/// Looks up session information by ACP session ID.
 fn session_context(contexts: &SessionContexts, session_id: &SessionId) -> Option<SessionContext> {
     contexts
         .lock()
@@ -190,16 +191,16 @@ fn session_context(contexts: &SessionContexts, session_id: &SessionId) -> Option
         .cloned()
 }
 
-/// 常駐プロセスのハンドル (プール / リースが共有保持する)。
+/// Handle to the resident process (shared by the pool / leases).
 struct ProcessHandle {
-    /// プロセスへのコマンド送信
+    /// Command sender to the process
     control_tx: mpsc::UnboundedSender<ProcessCommand>,
-    /// 常駐タスクの JoinHandle (`dispose_process` が teardown 完了を待つ)
+    /// JoinHandle of the resident task (`dispose_process` waits for teardown to finish)
     join: Mutex<Option<tokio::task::JoinHandle<()>>>,
 }
 
 impl ProcessHandle {
-    /// 新しいセッションを作成し、ハンドルとネイティブ復元成否を返す。
+    /// Creates a new session and returns the handle plus native restore status.
     async fn new_session(
         &self,
         params: SessionParams,
@@ -222,7 +223,7 @@ impl ProcessHandle {
             .context("acp agent process ended before the session became ready")?
     }
 
-    /// プロセスを終了し、teardown の完了を待つ (完了済みなら即時)。
+    /// Terminates the process and waits for teardown to finish (immediate if already done).
     async fn dispose_process(&self) {
         let _ = self.control_tx.send(ProcessCommand::Dispose);
         let join = self.join.lock().expect("process join poisoned").take();
@@ -238,21 +239,22 @@ impl WarmProcess for ProcessHandle {
     }
 }
 
-/// セッションが握るプロセスの利用権。終了時にプールへ返却、または破棄する。
+/// Process lease held by a session. Returned to the pool on end, or disposed.
 struct ProcessLease {
-    /// 再利用キー
+    /// Reuse key
     key: LaunchKey,
-    /// 常駐プロセス
+    /// Resident process
     process: Arc<ProcessHandle>,
-    /// 返却先プール (`None` = プール無効 → 破棄)
+    /// Destination pool (`None` = pool disabled → dispose)
     pool: Option<Arc<WarmPool<ProcessHandle>>>,
-    /// [`AcpSessionHandle::dispose`] 指定 (プールへ返さずプロセスを破棄する)
+    /// [`AcpSessionHandle::dispose`] requested (dispose the process instead of
+    /// returning it to the pool)
     dispose_requested: AtomicBool,
-    /// 返却 / 破棄の二重実行防止
+    /// Prevents double return / dispose
     finished: AtomicBool,
-    /// ターンループ終了通知の送信側 (プロセス側が serve 開始時に取り出す)
+    /// Sender for turn-loop end notification (taken by the process side when serve starts)
     session_end_tx: Mutex<Option<oneshot::Sender<()>>>,
-    /// ターンループ終了通知の受信側 (`shutdown` が待つ)
+    /// Receiver for turn-loop end notification (`shutdown` waits on it)
     session_end_rx: Mutex<Option<oneshot::Receiver<()>>>,
 }
 
@@ -267,7 +269,7 @@ impl std::fmt::Debug for ProcessLease {
 }
 
 impl ProcessLease {
-    /// 新しい利用権を作成する (ターンループ終了通知チャネルを含む)。
+    /// Creates a new lease (including the turn-loop end notification channel).
     fn new(
         key: LaunchKey,
         process: Arc<ProcessHandle>,
@@ -285,7 +287,7 @@ impl ProcessLease {
         }
     }
 
-    /// ターンループ終了通知の送信側を取り出す (プロセス側が一度だけ)。
+    /// Takes the turn-loop end notifier (process side, once).
     fn take_session_end_sender(&self) -> Option<oneshot::Sender<()>> {
         self.session_end_tx
             .lock()
@@ -293,7 +295,7 @@ impl ProcessLease {
             .take()
     }
 
-    /// ターンループ終了を待つための受信側を取り出す (`shutdown` が一度だけ)。
+    /// Takes the receiver for waiting on turn-loop end (`shutdown`, once).
     fn take_session_end_receiver(&self) -> Option<oneshot::Receiver<()>> {
         self.session_end_rx
             .lock()
@@ -301,12 +303,13 @@ impl ProcessLease {
             .take()
     }
 
-    /// プールへ返さずプロセスを破棄するよう印を付ける (セッション異常終了時など)。
+    /// Marks the process to be disposed instead of returned to the pool (e.g.
+    /// abnormal session end).
     fn mark_dispose(&self) {
         self.dispose_requested.store(true, Ordering::SeqCst);
     }
 
-    /// セッション終了後の後処理 (プールへ返却 or プロセス破棄)。二重呼び出しは無視する。
+    /// Post-session cleanup (return to the pool or dispose). Duplicate calls are ignored.
     async fn finish(&self) {
         if self.finished.swap(true, Ordering::SeqCst) {
             return;
@@ -333,7 +336,7 @@ impl AgentDriver for AcpDriver {
         match self.start_session_inner(req, &event_tx).await {
             Ok(started) => Ok(started),
             Err(err) => {
-                // 起動失敗をイベントに記録する (セッションは error 状態へ遷移する)
+                // Record the start failure as an event (the session moves to the error state)
                 let _ = event_tx.send(DriverEvent::Failed {
                     message: err.to_string(),
                 });
@@ -351,13 +354,13 @@ impl AgentDriver for AcpDriver {
 }
 
 impl AcpDriver {
-    /// セッション開始の本体 (アイドルプロセスの再利用 → コールドスタートの順)。
+    /// Core session start (reuse idle process, then cold start).
     async fn start_session_inner(
         &self,
         req: StartSessionRequest,
         event_tx: &mpsc::UnboundedSender<DriverEvent>,
     ) -> anyhow::Result<StartedSession> {
-        // `npx` / `uvx` 等の拡張子解決 (Windows の PATHEXT 対応)
+        // Extension resolution for `npx` / `uvx` (Windows PATHEXT support)
         let program = fxg_pty::resolve_command(&req.launch.program.to_string_lossy(), &req.cwd)
             .map_err(|err| {
                 anyhow!(
@@ -373,7 +376,7 @@ impl AcpDriver {
             resume: req.resume.clone(),
         };
 
-        // 1) アイドルプロセスの再利用 (initialize 済みの接続へ session/new するだけ)
+        // 1) Reuse an idle process (just session/new on an initialized connection)
         if let Some(pool) = &self.pool
             && let Some(process) = pool.checkout(&key)
         {
@@ -408,7 +411,7 @@ impl AcpDriver {
             }
         }
 
-        // 2) コールドスタート (プロセス起動 → initialize → セッション作成)
+        // 2) Cold start (spawn process → initialize → create session)
         let config = AcpAgentConfig::new(program)
             .args(req.launch.args.iter().cloned())
             .envs(
@@ -436,10 +439,10 @@ impl AcpDriver {
     }
 }
 
-/// エージェントプロセスを起動し、常駐タスクとプロセス ready 通知を返す。
+/// Spawns the agent process and returns the resident task and the process ready notification.
 ///
-/// ready は `initialize` 完了時に通知される (セッション作成は
-/// [`ProcessHandle::new_session`] で行う)。
+/// ready is notified when `initialize` completes (sessions are created by
+/// [`ProcessHandle::new_session`]).
 fn spawn_agent_process(
     agent: AcpAgent,
 ) -> (Arc<ProcessHandle>, oneshot::Receiver<anyhow::Result<()>>) {
@@ -465,27 +468,27 @@ fn spawn_agent_process(
     )
 }
 
-/// 起動済みACPセッションのハンドル。
+/// Handle for a started ACP session.
 struct AcpSessionHandle {
-    /// ACP (エージェント側) のセッションID
+    /// ACP (agent-side) session ID
     acp_session_id: SessionId,
-    /// 接続 (clone 可能。リクエスト/通知の発行に使う)
+    /// Connection (clonable; used to issue requests/notifications)
     conn: ConnectionTo<Agent>,
-    /// セッション (ターンループ) へのコマンド
+    /// Commands to the session (turn loop)
     commands: mpsc::UnboundedSender<AcpCommand>,
-    /// 承認解決レジストリ (プロセス共有)
+    /// Permission resolution registry (shared per process)
     permissions: PermissionRegistry,
-    /// elicitation 解決レジストリ (プロセス共有)
+    /// Elicitation resolution registry (shared per process)
     elicitations: ElicitationRegistry,
-    /// イベント送信 (ステータス更新用)。
+    /// Event sender (for status updates).
     ///
-    /// セッション終了 ([`ActiveSessionHandle::shutdown`]) で解放する。保持した
-    /// ままだとセッションマネージャのイベントポンプが「ドライバ終了」を検知
-    /// できず、セッションが active 一覧から外れない。
+    /// Released on session end ([`ActiveSessionHandle::shutdown`]). If it were kept,
+    /// the session manager's event pump could not detect that the driver ended and
+    /// the session would remain in the active list.
     events: Mutex<Option<mpsc::UnboundedSender<DriverEvent>>>,
-    /// PTY マネージャ (ACP terminal/* 用。プロセス共有)
+    /// PTY manager (for ACP terminal/*; shared per process)
     pty: Arc<fxg_pty::PtySessionManager>,
-    /// プロセスの利用権 (終了時にプールへ返却 or 破棄)
+    /// Process lease (returned to the pool or disposed on end)
     lease: Arc<ProcessLease>,
 }
 
@@ -530,8 +533,8 @@ impl ActiveSessionHandle for AcpSessionHandle {
     ) -> anyhow::Result<()> {
         use fxg_protocol::common::ElicitationAction as FxgElicitationAction;
 
-        // schema は pending を消費せずに読む (不正な content は pending を維持して
-        // エラーを返し、クライアントが修正して再送できるようにする)
+        // Read the schema without consuming the pending entry (invalid content keeps
+        // the entry pending and returns an error so the client can fix and resend)
         let schema = self
             .elicitations
             .lock()
@@ -541,7 +544,7 @@ impl ActiveSessionHandle for AcpSessionHandle {
             .ok_or_else(|| anyhow!("unknown or already resolved elicitation: {elicitation_id}"))?;
         let outcome = match action {
             FxgElicitationAction::Accept => {
-                // `content` 未指定 (null) は空オブジェクトとして扱う
+                // Treat unspecified (null) `content` as an empty object
                 let content = if content.is_null() {
                     serde_json::json!({})
                 } else {
@@ -603,9 +606,10 @@ impl ActiveSessionHandle for AcpSessionHandle {
         self.conn
             .send_notification(CancelNotification::new(self.acp_session_id.clone()))
             .map_err(|err| anyhow!("failed to cancel turn: {err}"))?;
-        // 未解決の承認は仕様上 cancelled で返す (MUST)
+        // The spec requires unresolved approvals to be returned as cancelled (MUST)
         cancel_pending_permissions(&self.permissions);
-        // 未解決の elicitation も仕様上 cancel で返し、回答待ち表示を解消する
+        // The spec also requires unresolved elicitations to be resolved as cancel,
+        // clearing the waiting-for-input state
         let events = self.events.lock().expect("session events poisoned").clone();
         cancel_pending_elicitations(&self.elicitations, events.as_ref());
         if let Some(events) = events.as_ref() {
@@ -618,31 +622,33 @@ impl ActiveSessionHandle for AcpSessionHandle {
     }
 
     async fn shutdown(&self) -> anyhow::Result<()> {
-        // セッションを閉じ、プロセスは再利用プールへ返す (破棄は [`Self::dispose`])
+        // Close the session and return the process to the reuse pool (disposal is
+        // [`Self::dispose`])
         let session_end = self.lease.take_session_end_receiver();
         let _ = self.commands.send(AcpCommand::Shutdown);
         if let Some(session_end) = session_end {
-            // ターンループの終了を待つ (ループ未起動/異常終了時は即時 Err で返る)
+            // Wait for the turn loop to end (returns Err immediately if the loop never
+            // started or failed)
             let _ = session_end.await;
         }
         for terminal_id in self.pty.list() {
             let _ = self.pty.kill(&terminal_id.pty_id);
         }
-        // イベント送信を解放する (セッションマネージャのポンプが「ドライバ終了」
-        // を検知し、active 一覧から外せるようにするため)
+        // Release the event sender (so the session manager's pump detects that the
+        // driver ended and removes the session from the active list)
         self.events.lock().expect("session events poisoned").take();
         self.lease.finish().await;
         Ok(())
     }
 
     async fn dispose(&self) -> anyhow::Result<()> {
-        // プロセスを温存せず破棄する (`fxg kill-all` / デーモン終了)
+        // Dispose the process instead of keeping it (`fxg kill-all` / daemon shutdown)
         self.lease.dispose_requested.store(true, Ordering::SeqCst);
         self.shutdown().await
     }
 }
 
-/// 未解決の承認リクエストをすべて `cancelled` で閉じる。
+/// Closes all unresolved permission requests as `cancelled`.
 fn cancel_pending_permissions(permissions: &PermissionRegistry) {
     let mut registry = permissions.lock().expect("permission registry poisoned");
     for (_, sender) in registry.drain() {
@@ -650,12 +656,12 @@ fn cancel_pending_permissions(permissions: &PermissionRegistry) {
     }
 }
 
-/// 未解決の elicitation をすべて `cancel` で閉じる (仕様上、ターン中断時は
-/// 未解決の elicitation を cancel で解決する)。
+/// Closes all unresolved elicitations as `cancel` (the spec requires resolving
+/// unresolved elicitations with cancel when a turn is interrupted).
 ///
-/// `events` がある場合は `ElicitationResolved` も発行し、UI / Inbox の
-/// 回答待ち表示を解消する (fxg 経由の応答はマネージャ側が記録済みのため、
-/// ここではドライバ側の自動解決のみを記録する)。
+/// When `events` is provided, also emits `ElicitationResolved` to clear the
+/// waiting-for-input state in the UI / Inbox (responses via fxg are already
+/// recorded by the manager, so this only records driver-side auto-resolution).
 fn cancel_pending_elicitations(
     elicitations: &ElicitationRegistry,
     events: Option<&mpsc::UnboundedSender<DriverEvent>>,
@@ -676,20 +682,21 @@ fn cancel_pending_elicitations(
     }
 }
 
-/// `run_acp_process` の起動パラメータ。
+/// Launch parameters for `run_acp_process`.
 struct AcpProcessTaskParams {
-    /// 起動するエージェント
+    /// Agent to launch
     agent: AcpAgent,
-    /// プロセス ready (initialize 完了) 通知
+    /// Process ready (initialize complete) notification
     ready_tx: oneshot::Sender<anyhow::Result<()>>,
-    /// プロセスへのコマンド受信
+    /// Command receiver for the process
     control_rx: mpsc::UnboundedReceiver<ProcessCommand>,
 }
 
-/// ACP接続を確立し、アイドル待機とセッション処理を順に回す常駐タスク。
+/// Resident task that establishes the ACP connection and alternates between idle
+/// waiting and session handling.
 ///
-/// 1 プロセスにつき同時 1 セッションを担当し、セッション終了後は次の
-/// `NewSession` まで待機する (プロセスの破棄はプールの TTL / `Dispose`)。
+/// Handles one session at a time per process, and after the session ends waits
+/// for the next `NewSession` (process disposal happens via the pool TTL / `Dispose`).
 #[allow(clippy::too_many_lines)]
 async fn run_acp_process(params: AcpProcessTaskParams) -> Result<(), agent_client_protocol::Error> {
     let AcpProcessTaskParams {
@@ -704,9 +711,9 @@ async fn run_acp_process(params: AcpProcessTaskParams) -> Result<(), agent_clien
     let elicitations: ElicitationRegistry = Arc::new(Mutex::new(HashMap::new()));
     let contexts: SessionContexts = Arc::new(Mutex::new(HashMap::new()));
 
-    // ハンドラ登録 (fs / 承認 / terminal)。
-    // NOTE: `impl AsyncFnMut` を返すヘルパー経由では associated future の `Send` を
-    // 証明できないため、ビルダーチェーンへクロージャを直接渡す。
+    // Register handlers (fs / approval / terminal).
+    // NOTE: a helper returning `impl AsyncFnMut` cannot prove `Send` for the associated
+    // future, so closures are passed directly to the builder chain.
     let builder = Client
         .v1()
         .name("fxg")
@@ -715,8 +722,8 @@ async fn run_acp_process(params: AcpProcessTaskParams) -> Result<(), agent_clien
                 let permissions = Arc::clone(&permissions);
                 let contexts = Arc::clone(&contexts);
                 async move |request: RequestPermissionRequest, responder, cx| {
-                    // セッションが既に閉じている (レース) 場合は安全側に倒して
-                    // キャンセルで返す
+                    // If the session is already closed (race), fail safe and
+                    // respond with cancel
                     let Some(context) = session_context(&contexts, &request.session_id) else {
                         return responder.respond(RequestPermissionResponse::new(
                             RequestPermissionOutcome::Cancelled,
@@ -852,7 +859,7 @@ async fn run_acp_process(params: AcpProcessTaskParams) -> Result<(), agent_clien
                     let Some(context) = session_context(&contexts, &request.session_id) else {
                         return responder.respond_with_internal_error("unknown session");
                     };
-                    // `AsyncFnMut` は複数回呼ばれるため、キャプチャは clone して渡す
+                    // `AsyncFnMut` is called multiple times, so pass cloned captures
                     create_terminal(
                         pty.clone(),
                         terminals.clone(),
@@ -898,7 +905,7 @@ async fn run_acp_process(params: AcpProcessTaskParams) -> Result<(), agent_clien
                         return responder.respond_with_internal_error("unknown terminal");
                     };
                     cx.spawn(async move {
-                        // 既に終了していれば現在値を返し、そうでなければ変更を待つ
+                        // Return the current value if already exited; otherwise wait for a change
                         if exit_rx.borrow().is_none() {
                             let _ = exit_rx.changed().await;
                         }
@@ -944,8 +951,8 @@ async fn run_acp_process(params: AcpProcessTaskParams) -> Result<(), agent_clien
                 let elicitations = Arc::clone(&elicitations);
                 let contexts = Arc::clone(&contexts);
                 async move |request: CreateElicitationRequest, responder, cx| {
-                    // Phase 1 は form モードのみ対応 (capability で広告した範囲)。
-                    // 未広告モードの要求は Invalid params で返す (spec)。
+                    // Phase 1 supports form mode only (the range advertised in capabilities).
+                    // Requests for unadvertised modes return Invalid params (spec).
                     let (scope, schema) = match &request.mode {
                         ElicitationMode::Form(form) => (
                             form.scope.clone(),
@@ -959,7 +966,8 @@ async fn run_acp_process(params: AcpProcessTaskParams) -> Result<(), agent_clien
                             );
                         }
                     };
-                    // セッションスコープのみ対応 (リクエストスコープは認証フロー用で未対応)
+                    // Only session scope is supported (request scope is for auth flows
+                    // and unsupported)
                     let ElicitationScope::Session(scope) = scope else {
                         return responder.respond_with_error(
                             agent_client_protocol::Error::invalid_params()
@@ -971,8 +979,8 @@ async fn run_acp_process(params: AcpProcessTaskParams) -> Result<(), agent_clien
                             agent_client_protocol::Error::invalid_params().data("unknown session"),
                         );
                     };
-                    // form モードはプロトコル上の elicitation id を持たないため、
-                    // JSON-RPC request id を elicitation id として使う (承認と同じ)。
+                    // Form mode has no protocol-level elicitation id, so use the
+                    // JSON-RPC request id as the elicitation id (same as approvals).
                     let elicitation_id = responder.id().to_string();
                     let events = context.events.clone();
                     let _ = events.send(DriverEvent::Event(UnifiedEventPayload::StatusChanged {
@@ -1031,8 +1039,8 @@ async fn run_acp_process(params: AcpProcessTaskParams) -> Result<(), agent_clien
         )
         .on_receive_notification(
             async move |notification: CompleteElicitationNotification, _cx| {
-                // Phase 1 は form モードのみのため、URL モードの完了通知は
-                // 未知 ID として無視する (spec: 未知 ID は無視しなければならない)。
+                // Phase 1 supports form mode only, so URL-mode completion notifications are
+                // ignored as unknown IDs (spec: unknown IDs must be ignored).
                 tracing::debug!(
                     elicitation_id = %notification.elicitation_id,
                     "elicitation/complete notification ignored (url mode not supported)"
@@ -1042,12 +1050,12 @@ async fn run_acp_process(params: AcpProcessTaskParams) -> Result<(), agent_clien
             agent_client_protocol::on_receive_notification!(),
         );
 
-    // クロージャ (async move) が `permissions` / `elicitations` をムーブするため、
-    // teardown 用に複製を保持しておく
+    // The closures (async move) move `permissions` / `elicitations`, so keep
+    // clones for teardown
     let permissions_for_teardown = Arc::clone(&permissions);
     let elicitations_for_teardown = Arc::clone(&elicitations);
 
-    // エージェント stderr をデーモンのログへ流す
+    // Forward agent stderr to the daemon log
     let agent = agent.with_debug(|line, direction| {
         if matches!(direction, agent_client_protocol::LineDirection::Stderr) {
             tracing::debug!(target: "fxg_acp::acp", "acp agent: {line}");
@@ -1056,8 +1064,8 @@ async fn run_acp_process(params: AcpProcessTaskParams) -> Result<(), agent_clien
 
     let run_result = builder
         .connect_with(agent, async move |cx: ConnectionTo<Agent>| {
-            // 1) initialize (プロセスにつき 1 回。fs 読み書き + terminal +
-            //    elicitation (form) をサポート宣言)
+            // 1) initialize (once per process; declare support for fs read/write +
+            //    terminal + elicitation (form))
             let capabilities = ClientCapabilities::new()
                 .fs(FileSystemCapabilities::new()
                     .read_text_file(true)
@@ -1088,8 +1096,8 @@ async fn run_acp_process(params: AcpProcessTaskParams) -> Result<(), agent_clien
                 let _ = tx.send(Ok(()));
             }
 
-            // 2) セッション処理ループ。1 プロセスにつき同時 1 セッションを担当し、
-            //    セッション終了後は次の `NewSession` までアイドル待機する。
+            // 2) Session processing loop. Handles one session at a time per process,
+            //    waiting idle for the next `NewSession` after a session ends.
             while let Some(command) = control_rx.recv().await {
                 let ProcessCommand::NewSession {
                     params,
@@ -1099,12 +1107,12 @@ async fn run_acp_process(params: AcpProcessTaskParams) -> Result<(), agent_clien
                     ready,
                 } = command
                 else {
-                    // Dispose = プロセス終了
+                    // Dispose = process termination
                     break;
                 };
-                // セッション構築。失敗した場合は接続の健全性が不明なため、
-                // エラーを返した上でプロセスを畳む (呼び出し側はコールド
-                // スタートへ回帰する)。
+                // Build the session. On failure the connection health is unknown, so
+                // return the error and shut the process down (the caller falls back
+                // to a cold start).
                 let (session, acp_session_id, context_restored, capabilities_state) =
                     match build_session(&cx, &agent_capabilities, &params, &events, &contexts).await
                     {
@@ -1128,7 +1136,7 @@ async fn run_acp_process(params: AcpProcessTaskParams) -> Result<(), agent_clien
                 };
                 let _ = ready.send(Ok((handle, context_restored)));
 
-                // 3) ターンループ (プロンプト送信と更新読み取りを直列化)
+                // 3) Turn loop (serializes prompt sends with update reads)
                 let outcome = serve_session(session, cmd_rx, &events, capabilities_state).await;
                 contexts
                     .lock()
@@ -1137,7 +1145,7 @@ async fn run_acp_process(params: AcpProcessTaskParams) -> Result<(), agent_clien
                 if let Some(tx) = session_end_tx {
                     let _ = tx.send(());
                 }
-                // セッションに紐づく未解決の承認・質問はキャンセルで閉じる
+                // Close unresolved approvals and questions tied to the session with cancel
                 cancel_pending_permissions(&permissions);
                 cancel_pending_elicitations(&elicitations, Some(&events));
                 match outcome {
@@ -1156,37 +1164,39 @@ async fn run_acp_process(params: AcpProcessTaskParams) -> Result<(), agent_clien
                         let _ = events.send(DriverEvent::Failed {
                             message: err.to_string(),
                         });
-                        // 接続異常時はプロセスを畳む (プールへは返さない)
+                        // Shut the process down on connection failure (do not return it
+                        // to the pool)
                         lease.mark_dispose();
                         break;
                     }
                 }
             }
 
-            // ループを抜ける = プロセスシャットダウン
+            // Exiting the loop = process shutdown
             Ok(())
         })
         .await;
 
-    // 未解決の承認・質問が残っていればキャンセルで閉じる (プロセス終了)
+    // Close any remaining unresolved approvals and questions with cancel (process exit)
     cancel_pending_permissions(&permissions_for_teardown);
     cancel_pending_elicitations(&elicitations_for_teardown, None);
 
     run_result
 }
 
-/// ターンループの終了理由。
+/// Reason the turn loop ended.
 enum ServeOutcome {
-    /// 正常終了 (`AcpCommand::Shutdown`)
+    /// Normal end (`AcpCommand::Shutdown`)
     Closed,
-    /// 接続・ターンの異常 (プロセスを畳む)
+    /// Connection / turn failure (shut the process down)
     Fatal(anyhow::Error),
 }
 
-/// セッションを作成・初期化する (`session/new` | `session/resume` | `session/load`)。
+/// Creates and initializes a session (`session/new` | `session/resume` | `session/load`).
 ///
-/// セッション情報を [`SessionContexts`] へ登録し (fs / terminal ハンドラが参照)、
-/// 初期モード適用・モード/コマンド/設定項目の配信まで行う。
+/// Registers session information in [`SessionContexts`] (referenced by the fs /
+/// terminal handlers), applies the initial mode, and publishes modes / commands /
+/// config options.
 #[allow(clippy::type_complexity)]
 async fn build_session(
     cx: &ConnectionTo<Agent>,
@@ -1200,12 +1210,12 @@ async fn build_session(
     bool,
     SessionCapabilitiesState,
 )> {
-    // セッション取得 (新規作成 / session/resume / session/load)
+    // Acquire the session (new / session/resume / session/load)
     let plan = plan_resume(agent_capabilities, params.resume.as_ref())?;
     let acquired = match acquire_session(cx, plan, &params.cwd).await {
         Ok(acquired) => acquired,
-        // ネイティブ限定の再開 (`allow_fresh = false`) では、復元失敗は
-        // 「ネイティブ復元不可」として呼び出し側 (ノード) に伝える
+        // For native-only resume (`allow_fresh = false`), report a restore failure to
+        // the caller (the node) as "native resume unavailable"
         Err(err)
             if params
                 .resume
@@ -1221,7 +1231,7 @@ async fn build_session(
     let session = acquired.session;
     let context_restored = acquired.is_resumed;
     let acp_session_id = session.session_id().clone();
-    // セッション情報を登録する (fs / terminal ハンドラが参照する)
+    // Register session information (referenced by the fs / terminal handlers)
     contexts.lock().expect("session contexts poisoned").insert(
         acp_session_id.to_string(),
         SessionContext {
@@ -1233,7 +1243,7 @@ async fn build_session(
         agent_session_id: acp_session_id.to_string(),
     }));
 
-    // 初期モード適用
+    // Apply the initial mode
     if let Some(mode_id) = params.initial_mode.as_ref()
         && let Err(err) = cx
             .send_request(SetSessionModeRequest::new(
@@ -1246,7 +1256,7 @@ async fn build_session(
         tracing::warn!("failed to set initial mode {mode_id}: {err}");
     }
 
-    // モード・スラッシュコマンド・設定項目を配信
+    // Publish modes, slash commands and config options
     let (modes, commands, config_options) =
         session_capabilities(acquired.modes.as_ref(), acquired.config_options.as_deref());
     let current_mode = acquired
@@ -1279,7 +1289,7 @@ async fn build_session(
     ))
 }
 
-/// 1 セッション分のターンループ (プロンプト送信と更新読み取りを直列化)。
+/// Turn loop for one session (serializes prompt sends with update reads).
 async fn serve_session(
     mut session: ActiveSession<'static, Agent>,
     mut cmd_rx: mpsc::UnboundedReceiver<AcpCommand>,
@@ -1342,7 +1352,7 @@ async fn serve_session(
                                 return ServeOutcome::Fatal(err.into());
                             }
                         }
-                        // `SessionMessage` は #[non_exhaustive]
+                        // `SessionMessage` is #[non_exhaustive]
                         Ok(_) => {}
                         Err(err) => return ServeOutcome::Fatal(err.into()),
                     }
@@ -1354,21 +1364,21 @@ async fn serve_session(
     ServeOutcome::Closed
 }
 
-/// ACP `StopReason` のうち、ユーザーへ提示すべき打ち切り理由をイベント化する。
+/// Turns ACP `StopReason` values that should be surfaced to the user into events.
 ///
-/// `EndTurn` (正常終了) / `Cancelled` (ユーザーによるキャンセル) は
-/// 正常終了として `None` を返す (`StopReason` は `#[non_exhaustive]`)。
+/// `EndTurn` (normal completion) / `Cancelled` (user cancellation) count as
+/// normal completion and return `None` (`StopReason` is `#[non_exhaustive]`).
 fn turn_ended_event(reason: StopReason) -> Option<UnifiedEventPayload> {
     let (reason, message) = match reason {
         StopReason::MaxTokens => (
             TurnStopReason::MaxTokens,
-            "エージェントが最大トークン数に達したためターンを終了しました",
+            "The agent ended the turn because it reached the maximum token count",
         ),
         StopReason::MaxTurnRequests => (
             TurnStopReason::MaxTurnRequests,
-            "エージェントが1ターン内の要求回数上限に達したためターンを終了しました",
+            "The agent ended the turn because it reached the per-turn request limit",
         ),
-        StopReason::Refusal => (TurnStopReason::Refusal, "エージェントが継続を拒否しました"),
+        StopReason::Refusal => (TurnStopReason::Refusal, "The agent refused to continue"),
         _ => return None,
     };
     Some(UnifiedEventPayload::TurnEnded {
@@ -1377,7 +1387,7 @@ fn turn_ended_event(reason: StopReason) -> Option<UnifiedEventPayload> {
     })
 }
 
-/// セッションのモード・コマンド・設定項目を取り出す。
+/// Extracts the session's modes, commands and config options.
 fn session_capabilities(
     modes: Option<&SessionModeState>,
     config_options: Option<&[SessionConfigOption]>,
@@ -1398,42 +1408,43 @@ fn session_capabilities(
     let config_options = config_options
         .map(|options| options.iter().map(map_config_option).collect())
         .unwrap_or_default();
-    // スラッシュコマンドは session/update (AvailableCommandsUpdate) で届くため
-    // ここでは空 (以降の通知で更新される)
+    // Slash commands arrive via session/update (AvailableCommandsUpdate), so this
+    // starts empty (later notifications update it)
     (modes, Vec::new(), config_options)
 }
 
-/// `resume` 指定とエージェント capability からセッション取得方法を決める。
+/// Decides how to acquire the session from the `resume` selection and agent capabilities.
 #[derive(Debug)]
 enum ResumePlan {
-    /// `session/resume` (履歴 Replay なし)
+    /// `session/resume` (no history replay)
     Resume(String),
-    /// `session/load` (Replay 通知は破棄する)
+    /// `session/load` (replay notifications are discarded)
     Load(String),
-    /// 新規セッション作成 (呼び出し側が履歴 Replay を注入する)
+    /// Create a fresh session (the caller injects history replay)
     Fresh,
 }
 
-/// セッション取得方法を決定する。
+/// Decides how to acquire the session.
 ///
-/// fxg は会話履歴の正本を自前のイベントログに持つため、履歴を送り返さない
-/// `session/resume` を優先する。resume 非対応の場合のみ `session/load`
-/// (Replay 通知は破棄) を使い、どちらも無ければ新規作成する
-/// (設計: `docs/04-agent-drivers-and-windows.md` §4.3)。
+/// fxg keeps the canonical conversation history in its own event log, so it prefers
+/// `session/resume`, which does not send history back. Only when resume is
+/// unsupported does it use `session/load` (discarding replay notifications), and
+/// if neither is available it creates a fresh session
+/// (design: `docs/04-agent-drivers-and-windows.md` §4.3).
 ///
-/// `resume.allow_fresh` が `false` の場合 (送信時の自動レジューム) は
-/// 新規作成せず [`NativeResumeUnavailable`] を返し、呼び出し側に履歴 Replay
-/// での明示的な再開を促す。
+/// When `resume.allow_fresh` is `false` (automatic resume on send), it returns
+/// [`NativeResumeUnavailable`] instead of creating a fresh session, prompting the
+/// caller to perform an explicit resume via history replay.
 fn plan_resume(
     capabilities: &AgentCapabilities,
     resume: Option<&ResumeRequest>,
 ) -> anyhow::Result<ResumePlan> {
-    // 再開指定なし → 新規作成
+    // No resume selection → create fresh
     let Some(resume) = resume else {
         return Ok(ResumePlan::Fresh);
     };
     let Some(agent_session_id) = resume.agent_session_id.clone() else {
-        // エージェント側ID未記録 (呼び出し側の履歴 Replay 注入前提)
+        // No agent-side ID recorded (caller is expected to inject history replay)
         return if resume.allow_fresh {
             Ok(ResumePlan::Fresh)
         } else {
@@ -1463,10 +1474,10 @@ struct AcquiredSession {
     config_options: Option<Vec<SessionConfigOption>>,
 }
 
-/// セッションを取得する ([`ResumePlan`] に従う)。
+/// Acquires a session (following [`ResumePlan`]).
 ///
-/// 戻り値の `is_resumed` はネイティブ復元の成否 (`false` = 新規作成。呼び出し側が
-/// 履歴 Replay を注入する)。
+/// The returned `is_resumed` indicates native restore success (`false` = fresh
+/// session; the caller injects history replay).
 async fn acquire_session(
     cx: &ConnectionTo<Agent>,
     plan: ResumePlan,
@@ -1524,11 +1535,12 @@ async fn acquire_session(
     }
 }
 
-/// `session/load` の応答前に届いた Replay 通知を破棄する。
+/// Discards replay notifications that arrived before the `session/load` response.
 ///
-/// ACP 仕様では会話履歴の Replay は load 応答前に完了し、SDK はその間の通知を
-/// 復元済みセッションにバッファする。fxg は履歴の正本を自前のイベントログに
-/// 持つため、二重記録を避けるべく応答直後にキューを drain して捨てる。
+/// Per the ACP spec, conversation history replay completes before the load
+/// response, and the SDK buffers notifications from that period into the restored
+/// session. fxg keeps the canonical history in its own event log, so it drains and
+/// drops the queue right after the response to avoid double recording.
 fn discard_replay_updates(session: &mut ActiveSession<'static, Agent>) {
     use futures_util::FutureExt;
 
@@ -1544,7 +1556,7 @@ fn discard_replay_updates(session: &mut ActiveSession<'static, Agent>) {
     }
 }
 
-/// ACP の設定項目を FXG の表示用型へ変換する。
+/// Converts an ACP config option into FXG's display type.
 fn map_config_option(option: &SessionConfigOption) -> ConfigOptionInfo {
     let (current_value, options) = match &option.kind {
         SessionConfigKind::Select(select) => (
@@ -1583,7 +1595,7 @@ fn map_config_option(option: &SessionConfigOption) -> ConfigOptionInfo {
     }
 }
 
-/// セッションの能力情報 (モード・コマンド・設定項目) の追跡状態。
+/// Tracking state for session capabilities (modes, commands, config options).
 #[derive(Debug, Default, Clone)]
 struct SessionCapabilitiesState {
     current_mode: Option<String>,
@@ -1603,7 +1615,7 @@ impl SessionCapabilitiesState {
     }
 }
 
-/// ストリーミングチャンクを蓄積し、メッセージ切り替え時に完成イベントを作る。
+/// Accumulates streaming chunks and emits completion events when the message changes.
 #[derive(Debug, Default)]
 struct StreamingAccumulator {
     message: Option<(String, String)>,
@@ -1616,8 +1628,8 @@ impl StreamingAccumulator {
         self.thought = None;
     }
 
-    /// メッセージチャンクを追加する。メッセージIDが変わった場合は
-    /// 直前のメッセージの完成イベントを返す。
+    /// Appends a message chunk. When the message ID changes, returns the completion
+    /// event for the previous message.
     fn push_message(&mut self, message_id: String, delta: &str) -> Option<UnifiedEventPayload> {
         match &mut self.message {
             Some((id, text)) if *id == message_id => {
@@ -1640,7 +1652,7 @@ impl StreamingAccumulator {
         }
     }
 
-    /// 思考チャンクを追加する (メッセージと同様の挙動)。
+    /// Appends a thought chunk (same behavior as messages).
     fn push_thought(&mut self, thought_id: String, delta: &str) -> Option<UnifiedEventPayload> {
         match &mut self.thought {
             Some((id, text)) if *id == thought_id => {
@@ -1663,7 +1675,7 @@ impl StreamingAccumulator {
         }
     }
 
-    /// 蓄積中のメッセージ・思考を完成イベントとして取り出す。
+    /// Takes the accumulated message / thought as completion events.
     fn finish_all(&mut self) -> Vec<UnifiedEventPayload> {
         let mut out = Vec::new();
         if let Some((id, text)) = self.message.take() {
@@ -1684,7 +1696,7 @@ impl StreamingAccumulator {
     }
 }
 
-/// `session/update` 通知を [`DriverEvent`] 列へ変換する。
+/// Converts a `session/update` notification into a list of [`DriverEvent`]s.
 fn map_session_update(
     update: SessionUpdate,
     accumulator: &mut StreamingAccumulator,
@@ -1693,7 +1705,7 @@ fn map_session_update(
     let mut events = Vec::new();
     match update {
         SessionUpdate::UserMessageChunk(_) => {
-            // ユーザーメッセージはマネージャが `UserMessage` として記録済み
+            // User messages are already recorded by the manager as `UserMessage`
         }
         SessionUpdate::AgentMessageChunk(ContentChunk {
             content,
@@ -1804,7 +1816,7 @@ fn map_session_update(
                 }),
             }));
         }
-        // `SessionUpdate` は #[non_exhaustive]
+        // `SessionUpdate` is #[non_exhaustive]
         other => {
             tracing::trace!("unhandled session update: {other:?}");
         }
@@ -1812,7 +1824,7 @@ fn map_session_update(
     events
 }
 
-/// ACP の `ToolCall` を正規化イベントへ変換する。
+/// Converts an ACP `ToolCall` into a normalized event.
 fn tool_call_event(tool_call: &ToolCall) -> UnifiedEventPayload {
     let (diff, _) = tool_call_contents(&tool_call.content);
     UnifiedEventPayload::ToolCall {
@@ -1830,7 +1842,7 @@ fn tool_call_event(tool_call: &ToolCall) -> UnifiedEventPayload {
     }
 }
 
-/// ACP の `ToolCallUpdate` を正規化イベントへ変換する (同一 `tool_call_id` への追記)。
+/// Converts an ACP `ToolCallUpdate` into a normalized event (appended to the same `tool_call_id`).
 fn tool_call_update_event(update: &ToolCallUpdate) -> UnifiedEventPayload {
     let fields = &update.fields;
     let (diff, locations) = fields
@@ -1865,7 +1877,7 @@ fn tool_call_update_event(update: &ToolCallUpdate) -> UnifiedEventPayload {
     }
 }
 
-/// `ToolCallContent` 列から Diff とファイルパス一覧を取り出す。
+/// Extracts the diff and list of file paths from a `ToolCallContent` list.
 fn tool_call_contents(contents: &[ToolCallContent]) -> (Option<FileDiff>, Vec<String>) {
     let mut diff = None;
     let mut locations = Vec::new();
@@ -1880,7 +1892,7 @@ fn tool_call_contents(contents: &[ToolCallContent]) -> (Option<FileDiff>, Vec<St
     (diff, locations)
 }
 
-/// 変更前後のテキストから Unified Diff を計算して [`FileDiff`] を作る。
+/// Computes a unified diff from the before/after text and builds a [`FileDiff`].
 pub(crate) fn build_file_diff(path: &str, old_text: &str, new_text: &str) -> FileDiff {
     let patch = diffy::create_patch(old_text, new_text);
     let unified_diff = patch.to_string();
@@ -1947,10 +1959,10 @@ fn permission_kind_str(kind: PermissionOptionKind) -> &'static str {
 }
 
 // ----------------------------------------------------------------------
-// ハンドラ補助 (fs / terminal)
+// Handler helpers (fs / terminal)
 // ----------------------------------------------------------------------
 
-/// パスをセッション作業ディレクトリ基準で解決する。
+/// Resolves a path relative to the session working directory.
 fn resolve_path(cwd: &Path, path: &Path) -> PathBuf {
     if path.is_absolute() {
         path.to_path_buf()
@@ -1959,11 +1971,12 @@ fn resolve_path(cwd: &Path, path: &Path) -> PathBuf {
     }
 }
 
-/// `accept` の content を `requested_schema` に対して軽量検証する。
+/// Lightly validates the `accept` content against `requested_schema`.
 ///
-/// ACP の elicitation が許す制限スキーマ (object / string (enum, oneOf) /
-/// integer / number / boolean / string array) のみを検証する (仕様上クライアント
-/// SHOULD。エージェントも再検証する)。既知の型以外 (将来拡張) は素通しする。
+/// Only the restricted schema types allowed by ACP elicitation (object / string
+/// (enum, oneOf) / integer / number / boolean / string array) are validated (the
+/// client SHOULD do this per the spec; the agent re-validates too). Unknown types
+/// (future extensions) pass through.
 fn validate_elicitation_content(
     schema: &serde_json::Value,
     content: &serde_json::Value,
@@ -1972,7 +1985,7 @@ fn validate_elicitation_content(
         return Err("content must be an object".to_owned());
     };
     let Some(properties) = schema.get("properties").and_then(|value| value.as_object()) else {
-        // properties を持たない schema では形状検証しない
+        // Do not validate shape for schemas without properties
         return Ok(());
     };
     if let Some(required) = schema.get("required").and_then(|value| value.as_array()) {
@@ -1991,7 +2004,7 @@ fn validate_elicitation_content(
     Ok(())
 }
 
-/// elicitation の制限スキーマにおける 1 プロパティの型検証。
+/// Type validation for a single property in the elicitation restricted schema.
 fn validate_elicitation_property(
     key: &str,
     property: &serde_json::Value,
@@ -2040,7 +2053,7 @@ fn validate_elicitation_property(
                 return Err(format!("property {key} must be an array of strings"));
             }
         }
-        // 既知の制限スキーマ外 (将来拡張) は検証しない
+        // Unknown restricted schema types (future extensions) are not validated
         _ => {}
     }
     Ok(())
@@ -2050,7 +2063,7 @@ fn validate_elicitation_property(
 // terminal/* (fxg-pty)
 // ----------------------------------------------------------------------
 
-/// ACP terminal の実行状態。
+/// Execution state of an ACP terminal.
 struct TerminalState {
     pty_id: String,
     command: String,
@@ -2058,13 +2071,13 @@ struct TerminalState {
     exit_rx: watch::Receiver<Option<i32>>,
 }
 
-/// ACP terminal レジストリ。
+/// ACP terminal registry.
 #[derive(Default)]
 struct TerminalRegistry {
     terminals: Mutex<HashMap<String, TerminalState>>,
 }
 
-/// `TerminalRegistry::get` の戻り値 (pty_id, command, output, exit_rx)。
+/// Return value of `TerminalRegistry::get` (pty_id, command, output, exit_rx).
 type TerminalSnapshot = (
     String,
     String,
@@ -2094,7 +2107,7 @@ impl TerminalRegistry {
     }
 }
 
-/// `terminal/create`: ACP ターミナルを fxg-pty で起動する。
+/// `terminal/create`: spawns an ACP terminal via fxg-pty.
 async fn create_terminal(
     pty: Arc<fxg_pty::PtySessionManager>,
     terminals: Arc<TerminalRegistry>,
@@ -2122,7 +2135,7 @@ async fn create_terminal(
             let output: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(Vec::new()));
             let (exit_tx, exit_rx) = watch::channel(None);
             let limit = request.output_byte_limit.map(|limit| limit as usize);
-            // PTY 出力の収集タスク (差分配信 + 終了時の完成イベント)
+            // PTY output collection task (delta delivery + completion event on exit)
             let output_for_task = Arc::clone(&output);
             let events_for_task = events.clone();
             let command_for_task = command_line.clone();
@@ -2190,7 +2203,7 @@ async fn create_terminal(
     }
 }
 
-/// 終了コードから ACP の `TerminalExitStatus` を作る。
+/// Builds an ACP `TerminalExitStatus` from an exit code.
 fn exit_status_of(code: Option<i32>) -> TerminalExitStatus {
     let mut status = TerminalExitStatus::new();
     if let Some(code) = code.and_then(|code| u32::try_from(code).ok()) {
@@ -2199,7 +2212,7 @@ fn exit_status_of(code: Option<i32>) -> TerminalExitStatus {
     status
 }
 
-/// Base64 エンコード (改行なし)。
+/// Base64 encoding (no line breaks).
 fn base64_encode(data: &[u8]) -> String {
     use base64::Engine;
     base64::engine::general_purpose::STANDARD.encode(data)
@@ -2211,7 +2224,7 @@ mod tests {
     use agent_client_protocol::v1::schema::{Plan, PlanEntry as AcpPlanEntry, PlanEntryPriority};
 
     fn text_chunk(text: &str, message_id: Option<&str>) -> SessionUpdate {
-        // `ContentChunk` は non_exhaustive のため JSON 経由で構築する
+        // `ContentChunk` is non_exhaustive, so construct it via JSON
         let mut value = serde_json::json!({
             "content": { "type": "text", "text": text },
         });
@@ -2223,9 +2236,9 @@ mod tests {
         )
     }
 
-    /// capability の組み合わせから `AgentCapabilities` を組み立てる。
+    /// Builds `AgentCapabilities` from a combination of capabilities.
     fn agent_capabilities(load_session: bool, resume: bool) -> AgentCapabilities {
-        // `AgentCapabilities` は non_exhaustive のため default から組み立てる
+        // `AgentCapabilities` is non_exhaustive, so build it from default
         let mut capabilities = AgentCapabilities::default();
         capabilities.load_session = load_session;
         if resume {
@@ -2270,7 +2283,7 @@ mod tests {
             )
             .is_ok()
         );
-        // properties を持たない schema は検証しない
+        // Do not validate schemas without properties
         assert!(
             validate_elicitation_content(
                 &serde_json::json!({ "type": "object" }),
@@ -2283,19 +2296,19 @@ mod tests {
     #[test]
     fn elicitation_content_validation_rejects_invalid_values() {
         let schema = elicitation_schema();
-        // 必須欠落
+        // Missing required property
         assert!(
             validate_elicitation_content(&schema, &serde_json::json!({}))
                 .expect_err("required")
                 .contains("missing required property")
         );
-        // enum 外
+        // Not in enum
         assert!(
             validate_elicitation_content(&schema, &serde_json::json!({ "strategy": "fast" }))
                 .expect_err("enum")
                 .contains("allowed values")
         );
-        // 型不一致
+        // Type mismatch
         assert!(
             validate_elicitation_content(
                 &schema,
@@ -2304,7 +2317,7 @@ mod tests {
             .expect_err("integer")
             .contains("must be an integer")
         );
-        // 未知プロパティ
+        // Unknown property
         assert!(
             validate_elicitation_content(
                 &schema,
@@ -2338,7 +2351,7 @@ mod tests {
 
     #[test]
     fn plan_resume_prefers_session_resume_over_load() {
-        // 両対応の場合は履歴 Replay のない `session/resume` を優先する
+        // When both are supported, prefer `session/resume` (no history replay)
         let capabilities = agent_capabilities(true, true);
         let resume = resume_request(Some("ses_1"), true);
         match plan_resume(&capabilities, Some(&resume)).expect("plan") {
@@ -2351,7 +2364,7 @@ mod tests {
 
     #[test]
     fn plan_resume_falls_back_to_load_then_fresh() {
-        // load のみ対応 → session/load (Replay は呼び出し側で破棄)
+        // Only load supported → session/load (replay discarded by the caller)
         let capabilities = agent_capabilities(true, false);
         let resume = resume_request(Some("ses_1"), true);
         match plan_resume(&capabilities, Some(&resume)).expect("plan") {
@@ -2359,14 +2372,14 @@ mod tests {
             ResumePlan::Resume(_) | ResumePlan::Fresh => panic!("session/load expected"),
         }
 
-        // どちらも非対応 + allow_fresh → 新規作成 (Replay フォールバック)
+        // Neither supported + allow_fresh → fresh session (replay fallback)
         let capabilities = agent_capabilities(false, false);
         assert!(matches!(
             plan_resume(&capabilities, Some(&resume)).expect("plan"),
             ResumePlan::Fresh
         ));
 
-        // どちらも非対応 + allow_fresh なし → ネイティブ復元不可
+        // Neither supported + no allow_fresh → native restore unavailable
         let resume = resume_request(Some("ses_1"), false);
         let err = plan_resume(&capabilities, Some(&resume)).expect_err("native-only must fail");
         assert!(err.downcast_ref::<NativeResumeUnavailable>().is_some());
@@ -2375,19 +2388,19 @@ mod tests {
     #[test]
     fn plan_resume_without_ids_is_fresh() {
         let capabilities = agent_capabilities(true, true);
-        // 再開指定なし
+        // No resume selection
         assert!(matches!(
             plan_resume(&capabilities, None).expect("plan"),
             ResumePlan::Fresh
         ));
-        // エージェント側IDが未記録 + allow_fresh (履歴 Replay 前提の新規作成)
+        // No agent-side ID + allow_fresh (fresh session assuming history replay)
         let resume = resume_request(None, true);
         assert!(matches!(
             plan_resume(&capabilities, Some(&resume)).expect("plan"),
             ResumePlan::Fresh
         ));
-        // エージェント側IDが未記録 + allow_fresh なし (自動レジューム) は
-        // ネイティブ復元不可 (履歴 Replay での明示再開が必要)
+        // No agent-side ID + no allow_fresh (automatic resume) means native restore is
+        // unavailable (requires explicit resume via history replay)
         let resume = resume_request(None, false);
         let err = plan_resume(&capabilities, Some(&resume)).expect_err("native-only must fail");
         assert!(err.downcast_ref::<NativeResumeUnavailable>().is_some());
@@ -2397,16 +2410,16 @@ mod tests {
     fn accumulator_emits_completed_message_on_id_switch() {
         let mut acc = StreamingAccumulator::default();
         let mut caps = SessionCapabilitiesState::default();
-        let events = map_session_update(text_chunk("こん", Some("m1")), &mut acc, &mut caps);
+        let events = map_session_update(text_chunk("こん", Some("m1")), &mut acc, &mut caps); // allow-japanese: streaming chunk split across multibyte text
         assert_eq!(events.len(), 1);
         assert!(matches!(events[0], DriverEvent::Delta(_)));
 
-        // 同一ID: 差分のみ
-        let events = map_session_update(text_chunk("にちは", Some("m1")), &mut acc, &mut caps);
+        // Same ID: delta only
+        let events = map_session_update(text_chunk("にちは", Some("m1")), &mut acc, &mut caps); // allow-japanese: streaming chunk split across multibyte text
         assert_eq!(events.len(), 1);
 
-        // 別ID: 直前メッセージの完成イベント + 新差分
-        let events = map_session_update(text_chunk("次", Some("m2")), &mut acc, &mut caps);
+        // Different ID: completion event for the previous message + new delta
+        let events = map_session_update(text_chunk("次", Some("m2")), &mut acc, &mut caps); // allow-japanese: multibyte streaming chunk fixture
         assert_eq!(events.len(), 2);
         match &events[0] {
             DriverEvent::Event(UnifiedEventPayload::AgentMessage {
@@ -2415,13 +2428,13 @@ mod tests {
                 is_complete,
             }) => {
                 assert_eq!(message_id, "m1");
-                assert_eq!(text, "こんにちは");
+                assert_eq!(text, "こんにちは"); // allow-japanese: expected accumulation of multibyte chunks
                 assert!(is_complete);
             }
             other => panic!("unexpected event: {other:?}"),
         }
 
-        // ターン終了で残りをフラッシュ
+        // Flush the rest at turn end
         let finished = acc.finish_all();
         assert_eq!(finished.len(), 1);
         match &finished[0] {
@@ -2429,7 +2442,7 @@ mod tests {
                 message_id, text, ..
             } => {
                 assert_eq!(message_id, "m2");
-                assert_eq!(text, "次");
+                assert_eq!(text, "次"); // allow-japanese: expected multibyte chunk text
             }
             other => panic!("unexpected payload: {other:?}"),
         }
@@ -2574,9 +2587,9 @@ mod tests {
             config_options: Vec::new(),
         };
 
-        // コマンド一覧の更新が届いたとき、既存の current_mode / available_modes が保持されること
+        // Existing current_mode / available_modes are preserved when a command list update arrives
         let cmd_update =
-            AvailableCommandsUpdate::new(vec![AvailableCommand::new("review", "コードレビュー")]);
+            AvailableCommandsUpdate::new(vec![AvailableCommand::new("review", "Review code")]);
         let events = map_session_update(
             SessionUpdate::AvailableCommandsUpdate(cmd_update),
             &mut acc,
@@ -2598,7 +2611,7 @@ mod tests {
             other => panic!("unexpected event: {other:?}"),
         }
 
-        // モード変更が届いたとき、直前に追加された available_commands が保持されること
+        // Previously added available_commands are preserved when a mode change arrives
         let mode_update = CurrentModeUpdate::new("code");
         let events = map_session_update(
             SessionUpdate::CurrentModeUpdate(mode_update),
@@ -2698,7 +2711,7 @@ mod tests {
 
     #[test]
     fn stop_reason_event_only_for_abnormal_reasons() {
-        // 正常終了・ユーザーキャンセルはイベント化しない
+        // Normal completion and user cancellation are not turned into events
         assert!(turn_ended_event(StopReason::EndTurn).is_none());
         assert!(turn_ended_event(StopReason::Cancelled).is_none());
 
