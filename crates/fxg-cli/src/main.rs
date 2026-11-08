@@ -10,6 +10,8 @@
 //! Phase 3 でエージェント実行系 (`run` / `attach` / `session show|prompt|stop|kill|revert|fork`
 //! / `inbox` / `agents`) と内蔵TUI (`tui`) を追加した。
 
+extern crate usage_rs as usage;
+
 use std::process::ExitCode;
 
 use usage::{Cli, RunAsync, Subcommands};

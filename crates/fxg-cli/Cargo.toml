@@ -29,11 +29,11 @@ tokio = { workspace = true }
 tracing = { workspace = true }
 tracing-appender = { workspace = true }
 tracing-subscriber = { workspace = true }
-usage = { workspace = true }
+usage-rs = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
-usage = { workspace = true, features = ["test"] }
+usage-rs = { workspace = true, features = ["test"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 tray-icon = { version = "0.26", default-features = false, features = ["ksni"] }
