@@ -20,9 +20,12 @@
   import PlugZapIcon from "@lucide/svelte/icons/plug-zap";
   import PlusIcon from "@lucide/svelte/icons/plus";
 
-  let { children } = $props();
+  import { page } from "$app/state";
+  import { layoutState } from "#lib/stores/layout.svelte.ts";
+  import InboxIcon from "@lucide/svelte/icons/inbox";
+  import SearchIcon from "@lucide/svelte/icons/search";
 
-  let mobileDrawerOpen = $state(false);
+  let { children } = $props();
 
   function onUnhandledRejection(event: PromiseRejectionEvent): void {
     problems.report("unhandled error", event.reason);
@@ -32,14 +35,28 @@
     problems.report("uncaught error", event.error ?? event.message);
   }
 
+  function onGlobalKeydown(event: KeyboardEvent): void {
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "b") {
+      // Avoid intercepting if focus is in an input or textarea with standard text
+      const target = event.target as HTMLElement | null;
+      const isInput = target?.tagName === "INPUT" || target?.tagName === "TEXTAREA";
+      if (!isInput) {
+        event.preventDefault();
+        layoutState.toggleSidebar();
+      }
+    }
+  }
+
   onMount(() => {
     theme.init();
     window.addEventListener("unhandledrejection", onUnhandledRejection);
     window.addEventListener("error", onUncaughtError);
+    window.addEventListener("keydown", onGlobalKeydown);
     void initApp();
     return () => {
       window.removeEventListener("unhandledrejection", onUnhandledRejection);
       window.removeEventListener("error", onUncaughtError);
+      window.removeEventListener("keydown", onGlobalKeydown);
     };
   });
 
@@ -109,15 +126,17 @@
   <div class="bg-background min-h-svh"></div>
 {:else}
   <div class="bg-background text-foreground flex h-svh w-full overflow-hidden">
-    <!-- Desktop sidebar (always visible on md and up) -->
-    <div class="hidden md:flex md:w-[264px] lg:w-[288px] md:shrink-0 md:h-full">
-      <AppSidebar />
-    </div>
+    <!-- Desktop sidebar (collapsible on md and up) -->
+    {#if !layoutState.sidebarCollapsed}
+      <div class="hidden md:flex md:w-[264px] lg:w-[288px] md:shrink-0 md:h-full">
+        <AppSidebar />
+      </div>
+    {/if}
 
     <!-- Mobile drawer (Sheet) -->
-    <Sheet.Root bind:open={mobileDrawerOpen}>
+    <Sheet.Root bind:open={layoutState.mobileDrawerOpen}>
       <Sheet.Content side="left" class="p-0 w-80 max-w-[85vw]">
-        <AppSidebar onNavigate={() => (mobileDrawerOpen = false)} />
+        <AppSidebar onNavigate={() => (layoutState.mobileDrawerOpen = false)} />
       </Sheet.Content>
     </Sheet.Root>
 
@@ -130,7 +149,7 @@
         <button
           type="button"
           class="hover:bg-accent flex size-8 items-center justify-center rounded-md border text-muted-foreground"
-          onclick={() => (mobileDrawerOpen = true)}
+          onclick={() => layoutState.setMobileDrawer(true)}
           aria-label={m.shell_open_menu()}
         >
           <MenuIcon class="size-4" />
@@ -145,13 +164,39 @@
           <span>FlexAgent</span>
         </a>
 
-        <a
-          href="/"
-          class="hover:bg-accent flex size-8 items-center justify-center rounded-md border text-muted-foreground"
-          aria-label={m.shell_new_session()}
-        >
-          <PlusIcon class="size-4" />
-        </a>
+        {#if sync.inbox.length > 0}
+          <a
+            href="/inbox"
+            class="hover:bg-accent relative flex size-8 items-center justify-center rounded-md border text-muted-foreground"
+            title={m.shell_approval_inbox()}
+            aria-label={m.shell_approval_inbox()}
+          >
+            <InboxIcon class="size-4" />
+            <span
+              class="bg-destructive text-destructive-foreground absolute -top-1 -right-1 flex size-4 items-center justify-center rounded-full text-[10px] font-bold leading-none"
+            >
+              {sync.inbox.length}
+            </span>
+          </a>
+        {:else if page.url.pathname === "/"}
+          <a
+            href="/search"
+            class="hover:bg-accent flex size-8 items-center justify-center rounded-md border text-muted-foreground"
+            title={m.shell_full_text_search()}
+            aria-label={m.shell_full_text_search()}
+          >
+            <SearchIcon class="size-4" />
+          </a>
+        {:else}
+          <a
+            href="/"
+            class="hover:bg-accent flex size-8 items-center justify-center rounded-md border text-muted-foreground"
+            title={m.shell_new_session()}
+            aria-label={m.shell_new_session()}
+          >
+            <PlusIcon class="size-4" />
+          </a>
+        {/if}
       </header>
 
       <ErrorBanner onaction={handleProblemAction} />

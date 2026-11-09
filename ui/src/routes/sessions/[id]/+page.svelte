@@ -27,12 +27,15 @@
   import { cn } from "#lib/utils.ts";
   import { toast } from "svelte-sonner";
   import ArchiveIcon from "@lucide/svelte/icons/archive";
+  import { layoutState } from "#lib/stores/layout.svelte.ts";
   import ArrowDownIcon from "@lucide/svelte/icons/arrow-down";
   import ChevronLeftIcon from "@lucide/svelte/icons/chevron-left";
   import FileCodeIcon from "@lucide/svelte/icons/file-code";
   import FolderIcon from "@lucide/svelte/icons/folder";
   import GitForkIcon from "@lucide/svelte/icons/git-fork";
+  import MenuIcon from "@lucide/svelte/icons/menu";
   import MessageSquareIcon from "@lucide/svelte/icons/message-square";
+  import PanelLeftOpenIcon from "@lucide/svelte/icons/panel-left-open";
   import PanelRightCloseIcon from "@lucide/svelte/icons/panel-right-close";
   import PlayIcon from "@lucide/svelte/icons/play";
   import PlusIcon from "@lucide/svelte/icons/plus";
@@ -236,13 +239,29 @@
     <div class="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
       <!-- Left: back link + title + node status -->
       <div class="flex min-w-0 flex-1 items-center gap-2">
-        <a
-          href="/"
+        <!-- Mobile: open sidebar drawer to pick sessions -->
+        <button
+          type="button"
           class="hover:bg-accent text-muted-foreground hover:text-foreground -ml-1 flex size-7 items-center justify-center rounded-md border md:hidden"
-          title={m.session_back_to_list()}
+          onclick={() => layoutState.setMobileDrawer(true)}
+          title={m.shell_open_menu()}
+          aria-label={m.shell_open_menu()}
         >
-          <ChevronLeftIcon class="size-4" />
-        </a>
+          <MenuIcon class="size-4" />
+        </button>
+
+        <!-- Desktop: expand sidebar when collapsed -->
+        {#if layoutState.sidebarCollapsed}
+          <button
+            type="button"
+            class="hover:bg-accent text-muted-foreground hover:text-foreground -ml-1 hidden size-7 items-center justify-center rounded-md border md:flex"
+            onclick={() => layoutState.toggleSidebar()}
+            title="Open sidebar (Ctrl+B)"
+            aria-label="Open sidebar"
+          >
+            <PanelLeftOpenIcon class="size-4" />
+          </button>
+        {/if}
 
         <div class="flex min-w-0 flex-col gap-0.5">
           <div class="flex items-center gap-2">
