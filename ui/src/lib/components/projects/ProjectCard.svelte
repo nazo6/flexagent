@@ -5,6 +5,7 @@
   import { formatRelativeTime } from "#lib/format.ts";
   import type { ProjectSummary, WorktreeInfo } from "#lib/generated/bindings.ts";
   import { m } from "#lib/paraglide/messages.js";
+  import type { ResourceEntry } from "#lib/stores/resource.svelte.ts";
   import EraserIcon from "@lucide/svelte/icons/eraser";
   import GitBranchIcon from "@lucide/svelte/icons/git-branch";
   import PencilIcon from "@lucide/svelte/icons/pencil";
@@ -15,9 +16,7 @@
 
   interface Props {
     project: ProjectSummary;
-    worktrees?: WorktreeInfo[];
-    worktreesLoading?: boolean;
-    worktreeError?: string | null;
+    worktreeState: ResourceEntry<WorktreeInfo[]>;
     nodeName: (nodeId: string) => string;
     onRefreshWorktrees: (projectId: string) => void;
     onCreateWorktree: (projectId: string) => void;
@@ -29,9 +28,7 @@
 
   let {
     project,
-    worktrees = [],
-    worktreesLoading = false,
-    worktreeError = null,
+    worktreeState,
     nodeName,
     onRefreshWorktrees,
     onCreateWorktree,
@@ -40,6 +37,8 @@
     onNewSession,
     onRemoveWorktree,
   }: Props = $props();
+
+  const worktrees = $derived(worktreeState.data ?? []);
 </script>
 
 <Card class="gap-3 p-4">
@@ -73,7 +72,7 @@
       <Button
         variant="outline"
         size="sm"
-        disabled={worktreesLoading}
+        disabled={worktreeState.loading}
         onclick={() => onRefreshWorktrees(project.project_id)}
       >
         <RefreshCwIcon />
@@ -155,13 +154,13 @@
     </ul>
   {/if}
 
-  {#if worktreesLoading && worktrees.length === 0}
+  {#if worktreeState.loading && worktrees.length === 0}
     <p class="text-muted-foreground text-xs">{m.common_loading()}</p>
-  {:else if worktreeError !== null && worktrees.length === 0}
+  {:else if worktreeState.error !== null && worktrees.length === 0}
     <div class="flex items-center gap-2 text-xs">
       <p class="text-destructive">
         {m.common_load_failed()}
-        {worktreeError}
+        {worktreeState.error}
       </p>
       <Button variant="ghost" size="xs" onclick={() => onRefreshWorktrees(project.project_id)}>
         {m.common_retry()}

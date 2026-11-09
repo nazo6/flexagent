@@ -10,13 +10,16 @@
   import { shortId } from "#lib/session-status.ts";
   import { sync } from "#lib/stores/app.svelte.ts";
   import { problems } from "#lib/stores/problems.svelte.ts";
+  import { createKeyedResource } from "#lib/stores/resource.svelte.ts";
   import LinkIcon from "@lucide/svelte/icons/link";
   import RefreshCwIcon from "@lucide/svelte/icons/refresh-cw";
   import SearchIcon from "@lucide/svelte/icons/search";
 
-  let worktreesByProject = $state(new Map<string, WorktreeInfo[]>());
-  let worktreeErrors = $state(new Map<string, string>());
-  let loadingProjects = $state<string[]>([]);
+  /** One worktree list per project (loaded on demand). */
+  const worktrees = createKeyedResource<string, WorktreeInfo[]>(
+    (projectId) => sync.connection.client.worktrees(projectId),
+    { onError: (error) => problems.report("load worktrees", error) },
+  );
 
   let worktreeDialog: WorktreeManagerDialog;
   let profileDialog: ProjectProfileDialog;
@@ -24,25 +27,6 @@
 
   function nodeName(nodeId: string): string {
     return sync.nodes.find((node) => node.node_id === nodeId)?.name ?? shortId(nodeId);
-  }
-
-  async function loadWorktrees(projectId: string, silent = false): Promise<void> {
-    if (loadingProjects.includes(projectId)) return;
-    loadingProjects = [...loadingProjects, projectId];
-    try {
-      const list = await sync.connection.client.worktrees(projectId);
-      worktreesByProject = new Map(worktreesByProject).set(projectId, list);
-      worktreeErrors = new Map(worktreeErrors);
-      worktreeErrors.delete(projectId);
-    } catch (error) {
-      worktreeErrors = new Map(worktreeErrors).set(
-        projectId,
-        error instanceof Error ? error.message : String(error),
-      );
-      if (!silent) problems.report("load worktrees", error);
-    } finally {
-      loadingProjects = loadingProjects.filter((id) => id !== projectId);
-    }
   }
 
   /** Open the new session screen for this project (optionally scoped to a node and path). */
@@ -105,11 +89,9 @@
     {#each sync.projects as project (project.project_id)}
       <ProjectCard
         {project}
-        worktrees={worktreesByProject.get(project.project_id) ?? []}
-        worktreesLoading={loadingProjects.includes(project.project_id)}
-        worktreeError={worktreeErrors.get(project.project_id) ?? null}
+        worktreeState={worktrees.entry(project.project_id)}
         {nodeName}
-        onRefreshWorktrees={(projectId) => void loadWorktrees(projectId)}
+        onRefreshWorktrees={(projectId) => void worktrees.load(projectId)}
         onCreateWorktree={(projectId) => worktreeDialog.openCreate(projectId)}
         onOpenSettings={(entry) => profileDialog.open(entry)}
         onPrune={(projectId) => worktreeDialog.openPrune(projectId)}
@@ -124,7 +106,7 @@
   bind:this={worktreeDialog}
   nodes={sync.nodes}
   {nodeName}
-  onChanged={(projectId) => void loadWorktrees(projectId)}
+  onChanged={(projectId) => void worktrees.load(projectId)}
 />
 <ProjectProfileDialog bind:this={profileDialog} {nodeName} />
 <ProjectLinkForms bind:this={linkForms} nodes={sync.nodes} />

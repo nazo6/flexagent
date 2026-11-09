@@ -1,7 +1,7 @@
 # リファクタリング・プログラム（API統合・モジュール分割）
 
 - **日付**: 2026-11-09
-- **ステータス**: 進行中（B0 / B1 / A1 / A2 / A3 / A4 / B2 / B3 / B4 完了、次は B5 / B6）
+- **ステータス**: 進行中（B0 / B1 / A1 / A2 / A3 / A4 / B2 / B3 / B4 / B5 完了、次は B6）
 - **統合元**: 同日に別々に作成した「API・プロトコル統合リファクタリング計画」と
   「コードベース全体リファクタリング・モジュール分割計画」を1本化した
 - **対象パッケージ**: `fxg-protocol`, `fxg-db`, `fxg-acp`, `fxg-node`,
@@ -486,13 +486,20 @@ relay 元を記録する）。A2 では設定・秘密・`browse_fs` のノー�
 
 ### 4.7 B5: UI データフローの宣言化
 
-- 現状: 各ページで `loading` / `error` / `busy` と手動再取得
-  （`sync.refreshProjects()`）を個別実装している。
-- 改善: Svelte 5 の Runes に合う軽量な Resource ヘルパーを用意し、
-  「取得」「エラー」「無効化」を宣言的に書けるようにする。
-- まず `projects` ページ1枚で試作し、効果を確認してから他ページへ広げる。
-- TanStack Query / Svelte Query の導入は、試作で不足が確認できた場合のみ検討する。
-  依存追加を目的にしない。
+- `ui/src/lib/stores/resource.svelte.ts` に軽量な Resource ヘルパーを追加する。
+  - `createResource(load)`（単一値）と `createKeyedResource(load)`（キーごと）を提供
+  - `data` / `loading` / `error` / `refresh` / `invalidate` を返す
+  - 世代番号で古い応答を破棄し、`invalidate` 後の遅延応答が復活しないようにする
+  - エラー通知は `onError` に集約し、`silent` でバックグラウンド更新を抑制できる
+- 適用先:
+  - `projects` ページ: Worktree 一覧を `createKeyedResource` に置き換え、
+    `worktreesByProject` / `worktreeErrors` / `loadingProjects` を削除
+  - `settings` ページ: node token 一覧を `createResource` に置き換え、
+    `tokens` / `loadingTokens` / `loadTokens` を削除
+- 取得系（読み取り）のみを対象とする。作成・削除などのミューテーション中の
+  `busy` は各フォームに残す。
+- TanStack Query / Svelte Query の導入は、キャッシュ・再試行・重複排除・
+  楽観更新などが必要と確認できた場合のみ検討する。現時点では導入しない。
 
 ### 4.8 B6: DB Row と Protocol 型のマッピング整理
 
@@ -600,9 +607,10 @@ relay 元を記録する）。A2 では設定・秘密・`browse_fs` のノー�
 
 ### B5: UI データフロー
 
-- [ ] `projects` ページで Resource ヘルパーを試作
-- [ ] 効果を確認して他ページへ展開
-- [ ] TanStack Query 導入の要否を判断
+- [x] `projects` ページで Resource ヘルパーを試作
+- [x] 効果を確認して `settings` ページ（node token 一覧）へ展開
+- [x] TanStack Query 導入の要否を判断（現時点では不要。キャッシュ・再試行・
+      楽観更新が必要になった時点で再検討）
 
 ### B6: DB マッピング
 
@@ -738,3 +746,17 @@ relay 元を記録する）。A2 では設定・秘密・`browse_fs` のノー�
   `resolvePermission` / `addCompactionUpdate` など）に分割した。
   `buildTimelineItems` は純粋関数のまま維持し、テストは既存の種別ごとの
   `describe` をそのまま使っている。
+- **2026-11-09 (B5 実装)**: `ui/src/lib/stores/resource.svelte.ts` に
+  `createResource` / `createKeyedResource` を追加した。`data` / `loading` /
+  `error` と `refresh` / `invalidate` を提供し、世代番号で古い応答を破棄する。
+  `invalidate` 後の遅延応答が復活しないことと、同一キーの多重ロード抑止を
+  単体テストで確認している。
+- **2026-11-09 (B5 実装)**: `projects` ページの Worktree 一覧を
+  `createKeyedResource`、`settings` ページの node token 一覧を
+  `createResource` に移行し、手動の `loading` / `error` マップと
+  `loadWorktrees` / `loadTokens` を削除した。ミューテーション中の `busy` は
+  フォーム側に残している。
+- **2026-11-09 (B5 実装)**: TanStack Query は現時点では導入しない。
+  キャッシュ・再試行・重複排除・楽観更新が必要になった時点で再検討する。
+  また `resource.svelte.ts` のテストのため、`vitest.config.ts` に Svelte
+  プラグインを追加した。

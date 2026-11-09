@@ -15,6 +15,7 @@
   import type { IssueNodeTokenResponse, NodeTokenSummary } from "#lib/generated/bindings.ts";
   import { m } from "#lib/paraglide/messages.js";
   import { sync } from "#lib/stores/app.svelte.ts";
+  import { createResource } from "#lib/stores/resource.svelte.ts";
   import { toast } from "svelte-sonner";
   import CopyIcon from "@lucide/svelte/icons/copy";
   import FileDownIcon from "@lucide/svelte/icons/file-down";
@@ -56,8 +57,9 @@
   }
 
   // --- Node pairing (central server only) ---
-  let tokens = $state<NodeTokenSummary[]>([]);
-  let loadingTokens = $state(false);
+  const tokens = createResource<NodeTokenSummary[]>(() => sync.connection.client.nodeTokens(), {
+    onError: (error) => toast.error(error instanceof Error ? error.message : String(error)),
+  });
 
   // Issue a new node token
   let issueOpen = $state(false);
@@ -75,20 +77,8 @@
   let rotateBusy = $state(false);
 
   onMount(() => {
-    void loadTokens();
+    if (isServer) void tokens.refresh();
   });
-
-  async function loadTokens(): Promise<void> {
-    if (!isServer || loadingTokens) return;
-    loadingTokens = true;
-    try {
-      tokens = await sync.connection.client.nodeTokens();
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : String(error));
-    } finally {
-      loadingTokens = false;
-    }
-  }
 
   async function submitIssue(event: SubmitEvent): Promise<void> {
     event.preventDefault();
@@ -100,7 +90,7 @@
       });
       issueOpen = false;
       issueNodeId = "";
-      await loadTokens();
+      await tokens.refresh();
       await sync.refreshNodes();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
@@ -117,7 +107,7 @@
       await sync.connection.client.revokeNodeToken(nodeId);
       toast.success(m.settings_node_token_revoked({ name: nodeId }));
       revokeTarget = null;
-      await loadTokens();
+      await tokens.refresh();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
     } finally {
@@ -244,8 +234,8 @@
                 <Button
                   variant="outline"
                   size="sm"
-                  disabled={!isServer || loadingTokens}
-                  onclick={() => void loadTokens()}
+                  disabled={!isServer || tokens.loading}
+                  onclick={() => void tokens.refresh()}
                 >
                   <RefreshCwIcon />
                   {m.common_refresh()}
@@ -261,13 +251,13 @@
                 {m.settings_node_pairing_server_only()}
                 <code>{sync.connection.origin}</code>
               </p>
-            {:else if tokens.length === 0}
+            {:else if (tokens.data ?? []).length === 0}
               <p class="text-muted-foreground text-xs">
-                {loadingTokens ? m.common_loading() : m.settings_no_node_tokens()}
+                {tokens.loading ? m.common_loading() : m.settings_no_node_tokens()}
               </p>
             {:else}
               <ul class="flex list-none flex-col gap-1 p-0 text-xs">
-                {#each tokens as token (token.node_id)}
+                {#each tokens.data ?? [] as token (token.node_id)}
                   <li
                     class="hover:bg-muted/50 flex flex-wrap items-center gap-2 rounded-md border px-2 py-1.5"
                   >
