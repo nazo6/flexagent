@@ -392,7 +392,7 @@
       <Label for="catalog-node">Target node</Label>
       <select
         id="catalog-node"
-        class="border-input bg-background h-8 rounded-md border px-2 text-xs"
+        class="border-input bg-background h-8 rounded-md border px-2 text-ui"
         bind:value={selectedNode}
       >
         {#each onlineNodes as node (node.node_id)}
@@ -400,7 +400,7 @@
         {/each}
       </select>
       {#if selectedNode === ""}
-        <span class="text-muted-foreground text-xs">
+        <span class="text-muted-foreground text-ui">
           No node is online. Node settings are read-only while offline.
         </span>
       {/if}
@@ -414,25 +414,25 @@
   {#if section === "bootstrap"}
     <Card class="gap-2 p-4">
       <h2 class="font-medium">Bootstrap (read-only)</h2>
-      <p class="text-muted-foreground text-xs">
+      <p class="text-muted-foreground text-ui">
         Process start-up values from config.toml, environment variables and CLI flags. Change them
         in the file and restart the process.
       </p>
       {#each filteredBootstrap as row (row.label)}
         <div class="flex flex-wrap items-center gap-2 border-b py-1.5 last:border-b-0">
-          <span class="w-40 text-xs font-medium">{row.label}</span>
-          <code class="min-w-0 flex-1 truncate text-xs">{row.value}</code>
-          <Badge variant="outline" class="text-[10px]">{sourceBadge(row.source)}</Badge>
+          <span class="w-40 text-ui font-medium">{row.label}</span>
+          <code class="min-w-0 flex-1 truncate text-ui">{row.value}</code>
+          <Badge variant="outline" class="text-2xs">{sourceBadge(row.source)}</Badge>
         </div>
       {/each}
       {#if filteredBootstrap.length === 0}
-        <p class="text-muted-foreground text-xs">{loading ? "Loading…" : "No matching values."}</p>
+        <p class="text-muted-foreground text-ui">{loading ? "Loading…" : "No matching values."}</p>
       {/if}
     </Card>
   {:else if section === "machine"}
     <Card class="gap-3 p-4">
       <h2 class="font-medium">This machine</h2>
-      <p class="text-muted-foreground text-xs">
+      <p class="text-muted-foreground text-ui">
         Owned by <code>node.db</code>. The hub proxies writes to the target node; offline nodes are
         read-only.
       </p>
@@ -462,7 +462,7 @@
             <Label for="node-scan">Project scan directories (one per line)</Label>
             <textarea
               id="node-scan"
-              class="border-input bg-background min-h-24 rounded-md border p-2 font-mono text-xs"
+              class="border-input bg-background min-h-24 rounded-md border p-2 font-mono text-ui"
               bind:value={nodeForm.project_scan_dirs}></textarea>
           </div>
         </div>
@@ -474,10 +474,10 @@
           >
             Save
           </Button>
-          <span class="text-muted-foreground text-xs">revision {nodeForm.revision}</span>
+          <span class="text-muted-foreground text-ui">revision {nodeForm.revision}</span>
         </div>
       {:else}
-        <p class="text-muted-foreground text-xs">
+        <p class="text-muted-foreground text-ui">
           {loading ? "Loading…" : "Node settings are unavailable."}
         </p>
       {/if}
@@ -486,7 +486,7 @@
     {#if !isServer}
       <Card class="gap-2 p-4">
         <h2 class="font-medium">Server settings</h2>
-        <p class="text-muted-foreground text-xs">
+        <p class="text-muted-foreground text-ui">
           Server-owned settings live in the hub's <code>server.db</code>. Connect to the central
           server to edit them.
         </p>
@@ -494,7 +494,7 @@
     {:else}
       <Card class="gap-3 p-4">
         <h2 class="font-medium">Server</h2>
-        <p class="text-muted-foreground text-xs">
+        <p class="text-muted-foreground text-ui">
           Owned by <code>server.db</code>: Web Push contact and Git credential providers.
         </p>
         <div class="grid gap-1.5">
@@ -548,7 +548,7 @@
         </div>
         <div class="flex items-center gap-2">
           <Button size="sm" onclick={() => void saveServer()}>Save</Button>
-          <span class="text-muted-foreground text-xs">revision {serverForm.revision}</span>
+          <span class="text-muted-foreground text-ui">revision {serverForm.revision}</span>
         </div>
       </Card>
     {/if}
@@ -556,12 +556,12 @@
     <Card class="gap-3 p-4">
       <h2 class="font-medium">Project profiles</h2>
       {#if !isServer}
-        <p class="text-muted-foreground text-xs">
+        <p class="text-muted-foreground text-ui">
           Bootstrap profiles for temporary VMs are owned by the hub. Open the hub Web UI to edit
           them.
         </p>
       {:else}
-        <p class="text-muted-foreground text-xs">
+        <p class="text-muted-foreground text-ui">
           Setup commands and environment variables injected into temporary VMs (<code
             >project_profiles</code
           >
@@ -572,8 +572,8 @@
           <div class="rounded-md border p-2">
             <div class="flex flex-wrap items-center gap-2">
               <span class="text-sm font-medium">{project.name}</span>
-              <code class="text-muted-foreground text-[11px]">{project.project_id}</code>
-              <Badge variant="outline" class="text-[10px]">{project.identity.kind}</Badge>
+              <code class="text-muted-foreground text-2xs">{project.project_id}</code>
+              <Badge variant="outline" class="text-2xs">{project.identity.kind}</Badge>
               <Button
                 variant="outline"
                 size="sm"
@@ -589,14 +589,14 @@
                   <Label for={`setup-${project.project_id}`}>Setup commands (one per line)</Label>
                   <textarea
                     id={`setup-${project.project_id}`}
-                    class="border-input bg-background min-h-20 rounded-md border p-2 font-mono text-xs"
+                    class="border-input bg-background min-h-20 rounded-md border p-2 font-mono text-ui"
                     bind:value={profileForm.setup}></textarea>
                 </div>
                 <div class="grid gap-1.5">
                   <Label for={`env-${project.project_id}`}>Environment (KEY=VALUE)</Label>
                   <textarea
                     id={`env-${project.project_id}`}
-                    class="border-input bg-background min-h-20 rounded-md border p-2 font-mono text-xs"
+                    class="border-input bg-background min-h-20 rounded-md border p-2 font-mono text-ui"
                     bind:value={profileForm.env}></textarea>
                 </div>
                 <div class="flex gap-2">
@@ -609,7 +609,7 @@
                 </div>
               </div>
             {:else if profile}
-              <p class="text-muted-foreground mt-1 text-xs">
+              <p class="text-muted-foreground mt-1 text-ui">
                 {profile.bootstrap_setup.length} setup command(s), {Object.keys(
                   profile.bootstrap_env,
                 ).length} env var(s)
@@ -624,20 +624,20 @@
   {#if showSecrets}
     <Card class="gap-3 p-4">
       <h2 class="font-medium">Secrets</h2>
-      <p class="text-muted-foreground text-xs">
+      <p class="text-muted-foreground text-ui">
         Key-value secrets stored in <code>~/.flexagent/secrets/</code>. Values are write-only and
         never returned by the API. Reference them in custom agents as <code>@KEY</code> or in Git
         credentials as <code>KEY</code>.
       </p>
       {#if secrets.length > 0}
-        <ul class="flex list-none flex-col gap-1 p-0 text-xs">
+        <ul class="flex list-none flex-col gap-1 p-0 text-ui">
           {#each secrets as secret (secret.id)}
             <li class="flex flex-wrap items-center gap-2 rounded-md border px-2 py-1.5">
               <span class="font-mono font-medium">{secret.id}</span>
               <Button
                 variant="ghost"
                 size="sm"
-                class="h-6 px-1.5 text-[10px]"
+                class="h-6 px-1.5 text-2xs"
                 onclick={() => {
                   if (typeof navigator !== "undefined" && navigator.clipboard) {
                     void navigator.clipboard.writeText(secret.id);
@@ -650,7 +650,7 @@
               {#if secret.description}
                 <span class="text-muted-foreground">{secret.description}</span>
               {/if}
-              <Badge variant={secret.configured ? "secondary" : "outline"} class="text-[10px]">
+              <Badge variant={secret.configured ? "secondary" : "outline"} class="text-2xs">
                 {secret.configured ? "Configured" : "Missing"}
               </Badge>
               {#if secret.used_by.length > 0}

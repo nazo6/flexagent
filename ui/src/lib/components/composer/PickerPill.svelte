@@ -38,7 +38,7 @@
   <Popover.Trigger
     {disabled}
     class={cn(
-      "border-input/70 bg-background/40 hover:bg-accent hover:text-accent-foreground focus-visible:ring-ring/50 inline-flex h-8 max-w-60 items-center gap-1.5 rounded-full border px-2.5 text-xs transition-colors outline-none focus-visible:ring-2 disabled:pointer-events-none disabled:opacity-50",
+      "border-border bg-chip hover:bg-chip-hover hover:text-foreground focus-visible:ring-ring/40 inline-flex h-7 max-w-60 items-center gap-1.5 rounded-full border px-2.5 text-ui transition-colors outline-none focus-visible:ring-2 disabled:pointer-events-none disabled:opacity-50",
       className,
     )}
     title={value === "" ? label : `${label}: ${value}`}

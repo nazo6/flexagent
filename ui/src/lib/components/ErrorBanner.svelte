@@ -39,7 +39,7 @@
 
 {#if visible.length > 0}
   <section
-    class="border-b bg-destructive/5 px-3 py-2"
+    class="border-b border-border bg-danger-soft/25 px-4 py-2"
     aria-live="polite"
     aria-label={m.problem_banner_label()}
   >
@@ -47,16 +47,14 @@
       {#each visible as problem (problem.id)}
         <div
           class={cn(
-            "flex items-start gap-2 rounded-md border px-2.5 py-2 text-sm",
-            problem.severity === "error"
-              ? "border-destructive/40 bg-background"
-              : "border-amber-500/40 bg-background",
+            "flex items-start gap-2 rounded-lg border px-3 py-2 text-ui",
+            problem.severity === "error" ? "border-danger/30 bg-card" : "border-warn/30 bg-card",
           )}
         >
           {#if problem.severity === "error"}
-            <CircleAlertIcon class="text-destructive mt-0.5 size-4 shrink-0" />
+            <CircleAlertIcon class="text-danger mt-0.5 size-4 shrink-0" />
           {:else}
-            <TriangleAlertIcon class="mt-0.5 size-4 shrink-0 text-amber-500" />
+            <TriangleAlertIcon class="text-warn mt-0.5 size-4 shrink-0" />
           {/if}
 
           <div class="min-w-0 flex-1">
@@ -66,16 +64,16 @@
             </p>
 
             {#if dataSafetyMessage(problem.dataSafety) !== null}
-              <p class="text-muted-foreground mt-0.5 text-xs">
+              <p class="text-muted-foreground mt-0.5 text-2xs">
                 {dataSafetyMessage(problem.dataSafety)}
               </p>
             {/if}
 
             <details class="group mt-1">
-              <summary class="text-muted-foreground hover:text-foreground cursor-pointer text-xs">
+              <summary class="text-muted-foreground hover:text-foreground cursor-pointer text-2xs">
                 {m.problem_details()}
               </summary>
-              <div class="mt-1 flex flex-col gap-1 text-xs">
+              <div class="mt-1 flex flex-col gap-1 text-ui">
                 {#if problem.code !== null}
                   <p class="text-muted-foreground font-mono">{problem.code}</p>
                 {/if}
@@ -138,7 +136,7 @@
       {/each}
 
       {#if hiddenCount > 0}
-        <p class="text-muted-foreground text-xs">
+        <p class="text-muted-foreground text-ui">
           {m.problem_more({ count: String(hiddenCount) })}
         </p>
       {/if}

@@ -25,7 +25,7 @@ export function getNodeAvailability(node: NodeSummary | null | undefined): NodeA
     return {
       isAvailable: false,
       statusText: m.status_offline(),
-      dotColorClass: "bg-destructive",
+      dotColorClass: "bg-danger",
       badgeVariant: "destructive",
     };
   }
@@ -35,7 +35,7 @@ export function getNodeAvailability(node: NodeSummary | null | undefined): NodeA
       return {
         isAvailable: true,
         statusText: m.status_online(),
-        dotColorClass: "bg-emerald-500",
+        dotColorClass: "bg-ok",
         badgeVariant: "secondary",
       };
     case "bootstrapping":
@@ -43,14 +43,14 @@ export function getNodeAvailability(node: NodeSummary | null | undefined): NodeA
       return {
         isAvailable: false,
         statusText: m.status_preparing(),
-        dotColorClass: "bg-amber-500 animate-pulse",
+        dotColorClass: "bg-warn animate-pulse",
         badgeVariant: "outline",
       };
     case "draining":
       return {
         isAvailable: false,
         statusText: m.status_stopping(),
-        dotColorClass: "bg-amber-600",
+        dotColorClass: "bg-warn",
         badgeVariant: "outline",
       };
     case "terminated":
@@ -64,14 +64,14 @@ export function getNodeAvailability(node: NodeSummary | null | undefined): NodeA
       return {
         isAvailable: false,
         statusText: m.status_error(),
-        dotColorClass: "bg-destructive",
+        dotColorClass: "bg-danger",
         badgeVariant: "destructive",
       };
     default:
       return {
         isAvailable: node.is_online,
         statusText: node.is_online ? m.status_active() : m.status_offline(),
-        dotColorClass: node.is_online ? "bg-emerald-500" : "bg-muted-foreground",
+        dotColorClass: node.is_online ? "bg-ok" : "bg-muted-foreground",
         badgeVariant: "outline",
       };
   }

@@ -73,7 +73,7 @@
       {#each logs as log (log.id)}
         <li>
           <Card class="gap-1.5 p-3">
-            <div class="flex flex-wrap items-center gap-2 text-xs">
+            <div class="flex flex-wrap items-center gap-2 text-ui">
               <Badge variant="outline">{ACTION_LABELS[log.action] ?? log.action}</Badge>
               <span class="text-muted-foreground">{formatEpochMs(log.created_at)}</span>
               <span class="text-muted-foreground">{log.client_ip}</span>
@@ -83,7 +83,7 @@
               {/if}
               {#if log.session_id}
                 <a
-                  class="ml-auto text-xs font-medium hover:underline"
+                  class="ml-auto text-ui font-medium hover:underline"
                   href={`/sessions/${log.session_id}`}
                 >
                   {sessionTitle(log.session_id)}
@@ -91,19 +91,19 @@
               {/if}
             </div>
             {#if log.client_user_agent}
-              <p class="text-muted-foreground truncate text-[11px]">
+              <p class="text-muted-foreground truncate text-2xs">
                 {log.client_user_agent}
               </p>
             {/if}
             {#if log.details !== null && log.details !== undefined}
               <details>
                 <summary
-                  class="text-muted-foreground hover:text-foreground cursor-pointer text-xs select-none"
+                  class="text-muted-foreground hover:text-foreground cursor-pointer text-ui select-none"
                 >
                   {m.settings_audit_details()}
                 </summary>
                 <pre
-                  class="bg-muted/40 mt-1 max-h-40 overflow-auto rounded-md p-2 font-mono text-xs whitespace-pre-wrap">{JSON.stringify(
+                  class="bg-muted/40 mt-1 max-h-40 overflow-auto rounded-md p-2 font-mono text-ui whitespace-pre-wrap">{JSON.stringify(
                     log.details,
                     null,
                     2,

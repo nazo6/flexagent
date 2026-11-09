@@ -158,16 +158,16 @@
   }
 </script>
 
-<aside class="bg-card flex h-full w-full flex-col border-r">
+<aside class="bg-sidebar flex h-full w-full flex-col border-r border-border">
   <!-- Sidebar header -->
-  <div class="flex items-center justify-between border-b px-3 py-2.5">
+  <div class="flex items-center justify-between border-b border-border px-3.5 py-3">
     <a
       href="/"
-      class="flex items-center gap-2 font-semibold tracking-tight hover:opacity-80 transition-opacity"
+      class="flex items-center gap-2.5 font-semibold tracking-tight hover:opacity-80 transition-opacity"
       onclick={handleLinkClick}
     >
       <div
-        class="bg-primary text-primary-foreground flex size-6 items-center justify-center rounded font-mono text-xs font-bold"
+        class="bg-primary text-primary-foreground flex size-7 items-center justify-center rounded-md font-mono text-2xs font-bold"
       >
         fxg
       </div>
@@ -176,19 +176,19 @@
   </div>
 
   <!-- Quick navigation -->
-  <nav class="flex flex-col gap-0.5 border-b p-2 text-xs">
+  <nav class="flex flex-col gap-0.5 border-b border-border p-2 text-ui">
     <a
       href="/"
       onclick={handleLinkClick}
       class={cn(
         "flex items-center justify-between rounded-md px-2.5 py-1.5 font-medium transition-colors",
         currentPath === "/"
-          ? "bg-accent text-accent-foreground"
+          ? "bg-accent text-foreground shadow-[inset_2px_0_0_0_var(--signal)]"
           : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
       )}
     >
       <div class="flex items-center gap-2">
-        <PlusIcon class="size-3.5" />
+        <PlusIcon class="size-4" />
         <span>{m.shell_new_session()}</span>
       </div>
     </a>
@@ -199,16 +199,16 @@
       class={cn(
         "flex items-center justify-between rounded-md px-2.5 py-1.5 font-medium transition-colors",
         currentPath.startsWith("/inbox")
-          ? "bg-accent text-accent-foreground"
+          ? "bg-accent text-foreground shadow-[inset_2px_0_0_0_var(--signal)]"
           : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
       )}
     >
       <div class="flex items-center gap-2">
-        <InboxIcon class="size-3.5" />
+        <InboxIcon class="size-4" />
         <span>{m.shell_approval_inbox()}</span>
       </div>
       {#if sync.inbox.length > 0}
-        <Badge variant="destructive" class="px-1.5 py-0 text-[10px] leading-tight">
+        <Badge variant="destructive" class="px-1.5 py-0 text-2xs leading-tight">
           {sync.inbox.length}
         </Badge>
       {/if}
@@ -220,11 +220,11 @@
       class={cn(
         "flex items-center gap-2 rounded-md px-2.5 py-1.5 font-medium transition-colors",
         currentPath.startsWith("/projects")
-          ? "bg-accent text-accent-foreground"
+          ? "bg-accent text-foreground shadow-[inset_2px_0_0_0_var(--signal)]"
           : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
       )}
     >
-      <FolderGit2Icon class="size-3.5" />
+      <FolderGit2Icon class="size-4" />
       <span>{m.shell_projects()}</span>
     </a>
 
@@ -234,11 +234,11 @@
       class={cn(
         "flex items-center gap-2 rounded-md px-2.5 py-1.5 font-medium transition-colors",
         currentPath.startsWith("/search")
-          ? "bg-accent text-accent-foreground"
+          ? "bg-accent text-foreground shadow-[inset_2px_0_0_0_var(--signal)]"
           : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
       )}
     >
-      <SearchIcon class="size-3.5" />
+      <SearchIcon class="size-4" />
       <span>{m.shell_full_text_search()}</span>
     </a>
 
@@ -248,11 +248,11 @@
       class={cn(
         "flex items-center gap-2 rounded-md px-2.5 py-1.5 font-medium transition-colors",
         currentPath.startsWith("/settings")
-          ? "bg-accent text-accent-foreground"
+          ? "bg-accent text-foreground shadow-[inset_2px_0_0_0_var(--signal)]"
           : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
       )}
     >
-      <SettingsIcon class="size-3.5" />
+      <SettingsIcon class="size-4" />
       <span>{m.shell_settings()}</span>
     </a>
   </nav>
@@ -260,12 +260,12 @@
   <!-- Search bar -->
   <div class="border-b px-2 py-2">
     <div class="relative flex items-center">
-      <SearchIcon class="text-muted-foreground absolute left-2 size-3.5 pointer-events-none" />
+      <SearchIcon class="text-muted-foreground absolute left-2 size-4 pointer-events-none" />
       <input
         type="text"
         bind:value={searchQuery}
         placeholder={m.shell_search_placeholder()}
-        class="bg-muted/40 placeholder:text-muted-foreground focus-visible:ring-ring/40 w-full rounded-md border py-1 pr-2 pl-7 text-xs outline-none focus-visible:ring-1"
+        class="bg-chip placeholder:text-muted-foreground focus-visible:ring-ring/40 h-8 w-full rounded-md border border-border pr-2 pl-7 text-ui outline-none focus-visible:ring-2"
       />
     </div>
   </div>
@@ -277,13 +277,13 @@
       <div class="mb-3 rounded-lg border border-destructive/30 bg-destructive/5 p-1.5">
         <button
           type="button"
-          class="text-destructive flex w-full items-center justify-between px-1 py-0.5 text-[11px] font-semibold tracking-wider uppercase select-none"
+          class="text-destructive flex w-full items-center justify-between px-1 py-0.5 text-2xs font-semibold tracking-wider uppercase select-none"
           onclick={() => (showAttentionSection = !showAttentionSection)}
         >
           <span class="flex items-center gap-1.5">
             <AlertCircleIcon class="size-3" />
             <span>{m.shell_needs_attention()}</span>
-            <span class="rounded-full bg-destructive/15 px-1.5 py-0.2 text-[10px] text-destructive">
+            <span class="rounded-full bg-destructive/15 px-1.5 py-0.2 text-2xs text-destructive">
               {needsAttentionSessions.length}
             </span>
           </span>
@@ -306,7 +306,7 @@
 
     <!-- List by project -->
     {#if projectGroups.length === 0}
-      <div class="text-muted-foreground p-3 text-center text-xs">
+      <div class="text-muted-foreground p-3 text-center text-ui">
         {searchQuery ? m.shell_no_matching_results() : m.shell_no_projects_yet()}
       </div>
     {:else}
@@ -316,7 +316,7 @@
           <div class="flex flex-col">
             <!-- Project header -->
             <div
-              class="group/proj flex items-center justify-between rounded-md px-1.5 py-1 text-xs hover:bg-muted/40 transition-colors"
+              class="group/proj flex items-center justify-between rounded-md px-1.5 py-1 text-ui hover:bg-muted/40 transition-colors"
             >
               <button
                 type="button"
@@ -325,28 +325,28 @@
               >
                 <span class="text-muted-foreground shrink-0">
                   {#if isCollapsed}
-                    <ChevronRightIcon class="size-3.5" />
+                    <ChevronRightIcon class="size-4" />
                   {:else}
-                    <ChevronDownIcon class="size-3.5" />
+                    <ChevronDownIcon class="size-4" />
                   {/if}
                 </span>
-                <FolderGit2Icon class="size-3.5 text-muted-foreground shrink-0" />
+                <FolderGit2Icon class="size-4 text-muted-foreground shrink-0" />
                 <span class="truncate">{group.projectName}</span>
                 {#if group.pendingCount > 0}
-                  <Badge variant="destructive" class="px-1 py-0 text-[9px] leading-tight shrink-0">
+                  <Badge variant="destructive" class="px-1 py-0 text-2xs leading-tight shrink-0">
                     {group.pendingCount}
                   </Badge>
                 {/if}
                 {#if group.runningCount > 0}
                   <span
-                    class="size-1.5 rounded-full bg-emerald-500 shrink-0"
+                    class="size-1.5 rounded-full bg-ok shrink-0"
                     title={m.shell_has_running_sessions()}
                   ></span>
                 {/if}
               </button>
 
               <div class="flex items-center gap-1 shrink-0 ml-1">
-                <span class="text-muted-foreground text-[10px]">
+                <span class="text-muted-foreground text-2xs">
                   {group.sessions.length}
                 </span>
                 <a
@@ -369,7 +369,7 @@
                   {@render sessionRow(session, false)}
                 {/each}
                 {#if group.sessions.length === 0}
-                  <li class="py-1 px-1.5 text-[11px] text-muted-foreground">
+                  <li class="py-1 px-1.5 text-2xs text-muted-foreground">
                     <a
                       href={`/?project=${encodeURIComponent(group.projectId)}`}
                       onclick={handleLinkClick}
@@ -392,13 +392,13 @@
       <div class="mt-3 border-t pt-2">
         <button
           type="button"
-          class="text-muted-foreground hover:text-foreground flex w-full items-center justify-between px-1 py-0.5 text-[11px] font-semibold tracking-wider uppercase select-none"
+          class="text-muted-foreground hover:text-foreground flex w-full items-center justify-between px-1 py-0.5 text-2xs font-semibold tracking-wider uppercase select-none"
           onclick={() => (showArchivedSection = !showArchivedSection)}
         >
           <span class="flex items-center gap-1.5">
             <ArchiveIcon class="size-3" />
             <span>{m.shell_archived()}</span>
-            <span class="bg-muted rounded-full px-1.5 py-0.2 text-[10px]">
+            <span class="bg-muted rounded-full px-1.5 py-0.2 text-2xs">
               {archivedSessions.length}
             </span>
           </span>
@@ -421,16 +421,11 @@
   </div>
 
   <!-- Footer: connection menu and status -->
-  <div class="border-t p-2 flex flex-col gap-2">
-    <div class="flex items-center gap-1.5">
-      <div class="flex-1 min-w-0">
-        <ConnectionMenu class="w-full justify-between" />
-      </div>
-      <KillSwitchButton />
-    </div>
-
-    <div class="pt-0.5">
+  <div class="border-border flex flex-col gap-2 border-t p-2">
+    <ConnectionMenu class="w-full justify-between" />
+    <div class="flex flex-wrap items-center justify-between gap-1.5">
       <SyncStatusBadge />
+      <KillSwitchButton class="h-7 text-2xs" />
     </div>
   </div>
 </aside>
@@ -447,9 +442,9 @@
       onclick={handleLinkClick}
       title={`${session.title}${isArchived ? ` (${m.shell_archived()})` : ""}\n${m.shell_working_directory({ path: session.local_path })}\n${m.shell_node_label({ node: node?.name ?? session.node_id })}`}
       class={cn(
-        "group flex items-center justify-between rounded-md px-2 py-1.5 text-xs transition-colors",
+        "group flex items-center justify-between rounded-md px-2 py-1.5 text-ui transition-colors",
         isActive
-          ? "bg-accent text-accent-foreground font-medium"
+          ? "bg-accent text-foreground shadow-[inset_2px_0_0_0_var(--signal)] font-medium"
           : "text-foreground/80 hover:bg-accent/40 hover:text-foreground",
         isArchived && "opacity-70",
       )}
@@ -466,12 +461,12 @@
 
         <div class="flex min-w-0 flex-1 items-center gap-1">
           {#if showProjectBadge}
-            <span class="text-muted-foreground text-[10px] shrink-0 font-medium truncate max-w-16">
+            <span class="text-muted-foreground text-2xs shrink-0 font-medium truncate max-w-16">
               [{session.project_id}]
             </span>
           {/if}
           {#if session.git_branch}
-            <span class="text-muted-foreground text-[10px] shrink-0 font-mono">
+            <span class="text-muted-foreground text-2xs shrink-0 font-mono">
               ({session.git_branch})
             </span>
           {/if}
@@ -480,7 +475,7 @@
         </div>
       </div>
 
-      <div class="ml-2 flex shrink-0 items-center gap-1.5 text-muted-foreground text-[10px]">
+      <div class="ml-2 flex shrink-0 items-center gap-1.5 text-muted-foreground text-2xs">
         <!-- Archive / delete menu -->
         <SessionActionsMenu
           {session}
@@ -493,7 +488,7 @@
           type="button"
           class={cn(
             "hover:text-foreground p-0.5 transition-opacity",
-            isPinned ? "opacity-100 text-amber-500" : "opacity-0 group-hover:opacity-100",
+            isPinned ? "opacity-100 text-signal" : "opacity-0 group-hover:opacity-100",
           )}
           title={isPinned ? m.shell_unpin() : m.shell_pin()}
           onclick={(e) => {

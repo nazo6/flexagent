@@ -17,9 +17,7 @@
       : 0,
   );
 
-  const barClass = $derived(
-    percent >= 90 ? "bg-destructive" : percent >= 70 ? "bg-amber-500" : "bg-primary",
-  );
+  const barClass = $derived(percent >= 90 ? "bg-danger" : percent >= 70 ? "bg-warn" : "bg-signal");
 
   const tooltip = $derived(
     usage

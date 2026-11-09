@@ -21,7 +21,7 @@
 </script>
 
 <div
-  class={cn("inline-flex items-center gap-1.5 text-xs", className)}
+  class={cn("inline-flex items-center gap-1.5 text-2xs", className)}
   title={node
     ? `${node.name} (${node.os}/${node.arch}): ${availability.statusText}`
     : availability.statusText}

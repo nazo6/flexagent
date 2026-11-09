@@ -89,7 +89,7 @@
   });
 </script>
 
-<ul class="flex list-none flex-col gap-3 p-0">
+<ul class="flex list-none flex-col gap-4 p-0">
   {#each groupedItems as group (group.key)}
     <li>
       {#if group.kind === "tools"}
@@ -98,7 +98,9 @@
         {@const item = group.item}
         {#if item.kind === "user"}
           <div class="flex items-end justify-end gap-1.5">
-            <div class="bg-primary text-primary-foreground max-w-[85%] rounded-2xl px-3.5 py-2">
+            <div
+              class="bg-user-message text-foreground max-w-[82%] rounded-xl rounded-br-sm px-4 py-2.5"
+            >
               {#if item.attachments.length > 0}
                 <div class="mb-1 flex flex-wrap gap-1.5">
                   {#each item.attachments as attachment (attachment.file_name + (attachment.local_path ?? ""))}
@@ -110,7 +112,7 @@
                       />
                     {:else}
                       <span
-                        class="bg-primary-foreground/15 inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px]"
+                        class="bg-background/60 inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-2xs"
                       >
                         <PaperclipIcon class="size-2.5" />
                         {attachment.file_name}
@@ -120,15 +122,19 @@
                 </div>
               {/if}
               <p class="text-sm whitespace-pre-wrap">{item.text}</p>
-              <p class="text-primary-foreground/70 mt-1 text-right text-[10px]">
+              <p class="text-muted-foreground desk-mono mt-1 text-right text-2xs">
                 {item.clientSource} &middot; {formatEpochMs(item.createdAt)}
               </p>
             </div>
           </div>
         {:else if item.kind === "agent"}
-          <div class="flex gap-2">
-            <BotIcon class="text-muted-foreground mt-0.5 size-4 shrink-0" />
-            <div class="max-w-[92%] flex-1">
+          <div class="flex gap-2.5">
+            <span
+              class="bg-signal-soft text-signal mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-md"
+            >
+              <BotIcon class="size-3" />
+            </span>
+            <div class="min-w-0 max-w-[92%] flex-1">
               <MarkdownText
                 text={item.text}
                 streaming={item.streaming}
@@ -139,23 +145,23 @@
         {:else if item.kind === "thought"}
           <details class="group">
             <summary
-              class="text-muted-foreground hover:text-foreground flex cursor-pointer items-center gap-1.5 text-xs select-none"
+              class="text-muted-foreground hover:text-foreground flex cursor-pointer items-center gap-1.5 text-ui select-none"
             >
               <BrainIcon class="size-3.5" />
               {m.chat_thought_process()}
               {#if item.streaming}<span class="animate-pulse">…</span>{/if}
             </summary>
             <div
-              class="text-muted-foreground border-muted-foreground/30 mt-1.5 border-l-2 pl-3 text-xs leading-relaxed"
+              class="text-muted-foreground border-line mt-1.5 border-l-2 pl-3 text-ui leading-relaxed"
             >
               <MarkdownText text={item.text} streaming={item.streaming} />
             </div>
           </details>
         {:else if item.kind === "terminal"}
-          <div class="bg-card/60 flex flex-col gap-1.5 rounded-lg border p-2.5">
-            <div class="flex items-center gap-2 text-xs">
-              <SquareTerminalIcon class="text-muted-foreground size-3.5" />
-              <span class="font-mono">{item.command === "" ? item.terminalId : item.command}</span>
+          <div class="bg-card flex flex-col gap-1.5 rounded-lg border border-border p-3">
+            <div class="flex items-center gap-2 text-ui">
+              <SquareTerminalIcon class="text-muted-foreground size-4" />
+              <span class="desk-mono">{item.command === "" ? item.terminalId : item.command}</span>
               {#if item.exitCode !== null}
                 <Badge variant={item.exitCode === 0 ? "secondary" : "destructive"}>
                   exit {item.exitCode}
@@ -163,7 +169,7 @@
               {/if}
             </div>
             <pre
-              class="bg-muted/30 max-h-56 overflow-auto rounded-md border p-2 font-mono text-xs whitespace-pre-wrap">{item.output}</pre>
+              class="bg-muted/40 max-h-56 overflow-auto rounded-md border border-border p-2.5 font-mono text-ui leading-relaxed whitespace-pre-wrap">{item.output}</pre>
           </div>
         {:else if item.kind === "permission"}
           <PermissionCard
@@ -186,9 +192,9 @@
             createdAt={item.createdAt}
           />
         {:else if item.kind === "plan"}
-          <div class="bg-card/60 flex flex-col gap-1.5 rounded-lg border p-2.5">
-            <div class="flex items-center gap-2 text-xs font-medium">
-              <ListChecksIcon class="size-3.5" />
+          <div class="bg-card flex flex-col gap-1.5 rounded-lg border border-border p-3">
+            <div class="flex items-center gap-2 text-ui font-medium">
+              <ListChecksIcon class="size-4" />
               {m.chat_plan()}
             </div>
             <ul class="flex list-none flex-col gap-1 p-0 text-sm">
@@ -199,9 +205,11 @@
           </div>
         {:else if item.kind === "notice"}
           <div
-            class="flex items-start gap-2 rounded-lg border p-2.5 text-sm"
-            class:text-destructive={item.tone === "error"}
-            class:text-amber-600={item.tone === "warning"}
+            class="flex items-start gap-2 rounded-lg border p-3 text-sm {item.tone === 'error'
+              ? 'border-danger/30 bg-danger-soft/50 text-danger'
+              : item.tone === 'warning'
+                ? 'border-warn/30 bg-warn-soft/50 text-warn'
+                : 'border-border bg-card text-foreground'}"
           >
             {#if item.tone === "error" || item.tone === "warning"}
               <AlertTriangleIcon class="mt-0.5 size-4 shrink-0" />
@@ -212,7 +220,7 @@
           </div>
         {:else if item.kind === "pending"}
           <div class="text-muted-foreground flex items-center gap-2 text-sm" role="status">
-            <LoaderCircleIcon class="size-4 animate-spin text-primary" />
+            <LoaderCircleIcon class="text-signal size-4 animate-spin" />
             <span>
               {m.chat_pending_label()}:
               <span class="whitespace-pre-wrap">{item.text}</span>
@@ -224,12 +232,16 @@
   {/each}
 
   {#if agentWorking}
-    <li class="flex gap-2" role="status" aria-live="polite">
-      <BotIcon class="text-muted-foreground mt-0.5 size-4 shrink-0" />
-      <div
-        class="bg-muted/60 text-muted-foreground flex items-center gap-2 rounded-2xl px-3.5 py-2 text-sm"
+    <li class="flex gap-2.5" role="status" aria-live="polite">
+      <span
+        class="bg-signal-soft text-signal mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-md"
       >
-        <LoaderCircleIcon class="size-3.5 animate-spin text-primary" />
+        <BotIcon class="size-3" />
+      </span>
+      <div
+        class="bg-card text-muted-foreground flex items-center gap-2 rounded-lg border border-border px-3 py-1.5 text-ui"
+      >
+        <LoaderCircleIcon class="text-signal size-3.5 animate-spin" />
         <span>{m.chat_agent_working()}</span>
       </div>
     </li>
@@ -237,7 +249,7 @@
 </ul>
 
 {#if items.length === 0 && !agentWorking}
-  <p class="text-muted-foreground text-sm">
+  <p class="text-muted-foreground text-ui">
     {m.chat_empty_timeline()}
   </p>
 {/if}

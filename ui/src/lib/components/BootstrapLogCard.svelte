@@ -20,7 +20,7 @@
   <div class="bg-card/60 rounded-lg border">
     <button
       type="button"
-      class="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-medium"
+      class="flex w-full items-center gap-2 px-3 py-2 text-left text-ui font-medium"
       onclick={() => (open = !open)}
     >
       <WrenchIcon class="size-3.5" />
@@ -37,7 +37,7 @@
     {#if open}
       <pre
         bind:this={scrollEl}
-        class="bg-muted/30 max-h-48 overflow-auto border-t p-2 font-mono text-xs whitespace-pre-wrap">{lines.join(
+        class="bg-muted/30 max-h-48 overflow-auto border-t p-2 font-mono text-ui whitespace-pre-wrap">{lines.join(
           "\n",
         )}</pre>
     {/if}

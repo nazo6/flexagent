@@ -30,10 +30,10 @@
   </p>
 {:else}
   <div class="flex flex-col gap-2">
-    <div class="flex flex-wrap items-center gap-2 text-xs">
+    <div class="flex flex-wrap items-center gap-2 text-ui">
       <span class="font-mono break-all">{file.path}</span>
-      <span class="text-emerald-600 dark:text-emerald-400">+{file.additions}</span>
-      <span class="text-red-600 dark:text-red-400">-{file.deletions}</span>
+      <span class="text-ok">+{file.additions}</span>
+      <span class="text-danger">-{file.deletions}</span>
     </div>
     {#if canUseMonaco && file !== null}
       <MonacoDiff {file} />

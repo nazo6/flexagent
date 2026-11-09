@@ -812,21 +812,23 @@
   <SparklesIcon class="text-muted-foreground size-3.5" />
 {/snippet}
 
-<div class="mx-auto flex min-h-full w-full max-w-3xl flex-col justify-center px-4 py-8 md:py-12">
-  <div class="flex flex-col gap-4">
-    <div class="flex flex-col items-center gap-2 text-center">
-      <div class="bg-primary/10 text-primary flex size-11 items-center justify-center rounded-2xl">
+<div
+  class="mx-auto flex min-h-full w-full max-w-[680px] flex-col justify-center px-4 py-8 md:py-12"
+>
+  <div class="flex flex-col gap-5">
+    <div class="flex flex-col items-center gap-2.5 text-center">
+      <div class="bg-signal-soft text-signal flex size-11 items-center justify-center rounded-xl">
         <SparklesIcon class="size-5" />
       </div>
-      <h1 class="text-2xl font-bold tracking-tight">{m.new_session_title()}</h1>
-      <p class="text-muted-foreground max-w-md text-sm">
+      <h1 class="text-2xl font-semibold tracking-tight">{m.new_session_title()}</h1>
+      <p class="text-muted-foreground max-w-md text-ui">
         {m.new_session_description()}
       </p>
     </div>
 
     {#if forkSessionId}
       <div
-        class="bg-primary/10 border-primary/20 flex items-center justify-between gap-2 rounded-xl border p-3 text-xs"
+        class="bg-signal-soft/70 border-signal/25 flex items-center justify-between gap-2 rounded-lg border p-3 text-ui"
       >
         <div class="flex min-w-0 items-center gap-2">
           <GitForkIcon class="text-primary size-4 shrink-0" />
@@ -840,7 +842,7 @@
         <Button
           variant="ghost"
           size="sm"
-          class="h-6 shrink-0 px-2 text-xs"
+          class="h-6 shrink-0 px-2 text-ui"
           onclick={() => {
             forkSessionId = "";
           }}
@@ -853,14 +855,14 @@
 
     {#if sync.projectsLoading && projects.length === 0}
       <div
-        class="bg-muted/40 text-muted-foreground flex items-center justify-center gap-2 rounded-xl border p-3 text-xs"
+        class="bg-chip text-muted-foreground flex items-center justify-center gap-2 rounded-lg border border-border p-3 text-ui"
       >
         <LoaderCircleIcon class="size-3.5 animate-spin" />
         {m.common_loading()}
       </div>
     {:else if projects.length === 0 && sync.projectsError === null}
       <div
-        class="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-xs"
+        class="border-warn/35 bg-warn-soft/60 flex flex-wrap items-center justify-between gap-2 rounded-lg border p-3 text-ui"
       >
         <span class="flex items-center gap-2">
           <FolderGit2Icon class="size-4 shrink-0" />
@@ -868,14 +870,14 @@
         </span>
         <a
           href="/projects"
-          class="bg-background hover:bg-muted rounded-md border px-2.5 py-1 text-xs font-medium"
+          class="bg-background hover:bg-muted rounded-md border px-2.5 py-1 text-ui font-medium"
         >
           {m.new_session_register_project()}
         </a>
       </div>
     {:else if sync.projectsError !== null}
       <div
-        class="border-destructive/30 bg-destructive/10 text-destructive flex items-center justify-between gap-2 rounded-xl border p-3 text-xs"
+        class="border-danger/30 bg-danger-soft/60 text-danger flex items-center justify-between gap-2 rounded-lg border p-3 text-ui"
       >
         <span class="truncate">{sync.projectsError}</span>
         <Button variant="ghost" size="xs" onclick={() => void sync.refreshProjects()}>
@@ -908,7 +910,7 @@
               <div class="border-t p-1">
                 <a
                   href="/projects"
-                  class="text-muted-foreground hover:bg-accent hover:text-accent-foreground block rounded-md px-2 py-1.5 text-xs"
+                  class="text-muted-foreground hover:bg-accent hover:text-accent-foreground block rounded-md px-2 py-1.5 text-ui"
                 >
                   {m.new_session_manage_projects()}
                 </a>
@@ -917,7 +919,7 @@
               <div class="p-1">
                 <a
                   href="/projects"
-                  class="text-muted-foreground hover:bg-accent hover:text-accent-foreground block rounded-md px-2 py-1.5 text-xs"
+                  class="text-muted-foreground hover:bg-accent hover:text-accent-foreground block rounded-md px-2 py-1.5 text-ui"
                 >
                   {m.new_session_register_project()}
                 </a>
@@ -934,21 +936,19 @@
             disabled={isProvisionerMode || selectedProject === null}
           >
             {#if isProvisionerMode}
-              <p class="text-muted-foreground p-2 text-xs">{m.new_session_ephemeral_note()}</p>
+              <p class="text-muted-foreground p-2 text-ui">{m.new_session_ephemeral_note()}</p>
             {:else if pathMode === "new_worktree"}
               <div class="flex flex-col gap-2 p-2">
                 <div class="flex flex-col gap-1">
-                  <span class="text-muted-foreground text-[10px]"
-                    >{m.new_session_new_worktree()}</span
-                  >
-                  <Input bind:value={branch} placeholder="feat/new-task" class="h-8 text-xs" />
+                  <span class="text-muted-foreground text-2xs">{m.new_session_new_worktree()}</span>
+                  <Input bind:value={branch} placeholder="feat/new-task" class="h-8 text-ui" />
                 </div>
-                <p class="text-muted-foreground text-[10px]">
+                <p class="text-muted-foreground text-2xs">
                   {m.new_session_worktree_description()}
                 </p>
                 <button
                   type="button"
-                  class="text-muted-foreground hover:text-foreground self-start text-[11px] underline"
+                  class="text-muted-foreground hover:text-foreground self-start text-2xs underline"
                   onclick={() => {
                     pathMode = "existing";
                     directoryOpen = false;
@@ -962,7 +962,7 @@
                 <Input
                   bind:value={localPath}
                   placeholder={m.new_session_path_placeholder()}
-                  class="h-8 font-mono text-xs"
+                  class="h-8 font-mono text-ui"
                   autofocus
                 />
                 <div class="flex flex-wrap items-center gap-1.5">
@@ -976,12 +976,12 @@
                   {/if}
                 </div>
                 {#if localPath.trim() !== "" && selectedCandidate === null}
-                  <p class="text-muted-foreground text-[10px]">
+                  <p class="text-muted-foreground text-2xs">
                     {m.new_session_unregistered_path()}
                   </p>
                 {/if}
                 {#if selectedCandidate && !selectedCandidate.exists}
-                  <p class="text-destructive text-[10px]">{m.new_session_path_not_exists()}</p>
+                  <p class="text-destructive text-2xs">{m.new_session_path_not_exists()}</p>
                 {/if}
               </div>
             {:else if pathCandidates.length > 0}
@@ -993,7 +993,7 @@
                   >
                     <span class="block truncate">{pathBasename(candidate.path)}</span>
                     <span
-                      class="text-muted-foreground block truncate text-[10px] {candidate.exists
+                      class="text-muted-foreground block truncate text-2xs {candidate.exists
                         ? ''
                         : 'text-destructive'}"
                       title={candidateLabel(candidate)}
@@ -1006,21 +1006,21 @@
               <div class="flex flex-wrap items-center gap-1 border-t p-1">
                 <button
                   type="button"
-                  class="text-muted-foreground hover:bg-accent hover:text-accent-foreground rounded-md px-2 py-1.5 text-[11px]"
+                  class="text-muted-foreground hover:bg-accent hover:text-accent-foreground rounded-md px-2 py-1.5 text-2xs"
                   onclick={openFolderBrowser}
                 >
                   {m.new_session_browse()}
                 </button>
                 <button
                   type="button"
-                  class="text-muted-foreground hover:bg-accent hover:text-accent-foreground rounded-md px-2 py-1.5 text-[11px]"
+                  class="text-muted-foreground hover:bg-accent hover:text-accent-foreground rounded-md px-2 py-1.5 text-2xs"
                   onclick={() => (useCustomPath = true)}
                 >
                   {m.new_session_enter_path()}
                 </button>
                 <button
                   type="button"
-                  class="text-muted-foreground hover:bg-accent hover:text-accent-foreground rounded-md px-2 py-1.5 text-[11px]"
+                  class="text-muted-foreground hover:bg-accent hover:text-accent-foreground rounded-md px-2 py-1.5 text-2xs"
                   onclick={() => {
                     pathMode = "new_worktree";
                     directoryOpen = false;
@@ -1031,7 +1031,7 @@
               </div>
             {:else}
               <div class="flex flex-col gap-2 p-2">
-                <p class="text-muted-foreground text-xs">
+                <p class="text-muted-foreground text-ui">
                   {m.new_session_no_candidate({
                     project: selectedProject?.name ?? m.new_session_this_project(),
                   })}
@@ -1042,7 +1042,7 @@
                   </Button>
                   <a
                     href="/projects"
-                    class="text-muted-foreground hover:text-foreground text-[11px] underline underline-offset-2"
+                    class="text-muted-foreground hover:text-foreground text-2xs underline underline-offset-2"
                   >
                     {m.new_session_go_to_project_settings()}
                   </a>
@@ -1050,7 +1050,7 @@
                 {#each otherNodesWithCandidates as otherNode (otherNode.node_id)}
                   <button
                     type="button"
-                    class="text-muted-foreground hover:text-foreground self-start text-[11px] underline"
+                    class="text-muted-foreground hover:text-foreground self-start text-2xs underline"
                     onclick={() => selectNode(otherNode.node_id)}
                   >
                     {m.new_session_registered_on_node({ node: otherNode.name })}
@@ -1072,12 +1072,12 @@
           >
             <div class="max-h-80 overflow-y-auto p-1">
               <div
-                class="text-muted-foreground px-2 py-1 text-[10px] font-medium tracking-wide uppercase"
+                class="text-muted-foreground px-2 py-1 text-2xs font-medium tracking-wide uppercase"
               >
                 {m.new_session_node_section()}
               </div>
               {#if nodes.length === 0}
-                <p class="text-muted-foreground px-2 py-1.5 text-xs">
+                <p class="text-muted-foreground px-2 py-1.5 text-ui">
                   {m.new_session_no_nodes()}
                 </p>
               {:else}
@@ -1092,7 +1092,7 @@
                       ></span>
                       <span class="truncate">{node.name}</span>
                     </span>
-                    <span class="text-muted-foreground block truncate text-[10px]">
+                    <span class="text-muted-foreground block truncate text-2xs">
                       {availability.statusText}
                     </span>
                   </PickerItem>
@@ -1101,7 +1101,7 @@
 
               <div class="border-t p-1 pt-2">
                 <div
-                  class="text-muted-foreground px-2 py-1 text-[10px] font-medium tracking-wide uppercase"
+                  class="text-muted-foreground px-2 py-1 text-2xs font-medium tracking-wide uppercase"
                 >
                   {m.new_session_ephemeral_section()}
                 </div>
@@ -1114,13 +1114,13 @@
                       <span class="block truncate">
                         {provisioner.description ?? provisioner.name}
                       </span>
-                      <span class="text-muted-foreground block truncate text-[10px]">
+                      <span class="text-muted-foreground block truncate text-2xs">
                         {provisioner.name}
                       </span>
                     </PickerItem>
                   {/each}
                 {:else if provisionerLoadError !== null}
-                  <div class="flex items-center gap-1.5 px-2 py-1 text-[11px]">
+                  <div class="flex items-center gap-1.5 px-2 py-1 text-2xs">
                     <span class="text-destructive truncate">{m.common_load_failed()}</span>
                     <button
                       type="button"
@@ -1131,10 +1131,10 @@
                     </button>
                   </div>
                 {:else}
-                  <p class="text-muted-foreground px-2 py-1 text-[11px]">
+                  <p class="text-muted-foreground px-2 py-1 text-2xs">
                     {m.new_session_provisioner_undefined()}
                   </p>
-                  <p class="text-muted-foreground px-2 pb-1 text-[10px]">
+                  <p class="text-muted-foreground px-2 pb-1 text-2xs">
                     {m.new_session_provisioner_config_hint()}
                   </p>
                 {/if}
@@ -1162,13 +1162,13 @@
           disabled={forkSessionId !== ""}
         >
           {#if catalogLoading}
-            <p class="text-muted-foreground flex items-center gap-1.5 px-2 py-2 text-xs">
+            <p class="text-muted-foreground flex items-center gap-1.5 px-2 py-2 text-ui">
               <LoaderCircleIcon class="size-3.5 animate-spin" />
               {m.common_loading()}
             </p>
           {:else if catalogError !== null}
             <div class="flex flex-col gap-2 p-2">
-              <p class="text-destructive break-words text-[11px]">{catalogError}</p>
+              <p class="text-destructive break-words text-2xs">{catalogError}</p>
               <Button
                 variant="outline"
                 size="sm"
@@ -1179,7 +1179,7 @@
               </Button>
             </div>
           {:else if availableAgents.length === 0}
-            <p class="text-muted-foreground p-2 text-xs">{m.new_session_no_agents()}</p>
+            <p class="text-muted-foreground p-2 text-ui">{m.new_session_no_agents()}</p>
           {:else}
             <div class="max-h-72 overflow-y-auto p-1">
               {#each availableAgents as agent (agent.id)}
@@ -1188,7 +1188,7 @@
                   onselect={() => selectAgent(agent.id)}
                 >
                   <span class="block truncate">{agent.name}</span>
-                  <span class="text-muted-foreground block truncate text-[10px]">
+                  <span class="text-muted-foreground block truncate text-2xs">
                     {agentHint(agent)}
                   </span>
                 </PickerItem>
@@ -1198,7 +1198,7 @@
           <div class="border-t p-1">
             <a
               href="/settings?tab=agents"
-              class="text-muted-foreground hover:bg-accent hover:text-accent-foreground block rounded-md px-2 py-1.5 text-xs"
+              class="text-muted-foreground hover:bg-accent hover:text-accent-foreground block rounded-md px-2 py-1.5 text-ui"
             >
               {m.new_session_manage_agents()}
             </a>
@@ -1237,9 +1237,9 @@
             icon={modelIcon}
             contentClass="w-72 p-0"
           >
-            <div class="flex flex-col gap-2 p-2 text-xs">
+            <div class="flex flex-col gap-2 p-2 text-ui">
               <p class="text-muted-foreground">{m.new_session_models_unavailable()}</p>
-              <p class="text-destructive break-words text-[10px]">{capabilitiesError}</p>
+              <p class="text-destructive break-words text-2xs">{capabilitiesError}</p>
               <Button
                 variant="outline"
                 size="sm"
@@ -1257,7 +1257,7 @@
             icon={modelIcon}
             contentClass="w-72 p-2"
           >
-            <p class="text-muted-foreground text-xs">{m.new_session_models_empty()}</p>
+            <p class="text-muted-foreground text-ui">{m.new_session_models_empty()}</p>
           </PickerPill>
         {:else}
           <PickerPill
@@ -1291,7 +1291,7 @@
       {/snippet}
     </ComposerCard>
 
-    <div class="min-h-4 text-center text-xs">
+    <div class="min-h-4 text-center text-ui">
       {#if busy}
         <span class="text-muted-foreground">{m.new_session_starting()}</span>
       {:else if blockingHint !== ""}
@@ -1342,7 +1342,7 @@
         {m.new_session_provisioner_test_description()}
       </Dialog.Description>
     </Dialog.Header>
-    <div class="flex flex-col gap-3 py-2 text-xs">
+    <div class="flex flex-col gap-3 py-2 text-ui">
       {#if testBusy}
         <div class="text-muted-foreground flex flex-col items-center justify-center gap-2 py-8">
           <LoaderCircleIcon class="text-primary size-6 animate-spin" />
@@ -1351,11 +1351,10 @@
       {:else if testResult}
         <div class="flex items-center gap-2 font-medium">
           {#if testResult.ok}
-            <CheckCircle2Icon class="size-5 text-green-500" />
-            <span class="text-green-600 dark:text-green-400">{m.new_session_test_success()}</span>
+            <CheckCircle2Icon class="text-ok size-5" />
+            <span class="text-ok">{m.new_session_test_success()}</span>
             {#if testResult.node_id}
-              <span class="text-muted-foreground font-mono text-[11px]">({testResult.node_id})</span
-              >
+              <span class="text-muted-foreground font-mono text-2xs">({testResult.node_id})</span>
             {/if}
           {:else}
             <XCircleIcon class="text-destructive size-5" />
@@ -1365,7 +1364,7 @@
 
         {#if testResult.error}
           <div
-            class="bg-destructive/10 text-destructive border-destructive/20 rounded-md border p-2.5 font-mono text-[11px] whitespace-pre-wrap"
+            class="bg-destructive/10 text-destructive border-destructive/20 rounded-md border p-2.5 font-mono text-2xs whitespace-pre-wrap"
           >
             {testResult.error}
           </div>
@@ -1373,9 +1372,9 @@
 
         {#if testResult.log_lines && testResult.log_lines.length > 0}
           <div class="flex flex-col gap-1">
-            <span class="text-muted-foreground text-[11px]">{m.new_session_run_log()}</span>
+            <span class="text-muted-foreground text-2xs">{m.new_session_run_log()}</span>
             <div
-              class="bg-muted text-foreground max-h-48 overflow-y-auto rounded-md p-2 font-mono text-[11px] leading-tight whitespace-pre-wrap"
+              class="bg-muted text-foreground max-h-48 overflow-y-auto rounded-md p-2 font-mono text-2xs leading-tight whitespace-pre-wrap"
             >
               {testResult.log_lines.join("\n")}
             </div>

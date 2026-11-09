@@ -2,7 +2,6 @@
   import ElicitationCard from "#lib/components/ElicitationCard.svelte";
   import PermissionCard from "#lib/components/PermissionCard.svelte";
   import { Button } from "#lib/components/ui/button/index.ts";
-  import { Card } from "#lib/components/ui/card/index.ts";
   import { formatRelativeTime } from "#lib/format.ts";
   import { m } from "#lib/paraglide/messages.js";
   import { shortId } from "#lib/session-status.ts";
@@ -26,11 +25,11 @@
   }
 </script>
 
-<div class="mx-auto flex max-w-5xl flex-col gap-4 p-4 md:p-6">
-  <div class="flex items-center justify-between gap-2">
-    <div>
-      <h1 class="text-xl font-semibold">{m.inbox_title()}</h1>
-      <p class="text-muted-foreground text-sm">
+<div class="desk-page">
+  <div class="flex flex-wrap items-end justify-between gap-3">
+    <div class="flex flex-col gap-1">
+      <h1 class="text-xl font-semibold tracking-tight">{m.inbox_title()}</h1>
+      <p class="text-muted-foreground text-ui">
         {m.inbox_subtitle()}
       </p>
     </div>
@@ -43,8 +42,10 @@
   {#if sync.inboxLoading && sorted.length === 0 && sortedElicitations.length === 0}
     <p class="text-muted-foreground text-sm">{m.common_loading()}</p>
   {:else if sync.inboxError !== null && sorted.length === 0 && sortedElicitations.length === 0}
-    <div class="flex flex-col items-start gap-2 rounded-md border border-destructive/40 p-3">
-      <p class="text-destructive text-sm">
+    <div
+      class="border-danger/30 bg-danger-soft/50 flex flex-col items-start gap-2 rounded-lg border p-3"
+    >
+      <p class="text-danger text-ui">
         {m.common_load_failed()}
         {sync.inboxError}
       </p>
@@ -54,79 +55,76 @@
       </Button>
     </div>
   {:else}
-    <section class="flex flex-col gap-3">
-      <h2 class="text-sm font-semibold">{m.inbox_approvals()}</h2>
+    <section class="flex flex-col gap-2">
+      <div class="flex items-center justify-between">
+        <h2 class="desk-label">{m.inbox_approvals()}</h2>
+        <span class="text-muted-foreground desk-mono text-2xs">{sorted.length}</span>
+      </div>
       {#if sorted.length === 0}
-        <p class="text-muted-foreground text-sm">{m.inbox_approvals_empty()}</p>
+        <p class="text-muted-foreground text-ui">{m.inbox_approvals_empty()}</p>
       {:else}
-        <ul class="flex list-none flex-col gap-3 p-0">
+        <ul class="border-border flex list-none flex-col border-t p-0">
           {#each sorted as request (request.request_id)}
-            <li>
-              <Card class="gap-0 p-0">
-                <div
-                  class="bg-muted/40 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-t-lg border-b px-3 py-2 text-xs"
+            <li class="border-border border-b py-4">
+              <div class="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-2xs">
+                <a
+                  href={`/sessions/${request.session_id}`}
+                  class="text-ui font-medium hover:underline"
                 >
-                  <a href={`/sessions/${request.session_id}`} class="font-medium hover:underline">
-                    {sessionTitle(request.session_id)}
-                  </a>
-                  <span class="text-muted-foreground">{nodeName(request.node_id)}</span>
-                  <span class="text-muted-foreground ml-auto">
-                    {formatRelativeTime(request.created_at)}
-                  </span>
-                </div>
-                <div class="p-3">
-                  <PermissionCard
-                    sessionId={request.session_id}
-                    requestId={request.request_id}
-                    toolName={request.tool_name}
-                    summary={request.summary}
-                    options={request.options}
-                    details={request.details}
-                    resolved={null}
-                    createdAt={request.created_at}
-                  />
-                </div>
-              </Card>
+                  {sessionTitle(request.session_id)}
+                </a>
+                <span class="text-muted-foreground desk-mono">{nodeName(request.node_id)}</span>
+                <span class="text-muted-foreground desk-mono ml-auto">
+                  {formatRelativeTime(request.created_at)}
+                </span>
+              </div>
+              <PermissionCard
+                sessionId={request.session_id}
+                requestId={request.request_id}
+                toolName={request.tool_name}
+                summary={request.summary}
+                options={request.options}
+                details={request.details}
+                resolved={null}
+                createdAt={request.created_at}
+              />
             </li>
           {/each}
         </ul>
       {/if}
     </section>
 
-    <section class="flex flex-col gap-3">
-      <h2 class="text-sm font-semibold">{m.inbox_questions()}</h2>
+    <section class="flex flex-col gap-2">
+      <div class="flex items-center justify-between">
+        <h2 class="desk-label">{m.inbox_questions()}</h2>
+        <span class="text-muted-foreground desk-mono text-2xs">{sortedElicitations.length}</span>
+      </div>
       {#if sortedElicitations.length === 0}
-        <p class="text-muted-foreground text-sm">{m.inbox_questions_empty()}</p>
+        <p class="text-muted-foreground text-ui">{m.inbox_questions_empty()}</p>
       {:else}
-        <ul class="flex list-none flex-col gap-3 p-0">
+        <ul class="border-border flex list-none flex-col border-t p-0">
           {#each sortedElicitations as elicitation (elicitation.elicitation_id)}
-            <li>
-              <Card class="gap-0 p-0">
-                <div
-                  class="bg-muted/40 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-t-lg border-b px-3 py-2 text-xs"
+            <li class="border-border border-b py-4">
+              <div class="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-2xs">
+                <a
+                  href={`/sessions/${elicitation.session_id}`}
+                  class="text-ui font-medium hover:underline"
                 >
-                  <a
-                    href={`/sessions/${elicitation.session_id}`}
-                    class="font-medium hover:underline"
-                  >
-                    {sessionTitle(elicitation.session_id)}
-                  </a>
-                  <span class="text-muted-foreground">{nodeName(elicitation.node_id)}</span>
-                  <span class="text-muted-foreground ml-auto">
-                    {formatRelativeTime(elicitation.created_at)}
-                  </span>
-                </div>
-                <div class="p-3">
-                  <ElicitationCard
-                    sessionId={elicitation.session_id}
-                    elicitationId={elicitation.elicitation_id}
-                    message={elicitation.message}
-                    requestedSchema={elicitation.requested_schema}
-                    resolved={null}
-                    createdAt={elicitation.created_at}
-                  />
-                </div>
-              </Card>
+                  {sessionTitle(elicitation.session_id)}
+                </a>
+                <span class="text-muted-foreground desk-mono">{nodeName(elicitation.node_id)}</span>
+                <span class="text-muted-foreground desk-mono ml-auto">
+                  {formatRelativeTime(elicitation.created_at)}
+                </span>
+              </div>
+              <ElicitationCard
+                sessionId={elicitation.session_id}
+                elicitationId={elicitation.elicitation_id}
+                message={elicitation.message}
+                requestedSchema={elicitation.requested_schema}
+                resolved={null}
+                createdAt={elicitation.created_at}
+              />
             </li>
           {/each}
         </ul>

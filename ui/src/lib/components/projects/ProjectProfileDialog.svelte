@@ -65,11 +65,11 @@
     {#if projectSettings}
       <div class="flex flex-col gap-3 text-sm">
         <div class="grid gap-1">
-          <span class="text-muted-foreground text-xs">Display name</span>
+          <span class="text-muted-foreground text-ui">Display name</span>
           <span class="font-medium">{projectSettings.name}</span>
         </div>
         <div class="grid gap-1">
-          <span class="text-muted-foreground text-xs">Identity</span>
+          <span class="text-muted-foreground text-ui">Identity</span>
           <span>{projectSettings.identity.kind}</span>
         </div>
         <form class="grid gap-2" onsubmit={saveProjectKey}>
@@ -79,20 +79,20 @@
               id="project-key"
               bind:value={projectKey}
               placeholder="my-project"
-              class="font-mono text-xs"
+              class="font-mono text-ui"
             />
             <Button type="submit" disabled={projectSettingsBusy || projectKey.trim() === ""}>
               Save
             </Button>
           </div>
-          <p class="text-muted-foreground text-xs">
+          <p class="text-muted-foreground text-ui">
             Use 1-64 characters of [a-zA-Z0-9._-]. To share a project across machines, set the same
             key on each machine.
           </p>
         </form>
         <div class="grid gap-1">
-          <span class="text-muted-foreground text-xs">Bindings</span>
-          <ul class="flex list-none flex-col gap-1 p-0 text-xs">
+          <span class="text-muted-foreground text-ui">Bindings</span>
+          <ul class="flex list-none flex-col gap-1 p-0 text-ui">
             {#each projectSettings.bindings as binding (`${binding.node_id}|${binding.local_path}`)}
               <li class="flex flex-wrap items-center gap-2 rounded-md border px-2 py-1.5">
                 <Badge variant="outline">{nodeName(binding.node_id)}</Badge>

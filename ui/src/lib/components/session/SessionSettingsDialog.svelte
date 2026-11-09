@@ -58,7 +58,7 @@
       <Dialog.Description>{m.new_session_settings_description()}</Dialog.Description>
     </Dialog.Header>
 
-    <div class="flex max-h-[60vh] flex-col gap-5 overflow-y-auto pr-1 text-xs">
+    <div class="flex max-h-[60vh] flex-col gap-5 overflow-y-auto pr-1 text-ui">
       <section class="flex flex-col gap-2">
         <h3 class="flex items-center gap-1.5 font-medium">
           {#if isProvisionerMode}
@@ -76,7 +76,7 @@
             <Input
               bind:value={branch}
               placeholder={m.new_session_clone_branch_placeholder()}
-              class="h-8 text-xs"
+              class="h-8 text-ui"
             />
           </div>
           <div class="flex items-center justify-between gap-2 rounded-md border p-2">
@@ -86,7 +86,7 @@
             <Button
               variant="outline"
               size="sm"
-              class="h-7 px-2 text-xs"
+              class="h-7 px-2 text-ui"
               disabled={!provisionerName || testBusy}
               onclick={onTest}
             >
@@ -120,14 +120,14 @@
             <div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
               <div class="flex flex-col gap-1">
                 <Label>{m.new_session_new_worktree()}</Label>
-                <Input bind:value={branch} placeholder="feat/new-task" class="h-8 text-xs" />
+                <Input bind:value={branch} placeholder="feat/new-task" class="h-8 text-ui" />
               </div>
               <div class="flex flex-col gap-1">
                 <Label>{m.new_session_base_branch()}</Label>
-                <Input bind:value={baseBranch} placeholder="main" class="h-8 text-xs" />
+                <Input bind:value={baseBranch} placeholder="main" class="h-8 text-ui" />
               </div>
             </div>
-            <p class="text-muted-foreground text-[11px]">
+            <p class="text-muted-foreground text-2xs">
               {m.new_session_worktree_description()}
             </p>
           {/if}
@@ -146,7 +146,7 @@
             <select
               bind:value={sessionMode}
               onchange={onModeChange}
-              class="border-input bg-background focus-visible:ring-ring/40 h-8 rounded-md border px-2 text-xs outline-none focus-visible:ring-1"
+              class="border-input bg-background focus-visible:ring-ring/40 h-8 rounded-md border px-2 text-ui outline-none focus-visible:ring-1"
             >
               <option value="default">{m.new_session_mode_default()}</option>
               <option value="code">{m.new_session_mode_code()}</option>
@@ -158,7 +158,7 @@
             <Input
               bind:value={extraArgsText}
               placeholder={m.new_session_extra_args_placeholder()}
-              class="h-8 font-mono text-xs"
+              class="h-8 font-mono text-ui"
             />
           </div>
         </div>
@@ -168,7 +168,7 @@
             <Label>{m.new_session_agent()}</Label>
             <button
               type="button"
-              class="text-muted-foreground hover:text-foreground text-[11px] underline disabled:pointer-events-none disabled:opacity-50"
+              class="text-muted-foreground hover:text-foreground text-2xs underline disabled:pointer-events-none disabled:opacity-50"
               disabled={forkActive}
               onclick={() => (manualAgent = !manualAgent)}
             >
@@ -180,17 +180,17 @@
               bind:value={agentId}
               oninput={onAgentIdInput}
               placeholder={m.new_session_agent_id_placeholder()}
-              class="h-8 font-mono text-xs"
+              class="h-8 font-mono text-ui"
               disabled={forkActive}
             />
           {:else}
-            <p class="text-muted-foreground text-[11px]">{m.new_session_agent_choose_hint()}</p>
+            <p class="text-muted-foreground text-2xs">{m.new_session_agent_choose_hint()}</p>
           {/if}
         </div>
 
         <a
           href="/settings?tab=agents"
-          class="text-muted-foreground hover:text-foreground text-[11px] underline"
+          class="text-muted-foreground hover:text-foreground text-2xs underline"
         >
           {m.new_session_manage_agents()}
         </a>

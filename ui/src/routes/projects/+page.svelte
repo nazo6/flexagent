@@ -43,11 +43,11 @@
   }
 </script>
 
-<div class="mx-auto flex max-w-5xl flex-col gap-4 p-4 md:p-6">
-  <div class="flex items-center justify-between gap-2">
-    <div>
-      <h1 class="text-xl font-semibold">{m.projects_title()}</h1>
-      <p class="text-muted-foreground text-sm">{m.projects_subtitle()}</p>
+<div class="desk-page">
+  <div class="flex flex-wrap items-end justify-between gap-3">
+    <div class="flex flex-col gap-1">
+      <h1 class="text-xl font-semibold tracking-tight">{m.projects_title()}</h1>
+      <p class="text-muted-foreground text-ui">{m.projects_subtitle()}</p>
     </div>
     <div class="flex items-center gap-1.5">
       <Button size="sm" onclick={() => addDialog.show()} title={m.projects_add_folder_title()}>
@@ -83,8 +83,10 @@
   {#if sync.projectsLoading && sync.projects.length === 0}
     <p class="text-muted-foreground text-sm">{m.common_loading()}</p>
   {:else if sync.projectsError !== null && sync.projects.length === 0}
-    <div class="flex flex-col items-start gap-2 rounded-md border border-destructive/40 p-3">
-      <p class="text-destructive text-sm">
+    <div
+      class="border-danger/30 bg-danger-soft/50 flex flex-col items-start gap-2 rounded-lg border p-3"
+    >
+      <p class="text-danger text-ui">
         {m.common_load_failed()}
         {sync.projectsError}
       </p>
@@ -96,19 +98,21 @@
   {:else if sync.projects.length === 0}
     <p class="text-muted-foreground text-sm">{m.projects_empty()}</p>
   {:else}
-    {#each sync.projects as project (project.project_id)}
-      <ProjectCard
-        {project}
-        worktreeState={worktrees.entry(project.project_id)}
-        {nodeName}
-        onRefreshWorktrees={(projectId) => void worktrees.load(projectId)}
-        onCreateWorktree={(projectId) => worktreeDialog.openCreate(projectId)}
-        onOpenSettings={(entry) => profileDialog.open(entry)}
-        onPrune={(projectId) => worktreeDialog.openPrune(projectId)}
-        onNewSession={openNewSession}
-        onRemoveWorktree={(projectId, worktree) => worktreeDialog.openRemove(projectId, worktree)}
-      />
-    {/each}
+    <div class="border-border flex flex-col border-t">
+      {#each sync.projects as project (project.project_id)}
+        <ProjectCard
+          {project}
+          worktreeState={worktrees.entry(project.project_id)}
+          {nodeName}
+          onRefreshWorktrees={(projectId) => void worktrees.load(projectId)}
+          onCreateWorktree={(projectId) => worktreeDialog.openCreate(projectId)}
+          onOpenSettings={(entry) => profileDialog.open(entry)}
+          onPrune={(projectId) => worktreeDialog.openPrune(projectId)}
+          onNewSession={openNewSession}
+          onRemoveWorktree={(projectId, worktree) => worktreeDialog.openRemove(projectId, worktree)}
+        />
+      {/each}
+    </div>
   {/if}
 </div>
 

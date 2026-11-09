@@ -187,7 +187,7 @@
 </script>
 
 <div class="flex flex-col gap-2">
-  <div class="flex flex-wrap items-center gap-2 text-xs">
+  <div class="flex flex-wrap items-center gap-2 text-ui">
     <Badge
       variant={status === "connected"
         ? "secondary"
@@ -231,7 +231,7 @@
         {m.terminal_blocked_notice_before()}<code>localhost:7860</code
         >{m.terminal_blocked_notice_after()}
         {#if statusMessage !== null}
-          <span class="text-muted-foreground block text-xs">{statusMessage}</span>
+          <span class="text-muted-foreground block text-ui">{statusMessage}</span>
         {/if}
       </p>
     </div>
@@ -244,7 +244,7 @@
 
   <div
     bind:this={container}
-    class="bg-[#0f172a] h-[50svh] min-h-48 w-full overflow-hidden rounded-lg border"
+    class="h-[50svh] min-h-48 w-full overflow-hidden rounded-lg border border-border bg-[#17140f]"
   ></div>
 
   <!-- Mobile virtual key bar (hidden on desktop) -->

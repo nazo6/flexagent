@@ -73,9 +73,7 @@
   }
 </script>
 
-<div
-  class="bg-card/70 border-border/70 overflow-hidden rounded-xl border text-xs shadow-2xs transition-colors"
->
+<div class="bg-card border-border overflow-hidden rounded-lg border text-ui transition-colors">
   <!-- Group header -->
   <button
     type="button"
@@ -98,17 +96,17 @@
 
     <div class="flex items-center gap-2">
       {#if hasInProgress}
-        <span class="flex items-center gap-1 text-primary text-[11px]">
+        <span class="flex items-center gap-1 text-signal text-2xs">
           <LoaderCircleIcon class="size-3.5 animate-spin" />
           <span>{m.chat_tool_running()}</span>
         </span>
       {:else if hasFailed}
-        <span class="flex items-center gap-1 text-destructive text-[11px]">
+        <span class="flex items-center gap-1 text-destructive text-2xs">
           <CircleXIcon class="size-3.5" />
           <span>{m.chat_tool_error()}</span>
         </span>
       {:else if allCompleted}
-        <CircleCheckIcon class="size-4 text-emerald-500" />
+        <CircleCheckIcon class="size-4 text-ok" />
       {/if}
     </div>
   </button>
@@ -129,7 +127,7 @@
             role="button"
             tabindex="0"
             class={cn(
-              "flex items-center justify-between px-3 py-1.5 text-xs transition-colors",
+              "flex items-center justify-between px-3 py-1.5 text-ui transition-colors",
               hasDetailContent ? "cursor-pointer hover:bg-accent/30" : "cursor-default",
             )}
             onclick={(e) => {
@@ -158,18 +156,18 @@
 
               <!-- Tool name badge (Read, Edit, Terminal, Search, etc.) -->
               <span
-                class="rounded bg-muted px-1.5 py-0.2 font-mono text-[10px] font-semibold text-foreground/85 shrink-0 border border-border/60"
+                class="rounded bg-muted px-1.5 py-0.2 font-mono text-2xs font-semibold text-foreground/85 shrink-0 border border-border/60"
               >
                 {toolInfo.name}
               </span>
 
               <!-- Command / arguments / target paths -->
-              <span class="truncate font-mono text-[11px] text-foreground/90">
+              <span class="truncate font-mono text-2xs text-foreground/90">
                 {toolInfo.detail}
               </span>
 
               {#if tool.locations.length > 0 && !toolInfo.detail.includes(tool.locations[0])}
-                <span class="text-muted-foreground truncate font-mono text-[10px]">
+                <span class="text-muted-foreground truncate font-mono text-2xs">
                   ({tool.locations.join(", ")})
                 </span>
               {/if}
@@ -178,15 +176,15 @@
             <!-- Status & expand toggle -->
             <div class="ml-2 flex shrink-0 items-center gap-2">
               {#if tool.status === "in_progress"}
-                <LoaderCircleIcon class="size-3 animate-spin text-primary" />
+                <LoaderCircleIcon class="size-3 animate-spin text-signal" />
               {:else if tool.status === "completed"}
-                <CircleCheckIcon class="size-3.5 text-emerald-500" />
+                <CircleCheckIcon class="size-3.5 text-ok" />
               {:else if tool.status === "failed"}
                 <CircleXIcon class="size-3.5 text-destructive" />
               {/if}
 
               {#if hasDetailContent}
-                <span class="text-muted-foreground text-[10px]">
+                <span class="text-muted-foreground text-2xs">
                   {isExpanded ? "▲" : "▼"}
                 </span>
               {/if}
@@ -196,22 +194,22 @@
           <!-- Detail content (diff / log output) -->
           {#if isExpanded && hasDetailContent}
             <div class="bg-background/80 border-border/60 border-t p-2.5 flex flex-col gap-2">
-              <div class="flex items-center gap-2 text-[11px]">
-                <span class="text-muted-foreground text-[10px]">{m.chat_tool_label()}</span>
+              <div class="flex items-center gap-2 text-2xs">
+                <span class="text-muted-foreground text-2xs">{m.chat_tool_label()}</span>
                 <span class="font-mono font-semibold text-foreground">{toolInfo.name}</span>
                 {#if tool.title && tool.title !== toolInfo.name}
-                  <span class="text-muted-foreground text-[10px]">{m.chat_tool_detail()}</span>
+                  <span class="text-muted-foreground text-2xs">{m.chat_tool_detail()}</span>
                   <span class="font-mono text-muted-foreground truncate">{tool.title}</span>
                 {/if}
                 {#if tool.status}
-                  <span class="text-muted-foreground text-[10px]">{m.chat_tool_status()}</span>
+                  <span class="text-muted-foreground text-2xs">{m.chat_tool_status()}</span>
                   <span class="font-mono text-muted-foreground">{tool.status}</span>
                 {/if}
               </div>
 
               {#if tool.locations.length > 0}
-                <div class="flex flex-col gap-0.5 text-[11px]">
-                  <span class="text-muted-foreground text-[10px]">
+                <div class="flex flex-col gap-0.5 text-2xs">
+                  <span class="text-muted-foreground text-2xs">
                     {m.chat_tool_target_files()}
                   </span>
                   <ul class="flex flex-col gap-0.5 font-mono text-muted-foreground p-0 list-none">
@@ -224,16 +222,16 @@
 
               {#if tool.diff !== null}
                 <div class="flex flex-col gap-1">
-                  <span class="text-muted-foreground text-[10px]">Diff:</span>
+                  <span class="text-muted-foreground text-2xs">Diff:</span>
                   <DiffText diff={tool.diff.unified_diff} maxHeight="12rem" />
                 </div>
               {/if}
 
               {#if tool.rawOutput !== null && tool.rawOutput !== ""}
                 <div class="flex flex-col gap-1">
-                  <span class="text-muted-foreground text-[10px]">{m.chat_tool_output()}</span>
+                  <span class="text-muted-foreground text-2xs">{m.chat_tool_output()}</span>
                   <pre
-                    class="bg-muted/40 max-h-40 overflow-auto rounded-md border p-2 font-mono text-[11px] whitespace-pre-wrap">{tool.rawOutput}</pre>
+                    class="bg-muted/40 max-h-40 overflow-auto rounded-md border p-2 font-mono text-2xs whitespace-pre-wrap">{tool.rawOutput}</pre>
                 </div>
               {/if}
             </div>

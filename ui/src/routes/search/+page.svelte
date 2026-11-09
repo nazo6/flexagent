@@ -1,6 +1,5 @@
 <script lang="ts">
   import { Button } from "#lib/components/ui/button/index.ts";
-  import { Card } from "#lib/components/ui/card/index.ts";
   import { Input } from "#lib/components/ui/input/index.ts";
   import { formatRelativeTime } from "#lib/format.ts";
   import type { SearchHit } from "#lib/generated/bindings.ts";
@@ -57,13 +56,13 @@
   }
 </script>
 
-<div class="mx-auto flex max-w-5xl flex-col gap-4 p-4 md:p-6">
-  <div>
-    <h1 class="text-xl font-semibold">{m.search_title()}</h1>
-    <p class="text-muted-foreground text-sm">
+<div class="desk-page">
+  <div class="flex flex-col gap-1">
+    <h1 class="text-xl font-semibold tracking-tight">{m.search_title()}</h1>
+    <p class="text-muted-foreground text-ui">
       {m.search_description()}
       {m.search_source_label()}
-      <code>{roleLabel}</code>
+      <code class="bg-muted rounded px-1 py-0.5 font-mono text-2xs">{roleLabel}</code>
     </p>
   </div>
 
@@ -76,30 +75,28 @@
   </form>
 
   {#if searched && hits.length === 0}
-    <p class="text-muted-foreground text-sm">{m.search_empty()}</p>
+    <p class="text-muted-foreground text-ui">{m.search_empty()}</p>
   {:else if hits.length > 0}
-    <ul class="flex list-none flex-col gap-2 p-0">
+    <ul class="border-border flex list-none flex-col border-t p-0">
       {#each hits as hit (hit.event_id)}
-        <li>
-          <Card class="gap-1.5 p-3">
-            <div class="flex flex-wrap items-center gap-2 text-xs">
-              <a class="font-medium hover:underline" href={`/sessions/${hit.session_id}`}>
-                {sessionTitle(hit.session_id)}
-              </a>
-              <span class="text-muted-foreground font-mono">#{hit.node_seq}</span>
-              <span class="text-muted-foreground">{hit.event_type}</span>
-              <span class="text-muted-foreground ml-auto">
-                {formatRelativeTime(hit.created_at)}
-              </span>
-            </div>
-            <p class="text-sm break-words whitespace-pre-wrap">
-              {#each segments(hit.snippet) as segment}
-                {#if segment.match}
-                  <mark class="bg-yellow-200 text-inherit dark:bg-yellow-800">{segment.text}</mark>
-                {:else}{segment.text}{/if}
-              {/each}
-            </p>
-          </Card>
+        <li class="border-border flex flex-col gap-1 border-b py-3">
+          <div class="flex flex-wrap items-center gap-2 text-2xs">
+            <a class="text-ui font-medium hover:underline" href={`/sessions/${hit.session_id}`}>
+              {sessionTitle(hit.session_id)}
+            </a>
+            <span class="text-muted-foreground desk-mono">#{hit.node_seq}</span>
+            <span class="text-muted-foreground desk-mono">{hit.event_type}</span>
+            <span class="text-muted-foreground desk-mono ml-auto">
+              {formatRelativeTime(hit.created_at)}
+            </span>
+          </div>
+          <p class="text-ui break-words whitespace-pre-wrap">
+            {#each segments(hit.snippet) as segment}
+              {#if segment.match}
+                <mark class="bg-signal-soft text-ink rounded-sm px-0.5">{segment.text}</mark>
+              {:else}{segment.text}{/if}
+            {/each}
+          </p>
         </li>
       {/each}
     </ul>

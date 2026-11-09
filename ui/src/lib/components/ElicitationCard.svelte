@@ -151,25 +151,27 @@
   }
 </script>
 
-<div class="bg-card flex flex-col gap-3 rounded-lg border p-3">
+<div
+  class="bg-card border-border flex flex-col gap-3 rounded-lg border border-l-2 border-l-signal p-3"
+>
   <div class="flex flex-wrap items-start justify-between gap-2">
     <div class="flex min-w-0 flex-col gap-1">
       <div class="flex items-center gap-2">
         <CircleHelpIcon class="text-muted-foreground size-4 shrink-0" />
-        <span class="text-xs font-medium">{m.chat_elicitation_heading()}</span>
+        <span class="text-ui font-medium">{m.chat_elicitation_heading()}</span>
         {#if resolved}
           <Badge variant="secondary">
             {resolvedLabel[resolved.action]} ({resolved.resolvedBy})
           </Badge>
         {:else if createdAt !== null}
-          <span class="text-muted-foreground text-xs">{formatRelativeTime(createdAt)}</span>
+          <span class="text-muted-foreground text-ui">{formatRelativeTime(createdAt)}</span>
         {/if}
       </div>
       <p class="text-sm break-words">{message}</p>
     </div>
     <a
       href={`/sessions/${sessionId}`}
-      class="text-muted-foreground hover:text-foreground flex shrink-0 items-center gap-0.5 text-xs"
+      class="text-muted-foreground hover:text-foreground flex shrink-0 items-center gap-0.5 text-ui"
     >
       {m.chat_open_session()}
       <ChevronRightIcon class="size-3" />
@@ -186,7 +188,7 @@
             {#if required.has(key)}<span class="text-destructive">*</span>{/if}
           </Label>
           {#if property.description}
-            <p class="text-muted-foreground text-xs">{property.description}</p>
+            <p class="text-muted-foreground text-ui">{property.description}</p>
           {/if}
           {#if property.enum || property.oneOf}
             <select

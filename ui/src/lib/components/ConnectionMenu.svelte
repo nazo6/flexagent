@@ -113,7 +113,7 @@
         variant="outline"
         size="sm"
         {...props}
-        class={cn("gap-1.5 text-xs", className)}
+        class={cn("gap-1.5 text-ui", className)}
         title={m.connection_current_target_tooltip({ role: roleLabel, origin: originLabel })}
       >
         <div class="flex items-center gap-1.5 min-w-0">
@@ -128,7 +128,7 @@
     <DropdownMenu.Label>{m.connection_current_target()}</DropdownMenu.Label>
     <DropdownMenu.Item disabled>
       <span class="truncate">{originLabel}</span>
-      <span class="text-muted-foreground ml-auto text-xs">{roleLabel}</span>
+      <span class="text-muted-foreground ml-auto text-ui">{roleLabel}</span>
     </DropdownMenu.Item>
     <DropdownMenu.Separator />
     {#if connection.availableTargets.length > 0}
@@ -137,7 +137,7 @@
         <DropdownMenu.Item onSelect={() => connection.switchTo(target.id)}>
           <CableIcon />
           <span class="flex-1 truncate">{target.label}</span>
-          <span class="text-muted-foreground text-xs">{target.url}</span>
+          <span class="text-muted-foreground text-ui">{target.url}</span>
         </DropdownMenu.Item>
       {/each}
       <DropdownMenu.Separator />

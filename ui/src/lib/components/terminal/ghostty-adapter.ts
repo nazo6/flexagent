@@ -1,29 +1,29 @@
 import { FitAddon, Terminal, init } from "ghostty-web";
 import type { ITerminalAdapter, TerminalDimensions } from "./types";
 
-/** Dark terminal color palette (matches the app's dark background). */
+/** Dark terminal color palette (matches the Desk dark background). */
 const TERMINAL_THEME = {
-  background: "#0f172a",
-  foreground: "#e2e8f0",
-  cursor: "#7dd3fc",
-  cursorAccent: "#0f172a",
-  selectionBackground: "#334155",
-  black: "#0f172a",
-  red: "#f87171",
-  green: "#4ade80",
-  yellow: "#facc15",
-  blue: "#60a5fa",
-  magenta: "#c084fc",
-  cyan: "#22d3ee",
-  white: "#e2e8f0",
-  brightBlack: "#64748b",
-  brightRed: "#fca5a5",
-  brightGreen: "#86efac",
-  brightYellow: "#fde047",
-  brightBlue: "#93c5fd",
-  brightMagenta: "#d8b4fe",
-  brightCyan: "#67e8f9",
-  brightWhite: "#f8fafc",
+  background: "#17140f",
+  foreground: "#ece6da",
+  cursor: "#e0a05a",
+  cursorAccent: "#17140f",
+  selectionBackground: "#3a3327",
+  black: "#17140f",
+  red: "#f08a7e",
+  green: "#9ac58c",
+  yellow: "#e0a95e",
+  blue: "#93b8f0",
+  magenta: "#c9a7e8",
+  cyan: "#8fcfc4",
+  white: "#ece6da",
+  brightBlack: "#9a9184",
+  brightRed: "#f4a79d",
+  brightGreen: "#b3d8a8",
+  brightYellow: "#efc98c",
+  brightBlue: "#b3ccf5",
+  brightMagenta: "#ddc3f2",
+  brightCyan: "#b1e1da",
+  brightWhite: "#faf6ec",
 } as const;
 
 /** Standard adapter backed by `ghostty-web` (libghostty WASM + Canvas 2D). */

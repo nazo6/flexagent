@@ -60,25 +60,27 @@
   }
 </script>
 
-<div class="bg-card flex flex-col gap-3 rounded-lg border p-3">
+<div
+  class="bg-card border-border flex flex-col gap-3 rounded-lg border border-l-2 border-l-warn p-3"
+>
   <div class="flex flex-wrap items-start justify-between gap-2">
     <div class="flex min-w-0 flex-col gap-1">
       <div class="flex items-center gap-2">
         <ShieldCheckIcon class="text-muted-foreground size-4 shrink-0" />
-        <span class="font-mono text-xs font-medium">{toolName}</span>
+        <span class="desk-mono text-2xs font-medium">{toolName}</span>
         {#if resolved}
           <Badge variant="secondary">
             {resolved.selectedOptionId} ({resolved.resolvedBy})
           </Badge>
         {:else if createdAt !== null}
-          <span class="text-muted-foreground text-xs">{formatRelativeTime(createdAt)}</span>
+          <span class="text-muted-foreground text-2xs">{formatRelativeTime(createdAt)}</span>
         {/if}
       </div>
       <p class="text-sm break-words">{summary}</p>
     </div>
     <a
       href={`/sessions/${sessionId}`}
-      class="text-muted-foreground hover:text-foreground flex shrink-0 items-center gap-0.5 text-xs"
+      class="text-muted-foreground hover:text-foreground flex shrink-0 items-center gap-0.5 text-2xs"
     >
       {m.chat_open_session()}
       <ChevronRightIcon class="size-3" />
@@ -88,12 +90,12 @@
   {#if detailsJson !== null}
     <details class="group">
       <summary
-        class="text-muted-foreground hover:text-foreground cursor-pointer text-xs select-none"
+        class="text-muted-foreground hover:text-foreground cursor-pointer text-2xs select-none"
       >
         {m.chat_permission_details()}
       </summary>
       <pre
-        class="bg-muted/50 mt-2 max-h-56 overflow-auto rounded-md p-2 font-mono text-xs whitespace-pre-wrap">{detailsJson}</pre>
+        class="bg-muted/50 border-border mt-2 max-h-56 overflow-auto rounded-md border p-2 font-mono text-ui whitespace-pre-wrap">{detailsJson}</pre>
     </details>
   {/if}
 

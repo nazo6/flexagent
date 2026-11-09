@@ -232,8 +232,8 @@
 
 <div class="flex h-full w-full flex-col overflow-hidden bg-background">
   <!-- Session header -->
-  <header class="bg-card/80 border-b px-3 py-2 shrink-0 backdrop-blur">
-    <div class="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5">
+  <header class="bg-card/85 border-b border-border px-4 py-2.5 shrink-0 backdrop-blur">
+    <div class="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
       <!-- Left: back link + title + node status -->
       <div class="flex min-w-0 flex-1 items-center gap-2">
         <a
@@ -246,7 +246,7 @@
 
         <div class="flex min-w-0 flex-col gap-0.5">
           <div class="flex items-center gap-2">
-            <h1 class="truncate text-sm font-semibold tracking-tight">
+            <h1 class="truncate text-[15px] font-semibold tracking-tight">
               {session?.title ?? m.session_title_fallback()}
             </h1>
             {#if currentStatus}
@@ -254,7 +254,7 @@
             {/if}
           </div>
 
-          <div class="text-muted-foreground flex flex-wrap items-center gap-x-2 text-[11px]">
+          <div class="text-muted-foreground flex flex-wrap items-center gap-x-2 text-2xs">
             <!-- Node availability status -->
             <NodeStatusBadge node={sessionNode} showNodeName={true} />
             <span class="opacity-40">/</span>
@@ -264,20 +264,20 @@
               <span class="font-mono">{session.git_branch}</span>
             {/if}
             {#if session?.is_worktree}
-              <span class="rounded bg-muted px-1 text-[10px]">wt</span>
+              <span class="bg-muted rounded px-1 text-2xs">wt</span>
             {/if}
             {#if session?.local_path}
               <span class="opacity-40">/</span>
               <button
                 type="button"
-                class="hover:text-foreground inline-flex items-center gap-1 font-mono text-[11px] truncate max-w-44 sm:max-w-xs md:max-w-md transition-colors cursor-pointer"
+                class="hover:text-foreground inline-flex items-center gap-1 font-mono text-2xs truncate max-w-44 sm:max-w-xs md:max-w-md transition-colors cursor-pointer"
                 title={m.session_working_dir_copy_title({ path: session.local_path })}
                 onclick={() => {
                   navigator.clipboard.writeText(session.local_path);
                   toast.success(m.session_working_dir_copied());
                 }}
               >
-                <FolderIcon class="size-3 shrink-0 text-amber-500/80" />
+                <FolderIcon class="text-signal size-3.5 shrink-0" />
                 <span class="truncate">{session.local_path}</span>
               </button>
             {/if}
@@ -302,10 +302,8 @@
           <button
             type="button"
             class={cn(
-              "px-2.5 py-1 text-xs font-medium rounded",
-              activeTab === "chat"
-                ? "bg-background shadow-xs text-foreground"
-                : "text-muted-foreground",
+              "px-2.5 py-1 text-ui font-medium rounded",
+              activeTab === "chat" ? "bg-background text-foreground" : "text-muted-foreground",
             )}
             onclick={() => (activeTab = "chat")}
           >
@@ -314,10 +312,8 @@
           <button
             type="button"
             class={cn(
-              "px-2.5 py-1 text-xs font-medium rounded",
-              activeTab === "diff"
-                ? "bg-background shadow-xs text-foreground"
-                : "text-muted-foreground",
+              "px-2.5 py-1 text-ui font-medium rounded",
+              activeTab === "diff" ? "bg-background text-foreground" : "text-muted-foreground",
             )}
             onclick={() => (activeTab = "diff")}
           >
@@ -326,10 +322,8 @@
           <button
             type="button"
             class={cn(
-              "px-2.5 py-1 text-xs font-medium rounded",
-              activeTab === "terminal"
-                ? "bg-background shadow-xs text-foreground"
-                : "text-muted-foreground",
+              "px-2.5 py-1 text-ui font-medium rounded",
+              activeTab === "terminal" ? "bg-background text-foreground" : "text-muted-foreground",
             )}
             onclick={() => (activeTab = "terminal")}
           >
@@ -340,9 +334,9 @@
         <!-- Desktop: side panel toggles -->
         <div class="hidden items-center gap-1 md:flex">
           <Button
-            variant={sidePanelMode === "diff" ? "secondary" : "outline"}
+            variant={sidePanelMode === "diff" ? "secondary" : "ghost"}
             size="sm"
-            class="h-7 text-xs gap-1.5"
+            class="h-8 text-ui gap-1.5"
             onclick={() => toggleSidePanel("diff")}
             title={m.session_diff_panel_toggle_title()}
           >
@@ -351,9 +345,9 @@
           </Button>
 
           <Button
-            variant={sidePanelMode === "terminal" ? "secondary" : "outline"}
+            variant={sidePanelMode === "terminal" ? "secondary" : "ghost"}
             size="sm"
-            class="h-7 text-xs gap-1.5"
+            class="h-8 text-ui gap-1.5"
             onclick={() => toggleSidePanel("terminal")}
             title={m.session_terminal_panel_toggle_title()}
           >
@@ -367,9 +361,9 @@
         <!-- Resume button (only for stopped sessions without native restore support) -->
         {#if canResume}
           <Button
-            variant="outline"
+            variant="ghost"
             size="sm"
-            class="h-7 text-xs gap-1"
+            class="h-8 text-ui gap-1"
             disabled={resuming}
             onclick={handleResumeSession}
             title={m.session_resume_button_title()}
@@ -382,9 +376,9 @@
         <!-- Fork button (only when the agent supports ACP-native session/fork) -->
         {#if session?.fork_supported}
           <Button
-            variant="outline"
+            variant="ghost"
             size="sm"
-            class="h-7 text-xs gap-1"
+            class="h-8 text-ui gap-1"
             onclick={handleForkSession}
             title={m.session_fork_button_title()}
           >
@@ -396,9 +390,9 @@
         <!-- New session in the same place (without carrying over history) -->
         {#if session && sessionNode && !sessionNode.is_ephemeral}
           <Button
-            variant="outline"
+            variant="ghost"
             size="sm"
-            class="h-7 text-xs gap-1"
+            class="h-8 text-ui gap-1"
             onclick={handleNewSessionHere}
             title={m.session_new_here_button_title()}
           >
@@ -411,7 +405,7 @@
         <Button
           variant="ghost"
           size="sm"
-          class="h-7 text-xs gap-1 text-destructive hover:bg-destructive/10 hover:text-destructive"
+          class="h-8 text-ui gap-1 text-destructive hover:bg-destructive/10 hover:text-destructive"
           onclick={() => (killDialogOpen = true)}
           title={m.session_kill_button_title()}
         >
@@ -430,16 +424,16 @@
   <!-- Archived banner -->
   {#if session && session.archived_at !== null}
     <div
-      class="flex shrink-0 items-center justify-between gap-2 border-b border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-xs"
+      class="border-warn/30 bg-warn-soft/50 flex shrink-0 items-center justify-between gap-2 border-b px-4 py-2 text-ui"
     >
-      <div class="flex items-center gap-2 text-amber-700 dark:text-amber-400">
-        <ArchiveIcon class="size-3.5" />
+      <div class="text-warn flex items-center gap-2">
+        <ArchiveIcon class="size-4" />
         <span>{m.session_archived_banner()}</span>
       </div>
       <Button
         variant="outline"
         size="sm"
-        class="h-6 shrink-0 gap-1 text-[11px]"
+        class="h-7 shrink-0 gap-1 text-2xs"
         onclick={handleUnarchive}
       >
         {m.session_unarchive()}
@@ -494,9 +488,9 @@
         <div
           bind:this={chatContainer}
           onscroll={handleScroll}
-          class="h-full overflow-y-auto px-3 py-4 md:px-6"
+          class="h-full overflow-y-auto px-4 py-5 md:px-8"
         >
-          <div class="mx-auto flex max-w-3xl flex-col gap-4">
+          <div class="mx-auto flex max-w-[760px] flex-col gap-4">
             <BootstrapLogCard lines={bootstrapLines} />
             <ChatTimeline {sessionId} {items} status={currentStatus} />
           </div>
@@ -506,7 +500,7 @@
         {#if showScrollBottom}
           <button
             type="button"
-            class="bg-primary text-primary-foreground absolute bottom-4 left-1/2 -translate-x-1/2 z-10 shadow-lg flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition-all hover:opacity-90 animate-in fade-in zoom-in-95 cursor-pointer"
+            class="bg-card text-foreground border-border absolute bottom-4 left-1/2 -translate-x-1/2 z-10 flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-ui font-medium shadow-md transition-all hover:bg-accent animate-in fade-in zoom-in-95 cursor-pointer"
             onclick={scrollToBottom}
           >
             <ArrowDownIcon class="size-3.5" />
@@ -516,8 +510,8 @@
       </div>
 
       <!-- Chat input (Composer) -->
-      <div class="border-t px-3 py-3 md:px-6 shrink-0">
-        <div class="mx-auto max-w-3xl">
+      <div class="border-t border-border px-4 py-3 md:px-8 shrink-0">
+        <div class="mx-auto max-w-[760px]">
           <Composer
             {sessionId}
             {capabilities}
@@ -534,11 +528,11 @@
     <!-- Desktop right side panel (Diff or Terminal) -->
     {#if sidePanelMode !== null}
       <div
-        class="border-border hidden md:flex md:w-1/2 lg:w-5/12 flex-col border-l bg-card/40 h-full overflow-hidden"
+        class="border-border bg-card/40 hidden h-full flex-col overflow-hidden border-l md:flex md:w-1/2 lg:w-5/12"
       >
         <!-- Side panel header -->
-        <div class="flex items-center justify-between border-b px-3 py-2">
-          <div class="flex items-center gap-2 text-xs font-semibold">
+        <div class="flex items-center justify-between border-b border-border px-3 py-2">
+          <div class="flex items-center gap-2 text-ui font-semibold">
             {#if sidePanelMode === "diff"}
               <FileCodeIcon class="size-4" />
               <span>{m.session_diff_panel_title()}</span>
@@ -552,7 +546,7 @@
             <button
               type="button"
               class={cn(
-                "px-2 py-0.5 text-xs rounded",
+                "px-2 py-0.5 text-ui rounded",
                 sidePanelMode === "diff"
                   ? "bg-secondary font-medium"
                   : "text-muted-foreground hover:text-foreground",
@@ -564,7 +558,7 @@
             <button
               type="button"
               class={cn(
-                "px-2 py-0.5 text-xs rounded",
+                "px-2 py-0.5 text-ui rounded",
                 sidePanelMode === "terminal"
                   ? "bg-secondary font-medium"
                   : "text-muted-foreground hover:text-foreground",

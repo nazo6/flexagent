@@ -20,7 +20,7 @@
 
 <div
   class={cn(
-    "bg-card focus-within:border-primary/40 rounded-2xl border p-2 shadow-sm transition-colors",
+    "bg-card focus-within:border-signal/50 focus-within:ring-signal/15 rounded-lg border border-border p-2.5 transition-[border-color,box-shadow] focus-within:ring-2",
     className,
   )}
 >

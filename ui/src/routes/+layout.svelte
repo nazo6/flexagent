@@ -11,6 +11,7 @@
   import { Toaster } from "#lib/components/ui/sonner/index.ts";
   import { connection, initApp, sync } from "#lib/stores/app.svelte.ts";
   import { problems, type AppProblem } from "#lib/stores/problems.svelte.ts";
+  import { theme } from "#lib/theme.svelte.ts";
   import type { RecoveryAction } from "#lib/generated/bindings.ts";
   import { m } from "#lib/paraglide/messages.js";
   import { ModeWatcher } from "mode-watcher";
@@ -32,6 +33,7 @@
   }
 
   onMount(() => {
+    theme.init();
     window.addEventListener("unhandledrejection", onUnhandledRejection);
     window.addEventListener("error", onUncaughtError);
     void initApp();
@@ -93,7 +95,7 @@
       <PlugZapIcon class="text-destructive size-8" />
       <h1 class="text-lg font-semibold">{m.shell_server_unreachable()}</h1>
       <p class="text-muted-foreground text-sm">{connection.error}</p>
-      <p class="text-muted-foreground text-xs">
+      <p class="text-muted-foreground text-ui">
         {m.shell_server_down_hint()}
         <code>http://localhost:7860</code>{m.shell_server_down_hint_suffix()}
       </p>
@@ -108,7 +110,7 @@
 {:else}
   <div class="bg-background text-foreground flex h-svh w-full overflow-hidden">
     <!-- Desktop sidebar (always visible on md and up) -->
-    <div class="hidden md:flex md:w-64 lg:w-72 md:shrink-0 md:h-full">
+    <div class="hidden md:flex md:w-[264px] lg:w-[288px] md:shrink-0 md:h-full">
       <AppSidebar />
     </div>
 
@@ -123,7 +125,7 @@
     <div class="flex flex-1 flex-col h-full overflow-hidden">
       <!-- Mobile top bar (visible below md) -->
       <header
-        class="bg-background/80 flex items-center justify-between border-b px-3 py-2 md:hidden shrink-0"
+        class="bg-background/85 flex items-center justify-between border-b border-border px-3 py-2 backdrop-blur md:hidden shrink-0"
       >
         <button
           type="button"
@@ -136,7 +138,7 @@
 
         <a href="/" class="flex items-center gap-1.5 font-semibold text-sm">
           <div
-            class="bg-primary text-primary-foreground flex size-5 items-center justify-center rounded font-mono text-[10px] font-bold"
+            class="bg-primary text-primary-foreground flex size-6 items-center justify-center rounded-md font-mono text-2xs font-bold"
           >
             fxg
           </div>

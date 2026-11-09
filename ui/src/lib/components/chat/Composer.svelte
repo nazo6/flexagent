@@ -358,7 +358,7 @@
     <div class="flex flex-col gap-2 px-1 pt-1">
       {#if isStopped}
         <div
-          class="bg-muted text-muted-foreground flex flex-wrap items-center gap-2 rounded-md px-2.5 py-1 text-xs"
+          class="border-warn/25 bg-warn-soft/40 text-warn flex flex-wrap items-center gap-2 rounded-md border px-3 py-1.5 text-ui"
         >
           <AlertTriangleIcon class="size-3.5 shrink-0" />
           <span>
@@ -367,7 +367,7 @@
           <Button
             variant="outline"
             size="sm"
-            class="ml-auto h-6 text-xs"
+            class="ml-auto h-6 text-2xs"
             disabled={sending || resuming}
             title={m.chat_resume_title()}
             onclick={() => void resumeSession()}
@@ -380,7 +380,7 @@
         </div>
       {:else if node && !nodeAvail.isAvailable}
         <div
-          class="bg-destructive/10 text-destructive flex items-center gap-2 rounded-md px-2.5 py-1 text-xs"
+          class="border-danger/25 bg-danger-soft/50 text-danger flex items-center gap-2 rounded-md border px-3 py-1.5 text-ui"
         >
           <AlertTriangleIcon class="size-3.5 shrink-0" />
           <span>
@@ -391,16 +391,16 @@
 
       {#if resumeRequired}
         <div
-          class="bg-muted text-muted-foreground flex flex-wrap items-center gap-2 rounded-md px-2.5 py-1 text-xs"
+          class="border-warn/25 bg-warn-soft/40 text-warn flex flex-wrap items-center gap-2 rounded-md border px-3 py-1.5 text-ui"
         >
-          <AlertTriangleIcon class="size-3.5 shrink-0 text-amber-500/80" />
+          <AlertTriangleIcon class="size-3.5 shrink-0" />
           <span>
             {m.chat_resume_required_notice()}
           </span>
           <Button
             variant="outline"
             size="sm"
-            class="ml-auto h-6 text-xs"
+            class="ml-auto h-6 text-2xs"
             disabled={sending || resuming}
             onclick={resumeAndSend}
           >
@@ -417,7 +417,7 @@
           {#each commandMatches as command (command.name)}
             <button
               type="button"
-              class="bg-muted hover:bg-accent flex items-center gap-1 rounded-md px-2 py-1 text-xs"
+              class="bg-chip hover:bg-chip-hover border-border flex items-center gap-1 rounded-md border px-2 py-1 text-ui"
               onclick={() => applyCommand(command.name)}
             >
               <SlashIcon class="size-3" />
@@ -432,7 +432,7 @@
         <div class="flex flex-wrap gap-2">
           {#each attachments as attachment, index (index)}
             <div
-              class="bg-muted/40 border-border/70 flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs"
+              class="bg-chip border-border flex items-center gap-1.5 rounded-md border px-2 py-1 text-ui"
             >
               {#if attachment.data_b64}
                 <img
@@ -508,7 +508,7 @@
             >
               <span class="block truncate">{item.label}</span>
               {#if item.description}
-                <span class="text-muted-foreground block truncate text-[10px]">
+                <span class="text-muted-foreground block truncate text-2xs">
                   {item.description}
                 </span>
               {/if}
@@ -532,7 +532,7 @@
 
     <div class="ml-auto flex items-center gap-2">
       {#if !sync.wsConnected}
-        <span class="text-destructive text-xs">{m.chat_connection_lost()}</span>
+        <span class="text-danger text-2xs">{m.chat_connection_lost()}</span>
       {/if}
       <Button
         variant={autoApprove ? "destructive" : "outline"}

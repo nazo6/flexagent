@@ -29,7 +29,7 @@
 
 {#if html !== null}
   <div
-    class="overflow-auto rounded-md border text-xs [&_code]:block [&_code]:min-w-max [&_pre]:p-2 [&_pre]:font-mono [&_pre]:leading-relaxed"
+    class="overflow-auto rounded-md border text-ui [&_code]:block [&_code]:min-w-max [&_pre]:p-2 [&_pre]:font-mono [&_pre]:leading-relaxed"
     style={`max-height:${maxHeight}`}
   >
     {@html html}
