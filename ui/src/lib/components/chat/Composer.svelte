@@ -1,10 +1,15 @@
 <script lang="ts">
   import { Button } from "#lib/components/ui/button/index.ts";
-  import ComposerSelect from "#lib/components/chat/ComposerSelect.svelte";
+  import ComposerCard from "#lib/components/composer/ComposerCard.svelte";
+  import ComposerSendButton from "#lib/components/composer/ComposerSendButton.svelte";
+  import ComposerTextarea from "#lib/components/composer/ComposerTextarea.svelte";
+  import ConfigOptionPicker from "#lib/components/composer/ConfigOptionPicker.svelte";
+  import PickerItem from "#lib/components/composer/PickerItem.svelte";
+  import PickerPill from "#lib/components/composer/PickerPill.svelte";
   import FolderBrowserDialog from "#lib/components/fs/FolderBrowserDialog.svelte";
   import NodeStatusBadge from "#lib/components/NodeStatusBadge.svelte";
   import { encodeBytesToBase64 } from "#lib/base64.ts";
-  import { configChoices, resolveConfigChoice, selectedConfigValue } from "#lib/config-options.ts";
+  import { orderedConfigOptions } from "#lib/config-options.ts";
   import { getNodeAvailability } from "#lib/node-status.ts";
   import { saveSessionConfigOption } from "#lib/session-prefs.ts";
   import { m } from "#lib/paraglide/messages.js";
@@ -20,13 +25,13 @@
   import { toast } from "svelte-sonner";
   import AlertTriangleIcon from "@lucide/svelte/icons/alert-triangle";
   import BanIcon from "@lucide/svelte/icons/ban";
-  import LoaderCircleIcon from "@lucide/svelte/icons/loader-circle";
   import FileIcon from "@lucide/svelte/icons/file";
+  import LoaderCircleIcon from "@lucide/svelte/icons/loader-circle";
   import Minimize2Icon from "@lucide/svelte/icons/minimize-2";
   import PaperclipIcon from "@lucide/svelte/icons/paperclip";
-  import SendIcon from "@lucide/svelte/icons/send";
   import ShieldCheckIcon from "@lucide/svelte/icons/shield-check";
   import SlashIcon from "@lucide/svelte/icons/slash";
+  import SlidersHorizontalIcon from "@lucide/svelte/icons/sliders-horizontal";
   import XIcon from "@lucide/svelte/icons/x";
 
   let {
@@ -115,6 +120,12 @@
       ? currentMode
       : undefined,
   );
+  const selectedModeLabel = $derived(
+    modeItems.find((item) => item.value === selectedMode)?.label ?? "",
+  );
+
+  /** Agent config options (model / thought level / agent-specific), newest first. */
+  const configOptions = $derived(orderedConfigOptions(capabilities?.configOptions ?? []));
 
   const slashQuery = $derived(
     text.startsWith("/") && !text.includes(" ") ? text.slice(1).toLowerCase() : null,
@@ -208,10 +219,6 @@
       event.preventDefault();
       void addImageFiles(files);
     }
-  }
-
-  function onDragOver(event: DragEvent) {
-    event.preventDefault();
   }
 
   function onDrop(event: DragEvent) {
@@ -342,124 +349,117 @@
   }
 </script>
 
-<div class="flex flex-col gap-2 border-t pt-2">
-  {#if isStopped}
-    <div
-      class="bg-muted text-muted-foreground flex flex-wrap items-center gap-2 rounded-md px-2.5 py-1 text-xs"
-    >
-      <AlertTriangleIcon class="size-3.5 shrink-0" />
-      <span>
-        {m.chat_stopped_notice()}
-      </span>
-      <Button
-        variant="outline"
-        size="sm"
-        class="ml-auto h-6 text-xs"
-        disabled={sending || resuming}
-        title={m.chat_resume_title()}
-        onclick={() => void resumeSession()}
-      >
-        {#if resuming}
-          <LoaderCircleIcon class="size-3.5 animate-spin" />
-        {/if}
-        {resuming ? m.chat_resuming() : m.chat_resume()}
-      </Button>
-    </div>
-  {:else if node && !nodeAvail.isAvailable}
-    <div
-      class="bg-destructive/10 text-destructive flex items-center gap-2 rounded-md px-2.5 py-1 text-xs"
-    >
-      <AlertTriangleIcon class="size-3.5 shrink-0" />
-      <span>
-        {m.chat_node_unavailable({ name: node.name, status: nodeAvail.statusText })}
-      </span>
-    </div>
-  {/if}
+{#snippet modeIcon()}
+  <SlidersHorizontalIcon class="text-muted-foreground size-3.5" />
+{/snippet}
 
-  {#if resumeRequired}
-    <div
-      class="bg-muted text-muted-foreground flex flex-wrap items-center gap-2 rounded-md px-2.5 py-1 text-xs"
-    >
-      <AlertTriangleIcon class="size-3.5 shrink-0 text-amber-500/80" />
-      <span>
-        {m.chat_resume_required_notice()}
-      </span>
-      <Button
-        variant="outline"
-        size="sm"
-        class="ml-auto h-6 text-xs"
-        disabled={sending || resuming}
-        onclick={resumeAndSend}
-      >
-        {#if resuming}
-          <LoaderCircleIcon class="size-3.5 animate-spin" />
-        {/if}
-        {resuming ? m.chat_resuming() : m.chat_resume_and_send()}
-      </Button>
-    </div>
-  {/if}
-
-  {#if commandMatches.length > 0}
-    <div class="flex flex-wrap gap-1">
-      {#each commandMatches as command (command.name)}
-        <button
-          type="button"
-          class="bg-muted hover:bg-accent flex items-center gap-1 rounded-md px-2 py-1 text-xs"
-          onclick={() => applyCommand(command.name)}
-        >
-          <SlashIcon class="size-3" />
-          <span class="font-mono">{command.name}</span>
-          <span class="text-muted-foreground">{command.description}</span>
-        </button>
-      {/each}
-    </div>
-  {/if}
-
-  {#if attachments.length > 0}
-    <div class="flex flex-wrap gap-2">
-      {#each attachments as attachment, index (index)}
+<ComposerCard>
+  {#snippet above()}
+    <div class="flex flex-col gap-2 px-1 pt-1">
+      {#if isStopped}
         <div
-          class="bg-muted/40 border-border/70 flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs"
+          class="bg-muted text-muted-foreground flex flex-wrap items-center gap-2 rounded-md px-2.5 py-1 text-xs"
         >
-          {#if attachment.data_b64}
-            <img
-              src={`data:${attachment.mime_type};base64,${attachment.data_b64}`}
-              alt={attachment.file_name}
-              class="size-8 rounded object-cover"
-            />
-          {:else}
-            <FileIcon class="text-muted-foreground size-3.5" />
-          {/if}
-          <span class="max-w-40 truncate">{attachment.file_name}</span>
-          <button
-            type="button"
-            class="text-muted-foreground hover:text-foreground"
-            title={m.chat_attachment_remove()}
-            onclick={() => removeAttachment(index)}
+          <AlertTriangleIcon class="size-3.5 shrink-0" />
+          <span>
+            {m.chat_stopped_notice()}
+          </span>
+          <Button
+            variant="outline"
+            size="sm"
+            class="ml-auto h-6 text-xs"
+            disabled={sending || resuming}
+            title={m.chat_resume_title()}
+            onclick={() => void resumeSession()}
           >
-            <XIcon class="size-3.5" />
-          </button>
+            {#if resuming}
+              <LoaderCircleIcon class="size-3.5 animate-spin" />
+            {/if}
+            {resuming ? m.chat_resuming() : m.chat_resume()}
+          </Button>
         </div>
-      {/each}
+      {:else if node && !nodeAvail.isAvailable}
+        <div
+          class="bg-destructive/10 text-destructive flex items-center gap-2 rounded-md px-2.5 py-1 text-xs"
+        >
+          <AlertTriangleIcon class="size-3.5 shrink-0" />
+          <span>
+            {m.chat_node_unavailable({ name: node.name, status: nodeAvail.statusText })}
+          </span>
+        </div>
+      {/if}
+
+      {#if resumeRequired}
+        <div
+          class="bg-muted text-muted-foreground flex flex-wrap items-center gap-2 rounded-md px-2.5 py-1 text-xs"
+        >
+          <AlertTriangleIcon class="size-3.5 shrink-0 text-amber-500/80" />
+          <span>
+            {m.chat_resume_required_notice()}
+          </span>
+          <Button
+            variant="outline"
+            size="sm"
+            class="ml-auto h-6 text-xs"
+            disabled={sending || resuming}
+            onclick={resumeAndSend}
+          >
+            {#if resuming}
+              <LoaderCircleIcon class="size-3.5 animate-spin" />
+            {/if}
+            {resuming ? m.chat_resuming() : m.chat_resume_and_send()}
+          </Button>
+        </div>
+      {/if}
+
+      {#if commandMatches.length > 0}
+        <div class="flex flex-wrap gap-1">
+          {#each commandMatches as command (command.name)}
+            <button
+              type="button"
+              class="bg-muted hover:bg-accent flex items-center gap-1 rounded-md px-2 py-1 text-xs"
+              onclick={() => applyCommand(command.name)}
+            >
+              <SlashIcon class="size-3" />
+              <span class="font-mono">{command.name}</span>
+              <span class="text-muted-foreground">{command.description}</span>
+            </button>
+          {/each}
+        </div>
+      {/if}
+
+      {#if attachments.length > 0}
+        <div class="flex flex-wrap gap-2">
+          {#each attachments as attachment, index (index)}
+            <div
+              class="bg-muted/40 border-border/70 flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs"
+            >
+              {#if attachment.data_b64}
+                <img
+                  src={`data:${attachment.mime_type};base64,${attachment.data_b64}`}
+                  alt={attachment.file_name}
+                  class="size-8 rounded object-cover"
+                />
+              {:else}
+                <FileIcon class="text-muted-foreground size-3.5" />
+              {/if}
+              <span class="max-w-40 truncate">{attachment.file_name}</span>
+              <button
+                type="button"
+                class="text-muted-foreground hover:text-foreground"
+                title={m.chat_attachment_remove()}
+                onclick={() => removeAttachment(index)}
+              >
+                <XIcon class="size-3.5" />
+              </button>
+            </div>
+          {/each}
+        </div>
+      {/if}
     </div>
-  {/if}
+  {/snippet}
 
-  <textarea
-    bind:value={text}
-    onkeydown={onKeydown}
-    onpaste={onPaste}
-    ondragover={onDragOver}
-    ondrop={onDrop}
-    rows="3"
-    placeholder={isStopped
-      ? m.chat_placeholder_stopped()
-      : isRunning
-        ? m.chat_placeholder_running()
-        : m.chat_placeholder_idle()}
-    class="border-input bg-background focus-visible:ring-ring/50 w-full resize-y rounded-md border px-3 py-2 text-sm outline-none focus-visible:ring-2 disabled:cursor-not-allowed disabled:opacity-50"
-    disabled={sending}></textarea>
-
-  <div class="flex flex-wrap items-center gap-2">
+  {#snippet toolbar()}
     <input
       bind:this={fileInput}
       type="file"
@@ -470,56 +470,64 @@
     />
     <Button
       variant="ghost"
-      size="sm"
+      size="icon-sm"
+      class="rounded-full"
       title={m.chat_attach_image()}
       aria-label={m.chat_attach_image()}
       onclick={() => fileInput?.click()}
     >
-      <PaperclipIcon class="size-3.5" />
+      <PaperclipIcon class="size-4" />
     </Button>
     {#if node}
       <Button
         variant="ghost"
-        size="sm"
+        size="icon-sm"
+        class="rounded-full"
         title={m.chat_attach_file()}
         aria-label={m.chat_attach_file()}
         onclick={() => (fileBrowserOpen = true)}
       >
-        <FileIcon class="size-3.5" />
+        <FileIcon class="size-4" />
       </Button>
     {/if}
     {#if node}
       <NodeStatusBadge {node} showNodeName={true} class="mr-1 hidden sm:inline-flex" />
     {/if}
     {#if capabilities && capabilities.availableModes.length > 0}
-      <ComposerSelect
+      <PickerPill
         label={m.chat_mode_label()}
-        placeholder={m.chat_default_placeholder()}
-        value={selectedMode}
-        items={modeItems}
-        onchange={(value) => void runControl({ action: "set_mode", mode_id: value })}
-      />
+        value={selectedModeLabel}
+        icon={modeIcon}
+        contentClass="w-[min(20rem,calc(100vw-1.5rem))]"
+      >
+        <div class="max-h-72 overflow-y-auto p-1">
+          {#each modeItems as item (item.value)}
+            <PickerItem
+              selected={item.value === selectedMode}
+              onselect={() => void runControl({ action: "set_mode", mode_id: item.value })}
+            >
+              <span class="block truncate">{item.label}</span>
+              {#if item.description}
+                <span class="text-muted-foreground block truncate text-[10px]">
+                  {item.description}
+                </span>
+              {/if}
+            </PickerItem>
+          {/each}
+        </div>
+      </PickerPill>
     {/if}
 
-    {#each capabilities?.configOptions ?? [] as option (option.key)}
-      {@const choices = configChoices(option.options)}
-      {#if choices.length > 0}
-        <ComposerSelect
-          label={option.name}
-          placeholder={m.chat_default_placeholder()}
-          value={selectedConfigValue(choices, option.current_value)}
-          items={choices.map((choice) => ({
-            value: choice.value,
-            label: choice.label,
-          }))}
-          onchange={(value) =>
-            void runControl({
-              action: "set_config",
-              key: option.key,
-              value: resolveConfigChoice(choices, value),
-            })}
-        />
-      {/if}
+    {#each configOptions as option (option.key)}
+      <ConfigOptionPicker
+        {option}
+        onchange={(value) =>
+          void runControl({
+            action: "set_config",
+            key: option.key,
+            value,
+          })}
+      />
     {/each}
 
     <div class="ml-auto flex items-center gap-2">
@@ -560,21 +568,29 @@
           {controlBusy ? m.chat_stopping() : m.chat_stop()}
         </Button>
       {/if}
-      <Button
-        size="sm"
+      <ComposerSendButton
+        busy={sending}
         disabled={sending || (text.trim() === "" && attachments.length === 0)}
+        title={sending ? m.chat_sending() : isRunning ? m.chat_queue() : m.chat_send()}
         onclick={() => void send()}
-      >
-        {#if sending}
-          <LoaderCircleIcon class="size-3.5 animate-spin" />
-        {:else}
-          <SendIcon class="size-3.5" />
-        {/if}
-        {sending ? m.chat_sending() : isRunning ? m.chat_queue() : m.chat_send()}
-      </Button>
+      />
     </div>
-  </div>
-</div>
+  {/snippet}
+
+  <ComposerTextarea
+    bind:value={text}
+    onkeydown={onKeydown}
+    onpaste={onPaste}
+    ondrop={onDrop}
+    rows={3}
+    placeholder={isStopped
+      ? m.chat_placeholder_stopped()
+      : isRunning
+        ? m.chat_placeholder_running()
+        : m.chat_placeholder_idle()}
+    disabled={sending}
+  />
+</ComposerCard>
 
 <FolderBrowserDialog
   bind:open={fileBrowserOpen}

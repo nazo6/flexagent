@@ -516,7 +516,7 @@
       </div>
 
       <!-- Chat input (Composer) -->
-      <div class="bg-card/50 border-t px-3 py-2 md:px-6 shrink-0">
+      <div class="border-t px-3 py-3 md:px-6 shrink-0">
         <div class="mx-auto max-w-3xl">
           <Composer
             {sessionId}

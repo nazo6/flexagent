@@ -17,13 +17,14 @@
 
   let {
     option,
-    value = null,
+    value = undefined,
     onchange,
     showRefresh = false,
     onrefresh,
     disabled = false,
   }: {
     option: ConfigOptionInfo;
+    /** Controlled value; when omitted, the option's current value is used. */
     value?: ConfigOptionValue | null;
     onchange: (value: ConfigOptionValue) => void;
     showRefresh?: boolean;
@@ -33,13 +34,19 @@
 
   let open = $state(false);
   let query = $state("");
+  /** Optimistically reflect the choice until the agent reports the new value. */
+  let selected = $state<ConfigOptionValue | null>(null);
+
+  $effect(() => {
+    selected = value !== undefined ? value : option.current_value;
+  });
 
   $effect(() => {
     if (!open) query = "";
   });
 
   const choices = $derived(configChoices(option.options));
-  const current = $derived(selectedConfigValue(choices, value ?? option.current_value) ?? "");
+  const current = $derived(selectedConfigValue(choices, selected) ?? "");
   const currentChoice = $derived(choices.find((choice) => choice.value === current) ?? null);
   const filteredChoices = $derived.by(() => {
     const needle = query.trim().toLowerCase();
@@ -84,7 +91,7 @@
         <input
           bind:value={query}
           class="placeholder:text-muted-foreground min-w-0 flex-1 bg-transparent text-xs outline-none"
-          placeholder={m.new_session_search_options()}
+          placeholder={m.composer_search_options()}
         />
       </div>
     {/if}
@@ -94,6 +101,7 @@
         <PickerItem
           selected={choice.value === current}
           onselect={() => {
+            selected = choice.raw;
             onchange(resolveConfigChoice(choices, choice.value));
             open = false;
           }}
@@ -107,7 +115,7 @@
         </PickerItem>
       {:else}
         <p class="text-muted-foreground px-2 py-3 text-center text-xs">
-          {m.new_session_no_matching_models()}
+          {m.composer_no_matching_options()}
         </p>
       {/each}
     </div>
@@ -122,7 +130,7 @@
         }}
       >
         <RefreshCwIcon class="size-3.5" />
-        {m.new_session_refresh_models()}
+        {m.composer_refresh_options()}
       </button>
     {/if}
   </div>

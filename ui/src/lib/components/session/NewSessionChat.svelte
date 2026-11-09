@@ -5,9 +5,12 @@
   import { Button } from "#lib/components/ui/button/index.ts";
   import { Input } from "#lib/components/ui/input/index.ts";
   import FolderBrowserDialog from "#lib/components/fs/FolderBrowserDialog.svelte";
-  import ConfigOptionPicker from "./ConfigOptionPicker.svelte";
-  import PickerItem from "./PickerItem.svelte";
-  import PickerPill from "./PickerPill.svelte";
+  import ComposerCard from "#lib/components/composer/ComposerCard.svelte";
+  import ComposerSendButton from "#lib/components/composer/ComposerSendButton.svelte";
+  import ComposerTextarea from "#lib/components/composer/ComposerTextarea.svelte";
+  import ConfigOptionPicker from "#lib/components/composer/ConfigOptionPicker.svelte";
+  import PickerItem from "#lib/components/composer/PickerItem.svelte";
+  import PickerPill from "#lib/components/composer/PickerPill.svelte";
   import SessionSettingsDialog from "./SessionSettingsDialog.svelte";
   import { agentHint, agentsAvailableOn } from "#lib/agents.ts";
   import type {
@@ -42,7 +45,6 @@
   import { problems } from "#lib/stores/problems.svelte.ts";
   import { toast } from "svelte-sonner";
   import { onMount, untrack } from "svelte";
-  import ArrowUpIcon from "@lucide/svelte/icons/arrow-up";
   import BotIcon from "@lucide/svelte/icons/bot";
   import BoxIcon from "@lucide/svelte/icons/box";
   import CheckCircle2Icon from "@lucide/svelte/icons/check-circle-2";
@@ -627,12 +629,6 @@
     }
   }
 
-  function resizePrompt(event: Event): void {
-    const textarea = event.currentTarget as HTMLTextAreaElement;
-    textarea.style.height = "auto";
-    textarea.style.height = `${Math.min(textarea.scrollHeight, 200)}px`;
-  }
-
   /** On project change: re-resolve the default node and default path. */
   function onProjectChange() {
     nodeTouched = false;
@@ -829,276 +825,275 @@
       </div>
     {/if}
 
-    <div
-      class="bg-card focus-within:border-primary/40 rounded-2xl border p-2 shadow-sm transition-colors"
-    >
-      <div class="flex flex-wrap items-center gap-1.5 px-1 pt-1">
-        <PickerPill
-          label={m.new_session_project()}
-          value={projectLabel}
-          icon={projectIcon}
-          bind:open={projectOpen}
-          disabled={projects.length === 0}
-        >
-          {#if projects.length > 0}
-            <div class="max-h-72 overflow-y-auto p-1">
-              {#each projects as project (project.project_id)}
-                <PickerItem
-                  selected={project.project_id === selectedProject?.project_id}
-                  onselect={() => selectProject(project.project_id)}
-                >
-                  <span class="block truncate">{project.name}</span>
-                </PickerItem>
-              {/each}
-            </div>
-            <div class="border-t p-1">
-              <a
-                href="/projects"
-                class="text-muted-foreground hover:bg-accent hover:text-accent-foreground block rounded-md px-2 py-1.5 text-xs"
-              >
-                {m.new_session_manage_projects()}
-              </a>
-            </div>
-          {:else}
-            <div class="p-1">
-              <a
-                href="/projects"
-                class="text-muted-foreground hover:bg-accent hover:text-accent-foreground block rounded-md px-2 py-1.5 text-xs"
-              >
-                {m.new_session_register_project()}
-              </a>
-            </div>
-          {/if}
-        </PickerPill>
-
-        <PickerPill
-          label={m.new_session_working_directory()}
-          value={directoryLabel}
-          icon={directoryIcon}
-          contentClass="w-[min(24rem,calc(100vw-1.5rem))]"
-          bind:open={directoryOpen}
-          disabled={isProvisionerMode || selectedProject === null}
-        >
-          {#if isProvisionerMode}
-            <p class="text-muted-foreground p-2 text-xs">{m.new_session_ephemeral_note()}</p>
-          {:else if pathMode === "new_worktree"}
-            <div class="flex flex-col gap-2 p-2">
-              <div class="flex flex-col gap-1">
-                <span class="text-muted-foreground text-[10px]">{m.new_session_new_worktree()}</span
-                >
-                <Input bind:value={branch} placeholder="feat/new-task" class="h-8 text-xs" />
-              </div>
-              <p class="text-muted-foreground text-[10px]">
-                {m.new_session_worktree_description()}
-              </p>
-              <button
-                type="button"
-                class="text-muted-foreground hover:text-foreground self-start text-[11px] underline"
-                onclick={() => {
-                  pathMode = "existing";
-                  directoryOpen = false;
-                }}
-              >
-                {m.new_session_back_to_list()}
-              </button>
-            </div>
-          {:else if useCustomPath}
-            <div class="flex flex-col gap-2 p-2">
-              <Input
-                bind:value={localPath}
-                placeholder={m.new_session_path_placeholder()}
-                class="h-8 font-mono text-xs"
-                autofocus
-              />
-              <div class="flex flex-wrap items-center gap-1.5">
-                <Button variant="outline" size="sm" onclick={openFolderBrowser}>
-                  {m.new_session_browse()}
-                </Button>
-                {#if pathCandidates.length > 0}
-                  <Button variant="ghost" size="sm" onclick={resetPathToDefault}>
-                    {m.new_session_back_to_list()}
-                  </Button>
-                {/if}
-              </div>
-              {#if localPath.trim() !== "" && selectedCandidate === null}
-                <p class="text-muted-foreground text-[10px]">
-                  {m.new_session_unregistered_path()}
-                </p>
-              {/if}
-              {#if selectedCandidate && !selectedCandidate.exists}
-                <p class="text-destructive text-[10px]">{m.new_session_path_not_exists()}</p>
-              {/if}
-            </div>
-          {:else if pathCandidates.length > 0}
-            <div class="max-h-72 overflow-y-auto p-1">
-              {#each pathCandidates as candidate (candidate.path)}
-                <PickerItem
-                  selected={candidate.path === localPath}
-                  onselect={() => selectPath(candidate.path)}
-                >
-                  <span class="block truncate">{pathBasename(candidate.path)}</span>
-                  <span
-                    class="text-muted-foreground block truncate text-[10px] {candidate.exists
-                      ? ''
-                      : 'text-destructive'}"
-                    title={candidateLabel(candidate)}
+    <ComposerCard>
+      {#snippet above()}
+        <div class="flex flex-wrap items-center gap-1.5 px-1 pt-1">
+          <PickerPill
+            label={m.new_session_project()}
+            value={projectLabel}
+            icon={projectIcon}
+            bind:open={projectOpen}
+            disabled={projects.length === 0}
+          >
+            {#if projects.length > 0}
+              <div class="max-h-72 overflow-y-auto p-1">
+                {#each projects as project (project.project_id)}
+                  <PickerItem
+                    selected={project.project_id === selectedProject?.project_id}
+                    onselect={() => selectProject(project.project_id)}
                   >
-                    {candidate.path} · {candidateDetail(candidate)}
-                  </span>
-                </PickerItem>
-              {/each}
-            </div>
-            <div class="flex flex-wrap items-center gap-1 border-t p-1">
-              <button
-                type="button"
-                class="text-muted-foreground hover:bg-accent hover:text-accent-foreground rounded-md px-2 py-1.5 text-[11px]"
-                onclick={openFolderBrowser}
-              >
-                {m.new_session_browse()}
-              </button>
-              <button
-                type="button"
-                class="text-muted-foreground hover:bg-accent hover:text-accent-foreground rounded-md px-2 py-1.5 text-[11px]"
-                onclick={() => (useCustomPath = true)}
-              >
-                {m.new_session_enter_path()}
-              </button>
-              <button
-                type="button"
-                class="text-muted-foreground hover:bg-accent hover:text-accent-foreground rounded-md px-2 py-1.5 text-[11px]"
-                onclick={() => {
-                  pathMode = "new_worktree";
-                  directoryOpen = false;
-                }}
-              >
-                {m.new_session_new_worktree()}
-              </button>
-            </div>
-          {:else}
-            <div class="flex flex-col gap-2 p-2">
-              <p class="text-muted-foreground text-xs">
-                {m.new_session_no_candidate({
-                  project: selectedProject?.name ?? m.new_session_this_project(),
-                })}
-              </p>
-              <div class="flex flex-wrap items-center gap-1.5">
-                <Button variant="outline" size="sm" onclick={openFolderBrowser}>
-                  {m.new_session_select_folder()}
-                </Button>
+                    <span class="block truncate">{project.name}</span>
+                  </PickerItem>
+                {/each}
+              </div>
+              <div class="border-t p-1">
                 <a
                   href="/projects"
-                  class="text-muted-foreground hover:text-foreground text-[11px] underline underline-offset-2"
+                  class="text-muted-foreground hover:bg-accent hover:text-accent-foreground block rounded-md px-2 py-1.5 text-xs"
                 >
-                  {m.new_session_go_to_project_settings()}
+                  {m.new_session_manage_projects()}
                 </a>
               </div>
-              {#each otherNodesWithCandidates as otherNode (otherNode.node_id)}
+            {:else}
+              <div class="p-1">
+                <a
+                  href="/projects"
+                  class="text-muted-foreground hover:bg-accent hover:text-accent-foreground block rounded-md px-2 py-1.5 text-xs"
+                >
+                  {m.new_session_register_project()}
+                </a>
+              </div>
+            {/if}
+          </PickerPill>
+
+          <PickerPill
+            label={m.new_session_working_directory()}
+            value={directoryLabel}
+            icon={directoryIcon}
+            contentClass="w-[min(24rem,calc(100vw-1.5rem))]"
+            bind:open={directoryOpen}
+            disabled={isProvisionerMode || selectedProject === null}
+          >
+            {#if isProvisionerMode}
+              <p class="text-muted-foreground p-2 text-xs">{m.new_session_ephemeral_note()}</p>
+            {:else if pathMode === "new_worktree"}
+              <div class="flex flex-col gap-2 p-2">
+                <div class="flex flex-col gap-1">
+                  <span class="text-muted-foreground text-[10px]"
+                    >{m.new_session_new_worktree()}</span
+                  >
+                  <Input bind:value={branch} placeholder="feat/new-task" class="h-8 text-xs" />
+                </div>
+                <p class="text-muted-foreground text-[10px]">
+                  {m.new_session_worktree_description()}
+                </p>
                 <button
                   type="button"
                   class="text-muted-foreground hover:text-foreground self-start text-[11px] underline"
-                  onclick={() => selectNode(otherNode.node_id)}
+                  onclick={() => {
+                    pathMode = "existing";
+                    directoryOpen = false;
+                  }}
                 >
-                  {m.new_session_registered_on_node({ node: otherNode.name })}
+                  {m.new_session_back_to_list()}
                 </button>
-              {/each}
-            </div>
-          {/if}
-        </PickerPill>
-
-        <span class="flex-1"></span>
-
-        <PickerPill
-          label={m.new_session_environment()}
-          value={environmentLabel}
-          icon={environmentIcon}
-          contentClass="w-[min(20rem,calc(100vw-1.5rem))]"
-          bind:open={environmentOpen}
-          disabled={nodes.length === 0 && provisioners.length === 0}
-        >
-          <div class="max-h-80 overflow-y-auto p-1">
-            <div
-              class="text-muted-foreground px-2 py-1 text-[10px] font-medium tracking-wide uppercase"
-            >
-              {m.new_session_node_section()}
-            </div>
-            {#if nodes.length === 0}
-              <p class="text-muted-foreground px-2 py-1.5 text-xs">
-                {m.new_session_no_nodes()}
-              </p>
-            {:else}
-              {#each nodes as node (node.node_id)}
-                {@const availability = getNodeAvailability(node)}
-                <PickerItem
-                  selected={!isProvisionerMode && node.node_id === nodeId}
-                  onselect={() => selectNode(node.node_id)}
-                >
-                  <span class="flex items-center gap-1.5">
-                    <span class="size-1.5 shrink-0 rounded-full {availability.dotColorClass}"
-                    ></span>
-                    <span class="truncate">{node.name}</span>
-                  </span>
-                  <span class="text-muted-foreground block truncate text-[10px]">
-                    {availability.statusText}
-                  </span>
-                </PickerItem>
-              {/each}
-            {/if}
-
-            <div class="border-t p-1 pt-2">
-              <div
-                class="text-muted-foreground px-2 py-1 text-[10px] font-medium tracking-wide uppercase"
-              >
-                {m.new_session_ephemeral_section()}
               </div>
-              {#if provisioners.length > 0}
-                {#each provisioners as provisioner (provisioner.name)}
+            {:else if useCustomPath}
+              <div class="flex flex-col gap-2 p-2">
+                <Input
+                  bind:value={localPath}
+                  placeholder={m.new_session_path_placeholder()}
+                  class="h-8 font-mono text-xs"
+                  autofocus
+                />
+                <div class="flex flex-wrap items-center gap-1.5">
+                  <Button variant="outline" size="sm" onclick={openFolderBrowser}>
+                    {m.new_session_browse()}
+                  </Button>
+                  {#if pathCandidates.length > 0}
+                    <Button variant="ghost" size="sm" onclick={resetPathToDefault}>
+                      {m.new_session_back_to_list()}
+                    </Button>
+                  {/if}
+                </div>
+                {#if localPath.trim() !== "" && selectedCandidate === null}
+                  <p class="text-muted-foreground text-[10px]">
+                    {m.new_session_unregistered_path()}
+                  </p>
+                {/if}
+                {#if selectedCandidate && !selectedCandidate.exists}
+                  <p class="text-destructive text-[10px]">{m.new_session_path_not_exists()}</p>
+                {/if}
+              </div>
+            {:else if pathCandidates.length > 0}
+              <div class="max-h-72 overflow-y-auto p-1">
+                {#each pathCandidates as candidate (candidate.path)}
                   <PickerItem
-                    selected={isProvisionerMode && provisioner.name === provisionerName}
-                    onselect={() => selectProvisioner(provisioner.name)}
+                    selected={candidate.path === localPath}
+                    onselect={() => selectPath(candidate.path)}
                   >
-                    <span class="block truncate">
-                      {provisioner.description ?? provisioner.name}
-                    </span>
-                    <span class="text-muted-foreground block truncate text-[10px]">
-                      {provisioner.name}
+                    <span class="block truncate">{pathBasename(candidate.path)}</span>
+                    <span
+                      class="text-muted-foreground block truncate text-[10px] {candidate.exists
+                        ? ''
+                        : 'text-destructive'}"
+                      title={candidateLabel(candidate)}
+                    >
+                      {candidate.path} · {candidateDetail(candidate)}
                     </span>
                   </PickerItem>
                 {/each}
-              {:else if provisionerLoadError !== null}
-                <div class="flex items-center gap-1.5 px-2 py-1 text-[11px]">
-                  <span class="text-destructive truncate">{m.common_load_failed()}</span>
+              </div>
+              <div class="flex flex-wrap items-center gap-1 border-t p-1">
+                <button
+                  type="button"
+                  class="text-muted-foreground hover:bg-accent hover:text-accent-foreground rounded-md px-2 py-1.5 text-[11px]"
+                  onclick={openFolderBrowser}
+                >
+                  {m.new_session_browse()}
+                </button>
+                <button
+                  type="button"
+                  class="text-muted-foreground hover:bg-accent hover:text-accent-foreground rounded-md px-2 py-1.5 text-[11px]"
+                  onclick={() => (useCustomPath = true)}
+                >
+                  {m.new_session_enter_path()}
+                </button>
+                <button
+                  type="button"
+                  class="text-muted-foreground hover:bg-accent hover:text-accent-foreground rounded-md px-2 py-1.5 text-[11px]"
+                  onclick={() => {
+                    pathMode = "new_worktree";
+                    directoryOpen = false;
+                  }}
+                >
+                  {m.new_session_new_worktree()}
+                </button>
+              </div>
+            {:else}
+              <div class="flex flex-col gap-2 p-2">
+                <p class="text-muted-foreground text-xs">
+                  {m.new_session_no_candidate({
+                    project: selectedProject?.name ?? m.new_session_this_project(),
+                  })}
+                </p>
+                <div class="flex flex-wrap items-center gap-1.5">
+                  <Button variant="outline" size="sm" onclick={openFolderBrowser}>
+                    {m.new_session_select_folder()}
+                  </Button>
+                  <a
+                    href="/projects"
+                    class="text-muted-foreground hover:text-foreground text-[11px] underline underline-offset-2"
+                  >
+                    {m.new_session_go_to_project_settings()}
+                  </a>
+                </div>
+                {#each otherNodesWithCandidates as otherNode (otherNode.node_id)}
                   <button
                     type="button"
-                    class="text-muted-foreground hover:text-foreground underline"
-                    onclick={() => void loadProvisioners()}
+                    class="text-muted-foreground hover:text-foreground self-start text-[11px] underline"
+                    onclick={() => selectNode(otherNode.node_id)}
                   >
-                    {m.common_retry()}
+                    {m.new_session_registered_on_node({ node: otherNode.name })}
                   </button>
-                </div>
-              {:else}
-                <p class="text-muted-foreground px-2 py-1 text-[11px]">
-                  {m.new_session_provisioner_undefined()}
-                </p>
-                <p class="text-muted-foreground px-2 pb-1 text-[10px]">
-                  {m.new_session_provisioner_config_hint()}
-                </p>
-              {/if}
-            </div>
-          </div>
-        </PickerPill>
-      </div>
+                {/each}
+              </div>
+            {/if}
+          </PickerPill>
 
-      <textarea
+          <span class="flex-1"></span>
+
+          <PickerPill
+            label={m.new_session_environment()}
+            value={environmentLabel}
+            icon={environmentIcon}
+            contentClass="w-[min(20rem,calc(100vw-1.5rem))]"
+            bind:open={environmentOpen}
+            disabled={nodes.length === 0 && provisioners.length === 0}
+          >
+            <div class="max-h-80 overflow-y-auto p-1">
+              <div
+                class="text-muted-foreground px-2 py-1 text-[10px] font-medium tracking-wide uppercase"
+              >
+                {m.new_session_node_section()}
+              </div>
+              {#if nodes.length === 0}
+                <p class="text-muted-foreground px-2 py-1.5 text-xs">
+                  {m.new_session_no_nodes()}
+                </p>
+              {:else}
+                {#each nodes as node (node.node_id)}
+                  {@const availability = getNodeAvailability(node)}
+                  <PickerItem
+                    selected={!isProvisionerMode && node.node_id === nodeId}
+                    onselect={() => selectNode(node.node_id)}
+                  >
+                    <span class="flex items-center gap-1.5">
+                      <span class="size-1.5 shrink-0 rounded-full {availability.dotColorClass}"
+                      ></span>
+                      <span class="truncate">{node.name}</span>
+                    </span>
+                    <span class="text-muted-foreground block truncate text-[10px]">
+                      {availability.statusText}
+                    </span>
+                  </PickerItem>
+                {/each}
+              {/if}
+
+              <div class="border-t p-1 pt-2">
+                <div
+                  class="text-muted-foreground px-2 py-1 text-[10px] font-medium tracking-wide uppercase"
+                >
+                  {m.new_session_ephemeral_section()}
+                </div>
+                {#if provisioners.length > 0}
+                  {#each provisioners as provisioner (provisioner.name)}
+                    <PickerItem
+                      selected={isProvisionerMode && provisioner.name === provisionerName}
+                      onselect={() => selectProvisioner(provisioner.name)}
+                    >
+                      <span class="block truncate">
+                        {provisioner.description ?? provisioner.name}
+                      </span>
+                      <span class="text-muted-foreground block truncate text-[10px]">
+                        {provisioner.name}
+                      </span>
+                    </PickerItem>
+                  {/each}
+                {:else if provisionerLoadError !== null}
+                  <div class="flex items-center gap-1.5 px-2 py-1 text-[11px]">
+                    <span class="text-destructive truncate">{m.common_load_failed()}</span>
+                    <button
+                      type="button"
+                      class="text-muted-foreground hover:text-foreground underline"
+                      onclick={() => void loadProvisioners()}
+                    >
+                      {m.common_retry()}
+                    </button>
+                  </div>
+                {:else}
+                  <p class="text-muted-foreground px-2 py-1 text-[11px]">
+                    {m.new_session_provisioner_undefined()}
+                  </p>
+                  <p class="text-muted-foreground px-2 pb-1 text-[10px]">
+                    {m.new_session_provisioner_config_hint()}
+                  </p>
+                {/if}
+              </div>
+            </div>
+          </PickerPill>
+        </div>
+      {/snippet}
+
+      <ComposerTextarea
         bind:value={promptText}
         onkeydown={onKeydown}
-        oninput={resizePrompt}
-        rows="3"
+        rows={3}
         placeholder={m.new_session_prompt_placeholder()}
-        class="placeholder:text-muted-foreground w-full resize-none overflow-y-auto bg-transparent px-2 py-3 text-sm leading-relaxed outline-none"
-        style="min-height: 76px; max-height: 200px;"
-        disabled={busy}></textarea>
+        disabled={busy}
+      />
 
-      <div class="flex flex-wrap items-center gap-1.5 border-t px-1 pt-2">
+      {#snippet toolbar()}
         <PickerPill
           label={m.new_session_agent()}
           value={agentLabel}
@@ -1227,22 +1222,15 @@
           <Settings2Icon class="size-4" />
         </Button>
 
-        <Button
-          size="icon-sm"
-          class="rounded-full"
+        <ComposerSendButton
+          {busy}
           disabled={!canSubmit || busy}
           title={startTitle}
-          aria-label={m.new_session_start()}
+          label={m.new_session_start()}
           onclick={() => void handleStartSession()}
-        >
-          {#if busy}
-            <LoaderCircleIcon class="size-4 animate-spin" />
-          {:else}
-            <ArrowUpIcon class="size-4" />
-          {/if}
-        </Button>
-      </div>
-    </div>
+        />
+      {/snippet}
+    </ComposerCard>
 
     <div class="min-h-4 text-center text-xs">
       {#if busy}
