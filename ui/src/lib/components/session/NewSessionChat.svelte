@@ -38,8 +38,10 @@
     loadSessionConfig,
     saveNewSessionPrefs,
     saveSessionConfigOption,
+    shouldSubmitOnEnter,
     type SessionModePreference,
   } from "#lib/session-prefs.ts";
+  import { prefs } from "#lib/stores/prefs.svelte.ts";
   import { getNodeAvailability } from "#lib/node-status.ts";
   import { m } from "#lib/paraglide/messages.js";
   import { sync } from "#lib/stores/app.svelte.ts";
@@ -680,9 +682,7 @@
   }
 
   function onKeydown(event: KeyboardEvent) {
-    if (event.isComposing || event.keyCode === 229) return;
-    const startWithModifier = event.ctrlKey || event.metaKey;
-    if (event.key === "Enter" && (startWithModifier || !event.shiftKey)) {
+    if (shouldSubmitOnEnter(event, prefs.sendShortcut)) {
       event.preventDefault();
       void handleStartSession();
     }

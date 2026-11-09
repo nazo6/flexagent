@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   loadNewSessionPrefs,
+  loadSendShortcutPreference,
   loadSessionConfig,
   saveNewSessionPrefs,
+  saveSendShortcutPreference,
   saveSessionConfigOption,
+  shouldSubmitOnEnter,
 } from "./session-prefs";
 
 /** Minimal Storage implementation for tests (mimics localStorage in Node). */
@@ -69,5 +72,45 @@ describe("session prefs", () => {
       thought_level: "high",
     });
     expect(loadSessionConfig("other", storage)).toEqual({});
+  });
+
+  it("handles send shortcut preference and shouldSubmitOnEnter", () => {
+    const storage = memoryStorage();
+    expect(loadSendShortcutPreference(storage)).toBe("enter");
+
+    saveSendShortcutPreference("modifier_enter", storage);
+    expect(loadSendShortcutPreference(storage)).toBe("modifier_enter");
+
+    // "enter" mode tests
+    const enterEvt = {
+      key: "Enter",
+      shiftKey: false,
+      ctrlKey: false,
+      metaKey: false,
+      isComposing: false,
+      keyCode: 13,
+    } as KeyboardEvent;
+    expect(shouldSubmitOnEnter(enterEvt, "enter")).toBe(true);
+
+    const shiftEnterEvt = { ...enterEvt, shiftKey: true } as KeyboardEvent;
+    expect(shouldSubmitOnEnter(shiftEnterEvt, "enter")).toBe(false);
+
+    const ctrlEnterEvt = { ...enterEvt, ctrlKey: true } as KeyboardEvent;
+    expect(shouldSubmitOnEnter(ctrlEnterEvt, "enter")).toBe(true);
+
+    // IME composition tests
+    const composingEvt = { ...enterEvt, isComposing: true } as KeyboardEvent;
+    expect(shouldSubmitOnEnter(composingEvt, "enter")).toBe(false);
+
+    const ime229Evt = { ...enterEvt, keyCode: 229 } as KeyboardEvent;
+    expect(shouldSubmitOnEnter(ime229Evt, "enter")).toBe(false);
+
+    // "modifier_enter" mode tests
+    expect(shouldSubmitOnEnter(enterEvt, "modifier_enter")).toBe(false);
+    expect(shouldSubmitOnEnter(shiftEnterEvt, "modifier_enter")).toBe(false);
+    expect(shouldSubmitOnEnter(ctrlEnterEvt, "modifier_enter")).toBe(true);
+
+    const metaEnterEvt = { ...enterEvt, metaKey: true } as KeyboardEvent;
+    expect(shouldSubmitOnEnter(metaEnterEvt, "modifier_enter")).toBe(true);
   });
 });

@@ -11,7 +11,8 @@
   import { encodeBytesToBase64 } from "#lib/base64.ts";
   import { orderedConfigOptions } from "#lib/config-options.ts";
   import { getNodeAvailability } from "#lib/node-status.ts";
-  import { saveSessionConfigOption } from "#lib/session-prefs.ts";
+  import { saveSessionConfigOption, shouldSubmitOnEnter } from "#lib/session-prefs.ts";
+  import { prefs } from "#lib/stores/prefs.svelte.ts";
   import { m } from "#lib/paraglide/messages.js";
   import type {
     AttachmentMeta,
@@ -270,7 +271,7 @@
   }
 
   function onKeydown(event: KeyboardEvent) {
-    if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
+    if (shouldSubmitOnEnter(event, prefs.sendShortcut)) {
       event.preventDefault();
       void send();
     }
