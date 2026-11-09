@@ -462,21 +462,6 @@ export class ApiClient {
   // Settings / secrets / project profiles
   // ------------------------------------------------------------------
 
-  /** `GET /api/v1/settings/node` (local node). */
-  nodeSettings(): Promise<NodeSettingsSnapshot> {
-    return this.#request("GET", "/api/v1/settings/node");
-  }
-
-  /** `PATCH /api/v1/settings/node` (local node; requires the observed revision). */
-  updateNodeSettings(request: UpdateNodeSettingsRequest): Promise<NodeSettingsSnapshot> {
-    return this.#request("PATCH", "/api/v1/settings/node", { body: request });
-  }
-
-  /** `PATCH /api/v1/settings/agents` (local node; requires the observed revision). */
-  updateAgentSettings(request: UpdateAgentSettingsRequest): Promise<NodeSettingsSnapshot> {
-    return this.#request("PATCH", "/api/v1/settings/agents", { body: request });
-  }
-
   /** `GET /api/v1/settings/server` (central server). */
   serverSettings(): Promise<ServerSettingsSnapshot> {
     return this.#request("GET", "/api/v1/settings/server");
@@ -487,13 +472,13 @@ export class ApiClient {
     return this.#request("PATCH", "/api/v1/settings/server", { body: request });
   }
 
-  /** `GET /api/v1/nodes/:id/settings` (hub proxy). */
-  nodeSettingsOf(nodeId: string): Promise<NodeSettingsSnapshot> {
+  /** `GET /api/v1/nodes/:id/settings` (node-owned, local or relayed). */
+  nodeSettings(nodeId: string): Promise<NodeSettingsSnapshot> {
     return this.#request("GET", `/api/v1/nodes/${encodeURIComponent(nodeId)}/settings`);
   }
 
-  /** `PATCH /api/v1/nodes/:id/settings/node` (hub proxy). */
-  updateNodeSettingsOf(
+  /** `PATCH /api/v1/nodes/:id/settings/node` (requires the observed revision). */
+  updateNodeSettings(
     nodeId: string,
     request: UpdateNodeSettingsRequest,
   ): Promise<NodeSettingsSnapshot> {
@@ -502,8 +487,8 @@ export class ApiClient {
     });
   }
 
-  /** `PATCH /api/v1/nodes/:id/settings/agents` (hub proxy). */
-  updateAgentSettingsOf(
+  /** `PATCH /api/v1/nodes/:id/settings/agents` (requires the observed revision). */
+  updateAgentSettings(
     nodeId: string,
     request: UpdateAgentSettingsRequest,
   ): Promise<NodeSettingsSnapshot> {
@@ -512,29 +497,12 @@ export class ApiClient {
     });
   }
 
-  /** `GET /api/v1/secrets` (node-owned on a daemon, server-owned on the hub). */
-  async secrets(): Promise<SecretsResponse> {
-    return this.#request("GET", "/api/v1/secrets");
-  }
-
-  /** `PUT /api/v1/secrets/:id` (write-only). */
-  upsertSecret(secretId: string, request: UpsertSecretRequest): Promise<SecretsResponse> {
-    return this.#request("PUT", `/api/v1/secrets/${encodeURIComponent(secretId)}`, {
-      body: request,
-    });
-  }
-
-  /** `DELETE /api/v1/secrets/:id`. */
-  deleteSecret(secretId: string): Promise<SecretsResponse> {
-    return this.#request("DELETE", `/api/v1/secrets/${encodeURIComponent(secretId)}`);
-  }
-
-  /** `GET /api/v1/nodes/:id/secrets` (hub proxy). */
+  /** `GET /api/v1/nodes/:id/secrets` (node-owned, local or relayed). */
   nodeSecrets(nodeId: string): Promise<SecretsResponse> {
     return this.#request("GET", `/api/v1/nodes/${encodeURIComponent(nodeId)}/secrets`);
   }
 
-  /** `PUT /api/v1/nodes/:id/secrets/:secret_id` (hub proxy, write-only). */
+  /** `PUT /api/v1/nodes/:id/secrets/:secret_id` (write-only). */
   upsertNodeSecret(
     nodeId: string,
     secretId: string,
@@ -547,12 +515,29 @@ export class ApiClient {
     );
   }
 
-  /** `DELETE /api/v1/nodes/:id/secrets/:secret_id` (hub proxy). */
+  /** `DELETE /api/v1/nodes/:id/secrets/:secret_id`. */
   deleteNodeSecret(nodeId: string, secretId: string): Promise<SecretsResponse> {
     return this.#request(
       "DELETE",
       `/api/v1/nodes/${encodeURIComponent(nodeId)}/secrets/${encodeURIComponent(secretId)}`,
     );
+  }
+
+  /** `GET /api/v1/server/secrets` (server-owned). */
+  serverSecrets(): Promise<SecretsResponse> {
+    return this.#request("GET", "/api/v1/server/secrets");
+  }
+
+  /** `PUT /api/v1/server/secrets/:id` (write-only). */
+  upsertServerSecret(secretId: string, request: UpsertSecretRequest): Promise<SecretsResponse> {
+    return this.#request("PUT", `/api/v1/server/secrets/${encodeURIComponent(secretId)}`, {
+      body: request,
+    });
+  }
+
+  /** `DELETE /api/v1/server/secrets/:id`. */
+  deleteServerSecret(secretId: string): Promise<SecretsResponse> {
+    return this.#request("DELETE", `/api/v1/server/secrets/${encodeURIComponent(secretId)}`);
   }
 
   /** `GET /api/v1/projects/:id/profile` (server-owned). */

@@ -20,8 +20,9 @@ pub(crate) async fn execute(
     state: &DaemonState,
     request_id: &CommandId,
     request: NodeRpcRequest,
+    source: &AuditSource,
 ) -> NodeRpcOutcome {
-    match execute_inner(state, request_id, request).await {
+    match execute_inner(state, request_id, request, source).await {
         Ok(response) => NodeRpcOutcome::Ok { response },
         Err(error) => NodeRpcOutcome::Err {
             error: error.info(),
@@ -33,8 +34,8 @@ async fn execute_inner(
     state: &DaemonState,
     request_id: &CommandId,
     request: NodeRpcRequest,
+    source: &AuditSource,
 ) -> Result<NodeRpcResponse, NodeError> {
-    let source = || AuditSource::remote(state.node_id());
     match request {
         NodeRpcRequest::GetGitDiff {
             session_id,
@@ -55,7 +56,6 @@ async fn execute_inner(
             Ok(NodeRpcResponse::GitDiff { diff })
         }
         NodeRpcRequest::ManageWorktree { project_id, action } => {
-            let source = source();
             let worktree = match action {
                 WorktreeAction::Add {
                     branch,
@@ -68,7 +68,7 @@ async fn execute_inner(
                             Some(project_id.as_str()),
                             &branch,
                             base_branch,
-                            &source,
+                            source,
                         )
                         .await?;
                     let head_commit = crate::git::head_commit(&outcome.path).await.unwrap_or(None);
@@ -82,13 +82,13 @@ async fn execute_inner(
                 }
                 WorktreeAction::Remove { path, force } => {
                     state
-                        .worktree_remove(None, Path::new(&path), force, &source)
+                        .worktree_remove(None, Path::new(&path), force, source)
                         .await?;
                     None
                 }
                 WorktreeAction::Prune => {
                     let repo = state.project_main_repo(project_id.as_str()).await?;
-                    state.worktree_prune(&repo, &source).await?;
+                    state.worktree_prune(&repo, source).await?;
                     None
                 }
             };
@@ -110,7 +110,7 @@ async fn execute_inner(
             state
                 .record_audit(
                     fxg_db::audit::actions::PROJECT_LINK,
-                    &source(),
+                    source,
                     None,
                     serde_json::json!({
                         "action": "scan",
@@ -135,7 +135,7 @@ async fn execute_inner(
             state
                 .record_audit(
                     fxg_db::audit::actions::PROJECT_LINK,
-                    &source(),
+                    source,
                     None,
                     serde_json::json!({
                         "action": "link",
@@ -162,7 +162,7 @@ async fn execute_inner(
             state
                 .record_audit(
                     fxg_db::audit::actions::SETTINGS_UPDATE,
-                    &source(),
+                    source,
                     None,
                     serde_json::json!({ "section": "node" }),
                 )
@@ -176,7 +176,7 @@ async fn execute_inner(
             state
                 .record_audit(
                     fxg_db::audit::actions::SETTINGS_UPDATE,
-                    &source(),
+                    source,
                     None,
                     serde_json::json!({ "section": "agents" }),
                 )
@@ -193,7 +193,7 @@ async fn execute_inner(
             state
                 .record_audit(
                     fxg_db::audit::actions::SECRET_MANAGE,
-                    &source(),
+                    source,
                     None,
                     serde_json::json!({
                         "action": "upsert",
@@ -209,7 +209,7 @@ async fn execute_inner(
             state
                 .record_audit(
                     fxg_db::audit::actions::SECRET_MANAGE,
-                    &source(),
+                    source,
                     None,
                     serde_json::json!({ "action": "delete", "secret_id": id.as_str() }),
                 )
@@ -221,7 +221,7 @@ async fn execute_inner(
             state
                 .record_audit(
                     fxg_db::audit::actions::AGENT_MANAGE,
-                    &source(),
+                    source,
                     None,
                     serde_json::json!({ "action": action, "message": &message }),
                 )
@@ -246,7 +246,7 @@ async fn execute_inner(
             state
                 .record_audit(
                     fxg_db::audit::actions::SESSION_RESUME,
-                    &source(),
+                    source,
                     Some(session_id.as_str()),
                     serde_json::json!({ "force_replay": force_replay }),
                 )
@@ -260,13 +260,13 @@ async fn execute_inner(
             archived,
         } => {
             let archived_at = state
-                .set_session_archived(request_id, session_id.as_str(), archived, &source())
+                .set_session_archived(request_id, session_id.as_str(), archived, source)
                 .await?;
             Ok(NodeRpcResponse::Archive { archived_at })
         }
         NodeRpcRequest::DeleteSession { session_id } => {
             state
-                .purge_session(request_id, session_id.as_str(), &source())
+                .purge_session(request_id, session_id.as_str(), source)
                 .await?;
             Ok(NodeRpcResponse::Delete)
         }

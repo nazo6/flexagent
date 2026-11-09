@@ -712,8 +712,9 @@ pub enum ServerToNodeMsg {
   (Host / Origin 検証は適用)。
 - `GET /api/v1/system/info`: 接続先が `central_server` か `local_node`
   か、および Web Push の VAPID Public Key を返却。ローカルノード接続時は
-  `unsynced_event_count`（Outbox 残数）と
-  `central_connected`（中央サーバー接続状態）も返却。
+  `node_id`（自分のノードID）、`unsynced_event_count`（Outbox 残数）、
+  `central_connected`（中央サーバー接続状態）も返却。UI はこの `node_id` を
+  `/api/v1/nodes/{node_id}/...` のパスに使う。
 - `GET /healthz` / `GET /readyz`: 認証不要の liveness / readiness。
   `readyz` は DB クエリが成功した場合のみ 200、失敗時は 503 を返す。
 - `GET /api/v1/diagnostics`: ローカルノードの診断情報
@@ -756,16 +757,18 @@ pub enum ServerToNodeMsg {
   ノード一覧とオンライン状態、一時ノード属性（`is_ephemeral`,
   `lifecycle_status`）、利用可能エージェント一覧を返却。
 - 設定 (すべて型付き構造体。汎用 Key-Value は使わない):
-  - `GET/PATCH /api/v1/settings/node`: `NodeSettingsSnapshot` (ローカルノード)
-  - `PATCH /api/v1/settings/agents`: `NodeSettingsSnapshot`
+  - `GET /api/v1/nodes/:node_id/settings`: `NodeSettingsSnapshot`
+  - `PATCH /api/v1/nodes/:node_id/settings/node` / `.../agents`:
+    ノード所有設定の更新
   - `GET/PATCH /api/v1/settings/server`: `ServerSettingsSnapshot` (中央サーバー)
-  - `GET /api/v1/nodes/:node_id/settings`: ハブが対象ノードへプロキシ
-  - `PATCH /api/v1/nodes/:node_id/settings/node` / `.../agents`: 同上
+  - ローカルノードも自身の `node_id` で同じ `/nodes/{node_id}/...` を使う
+    （`GET /api/v1/system/info` の `node_id` で取得する）。
   - 更新は `expected_revision` による楽観的ロック。競合は `REVISION_MISMATCH`。
 - 秘密 (値は書き込み専用。レスポンスは `SecretsResponse` = メタデータのみ):
-  - `GET /api/v1/secrets`, `PUT/DELETE /api/v1/secrets/:secret_id`,
-    `POST /api/v1/secrets/:secret_id/rotate`
-  - ハブ経由: `GET /api/v1/nodes/:node_id/secrets` など (対象ノードへプロキシ)
+  - ノード所有: `GET /api/v1/nodes/:node_id/secrets`,
+    `PUT/DELETE /api/v1/nodes/:node_id/secrets/:secret_id`
+  - サーバー所有: `GET /api/v1/server/secrets`,
+    `PUT/DELETE /api/v1/server/secrets/:secret_id`
   - 参照中の削除は `SECRET_IN_USE`、値ファイル欠損は `SECRET_MISSING`。
 - `GET /api/v1/nodes/:node_id/agents`: 指定ノードの ACP カタログ
   (`GET /api/v1/agents` はローカルノード専用。ハブは代表ノードを選ばない)。

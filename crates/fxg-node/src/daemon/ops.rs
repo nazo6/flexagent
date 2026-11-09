@@ -698,7 +698,8 @@ use fxg_protocol::settings::{
 };
 
 impl DaemonState {
-    /// Builds the typed settings snapshot exposed by `GET /api/v1/settings/node`.
+    /// Builds the typed settings snapshot exposed by
+    /// `GET /api/v1/nodes/{node_id}/settings`.
     pub fn node_settings_snapshot(&self) -> NodeSettingsSnapshot {
         let config = match GlobalConfig::load_from_path(&self.paths().config_path()) {
             Ok(config) => config,

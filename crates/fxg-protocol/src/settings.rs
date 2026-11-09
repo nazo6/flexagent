@@ -182,7 +182,7 @@ pub struct NodeSettings {
     pub updated_at: i64,
 }
 
-/// `PATCH /api/v1/settings/node` request.
+/// `PATCH /api/v1/nodes/{node_id}/settings/node` request.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct UpdateNodeSettingsRequest {
@@ -267,7 +267,7 @@ impl AgentSettings {
     }
 }
 
-/// `PATCH /api/v1/settings/agents` request.
+/// `PATCH /api/v1/nodes/{node_id}/settings/agents` request.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct UpdateAgentSettingsRequest {
@@ -428,7 +428,7 @@ pub struct SecretSummary {
     pub used_by: Vec<String>,
 }
 
-/// `PUT /api/v1/secrets/{secret_id}` request (write-only).
+/// `PUT /api/v1/{nodes/{node_id}/|server/}secrets/{secret_id}` request (write-only).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct UpsertSecretRequest {

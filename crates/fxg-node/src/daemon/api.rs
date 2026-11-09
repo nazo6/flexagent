@@ -8,7 +8,6 @@ use std::path::{Path, PathBuf};
 
 use async_trait::async_trait;
 use fxg_protocol::CommandId;
-use fxg_protocol::SecretId;
 use fxg_protocol::client_api::{
     AgentDiagnostics, AgentOpResponse, AgentsResponse, ConnectionRole, CreateSessionRequest,
     CreateSessionResponse, CreateWorktreeRequest, DiagnosticsResponse, KillSwitchResponse,
@@ -20,10 +19,6 @@ use fxg_protocol::client_api::{
 };
 use fxg_protocol::common::{
     AgentAction, CommandResult, DiffScope, ProjectSummary, WorkspaceDiffResponse,
-};
-use fxg_protocol::settings::{
-    NodeSettingsSnapshot, SecretsResponse, UpdateAgentSettingsRequest, UpdateNodeSettingsRequest,
-    UpsertSecretRequest,
 };
 use fxg_server::api::{
     ApiError, ClientApiBackend, ClientCommand, ClientEvent, ClientInfo, PtyChannelError,
@@ -65,6 +60,36 @@ impl ClientApiBackend for DaemonState {
 
     fn connection_role(&self) -> ConnectionRole {
         ConnectionRole::LocalNode
+    }
+
+    fn local_node_id(&self) -> Option<fxg_protocol::NodeId> {
+        Some(fxg_protocol::NodeId::from(self.node_id()))
+    }
+
+    async fn execute_node_rpc(
+        &self,
+        node_id: &fxg_protocol::NodeId,
+        request: fxg_protocol::node_server::NodeRpcRequest,
+        client: Option<ClientInfo>,
+    ) -> Result<fxg_protocol::node_server::NodeRpcResponse, ApiError> {
+        if node_id.as_str() != self.node_id() {
+            return Err(ApiError::not_found(format!(
+                "requested node {} but this node is {}",
+                node_id.as_str(),
+                self.node_id()
+            )));
+        }
+        let source = client
+            .as_ref()
+            .map(audit_source)
+            .unwrap_or_else(AuditSource::local);
+        let request_id = CommandId::from(fxg_protocol::util::uuid_v7());
+        match crate::rpc::execute(self, &request_id, request, &source).await {
+            fxg_protocol::node_server::NodeRpcOutcome::Ok { response } => Ok(response),
+            fxg_protocol::node_server::NodeRpcOutcome::Err { error } => {
+                Err(ApiError::from_info(error))
+            }
+        }
     }
 
     /// The local node returns a list verified live for the existence of linked paths.
@@ -713,21 +738,6 @@ impl ClientApiBackend for DaemonState {
         .map_err(api_error)
     }
 
-    async fn browse_fs(
-        &self,
-        node_id: &str,
-        path: Option<String>,
-    ) -> Result<fxg_protocol::client_api::FsBrowseResponse, ApiError> {
-        if node_id != self.node_id() {
-            return Err(ApiError::bad_request(format!(
-                "requested node {} but this node is {}",
-                node_id,
-                self.node_id()
-            )));
-        }
-        crate::fs_browse::browse_fs(path.as_deref()).map_err(api_error)
-    }
-
     async fn provisioners(&self) -> Result<ProvisionersResponse, ApiError> {
         // Ephemeral VM provisioners only run on the central server (design: docs/01 §6.1)
         Ok(ProvisionersResponse {
@@ -743,58 +753,6 @@ impl ClientApiBackend for DaemonState {
             )));
         }
         self.agents_catalog().await.map_err(api_error)
-    }
-
-    async fn settings_node(&self) -> Result<NodeSettingsSnapshot, ApiError> {
-        Ok(self.node_settings_snapshot())
-    }
-
-    async fn update_node_settings(
-        &self,
-        request: UpdateNodeSettingsRequest,
-    ) -> Result<NodeSettingsSnapshot, ApiError> {
-        DaemonState::update_node_settings(self, &request)
-            .await
-            .map_err(api_error)?;
-        Ok(self.node_settings_snapshot())
-    }
-
-    async fn update_agent_settings(
-        &self,
-        request: UpdateAgentSettingsRequest,
-    ) -> Result<NodeSettingsSnapshot, ApiError> {
-        DaemonState::update_agent_settings(self, &request)
-            .await
-            .map_err(api_error)?;
-        Ok(self.node_settings_snapshot())
-    }
-
-    async fn secrets(&self) -> Result<SecretsResponse, ApiError> {
-        Ok(SecretsResponse {
-            secrets: self.node_secrets().await.map_err(api_error)?,
-        })
-    }
-
-    async fn upsert_secret(
-        &self,
-        secret_id: &SecretId,
-        request: UpsertSecretRequest,
-    ) -> Result<SecretsResponse, ApiError> {
-        Ok(SecretsResponse {
-            secrets: self
-                .upsert_node_secret(secret_id, &request)
-                .await
-                .map_err(api_error)?,
-        })
-    }
-
-    async fn delete_secret(&self, secret_id: &SecretId) -> Result<SecretsResponse, ApiError> {
-        Ok(SecretsResponse {
-            secrets: self
-                .delete_node_secret(secret_id)
-                .await
-                .map_err(api_error)?,
-        })
     }
 
     async fn kill_switch(

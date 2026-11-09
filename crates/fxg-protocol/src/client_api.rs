@@ -35,6 +35,8 @@ pub enum ConnectionRole {
 pub struct SystemInfoResponse {
     /// Kind of endpoint
     pub role: ConnectionRole,
+    /// Node ID when connected to a local node (`None` on the central server)
+    pub node_id: Option<NodeId>,
     /// fxg binary version
     pub version: String,
     /// VAPID public key for Web Push (central server only)

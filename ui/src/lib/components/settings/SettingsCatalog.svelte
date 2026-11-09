@@ -55,7 +55,9 @@
   let editingProfile = $state<string | null>(null);
   let profileForm = $state({ setup: "", env: "", revision: 0 });
 
-  const targetNode = $derived(isServer ? selectedNode : "");
+  const targetNode = $derived(
+    isServer ? selectedNode : (sync.connection.systemInfo?.node_id ?? ""),
+  );
   const showSecrets = $derived(section === "machine" || (section === "server" && isServer));
 
   $effect(() => {
@@ -78,15 +80,8 @@
     error = null;
     try {
       if (section === "bootstrap" || section === "machine") {
-        if (isServer) {
-          if (targetNode !== "") {
-            nodeSnapshot = await sync.connection.client.nodeSettingsOf(targetNode);
-          } else {
-            nodeSnapshot = null;
-          }
-        } else {
-          nodeSnapshot = await sync.connection.client.nodeSettings();
-        }
+        nodeSnapshot =
+          targetNode !== "" ? await sync.connection.client.nodeSettings(targetNode) : null;
         syncNodeForm();
       }
       if (section === "bootstrap" || section === "machine" || section === "server") {
@@ -95,12 +90,11 @@
           syncServerForm();
         }
       }
-      if (section === "machine" || (section === "server" && isServer)) {
-        const response =
-          section === "machine" && isServer && targetNode !== ""
-            ? await sync.connection.client.nodeSecrets(targetNode)
-            : await sync.connection.client.secrets();
-        secrets = response.secrets;
+      if (section === "machine") {
+        secrets =
+          targetNode !== "" ? (await sync.connection.client.nodeSecrets(targetNode)).secrets : [];
+      } else if (section === "server" && isServer) {
+        secrets = (await sync.connection.client.serverSecrets()).secrets;
       }
       if (section === "projects" && isServer) {
         await sync.refreshProjects();
@@ -163,9 +157,8 @@
       expected_revision: nodeForm.revision,
     };
     try {
-      nodeSnapshot = isServer
-        ? await sync.connection.client.updateNodeSettingsOf(targetNode, request)
-        : await sync.connection.client.updateNodeSettings(request);
+      if (targetNode === "") throw new Error("node is not selected");
+      nodeSnapshot = await sync.connection.client.updateNodeSettings(targetNode, request);
       syncNodeForm();
       toast.success("Saved node settings.");
     } catch (cause) {
@@ -216,10 +209,13 @@
         description: secretForm.description.trim() === "" ? null : secretForm.description.trim(),
         value: secretForm.value,
       };
+      if (!(section === "server" && isServer) && targetNode === "") {
+        throw new Error("node is not selected");
+      }
       const response =
-        isServer && section === "machine" && targetNode !== ""
-          ? await sync.connection.client.upsertNodeSecret(targetNode, key, request)
-          : await sync.connection.client.upsertSecret(key, request);
+        section === "server" && isServer
+          ? await sync.connection.client.upsertServerSecret(key, request)
+          : await sync.connection.client.upsertNodeSecret(targetNode, key, request);
       secrets = response.secrets;
       secretForm = { key: "", description: "", value: "" };
       toast.success("Secret saved (the value is write-only and never returned).");
@@ -231,10 +227,13 @@
   async function deleteSecret(secret: SecretSummary): Promise<void> {
     if (!confirm(`Delete secret "${secret.id}"?`)) return;
     try {
+      if (!(section === "server" && isServer) && targetNode === "") {
+        throw new Error("node is not selected");
+      }
       const response =
-        isServer && section === "machine" && targetNode !== ""
-          ? await sync.connection.client.deleteNodeSecret(targetNode, secret.id)
-          : await sync.connection.client.deleteSecret(secret.id);
+        section === "server" && isServer
+          ? await sync.connection.client.deleteServerSecret(secret.id)
+          : await sync.connection.client.deleteNodeSecret(targetNode, secret.id);
       secrets = response.secrets;
       toast.success(`Deleted secret "${secret.id}".`);
     } catch (cause) {

@@ -1776,6 +1776,8 @@ data_b64: string };
 export type SystemInfoResponse = {
 	/**  Kind of endpoint */
 	role: ConnectionRole,
+	/**  Node ID when connected to a local node (`None` on the central server) */
+	node_id: NodeId | null,
 	/**  fxg binary version */
 	version: string,
 	/**  VAPID public key for Web Push (central server only) */
@@ -2105,7 +2107,7 @@ export type UnifiedEventPayload =
 	error_message: string | null,
 } };
 
-/**  `PATCH /api/v1/settings/agents` request. */
+/**  `PATCH /api/v1/nodes/{node_id}/settings/agents` request. */
 export type UpdateAgentSettingsRequest = {
 	/**  Default agent ID */
 	default_agent: string | null,
@@ -2119,7 +2121,7 @@ export type UpdateAgentSettingsRequest = {
 	expected_revision: number,
 };
 
-/**  `PATCH /api/v1/settings/node` request. */
+/**  `PATCH /api/v1/nodes/{node_id}/settings/node` request. */
 export type UpdateNodeSettingsRequest = {
 	/**  Display name */
 	name: string,
@@ -2153,7 +2155,7 @@ export type UpdateServerSettingsRequest = {
 	expected_revision: number,
 };
 
-/**  `PUT /api/v1/secrets/{secret_id}` request (write-only). */
+/**  `PUT /api/v1/{nodes/{node_id}/|server/}secrets/{secret_id}` request (write-only). */
 export type UpsertSecretRequest = {
 	/**  Optional description or note */
 	description: string | null,

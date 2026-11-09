@@ -39,10 +39,9 @@ use crate::hub::NodeHub;
 use crate::provisioner::{self, ProvisionerManager, SpawnSessionRequest};
 use crate::push::PushService;
 use fxg_protocol::settings::{
-    ConfigSource, NodeSettingsSnapshot, ProjectProfile, SecretSummary, SecretsResponse,
-    ServerBootstrapView, ServerSettingsSnapshot, SourcedValue, UpdateAgentSettingsRequest,
-    UpdateNodeSettingsRequest, UpdateProjectProfileRequest, UpdateServerSettingsRequest,
-    UpsertSecretRequest, sourced_option, sourced_string,
+    ConfigSource, ProjectProfile, SecretsResponse, ServerBootstrapView, ServerSettingsSnapshot,
+    SourcedValue, UpdateProjectProfileRequest, UpdateServerSettingsRequest, UpsertSecretRequest,
+    sourced_option, sourced_string,
 };
 use fxg_protocol::{NodeId, ProjectId, SecretId};
 
@@ -144,8 +143,7 @@ impl ServerState {
         node_id: &NodeId,
         request: NodeRpcRequest,
     ) -> Result<NodeRpcResponse, ApiError> {
-        let request_id = CommandId::from(uuid_v7());
-        self.inner.hub.rpc(node_id, &request_id, request).await
+        self.execute_node_rpc(node_id, request, None).await
     }
 
     /// VAPID Web Push delivery service.
@@ -279,123 +277,38 @@ impl ServerState {
     }
 
     /// Lists server-owned secret metadata.
-    pub async fn secrets(&self) -> Result<Vec<SecretSummary>, ServerError> {
-        Ok(fxg_db::secrets::list_secrets(self.db(), &self.inner.options.fxg_home).await?)
+    pub async fn server_secrets(&self) -> Result<SecretsResponse, ServerError> {
+        Ok(SecretsResponse {
+            secrets: fxg_db::secrets::list_secrets(self.db(), &self.inner.options.fxg_home).await?,
+        })
     }
 
     /// Stores a server-owned secret.
-    pub async fn upsert_secret(
+    pub async fn upsert_server_secret(
         &self,
         id: &SecretId,
         request: &UpsertSecretRequest,
-    ) -> Result<Vec<SecretSummary>, ServerError> {
-        Ok(
-            fxg_db::secrets::upsert_secret(self.db(), &self.inner.options.fxg_home, id, request)
-                .await?,
-        )
+    ) -> Result<SecretsResponse, ServerError> {
+        Ok(SecretsResponse {
+            secrets: fxg_db::secrets::upsert_secret(
+                self.db(),
+                &self.inner.options.fxg_home,
+                id,
+                request,
+            )
+            .await?,
+        })
     }
 
     /// Deletes a server-owned secret.
-    pub async fn delete_secret(&self, id: &SecretId) -> Result<Vec<SecretSummary>, ServerError> {
-        Ok(fxg_db::secrets::delete_secret(self.db(), &self.inner.options.fxg_home, id).await?)
-    }
-
-    /// Relays a node settings read over the hub.
-    pub async fn node_settings(&self, node_id: &str) -> Result<NodeSettingsSnapshot, ApiError> {
-        match self
-            .node_rpc(&NodeId::from(node_id), NodeRpcRequest::GetNodeSettings)
-            .await?
-        {
-            NodeRpcResponse::NodeSettings { snapshot } => Ok(*snapshot),
-            _ => Err(ApiError::internal("unexpected node RPC response")),
-        }
-    }
-
-    /// Relays a node settings update over the hub.
-    pub async fn update_node_settings_remote(
+    pub async fn delete_server_secret(
         &self,
-        node_id: &str,
-        request: UpdateNodeSettingsRequest,
-    ) -> Result<NodeSettingsSnapshot, ApiError> {
-        match self
-            .node_rpc(
-                &NodeId::from(node_id),
-                NodeRpcRequest::UpdateNodeSettings { request },
-            )
-            .await?
-        {
-            NodeRpcResponse::NodeSettings { snapshot } => Ok(*snapshot),
-            _ => Err(ApiError::internal("unexpected node RPC response")),
-        }
-    }
-
-    /// Relays an agent settings update over the hub.
-    pub async fn update_agent_settings_remote(
-        &self,
-        node_id: &str,
-        request: UpdateAgentSettingsRequest,
-    ) -> Result<NodeSettingsSnapshot, ApiError> {
-        match self
-            .node_rpc(
-                &NodeId::from(node_id),
-                NodeRpcRequest::UpdateAgentSettings { request },
-            )
-            .await?
-        {
-            NodeRpcResponse::NodeSettings { snapshot } => Ok(*snapshot),
-            _ => Err(ApiError::internal("unexpected node RPC response")),
-        }
-    }
-
-    /// Relays a node secret listing over the hub.
-    pub async fn node_secrets(&self, node_id: &str) -> Result<Vec<SecretSummary>, ApiError> {
-        match self
-            .node_rpc(&NodeId::from(node_id), NodeRpcRequest::GetSecrets)
-            .await?
-        {
-            NodeRpcResponse::Secrets { secrets } => Ok(secrets),
-            _ => Err(ApiError::internal("unexpected node RPC response")),
-        }
-    }
-
-    /// Relays a node secret write over the hub.
-    pub async fn upsert_node_secret(
-        &self,
-        node_id: &str,
         id: &SecretId,
-        request: UpsertSecretRequest,
-    ) -> Result<Vec<SecretSummary>, ApiError> {
-        match self
-            .node_rpc(
-                &NodeId::from(node_id),
-                NodeRpcRequest::UpsertSecret {
-                    id: id.clone(),
-                    request,
-                },
-            )
-            .await?
-        {
-            NodeRpcResponse::Secrets { secrets } => Ok(secrets),
-            _ => Err(ApiError::internal("unexpected node RPC response")),
-        }
-    }
-
-    /// Relays a node secret delete over the hub.
-    pub async fn delete_node_secret(
-        &self,
-        node_id: &str,
-        id: &SecretId,
-    ) -> Result<Vec<SecretSummary>, ApiError> {
-        match self
-            .node_rpc(
-                &NodeId::from(node_id),
-                NodeRpcRequest::DeleteSecret { id: id.clone() },
-            )
-            .await?
-        {
-            NodeRpcResponse::Secrets { secrets } => Ok(secrets),
-            _ => Err(ApiError::internal("unexpected node RPC response")),
-        }
+    ) -> Result<SecretsResponse, ServerError> {
+        Ok(SecretsResponse {
+            secrets: fxg_db::secrets::delete_secret(self.db(), &self.inner.options.fxg_home, id)
+                .await?,
+        })
     }
 
     /// Returns the project bootstrap profile (default when absent).
@@ -1554,34 +1467,6 @@ impl ClientApiBackend for ServerState {
         }
     }
 
-    async fn browse_fs(
-        &self,
-        node_id: &str,
-        path: Option<String>,
-    ) -> Result<fxg_protocol::client_api::FsBrowseResponse, ApiError> {
-        if !self
-            .inner
-            .hub
-            .is_online(&fxg_protocol::NodeId::from(node_id))
-            .await
-        {
-            return Err(ApiError::node_offline(
-                node_id,
-                format!("node is offline: {node_id}"),
-            ));
-        }
-        match self
-            .node_rpc(
-                &fxg_protocol::NodeId::from(node_id),
-                NodeRpcRequest::BrowseFs { path },
-            )
-            .await?
-        {
-            NodeRpcResponse::BrowseFs { response } => Ok(response),
-            _ => Err(ApiError::internal("unexpected node RPC response")),
-        }
-    }
-
     async fn provisioners(&self) -> Result<ProvisionersResponse, ApiError> {
         let provisioners = self
             .provisioners()
@@ -1621,79 +1506,39 @@ impl ClientApiBackend for ServerState {
             .map_err(ApiError::internal)
     }
 
-    async fn node_settings(&self, node_id: &str) -> Result<NodeSettingsSnapshot, ApiError> {
-        ServerState::node_settings(self, node_id).await
-    }
-
-    async fn update_node_settings_remote(
+    async fn execute_node_rpc(
         &self,
-        node_id: &str,
-        request: UpdateNodeSettingsRequest,
-    ) -> Result<NodeSettingsSnapshot, ApiError> {
-        ServerState::update_node_settings_remote(self, node_id, request).await
+        node_id: &NodeId,
+        request: NodeRpcRequest,
+        _client: Option<ClientInfo>,
+    ) -> Result<NodeRpcResponse, ApiError> {
+        let request_id = CommandId::from(uuid_v7());
+        self.inner.hub.rpc(node_id, &request_id, request).await
     }
 
-    async fn update_agent_settings_remote(
-        &self,
-        node_id: &str,
-        request: UpdateAgentSettingsRequest,
-    ) -> Result<NodeSettingsSnapshot, ApiError> {
-        ServerState::update_agent_settings_remote(self, node_id, request).await
+    async fn server_secrets(&self) -> Result<SecretsResponse, ApiError> {
+        ServerState::server_secrets(self)
+            .await
+            .map_err(ApiError::internal)
     }
 
-    async fn secrets(&self) -> Result<SecretsResponse, ApiError> {
-        Ok(SecretsResponse {
-            secrets: ServerState::secrets(self)
-                .await
-                .map_err(ApiError::internal)?,
-        })
-    }
-
-    async fn upsert_secret(
+    async fn upsert_server_secret(
         &self,
         secret_id: &SecretId,
         request: UpsertSecretRequest,
     ) -> Result<SecretsResponse, ApiError> {
-        Ok(SecretsResponse {
-            secrets: ServerState::upsert_secret(self, secret_id, &request)
-                .await
-                .map_err(secret_error)?,
-        })
+        ServerState::upsert_server_secret(self, secret_id, &request)
+            .await
+            .map_err(secret_error)
     }
 
-    async fn delete_secret(&self, secret_id: &SecretId) -> Result<SecretsResponse, ApiError> {
-        Ok(SecretsResponse {
-            secrets: ServerState::delete_secret(self, secret_id)
-                .await
-                .map_err(secret_error)?,
-        })
-    }
-
-    async fn node_secrets(&self, node_id: &str) -> Result<SecretsResponse, ApiError> {
-        Ok(SecretsResponse {
-            secrets: ServerState::node_secrets(self, node_id).await?,
-        })
-    }
-
-    async fn upsert_node_secret(
+    async fn delete_server_secret(
         &self,
-        node_id: &str,
-        secret_id: &SecretId,
-        request: UpsertSecretRequest,
-    ) -> Result<SecretsResponse, ApiError> {
-        Ok(SecretsResponse {
-            secrets: ServerState::upsert_node_secret(self, node_id, secret_id, request).await?,
-        })
-    }
-
-    async fn delete_node_secret(
-        &self,
-        node_id: &str,
         secret_id: &SecretId,
     ) -> Result<SecretsResponse, ApiError> {
-        Ok(SecretsResponse {
-            secrets: ServerState::delete_node_secret(self, node_id, secret_id).await?,
-        })
+        ServerState::delete_server_secret(self, secret_id)
+            .await
+            .map_err(secret_error)
     }
 
     async fn project_profile(&self, project_id: &str) -> Result<ProjectProfile, ApiError> {

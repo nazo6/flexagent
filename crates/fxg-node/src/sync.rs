@@ -549,7 +549,13 @@ pub(crate) async fn handle_server_message(
             request_id,
             request,
         } => {
-            let outcome = crate::rpc::execute(state, &request_id, request).await;
+            let outcome = crate::rpc::execute(
+                state,
+                &request_id,
+                request,
+                &AuditSource::remote(state.node_id()),
+            )
+            .await;
             fxg_protocol::discard_with!(
                 out.send(NodeToServerMsg::NodeRpcResult {
                     request_id,

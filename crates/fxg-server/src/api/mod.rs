@@ -54,12 +54,13 @@ use fxg_protocol::common::{
     SessionControlAction, SessionStatus, WorkspaceDiffResponse,
 };
 use fxg_protocol::events::{SessionEventBatch, SessionEventEnvelope};
+use fxg_protocol::node_server::{NodeRpcRequest, NodeRpcResponse};
 use fxg_protocol::settings::{
-    CustomAgentConfig, NodeSettingsSnapshot, ProjectProfile, SecretsResponse,
-    ServerSettingsSnapshot, UpdateAgentSettingsRequest, UpdateNodeSettingsRequest,
-    UpdateProjectProfileRequest, UpdateServerSettingsRequest, UpsertSecretRequest,
+    CustomAgentConfig, ProjectProfile, SecretsResponse, ServerSettingsSnapshot,
+    UpdateAgentSettingsRequest, UpdateNodeSettingsRequest, UpdateProjectProfileRequest,
+    UpdateServerSettingsRequest, UpsertSecretRequest,
 };
-use fxg_protocol::{CommandId, SecretId, SessionId};
+use fxg_protocol::{CommandId, NodeId, SecretId, SessionId};
 use tokio::sync::broadcast;
 
 pub use pty::{PtyChannelError, PtyChannelEvent, PtySpawnParams};
@@ -521,6 +522,24 @@ pub trait ClientApiBackend: Clone + Send + Sync + 'static {
     /// Kind of connection target (returned by `GET /api/v1/system/info`).
     fn connection_role(&self) -> ConnectionRole;
 
+    /// Node ID when this endpoint is a local node (`None` on the central server).
+    fn local_node_id(&self) -> Option<NodeId> {
+        None
+    }
+
+    /// Executes a generic node operation.
+    ///
+    /// A local node executes the operation in-process; the central server relays
+    /// it through [`NodeHub`](crate::hub::NodeHub). `client` is used by a local
+    /// node as the audit source and ignored by the hub (the node records the
+    /// relayed operation itself).
+    async fn execute_node_rpc(
+        &self,
+        node_id: &NodeId,
+        request: NodeRpcRequest,
+        client: Option<ClientInfo>,
+    ) -> Result<NodeRpcResponse, ApiError>;
+
     /// fxg version.
     fn version(&self) -> &'static str {
         env!("CARGO_PKG_VERSION")
@@ -687,13 +706,6 @@ pub trait ClientApiBackend: Clone + Send + Sync + 'static {
         base_branch: Option<String>,
     ) -> Result<WorkspaceDiffResponse, ApiError>;
 
-    /// `GET /api/v1/nodes/:node_id/fs/browse`
-    async fn browse_fs(
-        &self,
-        node_id: &str,
-        path: Option<String>,
-    ) -> Result<fxg_protocol::client_api::FsBrowseResponse, ApiError>;
-
     /// `GET /api/v1/provisioners`
     async fn provisioners(&self) -> Result<ProvisionersResponse, ApiError>;
 
@@ -708,36 +720,6 @@ pub trait ClientApiBackend: Clone + Send + Sync + 'static {
         Err(ApiError::from_code(
             ErrorCode::InvalidState,
             "provisioners can only be tested on the central server",
-        ))
-    }
-
-    /// `GET /api/v1/settings/node` (local node only).
-    async fn settings_node(&self) -> Result<NodeSettingsSnapshot, ApiError> {
-        Err(ApiError::from_code(
-            ErrorCode::InvalidState,
-            "node settings are only available on a local node",
-        ))
-    }
-
-    /// `PATCH /api/v1/settings/node` (local node only).
-    async fn update_node_settings(
-        &self,
-        _request: UpdateNodeSettingsRequest,
-    ) -> Result<NodeSettingsSnapshot, ApiError> {
-        Err(ApiError::from_code(
-            ErrorCode::InvalidState,
-            "node settings are only available on a local node",
-        ))
-    }
-
-    /// `PATCH /api/v1/settings/agents` (local node only).
-    async fn update_agent_settings(
-        &self,
-        _request: UpdateAgentSettingsRequest,
-    ) -> Result<NodeSettingsSnapshot, ApiError> {
-        Err(ApiError::from_code(
-            ErrorCode::InvalidState,
-            "agent settings are only available on a local node",
         ))
     }
 
@@ -760,96 +742,34 @@ pub trait ClientApiBackend: Clone + Send + Sync + 'static {
         ))
     }
 
-    /// `GET /api/v1/nodes/:node_id/settings` (hub proxy).
-    async fn node_settings(&self, _node_id: &str) -> Result<NodeSettingsSnapshot, ApiError> {
+    /// `GET /api/v1/server/secrets` (server-owned secret metadata).
+    async fn server_secrets(&self) -> Result<SecretsResponse, ApiError> {
         Err(ApiError::from_code(
             ErrorCode::InvalidState,
-            "node settings proxy is only available on the central server",
+            "server secrets are only available on the central server",
         ))
     }
 
-    /// `PATCH /api/v1/nodes/:node_id/settings/node` (hub proxy).
-    async fn update_node_settings_remote(
-        &self,
-        _node_id: &str,
-        _request: UpdateNodeSettingsRequest,
-    ) -> Result<NodeSettingsSnapshot, ApiError> {
-        Err(ApiError::from_code(
-            ErrorCode::InvalidState,
-            "node settings proxy is only available on the central server",
-        ))
-    }
-
-    /// `PATCH /api/v1/nodes/:node_id/settings/agents` (hub proxy).
-    async fn update_agent_settings_remote(
-        &self,
-        _node_id: &str,
-        _request: UpdateAgentSettingsRequest,
-    ) -> Result<NodeSettingsSnapshot, ApiError> {
-        Err(ApiError::from_code(
-            ErrorCode::InvalidState,
-            "node settings proxy is only available on the central server",
-        ))
-    }
-
-    /// `GET /api/v1/secrets` (node: node-owned, server: server-owned).
-    async fn secrets(&self) -> Result<SecretsResponse, ApiError> {
-        Err(ApiError::from_code(
-            ErrorCode::InvalidState,
-            "secrets are not available on this endpoint",
-        ))
-    }
-
-    /// `PUT /api/v1/secrets/:secret_id` (write-only).
-    async fn upsert_secret(
+    /// `PUT /api/v1/server/secrets/:secret_id` (write-only).
+    async fn upsert_server_secret(
         &self,
         _secret_id: &SecretId,
         _request: UpsertSecretRequest,
     ) -> Result<SecretsResponse, ApiError> {
         Err(ApiError::from_code(
             ErrorCode::InvalidState,
-            "secrets are not available on this endpoint",
+            "server secrets are only available on the central server",
         ))
     }
 
-    /// `DELETE /api/v1/secrets/:secret_id`.
-    async fn delete_secret(&self, _secret_id: &SecretId) -> Result<SecretsResponse, ApiError> {
-        Err(ApiError::from_code(
-            ErrorCode::InvalidState,
-            "secrets are not available on this endpoint",
-        ))
-    }
-
-    /// `GET /api/v1/nodes/:node_id/secrets` (hub proxy).
-    async fn node_secrets(&self, _node_id: &str) -> Result<SecretsResponse, ApiError> {
-        Err(ApiError::from_code(
-            ErrorCode::InvalidState,
-            "node secret proxy is only available on the central server",
-        ))
-    }
-
-    /// `PUT /api/v1/nodes/:node_id/secrets/:secret_id` (hub proxy).
-    async fn upsert_node_secret(
+    /// `DELETE /api/v1/server/secrets/:secret_id`.
+    async fn delete_server_secret(
         &self,
-        _node_id: &str,
-        _secret_id: &SecretId,
-        _request: UpsertSecretRequest,
-    ) -> Result<SecretsResponse, ApiError> {
-        Err(ApiError::from_code(
-            ErrorCode::InvalidState,
-            "node secret proxy is only available on the central server",
-        ))
-    }
-
-    /// `DELETE /api/v1/nodes/:node_id/secrets/:secret_id` (hub proxy).
-    async fn delete_node_secret(
-        &self,
-        _node_id: &str,
         _secret_id: &SecretId,
     ) -> Result<SecretsResponse, ApiError> {
         Err(ApiError::from_code(
             ErrorCode::InvalidState,
-            "node secret proxy is only available on the central server",
+            "server secrets are only available on the central server",
         ))
     }
 
@@ -1038,27 +958,22 @@ pub fn client_router<B: ClientApiBackend>(backend: B, options: ClientApiOptions)
         .route("/api/v1/nodes", get(list_nodes::<B>))
         .route("/api/v1/nodes/{node_id}/fs/browse", get(browse_fs::<B>))
         .route(
-            "/api/v1/settings/node",
-            get(settings_node::<B>).patch(update_node_settings::<B>),
-        )
-        .route("/api/v1/settings/agents", patch(update_agent_settings::<B>))
-        .route(
             "/api/v1/settings/server",
             get(settings_server::<B>).patch(update_server_settings::<B>),
         )
         .route("/api/v1/nodes/{node_id}/settings", get(node_settings::<B>))
         .route(
             "/api/v1/nodes/{node_id}/settings/node",
-            patch(update_node_settings_remote::<B>),
+            patch(update_node_settings::<B>),
         )
         .route(
             "/api/v1/nodes/{node_id}/settings/agents",
-            patch(update_agent_settings_remote::<B>),
+            patch(update_agent_settings::<B>),
         )
-        .route("/api/v1/secrets", get(secrets::<B>))
+        .route("/api/v1/server/secrets", get(server_secrets::<B>))
         .route(
-            "/api/v1/secrets/{secret_id}",
-            put(upsert_secret::<B>).delete(delete_secret::<B>),
+            "/api/v1/server/secrets/{secret_id}",
+            put(upsert_server_secret::<B>).delete(delete_server_secret::<B>),
         )
         .route("/api/v1/nodes/{node_id}/secrets", get(node_secrets::<B>))
         .route(
@@ -1162,6 +1077,7 @@ async fn system_info<B: ClientApiBackend>(State(state): State<ClientApiState<B>>
     };
     Json(SystemInfoResponse {
         role: state.backend.connection_role(),
+        node_id: state.backend.local_node_id(),
         version: state.backend.version().to_owned(),
         vapid_public_key: extras.vapid_public_key,
         unsynced_event_count: extras.unsynced_event_count,
@@ -1207,17 +1123,6 @@ async fn list_nodes<B: ClientApiBackend>(State(state): State<ClientApiState<B>>)
     match state.backend.db().list_nodes().await {
         Ok(nodes) => Json(NodesResponse { nodes }).into_response(),
         Err(err) => ApiError::from(err).into_response(),
-    }
-}
-
-async fn browse_fs<B: ClientApiBackend>(
-    State(state): State<ClientApiState<B>>,
-    UrlPath(node_id): UrlPath<String>,
-    Query(query): Query<fxg_protocol::client_api::FsBrowseQuery>,
-) -> Response {
-    match state.backend.browse_fs(&node_id, query.path).await {
-        Ok(resp) => Json(resp).into_response(),
-        Err(err) => err.into_response(),
     }
 }
 
@@ -1822,33 +1727,6 @@ pub(crate) fn is_websocket_upgrade(request: &Request) -> bool {
 // Settings, secrets and project profiles
 // ----------------------------------------------------------------------
 
-async fn settings_node<B: ClientApiBackend>(State(state): State<ClientApiState<B>>) -> Response {
-    match state.backend.settings_node().await {
-        Ok(snapshot) => Json(snapshot).into_response(),
-        Err(err) => err.into_response(),
-    }
-}
-
-async fn update_node_settings<B: ClientApiBackend>(
-    State(state): State<ClientApiState<B>>,
-    Json(request): Json<UpdateNodeSettingsRequest>,
-) -> Response {
-    match state.backend.update_node_settings(request).await {
-        Ok(snapshot) => Json(snapshot).into_response(),
-        Err(err) => err.into_response(),
-    }
-}
-
-async fn update_agent_settings<B: ClientApiBackend>(
-    State(state): State<ClientApiState<B>>,
-    Json(request): Json<UpdateAgentSettingsRequest>,
-) -> Response {
-    match state.backend.update_agent_settings(request).await {
-        Ok(snapshot) => Json(snapshot).into_response(),
-        Err(err) => err.into_response(),
-    }
-}
-
 async fn settings_server<B: ClientApiBackend>(State(state): State<ClientApiState<B>>) -> Response {
     match state.backend.settings_server().await {
         Ok(snapshot) => Json(snapshot).into_response(),
@@ -1866,74 +1744,83 @@ async fn update_server_settings<B: ClientApiBackend>(
     }
 }
 
-async fn node_settings<B: ClientApiBackend>(
+async fn browse_fs<B: ClientApiBackend>(
     State(state): State<ClientApiState<B>>,
     UrlPath(node_id): UrlPath<String>,
+    Query(query): Query<fxg_protocol::client_api::FsBrowseQuery>,
 ) -> Response {
-    match state.backend.node_settings(&node_id).await {
-        Ok(snapshot) => Json(snapshot).into_response(),
+    match state
+        .backend
+        .execute_node_rpc(
+            &NodeId::from(node_id),
+            NodeRpcRequest::BrowseFs { path: query.path },
+            None,
+        )
+        .await
+    {
+        Ok(NodeRpcResponse::BrowseFs { response }) => Json(response).into_response(),
+        Ok(_) => ApiError::internal("unexpected node RPC response").into_response(),
         Err(err) => err.into_response(),
     }
 }
 
-async fn update_node_settings_remote<B: ClientApiBackend>(
+async fn node_settings<B: ClientApiBackend>(
     State(state): State<ClientApiState<B>>,
+    UrlPath(node_id): UrlPath<String>,
+) -> Response {
+    match state
+        .backend
+        .execute_node_rpc(
+            &NodeId::from(node_id),
+            NodeRpcRequest::GetNodeSettings,
+            None,
+        )
+        .await
+    {
+        Ok(NodeRpcResponse::NodeSettings { snapshot }) => Json(*snapshot).into_response(),
+        Ok(_) => ApiError::internal("unexpected node RPC response").into_response(),
+        Err(err) => err.into_response(),
+    }
+}
+
+async fn update_node_settings<B: ClientApiBackend>(
+    State(state): State<ClientApiState<B>>,
+    Extension(client): Extension<ClientInfo>,
     UrlPath(node_id): UrlPath<String>,
     Json(request): Json<UpdateNodeSettingsRequest>,
 ) -> Response {
     match state
         .backend
-        .update_node_settings_remote(&node_id, request)
+        .execute_node_rpc(
+            &NodeId::from(node_id),
+            NodeRpcRequest::UpdateNodeSettings { request },
+            Some(client),
+        )
         .await
     {
-        Ok(snapshot) => Json(snapshot).into_response(),
+        Ok(NodeRpcResponse::NodeSettings { snapshot }) => Json(*snapshot).into_response(),
+        Ok(_) => ApiError::internal("unexpected node RPC response").into_response(),
         Err(err) => err.into_response(),
     }
 }
 
-async fn update_agent_settings_remote<B: ClientApiBackend>(
+async fn update_agent_settings<B: ClientApiBackend>(
     State(state): State<ClientApiState<B>>,
+    Extension(client): Extension<ClientInfo>,
     UrlPath(node_id): UrlPath<String>,
     Json(request): Json<UpdateAgentSettingsRequest>,
 ) -> Response {
     match state
         .backend
-        .update_agent_settings_remote(&node_id, request)
+        .execute_node_rpc(
+            &NodeId::from(node_id),
+            NodeRpcRequest::UpdateAgentSettings { request },
+            Some(client),
+        )
         .await
     {
-        Ok(snapshot) => Json(snapshot).into_response(),
-        Err(err) => err.into_response(),
-    }
-}
-
-async fn secrets<B: ClientApiBackend>(State(state): State<ClientApiState<B>>) -> Response {
-    match state.backend.secrets().await {
-        Ok(response) => Json(response).into_response(),
-        Err(err) => err.into_response(),
-    }
-}
-
-async fn upsert_secret<B: ClientApiBackend>(
-    State(state): State<ClientApiState<B>>,
-    UrlPath(secret_id): UrlPath<String>,
-    Json(request): Json<UpsertSecretRequest>,
-) -> Response {
-    match state
-        .backend
-        .upsert_secret(&SecretId::new(secret_id), request)
-        .await
-    {
-        Ok(response) => Json(response).into_response(),
-        Err(err) => err.into_response(),
-    }
-}
-
-async fn delete_secret<B: ClientApiBackend>(
-    State(state): State<ClientApiState<B>>,
-    UrlPath(secret_id): UrlPath<String>,
-) -> Response {
-    match state.backend.delete_secret(&SecretId::new(secret_id)).await {
-        Ok(response) => Json(response).into_response(),
+        Ok(NodeRpcResponse::NodeSettings { snapshot }) => Json(*snapshot).into_response(),
+        Ok(_) => ApiError::internal("unexpected node RPC response").into_response(),
         Err(err) => err.into_response(),
     }
 }
@@ -1942,20 +1829,84 @@ async fn node_secrets<B: ClientApiBackend>(
     State(state): State<ClientApiState<B>>,
     UrlPath(node_id): UrlPath<String>,
 ) -> Response {
-    match state.backend.node_secrets(&node_id).await {
-        Ok(response) => Json(response).into_response(),
+    match state
+        .backend
+        .execute_node_rpc(&NodeId::from(node_id), NodeRpcRequest::GetSecrets, None)
+        .await
+    {
+        Ok(NodeRpcResponse::Secrets { secrets }) => {
+            Json(SecretsResponse { secrets }).into_response()
+        }
+        Ok(_) => ApiError::internal("unexpected node RPC response").into_response(),
         Err(err) => err.into_response(),
     }
 }
 
 async fn upsert_node_secret<B: ClientApiBackend>(
     State(state): State<ClientApiState<B>>,
+    Extension(client): Extension<ClientInfo>,
     UrlPath((node_id, secret_id)): UrlPath<(String, String)>,
     Json(request): Json<UpsertSecretRequest>,
 ) -> Response {
     match state
         .backend
-        .upsert_node_secret(&node_id, &SecretId::new(secret_id), request)
+        .execute_node_rpc(
+            &NodeId::from(node_id),
+            NodeRpcRequest::UpsertSecret {
+                id: SecretId::new(secret_id),
+                request,
+            },
+            Some(client),
+        )
+        .await
+    {
+        Ok(NodeRpcResponse::Secrets { secrets }) => {
+            Json(SecretsResponse { secrets }).into_response()
+        }
+        Ok(_) => ApiError::internal("unexpected node RPC response").into_response(),
+        Err(err) => err.into_response(),
+    }
+}
+
+async fn delete_node_secret<B: ClientApiBackend>(
+    State(state): State<ClientApiState<B>>,
+    Extension(client): Extension<ClientInfo>,
+    UrlPath((node_id, secret_id)): UrlPath<(String, String)>,
+) -> Response {
+    match state
+        .backend
+        .execute_node_rpc(
+            &NodeId::from(node_id),
+            NodeRpcRequest::DeleteSecret {
+                id: SecretId::new(secret_id),
+            },
+            Some(client),
+        )
+        .await
+    {
+        Ok(NodeRpcResponse::Secrets { secrets }) => {
+            Json(SecretsResponse { secrets }).into_response()
+        }
+        Ok(_) => ApiError::internal("unexpected node RPC response").into_response(),
+        Err(err) => err.into_response(),
+    }
+}
+
+async fn server_secrets<B: ClientApiBackend>(State(state): State<ClientApiState<B>>) -> Response {
+    match state.backend.server_secrets().await {
+        Ok(response) => Json(response).into_response(),
+        Err(err) => err.into_response(),
+    }
+}
+
+async fn upsert_server_secret<B: ClientApiBackend>(
+    State(state): State<ClientApiState<B>>,
+    UrlPath(secret_id): UrlPath<String>,
+    Json(request): Json<UpsertSecretRequest>,
+) -> Response {
+    match state
+        .backend
+        .upsert_server_secret(&SecretId::new(secret_id), request)
         .await
     {
         Ok(response) => Json(response).into_response(),
@@ -1963,13 +1914,13 @@ async fn upsert_node_secret<B: ClientApiBackend>(
     }
 }
 
-async fn delete_node_secret<B: ClientApiBackend>(
+async fn delete_server_secret<B: ClientApiBackend>(
     State(state): State<ClientApiState<B>>,
-    UrlPath((node_id, secret_id)): UrlPath<(String, String)>,
+    UrlPath(secret_id): UrlPath<String>,
 ) -> Response {
     match state
         .backend
-        .delete_node_secret(&node_id, &SecretId::new(secret_id))
+        .delete_server_secret(&SecretId::new(secret_id))
         .await
     {
         Ok(response) => Json(response).into_response(),

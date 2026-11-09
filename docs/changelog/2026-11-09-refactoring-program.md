@@ -1,7 +1,7 @@
 # リファクタリング・プログラム（API統合・モジュール分割）
 
 - **日付**: 2026-11-09
-- **ステータス**: 進行中（B0 / B1 / A1 完了、次は A2）
+- **ステータス**: 進行中（B0 / B1 / A1 / A2 完了、次は A3）
 - **統合元**: 同日に別々に作成した「API・プロトコル統合リファクタリング計画」と
   「コードベース全体リファクタリング・モジュール分割計画」を1本化した
 - **対象パッケージ**: `fxg-protocol`, `fxg-db`, `fxg-acp`, `fxg-node`,
@@ -273,9 +273,10 @@ pub enum NodeRpcOutcome {
 #### 前提: LocalNode の自己 `node_id`
 
 ノード所有リソースを `/api/v1/nodes/{node_id}/...` に一本化するには、UI が
-接続先の `node_id` を知る必要がある。現在の `MetaResponse` は `role` しか
-返さないため、`node_id: Option<NodeId>` を追加する（LocalNode は `Some`、
-中央サーバーは `None`）。
+接続先の `node_id` を知る必要がある。`MetaResponse` は認証前に返るため、
+認証後の `SystemInfoResponse` に `node_id: Option<NodeId>` を追加した
+（LocalNode は `Some`、中央サーバーは `None`）。UI は `system/info` の値を
+ノードスコープのパスに使う。
 
 #### 廃止するローカル専用エンドポイント
 
@@ -306,7 +307,7 @@ pub trait ClientApiBackend: Clone + Send + Sync + 'static {
         &self,
         node_id: &NodeId,
         request: NodeRpcRequest,
-        client: ClientInfo,
+        client: Option<ClientInfo>,
     ) -> Result<NodeRpcResponse, ApiError>;
 
     // サーバー固有・ロール別クエリのみ個別メソッドとして残す
@@ -315,14 +316,19 @@ pub trait ClientApiBackend: Clone + Send + Sync + 'static {
 }
 ```
 
-約40メソッドを約18メソッドまで減らす。
+`client` は LocalNode が監査ログの source に使う（Hub は無視し、ノード側が
+relay 元を記録する）。A2 では設定・秘密・`browse_fs` のノード対象メソッド
+（13個）を削除してトレイトを 57 → 49 メソッドに削減した。完全な18メソッド化は
+ハンドラ側の監査・集約ロジックの移設が必要なため、A3/A4 の結果を見て判断する。
 
 #### `ui/src/lib/api/client.ts`
 
-- ノード操作は汎用 `rpc(nodeId, request)` に寄せ、手書きラッパーを削減する。
-- ロール固有のクエリは、パスと入出力が型推論される薄い汎用ヘルパー
-  （`request<T>(method, path, body)`）に置き換える。
-- ノード操作の追加で `client.ts` の編集が不要になることをゴールにする。
+- ローカル専用とハブ経由で重複していた設定・秘密のメソッドを削除し、
+  `/nodes/{node_id}/...` と `/server/...` の1系統に統一した。
+- ノード操作はノードIDを明示する薄いラッパー（`nodeSettings(nodeId)` 等）に
+  集約した。UI の呼び出し側でローカル/リモートの分岐を書かない。
+- 汎用ディスパッチャ（`rpc(nodeId, request)`）への完全移行は、REST を型付き
+  RPC エンドポイントへ置き換える場合の課題として A4 以降に残す。
 - `client_api` の型変更後に `mise run types` を実行する。
 
 ### 3.5 A3: Client WS / REST の重複整理
@@ -535,11 +541,12 @@ pub trait ClientApiBackend: Clone + Send + Sync + 'static {
 
 ### A2: REST 統合
 
-- [ ] `MetaResponse` に `node_id` を追加
-- [ ] 設定・秘密のローカル専用パスを `/nodes/{node_id}/...` と `/server/...` に整理
-- [ ] `ClientApiBackend` のノード対象メソッドを `execute_node_rpc` に集約
-- [ ] `ui/src/lib/api/client.ts` を汎用ヘルパーへ置換
-- [ ] `mise run types` で bindings を再生成
+- [x] `SystemInfoResponse` に `node_id` を追加（認証後の `system/info`）
+- [x] 設定・秘密のローカル専用パスを `/nodes/{node_id}/...` と `/server/...` に整理
+- [x] `execute_node_rpc` を追加し、設定・秘密・`browse_fs` のノード対象メソッドを削除（57 → 49）
+- [x] `ui/src/lib/api/client.ts` のローカル/リモート重複メソッドを削除
+- [x] `mise run types` で bindings を再生成
+- [ ] 汎用ディスパッチャ化（REST の型付き RPC 化と合わせて A4 以降で判断）
 
 ### A3: WS / REST
 
@@ -632,3 +639,17 @@ pub trait ClientApiBackend: Clone + Send + Sync + 'static {
 - **2026-11-09 (A1 実装)**: `ServerToNodeMsg` / `NodeToServerMsg` の
   セッションコマンド（`StartSession` 等）は A1.5 として保留したまま
   `CommandResult` を共有している。
+- **2026-11-09 (A2 実装)**: `SystemInfoResponse.node_id` を追加し、UI が
+  ローカルノードでも `/api/v1/nodes/{node_id}/...` を使えるようにした。
+  設定・秘密のローカル専用パス（`/settings/node`, `/settings/agents`,
+  `/secrets`）を削除し、サーバー秘密を `/api/v1/server/secrets` に分離した。
+- **2026-11-09 (A2 実装)**: `ClientApiBackend::execute_node_rpc` を追加し、
+  LocalNode はインプロセスで `rpc::execute` を呼び、Hub は `hub.rpc` に中継する
+  形に統一した。設定・秘密・`browse_fs` のノード対象メソッドを削除し、
+  トレイトは 57 → 49 メソッドになった。
+- **2026-11-09 (A2 実装)**: `rpc::execute` に `AuditSource` を渡すようにし、
+  ローカル REST 経由の操作も実クライアント情報で監査ログを記録できるように
+  した（従来は relay 元の `remote` 固定だった）。
+- **2026-11-09 (A2 実装)**: `ui/src/lib/api/client.ts` の設定・秘密ラッパーから
+  ローカル/リモートの重複を削除した。汎用 RPC ディスパッチャ化は、REST を
+  型付き RPC エンドポイントへ置き換える判断（A4 以降）と合わせて行う。
