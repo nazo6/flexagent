@@ -150,6 +150,43 @@ async fn execute_inner(
             };
             Ok(NodeRpcResponse::ProjectLink { response })
         }
+        NodeRpcRequest::InspectProject { local_path } => {
+            let dir = PathBuf::from(&local_path);
+            if !dir.is_dir() {
+                return Err(NodeError::InvalidState(format!(
+                    "directory not found: {local_path}"
+                )));
+            }
+            let resolved =
+                crate::project::resolve_project(&dir, state.node_id(), state.db()).await?;
+            Ok(NodeRpcResponse::ProjectPreview {
+                preview: project_preview(&resolved).await,
+            })
+        }
+        NodeRpcRequest::AddProject { local_path } => {
+            let dir = PathBuf::from(&local_path);
+            if !dir.is_dir() {
+                return Err(NodeError::InvalidState(format!(
+                    "directory not found: {local_path}"
+                )));
+            }
+            let resolved = state.resolve_and_register_project(&dir).await?;
+            state
+                .record_audit(
+                    fxg_db::audit::actions::PROJECT_LINK,
+                    source,
+                    None,
+                    serde_json::json!({
+                        "action": "add",
+                        "project_id": &resolved.project_id,
+                        "local_path": resolved.local_path.to_string_lossy(),
+                    }),
+                )
+                .await;
+            Ok(NodeRpcResponse::ProjectPreview {
+                preview: project_preview(&resolved).await,
+            })
+        }
         NodeRpcRequest::ListAgents => {
             let response = state.agents_catalog().await?;
             Ok(NodeRpcResponse::Agents { response })
@@ -282,4 +319,15 @@ async fn execute_inner(
             Ok(NodeRpcResponse::Delete)
         }
     }
+}
+
+/// Builds the client-facing preview for a resolved project.
+async fn project_preview(
+    resolved: &crate::project::ResolvedProject,
+) -> fxg_protocol::client_api::ProjectPreview {
+    let is_worktree = match &resolved.git_root {
+        Some(root) => crate::git::is_worktree(root).await.unwrap_or(false),
+        None => false,
+    };
+    resolved.to_preview(is_worktree)
 }

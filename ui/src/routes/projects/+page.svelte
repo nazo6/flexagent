@@ -1,17 +1,21 @@
 <script lang="ts">
   import { goto } from "$app/navigation";
+  import AddProjectDialog from "#lib/components/projects/AddProjectDialog.svelte";
   import ProjectCard from "#lib/components/projects/ProjectCard.svelte";
-  import ProjectLinkForms from "#lib/components/projects/ProjectLinkForms.svelte";
   import ProjectProfileDialog from "#lib/components/projects/ProjectProfileDialog.svelte";
+  import ProjectScanDialog from "#lib/components/projects/ProjectScanDialog.svelte";
   import WorktreeManagerDialog from "#lib/components/projects/WorktreeManagerDialog.svelte";
   import { Button } from "#lib/components/ui/button/index.ts";
+  import * as DropdownMenu from "#lib/components/ui/dropdown-menu/index.ts";
   import type { WorktreeInfo } from "#lib/generated/bindings.ts";
   import { m } from "#lib/paraglide/messages.js";
   import { shortId } from "#lib/session-status.ts";
   import { sync } from "#lib/stores/app.svelte.ts";
   import { problems } from "#lib/stores/problems.svelte.ts";
   import { createKeyedResource } from "#lib/stores/resource.svelte.ts";
+  import FolderPlusIcon from "@lucide/svelte/icons/folder-plus";
   import LinkIcon from "@lucide/svelte/icons/link";
+  import MoreHorizontalIcon from "@lucide/svelte/icons/more-horizontal";
   import RefreshCwIcon from "@lucide/svelte/icons/refresh-cw";
   import SearchIcon from "@lucide/svelte/icons/search";
 
@@ -23,7 +27,8 @@
 
   let worktreeDialog: WorktreeManagerDialog;
   let profileDialog: ProjectProfileDialog;
-  let linkForms: ProjectLinkForms;
+  let addDialog: AddProjectDialog;
+  let scanDialog: ProjectScanDialog;
 
   function nodeName(nodeId: string): string {
     return sync.nodes.find((node) => node.node_id === nodeId)?.name ?? shortId(nodeId);
@@ -44,29 +49,34 @@
       <h1 class="text-xl font-semibold">{m.projects_title()}</h1>
       <p class="text-muted-foreground text-sm">{m.projects_subtitle()}</p>
     </div>
-    <div class="flex flex-wrap items-center gap-1.5">
-      <Button
-        variant="outline"
-        size="sm"
-        onclick={() => linkForms.openScan()}
-        title={m.projects_scan_title()}
-      >
-        <SearchIcon />
-        {m.projects_scan()}
+    <div class="flex items-center gap-1.5">
+      <Button size="sm" onclick={() => addDialog.show()} title={m.projects_add_folder_title()}>
+        <FolderPlusIcon />
+        {m.projects_add_folder()}
       </Button>
-      <Button
-        variant="outline"
-        size="sm"
-        onclick={() => linkForms.openLink()}
-        title={m.projects_link_title()}
-      >
-        <LinkIcon />
-        {m.projects_link()}
-      </Button>
-      <Button variant="outline" size="sm" onclick={() => void sync.refreshProjects()}>
-        <RefreshCwIcon />
-        {m.common_refresh()}
-      </Button>
+      <DropdownMenu.Root>
+        <DropdownMenu.Trigger
+          class="border-border bg-background hover:bg-muted focus-visible:ring-ring/40 inline-flex size-8 items-center justify-center rounded-md border transition-colors outline-none focus-visible:ring-1"
+          title={m.projects_more_actions()}
+        >
+          <MoreHorizontalIcon class="size-4" />
+        </DropdownMenu.Trigger>
+        <DropdownMenu.Content align="end" class="w-64">
+          <DropdownMenu.Item onSelect={() => addDialog.show(true)}>
+            <LinkIcon />
+            {m.projects_advanced_link()}
+          </DropdownMenu.Item>
+          <DropdownMenu.Item onSelect={() => scanDialog.show()}>
+            <SearchIcon />
+            {m.projects_scan_menu()}
+          </DropdownMenu.Item>
+          <DropdownMenu.Separator />
+          <DropdownMenu.Item onSelect={() => void sync.refreshProjects()}>
+            <RefreshCwIcon />
+            {m.common_refresh()}
+          </DropdownMenu.Item>
+        </DropdownMenu.Content>
+      </DropdownMenu.Root>
     </div>
   </div>
 
@@ -109,4 +119,5 @@
   onChanged={(projectId) => void worktrees.load(projectId)}
 />
 <ProjectProfileDialog bind:this={profileDialog} {nodeName} />
-<ProjectLinkForms bind:this={linkForms} nodes={sync.nodes} />
+<AddProjectDialog bind:this={addDialog} />
+<ProjectScanDialog bind:this={scanDialog} nodes={sync.nodes} />

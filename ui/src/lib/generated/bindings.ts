@@ -1069,6 +1069,36 @@ export type ProjectNodeBinding = {
 	last_used_at: number,
 };
 
+/**
+ *  Automatically resolved project identity for a folder.
+ * 
+ *  Used before adding a project (preview) and after registering it (result).
+ */
+export type ProjectPreview = {
+	/**  Logical project ID after resolution */
+	project_id: ProjectId,
+	/**  Display name derived from the identity */
+	name: string,
+	/**  Git URL the canonical form was derived from */
+	canonical_git_url: string | null,
+	/**  How the identity was derived */
+	identity: ProjectIdentity,
+	/**  Canonical directory path */
+	local_path: string,
+	/**  Whether the directory is a Git repository */
+	is_git_repo: boolean,
+	/**  Whether the directory is a Git worktree */
+	is_worktree: boolean,
+	/**  Monorepo subpath relative to the Git root (if any) */
+	relative_subpath: string | null,
+};
+
+/**  `POST /api/v1/nodes/:node_id/projects/inspect` / `.../add` request. */
+export type ProjectPreviewRequest = {
+	/**  Target directory */
+	local_path: string,
+};
+
 /**  Per-project bootstrap profile for ephemeral VMs (`project_profiles` in `server.db`). */
 export type ProjectProfile = {
 	/**  Logical project ID */

@@ -51,8 +51,9 @@ use handlers::agents::{
     remove_custom_agent, upsert_custom_agent,
 };
 use handlers::projects::{
-    create_worktree, link_project, list_nodes, list_projects, list_provisioners, list_worktrees,
-    prune_worktrees, remove_worktree, scan_projects, test_provisioner,
+    add_project, create_worktree, inspect_project, link_project, list_nodes, list_projects,
+    list_provisioners, list_worktrees, prune_worktrees, remove_worktree, scan_projects,
+    test_provisioner,
 };
 use handlers::sessions::{
     archive_session, audit_logs, create_session, delete_session, inbox, list_sessions,
@@ -157,6 +158,14 @@ pub fn client_router<B: ClientApiBackend>(backend: B, options: ClientApiOptions)
         .route(
             "/api/v1/nodes/{node_id}/projects/link",
             post(link_project::<B>),
+        )
+        .route(
+            "/api/v1/nodes/{node_id}/projects/inspect",
+            post(inspect_project::<B>),
+        )
+        .route(
+            "/api/v1/nodes/{node_id}/projects/add",
+            post(add_project::<B>),
         )
         .route("/api/v1/agents", get(list_agents::<B>))
         .route(

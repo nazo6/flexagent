@@ -6,8 +6,8 @@ use axum::extract::{Path as UrlPath, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use fxg_protocol::client_api::{
-    CreateWorktreeRequest, NodesResponse, ProjectLinkRequest, ProjectScanRequest, ProjectsResponse,
-    PruneWorktreesRequest, RemoveWorktreeRequest,
+    CreateWorktreeRequest, NodesResponse, ProjectLinkRequest, ProjectPreviewRequest,
+    ProjectScanRequest, ProjectsResponse, PruneWorktreesRequest, RemoveWorktreeRequest,
 };
 
 use crate::api::{ApiError, ClientApiBackend, ClientApiState, ClientInfo};
@@ -115,6 +115,34 @@ pub(crate) async fn scan_projects<B: ClientApiBackend>(
     Json(request): Json<ProjectScanRequest>,
 ) -> Response {
     match state.backend.scan_projects(&node_id, request, client).await {
+        Ok(response) => Json(response).into_response(),
+        Err(err) => err.into_response(),
+    }
+}
+
+pub(crate) async fn inspect_project<B: ClientApiBackend>(
+    State(state): State<ClientApiState<B>>,
+    Extension(client): Extension<ClientInfo>,
+    UrlPath(node_id): UrlPath<String>,
+    Json(request): Json<ProjectPreviewRequest>,
+) -> Response {
+    match state
+        .backend
+        .inspect_project(&node_id, request, client)
+        .await
+    {
+        Ok(response) => Json(response).into_response(),
+        Err(err) => err.into_response(),
+    }
+}
+
+pub(crate) async fn add_project<B: ClientApiBackend>(
+    State(state): State<ClientApiState<B>>,
+    Extension(client): Extension<ClientInfo>,
+    UrlPath(node_id): UrlPath<String>,
+    Json(request): Json<ProjectPreviewRequest>,
+) -> Response {
+    match state.backend.add_project(&node_id, request, client).await {
         Ok(response) => Json(response).into_response(),
         Err(err) => err.into_response(),
     }

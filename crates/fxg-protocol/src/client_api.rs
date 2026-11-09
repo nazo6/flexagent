@@ -16,7 +16,7 @@ use crate::common::{
     SessionControlAction, SessionSummary, StreamDeltaPayload,
 };
 use crate::events::SessionEventBatch;
-use crate::settings::CustomAgentConfig;
+use crate::settings::{CustomAgentConfig, ProjectIdentity};
 use crate::{CommandId, NodeId, ProjectId, SessionId};
 
 /// Kind of endpoint (`GET /api/v1/system/info`).
@@ -237,6 +237,38 @@ pub struct ProjectLinkRequest {
     pub project_id: ProjectId,
     /// Target directory
     pub local_path: String,
+}
+
+/// `POST /api/v1/nodes/:node_id/projects/inspect` / `.../add` request.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
+pub struct ProjectPreviewRequest {
+    /// Target directory
+    pub local_path: String,
+}
+
+/// Automatically resolved project identity for a folder.
+///
+/// Used before adding a project (preview) and after registering it (result).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
+pub struct ProjectPreview {
+    /// Logical project ID after resolution
+    pub project_id: ProjectId,
+    /// Display name derived from the identity
+    pub name: String,
+    /// Git URL the canonical form was derived from
+    pub canonical_git_url: Option<String>,
+    /// How the identity was derived
+    pub identity: ProjectIdentity,
+    /// Canonical directory path
+    pub local_path: String,
+    /// Whether the directory is a Git repository
+    pub is_git_repo: bool,
+    /// Whether the directory is a Git worktree
+    pub is_worktree: bool,
+    /// Monorepo subpath relative to the Git root (if any)
+    pub relative_subpath: Option<String>,
 }
 
 /// `POST /api/v1/nodes/:node_id/projects/link` response.

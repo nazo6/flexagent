@@ -9,12 +9,13 @@ use fxg_protocol::client_api::{
     AgentCapabilitiesPreview, AgentOpResponse, AgentsResponse, ConnectionRole,
     CreateSessionRequest, CreateSessionResponse, CreateWorktreeRequest, DiagnosticsResponse,
     IssueNodeTokenRequest, IssueNodeTokenResponse, KillSwitchResponse, NodeTokensResponse,
-    ProbeAgentRequest, ProjectLinkRequest, ProjectLinkResponse, ProjectScanRequest,
-    ProjectScanResponse, ProvisionersResponse, PruneWorktreesRequest, PushSubscribeRequest,
-    PushSubscribeResponse, RemoveWorktreeRequest, RespondElicitationRequest,
-    RespondElicitationResponse, RespondPermissionRequest, RespondPermissionResponse,
-    ResumeSessionRequest, ResumeSessionResponse, RotateAuthTokenResponse, SessionArchiveRequest,
-    SessionArchiveResponse, WorktreeInfo, WorktreesResponse,
+    ProbeAgentRequest, ProjectLinkRequest, ProjectLinkResponse, ProjectPreview,
+    ProjectPreviewRequest, ProjectScanRequest, ProjectScanResponse, ProvisionersResponse,
+    PruneWorktreesRequest, PushSubscribeRequest, PushSubscribeResponse, RemoveWorktreeRequest,
+    RespondElicitationRequest, RespondElicitationResponse, RespondPermissionRequest,
+    RespondPermissionResponse, ResumeSessionRequest, ResumeSessionResponse,
+    RotateAuthTokenResponse, SessionArchiveRequest, SessionArchiveResponse, WorktreeInfo,
+    WorktreesResponse,
 };
 use fxg_protocol::common::{
     AgentAction, ClientSource, CommandResult, DiffScope, ErrorCode, ProjectSummary, PromptInput,
@@ -330,6 +331,50 @@ pub trait ClientApiBackend: Clone + Send + Sync + 'static {
         request: ProjectLinkRequest,
         client: ClientInfo,
     ) -> Result<ProjectLinkResponse, ApiError>;
+
+    /// `POST /api/v1/nodes/:node_id/projects/inspect` (read-only identity preview).
+    async fn inspect_project(
+        &self,
+        node_id: &str,
+        request: ProjectPreviewRequest,
+        client: ClientInfo,
+    ) -> Result<ProjectPreview, ApiError> {
+        let response = self
+            .execute_node_rpc(
+                &NodeId::from(node_id),
+                NodeRpcRequest::InspectProject {
+                    local_path: request.local_path,
+                },
+                Some(client),
+            )
+            .await?;
+        match response {
+            NodeRpcResponse::ProjectPreview { preview } => Ok(preview),
+            _ => Err(ApiError::internal("unexpected node RPC response")),
+        }
+    }
+
+    /// `POST /api/v1/nodes/:node_id/projects/add` (auto-detect and register).
+    async fn add_project(
+        &self,
+        node_id: &str,
+        request: ProjectPreviewRequest,
+        client: ClientInfo,
+    ) -> Result<ProjectPreview, ApiError> {
+        let response = self
+            .execute_node_rpc(
+                &NodeId::from(node_id),
+                NodeRpcRequest::AddProject {
+                    local_path: request.local_path,
+                },
+                Some(client),
+            )
+            .await?;
+        match response {
+            NodeRpcResponse::ProjectPreview { preview } => Ok(preview),
+            _ => Err(ApiError::internal("unexpected node RPC response")),
+        }
+    }
 
     /// `GET /api/v1/agents` (ACP Registry catalog + per-node install state).
     async fn list_agents(&self) -> Result<AgentsResponse, ApiError>;

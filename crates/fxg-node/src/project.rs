@@ -15,6 +15,7 @@
 use std::path::{Path, PathBuf};
 
 use fxg_db::Db;
+use fxg_protocol::client_api::ProjectPreview;
 use fxg_protocol::settings::{ProjectIdentity, ProjectIdentityKind};
 
 use crate::error::NodeError;
@@ -203,6 +204,20 @@ impl ResolvedProject {
             // The directory exists once resolution has succeeded
             path_exists: true,
             git_branch: git_branch.map(str::to_owned),
+        }
+    }
+
+    /// Client-facing preview used by the "Add project folder" flow.
+    pub fn to_preview(&self, is_worktree: bool) -> ProjectPreview {
+        ProjectPreview {
+            project_id: self.project_id.clone().into(),
+            name: self.name.clone(),
+            canonical_git_url: self.canonical_git_url.clone(),
+            identity: self.identity.clone(),
+            local_path: self.local_path.to_string_lossy().into_owned(),
+            is_git_repo: self.is_git_repo,
+            is_worktree,
+            relative_subpath: self.relative_subpath.clone(),
         }
     }
 }

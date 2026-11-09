@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::client_api::{
     AgentCapabilitiesPreview, AgentsResponse, FsBrowseResponse, ProjectLinkResponse,
-    ProjectScanResponse, WorktreeInfo,
+    ProjectPreview, ProjectScanResponse, WorktreeInfo,
 };
 use crate::common::{
     AgentAction, ClientSource, DataSafety, DiffScope, ElicitationContent, ErrorInfo,
@@ -96,6 +96,16 @@ pub enum NodeRpcRequest {
     ProjectLink {
         /// Logical project ID to link to
         project_id: ProjectId,
+        /// Target directory
+        local_path: String,
+    },
+    /// Resolve a directory to a logical project without writing to the DB.
+    InspectProject {
+        /// Target directory
+        local_path: String,
+    },
+    /// Resolve a directory and register the project binding.
+    AddProject {
         /// Target directory
         local_path: String,
     },
@@ -212,6 +222,11 @@ pub enum NodeRpcResponse {
     ProjectLink {
         /// Link result
         response: ProjectLinkResponse,
+    },
+    /// Auto-resolved project preview (`InspectProject` / `AddProject`).
+    ProjectPreview {
+        /// Resolved identity and path
+        preview: ProjectPreview,
     },
     /// ACP Registry catalog (`ListAgents`).
     Agents {

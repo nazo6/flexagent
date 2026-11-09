@@ -24,6 +24,8 @@ import type {
   NodesResponse,
   ProjectLinkRequest,
   ProjectLinkResponse,
+  ProjectPreview,
+  ProjectPreviewRequest,
   ProjectProfile,
   ProjectScanRequest,
   ProjectScanResponse,
@@ -262,6 +264,20 @@ export class ApiClient {
   linkProject(nodeId: string, request: ProjectLinkRequest): Promise<ProjectLinkResponse> {
     return this.#request("POST", `/api/v1/nodes/${encodeURIComponent(nodeId)}/projects/link`, {
       body: request,
+    });
+  }
+
+  /** `POST /api/v1/nodes/:id/projects/inspect` (read-only identity preview). */
+  inspectProject(nodeId: string, localPath: string): Promise<ProjectPreview> {
+    return this.#request("POST", `/api/v1/nodes/${encodeURIComponent(nodeId)}/projects/inspect`, {
+      body: { local_path: localPath } satisfies ProjectPreviewRequest,
+    });
+  }
+
+  /** `POST /api/v1/nodes/:id/projects/add` (auto-detect and register). */
+  addProject(nodeId: string, localPath: string): Promise<ProjectPreview> {
+    return this.#request("POST", `/api/v1/nodes/${encodeURIComponent(nodeId)}/projects/add`, {
+      body: { local_path: localPath } satisfies ProjectPreviewRequest,
     });
   }
 
