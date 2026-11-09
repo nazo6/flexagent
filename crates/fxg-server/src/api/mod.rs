@@ -49,9 +49,9 @@ use fxg_protocol::client_api::{
     SystemInfoResponse, WorktreeInfo, WorktreesResponse,
 };
 use fxg_protocol::common::{
-    AgentAction, ClientSource, CommandResult, DataSafety, DiffScope, ElicitationContent, ErrorCode,
-    ErrorInfo, ProjectSummary, PromptInput, RawJson, RecoveryAction, ResolvedBy,
-    SessionControlAction, SessionStatus, WorkspaceDiffResponse,
+    AgentAction, ClientSource, CommandResult, DataSafety, DiffScope, ErrorCode, ErrorInfo,
+    ProjectSummary, PromptInput, RawJson, RecoveryAction, SessionControlAction, SessionStatus,
+    WorkspaceDiffResponse,
 };
 use fxg_protocol::events::{SessionEventBatch, SessionEventEnvelope};
 use fxg_protocol::node_server::{NodeRpcRequest, NodeRpcResponse};
@@ -378,34 +378,6 @@ pub enum ClientCommand {
         /// Source (`cli` / `web` / `android`)
         client_source: ClientSource,
     },
-    /// Response to an approval request
-    RespondPermission {
-        /// Correlation ID
-        command_id: CommandId,
-        /// Target session ID
-        session_id: SessionId,
-        /// ACP request id
-        request_id: String,
-        /// Selected `option_id`
-        selected_option_id: String,
-        /// Who resolved it (`cli` / `web` / `android_push`)
-        resolved_by: ResolvedBy,
-    },
-    /// Response to an elicitation (structured input request)
-    RespondElicitation {
-        /// Correlation ID
-        command_id: CommandId,
-        /// Target session ID
-        session_id: SessionId,
-        /// ACP elicitation id
-        elicitation_id: String,
-        /// User response action (`accept` / `decline` / `cancel`)
-        action: fxg_protocol::common::ElicitationAction,
-        /// Answer content for `accept` (per the form's `requested_schema`)
-        content: Option<ElicitationContent>,
-        /// Who resolved it (`cli` / `web` / `android_push`)
-        resolved_by: ResolvedBy,
-    },
     /// Mode switch / configuration change / cancel / kill
     ControlSession {
         /// Correlation ID
@@ -433,34 +405,6 @@ impl ClientCommand {
                 input: input.clone(),
                 client_source: client_source.clone(),
             }),
-            ClientWsMessage::RespondPermission {
-                command_id,
-                session_id,
-                request_id,
-                selected_option_id,
-                resolved_by,
-            } => Some(Self::RespondPermission {
-                command_id: command_id.clone(),
-                session_id: session_id.clone(),
-                request_id: request_id.clone(),
-                selected_option_id: selected_option_id.clone(),
-                resolved_by: resolved_by.clone(),
-            }),
-            ClientWsMessage::RespondElicitation {
-                command_id,
-                session_id,
-                elicitation_id,
-                action,
-                content,
-                resolved_by,
-            } => Some(Self::RespondElicitation {
-                command_id: command_id.clone(),
-                session_id: session_id.clone(),
-                elicitation_id: elicitation_id.clone(),
-                action: *action,
-                content: content.clone(),
-                resolved_by: resolved_by.clone(),
-            }),
             ClientWsMessage::ControlSession {
                 command_id,
                 session_id,
@@ -477,10 +421,9 @@ impl ClientCommand {
     /// Correlation ID.
     pub fn command_id(&self) -> &CommandId {
         match self {
-            Self::SendPrompt { command_id, .. }
-            | Self::RespondPermission { command_id, .. }
-            | Self::RespondElicitation { command_id, .. }
-            | Self::ControlSession { command_id, .. } => command_id,
+            Self::SendPrompt { command_id, .. } | Self::ControlSession { command_id, .. } => {
+                command_id
+            }
         }
     }
 }
@@ -1017,7 +960,7 @@ pub fn client_router<B: ClientApiBackend>(backend: B, options: ClientApiOptions)
         )
         .route("/api/v1/sessions/{session_id}", delete(delete_session::<B>))
         .route("/api/v1/inbox", get(inbox::<B>))
-        .route("/api/v1/search", post(search::<B>))
+        .route("/api/v1/search", get(search::<B>))
         .route("/api/v1/push/subscribe", post(push_subscribe::<B>))
         .route("/api/v1/audit/logs", get(audit_logs::<B>))
         .route("/api/v1/client/ws", get(client_ws::<B>))
@@ -1256,26 +1199,12 @@ struct SearchQuery {
     limit: Option<u32>,
 }
 
-#[derive(Debug, serde::Deserialize)]
-struct SearchBody {
-    query: Option<String>,
-    limit: Option<u32>,
-}
-
 async fn search<B: ClientApiBackend>(
     State(state): State<ClientApiState<B>>,
     Query(params): Query<SearchQuery>,
-    body: Option<Json<SearchBody>>,
 ) -> Response {
-    let body = body.map(|Json(body)| body);
-    let query = params
-        .q
-        .or_else(|| body.as_ref().and_then(|body| body.query.clone()))
-        .unwrap_or_default();
-    let limit = params
-        .limit
-        .or_else(|| body.as_ref().and_then(|body| body.limit))
-        .unwrap_or(50);
+    let query = params.q.unwrap_or_default();
+    let limit = params.limit.unwrap_or(50);
 
     match state.backend.db().search(&query, limit).await {
         Ok(hits) => Json(SearchResponse { hits }).into_response(),

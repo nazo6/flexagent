@@ -155,46 +155,6 @@ impl ClientApiBackend for DaemonState {
                     .map(|()| session_id);
                 (command_id, result)
             }
-            ClientCommand::RespondPermission {
-                command_id,
-                session_id,
-                request_id,
-                selected_option_id,
-                resolved_by,
-            } => {
-                let result = manager
-                    .respond_permission(
-                        &command_id,
-                        session_id.as_str(),
-                        &request_id,
-                        &selected_option_id,
-                        resolved_by,
-                    )
-                    .await
-                    .map(|()| session_id);
-                (command_id, result)
-            }
-            ClientCommand::RespondElicitation {
-                command_id,
-                session_id,
-                elicitation_id,
-                action,
-                content,
-                resolved_by,
-            } => {
-                let result = manager
-                    .respond_elicitation(
-                        &command_id,
-                        session_id.as_str(),
-                        &elicitation_id,
-                        action,
-                        content,
-                        resolved_by,
-                    )
-                    .await
-                    .map(|()| session_id);
-                (command_id, result)
-            }
             ClientCommand::ControlSession {
                 command_id,
                 session_id,

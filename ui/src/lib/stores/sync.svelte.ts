@@ -9,6 +9,8 @@ import type {
   PermissionRequestEntry,
   ProjectSummary,
   PromptInput,
+  RespondElicitationResponse,
+  RespondPermissionResponse,
   ResumeSessionResponse,
   ServerWsMessage,
   SessionArchiveResponse,
@@ -402,46 +404,35 @@ export class SyncStore {
     });
   }
 
-  /** Respond to a permission request (over WS; idempotent). */
+  /** Respond to a permission request over REST (idempotent). */
   respondPermission(
     sessionId: string,
     requestId: string,
     selectedOptionId: string,
     resolvedBy = "web",
-  ): Promise<CommandResult> {
-    return this.#dispatch(
-      {
-        op: "respond_permission",
-        command_id: crypto.randomUUID(),
-        session_id: sessionId,
-        request_id: requestId,
-        selected_option_id: selectedOptionId,
-        resolved_by: resolvedBy,
-      },
-      sessionId,
-    );
+  ): Promise<RespondPermissionResponse> {
+    return this.connection.client.respondPermission(sessionId, requestId, {
+      selected_option_id: selectedOptionId,
+      // The selected option already carries allow_once / allow_always; `always`
+      // would promote an allow_once answer, which the UI does not do implicitly.
+      always: false,
+      resolved_by: resolvedBy,
+    });
   }
 
-  /** Respond to an elicitation (question) (over WS; idempotent). */
+  /** Respond to an elicitation (question) over REST (idempotent). */
   respondElicitation(
     sessionId: string,
     elicitationId: string,
     action: ElicitationAction,
     content: Record<string, ElicitationValue> | null,
     resolvedBy = "web",
-  ): Promise<CommandResult> {
-    return this.#dispatch(
-      {
-        op: "respond_elicitation",
-        command_id: crypto.randomUUID(),
-        session_id: sessionId,
-        elicitation_id: elicitationId,
-        action,
-        content,
-        resolved_by: resolvedBy,
-      },
-      sessionId,
-    );
+  ): Promise<RespondElicitationResponse> {
+    return this.connection.client.respondElicitation(sessionId, elicitationId, {
+      action,
+      content,
+      resolved_by: resolvedBy,
+    });
   }
 
   /** Mode switch / config change / cancel / kill. */

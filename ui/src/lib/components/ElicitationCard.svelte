@@ -9,7 +9,6 @@
     ElicitationSchema,
     ElicitationValue,
   } from "#lib/generated/bindings.ts";
-  import { commandErrorMessage } from "#lib/api/client.ts";
   import { formatRelativeTime } from "#lib/format.ts";
   import { m } from "#lib/paraglide/messages.js";
   import { sync } from "#lib/stores/app.svelte.ts";
@@ -138,10 +137,8 @@
         action,
         action === "accept" ? buildContent() : null,
       );
-      if (result.error?.code === "ALREADY_RESOLVED") {
+      if (result.already_resolved) {
         toast.info(m.error_already_resolved());
-      } else if (!result.success) {
-        toast.error(commandErrorMessage(result.error) ?? m.chat_elicitation_failed());
       } else {
         toast.success(m.chat_elicitation_sent());
       }

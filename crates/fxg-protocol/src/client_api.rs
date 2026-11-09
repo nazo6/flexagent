@@ -618,34 +618,6 @@ pub enum ClientWsMessage {
         /// Source (`cli` / `web` / `android`)
         client_source: ClientSource,
     },
-    /// Answers a permission request.
-    RespondPermission {
-        /// Correlation ID
-        command_id: CommandId,
-        /// Target session ID
-        session_id: SessionId,
-        /// ACP request id
-        request_id: String,
-        /// The selected `option_id`
-        selected_option_id: String,
-        /// Who resolved it (`cli` / `web` / `android_push`)
-        resolved_by: ResolvedBy,
-    },
-    /// Answers an elicitation (structured input request).
-    RespondElicitation {
-        /// Correlation ID
-        command_id: CommandId,
-        /// Target session ID
-        session_id: SessionId,
-        /// ACP elicitation id
-        elicitation_id: String,
-        /// The user's response action (`accept` / `decline` / `cancel`)
-        action: ElicitationAction,
-        /// Answer content for `accept` (following the form's `requested_schema`)
-        content: Option<ElicitationContent>,
-        /// Who resolved it (`cli` / `web` / `android_push`)
-        resolved_by: ResolvedBy,
-    },
     /// Mode switch / configuration change / cancel / kill.
     ControlSession {
         /// Correlation ID

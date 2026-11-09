@@ -1,7 +1,7 @@
 # リファクタリング・プログラム（API統合・モジュール分割）
 
 - **日付**: 2026-11-09
-- **ステータス**: 進行中（B0 / B1 / A1 / A2 完了、次は A3）
+- **ステータス**: 進行中（B0 / B1 / A1 / A2 / A3 完了、次は B4a / A4）
 - **統合元**: 同日に別々に作成した「API・プロトコル統合リファクタリング計画」と
   「コードベース全体リファクタリング・モジュール分割計画」を1本化した
 - **対象パッケージ**: `fxg-protocol`, `fxg-db`, `fxg-acp`, `fxg-node`,
@@ -550,9 +550,9 @@ relay 元を記録する）。A2 では設定・秘密・`browse_fs` のノー�
 
 ### A3: WS / REST
 
-- [ ] Client WS の上りを `Subscribe` / `SendPrompt` / `ControlSession` / `Ping` に絞る
-- [ ] Permission / Elicitation / Resume / Archive / Delete を REST に一本化
-- [ ] `/api/v1/search` を GET のクエリ指定に統一
+- [x] Client WS の上りを `Subscribe` / `SendPrompt` / `ControlSession` / `Ping` に絞る
+- [x] Permission / Elicitation / Resume / Archive / Delete を REST に一本化
+- [x] `/api/v1/search` を GET のクエリ指定に統一
 
 ### A4: CLI IPC
 
@@ -653,3 +653,9 @@ relay 元を記録する）。A2 では設定・秘密・`browse_fs` のノー�
 - **2026-11-09 (A2 実装)**: `ui/src/lib/api/client.ts` の設定・秘密ラッパーから
   ローカル/リモートの重複を削除した。汎用 RPC ディスパッチャ化は、REST を
   型付き RPC エンドポイントへ置き換える判断（A4 以降）と合わせて行う。
+- **2026-11-09 (A3 実装)**: `ClientWsMessage` / `ClientCommand` から
+  `RespondPermission` / `RespondElicitation` を削除し、上りを `Subscribe` /
+  `SendPrompt` / `ControlSession` / `Ping` に限定した。UI の回答操作は REST
+  （`already_resolved` を返す冪等 API）へ移行した。
+- **2026-11-09 (A3 実装)**: `/api/v1/search` を `GET ?q=...&limit=...` に統一し、
+  JSON body との二重受け付けを廃止した。

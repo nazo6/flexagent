@@ -533,40 +533,6 @@ impl ClientApiBackend for ServerState {
                     client_source: client_source.clone(),
                 },
             ),
-            ClientCommand::RespondPermission {
-                session_id,
-                request_id,
-                selected_option_id,
-                resolved_by,
-                ..
-            } => (
-                self.session_node(session_id).await,
-                ServerToNodeMsg::RespondPermission {
-                    command_id: command_id.clone(),
-                    session_id: session_id.clone(),
-                    request_id: request_id.clone(),
-                    selected_option_id: selected_option_id.clone(),
-                    resolved_by: resolved_by.clone(),
-                },
-            ),
-            ClientCommand::RespondElicitation {
-                session_id,
-                elicitation_id,
-                action,
-                content,
-                resolved_by,
-                ..
-            } => (
-                self.session_node(session_id).await,
-                ServerToNodeMsg::RespondElicitation {
-                    command_id: command_id.clone(),
-                    session_id: session_id.clone(),
-                    elicitation_id: elicitation_id.clone(),
-                    action: *action,
-                    content: content.clone(),
-                    resolved_by: resolved_by.clone(),
-                },
-            ),
             ClientCommand::ControlSession {
                 session_id, action, ..
             } => (

@@ -828,7 +828,9 @@ pub enum ServerToNodeMsg {
   本文イベント・承認履歴をパージする (**復元不能**)。
   アーカイブ済みでも削除できる。中央サーバー経由の場合は対象ノードへ
   `DeleteSession` を中継する。
-- `POST /api/v1/search?q=...`: SQLite FTS5 を用いた全セッション横断の全文検索。
+- `GET /api/v1/search?q=...&limit=...`: SQLite FTS5 を用いた全セッション
+  横断の全文検索。クエリは URL のクエリパラメータのみで受け取り、JSON body は
+  受け付けない。
 - `POST /api/v1/push/subscribe`: Android / Desktop PWA の Web Push
   サブスクリプション登録 (中央サーバーのみ)。VAPID 鍵は初回起動時に
   `~/.flexagent/vapid.json` へ自動生成され、公開鍵は `GET /api/v1/system/info`
@@ -910,10 +912,13 @@ pub enum ServerToNodeMsg {
    - クライアントはバッチのカーソル巻き戻り（受信カーソルが保存値より小さい）
      を検知したら、保存済みタイムラインを破棄して REST 投影を再取得し、
      新しいストアとして再同期する。
-3. クライアントからの操作（`SendPrompt`, `RespondPermission`,
-   `RespondElicitation`, `ControlSession`）もこのWebSocket上（またはREST
-   POST）で送信でき、結果は `command_id` 付きの `CommandResult`
-   として要求元クライアントへ応答されます。
+3. クライアントからの上りメッセージは `Subscribe` / `SendPrompt` /
+   `ControlSession` / `Ping` に限定する。`SendPrompt` と `ControlSession` の
+   結果は `command_id` 付きの `CommandResult` として要求元クライアントへ
+   応答される。
+   - Permission / Elicitation の回答、Resume / Archive / Delete は
+     **REST 専用**とする（冪等な状態変更を1経路にまとめ、WS と REST の
+     ペイロード差異をなくす）。REST は `already_resolved` を返す。
    - **一時VMブートストラップログ (`BootstrapLog`)**:
      一時VMの起動中（`fxg daemon
      --stdio` の `NodeHello` 前）はノードの `node.db` が存在しないため、中央

@@ -387,7 +387,7 @@ export class ApiClient {
 
   /** `POST /api/v1/search` (FTS5 full-text search). */
   async search(query: string, limit?: number): Promise<SearchHit[]> {
-    const response = await this.#request<SearchResponse>("POST", "/api/v1/search", {
+    const response = await this.#request<SearchResponse>("GET", "/api/v1/search", {
       query: { q: query, limit },
     });
     return response.hits;

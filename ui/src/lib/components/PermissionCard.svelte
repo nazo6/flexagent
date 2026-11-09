@@ -2,7 +2,6 @@
   import { Badge } from "#lib/components/ui/badge/index.ts";
   import { Button } from "#lib/components/ui/button/index.ts";
   import type { PermissionOption } from "#lib/generated/bindings.ts";
-  import { commandErrorMessage } from "#lib/api/client.ts";
   import { formatRelativeTime } from "#lib/format.ts";
   import { m } from "#lib/paraglide/messages.js";
   import { sync } from "#lib/stores/app.svelte.ts";
@@ -47,10 +46,8 @@
     busyOptionId = option.option_id;
     try {
       const result = await sync.respondPermission(sessionId, requestId, option.option_id);
-      if (result.error?.code === "ALREADY_RESOLVED") {
+      if (result.already_resolved) {
         toast.info(m.error_already_resolved());
-      } else if (!result.success) {
-        toast.error(commandErrorMessage(result.error) ?? m.chat_permission_failed());
       } else {
         toast.success(m.chat_permission_sent());
       }

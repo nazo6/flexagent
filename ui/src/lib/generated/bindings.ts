@@ -201,32 +201,6 @@ session_id: SessionId;
 input: PromptInput; 
 /**  Source (`cli` / `web` / `android`) */
 client_source: string } | 
-/**  Answers a permission request. */
-{ op: "respond_permission"; 
-/**  Correlation ID */
-command_id: CommandId; 
-/**  Target session ID */
-session_id: SessionId; 
-/**  ACP request id */
-request_id: string; 
-/**  The selected `option_id` */
-selected_option_id: string; 
-/**  Who resolved it (`cli` / `web` / `android_push`) */
-resolved_by: string } | 
-/**  Answers an elicitation (structured input request). */
-{ op: "respond_elicitation"; 
-/**  Correlation ID */
-command_id: CommandId; 
-/**  Target session ID */
-session_id: SessionId; 
-/**  ACP elicitation id */
-elicitation_id: string; 
-/**  The user's response action (`accept` / `decline` / `cancel`) */
-action: ElicitationAction; 
-/**  Answer content for `accept` (following the form's `requested_schema`) */
-content: { [key in string]: ElicitationValue } | null; 
-/**  Who resolved it (`cli` / `web` / `android_push`) */
-resolved_by: string } | 
 /**  Mode switch / configuration change / cancel / kill. */
 { op: "control_session"; 
 /**  Correlation ID */
