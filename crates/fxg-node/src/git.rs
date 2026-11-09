@@ -197,6 +197,40 @@ pub async fn is_worktree(repo: &Path) -> Result<bool, NodeError> {
     Ok(matches!((git_dir, common_dir), (Some(a), Some(b)) if a != b))
 }
 
+/// Root path of the main Worktree of a repository.
+///
+/// For a Worktree checked out in another directory, resolves the repository's main
+/// checkout through `git worktree list --porcelain` (first entry) and falls back to
+/// the parent of `git rev-parse --git-common-dir` (`<repo>/.git`). Returns `None`
+/// when the directory is not a Git repository.
+pub async fn main_worktree_root(repo: &Path) -> Result<Option<PathBuf>, NodeError> {
+    if let Some(list) = try_git(repo, &["worktree", "list", "--porcelain"]).await?
+        && let Some(first) = list.lines().next()
+        && let Some(path) = first.strip_prefix("worktree ")
+        && !path.is_empty()
+    {
+        let path = PathBuf::from(path);
+        return Ok(Some(fxg_pty::canonicalize(&path).unwrap_or(path)));
+    }
+    let common_dir = match try_git(
+        repo,
+        &["rev-parse", "--path-format=absolute", "--git-common-dir"],
+    )
+    .await?
+    {
+        Some(value) => value,
+        None => match try_git(repo, &["rev-parse", "--git-common-dir"]).await? {
+            Some(value) => value,
+            None => return Ok(None),
+        },
+    };
+    let common_dir = PathBuf::from(common_dir);
+    if common_dir.file_name().is_some_and(|name| name == ".git") {
+        return Ok(common_dir.parent().map(Path::to_path_buf));
+    }
+    Ok(None)
+}
+
 /// Retrieves the Git diff of the workspace (`GET /api/v1/sessions/:id/diff` /
 /// `GetGitDiff`).
 ///

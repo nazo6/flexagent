@@ -1,29 +1,25 @@
-//! Configuration file schemas (`~/.flexagent/config.toml` / `.fxg.toml`).
+//! Process bootstrap configuration (`~/.flexagent/config.toml`).
 //!
-//! Design: `docs/05-cli-and-pwa-ui.md` §2.
+//! Design: `docs/05-cli-and-pwa-ui.md` §2 and
+//! `docs/changelog/2026-11-09-settings-consolidation-and-project-identity.md`.
 //!
-//! - Global configuration ([`GlobalConfig`]): node, server, agent and provisioner
-//!   settings are merged into a single `config.toml`, with support for overrides
-//!   through environment variables (`FXG_*`).
-//! - Project configuration ([`ProjectConfig`]): placed in `.fxg.toml` inside the
-//!   repository.
+//! Only values that are needed **before** the DB opens live here: bind addresses,
+//! the central server URL and logging. Everything changed at runtime (node
+//! settings, agent definitions, provisioners, project profiles, secrets) is owned
+//! by `node.db` / `server.db` and edited through the client API.
 //!
 //! These are server/CLI internal types and are excluded from `specta` export
 //! (the convention is that only types exposed to clients get
 //! `#[specta(collect)]`).
 
-use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
-use specta::Type;
 
 /// Environment variable that changes the data directory (`~/.flexagent`).
 pub const ENV_FXG_HOME: &str = "FXG_HOME";
 /// Global configuration file name.
 pub const CONFIG_FILE_NAME: &str = "config.toml";
-/// Project configuration file name.
-pub const PROJECT_CONFIG_FILE_NAME: &str = ".fxg.toml";
 /// File name of the client authentication token.
 pub const AUTH_TOKEN_FILE_NAME: &str = "auth_token";
 /// File name of the per-node pairing token.
@@ -40,16 +36,12 @@ pub const DEFAULT_GIT_USERNAME: &str = "x-access-token";
 pub mod env_keys {
     /// `[node] node_id`
     pub const NODE_ID: &str = "FXG_NODE_ID";
-    /// `[node] name`
-    pub const NODE_NAME: &str = "FXG_NODE_NAME";
     /// `[node] listen_addr`
     pub const NODE_LISTEN_ADDR: &str = "FXG_NODE_LISTEN_ADDR";
     /// `[node] central_server_url`
     pub const CENTRAL_SERVER_URL: &str = "FXG_CENTRAL_SERVER_URL";
-    /// `[node] node_token`
+    /// Node pairing token (alternative to `~/.flexagent/node_token`)
     pub const NODE_TOKEN: &str = "FXG_NODE_TOKEN";
-    /// `[node] allow_remote_pty`
-    pub const ALLOW_REMOTE_PTY: &str = "FXG_ALLOW_REMOTE_PTY";
     /// Override of the local IPC endpoint (for tests and multiple instances on one host)
     pub const IPC_ENDPOINT: &str = "FXG_IPC_ENDPOINT";
     /// Disable automatic `fxg daemon` startup from CLI commands (`1` / `true`)
@@ -156,7 +148,7 @@ fn parse_list(value: &str) -> Vec<String> {
         .collect()
 }
 
-/// Global configuration (`~/.flexagent/config.toml`).
+/// Global bootstrap configuration (`~/.flexagent/config.toml`).
 ///
 /// Every field is optional (each has a default value).
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
@@ -164,14 +156,10 @@ fn parse_list(value: &str) -> Vec<String> {
 pub struct GlobalConfig {
     /// Logging settings
     pub log: LogConfig,
-    /// Local node daemon settings (`fxg daemon`)
-    pub node: NodeConfig,
-    /// Central server settings (`fxg server`)
-    pub server: ServerConfig,
-    /// Agent and ACP Registry settings
-    pub agents: AgentsConfig,
-    /// Ephemeral VM / sandbox provisioner definitions (`--provisioner <name>`)
-    pub provisioners: BTreeMap<String, ProvisionerConfig>,
+    /// Local node daemon bootstrap settings (`fxg daemon`)
+    pub node: NodeBootstrapConfig,
+    /// Central server bootstrap settings (`fxg server`)
+    pub server: ServerBootstrapConfig,
 }
 
 impl GlobalConfig {
@@ -225,20 +213,11 @@ impl GlobalConfig {
         if let Some(v) = env(env_keys::NODE_ID) {
             self.node.node_id = Some(v);
         }
-        if let Some(v) = env(env_keys::NODE_NAME) {
-            self.node.name = Some(v);
-        }
         if let Some(v) = env(env_keys::NODE_LISTEN_ADDR) {
             self.node.listen_addr = Some(v);
         }
         if let Some(v) = env(env_keys::CENTRAL_SERVER_URL) {
             self.node.central_server_url = Some(v);
-        }
-        if let Some(v) = env(env_keys::NODE_TOKEN) {
-            self.node.node_token = Some(v);
-        }
-        if let Some(v) = env(env_keys::ALLOW_REMOTE_PTY) {
-            self.node.allow_remote_pty = parse_bool_env(env_keys::ALLOW_REMOTE_PTY, &v)?;
         }
         if let Some(v) = env(env_keys::SERVER_LISTEN_ADDR) {
             self.server.listen_addr = Some(v);
@@ -267,46 +246,24 @@ pub struct LogConfig {
     pub no_color: bool,
 }
 
-/// The `[node]` section: local node daemon settings.
+/// The `[node]` section: local node daemon bootstrap settings.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(default)]
-pub struct NodeConfig {
+pub struct NodeBootstrapConfig {
     /// Unique node identifier
     /// (when omitted, a hostname-based slug plus a short ID is assigned on first start).
     pub node_id: Option<String>,
-    /// Display name in the UI (defaults to the OS hostname).
-    pub name: Option<String>,
     /// Bind address of the local HTTP/WS server
     /// (a loopback address is recommended by the security principles).
     pub listen_addr: Option<String>,
     /// Node Hub WebSocket URL of the central server
     /// (when omitted the node runs standalone and locally only).
     pub central_server_url: Option<String>,
-    /// Pairing token used when connecting to the central server (per node).
-    ///
-    /// When omitted, `~/.flexagent/node_token` is loaded.
-    pub node_token: Option<String>,
-    /// Whether to allow interactive Web PTY sessions started remotely (through the central server).
-    pub allow_remote_pty: bool,
-    /// Default destination template when automatically creating git worktrees.
-    ///
-    /// Placeholders: `{fxg_home}` / `{project}` / `{repo}` / `{repo_parent}` /
-    /// `{branch}`.
-    pub worktree_dir_template: Option<String>,
-    /// Directories scanned automatically when the daemon starts and when `fxg project scan` runs.
-    pub project_scan_dirs: Vec<String>,
-    /// Whether `fxg daemon` stays resident in the task tray on start-up (default: disabled).
-    ///
-    /// If `--tray` / `--no-tray` is passed on the CLI, that takes precedence.
-    pub tray: Option<bool>,
 }
 
-impl NodeConfig {
+impl NodeBootstrapConfig {
     /// Default bind address of the local HTTP/WS server (strictly bound to loopback).
     pub const DEFAULT_LISTEN_ADDR: &'static str = "127.0.0.1:7860";
-    /// Default worktree destination template.
-    pub const DEFAULT_WORKTREE_DIR_TEMPLATE: &'static str =
-        "{fxg_home}/worktrees/{project}/{branch}";
 
     /// Returns the effective bind address.
     pub fn resolved_listen_addr(&self) -> &str {
@@ -315,34 +272,21 @@ impl NodeConfig {
             .filter(|v| !v.trim().is_empty())
             .unwrap_or(Self::DEFAULT_LISTEN_ADDR)
     }
-
-    /// Returns the effective worktree destination template.
-    pub fn resolved_worktree_dir_template(&self) -> &str {
-        self.worktree_dir_template
-            .as_deref()
-            .filter(|v| !v.trim().is_empty())
-            .unwrap_or(Self::DEFAULT_WORKTREE_DIR_TEMPLATE)
-    }
 }
 
-/// The `[server]` section: central server settings.
+/// The `[server]` section: central server bootstrap settings.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 #[serde(default)]
-pub struct ServerConfig {
+pub struct ServerBootstrapConfig {
     /// HTTP/WS bind address of the central server (listen only inside a LAN / VPN).
     pub listen_addr: Option<String>,
     /// Extra host names allowed by the DNS rebinding defense (Host header validation).
     pub allowed_hosts: Vec<String>,
     /// Extra origins allowed by the CSWSH defense (WebSocket Origin validation) besides the same origin.
     pub allowed_origins: Vec<String>,
-    /// Contact claim of the Web Push (VAPID) configuration (`mailto:` or `https:`).
-    pub vapid_subject: Option<String>,
-    /// Authentication proxy settings for `GitCredentialRequest` coming from ephemeral VMs
-    /// (`fxg daemon --stdio`) (the key is the host name, e.g. `github.com`).
-    pub git_credentials: BTreeMap<String, GitCredentialConfig>,
 }
 
-impl ServerConfig {
+impl ServerBootstrapConfig {
     /// Default bind address of the central server.
     ///
     /// Never expose it directly to the public internet; listen only inside a LAN
@@ -356,214 +300,6 @@ impl ServerConfig {
             .filter(|v| !v.trim().is_empty())
             .unwrap_or(Self::DEFAULT_LISTEN_ADDR)
     }
-}
-
-/// How a temporary VM / sandbox node obtains git credentials.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "provider", rename_all = "snake_case")]
-pub enum GitCredentialConfig {
-    /// Obtain the token from `gh auth token`.
-    GhCli {
-        /// Basic authentication user name (default: `x-access-token`)
-        #[serde(default)]
-        username: Option<String>,
-    },
-    /// Obtain the token from the given environment variable.
-    Env {
-        /// Basic authentication user name (default: `x-access-token`)
-        #[serde(default)]
-        username: Option<String>,
-        /// Name of the environment variable holding the token
-        token_env: String,
-    },
-}
-
-/// The `[agents]` section: agent and ACP Registry settings.
-#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
-#[serde(default)]
-pub struct AgentsConfig {
-    /// Default agent used when `fxg run` etc. does not specify one.
-    pub default_agent: Option<String>,
-    /// Official ACP registry URL.
-    pub registry_url: Option<String>,
-    /// Validity period of the ACP registry cache (seconds).
-    pub registry_cache_ttl_secs: Option<u64>,
-    /// Agent name aliases usable with `fxg run <alias>`
-    /// (overrides and extends the built-in defaults).
-    pub aliases: BTreeMap<String, String>,
-    /// Custom ACP agent definitions outside the registry.
-    pub custom: BTreeMap<String, CustomAgentConfig>,
-}
-
-impl AgentsConfig {
-    /// Default value of the default agent.
-    pub const DEFAULT_AGENT: &'static str = "opencode";
-    /// Default value of the official ACP registry URL.
-    pub const DEFAULT_REGISTRY_URL: &'static str =
-        "https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json";
-    /// Default value of the registry cache TTL (24 hours).
-    pub const DEFAULT_REGISTRY_CACHE_TTL_SECS: u64 = 86_400;
-
-    /// Built-in default aliases.
-    pub fn default_aliases() -> BTreeMap<String, String> {
-        BTreeMap::from([
-            ("claude".to_owned(), "claude-code-acp".to_owned()),
-            ("antigravity".to_owned(), "agy".to_owned()),
-            ("gemini".to_owned(), "gemini-cli-acp".to_owned()),
-            ("codex".to_owned(), "codex-acp".to_owned()),
-        ])
-    }
-
-    /// Returns the effective aliases: the built-in ones merged with the overrides
-    /// and additions from the configuration file.
-    pub fn resolved_aliases(&self) -> BTreeMap<String, String> {
-        let mut aliases = Self::default_aliases();
-        for (key, value) in &self.aliases {
-            aliases.insert(key.clone(), value.clone());
-        }
-        aliases
-    }
-
-    /// Returns the effective default agent.
-    pub fn resolved_default_agent(&self) -> &str {
-        self.default_agent
-            .as_deref()
-            .filter(|v| !v.trim().is_empty())
-            .unwrap_or(Self::DEFAULT_AGENT)
-    }
-
-    /// Returns the effective ACP registry URL.
-    pub fn resolved_registry_url(&self) -> &str {
-        self.registry_url
-            .as_deref()
-            .filter(|v| !v.trim().is_empty())
-            .unwrap_or(Self::DEFAULT_REGISTRY_URL)
-    }
-
-    /// Returns the effective registry cache TTL (seconds).
-    pub fn resolved_registry_cache_ttl_secs(&self) -> u64 {
-        self.registry_cache_ttl_secs
-            .unwrap_or(Self::DEFAULT_REGISTRY_CACHE_TTL_SECS)
-    }
-}
-
-/// A custom ACP agent definition outside the registry (`[agents.custom.<id>]`).
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, Type)]
-#[specta(collect)]
-#[serde(default)]
-pub struct CustomAgentConfig {
-    /// Display name
-    pub name: Option<String>,
-    /// Command to execute
-    pub command: String,
-    /// Command arguments
-    pub args: Vec<String>,
-    /// Environment variables injected into the process
-    pub env: BTreeMap<String, String>,
-}
-
-/// `[provisioners.<name>]`: definition of an ephemeral VM / sandbox provisioner.
-///
-/// It only defines "a command that eventually starts `fxg daemon --stdio` over
-/// stdio", so any environment can be registered as a provisioner.
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(default)]
-pub struct ProvisionerConfig {
-    /// Description (shown in the UI)
-    pub description: Option<String>,
-    /// Command to execute (`docker` / `incus` / `uvx` / `ssh` etc.)
-    pub command: String,
-    /// Command arguments.
-    ///
-    /// Placeholders: `{BOOTSTRAP_SCRIPT}` / `{INSTANCE_NAME}` / `{SESSION_ID}`.
-    pub args: Vec<String>,
-    /// Seconds until the idle instance is discarded automatically.
-    pub idle_timeout_secs: Option<u64>,
-    /// Environment variables injected into the process
-    pub env: BTreeMap<String, String>,
-}
-
-/// Project configuration (`.fxg.toml`).
-///
-/// Optionally placed at the root of each git repository (or in a subdirectory of a
-/// monorepo) to define project-specific behavior. It can be tracked by git.
-#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
-#[serde(default)]
-pub struct ProjectConfig {
-    /// Explicit logical project ID
-    /// (normalized automatically from `git remote.origin.url` when omitted).
-    pub project_key: Option<String>,
-    /// Project display name in the UI (defaults to the directory or repository name).
-    pub name: Option<String>,
-    /// Project-specific default agent settings
-    pub agent: ProjectAgentConfig,
-    /// Project-specific rules for creating git worktrees
-    pub worktree: ProjectWorktreeConfig,
-    /// Extra setup definition for ephemeral VMs (`fxg bootstrap-workspace`)
-    pub bootstrap: ProjectBootstrapConfig,
-}
-
-impl ProjectConfig {
-    /// Reads `.fxg.toml` from the given directory (`None` when it does not exist).
-    pub fn load_from_dir(dir: &Path) -> Result<Option<Self>, ConfigError> {
-        let path = dir.join(PROJECT_CONFIG_FILE_NAME);
-        if !path.exists() {
-            return Ok(None);
-        }
-        Self::load_from_path(&path).map(Some)
-    }
-
-    /// Reads `.fxg.toml` at the given path.
-    pub fn load_from_path(path: &Path) -> Result<Self, ConfigError> {
-        let text = std::fs::read_to_string(path).map_err(|source| ConfigError::Io {
-            path: path.to_path_buf(),
-            source,
-        })?;
-        toml::from_str(&text).map_err(|source| ConfigError::Parse {
-            path: path.to_path_buf(),
-            source: Box::new(source),
-        })
-    }
-}
-
-/// The `[agent]` section: project-specific default agent settings.
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(default)]
-pub struct ProjectAgentConfig {
-    /// Default agent ID
-    pub default_agent: Option<String>,
-    /// Default mode (`code` / `plan` etc.)
-    pub default_mode: Option<String>,
-    /// Extra arguments passed to the agent process
-    pub extra_args: Vec<String>,
-}
-
-/// The `[worktree]` section: project-specific rules for creating git worktrees.
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(default)]
-pub struct ProjectWorktreeConfig {
-    /// Default base branch when creating a new worktree (defaults to the current HEAD).
-    pub base_branch: Option<String>,
-    /// Override of the worktree destination template for this project only.
-    pub dir_template: Option<String>,
-    /// Untracked files copied automatically from the main worktree when creating a
-    /// new worktree (such as `.env`).
-    pub copy_files: Vec<String>,
-    /// Initialization commands run automatically in the new worktree directory
-    /// right after it is created.
-    pub post_create: Vec<String>,
-}
-
-/// The `[bootstrap]` section: extra definition for ephemeral VMs (`fxg bootstrap-workspace`).
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(default)]
-pub struct ProjectBootstrapConfig {
-    /// Extra tools installed with `mise install` besides those detected from the repository.
-    pub tools: Vec<String>,
-    /// Initial setup commands run after `git clone` and the tool installation.
-    pub setup: Vec<String>,
-    /// Non-secret environment variables injected during setup and agent execution.
-    pub env: BTreeMap<String, String>,
 }
 
 #[cfg(test)]
@@ -581,137 +317,35 @@ mod tests {
     const SAMPLE_GLOBAL_CONFIG: &str = r#"
 [node]
 node_id = "home-win"
-name = "Home Windows PC"
 listen_addr = "127.0.0.1:7860"
 central_server_url = "ws://100.64.0.10:8080/api/v1/node/ws"
-allow_remote_pty = false
-worktree_dir_template = "{fxg_home}/worktrees/{project}/{branch}"
-project_scan_dirs = ["D:/ghq/github.com"]
-tray = false
 
 [server]
 listen_addr = "0.0.0.0:8080"
 allowed_hosts = ["home-server.tailnet-xxxx.ts.net:8080", "192.168.1.50:8080"]
 allowed_origins = ["https://home-server.tailnet-xxxx.ts.net"]
-vapid_subject = "mailto:admin@example.com"
-
-[server.git_credentials."github.com"]
-provider = "gh_cli"
-username = "x-access-token"
-
-[server.git_credentials."gitlab.example.com"]
-provider = "env"
-token_env = "FXG_GITLAB_PAT"
-
-[agents]
-default_agent = "opencode"
-registry_url = "https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json"
-registry_cache_ttl_secs = 86400
-
-[agents.aliases]
-antigravity = "antigravity-acp"
-
-[agents.custom.my-local-agent]
-name = "My Custom ACP Agent"
-command = "node"
-args = ["D:/tools/my-agent/dist/acp.js"]
-env = { LOG_LEVEL = "info" }
-
-[provisioners.local-docker]
-description = "Local isolated Ubuntu container (Docker)"
-command = "docker"
-args = ["run", "--rm", "-i", "ubuntu:24.04", "sh", "-c", "{BOOTSTRAP_SCRIPT}"]
-idle_timeout_secs = 900
-
-[provisioners.colab-pro]
-description = "Google Colab Pro (T4 GPU Runtime)"
-command = "uvx"
-args = ["google-colab-cli", "ssh", "--gpu", "t4", "--command", "{BOOTSTRAP_SCRIPT}"]
-idle_timeout_secs = 900
-env = {}
 "#;
 
     #[test]
     fn parses_full_global_config() {
         let config: GlobalConfig = toml::from_str(SAMPLE_GLOBAL_CONFIG).unwrap();
         assert_eq!(config.node.node_id.as_deref(), Some("home-win"));
-        assert_eq!(config.node.name.as_deref(), Some("Home Windows PC"));
-        assert!(!config.node.allow_remote_pty);
         assert_eq!(
             config.node.resolved_listen_addr(),
-            NodeConfig::DEFAULT_LISTEN_ADDR
-        );
-        assert_eq!(
-            config.node.resolved_worktree_dir_template(),
-            "{fxg_home}/worktrees/{project}/{branch}"
+            NodeBootstrapConfig::DEFAULT_LISTEN_ADDR
         );
         assert_eq!(
             config.server.resolved_listen_addr(),
-            ServerConfig::DEFAULT_LISTEN_ADDR
+            ServerBootstrapConfig::DEFAULT_LISTEN_ADDR
         );
         assert_eq!(config.server.allowed_hosts.len(), 2);
         assert_eq!(config.server.allowed_origins.len(), 1);
-        assert_eq!(
-            config.server.vapid_subject.as_deref(),
-            Some("mailto:admin@example.com")
-        );
-
-        match config.server.git_credentials.get("github.com").unwrap() {
-            GitCredentialConfig::GhCli { username } => {
-                assert_eq!(username.as_deref(), Some("x-access-token"));
-            }
-            other => panic!("unexpected provider: {other:?}"),
-        }
-        match config
-            .server
-            .git_credentials
-            .get("gitlab.example.com")
-            .unwrap()
-        {
-            GitCredentialConfig::Env { token_env, .. } => {
-                assert_eq!(token_env, "FXG_GITLAB_PAT");
-            }
-            other => panic!("unexpected provider: {other:?}"),
-        }
-
-        assert_eq!(config.agents.resolved_default_agent(), "opencode");
-        assert_eq!(
-            config.agents.resolved_registry_cache_ttl_secs(),
-            AgentsConfig::DEFAULT_REGISTRY_CACHE_TTL_SECS
-        );
-        // Aliases: the configured overrides merged over the built-in defaults
-        let aliases = config.agents.resolved_aliases();
-        assert_eq!(aliases.get("claude").unwrap(), "claude-code-acp");
-        assert_eq!(aliases.len(), 4);
-
-        let custom = config.agents.custom.get("my-local-agent").unwrap();
-        assert_eq!(custom.command, "node");
-        assert_eq!(custom.args.len(), 1);
-        assert_eq!(
-            custom.env.get("LOG_LEVEL").map(String::as_str),
-            Some("info")
-        );
-
-        let docker = config.provisioners.get("local-docker").unwrap();
-        assert_eq!(docker.command, "docker");
-        assert_eq!(docker.idle_timeout_secs, Some(900));
-        assert_eq!(config.provisioners.len(), 2);
     }
 
     #[test]
     fn defaults_are_applied_when_sections_are_missing() {
         let config: GlobalConfig = toml::from_str("").unwrap();
         assert_eq!(config, GlobalConfig::default());
-        assert!(
-            !config.node.allow_remote_pty,
-            "allow_remote_pty defaults false"
-        );
-        assert_eq!(
-            config.agents.resolved_registry_url(),
-            AgentsConfig::DEFAULT_REGISTRY_URL
-        );
-        assert_eq!(config.agents.resolved_default_agent(), "opencode");
-        assert!(config.provisioners.is_empty());
     }
 
     #[test]
@@ -732,11 +366,8 @@ future_option = "whatever"
         let mut config: GlobalConfig = toml::from_str(SAMPLE_GLOBAL_CONFIG).unwrap();
         let env = env_map(&[
             ("FXG_NODE_ID", "override-node"),
-            ("FXG_NODE_NAME", "Overridden"),
             ("FXG_NODE_LISTEN_ADDR", "127.0.0.1:9000"),
             ("FXG_CENTRAL_SERVER_URL", "ws://example.test/ws"),
-            ("FXG_NODE_TOKEN", "secret-token"),
-            ("FXG_ALLOW_REMOTE_PTY", "true"),
             ("FXG_SERVER_LISTEN_ADDR", "0.0.0.0:9090"),
             ("FXG_SERVER_ALLOWED_HOSTS", "a.test, b.test ,, c.test"),
             ("FXG_SERVER_ALLOWED_ORIGINS", "http://a.test"),
@@ -754,36 +385,17 @@ future_option = "whatever"
         assert_eq!(config.log.format.as_deref(), Some("json"));
         assert!(config.log.no_color);
         assert_eq!(config.node.node_id.as_deref(), Some("override-node"));
-        assert_eq!(config.node.name.as_deref(), Some("Overridden"));
         assert_eq!(config.node.resolved_listen_addr(), "127.0.0.1:9000");
         assert_eq!(
             config.node.central_server_url.as_deref(),
             Some("ws://example.test/ws")
         );
-        assert_eq!(config.node.node_token.as_deref(), Some("secret-token"));
-        assert!(config.node.allow_remote_pty);
         assert_eq!(config.server.resolved_listen_addr(), "0.0.0.0:9090");
         assert_eq!(
             config.server.allowed_hosts,
             vec!["a.test", "b.test", "c.test"]
         );
         assert_eq!(config.server.allowed_origins, vec!["http://a.test"]);
-    }
-
-    #[test]
-    fn invalid_bool_env_is_rejected() {
-        let mut config = GlobalConfig::default();
-        let env = env_map(&[("FXG_ALLOW_REMOTE_PTY", "maybe")]);
-        let err = config
-            .apply_env_overrides(&|key| env.get(key).cloned())
-            .unwrap_err();
-        assert!(matches!(
-            err,
-            ConfigError::InvalidEnvValue {
-                key: "FXG_ALLOW_REMOTE_PTY",
-                ..
-            }
-        ));
     }
 
     #[test]
@@ -813,7 +425,6 @@ future_option = "whatever"
         let env = env_map(&[("FXG_NODE_ID", "from-env")]);
         let config = GlobalConfig::load_from_dir(dir.path(), &|key| env.get(key).cloned()).unwrap();
         assert_eq!(config.node.node_id.as_deref(), Some("from-env"));
-        assert_eq!(config.node.name.as_deref(), Some("Home Windows PC"));
     }
 
     #[test]
@@ -826,62 +437,5 @@ future_option = "whatever"
             ConfigError::Parse { path: p, .. } => assert_eq!(p, path),
             other => panic!("unexpected error: {other}"),
         }
-    }
-
-    const SAMPLE_PROJECT_CONFIG: &str = r#"
-project_key = "github.com/nazo6/flexagent"
-name = "flexagent"
-
-[agent]
-default_agent = "opencode2"
-default_mode = "code"
-extra_args = []
-
-[worktree]
-base_branch = "main"
-dir_template = "{fxg_home}/worktrees/{project}/{branch}"
-copy_files = [".env", ".env.local"]
-post_create = ["pnpm install --prefer-offline"]
-
-[bootstrap]
-tools = ["rust@stable", "node@22", "pnpm@latest"]
-setup = ["cargo fetch", "pnpm install --frozen-lockfile"]
-
-[bootstrap.env]
-RUST_BACKTRACE = "1"
-"#;
-
-    #[test]
-    fn parses_project_config() {
-        let config: ProjectConfig = toml::from_str(SAMPLE_PROJECT_CONFIG).unwrap();
-        assert_eq!(
-            config.project_key.as_deref(),
-            Some("github.com/nazo6/flexagent")
-        );
-        assert_eq!(config.name.as_deref(), Some("flexagent"));
-        assert_eq!(config.agent.default_mode.as_deref(), Some("code"));
-        assert_eq!(config.worktree.base_branch.as_deref(), Some("main"));
-        assert_eq!(config.worktree.copy_files, vec![".env", ".env.local"]);
-        assert_eq!(config.worktree.post_create.len(), 1);
-        assert_eq!(config.bootstrap.tools.len(), 3);
-        assert_eq!(config.bootstrap.setup.len(), 2);
-        assert_eq!(
-            config
-                .bootstrap
-                .env
-                .get("RUST_BACKTRACE")
-                .map(String::as_str),
-            Some("1")
-        );
-    }
-
-    #[test]
-    fn project_config_load_from_dir_returns_none_when_absent() {
-        let dir = tempfile::tempdir().unwrap();
-        assert!(ProjectConfig::load_from_dir(dir.path()).unwrap().is_none());
-
-        std::fs::write(dir.path().join(PROJECT_CONFIG_FILE_NAME), "name = \"app\"").unwrap();
-        let config = ProjectConfig::load_from_dir(dir.path()).unwrap().unwrap();
-        assert_eq!(config.name.as_deref(), Some("app"));
     }
 }

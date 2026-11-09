@@ -15,10 +15,11 @@ use serde::{Deserialize, Serialize};
 use crate::client_api::WorktreeInfo;
 use crate::common::{
     ClientSource, ElicitationAction, ElicitationContent, ElicitationRequestEntry, ErrorInfo,
-    HookLogEntry, PermissionRequestEntry, ProjectResolutionSource, ProjectSummary, PromptInput,
-    ResolvedBy, SessionControlAction, SessionSummary, StreamDeltaPayload,
+    PermissionRequestEntry, ProjectSummary, PromptInput, ResolvedBy, SessionControlAction,
+    SessionSummary, StreamDeltaPayload,
 };
 use crate::events::SessionEventEnvelope;
+use crate::settings::ProjectIdentity;
 use crate::{CommandId, ProjectId, SessionId};
 
 /// Length of the length header of length-prefixed JSON (little-endian u32).
@@ -54,8 +55,8 @@ pub struct ProjectInfo {
     pub local_path: String,
     /// Whether it is a git repository
     pub is_git_repo: bool,
-    /// How it was resolved
-    pub source: ProjectResolutionSource,
+    /// How the identity was resolved
+    pub identity: ProjectIdentity,
 }
 
 /// Request message from the CLI to the daemon.
@@ -221,7 +222,7 @@ pub enum IpcClientMessage {
         command_id: CommandId,
     },
     /// Manually links the current directory to a logical project ID
-    /// (stored in `.fxg.toml`. `fxg project link`)
+    /// (stored in `node.db.project_path_links`; `fxg project link`)
     ProjectLink {
         /// Correlation ID
         command_id: CommandId,
@@ -258,8 +259,6 @@ pub enum IpcClientMessage {
         branch: String,
         /// Base branch (defaults to the current HEAD)
         base_branch: Option<String>,
-        /// Explicit destination path
-        path: Option<String>,
     },
     /// Removes a worktree (`fxg worktree remove`).
     WorktreeRemove {
@@ -409,8 +408,6 @@ pub enum IpcResult {
         branch: String,
         /// Whether it was newly created (`false` means an existing worktree was reused)
         created: bool,
-        /// Execution log of the `post_create` hook
-        hook_logs: Vec<HookLogEntry>,
     },
     /// Result of `ListSessions`
     Sessions {
@@ -560,7 +557,6 @@ mod tests {
                 project_id: None,
                 branch: "feat/auth".into(),
                 base_branch: Some("main".into()),
-                path: None,
             },
             IpcClientMessage::WorktreeRemove {
                 command_id: "c7".into(),
@@ -658,12 +654,12 @@ mod tests {
                 relative_subpath: None,
                 local_path: "/home/nazo/src/flexagent".into(),
                 is_git_repo: true,
-                source: ProjectResolutionSource::GitRemote,
+                identity: ProjectIdentity::git_remote(),
             },
         };
         let json = serde_json::to_value(&result).unwrap();
         assert_eq!(json["result"], "project_info");
-        assert_eq!(json["project"]["source"], "git_remote");
+        assert_eq!(json["project"]["identity"]["kind"], "git_remote");
         let decoded: IpcResult = serde_json::from_value(json).unwrap();
         assert_eq!(decoded, result);
 
@@ -671,15 +667,10 @@ mod tests {
             path: "/home/nazo/.flexagent/worktrees/github.com-nazo6-flexagent/feat-auth".into(),
             branch: "feat/auth".into(),
             created: true,
-            hook_logs: vec![HookLogEntry {
-                command: "pnpm install".into(),
-                success: true,
-                output: "done".into(),
-            }],
         };
         let json = serde_json::to_value(&added).unwrap();
         assert_eq!(json["result"], "worktree_added");
-        assert_eq!(json["hook_logs"][0]["success"], true);
+
         let decoded: IpcResult = serde_json::from_value(json).unwrap();
         assert_eq!(decoded, added);
     }

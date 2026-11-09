@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        INSERT INTO projects\n            (project_id, name, canonical_git_url, identity_kind, project_key, created_at, updated_at)\n        VALUES (?, ?, ?, ?, ?, ?, ?)\n        ON CONFLICT(project_id) DO UPDATE SET\n            name = excluded.name,\n            canonical_git_url = COALESCE(excluded.canonical_git_url, projects.canonical_git_url),\n            identity_kind = excluded.identity_kind,\n            project_key = COALESCE(excluded.project_key, projects.project_key),\n            updated_at = excluded.updated_at\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 7
+    },
+    "nullable": []
+  },
+  "hash": "82e4dd4eae9769d3d2f32598de19ae3433f586f9efc339fd40c0a85fa34c2ea0"
+}

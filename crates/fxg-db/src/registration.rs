@@ -5,6 +5,7 @@
 //! `NodeHello` report to the hub). Design: `docs/02-database-schema.md` §3.
 
 use fxg_protocol::common::{NodeLifecycleStatus, SessionStatus};
+use fxg_protocol::settings::ProjectIdentity;
 use fxg_protocol::util::now_ms;
 use sqlx::SqlitePool;
 
@@ -38,6 +39,8 @@ pub struct NodeRecord {
     pub idle_timeout_secs: Option<u64>,
     /// Whether connected
     pub is_online: bool,
+    /// Monotonically increasing revision of the node's reported state
+    pub state_revision: u64,
 }
 
 impl NodeRecord {
@@ -61,6 +64,7 @@ impl NodeRecord {
             lifecycle_status: NodeLifecycleStatus::Ready,
             idle_timeout_secs: None,
             is_online: true,
+            state_revision: 0,
         }
     }
 
@@ -80,6 +84,8 @@ pub struct ProjectRecord {
     pub name: String,
     /// Git URL before normalization
     pub canonical_git_url: Option<String>,
+    /// How the identity was derived
+    pub identity: ProjectIdentity,
 }
 
 /// Registration contents for `project_node_bindings` (project × node local path).
@@ -115,9 +121,10 @@ pub async fn upsert_node(pool: &SqlitePool, record: &NodeRecord) -> Result<(), D
         r#"
         INSERT INTO nodes (
             node_id, name, os, arch, version, installed_agents_json, is_ephemeral,
-            provisioner, lifecycle_status, idle_timeout_secs, is_online, last_seen_at, created_at
+            provisioner, lifecycle_status, idle_timeout_secs, is_online, last_seen_at,
+            created_at, state_revision
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(node_id) DO UPDATE SET
             name = excluded.name,
             os = excluded.os,
@@ -131,7 +138,8 @@ pub async fn upsert_node(pool: &SqlitePool, record: &NodeRecord) -> Result<(), D
             lifecycle_status = excluded.lifecycle_status,
             idle_timeout_secs = COALESCE(excluded.idle_timeout_secs, nodes.idle_timeout_secs),
             is_online = excluded.is_online,
-            last_seen_at = excluded.last_seen_at
+            last_seen_at = excluded.last_seen_at,
+            state_revision = MAX(nodes.state_revision, excluded.state_revision)
         "#,
         record.node_id,
         record.name,
@@ -146,6 +154,7 @@ pub async fn upsert_node(pool: &SqlitePool, record: &NodeRecord) -> Result<(), D
         record.is_online,
         now,
         now,
+        i64::try_from(record.state_revision).unwrap_or(i64::MAX),
     )
     .execute(pool)
     .await?;
@@ -339,16 +348,21 @@ pub async fn upsert_project(pool: &SqlitePool, record: &ProjectRecord) -> Result
     let now = now_ms();
     sqlx::query!(
         r#"
-        INSERT INTO projects (project_id, name, canonical_git_url, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?)
+        INSERT INTO projects
+            (project_id, name, canonical_git_url, identity_kind, project_key, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(project_id) DO UPDATE SET
             name = excluded.name,
             canonical_git_url = COALESCE(excluded.canonical_git_url, projects.canonical_git_url),
+            identity_kind = excluded.identity_kind,
+            project_key = COALESCE(excluded.project_key, projects.project_key),
             updated_at = excluded.updated_at
         "#,
         record.project_id,
         record.name,
         record.canonical_git_url.as_deref(),
+        record.identity.kind.as_str(),
+        record.identity.key.as_deref(),
         now,
         now,
     )
@@ -468,4 +482,106 @@ pub async fn upsert_provisional_session(
     .execute(pool)
     .await?;
     Ok(())
+}
+
+/// Returns the `state_revision` recorded for a node.
+pub async fn node_state_revision(pool: &SqlitePool, node_id: &str) -> Result<Option<u64>, DbError> {
+    let row = sqlx::query!(
+        r#"SELECT state_revision FROM nodes WHERE node_id = ?"#,
+        node_id,
+    )
+    .fetch_optional(pool)
+    .await?;
+    Ok(row.map(|row| u64::try_from(row.state_revision).unwrap_or(0)))
+}
+
+/// Deletes the project bindings of a node that are absent from a complete report.
+///
+/// `keep_local_paths` are the bindings contained in the latest `NodeHello`; every
+/// other binding of the node is removed (Worktree removal, `project_key` changes).
+pub async fn prune_node_project_bindings(
+    pool: &SqlitePool,
+    node_id: &str,
+    keep_local_paths: &[String],
+) -> Result<u64, DbError> {
+    let rows = sqlx::query!(
+        r#"SELECT local_path FROM project_node_bindings WHERE node_id = ?"#,
+        node_id,
+    )
+    .fetch_all(pool)
+    .await?;
+    let mut deleted = 0u64;
+    for row in rows {
+        if keep_local_paths.iter().any(|path| path == &row.local_path) {
+            continue;
+        }
+        deleted += delete_project_binding(pool, node_id, &row.local_path).await?;
+    }
+    Ok(deleted)
+}
+
+/// Reassigns the sessions of a node by local path (binding changes, `project_key`).
+pub async fn reassign_sessions_project(
+    pool: &SqlitePool,
+    node_id: &str,
+    assignments: &[(String, String)],
+) -> Result<u64, DbError> {
+    let mut updated = 0u64;
+    for (local_path, project_id) in assignments {
+        let result = sqlx::query!(
+            r#"
+            UPDATE sessions
+               SET project_id = ?, updated_at = ?
+             WHERE node_id = ? AND local_path = ? AND project_id != ?
+            "#,
+            project_id,
+            now_ms(),
+            node_id,
+            local_path,
+            project_id,
+        )
+        .execute(pool)
+        .await?;
+        updated += result.rows_affected();
+    }
+    Ok(updated)
+}
+
+/// Reassigns a single session to a logical project (used by `SessionSyncState`).
+pub async fn reassign_session_project(
+    pool: &SqlitePool,
+    session_id: &str,
+    project_id: &str,
+) -> Result<u64, DbError> {
+    let result = sqlx::query!(
+        r#"
+        UPDATE sessions
+           SET project_id = ?, updated_at = ?
+         WHERE session_id = ? AND project_id != ?
+        "#,
+        project_id,
+        now_ms(),
+        session_id,
+        project_id,
+    )
+    .execute(pool)
+    .await?;
+    Ok(result.rows_affected())
+}
+
+/// Increments `nodes.state_revision` and returns the new value.
+pub async fn bump_node_state_revision(pool: &SqlitePool, node_id: &str) -> Result<u64, DbError> {
+    let row = sqlx::query!(
+        r#"
+        UPDATE nodes
+           SET state_revision = state_revision + 1
+         WHERE node_id = ?
+        RETURNING state_revision
+        "#,
+        node_id,
+    )
+    .fetch_optional(pool)
+    .await?;
+    row.map(|row| u64::try_from(row.state_revision).unwrap_or(0))
+        .ok_or_else(|| DbError::NodeNotFound(node_id.to_owned()))
 }

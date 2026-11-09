@@ -13,6 +13,7 @@
 use anyhow::{Context, Result, bail};
 use fxg_protocol::client_api::{
     ApiErrorResponse, CreateSessionRequest, CreateSessionResponse, ProvisionerTestResponse,
+    ProvisionersResponse,
 };
 use fxg_protocol::config::{AUTH_TOKEN_FILE_NAME, EnvLookup, GlobalConfig, fxg_home};
 
@@ -62,6 +63,18 @@ impl ServerClient {
             .post(self.endpoint(path))
             .bearer_auth(&self.token)
             .json(body)
+            .send()
+            .await
+            .with_context(|| format!("failed to reach central server ({})", self.base))?;
+        decode(response).await
+    }
+
+    /// `GET /api/v1/provisioners`
+    pub async fn provisioners(&self) -> Result<ProvisionersResponse> {
+        let response = self
+            .http
+            .get(self.endpoint("/api/v1/provisioners"))
+            .bearer_auth(&self.token)
             .send()
             .await
             .with_context(|| format!("failed to reach central server ({})", self.base))?;

@@ -31,9 +31,6 @@ pub struct DaemonArgs {
     /// Node Hub WebSocket URL of the central server (Outbox sync; standalone when unset)
     #[usage(long)]
     server_url: Option<String>,
-    /// Allow Web PTY launches from remote clients (through the central server)
-    #[usage(long)]
-    allow_remote_pty: bool,
     /// Standard I/O pipe (JSON Lines) mode (ephemeral VM; launched by a provisioner)
     #[usage(long)]
     stdio: bool,
@@ -94,9 +91,6 @@ impl DaemonArgs {
         if let Some(node_id) = global.node.node_id.clone() {
             config.node_id = node_id;
         }
-        if let Some(name) = global.node.name.clone() {
-            config.node_name = name;
-        }
         if let Some(listen) = self
             .listen
             .clone()
@@ -104,14 +98,35 @@ impl DaemonArgs {
         {
             config.listen_addr = listen;
         }
-        config.allow_remote_pty = self.allow_remote_pty || global.node.allow_remote_pty;
         // Outbox sync (central server connection; standalone / local only when unset)
         config.central_server_url = self
             .server_url
             .clone()
             .or_else(|| global.node.central_server_url.clone());
-        config.node_token = global.node.node_token.clone();
+        config.node_token = env(fxg_protocol::config::env_keys::NODE_TOKEN);
+        config.log = self.effective_log_config(global);
         config
+    }
+
+    /// Effective logging settings after CLI > env > config.toml precedence.
+    fn effective_log_config(
+        &self,
+        global: &fxg_protocol::config::GlobalConfig,
+    ) -> fxg_protocol::config::LogConfig {
+        let mut log = global.log.clone();
+        if let Some(level) = self.log_level.clone() {
+            log.level = Some(level);
+        }
+        if self.no_log_file {
+            log.file = Some("-".to_owned());
+        } else if let Some(file) = self.log_file.clone() {
+            log.file = Some(file);
+        }
+        if let Some(format) = self.log_format.clone() {
+            log.format = Some(format);
+        }
+        log.no_color = self.no_color || global.log.no_color;
+        log
     }
 
     /// Whether tray residency is requested (always disabled for `--stdio` /
@@ -140,13 +155,10 @@ impl usage::RunAsync for DaemonArgs {
             if let Some(node_id) = global.node.node_id.clone() {
                 config.node_id = node_id;
             }
-            if let Some(name) = global.node.name.clone() {
-                config.node_name = name;
-            }
-            config.allow_remote_pty = self.allow_remote_pty || global.node.allow_remote_pty;
             // In stdio mode the server owns the pipe, so WS sync settings are unused
             config.central_server_url = None;
             config.node_token = None;
+            config.log = self.effective_log_config(&global);
 
             let stdio = fxg_node::daemon::StdioConfig {
                 daemon: config,
@@ -158,7 +170,20 @@ impl usage::RunAsync for DaemonArgs {
                 .context("fxg daemon --stdio failed");
         }
 
-        let tray_enabled = self.tray_requested(global.node.tray);
+        let tray_configured = match node_db(&env).await {
+            Ok(db) => match db.node_settings().await {
+                Ok(settings) => settings.and_then(|settings| settings.tray),
+                Err(err) => {
+                    tracing::debug!("failed to read node settings for the tray: {err}");
+                    None
+                }
+            },
+            Err(err) => {
+                tracing::debug!("failed to open node.db for the tray setting: {err}");
+                None
+            }
+        };
+        let tray_enabled = self.tray_requested(tray_configured);
         let config = self.daemon_config_from(&global);
         let daemon = fxg_node::daemon::NodeDaemon::start(config)
             .await
@@ -255,6 +280,27 @@ pub struct ServerArgs {
 }
 
 impl ServerArgs {
+    /// Effective logging settings after CLI > config.toml precedence.
+    fn effective_log_config(
+        &self,
+        global: &fxg_protocol::config::GlobalConfig,
+    ) -> fxg_protocol::config::LogConfig {
+        let mut log = global.log.clone();
+        if let Some(level) = self.log_level.clone() {
+            log.level = Some(level);
+        }
+        if self.no_log_file {
+            log.file = Some("-".to_owned());
+        } else if let Some(file) = self.log_file.clone() {
+            log.file = Some(file);
+        }
+        if let Some(format) = self.log_format.clone() {
+            log.format = Some(format);
+        }
+        log.no_color = self.no_color || global.log.no_color;
+        log
+    }
+
     /// Build the logging options.
     pub(crate) fn logging_options(&self) -> crate::logging::LoggingOptions {
         crate::logging::LoggingOptions {
@@ -299,8 +345,7 @@ impl usage::RunAsync for ServerArgs {
             listen_addr,
             allowed_hosts: global.server.allowed_hosts.clone(),
             allowed_origins: global.server.allowed_origins.clone(),
-            provisioners: global.provisioners.clone(),
-            git_credentials: global.server.git_credentials.clone(),
+            log: self.effective_log_config(&global),
         };
         let fxg_home = options.fxg_home.clone();
         let server = fxg_server::Server::start(options)
@@ -791,7 +836,9 @@ async fn run_with_provisioner(
 
     // Resolve the logical project of the current directory (the Git remote is
     // the source of truth)
-    let project = fxg_node::resolve_project(cwd, "cli")
+    let env = fxg_protocol::config::process_env;
+    let db = node_db(&env).await?;
+    let project = fxg_node::resolve_project(cwd, "cli", &db)
         .await
         .context("failed to resolve logical project (run inside a Git repository)")?;
 
@@ -801,7 +848,6 @@ async fn run_with_provisioner(
         (Some(branch), base) => Some(fxg_protocol::client_api::WorktreeSpec {
             branch: branch.clone(),
             base_branch: base.clone(),
-            new_path: None,
         }),
         (None, _) => None,
     };
@@ -870,50 +916,29 @@ pub struct ProvisionersListArgs {
     json: bool,
 }
 
-#[derive(serde::Serialize)]
-struct ProvisionerListEntry<'a> {
-    name: &'a str,
-    description: Option<&'a str>,
-    command: &'a str,
-    args: &'a [String],
-    idle_timeout_secs: Option<u64>,
-}
-
 impl usage::RunAsync for ProvisionersListArgs {
     type Output = Result<()>;
 
     async fn run_async(self) -> Self::Output {
         let env = fxg_protocol::config::process_env;
-        let global = fxg_protocol::config::GlobalConfig::load(&env)
-            .context("failed to load ~/.flexagent/config.toml")?;
-        let provisioners: Vec<ProvisionerListEntry<'_>> = global
-            .provisioners
-            .iter()
-            .map(|(name, config)| ProvisionerListEntry {
-                name,
-                description: config.description.as_deref(),
-                command: &config.command,
-                args: &config.args,
-                idle_timeout_secs: config.idle_timeout_secs,
-            })
-            .collect();
+        let server = crate::server_api::ServerClient::from_config(&env)?;
+        let response = server.provisioners().await?;
+        let provisioners = response.provisioners;
         if self.json {
             println!("{}", serde_json::to_string_pretty(&provisioners)?);
             return Ok(());
         }
         if provisioners.is_empty() {
-            println!(
-                "(no provisioners defined; add [provisioners.<name>] to ~/.flexagent/config.toml)"
-            );
+            println!("(no provisioners defined; edit them in the hub Web UI)");
             return Ok(());
         }
         let rows: Vec<Vec<String>> = provisioners
             .iter()
             .map(|entry| {
                 vec![
-                    entry.name.to_owned(),
-                    entry.description.unwrap_or_default().to_owned(),
-                    entry.command.to_owned(),
+                    entry.name.clone(),
+                    entry.description.clone().unwrap_or_default(),
+                    entry.command.clone(),
                     entry
                         .idle_timeout_secs
                         .map(|secs| format!("{secs}s"))
@@ -981,6 +1006,9 @@ pub struct BootstrapWorkspaceArgs {
     /// Destination directory (default: /tmp/workspace)
     #[usage(long)]
     dir: Option<String>,
+    /// Project profile JSON (setup commands and env) written by the server
+    #[usage(long)]
+    profile: Option<String>,
 }
 
 impl usage::RunAsync for BootstrapWorkspaceArgs {
@@ -992,6 +1020,31 @@ impl usage::RunAsync for BootstrapWorkspaceArgs {
             .dir
             .clone()
             .unwrap_or_else(|| "/tmp/workspace".to_owned());
+        let profile = match &self.profile {
+            Some(path) => Some(
+                serde_json::from_str::<fxg_protocol::settings::ProjectProfile>(
+                    &std::fs::read_to_string(path)
+                        .with_context(|| format!("failed to read profile {path}"))?,
+                )
+                .with_context(|| format!("failed to parse project profile {path}"))?,
+            ),
+            None => match env("FXG_PROJECT_PROFILE_B64") {
+                Some(encoded) => {
+                    use base64::Engine as _;
+                    let bytes = base64::engine::general_purpose::STANDARD
+                        .decode(encoded.trim().as_bytes())
+                        .context("failed to decode FXG_PROJECT_PROFILE_B64")?;
+                    Some(
+                        serde_json::from_slice::<fxg_protocol::settings::ProjectProfile>(&bytes)
+                            .context("failed to parse FXG_PROJECT_PROFILE_B64")?,
+                    )
+                }
+                None => None,
+            },
+        };
+        let (setup, profile_env) = profile
+            .map(|profile| (profile.bootstrap_setup, profile.bootstrap_env))
+            .unwrap_or_default();
         let options = fxg_node::bootstrap::BootstrapOptions {
             repo: self.repo.clone(),
             branch: self.branch.clone(),
@@ -999,6 +1052,8 @@ impl usage::RunAsync for BootstrapWorkspaceArgs {
             fxg_home: fxg_protocol::config::fxg_home(&env),
             install_toolchain: true,
             extra_tools: Vec::new(),
+            setup,
+            env: profile_env,
         };
         let outcome = fxg_node::bootstrap::bootstrap_workspace(options)
             .await
@@ -1052,20 +1107,11 @@ async fn create_worktree(
     branch: &str,
     base_branch: Option<String>,
 ) -> Result<PathBuf> {
-    let (path, branch, created, hook_logs) = client
-        .add_worktree(cwd, None, branch, base_branch, None)
-        .await?;
+    let (path, branch, created) = client.add_worktree(cwd, None, branch, base_branch).await?;
     if created {
         eprintln!("created worktree {branch} at {path}");
     } else {
         eprintln!("reusing existing worktree {branch} at {path}");
-    }
-    for log in hook_logs {
-        let status = if log.success { "ok" } else { "failed" };
-        eprintln!("[{status}] {}", log.command);
-        for line in log.output.lines() {
-            eprintln!("  {line}");
-        }
     }
     Ok(PathBuf::from(path))
 }
@@ -2140,7 +2186,16 @@ impl usage::RunAsync for ProjectInfoArgs {
             project.relative_subpath.as_deref().unwrap_or("-")
         );
         println!("local_path:      {}", project.local_path);
-        println!("source:          {}", project.source);
+        println!(
+            "identity:        {}{}",
+            project.identity.kind,
+            project
+                .identity
+                .key
+                .as_deref()
+                .map(|key| format!(" ({key})"))
+                .unwrap_or_default()
+        );
         Ok(())
     }
 }
@@ -2339,9 +2394,6 @@ pub struct WorktreeAddArgs {
     /// Base branch (defaults to the current HEAD)
     #[usage(long)]
     base: Option<String>,
-    /// Explicit destination path (defaults to a path resolved from worktree_dir_template)
-    #[usage(long)]
-    path: Option<String>,
     /// Logical project ID (defaults to resolving from the current directory)
     #[usage(long)]
     project: Option<String>,
@@ -2353,23 +2405,14 @@ impl usage::RunAsync for WorktreeAddArgs {
     async fn run_async(self) -> Self::Output {
         let cwd = std::env::current_dir().context("failed to resolve current directory")?;
         let mut client = DaemonClient::connect().await?;
-        let (path, branch, created, hook_logs) = client
-            .add_worktree(&cwd, self.project, &self.branch, self.base, self.path)
+        let (path, branch, created) = client
+            .add_worktree(&cwd, self.project, &self.branch, self.base)
             .await?;
 
         if created {
             println!("created worktree {branch} at {path}");
         } else {
             println!("reusing existing worktree {branch} at {path}");
-        }
-        for log in hook_logs {
-            let status = if log.success { "ok" } else { "failed" };
-            println!("[{status}] {}", log.command);
-            if !log.output.is_empty() {
-                for line in log.output.lines() {
-                    println!("  {line}");
-                }
-            }
         }
         Ok(())
     }
@@ -2445,15 +2488,23 @@ pub enum AgentsCommands {
     Logout(AgentsLogoutArgs),
 }
 
-/// Build an ACP Registry from `~/.flexagent/config.toml`.
-fn acp_registry() -> Result<AcpRegistry> {
+/// Opens `node.db` (CLI-side reads of the DB-owned settings).
+async fn node_db(env: fxg_protocol::config::EnvLookup<'_>) -> Result<fxg_db::Db> {
+    let paths = fxg_node::NodePaths::from_env(env);
+    Ok(fxg_db::Db::open(&paths.node_db_path(), fxg_db::DbRole::Node).await?)
+}
+
+/// Builds the ACP Registry from the node-owned agent settings.
+async fn acp_registry() -> Result<AcpRegistry> {
     let env = fxg_protocol::config::process_env;
-    let global = fxg_protocol::config::GlobalConfig::load(&env)
-        .context("failed to load ~/.flexagent/config.toml")?;
     let paths = fxg_node::NodePaths::from_env(&env);
+    let db = node_db(&env).await?;
+    let settings = db.ensure_agent_settings().await?;
     Ok(AcpRegistry::new(
         paths.fxg_home().to_path_buf(),
-        &global.agents,
+        &settings,
+        db.custom_agents().await?,
+        db.enabled_package_agents().await?,
     ))
 }
 
@@ -2501,7 +2552,7 @@ impl usage::RunAsync for AgentsListArgs {
     type Output = Result<()>;
 
     async fn run_async(self) -> Self::Output {
-        let registry = acp_registry()?;
+        let registry = acp_registry().await?;
         let index = registry
             .index(false)
             .await
@@ -2562,7 +2613,7 @@ impl usage::RunAsync for AgentsInstallArgs {
     type Output = Result<()>;
 
     async fn run_async(self) -> Self::Output {
-        let registry = acp_registry()?;
+        let registry = acp_registry().await?;
         let id = registry.resolve_alias(&self.id);
         if let Some(path) = registry.preset_available(&id) {
             println!(
@@ -2579,7 +2630,11 @@ impl usage::RunAsync for AgentsInstallArgs {
             format!("agent not found in the registry: {id} (`fxg agents list --all`)")
         })?;
         if agent.distribution.npx.is_some() || agent.distribution.uvx.is_some() {
-            registry.set_package_enabled(&id, true)?;
+            let env = fxg_protocol::config::process_env;
+            node_db(&env)
+                .await?
+                .set_package_agent_enabled(&id, true)
+                .await?;
             println!("enabled package agent {id} (npx/uvx)");
             return Ok(());
         }
@@ -2597,7 +2652,7 @@ impl usage::RunAsync for AgentsUpdateArgs {
     type Output = Result<()>;
 
     async fn run_async(self) -> Self::Output {
-        let registry = acp_registry()?;
+        let registry = acp_registry().await?;
         // Force a refetch of the index
         let index = registry
             .index(true)
@@ -2619,11 +2674,13 @@ impl usage::RunAsync for AgentsRemoveArgs {
     type Output = Result<()>;
 
     async fn run_async(self) -> Self::Output {
-        let registry = acp_registry()?;
+        let registry = acp_registry().await?;
         let id = registry.resolve_alias(&self.id);
-        let removed_custom = registry.remove_custom(&id)?;
+        let env = fxg_protocol::config::process_env;
+        let db = node_db(&env).await?;
+        let removed_custom = db.delete_custom_agent(&id).await? > 0;
         let disabled_package = if registry.enabled_package_agents().contains(&id) {
-            registry.set_package_enabled(&id, false)?;
+            db.set_package_agent_enabled(&id, false).await?;
             true
         } else {
             false
@@ -2709,7 +2766,7 @@ impl usage::RunAsync for AgentsLoginArgs {
     type Output = Result<()>;
 
     async fn run_async(self) -> Self::Output {
-        let registry = acp_registry()?;
+        let registry = acp_registry().await?;
         let id = registry.resolve_alias(&self.id);
         let spec = resolve_agent_launch_spec(&registry, &id).await?;
         let methods = fxg_acp::auth::discover_auth_methods(&spec)
@@ -2746,7 +2803,7 @@ impl usage::RunAsync for AgentsLogoutArgs {
     type Output = Result<()>;
 
     async fn run_async(self) -> Self::Output {
-        let registry = acp_registry()?;
+        let registry = acp_registry().await?;
         let id = registry.resolve_alias(&self.id);
         let spec = resolve_agent_launch_spec(&registry, &id).await?;
         fxg_acp::auth::logout(&spec)

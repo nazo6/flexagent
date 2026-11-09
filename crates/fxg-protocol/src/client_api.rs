@@ -14,8 +14,8 @@ use crate::common::{
     ElicitationRequestEntry, ErrorInfo, NodeSummary, PermissionRequestEntry, ProjectSummary,
     PromptInput, ResolvedBy, SearchHit, SessionControlAction, SessionSummary, StreamDeltaPayload,
 };
-use crate::config::CustomAgentConfig;
 use crate::events::SessionEventBatch;
+use crate::settings::CustomAgentConfig;
 use crate::{CommandId, NodeId, ProjectId, SessionId};
 
 /// Kind of endpoint (`GET /api/v1/system/info`).
@@ -115,8 +115,14 @@ pub struct ProvisionerSummary {
     pub name: String,
     /// Description
     pub description: Option<String>,
+    /// Command to execute
+    pub command: String,
+    /// Command arguments
+    pub args: Vec<String>,
     /// Seconds until the idle instance is discarded automatically
     pub idle_timeout_secs: Option<u64>,
+    /// Environment variables injected into the process
+    pub env: std::collections::BTreeMap<String, String>,
 }
 
 /// `GET /api/v1/provisioners` response.
@@ -180,8 +186,6 @@ pub struct CreateWorktreeRequest {
     pub branch: String,
     /// Base branch (defaults to the current HEAD)
     pub base_branch: Option<String>,
-    /// Explicit destination path (resolved from `worktree_dir_template` when omitted)
-    pub path: Option<String>,
 }
 
 /// `DELETE /api/v1/projects/:id/worktrees` request.
@@ -208,8 +212,7 @@ pub struct PruneWorktreesRequest {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct ProjectScanRequest {
-    /// Directory to scan
-    /// (walks `node.project_scan_dirs` of `config.toml` when omitted)
+    /// Directory to scan (walks `node_settings.project_scan_dirs` when omitted)
     pub dir: Option<String>,
 }
 
@@ -365,8 +368,6 @@ pub struct WorktreeSpec {
     pub branch: String,
     /// Base branch
     pub base_branch: Option<String>,
-    /// Explicit destination path
-    pub new_path: Option<String>,
 }
 
 /// Specification of a context fork.
@@ -920,7 +921,6 @@ mod tests {
             worktree: Some(WorktreeSpec {
                 branch: "feat/auth".into(),
                 base_branch: Some("main".into()),
-                new_path: None,
             }),
             agent_id: "opencode".into(),
             initial_prompt: Some(PromptInput::text("Fix the failing tests")),

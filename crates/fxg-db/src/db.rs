@@ -13,7 +13,7 @@ use sqlx::SqlitePool;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
 
 use crate::error::DbError;
-use crate::{audit, events, outbox, queries, registration};
+use crate::{audit, events, outbox, queries, registration, settings};
 
 /// Execution role of a DB.
 ///
@@ -426,5 +426,246 @@ impl Db {
     /// Deletes a Web Push subscription (cleanup of expired subscriptions).
     pub async fn delete_push_subscription(&self, endpoint: &str) -> Result<(), DbError> {
         crate::push::delete_push_subscription(&self.pool, endpoint).await
+    }
+
+    // ------------------------------------------------------------------
+    // Settings, project links, profiles and secret metadata (crate::settings)
+    // ------------------------------------------------------------------
+
+    /// Ensures the single `node_settings` row exists and returns it.
+    pub async fn ensure_node_settings(
+        &self,
+        default_name: &str,
+    ) -> Result<fxg_protocol::settings::NodeSettings, DbError> {
+        settings::ensure_node_settings(&self.pool, default_name).await
+    }
+
+    /// Returns the `node_settings` row when it exists.
+    pub async fn node_settings(
+        &self,
+    ) -> Result<Option<fxg_protocol::settings::NodeSettings>, DbError> {
+        settings::get_node_settings(&self.pool).await
+    }
+
+    /// Updates node settings under an optimistic lock.
+    pub async fn update_node_settings(
+        &self,
+        request: &fxg_protocol::settings::UpdateNodeSettingsRequest,
+    ) -> Result<fxg_protocol::settings::NodeSettings, DbError> {
+        settings::update_node_settings(&self.pool, request).await
+    }
+
+    /// Ensures the single `agent_settings` row exists and returns it.
+    pub async fn ensure_agent_settings(
+        &self,
+    ) -> Result<fxg_protocol::settings::AgentSettings, DbError> {
+        settings::ensure_agent_settings(&self.pool).await
+    }
+
+    /// Returns the `agent_settings` row when it exists.
+    pub async fn agent_settings(
+        &self,
+    ) -> Result<Option<fxg_protocol::settings::AgentSettings>, DbError> {
+        settings::get_agent_settings(&self.pool).await
+    }
+
+    /// Updates agent settings and aliases under an optimistic lock.
+    pub async fn update_agent_settings(
+        &self,
+        request: &fxg_protocol::settings::UpdateAgentSettingsRequest,
+    ) -> Result<fxg_protocol::settings::AgentSettings, DbError> {
+        settings::update_agent_settings(&self.pool, request).await
+    }
+
+    /// Lists every custom agent definition.
+    pub async fn custom_agents(
+        &self,
+    ) -> Result<
+        std::collections::BTreeMap<String, fxg_protocol::settings::CustomAgentConfig>,
+        DbError,
+    > {
+        settings::list_custom_agents(&self.pool).await
+    }
+
+    /// Inserts or replaces a custom agent definition.
+    pub async fn upsert_custom_agent(
+        &self,
+        agent_id: &str,
+        config: &fxg_protocol::settings::CustomAgentConfig,
+    ) -> Result<(), DbError> {
+        settings::upsert_custom_agent(&self.pool, agent_id, config).await
+    }
+
+    /// Deletes a custom agent definition.
+    pub async fn delete_custom_agent(&self, agent_id: &str) -> Result<u64, DbError> {
+        settings::delete_custom_agent(&self.pool, agent_id).await
+    }
+
+    /// Lists package agents enabled through `npx` / `uvx`.
+    pub async fn enabled_package_agents(&self) -> Result<Vec<String>, DbError> {
+        settings::list_enabled_package_agents(&self.pool).await
+    }
+
+    /// Enables or disables a package agent.
+    pub async fn set_package_agent_enabled(
+        &self,
+        agent_id: &str,
+        enabled: bool,
+    ) -> Result<(), DbError> {
+        settings::set_package_agent_enabled(&self.pool, agent_id, enabled).await
+    }
+
+    /// Returns the explicit project key linked to a local path.
+    pub async fn project_key_for_path(&self, local_path: &str) -> Result<Option<String>, DbError> {
+        settings::find_project_key(&self.pool, local_path).await
+    }
+
+    /// Lists every explicit path link.
+    pub async fn project_path_links(&self) -> Result<Vec<(String, String)>, DbError> {
+        settings::list_project_path_links(&self.pool).await
+    }
+
+    /// Inserts or replaces the explicit link of a local path.
+    pub async fn upsert_project_path_link(
+        &self,
+        local_path: &str,
+        project_key: &str,
+    ) -> Result<(), DbError> {
+        settings::upsert_project_path_link(&self.pool, local_path, project_key).await
+    }
+
+    /// Deletes the explicit link of a local path.
+    pub async fn delete_project_path_link(&self, local_path: &str) -> Result<u64, DbError> {
+        settings::delete_project_path_link(&self.pool, local_path).await
+    }
+
+    /// Ensures the single `server_settings` row exists and returns it.
+    pub async fn ensure_server_settings(
+        &self,
+    ) -> Result<fxg_protocol::settings::ServerSettings, DbError> {
+        settings::ensure_server_settings(&self.pool).await
+    }
+
+    /// Returns the `server_settings` row when it exists.
+    pub async fn server_settings(
+        &self,
+    ) -> Result<Option<fxg_protocol::settings::ServerSettings>, DbError> {
+        settings::get_server_settings(&self.pool).await
+    }
+
+    /// Updates server settings and Git credentials under an optimistic lock.
+    pub async fn update_server_settings(
+        &self,
+        request: &fxg_protocol::settings::UpdateServerSettingsRequest,
+    ) -> Result<fxg_protocol::settings::ServerSettings, DbError> {
+        settings::update_server_settings(&self.pool, request).await
+    }
+
+    /// Lists every provisioner definition.
+    pub async fn provisioners(
+        &self,
+    ) -> Result<
+        std::collections::BTreeMap<String, fxg_protocol::settings::ProvisionerDefinition>,
+        DbError,
+    > {
+        settings::list_provisioners(&self.pool).await
+    }
+
+    /// Inserts or replaces a provisioner definition.
+    pub async fn upsert_provisioner(
+        &self,
+        definition: &fxg_protocol::settings::ProvisionerDefinition,
+    ) -> Result<(), DbError> {
+        settings::upsert_provisioner(&self.pool, definition).await
+    }
+
+    /// Deletes a provisioner definition.
+    pub async fn delete_provisioner(&self, name: &str) -> Result<u64, DbError> {
+        settings::delete_provisioner(&self.pool, name).await
+    }
+
+    /// Returns the bootstrap profile of a project when it exists.
+    pub async fn project_profile(
+        &self,
+        project_id: &fxg_protocol::ProjectId,
+    ) -> Result<Option<fxg_protocol::settings::ProjectProfile>, DbError> {
+        settings::get_project_profile(&self.pool, project_id).await
+    }
+
+    /// Inserts or updates a project profile under an optimistic lock.
+    pub async fn upsert_project_profile(
+        &self,
+        project_id: &fxg_protocol::ProjectId,
+        request: &fxg_protocol::settings::UpdateProjectProfileRequest,
+    ) -> Result<fxg_protocol::settings::ProjectProfile, DbError> {
+        settings::upsert_project_profile(&self.pool, project_id, request).await
+    }
+
+    /// Lists secret metadata (values are never stored in the DB).
+    pub async fn secrets(&self) -> Result<Vec<fxg_protocol::settings::SecretSummary>, DbError> {
+        settings::list_secrets(&self.pool).await
+    }
+
+    /// Returns the metadata of a single secret.
+    pub async fn secret(
+        &self,
+        id: &fxg_protocol::SecretId,
+    ) -> Result<Option<fxg_protocol::settings::SecretSummary>, DbError> {
+        settings::get_secret(&self.pool, id).await
+    }
+
+    /// Inserts or updates secret metadata.
+    pub async fn upsert_secret_metadata(
+        &self,
+        id: &fxg_protocol::SecretId,
+        name: &str,
+        kind: &fxg_protocol::settings::SecretKind,
+    ) -> Result<(), DbError> {
+        settings::upsert_secret_metadata(&self.pool, id, name, kind).await
+    }
+
+    /// Deletes secret metadata.
+    pub async fn delete_secret_metadata(
+        &self,
+        id: &fxg_protocol::SecretId,
+    ) -> Result<u64, DbError> {
+        settings::delete_secret_metadata(&self.pool, id).await
+    }
+
+    /// Returns the `state_revision` recorded for a node.
+    pub async fn node_state_revision(&self, node_id: &str) -> Result<Option<u64>, DbError> {
+        registration::node_state_revision(&self.pool, node_id).await
+    }
+
+    /// Increments `nodes.state_revision` and returns the new value.
+    pub async fn bump_node_state_revision(&self, node_id: &str) -> Result<u64, DbError> {
+        registration::bump_node_state_revision(&self.pool, node_id).await
+    }
+
+    /// Deletes the project bindings of a node that are absent from a complete report.
+    pub async fn prune_node_project_bindings(
+        &self,
+        node_id: &str,
+        keep_local_paths: &[String],
+    ) -> Result<u64, DbError> {
+        registration::prune_node_project_bindings(&self.pool, node_id, keep_local_paths).await
+    }
+
+    /// Reassigns the sessions of a node by local path.
+    pub async fn reassign_sessions_project(
+        &self,
+        node_id: &str,
+        assignments: &[(String, String)],
+    ) -> Result<u64, DbError> {
+        registration::reassign_sessions_project(&self.pool, node_id, assignments).await
+    }
+
+    /// Reassigns a single session to a logical project.
+    pub async fn reassign_session_project(
+        &self,
+        session_id: &str,
+        project_id: &str,
+    ) -> Result<u64, DbError> {
+        registration::reassign_session_project(&self.pool, session_id, project_id).await
     }
 }

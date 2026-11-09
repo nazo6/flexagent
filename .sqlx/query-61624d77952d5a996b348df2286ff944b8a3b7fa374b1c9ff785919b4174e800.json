@@ -1,0 +1,86 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        SELECT name AS \"name!\", description, command, args_json, idle_timeout_secs, env_json\n          FROM provisioners\n         ORDER BY name\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "name!",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "provisioners",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "name": "description",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "provisioners",
+            "name": "description"
+          }
+        }
+      },
+      {
+        "name": "command",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "provisioners",
+            "name": "command"
+          }
+        }
+      },
+      {
+        "name": "args_json",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "provisioners",
+            "name": "args_json"
+          }
+        }
+      },
+      {
+        "name": "idle_timeout_secs",
+        "ordinal": 4,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "provisioners",
+            "name": "idle_timeout_secs"
+          }
+        }
+      },
+      {
+        "name": "env_json",
+        "ordinal": 5,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "provisioners",
+            "name": "env_json"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      true,
+      true,
+      false,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "61624d77952d5a996b348df2286ff944b8a3b7fa374b1c9ff785919b4174e800"
+}

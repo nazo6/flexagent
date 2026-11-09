@@ -22,7 +22,8 @@ use std::sync::{Arc, RwLock};
 
 use fxg_acp::registry::AcpRegistry;
 use fxg_db::{Db, DbRole};
-use fxg_protocol::config::{GlobalConfig, fxg_home};
+use fxg_protocol::config::fxg_home;
+use fxg_protocol::settings::{AgentSettings, NodeSettings};
 use fxg_protocol::util::now_ms;
 use fxg_pty::PtySessionManager;
 use fxg_server::api::ClientEvent;
@@ -54,8 +55,6 @@ pub struct DaemonConfig {
     pub listen_addr: String,
     /// Local IPC endpoint (named pipe / UDS path)
     pub ipc_endpoint: String,
-    /// Whether to allow Web PTY spawning from remote (via the central server)
-    pub allow_remote_pty: bool,
     /// Node Hub WebSocket URL of the central server (standalone when unset)
     pub central_server_url: Option<String>,
     /// Per-node pairing token (reads `~/.flexagent/node_token` when omitted)
@@ -65,6 +64,8 @@ pub struct DaemonConfig {
     pub ephemeral: bool,
     /// Data directory (`~/.flexagent`)
     pub fxg_home: PathBuf,
+    /// Effective logging settings (for the read-only settings catalog)
+    pub log: fxg_protocol::config::LogConfig,
 }
 
 impl DaemonConfig {
@@ -77,13 +78,13 @@ impl DaemonConfig {
         Self {
             node_id: node_id.into(),
             node_name: node_name.into(),
-            listen_addr: fxg_protocol::config::NodeConfig::DEFAULT_LISTEN_ADDR.to_owned(),
+            listen_addr: fxg_protocol::config::NodeBootstrapConfig::DEFAULT_LISTEN_ADDR.to_owned(),
             ipc_endpoint: ipc_endpoint(&fxg_protocol::config::process_env),
-            allow_remote_pty: false,
             central_server_url: None,
             node_token: None,
             ephemeral: false,
             fxg_home: fxg_home.into(),
+            log: fxg_protocol::config::LogConfig::default(),
         }
     }
 
@@ -94,13 +95,13 @@ impl DaemonConfig {
         Self {
             node_id: String::new(),
             node_name: hostname(),
-            listen_addr: fxg_protocol::config::NodeConfig::DEFAULT_LISTEN_ADDR.to_owned(),
+            listen_addr: fxg_protocol::config::NodeBootstrapConfig::DEFAULT_LISTEN_ADDR.to_owned(),
             ipc_endpoint: ipc_endpoint(env),
-            allow_remote_pty: false,
             central_server_url: env(fxg_protocol::config::env_keys::CENTRAL_SERVER_URL),
             node_token: env(fxg_protocol::config::env_keys::NODE_TOKEN),
             ephemeral: false,
             fxg_home: home,
+            log: fxg_protocol::config::LogConfig::default(),
         }
     }
 }
@@ -194,6 +195,10 @@ struct Inner {
     sessions: SessionManager,
     paths: NodePaths,
     config: DaemonConfig,
+    /// Node-owned settings (`node_settings` in `node.db`)
+    node_settings: RwLock<NodeSettings>,
+    /// Agent settings (`agent_settings` in `node.db`)
+    agent_settings: RwLock<AgentSettings>,
     token: RwLock<String>,
     started_at: i64,
     /// Normalized events delivered to Client WS (forwarded from the bus)
@@ -255,20 +260,30 @@ impl DaemonState {
         config.fxg_home = paths.fxg_home().to_path_buf();
 
         let token = auth::load_or_create(&paths.auth_token_path())?;
+        // Expose the system secrets (fixed paths) in the settings catalog.
+        crate::secrets::register_system_secrets(
+            &db,
+            paths.fxg_home(),
+            &[
+                ("node_token", fxg_protocol::settings::SecretKind::NodeToken),
+                ("auth_token", fxg_protocol::settings::SecretKind::AuthToken),
+            ],
+        )
+        .await?;
         let bus = SessionEventBus::new(db.clone());
         // Reconcile the state of sessions lost when the previous daemon exited
         reconcile_stale_sessions(&bus).await?;
 
-        // Resolve the ACP Registry / custom agent definitions from `config.toml`
-        // (if loading fails, start with defaults and only leave a warning).
-        let agents = match GlobalConfig::load_from_path(&paths.config_path()) {
-            Ok(global) => global.agents,
-            Err(err) => {
-                tracing::warn!("failed to load config.toml (using defaults): {err}");
-                fxg_protocol::config::AgentsConfig::default()
-            }
-        };
-        let registry = AcpRegistry::new(paths.fxg_home(), &agents);
+        // Runtime settings are owned by `node.db`; `config.toml` only bootstraps the process.
+        let node_settings = db.ensure_node_settings(&config.node_name).await?;
+        config.node_name = node_settings.name.clone();
+        let agent_settings = db.ensure_agent_settings().await?;
+        let registry = AcpRegistry::new(
+            paths.fxg_home(),
+            &agent_settings,
+            db.custom_agents().await?,
+            db.enabled_package_agents().await?,
+        );
         let sessions = SessionManager::with_factory(
             bus.clone(),
             paths.clone(),
@@ -286,6 +301,8 @@ impl DaemonState {
                 sessions,
                 paths,
                 config,
+                node_settings: RwLock::new(node_settings),
+                agent_settings: RwLock::new(agent_settings),
                 token: RwLock::new(token),
                 started_at: now_ms(),
                 client_events,
@@ -372,6 +389,93 @@ impl DaemonState {
         VERSION
     }
 
+    /// Current node-owned settings snapshot.
+    pub fn node_settings(&self) -> NodeSettings {
+        self.inner
+            .node_settings
+            .read()
+            .expect("node settings lock poisoned")
+            .clone()
+    }
+
+    /// Current agent settings snapshot.
+    pub fn agent_settings(&self) -> AgentSettings {
+        self.inner
+            .agent_settings
+            .read()
+            .expect("agent settings lock poisoned")
+            .clone()
+    }
+
+    /// Updates node settings under an optimistic lock and reports the new revision.
+    pub async fn update_node_settings(
+        &self,
+        request: &fxg_protocol::settings::UpdateNodeSettingsRequest,
+    ) -> Result<NodeSettings, NodeError> {
+        let settings = self.inner.db.update_node_settings(request).await?;
+        *self
+            .inner
+            .node_settings
+            .write()
+            .expect("node settings lock poisoned") = settings.clone();
+        self.bump_state_revision().await?;
+        Ok(settings)
+    }
+
+    /// Updates agent settings under an optimistic lock, refreshes the registry catalog
+    /// and reports the new revision.
+    pub async fn update_agent_settings(
+        &self,
+        request: &fxg_protocol::settings::UpdateAgentSettingsRequest,
+    ) -> Result<AgentSettings, NodeError> {
+        let settings = self.inner.db.update_agent_settings(request).await?;
+        *self
+            .inner
+            .agent_settings
+            .write()
+            .expect("agent settings lock poisoned") = settings.clone();
+        self.refresh_agent_catalog().await?;
+        self.bump_state_revision().await?;
+        Ok(settings)
+    }
+
+    /// Reloads custom agents / package enablement from `node.db` into the registry.
+    pub async fn refresh_agent_catalog(&self) -> Result<(), NodeError> {
+        let settings = self.inner.db.ensure_agent_settings().await?;
+        let custom = self.inner.db.custom_agents().await?;
+        let enabled = self.inner.db.enabled_package_agents().await?;
+        self.inner
+            .sessions
+            .registry()
+            .apply_catalog(&settings, custom, enabled);
+        *self
+            .inner
+            .agent_settings
+            .write()
+            .expect("agent settings lock poisoned") = settings;
+        Ok(())
+    }
+
+    /// Advances `nodes.state_revision` and asks the sync worker to re-send `NodeHello`.
+    pub async fn bump_state_revision(&self) -> Result<(), NodeError> {
+        self.inner
+            .db
+            .bump_node_state_revision(self.node_id())
+            .await?;
+        self.trigger_node_hello();
+        Ok(())
+    }
+
+    /// Current `nodes.state_revision` of this node.
+    pub async fn state_revision(&self) -> Result<u64, NodeError> {
+        Ok(self
+            .inner
+            .db
+            .node_state_revision(self.node_id())
+            .await?
+            .unwrap_or(0))
+    }
+
     /// Milliseconds elapsed since startup.
     pub fn uptime_ms(&self) -> i64 {
         now_ms().saturating_sub(self.inner.started_at)
@@ -429,9 +533,20 @@ impl DaemonState {
 
     /// Registers this node in the `nodes` table (upsert with online state).
     pub async fn register_node(&self) -> Result<(), NodeError> {
+        let revision = self
+            .inner
+            .db
+            .node_state_revision(self.node_id())
+            .await?
+            .unwrap_or(0);
+        self.register_node_with_revision(revision).await
+    }
+
+    /// Registers this node with an explicit `state_revision`.
+    pub async fn register_node_with_revision(&self, state_revision: u64) -> Result<(), NodeError> {
         let record = fxg_db::NodeRecord {
             node_id: self.inner.config.node_id.clone(),
-            name: self.inner.config.node_name.clone(),
+            name: self.node_settings().name,
             os: std::env::consts::OS.to_owned(),
             arch: std::env::consts::ARCH.to_owned(),
             version: VERSION.to_owned(),
@@ -441,6 +556,7 @@ impl DaemonState {
             lifecycle_status: fxg_protocol::common::NodeLifecycleStatus::Ready,
             idle_timeout_secs: None,
             is_online: true,
+            state_revision,
         };
         self.inner.db.upsert_node(&record).await?;
         Ok(())
@@ -814,9 +930,8 @@ mod tests {
         assert_eq!(config.fxg_home, PathBuf::from("/tmp/fxg-test-home"));
         assert_eq!(
             config.listen_addr,
-            fxg_protocol::config::NodeConfig::DEFAULT_LISTEN_ADDR
+            fxg_protocol::config::NodeBootstrapConfig::DEFAULT_LISTEN_ADDR
         );
-        assert!(!config.allow_remote_pty);
         assert!(!config.ipc_endpoint.is_empty());
     }
 
@@ -910,7 +1025,7 @@ mod tests {
         config.ipc_endpoint = crate::testutil::test_ipc_endpoint(dir.path());
         let daemon = NodeDaemon::start(config).await.expect("restart");
         assert_eq!(daemon.state().node_id(), "persisted-node");
-        assert_eq!(daemon.state().config().node_name, hostname());
+        assert_eq!(daemon.state().config().node_name, "Node");
         daemon.shutdown();
         daemon.wait().await;
     }
@@ -934,7 +1049,7 @@ mod tests {
     #[tokio::test]
     async fn kill_all_stops_agent_sessions() {
         let dir = tempfile::tempdir().expect("tempdir");
-        crate::testutil::write_mock_agent_config(dir.path());
+        crate::testutil::write_mock_agent_config(dir.path()).await;
         let mut config = DaemonConfig::new(dir.path().to_path_buf(), "kill-node", "Kill Node");
         config.listen_addr = "127.0.0.1:0".to_owned();
         config.ipc_endpoint = crate::testutil::test_ipc_endpoint(dir.path());

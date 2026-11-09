@@ -242,6 +242,7 @@ mod tests {
             project_id: PROJECT_ID.into(),
             name: "flexagent".to_owned(),
             canonical_git_url: None,
+            identity: fxg_protocol::settings::ProjectIdentity::local(),
         })
         .await
         .expect("project");
@@ -283,6 +284,7 @@ mod tests {
             project_id: PROJECT_ID.into(),
             name: "flexagent".to_owned(),
             canonical_git_url: None,
+            identity: fxg_protocol::settings::ProjectIdentity::local(),
         })
         .await
         .expect("project");

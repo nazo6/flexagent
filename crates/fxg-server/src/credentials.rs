@@ -6,9 +6,11 @@
 //! short-lived token injection at provisioner startup (`FXG_GIT_TOKEN`). Tokens live only in
 //! process memory and are never written to `server.db` or disk.
 
+use std::path::Path;
 use std::time::Duration;
 
-use fxg_protocol::config::{DEFAULT_GIT_USERNAME, GitCredentialConfig};
+use fxg_protocol::config::DEFAULT_GIT_USERNAME;
+use fxg_protocol::settings::{GitCredentialConfig, SecretKind};
 
 /// Resolved Git credentials (memory only).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -24,9 +26,13 @@ pub struct CredentialResponse {
 /// Execution timeout for `gh auth token`.
 const GH_TIMEOUT: Duration = Duration::from_secs(15);
 
-/// Resolves credentials from configuration (`[server.git_credentials.<host>]`).
+/// Resolves credentials from configuration (`git_credentials` in `server.db`).
+///
+/// `fxg_home` is used only by [`GitCredentialConfig::Secret`], which reads the
+/// value from `~/.flexagent/secrets/server/<id>`.
 pub async fn resolve_credential(
     config: &GitCredentialConfig,
+    fxg_home: &Path,
 ) -> Result<CredentialResponse, String> {
     match config {
         GitCredentialConfig::GhCli { username } => {
@@ -73,6 +79,33 @@ pub async fn resolve_credential(
                 "environment variable {token_env} is not set (git credentials)"
             )),
         },
+        GitCredentialConfig::Secret {
+            username,
+            secret_id,
+        } => {
+            let path = fxg_home
+                .join("secrets")
+                .join("server")
+                .join(secret_id.as_str());
+            match std::fs::read_to_string(&path) {
+                Ok(value) if !value.trim().is_empty() => Ok(CredentialResponse {
+                    username: username
+                        .clone()
+                        .unwrap_or_else(|| DEFAULT_GIT_USERNAME.to_owned()),
+                    token: Some(value.trim().to_owned()),
+                    error: None,
+                }),
+                Ok(_) => Err(format!(
+                    "secret {} is empty (git credentials)",
+                    secret_id.as_str()
+                )),
+                Err(err) => Err(format!(
+                    "failed to read secret {} ({}): {err}",
+                    secret_id.as_str(),
+                    SecretKind::GitToken.as_str()
+                )),
+            }
+        }
     }
 }
 
@@ -89,7 +122,9 @@ mod tests {
             username: None,
             token_env: key.to_owned(),
         };
-        let response = resolve_credential(&config).await.expect("resolve");
+        let response = resolve_credential(&config, Path::new("/tmp/fxg-test-home"))
+            .await
+            .expect("resolve");
         assert_eq!(response.token.as_deref(), Some("secret-token"));
         assert_eq!(response.username, DEFAULT_GIT_USERNAME);
         unsafe { std::env::remove_var(key) };
@@ -101,7 +136,9 @@ mod tests {
             username: Some("git".to_owned()),
             token_env: "FXG_TEST_MISSING_TOKEN_ENV".to_owned(),
         };
-        let err = resolve_credential(&config).await.expect_err("error");
+        let err = resolve_credential(&config, Path::new("/tmp/fxg-test-home"))
+            .await
+            .expect_err("error");
         assert!(err.contains("FXG_TEST_MISSING_TOKEN_ENV"));
     }
 }

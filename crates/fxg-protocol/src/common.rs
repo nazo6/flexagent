@@ -488,50 +488,7 @@ crate::impl_sqlx_text!(
     ElicitationRequestStatus,
 );
 
-/// How the logical project (`project_key`) was resolved.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
-#[serde(rename_all = "snake_case")]
-#[specta(collect)]
-pub enum ProjectResolutionSource {
-    /// Explicitly set in `.fxg.toml` (highest priority)
-    FxgToml,
-    /// Normalized `git remote.origin.url`
-    GitRemote,
-    /// Fallback (`local:<node_id>:<path-hash>`)
-    Fallback,
-}
-
-impl ProjectResolutionSource {
-    /// Identifier used for display.
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::FxgToml => "fxg_toml",
-            Self::GitRemote => "git_remote",
-            Self::Fallback => "fallback",
-        }
-    }
-}
-
-impl fmt::Display for ProjectResolutionSource {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-
-impl FromStr for ProjectResolutionSource {
-    type Err = EnumParseError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "fxg_toml" => Ok(Self::FxgToml),
-            "git_remote" => Ok(Self::GitRemote),
-            "fallback" => Ok(Self::Fallback),
-            other => Err(EnumParseError::new("project resolution source", other)),
-        }
-    }
-}
-
-/// Execution log of the `copy_files` / `post_create` hooks run when creating a worktree.
+/// Execution log of a worktree creation hook.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct HookLogEntry {
@@ -698,6 +655,8 @@ pub struct NodeProjectReport {
     pub name: String,
     /// Git URL the canonical form was derived from
     pub canonical_git_url: Option<String>,
+    /// How the project identity was derived
+    pub identity: crate::settings::ProjectIdentity,
     /// Local path bindings on this node (including worktrees)
     pub bindings: Vec<ProjectNodeBinding>,
 }
@@ -1150,8 +1109,6 @@ pub enum WorktreeAction {
         branch: String,
         /// Base branch (defaults to the current HEAD)
         base_branch: Option<String>,
-        /// Explicit destination path (resolved from `worktree_dir_template` when omitted)
-        new_path: Option<String>,
     },
     /// Remove a worktree (`git worktree remove`)
     Remove {
@@ -1176,7 +1133,7 @@ pub enum AgentAction {
         /// Agent ID
         agent_id: String,
         /// Command, arguments and environment variables
-        config: crate::config::CustomAgentConfig,
+        config: crate::settings::CustomAgentConfig,
     },
     /// Delete a UI-managed custom agent definition
     RemoveCustom {
@@ -1259,6 +1216,14 @@ pub enum ErrorCode {
     Internal,
     /// The configuration file is invalid or cannot be read
     ConfigInvalid,
+    /// `expected_revision` did not match the stored revision (optimistic lock conflict)
+    RevisionMismatch,
+    /// A referenced secret value does not exist
+    SecretMissing,
+    /// The secret is still referenced by an agent or Git credential and cannot be deleted
+    SecretInUse,
+    /// The secret ID or value is invalid
+    SecretInvalid,
     /// The requested agent is not installed / discoverable on the node
     AgentNotInstalled,
     /// The agent process could not be launched or initialized
@@ -1312,6 +1277,10 @@ impl ErrorCode {
         Self::NotFound,
         Self::Internal,
         Self::ConfigInvalid,
+        Self::RevisionMismatch,
+        Self::SecretMissing,
+        Self::SecretInUse,
+        Self::SecretInvalid,
         Self::AgentNotInstalled,
         Self::AgentLaunchFailed,
         Self::AgentProtocolError,
@@ -1348,6 +1317,10 @@ impl ErrorCode {
             Self::NotFound => "NOT_FOUND",
             Self::Internal => "INTERNAL",
             Self::ConfigInvalid => "CONFIG_INVALID",
+            Self::RevisionMismatch => "REVISION_MISMATCH",
+            Self::SecretMissing => "SECRET_MISSING",
+            Self::SecretInUse => "SECRET_IN_USE",
+            Self::SecretInvalid => "SECRET_INVALID",
             Self::AgentNotInstalled => "AGENT_NOT_INSTALLED",
             Self::AgentLaunchFailed => "AGENT_LAUNCH_FAILED",
             Self::AgentProtocolError => "AGENT_PROTOCOL_ERROR",
@@ -1406,6 +1379,10 @@ impl FromStr for ErrorCode {
             "NOT_FOUND" => Ok(Self::NotFound),
             "INTERNAL" => Ok(Self::Internal),
             "CONFIG_INVALID" => Ok(Self::ConfigInvalid),
+            "REVISION_MISMATCH" => Ok(Self::RevisionMismatch),
+            "SECRET_MISSING" => Ok(Self::SecretMissing),
+            "SECRET_IN_USE" => Ok(Self::SecretInUse),
+            "SECRET_INVALID" => Ok(Self::SecretInvalid),
             "AGENT_NOT_INSTALLED" => Ok(Self::AgentNotInstalled),
             "AGENT_LAUNCH_FAILED" => Ok(Self::AgentLaunchFailed),
             "AGENT_PROTOCOL_ERROR" => Ok(Self::AgentProtocolError),
@@ -1718,6 +1695,8 @@ pub struct ProjectSummary {
     pub name: String,
     /// Git URL the canonical form was derived from
     pub canonical_git_url: Option<String>,
+    /// How the project identity was derived
+    pub identity: crate::settings::ProjectIdentity,
     /// Creation time (Unix epoch ms)
     pub created_at: i64,
     /// Last update time (Unix epoch ms)
@@ -1937,6 +1916,10 @@ crate::open_string_enum! {
         NodeTokenManage => "node_token_manage",
         /// Client auth token rotated
         AuthTokenRotate => "auth_token_rotate",
+        /// Settings updated
+        SettingsUpdate => "settings_update",
+        /// Secret created / updated / deleted / rotated
+        SecretManage => "secret_manage",
     }
 }
 
@@ -2060,7 +2043,7 @@ mod tests {
         let troubleshooting = std::fs::read_to_string(workspace.join("docs/troubleshooting.md"))
             .expect("read docs/troubleshooting.md");
 
-        assert_eq!(ErrorCode::ALL.len(), 31, "update ALL when adding a code");
+        assert_eq!(ErrorCode::ALL.len(), 35, "update ALL when adding a code");
         for code in ErrorCode::ALL {
             let snake = code.as_str().to_ascii_lowercase();
             let message_key = format!("error_{snake}");

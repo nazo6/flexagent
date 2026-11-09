@@ -31,7 +31,7 @@ use axum::extract::{Path as UrlPath, Query, Request, State};
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::middleware;
 use axum::response::{IntoResponse, Response};
-use axum::routing::{delete, get, post, put};
+use axum::routing::{delete, get, patch, post, put};
 use axum::{Extension, Json, Router};
 use futures_util::SinkExt;
 use fxg_db::{Db, DbError, SessionFilter};
@@ -53,9 +53,13 @@ use fxg_protocol::common::{
     ErrorInfo, ProjectSummary, PromptInput, RawJson, RecoveryAction, ResolvedBy,
     SessionControlAction, SessionStatus, WorkspaceDiffResponse,
 };
-use fxg_protocol::config::CustomAgentConfig;
 use fxg_protocol::events::{SessionEventBatch, SessionEventEnvelope};
-use fxg_protocol::{CommandId, SessionId};
+use fxg_protocol::settings::{
+    CustomAgentConfig, NodeSettingsSnapshot, ProjectProfile, SecretsResponse,
+    ServerSettingsSnapshot, UpdateAgentSettingsRequest, UpdateNodeSettingsRequest,
+    UpdateProjectProfileRequest, UpdateServerSettingsRequest, UpsertSecretRequest,
+};
+use fxg_protocol::{CommandId, SecretId, SessionId};
 use tokio::sync::broadcast;
 
 pub use pty::{PtyChannelError, PtyChannelEvent, PtySpawnParams};
@@ -126,9 +130,13 @@ impl ApiError {
             | ErrorCode::AgentProtocolError
             | ErrorCode::GitUnavailable
             | ErrorCode::GitFailed
-            | ErrorCode::Cancelled => StatusCode::CONFLICT,
-            ErrorCode::InvalidState | ErrorCode::ConfigInvalid => StatusCode::BAD_REQUEST,
-            ErrorCode::NotFound => StatusCode::NOT_FOUND,
+            | ErrorCode::Cancelled
+            | ErrorCode::RevisionMismatch
+            | ErrorCode::SecretInUse => StatusCode::CONFLICT,
+            ErrorCode::InvalidState | ErrorCode::ConfigInvalid | ErrorCode::SecretInvalid => {
+                StatusCode::BAD_REQUEST
+            }
+            ErrorCode::NotFound | ErrorCode::SecretMissing => StatusCode::NOT_FOUND,
             ErrorCode::Timeout => StatusCode::GATEWAY_TIMEOUT,
             ErrorCode::DiskFull => StatusCode::INSUFFICIENT_STORAGE,
             ErrorCode::Internal
@@ -703,6 +711,196 @@ pub trait ClientApiBackend: Clone + Send + Sync + 'static {
         ))
     }
 
+    /// `GET /api/v1/settings/node` (local node only).
+    async fn settings_node(&self) -> Result<NodeSettingsSnapshot, ApiError> {
+        Err(ApiError::from_code(
+            ErrorCode::InvalidState,
+            "node settings are only available on a local node",
+        ))
+    }
+
+    /// `PATCH /api/v1/settings/node` (local node only).
+    async fn update_node_settings(
+        &self,
+        _request: UpdateNodeSettingsRequest,
+    ) -> Result<NodeSettingsSnapshot, ApiError> {
+        Err(ApiError::from_code(
+            ErrorCode::InvalidState,
+            "node settings are only available on a local node",
+        ))
+    }
+
+    /// `PATCH /api/v1/settings/agents` (local node only).
+    async fn update_agent_settings(
+        &self,
+        _request: UpdateAgentSettingsRequest,
+    ) -> Result<NodeSettingsSnapshot, ApiError> {
+        Err(ApiError::from_code(
+            ErrorCode::InvalidState,
+            "agent settings are only available on a local node",
+        ))
+    }
+
+    /// `GET /api/v1/settings/server` (central server only).
+    async fn settings_server(&self) -> Result<ServerSettingsSnapshot, ApiError> {
+        Err(ApiError::from_code(
+            ErrorCode::InvalidState,
+            "server settings are only available on the central server",
+        ))
+    }
+
+    /// `PATCH /api/v1/settings/server` (central server only).
+    async fn update_server_settings(
+        &self,
+        _request: UpdateServerSettingsRequest,
+    ) -> Result<ServerSettingsSnapshot, ApiError> {
+        Err(ApiError::from_code(
+            ErrorCode::InvalidState,
+            "server settings are only available on the central server",
+        ))
+    }
+
+    /// `GET /api/v1/nodes/:node_id/settings` (hub proxy).
+    async fn node_settings(&self, _node_id: &str) -> Result<NodeSettingsSnapshot, ApiError> {
+        Err(ApiError::from_code(
+            ErrorCode::InvalidState,
+            "node settings proxy is only available on the central server",
+        ))
+    }
+
+    /// `PATCH /api/v1/nodes/:node_id/settings/node` (hub proxy).
+    async fn update_node_settings_remote(
+        &self,
+        _node_id: &str,
+        _request: UpdateNodeSettingsRequest,
+    ) -> Result<NodeSettingsSnapshot, ApiError> {
+        Err(ApiError::from_code(
+            ErrorCode::InvalidState,
+            "node settings proxy is only available on the central server",
+        ))
+    }
+
+    /// `PATCH /api/v1/nodes/:node_id/settings/agents` (hub proxy).
+    async fn update_agent_settings_remote(
+        &self,
+        _node_id: &str,
+        _request: UpdateAgentSettingsRequest,
+    ) -> Result<NodeSettingsSnapshot, ApiError> {
+        Err(ApiError::from_code(
+            ErrorCode::InvalidState,
+            "node settings proxy is only available on the central server",
+        ))
+    }
+
+    /// `GET /api/v1/secrets` (node: node-owned, server: server-owned).
+    async fn secrets(&self) -> Result<SecretsResponse, ApiError> {
+        Err(ApiError::from_code(
+            ErrorCode::InvalidState,
+            "secrets are not available on this endpoint",
+        ))
+    }
+
+    /// `PUT /api/v1/secrets/:secret_id` (write-only).
+    async fn upsert_secret(
+        &self,
+        _secret_id: &SecretId,
+        _request: UpsertSecretRequest,
+    ) -> Result<SecretsResponse, ApiError> {
+        Err(ApiError::from_code(
+            ErrorCode::InvalidState,
+            "secrets are not available on this endpoint",
+        ))
+    }
+
+    /// `DELETE /api/v1/secrets/:secret_id`.
+    async fn delete_secret(&self, _secret_id: &SecretId) -> Result<SecretsResponse, ApiError> {
+        Err(ApiError::from_code(
+            ErrorCode::InvalidState,
+            "secrets are not available on this endpoint",
+        ))
+    }
+
+    /// `POST /api/v1/secrets/:secret_id/rotate`.
+    async fn rotate_secret(&self, _secret_id: &SecretId) -> Result<SecretsResponse, ApiError> {
+        Err(ApiError::from_code(
+            ErrorCode::InvalidState,
+            "secrets are not available on this endpoint",
+        ))
+    }
+
+    /// `GET /api/v1/nodes/:node_id/secrets` (hub proxy).
+    async fn node_secrets(&self, _node_id: &str) -> Result<SecretsResponse, ApiError> {
+        Err(ApiError::from_code(
+            ErrorCode::InvalidState,
+            "node secret proxy is only available on the central server",
+        ))
+    }
+
+    /// `PUT /api/v1/nodes/:node_id/secrets/:secret_id` (hub proxy).
+    async fn upsert_node_secret(
+        &self,
+        _node_id: &str,
+        _secret_id: &SecretId,
+        _request: UpsertSecretRequest,
+    ) -> Result<SecretsResponse, ApiError> {
+        Err(ApiError::from_code(
+            ErrorCode::InvalidState,
+            "node secret proxy is only available on the central server",
+        ))
+    }
+
+    /// `DELETE /api/v1/nodes/:node_id/secrets/:secret_id` (hub proxy).
+    async fn delete_node_secret(
+        &self,
+        _node_id: &str,
+        _secret_id: &SecretId,
+    ) -> Result<SecretsResponse, ApiError> {
+        Err(ApiError::from_code(
+            ErrorCode::InvalidState,
+            "node secret proxy is only available on the central server",
+        ))
+    }
+
+    /// `POST /api/v1/nodes/:node_id/secrets/:secret_id/rotate` (hub proxy).
+    async fn rotate_node_secret(
+        &self,
+        _node_id: &str,
+        _secret_id: &SecretId,
+    ) -> Result<SecretsResponse, ApiError> {
+        Err(ApiError::from_code(
+            ErrorCode::InvalidState,
+            "node secret proxy is only available on the central server",
+        ))
+    }
+
+    /// `GET /api/v1/projects/:project_id/profile` (server-owned).
+    async fn project_profile(&self, _project_id: &str) -> Result<ProjectProfile, ApiError> {
+        Err(ApiError::from_code(
+            ErrorCode::InvalidState,
+            "project profiles are only available on the central server",
+        ))
+    }
+
+    /// `PUT /api/v1/projects/:project_id/profile` (server-owned).
+    async fn update_project_profile(
+        &self,
+        _project_id: &str,
+        _request: UpdateProjectProfileRequest,
+    ) -> Result<ProjectProfile, ApiError> {
+        Err(ApiError::from_code(
+            ErrorCode::InvalidState,
+            "project profiles are only available on the central server",
+        ))
+    }
+
+    /// `GET /api/v1/nodes/:node_id/agents` (hub proxy).
+    async fn list_agents_node(&self, _node_id: &str) -> Result<AgentsResponse, ApiError> {
+        Err(ApiError::from_code(
+            ErrorCode::InvalidState,
+            "agent listing for a specific node is only available on the central server",
+        ))
+    }
+
     /// `POST /api/v1/system/kill-switch`
     async fn kill_switch(
         &self,
@@ -859,6 +1057,47 @@ pub fn client_router<B: ClientApiBackend>(backend: B, options: ClientApiOptions)
         .route("/api/v1/auth/rotate-token", post(rotate_auth_token::<B>))
         .route("/api/v1/nodes", get(list_nodes::<B>))
         .route("/api/v1/nodes/{node_id}/fs/browse", get(browse_fs::<B>))
+        .route(
+            "/api/v1/settings/node",
+            get(settings_node::<B>).patch(update_node_settings::<B>),
+        )
+        .route("/api/v1/settings/agents", patch(update_agent_settings::<B>))
+        .route(
+            "/api/v1/settings/server",
+            get(settings_server::<B>).patch(update_server_settings::<B>),
+        )
+        .route("/api/v1/nodes/{node_id}/settings", get(node_settings::<B>))
+        .route(
+            "/api/v1/nodes/{node_id}/settings/node",
+            patch(update_node_settings_remote::<B>),
+        )
+        .route(
+            "/api/v1/nodes/{node_id}/settings/agents",
+            patch(update_agent_settings_remote::<B>),
+        )
+        .route("/api/v1/secrets", get(secrets::<B>))
+        .route(
+            "/api/v1/secrets/{secret_id}",
+            put(upsert_secret::<B>).delete(delete_secret::<B>),
+        )
+        .route(
+            "/api/v1/secrets/{secret_id}/rotate",
+            post(rotate_secret::<B>),
+        )
+        .route("/api/v1/nodes/{node_id}/secrets", get(node_secrets::<B>))
+        .route(
+            "/api/v1/nodes/{node_id}/secrets/{secret_id}",
+            put(upsert_node_secret::<B>).delete(delete_node_secret::<B>),
+        )
+        .route(
+            "/api/v1/nodes/{node_id}/secrets/{secret_id}/rotate",
+            post(rotate_node_secret::<B>),
+        )
+        .route("/api/v1/nodes/{node_id}/agents", get(list_agents_node::<B>))
+        .route(
+            "/api/v1/projects/{project_id}/profile",
+            get(project_profile::<B>).put(update_project_profile::<B>),
+        )
         .route("/api/v1/provisioners", get(list_provisioners::<B>))
         .route(
             "/api/v1/provisioners/{provisioner}/test",
@@ -1605,4 +1844,222 @@ pub(crate) fn is_websocket_upgrade(request: &Request) -> bool {
     header_str(request.headers(), header::UPGRADE)
         .map(|value| value.eq_ignore_ascii_case("websocket"))
         .unwrap_or(false)
+}
+
+// ----------------------------------------------------------------------
+// Settings, secrets and project profiles
+// ----------------------------------------------------------------------
+
+async fn settings_node<B: ClientApiBackend>(State(state): State<ClientApiState<B>>) -> Response {
+    match state.backend.settings_node().await {
+        Ok(snapshot) => Json(snapshot).into_response(),
+        Err(err) => err.into_response(),
+    }
+}
+
+async fn update_node_settings<B: ClientApiBackend>(
+    State(state): State<ClientApiState<B>>,
+    Json(request): Json<UpdateNodeSettingsRequest>,
+) -> Response {
+    match state.backend.update_node_settings(request).await {
+        Ok(snapshot) => Json(snapshot).into_response(),
+        Err(err) => err.into_response(),
+    }
+}
+
+async fn update_agent_settings<B: ClientApiBackend>(
+    State(state): State<ClientApiState<B>>,
+    Json(request): Json<UpdateAgentSettingsRequest>,
+) -> Response {
+    match state.backend.update_agent_settings(request).await {
+        Ok(snapshot) => Json(snapshot).into_response(),
+        Err(err) => err.into_response(),
+    }
+}
+
+async fn settings_server<B: ClientApiBackend>(State(state): State<ClientApiState<B>>) -> Response {
+    match state.backend.settings_server().await {
+        Ok(snapshot) => Json(snapshot).into_response(),
+        Err(err) => err.into_response(),
+    }
+}
+
+async fn update_server_settings<B: ClientApiBackend>(
+    State(state): State<ClientApiState<B>>,
+    Json(request): Json<UpdateServerSettingsRequest>,
+) -> Response {
+    match state.backend.update_server_settings(request).await {
+        Ok(snapshot) => Json(snapshot).into_response(),
+        Err(err) => err.into_response(),
+    }
+}
+
+async fn node_settings<B: ClientApiBackend>(
+    State(state): State<ClientApiState<B>>,
+    UrlPath(node_id): UrlPath<String>,
+) -> Response {
+    match state.backend.node_settings(&node_id).await {
+        Ok(snapshot) => Json(snapshot).into_response(),
+        Err(err) => err.into_response(),
+    }
+}
+
+async fn update_node_settings_remote<B: ClientApiBackend>(
+    State(state): State<ClientApiState<B>>,
+    UrlPath(node_id): UrlPath<String>,
+    Json(request): Json<UpdateNodeSettingsRequest>,
+) -> Response {
+    match state
+        .backend
+        .update_node_settings_remote(&node_id, request)
+        .await
+    {
+        Ok(snapshot) => Json(snapshot).into_response(),
+        Err(err) => err.into_response(),
+    }
+}
+
+async fn update_agent_settings_remote<B: ClientApiBackend>(
+    State(state): State<ClientApiState<B>>,
+    UrlPath(node_id): UrlPath<String>,
+    Json(request): Json<UpdateAgentSettingsRequest>,
+) -> Response {
+    match state
+        .backend
+        .update_agent_settings_remote(&node_id, request)
+        .await
+    {
+        Ok(snapshot) => Json(snapshot).into_response(),
+        Err(err) => err.into_response(),
+    }
+}
+
+async fn secrets<B: ClientApiBackend>(State(state): State<ClientApiState<B>>) -> Response {
+    match state.backend.secrets().await {
+        Ok(response) => Json(response).into_response(),
+        Err(err) => err.into_response(),
+    }
+}
+
+async fn upsert_secret<B: ClientApiBackend>(
+    State(state): State<ClientApiState<B>>,
+    UrlPath(secret_id): UrlPath<String>,
+    Json(request): Json<UpsertSecretRequest>,
+) -> Response {
+    match state
+        .backend
+        .upsert_secret(&SecretId::new(secret_id), request)
+        .await
+    {
+        Ok(response) => Json(response).into_response(),
+        Err(err) => err.into_response(),
+    }
+}
+
+async fn delete_secret<B: ClientApiBackend>(
+    State(state): State<ClientApiState<B>>,
+    UrlPath(secret_id): UrlPath<String>,
+) -> Response {
+    match state.backend.delete_secret(&SecretId::new(secret_id)).await {
+        Ok(response) => Json(response).into_response(),
+        Err(err) => err.into_response(),
+    }
+}
+
+async fn rotate_secret<B: ClientApiBackend>(
+    State(state): State<ClientApiState<B>>,
+    UrlPath(secret_id): UrlPath<String>,
+) -> Response {
+    match state.backend.rotate_secret(&SecretId::new(secret_id)).await {
+        Ok(response) => Json(response).into_response(),
+        Err(err) => err.into_response(),
+    }
+}
+
+async fn node_secrets<B: ClientApiBackend>(
+    State(state): State<ClientApiState<B>>,
+    UrlPath(node_id): UrlPath<String>,
+) -> Response {
+    match state.backend.node_secrets(&node_id).await {
+        Ok(response) => Json(response).into_response(),
+        Err(err) => err.into_response(),
+    }
+}
+
+async fn upsert_node_secret<B: ClientApiBackend>(
+    State(state): State<ClientApiState<B>>,
+    UrlPath((node_id, secret_id)): UrlPath<(String, String)>,
+    Json(request): Json<UpsertSecretRequest>,
+) -> Response {
+    match state
+        .backend
+        .upsert_node_secret(&node_id, &SecretId::new(secret_id), request)
+        .await
+    {
+        Ok(response) => Json(response).into_response(),
+        Err(err) => err.into_response(),
+    }
+}
+
+async fn delete_node_secret<B: ClientApiBackend>(
+    State(state): State<ClientApiState<B>>,
+    UrlPath((node_id, secret_id)): UrlPath<(String, String)>,
+) -> Response {
+    match state
+        .backend
+        .delete_node_secret(&node_id, &SecretId::new(secret_id))
+        .await
+    {
+        Ok(response) => Json(response).into_response(),
+        Err(err) => err.into_response(),
+    }
+}
+
+async fn rotate_node_secret<B: ClientApiBackend>(
+    State(state): State<ClientApiState<B>>,
+    UrlPath((node_id, secret_id)): UrlPath<(String, String)>,
+) -> Response {
+    match state
+        .backend
+        .rotate_node_secret(&node_id, &SecretId::new(secret_id))
+        .await
+    {
+        Ok(response) => Json(response).into_response(),
+        Err(err) => err.into_response(),
+    }
+}
+
+async fn project_profile<B: ClientApiBackend>(
+    State(state): State<ClientApiState<B>>,
+    UrlPath(project_id): UrlPath<String>,
+) -> Response {
+    match state.backend.project_profile(&project_id).await {
+        Ok(profile) => Json(profile).into_response(),
+        Err(err) => err.into_response(),
+    }
+}
+
+async fn update_project_profile<B: ClientApiBackend>(
+    State(state): State<ClientApiState<B>>,
+    UrlPath(project_id): UrlPath<String>,
+    Json(request): Json<UpdateProjectProfileRequest>,
+) -> Response {
+    match state
+        .backend
+        .update_project_profile(&project_id, request)
+        .await
+    {
+        Ok(profile) => Json(profile).into_response(),
+        Err(err) => err.into_response(),
+    }
+}
+
+async fn list_agents_node<B: ClientApiBackend>(
+    State(state): State<ClientApiState<B>>,
+    UrlPath(node_id): UrlPath<String>,
+) -> Response {
+    match state.backend.list_agents_node(&node_id).await {
+        Ok(response) => Json(response).into_response(),
+        Err(err) => err.into_response(),
+    }
 }

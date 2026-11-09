@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        INSERT INTO server_settings (id, vapid_subject, revision, updated_at)\n        VALUES (1, NULL, 1, ?)\n        ON CONFLICT(id) DO NOTHING\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "018f1aaa6da46059d10e0a6498ae081573ee41f1624ffa52810d3b176ae8f8d7"
+}

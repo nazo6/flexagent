@@ -9,7 +9,8 @@
 //! - `node_server`: Node <-> Central Server messages (shared by WS / Stdio)
 //! - `client_api`: Client REST / Client WS / PTY WS messages
 //! - `ipc`: CLI <-> Local Daemon local IPC messages
-//! - `config`: global configuration (`config.toml`) / project configuration (`.fxg.toml`)
+//! - `config`: process bootstrap configuration (`config.toml`)
+//! - `settings`: typed settings snapshots, secret metadata and project identity
 //! - `util`: time and ID generation helpers
 //!
 //! Types handled directly by clients (UI / CLI) get `#[derive(specta::Type)]` +
@@ -34,9 +35,10 @@ pub mod events;
 pub mod ids;
 pub mod ipc;
 pub mod node_server;
+pub mod settings;
 pub mod util;
 
-pub use ids::{CommandId, EventId, NodeId, ProjectId, SessionId};
+pub use ids::{CommandId, EventId, NodeId, ProjectId, SecretId, SessionId};
 
 /// Generates the TypeScript definitions used by the UI (`cargo test -p fxg-protocol export_bindings`).
 ///

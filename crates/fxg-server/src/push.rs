@@ -100,6 +100,7 @@ pub struct PushService {
     client: reqwest::Client,
     key_pair: Arc<ES256KeyPair>,
     public_key: String,
+    subject: Arc<std::sync::RwLock<String>>,
 }
 
 impl PushService {
@@ -129,7 +130,16 @@ impl PushService {
             client: reqwest::Client::new(),
             key_pair: Arc::new(key_pair),
             public_key: keys.public_key,
+            subject: Arc::new(std::sync::RwLock::new(VAPID_CONTACT.to_owned())),
         })
+    }
+
+    /// Replaces the VAPID `sub` claim (contact) after a settings update.
+    pub fn set_subject(&self, subject: Option<&str>) {
+        let value = subject
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or(VAPID_CONTACT);
+        *self.subject.write().expect("vapid subject lock poisoned") = value.to_owned();
     }
 
     /// VAPID public key (base64url) distributed via `GET /api/v1/system/info`.
@@ -166,8 +176,13 @@ impl PushService {
             return Err(PushError::InvalidKeys);
         }
         let auth = Auth::clone_from_slice(&auth_bytes);
-        let builder = WebPushBuilder::new(endpoint, ua_public, auth)
-            .with_vapid(&self.key_pair, VAPID_CONTACT);
+        let subject = self
+            .subject
+            .read()
+            .expect("vapid subject lock poisoned")
+            .clone();
+        let builder =
+            WebPushBuilder::new(endpoint, ua_public, auth).with_vapid(&self.key_pair, &subject);
         Ok(builder.build(body)?)
     }
 

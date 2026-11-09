@@ -1,0 +1,86 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        SELECT agent_id AS \"agent_id!\", name, command, args_json, env_json, env_secrets_json\n          FROM custom_agents\n         ORDER BY agent_id\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "agent_id!",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "custom_agents",
+            "name": "agent_id"
+          }
+        }
+      },
+      {
+        "name": "name",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "custom_agents",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "name": "command",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "custom_agents",
+            "name": "command"
+          }
+        }
+      },
+      {
+        "name": "args_json",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "custom_agents",
+            "name": "args_json"
+          }
+        }
+      },
+      {
+        "name": "env_json",
+        "ordinal": 4,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "custom_agents",
+            "name": "env_json"
+          }
+        }
+      },
+      {
+        "name": "env_secrets_json",
+        "ordinal": 5,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "custom_agents",
+            "name": "env_secrets_json"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      true,
+      true,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "f97ef12c03f8c83a0c3fa2e574af111d2e447cf9079fb11211198c64800f42b1"
+}

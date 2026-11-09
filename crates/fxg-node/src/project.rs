@@ -1,18 +1,21 @@
 //! Identity resolution for logical projects (`Logical Project`).
 //!
-//! Design: `docs/01-architecture-and-sync.md` §4.
-//! Determines the `project_key` that ties together different paths on different
-//! nodes (Windows `D:\ghq\github.com\nazo6\flexagent`, a Linux VPS, WSL, and so on)
-//! as the "same project".
+//! Design: `docs/01-architecture-and-sync.md` §4 and
+//! `docs/changelog/2026-11-09-settings-consolidation-and-project-identity.md` §3.1.
 //!
 //! Resolution order:
-//! 1. `project_key` in `.fxg.toml` (explicit, highest priority)
-//! 2. Normalized `git remote.origin.url` ([`normalize_git_url`])
-//! 3. Fallback `local:<node_id>:<path-hash>` (not Git and no `.fxg.toml`)
+//! 1. Explicit `project_path_links` entry (exact path, then ancestors up to the
+//!    Git root; a Worktree falls back to the main Worktree's links through
+//!    `git rev-parse --git-common-dir`)
+//! 2. Normalized `git remote.origin.url`
+//! 3. Machine-local `local:<node_id>:<path-hash>` fallback
+//!
+//! Display names are always derived from the identity; they are never configured.
 
 use std::path::{Path, PathBuf};
 
-use fxg_protocol::config::ProjectConfig;
+use fxg_db::Db;
+use fxg_protocol::settings::{ProjectIdentity, ProjectIdentityKind};
 
 use crate::error::NodeError;
 use crate::git;
@@ -48,7 +51,7 @@ pub fn normalize_git_url(raw_url: &str, subpath_from_root: &str) -> String {
             None => (without_auth, ""),
         },
     };
-    // 4. Strip the port number (`gitlab.example.com:2222/team/app.git`)
+    // 4. Strip the port number (`gitlab.example.com:2222/team/app`)
     let path = match path.split_once('/') {
         Some((maybe_port, rest))
             if !maybe_port.is_empty() && maybe_port.chars().all(|ch| ch.is_ascii_digit()) =>
@@ -86,7 +89,7 @@ fn normalize_subpath(subpath: &str) -> String {
         .join("/")
 }
 
-/// Fallback project ID for non-Git projects (and projects without `.fxg.toml`).
+/// Fallback project ID for non-Git projects without an explicit link.
 ///
 /// The format is `local:<node_id>:<hash>` (design:
 /// `docs/01-architecture-and-sync.md` §4.1). The hash is FNV-1a (64-bit) of the
@@ -111,29 +114,43 @@ fn fnv1a64(bytes: &[u8]) -> u64 {
     hash
 }
 
-/// Source of the `project_key` resolution (re-export of
-/// [`fxg_protocol::common::ProjectResolutionSource`]).
-pub use fxg_protocol::common::ProjectResolutionSource;
+/// Validates an explicit project key (`[a-zA-Z0-9._-]{1,64}`).
+pub fn validate_project_key(key: &str) -> Result<(), NodeError> {
+    let valid = !key.is_empty()
+        && key.len() <= 64
+        && key
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '-'));
+    if valid {
+        Ok(())
+    } else {
+        Err(NodeError::InvalidState(format!(
+            "invalid project key {key:?}: use 1-64 characters of [a-zA-Z0-9._-]"
+        )))
+    }
+}
 
 /// A resolved logical project.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedProject {
-    /// Logical project ID (`project_key`)
+    /// Logical project ID (`user:<key>` / normalized Git URL / `local:...`)
     pub project_id: String,
-    /// Display name
+    /// Display name derived from the identity
     pub name: String,
     /// Git URL before normalization
     pub canonical_git_url: Option<String>,
+    /// Identity details
+    pub identity: ProjectIdentity,
     /// Git root (`None` for non-Git projects)
     pub git_root: Option<PathBuf>,
     /// Relative subpath from the Git root (monorepo; `None` directly under the root)
     pub relative_subpath: Option<String>,
-    /// Directory being resolved (normalized absolute path)
+    /// Directory that was resolved (normalized absolute path)
     pub local_path: PathBuf,
     /// Whether this is a Git repository
     pub is_git_repo: bool,
-    /// Resolution source
-    pub source: ProjectResolutionSource,
+    /// Explicit link that matched, when any
+    pub matched_link_path: Option<PathBuf>,
 }
 
 impl ResolvedProject {
@@ -143,6 +160,7 @@ impl ResolvedProject {
             project_id: self.project_id.clone(),
             name: self.name.clone(),
             canonical_git_url: self.canonical_git_url.clone(),
+            identity: self.identity.clone(),
         }
     }
 
@@ -165,69 +183,95 @@ impl ResolvedProject {
     }
 }
 
-/// Loads `.fxg.toml` in the order "target directory -> Git root".
-///
-/// Used to look up worktree creation hooks (`copy_files` / `post_create`) and
-/// per-project default settings.
-pub async fn load_project_config(cwd: &Path) -> Result<Option<ProjectConfig>, NodeError> {
-    if let Some(config) = ProjectConfig::load_from_dir(cwd)? {
-        return Ok(Some(config));
+/// Finds the explicit link matching a path (or one of its ancestors).
+fn match_link(
+    links: &[(String, String)],
+    path: &Path,
+    stop_at: Option<&Path>,
+) -> Option<(PathBuf, String)> {
+    let mut current = Some(path.to_path_buf());
+    while let Some(candidate) = current {
+        let candidate_str = candidate.to_string_lossy();
+        if let Some((_, key)) = links
+            .iter()
+            .find(|(linked, _)| linked == candidate_str.as_ref())
+        {
+            return Some((candidate, key.clone()));
+        }
+        if stop_at.is_some_and(|root| root == candidate) {
+            break;
+        }
+        current = candidate.parent().map(Path::to_path_buf);
     }
-    if let Some(root) = git::toplevel(cwd).await?
-        && root != cwd
-    {
-        return Ok(ProjectConfig::load_from_dir(&root)?);
+    None
+}
+
+/// Resolves the explicit `project_key` for a path.
+async fn explicit_key(
+    db: &Db,
+    local_path: &Path,
+    git_root: Option<&Path>,
+) -> Result<Option<(PathBuf, String)>, NodeError> {
+    let links = db.project_path_links().await?;
+    if let Some(found) = match_link(&links, local_path, git_root) {
+        return Ok(Some(found));
+    }
+    if let Some(root) = git_root {
+        // A Worktree in another directory inherits the main Worktree's link.
+        if let Some(main_root) = git::main_worktree_root(root).await?
+            && let Some(found) = match_link(&links, &main_root, Some(&main_root))
+        {
+            return Ok(Some(found));
+        }
     }
     Ok(None)
 }
 
-/// Writes `project_key` into `.fxg.toml` (preserving the existing settings).
-///
-/// Shared by `fxg project link` and the client API (`POST .../projects/link`).
-pub fn patch_project_key(dir: &Path, project_key: &str) -> Result<(), NodeError> {
-    let path = dir.join(fxg_protocol::config::PROJECT_CONFIG_FILE_NAME);
-    let existing = match std::fs::read_to_string(&path) {
-        Ok(text) => text,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => String::new(),
-        Err(err) => return Err(NodeError::io(&path, err)),
-    };
-    let mut lines: Vec<String> = existing.lines().map(str::to_owned).collect();
-
-    // Embed safely as a TOML string literal
-    let literal = format!(
-        "\"{}\"",
-        project_key.replace('\\', "\\\\").replace('"', "\\\"")
-    );
-
-    let mut replaced = false;
-    for line in lines.iter_mut() {
-        let trimmed = line.trim_start();
-        if trimmed.starts_with("project_key") && line.contains('=') {
-            *line = format!("project_key = {literal}");
-            replaced = true;
-            break;
+/// Derives the display name from the identity.
+fn derive_name(
+    identity: &ProjectIdentity,
+    project_id: &str,
+    git_root: Option<&Path>,
+    local_path: &Path,
+) -> String {
+    match identity.kind {
+        ProjectIdentityKind::UserKey => {
+            identity.key.clone().unwrap_or_else(|| "project".to_owned())
         }
+        ProjectIdentityKind::GitRemote => {
+            let without_subpath = project_id.split('#').next().unwrap_or(project_id);
+            without_subpath
+                .rsplit('/')
+                .next()
+                .filter(|segment| !segment.is_empty())
+                .map(str::to_owned)
+                .or_else(|| {
+                    git_root
+                        .and_then(|root| root.file_name())
+                        .map(|name| name.to_string_lossy().into_owned())
+                })
+                .unwrap_or_else(|| project_id.to_owned())
+        }
+        ProjectIdentityKind::Local => local_path
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_else(|| local_path.display().to_string()),
+        ProjectIdentityKind::Unknown(_) => local_path
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_else(|| local_path.display().to_string()),
     }
-    if !replaced {
-        lines.insert(0, format!("project_key = {literal}"));
-    }
-
-    let mut output = lines.join("\n");
-    output.push('\n');
-    std::fs::write(&path, output).map_err(|err| NodeError::io(&path, err))?;
-
-    // Verify that it can actually be read back (never write broken TOML)
-    ProjectConfig::load_from_path(&path)?;
-    Ok(())
 }
 
 /// Resolves the logical project of the given directory.
-///
-/// `.fxg.toml` is searched in the order starting directory -> Git root.
-pub async fn resolve_project(cwd: &Path, node_id: &str) -> Result<ResolvedProject, NodeError> {
+pub async fn resolve_project(
+    cwd: &Path,
+    node_id: &str,
+    db: &Db,
+) -> Result<ResolvedProject, NodeError> {
     let local_path = fxg_pty::canonicalize(cwd).unwrap_or_else(|_| cwd.to_path_buf());
     let git_root = git::toplevel(&local_path).await?;
-    let project_config = load_project_config(&local_path).await?;
+    let link = explicit_key(db, &local_path, git_root.as_deref()).await?;
 
     let canonical_git_url = match &git_root {
         Some(root) => git::remote_origin_url(root).await?,
@@ -252,48 +296,32 @@ pub async fn resolve_project(cwd: &Path, node_id: &str) -> Result<ResolvedProjec
         None => None,
     };
 
-    let folder_name = local_path
-        .file_name()
-        .map(|name| name.to_string_lossy().into_owned())
-        .unwrap_or_else(|| local_path.display().to_string());
-    let repo_name = git_root
-        .as_ref()
-        .and_then(|root| root.file_name())
-        .map(|name| name.to_string_lossy().into_owned());
-
-    let name = project_config
-        .as_ref()
-        .and_then(|config| config.name.clone())
-        .or(repo_name)
-        .unwrap_or(folder_name);
-
-    let (project_id, source) = if let Some(key) = project_config
-        .as_ref()
-        .and_then(|config| config.project_key.clone())
-        .filter(|key| !key.trim().is_empty())
-    {
-        (key, ProjectResolutionSource::FxgToml)
+    let (project_id, identity) = if let Some((_, key)) = &link {
+        (format!("user:{key}"), ProjectIdentity::user_key(key))
     } else if let Some(url) = &canonical_git_url {
         (
             normalize_git_url(url, relative_subpath.as_deref().unwrap_or("")),
-            ProjectResolutionSource::GitRemote,
+            ProjectIdentity::git_remote(),
         )
     } else {
         (
             fallback_project_id(node_id, &local_path),
-            ProjectResolutionSource::Fallback,
+            ProjectIdentity::local(),
         )
     };
+
+    let name = derive_name(&identity, &project_id, git_root.as_deref(), &local_path);
 
     Ok(ResolvedProject {
         project_id,
         name,
         canonical_git_url,
+        identity,
         is_git_repo: git_root.is_some(),
         git_root,
         relative_subpath,
         local_path,
-        source,
+        matched_link_path: link.map(|(path, _)| path),
     })
 }
 
@@ -301,6 +329,15 @@ pub async fn resolve_project(cwd: &Path, node_id: &str) -> Result<ResolvedProjec
 mod tests {
     use super::*;
     use crate::testutil;
+    use fxg_db::{Db, DbRole};
+
+    fn canonical(path: &Path) -> PathBuf {
+        fxg_pty::canonicalize(path).expect("canonicalize")
+    }
+
+    async fn test_db() -> Db {
+        Db::open_in_memory(DbRole::Node).await.expect("db")
+    }
 
     #[test]
     fn normalizes_documented_examples() {
@@ -320,32 +357,26 @@ mod tests {
 
     #[test]
     fn normalizes_variants() {
-        // scheme / no userinfo
         assert_eq!(
             normalize_git_url("github.com/nazo6/flexagent", ""),
             "github.com/nazo6/flexagent"
         );
-        // Uppercase host / trailing slash / no .git
         assert_eq!(
             normalize_git_url(" HTTPS://GitHub.com/nazo6/flexagent/ ", ""),
             "github.com/nazo6/flexagent"
         );
-        // https with a port
         assert_eq!(
             normalize_git_url("http://192.168.1.5:8080/team/app.git", ""),
             "192.168.1.5/team/app"
         );
-        // Subpath (monorepo)
         assert_eq!(
             normalize_git_url("git@github.com:nazo6/flexagent.git", "./packages/sub/"),
             "github.com/nazo6/flexagent#packages/sub"
         );
-        // Backslash subpath (Windows input)
         assert_eq!(
             normalize_git_url("git@github.com:nazo6/flexagent.git", r"packages\sub"),
             "github.com/nazo6/flexagent#packages/sub"
         );
-        // Group hierarchy
         assert_eq!(
             normalize_git_url("git@github.com:org/team/repo.git", ""),
             "github.com/org/team/repo"
@@ -370,141 +401,168 @@ mod tests {
 
     #[tokio::test]
     async fn resolves_project_from_git_remote() {
+        let db = test_db().await;
         let dir = tempfile::tempdir().expect("tempdir");
         testutil::init_test_repo_with_remote(dir.path(), "git@github.com:nazo6/flexagent.git")
             .await;
 
-        let resolved = resolve_project(dir.path(), "test-node")
+        let resolved = resolve_project(dir.path(), "test-node", &db)
             .await
             .expect("resolve");
         assert_eq!(resolved.project_id, "github.com/nazo6/flexagent");
-        assert_eq!(
-            resolved.name,
-            dir.path().file_name().unwrap().to_string_lossy()
-        );
+        assert_eq!(resolved.name, "flexagent");
         assert_eq!(
             resolved.canonical_git_url.as_deref(),
             Some("git@github.com:nazo6/flexagent.git")
         );
         assert!(resolved.is_git_repo);
         assert!(resolved.relative_subpath.is_none());
-        assert_eq!(resolved.source, ProjectResolutionSource::GitRemote);
+        assert_eq!(resolved.identity.kind, ProjectIdentityKind::GitRemote);
     }
 
     #[tokio::test]
     async fn resolves_monorepo_subpath() {
+        let db = test_db().await;
         let dir = tempfile::tempdir().expect("tempdir");
         testutil::init_test_repo_with_remote(dir.path(), "git@github.com:nazo6/flexagent.git")
             .await;
         let sub = dir.path().join("packages/sub");
         std::fs::create_dir_all(&sub).expect("mkdir");
 
-        let resolved = resolve_project(&sub, "test-node").await.expect("resolve");
+        let resolved = resolve_project(&sub, "test-node", &db)
+            .await
+            .expect("resolve");
         assert_eq!(
             resolved.project_id,
             "github.com/nazo6/flexagent#packages/sub"
         );
         assert_eq!(resolved.relative_subpath.as_deref(), Some("packages/sub"));
-        // The Git root is resolved as well
         assert_eq!(
             resolved.git_root.as_deref(),
+            Some(canonical(dir.path()).as_path())
+        );
+        assert_eq!(resolved.name, "flexagent");
+    }
+
+    #[tokio::test]
+    async fn explicit_link_wins_over_git_remote() {
+        let db = test_db().await;
+        let dir = tempfile::tempdir().expect("tempdir");
+        testutil::init_test_repo_with_remote(dir.path(), "git@github.com:nazo6/flexagent.git")
+            .await;
+        let path = canonical(dir.path()).to_string_lossy().into_owned();
+        db.upsert_project_path_link(&path, "internal.agent-tools")
+            .await
+            .expect("link");
+
+        let resolved = resolve_project(dir.path(), "test-node", &db)
+            .await
+            .expect("resolve");
+        assert_eq!(resolved.project_id, "user:internal.agent-tools");
+        assert_eq!(resolved.name, "internal.agent-tools");
+        assert_eq!(resolved.identity.kind, ProjectIdentityKind::UserKey);
+        assert_eq!(
+            resolved.matched_link_path.as_deref(),
             Some(canonical(dir.path()).as_path())
         );
     }
 
     #[tokio::test]
-    async fn fxg_toml_project_key_wins() {
+    async fn link_on_parent_directory_applies_to_subdirectory() {
+        let db = test_db().await;
         let dir = tempfile::tempdir().expect("tempdir");
         testutil::init_test_repo_with_remote(dir.path(), "git@github.com:nazo6/flexagent.git")
             .await;
-        std::fs::write(
-            dir.path().join(".fxg.toml"),
-            "project_key = \"internal/agent-tools\"\nname = \"Agent Tools\"\n",
-        )
-        .expect("write .fxg.toml");
+        let sub = dir.path().join("packages/sub");
+        std::fs::create_dir_all(&sub).expect("mkdir");
+        let path = canonical(dir.path()).to_string_lossy().into_owned();
+        db.upsert_project_path_link(&path, "mono")
+            .await
+            .expect("link");
 
-        let resolved = resolve_project(dir.path(), "test-node")
+        let resolved = resolve_project(&sub, "test-node", &db)
             .await
             .expect("resolve");
-        assert_eq!(resolved.project_id, "internal/agent-tools");
-        assert_eq!(resolved.name, "Agent Tools");
-        assert_eq!(resolved.source, ProjectResolutionSource::FxgToml);
+        assert_eq!(resolved.project_id, "user:mono");
     }
 
     #[tokio::test]
     async fn non_git_directory_falls_back_to_local_project() {
+        let db = test_db().await;
         let dir = tempfile::tempdir().expect("tempdir");
-        let resolved = resolve_project(dir.path(), "home-mac")
+        let resolved = resolve_project(dir.path(), "home-mac", &db)
             .await
             .expect("resolve");
         assert!(!resolved.is_git_repo);
-        assert_eq!(resolved.source, ProjectResolutionSource::Fallback);
+        assert_eq!(resolved.identity.kind, ProjectIdentityKind::Local);
         assert!(resolved.project_id.starts_with("local:home-mac:"));
         assert!(resolved.canonical_git_url.is_none());
+        assert_eq!(
+            resolved.name,
+            dir.path().file_name().unwrap().to_string_lossy()
+        );
     }
 
     #[tokio::test]
     async fn git_repo_without_remote_falls_back() {
+        let db = test_db().await;
         let dir = tempfile::tempdir().expect("tempdir");
         testutil::init_test_repo(dir.path()).await;
-        let resolved = resolve_project(dir.path(), "linux-vps")
+        let resolved = resolve_project(dir.path(), "linux-vps", &db)
             .await
             .expect("resolve");
         assert!(resolved.is_git_repo);
-        assert_eq!(resolved.source, ProjectResolutionSource::Fallback);
+        assert_eq!(resolved.identity.kind, ProjectIdentityKind::Local);
         assert!(resolved.project_id.starts_with("local:linux-vps:"));
     }
 
-    #[test]
-    fn patch_project_key_preserves_other_settings() {
+    #[tokio::test]
+    async fn worktree_inherits_main_worktree_link() {
+        let db = test_db().await;
         let dir = tempfile::tempdir().expect("tempdir");
-        std::fs::write(
-            dir.path()
-                .join(fxg_protocol::config::PROJECT_CONFIG_FILE_NAME),
-            "name = \"flexagent\"\n\n[worktree]\nbase_branch = \"main\"\n",
+        let repo = dir.path().join("repo");
+        std::fs::create_dir_all(&repo).expect("mkdir");
+        testutil::init_test_repo(&repo).await;
+        // Create a commit so a worktree can be added.
+        std::fs::write(repo.join("README.md"), "hello\n").expect("write");
+        git::run_git(&repo, &["add", "."]).await.expect("add");
+        git::run_git(
+            &repo,
+            &[
+                "-c",
+                "user.email=t@example.com",
+                "-c",
+                "user.name=t",
+                "commit",
+                "-m",
+                "init",
+            ],
         )
-        .expect("write");
-        patch_project_key(dir.path(), "github.com/nazo6/flexagent").expect("patch");
-        let config = ProjectConfig::load_from_dir(dir.path())
-            .expect("load")
-            .expect("exists");
-        assert_eq!(
-            config.project_key.as_deref(),
-            Some("github.com/nazo6/flexagent")
-        );
-        assert_eq!(config.name.as_deref(), Some("flexagent"));
-        assert_eq!(config.worktree.base_branch.as_deref(), Some("main"));
-
-        // Re-running must not create duplicate lines
-        patch_project_key(dir.path(), "other/key").expect("patch again");
-        let config = ProjectConfig::load_from_dir(dir.path())
-            .expect("load")
-            .expect("exists");
-        assert_eq!(config.project_key.as_deref(), Some("other/key"));
-        let text = std::fs::read_to_string(
-            dir.path()
-                .join(fxg_protocol::config::PROJECT_CONFIG_FILE_NAME),
+        .await
+        .expect("commit");
+        let worktree = dir.path().join("wt");
+        git::run_git(
+            &repo,
+            &[
+                "worktree",
+                "add",
+                "-b",
+                "feat",
+                worktree.to_str().expect("utf8"),
+            ],
         )
-        .expect("read");
-        assert_eq!(text.matches("project_key").count(), 1);
-    }
+        .await
+        .expect("worktree add");
 
-    #[test]
-    fn patch_project_key_does_not_overwrite_unreadable_config() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let path = dir
-            .path()
-            .join(fxg_protocol::config::PROJECT_CONFIG_FILE_NAME);
-        // A directory at the config path makes read_to_string fail with a
-        // non-NotFound error. The existing path must not be replaced by a file.
-        std::fs::create_dir(&path).expect("create directory");
-        let err = patch_project_key(dir.path(), "github.com/nazo6/flexagent")
-            .expect_err("patch must fail");
-        assert!(matches!(err, NodeError::Io { .. }));
-        assert!(path.is_dir(), "existing path must be left untouched");
-    }
+        let path = canonical(&repo).to_string_lossy().into_owned();
+        db.upsert_project_path_link(&path, "shared-key")
+            .await
+            .expect("link");
 
-    fn canonical(path: &Path) -> PathBuf {
-        fxg_pty::canonicalize(path).expect("canonicalize")
+        let resolved = resolve_project(&worktree, "test-node", &db)
+            .await
+            .expect("resolve");
+        assert_eq!(resolved.project_id, "user:shared-key");
+        assert!(resolved.is_git_repo);
     }
 }

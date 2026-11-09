@@ -15,7 +15,7 @@ use fxg_node::IpcClient;
 use fxg_protocol::CommandId;
 use fxg_protocol::client_api::{DiagnosticsResponse, WorktreeInfo};
 use fxg_protocol::common::{
-    ClientSource, ElicitationAction, ElicitationContent, ElicitationRequestEntry, HookLogEntry,
+    ClientSource, ElicitationAction, ElicitationContent, ElicitationRequestEntry,
     PermissionRequestEntry, ProjectSummary, PromptInput, ResolvedBy, SessionControlAction,
     SessionSummary,
 };
@@ -320,8 +320,7 @@ impl DaemonClient {
         project_id: Option<String>,
         branch: &str,
         base_branch: Option<String>,
-        path: Option<String>,
-    ) -> Result<(String, String, bool, Vec<HookLogEntry>)> {
+    ) -> Result<(String, String, bool)> {
         let command_id = self.command_id();
         let result = self
             .request(IpcClientMessage::WorktreeAdd {
@@ -330,7 +329,6 @@ impl DaemonClient {
                 project_id: project_id.map(fxg_protocol::ProjectId::from),
                 branch: branch.to_owned(),
                 base_branch,
-                path,
             })
             .await?;
         match result {
@@ -338,8 +336,7 @@ impl DaemonClient {
                 path,
                 branch,
                 created,
-                hook_logs,
-            } => Ok((path, branch, created, hook_logs)),
+            } => Ok((path, branch, created)),
             other => bail!("unexpected ipc result: {other:?}"),
         }
     }

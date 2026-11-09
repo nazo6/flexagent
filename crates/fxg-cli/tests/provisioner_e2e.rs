@@ -11,7 +11,8 @@ use std::time::Duration;
 
 use fxg_db::{Db, DbRole};
 use fxg_protocol::client_api::{CreateSessionRequest, CreateSessionResponse, NodesResponse};
-use fxg_protocol::config::{AUTH_TOKEN_FILE_NAME, ProvisionerConfig};
+use fxg_protocol::config::AUTH_TOKEN_FILE_NAME;
+use fxg_protocol::settings::ProvisionerDefinition;
 use fxg_server::Server;
 use fxg_server::api::{ClientApiBackend, ClientEvent};
 use fxg_server::state::ServerOptions;
@@ -64,11 +65,22 @@ async fn provisioner_runs_stdio_node_and_drains() {
     // nonexistent mock agent so StartSession fails deterministically (verifying
     // the stdio path and error propagation)
     std::fs::create_dir_all(&node_home).expect("mkdir node home");
-    std::fs::write(
-        node_home.join("config.toml"),
-        "[agents.custom.mock]\nname = \"Mock\"\ncommand = \"fxg-missing-mock-agent\"\n",
-    )
-    .expect("write node config");
+    // Define the mock custom agent in the ephemeral node's DB.
+    let node_db = Db::open(&fxg_db::node_db_path(&node_home), DbRole::Node)
+        .await
+        .expect("open node db");
+    node_db
+        .upsert_custom_agent(
+            "mock",
+            &fxg_protocol::settings::CustomAgentConfig {
+                name: Some("Mock".to_owned()),
+                command: "fxg-missing-mock-agent".to_owned(),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("register custom agent");
+    drop(node_db);
 
     // Register the project on the server side (`canonical_git_url` is required)
     let project_id = "github.com/nazo6/flexagent";
@@ -79,6 +91,7 @@ async fn provisioner_runs_stdio_node_and_drains() {
         project_id: project_id.into(),
         name: "flexagent".to_owned(),
         canonical_git_url: Some(repo.to_string_lossy().into_owned()),
+        identity: fxg_protocol::settings::ProjectIdentity::git_remote(),
     })
     .await
     .expect("register project");
@@ -87,7 +100,9 @@ async fn provisioner_runs_stdio_node_and_drains() {
     // Provisioner: start the real binary with `daemon --stdio --ephemeral`
     // (a free-form definition that avoids `{BOOTSTRAP_SCRIPT}`; verifies the
     // path without bootstrap)
-    let provisioner = ProvisionerConfig {
+    let provisioner_name = "test-ephemeral";
+    let provisioner = ProvisionerDefinition {
+        name: provisioner_name.to_owned(),
         description: Some("test stdio provisioner".to_owned()),
         command: env!("CARGO_BIN_EXE_fxg").to_owned(),
         args: vec![
@@ -103,14 +118,19 @@ async fn provisioner_runs_stdio_node_and_drains() {
             node_home.to_string_lossy().into_owned(),
         )]),
     };
-    let provisioner_name = "test-ephemeral";
+    let db = Db::open(&fxg_db::hub_db_path(&server_home), DbRole::Hub)
+        .await
+        .expect("open server db");
+    db.upsert_provisioner(&provisioner)
+        .await
+        .expect("register provisioner");
+    drop(db);
     let server = Server::start(ServerOptions {
         fxg_home: server_home.clone(),
         listen_addr: "127.0.0.1:0".to_owned(),
         allowed_hosts: Vec::new(),
         allowed_origins: Vec::new(),
-        provisioners: BTreeMap::from([(provisioner_name.to_owned(), provisioner)]),
-        git_credentials: BTreeMap::new(),
+        log: Default::default(),
     })
     .await
     .expect("start server");

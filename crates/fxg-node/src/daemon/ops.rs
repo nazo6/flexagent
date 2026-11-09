@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use fxg_acp::registry::{AcpRegistry, LocalSource};
 use fxg_protocol::CommandId;
 use fxg_protocol::client_api::{AgentSource, AgentSummary, AgentsResponse, WorktreeInfo};
-use fxg_protocol::common::{AgentAction, HookLogEntry, ProjectSummary};
+use fxg_protocol::common::{AgentAction, ProjectSummary};
 
 use super::DaemonState;
 use crate::error::NodeError;
@@ -56,18 +56,7 @@ impl AuditSource {
     }
 }
 
-/// Worktree creation result.
-#[derive(Debug, Clone)]
-pub struct WorktreeAddOutcome {
-    /// Created/reused path
-    pub path: PathBuf,
-    /// Checked-out branch
-    pub branch: String,
-    /// Whether it was newly created (`false` means an existing worktree was reused)
-    pub created: bool,
-    /// Execution log of the `post_create` hook
-    pub hook_logs: Vec<HookLogEntry>,
-}
+pub use crate::worktree::WorktreeAddOutcome;
 
 impl DaemonState {
     /// Records an audit log entry in `node.db.audit_logs` (failures are only warned about).
@@ -146,7 +135,7 @@ impl DaemonState {
         &self,
         dir: &Path,
     ) -> Result<ResolvedProject, NodeError> {
-        let resolved = project::resolve_project(dir, self.node_id()).await?;
+        let resolved = project::resolve_project(dir, self.node_id(), self.db()).await?;
         self.db()
             .upsert_project(&resolved.to_project_record())
             .await?;
@@ -180,7 +169,7 @@ impl DaemonState {
             .await?;
         self.db().delete_orphan_projects().await?;
         // Report surrounding changes (worktree detection, project binding) to the hub
-        self.trigger_node_hello();
+        self.bump_state_revision().await?;
         Ok(resolved)
     }
 
@@ -207,15 +196,82 @@ impl DaemonState {
         }
     }
 
-    /// Writes `project_key` into `.fxg.toml` and applies the binding immediately
+    /// Writes an explicit `project_key` link and applies it immediately
     /// (`fxg project link` / Client API shared implementation).
+    ///
+    /// Linking a Worktree records the link on the main Worktree root so that other
+    /// Worktrees of the same repository inherit it. Existing sessions of every
+    /// affected path follow the new `project_id`.
     pub async fn project_link(
         &self,
         dir: &Path,
-        project_id: &str,
+        project_key: &str,
     ) -> Result<ResolvedProject, NodeError> {
-        project::patch_project_key(dir, project_id)?;
-        self.resolve_and_register_project(dir).await
+        let project_key = project_key.strip_prefix("user:").unwrap_or(project_key);
+        project::validate_project_key(project_key)?;
+        let canonical = fxg_pty::canonicalize(dir).unwrap_or_else(|_| dir.to_path_buf());
+        let link_root = match crate::git::toplevel(&canonical).await? {
+            Some(root) => {
+                if crate::git::is_worktree(&root).await.unwrap_or(false) {
+                    crate::git::main_worktree_root(&root).await?.unwrap_or(root)
+                } else {
+                    root
+                }
+            }
+            None => canonical.clone(),
+        };
+        let link_path = link_root.to_string_lossy().into_owned();
+        self.db()
+            .upsert_project_path_link(&link_path, project_key)
+            .await?;
+
+        // Re-resolve every path this node knows about so Worktrees and sessions
+        // follow the new identity.
+        let mut paths: Vec<PathBuf> = vec![link_root.clone(), canonical.clone()];
+        let sessions = self
+            .db()
+            .list_sessions(&fxg_db::SessionFilter {
+                include_archived: true,
+                ..fxg_db::SessionFilter::default()
+            })
+            .await?;
+        for session in sessions {
+            if session.node_id.as_str() == self.node_id() {
+                paths.push(PathBuf::from(&session.local_path));
+            }
+        }
+        paths.sort();
+        paths.dedup();
+
+        let mut affected: Vec<(String, String)> = Vec::new();
+        for path in paths {
+            match self.resolve_and_register_project(&path).await {
+                Ok(resolved) => affected.push((
+                    resolved.local_path.to_string_lossy().into_owned(),
+                    resolved.project_id,
+                )),
+                Err(err) => {
+                    tracing::warn!(
+                        path = %path.display(),
+                        "failed to re-resolve project after link: {err}"
+                    );
+                }
+            }
+        }
+        affected.sort();
+        affected.dedup();
+        self.db()
+            .reassign_sessions_project(self.node_id(), &affected)
+            .await?;
+        for (path, project_id) in &affected {
+            self.db()
+                .delete_other_project_bindings(self.node_id(), path, project_id)
+                .await?;
+        }
+        self.db().delete_orphan_projects().await?;
+        self.bump_state_revision().await?;
+
+        self.resolve_and_register_project(&canonical).await
     }
 
     /// Scans and registers Git repositories under the given directory (or
@@ -223,12 +279,10 @@ impl DaemonState {
     ///
     /// Returns the list of directories actually scanned.
     pub async fn project_scan(&self, dir: Option<&Path>) -> Result<Vec<String>, NodeError> {
-        let config =
-            fxg_protocol::config::GlobalConfig::load_from_path(&self.paths().config_path())?;
         let scan_dirs: Vec<PathBuf> = match dir {
             Some(dir) => vec![dir.to_path_buf()],
-            None => config
-                .node
+            None => self
+                .node_settings()
                 .project_scan_dirs
                 .iter()
                 .map(PathBuf::from)
@@ -236,7 +290,7 @@ impl DaemonState {
         };
         if scan_dirs.is_empty() {
             return Err(NodeError::InvalidState(
-                "no scan directories configured (set node.project_scan_dirs in config.toml)"
+                "no scan directories configured (set project_scan_dirs in the node settings)"
                     .to_owned(),
             ));
         }
@@ -330,7 +384,7 @@ impl DaemonState {
     /// On success, updates the node's own `nodes` row (the list of available agents).
     pub async fn manage_agent(&self, action: &AgentAction) -> Result<String, NodeError> {
         let message = self.manage_agent_action(action).await?;
-        self.register_node().await?;
+        self.bump_state_revision().await?;
         Ok(message)
     }
 
@@ -343,28 +397,39 @@ impl DaemonState {
                 Ok("refreshed catalog".to_owned())
             }
             AgentAction::UpsertCustom { agent_id, config } => {
-                registry
-                    .upsert_custom(agent_id, config.clone())
-                    .map_err(agent_error)?;
+                if agent_id.trim().is_empty()
+                    || agent_id.contains(|ch: char| ch.is_whitespace() || ch == '/' || ch == '\\')
+                {
+                    return Err(NodeError::Agent(format!(
+                        "invalid custom agent id: {agent_id:?}"
+                    )));
+                }
+                if config.command.trim().is_empty() {
+                    return Err(NodeError::Agent(format!(
+                        "custom agent {agent_id} requires a non-empty command"
+                    )));
+                }
+                self.db().upsert_custom_agent(agent_id, config).await?;
+                self.refresh_agent_catalog().await?;
                 Ok(format!(
                     "saved custom agent {agent_id} ({})",
                     config.command
                 ))
             }
             AgentAction::RemoveCustom { agent_id } => {
-                let removed = registry.remove_custom(agent_id).map_err(agent_error)?;
+                let removed = self.db().delete_custom_agent(agent_id).await? > 0;
+                self.refresh_agent_catalog().await?;
                 Ok(if removed {
                     format!("removed custom agent {agent_id}")
                 } else {
-                    format!("custom agent {agent_id} is not defined in the UI store")
+                    format!("custom agent {agent_id} is not defined")
                 })
             }
             AgentAction::SetPackageEnabled { agent_id, enabled } => {
                 let id = registry.resolve_alias(agent_id);
                 if !enabled {
-                    registry
-                        .set_package_enabled(&id, false)
-                        .map_err(agent_error)?;
+                    self.db().set_package_agent_enabled(&id, false).await?;
+                    self.refresh_agent_catalog().await?;
                     return Ok(format!("disabled npx/uvx for {id}"));
                 }
                 let index = registry.index(false).await.map_err(agent_error)?;
@@ -376,9 +441,8 @@ impl DaemonState {
                         "{id} cannot run via npx/uvx on this node (npx/uvx not found in PATH, or no package distribution)"
                     ))
                 })?;
-                registry
-                    .set_package_enabled(&id, true)
-                    .map_err(agent_error)?;
+                self.db().set_package_agent_enabled(&id, true).await?;
+                self.refresh_agent_catalog().await?;
                 Ok(format!("enabled {id} via {runner}"))
             }
         }
@@ -461,7 +525,6 @@ impl DaemonState {
         expected_project_id: Option<&str>,
         branch: &str,
         base_branch: Option<String>,
-        new_path: Option<PathBuf>,
         source: &AuditSource,
     ) -> Result<WorktreeAddOutcome, NodeError> {
         let resolved = self.resolve_and_register_project(repo).await?;
@@ -478,33 +541,12 @@ impl DaemonState {
             )));
         }
 
-        let project_config = project::load_project_config(&resolved.local_path)
-            .await?
-            .unwrap_or_default();
-        let global_config =
-            fxg_protocol::config::GlobalConfig::load_from_path(&self.paths().config_path())?;
-        let dir_template = project_config
-            .worktree
-            .dir_template
-            .clone()
-            .unwrap_or_else(|| {
-                global_config
-                    .node
-                    .resolved_worktree_dir_template()
-                    .to_owned()
-            });
-        let base_branch = base_branch.or_else(|| project_config.worktree.base_branch.clone());
-
         let outcome = worktree::ensure_worktree(&worktree::WorktreeAddRequest {
             repo: &repo_root,
             project_id: &resolved.project_id,
             branch,
             base_branch: base_branch.as_deref(),
-            dir_template: &dir_template,
-            new_path: new_path.as_deref(),
             fxg_home: self.paths().fxg_home(),
-            copy_files: &project_config.worktree.copy_files,
-            post_create: &project_config.worktree.post_create,
         })
         .await?;
 
@@ -529,12 +571,7 @@ impl DaemonState {
         )
         .await;
 
-        Ok(WorktreeAddOutcome {
-            path: outcome.path,
-            branch: outcome.branch,
-            created: outcome.created,
-            hook_logs: outcome.hook_logs,
-        })
+        Ok(outcome)
     }
 
     /// Removes a worktree and updates the binding and audit log.
@@ -648,5 +685,206 @@ impl DaemonState {
             "worktree not found: {}{detail}",
             target.display()
         )))
+    }
+}
+
+// ----------------------------------------------------------------------
+// Typed settings snapshots and secrets
+// ----------------------------------------------------------------------
+
+use fxg_protocol::SecretId;
+use fxg_protocol::config::{GlobalConfig, process_env};
+use fxg_protocol::settings::{
+    ConfigSource, NodeBootstrapView, NodeSettingsSnapshot, SecretSummary, SourcedValue,
+    UpsertSecretRequest,
+};
+
+fn sourced_string(
+    current: String,
+    env_key: &str,
+    file_value: Option<String>,
+    config_key: &str,
+    cli_flag: &str,
+) -> SourcedValue<String> {
+    let env_value = process_env(env_key).filter(|value| value == &current);
+    if env_value.is_some() {
+        return SourcedValue::new(current, ConfigSource::Env, Some(env_key));
+    }
+    if file_value.as_deref() == Some(current.as_str()) {
+        return SourcedValue::new(current, ConfigSource::ConfigFile, Some(config_key));
+    }
+    if file_value.is_none() && process_env(env_key).is_none() && current == cli_flag {
+        // Caller passes the default value in `cli_flag` only for this comparison.
+        return SourcedValue::new(current, ConfigSource::Default, Option::<&str>::None);
+    }
+    SourcedValue::new(current, ConfigSource::Cli, Some(cli_flag))
+}
+
+fn sourced_option(
+    current: Option<String>,
+    env_key: &str,
+    file_value: Option<String>,
+    config_key: &str,
+    cli_flag: &str,
+) -> SourcedValue<Option<String>> {
+    if let Some(value) = current.clone() {
+        if process_env(env_key).as_deref() == Some(value.as_str()) {
+            return SourcedValue::new(Some(value), ConfigSource::Env, Some(env_key));
+        }
+        if file_value.as_deref() == Some(value.as_str()) {
+            return SourcedValue::new(Some(value), ConfigSource::ConfigFile, Some(config_key));
+        }
+        return SourcedValue::new(Some(value), ConfigSource::Cli, Some(cli_flag));
+    }
+    SourcedValue::new(None::<String>, ConfigSource::Default, Option::<&str>::None)
+}
+
+impl DaemonState {
+    /// Builds the typed settings snapshot exposed by `GET /api/v1/settings/node`.
+    pub fn node_settings_snapshot(&self) -> NodeSettingsSnapshot {
+        let config = match GlobalConfig::load_from_path(&self.paths().config_path()) {
+            Ok(config) => config,
+            Err(err) => {
+                tracing::warn!("failed to read config.toml for the settings view: {err}");
+                GlobalConfig::default()
+            }
+        };
+        let env = process_env;
+        let fxg_home_source = if env(fxg_protocol::config::ENV_FXG_HOME).is_some() {
+            ConfigSource::Env
+        } else {
+            ConfigSource::Default
+        };
+        let fxg_home = SourcedValue::new(
+            self.paths().fxg_home().to_string_lossy().into_owned(),
+            fxg_home_source.clone(),
+            (fxg_home_source == ConfigSource::Env)
+                .then(|| fxg_protocol::config::ENV_FXG_HOME.to_owned()),
+        );
+
+        let node_id = sourced_string(
+            self.config().node_id.clone(),
+            fxg_protocol::config::env_keys::NODE_ID,
+            config.node.node_id.clone(),
+            "node.node_id",
+            "",
+        );
+        let listen_addr = sourced_string(
+            self.config().listen_addr.clone(),
+            fxg_protocol::config::env_keys::NODE_LISTEN_ADDR,
+            config.node.listen_addr.clone(),
+            "node.listen_addr",
+            fxg_protocol::config::NodeBootstrapConfig::DEFAULT_LISTEN_ADDR,
+        );
+        let central_server_url = sourced_option(
+            self.config().central_server_url.clone(),
+            fxg_protocol::config::env_keys::CENTRAL_SERVER_URL,
+            config.node.central_server_url.clone(),
+            "node.central_server_url",
+            "--server-url",
+        );
+
+        let log = &self.config().log;
+        let log_level = sourced_string(
+            log.level.clone().unwrap_or_else(|| "info".to_owned()),
+            fxg_protocol::config::env_keys::LOG_LEVEL,
+            config.log.level.clone(),
+            "log.level",
+            "info",
+        );
+        let log_file = sourced_option(
+            log.file.clone().filter(|value| value != "-"),
+            fxg_protocol::config::env_keys::LOG_FILE,
+            config.log.file.clone(),
+            "log.file",
+            "--log-file",
+        );
+        let log_format = sourced_string(
+            log.format.clone().unwrap_or_else(|| "text".to_owned()),
+            fxg_protocol::config::env_keys::LOG_FORMAT,
+            config.log.format.clone(),
+            "log.format",
+            "text",
+        );
+        let log_no_color = SourcedValue::new(
+            log.no_color,
+            if log.no_color == config.log.no_color {
+                ConfigSource::ConfigFile
+            } else {
+                ConfigSource::Cli
+            },
+            Some("--no-color"),
+        );
+
+        NodeSettingsSnapshot {
+            bootstrap: NodeBootstrapView {
+                fxg_home,
+                node_id,
+                listen_addr,
+                central_server_url,
+                log_level,
+                log_file,
+                log_format,
+                log_no_color,
+            },
+            node: self.node_settings(),
+            agents: self.agent_settings(),
+        }
+    }
+
+    /// Lists secret metadata with `used_by` and `configured` filled in.
+    pub async fn node_secrets(&self) -> Result<Vec<SecretSummary>, NodeError> {
+        crate::secrets::list_secrets(
+            self.db(),
+            self.paths().fxg_home(),
+            crate::secrets::ROLE_NODE,
+        )
+        .await
+    }
+
+    /// Stores a node-owned secret (write-only).
+    pub async fn upsert_node_secret(
+        &self,
+        id: &SecretId,
+        request: &UpsertSecretRequest,
+    ) -> Result<Vec<SecretSummary>, NodeError> {
+        crate::secrets::upsert_secret(
+            self.db(),
+            self.paths().fxg_home(),
+            crate::secrets::ROLE_NODE,
+            id,
+            request,
+        )
+        .await
+    }
+
+    /// Deletes a node-owned secret after checking references.
+    pub async fn delete_node_secret(&self, id: &SecretId) -> Result<Vec<SecretSummary>, NodeError> {
+        crate::secrets::delete_secret(
+            self.db(),
+            self.paths().fxg_home(),
+            crate::secrets::ROLE_NODE,
+            id,
+        )
+        .await
+    }
+
+    /// Replaces a node-owned secret value with a fresh token.
+    pub async fn rotate_node_secret(&self, id: &SecretId) -> Result<Vec<SecretSummary>, NodeError> {
+        let existing = self
+            .db()
+            .secret(id)
+            .await?
+            .ok_or_else(|| NodeError::SecretMissing { id: id.clone() })?;
+        crate::secrets::write_secret(
+            self.paths().fxg_home(),
+            crate::secrets::ROLE_NODE,
+            id,
+            &crate::secrets::generate_secret_value(),
+        )?;
+        self.db()
+            .upsert_secret_metadata(id, &existing.name, &existing.kind)
+            .await?;
+        self.node_secrets().await
     }
 }

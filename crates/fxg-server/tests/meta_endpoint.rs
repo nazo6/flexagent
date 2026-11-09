@@ -19,8 +19,7 @@ async fn start_server() -> (tempfile::TempDir, Server) {
         listen_addr: "127.0.0.1:0".to_owned(),
         allowed_hosts: Vec::new(),
         allowed_origins: Vec::new(),
-        provisioners: Default::default(),
-        git_credentials: Default::default(),
+        log: Default::default(),
     })
     .await
     .expect("start server");

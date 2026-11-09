@@ -51,6 +51,7 @@ impl Fixture {
             project_id: PROJECT_ID.into(),
             name: "flexagent".to_owned(),
             canonical_git_url: Some("git@github.com:nazo6/flexagent.git".to_owned()),
+            identity: fxg_protocol::settings::ProjectIdentity::git_remote(),
         })
         .await
         .expect("upsert project");
@@ -1368,6 +1369,7 @@ async fn file_backed_db_persists_across_reopen() {
         project_id: PROJECT_ID.into(),
         name: "flexagent".to_owned(),
         canonical_git_url: None,
+        identity: fxg_protocol::settings::ProjectIdentity::local(),
     })
     .await
     .expect("upsert project");

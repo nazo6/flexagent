@@ -15,13 +15,14 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex as StdMutex};
+use std::sync::{Arc, Mutex as StdMutex, RwLock};
 use std::time::{Duration, Instant};
 
 use fxg_protocol::client_api::ProvisionerTestResponse;
 use fxg_protocol::common::{NodeLifecycleStatus, PromptInput, SessionStatus};
-use fxg_protocol::config::{DEFAULT_GIT_USERNAME, GitCredentialConfig, ProvisionerConfig};
+use fxg_protocol::config::DEFAULT_GIT_USERNAME;
 use fxg_protocol::node_server::{NodeToServerMsg, ServerToNodeMsg};
+use fxg_protocol::settings::{GitCredentialConfig, ProvisionerDefinition};
 use fxg_protocol::util::uuid_v7;
 use fxg_protocol::{CommandId, NodeId};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter};
@@ -60,8 +61,8 @@ struct Instance {
 
 struct ProvisionerInner {
     fxg_home: PathBuf,
-    configs: BTreeMap<String, ProvisionerConfig>,
-    git_credentials: BTreeMap<String, GitCredentialConfig>,
+    configs: RwLock<BTreeMap<String, ProvisionerDefinition>>,
+    git_credentials: RwLock<BTreeMap<String, GitCredentialConfig>>,
     instances: StdMutex<HashMap<String, Instance>>,
     drain_waiters: StdMutex<HashMap<String, oneshot::Sender<()>>>,
 }
@@ -80,8 +81,14 @@ impl std::fmt::Debug for ProvisionerManager {
             .lock()
             .map(|instances| instances.len())
             .unwrap_or(0);
+        let provisioners = self
+            .inner
+            .configs
+            .read()
+            .map(|configs| configs.len())
+            .unwrap_or(0);
         f.debug_struct("ProvisionerManager")
-            .field("provisioners", &self.inner.configs.len())
+            .field("provisioners", &provisioners)
             .field("instances", &instances)
             .finish()
     }
@@ -91,36 +98,65 @@ impl ProvisionerManager {
     /// Creates the manager from configuration.
     pub fn new(
         fxg_home: PathBuf,
-        configs: BTreeMap<String, ProvisionerConfig>,
+        configs: BTreeMap<String, ProvisionerDefinition>,
         git_credentials: BTreeMap<String, GitCredentialConfig>,
     ) -> Self {
         Self {
             inner: Arc::new(ProvisionerInner {
                 fxg_home,
-                configs,
-                git_credentials,
+                configs: RwLock::new(configs),
+                git_credentials: RwLock::new(git_credentials),
                 instances: StdMutex::new(HashMap::new()),
                 drain_waiters: StdMutex::new(HashMap::new()),
             }),
         }
     }
 
-    /// Configured provisioner definitions.
-    pub fn configs(&self) -> &BTreeMap<String, ProvisionerConfig> {
-        &self.inner.configs
+    /// Configured provisioner definitions (snapshot).
+    pub fn configs(&self) -> BTreeMap<String, ProvisionerDefinition> {
+        self.inner
+            .configs
+            .read()
+            .expect("provisioner configs lock poisoned")
+            .clone()
     }
 
     /// Fetches a configuration (unknown names yield `NOT_FOUND`).
-    pub fn config(&self, name: &str) -> Result<&ProvisionerConfig, ApiError> {
+    pub fn config(&self, name: &str) -> Result<ProvisionerDefinition, ApiError> {
         self.inner
             .configs
+            .read()
+            .expect("provisioner configs lock poisoned")
             .get(name)
+            .cloned()
             .ok_or_else(|| ApiError::not_found(format!("provisioner not found: {name}")))
     }
 
-    /// Git Credential Proxy configuration.
-    pub fn git_credentials(&self) -> &BTreeMap<String, GitCredentialConfig> {
-        &self.inner.git_credentials
+    /// Git Credential Proxy configuration (snapshot).
+    pub fn git_credentials(&self) -> BTreeMap<String, GitCredentialConfig> {
+        self.inner
+            .git_credentials
+            .read()
+            .expect("git credentials lock poisoned")
+            .clone()
+    }
+
+    /// Replaces the provisioner and Git credential sets after a settings update.
+    pub fn apply_settings(
+        &self,
+        configs: BTreeMap<String, ProvisionerDefinition>,
+        git_credentials: BTreeMap<String, GitCredentialConfig>,
+    ) {
+        *self
+            .inner
+            .configs
+            .write()
+            .expect("provisioner configs lock poisoned") = configs;
+        *self
+            .inner
+            .git_credentials
+            .write()
+            .expect("git credentials lock poisoned") = git_credentials;
     }
 
     /// `~/.flexagent` data directory.
@@ -244,7 +280,7 @@ pub async fn spawn_session(
     state: &ServerState,
     request: SpawnSessionRequest,
 ) -> Result<(), ApiError> {
-    let config = state.provisioners().config(&request.provisioner)?.clone();
+    let config = state.provisioners().config(&request.provisioner)?;
     let node_id = request.node_id.clone();
     let session_id = request.session_id.clone();
     let idle_timeout_secs = config.idle_timeout_secs.unwrap_or(900);
@@ -280,6 +316,20 @@ pub async fn spawn_session(
                 "no git credential configured for the project host; clone may fail"
             );
         }
+    }
+
+    // Inject the project bootstrap profile (server-owned `project_profiles`).
+    if let Ok(Some(profile)) = state
+        .db()
+        .project_profile(&fxg_protocol::ProjectId::from(request.project_id.as_str()))
+        .await
+        && let Ok(json) = serde_json::to_vec(&profile)
+    {
+        use base64::Engine as _;
+        env.push((
+            "FXG_PROJECT_PROFILE_B64".to_owned(),
+            base64::engine::general_purpose::STANDARD.encode(json),
+        ));
     }
 
     let pending = PendingStart {
@@ -359,7 +409,7 @@ pub async fn provisioner_test(
     state: &ServerState,
     name: &str,
 ) -> Result<ProvisionerTestResponse, ApiError> {
-    let config = state.provisioners().config(name)?.clone();
+    let config = state.provisioners().config(name)?;
     let node_id = format!("fxg-test-{}", &uuid_v7()[..8]);
 
     let spawn = SpawnRequest {
@@ -455,7 +505,7 @@ pub async fn provisioner_test(
 struct SpawnRequest {
     node_id: String,
     provisioner: String,
-    config: ProvisionerConfig,
+    config: ProvisionerDefinition,
     env: Vec<(String, String)>,
     mode: SpawnMode,
 }
@@ -952,7 +1002,7 @@ pub(crate) async fn resolve_git_token(
     let host = url_host(git_url)?;
     let credentials = state.provisioners().git_credentials();
     let config = credentials.get(&host).or_else(|| credentials.get("*"))?;
-    match resolve_credential(config).await {
+    match resolve_credential(config, state.options().fxg_home.as_path()).await {
         Ok(response) => Some(response),
         Err(err) => {
             tracing::warn!(host, "failed to resolve git credential: {err}");

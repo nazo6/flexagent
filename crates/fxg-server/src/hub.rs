@@ -156,6 +156,24 @@ enum PendingResponse {
         /// Message on failure
         error: Option<String>,
     },
+    /// Node settings snapshot result (`NodeSettingsResult`)
+    NodeSettings {
+        /// Snapshot on success
+        snapshot: Option<Box<fxg_protocol::settings::NodeSettingsSnapshot>>,
+        /// Structured error code on failure
+        code: Option<ErrorCode>,
+        /// Message on failure
+        error: Option<String>,
+    },
+    /// Secret metadata result (`SecretOpResult`)
+    SecretOp {
+        /// Secret metadata after the operation
+        secrets: Option<Vec<fxg_protocol::settings::SecretSummary>>,
+        /// Structured error code on failure
+        code: Option<ErrorCode>,
+        /// Message on failure
+        error: Option<String>,
+    },
     /// Failure such as a node disconnect
     Failed {
         /// Structured error code
@@ -686,6 +704,60 @@ impl NodeHub {
         }
     }
 
+    /// Relays a node settings read/update and returns the snapshot.
+    pub async fn node_settings(
+        &self,
+        node_id: &NodeId,
+        request_id: &str,
+        message: ServerToNodeMsg,
+    ) -> Result<fxg_protocol::settings::NodeSettingsSnapshot, ApiError> {
+        let response = self
+            .request(node_id, request_id, message, COMMAND_TIMEOUT)
+            .await?;
+        match response {
+            PendingResponse::NodeSettings {
+                snapshot,
+                code,
+                error,
+            } => match snapshot {
+                Some(snapshot) => Ok(*snapshot),
+                None => Err(ApiError::from_code(
+                    code.unwrap_or(ErrorCode::Internal),
+                    error.unwrap_or_else(|| "node settings request failed".to_owned()),
+                )),
+            },
+            PendingResponse::Failed { code, message } => Err(ApiError::from_code(code, message)),
+            _ => Err(ApiError::internal("unexpected node response kind")),
+        }
+    }
+
+    /// Relays a secret operation and returns the resulting metadata.
+    pub async fn secret_op(
+        &self,
+        node_id: &NodeId,
+        request_id: &str,
+        message: ServerToNodeMsg,
+    ) -> Result<Vec<fxg_protocol::settings::SecretSummary>, ApiError> {
+        let response = self
+            .request(node_id, request_id, message, COMMAND_TIMEOUT)
+            .await?;
+        match response {
+            PendingResponse::SecretOp {
+                secrets,
+                code,
+                error,
+            } => match secrets {
+                Some(secrets) => Ok(secrets),
+                None => Err(ApiError::from_code(
+                    code.unwrap_or(ErrorCode::Internal),
+                    error.unwrap_or_else(|| "secret operation failed".to_owned()),
+                )),
+            },
+            PendingResponse::Failed { code, message } => Err(ApiError::from_code(code, message)),
+            _ => Err(ApiError::internal("unexpected node response kind")),
+        }
+    }
+
     /// Common send-then-wait path.
     async fn request(
         &self,
@@ -918,6 +990,8 @@ async fn handle_node_connection(state: ServerState, token_owner: String, socket:
         is_ephemeral,
         installed_agents,
         projects,
+        projects_complete,
+        state_revision,
         sessions,
     } = hello
     else {
@@ -935,6 +1009,21 @@ async fn handle_node_connection(state: ServerState, token_owner: String, socket:
         return;
     }
 
+    // Stale reports (older than what the hub already applied) must not roll back
+    // project bindings or sessions.
+    let stored_revision = match state.db().node_state_revision(node_id.as_str()).await {
+        Ok(revision) => revision.unwrap_or(0),
+        Err(err) => {
+            tracing::warn!(
+                node_id = node_id.as_str(),
+                "failed to read node state revision: {err}"
+            );
+            0
+        }
+    };
+    let stale_report = state_revision < stored_revision;
+    let state_revision = state_revision.max(stored_revision);
+
     // 2. Register the node (a node may already have registered itself before the first Hello)
     let record = fxg_db::NodeRecord {
         node_id: node_id.as_str().to_owned(),
@@ -948,6 +1037,7 @@ async fn handle_node_connection(state: ServerState, token_owner: String, socket:
         lifecycle_status: fxg_protocol::common::NodeLifecycleStatus::Ready,
         idle_timeout_secs: None,
         is_online: true,
+        state_revision,
     };
     if let Err(err) = state.db().upsert_node(&record).await {
         tracing::warn!(
@@ -957,7 +1047,16 @@ async fn handle_node_connection(state: ServerState, token_owner: String, socket:
         fxg_protocol::discard_with!(sender.close().await, "close the node websocket");
         return;
     }
-    if let Err(err) = apply_project_reports(&state, &node_id, &projects).await {
+    if stale_report {
+        tracing::warn!(
+            node_id = node_id.as_str(),
+            state_revision,
+            stored_revision,
+            "ignoring stale NodeHello report"
+        );
+    } else if let Err(err) =
+        apply_project_reports(&state, &node_id, &projects, projects_complete, &sessions).await
+    {
         tracing::warn!(
             node_id = node_id.as_str(),
             "failed to apply project reports: {err}"
@@ -1063,6 +1162,8 @@ async fn handle_node_message_value(
             is_ephemeral,
             installed_agents,
             projects,
+            projects_complete,
+            state_revision,
             sessions,
         } => {
             // Not a reconnect but an in-flight resend (e.g. after a Worktree change)
@@ -1074,6 +1175,18 @@ async fn handle_node_message_value(
                 );
                 return;
             }
+            let stored_revision = match state.db().node_state_revision(node_id.as_str()).await {
+                Ok(revision) => revision.unwrap_or(0),
+                Err(err) => {
+                    tracing::warn!(
+                        node_id = node_id.as_str(),
+                        "failed to read node state revision: {err}"
+                    );
+                    0
+                }
+            };
+            let stale_report = state_revision < stored_revision;
+            let state_revision = state_revision.max(stored_revision);
             let record = fxg_db::NodeRecord {
                 node_id: node_id.as_str().to_owned(),
                 name,
@@ -1086,6 +1199,7 @@ async fn handle_node_message_value(
                 lifecycle_status: fxg_protocol::common::NodeLifecycleStatus::Ready,
                 idle_timeout_secs: None,
                 is_online: true,
+                state_revision,
             };
             if let Err(err) = state.db().upsert_node(&record).await {
                 tracing::warn!(
@@ -1093,7 +1207,16 @@ async fn handle_node_message_value(
                     "failed to update node from hello: {err}"
                 );
             }
-            if let Err(err) = apply_project_reports(state, node_id, &projects).await {
+            if stale_report {
+                tracing::warn!(
+                    node_id = node_id.as_str(),
+                    state_revision,
+                    stored_revision,
+                    "ignoring stale NodeHello report"
+                );
+            } else if let Err(err) =
+                apply_project_reports(state, node_id, &projects, projects_complete, &sessions).await
+            {
                 tracing::warn!(
                     node_id = node_id.as_str(),
                     "failed to apply project reports: {err}"
@@ -1296,6 +1419,42 @@ async fn handle_node_message_value(
                 )
                 .await;
         }
+        NodeToServerMsg::NodeSettingsResult {
+            request_id,
+            snapshot,
+            code,
+            error,
+        } => {
+            state
+                .hub()
+                .resolve(
+                    &request_id,
+                    PendingResponse::NodeSettings {
+                        snapshot,
+                        code,
+                        error,
+                    },
+                )
+                .await;
+        }
+        NodeToServerMsg::SecretOpResult {
+            request_id,
+            secrets,
+            code,
+            error,
+        } => {
+            state
+                .hub()
+                .resolve(
+                    &request_id,
+                    PendingResponse::SecretOp {
+                        secrets,
+                        code,
+                        error,
+                    },
+                )
+                .await;
+        }
         NodeToServerMsg::PtyOutput { pty_id, data_b64 } => {
             use base64::Engine as _;
             match base64::engine::general_purpose::STANDARD.decode(data_b64.as_bytes()) {
@@ -1383,7 +1542,10 @@ async fn apply_project_reports(
     state: &ServerState,
     node_id: &NodeId,
     projects: &[fxg_protocol::common::NodeProjectReport],
+    projects_complete: bool,
+    sessions: &[fxg_protocol::node_server::SessionSyncState],
 ) -> Result<(), fxg_db::DbError> {
+    let mut assignments: Vec<(String, String)> = Vec::new();
     for project in projects {
         state
             .db()
@@ -1391,6 +1553,7 @@ async fn apply_project_reports(
                 project_id: project.project_id.to_string(),
                 name: project.name.clone(),
                 canonical_git_url: project.canonical_git_url.clone(),
+                identity: project.identity.clone(),
             })
             .await?;
         for binding in &project.bindings {
@@ -1405,7 +1568,32 @@ async fn apply_project_reports(
                     git_branch: binding.git_branch.clone(),
                 })
                 .await?;
+            assignments.push((binding.local_path.clone(), project.project_id.to_string()));
         }
+    }
+
+    // Sessions follow the current binding / explicit report of their node.
+    state
+        .db()
+        .reassign_sessions_project(node_id.as_str(), &assignments)
+        .await?;
+    for session in sessions {
+        state
+            .db()
+            .reassign_session_project(session.session_id.as_str(), session.project_id.as_str())
+            .await?;
+    }
+
+    if projects_complete {
+        let keep: Vec<String> = assignments
+            .into_iter()
+            .map(|(local_path, _)| local_path)
+            .collect();
+        state
+            .db()
+            .prune_node_project_bindings(node_id.as_str(), &keep)
+            .await?;
+        state.db().delete_orphan_projects().await?;
     }
     Ok(())
 }

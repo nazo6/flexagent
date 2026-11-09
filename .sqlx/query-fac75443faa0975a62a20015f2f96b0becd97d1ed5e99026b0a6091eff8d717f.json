@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        INSERT INTO node_settings\n            (id, name, allow_remote_pty, project_scan_dirs_json, tray, revision, updated_at)\n        VALUES (1, ?, 0, '[]', NULL, 1, ?)\n        ON CONFLICT(id) DO NOTHING\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "fac75443faa0975a62a20015f2f96b0becd97d1ed5e99026b0a6091eff8d717f"
+}

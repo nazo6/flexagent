@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            INSERT INTO git_credentials\n                (host, provider, username, token_env, secret_id, updated_at)\n            VALUES (?, ?, ?, ?, ?, ?)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 6
+    },
+    "nullable": []
+  },
+  "hash": "284b3fbe58ad473b4bbadded387f7fd479d9a7d81274aa70d5e94cbebbfd08a3"
+}

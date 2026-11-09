@@ -12,16 +12,16 @@
 //!   existing install on `PATH` → `npx` / `uvx`.
 //!   fxg itself never downloads or extracts binary archives
 //!   (delegated to external package managers / the system PATH / custom definitions).
-//! - Custom definitions are resolved by merging `[agents.custom.<id>]` from
-//!   `config.toml` with `~/.flexagent/custom_agents.json` managed by the UI
-//!   (the file wins on conflicts).
+//! - Custom definitions and package enablement are owned by `node.db`; the
+//!   registry only holds an in-memory snapshot applied by the daemon.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
+use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
-use anyhow::{Context, anyhow, bail};
-use fxg_protocol::config::{AgentsConfig, CustomAgentConfig};
+use anyhow::{Context, anyhow};
+use fxg_protocol::settings::{AgentSettings, CustomAgentConfig};
 use serde::{Deserialize, Serialize};
 
 use crate::driver::{AgentLaunchSpec, DriverKind};
@@ -29,12 +29,37 @@ use crate::driver::{AgentLaunchSpec, DriverKind};
 /// Cache file name (`~/.flexagent/cache/registry.json`).
 pub const REGISTRY_CACHE_FILE: &str = "registry.json";
 
-/// UI-managed custom agent definition file name (`~/.flexagent/custom_agents.json`).
-pub const CUSTOM_AGENTS_FILE: &str = "custom_agents.json";
+/// In-memory catalog state owned by `node.db`.
+#[derive(Debug, Clone, Default)]
+pub struct AgentCatalogData {
+    /// Registry URL (`None` = built-in default)
+    pub registry_url: Option<String>,
+    /// Registry cache TTL in seconds (`None` = built-in default)
+    pub cache_ttl_secs: Option<u64>,
+    /// Effective aliases (built-ins merged with the configured ones)
+    pub aliases: BTreeMap<String, String>,
+    /// Custom agent definitions
+    pub custom: BTreeMap<String, CustomAgentConfig>,
+    /// Agent IDs enabled through `npx` / `uvx`
+    pub enabled_packages: BTreeSet<String>,
+}
 
-/// File name for agent IDs with `npx` / `uvx` distribution enabled
-/// (`~/.flexagent/enabled_package_agents.json`).
-pub const ENABLED_PACKAGES_FILE: &str = "enabled_package_agents.json";
+impl AgentCatalogData {
+    /// Builds the catalog from the persisted settings.
+    pub fn from_settings(
+        settings: &AgentSettings,
+        custom: BTreeMap<String, CustomAgentConfig>,
+        enabled_packages: Vec<String>,
+    ) -> Self {
+        Self {
+            registry_url: settings.registry_url.clone(),
+            cache_ttl_secs: settings.registry_cache_ttl_secs,
+            aliases: settings.resolved_aliases(),
+            custom,
+            enabled_packages: enabled_packages.into_iter().collect(),
+        }
+    }
+}
 
 /// `agents[].distribution`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -241,10 +266,7 @@ fn default_preset_lookup(preset: &AgentPreset) -> Option<PathBuf> {
 #[derive(Debug, Clone)]
 pub struct AcpRegistry {
     home: PathBuf,
-    registry_url: String,
-    cache_ttl: Duration,
-    custom: BTreeMap<String, CustomAgentConfig>,
-    aliases: BTreeMap<String, String>,
+    catalog: Arc<RwLock<AgentCatalogData>>,
     /// Preset executable lookup (injectable for tests)
     preset_lookup: fn(&AgentPreset) -> Option<PathBuf>,
     http: reqwest::Client,
@@ -299,8 +321,13 @@ impl AcpRegistry {
         }
     }
 
-    /// Creates from `~/.flexagent` and the `[agents]` configuration.
-    pub fn new(home: impl Into<PathBuf>, config: &AgentsConfig) -> Self {
+    /// Creates from `~/.flexagent` and the persisted agent catalog.
+    pub fn new(
+        home: impl Into<PathBuf>,
+        settings: &AgentSettings,
+        custom: BTreeMap<String, CustomAgentConfig>,
+        enabled_packages: Vec<String>,
+    ) -> Self {
         let http = reqwest::Client::builder()
             .user_agent(concat!("fxg/", env!("CARGO_PKG_VERSION")))
             .timeout(Duration::from_secs(300))
@@ -308,20 +335,29 @@ impl AcpRegistry {
             .unwrap_or_else(|_| reqwest::Client::new());
         Self {
             home: home.into(),
-            registry_url: config
-                .registry_url
-                .clone()
-                .unwrap_or_else(|| AgentsConfig::DEFAULT_REGISTRY_URL.to_owned()),
-            cache_ttl: Duration::from_secs(
-                config
-                    .registry_cache_ttl_secs
-                    .unwrap_or(AgentsConfig::DEFAULT_REGISTRY_CACHE_TTL_SECS),
-            ),
-            custom: config.custom.clone(),
-            aliases: config.resolved_aliases(),
+            catalog: Arc::new(RwLock::new(AgentCatalogData::from_settings(
+                settings,
+                custom,
+                enabled_packages,
+            ))),
             preset_lookup: default_preset_lookup,
             http,
         }
+    }
+
+    /// Replaces the in-memory catalog after a DB update.
+    pub fn apply_catalog(
+        &self,
+        settings: &AgentSettings,
+        custom: BTreeMap<String, CustomAgentConfig>,
+        enabled_packages: Vec<String>,
+    ) {
+        let mut catalog = self.catalog.write().expect("agent catalog lock poisoned");
+        *catalog = AgentCatalogData::from_settings(settings, custom, enabled_packages);
+    }
+
+    fn catalog(&self) -> std::sync::RwLockReadGuard<'_, AgentCatalogData> {
+        self.catalog.read().expect("agent catalog lock poisoned")
     }
 
     /// Cache file path (`~/.flexagent/cache/registry.json`).
@@ -329,128 +365,14 @@ impl AcpRegistry {
         self.home.join("cache").join(REGISTRY_CACHE_FILE)
     }
 
-    /// UI-managed custom agent definition file (`~/.flexagent/custom_agents.json`).
-    pub fn custom_store_path(&self) -> PathBuf {
-        self.home.join(CUSTOM_AGENTS_FILE)
-    }
-
-    /// Returns custom definitions merged from `config.toml` and the UI-managed file
-    /// (the UI-managed file wins on name conflicts).
+    /// Returns custom agent definitions from the DB catalog.
     pub fn custom_agents(&self) -> BTreeMap<String, CustomAgentConfig> {
-        let mut agents = self.custom.clone();
-        agents.extend(self.read_custom_store());
-        agents
-    }
-
-    /// Reads the UI-managed file (empty if missing or corrupt).
-    fn read_custom_store(&self) -> BTreeMap<String, CustomAgentConfig> {
-        let path = self.custom_store_path();
-        let Ok(text) = std::fs::read_to_string(&path) else {
-            return BTreeMap::new();
-        };
-        match serde_json::from_str(&text) {
-            Ok(agents) => agents,
-            Err(err) => {
-                tracing::warn!(path = %path.display(), "failed to parse custom agents: {err}");
-                BTreeMap::new()
-            }
-        }
-    }
-
-    /// Writes the UI-managed file (atomic replacement via a temporary file).
-    fn write_custom_store(
-        &self,
-        agents: &BTreeMap<String, CustomAgentConfig>,
-    ) -> anyhow::Result<()> {
-        let path = self.custom_store_path();
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)
-                .with_context(|| format!("failed to create {}", parent.display()))?;
-        }
-        let tmp = path.with_extension("json.tmp");
-        std::fs::write(&tmp, serde_json::to_string_pretty(agents)?)
-            .with_context(|| format!("failed to write {}", tmp.display()))?;
-        std::fs::rename(&tmp, &path)
-            .with_context(|| format!("failed to replace {}", path.display()))?;
-        Ok(())
-    }
-
-    /// Creates or updates a custom agent definition.
-    pub fn upsert_custom(&self, id: &str, config: CustomAgentConfig) -> anyhow::Result<()> {
-        let id = Self::validate_custom_id(id)?;
-        if config.command.trim().is_empty() {
-            bail!("custom agent `{id}` requires a non-empty command");
-        }
-        let mut agents = self.read_custom_store();
-        agents.insert(id.to_owned(), config);
-        self.write_custom_store(&agents)
-    }
-
-    /// Deletes a UI-managed custom definition (definitions in `config.toml` remain).
-    pub fn remove_custom(&self, id: &str) -> anyhow::Result<bool> {
-        let mut agents = self.read_custom_store();
-        let removed = agents.remove(id).is_some();
-        if removed {
-            self.write_custom_store(&agents)?;
-        }
-        Ok(removed)
-    }
-
-    /// Validates that a string can be used as a custom ID.
-    fn validate_custom_id(id: &str) -> anyhow::Result<&str> {
-        let id = id.trim();
-        if id.is_empty() || id.contains(|c: char| c.is_whitespace() || c == '/' || c == '\\') {
-            bail!("invalid custom agent id: {id:?}");
-        }
-        Ok(id)
-    }
-
-    /// `npx` / `uvx` enablement file (`~/.flexagent/enabled_package_agents.json`).
-    pub fn enabled_packages_path(&self) -> PathBuf {
-        self.home.join(ENABLED_PACKAGES_FILE)
+        self.catalog().custom.clone()
     }
 
     /// Agent IDs enabled for use via `npx` / `uvx` distribution.
-    ///
-    /// `npx` / `uvx` have no binary of their own and are fetched at run time, so they
-    /// are excluded by default and only explicitly enabled agents are candidates.
     pub fn enabled_package_agents(&self) -> BTreeSet<String> {
-        let path = self.enabled_packages_path();
-        let Ok(text) = std::fs::read_to_string(&path) else {
-            return BTreeSet::new();
-        };
-        match serde_json::from_str::<Vec<String>>(&text) {
-            Ok(ids) => ids.into_iter().collect(),
-            Err(err) => {
-                tracing::warn!(path = %path.display(), "failed to parse enabled package agents: {err}");
-                BTreeSet::new()
-            }
-        }
-    }
-
-    /// Enables or disables use via `npx` / `uvx` distribution.
-    pub fn set_package_enabled(&self, id: &str, enabled: bool) -> anyhow::Result<()> {
-        let mut ids = self.enabled_package_agents();
-        let changed = if enabled {
-            ids.insert(id.to_owned())
-        } else {
-            ids.remove(id)
-        };
-        if !changed {
-            return Ok(());
-        }
-        let path = self.enabled_packages_path();
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)
-                .with_context(|| format!("failed to create {}", parent.display()))?;
-        }
-        let tmp = path.with_extension("json.tmp");
-        let values: Vec<&String> = ids.iter().collect();
-        std::fs::write(&tmp, serde_json::to_string_pretty(&values)?)
-            .with_context(|| format!("failed to write {}", tmp.display()))?;
-        std::fs::rename(&tmp, &path)
-            .with_context(|| format!("failed to replace {}", path.display()))?;
-        Ok(())
+        self.catalog().enabled_packages.clone()
     }
 
     /// Runner that can launch the `npx` / `uvx` distribution (`None` if neither exists).
@@ -475,7 +397,8 @@ impl AcpRegistry {
 
     /// Resolves an agent name (alias / custom name) to the real agent ID.
     pub fn resolve_alias(&self, name: &str) -> String {
-        self.aliases
+        self.catalog()
+            .aliases
             .get(name)
             .cloned()
             .unwrap_or_else(|| name.to_owned())
@@ -511,10 +434,16 @@ impl AcpRegistry {
 
     /// Fetches the registry (bypassing the cache).
     pub async fn fetch(&self) -> anyhow::Result<RegistryIndex> {
-        tracing::debug!(url = %self.registry_url, "fetching acp registry");
+        let registry_url = self
+            .catalog()
+            .registry_url
+            .clone()
+            .filter(|url| !url.trim().is_empty())
+            .unwrap_or_else(|| AgentSettings::DEFAULT_REGISTRY_URL.to_owned());
+        tracing::debug!(url = %registry_url, "fetching acp registry");
         let response = self
             .http
-            .get(&self.registry_url)
+            .get(&registry_url)
             .send()
             .await
             .context("failed to fetch ACP registry")?
@@ -563,7 +492,11 @@ impl AcpRegistry {
                     std::time::Duration::ZERO
                 }
             };
-            if age > self.cache_ttl {
+            let ttl_secs = self
+                .catalog()
+                .cache_ttl_secs
+                .unwrap_or(AgentSettings::DEFAULT_REGISTRY_CACHE_TTL_SECS);
+            if age > Duration::from_secs(ttl_secs) {
                 return None;
             }
         }
@@ -711,17 +644,35 @@ impl AcpRegistry {
         if let Some(custom) = self.custom_agents().remove(&id) {
             let mut args = custom.args.clone();
             args.extend(extra_args.iter().cloned());
+            let mut env: Vec<(String, String)> = custom
+                .env
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect();
+            // Resolve `env_secrets` from ~/.flexagent/secrets/node/<id>. A missing
+            // value aborts the launch (never start with an empty token).
+            for (key, secret_id) in &custom.env_secrets {
+                let path = self
+                    .home
+                    .join("secrets")
+                    .join("node")
+                    .join(secret_id.as_str());
+                let value = std::fs::read_to_string(&path).map_err(|err| {
+                    anyhow!(
+                        "secret {} referenced by {key} is missing ({}): {err}",
+                        secret_id.as_str(),
+                        path.display()
+                    )
+                })?;
+                env.push((key.clone(), value.trim_end_matches(['\r', '\n']).to_owned()));
+            }
             return Ok(AgentLaunchSpec {
                 agent_id: id.clone(),
                 display_name: custom.name.clone().unwrap_or_else(|| id.clone()),
                 driver_kind: DriverKind::Acp,
                 program: PathBuf::from(&custom.command),
                 args,
-                env: custom
-                    .env
-                    .iter()
-                    .map(|(k, v)| (k.clone(), v.clone()))
-                    .collect(),
+                env,
             });
         }
 
@@ -860,25 +811,32 @@ mod tests {
     }
     "#;
 
-    fn config() -> AgentsConfig {
-        let mut custom = BTreeMap::new();
-        custom.insert(
+    fn settings() -> AgentSettings {
+        AgentSettings {
+            default_agent: None,
+            registry_url: None,
+            registry_cache_ttl_secs: None,
+            aliases: BTreeMap::new(),
+            revision: 1,
+            updated_at: 0,
+        }
+    }
+
+    fn custom_agents() -> BTreeMap<String, CustomAgentConfig> {
+        BTreeMap::from([(
             "my-agent".to_owned(),
             CustomAgentConfig {
                 name: Some("My Agent".to_owned()),
                 command: "my-agent".to_owned(),
                 args: vec!["--flag".to_owned()],
                 env: BTreeMap::from([("KEY".to_owned(), "value".to_owned())]),
+                env_secrets: BTreeMap::new(),
             },
-        );
-        AgentsConfig {
-            custom,
-            ..AgentsConfig::default()
-        }
+        )])
     }
 
     fn registry(dir: &Path) -> AcpRegistry {
-        let mut registry = AcpRegistry::new(dir, &config());
+        let mut registry = AcpRegistry::new(dir, &settings(), custom_agents(), Vec::new());
         // Keep tests independent of the host's PATH.
         registry.preset_lookup = |_| None;
         registry
@@ -995,70 +953,58 @@ mod tests {
         assert!(!demo.is_available());
     }
 
-    #[test]
-    fn custom_store_roundtrip() {
+    #[tokio::test]
+    async fn custom_agent_env_secrets_are_resolved_from_the_store() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let registry = registry(dir.path());
-        let config = CustomAgentConfig {
-            name: Some("Store Agent".to_owned()),
-            command: "node".to_owned(),
-            args: vec!["agent.js".to_owned()],
-            env: BTreeMap::new(),
-        };
-        registry
-            .upsert_custom("store-agent", config)
-            .expect("upsert custom");
+        std::fs::create_dir_all(dir.path().join("secrets/node")).expect("mkdir");
+        std::fs::write(dir.path().join("secrets/node/key-1"), "secret-value\n").expect("write");
+        let custom = BTreeMap::from([
+            (
+                "secret-agent".to_owned(),
+                CustomAgentConfig {
+                    name: Some("Secret Agent".to_owned()),
+                    command: "node".to_owned(),
+                    args: Vec::new(),
+                    env: BTreeMap::from([("PLAIN".to_owned(), "value".to_owned())]),
+                    env_secrets: BTreeMap::from([(
+                        "API_KEY".to_owned(),
+                        fxg_protocol::SecretId::new("key-1"),
+                    )]),
+                },
+            ),
+            (
+                "missing-secret-agent".to_owned(),
+                CustomAgentConfig {
+                    command: "node".to_owned(),
+                    env_secrets: BTreeMap::from([(
+                        "API_KEY".to_owned(),
+                        fxg_protocol::SecretId::new("missing"),
+                    )]),
+                    ..Default::default()
+                },
+            ),
+        ]);
+        let registry = AcpRegistry::new(dir.path(), &settings(), custom, Vec::new());
+        let index = RegistryIndex::default();
+        let spec = registry
+            .launch_spec("secret-agent", &index, &[])
+            .await
+            .expect("spec");
+        assert!(spec.env.contains(&("PLAIN".to_owned(), "value".to_owned())));
+        assert!(
+            spec.env
+                .contains(&("API_KEY".to_owned(), "secret-value".to_owned()))
+        );
 
-        let index: RegistryIndex = serde_json::from_str(FIXTURE).expect("fixture");
-        let spec = tokio::runtime::Runtime::new()
-            .unwrap()
-            .block_on(registry.launch_spec("store-agent", &index, &[]))
-            .expect("custom spec");
-        assert_eq!(spec.display_name, "Store Agent");
-        assert_eq!(spec.program, PathBuf::from("node"));
-        assert_eq!(spec.args, vec!["agent.js"]);
-
-        assert!(registry.remove_custom("store-agent").expect("remove"));
-        let err = tokio::runtime::Runtime::new()
-            .unwrap()
-            .block_on(registry.launch_spec("store-agent", &index, &[]))
-            .expect_err("removed custom must fail");
-        assert!(err.to_string().contains("unknown agent"));
-    }
-
-    #[test]
-    fn custom_store_rejects_invalid_id() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let registry = registry(dir.path());
-        let config = CustomAgentConfig {
-            command: "node".to_owned(),
-            ..CustomAgentConfig::default()
-        };
-        assert!(registry.upsert_custom("bad id", config.clone()).is_err());
-        assert!(registry.upsert_custom("", config).is_err());
-    }
-
-    #[test]
-    fn package_enablement_roundtrip() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let registry = registry(dir.path());
-        assert!(registry.enabled_package_agents().is_empty());
-
-        registry
-            .set_package_enabled("demo-npx", true)
-            .expect("enable");
-        assert!(registry.enabled_package_agents().contains("demo-npx"));
-
-        // Re-setting the same value is a no-op and does not break anything
-        registry
-            .set_package_enabled("demo-npx", true)
-            .expect("idempotent");
-        assert_eq!(registry.enabled_package_agents().len(), 1);
-
-        registry
-            .set_package_enabled("demo-npx", false)
-            .expect("disable");
-        assert!(registry.enabled_package_agents().is_empty());
+        // A missing secret must abort the launch instead of starting with an empty value.
+        let err = registry
+            .launch_spec("missing-secret-agent", &index, &[])
+            .await
+            .expect_err("missing secret");
+        assert!(
+            err.to_string().contains("is missing"),
+            "unexpected error: {err}"
+        );
     }
 
     #[test]
@@ -1070,7 +1016,10 @@ mod tests {
             .unwrap()
             .block_on(registry.launch_spec("missing", &index, &[]))
             .expect_err("must fail");
-        assert!(err.to_string().contains("unknown agent"));
+        assert!(
+            err.to_string().contains("unknown agent"),
+            "unexpected error: {err}"
+        );
     }
 
     #[test]
@@ -1104,7 +1053,7 @@ mod tests {
     #[test]
     fn resolves_preset_alias_to_installed_cli() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let mut registry = AcpRegistry::new(dir.path(), &config());
+        let mut registry = AcpRegistry::new(dir.path(), &settings(), custom_agents(), Vec::new());
         registry.preset_lookup =
             |preset| (preset.id == "agy").then(|| PathBuf::from("/fake/bin/agy"));
         let index: RegistryIndex = serde_json::from_str(FIXTURE).expect("fixture");
@@ -1121,7 +1070,7 @@ mod tests {
     #[test]
     fn lists_installed_presets_without_registry_entry() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let mut registry = AcpRegistry::new(dir.path(), &config());
+        let mut registry = AcpRegistry::new(dir.path(), &settings(), custom_agents(), Vec::new());
         registry.preset_lookup =
             |preset| (preset.id == "agy").then(|| PathBuf::from("/fake/bin/agy"));
         let index: RegistryIndex = serde_json::from_str(FIXTURE).expect("fixture");

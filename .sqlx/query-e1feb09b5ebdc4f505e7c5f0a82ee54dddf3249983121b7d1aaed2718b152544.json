@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        UPDATE nodes\n           SET state_revision = state_revision + 1\n         WHERE node_id = ?\n        RETURNING state_revision\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "state_revision",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "nodes",
+            "name": "state_revision"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "e1feb09b5ebdc4f505e7c5f0a82ee54dddf3249983121b7d1aaed2718b152544"
+}

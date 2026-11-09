@@ -199,30 +199,36 @@ async fn connect_once(
 
 /// Builds `NodeHello` (node info, projects, and session sync state).
 pub(crate) async fn build_hello(state: &DaemonState) -> NodeToServerMsg {
-    let projects = match state.list_projects_with_path_state().await {
-        Ok(projects) => projects
-            .into_iter()
-            .map(|project| fxg_protocol::common::NodeProjectReport {
-                project_id: project.project_id.clone(),
-                name: project.name,
-                canonical_git_url: project.canonical_git_url,
-                bindings: project
-                    .bindings
-                    .into_iter()
-                    .filter(|binding| binding.node_id.as_str() == state.node_id())
-                    .map(|binding| fxg_protocol::common::ProjectNodeBinding {
-                        local_path: binding.local_path,
-                        is_worktree: binding.is_worktree,
-                        path_exists: binding.path_exists,
-                        git_branch: binding.git_branch,
-                        last_used_at: binding.last_used_at,
-                    })
-                    .collect(),
-            })
-            .collect(),
+    // `projects_complete = false` prevents the hub from pruning bindings when the
+    // enumeration failed halfway (an empty list must not mean "delete everything").
+    let (projects, projects_complete) = match state.list_projects_with_path_state().await {
+        Ok(projects) => (
+            projects
+                .into_iter()
+                .map(|project| fxg_protocol::common::NodeProjectReport {
+                    project_id: project.project_id.clone(),
+                    name: project.name,
+                    canonical_git_url: project.canonical_git_url,
+                    identity: project.identity,
+                    bindings: project
+                        .bindings
+                        .into_iter()
+                        .filter(|binding| binding.node_id.as_str() == state.node_id())
+                        .map(|binding| fxg_protocol::common::ProjectNodeBinding {
+                            local_path: binding.local_path,
+                            is_worktree: binding.is_worktree,
+                            path_exists: binding.path_exists,
+                            git_branch: binding.git_branch,
+                            last_used_at: binding.last_used_at,
+                        })
+                        .collect(),
+                })
+                .collect(),
+            true,
+        ),
         Err(err) => {
             tracing::warn!("failed to list projects for NodeHello: {err}");
-            Vec::new()
+            (Vec::new(), false)
         }
     };
 
@@ -239,7 +245,8 @@ pub(crate) async fn build_hello(state: &DaemonState) -> NodeToServerMsg {
         Ok(sessions) => sessions
             .into_iter()
             .map(|session| SessionSyncState {
-                session_id: session.session_id,
+                session_id: session.session_id.clone(),
+                project_id: session.project_id,
                 last_node_seq: session.last_node_seq,
             })
             .collect(),
@@ -251,13 +258,15 @@ pub(crate) async fn build_hello(state: &DaemonState) -> NodeToServerMsg {
 
     NodeToServerMsg::NodeHello {
         node_id: state.node_id().into(),
-        name: state.config().node_name.clone(),
+        name: state.node_settings().name,
         os: std::env::consts::OS.to_owned(),
         arch: std::env::consts::ARCH.to_owned(),
         version: VERSION.to_owned(),
         is_ephemeral: state.config().ephemeral,
         installed_agents: state.installed_agents().await,
         projects,
+        projects_complete,
+        state_revision: state.state_revision().await.unwrap_or(0),
         sessions,
     }
 }
@@ -644,6 +653,109 @@ pub(crate) async fn handle_server_message(
                 "send a message to a channel that may be closed"
             );
         }
+        ServerToNodeMsg::GetNodeSettings { request_id } => {
+            send_node_settings_result(out, request_id, Ok(state.node_settings_snapshot())).await;
+        }
+        ServerToNodeMsg::UpdateNodeSettings {
+            request_id,
+            request,
+        } => {
+            let result = state.update_node_settings(&request).await.map(|_| ());
+            if result.is_ok() {
+                state
+                    .record_audit(
+                        fxg_db::audit::actions::SETTINGS_UPDATE,
+                        &AuditSource::remote(state.node_id()),
+                        None,
+                        serde_json::json!({ "section": "node" }),
+                    )
+                    .await;
+            }
+            match result {
+                Ok(()) => {
+                    send_node_settings_result(out, request_id, Ok(state.node_settings_snapshot()))
+                        .await
+                }
+                Err(err) => send_node_settings_result(out, request_id, Err(err)).await,
+            }
+        }
+        ServerToNodeMsg::UpdateAgentSettings {
+            request_id,
+            request,
+        } => {
+            let result = state.update_agent_settings(&request).await.map(|_| ());
+            if result.is_ok() {
+                state
+                    .record_audit(
+                        fxg_db::audit::actions::SETTINGS_UPDATE,
+                        &AuditSource::remote(state.node_id()),
+                        None,
+                        serde_json::json!({ "section": "agents" }),
+                    )
+                    .await;
+            }
+            match result {
+                Ok(()) => {
+                    send_node_settings_result(out, request_id, Ok(state.node_settings_snapshot()))
+                        .await
+                }
+                Err(err) => send_node_settings_result(out, request_id, Err(err)).await,
+            }
+        }
+        ServerToNodeMsg::GetSecrets { request_id } => {
+            let result = state.node_secrets().await;
+            send_secret_op_result(out, request_id, result).await;
+        }
+        ServerToNodeMsg::UpsertSecret {
+            request_id,
+            id,
+            request,
+        } => {
+            let result = state.upsert_node_secret(&id, &request).await;
+            if result.is_ok() {
+                state
+                    .record_audit(
+                        fxg_db::audit::actions::SECRET_MANAGE,
+                        &AuditSource::remote(state.node_id()),
+                        None,
+                        serde_json::json!({
+                            "action": "upsert",
+                            "secret_id": id.as_str(),
+                            "kind": request.kind.as_str(),
+                        }),
+                    )
+                    .await;
+            }
+            send_secret_op_result(out, request_id, result).await;
+        }
+        ServerToNodeMsg::DeleteSecret { request_id, id } => {
+            let result = state.delete_node_secret(&id).await;
+            if result.is_ok() {
+                state
+                    .record_audit(
+                        fxg_db::audit::actions::SECRET_MANAGE,
+                        &AuditSource::remote(state.node_id()),
+                        None,
+                        serde_json::json!({ "action": "delete", "secret_id": id.as_str() }),
+                    )
+                    .await;
+            }
+            send_secret_op_result(out, request_id, result).await;
+        }
+        ServerToNodeMsg::RotateSecret { request_id, id } => {
+            let result = state.rotate_node_secret(&id).await;
+            if result.is_ok() {
+                state
+                    .record_audit(
+                        fxg_db::audit::actions::SECRET_MANAGE,
+                        &AuditSource::remote(state.node_id()),
+                        None,
+                        serde_json::json!({ "action": "rotate", "secret_id": id.as_str() }),
+                    )
+                    .await;
+            }
+            send_secret_op_result(out, request_id, result).await;
+        }
         ServerToNodeMsg::PtySpawn {
             pty_id,
             session_id,
@@ -729,7 +841,6 @@ pub(crate) async fn handle_server_message(
                 WorktreeAction::Add {
                     branch,
                     base_branch,
-                    new_path,
                 } => match state.project_main_repo(project_id.as_str()).await {
                     Ok(repo) => {
                         match state
@@ -738,7 +849,6 @@ pub(crate) async fn handle_server_message(
                                 Some(project_id.as_str()),
                                 &branch,
                                 base_branch,
-                                new_path.map(std::path::PathBuf::from),
                                 &source,
                             )
                             .await
@@ -1017,6 +1127,58 @@ pub(crate) async fn handle_server_message(
     }
 }
 
+/// Sends a `NodeSettingsResult` for a settings request.
+async fn send_node_settings_result(
+    out: &mpsc::Sender<NodeToServerMsg>,
+    request_id: String,
+    result: Result<fxg_protocol::settings::NodeSettingsSnapshot, NodeError>,
+) {
+    let message = match result {
+        Ok(snapshot) => NodeToServerMsg::NodeSettingsResult {
+            request_id,
+            snapshot: Some(Box::new(snapshot)),
+            code: None,
+            error: None,
+        },
+        Err(err) => NodeToServerMsg::NodeSettingsResult {
+            request_id,
+            snapshot: None,
+            code: Some(err.error_code()),
+            error: Some(err.to_string()),
+        },
+    };
+    fxg_protocol::discard_with!(
+        out.send(message).await,
+        "send a message to a channel that may be closed"
+    );
+}
+
+/// Sends a `SecretOpResult` for a secret request.
+async fn send_secret_op_result(
+    out: &mpsc::Sender<NodeToServerMsg>,
+    request_id: String,
+    result: Result<Vec<fxg_protocol::settings::SecretSummary>, NodeError>,
+) {
+    let message = match result {
+        Ok(secrets) => NodeToServerMsg::SecretOpResult {
+            request_id,
+            secrets: Some(secrets),
+            code: None,
+            error: None,
+        },
+        Err(err) => NodeToServerMsg::SecretOpResult {
+            request_id,
+            secrets: None,
+            code: Some(err.error_code()),
+            error: Some(err.to_string()),
+        },
+    };
+    fxg_protocol::discard_with!(
+        out.send(message).await,
+        "send a message to a channel that may be closed"
+    );
+}
+
 /// Handles a remote PTY spawn request (applies the `allow_remote_pty` policy).
 async fn handle_remote_pty_spawn(
     state: &DaemonState,
@@ -1027,7 +1189,7 @@ async fn handle_remote_pty_spawn(
     rows: u16,
     shell_cmd: Option<String>,
 ) {
-    if !state.config().allow_remote_pty {
+    if !state.node_settings().allow_remote_pty {
         tracing::warn!(
             node_id = state.node_id(),
             "remote pty spawn rejected by policy"

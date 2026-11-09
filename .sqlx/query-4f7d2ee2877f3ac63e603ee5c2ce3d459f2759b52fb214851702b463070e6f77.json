@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT alias AS \"alias!\", agent_id FROM agent_aliases ORDER BY alias",
+  "describe": {
+    "columns": [
+      {
+        "name": "alias!",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "agent_aliases",
+            "name": "alias"
+          }
+        }
+      },
+      {
+        "name": "agent_id",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "agent_aliases",
+            "name": "agent_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      true,
+      false
+    ]
+  },
+  "hash": "4f7d2ee2877f3ac63e603ee5c2ce3d459f2759b52fb214851702b463070e6f77"
+}

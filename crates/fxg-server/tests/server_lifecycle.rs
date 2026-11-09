@@ -21,8 +21,7 @@ async fn server_keeps_running_until_shutdown_is_requested() {
         listen_addr: "127.0.0.1:0".to_owned(),
         allowed_hosts: Vec::new(),
         allowed_origins: Vec::new(),
-        provisioners: Default::default(),
-        git_credentials: Default::default(),
+        log: Default::default(),
     })
     .await
     .expect("start server");
