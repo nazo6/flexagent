@@ -52,8 +52,8 @@ export function errorCodeMessage(
       return m.error_git_failed();
     case "WORKTREE_CONFLICT":
       return m.error_worktree_conflict();
-    case "SNAPSHOT_UNAVAILABLE":
-      return m.error_snapshot_unavailable();
+    case "FORK_UNSUPPORTED":
+      return m.error_fork_unsupported();
     case "SYNC_BACKLOG":
       return m.error_sync_backlog();
     case "DB_CORRUPT":

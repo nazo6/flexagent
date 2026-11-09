@@ -12,7 +12,7 @@
 //!   event bus / outbox as persistent nodes, with 100% shared message types
 //! - `--workspace <DIR>`: registers the cloned workspace as a project and pins
 //!   `StartSession`'s `local_path` to this directory
-//! - `--ephemeral`: on `DrainAndShutdown`, saves a Git bundle and exits
+//! - `--ephemeral`: on `DrainAndShutdown`, stops sessions and flushes pending events
 //! - Also starts a local IPC server (`fxg git-askpass` → Git credential proxy)
 
 use std::path::PathBuf;
@@ -32,7 +32,7 @@ pub struct StdioConfig {
     pub daemon: DaemonConfig,
     /// `--workspace`: initial target directory (the cloned workspace)
     pub workspace: Option<PathBuf>,
-    /// `--ephemeral`: ephemeral VM mode (enables Git bundle saving on drain)
+    /// `--ephemeral`: ephemeral VM mode (flushes events and stops sessions on drain)
     pub ephemeral: bool,
 }
 

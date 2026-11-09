@@ -740,40 +740,9 @@ async fn handle(
             ))
         }
 
-        IpcClientMessage::SessionRevert {
-            command_id,
-            session_id,
-            target_node_seq,
-            files_only,
-        } => {
-            let outcome = state
-                .session_manager()
-                .revert(
-                    &command_id,
-                    session_id.as_str(),
-                    target_node_seq,
-                    files_only,
-                )
-                .await
-                .map_err(|err| DispatchError::from_node_error(&command_id, err))?;
-            Ok((
-                command_id,
-                IpcResult::SessionReverted {
-                    target_node_seq: outcome.target_node_seq,
-                    restored_tree_hash: outcome.restored_tree_hash,
-                    backup_tree_hash: outcome.backup_tree_hash,
-                    restored_files: outcome.restored_files as u64,
-                    removed_files: outcome.removed_files as u64,
-                    context_rebuilt: outcome.context_rebuilt,
-                },
-            ))
-        }
-
         IpcClientMessage::SessionFork {
             command_id,
             session_id,
-            from_node_seq,
-            agent_id,
             cwd,
         } => {
             let outcome = state
@@ -781,8 +750,6 @@ async fn handle(
                 .fork(
                     &command_id,
                     session_id.as_str(),
-                    from_node_seq,
-                    agent_id.as_deref(),
                     cwd.as_deref().map(Path::new),
                 )
                 .await

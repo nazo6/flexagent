@@ -11,7 +11,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use base64::Engine as _;
 use fxg_db::{Db, DbRole, PushSubscriptionRecord};
 use fxg_protocol::CommandId;
 use fxg_protocol::client_api::{
@@ -23,14 +22,12 @@ use fxg_protocol::client_api::{
     RemoveWorktreeRequest, RespondElicitationRequest, RespondElicitationResponse,
     RespondPermissionRequest, RespondPermissionResponse, ResumeSessionRequest,
     ResumeSessionResponse, RotateAuthTokenResponse, SessionArchiveRequest, SessionArchiveResponse,
-    SessionRevertRequest, SessionRevertResponse, WorktreeInfo, WorktreesResponse,
+    WorktreeInfo, WorktreesResponse,
 };
 use fxg_protocol::common::{
-    AgentAction, CommandResult, DiffScope, ErrorCode, ForkHistoryItem, HistoryRole,
-    WorkspaceDiffResponse, WorktreeAction,
+    AgentAction, CommandResult, DiffScope, ErrorCode, WorkspaceDiffResponse, WorktreeAction,
 };
 use fxg_protocol::config::{GitCredentialConfig, ProvisionerConfig};
-use fxg_protocol::events::UnifiedEventPayload;
 use fxg_protocol::node_server::ServerToNodeMsg;
 use fxg_protocol::util::uuid_v7;
 use tokio::sync::broadcast;
@@ -296,97 +293,6 @@ impl ServerState {
             .find(|project| &project.project_id == project_id)
             .ok_or_else(|| ApiError::not_found(format!("project not found: {project_id}")))
     }
-
-    /// Resolves history replay and a saved Git bundle from a Context Fork request.
-    ///
-    /// - History: extract the source session's conversation events (User / Agent / ToolCall)
-    ///   up to `from_node_seq` and place them in `StartSession.fork_context_messages`
-    /// - Bundle: unless `restore_git_bundle_b64` is given explicitly, read and Base64-encode
-    ///   the source session's `git_bundle_path` (bundle saved when an ephemeral VM was destroyed)
-    async fn prepare_fork(
-        &self,
-        request: &CreateSessionRequest,
-    ) -> Result<(Option<Vec<ForkHistoryItem>>, Option<String>), ApiError> {
-        let Some(fork) = &request.fork else {
-            return Ok((None, None));
-        };
-        // Verify the source session exists (prerequisite for correlation and auditing)
-        let source = self
-            .inner
-            .db
-            .get_session(fork.from_session_id.as_str())
-            .await
-            .map_err(ApiError::from)?
-            .ok_or_else(|| {
-                ApiError::not_found(format!("session not found: {}", fork.from_session_id))
-            })?;
-
-        let batch = self
-            .inner
-            .db
-            .session_events_after(source.session_id.as_str(), 0, 5_000)
-            .await
-            .map_err(ApiError::from)?;
-        let mut items: Vec<ForkHistoryItem> = Vec::new();
-        for event in batch.events {
-            if let Some(limit) = fork.from_node_seq
-                && event.node_seq > limit
-            {
-                break;
-            }
-            match event.payload {
-                UnifiedEventPayload::UserMessage { text, .. } => items.push(ForkHistoryItem {
-                    role: HistoryRole::User,
-                    text,
-                    tool_summary: None,
-                }),
-                UnifiedEventPayload::AgentMessage {
-                    text,
-                    is_complete: true,
-                    ..
-                } => items.push(ForkHistoryItem {
-                    role: HistoryRole::Agent,
-                    text,
-                    tool_summary: None,
-                }),
-                UnifiedEventPayload::ToolCall { title, status, .. } => {
-                    items.push(ForkHistoryItem {
-                        role: HistoryRole::Tool,
-                        text: String::new(),
-                        tool_summary: Some(format!("[{status}] {title}")),
-                    })
-                }
-                _ => {}
-            }
-        }
-        let context = (!items.is_empty()).then_some(items);
-
-        let bundle = match fork.restore_git_bundle_b64.clone() {
-            Some(bundle) => Some(bundle),
-            None => {
-                match self
-                    .inner
-                    .db
-                    .get_git_bundle_path(fork.from_session_id.as_str())
-                    .await
-                {
-                    Ok(Some(path)) => match std::fs::read(&path) {
-                        Ok(bytes) => Some(base64::engine::general_purpose::STANDARD.encode(bytes)),
-                        Err(err) => {
-                            tracing::warn!(path, "failed to read stored git bundle: {err}");
-                            None
-                        }
-                    },
-                    Ok(None) => None,
-                    Err(err) => {
-                        tracing::debug!("failed to load git bundle path: {err}");
-                        None
-                    }
-                }
-            }
-        };
-        Ok((context, bundle))
-    }
 }
 
 #[async_trait]
@@ -498,12 +404,29 @@ impl ClientApiBackend for ServerState {
         request: CreateSessionRequest,
         client: ClientInfo,
     ) -> Result<CreateSessionResponse, ApiError> {
-        // Context Fork (handoff from another node / a temporary VM): resolve history replay
-        // and the saved Git bundle
-        let (fork_context, restore_bundle_b64) = self.prepare_fork(&request).await?;
+        // ACP-native fork: it must run on the node that owns the source session.
+        // Cross-node / cross-agent / ephemeral-VM forks are not supported.
+        let fork_source = match &request.fork {
+            Some(fork) => Some(
+                self.inner
+                    .db
+                    .get_session(fork.from_session_id.as_str())
+                    .await
+                    .map_err(ApiError::from)?
+                    .ok_or_else(|| {
+                        ApiError::not_found(format!("session not found: {}", fork.from_session_id))
+                    })?,
+            ),
+            None => None,
+        };
 
         // Temporary VM provisioner: launch a child process on the server host
         if let Some(provisioner_name) = request.provisioner.clone() {
+            if fork_source.is_some() {
+                return Err(ApiError::bad_request(
+                    "native forks cannot be combined with a provisioner",
+                ));
+            }
             if request.node_id.is_some() {
                 return Err(ApiError::bad_request(
                     "node_id and provisioner are mutually exclusive",
@@ -572,8 +495,6 @@ impl ClientApiBackend for ServerState {
                     initial_config: request.initial_config.clone(),
                     mode: request.mode.clone(),
                     extra_args: request.extra_args.clone(),
-                    fork_context,
-                    restore_bundle_b64,
                 },
             )
             .await?;
@@ -596,10 +517,36 @@ impl ClientApiBackend for ServerState {
             });
         }
 
-        let node_id = request
-            .node_id
-            .clone()
-            .ok_or_else(|| ApiError::bad_request("node_id or provisioner is required"))?;
+        let node_id = match fork_source.as_ref() {
+            Some(source) => {
+                if let Some(requested) = &request.node_id
+                    && requested != &source.node_id
+                {
+                    return Err(ApiError::bad_request(format!(
+                        "a native fork must run on the source node ({})",
+                        source.node_id
+                    )));
+                }
+                let is_ephemeral = self
+                    .inner
+                    .db
+                    .list_nodes()
+                    .await
+                    .map_err(ApiError::from)?
+                    .iter()
+                    .any(|node| node.node_id == source.node_id && node.is_ephemeral);
+                if is_ephemeral {
+                    return Err(ApiError::bad_request(
+                        "native forks from ephemeral VM sessions are not supported",
+                    ));
+                }
+                source.node_id.clone()
+            }
+            None => request
+                .node_id
+                .clone()
+                .ok_or_else(|| ApiError::bad_request("node_id or provisioner is required"))?,
+        };
         if !self.inner.hub.is_online(&node_id).await {
             return Err(ApiError::node_offline(
                 node_id.as_str(),
@@ -631,12 +578,18 @@ impl ClientApiBackend for ServerState {
             info.path
         } else if let Some(path) = request.local_path.clone() {
             path
+        } else if let Some(source) = fork_source.as_ref() {
+            source.local_path.clone()
         } else {
             self.project_local_path(&request.project_id, &node_id)
                 .await?
         };
 
         let session_id = uuid_v7();
+        let agent_id = fork_source.as_ref().map_or_else(
+            || request.agent_id.clone(),
+            |source| source.agent_id.clone(),
+        );
         let result = self
             .inner
             .hub
@@ -648,13 +601,14 @@ impl ClientApiBackend for ServerState {
                     session_id: session_id.clone().into(),
                     project_id: request.project_id.clone(),
                     local_path: local_path.clone(),
-                    agent_id: request.agent_id.clone(),
+                    agent_id: agent_id.clone(),
                     initial_prompt: request.initial_prompt.clone(),
                     initial_config: request.initial_config.clone(),
                     mode: request.mode.clone(),
                     extra_args: request.extra_args.clone(),
-                    fork_context_messages: fork_context,
-                    restore_git_bundle_b64: restore_bundle_b64,
+                    fork_from_session_id: fork_source
+                        .as_ref()
+                        .map(|source| source.session_id.clone()),
                 },
             )
             .await?;
@@ -668,7 +622,7 @@ impl ClientApiBackend for ServerState {
             Some(&session_id),
             serde_json::json!({
                 "node_id": node_id,
-                "agent_id": request.agent_id,
+                "agent_id": agent_id,
                 "local_path": local_path,
                 "project_id": request.project_id,
             }),
@@ -799,46 +753,6 @@ impl ClientApiBackend for ServerState {
         }
     }
 
-    async fn revert_session(
-        &self,
-        session_id: &str,
-        request: SessionRevertRequest,
-        client: ClientInfo,
-    ) -> Result<SessionRevertResponse, ApiError> {
-        let node_id = self
-            .session_node(&fxg_protocol::SessionId::from(session_id))
-            .await?;
-        let command_id = CommandId::from(uuid_v7());
-        let outcome = self
-            .inner
-            .hub
-            .revert_session(
-                &node_id,
-                &command_id,
-                ServerToNodeMsg::RevertSession {
-                    command_id: command_id.clone(),
-                    session_id: session_id.into(),
-                    target_node_seq: request.target_node_seq,
-                    files_only: request.files_only,
-                },
-            )
-            .await?;
-        self.record_audit(
-            fxg_db::audit::actions::SESSION_REVERT,
-            &client,
-            Some(session_id),
-            serde_json::json!({
-                "node_id": node_id,
-                "target_node_seq": outcome.target_node_seq,
-                "restored_tree_hash": outcome.restored_tree_hash,
-                "restored_files": outcome.restored_files,
-                "removed_files": outcome.removed_files,
-            }),
-        )
-        .await;
-        Ok(outcome)
-    }
-
     async fn resume_session(
         &self,
         session_id: &str,
@@ -853,7 +767,8 @@ impl ClientApiBackend for ServerState {
             .map_err(ApiError::from)?
             .ok_or_else(|| ApiError::not_found(format!("session not found: {session_id}")))?;
 
-        // Resuming a temporary VM (provisioner) session (VM restart + bundle restore) is v2,
+        // Resuming a temporary VM (provisioner) session (VM restart + workspace
+        // handover) is v2,
         // so it is rejected in v1 (resident nodes only).
         let is_ephemeral = self
             .inner

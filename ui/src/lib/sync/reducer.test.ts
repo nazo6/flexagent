@@ -522,7 +522,6 @@ describe("pending prompts", () => {
             text: "hello",
             attachments: [],
             client_source: "web",
-            snapshot_tree_hash: null,
           },
         }),
       ]),

@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result, anyhow, bail};
 use fxg_node::IpcClient;
 use fxg_protocol::CommandId;
-use fxg_protocol::client_api::{DiagnosticsResponse, SessionRevertResponse, WorktreeInfo};
+use fxg_protocol::client_api::{DiagnosticsResponse, WorktreeInfo};
 use fxg_protocol::common::{
     ClientSource, ElicitationAction, ElicitationContent, ElicitationRequestEntry, HookLogEntry,
     PermissionRequestEntry, ProjectSummary, PromptInput, ResolvedBy, SessionControlAction,
@@ -670,57 +670,13 @@ impl DaemonClient {
         Ok(())
     }
 
-    /// `fxg session revert`
-    pub async fn revert_session(
-        &mut self,
-        session_id: &str,
-        target_node_seq: Option<u64>,
-        files_only: bool,
-    ) -> Result<SessionRevertResponse> {
-        let command_id = self.command_id();
-        let result = self
-            .request(IpcClientMessage::SessionRevert {
-                command_id,
-                session_id: session_id.into(),
-                target_node_seq,
-                files_only,
-            })
-            .await?;
-        match result {
-            IpcResult::SessionReverted {
-                target_node_seq,
-                restored_tree_hash,
-                backup_tree_hash,
-                restored_files,
-                removed_files,
-                context_rebuilt,
-            } => Ok(SessionRevertResponse {
-                target_node_seq,
-                restored_tree_hash,
-                backup_tree_hash,
-                restored_files,
-                removed_files,
-                context_rebuilt,
-            }),
-            other => bail!("unexpected ipc result: {other:?}"),
-        }
-    }
-
     /// `fxg session fork`
-    pub async fn fork_session(
-        &mut self,
-        session_id: &str,
-        from_node_seq: Option<u64>,
-        agent_id: Option<String>,
-        cwd: Option<&Path>,
-    ) -> Result<String> {
+    pub async fn fork_session(&mut self, session_id: &str, cwd: Option<&Path>) -> Result<String> {
         let command_id = self.command_id();
         let result = self
             .request(IpcClientMessage::SessionFork {
                 command_id,
                 session_id: session_id.into(),
-                from_node_seq,
-                agent_id,
                 cwd: cwd.map(path_to_string),
             })
             .await?;

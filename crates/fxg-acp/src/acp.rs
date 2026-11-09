@@ -1587,11 +1587,16 @@ async fn build_session(
         available_modes: modes.clone(),
         available_commands: commands.clone(),
         config_options: config_options.clone(),
+        fork_supported: Some(
+            agent_capabilities.session_capabilities.fork.is_some()
+                && agent_capabilities.load_session,
+        ),
     };
     if !modes.is_empty()
         || !commands.is_empty()
         || !config_options.is_empty()
         || current_mode.is_some()
+        || capabilities_state.fork_supported.is_some()
     {
         fxg_protocol::discard_with!(
             events.send(DriverEvent::Event(capabilities_state.to_payload())),
@@ -1790,7 +1795,7 @@ enum ResumePlan {
 /// `session/resume`, which does not send history back. Only when resume is
 /// unsupported does it use `session/load` (discarding replay notifications), and
 /// if neither is available it creates a fresh session
-/// (design: `docs/04-agent-drivers-and-windows.md` §4.3).
+/// (design: `docs/04-agent-drivers-and-windows.md` §4.1).
 ///
 /// When `resume.allow_fresh` is `false` (automatic resume on send), it returns
 /// [`NativeResumeUnavailable`] instead of creating a fresh session, prompting the
@@ -2141,6 +2146,7 @@ struct SessionCapabilitiesState {
     available_modes: Vec<ModeInfo>,
     available_commands: Vec<CommandInfo>,
     config_options: Vec<ConfigOptionInfo>,
+    fork_supported: Option<bool>,
 }
 
 impl SessionCapabilitiesState {
@@ -2150,6 +2156,7 @@ impl SessionCapabilitiesState {
             available_modes: self.available_modes.clone(),
             available_commands: self.available_commands.clone(),
             config_options: self.config_options.clone(),
+            fork_supported: self.fork_supported,
         }
     }
 }
@@ -3288,6 +3295,7 @@ mod tests {
             }],
             available_commands: Vec::new(),
             config_options: Vec::new(),
+            fork_supported: None,
         };
 
         // Existing current_mode / available_modes are preserved when a command list update arrives

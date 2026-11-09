@@ -73,7 +73,6 @@ fn elicitation_modes() -> Vec<ElicitationMode> {
 fn audit_actions() -> Vec<AuditAction> {
     vec![
         AuditAction::SessionStart,
-        AuditAction::SessionRevert,
         AuditAction::SessionResume,
         AuditAction::SessionArchive,
         AuditAction::SessionDelete,
@@ -105,7 +104,6 @@ fn event_types() -> Vec<EventType> {
         EventType::PermissionResolved,
         EventType::ElicitationRequest,
         EventType::ElicitationResolved,
-        EventType::SessionReverted,
         EventType::SessionArchived,
         EventType::SessionDeleted,
         EventType::TerminalOutput,

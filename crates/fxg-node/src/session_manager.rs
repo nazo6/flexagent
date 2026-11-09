@@ -5,9 +5,6 @@
 //!
 //! - **Driver integration**: Launches an [`AgentDriver`] and streams [`DriverEvent`]
 //!   into the [`SessionEventBus`] (persistent events via `record`, deltas via `publish_delta`).
-//! - **Turn-start snapshot**: Right before `SendPrompt`, captures a Tree Hash with
-//!   the Shadow Git Tree and records it as `UserMessage.snapshot_tree_hash`
-//!   (the revert baseline).
 //! - **Command idempotency**: Detects duplicate `command_id` submissions and
 //!   returns [`NodeError::CommandDuplicate`] (guards against double taps / WS resends).
 //! - **Pending queue**: `SendPrompt` while busy is queued, and the next prompt is
@@ -28,8 +25,8 @@ use fxg_acp::{
 use fxg_protocol::CommandId;
 use fxg_protocol::common::{
     ClientSource, ElicitationAction, ElicitationContent, ElicitationMode, ElicitationSchema,
-    ForkHistoryItem, HistoryRole, PermissionOption, PermissionPolicy, PromptInput, ResolvedBy,
-    SessionControlAction, SessionStatus,
+    PermissionOption, PermissionPolicy, PromptInput, ResolvedBy, SessionControlAction,
+    SessionStatus,
 };
 use fxg_protocol::events::{SessionEventEnvelope, UnifiedEventPayload};
 use fxg_protocol::util::uuid_v7;
@@ -39,7 +36,6 @@ use crate::error::NodeError;
 use crate::paths::NodePaths;
 use crate::project;
 use crate::session::SessionEventBus;
-use crate::snapshot::ShadowGitTree;
 
 /// Upper bound on retained processed `command_id`s (idempotency history).
 const PROCESSED_COMMAND_HISTORY: usize = 256;
@@ -108,10 +104,8 @@ pub struct StartSessionParams<'a> {
     pub mode: Option<&'a str>,
     /// Additional pass-through arguments for the agent
     pub extra_args: Option<&'a [String]>,
-    /// History replay injection on fork (handover from another node / ephemeral VM)
-    pub fork_context: Option<&'a [ForkHistoryItem]>,
-    /// Restore of a Git bundle saved from another node / ephemeral VM (local file path)
-    pub restore_git_bundle: Option<&'a Path>,
+    /// Source session to fork natively (ACP `session/fork` + `session/load`).
+    pub fork_from_session_id: Option<&'a str>,
 }
 
 /// Resume request for a stopped session ([`SessionManager::resume`]).
@@ -119,7 +113,7 @@ pub struct StartSessionParams<'a> {
 /// Starts the agent under the same `session_id`, preferring native restore
 /// (`session/resume` → `session/load`). If restore is impossible, continues by
 /// injecting a history replay
-/// (design: `docs/04-agent-drivers-and-windows.md` §4.3).
+/// (design: `docs/04-agent-drivers-and-windows.md` §4.1).
 #[derive(Debug, Clone, Copy)]
 pub struct ResumeParams<'a> {
     /// Correlation ID (idempotent deduplication of duplicate submissions)
@@ -128,23 +122,6 @@ pub struct ResumeParams<'a> {
     pub session_id: &'a str,
     /// Continue via history replay without attempting native restore
     pub force_replay: bool,
-}
-
-/// Result of `revert`.
-#[derive(Debug, Clone, PartialEq)]
-pub struct RevertOutcome {
-    /// `node_seq` of the `UserMessage` used as the revert baseline
-    pub target_node_seq: u64,
-    /// Tree Hash of the restore target
-    pub restored_tree_hash: String,
-    /// Backup Tree Hash saved right before restoring
-    pub backup_tree_hash: Option<String>,
-    /// Number of restored files
-    pub restored_files: usize,
-    /// Number of removed files
-    pub removed_files: usize,
-    /// Whether the agent conversation was rebuilt (files always restore)
-    pub context_rebuilt: bool,
 }
 
 /// Result of `resume`.
@@ -422,7 +399,6 @@ impl SessionManager {
                     is_worktree,
                     agent_id: spec.agent_id.clone(),
                     parent_session_id: None,
-                    fork_from_node_seq: None,
                     title: title.clone(),
                 },
             )
@@ -458,23 +434,54 @@ impl SessionManager {
         if !self.begin_command(params.command_id) {
             return Err(NodeError::CommandDuplicate(params.command_id.to_string()));
         }
+        self.start_session_inner(params).await
+    }
 
-        // Restore a saved Git bundle (handover to another node).
-        // Materialize the workspace before resolving the project.
-        if let Some(bundle_file) = params.restore_git_bundle {
-            crate::bundle::restore_workspace_bundle(params.local_path, bundle_file).await?;
-        }
+    /// Body of [`Self::start_session`] (the caller owns command deduplication).
+    async fn start_session_inner(
+        &self,
+        params: StartSessionParams<'_>,
+    ) -> Result<EnsureSessionOutcome, NodeError> {
+        // ACP-native fork: the source session must live on this node and use the
+        // same agent. The caller-provided agent ID is ignored in that case.
+        let fork_source = if let Some(source_id) = params.fork_from_session_id {
+            Some(
+                self.inner
+                    .bus
+                    .db()
+                    .get_session(source_id)
+                    .await?
+                    .ok_or_else(|| NodeError::InvalidSession(source_id.to_owned()))?,
+            )
+        } else {
+            None
+        };
+        let fork_from = match fork_source.as_ref() {
+            Some(source) => Some(source.agent_session_id.clone().ok_or_else(|| {
+                NodeError::ForkUnsupported(format!(
+                    "source session {} has no agent session binding",
+                    source.session_id
+                ))
+            })?),
+            None => None,
+        };
+        let effective_agent_id = fork_source
+            .as_ref()
+            .map_or(params.agent_id, |source| source.agent_id.as_str());
 
         let resolved = project::resolve_project(params.local_path, &self.inner.node_id).await?;
         let extra_args_vec: Vec<String> = params.extra_args.map(|s| s.to_vec()).unwrap_or_default();
         let spec = self
-            .resolve_launch_spec(params.agent_id, &extra_args_vec)
+            .resolve_launch_spec(effective_agent_id, &extra_args_vec)
             .await?;
 
         // SessionCreated (node_seq = 1)
         let (git_branch, is_worktree) =
             git_metadata_or_warn(&resolved.local_path, params.session_id).await;
-        let default_title = format!("{} @ {}", spec.display_name, resolved.name);
+        let default_title = match fork_source.as_ref() {
+            Some(source) => format!("Fork of {}", source.title),
+            None => format!("{} @ {}", spec.display_name, resolved.name),
+        };
         let (title, has_custom_title) = if let Some(prompt) = params.initial_prompt
             && let Some(derived) = derive_title_from_prompt(&prompt.text)
         {
@@ -494,8 +501,7 @@ impl SessionManager {
                     git_branch,
                     is_worktree,
                     agent_id: spec.agent_id.clone(),
-                    parent_session_id: None,
-                    fork_from_node_seq: None,
+                    parent_session_id: fork_source.as_ref().map(|source| source.session_id.clone()),
                     title: title.clone(),
                 },
             )
@@ -511,7 +517,7 @@ impl SessionManager {
                 initial_mode: params.mode.map(str::to_owned),
                 has_custom_title,
                 resume: None,
-                fork_from: None,
+                fork_from: fork_from.as_deref(),
                 initial_config: params.initial_config.to_vec(),
             })
             .await?;
@@ -524,23 +530,6 @@ impl SessionManager {
         {
             return Err(self
                 .fail_context_injection(params.session_id, "initial prompt injection", err)
-                .await);
-        }
-
-        // Fork from another node / ephemeral VM: inject the history replay as initial context
-        if let Some(context) = params
-            .fork_context
-            .and_then(|items| build_history_replay_context_from_items(items, ReplayPurpose::Fork))
-            && let Err(err) = self
-                .start_turn(
-                    params.session_id,
-                    &PromptInput::text(context),
-                    ClientSource::Fork,
-                )
-                .await
-        {
-            return Err(self
-                .fail_context_injection(params.session_id, "fork context injection", err)
                 .await);
         }
 
@@ -607,88 +596,84 @@ impl SessionManager {
             (self.inner.factory)(params.spec).map_err(|err| NodeError::Agent(err.to_string()))?;
         self.remember_driver(&driver);
         let (event_tx, event_rx) = mpsc::unbounded_channel();
-        let mut fork_from = params.fork_from.map(str::to_owned);
-        let started = loop {
-            let result = driver
-                .start_session(
-                    fxg_acp::StartSessionRequest {
-                        session_id: params.session_id.to_owned(),
-                        title: Some(params.title.to_owned()),
-                        cwd: params.cwd.to_path_buf(),
-                        launch: params.spec.clone(),
-                        extra_args: params.extra_args.clone(),
-                        initial_mode: params.initial_mode.clone(),
-                        resume: params.resume.clone(),
-                        fork_from: fork_from.clone(),
-                        initial_config: params.initial_config.clone(),
-                    },
-                    event_tx.clone(),
-                )
-                .await;
-            match result {
-                Ok(started) => break started,
-                Err(err)
-                    if fork_from.is_some()
-                        && err.downcast_ref::<NativeForkUnavailable>().is_some() =>
-                {
-                    tracing::info!(
-                        session_id = params.session_id,
-                        "native session fork unavailable; falling back to history replay"
+        let started = match driver
+            .start_session(
+                fxg_acp::StartSessionRequest {
+                    session_id: params.session_id.to_owned(),
+                    title: Some(params.title.to_owned()),
+                    cwd: params.cwd.to_path_buf(),
+                    launch: params.spec.clone(),
+                    extra_args: params.extra_args.clone(),
+                    initial_mode: params.initial_mode.clone(),
+                    resume: params.resume.clone(),
+                    fork_from: params.fork_from.map(str::to_owned),
+                    initial_config: params.initial_config.clone(),
+                },
+                event_tx.clone(),
+            )
+            .await
+        {
+            Ok(started) => started,
+            Err(err) => {
+                // The agent requires authentication before a session can be created.
+                // Surface the advertised methods so CLI / UI can guide the login flow.
+                if let Some(required) = err.downcast_ref::<AgentAuthRequired>() {
+                    let message = format!(
+                        "agent {} requires authentication ({} method(s) advertised)",
+                        params.spec.agent_id,
+                        required.0.len()
                     );
-                    fork_from = None;
-                }
-                Err(err) => {
-                    // The agent requires authentication before a session can be created.
-                    // Surface the advertised methods so CLI / UI can guide the login flow.
-                    if let Some(required) = err.downcast_ref::<AgentAuthRequired>() {
-                        let message = format!(
-                            "agent {} requires authentication ({} method(s) advertised)",
-                            params.spec.agent_id,
-                            required.0.len()
-                        );
-                        tracing::info!(session_id = params.session_id, "{message}");
-                        self.inner
-                            .bus
-                            .record(
-                                params.session_id,
-                                UnifiedEventPayload::StatusChanged {
-                                    status: SessionStatus::Error,
-                                    error_message: Some(message),
-                                },
-                            )
-                            .await?;
-                        return Err(NodeError::AuthRequired {
-                            agent_id: params.spec.agent_id.clone(),
-                            methods: required.0.clone(),
-                        });
-                    }
-                    // In native-only auto-resume (`allow_fresh = false`), return
-                    // "native restore unavailable" to the caller while leaving the session stopped
-                    // (do not implicitly run a history replay; prompt for an explicit Resume)
-                    if let Some(unavailable) = err.downcast_ref::<NativeResumeUnavailable>() {
-                        tracing::info!(
-                            session_id = params.session_id,
-                            "native resume is not available: {unavailable}"
-                        );
-                        return Err(NodeError::ResumeRequired {
-                            session_id: params.session_id.to_owned(),
-                            reason: unavailable.0.clone(),
-                        });
-                    }
-                    let message = format!("failed to start agent: {err:#}");
-                    tracing::warn!(session_id = params.session_id, "{message}");
+                    tracing::info!(session_id = params.session_id, "{message}");
                     self.inner
                         .bus
                         .record(
                             params.session_id,
                             UnifiedEventPayload::StatusChanged {
                                 status: SessionStatus::Error,
-                                error_message: Some(message.clone()),
+                                error_message: Some(message),
                             },
                         )
                         .await?;
-                    return Err(NodeError::Agent(message));
+                    return Err(NodeError::AuthRequired {
+                        agent_id: params.spec.agent_id.clone(),
+                        methods: required.0.clone(),
+                    });
                 }
+                // ACP-native forks are the only fork implementation. Report the
+                // missing capability instead of silently degrading to a replay.
+                if let Some(unavailable) = err.downcast_ref::<NativeForkUnavailable>() {
+                    tracing::info!(
+                        session_id = params.session_id,
+                        "native session fork is not available: {unavailable}"
+                    );
+                    return Err(NodeError::ForkUnsupported(unavailable.0.clone()));
+                }
+                // In native-only auto-resume (`allow_fresh = false`), return
+                // "native restore unavailable" to the caller while leaving the session stopped
+                // (do not implicitly run a history replay; prompt for an explicit Resume)
+                if let Some(unavailable) = err.downcast_ref::<NativeResumeUnavailable>() {
+                    tracing::info!(
+                        session_id = params.session_id,
+                        "native resume is not available: {unavailable}"
+                    );
+                    return Err(NodeError::ResumeRequired {
+                        session_id: params.session_id.to_owned(),
+                        reason: unavailable.0.clone(),
+                    });
+                }
+                let message = format!("failed to start agent: {err:#}");
+                tracing::warn!(session_id = params.session_id, "{message}");
+                self.inner
+                    .bus
+                    .record(
+                        params.session_id,
+                        UnifiedEventPayload::StatusChanged {
+                            status: SessionStatus::Error,
+                            error_message: Some(message.clone()),
+                        },
+                    )
+                    .await?;
+                return Err(NodeError::Agent(message));
             }
         };
 
@@ -723,11 +708,10 @@ impl SessionManager {
         Ok(StartedDriverSession { context_restored })
     }
 
-    /// Loads the persistent events of a session (limited to `up_to_node_seq` and below; `None` means all).
+    /// Loads the persistent events of a session.
     async fn load_session_events(
         &self,
         session_id: &str,
-        up_to_node_seq: Option<u64>,
     ) -> Result<Vec<SessionEventEnvelope>, NodeError> {
         let mut cursor = 0u64;
         let mut events = Vec::new();
@@ -740,190 +724,11 @@ impl SessionManager {
                 .await?;
             let full_batch = batch.events.len() as u32 >= EVENT_LOAD_BATCH;
             cursor = batch.cursor;
-            for event in batch.events {
-                if let Some(limit) = up_to_node_seq
-                    && event.node_seq > limit
-                {
-                    return Ok(events);
-                }
-                events.push(event);
-            }
+            events.extend(batch.events);
             if !full_batch {
                 return Ok(events);
             }
         }
-    }
-
-    /// Restores the workspace to the point of the specified turn (`fxg session revert`).
-    ///
-    /// - `target_node_seq` is the `node_seq` of a `UserMessage`
-    ///   (the latest turn when omitted). Restores files to the `snapshot_tree_hash`
-    ///   at that point and appends `SessionReverted`.
-    /// - The state right before restoring is saved as a backup Tree
-    ///   (reverting again returns to it).
-    /// - Running (busy) sessions are rejected with [`NodeError::Busy`].
-    pub async fn revert(
-        &self,
-        command_id: &CommandId,
-        session_id: &str,
-        target_node_seq: Option<u64>,
-        files_only: bool,
-    ) -> Result<RevertOutcome, NodeError> {
-        if !self.begin_command(command_id) {
-            return Err(NodeError::CommandDuplicate(command_id.to_string()));
-        }
-
-        let session = self
-            .inner
-            .bus
-            .db()
-            .get_session(session_id)
-            .await?
-            .ok_or_else(|| NodeError::InvalidSession(session_id.to_owned()))?;
-        let cwd = PathBuf::from(&session.local_path);
-        {
-            let sessions = self.inner.sessions.lock().expect("sessions poisoned");
-            if let Some(active) = sessions.active.get(session_id)
-                && active.busy
-            {
-                return Err(NodeError::Busy(session_id.to_owned()));
-            }
-        }
-
-        let events = self
-            .load_session_events(session_id, target_node_seq)
-            .await?;
-        let (target_seq, tree_hash) = find_revert_snapshot(&events).ok_or_else(|| {
-            NodeError::InvalidSession(format!(
-                "no snapshot found at or before the specified point: {session_id}"
-            ))
-        })?;
-
-        let tree = ShadowGitTree::new(
-            &cwd,
-            self.inner.paths.snapshot_index_path(session_id),
-            session_id,
-        );
-        let outcome = tree.restore(&tree_hash).await?;
-
-        // Rebuild the agent conversation so the next prompt does not see the
-        // turns that were just reverted. File restoration is the primary effect;
-        // a rebuild failure leaves the files restored and is reported as a
-        // partial success (`context_rebuilt = false`).
-        let context_rebuilt = if files_only {
-            false
-        } else {
-            match self
-                .rebuild_session_context(session_id, &session, target_seq, &events)
-                .await
-            {
-                Ok(()) => true,
-                Err(err) => {
-                    tracing::warn!(
-                        session_id,
-                        "failed to rebuild the agent context after revert: {err}"
-                    );
-                    false
-                }
-            }
-        };
-
-        self.inner
-            .bus
-            .record(
-                session_id,
-                UnifiedEventPayload::SessionReverted {
-                    target_node_seq: target_seq,
-                    restored_tree_hash: tree_hash.clone(),
-                    backup_tree_hash: outcome.backup_tree_hash.clone(),
-                    restored_files: outcome.restored_files as u64,
-                    removed_files: outcome.removed_files as u64,
-                    context_rebuilt,
-                },
-            )
-            .await?;
-
-        Ok(RevertOutcome {
-            restored_tree_hash: tree_hash,
-            backup_tree_hash: outcome.backup_tree_hash,
-            restored_files: outcome.restored_files,
-            removed_files: outcome.removed_files,
-            target_node_seq: target_seq,
-            context_rebuilt,
-        })
-    }
-
-    /// Stops the current agent session (if any) and starts a fresh one with a
-    /// replay of the events up to `target_seq` (used by [`Self::revert`]).
-    async fn rebuild_session_context(
-        &self,
-        session_id: &str,
-        session: &fxg_protocol::common::SessionSummary,
-        target_seq: u64,
-        events: &[SessionEventEnvelope],
-    ) -> Result<(), NodeError> {
-        let handle = {
-            let sessions = self.inner.sessions.lock().expect("sessions poisoned");
-            sessions
-                .active
-                .get(session_id)
-                .map(|active| Arc::clone(&active.handle))
-        };
-        if let Some(handle) = handle {
-            handle
-                .shutdown()
-                .await
-                .map_err(|err| NodeError::Server(format!("failed to stop agent: {err:#}")))?;
-            let mut stopped = false;
-            for _ in 0..200 {
-                let active = self
-                    .inner
-                    .sessions
-                    .lock()
-                    .expect("sessions poisoned")
-                    .active
-                    .contains_key(session_id);
-                if !active {
-                    stopped = true;
-                    break;
-                }
-                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-            }
-            if !stopped {
-                return Err(NodeError::InvalidState(format!(
-                    "session {session_id} did not stop for the context rebuild"
-                )));
-            }
-        }
-
-        let spec = self.resolve_launch_spec(&session.agent_id, &[]).await?;
-        let cwd = PathBuf::from(&session.local_path);
-        let _started = self
-            .start_driver_session(StartDriverParams {
-                session_id,
-                title: &session.title,
-                cwd: &cwd,
-                spec: &spec,
-                extra_args: Vec::new(),
-                initial_mode: None,
-                has_custom_title: true,
-                resume: None,
-                fork_from: None,
-                initial_config: Vec::new(),
-            })
-            .await?;
-
-        if let Some(context) =
-            build_history_replay_context(events, target_seq, ReplayPurpose::Revert)
-        {
-            self.start_turn(
-                session_id,
-                &PromptInput::text(context),
-                ClientSource::Revert,
-            )
-            .await?;
-        }
-        Ok(())
     }
 
     /// Imports an existing agent session by recording its agent-side ID and
@@ -960,7 +765,6 @@ impl SessionManager {
                     is_worktree,
                     agent_id: spec.agent_id.clone(),
                     parent_session_id: None,
-                    fork_from_node_seq: None,
                     title: title.clone(),
                 },
             )
@@ -984,20 +788,17 @@ impl SessionManager {
         Ok(session_id)
     }
 
-    /// Branches from the specified turn into a new session (`fxg session fork`).
+    /// Branches the session with the ACP-native `session/fork` + `session/load`
+    /// pair (`fxg session fork`).
     ///
-    /// - Inherits history from the source `SessionCreated` up to `from_node_seq`,
-    ///   and records `parent_session_id` / `fork_from_node_seq` on the new
-    ///   `SessionCreated`.
-    /// - Since standard ACP has no native fork API, the conversation history up to
-    ///   `node_seq` is injected as initial context (one prompt)
-    ///   (recorded as a `UserMessage` with `client_source = "fork"`).
+    /// - The source session must use the same agent and have an
+    ///   `agent_session_id`; otherwise [`NodeError::ForkUnsupported`] is returned.
+    /// - The new session records `parent_session_id` for lineage.
+    /// - No history replay is injected: the agent carries its own context.
     pub async fn fork(
         &self,
         command_id: &CommandId,
         session_id: &str,
-        from_node_seq: Option<u64>,
-        agent_id: Option<&str>,
         new_cwd: Option<&Path>,
     ) -> Result<EnsureSessionOutcome, NodeError> {
         if !self.begin_command(command_id) {
@@ -1012,78 +813,22 @@ impl SessionManager {
             .await?
             .ok_or_else(|| NodeError::InvalidSession(session_id.to_owned()))?;
 
-        let events = self.load_session_events(session_id, from_node_seq).await?;
-        let fork_seq = events
-            .last()
-            .map(|event| event.node_seq)
-            .or(source.fork_from_node_seq)
-            .unwrap_or(1);
-
-        let spec = self
-            .resolve_launch_spec(agent_id.unwrap_or(&source.agent_id), &[])
-            .await?;
-        let project_name = self.project_name(source.project_id.as_str()).await;
-
         let new_session_id = uuid_v7();
         let cwd = new_cwd
             .map(Path::to_path_buf)
             .unwrap_or_else(|| PathBuf::from(&source.local_path));
-        let (git_branch, is_worktree) = git_metadata_or_warn(&cwd, &new_session_id).await;
-        let title = format!("Fork of {}", source.title);
-        self.inner
-            .bus
-            .create_session(
-                &new_session_id,
-                UnifiedEventPayload::SessionCreated {
-                    node_id: self.inner.node_id.clone().into(),
-                    project_id: source.project_id.clone(),
-                    project_name,
-                    local_path: cwd.to_string_lossy().into_owned(),
-                    git_branch,
-                    is_worktree,
-                    agent_id: spec.agent_id.clone(),
-                    parent_session_id: Some(source.session_id.clone()),
-                    fork_from_node_seq: Some(fork_seq),
-                    title: title.clone(),
-                },
-            )
-            .await?;
-
-        let started = self
-            .start_driver_session(StartDriverParams {
-                session_id: &new_session_id,
-                title: &title,
-                cwd: &cwd,
-                spec: &spec,
-                extra_args: Vec::new(),
-                initial_mode: None,
-                has_custom_title: true,
-                resume: None,
-                fork_from: source.agent_session_id.as_deref(),
-                initial_config: Vec::new(),
-            })
-            .await?;
-
-        // Native fork preserves the agent context; only replay when it was unavailable.
-        if !started.context_restored
-            && let Some(context) =
-                build_history_replay_context(&events, fork_seq, ReplayPurpose::Fork)
-            && let Err(err) = self
-                .start_turn(
-                    &new_session_id,
-                    &PromptInput::text(context),
-                    ClientSource::Fork,
-                )
-                .await
-        {
-            return Err(self
-                .fail_context_injection(&new_session_id, "fork context injection", err)
-                .await);
-        }
-
-        Ok(EnsureSessionOutcome {
-            session_id: new_session_id,
+        self.start_session_inner(StartSessionParams {
+            command_id,
+            session_id: &new_session_id,
+            local_path: &cwd,
+            agent_id: &source.agent_id,
+            initial_prompt: None,
+            initial_config: &[],
+            mode: None,
+            extra_args: None,
+            fork_from_session_id: Some(source.session_id.as_str()),
         })
+        .await
     }
 
     /// Resumes a stopped session (`fxg session resume`).
@@ -1095,7 +840,7 @@ impl SessionManager {
     ///   On forced termination no transition to `stopped` is written, so resuming
     ///   is allowed even when the DB `status` is still `idle` / `running`.
     /// - Ephemeral VM (`provisioning` / `bootstrapping`) sessions cannot be
-    ///   resumed in v1 (design: `docs/04-agent-drivers-and-windows.md` §4.3).
+    ///   resumed in v1 (design: `docs/04-agent-drivers-and-windows.md` §4.1).
     pub async fn resume(&self, params: ResumeParams<'_>) -> Result<ResumeOutcome, NodeError> {
         if !self.begin_command(params.command_id) {
             return Err(NodeError::CommandDuplicate(params.command_id.to_string()));
@@ -1140,8 +885,7 @@ impl SessionManager {
         // If native restore failed, continue the context via history replay
         if !started.context_restored {
             let up_to_seq = events.last().map(|event| event.node_seq).unwrap_or(0);
-            if let Some(context) =
-                build_history_replay_context(&events, up_to_seq, ReplayPurpose::Resume)
+            if let Some(context) = build_history_replay_context(&events, up_to_seq)
                 && let Err(err) = self
                     .start_turn(
                         params.session_id,
@@ -1204,7 +948,7 @@ impl SessionManager {
             )));
         }
 
-        let events = self.load_session_events(session_id, None).await?;
+        let events = self.load_session_events(session_id).await?;
         let spec = self.resolve_launch_spec(&session.agent_id, &[]).await?;
 
         // Attempt native restore (the caller injects a replay if it fails)
@@ -1299,19 +1043,7 @@ impl SessionManager {
         }
     }
 
-    /// Resolves the display name of a logical project (returns `project_id` if unknown).
-    async fn project_name(&self, project_id: &str) -> String {
-        match self.inner.bus.db().list_projects().await {
-            Ok(projects) => projects
-                .into_iter()
-                .find(|project| project.project_id.as_str() == project_id)
-                .map(|project| project.name)
-                .unwrap_or_else(|| project_id.to_owned()),
-            Err(_) => project_id.to_owned(),
-        }
-    }
-
-    /// Starts a turn (busy reservation → snapshot → `UserMessage` → send).
+    /// Starts a turn (busy reservation → `UserMessage` → send).
     ///
     /// The caller has already decided busy handling (append to the pending queue or reject).
     async fn start_turn(
@@ -1826,7 +1558,6 @@ impl SessionManager {
             if let Err(err) = handle.dispose().await {
                 tracing::warn!(session_id = %session_id, "failed to shutdown: {err:#}");
             }
-            remove_snapshot_index(&self.inner.paths, &session_id);
             stopped.push(session_id);
         }
         // Also discard idle (warm) processes to empty the pool
@@ -2074,17 +1805,6 @@ async fn pump_events(
         let mut sessions = inner.sessions.lock().expect("sessions poisoned");
         sessions.active.remove(&session_id);
     }
-    remove_snapshot_index(&inner.paths, &session_id);
-}
-
-/// Removes the session's shadow Git index file (releases resources).
-fn remove_snapshot_index(paths: &NodePaths, session_id: &str) {
-    let path = paths.snapshot_index_path(session_id);
-    if let Err(err) = std::fs::remove_file(&path)
-        && err.kind() != std::io::ErrorKind::NotFound
-    {
-        tracing::warn!(session_id, path = %path.display(), "failed to remove snapshot index: {err:#}");
-    }
 }
 
 /// Updates the session status (busy is synchronized too).
@@ -2186,7 +1906,7 @@ pub fn derive_title_from_prompt(prompt: &str) -> Option<String> {
     None
 }
 
-/// Starts a single turn (snapshot → record `UserMessage` → send to the driver).
+/// Starts a single turn (record `UserMessage` → send to the driver).
 ///
 /// Busy reservation and release are handled by the caller (`SessionManager::start_turn` /
 /// [`maybe_dispatch_queued`]).
@@ -2196,7 +1916,7 @@ async fn dispatch_prompt(
     input: &PromptInput,
     client_source: ClientSource,
 ) -> Result<(), NodeError> {
-    let (cwd, should_update_title) = {
+    let should_update_title = {
         let mut sessions = inner.sessions.lock().expect("sessions poisoned");
         let session = sessions
             .active
@@ -2206,7 +1926,7 @@ async fn dispatch_prompt(
         if should_update {
             session.has_custom_title = true;
         }
-        (session.cwd.clone(), should_update)
+        should_update
     };
 
     if should_update_title && let Some(title) = derive_title_from_prompt(&input.text) {
@@ -2219,13 +1939,6 @@ async fn dispatch_prompt(
             .await?;
     }
 
-    let snapshot_tree_hash = snapshot_tree_hash(
-        &cwd,
-        &inner.paths.snapshot_index_path(session_id),
-        session_id,
-    )
-    .await;
-
     inner
         .bus
         .record(
@@ -2234,7 +1947,6 @@ async fn dispatch_prompt(
                 text: input.text.clone(),
                 attachments: input.attachments.clone(),
                 client_source,
-                snapshot_tree_hash,
             },
         )
         .await?;
@@ -2253,60 +1965,12 @@ async fn dispatch_prompt(
         .map_err(|err| NodeError::Server(format!("failed to send prompt: {err:#}")))
 }
 
-/// Selects the revert baseline snapshot from the loaded events.
-///
-/// Returns the last `UserMessage.snapshot_tree_hash` (`node_seq`, Tree Hash).
-fn find_revert_snapshot(events: &[SessionEventEnvelope]) -> Option<(u64, String)> {
-    events.iter().rev().find_map(|event| match &event.payload {
-        UnifiedEventPayload::UserMessage {
-            snapshot_tree_hash: Some(tree_hash),
-            ..
-        } => Some((event.node_seq, tree_hash.clone())),
-        _ => None,
-    })
-}
-
-/// Purpose of injecting a history replay (used for the introductory text at the start of the prompt).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ReplayPurpose {
-    /// Conversation branching (`fxg session fork`)
-    Fork,
-    /// Resuming a stopped session (`fxg session resume`)
-    Resume,
-    /// Rebuilding the conversation after a revert (`fxg session revert`)
-    Revert,
-}
-
-impl ReplayPurpose {
-    /// Builds the introductory text at the start of the prompt.
-    fn header(self, range: &str) -> String {
-        match self {
-            Self::Fork => format!(
-                "The history below is from a previous session{range} forked at this point. \
-                 Continue working with this context in mind.\n\n"
-            ),
-            Self::Resume => format!(
-                "The history below is from a stopped session{range} that has been resumed. \
-                 Continue working with this context in mind.\n\n"
-            ),
-            Self::Revert => format!(
-                "The history below is from this conversation{range} before a revert. \
-                 Continue working with this context in mind.\n\n"
-            ),
-        }
-    }
-}
-
-/// Builds the conversation context for a history replay (fork / resume).
+/// Builds the conversation context for an explicit resume replay.
 ///
 /// Concatenates the conversation (user / agent messages) plus tool call summaries
 /// and changed files in `node_seq` order (truncated at `up_to_seq`).
 /// Returns `None` when there is no conversation (no history).
-fn build_history_replay_context(
-    events: &[SessionEventEnvelope],
-    up_to_seq: u64,
-    purpose: ReplayPurpose,
-) -> Option<String> {
+fn build_history_replay_context(events: &[SessionEventEnvelope], up_to_seq: u64) -> Option<String> {
     let mut parts: Vec<String> = Vec::new();
     for event in events {
         if event.node_seq > up_to_seq {
@@ -2345,44 +2009,15 @@ fn build_history_replay_context(
             _ => {}
         }
     }
-    assemble_replay_context(parts, up_to_seq, purpose)
-}
-
-/// Builds the context for replay injection from the structured history
-/// ([`ForkHistoryItem`]) received from the central server (handover to another node / ephemeral VM).
-fn build_history_replay_context_from_items(
-    items: &[ForkHistoryItem],
-    purpose: ReplayPurpose,
-) -> Option<String> {
-    let mut parts: Vec<String> = Vec::new();
-    for item in items {
-        let role = if item.role == HistoryRole::User {
-            "User"
-        } else {
-            "Assistant"
-        };
-        if !item.text.trim().is_empty() {
-            parts.push(format!("### {role}\n{}", item.text));
-        }
-        if let Some(summary) = item.tool_summary.as_deref()
-            && !summary.trim().is_empty()
-        {
-            parts.push(format!("- {summary}"));
-        }
-    }
-    assemble_replay_context(parts, 0, purpose)
+    assemble_replay_context(parts, up_to_seq)
 }
 
 /// Shared assembly of the replay context (truncated at the character limit).
 ///
 /// When the history exceeds the limit, the **most recent** turns are kept
-/// (older turns are dropped) so a resumed / reverted / forked agent keeps the
-/// context closest to the current request.
-fn assemble_replay_context(
-    parts: Vec<String>,
-    up_to_seq: u64,
-    purpose: ReplayPurpose,
-) -> Option<String> {
+/// (older turns are dropped) so a resumed agent keeps the context closest to
+/// the current request.
+fn assemble_replay_context(parts: Vec<String>, up_to_seq: u64) -> Option<String> {
     /// Maximum number of characters in the injected context (prevents oversized prompts).
     const MAX_CONTEXT_CHARS: usize = 64_000;
 
@@ -2394,7 +2029,10 @@ fn assemble_replay_context(
     } else {
         String::new()
     };
-    let header = purpose.header(&range);
+    let header = format!(
+        "The history below is from a stopped session{range} that has been resumed. \
+         Continue working with this context in mind.\n\n"
+    );
 
     let mut selected: Vec<String> = Vec::new();
     let mut used = header.chars().count();
@@ -2431,26 +2069,6 @@ fn assemble_replay_context(
         context.push_str("\n\n");
     }
     Some(context)
-}
-
-/// Captures a Shadow Git Tree snapshot of the working directory.
-///
-/// `None` for non-Git directories or on failure (recorded as a turn that cannot
-/// be reverted). Failures are logged at `warn` with the working directory so
-/// that a later "no snapshot" revert error can be traced back to this turn.
-async fn snapshot_tree_hash(cwd: &Path, index_path: &Path, session_id: &str) -> Option<String> {
-    let tree = ShadowGitTree::new(cwd, index_path, session_id);
-    match tree.snapshot().await {
-        Ok(outcome) => outcome.tree_hash().map(str::to_owned),
-        Err(err) => {
-            tracing::warn!(
-                session_id,
-                cwd = %cwd.display(),
-                "snapshot skipped (revert will be unavailable for this turn): {err:#}"
-            );
-            None
-        }
-    }
 }
 
 /// Returns the current branch and the worktree determination.
@@ -3028,95 +2646,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn revert_restores_workspace_files() {
-        let (manager, mock, dir) = setup().await;
-        let (repo, session_id) = setup_repo_session(&manager, &dir).await;
-
-        // Record the snapshot at turn start
-        manager
-            .send_prompt(
-                &CommandId::from("c2"),
-                &session_id,
-                &PromptInput::text("first turn"),
-                ClientSource::Cli,
-            )
-            .await
-            .expect("prompt");
-        let user_seq = wait_user_message(&manager, &session_id, "first turn").await;
-
-        // Turn complete → assume the agent changed files
-        mock.emit(DriverEvent::Event(UnifiedEventPayload::StatusChanged {
-            status: SessionStatus::Idle,
-            error_message: None,
-        }));
-        wait_not_busy(&manager, &session_id).await;
-        std::fs::write(repo.join("README.md"), "changed by agent\n").expect("write");
-
-        // Revert: restore the file state at the start of the latest turn
-        let outcome = manager
-            .revert(&CommandId::from("c3"), &session_id, None, false)
-            .await
-            .expect("revert");
-        assert_eq!(outcome.target_node_seq, user_seq);
-        assert!(outcome.context_rebuilt);
-        assert!(outcome.restored_files >= 1);
-        assert_eq!(
-            std::fs::read_to_string(repo.join("README.md")).expect("read"),
-            "# test\n"
-        );
-
-        // SessionReverted is appended to the event log
-        let batch = manager
-            .bus()
-            .db()
-            .session_events_after(&session_id, 0, 100)
-            .await
-            .expect("events");
-        let reverted = batch
-            .events
-            .iter()
-            .find(|event| {
-                matches!(&event.payload, UnifiedEventPayload::SessionReverted { target_node_seq, .. } if *target_node_seq == user_seq)
-            })
-            .expect("session_reverted event");
-        match &reverted.payload {
-            UnifiedEventPayload::SessionReverted {
-                restored_tree_hash,
-                backup_tree_hash,
-                context_rebuilt,
-                ..
-            } => {
-                assert!(!restored_tree_hash.is_empty());
-                assert!(backup_tree_hash.is_some(), "a backup Tree is saved");
-                assert!(context_rebuilt);
-            }
-            _ => unreachable!(),
-        }
-    }
-
-    #[tokio::test]
-    async fn revert_rejects_busy_session() {
-        let (manager, _mock, dir) = setup().await;
-        let (_repo, session_id) = setup_repo_session(&manager, &dir).await;
-
-        // A running turn (no Idle event received yet) is rejected as Busy
-        manager
-            .send_prompt(
-                &CommandId::from("c2"),
-                &session_id,
-                &PromptInput::text("running"),
-                ClientSource::Cli,
-            )
-            .await
-            .expect("prompt");
-        let err = manager
-            .revert(&CommandId::from("c3"), &session_id, None, false)
-            .await
-            .expect_err("busy");
-        assert!(matches!(err, NodeError::Busy(_)));
-    }
-
-    #[tokio::test]
     async fn import_session_records_and_resumes_an_existing_agent_session() {
         let (manager, mock, dir) = setup().await;
         mock.set_resume_supported(true);
@@ -3149,46 +2678,29 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn fork_creates_child_session_and_injects_history() {
+    async fn fork_uses_native_session_fork() {
         let (manager, mock, dir) = setup().await;
         let (repo, source_id) = setup_repo_session(&manager, &dir).await;
 
+        // Native fork requires an agent-side session binding on the source.
         manager
-            .send_prompt(
-                &CommandId::from("c2"),
+            .bus()
+            .record(
                 &source_id,
-                &PromptInput::text("hello world"),
-                ClientSource::Cli,
+                UnifiedEventPayload::SessionAgentBound {
+                    agent_session_id: "agent-source-1".to_owned(),
+                },
             )
             .await
-            .expect("prompt");
-        let user_seq = wait_user_message(&manager, &source_id, "hello world").await;
-        mock.emit(DriverEvent::Event(UnifiedEventPayload::AgentMessage {
-            message_id: "m1".to_owned(),
-            text: "Understood".to_owned(),
-            is_complete: true,
-        }));
-        wait_event_type(&manager, &source_id, EventType::AgentMessage).await;
-        mock.emit(DriverEvent::Event(UnifiedEventPayload::StatusChanged {
-            status: SessionStatus::Idle,
-            error_message: None,
-        }));
-        wait_not_busy(&manager, &source_id).await;
+            .expect("bind agent session");
 
-        // Fork at the `user_seq` point
         let fork = manager
-            .fork(
-                &CommandId::from("c3"),
-                &source_id,
-                Some(user_seq),
-                None,
-                None,
-            )
+            .fork(&CommandId::from("c3"), &source_id, None)
             .await
             .expect("fork");
         assert_ne!(fork.session_id, source_id);
 
-        // The parent-child relationship is recorded
+        // The parent-child relationship is recorded.
         let child = manager
             .bus()
             .db()
@@ -3200,40 +2712,29 @@ mod tests {
             child.parent_session_id.as_ref().map(SessionId::as_str),
             Some(source_id.as_str())
         );
-        assert_eq!(child.fork_from_node_seq, Some(user_seq));
         assert_eq!(child.agent_id, "mock");
 
-        // History replay injection: recorded as a UserMessage of the fork session and
-        // includes the conversation (user utterances) up to the `user_seq` point
+        // The driver was asked to fork the source ACP session natively.
+        let start = mock
+            .starts()
+            .into_iter()
+            .find(|start| start.session_id == fork.session_id)
+            .expect("fork start");
+        assert_eq!(start.fork_from.as_deref(), Some("agent-source-1"));
+
+        // No history replay is injected into the child session.
         let batch = manager
             .bus()
             .db()
             .session_events_after(&fork.session_id, 0, 100)
             .await
             .expect("events");
-        let injected = batch
-            .events
-            .iter()
-            .find_map(|event| match &event.payload {
-                UnifiedEventPayload::UserMessage {
-                    text,
-                    client_source,
-                    ..
-                } if client_source == &ClientSource::Fork => Some(text.clone()),
-                _ => None,
-            })
-            .expect("injected fork context");
         assert!(
-            injected.contains("hello world"),
-            "history is included: {injected}"
-        );
-        assert!(
-            !injected.contains("Understood"),
-            "conversation after the fork point is excluded: {injected}"
-        );
-        assert!(
-            mock.prompts().iter().any(|prompt| prompt == &injected),
-            "the context is sent to the new agent"
+            !batch
+                .events
+                .iter()
+                .any(|event| matches!(event.payload, UnifiedEventPayload::UserMessage { .. })),
+            "native fork must not inject a replay prompt"
         );
 
         // The fork's working directory shares the same repository
@@ -3243,6 +2744,75 @@ mod tests {
                 .canonicalize()
                 .expect("canonicalize child"),
             repo.canonicalize().expect("canonicalize repo")
+        );
+    }
+
+    #[tokio::test]
+    async fn fork_requires_agent_session_binding() {
+        let (manager, _mock, dir) = setup().await;
+        let (_repo, source_id) = setup_repo_session(&manager, &dir).await;
+
+        let err = manager
+            .fork(&CommandId::from("c3"), &source_id, None)
+            .await
+            .expect_err("native fork needs the source agent session id");
+        assert!(matches!(err, NodeError::ForkUnsupported(_)));
+    }
+
+    #[tokio::test]
+    async fn start_session_with_fork_from_uses_native_fork() {
+        let (manager, mock, dir) = setup().await;
+        let (repo, source_id) = setup_repo_session(&manager, &dir).await;
+        manager
+            .bus()
+            .record(
+                &source_id,
+                UnifiedEventPayload::SessionAgentBound {
+                    agent_session_id: "agent-source-2".to_owned(),
+                },
+            )
+            .await
+            .expect("bind agent session");
+
+        let child_id = fxg_protocol::util::uuid_v7();
+        let prompt = PromptInput::text("continue");
+        manager
+            .start_session(StartSessionParams {
+                command_id: &CommandId::from("c-fork"),
+                session_id: &child_id,
+                local_path: &repo,
+                agent_id: "ignored-agent",
+                initial_prompt: Some(&prompt),
+                initial_config: &[],
+                mode: None,
+                extra_args: None,
+                fork_from_session_id: Some(&source_id),
+            })
+            .await
+            .expect("start forked session");
+
+        let child = manager
+            .bus()
+            .db()
+            .get_session(&child_id)
+            .await
+            .expect("query")
+            .expect("child row");
+        assert_eq!(
+            child.parent_session_id.as_ref().map(SessionId::as_str),
+            Some(source_id.as_str())
+        );
+        assert_eq!(child.agent_id, "mock");
+
+        let start = mock
+            .starts()
+            .into_iter()
+            .find(|start| start.session_id == child_id)
+            .expect("fork start");
+        assert_eq!(start.fork_from.as_deref(), Some("agent-source-2"));
+        assert!(
+            mock.prompts().iter().any(|text| text == "continue"),
+            "the initial prompt is sent after the fork"
         );
     }
 
@@ -3657,12 +3227,8 @@ mod tests {
     #[test]
     fn replay_context_keeps_most_recent_turns_when_truncated() {
         let old = "a".repeat(70_000);
-        let context = assemble_replay_context(
-            vec![old, "RECENT TURN".to_owned()],
-            10,
-            ReplayPurpose::Revert,
-        )
-        .expect("context");
+        let context =
+            assemble_replay_context(vec![old, "RECENT TURN".to_owned()], 10).expect("context");
         assert!(context.contains("RECENT TURN"));
         assert!(context.contains("older history omitted"));
         assert!(!context.contains(&"a".repeat(1_000)));
@@ -3704,8 +3270,7 @@ mod tests {
                 initial_config: &[],
                 mode: None,
                 extra_args: None,
-                fork_context: None,
-                restore_git_bundle: None,
+                fork_from_session_id: None,
             })
             .await
             .expect("start");
@@ -3778,30 +3343,5 @@ mod tests {
             .expect("query")
             .expect("session");
         assert_eq!(second_row.title, "Implement login page");
-    }
-
-    #[tokio::test]
-    async fn shutdown_all_cleans_up_snapshot_index() {
-        let (manager, _mock, dir) = setup().await;
-        let outcome = manager
-            .ensure_session(&CommandId::from("c_ensure"), dir.path(), "mock", &[], None)
-            .await
-            .expect("ensure");
-
-        // Create the index file
-        let index_path = manager.inner.paths.snapshot_index_path(&outcome.session_id);
-        std::fs::create_dir_all(index_path.parent().unwrap()).expect("create parent dir");
-        std::fs::write(&index_path, b"test index data").expect("write index");
-        assert!(index_path.exists());
-
-        // Run shutdown_all
-        let stopped = manager.shutdown_all().await;
-        assert_eq!(stopped, vec![outcome.session_id]);
-
-        // Confirm the index file has been deleted
-        assert!(
-            !index_path.exists(),
-            "snapshot index must be cleaned up on shutdown"
-        );
     }
 }

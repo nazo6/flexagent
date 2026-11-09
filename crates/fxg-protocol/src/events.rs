@@ -100,8 +100,6 @@ pub enum UnifiedEventPayload {
         agent_id: String,
         /// Session ID this session was forked from
         parent_session_id: Option<SessionId>,
-        /// Event (`node_seq`) of the fork source the history branched from
-        fork_from_node_seq: Option<u64>,
         /// Initial title
         title: String,
     },
@@ -122,12 +120,8 @@ pub enum UnifiedEventPayload {
         text: String,
         /// Attached files
         attachments: Vec<AttachmentMeta>,
-        /// Source (`cli` / `web` / `android` / `fork` / `resume`)
+        /// Source (`cli` / `web` / `android` / `resume`)
         client_source: ClientSource,
-        /// Shadow git tree hash right before the turn started (for revert).
-        /// `None` when `snapshot_enabled = false`. This payload is the single
-        /// source of truth and is not duplicated into dedicated DB columns.
-        snapshot_tree_hash: Option<String>,
     },
     /// A reply message from the agent.
     ///
@@ -233,29 +227,6 @@ pub enum UnifiedEventPayload {
         /// Who resolved it (`cli` / `web` / `android_push`)
         resolved_by: ResolvedBy,
     },
-    /// The workspace files were restored to the `snapshot_tree_hash` of a given
-    /// turn (revert).
-    ///
-    /// The event log is append-only, so conversation events are not deleted; only
-    /// the fact that a revert happened is appended
-    /// (`docs/04-agent-drivers-and-windows.md` §4.1). The state right before the
-    /// restore is kept on the shadow git tree as `backup_tree_hash`, so another
-    /// revert brings it back.
-    SessionReverted {
-        /// `node_seq` of the `UserMessage` used as the revert point
-        target_node_seq: u64,
-        /// Tree hash to restore to (`UserMessage.snapshot_tree_hash`)
-        restored_tree_hash: String,
-        /// Backup tree hash holding the state right before the restore
-        backup_tree_hash: Option<String>,
-        /// Number of restored files
-        restored_files: u64,
-        /// Number of removed files
-        removed_files: u64,
-        /// Whether the agent conversation was rebuilt (files always restore)
-        #[serde(default)]
-        context_rebuilt: bool,
-    },
     /// A change of the session's archive state (hidden from / restored to the list).
     ///
     /// Archiving is a reversible visibility flag; the event log and conversation
@@ -314,6 +285,11 @@ pub enum UnifiedEventPayload {
         available_commands: Vec<CommandInfo>,
         /// Configuration entries (model selection etc.)
         config_options: Vec<ConfigOptionInfo>,
+        /// Whether the agent supports ACP-native `session/fork` + `session/load`.
+        /// `None` keeps the existing value (events recorded before this field
+        /// existed).
+        #[serde(default)]
+        fork_supported: Option<bool>,
     },
     /// A progress log line of ephemeral VM provisioning / automatic tool setup (`stderr`).
     BootstrapLog {
@@ -383,7 +359,6 @@ impl UnifiedEventPayload {
             Self::PermissionResolved { .. } => EventType::PermissionResolved,
             Self::ElicitationRequest { .. } => EventType::ElicitationRequest,
             Self::ElicitationResolved { .. } => EventType::ElicitationResolved,
-            Self::SessionReverted { .. } => EventType::SessionReverted,
             Self::SessionArchived { .. } => EventType::SessionArchived,
             Self::SessionPermissionPolicyChanged { .. } => {
                 EventType::SessionPermissionPolicyChanged
@@ -455,7 +430,6 @@ mod tests {
             text: "Fix the failing tests".to_owned(),
             attachments: vec![],
             client_source: ClientSource::Cli,
-            snapshot_tree_hash: Some("a".repeat(40)),
         });
         let json = serde_json::to_string(&envelope).unwrap();
         let decoded: SessionEventEnvelope = serde_json::from_str(&json).unwrap();
@@ -485,6 +459,7 @@ mod tests {
                     ConfigOptionValue::Select("haiku".to_owned()),
                 ],
             }],
+            fork_supported: None,
         };
         let json = serde_json::to_value(&payload).unwrap();
         assert_eq!(json["type"], "capabilities_updated");
@@ -548,7 +523,6 @@ mod tests {
                 is_worktree: false,
                 agent_id: "opencode".into(),
                 parent_session_id: None,
-                fork_from_node_seq: None,
                 title: "t".into(),
             }
             .event_type(),

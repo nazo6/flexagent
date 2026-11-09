@@ -328,20 +328,6 @@ impl Db {
         queries::resolve_default_local_path(&self.pool, project_id, node_id).await
     }
 
-    /// Hub only: records the path of a salvaged git bundle (cleared with `None`).
-    pub async fn set_git_bundle_path(
-        &self,
-        session_id: &str,
-        path: Option<&str>,
-    ) -> Result<(), DbError> {
-        queries::set_git_bundle_path(&self.pool, session_id, path).await
-    }
-
-    /// Hub only: retrieves the path of a salvaged git bundle.
-    pub async fn get_git_bundle_path(&self, session_id: &str) -> Result<Option<String>, DbError> {
-        queries::get_git_bundle_path(&self.pool, session_id).await
-    }
-
     /// Retrieves the event history after `after_cursor` (batch for incremental resume).
     pub async fn session_events_after(
         &self,

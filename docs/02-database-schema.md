@@ -18,8 +18,7 @@ E2E暗号化を行わないため、中央サーバー側で会話履歴の構�
 ### 0.1 3つの原則
 
 1. **スキーマは1本**: 役割専用のテーブル（`push_subscriptions` 等）やカラム
-   （`synced_up_to_node_seq` / `git_bundle_path`
-   等）も両DBに作成し、使わない側では 空 /
+   （`synced_up_to_node_seq` 等）も両DBに作成し、使わない側では 空 /
    未使用のまま放置する。DDL・クエリ・マイグレーションを1本に保つことを優先する
    （空テーブル・未使用カラムの実害はない）。
 2. **同期はイベントログ1本**:
@@ -31,8 +30,7 @@ E2E暗号化を行わないため、中央サーバー側で会話履歴の構�
 3. **書き込み権威は1つ**: セッション状態を書き換えられるのは**実行ノードのみ**。
    中央サーバーは (a) クライアントコマンドの転送 (b)
    受信イベントの追記と投影適用
-   だけを行い、クライアント要求に応じてセッション状態を直接書き換えない （例外は
-   `git_bundle_path` のようなハブ固有の管理フィールドのみ）。
+   だけを行い、クライアント要求に応じてセッション状態を直接書き換えない。
 
 ### 0.2 ロール差分（ノード / 中央サーバー）
 
@@ -47,7 +45,6 @@ E2E暗号化を行わないため、中央サーバー側で会話履歴の構�
 | `push_subscriptions`                 | 空（未使用）                                         | PWA 購読管理（VAPID）                                              |
 | `audit_logs`                         | ローカル直結操作（CLI / `localhost:7860`）の記録     | ハブ経由操作の記録（同期対象外。各ストアが自分の観測事実のみ記録） |
 | `sessions.synced_up_to_node_seq`     | 使用（ハブが ACK した水位）                          | 未使用（常に 0）                                                   |
-| `sessions.git_bundle_path`           | 未使用（NULL）                                       | 使用（一時VMの退避 Git bundle パス）                               |
 | `sessions.last_node_seq`             | 永続化済み最新の `node_seq`（次はこの値 + 1 を採番） | 投影に適用済みの最大 `node_seq`                                    |
 
 ### 0.3 イベント適用と投影
@@ -59,14 +56,15 @@ E2E暗号化を行わないため、中央サーバー側で会話履歴の構�
 ```text
 SessionCreated        → sessions 行の生成（project_id / node_id / local_path /
                         git_branch / is_worktree / agent_id /
-                        parent_session_id / fork_from_node_seq / title / created_at）
+                        parent_session_id / title / created_at）
                         ※ node_id は SessionCreated payload が保持する
                           (イベントログのみから投影を完全再構築可能にするため)
 SessionTitleChanged   → sessions.title
 SessionAgentBound     → sessions.agent_session_id
 StatusChanged         → sessions.status
 CapabilitiesUpdated   → sessions.current_mode / available_modes_json /
-                        available_commands_json / config_options_json
+                        available_commands_json / config_options_json /
+                        fork_supported
 UsageUpdated          → sessions.usage_json (最新の used / size / cost。
                         累積ではなく最新の `usage_update` を上書き)
 すべてのイベント      → sessions.last_node_seq = 適用済み最大 node_seq
@@ -173,7 +171,6 @@ CREATE TABLE sessions (
     agent_id        TEXT NOT NULL,                  -- "claude-code" | "antigravity-acp" 等
     agent_session_id TEXT,                          -- エージェント内部のセッションID (SessionAgentBound イベントで確定)
     parent_session_id TEXT REFERENCES sessions(session_id), -- Fork元のセッションID
-    fork_from_node_seq INTEGER,                     -- 親セッションのどのイベント(node_seq)時点からFork/Revertしたか
     title           TEXT NOT NULL DEFAULT 'New Session',
     status          TEXT NOT NULL,                  -- 'provisioning' | 'bootstrapping' | 'idle' | 'running' | 'waiting_permission' | 'waiting_input' | 'stopped' | 'error'
     current_mode    TEXT,                           -- ACP SessionMode (例: 'code', 'plan')
@@ -181,7 +178,7 @@ CREATE TABLE sessions (
     available_commands_json TEXT NOT NULL DEFAULT '[]', -- ACP AvailableCommand[]
     config_options_json     TEXT NOT NULL DEFAULT '[]', -- ACP ConfigOption[]
     usage_json      TEXT,                           -- SessionUsage (最新の usage_update。NULL = 未受信)
-    git_bundle_path TEXT,                           -- ハブ専用: 一時VM破棄時に退避された git bundle パス（ノード側は NULL）
+    fork_supported  INTEGER NOT NULL DEFAULT 0,     -- エージェントがACPネイティブForkに対応しているか
     last_node_seq   INTEGER NOT NULL DEFAULT 0,     -- ノード: 永続化済み最新 node_seq（採番は +1）/ ハブ: 投影に適用済み最大 node_seq
     synced_up_to_node_seq INTEGER NOT NULL DEFAULT 0, -- ノード専用: ハブが ACK した水位（ハブ側は常に 0 で未使用）
     archived_at     INTEGER,                        -- アーカイブ日時 (NULL = 未アーカイブ)。既定の一覧から除外される (可逆)
@@ -201,7 +198,7 @@ CREATE TABLE session_events (
     event_id        TEXT NOT NULL UNIQUE,           -- UUID v7 (冪等適用・重複排除)
     session_id      TEXT NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
     node_seq        INTEGER NOT NULL,               -- セッション内の順序番号 (1, 2, 3...)。実行ノードのみが採番
-    event_type      TEXT NOT NULL,                  -- 'session_created' | 'session_title_changed' | 'session_agent_bound' | 'user_message' | 'agent_message' | 'agent_thought' | 'tool_call' | 'plan' | 'permission_request' | 'permission_resolved' | 'elicitation_request' | 'elicitation_resolved' | 'session_reverted' | 'session_archived' | 'session_deleted' | 'terminal_output' | 'status_change' | 'capabilities_updated' | 'bootstrap_log'
+    event_type      TEXT NOT NULL,                  -- 'session_created' | 'session_title_changed' | 'session_agent_bound' | 'user_message' | 'agent_message' | 'agent_thought' | 'tool_call' | 'plan' | 'permission_request' | 'permission_resolved' | 'elicitation_request' | 'elicitation_resolved' | 'session_archived' | 'session_deleted' | 'terminal_output' | 'status_change' | 'capabilities_updated' | 'bootstrap_log'
     payload_json    TEXT NOT NULL,                  -- 構造化ペイロード (UnifiedEventPayload のJSON。正データ)
     searchable_text TEXT,                           -- FTS5全文検索用のプレーンテキスト抽出 (受信時に payload_json から生成。terminal_output 等のバイナリ系は対象外)
     created_at      INTEGER NOT NULL,
@@ -307,21 +304,15 @@ Truth）とするため、テーブル上の以下のカラムは
 すべて**派生データ**として扱います。派生カラムはクエリ性能のためにのみ存在し、
 常にイベントログから再構築できることが要件です（再構築関数 + テストで保証）。
 
-| 派生カラム / テーブル                                              | 生成源                                                                     |
-| :----------------------------------------------------------------- | :------------------------------------------------------------------------- |
-| `sessions.*`（`git_bundle_path` / `synced_up_to_node_seq` を除く） | `session_events` の適用（§0.3 の投影規則）                                 |
-| `permission_requests`                                              | `PermissionRequest` / `PermissionResolved` イベント                        |
-| `elicitation_requests`                                             | `ElicitationRequest` / `ElicitationResolved` イベント                      |
-| `session_events.searchable_text`                                   | `payload_json` からのテキスト抽出（`TerminalOutput` 等のバイナリ系は除外） |
+| 派生カラム / テーブル                          | 生成源                                                                     |
+| :--------------------------------------------- | :------------------------------------------------------------------------- |
+| `sessions.*`（`synced_up_to_node_seq` を除く） | `session_events` の適用（§0.3 の投影規則）                                 |
+| `permission_requests`                          | `PermissionRequest` / `PermissionResolved` イベント                        |
+| `elicitation_requests`                         | `ElicitationRequest` / `ElicitationResolved` イベント                      |
+| `session_events.searchable_text`               | `payload_json` からのテキスト抽出（`TerminalOutput` 等のバイナリ系は除外） |
 
-- **Shadow Git の `snapshot_tree_hash`** は専用カラムを持たず、
-  `UnifiedEventPayload::UserMessage.snapshot_tree_hash`（`payload_json`
-  内）を正とします。 Revert 時の参照は `(session_id, node_seq)`
-  で対象イベントを直接引くため、複製カラムは不要です。
 - `searchable_text` の生成責務はイベントを永続化する側（ノード /
   ハブ双方の受信ハンドラ）にあります。
-- `git_bundle_path`
-  はハブのみが書き込む成果物退避パスであり、イベント投影の対象外です。
 - **削除は行を消さない (tombstone)**: `SessionDeleted` の適用時も `sessions`
   行は削除せず `deleted_at` を立て、本文イベントと `permission_requests` /
   `elicitation_requests`
@@ -338,8 +329,7 @@ Truth）とするため、テーブル上の以下のカラムは
   中央サーバーが `sessions` 行を `status = 'provisioning'`
   で先行挿入します（`upsert_provisional_session`。イベントではなく投影行）。
   ノードの `SessionCreated` が upsert で派生カラムを上書きし、以降は通常の
-  イベント投影に合流します（`git_bundle_path` と同様、全量再構築時には
-  失われ得るベストエフォートの表示用状態）。
+  イベント投影に合流します（全量再構築時には失われ得るベストエフォートの表示用状態）。
 
 ---
 

@@ -95,7 +95,6 @@ pub fn classify_payload(payload: &UnifiedEventPayload) -> (EventType, Option<Str
         | UnifiedEventPayload::TurnEnded { .. }
         | UnifiedEventPayload::PermissionResolved { .. }
         | UnifiedEventPayload::ElicitationResolved { .. }
-        | UnifiedEventPayload::SessionReverted { .. }
         | UnifiedEventPayload::SessionArchived { .. }
         | UnifiedEventPayload::SessionPermissionPolicyChanged { .. }
         | UnifiedEventPayload::SessionDeleted {}
@@ -154,7 +153,6 @@ mod tests {
                 data_b64: None,
             }],
             client_source: ClientSource::Cli,
-            snapshot_tree_hash: None,
         };
         let (event_type, text) = classify_payload(&payload);
         assert_eq!(event_type, EventType::UserMessage);
@@ -260,7 +258,6 @@ mod tests {
             is_worktree: false,
             agent_id: "opencode".to_owned(),
             parent_session_id: None,
-            fork_from_node_seq: None,
             title: "New Session".to_owned(),
         };
         assert_eq!(classify_payload(&payload).1, None);

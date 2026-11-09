@@ -69,6 +69,15 @@ UI のエラーバナー「Details」からは、このページの対応する�
 - **確認**: `details` のパス / セッション状態。
 - **復旧**: メッセージに従ってプロジェクトのリンク、パス、ブランチを修正する。
 
+## FORK_UNSUPPORTED
+
+- **原因**: 使用中のエージェントが ACP ネイティブの `session/fork` +
+  `session/load` に対応していない。fxg は履歴 Replay による Fork を行わない。
+- **確認**: Web UI の Fork ボタンは対応エージェントでのみ表示される。CLI では
+  `fxg session fork` のエラー詳細を確認する。
+- **復旧**: Fork を使わずに新しいセッションを開始する。同じ会話を続けたい場合は
+  同一セッション内でプロンプトを送る。
+
 ## RESUME_REQUIRED
 
 - **原因**: 停止中のセッションで、エージェントがネイティブ復元（`session/resume` /
@@ -149,13 +158,6 @@ UI のエラーバナー「Details」からは、このページの対応する�
 - **原因**: 既存 worktree とブランチ / パスが競合している。
 - **確認**: `GET /api/v1/projects/:id/worktrees`。
 - **復旧**: 既存 worktree を開く、別ブランチ名にする、または既存を削除する。
-
-## SNAPSHOT_UNAVAILABLE
-
-- **原因**: そのターンの Shadow Git Tree スナップショットが無い（非 Git ディレクトリ、
-  スナップショット失敗など）。
-- **確認**: 対象 `node_seq`。ノードログの `snapshot skipped` 警告。
-- **復旧**: 別の復元地点を選ぶ。ワークスペースは変更されていない。
 
 ## SYNC_BACKLOG
 

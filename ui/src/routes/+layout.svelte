@@ -55,7 +55,6 @@
         sync.restart();
         break;
       case "resume_with_replay":
-      case "revert_to_nearest_snapshot":
       case "show_logs":
         void goto(`/sessions/${action.session_id}`);
         break;

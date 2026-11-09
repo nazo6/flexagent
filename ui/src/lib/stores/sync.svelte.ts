@@ -14,7 +14,6 @@ import type {
   SessionArchiveResponse,
   SessionControlAction,
   SessionEventEnvelope,
-  SessionRevertResponse,
   SessionSummary,
 } from "#lib/generated/bindings.ts";
 import { m } from "#lib/paraglide/messages.js";
@@ -456,30 +455,6 @@ export class SyncStore {
       },
       sessionId,
     );
-  }
-
-  /**
-   * Roll the workspace back to the given turn (`UserMessage.node_seq`).
-   *
-   * Calls the REST API that restores from the node's Shadow Git Tree and
-   * re-fetches history to reflect the appended `SessionReverted` event.
-   */
-  async revertSession(
-    sessionId: string,
-    targetNodeSeq: number | null,
-    filesOnly = false,
-  ): Promise<SessionRevertResponse> {
-    const result = await this.connection.client.revertSession(sessionId, {
-      target_node_seq: targetNodeSeq,
-      files_only: filesOnly,
-    });
-    await Promise.all([
-      this.refreshSessions(),
-      this.loadSessionEvents(sessionId).catch(() => {
-        /* Ignore; WS replay will catch up */
-      }),
-    ]);
-    return result;
   }
 
   /** Emergency stop (REST API with an audit log). */

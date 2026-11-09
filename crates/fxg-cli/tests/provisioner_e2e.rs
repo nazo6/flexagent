@@ -3,8 +3,7 @@
 //! The tests start the real `fxg daemon --stdio --ephemeral` binary as a child
 //! process through a provisioner and verify stdio JSON Lines traffic with the
 //! central server, `StartSession` relaying, streamed bootstrap logs, and the
-//! `DrainAndShutdown` → `WorkspaceBundleUpload` →
-//! `sessions.git_bundle_path` persistence at session end.
+//! `DrainAndShutdown` → `DrainComplete` lifecycle.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -48,7 +47,7 @@ where
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn provisioner_runs_stdio_node_and_drains_bundle() {
+async fn provisioner_runs_stdio_node_and_drains() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let server_home = tmp.path().join("server");
     let node_home = tmp.path().join("node");
@@ -199,33 +198,7 @@ async fn provisioner_runs_stdio_node_and_drains_bundle() {
         }
     }
 
-    // 4. Idle / session-end monitoring triggers Drain → Git bundle backup
-    wait_until("workspace bundle stored", Duration::from_secs(90), || {
-        let db = server_state.db().clone();
-        let session_id = session_id.clone();
-        async move {
-            db.get_git_bundle_path(session_id.as_str())
-                .await
-                .expect("load git bundle path")
-                .is_some()
-        }
-    })
-    .await;
-
-    let bundle_path = server_state
-        .db()
-        .get_git_bundle_path(session_id.as_str())
-        .await
-        .expect("bundle path query")
-        .expect("bundle path");
-    let bundle_bytes = std::fs::read(&bundle_path).expect("read bundle");
-    assert!(!bundle_bytes.is_empty(), "bundle must not be empty");
-    assert!(
-        Path::new(&bundle_path).starts_with(server_home.join("bundles")),
-        "bundle path must live under the server home: {bundle_path}"
-    );
-
-    // 5. The ephemeral node is recorded as terminated
+    // 4. The ephemeral node is recorded as terminated
     wait_until("node terminated", Duration::from_secs(60), || {
         let db = server_state.db().clone();
         async move {

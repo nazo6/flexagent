@@ -37,7 +37,7 @@ pub struct DaemonArgs {
     /// Standard I/O pipe (JSON Lines) mode (ephemeral VM; launched by a provisioner)
     #[usage(long)]
     stdio: bool,
-    /// Ephemeral VM mode (enables Git bundle backup on drain)
+    /// Ephemeral VM mode (flushes events and stops sessions on drain)
     #[usage(long)]
     ephemeral: bool,
     /// Initial target directory in `--stdio` mode (the cloned workspace)
@@ -1174,11 +1174,9 @@ pub enum SessionCommands {
     Stop(SessionStopArgs),
     /// Force-terminate the session's child process tree
     Kill(SessionKillArgs),
-    /// Rewind files and conversation to the given turn
-    Revert(SessionRevertArgs),
     /// Resume a stopped session while keeping its conversation context
     Resume(SessionResumeArgs),
-    /// Create a new session by forking the conversation from the given point
+    /// Create a new session by forking the current conversation (ACP-native fork)
     Fork(SessionForkArgs),
     /// Import an existing agent session (native resume)
     Import(SessionImportArgs),
@@ -1351,14 +1349,6 @@ fn describe_event(payload: &UnifiedEventPayload) -> String {
             action,
             ..
         } => format!("elicitation_resolved {elicitation_id} → {action}"),
-        UnifiedEventPayload::SessionReverted {
-            target_node_seq,
-            restored_files,
-            removed_files,
-            ..
-        } => format!(
-            "session_reverted seq={target_node_seq} restored={restored_files} removed={removed_files}"
-        ),
         UnifiedEventPayload::SessionArchived { archived } => {
             format!("session_archived archived={archived}")
         }
@@ -1716,64 +1706,17 @@ impl usage::RunAsync for SessionDeleteArgs {
     }
 }
 
-/// `fxg session revert <id> --to-seq <NODE_SEQ>`
-#[derive(Debug, Args)]
-pub struct SessionRevertArgs {
-    /// Session ID
-    session_id: String,
-    /// Event sequence number to rewind to (the target turn's
-    /// `UserMessage.node_seq`)
-    #[usage(long)]
-    to_seq: u64,
-    /// Restore only files and keep the current agent conversation
-    #[usage(long)]
-    files_only: bool,
-}
-
-impl usage::RunAsync for SessionRevertArgs {
-    type Output = Result<()>;
-
-    async fn run_async(self) -> Self::Output {
-        let mut client = DaemonClient::connect().await?;
-        let outcome = client
-            .revert_session(&self.session_id, Some(self.to_seq), self.files_only)
-            .await?;
-        println!(
-            "reverted to node_seq={} (restored={}, removed={}, context_rebuilt={})",
-            outcome.target_node_seq,
-            outcome.restored_files,
-            outcome.removed_files,
-            outcome.context_rebuilt
-        );
-        println!("  tree:   {}", outcome.restored_tree_hash);
-        if let Some(backup) = &outcome.backup_tree_hash {
-            println!("  backup: {backup}");
-        }
-        Ok(())
-    }
-}
-
 /// `fxg session fork <id>`
 #[derive(Debug, Args)]
 pub struct SessionForkArgs {
     /// Session ID to fork from
     session_id: String,
-    /// Sequence number to fork from (latest when omitted)
-    #[usage(long)]
-    from_seq: Option<u64>,
-    /// Agent ID after the fork (same agent when omitted)
-    #[usage(long)]
-    agent: Option<String>,
     /// Fork into a new worktree
     #[usage(short = 'w', long)]
     worktree: Option<String>,
     /// Base branch used when creating a new worktree
     #[usage(long)]
     base: Option<String>,
-    /// Fork through an ephemeral VM provisioner (requires the central server;
-    /// restores the backed-up Git bundle)
-    #[usage(long)]
-    provisioner: Option<String>,
     /// Print only the session ID and do not open a browser
     #[usage(short = 'd', long)]
     detach: bool,
@@ -1786,48 +1729,6 @@ impl usage::RunAsync for SessionForkArgs {
     type Output = Result<()>;
 
     async fn run_async(self) -> Self::Output {
-        // Fork inside an ephemeral VM: request a context fork through the central
-        // server API
-        if let Some(provisioner) = &self.provisioner {
-            let env = fxg_protocol::config::process_env;
-            let server = crate::server_api::ServerClient::from_config(&env)?;
-            let sessions = server.sessions().await?;
-            let source = sessions
-                .iter()
-                .find(|session| session.session_id.as_str() == self.session_id)
-                .with_context(|| format!("session not found: {}", self.session_id))?;
-            let request = fxg_protocol::client_api::CreateSessionRequest {
-                command_id: format!("cli-{}", fxg_protocol::util::uuid_v7()).into(),
-                project_id: source.project_id.clone(),
-                node_id: None,
-                provisioner: Some(provisioner.clone()),
-                local_path: None,
-                worktree: None,
-                agent_id: self
-                    .agent
-                    .clone()
-                    .unwrap_or_else(|| source.agent_id.clone()),
-                initial_prompt: None,
-                initial_config: Vec::new(),
-                mode: None,
-                extra_args: None,
-                fork: Some(fxg_protocol::client_api::SessionForkSpec {
-                    from_session_id: self.session_id.clone().into(),
-                    from_node_seq: self.from_seq,
-                    // The central server loads the backed-up bundle
-                    // (git_bundle_path) automatically
-                    restore_git_bundle_b64: None,
-                }),
-            };
-            let response = server.create_session(&request).await?;
-            if self.detach {
-                println!("{}", response.session_id);
-            } else {
-                open_session_url(response.session_id.as_str(), self.no_open)?;
-            }
-            return Ok(());
-        }
-
         let mut client = DaemonClient::connect().await?;
         let cwd = match &self.worktree {
             Some(branch) => {
@@ -1838,7 +1739,7 @@ impl usage::RunAsync for SessionForkArgs {
         };
 
         let session_id = client
-            .fork_session(&self.session_id, self.from_seq, self.agent, cwd.as_deref())
+            .fork_session(&self.session_id, cwd.as_deref())
             .await?;
         if self.detach {
             println!("{session_id}");

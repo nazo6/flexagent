@@ -84,7 +84,6 @@ export type TimelineItem =
       text: string;
       attachments: AttachmentMeta[];
       clientSource: string;
-      snapshotTreeHash: string | null;
     }
   | {
       kind: "agent";
@@ -313,7 +312,6 @@ export function buildTimelineItems(sources: TimelineSources): TimelineItem[] {
           text: payload.data.text,
           attachments: payload.data.attachments,
           clientSource: payload.data.client_source,
-          snapshotTreeHash: payload.data.snapshot_tree_hash,
         });
         break;
       case "agent_message":
@@ -485,19 +483,6 @@ export function buildTimelineItems(sources: TimelineSources): TimelineItem[] {
           key: `plan:${event.node_seq}`,
           ...base,
           entries: payload.data.entries,
-        });
-        break;
-      case "session_reverted":
-        items.push({
-          kind: "notice",
-          key: `revert:${event.node_seq}`,
-          ...base,
-          text: m.timeline_session_reverted({
-            seq: payload.data.target_node_seq,
-            restored: payload.data.restored_files,
-            removed: payload.data.removed_files,
-          }),
-          tone: "info",
         });
         break;
       case "status_changed":

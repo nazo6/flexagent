@@ -192,9 +192,8 @@ sequenceDiagram
 
 **不変条件**: 中央サーバーはクライアント要求に応じてセッション状態（`sessions` /
 `permission_requests`）を直接書き換えない。書き込みは常に「実行ノードへのコマンド転送
-→ ノードが状態更新とイベント発行」を経由します（例外は `git_bundle_path`
-等のハブ固有管理フィールドと、
-イベント適用の結果としての投影更新のみ）。これにより「どちらの値が正か」という判定規則が1つになります。
+→ ノードが状態更新とイベント発行」を経由します（例外はイベント適用の結果としての
+投影更新のみ）。これにより「どちらの値が正か」という判定規則が1つになります。
 
 なお、ハブの投影が何らかの理由で失われた場合（DB再構築等）に備え、再接続時の
 `NodeHello` は
@@ -389,7 +388,7 @@ sequenceDiagram
     Note over Server,Eph: 通常のWebSocketノードと100%同一のメッセージ型で双方向通信<br/>(Git認証は GitCredentialRequest でこのパイプ経由にプロキシ)
     Note over Server,Eph: セッション完了 or アイドルタイムアウト (例: 15分)
     Server->>Eph: stdin: DrainAndShutdown
-    Eph->>Server: stdout: EventBatchPush (未送信ログ全フラッシュ) + WorkspaceBundleUpload (Git変更退避)
+    Eph->>Server: stdout: EventBatchPush (未送信ログ全フラッシュ)
     Eph->>Server: stdout: DrainComplete
     Server->>Child: パイプ切断・プロセス終了 (VM / コンテナ / Colabランタイムの即時破棄)
 ```
@@ -509,7 +508,7 @@ exec /tmp/fxg daemon --stdio --ephemeral --workspace /tmp/workspace
        `GitCredentialRequest` を中継する。トークンは
        `[server.git_credentials.<host>]`（`provider = "gh_cli" | "env"`）
        からサーバー側で解決する。
-2. **破棄前の Graceful Drain と Git Bundle 自動退避（ベストエフォート）**:
+2. **破棄前の Graceful Drain（ベストエフォート）**:
    - 一時VM内のイベントは VM 内の `node.db` に蓄積し、終了時に中央サーバーから
      `ServerToNodeMsg::DrainAndShutdown`
      を送信して未送信分を一括フラッシュします。
@@ -517,27 +516,15 @@ exec /tmp/fxg daemon --stdio --ephemeral --workspace /tmp/workspace
      内に未送信のまま残っていたイベントは失われます（VM
      内ディスクごと消滅するため）。この損失は許容仕様とします。
    - `fxg daemon`
-     は未送信のイベントログをすべてフラッシュ（`EventBatchPush`）した上で、ワークスペースの未プッシュコミット・未コミット変更を
-     **`git bundle create` で単一バンドルデータに固め、`WorkspaceBundleUpload`
-     メッセージとして中央サーバーへ退避**します。
-   - **実装順序**: `DrainAndShutdown` 受信 → (1) セッション / PTY 停止
-     (`StatusChanged(Stopped)` 記録) → (2) Outbox 全フラッシュ → (3)
-     未コミット変更を
-     Shadow Git Tree + `git commit-tree`
-     でスナップショットコミット化（`refs/heads/fxg-snapshot`）
-     した上で `git bundle create --all` → (4) `WorkspaceBundleUpload`
-     （8 MiB 単位の Base64 分割転送。サーバーは `DrainComplete`
-     までチャンクを蓄積して連結）→ (5) `DrainComplete` 送信 → 子プロセス終了。
-     復元は `restore_git_bundle_b64` を `StartSession` に載せ、別ノードが
-     `git clone <bundle>` / `git fetch <bundle>` + `checkout -f -B`
-     でスナップショットブランチを再現する。
+     は未送信のイベントログをすべてフラッシュ（`EventBatchPush`）した上で
+     `DrainComplete` を送信し、中央サーバーが子プロセス/VMを破棄します。
+   - ワークスペースの退避（Git bundle）と、別ノードへの Context Fork は行いません。
+     一時VMセッションの再開・引き継ぎは v2 の将来拡張です。
    - **仮セッション投影**: ブートストラップ中（`NodeHello` 前）も UI
      にセッションを
      見せるため、中央サーバーは `sessions` 行を `status = 'provisioning'`
      で先行挿入する（イベントではなく投影行。ノードの `SessionCreated`
      が派生カラムを上書きする。書き込み権威の一元化は維持）。
-   - これにより、一時VMが破棄された後でも、中央サーバーのUI上で差分を閲覧したり、別のノード（手元のWindows
-     PC等）へ引き継いでセッションを `Fork` / 再開できます。
 
 ---
 

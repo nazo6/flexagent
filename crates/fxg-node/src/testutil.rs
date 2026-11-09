@@ -49,11 +49,6 @@ pub(crate) async fn init_test_repo_with_remote(dir: &Path, remote_url: &str) {
         .expect("git remote add");
 }
 
-/// Builds a Shadow Git index path for tests (under a temporary directory).
-pub(crate) fn snapshot_index_path(dir: &Path, session_id: &str) -> std::path::PathBuf {
-    dir.join(format!("{session_id}.index"))
-}
-
 /// Returns a local IPC endpoint for tests.
 ///
 /// - **Windows**: Named pipe (`\\.\pipe\fxg-test-<pid>-<n>`). Tests run in
@@ -101,6 +96,8 @@ pub(crate) struct MockStart {
     pub cwd: PathBuf,
     /// Resume request (`None` means a new session)
     pub resume: Option<ResumeRequest>,
+    /// Source ACP session ID for a native fork
+    pub fork_from: Option<String>,
 }
 
 #[derive(Default)]
@@ -218,6 +215,7 @@ impl AgentDriver for MockAgent {
             session_id: req.session_id,
             cwd: req.cwd,
             resume: req.resume,
+            fork_from: req.fork_from,
         });
         Ok(StartedSession {
             handle: Box::new(self.clone()),

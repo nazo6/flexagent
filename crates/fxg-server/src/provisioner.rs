@@ -12,21 +12,15 @@
 //!   `StartSession` to start the session (the node is "offline" during bootstrap)
 //! - On idle timeout / when all sessions end, sends `DrainAndShutdown` and discards the child
 //!   process (VM/container) after `DrainComplete`
-//! - `WorkspaceBundleUpload` accumulates chunks until `DrainComplete`, saves them to
-//!   `~/.flexagent/bundles/<session-id>.bundle` and records the path in
-//!   `sessions.git_bundle_path`
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::{Duration, Instant};
 
-use base64::Engine as _;
 use fxg_protocol::client_api::ProvisionerTestResponse;
-use fxg_protocol::common::{ForkHistoryItem, NodeLifecycleStatus, PromptInput, SessionStatus};
-use fxg_protocol::config::{
-    BUNDLES_DIR_NAME, DEFAULT_GIT_USERNAME, GitCredentialConfig, ProvisionerConfig,
-};
+use fxg_protocol::common::{NodeLifecycleStatus, PromptInput, SessionStatus};
+use fxg_protocol::config::{DEFAULT_GIT_USERNAME, GitCredentialConfig, ProvisionerConfig};
 use fxg_protocol::node_server::{NodeToServerMsg, ServerToNodeMsg};
 use fxg_protocol::util::uuid_v7;
 use fxg_protocol::{CommandId, NodeId};
@@ -64,20 +58,11 @@ struct Instance {
     last_activity: Arc<StdMutex<Instant>>,
 }
 
-/// Git bundle being accumulated (session_id → sequence of Base64 chunks).
-#[derive(Default)]
-struct BundleAccumulator {
-    chunks: Vec<String>,
-    branch: String,
-    head_commit: String,
-}
-
 struct ProvisionerInner {
     fxg_home: PathBuf,
     configs: BTreeMap<String, ProvisionerConfig>,
     git_credentials: BTreeMap<String, GitCredentialConfig>,
     instances: StdMutex<HashMap<String, Instance>>,
-    bundles: StdMutex<HashMap<String, BundleAccumulator>>,
     drain_waiters: StdMutex<HashMap<String, oneshot::Sender<()>>>,
 }
 
@@ -115,7 +100,6 @@ impl ProvisionerManager {
                 configs,
                 git_credentials,
                 instances: StdMutex::new(HashMap::new()),
-                bundles: StdMutex::new(HashMap::new()),
                 drain_waiters: StdMutex::new(HashMap::new()),
             }),
         }
@@ -226,26 +210,6 @@ impl ProvisionerManager {
             fxg_protocol::discard_with!(tx.send(()), "notify a drain waiter that the node drained");
         }
     }
-
-    fn push_bundle_chunk(&self, session_id: &str, branch: &str, head_commit: &str, chunk: &str) {
-        let mut bundles = self.inner.bundles.lock().expect("bundles lock poisoned");
-        let entry = bundles.entry(session_id.to_owned()).or_default();
-        if !branch.is_empty() {
-            entry.branch = branch.to_owned();
-        }
-        if !head_commit.is_empty() {
-            entry.head_commit = head_commit.to_owned();
-        }
-        entry.chunks.push(chunk.to_owned());
-    }
-
-    fn take_bundle(&self, session_id: &str) -> Option<BundleAccumulator> {
-        self.inner
-            .bundles
-            .lock()
-            .expect("bundles lock poisoned")
-            .remove(session_id)
-    }
 }
 
 /// Session start request (provisioner launch + StartSession).
@@ -273,10 +237,6 @@ pub struct SpawnSessionRequest {
     pub mode: Option<String>,
     /// Extra arguments for the agent
     pub extra_args: Option<Vec<String>>,
-    /// Fork history from another node (replay injection)
-    pub fork_context: Option<Vec<ForkHistoryItem>>,
-    /// Saved Git bundle (Base64)
-    pub restore_bundle_b64: Option<String>,
 }
 
 /// Launches a provisioner for a session (sends StartSession after the handshake).
@@ -330,8 +290,6 @@ pub async fn spawn_session(
         initial_config: request.initial_config.clone(),
         mode: request.mode.clone(),
         extra_args: request.extra_args.clone(),
-        fork_context: request.fork_context.clone(),
-        restore_bundle_b64: request.restore_bundle_b64.clone(),
     };
 
     let spawn = SpawnRequest {
@@ -436,7 +394,6 @@ pub async fn provisioner_test(
             &NodeId::from(node_id.as_str()),
             ServerToNodeMsg::DrainAndShutdown {
                 reason: "provisioner test completed".to_owned(),
-                create_git_bundle: false,
             },
         )
         .await
@@ -521,8 +478,6 @@ struct PendingStart {
     initial_config: Vec<fxg_protocol::common::InitialConfig>,
     mode: Option<String>,
     extra_args: Option<Vec<String>>,
-    fork_context: Option<Vec<ForkHistoryItem>>,
-    restore_bundle_b64: Option<String>,
 }
 
 /// Handles obtained after launching the child process.
@@ -814,7 +769,7 @@ async fn await_handshake_and_start(
                 "timed out waiting for the ephemeral node handshake",
             )
             .await;
-            drain(&state, &node_id, "bootstrap timeout", false).await;
+            drain(&state, &node_id, "bootstrap timeout").await;
             return;
         }
     };
@@ -837,8 +792,7 @@ async fn await_handshake_and_start(
         initial_config: pending.initial_config.clone(),
         mode: pending.mode.clone(),
         extra_args: pending.extra_args.clone(),
-        fork_context_messages: pending.fork_context.clone(),
-        restore_git_bundle_b64: pending.restore_bundle_b64.clone(),
+        fork_from_session_id: None,
     };
     match state
         .hub()
@@ -902,7 +856,7 @@ async fn monitor_instance(state: ServerState, node_id: String, idle_timeout: Dur
                 node_id = node_id.as_str(),
                 "ephemeral node idle timeout; draining"
             );
-            drain(&state, &node_id, "idle timeout", true).await;
+            drain(&state, &node_id, "idle timeout").await;
             return;
         }
         // If the session has ended, discard the node as idle
@@ -918,7 +872,7 @@ async fn monitor_instance(state: ServerState, node_id: String, idle_timeout: Dur
                 session_id,
                 "ephemeral session ended; draining"
             );
-            drain(&state, &node_id, "session ended", true).await;
+            drain(&state, &node_id, "session ended").await;
             return;
         }
     }
@@ -927,12 +881,7 @@ async fn monitor_instance(state: ServerState, node_id: String, idle_timeout: Dur
 /// Sends `DrainAndShutdown` and discards the node after `DrainComplete` (or a timeout).
 ///
 /// Best effort: events not yet sent are lost if the node crashes before draining.
-pub(crate) async fn drain(
-    state: &ServerState,
-    node_id: &str,
-    reason: &str,
-    create_git_bundle: bool,
-) -> bool {
+pub(crate) async fn drain(state: &ServerState, node_id: &str, reason: &str) -> bool {
     if !state.provisioners().is_ephemeral(node_id) {
         return false;
     }
@@ -944,7 +893,6 @@ pub(crate) async fn drain(
             &NodeId::from(node_id),
             ServerToNodeMsg::DrainAndShutdown {
                 reason: reason.to_owned(),
-                create_git_bundle,
             },
         )
         .await
@@ -970,66 +918,9 @@ pub fn running_node_ids(state: &ServerState) -> Vec<String> {
     }
 }
 
-/// Accumulates `WorkspaceBundleUpload` chunks.
-pub(crate) fn on_bundle_upload(
-    state: &ServerState,
-    session_id: &str,
-    branch: &str,
-    head_commit: &str,
-    chunk: &str,
-) {
-    state
-        .provisioners()
-        .push_bundle_chunk(session_id, branch, head_commit, chunk);
-}
-
-/// Handling when `DrainComplete` is received (save the bundle + notify drain waiters).
-pub(crate) async fn on_drain_complete(state: &ServerState, node_id: &str) {
+/// Handling when `DrainComplete` is received (notifies drain waiters).
+pub(crate) fn on_drain_complete(state: &ServerState, node_id: &str) {
     state.provisioners().take_drain_waiter(node_id);
-    if let Some(session_id) = state.provisioners().session_id(node_id) {
-        save_bundle(state, &session_id).await;
-    }
-}
-
-/// Concatenates and decodes the accumulated bundle chunks and saves them to a file.
-async fn save_bundle(state: &ServerState, session_id: &str) {
-    let Some(bundle) = state.provisioners().take_bundle(session_id) else {
-        return;
-    };
-    let encoded: String = bundle.chunks.concat();
-    let bytes = match base64::engine::general_purpose::STANDARD.decode(encoded.as_bytes()) {
-        Ok(bytes) => bytes,
-        Err(err) => {
-            tracing::warn!(session_id, "failed to decode workspace bundle: {err}");
-            return;
-        }
-    };
-    let dir = state.provisioners().fxg_home().join(BUNDLES_DIR_NAME);
-    if let Err(err) = std::fs::create_dir_all(&dir) {
-        tracing::warn!(session_id, "failed to create bundles dir: {err}");
-        return;
-    }
-    let path = dir.join(format!("{session_id}.bundle"));
-    if let Err(err) = std::fs::write(&path, &bytes) {
-        tracing::warn!(session_id, "failed to write workspace bundle: {err}");
-        return;
-    }
-    if let Err(err) = state
-        .db()
-        .set_git_bundle_path(session_id, Some(&path.to_string_lossy()))
-        .await
-    {
-        tracing::warn!(session_id, "failed to record git_bundle_path: {err}");
-        return;
-    }
-    tracing::info!(
-        session_id,
-        path = %path.display(),
-        bytes = bytes.len(),
-        head_commit = bundle.head_commit,
-        branch = bundle.branch,
-        "workspace bundle stored"
-    );
 }
 
 /// Terminates all running temporary VMs (on server shutdown).
@@ -1041,7 +932,6 @@ pub async fn terminate_all(state: &ServerState) {
                 &NodeId::from(node_id.as_str()),
                 ServerToNodeMsg::DrainAndShutdown {
                     reason: "server shutting down".to_owned(),
-                    create_git_bundle: false,
                 },
             )
             .await

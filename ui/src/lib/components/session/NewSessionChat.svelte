@@ -89,7 +89,6 @@
 
   // Fork inheritance
   let forkSessionId = $state("");
-  let forkNodeSeq = $state<number | null>(null);
 
   // Launch options
   let sessionMode = $state<SessionModePreference>("default");
@@ -253,8 +252,6 @@
     const forkSession = page.url.searchParams.get("fork_session");
     if (forkSession) {
       forkSessionId = forkSession;
-      const forkSeqStr = page.url.searchParams.get("fork_seq");
-      forkNodeSeq = forkSeqStr ? Number.parseInt(forkSeqStr, 10) : null;
     }
     const agentParam = page.url.searchParams.get("agent");
     if (agentParam) {
@@ -364,8 +361,6 @@
         fork: forkSessionId
           ? {
               from_session_id: forkSessionId,
-              from_node_seq: forkNodeSeq,
-              restore_git_bundle_b64: null,
             }
           : null,
       });
@@ -459,9 +454,6 @@
             <code class="font-mono bg-background/50 px-1 py-0.5 rounded"
               >{forkSessionId.slice(0, 8)}</code
             >
-            {#if forkNodeSeq !== null}
-              {m.new_session_fork_banner_seq({ seq: forkNodeSeq })}
-            {/if}
             — {m.new_session_fork_banner_description()}
           </span>
         </div>
@@ -471,7 +463,6 @@
           class="h-6 px-2 text-xs"
           onclick={() => {
             forkSessionId = "";
-            forkNodeSeq = null;
           }}
         >
           <XIcon class="size-3.5 mr-1" />
@@ -604,6 +595,7 @@
           {#if !isProvisionerMode && availableAgents.length > 0 && !manualAgent}
             <select
               bind:value={agentId}
+              disabled={forkSessionId !== ""}
               class="border-input bg-background focus-visible:ring-ring/40 h-8 rounded-md border px-2 text-xs outline-none focus-visible:ring-1"
             >
               {#if agentId !== "" && !availableAgentIds.includes(agentId)}
@@ -618,6 +610,7 @@
           {:else}
             <Input
               bind:value={agentId}
+              disabled={forkSessionId !== ""}
               placeholder={m.new_session_agent_id_placeholder()}
               class="h-8 text-xs"
             />

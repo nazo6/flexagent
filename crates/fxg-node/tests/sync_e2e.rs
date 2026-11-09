@@ -299,8 +299,7 @@ async fn create_session_with_events(
             initial_config: &[],
             mode: None,
             extra_args: None,
-            fork_context: None,
-            restore_git_bundle: None,
+            fork_from_session_id: None,
         })
         .await
         .expect("start session");
@@ -959,8 +958,7 @@ async fn central_server_resumes_stopped_session() {
             initial_config: &[],
             mode: None,
             extra_args: None,
-            fork_context: None,
-            restore_git_bundle: None,
+            fork_from_session_id: None,
         })
         .await
         .expect("start session");

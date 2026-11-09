@@ -253,7 +253,6 @@ async fn upsert_session_from_created(
         is_worktree,
         agent_id,
         parent_session_id,
-        fork_from_node_seq,
         title,
         ..
     } = &envelope.payload
@@ -280,27 +279,18 @@ async fn upsert_session_from_created(
     .execute(&mut *conn)
     .await?;
 
-    let fork_from_node_seq_value = fork_from_node_seq
-        .map(|seq| {
-            i64::try_from(seq).map_err(|_| DbError::NodeSeqOutOfRange {
-                session_id: envelope.session_id.to_string(),
-                node_seq: seq,
-            })
-        })
-        .transpose()?;
-
     // Overwrite all columns to support rebuild (do not use INSERT OR REPLACE, since it would
     // delete the event log through ON DELETE CASCADE).
     sqlx::query!(
         r#"
         INSERT INTO sessions (
             session_id, project_id, node_id, local_path, git_branch, is_worktree,
-            agent_id, agent_session_id, parent_session_id, fork_from_node_seq,
+            agent_id, agent_session_id, parent_session_id,
             title, status, current_mode, available_modes_json,
             available_commands_json, config_options_json,
-            git_bundle_path, last_node_seq, synced_up_to_node_seq, created_at, updated_at
+            last_node_seq, synced_up_to_node_seq, created_at, updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, NULL, '[]', '[]', '[]', NULL, ?, 0, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, NULL, '[]', '[]', '[]', ?, 0, ?, ?)
         ON CONFLICT(session_id) DO UPDATE SET
             project_id = excluded.project_id,
             node_id = excluded.node_id,
@@ -309,7 +299,6 @@ async fn upsert_session_from_created(
             is_worktree = excluded.is_worktree,
             agent_id = excluded.agent_id,
             parent_session_id = excluded.parent_session_id,
-            fork_from_node_seq = excluded.fork_from_node_seq,
             title = excluded.title,
             created_at = excluded.created_at
         "#,
@@ -323,7 +312,6 @@ async fn upsert_session_from_created(
         parent_session_id
             .as_ref()
             .map(fxg_protocol::SessionId::as_str),
-        fork_from_node_seq_value,
         title,
         SessionStatus::Idle.as_str(),
         node_seq,
@@ -399,6 +387,7 @@ pub(crate) async fn apply_projections(
             available_modes,
             available_commands,
             config_options,
+            fork_supported,
         } => {
             let available_modes_json = if available_modes.is_empty() {
                 None
@@ -424,6 +413,7 @@ pub(crate) async fn apply_projections(
                        available_modes_json = COALESCE(?, available_modes_json),
                        available_commands_json = COALESCE(?, available_commands_json),
                        config_options_json = COALESCE(?, config_options_json),
+                       fork_supported = COALESCE(?, fork_supported),
                        updated_at = MAX(updated_at, ?),
                        last_node_seq = MAX(last_node_seq, ?)
                  WHERE session_id = ?
@@ -432,6 +422,7 @@ pub(crate) async fn apply_projections(
                 available_modes_json,
                 available_commands_json,
                 config_options_json,
+                *fork_supported,
                 envelope.created_at,
                 node_seq,
                 envelope.session_id,
@@ -668,8 +659,7 @@ pub(crate) async fn apply_projections(
         | UnifiedEventPayload::TerminalInput { .. }
         | UnifiedEventPayload::BootstrapLog { .. }
         | UnifiedEventPayload::TurnEnded { .. }
-        | UnifiedEventPayload::CompactionUpdated { .. }
-        | UnifiedEventPayload::SessionReverted { .. } => {}
+        | UnifiedEventPayload::CompactionUpdated { .. } => {}
     }
 
     // Common to all events: reflect the highest applied node_seq and the update time in the
@@ -755,8 +745,8 @@ fn option_id_looks_like_reject(selected_option_id: &str) -> bool {
 ///   rows cannot be DELETEd (it would also wipe the event log).
 ///   The procedure is therefore "reset derived columns to defaults → replay from
 ///   `SessionCreated` in cursor order".
-/// - `git_bundle_path` (hub-specific management field) and `synced_up_to_node_seq`
-///   (node-specific watermark) are preserved because they do not come from events.
+/// - `synced_up_to_node_seq` (node-specific watermark) is preserved because it
+///   does not come from events.
 /// - The entire event log is loaded into memory (a simplification assuming self-hosted,
 ///   single-tenant scale).
 pub async fn rebuild_projections(pool: &SqlitePool) -> Result<(), DbError> {
@@ -790,6 +780,7 @@ pub async fn rebuild_projections(pool: &SqlitePool) -> Result<(), DbError> {
                config_options_json = '[]',
                usage_json = NULL,
                agent_session_id = NULL,
+               fork_supported = 0,
                archived_at = NULL,
                deleted_at = NULL,
                last_node_seq = 0,

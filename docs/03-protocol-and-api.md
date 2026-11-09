@@ -59,7 +59,6 @@ pub enum UnifiedEventPayload {
         is_worktree: bool,
         agent_id: String,
         parent_session_id: Option<String>,
-        fork_from_node_seq: Option<u64>,
         title: String,
     },
     /// セッションタイトル変更 (UI/CLI からのリネーム。コマンドとして実行ノードに到達してから発行される)
@@ -78,10 +77,7 @@ pub enum UnifiedEventPayload {
     UserMessage {
         text: String,
         attachments: Vec<AttachmentMeta>,
-        client_source: String,        // "cli" | "web" | "android"
-        /// ターン開始直前の Shadow Git Tree Hash (Revert用。snapshot_enabled=false 時は None。
-        /// この payload が唯一の正であり、専用DBカラムへの複製は行わない)
-        snapshot_tree_hash: Option<String>,
+        client_source: String,        // "cli" | "web" | "android" | "resume"
     },
     /// プロンプト入力（IPC / Client WS / Node⇔Server / REST 共通）
     PromptInput {
@@ -240,13 +236,14 @@ pub struct SessionSummary {
     pub agent_id: String,
     pub agent_session_id: Option<String>,
     pub parent_session_id: Option<String>,
-    pub fork_from_node_seq: Option<u64>,
     pub title: String,
     pub status: SessionStatus,
     pub current_mode: Option<String>,
     /// 最新のコンテキスト使用量・累積コスト (UsageUpdated の投影。None = 未受信)
     pub usage: Option<SessionUsage>,
     pub last_node_seq: u64,
+    /// エージェントがACPネイティブFork (`session/fork` + `session/load`) に対応しているか
+    pub fork_supported: bool,
     pub created_at: i64,
     pub updated_at: i64,
 }
@@ -363,7 +360,6 @@ pub struct WorkspaceDiffResponse {
     pub files: Vec<FileDiff>,
 }
 
-pub struct ForkHistoryItem { pub role: String, pub text: String, pub tool_summary: Option<String> }
 
 /// 共通エラーコード (CommandResult および REST エラーレスポンス双方で使用)
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
@@ -478,15 +474,6 @@ pub enum NodeToServerMsg {
         worktree: Option<WorktreeInfo>,
         error: Option<String>,
     },
-    /// セッション Revert (`RevertSession`) の結果応答
-    /// ※成功時は復元結果 (SessionRevertResponse は §3.1 の client_api 型) を返す
-    RevertResult {
-        command_id: String,
-        success: bool,
-        code: Option<ErrorCode>,   // 失敗時の構造化エラーコード (BUSY 等)
-        outcome: Option<SessionRevertResponse>,
-        error: Option<String>,
-    },
     /// セッション再開 (`ResumeSession`) の結果応答
     ResumeResult {
         command_id: String,
@@ -550,14 +537,6 @@ pub enum NodeToServerMsg {
         repo_url: String,
         operation: String, // "clone" | "fetch" | "push"
     },
-    /// 一時VM破棄前の作業ツリー・コミット履歴バンドル退避 (`git bundle create`)
-    /// ※bundle は圧縮して Base64 化し、1メッセージ上限 (例: 16 MiB) を超える場合は分割転送する
-    WorkspaceBundleUpload {
-        session_id: String,
-        branch: String,
-        head_commit: String,
-        bundle_b64: String,
-    },
     /// Graceful Drain 完了通知 (これを受信後に中央サーバーが子プロセス/VMを破棄)
     DrainComplete {
         node_id: String,
@@ -589,13 +568,13 @@ pub enum ServerToNodeMsg {
         local_path: String,
         agent_id: String,
         initial_prompt: Option<PromptInput>, // text + attachments
-        fork_context_messages: Option<Vec<ForkHistoryItem>>, // 別ノードからの履歴引き継ぎ時
-        restore_git_bundle_b64: Option<String>,              // 一時VMから退避されたGitバンドルの復元用
+        /// このノード上にあるソースセッションをACPネイティブForkする場合のみ指定
+        fork_from_session_id: Option<String>,
     },
     /// プロンプト送信（スラッシュコマンド含む）
     /// ※停止済みセッションへの送信はノード側でネイティブ復元 (自動レジューム) を
     ///   試みる。非対応エージェントでは `RESUME_REQUIRED` を返し、クライアントは
-    ///   明示的な再開 (`SessionResume` = 履歴 Replay) を案内する (設計: docs/04 §4.3)
+    ///   明示的な再開 (`SessionResume` = 履歴 Replay) を案内する (設計: docs/04 §4.1)
     SendPrompt {
         command_id: String,
         session_id: String,
@@ -625,18 +604,10 @@ pub enum ServerToNodeMsg {
         session_id: String,
         action: SessionControlAction, // SetMode(String) | SetConfig(k, v) | Cancel | Kill
     },
-    /// 指定ターン時点へのファイル復元 (`fxg session revert`)
-    /// ※ノードの Shadow Git Tree からワークスペースを復元し、
-    ///   SessionReverted イベントを追記する (実行中セッションのみ。busy 時は BUSY)
-    RevertSession {
-        command_id: String,
-        session_id: String,
-        target_node_seq: Option<u64>, // Revert 基準の UserMessage.node_seq (None は直近ターン)
-    },
     /// 停止済みセッションの再開 (`POST /api/v1/sessions/:id/resume`)
     /// ※同一 session_id のままエージェントを起動し、ネイティブ復元
     ///   (`session/resume` → `session/load`) を
-    ///   優先する。復元できない場合は履歴 Replay を注入して継続する (設計: docs/04 §4.3)
+    ///   優先する。復元できない場合は履歴 Replay を注入して継続する (設計: docs/04 §4.1)
     ResumeSession {
         command_id: String,
         session_id: String,
@@ -720,10 +691,9 @@ pub enum ServerToNodeMsg {
         token: Option<String>,
         error: Option<String>,
     },
-    /// 一時VMの終了前フラッシュ＆Gitバンドル退避要求
+    /// 一時VMの終了前フラッシュ要求
     DrainAndShutdown {
         reason: String,
-        create_git_bundle: bool,
     },
     /// 緊急キルスイッチ: ノード上で稼働中の全セッション・プロセスツリー・PTYを即時強制停止
     KillAllSessions {
@@ -759,7 +729,7 @@ pub enum ServerToNodeMsg {
      が自サーバーのドメインまたはローカルオリジン以外からの接続である場合、ハンドシェイクを拒否。
 4. **監査ログ記録 (Audit Logging)**:
    - `session` 起動、`permission` 解決、`kill-switch` 実行、`worktree`
-     操作、セッション Revert、プロジェクト紐付け (scan / link)、エージェント管理
+     操作、プロジェクト紐付け (scan / link)、エージェント管理
      (install / update / remove)、ノードトークン発行・失効、クライアントトークン
      再生成は、クライアントIP・UA・トークンIDとともに `audit_logs` に記録。
    - 記録先は中央サーバー経由の操作が
@@ -836,8 +806,8 @@ pub enum ServerToNodeMsg {
   `include_archived=true` 指定時のみ返却される (既定は除外)。
 - `POST /api/v1/sessions`: 新規セッションの開始（既存の常駐 `node_id`
   指定のほか、`provisioner`
-  指定による一時VMのオンデマンド起動＆自動セットアップ、Worktreeパス指定、別ノードや退避済みGitバンドルからのContext
-  Forkに対応）。
+  指定による一時VMのオンデマンド起動＆自動セットアップ、Worktreeパス指定、
+  同一ノード・同一エージェントのACPネイティブForkに対応）。
 - `GET /api/v1/sessions/:id/events?after_cursor=0`:
   指定カーソル以降のイベント履歴取得（`SessionEventBatch` を返却）。
 - `GET /api/v1/sessions/:id/diff?scope=uncommitted&base=main`:
@@ -855,14 +825,6 @@ pub enum ServerToNodeMsg {
   質問 (elicitation) への応答 (`action` = `accept` | `decline` | `cancel`,
   `content` = `accept` 時の form 回答, `resolved_by`)。既に解決済みの場合は
   `already_resolved = true` を返却し（冪等）、UI 側は正常遷移として扱う。
-- `POST /api/v1/sessions/:id/revert`:
-  指定ターン (`target_node_seq` = `UserMessage.node_seq`) 時点の Shadow Git Tree
-  へワークスペースのファイルを復元する (`fxg session revert` の Web UI 版)。
-  会話イベントは削除せず `SessionReverted` を追記し、復元直前の状態は
-  バックアップ Tree Hash として退避する。応答は `SessionRevertResponse`
-  (`target_node_seq` / Tree Hash / 復元・削除ファイル数)。実行中セッションのみ
-  対象で、ターン実行中は `BUSY` を返却する。中央サーバー経由の場合は対象ノードへ
-  `RevertSession` を中継する。
 - `POST /api/v1/sessions/:id/resume`:
   停止済みセッションを同一 `session_id` のまま再開する (`fxg session resume`
   の Web UI 版)。エージェント側コンテキストのネイティブ復元
@@ -871,7 +833,7 @@ pub enum ServerToNodeMsg {
   (`session_id` / `context_restored`)。稼働中セッションは `INVALID_STATE`、
   一時VMセッションは v1 では `INVALID_STATE`
   を返却する。中央サーバー経由の場合は
-  対象ノードへ `ResumeSession` を中継する (設計: docs/04 §4.3)。
+  対象ノードへ `ResumeSession` を中継する (設計: docs/04 §4.1)。
 - `POST /api/v1/sessions/:id/archive`:
   セッションをアーカイブ/復元する (`{ "archived": true | false }`。
   `fxg session archive` / `unarchive` の Web UI 版)。アーカイブは

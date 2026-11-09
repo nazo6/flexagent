@@ -147,35 +147,15 @@ pub enum IpcClientMessage {
         /// Operation to execute
         action: SessionControlAction,
     },
-    /// Restores files to a given turn (`fxg session revert`).
+    /// Branches the conversation (`fxg session fork`).
     ///
-    /// Conversation events are not deleted; the revert operation is appended as a
-    /// `session_reverted` event (`docs/04-agent-drivers-and-windows.md` §4.1).
-    SessionRevert {
-        /// Correlation ID
-        command_id: CommandId,
-        /// Target session ID
-        session_id: SessionId,
-        /// `node_seq` of the `UserMessage` used as the revert point
-        /// (defaults to the latest turn)
-        target_node_seq: Option<u64>,
-        /// Restore only files and keep the current agent conversation
-        #[serde(default)]
-        files_only: bool,
-    },
-    /// Branches the conversation from a given turn (`fxg session fork`).
-    ///
-    /// Creates a new `session_id` and injects the history up to the given
-    /// `node_seq` into the new agent session as the initial context.
+    /// Creates a new `session_id` using the ACP-native `session/fork` +
+    /// `session/load` pair. The source session must use the same agent.
     SessionFork {
         /// Correlation ID
         command_id: CommandId,
         /// Source session ID
         session_id: SessionId,
-        /// `node_seq` of the fork source (defaults to the latest event)
-        from_node_seq: Option<u64>,
-        /// Agent ID to use in the fork (defaults to the same agent)
-        agent_id: Option<String>,
         /// Working directory of the fork (defaults to the source; used by `-w/--worktree`)
         cwd: Option<String>,
     },
@@ -365,21 +345,6 @@ pub enum IpcResult {
     CommandAccepted {
         /// Target session ID (optional)
         session_id: Option<SessionId>,
-    },
-    /// Result of `SessionRevert`
-    SessionReverted {
-        /// `node_seq` of the `UserMessage` used as the reference
-        target_node_seq: u64,
-        /// Tree hash to restore to
-        restored_tree_hash: String,
-        /// Backup tree hash holding the state right before the restore
-        backup_tree_hash: Option<String>,
-        /// Number of restored files
-        restored_files: u64,
-        /// Number of removed files
-        removed_files: u64,
-        /// Whether the agent conversation was rebuilt
-        context_rebuilt: bool,
     },
     /// Result of `SessionFork`
     SessionForked {
@@ -638,39 +603,16 @@ mod tests {
     }
 
     #[test]
-    fn session_revert_and_fork_roundtrip() {
-        for message in [
-            IpcClientMessage::SessionRevert {
-                command_id: "c1".into(),
-                session_id: "s1".into(),
-                target_node_seq: Some(4),
-                files_only: false,
-            },
-            IpcClientMessage::SessionFork {
-                command_id: "c2".into(),
-                session_id: "s1".into(),
-                from_node_seq: None,
-                agent_id: Some("antigravity-acp".into()),
-                cwd: None,
-            },
-        ] {
-            let json = serde_json::to_value(&message).unwrap();
-            assert!(json["method"].is_string(), "method tag missing: {json}");
-            let decoded: IpcClientMessage = serde_json::from_value(json).unwrap();
-            assert_eq!(decoded, message);
-        }
-
-        let reverted = IpcResult::SessionReverted {
-            target_node_seq: 4,
-            restored_tree_hash: "a".repeat(40),
-            backup_tree_hash: Some("b".repeat(40)),
-            restored_files: 3,
-            removed_files: 1,
-            context_rebuilt: true,
+    fn session_fork_roundtrip() {
+        let message = IpcClientMessage::SessionFork {
+            command_id: "c2".into(),
+            session_id: "s1".into(),
+            cwd: None,
         };
-        let json = serde_json::to_value(&reverted).unwrap();
-        assert_eq!(json["result"], "session_reverted");
-        assert_eq!(serde_json::from_value::<IpcResult>(json).unwrap(), reverted);
+        let json = serde_json::to_value(&message).unwrap();
+        assert!(json["method"].is_string(), "method tag missing: {json}");
+        let decoded: IpcClientMessage = serde_json::from_value(json).unwrap();
+        assert_eq!(decoded, message);
 
         let forked = IpcResult::SessionForked {
             session_id: "child".into(),

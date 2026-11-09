@@ -18,8 +18,6 @@ pub mod actions {
 
     /// Session started
     pub const SESSION_START: AuditAction = AuditAction::SessionStart;
-    /// Session reverted (Shadow Git Tree Revert)
-    pub const SESSION_REVERT: AuditAction = AuditAction::SessionRevert;
     /// Session resumed (resume a stopped session)
     pub const SESSION_RESUME: AuditAction = AuditAction::SessionResume;
     /// Session archived/restored

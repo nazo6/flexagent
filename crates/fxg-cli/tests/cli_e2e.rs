@@ -295,7 +295,7 @@ async fn cli_reports_missing_daemon_when_auto_start_is_disabled() {
 }
 
 /// Verify that the Phase 3 session commands (`session
-/// show|prompt|stop|kill|revert|fork` / `inbox` / `attach`) return errors
+/// show|prompt|stop|kill|resume|fork` / `inbox` / `attach`) return errors
 /// correctly through IPC.
 ///
 /// The tests cover what can be verified without launching a real agent
@@ -358,7 +358,6 @@ async fn phase3_session_and_inbox_commands_roundtrip_through_daemon() {
         vec!["session", "stop", unknown],
         vec!["session", "stop", unknown, "--turn-only"],
         vec!["session", "kill", unknown],
-        vec!["session", "revert", unknown, "--to-seq", "3"],
         vec!["session", "resume", unknown, "--detach"],
         vec!["session", "fork", unknown],
     ] {

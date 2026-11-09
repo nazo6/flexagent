@@ -566,6 +566,11 @@ export type ErrorCode =
  */
 "RESUME_REQUIRED" | 
 /**
+ *  The agent does not support the ACP-native `session/fork` + `session/load`
+ *  pair, so the session cannot be forked.
+ */
+"FORK_UNSUPPORTED" | 
+/**
  *  The agent requires authentication before a session can be created.
  *  The advertised methods are carried in [`ErrorInfo::details`].
  */
@@ -592,8 +597,6 @@ export type ErrorCode =
 "GIT_FAILED" | 
 /**  The worktree is in a conflicting state (branch checked out elsewhere, etc.) */
 "WORKTREE_CONFLICT" | 
-/**  A workspace snapshot required for revert is unavailable */
-"SNAPSHOT_UNAVAILABLE" | 
 /**  The outbox has pending events and synchronization is degraded */
 "SYNC_BACKLOG" | 
 /**  The database is corrupt or a stored value cannot be decoded */
@@ -663,16 +666,6 @@ export type FileDiff = {
 	additions: number,
 	/**  Number of deleted lines */
 	deletions: number,
-};
-
-/**  A conversation history item injected when forking a session. */
-export type ForkHistoryItem = {
-	/**  Speaker role (`user` / `agent` / `tool`) */
-	role: string,
-	/**  Body text */
-	text: string,
-	/**  Summary of tool calls etc. (optional) */
-	tool_summary: string | null,
 };
 
 /**  Query parameters of `GET /api/v1/nodes/:id/fs/browse`. */
@@ -1198,12 +1191,6 @@ agent_id: string } |
 project_id: ProjectId; 
 /**  Branch name (when known) */
 branch: string | null } | 
-/**  Revert to the nearest snapshot that can be restored */
-{ kind: "revert_to_nearest_snapshot"; 
-/**  Target session ID */
-session_id: SessionId; 
-/**  Candidate `node_seq` (the nearest snapshot when omitted) */
-node_seq: number | null } | 
 /**  Open the configuration file */
 { kind: "open_config"; 
 /**  Path of the configuration file */
@@ -1271,7 +1258,7 @@ export type RespondPermissionResponse = {
  *  `POST /api/v1/sessions/:id/resume` request.
  * 
  *  Resumes a stopped session with the same `session_id`
- *  (design: `docs/04-agent-drivers-and-windows.md` §4.3).
+ *  (design: `docs/04-agent-drivers-and-windows.md` §4.1).
  */
 export type ResumeSessionRequest = {
 	/**  Skip native restoration and continue with history replay (default `false`) */
@@ -1444,14 +1431,10 @@ export type SessionEventEnvelope = {
 	payload: UnifiedEventPayload,
 };
 
-/**  Specification of a context fork to another node or agent. */
+/**  Specification of a context fork. */
 export type SessionForkSpec = {
 	/**  Source session ID */
 	from_session_id: SessionId,
-	/**  Event sequence number of the fork source (latest when omitted) */
-	from_node_seq: number | null,
-	/**  Bundle data (Base64) when restoring a git bundle saved from an ephemeral VM */
-	restore_git_bundle_b64: string | null,
 };
 
 /**  ID of a session (UUID v7 assigned by the running node / server). */
@@ -1461,41 +1444,6 @@ export type SessionId = string;
 export type SessionListResponse = {
 	/**  Sessions (newest update first) */
 	sessions: SessionSummary[],
-};
-
-/**
- *  `POST /api/v1/sessions/:id/revert` request.
- * 
- *  Restores the workspace to the shadow git tree of the given turn
- *  (`UserMessage.node_seq`) (the Web UI version of `fxg session revert`).
- */
-export type SessionRevertRequest = {
-	/**
-	 *  `node_seq` of the `UserMessage` used as the revert point
-	 *  (defaults to the latest turn)
-	 */
-	target_node_seq: number | null,
-	/**  Restore only files and keep the current agent conversation */
-	files_only?: boolean,
-};
-
-/**  `POST /api/v1/sessions/:id/revert` response. */
-export type SessionRevertResponse = {
-	/**  `node_seq` of the `UserMessage` used as the reference */
-	target_node_seq: number,
-	/**  Tree hash to restore to */
-	restored_tree_hash: string,
-	/**
-	 *  Backup tree hash holding the state right before the restore
-	 *  (another revert brings it back)
-	 */
-	backup_tree_hash: string | null,
-	/**  Number of restored files */
-	restored_files: number,
-	/**  Number of removed files */
-	removed_files: number,
-	/**  Whether the agent conversation was rebuilt (files always restore) */
-	context_rebuilt?: boolean,
 };
 
 /**  Session status (same values as `sessions.status`). */
@@ -1542,8 +1490,6 @@ export type SessionSummary = {
 	agent_session_id: string | null,
 	/**  Session ID this session was forked from */
 	parent_session_id: SessionId | null,
-	/**  Event (`node_seq`) of the parent session the fork / revert started from */
-	fork_from_node_seq: number | null,
 	/**  Session title */
 	title: string,
 	/**  Session status */
@@ -1561,6 +1507,8 @@ export type SessionSummary = {
 	usage: SessionUsage | null,
 	/**  Latest persisted `node_seq` (node) / highest `node_seq` applied to the projection (hub) */
 	last_node_seq: number,
+	/**  Whether the agent supports ACP-native `session/fork` + `session/load` */
+	fork_supported?: boolean,
 	/**  Creation time (Unix epoch ms) */
 	created_at: number,
 	/**  Last update time (Unix epoch ms) */
@@ -1683,8 +1631,6 @@ export type UnifiedEventPayload =
 	agent_id: string,
 	/**  Session ID this session was forked from */
 	parent_session_id: SessionId | null,
-	/**  Event (`node_seq`) of the fork source the history branched from */
-	fork_from_node_seq: number | null,
 	/**  Initial title */
 	title: string,
 } } | 
@@ -1707,14 +1653,8 @@ export type UnifiedEventPayload =
 	text: string,
 	/**  Attached files */
 	attachments: AttachmentMeta[],
-	/**  Source (`cli` / `web` / `android` / `fork` / `resume`) */
+	/**  Source (`cli` / `web` / `android` / `resume`) */
 	client_source: string,
-	/**
-	 *  Shadow git tree hash right before the turn started (for revert).
-	 *  `None` when `snapshot_enabled = false`. This payload is the single
-	 *  source of truth and is not duplicated into dedicated DB columns.
-	 */
-	snapshot_tree_hash: string | null,
 } } | 
 /**
  *  A reply message from the agent.
@@ -1833,30 +1773,6 @@ export type UnifiedEventPayload =
 	resolved_by: string,
 } } | 
 /**
- *  The workspace files were restored to the `snapshot_tree_hash` of a given
- *  turn (revert).
- * 
- *  The event log is append-only, so conversation events are not deleted; only
- *  the fact that a revert happened is appended
- *  (`docs/04-agent-drivers-and-windows.md` §4.1). The state right before the
- *  restore is kept on the shadow git tree as `backup_tree_hash`, so another
- *  revert brings it back.
- */
-{ type: "session_reverted"; data: {
-	/**  `node_seq` of the `UserMessage` used as the revert point */
-	target_node_seq: number,
-	/**  Tree hash to restore to (`UserMessage.snapshot_tree_hash`) */
-	restored_tree_hash: string,
-	/**  Backup tree hash holding the state right before the restore */
-	backup_tree_hash: string | null,
-	/**  Number of restored files */
-	restored_files: number,
-	/**  Number of removed files */
-	removed_files: number,
-	/**  Whether the agent conversation was rebuilt (files always restore) */
-	context_rebuilt?: boolean,
-} } | 
-/**
  *  A change of the session's archive state (hidden from / restored to the list).
  * 
  *  Archiving is a reversible visibility flag; the event log and conversation
@@ -1924,6 +1840,12 @@ export type UnifiedEventPayload =
 	available_commands: CommandInfo[],
 	/**  Configuration entries (model selection etc.) */
 	config_options: ConfigOptionInfo[],
+	/**
+	 *  Whether the agent supports ACP-native `session/fork` + `session/load`.
+	 *  `None` keeps the existing value (events recorded before this field
+	 *  existed).
+	 */
+	fork_supported?: boolean | null,
 } } | 
 /**  A progress log line of ephemeral VM provisioning / automatic tool setup (`stderr`). */
 { type: "bootstrap_log"; data: {

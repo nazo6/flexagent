@@ -61,6 +61,9 @@ pub enum NodeError {
         /// Why native restore was unavailable
         reason: String,
     },
+    /// The agent does not support the ACP-native `session/fork` + `session/load`.
+    #[error("native session fork is not available: {0}")]
+    ForkUnsupported(String),
     /// The agent requires authentication before a session can be created
     #[error("agent {agent_id} requires authentication")]
     AuthRequired {
@@ -135,6 +138,7 @@ impl NodeError {
                 ErrorCode::InvalidState
             }
             Self::ResumeRequired { .. } => ErrorCode::ResumeRequired,
+            Self::ForkUnsupported(_) => ErrorCode::ForkUnsupported,
             Self::AuthRequired { .. } => ErrorCode::AuthRequired,
             Self::Busy(_) => ErrorCode::Busy,
             Self::CommandDuplicate(_) => ErrorCode::CommandDuplicate,

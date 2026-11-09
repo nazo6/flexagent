@@ -15,8 +15,7 @@ use fxg_protocol::client_api::{
     ProvisionersResponse, PruneWorktreesRequest, RemoveWorktreeRequest, RespondElicitationRequest,
     RespondElicitationResponse, RespondPermissionRequest, RespondPermissionResponse,
     ResumeSessionRequest, ResumeSessionResponse, RotateAuthTokenResponse, SessionArchiveRequest,
-    SessionArchiveResponse, SessionRevertRequest, SessionRevertResponse, WorktreeInfo,
-    WorktreesResponse,
+    SessionArchiveResponse, WorktreeInfo, WorktreesResponse,
 };
 use fxg_protocol::common::{
     AgentAction, CommandResult, DiffScope, ProjectSummary, WorkspaceDiffResponse,
@@ -205,47 +204,26 @@ impl ClientApiBackend for DaemonState {
         }
         let source = audit_source(&client);
 
-        // Context fork from an existing session (within the same node)
-        if let Some(fork) = &request.fork {
-            if fork.restore_git_bundle_b64.is_some() {
-                return Err(ApiError::bad_request(
-                    "git bundle restore requires an ephemeral node (Phase 6)",
-                ));
-            }
-            // Also refresh the binding of the fork source's working directory
-            if let Some(source) = self
-                .db()
-                .get_session(fork.from_session_id.as_str())
-                .await
-                .map_err(ApiError::from)?
-            {
+        // ACP-native fork from an existing session on this node. The source and
+        // the new session share the same agent (the server already validates it).
+        let fork_source = match &request.fork {
+            Some(fork) => {
+                let source = self
+                    .db()
+                    .get_session(fork.from_session_id.as_str())
+                    .await
+                    .map_err(ApiError::from)?
+                    .ok_or_else(|| {
+                        ApiError::not_found(format!("session not found: {}", fork.from_session_id))
+                    })?;
+                // Refresh the binding of the fork source's working directory.
                 self.resolve_and_register_project(Path::new(&source.local_path))
                     .await
                     .map_err(api_error)?;
+                Some(source)
             }
-            let outcome = self
-                .session_manager()
-                .fork(
-                    &request.command_id,
-                    fork.from_session_id.as_str(),
-                    fork.from_node_seq,
-                    Some(&request.agent_id),
-                    None,
-                )
-                .await
-                .map_err(api_error)?;
-            self.record_audit(
-                fxg_db::audit::actions::SESSION_START,
-                &source,
-                Some(&outcome.session_id),
-                serde_json::json!({ "fork_from": fork.from_session_id }),
-            )
-            .await;
-            return Ok(CreateSessionResponse {
-                session_id: outcome.session_id.into(),
-                command_id: request.command_id,
-            });
-        }
+            None => None,
+        };
 
         // Working directory: create a worktree at the same time, use an existing
         // path, or fall back to the node default
@@ -273,22 +251,26 @@ impl ClientApiBackend for DaemonState {
             }
             (None, Some(path)) => (PathBuf::from(path), true),
             (None, None) => {
-                let path = self
-                    .db()
-                    .resolve_default_local_path(
-                        &request.project_id,
-                        &fxg_protocol::NodeId::from(self.node_id()),
-                    )
-                    .await
-                    .map_err(ApiError::from)?
-                    .ok_or_else(|| {
-                        ApiError::not_found(format!(
-                            "no default directory for project {} on this node; \
-                             specify local_path or create a worktree",
-                            request.project_id
-                        ))
-                    })?;
-                (PathBuf::from(path), true)
+                if let Some(source) = fork_source.as_ref() {
+                    (PathBuf::from(&source.local_path), false)
+                } else {
+                    let path = self
+                        .db()
+                        .resolve_default_local_path(
+                            &request.project_id,
+                            &fxg_protocol::NodeId::from(self.node_id()),
+                        )
+                        .await
+                        .map_err(ApiError::from)?
+                        .ok_or_else(|| {
+                            ApiError::not_found(format!(
+                                "no default directory for project {} on this node; \
+                                 specify local_path or create a worktree",
+                                request.project_id
+                            ))
+                        })?;
+                    (PathBuf::from(path), true)
+                }
             }
         };
 
@@ -300,19 +282,24 @@ impl ClientApiBackend for DaemonState {
         }
 
         let session_id = fxg_protocol::util::uuid_v7();
+        let agent_id = fork_source.as_ref().map_or_else(
+            || request.agent_id.clone(),
+            |source| source.agent_id.clone(),
+        );
         let outcome = self
             .session_manager()
             .start_session(StartSessionParams {
                 command_id: &request.command_id,
                 session_id: session_id.as_str(),
                 local_path: &local_path,
-                agent_id: &request.agent_id,
+                agent_id: &agent_id,
                 initial_prompt: request.initial_prompt.as_ref(),
                 initial_config: &request.initial_config,
                 mode: request.mode.as_deref(),
                 extra_args: request.extra_args.as_deref(),
-                fork_context: None,
-                restore_git_bundle: None,
+                fork_from_session_id: fork_source
+                    .as_ref()
+                    .map(|source| source.session_id.as_str()),
             })
             .await
             .map_err(api_error)?;
@@ -321,8 +308,9 @@ impl ClientApiBackend for DaemonState {
             &source,
             Some(&outcome.session_id),
             serde_json::json!({
-                "agent_id": request.agent_id,
+                "agent_id": agent_id,
                 "local_path": local_path.to_string_lossy(),
+                "fork_from": fork_source.as_ref().map(|source| source.session_id.as_str()),
             }),
         )
         .await;
@@ -423,45 +411,6 @@ impl ClientApiBackend for DaemonState {
             }),
             Err(err) => Err(api_error(err)),
         }
-    }
-
-    async fn revert_session(
-        &self,
-        session_id: &str,
-        request: SessionRevertRequest,
-        client: ClientInfo,
-    ) -> Result<SessionRevertResponse, ApiError> {
-        let command_id = CommandId::from(fxg_protocol::util::uuid_v7());
-        let outcome = self
-            .session_manager()
-            .revert(
-                &command_id,
-                session_id,
-                request.target_node_seq,
-                request.files_only,
-            )
-            .await
-            .map_err(api_error)?;
-        self.record_audit(
-            fxg_db::audit::actions::SESSION_REVERT,
-            &audit_source(&client),
-            Some(session_id),
-            serde_json::json!({
-                "target_node_seq": outcome.target_node_seq,
-                "restored_tree_hash": outcome.restored_tree_hash,
-                "restored_files": outcome.restored_files,
-                "removed_files": outcome.removed_files,
-            }),
-        )
-        .await;
-        Ok(SessionRevertResponse {
-            target_node_seq: outcome.target_node_seq,
-            restored_tree_hash: outcome.restored_tree_hash,
-            backup_tree_hash: outcome.backup_tree_hash,
-            restored_files: outcome.restored_files as u64,
-            removed_files: outcome.removed_files as u64,
-            context_rebuilt: outcome.context_rebuilt,
-        })
     }
 
     async fn resume_session(

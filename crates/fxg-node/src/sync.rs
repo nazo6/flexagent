@@ -45,8 +45,6 @@ const OUTBOX_BATCH_EVENTS: usize = 200;
 const SEND_QUEUE_CAPACITY: usize = 1024;
 /// Maximum number of sessions reported in `NodeHello`.
 const HELLO_SESSION_LIMIT: u32 = 1000;
-/// Maximum Base64 chunk size per `WorkspaceBundleUpload` message (8 MiB).
-pub const BUNDLE_CHUNK_B64_BYTES: usize = 8 * 1024 * 1024;
 
 /// Processing context for commands from the server (absorbs transport differences).
 ///
@@ -58,7 +56,7 @@ pub(crate) struct CommandContext<'a> {
     /// Override directory of `--stdio --workspace`
     /// (pins `StartSession.local_path` to a fixed clone destination)
     pub workspace: Option<&'a Path>,
-    /// Whether this is ephemeral VM mode (`DrainAndShutdown` backs up a Git bundle)
+    /// Whether this is ephemeral VM mode (stop sessions and flush on drain)
     pub ephemeral: bool,
     /// Signal that requests process shutdown when `DrainAndShutdown` is received
     pub shutdown: Option<&'a watch::Sender<bool>>,
@@ -388,8 +386,7 @@ pub(crate) async fn handle_server_message(
             initial_config,
             mode,
             extra_args,
-            fork_context_messages,
-            restore_git_bundle_b64,
+            fork_from_session_id,
         } => {
             // An ephemeral VM (`--stdio --workspace`) is pinned to the cloned directory
             // (the server does not know the path inside the VM, so the requested
@@ -398,36 +395,6 @@ pub(crate) async fn handle_server_message(
                 .workspace
                 .map(Path::to_path_buf)
                 .unwrap_or_else(|| PathBuf::from(&local_path));
-
-            // Restore the backed-up Git bundle (handover to another node / resuming an
-            // ephemeral VM)
-            let restore_bundle_file = match restore_git_bundle_b64.as_deref() {
-                Some(b64) => match BASE64.decode(b64.as_bytes()) {
-                    Ok(bytes) => match crate::bundle::write_bundle_file(
-                        &state.paths().bundles_dir(),
-                        session_id.as_str(),
-                        &bytes,
-                    ) {
-                        Ok(file) => Some(file),
-                        Err(err) => {
-                            send_command_result(out, command_id, Err(err)).await;
-                            return;
-                        }
-                    },
-                    Err(err) => {
-                        send_command_result(
-                            out,
-                            command_id,
-                            Err(NodeError::InvalidSession(format!(
-                                "invalid git bundle payload: {err}"
-                            ))),
-                        )
-                        .await;
-                        return;
-                    }
-                },
-                None => None,
-            };
 
             // Bring the project binding of the working directory up to date
             // (an ephemeral VM already registered it at bootstrap, but re-register on
@@ -448,8 +415,9 @@ pub(crate) async fn handle_server_message(
                     initial_config: &initial_config,
                     mode: mode.as_deref(),
                     extra_args: extra_args.as_deref(),
-                    fork_context: fork_context_messages.as_deref(),
-                    restore_git_bundle: restore_bundle_file.as_deref(),
+                    fork_from_session_id: fork_from_session_id
+                        .as_ref()
+                        .map(fxg_protocol::SessionId::as_str),
                 })
                 .await
                 .map(|_| ());
@@ -567,49 +535,6 @@ pub(crate) async fn handle_server_message(
                 .await
                 .map(|()| session_id);
             send_command_result(out, command_id, result).await;
-        }
-        ServerToNodeMsg::RevertSession {
-            command_id,
-            session_id,
-            target_node_seq,
-            files_only,
-        } => {
-            let outcome = state
-                .session_manager()
-                .revert(
-                    &command_id,
-                    session_id.as_str(),
-                    target_node_seq,
-                    files_only,
-                )
-                .await;
-            let message = match outcome {
-                Ok(outcome) => NodeToServerMsg::RevertResult {
-                    command_id,
-                    success: true,
-                    code: None,
-                    outcome: Some(fxg_protocol::client_api::SessionRevertResponse {
-                        target_node_seq: outcome.target_node_seq,
-                        restored_tree_hash: outcome.restored_tree_hash,
-                        backup_tree_hash: outcome.backup_tree_hash,
-                        restored_files: outcome.restored_files as u64,
-                        removed_files: outcome.removed_files as u64,
-                        context_rebuilt: outcome.context_rebuilt,
-                    }),
-                    error: None,
-                },
-                Err(err) => NodeToServerMsg::RevertResult {
-                    command_id,
-                    success: false,
-                    code: Some(err.error_code()),
-                    outcome: None,
-                    error: Some(err.to_string()),
-                },
-            };
-            fxg_protocol::discard_with!(
-                out.send(message).await,
-                "send a message to a channel that may be closed"
-            );
         }
         ServerToNodeMsg::ResumeSession {
             command_id,
@@ -1067,11 +992,8 @@ pub(crate) async fn handle_server_message(
                 },
             );
         }
-        ServerToNodeMsg::DrainAndShutdown {
-            reason,
-            create_git_bundle,
-        } => {
-            drain_and_shutdown(state, out, ctx, &reason, create_git_bundle).await;
+        ServerToNodeMsg::DrainAndShutdown { reason } => {
+            drain_and_shutdown(state, out, ctx, &reason).await;
         }
         ServerToNodeMsg::KillAllSessions { reason } => match state.kill_all_local(&reason).await {
             Ok((killed_sessions, killed_ptys)) => {
@@ -1228,10 +1150,8 @@ async fn handle_remote_pty_spawn(
 
 /// Handles `DrainAndShutdown` (best effort).
 ///
-/// 1. Flush all unsent events
-/// 2. If this is an ephemeral VM (`ctx.ephemeral`), create a `git bundle` and upload it
-///    in chunks
-/// 3. Send `DrainComplete` and request process shutdown
+/// 1. Flush all unsent events and stop sessions on an ephemeral VM
+/// 2. Send `DrainComplete` and request process shutdown
 ///
 /// Losing intermediate events when the process crashes before drain is acceptable by
 /// design (design: docs/01 §6.4).
@@ -1240,9 +1160,8 @@ async fn drain_and_shutdown(
     out: &mpsc::Sender<NodeToServerMsg>,
     ctx: &CommandContext<'_>,
     reason: &str,
-    create_git_bundle: bool,
 ) {
-    tracing::info!(reason, create_git_bundle, "drain and shutdown requested");
+    tracing::info!(reason, "drain and shutdown requested");
 
     // 1. Stop sessions / PTYs (records StatusChanged(Stopped))
     if ctx.ephemeral
@@ -1254,23 +1173,6 @@ async fn drain_and_shutdown(
     // 2. Flush all unsent events
     if let Err(err) = push_outbox(state, out).await {
         tracing::warn!("failed to flush outbox on drain: {err}");
-    }
-
-    if create_git_bundle
-        && ctx.ephemeral
-        && let Some(workspace) = ctx.workspace
-    {
-        match upload_workspace_bundle(state, out, workspace).await {
-            Ok(Some(session_id)) => {
-                tracing::info!(session_id, "workspace bundle uploaded");
-            }
-            Ok(None) => {
-                tracing::info!("no session to attach workspace bundle to; skipped");
-            }
-            Err(err) => {
-                tracing::warn!("failed to create workspace bundle: {err}");
-            }
-        }
     }
 
     fxg_protocol::discard_with!(
@@ -1286,61 +1188,6 @@ async fn drain_and_shutdown(
     } else {
         tracing::warn!("drain requested but no shutdown channel is attached");
     }
-}
-
-/// Generates the workspace Git bundle and uploads it in chunks as
-/// `WorkspaceBundleUpload`.
-///
-/// Returns `Ok(None)` if there are no sessions (no backup needed).
-async fn upload_workspace_bundle(
-    state: &DaemonState,
-    out: &mpsc::Sender<NodeToServerMsg>,
-    workspace: &Path,
-) -> Result<Option<String>, NodeError> {
-    let sessions = state
-        .db()
-        .list_sessions(&SessionFilter {
-            limit: Some(1),
-            ..SessionFilter::default()
-        })
-        .await?;
-    let Some(session) = sessions.first() else {
-        return Ok(None);
-    };
-
-    let index_path = state
-        .paths()
-        .snapshot_index_path(session.session_id.as_str());
-    let bundle =
-        crate::bundle::create_workspace_bundle(workspace, &index_path, session.session_id.as_str())
-            .await?;
-
-    let encoded = BASE64.encode(&bundle.bytes);
-    let chunks: Vec<&str> = encoded
-        .as_bytes()
-        .chunks(BUNDLE_CHUNK_B64_BYTES)
-        .filter_map(|chunk| match std::str::from_utf8(chunk) {
-            Ok(chunk) => Some(chunk),
-            Err(err) => {
-                tracing::error!("base64 chunk is not valid UTF-8: {err}");
-                None
-            }
-        })
-        .collect();
-    for chunk in chunks {
-        let message = NodeToServerMsg::WorkspaceBundleUpload {
-            session_id: session.session_id.clone(),
-            branch: bundle.branch.clone().unwrap_or_default(),
-            head_commit: bundle.head_commit.clone().unwrap_or_default(),
-            bundle_b64: chunk.to_owned(),
-        };
-        if out.send(message).await.is_err() {
-            return Err(NodeError::Server(
-                "bundle sink closed before upload completed".to_owned(),
-            ));
-        }
-    }
-    Ok(Some(session.session_id.to_string()))
 }
 
 /// Builds and sends a `CommandResult`.

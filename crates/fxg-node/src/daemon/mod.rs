@@ -878,7 +878,6 @@ mod tests {
                 is_worktree: false,
                 agent_id: "mock".to_owned(),
                 parent_session_id: None,
-                fork_from_node_seq: None,
                 title: "stale".to_owned(),
             },
         )

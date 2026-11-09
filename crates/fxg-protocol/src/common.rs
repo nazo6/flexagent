@@ -658,8 +658,6 @@ pub struct SessionSummary {
     pub agent_session_id: Option<String>,
     /// Session ID this session was forked from
     pub parent_session_id: Option<SessionId>,
-    /// Event (`node_seq`) of the parent session the fork / revert started from
-    pub fork_from_node_seq: Option<u64>,
     /// Session title
     pub title: String,
     /// Session status
@@ -676,6 +674,9 @@ pub struct SessionSummary {
     pub usage: Option<SessionUsage>,
     /// Latest persisted `node_seq` (node) / highest `node_seq` applied to the projection (hub)
     pub last_node_seq: u64,
+    /// Whether the agent supports ACP-native `session/fork` + `session/load`
+    #[serde(default)]
+    pub fork_supported: bool,
     /// Creation time (Unix epoch ms)
     pub created_at: i64,
     /// Last update time (Unix epoch ms)
@@ -1028,12 +1029,8 @@ crate::open_string_enum! {
         Web => "web",
         /// An Android PWA client
         Android => "android",
-        /// History injected when forking a session
-        Fork => "fork",
         /// History injected when resuming a session
         Resume => "resume",
-        /// History injected when reverting a session
-        Revert => "revert",
     }
 }
 
@@ -1050,7 +1047,7 @@ crate::open_string_enum! {
 }
 
 crate::open_string_enum! {
-    /// Role of a conversation history item injected on fork / resume.
+    /// Role of a conversation history item injected on resume.
     pub enum HistoryRole {
         /// A user utterance
         User => "user",
@@ -1220,18 +1217,6 @@ pub struct WorkspaceDiffResponse {
     pub files: Vec<FileDiff>,
 }
 
-/// A conversation history item injected when forking a session.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
-#[specta(collect)]
-pub struct ForkHistoryItem {
-    /// Speaker role (`user` / `agent` / `tool`)
-    pub role: HistoryRole,
-    /// Body text
-    pub text: String,
-    /// Summary of tool calls etc. (optional)
-    pub tool_summary: Option<String>,
-}
-
 /// Shared error code (used by both `CommandResult` and REST error responses).
 ///
 /// The code is the machine-readable contract: clients use it as an i18n key and
@@ -1258,6 +1243,9 @@ pub enum ErrorCode {
     /// native restoration (`session/resume` etc.). An explicit resume through
     /// history replay (`fxg session resume` / Resume in the Web UI) is required.
     ResumeRequired,
+    /// The agent does not support the ACP-native `session/fork` + `session/load`
+    /// pair, so the session cannot be forked.
+    ForkUnsupported,
     /// The agent requires authentication before a session can be created.
     /// The advertised methods are carried in [`ErrorInfo::details`].
     AuthRequired,
@@ -1283,8 +1271,6 @@ pub enum ErrorCode {
     GitFailed,
     /// The worktree is in a conflicting state (branch checked out elsewhere, etc.)
     WorktreeConflict,
-    /// A workspace snapshot required for revert is unavailable
-    SnapshotUnavailable,
     /// The outbox has pending events and synchronization is degraded
     SyncBacklog,
     /// The database is corrupt or a stored value cannot be decoded
@@ -1319,6 +1305,7 @@ impl ErrorCode {
         Self::Busy,
         Self::InvalidState,
         Self::ResumeRequired,
+        Self::ForkUnsupported,
         Self::AuthRequired,
         Self::PtyDisabled,
         Self::CommandDuplicate,
@@ -1331,7 +1318,6 @@ impl ErrorCode {
         Self::GitUnavailable,
         Self::GitFailed,
         Self::WorktreeConflict,
-        Self::SnapshotUnavailable,
         Self::SyncBacklog,
         Self::DbCorrupt,
         Self::ProvisionerFailed,
@@ -1355,6 +1341,7 @@ impl ErrorCode {
             Self::Busy => "BUSY",
             Self::InvalidState => "INVALID_STATE",
             Self::ResumeRequired => "RESUME_REQUIRED",
+            Self::ForkUnsupported => "FORK_UNSUPPORTED",
             Self::AuthRequired => "AUTH_REQUIRED",
             Self::PtyDisabled => "PTY_DISABLED",
             Self::CommandDuplicate => "COMMAND_DUPLICATE",
@@ -1367,7 +1354,6 @@ impl ErrorCode {
             Self::GitUnavailable => "GIT_UNAVAILABLE",
             Self::GitFailed => "GIT_FAILED",
             Self::WorktreeConflict => "WORKTREE_CONFLICT",
-            Self::SnapshotUnavailable => "SNAPSHOT_UNAVAILABLE",
             Self::SyncBacklog => "SYNC_BACKLOG",
             Self::DbCorrupt => "DB_CORRUPT",
             Self::ProvisionerFailed => "PROVISIONER_FAILED",
@@ -1413,6 +1399,7 @@ impl FromStr for ErrorCode {
             "BUSY" => Ok(Self::Busy),
             "INVALID_STATE" => Ok(Self::InvalidState),
             "RESUME_REQUIRED" => Ok(Self::ResumeRequired),
+            "FORK_UNSUPPORTED" => Ok(Self::ForkUnsupported),
             "AUTH_REQUIRED" => Ok(Self::AuthRequired),
             "PTY_DISABLED" => Ok(Self::PtyDisabled),
             "COMMAND_DUPLICATE" => Ok(Self::CommandDuplicate),
@@ -1425,7 +1412,6 @@ impl FromStr for ErrorCode {
             "GIT_UNAVAILABLE" => Ok(Self::GitUnavailable),
             "GIT_FAILED" => Ok(Self::GitFailed),
             "WORKTREE_CONFLICT" => Ok(Self::WorktreeConflict),
-            "SNAPSHOT_UNAVAILABLE" => Ok(Self::SnapshotUnavailable),
             "SYNC_BACKLOG" => Ok(Self::SyncBacklog),
             "DB_CORRUPT" => Ok(Self::DbCorrupt),
             "PROVISIONER_FAILED" => Ok(Self::ProvisionerFailed),
@@ -1565,13 +1551,6 @@ pub enum RecoveryAction {
         project_id: ProjectId,
         /// Branch name (when known)
         branch: Option<String>,
-    },
-    /// Revert to the nearest snapshot that can be restored
-    RevertToNearestSnapshot {
-        /// Target session ID
-        session_id: SessionId,
-        /// Candidate `node_seq` (the nearest snapshot when omitted)
-        node_seq: Option<u64>,
     },
     /// Open the configuration file
     OpenConfig {
@@ -1884,8 +1863,6 @@ crate::open_string_enum! {
         ElicitationRequest => "elicitation_request",
         /// Elicitation resolved
         ElicitationResolved => "elicitation_resolved",
-        /// Session reverted
-        SessionReverted => "session_reverted",
         /// Session archived
         SessionArchived => "session_archived",
         /// Session permission policy changed
@@ -1934,8 +1911,6 @@ crate::open_string_enum! {
     pub enum AuditAction {
         /// Session started
         SessionStart => "session_start",
-        /// Session reverted
-        SessionRevert => "session_revert",
         /// Session resumed
         SessionResume => "session_resume",
         /// Session archived / restored
@@ -2003,6 +1978,7 @@ mod tests {
             ErrorCode::Busy,
             ErrorCode::InvalidState,
             ErrorCode::ResumeRequired,
+            ErrorCode::ForkUnsupported,
             ErrorCode::PtyDisabled,
             ErrorCode::CommandDuplicate,
             ErrorCode::NotFound,
@@ -2014,7 +1990,6 @@ mod tests {
             ErrorCode::GitUnavailable,
             ErrorCode::GitFailed,
             ErrorCode::WorktreeConflict,
-            ErrorCode::SnapshotUnavailable,
             ErrorCode::SyncBacklog,
             ErrorCode::DbCorrupt,
             ErrorCode::ProvisionerFailed,

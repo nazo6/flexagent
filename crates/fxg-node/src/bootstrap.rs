@@ -67,7 +67,7 @@ pub async fn bootstrap_workspace(options: BootstrapOptions) -> Result<BootstrapO
         source,
     })?;
 
-    if !crate::bundle::git_available().await {
+    if !crate::git::git_available().await {
         return Err(NodeError::GitUnavailable(
             "git is required for bootstrap-workspace".to_owned(),
         ));
@@ -106,7 +106,7 @@ pub async fn bootstrap_workspace(options: BootstrapOptions) -> Result<BootstrapO
     }
 
     // `git` is used with the highest priority, so only try to install it when missing
-    if options.install_toolchain && !crate::bundle::git_available().await {
+    if options.install_toolchain && !crate::git::git_available().await {
         log("git is missing after setup; setup commands may fail");
     }
 

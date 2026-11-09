@@ -115,12 +115,12 @@ impl Fixture {
                     input_hint: None,
                 }],
                 config_options: vec![],
+                fork_supported: Some(true),
             }),
             self.event(UnifiedEventPayload::UserMessage {
                 text: "Fix the authentication error".to_owned(),
                 attachments: vec![],
                 client_source: ClientSource::Cli,
-                snapshot_tree_hash: Some("b".repeat(40)),
             }),
             self.event(UnifiedEventPayload::PermissionRequest {
                 request_id: "req-1".to_owned(),
@@ -161,7 +161,6 @@ fn session_created_payload() -> UnifiedEventPayload {
         is_worktree: false,
         agent_id: "opencode2".to_owned(),
         parent_session_id: None,
-        fork_from_node_seq: None,
         title: "New Session".to_owned(),
     }
 }
@@ -347,6 +346,7 @@ async fn capabilities_partial_update_keeps_available_modes_projection() {
         }],
         available_commands: vec![],
         config_options: vec![],
+        fork_supported: None,
     });
     // Partial updates without modes (commands only) do not overwrite available_modes
     let commands = fixture.event(UnifiedEventPayload::CapabilitiesUpdated {
@@ -358,6 +358,7 @@ async fn capabilities_partial_update_keeps_available_modes_projection() {
             input_hint: None,
         }],
         config_options: vec![],
+        fork_supported: None,
     });
     fixture
         .db
@@ -565,14 +566,12 @@ async fn rebuild_projections_matches_incremental_apply() {
         is_worktree: true,
         agent_id: "opencode2".to_owned(),
         parent_session_id: Some(parent_session_id.clone().into()),
-        fork_from_node_seq: Some(6),
         title: "Forked Session".to_owned(),
     });
     let forked_message = fixture.event(UnifiedEventPayload::UserMessage {
         text: "This is a forked session".to_owned(),
         attachments: vec![],
         client_source: ClientSource::Web,
-        snapshot_tree_hash: None,
     });
     fixture
         .db
@@ -626,7 +625,6 @@ async fn rebuild_projections_matches_incremental_apply() {
             .map(fxg_protocol::SessionId::as_str),
         Some(parent_session_id.as_str())
     );
-    assert_eq!(forked.fork_from_node_seq, Some(6));
     assert!(forked.is_worktree);
 
     // Idempotent: rebuilding again changes nothing
@@ -729,7 +727,6 @@ async fn fts_search_matches_text_and_excludes_binary_events() {
         text: "認証エラーのデバッグをお願いします".to_owned(), // allow-japanese: CJK full-text search test
         attachments: vec![],
         client_source: ClientSource::Cli,
-        snapshot_tree_hash: None,
     });
     let terminal = fixture.event(UnifiedEventPayload::TerminalOutput {
         terminal_id: "term-1".to_owned(),
@@ -1324,7 +1321,6 @@ async fn default_local_path_prefers_recent_binding_then_session_history() {
             is_worktree: false,
             agent_id: "opencode2".to_owned(),
             parent_session_id: None,
-            fork_from_node_seq: None,
             title: "New Session".to_owned(),
         },
     };
@@ -1428,7 +1424,6 @@ async fn append_next_event_allocates_gap_free_sequences() {
                 text: "Continue".to_owned(),
                 attachments: vec![],
                 client_source: ClientSource::Cli,
-                snapshot_tree_hash: None,
             },
         )
         .await
@@ -1669,7 +1664,6 @@ async fn session_deletion_purges_content_and_keeps_tombstone() {
             text: "event received after deletion".to_owned(),
             attachments: vec![],
             client_source: ClientSource::Web,
-            snapshot_tree_hash: None,
         },
     };
     let outcome = fixture

@@ -72,10 +72,9 @@ pub async fn list_sessions(
                project_id, node_id, local_path, git_branch,
                is_worktree AS "is_worktree: bool",
                agent_id, agent_session_id, parent_session_id AS "parent_session_id: SessionId",
-               fork_from_node_seq,
                title, status AS "status: SessionStatus", current_mode,
                permission_policy AS "permission_policy: PermissionPolicy", usage_json,
-               last_node_seq, created_at, updated_at,
+               last_node_seq, fork_supported AS "fork_supported: bool", created_at, updated_at,
                archived_at
           FROM sessions
          WHERE deleted_at IS NULL
@@ -129,10 +128,9 @@ pub async fn get_session(
                project_id, node_id, local_path, git_branch,
                is_worktree AS "is_worktree: bool",
                agent_id, agent_session_id, parent_session_id AS "parent_session_id: SessionId",
-               fork_from_node_seq,
                title, status AS "status: SessionStatus", current_mode,
                permission_policy AS "permission_policy: PermissionPolicy", usage_json,
-               last_node_seq, created_at, updated_at,
+               last_node_seq, fork_supported AS "fork_supported: bool", created_at, updated_at,
                archived_at
           FROM sessions
          WHERE session_id = ? AND deleted_at IS NULL
@@ -142,44 +140,6 @@ pub async fn get_session(
     .fetch_optional(pool)
     .await?;
     row.map(SessionRow::into_summary).transpose()
-}
-
-/// Hub only: records the path of a git bundle salvaged when an ephemeral VM is destroyed.
-///
-/// Cleared with `None` (e.g. after restoring the bundle).
-pub async fn set_git_bundle_path(
-    pool: &SqlitePool,
-    session_id: &str,
-    path: Option<&str>,
-) -> Result<(), DbError> {
-    let result = sqlx::query!(
-        r#"UPDATE sessions SET git_bundle_path = ? WHERE session_id = ?"#,
-        path,
-        session_id,
-    )
-    .execute(pool)
-    .await?;
-    if result.rows_affected() == 0 {
-        return Err(DbError::SessionNotFound(session_id.to_owned()));
-    }
-    Ok(())
-}
-
-/// Hub only: retrieves the path of a salvaged git bundle.
-pub async fn get_git_bundle_path(
-    pool: &SqlitePool,
-    session_id: &str,
-) -> Result<Option<String>, DbError> {
-    let row = sqlx::query!(
-        r#"SELECT git_bundle_path FROM sessions WHERE session_id = ?"#,
-        session_id,
-    )
-    .fetch_optional(pool)
-    .await?;
-    match row {
-        Some(row) => Ok(row.git_bundle_path),
-        None => Err(DbError::SessionNotFound(session_id.to_owned())),
-    }
 }
 
 /// Retrieves the event history after `after_cursor` in batches (for resuming incremental sync).
@@ -712,13 +672,13 @@ struct SessionRow {
     agent_id: String,
     agent_session_id: Option<String>,
     parent_session_id: Option<SessionId>,
-    fork_from_node_seq: Option<i64>,
     title: String,
     status: SessionStatus,
     current_mode: Option<String>,
     permission_policy: PermissionPolicy,
     usage_json: Option<String>,
     last_node_seq: i64,
+    fork_supported: bool,
     created_at: i64,
     updated_at: i64,
     archived_at: Option<i64>,
@@ -736,10 +696,6 @@ impl SessionRow {
             agent_id: self.agent_id,
             agent_session_id: self.agent_session_id,
             parent_session_id: self.parent_session_id,
-            fork_from_node_seq: self
-                .fork_from_node_seq
-                .map(|value| u64::try_from(value).map_err(|_| DbError::NegativeNodeSeq(value)))
-                .transpose()?,
             title: self.title,
             status: self.status,
             current_mode: self.current_mode,
@@ -752,6 +708,7 @@ impl SessionRow {
                 .map_err(|err| DbError::InvalidEnumValue(err.to_string()))?,
             last_node_seq: u64::try_from(self.last_node_seq)
                 .map_err(|_| DbError::NegativeNodeSeq(self.last_node_seq))?,
+            fork_supported: self.fork_supported,
             created_at: self.created_at,
             updated_at: self.updated_at,
             archived_at: self.archived_at,

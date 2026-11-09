@@ -46,8 +46,7 @@ use fxg_protocol::client_api::{
     RespondElicitationResponse, RespondPermissionRequest, RespondPermissionResponse,
     ResumeSessionRequest, ResumeSessionResponse, RotateAuthTokenResponse, SearchResponse,
     ServerWsMessage, SessionArchiveRequest, SessionArchiveResponse, SessionListResponse,
-    SessionRevertRequest, SessionRevertResponse, SystemInfoResponse, WorktreeInfo,
-    WorktreesResponse,
+    SystemInfoResponse, WorktreeInfo, WorktreesResponse,
 };
 use fxg_protocol::common::{
     AgentAction, ClientSource, CommandResult, DataSafety, DiffScope, ElicitationContent, ErrorCode,
@@ -119,9 +118,9 @@ impl ApiError {
             | ErrorCode::Busy
             | ErrorCode::CommandDuplicate
             | ErrorCode::ResumeRequired
+            | ErrorCode::ForkUnsupported
             | ErrorCode::AuthRequired
             | ErrorCode::WorktreeConflict
-            | ErrorCode::SnapshotUnavailable
             | ErrorCode::AgentNotInstalled
             | ErrorCode::AgentLaunchFailed
             | ErrorCode::AgentProtocolError
@@ -553,14 +552,6 @@ pub trait ClientApiBackend: Clone + Send + Sync + 'static {
         client: ClientInfo,
     ) -> Result<RespondElicitationResponse, ApiError>;
 
-    /// `POST /api/v1/sessions/:id/revert` (rewind via Shadow Git Tree).
-    async fn revert_session(
-        &self,
-        session_id: &str,
-        request: SessionRevertRequest,
-        client: ClientInfo,
-    ) -> Result<SessionRevertResponse, ApiError>;
-
     /// `POST /api/v1/sessions/:id/resume` (resume a stopped session).
     async fn resume_session(
         &self,
@@ -889,10 +880,6 @@ pub fn client_router<B: ClientApiBackend>(backend: B, options: ClientApiOptions)
         .route(
             "/api/v1/sessions/{session_id}/elicitations/{elicitation_id}/respond",
             post(respond_elicitation::<B>),
-        )
-        .route(
-            "/api/v1/sessions/{session_id}/revert",
-            post(revert_session::<B>),
         )
         .route(
             "/api/v1/sessions/{session_id}/resume",
@@ -1239,22 +1226,6 @@ async fn respond_elicitation<B: ClientApiBackend>(
     match state
         .backend
         .respond_elicitation(&session_id, &elicitation_id, request, client)
-        .await
-    {
-        Ok(response) => Json(response).into_response(),
-        Err(err) => err.into_response(),
-    }
-}
-
-async fn revert_session<B: ClientApiBackend>(
-    State(state): State<ClientApiState<B>>,
-    Extension(client): Extension<ClientInfo>,
-    UrlPath(session_id): UrlPath<String>,
-    Json(request): Json<SessionRevertRequest>,
-) -> Response {
-    match state
-        .backend
-        .revert_session(&session_id, request, client)
         .await
     {
         Ok(response) => Json(response).into_response(),

@@ -446,12 +446,12 @@ pub async fn upsert_provisional_session(
         r#"
         INSERT INTO sessions (
             session_id, project_id, node_id, local_path, git_branch, is_worktree,
-            agent_id, agent_session_id, parent_session_id, fork_from_node_seq,
+            agent_id, agent_session_id, parent_session_id,
             title, status, current_mode, available_modes_json,
             available_commands_json, config_options_json,
-            git_bundle_path, last_node_seq, synced_up_to_node_seq, created_at, updated_at
+            last_node_seq, synced_up_to_node_seq, created_at, updated_at
         )
-        VALUES (?, ?, ?, ?, ?, 0, ?, NULL, NULL, NULL, ?, ?, NULL, '[]', '[]', '[]', NULL, 0, 0, ?, ?)
+        VALUES (?, ?, ?, ?, ?, 0, ?, NULL, NULL, ?, ?, NULL, '[]', '[]', '[]', 0, 0, ?, ?)
         ON CONFLICT(session_id) DO NOTHING
         "#,
         record.session_id,

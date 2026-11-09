@@ -46,8 +46,6 @@ import type {
   SessionArchiveRequest,
   SessionArchiveResponse,
   SessionEventBatch,
-  SessionRevertRequest,
-  SessionRevertResponse,
   SessionSummary,
   SystemInfoResponse,
   WorkspaceDiffResponse,
@@ -354,13 +352,6 @@ export class ApiClient {
       `/api/v1/sessions/${encodeURIComponent(sessionId)}/elicitations/${encodeURIComponent(elicitationId)}/respond`,
       { body: request },
     );
-  }
-
-  /** `POST /api/v1/sessions/:id/revert` (Shadow Git Tree rollback). */
-  revertSession(sessionId: string, request: SessionRevertRequest): Promise<SessionRevertResponse> {
-    return this.#request("POST", `/api/v1/sessions/${encodeURIComponent(sessionId)}/revert`, {
-      body: request,
-    });
   }
 
   /** `POST /api/v1/sessions/:id/resume` (resume a stopped session). */

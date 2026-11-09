@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n        SELECT session_id AS \"session_id!\",\n               project_id, node_id, local_path, git_branch,\n               is_worktree AS \"is_worktree: bool\",\n               agent_id, agent_session_id, parent_session_id AS \"parent_session_id: SessionId\",\n               fork_from_node_seq,\n               title, status AS \"status: SessionStatus\", current_mode,\n               permission_policy AS \"permission_policy: PermissionPolicy\", usage_json,\n               last_node_seq, created_at, updated_at,\n               archived_at\n          FROM sessions\n         WHERE session_id = ? AND deleted_at IS NULL\n        ",
+  "query": "\n        SELECT session_id AS \"session_id!\",\n               project_id, node_id, local_path, git_branch,\n               is_worktree AS \"is_worktree: bool\",\n               agent_id, agent_session_id, parent_session_id AS \"parent_session_id: SessionId\",\n               title, status AS \"status: SessionStatus\", current_mode,\n               permission_policy AS \"permission_policy: PermissionPolicy\", usage_json,\n               last_node_seq, fork_supported AS \"fork_supported: bool\", created_at, updated_at,\n               archived_at\n          FROM sessions\n         WHERE deleted_at IS NULL\n         ORDER BY updated_at DESC\n        ",
   "describe": {
     "columns": [
       {
@@ -103,19 +103,8 @@
         }
       },
       {
-        "name": "fork_from_node_seq",
-        "ordinal": 9,
-        "type_info": "Integer",
-        "origin": {
-          "Table": {
-            "table": "sessions",
-            "name": "fork_from_node_seq"
-          }
-        }
-      },
-      {
         "name": "title",
-        "ordinal": 10,
+        "ordinal": 9,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -126,7 +115,7 @@
       },
       {
         "name": "status: SessionStatus",
-        "ordinal": 11,
+        "ordinal": 10,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -137,7 +126,7 @@
       },
       {
         "name": "current_mode",
-        "ordinal": 12,
+        "ordinal": 11,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -148,7 +137,7 @@
       },
       {
         "name": "permission_policy: PermissionPolicy",
-        "ordinal": 13,
+        "ordinal": 12,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -159,7 +148,7 @@
       },
       {
         "name": "usage_json",
-        "ordinal": 14,
+        "ordinal": 13,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -170,12 +159,23 @@
       },
       {
         "name": "last_node_seq",
-        "ordinal": 15,
+        "ordinal": 14,
         "type_info": "Integer",
         "origin": {
           "Table": {
             "table": "sessions",
             "name": "last_node_seq"
+          }
+        }
+      },
+      {
+        "name": "fork_supported: bool",
+        "ordinal": 15,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "sessions",
+            "name": "fork_supported"
           }
         }
       },
@@ -214,7 +214,7 @@
       }
     ],
     "parameters": {
-      "Right": 1
+      "Right": 0
     },
     "nullable": [
       true,
@@ -226,17 +226,17 @@
       false,
       true,
       true,
-      true,
       false,
       false,
       true,
       false,
       true,
+      false,
       false,
       false,
       false,
       true
     ]
   },
-  "hash": "249c13785cfef7fbb73378c55046568a39d5553e5fd14e18a23247cb975877b6"
+  "hash": "4e7c1638b83c0dac87c07be230586fc84d5f24eb801235d68d66b91bbed1d858"
 }

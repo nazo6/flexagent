@@ -17,7 +17,7 @@ pub trait AgentDriver: Send + Sync {
 
     /// セッションを起動し、イベント送出用のストリーム/ハンドルを返す。
     /// `req.resume` 指定時はネイティブ復元 (`session/resume` / `session/load`)
-    /// を試み、成否を `StartedSession::context_restored` で返す (§4.3)
+    /// を試み、成否を `StartedSession::context_restored` で返す (§4.1)
     async fn start_session(
         &self,
         req: StartSessionRequest,
@@ -175,72 +175,22 @@ ACP Registry に載っていないエージェントや自前の ACP 実装は�
 
 ---
 
-## 4. セッションの Fork（分岐）と Revert（巻き戻し）の実装設計
+## 4. セッションの Fork（ACPネイティブのみ）
 
-特定のメッセージ時点から別ルートを試す **Fork**
-と、エージェントが行ったファイル変更ごと過去のターンへ巻き戻す **Revert (Undo)**
-を、全エージェント共通でサポートします。
+**Fork** は、ACP の `session/fork` + `session/load` をそのまま使う場合にのみ提供します。
+fxg 側で履歴を組み立て直す Replay フォールバックは行いません。
 
-### 4.1 ターンごとの軽量ファイルスナップショット (Shadow Git Tree 方式)
+- 対象は **同じエージェント・同じノード上にあるセッション** のみです。現在のセッション全体を
+  分岐し、新しい `session_id` を作成します。任意のメッセージ地点を指定した Fork は
+  ACP に存在しないため提供しません。
+- エージェントが `sessionCapabilities.fork` と `loadSession` の両方を広告した場合だけ
+  実行できます。未対応の場合は `FORK_UNSUPPORTED` を返し、Web UI では Fork ボタンを
+  表示しません（`CapabilitiesUpdated.fork_supported` を `sessions.fork_supported` に投影）。
+- 新しいセッションは `parent_session_id` だけを系譜として記録します。会話はエージェントが
+  保持しているため、Replay 用の `UserMessage` は追加しません。
+- 別ノード・一時VM・別エージェントへの Fork（Git bundle / 履歴引き継ぎ）は行いません。
 
-ユーザーの実際の `.git`（ブランチや
-`git log`、ステージング状態）を一切汚さずに、任意のターン時点のファイル状態をミリ秒単位で保存・復元するため、Gitのプラミングコマンドと専用Indexファイル（`GIT_INDEX_FILE`）を用いた
-**Shadow Git Tree** を実装します。
-
-1. **スナップショットの取得（各ターンの `send_prompt` 直前に自動実行）**:
-   - 環境変数 `GIT_INDEX_FILE=~/.flexagent/snapshots/<session-id>.index`
-     を指定した状態で：
-     1. `git add -A`（未追跡ファイルも含めてシャドウIndexにステージング）
-     2. `git write-tree` を実行し、返ってきた **40文字の Tree Hash
-        (`snapshot_tree_hash`)** をその `UserMessage` イベントの
-        payload（`UnifiedEventPayload::UserMessage.snapshot_tree_hash`）に含めて
-        イベントログ（`node.db` / `server.db` の
-        `session_events.payload_json`）へ保存します。 イベント payload
-        が唯一の正であり、専用カラムへの複製は行いません。
-   - **シャドウIndexはセッション単位で分離**します（`<session-id>.index`）。同一リポジトリの複数セッション（並行
-     Worktree 作業）が同時にスナップショットを取得しても Index
-     ファイルを奪い合わないためです。同一セッション内のターンは直列処理されるため競合しません。
-   - シャドウGit操作（`git add -A` / `read-tree` / `checkout-index`
-     等）は、常に `-c core.autocrlf=false -c core.eol=lf`
-     を前置して実行します。ワークツリーのバイト列（LF / CRLF）を変換せずに
-     スナップショット・復元するためです（Windows の既定
-     `core.autocrlf=true` では、復元時に LF が CRLF へ書き換えられ
-     ワークスペースが破壊される）。
-   - `git add -A` は `.gitignore`
-     対象を除外しますが、巨大な未追跡ファイル（ビルド成果物等）が含まれ得るため、サイズ上限（例:
-     100 MB 超）を設けて超過時はスナップショットをスキップし警告ログを残します。
-   - コミットオブジェクトすら作らないためユーザーのブランチ履歴は一切汚れず、変更がないファイルはGitオブジェクトDB内で自動的に重複排除されます。
-2. **Revert（指定したメッセージ時点へのファイル復元 ＋ 会話巻き戻し）**:
-   - ユーザーがWeb / Android /
-     CLIで特定のメッセージを選び「ここまでRevert（巻き戻し）」を実行した場合：
-     1. 対象メッセージの `snapshot_tree_hash`
-        を使い、ワークスペースのファイルをその時点へ復元（直前の状態の退避バックアップTreeも自動作成してデータロストを防止）。
-     2. 実行中のエージェントセッションを停止し、同じ fxg `session_id` のまま
-        新しいエージェントセッションを開始して `target_node_seq` までの履歴を
-        Replay 注入する (`context_rebuilt = true`)。Replay に失敗した場合は
-        ファイル復元のみを成功として残し、`context_rebuilt = false` を返す。
-     3. `--files-only` / UI の「ファイルのみ」では 2 をスキップする。
-   - Replay は 64,000 文字を上限とし、超過時は**直近のターンを優先**して
-     古い履歴を落とす。
-
-### 4.2 セッションの Fork（会話の分岐）
-
-任意のメッセージ（`node_seq`）時点から会話を分岐させ、新しい `session_id`
-を作成します：
-
-1. **ネイティブ Fork**: エージェントがACPの `unstable_session_fork`
-   に対応していればそれを呼び出します。
-   - ACP SDK 5.0.0 には v1 用の fork builder がないため、fxg は
-     `session/fork` を直接送り、返った session ID を `session/load` で
-     attach する (Replay 通知は破棄)。`session/fork` は空セッションを
-     拒否する場合があるため、失敗時は Replay にフォールバックする。
-2. **履歴 Replay**:
-   未対応のエージェント、または別エージェントに切り替えてForkする場合は、`node.db`
-   / `server.db` に保存されている `node_seq`
-   までの構造化イベント履歴（会話＋変更ファイル要約）を新しいACPセッションの初期コンテキストとして自動注入（Replay）します。
-   - 上限は 64,000 文字で、超過時は直近のターンを優先して残す。
-
-### 4.3 セッションのレジューム (Resume)
+### 4.1 セッションのレジューム (Resume)
 
 停止したセッション (`fxg daemon`
 再起動・`fxg session kill`・エージェントプロセス
@@ -258,14 +208,14 @@ ACP Registry に載っていないエージェントや自前の ACP 実装は�
      非対応で `agentCapabilities.loadSession` → `session/load` を使用します。
      `session/load` の Replay 通知は fxg のイベントログと重複するため破棄します
      (Replay は load 応答前に完了する仕様を利用して応答直後に drain)。
-3. **Replay フォールバック**: ネイティブ復元できない場合は、fork と同様に
+3. **Replay フォールバック**: ネイティブ復元できない場合は、
    履歴 (会話 + ツール要約) を `client_source = "resume"` の `UserMessage`
    として新エージェントセッションへ注入します。
 4. **イベント**: `SessionCreated` は再発行せず、`StatusChanged(Idle)` を追記して
    状態投影を復帰させます。ネイティブ復元できたかは API 応答
    (`context_restored`) でクライアントへ返します。
 
-#### 4.3.1 送信時の自動レジューム (ネイティブ限定)
+#### 4.1.1 送信時の自動レジューム (ネイティブ限定)
 
 停止済みセッションへプロンプトを送信した場合、ユーザーが明示的に Resume
 しなくても、ノードが**ネイティブ復元のみ**で自動再開してからプロンプトを
@@ -286,9 +236,8 @@ ACP Registry に載っていないエージェントや自前の ACP 実装は�
   (`fxg-server` の `SESSION_COMMAND_TIMEOUT`。Client WS 経由では 1 コマンド
   1 応答の同期処理のため、そのクライアント接続は完了まで待ちます)。
 
-> **v2 (将来拡張)**: 一時VM (provisioner) セッションの再開
-> (`git_bundle_path` の復元 + VM 再起動) と、`fxg daemon`
-> 起動時の自動レジューム。
+> **v2 (将来拡張)**: 一時VM (provisioner) セッションの再開 (VM 再起動 +
+> ワークスペース引き継ぎ) と、`fxg daemon` 起動時の自動レジューム。
 
 ---
 

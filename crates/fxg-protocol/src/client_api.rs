@@ -369,16 +369,12 @@ pub struct WorktreeSpec {
     pub new_path: Option<String>,
 }
 
-/// Specification of a context fork to another node or agent.
+/// Specification of a context fork.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct SessionForkSpec {
     /// Source session ID
     pub from_session_id: SessionId,
-    /// Event sequence number of the fork source (latest when omitted)
-    pub from_node_seq: Option<u64>,
-    /// Bundle data (Base64) when restoring a git bundle saved from an ephemeral VM
-    pub restore_git_bundle_b64: Option<String>,
 }
 
 /// `POST /api/v1/sessions` request (start a new session).
@@ -482,45 +478,10 @@ pub struct RespondElicitationResponse {
     pub already_resolved: bool,
 }
 
-/// `POST /api/v1/sessions/:id/revert` request.
-///
-/// Restores the workspace to the shadow git tree of the given turn
-/// (`UserMessage.node_seq`) (the Web UI version of `fxg session revert`).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
-#[specta(collect)]
-pub struct SessionRevertRequest {
-    /// `node_seq` of the `UserMessage` used as the revert point
-    /// (defaults to the latest turn)
-    pub target_node_seq: Option<u64>,
-    /// Restore only files and keep the current agent conversation
-    #[serde(default)]
-    pub files_only: bool,
-}
-
-/// `POST /api/v1/sessions/:id/revert` response.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
-#[specta(collect)]
-pub struct SessionRevertResponse {
-    /// `node_seq` of the `UserMessage` used as the reference
-    pub target_node_seq: u64,
-    /// Tree hash to restore to
-    pub restored_tree_hash: String,
-    /// Backup tree hash holding the state right before the restore
-    /// (another revert brings it back)
-    pub backup_tree_hash: Option<String>,
-    /// Number of restored files
-    pub restored_files: u64,
-    /// Number of removed files
-    pub removed_files: u64,
-    /// Whether the agent conversation was rebuilt (files always restore)
-    #[serde(default)]
-    pub context_rebuilt: bool,
-}
-
 /// `POST /api/v1/sessions/:id/resume` request.
 ///
 /// Resumes a stopped session with the same `session_id`
-/// (design: `docs/04-agent-drivers-and-windows.md` §4.3).
+/// (design: `docs/04-agent-drivers-and-windows.md` §4.1).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct ResumeSessionRequest {

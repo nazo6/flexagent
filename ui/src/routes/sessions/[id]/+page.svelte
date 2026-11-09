@@ -38,7 +38,6 @@
   import PlusIcon from "@lucide/svelte/icons/plus";
   import SkullIcon from "@lucide/svelte/icons/skull";
   import SquareTerminalIcon from "@lucide/svelte/icons/square-terminal";
-  import Undo2Icon from "@lucide/svelte/icons/undo-2";
 
   type ViewMode = "chat" | "diff" | "terminal";
 
@@ -137,11 +136,6 @@
   /** Show Resume only for sessions where unsupported native restore was detected. */
   const canResume = $derived(resumeRequired && session !== null);
 
-  // State of the Revert (Shadow Git Tree rollback) confirmation dialog
-  let revertSeq = $state<number | null>(null);
-  let reverting = $state(false);
-  let revertFilesOnly = $state(false);
-
   function scrollToBottom() {
     if (!chatContainer) return;
     chatContainer.scrollTo({
@@ -165,7 +159,6 @@
     params.set("fork_session", sessionId);
     if (session?.project_id) params.set("project", session.project_id);
     if (session?.agent_id) params.set("agent", session.agent_id);
-    if (session?.last_node_seq) params.set("fork_seq", String(session.last_node_seq));
     // Start the fork on the same node and working directory (overrides default path resolution)
     if (session?.node_id) params.set("node", session.node_id);
     if (session?.local_path) params.set("path", session.local_path);
@@ -221,11 +214,6 @@
     }
   }
 
-  /** Open the confirmation dialog from the timeline's "revert to this point". */
-  function requestRevert(seq: number) {
-    revertSeq = seq;
-  }
-
   /** Unarchive the session (from the archived banner). */
   async function handleUnarchive() {
     if (!sessionId) return;
@@ -234,27 +222,6 @@
       toast.success(m.session_unarchived());
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
-    }
-  }
-
-  /** Revert the workspace to the given turn (`POST /sessions/:id/revert`). */
-  async function handleRevertSession() {
-    if (!sessionId || revertSeq === null || reverting) return;
-    reverting = true;
-    try {
-      const result = await sync.revertSession(sessionId, revertSeq, revertFilesOnly);
-      toast.success(
-        m.session_revert_success({
-          seq: result.target_node_seq,
-          restored: result.restored_files,
-          removed: result.removed_files,
-        }),
-      );
-      revertSeq = null;
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : String(error));
-    } finally {
-      reverting = false;
     }
   }
 </script>
@@ -412,17 +379,19 @@
           </Button>
         {/if}
 
-        <!-- Fork button -->
-        <Button
-          variant="outline"
-          size="sm"
-          class="h-7 text-xs gap-1"
-          onclick={handleForkSession}
-          title={m.session_fork_button_title()}
-        >
-          <GitForkIcon class="size-3" />
-          <span class="hidden sm:inline">Fork</span>
-        </Button>
+        <!-- Fork button (only when the agent supports ACP-native session/fork) -->
+        {#if session?.fork_supported}
+          <Button
+            variant="outline"
+            size="sm"
+            class="h-7 text-xs gap-1"
+            onclick={handleForkSession}
+            title={m.session_fork_button_title()}
+          >
+            <GitForkIcon class="size-3" />
+            <span class="hidden sm:inline">Fork</span>
+          </Button>
+        {/if}
 
         <!-- New session in the same place (without carrying over history) -->
         {#if session && sessionNode && !sessionNode.is_ephemeral}
@@ -504,36 +473,6 @@
     </AlertDialog.Content>
   </AlertDialog.Root>
 
-  <!-- Revert confirmation modal (Shadow Git Tree rollback) -->
-  <AlertDialog.Root open={revertSeq !== null} onOpenChange={(open) => !open && (revertSeq = null)}>
-    <AlertDialog.Content>
-      <AlertDialog.Header>
-        <AlertDialog.Title class="flex items-center gap-2">
-          <Undo2Icon class="size-5 text-amber-500" />
-          {m.session_revert_confirm_title()}
-        </AlertDialog.Title>
-        <AlertDialog.Description class="text-sm">
-          {m.session_revert_confirm_description_pre()}
-          <code>node_seq={revertSeq}</code>{m.session_revert_confirm_description_post()}
-        </AlertDialog.Description>
-      </AlertDialog.Header>
-      <label class="flex items-center gap-2 text-xs">
-        <input type="checkbox" bind:checked={revertFilesOnly} />
-        {m.session_revert_files_only()}
-      </label>
-      <AlertDialog.Footer>
-        <AlertDialog.Cancel disabled={reverting}>{m.common_cancel()}</AlertDialog.Cancel>
-        <AlertDialog.Action
-          class="bg-amber-600 hover:bg-amber-600/90 text-white"
-          disabled={reverting}
-          onclick={handleRevertSession}
-        >
-          {reverting ? m.session_reverting() : m.session_revert_action()}
-        </AlertDialog.Action>
-      </AlertDialog.Footer>
-    </AlertDialog.Content>
-  </AlertDialog.Root>
-
   <!-- Error display when the session does not exist -->
   {#if session === null}
     <div class="p-4 text-center text-sm text-muted-foreground">
@@ -559,7 +498,7 @@
         >
           <div class="mx-auto flex max-w-3xl flex-col gap-4">
             <BootstrapLogCard lines={bootstrapLines} />
-            <ChatTimeline {sessionId} {items} status={currentStatus} onRevert={requestRevert} />
+            <ChatTimeline {sessionId} {items} status={currentStatus} />
           </div>
         </div>
 

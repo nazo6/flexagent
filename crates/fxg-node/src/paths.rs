@@ -10,7 +10,6 @@
 //! ├── node.db                # Local node SQLite DB
 //! ├── server.db              # Central server SQLite DB
 //! ├── worktrees/             # Git worktrees created automatically by fxg
-//! └── snapshots/             # Per-session Shadow Git Tree indexes
 //! ```
 
 use std::path::{Path, PathBuf};
@@ -73,16 +72,6 @@ impl NodePaths {
         self.fxg_home.join("worktrees")
     }
 
-    /// Storage location for Shadow Git Tree indexes (`snapshots/`).
-    pub fn snapshots_dir(&self) -> PathBuf {
-        self.fxg_home.join("snapshots")
-    }
-
-    /// Path of the Shadow Git index used for a session (`snapshots/<session-id>.index`).
-    pub fn snapshot_index_path(&self, session_id: &str) -> PathBuf {
-        self.snapshots_dir().join(format!("{session_id}.index"))
-    }
-
     /// ACP Registry cache directory (`cache/`).
     pub fn cache_dir(&self) -> PathBuf {
         self.fxg_home.join("cache")
@@ -93,18 +82,9 @@ impl NodePaths {
         self.fxg_home.join("agents")
     }
 
-    /// Storage location for backup Git bundles (`bundles/`).
-    pub fn bundles_dir(&self) -> PathBuf {
-        self.fxg_home.join("bundles")
-    }
-
     /// Creates the data directory (and the main subdirectories).
     pub fn ensure_dirs(&self) -> Result<(), crate::NodeError> {
-        for dir in [
-            self.fxg_home.clone(),
-            self.worktrees_dir(),
-            self.snapshots_dir(),
-        ] {
+        for dir in [self.fxg_home.clone(), self.worktrees_dir()] {
             std::fs::create_dir_all(&dir)
                 .map_err(|source| crate::NodeError::Io { path: dir, source })?;
         }
@@ -195,10 +175,6 @@ mod tests {
         );
         assert_eq!(paths.node_db_path(), PathBuf::from("/tmp/fxg-home/node.db"));
         assert_eq!(
-            paths.snapshot_index_path("0195f0"),
-            PathBuf::from("/tmp/fxg-home/snapshots/0195f0.index")
-        );
-        assert_eq!(
             paths.worktrees_dir(),
             PathBuf::from("/tmp/fxg-home/worktrees")
         );
@@ -210,7 +186,6 @@ mod tests {
         let paths = NodePaths::new(dir.path().join("fxg"));
         paths.ensure_dirs().expect("ensure");
         assert!(paths.worktrees_dir().is_dir());
-        assert!(paths.snapshots_dir().is_dir());
     }
 
     #[test]

@@ -63,7 +63,7 @@ pub struct AgentLaunchSpec {
 
 /// Resume selection from an existing agent session ([`StartSessionRequest::resume`]).
 ///
-/// Design: `docs/04-agent-drivers-and-windows.md` §4.3.
+/// Design: `docs/04-agent-drivers-and-windows.md` §4.1.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResumeRequest {
     /// Recorded internal agent session ID (the `SessionAgentBound` value).

@@ -13,9 +13,7 @@
 use anyhow::{Context, Result, bail};
 use fxg_protocol::client_api::{
     ApiErrorResponse, CreateSessionRequest, CreateSessionResponse, ProvisionerTestResponse,
-    SessionListResponse,
 };
-use fxg_protocol::common::SessionSummary;
 use fxg_protocol::config::{AUTH_TOKEN_FILE_NAME, EnvLookup, GlobalConfig, fxg_home};
 
 /// Central server REST client.
@@ -53,18 +51,6 @@ impl ServerClient {
         format!("{}{path}", self.base)
     }
 
-    /// Send a GET request and decode the JSON response.
-    async fn get<T: serde::de::DeserializeOwned>(&self, path: &str) -> Result<T> {
-        let response = self
-            .http
-            .get(self.endpoint(path))
-            .bearer_auth(&self.token)
-            .send()
-            .await
-            .with_context(|| format!("failed to reach central server ({})", self.base))?;
-        decode(response).await
-    }
-
     /// Send a POST request with a JSON body.
     async fn post<B: serde::Serialize, T: serde::de::DeserializeOwned>(
         &self,
@@ -86,12 +72,6 @@ impl ServerClient {
     pub async fn provisioner_test(&self, name: &str) -> Result<ProvisionerTestResponse> {
         self.post(&format!("/api/v1/provisioners/{name}/test"), &())
             .await
-    }
-
-    /// `GET /api/v1/sessions`
-    pub async fn sessions(&self) -> Result<Vec<SessionSummary>> {
-        let response: SessionListResponse = self.get("/api/v1/sessions").await?;
-        Ok(response.sessions)
     }
 
     /// `POST /api/v1/sessions`

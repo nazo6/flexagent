@@ -128,19 +128,6 @@ pub enum NodeToServerMsg {
         /// Failure message
         error: Option<String>,
     },
-    /// Response with the result of a session revert (`RevertSession`).
-    RevertResult {
-        /// Correlation ID of the request
-        command_id: CommandId,
-        /// Whether it succeeded
-        success: bool,
-        /// Structured error code on failure
-        code: Option<ErrorCode>,
-        /// Restore outcome on success
-        outcome: Option<crate::client_api::SessionRevertResponse>,
-        /// Failure message
-        error: Option<String>,
-    },
     /// Response with the result of a session resume (`ResumeSession`).
     ResumeResult {
         /// Correlation ID of the request
@@ -250,21 +237,6 @@ pub enum NodeToServerMsg {
         /// Operation kind (`clone` / `fetch` / `push`)
         operation: String,
     },
-    /// Saves the working tree and commit history bundle before an ephemeral VM is
-    /// discarded (`git bundle create`).
-    ///
-    /// The bundle is compressed and Base64-encoded, and transferred in chunks when
-    /// it exceeds the per-message limit (e.g. 16 MiB).
-    WorkspaceBundleUpload {
-        /// Target session ID
-        session_id: SessionId,
-        /// Target branch
-        branch: String,
-        /// HEAD commit
-        head_commit: String,
-        /// Bundle data (compressed + Base64)
-        bundle_b64: String,
-    },
     /// Notification that a graceful drain completed (after receiving it the central
     /// server discards the child process / VM).
     DrainComplete {
@@ -318,11 +290,9 @@ pub enum ServerToNodeMsg {
         mode: Option<String>,
         /// Extra arguments passed to the agent
         extra_args: Option<Vec<String>>,
-        /// Conversation history when taking over history from another node
-        /// (injected by replay)
-        fork_context_messages: Option<Vec<crate::common::ForkHistoryItem>>,
-        /// Used to restore a git bundle saved from an ephemeral VM
-        restore_git_bundle_b64: Option<String>,
+        /// Source session to fork natively (ACP `session/fork` + `session/load`).
+        /// The fork must run on the node that owns the source session.
+        fork_from_session_id: Option<SessionId>,
     },
     /// Sends a prompt (including slash commands and attachments).
     SendPrompt {
@@ -372,27 +342,10 @@ pub enum ServerToNodeMsg {
         /// Operation to execute
         action: SessionControlAction,
     },
-    /// Restores files to a given turn (`fxg session revert`).
-    ///
-    /// Restores the workspace from the node's shadow git tree and appends a
-    /// `SessionReverted` event
-    /// (design: `docs/04-agent-drivers-and-windows.md` §4.1).
-    RevertSession {
-        /// Correlation ID
-        command_id: CommandId,
-        /// Target session ID
-        session_id: SessionId,
-        /// `node_seq` of the `UserMessage` used as the revert point
-        /// (defaults to the latest turn)
-        target_node_seq: Option<u64>,
-        /// Restore only files and keep the current agent conversation
-        #[serde(default)]
-        files_only: bool,
-    },
     /// Resumes a stopped session (`POST /api/v1/sessions/:id/resume`).
     ///
     /// Keeps the same `session_id` and continues by restoring the agent-side
-    /// context (design: `docs/04-agent-drivers-and-windows.md` §4.3).
+    /// context (design: `docs/04-agent-drivers-and-windows.md` §4.1).
     ResumeSession {
         /// Correlation ID
         command_id: CommandId,
@@ -526,12 +479,10 @@ pub enum ServerToNodeMsg {
         /// Failure message
         error: Option<String>,
     },
-    /// Request to flush the ephemeral VM and save the git bundle before shutdown.
+    /// Request to flush the ephemeral VM before shutdown.
     DrainAndShutdown {
         /// Reason for shutting down (for logs)
         reason: String,
-        /// Whether to save the artifacts with `git bundle create`
-        create_git_bundle: bool,
     },
     /// Emergency kill switch: immediately and forcibly stop every session, process
     /// tree and PTY running on the node.
@@ -608,44 +559,6 @@ mod tests {
         assert_eq!(json["op"], "get_git_diff");
         assert_eq!(json["scope"], "branch_base");
         let decoded: ServerToNodeMsg = serde_json::from_value(json).unwrap();
-        assert_eq!(decoded, msg);
-    }
-
-    #[test]
-    fn server_to_node_revert_session_shape() {
-        let msg = ServerToNodeMsg::RevertSession {
-            command_id: "c1".into(),
-            session_id: "s1".into(),
-            target_node_seq: Some(7),
-            files_only: false,
-        };
-        let json = serde_json::to_value(&msg).unwrap();
-        assert_eq!(json["op"], "revert_session");
-        assert_eq!(json["target_node_seq"], 7);
-        let decoded: ServerToNodeMsg = serde_json::from_value(json).unwrap();
-        assert_eq!(decoded, msg);
-    }
-
-    #[test]
-    fn node_to_server_revert_result_shape() {
-        let msg = NodeToServerMsg::RevertResult {
-            command_id: "c1".into(),
-            success: true,
-            code: None,
-            outcome: Some(crate::client_api::SessionRevertResponse {
-                target_node_seq: 7,
-                restored_tree_hash: "abc123".into(),
-                backup_tree_hash: Some("def456".into()),
-                restored_files: 3,
-                removed_files: 1,
-                context_rebuilt: true,
-            }),
-            error: None,
-        };
-        let json = serde_json::to_value(&msg).unwrap();
-        assert_eq!(json["op"], "revert_result");
-        assert_eq!(json["outcome"]["restored_files"], 3);
-        let decoded: NodeToServerMsg = serde_json::from_value(json).unwrap();
         assert_eq!(decoded, msg);
     }
 

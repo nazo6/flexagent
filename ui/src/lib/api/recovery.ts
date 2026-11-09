@@ -18,8 +18,6 @@ export function recoveryActionLabel(action: RecoveryAction): string {
       return m.recovery_login_agent();
     case "recreate_worktree":
       return m.recovery_recreate_worktree();
-    case "revert_to_nearest_snapshot":
-      return m.recovery_revert_snapshot();
     case "open_config":
       return m.recovery_open_config();
     case "show_logs":
@@ -44,8 +42,6 @@ export function recoveryActionKey(action: RecoveryAction): string {
       return `login:${action.agent_id}`;
     case "recreate_worktree":
       return `worktree:${action.project_id}:${action.branch ?? ""}`;
-    case "revert_to_nearest_snapshot":
-      return `revert:${action.session_id}:${action.node_seq ?? ""}`;
     case "show_logs":
       return `logs:${action.session_id ?? "all"}`;
     case "open_config":

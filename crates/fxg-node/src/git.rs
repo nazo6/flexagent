@@ -39,6 +39,19 @@ impl GitOutput {
     }
 }
 
+/// Whether the `git` version can be obtained (for detecting environments without git).
+pub async fn git_available() -> bool {
+    Command::new("git")
+        .arg("--version")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .await
+        .map(|status| status.success())
+        .unwrap_or(false)
+}
+
 /// Runs `git` and returns the raw output (exit code is [`GitOutput::success`]).
 pub async fn capture(
     cwd: &Path,

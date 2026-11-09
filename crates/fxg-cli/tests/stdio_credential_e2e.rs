@@ -233,7 +233,6 @@ fn stdio_daemon_proxies_git_credentials_and_drains() {
         &json!({
             "op": "drain_and_shutdown",
             "reason": "test finished",
-            "create_git_bundle": false,
         }),
     );
     wait_for_message(&lines, "drain_complete", Duration::from_secs(30), |value| {

@@ -32,9 +32,8 @@ Fish / PowerShell / Nushell）・manpage・Markdown リファレンスを `usage
 | **`fxg session prompt <id> <text>`**        | 既存セッションへ非対話（ヘッドレス）でプロンプトを送信（停止済みセッションはネイティブ復元で自動再開。非対応エージェントは `RESUME_REQUIRED` となり `fxg session resume` が必要） | `--attach <PATH>`: 画像/ファイルを添付 (繰り返し可)<br/>`--wait`: ターン完了まで待機して出力を表示                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | **`fxg session stop <id>`**                 | 実行中ターンのキャンセル、またはセッションの正常停止                                                                                                                              | `--turn-only`: セッションは維持し現在のターンのみ中断                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | **`fxg session kill <id>`**                 | セッションの子プロセスツリー (Job Object) を強制終了                                                                                                                              | -                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| **`fxg session revert <id>`**               | Shadow Git Tree を用いて指定ターン時点へファイルと会話を巻き戻し                                                                                                                  | `--to-seq <NODE_SEQ>` (必須): 巻き戻し先のイベント連番<br/>`--files-only`: ファイルのみ復元し会話は維持                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | **`fxg session import <agent-session-id>`** | エージェント側の既存セッションをネイティブ復元で取り込む                                                                                                                          | `--agent <ID>` (必須)<br/>`--cwd <PATH>`: 作業ディレクトリ (既定: カレント)<br/>`--title <TITLE>`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| **`fxg session fork <id>`**                 | 指定時点から会話を分岐して新規セッションを作成（別エージェントや一時VMへの引き継ぎ・退避バンドル復元対応）                                                                        | `--from-seq <NODE_SEQ>`: 分岐元の連番（省略時は最新）<br/>`--agent <AGENT>`: 分岐後のエージェント変更<br/>`-w, --worktree <BRANCH>`: 新規Worktreeへ分岐<br/>`--provisioner <NAME>`: 一時VM上で分岐開始<br/>`--no-open`: ブラウザ自動オープンを抑制<br/>`-d, --detach`: バックグラウンド起動                                                                                                                                                                                                                                                                                       |
+| **`fxg session fork <id>`**                 | ACPネイティブの `session/fork` で現在のセッションを分岐して新規セッションを作成（同一エージェント・同一ノードのみ）                                                               | `-w, --worktree <BRANCH>`: 新規Worktreeへ分岐<br/>`--base <BRANCH>`: Worktree の分岐元<br/>`--no-open`: ブラウザ自動オープンを抑制<br/>`-d, --detach`: バックグラウンド起動                                                                                                                                                                                                                                                                                                                                                                                                       |
 | **`fxg session resume <id>`**               | 停止済みセッションを同じセッションIDのまま再開（ネイティブ復元優先。非対応エージェントは履歴 Replay で継続）し、Web UI をブラウザで自動オープン                                   | `--no-open`: ブラウザ自動オープンを抑制<br/>`-d, --detach`: バックグラウンド起動しセッションIDを出力<br/>`--replay`: ネイティブ復元を試みず履歴 Replay で継続                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | **`fxg session archive <id>`**              | セッションを一覧からアーカイブする（一覧から非表示。イベントログは保持され `unarchive` で復元可能）                                                                               | -                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | **`fxg session unarchive <id>`**            | アーカイブ済みセッションを一覧へ戻す                                                                                                                                              | -                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
@@ -83,8 +82,7 @@ fxg run claude --no-open                       # ブラウザ自動オープン�
 
 # 2. セッション一覧・履歴操作
 fxg ps                                           # 現在稼働中・最近のセッション一覧を表示
-fxg session revert 0195f0... --to-seq 12         # node_seq=12 の時点へファイルと会話を巻き戻し
-fxg session fork 0195f0... --agent antigravity   # 既存セッションを別エージェントへ引き継いで分岐
+fxg session fork 0195f0...                        # 現在のセッションをACPネイティブForkで分岐
 fxg session resume 0195f0...                     # 停止したセッションを会話コンテキストを維持して再開
 fxg session archive 0195f0...                    # セッションを一覧からアーカイブ (復元可能)
 fxg session delete 0195f0...                     # セッションを削除 (会話ログを消去。復元不能)
@@ -142,10 +140,6 @@ fxg kill-all                                     # 【緊急停止】全セッ�
 ├── enabled_package_agents.json # npx/uvx 配布を有効化したエージェントID
 ├── worktrees/                  # fxg が自動作成する Git Worktree のデフォルト集約ディレクトリ
 │   └── <project-slug>/<branch-slug>/
-├── snapshots/                  # Shadow Git Tree 用のセッション別一時インデックス (GIT_INDEX_FILE)
-│   └── <session-id>.index
-└── bundles/                    # 一時VM破棄時に退避された git bundle ファイル
-    └── <session-id>.bundle
 ```
 
 ### 2.2 グローバル設定ファイル (`~/.flexagent/config.toml`) スキーマ
@@ -199,10 +193,6 @@ worktree_dir_template = "{fxg_home}/worktrees/{project}/{branch}"
 project_scan_dirs = [
   "D:/ghq/github.com",
 ]
-
-# 各ターンのプロンプト送信直前に Shadow Git Tree スナップショットを自動取得するか
-# (ストリーミング途中のチャンクは永続化せず、ターン完了時に完成イベントのみを DB へ書き込む)
-snapshot_enabled = true
 
 # `fxg daemon` 起動時にタスクトレイへ常駐するか (デフォルト: false = 無効)
 # トレイメニュー: 状態表示 (中央サーバー接続・未同期 Outbox・稼働セッション) /
@@ -446,9 +436,8 @@ PCブラウザ、ローカルフォールバック (`localhost:7860`)、およ�
      - **「＋一時VMをスポーンして起動（Local Docker / Local Incus VM / Google
        Colab Pro）」**（選択したブランチを自動クローンし、`mise`/`uv`
        で必要ツールを自動セットアップして開始）
-   - 既存セッションの別ノード（または一時VM）へのContext
-     Forkや、一時VM破棄時に退避された `git bundle`
-     からの復元、不要になったWorktreeの削除もここから実行。
+   - 不要になったWorktreeの削除もここから実行。ACPネイティブForkに対応した
+     エージェントのセッションは、セッション詳細の Fork から同じノード上に分岐できる。
 3. **セッション詳細（チャット & ワークスペース）画面**:
    - **ヘッダー**: 実行ノード名（例: `Home-Win` または
      `Colab Pro [Ephemeral]`）、接続状態、バインドされているWorktree（例:
@@ -459,7 +448,7 @@ PCブラウザ、ローカルフォールバック (`localhost:7860`)、およ�
      自動で再開して送信される（**Resume
      ボタンは常時表示せず、ネイティブ復元非対応 (`RESUME_REQUIRED`)
      を検出したときだけ表示**し、履歴 Replay での再開
-     (`POST /api/v1/sessions/:id/resume`) を実行できる。設計: docs/04 §4.3.1）。
+     (`POST /api/v1/sessions/:id/resume`) を実行できる。設計: docs/04 §4.1.1）。
    - **セッション操作メニュー**: ヘッダーの「…」メニューとサイドバー各行から
      **アーカイブ** (`POST /api/v1/sessions/:id/archive`。一覧から非表示にする
      だけで復元可能) と **削除** (`DELETE /api/v1/sessions/:id`。会話ログ・
@@ -710,10 +699,7 @@ export interface ITerminalAdapter {
   - ブートストラップ中は短命トークンを echo する専用ヘルパー、デーモン起動後は
     `fxg git-askpass`（ローカルIPC）→ `GitCredentialRequest`
     でオンメモリ中継する。
-- [x] `DrainAndShutdown` & `WorkspaceBundleUpload`
-      による一時VM破棄前の未送信イベント完全フラッシュと `git bundle` 退避・復元
+- [x] `DrainAndShutdown` による一時VM破棄前の未送信イベント完全フラッシュ
   - アイドルタイムアウト（`idle_timeout_secs`）またはセッション終了で Drain
-    し、未コミット変更をスナップショットコミット化した `git bundle` を
-    8 MiB 単位に分割転送して `~/.flexagent/bundles/<session-id>.bundle`
-    へ保存する。別ノードへの Context Fork は `restore_git_bundle_b64`
-    で復元する。Drain 前クラッシュ時の中間イベント損失は許容仕様。
+    し、未送信イベントを送信してから `DrainComplete` を返す。Drain
+    前クラッシュ時の中間イベント損失は許容仕様。

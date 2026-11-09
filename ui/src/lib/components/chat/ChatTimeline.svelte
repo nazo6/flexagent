@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { goto } from "$app/navigation";
   import ElicitationCard from "#lib/components/ElicitationCard.svelte";
   import PermissionCard from "#lib/components/PermissionCard.svelte";
   import MarkdownText from "#lib/components/MarkdownText.svelte";
@@ -7,40 +6,27 @@
   import { Badge } from "#lib/components/ui/badge/index.ts";
   import { formatEpochMs } from "#lib/format.ts";
   import { m } from "#lib/paraglide/messages.js";
-  import { sync } from "#lib/stores/app.svelte.ts";
   import type { SessionStatus } from "#lib/generated/bindings.ts";
   import type { TimelineItem } from "#lib/sync/reducer.ts";
   import AlertTriangleIcon from "@lucide/svelte/icons/alert-triangle";
   import BotIcon from "@lucide/svelte/icons/bot";
   import BrainIcon from "@lucide/svelte/icons/brain";
   import ClockIcon from "@lucide/svelte/icons/clock";
-  import GitForkIcon from "@lucide/svelte/icons/git-fork";
   import ListChecksIcon from "@lucide/svelte/icons/list-checks";
   import LoaderCircleIcon from "@lucide/svelte/icons/loader-circle";
   import PaperclipIcon from "@lucide/svelte/icons/paperclip";
   import SquareTerminalIcon from "@lucide/svelte/icons/square-terminal";
-  import Undo2Icon from "@lucide/svelte/icons/undo-2";
 
   let {
     sessionId,
     items,
     status = null,
-    onRevert,
   }: {
     sessionId: string;
     items: TimelineItem[];
     /** Session status (derived from events). Used for the running indicator. */
     status?: SessionStatus | null;
-    /** Callback for "revert to this point" requests (argument: the target turn's node_seq). */
-    onRevert?: (seq: number) => void;
   } = $props();
-
-  const currentSession = $derived(sync.sessions.find((s) => s.session_id === sessionId) ?? null);
-
-  /** Stopped sessions cannot be reverted (the node only allows it while running). */
-  const canRevert = $derived(
-    onRevert !== undefined && currentSession !== null && currentSession.status !== "stopped",
-  );
 
   /**
    * The agent is running a turn (generating a response or executing tools).
@@ -51,15 +37,6 @@
    * user action.
    */
   const agentWorking = $derived(status === "running");
-
-  function forkFromSeq(seq: number) {
-    const params = new URLSearchParams();
-    params.set("fork_session", sessionId);
-    params.set("fork_seq", String(seq));
-    if (currentSession?.project_id) params.set("project", currentSession.project_id);
-    if (currentSession?.agent_id) params.set("agent", currentSession.agent_id);
-    void goto(`/?${params.toString()}`);
-  }
 
   function planStatusClass(planStatus: string): string {
     switch (planStatus) {
@@ -120,25 +97,7 @@
       {:else}
         {@const item = group.item}
         {#if item.kind === "user"}
-          <div class="group flex items-end justify-end gap-1.5">
-            {#if canRevert}
-              <button
-                type="button"
-                class="hover:bg-accent text-muted-foreground hover:text-foreground opacity-0 group-hover:opacity-100 mb-1 flex size-6 items-center justify-center rounded border transition-opacity cursor-pointer"
-                title={m.chat_revert_title()}
-                onclick={() => onRevert?.(item.seq)}
-              >
-                <Undo2Icon class="size-3" />
-              </button>
-            {/if}
-            <button
-              type="button"
-              class="hover:bg-accent text-muted-foreground hover:text-foreground opacity-0 group-hover:opacity-100 mb-1 flex size-6 items-center justify-center rounded border transition-opacity cursor-pointer"
-              title={m.chat_fork_turn_title()}
-              onclick={() => forkFromSeq(item.seq)}
-            >
-              <GitForkIcon class="size-3" />
-            </button>
+          <div class="flex items-end justify-end gap-1.5">
             <div class="bg-primary text-primary-foreground max-w-[85%] rounded-2xl px-3.5 py-2">
               {#if item.attachments.length > 0}
                 <div class="mb-1 flex flex-wrap gap-1.5">
@@ -167,7 +126,7 @@
             </div>
           </div>
         {:else if item.kind === "agent"}
-          <div class="group flex gap-2">
+          <div class="flex gap-2">
             <BotIcon class="text-muted-foreground mt-0.5 size-4 shrink-0" />
             <div class="max-w-[92%] flex-1">
               <MarkdownText
@@ -175,21 +134,6 @@
                 streaming={item.streaming}
                 class="text-sm leading-relaxed"
               />
-              {#if !item.streaming}
-                <div
-                  class="mt-1 flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity"
-                >
-                  <button
-                    type="button"
-                    class="hover:bg-accent text-muted-foreground hover:text-foreground flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] border transition-colors cursor-pointer"
-                    title={m.chat_fork_response_title()}
-                    onclick={() => forkFromSeq(item.seq)}
-                  >
-                    <GitForkIcon class="size-3" />
-                    <span>{m.chat_fork_here()}</span>
-                  </button>
-                </div>
-              {/if}
             </div>
           </div>
         {:else if item.kind === "thought"}

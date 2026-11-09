@@ -86,17 +86,6 @@ enum PendingResponse {
         /// Message on failure
         error: Option<String>,
     },
-    /// Session revert result (`RevertResult`)
-    Revert {
-        /// Whether it succeeded
-        success: bool,
-        /// Structured error code on failure
-        code: Option<ErrorCode>,
-        /// Restore outcome on success
-        outcome: Option<fxg_protocol::client_api::SessionRevertResponse>,
-        /// Message on failure
-        error: Option<String>,
-    },
     /// Session resume result (`ResumeResult`)
     Resume {
         /// Whether it succeeded
@@ -462,37 +451,6 @@ impl NodeHub {
                 (None, Some(error)) => Err(ApiError::bad_request(error)),
                 (None, None) => Ok(None),
             },
-            PendingResponse::Failed { code, message } => Err(ApiError::from_code(code, message)),
-            _ => Err(ApiError::internal("unexpected node response kind")),
-        }
-    }
-
-    /// Relays a session revert and waits for the result correlated by `command_id`.
-    pub async fn revert_session(
-        &self,
-        node_id: &NodeId,
-        command_id: &CommandId,
-        message: ServerToNodeMsg,
-    ) -> Result<fxg_protocol::client_api::SessionRevertResponse, ApiError> {
-        let response = self
-            .request(node_id, command_id.as_str(), message, COMMAND_TIMEOUT)
-            .await?;
-        match response {
-            PendingResponse::Revert {
-                success,
-                code,
-                outcome,
-                error,
-            } => {
-                if success {
-                    outcome.ok_or_else(|| ApiError::internal("node returned no revert outcome"))
-                } else {
-                    Err(ApiError::from_code(
-                        code.unwrap_or(ErrorCode::Internal),
-                        error.unwrap_or_else(|| "revert failed".to_owned()),
-                    ))
-                }
-            }
             PendingResponse::Failed { code, message } => Err(ApiError::from_code(code, message)),
             _ => Err(ApiError::internal("unexpected node response kind")),
         }
@@ -1214,26 +1172,6 @@ async fn handle_node_message_value(
                 )
                 .await;
         }
-        NodeToServerMsg::RevertResult {
-            command_id,
-            success,
-            code,
-            outcome,
-            error,
-        } => {
-            state
-                .hub()
-                .resolve(
-                    command_id.as_str(),
-                    PendingResponse::Revert {
-                        success,
-                        code,
-                        outcome,
-                        error,
-                    },
-                )
-                .await;
-        }
         NodeToServerMsg::ResumeResult {
             command_id,
             success,
@@ -1421,24 +1359,9 @@ async fn handle_node_message_value(
                 );
             }
         }
-        NodeToServerMsg::WorkspaceBundleUpload {
-            session_id,
-            branch,
-            head_commit,
-            bundle_b64,
-        } => {
-            // Accumulate chunked bundle uploads until DrainComplete
-            crate::provisioner::on_bundle_upload(
-                state,
-                session_id.as_str(),
-                &branch,
-                &head_commit,
-                &bundle_b64,
-            );
-        }
         NodeToServerMsg::DrainComplete { node_id: drained } => {
             tracing::info!(node_id = node_id.as_str(), "drain complete");
-            crate::provisioner::on_drain_complete(state, drained.as_str()).await;
+            crate::provisioner::on_drain_complete(state, drained.as_str());
         }
     }
 }
