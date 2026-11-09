@@ -1,6 +1,7 @@
 <script lang="ts">
   import { page } from "$app/state";
   import { goto } from "$app/navigation";
+  import { onMount } from "svelte";
   import * as AlertDialog from "#lib/components/ui/alert-dialog/index.ts";
   import BootstrapLogCard from "#lib/components/BootstrapLogCard.svelte";
   import ChatTimeline from "#lib/components/chat/ChatTimeline.svelte";
@@ -84,6 +85,55 @@
   // View mode (mobile tab switch and desktop right-pane selection)
   let activeTab = $state<ViewMode>("chat");
   let sidePanelMode = $state<"diff" | "terminal" | null>(null);
+
+  // Desktop resizable right pane
+  let mainContainer = $state<HTMLDivElement | null>(null);
+  let sidePanelWidth = $state(42); // default percentage
+  let isResizing = $state(false);
+
+  onMount(() => {
+    if (typeof localStorage !== "undefined") {
+      const saved = localStorage.getItem("fxg:session_side_panel_width");
+      if (saved) {
+        const num = parseFloat(saved);
+        if (!isNaN(num) && num >= 20 && num <= 80) {
+          sidePanelWidth = num;
+        }
+      }
+    }
+  });
+
+  function startResize(event: PointerEvent) {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    isResizing = true;
+
+    function onPointerMove(e: PointerEvent) {
+      if (!mainContainer) return;
+      const rect = mainContainer.getBoundingClientRect();
+      const pointerX = e.clientX;
+      const rightPixels = rect.right - pointerX;
+      const percentage = (rightPixels / rect.width) * 100;
+      // Clamp between 20% and 75%
+      sidePanelWidth = Math.max(20, Math.min(75, Math.round(percentage)));
+    }
+
+    function onPointerUp() {
+      isResizing = false;
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerUp);
+      if (typeof localStorage !== "undefined") {
+        try {
+          localStorage.setItem("fxg:session_side_panel_width", String(sidePanelWidth));
+        } catch {
+          // Ignore quota errors
+        }
+      }
+    }
+
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerUp);
+  }
 
   // Make the session a priority target for WS delivery, and fall back to REST
   // loading when the history has not been fetched yet.
@@ -494,7 +544,11 @@
   {/if}
 
   <!-- Main content area -->
-  <div class="flex flex-1 overflow-hidden">
+  <div
+    bind:this={mainContainer}
+    class="flex flex-1 overflow-hidden relative"
+    class:select-none={isResizing}
+  >
     <!-- Chat main area (always on desktop, on mobile only when activeTab === 'chat') -->
     <div
       class={cn(
@@ -544,10 +598,35 @@
       </div>
     </div>
 
-    <!-- Desktop right side panel (Diff or Terminal) -->
+    <!-- Desktop right side panel with resizer (Diff or Terminal) -->
     {#if sidePanelMode !== null}
+      <!-- Resizer divider -->
+      <button
+        type="button"
+        aria-label="Resize panel"
+        class={cn(
+          "hidden md:flex w-1.5 cursor-col-resize hover:bg-signal/50 active:bg-signal transition-colors group select-none shrink-0 border-l border-border items-center justify-center -ml-[1px] z-10 outline-none focus-visible:ring-1 focus-visible:ring-signal bg-transparent p-0",
+          isResizing && "bg-signal",
+        )}
+        onpointerdown={startResize}
+        onkeydown={(e) => {
+          if (e.key === "ArrowLeft") {
+            e.preventDefault();
+            sidePanelWidth = Math.min(75, sidePanelWidth + 2);
+          } else if (e.key === "ArrowRight") {
+            e.preventDefault();
+            sidePanelWidth = Math.max(20, sidePanelWidth - 2);
+          }
+        }}
+      >
+        <span
+          class="w-0.5 h-8 bg-muted-foreground/30 rounded-full group-hover:bg-signal pointer-events-none"
+        ></span>
+      </button>
+
       <div
-        class="border-border bg-card/40 hidden h-full flex-col overflow-hidden border-l md:flex md:w-1/2 lg:w-5/12"
+        class="border-border bg-card/40 hidden h-full flex-col overflow-hidden md:flex shrink-0"
+        style="width: {sidePanelWidth}%;"
       >
         <!-- Side panel header -->
         <div class="flex items-center justify-between border-b border-border px-3 py-2">
