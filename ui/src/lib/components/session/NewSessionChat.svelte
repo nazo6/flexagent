@@ -113,9 +113,12 @@
 
   // Agent capability probe (models / modes)
   let capabilities = $state<AgentCapabilitiesPreview | null>(null);
+  let capabilitiesKey = $state("");
   let capabilitiesLoading = $state(false);
   let capabilitiesError = $state<string | null>(null);
   let capabilitiesGeneration = 0;
+  /** Key whose probe is currently rendered (cleared immediately on selection changes). */
+  let lastProbeKey = "";
   /** Per-screen probe cache so re-selecting the same agent is instant. */
   const capabilitiesCache = new Map<string, AgentCapabilitiesPreview>();
   let selectedConfigValues = $state<Record<string, ConfigOptionValue>>({});
@@ -358,10 +361,16 @@
       : `${nodeId}\u0000${effectiveAgent}\u0000${probePath}`,
   );
 
-  const configOptions = $derived(orderedConfigOptions(capabilities?.config_options ?? []));
+  // Only show options that belong to the current selection. This prevents the
+  // previous agent's model list from flashing while the next probe is running.
+  const configOptions = $derived(
+    capabilitiesKey === probeKey ? orderedConfigOptions(capabilities?.config_options ?? []) : [],
+  );
 
-  function applyCapabilities(preview: AgentCapabilitiesPreview): void {
+  function applyCapabilities(key: string, preview: AgentCapabilitiesPreview): void {
     capabilities = preview;
+    capabilitiesKey = key;
+    capabilitiesLoading = false;
     const projectId = selectedProject?.project_id ?? "";
     const saved = projectId === "" ? {} : loadSessionConfig(projectId);
     selectedConfigValues = resolveInitialConfig(preview.config_options ?? [], saved);
@@ -372,6 +381,7 @@
     if (key === "") {
       capabilitiesGeneration += 1;
       capabilities = null;
+      capabilitiesKey = "";
       capabilitiesLoading = false;
       capabilitiesError = null;
       selectedConfigValues = {};
@@ -380,7 +390,7 @@
     if (!force) {
       const cached = capabilitiesCache.get(key);
       if (cached) {
-        applyCapabilities(cached);
+        applyCapabilities(key, cached);
         return;
       }
     }
@@ -396,10 +406,11 @@
       );
       if (generation !== capabilitiesGeneration) return;
       capabilitiesCache.set(key, preview);
-      applyCapabilities(preview);
+      applyCapabilities(key, preview);
     } catch (error) {
       if (generation !== capabilitiesGeneration) return;
       capabilities = null;
+      capabilitiesKey = key;
       selectedConfigValues = {};
       capabilitiesError = error instanceof Error ? error.message : String(error);
       problems.report("probe agent", error, "warning");
@@ -410,13 +421,26 @@
 
   // Probe when the node / agent / working directory selection changes.
   $effect(() => {
-    if (probeKey === "") {
+    const key = probeKey;
+    if (key === "") {
+      lastProbeKey = "";
       capabilitiesGeneration += 1;
       capabilities = null;
+      capabilitiesKey = "";
       capabilitiesLoading = false;
       capabilitiesError = null;
       selectedConfigValues = {};
       return;
+    }
+    if (key !== lastProbeKey) {
+      lastProbeKey = key;
+      // Drop the previous agent's/path's options immediately; the new probe
+      // starts from a clean loading state.
+      capabilities = null;
+      capabilitiesKey = "";
+      capabilitiesLoading = true;
+      capabilitiesError = null;
+      selectedConfigValues = {};
     }
     void loadAgentCapabilities(false);
   });
@@ -428,6 +452,8 @@
   }
 
   function initialConfig(): { key: string; value: ConfigOptionValue }[] {
+    // Never send an option list that belongs to a different agent / path.
+    if (probeKey !== "" && capabilitiesKey !== probeKey) return [];
     if (capabilities !== null) {
       return Object.entries(selectedConfigValues).map(([key, value]) => ({ key, value }));
     }
@@ -1132,7 +1158,7 @@
             icon={modelIcon}
             disabled
           />
-        {:else if capabilitiesLoading && configOptions.length === 0}
+        {:else if probeKey !== "" && (capabilitiesLoading || capabilitiesKey !== probeKey)}
           <PickerPill
             label={m.new_session_model()}
             value={m.new_session_models_loading()}
@@ -1170,7 +1196,7 @@
               </Button>
             </div>
           </PickerPill>
-        {:else if capabilities !== null}
+        {:else if capabilities !== null && capabilitiesKey === probeKey}
           <PickerPill
             label={m.new_session_model()}
             value={m.new_session_model_default()}
@@ -1223,7 +1249,7 @@
         <span class="text-muted-foreground">{m.new_session_starting()}</span>
       {:else if blockingHint !== ""}
         <span class="text-destructive">{blockingHint}</span>
-      {:else if capabilitiesError !== null}
+      {:else if capabilitiesError !== null && capabilitiesKey === probeKey}
         <span class="text-muted-foreground">{m.new_session_models_unavailable()}</span>
       {:else}
         <span class="text-muted-foreground hidden sm:inline">{m.new_session_enter_hint()}</span>
