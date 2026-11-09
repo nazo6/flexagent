@@ -1,7 +1,7 @@
 # 設定のDB集約・プロジェクト同一性・秘密ストア実装計画
 
 - **日付**: 2026-11-09
-- **ステータス**: 設計確定 / 未実装
+- **ステータス**: 実装済み / 検証済み
 - **対象パッケージ**: `fxg-protocol`, `fxg-db`, `fxg-node`, `fxg-server`,
   `fxg-cli`, `ui`
 - **対象スクリプト / 設定**:
@@ -714,49 +714,49 @@ PUT    /api/v1/projects/{project_id}/profile
 
 ### Phase 0: 型・DBスキーマ・設定スナップショット API の土台
 
-- [ ] `fxg-protocol/src/settings.rs` を新設（`NodeSettingsSnapshot`, `ServerSettingsSnapshot`, `SecretSummary`, `ProjectIdentity`, `ProjectProfile` 等）。
-- [ ] `fxg-protocol/src/config.rs` を起動設定（bootstrap）のみに縮小し、`ProjectConfig` 系を削除。
-- [ ] `0010_settings_consolidation.sql` マイグレーションを追加。
-- [ ] `fxg-db/src/settings.rs` を新設し、`registration.rs` / `queries.rs` を更新。
-- [ ] `mise run sqlx:prepare` で `.sqlx` を更新。
-- [ ] `GET /api/v1/settings/node` および `GET /api/v1/settings/server` を実装。
-- [ ] `mise run types` で TypeScript 型定義（`bindings.ts`）を更新。
+- [x] `fxg-protocol/src/settings.rs` を新設（`NodeSettingsSnapshot`, `ServerSettingsSnapshot`, `SecretSummary`, `ProjectIdentity`, `ProjectProfile` 等）。
+- [x] `fxg-protocol/src/config.rs` を起動設定（bootstrap）のみに縮小し、`ProjectConfig` 系を削除。
+- [x] `0010_settings_consolidation.sql` マイグレーションを追加。
+- [x] `fxg-db/src/settings.rs` を新設し、`registration.rs` / `queries.rs` を更新。
+- [x] `mise run sqlx:prepare` で `.sqlx` を更新。
+- [x] `GET /api/v1/settings/node` および `GET /api/v1/settings/server` を実装。
+- [x] `mise run types` で TypeScript 型定義（`bindings.ts`）を更新。
 
 ### Phase 1: プロジェクト同一性とハブの全量レポート置換
 
-- [ ] `resolve_project` を `project_path_links`（Worktree の `git-common-dir` 解決を含む） → Git リモート → `local:` の解決順に変更。
-- [ ] `fxg project link` / REST API / UI を `project_path_links` テーブルへの書き込みに変更。
-- [ ] `project_key` 変更時にローカルおよびハブの既存セッション（`sessions.project_id`）を新しい `project_id` へ移行し、旧プロジェクトを `delete_orphan_projects` で削除する処理を実装。
-- [ ] `ProjectIdentity` を `ProjectSummary` と `NodeHello` に追加し、表示名の自動導出ルールを実装。
-- [ ] ハブの `apply_project_reports` を `state_revision` 検証付きの「全量置換 + セッション再紐づけ + prune」に変更（`projects_complete = false` の安全弁を含む）。
+- [x] `resolve_project` を `project_path_links`（Worktree の `git-common-dir` 解決を含む） → Git リモート → `local:` の解決順に変更。
+- [x] `fxg project link` / REST API / UI を `project_path_links` テーブルへの書き込みに変更。
+- [x] `project_key` 変更時にローカルおよびハブの既存セッション（`sessions.project_id`）を新しい `project_id` へ移行し、旧プロジェクトを `delete_orphan_projects` で削除する処理を実装。
+- [x] `ProjectIdentity` を `ProjectSummary` と `NodeHello` に追加し、表示名の自動導出ルールを実装。
+- [x] ハブの `apply_project_reports` を `state_revision` 検証付きの「全量置換 + セッション再紐づけ + prune」に変更（`projects_complete = false` の安全弁を含む）。
 
 ### Phase 2: ロール別秘密情報ストア
 
-- [ ] `paths.rs` に `~/.flexagent/secrets/{node,server}/` 管理（パーミッション `0600` / Windows ACL）を追加。
-- [ ] `secrets` テーブルと Secret REST API（一覧・write-only 保存・削除・ローテーション・`SECRET_IN_USE` 検査・監査ログ）を実装。
-- [ ] `CustomAgentConfig.env_secrets` の保存とエージェント起動時の環境変数展開を実装。
-- [ ] `GitCredentialConfig::Secret` と `git_credentials` テーブルを実装。
-- [ ] Web UI に `SecretField` コンポーネントと `AgentManager` の秘密環境変数トグルを追加。
+- [x] `paths.rs` に `~/.flexagent/secrets/{node,server}/` 管理（パーミッション `0600` / Windows ACL）を追加。
+- [x] `secrets` テーブルと Secret REST API（一覧・write-only 保存・削除・ローテーション・`SECRET_IN_USE` 検査・監査ログ）を実装。
+- [x] `CustomAgentConfig.env_secrets` の保存とエージェント起動時の環境変数展開を実装。
+- [x] `GitCredentialConfig::Secret` と `git_credentials` テーブルを実装。
+- [x] Web UI に `SecretField` コンポーネントと `AgentManager` の秘密環境変数トグルを追加。
 
 ### Phase 3: 設定の DB 集約と `.fxg.toml` / Worktree フックの削除
 
-- [ ] `node_settings` / `agent_settings` / `agent_aliases` / `custom_agents` / `enabled_package_agents` を `node.db` ベースに切り替え。
-- [ ] `AgentCatalogStore` を導入し、`custom_agents.json` / `enabled_package_agents.json` の読み書きコードを削除。
-- [ ] `server_settings` / `provisioners` / `git_credentials` / `project_profiles` を `server.db` ベースに切り替え。
-- [ ] `bootstrap-workspace` を `FXG_PROJECT_PROFILE_B64` / `--profile` 入力に切り替え。
-- [ ] Worktree の作成先パスを固定し、`dir_template` / `copy_files` / `post_create` および `.fxg.toml` 関連コードをすべて削除。
+- [x] `node_settings` / `agent_settings` / `agent_aliases` / `custom_agents` / `enabled_package_agents` を `node.db` ベースに切り替え。
+- [x] `AgentCatalogStore` を導入し、`custom_agents.json` / `enabled_package_agents.json` の読み書きコードを削除。
+- [x] `server_settings` / `provisioners` / `git_credentials` / `project_profiles` を `server.db` ベースに切り替え。
+- [x] `bootstrap-workspace` を `FXG_PROJECT_PROFILE_B64` / `--profile` 入力に切り替え。
+- [x] Worktree の作成先パスを固定し、`dir_template` / `copy_files` / `post_create` および `.fxg.toml` 関連コードをすべて削除。
 
 ### Phase 4: ハブ ⇔ ノード間の設定プロキシと UI 仕上げ
 
-- [ ] WebSocket メッセージ（`GetNodeSettings` / `UpdateNodeSettings` / `UpdateAgentSettings` / `NodeSettingsResult` / `SecretOpResult`）とハブの中継処理を実装。
-- [ ] 設定画面の検索可能なカタログ UI・出所バッジ・インライン編集を実装。
-- [ ] ハブ UI からのノード設定・秘密編集（オフライン時は読み取り専用）と、ローカルノード UI の `Server` タブのハブリンクを実装。
-- [ ] `/projects` 画面のプロジェクト設定ダイアログ（`Project key` 編集・同一性バッジ・Bootstrap プロファイル編集）と `ui/messages/en.json` の翻訳文言を追加。
+- [x] WebSocket メッセージ（`GetNodeSettings` / `UpdateNodeSettings` / `UpdateAgentSettings` / `NodeSettingsResult` / `SecretOpResult`）とハブの中継処理を実装。
+- [x] 設定画面の検索可能なカタログ UI・出所バッジ・インライン編集を実装。
+- [x] ハブ UI からのノード設定・秘密編集（オフライン時は読み取り専用）と、ローカルノード UI の `Server` タブのハブリンクを実装。
+- [x] `/projects` 画面のプロジェクト設定ダイアログ（`Project key` 編集・同一性バッジ・Bootstrap プロファイル編集）と `ui/messages/en.json` の翻訳文言を追加。
 
 ### Phase 5: 最終検証とドキュメント更新
 
-- [ ] `mise run fmt` / `mise run lint` / `mise run check:ui` / `mise run test` / `mise run types` / `mise run sqlx:check` をすべて通過させる。
-- [ ] `AGENTS.md`, `docs/01`, `docs/02`, `docs/03`, `docs/05`, `docs/06`, `docs/troubleshooting.md` を更新。
+- [x] `mise run fmt` / `mise run lint` / `mise run check:ui` / `mise run test` / `mise run types` / `mise run sqlx:check` をすべて通過させる。
+- [x] `AGENTS.md`, `docs/01`, `docs/02`, `docs/03`, `docs/05`, `docs/06`, `docs/troubleshooting.md` を更新。
 
 ---
 
@@ -785,3 +785,23 @@ PUT    /api/v1/projects/{project_id}/profile
 | ネットワーク遅延で古い `NodeHello` が後から届き状態を巻き戻す    | `nodes.state_revision` を比較し、古いリビジョンのレポートを破棄する。                          |
 | 秘密値がログやエラーレスポンスに漏洩する                         | API は write-only とし、監査ログにもメタデータのみを記録。ログ出力の redaction を徹底する。    |
 | UI からの Provisioner 編集による任意コマンド実行リスク           | 監査ログへの記録、変更時の確認ダイアログ、`allowed_hosts` / トークン認証による保護を徹底する。 |
+
+---
+
+## 9. 実装ログ
+
+- 2026-11-09: 計画に沿って Phase 0〜5 を実装。
+  - `fxg-protocol/src/settings.rs` を新設し、`config.rs` を起動設定のみに縮小。
+  - `0010_settings_consolidation.sql` と `fxg-db/src/settings.rs` を追加。
+    `NodeHello` の `state_revision` / `projects_complete` 全量置換と prune、
+    `SessionSyncState.project_id` によるセッション再紐づけを実装。
+  - `project_path_links` による明示リンク（Worktree は `git-common-dir` 経由で
+    メイン Worktree のリンクを継承）と `user:<key>` へのセッション移行を実装。
+  - `secrets/{node,server}` ストア、Secret API、`env_secrets` 展開、
+    `GitCredentialConfig::Secret` を実装。
+  - `config.toml` から `[agents]` / `[provisioners]` / `.fxg.toml` を削除し、
+    Worktree 作成先を固定。`FXG_PROJECT_PROFILE_B64` / `--profile` に対応。
+  - Web UI に設定カタログ（出所バッジ・検索・read-only Bootstrap・write-only
+    秘密フィールド）とプロジェクト設定ダイアログを追加。
+  - `mise run fmt` / `mise run lint` / `mise run check:ui` / `cargo test --workspace`
+    / `mise run types` / `mise run sqlx:check` を実行して検証。

@@ -382,6 +382,18 @@ pub enum ErrorCode {
 
 ## 2. Node ⇔ Central Server 間プロトコル (WebSocket & Stdio Pipe 共通)
 
+`NodeHello` は `state_revision` (単調増加) と `projects_complete` を含む全量
+スナップショットです。ハブは古い `state_revision` を無視し、
+`projects_complete = true` のときだけ今回のレポートに含まれない
+`project_node_bindings` を prune します。`SessionSyncState` は各セッションの
+現在の `project_id` を含み、ハブはバインディング / レポートに基づいて
+`sessions.project_id` を更新します。
+
+`ServerToNodeMsg` には設定・秘密のプロキシ用に `GetNodeSettings` /
+`UpdateNodeSettings` / `UpdateAgentSettings` / `GetSecrets` / `UpsertSecret` /
+`DeleteSecret` / `RotateSecret`、応答に `NodeSettingsResult` /
+`SecretOpResult` を追加しています。
+
 常駐ノードと一時VMノードは、トランスポート層が異なるだけで**100%同一のメッセージ型
 (`NodeToServerMsg` / `ServerToNodeMsg`)** を共有します：
 
@@ -785,13 +797,31 @@ pub enum ServerToNodeMsg {
   `ProjectScanResponse` (`scanned_dirs` + ノード上での登録プロジェクト一覧)
   を返す。
 - `POST /api/v1/nodes/:node_id/projects/link`:
-  任意ディレクトリを論理プロジェクト ID へ手動で紐付ける
-  (`fxg project link` の Web UI 版。対象の `.fxg.toml` に `project_key`
-  を書き込む)。`{ project_id, local_path }` を受け取り、解決結果
-  (`ProjectLinkResponse`) を返す。
+  任意ディレクトリを論理プロジェクトへ手動で紐付ける
+  (`fxg project link` の Web UI 版)。`{ project_id, local_path }` の
+  `project_id` には `project_key` (`user:` プレフィックス可) を渡し、
+  対象ノードの `node.db.project_path_links` を更新する。Worktree の場合は
+  メイン Worktree のルートにリンクする。既存セッションの `sessions.project_id`
+  も新しい `user:<key>` へ付け替える。
 - `GET /api/v1/nodes`:
   ノード一覧とオンライン状態、一時ノード属性（`is_ephemeral`,
   `lifecycle_status`）、利用可能エージェント一覧を返却。
+- 設定 (すべて型付き構造体。汎用 Key-Value は使わない):
+  - `GET/PATCH /api/v1/settings/node`: `NodeSettingsSnapshot` (ローカルノード)
+  - `PATCH /api/v1/settings/agents`: `NodeSettingsSnapshot`
+  - `GET/PATCH /api/v1/settings/server`: `ServerSettingsSnapshot` (中央サーバー)
+  - `GET /api/v1/nodes/:node_id/settings`: ハブが対象ノードへプロキシ
+  - `PATCH /api/v1/nodes/:node_id/settings/node` / `.../agents`: 同上
+  - 更新は `expected_revision` による楽観的ロック。競合は `REVISION_MISMATCH`。
+- 秘密 (値は書き込み専用。レスポンスは `SecretsResponse` = メタデータのみ):
+  - `GET /api/v1/secrets`, `PUT/DELETE /api/v1/secrets/:secret_id`,
+    `POST /api/v1/secrets/:secret_id/rotate`
+  - ハブ経由: `GET /api/v1/nodes/:node_id/secrets` など (対象ノードへプロキシ)
+  - 参照中の削除は `SECRET_IN_USE`、値ファイル欠損は `SECRET_MISSING`。
+- `GET /api/v1/nodes/:node_id/agents`: 指定ノードの ACP カタログ
+  (`GET /api/v1/agents` はローカルノード専用。ハブは代表ノードを選ばない)。
+- `GET/PUT /api/v1/projects/:project_id/profile`: 一時VM用 Bootstrap プロファイル
+  (`server.db.project_profiles`)。
 - `GET /api/v1/provisioners`:
   利用可能な一時VM・サンドボックスプロビジョナー一覧（`local-docker`,
   `local-incus`, `colab-pro` 等）を返却。

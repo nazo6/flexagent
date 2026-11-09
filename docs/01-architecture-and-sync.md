@@ -271,8 +271,12 @@ Windows (`D:\ghq\github.com\nazo6\flexagent`)、Linux VPS
 ノード上でセッションを起動（またはプロジェクトスキャン）する際、`fxg daemon`
 は対象ディレクトリ `cwd` に対して以下の優先順位で `project_key` を決定します：
 
-1. **`.fxg.toml` の明示指定（最優先）**: `cwd` またはGitルートに `.fxg.toml`
-   が存在し、`project_key = "..."` が定義されていればそれを使用します。
+1. **明示リンク (`project_path_links`, 最優先)**: `node.db` の
+   `project_path_links` に `local_path = project_key` が登録されていれば、
+   `project_id = "user:<project_key>"` として解決します。完全一致がない場合は
+   Git ルートまで親ディレクトリを遡り、Git Worktree の場合は
+   `git rev-parse --git-common-dir` からメイン Worktree のリンクも探します。
+   `.fxg.toml` は廃止されました。
 2. **Git Remote URL の正規化（デフォルト自動解決）**:
    `git rev-parse --show-toplevel`
    でGitルートを特定し、`git config --get remote.origin.url`
@@ -286,10 +290,12 @@ Windows (`D:\ghq\github.com\nazo6\flexagent`)、Linux VPS
    ```
    モノレポ等でGitルートのサブディレクトリで起動された場合は、`github.com/nazo6/flexagent#packages/sub`
    のように相対パス（POSIXスラッシュ正規化）を付与します。
-3. **フォールバック（非Gitかつ `.fxg.toml` なし）**:
+3. **フォールバック（明示リンクも Git Remote もない）**:
    `local:<node_id>:<folder_name_hash>`
    としてノード固有プロジェクトを作成します（後からUIや `fxg project link`
-   コマンドで他ノードのフォルダとマージ可能）。
+   コマンドで同じ `project_key` を設定すれば他ノードのフォルダとマージ可能）。
+4. **表示名の自動導出**: `GitRemote` はリポジトリ名、`UserKey` はキーそのもの、
+   `Local` はディレクトリ名。表示名は設定項目として保存しません。
 
 ### 4.2 スマートフォンからの「パス入力不要」なセッション起動
 

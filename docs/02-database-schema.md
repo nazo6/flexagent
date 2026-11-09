@@ -133,7 +133,8 @@ CREATE TABLE nodes (
     idle_timeout_secs INTEGER,                      -- アイドル自動破棄までの秒数 (一時ノード用、例: 900)
     is_online       INTEGER NOT NULL DEFAULT 0,     -- 1: 接続中, 0: 切断
     last_seen_at    INTEGER NOT NULL,               -- Unix epoch (ms)
-    created_at      INTEGER NOT NULL
+    created_at      INTEGER NOT NULL,
+    state_revision  INTEGER NOT NULL DEFAULT 0      -- NodeHello 全量レポートの単調増加リビジョン
 );
 
 -- 2. 論理プロジェクトテーブル
@@ -142,6 +143,8 @@ CREATE TABLE projects (
     project_id      TEXT PRIMARY KEY,               -- 正規化キー (例: "github.com/nazo6/flexagent")
     name            TEXT NOT NULL,                  -- 表示名 (例: "flexagent")
     canonical_git_url TEXT,                         -- 正規化元Git URL
+    identity_kind   TEXT NOT NULL DEFAULT 'local',  -- 'git_remote' | 'user_key' | 'local'
+    project_key     TEXT,                           -- identity_kind = 'user_key' のときのキー
     created_at      INTEGER NOT NULL,
     updated_at      INTEGER NOT NULL
 );
@@ -296,6 +299,27 @@ CREATE INDEX idx_audit_logs_session ON audit_logs(session_id, created_at DESC);
 ```
 
 ---
+
+### 1.1 設定・秘密・プロファイル (migration `0010_settings_consolidation.sql`)
+
+実行時に変更する設定は所有者の DB にのみ保存します (ノード ⇔ サーバー間で同期・マージしない)。
+
+- `node.db`: `node_settings` / `agent_settings` / `agent_aliases` /
+  `custom_agents` / `enabled_package_agents` / `project_path_links`
+- `server.db`: `server_settings` / `git_credentials` / `provisioners` /
+  `project_profiles`
+- 共通: `secrets` (秘密の **メタデータ** のみ。値は
+  `~/.flexagent/secrets/{node,server}/<id>` に `0600` で保存)
+
+単一行テーブルは `id INTEGER PRIMARY KEY CHECK (id = 1)` と
+`revision INTEGER NOT NULL DEFAULT 1` を持ち、更新は
+`UPDATE ... WHERE id = 1 AND revision = ?` の単一クエリで楽観的ロックを行います
+(不一致は `REVISION_MISMATCH`)。
+
+`project_path_links` は `local_path -> project_key` の明示リンクで、Worktree からは
+メイン Worktree のリンクを `git-common-dir` 経由で引き継ぎます。
+`projects.identity_kind` / `projects.project_key` は解決結果の表示用で、
+`project_id` は `user:<key>` / 正規化 Git URL / `local:<node_id>:<hash>` のいずれかです。
 
 ## 2. 正データと派生カラム
 

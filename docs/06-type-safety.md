@@ -165,6 +165,22 @@ impl PermissionOptionKind {
 - `request_id` のように用途が複数ある語彙は、単一の `RequestId` にまとめず
   用途別の型にするか文字列のまま残す。
 
+### 3.3 設定・秘密・プロジェクト同一性の型
+
+設定 API / WebSocket に汎用 Key-Value (`SettingKey(String)` + `SettingValue`) を
+作らない。所有者ごとの型付き構造体をそのまま送受信する。
+
+- `NodeSettingsSnapshot` / `ServerSettingsSnapshot` / `NodeSettings` /
+  `AgentSettings` / `ServerSettings` / `SecretSummary` / `ProjectProfile`
+- `ConfigSource` / `ProjectIdentityKind` / `SecretKind` は `open_string_enum!`
+- `SecretId` は ID newtype（`is_valid()` でファイル名として安全か検証）
+- `SourcedValue<T>` は起動設定の値と出所 (`ConfigSource` + `source_detail`) を
+  組にする。UI は出所バッジとして描画するだけで、文字列キーで分岐しない。
+
+`project_id.starts_with("local:")` のような判定は禁止し、
+`ProjectIdentityKind` で分岐する。`project_key` は `user:<key>` として
+`project_id` に埋め込むが、判定は `ProjectIdentity.kind` を使う。
+
 ---
 
 ## 4. 機械的な強制
