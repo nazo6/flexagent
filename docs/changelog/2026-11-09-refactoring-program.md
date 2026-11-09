@@ -1,7 +1,7 @@
 # リファクタリング・プログラム（API統合・モジュール分割）
 
 - **日付**: 2026-11-09
-- **ステータス**: 進行中（B0 / B1 / A1 / A2 / A3 / A4 完了、次は B2 / B3 / B4）
+- **ステータス**: 進行中（B0 / B1 / A1 / A2 / A3 / A4 / B2 完了、次は B3 / B4）
 - **統合元**: 同日に別々に作成した「API・プロトコル統合リファクタリング計画」と
   「コードベース全体リファクタリング・モジュール分割計画」を1本化した
 - **対象パッケージ**: `fxg-protocol`, `fxg-db`, `fxg-acp`, `fxg-node`,
@@ -420,6 +420,10 @@ relay 元を記録する）。A2 では設定・秘密・`browse_fs` のノー�
 - `api/handlers/`: A2 後のサイズを見てドメイン別に分割する。小さければ
   1ファイルにまとめたままでよい。
 
+> Rust は同一型に対するトレイト実装を1つしか許さないため、`sessions.rs` は
+> トレイトメソッド本体を `*_impl` の固有メソッドとして提供し、`api_impl.rs` の
+> 1つの `impl ClientApiBackend for ServerState` がそれらへ委譲する。
+
 ### 4.4 B3: `fxg-acp` と `fxg-node` の分割
 
 - `acp/mod.rs`: `AcpDriver` の公開 API
@@ -563,8 +567,9 @@ relay 元を記録する）。A2 では設定・秘密・`browse_fs` のノー�
 
 ### B2: `fxg-server`
 
-- [ ] `state.rs` を `settings` / `sessions` / `api_impl` に分割
-- [ ] `api/mod.rs` を `error` / `backend` / `handlers` に分割
+- [x] `state.rs` を `settings` / `sessions` / `api_impl` に分割
+- [x] `api/mod.rs` を `error` / `backend` / `handlers` に分割
+- [x] `api/handlers/` を `system` / `projects` / `sessions` / `agents` / `admin` / `settings` / `stream` に分割
 
 ### B3: `fxg-acp` / `fxg-node`
 
@@ -672,3 +677,16 @@ relay 元を記録する）。A2 では設定・秘密・`browse_fs` のノー�
 - **2026-11-09 (A4 補足)**: `SendPrompt` / `RespondPermission` /
   `RespondElicitation` / `ControlSession` は A1.5 が保留のため `LocalRequest`
   に残した。Worktree 操作は `cwd` からプロジェクトを解決するためローカルのまま。
+- **2026-11-09 (B2 実装)**: `state.rs` を `state/{mod,settings,sessions,api_impl}.rs`
+  に分割した。`mod.rs` は `ServerState` の構築・アクセサ・監査、`settings.rs` は
+  サーバー設定・秘密・プロジェクトプロファイル、`sessions.rs` はセッション
+  ライフサイクルと解決ヘルパー、`api_impl.rs` は `ClientApiBackend` 実装を持つ。
+- **2026-11-09 (B2 実装)**: Rust では同一型に同じトレイトを複数回実装できない
+  ため、`sessions.rs` のセッションメソッドは `*_impl` の固有メソッドとし、
+  `api_impl.rs` のトレイト実装が委譲する形にした。公開 API・wire format・
+  挙動は変えていない。
+- **2026-11-09 (B2 実装)**: `api/mod.rs` を `api/{mod,error,backend}.rs` と
+  `api/handlers/{system,projects,sessions,agents,admin,settings,stream}.rs` に
+  分割した。`mod.rs` はルーター・`ClientApiState`・WS 共通ヘルパー、
+  `error.rs` は `ApiError` と `ErrorCode` → HTTP status 変換、`backend.rs` は
+  `ClientApiBackend` と関連型を持つ。ルート定義は分割前と同一。
