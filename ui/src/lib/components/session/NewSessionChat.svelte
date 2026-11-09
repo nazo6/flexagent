@@ -62,6 +62,8 @@
   let catalog = $state<AgentSummary[]>([]);
   let catalogLoading = $state(true);
   let catalogError = $state<string | null>(null);
+  /** Guards against stale responses when the node changes / the user retries. */
+  let catalogGeneration = 0;
   let provisionerLoadError = $state<string | null>(null);
   let pathMode = $state<PathMode>("existing");
   let localPath = $state("");
@@ -110,9 +112,8 @@
   const availableAgents = $derived(agentsAvailableOn(catalog, nodeId));
   const availableAgentIds = $derived(availableAgents.map((agent) => agent.id));
 
-  /** Loads provisioners and the agent catalog (retryable from the UI). */
-  async function loadOptions(): Promise<void> {
-    catalogLoading = true;
+  /** Loads ephemeral VM provisioners (central server only; retryable from the UI). */
+  async function loadProvisioners(): Promise<void> {
     try {
       const list = await sync.connection.client.provisioners();
       provisioners.splice(0, provisioners.length, ...list);
@@ -124,22 +125,49 @@
       provisionerLoadError = error instanceof Error ? error.message : String(error);
       problems.report("load provisioners", error, "warning");
     }
-    // You can keep going by entering an ID directly even if the agent list cannot be fetched
+  }
+
+  /**
+   * Loads the agent catalog for one node.
+   *
+   * The central server rejects the unscoped `GET /api/v1/agents` (every catalog is
+   * node-scoped), so always fetch through `/api/v1/nodes/{id}/agents`. You can keep going by
+   * entering an ID directly even if the catalog cannot be fetched.
+   */
+  async function loadAgentCatalog(target: string): Promise<void> {
+    if (target === "") return;
+    // Only the newest request may publish (node switches / retries can overlap)
+    const generation = ++catalogGeneration;
+    catalogLoading = true;
     try {
-      catalog = await sync.connection.client.agents();
+      const list = await sync.connection.client.nodeAgents(target);
+      if (generation !== catalogGeneration) return;
+      catalog = list;
       catalogError = null;
     } catch (error) {
+      if (generation !== catalogGeneration) return;
       catalog = [];
       catalogError = error instanceof Error ? error.message : String(error);
       problems.report("load agents", error);
     } finally {
-      catalogLoading = false;
+      if (generation === catalogGeneration) catalogLoading = false;
     }
   }
 
   // Ephemeral VM provisioner definitions (only available when connected to the central server)
   onMount(() => {
-    void loadOptions();
+    void loadProvisioners();
+  });
+
+  // The agent catalog is node-scoped: reload it when the target node changes.
+  $effect(() => {
+    const target = nodeId;
+    if (target === "") {
+      // No node to query (e.g. the hub has no connected nodes): stop the loading state.
+      catalogLoading = false;
+      return;
+    }
+    void loadAgentCatalog(target);
   });
 
   const isProvisionerMode = $derived(runTarget === "provisioner");
@@ -244,9 +272,10 @@
       : m.new_session_path_required_branch(),
   );
 
-  // URL `fork_session` / `agent` are applied only once
+  // URL `fork_session` / `agent` are applied only once (after the node catalog is loaded, so
+  // an agent from the link is recognized as a dropdown entry instead of a manual ID)
   $effect(() => {
-    if (urlAgentApplied || nodes.length === 0) return;
+    if (urlAgentApplied || nodes.length === 0 || catalogLoading) return;
     const forkSession = page.url.searchParams.get("fork_session");
     if (forkSession) {
       forkSessionId = forkSession;
@@ -619,7 +648,12 @@
                   {m.common_load_failed()}
                   {catalogError}
                 </span>
-                <Button type="button" variant="ghost" size="xs" onclick={() => void loadOptions()}>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="xs"
+                  onclick={() => void loadAgentCatalog(nodeId)}
+                >
                   {m.common_retry()}
                 </Button>
               </div>
