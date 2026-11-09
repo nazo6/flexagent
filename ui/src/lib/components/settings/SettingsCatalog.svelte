@@ -46,8 +46,8 @@
 
   // Secret form
   let secretForm = $state({
-    name: "",
-    kind: "agent_env",
+    key: "",
+    description: "",
     value: "",
   });
 
@@ -56,13 +56,6 @@
   let profileForm = $state({ setup: "", env: "", revision: 0 });
 
   const targetNode = $derived(isServer ? selectedNode : "");
-
-  /** User-creatable secret kinds; system kinds are registered by the process only. */
-  const userSecretKinds = $derived(
-    section === "server"
-      ? [{ value: "git_token", label: "Git token" }]
-      : [{ value: "agent_env", label: "Agent env" }],
-  );
   const showSecrets = $derived(section === "machine" || (section === "server" && isServer));
 
   $effect(() => {
@@ -108,10 +101,6 @@
             ? await sync.connection.client.nodeSecrets(targetNode)
             : await sync.connection.client.secrets();
         secrets = response.secrets;
-        const allowed = userSecretKinds.map((kind) => kind.value);
-        if (!allowed.includes(secretForm.kind)) {
-          secretForm = { ...secretForm, kind: allowed[0] ?? "agent_env" };
-        }
       }
       if (section === "projects" && isServer) {
         await sync.refreshProjects();
@@ -220,51 +209,34 @@
 
   async function saveSecret(event: SubmitEvent): Promise<void> {
     event.preventDefault();
-    if (secretForm.value === "" || secretForm.name.trim() === "") return;
-    const id =
-      typeof crypto !== "undefined" && "randomUUID" in crypto
-        ? crypto.randomUUID()
-        : `secret-${Date.now()}`;
+    const key = secretForm.key.trim();
+    if (secretForm.value === "" || key === "") return;
     try {
       const request = {
-        name: secretForm.name.trim(),
-        kind: secretForm.kind,
+        description: secretForm.description.trim() === "" ? null : secretForm.description.trim(),
         value: secretForm.value,
       };
       const response =
         isServer && section === "machine" && targetNode !== ""
-          ? await sync.connection.client.upsertNodeSecret(targetNode, id, request)
-          : await sync.connection.client.upsertSecret(id, request);
+          ? await sync.connection.client.upsertNodeSecret(targetNode, key, request)
+          : await sync.connection.client.upsertSecret(key, request);
       secrets = response.secrets;
-      secretForm = { name: "", kind: secretForm.kind, value: "" };
-      toast.success("Secret saved (the value is never shown again).");
-    } catch (cause) {
-      toast.error(cause instanceof Error ? cause.message : String(cause));
-    }
-  }
-
-  async function rotateSecret(secret: SecretSummary): Promise<void> {
-    try {
-      const response =
-        isServer && section === "machine" && targetNode !== ""
-          ? await sync.connection.client.rotateNodeSecret(targetNode, secret.id)
-          : await sync.connection.client.rotateSecret(secret.id);
-      secrets = response.secrets;
-      toast.success(`Rotated ${secret.name}.`);
+      secretForm = { key: "", description: "", value: "" };
+      toast.success("Secret saved (the value is write-only and never returned).");
     } catch (cause) {
       toast.error(cause instanceof Error ? cause.message : String(cause));
     }
   }
 
   async function deleteSecret(secret: SecretSummary): Promise<void> {
-    if (!confirm(`Delete secret ${secret.name}?`)) return;
+    if (!confirm(`Delete secret "${secret.id}"?`)) return;
     try {
       const response =
         isServer && section === "machine" && targetNode !== ""
           ? await sync.connection.client.deleteNodeSecret(targetNode, secret.id)
           : await sync.connection.client.deleteSecret(secret.id);
       secrets = response.secrets;
-      toast.success(`Deleted ${secret.name}.`);
+      toast.success(`Deleted secret "${secret.id}".`);
     } catch (cause) {
       toast.error(cause instanceof Error ? cause.message : String(cause));
     }
@@ -310,11 +282,6 @@
 
   function sourceBadge(source: string): string {
     return source.replaceAll("_", " ");
-  }
-
-  /** System secrets have fixed paths and are managed by the process, not this API. */
-  function isSystemSecret(kind: string): boolean {
-    return kind === "node_token" || kind === "auth_token" || kind === "vapid_private";
   }
 
   type Row = { label: string; value: string; source: string; detail?: string | null };
@@ -556,12 +523,18 @@
               </select>
               <Input placeholder="username" bind:value={entry.username} />
               <Input
-                placeholder={entry.provider === "env" ? "TOKEN_ENV" : "secret ID"}
+                placeholder={entry.provider === "env" ? "TOKEN_ENV" : "SECRET_KEY"}
                 bind:value={entry.detail}
                 disabled={entry.provider === "gh_cli"}
+                list={entry.provider === "secret" ? "server-secrets-datalist" : undefined}
               />
             </div>
           {/each}
+          <datalist id="server-secrets-datalist">
+            {#each secrets as s (s.id)}
+              <option value={s.id}>{s.description ? `${s.id} (${s.description})` : s.id}</option>
+            {/each}
+          </datalist>
           <div>
             <Button
               variant="outline"
@@ -655,57 +628,57 @@
     <Card class="gap-3 p-4">
       <h2 class="font-medium">Secrets</h2>
       <p class="text-muted-foreground text-xs">
-        Values are write-only: they are stored in <code>~/.flexagent/secrets/</code> and never returned
-        by the API.
+        Key-value secrets stored in <code>~/.flexagent/secrets/</code>. Values are write-only and
+        never returned by the API. Reference them in custom agents as <code>@KEY</code> or in Git
+        credentials as <code>KEY</code>.
       </p>
-      <ul class="flex list-none flex-col gap-1 p-0 text-xs">
-        {#each secrets as secret (secret.id)}
-          <li class="flex flex-wrap items-center gap-2 rounded-md border px-2 py-1.5">
-            <span class="font-medium">{secret.name}</span>
-            <code class="text-muted-foreground">{secret.kind}</code>
-            <Badge variant={secret.configured ? "secondary" : "outline"} class="text-[10px]">
-              {secret.configured ? "Configured" : "Missing"}
-            </Badge>
-            {#if isSystemSecret(secret.kind)}
-              <Badge variant="outline" class="text-[10px]">System</Badge>
-            {/if}
-            {#if secret.used_by.length > 0}
-              <span class="text-muted-foreground">used by {secret.used_by.join(", ")}</span>
-            {/if}
-            <div class="ml-auto flex gap-1">
+      {#if secrets.length > 0}
+        <ul class="flex list-none flex-col gap-1 p-0 text-xs">
+          {#each secrets as secret (secret.id)}
+            <li class="flex flex-wrap items-center gap-2 rounded-md border px-2 py-1.5">
+              <span class="font-mono font-medium">{secret.id}</span>
               <Button
                 variant="ghost"
                 size="sm"
-                onclick={() => void rotateSecret(secret)}
-                disabled={!secret.configured || isSystemSecret(secret.kind)}
+                class="h-6 px-1.5 text-[10px]"
+                onclick={() => {
+                  if (typeof navigator !== "undefined" && navigator.clipboard) {
+                    void navigator.clipboard.writeText(secret.id);
+                    toast.success(`Copied key "${secret.id}" to clipboard.`);
+                  }
+                }}
               >
-                Rotate
+                Copy key
               </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                class="text-destructive"
-                onclick={() => void deleteSecret(secret)}
-                disabled={secret.used_by.length > 0 || isSystemSecret(secret.kind)}
-              >
-                Delete
-              </Button>
-            </div>
-          </li>
-        {/each}
-      </ul>
-      <form class="grid gap-2 sm:grid-cols-4" onsubmit={saveSecret}>
-        <Input placeholder="Name" bind:value={secretForm.name} />
-        <select
-          class="border-input bg-background h-9 rounded-md border px-2 text-sm"
-          bind:value={secretForm.kind}
-        >
-          {#each userSecretKinds as kind (kind.value)}
-            <option value={kind.value}>{kind.label}</option>
+              {#if secret.description}
+                <span class="text-muted-foreground">{secret.description}</span>
+              {/if}
+              <Badge variant={secret.configured ? "secondary" : "outline"} class="text-[10px]">
+                {secret.configured ? "Configured" : "Missing"}
+              </Badge>
+              {#if secret.used_by.length > 0}
+                <span class="text-muted-foreground">used by {secret.used_by.join(", ")}</span>
+              {/if}
+              <div class="ml-auto flex gap-1">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  class="text-destructive"
+                  onclick={() => void deleteSecret(secret)}
+                  disabled={secret.used_by.length > 0}
+                >
+                  Delete
+                </Button>
+              </div>
+            </li>
           {/each}
-        </select>
+        </ul>
+      {/if}
+      <form class="grid gap-2 sm:grid-cols-4" onsubmit={saveSecret}>
+        <Input placeholder="Key (e.g. OPENAI_API_KEY)" bind:value={secretForm.key} />
+        <Input placeholder="Description (optional)" bind:value={secretForm.description} />
         <Input type="password" placeholder="Value (write-only)" bind:value={secretForm.value} />
-        <Button type="submit" disabled={secretForm.name.trim() === "" || secretForm.value === ""}>
+        <Button type="submit" disabled={secretForm.key.trim() === "" || secretForm.value === ""}>
           Store secret
         </Button>
       </form>

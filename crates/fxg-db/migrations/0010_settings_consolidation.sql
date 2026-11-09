@@ -98,8 +98,7 @@ CREATE TABLE project_profiles (
 -- 5. Secret metadata (node.db / server.db; values live in secrets/{node,server}/)
 CREATE TABLE secrets (
     id                       TEXT PRIMARY KEY,
-    name                     TEXT NOT NULL,
-    kind                     TEXT NOT NULL,
+    description              TEXT,
     created_at               INTEGER NOT NULL,
     updated_at               INTEGER NOT NULL
 );

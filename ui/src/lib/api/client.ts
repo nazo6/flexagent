@@ -529,11 +529,6 @@ export class ApiClient {
     return this.#request("DELETE", `/api/v1/secrets/${encodeURIComponent(secretId)}`);
   }
 
-  /** `POST /api/v1/secrets/:id/rotate`. */
-  rotateSecret(secretId: string): Promise<SecretsResponse> {
-    return this.#request("POST", `/api/v1/secrets/${encodeURIComponent(secretId)}/rotate`);
-  }
-
   /** `GET /api/v1/nodes/:id/secrets` (hub proxy). */
   nodeSecrets(nodeId: string): Promise<SecretsResponse> {
     return this.#request("GET", `/api/v1/nodes/${encodeURIComponent(nodeId)}/secrets`);
@@ -557,14 +552,6 @@ export class ApiClient {
     return this.#request(
       "DELETE",
       `/api/v1/nodes/${encodeURIComponent(nodeId)}/secrets/${encodeURIComponent(secretId)}`,
-    );
-  }
-
-  /** `POST /api/v1/nodes/:id/secrets/:secret_id/rotate` (hub proxy). */
-  rotateNodeSecret(nodeId: string, secretId: string): Promise<SecretsResponse> {
-    return this.#request(
-      "POST",
-      `/api/v1/nodes/${encodeURIComponent(nodeId)}/secrets/${encodeURIComponent(secretId)}/rotate`,
     );
   }
 

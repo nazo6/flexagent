@@ -30,16 +30,16 @@ API・プロトコル境界の整理（[`2026-11-09-api-protocol-consolidation-p
 
 ## 1. クレート横断の重複コード統合 (DRY)
 
-### 1.1 秘密ストア (`secrets.rs`) の `fxg-db` への統合
+### 1.1 秘密ストア (`secrets.rs`) の `fxg-db` への統合と Key-Value ストアへの再定義
 
-現在、`crates/fxg-node/src/secrets.rs`（392行）と `crates/fxg-server/src/secrets.rs`（208行）にほぼ同一のファイル操作・メタデータ管理コードが存在している。
+`crates/fxg-node/src/secrets.rs`（392行）と `crates/fxg-server/src/secrets.rs`（208行）に重複していたコードを `fxg-db::secrets` に集約・統合し、あわせて秘密ストアの設計を「任意 Key-Value ストア」に再定義した。
 
-- **現状の問題**:
-  - `secret_path`, `set_owner_only` (`0600`), `write_secret`, `read_secret`, `delete_secret_file`, `generate_secret_value`, `is_system_kind`, `system_secret_path`, `register_system_secrets`, `list_secrets`, `upsert_secret`, `delete_secret` が重複している。
-  - `fxg-node/src/secrets.rs` はすでに `role: &str` (`"node"` / `"server"`) を引数に取る設計になっている一方、`fxg-server/src/secrets.rs` はサーバー専用にコピーされており、削除時の参照チェックエラーが `NodeError::SecretInUse` ではなく `ServerError::Server(...)`（500 Internal Error）になる不整合（`crates/fxg-server/src/secrets.rs:193`）も生じている。
-- **改善策**:
-  - `fxg-db`（すでに `DbRole::Node` / `DbRole::Hub` を持つ）に共通の `secrets` モジュールを配置し、`Db::role()` に応じた保存先ディレクトリ（`secrets/{node,server}/<id>`）・許可 `SecretKind` 検証・参照元（`used_by`）解決を一元化する。
-  - `fxg-node/src/secrets.rs` と `fxg-server/src/secrets.rs` を削除し、`fxg-db` の共通実装を呼び出す形にする。
+- **解消した歪み**:
+  - `SecretKind`（`agent_env` / `git_token`）による用途分類を廃止し、Node / Hub が保持する汎用的な Key-Value 秘密（キー名識別子、任意の説明 `description`、値 `value`）に一本化。
+  - プロセス内部の起動資格情報（`node_token` / `auth_token` / `vapid_private`）をユーザー向け秘密ストアの CRUD 対象から分離。
+  - 外部 API キー等に対してランダム文字列を上書きしてしまう破綻した `rotate` API / 操作を廃止し、値の更新（PUT）に統一。
+  - 不可読な UUID v7 ではなく、ユーザーがつけたキー名（`OPENAI_API_KEY` 等）でエージェント（`KEY=@KEY`）や Git 認証（`KEY`）から直接参照できるように改善。
+  - `fxg-node/src/secrets.rs` と `fxg-server/src/secrets.rs` を完全削除し、`fxg-db::secrets` に統合。サーバー側の参照中削除エラーも `ErrorCode::SecretInUse` に統一。
 
 ### 1.2 Bootstrap 設定の `SourcedValue` 組み立てロジックの共通化
 
@@ -94,7 +94,7 @@ API・プロトコル境界の整理（[`2026-11-09-api-protocol-consolidation-p
 ## 4. 段階的チェックリスト
 
 - [ ] **Phase 1: 重複コードの統合 (DRY)**
-  - [ ] `fxg-node/src/secrets.rs` と `fxg-server/src/secrets.rs` を `fxg-db::secrets` に統合（サーバー側の `SecretInUse` エラーコード不整合も同時に修正）
+  - [x] `fxg-node/src/secrets.rs` と `fxg-server/src/secrets.rs` を `fxg-db::secrets` に統合し、汎用 Key-Value 秘密ストアへ再定義（SecretKind・ランダムRotateの廃止、キー名直接参照、サーバー側 `SecretInUse` 不整合修正）
   - [ ] Bootstrap 設定の `SourcedValue` 構築ヘルパーを `fxg-protocol::config` に共通化
   - [ ] 監査ログ記録ヘルパーを `fxg-db::audit` に共通化
 - [ ] **Phase 2: `fxg-protocol` と `fxg-db` のモジュール分割**

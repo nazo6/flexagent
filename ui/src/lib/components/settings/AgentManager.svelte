@@ -534,14 +534,14 @@
       <div class="grid gap-1.5">
         <Label for="custom-env">
           {m.settings_env_vars()} (<code>KEY=VALUE</code>, secret reference
-          <code>KEY=@secret-id</code>)
+          <code>KEY=@SECRET_KEY</code>)
         </Label>
         <textarea
           id="custom-env"
           bind:value={customForm.env}
           rows="3"
           class="border-input bg-background focus-visible:ring-ring/40 rounded-md border px-2 py-1.5 font-mono text-xs outline-none focus-visible:ring-1"
-          placeholder="LOG_LEVEL=info&#10;API_KEY=@0195-secret-id"></textarea>
+          placeholder="LOG_LEVEL=info&#10;OPENAI_API_KEY=@OPENAI_API_KEY"></textarea>
       </div>
       <Dialog.Footer>
         <Dialog.Close>{m.common_cancel()}</Dialog.Close>

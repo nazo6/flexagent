@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT id AS \"id!\", name, kind, created_at, updated_at FROM secrets WHERE id = ?",
+  "query": "SELECT id AS \"id!\", description, created_at, updated_at FROM secrets WHERE id = ?",
   "describe": {
     "columns": [
       {
@@ -15,30 +15,19 @@
         }
       },
       {
-        "name": "name",
+        "name": "description",
         "ordinal": 1,
         "type_info": "Text",
         "origin": {
           "Table": {
             "table": "secrets",
-            "name": "name"
-          }
-        }
-      },
-      {
-        "name": "kind",
-        "ordinal": 2,
-        "type_info": "Text",
-        "origin": {
-          "Table": {
-            "table": "secrets",
-            "name": "kind"
+            "name": "description"
           }
         }
       },
       {
         "name": "created_at",
-        "ordinal": 3,
+        "ordinal": 2,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -49,7 +38,7 @@
       },
       {
         "name": "updated_at",
-        "ordinal": 4,
+        "ordinal": 3,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -64,11 +53,10 @@
     },
     "nullable": [
       true,
-      false,
-      false,
+      true,
       false,
       false
     ]
   },
-  "hash": "89a58fa5f852ef961cc5a1bdc799cd14f01d7046f6f8e40d696e8a425cf89e5e"
+  "hash": "52c8d578563dbf71d6f88e8ca478ce10a2c12c53f01972c6ae858b154e8333ea"
 }

@@ -820,14 +820,6 @@ pub trait ClientApiBackend: Clone + Send + Sync + 'static {
         ))
     }
 
-    /// `POST /api/v1/secrets/:secret_id/rotate`.
-    async fn rotate_secret(&self, _secret_id: &SecretId) -> Result<SecretsResponse, ApiError> {
-        Err(ApiError::from_code(
-            ErrorCode::InvalidState,
-            "secrets are not available on this endpoint",
-        ))
-    }
-
     /// `GET /api/v1/nodes/:node_id/secrets` (hub proxy).
     async fn node_secrets(&self, _node_id: &str) -> Result<SecretsResponse, ApiError> {
         Err(ApiError::from_code(
@@ -851,18 +843,6 @@ pub trait ClientApiBackend: Clone + Send + Sync + 'static {
 
     /// `DELETE /api/v1/nodes/:node_id/secrets/:secret_id` (hub proxy).
     async fn delete_node_secret(
-        &self,
-        _node_id: &str,
-        _secret_id: &SecretId,
-    ) -> Result<SecretsResponse, ApiError> {
-        Err(ApiError::from_code(
-            ErrorCode::InvalidState,
-            "node secret proxy is only available on the central server",
-        ))
-    }
-
-    /// `POST /api/v1/nodes/:node_id/secrets/:secret_id/rotate` (hub proxy).
-    async fn rotate_node_secret(
         &self,
         _node_id: &str,
         _secret_id: &SecretId,
@@ -1080,18 +1060,10 @@ pub fn client_router<B: ClientApiBackend>(backend: B, options: ClientApiOptions)
             "/api/v1/secrets/{secret_id}",
             put(upsert_secret::<B>).delete(delete_secret::<B>),
         )
-        .route(
-            "/api/v1/secrets/{secret_id}/rotate",
-            post(rotate_secret::<B>),
-        )
         .route("/api/v1/nodes/{node_id}/secrets", get(node_secrets::<B>))
         .route(
             "/api/v1/nodes/{node_id}/secrets/{secret_id}",
             put(upsert_node_secret::<B>).delete(delete_node_secret::<B>),
-        )
-        .route(
-            "/api/v1/nodes/{node_id}/secrets/{secret_id}/rotate",
-            post(rotate_node_secret::<B>),
         )
         .route("/api/v1/nodes/{node_id}/agents", get(list_agents_node::<B>))
         .route(
@@ -1966,16 +1938,6 @@ async fn delete_secret<B: ClientApiBackend>(
     }
 }
 
-async fn rotate_secret<B: ClientApiBackend>(
-    State(state): State<ClientApiState<B>>,
-    UrlPath(secret_id): UrlPath<String>,
-) -> Response {
-    match state.backend.rotate_secret(&SecretId::new(secret_id)).await {
-        Ok(response) => Json(response).into_response(),
-        Err(err) => err.into_response(),
-    }
-}
-
 async fn node_secrets<B: ClientApiBackend>(
     State(state): State<ClientApiState<B>>,
     UrlPath(node_id): UrlPath<String>,
@@ -2008,20 +1970,6 @@ async fn delete_node_secret<B: ClientApiBackend>(
     match state
         .backend
         .delete_node_secret(&node_id, &SecretId::new(secret_id))
-        .await
-    {
-        Ok(response) => Json(response).into_response(),
-        Err(err) => err.into_response(),
-    }
-}
-
-async fn rotate_node_secret<B: ClientApiBackend>(
-    State(state): State<ClientApiState<B>>,
-    UrlPath((node_id, secret_id)): UrlPath<(String, String)>,
-) -> Response {
-    match state
-        .backend
-        .rotate_node_secret(&node_id, &SecretId::new(secret_id))
         .await
     {
         Ok(response) => Json(response).into_response(),

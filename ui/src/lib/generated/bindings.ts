@@ -1436,14 +1436,12 @@ export type SearchResponse = {
 /**  ID of a secret stored in `~/.flexagent/secrets/{node,server}/<id>`. */
 export type SecretId = string;
 
-/**  Metadata of a stored secret (never the value itself). */
+/**  Metadata of a stored user secret (never the value itself). */
 export type SecretSummary = {
-	/**  Secret ID */
+	/**  Secret key / identifier (e.g. `ANTHROPIC_API_KEY`, `GH_TOKEN`) */
 	id: SecretId,
-	/**  Display name */
-	name: string,
-	/**  Secret kind */
-	kind: string,
+	/**  Optional human-readable description or note */
+	description: string | null,
 	/**  Whether the value file exists */
 	configured: boolean,
 	/**  Last update time (Unix epoch ms). `None` when the value is missing. */
@@ -2157,10 +2155,8 @@ export type UpdateServerSettingsRequest = {
 
 /**  `PUT /api/v1/secrets/{secret_id}` request (write-only). */
 export type UpsertSecretRequest = {
-	/**  Display name */
-	name: string,
-	/**  Secret kind */
-	kind: string,
+	/**  Optional description or note */
+	description: string | null,
 	/**  The plaintext value. Never echoed back in a response or written to logs. */
 	value: string,
 };

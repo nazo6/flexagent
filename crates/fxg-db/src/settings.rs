@@ -13,7 +13,7 @@ use std::collections::BTreeMap;
 
 use fxg_protocol::settings::{
     AgentSettings, CustomAgentConfig, GitCredentialConfig, NodeSettings, ProjectProfile,
-    ProvisionerDefinition, SecretKind, SecretSummary, ServerSettings, UpdateAgentSettingsRequest,
+    ProvisionerDefinition, SecretSummary, ServerSettings, UpdateAgentSettingsRequest,
     UpdateNodeSettingsRequest, UpdateProjectProfileRequest, UpdateServerSettingsRequest,
 };
 use fxg_protocol::util::now_ms;
@@ -32,10 +32,6 @@ fn positive_u64(value: i64) -> Option<u64> {
         Ok(value) if value > 0 => Some(value),
         _ => None,
     }
-}
-
-fn parse_secret_kind(value: &str) -> SecretKind {
-    value.parse().unwrap_or_else(|never| match never {})
 }
 
 // ----------------------------------------------------------------------
@@ -724,7 +720,7 @@ pub async fn upsert_project_profile(
 /// Lists secret metadata (values are not stored in the DB).
 pub async fn list_secrets(pool: &SqlitePool) -> Result<Vec<SecretSummary>, DbError> {
     let rows = sqlx::query!(
-        r#"SELECT id AS "id!", name, kind, created_at, updated_at FROM secrets ORDER BY name, id"#,
+        r#"SELECT id AS "id!", description, created_at, updated_at FROM secrets ORDER BY id"#,
     )
     .fetch_all(pool)
     .await?;
@@ -732,8 +728,7 @@ pub async fn list_secrets(pool: &SqlitePool) -> Result<Vec<SecretSummary>, DbErr
         .into_iter()
         .map(|row| SecretSummary {
             id: SecretId::new(row.id),
-            name: row.name,
-            kind: parse_secret_kind(&row.kind),
+            description: row.description,
             configured: true,
             updated_at: Some(row.updated_at),
             used_by: Vec::new(),
@@ -747,15 +742,14 @@ pub async fn get_secret(
     id: &SecretId,
 ) -> Result<Option<SecretSummary>, DbError> {
     let row = sqlx::query!(
-        r#"SELECT id AS "id!", name, kind, created_at, updated_at FROM secrets WHERE id = ?"#,
+        r#"SELECT id AS "id!", description, created_at, updated_at FROM secrets WHERE id = ?"#,
         id.as_str(),
     )
     .fetch_optional(pool)
     .await?;
     Ok(row.map(|row| SecretSummary {
         id: SecretId::new(row.id),
-        name: row.name,
-        kind: parse_secret_kind(&row.kind),
+        description: row.description,
         configured: true,
         updated_at: Some(row.updated_at),
         used_by: Vec::new(),
@@ -766,22 +760,19 @@ pub async fn get_secret(
 pub async fn upsert_secret_metadata(
     pool: &SqlitePool,
     id: &SecretId,
-    name: &str,
-    kind: &SecretKind,
+    description: Option<&str>,
 ) -> Result<(), DbError> {
     let now = now_ms();
     sqlx::query!(
         r#"
-        INSERT INTO secrets (id, name, kind, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?)
+        INSERT INTO secrets (id, description, created_at, updated_at)
+        VALUES (?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
-            name = excluded.name,
-            kind = excluded.kind,
+            description = excluded.description,
             updated_at = excluded.updated_at
         "#,
         id.as_str(),
-        name,
-        kind.as_str(),
+        description,
         now,
         now,
     )

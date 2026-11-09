@@ -32,7 +32,6 @@ mod error;
 pub mod hub;
 pub mod provisioner;
 pub mod push;
-pub mod secrets;
 mod server;
 pub mod state;
 

@@ -54,4 +54,15 @@ pub enum DbError {
     /// `expected_revision` did not match the stored revision (optimistic lock conflict)
     #[error("settings revision mismatch")]
     RevisionMismatch,
+    /// Secret is in use and cannot be deleted
+    #[error("secret {id} is in use: {used_by:?}")]
+    SecretInUse {
+        /// Referenced secret ID
+        id: fxg_protocol::SecretId,
+        /// Identifiers of agents / git hosts referencing the secret
+        used_by: Vec<String>,
+    },
+    /// Secret parameter or state is invalid
+    #[error("secret invalid: {0}")]
+    SecretInvalid(String),
 }

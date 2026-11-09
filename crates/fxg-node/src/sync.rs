@@ -721,7 +721,7 @@ pub(crate) async fn handle_server_message(
                         serde_json::json!({
                             "action": "upsert",
                             "secret_id": id.as_str(),
-                            "kind": request.kind.as_str(),
+                            "has_description": request.description.is_some(),
                         }),
                     )
                     .await;
@@ -737,20 +737,6 @@ pub(crate) async fn handle_server_message(
                         &AuditSource::remote(state.node_id()),
                         None,
                         serde_json::json!({ "action": "delete", "secret_id": id.as_str() }),
-                    )
-                    .await;
-            }
-            send_secret_op_result(out, request_id, result).await;
-        }
-        ServerToNodeMsg::RotateSecret { request_id, id } => {
-            let result = state.rotate_node_secret(&id).await;
-            if result.is_ok() {
-                state
-                    .record_audit(
-                        fxg_db::audit::actions::SECRET_MANAGE,
-                        &AuditSource::remote(state.node_id()),
-                        None,
-                        serde_json::json!({ "action": "rotate", "secret_id": id.as_str() }),
                     )
                     .await;
             }

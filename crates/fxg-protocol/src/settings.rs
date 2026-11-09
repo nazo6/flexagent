@@ -41,22 +41,6 @@ crate::open_string_enum! {
     }
 }
 
-crate::open_string_enum! {
-    /// Kind of a stored secret.
-    pub enum SecretKind {
-        /// Node <-> server pairing token (`~/.flexagent/node_token`).
-        NodeToken => "node_token",
-        /// Client authentication token (`~/.flexagent/auth_token`).
-        AuthToken => "auth_token",
-        /// Web Push VAPID private key (`~/.flexagent/vapid_private.pem`).
-        VapidPrivate => "vapid_private",
-        /// Git access token for a credential provider.
-        GitToken => "git_token",
-        /// Environment variable injected into a custom agent.
-        AgentEnv => "agent_env",
-    }
-}
-
 /// A read-only bootstrap value together with its origin.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
@@ -372,16 +356,14 @@ pub struct ProvisionerDefinition {
     pub env: BTreeMap<String, String>,
 }
 
-/// Metadata of a stored secret (never the value itself).
+/// Metadata of a stored user secret (never the value itself).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct SecretSummary {
-    /// Secret ID
+    /// Secret key / identifier (e.g. `ANTHROPIC_API_KEY`, `GH_TOKEN`)
     pub id: SecretId,
-    /// Display name
-    pub name: String,
-    /// Secret kind
-    pub kind: SecretKind,
+    /// Optional human-readable description or note
+    pub description: Option<String>,
     /// Whether the value file exists
     pub configured: bool,
     /// Last update time (Unix epoch ms). `None` when the value is missing.
@@ -394,10 +376,8 @@ pub struct SecretSummary {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct UpsertSecretRequest {
-    /// Display name
-    pub name: String,
-    /// Secret kind
-    pub kind: SecretKind,
+    /// Optional description or note
+    pub description: Option<String>,
     /// The plaintext value. Never echoed back in a response or written to logs.
     pub value: String,
 }

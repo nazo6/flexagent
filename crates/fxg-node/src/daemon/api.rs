@@ -797,15 +797,6 @@ impl ClientApiBackend for DaemonState {
         })
     }
 
-    async fn rotate_secret(&self, secret_id: &SecretId) -> Result<SecretsResponse, ApiError> {
-        Ok(SecretsResponse {
-            secrets: self
-                .rotate_node_secret(secret_id)
-                .await
-                .map_err(api_error)?,
-        })
-    }
-
     async fn kill_switch(
         &self,
         reason: &str,

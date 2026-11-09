@@ -35,6 +35,7 @@ pub mod push;
 pub mod queries;
 pub mod registration;
 pub mod searchable;
+pub mod secrets;
 pub mod settings;
 
 mod db;

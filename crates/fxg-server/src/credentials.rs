@@ -10,7 +10,7 @@ use std::path::Path;
 use std::time::Duration;
 
 use fxg_protocol::config::DEFAULT_GIT_USERNAME;
-use fxg_protocol::settings::{GitCredentialConfig, SecretKind};
+use fxg_protocol::settings::GitCredentialConfig;
 
 /// Resolved Git credentials (memory only).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -100,9 +100,8 @@ pub async fn resolve_credential(
                     secret_id.as_str()
                 )),
                 Err(err) => Err(format!(
-                    "failed to read secret {} ({}): {err}",
-                    secret_id.as_str(),
-                    SecretKind::GitToken.as_str()
+                    "failed to read secret {}: {err}",
+                    secret_id.as_str()
                 )),
             }
         }

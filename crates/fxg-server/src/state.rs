@@ -104,24 +104,6 @@ impl ServerState {
         let push = PushService::load_or_create(&options.fxg_home)
             .map_err(|err| ServerError::Server(format!("web push init failed: {err}")))?;
         let server_settings = db.ensure_server_settings().await?;
-        crate::secrets::register_system_secrets(
-            &db,
-            &options.fxg_home,
-            &[
-                (
-                    "auth_token",
-                    "Client auth token",
-                    fxg_protocol::settings::SecretKind::AuthToken,
-                ),
-                (
-                    "vapid_private",
-                    "VAPID private key",
-                    fxg_protocol::settings::SecretKind::VapidPrivate,
-                ),
-            ],
-        )
-        .await
-        .map_err(|err| ServerError::Server(format!("secret store init failed: {err}")))?;
         push.set_subject(server_settings.vapid_subject.as_deref());
         let provisioners = ProvisionerManager::new(
             options.fxg_home.clone(),
@@ -283,7 +265,7 @@ impl ServerState {
 
     /// Lists server-owned secret metadata.
     pub async fn secrets(&self) -> Result<Vec<SecretSummary>, ServerError> {
-        crate::secrets::list_secrets(self.db(), &self.inner.options.fxg_home).await
+        Ok(fxg_db::secrets::list_secrets(self.db(), &self.inner.options.fxg_home).await?)
     }
 
     /// Stores a server-owned secret.
@@ -292,30 +274,15 @@ impl ServerState {
         id: &SecretId,
         request: &UpsertSecretRequest,
     ) -> Result<Vec<SecretSummary>, ServerError> {
-        crate::secrets::upsert_secret(self.db(), &self.inner.options.fxg_home, id, request).await
+        Ok(
+            fxg_db::secrets::upsert_secret(self.db(), &self.inner.options.fxg_home, id, request)
+                .await?,
+        )
     }
 
     /// Deletes a server-owned secret.
     pub async fn delete_secret(&self, id: &SecretId) -> Result<Vec<SecretSummary>, ServerError> {
-        crate::secrets::delete_secret(self.db(), &self.inner.options.fxg_home, id).await
-    }
-
-    /// Rotates a server-owned secret.
-    pub async fn rotate_secret(&self, id: &SecretId) -> Result<Vec<SecretSummary>, ServerError> {
-        let existing = self
-            .db()
-            .secret(id)
-            .await?
-            .ok_or_else(|| ServerError::Server(format!("secret not found: {}", id.as_str())))?;
-        crate::secrets::write_secret(
-            &self.inner.options.fxg_home,
-            id,
-            &crate::secrets::generate_secret_value(),
-        )?;
-        self.db()
-            .upsert_secret_metadata(id, &existing.name, &existing.kind)
-            .await?;
-        self.secrets().await
+        Ok(fxg_db::secrets::delete_secret(self.db(), &self.inner.options.fxg_home, id).await?)
     }
 
     /// Relays a node settings read over the hub.
@@ -417,25 +384,6 @@ impl ServerState {
                 &NodeId::from(node_id),
                 &request_id,
                 fxg_protocol::node_server::ServerToNodeMsg::DeleteSecret {
-                    request_id: request_id.clone(),
-                    id: id.clone(),
-                },
-            )
-            .await
-    }
-
-    /// Relays a node secret rotation over the hub.
-    pub async fn rotate_node_secret(
-        &self,
-        node_id: &str,
-        id: &SecretId,
-    ) -> Result<Vec<SecretSummary>, ApiError> {
-        let request_id = uuid_v7();
-        self.hub()
-            .secret_op(
-                &NodeId::from(node_id),
-                &request_id,
-                fxg_protocol::node_server::ServerToNodeMsg::RotateSecret {
                     request_id: request_id.clone(),
                     id: id.clone(),
                 },
@@ -1743,14 +1691,6 @@ impl ClientApiBackend for ServerState {
         })
     }
 
-    async fn rotate_secret(&self, secret_id: &SecretId) -> Result<SecretsResponse, ApiError> {
-        Ok(SecretsResponse {
-            secrets: ServerState::rotate_secret(self, secret_id)
-                .await
-                .map_err(secret_error)?,
-        })
-    }
-
     async fn node_secrets(&self, node_id: &str) -> Result<SecretsResponse, ApiError> {
         Ok(SecretsResponse {
             secrets: ServerState::node_secrets(self, node_id).await?,
@@ -1775,16 +1715,6 @@ impl ClientApiBackend for ServerState {
     ) -> Result<SecretsResponse, ApiError> {
         Ok(SecretsResponse {
             secrets: ServerState::delete_node_secret(self, node_id, secret_id).await?,
-        })
-    }
-
-    async fn rotate_node_secret(
-        &self,
-        node_id: &str,
-        secret_id: &SecretId,
-    ) -> Result<SecretsResponse, ApiError> {
-        Ok(SecretsResponse {
-            secrets: ServerState::rotate_node_secret(self, node_id, secret_id).await?,
         })
     }
 
@@ -1991,6 +1921,13 @@ impl ServerState {
 fn secret_error(err: ServerError) -> ApiError {
     match err {
         ServerError::SecretInvalid(message) => {
+            ApiError::from_code(ErrorCode::SecretInvalid, message)
+        }
+        ServerError::Db(fxg_db::DbError::SecretInUse { id, used_by }) => ApiError::from_code(
+            ErrorCode::SecretInUse,
+            format!("secret {} is in use: {}", id.as_str(), used_by.join(", ")),
+        ),
+        ServerError::Db(fxg_db::DbError::SecretInvalid(message)) => {
             ApiError::from_code(ErrorCode::SecretInvalid, message)
         }
         other => ApiError::internal(other),

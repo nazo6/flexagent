@@ -5,8 +5,8 @@ use std::collections::BTreeMap;
 use fxg_db::{Db, DbError, DbRole};
 use fxg_protocol::settings::{
     AgentSettings, ConfigSource, GitCredentialConfig, NodeSettings, ProjectIdentity,
-    ProvisionerDefinition, SecretKind, SourcedValue, UpdateAgentSettingsRequest,
-    UpdateNodeSettingsRequest, UpdateProjectProfileRequest, UpdateServerSettingsRequest,
+    ProvisionerDefinition, SourcedValue, UpdateAgentSettingsRequest, UpdateNodeSettingsRequest,
+    UpdateProjectProfileRequest, UpdateServerSettingsRequest,
 };
 use fxg_protocol::{ProjectId, SecretId};
 
@@ -269,18 +269,26 @@ async fn server_settings_provisioners_and_profiles() {
 async fn secret_metadata_roundtrip() {
     let db = db().await;
     let id = SecretId::new("secret-1");
-    db.upsert_secret_metadata(&id, "API key", &SecretKind::AgentEnv)
+    db.upsert_secret_metadata(&id, Some("API key"))
         .await
         .expect("insert");
     let secrets = db.secrets().await.expect("list");
     assert_eq!(secrets.len(), 1);
     assert_eq!(secrets[0].id, id);
-    assert_eq!(secrets[0].kind, SecretKind::AgentEnv);
+    assert_eq!(secrets[0].description.as_deref(), Some("API key"));
 
-    db.upsert_secret_metadata(&id, "Renamed", &SecretKind::GitToken)
+    db.upsert_secret_metadata(&id, Some("Renamed"))
         .await
         .expect("update");
-    assert_eq!(db.secret(&id).await.unwrap().unwrap().name, "Renamed");
+    assert_eq!(
+        db.secret(&id)
+            .await
+            .unwrap()
+            .unwrap()
+            .description
+            .as_deref(),
+        Some("Renamed")
+    );
     assert_eq!(db.delete_secret_metadata(&id).await.unwrap(), 1);
     assert!(db.secret(&id).await.unwrap().is_none());
 }

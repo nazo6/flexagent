@@ -220,7 +220,7 @@ pub enum NodeToServerMsg {
         error: Option<String>,
     },
     /// Response with the result of a secret operation (`GetSecrets` /
-    /// `UpsertSecret` / `DeleteSecret` / `RotateSecret`).
+    /// `UpsertSecret` / `DeleteSecret`).
     SecretOpResult {
         /// Correlation ID of the request
         request_id: String,
@@ -526,13 +526,6 @@ pub enum ServerToNodeMsg {
     },
     /// Request to delete a secret (hub proxy).
     DeleteSecret {
-        /// Correlation ID
-        request_id: String,
-        /// Target secret ID
-        id: crate::SecretId,
-    },
-    /// Request to replace a secret value with a fresh random token (hub proxy).
-    RotateSecret {
         /// Correlation ID
         request_id: String,
         /// Target secret ID

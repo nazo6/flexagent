@@ -260,24 +260,6 @@ impl DaemonState {
         config.fxg_home = paths.fxg_home().to_path_buf();
 
         let token = auth::load_or_create(&paths.auth_token_path())?;
-        // Expose the system secrets (fixed paths) in the settings catalog.
-        crate::secrets::register_system_secrets(
-            &db,
-            paths.fxg_home(),
-            &[
-                (
-                    "node_token",
-                    "Node pairing token",
-                    fxg_protocol::settings::SecretKind::NodeToken,
-                ),
-                (
-                    "auth_token",
-                    "Client auth token",
-                    fxg_protocol::settings::SecretKind::AuthToken,
-                ),
-            ],
-        )
-        .await?;
         let bus = SessionEventBus::new(db.clone());
         // Reconcile the state of sessions lost when the previous daemon exited
         reconcile_stale_sessions(&bus).await?;

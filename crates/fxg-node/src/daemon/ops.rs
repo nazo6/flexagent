@@ -834,12 +834,7 @@ impl DaemonState {
 
     /// Lists secret metadata with `used_by` and `configured` filled in.
     pub async fn node_secrets(&self) -> Result<Vec<SecretSummary>, NodeError> {
-        crate::secrets::list_secrets(
-            self.db(),
-            self.paths().fxg_home(),
-            crate::secrets::ROLE_NODE,
-        )
-        .await
+        Ok(fxg_db::secrets::list_secrets(self.db(), self.paths().fxg_home()).await?)
     }
 
     /// Stores a node-owned secret (write-only).
@@ -848,49 +843,11 @@ impl DaemonState {
         id: &SecretId,
         request: &UpsertSecretRequest,
     ) -> Result<Vec<SecretSummary>, NodeError> {
-        crate::secrets::upsert_secret(
-            self.db(),
-            self.paths().fxg_home(),
-            crate::secrets::ROLE_NODE,
-            id,
-            request,
-        )
-        .await
+        Ok(fxg_db::secrets::upsert_secret(self.db(), self.paths().fxg_home(), id, request).await?)
     }
 
     /// Deletes a node-owned secret after checking references.
     pub async fn delete_node_secret(&self, id: &SecretId) -> Result<Vec<SecretSummary>, NodeError> {
-        crate::secrets::delete_secret(
-            self.db(),
-            self.paths().fxg_home(),
-            crate::secrets::ROLE_NODE,
-            id,
-        )
-        .await
-    }
-
-    /// Replaces a node-owned secret value with a fresh token.
-    pub async fn rotate_node_secret(&self, id: &SecretId) -> Result<Vec<SecretSummary>, NodeError> {
-        let existing = self
-            .db()
-            .secret(id)
-            .await?
-            .ok_or_else(|| NodeError::SecretMissing { id: id.clone() })?;
-        if crate::secrets::is_system_kind(&existing.kind) {
-            return Err(NodeError::SecretInvalid(format!(
-                "secret kind {} is managed by the system",
-                existing.kind.as_str()
-            )));
-        }
-        crate::secrets::write_secret(
-            self.paths().fxg_home(),
-            crate::secrets::ROLE_NODE,
-            id,
-            &crate::secrets::generate_secret_value(),
-        )?;
-        self.db()
-            .upsert_secret_metadata(id, &existing.name, &existing.kind)
-            .await?;
-        self.node_secrets().await
+        Ok(fxg_db::secrets::delete_secret(self.db(), self.paths().fxg_home(), id).await?)
     }
 }

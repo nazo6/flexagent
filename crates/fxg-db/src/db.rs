@@ -618,10 +618,9 @@ impl Db {
     pub async fn upsert_secret_metadata(
         &self,
         id: &fxg_protocol::SecretId,
-        name: &str,
-        kind: &fxg_protocol::settings::SecretKind,
+        description: Option<&str>,
     ) -> Result<(), DbError> {
-        settings::upsert_secret_metadata(&self.pool, id, name, kind).await
+        settings::upsert_secret_metadata(&self.pool, id, description).await
     }
 
     /// Deletes secret metadata.
