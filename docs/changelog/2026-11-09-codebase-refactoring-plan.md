@@ -91,14 +91,46 @@ API・プロトコル境界の整理（[`2026-11-09-api-protocol-consolidation-p
 
 ---
 
-## 4. 段階的チェックリスト
+## 4. 変更波及 (Ripple Effect) を抑制するアーキテクチャ方針
+
+機能追加やスキーマ変更時に変更箇所が全方位に拡散するのを防ぐため、以下の設計施策を合わせて適用する。
+
+### 4.1 テスト用 Fixture ビルダー (Object Mother パターン) の導入
+
+- **現状の課題**:
+  - `SessionSummary`, `ProjectSummary`, 各種 Request/Response 型にフィールドを1つ追加・変更した際、各クレート内のテストコードにある直接構造体リテラル初期化（`SessionSummary { session_id, ... }`）が一斉にコンパイルエラーになり、無関係なテスト数十箇所の修正に追われる。
+- **改善策**:
+  - `fxg-protocol` のテスト支援モジュール（`#[cfg(any(test, feature = "testing"))]`）に、共通のダミー生成・ビルダー（例: `SessionSummary::dummy()`, `ProjectSummary::dummy()`, あるいは `Default` 実装）を整備する。
+  - テスト側では検証対象のフィールドのみを明示し、それ以外のフィールドはデフォルト値で吸収させることで、構造体拡張時のテスト修正コストをゼロにする。
+
+### 4.2 UI 状態管理・データフェッチの宣言化 (Query / Resource パターン)
+
+- **現状の課題**:
+  - 各ページ（`projects/+page.svelte`, `sessions/+page.svelte` 等）で `loading`, `error`, `busy`、手動再取得（`sync.refreshProjects()`）を命令的に個別実装しており、API の引数や戻り値が変わるたびにコンポーネント内の非同期フロー全体に修正が波及する。
+- **改善策**:
+  - Svelte 5 の Runes に適したデータフェッチ・キャッシュ無効化の共通機構（軽量な Resource パターンまたは TanStack Query / Svelte Query 等の導入）を整備する。
+  - 「セッション作成や Worktree 操作が成功したら関連キーのキャッシュを invalidate する」という宣言的記述に統一し、コンポーネント内のボイラープレートを排除する。
+
+### 4.3 DB Row とプロトコル型の過度な二重化 (マッピング税) の緩和
+
+- **現状の課題**:
+  - `SessionRow` と `SessionSummary` のように、DB層（`fxg-db`）とプロトコル層（`fxg-protocol`）でほぼ同一定義の構造体を別々に持ち、`into_summary()` によるフィールド詰め替えを手書きしているため、カラム追加ごとに migration → Row → マッピング関数 → Summary 型と4重の変更が必要。
+- **改善策**:
+  - 1対1で対応するプロトコル型については `fxg-protocol` の型を `sqlx::FromRow` で直接受けるか、共通マクロでマッピングを自動化する。
+  - 将来的に拡張・変更が頻繁に予想されるメタデータや設定項目は、無理に固定カラムにせず `metadata: Option<RawJson>` などの拡張 JSON カラムを活用し、DB マイグレーションと全レイヤーの型修正の頻度を抑える。
+
+---
+
+## 5. 段階的チェックリスト
 
 - [ ] **Phase 1: 重複コードの統合 (DRY)**
   - [x] `fxg-node/src/secrets.rs` と `fxg-server/src/secrets.rs` を `fxg-db::secrets` に統合し、汎用 Key-Value 秘密ストアへ再定義（SecretKind・ランダムRotateの廃止、キー名直接参照、サーバー側 `SecretInUse` 不整合修正）
   - [ ] Bootstrap 設定の `SourcedValue` 構築ヘルパーを `fxg-protocol::config` に共通化
   - [ ] 監査ログ記録ヘルパーを `fxg-db::audit` に共通化
-- [ ] **Phase 2: `fxg-protocol` と `fxg-db` のモジュール分割**
+- [ ] **Phase 2: `fxg-protocol` と `fxg-db` のモジュール分割・マッピング簡素化**
   - [ ] `crates/fxg-protocol/src/common.rs` を責務別サブモジュール（`error`, `session`, `project`, `acp`）に分割（`common::*` の再エクスポートにより呼び出し側は非破壊）
+  - [ ] 主要エンティティのテスト用 Fixture ビルダー（`SessionSummary::dummy()` 等）を整備
+  - [ ] `fxg-db` の Row 構造体と Protocol 型のマッピングボイラープレートを整理
 - [ ] **Phase 3: `fxg-acp` と `fxg-node` の巨大ファイル分割**
   - [ ] `crates/fxg-acp/src/acp.rs` を `client`, `process`, `mapping`, `tests` に分割
   - [ ] `crates/fxg-node/src/session_manager.rs` を `lifecycle`, `stream`, `approval`, `replay` に分割
@@ -106,3 +138,5 @@ API・プロトコル境界の整理（[`2026-11-09-api-protocol-consolidation-p
   - [ ] `crates/fxg-server/src/state.rs` と `api/mod.rs` を分割
   - [ ] `crates/fxg-cli/src/commands.rs` をサブコマンド群ごとに分割
   - [ ] `ui/src/routes/projects/+page.svelte` からサブコンポーネントを分離
+- [ ] **Phase 5: フロントエンドデータフローの宣言化**
+  - [ ] UI のデータフェッチ・キャッシュ無効化を宣言化（Query / Resource パターン導入）

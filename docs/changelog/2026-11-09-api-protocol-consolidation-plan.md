@@ -63,9 +63,9 @@ Client ⇔ Server/Node 間の API 方式について、以下の2つのアプロ
 
 ## 2. リファクタリング詳細設計
 
-### 2.1 Phase 1: Server ⇔ Node 間 (`NodeHub`) の汎用 RPC エンベロープ化
+### 2.1 Phase 1: Server ⇔ Node 間 (`NodeHub`) の汎用 RPC エンベロープ化と `ErrorInfo` 透過化
 
-`ServerToNodeMsg` / `NodeToServerMsg` を「ストリーム・制御メッセージ」と「汎用 RPC（Request / Response）」に分離する。
+`ServerToNodeMsg` / `NodeToServerMsg` を「ストリーム・制御メッセージ」と「汎用 RPC（Request / Response）」に分離する。さらに、エラーハンドリングにおいて各層でのエラー再ラッピング（Error Handling Tax）を廃止し、共通エラー型 `ErrorInfo` をそのまま透過させる。
 
 #### 変更後のプロトコル構造 (`crates/fxg-protocol/src/node_server.rs`)
 
@@ -118,6 +118,11 @@ pub enum NodeToServerMsg {
 - ワークスペース・Git 操作: `GetGitDiff`, `ManageWorktree`, `BrowseFs`, `ProjectScan`, `ProjectLink`
 - エージェント・設定・秘密操作: `ListAgents`, `ManageAgent`, `GetNodeSettings`, `UpdateNodeSettings`, `UpdateAgentSettings`, `GetSecrets`, `UpsertSecret`, `DeleteSecret`, `RotateSecret`
 
+#### `ErrorInfo` 透過化の原則
+
+- ノード側で発生したエラー（`NodeError`）は、境界で `NodeError::info(&self) -> ErrorInfo` に変換した後は、`NodeHub` やリレー層で別のエラー型（`ServerError` / `ApiError`）に再ラッピングせず、クライアントまで `Result<NodeRpcResponse, ErrorInfo>` としてそのまま素通し（pass-through）する。
+- これにより、エラー種別ごとの `match` 分岐の再定義が不要になり、新規エラーコード追加時の変更箇所を極小化する。
+
 #### 得られる効果
 
 - `crates/fxg-server/src/hub.rs` の `PendingResponse` enum（13バリアント）を `Result<NodeRpcResponse, ErrorInfo>` の **1種類のみ** に削減できる。
@@ -127,7 +132,7 @@ pub enum NodeToServerMsg {
 
 ---
 
-### 2.2 Phase 2: Client REST API の重複エンドポイント統合と `ClientApiBackend` 整理
+### 2.2 Phase 2: Client REST API の重複エンドポイント統合と `ClientApiBackend` 整理・手書き `ApiClient` の汎用化
 
 #### 1. ローカル専用パスとノード指定パスの統一
 
@@ -169,6 +174,11 @@ pub trait ClientApiBackend: Clone + Send + Sync + 'static {
 
 これにより、`ClientApiBackend` のメソッド数を **約40個 → 約18個** に半減できる。
 
+#### 3. フロントエンド `ui/src/lib/api/client.ts` の手書きラッパー廃止
+
+- **現状**: `bindings.ts` の型をインポートしつつ、約60個の `async listProjects(...)` などの個別メソッドを手書き（621行）しており、API変更時の改修箇所を増やしている。
+- **改善**: `api.rpc(nodeId, req)` および型安全な汎用リクエストヘルパー（パスと引数/戻り値が型推論される薄い関数）を導入し、手書きメソッドを全廃または極小化する。新API追加時に `client.ts` を編集する手間をゼロにする。
+
 ---
 
 ### 2.3 Phase 3: Client WS と REST のコマンド一本化・共通化
@@ -180,26 +190,31 @@ pub trait ClientApiBackend: Clone + Send + Sync + 'static {
 
 ---
 
-### 2.4 Phase 4: CLI ⇔ Daemon IPC と `NodeRpc` の統合（任意・段階的）
+### 2.4 Phase 4: CLI を「ローカル RPC / REST クライアント」へ一本化（IPC 専用型の廃止）
 
-- `crates/fxg-protocol/src/ipc.rs` の `IpcClientMessage` のうち、セッション操作・Worktree操作・プロジェクト操作・監査ログ記録を伴うものを `NodeRpcRequest` の呼び出しに委譲する。
-- CLI 固有のローカル操作（`EnsureSession`, `SessionImport`, `GetLocalStatus`, `ProjectInfo`, `GitCredential`）のみを IPC 専用バリアントとして残すことで、`crates/fxg-node/src/daemon/ipc.rs` と `crates/fxg-node/src/daemon/api.rs` の実装重複を排除する。
+- **現状の課題**:
+  - `crates/fxg-protocol/src/ipc.rs` の `IpcClientMessage` / `IpcResult` という別定義プロトコルの存在により、機能追加時に CLI のために型とディスパッチャ（`crates/fxg-node/src/daemon/ipc.rs`）を別途書く必要がある。
+- **抜本的な統合方針**:
+  - Named Pipe / UDS は「安全・高速なローカル IPC トランスポート」として維持しつつ、**送受信するメッセージ体系を `NodeRpcRequest` / `NodeRpcResponse`（およびローカル専用クエリ）に完全統一**する。
+  - CLI 固有の処理（`EnsureSession`, `GetLocalStatus` など）も可能な限り共通 RPC / Client API に寄せるか、同一の enum 体系に包含する。
+  - これにより、CLI コマンドの追加は「引数パース → 共通 RPC 呼び出し」となり、デーモン側の専用 IPC ハンドラ追記を不要にする。
 
 ---
 
 ## 3. 段階的チェックリスト
 
-- [ ] **Phase 1: `NodeRpcRequest` / `NodeRpcResponse` の導入と `NodeHub` リレー統合**
+- [ ] **Phase 1: `NodeRpcRequest` / `NodeRpcResponse` の導入と `NodeHub` リレー統合・`ErrorInfo` 透過化**
   - [ ] `fxg-protocol::node_server` に `NodeRpcRequest` / `NodeRpcResponse` を定義
   - [ ] `NodeToServerMsg` の個別 `*Result` を `NodeRpcResult`（`Result<NodeRpcResponse, ErrorInfo>`）に統合
-  - [ ] `fxg-server::hub::NodeHub` の `PendingResponse` と個別リレー関数を汎用 `rpc()` に集約
+  - [ ] `fxg-server::hub::NodeHub` の `PendingResponse` と個別リレー関数を汎用 `rpc()` に集約（エラー再ラップを廃止）
   - [ ] `fxg-node::sync::handle_server_message` の RPC ディスパッチを共通ハンドラに分離
-- [ ] **Phase 2: Client REST API の重複エンドポイント統合と `ClientApiBackend` 縮小**
+- [ ] **Phase 2: Client REST API の重複エンドポイント統合と `ClientApiBackend` 縮小・`ApiClient` 汎用化**
   - [ ] 設定・秘密のローカル専用パスを `/api/v1/nodes/{node_id}/...` と `/api/v1/server/...` に整理
   - [ ] `ClientApiBackend` のノード対象メソッドを `execute_node_rpc` 経由に集約
-  - [ ] `ui/src/lib/api/client.ts` と Settings 画面の呼び出しメソッドを統一
+  - [ ] `ui/src/lib/api/client.ts` の約60個の手書きメソッドを汎用 `rpc()` / 型安全ディスパッチャへ置換
 - [ ] **Phase 3: Client WS / REST の重複整理**
   - [ ] `RespondPermission` / `RespondElicitation` の WS / REST 間のシグネチャ統一（または REST への一本化）
   - [ ] `/api/v1/search` のパラメータ受け渡し方式の統一
-- [ ] **Phase 4: CLI IPC ハンドラと Node RPC 実行処理の共通化**
-  - [ ] `fxg-node/src/daemon/ipc.rs` のセッション・プロジェクト・Worktree 操作を共通 RPC 実行関数に委譲
+- [ ] **Phase 4: CLI をローカル RPC クライアントへ一本化**
+  - [ ] IPC 通信メッセージを `NodeRpcRequest` / `NodeRpcResponse` 体系に統合し、専用 `IpcClientMessage` / `IpcResult` を廃止
+  - [ ] `fxg-cli/src/client.rs` および `fxg-node/src/daemon/ipc.rs` のハンドラ重複を解消
