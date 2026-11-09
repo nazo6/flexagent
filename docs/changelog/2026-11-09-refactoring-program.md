@@ -1,7 +1,7 @@
 # リファクタリング・プログラム（API統合・モジュール分割）
 
 - **日付**: 2026-11-09
-- **ステータス**: 進行中（B0 / B1 / A1 / A2 / A3 / A4 / B2 / B3 / B4a 完了、次は B4b）
+- **ステータス**: 進行中（B0 / B1 / A1 / A2 / A3 / A4 / B2 / B3 / B4 完了、次は B5 / B6）
 - **統合元**: 同日に別々に作成した「API・プロトコル統合リファクタリング計画」と
   「コードベース全体リファクタリング・モジュール分割計画」を1本化した
 - **対象パッケージ**: `fxg-protocol`, `fxg-db`, `fxg-acp`, `fxg-node`,
@@ -462,12 +462,19 @@ relay 元を記録する）。A2 では設定・秘密・`browse_fs` のノー�
 
 #### B4b: UI
 
-- `ui/src/routes/projects/+page.svelte` から
-  `ProjectCard.svelte`, `WorktreeManagerDialog.svelte`,
-  `ProjectProfileDialog.svelte`, `ProjectLinkForms.svelte` を
-  `ui/src/lib/components/projects/` へ切り出す。
-- `ui/src/lib/sync/reducer.ts` はアイテム種別ごとのハンドラ関数に整理する。
-  純粋関数のまま保ち、既存テストを移動する。
+- `ui/src/routes/projects/+page.svelte` は一覧・Worktree 読み込み・新規セッション遷移に絞る。
+- 以下を `ui/src/lib/components/projects/` へ切り出す。
+  - `ProjectCard.svelte`: プロジェクト 1 件のカードと Worktree 一覧
+  - `WorktreeManagerDialog.svelte`: Worktree の作成・削除・prune
+  - `ProjectProfileDialog.svelte`: プロジェクトキーとバインディング
+  - `ProjectLinkForms.svelte`: 一括スキャン・手動リンク・フォルダブラウザ
+- ダイアログのフォーム状態と API 呼び出しはコンポーネント側へ移し、`bind:this`
+  で `openCreate` / `openRemove` / `openPrune` / `open` / `openScan` / `openLink`
+  を呼び出す。
+- `ui/src/lib/sync/reducer.ts` の `buildTimelineItems` は、アイテム種別ごとの
+  ハンドラ関数（`addUserMessage` / `upsertToolCall` / `resolvePermission` など）
+  に整理する。`buildTimelineItems` 自体は純粋関数のまま保つ。
+  テストは種別ごとの `describe` 構成を維持する。
 
 ### 4.6 分割不要になったファイル
 
@@ -588,8 +595,8 @@ relay 元を記録する）。A2 では設定・秘密・`browse_fs` のノー�
 ### B4: CLI / UI
 
 - [x] `commands.rs` を `daemon` / `run` / `session` / `project` / `admin` に分割
-- [ ] `projects/+page.svelte` からサブコンポーネントを分離
-- [ ] `sync/reducer.ts` をアイテム種別ごとのハンドラに整理
+- [x] `projects/+page.svelte` からサブコンポーネントを分離
+- [x] `sync/reducer.ts` をアイテム種別ごとのハンドラに整理
 
 ### B5: UI データフロー
 
@@ -720,3 +727,14 @@ relay 元を記録する）。A2 では設定・秘密・`browse_fs` のノー�
   `project.rs` へ移し、`run` / `session` から共有する。`build_prompt_input` は
   `run.rs` に置いて `session` から参照する。`main.rs` / tray の
   `crate::commands::...` パスは `mod.rs` の再エクスポートで維持している。
+- **2026-11-09 (B4b 実装)**: `projects/+page.svelte` を 833 行から 130 行へ縮小し、
+  `ProjectCard` / `WorktreeManagerDialog` / `ProjectProfileDialog` /
+  `ProjectLinkForms` を `ui/src/lib/components/projects/` に切り出した。
+  ダイアログのフォーム状態と API 呼び出しは各コンポーネントが持ち、ページは
+  `bind:this` で開くだけにした。Worktree 一覧の読み込みと新規セッション遷移は
+  ページ側に残している。
+- **2026-11-09 (B4b 実装)**: `sync/reducer.ts` の `buildTimelineItems` を
+  アイテム種別ごとのハンドラ（`addUserMessage` / `upsertToolCall` /
+  `resolvePermission` / `addCompactionUpdate` など）に分割した。
+  `buildTimelineItems` は純粋関数のまま維持し、テストは既存の種別ごとの
+  `describe` をそのまま使っている。

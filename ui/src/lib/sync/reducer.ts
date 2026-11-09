@@ -14,6 +14,7 @@ import type {
   SessionStatus,
   SessionUsage,
   StreamDeltaPayload,
+  UnifiedEventPayload,
 } from "#lib/generated/bindings.ts";
 import { decodeBase64ToText } from "#lib/base64.ts";
 import { m } from "#lib/paraglide/messages.js";
@@ -293,233 +294,302 @@ function appendTerminalText(current: string, addition: string): string {
  * Ordering follows `node_seq`; streaming entries (with no finalized event yet)
  * are appended at the end.
  */
-export function buildTimelineItems(sources: TimelineSources): TimelineItem[] {
-  const items: TimelineItem[] = [];
-  const toolIndex = new Map<string, number>();
-  const terminalIndex = new Map<string, number>();
-  const permissionIndex = new Map<string, number>();
-  const elicitationIndex = new Map<string, number>();
+interface TimelineBuilder {
+  items: TimelineItem[];
+  toolIndex: Map<string, number>;
+  terminalIndex: Map<string, number>;
+  permissionIndex: Map<string, number>;
+  elicitationIndex: Map<string, number>;
+}
 
-  for (const event of sources.events) {
-    const payload = event.payload;
-    const base = { seq: event.node_seq, createdAt: event.created_at };
-    switch (payload.type) {
-      case "user_message":
-        items.push({
-          kind: "user",
-          key: `user:${event.node_seq}`,
-          ...base,
-          text: payload.data.text,
-          attachments: payload.data.attachments,
-          clientSource: payload.data.client_source,
-        });
-        break;
-      case "agent_message":
-        items.push({
-          kind: "agent",
-          key: `agent:${payload.data.message_id}:${event.node_seq}`,
-          ...base,
-          text: payload.data.text,
-          streaming: !payload.data.is_complete,
-        });
-        break;
-      case "agent_thought":
-        items.push({
-          kind: "thought",
-          key: `thought:${payload.data.thought_id}:${event.node_seq}`,
-          ...base,
-          text: payload.data.text,
-          streaming: !payload.data.is_complete,
-        });
-        break;
-      case "tool_call": {
-        const existing = toolIndex.get(payload.data.tool_call_id);
-        if (existing === undefined) {
-          toolIndex.set(payload.data.tool_call_id, items.length);
-          items.push({
-            kind: "tool",
-            key: `tool:${payload.data.tool_call_id}`,
-            seq: event.node_seq,
-            createdAt: event.created_at,
-            toolCallId: payload.data.tool_call_id,
-            title: payload.data.title,
-            toolKind: payload.data.kind,
-            status: payload.data.status,
-            locations: payload.data.locations,
-            diff: payload.data.diff,
-            rawOutput: payload.data.raw_output,
-          });
-        } else {
-          const prev = items[existing];
-          if (prev.kind === "tool") {
-            items[existing] = {
-              ...prev,
-              title: payload.data.title !== "" ? payload.data.title : prev.title,
-              toolKind: payload.data.kind !== "" ? payload.data.kind : prev.toolKind,
-              status: payload.data.status !== "" ? payload.data.status : prev.status,
-              locations:
-                payload.data.locations.length > 0 ? payload.data.locations : prev.locations,
-              diff: payload.data.diff ?? prev.diff,
-              rawOutput: payload.data.raw_output ?? prev.rawOutput,
-            };
-          }
-        }
-        break;
-      }
-      case "terminal_output": {
-        const previous = terminalIndex.get(payload.data.terminal_id);
-        const output = decodeBase64ToText(payload.data.data_b64);
-        if (previous === undefined) {
-          terminalIndex.set(payload.data.terminal_id, items.length);
-          items.push({
-            kind: "terminal",
-            key: `terminal:${payload.data.terminal_id}`,
-            ...base,
-            terminalId: payload.data.terminal_id,
-            command: payload.data.command,
-            output,
-            exitCode: payload.data.exit_code,
-          });
-        } else {
-          const existing = items[previous];
-          if (existing.kind === "terminal") {
-            items[previous] = {
-              ...existing,
-              output: appendTerminalText(existing.output, output),
-              exitCode: payload.data.exit_code ?? existing.exitCode,
-            };
-          }
-        }
-        break;
-      }
-      case "permission_request": {
-        permissionIndex.set(payload.data.request_id, items.length);
-        items.push({
-          kind: "permission",
-          key: `permission:${payload.data.request_id}`,
-          ...base,
-          requestId: payload.data.request_id,
-          toolName: payload.data.tool_name,
-          summary: payload.data.summary,
-          options: payload.data.options,
-          details: payload.data.details,
-          resolved: null,
-        });
-        break;
-      }
-      case "permission_resolved": {
-        const index = permissionIndex.get(payload.data.request_id);
-        if (index !== undefined) {
-          const existing = items[index];
-          if (existing.kind === "permission") {
-            items[index] = {
-              ...existing,
-              resolved: {
-                selectedOptionId: payload.data.selected_option_id,
-                resolvedBy: payload.data.resolved_by,
-              },
-            };
-          }
-        } else {
-          items.push({
-            kind: "notice",
-            key: `permission-resolved:${payload.data.request_id}`,
-            ...base,
-            text: m.timeline_permission_resolved({
-              id: payload.data.request_id,
-              option: payload.data.selected_option_id,
-              by: payload.data.resolved_by,
-            }),
-            tone: "info",
-          });
-        }
-        break;
-      }
-      case "elicitation_request": {
-        elicitationIndex.set(payload.data.elicitation_id, items.length);
-        items.push({
-          kind: "elicitation",
-          key: `elicitation:${payload.data.elicitation_id}`,
-          ...base,
-          elicitationId: payload.data.elicitation_id,
-          message: payload.data.message,
-          mode: payload.data.mode,
-          requestedSchema: payload.data.requested_schema,
-          resolved: null,
-        });
-        break;
-      }
-      case "elicitation_resolved": {
-        const index = elicitationIndex.get(payload.data.elicitation_id);
-        if (index !== undefined) {
-          const existing = items[index];
-          if (existing.kind === "elicitation") {
-            items[index] = {
-              ...existing,
-              resolved: {
-                action: payload.data.action,
-                resolvedBy: payload.data.resolved_by,
-              },
-            };
-          }
-        } else {
-          items.push({
-            kind: "notice",
-            key: `elicitation-resolved:${payload.data.elicitation_id}`,
-            ...base,
-            text: m.timeline_elicitation_resolved({
-              id: payload.data.elicitation_id,
-              action: payload.data.action,
-              by: payload.data.resolved_by,
-            }),
-            tone: "info",
-          });
-        }
-        break;
-      }
-      case "plan_update":
-        items.push({
-          kind: "plan",
-          key: `plan:${event.node_seq}`,
-          ...base,
-          entries: payload.data.entries,
-        });
-        break;
-      case "status_changed":
-        if (payload.data.status === "error") {
-          items.push({
-            kind: "notice",
-            key: `status:${event.node_seq}`,
-            ...base,
-            text: payload.data.error_message ?? m.timeline_session_error(),
-            tone: "error",
-          });
-        }
-        break;
-      case "turn_ended":
-        items.push({
-          kind: "notice",
-          key: `turn-ended:${event.node_seq}`,
-          ...base,
-          text: turnStopReasonLabel(payload.data.reason),
-          tone: "warning",
-        });
-        break;
-      case "compaction_updated":
-        items.push({
-          kind: "notice",
-          key: `compaction:${event.node_seq}`,
-          ...base,
-          text: compactionStatusLabel(payload.data.status, payload.data.detail),
-          tone: payload.data.status === "failed" ? "error" : "info",
-        });
-        break;
-      default:
-        break;
-    }
+interface TimelineBase {
+  seq: number;
+  createdAt: number;
+}
+
+type UserMessagePayload = Extract<UnifiedEventPayload, { type: "user_message" }>;
+type AgentMessagePayload = Extract<UnifiedEventPayload, { type: "agent_message" }>;
+type AgentThoughtPayload = Extract<UnifiedEventPayload, { type: "agent_thought" }>;
+type ToolCallPayload = Extract<UnifiedEventPayload, { type: "tool_call" }>;
+type TerminalOutputPayload = Extract<UnifiedEventPayload, { type: "terminal_output" }>;
+type PermissionRequestPayload = Extract<UnifiedEventPayload, { type: "permission_request" }>;
+type PermissionResolvedPayload = Extract<UnifiedEventPayload, { type: "permission_resolved" }>;
+type ElicitationRequestPayload = Extract<UnifiedEventPayload, { type: "elicitation_request" }>;
+type ElicitationResolvedPayload = Extract<UnifiedEventPayload, { type: "elicitation_resolved" }>;
+type PlanUpdatePayload = Extract<UnifiedEventPayload, { type: "plan_update" }>;
+type StatusChangedPayload = Extract<UnifiedEventPayload, { type: "status_changed" }>;
+type TurnEndedPayload = Extract<UnifiedEventPayload, { type: "turn_ended" }>;
+type CompactionUpdatedPayload = Extract<UnifiedEventPayload, { type: "compaction_updated" }>;
+
+function addUserMessage(
+  builder: TimelineBuilder,
+  payload: UserMessagePayload,
+  base: TimelineBase,
+): void {
+  builder.items.push({
+    kind: "user",
+    key: `user:${base.seq}`,
+    ...base,
+    text: payload.data.text,
+    attachments: payload.data.attachments,
+    clientSource: payload.data.client_source,
+  });
+}
+
+function addAgentMessage(
+  builder: TimelineBuilder,
+  payload: AgentMessagePayload,
+  base: TimelineBase,
+): void {
+  builder.items.push({
+    kind: "agent",
+    key: `agent:${payload.data.message_id}:${base.seq}`,
+    ...base,
+    text: payload.data.text,
+    streaming: !payload.data.is_complete,
+  });
+}
+
+function addAgentThought(
+  builder: TimelineBuilder,
+  payload: AgentThoughtPayload,
+  base: TimelineBase,
+): void {
+  builder.items.push({
+    kind: "thought",
+    key: `thought:${payload.data.thought_id}:${base.seq}`,
+    ...base,
+    text: payload.data.text,
+    streaming: !payload.data.is_complete,
+  });
+}
+
+function upsertToolCall(
+  builder: TimelineBuilder,
+  payload: ToolCallPayload,
+  base: TimelineBase,
+): void {
+  const existing = builder.toolIndex.get(payload.data.tool_call_id);
+  if (existing === undefined) {
+    builder.toolIndex.set(payload.data.tool_call_id, builder.items.length);
+    builder.items.push({
+      kind: "tool",
+      key: `tool:${payload.data.tool_call_id}`,
+      seq: base.seq,
+      createdAt: base.createdAt,
+      toolCallId: payload.data.tool_call_id,
+      title: payload.data.title,
+      toolKind: payload.data.kind,
+      status: payload.data.status,
+      locations: payload.data.locations,
+      diff: payload.data.diff,
+      rawOutput: payload.data.raw_output,
+    });
+    return;
   }
+  const prev = builder.items[existing];
+  if (prev.kind === "tool") {
+    builder.items[existing] = {
+      ...prev,
+      title: payload.data.title !== "" ? payload.data.title : prev.title,
+      toolKind: payload.data.kind !== "" ? payload.data.kind : prev.toolKind,
+      status: payload.data.status !== "" ? payload.data.status : prev.status,
+      locations: payload.data.locations.length > 0 ? payload.data.locations : prev.locations,
+      diff: payload.data.diff ?? prev.diff,
+      rawOutput: payload.data.raw_output ?? prev.rawOutput,
+    };
+  }
+}
 
-  // ---- Append streaming entries at the end ---------------------------------
+function upsertTerminalOutput(
+  builder: TimelineBuilder,
+  payload: TerminalOutputPayload,
+  base: TimelineBase,
+): void {
+  const previous = builder.terminalIndex.get(payload.data.terminal_id);
+  const output = decodeBase64ToText(payload.data.data_b64);
+  if (previous === undefined) {
+    builder.terminalIndex.set(payload.data.terminal_id, builder.items.length);
+    builder.items.push({
+      kind: "terminal",
+      key: `terminal:${payload.data.terminal_id}`,
+      ...base,
+      terminalId: payload.data.terminal_id,
+      command: payload.data.command,
+      output,
+      exitCode: payload.data.exit_code,
+    });
+    return;
+  }
+  const existing = builder.items[previous];
+  if (existing.kind === "terminal") {
+    builder.items[previous] = {
+      ...existing,
+      output: appendTerminalText(existing.output, output),
+      exitCode: payload.data.exit_code ?? existing.exitCode,
+    };
+  }
+}
+
+function addPermissionRequest(
+  builder: TimelineBuilder,
+  payload: PermissionRequestPayload,
+  base: TimelineBase,
+): void {
+  builder.permissionIndex.set(payload.data.request_id, builder.items.length);
+  builder.items.push({
+    kind: "permission",
+    key: `permission:${payload.data.request_id}`,
+    ...base,
+    requestId: payload.data.request_id,
+    toolName: payload.data.tool_name,
+    summary: payload.data.summary,
+    options: payload.data.options,
+    details: payload.data.details,
+    resolved: null,
+  });
+}
+
+function resolvePermission(
+  builder: TimelineBuilder,
+  payload: PermissionResolvedPayload,
+  base: TimelineBase,
+): void {
+  const index = builder.permissionIndex.get(payload.data.request_id);
+  if (index !== undefined) {
+    const existing = builder.items[index];
+    if (existing.kind === "permission") {
+      builder.items[index] = {
+        ...existing,
+        resolved: {
+          selectedOptionId: payload.data.selected_option_id,
+          resolvedBy: payload.data.resolved_by,
+        },
+      };
+    }
+    return;
+  }
+  builder.items.push({
+    kind: "notice",
+    key: `permission-resolved:${payload.data.request_id}`,
+    ...base,
+    text: m.timeline_permission_resolved({
+      id: payload.data.request_id,
+      option: payload.data.selected_option_id,
+      by: payload.data.resolved_by,
+    }),
+    tone: "info",
+  });
+}
+
+function addElicitationRequest(
+  builder: TimelineBuilder,
+  payload: ElicitationRequestPayload,
+  base: TimelineBase,
+): void {
+  builder.elicitationIndex.set(payload.data.elicitation_id, builder.items.length);
+  builder.items.push({
+    kind: "elicitation",
+    key: `elicitation:${payload.data.elicitation_id}`,
+    ...base,
+    elicitationId: payload.data.elicitation_id,
+    message: payload.data.message,
+    mode: payload.data.mode,
+    requestedSchema: payload.data.requested_schema,
+    resolved: null,
+  });
+}
+
+function resolveElicitation(
+  builder: TimelineBuilder,
+  payload: ElicitationResolvedPayload,
+  base: TimelineBase,
+): void {
+  const index = builder.elicitationIndex.get(payload.data.elicitation_id);
+  if (index !== undefined) {
+    const existing = builder.items[index];
+    if (existing.kind === "elicitation") {
+      builder.items[index] = {
+        ...existing,
+        resolved: {
+          action: payload.data.action,
+          resolvedBy: payload.data.resolved_by,
+        },
+      };
+    }
+    return;
+  }
+  builder.items.push({
+    kind: "notice",
+    key: `elicitation-resolved:${payload.data.elicitation_id}`,
+    ...base,
+    text: m.timeline_elicitation_resolved({
+      id: payload.data.elicitation_id,
+      action: payload.data.action,
+      by: payload.data.resolved_by,
+    }),
+    tone: "info",
+  });
+}
+
+function addPlanUpdate(
+  builder: TimelineBuilder,
+  payload: PlanUpdatePayload,
+  base: TimelineBase,
+): void {
+  builder.items.push({
+    kind: "plan",
+    key: `plan:${base.seq}`,
+    ...base,
+    entries: payload.data.entries,
+  });
+}
+
+function addStatusChanged(
+  builder: TimelineBuilder,
+  payload: StatusChangedPayload,
+  base: TimelineBase,
+): void {
+  if (payload.data.status !== "error") return;
+  builder.items.push({
+    kind: "notice",
+    key: `status:${base.seq}`,
+    ...base,
+    text: payload.data.error_message ?? m.timeline_session_error(),
+    tone: "error",
+  });
+}
+
+function addTurnEnded(
+  builder: TimelineBuilder,
+  payload: TurnEndedPayload,
+  base: TimelineBase,
+): void {
+  builder.items.push({
+    kind: "notice",
+    key: `turn-ended:${base.seq}`,
+    ...base,
+    text: turnStopReasonLabel(payload.data.reason),
+    tone: "warning",
+  });
+}
+
+function addCompactionUpdate(
+  builder: TimelineBuilder,
+  payload: CompactionUpdatedPayload,
+  base: TimelineBase,
+): void {
+  builder.items.push({
+    kind: "notice",
+    key: `compaction:${base.seq}`,
+    ...base,
+    text: compactionStatusLabel(payload.data.status, payload.data.detail),
+    tone: payload.data.status === "failed" ? "error" : "info",
+  });
+}
+
+function appendEphemeralItems(builder: TimelineBuilder, sources: TimelineSources): void {
+  const items = builder.items;
   let streamOffset = 0;
   const nextStreamSeq = () => STREAM_SEQ + streamOffset++;
 
@@ -566,7 +636,7 @@ export function buildTimelineItems(sources: TimelineSources): TimelineItem[] {
       }
       case "tool": {
         const progress = sources.toolProgress.get(id);
-        if (progress === undefined || toolIndex.has(id)) continue;
+        if (progress === undefined || builder.toolIndex.has(id)) continue;
         items.push({
           kind: "tool",
           key: `tool:${id}`,
@@ -585,7 +655,7 @@ export function buildTimelineItems(sources: TimelineSources): TimelineItem[] {
       case "terminal": {
         const output = sources.terminalDeltas.get(id);
         if (output === undefined) continue;
-        const existing = terminalIndex.get(id);
+        const existing = builder.terminalIndex.get(id);
         if (existing !== undefined) {
           const item = items[existing];
           if (item.kind === "terminal") {
@@ -595,7 +665,7 @@ export function buildTimelineItems(sources: TimelineSources): TimelineItem[] {
             };
           }
         } else {
-          terminalIndex.set(id, items.length);
+          builder.terminalIndex.set(id, items.length);
           items.push({
             kind: "terminal",
             key: `terminal:${id}`,
@@ -611,6 +681,7 @@ export function buildTimelineItems(sources: TimelineSources): TimelineItem[] {
       }
     }
   }
+
   for (const pending of sources.pendingPrompts?.values() ?? []) {
     // Do not mix prompts sent in other sessions into this timeline
     if (pending.sessionId !== sources.sessionId) continue;
@@ -622,8 +693,67 @@ export function buildTimelineItems(sources: TimelineSources): TimelineItem[] {
       text: pending.text,
     });
   }
+}
 
-  return items;
+export function buildTimelineItems(sources: TimelineSources): TimelineItem[] {
+  const builder: TimelineBuilder = {
+    items: [],
+    toolIndex: new Map(),
+    terminalIndex: new Map(),
+    permissionIndex: new Map(),
+    elicitationIndex: new Map(),
+  };
+
+  for (const event of sources.events) {
+    const payload = event.payload;
+    const base: TimelineBase = { seq: event.node_seq, createdAt: event.created_at };
+    switch (payload.type) {
+      case "user_message":
+        addUserMessage(builder, payload, base);
+        break;
+      case "agent_message":
+        addAgentMessage(builder, payload, base);
+        break;
+      case "agent_thought":
+        addAgentThought(builder, payload, base);
+        break;
+      case "tool_call":
+        upsertToolCall(builder, payload, base);
+        break;
+      case "terminal_output":
+        upsertTerminalOutput(builder, payload, base);
+        break;
+      case "permission_request":
+        addPermissionRequest(builder, payload, base);
+        break;
+      case "permission_resolved":
+        resolvePermission(builder, payload, base);
+        break;
+      case "elicitation_request":
+        addElicitationRequest(builder, payload, base);
+        break;
+      case "elicitation_resolved":
+        resolveElicitation(builder, payload, base);
+        break;
+      case "plan_update":
+        addPlanUpdate(builder, payload, base);
+        break;
+      case "status_changed":
+        addStatusChanged(builder, payload, base);
+        break;
+      case "turn_ended":
+        addTurnEnded(builder, payload, base);
+        break;
+      case "compaction_updated":
+        addCompactionUpdate(builder, payload, base);
+        break;
+      default:
+        break;
+    }
+  }
+
+  appendEphemeralItems(builder, sources);
+  return builder.items;
 }
 
 // ----------------------------------------------------------------------
