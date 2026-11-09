@@ -16,12 +16,14 @@ import type {
   IssueNodeTokenResponse,
   KillSwitchResponse,
   MetaResponse,
+  NodeSettingsSnapshot,
   NodeSummary,
   NodeTokenSummary,
   NodeTokensResponse,
   NodesResponse,
   ProjectLinkRequest,
   ProjectLinkResponse,
+  ProjectProfile,
   ProjectScanRequest,
   ProjectScanResponse,
   ProjectSummary,
@@ -46,9 +48,16 @@ import type {
   SessionArchiveRequest,
   SessionArchiveResponse,
   SessionEventBatch,
+  SecretsResponse,
+  ServerSettingsSnapshot,
   SessionSummary,
   SystemInfoResponse,
   WorkspaceDiffResponse,
+  UpdateAgentSettingsRequest,
+  UpdateNodeSettingsRequest,
+  UpdateProjectProfileRequest,
+  UpdateServerSettingsRequest,
+  UpsertSecretRequest,
   WorktreeInfo,
   WorktreesResponse,
 } from "#lib/generated/bindings.ts";
@@ -447,6 +456,140 @@ export class ApiClient {
       "DELETE",
       `/api/v1/nodes/${encodeURIComponent(nodeId)}/agents/${encodeURIComponent(agentId)}/package`,
     );
+  }
+
+  // ------------------------------------------------------------------
+  // Settings / secrets / project profiles
+  // ------------------------------------------------------------------
+
+  /** `GET /api/v1/settings/node` (local node). */
+  nodeSettings(): Promise<NodeSettingsSnapshot> {
+    return this.#request("GET", "/api/v1/settings/node");
+  }
+
+  /** `PATCH /api/v1/settings/node` (local node; requires the observed revision). */
+  updateNodeSettings(request: UpdateNodeSettingsRequest): Promise<NodeSettingsSnapshot> {
+    return this.#request("PATCH", "/api/v1/settings/node", { body: request });
+  }
+
+  /** `PATCH /api/v1/settings/agents` (local node; requires the observed revision). */
+  updateAgentSettings(request: UpdateAgentSettingsRequest): Promise<NodeSettingsSnapshot> {
+    return this.#request("PATCH", "/api/v1/settings/agents", { body: request });
+  }
+
+  /** `GET /api/v1/settings/server` (central server). */
+  serverSettings(): Promise<ServerSettingsSnapshot> {
+    return this.#request("GET", "/api/v1/settings/server");
+  }
+
+  /** `PATCH /api/v1/settings/server` (central server). */
+  updateServerSettings(request: UpdateServerSettingsRequest): Promise<ServerSettingsSnapshot> {
+    return this.#request("PATCH", "/api/v1/settings/server", { body: request });
+  }
+
+  /** `GET /api/v1/nodes/:id/settings` (hub proxy). */
+  nodeSettingsOf(nodeId: string): Promise<NodeSettingsSnapshot> {
+    return this.#request("GET", `/api/v1/nodes/${encodeURIComponent(nodeId)}/settings`);
+  }
+
+  /** `PATCH /api/v1/nodes/:id/settings/node` (hub proxy). */
+  updateNodeSettingsOf(
+    nodeId: string,
+    request: UpdateNodeSettingsRequest,
+  ): Promise<NodeSettingsSnapshot> {
+    return this.#request("PATCH", `/api/v1/nodes/${encodeURIComponent(nodeId)}/settings/node`, {
+      body: request,
+    });
+  }
+
+  /** `PATCH /api/v1/nodes/:id/settings/agents` (hub proxy). */
+  updateAgentSettingsOf(
+    nodeId: string,
+    request: UpdateAgentSettingsRequest,
+  ): Promise<NodeSettingsSnapshot> {
+    return this.#request("PATCH", `/api/v1/nodes/${encodeURIComponent(nodeId)}/settings/agents`, {
+      body: request,
+    });
+  }
+
+  /** `GET /api/v1/secrets` (node-owned on a daemon, server-owned on the hub). */
+  async secrets(): Promise<SecretsResponse> {
+    return this.#request("GET", "/api/v1/secrets");
+  }
+
+  /** `PUT /api/v1/secrets/:id` (write-only). */
+  upsertSecret(secretId: string, request: UpsertSecretRequest): Promise<SecretsResponse> {
+    return this.#request("PUT", `/api/v1/secrets/${encodeURIComponent(secretId)}`, {
+      body: request,
+    });
+  }
+
+  /** `DELETE /api/v1/secrets/:id`. */
+  deleteSecret(secretId: string): Promise<SecretsResponse> {
+    return this.#request("DELETE", `/api/v1/secrets/${encodeURIComponent(secretId)}`);
+  }
+
+  /** `POST /api/v1/secrets/:id/rotate`. */
+  rotateSecret(secretId: string): Promise<SecretsResponse> {
+    return this.#request("POST", `/api/v1/secrets/${encodeURIComponent(secretId)}/rotate`);
+  }
+
+  /** `GET /api/v1/nodes/:id/secrets` (hub proxy). */
+  nodeSecrets(nodeId: string): Promise<SecretsResponse> {
+    return this.#request("GET", `/api/v1/nodes/${encodeURIComponent(nodeId)}/secrets`);
+  }
+
+  /** `PUT /api/v1/nodes/:id/secrets/:secret_id` (hub proxy, write-only). */
+  upsertNodeSecret(
+    nodeId: string,
+    secretId: string,
+    request: UpsertSecretRequest,
+  ): Promise<SecretsResponse> {
+    return this.#request(
+      "PUT",
+      `/api/v1/nodes/${encodeURIComponent(nodeId)}/secrets/${encodeURIComponent(secretId)}`,
+      { body: request },
+    );
+  }
+
+  /** `DELETE /api/v1/nodes/:id/secrets/:secret_id` (hub proxy). */
+  deleteNodeSecret(nodeId: string, secretId: string): Promise<SecretsResponse> {
+    return this.#request(
+      "DELETE",
+      `/api/v1/nodes/${encodeURIComponent(nodeId)}/secrets/${encodeURIComponent(secretId)}`,
+    );
+  }
+
+  /** `POST /api/v1/nodes/:id/secrets/:secret_id/rotate` (hub proxy). */
+  rotateNodeSecret(nodeId: string, secretId: string): Promise<SecretsResponse> {
+    return this.#request(
+      "POST",
+      `/api/v1/nodes/${encodeURIComponent(nodeId)}/secrets/${encodeURIComponent(secretId)}/rotate`,
+    );
+  }
+
+  /** `GET /api/v1/projects/:id/profile` (server-owned). */
+  projectProfile(projectId: string): Promise<ProjectProfile> {
+    return this.#request("GET", `/api/v1/projects/${encodeURIComponent(projectId)}/profile`);
+  }
+
+  /** `PUT /api/v1/projects/:id/profile` (server-owned). */
+  updateProjectProfile(
+    projectId: string,
+    request: UpdateProjectProfileRequest,
+  ): Promise<ProjectProfile> {
+    return this.#request("PUT", `/api/v1/projects/${encodeURIComponent(projectId)}/profile`, {
+      body: request,
+    });
+  }
+
+  /** `GET /api/v1/nodes/:id/agents` (catalog for a specific node). */
+  async nodeAgents(nodeId: string): Promise<AgentSummary[]> {
+    const response = await this.#request<AgentsResponse>(
+      "GET",
+      `/api/v1/nodes/${encodeURIComponent(nodeId)}/agents`,
+    );
+    return response.agents;
   }
 
   /** `POST /api/v1/auth/rotate-token` (regenerate the client auth token). */

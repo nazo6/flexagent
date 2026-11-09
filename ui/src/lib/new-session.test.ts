@@ -31,6 +31,7 @@ function project(
     project_id,
     name: "flexagent",
     canonical_git_url: "git@github.com:nazo6/flexagent.git",
+    identity: { kind: "git_remote", key: null },
     created_at: 0,
     updated_at: 0,
     bindings,

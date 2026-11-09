@@ -3,6 +3,7 @@
   import { page } from "$app/state";
   import AgentManager from "#lib/components/settings/AgentManager.svelte";
   import AuditLog from "#lib/components/settings/AuditLog.svelte";
+  import SettingsCatalog from "#lib/components/settings/SettingsCatalog.svelte";
   import * as AlertDialog from "#lib/components/ui/alert-dialog/index.ts";
   import { Badge } from "#lib/components/ui/badge/index.ts";
   import { Button } from "#lib/components/ui/button/index.ts";
@@ -25,7 +26,9 @@
   const isServer = $derived(sync.connection.role === "central_server");
 
   /** Selected settings tab (reflects deep links such as `?tab=agents`). */
-  let activeTab = $state(page.url.searchParams.get("tab") ?? "general");
+  let activeTab = $state(page.url.searchParams.get("tab") ?? "bootstrap");
+  /** Catalog search query (filters bootstrap and settings rows). */
+  let query = $state("");
 
   // --- Diagnostics ---
   let diagnosticsBusy = $state(false);
@@ -157,15 +160,47 @@
     </p>
   </div>
 
+  <Input placeholder="Search settings…" bind:value={query} class="max-w-md" />
+
   <Tabs.Root bind:value={activeTab}>
-    <Tabs.List class="w-full max-w-xs">
-      <Tabs.Trigger value="general">{m.settings_tab_general()}</Tabs.Trigger>
+    <Tabs.List class="w-full max-w-2xl flex-wrap">
+      <Tabs.Trigger value="bootstrap">Bootstrap</Tabs.Trigger>
+      <Tabs.Trigger value="machine">This machine</Tabs.Trigger>
+      <Tabs.Trigger value="projects">Projects</Tabs.Trigger>
+      <Tabs.Trigger value="server">Server</Tabs.Trigger>
       <Tabs.Trigger value="agents">{m.settings_tab_agents()}</Tabs.Trigger>
+      <Tabs.Trigger value="browser">Browser</Tabs.Trigger>
       <Tabs.Trigger value="audit">{m.settings_tab_audit()}</Tabs.Trigger>
     </Tabs.List>
 
-    <Tabs.Content value="general" class="mt-2 flex flex-col gap-3">
-      <!-- Client auth token -->
+    <Tabs.Content value="bootstrap" class="mt-2 flex flex-col gap-3">
+      <SettingsCatalog section="bootstrap" {query} />
+      <Card class="gap-3 p-4">
+        <div class="flex items-start gap-2">
+          <FileDownIcon class="text-muted-foreground mt-0.5 size-4" />
+          <div class="flex flex-1 flex-col gap-1">
+            <h2 class="font-medium">{m.settings_diagnostics_title()}</h2>
+            <p class="text-muted-foreground text-xs">
+              {m.settings_diagnostics_description()}
+            </p>
+            <div class="mt-1">
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={diagnosticsBusy}
+                onclick={() => void downloadDiagnostics()}
+              >
+                <FileDownIcon />
+                {m.settings_download_diagnostics()}
+              </Button>
+            </div>
+          </div>
+        </div>
+      </Card>
+    </Tabs.Content>
+
+    <Tabs.Content value="machine" class="mt-2 flex flex-col gap-3">
+      <SettingsCatalog section="machine" {query} />
       <Card class="gap-3 p-4">
         <div class="flex items-start gap-2">
           <ShieldIcon class="text-muted-foreground mt-0.5 size-4" />
@@ -185,8 +220,14 @@
           </div>
         </div>
       </Card>
+    </Tabs.Content>
 
-      <!-- Node pairing (central server only) -->
+    <Tabs.Content value="projects" class="mt-2 flex flex-col gap-3">
+      <SettingsCatalog section="projects" {query} />
+    </Tabs.Content>
+
+    <Tabs.Content value="server" class="mt-2 flex flex-col gap-3">
+      <SettingsCatalog section="server" {query} />
       <Card class="gap-3 p-4">
         <div class="flex items-start gap-2">
           <KeyRoundIcon class="text-muted-foreground mt-0.5 size-4" />
@@ -253,34 +294,20 @@
           </div>
         </div>
       </Card>
-
-      <!-- Diagnostics -->
-      <Card class="gap-3 p-4">
-        <div class="flex items-start gap-2">
-          <FileDownIcon class="text-muted-foreground mt-0.5 size-4" />
-          <div class="flex flex-1 flex-col gap-1">
-            <h2 class="font-medium">{m.settings_diagnostics_title()}</h2>
-            <p class="text-muted-foreground text-xs">
-              {m.settings_diagnostics_description()}
-            </p>
-            <div class="mt-1">
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={diagnosticsBusy}
-                onclick={() => void downloadDiagnostics()}
-              >
-                <FileDownIcon />
-                {m.settings_download_diagnostics()}
-              </Button>
-            </div>
-          </div>
-        </div>
-      </Card>
     </Tabs.Content>
 
     <Tabs.Content value="agents" class="mt-2 flex flex-col gap-3">
       <AgentManager />
+    </Tabs.Content>
+
+    <Tabs.Content value="browser" class="mt-2 flex flex-col gap-3">
+      <Card class="gap-2 p-4">
+        <h2 class="font-medium">Browser</h2>
+        <p class="text-muted-foreground text-xs">
+          Locale, theme and pinned items are stored in this browser's <code>localStorage</code> and never
+          sent to the node or the server.
+        </p>
+      </Card>
     </Tabs.Content>
 
     <Tabs.Content value="audit" class="mt-2 flex flex-col gap-3">

@@ -19,6 +19,7 @@
   import FolderOpenIcon from "@lucide/svelte/icons/folder-open";
   import GitBranchIcon from "@lucide/svelte/icons/git-branch";
   import LinkIcon from "@lucide/svelte/icons/link";
+  import PencilIcon from "@lucide/svelte/icons/pencil";
   import PlayIcon from "@lucide/svelte/icons/play";
   import PlusIcon from "@lucide/svelte/icons/plus";
   import RefreshCwIcon from "@lucide/svelte/icons/refresh-cw";
@@ -34,11 +35,10 @@
   let createNodeId = $state("");
   let createBranch = $state("");
   let createBase = $state("");
-  let createPath = $state("");
   let createBusy = $state(false);
   let browserOpen = $state(false);
   /** Which field receives the folder browser selection. */
-  let browserTarget = $state<"create" | "scan" | "link">("create");
+  let browserTarget = $state<"scan" | "link">("scan");
 
   // Worktree removal confirmation
   let removeTarget = $state<{
@@ -58,6 +58,11 @@
   let scanDir = $state("");
   let scanBusy = $state(false);
 
+  // Project settings (identity / explicit project key)
+  let projectSettings = $state<ProjectSummary | null>(null);
+  let projectKey = $state("");
+  let projectSettingsBusy = $state(false);
+
   // Manual folder linking
   let linkOpen = $state(false);
   let linkNodeId = $state("");
@@ -66,14 +71,10 @@
   let linkBusy = $state(false);
 
   /** Node the folder browser browses on. */
-  const browserNodeId = $derived(
-    browserTarget === "create" ? createNodeId : browserTarget === "scan" ? scanNodeId : linkNodeId,
-  );
+  const browserNodeId = $derived(browserTarget === "scan" ? scanNodeId : linkNodeId);
 
   /** Initial path for the folder browser. */
-  const browserInitialPath = $derived(
-    browserTarget === "create" ? createPath : browserTarget === "scan" ? scanDir : linkPath,
-  );
+  const browserInitialPath = $derived(browserTarget === "scan" ? scanDir : linkPath);
 
   function nodeName(nodeId: string): string {
     return sync.nodes.find((node) => node.node_id === nodeId)?.name ?? shortId(nodeId);
@@ -98,12 +99,40 @@
     }
   }
 
+  function openProjectSettings(project: ProjectSummary): void {
+    projectSettings = project;
+    projectKey = project.identity.key ?? "";
+  }
+
+  async function saveProjectKey(event: SubmitEvent): Promise<void> {
+    event.preventDefault();
+    const project = projectSettings;
+    if (project === null || projectSettingsBusy) return;
+    const key = projectKey.trim();
+    if (key === "") return;
+    projectSettingsBusy = true;
+    try {
+      for (const binding of project.bindings) {
+        await sync.connection.client.linkProject(binding.node_id, {
+          project_id: key,
+          local_path: binding.local_path,
+        });
+      }
+      await sync.refreshProjects();
+      projectSettings = null;
+      toast.success(`Linked this project to key ${key}.`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      projectSettingsBusy = false;
+    }
+  }
+
   function openCreateWorktree(projectId: string) {
     createProjectId = projectId;
     createNodeId = sync.nodes.find((node) => node.is_online)?.node_id ?? "";
     createBranch = "";
     createBase = "";
-    createPath = "";
   }
 
   /** Open the new session screen for this project (optionally scoped to a node and path). */
@@ -216,7 +245,6 @@
         node_id: createNodeId,
         branch: createBranch.trim(),
         base_branch: createBase.trim() === "" ? null : createBase.trim(),
-        path: createPath.trim() === "" ? null : createPath.trim(),
       });
       toast.success(m.projects_worktree_created({ path: created.path }));
       createProjectId = null;
@@ -300,6 +328,20 @@
                 {project.canonical_git_url}
               </p>
             {/if}
+            <div class="mt-1 flex flex-wrap items-center gap-1.5">
+              <Badge variant="outline" class="text-[10px]">
+                {project.identity.kind === "git_remote"
+                  ? "Git"
+                  : project.identity.kind === "user_key"
+                    ? "User key"
+                    : "Local only"}
+              </Badge>
+              {#if project.identity.kind === "local"}
+                <span class="text-muted-foreground text-[11px]">
+                  This machine only. Set a project key to share it across machines.
+                </span>
+              {/if}
+            </div>
           </div>
           <div class="flex flex-wrap items-center gap-1.5">
             <Button
@@ -318,6 +360,15 @@
             >
               <PlusIcon />
               {m.projects_worktree_add()}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onclick={() => openProjectSettings(project)}
+              title="Project settings"
+            >
+              <PencilIcon />
+              Settings
             </Button>
             <Button
               variant="outline"
@@ -480,32 +531,6 @@
       <div class="grid gap-2">
         <Label for="wt-base">{m.projects_base_branch()}</Label>
         <Input id="wt-base" bind:value={createBase} placeholder="main" />
-      </div>
-      <div class="grid gap-2">
-        <Label for="wt-path">{m.projects_target_path()}</Label>
-        <div class="flex items-center gap-1.5">
-          <Input
-            id="wt-path"
-            bind:value={createPath}
-            placeholder={m.projects_path_auto()}
-            class="flex-1 font-mono text-xs"
-          />
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            class="h-9 px-2.5 text-xs shrink-0 gap-1.5"
-            disabled={!createNodeId}
-            onclick={() => {
-              browserTarget = "create";
-              browserOpen = true;
-            }}
-            title={m.projects_pick_folder()}
-          >
-            <FolderOpenIcon class="size-3.5" />
-            <span>{m.projects_browse()}</span>
-          </Button>
-        </div>
       </div>
       <Dialog.Footer>
         <Button type="button" variant="outline" onclick={() => (createProjectId = null)}>
@@ -737,18 +762,72 @@
   </Dialog.Content>
 </Dialog.Root>
 
+<Dialog.Root
+  open={projectSettings !== null}
+  onOpenChange={(open) => !open && (projectSettings = null)}
+>
+  <Dialog.Content class="sm:max-w-lg">
+    <Dialog.Header>
+      <Dialog.Title>Project settings</Dialog.Title>
+      <Dialog.Description>
+        Link this project to an explicit key shared by every machine. The display name is derived
+        automatically from the identity.
+      </Dialog.Description>
+    </Dialog.Header>
+    {#if projectSettings}
+      <div class="flex flex-col gap-3 text-sm">
+        <div class="grid gap-1">
+          <span class="text-muted-foreground text-xs">Display name</span>
+          <span class="font-medium">{projectSettings.name}</span>
+        </div>
+        <div class="grid gap-1">
+          <span class="text-muted-foreground text-xs">Identity</span>
+          <span>{projectSettings.identity.kind}</span>
+        </div>
+        <form class="grid gap-2" onsubmit={saveProjectKey}>
+          <Label for="project-key">Project key</Label>
+          <div class="flex gap-1.5">
+            <Input
+              id="project-key"
+              bind:value={projectKey}
+              placeholder="my-project"
+              class="font-mono text-xs"
+            />
+            <Button type="submit" disabled={projectSettingsBusy || projectKey.trim() === ""}>
+              Save
+            </Button>
+          </div>
+          <p class="text-muted-foreground text-xs">
+            Use 1-64 characters of [a-zA-Z0-9._-]. To share a project across machines, set the same
+            key on each machine.
+          </p>
+        </form>
+        <div class="grid gap-1">
+          <span class="text-muted-foreground text-xs">Bindings</span>
+          <ul class="flex list-none flex-col gap-1 p-0 text-xs">
+            {#each projectSettings.bindings as binding (`${binding.node_id}|${binding.local_path}`)}
+              <li class="flex flex-wrap items-center gap-2 rounded-md border px-2 py-1.5">
+                <Badge variant="outline">{nodeName(binding.node_id)}</Badge>
+                <code class="truncate">{binding.local_path}</code>
+              </li>
+            {/each}
+          </ul>
+        </div>
+      </div>
+    {/if}
+    <Dialog.Footer>
+      <Button variant="outline" onclick={() => (projectSettings = null)}>Close</Button>
+    </Dialog.Footer>
+  </Dialog.Content>
+</Dialog.Root>
+
 <FolderBrowserDialog
   bind:open={browserOpen}
   nodeId={browserNodeId}
   initialPath={browserInitialPath}
-  title={browserTarget === "create"
-    ? m.projects_pick_worktree_folder()
-    : browserTarget === "scan"
-      ? m.projects_pick_scan_folder()
-      : m.projects_pick_link_folder()}
+  title={browserTarget === "scan" ? m.projects_pick_scan_folder() : m.projects_pick_link_folder()}
   onSelect={(path) => {
-    if (browserTarget === "create") createPath = path;
-    else if (browserTarget === "scan") scanDir = path;
+    if (browserTarget === "scan") scanDir = path;
     else linkPath = path;
   }}
 />

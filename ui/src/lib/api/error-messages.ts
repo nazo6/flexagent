@@ -76,5 +76,13 @@ export function errorCodeMessage(
       return m.error_server_error();
     case "CANCELLED":
       return m.error_cancelled();
+    case "REVISION_MISMATCH":
+      return m.error_invalid_state();
+    case "SECRET_MISSING":
+      return m.error_not_found();
+    case "SECRET_IN_USE":
+      return m.error_invalid_state();
+    case "SECRET_INVALID":
+      return m.error_invalid_state();
   }
 }

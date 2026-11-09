@@ -64,6 +64,12 @@
     }
   });
 
+  // Reload the catalog when the target node changes (the server no longer
+  // returns a representative node's catalog).
+  $effect(() => {
+    if (nodeId !== "") void loadAgents();
+  });
+
   function isAvailableOn(agent: AgentSummary): boolean {
     return agent.installed_nodes.includes(nodeId);
   }
@@ -81,10 +87,10 @@
   }
 
   async function loadAgents(): Promise<void> {
-    if (loading) return;
+    if (loading || nodeId === "") return;
     loading = true;
     try {
-      agents = await sync.connection.client.agents();
+      agents = await sync.connection.client.nodeAgents(nodeId);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
     } finally {
@@ -157,27 +163,35 @@
       name: config?.name ?? "",
       command: config?.command ?? "",
       args: (config?.args ?? []).join(" "),
-      env: formatEnv(config?.env ?? {}),
+      env: formatEnv(config?.env ?? {}, config?.env_secrets ?? {}),
     };
     customOpen = true;
   }
 
-  function formatEnv(env: Record<string, string>): string {
-    return Object.entries(env)
-      .map(([key, value]) => `${key}=${value}`)
-      .join("\n");
+  function formatEnv(env: Record<string, string>, envSecrets: Record<string, string>): string {
+    return [
+      ...Object.entries(env).map(([key, value]) => `${key}=${value}`),
+      ...Object.entries(envSecrets).map(([key, value]) => `${key}=@${value}`),
+    ].join("\n");
   }
 
-  function parseEnv(text: string): Record<string, string> {
+  function parseEnv(text: string): {
+    env: Record<string, string>;
+    env_secrets: Record<string, string>;
+  } {
     const env: Record<string, string> = {};
+    const env_secrets: Record<string, string> = {};
     for (const line of text.split("\n")) {
       const trimmed = line.trim();
       if (trimmed === "" || trimmed.startsWith("#")) continue;
       const index = trimmed.indexOf("=");
       if (index <= 0) continue;
-      env[trimmed.slice(0, index).trim()] = trimmed.slice(index + 1).trim();
+      const key = trimmed.slice(0, index).trim();
+      const value = trimmed.slice(index + 1).trim();
+      if (value.startsWith("@")) env_secrets[key] = value.slice(1).trim();
+      else env[key] = value;
     }
-    return env;
+    return { env, env_secrets };
   }
 
   async function submitCustom(event: SubmitEvent): Promise<void> {
@@ -198,7 +212,7 @@
         name: customForm.name.trim() === "" ? null : customForm.name.trim(),
         command: customForm.command.trim(),
         args: customForm.args.split(/\s+/).filter((value) => value !== ""),
-        env: parseEnv(customForm.env),
+        ...parseEnv(customForm.env),
       });
       toast.success(result.message ?? m.settings_custom_agent_saved({ name: id }));
       customOpen = false;
@@ -519,14 +533,15 @@
       </div>
       <div class="grid gap-1.5">
         <Label for="custom-env">
-          {m.settings_env_vars()} (<code>KEY=VALUE</code>)
+          {m.settings_env_vars()} (<code>KEY=VALUE</code>, secret reference
+          <code>KEY=@secret-id</code>)
         </Label>
         <textarea
           id="custom-env"
           bind:value={customForm.env}
           rows="3"
           class="border-input bg-background focus-visible:ring-ring/40 rounded-md border px-2 py-1.5 font-mono text-xs outline-none focus-visible:ring-1"
-          placeholder="LOG_LEVEL=info"></textarea>
+          placeholder="LOG_LEVEL=info&#10;API_KEY=@0195-secret-id"></textarea>
       </div>
       <Dialog.Footer>
         <Dialog.Close>{m.common_cancel()}</Dialog.Close>
