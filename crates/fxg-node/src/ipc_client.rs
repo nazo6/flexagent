@@ -5,7 +5,7 @@
 //!
 //! Design: `docs/03-protocol-and-api.md` §4.
 
-use fxg_protocol::ipc::{IpcClientMessage, IpcServerMessage};
+use fxg_protocol::ipc::{IpcRequest, IpcServerMessage};
 use tokio::io::{AsyncRead, AsyncWrite};
 
 use crate::error::NodeError;
@@ -81,7 +81,7 @@ impl IpcClient {
     ///
     /// Use [`Self::send`] + [`Self::recv`] when sending commands (`SendPrompt`
     /// etc.) over a connection that is streaming events via `AttachSession`.
-    pub async fn send(&mut self, message: &IpcClientMessage) -> Result<(), NodeError> {
+    pub async fn send(&mut self, message: &IpcRequest) -> Result<(), NodeError> {
         write_message(&mut self.stream, message).await
     }
 
@@ -99,10 +99,7 @@ impl IpcClient {
     }
 
     /// Sends a single request and receives the next response.
-    pub async fn request(
-        &mut self,
-        message: &IpcClientMessage,
-    ) -> Result<IpcServerMessage, NodeError> {
+    pub async fn request(&mut self, message: &IpcRequest) -> Result<IpcServerMessage, NodeError> {
         self.send(message).await?;
         self.recv()
             .await?
@@ -115,6 +112,9 @@ mod tests {
     use super::*;
     use crate::daemon::{DaemonConfig, NodeDaemon};
     use crate::ipc_framing::write_message;
+    use fxg_protocol::ipc::{
+        IPC_PROTOCOL_VERSION, IpcOutcome, IpcRequestKind, IpcResultKind, LocalRequest,
+    };
     use std::time::Duration;
 
     #[tokio::test]
@@ -139,19 +139,31 @@ mod tests {
         let mut client = client.expect("client connects");
 
         let response = client
-            .request(&IpcClientMessage::ListSessions {
-                command_id: "c1".into(),
-                include_stopped: true,
-                include_archived: true,
+            .request(&IpcRequest {
+                protocol_version: IPC_PROTOCOL_VERSION,
+                request_id: "c1".into(),
+                request: IpcRequestKind::Local {
+                    request: LocalRequest::ListSessions {
+                        command_id: "c1".into(),
+                        include_stopped: true,
+                        include_archived: true,
+                    },
+                },
             })
             .await
             .expect("request");
         match response {
-            IpcServerMessage::Result {
-                result: fxg_protocol::ipc::IpcResult::Sessions { sessions },
-                command_id,
+            IpcServerMessage::Response {
+                request_id,
+                outcome:
+                    IpcOutcome::Ok {
+                        result:
+                            IpcResultKind::Local {
+                                result: fxg_protocol::ipc::LocalResult::Sessions { sessions },
+                            },
+                    },
             } => {
-                assert_eq!(command_id.as_str(), "c1");
+                assert_eq!(request_id.as_str(), "c1");
                 assert!(sessions.is_empty());
             }
             other => panic!("unexpected response: {other:?}"),
@@ -162,10 +174,16 @@ mod tests {
         tokio::time::timeout(Duration::from_secs(5), daemon.wait())
             .await
             .expect("stop");
-        let err = client
-            .request(&IpcClientMessage::Ping)
-            .await
-            .expect_err("connection closed");
+        let ping = IpcRequest {
+            protocol_version: IPC_PROTOCOL_VERSION,
+            request_id: "c2".into(),
+            request: IpcRequestKind::Local {
+                request: LocalRequest::Ping {
+                    command_id: "c2".into(),
+                },
+            },
+        };
+        let err = client.request(&ping).await.expect_err("connection closed");
         assert!(matches!(err, NodeError::Server(_)));
     }
 
@@ -185,11 +203,18 @@ mod tests {
     async fn framing_helpers_are_shared_with_server() {
         // Verify that the client uses the same framing functions as the server
         let (mut a, mut b) = tokio::io::duplex(1024);
-        write_message(&mut a, &IpcClientMessage::Ping)
-            .await
-            .expect("write");
+        let ping = IpcRequest {
+            protocol_version: IPC_PROTOCOL_VERSION,
+            request_id: "c1".into(),
+            request: IpcRequestKind::Local {
+                request: LocalRequest::Ping {
+                    command_id: "c1".into(),
+                },
+            },
+        };
+        write_message(&mut a, &ping).await.expect("write");
         let frame = read_frame(&mut b).await.expect("read").expect("frame");
-        let decoded: IpcClientMessage = serde_json::from_slice(&frame).expect("decode");
-        assert_eq!(decoded, IpcClientMessage::Ping);
+        let decoded: IpcRequest = serde_json::from_slice(&frame).expect("decode");
+        assert_eq!(decoded, ping);
     }
 }

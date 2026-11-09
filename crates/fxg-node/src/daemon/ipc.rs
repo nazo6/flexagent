@@ -17,8 +17,10 @@ use fxg_protocol::CommandId;
 use fxg_protocol::common::{ErrorCode, ErrorInfo};
 use fxg_protocol::events::SessionEventEnvelope;
 use fxg_protocol::ipc::{
-    IpcClientMessage, IpcResult, IpcServerMessage, ProjectInfo, SessionDetail,
+    IPC_PROTOCOL_VERSION, IpcOutcome, IpcRequest, IpcRequestKind, IpcResultKind, IpcServerMessage,
+    LocalRequest, LocalResult, ProjectInfo, SessionDetail,
 };
+use fxg_protocol::node_server::NodeRpcOutcome;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::watch;
 
@@ -26,7 +28,6 @@ use super::DaemonState;
 use super::ops::AuditSource;
 use crate::error::NodeError;
 use crate::ipc_framing::{read_frame, write_message};
-use crate::session_manager::ResumeParams;
 use crate::{project, worktree};
 
 /// Upper limit of the session list returned by `fxg ps` etc.
@@ -176,72 +177,128 @@ where
         let Some(frame) = frame else {
             return Ok(()); // The client disconnected
         };
-        let request: IpcClientMessage = match serde_json::from_slice(&frame) {
+        let request: IpcRequest = match serde_json::from_slice(&frame) {
             Ok(request) => request,
             Err(err) => {
-                let response = IpcServerMessage::Error {
-                    command_id: None,
-                    error: ErrorInfo::new(
-                        ErrorCode::InvalidState,
-                        format!("invalid ipc message: {err}"),
-                    ),
+                let response = IpcServerMessage::Response {
+                    request_id: CommandId::new("invalid"),
+                    outcome: IpcOutcome::Err {
+                        error: ErrorInfo::new(
+                            ErrorCode::InvalidState,
+                            format!("invalid ipc message: {err}"),
+                        ),
+                    },
                 };
                 write_message(&mut writer, &response).await?;
                 continue;
             }
         };
+        if request.protocol_version != IPC_PROTOCOL_VERSION {
+            tracing::error!(
+                protocol_version = request.protocol_version,
+                required = IPC_PROTOCOL_VERSION,
+                "local IPC protocol version mismatch; restart the daemon"
+            );
+            let response = IpcServerMessage::Response {
+                request_id: request.request_id,
+                outcome: IpcOutcome::Err {
+                    error: ErrorInfo::new(
+                        ErrorCode::VersionMismatch,
+                        format!(
+                            "local IPC protocol version {} is not supported (daemon expects {}); restart the daemon",
+                            request.protocol_version, IPC_PROTOCOL_VERSION
+                        ),
+                    ),
+                },
+            };
+            write_message(&mut writer, &response).await?;
+            return Ok(());
+        }
 
         let response = dispatch(&state, request).await;
         write_message(&mut writer, &response).await?;
     }
 }
 
-/// Dispatch error (command ID + structured error code).
+/// Dispatch error (structured error code).
 #[derive(Debug)]
 struct DispatchError {
-    command_id: Option<CommandId>,
     code: ErrorCode,
     message: String,
 }
 
 impl DispatchError {
-    fn new(command_id: &CommandId, code: ErrorCode, message: impl Into<String>) -> Self {
+    fn new(_command_id: &CommandId, code: ErrorCode, message: impl Into<String>) -> Self {
         Self {
-            command_id: Some(command_id.clone()),
             code,
             message: message.into(),
         }
     }
 
-    fn from_node_error(command_id: &CommandId, err: NodeError) -> Self {
-        Self::new(command_id, err.error_code(), err.to_string())
+    fn from_node_error(_command_id: &CommandId, err: NodeError) -> Self {
+        Self {
+            code: err.error_code(),
+            message: err.to_string(),
+        }
     }
 }
 
 /// Processes a single request and returns the response message.
-pub async fn dispatch(state: &DaemonState, request: IpcClientMessage) -> IpcServerMessage {
-    match handle(state, request).await {
-        Ok((command_id, result)) => IpcServerMessage::Result { command_id, result },
-        Err(err) => IpcServerMessage::Error {
-            command_id: err.command_id,
+pub async fn dispatch(state: &DaemonState, request: IpcRequest) -> IpcServerMessage {
+    let request_id = request.request_id.clone();
+    let outcome = match request.request {
+        IpcRequestKind::Node { request } => {
+            match crate::rpc::execute(state, &request_id, request, &AuditSource::local()).await {
+                NodeRpcOutcome::Ok { response } => IpcOutcome::Ok {
+                    result: IpcResultKind::Node { response },
+                },
+                NodeRpcOutcome::Err { error } => IpcOutcome::Err { error },
+            }
+        }
+        IpcRequestKind::Local { request } => {
+            if request.command_id() != &request_id {
+                IpcOutcome::Err {
+                    error: ErrorInfo::new(
+                        ErrorCode::InvalidState,
+                        "local IPC request_id does not match command_id",
+                    ),
+                }
+            } else {
+                dispatch_local(state, request).await
+            }
+        }
+    };
+    IpcServerMessage::Response {
+        request_id,
+        outcome,
+    }
+}
+
+/// Dispatches a CLI-only operation and wraps the result.
+async fn dispatch_local(state: &DaemonState, request: LocalRequest) -> IpcOutcome {
+    match handle_local(state, request).await {
+        Ok((_command_id, result)) => IpcOutcome::Ok {
+            result: IpcResultKind::Local { result },
+        },
+        Err(err) => IpcOutcome::Err {
             error: ErrorInfo::new(err.code, err.message),
         },
     }
 }
 
-async fn handle(
+async fn handle_local(
     state: &DaemonState,
-    request: IpcClientMessage,
-) -> Result<(CommandId, IpcResult), DispatchError> {
+    request: LocalRequest,
+) -> Result<(CommandId, LocalResult), DispatchError> {
     match request {
-        IpcClientMessage::Ping => Ok((
-            CommandId::new("ping"),
-            IpcResult::Ack {
+        LocalRequest::Ping { command_id } => Ok((
+            command_id,
+            LocalResult::Ack {
                 message: Some("pong".to_owned()),
             },
         )),
 
-        IpcClientMessage::GetLocalStatus { command_id } => {
+        LocalRequest::GetLocalStatus { command_id } => {
             let sessions = state
                 .db()
                 .list_sessions(&SessionFilter {
@@ -263,7 +320,7 @@ async fn handle(
                 .map_err(|err| DispatchError::from_node_error(&command_id, err.into()))?;
             Ok((
                 command_id,
-                IpcResult::LocalStatus {
+                LocalResult::LocalStatus {
                     status: fxg_protocol::ipc::LocalStatus {
                         sessions,
                         central_connected: state.central_connected(),
@@ -273,7 +330,7 @@ async fn handle(
                 },
             ))
         }
-        IpcClientMessage::Diagnostics { command_id } => {
+        LocalRequest::Diagnostics { command_id } => {
             let agents = state
                 .session_manager()
                 .agent_diagnostics()
@@ -293,7 +350,7 @@ async fn handle(
                 .into_owned();
             Ok((
                 command_id,
-                IpcResult::Diagnostics {
+                LocalResult::Diagnostics {
                     diagnostics: fxg_protocol::client_api::DiagnosticsResponse {
                         node_id: state.node_id().to_owned(),
                         generated_at: fxg_protocol::util::now_ms(),
@@ -304,73 +361,25 @@ async fn handle(
             ))
         }
 
-        IpcClientMessage::ProjectInfo { command_id, cwd } => {
+        LocalRequest::ProjectInfo { command_id, cwd } => {
             let resolved = resolve_and_register(state, Path::new(&cwd), &command_id).await?;
             Ok((
                 command_id,
-                IpcResult::ProjectInfo {
+                LocalResult::ProjectInfo {
                     project: to_project_info(&resolved),
                 },
             ))
         }
 
-        IpcClientMessage::ProjectList { command_id } => {
+        LocalRequest::ProjectList { command_id } => {
             let projects = state
                 .list_projects_with_path_state()
                 .await
                 .map_err(|err| DispatchError::from_node_error(&command_id, err))?;
-            Ok((command_id, IpcResult::Projects { projects }))
+            Ok((command_id, LocalResult::Projects { projects }))
         }
 
-        IpcClientMessage::ProjectLink {
-            command_id,
-            cwd,
-            project_id,
-        } => {
-            let dir = PathBuf::from(&cwd);
-            if !dir.is_dir() {
-                return Err(DispatchError::new(
-                    &command_id,
-                    ErrorCode::NotFound,
-                    format!("directory not found: {cwd}"),
-                ));
-            }
-            // Apply the binding immediately
-            let resolved = state
-                .project_link(&dir, project_id.as_str())
-                .await
-                .map_err(|err| DispatchError::from_node_error(&command_id, err))?;
-            Ok((
-                command_id,
-                IpcResult::Ack {
-                    message: Some(format!(
-                        "linked {} to {}",
-                        resolved.local_path.display(),
-                        resolved.project_id
-                    )),
-                },
-            ))
-        }
-
-        IpcClientMessage::ProjectScan { command_id, dir } => {
-            let scanned_dirs = state
-                .project_scan(dir.as_deref().map(Path::new))
-                .await
-                .map_err(|err| DispatchError::from_node_error(&command_id, err))?;
-            let projects = state
-                .list_projects_with_path_state()
-                .await
-                .map_err(|err| DispatchError::from_node_error(&command_id, err))?;
-            Ok((
-                command_id,
-                IpcResult::ProjectScan {
-                    projects,
-                    scanned_dirs,
-                },
-            ))
-        }
-
-        IpcClientMessage::WorktreeList {
+        LocalRequest::WorktreeList {
             command_id,
             cwd,
             project_id,
@@ -382,10 +391,10 @@ async fn handle(
                 &command_id,
             )
             .await?;
-            Ok((command_id, IpcResult::Worktrees { worktrees }))
+            Ok((command_id, LocalResult::Worktrees { worktrees }))
         }
 
-        IpcClientMessage::WorktreeAdd {
+        LocalRequest::WorktreeAdd {
             command_id,
             cwd,
             project_id,
@@ -404,7 +413,7 @@ async fn handle(
                 .map_err(|err| DispatchError::from_node_error(&command_id, err))?;
             Ok((
                 command_id,
-                IpcResult::WorktreeAdded {
+                LocalResult::WorktreeAdded {
                     path: outcome.path.to_string_lossy().into_owned(),
                     branch: outcome.branch,
                     created: outcome.created,
@@ -412,7 +421,7 @@ async fn handle(
             ))
         }
 
-        IpcClientMessage::WorktreeRemove {
+        LocalRequest::WorktreeRemove {
             command_id,
             cwd,
             target,
@@ -457,20 +466,20 @@ async fn handle(
 
             Ok((
                 command_id,
-                IpcResult::Ack {
+                LocalResult::Ack {
                     message: Some(format!("removed worktree {}", target_path.display())),
                 },
             ))
         }
 
-        IpcClientMessage::WorktreePrune { command_id, cwd } => {
+        LocalRequest::WorktreePrune { command_id, cwd } => {
             let output = state
                 .worktree_prune(Path::new(&cwd), &AuditSource::local())
                 .await
                 .map_err(|err| DispatchError::from_node_error(&command_id, err))?;
             Ok((
                 command_id,
-                IpcResult::Ack {
+                LocalResult::Ack {
                     message: Some(if output.trim().is_empty() {
                         "pruned".to_owned()
                     } else {
@@ -480,7 +489,7 @@ async fn handle(
             ))
         }
 
-        IpcClientMessage::ListSessions {
+        LocalRequest::ListSessions {
             command_id,
             include_stopped,
             include_archived,
@@ -500,10 +509,10 @@ async fn handle(
                 .list_sessions(&filter)
                 .await
                 .map_err(|err| DispatchError::from_node_error(&command_id, err.into()))?;
-            Ok((command_id, IpcResult::Sessions { sessions }))
+            Ok((command_id, LocalResult::Sessions { sessions }))
         }
 
-        IpcClientMessage::KillAll { command_id } => {
+        LocalRequest::KillAll { command_id } => {
             let (killed_sessions, killed_ptys) = state
                 .kill_all_local("killed by local kill-all")
                 .await
@@ -524,14 +533,14 @@ async fn handle(
 
             Ok((
                 command_id,
-                IpcResult::KillAll {
+                LocalResult::KillAll {
                     killed_sessions,
                     killed_ptys,
                 },
             ))
         }
 
-        IpcClientMessage::AuthToken { command_id, rotate } => {
+        LocalRequest::AuthToken { command_id, rotate } => {
             let token = if rotate {
                 state
                     .rotate_auth_token()
@@ -539,14 +548,14 @@ async fn handle(
             } else {
                 state.auth_token()
             };
-            Ok((command_id, IpcResult::AuthToken { token }))
+            Ok((command_id, LocalResult::AuthToken { token }))
         }
 
-        IpcClientMessage::GitCredential { command_id, prompt } => {
+        LocalRequest::GitCredential { command_id, prompt } => {
             // Git credential proxy: resolve by relaying in memory to the central server
             // (without leaving the token on disk inside the VM. Design: docs/01 §6.4)
             let result = match state.credentials().resolve(&prompt).await {
-                Ok(response) => IpcResult::GitCredential {
+                Ok(response) => LocalResult::GitCredential {
                     username: if response.username.is_empty() {
                         crate::credentials::default_username().to_owned()
                     } else {
@@ -555,7 +564,7 @@ async fn handle(
                     token: response.token,
                     error: response.error,
                 },
-                Err(err) => IpcResult::GitCredential {
+                Err(err) => LocalResult::GitCredential {
                     username: crate::credentials::default_username().to_owned(),
                     token: None,
                     error: Some(err.to_string()),
@@ -564,7 +573,7 @@ async fn handle(
             Ok((command_id, result))
         }
 
-        IpcClientMessage::EnsureSession {
+        LocalRequest::EnsureSession {
             command_id,
             cwd,
             agent_id,
@@ -598,13 +607,13 @@ async fn handle(
                 .await;
             Ok((
                 command_id,
-                IpcResult::EnsureSession {
+                LocalResult::EnsureSession {
                     session_id: outcome.session_id.into(),
                 },
             ))
         }
 
-        IpcClientMessage::SessionImport {
+        LocalRequest::SessionImport {
             command_id,
             agent_id,
             agent_session_id,
@@ -640,13 +649,13 @@ async fn handle(
                 .await;
             Ok((
                 command_id,
-                IpcResult::SessionImported {
+                LocalResult::SessionImported {
                     session_id: session_id.into(),
                 },
             ))
         }
 
-        IpcClientMessage::SendPrompt {
+        LocalRequest::SendPrompt {
             command_id,
             session_id,
             input,
@@ -659,13 +668,13 @@ async fn handle(
                 .map_err(|err| DispatchError::from_node_error(&command_id, err))?;
             Ok((
                 command_id,
-                IpcResult::CommandAccepted {
+                LocalResult::CommandAccepted {
                     session_id: Some(session_id),
                 },
             ))
         }
 
-        IpcClientMessage::RespondPermission {
+        LocalRequest::RespondPermission {
             command_id,
             session_id,
             request_id,
@@ -685,13 +694,13 @@ async fn handle(
                 .map_err(|err| DispatchError::from_node_error(&command_id, err))?;
             Ok((
                 command_id,
-                IpcResult::CommandAccepted {
+                LocalResult::CommandAccepted {
                     session_id: Some(session_id),
                 },
             ))
         }
 
-        IpcClientMessage::RespondElicitation {
+        LocalRequest::RespondElicitation {
             command_id,
             session_id,
             elicitation_id,
@@ -713,13 +722,13 @@ async fn handle(
                 .map_err(|err| DispatchError::from_node_error(&command_id, err))?;
             Ok((
                 command_id,
-                IpcResult::CommandAccepted {
+                LocalResult::CommandAccepted {
                     session_id: Some(session_id),
                 },
             ))
         }
 
-        IpcClientMessage::ControlSession {
+        LocalRequest::ControlSession {
             command_id,
             session_id,
             action,
@@ -731,13 +740,13 @@ async fn handle(
                 .map_err(|err| DispatchError::from_node_error(&command_id, err))?;
             Ok((
                 command_id,
-                IpcResult::CommandAccepted {
+                LocalResult::CommandAccepted {
                     session_id: Some(session_id),
                 },
             ))
         }
 
-        IpcClientMessage::SessionFork {
+        LocalRequest::SessionFork {
             command_id,
             session_id,
             cwd,
@@ -753,78 +762,13 @@ async fn handle(
                 .map_err(|err| DispatchError::from_node_error(&command_id, err))?;
             Ok((
                 command_id,
-                IpcResult::SessionForked {
+                LocalResult::SessionForked {
                     session_id: outcome.session_id.into(),
                 },
             ))
         }
 
-        IpcClientMessage::SessionResume {
-            command_id,
-            session_id,
-            force_replay,
-        } => {
-            let started = state
-                .session_manager()
-                .resume(ResumeParams {
-                    command_id: &command_id,
-                    session_id: session_id.as_str(),
-                    force_replay,
-                })
-                .await
-                .map_err(|err| DispatchError::from_node_error(&command_id, err))?;
-            state
-                .record_audit(
-                    fxg_db::audit::actions::SESSION_RESUME,
-                    &AuditSource::local(),
-                    Some(session_id.as_str()),
-                    serde_json::json!({ "force_replay": force_replay }),
-                )
-                .await;
-            Ok((
-                command_id,
-                IpcResult::SessionResumed {
-                    session_id: started.session_id.into(),
-                    context_restored: started.context_restored,
-                },
-            ))
-        }
-
-        IpcClientMessage::SessionArchive {
-            command_id,
-            session_id,
-            archived,
-        } => {
-            let archived_at = state
-                .set_session_archived(
-                    &command_id,
-                    session_id.as_str(),
-                    archived,
-                    &AuditSource::local(),
-                )
-                .await
-                .map_err(|err| DispatchError::from_node_error(&command_id, err))?;
-            Ok((
-                command_id,
-                IpcResult::SessionArchived {
-                    session_id,
-                    archived_at,
-                },
-            ))
-        }
-
-        IpcClientMessage::SessionDelete {
-            command_id,
-            session_id,
-        } => {
-            state
-                .purge_session(&command_id, session_id.as_str(), &AuditSource::local())
-                .await
-                .map_err(|err| DispatchError::from_node_error(&command_id, err))?;
-            Ok((command_id, IpcResult::SessionDeleted { session_id }))
-        }
-
-        IpcClientMessage::SessionShow {
+        LocalRequest::SessionShow {
             command_id,
             session_id,
             recent_events,
@@ -863,7 +807,7 @@ async fn handle(
                 .collect();
             Ok((
                 command_id,
-                IpcResult::SessionDetail(Box::new(SessionDetail {
+                LocalResult::SessionDetail(Box::new(SessionDetail {
                     session,
                     event_count,
                     recent_events,
@@ -873,7 +817,7 @@ async fn handle(
             ))
         }
 
-        IpcClientMessage::InboxList { command_id } => {
+        LocalRequest::InboxList { command_id } => {
             let requests = state
                 .db()
                 .pending_permissions()
@@ -886,7 +830,7 @@ async fn handle(
                 .map_err(|err| DispatchError::from_node_error(&command_id, err.into()))?;
             Ok((
                 command_id,
-                IpcResult::Inbox {
+                LocalResult::Inbox {
                     requests,
                     elicitations,
                 },
@@ -974,6 +918,7 @@ mod tests {
     use crate::daemon::{DaemonConfig, NodeDaemon};
     use crate::git;
     use crate::ipc_client::IpcClient;
+    use fxg_protocol::node_server::{NodeRpcRequest, NodeRpcResponse};
     use std::time::Duration;
 
     async fn start_daemon() -> (NodeDaemon, tempfile::TempDir) {
@@ -1001,9 +946,64 @@ mod tests {
     ///
     /// The client uses `IpcClient` (verifying Unix domain sockets / named pipes
     /// with the same test code).
-    async fn roundtrip(endpoint: &str, request: &IpcClientMessage) -> IpcServerMessage {
+    async fn roundtrip(endpoint: &str, request: LocalRequest) -> IpcServerMessage {
+        let request = IpcRequest {
+            protocol_version: IPC_PROTOCOL_VERSION,
+            request_id: request.command_id().clone(),
+            request: IpcRequestKind::Local { request },
+        };
         let mut client = IpcClient::connect(endpoint).await.expect("connect");
-        client.request(request).await.expect("request")
+        client.request(&request).await.expect("request")
+    }
+
+    async fn roundtrip_node(
+        endpoint: &str,
+        request_id: impl Into<CommandId>,
+        request: NodeRpcRequest,
+    ) -> Result<NodeRpcResponse, Box<ErrorInfo>> {
+        let request = IpcRequest {
+            protocol_version: IPC_PROTOCOL_VERSION,
+            request_id: request_id.into(),
+            request: IpcRequestKind::Node { request },
+        };
+        let mut client = IpcClient::connect(endpoint).await.expect("connect");
+        match client.request(&request).await.expect("request") {
+            IpcServerMessage::Response {
+                outcome:
+                    IpcOutcome::Ok {
+                        result: IpcResultKind::Node { response },
+                    },
+                ..
+            } => Ok(response),
+            IpcServerMessage::Response {
+                outcome: IpcOutcome::Err { error },
+                ..
+            } => Err(Box::new(error)),
+            other => panic!("unexpected response: {other:?}"),
+        }
+    }
+
+    fn local_result(response: IpcServerMessage) -> LocalResult {
+        match response {
+            IpcServerMessage::Response {
+                outcome:
+                    IpcOutcome::Ok {
+                        result: IpcResultKind::Local { result },
+                    },
+                ..
+            } => result,
+            other => panic!("unexpected response: {other:?}"),
+        }
+    }
+
+    fn local_error(response: IpcServerMessage) -> ErrorInfo {
+        match response {
+            IpcServerMessage::Response {
+                outcome: IpcOutcome::Err { error },
+                ..
+            } => error,
+            other => panic!("unexpected response: {other:?}"),
+        }
     }
 
     /// Starts a daemon with a mock agent driver injected (for session operations).
@@ -1047,17 +1047,14 @@ mod tests {
 
         let response = roundtrip(
             &endpoint,
-            &IpcClientMessage::ProjectInfo {
+            LocalRequest::ProjectInfo {
                 command_id: "c1".into(),
                 cwd: repo.to_string_lossy().into_owned(),
             },
         )
         .await;
-        match response {
-            IpcServerMessage::Result {
-                result: IpcResult::ProjectInfo { project },
-                ..
-            } => {
+        match local_result(response) {
+            LocalResult::ProjectInfo { project } => {
                 assert_eq!(project.project_id.as_str(), "github.com/nazo6/flexagent");
                 assert_eq!(project.identity.kind.as_str(), "git_remote");
                 assert!(project.is_git_repo);
@@ -1066,22 +1063,17 @@ mod tests {
         }
 
         // project link writes an explicit path link
-        let response = roundtrip(
+        let response = roundtrip_node(
             &endpoint,
-            &IpcClientMessage::ProjectLink {
-                command_id: "c2".into(),
-                cwd: repo.to_string_lossy().into_owned(),
+            "c2",
+            NodeRpcRequest::ProjectLink {
                 project_id: "internal-agent-tools".into(),
+                local_path: repo.to_string_lossy().into_owned(),
             },
         )
-        .await;
-        assert!(matches!(
-            response,
-            IpcServerMessage::Result {
-                result: IpcResult::Ack { .. },
-                ..
-            }
-        ));
+        .await
+        .expect("project link");
+        assert!(matches!(response, NodeRpcResponse::ProjectLink { .. }));
         let link = daemon
             .state()
             .db()
@@ -1098,16 +1090,13 @@ mod tests {
         // It appears in the list
         let response = roundtrip(
             &endpoint,
-            &IpcClientMessage::ProjectList {
+            LocalRequest::ProjectList {
                 command_id: "c3".into(),
             },
         )
         .await;
-        match response {
-            IpcServerMessage::Result {
-                result: IpcResult::Projects { projects },
-                ..
-            } => {
+        match local_result(response) {
+            LocalResult::Projects { projects } => {
                 assert_eq!(projects.len(), 1);
                 assert_eq!(projects[0].project_id.as_str(), "user:internal-agent-tools");
                 assert_eq!(projects[0].bindings.len(), 1);
@@ -1147,7 +1136,7 @@ mod tests {
 
         let response = roundtrip(
             &endpoint,
-            &IpcClientMessage::WorktreeAdd {
+            LocalRequest::WorktreeAdd {
                 command_id: "w1".into(),
                 cwd: repo.to_string_lossy().into_owned(),
                 project_id: None,
@@ -1156,11 +1145,8 @@ mod tests {
             },
         )
         .await;
-        let worktree_path = match response {
-            IpcServerMessage::Result {
-                result: IpcResult::WorktreeAdded { path, created, .. },
-                ..
-            } => {
+        let worktree_path = match local_result(response) {
+            LocalResult::WorktreeAdded { path, created, .. } => {
                 assert!(created);
                 path
             }
@@ -1171,18 +1157,15 @@ mod tests {
         // List (with cwd specified)
         let response = roundtrip(
             &endpoint,
-            &IpcClientMessage::WorktreeList {
+            LocalRequest::WorktreeList {
                 command_id: "w2".into(),
                 cwd: Some(repo.to_string_lossy().into_owned()),
                 project_id: None,
             },
         )
         .await;
-        match response {
-            IpcServerMessage::Result {
-                result: IpcResult::Worktrees { worktrees },
-                ..
-            } => {
+        match local_result(response) {
+            LocalResult::Worktrees { worktrees } => {
                 assert_eq!(worktrees.len(), 2, "main + feat/ipc");
                 assert!(
                     worktrees
@@ -1201,7 +1184,7 @@ mod tests {
         // Remove by branch name
         let response = roundtrip(
             &endpoint,
-            &IpcClientMessage::WorktreeRemove {
+            LocalRequest::WorktreeRemove {
                 command_id: "w3".into(),
                 cwd: repo.to_string_lossy().into_owned(),
                 target: "feat/ipc".to_owned(),
@@ -1209,64 +1192,49 @@ mod tests {
             },
         )
         .await;
-        assert!(matches!(
-            response,
-            IpcServerMessage::Result {
-                result: IpcResult::Ack { .. },
-                ..
-            }
-        ));
+        assert!(matches!(local_result(response), LocalResult::Ack { .. }));
         assert!(!Path::new(&worktree_path).exists());
 
         // Session list (empty)
         let response = roundtrip(
             &endpoint,
-            &IpcClientMessage::ListSessions {
+            LocalRequest::ListSessions {
                 command_id: "s1".into(),
                 include_stopped: true,
                 include_archived: true,
             },
         )
         .await;
-        match response {
-            IpcServerMessage::Result {
-                result: IpcResult::Sessions { sessions },
-                ..
-            } => assert!(sessions.is_empty()),
+        match local_result(response) {
+            LocalResult::Sessions { sessions } => assert!(sessions.is_empty()),
             other => panic!("unexpected response: {other:?}"),
         }
 
         // Getting and rotating the auth token
         let response = roundtrip(
             &endpoint,
-            &IpcClientMessage::AuthToken {
+            LocalRequest::AuthToken {
                 command_id: "a1".into(),
                 rotate: false,
             },
         )
         .await;
-        let token = match response {
-            IpcServerMessage::Result {
-                result: IpcResult::AuthToken { token },
-                ..
-            } => token,
+        let token = match local_result(response) {
+            LocalResult::AuthToken { token } => token,
             other => panic!("unexpected response: {other:?}"),
         };
         assert_eq!(token, daemon.state().auth_token());
 
         let response = roundtrip(
             &endpoint,
-            &IpcClientMessage::AuthToken {
+            LocalRequest::AuthToken {
                 command_id: "a2".into(),
                 rotate: true,
             },
         )
         .await;
-        match response {
-            IpcServerMessage::Result {
-                result: IpcResult::AuthToken { token: rotated },
-                ..
-            } => assert_ne!(rotated, token),
+        match local_result(response) {
+            LocalResult::AuthToken { token: rotated } => assert_ne!(rotated, token),
             other => panic!("unexpected response: {other:?}"),
         }
 
@@ -1308,7 +1276,7 @@ mod tests {
         // EnsureSession: start a session
         let response = roundtrip(
             &endpoint,
-            &IpcClientMessage::EnsureSession {
+            LocalRequest::EnsureSession {
                 command_id: "e1".into(),
                 cwd: workdir.to_string_lossy().into_owned(),
                 agent_id: "mock".to_owned(),
@@ -1317,11 +1285,8 @@ mod tests {
             },
         )
         .await;
-        let session_id = match response {
-            IpcServerMessage::Result {
-                result: IpcResult::EnsureSession { session_id },
-                ..
-            } => session_id,
+        let session_id = match local_result(response) {
+            LocalResult::EnsureSession { session_id } => session_id,
             other => panic!("unexpected response: {other:?}"),
         };
 
@@ -1345,7 +1310,7 @@ mod tests {
         // Sending a duplicate command_id yields COMMAND_DUPLICATE (idempotency)
         let response = roundtrip(
             &endpoint,
-            &IpcClientMessage::EnsureSession {
+            LocalRequest::EnsureSession {
                 command_id: "e1".into(),
                 cwd: workdir.to_string_lossy().into_owned(),
                 agent_id: "mock".to_owned(),
@@ -1354,17 +1319,12 @@ mod tests {
             },
         )
         .await;
-        match response {
-            IpcServerMessage::Error { error, .. } => {
-                assert_eq!(error.code, ErrorCode::CommandDuplicate)
-            }
-            other => panic!("unexpected response: {other:?}"),
-        }
+        assert_eq!(local_error(response).code, ErrorCode::CommandDuplicate);
 
         // SendPrompt: send a prompt
         let response = roundtrip(
             &endpoint,
-            &IpcClientMessage::SendPrompt {
+            LocalRequest::SendPrompt {
                 command_id: "p1".into(),
                 session_id: session_id.clone(),
                 input: fxg_protocol::common::PromptInput::text("hello"),
@@ -1372,15 +1332,10 @@ mod tests {
             },
         )
         .await;
-        match response {
-            IpcServerMessage::Result {
-                command_id,
-                result:
-                    IpcResult::CommandAccepted {
-                        session_id: Some(sid),
-                    },
+        match local_result(response) {
+            LocalResult::CommandAccepted {
+                session_id: Some(sid),
             } => {
-                assert_eq!(command_id.as_str(), "p1");
                 assert_eq!(sid, session_id);
             }
             other => panic!("unexpected response: {other:?}"),
@@ -1411,7 +1366,7 @@ mod tests {
 
         let response = roundtrip(
             &endpoint,
-            &IpcClientMessage::RespondPermission {
+            LocalRequest::RespondPermission {
                 command_id: "r1".into(),
                 session_id: session_id.clone(),
                 request_id: "req-1".to_owned(),
@@ -1422,7 +1377,7 @@ mod tests {
         .await;
         assert!(matches!(
             response,
-            IpcServerMessage::Result { command_id, .. } if command_id.as_str() == "r1"
+            IpcServerMessage::Response { request_id, .. } if request_id.as_str() == "r1"
         ));
         assert_eq!(
             mock.permissions(),
@@ -1431,7 +1386,7 @@ mod tests {
 
         let response = roundtrip(
             &endpoint,
-            &IpcClientMessage::RespondPermission {
+            LocalRequest::RespondPermission {
                 command_id: "r2".into(),
                 session_id: session_id.clone(),
                 request_id: "req-1".to_owned(),
@@ -1440,10 +1395,7 @@ mod tests {
             },
         )
         .await;
-        assert!(matches!(
-            response,
-            IpcServerMessage::Error { error, .. } if error.code == ErrorCode::AlreadyResolved
-        ));
+        assert_eq!(local_error(response).code, ErrorCode::AlreadyResolved);
 
         // Question (elicitation) → response → the second attempt is ALREADY_RESOLVED
         mock.emit(DriverEvent::Event(
@@ -1464,7 +1416,7 @@ mod tests {
 
         let response = roundtrip(
             &endpoint,
-            &IpcClientMessage::RespondElicitation {
+            LocalRequest::RespondElicitation {
                 command_id: "q1".into(),
                 session_id: session_id.clone(),
                 elicitation_id: "elic-1".to_owned(),
@@ -1479,7 +1431,7 @@ mod tests {
         .await;
         assert!(matches!(
             response,
-            IpcServerMessage::Result { command_id, .. } if command_id.as_str() == "q1"
+            IpcServerMessage::Response { request_id, .. } if request_id.as_str() == "q1"
         ));
         assert_eq!(
             mock.elicitations(),
@@ -1495,7 +1447,7 @@ mod tests {
 
         let response = roundtrip(
             &endpoint,
-            &IpcClientMessage::RespondElicitation {
+            LocalRequest::RespondElicitation {
                 command_id: "q2".into(),
                 session_id: session_id.clone(),
                 elicitation_id: "elic-1".to_owned(),
@@ -1505,15 +1457,12 @@ mod tests {
             },
         )
         .await;
-        assert!(matches!(
-            response,
-            IpcServerMessage::Error { error, .. } if error.code == ErrorCode::AlreadyResolved
-        ));
+        assert_eq!(local_error(response).code, ErrorCode::AlreadyResolved);
 
         // ControlSession (SetMode) is forwarded to the driver
         let response = roundtrip(
             &endpoint,
-            &IpcClientMessage::ControlSession {
+            LocalRequest::ControlSession {
                 command_id: "m1".into(),
                 session_id: session_id.clone(),
                 action: SessionControlAction::SetMode {
@@ -1524,7 +1473,7 @@ mod tests {
         .await;
         assert!(matches!(
             response,
-            IpcServerMessage::Result { command_id, .. } if command_id.as_str() == "m1"
+            IpcServerMessage::Response { request_id, .. } if request_id.as_str() == "m1"
         ));
         assert_eq!(mock.modes(), vec!["plan".to_owned()]);
 
@@ -1548,7 +1497,7 @@ mod tests {
         // Leave one conversation turn via EnsureSession → SendPrompt
         let response = roundtrip(
             &endpoint,
-            &IpcClientMessage::EnsureSession {
+            LocalRequest::EnsureSession {
                 command_id: "e1".into(),
                 cwd: workdir.to_string_lossy().into_owned(),
                 agent_id: "mock".to_owned(),
@@ -1557,16 +1506,13 @@ mod tests {
             },
         )
         .await;
-        let session_id = match response {
-            IpcServerMessage::Result {
-                result: IpcResult::EnsureSession { session_id, .. },
-                ..
-            } => session_id,
+        let session_id = match local_result(response) {
+            LocalResult::EnsureSession { session_id, .. } => session_id,
             other => panic!("unexpected response: {other:?}"),
         };
         roundtrip(
             &endpoint,
-            &IpcClientMessage::SendPrompt {
+            LocalRequest::SendPrompt {
                 command_id: "p1".into(),
                 session_id: session_id.clone(),
                 input: fxg_protocol::common::PromptInput::text("hello resume"),
@@ -1595,26 +1541,18 @@ mod tests {
         }
 
         // Resume (the mock driver has no native restore support → continue via history replay)
-        let response = roundtrip(
+        let response = roundtrip_node(
             &endpoint,
-            &IpcClientMessage::SessionResume {
-                command_id: "r1".into(),
+            "r1",
+            NodeRpcRequest::ResumeSession {
                 session_id: session_id.clone(),
                 force_replay: false,
             },
         )
-        .await;
+        .await
+        .expect("resume");
         match response {
-            IpcServerMessage::Result {
-                result:
-                    IpcResult::SessionResumed {
-                        session_id: resumed,
-                        context_restored,
-                        ..
-                    },
-                ..
-            } => {
-                assert_eq!(resumed, session_id);
+            NodeRpcResponse::Resume { context_restored } => {
                 assert!(!context_restored, "mock driver cannot restore natively");
             }
             other => panic!("unexpected response: {other:?}"),
@@ -1636,21 +1574,17 @@ mod tests {
         assert!(injected, "resume context is injected to the agent");
 
         // Re-running on an active (already resumed) session is INVALID_STATE
-        let response = roundtrip(
+        let error = roundtrip_node(
             &endpoint,
-            &IpcClientMessage::SessionResume {
-                command_id: "r2".into(),
+            "r2",
+            NodeRpcRequest::ResumeSession {
                 session_id: session_id.clone(),
                 force_replay: false,
             },
         )
-        .await;
-        match response {
-            IpcServerMessage::Error { error, .. } => {
-                assert_eq!(error.code, ErrorCode::InvalidState)
-            }
-            other => panic!("unexpected response: {other:?}"),
-        }
+        .await
+        .expect_err("active session");
+        assert_eq!(error.code, ErrorCode::InvalidState);
 
         daemon.shutdown();
         tokio::time::timeout(Duration::from_secs(5), daemon.wait())

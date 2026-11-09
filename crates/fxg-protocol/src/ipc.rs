@@ -19,11 +19,18 @@ use crate::common::{
     SessionSummary, StreamDeltaPayload,
 };
 use crate::events::SessionEventEnvelope;
+use crate::node_server::{NodeRpcRequest, NodeRpcResponse};
 use crate::settings::ProjectIdentity;
 use crate::{CommandId, ProjectId, SessionId};
 
 /// Length of the length header of length-prefixed JSON (little-endian u32).
 pub const IPC_LENGTH_PREFIX_BYTES: usize = 4;
+
+/// Protocol version of the local IPC message set.
+///
+/// The CLI and the daemon are shipped from the same binary; a mismatch means a
+/// stale daemon is still running, so it is rejected with a clear error.
+pub const IPC_PROTOCOL_VERSION: u32 = 1;
 
 /// Runtime status of the local node (the `GetLocalStatus` response).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -59,10 +66,69 @@ pub struct ProjectInfo {
     pub identity: ProjectIdentity,
 }
 
-/// Request message from the CLI to the daemon.
+/// Envelope for every CLI -> daemon request.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct IpcRequest {
+    /// Protocol version of the sender
+    pub protocol_version: u32,
+    /// Correlation ID used by the response
+    pub request_id: CommandId,
+    /// Operation to execute
+    pub request: IpcRequestKind,
+}
+
+/// Operation carried by an [`IpcRequest`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum IpcRequestKind {
+    /// Shared node operation (same type as Server -> Node).
+    Node {
+        /// Operation to execute
+        request: NodeRpcRequest,
+    },
+    /// CLI-only query or session command.
+    Local {
+        /// Operation to execute
+        request: LocalRequest,
+    },
+}
+
+/// Outcome of an [`IpcRequest`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum IpcOutcome {
+    /// The operation succeeded.
+    Ok {
+        /// Typed result
+        result: IpcResultKind,
+    },
+    /// The operation failed with a structured error.
+    Err {
+        /// Error code, message and recovery actions
+        error: ErrorInfo,
+    },
+}
+
+/// Successful payload of an [`IpcRequest`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum IpcResultKind {
+    /// Result of a shared [`NodeRpcRequest`].
+    Node {
+        /// Typed node response
+        response: NodeRpcResponse,
+    },
+    /// Result of a CLI-only [`LocalRequest`].
+    Local {
+        /// Typed local result
+        result: LocalResult,
+    },
+}
+
+/// Request message from the CLI to the daemon (CLI-only operations).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "method", rename_all = "snake_case")]
-pub enum IpcClientMessage {
+pub enum LocalRequest {
     /// Called by `fxg run <agent>`; the daemon starts the session.
     EnsureSession {
         /// Correlation ID
@@ -160,41 +226,6 @@ pub enum IpcClientMessage {
         /// Working directory of the fork (defaults to the source; used by `-w/--worktree`)
         cwd: Option<String>,
     },
-    /// Resumes a stopped session (`fxg session resume`).
-    ///
-    /// Keeps the same `session_id` and continues by restoring the agent-side
-    /// context (falling back in the order `session/resume` -> `session/load` ->
-    /// history replay).
-    SessionResume {
-        /// Correlation ID
-        command_id: CommandId,
-        /// Target session ID
-        session_id: SessionId,
-        /// Skip native restoration and continue with history replay (`--replay`)
-        force_replay: bool,
-    },
-    /// Archives / restores a session (`fxg session archive` / `unarchive`).
-    ///
-    /// Archiving only hides or restores the session in the listing; the event log
-    /// is kept.
-    SessionArchive {
-        /// Correlation ID
-        command_id: CommandId,
-        /// Target session ID
-        session_id: SessionId,
-        /// `true` = archive, `false` = restore
-        archived: bool,
-    },
-    /// Deletes a session (`fxg session delete`).
-    ///
-    /// A running session is stopped first, then the event bodies are purged
-    /// (irreversible; only the tombstone used for synchronization remains).
-    SessionDelete {
-        /// Correlation ID
-        command_id: CommandId,
-        /// Target session ID
-        session_id: SessionId,
-    },
     /// Fetches session details (`fxg session show`).
     SessionShow {
         /// Correlation ID
@@ -220,23 +251,6 @@ pub enum IpcClientMessage {
     ProjectList {
         /// Correlation ID
         command_id: CommandId,
-    },
-    /// Manually links the current directory to a logical project ID
-    /// (stored in `node.db.project_path_links`; `fxg project link`)
-    ProjectLink {
-        /// Correlation ID
-        command_id: CommandId,
-        /// Target directory
-        cwd: String,
-        /// Logical project ID to link to
-        project_id: ProjectId,
-    },
-    /// Scans the git repositories under a directory in bulk (`fxg project scan`).
-    ProjectScan {
-        /// Correlation ID
-        command_id: CommandId,
-        /// Directory to scan (walks `project_scan_dirs` when omitted)
-        dir: Option<String>,
     },
     /// Lists worktrees (`fxg worktree list`).
     WorktreeList {
@@ -312,13 +326,46 @@ pub enum IpcClientMessage {
         prompt: String,
     },
     /// Keep-alive
-    Ping,
+    Ping {
+        /// Correlation ID
+        command_id: CommandId,
+    },
+}
+
+impl LocalRequest {
+    /// Correlation ID carried by the request.
+    pub fn command_id(&self) -> &CommandId {
+        match self {
+            Self::EnsureSession { command_id, .. }
+            | Self::SessionImport { command_id, .. }
+            | Self::GetLocalStatus { command_id }
+            | Self::Diagnostics { command_id }
+            | Self::SendPrompt { command_id, .. }
+            | Self::RespondPermission { command_id, .. }
+            | Self::RespondElicitation { command_id, .. }
+            | Self::ControlSession { command_id, .. }
+            | Self::SessionFork { command_id, .. }
+            | Self::SessionShow { command_id, .. }
+            | Self::InboxList { command_id }
+            | Self::ProjectInfo { command_id, .. }
+            | Self::ProjectList { command_id }
+            | Self::WorktreeList { command_id, .. }
+            | Self::WorktreeAdd { command_id, .. }
+            | Self::WorktreeRemove { command_id, .. }
+            | Self::WorktreePrune { command_id, .. }
+            | Self::ListSessions { command_id, .. }
+            | Self::KillAll { command_id }
+            | Self::AuthToken { command_id, .. }
+            | Self::GitCredential { command_id, .. }
+            | Self::Ping { command_id } => command_id,
+        }
+    }
 }
 
 /// Response body from the daemon to the CLI.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "result", rename_all = "snake_case")]
-pub enum IpcResult {
+pub enum LocalResult {
     /// Result of `SessionImport`
     SessionImported {
         /// New fxg session ID
@@ -350,25 +397,6 @@ pub enum IpcResult {
         /// New session ID
         session_id: SessionId,
     },
-    /// Result of `SessionResume`
-    SessionResumed {
-        /// Resumed session ID (the same as the requested one)
-        session_id: SessionId,
-        /// Whether native restoration succeeded (`false` = continued with history replay)
-        context_restored: bool,
-    },
-    /// Result of `SessionArchive`
-    SessionArchived {
-        /// Target session ID
-        session_id: SessionId,
-        /// Archive time (Unix epoch ms). `None` when restored
-        archived_at: Option<i64>,
-    },
-    /// Result of `SessionDelete`
-    SessionDeleted {
-        /// ID of the deleted session
-        session_id: SessionId,
-    },
     /// Result of `SessionShow`
     SessionDetail(Box<SessionDetail>),
     /// Result of `InboxList`
@@ -387,13 +415,6 @@ pub enum IpcResult {
     Projects {
         /// Registered logical projects
         projects: Vec<ProjectSummary>,
-    },
-    /// Result of `ProjectScan`
-    ProjectScan {
-        /// Logical projects resolved by the scan
-        projects: Vec<ProjectSummary>,
-        /// Directories that were actually scanned
-        scanned_dirs: Vec<String>,
     },
     /// Result of `WorktreeList`
     Worktrees {
@@ -447,18 +468,11 @@ pub enum IpcResult {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum IpcServerMessage {
     /// Response to a request
-    Result {
+    Response {
         /// Correlation ID
-        command_id: CommandId,
-        /// Response body
-        result: IpcResult,
-    },
-    /// Error response
-    Error {
-        /// Correlation ID (`None` when unknown, e.g. before the connection is established)
-        command_id: Option<CommandId>,
-        /// Structured error
-        error: ErrorInfo,
+        request_id: CommandId,
+        /// Typed result or structured error
+        outcome: IpcOutcome,
     },
     /// Delivery of persisted events (the replay right after connecting and the
     /// realtime delivery afterwards)
@@ -500,178 +514,93 @@ mod tests {
     use crate::common::ErrorCode;
 
     #[test]
-    fn ensure_session_roundtrip() {
-        let msg = IpcClientMessage::EnsureSession {
-            command_id: "c1".into(),
-            cwd: "/Users/nazo/src/flexagent".into(),
-            agent_id: "opencode".into(),
-            extra_args: vec!["--model".into(), "sonnet".into()],
-            initial_mode: Some("plan".into()),
+    fn node_request_envelope_roundtrip() {
+        let request = IpcRequest {
+            protocol_version: IPC_PROTOCOL_VERSION,
+            request_id: "c1".into(),
+            request: IpcRequestKind::Node {
+                request: NodeRpcRequest::ProjectLink {
+                    project_id: "github.com/nazo6/flexagent".into(),
+                    local_path: "/home/nazo/src/flexagent".into(),
+                },
+            },
         };
-        let json = serde_json::to_value(&msg).unwrap();
-        assert_eq!(json["method"], "ensure_session");
-        assert_eq!(json["extra_args"][1], "sonnet");
-        assert_eq!(json["initial_mode"], "plan");
-        let decoded: IpcClientMessage = serde_json::from_value(json).unwrap();
-        assert_eq!(decoded, msg);
+        let json = serde_json::to_value(&request).unwrap();
+        assert_eq!(json["protocol_version"], IPC_PROTOCOL_VERSION);
+        assert_eq!(json["request"]["type"], "node");
+        assert_eq!(json["request"]["request"]["type"], "project_link");
+        let decoded: IpcRequest = serde_json::from_value(json).unwrap();
+        assert_eq!(decoded, request);
     }
 
     #[test]
-    fn server_message_tags() {
-        let msg = IpcServerMessage::Error {
-            command_id: None,
-            error: ErrorInfo::new(ErrorCode::NotFound, "no such session"),
+    fn local_request_envelope_roundtrip() {
+        let request = IpcRequest {
+            protocol_version: IPC_PROTOCOL_VERSION,
+            request_id: "c1".into(),
+            request: IpcRequestKind::Local {
+                request: LocalRequest::EnsureSession {
+                    command_id: "c1".into(),
+                    cwd: "/Users/nazo/src/flexagent".into(),
+                    agent_id: "opencode".into(),
+                    extra_args: vec!["--model".into(), "sonnet".into()],
+                    initial_mode: Some("plan".into()),
+                },
+            },
         };
-        let json = serde_json::to_value(&msg).unwrap();
-        assert_eq!(json["type"], "error");
-        assert_eq!(json["error"]["code"], "NOT_FOUND");
+        let json = serde_json::to_value(&request).unwrap();
+        assert_eq!(json["request"]["type"], "local");
+        assert_eq!(json["request"]["request"]["method"], "ensure_session");
+        assert_eq!(json["request"]["request"]["extra_args"][1], "sonnet");
+        let decoded: IpcRequest = serde_json::from_value(json).unwrap();
+        assert_eq!(decoded, request);
     }
 
     #[test]
-    fn project_and_worktree_methods_roundtrip() {
+    fn outcome_error_shape() {
+        let message = IpcServerMessage::Response {
+            request_id: "c1".into(),
+            outcome: IpcOutcome::Err {
+                error: ErrorInfo::new(ErrorCode::NotFound, "no such session"),
+            },
+        };
+        let json = serde_json::to_value(&message).unwrap();
+        assert_eq!(json["type"], "response");
+        assert_eq!(json["outcome"]["status"], "err");
+        assert_eq!(json["outcome"]["error"]["code"], "NOT_FOUND");
+    }
+
+    #[test]
+    fn local_worktree_requests_roundtrip() {
         let cases = vec![
-            IpcClientMessage::ProjectInfo {
+            LocalRequest::WorktreeList {
                 command_id: "c1".into(),
-                cwd: "/home/nazo/src/flexagent".into(),
-            },
-            IpcClientMessage::ProjectList {
-                command_id: "c2".into(),
-            },
-            IpcClientMessage::ProjectLink {
-                command_id: "c3".into(),
-                cwd: "/home/nazo/src/flexagent".into(),
-                project_id: "internal/tools".into(),
-            },
-            IpcClientMessage::ProjectScan {
-                command_id: "c4".into(),
-                dir: Some("/home/nazo/src".into()),
-            },
-            IpcClientMessage::WorktreeList {
-                command_id: "c5".into(),
                 cwd: Some("/home/nazo/src/flexagent".into()),
                 project_id: None,
             },
-            IpcClientMessage::WorktreeAdd {
-                command_id: "c6".into(),
+            LocalRequest::WorktreeAdd {
+                command_id: "c2".into(),
                 cwd: "/home/nazo/src/flexagent".into(),
                 project_id: None,
                 branch: "feat/auth".into(),
                 base_branch: Some("main".into()),
             },
-            IpcClientMessage::WorktreeRemove {
-                command_id: "c7".into(),
+            LocalRequest::WorktreeRemove {
+                command_id: "c3".into(),
                 cwd: "/home/nazo/src/flexagent".into(),
                 target: "feat/auth".into(),
                 force: true,
             },
-            IpcClientMessage::WorktreePrune {
-                command_id: "c8".into(),
+            LocalRequest::WorktreePrune {
+                command_id: "c4".into(),
                 cwd: "/home/nazo/src/flexagent".into(),
-            },
-            IpcClientMessage::ListSessions {
-                command_id: "c9".into(),
-                include_stopped: true,
-                include_archived: true,
-            },
-            IpcClientMessage::SessionArchive {
-                command_id: "c12".into(),
-                session_id: "3f6b6f3e".into(),
-                archived: true,
-            },
-            IpcClientMessage::SessionDelete {
-                command_id: "c13".into(),
-                session_id: "3f6b6f3e".into(),
-            },
-            IpcClientMessage::KillAll {
-                command_id: "c10".into(),
-            },
-            IpcClientMessage::AuthToken {
-                command_id: "c11".into(),
-                rotate: false,
             },
         ];
         for message in cases {
             let json = serde_json::to_value(&message).unwrap();
             assert!(json["method"].is_string(), "method tag missing: {json}");
-            let decoded: IpcClientMessage = serde_json::from_value(json).unwrap();
+            let decoded: LocalRequest = serde_json::from_value(json).unwrap();
             assert_eq!(decoded, message);
         }
-    }
-
-    #[test]
-    fn session_fork_roundtrip() {
-        let message = IpcClientMessage::SessionFork {
-            command_id: "c2".into(),
-            session_id: "s1".into(),
-            cwd: None,
-        };
-        let json = serde_json::to_value(&message).unwrap();
-        assert!(json["method"].is_string(), "method tag missing: {json}");
-        let decoded: IpcClientMessage = serde_json::from_value(json).unwrap();
-        assert_eq!(decoded, message);
-
-        let forked = IpcResult::SessionForked {
-            session_id: "child".into(),
-        };
-        let json = serde_json::to_value(&forked).unwrap();
-        assert_eq!(json["result"], "session_forked");
-        assert_eq!(serde_json::from_value::<IpcResult>(json).unwrap(), forked);
-    }
-
-    #[test]
-    fn session_resume_roundtrip() {
-        let resume = IpcClientMessage::SessionResume {
-            command_id: "c1".into(),
-            session_id: "s1".into(),
-            force_replay: true,
-        };
-        let json = serde_json::to_value(&resume).unwrap();
-        assert_eq!(json["method"], "session_resume");
-        assert_eq!(json["force_replay"], true);
-        assert_eq!(
-            serde_json::from_value::<IpcClientMessage>(json).unwrap(),
-            resume
-        );
-
-        let resumed = IpcResult::SessionResumed {
-            session_id: "s1".into(),
-            context_restored: false,
-        };
-        let json = serde_json::to_value(&resumed).unwrap();
-        assert_eq!(json["result"], "session_resumed");
-        assert_eq!(json["context_restored"], false);
-        assert_eq!(serde_json::from_value::<IpcResult>(json).unwrap(), resumed);
-    }
-
-    #[test]
-    fn extended_results_serialize() {
-        let result = IpcResult::ProjectInfo {
-            project: ProjectInfo {
-                project_id: "github.com/nazo6/flexagent".into(),
-                name: "flexagent".into(),
-                canonical_git_url: Some("git@github.com:nazo6/flexagent.git".into()),
-                git_root: Some("/home/nazo/src/flexagent".into()),
-                relative_subpath: None,
-                local_path: "/home/nazo/src/flexagent".into(),
-                is_git_repo: true,
-                identity: ProjectIdentity::git_remote(),
-            },
-        };
-        let json = serde_json::to_value(&result).unwrap();
-        assert_eq!(json["result"], "project_info");
-        assert_eq!(json["project"]["identity"]["kind"], "git_remote");
-        let decoded: IpcResult = serde_json::from_value(json).unwrap();
-        assert_eq!(decoded, result);
-
-        let added = IpcResult::WorktreeAdded {
-            path: "/home/nazo/.flexagent/worktrees/github.com-nazo6-flexagent/feat-auth".into(),
-            branch: "feat/auth".into(),
-            created: true,
-        };
-        let json = serde_json::to_value(&added).unwrap();
-        assert_eq!(json["result"], "worktree_added");
-
-        let decoded: IpcResult = serde_json::from_value(json).unwrap();
-        assert_eq!(decoded, added);
     }
 }

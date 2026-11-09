@@ -964,29 +964,66 @@ xterm互換アダプター）とノード上の ConPTY / Unix PTY
     (`$XDG_RUNTIME_DIR/fxg/daemon.sock` または `/tmp/fxg-<uid>/daemon.sock`)
 - **フレーミング**: Length-prefixed JSON（4バイトのリトルエンディアン長さヘッダ
   ＋ JSONペイロード）
+- **バージョン**: 各リクエストは `protocol_version` を持ち、デーモンは
+  `IPC_PROTOCOL_VERSION` と一致しない場合に `VERSION_MISMATCH` を返して接続を
+  閉じる。CLI とデーモンは同一 `fxg` バイナリで動作する前提。
 
-### 主なIPCメソッド
+### 4.1 リクエスト / レスポンス
 
-1. `EnsureSession { cwd, agent_id, extra_args, ... } -> { session_id, title }`:
-   - `fxg run <agent>` 実行時に呼ばれ、デーモン側でセッションを開始します。
-2. `GetLocalStatus`:
-   - ローカルで稼働中のセッション一覧、中央サーバーとのWebSocket接続状態、未送信Outboxイベント数を返却。
-3. `SessionResume { session_id, force_replay } -> { session_id, context_restored }`:
-   - 停止済みセッションを同一 `session_id` のまま再開します
-     (`fxg session resume`)。ネイティブ復元を優先し、非対応時は履歴 Replay で
-     継続します (`context_restored = false`)。稼働中の再開は `INVALID_STATE`
-     を返却します。
-   - `SendPrompt` は停止済みセッションに対してこの再開 (ネイティブ限定) を
-     自動実行してから送信します。ネイティブ復元不可の場合は `RESUME_REQUIRED`
-     を返すため、クライアントは `SessionResume` での履歴 Replay
-     再開を案内します。
-4. `SessionArchive { session_id, archived } -> { session_id, archived_at }`:
-   - セッションのアーカイブ/復元 (`fxg session archive` / `unarchive`)。
-     アーカイブは一覧からの非表示/復元のみで、イベントログは保持されます。
-5. `SessionDelete { session_id } -> { session_id }`:
-   - セッションの削除 (`fxg session delete`)。稼働中は停止を待ってから
-     `SessionDeleted` (tombstone) を追記し、本文イベントをパージします
-     (復元不能)。
-6. `ListSessions { include_stopped, include_archived }`:
-   - セッション一覧 (`fxg ps` / `fxg session list`)。削除済みは常に除外され、
-     アーカイブ済みは `include_archived` 指定時のみ含まれます。
+```rust
+pub struct IpcRequest {
+    pub protocol_version: u32,
+    pub request_id: CommandId,
+    pub request: IpcRequestKind,
+}
+
+pub enum IpcRequestKind {
+    /// Server ⇔ Node と同じ型をローカルで実行する
+    Node { request: NodeRpcRequest },
+    /// CLI 専用のクエリ / セッション操作
+    Local { request: LocalRequest },
+}
+
+pub enum IpcOutcome {
+    Ok { result: IpcResultKind },
+    Err { error: ErrorInfo },
+}
+
+pub enum IpcResultKind {
+    Node { response: NodeRpcResponse },
+    Local { result: LocalResult },
+}
+```
+
+デーモンは `IpcServerMessage::Response { request_id, outcome }` で応答する。
+`EventBatch` / `LiveStreamDelta` は従来どおり非同期でプッシュされる。
+
+### 4.2 NodeRpc として実行する操作
+
+以下は `ServerToNodeMsg::NodeRpc` と同一の `NodeRpcRequest` /
+`NodeRpcResponse` を使う。デーモンはネットワークを介さずインプロセスで
+`rpc::execute` を呼ぶ。
+
+- `ProjectLink`
+- `ProjectScan`
+- `ResumeSession`
+- `ArchiveSession`
+- `DeleteSession`
+
+エラーは `NodeRpcOutcome` と同じ `ErrorInfo` で返り、CLI 側も
+`ErrorCode` / `RecoveryAction` を受け取れる。
+
+### 4.3 CLI 専用操作 (`LocalRequest`)
+
+- **セッション**: `EnsureSession`, `SessionImport`, `SendPrompt`,
+  `RespondPermission`, `RespondElicitation`, `ControlSession`,
+  `SessionFork`, `SessionShow`
+- **照会**: `GetLocalStatus`, `Diagnostics`, `InboxList`, `ListSessions`
+- **プロジェクト**: `ProjectInfo`, `ProjectList`
+- **Worktree**: `WorktreeList`, `WorktreeAdd`, `WorktreeRemove`,
+  `WorktreePrune`（`cwd` から論理プロジェクトを解決するため CLI 専用）
+- **管理**: `KillAll`, `AuthToken`, `GitCredential`, `Ping`
+
+セッションコマンドは、Node ⇔ Server 側の `CommandResult` と共通化する
+A1.5（保留）の完了後に `NodeRpcRequest` へ移行する余地を残している。
+Worktree 操作は `cwd` 解決が必要なため、現時点ではローカルに残す。

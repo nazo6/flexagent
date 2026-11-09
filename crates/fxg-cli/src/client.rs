@@ -21,8 +21,10 @@ use fxg_protocol::common::{
 };
 use fxg_protocol::config::{env_keys, fxg_home, process_env};
 use fxg_protocol::ipc::{
-    IpcClientMessage, IpcResult, IpcServerMessage, ProjectInfo, SessionDetail,
+    IPC_PROTOCOL_VERSION, IpcOutcome, IpcRequest, IpcRequestKind, IpcResultKind, IpcServerMessage,
+    LocalRequest, LocalResult, ProjectInfo, SessionDetail,
 };
+use fxg_protocol::node_server::{NodeRpcRequest, NodeRpcResponse};
 
 /// How long to wait for a freshly spawned daemon to accept IPC connections.
 const DAEMON_START_TIMEOUT: Duration = Duration::from_secs(15);
@@ -223,13 +225,54 @@ impl DaemonClient {
         CommandId::from(format!("cli-{}-{}", std::process::id(), self.request_seq))
     }
 
-    async fn request(&mut self, message: IpcClientMessage) -> Result<IpcResult> {
+    async fn request(&mut self, message: LocalRequest) -> Result<LocalResult> {
+        let request_id = message.command_id().clone();
+        let request = IpcRequest {
+            protocol_version: IPC_PROTOCOL_VERSION,
+            request_id,
+            request: IpcRequestKind::Local { request: message },
+        };
+        let response = self.client.request(&request).await?;
+        match response {
+            IpcServerMessage::Response {
+                outcome:
+                    IpcOutcome::Ok {
+                        result: IpcResultKind::Local { result },
+                    },
+                ..
+            } => Ok(result),
+            IpcServerMessage::Response {
+                outcome: IpcOutcome::Err { error },
+                ..
+            } => bail!("{}: {}", error.code, error.message),
+            other => bail!("unexpected ipc response: {other:?}"),
+        }
+    }
+
+    /// Sends a shared node RPC over the local IPC transport.
+    async fn request_node(
+        &mut self,
+        command_id: CommandId,
+        request: NodeRpcRequest,
+    ) -> Result<NodeRpcResponse> {
+        let message = IpcRequest {
+            protocol_version: IPC_PROTOCOL_VERSION,
+            request_id: command_id,
+            request: IpcRequestKind::Node { request },
+        };
         let response = self.client.request(&message).await?;
         match response {
-            IpcServerMessage::Result { result, .. } => Ok(result),
-            IpcServerMessage::Error { error, .. } => {
-                bail!("{}: {}", error.code, error.message)
-            }
+            IpcServerMessage::Response {
+                outcome:
+                    IpcOutcome::Ok {
+                        result: IpcResultKind::Node { response },
+                    },
+                ..
+            } => Ok(response),
+            IpcServerMessage::Response {
+                outcome: IpcOutcome::Err { error },
+                ..
+            } => bail!("{}: {}", error.code, error.message),
             other => bail!("unexpected ipc response: {other:?}"),
         }
     }
@@ -238,13 +281,13 @@ impl DaemonClient {
     pub async fn project_info(&mut self, cwd: &Path) -> Result<ProjectInfo> {
         let command_id = self.command_id();
         let result = self
-            .request(IpcClientMessage::ProjectInfo {
+            .request(LocalRequest::ProjectInfo {
                 command_id,
                 cwd: path_to_string(cwd),
             })
             .await?;
         match result {
-            IpcResult::ProjectInfo { project } => Ok(project),
+            LocalResult::ProjectInfo { project } => Ok(project),
             other => bail!("unexpected ipc result: {other:?}"),
         }
     }
@@ -253,10 +296,10 @@ impl DaemonClient {
     pub async fn list_projects(&mut self) -> Result<Vec<ProjectSummary>> {
         let command_id = self.command_id();
         let result = self
-            .request(IpcClientMessage::ProjectList { command_id })
+            .request(LocalRequest::ProjectList { command_id })
             .await?;
         match result {
-            IpcResult::Projects { projects } => Ok(projects),
+            LocalResult::Projects { projects } => Ok(projects),
             other => bail!("unexpected ipc result: {other:?}"),
         }
     }
@@ -264,14 +307,22 @@ impl DaemonClient {
     /// `fxg project link`
     pub async fn link_project(&mut self, cwd: &Path, project_id: &str) -> Result<Option<String>> {
         let command_id = self.command_id();
-        let result = self
-            .request(IpcClientMessage::ProjectLink {
+        let response = self
+            .request_node(
                 command_id,
-                cwd: path_to_string(cwd),
-                project_id: project_id.into(),
-            })
+                NodeRpcRequest::ProjectLink {
+                    project_id: project_id.into(),
+                    local_path: path_to_string(cwd),
+                },
+            )
             .await?;
-        ack_message(result)
+        match response {
+            NodeRpcResponse::ProjectLink { response } => Ok(Some(format!(
+                "linked {} to {}",
+                response.local_path, response.project_id
+            ))),
+            other => bail!("unexpected ipc result: {other:?}"),
+        }
     }
 
     /// `fxg project scan`
@@ -280,14 +331,13 @@ impl DaemonClient {
         dir: Option<String>,
     ) -> Result<(Vec<ProjectSummary>, Vec<String>)> {
         let command_id = self.command_id();
-        let result = self
-            .request(IpcClientMessage::ProjectScan { command_id, dir })
+        let response = self
+            .request_node(command_id, NodeRpcRequest::ProjectScan { dir })
             .await?;
-        match result {
-            IpcResult::ProjectScan {
-                projects,
-                scanned_dirs,
-            } => Ok((projects, scanned_dirs)),
+        match response {
+            NodeRpcResponse::ProjectScan { response } => {
+                Ok((response.projects, response.scanned_dirs))
+            }
             other => bail!("unexpected ipc result: {other:?}"),
         }
     }
@@ -300,14 +350,14 @@ impl DaemonClient {
     ) -> Result<Vec<WorktreeInfo>> {
         let command_id = self.command_id();
         let result = self
-            .request(IpcClientMessage::WorktreeList {
+            .request(LocalRequest::WorktreeList {
                 command_id,
                 cwd,
                 project_id: project_id.map(fxg_protocol::ProjectId::from),
             })
             .await?;
         match result {
-            IpcResult::Worktrees { worktrees } => Ok(worktrees),
+            LocalResult::Worktrees { worktrees } => Ok(worktrees),
             other => bail!("unexpected ipc result: {other:?}"),
         }
     }
@@ -323,7 +373,7 @@ impl DaemonClient {
     ) -> Result<(String, String, bool)> {
         let command_id = self.command_id();
         let result = self
-            .request(IpcClientMessage::WorktreeAdd {
+            .request(LocalRequest::WorktreeAdd {
                 command_id,
                 cwd: path_to_string(cwd),
                 project_id: project_id.map(fxg_protocol::ProjectId::from),
@@ -332,7 +382,7 @@ impl DaemonClient {
             })
             .await?;
         match result {
-            IpcResult::WorktreeAdded {
+            LocalResult::WorktreeAdded {
                 path,
                 branch,
                 created,
@@ -350,7 +400,7 @@ impl DaemonClient {
     ) -> Result<Option<String>> {
         let command_id = self.command_id();
         let result = self
-            .request(IpcClientMessage::WorktreeRemove {
+            .request(LocalRequest::WorktreeRemove {
                 command_id,
                 cwd: path_to_string(cwd),
                 target: target.to_owned(),
@@ -364,7 +414,7 @@ impl DaemonClient {
     pub async fn prune_worktrees(&mut self, cwd: &Path) -> Result<Option<String>> {
         let command_id = self.command_id();
         let result = self
-            .request(IpcClientMessage::WorktreePrune {
+            .request(LocalRequest::WorktreePrune {
                 command_id,
                 cwd: path_to_string(cwd),
             })
@@ -380,14 +430,14 @@ impl DaemonClient {
     ) -> Result<Vec<SessionSummary>> {
         let command_id = self.command_id();
         let result = self
-            .request(IpcClientMessage::ListSessions {
+            .request(LocalRequest::ListSessions {
                 command_id,
                 include_stopped,
                 include_archived,
             })
             .await?;
         match result {
-            IpcResult::Sessions { sessions } => Ok(sessions),
+            LocalResult::Sessions { sessions } => Ok(sessions),
             other => bail!("unexpected ipc result: {other:?}"),
         }
     }
@@ -401,15 +451,17 @@ impl DaemonClient {
         archived: bool,
     ) -> Result<Option<i64>> {
         let command_id = self.command_id();
-        let result = self
-            .request(IpcClientMessage::SessionArchive {
+        let response = self
+            .request_node(
                 command_id,
-                session_id: session_id.into(),
-                archived,
-            })
+                NodeRpcRequest::ArchiveSession {
+                    session_id: session_id.into(),
+                    archived,
+                },
+            )
             .await?;
-        match result {
-            IpcResult::SessionArchived { archived_at, .. } => Ok(archived_at),
+        match response {
+            NodeRpcResponse::Archive { archived_at } => Ok(archived_at),
             other => bail!("unexpected ipc result: {other:?}"),
         }
     }
@@ -417,14 +469,16 @@ impl DaemonClient {
     /// `fxg session delete` — delete a session (purges event bodies; irreversible).
     pub async fn delete_session(&mut self, session_id: &str) -> Result<()> {
         let command_id = self.command_id();
-        let result = self
-            .request(IpcClientMessage::SessionDelete {
+        let response = self
+            .request_node(
                 command_id,
-                session_id: session_id.into(),
-            })
+                NodeRpcRequest::DeleteSession {
+                    session_id: session_id.into(),
+                },
+            )
             .await?;
-        match result {
-            IpcResult::SessionDeleted { .. } => Ok(()),
+        match response {
+            NodeRpcResponse::Delete => Ok(()),
             other => bail!("unexpected ipc result: {other:?}"),
         }
     }
@@ -432,11 +486,9 @@ impl DaemonClient {
     /// `fxg kill-all`
     pub async fn kill_all(&mut self) -> Result<(Vec<String>, Vec<String>)> {
         let command_id = self.command_id();
-        let result = self
-            .request(IpcClientMessage::KillAll { command_id })
-            .await?;
+        let result = self.request(LocalRequest::KillAll { command_id }).await?;
         match result {
-            IpcResult::KillAll {
+            LocalResult::KillAll {
                 killed_sessions,
                 killed_ptys,
             } => Ok((killed_sessions, killed_ptys)),
@@ -448,10 +500,10 @@ impl DaemonClient {
     pub async fn auth_token(&mut self, rotate: bool) -> Result<String> {
         let command_id = self.command_id();
         let result = self
-            .request(IpcClientMessage::AuthToken { command_id, rotate })
+            .request(LocalRequest::AuthToken { command_id, rotate })
             .await?;
         match result {
-            IpcResult::AuthToken { token } => Ok(token),
+            LocalResult::AuthToken { token } => Ok(token),
             other => bail!("unexpected ipc result: {other:?}"),
         }
     }
@@ -466,13 +518,13 @@ impl DaemonClient {
     ) -> Result<(String, Option<String>, Option<String>)> {
         let command_id = self.command_id();
         let result = self
-            .request(IpcClientMessage::GitCredential {
+            .request(LocalRequest::GitCredential {
                 command_id,
                 prompt: prompt.to_owned(),
             })
             .await?;
         match result {
-            IpcResult::GitCredential {
+            LocalResult::GitCredential {
                 username,
                 token,
                 error,
@@ -491,7 +543,7 @@ impl DaemonClient {
     ) -> Result<String> {
         let command_id = self.command_id();
         let result = self
-            .request(IpcClientMessage::EnsureSession {
+            .request(LocalRequest::EnsureSession {
                 command_id,
                 cwd: path_to_string(cwd),
                 agent_id: agent_id.to_owned(),
@@ -500,7 +552,7 @@ impl DaemonClient {
             })
             .await?;
         match result {
-            IpcResult::EnsureSession { session_id } => Ok(session_id.to_string()),
+            LocalResult::EnsureSession { session_id } => Ok(session_id.to_string()),
             other => bail!("unexpected ipc result: {other:?}"),
         }
     }
@@ -515,7 +567,7 @@ impl DaemonClient {
     ) -> Result<String> {
         let command_id = self.command_id();
         let result = self
-            .request(IpcClientMessage::SessionImport {
+            .request(LocalRequest::SessionImport {
                 command_id,
                 agent_id: agent_id.to_owned(),
                 agent_session_id: agent_session_id.to_owned(),
@@ -524,7 +576,7 @@ impl DaemonClient {
             })
             .await?;
         match result {
-            IpcResult::SessionImported { session_id } => Ok(session_id.to_string()),
+            LocalResult::SessionImported { session_id } => Ok(session_id.to_string()),
             other => bail!("unexpected ipc result: {other:?}"),
         }
     }
@@ -533,10 +585,10 @@ impl DaemonClient {
     pub async fn diagnostics(&mut self) -> Result<DiagnosticsResponse> {
         let command_id = self.command_id();
         let result = self
-            .request(IpcClientMessage::Diagnostics { command_id })
+            .request(LocalRequest::Diagnostics { command_id })
             .await?;
         match result {
-            IpcResult::Diagnostics { diagnostics } => Ok(diagnostics),
+            LocalResult::Diagnostics { diagnostics } => Ok(diagnostics),
             other => bail!("unexpected ipc result: {other:?}"),
         }
     }
@@ -550,7 +602,7 @@ impl DaemonClient {
     ) -> Result<()> {
         let command_id = self.command_id();
         let result = self
-            .request(IpcClientMessage::SendPrompt {
+            .request(LocalRequest::SendPrompt {
                 command_id,
                 session_id: session_id.into(),
                 input: input.clone(),
@@ -570,7 +622,7 @@ impl DaemonClient {
     ) -> Result<()> {
         let command_id = self.command_id();
         let result = self
-            .request(IpcClientMessage::RespondPermission {
+            .request(LocalRequest::RespondPermission {
                 command_id,
                 session_id: session_id.into(),
                 request_id: request_id.to_owned(),
@@ -590,7 +642,7 @@ impl DaemonClient {
     ) -> Result<()> {
         let command_id = self.command_id();
         let result = self
-            .request(IpcClientMessage::ControlSession {
+            .request(LocalRequest::ControlSession {
                 command_id,
                 session_id: session_id.into(),
                 action,
@@ -608,14 +660,14 @@ impl DaemonClient {
     ) -> Result<SessionDetail> {
         let command_id = self.command_id();
         let result = self
-            .request(IpcClientMessage::SessionShow {
+            .request(LocalRequest::SessionShow {
                 command_id,
                 session_id: session_id.into(),
                 recent_events,
             })
             .await?;
         match result {
-            IpcResult::SessionDetail(detail) => Ok(*detail),
+            LocalResult::SessionDetail(detail) => Ok(*detail),
             other => bail!("unexpected ipc result: {other:?}"),
         }
     }
@@ -623,11 +675,9 @@ impl DaemonClient {
     /// `fxg inbox list`
     pub async fn inbox_list(&mut self) -> Result<Vec<PermissionRequestEntry>> {
         let command_id = self.command_id();
-        let result = self
-            .request(IpcClientMessage::InboxList { command_id })
-            .await?;
+        let result = self.request(LocalRequest::InboxList { command_id }).await?;
         match result {
-            IpcResult::Inbox { requests, .. } => Ok(requests),
+            LocalResult::Inbox { requests, .. } => Ok(requests),
             other => bail!("unexpected ipc result: {other:?}"),
         }
     }
@@ -635,11 +685,9 @@ impl DaemonClient {
     /// List of the questions (elicitations) from `fxg inbox list`.
     pub async fn inbox_elicitations(&mut self) -> Result<Vec<ElicitationRequestEntry>> {
         let command_id = self.command_id();
-        let result = self
-            .request(IpcClientMessage::InboxList { command_id })
-            .await?;
+        let result = self.request(LocalRequest::InboxList { command_id }).await?;
         match result {
-            IpcResult::Inbox { elicitations, .. } => Ok(elicitations),
+            LocalResult::Inbox { elicitations, .. } => Ok(elicitations),
             other => bail!("unexpected ipc result: {other:?}"),
         }
     }
@@ -654,7 +702,7 @@ impl DaemonClient {
     ) -> Result<()> {
         let command_id = self.command_id();
         let result = self
-            .request(IpcClientMessage::RespondElicitation {
+            .request(LocalRequest::RespondElicitation {
                 command_id,
                 session_id: session_id.into(),
                 elicitation_id: elicitation_id.to_owned(),
@@ -671,14 +719,14 @@ impl DaemonClient {
     pub async fn fork_session(&mut self, session_id: &str, cwd: Option<&Path>) -> Result<String> {
         let command_id = self.command_id();
         let result = self
-            .request(IpcClientMessage::SessionFork {
+            .request(LocalRequest::SessionFork {
                 command_id,
                 session_id: session_id.into(),
                 cwd: cwd.map(path_to_string),
             })
             .await?;
         match result {
-            IpcResult::SessionForked { session_id } => Ok(session_id.to_string()),
+            LocalResult::SessionForked { session_id } => Ok(session_id.to_string()),
             other => bail!("unexpected ipc result: {other:?}"),
         }
     }
@@ -689,17 +737,17 @@ impl DaemonClient {
     /// false` the session continues by replaying its history.
     pub async fn resume_session(&mut self, session_id: &str, force_replay: bool) -> Result<bool> {
         let command_id = self.command_id();
-        let result = self
-            .request(IpcClientMessage::SessionResume {
+        let response = self
+            .request_node(
                 command_id,
-                session_id: session_id.into(),
-                force_replay,
-            })
+                NodeRpcRequest::ResumeSession {
+                    session_id: session_id.into(),
+                    force_replay,
+                },
+            )
             .await?;
-        match result {
-            IpcResult::SessionResumed {
-                context_restored, ..
-            } => Ok(context_restored),
+        match response {
+            NodeRpcResponse::Resume { context_restored } => Ok(context_restored),
             other => bail!("unexpected ipc result: {other:?}"),
         }
     }
@@ -707,10 +755,10 @@ impl DaemonClient {
 
 /// Normalize a simple success response (`Ack` / acceptance of an async
 /// command) into an optional message.
-fn ack_message(result: IpcResult) -> Result<Option<String>> {
+fn ack_message(result: LocalResult) -> Result<Option<String>> {
     match result {
-        IpcResult::Ack { message } => Ok(message),
-        IpcResult::CommandAccepted { .. } => Ok(None),
+        LocalResult::Ack { message } => Ok(message),
+        LocalResult::CommandAccepted { .. } => Ok(None),
         other => bail!("unexpected ipc result: {other:?}"),
     }
 }
@@ -835,7 +883,7 @@ mod tests {
     #[test]
     fn treats_ack_and_command_accepted_as_success() {
         assert_eq!(
-            ack_message(IpcResult::Ack {
+            ack_message(LocalResult::Ack {
                 message: Some("done".to_owned()),
             })
             .expect("ack"),
@@ -844,7 +892,7 @@ mod tests {
         // Acceptance of an async command (`SendPrompt` / `RespondPermission` /
         // `ControlSession`)
         assert_eq!(
-            ack_message(IpcResult::CommandAccepted {
+            ack_message(LocalResult::CommandAccepted {
                 session_id: Some("s1".into()),
             })
             .expect("command accepted"),
@@ -852,7 +900,7 @@ mod tests {
         );
         // Any other response is unexpected and must fail.
         assert!(
-            ack_message(IpcResult::Inbox {
+            ack_message(LocalResult::Inbox {
                 requests: Vec::new(),
                 elicitations: Vec::new(),
             })

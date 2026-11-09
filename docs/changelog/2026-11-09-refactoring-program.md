@@ -1,7 +1,7 @@
 # リファクタリング・プログラム（API統合・モジュール分割）
 
 - **日付**: 2026-11-09
-- **ステータス**: 進行中（B0 / B1 / A1 / A2 / A3 完了、次は B4a / A4）
+- **ステータス**: 進行中（B0 / B1 / A1 / A2 / A3 / A4 完了、次は B2 / B3 / B4）
 - **統合元**: 同日に別々に作成した「API・プロトコル統合リファクタリング計画」と
   「コードベース全体リファクタリング・モジュール分割計画」を1本化した
 - **対象パッケージ**: `fxg-protocol`, `fxg-db`, `fxg-acp`, `fxg-node`,
@@ -556,9 +556,10 @@ relay 元を記録する）。A2 では設定・秘密・`browse_fs` のノー�
 
 ### A4: CLI IPC
 
-- [ ] `IpcClientMessage` / `IpcResult` を `NodeRpc` 体系へ統合
-- [ ] `daemon/ipc.rs` の専用ディスパッチャを共通ハンドラへ統合
-- [ ] ローカル IPC のバージョン検査を追加
+- [x] `IpcClientMessage` / `IpcResult` を `IpcRequest` / `LocalRequest` / `LocalResult` と `NodeRpc` 体系へ統合
+- [x] `daemon/ipc.rs` の Node 操作を `rpc::execute` へ委譲（ローカル専用操作は `dispatch_local` に分離）
+- [x] ローカル IPC のバージョン検査を追加（`IPC_PROTOCOL_VERSION`、不一致は `VERSION_MISMATCH`）
+- [ ] `commands.rs` の純粋分割（B4a。A4 では commands.rs を変更しなかったため独立して実施可能）
 
 ### B2: `fxg-server`
 
@@ -659,3 +660,15 @@ relay 元を記録する）。A2 では設定・秘密・`browse_fs` のノー�
   （`already_resolved` を返す冪等 API）へ移行した。
 - **2026-11-09 (A3 実装)**: `/api/v1/search` を `GET ?q=...&limit=...` に統一し、
   JSON body との二重受け付けを廃止した。
+- **2026-11-09 (A4 実装)**: ローカル IPC を `IpcRequest`（`protocol_version` +
+  `request_id`）で包み、`NodeRpcRequest` と CLI 専用の `LocalRequest` を
+  `IpcRequestKind` で分岐する形にした。`IpcClientMessage` / `IpcResult` は廃止。
+- **2026-11-09 (A4 実装)**: `ProjectLink` / `ProjectScan` / `SessionResume` /
+  `SessionArchive` / `SessionDelete` は `NodeRpcRequest` をローカル実行する
+  経路に移行し、`LocalResult` から重複した結果型を削除した。
+- **2026-11-09 (A4 実装)**: `IPC_PROTOCOL_VERSION` を追加し、不一致時は
+  `VERSION_MISMATCH` を返して接続を閉じる。CLI とデーモンのバージョンずれを
+  明確に検出できる。
+- **2026-11-09 (A4 補足)**: `SendPrompt` / `RespondPermission` /
+  `RespondElicitation` / `ControlSession` は A1.5 が保留のため `LocalRequest`
+  に残した。Worktree 操作は `cwd` からプロジェクトを解決するためローカルのまま。
