@@ -1,7 +1,7 @@
 # リファクタリング・プログラム（API統合・モジュール分割）
 
 - **日付**: 2026-11-09
-- **ステータス**: 進行中（B0 / B1 / A1 / A2 / A3 / A4 / B2 完了、次は B3 / B4）
+- **ステータス**: 進行中（B0 / B1 / A1 / A2 / A3 / A4 / B2 / B3 完了、次は B4）
 - **統合元**: 同日に別々に作成した「API・プロトコル統合リファクタリング計画」と
   「コードベース全体リファクタリング・モジュール分割計画」を1本化した
 - **対象パッケージ**: `fxg-protocol`, `fxg-db`, `fxg-acp`, `fxg-node`,
@@ -426,17 +426,21 @@ relay 元を記録する）。A2 では設定・秘密・`browse_fs` のノー�
 
 ### 4.4 B3: `fxg-acp` と `fxg-node` の分割
 
-- `acp/mod.rs`: `AcpDriver` の公開 API
-- `acp/client.rs`: ACP Client トレイト実装・コールバック
-- `acp/process.rs`: 子プロセス・stderr 収集・認証検知
-- `acp/mapping.rs`: ToolCall / Plan / Config / Elicitation の型変換
+- `acp/mod.rs`: `AcpDriver` の公開 API・`StderrRegistry`・セッション共通型
+- `acp/client.rs`: `ActiveSessionHandle` 実装・常駐プロセスループ（ACP Client コールバック）
+- `acp/process.rs`: `ProcessHandle` / `ProcessLease`・プロセス起動・Warm Pool 連携
+- `acp/session.rs`: セッション生成 / `session/resume` / `session/load` / native fork
+- `acp/mapping.rs`: session update・ToolCall・Plan・Config・Elicitation の型変換
+- `acp/terminal.rs`: `terminal/*` レジストリと Elicitation 内容の検証
 - `acp/tests.rs`
 
-- `session_manager/mod.rs`
+- `session_manager/mod.rs`: `SessionManager` の型・構築・照会
 - `session_manager/lifecycle.rs`: start / resume / fork / archive / delete
-- `session_manager/stream.rs`: チャンク結合・500ms フラッシュ・永続化
-- `session_manager/approval.rs`: `PermissionPolicy` / Elicitation 応答
-- `session_manager/replay.rs`: 履歴リプレイ構築
+- `session_manager/prompt.rs`: プロンプト送信・ターン開始・キュー処理
+- `session_manager/stream.rs`: イベントポンプ・ステータス遷移
+- `session_manager/approval.rs`: Permission / Elicitation 応答
+- `session_manager/replay.rs`: 履歴リプレイコンテキスト構築
+- `session_manager/tests.rs`
 
 子モジュールは親モジュールの private フィールドを参照できるため、
 `impl` ブロックの分割だけで済む。テストは移動先のモジュールへ移す。
@@ -573,8 +577,8 @@ relay 元を記録する）。A2 では設定・秘密・`browse_fs` のノー�
 
 ### B3: `fxg-acp` / `fxg-node`
 
-- [ ] `acp.rs` を `client` / `process` / `mapping` / `tests` に分割
-- [ ] `session_manager.rs` を `lifecycle` / `stream` / `approval` / `replay` に分割
+- [x] `acp.rs` を `client` / `process` / `session` / `mapping` / `terminal` / `tests` に分割
+- [x] `session_manager.rs` を `lifecycle` / `prompt` / `stream` / `approval` / `replay` / `tests` に分割
 
 ### B4: CLI / UI
 
@@ -690,3 +694,16 @@ relay 元を記録する）。A2 では設定・秘密・`browse_fs` のノー�
   分割した。`mod.rs` はルーター・`ClientApiState`・WS 共通ヘルパー、
   `error.rs` は `ApiError` と `ErrorCode` → HTTP status 変換、`backend.rs` は
   `ClientApiBackend` と関連型を持つ。ルート定義は分割前と同一。
+- **2026-11-09 (B3 実装)**: `acp.rs` を `acp/{mod,client,process,session,mapping,terminal,tests}.rs`
+  に分割した。`client.rs` は常駐プロセスループと ACP Client コールバック、
+  `session.rs` はセッション取得（new / resume / load / native fork）、
+  `terminal.rs` は `terminal/*` と Elicitation 検証を持つ。計画の `client` と
+  `process` の境界は、コールバックが `run_acp_process` 内にインラインで
+  書かれている実装に合わせて調整した。
+- **2026-11-09 (B3 実装)**: `session_manager.rs` を
+  `session_manager/{mod,lifecycle,prompt,stream,approval,replay,tests}.rs` に
+  分割した。計画の `stream` からプロンプト送信・キュー処理を独立させ、
+  `prompt.rs` を追加している（`stream.rs` はイベントポンプとステータス遷移に限定）。
+- **2026-11-09 (B3 実装)**: 子モジュール間で共有する型・メソッドは
+  `pub(super)` とし、公開 API は変更していない。`#[cfg(test)] mod tests;` を
+  各親モジュールに置き、テストは移動先の兄弟モジュールを glob import する。
