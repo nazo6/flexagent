@@ -15,6 +15,13 @@ use crate::common::{
 };
 use crate::events::SessionEventEnvelope;
 use crate::{CommandId, NodeId, ProjectId, SessionId};
+
+/// Version of the node <-> server message set.
+///
+/// The node and the central server must come from the same `fxg` release. A node
+/// with an older protocol is rejected at `NodeHello`; backward compatibility
+/// shims are intentionally not provided.
+pub const PROTOCOL_VERSION: u32 = 1;
 /// Synchronization state of a session held by the node (reported in `NodeHello`).
 ///
 /// The hub compares it with `last_node_seq` in its own DB and returns
@@ -56,6 +63,9 @@ pub enum NodeToServerMsg {
         arch: String,
         /// fxg binary version
         version: String,
+        /// Protocol version of the message set (missing on pre-version nodes = 0)
+        #[serde(default)]
+        protocol_version: u32,
         /// Whether this is an ephemeral VM / container node
         is_ephemeral: bool,
         /// Agent IDs available on this node
@@ -585,6 +595,7 @@ mod tests {
             os: "windows".into(),
             arch: "x86_64".into(),
             version: "0.1.0".into(),
+            protocol_version: PROTOCOL_VERSION,
             is_ephemeral: false,
             installed_agents: vec!["opencode2".into()],
             projects: vec![],
@@ -601,6 +612,34 @@ mod tests {
         assert_eq!(json["sessions"][0]["last_node_seq"], 3);
         let decoded: NodeToServerMsg = serde_json::from_value(json).unwrap();
         assert_eq!(decoded, msg);
+    }
+
+    #[test]
+    fn node_hello_without_protocol_version_decodes_as_zero() {
+        let msg = NodeToServerMsg::NodeHello {
+            node_id: "home-win".into(),
+            name: "Home Windows PC".into(),
+            os: "linux".into(),
+            arch: "x86_64".into(),
+            version: "0.1.0".into(),
+            protocol_version: PROTOCOL_VERSION,
+            is_ephemeral: false,
+            installed_agents: vec![],
+            projects: vec![],
+            projects_complete: true,
+            state_revision: 0,
+            sessions: vec![],
+        };
+        let mut json = serde_json::to_value(&msg).unwrap();
+        json.as_object_mut().unwrap().remove("protocol_version");
+        let decoded: NodeToServerMsg = serde_json::from_value(json).unwrap();
+        let NodeToServerMsg::NodeHello {
+            protocol_version, ..
+        } = decoded
+        else {
+            panic!("expected node hello");
+        };
+        assert_eq!(protocol_version, 0);
     }
 
     #[test]

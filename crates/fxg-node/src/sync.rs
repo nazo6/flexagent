@@ -262,6 +262,7 @@ pub(crate) async fn build_hello(state: &DaemonState) -> NodeToServerMsg {
         os: std::env::consts::OS.to_owned(),
         arch: std::env::consts::ARCH.to_owned(),
         version: VERSION.to_owned(),
+        protocol_version: fxg_protocol::node_server::PROTOCOL_VERSION,
         is_ephemeral: state.config().ephemeral,
         installed_agents: state.installed_agents().await,
         projects,

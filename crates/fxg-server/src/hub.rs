@@ -987,6 +987,7 @@ async fn handle_node_connection(state: ServerState, token_owner: String, socket:
         os,
         arch,
         version,
+        protocol_version,
         is_ephemeral,
         installed_agents,
         projects,
@@ -997,6 +998,18 @@ async fn handle_node_connection(state: ServerState, token_owner: String, socket:
     else {
         unreachable!("hello was matched above");
     };
+
+    // Reject nodes from a different protocol generation before sending any RPC.
+    if protocol_version < fxg_protocol::node_server::PROTOCOL_VERSION {
+        tracing::error!(
+            node_id = node_id.as_str(),
+            protocol_version,
+            required = fxg_protocol::node_server::PROTOCOL_VERSION,
+            "node protocol version is too old; upgrade fxg on the node"
+        );
+        fxg_protocol::discard_with!(sender.close().await, "close the node websocket");
+        return;
+    }
 
     // Reject impersonation: NodeHello.node_id must match the token owner
     if node_id.as_str() != token_owner {
@@ -1159,6 +1172,7 @@ async fn handle_node_message_value(
             os,
             arch,
             version,
+            protocol_version,
             is_ephemeral,
             installed_agents,
             projects,
@@ -1172,6 +1186,15 @@ async fn handle_node_message_value(
                     node_id = node_id.as_str(),
                     hello_node_id = hello_node_id.as_str(),
                     "node hello node_id mismatch; ignoring"
+                );
+                return;
+            }
+            if protocol_version < fxg_protocol::node_server::PROTOCOL_VERSION {
+                tracing::error!(
+                    node_id = node_id.as_str(),
+                    protocol_version,
+                    required = fxg_protocol::node_server::PROTOCOL_VERSION,
+                    "node protocol version is too old; ignoring hello"
                 );
                 return;
             }
