@@ -14,6 +14,7 @@ node_modules/
 ui/.svelte-kit/
 ui/build/
 ui/.vite/
+ui/project.inlang/cache/
 
 # OS
 .DS_Store
