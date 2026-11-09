@@ -158,20 +158,20 @@
     <div class="flex min-w-0 flex-col gap-1">
       <div class="flex items-center gap-2">
         <CircleHelpIcon class="text-muted-foreground size-4 shrink-0" />
-        <span class="text-ui font-medium">{m.chat_elicitation_heading()}</span>
+        <span class="text-[13px] font-medium">{m.chat_elicitation_heading()}</span>
         {#if resolved}
           <Badge variant="secondary">
             {resolvedLabel[resolved.action]} ({resolved.resolvedBy})
           </Badge>
         {:else if createdAt !== null}
-          <span class="text-muted-foreground text-ui">{formatRelativeTime(createdAt)}</span>
+          <span class="text-muted-foreground text-[13px]">{formatRelativeTime(createdAt)}</span>
         {/if}
       </div>
       <p class="text-sm break-words">{message}</p>
     </div>
     <a
       href={`/sessions/${sessionId}`}
-      class="text-muted-foreground hover:text-foreground flex shrink-0 items-center gap-0.5 text-ui"
+      class="text-muted-foreground hover:text-foreground flex shrink-0 items-center gap-0.5 text-[13px]"
     >
       {m.chat_open_session()}
       <ChevronRightIcon class="size-3" />
@@ -188,7 +188,7 @@
             {#if required.has(key)}<span class="text-destructive">*</span>{/if}
           </Label>
           {#if property.description}
-            <p class="text-muted-foreground text-ui">{property.description}</p>
+            <p class="text-muted-foreground text-[13px]">{property.description}</p>
           {/if}
           {#if property.enum || property.oneOf}
             <select

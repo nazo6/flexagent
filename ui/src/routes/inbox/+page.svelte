@@ -29,7 +29,7 @@
   <div class="flex flex-wrap items-end justify-between gap-3">
     <div class="flex flex-col gap-1">
       <h1 class="text-xl font-semibold tracking-tight">{m.inbox_title()}</h1>
-      <p class="text-muted-foreground text-ui">
+      <p class="text-muted-foreground text-[13px]">
         {m.inbox_subtitle()}
       </p>
     </div>
@@ -45,7 +45,7 @@
     <div
       class="border-danger/30 bg-danger-soft/50 flex flex-col items-start gap-2 rounded-lg border p-3"
     >
-      <p class="text-danger text-ui">
+      <p class="text-danger text-[13px]">
         {m.common_load_failed()}
         {sync.inboxError}
       </p>
@@ -58,18 +58,18 @@
     <section class="flex flex-col gap-2">
       <div class="flex items-center justify-between">
         <h2 class="desk-label">{m.inbox_approvals()}</h2>
-        <span class="text-muted-foreground desk-mono text-2xs">{sorted.length}</span>
+        <span class="text-muted-foreground desk-mono text-[11px]">{sorted.length}</span>
       </div>
       {#if sorted.length === 0}
-        <p class="text-muted-foreground text-ui">{m.inbox_approvals_empty()}</p>
+        <p class="text-muted-foreground text-[13px]">{m.inbox_approvals_empty()}</p>
       {:else}
         <ul class="border-border flex list-none flex-col border-t p-0">
           {#each sorted as request (request.request_id)}
             <li class="border-border border-b py-4">
-              <div class="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-2xs">
+              <div class="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]">
                 <a
                   href={`/sessions/${request.session_id}`}
-                  class="text-ui font-medium hover:underline"
+                  class="text-[13px] font-medium hover:underline"
                 >
                   {sessionTitle(request.session_id)}
                 </a>
@@ -97,18 +97,18 @@
     <section class="flex flex-col gap-2">
       <div class="flex items-center justify-between">
         <h2 class="desk-label">{m.inbox_questions()}</h2>
-        <span class="text-muted-foreground desk-mono text-2xs">{sortedElicitations.length}</span>
+        <span class="text-muted-foreground desk-mono text-[11px]">{sortedElicitations.length}</span>
       </div>
       {#if sortedElicitations.length === 0}
-        <p class="text-muted-foreground text-ui">{m.inbox_questions_empty()}</p>
+        <p class="text-muted-foreground text-[13px]">{m.inbox_questions_empty()}</p>
       {:else}
         <ul class="border-border flex list-none flex-col border-t p-0">
           {#each sortedElicitations as elicitation (elicitation.elicitation_id)}
             <li class="border-border border-b py-4">
-              <div class="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-2xs">
+              <div class="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]">
                 <a
                   href={`/sessions/${elicitation.session_id}`}
-                  class="text-ui font-medium hover:underline"
+                  class="text-[13px] font-medium hover:underline"
                 >
                   {sessionTitle(elicitation.session_id)}
                 </a>

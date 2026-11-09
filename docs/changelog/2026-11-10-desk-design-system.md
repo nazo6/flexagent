@@ -62,9 +62,9 @@ shadcn-svelte コンポーネントの挙動を変えずに配色だけを載せ
 - `ui/src/app.html` の初回描画前にパレットを適用し、色のフラッシュを防ぐ。
 - `ui/static/manifest.webmanifest` の `background_color` / `theme_color` を
   Desk の canvas に更新。
-- Settings に **Appearance** タブを追加し、light / dark / system と
-  Bone / Graphite / Moss を同じ場所で選択できるようにした。Browser タブは
-  pinned sessions のみに整理。
+- Settings の **Browser** タブに Theme と Color palette を統合し、light /
+  dark / system と Bone / Graphite / Moss を同じ場所で選択できるようにした。
+  同タブに pinned sessions も残し、独立した Appearance タブは作らない。
 
 ### Shell / 画面
 
@@ -77,7 +77,10 @@ shadcn-svelte コンポーネントの挙動を変えずに配色だけを載せ
   質問は signal の左ルール。
 - **Composer**: 新規・既存で共通。12px 角丸、1px 線、signal のフォーカス
   リング、ink の送信ボタン。停止・再開・権限の通知は warn / danger の
-  インライン callout に統一。
+  インライン callout に統一。ツールバーは 28px 高・12px 文字に揃え、
+  Auto / Compact / 添付 / 送信をモデルセレクタと同じサイズにした。
+  さらにツールバーを折り返さず、左の可変グループと右の固定アクションに
+  分けて二列化を防ぐ。
 - **New session**: 既存の composer 中心レイアウトを維持しつつ、ヒーローの
   アイコンを signal-soft、説明を 13px、callout を warn / danger に統一。
 - **Projects**: カードをやめてヘアラインの行に。repo / path は mono、
@@ -105,8 +108,10 @@ shadcn-svelte コンポーネントの挙動を変えずに配色だけを載せ
 - `mise run check:ui`（svelte-check / tsc）
 - `mise run test:ui`（91 tests）
 - `mise run build:ui`
-- ブラウザで light / dark × Bone / Graphite / Moss、Appearance タブの
-  切り替え、リロード後の永続化、`theme-color` の追従を確認。
+- ブラウザで light / dark × Bone / Graphite / Moss、Browser タブ内の
+  Theme / palette 切り替え、リロード後の永続化、`theme-color` の追従を確認。
+- Composer のツールバーが 1 行に収まり、light / dark で同じ高さ・文字サイズに
+  なることを確認。
 
 ## 注意・今後
 

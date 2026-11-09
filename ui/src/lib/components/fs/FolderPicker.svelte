@@ -173,14 +173,14 @@
       <Input
         bind:value={inputPath}
         placeholder={m.fs_path_placeholder()}
-        class="h-8 min-w-0 flex-1 font-mono text-ui"
+        class="h-8 min-w-0 flex-1 font-mono text-[13px]"
         disabled={loading}
       />
       <Button
         type="submit"
         variant="secondary"
         size="sm"
-        class="h-8 shrink-0 px-2 text-ui"
+        class="h-8 shrink-0 px-2 text-[13px]"
         disabled={loading || !inputPath.trim()}
         title={m.fs_go_to_path()}
       >
@@ -201,7 +201,7 @@
 
   {#if breadcrumbs.length > 0}
     <div
-      class="flex flex-nowrap items-center gap-0.5 overflow-x-auto font-mono text-2xs whitespace-nowrap"
+      class="flex flex-nowrap items-center gap-0.5 overflow-x-auto font-mono text-[11px] whitespace-nowrap"
     >
       {#each breadcrumbs as crumb, index (crumb.path)}
         {#if index > 0}
@@ -221,11 +221,11 @@
 
   {#if quickPaths.length > 0}
     <div class="flex flex-nowrap items-center gap-1 overflow-x-auto">
-      <span class="text-muted-foreground shrink-0 text-2xs">{m.fs_recent_folders()}</span>
+      <span class="text-muted-foreground shrink-0 text-[11px]">{m.fs_recent_folders()}</span>
       {#each quickPaths as quick (quick.path)}
         <button
           type="button"
-          class="bg-muted/50 hover:bg-muted text-muted-foreground hover:text-foreground max-w-56 truncate rounded-full border px-2 py-0.5 text-2xs"
+          class="bg-muted/50 hover:bg-muted text-muted-foreground hover:text-foreground max-w-56 truncate rounded-full border px-2 py-0.5 text-[11px]"
           onclick={() => void loadDirectory(quick.path)}
           title={quick.description ?? quick.path}
         >
@@ -244,13 +244,13 @@
       <SearchIcon class="text-muted-foreground size-3.5 shrink-0" />
       <input
         bind:value={filter}
-        class="placeholder:text-muted-foreground min-w-0 flex-1 bg-transparent text-ui outline-none"
+        class="placeholder:text-muted-foreground min-w-0 flex-1 bg-transparent text-[13px] outline-none"
         placeholder={m.fs_filter_folders()}
       />
     </div>
     <button
       type="button"
-      class="text-muted-foreground hover:text-foreground inline-flex shrink-0 items-center gap-1 text-2xs"
+      class="text-muted-foreground hover:text-foreground inline-flex shrink-0 items-center gap-1 text-[11px]"
       onclick={() => (showHidden = !showHidden)}
       title={showHidden ? m.fs_hidden_shown() : m.fs_show_hidden()}
     >
@@ -265,25 +265,25 @@
   <div class={cn("bg-muted/20 flex flex-col overflow-y-auto rounded-md border p-1", listClass)}>
     {#if loading}
       <div
-        class="text-muted-foreground flex flex-1 items-center justify-center gap-2 py-12 text-ui"
+        class="text-muted-foreground flex flex-1 items-center justify-center gap-2 py-12 text-[13px]"
       >
         <Loader2Icon class="text-primary size-4 animate-spin" />
         <span>{m.fs_loading_folders()}</span>
       </div>
     {:else if error}
       <div class="flex flex-1 flex-col items-center justify-center gap-2 p-4 text-center">
-        <p class="text-destructive text-ui">{error}</p>
+        <p class="text-destructive text-[13px]">{error}</p>
         <Button
           variant="outline"
           size="sm"
-          class="h-7 text-ui"
+          class="h-7 text-[13px]"
           onclick={() => void loadDirectory(parentPath ?? undefined)}
         >
           {m.fs_back()}
         </Button>
       </div>
     {:else if displayedEntries.length === 0}
-      <div class="text-muted-foreground flex flex-1 items-center justify-center py-12 text-ui">
+      <div class="text-muted-foreground flex flex-1 items-center justify-center py-12 text-[13px]">
         {filter.trim() === "" ? m.fs_no_subfolders() : m.fs_no_matching_folders()}
       </div>
     {:else}
@@ -294,7 +294,7 @@
             <div
               role="button"
               tabindex="0"
-              class="group flex cursor-pointer items-center justify-between rounded px-2 py-1.5 text-ui transition-colors select-none {isSelected
+              class="group flex cursor-pointer items-center justify-between rounded px-2 py-1.5 text-[13px] transition-colors select-none {isSelected
                 ? 'bg-primary/15 text-primary font-medium'
                 : 'hover:bg-muted text-foreground/90'}"
               onclick={() => handleSelectEntry(entry)}
@@ -309,9 +309,9 @@
             >
               <div class="flex min-w-0 flex-1 items-center gap-2">
                 <FolderIcon class="text-signal size-3.5 shrink-0" />
-                <span class="truncate font-mono text-ui">{entry.name}</span>
+                <span class="truncate font-mono text-[13px]">{entry.name}</span>
                 {#if entry.is_hidden}
-                  <span class="text-muted-foreground text-2xs opacity-60">
+                  <span class="text-muted-foreground text-[11px] opacity-60">
                     {m.fs_hidden()}
                   </span>
                 {/if}

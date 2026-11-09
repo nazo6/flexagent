@@ -87,13 +87,13 @@
             id="scan-dir"
             bind:value={scanDir}
             placeholder={m.projects_scan_dir_placeholder()}
-            class="flex-1 font-mono text-ui"
+            class="flex-1 font-mono text-[13px]"
           />
           <Button
             type="button"
             variant="outline"
             size="sm"
-            class="h-9 shrink-0 gap-1.5 px-2.5 text-ui"
+            class="h-9 shrink-0 gap-1.5 px-2.5 text-[13px]"
             disabled={!scanNodeId}
             onclick={() => (browserOpen = true)}
             title={m.projects_pick_folder()}

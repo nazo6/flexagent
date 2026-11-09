@@ -167,7 +167,7 @@
       onclick={handleLinkClick}
     >
       <div
-        class="bg-primary text-primary-foreground flex size-7 items-center justify-center rounded-md font-mono text-2xs font-bold"
+        class="bg-primary text-primary-foreground flex size-7 items-center justify-center rounded-md font-mono text-[11px] font-bold"
       >
         fxg
       </div>
@@ -176,7 +176,7 @@
   </div>
 
   <!-- Quick navigation -->
-  <nav class="flex flex-col gap-0.5 border-b border-border p-2 text-ui">
+  <nav class="flex flex-col gap-0.5 border-b border-border p-2 text-[13px]">
     <a
       href="/"
       onclick={handleLinkClick}
@@ -208,7 +208,7 @@
         <span>{m.shell_approval_inbox()}</span>
       </div>
       {#if sync.inbox.length > 0}
-        <Badge variant="destructive" class="px-1.5 py-0 text-2xs leading-tight">
+        <Badge variant="destructive" class="px-1.5 py-0 text-[11px] leading-tight">
           {sync.inbox.length}
         </Badge>
       {/if}
@@ -265,7 +265,7 @@
         type="text"
         bind:value={searchQuery}
         placeholder={m.shell_search_placeholder()}
-        class="bg-chip placeholder:text-muted-foreground focus-visible:ring-ring/40 h-8 w-full rounded-md border border-border pr-2 pl-7 text-ui outline-none focus-visible:ring-2"
+        class="bg-chip placeholder:text-muted-foreground focus-visible:ring-ring/40 h-8 w-full rounded-md border border-border pr-2 pl-7 text-[13px] outline-none focus-visible:ring-2"
       />
     </div>
   </div>
@@ -277,13 +277,13 @@
       <div class="mb-3 rounded-lg border border-destructive/30 bg-destructive/5 p-1.5">
         <button
           type="button"
-          class="text-destructive flex w-full items-center justify-between px-1 py-0.5 text-2xs font-semibold tracking-wider uppercase select-none"
+          class="text-destructive flex w-full items-center justify-between px-1 py-0.5 text-[11px] font-semibold tracking-wider uppercase select-none"
           onclick={() => (showAttentionSection = !showAttentionSection)}
         >
           <span class="flex items-center gap-1.5">
             <AlertCircleIcon class="size-3" />
             <span>{m.shell_needs_attention()}</span>
-            <span class="rounded-full bg-destructive/15 px-1.5 py-0.2 text-2xs text-destructive">
+            <span class="rounded-full bg-destructive/15 px-1.5 py-0.2 text-[11px] text-destructive">
               {needsAttentionSessions.length}
             </span>
           </span>
@@ -306,7 +306,7 @@
 
     <!-- List by project -->
     {#if projectGroups.length === 0}
-      <div class="text-muted-foreground p-3 text-center text-ui">
+      <div class="text-muted-foreground p-3 text-center text-[13px]">
         {searchQuery ? m.shell_no_matching_results() : m.shell_no_projects_yet()}
       </div>
     {:else}
@@ -316,7 +316,7 @@
           <div class="flex flex-col">
             <!-- Project header -->
             <div
-              class="group/proj flex items-center justify-between rounded-md px-1.5 py-1 text-ui hover:bg-muted/40 transition-colors"
+              class="group/proj flex items-center justify-between rounded-md px-1.5 py-1 text-[13px] hover:bg-muted/40 transition-colors"
             >
               <button
                 type="button"
@@ -333,7 +333,7 @@
                 <FolderGit2Icon class="size-4 text-muted-foreground shrink-0" />
                 <span class="truncate">{group.projectName}</span>
                 {#if group.pendingCount > 0}
-                  <Badge variant="destructive" class="px-1 py-0 text-2xs leading-tight shrink-0">
+                  <Badge variant="destructive" class="px-1 py-0 text-[11px] leading-tight shrink-0">
                     {group.pendingCount}
                   </Badge>
                 {/if}
@@ -346,7 +346,7 @@
               </button>
 
               <div class="flex items-center gap-1 shrink-0 ml-1">
-                <span class="text-muted-foreground text-2xs">
+                <span class="text-muted-foreground text-[11px]">
                   {group.sessions.length}
                 </span>
                 <a
@@ -369,7 +369,7 @@
                   {@render sessionRow(session, false)}
                 {/each}
                 {#if group.sessions.length === 0}
-                  <li class="py-1 px-1.5 text-2xs text-muted-foreground">
+                  <li class="py-1 px-1.5 text-[11px] text-muted-foreground">
                     <a
                       href={`/?project=${encodeURIComponent(group.projectId)}`}
                       onclick={handleLinkClick}
@@ -392,13 +392,13 @@
       <div class="mt-3 border-t pt-2">
         <button
           type="button"
-          class="text-muted-foreground hover:text-foreground flex w-full items-center justify-between px-1 py-0.5 text-2xs font-semibold tracking-wider uppercase select-none"
+          class="text-muted-foreground hover:text-foreground flex w-full items-center justify-between px-1 py-0.5 text-[11px] font-semibold tracking-wider uppercase select-none"
           onclick={() => (showArchivedSection = !showArchivedSection)}
         >
           <span class="flex items-center gap-1.5">
             <ArchiveIcon class="size-3" />
             <span>{m.shell_archived()}</span>
-            <span class="bg-muted rounded-full px-1.5 py-0.2 text-2xs">
+            <span class="bg-muted rounded-full px-1.5 py-0.2 text-[11px]">
               {archivedSessions.length}
             </span>
           </span>
@@ -425,7 +425,7 @@
     <ConnectionMenu class="w-full justify-between" />
     <div class="flex flex-wrap items-center justify-between gap-1.5">
       <SyncStatusBadge />
-      <KillSwitchButton class="h-7 text-2xs" />
+      <KillSwitchButton class="h-7 text-[11px]" />
     </div>
   </div>
 </aside>
@@ -442,7 +442,7 @@
       onclick={handleLinkClick}
       title={`${session.title}${isArchived ? ` (${m.shell_archived()})` : ""}\n${m.shell_working_directory({ path: session.local_path })}\n${m.shell_node_label({ node: node?.name ?? session.node_id })}`}
       class={cn(
-        "group flex items-center justify-between rounded-md px-2 py-1.5 text-ui transition-colors",
+        "group flex items-center justify-between rounded-md px-2 py-1.5 text-[13px] transition-colors",
         isActive
           ? "bg-accent text-foreground shadow-[inset_2px_0_0_0_var(--signal)] font-medium"
           : "text-foreground/80 hover:bg-accent/40 hover:text-foreground",
@@ -461,12 +461,12 @@
 
         <div class="flex min-w-0 flex-1 items-center gap-1">
           {#if showProjectBadge}
-            <span class="text-muted-foreground text-2xs shrink-0 font-medium truncate max-w-16">
+            <span class="text-muted-foreground text-[11px] shrink-0 font-medium truncate max-w-16">
               [{session.project_id}]
             </span>
           {/if}
           {#if session.git_branch}
-            <span class="text-muted-foreground text-2xs shrink-0 font-mono">
+            <span class="text-muted-foreground text-[11px] shrink-0 font-mono">
               ({session.git_branch})
             </span>
           {/if}
@@ -475,7 +475,7 @@
         </div>
       </div>
 
-      <div class="ml-2 flex shrink-0 items-center gap-1.5 text-muted-foreground text-2xs">
+      <div class="ml-2 flex shrink-0 items-center gap-1.5 text-muted-foreground text-[11px]">
         <!-- Archive / delete menu -->
         <SessionActionsMenu
           {session}

@@ -30,7 +30,7 @@
   </p>
 {:else}
   <div class="flex flex-col gap-2">
-    <div class="flex flex-wrap items-center gap-2 text-ui">
+    <div class="flex flex-wrap items-center gap-2 text-[13px]">
       <span class="font-mono break-all">{file.path}</span>
       <span class="text-ok">+{file.additions}</span>
       <span class="text-danger">-{file.deletions}</span>

@@ -254,7 +254,7 @@
         <FolderPlusIcon class="text-primary size-4" />
         {m.projects_add_folder_title()}
       </Dialog.Title>
-      <Dialog.Description class="text-muted-foreground text-ui">
+      <Dialog.Description class="text-muted-foreground text-[13px]">
         {m.projects_add_folder_description()}
       </Dialog.Description>
     </Dialog.Header>
@@ -262,13 +262,13 @@
     <div class="flex flex-col gap-1.5">
       <Label for="add-project-node">{m.projects_node()}</Label>
       {#if nodes.length === 0}
-        <p class="text-destructive text-ui">{m.projects_no_nodes()}</p>
+        <p class="text-destructive text-[13px]">{m.projects_no_nodes()}</p>
       {:else}
         <select
           id="add-project-node"
           bind:value={selectedNodeId}
           onchange={onNodeChange}
-          class="border-input bg-background focus-visible:ring-ring/40 h-8 w-full max-w-xs rounded-md border px-2 text-ui outline-none focus-visible:ring-1"
+          class="border-input bg-background focus-visible:ring-ring/40 h-8 w-full max-w-xs rounded-md border px-2 text-[13px] outline-none focus-visible:ring-1"
         >
           {#each nodes as node (node.node_id)}
             <option value={node.node_id} disabled={!node.is_online}>
@@ -297,14 +297,14 @@
           />
         {:else}
           <div
-            class="text-muted-foreground flex min-h-48 items-center justify-center rounded-md border border-dashed p-4 text-center text-ui"
+            class="text-muted-foreground flex min-h-48 items-center justify-center rounded-md border border-dashed p-4 text-center text-[13px]"
           >
             {m.projects_no_nodes()}
           </div>
         {/if}
       </div>
 
-      <div class="bg-background flex min-h-48 flex-col gap-2 rounded-md border p-3 text-ui">
+      <div class="bg-background flex min-h-48 flex-col gap-2 rounded-md border p-3 text-[13px]">
         {#if previewLoading}
           <div class="text-muted-foreground flex flex-1 items-center justify-center gap-2">
             <LoaderCircleIcon class="size-4 animate-spin" />
@@ -316,32 +316,32 @@
           >
             <AlertTriangleIcon class="size-5" />
             <span>{m.projects_inspect_failed()}</span>
-            <span class="text-2xs break-words opacity-80">{previewError}</span>
+            <span class="text-[11px] break-words opacity-80">{previewError}</span>
           </div>
         {:else if preview !== null}
-          <span class="text-muted-foreground w-fit rounded-full border px-2 py-0.5 text-2xs">
+          <span class="text-muted-foreground w-fit rounded-full border px-2 py-0.5 text-[11px]">
             {identityLabel()}
           </span>
           <h3 class="text-sm font-semibold">{preview.name}</h3>
-          <code class="text-muted-foreground text-2xs break-all">{effectiveProjectId}</code>
+          <code class="text-muted-foreground text-[11px] break-all">{effectiveProjectId}</code>
           {#if preview.canonical_git_url}
-            <p class="text-muted-foreground font-mono text-2xs break-all">
+            <p class="text-muted-foreground font-mono text-[11px] break-all">
               {preview.canonical_git_url}
             </p>
           {/if}
           {#if preview.relative_subpath}
-            <p class="text-muted-foreground text-2xs">
+            <p class="text-muted-foreground text-[11px]">
               {m.projects_monorepo_subpath({ path: preview.relative_subpath })}
             </p>
           {/if}
           {#if preview.is_worktree}
-            <p class="text-muted-foreground flex items-center gap-1 text-2xs">
+            <p class="text-muted-foreground flex items-center gap-1 text-[11px]">
               <GitBranchIcon class="size-3" />
               {m.projects_worktree_binding()}
             </p>
           {/if}
-          <p class="text-muted-foreground font-mono text-2xs break-all">{preview.local_path}</p>
-          <div class="mt-auto flex flex-col gap-1 border-t pt-2 text-2xs leading-relaxed">
+          <p class="text-muted-foreground font-mono text-[11px] break-all">{preview.local_path}</p>
+          <div class="mt-auto flex flex-col gap-1 border-t pt-2 text-[11px] leading-relaxed">
             {#if alreadyAdded}
               <p class="text-muted-foreground">{m.projects_already_added()}</p>
             {:else if conflictingBinding}
@@ -365,7 +365,7 @@
     </div>
 
     <div class="border-t pt-3">
-      <label class="text-muted-foreground flex items-center gap-2 text-ui">
+      <label class="text-muted-foreground flex items-center gap-2 text-[13px]">
         <input
           type="checkbox"
           class="border-input accent-primary size-3.5 rounded border"
@@ -378,10 +378,10 @@
           <Input
             bind:value={customKey}
             placeholder="my-project"
-            class="h-8 font-mono text-ui"
+            class="h-8 font-mono text-[13px]"
             disabled={busy}
           />
-          <p class="text-muted-foreground text-2xs">
+          <p class="text-muted-foreground text-[11px]">
             {m.projects_custom_key_hint()}
           </p>
         </div>
@@ -389,7 +389,7 @@
     </div>
 
     {#if formError !== null}
-      <p class="text-destructive text-ui">{formError}</p>
+      <p class="text-destructive text-[13px]">{formError}</p>
     {/if}
 
     <Dialog.Footer class="gap-2 sm:gap-2">

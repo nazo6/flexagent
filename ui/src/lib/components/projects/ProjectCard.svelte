@@ -44,16 +44,16 @@
   <div class="flex flex-wrap items-start justify-between gap-3">
     <div class="flex min-w-0 flex-col gap-1">
       <h2 class="truncate text-sm font-semibold tracking-tight">{project.name}</h2>
-      <p class="text-muted-foreground desk-mono truncate text-2xs">
+      <p class="text-muted-foreground desk-mono truncate text-[11px]">
         {project.project_id}
       </p>
       {#if project.canonical_git_url}
-        <p class="text-muted-foreground truncate text-2xs">
+        <p class="text-muted-foreground truncate text-[11px]">
           {project.canonical_git_url}
         </p>
       {/if}
       <div class="mt-0.5 flex flex-wrap items-center gap-1.5">
-        <Badge variant="outline" class="h-5 text-2xs">
+        <Badge variant="outline" class="h-5 text-[11px]">
           {project.identity.kind === "git_remote"
             ? "Git"
             : project.identity.kind === "user_key"
@@ -61,7 +61,7 @@
               : "Local only"}
         </Badge>
         {#if project.identity.kind === "local"}
-          <span class="text-muted-foreground text-2xs">
+          <span class="text-muted-foreground text-[11px]">
             This machine only. Set a project key to share it across machines.
           </span>
         {/if}
@@ -71,7 +71,7 @@
       <Button
         variant="outline"
         size="sm"
-        class="h-7 text-2xs"
+        class="h-7 text-[11px]"
         disabled={worktreeState.loading}
         onclick={() => onRefreshWorktrees(project.project_id)}
       >
@@ -81,7 +81,7 @@
       <Button
         variant="outline"
         size="sm"
-        class="h-7 text-2xs"
+        class="h-7 text-[11px]"
         onclick={() => onCreateWorktree(project.project_id)}
       >
         <PlusIcon class="size-3.5" />
@@ -90,7 +90,7 @@
       <Button
         variant="outline"
         size="sm"
-        class="h-7 text-2xs"
+        class="h-7 text-[11px]"
         onclick={() => onOpenSettings(project)}
         title="Project settings"
       >
@@ -100,7 +100,7 @@
       <Button
         variant="outline"
         size="sm"
-        class="h-7 text-2xs"
+        class="h-7 text-[11px]"
         onclick={() => onPrune(project.project_id)}
         title={m.projects_prune_title()}
       >
@@ -109,7 +109,7 @@
       </Button>
       <Button
         size="sm"
-        class="h-7 text-2xs"
+        class="h-7 text-[11px]"
         onclick={() => {
           onNewSession(project.project_id);
         }}
@@ -121,7 +121,7 @@
   </div>
 
   {#if project.bindings.length > 0}
-    <ul class="border-border ml-1 flex list-none flex-col gap-1 border-l p-0 pl-3 text-2xs">
+    <ul class="border-border ml-1 flex list-none flex-col gap-1 border-l p-0 pl-3 text-[11px]">
       {#each project.bindings as binding (`${binding.node_id}|${binding.local_path}`)}
         <li class="flex flex-wrap items-center gap-2">
           <Badge variant="outline">{nodeName(binding.node_id)}</Badge>
@@ -163,9 +163,9 @@
   {/if}
 
   {#if worktreeState.loading && worktrees.length === 0}
-    <p class="text-muted-foreground text-2xs">{m.common_loading()}</p>
+    <p class="text-muted-foreground text-[11px]">{m.common_loading()}</p>
   {:else if worktreeState.error !== null && worktrees.length === 0}
-    <div class="flex items-center gap-2 text-2xs">
+    <div class="flex items-center gap-2 text-[11px]">
       <p class="text-destructive">
         {m.common_load_failed()}
         {worktreeState.error}
@@ -176,7 +176,7 @@
     </div>
   {/if}
   {#if worktrees.length > 0}
-    <ul class="border-border ml-1 flex list-none flex-col gap-1 border-l p-0 pl-3 text-2xs">
+    <ul class="border-border ml-1 flex list-none flex-col gap-1 border-l p-0 pl-3 text-[11px]">
       {#each worktrees as worktree (`${worktree.node_id}|${worktree.path}`)}
         <li class="hover:bg-muted/50 flex flex-wrap items-center gap-2 rounded-md px-2 py-1.5">
           <GitBranchIcon class="text-muted-foreground size-3.5" />

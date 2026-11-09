@@ -47,7 +47,7 @@
       {#each visible as problem (problem.id)}
         <div
           class={cn(
-            "flex items-start gap-2 rounded-lg border px-3 py-2 text-ui",
+            "flex items-start gap-2 rounded-lg border px-3 py-2 text-[13px]",
             problem.severity === "error" ? "border-danger/30 bg-card" : "border-warn/30 bg-card",
           )}
         >
@@ -64,16 +64,18 @@
             </p>
 
             {#if dataSafetyMessage(problem.dataSafety) !== null}
-              <p class="text-muted-foreground mt-0.5 text-2xs">
+              <p class="text-muted-foreground mt-0.5 text-[11px]">
                 {dataSafetyMessage(problem.dataSafety)}
               </p>
             {/if}
 
             <details class="group mt-1">
-              <summary class="text-muted-foreground hover:text-foreground cursor-pointer text-2xs">
+              <summary
+                class="text-muted-foreground hover:text-foreground cursor-pointer text-[11px]"
+              >
                 {m.problem_details()}
               </summary>
-              <div class="mt-1 flex flex-col gap-1 text-ui">
+              <div class="mt-1 flex flex-col gap-1 text-[13px]">
                 {#if problem.code !== null}
                   <p class="text-muted-foreground font-mono">{problem.code}</p>
                 {/if}
@@ -136,7 +138,7 @@
       {/each}
 
       {#if hiddenCount > 0}
-        <p class="text-muted-foreground text-ui">
+        <p class="text-muted-foreground text-[13px]">
           {m.problem_more({ count: String(hiddenCount) })}
         </p>
       {/if}

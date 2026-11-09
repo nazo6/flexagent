@@ -67,20 +67,20 @@
     <div class="flex min-w-0 flex-col gap-1">
       <div class="flex items-center gap-2">
         <ShieldCheckIcon class="text-muted-foreground size-4 shrink-0" />
-        <span class="desk-mono text-2xs font-medium">{toolName}</span>
+        <span class="desk-mono text-[11px] font-medium">{toolName}</span>
         {#if resolved}
           <Badge variant="secondary">
             {resolved.selectedOptionId} ({resolved.resolvedBy})
           </Badge>
         {:else if createdAt !== null}
-          <span class="text-muted-foreground text-2xs">{formatRelativeTime(createdAt)}</span>
+          <span class="text-muted-foreground text-[11px]">{formatRelativeTime(createdAt)}</span>
         {/if}
       </div>
       <p class="text-sm break-words">{summary}</p>
     </div>
     <a
       href={`/sessions/${sessionId}`}
-      class="text-muted-foreground hover:text-foreground flex shrink-0 items-center gap-0.5 text-2xs"
+      class="text-muted-foreground hover:text-foreground flex shrink-0 items-center gap-0.5 text-[11px]"
     >
       {m.chat_open_session()}
       <ChevronRightIcon class="size-3" />
@@ -90,12 +90,12 @@
   {#if detailsJson !== null}
     <details class="group">
       <summary
-        class="text-muted-foreground hover:text-foreground cursor-pointer text-2xs select-none"
+        class="text-muted-foreground hover:text-foreground cursor-pointer text-[11px] select-none"
       >
         {m.chat_permission_details()}
       </summary>
       <pre
-        class="bg-muted/50 border-border mt-2 max-h-56 overflow-auto rounded-md border p-2 font-mono text-ui whitespace-pre-wrap">{detailsJson}</pre>
+        class="bg-muted/50 border-border mt-2 max-h-56 overflow-auto rounded-md border p-2 font-mono text-[13px] whitespace-pre-wrap">{detailsJson}</pre>
     </details>
   {/if}
 

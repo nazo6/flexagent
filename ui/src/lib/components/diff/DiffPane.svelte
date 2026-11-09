@@ -81,7 +81,7 @@
       </Button>
     {/if}
     {#if worktreeDiff !== null && scope !== "session"}
-      <span class="text-muted-foreground ml-auto text-ui">
+      <span class="text-muted-foreground ml-auto text-[13px]">
         {worktreeDiff.base_branch ?? worktreeDiff.scope}
         {#if worktreeDiff.head_commit !== ""}@ {worktreeDiff.head_commit.slice(0, 8)}{/if}
       </span>
@@ -108,7 +108,7 @@
             <button
               type="button"
               class={cn(
-                "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-ui",
+                "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px]",
                 selected?.path === file.path
                   ? "bg-accent text-accent-foreground"
                   : "hover:bg-muted",

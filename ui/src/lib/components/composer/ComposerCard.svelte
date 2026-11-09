@@ -29,7 +29,7 @@
   {/if}
   {@render children?.()}
   {#if toolbar}
-    <div class="flex flex-wrap items-center gap-1.5 border-t px-1 pt-2">
+    <div class="border-border flex flex-nowrap items-center gap-1 border-t px-0.5 pt-1.5">
       {@render toolbar()}
     </div>
   {/if}

@@ -80,7 +80,7 @@
 >
   <div class="flex flex-col">
     {#if option.description}
-      <p class="text-muted-foreground border-b px-3 py-2 text-2xs leading-relaxed">
+      <p class="text-muted-foreground border-b px-3 py-2 text-[11px] leading-relaxed">
         {option.description}
       </p>
     {/if}
@@ -90,7 +90,7 @@
         <SearchIcon class="text-muted-foreground size-3.5 shrink-0" />
         <input
           bind:value={query}
-          class="placeholder:text-muted-foreground min-w-0 flex-1 bg-transparent text-ui outline-none"
+          class="placeholder:text-muted-foreground min-w-0 flex-1 bg-transparent text-[13px] outline-none"
           placeholder={m.composer_search_options()}
         />
       </div>
@@ -108,13 +108,13 @@
         >
           <span class="block truncate">{choice.label}</span>
           {#if configChoiceDescription(choice.raw)}
-            <span class="text-muted-foreground block truncate text-2xs">
+            <span class="text-muted-foreground block truncate text-[11px]">
               {configChoiceDescription(choice.raw)}
             </span>
           {/if}
         </PickerItem>
       {:else}
-        <p class="text-muted-foreground px-2 py-3 text-center text-ui">
+        <p class="text-muted-foreground px-2 py-3 text-center text-[13px]">
           {m.composer_no_matching_options()}
         </p>
       {/each}
@@ -123,7 +123,7 @@
     {#if showRefresh}
       <button
         type="button"
-        class="text-muted-foreground hover:bg-accent hover:text-accent-foreground flex items-center gap-1.5 border-t px-3 py-2 text-ui transition-colors"
+        class="text-muted-foreground hover:bg-accent hover:text-accent-foreground flex items-center gap-1.5 border-t px-3 py-2 text-[13px] transition-colors"
         onclick={() => {
           open = false;
           onrefresh?.();

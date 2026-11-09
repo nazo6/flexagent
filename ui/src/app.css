@@ -201,9 +201,6 @@
   --font-sans: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
   --font-mono: ui-monospace, "SFMono-Regular", "Cascadia Mono", "Liberation Mono", Menlo, monospace;
 
-  --text-2xs: 0.6875rem;
-  --text-ui: 0.8125rem;
-
   --color-canvas: var(--canvas);
   --color-surface: var(--surface);
   --color-surface-raised: var(--surface-raised);
@@ -293,7 +290,8 @@
     @apply mx-auto flex w-full max-w-[760px] flex-col gap-5 px-4 py-6 md:py-8;
   }
   .desk-label {
-    @apply text-muted-ink text-2xs font-semibold tracking-[0.08em] uppercase;
+    @apply text-muted-ink font-semibold tracking-[0.08em] uppercase;
+    font-size: 0.6875rem;
   }
   .desk-mono {
     @apply font-mono tabular-nums;

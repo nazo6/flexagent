@@ -557,7 +557,6 @@
   "settings_select_node": "Select a node.",
   "settings_subtitle": "Manage auth tokens, node pairing, agents, and the audit log",
   "settings_tab_agents": "Agents",
-  "settings_tab_appearance": "Appearance",
   "settings_tab_audit": "Audit log",
   "settings_tab_general": "General",
   "settings_target_node": "Target node",

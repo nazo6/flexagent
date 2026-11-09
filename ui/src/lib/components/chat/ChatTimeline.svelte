@@ -112,7 +112,7 @@
                       />
                     {:else}
                       <span
-                        class="bg-background/60 inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-2xs"
+                        class="bg-background/60 inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px]"
                       >
                         <PaperclipIcon class="size-2.5" />
                         {attachment.file_name}
@@ -122,7 +122,7 @@
                 </div>
               {/if}
               <p class="text-sm whitespace-pre-wrap">{item.text}</p>
-              <p class="text-muted-foreground desk-mono mt-1 text-right text-2xs">
+              <p class="text-muted-foreground desk-mono mt-1 text-right text-[11px]">
                 {item.clientSource} &middot; {formatEpochMs(item.createdAt)}
               </p>
             </div>
@@ -145,21 +145,21 @@
         {:else if item.kind === "thought"}
           <details class="group">
             <summary
-              class="text-muted-foreground hover:text-foreground flex cursor-pointer items-center gap-1.5 text-ui select-none"
+              class="text-muted-foreground hover:text-foreground flex cursor-pointer items-center gap-1.5 text-[13px] select-none"
             >
               <BrainIcon class="size-3.5" />
               {m.chat_thought_process()}
               {#if item.streaming}<span class="animate-pulse">…</span>{/if}
             </summary>
             <div
-              class="text-muted-foreground border-line mt-1.5 border-l-2 pl-3 text-ui leading-relaxed"
+              class="text-muted-foreground border-line mt-1.5 border-l-2 pl-3 text-[13px] leading-relaxed"
             >
               <MarkdownText text={item.text} streaming={item.streaming} />
             </div>
           </details>
         {:else if item.kind === "terminal"}
           <div class="bg-card flex flex-col gap-1.5 rounded-lg border border-border p-3">
-            <div class="flex items-center gap-2 text-ui">
+            <div class="flex items-center gap-2 text-[13px]">
               <SquareTerminalIcon class="text-muted-foreground size-4" />
               <span class="desk-mono">{item.command === "" ? item.terminalId : item.command}</span>
               {#if item.exitCode !== null}
@@ -169,7 +169,7 @@
               {/if}
             </div>
             <pre
-              class="bg-muted/40 max-h-56 overflow-auto rounded-md border border-border p-2.5 font-mono text-ui leading-relaxed whitespace-pre-wrap">{item.output}</pre>
+              class="bg-muted/40 max-h-56 overflow-auto rounded-md border border-border p-2.5 font-mono text-[13px] leading-relaxed whitespace-pre-wrap">{item.output}</pre>
           </div>
         {:else if item.kind === "permission"}
           <PermissionCard
@@ -193,7 +193,7 @@
           />
         {:else if item.kind === "plan"}
           <div class="bg-card flex flex-col gap-1.5 rounded-lg border border-border p-3">
-            <div class="flex items-center gap-2 text-ui font-medium">
+            <div class="flex items-center gap-2 text-[13px] font-medium">
               <ListChecksIcon class="size-4" />
               {m.chat_plan()}
             </div>
@@ -239,7 +239,7 @@
         <BotIcon class="size-3" />
       </span>
       <div
-        class="bg-card text-muted-foreground flex items-center gap-2 rounded-lg border border-border px-3 py-1.5 text-ui"
+        class="bg-card text-muted-foreground flex items-center gap-2 rounded-lg border border-border px-3 py-1.5 text-[13px]"
       >
         <LoaderCircleIcon class="text-signal size-3.5 animate-spin" />
         <span>{m.chat_agent_working()}</span>
@@ -249,7 +249,7 @@
 </ul>
 
 {#if items.length === 0 && !agentWorking}
-  <p class="text-muted-foreground text-ui">
+  <p class="text-muted-foreground text-[13px]">
     {m.chat_empty_timeline()}
   </p>
 {/if}

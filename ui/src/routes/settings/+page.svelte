@@ -178,7 +178,7 @@
 <div class="desk-page">
   <div class="flex flex-col gap-1">
     <h1 class="text-xl font-semibold tracking-tight">{m.settings_title()}</h1>
-    <p class="text-muted-foreground text-ui">
+    <p class="text-muted-foreground text-[13px]">
       {m.settings_subtitle()}
     </p>
   </div>
@@ -189,7 +189,6 @@
     <Tabs.List variant="line" class="w-full overflow-x-auto border-b">
       <Tabs.Trigger value="bootstrap">Bootstrap</Tabs.Trigger>
       <Tabs.Trigger value="machine">This machine</Tabs.Trigger>
-      <Tabs.Trigger value="appearance">{m.settings_tab_appearance()}</Tabs.Trigger>
       <Tabs.Trigger value="projects">Projects</Tabs.Trigger>
       <Tabs.Trigger value="server">Server</Tabs.Trigger>
       <Tabs.Trigger value="agents">{m.settings_tab_agents()}</Tabs.Trigger>
@@ -204,7 +203,7 @@
           <FileDownIcon class="text-muted-foreground mt-0.5 size-4" />
           <div class="flex flex-1 flex-col gap-1">
             <h2 class="font-medium">{m.settings_diagnostics_title()}</h2>
-            <p class="text-muted-foreground text-ui">
+            <p class="text-muted-foreground text-[13px]">
               {m.settings_diagnostics_description()}
             </p>
             <div class="mt-1">
@@ -230,7 +229,7 @@
           <ShieldIcon class="text-muted-foreground mt-0.5 size-4" />
           <div class="flex flex-1 flex-col gap-1">
             <h2 class="font-medium">{m.settings_client_token_title()}</h2>
-            <p class="text-muted-foreground text-ui">
+            <p class="text-muted-foreground text-[13px]">
               {m.settings_client_token_description()}
               <code>~/.flexagent/auth_token</code>
               {m.settings_client_token_description_ref()}
@@ -246,17 +245,95 @@
       </Card>
     </Tabs.Content>
 
-    <Tabs.Content value="appearance" class="mt-2 flex flex-col gap-3">
+    <Tabs.Content value="projects" class="mt-2 flex flex-col gap-3">
+      <SettingsCatalog section="projects" {query} />
+    </Tabs.Content>
+
+    <Tabs.Content value="server" class="mt-2 flex flex-col gap-3">
+      <SettingsCatalog section="server" {query} />
+      <Card class="gap-3 p-4">
+        <div class="flex items-start gap-2">
+          <KeyRoundIcon class="text-muted-foreground mt-0.5 size-4" />
+          <div class="flex flex-1 flex-col gap-2">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h2 class="font-medium">{m.settings_node_pairing_title()}</h2>
+                <p class="text-muted-foreground text-[13px]">
+                  {m.settings_node_pairing_description()}
+                  (<code>fxg daemon</code>, <code>~/.flexagent/node_token</code>)
+                </p>
+              </div>
+              <div class="flex items-center gap-1.5">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={!isServer || tokens.loading}
+                  onclick={() => void tokens.refresh()}
+                >
+                  <RefreshCwIcon />
+                  {m.common_refresh()}
+                </Button>
+                <Button size="sm" disabled={!isServer} onclick={() => (issueOpen = true)}>
+                  {m.settings_issue_token()}
+                </Button>
+              </div>
+            </div>
+
+            {#if !isServer}
+              <p class="text-muted-foreground text-[13px]">
+                {m.settings_node_pairing_server_only()}
+                <code>{sync.connection.origin}</code>
+              </p>
+            {:else if (tokens.data ?? []).length === 0}
+              <p class="text-muted-foreground text-[13px]">
+                {tokens.loading ? m.common_loading() : m.settings_no_node_tokens()}
+              </p>
+            {:else}
+              <ul class="flex list-none flex-col gap-1 p-0 text-[13px]">
+                {#each tokens.data ?? [] as token (token.node_id)}
+                  <li
+                    class="hover:bg-muted/50 flex flex-wrap items-center gap-2 rounded-md border px-2 py-1.5"
+                  >
+                    <span class="font-medium">{token.node_id}</span>
+                    <span class="text-muted-foreground font-mono">{token.token_prefix}…</span>
+                    <Badge variant="outline" class="text-[11px]">{m.settings_badge_issued()}</Badge>
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      class="text-muted-foreground hover:text-destructive ml-auto"
+                      disabled={revokeBusy}
+                      onclick={() => (revokeTarget = token.node_id)}
+                      title={m.settings_revoke_token()}
+                    >
+                      <Trash2Icon />
+                      <span class="sr-only">
+                        {m.settings_revoke_token_for({ name: token.node_id })}
+                      </span>
+                    </Button>
+                  </li>
+                {/each}
+              </ul>
+            {/if}
+          </div>
+        </div>
+      </Card>
+    </Tabs.Content>
+
+    <Tabs.Content value="agents" class="mt-2 flex flex-col gap-3">
+      <AgentManager />
+    </Tabs.Content>
+
+    <Tabs.Content value="browser" class="mt-2 flex flex-col gap-3">
       <Card class="gap-4 p-5">
         <div class="flex flex-col gap-1">
           <h2 class="text-sm font-semibold">{m.settings_appearance_theme()}</h2>
-          <p class="text-muted-foreground text-ui">{m.settings_appearance_theme_note()}</p>
+          <p class="text-muted-foreground text-[13px]">{m.settings_appearance_theme_note()}</p>
         </div>
         <div class="grid max-w-sm gap-1.5">
           <select
-            id="appearance-theme"
+            id="browser-theme"
             aria-label={m.settings_appearance_theme()}
-            class="border-input bg-background h-9 rounded-md border px-2 text-sm"
+            class="border-input bg-background h-8 rounded-md border px-2 text-[13px]"
             value={themePreference}
             onchange={(event) => setMode(event.currentTarget.value as "system" | "light" | "dark")}
           >
@@ -270,7 +347,7 @@
       <Card class="gap-4 p-5">
         <div class="flex flex-col gap-1">
           <h2 class="text-sm font-semibold">{m.settings_appearance_palette()}</h2>
-          <p class="text-muted-foreground text-ui">{m.settings_appearance_palette_note()}</p>
+          <p class="text-muted-foreground text-[13px]">{m.settings_appearance_palette_note()}</p>
         </div>
         <div class="grid gap-2 sm:grid-cols-3">
           {#each PALETTES as option (option.id)}
@@ -299,103 +376,20 @@
                   style={`background:${option.signal}`}
                 ></span>
               </span>
-              <span class="text-ui font-medium">{paletteLabel(option.id)}</span>
+              <span class="text-[13px] font-medium">{paletteLabel(option.id)}</span>
             </button>
           {/each}
         </div>
-        <p class="text-muted-foreground text-ui">{m.settings_appearance_storage_note()}</p>
+        <p class="text-muted-foreground text-[13px]">{m.settings_appearance_storage_note()}</p>
       </Card>
-    </Tabs.Content>
 
-    <Tabs.Content value="projects" class="mt-2 flex flex-col gap-3">
-      <SettingsCatalog section="projects" {query} />
-    </Tabs.Content>
-
-    <Tabs.Content value="server" class="mt-2 flex flex-col gap-3">
-      <SettingsCatalog section="server" {query} />
       <Card class="gap-3 p-4">
-        <div class="flex items-start gap-2">
-          <KeyRoundIcon class="text-muted-foreground mt-0.5 size-4" />
-          <div class="flex flex-1 flex-col gap-2">
-            <div class="flex flex-wrap items-center justify-between gap-2">
-              <div>
-                <h2 class="font-medium">{m.settings_node_pairing_title()}</h2>
-                <p class="text-muted-foreground text-ui">
-                  {m.settings_node_pairing_description()}
-                  (<code>fxg daemon</code>, <code>~/.flexagent/node_token</code>)
-                </p>
-              </div>
-              <div class="flex items-center gap-1.5">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={!isServer || tokens.loading}
-                  onclick={() => void tokens.refresh()}
-                >
-                  <RefreshCwIcon />
-                  {m.common_refresh()}
-                </Button>
-                <Button size="sm" disabled={!isServer} onclick={() => (issueOpen = true)}>
-                  {m.settings_issue_token()}
-                </Button>
-              </div>
-            </div>
-
-            {#if !isServer}
-              <p class="text-muted-foreground text-ui">
-                {m.settings_node_pairing_server_only()}
-                <code>{sync.connection.origin}</code>
-              </p>
-            {:else if (tokens.data ?? []).length === 0}
-              <p class="text-muted-foreground text-ui">
-                {tokens.loading ? m.common_loading() : m.settings_no_node_tokens()}
-              </p>
-            {:else}
-              <ul class="flex list-none flex-col gap-1 p-0 text-ui">
-                {#each tokens.data ?? [] as token (token.node_id)}
-                  <li
-                    class="hover:bg-muted/50 flex flex-wrap items-center gap-2 rounded-md border px-2 py-1.5"
-                  >
-                    <span class="font-medium">{token.node_id}</span>
-                    <span class="text-muted-foreground font-mono">{token.token_prefix}…</span>
-                    <Badge variant="outline" class="text-2xs">{m.settings_badge_issued()}</Badge>
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      class="text-muted-foreground hover:text-destructive ml-auto"
-                      disabled={revokeBusy}
-                      onclick={() => (revokeTarget = token.node_id)}
-                      title={m.settings_revoke_token()}
-                    >
-                      <Trash2Icon />
-                      <span class="sr-only">
-                        {m.settings_revoke_token_for({ name: token.node_id })}
-                      </span>
-                    </Button>
-                  </li>
-                {/each}
-              </ul>
-            {/if}
-          </div>
-        </div>
-      </Card>
-    </Tabs.Content>
-
-    <Tabs.Content value="agents" class="mt-2 flex flex-col gap-3">
-      <AgentManager />
-    </Tabs.Content>
-
-    <Tabs.Content value="browser" class="mt-2 flex flex-col gap-3">
-      <Card class="gap-3 p-4">
-        <h2 class="font-medium">Browser</h2>
-        <p class="text-muted-foreground text-ui">{m.settings_browser_storage_note()}</p>
+        <h2 class="text-sm font-semibold">{m.settings_browser_pinned()}</h2>
+        <p class="text-muted-foreground text-[13px]">{m.settings_browser_storage_note()}</p>
         <div class="flex items-center justify-between gap-3">
-          <div class="grid gap-1">
-            <span class="text-sm font-medium">{m.settings_browser_pinned()}</span>
-            <span class="text-muted-foreground text-ui">
-              {m.settings_browser_pinned_count({ count: pinned.pinnedIds.size })}
-            </span>
-          </div>
+          <span class="text-muted-foreground text-[13px]">
+            {m.settings_browser_pinned_count({ count: pinned.pinnedIds.size })}
+          </span>
           <Button
             type="button"
             variant="outline"
@@ -435,7 +429,7 @@
           id="node-id"
           bind:value={issueNodeId}
           placeholder="home-win"
-          class="font-mono text-ui"
+          class="font-mono text-[13px]"
         />
       </div>
       <Dialog.Footer>
@@ -463,13 +457,13 @@
     <div class="flex flex-col gap-3">
       <div class="grid gap-2">
         <Label>{m.settings_node_id()}</Label>
-        <code class="bg-muted rounded-md border px-2 py-1 text-ui">{issued?.node_id}</code>
+        <code class="bg-muted rounded-md border px-2 py-1 text-[13px]">{issued?.node_id}</code>
       </div>
       <div class="grid gap-2">
         <Label>{m.settings_token()}</Label>
         <div class="flex items-center gap-1.5">
           <code
-            class="bg-muted min-w-0 flex-1 truncate rounded-md border px-2 py-1 font-mono text-ui"
+            class="bg-muted min-w-0 flex-1 truncate rounded-md border px-2 py-1 font-mono text-[13px]"
           >
             {issued?.token ?? ""}
           </code>
@@ -477,7 +471,7 @@
             type="button"
             variant="outline"
             size="sm"
-            class="h-8 shrink-0 gap-1.5 px-2.5 text-ui"
+            class="h-8 shrink-0 gap-1.5 px-2.5 text-[13px]"
             onclick={() => issued && void copyText(issued.token, m.settings_token())}
           >
             <CopyIcon class="size-3.5" />
@@ -486,7 +480,7 @@
         </div>
       </div>
       <pre
-        class="bg-muted overflow-x-auto rounded-md border p-2 text-2xs leading-relaxed">{`${m.settings_node_token_save_comment()}\necho "${issued?.token ?? ""}" > ~/.flexagent/node_token`}</pre>
+        class="bg-muted overflow-x-auto rounded-md border p-2 text-[11px] leading-relaxed">{`${m.settings_node_token_save_comment()}\necho "${issued?.token ?? ""}" > ~/.flexagent/node_token`}</pre>
     </div>
     <Dialog.Footer>
       <Button

@@ -47,7 +47,7 @@
   <div class="flex flex-wrap items-end justify-between gap-3">
     <div class="flex flex-col gap-1">
       <h1 class="text-xl font-semibold tracking-tight">{m.projects_title()}</h1>
-      <p class="text-muted-foreground text-ui">{m.projects_subtitle()}</p>
+      <p class="text-muted-foreground text-[13px]">{m.projects_subtitle()}</p>
     </div>
     <div class="flex items-center gap-1.5">
       <Button size="sm" onclick={() => addDialog.show()} title={m.projects_add_folder_title()}>
@@ -86,7 +86,7 @@
     <div
       class="border-danger/30 bg-danger-soft/50 flex flex-col items-start gap-2 rounded-lg border p-3"
     >
-      <p class="text-danger text-ui">
+      <p class="text-danger text-[13px]">
         {m.common_load_failed()}
         {sync.projectsError}
       </p>

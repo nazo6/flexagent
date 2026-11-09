@@ -36,7 +36,7 @@
         variant="destructive"
         size="sm"
         {...props}
-        class={cn("shrink-0 gap-1.5 text-ui", className)}
+        class={cn("shrink-0 gap-1.5 text-[13px]", className)}
         title={m.shell_kill_switch_tooltip()}
       >
         <OctagonXIcon class="size-3.5 shrink-0" />

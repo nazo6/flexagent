@@ -358,7 +358,7 @@
     <div class="flex flex-col gap-2 px-1 pt-1">
       {#if isStopped}
         <div
-          class="border-warn/25 bg-warn-soft/40 text-warn flex flex-wrap items-center gap-2 rounded-md border px-3 py-1.5 text-ui"
+          class="border-warn/25 bg-warn-soft/40 text-warn flex flex-wrap items-center gap-2 rounded-md border px-3 py-1.5 text-[13px]"
         >
           <AlertTriangleIcon class="size-3.5 shrink-0" />
           <span>
@@ -367,7 +367,7 @@
           <Button
             variant="outline"
             size="sm"
-            class="ml-auto h-6 text-2xs"
+            class="ml-auto h-6 text-[11px]"
             disabled={sending || resuming}
             title={m.chat_resume_title()}
             onclick={() => void resumeSession()}
@@ -380,7 +380,7 @@
         </div>
       {:else if node && !nodeAvail.isAvailable}
         <div
-          class="border-danger/25 bg-danger-soft/50 text-danger flex items-center gap-2 rounded-md border px-3 py-1.5 text-ui"
+          class="border-danger/25 bg-danger-soft/50 text-danger flex items-center gap-2 rounded-md border px-3 py-1.5 text-[13px]"
         >
           <AlertTriangleIcon class="size-3.5 shrink-0" />
           <span>
@@ -391,7 +391,7 @@
 
       {#if resumeRequired}
         <div
-          class="border-warn/25 bg-warn-soft/40 text-warn flex flex-wrap items-center gap-2 rounded-md border px-3 py-1.5 text-ui"
+          class="border-warn/25 bg-warn-soft/40 text-warn flex flex-wrap items-center gap-2 rounded-md border px-3 py-1.5 text-[13px]"
         >
           <AlertTriangleIcon class="size-3.5 shrink-0" />
           <span>
@@ -400,7 +400,7 @@
           <Button
             variant="outline"
             size="sm"
-            class="ml-auto h-6 text-2xs"
+            class="ml-auto h-6 text-[11px]"
             disabled={sending || resuming}
             onclick={resumeAndSend}
           >
@@ -417,7 +417,7 @@
           {#each commandMatches as command (command.name)}
             <button
               type="button"
-              class="bg-chip hover:bg-chip-hover border-border flex items-center gap-1 rounded-md border px-2 py-1 text-ui"
+              class="bg-chip hover:bg-chip-hover border-border flex items-center gap-1 rounded-md border px-2 py-1 text-[13px]"
               onclick={() => applyCommand(command.name)}
             >
               <SlashIcon class="size-3" />
@@ -432,7 +432,7 @@
         <div class="flex flex-wrap gap-2">
           {#each attachments as attachment, index (index)}
             <div
-              class="bg-chip border-border flex items-center gap-1.5 rounded-md border px-2 py-1 text-ui"
+              class="bg-chip border-border flex items-center gap-1.5 rounded-md border px-2 py-1 text-[13px]"
             >
               {#if attachment.data_b64}
                 <img
@@ -468,75 +468,85 @@
       class="hidden"
       onchange={onFileInputChange}
     />
-    <Button
-      variant="ghost"
-      size="icon-sm"
-      class="rounded-full"
-      title={m.chat_attach_image()}
-      aria-label={m.chat_attach_image()}
-      onclick={() => fileInput?.click()}
-    >
-      <PaperclipIcon class="size-4" />
-    </Button>
-    {#if node}
+    <div class="flex min-w-0 flex-1 items-center gap-1">
       <Button
         variant="ghost"
         size="icon-sm"
         class="rounded-full"
-        title={m.chat_attach_file()}
-        aria-label={m.chat_attach_file()}
-        onclick={() => (fileBrowserOpen = true)}
+        title={m.chat_attach_image()}
+        aria-label={m.chat_attach_image()}
+        onclick={() => fileInput?.click()}
       >
-        <FileIcon class="size-4" />
+        <PaperclipIcon class="size-4" />
       </Button>
-    {/if}
-    {#if node}
-      <NodeStatusBadge {node} showNodeName={true} class="mr-1 hidden sm:inline-flex" />
-    {/if}
-    {#if capabilities && capabilities.availableModes.length > 0}
-      <PickerPill
-        label={m.chat_mode_label()}
-        value={selectedModeLabel}
-        icon={modeIcon}
-        contentClass="w-[min(20rem,calc(100vw-1.5rem))]"
-      >
-        <div class="max-h-72 overflow-y-auto p-1">
-          {#each modeItems as item (item.value)}
-            <PickerItem
-              selected={item.value === selectedMode}
-              onselect={() => void runControl({ action: "set_mode", mode_id: item.value })}
-            >
-              <span class="block truncate">{item.label}</span>
-              {#if item.description}
-                <span class="text-muted-foreground block truncate text-2xs">
-                  {item.description}
-                </span>
-              {/if}
-            </PickerItem>
-          {/each}
-        </div>
-      </PickerPill>
-    {/if}
+      {#if node}
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          class="rounded-full"
+          title={m.chat_attach_file()}
+          aria-label={m.chat_attach_file()}
+          onclick={() => (fileBrowserOpen = true)}
+        >
+          <FileIcon class="size-4" />
+        </Button>
+      {/if}
+      {#if node}
+        <NodeStatusBadge
+          {node}
+          showNodeName={true}
+          showLabel={false}
+          class="hidden shrink-0 sm:inline-flex"
+        />
+      {/if}
+      {#if capabilities && capabilities.availableModes.length > 0}
+        <PickerPill
+          label={m.chat_mode_label()}
+          value={selectedModeLabel}
+          icon={modeIcon}
+          contentClass="w-[min(20rem,calc(100vw-1.5rem))]"
+        >
+          <div class="max-h-72 overflow-y-auto p-1">
+            {#each modeItems as item (item.value)}
+              <PickerItem
+                selected={item.value === selectedMode}
+                onselect={() => void runControl({ action: "set_mode", mode_id: item.value })}
+              >
+                <span class="block truncate">{item.label}</span>
+                {#if item.description}
+                  <span class="text-muted-foreground block truncate text-[11px]">
+                    {item.description}
+                  </span>
+                {/if}
+              </PickerItem>
+            {/each}
+          </div>
+        </PickerPill>
+      {/if}
 
-    {#each configOptions as option (option.key)}
-      <ConfigOptionPicker
-        {option}
-        onchange={(value) =>
-          void runControl({
-            action: "set_config",
-            key: option.key,
-            value,
-          })}
-      />
-    {/each}
+      {#each configOptions as option (option.key)}
+        <ConfigOptionPicker
+          {option}
+          onchange={(value) =>
+            void runControl({
+              action: "set_config",
+              key: option.key,
+              value,
+            })}
+        />
+      {/each}
+    </div>
 
-    <div class="ml-auto flex items-center gap-2">
+    <div class="ml-1 flex shrink-0 items-center gap-1">
       {#if !sync.wsConnected}
-        <span class="text-danger text-2xs">{m.chat_connection_lost()}</span>
+        <span class="text-danger text-[11px]">{m.chat_connection_lost()}</span>
       {/if}
       <Button
-        variant={autoApprove ? "destructive" : "outline"}
+        variant="outline"
         size="sm"
+        class={`h-7 rounded-full px-2.5 text-xs ${
+          autoApprove ? "border-signal/40 bg-signal-soft text-signal hover:bg-signal-soft" : ""
+        }`}
         disabled={controlBusy || sending}
         title={m.chat_auto_approve_title()}
         onclick={() => void toggleAutoApprove()}
@@ -546,20 +556,22 @@
       </Button>
       {#if canCompact && !isStopped}
         <Button
-          variant="outline"
+          variant="ghost"
           size="sm"
+          class="h-7 rounded-full px-2 text-xs"
           disabled={controlBusy || sending}
           title={m.chat_compact_title()}
           onclick={() => void requestCompact()}
         >
           <Minimize2Icon class="size-3.5" />
-          {m.chat_compact()}
+          <span class="hidden sm:inline">{m.chat_compact()}</span>
         </Button>
       {/if}
       {#if isRunning}
         <Button
           variant="destructive"
           size="sm"
+          class="h-7 rounded-full px-2.5 text-xs"
           disabled={controlBusy}
           title={m.chat_stop_title()}
           onclick={() => void runControl({ action: "cancel" })}

@@ -233,7 +233,7 @@
     <div class="flex flex-wrap items-center gap-1.5">
       <select
         bind:value={nodeId}
-        class="border-input bg-background h-8 rounded-md border px-2 text-ui"
+        class="border-input bg-background h-8 rounded-md border px-2 text-[13px]"
         title={m.settings_target_node()}
       >
         {#each sync.nodes as node (node.node_id)}
@@ -264,7 +264,7 @@
   </div>
 
   {#if busyLabel !== null}
-    <p class="text-muted-foreground text-ui">{busyLabel}</p>
+    <p class="text-muted-foreground text-[13px]">{busyLabel}</p>
   {/if}
 
   {#if onlineNodes.length === 0 && sync.nodes.length > 0}
@@ -287,21 +287,21 @@
             <div class="flex flex-wrap items-center gap-2">
               <BotIcon class="text-muted-foreground size-4" />
               <h2 class="font-medium">{agent.name}</h2>
-              <span class="text-muted-foreground font-mono text-ui">{agent.id}</span>
+              <span class="text-muted-foreground font-mono text-[13px]">{agent.id}</span>
               {#if agent.version !== "-"}
-                <span class="text-muted-foreground text-ui">v{agent.version}</span>
+                <span class="text-muted-foreground text-[13px]">v{agent.version}</span>
               {/if}
             </div>
             {#if agent.description}
-              <p class="text-muted-foreground text-ui">{agent.description}</p>
+              <p class="text-muted-foreground text-[13px]">{agent.description}</p>
             {/if}
             <div class="mt-0.5 flex flex-wrap items-center gap-1.5">
               {#each agent.sources as source (source)}
-                <Badge variant="outline" class="text-2xs">{agentSourceLabel(source)}</Badge>
+                <Badge variant="outline" class="text-[11px]">{agentSourceLabel(source)}</Badge>
               {/each}
             </div>
             {#if agent.external_path}
-              <p class="text-muted-foreground font-mono text-2xs break-all">
+              <p class="text-muted-foreground font-mono text-[11px] break-all">
                 {agent.external_path}
               </p>
             {/if}
@@ -349,7 +349,7 @@
         </div>
 
         {#if agent.installed_nodes.length > 1}
-          <p class="text-muted-foreground text-2xs">
+          <p class="text-muted-foreground text-[11px]">
             {m.settings_available_nodes()}
             {agent.installed_nodes.map((id) => nodeName(id)).join(", ")}
           </p>
@@ -421,7 +421,7 @@
         <Input
           bind:value={catalogQuery}
           placeholder={m.settings_catalog_search_placeholder()}
-          class="h-8 pl-8 text-ui"
+          class="h-8 pl-8 text-[13px]"
         />
       </div>
       <div class="flex max-h-[60vh] flex-col gap-2 overflow-y-auto">
@@ -437,14 +437,15 @@
               <div class="flex min-w-0 flex-col gap-0.5">
                 <div class="flex flex-wrap items-center gap-2">
                   <span class="text-sm font-medium">{agent.name}</span>
-                  <span class="text-muted-foreground font-mono text-ui">{agent.id}</span>
+                  <span class="text-muted-foreground font-mono text-[13px]">{agent.id}</span>
                   {#if agent.version !== "-"}
-                    <span class="text-muted-foreground text-ui">v{agent.version}</span>
+                    <span class="text-muted-foreground text-[13px]">v{agent.version}</span>
                   {/if}
-                  <Badge variant="secondary" class="text-2xs">{m.settings_not_installed()}</Badge>
+                  <Badge variant="secondary" class="text-[11px]">{m.settings_not_installed()}</Badge
+                  >
                 </div>
                 {#if agent.description}
-                  <p class="text-muted-foreground text-ui">
+                  <p class="text-muted-foreground text-[13px]">
                     {agent.description}
                   </p>
                 {/if}
@@ -462,7 +463,7 @@
                     {m.settings_enable_package()}
                   </Button>
                 {:else}
-                  <span class="text-muted-foreground text-2xs">
+                  <span class="text-muted-foreground text-[11px]">
                     {m.settings_manual_install_required()}
                   </span>
                 {/if}
@@ -497,7 +498,7 @@
           bind:value={customForm.id}
           disabled={customEditId !== null}
           placeholder="my-agent"
-          class="font-mono text-ui"
+          class="font-mono text-[13px]"
         />
       </div>
       <div class="grid gap-1.5">
@@ -506,7 +507,7 @@
           id="custom-name"
           bind:value={customForm.name}
           placeholder="My Agent"
-          class="text-ui"
+          class="text-[13px]"
         />
       </div>
       <div class="grid gap-1.5">
@@ -515,9 +516,9 @@
           id="custom-command"
           bind:value={customForm.command}
           placeholder="npx / node / /path/to/agent"
-          class="font-mono text-ui"
+          class="font-mono text-[13px]"
         />
-        <p class="text-muted-foreground text-2xs">
+        <p class="text-muted-foreground text-[11px]">
           {m.settings_command_hint()}
         </p>
       </div>
@@ -527,7 +528,7 @@
           id="custom-args"
           bind:value={customForm.args}
           placeholder="-y @scope/agent-acp"
-          class="font-mono text-ui"
+          class="font-mono text-[13px]"
         />
       </div>
       <div class="grid gap-1.5">
@@ -539,7 +540,7 @@
           id="custom-env"
           bind:value={customForm.env}
           rows="3"
-          class="border-input bg-background focus-visible:ring-ring/40 rounded-md border px-2 py-1.5 font-mono text-ui outline-none focus-visible:ring-1"
+          class="border-input bg-background focus-visible:ring-ring/40 rounded-md border px-2 py-1.5 font-mono text-[13px] outline-none focus-visible:ring-1"
           placeholder="LOG_LEVEL=info&#10;OPENAI_API_KEY=@OPENAI_API_KEY"></textarea>
       </div>
       <Dialog.Footer>

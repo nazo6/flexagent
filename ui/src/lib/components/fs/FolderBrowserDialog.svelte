@@ -52,7 +52,7 @@
         <FolderOpenIcon class="text-primary size-4" />
         <span>{title}</span>
       </Dialog.Title>
-      <Dialog.Description class="text-muted-foreground text-ui">
+      <Dialog.Description class="text-muted-foreground text-[13px]">
         {m.fs_description()}
       </Dialog.Description>
     </Dialog.Header>
@@ -72,8 +72,8 @@
       />
     </div>
 
-    <div class="flex items-center gap-2 pt-1 text-ui">
-      <div class="text-muted-foreground flex min-w-0 items-center gap-1 font-mono text-2xs">
+    <div class="flex items-center gap-2 pt-1 text-[13px]">
+      <div class="text-muted-foreground flex min-w-0 items-center gap-1 font-mono text-[11px]">
         <span class="shrink-0">{m.fs_selected()}</span>
         <span
           class="text-foreground truncate font-medium"
@@ -85,12 +85,12 @@
     </div>
 
     <Dialog.Footer class="gap-2 sm:gap-2">
-      <Button variant="outline" size="sm" class="h-8 text-ui" onclick={() => (open = false)}>
+      <Button variant="outline" size="sm" class="h-8 text-[13px]" onclick={() => (open = false)}>
         {m.common_cancel()}
       </Button>
       <Button
         size="sm"
-        class="h-8 gap-1.5 text-ui"
+        class="h-8 gap-1.5 text-[13px]"
         disabled={pickerLoading || (!selectedPath && !pickerPath)}
         onclick={handleConfirm}
       >

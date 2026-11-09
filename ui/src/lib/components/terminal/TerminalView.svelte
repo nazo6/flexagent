@@ -187,7 +187,7 @@
 </script>
 
 <div class="flex flex-col gap-2">
-  <div class="flex flex-wrap items-center gap-2 text-ui">
+  <div class="flex flex-wrap items-center gap-2 text-[13px]">
     <Badge
       variant={status === "connected"
         ? "secondary"
@@ -231,7 +231,7 @@
         {m.terminal_blocked_notice_before()}<code>localhost:7860</code
         >{m.terminal_blocked_notice_after()}
         {#if statusMessage !== null}
-          <span class="text-muted-foreground block text-ui">{statusMessage}</span>
+          <span class="text-muted-foreground block text-[13px]">{statusMessage}</span>
         {/if}
       </p>
     </div>

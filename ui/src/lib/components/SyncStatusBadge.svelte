@@ -16,10 +16,10 @@
   const isLocalNode = $derived(connection.role === "local_node");
 </script>
 
-<div class={cn("flex flex-wrap items-center gap-1.5 text-ui", className)}>
+<div class={cn("flex flex-wrap items-center gap-1.5 text-[13px]", className)}>
   <Badge
     variant={sync.wsConnected ? "secondary" : "destructive"}
-    class="gap-1 px-1.5 py-0 text-2xs font-normal"
+    class="gap-1 px-1.5 py-0 text-[11px] font-normal"
   >
     {#if sync.wsConnected}
       <WifiIcon class="size-3 shrink-0" />
@@ -33,14 +33,14 @@
   {#if isLocalNode}
     <Badge
       variant={sync.centralConnected ? "secondary" : "outline"}
-      class="px-1.5 py-0 text-2xs font-normal"
+      class="px-1.5 py-0 text-[11px] font-normal"
     >
       {m.shell_central_status({
         status: sync.centralConnected ? m.shell_connected() : m.shell_disconnected(),
       })}
     </Badge>
     {#if sync.unsyncedEventCount > 0}
-      <Badge variant="destructive" class="px-1.5 py-0 text-2xs font-normal">
+      <Badge variant="destructive" class="px-1.5 py-0 text-[11px] font-normal">
         {m.shell_unsynced_count({ count: sync.unsyncedEventCount })}
       </Badge>
     {/if}
@@ -48,7 +48,7 @@
 
   {#if sync.lastSyncedAt !== null}
     <span
-      class="text-muted-foreground text-2xs ml-auto truncate"
+      class="text-muted-foreground text-[11px] ml-auto truncate"
       title={m.shell_last_synced_tooltip({ time: new Date(sync.lastSyncedAt).toLocaleString() })}
     >
       {m.shell_synced_relative({ time: formatRelativeTime(sync.lastSyncedAt) })}

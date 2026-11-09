@@ -95,7 +95,7 @@
       <PlugZapIcon class="text-destructive size-8" />
       <h1 class="text-lg font-semibold">{m.shell_server_unreachable()}</h1>
       <p class="text-muted-foreground text-sm">{connection.error}</p>
-      <p class="text-muted-foreground text-ui">
+      <p class="text-muted-foreground text-[13px]">
         {m.shell_server_down_hint()}
         <code>http://localhost:7860</code>{m.shell_server_down_hint_suffix()}
       </p>
@@ -138,7 +138,7 @@
 
         <a href="/" class="flex items-center gap-1.5 font-semibold text-sm">
           <div
-            class="bg-primary text-primary-foreground flex size-6 items-center justify-center rounded-md font-mono text-2xs font-bold"
+            class="bg-primary text-primary-foreground flex size-6 items-center justify-center rounded-md font-mono text-[11px] font-bold"
           >
             fxg
           </div>

@@ -59,10 +59,10 @@
 <div class="desk-page">
   <div class="flex flex-col gap-1">
     <h1 class="text-xl font-semibold tracking-tight">{m.search_title()}</h1>
-    <p class="text-muted-foreground text-ui">
+    <p class="text-muted-foreground text-[13px]">
       {m.search_description()}
       {m.search_source_label()}
-      <code class="bg-muted rounded px-1 py-0.5 font-mono text-2xs">{roleLabel}</code>
+      <code class="bg-muted rounded px-1 py-0.5 font-mono text-[11px]">{roleLabel}</code>
     </p>
   </div>
 
@@ -75,13 +75,13 @@
   </form>
 
   {#if searched && hits.length === 0}
-    <p class="text-muted-foreground text-ui">{m.search_empty()}</p>
+    <p class="text-muted-foreground text-[13px]">{m.search_empty()}</p>
   {:else if hits.length > 0}
     <ul class="border-border flex list-none flex-col border-t p-0">
       {#each hits as hit (hit.event_id)}
         <li class="border-border flex flex-col gap-1 border-b py-3">
-          <div class="flex flex-wrap items-center gap-2 text-2xs">
-            <a class="text-ui font-medium hover:underline" href={`/sessions/${hit.session_id}`}>
+          <div class="flex flex-wrap items-center gap-2 text-[11px]">
+            <a class="text-[13px] font-medium hover:underline" href={`/sessions/${hit.session_id}`}>
               {sessionTitle(hit.session_id)}
             </a>
             <span class="text-muted-foreground desk-mono">#{hit.node_seq}</span>
@@ -90,7 +90,7 @@
               {formatRelativeTime(hit.created_at)}
             </span>
           </div>
-          <p class="text-ui break-words whitespace-pre-wrap">
+          <p class="text-[13px] break-words whitespace-pre-wrap">
             {#each segments(hit.snippet) as segment}
               {#if segment.match}
                 <mark class="bg-signal-soft text-ink rounded-sm px-0.5">{segment.text}</mark>

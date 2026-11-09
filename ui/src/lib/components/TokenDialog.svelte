@@ -66,7 +66,7 @@
           bind:value={token}
           disabled={busy}
         />
-        <p class="text-muted-foreground text-ui">
+        <p class="text-muted-foreground text-[13px]">
           {#if connection.role === "central_server"}
             {m.token_help_server_prefix()} <code>auth_token</code>
             {m.token_help_server_mid()}

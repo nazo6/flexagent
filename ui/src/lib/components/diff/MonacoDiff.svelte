@@ -99,7 +99,7 @@
   <div bind:this={container} class="h-[60svh] w-full"></div>
   {#if loading}
     <p
-      class="text-muted-foreground bg-background/80 absolute inset-0 flex items-center justify-center text-ui"
+      class="text-muted-foreground bg-background/80 absolute inset-0 flex items-center justify-center text-[13px]"
     >
       {m.diff_loading_editor()}
     </p>
