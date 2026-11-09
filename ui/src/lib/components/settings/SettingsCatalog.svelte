@@ -57,6 +57,13 @@
 
   const targetNode = $derived(isServer ? selectedNode : "");
 
+  /** User-creatable secret kinds; system kinds are registered by the process only. */
+  const userSecretKinds = $derived(
+    isServer && (section === "server" || section === "bootstrap")
+      ? [{ value: "git_token", label: "Git token" }]
+      : [{ value: "agent_env", label: "Agent env" }],
+  );
+
   $effect(() => {
     if (isServer && selectedNode === "" && onlineNodes.length > 0) {
       selectedNode = onlineNodes[0].node_id;
@@ -100,6 +107,10 @@
             ? await sync.connection.client.nodeSecrets(targetNode)
             : await sync.connection.client.secrets();
         secrets = response.secrets;
+        const allowed = userSecretKinds.map((kind) => kind.value);
+        if (!allowed.includes(secretForm.kind)) {
+          secretForm = { ...secretForm, kind: allowed[0] ?? "agent_env" };
+        }
       }
       if (section === "projects" && isServer) {
         await sync.refreshProjects();
@@ -654,6 +665,9 @@
             <Badge variant={secret.configured ? "secondary" : "outline"} class="text-[10px]">
               {secret.configured ? "Configured" : "Missing"}
             </Badge>
+            {#if isSystemSecret(secret.kind)}
+              <Badge variant="outline" class="text-[10px]">System</Badge>
+            {/if}
             {#if secret.used_by.length > 0}
               <span class="text-muted-foreground">used by {secret.used_by.join(", ")}</span>
             {/if}
@@ -685,11 +699,9 @@
           class="border-input bg-background h-9 rounded-md border px-2 text-sm"
           bind:value={secretForm.kind}
         >
-          <option value="agent_env">Agent env</option>
-          <option value="git_token">Git token</option>
-          <option value="node_token">Node token</option>
-          <option value="auth_token">Auth token</option>
-          <option value="vapid_private">VAPID private key</option>
+          {#each userSecretKinds as kind (kind.value)}
+            <option value={kind.value}>{kind.label}</option>
+          {/each}
         </select>
         <Input type="password" placeholder="Value (write-only)" bind:value={secretForm.value} />
         <Button type="submit" disabled={secretForm.name.trim() === "" || secretForm.value === ""}>

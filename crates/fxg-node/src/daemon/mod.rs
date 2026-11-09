@@ -265,8 +265,16 @@ impl DaemonState {
             &db,
             paths.fxg_home(),
             &[
-                ("node_token", fxg_protocol::settings::SecretKind::NodeToken),
-                ("auth_token", fxg_protocol::settings::SecretKind::AuthToken),
+                (
+                    "node_token",
+                    "Node pairing token",
+                    fxg_protocol::settings::SecretKind::NodeToken,
+                ),
+                (
+                    "auth_token",
+                    "Client auth token",
+                    fxg_protocol::settings::SecretKind::AuthToken,
+                ),
             ],
         )
         .await?;

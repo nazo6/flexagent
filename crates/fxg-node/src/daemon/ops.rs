@@ -876,6 +876,12 @@ impl DaemonState {
             .secret(id)
             .await?
             .ok_or_else(|| NodeError::SecretMissing { id: id.clone() })?;
+        if crate::secrets::is_system_kind(&existing.kind) {
+            return Err(NodeError::SecretInvalid(format!(
+                "secret kind {} is managed by the system",
+                existing.kind.as_str()
+            )));
+        }
         crate::secrets::write_secret(
             self.paths().fxg_home(),
             crate::secrets::ROLE_NODE,

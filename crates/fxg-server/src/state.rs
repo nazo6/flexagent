@@ -108,9 +108,14 @@ impl ServerState {
             &db,
             &options.fxg_home,
             &[
-                ("auth_token", fxg_protocol::settings::SecretKind::AuthToken),
+                (
+                    "auth_token",
+                    "Client auth token",
+                    fxg_protocol::settings::SecretKind::AuthToken,
+                ),
                 (
                     "vapid_private",
+                    "VAPID private key",
                     fxg_protocol::settings::SecretKind::VapidPrivate,
                 ),
             ],
@@ -1726,7 +1731,7 @@ impl ClientApiBackend for ServerState {
         Ok(SecretsResponse {
             secrets: ServerState::upsert_secret(self, secret_id, &request)
                 .await
-                .map_err(ApiError::internal)?,
+                .map_err(secret_error)?,
         })
     }
 
@@ -1734,7 +1739,7 @@ impl ClientApiBackend for ServerState {
         Ok(SecretsResponse {
             secrets: ServerState::delete_secret(self, secret_id)
                 .await
-                .map_err(ApiError::internal)?,
+                .map_err(secret_error)?,
         })
     }
 
@@ -1742,7 +1747,7 @@ impl ClientApiBackend for ServerState {
         Ok(SecretsResponse {
             secrets: ServerState::rotate_secret(self, secret_id)
                 .await
-                .map_err(ApiError::internal)?,
+                .map_err(secret_error)?,
         })
     }
 
@@ -1980,6 +1985,15 @@ impl ServerState {
             Ok(result) => result,
             Err(err) => command_failure(command_id.clone(), err),
         }
+    }
+}
+
+fn secret_error(err: ServerError) -> ApiError {
+    match err {
+        ServerError::SecretInvalid(message) => {
+            ApiError::from_code(ErrorCode::SecretInvalid, message)
+        }
+        other => ApiError::internal(other),
     }
 }
 

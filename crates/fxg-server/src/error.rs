@@ -15,4 +15,7 @@ pub enum ServerError {
     /// Socket bind failure, etc.
     #[error("server error: {0}")]
     Server(String),
+    /// The secret ID or value is invalid
+    #[error("invalid secret: {0}")]
+    SecretInvalid(String),
 }

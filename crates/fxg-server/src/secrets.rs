@@ -70,6 +70,14 @@ pub fn is_system_managed(id: &SecretId) -> bool {
     matches!(id.as_str(), "auth_token" | "vapid_private")
 }
 
+/// Whether the kind is only ever created by the process itself (fixed paths).
+pub fn is_system_kind(kind: &SecretKind) -> bool {
+    matches!(
+        kind,
+        SecretKind::NodeToken | SecretKind::AuthToken | SecretKind::VapidPrivate
+    )
+}
+
 fn system_secret_path(fxg_home: &Path, id: &SecretId) -> Option<std::path::PathBuf> {
     match id.as_str() {
         "auth_token" => Some(fxg_home.join(AUTH_TOKEN_FILE_NAME)),
@@ -88,12 +96,12 @@ fn is_configured(fxg_home: &Path, id: &SecretId) -> bool {
 pub async fn register_system_secrets(
     db: &Db,
     fxg_home: &Path,
-    system: &[(&str, SecretKind)],
+    system: &[(&str, &str, SecretKind)],
 ) -> Result<(), ServerError> {
-    for (id, kind) in system {
+    for (id, name, kind) in system {
         let id = SecretId::new(*id);
         if is_configured(fxg_home, &id) {
-            db.upsert_secret_metadata(&id, kind.as_str(), kind).await?;
+            db.upsert_secret_metadata(&id, name, kind).await?;
         }
     }
     Ok(())
@@ -140,18 +148,30 @@ pub async fn upsert_secret(
     request: &UpsertSecretRequest,
 ) -> Result<Vec<SecretSummary>, ServerError> {
     if !id.is_valid() {
-        return Err(ServerError::Server(format!(
+        return Err(ServerError::SecretInvalid(format!(
             "invalid secret id: {}",
             id.as_str()
         )));
     }
     if request.value.is_empty() {
-        return Err(ServerError::Server(
+        return Err(ServerError::SecretInvalid(
             "secret value must not be empty".to_owned(),
         ));
     }
+    if is_system_kind(&request.kind) {
+        return Err(ServerError::SecretInvalid(format!(
+            "secret kind {} is managed by the system",
+            request.kind.as_str()
+        )));
+    }
+    // Agent environment variables are node-owned (`secrets/node/`).
+    if request.kind == SecretKind::AgentEnv {
+        return Err(ServerError::SecretInvalid(
+            "agent environment secrets are owned by a node".to_owned(),
+        ));
+    }
     if system_secret_path(fxg_home, id).is_some() {
-        return Err(ServerError::Server(format!(
+        return Err(ServerError::SecretInvalid(format!(
             "secret {} is managed by the system",
             id.as_str()
         )));
@@ -177,7 +197,7 @@ pub async fn delete_secret(
         )));
     }
     if system_secret_path(fxg_home, id).is_some() {
-        return Err(ServerError::Server(format!(
+        return Err(ServerError::SecretInvalid(format!(
             "secret {} is managed by the system",
             id.as_str()
         )));

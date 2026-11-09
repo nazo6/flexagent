@@ -101,6 +101,14 @@ pub fn is_system_managed(id: &SecretId) -> bool {
     matches!(id.as_str(), "node_token" | "auth_token" | "vapid_private")
 }
 
+/// Whether the kind is only ever created by the process itself (fixed paths).
+pub fn is_system_kind(kind: &SecretKind) -> bool {
+    matches!(
+        kind,
+        SecretKind::NodeToken | SecretKind::AuthToken | SecretKind::VapidPrivate
+    )
+}
+
 /// Fixed path of a system secret (`node_token` / `auth_token` / VAPID key).
 fn system_secret_path(fxg_home: &Path, id: &SecretId) -> Option<PathBuf> {
     match id.as_str() {
@@ -122,12 +130,12 @@ pub fn is_configured(fxg_home: &Path, role: &str, id: &SecretId) -> bool {
 pub async fn register_system_secrets(
     db: &Db,
     fxg_home: &Path,
-    system: &[(&str, SecretKind)],
+    system: &[(&str, &str, SecretKind)],
 ) -> Result<(), NodeError> {
-    for (id, kind) in system {
+    for (id, name, kind) in system {
         let id = SecretId::new(*id);
         if is_configured(fxg_home, ROLE_NODE, &id) || is_configured(fxg_home, ROLE_SERVER, &id) {
-            db.upsert_secret_metadata(&id, kind.as_str(), kind).await?;
+            db.upsert_secret_metadata(&id, name, kind).await?;
         }
     }
     Ok(())
@@ -178,6 +186,20 @@ pub async fn upsert_secret(
     if request.value.is_empty() {
         return Err(NodeError::SecretInvalid(
             "secret value must not be empty".to_owned(),
+        ));
+    }
+    // System secrets (node_token / auth_token / VAPID) are created by the process
+    // with fixed IDs and paths; a user secret cannot take their kind.
+    if is_system_kind(&request.kind) {
+        return Err(NodeError::SecretInvalid(format!(
+            "secret kind {} is managed by the system",
+            request.kind.as_str()
+        )));
+    }
+    // Git tokens are server-owned (`secrets/server/`).
+    if role == ROLE_NODE && request.kind == SecretKind::GitToken {
+        return Err(NodeError::SecretInvalid(
+            "git tokens are owned by the central server".to_owned(),
         ));
     }
     if system_secret_path(fxg_home, id).is_some() {
@@ -330,5 +352,41 @@ mod tests {
             .await,
             Err(NodeError::SecretInvalid(_))
         ));
+    }
+}
+
+#[cfg(test)]
+mod kind_tests {
+    use super::*;
+    use fxg_db::{Db, DbRole};
+
+    #[tokio::test]
+    async fn system_and_foreign_kinds_cannot_be_created_by_users() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db = Db::open_in_memory(DbRole::Node).await.expect("db");
+        for kind in [
+            SecretKind::NodeToken,
+            SecretKind::AuthToken,
+            SecretKind::VapidPrivate,
+            SecretKind::GitToken,
+        ] {
+            let err = upsert_secret(
+                &db,
+                dir.path(),
+                ROLE_NODE,
+                &SecretId::new("user-secret"),
+                &UpsertSecretRequest {
+                    name: "x".to_owned(),
+                    kind: kind.clone(),
+                    value: "v".to_owned(),
+                },
+            )
+            .await
+            .expect_err("kind must be rejected");
+            assert!(
+                matches!(err, NodeError::SecretInvalid(_)),
+                "unexpected error for {kind}: {err}"
+            );
+        }
     }
 }
