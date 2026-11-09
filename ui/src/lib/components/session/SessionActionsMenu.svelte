@@ -32,9 +32,11 @@
   async function toggleArchive() {
     if (busy) return;
     busy = true;
+    // Capture the state before the store updates, so the toast describes the action just taken
+    const wasArchived = archived;
     try {
-      await sync.archiveSession(session.session_id, !archived);
-      toast.success(archived ? m.session_unarchived() : m.session_archived());
+      await sync.archiveSession(session.session_id, !wasArchived);
+      toast.success(wasArchived ? m.session_unarchived() : m.session_archived());
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
     } finally {

@@ -40,6 +40,13 @@ class PinnedStore {
     this.pinnedIds = next;
     savePinnedIds(next);
   }
+
+  /** Removes every pinned session. */
+  clear(): void {
+    if (this.pinnedIds.size === 0) return;
+    this.pinnedIds = new Set();
+    savePinnedIds(this.pinnedIds);
+  }
 }
 
 export const pinned = new PinnedStore();

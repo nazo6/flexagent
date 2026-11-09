@@ -487,10 +487,8 @@
       <Card class="gap-2 p-4">
         <h2 class="font-medium">Server settings</h2>
         <p class="text-muted-foreground text-xs">
-          Server-owned settings live in the hub's <code>server.db</code>. Open the hub Web UI at
-          <a class="underline" href={sync.connection.origin} target="_blank"
-            >{sync.connection.origin}</a
-          >.
+          Server-owned settings live in the hub's <code>server.db</code>. Connect to the central
+          server to edit them.
         </p>
       </Card>
     {:else}

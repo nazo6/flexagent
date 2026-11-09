@@ -13,6 +13,7 @@
   import { problems, type AppProblem } from "#lib/stores/problems.svelte.ts";
   import type { RecoveryAction } from "#lib/generated/bindings.ts";
   import { m } from "#lib/paraglide/messages.js";
+  import { ModeWatcher } from "mode-watcher";
   import LoaderCircleIcon from "@lucide/svelte/icons/loader-circle";
   import MenuIcon from "@lucide/svelte/icons/menu";
   import PlugZapIcon from "@lucide/svelte/icons/plug-zap";
@@ -77,6 +78,7 @@
   }
 </script>
 
+<ModeWatcher />
 <Toaster richColors position="top-center" />
 <TokenDialog />
 

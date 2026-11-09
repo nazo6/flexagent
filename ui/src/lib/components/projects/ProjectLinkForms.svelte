@@ -37,6 +37,13 @@
   /** Node the folder browser browses on. */
   const browserNodeId = $derived(browserTarget === "scan" ? scanNodeId : linkNodeId);
 
+  /** Example target path that matches the selected node's OS. */
+  const linkPathPlaceholder = $derived(
+    nodes.find((node) => node.node_id === linkNodeId)?.os === "windows"
+      ? "D:\\repo\\project"
+      : "/home/user/project",
+  );
+
   /** Initial path for the folder browser. */
   const browserInitialPath = $derived(browserTarget === "scan" ? scanDir : linkPath);
 
@@ -175,9 +182,7 @@
     <Dialog.Header>
       <Dialog.Title>{m.projects_link()}</Dialog.Title>
       <Dialog.Description>
-        {m.projects_link_dialog_description_prefix()}
-        <code>project_key</code>
-        {m.projects_link_dialog_description_suffix()}
+        {m.projects_link_dialog_description()}
       </Dialog.Description>
     </Dialog.Header>
     <form class="flex flex-col gap-4" onsubmit={submitLink}>
@@ -210,7 +215,7 @@
           <Input
             id="link-path"
             bind:value={linkPath}
-            placeholder="D:\\ghq\\github.com\\nazo6\\flexagent"
+            placeholder={linkPathPlaceholder}
             class="flex-1 font-mono text-xs"
           />
           <Button

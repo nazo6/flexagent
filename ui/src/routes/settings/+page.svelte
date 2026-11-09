@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { goto } from "$app/navigation";
   import { page } from "$app/state";
   import AgentManager from "#lib/components/settings/AgentManager.svelte";
   import AuditLog from "#lib/components/settings/AuditLog.svelte";
@@ -15,7 +16,9 @@
   import type { IssueNodeTokenResponse, NodeTokenSummary } from "#lib/generated/bindings.ts";
   import { m } from "#lib/paraglide/messages.js";
   import { sync } from "#lib/stores/app.svelte.ts";
+  import { pinned } from "#lib/stores/pinned.svelte.ts";
   import { createResource } from "#lib/stores/resource.svelte.ts";
+  import { setMode, userPrefersMode } from "mode-watcher";
   import { toast } from "svelte-sonner";
   import CopyIcon from "@lucide/svelte/icons/copy";
   import FileDownIcon from "@lucide/svelte/icons/file-down";
@@ -28,6 +31,23 @@
 
   /** Selected settings tab (reflects deep links such as `?tab=agents`). */
   let activeTab = $state(page.url.searchParams.get("tab") ?? "bootstrap");
+
+  /**
+   * Switch tabs and reflect the choice in the URL (reloads / copied links land on the tab).
+   *
+   * Only a user tab change writes the URL; `replace` keeps tabs out of the back/forward
+   * stack, and `shallow` avoids a router navigation for a query-only change.
+   */
+  function selectTab(value: string): void {
+    activeTab = value;
+    const url = new URL(location.href);
+    if (url.searchParams.get("tab") === value) return;
+    url.searchParams.set("tab", value);
+    void goto(url, { shallow: true, replace: true });
+  }
+
+  /** Theme preference stored in this browser (`system` / `light` / `dark`). */
+  const themePreference = $derived(userPrefersMode.current);
   /** Catalog search query (filters bootstrap and settings rows). */
   let query = $state("");
 
@@ -152,7 +172,7 @@
 
   <Input placeholder="Search settings…" bind:value={query} class="max-w-md" />
 
-  <Tabs.Root bind:value={activeTab}>
+  <Tabs.Root value={activeTab} onValueChange={selectTab}>
     <Tabs.List class="w-full max-w-2xl flex-wrap">
       <Tabs.Trigger value="bootstrap">Bootstrap</Tabs.Trigger>
       <Tabs.Trigger value="machine">This machine</Tabs.Trigger>
@@ -291,12 +311,39 @@
     </Tabs.Content>
 
     <Tabs.Content value="browser" class="mt-2 flex flex-col gap-3">
-      <Card class="gap-2 p-4">
+      <Card class="gap-3 p-4">
         <h2 class="font-medium">Browser</h2>
-        <p class="text-muted-foreground text-xs">
-          Locale, theme and pinned items are stored in this browser's <code>localStorage</code> and never
-          sent to the node or the server.
-        </p>
+        <p class="text-muted-foreground text-xs">{m.settings_browser_storage_note()}</p>
+        <div class="grid max-w-sm gap-1.5">
+          <Label for="browser-theme">{m.settings_browser_theme()}</Label>
+          <select
+            id="browser-theme"
+            class="border-input bg-background h-9 rounded-md border px-2 text-sm"
+            value={themePreference}
+            onchange={(event) => setMode(event.currentTarget.value as "system" | "light" | "dark")}
+          >
+            <option value="system">{m.settings_browser_theme_system()}</option>
+            <option value="light">{m.settings_browser_theme_light()}</option>
+            <option value="dark">{m.settings_browser_theme_dark()}</option>
+          </select>
+        </div>
+        <div class="flex items-center justify-between gap-3">
+          <div class="grid gap-1">
+            <span class="text-sm font-medium">{m.settings_browser_pinned()}</span>
+            <span class="text-muted-foreground text-xs">
+              {m.settings_browser_pinned_count({ count: pinned.pinnedIds.size })}
+            </span>
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={pinned.pinnedIds.size === 0}
+            onclick={() => pinned.clear()}
+          >
+            {m.settings_browser_unpin_all()}
+          </Button>
+        </div>
       </Card>
     </Tabs.Content>
 
