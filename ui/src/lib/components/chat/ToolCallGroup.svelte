@@ -23,7 +23,15 @@
 
   let { tools }: Props = $props();
 
-  let isOpen = $state(true);
+  let userToggled = $state(false);
+  let userIsOpen = $state(false);
+
+  const hasInProgress = $derived(tools.some((t) => t.status === "in_progress"));
+  const hasFailed = $derived(tools.some((t) => t.status === "failed"));
+  const allCompleted = $derived(tools.every((t) => t.status === "completed"));
+
+  const isOpen = $derived(userToggled ? userIsOpen : hasInProgress || hasFailed);
+
   let expandedDetails = $state<Record<string, boolean>>({});
 
   function toggleDetail(toolCallId: string, event: MouseEvent) {
@@ -31,9 +39,10 @@
     expandedDetails[toolCallId] = !expandedDetails[toolCallId];
   }
 
-  const hasInProgress = $derived(tools.some((t) => t.status === "in_progress"));
-  const hasFailed = $derived(tools.some((t) => t.status === "failed"));
-  const allCompleted = $derived(tools.every((t) => t.status === "completed"));
+  function toggleOpen() {
+    userToggled = true;
+    userIsOpen = !isOpen;
+  }
 
   function getToolInfo(tool: ToolItem): { name: string; detail: string } {
     const kindMap: Record<string, string> = {
@@ -78,7 +87,7 @@
   <button
     type="button"
     class="hover:bg-accent/40 flex w-full items-center justify-between px-3 py-2 text-left font-medium select-none"
-    onclick={() => (isOpen = !isOpen)}
+    onclick={toggleOpen}
   >
     <div class="flex items-center gap-2">
       <div class="text-muted-foreground flex items-center gap-1.5">
