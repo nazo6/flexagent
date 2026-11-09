@@ -59,10 +59,11 @@
 
   /** User-creatable secret kinds; system kinds are registered by the process only. */
   const userSecretKinds = $derived(
-    isServer && (section === "server" || section === "bootstrap")
+    section === "server"
       ? [{ value: "git_token", label: "Git token" }]
       : [{ value: "agent_env", label: "Agent env" }],
   );
+  const showSecrets = $derived(section === "machine" || (section === "server" && isServer));
 
   $effect(() => {
     if (isServer && selectedNode === "" && onlineNodes.length > 0) {
@@ -101,9 +102,9 @@
           syncServerForm();
         }
       }
-      if (section === "bootstrap" || section === "machine" || section === "server") {
+      if (section === "machine" || (section === "server" && isServer)) {
         const response =
-          isServer && section === "machine" && targetNode !== ""
+          section === "machine" && isServer && targetNode !== ""
             ? await sync.connection.client.nodeSecrets(targetNode)
             : await sync.connection.client.secrets();
         secrets = response.secrets;
@@ -650,7 +651,7 @@
     </Card>
   {/if}
 
-  {#if section === "bootstrap" || section === "machine" || section === "server"}
+  {#if showSecrets}
     <Card class="gap-3 p-4">
       <h2 class="font-medium">Secrets</h2>
       <p class="text-muted-foreground text-xs">
