@@ -498,15 +498,15 @@ pub trait ClientApiBackend: Clone + Send + Sync + 'static {
 ### P0: 計画整理・ベースライン
 
 - [x] 旧2計画を本ドキュメントへ統合
-- [ ] `mise run check` で緑を確認
+- [x] `mise run check` で緑を確認
 - [x] 旧計画の参照行・廃止済み項目（`rotate` / `SecretKind`）を除去
 - [x] プロトコル互換性の方針を決定（同一リリース同時更新）
 
 ### B0: 小さな DRY
 
 - [x] 秘密ストアを `fxg-db::secrets` に統合（`14dd6cb`）
-- [ ] `SourcedValue` の解決ビルダーを `fxg-protocol::settings` に集約
-- [ ] 監査ログ記録を `Db::record_audit` に統一
+- [x] `SourcedValue` の解決ビルダーを `fxg-protocol::settings` に集約
+- [x] 監査ログ記録を `Db::record_audit` に統一
 
 ### B1: `fxg-protocol`
 
@@ -596,3 +596,11 @@ pub trait ClientApiBackend: Clone + Send + Sync + 'static {
   読み取りは DB クエリが DTO を直接返す方式を第一候補とする。
 - **2026-11-09**: UI のデータ取得は軽量な Resource ヘルパーを試作してから
   判断する。TanStack Query は現時点では導入しない。
+- **2026-11-09 (B0 実装)**: `fxg-protocol::settings` に `sourced_string` /
+  `sourced_option` を追加し、環境変数を注入可能にして単体テストを追加した。
+  `fxg-node` / `fxg-server` の重複ヘルパーを削除し、`source_detail` に既定値
+  や設定キーを CLI フラグとして表示していた誤りも修正した。
+- **2026-11-09 (B0 実装)**: `AuditLogRecord` にビルダーメソッドを追加し、
+  `Db::record_audit` に「失敗時は warn のみ」の共通処理を集約した。
+  `DaemonState::record_audit` と `ServerState::record_audit` は記録の組み立て
+  だけを行う薄いラッパーになった。

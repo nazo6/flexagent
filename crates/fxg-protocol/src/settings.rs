@@ -13,6 +13,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
+use crate::config::EnvLookup;
 use crate::{ProjectId, SecretId};
 
 crate::open_string_enum! {
@@ -62,6 +63,61 @@ impl<T> SourcedValue<T> {
             source_detail: source_detail.map(Into::into),
         }
     }
+}
+
+/// Resolves the origin of an effective bootstrap string.
+///
+/// `effective` is the already merged value (CLI > env > `config.toml`). The
+/// origin is attributed by checking the layers in the order environment →
+/// configuration file → built-in default, falling back to the CLI flag.
+///
+/// The environment lookup is injected so tests do not depend on the process
+/// environment (same convention as [`crate::config::GlobalConfig`]).
+pub fn sourced_string(
+    env: EnvLookup<'_>,
+    effective: String,
+    env_key: &str,
+    file_value: Option<String>,
+    config_key: &str,
+    default_value: Option<&str>,
+    cli_flag: Option<&str>,
+) -> SourcedValue<String> {
+    let env_value = env(env_key);
+    if env_value.as_deref() == Some(effective.as_str()) {
+        return SourcedValue::new(effective, ConfigSource::Env, Some(env_key));
+    }
+    if file_value.as_deref() == Some(effective.as_str()) {
+        return SourcedValue::new(effective, ConfigSource::ConfigFile, Some(config_key));
+    }
+    if env_value.is_none() && file_value.is_none() && default_value == Some(effective.as_str()) {
+        return SourcedValue::new(effective, ConfigSource::Default, Option::<&str>::None);
+    }
+    SourcedValue::new(effective, ConfigSource::Cli, cli_flag)
+}
+
+/// Resolves the origin of an effective optional bootstrap string.
+///
+/// Unlike [`sourced_string`], `None` is the built-in default, so an absent
+/// value is always attributed to the default layer.
+pub fn sourced_option(
+    env: EnvLookup<'_>,
+    effective: Option<String>,
+    env_key: &str,
+    file_value: Option<String>,
+    config_key: &str,
+    cli_flag: Option<&str>,
+) -> SourcedValue<Option<String>> {
+    let Some(value) = effective else {
+        return SourcedValue::new(None, ConfigSource::Default, Option::<&str>::None);
+    };
+    let env_value = env(env_key);
+    if env_value.as_deref() == Some(value.as_str()) {
+        return SourcedValue::new(Some(value), ConfigSource::Env, Some(env_key));
+    }
+    if file_value.as_deref() == Some(value.as_str()) {
+        return SourcedValue::new(Some(value), ConfigSource::ConfigFile, Some(config_key));
+    }
+    SourcedValue::new(Some(value), ConfigSource::Cli, cli_flag)
 }
 
 /// Read-only bootstrap view of a local node (`config.toml` / env / CLI).
@@ -452,4 +508,131 @@ pub struct UpdateProjectProfileRequest {
 pub struct SecretsResponse {
     /// Secret metadata (values are never returned)
     pub secrets: Vec<SecretSummary>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::env_keys;
+
+    fn env_from<'a>(pairs: &'a [(&'a str, &'a str)]) -> impl Fn(&str) -> Option<String> + 'a {
+        move |key| {
+            pairs
+                .iter()
+                .find(|(name, _)| *name == key)
+                .map(|(_, value)| (*value).to_owned())
+        }
+    }
+
+    #[test]
+    fn sourced_string_attributes_env_before_file() {
+        let env = env_from(&[(env_keys::LOG_LEVEL, "debug")]);
+        let value = sourced_string(
+            &env,
+            "debug".to_owned(),
+            env_keys::LOG_LEVEL,
+            Some("debug".to_owned()),
+            "log.level",
+            Some("info"),
+            Some("--log-level"),
+        );
+        assert_eq!(value.source, ConfigSource::Env);
+        assert_eq!(value.source_detail.as_deref(), Some(env_keys::LOG_LEVEL));
+    }
+
+    #[test]
+    fn sourced_string_attributes_config_file() {
+        let env = env_from(&[(env_keys::LOG_LEVEL, "debug")]);
+        let value = sourced_string(
+            &env,
+            "warn".to_owned(),
+            env_keys::LOG_LEVEL,
+            Some("warn".to_owned()),
+            "log.level",
+            Some("info"),
+            Some("--log-level"),
+        );
+        assert_eq!(value.source, ConfigSource::ConfigFile);
+        assert_eq!(value.source_detail.as_deref(), Some("log.level"));
+    }
+
+    #[test]
+    fn sourced_string_attributes_default_when_no_layer_is_set() {
+        let env = env_from(&[]);
+        let value = sourced_string(
+            &env,
+            "info".to_owned(),
+            env_keys::LOG_LEVEL,
+            None,
+            "log.level",
+            Some("info"),
+            Some("--log-level"),
+        );
+        assert_eq!(value.source, ConfigSource::Default);
+        assert_eq!(value.source_detail, None);
+    }
+
+    #[test]
+    fn sourced_string_falls_back_to_cli() {
+        let env = env_from(&[]);
+        let value = sourced_string(
+            &env,
+            "trace".to_owned(),
+            env_keys::LOG_LEVEL,
+            None,
+            "log.level",
+            Some("info"),
+            Some("--log-level"),
+        );
+        assert_eq!(value.source, ConfigSource::Cli);
+        assert_eq!(value.source_detail.as_deref(), Some("--log-level"));
+    }
+
+    #[test]
+    fn sourced_option_attributes_layers() {
+        let env = env_from(&[(env_keys::CENTRAL_SERVER_URL, "ws://env")]);
+        let value = sourced_option(
+            &env,
+            Some("ws://env".to_owned()),
+            env_keys::CENTRAL_SERVER_URL,
+            Some("ws://file".to_owned()),
+            "node.central_server_url",
+            Some("--server-url"),
+        );
+        assert_eq!(value.source, ConfigSource::Env);
+
+        let env = env_from(&[]);
+        let value = sourced_option(
+            &env,
+            Some("ws://file".to_owned()),
+            env_keys::CENTRAL_SERVER_URL,
+            Some("ws://file".to_owned()),
+            "node.central_server_url",
+            Some("--server-url"),
+        );
+        assert_eq!(value.source, ConfigSource::ConfigFile);
+
+        let value = sourced_option(
+            &env,
+            Some("ws://cli".to_owned()),
+            env_keys::CENTRAL_SERVER_URL,
+            Some("ws://file".to_owned()),
+            "node.central_server_url",
+            Some("--server-url"),
+        );
+        assert_eq!(value.source, ConfigSource::Cli);
+        assert_eq!(value.source_detail.as_deref(), Some("--server-url"));
+
+        let value = sourced_option(
+            &env,
+            None,
+            env_keys::CENTRAL_SERVER_URL,
+            Some("ws://file".to_owned()),
+            "node.central_server_url",
+            Some("--server-url"),
+        );
+        assert_eq!(value.source, ConfigSource::Default);
+        assert_eq!(value.value, None);
+        assert_eq!(value.source_detail, None);
+    }
 }

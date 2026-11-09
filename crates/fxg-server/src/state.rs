@@ -42,7 +42,7 @@ use fxg_protocol::settings::{
     ConfigSource, NodeSettingsSnapshot, ProjectProfile, SecretSummary, SecretsResponse,
     ServerBootstrapView, ServerSettingsSnapshot, SourcedValue, UpdateAgentSettingsRequest,
     UpdateNodeSettingsRequest, UpdateProjectProfileRequest, UpdateServerSettingsRequest,
-    UpsertSecretRequest,
+    UpsertSecretRequest, sourced_option, sourced_string,
 };
 use fxg_protocol::{NodeId, ProjectId, SecretId};
 
@@ -177,37 +177,42 @@ impl ServerState {
                 .then(|| fxg_protocol::config::ENV_FXG_HOME.to_owned()),
         );
         let listen_addr = sourced_string(
+            &env,
             self.inner.options.listen_addr.clone(),
             fxg_protocol::config::env_keys::SERVER_LISTEN_ADDR,
             config.server.listen_addr.clone(),
             "server.listen_addr",
-            fxg_protocol::config::ServerBootstrapConfig::DEFAULT_LISTEN_ADDR,
+            Some(fxg_protocol::config::ServerBootstrapConfig::DEFAULT_LISTEN_ADDR),
+            Some("--listen"),
         );
         let allowed_hosts = self.inner.options.allowed_hosts.clone();
         let allowed_origins = self.inner.options.allowed_origins.clone();
         let log = &self.inner.options.log;
         let log_level = sourced_string(
+            &env,
             log.level.clone().unwrap_or_else(|| "info".to_owned()),
             fxg_protocol::config::env_keys::LOG_LEVEL,
             config.log.level.clone(),
             "log.level",
-            "info",
+            Some("info"),
+            Some("--log-level"),
         );
-        let log_file = SourcedValue::new(
+        let log_file = sourced_option(
+            &env,
             log.file.clone().filter(|value| value != "-"),
-            if log.file == config.log.file {
-                ConfigSource::ConfigFile
-            } else {
-                ConfigSource::Cli
-            },
+            fxg_protocol::config::env_keys::LOG_FILE,
+            config.log.file.clone(),
+            "log.file",
             Some("--log-file"),
         );
         let log_format = sourced_string(
+            &env,
             log.format.clone().unwrap_or_else(|| "text".to_owned()),
             fxg_protocol::config::env_keys::LOG_FORMAT,
             config.log.format.clone(),
             "log.format",
-            "text",
+            Some("text"),
+            Some("--log-format"),
         );
         let log_no_color = SourcedValue::new(
             log.no_color,
@@ -457,17 +462,12 @@ impl ServerState {
         session_id: Option<&str>,
         details: impl Into<fxg_protocol::common::RawJson>,
     ) {
-        let mut audit = fxg_db::AuditLogRecord::new(
-            action.clone(),
-            client.ip.clone(),
-            client.auth_subject.clone(),
-        );
-        audit.session_id = session_id.map(str::to_owned);
-        audit.client_user_agent = client.user_agent.clone();
-        audit.details = details.into();
-        if let Err(err) = self.inner.db.append_audit_log(&audit).await {
-            tracing::warn!("failed to record audit log ({action}): {err}");
-        }
+        let audit =
+            fxg_db::AuditLogRecord::new(action, client.ip.clone(), client.auth_subject.clone())
+                .with_session(session_id)
+                .with_user_agent(client.user_agent.as_deref())
+                .with_details(details);
+        self.inner.db.record_audit(&audit).await;
     }
 
     /// Resolves the executing node for a session (`NODE_OFFLINE` is returned early here).
@@ -1932,29 +1932,4 @@ fn secret_error(err: ServerError) -> ApiError {
         }
         other => ApiError::internal(other),
     }
-}
-
-/// Source inference for read-only bootstrap values.
-fn sourced_string(
-    current: String,
-    env_key: &str,
-    file_value: Option<String>,
-    config_key: &str,
-    default_value: &str,
-) -> SourcedValue<String> {
-    if let Some(value) = fxg_protocol::config::process_env(env_key)
-        && value == current
-    {
-        return SourcedValue::new(current, ConfigSource::Env, Some(env_key));
-    }
-    if file_value.as_deref() == Some(current.as_str()) {
-        return SourcedValue::new(current, ConfigSource::ConfigFile, Some(config_key));
-    }
-    if file_value.is_none()
-        && fxg_protocol::config::process_env(env_key).is_none()
-        && current == default_value
-    {
-        return SourcedValue::new(current, ConfigSource::Default, Option::<&str>::None);
-    }
-    SourcedValue::new(current, ConfigSource::Cli, Some(config_key))
 }

@@ -67,18 +67,16 @@ impl DaemonState {
         session_id: Option<&str>,
         details: impl Into<fxg_protocol::common::RawJson>,
     ) {
-        let mut audit = fxg_db::AuditLogRecord::new(
-            action.clone(),
+        let audit = fxg_db::AuditLogRecord::new(
+            action,
             source.client_ip.clone(),
             source.auth_subject.clone(),
-        );
-        audit.session_id = session_id.map(str::to_owned);
-        audit.node_id = Some(self.node_id().to_owned());
-        audit.client_user_agent = source.user_agent.clone();
-        audit.details = details.into();
-        if let Err(err) = self.db().append_audit_log(&audit).await {
-            tracing::warn!("failed to record audit log ({action}): {err}");
-        }
+        )
+        .with_session(session_id)
+        .with_node_id(Some(self.node_id()))
+        .with_user_agent(source.user_agent.as_deref())
+        .with_details(details);
+        self.db().record_audit(&audit).await;
     }
 
     /// Archives/restores a session (shared implementation for IPC / Client REST / central server relay).
@@ -696,48 +694,8 @@ use fxg_protocol::SecretId;
 use fxg_protocol::config::{GlobalConfig, process_env};
 use fxg_protocol::settings::{
     ConfigSource, NodeBootstrapView, NodeSettingsSnapshot, SecretSummary, SourcedValue,
-    UpsertSecretRequest,
+    UpsertSecretRequest, sourced_option, sourced_string,
 };
-
-fn sourced_string(
-    current: String,
-    env_key: &str,
-    file_value: Option<String>,
-    config_key: &str,
-    cli_flag: &str,
-) -> SourcedValue<String> {
-    let env_value = process_env(env_key).filter(|value| value == &current);
-    if env_value.is_some() {
-        return SourcedValue::new(current, ConfigSource::Env, Some(env_key));
-    }
-    if file_value.as_deref() == Some(current.as_str()) {
-        return SourcedValue::new(current, ConfigSource::ConfigFile, Some(config_key));
-    }
-    if file_value.is_none() && process_env(env_key).is_none() && current == cli_flag {
-        // Caller passes the default value in `cli_flag` only for this comparison.
-        return SourcedValue::new(current, ConfigSource::Default, Option::<&str>::None);
-    }
-    SourcedValue::new(current, ConfigSource::Cli, Some(cli_flag))
-}
-
-fn sourced_option(
-    current: Option<String>,
-    env_key: &str,
-    file_value: Option<String>,
-    config_key: &str,
-    cli_flag: &str,
-) -> SourcedValue<Option<String>> {
-    if let Some(value) = current.clone() {
-        if process_env(env_key).as_deref() == Some(value.as_str()) {
-            return SourcedValue::new(Some(value), ConfigSource::Env, Some(env_key));
-        }
-        if file_value.as_deref() == Some(value.as_str()) {
-            return SourcedValue::new(Some(value), ConfigSource::ConfigFile, Some(config_key));
-        }
-        return SourcedValue::new(Some(value), ConfigSource::Cli, Some(cli_flag));
-    }
-    SourcedValue::new(None::<String>, ConfigSource::Default, Option::<&str>::None)
-}
 
 impl DaemonState {
     /// Builds the typed settings snapshot exposed by `GET /api/v1/settings/node`.
@@ -763,48 +721,58 @@ impl DaemonState {
         );
 
         let node_id = sourced_string(
+            &env,
             self.config().node_id.clone(),
             fxg_protocol::config::env_keys::NODE_ID,
             config.node.node_id.clone(),
             "node.node_id",
-            "",
+            None,
+            None,
         );
         let listen_addr = sourced_string(
+            &env,
             self.config().listen_addr.clone(),
             fxg_protocol::config::env_keys::NODE_LISTEN_ADDR,
             config.node.listen_addr.clone(),
             "node.listen_addr",
-            fxg_protocol::config::NodeBootstrapConfig::DEFAULT_LISTEN_ADDR,
+            Some(fxg_protocol::config::NodeBootstrapConfig::DEFAULT_LISTEN_ADDR),
+            Some("--listen"),
         );
         let central_server_url = sourced_option(
+            &env,
             self.config().central_server_url.clone(),
             fxg_protocol::config::env_keys::CENTRAL_SERVER_URL,
             config.node.central_server_url.clone(),
             "node.central_server_url",
-            "--server-url",
+            Some("--server-url"),
         );
 
         let log = &self.config().log;
         let log_level = sourced_string(
+            &env,
             log.level.clone().unwrap_or_else(|| "info".to_owned()),
             fxg_protocol::config::env_keys::LOG_LEVEL,
             config.log.level.clone(),
             "log.level",
-            "info",
+            Some("info"),
+            Some("--log-level"),
         );
         let log_file = sourced_option(
+            &env,
             log.file.clone().filter(|value| value != "-"),
             fxg_protocol::config::env_keys::LOG_FILE,
             config.log.file.clone(),
             "log.file",
-            "--log-file",
+            Some("--log-file"),
         );
         let log_format = sourced_string(
+            &env,
             log.format.clone().unwrap_or_else(|| "text".to_owned()),
             fxg_protocol::config::env_keys::LOG_FORMAT,
             config.log.format.clone(),
             "log.format",
-            "text",
+            Some("text"),
+            Some("--log-format"),
         );
         let log_no_color = SourcedValue::new(
             log.no_color,

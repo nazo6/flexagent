@@ -404,6 +404,18 @@ impl Db {
         audit::append_audit_log(&self.pool, record).await
     }
 
+    /// Records an audit log entry and only warns when the insert fails.
+    ///
+    /// Audit logging must never fail the operation that produced it.
+    pub async fn record_audit(&self, record: &audit::AuditLogRecord) {
+        if let Err(err) = self.append_audit_log(record).await {
+            tracing::warn!(
+                action = %record.action,
+                "failed to record audit log: {err}"
+            );
+        }
+    }
+
     // ------------------------------------------------------------------
     // Web Push subscriptions (central server)
     // ------------------------------------------------------------------

@@ -86,6 +86,30 @@ impl AuditLogRecord {
             details: RawJson::default(),
         }
     }
+
+    /// Sets the related session.
+    pub fn with_session(mut self, session_id: Option<&str>) -> Self {
+        self.session_id = session_id.map(str::to_owned);
+        self
+    }
+
+    /// Sets the target node (the node itself when recorded on the node side).
+    pub fn with_node_id(mut self, node_id: Option<&str>) -> Self {
+        self.node_id = node_id.map(str::to_owned);
+        self
+    }
+
+    /// Sets the client User-Agent.
+    pub fn with_user_agent(mut self, user_agent: Option<&str>) -> Self {
+        self.client_user_agent = user_agent.map(str::to_owned);
+        self
+    }
+
+    /// Sets the operation details.
+    pub fn with_details(mut self, details: impl Into<RawJson>) -> Self {
+        self.details = details.into();
+        self
+    }
 }
 
 /// Records a single audit log entry and returns the assigned `id`.
