@@ -1,0 +1,777 @@
+//! CLI subcommands (argument definitions and execution).
+//!
+//! The `usage` derives are the single source of truth; the KDL spec, shell
+//! completions, manpage and Markdown reference are generated from
+//! `__usage_spec__` (design: `docs/05-cli-and-pwa-ui.md` §1).
+use std::path::PathBuf;
+
+use anyhow::{Context, Result, bail};
+use fxg_acp::registry::{AcpRegistry, AgentListEntry, LocalSource};
+use fxg_protocol::common::AgentAuthMethodKind;
+use usage::Args;
+
+use crate::client::{DaemonClient, print_table, truncate};
+
+use super::*;
+
+// ----------------------------------------------------------------------
+// fxg provisioners list / test
+// ----------------------------------------------------------------------
+
+/// `fxg provisioners <command>`
+#[derive(Debug, Args)]
+#[usage(run_async, arg_required_else_help)]
+pub struct ProvisionersArgs {
+    #[usage(subcommand)]
+    command: ProvisionersCommands,
+}
+
+/// Provisioner management subcommands.
+#[derive(Debug, usage::Subcommands)]
+#[usage(run_async)]
+pub enum ProvisionersCommands {
+    /// List the ephemeral VM provisioners defined in the config file
+    List(ProvisionersListArgs),
+    /// Verify that a provisioner starts and completes the `fxg daemon --stdio` handshake
+    Test(ProvisionersTestArgs),
+}
+
+/// `fxg provisioners list`
+#[derive(Debug, Args)]
+pub struct ProvisionersListArgs {
+    /// Output as JSON
+    #[usage(long)]
+    json: bool,
+}
+
+impl usage::RunAsync for ProvisionersListArgs {
+    type Output = Result<()>;
+
+    async fn run_async(self) -> Self::Output {
+        let env = fxg_protocol::config::process_env;
+        let server = crate::server_api::ServerClient::from_config(&env)?;
+        let response = server.provisioners().await?;
+        let provisioners = response.provisioners;
+        if self.json {
+            println!("{}", serde_json::to_string_pretty(&provisioners)?);
+            return Ok(());
+        }
+        if provisioners.is_empty() {
+            println!("(no provisioners defined; edit them in the hub Web UI)");
+            return Ok(());
+        }
+        let rows: Vec<Vec<String>> = provisioners
+            .iter()
+            .map(|entry| {
+                vec![
+                    entry.name.clone(),
+                    entry.description.clone().unwrap_or_default(),
+                    entry.command.clone(),
+                    entry
+                        .idle_timeout_secs
+                        .map(|secs| format!("{secs}s"))
+                        .unwrap_or_else(|| "-".to_owned()),
+                ]
+            })
+            .collect();
+        print_table(&["NAME", "DESCRIPTION", "COMMAND", "IDLE"], &rows);
+        Ok(())
+    }
+}
+
+/// `fxg provisioners test <name>`
+#[derive(Debug, Args)]
+pub struct ProvisionersTestArgs {
+    /// Name of the provisioner to verify
+    name: String,
+}
+
+impl usage::RunAsync for ProvisionersTestArgs {
+    type Output = Result<()>;
+
+    async fn run_async(self) -> Self::Output {
+        let env = fxg_protocol::config::process_env;
+        let server = crate::server_api::ServerClient::from_config(&env)?;
+        eprintln!(
+            "testing provisioner '{}' via {} (bootstrap can take a few minutes)",
+            self.name,
+            server.base_url()
+        );
+        let response = server.provisioner_test(&self.name).await?;
+        for line in &response.log_lines {
+            eprintln!("  {line}");
+        }
+        if response.ok {
+            println!(
+                "ok: {} (node {})",
+                response.name,
+                response.node_id.as_ref().map_or("-", |id| id.as_str())
+            );
+            return Ok(());
+        }
+        bail!(
+            "provisioner '{}' failed: {}",
+            response.name,
+            response.error.as_deref().unwrap_or("unknown error")
+        );
+    }
+}
+
+// ----------------------------------------------------------------------
+// fxg bootstrap-workspace
+// ----------------------------------------------------------------------
+
+/// Arguments of `fxg bootstrap-workspace` (run by the provisioner inside an
+/// ephemeral VM).
+#[derive(Debug, Args)]
+pub struct BootstrapWorkspaceArgs {
+    /// Git URL to clone from
+    #[usage(long)]
+    repo: String,
+    /// Target branch (defaults to the remote's default branch)
+    #[usage(long)]
+    branch: Option<String>,
+    /// Destination directory (default: /tmp/workspace)
+    #[usage(long)]
+    dir: Option<String>,
+    /// Project profile JSON (setup commands and env) written by the server
+    #[usage(long)]
+    profile: Option<String>,
+}
+
+impl usage::RunAsync for BootstrapWorkspaceArgs {
+    type Output = Result<()>;
+
+    async fn run_async(self) -> Self::Output {
+        let env = fxg_protocol::config::process_env;
+        let dir = self
+            .dir
+            .clone()
+            .unwrap_or_else(|| "/tmp/workspace".to_owned());
+        let profile = match &self.profile {
+            Some(path) => Some(
+                serde_json::from_str::<fxg_protocol::settings::ProjectProfile>(
+                    &std::fs::read_to_string(path)
+                        .with_context(|| format!("failed to read profile {path}"))?,
+                )
+                .with_context(|| format!("failed to parse project profile {path}"))?,
+            ),
+            None => match env("FXG_PROJECT_PROFILE_B64") {
+                Some(encoded) => {
+                    use base64::Engine as _;
+                    let bytes = base64::engine::general_purpose::STANDARD
+                        .decode(encoded.trim().as_bytes())
+                        .context("failed to decode FXG_PROJECT_PROFILE_B64")?;
+                    Some(
+                        serde_json::from_slice::<fxg_protocol::settings::ProjectProfile>(&bytes)
+                            .context("failed to parse FXG_PROJECT_PROFILE_B64")?,
+                    )
+                }
+                None => None,
+            },
+        };
+        let (setup, profile_env) = profile
+            .map(|profile| (profile.bootstrap_setup, profile.bootstrap_env))
+            .unwrap_or_default();
+        let options = fxg_node::bootstrap::BootstrapOptions {
+            repo: self.repo.clone(),
+            branch: self.branch.clone(),
+            dir: PathBuf::from(&dir),
+            fxg_home: fxg_protocol::config::fxg_home(&env),
+            install_toolchain: true,
+            extra_tools: Vec::new(),
+            setup,
+            env: profile_env,
+        };
+        let outcome = fxg_node::bootstrap::bootstrap_workspace(options)
+            .await
+            .context("fxg bootstrap-workspace failed")?;
+        // stdout is reserved for the protocol, so the result goes to stderr too
+        eprintln!(
+            "[fxg-bootstrap] ready: {} (tools: {})",
+            outcome.dir.display(),
+            outcome.tools.join(", ")
+        );
+        Ok(())
+    }
+}
+
+// ----------------------------------------------------------------------
+// fxg git-askpass (GIT_ASKPASS helper)
+// ----------------------------------------------------------------------
+
+/// Arguments of `fxg git-askpass` (an internal command Git invokes as
+/// `GIT_ASKPASS`).
+#[derive(Debug, Args)]
+pub struct GitAskpassArgs {
+    /// Prompt string passed by Git (`Username for '...'` / `Password for '...'`)
+    prompt: String,
+}
+
+impl usage::RunAsync for GitAskpassArgs {
+    type Output = Result<()>;
+
+    async fn run_async(self) -> Self::Output {
+        let mut client = DaemonClient::connect().await?;
+        let (username, token, error) = client.git_credential(&self.prompt).await?;
+        if let Some(error) = error {
+            bail!("{error}");
+        }
+        let value = if fxg_node::credentials::prompt_wants_username(&self.prompt) {
+            username
+        } else {
+            token.context("no credential token is available for this prompt")?
+        };
+        println!("{value}");
+        Ok(())
+    }
+}
+
+// ----------------------------------------------------------------------
+// fxg agents <command>
+// ----------------------------------------------------------------------
+
+/// `fxg agents <command>`
+#[derive(Debug, Args)]
+#[usage(run_async, arg_required_else_help)]
+pub struct AgentsArgs {
+    #[usage(subcommand)]
+    command: AgentsCommands,
+}
+
+/// ACP Registry agent management.
+#[derive(Debug, usage::Subcommands)]
+#[usage(run_async)]
+pub enum AgentsCommands {
+    /// List available agents and their installation state
+    List(AgentsListArgs),
+    /// Enable an npx/uvx agent (or report that a preset is already available)
+    Enable(AgentsInstallArgs),
+    /// Update the registry index and installed agents
+    Update(AgentsUpdateArgs),
+    /// Disable an npx/uvx agent or remove a custom definition
+    Disable(AgentsRemoveArgs),
+    /// Log in to an agent using its advertised ACP authentication methods
+    Login(AgentsLoginArgs),
+    /// Log out from an agent (when the agent supports it)
+    Logout(AgentsLogoutArgs),
+}
+
+/// Builds the ACP Registry from the node-owned agent settings.
+async fn acp_registry() -> Result<AcpRegistry> {
+    let env = fxg_protocol::config::process_env;
+    let paths = fxg_node::NodePaths::from_env(&env);
+    let db = node_db(&env).await?;
+    let settings = db.ensure_agent_settings().await?;
+    Ok(AcpRegistry::new(
+        paths.fxg_home().to_path_buf(),
+        &settings,
+        db.custom_agents().await?,
+        db.enabled_package_agents().await?,
+    ))
+}
+
+/// `fxg agents list`
+#[derive(Debug, Args)]
+pub struct AgentsListArgs {
+    /// Also show agents that are not installed in the ACP Registry
+    #[usage(long)]
+    all: bool,
+    /// Output as JSON
+    #[usage(long)]
+    json: bool,
+}
+
+/// Agent launch-form labels (for display).
+fn source_labels(entry: &AgentListEntry) -> Vec<&'static str> {
+    let mut labels = Vec::new();
+    if entry.custom.is_some() {
+        labels.push("custom");
+    }
+    for source in &entry.sources {
+        labels.push(match source {
+            LocalSource::External(_) => "external",
+            LocalSource::Npx => "npx",
+            LocalSource::Uvx => "uvx",
+        });
+    }
+    labels
+}
+
+#[derive(serde::Serialize)]
+struct AgentListOutput<'a> {
+    id: &'a str,
+    name: &'a str,
+    version: &'a str,
+    description: Option<&'a str>,
+    available: bool,
+    registry: bool,
+    package_available: bool,
+    sources: Vec<&'static str>,
+    custom: bool,
+}
+
+impl usage::RunAsync for AgentsListArgs {
+    type Output = Result<()>;
+
+    async fn run_async(self) -> Self::Output {
+        let registry = acp_registry().await?;
+        let index = registry
+            .index(false)
+            .await
+            .context("failed to load ACP registry")?;
+        let entries = registry.list(&index, self.all);
+        if self.json {
+            let value: Vec<AgentListOutput<'_>> = entries
+                .iter()
+                .map(|entry| AgentListOutput {
+                    id: &entry.id,
+                    name: &entry.name,
+                    version: &entry.version,
+                    description: entry.description.as_deref(),
+                    available: entry.is_available(),
+                    registry: entry.registry,
+                    package_available: entry.package_available,
+                    sources: source_labels(entry),
+                    custom: entry.custom.is_some(),
+                })
+                .collect();
+            println!("{}", serde_json::to_string_pretty(&value)?);
+            return Ok(());
+        }
+        if entries.is_empty() {
+            println!(
+                "(no agents available; use `fxg agents list --all` to show the whole registry)"
+            );
+            return Ok(());
+        }
+        let rows: Vec<Vec<String>> = entries
+            .iter()
+            .map(|entry| {
+                vec![
+                    entry.id.clone(),
+                    truncate(&entry.name, 24),
+                    entry.version.clone(),
+                    if entry.is_available() { "yes" } else { "-" }.to_owned(),
+                    source_labels(entry).join(","),
+                ]
+            })
+            .collect();
+        print_table(&["ID", "NAME", "VERSION", "AVAILABLE", "SOURCES"], &rows);
+        Ok(())
+    }
+}
+
+/// `fxg agents enable <id>`
+#[derive(Debug, Args)]
+pub struct AgentsInstallArgs {
+    /// Agent ID (aliases allowed)
+    id: String,
+    /// Version to install (only versions offered by the registry)
+    #[usage(long)]
+    version: Option<String>,
+}
+
+impl usage::RunAsync for AgentsInstallArgs {
+    type Output = Result<()>;
+
+    async fn run_async(self) -> Self::Output {
+        let registry = acp_registry().await?;
+        let id = registry.resolve_alias(&self.id);
+        if let Some(path) = registry.preset_available(&id) {
+            println!(
+                "{id} is already available on PATH ({}); no installation is needed",
+                path.display()
+            );
+            return Ok(());
+        }
+        let index = registry
+            .index(false)
+            .await
+            .context("failed to load ACP registry")?;
+        let agent = index.find(&id).with_context(|| {
+            format!("agent not found in the registry: {id} (`fxg agents list --all`)")
+        })?;
+        if agent.distribution.npx.is_some() || agent.distribution.uvx.is_some() {
+            let env = fxg_protocol::config::process_env;
+            node_db(&env)
+                .await?
+                .set_package_agent_enabled(&id, true)
+                .await?;
+            println!("enabled package agent {id} (npx/uvx)");
+            return Ok(());
+        }
+        bail!(
+            "fxg does not download binaries automatically. Install the binary from the tool's distributor and put it on PATH, or configure it as a custom agent (in `config.toml` or the Web UI)"
+        );
+    }
+}
+
+/// `fxg agents update`
+#[derive(Debug, Args)]
+pub struct AgentsUpdateArgs {}
+
+impl usage::RunAsync for AgentsUpdateArgs {
+    type Output = Result<()>;
+
+    async fn run_async(self) -> Self::Output {
+        let registry = acp_registry().await?;
+        // Force a refetch of the index
+        let index = registry
+            .index(true)
+            .await
+            .context("failed to fetch ACP registry")?;
+        println!("updated ACP registry index ({} agents)", index.agents.len());
+        Ok(())
+    }
+}
+
+/// `fxg agents disable <id>`
+#[derive(Debug, Args)]
+pub struct AgentsRemoveArgs {
+    /// Agent ID (aliases allowed)
+    id: String,
+}
+
+impl usage::RunAsync for AgentsRemoveArgs {
+    type Output = Result<()>;
+
+    async fn run_async(self) -> Self::Output {
+        let registry = acp_registry().await?;
+        let id = registry.resolve_alias(&self.id);
+        let env = fxg_protocol::config::process_env;
+        let db = node_db(&env).await?;
+        let removed_custom = db.delete_custom_agent(&id).await? > 0;
+        let disabled_package = if registry.enabled_package_agents().contains(&id) {
+            db.set_package_agent_enabled(&id, false).await?;
+            true
+        } else {
+            false
+        };
+        if removed_custom || disabled_package {
+            println!("removed/disabled {id}");
+        } else {
+            println!("{id} is not configured");
+        }
+        Ok(())
+    }
+}
+
+/// `fxg agents login <id>`
+#[derive(Debug, Args)]
+pub struct AgentsLoginArgs {
+    /// Agent ID (aliases allowed)
+    id: String,
+    /// Authentication method ID (omitted: prefer a terminal method)
+    #[usage(long)]
+    method: Option<String>,
+}
+
+/// Resolves a launch spec for `agents login/logout`.
+async fn resolve_agent_launch_spec(
+    registry: &AcpRegistry,
+    id: &str,
+) -> Result<fxg_acp::AgentLaunchSpec> {
+    // Custom definitions and presets are resolved before the registry index,
+    // so an offline/missing registry still allows logging in to a local CLI.
+    let index = match registry.index(false).await {
+        Ok(index) => index,
+        Err(err) => {
+            tracing::warn!(agent_id = id, "failed to load ACP registry: {err}");
+            fxg_acp::registry::RegistryIndex::default()
+        }
+    };
+    registry
+        .launch_spec(id, &index, &[])
+        .await
+        .with_context(|| format!("cannot launch {id}"))
+}
+
+/// Selects an authentication method (explicit ID, terminal preference, or the
+/// only advertised method).
+pub(super) fn choose_auth_method(
+    methods: &[fxg_protocol::common::AgentAuthMethodInfo],
+    requested: Option<&str>,
+) -> Result<fxg_protocol::common::AgentAuthMethodInfo> {
+    if let Some(wanted) = requested {
+        return methods
+            .iter()
+            .find(|method| method.id == wanted)
+            .cloned()
+            .with_context(|| {
+                format!(
+                    "unknown authentication method {wanted}; available: {}",
+                    methods
+                        .iter()
+                        .map(|method| method.id.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            });
+    }
+    if let Some(terminal) = methods
+        .iter()
+        .find(|method| method.kind == AgentAuthMethodKind::Terminal)
+        .cloned()
+    {
+        return Ok(terminal);
+    }
+    if methods.len() == 1 {
+        return Ok(methods[0].clone());
+    }
+    for method in methods {
+        println!("  {} ({}) - {}", method.id, method.kind, method.name);
+    }
+    bail!("multiple authentication methods; pass --method <id>")
+}
+
+impl usage::RunAsync for AgentsLoginArgs {
+    type Output = Result<()>;
+
+    async fn run_async(self) -> Self::Output {
+        let registry = acp_registry().await?;
+        let id = registry.resolve_alias(&self.id);
+        let spec = resolve_agent_launch_spec(&registry, &id).await?;
+        let methods = fxg_acp::auth::discover_auth_methods(&spec)
+            .await
+            .with_context(|| format!("failed to query authentication methods for {id}"))?;
+        if methods.is_empty() {
+            println!("{id} does not advertise authentication methods; it may already be signed in");
+            return Ok(());
+        }
+        let method = choose_auth_method(&methods, self.method.as_deref())?;
+        println!("using {} ({})", method.name, method.id);
+        match method.kind {
+            AgentAuthMethodKind::Terminal => {
+                fxg_acp::auth::run_terminal_login(&spec, &method).await?;
+            }
+            AgentAuthMethodKind::Agent => {
+                fxg_acp::auth::authenticate(&spec, &method.id).await?;
+            }
+            _ => bail!("unsupported authentication method kind: {}", method.kind),
+        }
+        println!("logged in to {id}");
+        Ok(())
+    }
+}
+
+/// `fxg agents logout <id>`
+#[derive(Debug, Args)]
+pub struct AgentsLogoutArgs {
+    /// Agent ID (aliases allowed)
+    id: String,
+}
+
+impl usage::RunAsync for AgentsLogoutArgs {
+    type Output = Result<()>;
+
+    async fn run_async(self) -> Self::Output {
+        let registry = acp_registry().await?;
+        let id = registry.resolve_alias(&self.id);
+        let spec = resolve_agent_launch_spec(&registry, &id).await?;
+        fxg_acp::auth::logout(&spec)
+            .await
+            .with_context(|| format!("failed to log out from {id}"))?;
+        println!("logged out of {id}");
+        Ok(())
+    }
+}
+
+// ----------------------------------------------------------------------
+// fxg auth <command>
+// ----------------------------------------------------------------------
+
+/// `fxg auth <command>`
+#[derive(Debug, Args)]
+#[usage(run_async, arg_required_else_help)]
+pub struct AuthArgs {
+    #[usage(subcommand)]
+    command: AuthCommands,
+}
+
+/// Auth token management subcommands.
+#[derive(Debug, usage::Subcommands)]
+#[usage(run_async)]
+pub enum AuthCommands {
+    /// Show the client auth token (auth_token)
+    Token(AuthTokenArgs),
+    /// Regenerate the client auth token
+    RotateToken(AuthRotateArgs),
+    /// Manage per-node tokens (Node ⇔ Server pairing)
+    #[usage(name = "node-token")]
+    NodeToken(NodeTokenArgs),
+}
+
+/// Subcommands of `fxg auth node-token`.
+#[derive(Debug, Args)]
+#[usage(run_async, arg_required_else_help)]
+pub struct NodeTokenArgs {
+    #[usage(subcommand)]
+    command: NodeTokenCommands,
+}
+
+/// Per-node token operations.
+#[derive(Debug, usage::Subcommands)]
+#[usage(run_async)]
+pub enum NodeTokenCommands {
+    /// Issue and print a per-node token (run on the central server)
+    Issue(NodeTokenIssueArgs),
+    /// Revoke a per-node token
+    Revoke(NodeTokenRevokeArgs),
+    /// List issued node tokens
+    List(NodeTokenListArgs),
+}
+
+/// `fxg auth node-token issue <node-id>`
+#[derive(Debug, Args)]
+pub struct NodeTokenIssueArgs {
+    /// Target node ID (the `fxg daemon` node_id)
+    node_id: String,
+}
+
+impl usage::RunAsync for NodeTokenIssueArgs {
+    type Output = Result<()>;
+
+    async fn run_async(self) -> Self::Output {
+        let db = open_hub_db().await?;
+        // Register unknown nodes with placeholder values
+        // (overwritten with real values by `NodeHello` when the node connects)
+        let nodes = db.list_nodes().await?;
+        if !nodes
+            .iter()
+            .any(|node| node.node_id.as_str() == self.node_id)
+        {
+            db.upsert_node(&fxg_db::NodeRecord::new(
+                self.node_id.clone(),
+                self.node_id.clone(),
+                "unknown",
+                "unknown",
+                "unknown",
+            ))
+            .await?;
+        }
+        let token = fxg_server::api::auth::generate_token();
+        db.set_node_token_hash(
+            &self.node_id,
+            Some(&fxg_server::api::auth::hash_token(&token)),
+        )
+        .await?;
+        // The plaintext token is shown only once at issuance (the server stores
+        // only the hash)
+        println!("{token}");
+        eprintln!("issued a node_token; save it to ~/.flexagent/node_token on the node side.");
+        Ok(())
+    }
+}
+
+/// `fxg auth node-token revoke <node-id>`
+#[derive(Debug, Args)]
+pub struct NodeTokenRevokeArgs {
+    /// Target node ID
+    node_id: String,
+}
+
+impl usage::RunAsync for NodeTokenRevokeArgs {
+    type Output = Result<()>;
+
+    async fn run_async(self) -> Self::Output {
+        let db = open_hub_db().await?;
+        db.set_node_token_hash(&self.node_id, None).await?;
+        println!("revoked node token for {}", self.node_id);
+        Ok(())
+    }
+}
+
+/// `fxg auth node-token list`
+#[derive(Debug, Args)]
+pub struct NodeTokenListArgs {}
+
+impl usage::RunAsync for NodeTokenListArgs {
+    type Output = Result<()>;
+
+    async fn run_async(self) -> Self::Output {
+        let db = open_hub_db().await?;
+        let tokens = db.list_node_tokens().await?;
+        if tokens.is_empty() {
+            println!("(no node tokens issued)");
+            return Ok(());
+        }
+        for (node_id, hash) in tokens {
+            let prefix: String = hash.chars().take(12).collect();
+            println!("{node_id}\t{prefix}…");
+        }
+        Ok(())
+    }
+}
+
+/// Open the central server DB (`~/.flexagent/server.db`).
+async fn open_hub_db() -> Result<fxg_db::Db> {
+    let env = fxg_protocol::config::process_env;
+    let home = fxg_protocol::config::fxg_home(&env);
+    let db = fxg_db::Db::open(&fxg_db::hub_db_path(&home), fxg_db::DbRole::Hub).await?;
+    Ok(db)
+}
+
+/// `fxg auth token`
+#[derive(Debug, Args)]
+pub struct AuthTokenArgs {}
+
+impl usage::RunAsync for AuthTokenArgs {
+    type Output = Result<()>;
+
+    async fn run_async(self) -> Self::Output {
+        let mut client = DaemonClient::connect().await?;
+        println!("{}", client.auth_token(false).await?);
+        Ok(())
+    }
+}
+
+/// `fxg auth rotate-token`
+#[derive(Debug, Args)]
+pub struct AuthRotateArgs {}
+
+impl usage::RunAsync for AuthRotateArgs {
+    type Output = Result<()>;
+
+    async fn run_async(self) -> Self::Output {
+        let mut client = DaemonClient::connect().await?;
+        let token = client.auth_token(true).await?;
+        println!("{token}");
+        eprintln!("regenerated the auth token (browsers and other clients must enter it again)");
+        Ok(())
+    }
+}
+
+// ----------------------------------------------------------------------
+// fxg kill-all
+// ----------------------------------------------------------------------
+
+/// Arguments of `fxg kill-all`.
+#[derive(Debug, Args)]
+pub struct KillAllArgs {
+    /// Stop only the local node without fanning out through the central server
+    /// (stopping every node at once is fanned out by the central server's
+    /// `POST /api/v1/system/kill-switch`)
+    #[usage(long)]
+    local_only: bool,
+}
+
+impl usage::RunAsync for KillAllArgs {
+    type Output = Result<()>;
+
+    async fn run_async(self) -> Self::Output {
+        let mut client = DaemonClient::connect().await?;
+        let (sessions, ptys) = client.kill_all().await?;
+        if !self.local_only {
+            tracing::debug!(
+                "all-node fan-out is issued by the central server via POST /api/v1/system/kill-switch"
+            );
+        }
+        println!(
+            "killed {} session(s) and {} pty(s)",
+            sessions.len(),
+            ptys.len()
+        );
+        Ok(())
+    }
+}

@@ -1,7 +1,7 @@
 # リファクタリング・プログラム（API統合・モジュール分割）
 
 - **日付**: 2026-11-09
-- **ステータス**: 進行中（B0 / B1 / A1 / A2 / A3 / A4 / B2 / B3 完了、次は B4）
+- **ステータス**: 進行中（B0 / B1 / A1 / A2 / A3 / A4 / B2 / B3 / B4a 完了、次は B4b）
 - **統合元**: 同日に別々に作成した「API・プロトコル統合リファクタリング計画」と
   「コードベース全体リファクタリング・モジュール分割計画」を1本化した
 - **対象パッケージ**: `fxg-protocol`, `fxg-db`, `fxg-acp`, `fxg-node`,
@@ -447,13 +447,18 @@ relay 元を記録する）。A2 では設定・秘密・`browse_fs` のノー�
 
 ### 4.5 B4: CLI と UI の分割
 
-#### B4a: CLI（A4 の前）
+#### B4a: CLI
 
-- `commands/mod.rs`: `Cli` 構造体・エントリ
-- `commands/run.rs`: `fxg run` とストリーム表示
+- `commands/mod.rs`: モジュール宣言と引数型の再エクスポート、`node_db` ヘルパー
+- `commands/daemon.rs`: `daemon` / `server` / `service` / `web` / `logs` / `doctor`
+- `commands/run.rs`: `fxg run` とプロンプト入力の組み立て
 - `commands/session.rs`: `ps`, `session *`, `inbox`
 - `commands/project.rs`: `project *`, `worktree *`
-- `commands/admin.rs`: `agents`, `nodes`, `provisioners`, `auth`, `doctor`
+- `commands/admin.rs`: `agents`, `auth`, node token, `provisioners`, `bootstrap-workspace`, `git-askpass`, `kill-all`
+- `commands/tests.rs`
+
+`main.rs` と tray からは `crate::commands::...` のパスを変えない
+（`mod.rs` で再エクスポートする）。
 
 #### B4b: UI
 
@@ -582,7 +587,7 @@ relay 元を記録する）。A2 では設定・秘密・`browse_fs` のノー�
 
 ### B4: CLI / UI
 
-- [ ] `commands.rs` を `run` / `session` / `project` / `admin` に分割
+- [x] `commands.rs` を `daemon` / `run` / `session` / `project` / `admin` に分割
 - [ ] `projects/+page.svelte` からサブコンポーネントを分離
 - [ ] `sync/reducer.ts` をアイテム種別ごとのハンドラに整理
 
@@ -707,3 +712,11 @@ relay 元を記録する）。A2 では設定・秘密・`browse_fs` のノー�
 - **2026-11-09 (B3 実装)**: 子モジュール間で共有する型・メソッドは
   `pub(super)` とし、公開 API は変更していない。`#[cfg(test)] mod tests;` を
   各親モジュールに置き、テストは移動先の兄弟モジュールを glob import する。
+- **2026-11-09 (B4a 実装)**: `commands.rs` を
+  `commands/{mod,daemon,run,session,project,admin,tests}.rs` に分割した。
+  計画の `admin` から daemon / server / service / web / logs / doctor を
+  `daemon.rs` として独立させ、1ファイルの肥大化を避けた。
+- **2026-11-09 (B4a 実装)**: `node_db` は `mod.rs`、`create_worktree` は
+  `project.rs` へ移し、`run` / `session` から共有する。`build_prompt_input` は
+  `run.rs` に置いて `session` から参照する。`main.rs` / tray の
+  `crate::commands::...` パスは `mod.rs` の再エクスポートで維持している。
