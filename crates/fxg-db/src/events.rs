@@ -161,8 +161,29 @@ async fn append_event_in_tx(
     // the sessions row (and any unknown project row) **before** appending the event.
     // (Events in a batch are passed in ascending node_seq order, so the first event of an
     //  unknown session is always SessionCreated = node_seq 1.)
-    if let UnifiedEventPayload::SessionCreated { .. } = &envelope.payload {
-        upsert_session_from_created(tx, envelope).await?;
+    //
+    // A replayed SessionCreated (resync / duplicated batch) is discarded by `INSERT OR IGNORE`
+    // below. Only prepare the row for a new event: `upsert_session_from_created` overwrites
+    // `title` (and the identity columns) with creation-time values, which would roll back a
+    // later `SessionTitleChanged` when the duplicate itself is ignored.
+    if matches!(envelope.payload, UnifiedEventPayload::SessionCreated { .. }) {
+        // Same lookup as the duplicate branch below (cursor of an already stored event).
+        let already_stored = sqlx::query_scalar!(
+            r#"
+            SELECT cursor FROM session_events
+             WHERE event_id = ? OR (session_id = ? AND node_seq = ?)
+             LIMIT 1
+            "#,
+            envelope.event_id,
+            envelope.session_id,
+            node_seq,
+        )
+        .fetch_optional(&mut **tx)
+        .await?
+        .is_some();
+        if !already_stored {
+            upsert_session_from_created(tx, envelope).await?;
+        }
     }
 
     // The append decision is embedded in the INSERT statement (splitting it into `SELECT` then

@@ -276,6 +276,40 @@ async fn event_application_is_idempotent() {
 }
 
 #[tokio::test]
+async fn duplicate_session_created_does_not_revert_title() {
+    let mut fixture = Fixture::new(DbRole::Node).await;
+    let created = fixture.session_created();
+    let title_changed = fixture.event(UnifiedEventPayload::SessionTitleChanged {
+        title: "Fix authentication error".to_owned(),
+    });
+    fixture
+        .db
+        .append_events(&[created.clone(), title_changed.clone()])
+        .await
+        .expect("initial append");
+
+    // A resync / duplicated batch replays the same events.
+    let replay = fixture
+        .db
+        .append_events(&[created, title_changed])
+        .await
+        .expect("replay");
+    assert!(replay.iter().all(|outcome| !outcome.inserted));
+
+    let summary = fixture
+        .db
+        .get_session(&fixture.session_id)
+        .await
+        .expect("get session")
+        .expect("session exists");
+    assert_eq!(
+        summary.title, "Fix authentication error",
+        "a replayed SessionCreated must not roll back the title"
+    );
+    assert_eq!(summary.last_node_seq, 2);
+}
+
+#[tokio::test]
 async fn event_application_updates_session_projections() {
     let mut fixture = Fixture::new(DbRole::Node).await;
     fixture.seed_typical_stream().await;
