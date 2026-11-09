@@ -379,11 +379,17 @@ pub trait ClientApiBackend: Clone + Send + Sync + 'static {
 `common/mod.rs`（`pub use` のみ）＋以下へ分割する。呼び出し側は
 `common::*` のままで壊さない。
 
-- `common/error.rs`: `ErrorCode`, `ErrorInfo`, `RecoveryAction`, `DataSafety`
+- `common/mod.rs`: `RawJson`, `EnumParseError`, モジュール宣言と `pub use`
+- `common/error.rs`: `ErrorCode`, `ErrorInfo`, `RecoveryAction`, `DataSafety`,
+  `WarningInfo`, `CommandResult`, `CommandStatus`
 - `common/session.rs`: `SessionSummary`, `SessionStatus`, `PromptInput`,
-  `SessionControlAction`
-- `common/project.rs`: `ProjectSummary`, `NodeSummary`, `WorkspaceDiffResponse`
-- `common/acp.rs`: `Permission*`, `Elicitation*`, `ConfigOption*`, `ToolCall*`
+  `SessionControlAction`, usage / compaction / stream delta
+- `common/project.rs`: `ProjectSummary`, `NodeSummary`, `NodeLifecycleStatus`,
+  `WorkspaceDiffResponse`, worktree / diff 型
+- `common/acp.rs`: `Permission*`, `Elicitation*`, `ConfigOption*`, `ToolCall*`,
+  `ModeInfo`, `CommandInfo`, `PlanEntry`
+- `common/agent.rs`: `AgentAction`, `AgentAuthMethod*`
+- `common/audit.rs`: `EventType`, `SearchHit`, `AuditAction`, `AuditLogEntry`
 
 #### テスト fixture
 
@@ -510,8 +516,8 @@ pub trait ClientApiBackend: Clone + Send + Sync + 'static {
 
 ### B1: `fxg-protocol`
 
-- [ ] `common.rs` を `error` / `session` / `project` / `acp` に分割
-- [ ] `testing` feature と `dummy()` ビルダーを追加
+- [x] `common.rs` を `error` / `session` / `project` / `acp` / `agent` / `audit` に分割
+- [x] `testing` feature と `dummy()` ビルダーを追加
 
 ### A1: NodeRpc 統合
 
@@ -604,3 +610,11 @@ pub trait ClientApiBackend: Clone + Send + Sync + 'static {
   `Db::record_audit` に「失敗時は warn のみ」の共通処理を集約した。
   `DaemonState::record_audit` と `ServerState::record_audit` は記録の組み立て
   だけを行う薄いラッパーになった。
+- **2026-11-09 (B1 実装)**: `fxg-protocol/src/common.rs` を
+  `common/{error,session,project,acp,agent,audit}.rs` に分割した。
+  `common/mod.rs` の `pub use` により `crate::common::*` のパスは変えていない。
+  テストは `common/error.rs` の `tests` モジュールへ移した。
+- **2026-11-09 (B1 実装)**: `testing` feature と
+  `SessionSummary::dummy()` / `ProjectSummary::dummy()` /
+  `NodeSummary::dummy()` を追加した。`Default` は実装せず、ID に空値を
+  入れない方針を維持している。

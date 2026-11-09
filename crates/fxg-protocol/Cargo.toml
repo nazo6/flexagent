@@ -26,6 +26,9 @@ default = []
 # Implement `sqlx::Type` / `Encode` / `Decode` for the string enums so `fxg-db` can
 # use them directly as TEXT column fields.
 sqlx = ["dep:sqlx"]
+# Expose dummy builders for large protocol structs to downstream tests. Enable it
+# from a `[dev-dependencies]` entry so production builds do not include them.
+testing = []
 
 [lints]
 workspace = true
