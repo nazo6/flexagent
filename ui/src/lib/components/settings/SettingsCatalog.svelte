@@ -300,6 +300,11 @@
     return source.replaceAll("_", " ");
   }
 
+  /** System secrets have fixed paths and are managed by the process, not this API. */
+  function isSystemSecret(kind: string): boolean {
+    return kind === "node_token" || kind === "auth_token" || kind === "vapid_private";
+  }
+
   type Row = { label: string; value: string; source: string; detail?: string | null };
 
   const bootstrapRows = $derived<Row[]>(
@@ -657,7 +662,7 @@
                 variant="ghost"
                 size="sm"
                 onclick={() => void rotateSecret(secret)}
-                disabled={!secret.configured}
+                disabled={!secret.configured || isSystemSecret(secret.kind)}
               >
                 Rotate
               </Button>
@@ -666,7 +671,7 @@
                 size="sm"
                 class="text-destructive"
                 onclick={() => void deleteSecret(secret)}
-                disabled={secret.used_by.length > 0}
+                disabled={secret.used_by.length > 0 || isSystemSecret(secret.kind)}
               >
                 Delete
               </Button>

@@ -62,6 +62,14 @@ pub fn generate_secret_value() -> String {
     )
 }
 
+/// Whether a secret is a system-managed value with a fixed path.
+///
+/// System secrets are registered in the metadata list but cannot be created,
+/// overwritten, deleted or rotated through the Secret API.
+pub fn is_system_managed(id: &SecretId) -> bool {
+    matches!(id.as_str(), "auth_token" | "vapid_private")
+}
+
 fn system_secret_path(fxg_home: &Path, id: &SecretId) -> Option<std::path::PathBuf> {
     match id.as_str() {
         "auth_token" => Some(fxg_home.join(AUTH_TOKEN_FILE_NAME)),
