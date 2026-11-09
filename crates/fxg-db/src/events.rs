@@ -21,6 +21,8 @@
     reason = "integer conversion errors (TryFromIntError) carry no additional context"
 )]
 
+use std::time::Duration;
+
 use fxg_protocol::common::{
     ElicitationAction, ElicitationRequestStatus, PermissionOption, PermissionRequestStatus,
     RawJson, SessionStatus, SessionUsage,
@@ -71,12 +73,54 @@ pub(crate) struct StoredPermissionDetails {
     pub options: Vec<PermissionOption>,
 }
 
+/// Retries for a batch that loses the SQLite write race (`SQLITE_BUSY*`).
+const APPEND_BUSY_RETRIES: u32 = 5;
+/// Initial delay between busy retries (doubled after each attempt).
+const APPEND_BUSY_BACKOFF: Duration = Duration::from_millis(10);
+
 /// Appends a sequence of events idempotently and updates projections in the same transaction.
 ///
 /// Callers must pass the events in a batch ordered by ascending `node_seq`
 /// (so that `SessionCreated` for an unknown session (`node_seq = 1`) is applied first and
 /// satisfies the FK constraint to `sessions`).
+///
+/// A batch that loses the write race (`SQLITE_BUSY_SNAPSHOT` after a read-then-write
+/// transaction, etc.) is retried as a whole; the append is idempotent, so a retry cannot
+/// duplicate events.
 pub async fn append_events(
+    pool: &SqlitePool,
+    events: &[SessionEventEnvelope],
+) -> Result<Vec<ApplyOutcome>, DbError> {
+    let mut retries = 0;
+    loop {
+        match append_events_once(pool, events).await {
+            Ok(outcomes) => return Ok(outcomes),
+            Err(err) if is_transient_busy(&err) && retries < APPEND_BUSY_RETRIES => {
+                tokio::time::sleep(APPEND_BUSY_BACKOFF * (1u32 << retries)).await;
+                retries += 1;
+            }
+            Err(err) => return Err(err),
+        }
+    }
+}
+
+/// Whether the error is a transient SQLite write conflict (`SQLITE_BUSY*` / `SQLITE_LOCKED*`).
+fn is_transient_busy(err: &DbError) -> bool {
+    let DbError::Sqlx(sqlx::Error::Database(db_err)) = err else {
+        return false;
+    };
+    match db_err.code().as_deref() {
+        // Primary result codes: BUSY (5) / LOCKED (6)
+        Some("5" | "6") => true,
+        // Extended codes are `<primary> | (n << 8)` (e.g. BUSY_SNAPSHOT = 517)
+        Some(code) => code
+            .parse::<u32>()
+            .is_ok_and(|code| matches!(code & 0xff, 5 | 6)),
+        None => false,
+    }
+}
+
+async fn append_events_once(
     pool: &SqlitePool,
     events: &[SessionEventEnvelope],
 ) -> Result<Vec<ApplyOutcome>, DbError> {
