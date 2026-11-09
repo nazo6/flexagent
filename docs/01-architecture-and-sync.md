@@ -273,7 +273,10 @@ Windows (`D:\ghq\github.com\nazo6\flexagent`)、Linux VPS
 
 1. **明示リンク (`project_path_links`, 最優先)**: `node.db` の
    `project_path_links` に `local_path = project_key` が登録されていれば、
-   `project_id = "user:<project_key>"` として解決します。完全一致がない場合は
+   そのキーをプロジェクトIDとして解決します。`github.com/owner/repo`
+   （モノレポは `github.com/owner/repo#packages/sub`）のように `/` を含む
+   正規IDはそのままプロジェクトIDになります。`flexagent-local` のような
+   単純キーは `user:<project_key>` 名前空間に保存します。完全一致がない場合は
    Git ルートまで親ディレクトリを遡り、Git Worktree の場合は
    `git rev-parse --git-common-dir` からメイン Worktree のリンクも探します。
    `.fxg.toml` は廃止されました。
@@ -293,7 +296,8 @@ Windows (`D:\ghq\github.com\nazo6\flexagent`)、Linux VPS
 3. **フォールバック（明示リンクも Git Remote もない）**:
    `local:<node_id>:<folder_name_hash>`
    としてノード固有プロジェクトを作成します（後からUIや `fxg project link`
-   コマンドで同じ `project_key` を設定すれば他ノードのフォルダとマージ可能）。
+   コマンドで Git 由来と同じ正規IDを設定すれば、リモートを持つ他ノードの
+   フォルダとマージ可能）。
 4. **表示名の自動導出**: `GitRemote` はリポジトリ名、`UserKey` はキーそのもの、
    `Local` はディレクトリ名。表示名は設定項目として保存しません。
 

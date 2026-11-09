@@ -114,18 +114,41 @@ fn fnv1a64(bytes: &[u8]) -> u64 {
     hash
 }
 
-/// Validates an explicit project key (`[a-zA-Z0-9._-]{1,64}`).
+/// Maximum length of an explicit project key / project ID.
+const MAX_PROJECT_KEY_LEN: usize = 255;
+
+/// Whether the key is a canonical logical project ID derived from a Git remote
+/// (`github.com/owner/repo` / `github.com/owner/repo#packages/sub`).
+///
+/// Keys containing `/` are used verbatim as the project ID; other keys live under the
+/// `user:` namespace.
+pub fn is_canonical_project_id(key: &str) -> bool {
+    key.contains('/')
+}
+
+/// Validates an explicit project key / project ID.
+///
+/// Accepted forms are a simple user key (`[a-zA-Z0-9._-]`) or a canonical project ID
+/// (`host/owner/repo`, optionally with a `#subpath`). `:` is rejected so the reserved
+/// namespaces (`user:` / `local:`) cannot be forged.
 pub fn validate_project_key(key: &str) -> Result<(), NodeError> {
     let valid = !key.is_empty()
-        && key.len() <= 64
+        && key.len() <= MAX_PROJECT_KEY_LEN
+        && !key.starts_with('/')
+        && !key.ends_with('/')
+        && !key.starts_with('#')
+        && !key.ends_with('#')
+        && !key.contains("//")
+        && key.matches('#').count() <= 1
         && key
             .chars()
-            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '-'));
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '-' | '/' | '#'));
     if valid {
         Ok(())
     } else {
         Err(NodeError::InvalidState(format!(
-            "invalid project key {key:?}: use 1-64 characters of [a-zA-Z0-9._-]"
+            "invalid project key {key:?}: use 1-{MAX_PROJECT_KEY_LEN} characters of \
+             [a-zA-Z0-9._-] or a canonical project ID (host/owner/repo[#subpath])"
         )))
     }
 }
@@ -133,7 +156,8 @@ pub fn validate_project_key(key: &str) -> Result<(), NodeError> {
 /// A resolved logical project.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedProject {
-    /// Logical project ID (`user:<key>` / normalized Git URL / `local:...`)
+    /// Logical project ID (`user:<key>` / linked canonical project ID / normalized Git URL /
+    /// `local:...`)
     pub project_id: String,
     /// Display name derived from the identity
     pub name: String,
@@ -297,7 +321,13 @@ pub async fn resolve_project(
     };
 
     let (project_id, identity) = if let Some((_, key)) = &link {
-        (format!("user:{key}"), ProjectIdentity::user_key(key))
+        if is_canonical_project_id(key) {
+            // A full project ID (`github.com/owner/repo[#subpath]`) links the folder directly
+            // to the Git-derived project, so another node's checkout merges with it.
+            (key.clone(), ProjectIdentity::git_remote())
+        } else {
+            (format!("user:{key}"), ProjectIdentity::user_key(key))
+        }
     } else if let Some(url) = &canonical_git_url {
         (
             normalize_git_url(url, relative_subpath.as_deref().unwrap_or("")),
@@ -444,6 +474,34 @@ mod tests {
         assert_eq!(resolved.name, "flexagent");
     }
 
+    #[test]
+    fn validates_user_keys_and_canonical_project_ids() {
+        for key in [
+            "internal.agent-tools",
+            "flexagent-local",
+            "github.com/nazo6/flexagent",
+            "github.com/nazo6/flexagent#packages/sub",
+        ] {
+            assert!(validate_project_key(key).is_ok(), "rejected {key:?}");
+        }
+        for key in [
+            "",
+            "a b",
+            "/leading",
+            "trailing/",
+            "a//b",
+            "a#b#c",
+            "#subpath",
+            "subpath#",
+            "local:test-node:0123",
+            "user:foo",
+        ] {
+            assert!(validate_project_key(key).is_err(), "accepted {key:?}");
+        }
+        assert!(validate_project_key(&"x".repeat(MAX_PROJECT_KEY_LEN)).is_ok());
+        assert!(validate_project_key(&"x".repeat(MAX_PROJECT_KEY_LEN + 1)).is_err());
+    }
+
     #[tokio::test]
     async fn explicit_link_wins_over_git_remote() {
         let db = test_db().await;
@@ -465,6 +523,25 @@ mod tests {
             resolved.matched_link_path.as_deref(),
             Some(canonical(dir.path()).as_path())
         );
+    }
+
+    #[tokio::test]
+    async fn explicit_canonical_link_uses_project_id_verbatim() {
+        let db = test_db().await;
+        let dir = tempfile::tempdir().expect("tempdir");
+        testutil::init_test_repo_with_remote(dir.path(), "git@github.com:nazo6/flexagent.git")
+            .await;
+        let path = canonical(dir.path()).to_string_lossy().into_owned();
+        db.upsert_project_path_link(&path, "github.com/nazo6/flexagent")
+            .await
+            .expect("link");
+
+        let resolved = resolve_project(dir.path(), "test-node", &db)
+            .await
+            .expect("resolve");
+        assert_eq!(resolved.project_id, "github.com/nazo6/flexagent");
+        assert_eq!(resolved.name, "flexagent");
+        assert_eq!(resolved.identity.kind, ProjectIdentityKind::GitRemote);
     }
 
     #[tokio::test]
