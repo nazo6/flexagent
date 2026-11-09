@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM provisioners WHERE name = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "bdb5c35e6b41b77feb0201f67fcfe6885a8f8147f59a01630945b6c4f010b41a"
+}

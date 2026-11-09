@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        SELECT project_id AS \"project_id!\"\n          FROM project_node_bindings\n         WHERE node_id = ? AND local_path = ?\n         LIMIT 1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "project_id!",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "project_node_bindings",
+            "name": "project_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "d3dd29057bc8fa5353d3e344627c2fbf4d85c9e9de3efc548f74f7fbfb56c8fc"
+}

@@ -6,7 +6,6 @@
 //! authority belongs to the executing node. Client operations are relayed to the target node
 //! through [`NodeHub`] and responses are returned correlated by `command_id`.
 
-use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -27,7 +26,6 @@ use fxg_protocol::client_api::{
 use fxg_protocol::common::{
     AgentAction, CommandResult, DiffScope, ErrorCode, WorkspaceDiffResponse, WorktreeAction,
 };
-use fxg_protocol::config::{GitCredentialConfig, ProvisionerConfig};
 use fxg_protocol::node_server::ServerToNodeMsg;
 use fxg_protocol::util::uuid_v7;
 use tokio::sync::broadcast;
@@ -40,6 +38,13 @@ use crate::error::ServerError;
 use crate::hub::NodeHub;
 use crate::provisioner::{self, ProvisionerManager, SpawnSessionRequest};
 use crate::push::PushService;
+use fxg_protocol::settings::{
+    ConfigSource, NodeSettingsSnapshot, ProjectProfile, SecretSummary, SecretsResponse,
+    ServerBootstrapView, ServerSettingsSnapshot, SourcedValue, UpdateAgentSettingsRequest,
+    UpdateNodeSettingsRequest, UpdateProjectProfileRequest, UpdateServerSettingsRequest,
+    UpsertSecretRequest,
+};
+use fxg_protocol::{NodeId, ProjectId, SecretId};
 
 /// Broadcast capacity for Client WS / Node Hub delivery.
 const CLIENT_EVENT_CAPACITY: usize = 2048;
@@ -55,10 +60,8 @@ pub struct ServerOptions {
     pub allowed_hosts: Vec<String>,
     /// Origins allowed in addition to the same origin
     pub allowed_origins: Vec<String>,
-    /// Temporary VM provisioner definitions (`[provisioners.*]` in `config.toml`)
-    pub provisioners: BTreeMap<String, ProvisionerConfig>,
-    /// Git Credential Proxy configuration (`[server.git_credentials.*]` in `config.toml`)
-    pub git_credentials: BTreeMap<String, GitCredentialConfig>,
+    /// Effective logging settings (for the read-only settings catalog)
+    pub log: fxg_protocol::config::LogConfig,
 }
 
 /// Shared state for the central server.
@@ -100,10 +103,30 @@ impl ServerState {
         let hub = NodeHub::new(db.clone(), client_events.clone());
         let push = PushService::load_or_create(&options.fxg_home)
             .map_err(|err| ServerError::Server(format!("web push init failed: {err}")))?;
+        let server_settings = db.ensure_server_settings().await?;
+        crate::secrets::register_system_secrets(
+            &db,
+            &options.fxg_home,
+            &[
+                (
+                    "auth_token",
+                    "Client auth token",
+                    fxg_protocol::settings::SecretKind::AuthToken,
+                ),
+                (
+                    "vapid_private",
+                    "VAPID private key",
+                    fxg_protocol::settings::SecretKind::VapidPrivate,
+                ),
+            ],
+        )
+        .await
+        .map_err(|err| ServerError::Server(format!("secret store init failed: {err}")))?;
+        push.set_subject(server_settings.vapid_subject.as_deref());
         let provisioners = ProvisionerManager::new(
             options.fxg_home.clone(),
-            options.provisioners.clone(),
-            options.git_credentials.clone(),
+            db.provisioners().await?,
+            server_settings.git_credentials.clone(),
         );
         Ok(Self {
             inner: Arc::new(ServerInner {
@@ -141,6 +164,315 @@ impl ServerState {
     /// Startup options.
     pub fn options(&self) -> &ServerOptions {
         &self.inner.options
+    }
+
+    /// Builds the typed settings snapshot exposed by `GET /api/v1/settings/server`.
+    pub async fn server_settings_snapshot(&self) -> Result<ServerSettingsSnapshot, ServerError> {
+        let settings = self.db().ensure_server_settings().await?;
+        let config = match fxg_protocol::config::GlobalConfig::load_from_path(
+            &self
+                .inner
+                .options
+                .fxg_home
+                .join(fxg_protocol::config::CONFIG_FILE_NAME),
+        ) {
+            Ok(config) => config,
+            Err(err) => {
+                tracing::warn!("failed to read config.toml for the settings view: {err}");
+                fxg_protocol::config::GlobalConfig::default()
+            }
+        };
+        let env = fxg_protocol::config::process_env;
+        let fxg_home_source = if env(fxg_protocol::config::ENV_FXG_HOME).is_some() {
+            ConfigSource::Env
+        } else {
+            ConfigSource::Default
+        };
+        let fxg_home = SourcedValue::new(
+            self.inner.options.fxg_home.to_string_lossy().into_owned(),
+            fxg_home_source.clone(),
+            (fxg_home_source == ConfigSource::Env)
+                .then(|| fxg_protocol::config::ENV_FXG_HOME.to_owned()),
+        );
+        let listen_addr = sourced_string(
+            self.inner.options.listen_addr.clone(),
+            fxg_protocol::config::env_keys::SERVER_LISTEN_ADDR,
+            config.server.listen_addr.clone(),
+            "server.listen_addr",
+            fxg_protocol::config::ServerBootstrapConfig::DEFAULT_LISTEN_ADDR,
+        );
+        let allowed_hosts = self.inner.options.allowed_hosts.clone();
+        let allowed_origins = self.inner.options.allowed_origins.clone();
+        let log = &self.inner.options.log;
+        let log_level = sourced_string(
+            log.level.clone().unwrap_or_else(|| "info".to_owned()),
+            fxg_protocol::config::env_keys::LOG_LEVEL,
+            config.log.level.clone(),
+            "log.level",
+            "info",
+        );
+        let log_file = SourcedValue::new(
+            log.file.clone().filter(|value| value != "-"),
+            if log.file == config.log.file {
+                ConfigSource::ConfigFile
+            } else {
+                ConfigSource::Cli
+            },
+            Some("--log-file"),
+        );
+        let log_format = sourced_string(
+            log.format.clone().unwrap_or_else(|| "text".to_owned()),
+            fxg_protocol::config::env_keys::LOG_FORMAT,
+            config.log.format.clone(),
+            "log.format",
+            "text",
+        );
+        let log_no_color = SourcedValue::new(
+            log.no_color,
+            if log.no_color == config.log.no_color {
+                ConfigSource::ConfigFile
+            } else {
+                ConfigSource::Cli
+            },
+            Some("--no-color"),
+        );
+        Ok(ServerSettingsSnapshot {
+            bootstrap: ServerBootstrapView {
+                fxg_home,
+                listen_addr,
+                allowed_hosts: SourcedValue::new(
+                    allowed_hosts,
+                    if config.server.allowed_hosts.is_empty() {
+                        ConfigSource::Default
+                    } else {
+                        ConfigSource::ConfigFile
+                    },
+                    Some("server.allowed_hosts"),
+                ),
+                allowed_origins: SourcedValue::new(
+                    allowed_origins,
+                    if config.server.allowed_origins.is_empty() {
+                        ConfigSource::Default
+                    } else {
+                        ConfigSource::ConfigFile
+                    },
+                    Some("server.allowed_origins"),
+                ),
+                log_level,
+                log_file,
+                log_format,
+                log_no_color,
+            },
+            server: settings,
+        })
+    }
+
+    /// Updates server settings and reloads provisioners / Git credentials / VAPID subject.
+    pub async fn update_server_settings(
+        &self,
+        request: &UpdateServerSettingsRequest,
+    ) -> Result<ServerSettingsSnapshot, ServerError> {
+        let settings = self.db().update_server_settings(request).await?;
+        self.provisioners().apply_settings(
+            self.db().provisioners().await?,
+            settings.git_credentials.clone(),
+        );
+        self.push().set_subject(settings.vapid_subject.as_deref());
+        self.server_settings_snapshot().await
+    }
+
+    /// Lists server-owned secret metadata.
+    pub async fn secrets(&self) -> Result<Vec<SecretSummary>, ServerError> {
+        crate::secrets::list_secrets(self.db(), &self.inner.options.fxg_home).await
+    }
+
+    /// Stores a server-owned secret.
+    pub async fn upsert_secret(
+        &self,
+        id: &SecretId,
+        request: &UpsertSecretRequest,
+    ) -> Result<Vec<SecretSummary>, ServerError> {
+        crate::secrets::upsert_secret(self.db(), &self.inner.options.fxg_home, id, request).await
+    }
+
+    /// Deletes a server-owned secret.
+    pub async fn delete_secret(&self, id: &SecretId) -> Result<Vec<SecretSummary>, ServerError> {
+        crate::secrets::delete_secret(self.db(), &self.inner.options.fxg_home, id).await
+    }
+
+    /// Rotates a server-owned secret.
+    pub async fn rotate_secret(&self, id: &SecretId) -> Result<Vec<SecretSummary>, ServerError> {
+        let existing = self
+            .db()
+            .secret(id)
+            .await?
+            .ok_or_else(|| ServerError::Server(format!("secret not found: {}", id.as_str())))?;
+        crate::secrets::write_secret(
+            &self.inner.options.fxg_home,
+            id,
+            &crate::secrets::generate_secret_value(),
+        )?;
+        self.db()
+            .upsert_secret_metadata(id, &existing.name, &existing.kind)
+            .await?;
+        self.secrets().await
+    }
+
+    /// Relays a node settings read over the hub.
+    pub async fn node_settings(&self, node_id: &str) -> Result<NodeSettingsSnapshot, ApiError> {
+        let request_id = uuid_v7();
+        self.hub()
+            .node_settings(
+                &NodeId::from(node_id),
+                &request_id,
+                fxg_protocol::node_server::ServerToNodeMsg::GetNodeSettings {
+                    request_id: request_id.clone(),
+                },
+            )
+            .await
+    }
+
+    /// Relays a node settings update over the hub.
+    pub async fn update_node_settings_remote(
+        &self,
+        node_id: &str,
+        request: UpdateNodeSettingsRequest,
+    ) -> Result<NodeSettingsSnapshot, ApiError> {
+        let request_id = uuid_v7();
+        self.hub()
+            .node_settings(
+                &NodeId::from(node_id),
+                &request_id,
+                fxg_protocol::node_server::ServerToNodeMsg::UpdateNodeSettings {
+                    request_id: request_id.clone(),
+                    request,
+                },
+            )
+            .await
+    }
+
+    /// Relays an agent settings update over the hub.
+    pub async fn update_agent_settings_remote(
+        &self,
+        node_id: &str,
+        request: UpdateAgentSettingsRequest,
+    ) -> Result<NodeSettingsSnapshot, ApiError> {
+        let request_id = uuid_v7();
+        self.hub()
+            .node_settings(
+                &NodeId::from(node_id),
+                &request_id,
+                fxg_protocol::node_server::ServerToNodeMsg::UpdateAgentSettings {
+                    request_id: request_id.clone(),
+                    request,
+                },
+            )
+            .await
+    }
+
+    /// Relays a node secret listing over the hub.
+    pub async fn node_secrets(&self, node_id: &str) -> Result<Vec<SecretSummary>, ApiError> {
+        let request_id = uuid_v7();
+        self.hub()
+            .secret_op(
+                &NodeId::from(node_id),
+                &request_id,
+                fxg_protocol::node_server::ServerToNodeMsg::GetSecrets {
+                    request_id: request_id.clone(),
+                },
+            )
+            .await
+    }
+
+    /// Relays a node secret write over the hub.
+    pub async fn upsert_node_secret(
+        &self,
+        node_id: &str,
+        id: &SecretId,
+        request: UpsertSecretRequest,
+    ) -> Result<Vec<SecretSummary>, ApiError> {
+        let request_id = uuid_v7();
+        self.hub()
+            .secret_op(
+                &NodeId::from(node_id),
+                &request_id,
+                fxg_protocol::node_server::ServerToNodeMsg::UpsertSecret {
+                    request_id: request_id.clone(),
+                    id: id.clone(),
+                    request,
+                },
+            )
+            .await
+    }
+
+    /// Relays a node secret delete over the hub.
+    pub async fn delete_node_secret(
+        &self,
+        node_id: &str,
+        id: &SecretId,
+    ) -> Result<Vec<SecretSummary>, ApiError> {
+        let request_id = uuid_v7();
+        self.hub()
+            .secret_op(
+                &NodeId::from(node_id),
+                &request_id,
+                fxg_protocol::node_server::ServerToNodeMsg::DeleteSecret {
+                    request_id: request_id.clone(),
+                    id: id.clone(),
+                },
+            )
+            .await
+    }
+
+    /// Relays a node secret rotation over the hub.
+    pub async fn rotate_node_secret(
+        &self,
+        node_id: &str,
+        id: &SecretId,
+    ) -> Result<Vec<SecretSummary>, ApiError> {
+        let request_id = uuid_v7();
+        self.hub()
+            .secret_op(
+                &NodeId::from(node_id),
+                &request_id,
+                fxg_protocol::node_server::ServerToNodeMsg::RotateSecret {
+                    request_id: request_id.clone(),
+                    id: id.clone(),
+                },
+            )
+            .await
+    }
+
+    /// Returns the project bootstrap profile (default when absent).
+    pub async fn project_profile(&self, project_id: &str) -> Result<ProjectProfile, ApiError> {
+        let id = ProjectId::from(project_id);
+        if let Some(profile) = self.db().project_profile(&id).await? {
+            return Ok(profile);
+        }
+        let projects = self.db().list_projects().await?;
+        if !projects.iter().any(|project| project.project_id == id) {
+            return Err(ApiError::not_found(format!(
+                "project not found: {project_id}"
+            )));
+        }
+        Ok(ProjectProfile {
+            project_id: id,
+            bootstrap_setup: Vec::new(),
+            bootstrap_env: Default::default(),
+            revision: 0,
+            updated_at: 0,
+        })
+    }
+
+    /// Updates the project bootstrap profile.
+    pub async fn update_project_profile(
+        &self,
+        project_id: &str,
+        request: &UpdateProjectProfileRequest,
+    ) -> Result<ProjectProfile, ApiError> {
+        let id = ProjectId::from(project_id);
+        let profile = self.db().upsert_project_profile(&id, request).await?;
+        Ok(profile)
     }
 
     /// Client auth token.
@@ -213,14 +545,6 @@ impl ServerState {
 
     /// Picks one online node that can serve the ACP Registry catalog.
     ///
-    /// Resident nodes are preferred over temporary VMs, then the most recently seen.
-    async fn select_agent_node(&self) -> Result<Option<fxg_protocol::NodeId>, ApiError> {
-        let nodes = self.inner.db.list_nodes().await.map_err(ApiError::from)?;
-        let mut online: Vec<_> = nodes.into_iter().filter(|node| node.is_online).collect();
-        online.sort_by_key(|node| (node.is_ephemeral, -node.last_seen_at));
-        Ok(online.first().map(|node| node.node_id.clone()))
-    }
-
     /// Resolves the default working directory for a project on this node.
     ///
     /// Prefers the most recently used binding (including worktrees) and falls back to the
@@ -569,7 +893,6 @@ impl ClientApiBackend for ServerState {
                         action: WorktreeAction::Add {
                             branch: spec.branch.clone(),
                             base_branch: spec.base_branch.clone(),
-                            new_path: spec.new_path.clone(),
                         },
                     },
                 )
@@ -1018,17 +1341,20 @@ impl ClientApiBackend for ServerState {
     }
 
     async fn list_agents(&self) -> Result<AgentsResponse, ApiError> {
-        let Some(node_id) = self.select_agent_node().await? else {
-            // Return an empty list when no online node can serve the catalog
-            // (the UI can show the offline reason from the node list)
-            return Ok(AgentsResponse { agents: Vec::new() });
-        };
+        // The central server does not pick a representative node anymore.
+        Err(ApiError::from_code(
+            ErrorCode::InvalidState,
+            "specify a node: GET /api/v1/nodes/{node_id}/agents",
+        ))
+    }
+
+    async fn list_agents_node(&self, node_id: &str) -> Result<AgentsResponse, ApiError> {
         let request_id = uuid_v7();
         let mut response = self
             .inner
             .hub
             .agents(
-                &node_id,
+                &fxg_protocol::NodeId::from(node_id),
                 &request_id,
                 ServerToNodeMsg::ListAgents {
                     request_id: request_id.clone(),
@@ -1236,7 +1562,6 @@ impl ClientApiBackend for ServerState {
                     action: WorktreeAction::Add {
                         branch: request.branch,
                         base_branch: request.base_branch,
-                        new_path: request.path,
                     },
                 },
             )
@@ -1333,14 +1658,16 @@ impl ClientApiBackend for ServerState {
 
     async fn provisioners(&self) -> Result<ProvisionersResponse, ApiError> {
         let provisioners = self
-            .inner
-            .options
-            .provisioners
-            .iter()
+            .provisioners()
+            .configs()
+            .into_iter()
             .map(|(name, config)| ProvisionerSummary {
-                name: name.clone(),
-                description: config.description.clone(),
+                name,
+                description: config.description,
+                command: config.command,
+                args: config.args,
                 idle_timeout_secs: config.idle_timeout_secs,
+                env: config.env,
             })
             .collect();
         Ok(ProvisionersResponse { provisioners })
@@ -1351,6 +1678,126 @@ impl ClientApiBackend for ServerState {
         name: &str,
     ) -> Result<fxg_protocol::client_api::ProvisionerTestResponse, ApiError> {
         crate::provisioner::provisioner_test(self, name).await
+    }
+
+    async fn settings_server(&self) -> Result<ServerSettingsSnapshot, ApiError> {
+        self.server_settings_snapshot()
+            .await
+            .map_err(ApiError::internal)
+    }
+
+    async fn update_server_settings(
+        &self,
+        request: UpdateServerSettingsRequest,
+    ) -> Result<ServerSettingsSnapshot, ApiError> {
+        self.update_server_settings(&request)
+            .await
+            .map_err(ApiError::internal)
+    }
+
+    async fn node_settings(&self, node_id: &str) -> Result<NodeSettingsSnapshot, ApiError> {
+        ServerState::node_settings(self, node_id).await
+    }
+
+    async fn update_node_settings_remote(
+        &self,
+        node_id: &str,
+        request: UpdateNodeSettingsRequest,
+    ) -> Result<NodeSettingsSnapshot, ApiError> {
+        ServerState::update_node_settings_remote(self, node_id, request).await
+    }
+
+    async fn update_agent_settings_remote(
+        &self,
+        node_id: &str,
+        request: UpdateAgentSettingsRequest,
+    ) -> Result<NodeSettingsSnapshot, ApiError> {
+        ServerState::update_agent_settings_remote(self, node_id, request).await
+    }
+
+    async fn secrets(&self) -> Result<SecretsResponse, ApiError> {
+        Ok(SecretsResponse {
+            secrets: ServerState::secrets(self)
+                .await
+                .map_err(ApiError::internal)?,
+        })
+    }
+
+    async fn upsert_secret(
+        &self,
+        secret_id: &SecretId,
+        request: UpsertSecretRequest,
+    ) -> Result<SecretsResponse, ApiError> {
+        Ok(SecretsResponse {
+            secrets: ServerState::upsert_secret(self, secret_id, &request)
+                .await
+                .map_err(secret_error)?,
+        })
+    }
+
+    async fn delete_secret(&self, secret_id: &SecretId) -> Result<SecretsResponse, ApiError> {
+        Ok(SecretsResponse {
+            secrets: ServerState::delete_secret(self, secret_id)
+                .await
+                .map_err(secret_error)?,
+        })
+    }
+
+    async fn rotate_secret(&self, secret_id: &SecretId) -> Result<SecretsResponse, ApiError> {
+        Ok(SecretsResponse {
+            secrets: ServerState::rotate_secret(self, secret_id)
+                .await
+                .map_err(secret_error)?,
+        })
+    }
+
+    async fn node_secrets(&self, node_id: &str) -> Result<SecretsResponse, ApiError> {
+        Ok(SecretsResponse {
+            secrets: ServerState::node_secrets(self, node_id).await?,
+        })
+    }
+
+    async fn upsert_node_secret(
+        &self,
+        node_id: &str,
+        secret_id: &SecretId,
+        request: UpsertSecretRequest,
+    ) -> Result<SecretsResponse, ApiError> {
+        Ok(SecretsResponse {
+            secrets: ServerState::upsert_node_secret(self, node_id, secret_id, request).await?,
+        })
+    }
+
+    async fn delete_node_secret(
+        &self,
+        node_id: &str,
+        secret_id: &SecretId,
+    ) -> Result<SecretsResponse, ApiError> {
+        Ok(SecretsResponse {
+            secrets: ServerState::delete_node_secret(self, node_id, secret_id).await?,
+        })
+    }
+
+    async fn rotate_node_secret(
+        &self,
+        node_id: &str,
+        secret_id: &SecretId,
+    ) -> Result<SecretsResponse, ApiError> {
+        Ok(SecretsResponse {
+            secrets: ServerState::rotate_node_secret(self, node_id, secret_id).await?,
+        })
+    }
+
+    async fn project_profile(&self, project_id: &str) -> Result<ProjectProfile, ApiError> {
+        ServerState::project_profile(self, project_id).await
+    }
+
+    async fn update_project_profile(
+        &self,
+        project_id: &str,
+        request: UpdateProjectProfileRequest,
+    ) -> Result<ProjectProfile, ApiError> {
+        ServerState::update_project_profile(self, project_id, &request).await
     }
 
     async fn kill_switch(
@@ -1539,4 +1986,38 @@ impl ServerState {
             Err(err) => command_failure(command_id.clone(), err),
         }
     }
+}
+
+fn secret_error(err: ServerError) -> ApiError {
+    match err {
+        ServerError::SecretInvalid(message) => {
+            ApiError::from_code(ErrorCode::SecretInvalid, message)
+        }
+        other => ApiError::internal(other),
+    }
+}
+
+/// Source inference for read-only bootstrap values.
+fn sourced_string(
+    current: String,
+    env_key: &str,
+    file_value: Option<String>,
+    config_key: &str,
+    default_value: &str,
+) -> SourcedValue<String> {
+    if let Some(value) = fxg_protocol::config::process_env(env_key)
+        && value == current
+    {
+        return SourcedValue::new(current, ConfigSource::Env, Some(env_key));
+    }
+    if file_value.as_deref() == Some(current.as_str()) {
+        return SourcedValue::new(current, ConfigSource::ConfigFile, Some(config_key));
+    }
+    if file_value.is_none()
+        && fxg_protocol::config::process_env(env_key).is_none()
+        && current == default_value
+    {
+        return SourcedValue::new(current, ConfigSource::Default, Option::<&str>::None);
+    }
+    SourcedValue::new(current, ConfigSource::Cli, Some(config_key))
 }

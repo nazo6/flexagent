@@ -28,6 +28,18 @@
   - コマンド解決には `which::which_in` (`PATHEXT` 対応) を使用し、パス正規化には
     UNC プレフィックス (`\\?\`) を回避するため必ず **`dunce::canonicalize`**
     を使用する。
+- **設定の所有権と秘密ストア**:
+  - 実行時に変更する設定は所有者の DB にのみ保存する (`node_settings` /
+    `agent_settings` / `custom_agents` / `project_path_links` は `node.db`、
+    `server_settings` / `git_credentials` / `provisioners` / `project_profiles`
+    は `server.db`)。ノード ⇔ サーバー間で設定を同期・マージしない。
+  - `config.toml` は待受アドレス・接続先・ログ・セキュリティ境界のみ。
+    `.fxg.toml` と旧 JSON 設定ファイルは廃止。
+  - 秘密の値は `~/.flexagent/secrets/{node,server}/<id>` (`0600`) に置き、
+    DB にはメタデータだけを保存する。API は書き込み専用で値を返さない。
+  - プロジェクト同一性は `project_path_links` → Git リモート → `local:` の順で
+    解決し、表示名は自動導出する。Worktree の作成先は
+    `~/.flexagent/worktrees/{project}/{branch}` に固定。
 - **セキュリティ原則**:
   - `fxg daemon` のローカルHTTP/WSは `127.0.0.1:7860` のみにバインドする。
   - 全HTTP/WSエンドポイントでトークン認証 (`Bearer` または
@@ -74,8 +86,8 @@
   `AgentDriver`、ACP / `opencode2` 統合、Shadow Git Revert/Fork、Windows
   固有実装
 - [`docs/05-cli-and-pwa-ui.md`](docs/05-cli-and-pwa-ui.md): CLI
-  コマンド完全リファレンス、設定ファイルスキーマ (`config.toml` /
-  `.fxg.toml`)、PWA / Web Push 設計
+  コマンド完全リファレンス、設定の所有者 (`config.toml` は起動設定のみ、
+  実行時設定は `node.db` / `server.db`)、秘密ストア、PWA / Web Push 設計
 - [`docs/06-type-safety.md`](docs/06-type-safety.md): 型安全性ガイド
   (open enum / `RawJson` / 文字列判定の禁止 / clippy による境界検査)
 - [`docs/changelog/2026-09-30-implementation-plan.md`](docs/changelog/2026-09-30-implementation-plan.md):

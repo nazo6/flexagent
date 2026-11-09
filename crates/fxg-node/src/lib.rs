@@ -29,6 +29,7 @@ pub mod error;
 pub mod git;
 pub mod paths;
 pub mod project;
+pub mod secrets;
 pub mod session;
 pub mod session_manager;
 pub mod sync;
@@ -47,9 +48,9 @@ pub(crate) mod ipc_framing;
 pub use error::NodeError;
 pub use ipc_client::IpcClient;
 pub use paths::{NodePaths, ipc_endpoint};
-pub use project::{ProjectResolutionSource, ResolvedProject, normalize_git_url, resolve_project};
+pub use project::{ResolvedProject, normalize_git_url, resolve_project};
 pub use session::{SessionBroadcast, SessionEventBus};
 pub use worktree::{
-    HookLogEntry, WorktreeAddOutcome, WorktreeAddRequest, WorktreeEntry, ensure_worktree,
-    list_worktrees, prune_worktrees, remove_worktree, resolve_worktree_dir,
+    WorktreeAddOutcome, WorktreeAddRequest, WorktreeEntry, ensure_worktree, list_worktrees,
+    prune_worktrees, remove_worktree, resolve_worktree_dir,
 };

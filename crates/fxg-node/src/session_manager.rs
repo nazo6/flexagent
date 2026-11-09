@@ -377,7 +377,8 @@ impl SessionManager {
             return Err(NodeError::CommandDuplicate(command_id.to_string()));
         }
 
-        let resolved = project::resolve_project(cwd, &self.inner.node_id).await?;
+        let resolved =
+            project::resolve_project(cwd, &self.inner.node_id, self.inner.bus.db()).await?;
         let session_id = uuid_v7();
 
         let spec = self.resolve_launch_spec(agent_id, extra_args).await?;
@@ -469,7 +470,9 @@ impl SessionManager {
             .as_ref()
             .map_or(params.agent_id, |source| source.agent_id.as_str());
 
-        let resolved = project::resolve_project(params.local_path, &self.inner.node_id).await?;
+        let resolved =
+            project::resolve_project(params.local_path, &self.inner.node_id, self.inner.bus.db())
+                .await?;
         let extra_args_vec: Vec<String> = params.extra_args.map(|s| s.to_vec()).unwrap_or_default();
         let spec = self
             .resolve_launch_spec(effective_agent_id, &extra_args_vec)
@@ -744,7 +747,8 @@ impl SessionManager {
         if !self.begin_command(command_id) {
             return Err(NodeError::CommandDuplicate(command_id.to_string()));
         }
-        let resolved = project::resolve_project(cwd, &self.inner.node_id).await?;
+        let resolved =
+            project::resolve_project(cwd, &self.inner.node_id, self.inner.bus.db()).await?;
         let spec = self.resolve_launch_spec(agent_id, &[]).await?;
         let session_id = uuid_v7();
         let (git_branch, is_worktree) =
@@ -2105,7 +2109,7 @@ mod tests {
     use fxg_db::{Db, DbRole};
     use fxg_protocol::SessionId;
     use fxg_protocol::common::{EventType, PermissionOptionKind};
-    use fxg_protocol::config::{AgentsConfig, CustomAgentConfig};
+    use fxg_protocol::settings::{AgentSettings, CustomAgentConfig};
 
     async fn setup() -> (SessionManager, MockAgent, tempfile::TempDir) {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -2132,13 +2136,18 @@ mod tests {
                 command: "mock".to_owned(),
                 args: Vec::new(),
                 env: Default::default(),
+                env_secrets: Default::default(),
             },
         );
-        let config = AgentsConfig {
-            custom,
-            ..AgentsConfig::default()
+        let settings = AgentSettings {
+            default_agent: None,
+            registry_url: None,
+            registry_cache_ttl_secs: None,
+            aliases: Default::default(),
+            revision: 1,
+            updated_at: 0,
         };
-        let registry = AcpRegistry::new(dir.path(), &config);
+        let registry = AcpRegistry::new(dir.path(), &settings, custom, Vec::new());
 
         let mock = MockAgent::default();
         let manager =

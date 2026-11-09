@@ -64,16 +64,25 @@ pub(crate) fn test_ipc_endpoint(dir: &Path) -> String {
     }
 }
 
-/// Writes a test custom agent (`mock`) into `config.toml` under `fxg_home`.
+/// Registers a test custom agent (`mock`) in `node.db` under `fxg_home`.
 ///
-/// `EnsureSession` through the daemon resolves launch specs from the registry,
-/// so even mock driver tests need an agent definition.
-pub(crate) fn write_mock_agent_config(fxg_home: &Path) {
-    std::fs::write(
-        fxg_home.join(fxg_protocol::config::CONFIG_FILE_NAME),
-        "[agents.custom.mock]\nname = \"Mock Agent\"\ncommand = \"mock-agent\"\n",
+/// `EnsureSession` through the daemon resolves launch specs from the DB-owned
+/// catalog, so even mock driver tests need an agent definition.
+pub(crate) async fn write_mock_agent_config(fxg_home: &Path) {
+    std::fs::create_dir_all(fxg_home).expect("mkdir home");
+    let db = fxg_db::Db::open(&fxg_db::node_db_path(fxg_home), fxg_db::DbRole::Node)
+        .await
+        .expect("open node db");
+    db.upsert_custom_agent(
+        "mock",
+        &fxg_protocol::settings::CustomAgentConfig {
+            name: Some("Mock Agent".to_owned()),
+            command: "mock-agent".to_owned(),
+            ..Default::default()
+        },
     )
-    .expect("write config.toml");
+    .await
+    .expect("register custom agent");
 }
 
 /// Shared state of the test mock agent driver (also serves as the driver itself).

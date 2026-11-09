@@ -66,6 +66,8 @@ impl TestEnv {
     fn command(&self) -> Command {
         let mut command = Command::new(fxg_bin());
         command.env("FXG_HOME", &self.home);
+        // Never auto-start a competing daemon while waiting for the explicit one.
+        command.env("FXG_NO_AUTO_DAEMON", "1");
         for (key, value) in &self.ipc_env {
             command.env(key, value);
         }
@@ -223,17 +225,12 @@ async fn cli_commands_work_through_daemon_ipc() {
     );
 
     // --- fxg worktree add / list / remove ---
-    let worktree_dir = env.dir.path().join("worktrees");
-    let output = env.run(
-        &[
-            "worktree",
-            "add",
-            "feat/cli-e2e",
-            "--path",
-            &worktree_dir.to_string_lossy(),
-        ],
-        Some(&repo),
-    );
+    let worktree_dir = env
+        .home
+        .join("worktrees")
+        .join("github.com-nazo6-flexagent")
+        .join("feat-cli-e2e");
+    let output = env.run(&["worktree", "add", "feat/cli-e2e"], Some(&repo));
     let text = stdout_of(&output);
     assert!(text.contains("created worktree"), "got: {text}");
     assert!(worktree_dir.join("README.md").is_file());
@@ -304,12 +301,22 @@ async fn cli_reports_missing_daemon_when_auto_start_is_disabled() {
 async fn phase3_session_and_inbox_commands_roundtrip_through_daemon() {
     let mut env = TestEnv::new();
     // A custom agent that fails to start (for verifying the session recording
-    // path)
-    std::fs::write(
-        env.home.join(fxg_protocol::config::CONFIG_FILE_NAME),
-        "[agents.custom.broken]\nname = \"Broken Agent\"\ncommand = \"fxg-definitely-not-installed\"\n",
-    )
-    .expect("write config.toml");
+    // path). Custom agents are owned by `node.db`.
+    {
+        let db = fxg_db::Db::open(&fxg_db::node_db_path(&env.home), fxg_db::DbRole::Node)
+            .await
+            .expect("open node db");
+        db.upsert_custom_agent(
+            "broken",
+            &fxg_protocol::settings::CustomAgentConfig {
+                name: Some("Broken Agent".to_owned()),
+                command: "fxg-definitely-not-installed".to_owned(),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("register broken agent");
+    }
     env.start_daemon().await;
     let repo = env.dir.path().join("repo");
     init_repo(&repo);

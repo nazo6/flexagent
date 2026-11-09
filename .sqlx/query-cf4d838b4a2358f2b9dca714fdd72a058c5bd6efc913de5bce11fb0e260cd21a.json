@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        UPDATE node_settings\n           SET name = ?,\n               allow_remote_pty = ?,\n               project_scan_dirs_json = ?,\n               tray = ?,\n               revision = revision + 1,\n               updated_at = ?\n         WHERE id = 1 AND revision = ?\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 6
+    },
+    "nullable": []
+  },
+  "hash": "cf4d838b4a2358f2b9dca714fdd72a058c5bd6efc913de5bce11fb0e260cd21a"
+}

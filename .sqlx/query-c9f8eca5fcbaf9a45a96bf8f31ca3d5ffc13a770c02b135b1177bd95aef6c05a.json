@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM project_path_links WHERE local_path = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "c9f8eca5fcbaf9a45a96bf8f31ca3d5ffc13a770c02b135b1177bd95aef6c05a"
+}

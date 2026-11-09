@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n        SELECT project_id AS \"project_id!\",\n               name, canonical_git_url, created_at, updated_at\n          FROM projects\n         ORDER BY updated_at DESC\n        ",
+  "query": "\n        SELECT project_id AS \"project_id!\",\n               name, canonical_git_url,\n               identity_kind AS \"identity_kind!: ProjectIdentityKind\",\n               project_key, created_at, updated_at\n          FROM projects\n         ORDER BY updated_at DESC\n        ",
   "describe": {
     "columns": [
       {
@@ -37,8 +37,30 @@
         }
       },
       {
-        "name": "created_at",
+        "name": "identity_kind!: ProjectIdentityKind",
         "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "projects",
+            "name": "identity_kind"
+          }
+        }
+      },
+      {
+        "name": "project_key",
+        "ordinal": 4,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "projects",
+            "name": "project_key"
+          }
+        }
+      },
+      {
+        "name": "created_at",
+        "ordinal": 5,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -49,7 +71,7 @@
       },
       {
         "name": "updated_at",
-        "ordinal": 4,
+        "ordinal": 6,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -67,8 +89,10 @@
       false,
       true,
       false,
+      true,
+      false,
       false
     ]
   },
-  "hash": "b5bbb953b3be597f27984dcc3221389a8cad4bbf3286698f69db1c0263ee2fdc"
+  "hash": "31e7b498457ff5a1c7fdfb12f8be49544b169dea5354cb1944877deb21fcc422"
 }

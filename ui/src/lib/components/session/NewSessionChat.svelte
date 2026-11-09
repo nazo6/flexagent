@@ -67,12 +67,10 @@
   let localPath = $state("");
   let branch = $state("");
   let baseBranch = $state("");
-  let newPath = $state("");
   let promptText = $state("");
   let busy = $state(false);
   let showAdvanced = $state(false);
   let browserOpen = $state(false);
-  let newWorktreeBrowserOpen = $state(false);
   let useCustomPath = $state(false);
 
   // Default resolution control: track the first application of URL params and node selection
@@ -343,12 +341,11 @@
         worktree: useProvisioner
           ? branch.trim() === ""
             ? null
-            : { branch: branch.trim(), base_branch: null, new_path: null }
+            : { branch: branch.trim(), base_branch: null }
           : pathMode === "new_worktree"
             ? {
                 branch: branch.trim(),
                 base_branch: baseBranch.trim() === "" ? null : baseBranch.trim(),
-                new_path: newPath.trim() === "" ? null : newPath.trim(),
               }
             : null,
         agent_id: effectiveAgent,
@@ -891,28 +888,6 @@
                   <Label class="text-xs">{m.new_session_base_branch()}</Label>
                   <Input bind:value={baseBranch} placeholder="main" class="h-8 text-xs" />
                 </div>
-                <div class="flex flex-col gap-1">
-                  <Label class="text-xs">{m.new_session_destination_path()}</Label>
-                  <div class="flex items-center gap-1.5">
-                    <Input
-                      bind:value={newPath}
-                      placeholder={m.new_session_destination_placeholder()}
-                      class="h-8 text-xs font-mono flex-1 min-w-0"
-                    />
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      class="h-8 px-2.5 text-xs shrink-0 gap-1.5"
-                      disabled={!nodeId}
-                      onclick={() => (newWorktreeBrowserOpen = true)}
-                      title={m.new_session_browse_destination_title()}
-                    >
-                      <FolderOpenIcon class="size-3.5" />
-                      <span>{m.new_session_browse()}</span>
-                    </Button>
-                  </div>
-                </div>
               </div>
             {/if}
 
@@ -1040,16 +1015,6 @@
   onSelect={(path) => {
     localPath = path;
     useCustomPath = true;
-  }}
-/>
-
-<FolderBrowserDialog
-  bind:open={newWorktreeBrowserOpen}
-  {nodeId}
-  initialPath={newPath || localPath}
-  title={m.new_session_worktree_folder_title()}
-  onSelect={(path) => {
-    newPath = path;
   }}
 />
 

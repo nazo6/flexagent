@@ -103,6 +103,23 @@ pub enum NodeError {
     /// Startup or I/O error of the server (local HTTP/WS / IPC)
     #[error("server error: {0}")]
     Server(String),
+    /// A referenced secret value file does not exist
+    #[error("secret is missing: {}", id.as_str())]
+    SecretMissing {
+        /// Secret ID
+        id: fxg_protocol::SecretId,
+    },
+    /// A secret is still referenced by an agent or Git credential
+    #[error("secret {} is in use: {}", id.as_str(), used_by.join(", "))]
+    SecretInUse {
+        /// Secret ID
+        id: fxg_protocol::SecretId,
+        /// Referencing agents / Git hosts
+        used_by: Vec<String>,
+    },
+    /// The secret ID or value is invalid
+    #[error("invalid secret: {0}")]
+    SecretInvalid(String),
 }
 
 impl NodeError {
@@ -152,12 +169,16 @@ impl NodeError {
                 | fxg_db::DbError::NegativeNodeSeq(_)
                 | fxg_db::DbError::InvalidEnumValue(_) => ErrorCode::DbCorrupt,
                 fxg_db::DbError::EmptySearchQuery => ErrorCode::InvalidState,
+                fxg_db::DbError::RevisionMismatch => ErrorCode::RevisionMismatch,
                 _ => ErrorCode::Internal,
             },
             Self::Config(_) => ErrorCode::ConfigInvalid,
             Self::Pty(_) => ErrorCode::PtyFailed,
             Self::Json(_) => ErrorCode::Internal,
             Self::Server(_) => ErrorCode::ServerError,
+            Self::SecretMissing { .. } => ErrorCode::SecretMissing,
+            Self::SecretInUse { .. } => ErrorCode::SecretInUse,
+            Self::SecretInvalid(_) => ErrorCode::SecretInvalid,
         }
     }
 

@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 
 use async_trait::async_trait;
 use fxg_protocol::CommandId;
+use fxg_protocol::SecretId;
 use fxg_protocol::client_api::{
     AgentDiagnostics, AgentOpResponse, AgentsResponse, ConnectionRole, CreateSessionRequest,
     CreateSessionResponse, CreateWorktreeRequest, DiagnosticsResponse, KillSwitchResponse,
@@ -19,6 +20,10 @@ use fxg_protocol::client_api::{
 };
 use fxg_protocol::common::{
     AgentAction, CommandResult, DiffScope, ProjectSummary, WorkspaceDiffResponse,
+};
+use fxg_protocol::settings::{
+    NodeSettingsSnapshot, SecretsResponse, UpdateAgentSettingsRequest, UpdateNodeSettingsRequest,
+    UpsertSecretRequest,
 };
 use fxg_server::api::{
     ApiError, ClientApiBackend, ClientCommand, ClientEvent, ClientInfo, PtyChannelError,
@@ -242,7 +247,6 @@ impl ClientApiBackend for DaemonState {
                         Some(request.project_id.as_str()),
                         &spec.branch,
                         spec.base_branch.clone(),
-                        spec.new_path.clone().map(PathBuf::from),
                         &source,
                     )
                     .await
@@ -506,7 +510,6 @@ impl ClientApiBackend for DaemonState {
                 Some(project_id),
                 &request.branch,
                 request.base_branch,
-                request.path.map(PathBuf::from),
                 &audit_source(&client),
             )
             .await
@@ -729,6 +732,77 @@ impl ClientApiBackend for DaemonState {
         // Ephemeral VM provisioners only run on the central server (design: docs/01 §6.1)
         Ok(ProvisionersResponse {
             provisioners: Vec::new(),
+        })
+    }
+
+    async fn list_agents_node(&self, node_id: &str) -> Result<AgentsResponse, ApiError> {
+        if node_id != self.node_id() {
+            return Err(ApiError::bad_request(format!(
+                "requested node {node_id} but this node is {}",
+                self.node_id()
+            )));
+        }
+        self.agents_catalog().await.map_err(api_error)
+    }
+
+    async fn settings_node(&self) -> Result<NodeSettingsSnapshot, ApiError> {
+        Ok(self.node_settings_snapshot())
+    }
+
+    async fn update_node_settings(
+        &self,
+        request: UpdateNodeSettingsRequest,
+    ) -> Result<NodeSettingsSnapshot, ApiError> {
+        DaemonState::update_node_settings(self, &request)
+            .await
+            .map_err(api_error)?;
+        Ok(self.node_settings_snapshot())
+    }
+
+    async fn update_agent_settings(
+        &self,
+        request: UpdateAgentSettingsRequest,
+    ) -> Result<NodeSettingsSnapshot, ApiError> {
+        DaemonState::update_agent_settings(self, &request)
+            .await
+            .map_err(api_error)?;
+        Ok(self.node_settings_snapshot())
+    }
+
+    async fn secrets(&self) -> Result<SecretsResponse, ApiError> {
+        Ok(SecretsResponse {
+            secrets: self.node_secrets().await.map_err(api_error)?,
+        })
+    }
+
+    async fn upsert_secret(
+        &self,
+        secret_id: &SecretId,
+        request: UpsertSecretRequest,
+    ) -> Result<SecretsResponse, ApiError> {
+        Ok(SecretsResponse {
+            secrets: self
+                .upsert_node_secret(secret_id, &request)
+                .await
+                .map_err(api_error)?,
+        })
+    }
+
+    async fn delete_secret(&self, secret_id: &SecretId) -> Result<SecretsResponse, ApiError> {
+        Ok(SecretsResponse {
+            secrets: self
+                .delete_node_secret(secret_id)
+                .await
+                .map_err(api_error)?,
+        })
+    }
+
+    async fn rotate_secret(&self, secret_id: &SecretId) -> Result<SecretsResponse, ApiError> {
+        Ok(SecretsResponse {
+            secrets: self
+                .rotate_node_secret(secret_id)
+                .await
+                .map_err(api_error)?,
         })
     }
 

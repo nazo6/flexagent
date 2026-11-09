@@ -51,4 +51,7 @@ pub enum DbError {
     /// Search query is empty
     #[error("search query must not be empty")]
     EmptySearchQuery,
+    /// `expected_revision` did not match the stored revision (optimistic lock conflict)
+    #[error("settings revision mismatch")]
+    RevisionMismatch,
 }

@@ -23,6 +23,8 @@ use crate::{CommandId, NodeId, ProjectId, SessionId};
 pub struct SessionSyncState {
     /// Target session ID
     pub session_id: SessionId,
+    /// Current logical project ID (follows `project_key` changes)
+    pub project_id: ProjectId,
     /// Latest `node_seq` persisted on the node
     pub last_node_seq: u64,
 }
@@ -60,6 +62,10 @@ pub enum NodeToServerMsg {
         installed_agents: Vec<String>,
         /// Project binding report
         projects: Vec<NodeProjectReport>,
+        /// Whether `projects` is a complete snapshot (when `false` the hub must not prune)
+        projects_complete: bool,
+        /// Monotonically increasing revision of the node's reported state
+        state_revision: u64,
         /// Session sync states
         sessions: Vec<SessionSyncState>,
     },
@@ -198,6 +204,30 @@ pub enum NodeToServerMsg {
         request_id: String,
         /// Catalog plus installation state on success
         response: Option<crate::client_api::AgentsResponse>,
+        /// Failure message
+        error: Option<String>,
+    },
+    /// Response with the node settings snapshot (`GetNodeSettings` /
+    /// `UpdateNodeSettings` / `UpdateAgentSettings`).
+    NodeSettingsResult {
+        /// Correlation ID of the request
+        request_id: String,
+        /// Snapshot on success
+        snapshot: Option<Box<crate::settings::NodeSettingsSnapshot>>,
+        /// Structured error code on failure
+        code: Option<ErrorCode>,
+        /// Failure message
+        error: Option<String>,
+    },
+    /// Response with the result of a secret operation (`GetSecrets` /
+    /// `UpsertSecret` / `DeleteSecret` / `RotateSecret`).
+    SecretOpResult {
+        /// Correlation ID of the request
+        request_id: String,
+        /// Secret metadata after the operation (values are never included)
+        secrets: Option<Vec<crate::settings::SecretSummary>>,
+        /// Structured error code on failure
+        code: Option<ErrorCode>,
         /// Failure message
         error: Option<String>,
     },
@@ -446,7 +476,7 @@ pub enum ServerToNodeMsg {
         dir: Option<String>,
     },
     /// Request to link an arbitrary directory to a logical project manually
-    /// (`fxg project link`, which writes `project_key` into `.fxg.toml`).
+    /// (`fxg project link`, which updates `project_path_links` in `node.db`).
     ProjectLink {
         /// Correlation ID
         request_id: String,
@@ -460,6 +490,53 @@ pub enum ServerToNodeMsg {
     ListAgents {
         /// Correlation ID
         request_id: String,
+    },
+    /// Request for the node settings snapshot (hub proxy).
+    GetNodeSettings {
+        /// Correlation ID
+        request_id: String,
+    },
+    /// Request to update node-owned settings (hub proxy).
+    UpdateNodeSettings {
+        /// Correlation ID
+        request_id: String,
+        /// New values and the observed revision
+        request: crate::settings::UpdateNodeSettingsRequest,
+    },
+    /// Request to update agent settings (hub proxy).
+    UpdateAgentSettings {
+        /// Correlation ID
+        request_id: String,
+        /// New values and the observed revision
+        request: crate::settings::UpdateAgentSettingsRequest,
+    },
+    /// Request for the node's secret metadata (hub proxy).
+    GetSecrets {
+        /// Correlation ID
+        request_id: String,
+    },
+    /// Request to store a secret value (hub proxy; write-only).
+    UpsertSecret {
+        /// Correlation ID
+        request_id: String,
+        /// Target secret ID
+        id: crate::SecretId,
+        /// Name, kind and value
+        request: crate::settings::UpsertSecretRequest,
+    },
+    /// Request to delete a secret (hub proxy).
+    DeleteSecret {
+        /// Correlation ID
+        request_id: String,
+        /// Target secret ID
+        id: crate::SecretId,
+    },
+    /// Request to replace a secret value with a fresh random token (hub proxy).
+    RotateSecret {
+        /// Correlation ID
+        request_id: String,
+        /// Target secret ID
+        id: crate::SecretId,
     },
     /// Agent management operation request (install / update / remove).
     ManageAgent {
@@ -518,8 +595,11 @@ mod tests {
             is_ephemeral: false,
             installed_agents: vec!["opencode2".into()],
             projects: vec![],
+            projects_complete: true,
+            state_revision: 0,
             sessions: vec![SessionSyncState {
                 session_id: "s1".into(),
+                project_id: "p1".into(),
                 last_node_seq: 3,
             }],
         };

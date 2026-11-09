@@ -48,7 +48,7 @@ Fish / PowerShell / Nushell）・manpage・Markdown リファレンスを `usage
 | **`fxg worktree prune`**                    | 削除済みディレクトリの Worktree 管理情報をクリーンアップ                                                                                                                          | -                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | **`fxg project info`**                      | カレントディレクトリの論理プロジェクトID (`project_key`)・Gitルート・Worktree判定結果を表示                                                                                       | `--json`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | **`fxg project list`**                      | 登録済み論理プロジェクト一覧と各ノードのローカルパス紐付けを表示                                                                                                                  | `--json`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| **`fxg project link <project-id>`**         | カレントディレクトリを指定の論理プロジェクトIDに手動紐付け（`.fxg.toml` に保存）                                                                                                  | -                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| **`fxg project link <project-id>`**         | カレントディレクトリを指定の `project_key` に手動紐付け（`node.db.project_path_links` に保存）                                                                                    | -                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | **`fxg project scan [dir]`**                | 指定ディレクトリ配下のGitリポジトリを一括スキャンしデーモンへ登録                                                                                                                 | `dir` 省略時は `config.toml` の `project_scan_dirs` を走査                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | **`fxg agents list`**                       | このノードで利用可能なエージェント (既知 CLI preset / PATH 上の既存 / npx・uvx / カスタム) を表示                                                                                 | `--all`: ACP Registry 上の未導入エージェントも表示<br/>`--json`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | **`fxg agents enable <id>`**                | npx / uvx 配布の有効化、または既知 CLI preset の利用可否を案内する (バイナリの自動ダウンロードは行わない)                                                                         | `--version <VER>`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
@@ -110,263 +110,76 @@ fxg kill-all                                     # 【緊急停止】全セッ�
 
 ---
 
-## 2. 設定ファイルスキーマ & ディレクトリ構造 (`config.toml` / `.fxg.toml`)
+## 2. 設定の所有者とディレクトリ構造
 
-設定は **① ユーザーホームのグローバル設定 (`~/.flexagent/config.toml`)** と **②
-リポジトリ内のプロジェクト設定 (`.fxg.toml`)** の2階層で構成されます。
-ノード設定・サーバー設定・エージェント設定・プロビジョナー定義はすべて単一の
-`~/.flexagent/config.toml` に統合され、環境変数 (`FXG_*`)
-による上書きをサポートします。
+設定は「その設定を直接使うプロセス」が唯一の所有者です。実行時に変更する設定は
+所有者の DB に型付き構造で保存し、`config.toml` にはプロセス起動時に必要な値だけを
+残します。`.fxg.toml`、`custom_agents.json`、`enabled_package_agents.json` は廃止
+しました（本番未デプロイのため移行コマンドはありません）。
+
+| 設定                                                            | 所有者 / 保存場所                                                                           | 変更手段                                       |
+| :-------------------------------------------------------------- | :------------------------------------------------------------------------------------------ | :--------------------------------------------- |
+| 待受アドレス・接続先・ログ・`allowed_hosts` / `allowed_origins` | `config.toml` / `FXG_*` / CLI                                                               | ファイル編集 + 再起動（Web UI は読み取り専用） |
+| `node.name` / `allow_remote_pty` / `project_scan_dirs` / `tray` | `node.db` (`node_settings`)                                                                 | Client API（ハブは対象ノードへプロキシ）       |
+| エージェント既定値・エイリアス・カスタム定義・npx/uvx 有効化    | `node.db` (`agent_settings` / `agent_aliases` / `custom_agents` / `enabled_package_agents`) | Client API                                     |
+| 明示的な `project_key`                                          | `node.db` (`project_path_links`)                                                            | `fxg project link` / Client API                |
+| VAPID subject・Git 認証・Provisioner・一時VM Bootstrap          | `server.db`                                                                                 | ハブ Web UI                                    |
+| 秘密の値                                                        | `~/.flexagent/secrets/{node,server}/<id>` (`0600`)                                          | Secret API（書き込み専用）                     |
+| 言語・テーマ・ピン留め                                          | ブラウザ `localStorage`                                                                     | Web UI                                         |
 
 ### 2.1 データディレクトリ構成 (`~/.flexagent/`)
 
-ベースディレクトリはデフォルトで `~/.flexagent`（環境変数 `FXG_HOME`
-で変更可能）です。
-
 ```text
 ~/.flexagent/
-├── config.toml                 # グローバル設定ファイル (Node / Server / Agents / Provisioners)
-├── auth_token                  # Client ⇔ Server/Node 認証トークン (パーミッション 0600)
-├── node_token                  # このノード専用の Node ⇔ Server ペアリングトークン (サーバーで発行・パーミッション 0600)
-├── vapid_private.pem           # Web Push VAPID 秘密鍵 (自動生成・Server用)
-├── vapid_public.txt            # Web Push VAPID 公開鍵 (URL-safe Base64)
-├── node.db                     # ローカルノード SQLite DB (WALモード)
-├── server.db                   # 中央サーバー SQLite DB (WALモード + FTS5)
-├── cache/
-│   └── registry.json           # ACP Registry インデックスキャッシュ
-├── agents/                     # ACP Registry から取得したエージェント実行バイナリ
-│   └── <agent-id>/<version>/
-├── custom_agents.json          # UI 管理のカスタム ACP エージェント定義
-├── enabled_package_agents.json # npx/uvx 配布を有効化したエージェントID
-├── worktrees/                  # fxg が自動作成する Git Worktree のデフォルト集約ディレクトリ
-│   └── <project-slug>/<branch-slug>/
+├── config.toml                 # 起動設定のみ (Node / Server / Log)
+├── auth_token                  # Client 認証トークン (0600)
+├── node_token                  # Node ペアリングトークン (0600)
+├── vapid.json                  # Web Push VAPID 秘密鍵 (Server用, 0600)
+├── node.db                     # ノード所有の設定 + セッション正データ
+├── server.db                   # サーバー所有の設定 + プロジェクト投影
+├── cache/registry.json         # ACP Registry キャッシュ
+├── secrets/
+│   ├── node/<secret-id>        # ノード所有の秘密値 (0600)
+│   └── server/<secret-id>      # サーバー所有の秘密値 (0600)
+└── worktrees/<project>/<branch>/  # 固定の Worktree 作成先
 ```
 
-### 2.2 グローバル設定ファイル (`~/.flexagent/config.toml`) スキーマ
-
-すべてのフィールドは省略可能（デフォルト値あり）です。
+### 2.2 `config.toml` スキーマ（起動設定のみ）
 
 ```toml
-# ==============================================================================
-# ~/.flexagent/config.toml
-# ==============================================================================
-
-# ------------------------------------------------------------------------------
-# 1. ローカルノードデーモン設定 (`fxg daemon`)
-# ------------------------------------------------------------------------------
 [node]
-# ノードの一意識別子（省略時は初回起動時にホスト名ベースのスラッグ+短IDを自動採番）
-# 環境変数: FXG_NODE_ID
 node_id = "home-win"
-
-# UI上に表示されるノード名（省略時はOSのホスト名）
-# 環境変数: FXG_NODE_NAME
-name = "Home Windows PC"
-
-# ローカルHTTP/WSサーバーのバインドアドレス（セキュリティ原則によりループバック固定推奨）
-# 環境変数: FXG_NODE_LISTEN_ADDR
 listen_addr = "127.0.0.1:7860"
-
-# 中央サーバーのNode Hub WebSocket URL（未指定時はスタンドアロン・ローカルのみで動作）
-# 環境変数: FXG_CENTRAL_SERVER_URL
 central_server_url = "ws://100.64.0.10:8080/api/v1/node/ws"
 
-# 中央サーバー接続時のペアリングトークン（ノード個別。中央サーバー上で `fxg auth node-token issue <node-id>` により発行）
-# 省略時は ~/.flexagent/node_token を読み込む
-# 環境変数: FXG_NODE_TOKEN
-# node_token = "..."
-
-# リモート（中央サーバー経由）からの対話型 Web PTY 起動を許可するか（デフォルト: false）
-# 環境変数: FXG_ALLOW_REMOTE_PTY
-allow_remote_pty = false
-
-# Git Worktree 自動作成時のデフォルト配置先テンプレート
-# 利用可能プレースホルダ:
-#   {fxg_home}    -> ~/.flexagent
-#   {project}     -> スラッシュ等をハイフン正規化した project_key (例: "github.com-nazo6-flexagent")
-#   {repo}        -> リポジトリフォルダ名 (例: "flexagent")
-#   {repo_parent} -> メインリポジトリの親ディレクトリ絶対パス
-#   {branch}      -> スラッシュをハイフンに置換したブランチ名 (例: "feat-auth")
-worktree_dir_template = "{fxg_home}/worktrees/{project}/{branch}"
-
-# デーモン起動時および `fxg project scan` 実行時にGitリポジトリを自動探索するディレクトリ一覧
-project_scan_dirs = [
-  "D:/ghq/github.com",
-]
-
-# `fxg daemon` 起動時にタスクトレイへ常駐するか (デフォルト: false = 無効)
-# トレイメニュー: 状態表示 (中央サーバー接続・未同期 Outbox・稼働セッション) /
-#                  ログイン時の自動起動トグル / Web UI を開く / 終了
-# CLI の `--tray` / `--no-tray` が指定された場合はそちらが優先される
-# トレイを作成できない環境 (SSH 等) では警告のみでデーモンは稼働を継続する
-tray = false
-
-
-# ------------------------------------------------------------------------------
-# 2. 中央サーバー設定 (`fxg server`)
-# ------------------------------------------------------------------------------
 [server]
-# 中央サーバーのHTTP/WSバインドアドレス（LAN / Tailscale インターフェース等）
-# ※ パブリックインターネットへ直接露出せず、ファイアウォール / VPN で隔離された LAN 内でのみ待ち受けること
-# 環境変数: FXG_SERVER_LISTEN_ADDR
 listen_addr = "0.0.0.0:8080"
+allowed_hosts = ["home-server.tailnet-xxxx.ts.net:8080"]
+allowed_origins = ["https://home-server.tailnet-xxxx.ts.net"]
 
-# DNS Rebinding 防御 (Host ヘッダ検証) で `localhost` / `127.0.0.1` 以外に許可するホスト名一覧
-# 環境変数: FXG_SERVER_ALLOWED_HOSTS (カンマ区切り)
-allowed_hosts = [
-  "home-server.tailnet-xxxx.ts.net:8080",
-  "home-server.tailnet-xxxx.ts.net",
-  "192.168.1.50:8080",
-]
-
-# CSWSH 防御 (WebSocket Origin 検証) で同一オリジン以外に許可するオリジン一覧
-# 環境変数: FXG_SERVER_ALLOWED_ORIGINS (カンマ区切り)
-allowed_origins = [
-  "https://home-server.tailnet-xxxx.ts.net",
-  "http://192.168.1.50:8080",
-]
-
-# Web Push (VAPID) の連絡先クレーム (mailto: または https:)
-vapid_subject = "mailto:admin@example.com"
-
-# 一時VM (`fxg daemon --stdio`) からの GitCredentialRequest に対する認証プロキシ設定
-# ※ ブートストラップ（デーモン起動前の git clone）用には、プロビジョナー起動時に
-#    この設定から短命トークン (FXG_GIT_TOKEN) が生成され環境変数として注入される
-[server.git_credentials."github.com"]
-# "gh_cli" (`gh auth token` から取得) または "env" (指定環境変数から取得)
-provider = "gh_cli"
-username = "x-access-token"
-# provider = "env" の場合に使用する環境変数名:
-# token_env = "FXG_GITHUB_PAT"
-
-
-# ------------------------------------------------------------------------------
-# 3. エージェント & ACP Registry 設定
-# ------------------------------------------------------------------------------
-[agents]
-# `fxg run` 等でエージェント指定を省略した場合やUIの初期選択エージェント
-default_agent = "claude"
-
-# ACP 公式レジストリURLとキャッシュ有効期間 (秒)
-registry_url = "https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json"
-registry_cache_ttl_secs = 86400
-
-# `fxg run <alias>` で使用できるエージェント名エイリアス（デフォルト内蔵値の上書き・追加）
-[agents.aliases]
-claude = "claude-code-acp"
-antigravity = "antigravity-acp"
-gemini = "gemini-cli-acp"
-codex = "codex-acp"
-
-# レジストリ外のカスタムACPエージェント定義
-# (Web UI の「カスタム追加」は ~/.flexagent/custom_agents.json へ保存する。
-#  同名 ID は UI 管理側が優先される)
-[agents.custom.my-local-agent]
-name = "My Custom ACP Agent"
-command = "node"
-args = ["D:/tools/my-agent/dist/acp.js"]
-env = { LOG_LEVEL = "info" }
-
-
-# ------------------------------------------------------------------------------
-# 4. 一時VM・サンドボックスプロビジョナー設定 (`--provisioner <name>`)
-# ------------------------------------------------------------------------------
-# ※ プロビジョナーは中央サーバー (`fxg server`) ホスト上で子プロセスとして起動される
-#    (CLI の `fxg run --provisioner` もサーバー API 経由。サーバー停止中は利用不可)
-# 利用可能プレースホルダ:
-#   {BOOTSTRAP_SCRIPT} -> `fxg bootstrap-workspace` + `exec fxg daemon --stdio --ephemeral` の自動生成スクリプト
-#   {INSTANCE_NAME}    -> 一時インスタンス識別名 (例: "fxg-eph-0195f0...")
-#   {SESSION_ID}       -> 起動対象セッションID
-
-[provisioners.local-docker]
-description = "Local isolated Ubuntu container (Docker)"
-command = "docker"
-args = ["run", "--rm", "-i", "ubuntu:24.04", "sh", "-c", "{BOOTSTRAP_SCRIPT}"]
-idle_timeout_secs = 900
-env = {}
-
-[provisioners.local-incus]
-description = "Local KVM MicroVM / LXC (Incus)"
-command = "incus"
-args = ["launch", "--ephemeral", "images:ubuntu/24.04", "{INSTANCE_NAME}", "--", "sh", "-c", "{BOOTSTRAP_SCRIPT}"]
-idle_timeout_secs = 900
-env = {}
-
-[provisioners.colab-pro]
-description = "Google Colab Pro (T4 GPU Runtime)"
-command = "uvx"
-args = ["google-colab-cli", "ssh", "--gpu", "t4", "--command", "{BOOTSTRAP_SCRIPT}"]
-idle_timeout_secs = 900
-env = {}
+[log]
+level = "info"
+file = "logs/daemon.log"
+format = "text"
+no_color = false
 ```
 
-### 2.3 プロジェクト設定ファイル (`.fxg.toml`) スキーマ
+`node.name` / `allow_remote_pty` / `project_scan_dirs` / `tray`、`[agents]`、
+`[provisioners]`、`[server.git_credentials]`、`vapid_subject` は `config.toml`
+から削除されました。Web UI の設定カタログは現在値と出所
+(`config.toml` / `env` / `cli` / `default`) を読み取り専用で表示します。
 
-各Gitリポジトリのルート（またはモノレポ内のサブディレクトリ）に任意で配置し、プロジェクト固有の挙動を定義します。
+### 2.3 Worktree と Bootstrap
 
-```toml
-# ==============================================================================
-# .fxg.toml (リポジトリルートに配置・Git管理可能)
-# ==============================================================================
-
-# 論理プロジェクトIDの明示指定（省略時は git remote.origin.url から自動正規化）
-# project_key = "github.com/nazo6/flexagent"
-
-# UI上のプロジェクト表示名（省略時はディレクトリ名またはリポジトリ名）
-name = "flexagent"
-
-# ------------------------------------------------------------------------------
-# 1. プロジェクト別のデフォルトエージェント設定
-# ------------------------------------------------------------------------------
-[agent]
-default_agent = "claude"
-default_mode = "code"
-extra_args = []
-
-# ------------------------------------------------------------------------------
-# 2. Git Worktree 作成時のプロジェクト固有ルール
-# ------------------------------------------------------------------------------
-[worktree]
-# 新規Worktree作成時のデフォルト起点ブランチ（省略時は現在のHEAD）
-base_branch = "main"
-
-# このプロジェクト専用のWorktree配置先テンプレート上書き（省略時は config.toml の設定を使用）
-# dir_template = "{fxg_home}/worktrees/{project}/{branch}"
-
-# 新規Worktree作成時にメインWorktreeから自動コピーする未追跡ファイル（.env 等）
-copy_files = [
-  ".env",
-  ".env.local",
-]
-
-# 新規Worktree作成直後にそのディレクトリで自動実行する初期化コマンド
-post_create = [
-  "pnpm install --prefer-offline",
-]
-
-# ------------------------------------------------------------------------------
-# 3. 一時VM (`fxg bootstrap-workspace`) 用の追加セットアップ定義
-# ------------------------------------------------------------------------------
-[bootstrap]
-# リポジトリから自動検出されるツール以外に `mise install` で追加導入するツール
-tools = [
-  "rust@stable",
-  "node@22",
-  "pnpm@latest",
-]
-
-# `git clone` とツール導入完了後に実行する初期セットアップコマンド（出力はすべて stderr へ配信）
-setup = [
-  "cargo fetch",
-  "pnpm install --frozen-lockfile",
-]
-
-# セットアップおよびエージェント実行時に注入する非機密の環境変数
-[bootstrap.env]
-RUST_BACKTRACE = "1"
-```
-
----
+- Worktree の作成先は `~/.flexagent/worktrees/{project}/{branch}` に固定です。
+  `dir_template` / `copy_files` / `post_create` / `--path` は廃止しました。
+  `fxg worktree add <branch> [--base <branch>]` のみを受け付けます。
+- 一時VMの初期化は `server.db` の `project_profiles`
+  (`bootstrap_setup` / `bootstrap_env`) が所有します。サーバーは
+  `FXG_PROJECT_PROFILE_B64` を注入し、`fxg bootstrap-workspace` は
+  `--profile <path>` またはこの環境変数から `ProjectProfile` を読み取ります。
+  ツール検出はリポジトリ内の `mise.toml` / `.tool-versions` / マニフェストのみを
+  使います。
 
 ## 3. Web UI / Android PWA (`ui/`) 設計
 
@@ -690,7 +503,8 @@ export interface ITerminalAdapter {
 - [x] `fxg bootstrap-workspace` の実装（`mise` / `uv`
       単一バイナリの自動取得と、リポジトリ設定ファイルからの完全ステートレスなツール自動構築）
   - `Cargo.toml` / `package.json` / `pyproject.toml` / `mise.toml` /
-    `.tool-versions` / `.fxg.toml [bootstrap]`
+    `.tool-versions` / `.fxg.toml [bootstrap]`（`.fxg.toml` は廃止。現在は
+    `server.db.project_profiles` の `bootstrap_setup` / `bootstrap_env`）
     からツールを検出して導入し、`$FXG_HOME/bootstrap.env`
     に PATH と環境変数を書き出す（生成スクリプトが `exec fxg daemon --stdio`
     の直前に `source` する）。出力はすべて `stderr`。

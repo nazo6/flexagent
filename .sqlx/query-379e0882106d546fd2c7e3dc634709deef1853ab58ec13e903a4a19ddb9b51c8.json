@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT local_path FROM project_node_bindings WHERE node_id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "local_path",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "project_node_bindings",
+            "name": "local_path"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "379e0882106d546fd2c7e3dc634709deef1853ab58ec13e903a4a19ddb9b51c8"
+}

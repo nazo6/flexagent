@@ -262,6 +262,22 @@ async fn upsert_session_from_created(
 
     let node_seq = node_seq_to_i64(envelope.session_id.as_str(), envelope.node_seq)?;
 
+    // Prefer the current binding of the node + local path so that a `project_key`
+    // change is not rolled back by a replayed `SessionCreated` event.
+    let binding_project_id: Option<String> = sqlx::query_scalar!(
+        r#"
+        SELECT project_id AS "project_id!"
+          FROM project_node_bindings
+         WHERE node_id = ? AND local_path = ?
+         LIMIT 1
+        "#,
+        node_id.as_str(),
+        local_path,
+    )
+    .fetch_optional(&mut *conn)
+    .await?;
+    let project_id = binding_project_id.as_deref().unwrap_or(project_id.as_str());
+
     // Prepare a row in case the project is unknown on the hub side
     // (on the node side the source data already exists when the project is resolved, so
     // DO NOTHING).

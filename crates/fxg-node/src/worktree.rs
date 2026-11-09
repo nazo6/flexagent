@@ -6,8 +6,7 @@
 //! - Worktrees created by `fxg` are aggregated under
 //!   `~/.flexagent/worktrees/<project>/<branch>` by default so that the parent folder
 //!   is not cluttered (`worktree_dir_template` can change this).
-//! - On creation, the `copy_files` (copying untracked files such as `.env`) and
-//!   `post_create` (initialization command) hooks from `.fxg.toml` are executed.
+//! - The destination is fixed to `~/.flexagent/worktrees/{project}/{branch}`.
 //! - Detection uses `git worktree list --porcelain` and lists every worktree including
 //!   the main repository.
 
@@ -159,10 +158,6 @@ pub fn resolve_worktree_dir(template: &str, ctx: &WorktreePathContext) -> PathBu
     PathBuf::from(resolved)
 }
 
-/// Result of running a hook command such as `post_create` (re-export of
-/// [`HookLogEntry`]).
-pub use fxg_protocol::common::HookLogEntry;
-
 /// Request to create a worktree.
 #[derive(Debug, Clone)]
 pub struct WorktreeAddRequest<'a> {
@@ -174,16 +169,8 @@ pub struct WorktreeAddRequest<'a> {
     pub branch: &'a str,
     /// Base branch (current HEAD if omitted)
     pub base_branch: Option<&'a str>,
-    /// Location template (default if omitted)
-    pub dir_template: &'a str,
-    /// Explicit location (takes precedence over the template)
-    pub new_path: Option<&'a Path>,
     /// `~/.flexagent`
     pub fxg_home: &'a Path,
-    /// Untracked files to copy from the main repository
-    pub copy_files: &'a [String],
-    /// Initialization command to run right after creation
-    pub post_create: &'a [String],
 }
 
 /// Result of creating a worktree.
@@ -195,10 +182,6 @@ pub struct WorktreeAddOutcome {
     pub branch: String,
     /// Whether it was newly created (`false` means an existing worktree was reused)
     pub created: bool,
-    /// Copied files (repository-relative paths)
-    pub copied_files: Vec<String>,
-    /// Execution logs of the `post_create` hook
-    pub hook_logs: Vec<HookLogEntry>,
 }
 
 /// Creates a worktree (reuses an existing worktree on the same branch if present).
@@ -220,23 +203,19 @@ pub async fn ensure_worktree(
             path,
             branch: request.branch.to_owned(),
             created: false,
-            copied_files: Vec::new(),
-            hook_logs: Vec::new(),
         });
     }
 
-    let path = match request.new_path {
-        Some(path) => path.to_path_buf(),
-        None => resolve_worktree_dir(
-            request.dir_template,
-            &WorktreePathContext {
-                fxg_home: request.fxg_home.to_path_buf(),
-                project_id: request.project_id.to_owned(),
-                repo_path: request.repo.to_path_buf(),
-                branch: request.branch.to_owned(),
-            },
-        ),
-    };
+    // Fixed destination: ~/.flexagent/worktrees/{project}/{branch}
+    let path = resolve_worktree_dir(
+        "{fxg_home}/worktrees/{project}/{branch}",
+        &WorktreePathContext {
+            fxg_home: request.fxg_home.to_path_buf(),
+            project_id: request.project_id.to_owned(),
+            repo_path: request.repo.to_path_buf(),
+            branch: request.branch.to_owned(),
+        },
+    );
     if path.exists()
         && path
             .read_dir()
@@ -279,38 +258,6 @@ pub async fn ensure_worktree(
         git::run_git(request.repo, &args).await?;
     }
 
-    // copy_files: copy untracked files from the main repository
-    let mut copied_files = Vec::new();
-    for relative in request.copy_files {
-        let source = request.repo.join(relative);
-        if !source.is_file() {
-            continue;
-        }
-        let destination = path.join(relative);
-        if destination.exists() {
-            continue;
-        }
-        if let Some(parent) = destination.parent() {
-            std::fs::create_dir_all(parent).map_err(|err| NodeError::io(parent, err))?;
-        }
-        std::fs::copy(&source, &destination).map_err(|err| NodeError::io(&destination, err))?;
-        copied_files.push(relative.clone());
-    }
-
-    // post_create: run the initialization command inside the new worktree
-    let mut hook_logs = Vec::new();
-    for command in request.post_create {
-        let log = run_hook_command(&path, command).await?;
-        if !log.success {
-            tracing::warn!(
-                worktree = %path.display(),
-                command = %command,
-                "post_create hook failed"
-            );
-        }
-        hook_logs.push(log);
-    }
-
     // Normalize to the symlink-resolved path (to match what git records)
     let path = fxg_pty::canonicalize(&path).unwrap_or(path);
 
@@ -318,8 +265,6 @@ pub async fn ensure_worktree(
         path,
         branch: request.branch.to_owned(),
         created: true,
-        copied_files,
-        hook_logs,
     })
 }
 
@@ -342,78 +287,6 @@ pub async fn prune_worktrees(repo: &Path) -> Result<String, NodeError> {
     git::run_git(repo, &["worktree", "prune"]).await
 }
 
-/// Hook execution timeout (seconds).
-const HOOK_TIMEOUT_SECS: u64 = 60;
-
-/// Runs a hook command through the shell (a failure does not become `Err`).
-pub async fn run_hook_command(dir: &Path, command: &str) -> Result<HookLogEntry, NodeError> {
-    let (program, flag) = if cfg!(windows) {
-        ("cmd", "/C")
-    } else {
-        ("sh", "-c")
-    };
-    let program_path = fxg_pty::resolve_command(program, dir)
-        .map_err(|err| NodeError::GitUnavailable(err.to_string()))?;
-
-    let _guard = fxg_pty::ProcessTreeGuard::new().map_err(|err| {
-        NodeError::Server(format!("failed to initialize process tree guard: {err}"))
-    })?;
-
-    let mut cmd = tokio::process::Command::new(program_path);
-    cmd.arg(flag)
-        .arg(command)
-        .current_dir(dir)
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped());
-
-    let child = cmd.spawn().map_err(NodeError::Plain)?;
-
-    #[cfg(windows)]
-    {
-        if let Some(raw_handle) = child.raw_handle()
-            && let Err(err) = _guard.attach_raw_handle(raw_handle)
-        {
-            tracing::warn!("failed to attach hook process to job object: {err}");
-        }
-    }
-
-    let wait_output = child.wait_with_output();
-    let result = tokio::time::timeout(
-        std::time::Duration::from_secs(HOOK_TIMEOUT_SECS),
-        wait_output,
-    )
-    .await;
-
-    match result {
-        Ok(Ok(output)) => {
-            let mut text = String::from_utf8_lossy(&output.stdout).trim().to_owned();
-            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
-            if !stderr.is_empty() {
-                if !text.is_empty() {
-                    text.push('\n');
-                }
-                text.push_str(&stderr);
-            }
-            Ok(HookLogEntry {
-                command: command.to_owned(),
-                success: output.status.success(),
-                output: text,
-            })
-        }
-        Ok(Err(err)) => Err(NodeError::Plain(err)),
-        Err(_elapsed) => {
-            let message = format!("hook command timed out after {HOOK_TIMEOUT_SECS}s: {command}");
-            tracing::warn!("{message}");
-            Ok(HookLogEntry {
-                command: command.to_owned(),
-                success: false,
-                output: message,
-            })
-        }
-    }
-}
-
 async fn ensure_repository(repo: &Path) -> Result<(), NodeError> {
     if !git::is_inside_work_tree(repo).await? {
         return Err(NodeError::NotARepository(repo.to_path_buf()));
@@ -430,20 +303,13 @@ mod tests {
         repo: &'a Path,
         fxg_home: &'a Path,
         branch: &'a str,
-        template: &'a str,
-        copy_files: &'a [String],
-        post_create: &'a [String],
     ) -> WorktreeAddRequest<'a> {
         WorktreeAddRequest {
             repo,
             project_id: "github.com/nazo6/flexagent",
             branch,
             base_branch: None,
-            dir_template: template,
-            new_path: None,
             fxg_home,
-            copy_files,
-            post_create,
         }
     }
 
@@ -508,24 +374,14 @@ detached
     }
 
     #[tokio::test]
-    async fn creates_and_removes_worktree_with_hooks() {
+    async fn creates_and_removes_worktree_at_fixed_path() {
         let dir = tempfile::tempdir().expect("tempdir");
         let repo = dir.path().join("repo");
         let home = dir.path().join("fxg-home");
         std::fs::create_dir_all(&repo).expect("mkdir repo");
         testutil::init_test_repo(&repo).await;
-        std::fs::write(repo.join(".env"), "SECRET=1\n").expect("write .env");
 
-        let copy_files = vec![".env".to_owned()];
-        let post_create = vec!["printf hook-ok".to_owned()];
-        let request = add_request(
-            &repo,
-            &home,
-            "feat/auth",
-            "{fxg_home}/worktrees/{project}/{branch}",
-            &copy_files,
-            &post_create,
-        );
+        let request = add_request(&repo, &home, "feat/auth");
         let outcome = ensure_worktree(&request).await.expect("ensure");
 
         assert!(outcome.created);
@@ -539,14 +395,6 @@ detached
             .expect("canonicalize expected path")
         );
         assert!(outcome.path.join("README.md").is_file());
-        assert_eq!(
-            std::fs::read_to_string(outcome.path.join(".env")).expect(".env copied"),
-            "SECRET=1\n"
-        );
-        assert_eq!(outcome.copied_files, vec![".env"]);
-        assert_eq!(outcome.hook_logs.len(), 1);
-        assert!(outcome.hook_logs[0].success);
-        assert!(outcome.hook_logs[0].output.contains("hook-ok"));
 
         // Appears in the list
         let entries = list_worktrees(&repo).await.expect("list");
@@ -561,7 +409,8 @@ detached
         assert!(!again.created);
         assert_eq!(again.path, outcome.path);
 
-        // An untracked file (.env) exists, so it cannot be removed without force
+        // An untracked file exists, so it cannot be removed without force
+        std::fs::write(outcome.path.join(".env"), "SECRET=1\n").expect("write .env");
         assert!(
             remove_worktree(&repo, &outcome.path, false).await.is_err(),
             "an untracked file exists, so force is required"
@@ -599,11 +448,7 @@ detached
             project_id: "github.com/nazo6/flexagent",
             branch: "feat/from-develop",
             base_branch: Some("develop"),
-            dir_template: "{fxg_home}/worktrees/{project}/{branch}",
-            new_path: None,
             fxg_home: &home,
-            copy_files: &[],
-            post_create: &[],
         };
         let outcome = ensure_worktree(&request).await.expect("ensure");
         assert!(
@@ -617,15 +462,5 @@ detached
         let dir = tempfile::tempdir().expect("tempdir");
         let err = list_worktrees(dir.path()).await.expect_err("must fail");
         assert!(matches!(err, NodeError::NotARepository(_)));
-    }
-
-    #[tokio::test]
-    async fn hook_command_runs_and_captures_output() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let entry = run_hook_command(dir.path(), "echo hook_test_success")
-            .await
-            .expect("hook run");
-        assert!(entry.success);
-        assert!(entry.output.contains("hook_test_success"));
     }
 }

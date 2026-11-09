@@ -33,6 +33,7 @@ use fxg_protocol::common::{
     SessionStatus, SessionSummary, SessionUsage,
 };
 use fxg_protocol::events::SessionEventBatch;
+use fxg_protocol::settings::ProjectIdentityKind;
 use fxg_protocol::{EventId, NodeId, ProjectId, SessionId};
 use sqlx::SqlitePool;
 
@@ -269,7 +270,9 @@ pub async fn list_projects(pool: &SqlitePool) -> Result<Vec<ProjectSummary>, DbE
         ProjectRow,
         r#"
         SELECT project_id AS "project_id!",
-               name, canonical_git_url, created_at, updated_at
+               name, canonical_git_url,
+               identity_kind AS "identity_kind!: ProjectIdentityKind",
+               project_key, created_at, updated_at
           FROM projects
          ORDER BY updated_at DESC
         "#,
@@ -297,6 +300,10 @@ pub async fn list_projects(pool: &SqlitePool) -> Result<Vec<ProjectSummary>, DbE
             project_id: row.project_id,
             name: row.name,
             canonical_git_url: row.canonical_git_url,
+            identity: fxg_protocol::settings::ProjectIdentity {
+                kind: row.identity_kind,
+                key: row.project_key,
+            },
             created_at: row.created_at,
             updated_at: row.updated_at,
             bindings: Vec::new(),
@@ -720,6 +727,8 @@ struct ProjectRow {
     project_id: ProjectId,
     name: String,
     canonical_git_url: Option<String>,
+    identity_kind: ProjectIdentityKind,
+    project_key: Option<String>,
     created_at: i64,
     updated_at: i64,
 }

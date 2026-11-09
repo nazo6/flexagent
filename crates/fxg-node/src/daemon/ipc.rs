@@ -391,7 +391,6 @@ async fn handle(
             project_id,
             branch,
             base_branch,
-            path,
         } => {
             let outcome = state
                 .worktree_add(
@@ -399,7 +398,6 @@ async fn handle(
                     project_id.as_ref().map(fxg_protocol::ProjectId::as_str),
                     &branch,
                     base_branch,
-                    path.map(PathBuf::from),
                     &AuditSource::local(),
                 )
                 .await
@@ -410,7 +408,6 @@ async fn handle(
                     path: outcome.path.to_string_lossy().into_owned(),
                     branch: outcome.branch,
                     created: outcome.created,
-                    hook_logs: outcome.hook_logs,
                 },
             ))
         }
@@ -954,7 +951,7 @@ fn to_project_info(resolved: &project::ResolvedProject) -> ProjectInfo {
         relative_subpath: resolved.relative_subpath.clone(),
         local_path: resolved.local_path.to_string_lossy().into_owned(),
         is_git_repo: resolved.is_git_repo,
-        source: resolved.source,
+        identity: resolved.identity.clone(),
     }
 }
 
@@ -977,7 +974,6 @@ mod tests {
     use crate::daemon::{DaemonConfig, NodeDaemon};
     use crate::git;
     use crate::ipc_client::IpcClient;
-    use fxg_protocol::config::ProjectConfig;
     use std::time::Duration;
 
     async fn start_daemon() -> (NodeDaemon, tempfile::TempDir) {
@@ -1013,7 +1009,7 @@ mod tests {
     /// Starts a daemon with a mock agent driver injected (for session operations).
     async fn start_session_daemon() -> (NodeDaemon, crate::testutil::MockAgent, tempfile::TempDir) {
         let dir = tempfile::tempdir().expect("tempdir");
-        crate::testutil::write_mock_agent_config(dir.path());
+        crate::testutil::write_mock_agent_config(dir.path()).await;
         let mut config =
             DaemonConfig::new(dir.path().to_path_buf(), "session-node", "Session Node");
         config.listen_addr = "127.0.0.1:0".to_owned();
@@ -1063,19 +1059,19 @@ mod tests {
                 ..
             } => {
                 assert_eq!(project.project_id.as_str(), "github.com/nazo6/flexagent");
-                assert_eq!(project.source.as_str(), "git_remote");
+                assert_eq!(project.identity.kind.as_str(), "git_remote");
                 assert!(project.is_git_repo);
             }
             other => panic!("unexpected response: {other:?}"),
         }
 
-        // project link writes .fxg.toml
+        // project link writes an explicit path link
         let response = roundtrip(
             &endpoint,
             &IpcClientMessage::ProjectLink {
                 command_id: "c2".into(),
                 cwd: repo.to_string_lossy().into_owned(),
-                project_id: "internal/agent-tools".into(),
+                project_id: "internal-agent-tools".into(),
             },
         )
         .await;
@@ -1086,10 +1082,18 @@ mod tests {
                 ..
             }
         ));
-        let config = ProjectConfig::load_from_dir(&repo)
-            .expect("load")
-            .expect(".fxg.toml exists");
-        assert_eq!(config.project_key.as_deref(), Some("internal/agent-tools"));
+        let link = daemon
+            .state()
+            .db()
+            .project_key_for_path(
+                &fxg_pty::canonicalize(&repo)
+                    .expect("canonicalize")
+                    .to_string_lossy(),
+            )
+            .await
+            .expect("link lookup")
+            .expect("link exists");
+        assert_eq!(link, "internal-agent-tools");
 
         // It appears in the list
         let response = roundtrip(
@@ -1105,7 +1109,7 @@ mod tests {
                 ..
             } => {
                 assert_eq!(projects.len(), 1);
-                assert_eq!(projects[0].project_id.as_str(), "internal/agent-tools");
+                assert_eq!(projects[0].project_id.as_str(), "user:internal-agent-tools");
                 assert_eq!(projects[0].bindings.len(), 1);
                 assert_eq!(projects[0].bindings[0].node_id.as_str(), "ipc-node");
             }
@@ -1149,7 +1153,6 @@ mod tests {
                 project_id: None,
                 branch: "feat/ipc".to_owned(),
                 base_branch: None,
-                path: None,
             },
         )
         .await;

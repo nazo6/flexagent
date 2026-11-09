@@ -50,6 +50,22 @@ export type AgentOpResponse = {
 	message: string | null,
 };
 
+/**  Node-owned agent settings stored in `node.db` (`agent_settings` / `agent_aliases`). */
+export type AgentSettings = {
+	/**  Default agent ID (`None` = built-in default) */
+	default_agent: string | null,
+	/**  ACP Registry URL (`None` = built-in default) */
+	registry_url: string | null,
+	/**  Registry cache TTL in seconds (`None` = built-in default) */
+	registry_cache_ttl_secs: number | null,
+	/**  Agent name aliases (merged over the built-in defaults) */
+	aliases: { [key in string]: string },
+	/**  Optimistic-lock revision */
+	revision: number,
+	/**  Last update time (Unix epoch ms) */
+	updated_at: number,
+};
+
 /**  How an agent is launched (the means actually usable on this node). */
 export type AgentSource = 
 /**  An installation already on PATH (detected with `which`) */
@@ -358,11 +374,9 @@ export type CreateWorktreeRequest = {
 	branch: string,
 	/**  Base branch (defaults to the current HEAD) */
 	base_branch: string | null,
-	/**  Explicit destination path (resolved from `worktree_dir_template` when omitted) */
-	path: string | null,
 };
 
-/**  A custom ACP agent definition outside the registry (`[agents.custom.<id>]`). */
+/**  A custom ACP agent definition (`agent_custom` in `node.db`). */
 export type CustomAgentConfig = {
 	/**  Display name */
 	name?: string | null,
@@ -370,8 +384,10 @@ export type CustomAgentConfig = {
 	command?: string,
 	/**  Command arguments */
 	args?: string[],
-	/**  Environment variables injected into the process */
+	/**  Plain environment variables injected into the process (stored as-is in the DB) */
 	env?: { [key in string]: string },
+	/**  Environment variables resolved from the secret store at launch time */
+	env_secrets?: { [key in string]: SecretId },
 };
 
 /**
@@ -585,6 +601,14 @@ export type ErrorCode =
 "INTERNAL" | 
 /**  The configuration file is invalid or cannot be read */
 "CONFIG_INVALID" | 
+/**  `expected_revision` did not match the stored revision (optimistic lock conflict) */
+"REVISION_MISMATCH" | 
+/**  A referenced secret value does not exist */
+"SECRET_MISSING" | 
+/**  The secret is still referenced by an agent or Git credential and cannot be deleted */
+"SECRET_IN_USE" | 
+/**  The secret ID or value is invalid */
+"SECRET_INVALID" | 
 /**  The requested agent is not installed / discoverable on the node */
 "AGENT_NOT_INSTALLED" | 
 /**  The agent process could not be launched or initialized */
@@ -696,7 +720,26 @@ export type FsEntry = {
 	is_hidden: boolean,
 };
 
-/**  Execution log of the `copy_files` / `post_create` hooks run when creating a worktree. */
+/**  How a temporary VM obtains Git credentials. */
+export type GitCredentialConfig = 
+/**  Obtain the token from `gh auth token`. */
+{ provider: "gh_cli"; 
+/**  Basic authentication user name (default: `x-access-token`) */
+username?: string | null } | 
+/**  Obtain the token from the given environment variable. */
+{ provider: "env"; 
+/**  Basic authentication user name (default: `x-access-token`) */
+username?: string | null; 
+/**  Name of the environment variable holding the token */
+token_env: string } | 
+/**  Read the token from the secret store (`secrets/server/<id>`). */
+{ provider: "secret"; 
+/**  Basic authentication user name (default: `x-access-token`) */
+username?: string | null; 
+/**  Referenced secret */
+secret_id: SecretId };
+
+/**  Execution log of a worktree creation hook. */
 export type HookLogEntry = {
 	/**  Command string that was executed */
 	command: string,
@@ -777,6 +820,26 @@ export type ModeInfo = {
 	description: string | null,
 };
 
+/**  Read-only bootstrap view of a local node (`config.toml` / env / CLI). */
+export type NodeBootstrapView = {
+	/**  Data directory (`FXG_HOME`) */
+	fxg_home: SourcedValue<string>,
+	/**  Node ID */
+	node_id: SourcedValue<string>,
+	/**  Local HTTP/WS bind address */
+	listen_addr: SourcedValue<string>,
+	/**  Node Hub WebSocket URL (standalone when `None`) */
+	central_server_url: SourcedValue<string | null>,
+	/**  Log level */
+	log_level: SourcedValue<string>,
+	/**  Log file destination (empty when disabled) */
+	log_file: SourcedValue<string | null>,
+	/**  Log format (`text` / `json`) */
+	log_format: SourcedValue<string>,
+	/**  Whether ANSI colors are disabled */
+	log_no_color: SourcedValue<boolean>,
+};
+
 /**  ID of a node (resident daemon or ephemeral VM). */
 export type NodeId = string;
 
@@ -803,8 +866,36 @@ export type NodeProjectReport = {
 	name: string,
 	/**  Git URL the canonical form was derived from */
 	canonical_git_url: string | null,
+	/**  How the project identity was derived */
+	identity: ProjectIdentity,
 	/**  Local path bindings on this node (including worktrees) */
 	bindings: ProjectNodeBinding[],
+};
+
+/**  Node-owned settings stored in `node.db` (`node_settings`). */
+export type NodeSettings = {
+	/**  Display name in the UI */
+	name: string,
+	/**  Whether remote (through the central server) Web PTY sessions are allowed */
+	allow_remote_pty: boolean,
+	/**  Directories scanned by `fxg project scan` when no directory is given */
+	project_scan_dirs: string[],
+	/**  Tray residency on start-up (`None` = default: disabled) */
+	tray: boolean | null,
+	/**  Optimistic-lock revision */
+	revision: number,
+	/**  Last update time (Unix epoch ms) */
+	updated_at: number,
+};
+
+/**  Complete settings snapshot of a local node. */
+export type NodeSettingsSnapshot = {
+	/**  Read-only process bootstrap values */
+	bootstrap: NodeBootstrapView,
+	/**  Node-owned settings */
+	node: NodeSettings,
+	/**  Agent settings */
+	agents: AgentSettings,
 };
 
 /**  Node information exposed to clients (`GET /api/v1/nodes` / `GET /api/v1/system/info`). */
@@ -934,10 +1025,18 @@ export type ProjectBindingSummary = {
 /**
  *  Logical project ID.
  * 
- *  Either an explicit `project_key` from `.fxg.toml`, a normalized git remote
- *  URL, or a `local:<node_id>:<hash>` fallback. Treated as opaque.
+ *  Either `user:<project_key>` from `project_path_links`, a normalized git
+ *  remote URL, or a `local:<node_id>:<hash>` fallback. Treated as opaque.
  */
 export type ProjectId = string;
+
+/**  Identity of a logical project. */
+export type ProjectIdentity = {
+	/**  How the identity was derived */
+	kind: string,
+	/**  Explicit project key (`Some` only for `UserKey`) */
+	key: string | null,
+};
 
 /**  `POST /api/v1/nodes/:node_id/projects/link` request. */
 export type ProjectLinkRequest = {
@@ -969,21 +1068,23 @@ export type ProjectNodeBinding = {
 	last_used_at: number,
 };
 
-/**  How the logical project (`project_key`) was resolved. */
-export type ProjectResolutionSource = 
-/**  Explicitly set in `.fxg.toml` (highest priority) */
-"fxg_toml" | 
-/**  Normalized `git remote.origin.url` */
-"git_remote" | 
-/**  Fallback (`local:<node_id>:<path-hash>`) */
-"fallback";
+/**  Per-project bootstrap profile for ephemeral VMs (`project_profiles` in `server.db`). */
+export type ProjectProfile = {
+	/**  Logical project ID */
+	project_id: ProjectId,
+	/**  Setup commands run after `git clone` and tool detection */
+	bootstrap_setup: string[],
+	/**  Non-secret environment variables injected during setup and execution */
+	bootstrap_env: { [key in string]: string },
+	/**  Optimistic-lock revision */
+	revision: number,
+	/**  Last update time (Unix epoch ms) */
+	updated_at: number,
+};
 
 /**  `POST /api/v1/nodes/:node_id/projects/scan` request. */
 export type ProjectScanRequest = {
-	/**
-	 *  Directory to scan
-	 *  (walks `node.project_scan_dirs` of `config.toml` when omitted)
-	 */
+	/**  Directory to scan (walks `node_settings.project_scan_dirs` when omitted) */
 	dir: string | null,
 };
 
@@ -1003,6 +1104,8 @@ export type ProjectSummary = {
 	name: string,
 	/**  Git URL the canonical form was derived from */
 	canonical_git_url: string | null,
+	/**  How the project identity was derived */
+	identity: ProjectIdentity,
 	/**  Creation time (Unix epoch ms) */
 	created_at: number,
 	/**  Last update time (Unix epoch ms) */
@@ -1030,14 +1133,40 @@ export type PromptInput = {
 	attachments?: AttachmentMeta[],
 };
 
+/**  Definition of an ephemeral VM / sandbox provisioner (`provisioners` in `server.db`). */
+export type ProvisionerDefinition = {
+	/**  Provisioner name (`local-docker` / `colab-pro` etc.) */
+	name?: string,
+	/**  Description (shown in the UI) */
+	description?: string | null,
+	/**  Command to execute (`docker` / `incus` / `uvx` / `ssh` etc.) */
+	command?: string,
+	/**
+	 *  Command arguments.
+	 * 
+	 *  Placeholders: `{BOOTSTRAP_SCRIPT}` / `{INSTANCE_NAME}` / `{SESSION_ID}`.
+	 */
+	args?: string[],
+	/**  Seconds until the idle instance is discarded automatically */
+	idle_timeout_secs?: number | null,
+	/**  Environment variables injected into the process */
+	env?: { [key in string]: string },
+};
+
 /**  An available ephemeral VM / sandbox provisioner (`GET /api/v1/provisioners`). */
 export type ProvisionerSummary = {
 	/**  Provisioner identifier (`local-docker` / `colab-pro` etc.) */
 	name: string,
 	/**  Description */
 	description: string | null,
+	/**  Command to execute */
+	command: string,
+	/**  Command arguments */
+	args: string[],
 	/**  Seconds until the idle instance is discarded automatically */
 	idle_timeout_secs: number | null,
+	/**  Environment variables injected into the process */
+	env: { [key in string]: string },
 };
 
 /**
@@ -1304,6 +1433,71 @@ export type SearchResponse = {
 	hits: SearchHit[],
 };
 
+/**  ID of a secret stored in `~/.flexagent/secrets/{node,server}/<id>`. */
+export type SecretId = string;
+
+/**  Metadata of a stored secret (never the value itself). */
+export type SecretSummary = {
+	/**  Secret ID */
+	id: SecretId,
+	/**  Display name */
+	name: string,
+	/**  Secret kind */
+	kind: string,
+	/**  Whether the value file exists */
+	configured: boolean,
+	/**  Last update time (Unix epoch ms). `None` when the value is missing. */
+	updated_at: number | null,
+	/**  Agent IDs / Git hosts referencing this secret (for `SECRET_IN_USE` diagnostics) */
+	used_by: string[],
+};
+
+/**  Response of the secret list endpoints. */
+export type SecretsResponse = {
+	/**  Secret metadata (values are never returned) */
+	secrets: SecretSummary[],
+};
+
+/**  Read-only bootstrap view of the central server (`config.toml` / env / CLI). */
+export type ServerBootstrapView = {
+	/**  Data directory (`FXG_HOME`) */
+	fxg_home: SourcedValue<string>,
+	/**  HTTP/WS bind address */
+	listen_addr: SourcedValue<string>,
+	/**  Extra allowed `Host` values (DNS rebinding defense) */
+	allowed_hosts: SourcedValue<string[]>,
+	/**  Extra allowed WebSocket `Origin` values (CSWSH defense) */
+	allowed_origins: SourcedValue<string[]>,
+	/**  Log level */
+	log_level: SourcedValue<string>,
+	/**  Log file destination (empty when disabled) */
+	log_file: SourcedValue<string | null>,
+	/**  Log format (`text` / `json`) */
+	log_format: SourcedValue<string>,
+	/**  Whether ANSI colors are disabled */
+	log_no_color: SourcedValue<boolean>,
+};
+
+/**  Server-owned settings stored in `server.db` (`server_settings`). */
+export type ServerSettings = {
+	/**  Web Push contact claim (`mailto:` / `https:`) */
+	vapid_subject: string | null,
+	/**  Per-host Git credential provider */
+	git_credentials: { [key in string]: GitCredentialConfig },
+	/**  Optimistic-lock revision */
+	revision: number,
+	/**  Last update time (Unix epoch ms) */
+	updated_at: number,
+};
+
+/**  Complete settings snapshot of the central server. */
+export type ServerSettingsSnapshot = {
+	/**  Read-only process bootstrap values */
+	bootstrap: ServerBootstrapView,
+	/**  Server-owned settings */
+	server: ServerSettings,
+};
+
 /**  Server -> Client (`/api/v1/client/ws`) message. */
 export type ServerWsMessage = 
 /**
@@ -1533,6 +1727,16 @@ export type SessionUsage = {
 	context_size: number,
 	/**  Accumulated cost (only when reported by the agent) */
 	cost: UsageCost | null,
+};
+
+/**  A read-only bootstrap value together with its origin. */
+export type SourcedValue<T> = {
+	/**  The effective value */
+	value: T,
+	/**  Which layer supplied the value */
+	source: string,
+	/**  Environment variable name / config.toml key / CLI flag (when known) */
+	source_detail: string | null,
 };
 
 /**
@@ -1903,6 +2107,64 @@ export type UnifiedEventPayload =
 	error_message: string | null,
 } };
 
+/**  `PATCH /api/v1/settings/agents` request. */
+export type UpdateAgentSettingsRequest = {
+	/**  Default agent ID */
+	default_agent: string | null,
+	/**  ACP Registry URL */
+	registry_url: string | null,
+	/**  Registry cache TTL in seconds */
+	registry_cache_ttl_secs: number | null,
+	/**  Agent name aliases */
+	aliases: { [key in string]: string },
+	/**  Revision the client observed (`REVISION_MISMATCH` on conflict) */
+	expected_revision: number,
+};
+
+/**  `PATCH /api/v1/settings/node` request. */
+export type UpdateNodeSettingsRequest = {
+	/**  Display name */
+	name: string,
+	/**  Remote PTY policy */
+	allow_remote_pty: boolean,
+	/**  Default project scan directories */
+	project_scan_dirs: string[],
+	/**  Tray residency */
+	tray: boolean | null,
+	/**  Revision the client observed (`REVISION_MISMATCH` on conflict) */
+	expected_revision: number,
+};
+
+/**  `PUT /api/v1/projects/{project_id}/profile` request. */
+export type UpdateProjectProfileRequest = {
+	/**  Setup commands */
+	bootstrap_setup: string[],
+	/**  Non-secret environment variables */
+	bootstrap_env: { [key in string]: string },
+	/**  Revision the client observed (`REVISION_MISMATCH` on conflict) */
+	expected_revision: number,
+};
+
+/**  `PATCH /api/v1/settings/server` request. */
+export type UpdateServerSettingsRequest = {
+	/**  Web Push contact claim */
+	vapid_subject: string | null,
+	/**  Per-host Git credential provider */
+	git_credentials: { [key in string]: GitCredentialConfig },
+	/**  Revision the client observed (`REVISION_MISMATCH` on conflict) */
+	expected_revision: number,
+};
+
+/**  `PUT /api/v1/secrets/{secret_id}` request (write-only). */
+export type UpsertSecretRequest = {
+	/**  Display name */
+	name: string,
+	/**  Secret kind */
+	kind: string,
+	/**  The plaintext value. Never echoed back in a response or written to logs. */
+	value: string,
+};
+
 /**  Accumulated session cost (ACP `Cost`). */
 export type UsageCost = {
 	/**  Accumulated cost amount */
@@ -1942,9 +2204,7 @@ export type WorktreeAction =
 /**  Name of the branch to create */
 branch: string; 
 /**  Base branch (defaults to the current HEAD) */
-base_branch: string | null; 
-/**  Explicit destination path (resolved from `worktree_dir_template` when omitted) */
-new_path: string | null } | 
+base_branch: string | null } | 
 /**  Remove a worktree (`git worktree remove`) */
 { action: "remove"; 
 /**  Path to remove */
@@ -1974,8 +2234,6 @@ export type WorktreeSpec = {
 	branch: string,
 	/**  Base branch */
 	base_branch: string | null,
-	/**  Explicit destination path */
-	new_path: string | null,
 };
 
 /**  `GET /api/v1/projects/:id/worktrees` response. */

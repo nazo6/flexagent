@@ -201,14 +201,22 @@ async fn init_repo(dir: &Path) {
         .expect("commit");
 }
 
-/// Writes the mock agent definition into the node's `config.toml`.
-fn write_mock_agent_config(fxg_home: &Path) {
+/// Registers the mock agent definition in the node's `node.db`.
+async fn write_mock_agent_config(fxg_home: &Path) {
     std::fs::create_dir_all(fxg_home).expect("mkdir home");
-    std::fs::write(
-        fxg_home.join("config.toml"),
-        "[agents.custom.mock]\nname = \"Mock Agent\"\ncommand = \"mock-agent\"\n",
+    let db = Db::open(&fxg_db::node_db_path(fxg_home), DbRole::Node)
+        .await
+        .expect("open node db");
+    db.upsert_custom_agent(
+        "mock",
+        &fxg_protocol::settings::CustomAgentConfig {
+            name: Some("Mock Agent".to_owned()),
+            command: "mock-agent".to_owned(),
+            ..Default::default()
+        },
     )
-    .expect("write config");
+    .await
+    .expect("register custom agent");
 }
 
 /// Starts a test node.
@@ -219,7 +227,7 @@ async fn start_node(
     node_token: Option<String>,
     agent: &MockAgent,
 ) -> NodeDaemon {
-    write_mock_agent_config(home);
+    write_mock_agent_config(home).await;
     let mut config = DaemonConfig::new(home.to_path_buf(), node_id, "E2E Node");
     config.listen_addr = "127.0.0.1:0".to_owned();
     config.ipc_endpoint = test_ipc_endpoint(home);
@@ -237,8 +245,7 @@ async fn start_server(home: &Path, port: u16) -> Server {
         listen_addr: format!("127.0.0.1:{port}"),
         allowed_hosts: Vec::new(),
         allowed_origins: Vec::new(),
-        provisioners: Default::default(),
-        git_credentials: Default::default(),
+        log: Default::default(),
     })
     .await
     .expect("start server")

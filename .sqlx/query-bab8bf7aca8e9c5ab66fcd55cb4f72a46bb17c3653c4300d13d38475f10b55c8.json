@@ -1,0 +1,74 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        SELECT project_id AS \"project_id!\", bootstrap_setup_json, bootstrap_env_json,\n               revision, updated_at\n          FROM project_profiles\n         WHERE project_id = ?\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "project_id!",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "project_profiles",
+            "name": "project_id"
+          }
+        }
+      },
+      {
+        "name": "bootstrap_setup_json",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "project_profiles",
+            "name": "bootstrap_setup_json"
+          }
+        }
+      },
+      {
+        "name": "bootstrap_env_json",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "project_profiles",
+            "name": "bootstrap_env_json"
+          }
+        }
+      },
+      {
+        "name": "revision",
+        "ordinal": 3,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "project_profiles",
+            "name": "revision"
+          }
+        }
+      },
+      {
+        "name": "updated_at",
+        "ordinal": 4,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "project_profiles",
+            "name": "updated_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "bab8bf7aca8e9c5ab66fcd55cb4f72a46bb17c3653c4300d13d38475f10b55c8"
+}

@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT local_path AS \"local_path!\", project_key FROM project_path_links ORDER BY local_path",
+  "describe": {
+    "columns": [
+      {
+        "name": "local_path!",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "project_path_links",
+            "name": "local_path"
+          }
+        }
+      },
+      {
+        "name": "project_key",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "project_path_links",
+            "name": "project_key"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      true,
+      false
+    ]
+  },
+  "hash": "2d8e96972dd739f66b1bcb33e6222649d9090ddd6b1f2b8e49a953b63d8c2b28"
+}

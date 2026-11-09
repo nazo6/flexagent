@@ -44,6 +44,10 @@ pub mod actions {
     pub const NODE_TOKEN_MANAGE: AuditAction = AuditAction::NodeTokenManage;
     /// Client auth token regeneration
     pub const AUTH_TOKEN_ROTATE: AuditAction = AuditAction::AuthTokenRotate;
+    /// Settings updated
+    pub const SETTINGS_UPDATE: AuditAction = AuditAction::SettingsUpdate;
+    /// Secret created / updated / deleted / rotated
+    pub const SECRET_MANAGE: AuditAction = AuditAction::SecretManage;
 }
 
 /// Contents of an audit log record.
