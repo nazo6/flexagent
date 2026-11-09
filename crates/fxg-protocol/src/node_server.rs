@@ -123,6 +123,9 @@ pub enum NodeRpcRequest {
         /// Bypass the node's probe cache
         #[serde(default)]
         force: bool,
+        /// Configuration applied before capabilities are read
+        #[serde(default)]
+        initial_config: Vec<crate::common::InitialConfig>,
     },
     /// Fetch the node settings snapshot.
     GetNodeSettings,
@@ -728,6 +731,7 @@ mod tests {
                 agent_id: "opencode".into(),
                 local_path: "/tmp".into(),
                 force: false,
+                initial_config: Vec::new(),
             }
             .timeout(),
             Duration::from_secs(120)

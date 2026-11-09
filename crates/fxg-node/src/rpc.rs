@@ -195,10 +195,11 @@ async fn execute_inner(
             agent_id,
             local_path,
             force,
+            initial_config,
         } => {
             let preview = state
                 .session_manager()
-                .probe_agent_capabilities(&agent_id, Path::new(&local_path), force)
+                .probe_agent_capabilities(&agent_id, Path::new(&local_path), &initial_config, force)
                 .await?;
             Ok(NodeRpcResponse::AgentCapabilities { preview })
         }

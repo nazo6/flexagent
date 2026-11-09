@@ -88,7 +88,12 @@ pub(super) async fn build_session(
         "notify event subscribers"
     );
 
-    // Apply initial configuration (model / thinking level, etc.)
+    // Apply initial configuration (model / thinking level, etc.).
+    //
+    // The response may contain the refreshed option list: selecting a model can
+    // add dependent options (for example opencode's effort levels) that are not
+    // part of the `session/new` payload.
+    let mut applied_config_options: Option<Vec<SessionConfigOption>> = None;
     for setting in &params.initial_config {
         let value = match parse_config_value(setting.value.clone()) {
             Ok(value) => value,
@@ -97,7 +102,7 @@ pub(super) async fn build_session(
                 continue;
             }
         };
-        if let Err(err) = cx
+        match cx
             .send_request(SetSessionConfigOptionRequest::new(
                 acp_session_id.clone(),
                 setting.key.clone(),
@@ -106,7 +111,13 @@ pub(super) async fn build_session(
             .block_task()
             .await
         {
-            tracing::warn!(key = %setting.key, "failed to set initial config: {err}");
+            Ok(response) if !response.config_options.is_empty() => {
+                applied_config_options = Some(response.config_options);
+            }
+            Ok(_) => {}
+            Err(err) => {
+                tracing::warn!(key = %setting.key, "failed to set initial config: {err}");
+            }
         }
     }
 
@@ -128,8 +139,12 @@ pub(super) async fn build_session(
     // `session/new` reports the agent defaults; reflect the initial values we
     // just applied so the first `CapabilitiesUpdated` matches the session state
     // (the agent usually does not emit a config update for `set_config_option`).
-    let (modes, commands, mut config_options) =
-        session_capabilities(acquired.modes.as_ref(), acquired.config_options.as_deref());
+    let (modes, commands, mut config_options) = session_capabilities(
+        acquired.modes.as_ref(),
+        applied_config_options
+            .as_deref()
+            .or(acquired.config_options.as_deref()),
+    );
     for setting in &params.initial_config {
         if let Some(option) = config_options
             .iter_mut()

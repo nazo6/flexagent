@@ -17,6 +17,7 @@
     AgentCapabilitiesPreview,
     AgentSummary,
     ConfigOptionValue,
+    InitialConfig,
     ProvisionerSummary,
     ProvisionerTestResponse,
   } from "#lib/generated/bindings.ts";
@@ -352,7 +353,34 @@
           ""),
   );
 
-  /** Stable cache / request key for the capability probe. */
+  /**
+   * Model selection applied to the capability probe.
+   *
+   * Some agents (for example opencode) publish dependent options such as
+   * `effort` only after a model is selected. Before the first probe the only
+   * model key we know is the conventional `model` from the saved preferences.
+   */
+  function currentModelConfig(): InitialConfig[] {
+    if (capabilities !== null) {
+      const option = (capabilities.config_options ?? []).find((candidate) =>
+        isModelOption(candidate),
+      );
+      if (option === undefined) return [];
+      const value = selectedConfigValues[option.key];
+      return value === undefined ? [] : [{ key: option.key, value }];
+    }
+    const projectId = selectedProject?.project_id ?? "";
+    if (projectId === "") return [];
+    const saved = loadSessionConfig(projectId)["model"];
+    return saved === undefined ? [] : [{ key: "model", value: saved }];
+  }
+
+  /** UI cache key for one probe request (agent / path / initial config). */
+  function probeCacheKey(key: string, config: InitialConfig[]): string {
+    return `${key}\u0000${JSON.stringify(config)}`;
+  }
+
+  /** Stable key for the probe target (node / agent / working directory). */
   const probeKey = $derived(
     isProvisionerMode ||
       !nodeAvailability.isAvailable ||
@@ -369,16 +397,35 @@
     capabilitiesKey === probeKey ? orderedConfigOptions(capabilities?.config_options ?? []) : [],
   );
 
-  function applyCapabilities(key: string, preview: AgentCapabilitiesPreview): void {
+  function sameConfig(left: InitialConfig[], right: InitialConfig[]): boolean {
+    return JSON.stringify(left) === JSON.stringify(right);
+  }
+
+  function applyCapabilities(
+    key: string,
+    preview: AgentCapabilitiesPreview,
+    probedConfig: InitialConfig[],
+  ): void {
     capabilities = preview;
     capabilitiesKey = key;
     capabilitiesLoading = false;
     const projectId = selectedProject?.project_id ?? "";
     const saved = projectId === "" ? {} : loadSessionConfig(projectId);
     selectedConfigValues = resolveInitialConfig(preview.config_options ?? [], saved);
+
+    // The probe may have used no model (first visit) or a remembered model that
+    // is no longer available. Probe once more with the model actually selected
+    // so dependent options such as effort are included.
+    const selectedModelConfig = currentModelConfig();
+    if (selectedModelConfig.length > 0 && !sameConfig(selectedModelConfig, probedConfig)) {
+      void loadAgentCapabilities(false, selectedModelConfig);
+    }
   }
 
-  async function loadAgentCapabilities(force = false): Promise<void> {
+  async function loadAgentCapabilities(
+    force = false,
+    config: InitialConfig[] = currentModelConfig(),
+  ): Promise<void> {
     const key = probeKey;
     if (key === "") {
       capabilitiesGeneration += 1;
@@ -389,10 +436,11 @@
       selectedConfigValues = {};
       return;
     }
+    const cacheKey = probeCacheKey(key, config);
     if (!force) {
-      const cached = capabilitiesCache.get(key);
+      const cached = capabilitiesCache.get(cacheKey);
       if (cached) {
-        applyCapabilities(key, cached);
+        applyCapabilities(key, cached, config);
         return;
       }
     }
@@ -405,10 +453,11 @@
         effectiveAgent,
         probePath,
         force,
+        config,
       );
       if (generation !== capabilitiesGeneration) return;
-      capabilitiesCache.set(key, preview);
-      applyCapabilities(key, preview);
+      capabilitiesCache.set(cacheKey, preview);
+      applyCapabilities(key, preview, config);
     } catch (error) {
       if (generation !== capabilitiesGeneration) return;
       capabilities = null;
@@ -444,13 +493,23 @@
       capabilitiesError = null;
       selectedConfigValues = {};
     }
-    void loadAgentCapabilities(false);
+    void loadAgentCapabilities(
+      false,
+      untrack(() => currentModelConfig()),
+    );
   });
 
   function changeConfigOption(key: string, value: ConfigOptionValue): void {
     selectedConfigValues = { ...selectedConfigValues, [key]: value };
     const projectId = selectedProject?.project_id ?? "";
     if (projectId !== "") saveSessionConfigOption(projectId, key, value);
+
+    // Selecting a model can reveal dependent options (for example opencode's
+    // effort levels) that the previous probe did not return.
+    const option = (capabilities?.config_options ?? []).find((candidate) => candidate.key === key);
+    if (option !== undefined && isModelOption(option)) {
+      void loadAgentCapabilities(true, [{ key, value }]);
+    }
   }
 
   function initialConfig(): { key: string; value: ConfigOptionValue }[] {

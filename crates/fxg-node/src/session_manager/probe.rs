@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use fxg_acp::{AgentAuthRequired, DriverEvent, StartSessionRequest};
 use fxg_protocol::client_api::AgentCapabilitiesPreview;
-use fxg_protocol::common::SessionStatus;
+use fxg_protocol::common::{ConfigOptionCategory, ConfigOptionInfo, InitialConfig, SessionStatus};
 use fxg_protocol::events::UnifiedEventPayload;
 use fxg_protocol::util::uuid_v7;
 use tokio::sync::mpsc;
@@ -61,19 +61,56 @@ impl Inner {
     }
 
     /// Updates the probe cache from a running session's capabilities.
+    ///
+    /// The cache key includes the current model so a probe for another model
+    /// does not reuse model-specific options (such as effort levels).
     pub(super) fn remember_capabilities(
         &self,
         agent_id: &str,
         cwd: &Path,
         preview: AgentCapabilitiesPreview,
     ) {
+        let model_config: Vec<InitialConfig> = preview
+            .config_options
+            .iter()
+            .find(|option| is_model_option(option))
+            .map(|option| {
+                vec![InitialConfig {
+                    key: option.key.clone(),
+                    value: option.current_value.clone(),
+                }]
+            })
+            .unwrap_or_default();
         self.store_probe(
             ProbeKey {
                 agent_id: agent_id.to_owned(),
                 local_path: cwd.to_path_buf(),
+                config_key: config_key(&model_config),
             },
             preview,
         );
+    }
+}
+
+/// Whether the option selects the agent's model.
+fn is_model_option(option: &ConfigOptionInfo) -> bool {
+    option.category.as_ref() == Some(&ConfigOptionCategory::Model)
+        || (option.category.is_none() && option.key == "model")
+}
+
+/// Stable cache key for the initial configuration applied to a probe.
+fn config_key(config: &[InitialConfig]) -> String {
+    if config.is_empty() {
+        return String::new();
+    }
+    match serde_json::to_string(config) {
+        Ok(key) => key,
+        Err(err) => {
+            // Keep entries distinct even if a caller sends a non-serializable
+            // value; the probe itself still applies the configuration.
+            tracing::warn!(%err, "failed to serialize probe config for the cache key");
+            format!("invalid:{err}")
+        }
     }
 }
 
@@ -81,11 +118,13 @@ impl SessionManager {
     /// Probes an agent by starting and immediately closing a temporary ACP session.
     ///
     /// The returned modes/config options match what a real session would receive
-    /// from `session/new`. Results are cached per `(agent_id, local_path)`.
+    /// after applying `initial_config`. Results are cached per
+    /// `(agent_id, local_path, initial_config)`.
     pub async fn probe_agent_capabilities(
         &self,
         agent_id: &str,
         local_path: &Path,
+        initial_config: &[InitialConfig],
         force: bool,
     ) -> Result<AgentCapabilitiesPreview, NodeError> {
         if agent_id.trim().is_empty() {
@@ -103,6 +142,7 @@ impl SessionManager {
         let key = ProbeKey {
             agent_id: agent_id.to_owned(),
             local_path: cwd.clone(),
+            config_key: config_key(initial_config),
         };
         if !force && let Some(preview) = self.inner.cached_probe(&key) {
             return Ok(preview);
@@ -130,7 +170,7 @@ impl SessionManager {
             initial_mode: None,
             resume: None,
             fork_from: None,
-            initial_config: Vec::new(),
+            initial_config: initial_config.to_vec(),
         };
 
         let started = match tokio::time::timeout(

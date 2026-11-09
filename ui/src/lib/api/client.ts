@@ -13,6 +13,7 @@ import type {
   ErrorInfo,
   FsBrowseResponse,
   InboxResponse,
+  InitialConfig,
   IssueNodeTokenRequest,
   IssueNodeTokenResponse,
   KillSwitchResponse,
@@ -587,11 +588,12 @@ export class ApiClient {
     agentId: string,
     localPath: string,
     force = false,
+    initialConfig: InitialConfig[] = [],
   ): Promise<AgentCapabilitiesPreview> {
     return this.#request<AgentCapabilitiesPreview>(
       "POST",
       `/api/v1/nodes/${encodeURIComponent(nodeId)}/agents/${encodeURIComponent(agentId)}/probe`,
-      { body: { local_path: localPath, force } },
+      { body: { local_path: localPath, force, initial_config: initialConfig } },
     );
   }
 

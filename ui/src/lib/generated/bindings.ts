@@ -1000,6 +1000,13 @@ export type ProbeAgentRequest = {
 	local_path: string,
 	/**  Bypass the node's probe cache (used by the UI's "Refresh") */
 	force?: boolean,
+	/**
+	 *  Configuration applied to the temporary session before capabilities are read.
+	 * 
+	 *  Some agents only report dependent options (for example the thought level)
+	 *  after a model is selected.
+	 */
+	initial_config?: InitialConfig[],
 };
 
 /**  Project-to-node binding exposed to clients. */

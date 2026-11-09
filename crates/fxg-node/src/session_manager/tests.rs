@@ -7,7 +7,7 @@ use fxg_db::{Db, DbRole};
 use fxg_protocol::SessionId;
 use fxg_protocol::client_api::AgentCapabilitiesPreview;
 use fxg_protocol::common::{
-    ConfigOptionCategory, ConfigOptionInfo, ConfigOptionValue, EventType, ModeInfo,
+    ConfigOptionCategory, ConfigOptionInfo, ConfigOptionValue, EventType, InitialConfig, ModeInfo,
     PermissionOptionKind,
 };
 use fxg_protocol::settings::{AgentSettings, CustomAgentConfig};
@@ -187,7 +187,7 @@ async fn probe_agent_capabilities_returns_options_and_caches() {
     mock.set_start_capabilities(preview.clone());
 
     let probed = manager
-        .probe_agent_capabilities("mock", dir.path(), false)
+        .probe_agent_capabilities("mock", dir.path(), &[], false)
         .await
         .expect("probe");
     assert_eq!(probed, preview);
@@ -205,7 +205,7 @@ async fn probe_agent_capabilities_returns_options_and_caches() {
     // A second probe is served from the cache (no second driver start).
     mock.set_start_capabilities(AgentCapabilitiesPreview::default());
     let cached = manager
-        .probe_agent_capabilities("mock", dir.path(), false)
+        .probe_agent_capabilities("mock", dir.path(), &[], false)
         .await
         .expect("cached probe");
     assert_eq!(cached, preview);
@@ -213,11 +213,32 @@ async fn probe_agent_capabilities_returns_options_and_caches() {
 
     // A forced probe bypasses the cache and starts the driver again.
     let refreshed = manager
-        .probe_agent_capabilities("mock", dir.path(), true)
+        .probe_agent_capabilities("mock", dir.path(), &[], true)
         .await
         .expect("forced probe");
     assert_eq!(refreshed, AgentCapabilitiesPreview::default());
     assert_eq!(mock.starts().len(), 2);
+
+    // A model-specific probe is a different cache entry and is applied to the
+    // temporary session so dependent options (effort, ...) can be discovered.
+    let model_config = vec![InitialConfig {
+        key: "model".to_owned(),
+        value: ConfigOptionValue::Select("gpt-4".to_owned()),
+    }];
+    let _ = manager
+        .probe_agent_capabilities("mock", dir.path(), &model_config, false)
+        .await
+        .expect("model probe");
+    assert_eq!(mock.starts().len(), 3);
+    let starts = mock.starts();
+    assert_eq!(starts[2].initial_config, model_config);
+
+    // The same model selection is served from the cache.
+    let _ = manager
+        .probe_agent_capabilities("mock", dir.path(), &model_config, false)
+        .await
+        .expect("cached model probe");
+    assert_eq!(mock.starts().len(), 3);
 }
 
 #[tokio::test]

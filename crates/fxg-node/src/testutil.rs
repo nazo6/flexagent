@@ -19,7 +19,7 @@ use fxg_acp::{
     StartSessionRequest, StartedSession,
 };
 use fxg_protocol::client_api::AgentCapabilitiesPreview;
-use fxg_protocol::common::SessionStatus;
+use fxg_protocol::common::{InitialConfig, SessionStatus};
 use fxg_protocol::events::UnifiedEventPayload;
 use tokio::sync::mpsc;
 
@@ -100,7 +100,7 @@ pub(crate) struct MockAgent {
 }
 
 /// Recorded `start_session` invocation for tests.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct MockStart {
     /// Target session ID
     pub session_id: String,
@@ -110,6 +110,8 @@ pub(crate) struct MockStart {
     pub resume: Option<ResumeRequest>,
     /// Source ACP session ID for a native fork
     pub fork_from: Option<String>,
+    /// Initial configuration applied after `session/new`
+    pub initial_config: Vec<InitialConfig>,
 }
 
 #[derive(Default)]
@@ -243,6 +245,7 @@ impl AgentDriver for MockAgent {
             cwd: req.cwd,
             resume: req.resume,
             fork_from: req.fork_from,
+            initial_config: req.initial_config,
         });
         if let Some(capabilities) = self
             .inner

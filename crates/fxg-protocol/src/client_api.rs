@@ -306,6 +306,12 @@ pub struct ProbeAgentRequest {
     /// Bypass the node's probe cache (used by the UI's "Refresh")
     #[serde(default)]
     pub force: bool,
+    /// Configuration applied to the temporary session before capabilities are read.
+    ///
+    /// Some agents only report dependent options (for example the thought level)
+    /// after a model is selected.
+    #[serde(default)]
+    pub initial_config: Vec<crate::common::InitialConfig>,
 }
 
 /// Capabilities returned by starting a temporary ACP session.

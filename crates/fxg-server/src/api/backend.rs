@@ -403,6 +403,7 @@ pub trait ClientApiBackend: Clone + Send + Sync + 'static {
                     agent_id: agent_id.to_owned(),
                     local_path: request.local_path,
                     force: request.force,
+                    initial_config: request.initial_config,
                 },
                 Some(client),
             )

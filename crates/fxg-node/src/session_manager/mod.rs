@@ -223,6 +223,8 @@ struct ProbeKey {
     agent_id: String,
     /// Working directory used for the probe
     local_path: PathBuf,
+    /// Fingerprint of the initial configuration (model, ...) applied to the probe
+    config_key: String,
 }
 
 /// Cached capability probe result.
