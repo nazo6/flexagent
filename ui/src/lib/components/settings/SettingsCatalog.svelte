@@ -88,7 +88,7 @@
         }
         syncNodeForm();
       }
-      if (section === "machine" || section === "server") {
+      if (section === "bootstrap" || section === "machine" || section === "server") {
         if (isServer) {
           serverSnapshot = await sync.connection.client.serverSettings();
           syncServerForm();
