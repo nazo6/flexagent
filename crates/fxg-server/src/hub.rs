@@ -10,8 +10,8 @@
 //! - **Event ingestion**: apply `EventBatchPush` idempotently with `INSERT OR IGNORE` +
 //!   projection updates (same Tx), then return `EventBatchAck` (watermark). Newly inserted
 //!   events are delivered to Client WS subscribers
-//! - **Command relay**: correlate by `command_id` and return the node's `CommandResult` /
-//!   `GitDiffResult` / `WorktreeResult` to the requesting client
+//! - **Command relay**: correlate by `command_id` and return the node's
+//!   `CommandResult` / `NodeRpcResult` to the requesting client
 //! - **PTY relay**: forward `PtyOutput` / `PtyExit` / `PtyError` to the client's PTY WS,
 //!   keyed by `pty_id`
 
@@ -25,8 +25,7 @@ use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use futures_util::{SinkExt, StreamExt};
 use fxg_db::Db;
-use fxg_protocol::client_api::WorktreeInfo;
-use fxg_protocol::common::{CommandResult, ErrorCode, WorkspaceDiffResponse};
+use fxg_protocol::common::{CommandResult, ErrorCode};
 use fxg_protocol::node_server::{NodeToServerMsg, ResyncTarget, ServerToNodeMsg};
 use fxg_protocol::util::uuid_v7;
 use fxg_protocol::{CommandId, NodeId};
@@ -39,28 +38,11 @@ use crate::state::ServerState;
 /// Timeout for the handshake (`NodeHello`) after a node connects.
 const HELLO_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// Timeout for a relayed command response.
-const COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
-
 /// Timeout for session commands (prompt submission, permission responses, control, resume).
 ///
 /// Sending to a stopped session and resuming start the agent on the node side, so a cold
 /// start (e.g. PyInstaller extraction, ~25 s) is allowed.
 const SESSION_COMMAND_TIMEOUT: Duration = Duration::from_secs(120);
-
-/// Timeout for project operations (scans, etc.).
-///
-/// Directory traversal can exceed 30 seconds depending on the target size.
-const PROJECT_OP_TIMEOUT: Duration = Duration::from_secs(120);
-
-/// Timeout for fetching the ACP Registry catalog
-/// (including the network re-fetch of the index).
-const AGENTS_TIMEOUT: Duration = Duration::from_secs(120);
-
-/// Timeout for agent installs and updates.
-///
-/// Downloading and extracting binaries can take minutes.
-const AGENT_OP_TIMEOUT: Duration = Duration::from_secs(600);
 
 /// Outgoing queue capacity for a node connection.
 const NODE_CHANNEL_CAPACITY: usize = 512;
@@ -70,110 +52,10 @@ const PTY_CHANNEL_CAPACITY: usize = 1024;
 
 /// Kind of response a relay is waiting for.
 enum PendingResponse {
-    /// Command execution result (`CommandResult`)
+    /// Session command result (`CommandResult`)
     Command(CommandResult),
-    /// Git Diff result (`GitDiffResult`)
-    GitDiff {
-        /// Diff on success
-        diff: Option<WorkspaceDiffResponse>,
-        /// Message on failure
-        error: Option<String>,
-    },
-    /// Worktree operation result (`WorktreeResult`)
-    Worktree {
-        /// Worktree info on success (`None` when deleted)
-        worktree: Option<WorktreeInfo>,
-        /// Message on failure
-        error: Option<String>,
-    },
-    /// Session resume result (`ResumeResult`)
-    Resume {
-        /// Whether it succeeded
-        success: bool,
-        /// Structured error code on failure
-        code: Option<ErrorCode>,
-        /// Whether native restore succeeded on success (`false` = continue by replaying history)
-        context_restored: Option<bool>,
-        /// Message on failure
-        error: Option<String>,
-    },
-    /// Session archive/restore result (`ArchiveResult`)
-    Archive {
-        /// Whether it succeeded
-        success: bool,
-        /// Structured error code on failure
-        code: Option<ErrorCode>,
-        /// Archive timestamp on success (Unix epoch ms). `None` when restoring
-        archived_at: Option<i64>,
-        /// Message on failure
-        error: Option<String>,
-    },
-    /// Session delete result (`DeleteResult`)
-    Delete {
-        /// Whether it succeeded
-        success: bool,
-        /// Structured error code on failure
-        code: Option<ErrorCode>,
-        /// Message on failure
-        error: Option<String>,
-    },
-    /// Filesystem browse result (`BrowseFsResult`)
-    BrowseFs {
-        /// Browse result on success
-        response: Option<fxg_protocol::client_api::FsBrowseResponse>,
-        /// Message on failure
-        error: Option<String>,
-    },
-    /// Project bulk scan result (`ProjectScanResult`)
-    ProjectScan {
-        /// Scan result on success
-        response: Option<fxg_protocol::client_api::ProjectScanResponse>,
-        /// Message on failure
-        error: Option<String>,
-    },
-    /// Project manual link result (`ProjectLinkResult`)
-    ProjectLink {
-        /// Link result on success
-        response: Option<fxg_protocol::client_api::ProjectLinkResponse>,
-        /// Message on failure
-        error: Option<String>,
-    },
-    /// Agent management operation result (`AgentOpResult`)
-    AgentOp {
-        /// Whether it succeeded
-        success: bool,
-        /// Structured error code on failure
-        code: Option<ErrorCode>,
-        /// Display message on success
-        message: Option<String>,
-        /// Message on failure
-        error: Option<String>,
-    },
-    /// ACP Registry catalog result (`AgentsResult`)
-    Agents {
-        /// Catalog on success
-        response: Option<fxg_protocol::client_api::AgentsResponse>,
-        /// Message on failure
-        error: Option<String>,
-    },
-    /// Node settings snapshot result (`NodeSettingsResult`)
-    NodeSettings {
-        /// Snapshot on success
-        snapshot: Option<Box<fxg_protocol::settings::NodeSettingsSnapshot>>,
-        /// Structured error code on failure
-        code: Option<ErrorCode>,
-        /// Message on failure
-        error: Option<String>,
-    },
-    /// Secret metadata result (`SecretOpResult`)
-    SecretOp {
-        /// Secret metadata after the operation
-        secrets: Option<Vec<fxg_protocol::settings::SecretSummary>>,
-        /// Structured error code on failure
-        code: Option<ErrorCode>,
-        /// Message on failure
-        error: Option<String>,
-    },
+    /// Generic node RPC result (`NodeRpcResult`)
+    Rpc(fxg_protocol::node_server::NodeRpcOutcome),
     /// Failure such as a node disconnect
     Failed {
         /// Structured error code
@@ -432,327 +314,34 @@ impl NodeHub {
         }
     }
 
-    /// Relays a Git Diff request and waits for the result correlated by `request_id`.
-    pub async fn git_diff(
-        &self,
-        node_id: &NodeId,
-        request_id: &str,
-        message: ServerToNodeMsg,
-    ) -> Result<WorkspaceDiffResponse, ApiError> {
-        let response = self
-            .request(node_id, request_id, message, COMMAND_TIMEOUT)
-            .await?;
-        match response {
-            PendingResponse::GitDiff { diff, error } => match (diff, error) {
-                (Some(diff), _) => Ok(diff),
-                (None, Some(error)) => Err(ApiError::bad_request(error)),
-                (None, None) => Err(ApiError::internal("node returned no diff")),
-            },
-            PendingResponse::Failed { code, message } => Err(ApiError::from_code(code, message)),
-            _ => Err(ApiError::internal("unexpected node response kind")),
-        }
-    }
-
-    /// Relays a Worktree operation and waits for the result correlated by `command_id`.
-    pub async fn worktree_op(
-        &self,
-        node_id: &NodeId,
-        command_id: &CommandId,
-        message: ServerToNodeMsg,
-    ) -> Result<Option<WorktreeInfo>, ApiError> {
-        let response = self
-            .request(node_id, command_id.as_str(), message, COMMAND_TIMEOUT)
-            .await?;
-        match response {
-            PendingResponse::Worktree { worktree, error } => match (worktree, error) {
-                (Some(worktree), _) => Ok(Some(worktree)),
-                (None, Some(error)) => Err(ApiError::bad_request(error)),
-                (None, None) => Ok(None),
-            },
-            PendingResponse::Failed { code, message } => Err(ApiError::from_code(code, message)),
-            _ => Err(ApiError::internal("unexpected node response kind")),
-        }
-    }
-
-    /// Relays a session resume and waits for the result correlated by `command_id`.
+    /// Relays a generic node operation and waits for its typed result.
     ///
-    /// The return value is whether native context restore succeeded (`false` = continue by
-    /// replaying history). Waits with [`SESSION_COMMAND_TIMEOUT`] to allow agent cold starts.
-    pub async fn resume_session(
+    /// The timeout comes from [`fxg_protocol::node_server::NodeRpcRequest::timeout`].
+    /// Node errors are passed through as [`ApiError::from_info`], so `ErrorCode`,
+    /// recovery actions and the data-safety hint are preserved.
+    pub async fn rpc(
         &self,
         node_id: &NodeId,
-        command_id: &CommandId,
-        message: ServerToNodeMsg,
-    ) -> Result<bool, ApiError> {
+        request_id: &CommandId,
+        request: fxg_protocol::node_server::NodeRpcRequest,
+    ) -> Result<fxg_protocol::node_server::NodeRpcResponse, ApiError> {
+        use fxg_protocol::node_server::NodeRpcOutcome;
+
+        let timeout = request.timeout();
         let response = self
             .request(
                 node_id,
-                command_id.as_str(),
-                message,
-                SESSION_COMMAND_TIMEOUT,
+                request_id.as_str(),
+                ServerToNodeMsg::NodeRpc {
+                    request_id: request_id.clone(),
+                    request,
+                },
+                timeout,
             )
             .await?;
         match response {
-            PendingResponse::Resume {
-                success,
-                code,
-                context_restored,
-                error,
-            } => {
-                if success {
-                    context_restored
-                        .ok_or_else(|| ApiError::internal("node returned no resume outcome"))
-                } else {
-                    Err(ApiError::from_code(
-                        code.unwrap_or(ErrorCode::Internal),
-                        error.unwrap_or_else(|| "resume failed".to_owned()),
-                    ))
-                }
-            }
-            PendingResponse::Failed { code, message } => Err(ApiError::from_code(code, message)),
-            _ => Err(ApiError::internal("unexpected node response kind")),
-        }
-    }
-
-    /// Relays a session archive/restore and waits for the result correlated by `command_id`.
-    ///
-    /// The return value is the archive timestamp (Unix epoch ms; `None` when restoring).
-    pub async fn archive_session(
-        &self,
-        node_id: &NodeId,
-        command_id: &CommandId,
-        message: ServerToNodeMsg,
-    ) -> Result<Option<i64>, ApiError> {
-        let response = self
-            .request(node_id, command_id.as_str(), message, COMMAND_TIMEOUT)
-            .await?;
-        match response {
-            PendingResponse::Archive {
-                success,
-                code,
-                archived_at,
-                error,
-            } => {
-                if success {
-                    Ok(archived_at)
-                } else {
-                    Err(ApiError::from_code(
-                        code.unwrap_or(ErrorCode::Internal),
-                        error.unwrap_or_else(|| "archive failed".to_owned()),
-                    ))
-                }
-            }
-            PendingResponse::Failed { code, message } => Err(ApiError::from_code(code, message)),
-            _ => Err(ApiError::internal("unexpected node response kind")),
-        }
-    }
-
-    /// Relays a session delete and waits for the result correlated by `command_id`.
-    ///
-    /// The executing node waits for a running session to stop, so wait with
-    /// [`SESSION_COMMAND_TIMEOUT`].
-    pub async fn delete_session(
-        &self,
-        node_id: &NodeId,
-        command_id: &CommandId,
-        message: ServerToNodeMsg,
-    ) -> Result<(), ApiError> {
-        let response = self
-            .request(
-                node_id,
-                command_id.as_str(),
-                message,
-                SESSION_COMMAND_TIMEOUT,
-            )
-            .await?;
-        match response {
-            PendingResponse::Delete {
-                success,
-                code,
-                error,
-            } => {
-                if success {
-                    Ok(())
-                } else {
-                    Err(ApiError::from_code(
-                        code.unwrap_or(ErrorCode::Internal),
-                        error.unwrap_or_else(|| "delete failed".to_owned()),
-                    ))
-                }
-            }
-            PendingResponse::Failed { code, message } => Err(ApiError::from_code(code, message)),
-            _ => Err(ApiError::internal("unexpected node response kind")),
-        }
-    }
-
-    /// Relays a filesystem browse and waits for the result correlated by `request_id`.
-    pub async fn browse_fs(
-        &self,
-        node_id: &NodeId,
-        request_id: &str,
-        message: ServerToNodeMsg,
-    ) -> Result<fxg_protocol::client_api::FsBrowseResponse, ApiError> {
-        let response = self
-            .request(node_id, request_id, message, COMMAND_TIMEOUT)
-            .await?;
-        match response {
-            PendingResponse::BrowseFs { response, error } => match (response, error) {
-                (Some(resp), _) => Ok(resp),
-                (None, Some(error)) => Err(ApiError::bad_request(error)),
-                (None, None) => Err(ApiError::internal("node returned no fs browse response")),
-            },
-            PendingResponse::Failed { code, message } => Err(ApiError::from_code(code, message)),
-            _ => Err(ApiError::internal("unexpected node response kind")),
-        }
-    }
-
-    /// Relays a project bulk scan and waits for the result correlated by `request_id`.
-    ///
-    /// Directory traversal can take a while, so wait with [`PROJECT_OP_TIMEOUT`], longer than
-    /// the normal command timeout.
-    pub async fn scan_projects(
-        &self,
-        node_id: &NodeId,
-        request_id: &str,
-        message: ServerToNodeMsg,
-    ) -> Result<fxg_protocol::client_api::ProjectScanResponse, ApiError> {
-        let response = self
-            .request(node_id, request_id, message, PROJECT_OP_TIMEOUT)
-            .await?;
-        match response {
-            PendingResponse::ProjectScan { response, error } => match (response, error) {
-                (Some(resp), _) => Ok(resp),
-                (None, Some(error)) => Err(ApiError::bad_request(error)),
-                (None, None) => Err(ApiError::internal("node returned no project scan response")),
-            },
-            PendingResponse::Failed { code, message } => Err(ApiError::from_code(code, message)),
-            _ => Err(ApiError::internal("unexpected node response kind")),
-        }
-    }
-
-    /// Relays a project manual link and waits for the result correlated by `request_id`.
-    pub async fn link_project(
-        &self,
-        node_id: &NodeId,
-        request_id: &str,
-        message: ServerToNodeMsg,
-    ) -> Result<fxg_protocol::client_api::ProjectLinkResponse, ApiError> {
-        let response = self
-            .request(node_id, request_id, message, COMMAND_TIMEOUT)
-            .await?;
-        match response {
-            PendingResponse::ProjectLink { response, error } => match (response, error) {
-                (Some(resp), _) => Ok(resp),
-                (None, Some(error)) => Err(ApiError::bad_request(error)),
-                (None, None) => Err(ApiError::internal("node returned no project link response")),
-            },
-            PendingResponse::Failed { code, message } => Err(ApiError::from_code(code, message)),
-            _ => Err(ApiError::internal("unexpected node response kind")),
-        }
-    }
-
-    /// Relays the ACP Registry catalog and waits for the result correlated by `request_id`.
-    pub async fn agents(
-        &self,
-        node_id: &NodeId,
-        request_id: &str,
-        message: ServerToNodeMsg,
-    ) -> Result<fxg_protocol::client_api::AgentsResponse, ApiError> {
-        let response = self
-            .request(node_id, request_id, message, AGENTS_TIMEOUT)
-            .await?;
-        match response {
-            PendingResponse::Agents { response, error } => match (response, error) {
-                (Some(resp), _) => Ok(resp),
-                (None, Some(error)) => Err(ApiError::bad_request(error)),
-                (None, None) => Err(ApiError::internal("node returned no agents response")),
-            },
-            PendingResponse::Failed { code, message } => Err(ApiError::from_code(code, message)),
-            _ => Err(ApiError::internal("unexpected node response kind")),
-        }
-    }
-
-    /// Relays an agent management operation (install / update / remove) and waits for the
-    /// result correlated by `request_id`. On success, returns the display message.
-    pub async fn manage_agent(
-        &self,
-        node_id: &NodeId,
-        request_id: &str,
-        message: ServerToNodeMsg,
-    ) -> Result<Option<String>, ApiError> {
-        let response = self
-            .request(node_id, request_id, message, AGENT_OP_TIMEOUT)
-            .await?;
-        match response {
-            PendingResponse::AgentOp {
-                success,
-                code,
-                message,
-                error,
-            } => {
-                if success {
-                    Ok(message)
-                } else {
-                    Err(ApiError::from_code(
-                        code.unwrap_or(ErrorCode::Internal),
-                        error.unwrap_or_else(|| "agent operation failed".to_owned()),
-                    ))
-                }
-            }
-            PendingResponse::Failed { code, message } => Err(ApiError::from_code(code, message)),
-            _ => Err(ApiError::internal("unexpected node response kind")),
-        }
-    }
-
-    /// Relays a node settings read/update and returns the snapshot.
-    pub async fn node_settings(
-        &self,
-        node_id: &NodeId,
-        request_id: &str,
-        message: ServerToNodeMsg,
-    ) -> Result<fxg_protocol::settings::NodeSettingsSnapshot, ApiError> {
-        let response = self
-            .request(node_id, request_id, message, COMMAND_TIMEOUT)
-            .await?;
-        match response {
-            PendingResponse::NodeSettings {
-                snapshot,
-                code,
-                error,
-            } => match snapshot {
-                Some(snapshot) => Ok(*snapshot),
-                None => Err(ApiError::from_code(
-                    code.unwrap_or(ErrorCode::Internal),
-                    error.unwrap_or_else(|| "node settings request failed".to_owned()),
-                )),
-            },
-            PendingResponse::Failed { code, message } => Err(ApiError::from_code(code, message)),
-            _ => Err(ApiError::internal("unexpected node response kind")),
-        }
-    }
-
-    /// Relays a secret operation and returns the resulting metadata.
-    pub async fn secret_op(
-        &self,
-        node_id: &NodeId,
-        request_id: &str,
-        message: ServerToNodeMsg,
-    ) -> Result<Vec<fxg_protocol::settings::SecretSummary>, ApiError> {
-        let response = self
-            .request(node_id, request_id, message, COMMAND_TIMEOUT)
-            .await?;
-        match response {
-            PendingResponse::SecretOp {
-                secrets,
-                code,
-                error,
-            } => match secrets {
-                Some(secrets) => Ok(secrets),
-                None => Err(ApiError::from_code(
-                    code.unwrap_or(ErrorCode::Internal),
-                    error.unwrap_or_else(|| "secret operation failed".to_owned()),
-                )),
-            },
+            PendingResponse::Rpc(NodeRpcOutcome::Ok { response }) => Ok(response),
+            PendingResponse::Rpc(NodeRpcOutcome::Err { error }) => Err(ApiError::from_info(error)),
             PendingResponse::Failed { code, message } => Err(ApiError::from_code(code, message)),
             _ => Err(ApiError::internal("unexpected node response kind")),
         }
@@ -1295,187 +884,13 @@ async fn handle_node_message_value(
                 .resolve(command_id.as_str(), PendingResponse::Command(result))
                 .await;
         }
-        NodeToServerMsg::GitDiffResult {
+        NodeToServerMsg::NodeRpcResult {
             request_id,
-            diff,
-            error,
+            outcome,
         } => {
             state
                 .hub()
-                .resolve(&request_id, PendingResponse::GitDiff { diff, error })
-                .await;
-        }
-        NodeToServerMsg::WorktreeResult {
-            command_id,
-            worktree,
-            error,
-        } => {
-            state
-                .hub()
-                .resolve(
-                    command_id.as_str(),
-                    PendingResponse::Worktree { worktree, error },
-                )
-                .await;
-        }
-        NodeToServerMsg::ResumeResult {
-            command_id,
-            success,
-            code,
-            context_restored,
-            error,
-        } => {
-            state
-                .hub()
-                .resolve(
-                    command_id.as_str(),
-                    PendingResponse::Resume {
-                        success,
-                        code,
-                        context_restored,
-                        error,
-                    },
-                )
-                .await;
-        }
-        NodeToServerMsg::ArchiveResult {
-            command_id,
-            success,
-            code,
-            archived_at,
-            error,
-        } => {
-            state
-                .hub()
-                .resolve(
-                    command_id.as_str(),
-                    PendingResponse::Archive {
-                        success,
-                        code,
-                        archived_at,
-                        error,
-                    },
-                )
-                .await;
-        }
-        NodeToServerMsg::DeleteResult {
-            command_id,
-            success,
-            code,
-            error,
-        } => {
-            state
-                .hub()
-                .resolve(
-                    command_id.as_str(),
-                    PendingResponse::Delete {
-                        success,
-                        code,
-                        error,
-                    },
-                )
-                .await;
-        }
-        NodeToServerMsg::BrowseFsResult {
-            request_id,
-            response,
-            error,
-        } => {
-            state
-                .hub()
-                .resolve(&request_id, PendingResponse::BrowseFs { response, error })
-                .await;
-        }
-        NodeToServerMsg::ProjectScanResult {
-            request_id,
-            response,
-            error,
-        } => {
-            state
-                .hub()
-                .resolve(
-                    &request_id,
-                    PendingResponse::ProjectScan { response, error },
-                )
-                .await;
-        }
-        NodeToServerMsg::ProjectLinkResult {
-            request_id,
-            response,
-            error,
-        } => {
-            state
-                .hub()
-                .resolve(
-                    &request_id,
-                    PendingResponse::ProjectLink { response, error },
-                )
-                .await;
-        }
-        NodeToServerMsg::AgentsResult {
-            request_id,
-            response,
-            error,
-        } => {
-            state
-                .hub()
-                .resolve(&request_id, PendingResponse::Agents { response, error })
-                .await;
-        }
-        NodeToServerMsg::AgentOpResult {
-            request_id,
-            success,
-            code,
-            message,
-            error,
-        } => {
-            state
-                .hub()
-                .resolve(
-                    &request_id,
-                    PendingResponse::AgentOp {
-                        success,
-                        code,
-                        message,
-                        error,
-                    },
-                )
-                .await;
-        }
-        NodeToServerMsg::NodeSettingsResult {
-            request_id,
-            snapshot,
-            code,
-            error,
-        } => {
-            state
-                .hub()
-                .resolve(
-                    &request_id,
-                    PendingResponse::NodeSettings {
-                        snapshot,
-                        code,
-                        error,
-                    },
-                )
-                .await;
-        }
-        NodeToServerMsg::SecretOpResult {
-            request_id,
-            secrets,
-            code,
-            error,
-        } => {
-            state
-                .hub()
-                .resolve(
-                    &request_id,
-                    PendingResponse::SecretOp {
-                        secrets,
-                        code,
-                        error,
-                    },
-                )
+                .resolve(request_id.as_str(), PendingResponse::Rpc(outcome))
                 .await;
         }
         NodeToServerMsg::PtyOutput { pty_id, data_b64 } => {

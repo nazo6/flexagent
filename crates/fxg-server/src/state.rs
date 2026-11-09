@@ -26,7 +26,7 @@ use fxg_protocol::client_api::{
 use fxg_protocol::common::{
     AgentAction, CommandResult, DiffScope, ErrorCode, WorkspaceDiffResponse, WorktreeAction,
 };
-use fxg_protocol::node_server::ServerToNodeMsg;
+use fxg_protocol::node_server::{NodeRpcRequest, NodeRpcResponse, ServerToNodeMsg};
 use fxg_protocol::util::uuid_v7;
 use tokio::sync::broadcast;
 
@@ -136,6 +136,16 @@ impl ServerState {
     /// Node connection registry.
     pub fn hub(&self) -> &NodeHub {
         &self.inner.hub
+    }
+
+    /// Executes a generic node RPC with a fresh correlation ID.
+    async fn node_rpc(
+        &self,
+        node_id: &NodeId,
+        request: NodeRpcRequest,
+    ) -> Result<NodeRpcResponse, ApiError> {
+        let request_id = CommandId::from(uuid_v7());
+        self.inner.hub.rpc(node_id, &request_id, request).await
     }
 
     /// VAPID Web Push delivery service.
@@ -292,16 +302,13 @@ impl ServerState {
 
     /// Relays a node settings read over the hub.
     pub async fn node_settings(&self, node_id: &str) -> Result<NodeSettingsSnapshot, ApiError> {
-        let request_id = uuid_v7();
-        self.hub()
-            .node_settings(
-                &NodeId::from(node_id),
-                &request_id,
-                fxg_protocol::node_server::ServerToNodeMsg::GetNodeSettings {
-                    request_id: request_id.clone(),
-                },
-            )
-            .await
+        match self
+            .node_rpc(&NodeId::from(node_id), NodeRpcRequest::GetNodeSettings)
+            .await?
+        {
+            NodeRpcResponse::NodeSettings { snapshot } => Ok(*snapshot),
+            _ => Err(ApiError::internal("unexpected node RPC response")),
+        }
     }
 
     /// Relays a node settings update over the hub.
@@ -310,17 +317,16 @@ impl ServerState {
         node_id: &str,
         request: UpdateNodeSettingsRequest,
     ) -> Result<NodeSettingsSnapshot, ApiError> {
-        let request_id = uuid_v7();
-        self.hub()
-            .node_settings(
+        match self
+            .node_rpc(
                 &NodeId::from(node_id),
-                &request_id,
-                fxg_protocol::node_server::ServerToNodeMsg::UpdateNodeSettings {
-                    request_id: request_id.clone(),
-                    request,
-                },
+                NodeRpcRequest::UpdateNodeSettings { request },
             )
-            .await
+            .await?
+        {
+            NodeRpcResponse::NodeSettings { snapshot } => Ok(*snapshot),
+            _ => Err(ApiError::internal("unexpected node RPC response")),
+        }
     }
 
     /// Relays an agent settings update over the hub.
@@ -329,31 +335,27 @@ impl ServerState {
         node_id: &str,
         request: UpdateAgentSettingsRequest,
     ) -> Result<NodeSettingsSnapshot, ApiError> {
-        let request_id = uuid_v7();
-        self.hub()
-            .node_settings(
+        match self
+            .node_rpc(
                 &NodeId::from(node_id),
-                &request_id,
-                fxg_protocol::node_server::ServerToNodeMsg::UpdateAgentSettings {
-                    request_id: request_id.clone(),
-                    request,
-                },
+                NodeRpcRequest::UpdateAgentSettings { request },
             )
-            .await
+            .await?
+        {
+            NodeRpcResponse::NodeSettings { snapshot } => Ok(*snapshot),
+            _ => Err(ApiError::internal("unexpected node RPC response")),
+        }
     }
 
     /// Relays a node secret listing over the hub.
     pub async fn node_secrets(&self, node_id: &str) -> Result<Vec<SecretSummary>, ApiError> {
-        let request_id = uuid_v7();
-        self.hub()
-            .secret_op(
-                &NodeId::from(node_id),
-                &request_id,
-                fxg_protocol::node_server::ServerToNodeMsg::GetSecrets {
-                    request_id: request_id.clone(),
-                },
-            )
-            .await
+        match self
+            .node_rpc(&NodeId::from(node_id), NodeRpcRequest::GetSecrets)
+            .await?
+        {
+            NodeRpcResponse::Secrets { secrets } => Ok(secrets),
+            _ => Err(ApiError::internal("unexpected node RPC response")),
+        }
     }
 
     /// Relays a node secret write over the hub.
@@ -363,18 +365,19 @@ impl ServerState {
         id: &SecretId,
         request: UpsertSecretRequest,
     ) -> Result<Vec<SecretSummary>, ApiError> {
-        let request_id = uuid_v7();
-        self.hub()
-            .secret_op(
+        match self
+            .node_rpc(
                 &NodeId::from(node_id),
-                &request_id,
-                fxg_protocol::node_server::ServerToNodeMsg::UpsertSecret {
-                    request_id: request_id.clone(),
+                NodeRpcRequest::UpsertSecret {
                     id: id.clone(),
                     request,
                 },
             )
-            .await
+            .await?
+        {
+            NodeRpcResponse::Secrets { secrets } => Ok(secrets),
+            _ => Err(ApiError::internal("unexpected node RPC response")),
+        }
     }
 
     /// Relays a node secret delete over the hub.
@@ -383,17 +386,16 @@ impl ServerState {
         node_id: &str,
         id: &SecretId,
     ) -> Result<Vec<SecretSummary>, ApiError> {
-        let request_id = uuid_v7();
-        self.hub()
-            .secret_op(
+        match self
+            .node_rpc(
                 &NodeId::from(node_id),
-                &request_id,
-                fxg_protocol::node_server::ServerToNodeMsg::DeleteSecret {
-                    request_id: request_id.clone(),
-                    id: id.clone(),
-                },
+                NodeRpcRequest::DeleteSecret { id: id.clone() },
             )
-            .await
+            .await?
+        {
+            NodeRpcResponse::Secrets { secrets } => Ok(secrets),
+            _ => Err(ApiError::internal("unexpected node RPC response")),
+        }
     }
 
     /// Returns the project bootstrap profile (default when absent).
@@ -828,15 +830,10 @@ impl ClientApiBackend for ServerState {
 
         // When creating a worktree at the same time, create it on the node and use the real path
         let local_path = if let Some(spec) = &request.worktree {
-            let worktree_command_id = CommandId::from(uuid_v7());
-            let info = self
-                .inner
-                .hub
-                .worktree_op(
+            let info = match self
+                .node_rpc(
                     &node_id,
-                    &worktree_command_id,
-                    ServerToNodeMsg::ManageWorktree {
-                        command_id: worktree_command_id.clone(),
+                    NodeRpcRequest::ManageWorktree {
                         project_id: request.project_id.clone(),
                         action: WorktreeAction::Add {
                             branch: spec.branch.clone(),
@@ -845,7 +842,12 @@ impl ClientApiBackend for ServerState {
                     },
                 )
                 .await?
-                .ok_or_else(|| ApiError::internal("node returned no worktree info"))?;
+            {
+                NodeRpcResponse::Worktree {
+                    worktree: Some(info),
+                } => info,
+                _ => return Err(ApiError::internal("node returned no worktree info")),
+            };
             info.path
         } else if let Some(path) = request.local_path.clone() {
             path
@@ -1060,20 +1062,19 @@ impl ClientApiBackend for ServerState {
         let node_id = self
             .session_node(&fxg_protocol::SessionId::from(session_id))
             .await?;
-        let command_id = CommandId::from(uuid_v7());
-        let context_restored = self
-            .inner
-            .hub
-            .resume_session(
+        let context_restored = match self
+            .node_rpc(
                 &node_id,
-                &command_id,
-                ServerToNodeMsg::ResumeSession {
-                    command_id: command_id.clone(),
+                NodeRpcRequest::ResumeSession {
                     session_id: session_id.into(),
                     force_replay: request.force_replay,
                 },
             )
-            .await?;
+            .await?
+        {
+            NodeRpcResponse::Resume { context_restored } => context_restored,
+            _ => return Err(ApiError::internal("unexpected node RPC response")),
+        };
         self.record_audit(
             fxg_db::audit::actions::SESSION_RESUME,
             &client,
@@ -1101,20 +1102,19 @@ impl ClientApiBackend for ServerState {
         let node_id = self
             .session_node(&fxg_protocol::SessionId::from(session_id))
             .await?;
-        let command_id = CommandId::from(uuid_v7());
-        let archived_at = self
-            .inner
-            .hub
-            .archive_session(
+        let archived_at = match self
+            .node_rpc(
                 &node_id,
-                &command_id,
-                ServerToNodeMsg::ArchiveSession {
-                    command_id: command_id.clone(),
+                NodeRpcRequest::ArchiveSession {
                     session_id: session_id.into(),
                     archived: request.archived,
                 },
             )
-            .await?;
+            .await?
+        {
+            NodeRpcResponse::Archive { archived_at } => archived_at,
+            _ => return Err(ApiError::internal("unexpected node RPC response")),
+        };
         self.record_audit(
             fxg_db::audit::actions::SESSION_ARCHIVE,
             &client,
@@ -1137,18 +1137,13 @@ impl ClientApiBackend for ServerState {
         let node_id = self
             .session_node(&fxg_protocol::SessionId::from(session_id))
             .await?;
-        let command_id = CommandId::from(uuid_v7());
-        self.inner
-            .hub
-            .delete_session(
-                &node_id,
-                &command_id,
-                ServerToNodeMsg::DeleteSession {
-                    command_id: command_id.clone(),
-                    session_id: session_id.into(),
-                },
-            )
-            .await?;
+        self.node_rpc(
+            &node_id,
+            NodeRpcRequest::DeleteSession {
+                session_id: session_id.into(),
+            },
+        )
+        .await?;
         self.record_audit(
             fxg_db::audit::actions::SESSION_DELETE,
             &client,
@@ -1171,19 +1166,14 @@ impl ClientApiBackend for ServerState {
                 format!("node is offline: {}", request.node_id),
             ));
         }
-        let command_id = CommandId::from(uuid_v7());
-        self.inner
-            .hub
-            .worktree_op(
-                &request.node_id,
-                &command_id,
-                ServerToNodeMsg::ManageWorktree {
-                    command_id: command_id.clone(),
-                    project_id: project_id.into(),
-                    action: WorktreeAction::Prune,
-                },
-            )
-            .await?;
+        self.node_rpc(
+            &request.node_id,
+            NodeRpcRequest::ManageWorktree {
+                project_id: project_id.into(),
+                action: WorktreeAction::Prune,
+            },
+        )
+        .await?;
         self.record_audit(
             fxg_db::audit::actions::WORKTREE_PRUNE,
             &client,
@@ -1214,19 +1204,18 @@ impl ClientApiBackend for ServerState {
                 format!("node is offline: {node_id}"),
             ));
         }
-        let request_id = uuid_v7();
-        let response = self
-            .inner
-            .hub
-            .scan_projects(
+        let response = match self
+            .node_rpc(
                 &fxg_protocol::NodeId::from(node_id),
-                &request_id,
-                ServerToNodeMsg::ProjectScan {
-                    request_id: request_id.clone(),
+                NodeRpcRequest::ProjectScan {
                     dir: request.dir.clone(),
                 },
             )
-            .await?;
+            .await?
+        {
+            NodeRpcResponse::ProjectScan { response } => response,
+            _ => return Err(ApiError::internal("unexpected node RPC response")),
+        };
         self.record_audit(
             fxg_db::audit::actions::PROJECT_LINK,
             &client,
@@ -1259,20 +1248,19 @@ impl ClientApiBackend for ServerState {
                 format!("node is offline: {node_id}"),
             ));
         }
-        let request_id = uuid_v7();
-        let response = self
-            .inner
-            .hub
-            .link_project(
+        let response = match self
+            .node_rpc(
                 &fxg_protocol::NodeId::from(node_id),
-                &request_id,
-                ServerToNodeMsg::ProjectLink {
-                    request_id: request_id.clone(),
+                NodeRpcRequest::ProjectLink {
                     project_id: request.project_id.clone(),
                     local_path: request.local_path.clone(),
                 },
             )
-            .await?;
+            .await?
+        {
+            NodeRpcResponse::ProjectLink { response } => response,
+            _ => return Err(ApiError::internal("unexpected node RPC response")),
+        };
         self.record_audit(
             fxg_db::audit::actions::PROJECT_LINK,
             &client,
@@ -1297,18 +1285,16 @@ impl ClientApiBackend for ServerState {
     }
 
     async fn list_agents_node(&self, node_id: &str) -> Result<AgentsResponse, ApiError> {
-        let request_id = uuid_v7();
-        let mut response = self
-            .inner
-            .hub
-            .agents(
+        let mut response = match self
+            .node_rpc(
                 &fxg_protocol::NodeId::from(node_id),
-                &request_id,
-                ServerToNodeMsg::ListAgents {
-                    request_id: request_id.clone(),
-                },
+                NodeRpcRequest::ListAgents,
             )
-            .await?;
+            .await?
+        {
+            NodeRpcResponse::Agents { response } => response,
+            _ => return Err(ApiError::internal("unexpected node RPC response")),
+        };
 
         // Merge availability across all nodes (installed_agents from NodeHello)
         let nodes = self.inner.db.list_nodes().await.map_err(ApiError::from)?;
@@ -1339,19 +1325,18 @@ impl ClientApiBackend for ServerState {
                 format!("node is offline: {node_id}"),
             ));
         }
-        let request_id = uuid_v7();
-        let message = self
-            .inner
-            .hub
-            .manage_agent(
+        let message = match self
+            .node_rpc(
                 &fxg_protocol::NodeId::from(node_id),
-                &request_id,
-                ServerToNodeMsg::ManageAgent {
-                    request_id: request_id.clone(),
+                NodeRpcRequest::ManageAgent {
                     action: action.clone(),
                 },
             )
-            .await?;
+            .await?
+        {
+            NodeRpcResponse::AgentOp { message } => message,
+            _ => return Err(ApiError::internal("unexpected node RPC response")),
+        };
         self.record_audit(
             fxg_db::audit::actions::AGENT_MANAGE,
             &client,
@@ -1497,15 +1482,10 @@ impl ClientApiBackend for ServerState {
                 format!("node is offline: {}", request.node_id),
             ));
         }
-        let command_id = CommandId::from(uuid_v7());
-        let info = self
-            .inner
-            .hub
-            .worktree_op(
+        let info = match self
+            .node_rpc(
                 &request.node_id,
-                &command_id,
-                ServerToNodeMsg::ManageWorktree {
-                    command_id: command_id.clone(),
+                NodeRpcRequest::ManageWorktree {
                     project_id: project_id.into(),
                     action: WorktreeAction::Add {
                         branch: request.branch,
@@ -1514,7 +1494,12 @@ impl ClientApiBackend for ServerState {
                 },
             )
             .await?
-            .ok_or_else(|| ApiError::internal("node returned no worktree info"))?;
+        {
+            NodeRpcResponse::Worktree {
+                worktree: Some(info),
+            } => info,
+            _ => return Err(ApiError::internal("node returned no worktree info")),
+        };
         Ok(info)
     }
 
@@ -1530,22 +1515,17 @@ impl ClientApiBackend for ServerState {
                 format!("node is offline: {}", request.node_id),
             ));
         }
-        let command_id = CommandId::from(uuid_v7());
-        self.inner
-            .hub
-            .worktree_op(
-                &request.node_id,
-                &command_id,
-                ServerToNodeMsg::ManageWorktree {
-                    command_id: command_id.clone(),
-                    project_id: project_id.into(),
-                    action: WorktreeAction::Remove {
-                        path: request.path,
-                        force: request.force,
-                    },
+        self.node_rpc(
+            &request.node_id,
+            NodeRpcRequest::ManageWorktree {
+                project_id: project_id.into(),
+                action: WorktreeAction::Remove {
+                    path: request.path,
+                    force: request.force,
                 },
-            )
-            .await?;
+            },
+        )
+        .await?;
         Ok(())
     }
 
@@ -1558,20 +1538,20 @@ impl ClientApiBackend for ServerState {
         let node_id = self
             .session_node(&fxg_protocol::SessionId::from(session_id))
             .await?;
-        let request_id = uuid_v7();
-        self.inner
-            .hub
-            .git_diff(
+        match self
+            .node_rpc(
                 &node_id,
-                &request_id,
-                ServerToNodeMsg::GetGitDiff {
-                    request_id: request_id.clone(),
+                NodeRpcRequest::GetGitDiff {
                     session_id: session_id.into(),
                     scope,
                     base_branch,
                 },
             )
-            .await
+            .await?
+        {
+            NodeRpcResponse::GitDiff { diff } => Ok(diff),
+            _ => Err(ApiError::internal("unexpected node RPC response")),
+        }
     }
 
     async fn browse_fs(
@@ -1590,18 +1570,16 @@ impl ClientApiBackend for ServerState {
                 format!("node is offline: {node_id}"),
             ));
         }
-        let request_id = uuid_v7();
-        self.inner
-            .hub
-            .browse_fs(
+        match self
+            .node_rpc(
                 &fxg_protocol::NodeId::from(node_id),
-                &request_id,
-                ServerToNodeMsg::BrowseFs {
-                    request_id: request_id.clone(),
-                    path,
-                },
+                NodeRpcRequest::BrowseFs { path },
             )
-            .await
+            .await?
+        {
+            NodeRpcResponse::BrowseFs { response } => Ok(response),
+            _ => Err(ApiError::internal("unexpected node RPC response")),
+        }
     }
 
     async fn provisioners(&self) -> Result<ProvisionersResponse, ApiError> {

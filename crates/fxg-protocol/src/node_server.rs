@@ -7,14 +7,24 @@
 //! This is the internal protocol of the server implementation and is not exposed
 //! to the UI, so it is excluded from `specta` export.
 
+use std::time::Duration;
+
 use serde::{Deserialize, Serialize};
 
+use crate::client_api::{
+    AgentsResponse, FsBrowseResponse, ProjectLinkResponse, ProjectScanResponse, WorktreeInfo,
+};
 use crate::common::{
-    ClientSource, DataSafety, ElicitationContent, ErrorCode, ErrorInfo, NodeProjectReport,
-    PromptInput, ResolvedBy, SessionControlAction, WarningInfo, WorkspaceDiffResponse,
+    AgentAction, ClientSource, DataSafety, DiffScope, ElicitationContent, ErrorInfo,
+    NodeProjectReport, PromptInput, ResolvedBy, SessionControlAction, WarningInfo,
+    WorkspaceDiffResponse, WorktreeAction,
 };
 use crate::events::SessionEventEnvelope;
-use crate::{CommandId, NodeId, ProjectId, SessionId};
+use crate::settings::{
+    NodeSettingsSnapshot, SecretSummary, UpdateAgentSettingsRequest, UpdateNodeSettingsRequest,
+    UpsertSecretRequest,
+};
+use crate::{CommandId, NodeId, ProjectId, SecretId, SessionId};
 
 /// Version of the node <-> server message set.
 ///
@@ -44,6 +54,200 @@ pub struct ResyncTarget {
     /// Resend events at or after (`>=`) this value regardless of the watermark
     /// (`1` means a full resend including `SessionCreated`)
     pub from_node_seq: u64,
+}
+
+/// Generic node operation requested by the central server.
+///
+/// The request is correlated by the `request_id` carried in
+/// [`ServerToNodeMsg::NodeRpc`]. Both success and failure are returned through
+/// [`NodeRpcOutcome`], so errors keep their `ErrorCode` / `RecoveryAction`
+/// instead of being flattened to a string at the hub.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum NodeRpcRequest {
+    /// Fetch the git diff of a session workspace.
+    GetGitDiff {
+        /// Target session ID
+        session_id: SessionId,
+        /// Diff scope (uncommitted / cumulative against the base branch)
+        scope: DiffScope,
+        /// Base branch used for `BranchBase`
+        base_branch: Option<String>,
+    },
+    /// Create, remove or prune a worktree.
+    ManageWorktree {
+        /// Target logical project ID
+        project_id: ProjectId,
+        /// Operation to execute
+        action: WorktreeAction,
+    },
+    /// Browse the file system of the node.
+    BrowseFs {
+        /// Path to browse (defaults to the home directory)
+        path: Option<String>,
+    },
+    /// Scan and register the git repositories under a directory.
+    ProjectScan {
+        /// Directory to scan (defaults to `node.project_scan_dirs`)
+        dir: Option<String>,
+    },
+    /// Link an arbitrary directory to a logical project.
+    ProjectLink {
+        /// Logical project ID to link to
+        project_id: ProjectId,
+        /// Target directory
+        local_path: String,
+    },
+    /// Fetch the ACP Registry catalog plus installation state.
+    ListAgents,
+    /// Fetch the node settings snapshot.
+    GetNodeSettings,
+    /// Update node-owned settings.
+    UpdateNodeSettings {
+        /// New values and the observed revision
+        request: UpdateNodeSettingsRequest,
+    },
+    /// Update agent settings.
+    UpdateAgentSettings {
+        /// New values and the observed revision
+        request: UpdateAgentSettingsRequest,
+    },
+    /// Fetch the node's secret metadata (values are never returned).
+    GetSecrets,
+    /// Store a secret value (write-only).
+    UpsertSecret {
+        /// Target secret ID
+        id: SecretId,
+        /// Name, description and value
+        request: UpsertSecretRequest,
+    },
+    /// Delete a secret.
+    DeleteSecret {
+        /// Target secret ID
+        id: SecretId,
+    },
+    /// Install, update or remove an agent.
+    ManageAgent {
+        /// Operation to execute
+        action: AgentAction,
+    },
+    /// Resume a stopped session.
+    ResumeSession {
+        /// Target session ID
+        session_id: SessionId,
+        /// Skip native restoration and continue with history replay
+        force_replay: bool,
+    },
+    /// Archive or restore a session.
+    ArchiveSession {
+        /// Target session ID
+        session_id: SessionId,
+        /// `true` = archive, `false` = restore
+        archived: bool,
+    },
+    /// Delete a session and purge its event bodies.
+    DeleteSession {
+        /// Target session ID
+        session_id: SessionId,
+    },
+}
+
+impl NodeRpcRequest {
+    /// Time the hub waits for the node before failing the operation.
+    ///
+    /// Project scans, catalog refreshes, resumes and deletes can exceed the
+    /// normal timeout because they traverse directories or cold-start an agent.
+    pub fn timeout(&self) -> Duration {
+        match self {
+            Self::ProjectScan { .. }
+            | Self::ListAgents
+            | Self::ResumeSession { .. }
+            | Self::DeleteSession { .. } => Duration::from_secs(120),
+            Self::ManageAgent { .. } => Duration::from_secs(600),
+            _ => Duration::from_secs(30),
+        }
+    }
+}
+
+/// Successful payload of a [`NodeRpcRequest`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum NodeRpcResponse {
+    /// Git diff payload (`GetGitDiff`).
+    GitDiff {
+        /// Diff of the workspace
+        diff: WorkspaceDiffResponse,
+    },
+    /// Worktree payload (`ManageWorktree`; `None` when removed or pruned).
+    Worktree {
+        /// Worktree information on success
+        worktree: Option<WorktreeInfo>,
+    },
+    /// Filesystem browse payload (`BrowseFs`).
+    BrowseFs {
+        /// Browse result
+        response: FsBrowseResponse,
+    },
+    /// Project scan payload (`ProjectScan`).
+    ProjectScan {
+        /// Scan result
+        response: ProjectScanResponse,
+    },
+    /// Project link payload (`ProjectLink`).
+    ProjectLink {
+        /// Link result
+        response: ProjectLinkResponse,
+    },
+    /// ACP Registry catalog (`ListAgents`).
+    Agents {
+        /// Catalog plus installation state
+        response: AgentsResponse,
+    },
+    /// Settings snapshot (`GetNodeSettings` / `UpdateNodeSettings` /
+    /// `UpdateAgentSettings`).
+    NodeSettings {
+        /// Snapshot after the operation
+        snapshot: Box<NodeSettingsSnapshot>,
+    },
+    /// Secret metadata after the operation (`GetSecrets` / `UpsertSecret` /
+    /// `DeleteSecret`; values are never included).
+    Secrets {
+        /// Secret metadata
+        secrets: Vec<SecretSummary>,
+    },
+    /// Agent management result (`ManageAgent`).
+    AgentOp {
+        /// Display message on success (e.g. `installed opencode2 0.1.0`)
+        message: Option<String>,
+    },
+    /// Session resume result (`ResumeSession`).
+    Resume {
+        /// Whether native restoration succeeded (`false` = history replay)
+        context_restored: bool,
+    },
+    /// Session archive result (`ArchiveSession`).
+    Archive {
+        /// Archive time on success (Unix epoch ms). `None` when restored
+        archived_at: Option<i64>,
+    },
+    /// Session delete result (`DeleteSession`).
+    Delete,
+}
+
+/// Outcome of a [`NodeRpcRequest`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum NodeRpcOutcome {
+    /// The operation succeeded.
+    Ok {
+        /// Typed response payload
+        response: NodeRpcResponse,
+    },
+    /// The operation failed with a structured error.
+    Err {
+        /// Error code, message, recovery actions and data-safety hint
+        error: ErrorInfo,
+    },
 }
 
 /// Message sent from the node to the server.
@@ -126,134 +330,6 @@ pub enum NodeToServerMsg {
         /// Exit code
         exit_code: Option<i32>,
     },
-    /// Response with the result of fetching the git diff on the node.
-    GitDiffResult {
-        /// Correlation ID of the request
-        request_id: String,
-        /// The diff on success
-        diff: Option<WorkspaceDiffResponse>,
-        /// Failure message
-        error: Option<String>,
-    },
-    /// Response with the result of a worktree operation (`ManageWorktree`).
-    WorktreeResult {
-        /// Correlation ID of the request
-        command_id: CommandId,
-        /// Worktree information on success (`None` when removed)
-        worktree: Option<crate::client_api::WorktreeInfo>,
-        /// Failure message
-        error: Option<String>,
-    },
-    /// Response with the result of a session resume (`ResumeSession`).
-    ResumeResult {
-        /// Correlation ID of the request
-        command_id: CommandId,
-        /// Whether it succeeded
-        success: bool,
-        /// Structured error code on failure
-        code: Option<ErrorCode>,
-        /// Whether native restoration succeeded (`false` = continued with history replay)
-        context_restored: Option<bool>,
-        /// Failure message
-        error: Option<String>,
-    },
-    /// Response with the result of archiving / restoring a session (`ArchiveSession`).
-    ArchiveResult {
-        /// Correlation ID of the request
-        command_id: CommandId,
-        /// Whether it succeeded
-        success: bool,
-        /// Structured error code on failure
-        code: Option<ErrorCode>,
-        /// Archive time on success (Unix epoch ms). `None` when restored
-        archived_at: Option<i64>,
-        /// Failure message
-        error: Option<String>,
-    },
-    /// Response with the result of deleting a session (`DeleteSession`).
-    DeleteResult {
-        /// Correlation ID of the request
-        command_id: CommandId,
-        /// Whether it succeeded
-        success: bool,
-        /// Structured error code on failure
-        code: Option<ErrorCode>,
-        /// Failure message
-        error: Option<String>,
-    },
-    /// Response with the result of browsing the file system (`BrowseFs`).
-    BrowseFsResult {
-        /// Correlation ID of the request
-        request_id: String,
-        /// Browse result on success
-        response: Option<crate::client_api::FsBrowseResponse>,
-        /// Failure message
-        error: Option<String>,
-    },
-    /// Response with the result of a bulk project scan (`ProjectScan`).
-    ProjectScanResult {
-        /// Correlation ID of the request
-        request_id: String,
-        /// Scan result on success
-        response: Option<crate::client_api::ProjectScanResponse>,
-        /// Failure message
-        error: Option<String>,
-    },
-    /// Response with the result of a manual project link (`ProjectLink`).
-    ProjectLinkResult {
-        /// Correlation ID of the request
-        request_id: String,
-        /// Link result on success
-        response: Option<crate::client_api::ProjectLinkResponse>,
-        /// Failure message
-        error: Option<String>,
-    },
-    /// Response with the result of the ACP Registry catalog (`ListAgents`).
-    AgentsResult {
-        /// Correlation ID of the request
-        request_id: String,
-        /// Catalog plus installation state on success
-        response: Option<crate::client_api::AgentsResponse>,
-        /// Failure message
-        error: Option<String>,
-    },
-    /// Response with the node settings snapshot (`GetNodeSettings` /
-    /// `UpdateNodeSettings` / `UpdateAgentSettings`).
-    NodeSettingsResult {
-        /// Correlation ID of the request
-        request_id: String,
-        /// Snapshot on success
-        snapshot: Option<Box<crate::settings::NodeSettingsSnapshot>>,
-        /// Structured error code on failure
-        code: Option<ErrorCode>,
-        /// Failure message
-        error: Option<String>,
-    },
-    /// Response with the result of a secret operation (`GetSecrets` /
-    /// `UpsertSecret` / `DeleteSecret`).
-    SecretOpResult {
-        /// Correlation ID of the request
-        request_id: String,
-        /// Secret metadata after the operation (values are never included)
-        secrets: Option<Vec<crate::settings::SecretSummary>>,
-        /// Structured error code on failure
-        code: Option<ErrorCode>,
-        /// Failure message
-        error: Option<String>,
-    },
-    /// Response with the result of an agent management operation (`ManageAgent`).
-    AgentOpResult {
-        /// Correlation ID of the request
-        request_id: String,
-        /// Whether it succeeded
-        success: bool,
-        /// Structured error code on failure
-        code: Option<ErrorCode>,
-        /// Display message on success (e.g. `installed opencode2 0.1.0`)
-        message: Option<String>,
-        /// Failure message
-        error: Option<String>,
-    },
     /// Failure notification for starting or operating a PTY (the error code is a
     /// string, e.g. `PTY_DISABLED`).
     ///
@@ -282,6 +358,13 @@ pub enum NodeToServerMsg {
     DrainComplete {
         /// Node ID
         node_id: NodeId,
+    },
+    /// Response to [`ServerToNodeMsg::NodeRpc`].
+    NodeRpcResult {
+        /// Correlation ID
+        request_id: CommandId,
+        /// Typed success payload or structured error
+        outcome: NodeRpcOutcome,
     },
 }
 
@@ -382,40 +465,6 @@ pub enum ServerToNodeMsg {
         /// Operation to execute
         action: SessionControlAction,
     },
-    /// Resumes a stopped session (`POST /api/v1/sessions/:id/resume`).
-    ///
-    /// Keeps the same `session_id` and continues by restoring the agent-side
-    /// context (design: `docs/04-agent-drivers-and-windows.md` §4.1).
-    ResumeSession {
-        /// Correlation ID
-        command_id: CommandId,
-        /// Target session ID
-        session_id: SessionId,
-        /// Skip native restoration and continue with history replay
-        force_replay: bool,
-    },
-    /// Archives / restores a session (`POST /api/v1/sessions/:id/archive`).
-    ///
-    /// Archiving only hides or restores the session in the listing; the event log
-    /// is kept.
-    ArchiveSession {
-        /// Correlation ID
-        command_id: CommandId,
-        /// Target session ID
-        session_id: SessionId,
-        /// `true` = archive, `false` = restore
-        archived: bool,
-    },
-    /// Deletes a session (`DELETE /api/v1/sessions/:id`).
-    ///
-    /// The running node stops the session if it is running, then appends a
-    /// `SessionDeleted` event (tombstone) and purges the bodies of earlier events.
-    DeleteSession {
-        /// Correlation ID
-        command_id: CommandId,
-        /// Target session ID
-        session_id: SessionId,
-    },
     /// Request to start a workspace web terminal (PTY).
     PtySpawn {
         /// PTY ID
@@ -450,104 +499,6 @@ pub enum ServerToNodeMsg {
         /// PTY ID
         pty_id: String,
     },
-    /// Request for the git working tree / branch diff of the node.
-    GetGitDiff {
-        /// Correlation ID
-        request_id: String,
-        /// Target session ID
-        session_id: SessionId,
-        /// Scope to fetch (uncommitted / cumulative against the base branch)
-        scope: crate::common::DiffScope,
-        /// Base branch used for `BranchBase`
-        base_branch: Option<String>,
-    },
-    /// Request for a worktree operation (create / remove).
-    ManageWorktree {
-        /// Correlation ID
-        command_id: CommandId,
-        /// Target logical project ID
-        project_id: ProjectId,
-        /// Operation to execute
-        action: crate::common::WorktreeAction,
-    },
-    /// Request to browse the file system.
-    BrowseFs {
-        /// Correlation ID
-        request_id: String,
-        /// Path to browse (defaults to the home directory)
-        path: Option<String>,
-    },
-    /// Request to scan and register the git repositories under a directory
-    /// (`fxg project scan`).
-    ProjectScan {
-        /// Correlation ID
-        request_id: String,
-        /// Directory to scan (defaults to `node.project_scan_dirs`)
-        dir: Option<String>,
-    },
-    /// Request to link an arbitrary directory to a logical project manually
-    /// (`fxg project link`, which updates `project_path_links` in `node.db`).
-    ProjectLink {
-        /// Correlation ID
-        request_id: String,
-        /// Logical project ID to link to
-        project_id: ProjectId,
-        /// Target directory
-        local_path: String,
-    },
-    /// Request for the ACP Registry catalog plus installation state (agent
-    /// management in the Web UI).
-    ListAgents {
-        /// Correlation ID
-        request_id: String,
-    },
-    /// Request for the node settings snapshot (hub proxy).
-    GetNodeSettings {
-        /// Correlation ID
-        request_id: String,
-    },
-    /// Request to update node-owned settings (hub proxy).
-    UpdateNodeSettings {
-        /// Correlation ID
-        request_id: String,
-        /// New values and the observed revision
-        request: crate::settings::UpdateNodeSettingsRequest,
-    },
-    /// Request to update agent settings (hub proxy).
-    UpdateAgentSettings {
-        /// Correlation ID
-        request_id: String,
-        /// New values and the observed revision
-        request: crate::settings::UpdateAgentSettingsRequest,
-    },
-    /// Request for the node's secret metadata (hub proxy).
-    GetSecrets {
-        /// Correlation ID
-        request_id: String,
-    },
-    /// Request to store a secret value (hub proxy; write-only).
-    UpsertSecret {
-        /// Correlation ID
-        request_id: String,
-        /// Target secret ID
-        id: crate::SecretId,
-        /// Name, kind and value
-        request: crate::settings::UpsertSecretRequest,
-    },
-    /// Request to delete a secret (hub proxy).
-    DeleteSecret {
-        /// Correlation ID
-        request_id: String,
-        /// Target secret ID
-        id: crate::SecretId,
-    },
-    /// Agent management operation request (install / update / remove).
-    ManageAgent {
-        /// Correlation ID
-        request_id: String,
-        /// Operation to execute
-        action: crate::common::AgentAction,
-    },
     /// Short-lived token response to a `GitCredentialRequest`.
     GitCredentialResponse {
         /// Correlation ID
@@ -569,6 +520,14 @@ pub enum ServerToNodeMsg {
     KillAllSessions {
         /// Reason for the action (for the audit log)
         reason: String,
+    },
+    /// Generic node operation (git, worktree, projects, agents, settings, secrets,
+    /// and session lifecycle).
+    NodeRpc {
+        /// Correlation ID
+        request_id: CommandId,
+        /// Operation to execute
+        request: NodeRpcRequest,
     },
 }
 
@@ -609,6 +568,7 @@ mod tests {
         };
         let json = serde_json::to_value(&msg).unwrap();
         assert_eq!(json["op"], "node_hello");
+        assert_eq!(json["protocol_version"], PROTOCOL_VERSION);
         assert_eq!(json["sessions"][0]["last_node_seq"], 3);
         let decoded: NodeToServerMsg = serde_json::from_value(json).unwrap();
         assert_eq!(decoded, msg);
@@ -660,86 +620,126 @@ mod tests {
     }
 
     #[test]
-    fn git_diff_request_shape() {
-        let msg = ServerToNodeMsg::GetGitDiff {
-            request_id: "r1".into(),
-            session_id: "s1".into(),
-            scope: DiffScope::BranchBase,
-            base_branch: Some("main".into()),
+    fn node_rpc_envelope_shape() {
+        let msg = ServerToNodeMsg::NodeRpc {
+            request_id: "c1".into(),
+            request: NodeRpcRequest::GetGitDiff {
+                session_id: "s1".into(),
+                scope: DiffScope::BranchBase,
+                base_branch: Some("main".into()),
+            },
         };
         let json = serde_json::to_value(&msg).unwrap();
-        assert_eq!(json["op"], "get_git_diff");
-        assert_eq!(json["scope"], "branch_base");
+        assert_eq!(json["op"], "node_rpc");
+        assert_eq!(json["request_id"], "c1");
+        assert_eq!(json["request"]["type"], "get_git_diff");
+        assert_eq!(json["request"]["scope"], "branch_base");
         let decoded: ServerToNodeMsg = serde_json::from_value(json).unwrap();
         assert_eq!(decoded, msg);
     }
 
     #[test]
-    fn server_to_node_resume_session_shape() {
-        let msg = ServerToNodeMsg::ResumeSession {
-            command_id: "c1".into(),
-            session_id: "s1".into(),
-            force_replay: true,
+    fn node_rpc_result_shape() {
+        let msg = NodeToServerMsg::NodeRpcResult {
+            request_id: "c1".into(),
+            outcome: NodeRpcOutcome::Ok {
+                response: NodeRpcResponse::Resume {
+                    context_restored: false,
+                },
+            },
         };
         let json = serde_json::to_value(&msg).unwrap();
-        assert_eq!(json["op"], "resume_session");
-        assert_eq!(json["force_replay"], true);
-        let decoded: ServerToNodeMsg = serde_json::from_value(json).unwrap();
-        assert_eq!(decoded, msg);
-    }
-
-    #[test]
-    fn node_to_server_resume_result_shape() {
-        let msg = NodeToServerMsg::ResumeResult {
-            command_id: "c1".into(),
-            success: true,
-            code: None,
-            context_restored: Some(false),
-            error: None,
-        };
-        let json = serde_json::to_value(&msg).unwrap();
-        assert_eq!(json["op"], "resume_result");
-        assert_eq!(json["context_restored"], false);
+        assert_eq!(json["op"], "node_rpc_result");
+        assert_eq!(json["outcome"]["status"], "ok");
+        assert_eq!(json["outcome"]["response"]["type"], "resume");
+        assert_eq!(json["outcome"]["response"]["context_restored"], false);
         let decoded: NodeToServerMsg = serde_json::from_value(json).unwrap();
         assert_eq!(decoded, msg);
     }
 
     #[test]
+    fn node_rpc_error_keeps_structured_info() {
+        let msg = NodeToServerMsg::NodeRpcResult {
+            request_id: "c1".into(),
+            outcome: NodeRpcOutcome::Err {
+                error: ErrorInfo::new(crate::common::ErrorCode::NotFound, "session not found")
+                    .with_param("session_id", "s1"),
+            },
+        };
+        let json = serde_json::to_value(&msg).unwrap();
+        assert_eq!(json["outcome"]["status"], "err");
+        assert_eq!(json["outcome"]["error"]["code"], "NOT_FOUND");
+        assert_eq!(json["outcome"]["error"]["params"]["session_id"], "s1");
+        let decoded: NodeToServerMsg = serde_json::from_value(json).unwrap();
+        assert_eq!(decoded, msg);
+    }
+
+    #[test]
+    fn node_rpc_timeout_matches_operation() {
+        assert_eq!(
+            NodeRpcRequest::GetNodeSettings.timeout(),
+            Duration::from_secs(30)
+        );
+        assert_eq!(
+            NodeRpcRequest::ProjectScan { dir: None }.timeout(),
+            Duration::from_secs(120)
+        );
+        assert_eq!(
+            NodeRpcRequest::ListAgents.timeout(),
+            Duration::from_secs(120)
+        );
+        assert_eq!(
+            NodeRpcRequest::ManageAgent {
+                action: AgentAction::RefreshCatalog,
+            }
+            .timeout(),
+            Duration::from_secs(600)
+        );
+    }
+
+    #[test]
     fn project_scan_and_link_shape() {
-        let scan = ServerToNodeMsg::ProjectScan {
+        let scan = ServerToNodeMsg::NodeRpc {
             request_id: "r1".into(),
-            dir: Some("D:/ghq".into()),
+            request: NodeRpcRequest::ProjectScan {
+                dir: Some("D:/ghq".into()),
+            },
         };
         let json = serde_json::to_value(&scan).unwrap();
-        assert_eq!(json["op"], "project_scan");
-        assert_eq!(json["dir"], "D:/ghq");
+        assert_eq!(json["request"]["type"], "project_scan");
+        assert_eq!(json["request"]["dir"], "D:/ghq");
         assert_eq!(
             serde_json::from_value::<ServerToNodeMsg>(json).unwrap(),
             scan
         );
 
-        let link = ServerToNodeMsg::ProjectLink {
+        let link = ServerToNodeMsg::NodeRpc {
             request_id: "r2".into(),
-            project_id: "github.com/nazo6/flexagent".into(),
-            local_path: "D:/ghq/github.com/nazo6/flexagent".into(),
+            request: NodeRpcRequest::ProjectLink {
+                project_id: "github.com/nazo6/flexagent".into(),
+                local_path: "D:/ghq/github.com/nazo6/flexagent".into(),
+            },
         };
         let json = serde_json::to_value(&link).unwrap();
-        assert_eq!(json["op"], "project_link");
+        assert_eq!(json["request"]["type"], "project_link");
         assert_eq!(
             serde_json::from_value::<ServerToNodeMsg>(json).unwrap(),
             link
         );
 
-        let link_result = NodeToServerMsg::ProjectLinkResult {
+        let link_result = NodeToServerMsg::NodeRpcResult {
             request_id: "r2".into(),
-            response: Some(crate::client_api::ProjectLinkResponse {
-                project_id: "github.com/nazo6/flexagent".into(),
-                local_path: "D:/ghq/github.com/nazo6/flexagent".into(),
-            }),
-            error: None,
+            outcome: NodeRpcOutcome::Ok {
+                response: NodeRpcResponse::ProjectLink {
+                    response: crate::client_api::ProjectLinkResponse {
+                        project_id: "github.com/nazo6/flexagent".into(),
+                        local_path: "D:/ghq/github.com/nazo6/flexagent".into(),
+                    },
+                },
+            },
         };
         let json = serde_json::to_value(&link_result).unwrap();
-        assert_eq!(json["op"], "project_link_result");
+        assert_eq!(json["op"], "node_rpc_result");
         assert_eq!(
             serde_json::from_value::<NodeToServerMsg>(json).unwrap(),
             link_result
@@ -748,34 +748,37 @@ mod tests {
 
     #[test]
     fn worktree_prune_action_shape() {
-        let msg = ServerToNodeMsg::ManageWorktree {
-            command_id: "c1".into(),
-            project_id: "p1".into(),
-            action: crate::common::WorktreeAction::Prune,
+        let msg = ServerToNodeMsg::NodeRpc {
+            request_id: "c1".into(),
+            request: NodeRpcRequest::ManageWorktree {
+                project_id: "p1".into(),
+                action: WorktreeAction::Prune,
+            },
         };
         let json = serde_json::to_value(&msg).unwrap();
-        assert_eq!(json["action"]["action"], "prune");
+        assert_eq!(json["request"]["action"]["action"], "prune");
         let decoded: ServerToNodeMsg = serde_json::from_value(json).unwrap();
         assert_eq!(decoded, msg);
     }
 
     #[test]
     fn manage_agent_shape() {
-        let refresh = ServerToNodeMsg::ManageAgent {
+        let refresh = ServerToNodeMsg::NodeRpc {
             request_id: "r1".into(),
-            action: crate::common::AgentAction::RefreshCatalog,
+            request: NodeRpcRequest::ManageAgent {
+                action: AgentAction::RefreshCatalog,
+            },
         };
         let json = serde_json::to_value(&refresh).unwrap();
-        assert_eq!(json["op"], "manage_agent");
-        assert_eq!(json["action"]["action"], "refresh_catalog");
+        assert_eq!(json["request"]["type"], "manage_agent");
+        assert_eq!(json["request"]["action"]["action"], "refresh_catalog");
         assert_eq!(
             serde_json::from_value::<ServerToNodeMsg>(json).unwrap(),
             refresh
         );
 
-        let set_pkg = ServerToNodeMsg::ManageAgent {
-            request_id: "r2".into(),
-            action: crate::common::AgentAction::SetPackageEnabled {
+        let set_pkg = NodeRpcRequest::ManageAgent {
+            action: AgentAction::SetPackageEnabled {
                 agent_id: "demo".into(),
                 enabled: true,
             },
@@ -785,15 +788,16 @@ mod tests {
         assert_eq!(json["action"]["agent_id"], "demo");
         assert_eq!(json["action"]["enabled"], true);
 
-        let result = NodeToServerMsg::AgentOpResult {
+        let result = NodeToServerMsg::NodeRpcResult {
             request_id: "r1".into(),
-            success: true,
-            code: None,
-            message: Some("refreshed catalog".into()),
-            error: None,
+            outcome: NodeRpcOutcome::Ok {
+                response: NodeRpcResponse::AgentOp {
+                    message: Some("refreshed catalog".into()),
+                },
+            },
         };
         let json = serde_json::to_value(&result).unwrap();
-        assert_eq!(json["op"], "agent_op_result");
+        assert_eq!(json["op"], "node_rpc_result");
         assert_eq!(
             serde_json::from_value::<NodeToServerMsg>(json).unwrap(),
             result

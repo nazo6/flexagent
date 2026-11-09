@@ -521,16 +521,16 @@ pub trait ClientApiBackend: Clone + Send + Sync + 'static {
 
 ### A1: NodeRpc 統合
 
-- [ ] A1-pre: `PROTOCOL_VERSION` と `NodeHello.protocol_version`、サーバー側検査
-- [ ] A1-a: `NodeRpcRequest` / `NodeRpcResponse` / `NodeRpcOutcome` を追加
-- [ ] A1-a: 読み取り系（git diff / browse fs / scan / agents / settings 取得 / secrets 一覧）を移行
-- [ ] A1-a: `hub.rpc()` と `NodeRpcRequest::timeout()` を追加
-- [ ] A1-b: 変更系（worktree / link / agent 管理 / settings 更新 / secrets 更新 / resume / archive / delete）を移行
-- [ ] A1-b: 個別リレーメソッドと `PendingResponse` の個別 variant を削除
-- [ ] A1-c: 旧 `*Result` と `error: Option<String>` を削除
-- [ ] A1-c: `sync.rs` の match を `NodeRpc` 1分岐に縮小
-- [ ] A1-c: `docs/03-protocol-and-api.md` を更新
-- [ ] A1-c: `hub.rs` の行数を測り、分割要否を判断
+- [x] A1-pre: `PROTOCOL_VERSION` と `NodeHello.protocol_version`、サーバー側検査
+- [x] A1-a: `NodeRpcRequest` / `NodeRpcResponse` / `NodeRpcOutcome` を追加
+- [x] A1-a: 読み取り系（git diff / browse fs / scan / agents / settings 取得 / secrets 一覧）を移行
+- [x] A1-a: `hub.rpc()` と `NodeRpcRequest::timeout()` を追加
+- [x] A1-b: 変更系（worktree / link / agent 管理 / settings 更新 / secrets 更新 / resume / archive / delete）を移行
+- [x] A1-b: 個別リレーメソッドと `PendingResponse` の個別 variant を削除
+- [x] A1-c: 旧 `*Result` と `error: Option<String>` を削除
+- [x] A1-c: `sync.rs` の match を `NodeRpc` 1分岐に縮小
+- [x] A1-c: `docs/03-protocol-and-api.md` を更新
+- [x] A1-c: `hub.rs` の行数を測り、分割要否を判断（1,208行のため分割不要）
 - [ ] A1.5（保留）: セッションコマンド variant の統合
 
 ### A2: REST 統合
@@ -618,3 +618,17 @@ pub trait ClientApiBackend: Clone + Send + Sync + 'static {
   `SessionSummary::dummy()` / `ProjectSummary::dummy()` /
   `NodeSummary::dummy()` を追加した。`Default` は実装せず、ID に空値を
   入れない方針を維持している。
+- **2026-11-09 (A1 実装)**: `NodeHello.protocol_version` と
+  `PROTOCOL_VERSION` を追加し、サーバーが古いノードを `NodeHello` 時点で
+  拒否するようにした。フィールド欠落は `0` としてデコードされる。
+- **2026-11-09 (A1 実装)**: `NodeRpcRequest` / `NodeRpcResponse` /
+  `NodeRpcOutcome` と `NodeRpc` / `NodeRpcResult` を追加し、12系統の
+  `*Result` と `error: Option<String>` を削除した。`PendingResponse` は
+  `Command` / `Rpc` / `Failed` の3 variant になった。
+- **2026-11-09 (A1 実装)**: ノード側のディスパッチを
+  `crates/fxg-node/src/rpc.rs` に分離した。`sync.rs` は `NodeRpc` を
+  `rpc::execute` に渡して結果を返すだけになり、1,363行 → 833行に縮小した。
+  `hub.rs` は 1,773行 → 1,208行となり、分割不要と判断した。
+- **2026-11-09 (A1 実装)**: `ServerToNodeMsg` / `NodeToServerMsg` の
+  セッションコマンド（`StartSession` 等）は A1.5 として保留したまま
+  `CommandResult` を共有している。

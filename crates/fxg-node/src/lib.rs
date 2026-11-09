@@ -43,6 +43,7 @@ mod testutil;
 
 pub mod ipc_client;
 pub(crate) mod ipc_framing;
+pub(crate) mod rpc;
 
 pub use error::NodeError;
 pub use ipc_client::IpcClient;

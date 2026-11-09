@@ -389,10 +389,25 @@ pub enum ErrorCode {
 現在の `project_id` を含み、ハブはバインディング / レポートに基づいて
 `sessions.project_id` を更新します。
 
-`ServerToNodeMsg` には設定・秘密のプロキシ用に `GetNodeSettings` /
-`UpdateNodeSettings` / `UpdateAgentSettings` / `GetSecrets` / `UpsertSecret` /
-`DeleteSecret` / `RotateSecret`、応答に `NodeSettingsResult` /
-`SecretOpResult` を追加しています。
+### 2.1 バージョン契約
+
+`NodeHello.protocol_version` に
+`fxg_protocol::node_server::PROTOCOL_VERSION` を載せます。サーバーは最小
+バージョン未満のノードを `NodeHello` の時点で拒否し、必要なバージョンを
+ログに残して接続を閉じます。ノードと中央サーバーは**同一 `fxg` リリースで
+同時に更新する**前提とし、後方互換の分岐は提供しません。旧ノードは
+フィールドを送らないため `0` としてデコードされ、拒否されます。
+
+### 2.2 メッセージの分類
+
+- **同期・ストリーム**: `EventBatchPush` / `EventBatchAck`, `ResyncRequest`,
+  `LiveStreamDelta`, `PtyOutput` / `PtyExit` / `PtyError`
+- **セッションコマンド**: `StartSession`, `SendPrompt`, `RespondPermission`,
+  `RespondElicitation`, `ControlSession`。結果は `CommandResult` で返します。
+- **汎用 Node RPC**: 上記以外のノード操作は `ServerToNodeMsg::NodeRpc` と
+  `NodeToServerMsg::NodeRpcResult` の1組に集約します。
+- **ライフサイクル**: `GitCredentialRequest` / `GitCredentialResponse`,
+  `DrainAndShutdown`, `DrainComplete`, `KillAllSessions`
 
 常駐ノードと一時VMノードは、トランスポート層が異なるだけで**100%同一のメッセージ型
 (`NodeToServerMsg` / `ServerToNodeMsg`)** を共有します：
@@ -401,7 +416,7 @@ pub enum ErrorCode {
   - **エンドポイント**: `wss://<server-host>/api/v1/node/ws`
   - **認証**: `Authorization: Bearer <NODE_TOKEN>` ヘッダ（ノード個別トークン。
     `server.db.nodes.token_hash` と照合し、`NodeHello.node_id`
-    がトークン発行対象ノードと 一致することを検証してなりすましを拒否する）
+    がトークン発行対象ノードと一致することを検証してなりすましを拒否する）
 - **トランスポート B（一時VM・サンドボックスノード用: Stdio Pipe
   `fxg daemon --stdio`）**:
   - **チャネル**:
@@ -413,304 +428,238 @@ pub enum ErrorCode {
     によるツール導入ログはすべて **`stderr`** に出力され、`BootstrapLog`
     イベントとしてUIへストリーム配信されます。
 
+### 2.3 汎用 Node RPC
+
+ハブは操作ごとの個別メソッドを持たず、`NodeRpcRequest` を
+`rpc(node_id, request_id, request)` で送り、`NodeRpcResult` を待ちます。
+タイムアウトは `NodeRpcRequest::timeout()` に一元化しています。
+
+| operation                                                        | 内容                             | timeout |
+| :--------------------------------------------------------------- | :------------------------------- | ------: |
+| `GetGitDiff`                                                     | セッションの作業ツリー diff      |   30 秒 |
+| `ManageWorktree`                                                 | Worktree の作成・削除・prune     |   30 秒 |
+| `BrowseFs`                                                       | ノードのファイルシステム閲覧     |   30 秒 |
+| `ProjectScan`                                                    | ディレクトリ配下の一括スキャン   |  120 秒 |
+| `ProjectLink`                                                    | 任意ディレクトリの手動紐付け     |   30 秒 |
+| `ListAgents`                                                     | ACP Registry カタログ + 導入状態 |  120 秒 |
+| `GetNodeSettings` / `UpdateNodeSettings` / `UpdateAgentSettings` | 設定の参照・更新                 |   30 秒 |
+| `GetSecrets` / `UpsertSecret` / `DeleteSecret`                   | 秘密のメタデータ参照・更新       |   30 秒 |
+| `ManageAgent`                                                    | エージェントの導入・更新・削除   |  600 秒 |
+| `ResumeSession`                                                  | 停止済みセッションの再開         |  120 秒 |
+| `ArchiveSession`                                                 | セッションのアーカイブ / 復元    |   30 秒 |
+| `DeleteSession`                                                  | セッションの削除                 |  120 秒 |
+
+`NodeRpcOutcome` は成功時 `Ok { response }`、失敗時 `Err { error: ErrorInfo }`
+です。ノード側の `ErrorCode` / `RecoveryAction` / `DataSafety` はハブで
+文字列に潰さず、HTTP 境界の `ApiError::from_info` で status に変換するだけに
+しています。
+
+```rust
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum NodeRpcRequest {
+    GetGitDiff {
+        session_id: SessionId,
+        scope: DiffScope,
+        base_branch: Option<String>,
+    },
+    ManageWorktree {
+        project_id: ProjectId,
+        action: WorktreeAction,
+    },
+    BrowseFs {
+        path: Option<String>,
+    },
+    ProjectScan {
+        dir: Option<String>,
+    },
+    ProjectLink {
+        project_id: ProjectId,
+        local_path: String,
+    },
+    ListAgents,
+    GetNodeSettings,
+    UpdateNodeSettings {
+        request: UpdateNodeSettingsRequest,
+    },
+    UpdateAgentSettings {
+        request: UpdateAgentSettingsRequest,
+    },
+    GetSecrets,
+    UpsertSecret {
+        id: SecretId,
+        request: UpsertSecretRequest,
+    },
+    DeleteSecret {
+        id: SecretId,
+    },
+    ManageAgent {
+        action: AgentAction,
+    },
+    ResumeSession {
+        session_id: SessionId,
+        force_replay: bool,
+    },
+    ArchiveSession {
+        session_id: SessionId,
+        archived: bool,
+    },
+    DeleteSession {
+        session_id: SessionId,
+    },
+}
+
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum NodeRpcResponse {
+    GitDiff { diff: WorkspaceDiffResponse },
+    Worktree { worktree: Option<WorktreeInfo> },
+    BrowseFs { response: FsBrowseResponse },
+    ProjectScan { response: ProjectScanResponse },
+    ProjectLink { response: ProjectLinkResponse },
+    Agents { response: AgentsResponse },
+    NodeSettings { snapshot: Box<NodeSettingsSnapshot> },
+    Secrets { secrets: Vec<SecretSummary> },
+    AgentOp { message: Option<String> },
+    Resume { context_restored: bool },
+    Archive { archived_at: Option<i64> },
+    Delete,
+}
+
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum NodeRpcOutcome {
+    Ok { response: NodeRpcResponse },
+    Err { error: ErrorInfo },
+}
+```
+
+### 2.4 メッセージ定義 (抜粋)
+
 ```rust
 /// ノードが保持するセッションの同期状態（NodeHello で報告）
-/// ハブは自 DB の last_node_seq と比較し、欠落・遅延があれば ResyncRequest を返す
 pub struct SessionSyncState {
-    pub session_id: String,
+    pub session_id: SessionId,
+    pub project_id: ProjectId,
     pub last_node_seq: u64,
 }
 
 /// ハブ側で欠落・遅延しているセッションの再送指定（ResyncRequest）
 pub struct ResyncTarget {
-    pub session_id: String,
+    pub session_id: SessionId,
     pub from_node_seq: u64, // この値以降 (>=) のイベントを水位に関係なく再送する
 }
 
 /// Node -> Server への送信メッセージ
-#[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case")]
 pub enum NodeToServerMsg {
-    /// 接続直後のハンドシェイク（ノード情報・プロジェクト紐付け・セッション同期状態一覧を通知）
     NodeHello {
-        node_id: String,
+        node_id: NodeId,
         name: String,
         os: String,
         arch: String,
         version: String,
+        protocol_version: u32,
         is_ephemeral: bool,
         installed_agents: Vec<String>,
         projects: Vec<NodeProjectReport>,
+        projects_complete: bool,
+        state_revision: u64,
         sessions: Vec<SessionSyncState>,
     },
-    /// 永続化イベントのバッチ送信 (Store-and-Forward Outbox)
-    /// ※セッションのメタデータ (SessionCreated 等) も session_events 上のイベントとして送信される。
-    ///   通常は synced_up_to_node_seq より後のイベントを node_seq 昇順で送る
-    EventBatchPush {
-        events: Vec<SessionEventEnvelope>,
-    },
-    /// リアルタイム・エフェメラルチャンク (DBフラッシュ前の高速表示用)
+    EventBatchPush { events: Vec<SessionEventEnvelope> },
     LiveStreamDelta {
-        session_id: String,
+        session_id: SessionId,
         delta: StreamDeltaPayload,
     },
-    /// サーバーからのコマンド実行結果応答 (要求元クライアントへ command_id 付きで返却される)
     CommandResult {
-        command_id: String,
+        command_id: CommandId,
         success: bool,
-        code: Option<ErrorCode>,   // 失敗時の構造化エラーコード
-        error: Option<String>,     // 人間向けメッセージ
-        session_id: Option<String>,
+        error: Option<ErrorInfo>,
+        session_id: Option<SessionId>,
+        warnings: Vec<WarningInfo>,
+        data_safety: Option<DataSafety>,
     },
-    /// PTY 出力データチャンク (Web Terminal -> クライアント)
-    PtyOutput {
-        pty_id: String,
-        data_b64: String,
+    NodeRpcResult {
+        request_id: CommandId,
+        outcome: NodeRpcOutcome,
     },
-    /// PTY プロセス終了通知
-    PtyExit {
-        pty_id: String,
-        exit_code: Option<i32>,
-    },
-    /// ノードのGit Diff取得結果応答
-    GitDiffResult {
-        request_id: String,
-        diff: Option<WorkspaceDiffResponse>,
-        error: Option<String>,
-    },
-    /// Worktree 操作 (`ManageWorktree`) の結果応答
-    /// ※成功時の Worktree 情報 (削除時は None) を返す
-    ///   (WorktreeInfo は §3.1 の client_api 型)
-    WorktreeResult {
-        command_id: String,
-        worktree: Option<WorktreeInfo>,
-        error: Option<String>,
-    },
-    /// セッション再開 (`ResumeSession`) の結果応答
-    ResumeResult {
-        command_id: String,
-        success: bool,
-        code: Option<ErrorCode>,   // 失敗時の構造化エラーコード (INVALID_STATE 等)
-        context_restored: Option<bool>, // ネイティブ復元成否 (false = 履歴 Replay で継続)
-        error: Option<String>,
-    },
-    /// セッションのアーカイブ/復元 (`ArchiveSession`) の結果応答
-    ArchiveResult {
-        command_id: String,
-        success: bool,
-        code: Option<ErrorCode>,
-        archived_at: Option<i64>,  // アーカイブ日時 (Unix epoch ms)。復元時は None
-        error: Option<String>,
-    },
-    /// セッション削除 (`DeleteSession`) の結果応答
-    DeleteResult {
-        command_id: String,
-        success: bool,
-        code: Option<ErrorCode>,
-        error: Option<String>,
-    },
-    /// プロジェクト一括スキャン (`ProjectScan`) の結果応答
-    ProjectScanResult {
-        request_id: String,
-        response: Option<ProjectScanResponse>, // scanned_dirs + projects (§3.1)
-        error: Option<String>,
-    },
-    /// プロジェクト手動紐付け (`ProjectLink`) の結果応答
-    ProjectLinkResult {
-        request_id: String,
-        response: Option<ProjectLinkResponse>, // project_id + local_path (§3.1)
-        error: Option<String>,
-    },
-    /// ACP Registry カタログ (`ListAgents`) の結果応答
-    AgentsResult {
-        request_id: String,
-        response: Option<AgentsResponse>, // registry + installed_versions (§3.1)
-        error: Option<String>,
-    },
-    /// エージェント管理操作 (`ManageAgent`) の結果応答
-    AgentOpResult {
-        request_id: String,
-        success: bool,
-        code: Option<ErrorCode>,
-        message: Option<String>,   // 成功時の表示メッセージ
-        error: Option<String>,
-    },
-    /// PTY 起動・操作の失敗通知 (エラーコードは文字列。例: `PTY_DISABLED`)
-    /// ※ノード側設定 allow_remote_pty = false の場合、リモートからの
-    ///   PtySpawn に対して PTY_DISABLED を返す
-    PtyError {
-        pty_id: String,
-        code: String,
-        message: String,
-    },
-    /// 一時VMからのオンメモリGit認証要求 (GIT_ASKPASS プロキシ)
+    PtyOutput { pty_id: String, data_b64: String },
+    PtyExit { pty_id: String, exit_code: Option<i32> },
+    PtyError { pty_id: String, code: String, message: String },
     GitCredentialRequest {
         request_id: String,
         repo_url: String,
-        operation: String, // "clone" | "fetch" | "push"
+        operation: String,
     },
-    /// Graceful Drain 完了通知 (これを受信後に中央サーバーが子プロセス/VMを破棄)
-    DrainComplete {
-        node_id: String,
-    },
+    DrainComplete { node_id: NodeId },
 }
 
 /// Server -> Node への送信メッセージ
-#[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case")]
 pub enum ServerToNodeMsg {
-    /// EventBatchPush に対する永続化完了ACK
-    /// ※バッチはセッション単位に分割して送信し、ACK もセッション単位で返却する
-    ///   ノードは受信後 sessions.synced_up_to_node_seq を水位として更新する
     EventBatchAck {
-        session_id: String,
+        session_id: SessionId,
         acked_up_to_node_seq: u64,
     },
-    /// NodeHello への応答: ハブ側で欠落・遅延しているセッションの再送要求
-    /// ノードは指定 from_node_seq 以降のイベントを水位に関係なく再送する
-    /// (from_node_seq = 1 は SessionCreated を含む全量再送を意味する)
-    ResyncRequest {
-        sessions: Vec<ResyncTarget>,
-    },
-    /// クライアント(Web/Android)からのセッション新規起動要求
+    ResyncRequest { sessions: Vec<ResyncTarget> },
     StartSession {
-        command_id: String,
-        session_id: String,
-        project_id: String,
+        command_id: CommandId,
+        session_id: SessionId,
+        project_id: ProjectId,
         local_path: String,
         agent_id: String,
-        initial_prompt: Option<PromptInput>, // text + attachments
-        /// このノード上にあるソースセッションをACPネイティブForkする場合のみ指定
-        fork_from_session_id: Option<String>,
+        initial_prompt: Option<PromptInput>,
+        initial_config: Vec<InitialConfig>,
+        mode: Option<String>,
+        extra_args: Option<Vec<String>>,
+        fork_from_session_id: Option<SessionId>,
     },
-    /// プロンプト送信（スラッシュコマンド含む）
-    /// ※停止済みセッションへの送信はノード側でネイティブ復元 (自動レジューム) を
-    ///   試みる。非対応エージェントでは `RESUME_REQUIRED` を返し、クライアントは
-    ///   明示的な再開 (`SessionResume` = 履歴 Replay) を案内する (設計: docs/04 §4.1)
     SendPrompt {
-        command_id: String,
-        session_id: String,
-        input: PromptInput, // text + attachments
-        client_source: String,
+        command_id: CommandId,
+        session_id: SessionId,
+        input: PromptInput,
+        client_source: ClientSource,
     },
-    /// 承認リクエストへの回答
     RespondPermission {
-        command_id: String,
-        session_id: String,
+        command_id: CommandId,
+        session_id: SessionId,
         request_id: String,
         selected_option_id: String,
-        resolved_by: String,
+        resolved_by: ResolvedBy,
     },
-    /// 質問 (elicitation) への回答
     RespondElicitation {
-        command_id: String,
-        session_id: String,
+        command_id: CommandId,
+        session_id: SessionId,
         elicitation_id: String,
-        action: ElicitationAction,    // "accept" | "decline" | "cancel"
-        content: serde_json::Value,   // accept 時の form 回答 (それ以外は null)
-        resolved_by: String,
+        action: ElicitationAction,
+        content: Option<ElicitationContent>,
+        resolved_by: ResolvedBy,
     },
-    /// モード切替 / 設定変更 / キャンセル
     ControlSession {
-        command_id: String,
-        session_id: String,
-        action: SessionControlAction, // SetMode(String) | SetConfig(k, v) | Cancel | Kill
+        command_id: CommandId,
+        session_id: SessionId,
+        action: SessionControlAction,
     },
-    /// 停止済みセッションの再開 (`POST /api/v1/sessions/:id/resume`)
-    /// ※同一 session_id のままエージェントを起動し、ネイティブ復元
-    ///   (`session/resume` → `session/load`) を
-    ///   優先する。復元できない場合は履歴 Replay を注入して継続する (設計: docs/04 §4.1)
-    ResumeSession {
-        command_id: String,
-        session_id: String,
-        force_replay: bool, // ネイティブ復元を試みず履歴 Replay で継続する
+    NodeRpc {
+        request_id: CommandId,
+        request: NodeRpcRequest,
     },
-    /// セッションのアーカイブ/復元 (`POST /api/v1/sessions/:id/archive`)
-    /// ※アーカイブは一覧からの非表示/復元のみで、イベントログは保持される
-    ArchiveSession {
-        command_id: String,
-        session_id: String,
-        archived: bool,     // true = アーカイブ, false = 復元
-    },
-    /// セッションの削除 (`DELETE /api/v1/sessions/:id`)
-    /// ※稼働中セッションは停止を待ってから `SessionDeleted` (tombstone) を
-    ///   追記し、イベント本文をパージする (復元不能)
-    DeleteSession {
-        command_id: String,
-        session_id: String,
-    },
-    /// ワークスペースWebターミナル (PTY) の起動要求
     PtySpawn {
         pty_id: String,
-        session_id: String,
+        session_id: SessionId,
         cols: u16,
         rows: u16,
         shell_cmd: Option<String>,
     },
-    /// PTY へのユーザー入力送信 (キー入力)
-    PtyInput {
-        pty_id: String,
-        data_b64: String,
-    },
-    /// PTY ウィンドウリサイズ
-    PtyResize {
-        pty_id: String,
-        cols: u16,
-        rows: u16,
-    },
-    /// PTY プロセス終了
-    PtyKill {
-        pty_id: String,
-    },
-    /// ノードのGit作業ツリー/ブランチDiff取得要求
-    GetGitDiff {
-        request_id: String,
-        session_id: String,
-        scope: DiffScope,              // Uncommitted (git diff HEAD) | BranchBase (git diff <base>...HEAD)
-        base_branch: Option<String>,
-    },
-    /// Worktree 操作要求 (作成・削除・一覧)
-    ManageWorktree {
-        command_id: String,
-        project_id: String,
-        action: WorktreeAction,        // Add { branch, new_path } | Remove { path } | Prune
-    },
-    /// 指定ディレクトリ配下の Git リポジトリ一括スキャン・登録要求 (`fxg project scan`)
-    ProjectScan {
-        request_id: String,
-        dir: Option<String>,          // 未指定時は node.project_scan_dirs
-    },
-    /// 任意ディレクトリの論理プロジェクトへの手動紐付け要求 (`fxg project link`)
-    ProjectLink {
-        request_id: String,
-        project_id: String,
-        local_path: String,
-    },
-    /// ACP Registry カタログ + 導入状態の取得要求 (Web UI のエージェント管理)
-    ListAgents {
-        request_id: String,
-    },
-    /// エージェント管理操作要求 (install / update / remove)
-    ManageAgent {
-        request_id: String,
-        action: AgentAction,          // Install { agent_id } | Update { agent_id? } | Remove { agent_id }
-                                      // | UpsertCustom { agent_id, config } | RemoveCustom { agent_id }
-    },
-    /// GitCredentialRequest に対する短命トークン応答
+    PtyInput { pty_id: String, data_b64: String },
+    PtyResize { pty_id: String, cols: u16, rows: u16 },
+    PtyKill { pty_id: String },
     GitCredentialResponse {
         request_id: String,
         username: String,
         token: Option<String>,
         error: Option<String>,
     },
-    /// 一時VMの終了前フラッシュ要求
-    DrainAndShutdown {
-        reason: String,
-    },
-    /// 緊急キルスイッチ: ノード上で稼働中の全セッション・プロセスツリー・PTYを即時強制停止
-    KillAllSessions {
-        reason: String,
-    },
+    DrainAndShutdown { reason: String },
+    KillAllSessions { reason: String },
 }
 ```
 
