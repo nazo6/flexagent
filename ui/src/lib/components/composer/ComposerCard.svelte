@@ -29,7 +29,9 @@
   {/if}
   {@render children?.()}
   {#if toolbar}
-    <div class="border-border flex flex-nowrap items-center gap-1 border-t px-0.5 pt-1.5">
+    <div
+      class="border-border flex flex-wrap items-center justify-between gap-x-1.5 gap-y-2 border-t px-0.5 pt-1.5"
+    >
       {@render toolbar()}
     </div>
   {/if}

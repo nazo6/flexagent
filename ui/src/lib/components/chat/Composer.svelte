@@ -149,6 +149,23 @@
     text = `/${name} `;
   }
 
+  const placeholderText = $derived.by(() => {
+    const isEnter = prefs.sendShortcut === "enter";
+    if (isStopped) {
+      return isEnter
+        ? "Stopped: sending resumes automatically (Enter to send)"
+        : m.chat_placeholder_stopped();
+    }
+    if (isRunning) {
+      return isEnter
+        ? "Enter the next prompt (added to queue; Enter to send)"
+        : m.chat_placeholder_running();
+    }
+    return isEnter
+      ? "Enter a prompt (Enter to send, Shift+Enter for newline, `/` for commands)"
+      : m.chat_placeholder_idle();
+  });
+
   /** Best-effort MIME type from a file name (mirrors the CLI helper). */
   function guessMime(fileName: string): string {
     const extension = fileName.split(".").pop()?.toLowerCase() ?? "";
@@ -469,7 +486,7 @@
       class="hidden"
       onchange={onFileInputChange}
     />
-    <div class="flex min-w-0 flex-1 items-center gap-1">
+    <div class="flex flex-wrap items-center gap-1 min-w-0">
       <Button
         variant="ghost"
         size="icon-sm"
@@ -538,14 +555,14 @@
       {/each}
     </div>
 
-    <div class="ml-1 flex shrink-0 items-center gap-1">
+    <div class="ml-auto flex shrink-0 items-center gap-1">
       {#if !sync.wsConnected}
         <span class="text-danger text-[11px]">{m.chat_connection_lost()}</span>
       {/if}
       <Button
         variant="outline"
         size="sm"
-        class={`h-7 rounded-full px-2.5 text-xs ${
+        class={`h-7 rounded-full px-2 text-xs gap-1 ${
           autoApprove ? "border-signal/40 bg-signal-soft text-signal hover:bg-signal-soft" : ""
         }`}
         disabled={controlBusy || sending}
@@ -553,7 +570,7 @@
         onclick={() => void toggleAutoApprove()}
       >
         <ShieldCheckIcon class="size-3.5" />
-        {m.chat_auto_approve()}
+        <span class="hidden sm:inline">{m.chat_auto_approve()}</span>
       </Button>
       {#if canCompact && !isStopped}
         <Button
@@ -596,11 +613,7 @@
     onpaste={onPaste}
     ondrop={onDrop}
     rows={3}
-    placeholder={isStopped
-      ? m.chat_placeholder_stopped()
-      : isRunning
-        ? m.chat_placeholder_running()
-        : m.chat_placeholder_idle()}
+    placeholder={placeholderText}
     disabled={sending}
   />
 </ComposerCard>
