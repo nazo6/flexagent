@@ -328,6 +328,9 @@ pub struct CommandInfo { pub name: String, pub description: String, pub input_hi
 pub struct ConfigOptionInfo {
     pub key: String,
     pub name: String,
+    pub description: Option<String>,
+    /// UX ヒント (model / thought_level / mode など)。未知値は保持する。
+    pub category: Option<ConfigOptionCategory>,
     pub current_value: serde_json::Value,
     pub options: Vec<serde_json::Value>,
 }
@@ -442,6 +445,7 @@ pub enum ErrorCode {
 | `ProjectScan`                                                    | ディレクトリ配下の一括スキャン   |  120 秒 |
 | `ProjectLink`                                                    | 任意ディレクトリの手動紐付け     |   30 秒 |
 | `ListAgents`                                                     | ACP Registry カタログ + 導入状態 |  120 秒 |
+| `ProbeAgentConfig`                                               | 一時 ACP セッションでモデル一覧  |  120 秒 |
 | `GetNodeSettings` / `UpdateNodeSettings` / `UpdateAgentSettings` | 設定の参照・更新                 |   30 秒 |
 | `GetSecrets` / `UpsertSecret` / `DeleteSecret`                   | 秘密のメタデータ参照・更新       |   30 秒 |
 | `ManageAgent`                                                    | エージェントの導入・更新・削除   |  600 秒 |
@@ -477,6 +481,10 @@ pub enum NodeRpcRequest {
         local_path: String,
     },
     ListAgents,
+    ProbeAgentConfig {
+        agent_id: String,
+        local_path: String,
+    },
     GetNodeSettings,
     UpdateNodeSettings {
         request: UpdateNodeSettingsRequest,
@@ -772,6 +780,14 @@ pub enum ServerToNodeMsg {
   - 参照中の削除は `SECRET_IN_USE`、値ファイル欠損は `SECRET_MISSING`。
 - `GET /api/v1/nodes/:node_id/agents`: 指定ノードの ACP カタログ
   (`GET /api/v1/agents` はローカルノード専用。ハブは代表ノードを選ばない)。
+- `POST /api/v1/nodes/:node_id/agents/:agent_id/probe`:
+  新規セッション画面用の能力プローブ。body は
+  `{ local_path, force? }`（`force: true` でキャッシュを迂回する）。
+  ACP の `session/new` を1回だけ実行して `configOptions` (モデル一覧など) と
+  `available_modes` を `AgentCapabilitiesPreview` として返し、直後に
+  セッションを閉じる。FXG の `sessions` 行は作らない。ノードは
+  `(agent_id, local_path)` 単位で約10分キャッシュし、同時実行は直列化する。
+  認証が必要な場合は通常の `AUTH_REQUIRED` を返す。
 - `GET/PUT /api/v1/projects/:project_id/profile`: 一時VM用 Bootstrap プロファイル
   (`server.db.project_profiles`)。
 - `GET /api/v1/provisioners`:

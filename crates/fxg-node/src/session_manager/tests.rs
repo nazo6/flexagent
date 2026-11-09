@@ -2,9 +2,14 @@ use super::prompt::*;
 use super::replay::*;
 use super::*;
 use crate::testutil::MockAgent;
+use fxg_db::queries::SessionFilter;
 use fxg_db::{Db, DbRole};
 use fxg_protocol::SessionId;
-use fxg_protocol::common::{EventType, PermissionOptionKind};
+use fxg_protocol::client_api::AgentCapabilitiesPreview;
+use fxg_protocol::common::{
+    ConfigOptionCategory, ConfigOptionInfo, ConfigOptionValue, EventType, ModeInfo,
+    PermissionOptionKind,
+};
 use fxg_protocol::settings::{AgentSettings, CustomAgentConfig};
 
 async fn setup() -> (SessionManager, MockAgent, tempfile::TempDir) {
@@ -155,6 +160,64 @@ async fn ensure_session_records_created_event_and_start() {
         .expect("query")
         .expect("session row");
     assert_eq!(session.agent_id, "mock");
+}
+
+#[tokio::test]
+async fn probe_agent_capabilities_returns_options_and_caches() {
+    let (manager, mock, dir) = setup().await;
+    let preview = AgentCapabilitiesPreview {
+        current_mode: Some("code".to_owned()),
+        available_modes: vec![ModeInfo {
+            mode_id: "code".to_owned(),
+            name: "Code".to_owned(),
+            description: None,
+        }],
+        config_options: vec![ConfigOptionInfo {
+            key: "model".to_owned(),
+            name: "Model".to_owned(),
+            description: Some("Model used for the session".to_owned()),
+            category: Some(ConfigOptionCategory::Model),
+            current_value: ConfigOptionValue::Select("gpt-5".to_owned()),
+            options: vec![
+                ConfigOptionValue::Select("gpt-5".to_owned()),
+                ConfigOptionValue::Select("gpt-4".to_owned()),
+            ],
+        }],
+    };
+    mock.set_start_capabilities(preview.clone());
+
+    let probed = manager
+        .probe_agent_capabilities("mock", dir.path(), false)
+        .await
+        .expect("probe");
+    assert_eq!(probed, preview);
+
+    // The probe does not create an FXG session.
+    assert!(manager.list_active().is_empty());
+    let sessions = manager
+        .bus()
+        .db()
+        .list_sessions(&SessionFilter::default())
+        .await
+        .expect("sessions");
+    assert!(sessions.is_empty());
+
+    // A second probe is served from the cache (no second driver start).
+    mock.set_start_capabilities(AgentCapabilitiesPreview::default());
+    let cached = manager
+        .probe_agent_capabilities("mock", dir.path(), false)
+        .await
+        .expect("cached probe");
+    assert_eq!(cached, preview);
+    assert_eq!(mock.starts().len(), 1);
+
+    // A forced probe bypasses the cache and starts the driver again.
+    let refreshed = manager
+        .probe_agent_capabilities("mock", dir.path(), true)
+        .await
+        .expect("forced probe");
+    assert_eq!(refreshed, AgentCapabilitiesPreview::default());
+    assert_eq!(mock.starts().len(), 2);
 }
 
 #[tokio::test]

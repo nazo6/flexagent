@@ -12,7 +12,8 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 
 use crate::client_api::{
-    AgentsResponse, FsBrowseResponse, ProjectLinkResponse, ProjectScanResponse, WorktreeInfo,
+    AgentCapabilitiesPreview, AgentsResponse, FsBrowseResponse, ProjectLinkResponse,
+    ProjectScanResponse, WorktreeInfo,
 };
 use crate::common::{
     AgentAction, ClientSource, DataSafety, DiffScope, ElicitationContent, ErrorInfo,
@@ -100,6 +101,19 @@ pub enum NodeRpcRequest {
     },
     /// Fetch the ACP Registry catalog plus installation state.
     ListAgents,
+    /// Probe an agent by starting a temporary ACP session.
+    ///
+    /// ACP only reports model choices in the `session/new` response, so this
+    /// starts and immediately closes a session without creating an FXG session.
+    ProbeAgentConfig {
+        /// Agent ID
+        agent_id: String,
+        /// Working directory used for the temporary ACP session
+        local_path: String,
+        /// Bypass the node's probe cache
+        #[serde(default)]
+        force: bool,
+    },
     /// Fetch the node settings snapshot.
     GetNodeSettings,
     /// Update node-owned settings.
@@ -161,6 +175,7 @@ impl NodeRpcRequest {
         match self {
             Self::ProjectScan { .. }
             | Self::ListAgents
+            | Self::ProbeAgentConfig { .. }
             | Self::ResumeSession { .. }
             | Self::DeleteSession { .. } => Duration::from_secs(120),
             Self::ManageAgent { .. } => Duration::from_secs(600),
@@ -202,6 +217,11 @@ pub enum NodeRpcResponse {
     Agents {
         /// Catalog plus installation state
         response: AgentsResponse,
+    },
+    /// Agent capabilities from a temporary ACP session (`ProbeAgentConfig`).
+    AgentCapabilities {
+        /// Modes and configuration entries reported by the agent
+        preview: AgentCapabilitiesPreview,
     },
     /// Settings snapshot (`GetNodeSettings` / `UpdateNodeSettings` /
     /// `UpdateAgentSettings`).
@@ -686,6 +706,15 @@ mod tests {
         );
         assert_eq!(
             NodeRpcRequest::ListAgents.timeout(),
+            Duration::from_secs(120)
+        );
+        assert_eq!(
+            NodeRpcRequest::ProbeAgentConfig {
+                agent_id: "opencode".into(),
+                local_path: "/tmp".into(),
+                force: false,
+            }
+            .timeout(),
             Duration::from_secs(120)
         );
         assert_eq!(

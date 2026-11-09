@@ -497,6 +497,20 @@ pub enum ConfigOptionValue {
     Unknown(RawJson),
 }
 
+crate::open_string_enum! {
+    /// Semantic category of an agent configuration option (UX hint).
+    pub enum ConfigOptionCategory {
+        /// Session mode selector
+        Mode => "mode",
+        /// Model selector
+        Model => "model",
+        /// Model-related configuration parameter
+        ModelConfig => "model_config",
+        /// Thought / reasoning level selector
+        ThoughtLevel => "thought_level",
+    }
+}
+
 /// Information about an agent configuration entry (model selection etc.).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
@@ -505,6 +519,10 @@ pub struct ConfigOptionInfo {
     pub key: String,
     /// Display name
     pub name: String,
+    /// Optional description reported by the agent
+    pub description: Option<String>,
+    /// Semantic category reported by the agent (UX hint only)
+    pub category: Option<ConfigOptionCategory>,
     /// Current value
     pub current_value: ConfigOptionValue,
     /// List of selectable values

@@ -1,4 +1,5 @@
 import type {
+  AgentCapabilitiesPreview,
   AgentOpResponse,
   AgentSummary,
   AgentsResponse,
@@ -562,6 +563,20 @@ export class ApiClient {
       `/api/v1/nodes/${encodeURIComponent(nodeId)}/agents`,
     );
     return response.agents;
+  }
+
+  /** `POST /api/v1/nodes/:id/agents/:agentId/probe` (temporary ACP session). */
+  probeAgent(
+    nodeId: string,
+    agentId: string,
+    localPath: string,
+    force = false,
+  ): Promise<AgentCapabilitiesPreview> {
+    return this.#request<AgentCapabilitiesPreview>(
+      "POST",
+      `/api/v1/nodes/${encodeURIComponent(nodeId)}/agents/${encodeURIComponent(agentId)}/probe`,
+      { body: { local_path: localPath, force } },
+    );
   }
 
   /** `POST /api/v1/auth/rotate-token` (regenerate the client auth token). */

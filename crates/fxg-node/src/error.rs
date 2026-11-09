@@ -72,6 +72,9 @@ pub enum NodeError {
         /// Authentication methods advertised by the agent
         methods: Vec<fxg_protocol::common::AgentAuthMethodInfo>,
     },
+    /// An operation timed out
+    #[error("timed out: {0}")]
+    Timeout(String),
     /// The session is running (busy) and cannot be operated on
     #[error("session is busy: {0}")]
     Busy(String),
@@ -157,6 +160,7 @@ impl NodeError {
             Self::ResumeRequired { .. } => ErrorCode::ResumeRequired,
             Self::ForkUnsupported(_) => ErrorCode::ForkUnsupported,
             Self::AuthRequired { .. } => ErrorCode::AuthRequired,
+            Self::Timeout(_) => ErrorCode::Timeout,
             Self::Busy(_) => ErrorCode::Busy,
             Self::CommandDuplicate(_) => ErrorCode::CommandDuplicate,
             Self::AlreadyResolved(_) => ErrorCode::AlreadyResolved,

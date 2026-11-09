@@ -10,9 +10,10 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 
 use crate::common::{
-    AuditLogEntry, ClientSource, CommandResult, ElicitationAction, ElicitationContent,
-    ElicitationRequestEntry, ErrorInfo, NodeSummary, PermissionRequestEntry, ProjectSummary,
-    PromptInput, ResolvedBy, SearchHit, SessionControlAction, SessionSummary, StreamDeltaPayload,
+    AuditLogEntry, ClientSource, CommandResult, ConfigOptionInfo, ElicitationAction,
+    ElicitationContent, ElicitationRequestEntry, ErrorInfo, ModeInfo, NodeSummary,
+    PermissionRequestEntry, ProjectSummary, PromptInput, ResolvedBy, SearchHit,
+    SessionControlAction, SessionSummary, StreamDeltaPayload,
 };
 use crate::events::SessionEventBatch;
 use crate::settings::CustomAgentConfig;
@@ -262,6 +263,35 @@ pub struct SessionListResponse {
 pub struct AgentsResponse {
     /// Every agent of the registry (including built-in and custom ones)
     pub agents: Vec<AgentSummary>,
+}
+
+/// `POST /api/v1/nodes/{node_id}/agents/{agent_id}/probe` request.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
+pub struct ProbeAgentRequest {
+    /// Working directory used to create the temporary ACP session
+    pub local_path: String,
+    /// Bypass the node's probe cache (used by the UI's "Refresh")
+    #[serde(default)]
+    pub force: bool,
+}
+
+/// Capabilities returned by starting a temporary ACP session.
+///
+/// ACP only exposes the selectable models (`configOptions`) in the
+/// `session/new` response, so the node probes once and caches the result.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
+pub struct AgentCapabilitiesPreview {
+    /// Available agent modes
+    #[serde(default)]
+    pub available_modes: Vec<ModeInfo>,
+    /// Current mode (agent default)
+    #[serde(default)]
+    pub current_mode: Option<String>,
+    /// Configuration entries (model selection, thinking level, ...)
+    #[serde(default)]
+    pub config_options: Vec<ConfigOptionInfo>,
 }
 
 /// How an agent is launched (the means actually usable on this node).

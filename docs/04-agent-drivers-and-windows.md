@@ -386,3 +386,25 @@ Web UI はプロジェクトごとに最後に選択した `configOptions`
 (モデル / thinking level 等) を localStorage に保存し、新規セッション作成時に
 `CreateSessionRequest.initial_config` として送ります。ノードは
 `session/new` 後に `session/set_config_option` を順に送って適用します。
+
+### 4.6 新規セッション前の能力プローブ
+
+ACP は `initialize` ではモデル一覧を返さず、`session/new` のレスポンスに含まれる
+`configOptions` が唯一の情報源です。そこで Web UI は
+`POST /api/v1/nodes/:node_id/agents/:agent_id/probe` を呼び、ノードが
+**一時的な ACP セッション**を1回だけ開始して能力を取得します。
+
+- **DB 非汚染**: プローブは `SessionManager::probe_agent_capabilities` が
+  driver を直接使い、`sessions` 行やイベントを記録しない。
+- **ウォームプール再利用**: 既存の `AcpDriver` / warm pool を使うため、プローブで
+  起動したプロセスを実セッションが再利用でき、初回起動コストを相殺できる。
+- **キャッシュ**: `(agent_id, local_path)` 単位で約10分保持する。実セッションの
+  `CapabilitiesUpdated` でもキャッシュを更新する。同時プローブは直列化する。
+  UI の「Refresh」は `force: true` でキャッシュを迂回する。
+- **失敗時**: `AUTH_REQUIRED` は通常のログイン復旧導線へ流す。タイムアウトや
+  起動失敗時も新規セッション自体は開始でき、モデルはエージェント既定値を使う。
+- **制約**: 一時VMはノード起動前なのでプローブできない。また、エージェント側に
+  空のセッションが残る実装がある (ACP にセッションを作らない一覧 API はない)。
+- **新規セッション UI**: モデル pill は常に表示し、取得中は `Default` のまま開始を
+  ブロックしない。`category = "mode"` の `configOption` は既存の
+  `CreateSessionRequest.mode` と重複するため、モデル pill 列には出さない。

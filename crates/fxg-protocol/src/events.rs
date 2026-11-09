@@ -453,6 +453,8 @@ mod tests {
             config_options: vec![ConfigOptionInfo {
                 key: "model".to_owned(),
                 name: "Model".to_owned(),
+                description: Some("Model used for the session".to_owned()),
+                category: Some(crate::common::ConfigOptionCategory::Model),
                 current_value: ConfigOptionValue::Select("sonnet".to_owned()),
                 options: vec![
                     ConfigOptionValue::Select("sonnet".to_owned()),

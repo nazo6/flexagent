@@ -23,6 +23,7 @@ use fxg_acp::{
     DriverKind, NativeForkUnavailable, NativeResumeUnavailable, ResumeRequest,
 };
 use fxg_protocol::CommandId;
+use fxg_protocol::client_api::AgentCapabilitiesPreview;
 use fxg_protocol::common::{
     ClientSource, ElicitationAction, ElicitationContent, ElicitationMode, ElicitationSchema,
     PermissionOption, PermissionPolicy, PromptInput, ResolvedBy, SessionControlAction,
@@ -209,6 +210,28 @@ struct Inner {
     sessions: Mutex<Sessions>,
     /// Drivers returned by the factory (shared instances; retained for `shutdown_idle`)
     drivers: Mutex<Vec<Arc<dyn AgentDriver>>>,
+    /// Cached capability probe results (agent × working directory).
+    probe_cache: Mutex<HashMap<ProbeKey, ProbeCacheEntry>>,
+    /// Serializes probe startups (the UI probes a single agent at a time).
+    probe_lock: tokio::sync::Mutex<()>,
+}
+
+/// Cache key for agent capability probes.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct ProbeKey {
+    /// Agent ID
+    agent_id: String,
+    /// Working directory used for the probe
+    local_path: PathBuf,
+}
+
+/// Cached capability probe result.
+#[derive(Debug, Clone)]
+struct ProbeCacheEntry {
+    /// Modes and configuration entries returned by the agent
+    preview: AgentCapabilitiesPreview,
+    /// Time the entry was cached
+    cached_at: std::time::Instant,
 }
 
 #[derive(Default)]
@@ -304,6 +327,8 @@ impl SessionManager {
                 factory,
                 sessions: Mutex::new(Sessions::default()),
                 drivers: Mutex::new(Vec::new()),
+                probe_cache: Mutex::new(HashMap::new()),
+                probe_lock: tokio::sync::Mutex::new(()),
             }),
         }
     }
@@ -535,6 +560,7 @@ impl SessionManager {
 
 mod approval;
 mod lifecycle;
+mod probe;
 mod prompt;
 mod replay;
 mod stream;

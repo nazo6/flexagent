@@ -42,22 +42,22 @@ use agent_client_protocol::v1::schema::{
     PlanEntryStatus as AcpPlanEntryStatus, PromptCapabilities, ReadTextFileRequest,
     ReadTextFileResponse, ReleaseTerminalRequest, ReleaseTerminalResponse,
     RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse, ResourceLink,
-    SelectedPermissionOutcome, SessionConfigKind, SessionConfigOption, SessionConfigOptionValue,
-    SessionId, SessionModeState, SessionNotification, SessionUpdate, SetSessionConfigOptionRequest,
-    SetSessionModeRequest, StopReason, TerminalExitStatus, TerminalId, TerminalOutputRequest,
-    TerminalOutputResponse, TextContent, ToolCall, ToolCallContent, ToolCallStatus, ToolCallUpdate,
-    ToolKind, WaitForTerminalExitRequest, WaitForTerminalExitResponse, WriteTextFileRequest,
-    WriteTextFileResponse,
+    SelectedPermissionOutcome, SessionConfigKind, SessionConfigOption, SessionConfigOptionCategory,
+    SessionConfigOptionValue, SessionId, SessionModeState, SessionNotification, SessionUpdate,
+    SetSessionConfigOptionRequest, SetSessionModeRequest, StopReason, TerminalExitStatus,
+    TerminalId, TerminalOutputRequest, TerminalOutputResponse, TextContent, ToolCall,
+    ToolCallContent, ToolCallStatus, ToolCallUpdate, ToolKind, WaitForTerminalExitRequest,
+    WaitForTerminalExitResponse, WriteTextFileRequest, WriteTextFileResponse,
 };
 use agent_client_protocol::v1::{ActiveSession, ConnectionTo, SessionMessage, SessionSetup};
 use agent_client_protocol::{AcpAgent, AcpAgentConfig, Agent, Client};
 use anyhow::{Context, anyhow, bail};
 use async_trait::async_trait;
 use fxg_protocol::common::{
-    AgentAuthMethodInfo, AgentAuthMethodKind, CommandInfo, ConfigOptionInfo, ConfigOptionValue,
-    ElicitationContent, ElicitationMode as FxgElicitationMode, ElicitationPropertyKind,
-    ElicitationSchema, ElicitationValue, FileDiff, ModeInfo, PermissionOption,
-    PermissionOptionKind as FxgPermissionOptionKind, PlanEntry,
+    AgentAuthMethodInfo, AgentAuthMethodKind, CommandInfo, ConfigOptionCategory, ConfigOptionInfo,
+    ConfigOptionValue, ElicitationContent, ElicitationMode as FxgElicitationMode,
+    ElicitationPropertyKind, ElicitationSchema, ElicitationValue, FileDiff, ModeInfo,
+    PermissionOption, PermissionOptionKind as FxgPermissionOptionKind, PlanEntry,
     PlanEntryStatus as FxgPlanEntryStatus, PromptInput, StreamDeltaPayload,
     ToolCallKind as FxgToolCallKind, ToolCallStatus as FxgToolCallStatus, TurnStopReason,
     UsageCost,

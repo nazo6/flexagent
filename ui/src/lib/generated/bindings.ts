@@ -36,6 +36,21 @@ export type AgentAuthMethodInfo = {
 	env?: { [key in string]: string },
 };
 
+/**
+ *  Capabilities returned by starting a temporary ACP session.
+ * 
+ *  ACP only exposes the selectable models (`configOptions`) in the
+ *  `session/new` response, so the node probes once and caches the result.
+ */
+export type AgentCapabilitiesPreview = {
+	/**  Available agent modes */
+	available_modes?: ModeInfo[],
+	/**  Current mode (agent default) */
+	current_mode?: string | null,
+	/**  Configuration entries (model selection, thinking level, ...) */
+	config_options?: ConfigOptionInfo[],
+};
+
 /**  Recent stderr lines for one agent (diagnostics). */
 export type AgentDiagnostics = {
 	/**  Agent ID */
@@ -276,6 +291,10 @@ export type ConfigOptionInfo = {
 	key: string,
 	/**  Display name */
 	name: string,
+	/**  Optional description reported by the agent */
+	description: string | null,
+	/**  Semantic category reported by the agent (UX hint only) */
+	category: string | null,
 	/**  Current value */
 	current_value: ConfigOptionValue,
 	/**  List of selectable values */
@@ -973,6 +992,14 @@ export type PlanEntry = {
 	title: string,
 	/**  Status (`pending` / `in_progress` / `completed`) */
 	status: string,
+};
+
+/**  `POST /api/v1/nodes/{node_id}/agents/{agent_id}/probe` request. */
+export type ProbeAgentRequest = {
+	/**  Working directory used to create the temporary ACP session */
+	local_path: string,
+	/**  Bypass the node's probe cache (used by the UI's "Refresh") */
+	force?: boolean,
 };
 
 /**  Project-to-node binding exposed to clients. */

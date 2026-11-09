@@ -123,9 +123,21 @@ pub(super) async fn build_session(
         tracing::warn!("failed to set initial mode {mode_id}: {err}");
     }
 
-    // Publish modes, slash commands and config options
-    let (modes, commands, config_options) =
+    // Publish modes, slash commands and config options.
+    //
+    // `session/new` reports the agent defaults; reflect the initial values we
+    // just applied so the first `CapabilitiesUpdated` matches the session state
+    // (the agent usually does not emit a config update for `set_config_option`).
+    let (modes, commands, mut config_options) =
         session_capabilities(acquired.modes.as_ref(), acquired.config_options.as_deref());
+    for setting in &params.initial_config {
+        if let Some(option) = config_options
+            .iter_mut()
+            .find(|option| option.key == setting.key)
+        {
+            option.current_value = setting.value.clone();
+        }
+    }
     let current_mode = acquired
         .modes
         .as_ref()

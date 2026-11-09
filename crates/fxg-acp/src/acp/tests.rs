@@ -528,8 +528,8 @@ fn capabilities_partial_updates_preserve_existing_state() {
 #[test]
 fn maps_grouped_select_options() {
     use agent_client_protocol::v1::schema::{
-        SessionConfigOption, SessionConfigSelect, SessionConfigSelectGroup,
-        SessionConfigSelectOption,
+        SessionConfigOption, SessionConfigOptionCategory, SessionConfigSelect,
+        SessionConfigSelectGroup, SessionConfigSelectOption,
     };
 
     let option = SessionConfigOption::new(
@@ -553,11 +553,21 @@ fn maps_grouped_select_options() {
                 ),
             ],
         )),
-    );
+    )
+    .description("Model used for the session")
+    .category(SessionConfigOptionCategory::Model);
 
     let mapped = map_config_option(&option);
     assert_eq!(mapped.key, "model");
     assert_eq!(mapped.name, "Model");
+    assert_eq!(
+        mapped.description.as_deref(),
+        Some("Model used for the session")
+    );
+    assert_eq!(
+        mapped.category,
+        Some(fxg_protocol::common::ConfigOptionCategory::Model)
+    );
     assert_eq!(
         mapped.current_value,
         ConfigOptionValue::Select("gpt-4".to_owned())

@@ -154,6 +154,17 @@ async fn execute_inner(
             let response = state.agents_catalog().await?;
             Ok(NodeRpcResponse::Agents { response })
         }
+        NodeRpcRequest::ProbeAgentConfig {
+            agent_id,
+            local_path,
+            force,
+        } => {
+            let preview = state
+                .session_manager()
+                .probe_agent_capabilities(&agent_id, Path::new(&local_path), force)
+                .await?;
+            Ok(NodeRpcResponse::AgentCapabilities { preview })
+        }
         NodeRpcRequest::GetNodeSettings => Ok(NodeRpcResponse::NodeSettings {
             snapshot: Box::new(state.node_settings_snapshot()),
         }),

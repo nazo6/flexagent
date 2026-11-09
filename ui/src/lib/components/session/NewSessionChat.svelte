@@ -4,16 +4,25 @@
   import * as Dialog from "#lib/components/ui/dialog/index.ts";
   import { Button } from "#lib/components/ui/button/index.ts";
   import { Input } from "#lib/components/ui/input/index.ts";
-  import { Label } from "#lib/components/ui/label/index.ts";
-  import NodeStatusBadge from "#lib/components/NodeStatusBadge.svelte";
   import FolderBrowserDialog from "#lib/components/fs/FolderBrowserDialog.svelte";
-  import { agentOptionLabel, agentsAvailableOn } from "#lib/agents.ts";
+  import ConfigOptionPicker from "./ConfigOptionPicker.svelte";
+  import PickerItem from "./PickerItem.svelte";
+  import PickerPill from "./PickerPill.svelte";
+  import SessionSettingsDialog from "./SessionSettingsDialog.svelte";
+  import { agentHint, agentsAvailableOn } from "#lib/agents.ts";
   import type {
+    AgentCapabilitiesPreview,
     AgentSummary,
+    ConfigOptionValue,
     ProvisionerSummary,
     ProvisionerTestResponse,
   } from "#lib/generated/bindings.ts";
   import { formatRelativeTime } from "#lib/format.ts";
+  import {
+    isModelOption,
+    orderedConfigOptions,
+    resolveInitialConfig,
+  } from "#lib/config-options.ts";
   import {
     buildPathCandidates,
     pickDefaultCandidate,
@@ -24,6 +33,7 @@
     loadNewSessionPrefs,
     loadSessionConfig,
     saveNewSessionPrefs,
+    saveSessionConfigOption,
     type SessionModePreference,
   } from "#lib/session-prefs.ts";
   import { getNodeAvailability } from "#lib/node-status.ts";
@@ -32,18 +42,17 @@
   import { problems } from "#lib/stores/problems.svelte.ts";
   import { toast } from "svelte-sonner";
   import { onMount, untrack } from "svelte";
+  import ArrowUpIcon from "@lucide/svelte/icons/arrow-up";
   import BotIcon from "@lucide/svelte/icons/bot";
   import BoxIcon from "@lucide/svelte/icons/box";
   import CheckCircle2Icon from "@lucide/svelte/icons/check-circle-2";
-  import CornerDownLeftIcon from "@lucide/svelte/icons/corner-down-left";
   import FolderGit2Icon from "@lucide/svelte/icons/folder-git-2";
-  import FolderOpenIcon from "@lucide/svelte/icons/folder-open";
+  import GitBranchIcon from "@lucide/svelte/icons/git-branch";
   import GitForkIcon from "@lucide/svelte/icons/git-fork";
   import LoaderCircleIcon from "@lucide/svelte/icons/loader-circle";
-  import PlayIcon from "@lucide/svelte/icons/play";
-  import ServerIcon from "@lucide/svelte/icons/server";
   import Settings2Icon from "@lucide/svelte/icons/settings-2";
   import SparklesIcon from "@lucide/svelte/icons/sparkles";
+  import ServerIcon from "@lucide/svelte/icons/server";
   import XCircleIcon from "@lucide/svelte/icons/x-circle";
   import XIcon from "@lucide/svelte/icons/x";
 
@@ -71,9 +80,15 @@
   let baseBranch = $state("");
   let promptText = $state("");
   let busy = $state(false);
-  let showAdvanced = $state(false);
+  let showSettings = $state(false);
   let browserOpen = $state(false);
   let useCustomPath = $state(false);
+
+  // Picker popovers
+  let projectOpen = $state(false);
+  let directoryOpen = $state(false);
+  let environmentOpen = $state(false);
+  let agentOpen = $state(false);
 
   // Default resolution control: track the first application of URL params and node selection
   let nodeTouched = $state(false);
@@ -84,6 +99,8 @@
 
   // Per-device memory (scoped to a project): tracked so nothing is saved before restoring
   let prefsProjectId = "";
+  /** Project whose saved preferences have been applied (empty until the catalog is ready). */
+  let prefsResolvedProjectId = $state("");
   let agentTouched = $state(false);
   let modeTouched = $state(false);
 
@@ -93,6 +110,15 @@
   // Launch options
   let sessionMode = $state<SessionModePreference>("default");
   let extraArgsText = $state("");
+
+  // Agent capability probe (models / modes)
+  let capabilities = $state<AgentCapabilitiesPreview | null>(null);
+  let capabilitiesLoading = $state(false);
+  let capabilitiesError = $state<string | null>(null);
+  let capabilitiesGeneration = 0;
+  /** Per-screen probe cache so re-selecting the same agent is instant. */
+  const capabilitiesCache = new Map<string, AgentCapabilitiesPreview>();
+  let selectedConfigValues = $state<Record<string, ConfigOptionValue>>({});
 
   // Provisioner connectivity test
   let testBusy = $state(false);
@@ -106,11 +132,19 @@
 
   const nodes = $derived(sync.nodes);
   const selectedNode = $derived(nodes.find((n) => n.node_id === nodeId) ?? null);
+  const nodeAvailability = $derived(getNodeAvailability(selectedNode));
   // Agents that can actually be launched on this node (based on the catalog's
   // installed_nodes; npx/uvx distributed agents are included only once enabled
   // via "add from catalog")
   const availableAgents = $derived(agentsAvailableOn(catalog, nodeId));
   const availableAgentIds = $derived(availableAgents.map((agent) => agent.id));
+  const selectedAgent = $derived(availableAgents.find((agent) => agent.id === agentId) ?? null);
+  const effectiveAgent = $derived(agentId.trim());
+
+  const isProvisionerMode = $derived(runTarget === "provisioner");
+  const selectedProvisioner = $derived(
+    provisioners.find((p) => p.name === provisionerName) ?? provisioners[0] ?? null,
+  );
 
   /** Loads ephemeral VM provisioners (central server only; retryable from the UI). */
   async function loadProvisioners(): Promise<void> {
@@ -169,11 +203,6 @@
     }
     void loadAgentCatalog(target);
   });
-
-  const isProvisionerMode = $derived(runTarget === "provisioner");
-  const selectedProvisioner = $derived(
-    provisioners.find((p) => p.name === provisionerName) ?? provisioners[0] ?? null,
-  );
 
   // The URL `project` is applied only once (it must not overwrite later manual selections)
   $effect(() => {
@@ -243,34 +272,15 @@
     if (!containsCurrent) localPath = pickDefaultCandidate(pathCandidates)?.path ?? "";
   });
 
-  const effectiveAgent = $derived(agentId.trim());
-
-  // Default agent: pick the first one usable on this node when nothing is selected
+  // Default agent: pick the first one usable on this node when nothing is selected.
+  // Wait until the per-project preference has been restored so a stored agent is
+  // not briefly replaced (and probed) before the preference is applied.
   $effect(() => {
-    if (agentId !== "" || isProvisionerMode) return;
+    if (agentId !== "" || isProvisionerMode || selectedProject === null) return;
+    if (prefsResolvedProjectId !== selectedProject.project_id) return;
     const first = availableAgentIds[0];
     if (first !== undefined) agentId = first;
   });
-
-  const canSubmit = $derived(
-    !busy &&
-      selectedProject !== null &&
-      effectiveAgent !== "" &&
-      (isProvisionerMode
-        ? selectedProvisioner !== null
-        : nodeId !== "" && (pathMode === "existing" ? localPath !== "" : branch.trim() !== "")),
-  );
-
-  // Explain to the user why submit is unavailable (avoid a silent disabled state)
-  const pathMissing = $derived(
-    !isProvisionerMode &&
-      (pathMode === "existing" ? localPath.trim() === "" : branch.trim() === ""),
-  );
-  const pathRequiredHint = $derived(
-    pathMode === "existing"
-      ? m.new_session_path_required_existing()
-      : m.new_session_path_required_branch(),
-  );
 
   // URL `fork_session` / `agent` are applied only once (after the node catalog is loaded, so
   // an agent from the link is recognized as a dropdown entry instead of a manual ID)
@@ -295,29 +305,205 @@
   // (restoration must not overwrite items the user explicitly changed)
   $effect(() => {
     const project = selectedProject;
-    if (!project) return;
+    if (!project || catalogLoading) return;
     if (project.project_id !== prefsProjectId) {
       prefsProjectId = project.project_id;
+      prefsResolvedProjectId = "";
       agentTouched = false;
       modeTouched = false;
     }
     const prefs = untrack(() => loadNewSessionPrefs(project.project_id));
-    if (!prefs) return;
-    if (!modeTouched && prefs.mode !== "default") sessionMode = prefs.mode;
-    if (!agentTouched && prefs.agent !== "" && availableAgentIds.includes(prefs.agent)) {
-      agentId = prefs.agent;
+    if (prefs) {
+      if (!modeTouched && prefs.mode !== "default") sessionMode = prefs.mode;
+      if (!agentTouched && prefs.agent !== "" && availableAgentIds.includes(prefs.agent)) {
+        agentId = prefs.agent;
+      }
     }
+    prefsResolvedProjectId = project.project_id;
   });
 
-  // Persist changes to the launch settings on the local device
-  // (`prefsProjectId` must match so nothing is saved before restoring)
+  // Persist changes to the launch settings on the local device.
+  //
+  // Only explicit user changes are saved: the initial default agent / mode must
+  // not overwrite the restored per-project preference before the catalog has
+  // loaded (`agentTouched` / `modeTouched`).
   $effect(() => {
     void agentId;
     void sessionMode;
+    if (!agentTouched && !modeTouched) return;
     const projectId = selectedProject?.project_id ?? "";
     if (projectId === "" || projectId !== prefsProjectId || isProvisionerMode) return;
     persistPrefs();
   });
+
+  /** Working directory used to probe the agent for models. */
+  const probePath = $derived(
+    isProvisionerMode
+      ? ""
+      : pathMode === "existing"
+        ? localPath
+        : (pathCandidates.find((candidate) => candidate.exists)?.path ??
+          pathCandidates[0]?.path ??
+          ""),
+  );
+
+  /** Stable cache / request key for the capability probe. */
+  const probeKey = $derived(
+    isProvisionerMode ||
+      !nodeAvailability.isAvailable ||
+      nodeId === "" ||
+      effectiveAgent === "" ||
+      probePath === ""
+      ? ""
+      : `${nodeId}\u0000${effectiveAgent}\u0000${probePath}`,
+  );
+
+  const configOptions = $derived(orderedConfigOptions(capabilities?.config_options ?? []));
+
+  function applyCapabilities(preview: AgentCapabilitiesPreview): void {
+    capabilities = preview;
+    const projectId = selectedProject?.project_id ?? "";
+    const saved = projectId === "" ? {} : loadSessionConfig(projectId);
+    selectedConfigValues = resolveInitialConfig(preview.config_options ?? [], saved);
+  }
+
+  async function loadAgentCapabilities(force = false): Promise<void> {
+    const key = probeKey;
+    if (key === "") {
+      capabilitiesGeneration += 1;
+      capabilities = null;
+      capabilitiesLoading = false;
+      capabilitiesError = null;
+      selectedConfigValues = {};
+      return;
+    }
+    if (!force) {
+      const cached = capabilitiesCache.get(key);
+      if (cached) {
+        applyCapabilities(cached);
+        return;
+      }
+    }
+    const generation = ++capabilitiesGeneration;
+    capabilitiesLoading = true;
+    capabilitiesError = null;
+    try {
+      const preview = await sync.connection.client.probeAgent(
+        nodeId,
+        effectiveAgent,
+        probePath,
+        force,
+      );
+      if (generation !== capabilitiesGeneration) return;
+      capabilitiesCache.set(key, preview);
+      applyCapabilities(preview);
+    } catch (error) {
+      if (generation !== capabilitiesGeneration) return;
+      capabilities = null;
+      selectedConfigValues = {};
+      capabilitiesError = error instanceof Error ? error.message : String(error);
+      problems.report("probe agent", error, "warning");
+    } finally {
+      if (generation === capabilitiesGeneration) capabilitiesLoading = false;
+    }
+  }
+
+  // Probe when the node / agent / working directory selection changes.
+  $effect(() => {
+    if (probeKey === "") {
+      capabilitiesGeneration += 1;
+      capabilities = null;
+      capabilitiesLoading = false;
+      capabilitiesError = null;
+      selectedConfigValues = {};
+      return;
+    }
+    void loadAgentCapabilities(false);
+  });
+
+  function changeConfigOption(key: string, value: ConfigOptionValue): void {
+    selectedConfigValues = { ...selectedConfigValues, [key]: value };
+    const projectId = selectedProject?.project_id ?? "";
+    if (projectId !== "") saveSessionConfigOption(projectId, key, value);
+  }
+
+  function initialConfig(): { key: string; value: ConfigOptionValue }[] {
+    if (capabilities !== null) {
+      return Object.entries(selectedConfigValues).map(([key, value]) => ({ key, value }));
+    }
+    const projectId = selectedProject?.project_id ?? "";
+    if (projectId === "") return [];
+    return Object.entries(loadSessionConfig(projectId)).map(([key, value]) => ({
+      key,
+      value,
+    }));
+  }
+
+  const canSubmit = $derived(
+    !busy &&
+      selectedProject !== null &&
+      effectiveAgent !== "" &&
+      (isProvisionerMode
+        ? selectedProvisioner !== null
+        : nodeId !== "" &&
+          nodeAvailability.isAvailable &&
+          (pathMode === "existing" ? localPath !== "" : branch.trim() !== "")),
+  );
+
+  // Explain to the user why submit is unavailable (avoid a silent disabled state)
+  const blockingHint = $derived.by(() => {
+    // The project callout above the composer already explains these states.
+    if (sync.projectsLoading || projects.length === 0 || sync.projectsError !== null) return "";
+    if (!isProvisionerMode) {
+      if (nodes.length === 0) return m.new_session_no_nodes();
+      if (selectedNode !== null && !nodeAvailability.isAvailable) {
+        return m.new_session_node_unavailable({
+          node: selectedNode.name,
+          status: nodeAvailability.statusText,
+        });
+      }
+    } else if (selectedProvisioner === null) {
+      return m.new_session_provisioner_undefined();
+    }
+    if (effectiveAgent === "") return m.new_session_agent_required();
+    if (
+      !isProvisionerMode &&
+      (pathMode === "existing" ? localPath.trim() === "" : branch.trim() === "")
+    ) {
+      return pathMode === "existing"
+        ? m.new_session_path_required_existing()
+        : m.new_session_path_required_branch();
+    }
+    return "";
+  });
+
+  const startTitle = $derived(
+    blockingHint !== ""
+      ? blockingHint
+      : promptText.trim() === ""
+        ? m.new_session_start_empty_title()
+        : m.new_session_start_title(),
+  );
+
+  function pathBasename(path: string): string {
+    const parts = path.split(/[\\/]/).filter(Boolean);
+    return parts.length > 0 ? parts[parts.length - 1] : path;
+  }
+
+  const projectLabel = $derived(selectedProject?.name ?? "");
+  const directoryLabel = $derived(
+    pathMode === "new_worktree"
+      ? branch.trim() || m.new_session_new_worktree()
+      : localPath.trim() !== ""
+        ? pathBasename(localPath)
+        : "",
+  );
+  const environmentLabel = $derived(
+    isProvisionerMode
+      ? (selectedProvisioner?.description ?? selectedProvisioner?.name ?? provisionerName)
+      : (selectedNode?.name ?? ""),
+  );
+  const agentLabel = $derived(manualAgent ? effectiveAgent : (selectedAgent?.name ?? ""));
 
   async function runProvisionerTest(name: string) {
     if (testBusy || !name) return;
@@ -379,9 +565,7 @@
             : null,
         agent_id: effectiveAgent,
         initial_prompt: promptToSend === "" ? null : { text: promptToSend, attachments: [] },
-        initial_config: Object.entries(loadSessionConfig(selectedProject.project_id)).map(
-          ([key, value]) => ({ key, value }),
-        ),
+        initial_config: initialConfig(),
         mode: sessionMode === "default" ? null : sessionMode,
         extra_args: extraArgs,
         fork: forkSessionId
@@ -409,10 +593,18 @@
   }
 
   function onKeydown(event: KeyboardEvent) {
-    if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
+    if (event.isComposing || event.keyCode === 229) return;
+    const startWithModifier = event.ctrlKey || event.metaKey;
+    if (event.key === "Enter" && (startWithModifier || !event.shiftKey)) {
       event.preventDefault();
       void handleStartSession();
     }
+  }
+
+  function resizePrompt(event: Event): void {
+    const textarea = event.currentTarget as HTMLTextAreaElement;
+    textarea.style.height = "auto";
+    textarea.style.height = `${Math.min(textarea.scrollHeight, 200)}px`;
   }
 
   /** On project change: re-resolve the default node and default path. */
@@ -450,34 +642,115 @@
     return `${parts.join(" ")} — ${formatRelativeTime(candidate.usedAt)}${suffix}`;
   }
 
-  const suggestionPrompts = $derived([
-    m.new_session_suggestion_1(),
-    m.new_session_suggestion_2(),
-    m.new_session_suggestion_3(),
-    m.new_session_suggestion_4(),
-  ]);
+  function candidateDetail(candidate: PathCandidate): string {
+    const parts: string[] = [];
+    if (!candidate.exists) parts.push(m.new_session_path_missing_label());
+    if (candidate.isWorktree) parts.push("Worktree");
+    if (candidate.gitBranch) parts.push(candidate.gitBranch);
+    parts.push(formatRelativeTime(candidate.usedAt));
+    return parts.join(" · ");
+  }
+
+  function selectProject(projectId: string): void {
+    selectedProjectId = projectId;
+    onProjectChange();
+    projectOpen = false;
+  }
+
+  function selectNode(id: string): void {
+    runTarget = "node";
+    nodeId = id;
+    onNodeChange();
+    environmentOpen = false;
+  }
+
+  function selectProvisioner(name: string): void {
+    runTarget = "provisioner";
+    provisionerName = name;
+    environmentOpen = false;
+  }
+
+  function selectAgent(id: string): void {
+    agentId = id;
+    manualAgent = false;
+    agentTouched = true;
+    agentOpen = false;
+  }
+
+  function onManualAgentInput(): void {
+    agentTouched = true;
+  }
+
+  function onSessionModeChange(): void {
+    modeTouched = true;
+  }
+
+  function selectPath(path: string): void {
+    localPath = path;
+    useCustomPath = false;
+    directoryOpen = false;
+  }
+
+  function resetPathToDefault(): void {
+    useCustomPath = false;
+    localPath = pickDefaultCandidate(pathCandidates)?.path ?? "";
+  }
+
+  function openFolderBrowser(): void {
+    directoryOpen = false;
+    browserOpen = true;
+  }
 </script>
 
-<div class="mx-auto flex h-full max-w-3xl flex-col justify-between px-4 py-6 md:py-10">
-  <div class="flex flex-col gap-6">
+{#snippet projectIcon()}
+  <FolderGit2Icon class="text-muted-foreground size-3.5" />
+{/snippet}
+
+{#snippet directoryIcon()}
+  <GitBranchIcon class="text-muted-foreground size-3.5" />
+{/snippet}
+
+{#snippet environmentIcon()}
+  {#if isProvisionerMode}
+    <BoxIcon class="text-muted-foreground size-3.5" />
+  {:else}
+    <span class="relative inline-flex">
+      <ServerIcon class="text-muted-foreground size-3.5" />
+      <span
+        class="ring-background absolute -right-1 -bottom-0.5 size-1.5 rounded-full ring-1 {nodeAvailability.dotColorClass}"
+      ></span>
+    </span>
+  {/if}
+{/snippet}
+
+{#snippet agentIcon()}
+  <BotIcon class="text-muted-foreground size-3.5" />
+{/snippet}
+
+{#snippet modelIcon()}
+  <SparklesIcon class="text-muted-foreground size-3.5" />
+{/snippet}
+
+<div class="mx-auto flex min-h-full w-full max-w-3xl flex-col justify-center px-4 py-8 md:py-12">
+  <div class="flex flex-col gap-4">
     <div class="flex flex-col items-center gap-2 text-center">
-      <div class="bg-primary/10 text-primary flex size-12 items-center justify-center rounded-2xl">
-        <SparklesIcon class="size-6" />
+      <div class="bg-primary/10 text-primary flex size-11 items-center justify-center rounded-2xl">
+        <SparklesIcon class="size-5" />
       </div>
       <h1 class="text-2xl font-bold tracking-tight">{m.new_session_title()}</h1>
-      <p class="text-muted-foreground text-sm max-w-md">
+      <p class="text-muted-foreground max-w-md text-sm">
         {m.new_session_description()}
       </p>
     </div>
 
     {#if forkSessionId}
       <div
-        class="bg-primary/10 border-primary/20 flex items-center justify-between rounded-xl border p-3 text-xs"
+        class="bg-primary/10 border-primary/20 flex items-center justify-between gap-2 rounded-xl border p-3 text-xs"
       >
-        <div class="flex items-center gap-2">
+        <div class="flex min-w-0 items-center gap-2">
           <GitForkIcon class="text-primary size-4 shrink-0" />
-          <span>
-            <code class="font-mono bg-background/50 px-1 py-0.5 rounded"
+          <span class="truncate">
+            <code class="bg-background/50 rounded px-1 py-0.5 font-mono"
               >{forkSessionId.slice(0, 8)}</code
             >
             — {m.new_session_fork_banner_description()}
@@ -486,558 +759,476 @@
         <Button
           variant="ghost"
           size="sm"
-          class="h-6 px-2 text-xs"
+          class="h-6 shrink-0 px-2 text-xs"
           onclick={() => {
             forkSessionId = "";
           }}
         >
-          <XIcon class="size-3.5 mr-1" />
+          <XIcon class="mr-1 size-3.5" />
           {m.new_session_fork_clear()}
         </Button>
       </div>
     {/if}
 
-    <div class="bg-card/70 rounded-xl border p-3.5 shadow-xs flex flex-col gap-3">
-      <div class="grid grid-cols-1 gap-2.5 sm:grid-cols-3">
-        <div class="flex flex-col gap-1">
-          <Label class="text-muted-foreground text-xs flex items-center gap-1.5">
-            <FolderGit2Icon class="size-3.5" />
-            {m.new_session_project()}
-          </Label>
+    {#if sync.projectsLoading && projects.length === 0}
+      <div
+        class="bg-muted/40 text-muted-foreground flex items-center justify-center gap-2 rounded-xl border p-3 text-xs"
+      >
+        <LoaderCircleIcon class="size-3.5 animate-spin" />
+        {m.common_loading()}
+      </div>
+    {:else if projects.length === 0 && sync.projectsError === null}
+      <div
+        class="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-xs"
+      >
+        <span class="flex items-center gap-2">
+          <FolderGit2Icon class="size-4 shrink-0" />
+          {m.new_session_no_projects()}
+        </span>
+        <a
+          href="/projects"
+          class="bg-background hover:bg-muted rounded-md border px-2.5 py-1 text-xs font-medium"
+        >
+          {m.new_session_register_project()}
+        </a>
+      </div>
+    {:else if sync.projectsError !== null}
+      <div
+        class="border-destructive/30 bg-destructive/10 text-destructive flex items-center justify-between gap-2 rounded-xl border p-3 text-xs"
+      >
+        <span class="truncate">{sync.projectsError}</span>
+        <Button variant="ghost" size="xs" onclick={() => void sync.refreshProjects()}>
+          {m.common_retry()}
+        </Button>
+      </div>
+    {/if}
+
+    <div
+      class="bg-card focus-within:border-primary/40 rounded-2xl border p-2 shadow-sm transition-colors"
+    >
+      <div class="flex flex-wrap items-center gap-1.5 px-1 pt-1">
+        <PickerPill
+          label={m.new_session_project()}
+          value={projectLabel}
+          icon={projectIcon}
+          bind:open={projectOpen}
+          disabled={projects.length === 0}
+        >
           {#if projects.length > 0}
-            <select
-              bind:value={selectedProjectId}
-              onchange={onProjectChange}
-              class="border-input bg-background focus-visible:ring-ring/40 h-8 rounded-md border px-2 text-xs outline-none focus-visible:ring-1"
-            >
+            <div class="max-h-72 overflow-y-auto p-1">
               {#each projects as project (project.project_id)}
-                <option value={project.project_id}>{project.name}</option>
+                <PickerItem
+                  selected={project.project_id === selectedProject?.project_id}
+                  onselect={() => selectProject(project.project_id)}
+                >
+                  <span class="block truncate">{project.name}</span>
+                </PickerItem>
               {/each}
-            </select>
-          {:else if sync.projectsLoading}
-            <span class="text-muted-foreground flex h-8 items-center text-xs">
-              {m.common_loading()}
-            </span>
-          {:else if sync.projectsError !== null}
-            <div class="flex h-8 items-center gap-1.5 text-xs">
-              <span class="text-destructive truncate" title={sync.projectsError}>
-                {m.common_load_failed()}
-              </span>
-              <Button variant="ghost" size="xs" onclick={() => void sync.refreshProjects()}>
-                {m.common_retry()}
-              </Button>
+            </div>
+            <div class="border-t p-1">
+              <a
+                href="/projects"
+                class="text-muted-foreground hover:bg-accent hover:text-accent-foreground block rounded-md px-2 py-1.5 text-xs"
+              >
+                {m.new_session_manage_projects()}
+              </a>
             </div>
           {:else}
-            <a
-              href="/projects"
-              class="border-input bg-muted/40 hover:bg-muted text-muted-foreground flex h-8 items-center justify-center rounded-md border text-xs"
-            >
-              {m.new_session_register_project()}
-            </a>
+            <div class="p-1">
+              <a
+                href="/projects"
+                class="text-muted-foreground hover:bg-accent hover:text-accent-foreground block rounded-md px-2 py-1.5 text-xs"
+              >
+                {m.new_session_register_project()}
+              </a>
+            </div>
           {/if}
-        </div>
+        </PickerPill>
 
-        <div class="flex flex-col gap-1">
-          <Label class="text-muted-foreground text-xs flex items-center gap-1.5">
-            {#if isProvisionerMode}
-              <BoxIcon class="size-3.5" />
-              {m.new_session_provisioner()}
-            {:else}
-              <ServerIcon class="size-3.5" />
-              {m.new_session_node()}
-            {/if}
-          </Label>
+        <PickerPill
+          label={m.new_session_working_directory()}
+          value={directoryLabel}
+          icon={directoryIcon}
+          contentClass="w-[min(24rem,calc(100vw-1.5rem))]"
+          bind:open={directoryOpen}
+          disabled={isProvisionerMode || selectedProject === null}
+        >
           {#if isProvisionerMode}
-            <div class="flex items-center gap-1.5">
-              {#if provisioners.length > 0}
-                <select
-                  bind:value={provisionerName}
-                  class="border-input bg-background focus-visible:ring-ring/40 h-8 rounded-md border px-2 text-xs outline-none focus-visible:ring-1 flex-1 min-w-0"
+            <p class="text-muted-foreground p-2 text-xs">{m.new_session_ephemeral_note()}</p>
+          {:else if pathMode === "new_worktree"}
+            <div class="flex flex-col gap-2 p-2">
+              <div class="flex flex-col gap-1">
+                <span class="text-muted-foreground text-[10px]">{m.new_session_new_worktree()}</span
                 >
-                  {#each provisioners as provisioner (provisioner.name)}
-                    <option value={provisioner.name}>
-                      {provisioner.description ?? provisioner.name}
-                    </option>
-                  {/each}
-                </select>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  class="h-8 px-2 text-xs shrink-0"
-                  disabled={!provisionerName || testBusy}
-                  onclick={() => runProvisionerTest(provisionerName)}
-                  title={m.new_session_provisioner_test_button_title()}
-                >
-                  {#if testBusy}
-                    <LoaderCircleIcon class="size-3.5 animate-spin" />
-                  {:else}
-                    {m.new_session_test()}
-                  {/if}
+                <Input bind:value={branch} placeholder="feat/new-task" class="h-8 text-xs" />
+              </div>
+              <p class="text-muted-foreground text-[10px]">
+                {m.new_session_worktree_description()}
+              </p>
+              <button
+                type="button"
+                class="text-muted-foreground hover:text-foreground self-start text-[11px] underline"
+                onclick={() => {
+                  pathMode = "existing";
+                  directoryOpen = false;
+                }}
+              >
+                {m.new_session_back_to_list()}
+              </button>
+            </div>
+          {:else if useCustomPath}
+            <div class="flex flex-col gap-2 p-2">
+              <Input
+                bind:value={localPath}
+                placeholder={m.new_session_path_placeholder()}
+                class="h-8 font-mono text-xs"
+                autofocus
+              />
+              <div class="flex flex-wrap items-center gap-1.5">
+                <Button variant="outline" size="sm" onclick={openFolderBrowser}>
+                  {m.new_session_browse()}
                 </Button>
-              {:else if provisionerLoadError !== null}
-                <span class="text-destructive text-xs leading-8">
-                  {m.common_load_failed()}
-                  {provisionerLoadError}
-                </span>
-              {:else}
-                <span class="text-muted-foreground text-xs leading-8">
-                  {m.new_session_provisioner_undefined()}
-                </span>
+                {#if pathCandidates.length > 0}
+                  <Button variant="ghost" size="sm" onclick={resetPathToDefault}>
+                    {m.new_session_back_to_list()}
+                  </Button>
+                {/if}
+              </div>
+              {#if localPath.trim() !== "" && selectedCandidate === null}
+                <p class="text-muted-foreground text-[10px]">
+                  {m.new_session_unregistered_path()}
+                </p>
+              {/if}
+              {#if selectedCandidate && !selectedCandidate.exists}
+                <p class="text-destructive text-[10px]">{m.new_session_path_not_exists()}</p>
               {/if}
             </div>
-          {:else}
-            <select
-              bind:value={nodeId}
-              onchange={onNodeChange}
-              class="border-input bg-background focus-visible:ring-ring/40 h-8 rounded-md border px-2 text-xs outline-none focus-visible:ring-1"
-            >
-              {#each nodes as node (node.node_id)}
-                {@const avail = getNodeAvailability(node)}
-                <option value={node.node_id}>
-                  {node.name} ({avail.statusText})
-                </option>
+          {:else if pathCandidates.length > 0}
+            <div class="max-h-72 overflow-y-auto p-1">
+              {#each pathCandidates as candidate (candidate.path)}
+                <PickerItem
+                  selected={candidate.path === localPath}
+                  onselect={() => selectPath(candidate.path)}
+                >
+                  <span class="block truncate">{pathBasename(candidate.path)}</span>
+                  <span
+                    class="text-muted-foreground block truncate text-[10px] {candidate.exists
+                      ? ''
+                      : 'text-destructive'}"
+                    title={candidateLabel(candidate)}
+                  >
+                    {candidate.path} · {candidateDetail(candidate)}
+                  </span>
+                </PickerItem>
               {/each}
-            </select>
-          {/if}
-        </div>
-
-        <div class="flex flex-col gap-1">
-          <div class="flex items-center gap-1.5">
-            <Label class="text-muted-foreground text-xs flex items-center gap-1.5">
-              <BotIcon class="size-3.5" />
-              {m.new_session_agent()}
-            </Label>
-            {#if !isProvisionerMode && availableAgents.length > 0}
+            </div>
+            <div class="flex flex-wrap items-center gap-1 border-t p-1">
               <button
                 type="button"
-                class="text-muted-foreground hover:text-foreground ml-auto text-[10px] underline"
-                onclick={() => (manualAgent = !manualAgent)}
+                class="text-muted-foreground hover:bg-accent hover:text-accent-foreground rounded-md px-2 py-1.5 text-[11px]"
+                onclick={openFolderBrowser}
               >
-                {manualAgent ? m.new_session_choose_from_list() : m.new_session_enter_id()}
-              </button>
-            {/if}
-          </div>
-          {#if !isProvisionerMode && availableAgents.length > 0 && !manualAgent}
-            <select
-              bind:value={agentId}
-              disabled={forkSessionId !== ""}
-              class="border-input bg-background focus-visible:ring-ring/40 h-8 rounded-md border px-2 text-xs outline-none focus-visible:ring-1"
-            >
-              {#if agentId !== "" && !availableAgentIds.includes(agentId)}
-                <option value={agentId}
-                  >{m.new_session_agent_not_in_list({ agent: agentId })}</option
-                >
-              {/if}
-              {#each availableAgents as agent (agent.id)}
-                <option value={agent.id}>{agentOptionLabel(agent)}</option>
-              {/each}
-            </select>
-          {:else}
-            <Input
-              bind:value={agentId}
-              disabled={forkSessionId !== ""}
-              placeholder={m.new_session_agent_id_placeholder()}
-              class="h-8 text-xs"
-            />
-          {/if}
-          {#if !isProvisionerMode}
-            {#if catalogError !== null}
-              <div class="flex items-center gap-1.5 text-[10px]">
-                <span class="text-destructive">
-                  {m.common_load_failed()}
-                  {catalogError}
-                </span>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="xs"
-                  onclick={() => void loadAgentCatalog(nodeId)}
-                >
-                  {m.common_retry()}
-                </Button>
-              </div>
-            {:else if catalogLoading}
-              <span class="text-muted-foreground text-[10px]">{m.common_loading()}</span>
-            {/if}
-            <a
-              href="/settings?tab=agents"
-              class="text-muted-foreground hover:text-foreground text-[10px] underline"
-            >
-              {availableAgents.length === 0
-                ? m.new_session_no_agents()
-                : m.new_session_manage_agents()}
-            </a>
-          {/if}
-        </div>
-      </div>
-
-      <div class="flex items-center gap-1.5 text-xs">
-        <span class="text-muted-foreground">{m.new_session_run_environment()}</span>
-        <button
-          type="button"
-          class="rounded-full border px-2.5 py-0.5 transition-colors {runTarget === 'node'
-            ? 'bg-primary text-primary-foreground border-primary'
-            : 'text-muted-foreground hover:bg-muted'}"
-          onclick={() => (runTarget = "node")}
-        >
-          {m.new_session_resident_node()}
-        </button>
-        <button
-          type="button"
-          class="rounded-full border px-2.5 py-0.5 transition-colors {isProvisionerMode
-            ? 'bg-primary text-primary-foreground border-primary'
-            : 'text-muted-foreground hover:bg-muted'}"
-          onclick={() => (runTarget = "provisioner")}
-          disabled={provisioners.length === 0}
-          title={provisioners.length === 0
-            ? m.new_session_provisioner_config_hint()
-            : m.new_session_ephemeral_hint()}
-        >
-          {m.new_session_ephemeral()}
-        </button>
-        {#if isProvisionerMode}
-          <span class="text-muted-foreground">
-            — {m.new_session_ephemeral_note()}
-          </span>
-        {/if}
-      </div>
-
-      {#if !isProvisionerMode && projects.length > 0}
-        <div class="flex flex-col gap-1.5 border-t pt-3">
-          <div class="flex flex-wrap items-center justify-between gap-2">
-            <Label class="text-muted-foreground flex items-center gap-1.5 text-xs">
-              <FolderGit2Icon class="size-3.5" />
-              {m.new_session_working_directory()}
-              <span class="text-destructive">*</span>
-            </Label>
-            <div class="flex items-center gap-1">
-              <button
-                type="button"
-                class="rounded-full border px-2.5 py-0.5 text-xs transition-colors {pathMode ===
-                'existing'
-                  ? 'bg-primary text-primary-foreground border-primary'
-                  : 'text-muted-foreground hover:bg-muted'}"
-                onclick={() => (pathMode = "existing")}
-              >
-                {m.new_session_existing()}
+                {m.new_session_browse()}
               </button>
               <button
                 type="button"
-                class="rounded-full border px-2.5 py-0.5 text-xs transition-colors {pathMode ===
-                'new_worktree'
-                  ? 'bg-primary text-primary-foreground border-primary'
-                  : 'text-muted-foreground hover:bg-muted'}"
-                onclick={() => (pathMode = "new_worktree")}
+                class="text-muted-foreground hover:bg-accent hover:text-accent-foreground rounded-md px-2 py-1.5 text-[11px]"
+                onclick={() => (useCustomPath = true)}
+              >
+                {m.new_session_enter_path()}
+              </button>
+              <button
+                type="button"
+                class="text-muted-foreground hover:bg-accent hover:text-accent-foreground rounded-md px-2 py-1.5 text-[11px]"
+                onclick={() => {
+                  pathMode = "new_worktree";
+                  directoryOpen = false;
+                }}
               >
                 {m.new_session_new_worktree()}
               </button>
             </div>
-          </div>
+          {:else}
+            <div class="flex flex-col gap-2 p-2">
+              <p class="text-muted-foreground text-xs">
+                {m.new_session_no_candidate({
+                  project: selectedProject?.name ?? m.new_session_this_project(),
+                })}
+              </p>
+              <div class="flex flex-wrap items-center gap-1.5">
+                <Button variant="outline" size="sm" onclick={openFolderBrowser}>
+                  {m.new_session_select_folder()}
+                </Button>
+                <a
+                  href="/projects"
+                  class="text-muted-foreground hover:text-foreground text-[11px] underline underline-offset-2"
+                >
+                  {m.new_session_go_to_project_settings()}
+                </a>
+              </div>
+              {#each otherNodesWithCandidates as otherNode (otherNode.node_id)}
+                <button
+                  type="button"
+                  class="text-muted-foreground hover:text-foreground self-start text-[11px] underline"
+                  onclick={() => selectNode(otherNode.node_id)}
+                >
+                  {m.new_session_registered_on_node({ node: otherNode.name })}
+                </button>
+              {/each}
+            </div>
+          {/if}
+        </PickerPill>
 
-          {#if pathMode === "existing"}
-            <div class="flex items-center gap-1.5">
-              {#if pathCandidates.length > 0 && !useCustomPath}
-                <select
-                  bind:value={localPath}
-                  aria-invalid={localPath.trim() === ""}
-                  class="border-input bg-background focus-visible:ring-ring/40 h-8 min-w-0 flex-1 rounded-md border px-2 text-xs outline-none focus-visible:ring-1 {localPath.trim() ===
-                  ''
-                    ? 'border-destructive'
-                    : ''}"
+        <span class="flex-1"></span>
+
+        <PickerPill
+          label={m.new_session_environment()}
+          value={environmentLabel}
+          icon={environmentIcon}
+          contentClass="w-[min(20rem,calc(100vw-1.5rem))]"
+          bind:open={environmentOpen}
+          disabled={nodes.length === 0 && provisioners.length === 0}
+        >
+          <div class="max-h-80 overflow-y-auto p-1">
+            <div
+              class="text-muted-foreground px-2 py-1 text-[10px] font-medium tracking-wide uppercase"
+            >
+              {m.new_session_node_section()}
+            </div>
+            {#if nodes.length === 0}
+              <p class="text-muted-foreground px-2 py-1.5 text-xs">
+                {m.new_session_no_nodes()}
+              </p>
+            {:else}
+              {#each nodes as node (node.node_id)}
+                {@const availability = getNodeAvailability(node)}
+                <PickerItem
+                  selected={!isProvisionerMode && node.node_id === nodeId}
+                  onselect={() => selectNode(node.node_id)}
                 >
-                  {#each pathCandidates as candidate (candidate.path)}
-                    <option value={candidate.path}>{candidateLabel(candidate)}</option>
-                  {/each}
-                </select>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  class="h-8 shrink-0 gap-1.5 px-2.5 text-xs"
-                  onclick={() => {
-                    useCustomPath = true;
-                    browserOpen = true;
-                  }}
-                  title={m.new_session_browse_other_dir()}
-                >
-                  <FolderOpenIcon class="size-3.5" />
-                  <span>{m.new_session_browse()}</span>
-                </Button>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  class="text-muted-foreground hover:text-foreground h-8 shrink-0 px-2 text-xs"
-                  onclick={() => (useCustomPath = true)}
-                  title={m.new_session_enter_path_title()}
-                >
-                  {m.new_session_enter_path()}
-                </Button>
-              {:else}
-                <Input
-                  bind:value={localPath}
-                  aria-invalid={localPath.trim() === ""}
-                  placeholder={m.new_session_path_placeholder()}
-                  class="h-8 min-w-0 flex-1 font-mono text-xs"
-                />
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  class="h-8 shrink-0 gap-1.5 px-2.5 text-xs"
-                  disabled={!nodeId}
-                  onclick={() => (browserOpen = true)}
-                  title={m.new_session_browse_title()}
-                >
-                  <FolderOpenIcon class="size-3.5" />
-                  <span>{m.new_session_browse()}</span>
-                </Button>
-                {#if pathCandidates.length > 0}
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    class="text-muted-foreground hover:text-foreground h-8 shrink-0 px-2 text-xs"
-                    onclick={() => {
-                      useCustomPath = false;
-                      localPath = pickDefaultCandidate(pathCandidates)?.path ?? "";
-                    }}
-                    title={m.new_session_back_to_list_title()}
+                  <span class="flex items-center gap-1.5">
+                    <span class="size-1.5 shrink-0 rounded-full {availability.dotColorClass}"
+                    ></span>
+                    <span class="truncate">{node.name}</span>
+                  </span>
+                  <span class="text-muted-foreground block truncate text-[10px]">
+                    {availability.statusText}
+                  </span>
+                </PickerItem>
+              {/each}
+            {/if}
+
+            <div class="border-t p-1 pt-2">
+              <div
+                class="text-muted-foreground px-2 py-1 text-[10px] font-medium tracking-wide uppercase"
+              >
+                {m.new_session_ephemeral_section()}
+              </div>
+              {#if provisioners.length > 0}
+                {#each provisioners as provisioner (provisioner.name)}
+                  <PickerItem
+                    selected={isProvisionerMode && provisioner.name === provisionerName}
+                    onselect={() => selectProvisioner(provisioner.name)}
                   >
-                    {m.new_session_back_to_list()}
-                  </Button>
-                {/if}
+                    <span class="block truncate">
+                      {provisioner.description ?? provisioner.name}
+                    </span>
+                    <span class="text-muted-foreground block truncate text-[10px]">
+                      {provisioner.name}
+                    </span>
+                  </PickerItem>
+                {/each}
+              {:else if provisionerLoadError !== null}
+                <div class="flex items-center gap-1.5 px-2 py-1 text-[11px]">
+                  <span class="text-destructive truncate">{m.common_load_failed()}</span>
+                  <button
+                    type="button"
+                    class="text-muted-foreground hover:text-foreground underline"
+                    onclick={() => void loadProvisioners()}
+                  >
+                    {m.common_retry()}
+                  </button>
+                </div>
+              {:else}
+                <p class="text-muted-foreground px-2 py-1 text-[11px]">
+                  {m.new_session_provisioner_undefined()}
+                </p>
+                <p class="text-muted-foreground px-2 pb-1 text-[10px]">
+                  {m.new_session_provisioner_config_hint()}
+                </p>
               {/if}
             </div>
-
-            {#if selectedCandidate}
-              <p class="text-muted-foreground text-[11px]">
-                {selectedCandidate.source === "binding"
-                  ? m.new_session_source_binding()
-                  : m.new_session_source_session()}
-                — {m.new_session_last_used({
-                  time: formatRelativeTime(selectedCandidate.usedAt),
-                })}
-                {#if selectedCandidate.isWorktree}
-                  — Worktree
-                {/if}
-                {#if selectedCandidate.gitBranch}
-                  — {selectedCandidate.gitBranch}
-                {/if}
-              </p>
-            {:else if localPath.trim() !== ""}
-              <p class="text-muted-foreground text-[11px]">
-                {m.new_session_unregistered_path()}
-              </p>
-            {/if}
-
-            {#if selectedCandidate && !selectedCandidate.exists}
-              <p class="text-destructive text-[11px]">
-                {m.new_session_path_not_exists()}
-              </p>
-            {/if}
-
-            {#if pathCandidates.length === 0 && !(useCustomPath && localPath.trim() !== "")}
-              <div
-                class="flex flex-col gap-1.5 rounded-md border border-amber-500/40 bg-amber-500/10 p-2.5 text-[11px]"
-              >
-                <span>
-                  {m.new_session_no_candidate({
-                    project: selectedProject?.name ?? m.new_session_this_project(),
-                  })}
-                </span>
-                <div class="flex flex-wrap items-center gap-1.5">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    class="h-7 px-2 text-[11px]"
-                    onclick={() => {
-                      useCustomPath = true;
-                      browserOpen = true;
-                    }}
-                  >
-                    {m.new_session_select_folder()}
-                  </Button>
-                  <a
-                    href="/projects"
-                    class="text-muted-foreground hover:text-foreground underline underline-offset-2"
-                  >
-                    {m.new_session_go_to_project_settings()}
-                  </a>
-                  {#each otherNodesWithCandidates as otherNode (otherNode.node_id)}
-                    <button
-                      type="button"
-                      class="text-muted-foreground hover:text-foreground underline underline-offset-2"
-                      onclick={() => {
-                        nodeId = otherNode.node_id;
-                        nodeTouched = true;
-                      }}
-                    >
-                      {m.new_session_registered_on_node({ node: otherNode.name })}
-                    </button>
-                  {/each}
-                </div>
-              </div>
-            {/if}
-          {:else}
-            <Input
-              bind:value={branch}
-              aria-invalid={branch.trim() === ""}
-              placeholder="feat/new-task"
-              class="h-8 text-xs"
-            />
-            <p class="text-muted-foreground text-[11px]">
-              {m.new_session_worktree_description()}
-            </p>
-          {/if}
-        </div>
-      {/if}
-
-      <div>
-        <button
-          type="button"
-          class="text-muted-foreground hover:text-foreground inline-flex items-center gap-1 text-xs"
-          onclick={() => (showAdvanced = !showAdvanced)}
-        >
-          <Settings2Icon class="size-3" />
-          <span>{showAdvanced ? m.new_session_hide_advanced() : m.new_session_advanced()}</span>
-        </button>
-
-        {#if showAdvanced}
-          <div class="border-t pt-3 mt-2 flex flex-col gap-3">
-            {#if isProvisionerMode}
-              <div class="flex flex-col gap-1">
-                <Label class="text-xs">{m.new_session_clone_branch()}</Label>
-                <Input
-                  bind:value={branch}
-                  placeholder={m.new_session_clone_branch_placeholder()}
-                  class="h-8 text-xs"
-                />
-              </div>
-            {:else if pathMode === "new_worktree"}
-              <div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                <div class="flex flex-col gap-1">
-                  <Label class="text-xs">{m.new_session_base_branch()}</Label>
-                  <Input bind:value={baseBranch} placeholder="main" class="h-8 text-xs" />
-                </div>
-              </div>
-            {/if}
-
-            <div
-              class="{isProvisionerMode || pathMode === 'new_worktree'
-                ? 'border-t pt-2.5 '
-                : ''}grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs"
-            >
-              <div class="flex flex-col gap-1">
-                <Label class="text-xs">{m.new_session_initial_mode()}</Label>
-                <select
-                  bind:value={sessionMode}
-                  class="border-input bg-background h-8 rounded-md border px-2 text-xs outline-none focus-visible:ring-1"
-                >
-                  <option value="default">{m.new_session_mode_default()}</option>
-                  <option value="code">{m.new_session_mode_code()}</option>
-                  <option value="plan">{m.new_session_mode_plan()}</option>
-                </select>
-              </div>
-
-              <div class="flex flex-col gap-1">
-                <Label class="text-xs">{m.new_session_extra_args()}</Label>
-                <Input
-                  bind:value={extraArgsText}
-                  placeholder={m.new_session_extra_args_placeholder()}
-                  class="h-8 text-xs font-mono"
-                />
-              </div>
-            </div>
           </div>
-        {/if}
+        </PickerPill>
       </div>
-    </div>
 
-    <div
-      class="bg-card rounded-2xl border shadow-sm p-3 flex flex-col gap-2 focus-within:border-primary/50 transition-colors"
-    >
       <textarea
         bind:value={promptText}
         onkeydown={onKeydown}
-        rows="4"
+        oninput={resizePrompt}
+        rows="3"
         placeholder={m.new_session_prompt_placeholder()}
-        class="bg-transparent placeholder:text-muted-foreground w-full resize-none text-sm outline-none leading-relaxed"
+        class="placeholder:text-muted-foreground w-full resize-none overflow-y-auto bg-transparent px-2 py-3 text-sm leading-relaxed outline-none"
+        style="min-height: 76px; max-height: 200px;"
         disabled={busy}></textarea>
 
-      <div class="flex items-center justify-between border-t pt-2.5">
-        <div class="flex items-center gap-2">
-          {#if isProvisionerMode}
-            {#if selectedProvisioner}
-              <span class="text-muted-foreground text-xs">
-                {selectedProvisioner.name}
-                {#if selectedProvisioner.idle_timeout_secs}
-                  — {m.new_session_idle_discard({
-                    minutes: Math.round(selectedProvisioner.idle_timeout_secs / 60),
-                  })}
-                {/if}
-              </span>
-            {/if}
-          {:else if selectedNode}
-            <NodeStatusBadge node={selectedNode} showNodeName={true} />
-          {/if}
-        </div>
-
-        <div class="flex items-center gap-2">
-          {#if pathMissing}
-            <span class="text-destructive text-xs">{pathRequiredHint}</span>
-          {:else if effectiveAgent === ""}
-            <span class="text-destructive text-xs">{m.new_session_agent_required()}</span>
-          {/if}
-          <Button
-            variant="ghost"
-            size="sm"
-            class="text-xs h-8 text-muted-foreground hover:text-foreground"
-            disabled={!canSubmit || busy}
-            onclick={() => handleStartSession("")}
-            title={pathMissing ? pathRequiredHint : m.new_session_start_empty_title()}
-          >
-            {m.new_session_start_empty()}
-          </Button>
-
-          <Button
-            size="sm"
-            class="gap-1.5 h-8 text-xs font-medium"
-            disabled={!canSubmit || busy}
-            onclick={() => handleStartSession()}
-            title={pathMissing ? pathRequiredHint : m.new_session_start_title()}
-          >
-            {#if busy}
-              <span>{m.new_session_starting()}</span>
-            {:else}
-              <PlayIcon class="size-3.5 fill-current" />
-              <span>{m.new_session_start()}</span>
-              <kbd class="bg-primary-foreground/20 text-[10px] px-1 py-0.5 rounded font-mono">↵</kbd
+      <div class="flex flex-wrap items-center gap-1.5 border-t px-1 pt-2">
+        <PickerPill
+          label={m.new_session_agent()}
+          value={agentLabel}
+          icon={agentIcon}
+          contentClass="w-[min(20rem,calc(100vw-1.5rem))]"
+          bind:open={agentOpen}
+          disabled={forkSessionId !== ""}
+        >
+          {#if catalogLoading}
+            <p class="text-muted-foreground flex items-center gap-1.5 px-2 py-2 text-xs">
+              <LoaderCircleIcon class="size-3.5 animate-spin" />
+              {m.common_loading()}
+            </p>
+          {:else if catalogError !== null}
+            <div class="flex flex-col gap-2 p-2">
+              <p class="text-destructive break-words text-[11px]">{catalogError}</p>
+              <Button
+                variant="outline"
+                size="sm"
+                class="self-start"
+                onclick={() => void loadAgentCatalog(nodeId)}
               >
-            {/if}
-          </Button>
-        </div>
+                {m.common_retry()}
+              </Button>
+            </div>
+          {:else if availableAgents.length === 0}
+            <p class="text-muted-foreground p-2 text-xs">{m.new_session_no_agents()}</p>
+          {:else}
+            <div class="max-h-72 overflow-y-auto p-1">
+              {#each availableAgents as agent (agent.id)}
+                <PickerItem
+                  selected={agent.id === effectiveAgent}
+                  onselect={() => selectAgent(agent.id)}
+                >
+                  <span class="block truncate">{agent.name}</span>
+                  <span class="text-muted-foreground block truncate text-[10px]">
+                    {agentHint(agent)}
+                  </span>
+                </PickerItem>
+              {/each}
+            </div>
+          {/if}
+          <div class="border-t p-1">
+            <a
+              href="/settings?tab=agents"
+              class="text-muted-foreground hover:bg-accent hover:text-accent-foreground block rounded-md px-2 py-1.5 text-xs"
+            >
+              {m.new_session_manage_agents()}
+            </a>
+          </div>
+        </PickerPill>
+
+        {#if isProvisionerMode}
+          <PickerPill
+            label={m.new_session_model()}
+            value={m.new_session_models_after_start()}
+            icon={modelIcon}
+            disabled
+          />
+        {:else if capabilitiesLoading && configOptions.length === 0}
+          <PickerPill
+            label={m.new_session_model()}
+            value={m.new_session_models_loading()}
+            icon={modelIcon}
+            loading
+            disabled
+          />
+        {:else if configOptions.length > 0}
+          {#each configOptions as option (option.key)}
+            <ConfigOptionPicker
+              {option}
+              value={selectedConfigValues[option.key]}
+              onchange={(value) => changeConfigOption(option.key, value)}
+              showRefresh={isModelOption(option)}
+              onrefresh={() => void loadAgentCapabilities(true)}
+            />
+          {/each}
+        {:else if capabilitiesError !== null}
+          <PickerPill
+            label={m.new_session_model()}
+            value={m.new_session_model_default()}
+            icon={modelIcon}
+            contentClass="w-72 p-0"
+          >
+            <div class="flex flex-col gap-2 p-2 text-xs">
+              <p class="text-muted-foreground">{m.new_session_models_unavailable()}</p>
+              <p class="text-destructive break-words text-[10px]">{capabilitiesError}</p>
+              <Button
+                variant="outline"
+                size="sm"
+                class="self-start"
+                onclick={() => void loadAgentCapabilities(true)}
+              >
+                {m.common_retry()}
+              </Button>
+            </div>
+          </PickerPill>
+        {:else if capabilities !== null}
+          <PickerPill
+            label={m.new_session_model()}
+            value={m.new_session_model_default()}
+            icon={modelIcon}
+            contentClass="w-72 p-2"
+          >
+            <p class="text-muted-foreground text-xs">{m.new_session_models_empty()}</p>
+          </PickerPill>
+        {:else}
+          <PickerPill
+            label={m.new_session_model()}
+            value={m.new_session_model_default()}
+            icon={modelIcon}
+            disabled
+          />
+        {/if}
+
+        <span class="flex-1"></span>
+
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          class="text-muted-foreground hover:text-foreground rounded-full"
+          title={m.new_session_settings_title()}
+          aria-label={m.new_session_settings_title()}
+          onclick={() => (showSettings = true)}
+        >
+          <Settings2Icon class="size-4" />
+        </Button>
+
+        <Button
+          size="icon-sm"
+          class="rounded-full"
+          disabled={!canSubmit || busy}
+          title={startTitle}
+          aria-label={m.new_session_start()}
+          onclick={() => void handleStartSession()}
+        >
+          {#if busy}
+            <LoaderCircleIcon class="size-4 animate-spin" />
+          {:else}
+            <ArrowUpIcon class="size-4" />
+          {/if}
+        </Button>
       </div>
     </div>
 
-    <div class="flex flex-col gap-2">
-      <span class="text-muted-foreground text-xs">{m.new_session_suggestions()}</span>
-      <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
-        {#each suggestionPrompts as suggestion}
-          <button
-            type="button"
-            class="hover:bg-accent/60 bg-muted/30 text-muted-foreground hover:text-foreground flex items-center justify-between rounded-lg border p-2.5 text-left text-xs transition-colors"
-            onclick={() => {
-              promptText = suggestion;
-            }}
-          >
-            <span class="line-clamp-1">{suggestion}</span>
-            <CornerDownLeftIcon class="size-3 shrink-0 opacity-60" />
-          </button>
-        {/each}
-      </div>
+    <div class="min-h-4 text-center text-xs">
+      {#if busy}
+        <span class="text-muted-foreground">{m.new_session_starting()}</span>
+      {:else if blockingHint !== ""}
+        <span class="text-destructive">{blockingHint}</span>
+      {:else if capabilitiesError !== null}
+        <span class="text-muted-foreground">{m.new_session_models_unavailable()}</span>
+      {:else}
+        <span class="text-muted-foreground hidden sm:inline">{m.new_session_enter_hint()}</span>
+        <span class="text-muted-foreground sm:hidden">{m.new_session_tap_hint()}</span>
+      {/if}
     </div>
   </div>
 </div>
@@ -1052,6 +1243,24 @@
   }}
 />
 
+<SessionSettingsDialog
+  bind:open={showSettings}
+  bind:pathMode
+  bind:branch
+  bind:baseBranch
+  bind:sessionMode
+  bind:extraArgsText
+  bind:manualAgent
+  bind:agentId
+  {isProvisionerMode}
+  forkActive={forkSessionId !== ""}
+  {provisionerName}
+  {testBusy}
+  onTest={() => void runProvisionerTest(provisionerName)}
+  onModeChange={onSessionModeChange}
+  onAgentIdInput={onManualAgentInput}
+/>
+
 <Dialog.Root bind:open={testDialogOpen}>
   <Dialog.Content class="max-w-lg">
     <Dialog.Header>
@@ -1060,10 +1269,10 @@
         {m.new_session_provisioner_test_description()}
       </Dialog.Description>
     </Dialog.Header>
-    <div class="py-2 text-xs flex flex-col gap-3">
+    <div class="flex flex-col gap-3 py-2 text-xs">
       {#if testBusy}
-        <div class="flex flex-col items-center justify-center gap-2 py-8 text-muted-foreground">
-          <LoaderCircleIcon class="size-6 animate-spin text-primary" />
+        <div class="text-muted-foreground flex flex-col items-center justify-center gap-2 py-8">
+          <LoaderCircleIcon class="text-primary size-6 animate-spin" />
           <span>{m.new_session_provisioner_starting()}</span>
         </div>
       {:else if testResult}
@@ -1076,7 +1285,7 @@
               >
             {/if}
           {:else}
-            <XCircleIcon class="size-5 text-destructive" />
+            <XCircleIcon class="text-destructive size-5" />
             <span class="text-destructive">{m.new_session_test_failed()}</span>
           {/if}
         </div>
@@ -1093,7 +1302,7 @@
           <div class="flex flex-col gap-1">
             <span class="text-muted-foreground text-[11px]">{m.new_session_run_log()}</span>
             <div
-              class="bg-muted max-h-48 overflow-y-auto rounded-md p-2 font-mono text-[11px] leading-tight text-foreground whitespace-pre-wrap"
+              class="bg-muted text-foreground max-h-48 overflow-y-auto rounded-md p-2 font-mono text-[11px] leading-tight whitespace-pre-wrap"
             >
               {testResult.log_lines.join("\n")}
             </div>

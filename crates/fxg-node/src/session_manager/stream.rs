@@ -177,6 +177,31 @@ pub(super) async fn pump_events(
                             session.has_custom_title = true;
                         }
                     }
+                    UnifiedEventPayload::CapabilitiesUpdated {
+                        current_mode,
+                        available_modes,
+                        config_options,
+                        ..
+                    } => {
+                        let session = {
+                            let sessions = inner.sessions.lock().expect("sessions poisoned");
+                            sessions
+                                .active
+                                .get(&session_id)
+                                .map(|session| (session.agent_id.clone(), session.cwd.clone()))
+                        };
+                        if let Some((agent_id, cwd)) = session {
+                            inner.remember_capabilities(
+                                &agent_id,
+                                &cwd,
+                                AgentCapabilitiesPreview {
+                                    available_modes: available_modes.clone(),
+                                    current_mode: current_mode.clone(),
+                                    config_options: config_options.clone(),
+                                },
+                            );
+                        }
+                    }
                     _ => {}
                 }
                 match inner.bus.record(&session_id, payload).await {

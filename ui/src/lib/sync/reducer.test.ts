@@ -457,6 +457,8 @@ describe("metadata helpers", () => {
             {
               key: "model",
               name: "Model",
+              description: null,
+              category: "model",
               current_value: "gpt-4",
               options: ["gpt-4", "gpt-3.5"],
             },
@@ -498,6 +500,8 @@ describe("metadata helpers", () => {
         {
           key: "model",
           name: "Model",
+          description: null,
+          category: "model",
           current_value: "gpt-4",
           options: ["gpt-4", "gpt-3.5"],
         },

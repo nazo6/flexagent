@@ -187,8 +187,23 @@ pub(super) fn map_config_option(option: &SessionConfigOption) -> ConfigOptionInf
     ConfigOptionInfo {
         key: option.id.to_string(),
         name: option.name.clone(),
+        description: option.description.clone(),
+        category: option.category.as_ref().map(map_config_category),
         current_value,
         options,
+    }
+}
+
+/// Maps the ACP config option category to FXG's open enum.
+fn map_config_category(category: &SessionConfigOptionCategory) -> ConfigOptionCategory {
+    match category {
+        SessionConfigOptionCategory::Mode => ConfigOptionCategory::Mode,
+        SessionConfigOptionCategory::Model => ConfigOptionCategory::Model,
+        SessionConfigOptionCategory::ModelConfig => ConfigOptionCategory::ModelConfig,
+        SessionConfigOptionCategory::ThoughtLevel => ConfigOptionCategory::ThoughtLevel,
+        SessionConfigOptionCategory::Other(raw) => ConfigOptionCategory::Unknown(raw.clone()),
+        // `SessionConfigOptionCategory` is non-exhaustive; preserve future values as-is.
+        _ => ConfigOptionCategory::Unknown(String::new()),
     }
 }
 

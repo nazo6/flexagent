@@ -18,6 +18,9 @@ use fxg_acp::{
     ActiveSessionHandle, AgentDriver, AgentLaunchSpec, DriverEvent, DriverKind, ResumeRequest,
     StartSessionRequest, StartedSession,
 };
+use fxg_protocol::client_api::AgentCapabilitiesPreview;
+use fxg_protocol::common::SessionStatus;
+use fxg_protocol::events::UnifiedEventPayload;
 use tokio::sync::mpsc;
 
 use crate::git;
@@ -125,6 +128,8 @@ struct MockAgentInner {
     starts: Mutex<Vec<MockStart>>,
     /// Whether native restore (resume) is supported
     resume_supported: AtomicBool,
+    /// Capabilities emitted right after `session/new` (capability probe tests)
+    start_capabilities: Mutex<Option<AgentCapabilitiesPreview>>,
 }
 
 impl MockAgent {
@@ -148,6 +153,15 @@ impl MockAgent {
         self.inner
             .resume_supported
             .store(supported, Ordering::SeqCst);
+    }
+
+    /// Sets the capabilities emitted immediately after `session/new`.
+    pub(crate) fn set_start_capabilities(&self, capabilities: AgentCapabilitiesPreview) {
+        *self
+            .inner
+            .start_capabilities
+            .lock()
+            .expect("start capabilities") = Some(capabilities);
     }
 
     /// List of sent prompts.
@@ -219,13 +233,44 @@ impl AgentDriver for MockAgent {
                 fxg_acp::NativeResumeUnavailable("mock resume unsupported".to_owned()).into(),
             );
         }
-        self.inner.events.lock().expect("events").push(event_tx);
+        self.inner
+            .events
+            .lock()
+            .expect("events")
+            .push(event_tx.clone());
         self.inner.starts.lock().expect("starts").push(MockStart {
             session_id: req.session_id,
             cwd: req.cwd,
             resume: req.resume,
             fork_from: req.fork_from,
         });
+        if let Some(capabilities) = self
+            .inner
+            .start_capabilities
+            .lock()
+            .expect("start capabilities")
+            .clone()
+        {
+            fxg_protocol::discard_with!(
+                event_tx.send(DriverEvent::Event(
+                    UnifiedEventPayload::CapabilitiesUpdated {
+                        current_mode: capabilities.current_mode,
+                        available_modes: capabilities.available_modes,
+                        available_commands: Vec::new(),
+                        config_options: capabilities.config_options,
+                        fork_supported: None,
+                    }
+                )),
+                "send capabilities to the probe"
+            );
+            fxg_protocol::discard_with!(
+                event_tx.send(DriverEvent::Event(UnifiedEventPayload::StatusChanged {
+                    status: SessionStatus::Idle,
+                    error_message: None,
+                })),
+                "send idle status to the probe"
+            );
+        }
         Ok(StartedSession {
             handle: Box::new(self.clone()),
             context_restored: can_restore,

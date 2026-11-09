@@ -6,11 +6,12 @@ use async_trait::async_trait;
 use axum::http::{HeaderMap, header};
 use fxg_db::Db;
 use fxg_protocol::client_api::{
-    AgentOpResponse, AgentsResponse, ConnectionRole, CreateSessionRequest, CreateSessionResponse,
-    CreateWorktreeRequest, DiagnosticsResponse, IssueNodeTokenRequest, IssueNodeTokenResponse,
-    KillSwitchResponse, NodeTokensResponse, ProjectLinkRequest, ProjectLinkResponse,
-    ProjectScanRequest, ProjectScanResponse, ProvisionersResponse, PruneWorktreesRequest,
-    PushSubscribeRequest, PushSubscribeResponse, RemoveWorktreeRequest, RespondElicitationRequest,
+    AgentCapabilitiesPreview, AgentOpResponse, AgentsResponse, ConnectionRole,
+    CreateSessionRequest, CreateSessionResponse, CreateWorktreeRequest, DiagnosticsResponse,
+    IssueNodeTokenRequest, IssueNodeTokenResponse, KillSwitchResponse, NodeTokensResponse,
+    ProbeAgentRequest, ProjectLinkRequest, ProjectLinkResponse, ProjectScanRequest,
+    ProjectScanResponse, ProvisionersResponse, PruneWorktreesRequest, PushSubscribeRequest,
+    PushSubscribeResponse, RemoveWorktreeRequest, RespondElicitationRequest,
     RespondElicitationResponse, RespondPermissionRequest, RespondPermissionResponse,
     ResumeSessionRequest, ResumeSessionResponse, RotateAuthTokenResponse, SessionArchiveRequest,
     SessionArchiveResponse, WorktreeInfo, WorktreesResponse,
@@ -340,6 +341,32 @@ pub trait ClientApiBackend: Clone + Send + Sync + 'static {
         action: AgentAction,
         client: ClientInfo,
     ) -> Result<AgentOpResponse, ApiError>;
+
+    /// `POST /api/v1/nodes/:node_id/agents/:agent_id/probe`
+    /// (temporary ACP session to discover models / modes).
+    async fn probe_agent_config(
+        &self,
+        node_id: &str,
+        agent_id: &str,
+        request: ProbeAgentRequest,
+        client: ClientInfo,
+    ) -> Result<AgentCapabilitiesPreview, ApiError> {
+        let response = self
+            .execute_node_rpc(
+                &NodeId::from(node_id),
+                NodeRpcRequest::ProbeAgentConfig {
+                    agent_id: agent_id.to_owned(),
+                    local_path: request.local_path,
+                    force: request.force,
+                },
+                Some(client),
+            )
+            .await?;
+        match response {
+            NodeRpcResponse::AgentCapabilities { preview } => Ok(preview),
+            _ => Err(ApiError::internal("unexpected node RPC response")),
+        }
+    }
 
     /// `POST /api/v1/auth/rotate-token` (regenerate the client auth token).
     ///
