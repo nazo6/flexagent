@@ -1,8 +1,10 @@
-# 03. プロトコル・API・IPC仕様 (`fxg-protocol`)
+# 03. プロトコル・API仕様 (`fxg-protocol`)
 
-`crates/fxg-protocol` クレートに定義する共通データ型と、3つの通信経路（① Node ⇔
-Hub WebSocket、② Client ⇔ Hub/Node HTTP+WS、③ CLI ⇔ Node Local
-IPC）のプロトコル仕様です。 クライアント (UI / CLI) が直接扱う型には
+`crates/fxg-protocol` クレートに定義する共通データ型と、2つの通信経路（① Node ⇔
+Hub WebSocket/Stdio、② Client ⇔ Hub/Node HTTP+WS）のプロトコル仕様です。
+CLI (`fxg`) はローカルノード (`127.0.0.1:7860`) またはハブの HTTP REST API / WebSocket
+を直接利用し、プラットフォーム固有のローカルIPC (Named Pipe / UDS) は全廃されました。
+クライアント (UI / CLI) が直接扱う型には
 `#[derive(Serialize, Deserialize, specta::Type)]` + `#[specta(collect)]`
 を付与し、`ui/src/lib/generated/bindings.ts`（SvelteKit の
 `$lib/generated/bindings`）へTypeScriptの型定義を自動出力します（設定ファイル
@@ -79,7 +81,7 @@ pub enum UnifiedEventPayload {
         attachments: Vec<AttachmentMeta>,
         client_source: String,        // "cli" | "web" | "android" | "resume"
     },
-    /// プロンプト入力（IPC / Client WS / Node⇔Hub / REST 共通）
+    /// プロンプト入力（Client WS / Node⇔Hub / REST 共通）
     PromptInput {
         text: String,
         attachments: Vec<AttachmentMeta>,
@@ -409,8 +411,7 @@ pub enum ErrorCode {
   `RespondElicitation`, `ControlSession`。結果は `CommandResult` で返します。
 - **汎用 Node RPC**: 上記以外のノード操作は `HubToNodeMsg::NodeRpc` と
   `NodeToHubMsg::NodeRpcResult` の1組に集約します。
-- **ライフサイクル**: `GitCredentialRequest` / `GitCredentialResponse`,
-  `DrainAndShutdown`, `DrainComplete`, `KillAllSessions`
+- **ライフサイクル**: `DrainAndShutdown`, `DrainComplete`, `KillAllSessions`
 
 常駐ノードと一時VMノードは、トランスポート層が異なるだけで**100%同一のメッセージ型
 (`NodeToHubMsg` / `HubToNodeMsg`)** を共有します：
@@ -427,9 +428,8 @@ pub enum ErrorCode {
     `incus`, `uvx google-colab-cli`, `ssh` 等）の **`stdout`
     (`NodeToHubMsg`)** および **`stdin` (`HubToNodeMsg`)**
   - **フレーミング**: JSON
-    Lines（1メッセージ1行の改行区切りJSON）。ブートストラップや `mise` / `uv`
-    によるツール導入ログはすべて **`stderr`** に出力され、`BootstrapLog`
-    イベントとしてUIへストリーム配信されます。
+    Lines（1メッセージ1行の改行区切りJSON）。初期化ログや診断メッセージはすべて
+    **`stderr`** に出力され、`BootstrapLog` イベントとしてUIへストリーム配信されます。
 
 ### 2.3 汎用 Node RPC
 
@@ -592,11 +592,6 @@ pub enum NodeToHubMsg {
     PtyOutput { pty_id: String, data_b64: String },
     PtyExit { pty_id: String, exit_code: Option<i32> },
     PtyError { pty_id: String, code: String, message: String },
-    GitCredentialRequest {
-        request_id: String,
-        repo_url: String,
-        operation: String,
-    },
     DrainComplete { node_id: NodeId },
 }
 
@@ -660,12 +655,6 @@ pub enum HubToNodeMsg {
     PtyInput { pty_id: String, data_b64: String },
     PtyResize { pty_id: String, cols: u16, rows: u16 },
     PtyKill { pty_id: String },
-    GitCredentialResponse {
-        request_id: String,
-        username: String,
-        token: Option<String>,
-        error: Option<String>,
-    },
     DrainAndShutdown { reason: String },
     KillAllSessions { reason: String },
 }
@@ -803,8 +792,6 @@ pub enum HubToNodeMsg {
   セッションを閉じる。FXG の `sessions` 行は作らない。ノードは
   `(agent_id, local_path)` 単位で約10分キャッシュし、同時実行は直列化する。
   認証が必要な場合は通常の `AUTH_REQUIRED` を返す。
-- `GET/PUT /api/v1/projects/:project_id/profile`: 一時VM用 Bootstrap プロファイル
-  (`hub.db.project_profiles`)。
 - `GET /api/v1/provisioners`:
   利用可能な一時VM・サンドボックスプロビジョナー一覧（`local-docker`,
   `local-incus`, `colab-pro` 等）を返却。
@@ -819,8 +806,22 @@ pub enum HubToNodeMsg {
   `include_archived=true` 指定時のみ返却される (既定は除外)。
 - `POST /api/v1/sessions`: 新規セッションの開始（既存の常駐 `node_id`
   指定のほか、`provisioner`
-  指定による一時VMのオンデマンド起動＆自動セットアップ、Worktreeパス指定、
+  指定による一時VMのオンデマンド起動、Worktreeパス指定、
   同一ノード・同一エージェントのACPネイティブForkに対応）。
+- `GET /api/v1/sessions/:id`:
+  セッション詳細情報（ステータス、設定、参加エージェント、Worktree等）の取得 (`SessionDetail`)。
+- `POST /api/v1/sessions/:id/prompt`:
+  セッションへのプロンプト送信 (`PromptInput`, `client_source: ClientSource`)。応答は `CommandResult`。
+- `POST /api/v1/sessions/:id/control`:
+  セッション制御 (`action: SessionControlAction` 例: `abort`, `pause`)。応答は `CommandResult`。
+- `POST /api/v1/sessions/import`:
+  外部 ACP セッションやトランスクリプトのインポート。応答は `SessionImportResponse`。
+- `GET /api/v1/projects/:project_id/worktrees`:
+  プロジェクトの Worktree 一覧取得 (`WorktreeListResponse`)。
+- `POST /api/v1/projects/:project_id/worktrees`:
+  新規 Worktree の作成・追加 (`{ branch, new_branch? }`)。
+- `DELETE /api/v1/projects/:project_id/worktrees/:worktree_id`:
+  指定 Worktree の削除。
 - `GET /api/v1/sessions/:id/events?after_cursor=0`:
   指定カーソル以降のイベント履歴取得（`SessionEventBatch` を返却）。
 - `GET /api/v1/sessions/:id/diff?scope=uncommitted&base=main`:
@@ -988,74 +989,44 @@ xterm互換アダプター）とノード上の ConPTY / Unix PTY
 
 ---
 
-## 4. CLI (`fxg`) ⇔ Local Node (`fxg node`) 間 ローカルIPC
+## 4. CLI (`fxg`) ⇔ Local Node (`fxg node`) 間 ローカル通信 (HTTP REST / WebSocket)
 
-- **トランスポート**:
-  - **Windows**: Named Pipe (`\\.\pipe\fxg-node-<username>`)
-  - **Linux / macOS / WSL**: Unix Domain Socket
-    (`$XDG_RUNTIME_DIR/fxg/node.sock` または `/tmp/fxg-<uid>/node.sock`)
-- **フレーミング**: Length-prefixed JSON（4バイトのリトルエンディアン長さヘッダ
-  ＋ JSONペイロード）
-- **バージョン**: 各リクエストは `protocol_version` を持ち、ノードは
-  `IPC_PROTOCOL_VERSION` と一致しない場合に `VERSION_MISMATCH` を返して接続を
-  閉じる。CLI とノードは同一 `fxg` バイナリで動作する前提。
+プラットフォーム固有のローカルIPC（Windows Named Pipe / Unix Domain Socket）および長さプレフィックス付き独自バイナリ/JSONフレーミングは**全廃**され、ローカルノードのループバック HTTP サーバー (`http://127.0.0.1:7860`) に一本化されました。
 
-### 4.1 リクエスト / レスポンス
+これにより、CLI (`fxg`)、PC ブラウザ、スマホ PWA のすべてが同一の REST API と WebSocket プロトコルを共有し、重複したルーティング・メッセージ定義・保守コストが完全に排除されます。
 
-```rust
-pub struct IpcRequest {
-    pub protocol_version: u32,
-    pub request_id: CommandId,
-    pub request: IpcRequestKind,
-}
+### 4.1 通信仕様と認証
 
-pub enum IpcRequestKind {
-    /// Hub ⇔ Node と同じ型をローカルで実行する
-    Node { request: NodeRpcRequest },
-    /// CLI 専用のクエリ / セッション操作
-    Local { request: LocalRequest },
-}
+- **接続先**:
+  - デフォルト: `http://127.0.0.1:7860`（ローカルループバック限定）
+  - 環境変数: `FXG_NODE_URL` または `FXG_HUB_URL` でオーバーライド可能
+- **認証**:
+  - ローカルノード初回起動時に生成される `~/.flexagent/auth_token` のトークン値を読み取り、`Authorization: Bearer <AUTH_TOKEN>` ヘッダを付与してリクエストを行います。
+- **未起動時のハンドリング**:
+  - ノードが起動していない（接続拒否など）場合は、`fxg node start` を案内するか、自動起動（バックグラウンド起動）を試行します。
 
-pub enum IpcOutcome {
-    Ok { result: IpcResultKind },
-    Err { error: ErrorInfo },
-}
+### 4.2 CLI コマンドと REST / WS エンドポイント対応表
 
-pub enum IpcResultKind {
-    Node { response: NodeRpcResponse },
-    Local { result: LocalResult },
-}
-```
+| CLI コマンド          | 使用する REST / WS エンドポイント                       | 説明                                         |
+| :-------------------- | :------------------------------------------------------ | :------------------------------------------- |
+| `fxg session new`     | `POST /api/v1/sessions`                                 | 新規セッション開始（ACP 起動）               |
+| `fxg session prompt`  | `POST /api/v1/sessions/:id/prompt`                      | プロンプト送信（リアルタイム出力は WS 購読） |
+| `fxg session list`    | `GET /api/v1/sessions`                                  | セッション一覧取得                           |
+| `fxg session show`    | `GET /api/v1/sessions/:id`                              | セッション詳細・状態取得                     |
+| `fxg session resume`  | `POST /api/v1/sessions/:id/resume`                      | 停止セッションの再開                         |
+| `fxg session archive` | `POST /api/v1/sessions/:id/archive`                     | セッションのアーカイブ/復元                  |
+| `fxg session delete`  | `DELETE /api/v1/sessions/:id`                           | セッション削除                               |
+| `fxg session diff`    | `GET /api/v1/sessions/:id/diff`                         | 作業ツリー差分取得                           |
+| `fxg session import`  | `POST /api/v1/sessions/import`                          | 外部セッションのインポート                   |
+| `fxg inbox`           | `GET /api/v1/inbox`                                     | 未解決リクエスト一覧                         |
+| `fxg inbox respond`   | `POST /api/v1/sessions/:id/permissions/:req_id/respond` | ツール実行承認/拒否                          |
+| `fxg worktree ...`    | `GET / POST / DELETE /api/v1/projects/:id/worktrees`    | Worktree 操作                                |
+| `fxg status`          | `GET /api/v1/meta` および `GET /api/v1/sessions`        | ノード稼働状態・稼働セッション取得           |
+| リアルタイム出力      | `/api/v1/client/ws`                                     | トークン単位のリアルタイム出力購読           |
 
-ノードは `IpcServerMessage::Response { request_id, outcome }` で応答する。
-`EventBatch` / `LiveStreamDelta` は従来どおり非同期でプッシュされる。
+### 4.3 廃止された IPC 関連コンポーネント
 
-### 4.2 NodeRpc として実行する操作
-
-以下は `HubToNodeMsg::NodeRpc` と同一の `NodeRpcRequest` /
-`NodeRpcResponse` を使う。ノードはネットワークを介さずインプロセスで
-`rpc::execute` を呼ぶ。
-
-- `ProjectLink`
-- `ProjectScan`
-- `ResumeSession`
-- `ArchiveSession`
-- `DeleteSession`
-
-エラーは `NodeRpcOutcome` と同じ `ErrorInfo` で返り、CLI 側も
-`ErrorCode` / `RecoveryAction` を受け取れる。
-
-### 4.3 CLI 専用操作 (`LocalRequest`)
-
-- **セッション**: `EnsureSession`, `SessionImport`, `SendPrompt`,
-  `RespondPermission`, `RespondElicitation`, `ControlSession`,
-  `SessionFork`, `SessionShow`
-- **照会**: `GetLocalStatus`, `Diagnostics`, `InboxList`, `ListSessions`
-- **プロジェクト**: `ProjectInfo`, `ProjectList`
-- **Worktree**: `WorktreeList`, `WorktreeAdd`, `WorktreeRemove`,
-  `WorktreePrune`（`cwd` から論理プロジェクトを解決するため CLI 専用）
-- **管理**: `KillAll`, `AuthToken`, `GitCredential`, `Ping`
-
-セッションコマンドは、Node ⇔ Hub 側の `CommandResult` と共通化する
-A1.5（保留）の完了後に `NodeRpcRequest` へ移行する余地を残している。
-Worktree 操作は `cwd` 解決が必要なため、現時点ではローカルに残す。
+- `crates/fxg-protocol/src/ipc.rs`（`IpcRequest`, `IpcRequestKind`, `LocalRequest`, `IpcResponse` 等）
+- `crates/fxg-node/src/daemon/ipc.rs`（Windows Named Pipe / Unix Domain Socket サーバー）
+- `crates/fxg-cli/src/client.rs`（IPC クライアントおよびフレーミング処理）
+- `fxg internal git-askpass` 用のローカル IPC リレー機構

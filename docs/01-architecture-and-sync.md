@@ -27,12 +27,10 @@ flowchart TB
 
     subgraph Node["常駐ノード (`fxg node start` on Win / Mac / Linux / WSL)"]
         LocalAPI["Local HTTP/WS Server (:7860)<br/>(127.0.0.1 ループバック専用 + Token)"]
-        LocalIPC["Local IPC Server<br/>(Named Pipe / Unix Socket)"]
         SyncWorker["Outbox Sync Worker<br/>(Outbound WS Client)"]
         SessionMgr["Session & Agent Manager"]
         NodeDB[("node.db (SQLite)<br/>hub.db と同一スキーマ")]
 
-        LocalIPC --> SessionMgr
         LocalAPI --> SessionMgr
         SessionMgr --> NodeDB
         NodeDB --> SyncWorker
@@ -40,11 +38,11 @@ flowchart TB
 
     subgraph EphemeralNode["一時VM / サンドボックスノード (Docker / Incus / Colab Pro)"]
         EphNode["fxg internal stdio --ephemeral"]
-        EphAgent["Session & Agent Manager<br/>(+ mise / uv 自動ツール環境)"]
+        EphAgent["Session & Agent Manager<br/>(外部事前構築済みツール環境)"]
         EphNode <--> EphAgent
     end
 
-    CLI <-->|"1. Named Pipe / UDS (最優先・超低遅延)"| LocalIPC
+    CLI <-->|"1. Local HTTP REST / WS (127.0.0.1:7860)"| LocalAPI
     Browser <-->|"2a. 通常時: LANハブ接続 (:8080)"| HubAPI
     Browser -.->|"2b. 障害時・同一PCローカル直結 (127.0.0.1:7860)"| LocalAPI
     AndroidPWA <-->|"LAN / VPN (Tailscale等) 経由 WS / Push"| HubAPI
@@ -128,7 +126,7 @@ sequenceDiagram
 
     Agent->>Node: SessionUpdate (ストリーミング出力)
     Node->>NodeDB: INSERT session_events (node_seq=N) + sessions 更新
-    Node->>LocalClient: 即座にIPC / Local WSへ配信 (遅延ゼロ)
+    Node->>LocalClient: 即座にLocal WSへ配信 (遅延ゼロ)
 
     alt ハブ接続中 (Online)
         Node->>Hub: WS: EventBatchPush (synced_up_to_node_seq より後のイベント)
@@ -156,8 +154,7 @@ sequenceDiagram
 は「配信」と「永続化」を分離して処理します：
 
 1. **メモリ上のリアルタイム配信（全チャンク）**:
-   チャンクが到着した瞬間、メモリ上のブロードキャストチャネルを通じてローカルIPC
-   / Local
+   チャンクが到着した瞬間、メモリ上のブロードキャストチャネルを通じて Local
    WS（CLI・ローカルUI）およびハブWebSocket（`LiveStreamDelta`）へ**リアルタイム（遅延なし）**でそのまま流します。この経路はDBを経由しません。
 2. **SQLiteへの永続化（ターン完了時のみ）**:
    ストリーミング途中（`is_complete = false`）の中間状態は永続化しません。**ターン完了時に完成したイベント（`is_complete = true`）のみ**を、`node_seq`
@@ -419,91 +416,35 @@ sequenceDiagram
 
 `ProvisionerDefinition` は次の項目を持ちます。
 
-| 項目                | 説明                                                                   |
-| :------------------ | :--------------------------------------------------------------------- |
-| `name`              | プロビジョナー名 (`local-docker` / `colab-pro` 等)                     |
-| `description`       | UI に表示する説明                                                      |
-| `command`           | 実行するコマンド (`docker` / `incus` / `uvx` / `ssh` 等)               |
-| `args`              | 引数。`{BOOTSTRAP_SCRIPT}` / `{INSTANCE_NAME}` / `{SESSION_ID}` を置換 |
-| `idle_timeout_secs` | アイドル状態のインスタンスを破棄するまでの秒数                         |
-| `env`               | 子プロセスへ注入する環境変数                                           |
+| 項目                | 説明                                                     |
+| :------------------ | :------------------------------------------------------- |
+| `name`              | プロビジョナー名 (`local-docker` / `colab-pro` 等)       |
+| `description`       | UI に表示する説明                                        |
+| `command`           | 実行するコマンド (`docker` / `incus` / `uvx` / `ssh` 等) |
+| `args`              | 引数。`{INSTANCE_NAME}` / `{SESSION_ID}` を置換          |
+| `idle_timeout_secs` | アイドル状態のインスタンスを破棄するまでの秒数           |
+| `env`               | 子プロセスへ注入する環境変数                             |
 
 Docker / Incus / Google Colab Pro の代表的な定義は Web UI のプリセットとして
 提供されます。
 
-### 6.3 Zero-Touch 自動ツールセットアップ (`stderr` ログ分離 + `mise` / `uv`)
+### 6.3 外部環境でのツールセットアップと標準入出力の保護 (`stderr` ログ分離)
 
-手動での環境構築を一切不要にするため、`{BOOTSTRAP_SCRIPT}`
-内では以下の手順が全自動で実行されます。この際、**セットアップの出力はすべて
-`stderr` (`>&2`) にリダイレクト**し、`stdout` は `fxg internal stdio`
-のプロトコル通信専用に保護します。
+プロビジョナーが起動するコンテナやVM内でのツールチェイン（言語ランタイム、ビルドツール、パッケージマネージャ）のセットアップは、**DockerイメージやVMテンプレート、またはプロビジョナー起動コマンド自身によって事前構築・外部管理**されます。`fxg` 自身はツールマネージャ（`mise` / `uv` 等）の自動ダウンロードやシェルスクリプトの動的合成を行いません。
 
-```bash
-# 自動生成されるブートストラップ処理の流れ
-set -eu
-{
-  echo "[fxg-bootstrap] Installing fxg & mise..."
-  curl -fsSL https://github.com/nazo6/flexagent/releases/latest/download/fxg-linux-x86_64 -o /tmp/fxg
-  chmod +x /tmp/fxg
-  /tmp/fxg internal bootstrap-workspace --repo "$FXG_GIT_URL" --branch "$FXG_GIT_BRANCH" --dir /tmp/workspace
-} >&2
+- **`stdout` と `stderr` の厳格な分離**:
+  - `fxg internal stdio` は `stdin` / `stdout` を `NodeToHubMsg` / `HubToNodeMsg`（JSON Lines）のプロトコル通信専用に使用します。
+  - プロビジョナー起動時やコンテナ立ち上げ時の初期化ログ、診断メッセージはすべて `stderr` (`>&2`) に出力することで、プロトコルストリームの破壊を防ぎます。
+- **ワークスペース準備の責務分離**:
+  - 対象リポジトリの配置やクローンが必要な場合、プロビジョナーの起動コマンド（コンテナのエントリポイント等）または環境変数（`FXG_GIT_URL` / `FXG_GIT_BRANCH` 等）を用いてコンテナ/VM側で解決します。
+  - 準備完了後、直接 `fxg internal stdio --ephemeral --workspace <path>` を起動します。
 
-# セットアップ完了後、stdout/stdin を用いてノード通信を開始
-exec /tmp/fxg internal stdio --ephemeral --workspace /tmp/workspace
-```
+### 6.4 環境変数による Git 認証と破棄前の成果物退避
 
-- **ブートストラップ時の環境変数注入**: プロビジョナー起動時に `fxg hub` が
-  `FXG_GIT_URL` / `FXG_GIT_BRANCH` および**短命の `FXG_GIT_TOKEN`**
-  を環境変数として注入します。 ノード起動前の
-  `git clone`（`internal bootstrap-workspace` 内）は、`internal bootstrap-workspace`
-  が内部で生成する `GIT_ASKPASS` ヘルパー経由で `FXG_GIT_TOKEN` を Git
-  に渡します（URL へのトークン埋め込みは行わない）。 トークンは一時VMの
-  Drain・プロセス終了とともに失効します。ノード起動後（`exec fxg internal stdio`
-  以降）は §6.4 の `GIT_ASKPASS` プロキシ（stdio パイプ経由の
-  `GitCredentialRequest`）に切り替わります。
-
-#### `fxg internal bootstrap-workspace` が自動で行うこと
-
-1. **スタンドアロンツールマネージャ (`mise` / `uv`) の配置**:
-   - 単一バイナリである `mise` と `uv` を `~/.local/bin`
-     にプリビルド取得します（root権限・`apt` 不要、数秒で完了）。
-2. **リポジトリの構成ファイルからのゼロコンフィグ自動導入**:
-   - クローンしたリポジトリのルートを検査し、設定ファイルが存在すれば対応するツールチェインのプリビルドバイナリを
-     `mise install --yes` で自動導入します：
-     - `Cargo.toml` / `rust-toolchain.toml` ➔ `rust` (`cargo`, `rustc`)
-     - `package.json` / `.node-version` ➔ `node`（およびロックファイルに応じて
-       `pnpm` / `bun` / `yarn`）
-     - `pyproject.toml` / `.python-version` ➔ `uv` による Python
-       ランタイム＆仮想環境構築
-     - `mise.toml` / `.tool-versions` ➔ 記載された全ツール
-     - 標準必須CLI（`git`, `ripgrep`, `fd`, `jq`, `gh`）
-3. **プロジェクトプロファイルによる追加初期化（任意）**:
-   - ハブの `hub.db.project_profiles` に `bootstrap_setup` /
-     `bootstrap_env` を登録すると、追加の初期化コマンド
-     （例: `cargo fetch`, `pnpm install --frozen-lockfile`）を自動実行し、
-     環境変数を注入します。登録はハブの Web UI から行います。
-
-### 6.4 秘密情報をVMに残さない Git Credential Proxy と破棄前の成果物退避
-
-1. **Git Credential Proxy（VM内への秘密鍵・PAT配置ゼロ）**:
-   - 一時VMやColabのディスクに個人のSSH秘密鍵や恒久的なGitHub
-     PATを保存しません。
-   - **ブートストラップ中**（ノード起動前）: §6.3
-     のとおり、プロビジョナー起動時に注入された短命 `FXG_GIT_TOKEN` を
-     `bootstrap-workspace` の `GIT_ASKPASS`
-     ヘルパー経由で使用します（環境変数はオンメモリで扱い、ディスクには残さない）。
-   - **ノード起動後**: `fxg internal stdio` は自分自身を `GIT_ASKPASS`（および
-     Git credential helper）として設定します。VM内で `git clone` / `git fetch` /
-     `git push` が走ると、すでに繋がっている `stdio` パイプ上で
-     `NodeToHubMsg::GitCredentialRequest`
-     をハブへ送り、ハブから対象リポジトリの認証トークンをオンメモリで受け取ってGitへ渡します。
-     - **実装**: ノードはエージェントプロセスへ `GIT_ASKPASS`
-       （`~/.flexagent/git-askpass.sh` → `fxg internal git-askpass <prompt>`）と
-       `GIT_TERMINAL_PROMPT=0` を注入する。ヘルパーはローカルIPC でノードへ
-       問い合わせ、ノードが Node ⇔ Hub 接続（WS / stdio 共通）上で
-       `GitCredentialRequest` を中継する。トークンは
-       `[hub.git_credentials.<host>]`（`provider = "gh_cli" | "env"`）
-       からハブ側で解決する。
+1. **環境変数による Git 認証 (外部注入方式)**:
+   - Git 認証のための `GIT_ASKPASS` ヘルパーコマンド（`fxg internal git-askpass`）や、Node ⇔ Hub 間の `GitCredentialRequest` / `GitCredentialResponse` プロキシ機構は設けていません。
+   - 一時VMやコンテナ環境で Git 操作を行う場合、プロビジョナー定義の `env` 経由で標準的な環境変数（例: GitHub CLI / Git で認識される `GH_TOKEN`, `GITHUB_TOKEN`, `FXG_GIT_TOKEN`）を直接プロセスに渡すか、コンテナ内の設定を利用します。
+   - 常駐ノード（`fxg node`）でも開発者自身の既存の Git 認証（SSH 鍵、Git Credential Manager 等）がそのまま透過的に利用されます。
 2. **破棄前の Graceful Drain（ベストエフォート）**:
    - 一時VM内のイベントは VM 内の `node.db` に蓄積し、終了時にハブから
      `HubToNodeMsg::DrainAndShutdown`
@@ -516,9 +457,8 @@ exec /tmp/fxg internal stdio --ephemeral --workspace /tmp/workspace
      `DrainComplete` を送信し、ハブが子プロセス/VMを破棄します。
    - ワークスペースの退避（Git bundle）と、別ノードへの Context Fork は行いません。
      一時VMセッションの再開・引き継ぎは v2 の将来拡張です。
-   - **仮セッション投影**: ブートストラップ中（`NodeHello` 前）も UI
-     にセッションを
-     見せるため、ハブは `sessions` 行を `status = 'provisioning'`
+   - **仮セッション投影**: プロビジョニング中（`NodeHello` 前）も UI
+     にセッションを見せるため、ハブは `sessions` 行を `status = 'provisioning'`
      で先行挿入する（イベントではなく投影行。ノードの `SessionCreated`
      が派生カラムを上書きする。書き込み権威の一元化は維持）。
 

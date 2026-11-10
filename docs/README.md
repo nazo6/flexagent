@@ -25,13 +25,12 @@ Protocol）対応コーディングエージェントを「好きな場所から
    - 個人・単一テナントのセルフホストに特化することで、ハブのSQLite
      (FTS5) による全セッション横断検索や、軽量な差分同期を実現します。
 5. **ファーストクラスのWindowsサポート**:
-   - `tmux` に依存しない Named Pipe マルチプレクシング、ConPTY、Windows Job
-     Object によるプロセスツリー確実終了、`PATHEXT`
-     解決を備えます（WSL環境はWSL内にLinux版 `fxg`
+   - ConPTY、Windows Job Object によるプロセスツリー確実終了、`PATHEXT`
+     解決、`dunce::canonicalize` によるパス正規化を備えます（WSL環境はWSL内にLinux版 `fxg`
      ノードを配置して別ノードとして統合）。
 6. **LAN/VPN限定運用とブラウザ攻撃防御 (Defense in Depth)**:
    - ハブはLAN/プライベートVPN（Tailscale等）限定公開を前提とし、ノードは
-     `127.0.0.1`
+     `127.0.0.1:7860`
      のみにバインド。暗号論的トークン認証、Host/Originヘッダ検証（DNS
      Rebinding/CSWSH対策）、リモートPTY制御、および緊急キルスイッチ（Panic
      Button）を標準装備します。
@@ -39,9 +38,7 @@ Protocol）対応コーディングエージェントを「好きな場所から
    - 自前サーバー上の権限分離環境（Docker / Rootless Podman / Incus VM）や
      **Google Colab Pro (`google-colab-cli`)**
      などをオンデマンドにスポーンし、**標準入出力パイプ (`stdin/stdout`)
-     上のJSON通信**で直結します。特定VPN（Tailscale等）へのロックインやポート開放を一切不要とし、`mise`
-     / `uv`
-     による完全ステートレスな自動ツール構築と破棄前のGit成果物退避を備えます。
+     上のJSON通信**で直結します。特定VPN（Tailscale等）へのロックインやポート開放を一切不要とし、環境セットアップはDockerfileやVM環境側で事前に用意することで高速・安全な完全ステートレス運用を実現します。
 
 ---
 
@@ -72,7 +69,7 @@ flexagent/
 │   ├── fxg-db/                 # SQLiteスキーマ管理・クエリレイヤー (hub.db / node.db 共用・分離)
 │   ├── fxg-pty/                # ConPTY/Unix PTY・Windows Job Object・プロセスツリー管理
 │   ├── fxg-acp/                # ACP Registry管理・AcpDriver・ローカル PATH コマンド解決
-│   ├── fxg-node/               # ノード実装 (ローカルIPC・ローカルWeb配信・Outbox同期・Project解決)
+│   ├── fxg-node/               # ノード実装 (ローカルWeb/WS配信・Outbox同期・Project解決)
 │   ├── fxg-hub/                # ハブ実装 (Axum・ノード管理・イベント集約・Web Push・PWA配信)
 │   └── fxg-cli/                # `fxg` バイナリエントリポイント (CLI / node / hub サブコマンド・Web UI自動オープン)
 └── ui/                         # 共通フロントエンド (SvelteKit / Svelte 5 SPA + TypeScript + Tailwind v4 + shadcn-svelte)

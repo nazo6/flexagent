@@ -340,8 +340,7 @@ CREATE INDEX idx_incidents_last_seen ON incidents(last_seen_at DESC);
 
 - `node.db`: `node_settings` / `agent_settings` / `agent_aliases` /
   `custom_agents` / `enabled_package_agents` / `project_path_links`
-- `hub.db`: `hub_settings` / `git_credentials` / `provisioners` /
-  `project_profiles`
+- `hub.db`: `hub_settings` / `provisioners` (※ `git_credentials` および `project_profiles` はアーキテクチャ簡素化により廃止)
 - 共通: `secrets` (秘密の **メタデータ** のみ。値は
   `~/.flexagent/secrets/{node,hub}/<id>` に `0600` で保存)
 
