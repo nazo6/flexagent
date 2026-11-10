@@ -151,6 +151,10 @@
   }
 </script>
 
+<svelte:head>
+  <title>{m.settings_page_title()}</title>
+</svelte:head>
+
 <div class="desk-page">
   <div class="flex flex-col gap-1">
     <h1 class="text-xl font-semibold tracking-tight">{m.settings_title()}</h1>

@@ -25,6 +25,10 @@
   }
 </script>
 
+<svelte:head>
+  <title>{m.inbox_page_title()}</title>
+</svelte:head>
+
 <div class="desk-page">
   <div class="flex flex-wrap items-end justify-between gap-3">
     <div class="flex flex-col gap-1">

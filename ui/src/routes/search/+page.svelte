@@ -56,6 +56,10 @@
   }
 </script>
 
+<svelte:head>
+  <title>{m.search_page_title()}</title>
+</svelte:head>
+
 <div class="desk-page">
   <div class="flex flex-col gap-1">
     <h1 class="text-xl font-semibold tracking-tight">{m.search_title()}</h1>
