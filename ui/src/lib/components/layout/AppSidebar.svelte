@@ -1,6 +1,7 @@
 <script lang="ts">
   import { page } from "$app/state";
   import { Badge } from "#lib/components/ui/badge/index.ts";
+  import * as Tooltip from "#lib/components/ui/tooltip/index.ts";
   import { formatRelativeTimeCompact } from "#lib/format.ts";
   import { getNodeAvailability } from "#lib/node-status.ts";
   import { pinned } from "#lib/stores/pinned.svelte.ts";
@@ -19,6 +20,8 @@
   import ChevronDownIcon from "@lucide/svelte/icons/chevron-down";
   import ChevronRightIcon from "@lucide/svelte/icons/chevron-right";
   import FolderGit2Icon from "@lucide/svelte/icons/folder-git-2";
+  import FolderIcon from "@lucide/svelte/icons/folder";
+  import GitBranchIcon from "@lucide/svelte/icons/git-branch";
   import InboxIcon from "@lucide/svelte/icons/inbox";
   import PinIcon from "@lucide/svelte/icons/pin";
   import PlusIcon from "@lucide/svelte/icons/plus";
@@ -308,7 +311,7 @@
         {#if showAttentionSection}
           <ul class="flex list-none flex-col gap-0.5 p-0 mt-1">
             {#each needsAttentionSessions as session (session.session_id)}
-              {@render sessionRow(session, true)}
+              {@render sessionRow(session)}
             {/each}
           </ul>
         {/if}
@@ -377,7 +380,7 @@
                 class="ml-2.5 border-l border-border/60 pl-2 flex list-none flex-col gap-0.5 p-0 mt-0.5"
               >
                 {#each group.sessions as session (session.session_id)}
-                  {@render sessionRow(session, false)}
+                  {@render sessionRow(session)}
                 {/each}
                 {#if group.sessions.length === 0}
                   <li class="py-1 px-1.5 text-[11px] text-muted-foreground">
@@ -423,7 +426,7 @@
         {#if showArchivedSection}
           <ul class="mt-1 flex list-none flex-col gap-0.5 p-0">
             {#each archivedSessions as session (session.session_id)}
-              {@render sessionRow(session, true)}
+              {@render sessionRow(session)}
             {/each}
           </ul>
         {/if}
@@ -441,78 +444,98 @@
   </div>
 </aside>
 
-{#snippet sessionRow(session: SessionSummary, showProjectBadge: boolean)}
+{#snippet sessionRow(session: SessionSummary)}
   {@const isActive = activeSessionId === session.session_id}
   {@const isArchived = session.archived_at !== null}
   {@const node = getNode(session.node_id)}
   {@const nodeAvail = getNodeAvailability(node)}
   {@const isPinned = pinned.isPinned(session.session_id)}
   <li>
-    <a
-      href={`/sessions/${session.session_id}`}
-      onclick={handleLinkClick}
-      title={`${session.title}${isArchived ? ` (${m.shell_archived()})` : ""}\n${m.shell_working_directory({ path: session.local_path })}\n${m.shell_node_label({ node: node?.name ?? session.node_id })}`}
-      class={cn(
-        "group flex items-center justify-between rounded-md px-2 py-1.5 text-[13px] transition-colors",
-        isActive
-          ? "bg-accent text-foreground shadow-[inset_2px_0_0_0_var(--signal)] font-medium"
-          : "text-foreground/80 hover:bg-accent/40 hover:text-foreground",
-        isArchived && "opacity-70",
-      )}
-    >
-      <div class="flex min-w-0 flex-1 items-center gap-2">
-        <!-- Node status dot -->
-        <span
-          class={cn("size-1.5 shrink-0 rounded-full", nodeAvail.dotColorClass)}
-          title={m.shell_node_status({
-            node: node?.name ?? session.node_id,
-            status: nodeAvail.statusText,
-          })}
-        ></span>
+    <Tooltip.Provider delayDuration={400}>
+      <Tooltip.Root>
+        <Tooltip.Trigger>
+          {#snippet child({ props })}
+            <a
+              {...props}
+              href={`/sessions/${session.session_id}`}
+              onclick={handleLinkClick}
+              class={cn(
+                "group flex items-center justify-between gap-2 rounded-md px-2 py-1.5 text-[13px] transition-colors",
+                isActive
+                  ? "bg-accent text-foreground shadow-[inset_2px_0_0_0_var(--signal)] font-medium"
+                  : "text-foreground/80 hover:bg-accent/40 hover:text-foreground",
+                isArchived && "opacity-70",
+              )}
+            >
+              <!-- Node status dot -->
+              <span class={cn("size-1.5 shrink-0 rounded-full", nodeAvail.dotColorClass)}></span>
 
-        <div class="flex min-w-0 flex-1 items-center gap-1">
-          {#if showProjectBadge}
-            <span class="text-muted-foreground text-[11px] shrink-0 font-medium truncate max-w-16">
-              [{session.project_id}]
-            </span>
-          {/if}
-          {#if session.git_branch}
-            <span class="text-muted-foreground text-[11px] shrink-0 font-mono">
-              ({session.git_branch})
-            </span>
-          {/if}
-          <!-- Title -->
-          <span class="truncate">{session.title}</span>
-        </div>
-      </div>
+              <!-- Title -->
+              <span class="min-w-0 flex-1 truncate">{session.title}</span>
 
-      <div class="ml-2 flex shrink-0 items-center gap-1.5 text-muted-foreground text-[11px]">
-        <!-- Archive / delete menu -->
-        <SessionActionsMenu
-          {session}
-          align="end"
-          buttonClass="opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
-        />
+              <div class="flex shrink-0 items-center gap-1.5 text-muted-foreground text-[11px]">
+                <!-- Archive / delete menu -->
+                <SessionActionsMenu
+                  {session}
+                  align="end"
+                  buttonClass="opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+                />
 
-        <!-- Pin button -->
-        <button
-          type="button"
-          class={cn(
-            "hover:text-foreground p-0.5 transition-opacity",
-            isPinned ? "opacity-100 text-signal" : "opacity-0 group-hover:opacity-100",
-          )}
-          title={isPinned ? m.shell_unpin() : m.shell_pin()}
-          onclick={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            pinned.toggle(session.session_id);
-          }}
+                <!-- Pin button -->
+                <button
+                  type="button"
+                  class={cn(
+                    "hover:text-foreground p-0.5 transition-opacity",
+                    isPinned ? "opacity-100 text-signal" : "opacity-0 group-hover:opacity-100",
+                  )}
+                  title={isPinned ? m.shell_unpin() : m.shell_pin()}
+                  onclick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    pinned.toggle(session.session_id);
+                  }}
+                >
+                  <PinIcon class="size-3" fill={isPinned ? "currentColor" : "none"} />
+                </button>
+
+                <span>{formatRelativeTimeCompact(session.updated_at)}</span>
+              </div>
+            </a>
+          {/snippet}
+        </Tooltip.Trigger>
+        <Tooltip.Content
+          side="right"
+          align="start"
+          class="max-w-[300px] flex-col items-stretch gap-1.5 px-2.5 py-2 text-left leading-snug"
         >
-          <PinIcon class="size-3" fill={isPinned ? "currentColor" : "none"} />
-        </button>
-
-        <span>{formatRelativeTimeCompact(session.updated_at)}</span>
-      </div>
-    </a>
+          <span class="font-medium break-words">
+            {`${session.title}${isArchived ? ` (${m.shell_archived()})` : ""}`}
+          </span>
+          <span class="text-background/70 flex items-center gap-1.5">
+            <FolderGit2Icon class="size-3 shrink-0" />
+            <span class="truncate">{session.project_id}</span>
+          </span>
+          {#if session.git_branch}
+            <span class="text-background/70 flex items-center gap-1.5">
+              <GitBranchIcon class="size-3 shrink-0" />
+              <span class="truncate font-mono">{session.git_branch}</span>
+            </span>
+          {/if}
+          <span class="text-background/70 flex items-start gap-1.5">
+            <FolderIcon class="mt-0.5 size-3 shrink-0" />
+            <span class="font-mono text-[11px] break-all">{session.local_path}</span>
+          </span>
+          <span class="text-background/70 flex items-center gap-1.5">
+            <span class={cn("size-1.5 shrink-0 rounded-full", nodeAvail.dotColorClass)}></span>
+            <span class="truncate">
+              {m.shell_node_status({
+                node: node?.name ?? session.node_id,
+                status: nodeAvail.statusText,
+              })}
+            </span>
+          </span>
+        </Tooltip.Content>
+      </Tooltip.Root>
+    </Tooltip.Provider>
   </li>
 {/snippet}
