@@ -295,7 +295,7 @@ pub async fn delete_project_binding(
 
 /// Deletes bindings of other projects that share the same `(node_id, local_path)`.
 ///
-/// Used to avoid leaving old bindings when relinking a project (`fxg project link`).
+/// Used to avoid leaving old bindings when relinking a project (Web UI).
 /// Returns the number of deleted rows.
 pub async fn delete_other_project_bindings(
     pool: &SqlitePool,

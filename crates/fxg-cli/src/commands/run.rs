@@ -11,7 +11,6 @@ use usage::Args;
 
 use crate::client::DaemonClient;
 
-use super::project::*;
 use super::*;
 
 // ----------------------------------------------------------------------
@@ -198,7 +197,7 @@ async fn run_with_provisioner(
     };
     let response = server.create_session(&request).await?;
     eprintln!(
-        "provisioning session {} via '{provisioner}' (bootstrap logs are available in the Web UI / `fxg provisioners test`)",
+        "provisioning session {} via '{provisioner}' (bootstrap logs are available in the Web UI)",
         response.session_id
     );
     if args.detach {

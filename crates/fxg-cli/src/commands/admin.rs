@@ -6,122 +6,41 @@
 use std::path::PathBuf;
 
 use anyhow::{Context, Result, bail};
-use fxg_acp::registry::{AcpRegistry, AgentListEntry, LocalSource};
+use fxg_acp::registry::AcpRegistry;
 use fxg_protocol::common::AgentAuthMethodKind;
 use usage::Args;
 
-use crate::client::{DaemonClient, print_table, truncate};
+use crate::client::DaemonClient;
 
-use super::*;
+use super::node_db;
 
 // ----------------------------------------------------------------------
-// fxg provisioners list / test
+// fxg internal <command>
 // ----------------------------------------------------------------------
 
-/// `fxg provisioners <command>`
+/// Arguments of `fxg internal <command>`.
 #[derive(Debug, Args)]
 #[usage(run_async, arg_required_else_help)]
-pub struct ProvisionersArgs {
+pub struct InternalArgs {
     #[usage(subcommand)]
-    command: ProvisionersCommands,
+    command: InternalCommands,
 }
 
-/// Provisioner management subcommands.
+/// Internal commands invoked by Git, provisioners, or system integrations.
 #[derive(Debug, usage::Subcommands)]
 #[usage(run_async)]
-pub enum ProvisionersCommands {
-    /// List the ephemeral VM provisioners defined in the config file
-    List(ProvisionersListArgs),
-    /// Verify that a provisioner starts and completes the `fxg daemon --stdio` handshake
-    Test(ProvisionersTestArgs),
-}
-
-/// `fxg provisioners list`
-#[derive(Debug, Args)]
-pub struct ProvisionersListArgs {
-    /// Output as JSON
-    #[usage(long)]
-    json: bool,
-}
-
-impl usage::RunAsync for ProvisionersListArgs {
-    type Output = Result<()>;
-
-    async fn run_async(self) -> Self::Output {
-        let env = fxg_protocol::config::process_env;
-        let server = crate::server_api::ServerClient::from_config(&env)?;
-        let response = server.provisioners().await?;
-        let provisioners = response.provisioners;
-        if self.json {
-            println!("{}", serde_json::to_string_pretty(&provisioners)?);
-            return Ok(());
-        }
-        if provisioners.is_empty() {
-            println!("(no provisioners defined; edit them in the hub Web UI)");
-            return Ok(());
-        }
-        let rows: Vec<Vec<String>> = provisioners
-            .iter()
-            .map(|entry| {
-                vec![
-                    entry.name.clone(),
-                    entry.description.clone().unwrap_or_default(),
-                    entry.command.clone(),
-                    entry
-                        .idle_timeout_secs
-                        .map(|secs| format!("{secs}s"))
-                        .unwrap_or_else(|| "-".to_owned()),
-                ]
-            })
-            .collect();
-        print_table(&["NAME", "DESCRIPTION", "COMMAND", "IDLE"], &rows);
-        Ok(())
-    }
-}
-
-/// `fxg provisioners test <name>`
-#[derive(Debug, Args)]
-pub struct ProvisionersTestArgs {
-    /// Name of the provisioner to verify
-    name: String,
-}
-
-impl usage::RunAsync for ProvisionersTestArgs {
-    type Output = Result<()>;
-
-    async fn run_async(self) -> Self::Output {
-        let env = fxg_protocol::config::process_env;
-        let server = crate::server_api::ServerClient::from_config(&env)?;
-        eprintln!(
-            "testing provisioner '{}' via {} (bootstrap can take a few minutes)",
-            self.name,
-            server.base_url()
-        );
-        let response = server.provisioner_test(&self.name).await?;
-        for line in &response.log_lines {
-            eprintln!("  {line}");
-        }
-        if response.ok {
-            println!(
-                "ok: {} (node {})",
-                response.name,
-                response.node_id.as_ref().map_or("-", |id| id.as_str())
-            );
-            return Ok(());
-        }
-        bail!(
-            "provisioner '{}' failed: {}",
-            response.name,
-            response.error.as_deref().unwrap_or("unknown error")
-        );
-    }
+pub enum InternalCommands {
+    /// GIT_ASKPASS helper for the Git credential proxy
+    GitAskpass(GitAskpassArgs),
+    /// Zero-touch workspace bootstrap inside ephemeral VMs
+    BootstrapWorkspace(BootstrapWorkspaceArgs),
 }
 
 // ----------------------------------------------------------------------
-// fxg bootstrap-workspace
+// fxg internal bootstrap-workspace
 // ----------------------------------------------------------------------
 
-/// Arguments of `fxg bootstrap-workspace` (run by the provisioner inside an
+/// Arguments of `fxg internal bootstrap-workspace` (run by the provisioner inside an
 /// ephemeral VM).
 #[derive(Debug, Args)]
 pub struct BootstrapWorkspaceArgs {
@@ -185,7 +104,7 @@ impl usage::RunAsync for BootstrapWorkspaceArgs {
         };
         let outcome = fxg_node::bootstrap::bootstrap_workspace(options)
             .await
-            .context("fxg bootstrap-workspace failed")?;
+            .context("bootstrap-workspace failed")?;
         // stdout is reserved for the protocol, so the result goes to stderr too
         eprintln!(
             "[fxg-bootstrap] ready: {} (tools: {})",
@@ -197,10 +116,10 @@ impl usage::RunAsync for BootstrapWorkspaceArgs {
 }
 
 // ----------------------------------------------------------------------
-// fxg git-askpass (GIT_ASKPASS helper)
+// fxg internal git-askpass (GIT_ASKPASS helper)
 // ----------------------------------------------------------------------
 
-/// Arguments of `fxg git-askpass` (an internal command Git invokes as
+/// Arguments of `fxg internal git-askpass` (an internal command Git invokes as
 /// `GIT_ASKPASS`).
 #[derive(Debug, Args)]
 pub struct GitAskpassArgs {
@@ -239,18 +158,10 @@ pub struct AgentsArgs {
     command: AgentsCommands,
 }
 
-/// ACP Registry agent management.
+/// ACP agent authentication subcommands.
 #[derive(Debug, usage::Subcommands)]
 #[usage(run_async)]
 pub enum AgentsCommands {
-    /// List available agents and their installation state
-    List(AgentsListArgs),
-    /// Enable an npx/uvx agent (or report that a preset is already available)
-    Enable(AgentsInstallArgs),
-    /// Update the registry index and installed agents
-    Update(AgentsUpdateArgs),
-    /// Disable an npx/uvx agent or remove a custom definition
-    Disable(AgentsRemoveArgs),
     /// Log in to an agent using its advertised ACP authentication methods
     Login(AgentsLoginArgs),
     /// Log out from an agent (when the agent supports it)
@@ -269,192 +180,6 @@ async fn acp_registry() -> Result<AcpRegistry> {
         db.custom_agents().await?,
         db.enabled_package_agents().await?,
     ))
-}
-
-/// `fxg agents list`
-#[derive(Debug, Args)]
-pub struct AgentsListArgs {
-    /// Also show agents that are not installed in the ACP Registry
-    #[usage(long)]
-    all: bool,
-    /// Output as JSON
-    #[usage(long)]
-    json: bool,
-}
-
-/// Agent launch-form labels (for display).
-fn source_labels(entry: &AgentListEntry) -> Vec<&'static str> {
-    let mut labels = Vec::new();
-    if entry.custom.is_some() {
-        labels.push("custom");
-    }
-    for source in &entry.sources {
-        labels.push(match source {
-            LocalSource::External(_) => "external",
-            LocalSource::Npx => "npx",
-            LocalSource::Uvx => "uvx",
-        });
-    }
-    labels
-}
-
-#[derive(serde::Serialize)]
-struct AgentListOutput<'a> {
-    id: &'a str,
-    name: &'a str,
-    version: &'a str,
-    description: Option<&'a str>,
-    available: bool,
-    registry: bool,
-    package_available: bool,
-    sources: Vec<&'static str>,
-    custom: bool,
-}
-
-impl usage::RunAsync for AgentsListArgs {
-    type Output = Result<()>;
-
-    async fn run_async(self) -> Self::Output {
-        let registry = acp_registry().await?;
-        let index = registry
-            .index(false)
-            .await
-            .context("failed to load ACP registry")?;
-        let entries = registry.list(&index, self.all);
-        if self.json {
-            let value: Vec<AgentListOutput<'_>> = entries
-                .iter()
-                .map(|entry| AgentListOutput {
-                    id: &entry.id,
-                    name: &entry.name,
-                    version: &entry.version,
-                    description: entry.description.as_deref(),
-                    available: entry.is_available(),
-                    registry: entry.registry,
-                    package_available: entry.package_available,
-                    sources: source_labels(entry),
-                    custom: entry.custom.is_some(),
-                })
-                .collect();
-            println!("{}", serde_json::to_string_pretty(&value)?);
-            return Ok(());
-        }
-        if entries.is_empty() {
-            println!(
-                "(no agents available; use `fxg agents list --all` to show the whole registry)"
-            );
-            return Ok(());
-        }
-        let rows: Vec<Vec<String>> = entries
-            .iter()
-            .map(|entry| {
-                vec![
-                    entry.id.clone(),
-                    truncate(&entry.name, 24),
-                    entry.version.clone(),
-                    if entry.is_available() { "yes" } else { "-" }.to_owned(),
-                    source_labels(entry).join(","),
-                ]
-            })
-            .collect();
-        print_table(&["ID", "NAME", "VERSION", "AVAILABLE", "SOURCES"], &rows);
-        Ok(())
-    }
-}
-
-/// `fxg agents enable <id>`
-#[derive(Debug, Args)]
-pub struct AgentsInstallArgs {
-    /// Agent ID (aliases allowed)
-    id: String,
-    /// Version to install (only versions offered by the registry)
-    #[usage(long)]
-    version: Option<String>,
-}
-
-impl usage::RunAsync for AgentsInstallArgs {
-    type Output = Result<()>;
-
-    async fn run_async(self) -> Self::Output {
-        let registry = acp_registry().await?;
-        let id = registry.resolve_alias(&self.id);
-        if let Some(path) = registry.preset_available(&id) {
-            println!(
-                "{id} is already available on PATH ({}); no installation is needed",
-                path.display()
-            );
-            return Ok(());
-        }
-        let index = registry
-            .index(false)
-            .await
-            .context("failed to load ACP registry")?;
-        let agent = index.find(&id).with_context(|| {
-            format!("agent not found in the registry: {id} (`fxg agents list --all`)")
-        })?;
-        if agent.distribution.npx.is_some() || agent.distribution.uvx.is_some() {
-            let env = fxg_protocol::config::process_env;
-            node_db(&env)
-                .await?
-                .set_package_agent_enabled(&id, true)
-                .await?;
-            println!("enabled package agent {id} (npx/uvx)");
-            return Ok(());
-        }
-        bail!(
-            "fxg does not download binaries automatically. Install the binary from the tool's distributor and put it on PATH, or configure it as a custom agent (in `config.toml` or the Web UI)"
-        );
-    }
-}
-
-/// `fxg agents update`
-#[derive(Debug, Args)]
-pub struct AgentsUpdateArgs {}
-
-impl usage::RunAsync for AgentsUpdateArgs {
-    type Output = Result<()>;
-
-    async fn run_async(self) -> Self::Output {
-        let registry = acp_registry().await?;
-        // Force a refetch of the index
-        let index = registry
-            .index(true)
-            .await
-            .context("failed to fetch ACP registry")?;
-        println!("updated ACP registry index ({} agents)", index.agents.len());
-        Ok(())
-    }
-}
-
-/// `fxg agents disable <id>`
-#[derive(Debug, Args)]
-pub struct AgentsRemoveArgs {
-    /// Agent ID (aliases allowed)
-    id: String,
-}
-
-impl usage::RunAsync for AgentsRemoveArgs {
-    type Output = Result<()>;
-
-    async fn run_async(self) -> Self::Output {
-        let registry = acp_registry().await?;
-        let id = registry.resolve_alias(&self.id);
-        let env = fxg_protocol::config::process_env;
-        let db = node_db(&env).await?;
-        let removed_custom = db.delete_custom_agent(&id).await? > 0;
-        let disabled_package = if registry.enabled_package_agents().contains(&id) {
-            db.set_package_agent_enabled(&id, false).await?;
-            true
-        } else {
-            false
-        };
-        if removed_custom || disabled_package {
-            println!("removed/disabled {id}");
-        } else {
-            println!("{id} is not configured");
-        }
-        Ok(())
-    }
 }
 
 /// `fxg agents login <id>`
@@ -773,5 +498,53 @@ impl usage::RunAsync for KillAllArgs {
             ptys.len()
         );
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use fxg_protocol::common::{AgentAuthMethodInfo, AgentAuthMethodKind};
+    use std::collections::BTreeMap;
+
+    fn auth_method(id: &str, kind: AgentAuthMethodKind) -> AgentAuthMethodInfo {
+        AgentAuthMethodInfo {
+            id: id.to_owned(),
+            name: id.to_owned(),
+            description: None,
+            kind,
+            args: Vec::new(),
+            env: BTreeMap::new(),
+        }
+    }
+
+    #[test]
+    fn choose_auth_method_prefers_terminal() {
+        let methods = vec![
+            auth_method("agent-login", AgentAuthMethodKind::Agent),
+            auth_method("terminal-login", AgentAuthMethodKind::Terminal),
+        ];
+        let chosen = choose_auth_method(&methods, None).expect("terminal method");
+        assert_eq!(chosen.id, "terminal-login");
+    }
+
+    #[test]
+    fn choose_auth_method_honors_explicit_id() {
+        let methods = vec![
+            auth_method("agent-login", AgentAuthMethodKind::Agent),
+            auth_method("terminal-login", AgentAuthMethodKind::Terminal),
+        ];
+        let chosen = choose_auth_method(&methods, Some("agent-login")).expect("explicit method");
+        assert_eq!(chosen.id, "agent-login");
+    }
+
+    #[test]
+    fn choose_auth_method_requires_a_choice_when_ambiguous() {
+        let methods = vec![
+            auth_method("a", AgentAuthMethodKind::Agent),
+            auth_method("b", AgentAuthMethodKind::Agent),
+        ];
+        let err = choose_auth_method(&methods, None).expect_err("ambiguous");
+        assert!(err.to_string().contains("--method"), "got: {err}");
     }
 }

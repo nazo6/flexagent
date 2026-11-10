@@ -13,7 +13,7 @@
 //! - `--workspace <DIR>`: registers the cloned workspace as a project and pins
 //!   `StartSession`'s `local_path` to this directory
 //! - `--ephemeral`: on `DrainAndShutdown`, stops sessions and flushes pending events
-//! - Also starts a local IPC server (`fxg git-askpass` → Git credential proxy)
+//! - Also starts a local IPC server (`fxg internal git-askpass` → Git credential proxy)
 
 use std::path::PathBuf;
 use std::time::Duration;

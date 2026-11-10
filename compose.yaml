@@ -1,7 +1,7 @@
 # - データは named volume に永続化する (`fxg-data` = サーバー / `fxg-node-data` =
 #   ノード。どちらも `FXG_HOME` = `/data`)。
 # - `server` は既定コマンド (`fxg server`)、`node` は `fxg daemon` として起動する。
-#   ノードにリポジトリを登録する: `docker compose exec node fxg project scan /workspace`
+#   ノードにリポジトリを登録する: Web UI のプロジェクト画面から /workspace をスキャンする
 
 name: flexagent
 

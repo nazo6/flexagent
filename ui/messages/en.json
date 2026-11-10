@@ -489,7 +489,7 @@
   "settings_catalog_empty": "No agents are left to install.",
   "settings_catalog_no_match": "No agents match your search.",
   "settings_catalog_refresh": "Update catalog",
-  "settings_catalog_refresh_title": "Force-refresh the ACP Registry catalog (fxg agents update)",
+  "settings_catalog_refresh_title": "Force-refresh the ACP Registry catalog",
   "settings_catalog_refreshed": "Catalog refreshed.",
   "settings_catalog_refreshing": "Refreshing catalog…",
   "settings_catalog_search_placeholder": "Search by name, ID, or description",

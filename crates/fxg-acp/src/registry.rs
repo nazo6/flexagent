@@ -2,12 +2,12 @@
 //! plus custom agent management.
 //!
 //! Design: `docs/04-agent-drivers-and-windows.md` §2,
-//! CLI commands: `docs/05-cli-and-pwa-ui.md` §1 (`fxg agents ...`).
+//! catalog commands: `docs/05-cli-and-pwa-ui.md` §1 (Web UI agent settings).
 //!
 //! - Caches the official index (default
 //!   `https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json`)
 //!   to `~/.flexagent/cache/registry.json`
-//!   (default TTL 24 hours; `fxg agents update` forces a refresh).
+//!   (default TTL 24 hours; the Web UI catalog refresh forces a refresh).
 //! - Launch resolution is local-first: custom agent →
 //!   existing install on `PATH` → `npx` / `uvx`.
 //!   fxg itself never downloads or extracts binary archives
@@ -182,7 +182,7 @@ pub enum LocalSource {
     Uvx,
 }
 
-/// Agent information for `fxg agents list` / catalog display.
+/// Agent information for the catalog display.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentListEntry {
     /// Agent ID
@@ -281,14 +281,6 @@ impl AcpRegistry {
     /// Resolves a preset's executable on `PATH`.
     fn preset_path(&self, preset: &AgentPreset) -> Option<PathBuf> {
         (self.preset_lookup)(preset)
-    }
-
-    /// Returns the resolved executable for a built-in preset, if installed.
-    ///
-    /// This is used by `fxg agents install` to explain that a known CLI needs no
-    /// installation step.
-    pub fn preset_available(&self, id: &str) -> Option<PathBuf> {
-        Self::preset(id).and_then(|preset| self.preset_path(preset))
     }
 
     /// Builds a launch spec from a built-in preset without requiring the registry.

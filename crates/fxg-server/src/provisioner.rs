@@ -404,7 +404,7 @@ pub(crate) async fn register_ephemeral_node(
         .map_err(ApiError::from)
 }
 
-/// `fxg provisioners test <name>`: validates provisioner startup and the NodeHello handshake.
+/// Provisioner connectivity check: validates provisioner startup and the NodeHello handshake.
 pub async fn provisioner_test(
     state: &ServerState,
     name: &str,
@@ -1040,7 +1040,7 @@ pub(crate) fn url_host(url: &str) -> Option<String> {
 fn compose_bootstrap_script(version: &str, clone_workspace: bool) -> String {
     let clone_step = if clone_workspace {
         format!(
-            r#"'{}' bootstrap-workspace --repo "$FXG_GIT_URL" ${{FXG_GIT_BRANCH:+--branch "$FXG_GIT_BRANCH"}} --dir {} >&2
+            r#"'{}' internal bootstrap-workspace --repo "$FXG_GIT_URL" ${{FXG_GIT_BRANCH:+--branch "$FXG_GIT_BRANCH"}} --dir {} >&2
 if [ -f "$FXG_HOME/bootstrap.env" ]; then . "$FXG_HOME/bootstrap.env"; fi
 exec '{}' daemon --stdio --ephemeral --workspace {}"#,
             EPHEMERAL_BINARY, EPHEMERAL_WORKSPACE, EPHEMERAL_BINARY, EPHEMERAL_WORKSPACE
@@ -1092,7 +1092,7 @@ mod tests {
     #[test]
     fn bootstrap_script_separates_stdout_and_starts_daemon() {
         let script = compose_bootstrap_script("9.9.9", true);
-        assert!(script.contains("bootstrap-workspace"));
+        assert!(script.contains("internal bootstrap-workspace"));
         assert!(
             script
                 .contains("exec '/tmp/fxg' daemon --stdio --ephemeral --workspace /tmp/workspace")

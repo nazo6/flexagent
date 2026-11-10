@@ -747,16 +747,16 @@ pub enum ServerToNodeMsg {
 - `POST /api/v1/projects/:id/worktrees/prune`:
   指定ノード上のメインリポジトリで `git worktree prune`
   を実行し、削除済みディレクトリの管理情報をクリーンアップする
-  (`fxg worktree prune` の Web UI 版。`{ node_id }`)。
+  (Web UI の Worktree 整理。`{ node_id }`)。
 - `POST /api/v1/nodes/:node_id/projects/scan`:
   指定ディレクトリ (省略時は `config.toml` の `node.project_scan_dirs`)
   配下の Git リポジトリを一括探索し、論理プロジェクトとして登録する
-  (`fxg project scan` の Web UI 版)。`{ dir: Option<String> }` を受け取り、
+  (Web UI のプロジェクトスキャン)。`{ dir: Option<String> }` を受け取り、
   `ProjectScanResponse` (`scanned_dirs` + ノード上での登録プロジェクト一覧)
   を返す。
 - `POST /api/v1/nodes/:node_id/projects/link`:
   任意ディレクトリを論理プロジェクトへ手動で紐付ける
-  (`fxg project link` の Web UI 版)。`{ project_id, local_path }` の
+  (Web UI のプロジェクト紐付け)。`{ project_id, local_path }` の
   `project_id` には `project_key` (`user:` プレフィックス可) を渡し、
   対象ノードの `node.db.project_path_links` を更新する。Worktree の場合は
   メイン Worktree のルートにリンクする。既存セッションの `sessions.project_id`
@@ -871,13 +871,12 @@ pub enum ServerToNodeMsg {
 - `POST /api/v1/nodes/:node_id/agents/:agent_id/install`:
   指定ノード上で ACP Registry
   からエージェントを**明示的に**ダウンロード・展開する
-  (`fxg agents install` の Web UI 版)。起動時に暗黙ダウンロードは行わない。
+  (Web UI のエージェント導入)。起動時に暗黙ダウンロードは行わない。
 - `POST /api/v1/nodes/:node_id/agents/update`:
-  指定ノードの fxg 管理エージェントを更新する (`fxg agents update` の Web UI
-  版。
+  指定ノードの fxg 管理エージェントを更新する (Web UI のカタログ更新。
   `{ agent_id: Option<String> }`。省略時は導入済み全件)。
 - `DELETE /api/v1/nodes/:node_id/agents/:agent_id`:
-  指定ノード上の fxg 管理バイナリを削除する (`fxg agents remove` の Web UI 版)。
+  指定ノード上の fxg 管理バイナリを削除する (Web UI のエージェント削除)。
 - `PUT /api/v1/nodes/:node_id/agents/custom/:agent_id`:
   カスタム ACP エージェント定義を作成・更新する (body: `CustomAgentConfig` =
   `{ name, command, args, env }`)。`AgentAction::UpsertCustom`

@@ -6,11 +6,11 @@
 //! reference are generated from `__usage_spec__` (design:
 //! `docs/05-cli-and-pwa-ui.md` §1).
 //!
-//! Phase 2 provides the basic subcommands (`daemon` / `ps` / `session list` /
-//! `project` / `worktree` / `auth` / `kill-all`). Phase 3 added the agent
-//! execution commands (`run` / `attach` / `session
-//! show|prompt|stop|kill|revert|fork` / `inbox` / `agents`) and the built-in
-//! TUI (`tui`).
+//! The CLI exposes the core commands (`run` / `session` / `agents login|logout` /
+//! `ps` / `logs` / `doctor` / `daemon` / `server` / `service` / `auth` /
+//! `kill-all` / `web`) plus the hidden `internal` namespace. Management features
+//! owned by the Web UI (approval inbox, projects, worktrees, the agent catalog)
+//! have no CLI subcommand.
 
 // Migration baseline: remove this crate-level allow as Phase 1 of
 // `docs/changelog/2026-11-08-type-safety-plan.md` lands.
@@ -39,7 +39,9 @@ mod tray;
     bin = "fxg",
     version = env!("CARGO_PKG_VERSION"),
     about = "FlexAgent: a local-first agent manager",
-    arg_required_else_help
+    default_subcommand = "web",
+    default_subcommand_flags,
+    default_subcommand_on_empty
 )]
 struct Fxg {
     #[usage(subcommand)]
@@ -50,23 +52,16 @@ struct Fxg {
 #[derive(Debug, Subcommands)]
 #[usage(run_async)]
 enum Commands {
+    /// Open a tokenized URL in the default browser
+    Web(commands::WebArgs),
     /// Start a new session
     Run(commands::RunArgs),
     /// List running and recent sessions (alias for `fxg session list`)
     Ps(commands::SessionListArgs),
     /// Session management (list / show / prompt / stop / kill / revert / fork)
     Session(commands::SessionArgs),
-    /// Review and answer pending approval requests (list / approve / reject)
-    Inbox(commands::InboxArgs),
-    /// Logical project management (info / list / link / scan)
-    Project(commands::ProjectArgs),
-    /// Git worktree management (list / add / remove / prune)
-    #[usage(alias = "wt")]
-    Worktree(commands::WorktreeArgs),
-    /// Agent management (list / enable / update / disable / login / logout)
+    /// Agent authentication (login / logout)
     Agents(commands::AgentsArgs),
-    /// Inspect ephemeral VM / sandbox provisioners (list / test)
-    Provisioners(commands::ProvisionersArgs),
     /// Show local logs (daemon log / per-agent stderr)
     Logs(commands::LogsArgs),
     /// Check the local configuration, database, logs and toolchain
@@ -75,19 +70,15 @@ enum Commands {
     Daemon(commands::DaemonArgs),
     /// Start the central server in the foreground (:8080)
     Server(commands::ServerArgs),
-    /// Zero-touch initialization inside an ephemeral VM (git clone + automatic
-    /// tool install; output goes to stderr)
-    BootstrapWorkspace(commands::BootstrapWorkspaceArgs),
-    /// GIT_ASKPASS helper for the Git credential proxy (internal use)
-    GitAskpass(commands::GitAskpassArgs),
     /// Manage the background service that starts at OS login
     Service(commands::ServiceArgs),
-    /// Open a tokenized URL in the default browser
-    Web(commands::WebArgs),
     /// Auth token management (token / rotate-token / node-token)
     Auth(commands::AuthArgs),
     /// [Emergency stop] Force-terminate every local session, child process tree and PTY
     KillAll(commands::KillAllArgs),
+    /// Internal commands invoked by Git, provisioners, or system integrations
+    #[usage(hide)]
+    Internal(commands::InternalArgs),
 }
 
 #[tokio::main]

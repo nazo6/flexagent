@@ -61,7 +61,7 @@ pub trait ActiveSessionHandle: Send + Sync {
    - 公式インデックス
      `https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json`
      を取得し、`~/.flexagent/cache/registry.json` にキャッシュ（TTL
-     24時間、`fxg agents update` で即時更新）。
+     24時間、Web UI のカタログ更新で即時更新）。
    - レジストリは「表示名・説明・配布形態を知るためのカタログ」として使い、
      起動できるのは **このノードに実体があるものだけ** とする (未登録 ID を
      `PATH` から暗黙解決するフォールバックは行わない。任意のコマンドは
@@ -86,7 +86,7 @@ pub trait ActiveSessionHandle: Send + Sync {
    - 未導入のまま起動しようとした場合は、インストール方法を含むエラーを返す
      (`PATH` に既存インストールがあればそれを使うため、通常は導入不要)。
    - `npx` / `uvx` は実行時にパッケージマネージャが取得するため、fxg 側では
-     成果物を保持しない (`fxg agents disable` の対象外)。
+     成果物を保持しない (Web UI の無効化の対象外)。
    - 実体を持たない `npx` / `uvx` 配布は **既定では一覧に出さない**。Web UI の
      「カタログから追加」でエージェントごとに**有効化**し、状態は
      `~/.flexagent/enabled_package_agents.json` に保存する

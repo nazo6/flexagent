@@ -4,7 +4,7 @@
 //! the central server, reading and writing JSON Lines:
 //!
 //! - Receive `NodeHello` (reporting `is_ephemeral = true` as an ephemeral node)
-//! - `fxg git-askpass` (local IPC) → `GitCredentialRequest` →
+//! - `fxg internal git-askpass` (local IPC) → `GitCredentialRequest` →
 //!   test-side `GitCredentialResponse` → askpass prints the token
 //! - `DrainAndShutdown` → `DrainComplete` → the process exits cleanly
 //!
@@ -111,17 +111,17 @@ fn write_message(stdin: &mut ChildStdin, message: &Value) {
     stdin.flush().expect("flush stdin");
 }
 
-/// Run `fxg git-askpass` and return the single stdout line.
+/// Run `fxg internal git-askpass` and return the single stdout line.
 fn run_askpass(env: &TestEnv, prompt: &str) -> String {
     let mut command = Command::new(fxg());
-    command.args(["git-askpass", prompt]);
+    command.args(["internal", "git-askpass", prompt]);
     for (key, value) in env.base_env() {
         command.env(key, value);
     }
     let output = command.output().expect("run git-askpass");
     assert!(
         output.status.success(),
-        "git-askpass failed: {}",
+        "internal git-askpass failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
     String::from_utf8_lossy(&output.stdout).trim().to_owned()
