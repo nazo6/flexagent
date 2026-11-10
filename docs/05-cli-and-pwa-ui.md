@@ -1,5 +1,10 @@
 # 05. CLI (`fxg`) コマンド仕様・設定ファイルスキーマ・PWA フロントエンド設計
 
+> **Status: 計画中（未実装）** — 本ドキュメントは
+> [`changelog/2026-11-10-architecture-simplification.md`](changelog/2026-11-10-architecture-simplification.md)
+> の目標アーキテクチャを記述しています。実装PRが入るまで、現行コードは Local IPC /
+> `git-askpass` / `bootstrap-workspace` を使用します。
+
 ---
 
 ## 1. `fxg` CLI コマンド完全リファレンス
@@ -170,9 +175,15 @@ no_color = false
 ```
 
 `node.name` / `allow_remote_pty` / `project_scan_dirs` / `tray`、`[agents]`、
-`[provisioners]`、`[hub.git_credentials]`、`vapid_subject` は `config.toml`
-から削除されました。Web UI の設定カタログは現在値と出所
+`[provisioners]`、`vapid_subject` は `config.toml` から削除されました。
+`[hub.git_credentials]` はアーキテクチャ簡素化で廃止され、Git 認証は
+Provisioner の `env_secrets` に移行します。Web UI の設定カタログは現在値と出所
 (`config.toml` / `env` / `cli` / `default`) を読み取り専用で表示します。
+
+`[node] listen_addr` の既定は `127.0.0.1:7860` です。7860 が使用中で明示指定が
+ない場合は ephemeral port にフォールバックし、実際のアドレスは
+`~/.flexagent/node.addr` に記録されます。CLI・`fxg web`・ブラウザのローカル直結は
+このファイルを優先します。
 
 ### 2.3 Worktree と 一時VM環境
 
@@ -184,8 +195,8 @@ no_color = false
 
 ## 3. Web UI / Android PWA (`ui/`) 設計
 
-PCブラウザ、ローカルフォールバック (`localhost:7860`)、および Android
-スマートフォン（ホーム画面追加PWA）のすべてを単一のレスポンシブSPAで提供します。
+PCブラウザ、ローカルフォールバック (`node.addr`、既定は `localhost:7860`)、および
+Android スマートフォン（ホーム画面追加PWA）のすべてを単一のレスポンシブSPAで提供します。
 
 ### 3.1 フロントエンド技術スタック & 開発基盤
 
@@ -424,10 +435,11 @@ export interface ITerminalAdapter {
       (Phase 1 完了: 単一スキーマ + FTS5 trigram + 投影エンジン。実装は
       `crates/fxg-db/`)
 - [ ] Git Remote URL正規化による論理プロジェクト解決 (Web UI のプロジェクト画面)
-- [ ] ローカルループバック HTTP REST / WS (`127.0.0.1:7860`) による `fxg` CLI ⇔ `fxg node`
-      疎通
+- [ ] ローカルループバック HTTP REST / WS (`127.0.0.1:7860` 既定 / 衝突時は
+      ephemeral port) による `fxg` CLI ⇔ `fxg node` 疎通
 - [ ] **セキュリティ基礎**:
-  - [ ] `fxg node` ローカルAPIの `127.0.0.1:7860`（ループバック）厳格バインド
+  - [ ] `fxg node` ローカルAPIの `127.0.0.1`（ループバック、既定ポート 7860）
+        厳格バインドと `node.addr` の公開
   - [ ] 認証トークン生成・永続化 (`~/.flexagent/auth_token`)
   - [ ] Axum ミドルウェアによる `Host` ヘッダ検証 (DNS Rebinding 対策)
   - [ ] WebSocket ハンドシェイク時の `Origin` ヘッダ検証 (CSWSH 対策)
@@ -499,10 +511,25 @@ export interface ITerminalAdapter {
       初期化ログ配信）
   - `{INSTANCE_NAME}` / `{SESSION_ID}` を置換し、プロビジョナー定義の環境変数を注入。
     `stderr` は `HubWsMessage::BootstrapLog` として UI へエフェメラル配信する。
+    → アーキテクチャ簡素化で `{BOOTSTRAP_SCRIPT}` と `BootstrapLog` は廃止予定。
+- [x] `fxg internal bootstrap-workspace` の実装（`mise` / `uv`
+      単一バイナリの自動取得と、リポジトリ設定ファイルからの完全ステートレスなツール自動構築）
+  - `Cargo.toml` / `package.json` / `pyproject.toml` / `mise.toml` /
+    `.tool-versions` / `hub.db.project_profiles` からツールを検出して導入し、
+    `$FXG_HOME/bootstrap.env` に PATH と環境変数を書き出す。
+    → アーキテクチャ簡素化で `bootstrap.rs` / `bootstrap-workspace` /
+    `project_profiles` は廃止予定。ツールチェインはイメージ / VM テンプレート側へ移す。
+- [x] `GIT_ASKPASS` + `GitCredentialRequest`
+      パイププロキシによる一時VM内への秘密鍵・トークン非保持化
+  - ブートストラップ中は短命トークンを echo する専用ヘルパー、ノード起動後は
+    `fxg internal git-askpass`（ローカルIPC）→ `GitCredentialRequest`
+    でオンメモリ中継する。
+    → アーキテクチャ簡素化で `git-askpass` / `GitCredentialRequest` は廃止予定。
+    Provisioner の `env_secrets` とイメージ側の credential helper に移行する。
 - [ ] 外部事前構築済みツール環境への責務分離（`bootstrap.rs` / `bootstrap-workspace` の廃止）
   - ツールチェインやリポジトリ配置は Dockerfile / VM テンプレート / 起動コマンド側で管理し、`fxg` 内のツール自動導入ロジックを全廃。
 - [ ] 環境変数による Git 認証への一本化（`git-askpass` / `GitCredentialRequest` の廃止）
-  - プロビジョナーの環境変数（`GH_TOKEN` 等）またはコンテナ内設定を利用し、動的認証プロキシを全廃。
+  - プロビジョナーの `env_secrets` またはコンテナ内設定を利用し、動的認証プロキシを全廃。
 - [x] `DrainAndShutdown` による一時VM破棄前の未送信イベント完全フラッシュ
   - アイドルタイムアウト（`idle_timeout_secs`）またはセッション終了で Drain
     し、未送信イベントを送信してから `DrainComplete` を返す。Drain

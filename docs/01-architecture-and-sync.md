@@ -1,5 +1,10 @@
 # 01. 全体アーキテクチャ・同期モデル・一時VM・プロジェクト解決
 
+> **Status: 計画中（未実装）** — 本ドキュメントは
+> [`changelog/2026-11-10-architecture-simplification.md`](changelog/2026-11-10-architecture-simplification.md)
+> の目標アーキテクチャを記述しています。実装PRが入るまで、現行コードは Local IPC /
+> `git-askpass` / `bootstrap-workspace` を使用します。
+
 本ドキュメントでは、FlexAgent (`fxg`)
 の通信トポロジー、ハブ停止時にも機能するローカルファースト同期（Store-and-Forward）、ネットワーク非依存の一時VM・サンドボックスノード（`fxg internal stdio`）、および異なるPC・OS間で同じプロジェクトとして認識する仕組みを定義します。
 
@@ -42,13 +47,18 @@ flowchart TB
         EphNode <--> EphAgent
     end
 
-    CLI <-->|"1. Local HTTP REST / WS (127.0.0.1:7860)"| LocalAPI
+    CLI <-->|"1. Local HTTP REST / WS (既定 127.0.0.1:7860 / 衝突時は動的ポート)"| LocalAPI
     Browser <-->|"2a. 通常時: LANハブ接続 (:8080)"| HubAPI
     Browser -.->|"2b. 障害時・同一PCローカル直結 (127.0.0.1:7860)"| LocalAPI
     AndroidPWA <-->|"LAN / VPN (Tailscale等) 経由 WS / Push"| HubAPI
     SyncWorker ===>|"3a. 常駐ノード: 常時接続 Outbound WS"| HubAPI
     Prov <==>|"3b. 一時ノード: 子プロセス stdin/stdout パイプ (JSON Lines)<br/>(VPN・ポート開放・ネットワーク設定一切不要)"| EphNode
 ```
+
+> ローカル HTTP/WS の待受は既定で `127.0.0.1:7860`。7860 が使用中で
+> `--listen` / `[node] listen_addr` が明示されていない場合のみ、`127.0.0.1:0`
+> （ephemeral port）へフォールバックし、実際のアドレスを `node.addr` に書き出す。
+> CLI・`fxg web`・ブラウザのローカル直結はこのファイルを優先する。
 
 ### 各モードの起動方法（単一バイナリ `fxg`）
 
@@ -384,11 +394,11 @@ sequenceDiagram
 
     UI->>Hub: 新規セッション要求 (provisioner = "colab-pro" or "local-incus")
     Hub->>Child: コマンド起動 (stdin / stdout / stderr パイプ接続)
-    Child->>Eph: 1. ブートストラップ実行 (fxg配置 + git clone + mise/uv ツール導入)
-    Eph-->>Hub: stderr: セットアップ進捗ログをリアルタイム配信 (UIへ表示)
+    Child->>Eph: 1. 環境側で用意済みの fxg / workspace を起動 (clone・ツール導入はイメージ/テンプレート側)
+    Eph-->>Hub: stderr: プロビジョニング進捗ログをリアルタイム配信 (UIへ表示)
     Eph->>Hub: stdout: NodeHello (JSON Lines 通信開始)
     Hub->>Eph: stdin: StartSession (エージェント起動・タスク実行)
-    Note over Hub,Eph: 通常のWebSocketノードと100%同一のメッセージ型で双方向通信<br/>(Git認証は GitCredentialRequest でこのパイプ経由にプロキシ)
+    Note over Hub,Eph: 通常のWebSocketノードと100%同一のメッセージ型で双方向通信<br/>(Git認証は env_secrets とイメージ側の credential helper で完結)
     Note over Hub,Eph: セッション完了 or アイドルタイムアウト (例: 15分)
     Hub->>Eph: stdin: DrainAndShutdown
     Eph->>Hub: stdout: EventBatchPush (未送信ログ全フラッシュ)
@@ -424,6 +434,7 @@ sequenceDiagram
 | `args`              | 引数。`{INSTANCE_NAME}` / `{SESSION_ID}` を置換          |
 | `idle_timeout_secs` | アイドル状態のインスタンスを破棄するまでの秒数           |
 | `env`               | 子プロセスへ注入する環境変数                             |
+| `env_secrets`       | 秘密ストアの値を環境変数として注入 (env 名 → secret ID)  |
 
 Docker / Incus / Google Colab Pro の代表的な定義は Web UI のプリセットとして
 提供されます。
@@ -443,7 +454,10 @@ Docker / Incus / Google Colab Pro の代表的な定義は Web UI のプリセ�
 
 1. **環境変数による Git 認証 (外部注入方式)**:
    - Git 認証のための `GIT_ASKPASS` ヘルパーコマンド（`fxg internal git-askpass`）や、Node ⇔ Hub 間の `GitCredentialRequest` / `GitCredentialResponse` プロキシ機構は設けていません。
-   - 一時VMやコンテナ環境で Git 操作を行う場合、プロビジョナー定義の `env` 経由で標準的な環境変数（例: GitHub CLI / Git で認識される `GH_TOKEN`, `GITHUB_TOKEN`, `FXG_GIT_TOKEN`）を直接プロセスに渡すか、コンテナ内の設定を利用します。
+   - 一時VMやコンテナ環境で Git 操作を行う場合、Provisioner の `env_secrets` で
+     `GH_TOKEN` などの秘密値を環境変数として注入し、イメージ / 起動コマンド側で
+     `gh auth setup-git`、credential helper、SSH agent のいずれかを設定します。
+     `GH_TOKEN` を Git が自動で読むわけではないため、環境側の設定が必須です。
    - 常駐ノード（`fxg node`）でも開発者自身の既存の Git 認証（SSH 鍵、Git Credential Manager 等）がそのまま透過的に利用されます。
 2. **破棄前の Graceful Drain（ベストエフォート）**:
    - 一時VM内のイベントは VM 内の `node.db` に蓄積し、終了時にハブから
@@ -480,7 +494,9 @@ Hijacking）や不正アクセスを防ぐため、以下の多層防御モデ�
 - **ノード (`fxg node`)**:
   - ローカルWeb/WSサーバー (`LocalAPI`) は、デフォルトで
     **`127.0.0.1:7860`（ローカルループバックのみ）** に厳格バインドします。
-  - 同一LAN内の他端末から直接PCの `:7860`
+    7860 が使用中の場合はループバックの ephemeral port にフォールバックし、
+    実際のアドレスは `node.addr` に記録します。
+  - 同一LAN内の他端末から直接PCのローカルAPI
     を叩くことはできず、すべてのリモート操作はハブ経由で中継されます。
 
 ### 7.2 ブラウザ固有の攻撃防止（Localhost保護）
@@ -490,8 +506,9 @@ Hijacking）や不正アクセスを防ぐため、以下の多層防御モデ�
 を叩いてPCを侵害することを完全に防ぎます。
 
 1. **Host ヘッダ検証 (DNS Rebinding 対策)**:
-   - リクエストの `Host` ヘッダを検査し、`localhost:7860`, `127.0.0.1:7860`,
-     または明示的に設定されたハブホスト名以外は `403 Forbidden`
+   - リクエストの `Host` ヘッダを検査し、実際に bind したループバック
+     アドレス（既定は `localhost:7860` / `127.0.0.1:7860`、フォールバック時は
+     動的ポート）、または明示的に設定されたハブホスト名以外は `403 Forbidden`
      で即座に拒否します。
 2. **Origin ヘッダ検証 (Cross-Site WebSocket Hijacking 対策)**:
    - WebSocketハンドシェイク（`/api/v1/client/ws`, `/api/v1/pty/ws`）時に
@@ -505,8 +522,9 @@ Hijacking）や不正アクセスを防ぐため、以下の多層防御モデ�
      `fxg node token rotate`）、安全な64文字のランダム文字列（`auth_token`）を生成し、`~/.flexagent/auth_token`
      にパーミッション `0600` で保存します。
 2. **Web UI 初回アクセスとCookieの安全な設定**:
-   - ローカルCLIから `fxg web` を実行すると、ワンタイムURL
-     `http://localhost:7860/?token=<AUTH_TOKEN>` がブラウザで開かれます。
+   - ローカルCLIから `fxg web` を実行すると、`node.addr` のアドレスを使った
+     ワンタイムURL `http://<node.addr のアドレス>/?token=<AUTH_TOKEN>`
+     （既定は `http://localhost:7860/?token=<AUTH_TOKEN>`）がブラウザで開かれます。
    - サーバーはトークンを検証後、`Set-Cookie: fxg_session=<TOKEN>; HttpOnly; SameSite=Strict; Path=/`
      を発行します。以降のリクエストはCookieまたは
      `Authorization: Bearer <AUTH_TOKEN>`
