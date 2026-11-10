@@ -387,7 +387,7 @@ impl DaemonClient {
         }
     }
 
-    /// `fxg git-askpass` (GIT_ASKPASS helper; Git credential proxy)
+    /// `fxg internal git-askpass` (GIT_ASKPASS helper; Git credential proxy)
     ///
     /// Returns `(username, token, error)`. In an ephemeral VM the token is kept
     /// in memory only and never written to disk (design: docs/01 §6.4).
@@ -704,8 +704,7 @@ mod tests {
             .expect("ack"),
             Some("done".to_owned())
         );
-        // Acceptance of an async command (`SendPrompt` / `RespondPermission` /
-        // `ControlSession`)
+        // Acceptance of an async command (`SendPrompt` / `ControlSession`)
         assert_eq!(
             ack_message(LocalResult::CommandAccepted {
                 session_id: Some("s1".into()),
@@ -715,9 +714,8 @@ mod tests {
         );
         // Any other response is unexpected and must fail.
         assert!(
-            ack_message(LocalResult::Inbox {
-                requests: Vec::new(),
-                elicitations: Vec::new(),
+            ack_message(LocalResult::Sessions {
+                sessions: Vec::new(),
             })
             .is_err()
         );

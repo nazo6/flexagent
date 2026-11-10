@@ -18,7 +18,7 @@ use fxg_protocol::common::{ErrorCode, ErrorInfo};
 use fxg_protocol::events::SessionEventEnvelope;
 use fxg_protocol::ipc::{
     IPC_PROTOCOL_VERSION, IpcOutcome, IpcRequest, IpcRequestKind, IpcResultKind, IpcServerMessage,
-    LocalRequest, LocalResult, ProjectInfo, SessionDetail,
+    LocalRequest, LocalResult, SessionDetail,
 };
 use fxg_protocol::node_server::NodeRpcOutcome;
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -28,7 +28,6 @@ use super::DaemonState;
 use super::ops::AuditSource;
 use crate::error::NodeError;
 use crate::ipc_framing::{read_frame, write_message};
-use crate::{project, worktree};
 
 /// Upper limit of the session list returned by `fxg ps` etc.
 const SESSION_LIST_LIMIT: u32 = 200;
@@ -361,39 +360,6 @@ async fn handle_local(
             ))
         }
 
-        LocalRequest::ProjectInfo { command_id, cwd } => {
-            let resolved = resolve_and_register(state, Path::new(&cwd), &command_id).await?;
-            Ok((
-                command_id,
-                LocalResult::ProjectInfo {
-                    project: to_project_info(&resolved),
-                },
-            ))
-        }
-
-        LocalRequest::ProjectList { command_id } => {
-            let projects = state
-                .list_projects_with_path_state()
-                .await
-                .map_err(|err| DispatchError::from_node_error(&command_id, err))?;
-            Ok((command_id, LocalResult::Projects { projects }))
-        }
-
-        LocalRequest::WorktreeList {
-            command_id,
-            cwd,
-            project_id,
-        } => {
-            let worktrees = list_worktrees(
-                state,
-                cwd.as_deref(),
-                project_id.as_ref().map(fxg_protocol::ProjectId::as_str),
-                &command_id,
-            )
-            .await?;
-            Ok((command_id, LocalResult::Worktrees { worktrees }))
-        }
-
         LocalRequest::WorktreeAdd {
             command_id,
             cwd,
@@ -417,74 +383,6 @@ async fn handle_local(
                     path: outcome.path.to_string_lossy().into_owned(),
                     branch: outcome.branch,
                     created: outcome.created,
-                },
-            ))
-        }
-
-        LocalRequest::WorktreeRemove {
-            command_id,
-            cwd,
-            target,
-            force,
-        } => {
-            let repo = PathBuf::from(&cwd);
-            let entries = worktree::list_worktrees(&repo)
-                .await
-                .map_err(|err| DispatchError::from_node_error(&command_id, err))?;
-            let target_path = entries
-                .iter()
-                .find_map(|entry| {
-                    if entry.branch.as_deref() == Some(target.as_str()) {
-                        return Some(entry.path.clone());
-                    }
-                    let path = Path::new(&target);
-                    if path.is_absolute() && entry.path == path {
-                        return Some(entry.path.clone());
-                    }
-                    if entry
-                        .path
-                        .file_name()
-                        .map(|name| name.to_string_lossy() == target.as_str())
-                        .unwrap_or(false)
-                    {
-                        return Some(entry.path.clone());
-                    }
-                    None
-                })
-                .ok_or_else(|| {
-                    DispatchError::new(
-                        &command_id,
-                        ErrorCode::NotFound,
-                        format!("worktree not found: {target}"),
-                    )
-                })?;
-
-            state
-                .worktree_remove(Some(&repo), &target_path, force, &AuditSource::local())
-                .await
-                .map_err(|err| DispatchError::from_node_error(&command_id, err))?;
-
-            Ok((
-                command_id,
-                LocalResult::Ack {
-                    message: Some(format!("removed worktree {}", target_path.display())),
-                },
-            ))
-        }
-
-        LocalRequest::WorktreePrune { command_id, cwd } => {
-            let output = state
-                .worktree_prune(Path::new(&cwd), &AuditSource::local())
-                .await
-                .map_err(|err| DispatchError::from_node_error(&command_id, err))?;
-            Ok((
-                command_id,
-                LocalResult::Ack {
-                    message: Some(if output.trim().is_empty() {
-                        "pruned".to_owned()
-                    } else {
-                        output
-                    }),
                 },
             ))
         }
@@ -674,60 +572,6 @@ async fn handle_local(
             ))
         }
 
-        LocalRequest::RespondPermission {
-            command_id,
-            session_id,
-            request_id,
-            selected_option_id,
-            resolved_by,
-        } => {
-            state
-                .session_manager()
-                .respond_permission(
-                    &command_id,
-                    session_id.as_str(),
-                    &request_id,
-                    &selected_option_id,
-                    resolved_by,
-                )
-                .await
-                .map_err(|err| DispatchError::from_node_error(&command_id, err))?;
-            Ok((
-                command_id,
-                LocalResult::CommandAccepted {
-                    session_id: Some(session_id),
-                },
-            ))
-        }
-
-        LocalRequest::RespondElicitation {
-            command_id,
-            session_id,
-            elicitation_id,
-            action,
-            content,
-            resolved_by,
-        } => {
-            state
-                .session_manager()
-                .respond_elicitation(
-                    &command_id,
-                    session_id.as_str(),
-                    &elicitation_id,
-                    action,
-                    content,
-                    resolved_by,
-                )
-                .await
-                .map_err(|err| DispatchError::from_node_error(&command_id, err))?;
-            Ok((
-                command_id,
-                LocalResult::CommandAccepted {
-                    session_id: Some(session_id),
-                },
-            ))
-        }
-
         LocalRequest::ControlSession {
             command_id,
             session_id,
@@ -816,26 +660,6 @@ async fn handle_local(
                 })),
             ))
         }
-
-        LocalRequest::InboxList { command_id } => {
-            let requests = state
-                .db()
-                .pending_permissions()
-                .await
-                .map_err(|err| DispatchError::from_node_error(&command_id, err.into()))?;
-            let elicitations = state
-                .db()
-                .pending_elicitations()
-                .await
-                .map_err(|err| DispatchError::from_node_error(&command_id, err.into()))?;
-            Ok((
-                command_id,
-                LocalResult::Inbox {
-                    requests,
-                    elicitations,
-                },
-            ))
-        }
     }
 }
 
@@ -869,47 +693,6 @@ async fn session_event_tail(
         }
     }
     Ok((cursor, tail.into_iter().collect()))
-}
-
-/// Resolves a project and updates `projects` / `project_node_bindings`.
-async fn resolve_and_register(
-    state: &DaemonState,
-    dir: &Path,
-    command_id: &CommandId,
-) -> Result<project::ResolvedProject, DispatchError> {
-    state
-        .resolve_and_register_project(dir)
-        .await
-        .map_err(|err| DispatchError::from_node_error(command_id, err))
-}
-
-fn to_project_info(resolved: &project::ResolvedProject) -> ProjectInfo {
-    ProjectInfo {
-        project_id: resolved.project_id.clone().into(),
-        name: resolved.name.clone(),
-        canonical_git_url: resolved.canonical_git_url.clone(),
-        git_root: resolved
-            .git_root
-            .as_ref()
-            .map(|root| root.to_string_lossy().into_owned()),
-        relative_subpath: resolved.relative_subpath.clone(),
-        local_path: resolved.local_path.to_string_lossy().into_owned(),
-        is_git_repo: resolved.is_git_repo,
-        identity: resolved.identity.clone(),
-    }
-}
-
-/// Returns the worktree list (resolved from `cwd` or the main repositories of registered projects).
-async fn list_worktrees(
-    state: &DaemonState,
-    cwd: Option<&str>,
-    project_id: Option<&str>,
-    command_id: &CommandId,
-) -> Result<Vec<fxg_protocol::client_api::WorktreeInfo>, DispatchError> {
-    state
-        .worktree_list(cwd.map(Path::new), project_id)
-        .await
-        .map_err(|err| DispatchError::from_node_error(command_id, err))
 }
 
 #[cfg(test)]
@@ -1023,11 +806,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn ipc_project_info_and_link_via_socket() {
+    async fn ipc_project_link_via_socket() {
         let (daemon, dir) = start_daemon().await;
         let endpoint = daemon.ipc_endpoint().to_owned();
 
-        // Create a Git repository before querying
+        // Create a Git repository before linking
         let repo = dir.path().join("repo");
         std::fs::create_dir_all(&repo).expect("mkdir");
         git::run_git(&repo, &["init", "-q", "-b", "main"])
@@ -1044,23 +827,6 @@ mod tests {
         )
         .await
         .expect("remote");
-
-        let response = roundtrip(
-            &endpoint,
-            LocalRequest::ProjectInfo {
-                command_id: "c1".into(),
-                cwd: repo.to_string_lossy().into_owned(),
-            },
-        )
-        .await;
-        match local_result(response) {
-            LocalResult::ProjectInfo { project } => {
-                assert_eq!(project.project_id.as_str(), "github.com/nazo6/flexagent");
-                assert_eq!(project.identity.kind.as_str(), "git_remote");
-                assert!(project.is_git_repo);
-            }
-            other => panic!("unexpected response: {other:?}"),
-        }
 
         // project link writes an explicit path link
         let response = roundtrip_node(
@@ -1087,24 +853,6 @@ mod tests {
             .expect("link exists");
         assert_eq!(link, "internal-agent-tools");
 
-        // It appears in the list
-        let response = roundtrip(
-            &endpoint,
-            LocalRequest::ProjectList {
-                command_id: "c3".into(),
-            },
-        )
-        .await;
-        match local_result(response) {
-            LocalResult::Projects { projects } => {
-                assert_eq!(projects.len(), 1);
-                assert_eq!(projects[0].project_id.as_str(), "user:internal-agent-tools");
-                assert_eq!(projects[0].bindings.len(), 1);
-                assert_eq!(projects[0].bindings[0].node_id.as_str(), "ipc-node");
-            }
-            other => panic!("unexpected response: {other:?}"),
-        }
-
         daemon.shutdown();
         tokio::time::timeout(Duration::from_secs(5), daemon.wait())
             .await
@@ -1112,7 +860,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn ipc_worktree_add_list_remove_and_sessions() {
+    async fn ipc_worktree_add_and_sessions() {
         let (daemon, dir) = start_daemon().await;
         let endpoint = daemon.ipc_endpoint().to_owned();
 
@@ -1153,47 +901,6 @@ mod tests {
             other => panic!("unexpected response: {other:?}"),
         };
         assert!(Path::new(&worktree_path).join("README.md").is_file());
-
-        // List (with cwd specified)
-        let response = roundtrip(
-            &endpoint,
-            LocalRequest::WorktreeList {
-                command_id: "w2".into(),
-                cwd: Some(repo.to_string_lossy().into_owned()),
-                project_id: None,
-            },
-        )
-        .await;
-        match local_result(response) {
-            LocalResult::Worktrees { worktrees } => {
-                assert_eq!(worktrees.len(), 2, "main + feat/ipc");
-                assert!(
-                    worktrees
-                        .iter()
-                        .any(|w| w.branch.as_deref() == Some("main") && w.is_main)
-                );
-                assert!(
-                    worktrees
-                        .iter()
-                        .any(|w| w.branch.as_deref() == Some("feat/ipc"))
-                );
-            }
-            other => panic!("unexpected response: {other:?}"),
-        }
-
-        // Remove by branch name
-        let response = roundtrip(
-            &endpoint,
-            LocalRequest::WorktreeRemove {
-                command_id: "w3".into(),
-                cwd: repo.to_string_lossy().into_owned(),
-                target: "feat/ipc".to_owned(),
-                force: true,
-            },
-        )
-        .await;
-        assert!(matches!(local_result(response), LocalResult::Ack { .. }));
-        assert!(!Path::new(&worktree_path).exists());
 
         // Session list (empty)
         let response = roundtrip(
@@ -1263,10 +970,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn ipc_session_ensure_attach_prompt_and_permissions() {
-        use fxg_acp::DriverEvent;
-        use fxg_protocol::common::{ElicitationAction, PermissionOption, SessionControlAction};
-        use fxg_protocol::events::UnifiedEventPayload;
+    async fn ipc_session_ensure_attach_and_prompt() {
+        use fxg_protocol::common::SessionControlAction;
 
         let (daemon, mock, dir) = start_session_daemon().await;
         let endpoint = daemon.ipc_endpoint().to_owned();
@@ -1349,115 +1054,6 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
         assert_eq!(mock.prompts(), vec!["hello"]);
-
-        // Permission request → response → the second attempt is ALREADY_RESOLVED
-        mock.emit(DriverEvent::Event(UnifiedEventPayload::PermissionRequest {
-            request_id: "req-1".to_owned(),
-            tool_name: "terminal".to_owned(),
-            summary: "Run tests".to_owned(),
-            options: vec![PermissionOption {
-                option_id: "allow_once".to_owned(),
-                name: "Allow once".to_owned(),
-                kind: fxg_protocol::common::PermissionOptionKind::AllowOnce,
-            }],
-            details: serde_json::json!({}).into(),
-        }));
-        tokio::time::sleep(Duration::from_millis(50)).await;
-
-        let response = roundtrip(
-            &endpoint,
-            LocalRequest::RespondPermission {
-                command_id: "r1".into(),
-                session_id: session_id.clone(),
-                request_id: "req-1".to_owned(),
-                selected_option_id: "allow_once".to_owned(),
-                resolved_by: fxg_protocol::common::ResolvedBy::Cli,
-            },
-        )
-        .await;
-        assert!(matches!(
-            response,
-            IpcServerMessage::Response { request_id, .. } if request_id.as_str() == "r1"
-        ));
-        assert_eq!(
-            mock.permissions(),
-            vec![("req-1".to_owned(), "allow_once".to_owned())]
-        );
-
-        let response = roundtrip(
-            &endpoint,
-            LocalRequest::RespondPermission {
-                command_id: "r2".into(),
-                session_id: session_id.clone(),
-                request_id: "req-1".to_owned(),
-                selected_option_id: "allow_once".to_owned(),
-                resolved_by: fxg_protocol::common::ResolvedBy::Web,
-            },
-        )
-        .await;
-        assert_eq!(local_error(response).code, ErrorCode::AlreadyResolved);
-
-        // Question (elicitation) → response → the second attempt is ALREADY_RESOLVED
-        mock.emit(DriverEvent::Event(
-            UnifiedEventPayload::ElicitationRequest {
-                elicitation_id: "elic-1".to_owned(),
-                message: "Which strategy should we go with?".to_owned(),
-                mode: fxg_protocol::common::ElicitationMode::Form,
-                requested_schema: serde_json::from_value(serde_json::json!({
-                    "type": "object",
-                    "properties": { "strategy": { "type": "string", "enum": ["a", "b"] } },
-                    "required": ["strategy"]
-                }))
-                .expect("schema"),
-                tool_call_id: None,
-            },
-        ));
-        tokio::time::sleep(Duration::from_millis(50)).await;
-
-        let response = roundtrip(
-            &endpoint,
-            LocalRequest::RespondElicitation {
-                command_id: "q1".into(),
-                session_id: session_id.clone(),
-                elicitation_id: "elic-1".to_owned(),
-                action: ElicitationAction::Accept,
-                content: Some(
-                    serde_json::from_value(serde_json::json!({ "strategy": "a" }))
-                        .expect("content"),
-                ),
-                resolved_by: fxg_protocol::common::ResolvedBy::Cli,
-            },
-        )
-        .await;
-        assert!(matches!(
-            response,
-            IpcServerMessage::Response { request_id, .. } if request_id.as_str() == "q1"
-        ));
-        assert_eq!(
-            mock.elicitations(),
-            vec![(
-                "elic-1".to_owned(),
-                ElicitationAction::Accept,
-                Some(
-                    serde_json::from_value(serde_json::json!({ "strategy": "a" }))
-                        .expect("content")
-                )
-            )]
-        );
-
-        let response = roundtrip(
-            &endpoint,
-            LocalRequest::RespondElicitation {
-                command_id: "q2".into(),
-                session_id: session_id.clone(),
-                elicitation_id: "elic-1".to_owned(),
-                action: ElicitationAction::Decline,
-                content: None,
-                resolved_by: fxg_protocol::common::ResolvedBy::Web,
-            },
-        )
-        .await;
-        assert_eq!(local_error(response).code, ErrorCode::AlreadyResolved);
 
         // ControlSession (SetMode) is forwarded to the driver
         let response = roundtrip(

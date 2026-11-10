@@ -12,15 +12,12 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::client_api::WorktreeInfo;
 use crate::common::{
-    ClientSource, ElicitationAction, ElicitationContent, ElicitationRequestEntry, ErrorInfo,
-    PermissionRequestEntry, ProjectSummary, PromptInput, ResolvedBy, SessionControlAction,
-    SessionSummary, StreamDeltaPayload,
+    ClientSource, ElicitationRequestEntry, ErrorInfo, PermissionRequestEntry, PromptInput,
+    SessionControlAction, SessionSummary, StreamDeltaPayload,
 };
 use crate::events::SessionEventEnvelope;
 use crate::node_server::{NodeRpcRequest, NodeRpcResponse};
-use crate::settings::ProjectIdentity;
 use crate::{CommandId, ProjectId, SessionId};
 
 /// Length of the length header of length-prefixed JSON (little-endian u32).
@@ -43,27 +40,6 @@ pub struct LocalStatus {
     pub unsynced_event_count: u64,
     /// Last synchronization time (Unix epoch ms)
     pub last_synced_at: Option<i64>,
-}
-
-/// Details of the logical project resolution (the result of `fxg project info`).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ProjectInfo {
-    /// Logical project ID (`project_key`)
-    pub project_id: ProjectId,
-    /// Display name
-    pub name: String,
-    /// Git URL the canonical form was derived from
-    pub canonical_git_url: Option<String>,
-    /// Git root (`None` when not a git repository)
-    pub git_root: Option<String>,
-    /// Relative subpath from the git root (monorepo)
-    pub relative_subpath: Option<String>,
-    /// Directory that was resolved
-    pub local_path: String,
-    /// Whether it is a git repository
-    pub is_git_repo: bool,
-    /// How the identity was resolved
-    pub identity: ProjectIdentity,
 }
 
 /// Envelope for every CLI -> daemon request.
@@ -177,34 +153,6 @@ pub enum LocalRequest {
         /// Source (`cli` / `web` / `android`)
         client_source: ClientSource,
     },
-    /// Answers a permission request.
-    RespondPermission {
-        /// Correlation ID
-        command_id: CommandId,
-        /// Target session ID
-        session_id: SessionId,
-        /// ACP request id
-        request_id: String,
-        /// The selected `option_id`
-        selected_option_id: String,
-        /// Who resolved it (`cli` / `web` / `android_push`)
-        resolved_by: ResolvedBy,
-    },
-    /// Answers an elicitation (structured input request).
-    RespondElicitation {
-        /// Correlation ID
-        command_id: CommandId,
-        /// Target session ID
-        session_id: SessionId,
-        /// ACP elicitation id
-        elicitation_id: String,
-        /// The user's response action (`accept` / `decline` / `cancel`)
-        action: ElicitationAction,
-        /// Answer content for `accept` (following the form's `requested_schema`)
-        content: Option<ElicitationContent>,
-        /// Who resolved it (`cli` / `web` / `android_push`)
-        resolved_by: ResolvedBy,
-    },
     /// Mode switch / configuration change / cancel / kill.
     ControlSession {
         /// Correlation ID
@@ -235,33 +183,7 @@ pub enum LocalRequest {
         /// Number of events to show from the end
         recent_events: u32,
     },
-    /// Lists requests waiting for approval (`fxg inbox list`).
-    InboxList {
-        /// Correlation ID
-        command_id: CommandId,
-    },
-    /// Resolves the logical project of a given directory (`fxg project info`).
-    ProjectInfo {
-        /// Correlation ID
-        command_id: CommandId,
-        /// Directory to resolve
-        cwd: String,
-    },
-    /// Lists registered logical projects (`fxg project list`).
-    ProjectList {
-        /// Correlation ID
-        command_id: CommandId,
-    },
-    /// Lists worktrees (`fxg worktree list`).
-    WorktreeList {
-        /// Correlation ID
-        command_id: CommandId,
-        /// Directory of the target repository (resolved from the logical project when omitted)
-        cwd: Option<String>,
-        /// Filter by logical project ID
-        project_id: Option<ProjectId>,
-    },
-    /// Creates a worktree (`fxg worktree add`).
+    /// Creates a worktree (`fxg run -w` / `fxg session fork -w`).
     WorktreeAdd {
         /// Correlation ID
         command_id: CommandId,
@@ -273,24 +195,6 @@ pub enum LocalRequest {
         branch: String,
         /// Base branch (defaults to the current HEAD)
         base_branch: Option<String>,
-    },
-    /// Removes a worktree (`fxg worktree remove`).
-    WorktreeRemove {
-        /// Correlation ID
-        command_id: CommandId,
-        /// Directory of the main repository
-        cwd: String,
-        /// Branch name or path to remove
-        target: String,
-        /// Whether to remove even if there are uncommitted changes
-        force: bool,
-    },
-    /// Cleans up the administrative data of deleted worktrees (`fxg worktree prune`).
-    WorktreePrune {
-        /// Correlation ID
-        command_id: CommandId,
-        /// Directory of the main repository
-        cwd: String,
     },
     /// Lists sessions (`fxg ps` / `fxg session list`).
     ListSessions {
@@ -313,7 +217,7 @@ pub enum LocalRequest {
         /// Whether to regenerate it
         rotate: bool,
     },
-    /// Resolves git credentials (`fxg git-askpass`, used as a `GIT_ASKPASS` helper).
+    /// Resolves git credentials (`fxg internal git-askpass`, used as a `GIT_ASKPASS` helper).
     ///
     /// Git operations on an ephemeral VM (`fxg daemon --stdio`) are relayed through
     /// this method from the daemon to the central server (`GitCredentialRequest`),
@@ -341,18 +245,10 @@ impl LocalRequest {
             | Self::GetLocalStatus { command_id }
             | Self::Diagnostics { command_id }
             | Self::SendPrompt { command_id, .. }
-            | Self::RespondPermission { command_id, .. }
-            | Self::RespondElicitation { command_id, .. }
             | Self::ControlSession { command_id, .. }
             | Self::SessionFork { command_id, .. }
             | Self::SessionShow { command_id, .. }
-            | Self::InboxList { command_id }
-            | Self::ProjectInfo { command_id, .. }
-            | Self::ProjectList { command_id }
-            | Self::WorktreeList { command_id, .. }
             | Self::WorktreeAdd { command_id, .. }
-            | Self::WorktreeRemove { command_id, .. }
-            | Self::WorktreePrune { command_id, .. }
             | Self::ListSessions { command_id, .. }
             | Self::KillAll { command_id }
             | Self::AuthToken { command_id, .. }
@@ -387,7 +283,7 @@ pub enum LocalResult {
         status: LocalStatus,
     },
     /// Acceptance of an asynchronous command
-    /// (`SendPrompt` / `RespondPermission` / `ControlSession`)
+    /// (`SendPrompt` / `ControlSession`)
     CommandAccepted {
         /// Target session ID (optional)
         session_id: Option<SessionId>,
@@ -399,28 +295,6 @@ pub enum LocalResult {
     },
     /// Result of `SessionShow`
     SessionDetail(Box<SessionDetail>),
-    /// Result of `InboxList`
-    Inbox {
-        /// Requests waiting for approval (across all sessions)
-        requests: Vec<PermissionRequestEntry>,
-        /// Elicitation requests waiting for an answer (across all sessions)
-        elicitations: Vec<ElicitationRequestEntry>,
-    },
-    /// Result of `ProjectInfo`
-    ProjectInfo {
-        /// The resolved logical project
-        project: ProjectInfo,
-    },
-    /// Result of `ProjectList`
-    Projects {
-        /// Registered logical projects
-        projects: Vec<ProjectSummary>,
-    },
-    /// Result of `WorktreeList`
-    Worktrees {
-        /// Worktrees
-        worktrees: Vec<WorktreeInfo>,
-    },
     /// Result of `WorktreeAdd`
     WorktreeAdded {
         /// Worktree path
@@ -571,36 +445,17 @@ mod tests {
     }
 
     #[test]
-    fn local_worktree_requests_roundtrip() {
-        let cases = vec![
-            LocalRequest::WorktreeList {
-                command_id: "c1".into(),
-                cwd: Some("/home/nazo/src/flexagent".into()),
-                project_id: None,
-            },
-            LocalRequest::WorktreeAdd {
-                command_id: "c2".into(),
-                cwd: "/home/nazo/src/flexagent".into(),
-                project_id: None,
-                branch: "feat/auth".into(),
-                base_branch: Some("main".into()),
-            },
-            LocalRequest::WorktreeRemove {
-                command_id: "c3".into(),
-                cwd: "/home/nazo/src/flexagent".into(),
-                target: "feat/auth".into(),
-                force: true,
-            },
-            LocalRequest::WorktreePrune {
-                command_id: "c4".into(),
-                cwd: "/home/nazo/src/flexagent".into(),
-            },
-        ];
-        for message in cases {
-            let json = serde_json::to_value(&message).unwrap();
-            assert!(json["method"].is_string(), "method tag missing: {json}");
-            let decoded: LocalRequest = serde_json::from_value(json).unwrap();
-            assert_eq!(decoded, message);
-        }
+    fn local_worktree_request_roundtrips() {
+        let request = LocalRequest::WorktreeAdd {
+            command_id: "c2".into(),
+            cwd: "/home/nazo/src/flexagent".into(),
+            project_id: None,
+            branch: "feat/auth".into(),
+            base_branch: Some("main".into()),
+        };
+        let json = serde_json::to_value(&request).unwrap();
+        assert!(json["method"].is_string(), "method tag missing: {json}");
+        let decoded: LocalRequest = serde_json::from_value(json).unwrap();
+        assert_eq!(decoded, request);
     }
 }
