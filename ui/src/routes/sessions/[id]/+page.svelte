@@ -655,30 +655,6 @@
           <div class="flex items-center gap-1">
             <button
               type="button"
-              class={cn(
-                "px-2 py-0.5 text-[13px] rounded",
-                sidePanelMode === "diff"
-                  ? "bg-secondary font-medium"
-                  : "text-muted-foreground hover:text-foreground",
-              )}
-              onclick={() => (sidePanelMode = "diff")}
-            >
-              Diff
-            </button>
-            <button
-              type="button"
-              class={cn(
-                "px-2 py-0.5 text-[13px] rounded",
-                sidePanelMode === "terminal"
-                  ? "bg-secondary font-medium"
-                  : "text-muted-foreground hover:text-foreground",
-              )}
-              onclick={() => (sidePanelMode = "terminal")}
-            >
-              Terminal
-            </button>
-            <button
-              type="button"
               class="text-muted-foreground hover:text-foreground ml-1 p-1"
               onclick={() => (sidePanelMode = null)}
               title={m.session_close_panel()}

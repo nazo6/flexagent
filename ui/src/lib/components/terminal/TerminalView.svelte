@@ -17,7 +17,6 @@
   let status = $state<Status>("disconnected");
   let statusMessage = $state<string | null>(null);
   let container = $state<HTMLDivElement | null>(null);
-  let ptyId = $state<string | null>(null);
 
   let adapter: GhosttyWebAdapter | null = null;
   let socket: WebSocket | null = null;
@@ -61,7 +60,6 @@
     }
     switch (message.op) {
       case "spawned":
-        ptyId = message.pty_id;
         status = "connected";
         statusMessage = null;
         adapter?.focus();
@@ -146,7 +144,6 @@
       socket = null;
       current.close();
     }
-    ptyId = null;
     connect();
   }
 
@@ -209,9 +206,6 @@
         {m.terminal_status_error()}
       {/if}
     </Badge>
-    {#if ptyId !== null}
-      <span class="text-muted-foreground font-mono">{ptyId}</span>
-    {/if}
     <Button
       variant="ghost"
       size="sm"
@@ -244,7 +238,7 @@
 
   <div
     bind:this={container}
-    class="h-[50svh] min-h-48 w-full overflow-hidden rounded-lg border border-border bg-[#17140f]"
+    class="h-[50svh] min-h-48 w-full overflow-hidden rounded-lg border border-border bg-[#17140f] p-1.5"
   ></div>
 
   <!-- Mobile virtual key bar (hidden on desktop) -->
