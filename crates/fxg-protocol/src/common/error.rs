@@ -56,7 +56,7 @@ pub enum ErrorCode {
     RevisionMismatch,
     /// A referenced secret value does not exist
     SecretMissing,
-    /// The secret is still referenced by an agent or Git credential and cannot be deleted
+    /// The secret is still referenced by an agent or provisioner and cannot be deleted
     SecretInUse,
     /// The secret ID or value is invalid
     SecretInvalid,

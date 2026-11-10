@@ -657,7 +657,7 @@ impl Db {
         settings::get_hub_settings(&self.pool).await
     }
 
-    /// Updates hub settings and Git credentials under an optimistic lock.
+    /// Updates hub settings under an optimistic lock.
     pub async fn update_hub_settings(
         &self,
         request: &fxg_protocol::settings::UpdateHubSettingsRequest,

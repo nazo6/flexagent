@@ -422,8 +422,8 @@
       <h2 class="font-medium">Secrets</h2>
       <p class="text-muted-foreground text-[13px]">
         Key-value secrets stored in <code>~/.flexagent/secrets/</code>. Values are write-only and
-        never returned by the API. Reference them in custom agents as <code>@KEY</code> or in Git
-        credentials as <code>KEY</code>.
+        never returned by the API. Reference them in custom agents as <code>@KEY</code> or in
+        provisioner environment variables as <code>KEY</code>.
       </p>
       {#if secrets.length > 0}
         <ul class="flex list-none flex-col gap-1 p-0 text-[13px]">

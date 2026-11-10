@@ -654,7 +654,7 @@ export type ErrorCode =
 "REVISION_MISMATCH" |
 /**  A referenced secret value does not exist */
 "SECRET_MISSING" |
-/**  The secret is still referenced by an agent or Git credential and cannot be deleted */
+/**  The secret is still referenced by an agent or provisioner and cannot be deleted */
 "SECRET_IN_USE" |
 /**  The secret ID or value is invalid */
 "SECRET_INVALID" |

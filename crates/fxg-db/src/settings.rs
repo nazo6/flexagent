@@ -421,7 +421,7 @@ pub async fn delete_project_path_link(pool: &SqlitePool, local_path: &str) -> Re
 }
 
 // ----------------------------------------------------------------------
-// Server settings / Git credentials
+// Server settings
 // ----------------------------------------------------------------------
 
 /// Ensures the single `hub_settings` row exists and returns it.
