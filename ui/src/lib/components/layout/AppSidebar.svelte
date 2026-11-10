@@ -12,6 +12,8 @@
   import SessionActionsMenu from "#lib/components/session/SessionActionsMenu.svelte";
   import SyncStatusBadge from "#lib/components/SyncStatusBadge.svelte";
   import type { SessionSummary } from "#lib/generated/bindings.ts";
+  import { layoutState } from "#lib/stores/layout.svelte.ts";
+  import PanelLeftCloseIcon from "@lucide/svelte/icons/panel-left-close";
   import AlertCircleIcon from "@lucide/svelte/icons/alert-circle";
   import ArchiveIcon from "@lucide/svelte/icons/archive";
   import ChevronDownIcon from "@lucide/svelte/icons/chevron-down";
@@ -173,6 +175,15 @@
       </div>
       <span class="text-sm">FlexAgent</span>
     </a>
+    <button
+      type="button"
+      class="hover:bg-accent text-muted-foreground hover:text-foreground hidden size-7 items-center justify-center rounded-md border md:flex"
+      onclick={() => layoutState.toggleSidebar()}
+      title="Toggle sidebar (Ctrl+B)"
+      aria-label="Toggle sidebar"
+    >
+      <PanelLeftCloseIcon class="size-4" />
+    </button>
   </div>
 
   <!-- Quick navigation -->

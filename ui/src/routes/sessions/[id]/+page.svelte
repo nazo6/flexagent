@@ -1,6 +1,7 @@
 <script lang="ts">
   import { page } from "$app/state";
   import { goto } from "$app/navigation";
+  import { onMount } from "svelte";
   import * as AlertDialog from "#lib/components/ui/alert-dialog/index.ts";
   import BootstrapLogCard from "#lib/components/BootstrapLogCard.svelte";
   import ChatTimeline from "#lib/components/chat/ChatTimeline.svelte";
@@ -27,12 +28,15 @@
   import { cn } from "#lib/utils.ts";
   import { toast } from "svelte-sonner";
   import ArchiveIcon from "@lucide/svelte/icons/archive";
+  import { layoutState } from "#lib/stores/layout.svelte.ts";
   import ArrowDownIcon from "@lucide/svelte/icons/arrow-down";
   import ChevronLeftIcon from "@lucide/svelte/icons/chevron-left";
   import FileCodeIcon from "@lucide/svelte/icons/file-code";
   import FolderIcon from "@lucide/svelte/icons/folder";
   import GitForkIcon from "@lucide/svelte/icons/git-fork";
+  import MenuIcon from "@lucide/svelte/icons/menu";
   import MessageSquareIcon from "@lucide/svelte/icons/message-square";
+  import PanelLeftOpenIcon from "@lucide/svelte/icons/panel-left-open";
   import PanelRightCloseIcon from "@lucide/svelte/icons/panel-right-close";
   import PlayIcon from "@lucide/svelte/icons/play";
   import PlusIcon from "@lucide/svelte/icons/plus";
@@ -81,6 +85,55 @@
   // View mode (mobile tab switch and desktop right-pane selection)
   let activeTab = $state<ViewMode>("chat");
   let sidePanelMode = $state<"diff" | "terminal" | null>(null);
+
+  // Desktop resizable right pane
+  let mainContainer = $state<HTMLDivElement | null>(null);
+  let sidePanelWidth = $state(42); // default percentage
+  let isResizing = $state(false);
+
+  onMount(() => {
+    if (typeof localStorage !== "undefined") {
+      const saved = localStorage.getItem("fxg:session_side_panel_width");
+      if (saved) {
+        const num = parseFloat(saved);
+        if (!isNaN(num) && num >= 20 && num <= 80) {
+          sidePanelWidth = num;
+        }
+      }
+    }
+  });
+
+  function handlePointerMove(e: PointerEvent) {
+    if (!isResizing || !mainContainer) return;
+    const rect = mainContainer.getBoundingClientRect();
+    const pointerX = e.clientX;
+    const rightPixels = rect.right - pointerX;
+    const percentage = (rightPixels / rect.width) * 100;
+    // Clamp between 20% and 75%
+    sidePanelWidth = Math.max(20, Math.min(75, Math.round(percentage)));
+  }
+
+  function handlePointerUp() {
+    if (!isResizing) return;
+    isResizing = false;
+    window.removeEventListener("pointermove", handlePointerMove);
+    window.removeEventListener("pointerup", handlePointerUp);
+    if (typeof localStorage !== "undefined") {
+      try {
+        localStorage.setItem("fxg:session_side_panel_width", String(sidePanelWidth));
+      } catch {
+        // Ignore quota errors
+      }
+    }
+  }
+
+  function startResize(event: PointerEvent) {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    isResizing = true;
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp);
+  }
 
   // Make the session a priority target for WS delivery, and fall back to REST
   // loading when the history has not been fetched yet.
@@ -236,13 +289,29 @@
     <div class="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
       <!-- Left: back link + title + node status -->
       <div class="flex min-w-0 flex-1 items-center gap-2">
-        <a
-          href="/"
+        <!-- Mobile: open sidebar drawer to pick sessions -->
+        <button
+          type="button"
           class="hover:bg-accent text-muted-foreground hover:text-foreground -ml-1 flex size-7 items-center justify-center rounded-md border md:hidden"
-          title={m.session_back_to_list()}
+          onclick={() => layoutState.setMobileDrawer(true)}
+          title={m.shell_open_menu()}
+          aria-label={m.shell_open_menu()}
         >
-          <ChevronLeftIcon class="size-4" />
-        </a>
+          <MenuIcon class="size-4" />
+        </button>
+
+        <!-- Desktop: expand sidebar when collapsed -->
+        {#if layoutState.sidebarCollapsed}
+          <button
+            type="button"
+            class="hover:bg-accent text-muted-foreground hover:text-foreground -ml-1 hidden size-7 items-center justify-center rounded-md border md:flex"
+            onclick={() => layoutState.toggleSidebar()}
+            title="Open sidebar (Ctrl+B)"
+            aria-label="Open sidebar"
+          >
+            <PanelLeftOpenIcon class="size-4" />
+          </button>
+        {/if}
 
         <div class="flex min-w-0 flex-col gap-0.5">
           <div class="flex items-center gap-2">
@@ -475,7 +544,11 @@
   {/if}
 
   <!-- Main content area -->
-  <div class="flex flex-1 overflow-hidden">
+  <div
+    bind:this={mainContainer}
+    class="flex flex-1 overflow-hidden relative"
+    class:select-none={isResizing}
+  >
     <!-- Chat main area (always on desktop, on mobile only when activeTab === 'chat') -->
     <div
       class={cn(
@@ -525,10 +598,35 @@
       </div>
     </div>
 
-    <!-- Desktop right side panel (Diff or Terminal) -->
+    <!-- Desktop right side panel with resizer (Diff or Terminal) -->
     {#if sidePanelMode !== null}
+      <!-- Resizer divider -->
+      <button
+        type="button"
+        aria-label="Resize panel"
+        class={cn(
+          "hidden md:flex w-1.5 cursor-col-resize hover:bg-signal/50 active:bg-signal transition-colors group select-none shrink-0 border-l border-border items-center justify-center -ml-[1px] z-10 outline-none focus-visible:ring-1 focus-visible:ring-signal bg-transparent p-0",
+          isResizing && "bg-signal",
+        )}
+        onpointerdown={startResize}
+        onkeydown={(e) => {
+          if (e.key === "ArrowLeft") {
+            e.preventDefault();
+            sidePanelWidth = Math.min(75, sidePanelWidth + 2);
+          } else if (e.key === "ArrowRight") {
+            e.preventDefault();
+            sidePanelWidth = Math.max(20, sidePanelWidth - 2);
+          }
+        }}
+      >
+        <span
+          class="w-0.5 h-8 bg-muted-foreground/30 rounded-full group-hover:bg-signal pointer-events-none"
+        ></span>
+      </button>
+
       <div
-        class="border-border bg-card/40 hidden h-full flex-col overflow-hidden border-l md:flex md:w-1/2 lg:w-5/12"
+        class="border-border bg-card/40 hidden h-full flex-col overflow-hidden md:flex shrink-0"
+        style="width: {sidePanelWidth}%;"
       >
         <!-- Side panel header -->
         <div class="flex items-center justify-between border-b border-border px-3 py-2">

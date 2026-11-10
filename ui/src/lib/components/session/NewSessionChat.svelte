@@ -38,14 +38,17 @@
     loadSessionConfig,
     saveNewSessionPrefs,
     saveSessionConfigOption,
+    shouldSubmitOnEnter,
     type SessionModePreference,
   } from "#lib/session-prefs.ts";
+  import { prefs } from "#lib/stores/prefs.svelte.ts";
   import { getNodeAvailability } from "#lib/node-status.ts";
   import { m } from "#lib/paraglide/messages.js";
   import { sync } from "#lib/stores/app.svelte.ts";
   import { problems } from "#lib/stores/problems.svelte.ts";
   import { toast } from "svelte-sonner";
   import { onMount, untrack } from "svelte";
+  import AlertCircleIcon from "@lucide/svelte/icons/alert-circle";
   import BotIcon from "@lucide/svelte/icons/bot";
   import BoxIcon from "@lucide/svelte/icons/box";
   import CheckCircle2Icon from "@lucide/svelte/icons/check-circle-2";
@@ -318,11 +321,15 @@
       agentTouched = false;
       modeTouched = false;
     }
-    const prefs = untrack(() => loadNewSessionPrefs(project.project_id));
-    if (prefs) {
-      if (!modeTouched && prefs.mode !== "default") sessionMode = prefs.mode;
-      if (!agentTouched && prefs.agent !== "" && availableAgentIds.includes(prefs.agent)) {
-        agentId = prefs.agent;
+    const savedPrefs = untrack(() => loadNewSessionPrefs(project.project_id));
+    if (savedPrefs) {
+      if (!modeTouched && savedPrefs.mode !== "default") sessionMode = savedPrefs.mode;
+      if (
+        !agentTouched &&
+        savedPrefs.agent !== "" &&
+        availableAgentIds.includes(savedPrefs.agent)
+      ) {
+        agentId = savedPrefs.agent;
       }
     }
     prefsResolvedProjectId = project.project_id;
@@ -680,9 +687,7 @@
   }
 
   function onKeydown(event: KeyboardEvent) {
-    if (event.isComposing || event.keyCode === 229) return;
-    const startWithModifier = event.ctrlKey || event.metaKey;
-    if (event.key === "Enter" && (startWithModifier || !event.shiftKey)) {
+    if (shouldSubmitOnEnter(event, prefs.sendShortcut)) {
       event.preventDefault();
       void handleStartSession();
     }
@@ -850,6 +855,23 @@
           <XIcon class="mr-1 size-3.5" />
           {m.new_session_fork_clear()}
         </Button>
+      </div>
+    {/if}
+
+    {#if sync.inbox.length > 0}
+      <div
+        class="border-destructive/30 bg-destructive/10 text-destructive flex items-center justify-between gap-2 rounded-lg border p-3 text-[13px]"
+      >
+        <span class="flex items-center gap-2">
+          <AlertCircleIcon class="size-4 shrink-0" />
+          <span>{m.inbox_approvals()} ({sync.inbox.length})</span>
+        </span>
+        <a
+          href="/inbox"
+          class="bg-destructive text-destructive-foreground hover:bg-destructive/90 rounded-md px-2.5 py-1 text-[12px] font-medium transition-colors"
+        >
+          {m.shell_approval_inbox()}
+        </a>
       </div>
     {/if}
 

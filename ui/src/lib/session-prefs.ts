@@ -111,3 +111,48 @@ export function saveSessionConfigOption(
     // Do not persist when localStorage is disabled or over quota
   }
 }
+
+export type SendShortcut = "enter" | "modifier_enter";
+
+const SHORTCUT_KEY = "fxg:send_shortcut";
+
+/**
+ * Load the send shortcut preference (defaults to "enter").
+ */
+export function loadSendShortcutPreference(storage?: Storage | null): SendShortcut {
+  const store = resolveStorage(storage);
+  if (store === null) return "enter";
+  const raw = store.getItem(SHORTCUT_KEY);
+  if (raw === "modifier_enter" || raw === "enter") return raw;
+  return "enter";
+}
+
+/**
+ * Save the send shortcut preference.
+ */
+export function saveSendShortcutPreference(shortcut: SendShortcut, storage?: Storage | null): void {
+  const store = resolveStorage(storage);
+  if (store === null) return;
+  try {
+    store.setItem(SHORTCUT_KEY, shortcut);
+  } catch {
+    // Do not persist when localStorage is disabled or over quota
+  }
+}
+
+/**
+ * Checks whether a keydown event should trigger a form submit based on the preference.
+ * Always guards against IME composition (`isComposing` and keyCode 229).
+ */
+export function shouldSubmitOnEnter(
+  event: KeyboardEvent,
+  shortcut: SendShortcut = "enter",
+): boolean {
+  if (event.isComposing || event.keyCode === 229) return false;
+  if (event.key !== "Enter") return false;
+  if (shortcut === "modifier_enter") {
+    return event.ctrlKey || event.metaKey;
+  }
+  // "enter" mode: Enter sends unless Shift is pressed (newline). Ctrl/Cmd+Enter also sends.
+  return event.ctrlKey || event.metaKey || !event.shiftKey;
+}

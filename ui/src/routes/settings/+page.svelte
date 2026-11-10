@@ -17,6 +17,7 @@
   import { m } from "#lib/paraglide/messages.js";
   import { sync } from "#lib/stores/app.svelte.ts";
   import { pinned } from "#lib/stores/pinned.svelte.ts";
+  import { prefs } from "#lib/stores/prefs.svelte.ts";
   import { createResource } from "#lib/stores/resource.svelte.ts";
   import { PALETTES, theme, type PaletteId } from "#lib/theme.svelte.ts";
   import { cn } from "#lib/utils.ts";
@@ -381,6 +382,26 @@
           {/each}
         </div>
         <p class="text-muted-foreground text-[13px]">{m.settings_appearance_storage_note()}</p>
+      </Card>
+
+      <Card class="gap-4 p-5">
+        <div class="flex flex-col gap-1">
+          <h2 class="text-sm font-semibold">{m.settings_browser_send_shortcut()}</h2>
+          <p class="text-muted-foreground text-[13px]">{m.settings_browser_send_shortcut_note()}</p>
+        </div>
+        <div class="grid max-w-sm gap-1.5">
+          <select
+            id="browser-send-shortcut"
+            aria-label={m.settings_browser_send_shortcut()}
+            class="border-input bg-background h-8 rounded-md border px-2 text-[13px]"
+            value={prefs.sendShortcut}
+            onchange={(event) =>
+              prefs.setSendShortcut(event.currentTarget.value as "enter" | "modifier_enter")}
+          >
+            <option value="enter">{m.settings_browser_send_shortcut_enter()}</option>
+            <option value="modifier_enter">{m.settings_browser_send_shortcut_modifier()}</option>
+          </select>
+        </div>
       </Card>
 
       <Card class="gap-3 p-4">
