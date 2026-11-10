@@ -39,7 +39,9 @@ mod tray;
     bin = "fxg",
     version = env!("CARGO_PKG_VERSION"),
     about = "FlexAgent: a local-first agent manager",
-    arg_required_else_help
+    default_subcommand = "web",
+    default_subcommand_flags,
+    default_subcommand_on_empty
 )]
 struct Fxg {
     #[usage(subcommand)]
@@ -50,23 +52,14 @@ struct Fxg {
 #[derive(Debug, Subcommands)]
 #[usage(run_async)]
 enum Commands {
+    /// Open a tokenized URL in the default browser
+    Web(commands::WebArgs),
     /// Start a new session
     Run(commands::RunArgs),
     /// List running and recent sessions (alias for `fxg session list`)
     Ps(commands::SessionListArgs),
     /// Session management (list / show / prompt / stop / kill / revert / fork)
     Session(commands::SessionArgs),
-    /// Review and answer pending approval requests (list / approve / reject)
-    Inbox(commands::InboxArgs),
-    /// Logical project management (info / list / link / scan)
-    Project(commands::ProjectArgs),
-    /// Git worktree management (list / add / remove / prune)
-    #[usage(alias = "wt")]
-    Worktree(commands::WorktreeArgs),
-    /// Agent management (list / enable / update / disable / login / logout)
-    Agents(commands::AgentsArgs),
-    /// Inspect ephemeral VM / sandbox provisioners (list / test)
-    Provisioners(commands::ProvisionersArgs),
     /// Show local logs (daemon log / per-agent stderr)
     Logs(commands::LogsArgs),
     /// Check the local configuration, database, logs and toolchain
@@ -75,17 +68,30 @@ enum Commands {
     Daemon(commands::DaemonArgs),
     /// Start the central server in the foreground (:8080)
     Server(commands::ServerArgs),
-    /// Internal commands invoked by Git, provisioners, or system integrations
-    #[usage(hide)]
-    Internal(commands::InternalArgs),
     /// Manage the background service that starts at OS login
     Service(commands::ServiceArgs),
-    /// Open a tokenized URL in the default browser
-    Web(commands::WebArgs),
     /// Auth token management (token / rotate-token / node-token)
     Auth(commands::AuthArgs),
     /// [Emergency stop] Force-terminate every local session, child process tree and PTY
     KillAll(commands::KillAllArgs),
+    /// Review and answer pending approval requests (list / approve / reject)
+    #[usage(hide)]
+    Inbox(commands::InboxArgs),
+    /// Logical project management (info / list / link / scan)
+    #[usage(hide)]
+    Project(commands::ProjectArgs),
+    /// Git worktree management (list / add / remove / prune)
+    #[usage(alias = "wt", hide)]
+    Worktree(commands::WorktreeArgs),
+    /// Agent management (list / enable / update / disable / login / logout)
+    #[usage(hide)]
+    Agents(commands::AgentsArgs),
+    /// Inspect ephemeral VM / sandbox provisioners (list / test)
+    #[usage(hide)]
+    Provisioners(commands::ProvisionersArgs),
+    /// Internal commands invoked by Git, provisioners, or system integrations
+    #[usage(hide)]
+    Internal(commands::InternalArgs),
 }
 
 #[tokio::main]

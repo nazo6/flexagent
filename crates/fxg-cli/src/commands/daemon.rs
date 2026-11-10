@@ -430,11 +430,8 @@ impl usage::RunAsync for WebArgs {
                 .context("node.central_server_url is not set in config.toml")?;
             crate::server_api::central_http_url(&server_url)?
         } else {
-            let token = fxg_server::api::auth::load_or_create_token(
-                &fxg_protocol::config::fxg_home(&env)
-                    .join(fxg_protocol::config::AUTH_TOKEN_FILE_NAME),
-            )
-            .context("failed to load ~/.flexagent/auth_token")?;
+            let mut client = DaemonClient::connect().await?;
+            let token = client.auth_token(false).await?;
             let listen = global
                 .node
                 .listen_addr
@@ -444,7 +441,9 @@ impl usage::RunAsync for WebArgs {
         };
 
         println!("{url}");
-        opener::open_browser(&url).context("failed to open the default browser")?;
+        if let Err(err) = opener::open_browser(&url) {
+            tracing::warn!("failed to open default browser: {err}");
+        }
         Ok(())
     }
 }
