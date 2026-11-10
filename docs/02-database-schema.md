@@ -44,6 +44,7 @@ E2E暗号化を行わないため、中央サーバー側で会話履歴の構�
 | `permission_requests`                | 自分のセッション分の投影                             | 全会話分の投影（グローバル承認 Inbox）                             |
 | `push_subscriptions`                 | 空（未使用）                                         | PWA 購読管理（VAPID）                                              |
 | `audit_logs`                         | ローカル直結操作（CLI / `localhost:7860`）の記録     | ハブ経由操作の記録（同期対象外。各ストアが自分の観測事実のみ記録） |
+| `incidents`                          | ノード自身のエラー境界で観測した障害                 | ハブ自身のエラー境界で観測した障害（同期対象外）                   |
 | `sessions.synced_up_to_node_seq`     | 使用（ハブが ACK した水位）                          | 未使用（常に 0）                                                   |
 | `sessions.last_node_seq`             | 永続化済み最新の `node_seq`（次はこの値 + 1 を採番） | 投影に適用済みの最大 `node_seq`                                    |
 
@@ -296,6 +297,39 @@ CREATE TABLE audit_logs (
 
 CREATE INDEX idx_audit_logs_action ON audit_logs(action, created_at DESC);
 CREATE INDEX idx_audit_logs_session ON audit_logs(session_id, created_at DESC);
+```
+
+---
+
+### 1.0.1 診断インシデント (migration `0011_incidents.sql`)
+
+`incidents` は「ノード / サーバーが自分のエラー境界で観測した障害」を
+保持する、**同期対象外**のリングバッファです。同じ原因
+(`code` + `source` + `session_id` + `node_id`) が未解決のまま
+10 分以内に再発した場合は、行を増やさず `occurrence_count` と
+`last_seen_at` を更新します。保持期間は 14 日、最大 1000 行です。
+
+```sql
+CREATE TABLE incidents (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at        INTEGER NOT NULL,
+    last_seen_at      INTEGER NOT NULL,
+    level             TEXT NOT NULL,                 -- 'info' | 'warning' | 'error'
+    code              TEXT NOT NULL,                 -- ErrorCode
+    summary           TEXT NOT NULL,                 -- 英語のフォールバック説明
+    details_json      TEXT NOT NULL DEFAULT '{}',    -- 境界ごとの技術情報 (RawJson)
+    session_id        TEXT,
+    node_id           TEXT,
+    request_id        TEXT,                          -- REST / command の相関ID
+    source            TEXT NOT NULL,                 -- 'api' | 'agent' | 'sync' | 'git' | ...
+    occurrence_count  INTEGER NOT NULL DEFAULT 1,
+    resolved_at       INTEGER
+);
+
+CREATE INDEX idx_incidents_created ON incidents(created_at DESC);
+CREATE INDEX idx_incidents_group
+    ON incidents(code, source, session_id, node_id, resolved_at);
+CREATE INDEX idx_incidents_last_seen ON incidents(last_seen_at DESC);
 ```
 
 ---

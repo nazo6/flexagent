@@ -27,6 +27,7 @@ base64 = "0.23.1"
 diffy = "0.5.2"
 dirs = "7.0.0"
 dunce = "1.0.5"
+fs4 = { version = "1.1.0", features = ["sync"] }
 futures-util = "0.3.34"
 http-body-util = "0.1.5"
 libc = "0.2.189"

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            INSERT INTO incidents\n                (created_at, last_seen_at, level, code, summary, source)\n            VALUES (?, ?, 'error', 'GIT_FAILED', 'old', 'git')\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "9cb72099a1370490565547595b4893f81360cdfb0a6cb0c2ec95a40781a81424"
+}

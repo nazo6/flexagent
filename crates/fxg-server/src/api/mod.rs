@@ -17,6 +17,8 @@
 
 pub mod auth;
 mod backend;
+mod counters;
+pub(crate) mod diagnostics;
 mod error;
 mod handlers;
 mod pty;
@@ -38,6 +40,8 @@ use fxg_protocol::client_api::ServerWsMessage;
 use fxg_protocol::events::SessionEventBatch;
 
 pub use backend::{ClientApiBackend, ClientCommand, ClientEvent, ClientInfo, SystemExtras};
+pub use counters::{CounterKind, DiagnosticsCounters};
+pub use diagnostics::{incident_retention, log_tail};
 pub use error::ApiError;
 pub use pty::{PtyChannelError, PtyChannelEvent, PtySpawnParams};
 pub use ws::REPLAY_BATCH_SIZE;
@@ -66,7 +70,10 @@ use handlers::settings::{
     upsert_server_secret,
 };
 use handlers::stream::{client_ws, pty_ws};
-use handlers::system::{auth_login, auth_logout, diagnostics, healthz, meta, readyz, system_info};
+use handlers::system::{
+    auth_login, auth_logout, diagnostics, diagnostics_bundle, diagnostics_incidents, healthz, meta,
+    readyz, resolve_incident, system_info,
+};
 
 /// Returns a header value as `&str` (`None` for a missing or non-UTF-8 value).
 // `Result::ok` is disallowed by the error-handling policy, so the explicit
@@ -138,6 +145,15 @@ pub fn client_router<B: ClientApiBackend>(backend: B, options: ClientApiOptions)
         .route("/api/v1/system/info", get(system_info::<B>))
         .route("/api/v1/system/kill-switch", post(kill_switch::<B>))
         .route("/api/v1/diagnostics", get(diagnostics::<B>))
+        .route(
+            "/api/v1/diagnostics/incidents",
+            get(diagnostics_incidents::<B>),
+        )
+        .route(
+            "/api/v1/diagnostics/incidents/{id}/resolve",
+            post(resolve_incident::<B>),
+        )
+        .route("/api/v1/diagnostics/bundle", get(diagnostics_bundle::<B>))
         .route("/api/v1/auth/login", post(auth_login::<B>))
         .route("/api/v1/auth/logout", post(auth_logout))
         .route("/api/v1/projects", get(list_projects::<B>))
@@ -263,6 +279,10 @@ pub fn client_router<B: ClientApiBackend>(backend: B, options: ClientApiOptions)
         .layer(middleware::from_fn_with_state(
             state.clone(),
             security::security::<B>,
+        ))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            diagnostics::record_api_errors::<B>,
         ))
         .layer(middleware::from_fn(request_context::request_context))
         .with_state(state);

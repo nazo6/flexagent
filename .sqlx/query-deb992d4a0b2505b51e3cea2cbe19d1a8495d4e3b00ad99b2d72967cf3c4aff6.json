@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            INSERT INTO incidents\n                (created_at, last_seen_at, level, code, summary, details_json,\n                 session_id, node_id, request_id, source, occurrence_count, resolved_at)\n            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NULL)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 10
+    },
+    "nullable": []
+  },
+  "hash": "deb992d4a0b2505b51e3cea2cbe19d1a8495d4e3b00ad99b2d72967cf3c4aff6"
+}

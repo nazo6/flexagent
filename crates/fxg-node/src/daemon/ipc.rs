@@ -240,6 +240,13 @@ impl DispatchError {
             message: err.to_string(),
         }
     }
+
+    fn from_api_error(_command_id: &CommandId, err: fxg_server::api::ApiError) -> Self {
+        Self {
+            code: err.code,
+            message: err.message,
+        }
+    }
 }
 
 /// Processes a single request and returns the response message.
@@ -330,31 +337,42 @@ async fn handle_local(
             ))
         }
         LocalRequest::Diagnostics { command_id } => {
-            let agents = state
-                .session_manager()
-                .agent_diagnostics()
-                .into_iter()
-                .map(
-                    |(agent_id, stderr_tail)| fxg_protocol::client_api::AgentDiagnostics {
-                        agent_id,
-                        stderr_tail,
-                    },
-                )
-                .collect();
-            let daemon_log = DaemonState::paths(state)
-                .fxg_home()
-                .join("logs")
-                .join("daemon.log")
-                .to_string_lossy()
-                .into_owned();
+            let diagnostics = state
+                .diagnostics_response()
+                .await
+                .map_err(|err| DispatchError::from_api_error(&command_id, err))?;
+            Ok((command_id, LocalResult::Diagnostics { diagnostics }))
+        }
+        LocalRequest::SupportBundle { command_id } => {
+            let bundle = state
+                .support_bundle_response()
+                .await
+                .map_err(|err| DispatchError::from_api_error(&command_id, err))?;
             Ok((
                 command_id,
-                LocalResult::Diagnostics {
-                    diagnostics: fxg_protocol::client_api::DiagnosticsResponse {
-                        node_id: state.node_id().to_owned(),
-                        generated_at: fxg_protocol::util::now_ms(),
-                        agents,
-                        daemon_log: Some(daemon_log),
+                LocalResult::SupportBundle {
+                    bundle: Box::new(bundle),
+                },
+            ))
+        }
+        LocalRequest::Incidents {
+            command_id,
+            limit,
+            include_resolved,
+        } => {
+            let incidents = state
+                .db()
+                .list_incidents(limit.clamp(1, 500), include_resolved)
+                .await
+                .map_err(|err| DispatchError::from_node_error(&command_id, err.into()))?;
+            let (retention_days, max_entries) = fxg_server::api::incident_retention();
+            Ok((
+                command_id,
+                LocalResult::Incidents {
+                    incidents: fxg_protocol::common::IncidentListResponse {
+                        incidents,
+                        retention_days,
+                        max_entries,
                     },
                 },
             ))

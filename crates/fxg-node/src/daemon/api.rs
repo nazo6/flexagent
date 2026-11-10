@@ -15,10 +15,11 @@ use fxg_protocol::client_api::{
     ProvisionersResponse, PruneWorktreesRequest, RemoveWorktreeRequest, RespondElicitationRequest,
     RespondElicitationResponse, RespondPermissionRequest, RespondPermissionResponse,
     ResumeSessionRequest, ResumeSessionResponse, RotateAuthTokenResponse, SessionArchiveRequest,
-    SessionArchiveResponse, WorktreeInfo, WorktreesResponse,
+    SessionArchiveResponse, SupportBundle, SupportBundleConfig, WorktreeInfo, WorktreesResponse,
 };
 use fxg_protocol::common::{
-    AgentAction, CommandResult, DiffScope, ProjectSummary, WorkspaceDiffResponse,
+    AgentAction, CommandResult, ComponentHealth, ComponentName, ComponentState, DiffScope,
+    ProjectSummary, WorkspaceDiffResponse,
 };
 use fxg_server::api::{
     ApiError, ClientApiBackend, ClientCommand, ClientEvent, ClientInfo, PtyChannelError,
@@ -45,6 +46,18 @@ fn audit_source(client: &ClientInfo) -> AuditSource {
         client_ip: client.ip.clone(),
         auth_subject: client.auth_subject.clone(),
         user_agent: client.user_agent.clone(),
+    }
+}
+
+impl DaemonState {
+    /// Shared diagnostics payload (REST and local IPC).
+    pub async fn diagnostics_response(&self) -> Result<DiagnosticsResponse, ApiError> {
+        <Self as ClientApiBackend>::diagnostics(self).await
+    }
+
+    /// Redacted support bundle (REST and local IPC).
+    pub async fn support_bundle_response(&self) -> Result<SupportBundle, ApiError> {
+        <Self as ClientApiBackend>::support_bundle(self).await
     }
 }
 
@@ -99,28 +112,90 @@ impl ClientApiBackend for DaemonState {
             .map_err(api_error)
     }
 
-    async fn diagnostics(&self) -> Result<DiagnosticsResponse, ApiError> {
-        let agents = self
-            .session_manager()
+    fn diagnostics_counters(&self) -> Option<&fxg_server::api::DiagnosticsCounters> {
+        Some(DaemonState::diagnostics_counters(self))
+    }
+
+    fn fxg_home(&self) -> Option<&std::path::Path> {
+        Some(DaemonState::paths(self).fxg_home())
+    }
+
+    async fn role_health(&self, now: i64) -> Vec<ComponentHealth> {
+        let mut sync = if self.config().central_server_url.is_none() {
+            ComponentHealth {
+                component: ComponentName::Sync,
+                state: ComponentState::NotMeasured,
+                message: Some("central server is not configured (local-only mode)".to_owned()),
+                last_ok_at: None,
+                last_error_at: None,
+            }
+        } else if self.central_connected() {
+            ComponentHealth::ok(ComponentName::Sync, now)
+        } else {
+            ComponentHealth::failed(
+                ComponentName::Sync,
+                ComponentState::Degraded,
+                "not connected to the central server",
+                now,
+            )
+        };
+        match self.db().unsynced_event_count().await {
+            Ok(backlog) if backlog > 1000 => {
+                sync = ComponentHealth::failed(
+                    ComponentName::Sync,
+                    ComponentState::Degraded,
+                    format!("{backlog} events are waiting in the outbox"),
+                    now,
+                );
+            }
+            Ok(_) => {}
+            Err(err) => {
+                sync = ComponentHealth::failed(
+                    ComponentName::Sync,
+                    ComponentState::Error,
+                    format!("failed to read the outbox backlog: {err}"),
+                    now,
+                );
+            }
+        }
+        vec![ComponentHealth::ok(ComponentName::Ipc, now), sync]
+    }
+
+    fn agent_diagnostics(&self) -> Vec<AgentDiagnostics> {
+        self.session_manager()
             .agent_diagnostics()
             .into_iter()
             .map(|(agent_id, stderr_tail)| AgentDiagnostics {
                 agent_id,
                 stderr_tail,
             })
-            .collect();
-        let daemon_log = DaemonState::paths(self)
+            .collect()
+    }
+
+    fn support_bundle_config(&self) -> SupportBundleConfig {
+        let config = self.config();
+        SupportBundleConfig {
+            fxg_home: DaemonState::paths(self)
+                .fxg_home()
+                .to_string_lossy()
+                .into_owned(),
+            log_level: config.log.level.clone(),
+            log_file: config.log.file.clone(),
+            log_format: config.log.format.clone(),
+            node_listen_addr: Some(config.listen_addr.clone()),
+            central_server_url: config.central_server_url.clone(),
+            server_listen_addr: None,
+            allowed_hosts: Vec::new(),
+            allowed_origins: Vec::new(),
+        }
+    }
+
+    fn support_bundle_logs(&self, lines: usize) -> Vec<String> {
+        let path = DaemonState::paths(self)
             .fxg_home()
             .join("logs")
-            .join("daemon.log")
-            .to_string_lossy()
-            .into_owned();
-        Ok(DiagnosticsResponse {
-            node_id: self.node_id().to_owned(),
-            generated_at: fxg_protocol::util::now_ms(),
-            agents,
-            daemon_log: Some(daemon_log),
-        })
+            .join("daemon.log");
+        fxg_server::api::log_tail(&path, lines)
     }
 
     async fn system_extras(&self) -> Result<SystemExtras, ApiError> {

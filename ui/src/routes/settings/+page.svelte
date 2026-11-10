@@ -4,6 +4,7 @@
   import { page } from "$app/state";
   import AgentManager from "#lib/components/settings/AgentManager.svelte";
   import AuditLog from "#lib/components/settings/AuditLog.svelte";
+  import DiagnosticsPanel from "#lib/components/settings/DiagnosticsPanel.svelte";
   import SettingsCatalog from "#lib/components/settings/SettingsCatalog.svelte";
   import * as AlertDialog from "#lib/components/ui/alert-dialog/index.ts";
   import { Badge } from "#lib/components/ui/badge/index.ts";
@@ -24,7 +25,6 @@
   import { setMode, userPrefersMode } from "mode-watcher";
   import { toast } from "svelte-sonner";
   import CopyIcon from "@lucide/svelte/icons/copy";
-  import FileDownIcon from "@lucide/svelte/icons/file-down";
   import KeyRoundIcon from "@lucide/svelte/icons/key-round";
   import RefreshCwIcon from "@lucide/svelte/icons/refresh-cw";
   import ShieldIcon from "@lucide/svelte/icons/shield";
@@ -64,31 +64,6 @@
   }
   /** Catalog search query (filters bootstrap and settings rows). */
   let query = $state("");
-
-  // --- Diagnostics ---
-  let diagnosticsBusy = $state(false);
-
-  async function downloadDiagnostics() {
-    if (diagnosticsBusy) return;
-    diagnosticsBusy = true;
-    try {
-      const response = await sync.connection.client.diagnostics();
-      const blob = new Blob([JSON.stringify(response, null, 2)], {
-        type: "application/json",
-      });
-      const url = URL.createObjectURL(blob);
-      const anchor = document.createElement("a");
-      anchor.href = url;
-      anchor.download = `fxg-diagnostics-${Date.now()}.json`;
-      anchor.click();
-      URL.revokeObjectURL(url);
-      toast.success(m.settings_diagnostics_downloaded());
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : String(error));
-    } finally {
-      diagnosticsBusy = false;
-    }
-  }
 
   // --- Node pairing (central server only) ---
   const tokens = createResource<NodeTokenSummary[]>(() => sync.connection.client.nodeTokens(), {
@@ -199,28 +174,7 @@
 
     <Tabs.Content value="bootstrap" class="mt-2 flex flex-col gap-3">
       <SettingsCatalog section="bootstrap" {query} />
-      <Card class="gap-3 p-4">
-        <div class="flex items-start gap-2">
-          <FileDownIcon class="text-muted-foreground mt-0.5 size-4" />
-          <div class="flex flex-1 flex-col gap-1">
-            <h2 class="font-medium">{m.settings_diagnostics_title()}</h2>
-            <p class="text-muted-foreground text-[13px]">
-              {m.settings_diagnostics_description()}
-            </p>
-            <div class="mt-1">
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={diagnosticsBusy}
-                onclick={() => void downloadDiagnostics()}
-              >
-                <FileDownIcon />
-                {m.settings_download_diagnostics()}
-              </Button>
-            </div>
-          </div>
-        </div>
-      </Card>
+      <DiagnosticsPanel />
     </Tabs.Content>
 
     <Tabs.Content value="machine" class="mt-2 flex flex-col gap-3">

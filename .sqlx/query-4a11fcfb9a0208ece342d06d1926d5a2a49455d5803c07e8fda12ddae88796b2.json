@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        DELETE FROM incidents\n         WHERE last_seen_at < ?\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "4a11fcfb9a0208ece342d06d1926d5a2a49455d5803c07e8fda12ddae88796b2"
+}

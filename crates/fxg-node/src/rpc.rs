@@ -24,9 +24,27 @@ pub(crate) async fn execute(
 ) -> NodeRpcOutcome {
     match execute_inner(state, request_id, request, source).await {
         Ok(response) => NodeRpcOutcome::Ok { response },
-        Err(error) => NodeRpcOutcome::Err {
-            error: error.info(),
-        },
+        Err(error) => {
+            if error.is_incident() {
+                let info = error.info();
+                let record = fxg_db::IncidentRecord::new(
+                    error.incident_level(),
+                    info.code,
+                    error.incident_source(),
+                    info.message.clone(),
+                )
+                .with_node_id(Some(state.node_id()))
+                .with_request_id(Some(request_id.as_str()))
+                .with_details(serde_json::json!({
+                    "retryable": info.retryable,
+                    "params": info.params,
+                }));
+                state.db().record_incident_best_effort(&record).await;
+            }
+            NodeRpcOutcome::Err {
+                error: error.info(),
+            }
+        }
     }
 }
 

@@ -142,6 +142,20 @@ pub enum LocalRequest {
         /// Correlation ID
         command_id: CommandId,
     },
+    /// Returns a redacted support bundle (`fxg diagnostics export`).
+    SupportBundle {
+        /// Correlation ID
+        command_id: CommandId,
+    },
+    /// Returns recent persisted incidents (`fxg diagnostics incidents`).
+    Incidents {
+        /// Correlation ID
+        command_id: CommandId,
+        /// Maximum number of entries
+        limit: u32,
+        /// Include resolved incidents
+        include_resolved: bool,
+    },
     /// Sends a prompt (including slash commands and attachments).
     SendPrompt {
         /// Correlation ID
@@ -244,6 +258,8 @@ impl LocalRequest {
             | Self::SessionImport { command_id, .. }
             | Self::GetLocalStatus { command_id }
             | Self::Diagnostics { command_id }
+            | Self::SupportBundle { command_id }
+            | Self::Incidents { command_id, .. }
             | Self::SendPrompt { command_id, .. }
             | Self::ControlSession { command_id, .. }
             | Self::SessionFork { command_id, .. }
@@ -276,6 +292,16 @@ pub enum LocalResult {
     Diagnostics {
         /// Diagnostics payload
         diagnostics: crate::client_api::DiagnosticsResponse,
+    },
+    /// Result of `SupportBundle`
+    SupportBundle {
+        /// Redacted support bundle
+        bundle: Box<crate::client_api::SupportBundle>,
+    },
+    /// Result of `Incidents`
+    Incidents {
+        /// Incident list payload
+        incidents: crate::common::IncidentListResponse,
     },
     /// Result of `GetLocalStatus`
     LocalStatus {

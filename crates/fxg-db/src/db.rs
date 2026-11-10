@@ -13,7 +13,7 @@ use sqlx::SqlitePool;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
 
 use crate::error::DbError;
-use crate::{audit, events, outbox, queries, registration, settings};
+use crate::{audit, events, incidents, outbox, queries, registration, settings};
 
 /// Execution role of a DB.
 ///
@@ -414,6 +414,75 @@ impl Db {
                 "failed to record audit log: {err}"
             );
         }
+    }
+
+    // ------------------------------------------------------------------
+    // Diagnostic incidents
+    // ------------------------------------------------------------------
+
+    /// Records (or groups) a diagnostic incident.
+    pub async fn record_incident(
+        &self,
+        record: &incidents::IncidentRecord,
+    ) -> Result<fxg_protocol::common::IncidentEntry, DbError> {
+        incidents::record(&self.pool, record).await
+    }
+
+    /// Records an incident and only warns when the insert fails.
+    ///
+    /// Diagnostics must never fail the operation that produced them.
+    pub async fn record_incident_best_effort(&self, record: &incidents::IncidentRecord) {
+        if let Err(err) = self.record_incident(record).await {
+            tracing::warn!(
+                code = %record.code,
+                source = %record.source,
+                "failed to record incident: {err}"
+            );
+        }
+    }
+
+    /// Lists incidents newest first.
+    pub async fn list_incidents(
+        &self,
+        limit: u32,
+        include_resolved: bool,
+    ) -> Result<Vec<fxg_protocol::common::IncidentEntry>, DbError> {
+        incidents::list(&self.pool, limit, include_resolved).await
+    }
+
+    /// Marks one incident as resolved.
+    pub async fn resolve_incident(&self, id: i64) -> Result<bool, DbError> {
+        incidents::resolve(&self.pool, id).await
+    }
+
+    /// Resolves every unresolved incident with the given code and source.
+    pub async fn resolve_incidents(
+        &self,
+        code: fxg_protocol::common::ErrorCode,
+        source: fxg_protocol::common::IncidentSource,
+    ) -> Result<u64, DbError> {
+        incidents::resolve_code(&self.pool, code, source).await
+    }
+
+    /// Returns unresolved incidents since `since` (Unix epoch ms).
+    pub async fn unresolved_incidents_since(
+        &self,
+        since: i64,
+    ) -> Result<Vec<fxg_protocol::common::IncidentEntry>, DbError> {
+        incidents::unresolved_since(&self.pool, since).await
+    }
+
+    /// Row counts used by diagnostics and the support bundle.
+    pub async fn database_counts(&self) -> Result<incidents::DatabaseCounts, DbError> {
+        incidents::counts(&self.pool).await
+    }
+
+    /// Recent sessions with their event counts for a support bundle.
+    pub async fn support_bundle_sessions(
+        &self,
+        limit: u32,
+    ) -> Result<Vec<fxg_protocol::common::SupportBundleSession>, DbError> {
+        incidents::support_bundle_sessions(&self.pool, limit).await
     }
 
     // ------------------------------------------------------------------

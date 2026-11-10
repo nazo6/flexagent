@@ -66,6 +66,8 @@ enum Commands {
     Logs(commands::LogsArgs),
     /// Check the local configuration, database, logs and toolchain
     Doctor(commands::DoctorArgs),
+    /// Export a redacted support bundle / list persisted incidents
+    Diagnostics(commands::DiagnosticsArgs),
     /// Start the node daemon in the foreground
     Daemon(commands::DaemonArgs),
     /// Start the central server in the foreground (:8080)

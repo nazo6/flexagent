@@ -8,6 +8,7 @@
 mod acp;
 mod agent;
 mod audit;
+mod diagnostics;
 mod error;
 #[cfg(any(test, feature = "testing"))]
 mod fixture;
@@ -17,6 +18,7 @@ mod session;
 pub use acp::*;
 pub use agent::*;
 pub use audit::*;
+pub use diagnostics::*;
 pub use error::*;
 pub use project::*;
 pub use session::*;

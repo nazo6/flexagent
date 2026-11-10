@@ -1,0 +1,35 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        SELECT (SELECT COUNT(*) FROM sessions) AS sessions,\n               (SELECT COUNT(*) FROM session_events) AS events,\n               (SELECT COUNT(*) FROM incidents) AS incidents\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "sessions",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": "Expression"
+      },
+      {
+        "name": "events",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": "Expression"
+      },
+      {
+        "name": "incidents",
+        "ordinal": 2,
+        "type_info": "Integer",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "2c71467214cbafc5a4345228e9ebf36c11f1a6b010e0a346c669da8e7a210bc9"
+}

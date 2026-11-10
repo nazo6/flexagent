@@ -1,7 +1,7 @@
 //! REST / WS API error type and its HTTP status mapping.
 
 use axum::Json;
-use axum::http::StatusCode;
+use axum::http::{HeaderName, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use fxg_db::DbError;
 use fxg_protocol::client_api::ApiErrorResponse;
@@ -206,12 +206,40 @@ impl From<DbError> for ApiError {
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let status = self.status;
-        (
+        let info = self.into_info();
+        let mut response = (
             status,
             Json(ApiErrorResponse {
-                error: self.into_info(),
+                error: info.clone(),
             }),
         )
-            .into_response()
+            .into_response();
+        // The incident-recording middleware reads the code without buffering the
+        // response body (`x-fxg-error-code`).
+        if let Ok(value) = HeaderValue::from_str(info.code.as_str()) {
+            response
+                .headers_mut()
+                .insert(HeaderName::from_static("x-fxg-error-code"), value);
+        }
+        response
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn error_response_carries_the_code_header() {
+        let response = ApiError::not_found("missing").into_response();
+        assert_eq!(
+            response
+                .headers()
+                .get("x-fxg-error-code")
+                .expect("header")
+                .to_str()
+                .expect("ascii"),
+            "NOT_FOUND"
+        );
     }
 }

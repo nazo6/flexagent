@@ -372,33 +372,45 @@ Phase 3 は `incidents` テーブル・新 API・`fxg doctor` など変更範囲
 
 ### タスクリスト
 
-- [ ] `fxg-db`: `incidents` テーブルを追加する
+- [x] `fxg-db`: `incidents` テーブルを追加する
       （`id`, `created_at`, `level`, `code`, `summary`, `details_json`,
       `session_id`, `node_id`, `request_id`, `source`, `resolved_at`。
-      上限付きリングバッファ + 保持期間）
-- [ ] `fxg-node` / `fxg-server`: エラー境界でインシデントを記録する
-      （同一原因の連続はグルーピング）
-- [ ] コンポーネントヘルスを導入する
+      上限付きリングバッファ + 保持期間）→ migration `0011_incidents.sql`。
+      同一原因 (`code` + `source` + `session_id` + `node_id`) は未解決の間
+      10 分ウィンドウでグルーピングし、14 日 / 1000 行で剪定する
+- [x] `fxg-node` / `fxg-server`: エラー境界でインシデントを記録する
+      （同一原因の連続はグルーピング）→ REST ミドルウェア、Client WS の
+      コマンド失敗 / replay 失敗、ノード RPC、エージェントの
+      `StatusChanged(Error)` で記録する
+- [x] コンポーネントヘルスを導入する
       （`db` / `ipc` / `http` / `central sync` / `registry` / `agent spawn` /
       `disk` / `migrations`。各 `ok` / `degraded` / `error` + 最終エラー +
-      最終成功時刻）
-- [ ] `GET /healthz`（liveness）と `GET /readyz`（DB / マイグレーション込み）
+      最終成功時刻）→ `SystemStatus` / `ComponentHealth`。直近 24 時間の
+      未解決インシデントを該当コンポーネントの劣化理由へ反映する
+- [x] `GET /healthz`（liveness）と `GET /readyz`（DB / マイグレーション込み）
       を追加する
-- [ ] `SystemInfoResponse` / `SystemStatus` にヘルスと劣化理由を追加する
-- [ ] エージェント stderr のセッション別リングバッファを実装する
+- [x] `SystemStatus` にヘルスと劣化理由を追加する
+      （`SystemInfoResponse` は軽量な接続情報のままにし、詳細は
+      `/api/v1/diagnostics` へ集約する）
+- [x] エージェント stderr のセッション別リングバッファを実装する
       （直近 N 行 + 終了コード + 最後の ACP メッセージを
-      セッション診断に含める）
-- [ ] 同期・配信のドロップカウンタを実装する
+      セッション診断に含める）→ `StderrRegistry`（最大 200 行）
+- [x] 同期・配信のドロップカウンタを実装する
       （`dropped_events` / `lagged_broadcasts` / `replay_failures` /
-      `outbox_retries` / `push_failures` / `stale_registry_served`）
-- [ ] `GET /api/v1/diagnostics` と
+      `outbox_retries` / `push_failures`）。`stale_registry_served` は
+      レジストリのキャッシュ経路が未計測のため保留
+- [x] `GET /api/v1/diagnostics` と
       `GET /api/v1/diagnostics/incidents` を追加する
-- [ ] `fxg doctor` を追加する
+- [x] `fxg doctor` を追加する
       （設定検証、DB 整合性、ディスク、バージョン、直近インシデント、
       コンポーネントヘルス）
-- [ ] `fxg status --verbose` / `fxg logs` / `fxg session diagnose <id>` を追加する
-- [ ] サポートバンドル出力（`fxg diagnostics export` / UI）を追加する - バージョン、設定（秘密情報マスク）、DB 統計、インシデント、
+- [ ] 残り: `fxg status --verbose`
+      （`fxg logs` / `fxg session diagnose <id>` は実装済み）
+- [x] サポートバンドル出力（`fxg diagnostics export` / UI）を追加する - バージョン、設定（秘密情報マスク）、DB 統計、インシデント、
       ログ末尾、ノード / セッション状態 - **トークン・Cookie・環境変数・プロンプトの redaction を必須にする**
+      → `GET /api/v1/diagnostics/bundle` と `fxg diagnostics export` /
+      `fxg diagnostics incidents`、設定 > Bootstrap の Diagnostics パネル。
+      redaction はノード / サーバーの両方で共通実装
 
 ### 完了条件 / 検証
 
@@ -406,6 +418,27 @@ Phase 3 は `incidents` テーブル・新 API・`fxg doctor` など変更範囲
   タイムスタンプが現れる
 - サポートバンドルに秘密情報が含まれないことをテストで確認する
 - `/readyz` が DB / マイグレーション異常時に 503 を返す
+
+### 実装ログ / 進捗メモ
+
+- **2026-11-10**: Phase 3 を実装。`incidents` テーブルと
+  `fxg_db::incidents`（グルーピング・保持期間・解決 API）、
+  `SystemStatus` / `ComponentHealth` / `DropCounters` を追加した。
+- **記録境界**: REST のエラー応答に `x-fxg-error-code` を付与し、
+  ミドルウェアがレスポンスボディを読まずにインシデント化する
+  （5xx / 409 / 408 / 429 のみ）。Client WS のコマンド失敗・replay 失敗、
+  ノード RPC、エージェントの `StatusChanged(Error)` も同じテーブルへ記録。
+- **ヘルス**: `db` / `migrations` / `http` / `ipc` / `sync` / `hub` / `disk`
+  を常時測定し、`registry` / `agent spawn` / `git` / `push` は直近 24 時間の
+  未解決インシデントから劣化として導出する。
+- **ドロップカウンタ**: ノードのイベント転送 / Outbox、Client WS の
+  replay / lag、Web Push の失敗をプロセス内カウンタで集計する。
+- **サポートバンドル**: `GET /api/v1/diagnostics/bundle` と
+  `fxg diagnostics export` / `fxg diagnostics incidents`、UI の Diagnostics
+  パネルを追加。redaction（Bearer / Cookie / token / password / secret /
+  ホームディレクトリ）と契約テストを `fxg-server` に置いた。
+- **残り**: `fxg status --verbose` と、`stale_registry_served` の計測は
+  未着手。Phase 5 の preflight は独立して実施する。
 
 ---
 

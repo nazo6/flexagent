@@ -5,11 +5,13 @@
 
 mod admin;
 mod daemon;
+mod diagnostics;
 mod run;
 mod session;
 
 pub use admin::*;
 pub use daemon::*;
+pub use diagnostics::*;
 pub use run::*;
 pub use session::*;
 
