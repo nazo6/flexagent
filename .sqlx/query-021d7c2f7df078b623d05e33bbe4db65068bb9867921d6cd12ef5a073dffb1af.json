@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        SELECT id\n          FROM incidents\n         WHERE code = ?\n           AND source = ?\n           AND session_id IS ?\n           AND node_id IS ?\n           AND resolved_at IS NULL\n           AND last_seen_at >= ?\n         ORDER BY last_seen_at DESC\n         LIMIT 1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "incidents",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 5
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "021d7c2f7df078b623d05e33bbe4db65068bb9867921d6cd12ef5a073dffb1af"
+}

@@ -7,7 +7,7 @@
 use axum::extract::ws::{Message, WebSocket};
 use futures_util::{SinkExt, StreamExt};
 use fxg_protocol::client_api::{ClientWsMessage, ServerWsMessage};
-use fxg_protocol::common::{ErrorCode, ErrorInfo};
+use fxg_protocol::common::{ErrorCode, ErrorInfo, IncidentLevel, IncidentSource};
 use tokio::sync::broadcast;
 
 use super::{ClientApiBackend, ClientCommand, ClientEvent, replay_events, send_ws_json};
@@ -47,6 +47,7 @@ pub(crate) async fn handle_client_ws<B: ClientApiBackend>(backend: B, socket: We
                 Message::Text(text) => match serde_json::from_str::<ClientWsMessage>(&text) {
                     Ok(ClientWsMessage::Subscribe { since_cursor, .. }) => {
                         let requested = since_cursor.unwrap_or(0);
+                        let counters = backend.diagnostics_counters();
                         // After the DB is recreated or reset, the client's stored cursor exceeds
                         // the store's end. That would cause all events in the new store (with
                         // smaller cursors) to be skipped as duplicates, so resync everything from
@@ -69,9 +70,20 @@ pub(crate) async fn handle_client_ws<B: ClientApiBackend>(backend: B, socket: We
                         if let Err(message) =
                             replay_events(&backend, &mut sender, &mut cursor).await
                         {
-                            let error = ServerWsMessage::Error {
-                                error: ErrorInfo::new(ErrorCode::SyncBacklog, message),
-                            };
+                            if let Some(counters) = counters {
+                                counters.incr(super::CounterKind::ReplayFailures);
+                            }
+                            let error = ErrorInfo::new(ErrorCode::SyncBacklog, message);
+                            super::diagnostics::record_info(
+                                &backend,
+                                &error,
+                                IncidentSource::Sync,
+                                IncidentLevel::Error,
+                                None,
+                                None,
+                            )
+                            .await;
+                            let error = ServerWsMessage::Error { error };
                             fxg_protocol::discard_with!(
                                 send_ws_json(&mut sender, &error).await,
                                 "notify the client that replay failed"
@@ -102,6 +114,31 @@ pub(crate) async fn handle_client_ws<B: ClientApiBackend>(backend: B, socket: We
                             continue;
                         };
                         let result = backend.dispatch_command(command).await;
+                        if let Some(error) = result.error.as_ref() {
+                            super::diagnostics::record_info(
+                                &backend,
+                                error,
+                                IncidentSource::Api,
+                                IncidentLevel::Error,
+                                result
+                                    .session_id
+                                    .as_ref()
+                                    .map(fxg_protocol::SessionId::as_str),
+                                None,
+                            )
+                            .await;
+                        }
+                        for warning in &result.warnings {
+                            super::diagnostics::record_warning(
+                                &backend,
+                                warning,
+                                result
+                                    .session_id
+                                    .as_ref()
+                                    .map(fxg_protocol::SessionId::as_str),
+                            )
+                            .await;
+                        }
                         let response = ServerWsMessage::CommandResult {
                             command_id: result.command_id,
                             success: result.success,
@@ -180,11 +217,26 @@ pub(crate) async fn handle_client_ws<B: ClientApiBackend>(backend: B, socket: We
                 }
                 Err(broadcast::error::RecvError::Lagged(skipped)) => {
                     // When the subscription lags, fetch history again from the cursor
+                    if let Some(counters) = backend.diagnostics_counters() {
+                        counters.add(super::CounterKind::DroppedEvents, skipped);
+                        counters.incr(super::CounterKind::LaggedBroadcasts);
+                    }
                     tracing::warn!(skipped, "client ws lagged; replaying from cursor");
                     if let Err(message) = replay_events(&backend, &mut sender, &mut cursor).await {
-                        let error = ServerWsMessage::Error {
-                            error: ErrorInfo::new(ErrorCode::SyncBacklog, message),
-                        };
+                        if let Some(counters) = backend.diagnostics_counters() {
+                            counters.incr(super::CounterKind::ReplayFailures);
+                        }
+                        let error = ErrorInfo::new(ErrorCode::SyncBacklog, message);
+                        super::diagnostics::record_info(
+                            &backend,
+                            &error,
+                            IncidentSource::Sync,
+                            IncidentLevel::Error,
+                            None,
+                            None,
+                        )
+                        .await;
+                        let error = ServerWsMessage::Error { error };
                         fxg_protocol::discard_with!(
                             send_ws_json(&mut sender, &error).await,
                             "notify the client that replay failed"

@@ -725,10 +725,25 @@ pub enum ServerToNodeMsg {
   `/api/v1/nodes/{node_id}/...` のパスに使う。
 - `GET /healthz` / `GET /readyz`: 認証不要の liveness / readiness。
   `readyz` は DB クエリが成功した場合のみ 200、失敗時は 503 を返す。
-- `GET /api/v1/diagnostics`: ローカルノードの診断情報
-  (`DiagnosticsResponse`)。エージェントごとの直近 stderr
-  (`agents[].stderr_tail`、最大 200 行) と `daemon_log` のパスを返す。
-  中央サーバーでは `agents=[]` を返す。
+- `GET /api/v1/diagnostics`: 診断情報 (`DiagnosticsResponse`)。エージェントごとの
+  直近 stderr (`agents[].stderr_tail`、最大 200 行)、`daemon_log` のパス、
+  コンポーネントヘルス / ドロップカウンタ (`health: SystemStatus`)、
+  直近の未解決インシデント (`incidents`) を返す。中央サーバーでは
+  `agents=[]` を返し、`health` は `db` / `migrations` / `http` / `hub` /
+  `disk` を報告する。
+- `GET /api/v1/diagnostics/incidents?limit=50&include_resolved=false`:
+  永続化されたインシデントの一覧 (`IncidentListResponse`)。新しい順。
+  `limit` は最大 500。`resolved_at` が未設定のものだけが既定の対象。
+- `POST /api/v1/diagnostics/incidents/:id/resolve`: インシデントを解決済みに
+  する (204)。既に解決済みでも成功扱い。
+- `GET /api/v1/diagnostics/bundle`: サポートバンドル (`SupportBundle`)。
+  設定 (`config.toml` の安全な項目)、DB 統計、ヘルス、インシデント、
+  セッション概要、ログ末尾を含み、トークン / Cookie / プロンプト /
+  ホームディレクトリは**必ず redaction される**。`fxg diagnostics export` と
+  Web UI の「Export support bundle」が同じエンドポイントを使う。
+- REST のエラー応答には `x-fxg-error-code` ヘッダが付く。診断ミドルウェアは
+  このヘッダだけを読み、5xx と復旧可能な 409 / 408 / 429 をインシデントとして
+  記録する (レスポンスボディは読まない)。
 - `POST /api/v1/auth/login`: Web UI のトークン入力フロー。認証済みリクエスト
   (`Authorization: Bearer <auth_token>`) と `{ "token": "..." }` を受け取り、
   body のトークンを再検証したうえで

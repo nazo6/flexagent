@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        UPDATE incidents\n           SET resolved_at = COALESCE(resolved_at, ?)\n         WHERE id = ?\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "bd7a637561bfd1e4c58f690cdad162e0b9fb83f1bbeaf488b0d1e1ee9644ca2f"
+}

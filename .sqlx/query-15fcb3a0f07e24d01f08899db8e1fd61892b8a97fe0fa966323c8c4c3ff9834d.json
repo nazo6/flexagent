@@ -1,0 +1,170 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        SELECT id, created_at, last_seen_at, level, code, summary, details_json,\n               session_id, node_id, request_id, source, occurrence_count, resolved_at\n          FROM incidents\n         WHERE id = ?\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "incidents",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "name": "created_at",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "incidents",
+            "name": "created_at"
+          }
+        }
+      },
+      {
+        "name": "last_seen_at",
+        "ordinal": 2,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "incidents",
+            "name": "last_seen_at"
+          }
+        }
+      },
+      {
+        "name": "level",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "incidents",
+            "name": "level"
+          }
+        }
+      },
+      {
+        "name": "code",
+        "ordinal": 4,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "incidents",
+            "name": "code"
+          }
+        }
+      },
+      {
+        "name": "summary",
+        "ordinal": 5,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "incidents",
+            "name": "summary"
+          }
+        }
+      },
+      {
+        "name": "details_json",
+        "ordinal": 6,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "incidents",
+            "name": "details_json"
+          }
+        }
+      },
+      {
+        "name": "session_id",
+        "ordinal": 7,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "incidents",
+            "name": "session_id"
+          }
+        }
+      },
+      {
+        "name": "node_id",
+        "ordinal": 8,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "incidents",
+            "name": "node_id"
+          }
+        }
+      },
+      {
+        "name": "request_id",
+        "ordinal": 9,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "incidents",
+            "name": "request_id"
+          }
+        }
+      },
+      {
+        "name": "source",
+        "ordinal": 10,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "incidents",
+            "name": "source"
+          }
+        }
+      },
+      {
+        "name": "occurrence_count",
+        "ordinal": 11,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "incidents",
+            "name": "occurrence_count"
+          }
+        }
+      },
+      {
+        "name": "resolved_at",
+        "ordinal": 12,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "incidents",
+            "name": "resolved_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "15fcb3a0f07e24d01f08899db8e1fd61892b8a97fe0fa966323c8c4c3ff9834d"
+}

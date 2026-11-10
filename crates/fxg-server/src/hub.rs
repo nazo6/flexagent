@@ -1202,10 +1202,12 @@ async fn apply_event_batch(
     if !notify_events.is_empty() {
         let push = state.push().clone();
         let db = state.db().clone();
+        let counters = state.diagnostics_counters_arc();
         fxg_protocol::spawn_guarded!("web push notification", async move {
-            crate::push::notify_permission_requests(&push, &db, &notify_events).await;
-            crate::push::notify_elicitations(&push, &db, &notify_events).await;
-            crate::push::notify_turn_finished(&push, &db, &notify_events).await;
+            crate::push::notify_permission_requests(&push, &db, &notify_events, Some(&counters))
+                .await;
+            crate::push::notify_elicitations(&push, &db, &notify_events, Some(&counters)).await;
+            crate::push::notify_turn_finished(&push, &db, &notify_events, Some(&counters)).await;
         });
     }
 }

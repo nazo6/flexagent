@@ -340,6 +340,7 @@ async fn send_to_subscriptions(
     db: &Db,
     subscriptions: &[PushSubscriptionRecord],
     payload: &PushNotificationPayload,
+    counters: Option<&crate::api::DiagnosticsCounters>,
 ) {
     for subscription in subscriptions {
         match push.send(subscription, payload).await {
@@ -353,6 +354,9 @@ async fn send_to_subscriptions(
                 }
             }
             Err(err) => {
+                if let Some(counters) = counters {
+                    counters.incr(crate::api::CounterKind::PushFailures);
+                }
                 tracing::warn!(endpoint = %subscription.endpoint, "push send failed: {err}");
             }
         }
@@ -367,6 +371,7 @@ pub async fn notify_permission_requests(
     push: &PushService,
     db: &Db,
     events: &[fxg_protocol::events::SessionEventEnvelope],
+    counters: Option<&crate::api::DiagnosticsCounters>,
 ) {
     use fxg_protocol::events::UnifiedEventPayload;
 
@@ -432,7 +437,7 @@ pub async fn notify_permission_requests(
             &options,
         );
 
-        send_to_subscriptions(push, db, &subscriptions, &payload).await;
+        send_to_subscriptions(push, db, &subscriptions, &payload, counters).await;
     }
 }
 
@@ -444,6 +449,7 @@ pub async fn notify_elicitations(
     push: &PushService,
     db: &Db,
     events: &[fxg_protocol::events::SessionEventEnvelope],
+    counters: Option<&crate::api::DiagnosticsCounters>,
 ) {
     use fxg_protocol::events::UnifiedEventPayload;
 
@@ -497,7 +503,7 @@ pub async fn notify_elicitations(
             &message,
         );
 
-        send_to_subscriptions(push, db, &subscriptions, &payload).await;
+        send_to_subscriptions(push, db, &subscriptions, &payload, counters).await;
     }
 }
 
@@ -506,6 +512,7 @@ pub async fn notify_turn_finished(
     push: &PushService,
     db: &Db,
     events: &[fxg_protocol::events::SessionEventEnvelope],
+    counters: Option<&crate::api::DiagnosticsCounters>,
 ) {
     use fxg_protocol::common::SessionStatus;
     use fxg_protocol::events::UnifiedEventPayload;
@@ -551,7 +558,7 @@ pub async fn notify_turn_finished(
         let node_label = session.node_id.to_string();
         let payload =
             turn_finished_notification(&session_id, Some(&session.title), &node_label, failed);
-        send_to_subscriptions(push, db, &subscriptions, &payload).await;
+        send_to_subscriptions(push, db, &subscriptions, &payload, counters).await;
     }
 }
 

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            UPDATE incidents\n               SET last_seen_at = ?,\n                   occurrence_count = occurrence_count + 1,\n                   level = ?,\n                   summary = ?,\n                   details_json = ?,\n                   request_id = COALESCE(?, request_id)\n             WHERE id = ?\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 6
+    },
+    "nullable": []
+  },
+  "hash": "f4868f1610c09d845143fcfb1bd6f9b9347fc4926afed07cc34def368baf025b"
+}

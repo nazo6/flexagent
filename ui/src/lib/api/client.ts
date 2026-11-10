@@ -47,6 +47,8 @@ import type {
   ResumeSessionResponse,
   RotateAuthTokenResponse,
   DiagnosticsResponse,
+  IncidentListResponse,
+  SupportBundle,
   SearchHit,
   SearchResponse,
   SessionArchiveRequest,
@@ -240,9 +242,26 @@ export class ApiClient {
     return response.nodes;
   }
 
-  /** `GET /api/v1/diagnostics` (agent stderr tails + daemon log path). */
+  /** `GET /api/v1/diagnostics` (agent stderr tails, health, recent incidents). */
   diagnostics(): Promise<DiagnosticsResponse> {
     return this.#request("GET", "/api/v1/diagnostics");
+  }
+
+  /** `GET /api/v1/diagnostics/incidents` (newest first). */
+  diagnosticsIncidents(limit = 50, includeResolved = false): Promise<IncidentListResponse> {
+    return this.#request<IncidentListResponse>("GET", "/api/v1/diagnostics/incidents", {
+      query: { limit, include_resolved: includeResolved },
+    });
+  }
+
+  /** `GET /api/v1/diagnostics/bundle` (redacted support bundle). */
+  diagnosticsBundle(): Promise<SupportBundle> {
+    return this.#request("GET", "/api/v1/diagnostics/bundle");
+  }
+
+  /** `POST /api/v1/diagnostics/incidents/:id/resolve`. */
+  resolveIncident(id: number): Promise<void> {
+    return this.#request("POST", `/api/v1/diagnostics/incidents/${id}/resolve`);
   }
 
   /** `GET /api/v1/nodes/:id/fs/browse` */

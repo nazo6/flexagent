@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        UPDATE incidents\n           SET resolved_at = ?\n         WHERE code = ?\n           AND source = ?\n           AND resolved_at IS NULL\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "48c32a6758b83ec9d7032ff347361a7a8a90a16649d8d33aacfe27cb8ac3dac8"
+}

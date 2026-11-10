@@ -81,6 +81,9 @@ pub async fn run(
                 backoff = RECONNECT_MIN;
             }
             Err(err) => {
+                state
+                    .diagnostics_counters()
+                    .incr(fxg_server::api::CounterKind::OutboxRetries);
                 tracing::warn!(url = %server_url, "central server connection failed: {err:#}");
             }
         }
@@ -170,6 +173,12 @@ async fn connect_once(
                 // Ephemeral events (keystrokes and so on) are not synced
                 Ok(SessionBroadcast::Ephemeral(_)) => {}
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
+                    state
+                        .diagnostics_counters()
+                        .add(fxg_server::api::CounterKind::DroppedEvents, skipped);
+                    state
+                        .diagnostics_counters()
+                        .incr(fxg_server::api::CounterKind::LaggedBroadcasts);
                     // Recover missed events from the Outbox (watermark based)
                     tracing::warn!(skipped, "session bus lagged; flushing outbox");
                     flush_outbox(state, &mut sender).await?;

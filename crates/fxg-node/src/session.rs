@@ -19,7 +19,9 @@
 use std::sync::Arc;
 
 use fxg_db::Db;
-use fxg_protocol::common::StreamDeltaPayload;
+use fxg_protocol::common::{
+    ErrorCode, IncidentLevel, IncidentSource, SessionStatus, StreamDeltaPayload,
+};
 use fxg_protocol::events::{SessionEventEnvelope, UnifiedEventPayload};
 use fxg_protocol::util::{now_ms, uuid_v7};
 use tokio::sync::broadcast;
@@ -80,6 +82,8 @@ pub struct SessionEventBus {
 struct Inner {
     db: Db,
     events: broadcast::Sender<SessionBroadcast>,
+    /// Owning node ID (used to attribute incidents)
+    node_id: Option<String>,
 }
 
 impl std::fmt::Debug for SessionEventBus {
@@ -95,8 +99,22 @@ impl SessionEventBus {
     pub fn new(db: Db) -> Self {
         let (events, _receiver) = broadcast::channel(BROADCAST_CAPACITY);
         Self {
-            inner: Arc::new(Inner { db, events }),
+            inner: Arc::new(Inner {
+                db,
+                events,
+                node_id: None,
+            }),
         }
+    }
+
+    /// Attaches the owning node ID so agent errors are recorded as incidents.
+    pub fn with_node_id(mut self, node_id: impl Into<String>) -> Self {
+        self.inner = Arc::new(Inner {
+            db: self.inner.db.clone(),
+            events: self.inner.events.clone(),
+            node_id: Some(node_id.into()),
+        });
+        self
     }
 
     /// The DB handle for persistence.
@@ -169,7 +187,29 @@ impl SessionEventBus {
         if !payload.is_persistable() {
             return Err(NodeError::NonPersistableEvent(payload.event_type()));
         }
+        let agent_error = match &payload {
+            UnifiedEventPayload::StatusChanged {
+                status: SessionStatus::Error,
+                error_message,
+            } => Some(
+                error_message
+                    .clone()
+                    .unwrap_or_else(|| "agent reported an error".to_owned()),
+            ),
+            _ => None,
+        };
         let appended = self.db().append_next_event(session_id, payload).await?;
+        if let Some(message) = agent_error {
+            let record = fxg_db::IncidentRecord::new(
+                IncidentLevel::Error,
+                ErrorCode::AgentProtocolError,
+                IncidentSource::Agent,
+                message,
+            )
+            .with_session(Some(session_id))
+            .with_node_id(self.inner.node_id.as_deref());
+            self.db().record_incident_best_effort(&record).await;
+        }
         self.broadcast(SessionBroadcast::Persisted {
             event: appended.envelope.clone(),
             cursor: appended.cursor,

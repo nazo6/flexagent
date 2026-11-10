@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use axum::http::{HeaderMap, header};
 use fxg_db::Db;
 use fxg_protocol::client_api::{
-    AgentCapabilitiesPreview, AgentOpResponse, AgentsResponse, ConnectionRole,
+    AgentCapabilitiesPreview, AgentDiagnostics, AgentOpResponse, AgentsResponse, ConnectionRole,
     CreateSessionRequest, CreateSessionResponse, CreateWorktreeRequest, DiagnosticsResponse,
     IssueNodeTokenRequest, IssueNodeTokenResponse, KillSwitchResponse, NodeTokensResponse,
     ProbeAgentRequest, ProjectLinkRequest, ProjectLinkResponse, ProjectPreview,
@@ -14,12 +14,12 @@ use fxg_protocol::client_api::{
     PruneWorktreesRequest, PushSubscribeRequest, PushSubscribeResponse, RemoveWorktreeRequest,
     RespondElicitationRequest, RespondElicitationResponse, RespondPermissionRequest,
     RespondPermissionResponse, ResumeSessionRequest, ResumeSessionResponse,
-    RotateAuthTokenResponse, SessionArchiveRequest, SessionArchiveResponse, WorktreeInfo,
-    WorktreesResponse,
+    RotateAuthTokenResponse, SessionArchiveRequest, SessionArchiveResponse, SupportBundle,
+    SupportBundleConfig, WorktreeInfo, WorktreesResponse,
 };
 use fxg_protocol::common::{
-    AgentAction, ClientSource, CommandResult, DiffScope, ErrorCode, ProjectSummary, PromptInput,
-    SessionControlAction, WorkspaceDiffResponse,
+    AgentAction, ClientSource, CommandResult, ComponentHealth, DiffScope, ErrorCode,
+    ProjectSummary, PromptInput, SessionControlAction, SystemStatus, WorkspaceDiffResponse,
 };
 use fxg_protocol::events::SessionEventEnvelope;
 use fxg_protocol::node_server::{NodeRpcRequest, NodeRpcResponse};
@@ -192,12 +192,58 @@ pub trait ClientApiBackend: Clone + Send + Sync + 'static {
 
     /// Diagnostics (`GET /api/v1/diagnostics`).
     ///
-    /// The default implementation reports that diagnostics are unavailable; the
-    /// local node overrides it with the agent stderr tails.
+    /// The default implementation combines component health, recent incidents and
+    /// the role-specific hooks below. Endpoints only override
+    /// [`Self::agent_diagnostics`] / [`Self::role_health`].
     async fn diagnostics(&self) -> Result<DiagnosticsResponse, ApiError> {
-        Err(ApiError::not_found(
-            "diagnostics are not available on this endpoint",
-        ))
+        super::diagnostics::build_diagnostics(self).await
+    }
+
+    /// Process-local delivery counters (exposed by diagnostics).
+    fn diagnostics_counters(&self) -> Option<&super::DiagnosticsCounters> {
+        None
+    }
+
+    /// Data directory (`~/.flexagent`) when the endpoint owns one.
+    fn fxg_home(&self) -> Option<&std::path::Path> {
+        None
+    }
+
+    /// Log file name inside `<fxg_home>/logs` (`daemon.log` / `server.log`).
+    fn log_file_name(&self) -> &'static str {
+        "daemon.log"
+    }
+
+    /// Role-specific components (sync / hub / ipc).
+    async fn role_health(&self, _now: i64) -> Vec<ComponentHealth> {
+        Vec::new()
+    }
+
+    /// Agent stderr tails for diagnostics.
+    fn agent_diagnostics(&self) -> Vec<AgentDiagnostics> {
+        Vec::new()
+    }
+
+    /// Redacted bootstrap configuration included in a support bundle.
+    fn support_bundle_config(&self) -> SupportBundleConfig {
+        SupportBundleConfig::default()
+    }
+
+    /// Tail of the process log included in a support bundle (unredacted; the
+    /// diagnostics layer applies redaction).
+    fn support_bundle_logs(&self, _lines: usize) -> Vec<String> {
+        Vec::new()
+    }
+
+    /// Component health snapshot (`GET /api/v1/diagnostics` / bundle).
+    async fn system_status(&self) -> Result<SystemStatus, ApiError> {
+        Ok(super::diagnostics::build_system_status(self).await)
+    }
+
+    /// Redacted support bundle (`GET /api/v1/diagnostics/bundle` /
+    /// `fxg diagnostics export`).
+    async fn support_bundle(&self) -> Result<SupportBundle, ApiError> {
+        super::diagnostics::build_support_bundle(self).await
     }
 
     /// Client auth token.

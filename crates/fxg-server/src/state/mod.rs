@@ -59,6 +59,7 @@ struct ServerInner {
     client_events: broadcast::Sender<ClientEvent>,
     push: PushService,
     provisioners: ProvisionerManager,
+    diagnostics_counters: std::sync::Arc<crate::api::DiagnosticsCounters>,
 }
 
 impl std::fmt::Debug for ServerState {
@@ -99,6 +100,7 @@ impl ServerState {
                 client_events,
                 push,
                 provisioners,
+                diagnostics_counters: std::sync::Arc::new(crate::api::DiagnosticsCounters::new()),
             }),
         })
     }
@@ -130,6 +132,16 @@ impl ServerState {
     /// VAPID Web Push delivery service.
     pub fn push(&self) -> &PushService {
         &self.inner.push
+    }
+
+    /// Process-local delivery counters exposed by diagnostics.
+    pub fn diagnostics_counters(&self) -> &crate::api::DiagnosticsCounters {
+        &self.inner.diagnostics_counters
+    }
+
+    /// Shared counter handle for spawned tasks.
+    pub fn diagnostics_counters_arc(&self) -> std::sync::Arc<crate::api::DiagnosticsCounters> {
+        std::sync::Arc::clone(&self.inner.diagnostics_counters)
     }
 
     /// Startup options.

@@ -8,17 +8,18 @@ use fxg_db::{Db, PushSubscriptionRecord};
 use fxg_protocol::CommandId;
 use fxg_protocol::client_api::{
     AgentOpResponse, AgentsResponse, ConnectionRole, CreateSessionRequest, CreateSessionResponse,
-    CreateWorktreeRequest, DiagnosticsResponse, IssueNodeTokenRequest, IssueNodeTokenResponse,
-    KillSwitchResponse, NodeTokenSummary, NodeTokensResponse, ProjectLinkRequest,
-    ProjectLinkResponse, ProjectScanRequest, ProjectScanResponse, ProvisionerSummary,
-    ProvisionersResponse, PruneWorktreesRequest, PushSubscribeRequest, PushSubscribeResponse,
-    RemoveWorktreeRequest, RespondElicitationRequest, RespondElicitationResponse,
-    RespondPermissionRequest, RespondPermissionResponse, ResumeSessionRequest,
-    ResumeSessionResponse, RotateAuthTokenResponse, SessionArchiveRequest, SessionArchiveResponse,
+    CreateWorktreeRequest, IssueNodeTokenRequest, IssueNodeTokenResponse, KillSwitchResponse,
+    NodeTokenSummary, NodeTokensResponse, ProjectLinkRequest, ProjectLinkResponse,
+    ProjectScanRequest, ProjectScanResponse, ProvisionerSummary, ProvisionersResponse,
+    PruneWorktreesRequest, PushSubscribeRequest, PushSubscribeResponse, RemoveWorktreeRequest,
+    RespondElicitationRequest, RespondElicitationResponse, RespondPermissionRequest,
+    RespondPermissionResponse, ResumeSessionRequest, ResumeSessionResponse,
+    RotateAuthTokenResponse, SessionArchiveRequest, SessionArchiveResponse, SupportBundleConfig,
     WorktreeInfo, WorktreesResponse,
 };
 use fxg_protocol::common::{
-    AgentAction, CommandResult, DiffScope, ErrorCode, WorkspaceDiffResponse, WorktreeAction,
+    AgentAction, CommandResult, ComponentHealth, ComponentName, DiffScope, ErrorCode,
+    WorkspaceDiffResponse, WorktreeAction,
 };
 use fxg_protocol::node_server::{NodeRpcRequest, NodeRpcResponse, ServerToNodeMsg};
 use fxg_protocol::util::uuid_v7;
@@ -51,13 +52,40 @@ impl ClientApiBackend for ServerState {
         ConnectionRole::CentralServer
     }
 
-    async fn diagnostics(&self) -> Result<DiagnosticsResponse, ApiError> {
-        Ok(DiagnosticsResponse {
-            node_id: "central-server".to_owned(),
-            generated_at: fxg_protocol::util::now_ms(),
-            agents: Vec::new(),
-            daemon_log: None,
-        })
+    fn diagnostics_counters(&self) -> Option<&crate::api::DiagnosticsCounters> {
+        Some(ServerState::diagnostics_counters(self))
+    }
+
+    fn fxg_home(&self) -> Option<&std::path::Path> {
+        Some(&self.inner.options.fxg_home)
+    }
+
+    fn log_file_name(&self) -> &'static str {
+        "server.log"
+    }
+
+    async fn role_health(&self, now: i64) -> Vec<ComponentHealth> {
+        vec![ComponentHealth::ok(ComponentName::Hub, now)]
+    }
+
+    fn support_bundle_config(&self) -> SupportBundleConfig {
+        let allowed_hosts = self.inner.options.allowed_hosts.clone();
+        let allowed_origins = self.inner.options.allowed_origins.clone();
+        SupportBundleConfig {
+            fxg_home: self.inner.options.fxg_home.to_string_lossy().into_owned(),
+            log_level: self.inner.options.log.level.clone(),
+            log_file: self.inner.options.log.file.clone(),
+            log_format: self.inner.options.log.format.clone(),
+            server_listen_addr: Some(self.inner.options.listen_addr.clone()),
+            allowed_hosts,
+            allowed_origins,
+            ..SupportBundleConfig::default()
+        }
+    }
+
+    fn support_bundle_logs(&self, lines: usize) -> Vec<String> {
+        let path = self.inner.options.fxg_home.join("logs").join("server.log");
+        crate::api::diagnostics::log_tail(&path, lines)
     }
 
     async fn system_extras(&self) -> Result<SystemExtras, ApiError> {

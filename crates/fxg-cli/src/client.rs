@@ -13,8 +13,10 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result, anyhow, bail};
 use fxg_node::IpcClient;
 use fxg_protocol::CommandId;
-use fxg_protocol::client_api::DiagnosticsResponse;
-use fxg_protocol::common::{ClientSource, PromptInput, SessionControlAction, SessionSummary};
+use fxg_protocol::client_api::{DiagnosticsResponse, SupportBundle};
+use fxg_protocol::common::{
+    ClientSource, IncidentListResponse, PromptInput, SessionControlAction, SessionSummary,
+};
 use fxg_protocol::config::{env_keys, fxg_home, process_env};
 use fxg_protocol::ipc::{
     IPC_PROTOCOL_VERSION, IpcOutcome, IpcRequest, IpcRequestKind, IpcResultKind, IpcServerMessage,
@@ -468,6 +470,38 @@ impl DaemonClient {
             .await?;
         match result {
             LocalResult::Diagnostics { diagnostics } => Ok(diagnostics),
+            other => bail!("unexpected ipc result: {other:?}"),
+        }
+    }
+
+    /// `fxg diagnostics export` (redacted support bundle).
+    pub async fn support_bundle(&mut self) -> Result<SupportBundle> {
+        let command_id = self.command_id();
+        let result = self
+            .request(LocalRequest::SupportBundle { command_id })
+            .await?;
+        match result {
+            LocalResult::SupportBundle { bundle } => Ok(*bundle),
+            other => bail!("unexpected ipc result: {other:?}"),
+        }
+    }
+
+    /// `fxg diagnostics incidents` (persisted incidents).
+    pub async fn incidents(
+        &mut self,
+        limit: u32,
+        include_resolved: bool,
+    ) -> Result<IncidentListResponse> {
+        let command_id = self.command_id();
+        let result = self
+            .request(LocalRequest::Incidents {
+                command_id,
+                limit,
+                include_resolved,
+            })
+            .await?;
+        match result {
+            LocalResult::Incidents { incidents } => Ok(incidents),
             other => bail!("unexpected ipc result: {other:?}"),
         }
     }

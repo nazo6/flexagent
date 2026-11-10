@@ -285,6 +285,20 @@ export type CompactionStatus =
 /**  Compaction failed */
 "failed";
 
+/**  Health of one component. */
+export type ComponentHealth = {
+	/**  Component name */
+	component: string,
+	/**  Current state */
+	state: string,
+	/**  Human-readable reason for the current state (English fallback) */
+	message?: string | null,
+	/**  Last time the component was observed healthy (Unix epoch ms) */
+	last_ok_at?: number | null,
+	/**  Last time the component failed (Unix epoch ms) */
+	last_error_at?: number | null,
+};
+
 /**  Information about an agent configuration entry (model selection etc.). */
 export type ConfigOptionInfo = {
 	/**  Configuration key */
@@ -406,6 +420,22 @@ export type DataSafety =
 /**  Unknown */
 "unknown";
 
+/**  Database statistics included in a support bundle. */
+export type DatabaseStats = {
+	/**  Database file path after home-directory redaction */
+	path: string,
+	/**  Database file size in bytes */
+	size_bytes: number,
+	/**  Number of sessions */
+	sessions: number,
+	/**  Number of persisted events */
+	events: number,
+	/**  Number of incidents */
+	incidents: number,
+	/**  Events not yet acknowledged by the central server (nodes only) */
+	pending_outbox_events: number,
+};
+
 /**  `GET /api/v1/diagnostics` response. */
 export type DiagnosticsResponse = {
 	/**  Endpoint identifier (`local-node` / `central-server`) */
@@ -416,6 +446,10 @@ export type DiagnosticsResponse = {
 	agents: AgentDiagnostics[],
 	/**  Daemon log path (local node only) */
 	daemon_log: string | null,
+	/**  Component health and delivery counters */
+	health: SystemStatus,
+	/**  Recent persisted incidents (newest first) */
+	incidents: IncidentEntry[],
 };
 
 /**  Scope of a diff. */
@@ -424,6 +458,20 @@ export type DiffScope =
 "uncommitted" | 
 /**  Cumulative diff against the base branch (`git diff <base>...HEAD`) */
 "branch_base";
+
+/**  Dropped / retried delivery counters (reset when the process restarts). */
+export type DropCounters = {
+	/**  Events dropped because a subscriber lagged */
+	dropped_events: number,
+	/**  Broadcast receivers that observed `Lagged` */
+	lagged_broadcasts: number,
+	/**  Client WS replays that failed */
+	replay_failures: number,
+	/**  Outbox connection / send retries */
+	outbox_retries: number,
+	/**  Web Push deliveries that failed */
+	push_failures: number,
+};
 
 /**  User response action for an elicitation (same values as the ACP `ElicitationAction`). */
 export type ElicitationAction = 
@@ -748,6 +796,59 @@ export type InboxResponse = {
 	requests: PermissionRequestEntry[],
 	/**  Unresolved (`pending`) elicitation (structured input) requests */
 	elicitations: ElicitationRequestEntry[],
+};
+
+/**
+ *  A persisted diagnostic incident.
+ * 
+ *  Repeated occurrences of the same cause are grouped into one entry with an
+ *  increasing `occurrence_count` instead of filling the table with duplicates.
+ */
+export type IncidentEntry = {
+	/**  Row ID */
+	id: number,
+	/**  First occurrence (Unix epoch ms) */
+	created_at: number,
+	/**  Most recent occurrence (Unix epoch ms) */
+	last_seen_at: number,
+	/**  Severity */
+	level: string,
+	/**  Structured error code */
+	code: ErrorCode,
+	/**  English human-readable summary */
+	summary: string,
+	/**  Technical details (paths, request context, ...) */
+	details?: RawJson,
+	/**  Related session */
+	session_id?: SessionId | null,
+	/**  Related node */
+	node_id?: NodeId | null,
+	/**  Request correlation ID */
+	request_id?: string | null,
+	/**  Component that produced the incident */
+	source: string,
+	/**  Number of occurrences since the first one */
+	occurrence_count: number,
+	/**  Time the incident was marked resolved (Unix epoch ms) */
+	resolved_at?: number | null,
+};
+
+/**  `GET /api/v1/diagnostics/incidents` response. */
+export type IncidentListResponse = {
+	/**  Newest first */
+	incidents: IncidentEntry[],
+	/**  Retention period of the ring buffer (days) */
+	retention_days: number,
+	/**  Maximum number of retained rows */
+	max_entries: number,
+};
+
+/**  Query of `GET /api/v1/diagnostics/incidents`. */
+export type IncidentQuery = {
+	/**  Maximum number of entries to return (default 50) */
+	limit: number | null,
+	/**  Include incidents that were marked resolved */
+	include_resolved: boolean | null,
 };
 
 /**  Initial session configuration applied right after `session/new`. */
@@ -1810,6 +1911,61 @@ terminal_id: string;
 /**  Output bytes (Base64) */
 data_b64: string };
 
+/**
+ *  `GET /api/v1/diagnostics/bundle` response (`fxg diagnostics export`).
+ * 
+ *  Everything text-based is redacted: tokens, cookies, environment values,
+ *  prompts and the user's home directory never leave the process.
+ */
+export type SupportBundle = {
+	/**  Generation time (Unix epoch ms) */
+	generated_at: number,
+	/**  fxg binary version */
+	version: string,
+	/**  Kind of endpoint */
+	role: ConnectionRole,
+	/**  Redacted bootstrap configuration */
+	config: SupportBundleConfig,
+	/**  Diagnostics (health, incidents, agent stderr tails) */
+	diagnostics: DiagnosticsResponse,
+	/**  Database statistics */
+	database: DatabaseStats,
+	/**  Recent sessions with their event counts */
+	sessions: SupportBundleSession[],
+	/**  Tail of the process log (redacted, oldest first) */
+	logs: string[],
+};
+
+/**  Redacted bootstrap configuration included in a support bundle. */
+export type SupportBundleConfig = {
+	/**  `FXG_HOME` after replacing the user's home directory with `~` */
+	fxg_home: string,
+	/**  Log level */
+	log_level: string | null,
+	/**  Log file destination */
+	log_file: string | null,
+	/**  Log format */
+	log_format: string | null,
+	/**  Local node bind address */
+	node_listen_addr: string | null,
+	/**  Central server URL */
+	central_server_url: string | null,
+	/**  Central server bind address */
+	server_listen_addr: string | null,
+	/**  Extra allowed hosts (central server) */
+	allowed_hosts: string[],
+	/**  Extra allowed origins (central server) */
+	allowed_origins: string[],
+};
+
+/**  Summary of one session in a support bundle. */
+export type SupportBundleSession = {
+	/**  Session summary */
+	session: SessionSummary,
+	/**  Persisted event count */
+	event_count: number,
+};
+
 /**  `GET /api/v1/system/info` response. */
 export type SystemInfoResponse = {
 	/**  Kind of endpoint */
@@ -1824,6 +1980,16 @@ export type SystemInfoResponse = {
 	unsynced_event_count: number | null,
 	/**  WebSocket connection state to the central server (local node only) */
 	central_connected: boolean | null,
+};
+
+/**  Overall health snapshot returned by diagnostics. */
+export type SystemStatus = {
+	/**  Measurement time (Unix epoch ms) */
+	checked_at: number,
+	/**  Per-component health */
+	components: ComponentHealth[],
+	/**  Delivery drop / retry counters */
+	counters: DropCounters,
 };
 
 /**

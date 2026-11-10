@@ -147,7 +147,7 @@ export DATABASE_URL="sqlite://$PWD/target/fxg-dev.db"
 mkdir -p target
 sqlx database create 2>/dev/null || true
 sqlx migrate run --source crates/fxg-db/migrations
-cargo sqlx prepare --workspace
+cargo sqlx prepare --workspace -- --all-targets
 """
 
 [tasks."sqlx:check"]
@@ -159,7 +159,7 @@ export DATABASE_URL="sqlite://$PWD/target/fxg-dev.db"
 mkdir -p target
 sqlx database create 2>/dev/null || true
 sqlx migrate run --source crates/fxg-db/migrations
-cargo sqlx prepare --workspace --check
+cargo sqlx prepare --workspace --check -- --all-targets
 """
 
 # ---------------------------------------------------------------------------

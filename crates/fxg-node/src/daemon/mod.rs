@@ -209,6 +209,8 @@ struct Inner {
     hello_refresh: tokio::sync::Notify,
     /// Git credential proxy (in-memory auth relay for ephemeral VMs)
     credentials: crate::credentials::CredentialBroker,
+    /// Process-local delivery counters exposed by diagnostics
+    diagnostics_counters: std::sync::Arc<fxg_server::api::DiagnosticsCounters>,
 }
 
 /// Shared daemon state (shared by HTTP handlers / IPC handlers / the CLI).
@@ -260,7 +262,7 @@ impl DaemonState {
         config.fxg_home = paths.fxg_home().to_path_buf();
 
         let token = auth::load_or_create(&paths.auth_token_path())?;
-        let bus = SessionEventBus::new(db.clone());
+        let bus = SessionEventBus::new(db.clone()).with_node_id(config.node_id.clone());
         // Reconcile the state of sessions lost when the previous daemon exited
         reconcile_stale_sessions(&bus).await?;
 
@@ -299,6 +301,9 @@ impl DaemonState {
                 central_connected: AtomicBool::new(false),
                 hello_refresh: tokio::sync::Notify::new(),
                 credentials: crate::credentials::CredentialBroker::new(),
+                diagnostics_counters: std::sync::Arc::new(
+                    fxg_server::api::DiagnosticsCounters::new(),
+                ),
             }),
         };
 
@@ -313,6 +318,7 @@ impl DaemonState {
         // (bus Lagged is recovered by the Client WS loop replaying from the cursor)
         let mut bus_rx = state.inner.bus.subscribe();
         let client_tx = state.inner.client_events.clone();
+        let counters = state.diagnostics_counters_arc();
         fxg_protocol::spawn_guarded!("local client event forwarder", async move {
             loop {
                 match bus_rx.recv().await {
@@ -334,6 +340,8 @@ impl DaemonState {
                     // Ephemeral events (keystrokes etc.) are delivered over the PTY WS
                     Ok(crate::session::SessionBroadcast::Ephemeral(_)) => {}
                     Err(broadcast::error::RecvError::Lagged(skipped)) => {
+                        counters.add(fxg_server::api::CounterKind::DroppedEvents, skipped);
+                        counters.incr(fxg_server::api::CounterKind::LaggedBroadcasts);
                         tracing::debug!(skipped, "client event forwarder lagged");
                     }
                     Err(broadcast::error::RecvError::Closed) => break,
@@ -367,6 +375,16 @@ impl DaemonState {
     /// Path resolution for the data directory.
     pub fn paths(&self) -> &NodePaths {
         &self.inner.paths
+    }
+
+    /// Process-local delivery counters exposed by diagnostics.
+    pub fn diagnostics_counters(&self) -> &fxg_server::api::DiagnosticsCounters {
+        &self.inner.diagnostics_counters
+    }
+
+    /// Shared counter handle for spawned tasks.
+    pub fn diagnostics_counters_arc(&self) -> std::sync::Arc<fxg_server::api::DiagnosticsCounters> {
+        std::sync::Arc::clone(&self.inner.diagnostics_counters)
     }
 
     /// Startup configuration.
