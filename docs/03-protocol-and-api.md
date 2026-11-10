@@ -854,6 +854,11 @@ pub enum HubToNodeMsg {
   一時VMセッションは v1 では `INVALID_STATE`
   を返却する。ハブ経由の場合は
   対象ノードへ `ResumeSession` を中継する (設計: docs/04 §4.1)。
+- `POST /api/v1/sessions/:id/title`:
+  セッション名を変更する (`{ "title": String }`。1〜200 文字、空文字は
+  `INVALID_STATE`)。`SessionTitleChanged` を追記するため、ハブ・他クライアント
+  にも同じ名前が同期される。応答は `SessionRenameResponse` (`session_id` /
+  `title`)。ハブ経由の場合は対象ノードへ `RenameSession` を中継する。
 - `POST /api/v1/sessions/:id/archive`:
   セッションをアーカイブ/復元する (`{ "archived": true | false }`。
   `fxg session archive` / `unarchive` の Web UI 版)。アーカイブは

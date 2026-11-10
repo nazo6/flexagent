@@ -1,6 +1,10 @@
 <script lang="ts">
   import * as AlertDialog from "#lib/components/ui/alert-dialog/index.ts";
+  import * as Dialog from "#lib/components/ui/dialog/index.ts";
   import * as DropdownMenu from "#lib/components/ui/dropdown-menu/index.ts";
+  import { Button } from "#lib/components/ui/button/index.ts";
+  import { Input } from "#lib/components/ui/input/index.ts";
+  import { Label } from "#lib/components/ui/label/index.ts";
   import type { SessionSummary } from "#lib/generated/bindings.ts";
   import { m } from "#lib/paraglide/messages.js";
   import { sync } from "#lib/stores/app.svelte.ts";
@@ -9,6 +13,7 @@
   import ArchiveIcon from "@lucide/svelte/icons/archive";
   import ArchiveRestoreIcon from "@lucide/svelte/icons/archive-restore";
   import MoreHorizontalIcon from "@lucide/svelte/icons/more-horizontal";
+  import PencilIcon from "@lucide/svelte/icons/pencil";
   import Trash2Icon from "@lucide/svelte/icons/trash-2";
 
   interface Props {
@@ -27,6 +32,31 @@
   const archived = $derived(session.archived_at !== null);
   let confirmOpen = $state(false);
   let busy = $state(false);
+  let renameOpen = $state(false);
+  let renameTitle = $state("");
+  let renaming = $state(false);
+
+  function openRename(): void {
+    renameTitle = session.title;
+    renameOpen = true;
+  }
+
+  /** Rename the session (the node emits `SessionTitleChanged`). */
+  async function handleRename(event: SubmitEvent): Promise<void> {
+    event.preventDefault();
+    const title = renameTitle.trim();
+    if (title === "" || renaming) return;
+    renaming = true;
+    try {
+      await sync.renameSession(session.session_id, title);
+      toast.success(m.session_renamed());
+      renameOpen = false;
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      renaming = false;
+    }
+  }
 
   /** Archive/unarchive the session (reversible; the event log is retained). */
   async function toggleArchive() {
@@ -81,6 +111,10 @@
       <MoreHorizontalIcon class={iconClass} />
     </DropdownMenu.Trigger>
     <DropdownMenu.Content {align} class="w-44">
+      <DropdownMenu.Item disabled={busy || renaming} onSelect={openRename}>
+        <PencilIcon />
+        {m.session_rename_menu()}
+      </DropdownMenu.Item>
       <DropdownMenu.Item disabled={busy} onSelect={() => void toggleArchive()}>
         {#if archived}
           <ArchiveRestoreIcon />
@@ -102,6 +136,40 @@
     </DropdownMenu.Content>
   </DropdownMenu.Root>
 </span>
+
+<!-- Rename dialog -->
+<Dialog.Root bind:open={renameOpen}>
+  <Dialog.Content class="sm:max-w-md">
+    <form class="flex flex-col gap-4" onsubmit={handleRename}>
+      <Dialog.Header>
+        <Dialog.Title>{m.session_rename_title()}</Dialog.Title>
+        <Dialog.Description>{m.session_rename_description()}</Dialog.Description>
+      </Dialog.Header>
+      <div class="grid gap-2">
+        <Label for="session-title">{m.session_rename_placeholder()}</Label>
+        <Input
+          id="session-title"
+          bind:value={renameTitle}
+          maxlength={200}
+          aria-label={m.session_rename_placeholder()}
+        />
+      </div>
+      <Dialog.Footer>
+        <Button
+          type="button"
+          variant="outline"
+          onclick={() => (renameOpen = false)}
+          disabled={renaming}
+        >
+          {m.common_cancel()}
+        </Button>
+        <Button type="submit" disabled={renaming || renameTitle.trim() === ""}>
+          {m.common_save()}
+        </Button>
+      </Dialog.Footer>
+    </form>
+  </Dialog.Content>
+</Dialog.Root>
 
 <!-- Delete confirmation dialog -->
 <AlertDialog.Root bind:open={confirmOpen}>

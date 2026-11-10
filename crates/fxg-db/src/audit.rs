@@ -24,6 +24,8 @@ pub mod actions {
     pub const SESSION_ARCHIVE: AuditAction = AuditAction::SessionArchive;
     /// Session deleted (purge of event bodies)
     pub const SESSION_DELETE: AuditAction = AuditAction::SessionDelete;
+    /// Session renamed
+    pub const SESSION_RENAME: AuditAction = AuditAction::SessionRename;
     /// Permission resolved (Approve / Reject)
     pub const PERMISSION_RESOLVED: AuditAction = AuditAction::PermissionResolved;
     /// Elicitation (question) resolved

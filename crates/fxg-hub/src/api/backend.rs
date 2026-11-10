@@ -15,8 +15,8 @@ use fxg_protocol::client_api::{
     PushSubscribeResponse, RemoveWorktreeRequest, RespondElicitationRequest,
     RespondElicitationResponse, RespondPermissionRequest, RespondPermissionResponse,
     ResumeSessionRequest, ResumeSessionResponse, RotateAuthTokenResponse, SessionArchiveRequest,
-    SessionArchiveResponse, SessionImportRequest, SessionImportResponse, SupportBundle,
-    SupportBundleConfig, WorktreeInfo, WorktreesResponse,
+    SessionArchiveResponse, SessionImportRequest, SessionImportResponse, SessionRenameRequest,
+    SessionRenameResponse, SupportBundle, SupportBundleConfig, WorktreeInfo, WorktreesResponse,
 };
 use fxg_protocol::common::{
     AgentAction, ClientSource, CommandResult, ComponentHealth, DiffScope, ErrorCode,
@@ -348,6 +348,14 @@ pub trait ClientApiBackend: Clone + Send + Sync + 'static {
         request: SessionArchiveRequest,
         client: ClientInfo,
     ) -> Result<SessionArchiveResponse, ApiError>;
+
+    /// `POST /api/v1/sessions/:id/title` (rename; emits `SessionTitleChanged`).
+    async fn rename_session(
+        &self,
+        session_id: &str,
+        request: SessionRenameRequest,
+        client: ClientInfo,
+    ) -> Result<SessionRenameResponse, ApiError>;
 
     /// `DELETE /api/v1/sessions/:id` (delete).
     ///

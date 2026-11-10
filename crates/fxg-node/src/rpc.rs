@@ -371,6 +371,21 @@ async fn execute_inner(
                 context_restored: outcome.context_restored,
             })
         }
+        NodeRpcRequest::RenameSession { session_id, title } => {
+            let title = state
+                .session_manager()
+                .rename(request_id, session_id.as_str(), &title)
+                .await?;
+            state
+                .record_audit(
+                    fxg_db::audit::actions::SESSION_RENAME,
+                    source,
+                    Some(session_id.as_str()),
+                    serde_json::json!({ "title": title }),
+                )
+                .await;
+            Ok(NodeRpcResponse::Renamed { title })
+        }
         NodeRpcRequest::ArchiveSession {
             session_id,
             archived,

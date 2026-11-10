@@ -61,8 +61,8 @@ use handlers::projects::{
 };
 use handlers::sessions::{
     archive_session, audit_logs, control_session, create_session, delete_session, import_session,
-    inbox, list_sessions, respond_elicitation, respond_permission, resume_session, search,
-    send_prompt, session_detail, session_diff, session_events,
+    inbox, list_sessions, rename_session, respond_elicitation, respond_permission, resume_session,
+    search, send_prompt, session_detail, session_diff, session_events,
 };
 use handlers::settings::{
     browse_fs, delete_node_secret, delete_server_secret, list_agents_node, node_secrets,
@@ -274,6 +274,10 @@ pub fn client_router<B: ClientApiBackend>(backend: B, options: ClientApiOptions)
         .route(
             "/api/v1/sessions/{session_id}/resume",
             post(resume_session::<B>),
+        )
+        .route(
+            "/api/v1/sessions/{session_id}/title",
+            post(rename_session::<B>),
         )
         .route(
             "/api/v1/sessions/{session_id}/archive",

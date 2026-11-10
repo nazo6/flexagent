@@ -12,7 +12,7 @@ use fxg_protocol::client_api::{
     AuditLogsResponse, ControlSessionRequest, CreateSessionRequest, InboxResponse,
     RespondElicitationRequest, RespondPermissionRequest, ResumeSessionRequest, SearchResponse,
     SendPromptRequest, SessionArchiveRequest, SessionDetail, SessionImportRequest,
-    SessionListResponse,
+    SessionListResponse, SessionRenameRequest,
 };
 use fxg_protocol::common::{DiffScope, SessionStatus};
 
@@ -337,6 +337,22 @@ pub(crate) async fn archive_session<B: ClientApiBackend>(
     match state
         .backend
         .archive_session(&session_id, request, client)
+        .await
+    {
+        Ok(response) => Json(response).into_response(),
+        Err(err) => err.into_response(),
+    }
+}
+
+pub(crate) async fn rename_session<B: ClientApiBackend>(
+    State(state): State<ClientApiState<B>>,
+    Extension(client): Extension<ClientInfo>,
+    UrlPath(session_id): UrlPath<String>,
+    Json(request): Json<SessionRenameRequest>,
+) -> Response {
+    match state
+        .backend
+        .rename_session(&session_id, request, client)
         .await
     {
         Ok(response) => Json(response).into_response(),

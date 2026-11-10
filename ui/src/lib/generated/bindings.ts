@@ -1827,6 +1827,20 @@ export type SessionListResponse = {
 	sessions: SessionSummary[],
 };
 
+/**  `POST /api/v1/sessions/:id/title` request. */
+export type SessionRenameRequest = {
+	/**  New display title */
+	title: string,
+};
+
+/**  `POST /api/v1/sessions/:id/title` response. */
+export type SessionRenameResponse = {
+	/**  Target session ID */
+	session_id: SessionId,
+	/**  Title after the rename */
+	title: string,
+};
+
 /**  Session status (same values as `sessions.status`). */
 export type SessionStatus =
 /**  Provisioning an ephemeral VM */

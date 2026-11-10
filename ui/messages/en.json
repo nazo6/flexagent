@@ -703,5 +703,10 @@
   "projects_unlink_title": "Remove project folder?",
   "projects_unlink_description": "Removes {path} from {node}. The project is deleted when no other folder remains; its sessions are kept.",
   "projects_unlink_action": "Remove",
-  "projects_unlinked": "Removed {path}."
+  "projects_unlinked": "Removed {path}.",
+  "session_rename_menu": "Rename…",
+  "session_rename_title": "Rename session",
+  "session_rename_description": "Give this session a name that is easier to recognise in the sidebar.",
+  "session_rename_placeholder": "Session title",
+  "session_renamed": "Session renamed."
 }

@@ -769,6 +769,24 @@ pub struct SessionArchiveResponse {
     pub archived_at: Option<i64>,
 }
 
+/// `POST /api/v1/sessions/:id/title` request.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
+pub struct SessionRenameRequest {
+    /// New display title
+    pub title: String,
+}
+
+/// `POST /api/v1/sessions/:id/title` response.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
+pub struct SessionRenameResponse {
+    /// Target session ID
+    pub session_id: SessionId,
+    /// Title after the rename
+    pub title: String,
+}
+
 /// `POST /api/v1/search` response (FTS5 full-text search).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]

@@ -14,6 +14,7 @@ import type {
   ResumeSessionResponse,
   HubWsMessage,
   SessionArchiveResponse,
+  SessionRenameResponse,
   SessionControlAction,
   SessionEventEnvelope,
   SessionSummary,
@@ -473,6 +474,13 @@ export class SyncStore {
   /**
    * Archive / restore a session (reversible; the event log is retained).
    */
+  /** Rename a session; the node emits `SessionTitleChanged` for other clients. */
+  async renameSession(sessionId: string, title: string): Promise<SessionRenameResponse> {
+    const result = await this.connection.client.renameSession(sessionId, { title });
+    await this.refreshSessions();
+    return result;
+  }
+
   async archiveSession(sessionId: string, archived: boolean): Promise<SessionArchiveResponse> {
     const result = await this.connection.client.archiveSession(sessionId, {
       archived,

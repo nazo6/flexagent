@@ -87,6 +87,8 @@ crate::open_string_enum! {
         SessionArchive => "session_archive",
         /// Session deleted
         SessionDelete => "session_delete",
+        /// Session renamed
+        SessionRename => "session_rename",
         /// Permission resolved
         PermissionResolved => "permission_resolved",
         /// Elicitation resolved

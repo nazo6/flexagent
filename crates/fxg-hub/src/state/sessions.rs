@@ -5,6 +5,7 @@ use fxg_protocol::client_api::{
     CreateSessionRequest, CreateSessionResponse, RespondElicitationRequest,
     RespondElicitationResponse, RespondPermissionRequest, RespondPermissionResponse,
     ResumeSessionRequest, ResumeSessionResponse, SessionArchiveRequest, SessionArchiveResponse,
+    SessionRenameRequest, SessionRenameResponse,
 };
 use fxg_protocol::common::{ErrorCode, WorktreeAction};
 use fxg_protocol::node_hub::{HubToNodeMsg, NodeRpcRequest, NodeRpcResponse};
@@ -567,6 +568,41 @@ impl HubState {
         Ok(SessionArchiveResponse {
             session_id: session_id.into(),
             archived_at,
+        })
+    }
+
+    pub(super) async fn rename_session_impl(
+        &self,
+        session_id: &str,
+        request: SessionRenameRequest,
+        client: ClientInfo,
+    ) -> Result<SessionRenameResponse, ApiError> {
+        let node_id = self
+            .session_node(&fxg_protocol::SessionId::from(session_id))
+            .await?;
+        let title = match self
+            .node_rpc(
+                &node_id,
+                NodeRpcRequest::RenameSession {
+                    session_id: session_id.into(),
+                    title: request.title,
+                },
+            )
+            .await?
+        {
+            NodeRpcResponse::Renamed { title } => title,
+            _ => return Err(ApiError::internal("unexpected node RPC response")),
+        };
+        self.record_audit(
+            fxg_db::audit::actions::SESSION_RENAME,
+            &client,
+            Some(session_id),
+            serde_json::json!({ "node_id": node_id, "title": title }),
+        )
+        .await;
+        Ok(SessionRenameResponse {
+            session_id: session_id.into(),
+            title,
         })
     }
 

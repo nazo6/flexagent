@@ -53,6 +53,8 @@ import type {
   SearchResponse,
   SessionArchiveRequest,
   SessionArchiveResponse,
+  SessionRenameRequest,
+  SessionRenameResponse,
   SessionEventBatch,
   SecretsResponse,
   HubSettingsSnapshot,
@@ -414,6 +416,13 @@ export class ApiClient {
   }
 
   /** `POST /api/v1/sessions/:id/archive` (archive / restore). */
+  /** `POST /api/v1/sessions/:id/title` (rename). */
+  renameSession(sessionId: string, request: SessionRenameRequest): Promise<SessionRenameResponse> {
+    return this.#request("POST", `/api/v1/sessions/${encodeURIComponent(sessionId)}/title`, {
+      body: request,
+    });
+  }
+
   archiveSession(
     sessionId: string,
     request: SessionArchiveRequest,

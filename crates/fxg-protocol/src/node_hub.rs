@@ -181,6 +181,13 @@ pub enum NodeRpcRequest {
         /// Skip native restoration and continue with history replay
         force_replay: bool,
     },
+    /// Rename a session.
+    RenameSession {
+        /// Target session ID
+        session_id: SessionId,
+        /// New title
+        title: String,
+    },
     /// Archive or restore a session.
     ArchiveSession {
         /// Target session ID
@@ -289,6 +296,11 @@ pub enum NodeRpcResponse {
     Resume {
         /// Whether native restoration succeeded (`false` = history replay)
         context_restored: bool,
+    },
+    /// Session rename result (`RenameSession`).
+    Renamed {
+        /// Title after the rename
+        title: String,
     },
     /// Session archive result (`ArchiveSession`).
     Archive {

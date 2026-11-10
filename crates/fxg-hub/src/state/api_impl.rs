@@ -15,8 +15,8 @@ use fxg_protocol::client_api::{
     PushSubscribeResponse, RemoveWorktreeRequest, RespondElicitationRequest,
     RespondElicitationResponse, RespondPermissionRequest, RespondPermissionResponse,
     ResumeSessionRequest, ResumeSessionResponse, RotateAuthTokenResponse, SessionArchiveRequest,
-    SessionArchiveResponse, SessionImportRequest, SessionImportResponse, SupportBundleConfig,
-    WorktreeInfo, WorktreesResponse,
+    SessionArchiveResponse, SessionImportRequest, SessionImportResponse, SessionRenameRequest,
+    SessionRenameResponse, SupportBundleConfig, WorktreeInfo, WorktreesResponse,
 };
 use fxg_protocol::common::{
     AgentAction, CommandResult, ComponentHealth, ComponentName, DiffScope, ErrorCode,
@@ -560,6 +560,15 @@ impl ClientApiBackend for HubState {
         client: ClientInfo,
     ) -> Result<SessionArchiveResponse, ApiError> {
         self.archive_session_impl(session_id, request, client).await
+    }
+
+    async fn rename_session(
+        &self,
+        session_id: &str,
+        request: SessionRenameRequest,
+        client: ClientInfo,
+    ) -> Result<SessionRenameResponse, ApiError> {
+        self.rename_session_impl(session_id, request, client).await
     }
 
     async fn delete_session(&self, session_id: &str, client: ClientInfo) -> Result<(), ApiError> {

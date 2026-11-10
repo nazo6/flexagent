@@ -20,8 +20,8 @@ use fxg_protocol::client_api::{
     RemoveWorktreeRequest, RespondElicitationRequest, RespondElicitationResponse,
     RespondPermissionRequest, RespondPermissionResponse, ResumeSessionRequest,
     ResumeSessionResponse, RotateAuthTokenResponse, SessionArchiveRequest, SessionArchiveResponse,
-    SessionImportRequest, SessionImportResponse, SupportBundle, SupportBundleConfig, WorktreeInfo,
-    WorktreesResponse,
+    SessionImportRequest, SessionImportResponse, SessionRenameRequest, SessionRenameResponse,
+    SupportBundle, SupportBundleConfig, WorktreeInfo, WorktreesResponse,
 };
 use fxg_protocol::common::{
     AgentAction, CommandResult, ComponentHealth, ComponentName, ComponentState, DiffScope,
@@ -567,6 +567,31 @@ impl ClientApiBackend for DaemonState {
         Ok(SessionArchiveResponse {
             session_id: session_id.into(),
             archived_at,
+        })
+    }
+
+    async fn rename_session(
+        &self,
+        session_id: &str,
+        request: SessionRenameRequest,
+        client: ClientInfo,
+    ) -> Result<SessionRenameResponse, ApiError> {
+        let command_id = CommandId::from(fxg_protocol::util::uuid_v7());
+        let title = self
+            .session_manager()
+            .rename(&command_id, session_id, &request.title)
+            .await
+            .map_err(api_error)?;
+        self.record_audit(
+            fxg_db::audit::actions::SESSION_RENAME,
+            &audit_source(&client),
+            Some(session_id),
+            serde_json::json!({ "title": title }),
+        )
+        .await;
+        Ok(SessionRenameResponse {
+            session_id: session_id.into(),
+            title,
         })
     }
 

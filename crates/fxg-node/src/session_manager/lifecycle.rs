@@ -667,6 +667,43 @@ impl SessionManager {
         Ok(archived.then_some(envelope.created_at))
     }
 
+    /// Renames a session (updates the title shown in lists).
+    ///
+    /// Emits `SessionTitleChanged`, which the event store applies to
+    /// `sessions.title` and syncs to the hub like any other session event.
+    pub async fn rename(
+        &self,
+        command_id: &CommandId,
+        session_id: &str,
+        title: &str,
+    ) -> Result<String, NodeError> {
+        let title = title.trim();
+        if title.is_empty() {
+            return Err(NodeError::InvalidState(
+                "session title must not be empty".to_owned(),
+            ));
+        }
+        if title.chars().count() > 200 {
+            return Err(NodeError::InvalidState(
+                "session title must be at most 200 characters".to_owned(),
+            ));
+        }
+        if !self.begin_command(command_id) {
+            return Err(NodeError::CommandDuplicate(command_id.to_string()));
+        }
+        self.ensure_session_exists(session_id).await?;
+        self.inner
+            .bus
+            .record(
+                session_id,
+                UnifiedEventPayload::SessionTitleChanged {
+                    title: title.to_owned(),
+                },
+            )
+            .await?;
+        Ok(title.to_owned())
+    }
+
     /// Deletes a session (`fxg session delete` / Web UI).
     ///
     /// If active (agent process alive), waits for it to stop before appending
