@@ -74,7 +74,7 @@ macro_rules! string_id {
 string_id! {
     /// Correlation ID of a command.
     ///
-    /// Attached to `HubToNodeMsg` / IPC / client WS requests and echoed back in
+    /// Attached to `HubToNodeMsg` / client WS requests and echoed back in
     /// `CommandResult`. It is not an entity ID and is not persisted.
     CommandId
 }

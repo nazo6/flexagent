@@ -172,17 +172,6 @@ fn reserve_port() -> u16 {
     port
 }
 
-/// Local IPC endpoint for tests (a name that does not collide between tests).
-fn test_ipc_endpoint(dir: &Path) -> String {
-    if cfg!(windows) {
-        static COUNTER: AtomicU32 = AtomicU32::new(0);
-        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-        format!(r"\\.\pipe\fxg-e2e-{}-{n}", std::process::id())
-    } else {
-        dir.join("node.sock").to_string_lossy().into_owned()
-    }
-}
-
 /// Creates a Git repository for tests (one commit).
 async fn init_repo(dir: &Path) {
     for args in [
@@ -230,7 +219,6 @@ async fn start_node(
     write_mock_agent_config(home).await;
     let mut config = DaemonConfig::new(home.to_path_buf(), node_id, "E2E Node");
     config.listen_addr = "127.0.0.1:0".to_owned();
-    config.ipc_endpoint = test_ipc_endpoint(home);
     config.hub_url = server_url;
     config.node_token = node_token;
     NodeDaemon::start_with_driver_factory(config, agent.factory())

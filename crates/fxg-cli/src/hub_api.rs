@@ -1,6 +1,6 @@
 //! Hub REST API client (for the CLI).
 //!
-//! Operations that local IPC (a direct daemon connection) cannot provide —
+//! Operations that only the hub provides —
 //! starting an ephemeral VM provisioner (`fxg session new --provisioner`) — call the
 //! hub API named by `[node] hub_url` in `config.toml`
 //! directly (design: docs/05 §1.1; unavailable while the hub is

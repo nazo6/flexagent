@@ -203,7 +203,6 @@ impl usage::RunAsync for NodeStartArgs {
         crate::logging::print_node_banner(
             node.state().node_id(),
             &node.http_addr().to_string(),
-            node.ipc_endpoint(),
             log_file.as_deref(),
             node.state().config().hub_url.as_deref(),
             auth_token.as_deref(),
@@ -230,7 +229,7 @@ impl usage::RunAsync for NodeStartArgs {
     }
 }
 
-/// Waits until the local node accepts IPC connections (used after `--detach`).
+/// Waits until the local node accepts HTTP connections (used after `--detach`).
 async fn wait_for_node() -> Result<NodeClient> {
     let deadline = Instant::now() + Duration::from_secs(15);
     loop {

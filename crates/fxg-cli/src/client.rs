@@ -25,7 +25,6 @@ use fxg_protocol::common::{
 use fxg_protocol::config::{
     AUTH_TOKEN_FILE_NAME, EnvLookup, GlobalConfig, env_keys, fxg_home, process_env,
 };
-use fxg_protocol::ipc::LocalStatus;
 use fxg_protocol::{NodeId, ProjectId};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -36,6 +35,19 @@ const NODE_START_TIMEOUT: Duration = Duration::from_secs(15);
 const NODE_START_LOCK_STALE: Duration = Duration::from_secs(30);
 /// Number of sessions fetched by list / status commands.
 const SESSION_LIST_LIMIT: u32 = 200;
+
+/// Runtime status of the local node shown by `fxg node status`.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct LocalStatus {
+    /// Sessions running locally or recently active
+    pub sessions: Vec<SessionSummary>,
+    /// WebSocket connection state to the hub
+    pub hub_connected: bool,
+    /// Number of outbox events not yet sent
+    pub unsynced_event_count: u64,
+    /// Last synchronization time (Unix epoch ms)
+    pub last_synced_at: Option<i64>,
+}
 
 /// HTTP client for the local node (`fxg node start`).
 pub struct NodeClient {

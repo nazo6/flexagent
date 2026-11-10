@@ -84,7 +84,6 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let mut config = DaemonConfig::new(dir.path().to_path_buf(), "http-node", "HTTP Node");
         config.listen_addr = "127.0.0.1:0".to_owned();
-        config.ipc_endpoint = crate::testutil::test_ipc_endpoint(dir.path());
         let daemon = NodeDaemon::start(config).await.expect("start");
         (daemon, dir)
     }
@@ -556,7 +555,6 @@ mod tests {
         let mut config =
             DaemonConfig::new(dir.path().to_path_buf(), "session-node", "Session Node");
         config.listen_addr = "127.0.0.1:0".to_owned();
-        config.ipc_endpoint = crate::testutil::test_ipc_endpoint(dir.path());
         let mock = crate::testutil::MockAgent::default();
         let daemon = NodeDaemon::start_with_driver_factory(config, mock.factory())
             .await
@@ -737,6 +735,24 @@ mod tests {
             .expect("response");
         assert_eq!(response.status(), StatusCode::OK);
         assert_eq!(body_json(response).await["success"], true);
+
+        let set_mode = serde_json::json!({
+            "command_id": "control-mode-1",
+            "action": {"action": "set_mode", "mode_id": "plan"},
+        });
+        let response = app
+            .clone()
+            .oneshot(post_json(
+                &host,
+                &format!("/api/v1/sessions/{session_id}/control"),
+                Some(&token),
+                &set_mode.to_string(),
+            ))
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(body_json(response).await["success"], true);
+        assert_eq!(mock.modes(), vec!["plan".to_owned()]);
 
         mock.set_resume_supported(true);
         let import = serde_json::json!({

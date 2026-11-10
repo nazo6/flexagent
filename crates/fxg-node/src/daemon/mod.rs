@@ -4,14 +4,11 @@
 //!
 //! - **Local HTTP/WS server** (strictly bound to `127.0.0.1:7860`):
 //!   serves the client API (REST + Client WS) ([`http`])
-//! - **Local IPC server** (Windows named pipe / Unix domain socket):
-//!   accepts commands from the `fxg` CLI ([`ipc`])
 //! - **Authentication**: Bearer / Cookie authentication via `~/.flexagent/auth_token` ([`auth`])
 
 mod api;
 mod auth;
 mod http;
-mod ipc;
 mod ops;
 mod stdio;
 
@@ -30,7 +27,7 @@ use fxg_pty::PtySessionManager;
 use tokio::sync::{broadcast, watch};
 
 use crate::error::NodeError;
-use crate::paths::{NodePaths, ipc_endpoint};
+use crate::paths::NodePaths;
 use crate::session::SessionEventBus;
 use crate::session_manager::{DriverFactory, SessionManager, default_driver_factory};
 
@@ -53,8 +50,6 @@ pub struct DaemonConfig {
     pub node_name: String,
     /// Bind address of the local HTTP/WS server (default `127.0.0.1:7860`)
     pub listen_addr: String,
-    /// Local IPC endpoint (named pipe / UDS path)
-    pub ipc_endpoint: String,
     /// Node Hub WebSocket URL of the hub (standalone when unset)
     pub hub_url: Option<String>,
     /// Per-node pairing token (reads `~/.flexagent/node_token` when omitted)
@@ -79,7 +74,6 @@ impl DaemonConfig {
             node_id: node_id.into(),
             node_name: node_name.into(),
             listen_addr: fxg_protocol::config::NodeBootstrapConfig::DEFAULT_LISTEN_ADDR.to_owned(),
-            ipc_endpoint: ipc_endpoint(&fxg_protocol::config::process_env),
             hub_url: None,
             node_token: None,
             ephemeral: false,
@@ -88,15 +82,13 @@ impl DaemonConfig {
         }
     }
 
-    /// Builds the configuration by resolving the data directory and default IPC
-    /// endpoint from the environment.
+    /// Builds the configuration by resolving the data directory from the environment.
     pub fn from_env(env: fxg_protocol::config::EnvLookup<'_>) -> Self {
         let home = fxg_home(env);
         Self {
             node_id: String::new(),
             node_name: hostname(),
             listen_addr: fxg_protocol::config::NodeBootstrapConfig::DEFAULT_LISTEN_ADDR.to_owned(),
-            ipc_endpoint: ipc_endpoint(env),
             hub_url: env(fxg_protocol::config::env_keys::HUB_URL),
             node_token: env(fxg_protocol::config::env_keys::NODE_TOKEN),
             ephemeral: false,
@@ -210,11 +202,11 @@ struct Inner {
 
     /// Process-local delivery counters exposed by diagnostics
     diagnostics_counters: std::sync::Arc<fxg_hub::api::DiagnosticsCounters>,
-    /// Shutdown sender used by the local IPC `Shutdown` request (set at startup)
+    /// Shutdown sender used by `POST /api/v1/system/shutdown` (set at startup)
     shutdown_tx: std::sync::OnceLock<watch::Sender<bool>>,
 }
 
-/// Shared daemon state (shared by HTTP handlers / IPC handlers / the CLI).
+/// Shared daemon state (shared by HTTP handlers / the CLI).
 #[derive(Clone)]
 pub struct DaemonState {
     inner: Arc<Inner>,
@@ -225,13 +217,12 @@ impl std::fmt::Debug for DaemonState {
         f.debug_struct("DaemonState")
             .field("node_id", &self.inner.config.node_id)
             .field("listen_addr", &self.inner.config.listen_addr)
-            .field("ipc_endpoint", &self.inner.config.ipc_endpoint)
             .finish()
     }
 }
 
 impl DaemonState {
-    /// Registers the shutdown sender used by the local IPC `Shutdown` request.
+    /// Registers the shutdown sender used by the local shutdown endpoint.
     pub(crate) fn set_shutdown_sender(&self, sender: watch::Sender<bool>) {
         fxg_protocol::discard_with!(
             self.inner.shutdown_tx.set(sender),
@@ -239,10 +230,10 @@ impl DaemonState {
         );
     }
 
-    /// Requests a graceful node shutdown (local IPC `Shutdown` / `fxg node stop`).
+    /// Requests a graceful node shutdown (`POST /api/v1/system/shutdown` / `fxg node stop`).
     pub(crate) fn request_shutdown(&self) {
         if let Some(sender) = self.inner.shutdown_tx.get() {
-            fxg_protocol::discard_with!(sender.send(true), "request node shutdown from local IPC");
+            fxg_protocol::discard_with!(sender.send(true), "request node shutdown from the API");
         }
     }
 
@@ -633,7 +624,7 @@ impl DaemonState {
     /// - Sessions that were running: emits a `StatusChanged(Stopped)` event
     ///
     /// Recording to the audit log (`audit_logs`) is the responsibility of the
-    /// caller (IPC / HTTP handler) that holds the client information (IP / route).
+    /// caller (HTTP handler) that holds the client information (IP / route).
     ///
     /// Returns the list of terminated session IDs and PTY IDs.
     pub async fn kill_all_local(
@@ -722,7 +713,6 @@ pub struct NodeDaemon {
     http_addr: SocketAddr,
     shutdown_tx: watch::Sender<bool>,
     http_task: tokio::task::JoinHandle<()>,
-    ipc_task: tokio::task::JoinHandle<()>,
     sync_task: Option<tokio::task::JoinHandle<()>>,
     addr_file: std::path::PathBuf,
 }
@@ -732,7 +722,6 @@ impl std::fmt::Debug for NodeDaemon {
         f.debug_struct("NodeDaemon")
             .field("node_id", &self.state.node_id())
             .field("http_addr", &self.http_addr)
-            .field("ipc_endpoint", &self.state.config().ipc_endpoint)
             .finish()
     }
 }
@@ -753,7 +742,7 @@ impl ShutdownHandle {
 
 impl NodeDaemon {
     /// Starts the daemon (creates the data directory, registers the node,
-    /// starts listening on the local HTTP/WS and local IPC).
+    /// starts listening on the local HTTP/WS).
     pub async fn start(config: DaemonConfig) -> Result<Self, NodeError> {
         Self::start_with_driver_factory(config, default_driver_factory()).await
     }
@@ -793,18 +782,6 @@ impl NodeDaemon {
             http::serve(http_state, listener, http_shutdown).await;
         });
 
-        // Local IPC server (named pipe / UDS).
-        // First check whether another daemon is already running on the same endpoint
-        // (to return the failure to the caller of `start`).
-        ipc::check_endpoint_available(&state.config().ipc_endpoint).await?;
-        let ipc_state = state.clone();
-        let ipc_endpoint = state.config().ipc_endpoint.clone();
-        let ipc_task = tokio::spawn(async move {
-            if let Err(err) = ipc::serve(ipc_state, ipc_endpoint, shutdown_rx).await {
-                tracing::error!("local ipc server stopped: {err}");
-            }
-        });
-
         // Request shutdown on Ctrl-C
         let signal_tx = shutdown_tx.clone();
         fxg_protocol::spawn_guarded!("ctrl-c handler", async move {
@@ -823,7 +800,6 @@ impl NodeDaemon {
         tracing::info!(
             node_id = state.config().node_id,
             http = %http_addr,
-            ipc = %state.config().ipc_endpoint,
             "fxg node start started"
         );
 
@@ -832,7 +808,6 @@ impl NodeDaemon {
             http_addr,
             shutdown_tx,
             http_task,
-            ipc_task,
             sync_task,
             addr_file,
         })
@@ -846,11 +821,6 @@ impl NodeDaemon {
     /// Actual bound address of the local HTTP/WS server.
     pub fn http_addr(&self) -> SocketAddr {
         self.http_addr
-    }
-
-    /// Local IPC endpoint.
-    pub fn ipc_endpoint(&self) -> &str {
-        &self.state.config().ipc_endpoint
     }
 
     /// Returns a handle for requesting shutdown from another thread / the tray.
@@ -904,9 +874,6 @@ impl NodeDaemon {
         if let Err(err) = self.http_task.await {
             tracing::error!(task = "http", "http task terminated unexpectedly: {err}");
         }
-        if let Err(err) = self.ipc_task.await {
-            tracing::error!(task = "ipc", "ipc task terminated unexpectedly: {err}");
-        }
         if let Some(sync_task) = self.sync_task
             && let Err(err) = sync_task.await
         {
@@ -958,15 +925,13 @@ mod tests {
             config.listen_addr,
             fxg_protocol::config::NodeBootstrapConfig::DEFAULT_LISTEN_ADDR
         );
-        assert!(!config.ipc_endpoint.is_empty());
     }
 
     async fn start_test_daemon() -> (NodeDaemon, tempfile::TempDir) {
         let dir = tempfile::tempdir().expect("tempdir");
         let mut config = DaemonConfig::new(dir.path().to_path_buf(), "test-node", "Test Node");
-        // Tests use an ephemeral port and a temporary IPC path to avoid port conflicts
+        // Tests use an ephemeral port to avoid port conflicts
         config.listen_addr = "127.0.0.1:0".to_owned();
-        config.ipc_endpoint = crate::testutil::test_ipc_endpoint(dir.path());
         let daemon = NodeDaemon::start(config).await.expect("start daemon");
         (daemon, dir)
     }
@@ -1040,7 +1005,6 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let mut config = DaemonConfig::new(dir.path().to_path_buf(), "persisted-node", "Node");
         config.listen_addr = "127.0.0.1:0".to_owned();
-        config.ipc_endpoint = crate::testutil::test_ipc_endpoint(dir.path());
         let daemon = NodeDaemon::start(config).await.expect("start");
         daemon.shutdown();
         daemon.wait().await;
@@ -1048,7 +1012,6 @@ mod tests {
         // Restarting without a node_id still uses the same ID
         let mut config = DaemonConfig::new(dir.path().to_path_buf(), "", "");
         config.listen_addr = "127.0.0.1:0".to_owned();
-        config.ipc_endpoint = crate::testutil::test_ipc_endpoint(dir.path());
         let daemon = NodeDaemon::start(config).await.expect("restart");
         assert_eq!(daemon.state().node_id(), "persisted-node");
         assert_eq!(daemon.state().config().node_name, "Node");
@@ -1078,7 +1041,6 @@ mod tests {
         crate::testutil::write_mock_agent_config(dir.path()).await;
         let mut config = DaemonConfig::new(dir.path().to_path_buf(), "kill-node", "Kill Node");
         config.listen_addr = "127.0.0.1:0".to_owned();
-        config.ipc_endpoint = crate::testutil::test_ipc_endpoint(dir.path());
         let mock = crate::testutil::MockAgent::default();
         let daemon = NodeDaemon::start_with_driver_factory(config, mock.factory())
             .await

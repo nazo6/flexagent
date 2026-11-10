@@ -3,8 +3,7 @@
 //! The tests actually start `fxg node start` as a child process and verify that
 //! `fxg session` / `fxg node token` work **through the local HTTP API**.
 //!
-//! Each test uses a temporary `FXG_HOME` (and a unique legacy IPC endpoint
-//! until that server is removed), so it never collides with a real node.
+//! Each test uses a temporary `FXG_HOME`, so it never collides with a real node.
 
 #![allow(
     clippy::disallowed_types,
@@ -24,9 +23,6 @@ fn fxg_bin() -> PathBuf {
 struct TestEnv {
     dir: tempfile::TempDir,
     home: PathBuf,
-    /// Environment variables that isolate the legacy IPC endpoint
-    /// (unix: XDG_RUNTIME_DIR / windows: USERNAME)
-    ipc_env: Vec<(String, String)>,
     node: Option<Child>,
 }
 
@@ -35,27 +31,9 @@ impl TestEnv {
         let dir = tempfile::tempdir().expect("tempdir");
         let home = dir.path().join("flexagent-home");
         std::fs::create_dir_all(&home).expect("mkdir home");
-        let runtime = dir.path().join("runtime");
-        std::fs::create_dir_all(&runtime).expect("mkdir runtime");
-        let ipc_env = if cfg!(windows) {
-            // Tests run in parallel within the same process, so make the Named
-            // Pipe name unique with a counter
-            static COUNTER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-            let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            vec![(
-                "USERNAME".to_owned(),
-                format!("fxg-test-{}-{n}", std::process::id()),
-            )]
-        } else {
-            vec![(
-                "XDG_RUNTIME_DIR".to_owned(),
-                runtime.to_string_lossy().into_owned(),
-            )]
-        };
         Self {
             dir,
             home,
-            ipc_env,
             node: None,
         }
     }
@@ -66,9 +44,6 @@ impl TestEnv {
         command.env("FXG_HOME", &self.home);
         // Never auto-start a competing node while waiting for the explicit one.
         command.env("FXG_NO_AUTO_NODE", "1");
-        for (key, value) in &self.ipc_env {
-            command.env(key, value);
-        }
         command
     }
 

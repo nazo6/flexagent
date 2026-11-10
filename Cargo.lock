@@ -1692,7 +1692,6 @@ dependencies = [
  "fxg-protocol",
  "fxg-pty",
  "http-body-util",
- "libc",
  "rand 0.10.3",
  "reqwest",
  "serde",

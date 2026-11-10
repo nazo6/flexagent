@@ -38,8 +38,6 @@ pub mod env_keys {
     pub const HUB_URL: &str = "FXG_HUB_URL";
     /// Node pairing token (alternative to `~/.flexagent/node_token`)
     pub const NODE_TOKEN: &str = "FXG_NODE_TOKEN";
-    /// Override of the local IPC endpoint (for tests and multiple instances on one host)
-    pub const IPC_ENDPOINT: &str = "FXG_IPC_ENDPOINT";
     /// Disable automatic `fxg node start` startup from CLI commands (`1` / `true`)
     pub const NO_AUTO_NODE: &str = "FXG_NO_AUTO_NODE";
     /// Idle seconds before a warm ACP agent process is disposed (0 = keep until shutdown)

@@ -195,7 +195,6 @@ fn component_for_source(source: &IncidentSource) -> Option<ComponentName> {
         IncidentSource::Pty => Some(ComponentName::Pty),
         IncidentSource::Registry => Some(ComponentName::Registry),
         IncidentSource::Provisioner => Some(ComponentName::Provisioner),
-        IncidentSource::Ipc => Some(ComponentName::Ipc),
         IncidentSource::Push => Some(ComponentName::Push),
         IncidentSource::Service => Some(ComponentName::Service),
         IncidentSource::Unknown(_) => None,

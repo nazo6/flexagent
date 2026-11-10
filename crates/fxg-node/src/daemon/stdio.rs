@@ -82,18 +82,6 @@ pub async fn run_stdio(config: StdioConfig) -> Result<(), NodeError> {
         }
     }
 
-    // Local IPC server (for the GIT_ASKPASS helper / local CLI)
-    let (ipc_shutdown_tx, ipc_shutdown_rx) = watch::channel(false);
-    let ipc_task = tokio::spawn({
-        let state = state.clone();
-        let endpoint = state.config().ipc_endpoint.clone();
-        async move {
-            if let Err(err) = super::ipc::serve(state, endpoint, ipc_shutdown_rx).await {
-                tracing::error!("local ipc server stopped: {err}");
-            }
-        }
-    });
-
     // stdout is reserved for protocol traffic (JSON Lines). Writes are serialized in a dedicated task.
     let (out_tx, mut out_rx) = mpsc::channel::<NodeToHubMsg>(OUT_QUEUE_CAPACITY);
     let writer = tokio::spawn(async move {
@@ -238,13 +226,9 @@ pub async fn run_stdio(config: StdioConfig) -> Result<(), NodeError> {
             tracing::warn!("failed to mark node offline: {err}");
         }
     }
-    fxg_protocol::discard_with!(ipc_shutdown_tx.send(true), "request local IPC shutdown");
     drop(out_tx);
     if let Err(err) = tokio::time::timeout(FLUSH_TIMEOUT, writer).await {
         tracing::warn!("timed out waiting for stdout to flush: {err}");
-    }
-    if let Err(err) = ipc_task.await {
-        tracing::warn!("local IPC task terminated unexpectedly: {err}");
     }
     tracing::info!("fxg node start stopped (stdio transport)");
     Ok(())

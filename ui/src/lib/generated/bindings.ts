@@ -230,7 +230,7 @@ action: SessionControlAction } |
 /**
  *  Correlation ID of a command.
  * 
- *  Attached to `HubToNodeMsg` / IPC / client WS requests and echoed back in
+ *  Attached to `HubToNodeMsg` / client WS requests and echoed back in
  *  `CommandResult`. It is not an entity ID and is not persisted.
  */
 export type CommandId = string;
@@ -694,7 +694,7 @@ export type ErrorCode =
 "CANCELLED";
 
 /**
- *  Structured error exchanged by REST, Client WS, the node protocol and IPC.
+ *  Structured error exchanged by REST, Client WS and the node protocol.
  * 
  *  `message` is the English fallback for logs / CLI; clients translate
  *  `code` (and interpolate `params`) for display. `details` carries
@@ -1329,7 +1329,7 @@ export type ProjectsResponse = {
 /**
  *  A prompt sent to an agent: text plus optional attachments.
  * 
- *  Shared by IPC, Client WS, Node⇔Hub messages and REST so the same payload
+ *  Shared by Client WS, Node⇔Hub messages and REST so the same payload
  *  is validated once and recorded in `UserMessage`.
  */
 export type PromptInput = {

@@ -52,21 +52,6 @@ pub(crate) async fn init_test_repo_with_remote(dir: &Path, remote_url: &str) {
         .expect("git remote add");
 }
 
-/// Returns a local IPC endpoint for tests.
-///
-/// - **Windows**: Named pipe (`\\.\pipe\fxg-test-<pid>-<n>`). Tests run in
-///   parallel within the same process, so a sequence number keeps them unique.
-/// - **Unix**: A temporary socket under `dir` (each test uses its own tempdir).
-pub(crate) fn test_ipc_endpoint(dir: &Path) -> String {
-    if cfg!(windows) {
-        static COUNTER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-        let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        format!(r"\\.\pipe\fxg-test-{}-{n}", std::process::id())
-    } else {
-        dir.join("node.sock").to_string_lossy().into_owned()
-    }
-}
-
 /// Registers a test custom agent (`mock`) in `node.db` under `fxg_home`.
 ///
 /// `EnsureSession` through the daemon resolves launch specs from the DB-owned

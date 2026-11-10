@@ -173,10 +173,10 @@
   - [x] `git-askpass` サブコマンド、node/hub credentials、GitCredential メッセージ、relay
   - [x] `SessionManager` の `GIT_ASKPASS` 注入削除
   - [x] `git_credentials` テーブル・API・UI・型
-- [ ] **Commit 6: IPC 削除**
-  - [ ] `fxg-protocol/src/ipc.rs`、`daemon/ipc.rs`、`ipc_client.rs`、`ipc_framing.rs`
-  - [ ] `ipc_endpoint` / `FXG_IPC_ENDPOINT` / testutil / logging / Cargo の不要依存
-  - [ ] `stdio` モードの IPC サーバー起動削除
+- [x] **Commit 6: IPC 削除**
+  - [x] `fxg-protocol/src/ipc.rs`、`daemon/ipc.rs`、`ipc_client.rs`、`ipc_framing.rs`
+  - [x] `ipc_endpoint` / `FXG_IPC_ENDPOINT` / testutil / logging / Cargo の不要依存
+  - [x] `stdio` モードの IPC サーバー起動削除
 - [ ] **Commit 7: 命名・migration・docs・検証**
   - [ ] `PROTOCOL_VERSION = 2`、migration `0014`（`git_credentials` DROP / 状態・イベント名の移行）
   - [ ] `Bootstrapping` → `Provisioning`、`BootstrapLog` → `ProvisioningLog`、serde alias
@@ -255,3 +255,11 @@
   - `GitCredentialConfig` / `DEFAULT_GIT_USERNAME` / `hub_settings.git_credentials` と Settings UI の Git credential 編集を削除。
   - migration `0014_remove_git_credentials.sql` を追加し、`git_credentials` テーブルを DROP。
   - `secrets::used_by` は Provisioner の `env_secrets` 参照のみを返すよう変更。
+- **2026-11-10: Commit 6 (IPC 削除)**
+  - `fxg-protocol/src/ipc.rs`、`fxg-node/src/daemon/ipc.rs`、`ipc_client.rs`、`ipc_framing.rs` を削除。
+  - `DaemonConfig.ipc_endpoint`、`paths::ipc_endpoint`、`FXG_IPC_ENDPOINT`、テスト用 IPC エンドポイントを削除。
+  - `fxg node start` / `fxg internal stdio` は IPC サーバーを起動しない。
+  - `fxg node start` のバナーから IPC Endpoint を削除。
+  - `fxg-node` の `libc` 依存、診断の `ComponentName::Ipc` / `IncidentSource::Ipc` を削除。
+  - `fxg node status` 用の `LocalStatus` を CLI 側の型として再定義。
+  - `daemon/ipc.rs` の Control set_mode 検証は HTTP テストへ移設。

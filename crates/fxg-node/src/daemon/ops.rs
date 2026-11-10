@@ -1,6 +1,6 @@
-//! Shared implementation of daemon operations (used by both IPC and Client REST).
+//! Shared implementation of daemon operations (used by Client REST and hub relay).
 //!
-//! The local IPC (`fxg` CLI) and the Client REST API (`localhost:7860` /
+//! The Client REST API (`localhost:7860` /
 //! hub relay) perform the same entity operations (worktree
 //! management, project resolution, audit logging), so the implementation is
 //! centralized here.
@@ -30,18 +30,18 @@ fn agent_error(err: anyhow::Error) -> NodeError {
 pub struct AuditSource {
     /// Source IP address
     pub client_ip: String,
-    /// Authenticated subject (`local-ipc` / `bearer:<ip>` etc.)
+    /// Authenticated subject (`local` / `bearer:<ip>` etc.)
     pub auth_subject: String,
     /// User-Agent
     pub user_agent: Option<String>,
 }
 
 impl AuditSource {
-    /// Operation originating from the local CLI (IPC).
+    /// Operation originating from the local process (no request context).
     pub fn local() -> Self {
         Self {
             client_ip: "local".to_owned(),
-            auth_subject: "local-ipc".to_owned(),
+            auth_subject: "local".to_owned(),
             user_agent: None,
         }
     }
@@ -81,7 +81,7 @@ impl DaemonState {
 
     /// Imports an existing agent session and returns the new FXG session ID.
     ///
-    /// Shared by the local IPC command and the Client REST endpoint so the
+    /// Shared by the Client REST endpoint and the hub relay so the
     /// project-binding refresh and audit entry stay identical.
     pub async fn import_session(
         &self,
@@ -112,7 +112,7 @@ impl DaemonState {
         Ok(session_id)
     }
 
-    /// Archives/restores a session (shared implementation for IPC / Client REST / hub relay).
+    /// Archives/restores a session (shared implementation for Client REST / hub relay).
     ///
     /// Archiving is a reversible visibility flag; the event log is retained.
     /// Returns the archive timestamp (Unix epoch ms; `None` when restoring).
@@ -137,7 +137,7 @@ impl DaemonState {
         Ok(archived_at)
     }
 
-    /// Deletes a session (shared implementation for IPC / Client REST / hub relay).
+    /// Deletes a session (shared implementation for Client REST / hub relay).
     ///
     /// A running session is stopped first, then `SessionDeleted` (tombstone) is
     /// appended and the event bodies and permission history are purged

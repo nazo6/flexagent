@@ -148,7 +148,7 @@ enum ResumeMode {
     NativeOnly,
 }
 
-/// One row of the session list (for IPC).
+/// One row of the session list (for the API).
 #[derive(Debug, Clone, PartialEq)]
 pub struct ActiveSessionSummary {
     /// Session ID

@@ -8,7 +8,6 @@
 //! - `common`: shared helper types and error codes
 //! - `node_hub`: Node <-> Hub messages (shared by WS / Stdio)
 //! - `client_api`: Client REST / Client WS / PTY WS messages
-//! - `ipc`: CLI <-> Local Daemon local IPC messages
 //! - `config`: process bootstrap configuration (`config.toml`)
 //! - `settings`: typed settings snapshots, secret metadata and project identity
 //! - `util`: time and ID generation helpers
@@ -33,7 +32,6 @@ pub mod common;
 pub mod config;
 pub mod events;
 pub mod ids;
-pub mod ipc;
 pub mod node_hub;
 pub mod settings;
 pub mod util;

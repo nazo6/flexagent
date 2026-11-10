@@ -122,7 +122,7 @@ impl SessionEventBus {
         &self.inner.db
     }
 
-    /// Subscribes to the event stream (for IPC / local WS / the outbox worker).
+    /// Subscribes to the event stream (for local WS / the outbox worker).
     pub fn subscribe(&self) -> broadcast::Receiver<SessionBroadcast> {
         self.inner.events.subscribe()
     }

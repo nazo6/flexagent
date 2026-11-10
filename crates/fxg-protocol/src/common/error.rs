@@ -241,7 +241,7 @@ impl FromStr for ErrorCode {
     }
 }
 
-/// Structured error exchanged by REST, Client WS, the node protocol and IPC.
+/// Structured error exchanged by REST, Client WS and the node protocol.
 ///
 /// `message` is the English fallback for logs / CLI; clients translate
 /// `code` (and interpolate `params`) for display. `details` carries

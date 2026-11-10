@@ -105,7 +105,7 @@ pub enum NodeError {
     /// JSON conversion error
     #[error("json error: {0}")]
     Json(#[from] serde_json::Error),
-    /// Startup or I/O error of the hub (local HTTP/WS / IPC)
+    /// Startup or I/O error of the hub (local HTTP/WS)
     #[error("hub error: {0}")]
     Hub(String),
     /// A referenced secret value file does not exist
@@ -203,7 +203,7 @@ impl NodeError {
         }
     }
 
-    /// Converts to the structured error code carried in IPC / WebSocket / REST responses.
+    /// Converts to the structured error code carried in WebSocket / REST responses.
     ///
     /// Clients (CLI / PWA) use this code to decide on idempotent retries
     /// (`COMMAND_DUPLICATE` / `ALREADY_RESOLVED`) and to pick a recovery action.
@@ -255,10 +255,10 @@ impl NodeError {
         }
     }
 
-    /// Builds the structured error exchanged by REST / WS / IPC.
+    /// Builds the structured error exchanged by REST / WS.
     ///
     /// Recovery actions and data-safety hints are attached here so every
-    /// transport (REST / WS / IPC / stdio) exposes them consistently.
+    /// transport (REST / WS / stdio) exposes them consistently.
     pub fn info(&self) -> fxg_protocol::common::ErrorInfo {
         use fxg_protocol::common::{DataSafety, RecoveryAction};
 

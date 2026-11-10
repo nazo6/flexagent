@@ -215,7 +215,7 @@ pub trait ClientApiBackend: Clone + Send + Sync + 'static {
         "node.log"
     }
 
-    /// Role-specific components (sync / hub / ipc).
+    /// Role-specific components (sync / hub).
     async fn role_health(&self, _now: i64) -> Vec<ComponentHealth> {
         Vec::new()
     }

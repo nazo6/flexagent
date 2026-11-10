@@ -51,12 +51,12 @@ fn audit_source(client: &ClientInfo) -> AuditSource {
 }
 
 impl DaemonState {
-    /// Shared diagnostics payload (REST and local IPC).
+    /// Shared diagnostics payload (REST).
     pub async fn diagnostics_response(&self) -> Result<DiagnosticsResponse, ApiError> {
         <Self as ClientApiBackend>::diagnostics(self).await
     }
 
-    /// Redacted support bundle (REST and local IPC).
+    /// Redacted support bundle (REST).
     pub async fn support_bundle_response(&self) -> Result<SupportBundle, ApiError> {
         <Self as ClientApiBackend>::support_bundle(self).await
     }
@@ -164,7 +164,7 @@ impl ClientApiBackend for DaemonState {
                 );
             }
         }
-        vec![ComponentHealth::ok(ComponentName::Ipc, now), sync]
+        vec![sync]
     }
 
     fn agent_diagnostics(&self) -> Vec<AgentDiagnostics> {

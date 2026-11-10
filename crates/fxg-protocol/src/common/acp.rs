@@ -215,7 +215,7 @@ pub enum ElicitationAction {
 }
 
 impl ElicitationAction {
-    /// String representation used in JSON / IPC.
+    /// String representation used in JSON.
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Accept => "accept",
