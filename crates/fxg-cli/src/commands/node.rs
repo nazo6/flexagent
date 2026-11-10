@@ -237,7 +237,7 @@ async fn wait_for_node() -> Result<NodeClient> {
         match NodeClient::connect_existing().await {
             Ok(client) => return Ok(client),
             Err(err) if Instant::now() < deadline => {
-                let _ = err;
+                tracing::trace!("node not ready yet: {err}");
                 tokio::time::sleep(Duration::from_millis(100)).await;
             }
             Err(err) => return Err(err),

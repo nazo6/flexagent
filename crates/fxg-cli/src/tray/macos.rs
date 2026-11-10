@@ -2,11 +2,11 @@
 //!
 //! `NSStatusItem` must be created and driven **while the main thread's event
 //! loop is running**, so `fxg node start --tray` hands the main thread over to tao
-//! (the NSApplication loop) and starts the daemon body (tokio runtime) on a
+//! (the NSApplication loop) and starts the node body (tokio runtime) on a
 //! worker thread (called from the early branch in `main.rs`).
 //!
 //! In environments where the tray cannot be created (no window server, etc.) the
-//! daemon logs a warning and keeps running without it.
+//! node logs a warning and keeps running without it.
 
 use std::process::ExitCode;
 use std::sync::Arc;
@@ -22,7 +22,7 @@ use super::{Notifier, TrayAction, TrayContext, TrayUi, TrayUpdate, spawn_control
 use crate::Commands;
 use crate::commands::{NodeCommands, NodeStartArgs};
 
-/// Handles of the started daemon (passed from the worker thread to the main
+/// Handles of the started node (passed from the worker thread to the main
 /// thread).
 type ReadyPayload = (DaemonState, ShutdownHandle, tokio::runtime::Handle);
 
@@ -30,11 +30,11 @@ type ReadyPayload = (DaemonState, ShutdownHandle, tokio::runtime::Handle);
 enum UserEvent {
     /// A tray update arrived
     Tray,
-    /// The daemon stopped (process exit code)
+    /// The node stopped (process exit code)
     DaemonStopped(i32),
 }
 
-/// If this is `fxg node start --tray` (macOS), start the daemon with a tray on the
+/// If this is `fxg node start --tray` (macOS), start the node with a tray on the
 /// main thread.
 ///
 /// When it returns `Some`, the caller (`main`) exits with that exit code. When
@@ -65,7 +65,7 @@ fn run_node_with_tray(
 ) -> ExitCode {
     let config = args.node_config_from(global);
 
-    // The daemon body (tokio) starts on a worker thread (tao owns the main
+    // The node body (tokio) starts on a worker thread (tao owns the main
     // thread)
     let (ready_tx, ready_rx) = mpsc::channel::<Result<ReadyPayload, String>>();
     let worker = match std::thread::Builder::new()
@@ -83,11 +83,11 @@ fn run_node_with_tray(
                 match NodeDaemon::start(config).await {
                     Ok(node) => {
                         let _ = ready_tx.send(Ok((
-                            daemon.state().clone(),
-                            daemon.shutdown_handle(),
+                            node.state().clone(),
+                            node.shutdown_handle(),
                             handle,
                         )));
-                        daemon.wait().await;
+                        node.wait().await;
                         0
                     }
                     Err(err) => {

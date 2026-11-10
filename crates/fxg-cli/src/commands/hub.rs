@@ -254,7 +254,7 @@ impl usage::RunAsync for HubRestartArgs {
             return Ok(());
         }
         if let Ok(client) = HubClient::local(&fxg_protocol::config::process_env) {
-            let _ = client.shutdown().await;
+            fxg_protocol::discard_with!(client.shutdown().await, "stop the hub before restarting");
         }
         let env = fxg_protocol::config::process_env;
         let global = fxg_protocol::config::GlobalConfig::load(&env)
@@ -284,8 +284,20 @@ impl usage::RunAsync for HubStatusArgs {
     async fn run_async(self) -> Self::Output {
         let service_installed = crate::service::is_installed(ServiceTarget::Hub);
         let client = HubClient::local(&fxg_protocol::config::process_env)?;
-        let info = client.system_info().await.ok();
-        let nodes = client.nodes().await.ok();
+        let info = match client.system_info().await {
+            Ok(info) => Some(info),
+            Err(err) => {
+                tracing::debug!("hub system info unavailable: {err}");
+                None
+            }
+        };
+        let nodes = match client.nodes().await {
+            Ok(nodes) => Some(nodes),
+            Err(err) => {
+                tracing::debug!("hub nodes unavailable: {err}");
+                None
+            }
+        };
 
         if self.json {
             let value = serde_json::json!({

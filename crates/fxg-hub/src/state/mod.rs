@@ -75,7 +75,10 @@ impl std::fmt::Debug for HubState {
 impl HubState {
     /// Registers the shutdown sender used by `POST /api/v1/system/shutdown`.
     pub(crate) fn set_shutdown_sender(&self, sender: watch::Sender<bool>) {
-        let _ = self.inner.shutdown_tx.set(sender);
+        fxg_protocol::discard_with!(
+            self.inner.shutdown_tx.set(sender),
+            "register the hub shutdown sender"
+        );
     }
 
     /// Requests a graceful hub shutdown.

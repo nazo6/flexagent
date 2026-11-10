@@ -234,7 +234,10 @@ impl std::fmt::Debug for DaemonState {
 impl DaemonState {
     /// Registers the shutdown sender used by the local IPC `Shutdown` request.
     pub(crate) fn set_shutdown_sender(&self, sender: watch::Sender<bool>) {
-        let _ = self.inner.shutdown_tx.set(sender);
+        fxg_protocol::discard_with!(
+            self.inner.shutdown_tx.set(sender),
+            "register the node shutdown sender"
+        );
     }
 
     /// Requests a graceful node shutdown (local IPC `Shutdown` / `fxg node stop`).
