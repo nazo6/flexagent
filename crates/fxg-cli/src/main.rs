@@ -75,11 +75,9 @@ enum Commands {
     Daemon(commands::DaemonArgs),
     /// Start the central server in the foreground (:8080)
     Server(commands::ServerArgs),
-    /// Zero-touch initialization inside an ephemeral VM (git clone + automatic
-    /// tool install; output goes to stderr)
-    BootstrapWorkspace(commands::BootstrapWorkspaceArgs),
-    /// GIT_ASKPASS helper for the Git credential proxy (internal use)
-    GitAskpass(commands::GitAskpassArgs),
+    /// Internal commands invoked by Git, provisioners, or system integrations
+    #[usage(hide)]
+    Internal(commands::InternalArgs),
     /// Manage the background service that starts at OS login
     Service(commands::ServiceArgs),
     /// Open a tokenized URL in the default browser

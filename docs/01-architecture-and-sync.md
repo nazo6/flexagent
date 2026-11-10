@@ -459,7 +459,7 @@ set -eu
   echo "[fxg-bootstrap] Installing fxg & mise..."
   curl -fsSL https://github.com/nazo6/flexagent/releases/latest/download/fxg-linux-x86_64 -o /tmp/fxg
   chmod +x /tmp/fxg
-  /tmp/fxg bootstrap-workspace --repo "$FXG_GIT_URL" --branch "$FXG_GIT_BRANCH" --dir /tmp/workspace
+  /tmp/fxg internal bootstrap-workspace --repo "$FXG_GIT_URL" --branch "$FXG_GIT_BRANCH" --dir /tmp/workspace
 } >&2
 
 # セットアップ完了後、stdout/stdin を用いてデーモン通信を開始
@@ -469,14 +469,14 @@ exec /tmp/fxg daemon --stdio --ephemeral --workspace /tmp/workspace
 - **ブートストラップ時の環境変数注入**: プロビジョナー起動時に `fxg server` が
   `FXG_GIT_URL` / `FXG_GIT_BRANCH` および**短命の `FXG_GIT_TOKEN`**
   を環境変数として注入します。 デーモン起動前の
-  `git clone`（`bootstrap-workspace` 内）は、`bootstrap-workspace`
+  `git clone`（`internal bootstrap-workspace` 内）は、`internal bootstrap-workspace`
   が内部で生成する `GIT_ASKPASS` ヘルパー経由で `FXG_GIT_TOKEN` を Git
   に渡します（URL へのトークン埋め込みは行わない）。 トークンは一時VMの
   Drain・プロセス終了とともに失効します。デーモン起動後（`exec fxg daemon --stdio`
   以降）は §6.4 の `GIT_ASKPASS` プロキシ（stdio パイプ経由の
   `GitCredentialRequest`）に切り替わります。
 
-#### `fxg bootstrap-workspace` が自動で行うこと
+#### `fxg internal bootstrap-workspace` が自動で行うこと
 
 1. **スタンドアロンツールマネージャ (`mise` / `uv`) の配置**:
    - 単一バイナリである `mise` と `uv` を `~/.local/bin`
@@ -512,7 +512,7 @@ exec /tmp/fxg daemon --stdio --ephemeral --workspace /tmp/workspace
      `NodeToServerMsg::GitCredentialRequest`
      を中央サーバーへ送り、中央サーバーから対象リポジトリの認証トークンをオンメモリで受け取ってGitへ渡します。
      - **実装**: デーモンはエージェントプロセスへ `GIT_ASKPASS`
-       （`~/.flexagent/git-askpass.sh` → `fxg git-askpass <prompt>`）と
+       （`~/.flexagent/git-askpass.sh` → `fxg internal git-askpass <prompt>`）と
        `GIT_TERMINAL_PROMPT=0` を注入する。ヘルパーはローカルIPC でデーモンへ
        問い合わせ、デーモンが Node ⇔ Server 接続（WS / stdio 共通）上で
        `GitCredentialRequest` を中継する。トークンは

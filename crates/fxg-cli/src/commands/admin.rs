@@ -118,10 +118,32 @@ impl usage::RunAsync for ProvisionersTestArgs {
 }
 
 // ----------------------------------------------------------------------
-// fxg bootstrap-workspace
+// fxg internal <command>
 // ----------------------------------------------------------------------
 
-/// Arguments of `fxg bootstrap-workspace` (run by the provisioner inside an
+/// Arguments of `fxg internal <command>`.
+#[derive(Debug, Args)]
+#[usage(run_async, arg_required_else_help)]
+pub struct InternalArgs {
+    #[usage(subcommand)]
+    command: InternalCommands,
+}
+
+/// Internal commands invoked by Git, provisioners, or system integrations.
+#[derive(Debug, usage::Subcommands)]
+#[usage(run_async)]
+pub enum InternalCommands {
+    /// GIT_ASKPASS helper for the Git credential proxy
+    GitAskpass(GitAskpassArgs),
+    /// Zero-touch workspace bootstrap inside ephemeral VMs
+    BootstrapWorkspace(BootstrapWorkspaceArgs),
+}
+
+// ----------------------------------------------------------------------
+// fxg internal bootstrap-workspace
+// ----------------------------------------------------------------------
+
+/// Arguments of `fxg internal bootstrap-workspace` (run by the provisioner inside an
 /// ephemeral VM).
 #[derive(Debug, Args)]
 pub struct BootstrapWorkspaceArgs {
@@ -197,10 +219,10 @@ impl usage::RunAsync for BootstrapWorkspaceArgs {
 }
 
 // ----------------------------------------------------------------------
-// fxg git-askpass (GIT_ASKPASS helper)
+// fxg internal git-askpass (GIT_ASKPASS helper)
 // ----------------------------------------------------------------------
 
-/// Arguments of `fxg git-askpass` (an internal command Git invokes as
+/// Arguments of `fxg internal git-askpass` (an internal command Git invokes as
 /// `GIT_ASKPASS`).
 #[derive(Debug, Args)]
 pub struct GitAskpassArgs {
