@@ -120,7 +120,7 @@ async fn main() -> ExitCode {
     // thread's event loop, so `fxg daemon --tray` hands the main thread over to
     // the tao loop here (the daemon body moves to a worker thread).
     #[cfg(target_os = "macos")]
-    if let Some(code) = tray::run_daemon_if_requested(&cli.command) {
+    if let Some(code) = tray::run_daemon_if_requested(&cli.command).await {
         return code;
     }
 

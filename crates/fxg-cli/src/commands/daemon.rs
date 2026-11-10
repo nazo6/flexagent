@@ -164,19 +164,7 @@ impl usage::RunAsync for DaemonArgs {
                 .context("fxg daemon --stdio failed");
         }
 
-        let tray_configured = match node_db(&env).await {
-            Ok(db) => match db.node_settings().await {
-                Ok(settings) => settings.and_then(|settings| settings.tray),
-                Err(err) => {
-                    tracing::debug!("failed to read node settings for the tray: {err}");
-                    None
-                }
-            },
-            Err(err) => {
-                tracing::debug!("failed to open node.db for the tray setting: {err}");
-                None
-            }
-        };
+        let tray_configured = load_tray_setting(&env).await;
         let tray_enabled = self.tray_requested(tray_configured);
         let config = self.daemon_config_from(&global);
         let daemon = fxg_node::daemon::NodeDaemon::start(config)
@@ -221,6 +209,23 @@ impl usage::RunAsync for DaemonArgs {
             tray.close();
         }
         Ok(())
+    }
+}
+
+/// Reads the `tray` setting from `node.db` (returns `None` if unset or on error).
+pub(crate) async fn load_tray_setting(env: fxg_protocol::config::EnvLookup<'_>) -> Option<bool> {
+    match node_db(env).await {
+        Ok(db) => match db.node_settings().await {
+            Ok(settings) => settings.and_then(|settings| settings.tray),
+            Err(err) => {
+                tracing::debug!("failed to read node settings for the tray: {err}");
+                None
+            }
+        },
+        Err(err) => {
+            tracing::debug!("failed to open node.db for the tray setting: {err}");
+            None
+        }
     }
 }
 
