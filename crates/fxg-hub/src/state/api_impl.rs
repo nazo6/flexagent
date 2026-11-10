@@ -81,7 +81,7 @@ impl ClientApiBackend for HubState {
             log_level: self.inner.options.log.level.clone(),
             log_file: self.inner.options.log.file.clone(),
             log_format: self.inner.options.log.format.clone(),
-            server_listen_addr: Some(self.inner.options.listen_addr.clone()),
+            hub_listen_addr: Some(self.inner.options.listen_addr.clone()),
             allowed_hosts,
             allowed_origins,
             ..SupportBundleConfig::default()

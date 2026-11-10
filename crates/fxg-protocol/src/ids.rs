@@ -103,7 +103,7 @@ string_id! {
 }
 
 string_id! {
-    /// ID of a secret stored in `~/.flexagent/secrets/{node,server}/<id>`.
+    /// ID of a secret stored in `~/.flexagent/secrets/{node,hub}/<id>`.
     SecretId
 }
 

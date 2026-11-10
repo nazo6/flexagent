@@ -426,7 +426,7 @@ fn redact_config(config: SupportBundleConfig, home: Option<&Path>) -> SupportBun
         log_format: config.log_format.map(|value| redact_text(&value, home)),
         node_listen_addr: config.node_listen_addr,
         hub_url: config.hub_url.map(|value| redact_text(&value, home)),
-        server_listen_addr: config.server_listen_addr,
+        hub_listen_addr: config.hub_listen_addr,
         allowed_hosts: config.allowed_hosts,
         allowed_origins: config.allowed_origins,
     }

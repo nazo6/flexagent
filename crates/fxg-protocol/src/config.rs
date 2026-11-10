@@ -8,7 +8,7 @@
 //! settings, agent definitions, provisioners, project profiles, secrets) is owned
 //! by `node.db` / `hub.db` and edited through the client API.
 //!
-//! These are server/CLI internal types and are excluded from `specta` export
+//! These are hub/CLI internal types and are excluded from `specta` export
 //! (the convention is that only types exposed to clients get
 //! `#[specta(collect)]`).
 

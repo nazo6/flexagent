@@ -1,4 +1,4 @@
-//! Node <-> Central Server protocol (shared by WebSocket and stdio pipe).
+//! Node <-> Hub protocol (shared by WebSocket and stdio pipe).
 //!
 //! A resident node (outbound WebSocket) and an ephemeral VM node (JSON Lines of
 //! `fxg internal stdio`) differ only in the transport layer and share **exactly the

@@ -295,7 +295,7 @@ pub struct NodeSettingsSnapshot {
     pub agents: AgentSettings,
 }
 
-/// Server-owned settings stored in `hub.db` (`hub_settings`).
+/// Hub-owned settings stored in `hub.db` (`hub_settings`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct HubSettings {

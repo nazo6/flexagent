@@ -103,7 +103,7 @@ pub struct SupportBundleConfig {
     /// Hub URL
     pub hub_url: Option<String>,
     /// Hub bind address
-    pub server_listen_addr: Option<String>,
+    pub hub_listen_addr: Option<String>,
     /// Extra allowed hosts (hub)
     pub allowed_hosts: Vec<String>,
     /// Extra allowed origins (hub)
@@ -741,7 +741,7 @@ pub struct AuditLogsResponse {
     pub logs: Vec<AuditLogEntry>,
 }
 
-/// Client -> Server (`/api/v1/client/ws`) message.
+/// Client -> Endpoint (`/api/v1/client/ws`) message.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[serde(tag = "op", rename_all = "snake_case")]
 #[specta(collect)]
@@ -780,7 +780,7 @@ pub enum ClientWsMessage {
     Ping,
 }
 
-/// Server -> Client (`/api/v1/client/ws`) message.
+/// Endpoint -> Client (`/api/v1/client/ws`) message.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[serde(tag = "op", rename_all = "snake_case")]
 #[specta(collect)]
@@ -841,7 +841,7 @@ pub enum HubWsMessage {
     Pong,
 }
 
-/// Client -> Server (`/api/v1/pty/ws`) message.
+/// Client -> Endpoint (`/api/v1/pty/ws`) message.
 ///
 /// A bidirectional stream channel that connects the terminal of the Web UI / mobile
 /// PWA directly to the ConPTY / Unix PTY on the node. When the node setting
@@ -883,7 +883,7 @@ pub enum PtyClientMessage {
     Kill,
 }
 
-/// Server -> Client (`/api/v1/pty/ws`) message.
+/// Endpoint -> Client (`/api/v1/pty/ws`) message.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[serde(tag = "op", rename_all = "snake_case")]
 #[specta(collect)]

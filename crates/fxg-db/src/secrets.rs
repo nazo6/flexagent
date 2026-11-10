@@ -1,10 +1,10 @@
-//! Role-scoped user secret store (`~/.flexagent/secrets/{node,server}/<id>`).
+//! Role-scoped user secret store (`~/.flexagent/secrets/{node,hub}/<id>`).
 //!
 //! Secret values are stored as plaintext files with mode `0600` on Unix and
 //! restricted ACLs on Windows. They never enter the SQLite database or log lines;
 //! the database holds only metadata (`secrets` table: key, description, timestamps).
 //!
-//! Node and Hub (server) share the same implementation parameterized by role.
+//! Node and Hub share the same implementation parameterized by role.
 
 use std::path::{Path, PathBuf};
 
@@ -17,13 +17,13 @@ use crate::error::DbError;
 /// Directory name owned by a local node.
 pub const ROLE_NODE: &str = "node";
 /// Directory name owned by the hub.
-pub const ROLE_SERVER: &str = "server";
+pub const ROLE_HUB: &str = "hub";
 
 /// Maps a database role to its secrets sub-directory name.
 pub fn role_name(role: DbRole) -> &'static str {
     match role {
         DbRole::Node => ROLE_NODE,
-        DbRole::Hub => ROLE_SERVER,
+        DbRole::Hub => ROLE_HUB,
     }
 }
 

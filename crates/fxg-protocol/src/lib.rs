@@ -6,7 +6,7 @@
 //!
 //! - `events`: normalized session events (`SessionEventEnvelope` / `UnifiedEventPayload`)
 //! - `common`: shared helper types and error codes
-//! - `node_hub`: Node <-> Central Server messages (shared by WS / Stdio)
+//! - `node_hub`: Node <-> Hub messages (shared by WS / Stdio)
 //! - `client_api`: Client REST / Client WS / PTY WS messages
 //! - `ipc`: CLI <-> Local Daemon local IPC messages
 //! - `config`: process bootstrap configuration (`config.toml`)

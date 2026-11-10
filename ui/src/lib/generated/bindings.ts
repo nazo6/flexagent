@@ -193,7 +193,7 @@ export type AuthLoginRequest = {
 	token: string,
 };
 
-/**  Client -> Server (`/api/v1/client/ws`) message. */
+/**  Client -> Endpoint (`/api/v1/client/ws`) message. */
 export type ClientWsMessage = 
 /**
  *  Starts the subscription on connect (specifying the cursor to resume from).
@@ -810,7 +810,7 @@ export type HubBootstrapView = {
 	log_no_color: SourcedValue<boolean>,
 };
 
-/**  Server-owned settings stored in `hub.db` (`hub_settings`). */
+/**  Hub-owned settings stored in `hub.db` (`hub_settings`). */
 export type HubSettings = {
 	/**  Web Push contact claim (`mailto:` / `https:`) */
 	vapid_subject: string | null,
@@ -830,7 +830,7 @@ export type HubSettingsSnapshot = {
 	hub: HubSettings,
 };
 
-/**  Server -> Client (`/api/v1/client/ws`) message. */
+/**  Endpoint -> Client (`/api/v1/client/ws`) message. */
 export type HubWsMessage = 
 /**
  *  A batch of incremental events (the replay right after connecting and the
@@ -1356,7 +1356,7 @@ export type ProjectsResponse = {
 /**
  *  A prompt sent to an agent: text plus optional attachments.
  * 
- *  Shared by IPC, Client WS, Node⇔Server messages and REST so the same payload
+ *  Shared by IPC, Client WS, Node⇔Hub messages and REST so the same payload
  *  is validated once and recorded in `UserMessage`.
  */
 export type PromptInput = {
@@ -1434,7 +1434,7 @@ export type PruneWorktreesRequest = {
 };
 
 /**
- *  Client -> Server (`/api/v1/pty/ws`) message.
+ *  Client -> Endpoint (`/api/v1/pty/ws`) message.
  * 
  *  A bidirectional stream channel that connects the terminal of the Web UI / mobile
  *  PWA directly to the ConPTY / Unix PTY on the node. When the node setting
@@ -1469,7 +1469,7 @@ rows: number } |
 /**  Terminate the PTY */
 { op: "kill" };
 
-/**  Server -> Client (`/api/v1/pty/ws`) message. */
+/**  Endpoint -> Client (`/api/v1/pty/ws`) message. */
 export type PtyServerMessage = 
 /**  The PTY has started (subsequent output belongs to the attached PTY ID) */
 { op: "spawned"; 
@@ -1666,7 +1666,7 @@ export type SearchResponse = {
 	hits: SearchHit[],
 };
 
-/**  ID of a secret stored in `~/.flexagent/secrets/{node,server}/<id>`. */
+/**  ID of a secret stored in `~/.flexagent/secrets/{node,hub}/<id>`. */
 export type SecretId = string;
 
 /**  Metadata of a stored user secret (never the value itself). */
@@ -1951,7 +1951,7 @@ export type SupportBundleConfig = {
 	/**  Hub URL */
 	hub_url: string | null,
 	/**  Hub bind address */
-	server_listen_addr: string | null,
+	hub_listen_addr: string | null,
 	/**  Extra allowed hosts (hub) */
 	allowed_hosts: string[],
 	/**  Extra allowed origins (hub) */
