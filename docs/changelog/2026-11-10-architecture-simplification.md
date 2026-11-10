@@ -269,4 +269,5 @@
   - migration `0015_rename_provisioning_statuses.sql` で `sessions.status` / `nodes.lifecycle_status` / `session_events.event_type` を移行。
   - UI の `status_bootstrapping` を削除し、`BootstrapLogCard` を `ProvisioningLogCard` に改名。
   - 各 docs の「計画中（未実装）」バナーを削除し、`AGENTS.md` を実装後の構成に同期。
+  - D8 の既定ポート使用中時の ephemeral port フォールバックを実装し、明示指定時はエラーにするテストを追加。
   - `mise run types` / `mise run sqlx:prepare` / `pnpm --dir ui run check` / `cargo test --workspace` を通過。

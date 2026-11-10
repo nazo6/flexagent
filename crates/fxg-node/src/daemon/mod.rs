@@ -50,6 +50,12 @@ pub struct DaemonConfig {
     pub node_name: String,
     /// Bind address of the local HTTP/WS server (default `127.0.0.1:7860`)
     pub listen_addr: String,
+    /// Whether `listen_addr` came from an explicit configuration (`--listen` /
+    /// `[node] listen_addr` / `FXG_NODE_LISTEN_ADDR`).
+    ///
+    /// When false and the default port is already in use, the daemon falls back
+    /// to an ephemeral loopback port.
+    pub listen_addr_explicit: bool,
     /// Node Hub WebSocket URL of the hub (standalone when unset)
     pub hub_url: Option<String>,
     /// Per-node pairing token (reads `~/.flexagent/node_token` when omitted)
@@ -74,6 +80,7 @@ impl DaemonConfig {
             node_id: node_id.into(),
             node_name: node_name.into(),
             listen_addr: fxg_protocol::config::NodeBootstrapConfig::DEFAULT_LISTEN_ADDR.to_owned(),
+            listen_addr_explicit: false,
             hub_url: None,
             node_token: None,
             ephemeral: false,
@@ -89,6 +96,7 @@ impl DaemonConfig {
             node_id: String::new(),
             node_name: hostname(),
             listen_addr: fxg_protocol::config::NodeBootstrapConfig::DEFAULT_LISTEN_ADDR.to_owned(),
+            listen_addr_explicit: false,
             hub_url: env(fxg_protocol::config::env_keys::HUB_URL),
             node_token: env(fxg_protocol::config::env_keys::NODE_TOKEN),
             ephemeral: false,
@@ -96,6 +104,18 @@ impl DaemonConfig {
             log: fxg_protocol::config::LogConfig::default(),
         }
     }
+}
+
+/// Returns the same host with an ephemeral port (falls back to loopback).
+fn ephemeral_addr(listen_addr: &str) -> String {
+    listen_addr
+        .parse::<SocketAddr>()
+        .map(|addr| {
+            let mut addr = addr;
+            addr.set_port(0);
+            addr.to_string()
+        })
+        .unwrap_or_else(|_| "127.0.0.1:0".to_owned())
 }
 
 /// Reconciles the state of sessions lost along with the previous process on daemon restart.
@@ -759,11 +779,32 @@ impl NodeDaemon {
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
         state.set_shutdown_sender(shutdown_tx.clone());
 
-        // Local HTTP/WS server (strict loopback binding)
+        // Local HTTP/WS server (strict loopback binding). When the default address
+        // is already in use and the user did not configure one explicitly, fall
+        // back to an ephemeral loopback port (D8).
         let listen_addr = state.config().listen_addr.clone();
-        let listener = tokio::net::TcpListener::bind(&listen_addr)
-            .await
-            .map_err(|err| NodeError::Hub(format!("failed to bind {listen_addr}: {err}")))?;
+        let listener = match tokio::net::TcpListener::bind(&listen_addr).await {
+            Ok(listener) => listener,
+            Err(err)
+                if err.kind() == std::io::ErrorKind::AddrInUse
+                    && !state.config().listen_addr_explicit =>
+            {
+                let fallback = ephemeral_addr(&listen_addr);
+                tracing::warn!(
+                    requested = %listen_addr,
+                    fallback = %fallback,
+                    "listen address is in use; falling back to an ephemeral port"
+                );
+                tokio::net::TcpListener::bind(&fallback)
+                    .await
+                    .map_err(|err| NodeError::Hub(format!("failed to bind {fallback}: {err}")))?
+            }
+            Err(err) => {
+                return Err(NodeError::Hub(format!(
+                    "failed to bind {listen_addr}: {err}"
+                )));
+            }
+        };
         let http_addr = listener
             .local_addr()
             .map_err(|err| NodeError::Hub(err.to_string()))?;
@@ -933,6 +974,41 @@ mod tests {
         config.listen_addr = "127.0.0.1:0".to_owned();
         let daemon = NodeDaemon::start(config).await.expect("start daemon");
         (daemon, dir)
+    }
+
+    #[tokio::test]
+    async fn default_address_falls_back_to_an_ephemeral_port() {
+        let occupied = std::net::TcpListener::bind("127.0.0.1:0").expect("occupy a port");
+        let occupied_port = occupied.local_addr().expect("addr").port();
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut config = DaemonConfig::new(dir.path().to_path_buf(), "fallback-node", "Fallback");
+        config.listen_addr = format!("127.0.0.1:{occupied_port}");
+        config.listen_addr_explicit = false;
+
+        let daemon = NodeDaemon::start(config)
+            .await
+            .expect("start with fallback");
+        assert_ne!(daemon.http_addr().port(), occupied_port);
+
+        daemon.shutdown();
+        tokio::time::timeout(Duration::from_secs(5), daemon.wait())
+            .await
+            .expect("stop");
+    }
+
+    #[tokio::test]
+    async fn explicit_address_fails_when_in_use() {
+        let occupied = std::net::TcpListener::bind("127.0.0.1:0").expect("occupy a port");
+        let occupied_port = occupied.local_addr().expect("addr").port();
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut config = DaemonConfig::new(dir.path().to_path_buf(), "explicit-node", "Explicit");
+        config.listen_addr = format!("127.0.0.1:{occupied_port}");
+        config.listen_addr_explicit = true;
+
+        let err = NodeDaemon::start(config).await.expect_err("must fail");
+        assert!(matches!(err, NodeError::Hub(_)), "unexpected error: {err}");
     }
 
     #[tokio::test]

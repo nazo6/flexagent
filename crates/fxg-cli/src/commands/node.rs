@@ -108,6 +108,7 @@ impl NodeStartArgs {
             .or_else(|| global.node.listen_addr.clone())
         {
             config.listen_addr = listen;
+            config.listen_addr_explicit = true;
         }
         // Outbox sync (hub connection; standalone / local only when unset)
         config.hub_url = self.hub_url.clone().or_else(|| global.node.hub_url.clone());
