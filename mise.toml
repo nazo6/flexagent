@@ -1,76 +1,61 @@
-# FlexAgent 開発タスクランナー / ツールチェイン固定
-#
-# - ツールは mise で固定する (rust は rustup の stable を使用。MSRV は Cargo.toml の
-#   rust-version を正とする)
-# - タスクは `mise run <name>` で実行する
-# - sqlx-cli は .sqlx (オフラインクエリデータ) 生成用 (sqlite + rustls のみ)
-# - sqlx の型安全マクロは DATABASE_URL 未設定時に `.sqlx/` へ自動フォールバックする
-#   (開発時に live 検証したい場合は `mise run sqlx:prepare` が DATABASE_URL を設定する)
+# Toolchain is pinned here; MSRV is Cargo.toml's `rust-version`.
 
 [tools]
 rust = "stable"
 node = "24.21.0"
 pnpm = "12.8.1"
+# sqlx-cli only needs sqlite + rustls for `.sqlx` generation.
 "cargo:sqlx-cli" = { version = "0.9.0", default-features = "false", features = "sqlite,rustls" }
+# Hot restart for `mise run dev`.
+watchexec = "2.8.0"
 tombi = "1.5.8"
 
-# ---------------------------------------------------------------------------
-# フォーマット
-# ---------------------------------------------------------------------------
-
 [tasks."fmt:rust"]
-description = "Rust コードを rustfmt でフォーマットする"
+description = "Format Rust code with rustfmt"
 run = "cargo fmt --all"
 
 [tasks."fmt:toml"]
-description = "TOML を tombi でフォーマットする"
+description = "Format TOML with tombi"
 run = "tombi format"
 
 [tasks."fmt:oxc"]
-description = "Markdown / JSON / YAML / HTML / TypeScript / Svelte を oxfmt でフォーマットする"
-# `oxfmt` は `ui` の devDependency。`.svelte` の整形には oxfmt と同じ
-# node_modules に `svelte` が要るため ui に置いたまま、その bin を node で起動する
-# (`ui/node_modules/.bin` のシェルスクリプトを避けて Windows でも動くようにする)。
+description = "Format Markdown / JSON / YAML / HTML / TypeScript / Svelte with oxfmt"
+# oxfmt is a devDependency of `ui` (it needs `svelte` from the same node_modules);
+# running its JS entry with node avoids the shell shim and works on Windows.
 run = "node ui/node_modules/oxfmt/bin/oxfmt -c .oxfmtrc.json ."
 
 [tasks.fmt]
-description = "全言語 (Rust / TOML / Markdown / JSON / YAML / UI) をフォーマットする"
+description = "Format all languages (Rust / TOML / Markdown / JSON / YAML / UI)"
 run = [{ task = "fmt:rust" }, { task = "fmt:toml" }, { task = "fmt:oxc" }]
 
 [tasks."fmt:check"]
-description = "全言語のフォーマット差分を検証する"
+description = "Check formatting for all languages"
 run = [
   "cargo fmt --all --check",
   "tombi format --check",
   "node ui/node_modules/oxfmt/bin/oxfmt -c .oxfmtrc.json --check .",
 ]
 
-# ---------------------------------------------------------------------------
-# Lint (静的解析)
-# ---------------------------------------------------------------------------
-
 [tasks."lint:rust"]
-description = "Rust の clippy を警告エラー扱いで実行する"
+description = "Run clippy on Rust with warnings as errors"
 run = "cargo clippy --workspace --all-targets -- -D warnings"
 
 [tasks."lint:errors"]
-description = "エラー握り潰しと型安全境界 (生JSON / 文字列判定 / wildcard enum match) を workspace 全体で禁止する"
-# clippy.toml の disallowed-methods / disallowed-types と併用する。
-# 既存違反はクレート単位の `#![allow(..., reason = "...")]` で移行ベースラインとして
-# 残し、Phase 2/3 で削除する (docs/06-type-safety.md)。
-# OS 固有モジュール (Windows / macOS の tray など) は該当 OS でのみ検査される。
+description = "Reject swallowed errors and type-safety boundary violations (raw JSON / string checks / wildcard enum matches) workspace-wide"
+# Extends clippy.toml's disallowed lists; existing violations stay as per-crate
+# `#![allow(..., reason = "...")]` baselines (see docs/06-type-safety.md).
 run = "cargo clippy --workspace --all-targets -- -D warnings -D clippy::let_underscore_must_use -D clippy::map_err_ignore -D clippy::disallowed_methods -D clippy::disallowed_types -D clippy::wildcard_enum_match_arm"
 
 [tasks."lint:toml"]
-description = "TOML を tombi で lint する (JSON Schema 検証含む)"
+description = "Lint TOML with tombi (including JSON Schema validation)"
 run = "tombi lint"
 
 [tasks."lint:ui"]
-description = "TypeScript / Svelte を oxlint で lint する"
+description = "Lint TypeScript / Svelte with oxlint"
 run = "pnpm --dir ui run lint"
 
 [tasks.lint]
-description = "全言語の lint を実行する"
+description = "Run lint for all languages"
 run = [
   { task = "lint:rust" },
   { task = "lint:errors" },
@@ -78,39 +63,29 @@ run = [
   { task = "lint:ui" },
 ]
 
-# ---------------------------------------------------------------------------
-# テスト
-# ---------------------------------------------------------------------------
-
 [tasks."test:rust"]
-description = "Rust ワークスペース全体のテストを実行する (specta 型出力含む)"
-# --no-fail-fast: あるクレートが失敗しても全クレートの結果を報告する (CI 診断用)
+description = "Run the whole Rust workspace test suite (including specta type export)"
 run = "cargo test --workspace --no-fail-fast"
 
 [tasks."test:ui"]
-description = "UI の Vitest を実行する"
+description = "Run UI tests with Vitest"
 run = "pnpm --dir ui run test"
 
 [tasks.test]
-description = "全テスト (Rust + UI) を実行する"
+description = "Run all tests (Rust + UI)"
 run = [{ task = "test:rust" }, { task = "test:ui" }]
 
-# ---------------------------------------------------------------------------
-# 検証 (Check)
-# ---------------------------------------------------------------------------
-
 [tasks."check:rust"]
-description = "Rust の lint とテストを一括実行する"
+description = "Run Rust lint and tests together"
 run = [{ task = "lint:rust" }, { task = "test:rust" }]
 
 [tasks."check:ui"]
-description = "UI の TypeScript / Svelte 型検査を実行する (svelte-check)"
+description = "Type-check UI TypeScript / Svelte (svelte-check)"
 run = "pnpm --dir ui run check"
 
 [tasks.check]
-description = "fmt:check + lint + check:ui + test を一括実行する (コミット前完全チェック)"
-# 直列実行する: 並列に走らせると cargo のビルドディレクトリロックで
-# 相互待ちになり遅くなるため (`{ task = ... }` は順次実行)
+description = "Pre-commit full check: fmt:check + lint + check:ui + test"
+# Sequential: parallel runs would contend on cargo's build directory lock.
 run = [
   { task = "fmt:check" },
   { task = "lint" },
@@ -118,28 +93,20 @@ run = [
   { task = "test" },
 ]
 
-# ---------------------------------------------------------------------------
-# UI ビルド・導入
-# ---------------------------------------------------------------------------
-
 [tasks."ui:install"]
-description = "UI の依存関係を lockfile どおりに導入する"
+description = "Install UI dependencies exactly as locked"
 run = "pnpm --dir ui install --frozen-lockfile"
 
 [tasks."build:ui"]
-description = "UI をビルドする (ui/build。fxg バイナリへの同梱用)"
+description = "Build the UI (ui/build, bundled into the fxg binary)"
 run = "pnpm --dir ui run build"
 
-# ---------------------------------------------------------------------------
-# 型生成 (specta) / sqlx オフラインデータ
-# ---------------------------------------------------------------------------
-
 [tasks.types]
-description = "fxg-protocol から TypeScript 型を生成する (ui/src/lib/generated/bindings.ts)"
+description = "Generate TypeScript types from fxg-protocol (ui/src/lib/generated/bindings.ts)"
 run = "cargo test -p fxg-protocol export_bindings"
 
 [tasks."sqlx:prepare"]
-description = "開発用DBを作成・マイグレーションし .sqlx を再生成する (要コミット)"
+description = "Create and migrate the dev database, then regenerate .sqlx (commit the result)"
 run = """
 #!/usr/bin/env bash
 set -euo pipefail
@@ -151,7 +118,7 @@ cargo sqlx prepare --workspace -- --all-targets
 """
 
 [tasks."sqlx:check"]
-description = ".sqlx がスキーマ・クエリと一致しているか検証する"
+description = "Verify .sqlx matches the schema and queries"
 run = """
 #!/usr/bin/env bash
 set -euo pipefail
@@ -162,36 +129,29 @@ sqlx migrate run --source crates/fxg-db/migrations
 cargo sqlx prepare --workspace --check -- --all-targets
 """
 
-# ---------------------------------------------------------------------------
-# 開発
-# ---------------------------------------------------------------------------
-
 [tasks."dev:ui"]
-description = "UI (Vite) 開発サーバーを起動する (http://localhost:5173)"
+description = "Start the UI (Vite) dev server (http://localhost:5173)"
 run = "pnpm --dir ui run dev"
-alias = "ui:dev"
 
-[tasks."dev:daemon"]
-description = "デバッグバイナリのローカルデーモン (`fxg daemon`) を起動する (http://127.0.0.1:7860)"
-run = "cargo run -p fxg-cli -- daemon"
+[tasks."dev:node"]
+description = "Start the debug local node, rebuilding and restarting on Rust changes (http://127.0.0.1:7860)"
+# Only crates/ and Cargo files: the UI is covered by Vite HMR. SIGINT gives the
+# node a graceful shutdown (on Windows watchexec maps it to CTRL+C).
+run = "watchexec -r -w crates -w Cargo.toml -w Cargo.lock --stop-signal SIGINT -- cargo run -p fxg-cli -- node start"
 
-[tasks."dev:server"]
-description = "デバッグバイナリの中央サーバー (`fxg server`) を起動する (http://0.0.0.0:8080)"
-run = "cargo run -p fxg-cli -- server"
+[tasks."dev:hub"]
+description = "Start the debug hub, rebuilding and restarting on Rust changes (http://0.0.0.0:8080)"
+run = "watchexec -r -w crates -w Cargo.toml -w Cargo.lock --stop-signal SIGINT -- cargo run -p fxg-cli -- hub start"
 
 [tasks.dev]
-description = "Vite 開発サーバーとデバッグバイナリ (fxg daemon) を並列起動する"
-run = [{ tasks = ["dev:ui", "dev:daemon"] }]
-
-# ---------------------------------------------------------------------------
-# ビルド
-# ---------------------------------------------------------------------------
+description = "Start the Vite dev server and the debug binary (`fxg node start`) in parallel (UI via HMR, Rust restarts on change)"
+run = [{ tasks = ["dev:ui", "dev:node"] }]
 
 [tasks.build]
-description = "`fxg` バイナリをリリースビルドする"
+description = "Build the `fxg` binary in release mode"
 run = "cargo build --release -p fxg-cli"
 
 [tasks."build:docker"]
-description = "Docker イメージをビルドする"
-# amd64 を明示する: arm64 ホストでも本番・配布と同じイメージを再現する
+description = "Build the Docker image"
+# Pin amd64 so arm64 hosts reproduce the production/distributed image.
 run = "docker compose build"
