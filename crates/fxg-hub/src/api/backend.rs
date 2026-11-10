@@ -77,6 +77,8 @@ pub struct SystemExtras {
     pub unsynced_event_count: Option<u64>,
     /// WebSocket connection state to the hub (only when connected to a local node)
     pub hub_connected: Option<bool>,
+    /// Last successful synchronization time (Unix epoch ms; local node only)
+    pub last_synced_at: Option<i64>,
 }
 
 /// Live event delivered over Client WS.

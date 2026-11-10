@@ -1927,6 +1927,12 @@ export type SessionUsage = {
 	cost: UsageCost | null,
 };
 
+/**  `POST /api/v1/system/shutdown` response. */
+export type ShutdownResponse = {
+	/**  Whether the graceful shutdown was requested */
+	ok: boolean,
+};
+
 /**  A read-only bootstrap value together with its origin. */
 export type SourcedValue<T> = {
 	/**  The effective value */
@@ -2041,6 +2047,8 @@ export type SystemInfoResponse = {
 	unsynced_event_count: number | null,
 	/**  WebSocket connection state to the hub (local node only) */
 	hub_connected: boolean | null,
+	/**  Last successful synchronization time (Unix epoch ms; local node only) */
+	last_synced_at: number | null,
 };
 
 /**  Overall health snapshot returned by diagnostics. */

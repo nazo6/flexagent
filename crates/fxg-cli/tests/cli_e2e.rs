@@ -1,10 +1,10 @@
 //! End-to-end tests for the `fxg` CLI.
 //!
 //! The tests actually start `fxg node start` as a child process and verify that
-//! `fxg session` / `fxg node token` work **through IPC**.
+//! `fxg session` / `fxg node token` work **through the local HTTP API**.
 //!
-//! Each test uses a temporary `FXG_HOME` and IPC endpoint, so it never collides
-//! with a real node.
+//! Each test uses a temporary `FXG_HOME` (and a unique legacy IPC endpoint
+//! until that server is removed), so it never collides with a real node.
 
 #![allow(
     clippy::disallowed_types,
@@ -24,7 +24,7 @@ fn fxg_bin() -> PathBuf {
 struct TestEnv {
     dir: tempfile::TempDir,
     home: PathBuf,
-    /// Environment variables that determine the IPC endpoint
+    /// Environment variables that isolate the legacy IPC endpoint
     /// (unix: XDG_RUNTIME_DIR / windows: USERNAME)
     ipc_env: Vec<(String, String)>,
     node: Option<Child>,
@@ -72,7 +72,7 @@ impl TestEnv {
         command
     }
 
-    /// Start the node and wait until IPC responds.
+    /// Start the node and wait until the HTTP API responds.
     async fn start_node(&mut self) {
         // Save node logs to a file for diagnostics on failure
         let log_path = self.dir.path().join("node.log");
@@ -190,7 +190,7 @@ fn init_repo(dir: &Path) {
 }
 
 #[tokio::test]
-async fn cli_commands_work_through_node_ipc() {
+async fn cli_commands_work_through_node_http() {
     let mut env = TestEnv::new();
     env.start_node().await;
 
@@ -235,10 +235,10 @@ async fn cli_reports_missing_node_when_auto_start_is_disabled() {
 
 /// Verify that the Phase 3 session commands (`session
 /// show|prompt|stop|kill|resume|fork` / `attach`) return errors
-/// correctly through IPC.
+/// correctly through HTTP.
 ///
 /// The tests cover what can be verified without launching a real agent
-/// (argument parsing, IPC round-trips, error codes).
+/// (argument parsing, HTTP round-trips, error codes).
 #[tokio::test]
 async fn phase3_session_commands_roundtrip_through_node() {
     let mut env = TestEnv::new();
@@ -277,13 +277,19 @@ async fn phase3_session_commands_roundtrip_through_node() {
         vec!["session", "cancel", unknown],
         vec!["session", "kill", unknown],
         vec!["session", "resume", unknown, "--quiet"],
-        vec!["session", "fork", unknown],
     ] {
         let output = env.run(&args, Some(&repo));
         assert!(!output.status.success(), "{args:?} must fail");
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert!(stderr.contains("INVALID_STATE"), "{args:?}: {stderr}");
     }
+
+    // Fork resolves the source session over REST before creating the fork, so
+    // an unknown source is a NOT_FOUND error.
+    let output = env.run(&["session", "fork", unknown], Some(&repo));
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("NOT_FOUND"), "got: {stderr}");
 
     // --- fxg session new --provisioner requires the hub (a config error
     // when unset) ---

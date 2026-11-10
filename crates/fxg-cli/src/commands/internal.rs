@@ -3,9 +3,12 @@
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
+use fxg_protocol::CommandId;
+use fxg_protocol::ipc::{
+    IPC_PROTOCOL_VERSION, IpcOutcome, IpcRequest, IpcRequestKind, IpcResultKind, IpcServerMessage,
+    LocalRequest, LocalResult,
+};
 use usage::{Args, Subcommands};
-
-use crate::client::NodeClient;
 
 /// `fxg internal <command>`
 #[derive(Debug, Args)]
@@ -221,8 +224,7 @@ impl usage::RunAsync for GitAskpassArgs {
     type Output = Result<()>;
 
     async fn run_async(self) -> Self::Output {
-        let mut client = NodeClient::connect().await?;
-        let (username, token, error) = client.git_credential(&self.prompt).await?;
+        let (username, token, error) = git_credential_via_ipc(&self.prompt).await?;
         if let Some(error) = error {
             anyhow::bail!("{error}");
         }
@@ -233,5 +235,54 @@ impl usage::RunAsync for GitAskpassArgs {
         };
         println!("{value}");
         Ok(())
+    }
+}
+
+/// Temporary IPC bridge for `fxg internal git-askpass`.
+///
+/// The askpass command is removed together with the credential proxy in the
+/// architecture simplification; until then it still talks to the daemon over
+/// local IPC while all normal CLI commands use HTTP.
+async fn git_credential_via_ipc(prompt: &str) -> Result<(String, Option<String>, Option<String>)> {
+    let command_id = CommandId::from(format!(
+        "cli-askpass-{}-{}",
+        std::process::id(),
+        fxg_protocol::util::uuid_v7()
+    ));
+    let request = IpcRequest {
+        protocol_version: IPC_PROTOCOL_VERSION,
+        request_id: command_id.clone(),
+        request: IpcRequestKind::Local {
+            request: LocalRequest::GitCredential {
+                command_id,
+                prompt: prompt.to_owned(),
+            },
+        },
+    };
+    let endpoint = fxg_node::ipc_endpoint(&fxg_protocol::config::process_env);
+    let mut client = fxg_node::IpcClient::connect(&endpoint)
+        .await
+        .with_context(|| format!("failed to connect to the node at {endpoint}"))?;
+    match client.request(&request).await? {
+        IpcServerMessage::Response {
+            outcome:
+                IpcOutcome::Ok {
+                    result:
+                        IpcResultKind::Local {
+                            result:
+                                LocalResult::GitCredential {
+                                    username,
+                                    token,
+                                    error,
+                                },
+                        },
+                },
+            ..
+        } => Ok((username, token, error)),
+        IpcServerMessage::Response {
+            outcome: IpcOutcome::Err { error },
+            ..
+        } => anyhow::bail!("{}: {}", error.code, error.message),
+        other => anyhow::bail!("unexpected ipc response: {other:?}"),
     }
 }

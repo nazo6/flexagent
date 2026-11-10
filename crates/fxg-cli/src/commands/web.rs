@@ -22,7 +22,7 @@ impl usage::RunAsync for WebArgs {
             None | Some("node") => {
                 let mut client = NodeClient::connect().await?;
                 let token = client.auth_token(false).await?;
-                let base = super::node::local_node_base(&env)?;
+                let base = crate::client::local_node_base(&env)?;
                 format!("{base}/?token={token}")
             }
             Some("hub") => crate::hub_api::local_hub_base(&env)?,

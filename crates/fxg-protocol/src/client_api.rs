@@ -46,6 +46,8 @@ pub struct SystemInfoResponse {
     pub unsynced_event_count: Option<u64>,
     /// WebSocket connection state to the hub (local node only)
     pub hub_connected: Option<bool>,
+    /// Last successful synchronization time (Unix epoch ms; local node only)
+    pub last_synced_at: Option<i64>,
 }
 
 /// Recent stderr lines for one agent (diagnostics).
@@ -501,6 +503,14 @@ pub struct IssueNodeTokenResponse {
     pub node_id: NodeId,
     /// The issued plaintext token (stored in `~/.flexagent/node_token`)
     pub token: String,
+}
+
+/// `POST /api/v1/system/shutdown` response.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
+pub struct ShutdownResponse {
+    /// Whether the graceful shutdown was requested
+    pub ok: bool,
 }
 
 /// `POST /api/v1/auth/rotate-token` response (regenerate the client token).

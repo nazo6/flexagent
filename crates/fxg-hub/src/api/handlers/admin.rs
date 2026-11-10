@@ -70,7 +70,7 @@ pub(crate) async fn shutdown<B: ClientApiBackend>(
     State(state): State<ClientApiState<B>>,
 ) -> Response {
     if state.backend.request_shutdown() {
-        Json(serde_json::json!({ "ok": true })).into_response()
+        Json(fxg_protocol::client_api::ShutdownResponse { ok: true }).into_response()
     } else {
         (
             StatusCode::NOT_IMPLEMENTED,

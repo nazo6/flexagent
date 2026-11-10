@@ -904,10 +904,17 @@ impl NodeDaemon {
         if let Err(err) = self.state.mark_offline().await {
             tracing::warn!("failed to mark node offline: {err}");
         }
-        fxg_protocol::discard_with!(
-            std::fs::remove_file(&self.addr_file),
-            "remove the node address file"
-        );
+        // Do not delete an address published by a replacement daemon (e.g.
+        // `fxg node restart` starts the new process before the old one exits).
+        let owns_addr_file = std::fs::read_to_string(&self.addr_file)
+            .map(|addr| addr.trim() == self.http_addr.to_string())
+            .unwrap_or(false);
+        if owns_addr_file {
+            fxg_protocol::discard_with!(
+                std::fs::remove_file(&self.addr_file),
+                "remove the node address file"
+            );
+        }
 
         if let Err(err) = self.http_task.await {
             tracing::error!(task = "http", "http task terminated unexpectedly: {err}");

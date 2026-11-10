@@ -214,6 +214,7 @@ impl ClientApiBackend for DaemonState {
             vapid_public_key: None,
             unsynced_event_count: Some(unsynced),
             hub_connected: Some(self.hub_connected()),
+            last_synced_at: self.db().last_synced_at().await.map_err(ApiError::from)?,
         })
     }
 

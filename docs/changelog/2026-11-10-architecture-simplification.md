@@ -152,13 +152,15 @@
   - [x] ローカル `POST /api/v1/system/shutdown` と `DaemonState::request_shutdown`
   - [x] `SessionDetail` を `client_api` へ移設、リクエスト / レスポンス型を追加
   - [x] cwd → `project_id` は既存の `POST /api/v1/nodes/:id/projects/inspect` で対応可能なことを確認（CLI 結線は Commit 2）
-- [ ] **Commit 2: CLI の HTTP / WS 移行**
-  - [ ] `NodeClient` を `reqwest` + `tokio-tungstenite` に書き換え
-  - [ ] `node.addr` 読み込み、`/healthz` ポーリング、stale addr / 自動起動
-  - [ ] `fxg node status` を `/system/info` + `/sessions` に移行
-  - [ ] `fxg node stop` / `node token show` / `node token rotate` を REST / token ファイルに移行
-  - [ ] `fxg session prompt --wait` の WS 購読
-  - [ ] `fxg support` / `fxg doctor` / `fxg logs --session` を既存 REST に移行
+- [x] **Commit 2: CLI の HTTP / WS 移行**
+  - [x] `NodeClient` を `reqwest` + `tokio-tungstenite` に書き換え
+  - [x] `node.addr` 読み込み、認証付き `/system/info` プローブ、stale addr / 自動起動
+  - [x] `fxg node status` を `/system/info` + `/sessions` に移行
+  - [x] `fxg node stop` / `node token show` / `node token rotate` を REST / token ファイルに移行
+  - [x] `fxg session prompt --wait` の WS 購読（`last_node_seq` で replay をフィルタ）
+  - [x] `fxg support` / `fxg doctor` / `fxg logs --session` を既存 REST に移行
+  - [x] `fxg session new` / `-w` / `fork` / `import` の cwd・project 解決を REST に移行
+  - 注: `fxg internal git-askpass` だけは Commit 5 まで暫定的に IPC を使用する。
 - [ ] **Commit 3: Provisioner secret**
   - [ ] `ProvisionerDefinition.env_secrets` と `provisioners.env_secrets_json`
   - [ ] spawn 時の secret 解決、`secrets::used_by` の Provisioner 走査
@@ -229,3 +231,11 @@
   - ローカルノードの `POST /api/v1/system/shutdown` を実装。
   - Node RPC に `ImportSession` を追加し、ハブ経由のインポートにも対応。
   - `fxg-node` の HTTP テストで detail / events / prompt / control / import / shutdown を検証。
+- **2026-11-10: Commit 2 (CLI HTTP / WS 移行)**
+  - `NodeClient` を `reqwest` ベースに書き換え、`node.addr` と認証付き `/system/info` で接続を検証。
+  - `session list/show/prompt/stop/cancel/kill/archive/delete/import/fork/resume`、worktree、token、status、support、logs を REST に移行。
+  - `fxg session prompt --wait` は `/api/v1/client/ws` を購読し、`last_node_seq` より後ろのイベントだけを表示。
+  - `fxg internal git-askpass` は Commit 5 での削除まで暫定的に IPC ブリッジを使用。
+  - `GET /api/v1/system/info` に `last_synced_at` を追加し、`fxg node status` の表示を維持。
+  - 旧デーモンが新しい `node.addr` を削除しないよう、終了時の所有者チェックを追加。
+  - `cli_e2e` を HTTP 前提に更新し、`stdio_credential_e2e` と `provisioner_e2e` も通過。
