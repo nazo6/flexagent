@@ -42,9 +42,9 @@
       <span class={`block h-full ${barClass}`} style={`width: ${percent}%`}></span>
     </span>
     <span class="whitespace-nowrap font-mono">
-      {formatTokenCount(usage.used_tokens)}/{formatTokenCount(usage.context_size)}
+      {formatTokenCount(usage.used_tokens)} / {formatTokenCount(usage.context_size)}
     </span>
-    {#if usage.cost}
+    {#if usage.cost && usage.cost.amount > 0}
       <span class="whitespace-nowrap font-mono">
         {usage.cost.currency}
         {usage.cost.amount.toFixed(4)}

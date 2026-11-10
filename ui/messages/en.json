@@ -432,7 +432,7 @@
   "session_kill_failed": "Failed to terminate the session.",
   "session_kill_success": "The session's child process tree was force-stopped.",
   "session_killing": "Terminating…",
-  "session_new_here": "New here",
+  "session_new_here": "New session here",
   "session_new_here_button_title": "Start a new session on the same node and working directory as this session",
   "session_not_found": "This session is not synced or does not exist.",
   "session_resume_button_title": "The agent does not support native restore, so the session is resumed from its history",

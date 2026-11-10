@@ -1213,8 +1213,8 @@
                   onselect={() => selectAgent(agent.id)}
                 >
                   <span class="block truncate">{agent.name}</span>
-                  <span class="text-muted-foreground block truncate text-[11px]">
-                    {agentHint(agent)}
+                  <span class="text-muted-foreground block truncate font-mono text-[11px]">
+                    {agent.id} — {agentHint(agent)}
                   </span>
                 </PickerItem>
               {/each}
