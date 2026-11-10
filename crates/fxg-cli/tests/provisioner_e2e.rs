@@ -98,8 +98,7 @@ async fn provisioner_runs_stdio_node_and_drains() {
     drop(db);
 
     // Provisioner: start the real binary with `internal stdio --ephemeral`
-    // (a free-form definition that avoids `{BOOTSTRAP_SCRIPT}`; verifies the
-    // path without bootstrap)
+    // (an external command definition; the hub only pipes stdin / stdout)
     let provisioner_name = "test-ephemeral";
     let provisioner = ProvisionerDefinition {
         name: provisioner_name.to_owned(),
@@ -117,6 +116,7 @@ async fn provisioner_runs_stdio_node_and_drains() {
             "FXG_HOME".to_owned(),
             node_home.to_string_lossy().into_owned(),
         )]),
+        env_secrets: BTreeMap::new(),
     };
     let db = Db::open(&fxg_db::hub_db_path(&server_home), DbRole::Hub)
         .await
@@ -207,7 +207,7 @@ async fn provisioner_runs_stdio_node_and_drains() {
     // 3. Bootstrap logs are delivered to the Client WS
     let mut bootstrap_lines = Vec::new();
     while let Ok(event) = events.try_recv() {
-        if let ClientEvent::BootstrapLog {
+        if let ClientEvent::ProvisioningLog {
             session_id: event_session,
             line,
         } = event

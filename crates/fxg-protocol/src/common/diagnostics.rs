@@ -42,8 +42,6 @@ crate::open_string_enum! {
         Registry => "registry",
         /// Provisioner / temporary VM
         Provisioner => "provisioner",
-        /// Local IPC (CLI <-> daemon)
-        Ipc => "ipc",
         /// Web Push delivery
         Push => "push",
         /// Desktop integration (tray / service)
@@ -58,8 +56,6 @@ crate::open_string_enum! {
         Db => "db",
         /// Migration state
         Migrations => "migrations",
-        /// Local IPC listener
-        Ipc => "ipc",
         /// HTTP / WebSocket listener
         Http => "http",
         /// Hub synchronization

@@ -45,8 +45,8 @@ crate::open_string_enum! {
         TerminalInput => "terminal_input",
         /// Capabilities updated
         CapabilitiesUpdated => "capabilities_updated",
-        /// Bootstrap log
-        BootstrapLog => "bootstrap_log",
+        /// Provisioning log
+        ProvisioningLog => "provisioning_log",
         /// Usage updated
         UsageUpdated => "usage_updated",
         /// Turn ended

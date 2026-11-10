@@ -14,8 +14,8 @@ use fxg_protocol::client_api::{
     PruneWorktreesRequest, PushSubscribeRequest, PushSubscribeResponse, RemoveWorktreeRequest,
     RespondElicitationRequest, RespondElicitationResponse, RespondPermissionRequest,
     RespondPermissionResponse, ResumeSessionRequest, ResumeSessionResponse,
-    RotateAuthTokenResponse, SessionArchiveRequest, SessionArchiveResponse, SupportBundleConfig,
-    WorktreeInfo, WorktreesResponse,
+    RotateAuthTokenResponse, SessionArchiveRequest, SessionArchiveResponse, SessionImportRequest,
+    SessionImportResponse, SupportBundleConfig, WorktreeInfo, WorktreesResponse,
 };
 use fxg_protocol::common::{
     AgentAction, CommandResult, ComponentHealth, ComponentName, DiffScope, ErrorCode,
@@ -30,8 +30,7 @@ use crate::api::{
     PtyChannelEvent, PtySpawnParams, SystemExtras, auth,
 };
 use fxg_protocol::settings::{
-    HubSettingsSnapshot, ProjectProfile, SecretsResponse, UpdateHubSettingsRequest,
-    UpdateProjectProfileRequest, UpsertSecretRequest,
+    HubSettingsSnapshot, SecretsResponse, UpdateHubSettingsRequest, UpsertSecretRequest,
 };
 use fxg_protocol::{NodeId, SecretId};
 
@@ -438,6 +437,47 @@ impl ClientApiBackend for HubState {
         self.create_session_impl(request, client).await
     }
 
+    async fn import_session(
+        &self,
+        request: SessionImportRequest,
+        client: ClientInfo,
+    ) -> Result<SessionImportResponse, ApiError> {
+        let node_id = request.node_id.clone().ok_or_else(|| {
+            ApiError::bad_request("node_id is required to import a session through the hub")
+        })?;
+        let response = self
+            .node_rpc(
+                &node_id,
+                NodeRpcRequest::ImportSession {
+                    agent_id: request.agent_id.clone(),
+                    agent_session_id: request.agent_session_id.clone(),
+                    cwd: request.cwd.clone(),
+                    title: request.title.clone(),
+                },
+            )
+            .await?;
+        let session_id = match response {
+            NodeRpcResponse::SessionImported { session_id } => session_id,
+            _ => return Err(ApiError::internal("unexpected node RPC response")),
+        };
+        self.record_audit(
+            fxg_db::audit::actions::SESSION_START,
+            &client,
+            Some(session_id.as_str()),
+            serde_json::json!({
+                "node_id": node_id,
+                "agent_id": request.agent_id,
+                "local_path": request.cwd,
+                "imported_agent_session_id": request.agent_session_id,
+            }),
+        )
+        .await;
+        Ok(SessionImportResponse {
+            session_id,
+            command_id: request.command_id,
+        })
+    }
+
     async fn respond_permission(
         &self,
         session_id: &str,
@@ -664,18 +704,6 @@ impl ClientApiBackend for HubState {
         HubState::delete_server_secret(self, secret_id)
             .await
             .map_err(secret_error)
-    }
-
-    async fn project_profile(&self, project_id: &str) -> Result<ProjectProfile, ApiError> {
-        HubState::project_profile(self, project_id).await
-    }
-
-    async fn update_project_profile(
-        &self,
-        project_id: &str,
-        request: UpdateProjectProfileRequest,
-    ) -> Result<ProjectProfile, ApiError> {
-        HubState::update_project_profile(self, project_id, &request).await
     }
 
     async fn kill_switch(

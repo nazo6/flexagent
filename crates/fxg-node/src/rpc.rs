@@ -298,6 +298,26 @@ async fn execute_inner(
                 message: Some(message),
             })
         }
+        NodeRpcRequest::ImportSession {
+            agent_id,
+            agent_session_id,
+            cwd,
+            title,
+        } => {
+            let session_id = state
+                .import_session(
+                    request_id,
+                    &agent_id,
+                    &agent_session_id,
+                    Path::new(&cwd),
+                    title.as_deref(),
+                    source,
+                )
+                .await?;
+            Ok(NodeRpcResponse::SessionImported {
+                session_id: session_id.into(),
+            })
+        }
         NodeRpcRequest::ResumeSession {
             session_id,
             force_replay,

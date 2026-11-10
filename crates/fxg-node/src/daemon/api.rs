@@ -19,7 +19,8 @@ use fxg_protocol::client_api::{
     ProvisionersResponse, PruneWorktreesRequest, RemoveWorktreeRequest, RespondElicitationRequest,
     RespondElicitationResponse, RespondPermissionRequest, RespondPermissionResponse,
     ResumeSessionRequest, ResumeSessionResponse, RotateAuthTokenResponse, SessionArchiveRequest,
-    SessionArchiveResponse, SupportBundle, SupportBundleConfig, WorktreeInfo, WorktreesResponse,
+    SessionArchiveResponse, SessionImportRequest, SessionImportResponse, SupportBundle,
+    SupportBundleConfig, WorktreeInfo, WorktreesResponse,
 };
 use fxg_protocol::common::{
     AgentAction, CommandResult, ComponentHealth, ComponentName, ComponentState, DiffScope,
@@ -50,12 +51,12 @@ fn audit_source(client: &ClientInfo) -> AuditSource {
 }
 
 impl DaemonState {
-    /// Shared diagnostics payload (REST and local IPC).
+    /// Shared diagnostics payload (REST).
     pub async fn diagnostics_response(&self) -> Result<DiagnosticsResponse, ApiError> {
         <Self as ClientApiBackend>::diagnostics(self).await
     }
 
-    /// Redacted support bundle (REST and local IPC).
+    /// Redacted support bundle (REST).
     pub async fn support_bundle_response(&self) -> Result<SupportBundle, ApiError> {
         <Self as ClientApiBackend>::support_bundle(self).await
     }
@@ -77,6 +78,11 @@ impl ClientApiBackend for DaemonState {
 
     fn local_node_id(&self) -> Option<fxg_protocol::NodeId> {
         Some(fxg_protocol::NodeId::from(self.node_id()))
+    }
+
+    fn request_shutdown(&self) -> bool {
+        DaemonState::request_shutdown(self);
+        true
     }
 
     async fn execute_node_rpc(
@@ -158,7 +164,7 @@ impl ClientApiBackend for DaemonState {
                 );
             }
         }
-        vec![ComponentHealth::ok(ComponentName::Ipc, now), sync]
+        vec![sync]
     }
 
     fn agent_diagnostics(&self) -> Vec<AgentDiagnostics> {
@@ -208,6 +214,7 @@ impl ClientApiBackend for DaemonState {
             vapid_public_key: None,
             unsynced_event_count: Some(unsynced),
             hub_connected: Some(self.hub_connected()),
+            last_synced_at: self.db().last_synced_at().await.map_err(ApiError::from)?,
         })
     }
 
@@ -381,6 +388,37 @@ impl ClientApiBackend for DaemonState {
 
         Ok(CreateSessionResponse {
             session_id: outcome.session_id.into(),
+            command_id: request.command_id,
+        })
+    }
+
+    async fn import_session(
+        &self,
+        request: SessionImportRequest,
+        client: ClientInfo,
+    ) -> Result<SessionImportResponse, ApiError> {
+        if let Some(node_id) = &request.node_id
+            && node_id.as_str() != self.node_id()
+        {
+            return Err(ApiError::bad_request(format!(
+                "requested node {node_id} but this node is {}",
+                self.node_id()
+            )));
+        }
+        let source = audit_source(&client);
+        let session_id = DaemonState::import_session(
+            self,
+            &request.command_id,
+            &request.agent_id,
+            &request.agent_session_id,
+            Path::new(&request.cwd),
+            request.title.as_deref(),
+            &source,
+        )
+        .await
+        .map_err(api_error)?;
+        Ok(SessionImportResponse {
+            session_id: session_id.into(),
             command_id: request.command_id,
         })
     }

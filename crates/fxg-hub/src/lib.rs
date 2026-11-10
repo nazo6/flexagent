@@ -27,7 +27,6 @@
 )]
 
 pub mod api;
-mod credentials;
 mod error;
 pub mod hub;
 mod process;

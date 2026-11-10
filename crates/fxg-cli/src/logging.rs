@@ -244,7 +244,6 @@ pub fn init_logging(
 pub fn print_node_banner(
     node_id: &str,
     http_addr: &str,
-    ipc_endpoint: &str,
     log_file: Option<&Path>,
     hub_url: Option<&str>,
     auth_token: Option<&str>,
@@ -268,7 +267,6 @@ pub fn print_node_banner(
         } else {
             eprintln!("  \x1b[1mWeb UI:\x1b[0m       http://{http_addr}/");
         }
-        eprintln!("  \x1b[1mIPC Endpoint:\x1b[0m {ipc_endpoint}");
         eprintln!("  \x1b[1mLog File:\x1b[0m     {log_str}");
         eprintln!("  \x1b[1mOutbox Sync:\x1b[0m  {sync_str}");
         eprintln!("  \x1b[2mPress Ctrl+C to stop.\x1b[0m\n");
@@ -282,7 +280,6 @@ pub fn print_node_banner(
         } else {
             eprintln!("  Web UI:       http://{http_addr}/");
         }
-        eprintln!("  IPC Endpoint: {ipc_endpoint}");
         eprintln!("  Log File:     {log_str}");
         eprintln!("  Outbox Sync:  {sync_str}");
         eprintln!("  Press Ctrl+C to stop.\n");
@@ -378,21 +375,12 @@ mod tests {
         print_node_banner(
             "node_test",
             "127.0.0.1:7860",
-            r"\\.\pipe\test",
             Some(dir.path()),
             None,
             Some("test_token_123"),
             true,
         );
-        print_node_banner(
-            "node_test",
-            "127.0.0.1:7860",
-            r"\\.\pipe\test",
-            None,
-            None,
-            None,
-            false,
-        );
+        print_node_banner("node_test", "127.0.0.1:7860", None, None, None, false);
         print_hub_banner(
             "0.0.0.0:8080",
             dir.path(),

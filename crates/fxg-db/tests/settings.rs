@@ -3,12 +3,11 @@
 use std::collections::BTreeMap;
 
 use fxg_db::{Db, DbError, DbRole};
+use fxg_protocol::SecretId;
 use fxg_protocol::settings::{
-    AgentSettings, ConfigSource, GitCredentialConfig, NodeSettings, ProjectIdentity,
-    ProvisionerDefinition, SourcedValue, UpdateAgentSettingsRequest, UpdateHubSettingsRequest,
-    UpdateNodeSettingsRequest, UpdateProjectProfileRequest,
+    AgentSettings, ConfigSource, NodeSettings, ProjectIdentity, ProvisionerDefinition,
+    SourcedValue, UpdateAgentSettingsRequest, UpdateHubSettingsRequest, UpdateNodeSettingsRequest,
 };
-use fxg_protocol::{ProjectId, SecretId};
 
 async fn db() -> Db {
     Db::open_in_memory(DbRole::Node).await.expect("db")
@@ -185,20 +184,13 @@ async fn prune_removes_unreported_bindings_and_relinks_sessions() {
 }
 
 #[tokio::test]
-async fn hub_settings_provisioners_and_profiles() {
+async fn hub_settings_and_provisioners() {
     let db = Db::open_in_memory(DbRole::Hub).await.expect("db");
     let initial = db.ensure_hub_settings().await.expect("ensure");
 
     let updated = db
         .update_hub_settings(&UpdateHubSettingsRequest {
             vapid_subject: Some("mailto:admin@example.com".to_owned()),
-            git_credentials: BTreeMap::from([(
-                "github.com".to_owned(),
-                GitCredentialConfig::Secret {
-                    username: Some("git".to_owned()),
-                    secret_id: SecretId::new("git-token"),
-                },
-            )]),
             expected_revision: initial.revision,
         })
         .await
@@ -207,14 +199,6 @@ async fn hub_settings_provisioners_and_profiles() {
         updated.vapid_subject.as_deref(),
         Some("mailto:admin@example.com")
     );
-    match updated.git_credentials.get("github.com").expect("github") {
-        GitCredentialConfig::Secret { secret_id, .. } => {
-            assert_eq!(secret_id.as_str(), "git-token");
-        }
-        other @ (GitCredentialConfig::GhCli { .. } | GitCredentialConfig::Env { .. }) => {
-            panic!("unexpected provider: {other:?}")
-        }
-    }
 
     db.upsert_provisioner(&ProvisionerDefinition {
         name: "docker".to_owned(),
@@ -223,46 +207,17 @@ async fn hub_settings_provisioners_and_profiles() {
         args: vec!["run".to_owned()],
         idle_timeout_secs: Some(900),
         env: BTreeMap::from([("KEY".to_owned(), "value".to_owned())]),
+        env_secrets: BTreeMap::from([("GH_TOKEN".to_owned(), SecretId::new("github-token"))]),
     })
     .await
     .expect("provisioner");
     let provisioners = db.provisioners().await.expect("list");
     assert_eq!(provisioners["docker"].args, vec!["run"]);
     assert_eq!(provisioners["docker"].env["KEY"], "value");
-
-    let project_id = ProjectId::from("github.com/acme/one");
-    db.upsert_project(&fxg_db::ProjectRecord {
-        project_id: project_id.as_str().to_owned(),
-        name: "one".to_owned(),
-        canonical_git_url: None,
-        identity: ProjectIdentity::git_remote(),
-    })
-    .await
-    .expect("project");
-    let profile = db
-        .upsert_project_profile(
-            &project_id,
-            &UpdateProjectProfileRequest {
-                bootstrap_setup: vec!["cargo fetch".to_owned()],
-                bootstrap_env: BTreeMap::from([("RUST_BACKTRACE".to_owned(), "1".to_owned())]),
-                expected_revision: 0,
-            },
-        )
-        .await
-        .expect("profile");
-    assert_eq!(profile.revision, 1);
-    let err = db
-        .upsert_project_profile(
-            &project_id,
-            &UpdateProjectProfileRequest {
-                bootstrap_setup: Vec::new(),
-                bootstrap_env: BTreeMap::new(),
-                expected_revision: 0,
-            },
-        )
-        .await
-        .expect_err("stale profile revision");
-    assert!(matches!(err, DbError::RevisionMismatch));
+    assert_eq!(
+        provisioners["docker"].env_secrets["GH_TOKEN"].as_str(),
+        "github-token"
+    );
 }
 
 #[tokio::test]

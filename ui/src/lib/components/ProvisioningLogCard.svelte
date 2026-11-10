@@ -24,11 +24,11 @@
       onclick={() => (open = !open)}
     >
       <WrenchIcon class="size-3.5" />
-      Environment Bootstrap Log
+      Environment Provisioning Log
       <Badge variant="secondary">
         {lines.length === 1
-          ? m.chat_bootstrap_line({ count: lines.length })
-          : m.chat_bootstrap_lines({ count: lines.length })}
+          ? m.chat_provisioning_line({ count: lines.length })
+          : m.chat_provisioning_lines({ count: lines.length })}
       </Badge>
       <span class="text-muted-foreground ml-auto">
         {open ? m.chat_collapse() : m.chat_expand()}

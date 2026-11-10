@@ -15,7 +15,7 @@ use crate::common::{
     PermissionRequestEntry, ProjectSummary, PromptInput, ResolvedBy, SearchHit,
     SessionControlAction, SessionSummary, StreamDeltaPayload, SystemStatus,
 };
-use crate::events::SessionEventBatch;
+use crate::events::{SessionEventBatch, SessionEventEnvelope};
 use crate::settings::{CustomAgentConfig, ProjectIdentity};
 use crate::{CommandId, NodeId, ProjectId, SessionId};
 
@@ -46,6 +46,8 @@ pub struct SystemInfoResponse {
     pub unsynced_event_count: Option<u64>,
     /// WebSocket connection state to the hub (local node only)
     pub hub_connected: Option<bool>,
+    /// Last successful synchronization time (Unix epoch ms; local node only)
+    pub last_synced_at: Option<i64>,
 }
 
 /// Recent stderr lines for one agent (diagnostics).
@@ -220,7 +222,7 @@ pub struct ProvisionersResponse {
 /// `POST /api/v1/provisioners/:name/test` response (connectivity check).
 ///
 /// Starts the provisioner and verifies up to the `NodeHello` handshake of
-/// `fxg internal stdio` (or reports a failure during bootstrapping).
+/// `fxg internal stdio` (or reports a failure during provisioning).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct ProvisionerTestResponse {
@@ -503,6 +505,14 @@ pub struct IssueNodeTokenResponse {
     pub token: String,
 }
 
+/// `POST /api/v1/system/shutdown` response.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
+pub struct ShutdownResponse {
+    /// Whether the graceful shutdown was requested
+    pub ok: bool,
+}
+
 /// `POST /api/v1/auth/rotate-token` response (regenerate the client token).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
@@ -569,6 +579,75 @@ pub struct CreateSessionRequest {
 #[specta(collect)]
 pub struct CreateSessionResponse {
     /// ID of the started session
+    pub session_id: SessionId,
+    /// Correlation ID from the request
+    pub command_id: CommandId,
+}
+
+/// `GET /api/v1/sessions/:id` response.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
+pub struct SessionDetail {
+    /// The session aggregate
+    pub session: SessionSummary,
+    /// Total number of persisted events
+    pub event_count: u64,
+    /// Recent events (oldest first)
+    pub recent_events: Vec<SessionEventEnvelope>,
+    /// Permission requests still pending for this session
+    pub pending_permissions: Vec<PermissionRequestEntry>,
+    /// Elicitation requests still waiting for an answer for this session
+    pub pending_elicitations: Vec<ElicitationRequestEntry>,
+}
+
+/// `POST /api/v1/sessions/:id/prompt` request.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
+pub struct SendPromptRequest {
+    /// Correlation ID assigned by the client
+    pub command_id: CommandId,
+    /// Prompt body and attachments
+    pub input: PromptInput,
+    /// Source (`cli` / `web` / `android`)
+    pub client_source: ClientSource,
+}
+
+/// `POST /api/v1/sessions/:id/control` request.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
+pub struct ControlSessionRequest {
+    /// Correlation ID assigned by the client
+    pub command_id: CommandId,
+    /// Operation to execute
+    pub action: SessionControlAction,
+}
+
+/// `POST /api/v1/sessions/import` request.
+/// A local node derives the target from `cwd` and ignores `node_id` (or
+/// validates it when present). The hub requires `node_id` and relays the import
+/// to that node.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
+pub struct SessionImportRequest {
+    /// Correlation ID assigned by the client
+    pub command_id: CommandId,
+    /// Node that owns the agent session (hub only; omit for a local node)
+    pub node_id: Option<NodeId>,
+    /// Agent ID (`opencode2` / `antigravity-acp` etc.)
+    pub agent_id: String,
+    /// Agent-side session ID to take over
+    pub agent_session_id: String,
+    /// Working directory
+    pub cwd: String,
+    /// Optional title
+    pub title: Option<String>,
+}
+
+/// `POST /api/v1/sessions/import` response.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
+pub struct SessionImportResponse {
+    /// ID of the imported session
     pub session_id: SessionId,
     /// Correlation ID from the request
     pub command_id: CommandId,
@@ -800,12 +879,13 @@ pub enum HubWsMessage {
         /// The delta body
         delta: StreamDeltaPayload,
     },
-    /// A progress log line of ephemeral VM bootstrapping (`stderr`) (ephemeral).
+    /// A progress log line of ephemeral VM provisioning (`stderr`) (ephemeral).
     ///
-    /// Bootstrapping happens before the ephemeral node's `node.db` exists, so it is
+    /// Provisioning happens before the ephemeral node's `node.db` exists, so it is
     /// streamed directly from the hub instead of being persisted in the
     /// event log.
-    BootstrapLog {
+    #[serde(alias = "bootstrap_log")]
+    ProvisioningLog {
         /// Target session ID
         session_id: SessionId,
         /// A single log line

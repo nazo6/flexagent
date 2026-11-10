@@ -165,7 +165,6 @@
     <Tabs.List variant="line" class="w-full overflow-x-auto border-b">
       <Tabs.Trigger value="bootstrap">Bootstrap</Tabs.Trigger>
       <Tabs.Trigger value="machine">This machine</Tabs.Trigger>
-      <Tabs.Trigger value="projects">Projects</Tabs.Trigger>
       <Tabs.Trigger value="hub">Hub</Tabs.Trigger>
       <Tabs.Trigger value="agents">{m.settings_tab_agents()}</Tabs.Trigger>
       <Tabs.Trigger value="browser">Browser</Tabs.Trigger>
@@ -198,10 +197,6 @@
           </div>
         </div>
       </Card>
-    </Tabs.Content>
-
-    <Tabs.Content value="projects" class="mt-2 flex flex-col gap-3">
-      <SettingsCatalog section="projects" {query} />
     </Tabs.Content>
 
     <Tabs.Content value="hub" class="mt-2 flex flex-col gap-3">

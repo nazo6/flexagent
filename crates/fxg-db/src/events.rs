@@ -729,7 +729,7 @@ pub(crate) async fn apply_projections(
             .await?;
         }
         // Events without derived-column updates on the sessions row
-        // (conversation, tool execution, terminal output, BootstrapLog, etc.).
+        // (conversation, tool execution, terminal output, ProvisioningLog, etc.).
         // Only the shared watermark / update-time update is applied.
         UnifiedEventPayload::UserMessage { .. }
         | UnifiedEventPayload::AgentMessage { .. }
@@ -738,7 +738,7 @@ pub(crate) async fn apply_projections(
         | UnifiedEventPayload::PlanUpdate { .. }
         | UnifiedEventPayload::TerminalOutput { .. }
         | UnifiedEventPayload::TerminalInput { .. }
-        | UnifiedEventPayload::BootstrapLog { .. }
+        | UnifiedEventPayload::ProvisioningLog { .. }
         | UnifiedEventPayload::TurnEnded { .. }
         | UnifiedEventPayload::CompactionUpdated { .. } => {}
     }

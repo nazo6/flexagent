@@ -4,7 +4,9 @@
 //! completions, manpage and Markdown reference are generated from
 //! `__usage_spec__` (design: `docs/05-cli-and-pwa-ui.md` §1).
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
+use futures_util::{SinkExt, StreamExt};
+use fxg_protocol::client_api::{ClientWsMessage, HubWsMessage};
 use fxg_protocol::common::{ClientSource, SessionControlAction, SessionStatus};
 use fxg_protocol::events::UnifiedEventPayload;
 use usage::Args;
@@ -317,7 +319,7 @@ fn describe_event(payload: &UnifiedEventPayload) -> String {
             Some(message) => format!("status_changed {status} ({message})"),
             None => format!("status_changed {status}"),
         },
-        UnifiedEventPayload::BootstrapLog { line } => {
+        UnifiedEventPayload::ProvisioningLog { line } => {
             format!("bootstrap {}", truncate(line, 60))
         }
         UnifiedEventPayload::UsageUpdated {
@@ -360,42 +362,88 @@ impl usage::RunAsync for SessionPromptArgs {
 
     async fn run_async(self) -> Self::Output {
         let mut client = NodeClient::connect().await?;
+        // Capture the current tail so the WS replay does not print the whole
+        // previous conversation.
+        let baseline = if self.wait {
+            Some(
+                client
+                    .session_show(&self.session_id, 0)
+                    .await?
+                    .session
+                    .last_node_seq,
+            )
+        } else {
+            None
+        };
         let input = build_prompt_input(&self.text, &self.attach)?;
         client
             .send_prompt(&self.session_id, &input, ClientSource::Cli)
             .await?;
-        if !self.wait {
+        if let Some(baseline) = baseline {
+            wait_for_turn(&client, &self.session_id, &self.text, baseline).await
+        } else {
             println!("accepted ({})", short_id(&self.session_id));
-            return Ok(());
+            Ok(())
         }
-        wait_for_turn(&mut client, &self.session_id, &self.text).await
     }
 }
 
-/// Poll events until the turn finishes (`idle`) and print them
-/// (`fxg session prompt --wait`).
-async fn wait_for_turn(client: &mut NodeClient, session_id: &str, prompt: &str) -> Result<()> {
+/// Subscribe to the Client WS until the turn finishes (`idle`) and print the
+/// new events (`fxg session prompt --wait`).
+async fn wait_for_turn(
+    client: &NodeClient,
+    session_id: &str,
+    prompt: &str,
+    baseline_seq: u64,
+) -> Result<()> {
+    let mut socket = client.ws_connect().await?;
+    let subscribe = ClientWsMessage::Subscribe {
+        since_cursor: None,
+        focused_session_id: Some(session_id.into()),
+    };
+    socket
+        .send(tokio_tungstenite::tungstenite::Message::Text(
+            serde_json::to_string(&subscribe)?.into(),
+        ))
+        .await
+        .context("failed to subscribe to session events")?;
+
     let mut seen_prompt = false;
-    let mut last_seq = 0u64;
     loop {
-        let detail = client.session_show(session_id, 100).await?;
-        for event in detail.recent_events {
-            if event.node_seq > last_seq {
-                last_seq = event.node_seq;
-                if print_and_check_done(&event.payload, prompt, &mut seen_prompt) {
-                    return Ok(());
+        let message = socket
+            .next()
+            .await
+            .ok_or_else(|| anyhow::anyhow!("session event stream closed"))?
+            .context("failed to read a session event")?;
+        match message {
+            tokio_tungstenite::tungstenite::Message::Text(text) => {
+                let message: HubWsMessage = serde_json::from_str(text.as_str())
+                    .context("failed to decode a session event")?;
+                match message {
+                    HubWsMessage::EventBatch { events, .. } => {
+                        for event in events {
+                            if event.session_id.as_str() != session_id
+                                || event.node_seq <= baseline_seq
+                            {
+                                continue;
+                            }
+                            if print_and_check_done(&event.payload, prompt, &mut seen_prompt) {
+                                return Ok(());
+                            }
+                        }
+                    }
+                    HubWsMessage::Error { error } => {
+                        bail!("{}: {}", error.code, error.message);
+                    }
+                    HubWsMessage::Pong => {}
+                    _ => {}
                 }
             }
+            tokio_tungstenite::tungstenite::Message::Close(_) => {
+                bail!("session event stream closed");
+            }
+            _ => {}
         }
-        if seen_prompt
-            && matches!(
-                detail.session.status,
-                SessionStatus::Idle | SessionStatus::Error | SessionStatus::Stopped
-            )
-        {
-            return Ok(());
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
     }
 }
 

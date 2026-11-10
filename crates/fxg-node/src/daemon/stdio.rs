@@ -5,15 +5,14 @@
 //! Speaks JSON Lines over **`stdin` (`HubToNodeMsg`) / `stdout`
 //! (`NodeToHubMsg`)** of the provisioner command that the hub
 //! (`fxg hub start`) starts as a child process (fully independent of any network
-//! or VPN). Bootstrap and `mise` / `uv` tool installation logs all go to
-//! `stderr`, keeping `stdout` reserved for protocol traffic.
+//! or VPN). Provisioner / environment setup logs all go to `stderr`, keeping
+//! `stdout` reserved for protocol traffic.
 //!
 //! - Uses the same [`SessionManager`](crate::session_manager::SessionManager) /
 //!   event bus / outbox as persistent nodes, with 100% shared message types
 //! - `--workspace <DIR>`: registers the cloned workspace as a project and pins
 //!   `StartSession`'s `local_path` to this directory
 //! - `--ephemeral`: on `DrainAndShutdown`, stops sessions and flushes pending events
-//! - Also starts a local IPC server (`fxg internal git-askpass` → Git credential proxy)
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -83,18 +82,6 @@ pub async fn run_stdio(config: StdioConfig) -> Result<(), NodeError> {
         }
     }
 
-    // Local IPC server (for the GIT_ASKPASS helper / local CLI)
-    let (ipc_shutdown_tx, ipc_shutdown_rx) = watch::channel(false);
-    let ipc_task = tokio::spawn({
-        let state = state.clone();
-        let endpoint = state.config().ipc_endpoint.clone();
-        async move {
-            if let Err(err) = super::ipc::serve(state, endpoint, ipc_shutdown_rx).await {
-                tracing::error!("local ipc server stopped: {err}");
-            }
-        }
-    });
-
     // stdout is reserved for protocol traffic (JSON Lines). Writes are serialized in a dedicated task.
     let (out_tx, mut out_rx) = mpsc::channel::<NodeToHubMsg>(OUT_QUEUE_CAPACITY);
     let writer = tokio::spawn(async move {
@@ -116,9 +103,6 @@ pub async fn run_stdio(config: StdioConfig) -> Result<(), NodeError> {
             tracing::debug!("failed to flush stdout at the end of the transport: {err}");
         }
     });
-
-    // Bind the Git credential proxy to this transport
-    state.credentials().attach(out_tx.clone());
 
     // 1. Handshake + flush of unsent events
     let hello = crate::sync::build_hello(&state).await;
@@ -235,7 +219,6 @@ pub async fn run_stdio(config: StdioConfig) -> Result<(), NodeError> {
     if let Err(err) = crate::sync::push_outbox(&state, &out_tx).await {
         tracing::warn!("failed to flush outbox on shutdown: {err}");
     }
-    state.credentials().detach();
     if !state.config().ephemeral {
         // Ephemeral VMs have their node row dropped hub-side, so offline state is only
         // recorded for regular nodes
@@ -243,13 +226,9 @@ pub async fn run_stdio(config: StdioConfig) -> Result<(), NodeError> {
             tracing::warn!("failed to mark node offline: {err}");
         }
     }
-    fxg_protocol::discard_with!(ipc_shutdown_tx.send(true), "request local IPC shutdown");
     drop(out_tx);
     if let Err(err) = tokio::time::timeout(FLUSH_TIMEOUT, writer).await {
         tracing::warn!("timed out waiting for stdout to flush: {err}");
-    }
-    if let Err(err) = ipc_task.await {
-        tracing::warn!("local IPC task terminated unexpectedly: {err}");
     }
     tracing::info!("fxg node start stopped (stdio transport)");
     Ok(())

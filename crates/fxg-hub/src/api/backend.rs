@@ -14,8 +14,8 @@ use fxg_protocol::client_api::{
     PruneWorktreesRequest, PushSubscribeRequest, PushSubscribeResponse, RemoveWorktreeRequest,
     RespondElicitationRequest, RespondElicitationResponse, RespondPermissionRequest,
     RespondPermissionResponse, ResumeSessionRequest, ResumeSessionResponse,
-    RotateAuthTokenResponse, SessionArchiveRequest, SessionArchiveResponse, SupportBundle,
-    SupportBundleConfig, WorktreeInfo, WorktreesResponse,
+    RotateAuthTokenResponse, SessionArchiveRequest, SessionArchiveResponse, SessionImportRequest,
+    SessionImportResponse, SupportBundle, SupportBundleConfig, WorktreeInfo, WorktreesResponse,
 };
 use fxg_protocol::common::{
     AgentAction, ClientSource, CommandResult, ComponentHealth, DiffScope, ErrorCode,
@@ -24,8 +24,7 @@ use fxg_protocol::common::{
 use fxg_protocol::events::SessionEventEnvelope;
 use fxg_protocol::node_hub::{NodeRpcRequest, NodeRpcResponse};
 use fxg_protocol::settings::{
-    HubSettingsSnapshot, ProjectProfile, SecretsResponse, UpdateHubSettingsRequest,
-    UpdateProjectProfileRequest, UpsertSecretRequest,
+    HubSettingsSnapshot, SecretsResponse, UpdateHubSettingsRequest, UpsertSecretRequest,
 };
 use fxg_protocol::{CommandId, NodeId, SecretId, SessionId};
 use tokio::sync::broadcast;
@@ -77,6 +76,8 @@ pub struct SystemExtras {
     pub unsynced_event_count: Option<u64>,
     /// WebSocket connection state to the hub (only when connected to a local node)
     pub hub_connected: Option<bool>,
+    /// Last successful synchronization time (Unix epoch ms; local node only)
+    pub last_synced_at: Option<i64>,
 }
 
 /// Live event delivered over Client WS.
@@ -96,8 +97,8 @@ pub enum ClientEvent {
         /// Delta body
         delta: fxg_protocol::common::StreamDeltaPayload,
     },
-    /// Progress log from temporary VM bootstrap (`stderr`) (not persisted)
-    BootstrapLog {
+    /// Progress log from temporary VM provisioning (`stderr`) (not persisted)
+    ProvisioningLog {
         /// Target session ID
         session_id: SessionId,
         /// One log line
@@ -214,7 +215,7 @@ pub trait ClientApiBackend: Clone + Send + Sync + 'static {
         "node.log"
     }
 
-    /// Role-specific components (sync / hub / ipc).
+    /// Role-specific components (sync / hub).
     async fn role_health(&self, _now: i64) -> Vec<ComponentHealth> {
         Vec::new()
     }
@@ -295,6 +296,21 @@ pub trait ClientApiBackend: Clone + Send + Sync + 'static {
         request: CreateSessionRequest,
         client: ClientInfo,
     ) -> Result<CreateSessionResponse, ApiError>;
+
+    /// `POST /api/v1/sessions/import` (take over an existing agent session).
+    ///
+    /// The default implementation is for endpoints that cannot own an agent
+    /// process (the hub overrides it to relay to the target node).
+    async fn import_session(
+        &self,
+        _request: SessionImportRequest,
+        _client: ClientInfo,
+    ) -> Result<SessionImportResponse, ApiError> {
+        Err(ApiError::from_code(
+            ErrorCode::InvalidState,
+            "session import is not supported by this backend",
+        ))
+    }
 
     /// `POST /api/v1/sessions/:id/permissions/:req_id/respond` (idempotent).
     async fn respond_permission(
@@ -576,26 +592,6 @@ pub trait ClientApiBackend: Clone + Send + Sync + 'static {
         Err(ApiError::from_code(
             ErrorCode::InvalidState,
             "server secrets are only available on the hub",
-        ))
-    }
-
-    /// `GET /api/v1/projects/:project_id/profile` (hub-owned).
-    async fn project_profile(&self, _project_id: &str) -> Result<ProjectProfile, ApiError> {
-        Err(ApiError::from_code(
-            ErrorCode::InvalidState,
-            "project profiles are only available on the hub",
-        ))
-    }
-
-    /// `PUT /api/v1/projects/:project_id/profile` (hub-owned).
-    async fn update_project_profile(
-        &self,
-        _project_id: &str,
-        _request: UpdateProjectProfileRequest,
-    ) -> Result<ProjectProfile, ApiError> {
-        Err(ApiError::from_code(
-            ErrorCode::InvalidState,
-            "project profiles are only available on the hub",
         ))
     }
 

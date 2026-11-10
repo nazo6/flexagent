@@ -52,7 +52,7 @@ Web UI をメインのインターフェースとするローカルファース�
 | **`fxg support bundle`**                                                    | 秘密情報を redaction したサポートバンドルを出力                                                                                                                                                          | `-o, --output <PATH>`                                                                                                                                                                                                                            |
 | **`fxg support incidents`**                                                 | 永続化された障害インシデントを新しい順に一覧表示                                                                                                                                                         | `--limit <N>`<br/>`--all`<br/>`--json`                                                                                                                                                                                                           |
 | **`fxg agents login <id>` / `fxg agents logout <id>`**                      | ACP エージェントの認証 / ログアウト（ローカルノード）                                                                                                                                                    | `--method <ID>`                                                                                                                                                                                                                                  |
-| **`fxg internal <subcommand>`**                                             | 内部・システム連携用隠しコマンド（`--help` には非表示）                                                                                                                                                  | `stdio`: 標準入出力パイプ (JSON Lines) の一時ノード (`--ephemeral` / `--workspace <DIR>`)<br/>`bootstrap-workspace`: 一時VM内の Zero-Touch 初期化<br/>`git-askpass <PROMPT>`: `GIT_ASKPASS` ヘルパー                                             |
+| **`fxg internal <subcommand>`**                                             | 内部・システム連携用隠しコマンド（`--help` には非表示）                                                                                                                                                  | `stdio`: 標準入出力パイプ (JSON Lines) の一時ノード (`--ephemeral` / `--workspace <DIR>`)                                                                                                                                                        |
 
 ハブの Web UI を開く場合、ハブの `auth_token`（`~/.flexagent/auth_token`。Docker では
 `docker compose exec hub cat /data/auth_token`）を初回入力ダイアログに入力します。
@@ -109,7 +109,7 @@ fxg support bundle -o /tmp/fxg-support.json
 fxg support incidents
 ```
 
-`fxg session ...` / `fxg web` などの IPC を使うコマンドは、ノードが起動していない場合に `fxg node start --detach` 相当で自動起動します（ログ: `~/.flexagent/logs/node.log`）。自動起動を無効化するには `FXG_NO_AUTO_NODE=1` を設定してください。`fxg node start` を前景で起動している場合や、`fxg service install` で常駐させている場合はそちらが優先されます。停止は `fxg node stop` です。
+`fxg session ...` / `fxg web` などのローカルAPIを使うコマンドは、ノードが起動していない場合に `fxg node start --detach` 相当で自動起動します（ログ: `~/.flexagent/logs/node.log`）。自動起動を無効化するには `FXG_NO_AUTO_NODE=1` を設定してください。`fxg node start` を前景で起動している場合や、`fxg service install` で常駐させている場合はそちらが優先されます。停止は `fxg node stop` です。
 
 ---
 
@@ -170,27 +170,28 @@ no_color = false
 ```
 
 `node.name` / `allow_remote_pty` / `project_scan_dirs` / `tray`、`[agents]`、
-`[provisioners]`、`[hub.git_credentials]`、`vapid_subject` は `config.toml`
-から削除されました。Web UI の設定カタログは現在値と出所
+`[provisioners]`、`vapid_subject` は `config.toml` から削除されました。
+`[hub.git_credentials]` はアーキテクチャ簡素化で廃止され、Git 認証は
+Provisioner の `env_secrets` に移行しました。Web UI の設定カタログは現在値と出所
 (`config.toml` / `env` / `cli` / `default`) を読み取り専用で表示します。
 
-### 2.3 Worktree と Bootstrap
+`[node] listen_addr` の既定は `127.0.0.1:7860` です。7860 が使用中で明示指定が
+ない場合は ephemeral port にフォールバックし、実際のアドレスは
+`~/.flexagent/node.addr` に記録されます。CLI・`fxg web`・ブラウザのローカル直結は
+このファイルを優先します。
+
+### 2.3 Worktree と 一時VM環境
 
 - Worktree の作成先は `~/.flexagent/worktrees/{project}/{branch}` に固定です。
   `dir_template` / `copy_files` / `post_create` / `--path` は廃止しました。
   Worktree の作成は Web UI、または `fxg session new <agent> -w <branch> [--base <branch>]`
   / `fxg session fork <id> -w <branch>` から行います。
-- 一時VMの初期化は `hub.db` の `project_profiles`
-  (`bootstrap_setup` / `bootstrap_env`) が所有します。ハブは
-  `FXG_PROJECT_PROFILE_B64` を注入し、`fxg internal bootstrap-workspace` は
-  `--profile <path>` またはこの環境変数から `ProjectProfile` を読み取ります。
-  ツール検出はリポジトリ内の `mise.toml` / `.tool-versions` / マニフェストのみを
-  使います。
+- 一時VMの環境構築・ツールセットアップは、コンテナイメージやVMテンプレート、またはプロビジョナーのコマンド定義で外部管理されます。`fxg` 自身はスクリプト合成やツール自動検出を行わず、`fxg internal stdio` は与えられたワークスペース上でプロトコル通信に専念します。
 
 ## 3. Web UI / Android PWA (`ui/`) 設計
 
-PCブラウザ、ローカルフォールバック (`localhost:7860`)、および Android
-スマートフォン（ホーム画面追加PWA）のすべてを単一のレスポンシブSPAで提供します。
+PCブラウザ、ローカルフォールバック (`node.addr`、既定は `localhost:7860`)、および
+Android スマートフォン（ホーム画面追加PWA）のすべてを単一のレスポンシブSPAで提供します。
 
 ### 3.1 フロントエンド技術スタック & 開発基盤
 
@@ -276,9 +277,9 @@ PCブラウザ、ローカルフォールバック (`localhost:7860`)、およ�
      折りたたんで表示され、セッション画面には復元バナーが表示される。
    - **マルチペイン / タブ構成** (デスクトップは左右分割、モバイルはタブ切替):
      - **Chat ペイン**:
-       - 一時VM起動時（`provisioning` / `bootstrapping`
-         状態）は、最上部に折りたたみ式の **「Environment Bootstrap
-         Log」カード** を表示し、VM起動・`git clone`・`mise` ツール自動導入の
+       - 一時VM起動時（`provisioning`
+         状態）は、最上部に折りたたみ式の **「Provisioner
+         Log」カード** を表示し、VM起動やコンテナ初期化の
          `stderr` 出力をリアルタイム表示。
        - ストリームタイムライン（ユーザー発言、思考プロセス折りたたみ、ツール実行、承認カード、Pending
          Queue）。
@@ -429,10 +430,11 @@ export interface ITerminalAdapter {
       (Phase 1 完了: 単一スキーマ + FTS5 trigram + 投影エンジン。実装は
       `crates/fxg-db/`)
 - [ ] Git Remote URL正規化による論理プロジェクト解決 (Web UI のプロジェクト画面)
-- [ ] Windows Named Pipe / Unix Domain Socket による `fxg` CLI ⇔ `fxg node`
-      ローカルIPC疎通
+- [ ] ローカルループバック HTTP REST / WS (`127.0.0.1:7860` 既定 / 衝突時は
+      ephemeral port) による `fxg` CLI ⇔ `fxg node` 疎通
 - [ ] **セキュリティ基礎**:
-  - [ ] `fxg node` ローカルAPIの `127.0.0.1:7860`（ループバック）厳格バインド
+  - [ ] `fxg node` ローカルAPIの `127.0.0.1`（ループバック、既定ポート 7860）
+        厳格バインドと `node.addr` の公開
   - [ ] 認証トークン生成・永続化 (`~/.flexagent/auth_token`)
   - [ ] Axum ミドルウェアによる `Host` ヘッダ検証 (DNS Rebinding 対策)
   - [ ] WebSocket ハンドシェイク時の `Origin` ヘッダ検証 (CSWSH 対策)
@@ -490,7 +492,7 @@ export interface ITerminalAdapter {
       VAPID Push通知（Androidバックグラウンド通知＆バナー承認）の実装
 - [x] `fxg service install` による各OS自動起動設定の実装
 
-### Milestone 6: 一時VM・サンドボックスノード (`fxg internal stdio` & Zero-Touch Provisioner) (実装計画 Phase 6 対応)
+### Milestone 6: 一時VM・サンドボックスノード (`fxg internal stdio` & 簡素化された Provisioner) (実装計画 Phase 6 対応)
 
 - [x] `fxg internal stdio --ephemeral` による標準入出力パイプ（JSON
       Lines）トランスポート実装
@@ -501,24 +503,28 @@ export interface ITerminalAdapter {
     `local_path` をそのディレクトリに固定する。
 - [x] `fxg hub` のコマンドテンプレート型プロビジョナー管理（Docker / Rootless
       Podman / Incus VM / `google-colab-cli` の子プロセス起動と `stderr`
-      ブートストラップ進捗配信）
-  - `{BOOTSTRAP_SCRIPT}` / `{INSTANCE_NAME}` / `{SESSION_ID}`
-    を置換し、`FXG_NODE_ID` / `FXG_GIT_URL` / `FXG_GIT_BRANCH` / 短命
-    `FXG_GIT_TOKEN` を注入。`stderr` は `HubWsMessage::BootstrapLog`
-    として UI へエフェメラル配信する。
+      初期化ログ配信）
+  - `{INSTANCE_NAME}` / `{SESSION_ID}` を置換し、プロビジョナー定義の環境変数を注入。
+    `stderr` は `HubWsMessage::ProvisioningLog` として UI へエフェメラル配信する。
+    → アーキテクチャ簡素化で `{BOOTSTRAP_SCRIPT}` は廃止済み。
 - [x] `fxg internal bootstrap-workspace` の実装（`mise` / `uv`
       単一バイナリの自動取得と、リポジトリ設定ファイルからの完全ステートレスなツール自動構築）
   - `Cargo.toml` / `package.json` / `pyproject.toml` / `mise.toml` /
-    `.tool-versions` / `.fxg.toml [bootstrap]`（`.fxg.toml` は廃止。現在は
-    `hub.db.project_profiles` の `bootstrap_setup` / `bootstrap_env`）
-    からツールを検出して導入し、`$FXG_HOME/bootstrap.env`
-    に PATH と環境変数を書き出す（生成スクリプトが `exec fxg internal stdio`
-    の直前に `source` する）。出力はすべて `stderr`。
+    `.tool-versions` / `hub.db.project_profiles` からツールを検出して導入し、
+    `$FXG_HOME/bootstrap.env` に PATH と環境変数を書き出す。
+    → アーキテクチャ簡素化で `bootstrap.rs` / `bootstrap-workspace` /
+    `project_profiles` は廃止済み。ツールチェインはイメージ / VM テンプレート側へ移す。
 - [x] `GIT_ASKPASS` + `GitCredentialRequest`
       パイププロキシによる一時VM内への秘密鍵・トークン非保持化
   - ブートストラップ中は短命トークンを echo する専用ヘルパー、ノード起動後は
     `fxg internal git-askpass`（ローカルIPC）→ `GitCredentialRequest`
     でオンメモリ中継する。
+    → アーキテクチャ簡素化で `git-askpass` / `GitCredentialRequest` は廃止済み。
+    Provisioner の `env_secrets` とイメージ側の credential helper に移行した。
+- [x] 外部事前構築済みツール環境への責務分離（`bootstrap.rs` / `bootstrap-workspace` の廃止）
+  - ツールチェインやリポジトリ配置は Dockerfile / VM テンプレート / 起動コマンド側で管理し、`fxg` 内のツール自動導入ロジックを全廃。
+- [x] 環境変数による Git 認証への一本化（`git-askpass` / `GitCredentialRequest` の廃止）
+  - プロビジョナーの `env_secrets` またはコンテナ内設定を利用し、動的認証プロキシを全廃。
 - [x] `DrainAndShutdown` による一時VM破棄前の未送信イベント完全フラッシュ
   - アイドルタイムアウト（`idle_timeout_secs`）またはセッション終了で Drain
     し、未送信イベントを送信してから `DrainComplete` を返す。Drain

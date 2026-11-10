@@ -9,13 +9,16 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use fxg_db::SessionFilter;
 use fxg_protocol::client_api::{
-    AuditLogsResponse, CreateSessionRequest, InboxResponse, RespondElicitationRequest,
-    RespondPermissionRequest, ResumeSessionRequest, SearchResponse, SessionArchiveRequest,
+    AuditLogsResponse, ControlSessionRequest, CreateSessionRequest, InboxResponse,
+    RespondElicitationRequest, RespondPermissionRequest, ResumeSessionRequest, SearchResponse,
+    SendPromptRequest, SessionArchiveRequest, SessionDetail, SessionImportRequest,
     SessionListResponse,
 };
 use fxg_protocol::common::{DiffScope, SessionStatus};
 
-use crate::api::{ApiError, ClientApiBackend, ClientApiState, ClientInfo, REPLAY_BATCH_SIZE};
+use crate::api::{
+    ApiError, ClientApiBackend, ClientApiState, ClientCommand, ClientInfo, REPLAY_BATCH_SIZE,
+};
 
 #[derive(Debug, serde::Deserialize)]
 pub(crate) struct SessionListQuery {
@@ -52,8 +55,58 @@ pub(crate) async fn list_sessions<B: ClientApiBackend>(
 }
 
 #[derive(Debug, serde::Deserialize)]
+pub(crate) struct SessionDetailQuery {
+    /// Number of recent events to include (default 20)
+    recent_events: Option<u32>,
+}
+
+/// `GET /api/v1/sessions/:id`
+pub(crate) async fn session_detail<B: ClientApiBackend>(
+    State(state): State<ClientApiState<B>>,
+    UrlPath(session_id): UrlPath<String>,
+    Query(params): Query<SessionDetailQuery>,
+) -> Response {
+    let db = state.backend.db();
+    let session = match db.get_session(&session_id).await {
+        Ok(Some(session)) => session,
+        Ok(None) => {
+            return ApiError::not_found(format!("session not found: {session_id}")).into_response();
+        }
+        Err(err) => return ApiError::from(err).into_response(),
+    };
+    let recent = params.recent_events.unwrap_or(20).min(500);
+    let (event_count, recent_events) = match db.session_event_tail(&session_id, recent).await {
+        Ok(tail) => tail,
+        Err(err) => return ApiError::from(err).into_response(),
+    };
+    let pending_permissions = match db.pending_permissions().await {
+        Ok(entries) => entries
+            .into_iter()
+            .filter(|entry| entry.session_id.as_str() == session_id)
+            .collect(),
+        Err(err) => return ApiError::from(err).into_response(),
+    };
+    let pending_elicitations = match db.pending_elicitations().await {
+        Ok(entries) => entries
+            .into_iter()
+            .filter(|entry| entry.session_id.as_str() == session_id)
+            .collect(),
+        Err(err) => return ApiError::from(err).into_response(),
+    };
+    Json(SessionDetail {
+        session,
+        event_count,
+        recent_events,
+        pending_permissions,
+        pending_elicitations,
+    })
+    .into_response()
+}
+
+#[derive(Debug, serde::Deserialize)]
 pub(crate) struct EventsQuery {
     after_cursor: Option<u64>,
+    before_cursor: Option<u64>,
     limit: Option<u32>,
 }
 
@@ -62,16 +115,24 @@ pub(crate) async fn session_events<B: ClientApiBackend>(
     UrlPath(session_id): UrlPath<String>,
     Query(params): Query<EventsQuery>,
 ) -> Response {
-    match state
-        .backend
-        .db()
-        .session_events_after(
-            &session_id,
-            params.after_cursor.unwrap_or(0),
-            params.limit.unwrap_or(REPLAY_BATCH_SIZE),
-        )
-        .await
-    {
+    let limit = params.limit.unwrap_or(REPLAY_BATCH_SIZE);
+    let result = match params.before_cursor {
+        Some(before) => {
+            state
+                .backend
+                .db()
+                .session_events_before(&session_id, Some(before), limit)
+                .await
+        }
+        None => {
+            state
+                .backend
+                .db()
+                .session_events_after(&session_id, params.after_cursor.unwrap_or(0), limit)
+                .await
+        }
+    };
+    match result {
         Ok(batch) => Json(batch).into_response(),
         Err(err) => ApiError::from(err).into_response(),
     }
@@ -169,6 +230,51 @@ pub(crate) async fn create_session<B: ClientApiBackend>(
     Json(request): Json<CreateSessionRequest>,
 ) -> Response {
     match state.backend.create_session(request, client).await {
+        Ok(response) => Json(response).into_response(),
+        Err(err) => err.into_response(),
+    }
+}
+
+/// `POST /api/v1/sessions/:id/prompt`
+pub(crate) async fn send_prompt<B: ClientApiBackend>(
+    State(state): State<ClientApiState<B>>,
+    UrlPath(session_id): UrlPath<String>,
+    Json(request): Json<SendPromptRequest>,
+) -> Response {
+    let command = ClientCommand::SendPrompt {
+        command_id: request.command_id,
+        session_id: session_id.into(),
+        input: request.input,
+        client_source: request.client_source,
+    };
+    let result = state.backend.dispatch_command(command).await;
+    crate::api::diagnostics::record_command_result(&state.backend, &result).await;
+    Json(result).into_response()
+}
+
+/// `POST /api/v1/sessions/:id/control`
+pub(crate) async fn control_session<B: ClientApiBackend>(
+    State(state): State<ClientApiState<B>>,
+    UrlPath(session_id): UrlPath<String>,
+    Json(request): Json<ControlSessionRequest>,
+) -> Response {
+    let command = ClientCommand::ControlSession {
+        command_id: request.command_id,
+        session_id: session_id.into(),
+        action: request.action,
+    };
+    let result = state.backend.dispatch_command(command).await;
+    crate::api::diagnostics::record_command_result(&state.backend, &result).await;
+    Json(result).into_response()
+}
+
+/// `POST /api/v1/sessions/import`
+pub(crate) async fn import_session<B: ClientApiBackend>(
+    State(state): State<ClientApiState<B>>,
+    Extension(client): Extension<ClientInfo>,
+    Json(request): Json<SessionImportRequest>,
+) -> Response {
+    match state.backend.import_session(request, client).await {
         Ok(response) => Json(response).into_response(),
         Err(err) => err.into_response(),
     }

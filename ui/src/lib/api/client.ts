@@ -27,7 +27,6 @@ import type {
   ProjectLinkResponse,
   ProjectPreview,
   ProjectPreviewRequest,
-  ProjectProfile,
   ProjectScanRequest,
   ProjectScanResponse,
   ProjectSummary,
@@ -61,7 +60,6 @@ import type {
   WorkspaceDiffResponse,
   UpdateAgentSettingsRequest,
   UpdateNodeSettingsRequest,
-  UpdateProjectProfileRequest,
   UpdateHubSettingsRequest,
   UpsertSecretRequest,
   WorktreeInfo,
@@ -496,7 +494,7 @@ export class ApiClient {
   }
 
   // ------------------------------------------------------------------
-  // Settings / secrets / project profiles
+  // Settings / secrets
   // ------------------------------------------------------------------
 
   /** `GET /api/v1/settings/hub` (hub). */
@@ -575,21 +573,6 @@ export class ApiClient {
   /** `DELETE /api/v1/hub/secrets/:id`. */
   deleteHubSecret(secretId: string): Promise<SecretsResponse> {
     return this.#request("DELETE", `/api/v1/hub/secrets/${encodeURIComponent(secretId)}`);
-  }
-
-  /** `GET /api/v1/projects/:id/profile` (hub-owned). */
-  projectProfile(projectId: string): Promise<ProjectProfile> {
-    return this.#request("GET", `/api/v1/projects/${encodeURIComponent(projectId)}/profile`);
-  }
-
-  /** `PUT /api/v1/projects/:id/profile` (hub-owned). */
-  updateProjectProfile(
-    projectId: string,
-    request: UpdateProjectProfileRequest,
-  ): Promise<ProjectProfile> {
-    return this.#request("PUT", `/api/v1/projects/${encodeURIComponent(projectId)}/profile`, {
-      body: request,
-    });
   }
 
   /** `GET /api/v1/nodes/:id/agents` (catalog for a specific node). */

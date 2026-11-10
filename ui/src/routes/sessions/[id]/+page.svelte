@@ -3,7 +3,7 @@
   import { goto } from "$app/navigation";
   import { onMount } from "svelte";
   import * as AlertDialog from "#lib/components/ui/alert-dialog/index.ts";
-  import BootstrapLogCard from "#lib/components/BootstrapLogCard.svelte";
+  import ProvisioningLogCard from "#lib/components/ProvisioningLogCard.svelte";
   import ChatTimeline from "#lib/components/chat/ChatTimeline.svelte";
   import Composer from "#lib/components/chat/Composer.svelte";
   import DiffPane from "#lib/components/diff/DiffPane.svelte";
@@ -19,7 +19,7 @@
   import { shortId } from "#lib/session-status.ts";
   import { sync } from "#lib/stores/app.svelte.ts";
   import {
-    bootstrapLogLines,
+    provisioningLogLines,
     buildTimelineItems,
     capabilitiesFromEvents,
     latestStatusFromEvents,
@@ -70,11 +70,11 @@
   const capabilities = $derived(capabilitiesFromEvents(timeline.events));
   // Prefer the latest usage derived from events, and fall back to the session list (projection) value.
   const usage = $derived(latestUsageFromEvents(timeline.events) ?? session?.usage ?? null);
-  // Merge persistent events (BootstrapLog synced after a turn completes) with the
+  // Merge persistent events (ProvisioningLog synced after a turn completes) with the
   // ephemeral log the server streams from an ephemeral VM.
-  const bootstrapLines = $derived.by(() => {
-    const persisted = bootstrapLogLines(timeline.events);
-    const live = sync.bootstrapLinesFor(sessionId);
+  const provisioningLines = $derived.by(() => {
+    const persisted = provisioningLogLines(timeline.events);
+    const live = sync.provisioningLinesFor(sessionId);
     return live.length === 0 ? persisted : [...new Set([...persisted, ...live])];
   });
 
@@ -564,7 +564,7 @@
           class="h-full overflow-y-auto px-4 py-5 md:px-8"
         >
           <div class="mx-auto flex max-w-[760px] flex-col gap-4">
-            <BootstrapLogCard lines={bootstrapLines} />
+            <ProvisioningLogCard lines={provisioningLines} />
             <ChatTimeline {sessionId} {items} status={currentStatus} />
           </div>
         </div>

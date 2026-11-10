@@ -32,7 +32,7 @@ use crate::{CommandId, NodeId, ProjectId, SecretId, SessionId};
 /// The node and the hub must come from the same `fxg` release. A node
 /// with an older protocol is rejected at `NodeHello`; backward compatibility
 /// shims are intentionally not provided.
-pub const PROTOCOL_VERSION: u32 = 1;
+pub const PROTOCOL_VERSION: u32 = 2;
 /// Synchronization state of a session held by the node (reported in `NodeHello`).
 ///
 /// The hub compares it with `last_node_seq` in its own DB and returns
@@ -158,6 +158,17 @@ pub enum NodeRpcRequest {
         /// Operation to execute
         action: AgentAction,
     },
+    /// Import an existing agent session (native resume with a recorded ID).
+    ImportSession {
+        /// Agent ID
+        agent_id: String,
+        /// Agent-side session ID to take over
+        agent_session_id: String,
+        /// Working directory
+        cwd: String,
+        /// Optional title
+        title: Option<String>,
+    },
     /// Resume a stopped session.
     ResumeSession {
         /// Target session ID
@@ -189,6 +200,7 @@ impl NodeRpcRequest {
             Self::ProjectScan { .. }
             | Self::ListAgents
             | Self::ProbeAgentConfig { .. }
+            | Self::ImportSession { .. }
             | Self::ResumeSession { .. }
             | Self::DeleteSession { .. } => Duration::from_secs(120),
             Self::ManageAgent { .. } => Duration::from_secs(600),
@@ -257,6 +269,11 @@ pub enum NodeRpcResponse {
     AgentOp {
         /// Display message on success (e.g. `installed opencode2 0.1.0`)
         message: Option<String>,
+    },
+    /// Session import result (`ImportSession`).
+    SessionImported {
+        /// ID of the imported session
+        session_id: SessionId,
     },
     /// Session resume result (`ResumeSession`).
     Resume {
@@ -380,16 +397,6 @@ pub enum NodeToHubMsg {
         code: String,
         /// Human-readable message
         message: String,
-    },
-    /// In-memory git authentication request from an ephemeral VM (the `GIT_ASKPASS`
-    /// proxy).
-    GitCredentialRequest {
-        /// Correlation ID
-        request_id: String,
-        /// Target repository URL
-        repo_url: String,
-        /// Operation kind (`clone` / `fetch` / `push`)
-        operation: String,
     },
     /// Notification that a graceful drain completed (after receiving it the central
     /// server discards the child process / VM).
@@ -536,17 +543,6 @@ pub enum HubToNodeMsg {
     PtyKill {
         /// PTY ID
         pty_id: String,
-    },
-    /// Short-lived token response to a `GitCredentialRequest`.
-    GitCredentialResponse {
-        /// Correlation ID
-        request_id: String,
-        /// Basic authentication user name
-        username: String,
-        /// Token (in memory only; never written to the VM disk)
-        token: Option<String>,
-        /// Failure message
-        error: Option<String>,
     },
     /// Request to flush the ephemeral VM before shutdown.
     DrainAndShutdown {
@@ -696,6 +692,35 @@ mod tests {
     }
 
     #[test]
+    fn import_session_rpc_shape() {
+        let msg = HubToNodeMsg::NodeRpc {
+            request_id: "c1".into(),
+            request: NodeRpcRequest::ImportSession {
+                agent_id: "opencode2".into(),
+                agent_session_id: "agent-9".into(),
+                cwd: "/tmp/repo".into(),
+                title: Some("Imported".into()),
+            },
+        };
+        let json = serde_json::to_value(&msg).unwrap();
+        assert_eq!(json["request"]["type"], "import_session");
+        assert_eq!(json["request"]["agent_session_id"], "agent-9");
+        let decoded: HubToNodeMsg = serde_json::from_value(json).unwrap();
+        assert_eq!(decoded, msg);
+
+        let result = NodeRpcResponse::SessionImported {
+            session_id: "s1".into(),
+        };
+        let json = serde_json::to_value(&result).unwrap();
+        assert_eq!(json["type"], "session_imported");
+        assert_eq!(json["session_id"], "s1");
+        assert_eq!(
+            serde_json::from_value::<NodeRpcResponse>(json).unwrap(),
+            result
+        );
+    }
+
+    #[test]
     fn node_rpc_error_keeps_structured_info() {
         let msg = NodeToHubMsg::NodeRpcResult {
             request_id: "c1".into(),
@@ -724,6 +749,16 @@ mod tests {
         );
         assert_eq!(
             NodeRpcRequest::ListAgents.timeout(),
+            Duration::from_secs(120)
+        );
+        assert_eq!(
+            NodeRpcRequest::ImportSession {
+                agent_id: "opencode2".into(),
+                agent_session_id: "agent-9".into(),
+                cwd: "/tmp/repo".into(),
+                title: None,
+            }
+            .timeout(),
             Duration::from_secs(120)
         );
         assert_eq!(

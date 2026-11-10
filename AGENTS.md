@@ -18,9 +18,12 @@
     `HubToNodeMsg` を使用する。
   - Client ⇔ Hub (`:8080`) と Client ⇔ Local Node (`127.0.0.1:7860`) は同一の
     REST API / WebSocket フォーマットを提供する。
-- **一時VM (`fxg internal stdio`) の出力分離**: ブートストラップや `mise` / `uv`
-  によるツール導入ログはすべて `stderr` (`>&2`) に出力し、`stdout`
+- **一時VM (`fxg internal stdio`) の出力分離**: 環境構築・プロビジョナー
+  ログはすべて `stderr` (`>&2`) に出力し、`stdout`
   はプロトコル通信 (JSON Lines) 専用として保護する。
+- **通信経路の一本化**: CLI (`fxg`) はローカルノードのループバック HTTP/WS
+  (`node.addr`、既定 `127.0.0.1:7860`) のみを使用し、Local IPC (Named Pipe /
+  UDS) は持たない。
 - **Windows ファーストクラス対応**:
   - 子プロセス・PTY は必ず **Windows Job Object (`win32job`)**
     にバインドし、親終了時にプロセスツリーごと確実に終了させる。
@@ -30,8 +33,8 @@
 - **設定の所有権と秘密ストア**:
   - 実行時に変更する設定は所有者の DB にのみ保存する (`node_settings` /
     `agent_settings` / `custom_agents` / `project_path_links` は `node.db`、
-    `hub_settings` / `git_credentials` / `provisioners` / `project_profiles`
-    は `hub.db`)。ノード ⇔ ハブ間で設定を同期・マージしない。
+    `hub_settings` / `provisioners` は `hub.db`)。ノード ⇔ ハブ間で設定を
+    同期・マージしない。
   - `config.toml` は待受アドレス・接続先・ログ・セキュリティ境界のみ。
     `.fxg.toml` と旧 JSON 設定ファイルは廃止。
   - 秘密の値は `~/.flexagent/secrets/{node,hub}/<id>` (`0600`) に置き、
@@ -55,7 +58,7 @@
   - `fxg-pty`: ConPTY / Unix PTY (`portable-pty`)、Windows Job Object 管理
   - `fxg-acp`: `AgentDriver` トレイト、`AcpDriver`
     (`agent-client-protocol`)、ACP Registry、ローカル PATH 実行
-  - `fxg-node`: ノード (Named Pipe / UDS ローカルIPC、Outbox 同期、Git
+  - `fxg-node`: ノード (ループバック HTTP/WS、Outbox 同期、Git
     Worktree 管理、Shadow Git Tree (`GIT_INDEX_FILE`)
     によるターン単位のスナップショット/Revert)
   - `fxg-hub`: ハブ (Axum、Node Hub、VAPID Web Push、Stdio
@@ -80,7 +83,7 @@
 - [`docs/02-database-schema.md`](docs/02-database-schema.md): `hub.db` /
   `node.db` の SQLite スキーマ定義
 - [`docs/03-protocol-and-api.md`](docs/03-protocol-and-api.md): `fxg-protocol`
-  型定義、WS/Stdio/IPC メッセージ、REST API エンドポイント
+  型定義、WS/Stdio メッセージ、REST API エンドポイント
 - [`docs/04-agent-drivers-and-windows.md`](docs/04-agent-drivers-and-windows.md):
   `AgentDriver`、ACP / `opencode2` 統合、Shadow Git Revert/Fork、Windows
   固有実装

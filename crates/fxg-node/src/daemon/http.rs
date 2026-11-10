@@ -84,7 +84,6 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let mut config = DaemonConfig::new(dir.path().to_path_buf(), "http-node", "HTTP Node");
         config.listen_addr = "127.0.0.1:0".to_owned();
-        config.ipc_endpoint = crate::testutil::test_ipc_endpoint(dir.path());
         let daemon = NodeDaemon::start(config).await.expect("start");
         (daemon, dir)
     }
@@ -544,6 +543,270 @@ mod tests {
         }
 
         daemon.shutdown();
+        tokio::time::timeout(std::time::Duration::from_secs(5), daemon.wait())
+            .await
+            .expect("stop");
+    }
+
+    /// Starts a daemon with the mock agent driver for session REST tests.
+    async fn test_session_daemon() -> (NodeDaemon, crate::testutil::MockAgent, tempfile::TempDir) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        crate::testutil::write_mock_agent_config(dir.path()).await;
+        let mut config =
+            DaemonConfig::new(dir.path().to_path_buf(), "session-node", "Session Node");
+        config.listen_addr = "127.0.0.1:0".to_owned();
+        let mock = crate::testutil::MockAgent::default();
+        let daemon = NodeDaemon::start_with_driver_factory(config, mock.factory())
+            .await
+            .expect("start");
+        (daemon, mock, dir)
+    }
+
+    async fn create_session_via_rest(
+        app: &Router,
+        host: &str,
+        token: &str,
+        workspace: &std::path::Path,
+    ) -> String {
+        let body = serde_json::json!({
+            "command_id": "create-1",
+            "project_id": "local:http-test",
+            "node_id": "session-node",
+            "local_path": workspace.to_string_lossy(),
+            "agent_id": "mock",
+        });
+        let response = app
+            .clone()
+            .oneshot(post_json(
+                host,
+                "/api/v1/sessions",
+                Some(token),
+                &body.to_string(),
+            ))
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = body_json(response).await;
+        body["session_id"].as_str().expect("session id").to_owned()
+    }
+
+    #[tokio::test]
+    async fn rest_session_detail_and_event_tail() {
+        let (daemon, _dir) = test_daemon().await;
+        let app = router(daemon.state().clone(), daemon.http_addr());
+        let host = host_of(&daemon);
+        let token = daemon.state().auth_token();
+        let session_id = fxg_protocol::util::uuid_v7();
+        daemon
+            .state()
+            .bus()
+            .create_session(
+                &session_id,
+                fxg_protocol::events::UnifiedEventPayload::SessionCreated {
+                    node_id: daemon.state().node_id().into(),
+                    project_id: "github.com/nazo6/flexagent".into(),
+                    project_name: "flexagent".to_owned(),
+                    local_path: "/tmp/repo".to_owned(),
+                    git_branch: Some("main".to_owned()),
+                    is_worktree: false,
+                    agent_id: "mock".to_owned(),
+                    parent_session_id: None,
+                    title: "New Session".to_owned(),
+                },
+            )
+            .await
+            .expect("create session");
+        daemon
+            .state()
+            .bus()
+            .record(
+                &session_id,
+                fxg_protocol::events::UnifiedEventPayload::StatusChanged {
+                    status: fxg_protocol::common::SessionStatus::Running,
+                    error_message: None,
+                },
+            )
+            .await
+            .expect("record status");
+
+        let response = app
+            .clone()
+            .oneshot(get(
+                &host,
+                &format!("/api/v1/sessions/{session_id}?recent_events=1"),
+                Some(&token),
+            ))
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = body_json(response).await;
+        assert_eq!(body["event_count"], 2);
+        assert_eq!(body["recent_events"].as_array().expect("events").len(), 1);
+        assert!(
+            body["pending_permissions"]
+                .as_array()
+                .expect("pending")
+                .is_empty()
+        );
+        assert!(
+            body["pending_elicitations"]
+                .as_array()
+                .expect("pending")
+                .is_empty()
+        );
+
+        let response = app
+            .clone()
+            .oneshot(get(
+                &host,
+                &format!("/api/v1/sessions/{session_id}/events?after_cursor=0"),
+                Some(&token),
+            ))
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = body_json(response).await;
+        assert_eq!(body["events"].as_array().expect("events").len(), 2);
+        let cursor = body["cursor"].as_u64().expect("cursor");
+
+        let response = app
+            .clone()
+            .oneshot(get(
+                &host,
+                &format!("/api/v1/sessions/{session_id}/events?before_cursor={cursor}&limit=1"),
+                Some(&token),
+            ))
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = body_json(response).await;
+        assert_eq!(body["events"].as_array().expect("events").len(), 1);
+
+        daemon.shutdown();
+        tokio::time::timeout(std::time::Duration::from_secs(5), daemon.wait())
+            .await
+            .expect("stop");
+    }
+
+    #[tokio::test]
+    async fn rest_prompt_control_and_import_return_command_results() {
+        let (daemon, mock, dir) = test_session_daemon().await;
+        let app = router(daemon.state().clone(), daemon.http_addr());
+        let host = host_of(&daemon);
+        let token = daemon.state().auth_token();
+        let workspace = dir.path().join("workspace");
+        std::fs::create_dir_all(&workspace).expect("workspace");
+
+        let session_id = create_session_via_rest(&app, &host, &token, &workspace).await;
+
+        let prompt = serde_json::json!({
+            "command_id": "prompt-1",
+            "input": {"text": "hello"},
+            "client_source": "cli",
+        });
+        let response = app
+            .clone()
+            .oneshot(post_json(
+                &host,
+                &format!("/api/v1/sessions/{session_id}/prompt"),
+                Some(&token),
+                &prompt.to_string(),
+            ))
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = body_json(response).await;
+        assert_eq!(body["success"], true);
+        assert_eq!(mock.prompts(), vec!["hello".to_owned()]);
+
+        let control = serde_json::json!({
+            "command_id": "control-1",
+            "action": {"action": "cancel"},
+        });
+        let response = app
+            .clone()
+            .oneshot(post_json(
+                &host,
+                &format!("/api/v1/sessions/{session_id}/control"),
+                Some(&token),
+                &control.to_string(),
+            ))
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(body_json(response).await["success"], true);
+
+        let set_mode = serde_json::json!({
+            "command_id": "control-mode-1",
+            "action": {"action": "set_mode", "mode_id": "plan"},
+        });
+        let response = app
+            .clone()
+            .oneshot(post_json(
+                &host,
+                &format!("/api/v1/sessions/{session_id}/control"),
+                Some(&token),
+                &set_mode.to_string(),
+            ))
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(body_json(response).await["success"], true);
+        assert_eq!(mock.modes(), vec!["plan".to_owned()]);
+
+        mock.set_resume_supported(true);
+        let import = serde_json::json!({
+            "command_id": "import-1",
+            "agent_id": "mock",
+            "agent_session_id": "agent-9",
+            "cwd": workspace.to_string_lossy(),
+            "title": "Imported",
+        });
+        let response = app
+            .clone()
+            .oneshot(post_json(
+                &host,
+                "/api/v1/sessions/import",
+                Some(&token),
+                &import.to_string(),
+            ))
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = body_json(response).await;
+        assert!(body["session_id"].as_str().is_some());
+        assert!(mock.starts().iter().any(|start| {
+            start
+                .resume
+                .as_ref()
+                .is_some_and(|resume| resume.agent_session_id.as_deref() == Some("agent-9"))
+        }));
+
+        daemon.shutdown();
+        tokio::time::timeout(std::time::Duration::from_secs(5), daemon.wait())
+            .await
+            .expect("stop");
+    }
+
+    #[tokio::test]
+    async fn rest_shutdown_stops_the_local_node() {
+        let (daemon, _dir) = test_daemon().await;
+        let app = router(daemon.state().clone(), daemon.http_addr());
+        let host = host_of(&daemon);
+        let token = daemon.state().auth_token();
+
+        let response = app
+            .oneshot(post_json(
+                &host,
+                "/api/v1/system/shutdown",
+                Some(&token),
+                "{}",
+            ))
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(body_json(response).await["ok"], true);
+
         tokio::time::timeout(std::time::Duration::from_secs(5), daemon.wait())
             .await
             .expect("stop");

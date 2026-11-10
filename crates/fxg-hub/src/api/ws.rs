@@ -114,31 +114,7 @@ pub(crate) async fn handle_client_ws<B: ClientApiBackend>(backend: B, socket: We
                             continue;
                         };
                         let result = backend.dispatch_command(command).await;
-                        if let Some(error) = result.error.as_ref() {
-                            super::diagnostics::record_info(
-                                &backend,
-                                error,
-                                IncidentSource::Api,
-                                IncidentLevel::Error,
-                                result
-                                    .session_id
-                                    .as_ref()
-                                    .map(fxg_protocol::SessionId::as_str),
-                                None,
-                            )
-                            .await;
-                        }
-                        for warning in &result.warnings {
-                            super::diagnostics::record_warning(
-                                &backend,
-                                warning,
-                                result
-                                    .session_id
-                                    .as_ref()
-                                    .map(fxg_protocol::SessionId::as_str),
-                            )
-                            .await;
-                        }
+                        super::diagnostics::record_command_result(&backend, &result).await;
                         let response = HubWsMessage::CommandResult {
                             command_id: result.command_id,
                             success: result.success,
@@ -203,11 +179,11 @@ pub(crate) async fn handle_client_ws<B: ClientApiBackend>(backend: B, socket: We
                         break;
                     }
                 }
-                Ok(ClientEvent::BootstrapLog { session_id, line }) => {
+                Ok(ClientEvent::ProvisioningLog { session_id, line }) => {
                     // Temporary VM bootstrap log (ephemeral; not persisted)
                     if send_ws_json(
                         &mut sender,
-                        &HubWsMessage::BootstrapLog { session_id, line },
+                        &HubWsMessage::ProvisioningLog { session_id, line },
                     )
                     .await
                     .is_err()

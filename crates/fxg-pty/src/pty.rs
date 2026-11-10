@@ -6,7 +6,7 @@
 //! - **Cross-platform PTY**: `portable-pty` selects ConPTY on Windows and Unix
 //!   PTY on macOS/Linux automatically.
 //! - **Asynchronous streaming**: a dedicated thread reads the Master side's
-//!   `Read` and publishes [`PtyEvent`]s to subscribers (WebSocket / IPC) via
+//!   `Read` and publishes [`PtyEvent`]s to subscribers (WebSocket) via
 //!   `tokio::sync::broadcast`. Input is flushed immediately to the Master's
 //!   `Write` by a dedicated writer thread. Exit detection is handled by a
 //!   dedicated `wait()` thread (Windows ConPTY does not reach EOF just because
@@ -276,8 +276,7 @@ impl OutputForwarder {
 
 /// Session manager for ConPTY / Unix PTY.
 ///
-/// A cloneable handle (`Arc<Inner>`) shared by WebSocket handlers and the IPC
-/// server.
+/// A cloneable handle (`Arc<Inner>`) shared by WebSocket handlers.
 #[derive(Clone)]
 pub struct PtySessionManager {
     inner: Arc<Inner>,

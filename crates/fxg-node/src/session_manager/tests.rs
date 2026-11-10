@@ -1,6 +1,7 @@
 use super::prompt::*;
 use super::replay::*;
 use super::*;
+use crate::paths::NodePaths;
 use crate::testutil::MockAgent;
 use fxg_db::queries::SessionFilter;
 use fxg_db::{Db, DbRole};
@@ -25,8 +26,9 @@ async fn setup() -> (SessionManager, MockAgent, tempfile::TempDir) {
     .await
     .expect("node");
     let bus = SessionEventBus::new(db);
-    let paths = NodePaths::new(dir.path().to_path_buf());
-    paths.ensure_dirs().expect("dirs");
+    NodePaths::new(dir.path().to_path_buf())
+        .ensure_dirs()
+        .expect("dirs");
 
     // Register a custom agent "mock" (resolved without an index)
     let mut custom = std::collections::BTreeMap::new();
@@ -51,7 +53,7 @@ async fn setup() -> (SessionManager, MockAgent, tempfile::TempDir) {
     let registry = AcpRegistry::new(dir.path(), &settings, custom, Vec::new());
 
     let mock = MockAgent::default();
-    let manager = SessionManager::with_factory(bus, paths, "test-node", registry, mock.factory());
+    let manager = SessionManager::with_factory(bus, "test-node", registry, mock.factory());
     (manager, mock, dir)
 }
 

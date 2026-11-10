@@ -108,6 +108,7 @@ impl NodeStartArgs {
             .or_else(|| global.node.listen_addr.clone())
         {
             config.listen_addr = listen;
+            config.listen_addr_explicit = true;
         }
         // Outbox sync (hub connection; standalone / local only when unset)
         config.hub_url = self.hub_url.clone().or_else(|| global.node.hub_url.clone());
@@ -203,7 +204,6 @@ impl usage::RunAsync for NodeStartArgs {
         crate::logging::print_node_banner(
             node.state().node_id(),
             &node.http_addr().to_string(),
-            node.ipc_endpoint(),
             log_file.as_deref(),
             node.state().config().hub_url.as_deref(),
             auth_token.as_deref(),
@@ -230,7 +230,7 @@ impl usage::RunAsync for NodeStartArgs {
     }
 }
 
-/// Waits until the local node accepts IPC connections (used after `--detach`).
+/// Waits until the local node accepts HTTP connections (used after `--detach`).
 async fn wait_for_node() -> Result<NodeClient> {
     let deadline = Instant::now() + Duration::from_secs(15);
     loop {
@@ -461,28 +461,6 @@ pub(crate) fn local_web_url(listen_addr: &str, token: &str) -> String {
     format!("http://{listen_addr}/?token={token}")
 }
 
-/// Base URL of the local node Web UI.
-///
-/// Prefers the address published by a running node (`node.addr`), then
-/// `[node] listen_addr`, then the default loopback address.
-pub(crate) fn local_node_base(env: fxg_protocol::config::EnvLookup<'_>) -> Result<String> {
-    let home = fxg_protocol::config::fxg_home(env);
-    if let Ok(addr) = std::fs::read_to_string(home.join("node.addr")) {
-        let addr = addr.trim();
-        if !addr.is_empty() {
-            return Ok(format!("http://{addr}"));
-        }
-    }
-    let global = fxg_protocol::config::GlobalConfig::load(env)
-        .context("failed to load ~/.flexagent/config.toml")?;
-    let listen = global
-        .node
-        .listen_addr
-        .clone()
-        .unwrap_or_else(|| "127.0.0.1:7860".to_owned());
-    Ok(format!("http://{listen}"))
-}
-
 /// Build the tokenized Web UI URL for a specific session.
 pub(crate) fn local_session_web_url(session_id: &str) -> Result<String> {
     let env = fxg_protocol::config::process_env;
@@ -490,7 +468,7 @@ pub(crate) fn local_session_web_url(session_id: &str) -> Result<String> {
         &fxg_protocol::config::fxg_home(&env).join(fxg_protocol::config::AUTH_TOKEN_FILE_NAME),
     )
     .context("failed to load ~/.flexagent/auth_token")?;
-    let base = local_node_base(&env)?;
+    let base = crate::client::local_node_base(&env)?;
     Ok(format!("{base}/sessions/{session_id}?token={token}"))
 }
 

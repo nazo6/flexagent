@@ -2,7 +2,6 @@
   import { goto } from "$app/navigation";
   import AddProjectDialog from "#lib/components/projects/AddProjectDialog.svelte";
   import ProjectCard from "#lib/components/projects/ProjectCard.svelte";
-  import ProjectProfileDialog from "#lib/components/projects/ProjectProfileDialog.svelte";
   import ProjectScanDialog from "#lib/components/projects/ProjectScanDialog.svelte";
   import WorktreeManagerDialog from "#lib/components/projects/WorktreeManagerDialog.svelte";
   import { Button } from "#lib/components/ui/button/index.ts";
@@ -26,7 +25,6 @@
   );
 
   let worktreeDialog: WorktreeManagerDialog;
-  let profileDialog: ProjectProfileDialog;
   let addDialog: AddProjectDialog;
   let scanDialog: ProjectScanDialog;
 
@@ -106,7 +104,6 @@
           {nodeName}
           onRefreshWorktrees={(projectId) => void worktrees.load(projectId)}
           onCreateWorktree={(projectId) => worktreeDialog.openCreate(projectId)}
-          onOpenSettings={(entry) => profileDialog.open(entry)}
           onPrune={(projectId) => worktreeDialog.openPrune(projectId)}
           onNewSession={openNewSession}
           onRemoveWorktree={(projectId, worktree) => worktreeDialog.openRemove(projectId, worktree)}
@@ -122,6 +119,5 @@
   {nodeName}
   onChanged={(projectId) => void worktrees.load(projectId)}
 />
-<ProjectProfileDialog bind:this={profileDialog} {nodeName} />
 <AddProjectDialog bind:this={addDialog} />
 <ProjectScanDialog bind:this={scanDialog} nodes={sync.nodes} />

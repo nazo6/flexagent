@@ -7,7 +7,7 @@ use axum::response::{IntoResponse, Response};
 use fxg_protocol::node_hub::{NodeRpcRequest, NodeRpcResponse};
 use fxg_protocol::settings::{
     SecretsResponse, UpdateAgentSettingsRequest, UpdateHubSettingsRequest,
-    UpdateNodeSettingsRequest, UpdateProjectProfileRequest, UpsertSecretRequest,
+    UpdateNodeSettingsRequest, UpsertSecretRequest,
 };
 use fxg_protocol::{NodeId, SecretId};
 
@@ -218,31 +218,6 @@ pub(crate) async fn delete_server_secret<B: ClientApiBackend>(
         .await
     {
         Ok(response) => Json(response).into_response(),
-        Err(err) => err.into_response(),
-    }
-}
-
-pub(crate) async fn project_profile<B: ClientApiBackend>(
-    State(state): State<ClientApiState<B>>,
-    UrlPath(project_id): UrlPath<String>,
-) -> Response {
-    match state.backend.project_profile(&project_id).await {
-        Ok(profile) => Json(profile).into_response(),
-        Err(err) => err.into_response(),
-    }
-}
-
-pub(crate) async fn update_project_profile<B: ClientApiBackend>(
-    State(state): State<ClientApiState<B>>,
-    UrlPath(project_id): UrlPath<String>,
-    Json(request): Json<UpdateProjectProfileRequest>,
-) -> Response {
-    match state
-        .backend
-        .update_project_profile(&project_id, request)
-        .await
-    {
-        Ok(profile) => Json(profile).into_response(),
         Err(err) => err.into_response(),
     }
 }

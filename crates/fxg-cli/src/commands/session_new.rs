@@ -190,7 +190,7 @@ async fn run_with_provisioner(
     };
     let response = hub.create_session(&request).await?;
     eprintln!(
-        "provisioning session {} via '{provisioner}' (bootstrap logs are available in the Web UI)",
+        "provisioning session {} via '{provisioner}' (provisioner logs are available in the Web UI)",
         response.session_id
     );
     if args.quiet {

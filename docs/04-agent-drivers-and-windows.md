@@ -119,7 +119,7 @@ ACPでは、エディタやオーケストレータ側が **`acp::Client` トレ
 - **`request_permission(req) -> oneshot::Receiver<RequestPermissionResponse>`**:
   - `oneshot::channel`
     を生成してMapに保持し、`UnifiedEventPayload::PermissionRequest` を発行。
-  - Web Push通知（Android PWA）およびWebSocket/IPCへ即時ブロードキャスト。
+  - Web Push通知（Android PWA）およびWebSocketへ即時ブロードキャスト。
   - ユーザーがAndroid・Web・CLIのいずれかで承認を選択したら、`oneshot::Sender`
     に結果を流してACPエージェントの処理を再開。
 - **`elicitation_create(req) -> oneshot::Receiver<CreateElicitationResponse>`**
@@ -199,7 +199,7 @@ fxg 側で履歴を組み立て直す Replay フォールバックは行いま�
 1. **再開可否の判定**: `SessionManager` の active 一覧 (実際の稼働状況) を正と
    します。強制終了時は `stopped` への遷移イベントが書かれないため、DB の
    `status` が `idle` / `running` のままでも再開を許可します。一方、
-   `provisioning` / `bootstrapping` (一時VM) は v1 では拒否します
+   `provisioning` (一時VM) は v1 では拒否します
    (`INVALID_STATE`)。
 2. **ネイティブ復元 (優先)**: エージェント内部の会話コンテキストを維持したまま
    再開します。
@@ -351,7 +351,7 @@ systemd / launchd / Task Scheduler に委譲します。
 - **アイコン**: `ui/static/icon-192.png` を 32×32 へ縮小し、右下に接続状態ドット
   （緑=ハブ接続中 / グレー=スタンドアロン）を合成する。
 - **状態の取得元**: プロセス内の `DaemonState`（`node.db` / 同期ワーカー）を直接
-  参照する（IPC / HTTP を経由しない）。
+  参照する（HTTP を経由しない）。
 - **OS 別実装**（`tray-icon` はイベントループを自前で持たないため）:
   - **Windows** (`crates/fxg-cli/src/tray/windows.rs`): 専用スレッドで Win32
     メッセージループ（`GetMessageW`）を回し、状態更新は `PostThreadMessageW`

@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n        SELECT name AS \"name!\", description, command, args_json, idle_timeout_secs, env_json\n          FROM provisioners\n         ORDER BY name\n        ",
+  "query": "\n        SELECT name AS \"name!\", description, command, args_json, idle_timeout_secs, env_json,\n               env_secrets_json\n          FROM provisioners\n         ORDER BY name\n        ",
   "describe": {
     "columns": [
       {
@@ -68,6 +68,17 @@
             "name": "env_json"
           }
         }
+      },
+      {
+        "name": "env_secrets_json",
+        "ordinal": 6,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "provisioners",
+            "name": "env_secrets_json"
+          }
+        }
       }
     ],
     "parameters": {
@@ -79,8 +90,9 @@
       false,
       false,
       true,
+      false,
       false
     ]
   },
-  "hash": "61624d77952d5a996b348df2286ff944b8a3b7fa374b1c9ff785919b4174e800"
+  "hash": "0df9e03a03379b7cc6fc60304addfdfbd61b4e81cb842e56e89d88fcca007ec8"
 }

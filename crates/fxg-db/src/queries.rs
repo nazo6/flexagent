@@ -184,6 +184,52 @@ pub async fn session_events_after(
     Ok(SessionEventBatch { events, cursor })
 }
 
+/// Retrieves the most recent events before `before_cursor` (oldest first).
+///
+/// `None` means "the end of the log" and is used for the tail shown by
+/// `fxg session show` / `GET /api/v1/sessions/:id`.
+pub async fn session_events_before(
+    pool: &SqlitePool,
+    session_id: &str,
+    before_cursor: Option<u64>,
+    limit: u32,
+) -> Result<SessionEventBatch, DbError> {
+    let before = match before_cursor {
+        Some(cursor) => i64::try_from(cursor).map_err(|_| DbError::CursorOutOfRange(cursor))?,
+        None => i64::MAX,
+    };
+    let rows = sqlx::query!(
+        r#"
+        SELECT cursor, event_id, session_id, node_seq, payload_json, created_at
+          FROM session_events
+         WHERE session_id = ? AND cursor < ?
+         ORDER BY cursor DESC
+         LIMIT ?
+        "#,
+        session_id,
+        before,
+        i64::from(limit),
+    )
+    .fetch_all(pool)
+    .await?;
+
+    let rows = rows
+        .into_iter()
+        .rev()
+        .map(|row| {
+            (
+                row.cursor,
+                row.event_id,
+                row.session_id,
+                row.node_seq,
+                row.payload_json,
+                row.created_at,
+            )
+        })
+        .collect();
+    batch_from_rows(rows, 0)
+}
+
 /// Builds a [`SessionEventBatch`] from `(cursor, event_id, session_id, node_seq, payload_json,
 /// created_at)` rows (shared routine).
 fn batch_from_rows(

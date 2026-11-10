@@ -92,64 +92,6 @@ impl NodePaths {
     }
 }
 
-/// Resolves the endpoint of the CLI <-> daemon local IPC.
-///
-/// - **Windows**: Named Pipe `\\.\pipe\fxg-node-<username>`
-/// - **Linux / macOS / WSL**: `$XDG_RUNTIME_DIR/fxg/node.sock` or
-///   `/tmp/fxg-<uid>/node.sock`
-///
-/// If the environment variable `FXG_IPC_ENDPOINT` is set, it takes precedence
-/// (for isolated execution in ephemeral VMs and for multiple instances in tests).
-///
-/// Design: `docs/03-protocol-and-api.md` §4.
-pub fn ipc_endpoint(env: EnvLookup<'_>) -> String {
-    if let Some(value) =
-        env(fxg_protocol::config::env_keys::IPC_ENDPOINT).filter(|value| !value.trim().is_empty())
-    {
-        return value;
-    }
-    ipc_endpoint_inner(env)
-}
-
-#[cfg(windows)]
-fn ipc_endpoint_inner(env: EnvLookup<'_>) -> String {
-    let username = env("USERNAME")
-        .or_else(|| env("USER"))
-        .unwrap_or_else(|| "default".to_owned());
-    let sanitized: String = username
-        .chars()
-        .map(|ch| {
-            if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
-                ch
-            } else {
-                '_'
-            }
-        })
-        .collect();
-    format!(r"\\.\pipe\fxg-node-{sanitized}")
-}
-
-#[cfg(unix)]
-fn ipc_endpoint_inner(env: EnvLookup<'_>) -> String {
-    if let Some(runtime_dir) = env("XDG_RUNTIME_DIR").filter(|value| !value.is_empty()) {
-        return PathBuf::from(runtime_dir)
-            .join("fxg")
-            .join("node.sock")
-            .to_string_lossy()
-            .into_owned();
-    }
-    PathBuf::from(format!("/tmp/fxg-{}", current_uid()))
-        .join("node.sock")
-        .to_string_lossy()
-        .into_owned()
-}
-
-#[cfg(unix)]
-fn current_uid() -> u32 {
-    // SAFETY: `getuid` is a POSIX system call that takes no arguments and always succeeds.
-    unsafe { libc::getuid() }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -193,30 +135,5 @@ mod tests {
         let env = env_map(&[("FXG_HOME", "/tmp/fxg-env-home")]);
         let paths = NodePaths::from_env(&|key| env.get(key).cloned());
         assert_eq!(paths.fxg_home(), Path::new("/tmp/fxg-env-home"));
-    }
-
-    #[cfg(windows)]
-    #[test]
-    fn ipc_endpoint_is_named_pipe() {
-        let env = env_map(&[("USERNAME", "nazo6")]);
-        assert_eq!(
-            ipc_endpoint(&|key| env.get(key).cloned()),
-            r"\\.\pipe\fxg-node-nazo6"
-        );
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn ipc_endpoint_prefers_xdg_runtime_dir() {
-        let env = env_map(&[("XDG_RUNTIME_DIR", "/run/user/1000")]);
-        assert_eq!(
-            ipc_endpoint(&|key| env.get(key).cloned()),
-            "/run/user/1000/fxg/node.sock"
-        );
-
-        let empty = env_map(&[]);
-        let fallback = ipc_endpoint(&|key| empty.get(key).cloned());
-        assert!(fallback.starts_with("/tmp/fxg-"), "got: {fallback}");
-        assert!(fallback.ends_with("node.sock"));
     }
 }

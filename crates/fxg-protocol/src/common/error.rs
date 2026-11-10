@@ -56,7 +56,7 @@ pub enum ErrorCode {
     RevisionMismatch,
     /// A referenced secret value does not exist
     SecretMissing,
-    /// The secret is still referenced by an agent or Git credential and cannot be deleted
+    /// The secret is still referenced by an agent or provisioner and cannot be deleted
     SecretInUse,
     /// The secret ID or value is invalid
     SecretInvalid,
@@ -241,7 +241,7 @@ impl FromStr for ErrorCode {
     }
 }
 
-/// Structured error exchanged by REST, Client WS, the node protocol and IPC.
+/// Structured error exchanged by REST, Client WS and the node protocol.
 ///
 /// `message` is the English fallback for logs / CLI; clients translate
 /// `code` (and interpolate `params`) for display. `details` carries

@@ -16,8 +16,6 @@ use crate::{NodeId, ProjectId};
 pub enum NodeLifecycleStatus {
     /// Provisioning (ephemeral VM)
     Provisioning,
-    /// Bootstrapping (ephemeral VM)
-    Bootstrapping,
     /// Ready to serve
     Ready,
     /// Shutting down (draining)
@@ -33,7 +31,6 @@ impl NodeLifecycleStatus {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Provisioning => "provisioning",
-            Self::Bootstrapping => "bootstrapping",
             Self::Ready => "ready",
             Self::Draining => "draining",
             Self::Terminated => "terminated",
@@ -54,7 +51,6 @@ impl FromStr for NodeLifecycleStatus {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "provisioning" => Ok(Self::Provisioning),
-            "bootstrapping" => Ok(Self::Bootstrapping),
             "ready" => Ok(Self::Ready),
             "draining" => Ok(Self::Draining),
             "terminated" => Ok(Self::Terminated),

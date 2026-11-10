@@ -405,7 +405,7 @@ pub async fn upsert_project_binding(
 
 /// Provisional session row while an ephemeral VM is being provisioned.
 ///
-/// An ephemeral VM goes through `bootstrap-workspace` (git clone + tool installation) before
+/// An ephemeral VM is prepared by its container / VM environment before
 /// `fxg internal stdio` sends `SessionCreated`, so until then the client (UI) needs to see the
 /// session's existence and its `provisioning` state. The hub does this by directly
 /// inserting a projection row rather than an event (preserving the single write authority), and

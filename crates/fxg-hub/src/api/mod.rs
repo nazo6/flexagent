@@ -60,14 +60,14 @@ use handlers::projects::{
     test_provisioner,
 };
 use handlers::sessions::{
-    archive_session, audit_logs, create_session, delete_session, inbox, list_sessions,
-    respond_elicitation, respond_permission, resume_session, search, session_diff, session_events,
+    archive_session, audit_logs, control_session, create_session, delete_session, import_session,
+    inbox, list_sessions, respond_elicitation, respond_permission, resume_session, search,
+    send_prompt, session_detail, session_diff, session_events,
 };
 use handlers::settings::{
     browse_fs, delete_node_secret, delete_server_secret, list_agents_node, node_secrets,
-    node_settings, project_profile, server_secrets, settings_server, update_agent_settings,
-    update_hub_settings, update_node_settings, update_project_profile, upsert_node_secret,
-    upsert_server_secret,
+    node_settings, server_secrets, settings_server, update_agent_settings, update_hub_settings,
+    update_node_settings, upsert_node_secret, upsert_server_secret,
 };
 use handlers::stream::{client_ws, pty_ws};
 use handlers::system::{
@@ -236,10 +236,6 @@ pub fn client_router<B: ClientApiBackend>(backend: B, options: ClientApiOptions)
             put(upsert_node_secret::<B>).delete(delete_node_secret::<B>),
         )
         .route("/api/v1/nodes/{node_id}/agents", get(list_agents_node::<B>))
-        .route(
-            "/api/v1/projects/{project_id}/profile",
-            get(project_profile::<B>).put(update_project_profile::<B>),
-        )
         .route("/api/v1/provisioners", get(list_provisioners::<B>))
         .route(
             "/api/v1/provisioners/{provisioner}/test",
@@ -252,6 +248,15 @@ pub fn client_router<B: ClientApiBackend>(backend: B, options: ClientApiOptions)
         .route(
             "/api/v1/sessions/{session_id}/events",
             get(session_events::<B>),
+        )
+        .route("/api/v1/sessions/import", post(import_session::<B>))
+        .route(
+            "/api/v1/sessions/{session_id}/prompt",
+            post(send_prompt::<B>),
+        )
+        .route(
+            "/api/v1/sessions/{session_id}/control",
+            post(control_session::<B>),
         )
         .route("/api/v1/sessions/{session_id}/diff", get(session_diff::<B>))
         .route(
@@ -270,7 +275,10 @@ pub fn client_router<B: ClientApiBackend>(backend: B, options: ClientApiOptions)
             "/api/v1/sessions/{session_id}/archive",
             post(archive_session::<B>),
         )
-        .route("/api/v1/sessions/{session_id}", delete(delete_session::<B>))
+        .route(
+            "/api/v1/sessions/{session_id}",
+            get(session_detail::<B>).delete(delete_session::<B>),
+        )
         .route("/api/v1/inbox", get(inbox::<B>))
         .route("/api/v1/search", get(search::<B>))
         .route("/api/v1/push/subscribe", post(push_subscribe::<B>))

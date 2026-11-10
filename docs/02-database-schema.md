@@ -130,7 +130,7 @@ CREATE TABLE nodes (
     installed_agents_json TEXT NOT NULL DEFAULT '[]', -- 利用可能なエージェントID一覧 (JSON配列)
     is_ephemeral    INTEGER NOT NULL DEFAULT 0,     -- 0: 常駐ノード, 1: 一時VM/コンテナノード
     provisioner     TEXT,                           -- 一時ノードのプロビジョナー識別子 (例: "local-docker", "local-incus", "colab-pro")
-    lifecycle_status TEXT NOT NULL DEFAULT 'ready', -- 'provisioning' | 'bootstrapping' | 'ready' | 'draining' | 'terminated' | 'error'
+    lifecycle_status TEXT NOT NULL DEFAULT 'ready', -- 'provisioning' | 'ready' | 'draining' | 'terminated' | 'error'
     idle_timeout_secs INTEGER,                      -- アイドル自動破棄までの秒数 (一時ノード用、例: 900)
     is_online       INTEGER NOT NULL DEFAULT 0,     -- 1: 接続中, 0: 切断
     last_seen_at    INTEGER NOT NULL,               -- Unix epoch (ms)
@@ -176,7 +176,7 @@ CREATE TABLE sessions (
     agent_session_id TEXT,                          -- エージェント内部のセッションID (SessionAgentBound イベントで確定)
     parent_session_id TEXT REFERENCES sessions(session_id), -- Fork元のセッションID
     title           TEXT NOT NULL DEFAULT 'New Session',
-    status          TEXT NOT NULL,                  -- 'provisioning' | 'bootstrapping' | 'idle' | 'running' | 'waiting_permission' | 'waiting_input' | 'stopped' | 'error'
+    status          TEXT NOT NULL,                  -- 'provisioning' | 'idle' | 'running' | 'waiting_permission' | 'waiting_input' | 'stopped' | 'error'
     current_mode    TEXT,                           -- ACP SessionMode (例: 'code', 'plan')
     available_modes_json    TEXT NOT NULL DEFAULT '[]', -- ACP ModeInfo[]
     available_commands_json TEXT NOT NULL DEFAULT '[]', -- ACP AvailableCommand[]
@@ -202,7 +202,7 @@ CREATE TABLE session_events (
     event_id        TEXT NOT NULL UNIQUE,           -- UUID v7 (冪等適用・重複排除)
     session_id      TEXT NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
     node_seq        INTEGER NOT NULL,               -- セッション内の順序番号 (1, 2, 3...)。実行ノードのみが採番
-    event_type      TEXT NOT NULL,                  -- 'session_created' | 'session_title_changed' | 'session_agent_bound' | 'user_message' | 'agent_message' | 'agent_thought' | 'tool_call' | 'plan' | 'permission_request' | 'permission_resolved' | 'elicitation_request' | 'elicitation_resolved' | 'session_archived' | 'session_deleted' | 'terminal_output' | 'status_change' | 'capabilities_updated' | 'bootstrap_log'
+    event_type      TEXT NOT NULL,                  -- 'session_created' | 'session_title_changed' | 'session_agent_bound' | 'user_message' | 'agent_message' | 'agent_thought' | 'tool_call' | 'plan' | 'permission_request' | 'permission_resolved' | 'elicitation_request' | 'elicitation_resolved' | 'session_archived' | 'session_deleted' | 'terminal_output' | 'status_change' | 'capabilities_updated' | 'provisioning_log'
     payload_json    TEXT NOT NULL,                  -- 構造化ペイロード (UnifiedEventPayload のJSON。正データ)
     searchable_text TEXT,                           -- FTS5全文検索用のプレーンテキスト抽出 (受信時に payload_json から生成。terminal_output 等のバイナリ系は対象外)
     created_at      INTEGER NOT NULL,
@@ -340,8 +340,9 @@ CREATE INDEX idx_incidents_last_seen ON incidents(last_seen_at DESC);
 
 - `node.db`: `node_settings` / `agent_settings` / `agent_aliases` /
   `custom_agents` / `enabled_package_agents` / `project_path_links`
-- `hub.db`: `hub_settings` / `git_credentials` / `provisioners` /
-  `project_profiles`
+- `hub.db`: `hub_settings` / `provisioners` (`provisioners` は `env_json` /
+  `env_secrets_json` を持つ。`project_profiles` / `git_credentials` は
+  アーキテクチャ簡素化で削除済み)
 - 共通: `secrets` (秘密の **メタデータ** のみ。値は
   `~/.flexagent/secrets/{node,hub}/<id>` に `0600` で保存)
 
@@ -349,6 +350,15 @@ CREATE INDEX idx_incidents_last_seen ON incidents(last_seen_at DESC);
 `revision INTEGER NOT NULL DEFAULT 1` を持ち、更新は
 `UPDATE ... WHERE id = 1 AND revision = ?` の単一クエリで楽観的ロックを行います
 (不一致は `REVISION_MISMATCH`)。
+
+> **アーキテクチャ簡素化の migration**:
+> `0012_provisioner_env_secrets.sql` が `provisioners.env_secrets_json` を ADD し、
+> `0013_remove_project_profiles.sql` が `project_profiles` を DROP、
+> `0014_remove_git_credentials.sql` が `git_credentials` を DROP、
+> `0015_rename_provisioning_statuses.sql` が `bootstrapping` を `provisioning` に、
+> `bootstrap_log` を `provisioning_log` に更新する。詳細は
+> [`changelog/2026-11-10-architecture-simplification.md`](changelog/2026-11-10-architecture-simplification.md)
+> を参照。
 
 `project_path_links` は `local_path -> project_key` の明示リンクで、Worktree からは
 メイン Worktree のリンクを `git-common-dir` 経由で引き継ぎます。

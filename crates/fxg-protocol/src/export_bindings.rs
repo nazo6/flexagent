@@ -144,5 +144,16 @@ fn export_bindings() {
         .export_to(&path, &types, specta_serde::Format)
         .expect("export TypeScript bindings");
 
+    // Specta leaves trailing spaces on some generated lines; trim them so the
+    // generated file passes whitespace checks without manual edits.
+    let generated = std::fs::read_to_string(&path).expect("read generated bindings");
+    let mut trimmed = generated
+        .lines()
+        .map(str::trim_end)
+        .collect::<Vec<_>>()
+        .join("\n");
+    trimmed.push('\n');
+    std::fs::write(&path, trimmed).expect("trim generated bindings");
+
     assert!(path.exists(), "bindings were not generated: {path:?}");
 }

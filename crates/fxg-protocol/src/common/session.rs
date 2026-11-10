@@ -17,8 +17,6 @@ use crate::{NodeId, ProjectId, SessionId};
 pub enum SessionStatus {
     /// Provisioning an ephemeral VM
     Provisioning,
-    /// Bootstrapping (automatically installing tools)
-    Bootstrapping,
     /// Idle (waiting for a prompt)
     Idle,
     /// Running a turn
@@ -38,7 +36,6 @@ impl SessionStatus {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Provisioning => "provisioning",
-            Self::Bootstrapping => "bootstrapping",
             Self::Idle => "idle",
             Self::Running => "running",
             Self::WaitingPermission => "waiting_permission",
@@ -61,7 +58,6 @@ impl FromStr for SessionStatus {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "provisioning" => Ok(Self::Provisioning),
-            "bootstrapping" => Ok(Self::Bootstrapping),
             "idle" => Ok(Self::Idle),
             "running" => Ok(Self::Running),
             "waiting_permission" => Ok(Self::WaitingPermission),
@@ -299,7 +295,7 @@ pub struct InitialConfig {
 
 /// A prompt sent to an agent: text plus optional attachments.
 ///
-/// Shared by IPC, Client WS, Node⇔Hub messages and REST so the same payload
+/// Shared by Client WS, Node⇔Hub messages and REST so the same payload
 /// is validated once and recorded in `UserMessage`.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, Type)]
 #[specta(collect)]

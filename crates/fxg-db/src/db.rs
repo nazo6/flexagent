@@ -338,6 +338,29 @@ impl Db {
         queries::session_events_after(&self.pool, session_id, after_cursor, limit).await
     }
 
+    /// Retrieves the most recent events before `before_cursor` (oldest first).
+    ///
+    /// `None` means the end of the log (used for the `fxg session show` tail).
+    pub async fn session_events_before(
+        &self,
+        session_id: &str,
+        before_cursor: Option<u64>,
+        limit: u32,
+    ) -> Result<SessionEventBatch, DbError> {
+        queries::session_events_before(&self.pool, session_id, before_cursor, limit).await
+    }
+
+    /// Returns the total persisted event count and the last `recent` events.
+    pub async fn session_event_tail(
+        &self,
+        session_id: &str,
+        recent: u32,
+    ) -> Result<(u64, Vec<fxg_protocol::events::SessionEventEnvelope>), DbError> {
+        let count = incidents::event_count(&self.pool, session_id).await?;
+        let batch = self.session_events_before(session_id, None, recent).await?;
+        Ok((count, batch.events))
+    }
+
     /// Retrieves events after `after_cursor` across all sessions
     /// (for Client WS replay).
     pub async fn events_after_cursor(
@@ -634,7 +657,7 @@ impl Db {
         settings::get_hub_settings(&self.pool).await
     }
 
-    /// Updates hub settings and Git credentials under an optimistic lock.
+    /// Updates hub settings under an optimistic lock.
     pub async fn update_hub_settings(
         &self,
         request: &fxg_protocol::settings::UpdateHubSettingsRequest,
@@ -663,23 +686,6 @@ impl Db {
     /// Deletes a provisioner definition.
     pub async fn delete_provisioner(&self, name: &str) -> Result<u64, DbError> {
         settings::delete_provisioner(&self.pool, name).await
-    }
-
-    /// Returns the bootstrap profile of a project when it exists.
-    pub async fn project_profile(
-        &self,
-        project_id: &fxg_protocol::ProjectId,
-    ) -> Result<Option<fxg_protocol::settings::ProjectProfile>, DbError> {
-        settings::get_project_profile(&self.pool, project_id).await
-    }
-
-    /// Inserts or updates a project profile under an optimistic lock.
-    pub async fn upsert_project_profile(
-        &self,
-        project_id: &fxg_protocol::ProjectId,
-        request: &fxg_protocol::settings::UpdateProjectProfileRequest,
-    ) -> Result<fxg_protocol::settings::ProjectProfile, DbError> {
-        settings::upsert_project_profile(&self.pool, project_id, request).await
     }
 
     /// Lists secret metadata (values are never stored in the DB).

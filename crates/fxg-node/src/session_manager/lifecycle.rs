@@ -218,23 +218,6 @@ impl SessionManager {
         &self,
         params: StartDriverParams<'_>,
     ) -> Result<StartedDriverSession, NodeError> {
-        // Inject the Git credential proxy (GIT_ASKPASS for ephemeral VMs) into the agent process.
-        // The script is generated at daemon startup and authenticates via
-        // `fxg internal git-askpass` → local IPC → the hub's in-memory relay
-        // (design: docs/01 §6.4).
-        let mut spec = params.spec.clone();
-        let askpass = crate::credentials::askpass_script_path(self.inner.paths.fxg_home());
-        if askpass.exists() {
-            for (key, value) in crate::credentials::git_env(self.inner.paths.fxg_home()) {
-                spec.env.retain(|(k, _)| k != &key);
-                spec.env.push((key, value));
-            }
-        }
-        let params = StartDriverParams {
-            spec: &spec,
-            ..params
-        };
-
         let driver =
             (self.inner.factory)(params.spec).map_err(|err| NodeError::Agent(err.to_string()))?;
         self.remember_driver(&driver);
@@ -459,8 +442,8 @@ impl SessionManager {
     /// - Resumability is based on `sessions.active` (the actual running state).
     ///   On forced termination no transition to `stopped` is written, so resuming
     ///   is allowed even when the DB `status` is still `idle` / `running`.
-    /// - Ephemeral VM (`provisioning` / `bootstrapping`) sessions cannot be
-    ///   resumed in v1 (design: `docs/04-agent-drivers-and-windows.md` §4.1).
+    /// - Ephemeral VM (`provisioning`) sessions cannot be resumed in v1
+    ///   (design: `docs/04-agent-drivers-and-windows.md` §4.1).
     pub async fn resume(&self, params: ResumeParams<'_>) -> Result<ResumeOutcome, NodeError> {
         if !self.begin_command(params.command_id) {
             return Err(NodeError::CommandDuplicate(params.command_id.to_string()));
@@ -529,7 +512,7 @@ impl SessionManager {
     /// Validates a stopped session, launches the driver, and records up to
     /// `StatusChanged(Idle)` (shared by explicit resume / auto-resume on send).
     ///
-    /// - Ephemeral VM (`provisioning` / `bootstrapping`) sessions and missing
+    /// - Ephemeral VM (`provisioning`) sessions and missing
     ///   working directories are rejected with [`NodeError::InvalidState`].
     /// - When native restore is impossible in [`ResumeMode::NativeOnly`], the driver
     ///   returns [`NativeResumeUnavailable`], which reaches the caller as
@@ -550,10 +533,7 @@ impl SessionManager {
             .ok_or_else(|| NodeError::InvalidSession(session_id.to_owned()))?;
 
         // Resuming an ephemeral VM (provisioner) session is v2 (not yet supported)
-        if matches!(
-            session.status,
-            SessionStatus::Provisioning | SessionStatus::Bootstrapping
-        ) {
+        if session.status == SessionStatus::Provisioning {
             return Err(NodeError::InvalidState(format!(
                 "resuming ephemeral sessions is not supported yet: {session_id}"
             )));

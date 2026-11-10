@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        INSERT INTO provisioners\n            (name, description, command, args_json, idle_timeout_secs, env_json,\n             env_secrets_json, updated_at)\n        VALUES (?, ?, ?, ?, ?, ?, ?, ?)\n        ON CONFLICT(name) DO UPDATE SET\n            description = excluded.description,\n            command = excluded.command,\n            args_json = excluded.args_json,\n            idle_timeout_secs = excluded.idle_timeout_secs,\n            env_json = excluded.env_json,\n            env_secrets_json = excluded.env_secrets_json,\n            updated_at = excluded.updated_at\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 8
+    },
+    "nullable": []
+  },
+  "hash": "da57137ae346fbf49ca5cb2890291529f3cb936764beb2e8e72bc130e740f4e5"
+}
