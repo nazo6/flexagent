@@ -7,7 +7,9 @@
 use std::path::{Path, PathBuf};
 
 use fxg_protocol::CommandId;
-use fxg_protocol::client_api::{ProjectLinkResponse, ProjectScanResponse, WorktreeInfo};
+use fxg_protocol::client_api::{
+    ProjectLinkResponse, ProjectScanResponse, ProjectUnlinkResponse, WorktreeInfo,
+};
 use fxg_protocol::common::WorktreeAction;
 use fxg_protocol::node_hub::{NodeRpcOutcome, NodeRpcRequest, NodeRpcResponse};
 
@@ -203,6 +205,33 @@ async fn execute_inner(
                 .await;
             Ok(NodeRpcResponse::ProjectPreview {
                 preview: project_preview(&resolved).await,
+            })
+        }
+        NodeRpcRequest::UnlinkProject { local_path } => {
+            let deleted = state
+                .db()
+                .delete_project_binding(state.node_id(), &local_path)
+                .await?;
+            if deleted == 0 {
+                return Err(NodeError::InvalidState(format!(
+                    "no project binding for {local_path}"
+                )));
+            }
+            state.db().delete_orphan_projects().await?;
+            state
+                .record_audit(
+                    fxg_db::audit::actions::PROJECT_LINK,
+                    source,
+                    None,
+                    serde_json::json!({
+                        "action": "unlink",
+                        "local_path": local_path,
+                    }),
+                )
+                .await;
+            state.trigger_node_hello();
+            Ok(NodeRpcResponse::ProjectUnlinked {
+                response: ProjectUnlinkResponse { local_path },
             })
         }
         NodeRpcRequest::ListAgents => {

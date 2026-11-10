@@ -698,5 +698,10 @@
   "search_scope_hub": "Only sessions on the hub are searched.",
   "settings_browser_pinned_note": "Pinned sessions are stored in this browser only.",
   "session_force_stop": "Force stop",
-  "projects_worktrees": "Worktrees"
+  "projects_worktrees": "Worktrees",
+  "projects_unlink_tooltip": "Remove this folder from the project",
+  "projects_unlink_title": "Remove project folder?",
+  "projects_unlink_description": "Removes {path} from {node}. The project is deleted when no other folder remains; its sessions are kept.",
+  "projects_unlink_action": "Remove",
+  "projects_unlinked": "Removed {path}."
 }

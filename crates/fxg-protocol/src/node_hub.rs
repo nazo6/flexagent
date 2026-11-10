@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::client_api::{
     AgentCapabilitiesPreview, AgentsResponse, FsBrowseResponse, ProjectLinkResponse,
-    ProjectPreview, ProjectScanResponse, WorktreeInfo,
+    ProjectPreview, ProjectScanResponse, ProjectUnlinkResponse, WorktreeInfo,
 };
 use crate::common::{
     AgentAction, ClientSource, DataSafety, DiffScope, ElicitationContent, ErrorInfo,
@@ -106,6 +106,11 @@ pub enum NodeRpcRequest {
     },
     /// Resolve a directory and register the project binding.
     AddProject {
+        /// Target directory
+        local_path: String,
+    },
+    /// Remove this node's binding for a directory (orphan projects are pruned).
+    UnlinkProject {
         /// Target directory
         local_path: String,
     },
@@ -242,6 +247,11 @@ pub enum NodeRpcResponse {
     ProjectPreview {
         /// Resolved identity and path
         preview: ProjectPreview,
+    },
+    /// Removed project binding (`UnlinkProject`).
+    ProjectUnlinked {
+        /// Removed binding
+        response: ProjectUnlinkResponse,
     },
     /// ACP Registry catalog (`ListAgents`).
     Agents {

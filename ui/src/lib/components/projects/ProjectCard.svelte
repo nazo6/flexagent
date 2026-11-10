@@ -1,4 +1,5 @@
 <script lang="ts">
+  import * as AlertDialog from "#lib/components/ui/alert-dialog/index.ts";
   import { Badge } from "#lib/components/ui/badge/index.ts";
   import { Button } from "#lib/components/ui/button/index.ts";
   import { formatRelativeTime } from "#lib/format.ts";
@@ -21,6 +22,7 @@
     onPrune: (projectId: string) => void;
     onNewSession: (projectId: string, nodeId?: string, path?: string) => void;
     onRemoveWorktree: (projectId: string, worktree: WorktreeInfo) => void;
+    onUnlinkBinding: (projectId: string, nodeId: string, path: string) => void;
   }
 
   let {
@@ -32,7 +34,11 @@
     onPrune,
     onNewSession,
     onRemoveWorktree,
+    onUnlinkBinding,
   }: Props = $props();
+
+  /** Binding awaiting removal confirmation. */
+  let unlinkTarget = $state<{ nodeId: string; path: string } | null>(null);
 
   const worktrees = $derived(worktreeState.data ?? []);
 </script>
@@ -144,6 +150,16 @@
           <span class="text-muted-foreground ml-auto">
             {formatRelativeTime(binding.last_used_at)}
           </span>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            class="text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+            onclick={() => (unlinkTarget = { nodeId: binding.node_id, path: binding.local_path })}
+            title={m.projects_unlink_tooltip()}
+          >
+            <Trash2Icon class="size-3.5" />
+            <span class="sr-only">{m.projects_unlink_tooltip()}</span>
+          </Button>
         </li>
       {/each}
     </ul>
@@ -194,3 +210,34 @@
     </ul>
   {/if}
 </section>
+
+<AlertDialog.Root
+  open={unlinkTarget !== null}
+  onOpenChange={(open) => !open && (unlinkTarget = null)}
+>
+  <AlertDialog.Content>
+    <AlertDialog.Header>
+      <AlertDialog.Title>{m.projects_unlink_title()}</AlertDialog.Title>
+      <AlertDialog.Description>
+        {m.projects_unlink_description({
+          path: unlinkTarget?.path ?? "",
+          node: nodeName(unlinkTarget?.nodeId ?? ""),
+        })}
+      </AlertDialog.Description>
+    </AlertDialog.Header>
+    <AlertDialog.Footer>
+      <AlertDialog.Cancel>{m.common_cancel()}</AlertDialog.Cancel>
+      <AlertDialog.Action
+        variant="destructive"
+        onclick={() => {
+          if (unlinkTarget !== null) {
+            onUnlinkBinding(project.project_id, unlinkTarget.nodeId, unlinkTarget.path);
+          }
+          unlinkTarget = null;
+        }}
+      >
+        {m.projects_unlink_action()}
+      </AlertDialog.Action>
+    </AlertDialog.Footer>
+  </AlertDialog.Content>
+</AlertDialog.Root>

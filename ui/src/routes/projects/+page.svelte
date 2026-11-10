@@ -11,6 +11,7 @@
   import { shortId } from "#lib/session-status.ts";
   import { sync } from "#lib/stores/app.svelte.ts";
   import { problems } from "#lib/stores/problems.svelte.ts";
+  import { toast } from "svelte-sonner";
   import { createKeyedResource } from "#lib/stores/resource.svelte.ts";
   import FolderPlusIcon from "@lucide/svelte/icons/folder-plus";
   import LinkIcon from "@lucide/svelte/icons/link";
@@ -27,6 +28,17 @@
   let worktreeDialog: WorktreeManagerDialog;
   let addDialog: AddProjectDialog;
   let scanDialog: ProjectScanDialog;
+
+  /** Removes this node's folder binding; the project disappears with its last binding. */
+  async function unlinkBinding(_projectId: string, nodeId: string, path: string): Promise<void> {
+    try {
+      await sync.connection.client.unlinkProject(nodeId, path);
+      toast.success(m.projects_unlinked({ path }));
+      await sync.refreshProjects();
+    } catch (error) {
+      problems.report("unlink project", error);
+    }
+  }
 
   function nodeName(nodeId: string): string {
     return sync.nodes.find((node) => node.node_id === nodeId)?.name ?? shortId(nodeId);
@@ -111,6 +123,7 @@
           onPrune={(projectId) => worktreeDialog.openPrune(projectId)}
           onNewSession={openNewSession}
           onRemoveWorktree={(projectId, worktree) => worktreeDialog.openRemove(projectId, worktree)}
+          onUnlinkBinding={(projectId, nodeId, path) => void unlinkBinding(projectId, nodeId, path)}
         />
       {/each}
     </div>

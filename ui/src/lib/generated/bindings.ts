@@ -1330,6 +1330,18 @@ export type ProjectSummary = {
 	bindings: ProjectBindingSummary[],
 };
 
+/**  `POST /api/v1/nodes/:node_id/projects/unlink` request. */
+export type ProjectUnlinkRequest = {
+	/**  Directory whose binding on the node should be removed */
+	local_path: string,
+};
+
+/**  `POST /api/v1/nodes/:node_id/projects/unlink` response. */
+export type ProjectUnlinkResponse = {
+	/**  Directory whose binding was removed */
+	local_path: string,
+};
+
 /**  `GET /api/v1/projects` response. */
 export type ProjectsResponse = {
 	/**  Logical projects (including node / worktree bindings) */

@@ -29,6 +29,7 @@ import type {
   ProjectPreviewRequest,
   ProjectScanRequest,
   ProjectScanResponse,
+  ProjectUnlinkResponse,
   ProjectSummary,
   ProjectsResponse,
   ProvisionerSummary,
@@ -282,6 +283,13 @@ export class ApiClient {
   linkProject(nodeId: string, request: ProjectLinkRequest): Promise<ProjectLinkResponse> {
     return this.#request("POST", `/api/v1/nodes/${encodeURIComponent(nodeId)}/projects/link`, {
       body: request,
+    });
+  }
+
+  /** `POST /api/v1/nodes/:id/projects/unlink` (remove this node's folder binding). */
+  unlinkProject(nodeId: string, localPath: string): Promise<ProjectUnlinkResponse> {
+    return this.#request("POST", `/api/v1/nodes/${encodeURIComponent(nodeId)}/projects/unlink`, {
+      body: { local_path: localPath },
     });
   }
 

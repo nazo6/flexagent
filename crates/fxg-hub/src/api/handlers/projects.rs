@@ -7,7 +7,8 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use fxg_protocol::client_api::{
     CreateWorktreeRequest, NodesResponse, ProjectLinkRequest, ProjectPreviewRequest,
-    ProjectScanRequest, ProjectsResponse, PruneWorktreesRequest, RemoveWorktreeRequest,
+    ProjectScanRequest, ProjectUnlinkRequest, ProjectsResponse, PruneWorktreesRequest,
+    RemoveWorktreeRequest,
 };
 
 use crate::api::{ApiError, ClientApiBackend, ClientApiState, ClientInfo};
@@ -155,6 +156,22 @@ pub(crate) async fn link_project<B: ClientApiBackend>(
     Json(request): Json<ProjectLinkRequest>,
 ) -> Response {
     match state.backend.link_project(&node_id, request, client).await {
+        Ok(response) => Json(response).into_response(),
+        Err(err) => err.into_response(),
+    }
+}
+
+pub(crate) async fn unlink_project<B: ClientApiBackend>(
+    State(state): State<ClientApiState<B>>,
+    Extension(client): Extension<ClientInfo>,
+    UrlPath(node_id): UrlPath<String>,
+    Json(request): Json<ProjectUnlinkRequest>,
+) -> Response {
+    match state
+        .backend
+        .unlink_project(&node_id, request, client)
+        .await
+    {
         Ok(response) => Json(response).into_response(),
         Err(err) => err.into_response(),
     }

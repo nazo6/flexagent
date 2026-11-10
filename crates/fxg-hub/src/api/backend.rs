@@ -10,12 +10,13 @@ use fxg_protocol::client_api::{
     CreateSessionRequest, CreateSessionResponse, CreateWorktreeRequest, DiagnosticsResponse,
     IssueNodeTokenRequest, IssueNodeTokenResponse, KillSwitchResponse, NodeTokensResponse,
     ProbeAgentRequest, ProjectLinkRequest, ProjectLinkResponse, ProjectPreview,
-    ProjectPreviewRequest, ProjectScanRequest, ProjectScanResponse, ProvisionersResponse,
-    PruneWorktreesRequest, PushSubscribeRequest, PushSubscribeResponse, RemoveWorktreeRequest,
-    RespondElicitationRequest, RespondElicitationResponse, RespondPermissionRequest,
-    RespondPermissionResponse, ResumeSessionRequest, ResumeSessionResponse,
-    RotateAuthTokenResponse, SessionArchiveRequest, SessionArchiveResponse, SessionImportRequest,
-    SessionImportResponse, SupportBundle, SupportBundleConfig, WorktreeInfo, WorktreesResponse,
+    ProjectPreviewRequest, ProjectScanRequest, ProjectScanResponse, ProjectUnlinkRequest,
+    ProjectUnlinkResponse, ProvisionersResponse, PruneWorktreesRequest, PushSubscribeRequest,
+    PushSubscribeResponse, RemoveWorktreeRequest, RespondElicitationRequest,
+    RespondElicitationResponse, RespondPermissionRequest, RespondPermissionResponse,
+    ResumeSessionRequest, ResumeSessionResponse, RotateAuthTokenResponse, SessionArchiveRequest,
+    SessionArchiveResponse, SessionImportRequest, SessionImportResponse, SupportBundle,
+    SupportBundleConfig, WorktreeInfo, WorktreesResponse,
 };
 use fxg_protocol::common::{
     AgentAction, ClientSource, CommandResult, ComponentHealth, DiffScope, ErrorCode,
@@ -398,6 +399,15 @@ pub trait ClientApiBackend: Clone + Send + Sync + 'static {
         request: ProjectLinkRequest,
         client: ClientInfo,
     ) -> Result<ProjectLinkResponse, ApiError>;
+
+    /// `POST /api/v1/nodes/:node_id/projects/unlink`
+    /// (remove this node's binding for a directory; orphan projects are pruned).
+    async fn unlink_project(
+        &self,
+        node_id: &str,
+        request: ProjectUnlinkRequest,
+        client: ClientInfo,
+    ) -> Result<ProjectUnlinkResponse, ApiError>;
 
     /// `POST /api/v1/nodes/:node_id/projects/inspect` (read-only identity preview).
     async fn inspect_project(

@@ -766,6 +766,10 @@ pub enum HubToNodeMsg {
   対象ノードの `node.db.project_path_links` を更新する。Worktree の場合は
   メイン Worktree のルートにリンクする。既存セッションの `sessions.project_id`
   も新しい `user:<key>` へ付け替える。
+- `POST /api/v1/nodes/:node_id/projects/unlink`:
+  指定ノード上のフォルダ紐付け (`project_node_bindings`) を削除する
+  (Web UI のプロジェクト削除)。`{ local_path }` を受け取り、最後の紐付け
+  だった論理プロジェクトは破棄する（セッションは保持）。未登録のパスは 404。
 - `GET /api/v1/nodes`:
   ノード一覧とオンライン状態、一時ノード属性（`is_ephemeral`,
   `lifecycle_status`）、利用可能エージェント一覧を返却。

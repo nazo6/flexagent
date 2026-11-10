@@ -10,12 +10,13 @@ use fxg_protocol::client_api::{
     AgentOpResponse, AgentsResponse, ConnectionRole, CreateSessionRequest, CreateSessionResponse,
     CreateWorktreeRequest, IssueNodeTokenRequest, IssueNodeTokenResponse, KillSwitchResponse,
     NodeTokenSummary, NodeTokensResponse, ProjectLinkRequest, ProjectLinkResponse,
-    ProjectScanRequest, ProjectScanResponse, ProvisionerSummary, ProvisionersResponse,
-    PruneWorktreesRequest, PushSubscribeRequest, PushSubscribeResponse, RemoveWorktreeRequest,
-    RespondElicitationRequest, RespondElicitationResponse, RespondPermissionRequest,
-    RespondPermissionResponse, ResumeSessionRequest, ResumeSessionResponse,
-    RotateAuthTokenResponse, SessionArchiveRequest, SessionArchiveResponse, SessionImportRequest,
-    SessionImportResponse, SupportBundleConfig, WorktreeInfo, WorktreesResponse,
+    ProjectScanRequest, ProjectScanResponse, ProjectUnlinkRequest, ProjectUnlinkResponse,
+    ProvisionerSummary, ProvisionersResponse, PruneWorktreesRequest, PushSubscribeRequest,
+    PushSubscribeResponse, RemoveWorktreeRequest, RespondElicitationRequest,
+    RespondElicitationResponse, RespondPermissionRequest, RespondPermissionResponse,
+    ResumeSessionRequest, ResumeSessionResponse, RotateAuthTokenResponse, SessionArchiveRequest,
+    SessionArchiveResponse, SessionImportRequest, SessionImportResponse, SupportBundleConfig,
+    WorktreeInfo, WorktreesResponse,
 };
 use fxg_protocol::common::{
     AgentAction, CommandResult, ComponentHealth, ComponentName, DiffScope, ErrorCode,
@@ -254,6 +255,49 @@ impl ClientApiBackend for HubState {
                 "action": "link",
                 "node_id": node_id,
                 "project_id": response.project_id,
+                "local_path": response.local_path,
+            }),
+        )
+        .await;
+        Ok(response)
+    }
+
+    async fn unlink_project(
+        &self,
+        node_id: &str,
+        request: ProjectUnlinkRequest,
+        client: ClientInfo,
+    ) -> Result<ProjectUnlinkResponse, ApiError> {
+        if !self
+            .inner
+            .hub
+            .is_online(&fxg_protocol::NodeId::from(node_id))
+            .await
+        {
+            return Err(ApiError::node_offline(
+                node_id,
+                format!("node is offline: {node_id}"),
+            ));
+        }
+        let response = match self
+            .node_rpc(
+                &fxg_protocol::NodeId::from(node_id),
+                NodeRpcRequest::UnlinkProject {
+                    local_path: request.local_path.clone(),
+                },
+            )
+            .await?
+        {
+            NodeRpcResponse::ProjectUnlinked { response } => response,
+            _ => return Err(ApiError::internal("unexpected node RPC response")),
+        };
+        self.record_audit(
+            fxg_db::audit::actions::PROJECT_LINK,
+            &client,
+            None,
+            serde_json::json!({
+                "action": "unlink",
+                "node_id": node_id,
                 "local_path": response.local_path,
             }),
         )

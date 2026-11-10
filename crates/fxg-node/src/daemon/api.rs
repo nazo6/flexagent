@@ -16,11 +16,12 @@ use fxg_protocol::client_api::{
     AgentDiagnostics, AgentOpResponse, AgentsResponse, ConnectionRole, CreateSessionRequest,
     CreateSessionResponse, CreateWorktreeRequest, DiagnosticsResponse, KillSwitchResponse,
     ProjectLinkRequest, ProjectLinkResponse, ProjectScanRequest, ProjectScanResponse,
-    ProvisionersResponse, PruneWorktreesRequest, RemoveWorktreeRequest, RespondElicitationRequest,
-    RespondElicitationResponse, RespondPermissionRequest, RespondPermissionResponse,
-    ResumeSessionRequest, ResumeSessionResponse, RotateAuthTokenResponse, SessionArchiveRequest,
-    SessionArchiveResponse, SessionImportRequest, SessionImportResponse, SupportBundle,
-    SupportBundleConfig, WorktreeInfo, WorktreesResponse,
+    ProjectUnlinkRequest, ProjectUnlinkResponse, ProvisionersResponse, PruneWorktreesRequest,
+    RemoveWorktreeRequest, RespondElicitationRequest, RespondElicitationResponse,
+    RespondPermissionRequest, RespondPermissionResponse, ResumeSessionRequest,
+    ResumeSessionResponse, RotateAuthTokenResponse, SessionArchiveRequest, SessionArchiveResponse,
+    SessionImportRequest, SessionImportResponse, SupportBundle, SupportBundleConfig, WorktreeInfo,
+    WorktreesResponse,
 };
 use fxg_protocol::common::{
     AgentAction, CommandResult, ComponentHealth, ComponentName, ComponentState, DiffScope,
@@ -739,6 +740,48 @@ impl ClientApiBackend for DaemonState {
             project_id: resolved.project_id.into(),
             local_path: resolved.local_path.to_string_lossy().into_owned(),
         })
+    }
+
+    async fn unlink_project(
+        &self,
+        node_id: &str,
+        request: ProjectUnlinkRequest,
+        client: ClientInfo,
+    ) -> Result<ProjectUnlinkResponse, ApiError> {
+        if node_id != self.node_id() {
+            return Err(ApiError::bad_request(format!(
+                "requested node {node_id} but this node is {}",
+                self.node_id()
+            )));
+        }
+        let local_path = request.local_path;
+        let deleted = self
+            .db()
+            .delete_project_binding(self.node_id(), &local_path)
+            .await
+            .map_err(ApiError::from)?;
+        if deleted == 0 {
+            return Err(ApiError::not_found(format!(
+                "no project binding for {local_path}"
+            )));
+        }
+        // Drop the logical project as well when this was its last binding (sessions keep it).
+        self.db()
+            .delete_orphan_projects()
+            .await
+            .map_err(ApiError::from)?;
+        self.record_audit(
+            fxg_db::audit::actions::PROJECT_LINK,
+            &audit_source(&client),
+            None,
+            serde_json::json!({
+                "action": "unlink",
+                "local_path": local_path,
+            }),
+        )
+        .await;
+        self.trigger_node_hello();
+        Ok(ProjectUnlinkResponse { local_path })
     }
 
     async fn list_agents(&self) -> Result<AgentsResponse, ApiError> {

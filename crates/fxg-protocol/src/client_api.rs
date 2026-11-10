@@ -364,6 +364,22 @@ pub struct ProjectLinkResponse {
     pub local_path: String,
 }
 
+/// `POST /api/v1/nodes/:node_id/projects/unlink` request.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
+pub struct ProjectUnlinkRequest {
+    /// Directory whose binding on the node should be removed
+    pub local_path: String,
+}
+
+/// `POST /api/v1/nodes/:node_id/projects/unlink` response.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
+pub struct ProjectUnlinkResponse {
+    /// Directory whose binding was removed
+    pub local_path: String,
+}
+
 /// `GET /api/v1/sessions` response.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]

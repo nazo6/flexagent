@@ -57,7 +57,7 @@ use handlers::agents::{
 use handlers::projects::{
     add_project, create_worktree, inspect_project, link_project, list_nodes, list_projects,
     list_provisioners, list_worktrees, prune_worktrees, remove_worktree, scan_projects,
-    test_provisioner,
+    test_provisioner, unlink_project,
 };
 use handlers::sessions::{
     archive_session, audit_logs, control_session, create_session, delete_session, import_session,
@@ -175,6 +175,10 @@ pub fn client_router<B: ClientApiBackend>(backend: B, options: ClientApiOptions)
         .route(
             "/api/v1/nodes/{node_id}/projects/link",
             post(link_project::<B>),
+        )
+        .route(
+            "/api/v1/nodes/{node_id}/projects/unlink",
+            post(unlink_project::<B>),
         )
         .route(
             "/api/v1/nodes/{node_id}/projects/inspect",
