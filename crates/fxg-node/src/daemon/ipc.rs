@@ -116,10 +116,10 @@ pub async fn serve(
     endpoint: String,
     mut shutdown: watch::Receiver<bool>,
 ) -> Result<(), NodeError> {
-    use tokio::net::windows::named_pipe::HubOptions;
+    use tokio::net::windows::named_pipe::ServerOptions;
 
     let create_instance = |first: bool| {
-        let mut options = HubOptions::new();
+        let mut options = ServerOptions::new();
         options.first_pipe_instance(first);
         options
             .create(&endpoint)
