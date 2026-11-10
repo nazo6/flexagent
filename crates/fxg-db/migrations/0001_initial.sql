@@ -1,8 +1,8 @@
--- FlexAgent 単一スキーマ (node.db / server.db 共通)
+-- FlexAgent 単一スキーマ (node.db / hub.db 共通)
 --
 -- 設計: docs/02-database-schema.md §1
---   node.db (各ノード: ~/.flexagent/node.db) と server.db (中央サーバー:
---   ~/.flexagent/server.db) は「同一DDL・同一テーブル名・単一マイグレーションセット」
+--   node.db (各ノード: ~/.flexagent/node.db) と hub.db (中央サーバー:
+--   ~/.flexagent/hub.db) は「同一DDL・同一テーブル名・単一マイグレーションセット」
 --   から生成される1つのスキーマを共有する。両者の違いは「行のスコープ」と
 --   「実行ロール」だけであり、スキーマ対称性は単一定義によって保証する。
 --

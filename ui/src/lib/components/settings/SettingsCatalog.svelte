@@ -9,21 +9,21 @@
     NodeSettingsSnapshot,
     ProjectProfile,
     SecretSummary,
-    ServerSettingsSnapshot,
+    HubSettingsSnapshot,
   } from "#lib/generated/bindings.ts";
   import { sync } from "#lib/stores/app.svelte.ts";
   import { toast } from "svelte-sonner";
 
-  type Section = "bootstrap" | "machine" | "server" | "projects";
+  type Section = "bootstrap" | "machine" | "hub" | "projects";
 
   let { section, query = "" }: { section: Section; query?: string } = $props();
 
-  const isServer = $derived(sync.connection.role === "central_server");
+  const isHub = $derived(sync.connection.role === "hub");
   const onlineNodes = $derived(sync.nodes.filter((node) => node.is_online));
 
   let selectedNode = $state("");
   let nodeSnapshot = $state<NodeSettingsSnapshot | null>(null);
-  let serverSnapshot = $state<ServerSettingsSnapshot | null>(null);
+  let hubSnapshot = $state<HubSettingsSnapshot | null>(null);
   let secrets = $state<SecretSummary[]>([]);
   let profiles = $state<Record<string, ProjectProfile>>({});
   let loading = $state(false);
@@ -38,8 +38,8 @@
     revision: 0,
   });
 
-  // Server settings form
-  let serverForm = $state({ vapid_subject: "", revision: 0 });
+  // Hub settings form
+  let hubForm = $state({ vapid_subject: "", revision: 0 });
   let gitCredentials = $state<
     { host: string; provider: string; username: string; detail: string }[]
   >([]);
@@ -55,13 +55,11 @@
   let editingProfile = $state<string | null>(null);
   let profileForm = $state({ setup: "", env: "", revision: 0 });
 
-  const targetNode = $derived(
-    isServer ? selectedNode : (sync.connection.systemInfo?.node_id ?? ""),
-  );
-  const showSecrets = $derived(section === "machine" || (section === "server" && isServer));
+  const targetNode = $derived(isHub ? selectedNode : (sync.connection.systemInfo?.node_id ?? ""));
+  const showSecrets = $derived(section === "machine" || (section === "hub" && isHub));
 
   $effect(() => {
-    if (isServer && selectedNode === "" && onlineNodes.length > 0) {
+    if (isHub && selectedNode === "" && onlineNodes.length > 0) {
       selectedNode = onlineNodes[0].node_id;
     }
   });
@@ -84,19 +82,19 @@
           targetNode !== "" ? await sync.connection.client.nodeSettings(targetNode) : null;
         syncNodeForm();
       }
-      if (section === "bootstrap" || section === "machine" || section === "server") {
-        if (isServer) {
-          serverSnapshot = await sync.connection.client.serverSettings();
-          syncServerForm();
+      if (section === "bootstrap" || section === "machine" || section === "hub") {
+        if (isHub) {
+          hubSnapshot = await sync.connection.client.hubSettings();
+          syncHubForm();
         }
       }
       if (section === "machine") {
         secrets =
           targetNode !== "" ? (await sync.connection.client.nodeSecrets(targetNode)).secrets : [];
-      } else if (section === "server" && isServer) {
-        secrets = (await sync.connection.client.serverSecrets()).secrets;
+      } else if (section === "hub" && isHub) {
+        secrets = (await sync.connection.client.hubSecrets()).secrets;
       }
-      if (section === "projects" && isServer) {
+      if (section === "projects" && isHub) {
         await sync.refreshProjects();
         const entries = await Promise.all(
           sync.projects.map(async (project) => {
@@ -124,25 +122,23 @@
     };
   }
 
-  function syncServerForm(): void {
-    if (!serverSnapshot) return;
-    serverForm = {
-      vapid_subject: serverSnapshot.server.vapid_subject ?? "",
-      revision: serverSnapshot.server.revision,
+  function syncHubForm(): void {
+    if (!hubSnapshot) return;
+    hubForm = {
+      vapid_subject: hubSnapshot.hub.vapid_subject ?? "",
+      revision: hubSnapshot.hub.revision,
     };
-    gitCredentials = Object.entries(serverSnapshot.server.git_credentials).map(
-      ([host, config]) => ({
-        host,
-        provider: config.provider,
-        username: config.username ?? "",
-        detail:
-          config.provider === "env"
-            ? (config as { token_env: string }).token_env
-            : config.provider === "secret"
-              ? (config as { secret_id: string }).secret_id
-              : "",
-      }),
-    );
+    gitCredentials = Object.entries(hubSnapshot.hub.git_credentials).map(([host, config]) => ({
+      host,
+      provider: config.provider,
+      username: config.username ?? "",
+      detail:
+        config.provider === "env"
+          ? (config as { token_env: string }).token_env
+          : config.provider === "secret"
+            ? (config as { secret_id: string }).secret_id
+            : "",
+    }));
   }
 
   async function saveNode(): Promise<void> {
@@ -166,11 +162,10 @@
     }
   }
 
-  async function saveServer(): Promise<void> {
+  async function saveHub(): Promise<void> {
     try {
-      serverSnapshot = await sync.connection.client.updateServerSettings({
-        vapid_subject:
-          serverForm.vapid_subject.trim() === "" ? null : serverForm.vapid_subject.trim(),
+      hubSnapshot = await sync.connection.client.updateHubSettings({
+        vapid_subject: hubForm.vapid_subject.trim() === "" ? null : hubForm.vapid_subject.trim(),
         git_credentials: Object.fromEntries(
           gitCredentials
             .filter((entry) => entry.host.trim() !== "")
@@ -191,10 +186,10 @@
                     },
             ]),
         ),
-        expected_revision: serverForm.revision,
+        expected_revision: hubForm.revision,
       });
-      syncServerForm();
-      toast.success("Saved server settings.");
+      syncHubForm();
+      toast.success("Saved hub settings.");
     } catch (cause) {
       toast.error(cause instanceof Error ? cause.message : String(cause));
     }
@@ -209,12 +204,12 @@
         description: secretForm.description.trim() === "" ? null : secretForm.description.trim(),
         value: secretForm.value,
       };
-      if (!(section === "server" && isServer) && targetNode === "") {
+      if (!(section === "hub" && isHub) && targetNode === "") {
         throw new Error("node is not selected");
       }
       const response =
-        section === "server" && isServer
-          ? await sync.connection.client.upsertServerSecret(key, request)
+        section === "hub" && isHub
+          ? await sync.connection.client.upsertHubSecret(key, request)
           : await sync.connection.client.upsertNodeSecret(targetNode, key, request);
       secrets = response.secrets;
       secretForm = { key: "", description: "", value: "" };
@@ -227,12 +222,12 @@
   async function deleteSecret(secret: SecretSummary): Promise<void> {
     if (!confirm(`Delete secret "${secret.id}"?`)) return;
     try {
-      if (!(section === "server" && isServer) && targetNode === "") {
+      if (!(section === "hub" && isHub) && targetNode === "") {
         throw new Error("node is not selected");
       }
       const response =
-        section === "server" && isServer
-          ? await sync.connection.client.deleteServerSecret(secret.id)
+        section === "hub" && isHub
+          ? await sync.connection.client.deleteHubSecret(secret.id)
           : await sync.connection.client.deleteNodeSecret(targetNode, secret.id);
       secrets = response.secrets;
       toast.success(`Deleted secret "${secret.id}".`);
@@ -287,48 +282,48 @@
 
   const bootstrapRows = $derived<Row[]>(
     section === "bootstrap"
-      ? isServer
-        ? serverSnapshot
+      ? isHub
+        ? hubSnapshot
           ? [
               {
                 label: "Data directory",
-                value: serverSnapshot.bootstrap.fxg_home.value,
-                source: serverSnapshot.bootstrap.fxg_home.source,
+                value: hubSnapshot.bootstrap.fxg_home.value,
+                source: hubSnapshot.bootstrap.fxg_home.source,
               },
               {
                 label: "Listen address",
-                value: serverSnapshot.bootstrap.listen_addr.value,
-                source: serverSnapshot.bootstrap.listen_addr.source,
+                value: hubSnapshot.bootstrap.listen_addr.value,
+                source: hubSnapshot.bootstrap.listen_addr.source,
               },
               {
                 label: "Allowed hosts",
-                value: serverSnapshot.bootstrap.allowed_hosts.value.join(", ") || "-",
-                source: serverSnapshot.bootstrap.allowed_hosts.source,
+                value: hubSnapshot.bootstrap.allowed_hosts.value.join(", ") || "-",
+                source: hubSnapshot.bootstrap.allowed_hosts.source,
               },
               {
                 label: "Allowed origins",
-                value: serverSnapshot.bootstrap.allowed_origins.value.join(", ") || "-",
-                source: serverSnapshot.bootstrap.allowed_origins.source,
+                value: hubSnapshot.bootstrap.allowed_origins.value.join(", ") || "-",
+                source: hubSnapshot.bootstrap.allowed_origins.source,
               },
               {
                 label: "Log level",
-                value: serverSnapshot.bootstrap.log_level.value,
-                source: serverSnapshot.bootstrap.log_level.source,
+                value: hubSnapshot.bootstrap.log_level.value,
+                source: hubSnapshot.bootstrap.log_level.source,
               },
               {
                 label: "Log file",
-                value: serverSnapshot.bootstrap.log_file.value ?? "-",
-                source: serverSnapshot.bootstrap.log_file.source,
+                value: hubSnapshot.bootstrap.log_file.value ?? "-",
+                source: hubSnapshot.bootstrap.log_file.source,
               },
               {
                 label: "Log format",
-                value: serverSnapshot.bootstrap.log_format.value,
-                source: serverSnapshot.bootstrap.log_format.source,
+                value: hubSnapshot.bootstrap.log_format.value,
+                source: hubSnapshot.bootstrap.log_format.source,
               },
               {
                 label: "No color",
-                value: String(serverSnapshot.bootstrap.log_no_color.value),
-                source: serverSnapshot.bootstrap.log_no_color.source,
+                value: String(hubSnapshot.bootstrap.log_no_color.value),
+                source: hubSnapshot.bootstrap.log_no_color.source,
               },
             ]
           : []
@@ -350,9 +345,9 @@
                 source: nodeSnapshot.bootstrap.listen_addr.source,
               },
               {
-                label: "Central server",
-                value: nodeSnapshot.bootstrap.central_server_url.value ?? "-",
-                source: nodeSnapshot.bootstrap.central_server_url.source,
+                label: "Hub",
+                value: nodeSnapshot.bootstrap.hub_url.value ?? "-",
+                source: nodeSnapshot.bootstrap.hub_url.source,
               },
               {
                 label: "Log level",
@@ -387,7 +382,7 @@
 </script>
 
 <div class="flex flex-col gap-3">
-  {#if isServer && (section === "bootstrap" || section === "machine")}
+  {#if isHub && (section === "bootstrap" || section === "machine")}
     <div class="flex flex-wrap items-center gap-2">
       <Label for="catalog-node">Target node</Label>
       <select
@@ -469,11 +464,7 @@
           </div>
         </div>
         <div class="flex items-center gap-2">
-          <Button
-            size="sm"
-            disabled={isServer && targetNode === ""}
-            onclick={() => void saveNode()}
-          >
+          <Button size="sm" disabled={isHub && targetNode === ""} onclick={() => void saveNode()}>
             Save
           </Button>
           <span class="text-muted-foreground text-[13px]">revision {nodeForm.revision}</span>
@@ -484,27 +475,26 @@
         </p>
       {/if}
     </Card>
-  {:else if section === "server"}
-    {#if !isServer}
+  {:else if section === "hub"}
+    {#if !isHub}
       <Card class="gap-2 p-4">
-        <h2 class="font-medium">Server settings</h2>
+        <h2 class="font-medium">Hub settings</h2>
         <p class="text-muted-foreground text-[13px]">
-          Server-owned settings live in the hub's <code>server.db</code>. Connect to the central
-          server to edit them.
+          Hub-owned settings live in <code>hub.db</code>. Connect to the hub to edit them.
         </p>
       </Card>
     {:else}
       <Card class="gap-3 p-4">
-        <h2 class="font-medium">Server</h2>
+        <h2 class="font-medium">Hub</h2>
         <p class="text-muted-foreground text-[13px]">
-          Owned by <code>server.db</code>: Web Push contact and Git credential providers.
+          Owned by <code>hub.db</code>: Web Push contact and Git credential providers.
         </p>
         <div class="grid gap-1.5">
           <Label for="vapid-subject">VAPID subject</Label>
           <Input
             id="vapid-subject"
             placeholder="mailto:admin@example.com"
-            bind:value={serverForm.vapid_subject}
+            bind:value={hubForm.vapid_subject}
           />
         </div>
         <div class="flex flex-col gap-2">
@@ -525,11 +515,11 @@
                 placeholder={entry.provider === "env" ? "TOKEN_ENV" : "SECRET_KEY"}
                 bind:value={entry.detail}
                 disabled={entry.provider === "gh_cli"}
-                list={entry.provider === "secret" ? "server-secrets-datalist" : undefined}
+                list={entry.provider === "secret" ? "hub-secrets-datalist" : undefined}
               />
             </div>
           {/each}
-          <datalist id="server-secrets-datalist">
+          <datalist id="hub-secrets-datalist">
             {#each secrets as s (s.id)}
               <option value={s.id}>{s.description ? `${s.id} (${s.description})` : s.id}</option>
             {/each}
@@ -549,15 +539,15 @@
           </div>
         </div>
         <div class="flex items-center gap-2">
-          <Button size="sm" onclick={() => void saveServer()}>Save</Button>
-          <span class="text-muted-foreground text-[13px]">revision {serverForm.revision}</span>
+          <Button size="sm" onclick={() => void saveHub()}>Save</Button>
+          <span class="text-muted-foreground text-[13px]">revision {hubForm.revision}</span>
         </div>
       </Card>
     {/if}
   {:else if section === "projects"}
     <Card class="gap-3 p-4">
       <h2 class="font-medium">Project profiles</h2>
-      {#if !isServer}
+      {#if !isHub}
         <p class="text-muted-foreground text-[13px]">
           Bootstrap profiles for temporary VMs are owned by the hub. Open the hub Web UI to edit
           them.
@@ -567,7 +557,7 @@
           Setup commands and environment variables injected into temporary VMs (<code
             >project_profiles</code
           >
-          in <code>server.db</code>).
+          in <code>hub.db</code>).
         </p>
         {#each sync.projects as project (project.project_id)}
           {@const profile = profiles[project.project_id]}

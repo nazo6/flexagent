@@ -110,7 +110,7 @@ pub struct ProjectBindingRecord {
 /// `token_hash` / `token_issued_at` / `created_at` keep their existing values.
 /// `provisioner` / `idle_timeout_secs` are not overwritten with `NULL` from existing values
 /// (so that they are not lost when a NodeHello upsert with `provisioner = None` arrives after
-/// the server pre-registered an ephemeral node).
+/// the hub pre-registered an ephemeral node).
 pub async fn upsert_node(pool: &SqlitePool, record: &NodeRecord) -> Result<(), DbError> {
     let now = now_ms();
     let installed_agents_json = serde_json::to_string(&record.installed_agents)?;
@@ -132,7 +132,7 @@ pub async fn upsert_node(pool: &SqlitePool, record: &NodeRecord) -> Result<(), D
             version = excluded.version,
             installed_agents_json = excluded.installed_agents_json,
             is_ephemeral = excluded.is_ephemeral,
-            -- Preserve the provisioner / idle_timeout that the server pre-registered for an
+            -- Preserve the provisioner / idle_timeout that the hub pre-registered for an
             -- ephemeral node, so the NodeHello upsert (provisioner = NULL) cannot lose them
             provisioner = COALESCE(excluded.provisioner, nodes.provisioner),
             lifecycle_status = excluded.lifecycle_status,
@@ -406,14 +406,14 @@ pub async fn upsert_project_binding(
 /// Provisional session row while an ephemeral VM is being provisioned.
 ///
 /// An ephemeral VM goes through `bootstrap-workspace` (git clone + tool installation) before
-/// `fxg daemon --stdio` sends `SessionCreated`, so until then the client (UI) needs to see the
-/// session's existence and its `provisioning` state. The central server does this by directly
+/// `fxg internal stdio` sends `SessionCreated`, so until then the client (UI) needs to see the
+/// session's existence and its `provisioning` state. The hub does this by directly
 /// inserting a projection row rather than an event (preserving the single write authority), and
 /// the subsequent `SessionCreated` projection upsert overwrites the derived columns (`status` is
 /// retained until `StatusChanged`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProvisionalSessionRecord {
-    /// Session ID (assigned by the server)
+    /// Session ID (assigned by the hub)
     pub session_id: String,
     /// Logical project ID
     pub project_id: String,

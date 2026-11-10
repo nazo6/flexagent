@@ -177,11 +177,11 @@ impl SessionManager {
             SessionControlAction::SetMode { mode_id } => handle
                 .set_mode(mode_id.clone())
                 .await
-                .map_err(|err| NodeError::Server(format!("failed to set mode: {err:#}"))),
+                .map_err(|err| NodeError::Hub(format!("failed to set mode: {err:#}"))),
             SessionControlAction::SetConfig { key, value } => handle
                 .set_config(key.clone(), value.clone())
                 .await
-                .map_err(|err| NodeError::Server(format!("failed to set config: {err:#}"))),
+                .map_err(|err| NodeError::Hub(format!("failed to set config: {err:#}"))),
             SessionControlAction::SetPermissionPolicy { policy } => {
                 {
                     let mut sessions = self.inner.sessions.lock().expect("sessions poisoned");
@@ -209,12 +209,12 @@ impl SessionManager {
                 handle
                     .cancel_turn()
                     .await
-                    .map_err(|err| NodeError::Server(format!("failed to cancel: {err:#}")))
+                    .map_err(|err| NodeError::Hub(format!("failed to cancel: {err:#}")))
             }
             SessionControlAction::Kill => handle
                 .shutdown()
                 .await
-                .map_err(|err| NodeError::Server(format!("failed to shutdown: {err:#}"))),
+                .map_err(|err| NodeError::Hub(format!("failed to shutdown: {err:#}"))),
         }
     }
 }
@@ -357,5 +357,5 @@ pub(super) async fn dispatch_prompt(
     handle
         .send_prompt(input.clone())
         .await
-        .map_err(|err| NodeError::Server(format!("failed to send prompt: {err:#}")))
+        .map_err(|err| NodeError::Hub(format!("failed to send prompt: {err:#}")))
 }

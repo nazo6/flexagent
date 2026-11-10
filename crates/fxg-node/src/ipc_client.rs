@@ -1,6 +1,6 @@
 //! Local IPC client from the CLI (`fxg`) to the daemon.
 //!
-//! Connects to the daemon's (`fxg daemon`) IPC endpoint and exchanges
+//! Connects to the daemon's (`fxg node start`) IPC endpoint and exchanges
 //! one request and one response at a time as length-prefixed JSON.
 //!
 //! Design: `docs/03-protocol-and-api.md` §4.
@@ -35,7 +35,7 @@ impl IpcClient {
     pub async fn connect(endpoint: &str) -> Result<Self, NodeError> {
         let stream = tokio::net::UnixStream::connect(endpoint)
             .await
-            .map_err(|err| NodeError::Server(format!("failed to connect to {endpoint}: {err}")))?;
+            .map_err(|err| NodeError::Hub(format!("failed to connect to {endpoint}: {err}")))?;
         Ok(Self {
             stream: Box::new(stream),
         })
@@ -43,7 +43,7 @@ impl IpcClient {
 
     /// Connects to the endpoint (Windows: named pipe).
     ///
-    /// Until the server provides the next pipe instance, it may return
+    /// Until the hub provides the next pipe instance, it may return
     /// `ERROR_PIPE_BUSY` (231). Absorb that with short retries, following the
     /// standard Windows procedure (`WaitNamedPipe`).
     #[cfg(windows)]
@@ -63,7 +63,7 @@ impl IpcClient {
                     tokio::time::sleep(std::time::Duration::from_millis(10)).await;
                 }
                 Err(err) => {
-                    return Err(NodeError::Server(format!(
+                    return Err(NodeError::Hub(format!(
                         "failed to connect to {endpoint}: {err}"
                     )));
                 }
@@ -72,7 +72,7 @@ impl IpcClient {
         let err = last_error
             .map(|err| err.to_string())
             .unwrap_or_else(|| "all pipe instances are busy".to_owned());
-        Err(NodeError::Server(format!(
+        Err(NodeError::Hub(format!(
             "failed to connect to {endpoint}: {err}"
         )))
     }
@@ -103,7 +103,7 @@ impl IpcClient {
         self.send(message).await?;
         self.recv()
             .await?
-            .ok_or_else(|| NodeError::Server("daemon closed the connection".to_owned()))
+            .ok_or_else(|| NodeError::Hub("daemon closed the connection".to_owned()))
     }
 }
 
@@ -125,7 +125,7 @@ mod tests {
         config.ipc_endpoint = crate::testutil::test_ipc_endpoint(dir.path());
         let daemon = NodeDaemon::start(config).await.expect("start");
 
-        // Wait until the server starts listening
+        // Wait until the hub starts listening
         let mut client = None;
         for _ in 0..200 {
             match IpcClient::connect(daemon.ipc_endpoint()).await {
@@ -184,7 +184,7 @@ mod tests {
             },
         };
         let err = client.request(&ping).await.expect_err("connection closed");
-        assert!(matches!(err, NodeError::Server(_)));
+        assert!(matches!(err, NodeError::Hub(_)));
     }
 
     #[tokio::test]
@@ -196,12 +196,12 @@ mod tests {
             .to_string_lossy()
             .into_owned();
         let err = IpcClient::connect(&endpoint).await.expect_err("must fail");
-        assert!(matches!(err, NodeError::Server(_)));
+        assert!(matches!(err, NodeError::Hub(_)));
     }
 
     #[tokio::test]
     async fn framing_helpers_are_shared_with_server() {
-        // Verify that the client uses the same framing functions as the server
+        // Verify that the client uses the same framing functions as the hub
         let (mut a, mut b) = tokio::io::duplex(1024);
         let ping = IpcRequest {
             protocol_version: IPC_PROTOCOL_VERSION,

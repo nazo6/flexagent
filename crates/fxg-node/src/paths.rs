@@ -8,7 +8,7 @@
 //! ├── auth_token             # Client <-> Server/Node auth token (0600)
 //! ├── node_token             # Node <-> Server pairing token (0600)
 //! ├── node.db                # Local node SQLite DB
-//! ├── server.db              # Central server SQLite DB
+//! ├── hub.db              # Hub SQLite DB
 //! ├── worktrees/             # Git worktrees created automatically by fxg
 //! ```
 
@@ -62,7 +62,7 @@ impl NodePaths {
         fxg_db::node_db_path(&self.fxg_home)
     }
 
-    /// Central server DB (`server.db`).
+    /// Hub DB (`hub.db`).
     pub fn hub_db_path(&self) -> PathBuf {
         fxg_db::hub_db_path(&self.fxg_home)
     }
@@ -94,9 +94,9 @@ impl NodePaths {
 
 /// Resolves the endpoint of the CLI <-> daemon local IPC.
 ///
-/// - **Windows**: Named Pipe `\\.\pipe\fxg-daemon-<username>`
-/// - **Linux / macOS / WSL**: `$XDG_RUNTIME_DIR/fxg/daemon.sock` or
-///   `/tmp/fxg-<uid>/daemon.sock`
+/// - **Windows**: Named Pipe `\\.\pipe\fxg-node-<username>`
+/// - **Linux / macOS / WSL**: `$XDG_RUNTIME_DIR/fxg/node.sock` or
+///   `/tmp/fxg-<uid>/node.sock`
 ///
 /// If the environment variable `FXG_IPC_ENDPOINT` is set, it takes precedence
 /// (for isolated execution in ephemeral VMs and for multiple instances in tests).
@@ -126,7 +126,7 @@ fn ipc_endpoint_inner(env: EnvLookup<'_>) -> String {
             }
         })
         .collect();
-    format!(r"\\.\pipe\fxg-daemon-{sanitized}")
+    format!(r"\\.\pipe\fxg-node-{sanitized}")
 }
 
 #[cfg(unix)]
@@ -134,12 +134,12 @@ fn ipc_endpoint_inner(env: EnvLookup<'_>) -> String {
     if let Some(runtime_dir) = env("XDG_RUNTIME_DIR").filter(|value| !value.is_empty()) {
         return PathBuf::from(runtime_dir)
             .join("fxg")
-            .join("daemon.sock")
+            .join("node.sock")
             .to_string_lossy()
             .into_owned();
     }
     PathBuf::from(format!("/tmp/fxg-{}", current_uid()))
-        .join("daemon.sock")
+        .join("node.sock")
         .to_string_lossy()
         .into_owned()
 }
@@ -201,7 +201,7 @@ mod tests {
         let env = env_map(&[("USERNAME", "nazo6")]);
         assert_eq!(
             ipc_endpoint(&|key| env.get(key).cloned()),
-            r"\\.\pipe\fxg-daemon-nazo6"
+            r"\\.\pipe\fxg-node-nazo6"
         );
     }
 
@@ -211,12 +211,12 @@ mod tests {
         let env = env_map(&[("XDG_RUNTIME_DIR", "/run/user/1000")]);
         assert_eq!(
             ipc_endpoint(&|key| env.get(key).cloned()),
-            "/run/user/1000/fxg/daemon.sock"
+            "/run/user/1000/fxg/node.sock"
         );
 
         let empty = env_map(&[]);
         let fallback = ipc_endpoint(&|key| empty.get(key).cloned());
         assert!(fallback.starts_with("/tmp/fxg-"), "got: {fallback}");
-        assert!(fallback.ends_with("daemon.sock"));
+        assert!(fallback.ends_with("node.sock"));
     }
 }

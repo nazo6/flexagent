@@ -1,10 +1,10 @@
-//! `fxg daemon --stdio`: standard I/O transport for ephemeral VM and sandbox nodes.
+//! `fxg internal stdio`: standard I/O transport for ephemeral VM and sandbox nodes.
 //!
 //! Design: `docs/01-architecture-and-sync.md` §6.1, `docs/03-protocol-and-api.md` §2.
 //!
-//! Speaks JSON Lines over **`stdin` (`ServerToNodeMsg`) / `stdout`
-//! (`NodeToServerMsg`)** of the provisioner command that the central server
-//! (`fxg server`) starts as a child process (fully independent of any network
+//! Speaks JSON Lines over **`stdin` (`HubToNodeMsg`) / `stdout`
+//! (`NodeToHubMsg`)** of the provisioner command that the hub
+//! (`fxg hub start`) starts as a child process (fully independent of any network
 //! or VPN). Bootstrap and `mise` / `uv` tool installation logs all go to
 //! `stderr`, keeping `stdout` reserved for protocol traffic.
 //!
@@ -18,14 +18,14 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use fxg_protocol::node_server::NodeToServerMsg;
+use fxg_protocol::node_hub::NodeToHubMsg;
 use tokio::io::{AsyncWriteExt, BufWriter};
 use tokio::sync::{mpsc, watch};
 
 use super::{DaemonConfig, DaemonState};
 use crate::error::NodeError;
 
-/// Startup configuration for `fxg daemon --stdio`.
+/// Startup configuration for `fxg internal stdio`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StdioConfig {
     /// Base configuration (node ID / data directory, etc.)
@@ -60,10 +60,10 @@ pub async fn run_stdio(config: StdioConfig) -> Result<(), NodeError> {
     state.register_node().await?;
 
     // Register `--workspace` as a logical project
-    // (it is included in the NodeHello project report and used server-side to start sessions)
+    // (it is included in the NodeHello project report and used hub-side to start sessions)
     if let Some(workspace) = config.workspace.as_deref() {
         if !workspace.is_dir() {
-            return Err(NodeError::Server(format!(
+            return Err(NodeError::Hub(format!(
                 "--workspace directory does not exist: {}",
                 workspace.display()
             )));
@@ -96,7 +96,7 @@ pub async fn run_stdio(config: StdioConfig) -> Result<(), NodeError> {
     });
 
     // stdout is reserved for protocol traffic (JSON Lines). Writes are serialized in a dedicated task.
-    let (out_tx, mut out_rx) = mpsc::channel::<NodeToServerMsg>(OUT_QUEUE_CAPACITY);
+    let (out_tx, mut out_rx) = mpsc::channel::<NodeToHubMsg>(OUT_QUEUE_CAPACITY);
     let writer = tokio::spawn(async move {
         let mut writer = BufWriter::new(tokio::io::stdout());
         while let Some(message) = out_rx.recv().await {
@@ -129,7 +129,7 @@ pub async fn run_stdio(config: StdioConfig) -> Result<(), NodeError> {
         tracing::warn!("failed to flush outbox at startup: {err}");
     }
 
-    // 2. Bidirectional loop (stdin `ServerToNodeMsg` / event bus → stdout)
+    // 2. Bidirectional loop (stdin `HubToNodeMsg` / event bus → stdout)
     let (shutdown_tx, mut shutdown_rx) = watch::channel(false);
     let ctx = crate::sync::CommandContext {
         workspace: config.workspace.as_deref(),
@@ -171,7 +171,7 @@ pub async fn run_stdio(config: StdioConfig) -> Result<(), NodeError> {
     tracing::info!(
         node_id = state.node_id(),
         ephemeral = config.ephemeral,
-        "fxg daemon started (stdio transport)"
+        "fxg node start started (stdio transport)"
     );
 
     loop {
@@ -201,17 +201,17 @@ pub async fn run_stdio(config: StdioConfig) -> Result<(), NodeError> {
                 Ok(crate::session::SessionBroadcast::Persisted { event, .. }) => {
                     fxg_protocol::discard_with!(
                         out_tx
-                            .send(NodeToServerMsg::EventBatchPush { events: vec![event] })
+                            .send(NodeToHubMsg::EventBatchPush { events: vec![event] })
                             .await,
-                        "push a persisted event to the central server"
+                        "push a persisted event to the hub"
                     );
                 }
                 Ok(crate::session::SessionBroadcast::StreamDelta { session_id, delta }) => {
                     fxg_protocol::discard_with!(
                         out_tx
-                            .send(NodeToServerMsg::LiveStreamDelta { session_id, delta })
+                            .send(NodeToHubMsg::LiveStreamDelta { session_id, delta })
                             .await,
-                        "push a live stream delta to the central server"
+                        "push a live stream delta to the hub"
                     );
                 }
                 // Ephemeral events (keystrokes etc.) are not synchronized
@@ -237,7 +237,7 @@ pub async fn run_stdio(config: StdioConfig) -> Result<(), NodeError> {
     }
     state.credentials().detach();
     if !state.config().ephemeral {
-        // Ephemeral VMs have their node row dropped server-side, so offline state is only
+        // Ephemeral VMs have their node row dropped hub-side, so offline state is only
         // recorded for regular nodes
         if let Err(err) = state.mark_offline().await {
             tracing::warn!("failed to mark node offline: {err}");
@@ -251,6 +251,6 @@ pub async fn run_stdio(config: StdioConfig) -> Result<(), NodeError> {
     if let Err(err) = ipc_task.await {
         tracing::warn!("local IPC task terminated unexpectedly: {err}");
     }
-    tracing::info!("fxg daemon stopped (stdio transport)");
+    tracing::info!("fxg node start stopped (stdio transport)");
     Ok(())
 }

@@ -1,4 +1,4 @@
-//! Node daemon (`fxg daemon`).
+//! Node daemon (`fxg node start`).
 //!
 //! Design: `docs/01-architecture-and-sync.md` §1, §7; `docs/03-protocol-and-api.md` §3, §4.
 //!
@@ -22,11 +22,11 @@ use std::sync::{Arc, RwLock};
 
 use fxg_acp::registry::AcpRegistry;
 use fxg_db::{Db, DbRole};
+use fxg_hub::api::ClientEvent;
 use fxg_protocol::config::fxg_home;
 use fxg_protocol::settings::{AgentSettings, NodeSettings};
 use fxg_protocol::util::now_ms;
 use fxg_pty::PtySessionManager;
-use fxg_server::api::ClientEvent;
 use tokio::sync::{broadcast, watch};
 
 use crate::error::NodeError;
@@ -55,8 +55,8 @@ pub struct DaemonConfig {
     pub listen_addr: String,
     /// Local IPC endpoint (named pipe / UDS path)
     pub ipc_endpoint: String,
-    /// Node Hub WebSocket URL of the central server (standalone when unset)
-    pub central_server_url: Option<String>,
+    /// Node Hub WebSocket URL of the hub (standalone when unset)
+    pub hub_url: Option<String>,
     /// Per-node pairing token (reads `~/.flexagent/node_token` when omitted)
     pub node_token: Option<String>,
     /// Whether this is an ephemeral VM / sandbox node (`--ephemeral`; reflected in
@@ -80,7 +80,7 @@ impl DaemonConfig {
             node_name: node_name.into(),
             listen_addr: fxg_protocol::config::NodeBootstrapConfig::DEFAULT_LISTEN_ADDR.to_owned(),
             ipc_endpoint: ipc_endpoint(&fxg_protocol::config::process_env),
-            central_server_url: None,
+            hub_url: None,
             node_token: None,
             ephemeral: false,
             fxg_home: fxg_home.into(),
@@ -97,7 +97,7 @@ impl DaemonConfig {
             node_name: hostname(),
             listen_addr: fxg_protocol::config::NodeBootstrapConfig::DEFAULT_LISTEN_ADDR.to_owned(),
             ipc_endpoint: ipc_endpoint(env),
-            central_server_url: env(fxg_protocol::config::env_keys::CENTRAL_SERVER_URL),
+            hub_url: env(fxg_protocol::config::env_keys::HUB_URL),
             node_token: env(fxg_protocol::config::env_keys::NODE_TOKEN),
             ephemeral: false,
             fxg_home: home,
@@ -110,7 +110,7 @@ impl DaemonConfig {
 ///
 /// Sessions still marked active (`provisioning` to `waiting_permission`) have no
 /// agent process (it exited with the daemon), so they are recorded again as
-/// `stopped` (so that ghost sessions do not linger in `fxg ps`).
+/// `stopped` (so that ghost sessions do not linger in `fxg session list`).
 async fn reconcile_stale_sessions(bus: &SessionEventBus) -> Result<(), NodeError> {
     use fxg_db::SessionFilter;
     use fxg_protocol::common::SessionStatus;
@@ -203,14 +203,16 @@ struct Inner {
     started_at: i64,
     /// Normalized events delivered to Client WS (forwarded from the bus)
     client_events: broadcast::Sender<ClientEvent>,
-    /// Whether the central server's outbox sync worker is connected
-    central_connected: AtomicBool,
+    /// Whether the hub's outbox sync worker is connected
+    hub_connected: AtomicBool,
     /// `NodeHello` resend trigger (on worktree changes / project registration)
     hello_refresh: tokio::sync::Notify,
     /// Git credential proxy (in-memory auth relay for ephemeral VMs)
     credentials: crate::credentials::CredentialBroker,
     /// Process-local delivery counters exposed by diagnostics
-    diagnostics_counters: std::sync::Arc<fxg_server::api::DiagnosticsCounters>,
+    diagnostics_counters: std::sync::Arc<fxg_hub::api::DiagnosticsCounters>,
+    /// Shutdown sender used by the local IPC `Shutdown` request (set at startup)
+    shutdown_tx: std::sync::OnceLock<watch::Sender<bool>>,
 }
 
 /// Shared daemon state (shared by HTTP handlers / IPC handlers / the CLI).
@@ -230,6 +232,21 @@ impl std::fmt::Debug for DaemonState {
 }
 
 impl DaemonState {
+    /// Registers the shutdown sender used by the local IPC `Shutdown` request.
+    pub(crate) fn set_shutdown_sender(&self, sender: watch::Sender<bool>) {
+        fxg_protocol::discard_with!(
+            self.inner.shutdown_tx.set(sender),
+            "register the node shutdown sender"
+        );
+    }
+
+    /// Requests a graceful node shutdown (local IPC `Shutdown` / `fxg node stop`).
+    pub(crate) fn request_shutdown(&self) {
+        if let Some(sender) = self.inner.shutdown_tx.get() {
+            fxg_protocol::discard_with!(sender.send(true), "request node shutdown from local IPC");
+        }
+    }
+
     /// Initializes the state (creates the data directory + loads the auth token +
     /// resolves the node ID).
     pub async fn new(config: DaemonConfig) -> Result<Self, NodeError> {
@@ -298,18 +315,17 @@ impl DaemonState {
                 token: RwLock::new(token),
                 started_at: now_ms(),
                 client_events,
-                central_connected: AtomicBool::new(false),
+                hub_connected: AtomicBool::new(false),
                 hello_refresh: tokio::sync::Notify::new(),
                 credentials: crate::credentials::CredentialBroker::new(),
-                diagnostics_counters: std::sync::Arc::new(
-                    fxg_server::api::DiagnosticsCounters::new(),
-                ),
+                diagnostics_counters: std::sync::Arc::new(fxg_hub::api::DiagnosticsCounters::new()),
+                shutdown_tx: std::sync::OnceLock::new(),
             }),
         };
 
         // Generate the GIT_ASKPASS helper injected into agent processes
         // (Git operations in ephemeral VMs authenticate through this script → local IPC →
-        //  the central server's in-memory relay. Design: docs/01 §6.4)
+        //  the hub's in-memory relay. Design: docs/01 §6.4)
         if let Err(err) = crate::credentials::write_askpass_script(state.inner.paths.fxg_home()) {
             tracing::warn!("failed to write git-askpass script: {err}");
         }
@@ -340,8 +356,8 @@ impl DaemonState {
                     // Ephemeral events (keystrokes etc.) are delivered over the PTY WS
                     Ok(crate::session::SessionBroadcast::Ephemeral(_)) => {}
                     Err(broadcast::error::RecvError::Lagged(skipped)) => {
-                        counters.add(fxg_server::api::CounterKind::DroppedEvents, skipped);
-                        counters.incr(fxg_server::api::CounterKind::LaggedBroadcasts);
+                        counters.add(fxg_hub::api::CounterKind::DroppedEvents, skipped);
+                        counters.incr(fxg_hub::api::CounterKind::LaggedBroadcasts);
                         tracing::debug!(skipped, "client event forwarder lagged");
                     }
                     Err(broadcast::error::RecvError::Closed) => break,
@@ -378,12 +394,12 @@ impl DaemonState {
     }
 
     /// Process-local delivery counters exposed by diagnostics.
-    pub fn diagnostics_counters(&self) -> &fxg_server::api::DiagnosticsCounters {
+    pub fn diagnostics_counters(&self) -> &fxg_hub::api::DiagnosticsCounters {
         &self.inner.diagnostics_counters
     }
 
     /// Shared counter handle for spawned tasks.
-    pub fn diagnostics_counters_arc(&self) -> std::sync::Arc<fxg_server::api::DiagnosticsCounters> {
+    pub fn diagnostics_counters_arc(&self) -> std::sync::Arc<fxg_hub::api::DiagnosticsCounters> {
         std::sync::Arc::clone(&self.inner.diagnostics_counters)
     }
 
@@ -489,16 +505,14 @@ impl DaemonState {
         now_ms().saturating_sub(self.inner.started_at)
     }
 
-    /// Whether the central server's outbox sync worker is connected.
-    pub fn central_connected(&self) -> bool {
-        self.inner.central_connected.load(Ordering::Relaxed)
+    /// Whether the hub's outbox sync worker is connected.
+    pub fn hub_connected(&self) -> bool {
+        self.inner.hub_connected.load(Ordering::Relaxed)
     }
 
-    /// Updates the central server connection state (outbox sync worker only).
-    pub fn set_central_connected(&self, connected: bool) {
-        self.inner
-            .central_connected
-            .store(connected, Ordering::Relaxed);
+    /// Updates the hub connection state (outbox sync worker only).
+    pub fn set_hub_connected(&self, connected: bool) {
+        self.inner.hub_connected.store(connected, Ordering::Relaxed);
     }
 
     /// Git credential proxy broker.
@@ -612,7 +626,7 @@ impl DaemonState {
         Ok(())
     }
 
-    /// List of session statuses considered locally active (the default filter for `fxg ps`).
+    /// List of session statuses considered locally active (the default filter for `fxg session list`).
     pub fn active_statuses() -> Vec<fxg_protocol::common::SessionStatus> {
         use fxg_protocol::common::SessionStatus;
         vec![
@@ -688,7 +702,7 @@ impl DaemonState {
     }
 }
 
-/// Starts the outbox sync worker (returns `None` when no central server URL is set).
+/// Starts the outbox sync worker (returns `None` when no hub URL is set).
 ///
 /// The per-node token is resolved in the order `config.node_token` / `FXG_NODE_TOKEN` →
 /// `~/.flexagent/node_token`.
@@ -696,7 +710,7 @@ fn start_sync_worker(
     state: &DaemonState,
     shutdown_tx: &watch::Sender<bool>,
 ) -> Result<Option<tokio::task::JoinHandle<()>>, NodeError> {
-    let Some(url) = state.config().central_server_url.clone() else {
+    let Some(url) = state.config().hub_url.clone() else {
         return Ok(None);
     };
     let token = match state.config().node_token.clone() {
@@ -704,9 +718,7 @@ fn start_sync_worker(
         _ => match std::fs::read_to_string(state.paths().node_token_path()) {
             Ok(token) if !token.trim().is_empty() => token.trim().to_owned(),
             _ => {
-                tracing::warn!(
-                    "central_server_url is set but node_token is missing; outbox sync disabled"
-                );
+                tracing::warn!("hub_url is set but node_token is missing; outbox sync disabled");
                 return Ok(None);
             }
         },
@@ -727,6 +739,7 @@ pub struct NodeDaemon {
     http_task: tokio::task::JoinHandle<()>,
     ipc_task: tokio::task::JoinHandle<()>,
     sync_task: Option<tokio::task::JoinHandle<()>>,
+    addr_file: std::path::PathBuf,
 }
 
 impl std::fmt::Debug for NodeDaemon {
@@ -771,15 +784,23 @@ impl NodeDaemon {
         state.register_node().await?;
 
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
+        state.set_shutdown_sender(shutdown_tx.clone());
 
         // Local HTTP/WS server (strict loopback binding)
         let listen_addr = state.config().listen_addr.clone();
         let listener = tokio::net::TcpListener::bind(&listen_addr)
             .await
-            .map_err(|err| NodeError::Server(format!("failed to bind {listen_addr}: {err}")))?;
+            .map_err(|err| NodeError::Hub(format!("failed to bind {listen_addr}: {err}")))?;
         let http_addr = listener
             .local_addr()
-            .map_err(|err| NodeError::Server(err.to_string()))?;
+            .map_err(|err| NodeError::Hub(err.to_string()))?;
+
+        // Publish the bound address so `fxg web` / `session new` can open the
+        // Web UI even when the node was started with a `--listen` override.
+        let addr_file = state.paths().fxg_home().join("node.addr");
+        if let Err(err) = std::fs::write(&addr_file, http_addr.to_string()) {
+            tracing::warn!(path = %addr_file.display(), "failed to write the node address file: {err}");
+        }
 
         let http_state = state.clone();
         let http_shutdown = shutdown_rx.clone();
@@ -811,14 +832,14 @@ impl NodeDaemon {
             }
         });
 
-        // Outbox sync worker (started only when a central server URL is configured)
+        // Outbox sync worker (started only when a hub URL is configured)
         let sync_task = start_sync_worker(&state, &shutdown_tx)?;
 
         tracing::info!(
             node_id = state.config().node_id,
             http = %http_addr,
             ipc = %state.config().ipc_endpoint,
-            "fxg daemon started"
+            "fxg node start started"
         );
 
         Ok(Self {
@@ -828,6 +849,7 @@ impl NodeDaemon {
             http_task,
             ipc_task,
             sync_task,
+            addr_file,
         })
     }
 
@@ -882,6 +904,10 @@ impl NodeDaemon {
         if let Err(err) = self.state.mark_offline().await {
             tracing::warn!("failed to mark node offline: {err}");
         }
+        fxg_protocol::discard_with!(
+            std::fs::remove_file(&self.addr_file),
+            "remove the node address file"
+        );
 
         if let Err(err) = self.http_task.await {
             tracing::error!(task = "http", "http task terminated unexpectedly: {err}");
@@ -894,7 +920,7 @@ impl NodeDaemon {
         {
             tracing::error!(task = "sync", "sync task terminated unexpectedly: {err}");
         }
-        tracing::info!("fxg daemon stopped");
+        tracing::info!("fxg node start stopped");
     }
 
     /// Starts the daemon and runs until shutdown (for the CLI entry point).

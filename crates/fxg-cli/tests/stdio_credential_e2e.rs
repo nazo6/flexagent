@@ -1,7 +1,7 @@
-//! Git credential proxy / drain E2E tests for `fxg daemon --stdio`.
+//! Git credential proxy / drain E2E tests for `fxg internal stdio`.
 //!
 //! The tests start the real binary as a child process and the test side acts as
-//! the central server, reading and writing JSON Lines:
+//! the hub, reading and writing JSON Lines:
 //!
 //! - Receive `NodeHello` (reporting `is_ephemeral = true` as an ephemeral node)
 //! - `fxg internal git-askpass` (local IPC) → `GitCredentialRequest` →
@@ -36,7 +36,7 @@ impl TestEnv {
         let ipc_endpoint = if cfg!(windows) {
             format!(r"\\.\pipe\fxg-stdio-test-{}", std::process::id())
         } else {
-            base.join("daemon.sock").to_string_lossy().into_owned()
+            base.join("node.sock").to_string_lossy().into_owned()
         };
         Self {
             home: base.join("home"),
@@ -128,7 +128,7 @@ fn run_askpass(env: &TestEnv, prompt: &str) -> String {
 }
 
 #[test]
-fn stdio_daemon_proxies_git_credentials_and_drains() {
+fn stdio_node_proxies_git_credentials_and_drains() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let env = TestEnv::new(tmp.path());
     let workspace = tmp.path().join("workspace");
@@ -136,8 +136,8 @@ fn stdio_daemon_proxies_git_credentials_and_drains() {
 
     let mut command = Command::new(fxg());
     command.args([
-        "daemon",
-        "--stdio",
+        "internal",
+        "stdio",
         "--ephemeral",
         "--workspace",
         &workspace.to_string_lossy(),
@@ -149,7 +149,7 @@ fn stdio_daemon_proxies_git_credentials_and_drains() {
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
-    let mut child: Child = command.spawn().expect("spawn fxg daemon --stdio");
+    let mut child: Child = command.spawn().expect("spawn fxg internal stdio");
     let stdin = child.stdin.take().expect("stdin");
     let stdout = child.stdout.take().expect("stdout");
     let mut stdin = stdin;
@@ -243,10 +243,10 @@ fn stdio_daemon_proxies_git_credentials_and_drains() {
     loop {
         match child.try_wait().expect("try_wait") {
             Some(status) => {
-                assert!(status.success(), "daemon exited with {status}");
+                assert!(status.success(), "node exited with {status}");
                 break;
             }
-            None if Instant::now() >= deadline => panic!("daemon did not exit after drain"),
+            None if Instant::now() >= deadline => panic!("node did not exit after drain"),
             None => std::thread::sleep(Duration::from_millis(100)),
         }
     }

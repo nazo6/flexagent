@@ -18,11 +18,11 @@ use tracing_subscriber::{EnvFilter, Layer};
 /// Logging kind for the subcommand being run.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum CommandLogKind {
-    /// Resident daemon (`fxg daemon`)
-    Daemon,
-    /// Central server (`fxg server`)
-    Server,
-    /// Ordinary CLI command (`fxg ps`, `fxg session ...`, etc.)
+    /// Resident node (`fxg node start`)
+    Node,
+    /// Hub (`fxg hub start`)
+    Hub,
+    /// Ordinary CLI command (`fxg session list`, `fxg session ...`, etc.)
     #[default]
     Cli,
 }
@@ -100,7 +100,7 @@ fn resolve_filter(opts: &LoggingOptions, config: &LogConfig) -> EnvFilter {
 
     // 4. Default per command kind
     match opts.kind {
-        CommandLogKind::Daemon | CommandLogKind::Server => {
+        CommandLogKind::Node | CommandLogKind::Hub => {
             // Daemon and server: info for fxg internals, warn for third-party noise
             EnvFilter::new("fxg=info,warn")
         }
@@ -134,14 +134,14 @@ pub fn resolve_log_file_path(
     }
 
     // 3. Default behavior:
-    //    For a resident Daemon / Server process outside stdio mode, use
+    //    For a resident Node / Hub process outside stdio mode, use
     //    ~/.flexagent/logs/<kind>.log automatically.
     if opts.is_stdio {
         return None;
     }
     match opts.kind {
-        CommandLogKind::Daemon => Some(fxg_home.join("logs").join("daemon.log")),
-        CommandLogKind::Server => Some(fxg_home.join("logs").join("server.log")),
+        CommandLogKind::Node => Some(fxg_home.join("logs").join("node.log")),
+        CommandLogKind::Hub => Some(fxg_home.join("logs").join("hub.log")),
         CommandLogKind::Cli => None,
     }
 }
@@ -185,7 +185,7 @@ pub fn init_logging(
         let file_name = path
             .file_name()
             .and_then(|n| n.to_str())
-            .unwrap_or("daemon.log");
+            .unwrap_or("node.log");
         let dir = path.parent().unwrap_or(fxg_home);
         let appender = tracing_appender::rolling::never(dir, file_name);
 
@@ -240,24 +240,24 @@ pub fn init_logging(
 
 /// Print the daemon startup banner to stderr.
 ///
-/// Do not call this in `--stdio` mode, where it would corrupt the protocol.
-pub fn print_daemon_banner(
+/// Do not call this in `fxg internal stdio` mode, where it would corrupt the protocol.
+pub fn print_node_banner(
     node_id: &str,
     http_addr: &str,
     ipc_endpoint: &str,
     log_file: Option<&Path>,
-    central_server_url: Option<&str>,
+    hub_url: Option<&str>,
     auth_token: Option<&str>,
     use_color: bool,
 ) {
     let log_str = log_file
         .map(|p| p.display().to_string())
         .unwrap_or_else(|| "none".to_owned());
-    let sync_str = central_server_url.unwrap_or("standalone (local only)");
+    let sync_str = hub_url.unwrap_or("standalone (local only)");
 
     if use_color {
         eprintln!(
-            "\x1b[1;36mFlexAgent daemon v{}\x1b[0m started",
+            "\x1b[1;36mFlexAgent node v{}\x1b[0m started",
             env!("CARGO_PKG_VERSION")
         );
         eprintln!("  \x1b[1mNode ID:\x1b[0m      {node_id}");
@@ -273,7 +273,7 @@ pub fn print_daemon_banner(
         eprintln!("  \x1b[1mOutbox Sync:\x1b[0m  {sync_str}");
         eprintln!("  \x1b[2mPress Ctrl+C to stop.\x1b[0m\n");
     } else {
-        eprintln!("FlexAgent daemon v{} started", env!("CARGO_PKG_VERSION"));
+        eprintln!("FlexAgent node v{} started", env!("CARGO_PKG_VERSION"));
         eprintln!("  Node ID:      {node_id}");
         eprintln!("  HTTP/WS API:  http://{http_addr}");
         if let Some(token) = auth_token {
@@ -289,8 +289,8 @@ pub fn print_daemon_banner(
     }
 }
 
-/// Print the server startup banner to stderr.
-pub fn print_server_banner(
+/// Print the hub startup banner to stderr.
+pub fn print_hub_banner(
     http_addr: &str,
     fxg_home: &Path,
     log_file: Option<&Path>,
@@ -303,7 +303,7 @@ pub fn print_server_banner(
 
     if use_color {
         eprintln!(
-            "\x1b[1;35mFlexAgent central server v{}\x1b[0m started",
+            "\x1b[1;35mFlexAgent hub v{}\x1b[0m started",
             env!("CARGO_PKG_VERSION")
         );
         eprintln!("  \x1b[1mHTTP/WS API:\x1b[0m  http://{http_addr}");
@@ -317,10 +317,7 @@ pub fn print_server_banner(
         eprintln!("  \x1b[1mLog File:\x1b[0m     {log_str}");
         eprintln!("  \x1b[2mPress Ctrl+C to stop.\x1b[0m\n");
     } else {
-        eprintln!(
-            "FlexAgent central server v{} started",
-            env!("CARGO_PKG_VERSION")
-        );
+        eprintln!("FlexAgent hub v{} started", env!("CARGO_PKG_VERSION"));
         eprintln!("  HTTP/WS API:  http://{http_addr}");
         if let Some(token) = auth_token {
             eprintln!("  Web UI:       http://{http_addr}/?token={token}");
@@ -378,7 +375,7 @@ mod tests {
     #[test]
     fn print_banners_do_not_panic() {
         let dir = tempfile::tempdir().unwrap();
-        print_daemon_banner(
+        print_node_banner(
             "node_test",
             "127.0.0.1:7860",
             r"\\.\pipe\test",
@@ -387,7 +384,7 @@ mod tests {
             Some("test_token_123"),
             true,
         );
-        print_daemon_banner(
+        print_node_banner(
             "node_test",
             "127.0.0.1:7860",
             r"\\.\pipe\test",
@@ -396,13 +393,13 @@ mod tests {
             None,
             false,
         );
-        print_server_banner(
+        print_hub_banner(
             "0.0.0.0:8080",
             dir.path(),
             None,
             Some("test_token_123"),
             true,
         );
-        print_server_banner("0.0.0.0:8080", dir.path(), None, None, false);
+        print_hub_banner("0.0.0.0:8080", dir.path(), None, None, false);
     }
 }

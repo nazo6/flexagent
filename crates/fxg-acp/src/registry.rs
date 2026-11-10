@@ -217,7 +217,7 @@ impl AgentListEntry {
 /// `agy acp`). User custom definitions always take priority.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AgentPreset {
-    /// Stable agent ID (used by `fxg run` and `AgentSummary.id`)
+    /// Stable agent ID (used by `fxg session new` and `AgentSummary.id`)
     pub id: &'static str,
     /// Display name
     pub display_name: &'static str,

@@ -1,10 +1,10 @@
 //! End-to-end tests for the `fxg` CLI.
 //!
-//! The tests actually start `fxg daemon` as a child process and verify that
-//! `fxg ps` / `fxg auth token` / `fxg kill-all` / `fxg session` work **through IPC**.
+//! The tests actually start `fxg node start` as a child process and verify that
+//! `fxg session` / `fxg node token` work **through IPC**.
 //!
 //! Each test uses a temporary `FXG_HOME` and IPC endpoint, so it never collides
-//! with a real daemon.
+//! with a real node.
 
 #![allow(
     clippy::disallowed_types,
@@ -27,7 +27,7 @@ struct TestEnv {
     /// Environment variables that determine the IPC endpoint
     /// (unix: XDG_RUNTIME_DIR / windows: USERNAME)
     ipc_env: Vec<(String, String)>,
-    daemon: Option<Child>,
+    node: Option<Child>,
 }
 
 impl TestEnv {
@@ -56,7 +56,7 @@ impl TestEnv {
             dir,
             home,
             ipc_env,
-            daemon: None,
+            node: None,
         }
     }
 
@@ -64,51 +64,51 @@ impl TestEnv {
     fn command(&self) -> Command {
         let mut command = Command::new(fxg_bin());
         command.env("FXG_HOME", &self.home);
-        // Never auto-start a competing daemon while waiting for the explicit one.
-        command.env("FXG_NO_AUTO_DAEMON", "1");
+        // Never auto-start a competing node while waiting for the explicit one.
+        command.env("FXG_NO_AUTO_NODE", "1");
         for (key, value) in &self.ipc_env {
             command.env(key, value);
         }
         command
     }
 
-    /// Start the daemon and wait until IPC responds.
-    async fn start_daemon(&mut self) {
-        // Save daemon logs to a file for diagnostics on failure
-        let log_path = self.dir.path().join("daemon.log");
-        let log = std::fs::File::create(&log_path).expect("create daemon log");
+    /// Start the node and wait until IPC responds.
+    async fn start_node(&mut self) {
+        // Save node logs to a file for diagnostics on failure
+        let log_path = self.dir.path().join("node.log");
+        let log = std::fs::File::create(&log_path).expect("create node log");
         let child = self
             .command()
-            .args(["daemon", "--listen", "127.0.0.1:0"])
+            .args(["node", "start", "--listen", "127.0.0.1:0"])
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::from(log))
             .spawn()
-            .expect("spawn fxg daemon");
-        self.daemon = Some(child);
+            .expect("spawn fxg node start");
+        self.node = Some(child);
 
         let deadline = Instant::now() + Duration::from_secs(30);
         loop {
-            let output = self.run(&["ps"], None);
+            let output = self.run(&["session", "list"], None);
             if output.status.success() {
-                // Verify the daemon startup message was printed and that the log
+                // Verify the node startup message was printed and that the log
                 // contains no ANSI color codes
-                let log = self.daemon_log();
+                let log = self.node_log();
                 assert!(
-                    log.contains("fxg daemon started") || log.contains("FlexAgent daemon"),
-                    "daemon log should contain startup message, got:\n{log}"
+                    log.contains("FlexAgent node"),
+                    "node log should contain startup message, got:\n{log}"
                 );
                 assert!(
                     !log.contains("\x1b["),
-                    "daemon log should not contain ANSI escape sequences, got:\n{log}"
+                    "node log should not contain ANSI escape sequences, got:\n{log}"
                 );
                 return;
             }
             if Instant::now() > deadline {
                 panic!(
-                    "fxg daemon did not become ready: {}\n--- daemon log ---\n{}",
+                    "fxg node start did not become ready: {}\n--- node log ---\n{}",
                     String::from_utf8_lossy(&output.stderr),
-                    self.daemon_log()
+                    self.node_log()
                 );
             }
             tokio::time::sleep(Duration::from_millis(100)).await;
@@ -116,15 +116,15 @@ impl TestEnv {
     }
 
     /// Daemon log (for Stdio diagnostics).
-    fn daemon_log(&self) -> String {
-        std::fs::read_to_string(self.dir.path().join("daemon.log")).expect("read daemon.log")
+    fn node_log(&self) -> String {
+        std::fs::read_to_string(self.dir.path().join("node.log")).expect("read node.log")
     }
 
-    /// Stop the daemon.
-    fn stop_daemon(&mut self) {
-        if let Some(mut child) = self.daemon.take() {
-            fxg_protocol::discard_with!(child.kill(), "kill the test daemon");
-            fxg_protocol::discard_with!(child.wait(), "reap the test daemon");
+    /// Stop the node.
+    fn stop_node(&mut self) {
+        if let Some(mut child) = self.node.take() {
+            fxg_protocol::discard_with!(child.kill(), "kill the test node");
+            fxg_protocol::discard_with!(child.wait(), "reap the test node");
         }
     }
 
@@ -144,7 +144,7 @@ impl TestEnv {
 
 impl Drop for TestEnv {
     fn drop(&mut self) {
-        self.stop_daemon();
+        self.stop_node();
         let _ = &self.dir;
     }
 }
@@ -190,12 +190,12 @@ fn init_repo(dir: &Path) {
 }
 
 #[tokio::test]
-async fn cli_commands_work_through_daemon_ipc() {
+async fn cli_commands_work_through_node_ipc() {
     let mut env = TestEnv::new();
-    env.start_daemon().await;
+    env.start_node().await;
 
-    // --- fxg ps (there are no sessions yet) ---
-    let output = env.run(&["ps"], None);
+    // --- fxg session list (there are no sessions yet) ---
+    let output = env.run(&["session", "list"], None);
     let text = stdout_of(&output);
     assert!(text.contains("no sessions"), "got: {text}");
 
@@ -204,36 +204,32 @@ async fn cli_commands_work_through_daemon_ipc() {
     let json: serde_json::Value = serde_json::from_str(&stdout_of(&output)).expect("valid json");
     assert!(json.as_array().expect("array").is_empty());
 
-    // --- fxg auth token (64 hex characters) ---
-    let output = env.run(&["auth", "token"], None);
+    // --- fxg node token show (64 hex characters) ---
+    let output = env.run(&["node", "token", "show"], None);
     let token = stdout_of(&output).trim().to_owned();
     assert_eq!(token.len(), 64, "token length: {token}");
     assert!(token.chars().all(|ch| ch.is_ascii_hexdigit()));
 
-    // --- fxg kill-all ---
-    let output = env.run(&["kill-all", "--local-only"], None);
-    let text = stdout_of(&output);
-    assert!(text.contains("killed 0 session(s)"), "got: {text}");
-
-    env.stop_daemon();
+    env.stop_node();
 }
 
 #[tokio::test]
-async fn cli_reports_missing_daemon_when_auto_start_is_disabled() {
+async fn cli_reports_missing_node_when_auto_start_is_disabled() {
     let env = TestEnv::new();
     // Auto-start is on by default; disable it to keep testing the error path.
     let output = env
         .command()
-        .env(fxg_protocol::config::env_keys::NO_AUTO_DAEMON, "1")
-        .arg("ps")
+        .env(fxg_protocol::config::env_keys::NO_AUTO_NODE, "1")
+        .arg("session")
+        .arg("list")
         .stdin(Stdio::null())
         .output()
-        .expect("run fxg ps");
+        .expect("run fxg session list");
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.contains("fxg daemon"),
-        "stderr must guide to starting the daemon: {stderr}"
+        stderr.contains("fxg node start"),
+        "stderr must guide to starting the node: {stderr}"
     );
 }
 
@@ -244,7 +240,7 @@ async fn cli_reports_missing_daemon_when_auto_start_is_disabled() {
 /// The tests cover what can be verified without launching a real agent
 /// (argument parsing, IPC round-trips, error codes).
 #[tokio::test]
-async fn phase3_session_commands_roundtrip_through_daemon() {
+async fn phase3_session_commands_roundtrip_through_node() {
     let mut env = TestEnv::new();
     // A custom agent that fails to start (for verifying the session recording
     // path). Custom agents are owned by `node.db`.
@@ -263,7 +259,7 @@ async fn phase3_session_commands_roundtrip_through_daemon() {
         .await
         .expect("register broken agent");
     }
-    env.start_daemon().await;
+    env.start_node().await;
     let repo = env.dir.path().join("repo");
     init_repo(&repo);
 
@@ -278,9 +274,9 @@ async fn phase3_session_commands_roundtrip_through_daemon() {
     for args in [
         vec!["session", "prompt", unknown, "hello"],
         vec!["session", "stop", unknown],
-        vec!["session", "stop", unknown, "--turn-only"],
+        vec!["session", "cancel", unknown],
         vec!["session", "kill", unknown],
-        vec!["session", "resume", unknown, "--detach"],
+        vec!["session", "resume", unknown, "--quiet"],
         vec!["session", "fork", unknown],
     ] {
         let output = env.run(&args, Some(&repo));
@@ -289,28 +285,28 @@ async fn phase3_session_commands_roundtrip_through_daemon() {
         assert!(stderr.contains("INVALID_STATE"), "{args:?}: {stderr}");
     }
 
-    // --- fxg run --provisioner requires the central server (a config error
+    // --- fxg session new --provisioner requires the hub (a config error
     // when unset) ---
     let output = env.run(
-        &["run", "opencode", "--provisioner", "colab-pro"],
+        &["session", "new", "opencode", "--provisioner", "colab-pro"],
         Some(&repo),
     );
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("central_server_url"), "got: {stderr}");
+    assert!(stderr.contains("hub_url"), "got: {stderr}");
 
     // --- Sessions are recorded even when the agent fails to start ---
-    let output = env.run(&["run", "broken", "--detach"], Some(&repo));
+    let output = env.run(&["session", "new", "broken", "--quiet"], Some(&repo));
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
         stderr.contains("failed to start agent"),
-        "got: {stderr}\n--- daemon log ---\n{}",
-        env.daemon_log()
+        "got: {stderr}\n--- node log ---\n{}",
+        env.node_log()
     );
 
-    // Get the recorded session ID from `fxg ps -a --json`
-    let output = env.run(&["ps", "-a", "--json"], Some(&repo));
+    // Get the recorded session ID from `fxg session list -a --json`
+    let output = env.run(&["session", "list", "-a", "--json"], Some(&repo));
     let sessions: serde_json::Value = serde_json::from_str(&stdout_of(&output)).expect("json");
     let session_id = sessions
         .as_array()
@@ -334,16 +330,16 @@ async fn phase3_session_commands_roundtrip_through_daemon() {
     assert_eq!(json["session"]["status"], "error");
 
     // --- Resuming a session whose agent failed to start also errors ---
-    let output = env.run(&["session", "resume", &session_id, "--detach"], Some(&repo));
+    let output = env.run(&["session", "resume", &session_id, "--quiet"], Some(&repo));
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
         stderr.contains("failed to start agent"),
-        "got: {stderr}\n--- daemon log ---\n{}",
-        env.daemon_log()
+        "got: {stderr}\n--- node log ---\n{}",
+        env.node_log()
     );
 
-    env.stop_daemon();
+    env.stop_node();
 }
 
 #[tokio::test]
@@ -365,12 +361,13 @@ async fn cli_shows_help_for_missing_subcommand() {
 }
 
 #[tokio::test]
-async fn daemon_logging_to_custom_file_and_no_color() {
+async fn node_logging_to_custom_file_and_no_color() {
     let mut env = TestEnv::new();
-    let custom_log_path = env.dir.path().join("custom_daemon.log");
+    let custom_log_path = env.dir.path().join("custom_node.log");
     let mut cmd = env.command();
     cmd.args([
-        "daemon",
+        "node",
+        "start",
         "--listen",
         "127.0.0.1:0",
         "--log-file",
@@ -381,27 +378,27 @@ async fn daemon_logging_to_custom_file_and_no_color() {
     .stdout(std::process::Stdio::null())
     .stderr(std::process::Stdio::null());
 
-    let child = cmd.spawn().expect("spawn daemon");
-    env.daemon = Some(child);
+    let child = cmd.spawn().expect("spawn node");
+    env.node = Some(child);
 
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
     loop {
-        let output = env.run(&["ps"], None);
+        let output = env.run(&["session", "list"], None);
         if output.status.success() {
             break;
         }
         if std::time::Instant::now() > deadline {
-            panic!("daemon did not start in time");
+            panic!("node did not start in time");
         }
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
     }
 
-    // Verify that the log is written to custom_daemon.log and contains no ANSI
+    // Verify that the log is written to custom_node.log and contains no ANSI
     // escapes
     assert!(custom_log_path.exists(), "custom log file must exist");
-    let content = std::fs::read_to_string(&custom_log_path).expect("read the custom daemon log");
+    let content = std::fs::read_to_string(&custom_log_path).expect("read the custom node log");
     assert!(
-        content.contains("fxg daemon started"),
+        content.contains("fxg node start started"),
         "custom log file should contain startup message, got:\n{content}"
     );
     assert!(
@@ -409,5 +406,5 @@ async fn daemon_logging_to_custom_file_and_no_color() {
         "custom log file must not contain ANSI escape sequences, got:\n{content}"
     );
 
-    env.stop_daemon();
+    env.stop_node();
 }

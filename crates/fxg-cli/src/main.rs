@@ -6,11 +6,10 @@
 //! reference are generated from `__usage_spec__` (design:
 //! `docs/05-cli-and-pwa-ui.md` §1).
 //!
-//! The CLI exposes the core commands (`run` / `session` / `agents login|logout` /
-//! `ps` / `logs` / `doctor` / `daemon` / `server` / `service` / `auth` /
-//! `kill-all` / `web`) plus the hidden `internal` namespace. Management features
-//! owned by the Web UI (approval inbox, projects, worktrees, the agent catalog)
-//! have no CLI subcommand.
+//! The CLI is organized around sessions (`fxg session ...`), the local node
+//! (`fxg node ...`), the hub (`fxg hub ...`), and the OS autostart service
+//! (`fxg service ...`), plus the support utilities (`logs` / `doctor` /
+//! `support`) and the hidden `internal` namespace.
 
 // Migration baseline: remove this crate-level allow as Phase 1 of
 // `docs/changelog/2026-11-08-type-safety-plan.md` lands.
@@ -27,10 +26,13 @@ use usage::{Cli, RunAsync, Subcommands};
 
 mod client;
 mod commands;
+mod hub_api;
 pub mod logging;
-mod server_api;
 mod service;
+mod spawn;
 mod tray;
+
+use commands::{HubCommands, InternalCommands, NodeCommands};
 
 /// Root command of `fxg`.
 #[derive(Debug, Cli)]
@@ -54,30 +56,22 @@ struct Fxg {
 enum Commands {
     /// Open a tokenized URL in the default browser
     Web(commands::WebArgs),
-    /// Start a new session
-    Run(commands::RunArgs),
-    /// List running and recent sessions (alias for `fxg session list`)
-    Ps(commands::SessionListArgs),
-    /// Session management (list / show / prompt / stop / kill / revert / fork)
+    /// Session management (new / list / show / prompt / cancel / stop / kill / ...)
     Session(commands::SessionArgs),
     /// Agent authentication (login / logout)
     Agents(commands::AgentsArgs),
-    /// Show local logs (daemon log / per-agent stderr)
+    /// Show local logs (node / hub / per-agent stderr)
     Logs(commands::LogsArgs),
     /// Check the local configuration, database, logs and toolchain
     Doctor(commands::DoctorArgs),
     /// Export a redacted support bundle / list persisted incidents
-    Diagnostics(commands::DiagnosticsArgs),
-    /// Start the node daemon in the foreground
-    Daemon(commands::DaemonArgs),
-    /// Start the central server in the foreground (:8080)
-    Server(commands::ServerArgs),
-    /// Manage the background service that starts at OS login
+    Support(commands::SupportArgs),
+    /// Local node process and client tokens
+    Node(commands::NodeArgs),
+    /// Hub process and node pairing tokens
+    Hub(commands::HubArgs),
+    /// Manage the OS login autostart service
     Service(commands::ServiceArgs),
-    /// Auth token management (token / rotate-token / node-token)
-    Auth(commands::AuthArgs),
-    /// [Emergency stop] Force-terminate every local session, child process tree and PTY
-    KillAll(commands::KillAllArgs),
     /// Internal commands invoked by Git, provisioners, or system integrations
     #[usage(hide)]
     Internal(commands::InternalArgs),
@@ -100,20 +94,27 @@ async fn main() -> ExitCode {
     };
 
     let logging_options = match &cli.command {
-        Commands::Daemon(daemon_args) => daemon_args.logging_options(),
-        Commands::Server(server_args) => server_args.logging_options(),
-        _ => logging::LoggingOptions {
-            kind: logging::CommandLogKind::Cli,
-            ..Default::default()
+        Commands::Node(args) => match &args.command {
+            NodeCommands::Start(start) => start.logging_options(),
+            _ => cli_logging(),
         },
+        Commands::Hub(args) => match &args.command {
+            HubCommands::Start(start) => start.logging_options(),
+            _ => cli_logging(),
+        },
+        Commands::Internal(args) => match &args.command {
+            InternalCommands::Stdio(stdio) => stdio.logging_options(),
+            _ => cli_logging(),
+        },
+        _ => cli_logging(),
     };
     logging::init_logging(&logging_options, &global, &fxg_home);
 
     // On macOS the tray (NSStatusItem) must be created and driven on the main
-    // thread's event loop, so `fxg daemon --tray` hands the main thread over to
-    // the tao loop here (the daemon body moves to a worker thread).
+    // thread's event loop, so `fxg node start --tray` hands the main thread over
+    // to the tao loop here (the node body moves to a worker thread).
     #[cfg(target_os = "macos")]
-    if let Some(code) = tray::run_daemon_if_requested(&cli.command).await {
+    if let Some(code) = tray::run_node_if_requested(&cli.command).await {
         return code;
     }
 
@@ -123,5 +124,12 @@ async fn main() -> ExitCode {
             eprintln!("fxg: {err:#}");
             ExitCode::FAILURE
         }
+    }
+}
+
+fn cli_logging() -> logging::LoggingOptions {
+    logging::LoggingOptions {
+        kind: logging::CommandLogKind::Cli,
+        ..Default::default()
     }
 }

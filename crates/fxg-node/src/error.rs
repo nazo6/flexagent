@@ -7,7 +7,7 @@ use fxg_protocol::common::{IncidentLevel, IncidentSource};
 /// Windows `ERROR_PIPE_BUSY` (231).
 ///
 /// Every instance of the named pipe is connected, so `WaitNamedPipe` should be used.
-/// Defined here because both the server and the client refer to it.
+/// Defined here because both the hub and the client refer to it.
 #[cfg(windows)]
 pub(crate) const PIPE_BUSY: i32 = 231;
 
@@ -105,9 +105,9 @@ pub enum NodeError {
     /// JSON conversion error
     #[error("json error: {0}")]
     Json(#[from] serde_json::Error),
-    /// Startup or I/O error of the server (local HTTP/WS / IPC)
-    #[error("server error: {0}")]
-    Server(String),
+    /// Startup or I/O error of the hub (local HTTP/WS / IPC)
+    #[error("hub error: {0}")]
+    Hub(String),
     /// A referenced secret value file does not exist
     #[error("secret is missing: {}", id.as_str())]
     SecretMissing {
@@ -141,7 +141,7 @@ impl NodeError {
             Self::Io { .. } | Self::Plain(_) | Self::Json(_) | Self::Config(_) => {
                 IncidentSource::Api
             }
-            Self::Server(_) | Self::Timeout(_) => IncidentSource::Sync,
+            Self::Hub(_) | Self::Timeout(_) => IncidentSource::Sync,
             Self::InvalidState(_)
             | Self::InvalidSession(_)
             | Self::ResumeRequired { .. }
@@ -180,7 +180,7 @@ impl NodeError {
             | Self::Io { .. }
             | Self::Plain(_)
             | Self::Json(_)
-            | Self::Server(_)
+            | Self::Hub(_)
             | Self::Timeout(_)
             | Self::Config(_)
             | Self::NonPersistableEvent(_) => IncidentLevel::Error,
@@ -248,7 +248,7 @@ impl NodeError {
             Self::Config(_) => ErrorCode::ConfigInvalid,
             Self::Pty(_) => ErrorCode::PtyFailed,
             Self::Json(_) => ErrorCode::Internal,
-            Self::Server(_) => ErrorCode::ServerError,
+            Self::Hub(_) => ErrorCode::HubError,
             Self::SecretMissing { .. } => ErrorCode::SecretMissing,
             Self::SecretInUse { .. } => ErrorCode::SecretInUse,
             Self::SecretInvalid(_) => ErrorCode::SecretInvalid,

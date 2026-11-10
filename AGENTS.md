@@ -5,21 +5,20 @@
 
 ## 1. アーキテクチャ・実装の要点
 
-- **単一バイナリ構成 (`fxg`)**: CLI、ノードデーモン
-  (`fxg daemon`)、中央サーバー (`fxg server`)、および Web UI / PWA
+- **単一バイナリ構成 (`fxg`)**: CLI、ノード (`fxg node start`)、ハブ (`fxg hub start`)、および Web UI / PWA
   (`rust-embed`) を単一の Rust バイナリに内包する。
 - **ローカルファースト & Outbox 同期**:
   セッションとイベントの一次ソースは各ノードの `node.db` (SQLite
   WAL)。イベントIDには `UUID v7` とセッション内連番 `node_seq`
-  を用い、中央サーバー (`server.db`) へは Store-and-Forward (Outbox パターン)
+  を用い、ハブ (`hub.db`) へは Store-and-Forward (Outbox パターン)
   で非同期同期する。ストリーミングチャンクはメモリで即時配信しつつ、DBへは500msごとまたはターン区切りで結合フラッシュする。
 - **同一プロトコル・同一API**:
-  - Node ⇔ Server 間通信は、常駐ノード (Outbound WS) も一時VMノード
-    (`fxg daemon --stdio` の JSON Lines) も同一の `NodeToServerMsg` /
-    `ServerToNodeMsg` を使用する。
-  - Client ⇔ Server (`:8080`) と Client ⇔ Local Node (`127.0.0.1:7860`) は同一の
+  - Node ⇔ Hub 間通信は、常駐ノード (Outbound WS) も一時VMノード
+    (`fxg internal stdio` の JSON Lines) も同一の `NodeToHubMsg` /
+    `HubToNodeMsg` を使用する。
+  - Client ⇔ Hub (`:8080`) と Client ⇔ Local Node (`127.0.0.1:7860`) は同一の
     REST API / WebSocket フォーマットを提供する。
-- **一時VM (`--stdio`) の出力分離**: ブートストラップや `mise` / `uv`
+- **一時VM (`fxg internal stdio`) の出力分離**: ブートストラップや `mise` / `uv`
   によるツール導入ログはすべて `stderr` (`>&2`) に出力し、`stdout`
   はプロトコル通信 (JSON Lines) 専用として保護する。
 - **Windows ファーストクラス対応**:
@@ -31,17 +30,17 @@
 - **設定の所有権と秘密ストア**:
   - 実行時に変更する設定は所有者の DB にのみ保存する (`node_settings` /
     `agent_settings` / `custom_agents` / `project_path_links` は `node.db`、
-    `server_settings` / `git_credentials` / `provisioners` / `project_profiles`
-    は `server.db`)。ノード ⇔ サーバー間で設定を同期・マージしない。
+    `hub_settings` / `git_credentials` / `provisioners` / `project_profiles`
+    は `hub.db`)。ノード ⇔ ハブ間で設定を同期・マージしない。
   - `config.toml` は待受アドレス・接続先・ログ・セキュリティ境界のみ。
     `.fxg.toml` と旧 JSON 設定ファイルは廃止。
-  - 秘密の値は `~/.flexagent/secrets/{node,server}/<id>` (`0600`) に置き、
+  - 秘密の値は `~/.flexagent/secrets/{node,hub}/<id>` (`0600`) に置き、
     DB にはメタデータだけを保存する。API は書き込み専用で値を返さない。
   - プロジェクト同一性は `project_path_links` → Git リモート → `local:` の順で
     解決し、表示名は自動導出する。Worktree の作成先は
     `~/.flexagent/worktrees/{project}/{branch}` に固定。
 - **セキュリティ原則**:
-  - `fxg daemon` のローカルHTTP/WSは `127.0.0.1:7860` のみにバインドする。
+  - `fxg node start` のローカルHTTP/WSは `127.0.0.1:7860` のみにバインドする。
   - 全HTTP/WSエンドポイントでトークン認証 (`Bearer` または
     `HttpOnly; SameSite=Strict` Cookie)、`Host` ヘッダ検証 (DNS
     Rebinding対策)、WS `Origin` ヘッダ検証 (CSWSH対策) を強制する。
@@ -51,15 +50,15 @@
 - **Rust (`crates/`)**:
   - `fxg-protocol`: 共通型・イベント・通信メッセージ定義 (`specta` で
     `ui/src/lib/generated/bindings.ts` へTS型を自動生成)
-  - `fxg-db`: SQLite (`sqlx`, WAL, FTS5 `tokenize='trigram'`) による `server.db`
+  - `fxg-db`: SQLite (`sqlx`, WAL, FTS5 `tokenize='trigram'`) による `hub.db`
     / `node.db` 管理
   - `fxg-pty`: ConPTY / Unix PTY (`portable-pty`)、Windows Job Object 管理
   - `fxg-acp`: `AgentDriver` トレイト、`AcpDriver`
     (`agent-client-protocol`)、ACP Registry、ローカル PATH 実行
-  - `fxg-node`: ノードデーモン (Named Pipe / UDS ローカルIPC、Outbox 同期、Git
+  - `fxg-node`: ノード (Named Pipe / UDS ローカルIPC、Outbox 同期、Git
     Worktree 管理、Shadow Git Tree (`GIT_INDEX_FILE`)
     によるターン単位のスナップショット/Revert)
-  - `fxg-server`: 中央サーバー (Axum、Node Hub、VAPID Web Push、Stdio
+  - `fxg-hub`: ハブ (Axum、Node Hub、VAPID Web Push、Stdio
     Provisioner、監査ログ)
   - `fxg-cli`: `fxg` バイナリエントリポイント (セッション開始時に Web UI
     をブラウザで自動オープン)
@@ -77,8 +76,8 @@
 - [`docs/README.md`](docs/README.md): コアコンセプト・クレート構成
 - [`docs/01-architecture-and-sync.md`](docs/01-architecture-and-sync.md):
   通信トポロジー、Outbox同期、論理プロジェクト・Worktree解決、一時VM
-  (`--stdio`)、セキュリティ
-- [`docs/02-database-schema.md`](docs/02-database-schema.md): `server.db` /
+  (`fxg internal stdio`)、セキュリティ
+- [`docs/02-database-schema.md`](docs/02-database-schema.md): `hub.db` /
   `node.db` の SQLite スキーマ定義
 - [`docs/03-protocol-and-api.md`](docs/03-protocol-and-api.md): `fxg-protocol`
   型定義、WS/Stdio/IPC メッセージ、REST API エンドポイント
@@ -87,7 +86,7 @@
   固有実装
 - [`docs/05-cli-and-pwa-ui.md`](docs/05-cli-and-pwa-ui.md): CLI
   コマンド完全リファレンス、設定の所有者 (`config.toml` は起動設定のみ、
-  実行時設定は `node.db` / `server.db`)、秘密ストア、PWA / Web Push 設計
+  実行時設定は `node.db` / `hub.db`)、秘密ストア、PWA / Web Push 設計
 - [`docs/06-type-safety.md`](docs/06-type-safety.md): 型安全性ガイド
   (open enum / `RawJson` / 文字列判定の禁止 / clippy による境界検査)
 - [`docs/changelog/2026-09-30-implementation-plan.md`](docs/changelog/2026-09-30-implementation-plan.md):

@@ -155,7 +155,7 @@
     provisioners.find((p) => p.name === provisionerName) ?? provisioners[0] ?? null,
   );
 
-  /** Loads ephemeral VM provisioners (central server only; retryable from the UI). */
+  /** Loads ephemeral VM provisioners (hub only; retryable from the UI). */
   async function loadProvisioners(): Promise<void> {
     try {
       const list = await sync.connection.client.provisioners();
@@ -173,7 +173,7 @@
   /**
    * Loads the agent catalog for one node.
    *
-   * The central server rejects the unscoped `GET /api/v1/agents` (every catalog is
+   * The hub rejects the unscoped `GET /api/v1/agents` (every catalog is
    * node-scoped), so always fetch through `/api/v1/nodes/{id}/agents`. You can keep going by
    * entering an ID directly even if the catalog cannot be fetched.
    */
@@ -197,7 +197,7 @@
     }
   }
 
-  // Ephemeral VM provisioner definitions (only available when connected to the central server)
+  // Ephemeral VM provisioner definitions (only available when connected to the hub)
   onMount(() => {
     void loadProvisioners();
   });

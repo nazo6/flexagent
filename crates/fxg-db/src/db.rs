@@ -7,7 +7,7 @@ use fxg_protocol::common::{
     AuditLogEntry, ElicitationRequestEntry, NodeSummary, PermissionRequestEntry, ProjectSummary,
     SearchHit, SessionSummary,
 };
-use fxg_protocol::config::{NODE_DB_FILE_NAME, SERVER_DB_FILE_NAME};
+use fxg_protocol::config::{HUB_DB_FILE_NAME, NODE_DB_FILE_NAME};
 use fxg_protocol::events::{SessionEventBatch, SessionEventEnvelope, UnifiedEventPayload};
 use sqlx::SqlitePool;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
@@ -17,14 +17,14 @@ use crate::{audit, events, incidents, outbox, queries, registration, settings};
 
 /// Execution role of a DB.
 ///
-/// `node.db` / `server.db` share the same schema, and behavioral differences branch on this
+/// `node.db` / `hub.db` share the same schema, and behavioral differences branch on this
 /// role (role-based branching appears in outbox sync, relaying, Web Push, etc. from Phase 4
 /// onward).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DbRole {
     /// Each node's local DB (`node.db`). The **authority** for session state.
     Node,
-    /// Central server DB (`server.db`). Only updates **projections** via event application.
+    /// Hub DB (`hub.db`). Only updates **projections** via event application.
     Hub,
 }
 
@@ -43,9 +43,9 @@ pub fn node_db_path(fxg_home: &Path) -> PathBuf {
     fxg_home.join(NODE_DB_FILE_NAME)
 }
 
-/// Returns the path to `~/.flexagent/server.db`.
+/// Returns the path to `~/.flexagent/hub.db`.
 pub fn hub_db_path(fxg_home: &Path) -> PathBuf {
-    fxg_home.join(SERVER_DB_FILE_NAME)
+    fxg_home.join(HUB_DB_FILE_NAME)
 }
 
 /// SQLite DB handle (connection pool + execution role).
@@ -486,7 +486,7 @@ impl Db {
     }
 
     // ------------------------------------------------------------------
-    // Web Push subscriptions (central server)
+    // Web Push subscriptions (hub)
     // ------------------------------------------------------------------
 
     /// Registers or updates a Web Push subscription (same `endpoint` overwrites the keys).
@@ -620,26 +620,26 @@ impl Db {
         settings::delete_project_path_link(&self.pool, local_path).await
     }
 
-    /// Ensures the single `server_settings` row exists and returns it.
-    pub async fn ensure_server_settings(
+    /// Ensures the single `hub_settings` row exists and returns it.
+    pub async fn ensure_hub_settings(
         &self,
-    ) -> Result<fxg_protocol::settings::ServerSettings, DbError> {
-        settings::ensure_server_settings(&self.pool).await
+    ) -> Result<fxg_protocol::settings::HubSettings, DbError> {
+        settings::ensure_hub_settings(&self.pool).await
     }
 
-    /// Returns the `server_settings` row when it exists.
-    pub async fn server_settings(
+    /// Returns the `hub_settings` row when it exists.
+    pub async fn hub_settings(
         &self,
-    ) -> Result<Option<fxg_protocol::settings::ServerSettings>, DbError> {
-        settings::get_server_settings(&self.pool).await
+    ) -> Result<Option<fxg_protocol::settings::HubSettings>, DbError> {
+        settings::get_hub_settings(&self.pool).await
     }
 
-    /// Updates server settings and Git credentials under an optimistic lock.
-    pub async fn update_server_settings(
+    /// Updates hub settings and Git credentials under an optimistic lock.
+    pub async fn update_hub_settings(
         &self,
-        request: &fxg_protocol::settings::UpdateServerSettingsRequest,
-    ) -> Result<fxg_protocol::settings::ServerSettings, DbError> {
-        settings::update_server_settings(&self.pool, request).await
+        request: &fxg_protocol::settings::UpdateHubSettingsRequest,
+    ) -> Result<fxg_protocol::settings::HubSettings, DbError> {
+        settings::update_hub_settings(&self.pool, request).await
     }
 
     /// Lists every provisioner definition.

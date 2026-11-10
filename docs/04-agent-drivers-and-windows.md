@@ -75,7 +75,7 @@ pub trait ActiveSessionHandle: Send + Sync {
       対応)
    4. `npx` 配布 (`npx -y <package> <args...>`)
    5. `uvx` 配布 (`uvx <package> <args...>`)
-   - 代表例: `fxg run antigravity` は `agy acp`、`fxg run opencode` は
+   - 代表例: `fxg session new antigravity` は `agy acp`、`fxg session new opencode` は
      `opencode acp` として起動する。registry の `antigravity-acp` が
      `agy_acp_server.par` を前提としていても、`agy` CLI が PATH にあれば
      preset が優先される。
@@ -192,8 +192,7 @@ fxg 側で履歴を組み立て直す Replay フォールバックは行いま�
 
 ### 4.1 セッションのレジューム (Resume)
 
-停止したセッション (`fxg daemon`
-再起動・`fxg session kill`・エージェントプロセス
+停止したセッション (`fxg node restart`・`fxg session kill`・エージェントプロセス
 異常終了) を、**同一 `session_id` のまま**会話コンテキストを維持して再開します
 (CLI `fxg session resume` / REST `POST /api/v1/sessions/:id/resume` / Web UI)。
 
@@ -233,11 +232,11 @@ fxg 側で履歴を組み立て直す Replay フォールバックは行いま�
   進行中の場合は完了を待ってから送信します。
 - **タイムアウト**: 自動レジュームはエージェントのコールドスタート (~25 秒) を
   含みうるため、送信コマンドの中継タイムアウトを 120 秒としています
-  (`fxg-server` の `SESSION_COMMAND_TIMEOUT`。Client WS 経由では 1 コマンド
+  (`fxg-hub` の `SESSION_COMMAND_TIMEOUT`。Client WS 経由では 1 コマンド
   1 応答の同期処理のため、そのクライアント接続は完了まで待ちます)。
 
 > **v2 (将来拡張)**: 一時VM (provisioner) セッションの再開 (VM 再起動 +
-> ワークスペース引き継ぎ) と、`fxg daemon` 起動時の自動レジューム。
+> ワークスペース引き継ぎ) と、`fxg node` 起動時の自動レジューム。
 
 ---
 
@@ -262,7 +261,7 @@ impl WinJobGuard {
     pub fn new_kill_on_close() -> anyhow::Result<Self> {
         let job = win32job::Job::create()?;
         let mut info = job.query_extended_limit_info()?;
-        info.limit_kill_on_job_close(); // デーモン終了時・Drop時に孫プロセスまで確実にKill
+        info.limit_kill_on_job_close(); // ノード終了時・Drop時に孫プロセスまで確実にKill
         job.set_extended_limit_info(&info)?;
         Ok(Self { job })
     }
@@ -313,34 +312,36 @@ GUI (Web UI / スマホPWA)
 
 ### 5.4 バックグラウンド常駐化 (`fxg service`)
 
-`fxg service install`
-コマンドにより、各OS標準のユーザー権限バックグラウンドサービスとしてデーモンを登録します：
+`fxg service install [node|hub]` コマンドにより、各OS標準のユーザー権限バックグラウンドサービスとして
+ノードまたはハブを登録します（既定は `node`）。`service` は **OS への登録・解除**を担当し
+（`install` は登録後に起動する）、起動・停止・状態確認は `fxg node start|stop|status` /
+`fxg hub start|stop|status` が行います。unit が登録済みの場合、これらのコマンドは
+systemd / launchd / Task Scheduler に委譲します。
 
 - **Windows**: タスクスケジューラ（ログオン時実行・コンソールウィンドウ非表示
   `CREATE_NO_WINDOW`）またはスタートアップ登録。
   - 実装: `schtasks /Create /SC ONLOGON` を第一手段とする。管理者権限が無い
     環境では `Access is denied` となるため、スタートアップフォルダ
-    (`%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\fxg-daemon.vbs`)
+    (`%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\fxg-node.vbs`)
     へ VBS ランチャー (`WScript.Shell.Run ..., 0, False` = ウィンドウ非表示)
-    を書き出すフォールバックを持つ。状態確認はタスク / VBS の存在と、
-    デーモンのローカルIPC接続プローブ (サーバーは TCP) で行う
-- **Linux / WSL**: `~/.config/systemd/user/fxg-daemon.service` を生成し
-  `systemctl --user enable --now fxg-daemon`。
-- **macOS**: `~/Library/LaunchAgents/dev.flexagent.daemon.plist` を生成し
+    を書き出すフォールバックを持つ。状態確認は `fxg node status` が行う。
+- **Linux / WSL**: `~/.config/systemd/user/fxg-node.service` を生成し
+  `systemctl --user enable --now fxg-node`。
+- **macOS**: `~/Library/LaunchAgents/dev.flexagent.node.plist` を生成し
   `launchctl load`。
 
-`--server` を付けると `fxg daemon` ではなく `fxg server` (中央サーバー) を対象に
-同じ操作系で管理します。
+ハブを常駐させる場合は `fxg service install hub` を使います（unit 名は
+`fxg-hub` / `dev.flexagent.hub`）。`fxg service uninstall [node|hub]` で停止・解除します。
 
-### 5.5 タスクトレイ常駐 (`fxg daemon --tray`)
+### 5.5 タスクトレイ常駐 (`fxg node start --tray`)
 
-`fxg daemon --tray` で起動すると、デーモンはタスクトレイに常駐し、メニューから
+`fxg node start --tray` で起動すると、ノードはタスクトレイに常駐し、メニューから
 状態確認と操作ができます（既定は無効。`~/.flexagent/config.toml` の
 `[node] tray = true` で常時有効化、`--no-tray` で一時的に無効化）。
-`--stdio`（一時VM・プロビジョナー）では常に無効です。
+`fxg internal stdio`（一時VM・プロビジョナー）では常に無効です。
 
 - **メニュー**:
-  - ステータス表示: 中央サーバー接続状態（●接続中 / ○スタンドアロン）、
+  - ステータス表示: ハブ接続状態（●接続中 / ○スタンドアロン）、
     未同期 Outbox 件数、稼働中セッション数（3秒間隔で更新）
   - 「ログイン時に自動起動」: `fxg service install` / `uninstall` と同一実装の
     チェック項目（登録後は実状態を再確認して表示を同期）
@@ -348,7 +349,7 @@ GUI (Web UI / スマホPWA)
   - 「終了」: `NodeDaemon` の graceful shutdown（エージェント/PTY 停止 →
     `nodes.is_online = 0` 記録）を実行して終了
 - **アイコン**: `ui/static/icon-192.png` を 32×32 へ縮小し、右下に接続状態ドット
-  （緑=中央サーバー接続中 / グレー=スタンドアロン）を合成する。
+  （緑=ハブ接続中 / グレー=スタンドアロン）を合成する。
 - **状態の取得元**: プロセス内の `DaemonState`（`node.db` / 同期ワーカー）を直接
   参照する（IPC / HTTP を経由しない）。
 - **OS 別実装**（`tray-icon` はイベントループを自前で持たないため）:
@@ -363,12 +364,12 @@ GUI (Web UI / スマホPWA)
   - **macOS** (`tray/macos.rs`): `NSStatusItem`
     はメインスレッドのイベントループ上で
     作成・操作する必要があるため、`main.rs` の早期分岐でメインスレッドを tao
-    ループに明け渡し、デーモン本体（tokio
+    ループに明け渡し、ノード本体（tokio
     ランタイム）をワーカースレッドで起動する。
 - **スレッド安全性**: `muda` のメニュー項目は `!Send` のため、メニューの操作は
-  すべてトレイを作成したスレッド上で行う（デーモンとはチャネルで連携）。
-- **フェイルセーフ**: トレイを作成できない環境では警告のみでデーモンは稼働を
-  継続する（起動の成否はデーモン本体と独立）。
+  すべてトレイを作成したスレッド上で行う（ノードとはチャネルで連携）。
+- **フェイルセーフ**: トレイを作成できない環境では警告のみでノードは稼働を
+  継続する（起動の成否はノード本体と独立）。
 
 ### 4.4 承認ポリシー (`PermissionPolicy`)
 

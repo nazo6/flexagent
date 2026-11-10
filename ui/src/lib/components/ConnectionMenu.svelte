@@ -37,8 +37,8 @@
   let pushBusy = $state(false);
 
   const roleLabel = $derived(
-    connection.role === "central_server"
-      ? m.connection_role_central_server()
+    connection.role === "hub"
+      ? m.connection_role_hub()
       : connection.role === "local_node"
         ? m.connection_role_local_node()
         : m.connection_role_disconnected(),

@@ -1,7 +1,7 @@
 //! API type definitions for Client (PWA / Browser / CLI) <-> Server (or Local Node).
 //!
-//! The central server (`fxg server`, `:8080`) and the node's local web server
-//! (`fxg daemon`, `127.0.0.1:7860`) implement exactly the same API paths and
+//! The hub (`fxg hub start`, `:8080`) and the node's local web server
+//! (`fxg node start`, `127.0.0.1:7860`) implement exactly the same API paths and
 //! WebSocket format (design: `docs/03-protocol-and-api.md` §3). The UI connects
 //! to either of them with the same types and the same code, without caring about
 //! the endpoint URL.
@@ -24,9 +24,9 @@ use crate::{CommandId, NodeId, ProjectId, SessionId};
 #[serde(rename_all = "snake_case")]
 #[specta(collect)]
 pub enum ConnectionRole {
-    /// Connected to the central server (`fxg server`)
-    CentralServer,
-    /// Connected to the node's local web server (`fxg daemon`)
+    /// Connected to the hub (`fxg hub start`)
+    Hub,
+    /// Connected to the node's local web server (`fxg node start`)
     LocalNode,
 }
 
@@ -36,16 +36,16 @@ pub enum ConnectionRole {
 pub struct SystemInfoResponse {
     /// Kind of endpoint
     pub role: ConnectionRole,
-    /// Node ID when connected to a local node (`None` on the central server)
+    /// Node ID when connected to a local node (`None` on the hub)
     pub node_id: Option<NodeId>,
     /// fxg binary version
     pub version: String,
-    /// VAPID public key for Web Push (central server only)
+    /// VAPID public key for Web Push (hub only)
     pub vapid_public_key: Option<String>,
     /// Number of unsynced outbox events (local node only)
     pub unsynced_event_count: Option<u64>,
-    /// WebSocket connection state to the central server (local node only)
-    pub central_connected: Option<bool>,
+    /// WebSocket connection state to the hub (local node only)
+    pub hub_connected: Option<bool>,
 }
 
 /// Recent stderr lines for one agent (diagnostics).
@@ -69,7 +69,7 @@ pub struct DiagnosticsResponse {
     /// Per-agent stderr tails
     pub agents: Vec<AgentDiagnostics>,
     /// Daemon log path (local node only)
-    pub daemon_log: Option<String>,
+    pub node_log: Option<String>,
     /// Component health and delivery counters
     pub health: SystemStatus,
     /// Recent persisted incidents (newest first)
@@ -100,13 +100,13 @@ pub struct SupportBundleConfig {
     pub log_format: Option<String>,
     /// Local node bind address
     pub node_listen_addr: Option<String>,
-    /// Central server URL
-    pub central_server_url: Option<String>,
-    /// Central server bind address
-    pub server_listen_addr: Option<String>,
-    /// Extra allowed hosts (central server)
+    /// Hub URL
+    pub hub_url: Option<String>,
+    /// Hub bind address
+    pub hub_listen_addr: Option<String>,
+    /// Extra allowed hosts (hub)
     pub allowed_hosts: Vec<String>,
-    /// Extra allowed origins (central server)
+    /// Extra allowed origins (hub)
     pub allowed_origins: Vec<String>,
 }
 
@@ -124,11 +124,11 @@ pub struct DatabaseStats {
     pub events: u64,
     /// Number of incidents
     pub incidents: u64,
-    /// Events not yet acknowledged by the central server (nodes only)
+    /// Events not yet acknowledged by the hub (nodes only)
     pub pending_outbox_events: u64,
 }
 
-/// `GET /api/v1/diagnostics/bundle` response (`fxg diagnostics export`).
+/// `GET /api/v1/diagnostics/bundle` response (`fxg support bundle`).
 ///
 /// Everything text-based is redacted: tokens, cookies, environment values,
 /// prompts and the user's home directory never leave the process.
@@ -157,7 +157,7 @@ pub struct SupportBundle {
 ///
 /// `GET /api/v1/system/info` requires authentication, so an unauthenticated Web UI
 /// determines the endpoint kind from this endpoint and switches the token dialog
-/// correctly (central server / local node) (design: `docs/03` §3.1).
+/// correctly (hub / local node) (design: `docs/03` §3.1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct MetaResponse {
@@ -220,7 +220,7 @@ pub struct ProvisionersResponse {
 /// `POST /api/v1/provisioners/:name/test` response (connectivity check).
 ///
 /// Starts the provisioner and verifies up to the `NodeHello` handshake of
-/// `fxg daemon --stdio` (or reports a failure during bootstrapping).
+/// `fxg internal stdio` (or reports a failure during bootstrapping).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct ProvisionerTestResponse {
@@ -486,13 +486,13 @@ pub struct NodeTokensResponse {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct IssueNodeTokenRequest {
-    /// Node ID to pair (the node_id of the fxg daemon)
+    /// Node ID to pair (the node_id of the fxg node start)
     pub node_id: NodeId,
 }
 
 /// `POST /api/v1/nodes/tokens` response.
 ///
-/// The plaintext token is returned only once, at issue time (the server stores
+/// The plaintext token is returned only once, at issue time (the hub stores
 /// only its SHA-256 hash).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
@@ -543,7 +543,7 @@ pub struct CreateSessionRequest {
     pub project_id: ProjectId,
     /// ID of the resident node to run on (mutually exclusive with `provisioner`)
     pub node_id: Option<NodeId>,
-    /// Ephemeral VM provisioner name (mutually exclusive with `node_id`; requires the central server)
+    /// Ephemeral VM provisioner name (mutually exclusive with `node_id`; requires the hub)
     pub provisioner: Option<String>,
     /// Working directory (an existing worktree or the repository root)
     pub local_path: Option<String>,
@@ -741,7 +741,7 @@ pub struct AuditLogsResponse {
     pub logs: Vec<AuditLogEntry>,
 }
 
-/// Client -> Server (`/api/v1/client/ws`) message.
+/// Client -> Endpoint (`/api/v1/client/ws`) message.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[serde(tag = "op", rename_all = "snake_case")]
 #[specta(collect)]
@@ -780,11 +780,11 @@ pub enum ClientWsMessage {
     Ping,
 }
 
-/// Server -> Client (`/api/v1/client/ws`) message.
+/// Endpoint -> Client (`/api/v1/client/ws`) message.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[serde(tag = "op", rename_all = "snake_case")]
 #[specta(collect)]
-pub enum ServerWsMessage {
+pub enum HubWsMessage {
     /// A batch of incremental events (the replay right after connecting and the
     /// realtime delivery afterwards).
     EventBatch {
@@ -803,7 +803,7 @@ pub enum ServerWsMessage {
     /// A progress log line of ephemeral VM bootstrapping (`stderr`) (ephemeral).
     ///
     /// Bootstrapping happens before the ephemeral node's `node.db` exists, so it is
-    /// streamed directly from the central server instead of being persisted in the
+    /// streamed directly from the hub instead of being persisted in the
     /// event log.
     BootstrapLog {
         /// Target session ID
@@ -825,8 +825,8 @@ pub enum ServerWsMessage {
     },
     /// Synchronization state notification (drives the sync badge in the UI).
     SystemStatus {
-        /// Whether the central server is connected (when connected to a local node)
-        central_connected: bool,
+        /// Whether the hub is connected (when connected to a local node)
+        hub_connected: bool,
         /// Number of unsynced outbox events
         unsynced_event_count: u64,
         /// Last synchronization time (Unix epoch ms)
@@ -841,12 +841,12 @@ pub enum ServerWsMessage {
     Pong,
 }
 
-/// Client -> Server (`/api/v1/pty/ws`) message.
+/// Client -> Endpoint (`/api/v1/pty/ws`) message.
 ///
 /// A bidirectional stream channel that connects the terminal of the Web UI / mobile
 /// PWA directly to the ConPTY / Unix PTY on the node. When the node setting
 /// `allow_remote_pty = false` is in effect, `spawn` from remote (through the
-/// central server) is rejected.
+/// hub) is rejected.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[serde(tag = "op", rename_all = "snake_case")]
 #[specta(collect)]
@@ -883,7 +883,7 @@ pub enum PtyClientMessage {
     Kill,
 }
 
-/// Server -> Client (`/api/v1/pty/ws`) message.
+/// Endpoint -> Client (`/api/v1/pty/ws`) message.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[serde(tag = "op", rename_all = "snake_case")]
 #[specta(collect)]
@@ -915,9 +915,9 @@ pub enum PtyServerMessage {
     },
 }
 
-/// Helper converting a `CommandResult` into `ServerWsMessage::CommandResult`.
-pub fn command_result_ws(result: CommandResult) -> ServerWsMessage {
-    ServerWsMessage::CommandResult {
+/// Helper converting a `CommandResult` into `HubWsMessage::CommandResult`.
+pub fn command_result_ws(result: CommandResult) -> HubWsMessage {
+    HubWsMessage::CommandResult {
         command_id: result.command_id,
         success: result.success,
         error: result.error,
@@ -925,9 +925,9 @@ pub fn command_result_ws(result: CommandResult) -> ServerWsMessage {
     }
 }
 
-/// Helper converting a `SessionEventBatch` into `ServerWsMessage::EventBatch`.
-pub fn event_batch_ws(batch: SessionEventBatch) -> ServerWsMessage {
-    ServerWsMessage::EventBatch {
+/// Helper converting a `SessionEventBatch` into `HubWsMessage::EventBatch`.
+pub fn event_batch_ws(batch: SessionEventBatch) -> HubWsMessage {
+    HubWsMessage::EventBatch {
         events: batch.events,
         cursor: batch.cursor,
     }
@@ -990,7 +990,7 @@ mod tests {
 
     #[test]
     fn server_ws_error_shape() {
-        let msg = ServerWsMessage::Error {
+        let msg = HubWsMessage::Error {
             error: ErrorInfo::new(ErrorCode::NodeOffline, "node is offline"),
         };
         let json = serde_json::to_value(&msg).unwrap();

@@ -194,7 +194,7 @@ pub struct ProjectBindingSummary {
     pub is_worktree: bool,
     /// Whether the local path actually exists on the node
     ///
-    /// On the central server this is the value from the last `NodeHello` report;
+    /// On the hub this is the value from the last `NodeHello` report;
     /// on the local node it is checked live when fetching.
     pub path_exists: bool,
     /// Git branch as of the last check

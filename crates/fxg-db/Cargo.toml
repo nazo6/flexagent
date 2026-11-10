@@ -3,7 +3,7 @@ name = "fxg-db"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
-description = "FlexAgent SQLite schema management, event application engine, and shared query layer (shared by node.db / server.db)"
+description = "FlexAgent SQLite schema management, event application engine, and shared query layer (shared by node.db / hub.db)"
 repository.workspace = true
 
 [dependencies]

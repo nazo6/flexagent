@@ -1,6 +1,6 @@
 //! Local IPC framing (length-prefixed JSON).
 //!
-//! Used by both the server (`daemon::ipc`) and the client
+//! Used by both the hub (`daemon::ipc`) and the client
 //! ([`crate::ipc_client::IpcClient`]): **a 4-byte little-endian length header
 //! followed by a JSON payload**.
 //!
@@ -31,18 +31,18 @@ where
         Ok(_) => {}
         Err(err) if err.kind() == std::io::ErrorKind::UnexpectedEof => return Ok(None),
         Err(err) => {
-            return Err(NodeError::Server(format!("ipc length read failed: {err}")));
+            return Err(NodeError::Hub(format!("ipc length read failed: {err}")));
         }
     }
     let length = u32::from_le_bytes(length_buf);
     if length > MAX_FRAME_BYTES {
-        return Err(NodeError::Server(format!("ipc frame too large: {length}")));
+        return Err(NodeError::Hub(format!("ipc frame too large: {length}")));
     }
     let mut payload = vec![0u8; length as usize];
     stream
         .read_exact(&mut payload)
         .await
-        .map_err(|err| NodeError::Server(format!("ipc payload read failed: {err}")))?;
+        .map_err(|err| NodeError::Hub(format!("ipc payload read failed: {err}")))?;
     Ok(Some(payload))
 }
 
@@ -54,19 +54,19 @@ where
 {
     let payload = serde_json::to_vec(message)?;
     let length = u32::try_from(payload.len())
-        .map_err(|err| NodeError::Server(format!("ipc frame is too large ({err})")))?;
+        .map_err(|err| NodeError::Hub(format!("ipc frame is too large ({err})")))?;
     stream
         .write_all(&length.to_le_bytes())
         .await
-        .map_err(|err| NodeError::Server(format!("ipc write failed: {err}")))?;
+        .map_err(|err| NodeError::Hub(format!("ipc write failed: {err}")))?;
     stream
         .write_all(&payload)
         .await
-        .map_err(|err| NodeError::Server(format!("ipc write failed: {err}")))?;
+        .map_err(|err| NodeError::Hub(format!("ipc write failed: {err}")))?;
     stream
         .flush()
         .await
-        .map_err(|err| NodeError::Server(format!("ipc flush failed: {err}")))?;
+        .map_err(|err| NodeError::Hub(format!("ipc flush failed: {err}")))?;
     Ok(())
 }
 
@@ -98,6 +98,6 @@ mod tests {
             .await
             .expect("write length");
         let err = read_frame(&mut b).await.expect_err("must fail");
-        assert!(matches!(err, NodeError::Server(_)));
+        assert!(matches!(err, NodeError::Hub(_)));
     }
 }

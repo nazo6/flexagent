@@ -1,6 +1,6 @@
 //! Generic node RPC dispatch.
 //!
-//! Runs a [`NodeRpcRequest`] requested by the central server and returns a typed
+//! Runs a [`NodeRpcRequest`] requested by the hub and returns a typed
 //! [`NodeRpcOutcome`]. Transport concerns (WS / stdio framing, correlation and
 //! resend) stay in [`crate::sync`].
 
@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use fxg_protocol::CommandId;
 use fxg_protocol::client_api::{ProjectLinkResponse, ProjectScanResponse, WorktreeInfo};
 use fxg_protocol::common::WorktreeAction;
-use fxg_protocol::node_server::{NodeRpcOutcome, NodeRpcRequest, NodeRpcResponse};
+use fxg_protocol::node_hub::{NodeRpcOutcome, NodeRpcRequest, NodeRpcResponse};
 
 use crate::daemon::{AuditSource, DaemonState};
 use crate::error::NodeError;

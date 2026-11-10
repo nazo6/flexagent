@@ -109,7 +109,7 @@ pub struct StartSessionRequest {
     pub cwd: PathBuf,
     /// Launch spec (resolved)
     pub launch: AgentLaunchSpec,
-    /// Pass-through arguments for the agent process (`fxg run <agent> -- ...`)
+    /// Pass-through arguments for the agent process (`fxg session new <agent> -- ...`)
     pub extra_args: Vec<String>,
     /// Initial mode (when `--mode` is given; applied via ACP `session/set_mode`)
     pub initial_mode: Option<String>,
@@ -172,7 +172,7 @@ pub trait AgentDriver: Send + Sync {
 
     /// Disposes all idle agent processes (those not attached to a session).
     ///
-    /// Called by `fxg kill-all` / daemon shutdown. Drivers that keep processes alive
+    /// Called by `the hub kill switch` / node shutdown. Drivers that keep processes alive
     /// after session end must terminate them here. The return value is the number disposed.
     /// The default implementation for drivers that hold no processes returns 0 (no-op).
     async fn shutdown_idle(&self) -> usize {
@@ -222,7 +222,7 @@ pub trait ActiveSessionHandle: Send + Sync {
     /// Fully terminates the session process (including the process tree).
     ///
     /// Drivers that keep processes alive after session end (`AcpDriver`) **discard
-    /// them here instead of keeping them**. Used by `fxg kill-all` / daemon shutdown.
+    /// them here instead of keeping them**. Used by `the hub kill switch` / node shutdown.
     async fn dispose(&self) -> anyhow::Result<()> {
         self.shutdown().await
     }

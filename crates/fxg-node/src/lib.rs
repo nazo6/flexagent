@@ -1,6 +1,6 @@
 //! FlexAgent node daemon crate (`fxg-node`)
 //!
-//! Core implementation of the resident node (`fxg daemon`). It provides the local IPC
+//! Core implementation of the resident node (`fxg node start`). It provides the local IPC
 //! server (Named Pipe / UDS), the local HTTP/WS server (`127.0.0.1:7860`), logical
 //! project resolution, Git Worktree management, and the Outbox sync worker.
 //!

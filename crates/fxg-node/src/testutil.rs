@@ -63,7 +63,7 @@ pub(crate) fn test_ipc_endpoint(dir: &Path) -> String {
         let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         format!(r"\\.\pipe\fxg-test-{}-{n}", std::process::id())
     } else {
-        dir.join("daemon.sock").to_string_lossy().into_owned()
+        dir.join("node.sock").to_string_lossy().into_owned()
     }
 }
 

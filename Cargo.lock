@@ -1611,9 +1611,9 @@ dependencies = [
  "dirs 7.0.0",
  "fxg-acp",
  "fxg-db",
+ "fxg-hub",
  "fxg-node",
  "fxg-protocol",
- "fxg-server",
  "libc",
  "opener",
  "png",
@@ -1646,6 +1646,35 @@ dependencies = [
 ]
 
 [[package]]
+name = "fxg-hub"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "axum",
+ "base64 0.23.1",
+ "fs4",
+ "futures-util",
+ "fxg-db",
+ "fxg-protocol",
+ "fxg-pty",
+ "fxg-ui-assets",
+ "http",
+ "http-body-util",
+ "rand 0.10.3",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha2 0.11.1",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "tokio-tungstenite 0.30.0",
+ "tower",
+ "tracing",
+ "web-push-native",
+]
+
+[[package]]
 name = "fxg-node"
 version = "0.1.0"
 dependencies = [
@@ -1658,9 +1687,9 @@ dependencies = [
  "futures-util",
  "fxg-acp",
  "fxg-db",
+ "fxg-hub",
  "fxg-protocol",
  "fxg-pty",
- "fxg-server",
  "http-body-util",
  "libc",
  "rand 0.10.3",
@@ -1708,35 +1737,6 @@ dependencies = [
  "which",
  "win32job",
  "windows 0.61.3",
-]
-
-[[package]]
-name = "fxg-server"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "axum",
- "base64 0.23.1",
- "fs4",
- "futures-util",
- "fxg-db",
- "fxg-protocol",
- "fxg-pty",
- "fxg-ui-assets",
- "http",
- "http-body-util",
- "rand 0.10.3",
- "reqwest",
- "serde",
- "serde_json",
- "sha2 0.11.1",
- "tempfile",
- "thiserror 2.0.21",
- "tokio",
- "tokio-tungstenite 0.30.0",
- "tower",
- "tracing",
- "web-push-native",
 ]
 
 [[package]]

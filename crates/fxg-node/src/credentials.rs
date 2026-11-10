@@ -17,7 +17,7 @@ use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 
 use fxg_protocol::config::DEFAULT_GIT_USERNAME;
-use fxg_protocol::node_server::NodeToServerMsg;
+use fxg_protocol::node_hub::NodeToHubMsg;
 use fxg_protocol::util::uuid_v7;
 use tokio::sync::{mpsc, oneshot};
 
@@ -26,7 +26,7 @@ use crate::error::NodeError;
 /// Timeout for waiting on a `GitCredentialRequest` response.
 pub const CREDENTIAL_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// Git credentials returned by the central server (in memory only).
+/// Git credentials returned by the hub (in memory only).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct CredentialResponse {
     /// Basic auth username
@@ -40,29 +40,29 @@ pub struct CredentialResponse {
 /// Error returned when the Git credential proxy is unavailable (passed through to the CLI).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CredentialError {
-    /// Not connected to the central server
+    /// Not connected to the hub
     NotConnected,
     /// Response timed out
     Timeout,
-    /// The server failed to resolve the credential
-    Server(String),
+    /// The hub failed to resolve the credential
+    Hub(String),
 }
 
 impl std::fmt::Display for CredentialError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::NotConnected => f.write_str(
-                "git credential proxy is unavailable (not connected to a central server)",
-            ),
+            Self::NotConnected => {
+                f.write_str("git credential proxy is unavailable (not connected to a hub)")
+            }
             Self::Timeout => f.write_str("git credential request timed out"),
-            Self::Server(message) => write!(f, "git credential request failed: {message}"),
+            Self::Hub(message) => write!(f, "git credential request failed: {message}"),
         }
     }
 }
 
 struct BrokerInner {
     /// Send queue of the Node <-> Server connection (`None` when disconnected).
-    outbound: RwLock<Option<mpsc::Sender<NodeToServerMsg>>>,
+    outbound: RwLock<Option<mpsc::Sender<NodeToHubMsg>>>,
     /// Requests awaiting a response (`request_id` -> oneshot)
     pending: Mutex<HashMap<String, oneshot::Sender<CredentialResponse>>>,
 }
@@ -96,9 +96,9 @@ impl CredentialBroker {
         }
     }
 
-    /// Registers the send queue when connecting to the central server (sync worker /
+    /// Registers the send queue when connecting to the hub (sync worker /
     /// stdio transport only).
-    pub fn attach(&self, outbound: mpsc::Sender<NodeToServerMsg>) {
+    pub fn attach(&self, outbound: mpsc::Sender<NodeToHubMsg>) {
         *self.inner.outbound.write().expect("outbound lock poisoned") = Some(outbound);
     }
 
@@ -126,7 +126,7 @@ impl CredentialBroker {
     /// Resolves credentials from a Git askpass prompt.
     ///
     /// Extracts the host from the URL in the prompt, sends a `GitCredentialRequest`
-    /// to the central server, and waits for the response.
+    /// to the hub, and waits for the response.
     pub async fn resolve(&self, prompt: &str) -> Result<CredentialResponse, CredentialError> {
         let host = parse_host(prompt).unwrap_or_default();
         let repo_url = parse_url(prompt).unwrap_or(host);
@@ -146,11 +146,11 @@ impl CredentialBroker {
             .expect("pending lock poisoned")
             .insert(request_id.clone(), tx);
 
-        let message = NodeToServerMsg::GitCredentialRequest {
+        let message = NodeToHubMsg::GitCredentialRequest {
             request_id: request_id.clone(),
             repo_url,
             // GIT_ASKPASS cannot distinguish clone / fetch / push, so send the
-            // generic value `fetch` (the server resolves it the same way)
+            // generic value `fetch` (the hub resolves it the same way)
             operation: "fetch".to_owned(),
         };
         if outbound.send(message).await.is_err() {
@@ -226,7 +226,7 @@ pub fn askpass_script_path(fxg_home: &Path) -> PathBuf {
 /// Generates the `GIT_ASKPASS` helper script (overwritten every time).
 ///
 /// The script is a thin wrapper that only calls `fxg internal git-askpass <prompt>`; the
-/// actual work (relaying a `GitCredentialRequest` to the central server) is done by
+/// actual work (relaying a `GitCredentialRequest` to the hub) is done by
 /// the daemon. If the daemon is not running, the script exits non-zero and Git
 /// stops as an authentication failure (design that never writes tokens to disk:
 /// docs/01 §6.4).
@@ -325,7 +325,7 @@ mod tests {
             tokio::spawn(async move { broker.resolve("Password for 'https://github.com':").await })
         };
         let message = rx.recv().await.expect("request");
-        let NodeToServerMsg::GitCredentialRequest {
+        let NodeToHubMsg::GitCredentialRequest {
             request_id,
             repo_url,
             ..

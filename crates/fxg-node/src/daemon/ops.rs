@@ -1,7 +1,7 @@
 //! Shared implementation of daemon operations (used by both IPC and Client REST).
 //!
 //! The local IPC (`fxg` CLI) and the Client REST API (`localhost:7860` /
-//! central server relay) perform the same entity operations (worktree
+//! hub relay) perform the same entity operations (worktree
 //! management, project resolution, audit logging), so the implementation is
 //! centralized here.
 
@@ -46,7 +46,7 @@ impl AuditSource {
         }
     }
 
-    /// Operation from a remote client (via the central server).
+    /// Operation from a remote client (via the hub).
     pub fn remote(node_id: &str) -> Self {
         Self {
             client_ip: "server".to_owned(),
@@ -79,7 +79,7 @@ impl DaemonState {
         self.db().record_audit(&audit).await;
     }
 
-    /// Archives/restores a session (shared implementation for IPC / Client REST / central server relay).
+    /// Archives/restores a session (shared implementation for IPC / Client REST / hub relay).
     ///
     /// Archiving is a reversible visibility flag; the event log is retained.
     /// Returns the archive timestamp (Unix epoch ms; `None` when restoring).
@@ -104,7 +104,7 @@ impl DaemonState {
         Ok(archived_at)
     }
 
-    /// Deletes a session (shared implementation for IPC / Client REST / central server relay).
+    /// Deletes a session (shared implementation for IPC / Client REST / hub relay).
     ///
     /// A running session is stopped first, then `SessionDeleted` (tombstone) is
     /// appended and the event bodies and permission history are purged
@@ -739,13 +739,13 @@ impl DaemonState {
             Some(fxg_protocol::config::NodeBootstrapConfig::DEFAULT_LISTEN_ADDR),
             Some("--listen"),
         );
-        let central_server_url = sourced_option(
+        let hub_url = sourced_option(
             &env,
-            self.config().central_server_url.clone(),
-            fxg_protocol::config::env_keys::CENTRAL_SERVER_URL,
-            config.node.central_server_url.clone(),
-            "node.central_server_url",
-            Some("--server-url"),
+            self.config().hub_url.clone(),
+            fxg_protocol::config::env_keys::HUB_URL,
+            config.node.hub_url.clone(),
+            "node.hub_url",
+            Some("--hub-url"),
         );
 
         let log = &self.config().log;
@@ -790,7 +790,7 @@ impl DaemonState {
                 fxg_home,
                 node_id,
                 listen_addr,
-                central_server_url,
+                hub_url,
                 log_level,
                 log_file,
                 log_format,

@@ -155,7 +155,7 @@ impl AcpDriver {
     /// Creates a driver with the idle pool enabled.
     ///
     /// The idle TTL defaults to 10 minutes; `FXG_AGENT_WARM_IDLE_SECS` overrides
-    /// it (`0` keeps processes until daemon shutdown).
+    /// it (`0` keeps processes until node shutdown).
     pub fn new() -> Self {
         let idle = match fxg_protocol::config::process_env(
             fxg_protocol::config::env_keys::AGENT_WARM_IDLE_SECS,
