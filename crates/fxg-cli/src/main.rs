@@ -6,11 +6,11 @@
 //! reference are generated from `__usage_spec__` (design:
 //! `docs/05-cli-and-pwa-ui.md` §1).
 //!
-//! Phase 2 provides the basic subcommands (`daemon` / `ps` / `session list` /
-//! `project` / `worktree` / `auth` / `kill-all`). Phase 3 added the agent
-//! execution commands (`run` / `attach` / `session
-//! show|prompt|stop|kill|revert|fork` / `inbox` / `agents`) and the built-in
-//! TUI (`tui`).
+//! The CLI exposes the core commands (`run` / `session` / `agents login|logout` /
+//! `ps` / `logs` / `doctor` / `daemon` / `server` / `service` / `auth` /
+//! `kill-all` / `web`) plus the hidden `internal` namespace. Management features
+//! owned by the Web UI (approval inbox, projects, worktrees, the agent catalog)
+//! have no CLI subcommand.
 
 // Migration baseline: remove this crate-level allow as Phase 1 of
 // `docs/changelog/2026-11-08-type-safety-plan.md` lands.
@@ -60,6 +60,8 @@ enum Commands {
     Ps(commands::SessionListArgs),
     /// Session management (list / show / prompt / stop / kill / revert / fork)
     Session(commands::SessionArgs),
+    /// Agent authentication (login / logout)
+    Agents(commands::AgentsArgs),
     /// Show local logs (daemon log / per-agent stderr)
     Logs(commands::LogsArgs),
     /// Check the local configuration, database, logs and toolchain
