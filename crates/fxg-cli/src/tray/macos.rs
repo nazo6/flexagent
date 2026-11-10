@@ -40,15 +40,16 @@ enum UserEvent {
 /// When it returns `Some`, the caller (`main`) exits with that exit code. When
 /// it returns `None`, the normal path (tokio runtime on the main thread)
 /// handles the command.
-pub fn run_daemon_if_requested(command: &Commands) -> Option<ExitCode> {
+pub async fn run_daemon_if_requested(command: &Commands) -> Option<ExitCode> {
     let Commands::Daemon(args) = command else {
         return None;
     };
+    let env = fxg_protocol::config::process_env;
     // If the config cannot be loaded, leave it to the normal path (which reports
     // the error)
-    let global =
-        fxg_protocol::config::GlobalConfig::load(&fxg_protocol::config::process_env).ok()?;
-    if !args.tray_requested(global.node.tray) {
+    let global = fxg_protocol::config::GlobalConfig::load(&env).ok()?;
+    let tray_configured = crate::commands::load_tray_setting(&env).await;
+    if !args.tray_requested(tray_configured) {
         return None;
     }
     Some(run_daemon_with_tray(args, &global))

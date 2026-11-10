@@ -304,14 +304,16 @@ async fn prompt_attachments_are_resolved_and_validated() {
     );
     assert_eq!(input.attachments[0].size_bytes, 5);
 
+    let outside_file = dir.path().join("outside.txt");
+    std::fs::write(&outside_file, "secret").expect("write outside attachment");
     let mut outside = PromptInput::text("read this");
     outside
         .attachments
         .push(fxg_protocol::common::AttachmentMeta {
-            file_name: "passwd".to_owned(),
+            file_name: "outside.txt".to_owned(),
             mime_type: "text/plain".to_owned(),
             size_bytes: 0,
-            local_path: Some("/etc/passwd".to_owned()),
+            local_path: Some(outside_file.to_string_lossy().into_owned()),
             data_b64: None,
         });
     let err = manager
