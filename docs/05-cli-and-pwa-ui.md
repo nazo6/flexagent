@@ -17,11 +17,11 @@ Web UI をメインのインターフェースとするローカルファース�
 ### 1.1 設計原則
 
 - **用語**: ローカルプロセスは `node`、中央プロセスは `hub`。コマンド名・設定名に `daemon` / `server` / `central server` は使わない。
-- **セッション**: 作成・一覧・操作はすべて `fxg session ...`。`run` / `ps` は廃止。
+- **セッション**: 作成・一覧・操作はすべて `fxg session ...`。
 - **プロセス**: `fxg node start|stop|restart|status` と `fxg hub start|stop|restart|status`。前景起動が既定で、`--detach` でバックグラウンド起動。
 - **常駐**: `fxg service install [node|hub]` は OS ログイン時の登録のみ。unit が登録済みなら `node` / `hub` の各コマンドが systemd / launchd / Task Scheduler に委譲する。
 - **対象の指定**: フラグではなく位置引数（`fxg web hub`、`fxg logs hub`、`fxg service install hub`）。`--server` のような対象フラグは置かない。
-- **緊急停止**: 全ノード一斉の kill switch はハブの Web UI / `POST /api/v1/system/kill-switch` に一本化。CLI の `kill-all` は廃止し、ローカルでは `fxg node stop`（ノードごと停止）を使う。
+- **緊急停止**: 全ノード一斉の kill switch はハブの Web UI / `POST /api/v1/system/kill-switch` に置く。ローカルのノードは `fxg node stop` で停止する。
 
 ### 1.2 コマンド一覧
 
@@ -59,7 +59,7 @@ Web UI をメインのインターフェースとするローカルファース�
 ハブの Web UI を開く場合、ハブの `auth_token`（`~/.flexagent/auth_token`。Docker では
 `docker compose exec hub cat /data/auth_token`）を初回入力ダイアログに入力します。
 
-`fxg session diagnose` は廃止しました。状態は `fxg session show`、エージェント stderr は `fxg logs --session <id>` で確認します。
+セッションの状態は `fxg session show`、エージェント stderr は `fxg logs --session <id>` で確認します。
 
 `fxg session prompt` は停止済みセッションをネイティブ復元で自動再開します。非対応エージェントは `RESUME_REQUIRED` を返すため、`fxg session resume <id> --replay` で履歴 Replay 再開してから送信してください。
 
