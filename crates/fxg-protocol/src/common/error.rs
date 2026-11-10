@@ -24,7 +24,7 @@ pub enum ErrorCode {
     /// `Host` / `Origin` validation failure or policy violation (HTTP `403 Forbidden`.
     /// Distinct from `PTY_DISABLED`, which means remote PTY is disabled)
     Forbidden,
-    /// The target node is disconnected from the central server (returned immediately, not queued)
+    /// The target node is disconnected from the hub (returned immediately, not queued)
     NodeOffline,
     /// The permission request was already resolved (a second or later answer; treated idempotently)
     AlreadyResolved,
@@ -90,8 +90,8 @@ pub enum ErrorCode {
     IoError,
     /// A PTY operation failed
     PtyFailed,
-    /// The local or central server failed
-    ServerError,
+    /// The local or hub failed
+    HubError,
     /// The operation was cancelled
     Cancelled,
 }
@@ -132,7 +132,7 @@ impl ErrorCode {
         Self::PermissionDenied,
         Self::IoError,
         Self::PtyFailed,
-        Self::ServerError,
+        Self::HubError,
         Self::Cancelled,
     ];
 
@@ -172,7 +172,7 @@ impl ErrorCode {
             Self::PermissionDenied => "PERMISSION_DENIED",
             Self::IoError => "IO_ERROR",
             Self::PtyFailed => "PTY_FAILED",
-            Self::ServerError => "SERVER_ERROR",
+            Self::HubError => "HUB_ERROR",
             Self::Cancelled => "CANCELLED",
         }
     }
@@ -184,7 +184,7 @@ impl ErrorCode {
             Self::NodeOffline
                 | Self::Timeout
                 | Self::SyncBacklog
-                | Self::ServerError
+                | Self::HubError
                 | Self::AgentLaunchFailed
         )
     }
@@ -234,7 +234,7 @@ impl FromStr for ErrorCode {
             "PERMISSION_DENIED" => Ok(Self::PermissionDenied),
             "IO_ERROR" => Ok(Self::IoError),
             "PTY_FAILED" => Ok(Self::PtyFailed),
-            "SERVER_ERROR" => Ok(Self::ServerError),
+            "HUB_ERROR" => Ok(Self::HubError),
             "CANCELLED" => Ok(Self::Cancelled),
             other => Err(EnumParseError::new("error code", other)),
         }
@@ -432,11 +432,11 @@ pub enum DataSafety {
     Unknown,
 }
 
-/// Result of a command (correlated back from the node through the server to the requesting client).
+/// Result of a command (correlated back from the node through the hub to the requesting client).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct CommandResult {
-    /// Correlation ID attached to each `ServerToNodeMsg` command
+    /// Correlation ID attached to each `HubToNodeMsg` command
     pub command_id: CommandId,
     /// Whether it succeeded
     pub success: bool,
@@ -556,7 +556,7 @@ mod tests {
             ErrorCode::PermissionDenied,
             ErrorCode::IoError,
             ErrorCode::PtyFailed,
-            ErrorCode::ServerError,
+            ErrorCode::HubError,
             ErrorCode::Cancelled,
         ];
         for code in codes {

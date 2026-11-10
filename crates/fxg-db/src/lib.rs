@@ -1,6 +1,6 @@
 //! FlexAgent SQLite schema management, event application engine, and shared query layer (`fxg-db`)
 //!
-//! `node.db` (each node) and `server.db` (the central server) share the same schema
+//! `node.db` (each node) and `hub.db` (the hub) share the same schema
 //! generated from [a single migration set](./migrations). The only differences are the
 //! "row scope" and the "execution role" ([`DbRole`]).
 //!

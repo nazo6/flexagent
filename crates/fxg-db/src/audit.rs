@@ -1,7 +1,7 @@
 //! Audit log recording (`audit_logs`).
 //!
 //! Each store records only the operations it observed itself (not subject to sync).
-//! Operations routed through the central server are recorded in `server.db`, while
+//! Operations routed through the hub are recorded in `hub.db`, while
 //! operations made directly against the local node (CLI / `localhost:7860`) are also
 //! recorded in the executing node's `node.db`
 //! (design: `docs/01-architecture-and-sync.md` §7.5).

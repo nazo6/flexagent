@@ -227,7 +227,7 @@ impl ActiveSessionHandle for AcpSessionHandle {
     }
 
     async fn dispose(&self) -> anyhow::Result<()> {
-        // Dispose the process instead of keeping it (`fxg kill-all` / daemon shutdown)
+        // Dispose the process instead of keeping it (`the hub kill switch` / node shutdown)
         self.lease.dispose_requested.store(true, Ordering::SeqCst);
         self.shutdown().await
     }

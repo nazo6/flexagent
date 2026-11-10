@@ -1,7 +1,7 @@
 //! Embeds the FlexAgent Web UI (`ui/build`) into the binary via `rust-embed`.
 //!
 //! - Embeds the SvelteKit + `@sveltejs/adapter-static` (SPA) build output so that
-//!   `fxg server` / `fxg daemon` serve it from the same origin.
+//!   `fxg hub start` / `fxg node start` serve it from the same origin.
 //! - When the UI has not been built, `build.rs` provides a placeholder `index.html`,
 //!   so the Rust build itself always succeeds.
 

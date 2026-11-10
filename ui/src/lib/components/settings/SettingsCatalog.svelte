@@ -9,7 +9,7 @@
     NodeSettingsSnapshot,
     ProjectProfile,
     SecretSummary,
-    ServerSettingsSnapshot,
+    HubSettingsSnapshot,
   } from "#lib/generated/bindings.ts";
   import { sync } from "#lib/stores/app.svelte.ts";
   import { toast } from "svelte-sonner";
@@ -18,12 +18,12 @@
 
   let { section, query = "" }: { section: Section; query?: string } = $props();
 
-  const isServer = $derived(sync.connection.role === "central_server");
+  const isServer = $derived(sync.connection.role === "hub");
   const onlineNodes = $derived(sync.nodes.filter((node) => node.is_online));
 
   let selectedNode = $state("");
   let nodeSnapshot = $state<NodeSettingsSnapshot | null>(null);
-  let serverSnapshot = $state<ServerSettingsSnapshot | null>(null);
+  let hubSnapshot = $state<HubSettingsSnapshot | null>(null);
   let secrets = $state<SecretSummary[]>([]);
   let profiles = $state<Record<string, ProjectProfile>>({});
   let loading = $state(false);
@@ -86,7 +86,7 @@
       }
       if (section === "bootstrap" || section === "machine" || section === "server") {
         if (isServer) {
-          serverSnapshot = await sync.connection.client.serverSettings();
+          hubSnapshot = await sync.connection.client.hubSettings();
           syncServerForm();
         }
       }
@@ -125,24 +125,22 @@
   }
 
   function syncServerForm(): void {
-    if (!serverSnapshot) return;
+    if (!hubSnapshot) return;
     serverForm = {
-      vapid_subject: serverSnapshot.server.vapid_subject ?? "",
-      revision: serverSnapshot.server.revision,
+      vapid_subject: hubSnapshot.hub.vapid_subject ?? "",
+      revision: hubSnapshot.hub.revision,
     };
-    gitCredentials = Object.entries(serverSnapshot.server.git_credentials).map(
-      ([host, config]) => ({
-        host,
-        provider: config.provider,
-        username: config.username ?? "",
-        detail:
-          config.provider === "env"
-            ? (config as { token_env: string }).token_env
-            : config.provider === "secret"
-              ? (config as { secret_id: string }).secret_id
-              : "",
-      }),
-    );
+    gitCredentials = Object.entries(hubSnapshot.hub.git_credentials).map(([host, config]) => ({
+      host,
+      provider: config.provider,
+      username: config.username ?? "",
+      detail:
+        config.provider === "env"
+          ? (config as { token_env: string }).token_env
+          : config.provider === "secret"
+            ? (config as { secret_id: string }).secret_id
+            : "",
+    }));
   }
 
   async function saveNode(): Promise<void> {
@@ -168,7 +166,7 @@
 
   async function saveServer(): Promise<void> {
     try {
-      serverSnapshot = await sync.connection.client.updateServerSettings({
+      hubSnapshot = await sync.connection.client.updateHubSettings({
         vapid_subject:
           serverForm.vapid_subject.trim() === "" ? null : serverForm.vapid_subject.trim(),
         git_credentials: Object.fromEntries(
@@ -288,47 +286,47 @@
   const bootstrapRows = $derived<Row[]>(
     section === "bootstrap"
       ? isServer
-        ? serverSnapshot
+        ? hubSnapshot
           ? [
               {
                 label: "Data directory",
-                value: serverSnapshot.bootstrap.fxg_home.value,
-                source: serverSnapshot.bootstrap.fxg_home.source,
+                value: hubSnapshot.bootstrap.fxg_home.value,
+                source: hubSnapshot.bootstrap.fxg_home.source,
               },
               {
                 label: "Listen address",
-                value: serverSnapshot.bootstrap.listen_addr.value,
-                source: serverSnapshot.bootstrap.listen_addr.source,
+                value: hubSnapshot.bootstrap.listen_addr.value,
+                source: hubSnapshot.bootstrap.listen_addr.source,
               },
               {
                 label: "Allowed hosts",
-                value: serverSnapshot.bootstrap.allowed_hosts.value.join(", ") || "-",
-                source: serverSnapshot.bootstrap.allowed_hosts.source,
+                value: hubSnapshot.bootstrap.allowed_hosts.value.join(", ") || "-",
+                source: hubSnapshot.bootstrap.allowed_hosts.source,
               },
               {
                 label: "Allowed origins",
-                value: serverSnapshot.bootstrap.allowed_origins.value.join(", ") || "-",
-                source: serverSnapshot.bootstrap.allowed_origins.source,
+                value: hubSnapshot.bootstrap.allowed_origins.value.join(", ") || "-",
+                source: hubSnapshot.bootstrap.allowed_origins.source,
               },
               {
                 label: "Log level",
-                value: serverSnapshot.bootstrap.log_level.value,
-                source: serverSnapshot.bootstrap.log_level.source,
+                value: hubSnapshot.bootstrap.log_level.value,
+                source: hubSnapshot.bootstrap.log_level.source,
               },
               {
                 label: "Log file",
-                value: serverSnapshot.bootstrap.log_file.value ?? "-",
-                source: serverSnapshot.bootstrap.log_file.source,
+                value: hubSnapshot.bootstrap.log_file.value ?? "-",
+                source: hubSnapshot.bootstrap.log_file.source,
               },
               {
                 label: "Log format",
-                value: serverSnapshot.bootstrap.log_format.value,
-                source: serverSnapshot.bootstrap.log_format.source,
+                value: hubSnapshot.bootstrap.log_format.value,
+                source: hubSnapshot.bootstrap.log_format.source,
               },
               {
                 label: "No color",
-                value: String(serverSnapshot.bootstrap.log_no_color.value),
-                source: serverSnapshot.bootstrap.log_no_color.source,
+                value: String(hubSnapshot.bootstrap.log_no_color.value),
+                source: hubSnapshot.bootstrap.log_no_color.source,
               },
             ]
           : []
@@ -350,9 +348,9 @@
                 source: nodeSnapshot.bootstrap.listen_addr.source,
               },
               {
-                label: "Central server",
-                value: nodeSnapshot.bootstrap.central_server_url.value ?? "-",
-                source: nodeSnapshot.bootstrap.central_server_url.source,
+                label: "Hub",
+                value: nodeSnapshot.bootstrap.hub_url.value ?? "-",
+                source: nodeSnapshot.bootstrap.hub_url.source,
               },
               {
                 label: "Log level",
@@ -489,15 +487,15 @@
       <Card class="gap-2 p-4">
         <h2 class="font-medium">Server settings</h2>
         <p class="text-muted-foreground text-[13px]">
-          Server-owned settings live in the hub's <code>server.db</code>. Connect to the central
-          server to edit them.
+          Server-owned settings live in the hub's <code>hub.db</code>. Connect to the central server
+          to edit them.
         </p>
       </Card>
     {:else}
       <Card class="gap-3 p-4">
         <h2 class="font-medium">Server</h2>
         <p class="text-muted-foreground text-[13px]">
-          Owned by <code>server.db</code>: Web Push contact and Git credential providers.
+          Owned by <code>hub.db</code>: Web Push contact and Git credential providers.
         </p>
         <div class="grid gap-1.5">
           <Label for="vapid-subject">VAPID subject</Label>
@@ -567,7 +565,7 @@
           Setup commands and environment variables injected into temporary VMs (<code
             >project_profiles</code
           >
-          in <code>server.db</code>).
+          in <code>hub.db</code>).
         </p>
         {#each sync.projects as project (project.project_id)}
           {@const profile = profiles[project.project_id]}

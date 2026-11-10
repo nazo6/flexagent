@@ -144,7 +144,7 @@ impl<P: WarmProcess> WarmPool<P> {
         });
     }
 
-    /// Disposes all idle processes (`fxg kill-all` / daemon shutdown).
+    /// Disposes all idle processes (`the hub kill switch` / node shutdown).
     ///
     /// The return value is the number of processes disposed (waited on).
     pub(crate) async fn shutdown_idle(&self) -> usize {

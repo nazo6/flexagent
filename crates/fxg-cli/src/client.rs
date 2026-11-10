@@ -1,13 +1,12 @@
-//! Daemon IPC client and CLI output helpers.
+//! Node IPC client and CLI output helpers.
 //!
-//! The `fxg` CLI drives the node through local IPC (`fxg daemon`)
-//! (design: `docs/03-protocol-and-api.md` §4). When the daemon is not running,
-//! `DaemonClient::connect` starts it in the background once (unless
-//! `FXG_NO_AUTO_DAEMON=1` is set).
+//! The `fxg` CLI drives the node through local IPC (`fxg node start`)
+//! (design: `docs/03-protocol-and-api.md` §4). When the node is not running,
+//! `NodeClient::connect` starts it in the background once (unless
+//! `FXG_NO_AUTO_NODE=1` is set).
 
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, anyhow, bail};
@@ -22,41 +21,41 @@ use fxg_protocol::ipc::{
     IPC_PROTOCOL_VERSION, IpcOutcome, IpcRequest, IpcRequestKind, IpcResultKind, IpcServerMessage,
     LocalRequest, LocalResult, SessionDetail,
 };
-use fxg_protocol::node_server::{NodeRpcRequest, NodeRpcResponse};
+use fxg_protocol::node_hub::{NodeRpcRequest, NodeRpcResponse};
 
 /// How long to wait for a freshly spawned daemon to accept IPC connections.
-const DAEMON_START_TIMEOUT: Duration = Duration::from_secs(15);
+const NODE_START_TIMEOUT: Duration = Duration::from_secs(15);
 /// A startup lock older than this is considered stale (crashed starter).
-const DAEMON_START_LOCK_STALE: Duration = Duration::from_secs(30);
+const NODE_START_LOCK_STALE: Duration = Duration::from_secs(30);
 
-/// IPC client for the daemon (`fxg daemon`).
-pub struct DaemonClient {
+/// IPC client for the node (`fxg node start`).
+pub struct NodeClient {
     client: IpcClient,
     request_seq: u64,
 }
 
-/// Whether automatic daemon startup is enabled (`FXG_NO_AUTO_DAEMON=1` disables it).
-fn auto_daemon_enabled() -> bool {
+/// Whether automatic daemon startup is enabled (`FXG_NO_AUTO_NODE=1` disables it).
+fn auto_node_enabled() -> bool {
     !matches!(
-        process_env(env_keys::NO_AUTO_DAEMON)
+        process_env(env_keys::NO_AUTO_NODE)
             .map(|value| value.trim().to_ascii_lowercase())
             .as_deref(),
         Some("1" | "true" | "yes" | "on")
     )
 }
 
-/// Starts `fxg daemon` in the background (once) and waits for its IPC endpoint.
+/// Starts `fxg node start` in the background (once) and waits for its IPC endpoint.
 ///
-/// Returns the daemon log path so the caller can include it in an error message.
-async fn ensure_daemon_started(endpoint: &str) -> Result<PathBuf> {
+/// Returns the node log path so the caller can include it in an error message.
+async fn ensure_node_started(endpoint: &str) -> Result<PathBuf> {
     let home = fxg_home(&process_env);
-    let log_path = home.join("logs").join("daemon.log");
+    let log_path = home.join("logs").join("node.log");
     if let Some(parent) = log_path.parent() {
         std::fs::create_dir_all(parent)
             .with_context(|| format!("failed to create {}", parent.display()))?;
     }
 
-    let lock_path = home.join("daemon.start.lock");
+    let lock_path = home.join("node.start.lock");
     for attempt in 0..2 {
         match std::fs::OpenOptions::new()
             .write(true)
@@ -66,11 +65,11 @@ async fn ensure_daemon_started(endpoint: &str) -> Result<PathBuf> {
             Ok(mut lock) => {
                 fxg_protocol::discard_with!(
                     writeln!(lock, "{}", std::process::id()),
-                    "best-effort pid note in the daemon startup lock"
+                    "best-effort pid note in the node startup lock"
                 );
-                let spawn_result = spawn_daemon(&log_path);
+                let spawn_result = crate::spawn::spawn_background(&["node", "start"], "node.log");
                 let ready = match &spawn_result {
-                    Ok(()) => wait_for_ipc(endpoint, DAEMON_START_TIMEOUT).await,
+                    Ok(_) => wait_for_ipc(endpoint, NODE_START_TIMEOUT).await,
                     Err(_) => false,
                 };
                 remove_start_lock(&lock_path);
@@ -79,13 +78,13 @@ async fn ensure_daemon_started(endpoint: &str) -> Result<PathBuf> {
                     tracing::debug!(
                         endpoint,
                         log = %log_path.display(),
-                        "daemon did not become ready before the startup timeout"
+                        "node did not become ready before the startup timeout"
                     );
                 }
                 return Ok(log_path);
             }
             Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {
-                // Another CLI is already starting the daemon; wait for it.
+                // Another CLI is already starting the node; wait for it.
                 if wait_for_ipc(endpoint, Duration::from_secs(5)).await {
                     return Ok(log_path);
                 }
@@ -102,51 +101,6 @@ async fn ensure_daemon_started(endpoint: &str) -> Result<PathBuf> {
         }
     }
     Ok(log_path)
-}
-
-/// Spawns `fxg daemon` detached with its stdio redirected to the daemon log.
-fn spawn_daemon(log_path: &Path) -> Result<()> {
-    let exe = std::env::current_exe().context("failed to resolve the fxg executable")?;
-    let log = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(log_path)
-        .with_context(|| format!("failed to open {}", log_path.display()))?;
-    let stderr = log
-        .try_clone()
-        .with_context(|| format!("failed to clone {}", log_path.display()))?;
-
-    let mut command = std::process::Command::new(exe);
-    command
-        .arg("daemon")
-        .stdin(Stdio::null())
-        .stdout(Stdio::from(log))
-        .stderr(Stdio::from(stderr));
-
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt as _;
-        // New session so the daemon survives terminal close (SIGHUP).
-        unsafe {
-            command.pre_exec(|| {
-                if libc::setsid() == -1 {
-                    return Err(std::io::Error::last_os_error());
-                }
-                Ok(())
-            });
-        }
-    }
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt as _;
-        use windows_sys::Win32::System::Threading::{CREATE_NO_WINDOW, DETACHED_PROCESS};
-        command.creation_flags(CREATE_NO_WINDOW | DETACHED_PROCESS);
-    }
-
-    let child = command.spawn().context("failed to spawn `fxg daemon`")?;
-    // Detached: the daemon is reparented (Unix) / detached (Windows).
-    drop(child);
-    Ok(())
 }
 
 /// Waits until the IPC endpoint accepts a connection.
@@ -173,7 +127,7 @@ fn lock_is_stale(path: &Path) -> bool {
         return false;
     };
     match modified.elapsed() {
-        Ok(age) => age > DAEMON_START_LOCK_STALE,
+        Ok(age) => age > NODE_START_LOCK_STALE,
         Err(err) => {
             tracing::debug!(path = %path.display(), "startup lock mtime is in the future: {err}");
             false
@@ -183,11 +137,11 @@ fn lock_is_stale(path: &Path) -> bool {
 
 /// Removes the startup lock (best effort).
 fn remove_start_lock(path: &Path) {
-    fxg_protocol::discard_with!(std::fs::remove_file(path), "remove the daemon startup lock");
+    fxg_protocol::discard_with!(std::fs::remove_file(path), "remove the node startup lock");
 }
 
-impl DaemonClient {
-    /// Connect to the local IPC endpoint, starting `fxg daemon` if needed.
+impl NodeClient {
+    /// Connect to the local IPC endpoint, starting `fxg node start` if needed.
     pub async fn connect() -> Result<Self> {
         let endpoint = fxg_node::ipc_endpoint(&process_env);
         match IpcClient::connect(&endpoint).await {
@@ -196,26 +150,38 @@ impl DaemonClient {
                 request_seq: 0,
             }),
             Err(connect_error) => {
-                if !auto_daemon_enabled() {
+                if !auto_node_enabled() {
                     return Err(connect_error).with_context(|| {
                         format!(
-                            "cannot connect to the daemon ({endpoint}); start `fxg daemon` first"
+                            "cannot connect to the node ({endpoint}); start `fxg node start` first"
                         )
                     });
                 }
-                let log_path = ensure_daemon_started(&endpoint).await?;
+                let log_path = ensure_node_started(&endpoint).await?;
                 match IpcClient::connect(&endpoint).await {
                     Ok(client) => Ok(Self {
                         client,
                         request_seq: 0,
                     }),
                     Err(err) => Err(anyhow!(
-                        "cannot connect to the daemon ({endpoint}) after auto-start: {err}; see {} (set FXG_NO_AUTO_DAEMON=1 to disable auto-start)",
+                        "cannot connect to the node ({endpoint}) after auto-start: {err}; see {} (set FXG_NO_AUTO_NODE=1 to disable auto-start)",
                         log_path.display()
                     )),
                 }
             }
         }
+    }
+
+    /// Connects to a running node without auto-starting it.
+    pub async fn connect_existing() -> Result<Self> {
+        let endpoint = fxg_node::ipc_endpoint(&process_env);
+        let client = IpcClient::connect(&endpoint)
+            .await
+            .with_context(|| format!("node is not running ({endpoint})"))?;
+        Ok(Self {
+            client,
+            request_seq: 0,
+        })
     }
 
     fn command_id(&mut self) -> CommandId {
@@ -275,7 +241,7 @@ impl DaemonClient {
         }
     }
 
-    /// Create or reuse a worktree through daemon IPC (`fxg run -w` / `fxg session fork -w`).
+    /// Create or reuse a worktree through node IPC (`fxg session new -w` / `fxg session fork -w`).
     pub async fn add_worktree(
         &mut self,
         cwd: &Path,
@@ -303,7 +269,7 @@ impl DaemonClient {
         }
     }
 
-    /// `fxg ps` / `fxg session list`
+    /// `fxg session list` / `fxg session list`
     pub async fn list_sessions(
         &mut self,
         include_stopped: bool,
@@ -364,20 +330,29 @@ impl DaemonClient {
         }
     }
 
-    /// `fxg kill-all`
-    pub async fn kill_all(&mut self) -> Result<(Vec<String>, Vec<String>)> {
+    /// `fxg node stop` (graceful local node shutdown).
+    pub async fn shutdown(&mut self) -> Result<()> {
         let command_id = self.command_id();
-        let result = self.request(LocalRequest::KillAll { command_id }).await?;
+        let result = self.request(LocalRequest::Shutdown { command_id }).await?;
         match result {
-            LocalResult::KillAll {
-                killed_sessions,
-                killed_ptys,
-            } => Ok((killed_sessions, killed_ptys)),
+            LocalResult::Ack { .. } => Ok(()),
             other => bail!("unexpected ipc result: {other:?}"),
         }
     }
 
-    /// `fxg auth token` / `fxg auth rotate-token`
+    /// `fxg node status`
+    pub async fn local_status(&mut self) -> Result<fxg_protocol::ipc::LocalStatus> {
+        let command_id = self.command_id();
+        let result = self
+            .request(LocalRequest::GetLocalStatus { command_id })
+            .await?;
+        match result {
+            LocalResult::LocalStatus { status } => Ok(status),
+            other => bail!("unexpected ipc result: {other:?}"),
+        }
+    }
+
+    /// `fxg node token show` / `fxg node token rotate`
     pub async fn auth_token(&mut self, rotate: bool) -> Result<String> {
         let command_id = self.command_id();
         let result = self
@@ -414,7 +389,7 @@ impl DaemonClient {
         }
     }
 
-    /// Start a new session for `fxg run <agent>`.
+    /// Start a new session for `fxg session new <agent>`.
     pub async fn ensure_session(
         &mut self,
         cwd: &Path,
@@ -474,7 +449,7 @@ impl DaemonClient {
         }
     }
 
-    /// `fxg diagnostics export` (redacted support bundle).
+    /// `fxg support bundle` (redacted support bundle).
     pub async fn support_bundle(&mut self) -> Result<SupportBundle> {
         let command_id = self.command_id();
         let result = self
@@ -486,7 +461,7 @@ impl DaemonClient {
         }
     }
 
-    /// `fxg diagnostics incidents` (persisted incidents).
+    /// `fxg support incidents` (persisted incidents).
     pub async fn incidents(
         &mut self,
         limit: u32,

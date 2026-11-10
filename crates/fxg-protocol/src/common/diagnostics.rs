@@ -1,6 +1,6 @@
 //! Diagnostics types: recorded incidents, component health and drop counters.
 //!
-//! These types are shared by the local node and the central server so the Web UI
+//! These types are shared by the local node and the hub so the Web UI
 //! and CLI can inspect the same diagnostics regardless of the connection target
 //! (design: `docs/03-protocol-and-api.md` §3.1).
 
@@ -52,7 +52,7 @@ crate::open_string_enum! {
 }
 
 crate::open_string_enum! {
-    /// Health component of a node or the central server.
+    /// Health component of a node or the hub.
     pub enum ComponentName {
         /// Database connectivity
         Db => "db",
@@ -62,7 +62,7 @@ crate::open_string_enum! {
         Ipc => "ipc",
         /// HTTP / WebSocket listener
         Http => "http",
-        /// Central server synchronization
+        /// Hub synchronization
         Sync => "sync",
         /// ACP registry / agent catalog
         Registry => "registry",
@@ -80,7 +80,7 @@ crate::open_string_enum! {
         Disk => "disk",
         /// Web Push delivery
         Push => "push",
-        /// Central server node hub
+        /// Hub node hub
         Hub => "hub",
     }
 }

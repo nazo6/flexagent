@@ -1,7 +1,7 @@
 //! Diagnostic incidents (`incidents` table).
 //!
 //! Incidents are a bounded, grouped history of failures and degradations. Both
-//! `node.db` and `server.db` record the errors they observed themselves; the
+//! `node.db` and `hub.db` record the errors they observed themselves; the
 //! table is not part of session sync (design:
 //! `docs/changelog/2026-11-08-error-handling-and-recovery-plan.md` Phase 3).
 //!

@@ -48,7 +48,7 @@ pub struct SessionEventEnvelope {
 /// A batch of events with a cursor (shared by Client WS delivery and the history API).
 ///
 /// `cursor` is the ingestion order of the **source store** (`node.db` /
-/// `server.db`). Clients persist the `cursor` of the last batch they received and
+/// `hub.db`). Clients persist the `cursor` of the last batch they received and
 /// pass it as `Subscribe { since_cursor }` when reconnecting. A `cursor` is only
 /// meaningful for the store it came from.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
@@ -187,7 +187,7 @@ pub enum UnifiedEventPayload {
     },
     /// The outcome of a permission request.
     ///
-    /// `fxg daemon` emits this event at the same time as it answers the agent, so
+    /// `fxg node start` emits this event at the same time as it answers the agent, so
     /// that approval dialogs in other clients close automatically. Second and
     /// later answers are dropped per `request_id` and `ALREADY_RESOLVED` is returned.
     PermissionResolved {

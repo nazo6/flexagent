@@ -14,7 +14,7 @@
   let logs = $state<AuditLogEntry[]>([]);
   let loading = $state(false);
 
-  const roleLabel = $derived(connection.role === "central_server" ? "server.db" : "node.db");
+  const roleLabel = $derived(connection.role === "hub" ? "hub.db" : "node.db");
 
   async function load() {
     loading = true;

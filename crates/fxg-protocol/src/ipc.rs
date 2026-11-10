@@ -1,12 +1,12 @@
-//! Local IPC messages between the CLI (`fxg`) and the local daemon (`fxg daemon`).
+//! Local IPC messages between the CLI (`fxg`) and the local daemon (`fxg node start`).
 //!
-//! - **Transport**: Named Pipe on Windows (`\\.\pipe\fxg-daemon-<username>`), and a
+//! - **Transport**: Named Pipe on Windows (`\\.\pipe\fxg-node-<username>`), and a
 //!   Unix Domain Socket on Linux / macOS / WSL
-//!   (`$XDG_RUNTIME_DIR/fxg/daemon.sock` or `/tmp/fxg-<uid>/daemon.sock`)
+//!   (`$XDG_RUNTIME_DIR/fxg/node.sock` or `/tmp/fxg-<uid>/node.sock`)
 //! - **Framing**: length-prefixed JSON
 //!   (a little-endian length header of [`IPC_LENGTH_PREFIX_BYTES`] bytes + JSON)
 //!
-//! This is the internal protocol of the server implementation and is not exposed
+//! This is the internal protocol of the hub implementation and is not exposed
 //! to the UI, so it is excluded from `specta` export
 //! (design: `docs/03-protocol-and-api.md` §4).
 
@@ -17,7 +17,7 @@ use crate::common::{
     SessionControlAction, SessionSummary, StreamDeltaPayload,
 };
 use crate::events::SessionEventEnvelope;
-use crate::node_server::{NodeRpcRequest, NodeRpcResponse};
+use crate::node_hub::{NodeRpcRequest, NodeRpcResponse};
 use crate::{CommandId, ProjectId, SessionId};
 
 /// Length of the length header of length-prefixed JSON (little-endian u32).
@@ -34,8 +34,8 @@ pub const IPC_PROTOCOL_VERSION: u32 = 1;
 pub struct LocalStatus {
     /// Sessions running locally or recently active
     pub sessions: Vec<SessionSummary>,
-    /// WebSocket connection state to the central server
-    pub central_connected: bool,
+    /// WebSocket connection state to the hub
+    pub hub_connected: bool,
     /// Number of outbox events not yet sent
     pub unsynced_event_count: u64,
     /// Last synchronization time (Unix epoch ms)
@@ -57,7 +57,7 @@ pub struct IpcRequest {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum IpcRequestKind {
-    /// Shared node operation (same type as Server -> Node).
+    /// Shared node operation (same type as Hub -> Node).
     Node {
         /// Operation to execute
         request: NodeRpcRequest,
@@ -105,7 +105,7 @@ pub enum IpcResultKind {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "method", rename_all = "snake_case")]
 pub enum LocalRequest {
-    /// Called by `fxg run <agent>`; the daemon starts the session.
+    /// Called by `fxg session new <agent>`; the node starts the session.
     EnsureSession {
         /// Correlation ID
         command_id: CommandId,
@@ -131,7 +131,7 @@ pub enum LocalRequest {
         /// Optional title
         title: Option<String>,
     },
-    /// Returns the running sessions, the central server connection state and the
+    /// Returns the running sessions, the hub connection state and the
     /// number of unsent outbox events.
     GetLocalStatus {
         /// Correlation ID
@@ -142,12 +142,12 @@ pub enum LocalRequest {
         /// Correlation ID
         command_id: CommandId,
     },
-    /// Returns a redacted support bundle (`fxg diagnostics export`).
+    /// Returns a redacted support bundle (`fxg support bundle`).
     SupportBundle {
         /// Correlation ID
         command_id: CommandId,
     },
-    /// Returns recent persisted incidents (`fxg diagnostics incidents`).
+    /// Returns recent persisted incidents (`fxg support incidents`).
     Incidents {
         /// Correlation ID
         command_id: CommandId,
@@ -197,7 +197,7 @@ pub enum LocalRequest {
         /// Number of events to show from the end
         recent_events: u32,
     },
-    /// Creates a worktree (`fxg run -w` / `fxg session fork -w`).
+    /// Creates a worktree (`fxg session new -w` / `fxg session fork -w`).
     WorktreeAdd {
         /// Correlation ID
         command_id: CommandId,
@@ -210,7 +210,7 @@ pub enum LocalRequest {
         /// Base branch (defaults to the current HEAD)
         base_branch: Option<String>,
     },
-    /// Lists sessions (`fxg ps` / `fxg session list`).
+    /// Lists sessions (`fxg session list`).
     ListSessions {
         /// Correlation ID
         command_id: CommandId,
@@ -219,12 +219,12 @@ pub enum LocalRequest {
         /// Whether to include archived sessions (`--archived`)
         include_archived: bool,
     },
-    /// Forcefully terminates every session, process tree and PTY on the local node (`fxg kill-all`).
-    KillAll {
+    /// Gracefully shuts down the local node (`fxg node stop`).
+    Shutdown {
         /// Correlation ID
         command_id: CommandId,
     },
-    /// Fetches or regenerates the authentication token (`fxg auth token` / `fxg auth rotate-token`).
+    /// Fetches or regenerates the authentication token (`fxg node token show` / `fxg node token rotate`).
     AuthToken {
         /// Correlation ID
         command_id: CommandId,
@@ -233,8 +233,8 @@ pub enum LocalRequest {
     },
     /// Resolves git credentials (`fxg internal git-askpass`, used as a `GIT_ASKPASS` helper).
     ///
-    /// Git operations on an ephemeral VM (`fxg daemon --stdio`) are relayed through
-    /// this method from the daemon to the central server (`GitCredentialRequest`),
+    /// Git operations on an ephemeral VM (`fxg internal stdio`) are relayed through
+    /// this method from the node to the hub (`GitCredentialRequest`),
     /// which authenticates without leaving the token on the VM disk
     /// (design: docs/01 §6.4).
     GitCredential {
@@ -266,7 +266,7 @@ impl LocalRequest {
             | Self::SessionShow { command_id, .. }
             | Self::WorktreeAdd { command_id, .. }
             | Self::ListSessions { command_id, .. }
-            | Self::KillAll { command_id }
+            | Self::Shutdown { command_id }
             | Self::AuthToken { command_id, .. }
             | Self::GitCredential { command_id, .. }
             | Self::Ping { command_id } => command_id,
@@ -334,13 +334,6 @@ pub enum LocalResult {
     Sessions {
         /// Sessions (newest update first)
         sessions: Vec<SessionSummary>,
-    },
-    /// Result of `KillAll`
-    KillAll {
-        /// Sessions that were terminated
-        killed_sessions: Vec<String>,
-        /// PTY IDs that were terminated
-        killed_ptys: Vec<String>,
     },
     /// Result of `AuthToken`
     AuthToken {

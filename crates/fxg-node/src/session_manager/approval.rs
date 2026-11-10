@@ -27,7 +27,7 @@ impl SessionManager {
         handle
             .respond_permission(request_id.to_owned(), selected_option_id.to_owned())
             .await
-            .map_err(|err| NodeError::Server(format!("failed to respond: {err:#}")))?;
+            .map_err(|err| NodeError::Hub(format!("failed to respond: {err:#}")))?;
 
         self.inner
             .bus
@@ -79,7 +79,7 @@ impl SessionManager {
                     .pending_elicitations
                     .insert(elicitation_id.to_owned(), summary);
             }
-            return Err(NodeError::Server(format!("failed to respond: {err:#}")));
+            return Err(NodeError::Hub(format!("failed to respond: {err:#}")));
         }
 
         self.inner

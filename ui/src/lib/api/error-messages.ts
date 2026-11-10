@@ -72,8 +72,8 @@ export function errorCodeMessage(
       return m.error_io_error();
     case "PTY_FAILED":
       return m.error_pty_failed();
-    case "SERVER_ERROR":
-      return m.error_server_error();
+    case "HUB_ERROR":
+      return m.error_hub_error();
     case "CANCELLED":
       return m.error_cancelled();
     case "REVISION_MISMATCH":

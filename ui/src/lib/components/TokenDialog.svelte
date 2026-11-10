@@ -43,8 +43,8 @@
         {m.token_dialog_title()}
       </Dialog.Title>
       <Dialog.Description>
-        {#if connection.role === "central_server"}
-          {m.token_dialog_description_central_server()}
+        {#if connection.role === "hub"}
+          {m.token_dialog_description_hub()}
         {:else}
           {m.token_dialog_description_local_node()}
         {/if}
@@ -60,23 +60,23 @@
           id="fxg-token"
           type="password"
           autocomplete="off"
-          placeholder={connection.role === "central_server"
-            ? m.token_placeholder_server()
+          placeholder={connection.role === "hub"
+            ? m.token_placeholder_hub()
             : m.token_placeholder_node()}
           bind:value={token}
           disabled={busy}
         />
         <p class="text-muted-foreground text-[13px]">
-          {#if connection.role === "central_server"}
-            {m.token_help_server_prefix()} <code>auth_token</code>
-            {m.token_help_server_mid()}
-            <code>~/.flexagent/auth_token</code>{m.token_help_server_docker()}
+          {#if connection.role === "hub"}
+            {m.token_help_hub_prefix()} <code>auth_token</code>
+            {m.token_help_hub_mid()}
+            <code>~/.flexagent/auth_token</code>{m.token_help_hub_docker()}
             <code>docker compose exec server cat /data/auth_token</code>.
           {:else}
             {m.token_help_node_prefix()} <code>~/.flexagent/auth_token</code>
-            {m.token_help_node_mid()} <code>fxg auth token</code>
+            {m.token_help_node_mid()} <code>fxg node token show</code>
             {m.token_help_node_docker()}
-            <code>docker compose exec node fxg auth token</code>).
+            <code>docker compose exec node fxg node token show</code>).
           {/if}
         </p>
       </div>

@@ -131,7 +131,7 @@ pub struct NodeBootstrapView {
     /// Local HTTP/WS bind address
     pub listen_addr: SourcedValue<String>,
     /// Node Hub WebSocket URL (standalone when `None`)
-    pub central_server_url: SourcedValue<Option<String>>,
+    pub hub_url: SourcedValue<Option<String>>,
     /// Log level
     pub log_level: SourcedValue<String>,
     /// Log file destination (empty when disabled)
@@ -142,10 +142,10 @@ pub struct NodeBootstrapView {
     pub log_no_color: SourcedValue<bool>,
 }
 
-/// Read-only bootstrap view of the central server (`config.toml` / env / CLI).
+/// Read-only bootstrap view of the hub (`config.toml` / env / CLI).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
-pub struct ServerBootstrapView {
+pub struct HubBootstrapView {
     /// Data directory (`FXG_HOME`)
     pub fxg_home: SourcedValue<String>,
     /// HTTP/WS bind address
@@ -170,7 +170,7 @@ pub struct ServerBootstrapView {
 pub struct NodeSettings {
     /// Display name in the UI
     pub name: String,
-    /// Whether remote (through the central server) Web PTY sessions are allowed
+    /// Whether remote (through the hub) Web PTY sessions are allowed
     pub allow_remote_pty: bool,
     /// Directories scanned by `fxg project scan` when no directory is given
     pub project_scan_dirs: Vec<String>,
@@ -295,10 +295,10 @@ pub struct NodeSettingsSnapshot {
     pub agents: AgentSettings,
 }
 
-/// Server-owned settings stored in `server.db` (`server_settings`).
+/// Server-owned settings stored in `hub.db` (`hub_settings`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
-pub struct ServerSettings {
+pub struct HubSettings {
     /// Web Push contact claim (`mailto:` / `https:`)
     pub vapid_subject: Option<String>,
     /// Per-host Git credential provider
@@ -309,10 +309,10 @@ pub struct ServerSettings {
     pub updated_at: i64,
 }
 
-/// `PATCH /api/v1/settings/server` request.
+/// `PATCH /api/v1/settings/hub` request.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
-pub struct UpdateServerSettingsRequest {
+pub struct UpdateHubSettingsRequest {
     /// Web Push contact claim
     pub vapid_subject: Option<String>,
     /// Per-host Git credential provider
@@ -321,14 +321,14 @@ pub struct UpdateServerSettingsRequest {
     pub expected_revision: u64,
 }
 
-/// Complete settings snapshot of the central server.
+/// Complete settings snapshot of the hub.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
-pub struct ServerSettingsSnapshot {
+pub struct HubSettingsSnapshot {
     /// Read-only process bootstrap values
-    pub bootstrap: ServerBootstrapView,
-    /// Server-owned settings
-    pub server: ServerSettings,
+    pub bootstrap: HubBootstrapView,
+    /// Hub-owned settings
+    pub hub: HubSettings,
 }
 
 /// How a temporary VM obtains Git credentials.
@@ -391,7 +391,7 @@ pub struct CustomAgentConfig {
     pub env_secrets: BTreeMap<String, SecretId>,
 }
 
-/// Definition of an ephemeral VM / sandbox provisioner (`provisioners` in `server.db`).
+/// Definition of an ephemeral VM / sandbox provisioner (`provisioners` in `hub.db`).
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, Type)]
 #[specta(collect)]
 #[serde(default)]
@@ -474,7 +474,7 @@ impl ProjectIdentity {
     }
 }
 
-/// Per-project bootstrap profile for ephemeral VMs (`project_profiles` in `server.db`).
+/// Per-project bootstrap profile for ephemeral VMs (`project_profiles` in `hub.db`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct ProjectProfile {
@@ -590,14 +590,14 @@ mod tests {
 
     #[test]
     fn sourced_option_attributes_layers() {
-        let env = env_from(&[(env_keys::CENTRAL_SERVER_URL, "ws://env")]);
+        let env = env_from(&[(env_keys::HUB_URL, "ws://env")]);
         let value = sourced_option(
             &env,
             Some("ws://env".to_owned()),
-            env_keys::CENTRAL_SERVER_URL,
+            env_keys::HUB_URL,
             Some("ws://file".to_owned()),
-            "node.central_server_url",
-            Some("--server-url"),
+            "node.hub_url",
+            Some("--hub-url"),
         );
         assert_eq!(value.source, ConfigSource::Env);
 
@@ -605,31 +605,31 @@ mod tests {
         let value = sourced_option(
             &env,
             Some("ws://file".to_owned()),
-            env_keys::CENTRAL_SERVER_URL,
+            env_keys::HUB_URL,
             Some("ws://file".to_owned()),
-            "node.central_server_url",
-            Some("--server-url"),
+            "node.hub_url",
+            Some("--hub-url"),
         );
         assert_eq!(value.source, ConfigSource::ConfigFile);
 
         let value = sourced_option(
             &env,
             Some("ws://cli".to_owned()),
-            env_keys::CENTRAL_SERVER_URL,
+            env_keys::HUB_URL,
             Some("ws://file".to_owned()),
-            "node.central_server_url",
-            Some("--server-url"),
+            "node.hub_url",
+            Some("--hub-url"),
         );
         assert_eq!(value.source, ConfigSource::Cli);
-        assert_eq!(value.source_detail.as_deref(), Some("--server-url"));
+        assert_eq!(value.source_detail.as_deref(), Some("--hub-url"));
 
         let value = sourced_option(
             &env,
             None,
-            env_keys::CENTRAL_SERVER_URL,
+            env_keys::HUB_URL,
             Some("ws://file".to_owned()),
-            "node.central_server_url",
-            Some("--server-url"),
+            "node.hub_url",
+            Some("--hub-url"),
         );
         assert_eq!(value.source, ConfigSource::Default);
         assert_eq!(value.value, None);

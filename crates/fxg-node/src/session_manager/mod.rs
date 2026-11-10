@@ -84,9 +84,9 @@ pub struct EnsureSessionOutcome {
 
 /// Start request with an explicit session ID ([`SessionManager::start_session`]).
 ///
-/// Used by the central server (`ServerToNodeMsg::StartSession`) and the local
+/// Used by the hub (`HubToNodeMsg::StartSession`) and the local
 /// REST API (`POST /api/v1/sessions`). The session ID is assigned by the caller
-/// (central server) so that all clients can correlate it.
+/// (hub) so that all clients can correlate it.
 #[derive(Debug, Clone)]
 pub struct StartSessionParams<'a> {
     /// Correlation ID (idempotent deduplication of duplicate submissions)
@@ -524,7 +524,7 @@ impl SessionManager {
         list
     }
 
-    /// Terminates the agent processes of all sessions (`fxg kill-all`).
+    /// Terminates the agent processes of all sessions (`the hub kill switch`).
     pub async fn shutdown_all(&self) -> Vec<String> {
         let handles: Vec<(String, Arc<dyn ActiveSessionHandle>)> = {
             let mut sessions = self.inner.sessions.lock().expect("sessions poisoned");

@@ -230,7 +230,7 @@ action: SessionControlAction } |
 /**
  *  Correlation ID of a command.
  * 
- *  Attached to `ServerToNodeMsg` / IPC / client WS requests and echoed back in
+ *  Attached to `HubToNodeMsg` / IPC / client WS requests and echoed back in
  *  `CommandResult`. It is not an entity ID and is not persisted.
  */
 export type CommandId = string;
@@ -245,9 +245,9 @@ export type CommandInfo = {
 	input_hint: string | null,
 };
 
-/**  Result of a command (correlated back from the node through the server to the requesting client). */
+/**  Result of a command (correlated back from the node through the hub to the requesting client). */
 export type CommandResult = {
-	/**  Correlation ID attached to each `ServerToNodeMsg` command */
+	/**  Correlation ID attached to each `HubToNodeMsg` command */
 	command_id: CommandId,
 	/**  Whether it succeeded */
 	success: boolean,
@@ -326,9 +326,9 @@ RawJson;
 
 /**  Kind of endpoint (`GET /api/v1/system/info`). */
 export type ConnectionRole = 
-/**  Connected to the central server (`fxg server`) */
-"central_server" | 
-/**  Connected to the node's local web server (`fxg daemon`) */
+/**  Connected to the hub (`fxg hub start`) */
+"hub" | 
+/**  Connected to the node's local web server (`fxg node start`) */
 "local_node";
 
 /**
@@ -345,7 +345,7 @@ export type CreateSessionRequest = {
 	project_id: ProjectId,
 	/**  ID of the resident node to run on (mutually exclusive with `provisioner`) */
 	node_id: NodeId | null,
-	/**  Ephemeral VM provisioner name (mutually exclusive with `node_id`; requires the central server) */
+	/**  Ephemeral VM provisioner name (mutually exclusive with `node_id`; requires the hub) */
 	provisioner: string | null,
 	/**  Working directory (an existing worktree or the repository root) */
 	local_path: string | null,
@@ -432,7 +432,7 @@ export type DatabaseStats = {
 	events: number,
 	/**  Number of incidents */
 	incidents: number,
-	/**  Events not yet acknowledged by the central server (nodes only) */
+	/**  Events not yet acknowledged by the hub (nodes only) */
 	pending_outbox_events: number,
 };
 
@@ -445,7 +445,7 @@ export type DiagnosticsResponse = {
 	/**  Per-agent stderr tails */
 	agents: AgentDiagnostics[],
 	/**  Daemon log path (local node only) */
-	daemon_log: string | null,
+	node_log: string | null,
 	/**  Component health and delivery counters */
 	health: SystemStatus,
 	/**  Recent persisted incidents (newest first) */
@@ -608,7 +608,7 @@ export type ErrorCode =
  *  Distinct from `PTY_DISABLED`, which means remote PTY is disabled)
  */
 "FORBIDDEN" | 
-/**  The target node is disconnected from the central server (returned immediately, not queued) */
+/**  The target node is disconnected from the hub (returned immediately, not queued) */
 "NODE_OFFLINE" | 
 /**  The permission request was already resolved (a second or later answer; treated idempotently) */
 "ALREADY_RESOLVED" | 
@@ -680,8 +680,8 @@ export type ErrorCode =
 "IO_ERROR" | 
 /**  A PTY operation failed */
 "PTY_FAILED" | 
-/**  The local or central server failed */
-"SERVER_ERROR" | 
+/**  The local or hub failed */
+"HUB_ERROR" | 
 /**  The operation was cancelled */
 "CANCELLED";
 
@@ -790,6 +790,100 @@ export type HookLogEntry = {
 	output: string,
 };
 
+/**  Read-only bootstrap view of the hub (`config.toml` / env / CLI). */
+export type HubBootstrapView = {
+	/**  Data directory (`FXG_HOME`) */
+	fxg_home: SourcedValue<string>,
+	/**  HTTP/WS bind address */
+	listen_addr: SourcedValue<string>,
+	/**  Extra allowed `Host` values (DNS rebinding defense) */
+	allowed_hosts: SourcedValue<string[]>,
+	/**  Extra allowed WebSocket `Origin` values (CSWSH defense) */
+	allowed_origins: SourcedValue<string[]>,
+	/**  Log level */
+	log_level: SourcedValue<string>,
+	/**  Log file destination (empty when disabled) */
+	log_file: SourcedValue<string | null>,
+	/**  Log format (`text` / `json`) */
+	log_format: SourcedValue<string>,
+	/**  Whether ANSI colors are disabled */
+	log_no_color: SourcedValue<boolean>,
+};
+
+/**  Server-owned settings stored in `hub.db` (`hub_settings`). */
+export type HubSettings = {
+	/**  Web Push contact claim (`mailto:` / `https:`) */
+	vapid_subject: string | null,
+	/**  Per-host Git credential provider */
+	git_credentials: { [key in string]: GitCredentialConfig },
+	/**  Optimistic-lock revision */
+	revision: number,
+	/**  Last update time (Unix epoch ms) */
+	updated_at: number,
+};
+
+/**  Complete settings snapshot of the hub. */
+export type HubSettingsSnapshot = {
+	/**  Read-only process bootstrap values */
+	bootstrap: HubBootstrapView,
+	/**  Hub-owned settings */
+	hub: HubSettings,
+};
+
+/**  Server -> Client (`/api/v1/client/ws`) message. */
+export type HubWsMessage = 
+/**
+ *  A batch of incremental events (the replay right after connecting and the
+ *  realtime delivery afterwards).
+ */
+{ op: "event_batch"; 
+/**  Events (ascending `node_seq`) */
+events: SessionEventEnvelope[]; 
+/**  Cursor of the source store (passed as `since_cursor` when reconnecting) */
+cursor: number } | 
+/**  An ephemeral chunk produced while streaming (never persisted). */
+{ op: "live_stream_delta"; 
+/**  Target session ID */
+session_id: SessionId; 
+/**  The delta body */
+delta: StreamDeltaPayload } | 
+/**
+ *  A progress log line of ephemeral VM bootstrapping (`stderr`) (ephemeral).
+ * 
+ *  Bootstrapping happens before the ephemeral node's `node.db` exists, so it is
+ *  streamed directly from the hub instead of being persisted in the
+ *  event log.
+ */
+{ op: "bootstrap_log"; 
+/**  Target session ID */
+session_id: SessionId; 
+/**  A single log line */
+line: string } | 
+/**  Result of a command (correlated back to the requesting client). */
+{ op: "command_result"; 
+/**  Correlation ID */
+command_id: CommandId; 
+/**  Whether it succeeded */
+success: boolean; 
+/**  Structured error on failure */
+error?: ErrorInfo | null; 
+/**  Target session ID (optional) */
+session_id: SessionId | null } | 
+/**  Synchronization state notification (drives the sync badge in the UI). */
+{ op: "system_status"; 
+/**  Whether the hub is connected (when connected to a local node) */
+hub_connected: boolean; 
+/**  Number of unsynced outbox events */
+unsynced_event_count: number; 
+/**  Last synchronization time (Unix epoch ms) */
+last_synced_at: number | null } | 
+/**  Error notification. */
+{ op: "error"; 
+/**  Structured error */
+error: ErrorInfo } | 
+/**  Response to `Ping` */
+{ op: "pong" };
+
 /**  `GET /api/v1/inbox` response (unresolved permission requests across all sessions). */
 export type InboxResponse = {
 	/**  Unresolved (`pending`) permission requests */
@@ -861,14 +955,14 @@ export type InitialConfig = {
 
 /**  `POST /api/v1/nodes/tokens` request (issue a new node token). */
 export type IssueNodeTokenRequest = {
-	/**  Node ID to pair (the node_id of the fxg daemon) */
+	/**  Node ID to pair (the node_id of the fxg node start) */
 	node_id: NodeId,
 };
 
 /**
  *  `POST /api/v1/nodes/tokens` response.
  * 
- *  The plaintext token is returned only once, at issue time (the server stores
+ *  The plaintext token is returned only once, at issue time (the hub stores
  *  only its SHA-256 hash).
  */
 export type IssueNodeTokenResponse = {
@@ -897,7 +991,7 @@ export type KillSwitchResponse = {
  * 
  *  `GET /api/v1/system/info` requires authentication, so an unauthenticated Web UI
  *  determines the endpoint kind from this endpoint and switches the token dialog
- *  correctly (central server / local node) (design: `docs/03` §3.1).
+ *  correctly (hub / local node) (design: `docs/03` §3.1).
  */
 export type MetaResponse = {
 	/**  Kind of endpoint */
@@ -923,7 +1017,7 @@ export type NodeBootstrapView = {
 	/**  Local HTTP/WS bind address */
 	listen_addr: SourcedValue<string>,
 	/**  Node Hub WebSocket URL (standalone when `None`) */
-	central_server_url: SourcedValue<string | null>,
+	hub_url: SourcedValue<string | null>,
 	/**  Log level */
 	log_level: SourcedValue<string>,
 	/**  Log file destination (empty when disabled) */
@@ -970,7 +1064,7 @@ export type NodeProjectReport = {
 export type NodeSettings = {
 	/**  Display name in the UI */
 	name: string,
-	/**  Whether remote (through the central server) Web PTY sessions are allowed */
+	/**  Whether remote (through the hub) Web PTY sessions are allowed */
 	allow_remote_pty: boolean,
 	/**  Directories scanned by `fxg project scan` when no directory is given */
 	project_scan_dirs: string[],
@@ -1121,7 +1215,7 @@ export type ProjectBindingSummary = {
 	/**
 	 *  Whether the local path actually exists on the node
 	 * 
-	 *  On the central server this is the value from the last `NodeHello` report;
+	 *  On the hub this is the value from the last `NodeHello` report;
 	 *  on the local node it is checked live when fetching.
 	 */
 	path_exists: boolean,
@@ -1207,7 +1301,7 @@ export type ProjectPreviewRequest = {
 	local_path: string,
 };
 
-/**  Per-project bootstrap profile for ephemeral VMs (`project_profiles` in `server.db`). */
+/**  Per-project bootstrap profile for ephemeral VMs (`project_profiles` in `hub.db`). */
 export type ProjectProfile = {
 	/**  Logical project ID */
 	project_id: ProjectId,
@@ -1272,7 +1366,7 @@ export type PromptInput = {
 	attachments?: AttachmentMeta[],
 };
 
-/**  Definition of an ephemeral VM / sandbox provisioner (`provisioners` in `server.db`). */
+/**  Definition of an ephemeral VM / sandbox provisioner (`provisioners` in `hub.db`). */
 export type ProvisionerDefinition = {
 	/**  Provisioner name (`local-docker` / `colab-pro` etc.) */
 	name?: string,
@@ -1312,7 +1406,7 @@ export type ProvisionerSummary = {
  *  `POST /api/v1/provisioners/:name/test` response (connectivity check).
  * 
  *  Starts the provisioner and verifies up to the `NodeHello` handshake of
- *  `fxg daemon --stdio` (or reports a failure during bootstrapping).
+ *  `fxg internal stdio` (or reports a failure during bootstrapping).
  */
 export type ProvisionerTestResponse = {
 	/**  Name of the tested provisioner */
@@ -1345,7 +1439,7 @@ export type PruneWorktreesRequest = {
  *  A bidirectional stream channel that connects the terminal of the Web UI / mobile
  *  PWA directly to the ConPTY / Unix PTY on the node. When the node setting
  *  `allow_remote_pty = false` is in effect, `spawn` from remote (through the
- *  central server) is rejected.
+ *  hub) is rejected.
  */
 export type PtyClientMessage = 
 /**  Attach to an existing PTY */
@@ -1595,100 +1689,6 @@ export type SecretsResponse = {
 	secrets: SecretSummary[],
 };
 
-/**  Read-only bootstrap view of the central server (`config.toml` / env / CLI). */
-export type ServerBootstrapView = {
-	/**  Data directory (`FXG_HOME`) */
-	fxg_home: SourcedValue<string>,
-	/**  HTTP/WS bind address */
-	listen_addr: SourcedValue<string>,
-	/**  Extra allowed `Host` values (DNS rebinding defense) */
-	allowed_hosts: SourcedValue<string[]>,
-	/**  Extra allowed WebSocket `Origin` values (CSWSH defense) */
-	allowed_origins: SourcedValue<string[]>,
-	/**  Log level */
-	log_level: SourcedValue<string>,
-	/**  Log file destination (empty when disabled) */
-	log_file: SourcedValue<string | null>,
-	/**  Log format (`text` / `json`) */
-	log_format: SourcedValue<string>,
-	/**  Whether ANSI colors are disabled */
-	log_no_color: SourcedValue<boolean>,
-};
-
-/**  Server-owned settings stored in `server.db` (`server_settings`). */
-export type ServerSettings = {
-	/**  Web Push contact claim (`mailto:` / `https:`) */
-	vapid_subject: string | null,
-	/**  Per-host Git credential provider */
-	git_credentials: { [key in string]: GitCredentialConfig },
-	/**  Optimistic-lock revision */
-	revision: number,
-	/**  Last update time (Unix epoch ms) */
-	updated_at: number,
-};
-
-/**  Complete settings snapshot of the central server. */
-export type ServerSettingsSnapshot = {
-	/**  Read-only process bootstrap values */
-	bootstrap: ServerBootstrapView,
-	/**  Server-owned settings */
-	server: ServerSettings,
-};
-
-/**  Server -> Client (`/api/v1/client/ws`) message. */
-export type ServerWsMessage = 
-/**
- *  A batch of incremental events (the replay right after connecting and the
- *  realtime delivery afterwards).
- */
-{ op: "event_batch"; 
-/**  Events (ascending `node_seq`) */
-events: SessionEventEnvelope[]; 
-/**  Cursor of the source store (passed as `since_cursor` when reconnecting) */
-cursor: number } | 
-/**  An ephemeral chunk produced while streaming (never persisted). */
-{ op: "live_stream_delta"; 
-/**  Target session ID */
-session_id: SessionId; 
-/**  The delta body */
-delta: StreamDeltaPayload } | 
-/**
- *  A progress log line of ephemeral VM bootstrapping (`stderr`) (ephemeral).
- * 
- *  Bootstrapping happens before the ephemeral node's `node.db` exists, so it is
- *  streamed directly from the central server instead of being persisted in the
- *  event log.
- */
-{ op: "bootstrap_log"; 
-/**  Target session ID */
-session_id: SessionId; 
-/**  A single log line */
-line: string } | 
-/**  Result of a command (correlated back to the requesting client). */
-{ op: "command_result"; 
-/**  Correlation ID */
-command_id: CommandId; 
-/**  Whether it succeeded */
-success: boolean; 
-/**  Structured error on failure */
-error?: ErrorInfo | null; 
-/**  Target session ID (optional) */
-session_id: SessionId | null } | 
-/**  Synchronization state notification (drives the sync badge in the UI). */
-{ op: "system_status"; 
-/**  Whether the central server is connected (when connected to a local node) */
-central_connected: boolean; 
-/**  Number of unsynced outbox events */
-unsynced_event_count: number; 
-/**  Last synchronization time (Unix epoch ms) */
-last_synced_at: number | null } | 
-/**  Error notification. */
-{ op: "error"; 
-/**  Structured error */
-error: ErrorInfo } | 
-/**  Response to `Ping` */
-{ op: "pong" };
-
 /**
  *  `POST /api/v1/sessions/:id/archive` request.
  * 
@@ -1733,7 +1733,7 @@ policy: string } |
  *  A batch of events with a cursor (shared by Client WS delivery and the history API).
  * 
  *  `cursor` is the ingestion order of the **source store** (`node.db` /
- *  `server.db`). Clients persist the `cursor` of the last batch they received and
+ *  `hub.db`). Clients persist the `cursor` of the last batch they received and
  *  pass it as `Subscribe { since_cursor }` when reconnecting. A `cursor` is only
  *  meaningful for the store it came from.
  */
@@ -1800,7 +1800,7 @@ export type SessionStatus =
  *  Aggregated session type used in API responses (built from a `sessions` row).
  * 
  *  On the hub side it is produced from the projection obtained by applying
- *  events. Both the local node and the central server return this same type.
+ *  events. Both the local node and the hub return this same type.
  */
 export type SessionSummary = {
 	/**  Session ID (UUID v7) */
@@ -1912,7 +1912,7 @@ terminal_id: string;
 data_b64: string };
 
 /**
- *  `GET /api/v1/diagnostics/bundle` response (`fxg diagnostics export`).
+ *  `GET /api/v1/diagnostics/bundle` response (`fxg support bundle`).
  * 
  *  Everything text-based is redacted: tokens, cookies, environment values,
  *  prompts and the user's home directory never leave the process.
@@ -1948,13 +1948,13 @@ export type SupportBundleConfig = {
 	log_format: string | null,
 	/**  Local node bind address */
 	node_listen_addr: string | null,
-	/**  Central server URL */
-	central_server_url: string | null,
-	/**  Central server bind address */
+	/**  Hub URL */
+	hub_url: string | null,
+	/**  Hub bind address */
 	server_listen_addr: string | null,
-	/**  Extra allowed hosts (central server) */
+	/**  Extra allowed hosts (hub) */
 	allowed_hosts: string[],
-	/**  Extra allowed origins (central server) */
+	/**  Extra allowed origins (hub) */
 	allowed_origins: string[],
 };
 
@@ -1970,16 +1970,16 @@ export type SupportBundleSession = {
 export type SystemInfoResponse = {
 	/**  Kind of endpoint */
 	role: ConnectionRole,
-	/**  Node ID when connected to a local node (`None` on the central server) */
+	/**  Node ID when connected to a local node (`None` on the hub) */
 	node_id: NodeId | null,
 	/**  fxg binary version */
 	version: string,
-	/**  VAPID public key for Web Push (central server only) */
+	/**  VAPID public key for Web Push (hub only) */
 	vapid_public_key: string | null,
 	/**  Number of unsynced outbox events (local node only) */
 	unsynced_event_count: number | null,
-	/**  WebSocket connection state to the central server (local node only) */
-	central_connected: boolean | null,
+	/**  WebSocket connection state to the hub (local node only) */
+	hub_connected: boolean | null,
 };
 
 /**  Overall health snapshot returned by diagnostics. */
@@ -2137,7 +2137,7 @@ export type UnifiedEventPayload =
 /**
  *  The outcome of a permission request.
  * 
- *  `fxg daemon` emits this event at the same time as it answers the agent, so
+ *  `fxg node start` emits this event at the same time as it answers the agent, so
  *  that approval dialogs in other clients close automatically. Second and
  *  later answers are dropped per `request_id` and `ALREADY_RESOLVED` is returned.
  */
@@ -2325,6 +2325,16 @@ export type UpdateAgentSettingsRequest = {
 	expected_revision: number,
 };
 
+/**  `PATCH /api/v1/settings/hub` request. */
+export type UpdateHubSettingsRequest = {
+	/**  Web Push contact claim */
+	vapid_subject: string | null,
+	/**  Per-host Git credential provider */
+	git_credentials: { [key in string]: GitCredentialConfig },
+	/**  Revision the client observed (`REVISION_MISMATCH` on conflict) */
+	expected_revision: number,
+};
+
 /**  `PATCH /api/v1/nodes/{node_id}/settings/node` request. */
 export type UpdateNodeSettingsRequest = {
 	/**  Display name */
@@ -2345,16 +2355,6 @@ export type UpdateProjectProfileRequest = {
 	bootstrap_setup: string[],
 	/**  Non-secret environment variables */
 	bootstrap_env: { [key in string]: string },
-	/**  Revision the client observed (`REVISION_MISMATCH` on conflict) */
-	expected_revision: number,
-};
-
-/**  `PATCH /api/v1/settings/server` request. */
-export type UpdateServerSettingsRequest = {
-	/**  Web Push contact claim */
-	vapid_subject: string | null,
-	/**  Per-host Git credential provider */
-	git_credentials: { [key in string]: GitCredentialConfig },
 	/**  Revision the client observed (`REVISION_MISMATCH` on conflict) */
 	expected_revision: number,
 };

@@ -4,7 +4,7 @@ use super::stream::*;
 use super::*;
 
 impl SessionManager {
-    /// Starts a new session (`fxg run`).
+    /// Starts a new session (`fxg session new`).
     pub async fn ensure_session(
         &self,
         command_id: &CommandId,
@@ -220,7 +220,7 @@ impl SessionManager {
     ) -> Result<StartedDriverSession, NodeError> {
         // Inject the Git credential proxy (GIT_ASKPASS for ephemeral VMs) into the agent process.
         // The script is generated at daemon startup and authenticates via
-        // `fxg internal git-askpass` → local IPC → the central server's in-memory relay
+        // `fxg internal git-askpass` → local IPC → the hub's in-memory relay
         // (design: docs/01 §6.4).
         let mut spec = params.spec.clone();
         let askpass = crate::credentials::askpass_script_path(self.inner.paths.fxg_home());

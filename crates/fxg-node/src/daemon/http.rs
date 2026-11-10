@@ -3,8 +3,8 @@
 //! Design: `docs/03-protocol-and-api.md` §3.0-§3.3,
 //! `docs/01-architecture-and-sync.md` §7.1-§7.3.
 //!
-//! The router, handlers and validation logic are shared with the central server
-//! (`fxg server`) in [`fxg_server::api`]; this module only supplies the
+//! The router, handlers and validation logic are shared with the hub
+//! (`fxg hub start`) in [`fxg_hub::api`]; this module only supplies the
 //! [`DaemonState`] (the Client API backend implementation) and serves it locally
 //! (loopback `127.0.0.1` only).
 
@@ -16,7 +16,7 @@
 use std::net::SocketAddr;
 
 use axum::Router;
-use fxg_server::api::{ClientApiOptions, client_router};
+use fxg_hub::api::{ClientApiOptions, client_router};
 use tokio::sync::watch;
 
 use super::DaemonState;
@@ -75,7 +75,7 @@ mod tests {
     use axum::http::Request as HttpRequest;
     use axum::http::{StatusCode, header};
     use axum::response::Response;
-    use fxg_protocol::client_api::ServerWsMessage;
+    use fxg_protocol::client_api::HubWsMessage;
     use fxg_protocol::common::ErrorCode;
     use http_body_util::BodyExt;
     use tower::ServiceExt;
@@ -164,7 +164,7 @@ mod tests {
         let body = body_json(response).await;
         assert_eq!(body["role"], "local_node");
         assert_eq!(body["version"], crate::daemon::VERSION);
-        assert_eq!(body["central_connected"], false);
+        assert_eq!(body["hub_connected"], false);
 
         daemon.shutdown();
         tokio::time::timeout(std::time::Duration::from_secs(5), daemon.wait())
@@ -364,7 +364,7 @@ mod tests {
 
         let message = next_ws_message(&mut socket).await;
         match message {
-            ServerWsMessage::EventBatch { events, cursor } => {
+            HubWsMessage::EventBatch { events, cursor } => {
                 assert_eq!(events.len(), 1);
                 assert_eq!(events[0].session_id.as_str(), session_id);
                 assert_eq!(events[0].node_seq, 1);
@@ -387,7 +387,7 @@ mod tests {
             .await
             .expect("record");
         match next_ws_message(&mut socket).await {
-            ServerWsMessage::EventBatch { events, .. } => {
+            HubWsMessage::EventBatch { events, .. } => {
                 assert_eq!(events.len(), 1);
                 assert_eq!(events[0].node_seq, 2);
             }
@@ -403,7 +403,7 @@ mod tests {
             },
         );
         match next_ws_message(&mut socket).await {
-            ServerWsMessage::LiveStreamDelta {
+            HubWsMessage::LiveStreamDelta {
                 session_id: id,
                 delta,
             } => {
@@ -426,7 +426,7 @@ mod tests {
             .await
             .expect("send ping");
         match next_ws_message(&mut socket).await {
-            ServerWsMessage::Pong => {}
+            HubWsMessage::Pong => {}
             other => panic!("unexpected message: {other:?}"),
         }
 
@@ -486,7 +486,7 @@ mod tests {
             .expect("send subscribe");
 
         match next_ws_message(&mut socket).await {
-            ServerWsMessage::EventBatch { events, cursor } => {
+            HubWsMessage::EventBatch { events, cursor } => {
                 assert_eq!(events.len(), 1, "stale cursor must not skip events");
                 assert_eq!(events[0].session_id.as_str(), session_id);
                 assert_eq!(events[0].node_seq, 1);
@@ -529,7 +529,7 @@ mod tests {
             .await
             .expect("send prompt");
         match next_ws_message(&mut socket).await {
-            ServerWsMessage::CommandResult {
+            HubWsMessage::CommandResult {
                 command_id,
                 success,
                 error,
@@ -549,8 +549,8 @@ mod tests {
             .expect("stop");
     }
 
-    /// Receives the next `ServerWsMessage` from the WS (with a timeout).
-    async fn next_ws_message<S>(socket: &mut S) -> ServerWsMessage
+    /// Receives the next `HubWsMessage` from the WS (with a timeout).
+    async fn next_ws_message<S>(socket: &mut S) -> HubWsMessage
     where
         S: futures_util::Sink<tokio_tungstenite::tungstenite::Message>
             + futures_util::Stream<

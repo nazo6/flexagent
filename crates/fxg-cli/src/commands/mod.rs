@@ -3,25 +3,37 @@
 //! The argument structs are re-exported here so `main.rs` and the tray can use
 //! `crate::commands::...` without knowing the file split.
 
-mod admin;
-mod daemon;
-mod diagnostics;
-mod run;
+mod agents;
+mod doctor;
+mod hub;
+mod internal;
+mod logs;
+mod node;
+mod service;
 mod session;
+mod session_new;
+mod support;
+mod web;
 
-pub use admin::*;
-pub use daemon::*;
-pub use diagnostics::*;
-pub use run::*;
+pub use agents::*;
+pub use doctor::*;
+pub use hub::*;
+pub use internal::*;
+pub use logs::*;
+pub use node::*;
+pub use service::*;
 pub use session::*;
+pub use session_new::*;
+pub use support::*;
+pub use web::*;
 
-pub(crate) use daemon::local_web_url;
+pub(crate) use node::{local_web_url, open_session_url};
 
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 
-use crate::client::DaemonClient;
+use crate::client::NodeClient;
 
 /// Opens `node.db` (CLI-side reads of the DB-owned settings).
 async fn node_db(env: fxg_protocol::config::EnvLookup<'_>) -> Result<fxg_db::Db> {
@@ -29,10 +41,10 @@ async fn node_db(env: fxg_protocol::config::EnvLookup<'_>) -> Result<fxg_db::Db>
     Ok(fxg_db::Db::open(&paths.node_db_path(), fxg_db::DbRole::Node).await?)
 }
 
-/// Create or reuse a worktree and return its path (`fxg run -w` /
+/// Create or reuse a worktree and return its path (`fxg session new -w` /
 /// `fxg session fork -w`).
 pub(super) async fn create_worktree(
-    client: &mut DaemonClient,
+    client: &mut NodeClient,
     cwd: &Path,
     branch: &str,
     base_branch: Option<String>,

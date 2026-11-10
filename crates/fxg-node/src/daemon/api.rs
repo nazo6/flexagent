@@ -1,12 +1,16 @@
-//! Client API backend implementation for the local node (`fxg daemon`).
+//! Client API backend implementation for the local node (`fxg node start`).
 //!
 //! Supplies the daemon's `SessionManager` / `PtySessionManager` / Git operations
-//! to the shared router of `fxg-server` ([`fxg_server::api::client_router`])
+//! to the shared router of `fxg-server` ([`fxg_hub::api::client_router`])
 //! (design: `docs/03-protocol-and-api.md` §3).
 
 use std::path::{Path, PathBuf};
 
 use async_trait::async_trait;
+use fxg_hub::api::{
+    ApiError, ClientApiBackend, ClientCommand, ClientEvent, ClientInfo, PtyChannelError,
+    PtyChannelEvent, PtySpawnParams, SystemExtras,
+};
 use fxg_protocol::CommandId;
 use fxg_protocol::client_api::{
     AgentDiagnostics, AgentOpResponse, AgentsResponse, ConnectionRole, CreateSessionRequest,
@@ -20,10 +24,6 @@ use fxg_protocol::client_api::{
 use fxg_protocol::common::{
     AgentAction, CommandResult, ComponentHealth, ComponentName, ComponentState, DiffScope,
     ProjectSummary, WorkspaceDiffResponse,
-};
-use fxg_server::api::{
-    ApiError, ClientApiBackend, ClientCommand, ClientEvent, ClientInfo, PtyChannelError,
-    PtyChannelEvent, PtySpawnParams, SystemExtras,
 };
 use tokio::sync::broadcast;
 
@@ -67,6 +67,11 @@ impl ClientApiBackend for DaemonState {
         DaemonState::db(self)
     }
 
+    fn request_shutdown(&self) -> bool {
+        DaemonState::request_shutdown(self);
+        true
+    }
+
     fn auth_token(&self) -> String {
         DaemonState::auth_token(self)
     }
@@ -82,9 +87,9 @@ impl ClientApiBackend for DaemonState {
     async fn execute_node_rpc(
         &self,
         node_id: &fxg_protocol::NodeId,
-        request: fxg_protocol::node_server::NodeRpcRequest,
+        request: fxg_protocol::node_hub::NodeRpcRequest,
         client: Option<ClientInfo>,
-    ) -> Result<fxg_protocol::node_server::NodeRpcResponse, ApiError> {
+    ) -> Result<fxg_protocol::node_hub::NodeRpcResponse, ApiError> {
         if node_id.as_str() != self.node_id() {
             return Err(ApiError::not_found(format!(
                 "requested node {} but this node is {}",
@@ -98,8 +103,8 @@ impl ClientApiBackend for DaemonState {
             .unwrap_or_else(AuditSource::local);
         let request_id = CommandId::from(fxg_protocol::util::uuid_v7());
         match crate::rpc::execute(self, &request_id, request, &source).await {
-            fxg_protocol::node_server::NodeRpcOutcome::Ok { response } => Ok(response),
-            fxg_protocol::node_server::NodeRpcOutcome::Err { error } => {
+            fxg_protocol::node_hub::NodeRpcOutcome::Ok { response } => Ok(response),
+            fxg_protocol::node_hub::NodeRpcOutcome::Err { error } => {
                 Err(ApiError::from_info(error))
             }
         }
@@ -112,7 +117,7 @@ impl ClientApiBackend for DaemonState {
             .map_err(api_error)
     }
 
-    fn diagnostics_counters(&self) -> Option<&fxg_server::api::DiagnosticsCounters> {
+    fn diagnostics_counters(&self) -> Option<&fxg_hub::api::DiagnosticsCounters> {
         Some(DaemonState::diagnostics_counters(self))
     }
 
@@ -121,21 +126,21 @@ impl ClientApiBackend for DaemonState {
     }
 
     async fn role_health(&self, now: i64) -> Vec<ComponentHealth> {
-        let mut sync = if self.config().central_server_url.is_none() {
+        let mut sync = if self.config().hub_url.is_none() {
             ComponentHealth {
                 component: ComponentName::Sync,
                 state: ComponentState::NotMeasured,
-                message: Some("central server is not configured (local-only mode)".to_owned()),
+                message: Some("hub is not configured (local-only mode)".to_owned()),
                 last_ok_at: None,
                 last_error_at: None,
             }
-        } else if self.central_connected() {
+        } else if self.hub_connected() {
             ComponentHealth::ok(ComponentName::Sync, now)
         } else {
             ComponentHealth::failed(
                 ComponentName::Sync,
                 ComponentState::Degraded,
-                "not connected to the central server",
+                "not connected to the hub",
                 now,
             )
         };
@@ -183,7 +188,7 @@ impl ClientApiBackend for DaemonState {
             log_file: config.log.file.clone(),
             log_format: config.log.format.clone(),
             node_listen_addr: Some(config.listen_addr.clone()),
-            central_server_url: config.central_server_url.clone(),
+            hub_url: config.hub_url.clone(),
             server_listen_addr: None,
             allowed_hosts: Vec::new(),
             allowed_origins: Vec::new(),
@@ -194,8 +199,8 @@ impl ClientApiBackend for DaemonState {
         let path = DaemonState::paths(self)
             .fxg_home()
             .join("logs")
-            .join("daemon.log");
-        fxg_server::api::log_tail(&path, lines)
+            .join("node.log");
+        fxg_hub::api::log_tail(&path, lines)
     }
 
     async fn system_extras(&self) -> Result<SystemExtras, ApiError> {
@@ -207,7 +212,7 @@ impl ClientApiBackend for DaemonState {
         Ok(SystemExtras {
             vapid_public_key: None,
             unsynced_event_count: Some(unsynced),
-            central_connected: Some(self.central_connected()),
+            hub_connected: Some(self.hub_connected()),
         })
     }
 
@@ -256,7 +261,7 @@ impl ClientApiBackend for DaemonState {
     ) -> Result<CreateSessionResponse, ApiError> {
         if request.provisioner.is_some() {
             return Err(ApiError::bad_request(
-                "provisioners are only available on the central server",
+                "provisioners are only available on the hub",
             ));
         }
         if let Some(node_id) = &request.node_id
@@ -270,7 +275,7 @@ impl ClientApiBackend for DaemonState {
         let source = audit_source(&client);
 
         // ACP-native fork from an existing session on this node. The source and
-        // the new session share the same agent (the server already validates it).
+        // the new session share the same agent (the hub already validates it).
         let fork_source = match &request.fork {
             Some(fork) => {
                 let source = self
@@ -774,7 +779,7 @@ impl ClientApiBackend for DaemonState {
     }
 
     async fn provisioners(&self) -> Result<ProvisionersResponse, ApiError> {
-        // Ephemeral VM provisioners only run on the central server (design: docs/01 §6.1)
+        // Ephemeral VM provisioners only run on the hub (design: docs/01 §6.1)
         Ok(ProvisionersResponse {
             provisioners: Vec::new(),
         })

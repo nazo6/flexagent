@@ -1,14 +1,14 @@
-//! End-to-end tests for the central server + multiple nodes.
+//! End-to-end tests for the hub + multiple nodes.
 //!
 //! Verification items (Phase 4 completion criteria):
-//! - Events generated on a node while the server is stopped are synced without loss
+//! - Events generated on a node while the hub is stopped are synced without loss
 //!   or duplication when it starts and reconnects (NodeHello -> ResyncRequest ->
 //!   EventBatchPush -> EventBatchAck)
-//! - Session operations and prompt sending through the central server API work
+//! - Session operations and prompt sending through the hub API work
 //! - A duplicate approval response becomes idempotent with `ALREADY_RESOLVED`
 //!   (200 `already_resolved`)
 //! - The kill switch is delivered to all nodes, and the audit log is recorded in both
-//!   server.db and node.db
+//!   hub.db and node.db
 //! - Commands while the node is disconnected return immediately as `NODE_OFFLINE`
 
 #![allow(
@@ -28,6 +28,9 @@ use fxg_acp::{
     StartSessionRequest, StartedSession,
 };
 use fxg_db::{Db, DbRole};
+use fxg_hub::Hub;
+use fxg_hub::api::auth::{generate_token, hash_token};
+use fxg_hub::state::HubOptions;
 use fxg_node::daemon::{DaemonConfig, NodeDaemon};
 use fxg_node::session_manager::{DriverFactory, StartSessionParams};
 use fxg_protocol::common::{
@@ -36,9 +39,6 @@ use fxg_protocol::common::{
 };
 use fxg_protocol::events::UnifiedEventPayload;
 use fxg_protocol::{CommandId, NodeId};
-use fxg_server::Server;
-use fxg_server::api::auth::{generate_token, hash_token};
-use fxg_server::state::ServerOptions;
 use serde_json::json;
 use tokio::sync::mpsc;
 
@@ -179,7 +179,7 @@ fn test_ipc_endpoint(dir: &Path) -> String {
         let n = COUNTER.fetch_add(1, Ordering::Relaxed);
         format!(r"\\.\pipe\fxg-e2e-{}-{n}", std::process::id())
     } else {
-        dir.join("daemon.sock").to_string_lossy().into_owned()
+        dir.join("node.sock").to_string_lossy().into_owned()
     }
 }
 
@@ -231,16 +231,16 @@ async fn start_node(
     let mut config = DaemonConfig::new(home.to_path_buf(), node_id, "E2E Node");
     config.listen_addr = "127.0.0.1:0".to_owned();
     config.ipc_endpoint = test_ipc_endpoint(home);
-    config.central_server_url = server_url;
+    config.hub_url = server_url;
     config.node_token = node_token;
     NodeDaemon::start_with_driver_factory(config, agent.factory())
         .await
         .expect("start node")
 }
 
-/// Starts the central server.
-async fn start_server(home: &Path, port: u16) -> Server {
-    Server::start(ServerOptions {
+/// Starts the hub.
+async fn start_hub(home: &Path, port: u16) -> Hub {
+    Hub::start(HubOptions {
         fxg_home: home.to_path_buf(),
         listen_addr: format!("127.0.0.1:{port}"),
         allowed_hosts: Vec::new(),
@@ -251,7 +251,7 @@ async fn start_server(home: &Path, port: u16) -> Server {
     .expect("start server")
 }
 
-/// Opens the server DB (`server.db`) and issues a node-specific token.
+/// Opens the hub DB (`hub.db`) and issues a node-specific token.
 async fn issue_node_token(server_home: &Path, node_id: &str) -> String {
     let db = Db::open(&fxg_db::hub_db_path(server_home), DbRole::Hub)
         .await
@@ -356,7 +356,7 @@ async fn offline_events_sync_without_loss_or_duplication() {
     let agent_a = MockAgent::default();
     let agent_b = MockAgent::default();
 
-    // 1. Start node A while the server is stopped and accumulate events
+    // 1. Start node A while the hub is stopped and accumulate events
     let node_a = start_node(
         node_a_home.path(),
         "node-a",
@@ -367,8 +367,8 @@ async fn offline_events_sync_without_loss_or_duplication() {
     .await;
     let session_a = create_session_with_events(&node_a, &agent_a, repo_a.path(), "offline").await;
 
-    // 2. Start the central server and connect node B
-    let server = start_server(server_home.path(), port).await;
+    // 2. Start the hub and connect node B
+    let server = start_hub(server_home.path(), port).await;
     let node_b = start_node(
         node_b_home.path(),
         "node-b",
@@ -465,7 +465,7 @@ async fn offline_events_sync_without_loss_or_duplication() {
     })
     .await;
 
-    // 6. Check the node state on the server side (online status, agent list)
+    // 6. Check the node state on the hub side (online status, agent list)
     let nodes = server_db.list_nodes().await.expect("nodes");
     assert_eq!(nodes.len(), 2);
     assert!(nodes.iter().all(|node| node.is_online));
@@ -490,11 +490,11 @@ async fn offline_events_sync_without_loss_or_duplication() {
 }
 
 // ----------------------------------------------------------------------
-// E2E test 2: commands, permissions, and kill switch via the central server
+// E2E test 2: commands, permissions, and kill switch via the hub
 // ----------------------------------------------------------------------
 
 #[tokio::test(flavor = "multi_thread")]
-async fn central_server_commands_permissions_and_kill_switch() {
+async fn hub_commands_permissions_and_kill_switch() {
     let server_home = tempfile::tempdir().expect("server home");
     let node_home = tempfile::tempdir().expect("node home");
     let repo = tempfile::tempdir().expect("repo");
@@ -505,7 +505,7 @@ async fn central_server_commands_permissions_and_kill_switch() {
     let node_token = issue_node_token(server_home.path(), "node-1").await;
     let agent = MockAgent::default();
 
-    let server = start_server(server_home.path(), port).await;
+    let server = start_hub(server_home.path(), port).await;
     let node = start_node(
         node_home.path(),
         "node-1",
@@ -529,7 +529,7 @@ async fn central_server_commands_permissions_and_kill_switch() {
     let node_db = Db::open(&fxg_db::node_db_path(node_home.path()), DbRole::Node)
         .await
         .expect("node db");
-    let client_token = fxg_server::api::auth::load_or_create_token(
+    let client_token = fxg_hub::api::auth::load_or_create_token(
         &server_home
             .path()
             .join(fxg_protocol::config::AUTH_TOKEN_FILE_NAME),
@@ -538,7 +538,7 @@ async fn central_server_commands_permissions_and_kill_switch() {
     let http = reqwest::Client::new();
     let base = format!("http://127.0.0.1:{port}");
 
-    // 1. Register a project on the node and sync the binding to the central server
+    // 1. Register a project on the node and sync the binding to the hub
     let resolved = node
         .state()
         .resolve_and_register_project(repo.path())
@@ -566,7 +566,7 @@ async fn central_server_commands_permissions_and_kill_switch() {
     )
     .await;
 
-    // 2. Start a new session from the central server's REST API
+    // 2. Start a new session from the hub's REST API
     let create = http
         .post(format!("{base}/api/v1/sessions"))
         .bearer_auth(&client_token)
@@ -696,7 +696,7 @@ async fn central_server_commands_permissions_and_kill_switch() {
     )
     .await;
 
-    // 4. Send a prompt from the client WS (central server)
+    // 4. Send a prompt from the client WS (hub)
     {
         use futures_util::SinkExt;
         use tokio_tungstenite::tungstenite::Message as WsMessage;
@@ -795,7 +795,7 @@ async fn central_server_commands_permissions_and_kill_switch() {
     )
     .await;
 
-    // 6. The audit log is recorded in both server.db and node.db
+    // 6. The audit log is recorded in both hub.db and node.db
     let server_audits = server_db.audit_logs(100).await.expect("audit logs");
     let actions: Vec<&str> = server_audits
         .iter()
@@ -900,11 +900,11 @@ async fn central_server_commands_permissions_and_kill_switch() {
 }
 
 // ----------------------------------------------------------------------
-// E2E test: resuming a stopped session via the central server (resume)
+// E2E test: resuming a stopped session via the hub (resume)
 // ----------------------------------------------------------------------
 
 #[tokio::test(flavor = "multi_thread")]
-async fn central_server_resumes_stopped_session() {
+async fn hub_resumes_stopped_session() {
     let server_home = tempfile::tempdir().expect("server home");
     let node_home = tempfile::tempdir().expect("node home");
     let repo = tempfile::tempdir().expect("repo");
@@ -915,7 +915,7 @@ async fn central_server_resumes_stopped_session() {
     let node_token = issue_node_token(server_home.path(), "node-1").await;
     let agent = MockAgent::default();
 
-    let server = start_server(server_home.path(), port).await;
+    let server = start_hub(server_home.path(), port).await;
     let node = start_node(
         node_home.path(),
         "node-1",
@@ -939,7 +939,7 @@ async fn central_server_resumes_stopped_session() {
     let node_db = Db::open(&fxg_db::node_db_path(node_home.path()), DbRole::Node)
         .await
         .expect("node db");
-    let client_token = fxg_server::api::auth::load_or_create_token(
+    let client_token = fxg_hub::api::auth::load_or_create_token(
         &server_home
             .path()
             .join(fxg_protocol::config::AUTH_TOKEN_FILE_NAME),
@@ -1009,7 +1009,7 @@ async fn central_server_resumes_stopped_session() {
     })
     .await;
 
-    // 3. Resume from the central server REST API (the mock supports native resume)
+    // 3. Resume from the hub REST API (the mock supports native resume)
     let response = http
         .post(format!("{base}/api/v1/sessions/{session_id}/resume"))
         .bearer_auth(&client_token)
@@ -1079,11 +1079,11 @@ async fn central_server_resumes_stopped_session() {
 }
 
 // ----------------------------------------------------------------------
-// E2E test: archiving / deleting via the central server (tombstone + body purge)
+// E2E test: archiving / deleting via the hub (tombstone + body purge)
 // ----------------------------------------------------------------------
 
 #[tokio::test(flavor = "multi_thread")]
-async fn central_server_archives_and_deletes_session() {
+async fn hub_archives_and_deletes_session() {
     let server_home = tempfile::tempdir().expect("server home");
     let node_home = tempfile::tempdir().expect("node home");
     let repo = tempfile::tempdir().expect("repo");
@@ -1094,7 +1094,7 @@ async fn central_server_archives_and_deletes_session() {
     let node_token = issue_node_token(server_home.path(), "node-1").await;
     let agent = MockAgent::default();
 
-    let server = start_server(server_home.path(), port).await;
+    let server = start_hub(server_home.path(), port).await;
     let node = start_node(
         node_home.path(),
         "node-1",
@@ -1118,7 +1118,7 @@ async fn central_server_archives_and_deletes_session() {
     let node_db = Db::open(&fxg_db::node_db_path(node_home.path()), DbRole::Node)
         .await
         .expect("node db");
-    let client_token = fxg_server::api::auth::load_or_create_token(
+    let client_token = fxg_hub::api::auth::load_or_create_token(
         &server_home
             .path()
             .join(fxg_protocol::config::AUTH_TOKEN_FILE_NAME),
@@ -1277,7 +1277,7 @@ async fn central_server_archives_and_deletes_session() {
         ));
     }
 
-    // Both operations remain in the audit log (server.db)
+    // Both operations remain in the audit log (hub.db)
     let audits = server_db.audit_logs(100).await.expect("audit logs");
     assert!(
         audits

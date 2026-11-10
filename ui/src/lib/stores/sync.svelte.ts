@@ -12,7 +12,7 @@ import type {
   RespondElicitationResponse,
   RespondPermissionResponse,
   ResumeSessionResponse,
-  ServerWsMessage,
+  HubWsMessage,
   SessionArchiveResponse,
   SessionControlAction,
   SessionEventEnvelope,
@@ -104,7 +104,7 @@ export class SyncStore {
    * Progress logs for ephemeral VM bootstrap (ephemeral; not persisted).
    *
    * The server delivers `stderr` output from before the node's `node.db` exists
-   * as `ServerWsMessage::BootstrapLog`. It is not restored on reconnect.
+   * as `HubWsMessage::BootstrapLog`. It is not restored on reconnect.
    */
   bootstrapLogs = $state(new Map<string, string[]>());
 
@@ -369,7 +369,7 @@ export class SyncStore {
       if (!this.#send(command)) {
         this.#pendingCommands.delete(commandId);
         clearTimeout(timer);
-        reject(ApiError.fromCode(0, "NODE_OFFLINE", m.lib_not_connected_to_server()));
+        reject(ApiError.fromCode(0, "NODE_OFFLINE", m.lib_not_connected_to_hub()));
       }
     });
   }
@@ -508,9 +508,9 @@ export class SyncStore {
   // ------------------------------------------------------------------
 
   #handleMessage(raw: string): void {
-    let message: ServerWsMessage;
+    let message: HubWsMessage;
     try {
-      message = JSON.parse(raw) as ServerWsMessage;
+      message = JSON.parse(raw) as HubWsMessage;
     } catch (error) {
       console.error("[fxg] failed to parse client ws message", error, raw);
       return;
@@ -529,7 +529,7 @@ export class SyncStore {
         this.#resolveCommand(message);
         break;
       case "system_status":
-        this.centralConnected = message.central_connected;
+        this.centralConnected = message.hub_connected;
         this.unsyncedEventCount = message.unsynced_event_count;
         this.lastSyncedAt = message.last_synced_at;
         break;

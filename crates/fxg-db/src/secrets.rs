@@ -16,7 +16,7 @@ use crate::error::DbError;
 
 /// Directory name owned by a local node.
 pub const ROLE_NODE: &str = "node";
-/// Directory name owned by the central server.
+/// Directory name owned by the hub.
 pub const ROLE_SERVER: &str = "server";
 
 /// Maps a database role to its secrets sub-directory name.
@@ -102,7 +102,7 @@ pub async fn used_by(db: &Db, id: &SecretId) -> Result<Vec<String>, DbError> {
             Ok(used)
         }
         DbRole::Hub => {
-            let settings = db.server_settings().await?;
+            let settings = db.hub_settings().await?;
             let Some(settings) = settings else {
                 return Ok(Vec::new());
             };

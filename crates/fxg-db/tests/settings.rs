@@ -5,8 +5,8 @@ use std::collections::BTreeMap;
 use fxg_db::{Db, DbError, DbRole};
 use fxg_protocol::settings::{
     AgentSettings, ConfigSource, GitCredentialConfig, NodeSettings, ProjectIdentity,
-    ProvisionerDefinition, SourcedValue, UpdateAgentSettingsRequest, UpdateNodeSettingsRequest,
-    UpdateProjectProfileRequest, UpdateServerSettingsRequest,
+    ProvisionerDefinition, SourcedValue, UpdateAgentSettingsRequest, UpdateHubSettingsRequest,
+    UpdateNodeSettingsRequest, UpdateProjectProfileRequest,
 };
 use fxg_protocol::{ProjectId, SecretId};
 
@@ -185,12 +185,12 @@ async fn prune_removes_unreported_bindings_and_relinks_sessions() {
 }
 
 #[tokio::test]
-async fn server_settings_provisioners_and_profiles() {
+async fn hub_settings_provisioners_and_profiles() {
     let db = Db::open_in_memory(DbRole::Hub).await.expect("db");
-    let initial = db.ensure_server_settings().await.expect("ensure");
+    let initial = db.ensure_hub_settings().await.expect("ensure");
 
     let updated = db
-        .update_server_settings(&UpdateServerSettingsRequest {
+        .update_hub_settings(&UpdateHubSettingsRequest {
             vapid_subject: Some("mailto:admin@example.com".to_owned()),
             git_credentials: BTreeMap::from([(
                 "github.com".to_owned(),
@@ -202,7 +202,7 @@ async fn server_settings_provisioners_and_profiles() {
             expected_revision: initial.revision,
         })
         .await
-        .expect("server settings");
+        .expect("hub settings");
     assert_eq!(
         updated.vapid_subject.as_deref(),
         Some("mailto:admin@example.com")

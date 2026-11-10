@@ -53,11 +53,11 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 FROM debian:bookworm-slim AS runtime
 
 LABEL org.opencontainers.image.title="FlexAgent (fxg)" \
-      org.opencontainers.image.description="Self-hosted, local-first agent manager (CLI/TUI, node daemon, central server and PWA in a single binary)" \
+      org.opencontainers.image.description="Self-hosted, local-first agent manager (CLI/TUI, node, hub and PWA in a single binary)" \
       org.opencontainers.image.source="https://github.com/nazo6/flexagent"
 
 # - ca-certificates: HTTPS (Node Hub / Web Push / PWA 配信) 用
-# - git / openssh-client: `fxg daemon` の Worktree・Shadow Git Tree・git+ssh 用
+# - git / openssh-client: `fxg node start` の Worktree・Shadow Git Tree・git+ssh 用
 # (SQLite は bundled で静的リンク、TLS は rustls のため libssl は不要)
 RUN apt-get update \
   && apt-get install --yes --no-install-recommends ca-certificates git openssh-client \
@@ -67,16 +67,16 @@ RUN apt-get update \
 COPY --from=build /usr/local/bin/fxg /usr/local/bin/fxg
 
 # データディレクトリ (`~/.flexagent` 相当) を FXG_HOME=/data に固定し、
-# named volume で永続化する (server.db / node.db / config.toml / worktrees 等)
+# named volume で永続化する (hub.db / node.db / config.toml / worktrees 等)
 ENV FXG_HOME=/data
 RUN install --directory --owner=fxg --group=fxg --mode=0750 /data
 VOLUME ["/data"]
 WORKDIR /data
 USER fxg
 
-# `fxg server` の既定待受 (0.0.0.0:8080)。コンテナ内部から `fxg daemon` を
+# `fxg hub start` の既定待受 (0.0.0.0:8080)。コンテナ内部から `fxg node start` を
 # 使う場合の 127.0.0.1:7860 はコンテナ外へ公開されない。
 EXPOSE 8080
 
 ENTRYPOINT ["fxg"]
-CMD ["server"]
+CMD ["hub", "start"]

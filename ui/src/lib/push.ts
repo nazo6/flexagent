@@ -73,7 +73,7 @@ export async function enablePushNotifications(): Promise<void> {
   const info = await systemInfo();
   const vapidKey = info?.vapid_public_key ?? null;
   if (vapidKey === null) {
-    throw new Error(m.push_server_unavailable());
+    throw new Error(m.push_hub_unavailable());
   }
   const applicationServerKey = urlBase64ToUint8Array(vapidKey);
   if (!isValidVapidKey(applicationServerKey)) {

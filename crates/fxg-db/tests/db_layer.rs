@@ -6,7 +6,7 @@
 //! - Projection rebuild matches event application results
 //! - Watermark-based outbox extraction and ACK
 //! - FTS5 full-text search (via triggers, `searchable_text` exclusion rules, LIKE fallback)
-//! - Local Node (`node.db`) and Central Server (`server.db`) return identical response types
+//! - Local Node (`node.db`) and Hub (`hub.db`) return identical response types
 
 use fxg_db::audit::actions;
 use fxg_db::{

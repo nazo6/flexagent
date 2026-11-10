@@ -16,9 +16,9 @@ dunce = { workspace = true }
 futures-util = { workspace = true }
 fxg-acp = { workspace = true }
 fxg-db = { workspace = true }
+fxg-hub = { workspace = true }
 fxg-protocol = { workspace = true }
 fxg-pty = { workspace = true }
-fxg-server = { workspace = true }
 rand = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

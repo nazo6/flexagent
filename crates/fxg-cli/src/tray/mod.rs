@@ -25,7 +25,7 @@ pub use linux::{TrayHandle, spawn};
 #[cfg(target_os = "macos")]
 mod macos;
 #[cfg(target_os = "macos")]
-pub use macos::run_daemon_if_requested;
+pub use macos::run_node_if_requested;
 #[cfg(target_os = "windows")]
 mod windows;
 #[cfg(target_os = "windows")]
@@ -42,7 +42,7 @@ use tray_icon::TrayIcon;
 use tray_icon::TrayIconBuilder;
 use tray_icon::menu::{CheckMenuItem, Menu, MenuEvent, MenuId, MenuItem, PredefinedMenuItem};
 
-use crate::service::{ServiceAction, is_installed, run_sync};
+use crate::service::{ServiceAction, ServiceTarget, is_installed, run_sync};
 
 /// Interval at which the status display is refreshed.
 const STATUS_INTERVAL: Duration = Duration::from_secs(3);
@@ -94,8 +94,8 @@ pub(crate) type Notifier = Arc<dyn Fn(TrayUpdate) + Send + Sync>;
 /// Status shown in the menu.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct TrayStatus {
-    /// Whether the central server is connected
-    central_connected: bool,
+    /// Whether the hub is connected
+    hub_connected: bool,
     /// Number of unsynced Outbox events
     unsynced: u64,
     /// Number of active sessions
@@ -203,7 +203,7 @@ impl TrayUi {
                     ))),
                     "update the tray tooltip"
                 );
-                match build_icon(status.central_connected) {
+                match build_icon(status.hub_connected) {
                     Ok(icon) => {
                         if let Err(err) = self.tray.set_icon(Some(icon)) {
                             tracing::debug!("failed to update the tray icon: {err}");
@@ -250,7 +250,7 @@ pub(crate) fn spawn_controller(
     mut actions: UnboundedReceiver<TrayAction>,
 ) {
     handle.spawn(async move {
-        let mut autostart = tokio::task::spawn_blocking(|| is_installed(false))
+        let mut autostart = tokio::task::spawn_blocking(|| is_installed(ServiceTarget::Node))
             .await
             .unwrap_or(false);
         notifier(TrayUpdate::Autostart(autostart));
@@ -271,13 +271,13 @@ pub(crate) fn spawn_controller(
                                 ServiceAction::Install
                             };
                             let result =
-                                tokio::task::spawn_blocking(move || run_sync(service_action, false)).await;
+                                tokio::task::spawn_blocking(move || run_sync(service_action, ServiceTarget::Node)).await;
                             match result {
                                 Ok(Ok(())) => {}
                                 Ok(Err(err)) => tracing::warn!("failed to toggle autostart: {err:#}"),
                                 Err(err) => tracing::warn!("autostart task failed: {err}"),
                             }
-                            autostart = tokio::task::spawn_blocking(|| is_installed(false))
+                            autostart = tokio::task::spawn_blocking(|| is_installed(ServiceTarget::Node))
                                 .await
                                 .unwrap_or(autostart);
                             notifier(TrayUpdate::Autostart(autostart));
@@ -315,19 +315,16 @@ async fn collect_status(state: &DaemonState) -> TrayStatus {
         .map(|sessions| sessions.len())
         .unwrap_or(0);
     TrayStatus {
-        central_connected: state.central_connected(),
+        hub_connected: state.hub_connected(),
         unsynced,
         active_sessions,
     }
 }
 
-/// Status line (central server connection state + unsynced count).
+/// Status line (hub connection state + unsynced count).
 fn status_line(status: &TrayStatus) -> String {
-    if status.central_connected {
-        format!(
-            "Status: ● connected to central server ({} unsynced)",
-            status.unsynced
-        )
+    if status.hub_connected {
+        format!("Status: ● connected to hub ({} unsynced)", status.unsynced)
     } else {
         "Status: ○ standalone".to_owned()
     }
@@ -342,7 +339,7 @@ fn session_line(active_sessions: usize) -> String {
 fn tooltip(node_name: &str, version: &str, status: Option<&TrayStatus>) -> String {
     match status {
         Some(status) => {
-            let mode = if status.central_connected {
+            let mode = if status.hub_connected {
                 "connected"
             } else {
                 "standalone"
@@ -358,18 +355,18 @@ fn tooltip(node_name: &str, version: &str, status: Option<&TrayStatus>) -> Strin
 
 /// Build the tray icon by downscaling the bundled icon and compositing the
 /// connection-state dot.
-fn build_icon(central_connected: bool) -> Result<tray_icon::Icon> {
-    let rgba = render_icon_rgba(ICON_PNG, central_connected)?;
+fn build_icon(hub_connected: bool) -> Result<tray_icon::Icon> {
+    let rgba = render_icon_rgba(ICON_PNG, hub_connected)?;
     tray_icon::Icon::from_rgba(rgba, ICON_SIZE, ICON_SIZE)
         .map_err(|err| anyhow::anyhow!("invalid tray icon image: {err}"))
 }
 
 /// Decode the PNG, downscale it to `ICON_SIZE` and draw the state dot (a pure
 /// function so it can be tested).
-fn render_icon_rgba(png_bytes: &[u8], central_connected: bool) -> Result<Vec<u8>> {
+fn render_icon_rgba(png_bytes: &[u8], hub_connected: bool) -> Result<Vec<u8>> {
     let (source, width, height) = decode_png_rgba(png_bytes)?;
     let mut rgba = downsample_rgba(&source, width, height, ICON_SIZE)?;
-    draw_status_dot(&mut rgba, ICON_SIZE, central_connected);
+    draw_status_dot(&mut rgba, ICON_SIZE, hub_connected);
     Ok(rgba)
 }
 
@@ -439,9 +436,9 @@ fn downsample_rgba(source: &[u8], width: u32, height: u32, size: u32) -> Result<
     Ok(output)
 }
 
-/// Draw the central server connection-state dot in the bottom-right corner
+/// Draw the hub connection-state dot in the bottom-right corner
 /// (green = connected / grey = standalone).
-fn draw_status_dot(rgba: &mut [u8], size: u32, central_connected: bool) {
+fn draw_status_dot(rgba: &mut [u8], size: u32, hub_connected: bool) {
     // #22c55e (connected)
     const CONNECTED: [u8; 4] = [34, 197, 94, u8::MAX];
     // #9ca3af (standalone)
@@ -449,11 +446,7 @@ fn draw_status_dot(rgba: &mut [u8], size: u32, central_connected: bool) {
     // #0f172a (outline for visibility)
     const OUTLINE: [u8; 4] = [15, 23, 42, u8::MAX];
 
-    let color = if central_connected {
-        CONNECTED
-    } else {
-        STANDALONE
-    };
+    let color = if hub_connected { CONNECTED } else { STANDALONE };
     let center = size as f32 / 2.0 - 0.5 + (size as f32 * 0.22);
     let radius = size as f32 * 0.2;
     for y in 0..size {
@@ -475,9 +468,9 @@ fn draw_status_dot(rgba: &mut [u8], size: u32, central_connected: bool) {
 mod tests {
     use super::*;
 
-    fn status(central_connected: bool, unsynced: u64, active_sessions: usize) -> TrayStatus {
+    fn status(hub_connected: bool, unsynced: u64, active_sessions: usize) -> TrayStatus {
         TrayStatus {
-            central_connected,
+            hub_connected,
             unsynced,
             active_sessions,
         }
@@ -500,7 +493,7 @@ mod tests {
     fn status_and_session_lines() {
         assert_eq!(
             status_line(&status(true, 3, 2)),
-            "Status: ● connected to central server (3 unsynced)"
+            "Status: ● connected to hub (3 unsynced)"
         );
         assert_eq!(status_line(&status(false, 0, 0)), "Status: ○ standalone");
         assert_eq!(session_line(0), "Sessions: 0 active");

@@ -30,7 +30,7 @@
   import ShieldIcon from "@lucide/svelte/icons/shield";
   import Trash2Icon from "@lucide/svelte/icons/trash-2";
 
-  const isServer = $derived(sync.connection.role === "central_server");
+  const isServer = $derived(sync.connection.role === "hub");
 
   /** Selected settings tab (reflects deep links such as `?tab=agents`). */
   let activeTab = $state(page.url.searchParams.get("tab") ?? "bootstrap");
@@ -215,7 +215,7 @@
                 <h2 class="font-medium">{m.settings_node_pairing_title()}</h2>
                 <p class="text-muted-foreground text-[13px]">
                   {m.settings_node_pairing_description()}
-                  (<code>fxg daemon</code>, <code>~/.flexagent/node_token</code>)
+                  (<code>fxg node start</code>, <code>~/.flexagent/node_token</code>)
                 </p>
               </div>
               <div class="flex items-center gap-1.5">
@@ -236,7 +236,7 @@
 
             {#if !isServer}
               <p class="text-muted-foreground text-[13px]">
-                {m.settings_node_pairing_server_only()}
+                {m.settings_node_pairing_hub_only()}
                 <code>{sync.connection.origin}</code>
               </p>
             {:else if (tokens.data ?? []).length === 0}
@@ -391,7 +391,7 @@
       <Dialog.Title>{m.settings_issue_node_token_title()}</Dialog.Title>
       <Dialog.Description>
         {m.settings_issue_node_token_description()}
-        <code>fxg daemon</code>
+        <code>fxg node start</code>
         {m.settings_issue_node_token_description_as()}
         <code>node_id</code>
         {m.settings_issue_node_token_description_note()}

@@ -2,15 +2,15 @@
 //!
 //! Design: `docs/01-architecture-and-sync.md` §6.3, `docs/05-cli-and-pwa-ui.md` §2.3.
 //!
-//! Clones the repository using the short-lived token injected by the central server
+//! Clones the repository using the short-lived token injected by the hub
 //! (`FXG_GIT_TOKEN`), auto-detects the toolchain from the repository's manifest files,
 //! and installs it with `mise` / `uv`. **All output of this function is restricted to
 //! `stderr`** (`stdout` is protected as JSON Lines dedicated to the subsequent
-//! `fxg daemon --stdio`).
+//! `fxg internal stdio`).
 //!
 //! On exit it writes the environment variables (PATH additions + the project profile's
 //! `bootstrap_env`) to `$FXG_HOME/bootstrap.env`. The generated provisioner script sources
-//! this right before `exec fxg daemon --stdio`, so the installed tools are inherited by
+//! this right before `exec fxg internal stdio`, so the installed tools are inherited by
 //! the agent process.
 
 use std::path::{Path, PathBuf};
@@ -41,7 +41,7 @@ pub struct BootstrapOptions {
     pub install_toolchain: bool,
     /// Tools added to the detected ones (for tests and debugging)
     pub extra_tools: Vec<String>,
-    /// Setup commands from the project profile (`project_profiles` in `server.db`)
+    /// Setup commands from the project profile (`project_profiles` in `hub.db`)
     pub setup: Vec<String>,
     /// Non-secret environment variables from the project profile
     pub env: BTreeMap<String, String>,
@@ -118,7 +118,7 @@ pub async fn bootstrap_workspace(options: BootstrapOptions) -> Result<BootstrapO
         log(format!("setup: {command}"));
         let status = run_streaming(&options.dir, command, &[]).await?;
         if !status {
-            return Err(NodeError::Server(format!(
+            return Err(NodeError::Hub(format!(
                 "bootstrap setup command failed: {command}"
             )));
         }
@@ -151,7 +151,7 @@ async fn clone_repository(options: &BootstrapOptions) -> Result<(), NodeError> {
             .map(|mut entries| entries.next().is_none())
             .unwrap_or(true);
         if !is_empty {
-            return Err(NodeError::Server(format!(
+            return Err(NodeError::Hub(format!(
                 "target directory is not empty and not a git repository: {}",
                 options.dir.display()
             )));

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        UPDATE hub_settings\n           SET vapid_subject = ?, revision = revision + 1, updated_at = ?\n         WHERE id = 1 AND revision = ?\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "ef0035aaed07fb2f4bcd7b38105feef18fdaf474f5ae653d47c2c5303e4d5a43"
+}

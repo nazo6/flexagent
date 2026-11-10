@@ -3,9 +3,9 @@
 -- Everything changed at runtime is owned by exactly one DB:
 --   node.db   : node_settings / agent_settings / agent_aliases / custom_agents /
 --               enabled_package_agents / project_path_links
---   server.db : server_settings / git_credentials / provisioners / project_profiles
+--   hub.db : hub_settings / git_credentials / provisioners / project_profiles
 -- Secret *values* never live in the DB: only metadata is stored here, while the
--- value file lives under ~/.flexagent/secrets/{node,server}/<id>.
+-- value file lives under ~/.flexagent/secrets/{node,hub}/<id>.
 
 -- 1. Node settings (node.db; single-row table)
 CREATE TABLE node_settings (
@@ -60,8 +60,8 @@ CREATE TABLE project_path_links (
 CREATE INDEX idx_project_path_links_key
     ON project_path_links(project_key);
 
--- 4. Server settings, Git credentials, provisioners and VM profiles (server.db)
-CREATE TABLE server_settings (
+-- 4. Server settings, Git credentials, provisioners and VM profiles (hub.db)
+CREATE TABLE hub_settings (
     id                       INTEGER PRIMARY KEY CHECK (id = 1),
     vapid_subject            TEXT,
     revision                 INTEGER NOT NULL DEFAULT 1,
@@ -95,7 +95,7 @@ CREATE TABLE project_profiles (
     updated_at               INTEGER NOT NULL
 );
 
--- 5. Secret metadata (node.db / server.db; values live in secrets/{node,server}/)
+-- 5. Secret metadata (node.db / hub.db; values live in secrets/{node,hub}/)
 CREATE TABLE secrets (
     id                       TEXT PRIMARY KEY,
     description              TEXT,

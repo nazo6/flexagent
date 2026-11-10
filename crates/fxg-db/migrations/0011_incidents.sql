@@ -1,6 +1,6 @@
 -- Diagnostic incidents: a bounded, grouped history of failures and degradations.
 --
--- Both node.db and server.db use this table. Rows are grouped by
+-- Both node.db and hub.db use this table. Rows are grouped by
 -- (code, source, session_id, node_id) while unresolved and inside the grouping
 -- window, so a reconnect loop does not flood the table. Retention is enforced by
 -- `fxg_db::incidents::prune` (period + maximum row count).

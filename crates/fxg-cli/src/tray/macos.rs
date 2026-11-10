@@ -1,7 +1,7 @@
 //! macOS: backend that runs the tao loop on the main thread.
 //!
 //! `NSStatusItem` must be created and driven **while the main thread's event
-//! loop is running**, so `fxg daemon --tray` hands the main thread over to tao
+//! loop is running**, so `fxg node start --tray` hands the main thread over to tao
 //! (the NSApplication loop) and starts the daemon body (tokio runtime) on a
 //! worker thread (called from the early branch in `main.rs`).
 //!
@@ -20,7 +20,7 @@ use tokio::sync::mpsc::unbounded_channel;
 
 use super::{Notifier, TrayAction, TrayContext, TrayUi, TrayUpdate, spawn_controller};
 use crate::Commands;
-use crate::commands::DaemonArgs;
+use crate::commands::{NodeCommands, NodeStartArgs};
 
 /// Handles of the started daemon (passed from the worker thread to the main
 /// thread).
@@ -34,14 +34,17 @@ enum UserEvent {
     DaemonStopped(i32),
 }
 
-/// If this is `fxg daemon --tray` (macOS), start the daemon with a tray on the
+/// If this is `fxg node start --tray` (macOS), start the daemon with a tray on the
 /// main thread.
 ///
 /// When it returns `Some`, the caller (`main`) exits with that exit code. When
 /// it returns `None`, the normal path (tokio runtime on the main thread)
 /// handles the command.
-pub async fn run_daemon_if_requested(command: &Commands) -> Option<ExitCode> {
-    let Commands::Daemon(args) = command else {
+pub async fn run_node_if_requested(command: &Commands) -> Option<ExitCode> {
+    let Commands::Node(node_args) = command else {
+        return None;
+    };
+    let NodeCommands::Start(args) = &node_args.command else {
         return None;
     };
     let env = fxg_protocol::config::process_env;
@@ -52,21 +55,21 @@ pub async fn run_daemon_if_requested(command: &Commands) -> Option<ExitCode> {
     if !args.tray_requested(tray_configured) {
         return None;
     }
-    Some(run_daemon_with_tray(args, &global))
+    Some(run_node_with_tray(args, &global))
 }
 
-/// Run `fxg daemon --tray` (macOS). Does not return until the daemon stops.
-fn run_daemon_with_tray(
-    args: &DaemonArgs,
+/// Run `fxg node start --tray` (macOS). Does not return until the node stops.
+fn run_node_with_tray(
+    args: &NodeStartArgs,
     global: &fxg_protocol::config::GlobalConfig,
 ) -> ExitCode {
-    let config = args.daemon_config_from(global);
+    let config = args.node_config_from(global);
 
     // The daemon body (tokio) starts on a worker thread (tao owns the main
     // thread)
     let (ready_tx, ready_rx) = mpsc::channel::<Result<ReadyPayload, String>>();
     let worker = match std::thread::Builder::new()
-        .name("fxg-daemon".to_owned())
+        .name("fxg-node".to_owned())
         .spawn(move || -> i32 {
             let runtime = match Runtime::new() {
                 Ok(runtime) => runtime,
@@ -78,7 +81,7 @@ fn run_daemon_with_tray(
             let handle = runtime.handle().clone();
             runtime.block_on(async move {
                 match NodeDaemon::start(config).await {
-                    Ok(daemon) => {
+                    Ok(node) => {
                         let _ = ready_tx.send(Ok((
                             daemon.state().clone(),
                             daemon.shutdown_handle(),
@@ -96,7 +99,7 @@ fn run_daemon_with_tray(
         }) {
         Ok(worker) => worker,
         Err(err) => {
-            eprintln!("fxg: failed to spawn the daemon thread: {err}");
+            eprintln!("fxg: failed to spawn the node thread: {err}");
             return ExitCode::FAILURE;
         }
     };
@@ -117,7 +120,7 @@ fn run_daemon_with_tray(
     let event_loop = EventLoopBuilder::<UserEvent>::with_user_event().build();
 
     let proxy = event_loop.create_proxy();
-    // Notify the main loop when the worker thread (daemon) exits
+    // Notify the main loop when the worker thread (node) exits
     let proxy_done = proxy.clone();
     std::thread::spawn(move || {
         let code = worker.join().unwrap_or(1);

@@ -1,8 +1,8 @@
 //! Local IPC server between the CLI (`fxg`) and the daemon.
 //!
-//! - **Transport**: Windows uses a named pipe (`\\.\pipe\fxg-daemon-<username>`);
-//!   Linux / macOS / WSL use a Unix domain socket (`$XDG_RUNTIME_DIR/fxg/daemon.sock`
-//!   or `/tmp/fxg-<uid>/daemon.sock`)
+//! - **Transport**: Windows uses a named pipe (`\\.\pipe\fxg-node-<username>`);
+//!   Linux / macOS / WSL use a Unix domain socket (`$XDG_RUNTIME_DIR/fxg/node.sock`
+//!   or `/tmp/fxg-<uid>/node.sock`)
 //! - **Framing**: Length-prefixed JSON
 //!   (4-byte LE length header + JSON payload)
 //!
@@ -20,7 +20,7 @@ use fxg_protocol::ipc::{
     IPC_PROTOCOL_VERSION, IpcOutcome, IpcRequest, IpcRequestKind, IpcResultKind, IpcServerMessage,
     LocalRequest, LocalResult, SessionDetail,
 };
-use fxg_protocol::node_server::NodeRpcOutcome;
+use fxg_protocol::node_hub::NodeRpcOutcome;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::watch;
 
@@ -29,7 +29,7 @@ use super::ops::AuditSource;
 use crate::error::NodeError;
 use crate::ipc_framing::{read_frame, write_message};
 
-/// Upper limit of the session list returned by `fxg ps` etc.
+/// Upper limit of the session list returned by `fxg session list` etc.
 const SESSION_LIST_LIMIT: u32 = 200;
 
 /// Checks whether the IPC endpoint is taken by another daemon.
@@ -43,7 +43,7 @@ pub async fn check_endpoint_available(endpoint: &str) -> Result<(), NodeError> {
         return Ok(());
     }
     if tokio::net::UnixStream::connect(path).await.is_ok() {
-        return Err(NodeError::Server(format!(
+        return Err(NodeError::Hub(format!(
             "another daemon is already listening on {endpoint}"
         )));
     }
@@ -57,11 +57,11 @@ pub async fn check_endpoint_available(endpoint: &str) -> Result<(), NodeError> {
     use tokio::net::windows::named_pipe::ClientOptions;
 
     match ClientOptions::new().open(endpoint) {
-        Ok(_) => Err(NodeError::Server(format!(
+        Ok(_) => Err(NodeError::Hub(format!(
             "another daemon is already listening on {endpoint}"
         ))),
         // ERROR_PIPE_BUSY (231): running, but all instances are handling connections
-        Err(err) if err.raw_os_error() == Some(crate::error::PIPE_BUSY) => Err(NodeError::Server(
+        Err(err) if err.raw_os_error() == Some(crate::error::PIPE_BUSY) => Err(NodeError::Hub(
             format!("another daemon is already listening on {endpoint}"),
         )),
         // ERROR_FILE_NOT_FOUND (2) means not started. Other errors are detected at bind time
@@ -82,7 +82,7 @@ pub async fn serve(
     }
 
     let listener = tokio::net::UnixListener::bind(&path)
-        .map_err(|err| NodeError::Server(format!("failed to bind {endpoint}: {err}")))?;
+        .map_err(|err| NodeError::Hub(format!("failed to bind {endpoint}: {err}")))?;
     tracing::info!(endpoint = %endpoint, "local ipc server listening (unix socket)");
 
     loop {
@@ -116,14 +116,14 @@ pub async fn serve(
     endpoint: String,
     mut shutdown: watch::Receiver<bool>,
 ) -> Result<(), NodeError> {
-    use tokio::net::windows::named_pipe::ServerOptions;
+    use tokio::net::windows::named_pipe::HubOptions;
 
     let create_instance = |first: bool| {
-        let mut options = ServerOptions::new();
+        let mut options = HubOptions::new();
         options.first_pipe_instance(first);
-        options.create(&endpoint).map_err(|err| {
-            NodeError::Server(format!("failed to create named pipe {endpoint}: {err}"))
-        })
+        options
+            .create(&endpoint)
+            .map_err(|err| NodeError::Hub(format!("failed to create named pipe {endpoint}: {err}")))
     };
 
     tracing::info!(endpoint = %endpoint, "local ipc server listening (named pipe)");
@@ -214,8 +214,18 @@ where
             return Ok(());
         }
 
+        let shutdown_requested = matches!(
+            &request.request,
+            IpcRequestKind::Local {
+                request: LocalRequest::Shutdown { .. }
+            }
+        );
         let response = dispatch(&state, request).await;
         write_message(&mut writer, &response).await?;
+        if shutdown_requested {
+            state.request_shutdown();
+            return Ok(());
+        }
     }
 }
 
@@ -241,7 +251,7 @@ impl DispatchError {
         }
     }
 
-    fn from_api_error(_command_id: &CommandId, err: fxg_server::api::ApiError) -> Self {
+    fn from_api_error(_command_id: &CommandId, err: fxg_hub::api::ApiError) -> Self {
         Self {
             code: err.code,
             message: err.message,
@@ -329,7 +339,7 @@ async fn handle_local(
                 LocalResult::LocalStatus {
                     status: fxg_protocol::ipc::LocalStatus {
                         sessions,
-                        central_connected: state.central_connected(),
+                        hub_connected: state.hub_connected(),
                         unsynced_event_count: unsynced,
                         last_synced_at,
                     },
@@ -365,7 +375,7 @@ async fn handle_local(
                 .list_incidents(limit.clamp(1, 500), include_resolved)
                 .await
                 .map_err(|err| DispatchError::from_node_error(&command_id, err.into()))?;
-            let (retention_days, max_entries) = fxg_server::api::incident_retention();
+            let (retention_days, max_entries) = fxg_hub::api::incident_retention();
             Ok((
                 command_id,
                 LocalResult::Incidents {
@@ -428,34 +438,10 @@ async fn handle_local(
             Ok((command_id, LocalResult::Sessions { sessions }))
         }
 
-        LocalRequest::KillAll { command_id } => {
-            let (killed_sessions, killed_ptys) = state
-                .kill_all_local("killed by local kill-all")
-                .await
-                .map_err(|err| DispatchError::from_node_error(&command_id, err))?;
-
-            state
-                .record_audit(
-                    fxg_db::audit::actions::KILL_SWITCH,
-                    &AuditSource::local(),
-                    None,
-                    serde_json::json!({
-                        "reason": "local kill-all",
-                        "killed_sessions": killed_sessions,
-                        "killed_ptys": killed_ptys,
-                    }),
-                )
-                .await;
-
-            Ok((
-                command_id,
-                LocalResult::KillAll {
-                    killed_sessions,
-                    killed_ptys,
-                },
-            ))
+        LocalRequest::Shutdown { command_id } => {
+            // The connection handler requests shutdown after writing this response.
+            Ok((command_id, LocalResult::Ack { message: None }))
         }
-
         LocalRequest::AuthToken { command_id, rotate } => {
             let token = if rotate {
                 state
@@ -468,7 +454,7 @@ async fn handle_local(
         }
 
         LocalRequest::GitCredential { command_id, prompt } => {
-            // Git credential proxy: resolve by relaying in memory to the central server
+            // Git credential proxy: resolve by relaying in memory to the hub
             // (without leaving the token on disk inside the VM. Design: docs/01 §6.4)
             let result = match state.credentials().resolve(&prompt).await {
                 Ok(response) => LocalResult::GitCredential {
@@ -719,7 +705,7 @@ mod tests {
     use crate::daemon::{DaemonConfig, NodeDaemon};
     use crate::git;
     use crate::ipc_client::IpcClient;
-    use fxg_protocol::node_server::{NodeRpcRequest, NodeRpcResponse};
+    use fxg_protocol::node_hub::{NodeRpcRequest, NodeRpcResponse};
     use std::time::Duration;
 
     async fn start_daemon() -> (NodeDaemon, tempfile::TempDir) {
@@ -976,10 +962,7 @@ mod tests {
         config.listen_addr = "127.0.0.1:0".to_owned();
         config.ipc_endpoint = daemon.ipc_endpoint().to_owned();
         let err = NodeDaemon::start(config).await.expect_err("must fail");
-        assert!(
-            matches!(err, NodeError::Server(_)),
-            "unexpected error: {err}"
-        );
+        assert!(matches!(err, NodeError::Hub(_)), "unexpected error: {err}");
 
         daemon.shutdown();
         tokio::time::timeout(Duration::from_secs(5), daemon.wait())

@@ -55,14 +55,14 @@ import type {
   SessionArchiveResponse,
   SessionEventBatch,
   SecretsResponse,
-  ServerSettingsSnapshot,
+  HubSettingsSnapshot,
   SessionSummary,
   SystemInfoResponse,
   WorkspaceDiffResponse,
   UpdateAgentSettingsRequest,
   UpdateNodeSettingsRequest,
   UpdateProjectProfileRequest,
-  UpdateServerSettingsRequest,
+  UpdateHubSettingsRequest,
   UpsertSecretRequest,
   WorktreeInfo,
   WorktreesResponse,
@@ -87,7 +87,7 @@ interface RequestOptions {
 }
 
 /**
- * Client REST API client shared by `fxg server` / `fxg daemon`.
+ * Client REST API client shared by `fxg hub` / `fxg node`.
  *
  * Authentication prefers the Bearer header, while same-origin requests also
  * send the `fxg_session` Cookie automatically (`credentials: 'same-origin'`).
@@ -438,7 +438,7 @@ export class ApiClient {
     return response.logs;
   }
 
-  /** `POST /api/v1/push/subscribe` (register a Web Push subscription; central server only). */
+  /** `POST /api/v1/push/subscribe` (register a Web Push subscription; hub only). */
   pushSubscribe(request: PushSubscribeRequest): Promise<PushSubscribeResponse> {
     return this.#request("POST", "/api/v1/push/subscribe", { body: request });
   }
@@ -499,14 +499,14 @@ export class ApiClient {
   // Settings / secrets / project profiles
   // ------------------------------------------------------------------
 
-  /** `GET /api/v1/settings/server` (central server). */
-  serverSettings(): Promise<ServerSettingsSnapshot> {
-    return this.#request("GET", "/api/v1/settings/server");
+  /** `GET /api/v1/settings/hub` (hub). */
+  hubSettings(): Promise<HubSettingsSnapshot> {
+    return this.#request("GET", "/api/v1/settings/hub");
   }
 
-  /** `PATCH /api/v1/settings/server` (central server). */
-  updateServerSettings(request: UpdateServerSettingsRequest): Promise<ServerSettingsSnapshot> {
-    return this.#request("PATCH", "/api/v1/settings/server", { body: request });
+  /** `PATCH /api/v1/settings/hub` (hub). */
+  updateHubSettings(request: UpdateHubSettingsRequest): Promise<HubSettingsSnapshot> {
+    return this.#request("PATCH", "/api/v1/settings/hub", { body: request });
   }
 
   /** `GET /api/v1/nodes/:id/settings` (node-owned, local or relayed). */
@@ -560,29 +560,29 @@ export class ApiClient {
     );
   }
 
-  /** `GET /api/v1/server/secrets` (server-owned). */
+  /** `GET /api/v1/hub/secrets` (hub-owned). */
   serverSecrets(): Promise<SecretsResponse> {
-    return this.#request("GET", "/api/v1/server/secrets");
+    return this.#request("GET", "/api/v1/hub/secrets");
   }
 
-  /** `PUT /api/v1/server/secrets/:id` (write-only). */
+  /** `PUT /api/v1/hub/secrets/:id` (write-only). */
   upsertServerSecret(secretId: string, request: UpsertSecretRequest): Promise<SecretsResponse> {
-    return this.#request("PUT", `/api/v1/server/secrets/${encodeURIComponent(secretId)}`, {
+    return this.#request("PUT", `/api/v1/hub/secrets/${encodeURIComponent(secretId)}`, {
       body: request,
     });
   }
 
-  /** `DELETE /api/v1/server/secrets/:id`. */
+  /** `DELETE /api/v1/hub/secrets/:id`. */
   deleteServerSecret(secretId: string): Promise<SecretsResponse> {
-    return this.#request("DELETE", `/api/v1/server/secrets/${encodeURIComponent(secretId)}`);
+    return this.#request("DELETE", `/api/v1/hub/secrets/${encodeURIComponent(secretId)}`);
   }
 
-  /** `GET /api/v1/projects/:id/profile` (server-owned). */
+  /** `GET /api/v1/projects/:id/profile` (hub-owned). */
   projectProfile(projectId: string): Promise<ProjectProfile> {
     return this.#request("GET", `/api/v1/projects/${encodeURIComponent(projectId)}/profile`);
   }
 
-  /** `PUT /api/v1/projects/:id/profile` (server-owned). */
+  /** `PUT /api/v1/projects/:id/profile` (hub-owned). */
   updateProjectProfile(
     projectId: string,
     request: UpdateProjectProfileRequest,
@@ -621,18 +621,18 @@ export class ApiClient {
     return this.#request("POST", "/api/v1/auth/rotate-token");
   }
 
-  /** `GET /api/v1/nodes/tokens` (central server only). */
+  /** `GET /api/v1/nodes/tokens` (hub only). */
   async nodeTokens(): Promise<NodeTokenSummary[]> {
     const response = await this.#request<NodeTokensResponse>("GET", "/api/v1/nodes/tokens");
     return response.tokens;
   }
 
-  /** `POST /api/v1/nodes/tokens` (issue a per-node token; central server only). */
+  /** `POST /api/v1/nodes/tokens` (issue a per-node token; hub only). */
   issueNodeToken(request: IssueNodeTokenRequest): Promise<IssueNodeTokenResponse> {
     return this.#request("POST", "/api/v1/nodes/tokens", { body: request });
   }
 
-  /** `DELETE /api/v1/nodes/tokens/:node_id` (revoke a per-node token; central server only). */
+  /** `DELETE /api/v1/nodes/tokens/:node_id` (revoke a per-node token; hub only). */
   async revokeNodeToken(nodeId: string): Promise<void> {
     await this.#request("DELETE", `/api/v1/nodes/tokens/${encodeURIComponent(nodeId)}`);
   }

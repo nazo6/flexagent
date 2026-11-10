@@ -1,8 +1,8 @@
 //! Phase 6: end-to-end tests for ephemeral VM provisioners.
 //!
-//! The tests start the real `fxg daemon --stdio --ephemeral` binary as a child
+//! The tests start the real `fxg internal stdio --ephemeral` binary as a child
 //! process through a provisioner and verify stdio JSON Lines traffic with the
-//! central server, `StartSession` relaying, streamed bootstrap logs, and the
+//! hub, `StartSession` relaying, streamed bootstrap logs, and the
 //! `DrainAndShutdown` → `DrainComplete` lifecycle.
 
 use std::collections::BTreeMap;
@@ -10,12 +10,12 @@ use std::path::Path;
 use std::time::Duration;
 
 use fxg_db::{Db, DbRole};
+use fxg_hub::Hub;
+use fxg_hub::api::{ClientApiBackend, ClientEvent};
+use fxg_hub::state::HubOptions;
 use fxg_protocol::client_api::{CreateSessionRequest, CreateSessionResponse, NodesResponse};
 use fxg_protocol::config::AUTH_TOKEN_FILE_NAME;
 use fxg_protocol::settings::ProvisionerDefinition;
-use fxg_server::Server;
-use fxg_server::api::{ClientApiBackend, ClientEvent};
-use fxg_server::state::ServerOptions;
 
 /// Run a Git command (panics on failure).
 fn git(dir: &Path, args: &[&str]) {
@@ -82,7 +82,7 @@ async fn provisioner_runs_stdio_node_and_drains() {
         .expect("register custom agent");
     drop(node_db);
 
-    // Register the project on the server side (`canonical_git_url` is required)
+    // Register the project on the hub side (`canonical_git_url` is required)
     let project_id = "github.com/nazo6/flexagent";
     let db = Db::open(&fxg_db::hub_db_path(&server_home), DbRole::Hub)
         .await
@@ -97,7 +97,7 @@ async fn provisioner_runs_stdio_node_and_drains() {
     .expect("register project");
     drop(db);
 
-    // Provisioner: start the real binary with `daemon --stdio --ephemeral`
+    // Provisioner: start the real binary with `internal stdio --ephemeral`
     // (a free-form definition that avoids `{BOOTSTRAP_SCRIPT}`; verifies the
     // path without bootstrap)
     let provisioner_name = "test-ephemeral";
@@ -106,8 +106,8 @@ async fn provisioner_runs_stdio_node_and_drains() {
         description: Some("test stdio provisioner".to_owned()),
         command: env!("CARGO_BIN_EXE_fxg").to_owned(),
         args: vec![
-            "daemon".to_owned(),
-            "--stdio".to_owned(),
+            "internal".to_owned(),
+            "stdio".to_owned(),
             "--ephemeral".to_owned(),
             "--workspace".to_owned(),
             repo.to_string_lossy().into_owned(),
@@ -125,7 +125,7 @@ async fn provisioner_runs_stdio_node_and_drains() {
         .await
         .expect("register provisioner");
     drop(db);
-    let server = Server::start(ServerOptions {
+    let server = Hub::start(HubOptions {
         fxg_home: server_home.clone(),
         listen_addr: "127.0.0.1:0".to_owned(),
         allowed_hosts: Vec::new(),
@@ -135,9 +135,8 @@ async fn provisioner_runs_stdio_node_and_drains() {
     .await
     .expect("start server");
     let addr = server.listen_addr();
-    let token =
-        fxg_server::api::auth::load_or_create_token(&server_home.join(AUTH_TOKEN_FILE_NAME))
-            .expect("token");
+    let token = fxg_hub::api::auth::load_or_create_token(&server_home.join(AUTH_TOKEN_FILE_NAME))
+        .expect("token");
     let http = reqwest::Client::new();
 
     // Subscribe to bootstrap logs (ephemeral events)

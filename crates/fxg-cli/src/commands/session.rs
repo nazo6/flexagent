@@ -9,16 +9,15 @@ use fxg_protocol::common::{ClientSource, SessionControlAction, SessionStatus};
 use fxg_protocol::events::UnifiedEventPayload;
 use usage::Args;
 
-use crate::client::{DaemonClient, format_unix_ms_utc, print_table, short_id, truncate};
+use crate::client::{NodeClient, format_unix_ms_utc, print_table, short_id, truncate};
 
-use super::run::*;
 use super::*;
 
 // ----------------------------------------------------------------------
-// fxg ps / fxg session list
+// fxg session list / fxg session list
 // ----------------------------------------------------------------------
 
-/// Display options for the session list (shared by `fxg ps` and
+/// Display options for the session list (shared by `fxg session list` and
 /// `fxg session list`).
 #[derive(Debug, Args)]
 pub struct SessionListArgs {
@@ -43,7 +42,7 @@ impl usage::RunAsync for SessionListArgs {
     type Output = Result<()>;
 
     async fn run_async(self) -> Self::Output {
-        let mut client = DaemonClient::connect().await?;
+        let mut client = NodeClient::connect().await?;
         let sessions = client.list_sessions(self.all, self.archived).await?;
         let sessions: Vec<_> = sessions
             .into_iter()
@@ -106,15 +105,17 @@ pub struct SessionArgs {
 #[derive(Debug, usage::Subcommands)]
 #[usage(run_async)]
 pub enum SessionCommands {
+    /// Start a new session
+    New(SessionNewArgs),
     /// List sessions
     List(SessionListArgs),
     /// Show session details, state and event statistics
     Show(SessionShowArgs),
-    /// Show session diagnostics (agent stderr tail, status, last error)
-    Diagnose(SessionDiagnoseArgs),
     /// Send a prompt to an existing session non-interactively (headless)
     Prompt(SessionPromptArgs),
-    /// Cancel the running turn, or stop the session gracefully
+    /// Cancel the running turn
+    Cancel(SessionCancelArgs),
+    /// Stop the session gracefully
     Stop(SessionStopArgs),
     /// Force-terminate the session's child process tree
     Kill(SessionKillArgs),
@@ -149,7 +150,7 @@ impl usage::RunAsync for SessionShowArgs {
     type Output = Result<()>;
 
     async fn run_async(self) -> Self::Output {
-        let mut client = DaemonClient::connect().await?;
+        let mut client = NodeClient::connect().await?;
         let detail = client.session_show(&self.session_id, self.events).await?;
         if self.json {
             let value = serde_json::json!({
@@ -339,61 +340,6 @@ fn describe_event(payload: &UnifiedEventPayload) -> String {
     }
 }
 
-/// `fxg session diagnose <id>`
-#[derive(Debug, Args)]
-pub struct SessionDiagnoseArgs {
-    /// Session ID
-    session_id: String,
-    /// Output as JSON
-    #[usage(long)]
-    json: bool,
-}
-
-impl usage::RunAsync for SessionDiagnoseArgs {
-    type Output = Result<()>;
-
-    async fn run_async(self) -> Self::Output {
-        let mut client = DaemonClient::connect().await?;
-        let detail = client.session_show(&self.session_id, 5).await?;
-        let diagnostics = client.diagnostics().await?;
-        let agent_id = &detail.session.agent_id;
-        let stderr_tail = diagnostics
-            .agents
-            .iter()
-            .find(|agent| &agent.agent_id == agent_id)
-            .map(|agent| agent.stderr_tail.clone())
-            .unwrap_or_default();
-        if self.json {
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&serde_json::json!({
-                    "session": detail.session,
-                    "agent_id": agent_id,
-                    "stderr_tail": stderr_tail,
-                    "daemon_log": diagnostics.daemon_log,
-                }))?
-            );
-            return Ok(());
-        }
-        println!("Session: {} ({})", detail.session.title, self.session_id);
-        println!("Agent:   {agent_id}");
-        println!("Status:  {:?}", detail.session.status);
-        println!("Path:    {}", detail.session.local_path);
-        if stderr_tail.is_empty() {
-            println!("stderr:  (none captured)");
-        } else {
-            println!("stderr (last {}):", stderr_tail.len());
-            for line in &stderr_tail {
-                println!("  {line}");
-            }
-        }
-        if let Some(log) = diagnostics.daemon_log {
-            println!("Daemon log: {log}");
-        }
-        Ok(())
-    }
-}
-
 /// `fxg session prompt <id> <text>`
 #[derive(Debug, Args)]
 pub struct SessionPromptArgs {
@@ -413,7 +359,7 @@ impl usage::RunAsync for SessionPromptArgs {
     type Output = Result<()>;
 
     async fn run_async(self) -> Self::Output {
-        let mut client = DaemonClient::connect().await?;
+        let mut client = NodeClient::connect().await?;
         let input = build_prompt_input(&self.text, &self.attach)?;
         client
             .send_prompt(&self.session_id, &input, ClientSource::Cli)
@@ -428,7 +374,7 @@ impl usage::RunAsync for SessionPromptArgs {
 
 /// Poll events until the turn finishes (`idle`) and print them
 /// (`fxg session prompt --wait`).
-async fn wait_for_turn(client: &mut DaemonClient, session_id: &str, prompt: &str) -> Result<()> {
+async fn wait_for_turn(client: &mut NodeClient, session_id: &str, prompt: &str) -> Result<()> {
     let mut seen_prompt = false;
     let mut last_seq = 0u64;
     loop {
@@ -501,27 +447,37 @@ fn print_and_check_done(
 pub struct SessionStopArgs {
     /// Session ID
     session_id: String,
-    /// Keep the session and only interrupt the running turn
-    #[usage(long)]
-    turn_only: bool,
 }
 
 impl usage::RunAsync for SessionStopArgs {
     type Output = Result<()>;
 
     async fn run_async(self) -> Self::Output {
-        let mut client = DaemonClient::connect().await?;
-        if self.turn_only {
-            client
-                .control_session(&self.session_id, SessionControlAction::Cancel)
-                .await?;
-            println!("cancelled current turn ({})", short_id(&self.session_id));
-        } else {
-            client
-                .control_session(&self.session_id, SessionControlAction::Kill)
-                .await?;
-            println!("stopped session ({})", short_id(&self.session_id));
-        }
+        let mut client = NodeClient::connect().await?;
+        client
+            .control_session(&self.session_id, SessionControlAction::Kill)
+            .await?;
+        println!("stopped session ({})", short_id(&self.session_id));
+        Ok(())
+    }
+}
+
+/// `fxg session cancel <id>`
+#[derive(Debug, Args)]
+pub struct SessionCancelArgs {
+    /// Session ID
+    session_id: String,
+}
+
+impl usage::RunAsync for SessionCancelArgs {
+    type Output = Result<()>;
+
+    async fn run_async(self) -> Self::Output {
+        let mut client = NodeClient::connect().await?;
+        client
+            .control_session(&self.session_id, SessionControlAction::Cancel)
+            .await?;
+        println!("cancelled current turn ({})", short_id(&self.session_id));
         Ok(())
     }
 }
@@ -537,7 +493,7 @@ impl usage::RunAsync for SessionKillArgs {
     type Output = Result<()>;
 
     async fn run_async(self) -> Self::Output {
-        let mut client = DaemonClient::connect().await?;
+        let mut client = NodeClient::connect().await?;
         client
             .control_session(&self.session_id, SessionControlAction::Kill)
             .await?;
@@ -576,7 +532,7 @@ impl usage::RunAsync for SessionImportArgs {
                 .to_string_lossy()
                 .into_owned(),
         };
-        let mut client = DaemonClient::connect().await?;
+        let mut client = NodeClient::connect().await?;
         let session_id = client
             .import_session(
                 &self.agent,
@@ -601,7 +557,7 @@ impl usage::RunAsync for SessionArchiveArgs {
     type Output = Result<()>;
 
     async fn run_async(self) -> Self::Output {
-        let mut client = DaemonClient::connect().await?;
+        let mut client = NodeClient::connect().await?;
         let archived_at = client.archive_session(&self.session_id, true).await?;
         println!("archived session ({})", short_id(&self.session_id));
         if let Some(archived_at) = archived_at {
@@ -622,7 +578,7 @@ impl usage::RunAsync for SessionUnarchiveArgs {
     type Output = Result<()>;
 
     async fn run_async(self) -> Self::Output {
-        let mut client = DaemonClient::connect().await?;
+        let mut client = NodeClient::connect().await?;
         client.archive_session(&self.session_id, false).await?;
         println!("unarchived session ({})", short_id(&self.session_id));
         Ok(())
@@ -640,7 +596,7 @@ impl usage::RunAsync for SessionDeleteArgs {
     type Output = Result<()>;
 
     async fn run_async(self) -> Self::Output {
-        let mut client = DaemonClient::connect().await?;
+        let mut client = NodeClient::connect().await?;
         client.delete_session(&self.session_id).await?;
         println!(
             "deleted session ({}) — the conversation log is purged and cannot be restored",
@@ -662,8 +618,8 @@ pub struct SessionForkArgs {
     #[usage(long)]
     base: Option<String>,
     /// Print only the session ID and do not open a browser
-    #[usage(short = 'd', long)]
-    detach: bool,
+    #[usage(short = 'q', long)]
+    quiet: bool,
     /// Do not open the Web UI in the default browser after the fork
     #[usage(long)]
     no_open: bool,
@@ -673,7 +629,7 @@ impl usage::RunAsync for SessionForkArgs {
     type Output = Result<()>;
 
     async fn run_async(self) -> Self::Output {
-        let mut client = DaemonClient::connect().await?;
+        let mut client = NodeClient::connect().await?;
         let cwd = match &self.worktree {
             Some(branch) => {
                 let dir = std::env::current_dir().context("failed to resolve current directory")?;
@@ -685,7 +641,7 @@ impl usage::RunAsync for SessionForkArgs {
         let session_id = client
             .fork_session(&self.session_id, cwd.as_deref())
             .await?;
-        if self.detach {
+        if self.quiet {
             println!("{session_id}");
             return Ok(());
         }
@@ -699,8 +655,8 @@ pub struct SessionResumeArgs {
     /// Session ID to resume
     session_id: String,
     /// Print only the session ID and do not open a browser
-    #[usage(short = 'd', long)]
-    detach: bool,
+    #[usage(short = 'q', long)]
+    quiet: bool,
     /// Do not open the Web UI in the default browser after resuming
     #[usage(long)]
     no_open: bool,
@@ -714,14 +670,14 @@ impl usage::RunAsync for SessionResumeArgs {
     type Output = Result<()>;
 
     async fn run_async(self) -> Self::Output {
-        let mut client = DaemonClient::connect().await?;
+        let mut client = NodeClient::connect().await?;
         let context_restored = client.resume_session(&self.session_id, self.replay).await?;
         if context_restored {
             eprintln!("resumed (agent context restored): {}", self.session_id);
         } else {
             eprintln!("resumed with replayed history: {}", self.session_id);
         }
-        if self.detach {
+        if self.quiet {
             println!("{}", self.session_id);
             return Ok(());
         }

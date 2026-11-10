@@ -4,8 +4,6 @@
 
 ## 1. `fxg` CLI コマンド完全リファレンス
 
-> **Status**: 本節は CLI 再編（`session` / `node` / `hub` 体系）後の仕様を先に定義したものです。実装は同じブランチで後続して行うため、現時点のバイナリのコマンドとは一部異なります。
-
 CLI は曖昧な暗黙サブコマンド（`fxg <agent>` 短縮形）を設けず、**`fxg <noun> <verb>` の明示的な体系**に統一します。セッション操作は `session` に集約し、`run` / `ps` のような別名は置きません。プロセスは `node`（ローカル）と `hub`（中央）の2つだけにし、どちらも同じ `start` / `stop` / `restart` / `status` を持ちます。`service` は OS ログイン時の自動起動登録だけを担当し、起動・停止は `node` / `hub` に委譲します。
 
 CLI のパースには **`usage-rs`**（`usage = { package = "usage-rs", version = "7.3", features = ["completions"] }`）を使用し、`#[derive(Cli)]` / `#[derive(Args)]` / `#[derive(Subcommands)]` + `Run` / `RunWith` でコマンドを定義します（`clap` は使用しない）。引数なしの **`fxg` 実行はデフォルトサブコマンドとして `fxg web`（node の Web UI）が実行**され、node が未起動であれば自動でバックグラウンド起動し、トークン付きURLでブラウザを自動オープンします。

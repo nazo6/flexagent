@@ -2,7 +2,7 @@
 //!
 //! `node.db` owns `node_settings` / `agent_settings` / `agent_aliases` /
 //! `custom_agents` / `enabled_package_agents` / `project_path_links`.
-//! `server.db` owns `server_settings` / `git_credentials` / `provisioners` /
+//! `hub.db` owns `hub_settings` / `git_credentials` / `provisioners` /
 //! `project_profiles`.
 //!
 //! Every mutable single-row/aggregate table carries an explicit `revision`
@@ -12,9 +12,9 @@
 use std::collections::BTreeMap;
 
 use fxg_protocol::settings::{
-    AgentSettings, CustomAgentConfig, GitCredentialConfig, NodeSettings, ProjectProfile,
-    ProvisionerDefinition, SecretSummary, ServerSettings, UpdateAgentSettingsRequest,
-    UpdateNodeSettingsRequest, UpdateProjectProfileRequest, UpdateServerSettingsRequest,
+    AgentSettings, CustomAgentConfig, GitCredentialConfig, HubSettings, NodeSettings,
+    ProjectProfile, ProvisionerDefinition, SecretSummary, UpdateAgentSettingsRequest,
+    UpdateHubSettingsRequest, UpdateNodeSettingsRequest, UpdateProjectProfileRequest,
 };
 use fxg_protocol::util::now_ms;
 use fxg_protocol::{ProjectId, SecretId};
@@ -426,11 +426,11 @@ pub async fn delete_project_path_link(pool: &SqlitePool, local_path: &str) -> Re
 // Server settings / Git credentials
 // ----------------------------------------------------------------------
 
-/// Ensures the single `server_settings` row exists and returns it.
-pub async fn ensure_server_settings(pool: &SqlitePool) -> Result<ServerSettings, DbError> {
+/// Ensures the single `hub_settings` row exists and returns it.
+pub async fn ensure_hub_settings(pool: &SqlitePool) -> Result<HubSettings, DbError> {
     sqlx::query!(
         r#"
-        INSERT INTO server_settings (id, vapid_subject, revision, updated_at)
+        INSERT INTO hub_settings (id, vapid_subject, revision, updated_at)
         VALUES (1, NULL, 1, ?)
         ON CONFLICT(id) DO NOTHING
         "#,
@@ -438,20 +438,20 @@ pub async fn ensure_server_settings(pool: &SqlitePool) -> Result<ServerSettings,
     )
     .execute(pool)
     .await?;
-    get_server_settings(pool)
+    get_hub_settings(pool)
         .await?
-        .ok_or_else(|| DbError::InvalidPayload("server_settings row is missing".to_owned()))
+        .ok_or_else(|| DbError::InvalidPayload("hub_settings row is missing".to_owned()))
 }
 
-/// Returns the `server_settings` row (with Git credentials) when it exists.
-pub async fn get_server_settings(pool: &SqlitePool) -> Result<Option<ServerSettings>, DbError> {
+/// Returns the `hub_settings` row (with Git credentials) when it exists.
+pub async fn get_hub_settings(pool: &SqlitePool) -> Result<Option<HubSettings>, DbError> {
     let row = sqlx::query!(
-        r#"SELECT vapid_subject, revision, updated_at FROM server_settings WHERE id = 1"#,
+        r#"SELECT vapid_subject, revision, updated_at FROM hub_settings WHERE id = 1"#,
     )
     .fetch_optional(pool)
     .await?;
     let Some(row) = row else { return Ok(None) };
-    Ok(Some(ServerSettings {
+    Ok(Some(HubSettings {
         vapid_subject: row.vapid_subject,
         git_credentials: list_git_credentials(pool).await?,
         revision: revision_u64(row.revision)?,
@@ -497,17 +497,17 @@ pub async fn list_git_credentials(
     Ok(credentials)
 }
 
-/// Updates server settings and Git credentials under an optimistic lock.
-pub async fn update_server_settings(
+/// Updates hub settings and Git credentials under an optimistic lock.
+pub async fn update_hub_settings(
     pool: &SqlitePool,
-    request: &UpdateServerSettingsRequest,
-) -> Result<ServerSettings, DbError> {
+    request: &UpdateHubSettingsRequest,
+) -> Result<HubSettings, DbError> {
     let now = now_ms();
     let expected = i64::try_from(request.expected_revision).unwrap_or(i64::MAX);
     let mut tx = pool.begin().await?;
     let result = sqlx::query!(
         r#"
-        UPDATE server_settings
+        UPDATE hub_settings
            SET vapid_subject = ?, revision = revision + 1, updated_at = ?
          WHERE id = 1 AND revision = ?
         "#,
@@ -557,9 +557,9 @@ pub async fn update_server_settings(
         .await?;
     }
     tx.commit().await?;
-    get_server_settings(pool)
+    get_hub_settings(pool)
         .await?
-        .ok_or_else(|| DbError::InvalidPayload("server_settings row is missing".to_owned()))
+        .ok_or_else(|| DbError::InvalidPayload("hub_settings row is missing".to_owned()))
 }
 
 // ----------------------------------------------------------------------

@@ -178,7 +178,7 @@ impl fmt::Display for CompactionStatus {
 /// Aggregated session type used in API responses (built from a `sessions` row).
 ///
 /// On the hub side it is produced from the projection obtained by applying
-/// events. Both the local node and the central server return this same type.
+/// events. Both the local node and the hub return this same type.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct SessionSummary {

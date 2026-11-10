@@ -1,6 +1,6 @@
 //! Shared client-facing query layer.
 //!
-//! Lets both `node.db` (local direct UI / CLI) and `server.db` (central server UI) return
+//! Lets both `node.db` (local direct UI / CLI) and `hub.db` (hub UI) return
 //! **the same response types** ([`SessionSummary`] / [`PermissionRequestEntry`], etc.)
 //! (design: `docs/02-database-schema.md` §3).
 //!
@@ -339,7 +339,7 @@ pub async fn list_projects(pool: &SqlitePool) -> Result<Vec<ProjectSummary>, DbE
 ///    implemented)
 ///
 /// Used as the default when `local_path` is omitted in a session start request, shared by both
-/// the node and the central server (design: docs/01-architecture-and-sync.md §4).
+/// the node and the hub (design: docs/01-architecture-and-sync.md §4).
 pub async fn resolve_default_local_path(
     pool: &SqlitePool,
     project_id: &ProjectId,
