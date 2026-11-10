@@ -4,6 +4,7 @@
   import MarkdownText from "#lib/components/MarkdownText.svelte";
   import ToolCallGroup from "./ToolCallGroup.svelte";
   import { Badge } from "#lib/components/ui/badge/index.ts";
+  import { groupTimelineItems } from "#lib/chat-groups.ts";
   import { formatEpochMs } from "#lib/format.ts";
   import { m } from "#lib/paraglide/messages.js";
   import type { SessionStatus } from "#lib/generated/bindings.ts";
@@ -49,44 +50,7 @@
     }
   }
 
-  type RenderGroup =
-    | { kind: "single"; key: string; item: TimelineItem }
-    | {
-        kind: "tools";
-        key: string;
-        tools: Extract<TimelineItem, { kind: "tool" }>[];
-      };
-
-  const groupedItems = $derived.by(() => {
-    const groups: RenderGroup[] = [];
-    let currentTools: Extract<TimelineItem, { kind: "tool" }>[] = [];
-
-    for (const item of items) {
-      if (item.kind === "tool") {
-        currentTools.push(item);
-      } else {
-        if (currentTools.length > 0) {
-          groups.push({
-            kind: "tools",
-            key: `toolgroup:${currentTools[0].toolCallId}`,
-            tools: currentTools,
-          });
-          currentTools = [];
-        }
-        groups.push({ kind: "single", key: item.key, item });
-      }
-    }
-
-    if (currentTools.length > 0) {
-      groups.push({
-        kind: "tools",
-        key: `toolgroup:${currentTools[0].toolCallId}`,
-        tools: currentTools,
-      });
-    }
-
-    return groups;
-  });
+  const groupedItems = $derived(groupTimelineItems(items));
 </script>
 
 <ul class="flex list-none flex-col gap-4 p-0">

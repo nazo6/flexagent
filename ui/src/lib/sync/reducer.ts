@@ -143,6 +143,8 @@ export type TimelineItem =
       seq: number;
       createdAt: number;
       elicitationId: string;
+      /** Tool call that asked the question (used to hide the duplicate tool row). */
+      toolCallId: string | null;
       message: string;
       mode: string;
       requestedSchema: ElicitationSchema;
@@ -493,6 +495,7 @@ function addElicitationRequest(
     key: `elicitation:${payload.data.elicitation_id}`,
     ...base,
     elicitationId: payload.data.elicitation_id,
+    toolCallId: payload.data.tool_call_id,
     message: payload.data.message,
     mode: payload.data.mode,
     requestedSchema: payload.data.requested_schema,

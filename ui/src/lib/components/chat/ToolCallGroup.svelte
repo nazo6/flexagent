@@ -2,11 +2,13 @@
   import DiffText from "#lib/components/diff/DiffText.svelte";
   import { m } from "#lib/paraglide/messages.js";
   import type { TimelineItem } from "#lib/sync/reducer.ts";
+  import { summarizeToolOutput } from "#lib/tool-output.ts";
   import { cn } from "#lib/utils.ts";
   import ChevronDownIcon from "@lucide/svelte/icons/chevron-down";
   import ChevronRightIcon from "@lucide/svelte/icons/chevron-right";
   import CircleCheckIcon from "@lucide/svelte/icons/circle-check";
   import CircleXIcon from "@lucide/svelte/icons/circle-x";
+  import CornerDownRightIcon from "@lucide/svelte/icons/corner-down-right";
   import FileSearchIcon from "@lucide/svelte/icons/file-search";
   import HammerIcon from "@lucide/svelte/icons/hammer";
   import LoaderCircleIcon from "@lucide/svelte/icons/loader-circle";
@@ -52,9 +54,17 @@
       search: "Search",
     };
 
-    // Tool name label (Read, Edit, Terminal, Search, or the tool identifier)
     let name = kindMap[tool.toolKind] ?? "";
     let detail = tool.title;
+
+    if (tool.toolKind === "execute") {
+      // The agent sets the shell command as the title; do not split it at the
+      // first colon (commands commonly contain one).
+      return {
+        name: name || "Terminal",
+        detail: tool.title || tool.toolCallId,
+      };
+    }
 
     if (tool.title.startsWith("Running ")) {
       const funcName = tool.title.replace("Running ", "").trim();
@@ -126,17 +136,27 @@
       {#each tools as tool (tool.toolCallId)}
         {@const isExpanded = expandedDetails[tool.toolCallId]}
         {@const toolInfo = getToolInfo(tool)}
+        {@const isTerminal = tool.toolKind === "execute"}
+        {@const result = isTerminal ? summarizeToolOutput(tool.rawOutput, tool.status) : null}
+        {@const hasRawOutput = tool.rawOutput !== null && tool.rawOutput !== ""}
+        {@const terminalFailed =
+          result !== null &&
+          (tool.status === "failed" ||
+            result.error !== null ||
+            (result.exitCode !== null && result.exitCode !== 0))}
         {@const hasDetailContent =
           tool.diff !== null ||
-          (tool.rawOutput !== null && tool.rawOutput !== "") ||
-          tool.locations.length > 0}
+          tool.locations.length > 0 ||
+          (result !== null
+            ? result.text !== "" || result.error !== null || hasRawOutput
+            : hasRawOutput)}
         <div class="flex flex-col">
           <!-- Single-line tool summary -->
           <div
             role="button"
             tabindex="0"
             class={cn(
-              "flex items-center justify-between px-3 py-1.5 text-[13px] transition-colors",
+              "flex items-start justify-between gap-2 px-3 py-2 text-[13px] transition-colors",
               hasDetailContent ? "cursor-pointer hover:bg-accent/30" : "cursor-default",
             )}
             onclick={(e) => {
@@ -149,42 +169,85 @@
               }
             }}
           >
-            <div class="flex min-w-0 flex-1 items-center gap-2">
-              <!-- Icon -->
-              {#if tool.toolKind === "read"}
-                <FileSearchIcon class="text-muted-foreground size-3.5 shrink-0" />
-              {:else if tool.toolKind === "edit"}
-                <PencilIcon class="text-muted-foreground size-3.5 shrink-0" />
-              {:else if tool.toolKind === "execute"}
-                <SquareTerminalIcon class="text-muted-foreground size-3.5 shrink-0" />
-              {:else if tool.toolKind === "search"}
-                <SearchIcon class="text-muted-foreground size-3.5 shrink-0" />
-              {:else}
-                <HammerIcon class="text-muted-foreground size-3.5 shrink-0" />
-              {/if}
+            <div class="flex min-w-0 flex-1 flex-col gap-1">
+              <div class="flex min-w-0 items-center gap-2">
+                <!-- Icon -->
+                {#if tool.toolKind === "read"}
+                  <FileSearchIcon class="text-muted-foreground size-3.5 shrink-0" />
+                {:else if tool.toolKind === "edit"}
+                  <PencilIcon class="text-muted-foreground size-3.5 shrink-0" />
+                {:else if tool.toolKind === "execute"}
+                  <SquareTerminalIcon class="text-muted-foreground size-3.5 shrink-0" />
+                {:else if tool.toolKind === "search"}
+                  <SearchIcon class="text-muted-foreground size-3.5 shrink-0" />
+                {:else}
+                  <HammerIcon class="text-muted-foreground size-3.5 shrink-0" />
+                {/if}
 
-              <!-- Tool name badge (Read, Edit, Terminal, Search, etc.) -->
-              <span
-                class="rounded bg-muted px-1.5 py-0.2 font-mono text-[11px] font-semibold text-foreground/85 shrink-0 border border-border/60"
-              >
-                {toolInfo.name}
-              </span>
-
-              <!-- Command / arguments / target paths -->
-              <span class="truncate font-mono text-[11px] text-foreground/90">
-                {toolInfo.detail}
-              </span>
-
-              {#if tool.locations.length > 0 && !toolInfo.detail.includes(tool.locations[0])}
-                <span class="text-muted-foreground truncate font-mono text-[11px]">
-                  ({tool.locations.join(", ")})
+                <!-- Tool name badge (Read, Edit, Terminal, Search, etc.) -->
+                <span
+                  class="rounded bg-muted px-1.5 py-0.2 font-mono text-[11px] font-semibold text-foreground/85 shrink-0 border border-border/60"
+                >
+                  {toolInfo.name}
                 </span>
+
+                <!-- Command / arguments / target paths -->
+                <span class="truncate font-mono text-[11px] text-foreground/90">
+                  {toolInfo.detail}
+                </span>
+
+                {#if tool.locations.length > 0 && !toolInfo.detail.includes(tool.locations[0])}
+                  <span class="text-muted-foreground truncate font-mono text-[11px]">
+                    ({tool.locations.join(", ")})
+                  </span>
+                {/if}
+              </div>
+
+              <!-- Terminal result preview (visible without expanding the detail) -->
+              {#if result !== null && result.preview !== ""}
+                <div class="flex min-w-0 items-center gap-1.5 pl-5.5">
+                  <CornerDownRightIcon class="text-muted-foreground size-3 shrink-0" />
+                  <span
+                    class={cn(
+                      "truncate font-mono text-[11px]",
+                      terminalFailed ? "text-destructive/85" : "text-muted-foreground",
+                    )}
+                  >
+                    {result.preview}
+                  </span>
+                  {#if result.hiddenLineCount > 0}
+                    <span class="text-muted-foreground/70 shrink-0 text-[10px]">
+                      +{result.hiddenLineCount}
+                    </span>
+                  {/if}
+                </div>
               {/if}
             </div>
 
             <!-- Status & expand toggle -->
-            <div class="ml-2 flex shrink-0 items-center gap-2">
-              {#if tool.status === "in_progress"}
+            <div class="mt-0.5 ml-2 flex shrink-0 items-center gap-2">
+              {#if isTerminal && result !== null}
+                {#if tool.status === "in_progress"}
+                  <LoaderCircleIcon class="size-3 animate-spin text-signal" />
+                {:else if tool.status === "completed" || tool.status === "failed" || result.exitCode !== null}
+                  <span
+                    class={cn(
+                      "rounded border px-1.5 py-0.2 font-mono text-[10px] tabular-nums",
+                      terminalFailed
+                        ? "border-destructive/30 bg-danger-soft/60 text-destructive"
+                        : "border-ok/30 bg-ok-soft/60 text-ok",
+                    )}
+                  >
+                    {#if result.exitCode !== null}
+                      {m.chat_tool_exit_code({ code: result.exitCode })}
+                    {:else}
+                      {terminalFailed ? m.chat_tool_failed() : m.chat_tool_done()}
+                    {/if}
+                  </span>
+                {:else if tool.status === "pending"}
+                  <span class="text-muted-foreground text-[10px]">{m.chat_tool_pending()}</span>
+                {/if}
+              {:else if tool.status === "in_progress"}
                 <LoaderCircleIcon class="size-3 animate-spin text-signal" />
               {:else if tool.status === "completed"}
                 <CircleCheckIcon class="size-3.5 text-ok" />
@@ -203,12 +266,17 @@
           <!-- Detail content (diff / log output) -->
           {#if isExpanded && hasDetailContent}
             <div class="bg-background/80 border-border/60 border-t p-2.5 flex flex-col gap-2">
-              <div class="flex items-center gap-2 text-[11px]">
-                <span class="text-muted-foreground text-[11px]">{m.chat_tool_label()}</span>
-                <span class="font-mono font-semibold text-foreground">{toolInfo.name}</span>
-                {#if tool.title && tool.title !== toolInfo.name}
-                  <span class="text-muted-foreground text-[11px]">{m.chat_tool_detail()}</span>
-                  <span class="font-mono text-muted-foreground truncate">{tool.title}</span>
+              <div class="flex flex-wrap items-center gap-2 text-[11px]">
+                {#if result !== null}
+                  <span class="text-muted-foreground text-[11px]">{m.chat_tool_command()}</span>
+                  <span class="font-mono font-semibold text-foreground">{toolInfo.detail}</span>
+                {:else}
+                  <span class="text-muted-foreground text-[11px]">{m.chat_tool_label()}</span>
+                  <span class="font-mono font-semibold text-foreground">{toolInfo.name}</span>
+                  {#if tool.title && tool.title !== toolInfo.name}
+                    <span class="text-muted-foreground text-[11px]">{m.chat_tool_detail()}</span>
+                    <span class="font-mono text-muted-foreground truncate">{tool.title}</span>
+                  {/if}
                 {/if}
                 {#if tool.status}
                   <span class="text-muted-foreground text-[11px]">{m.chat_tool_status()}</span>
@@ -236,7 +304,35 @@
                 </div>
               {/if}
 
-              {#if tool.rawOutput !== null && tool.rawOutput !== ""}
+              {#if result !== null}
+                {#if result.error !== null}
+                  <div class="flex flex-col gap-1">
+                    <span class="text-muted-foreground text-[11px]">{m.chat_tool_error()}</span>
+                    <pre
+                      class="border-destructive/30 bg-danger-soft/40 text-destructive max-h-40 overflow-auto rounded-md border p-2 font-mono text-[11px] whitespace-pre-wrap">{result.error}</pre>
+                  </div>
+                {/if}
+
+                {#if result.text !== ""}
+                  <div class="flex flex-col gap-1">
+                    <span class="text-muted-foreground text-[11px]">{m.chat_tool_output()}</span>
+                    <pre
+                      class="bg-muted/40 max-h-40 overflow-auto rounded-md border p-2 font-mono text-[11px] whitespace-pre-wrap">{result.text}</pre>
+                  </div>
+                {:else if result.error === null && hasRawOutput}
+                  <div class="flex flex-col gap-1">
+                    <span class="text-muted-foreground text-[11px]">{m.chat_tool_output()}</span>
+                    <pre
+                      class="bg-muted/40 max-h-40 overflow-auto rounded-md border p-2 font-mono text-[11px] whitespace-pre-wrap">{tool.rawOutput}</pre>
+                  </div>
+                {/if}
+
+                {#if result.truncated}
+                  <span class="text-muted-foreground text-[10px]">
+                    {m.chat_tool_output_truncated()}
+                  </span>
+                {/if}
+              {:else if hasRawOutput}
                 <div class="flex flex-col gap-1">
                   <span class="text-muted-foreground text-[11px]">{m.chat_tool_output()}</span>
                   <pre

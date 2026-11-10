@@ -425,7 +425,7 @@ describe("elicitations", () => {
             properties: { strategy: { type: "string", enum: ["a", "b"] } },
             required: ["strategy"],
           },
-          tool_call_id: null,
+          tool_call_id: "q1",
         },
       }),
       makeEvent(2, {
@@ -443,6 +443,7 @@ describe("elicitations", () => {
     expect(items[0]).toMatchObject({
       kind: "elicitation",
       elicitationId: "elic-1",
+      toolCallId: "q1",
       message: "Which strategy should we use?",
       resolved: { action: "accept", resolvedBy: "web" },
     });
