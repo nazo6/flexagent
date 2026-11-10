@@ -581,6 +581,8 @@
   "settings_rotate_token_title": "Regenerate the client auth token?",
   "settings_saving": "Saving…",
   "settings_search_placeholder": "Search settings…",
+  "settings_search_results": "Settings matching “{query}”",
+  "settings_search_empty": "No settings match “{query}”.",
   "settings_secret_description_label": "Secret description (optional)",
   "settings_secret_key_label": "Secret key",
   "settings_secret_value_label": "Secret value (write-only)",

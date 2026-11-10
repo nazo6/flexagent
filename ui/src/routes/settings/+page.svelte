@@ -6,6 +6,7 @@
   import AuditLog from "#lib/components/settings/AuditLog.svelte";
   import DiagnosticsPanel from "#lib/components/settings/DiagnosticsPanel.svelte";
   import SettingsCatalog from "#lib/components/settings/SettingsCatalog.svelte";
+  import { searchSettings, SETTINGS_TAB_LABELS } from "#lib/settings-search.ts";
   import * as AlertDialog from "#lib/components/ui/alert-dialog/index.ts";
   import { Badge } from "#lib/components/ui/badge/index.ts";
   import { Button } from "#lib/components/ui/button/index.ts";
@@ -62,8 +63,9 @@
         return m.settings_appearance_palette_moss();
     }
   }
-  /** Catalog search query (filters bootstrap and settings rows). */
+  /** Search query: while set, the tabs are replaced by cross-tab search results. */
   let query = $state("");
+  const searchResults = $derived(searchSettings(query));
 
   // --- Node pairing (hub only) ---
   const tokens = createResource<NodeTokenSummary[]>(() => sync.connection.client.nodeTokens(), {
@@ -170,222 +172,258 @@
     class="max-w-md"
   />
 
-  <Tabs.Root value={activeTab} onValueChange={selectTab}>
-    <Tabs.List variant="line" class="w-full overflow-x-auto border-b">
-      <Tabs.Trigger value="bootstrap">Bootstrap</Tabs.Trigger>
-      <Tabs.Trigger value="machine">This machine</Tabs.Trigger>
-      <Tabs.Trigger value="hub">Hub</Tabs.Trigger>
-      <Tabs.Trigger value="agents">{m.settings_tab_agents()}</Tabs.Trigger>
-      <Tabs.Trigger value="browser">Browser</Tabs.Trigger>
-      <Tabs.Trigger value="audit">{m.settings_tab_audit()}</Tabs.Trigger>
-    </Tabs.List>
-
-    <Tabs.Content value="bootstrap" class="mt-2 flex flex-col gap-3">
-      <SettingsCatalog section="bootstrap" {query} />
-      <DiagnosticsPanel />
-    </Tabs.Content>
-
-    <Tabs.Content value="machine" class="mt-2 flex flex-col gap-3">
-      <SettingsCatalog section="machine" {query} />
-      <Card class="gap-3 p-4">
-        <div class="flex items-start gap-2">
-          <ShieldIcon class="text-muted-foreground mt-0.5 size-4" />
-          <div class="flex flex-1 flex-col gap-1">
-            <h2 class="font-medium">{m.settings_client_token_title()}</h2>
-            <p class="text-muted-foreground text-[13px]">
-              {m.settings_client_token_description()}
-              <code>~/.flexagent/auth_token</code>
-              {m.settings_client_token_description_ref()}
-            </p>
-            <div class="mt-1">
-              <Button variant="outline" size="sm" onclick={() => (rotateOpen = true)}>
-                <RefreshCwIcon />
-                {m.settings_regenerate_token()}
-              </Button>
-            </div>
-          </div>
-        </div>
-      </Card>
-    </Tabs.Content>
-
-    <Tabs.Content value="hub" class="mt-2 flex flex-col gap-3">
-      <SettingsCatalog section="hub" {query} />
-      <Card class="gap-3 p-4">
-        <div class="flex items-start gap-2">
-          <KeyRoundIcon class="text-muted-foreground mt-0.5 size-4" />
-          <div class="flex flex-1 flex-col gap-2">
-            <div class="flex flex-wrap items-center justify-between gap-2">
-              <div>
-                <h2 class="font-medium">{m.settings_node_pairing_title()}</h2>
-                <p class="text-muted-foreground text-[13px]">
-                  {m.settings_node_pairing_description()}
-                  (<code>fxg node start</code>, <code>~/.flexagent/node_token</code>)
-                </p>
-              </div>
-              <div class="flex items-center gap-1.5">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={!isHub || tokens.loading}
-                  onclick={() => void tokens.refresh()}
-                >
-                  <RefreshCwIcon />
-                  {m.common_refresh()}
-                </Button>
-                <Button size="sm" disabled={!isHub} onclick={() => (issueOpen = true)}>
-                  {m.settings_issue_token()}
-                </Button>
-              </div>
-            </div>
-
-            {#if !isHub}
-              <p class="text-muted-foreground text-[13px]">
-                {m.settings_node_pairing_hub_only()}
-                <code>{sync.connection.origin}</code>
-              </p>
-            {:else if (tokens.data ?? []).length === 0}
-              <p class="text-muted-foreground text-[13px]">
-                {tokens.loading ? m.common_loading() : m.settings_no_node_tokens()}
-              </p>
-            {:else}
-              <ul class="flex list-none flex-col gap-1 p-0 text-[13px]">
-                {#each tokens.data ?? [] as token (token.node_id)}
-                  <li
-                    class="hover:bg-muted/50 flex flex-wrap items-center gap-2 rounded-md border px-2 py-1.5"
-                  >
-                    <span class="font-medium">{token.node_id}</span>
-                    <span class="text-muted-foreground font-mono">{token.token_prefix}…</span>
-                    <Badge variant="outline" class="text-[11px]">{m.settings_badge_issued()}</Badge>
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      class="text-muted-foreground hover:text-destructive ml-auto"
-                      disabled={revokeBusy}
-                      onclick={() => (revokeTarget = token.node_id)}
-                      title={m.settings_revoke_token()}
-                    >
-                      <Trash2Icon />
-                      <span class="sr-only">
-                        {m.settings_revoke_token_for({ name: token.node_id })}
-                      </span>
-                    </Button>
-                  </li>
-                {/each}
-              </ul>
-            {/if}
-          </div>
-        </div>
-      </Card>
-    </Tabs.Content>
-
-    <Tabs.Content value="agents" class="mt-2 flex flex-col gap-3">
-      <AgentManager />
-    </Tabs.Content>
-
-    <Tabs.Content value="browser" class="mt-2 flex flex-col gap-3">
-      <Card class="gap-4 p-5">
-        <div class="flex flex-col gap-1">
-          <h2 class="text-sm font-semibold">{m.settings_appearance_theme()}</h2>
-          <p class="text-muted-foreground text-[13px]">{m.settings_appearance_theme_note()}</p>
-        </div>
-        <div class="grid max-w-sm gap-1.5">
-          <select
-            id="browser-theme"
-            aria-label={m.settings_appearance_theme()}
-            class="border-input bg-background h-8 rounded-md border px-2 text-[13px]"
-            value={themePreference}
-            onchange={(event) => setMode(event.currentTarget.value as "system" | "light" | "dark")}
-          >
-            <option value="system">{m.settings_browser_theme_system()}</option>
-            <option value="light">{m.settings_browser_theme_light()}</option>
-            <option value="dark">{m.settings_browser_theme_dark()}</option>
-          </select>
-        </div>
-      </Card>
-
-      <Card class="gap-4 p-5">
-        <div class="flex flex-col gap-1">
-          <h2 class="text-sm font-semibold">{m.settings_appearance_palette()}</h2>
-          <p class="text-muted-foreground text-[13px]">{m.settings_appearance_palette_note()}</p>
-        </div>
-        <div class="grid gap-2 sm:grid-cols-3">
-          {#each PALETTES as option (option.id)}
-            <button
-              type="button"
-              aria-pressed={theme.palette === option.id}
-              onclick={() => theme.setPalette(option.id)}
-              class={cn(
-                "flex items-center justify-between gap-2 rounded-lg border px-3 py-2.5 text-left transition-colors",
-                theme.palette === option.id
-                  ? "border-signal bg-signal-soft/60"
-                  : "border-border hover:border-line-strong hover:bg-muted/50",
-              )}
-            >
-              <span class="flex items-center gap-2">
-                <span
-                  class="size-3.5 rounded-full border border-black/10"
-                  style={`background:${option.canvas}`}
-                ></span>
-                <span
-                  class="size-3.5 rounded-full border border-black/10"
-                  style={`background:${option.ink}`}
-                ></span>
-                <span
-                  class="size-3.5 rounded-full border border-black/10"
-                  style={`background:${option.signal}`}
-                ></span>
-              </span>
-              <span class="text-[13px] font-medium">{paletteLabel(option.id)}</span>
-            </button>
+  {#if query.trim() !== ""}
+    <section class="flex flex-col gap-2">
+      <h2 class="desk-label">{m.settings_search_results({ query: query.trim() })}</h2>
+      {#if searchResults.length === 0}
+        <p class="text-muted-foreground text-[13px]">
+          {m.settings_search_empty({ query: query.trim() })}
+        </p>
+      {:else}
+        <ul class="divide-y overflow-hidden rounded-lg border">
+          {#each searchResults as result (result.tab + ":" + result.label)}
+            <li>
+              <button
+                type="button"
+                class="hover:bg-accent flex w-full items-center gap-3 px-3 py-2 text-left transition-colors"
+                onclick={() => {
+                  selectTab(result.tab);
+                  query = "";
+                }}
+              >
+                <span class="text-[13px]">{result.label}</span>
+                <span class="text-muted-foreground ml-auto text-[11px]">
+                  {SETTINGS_TAB_LABELS[result.tab]}
+                </span>
+              </button>
+            </li>
           {/each}
-        </div>
-        <p class="text-muted-foreground text-[13px]">{m.settings_appearance_storage_note()}</p>
-      </Card>
+        </ul>
+      {/if}
+    </section>
+  {:else}
+    <Tabs.Root value={activeTab} onValueChange={selectTab}>
+      <Tabs.List variant="line" class="w-full overflow-x-auto border-b">
+        <Tabs.Trigger value="bootstrap">Bootstrap</Tabs.Trigger>
+        <Tabs.Trigger value="machine">This machine</Tabs.Trigger>
+        <Tabs.Trigger value="hub">Hub</Tabs.Trigger>
+        <Tabs.Trigger value="agents">{m.settings_tab_agents()}</Tabs.Trigger>
+        <Tabs.Trigger value="browser">Browser</Tabs.Trigger>
+        <Tabs.Trigger value="audit">{m.settings_tab_audit()}</Tabs.Trigger>
+      </Tabs.List>
 
-      <Card class="gap-4 p-5">
-        <div class="flex flex-col gap-1">
-          <h2 class="text-sm font-semibold">{m.settings_browser_send_shortcut()}</h2>
-          <p class="text-muted-foreground text-[13px]">{m.settings_browser_send_shortcut_note()}</p>
-        </div>
-        <div class="grid max-w-sm gap-1.5">
-          <select
-            id="browser-send-shortcut"
-            aria-label={m.settings_browser_send_shortcut()}
-            class="border-input bg-background h-8 rounded-md border px-2 text-[13px]"
-            value={prefs.sendShortcut}
-            onchange={(event) =>
-              prefs.setSendShortcut(event.currentTarget.value as "enter" | "modifier_enter")}
-          >
-            <option value="enter">{m.settings_browser_send_shortcut_enter()}</option>
-            <option value="modifier_enter">{m.settings_browser_send_shortcut_modifier()}</option>
-          </select>
-        </div>
-      </Card>
+      <Tabs.Content value="bootstrap" class="mt-2 flex flex-col gap-3">
+        <SettingsCatalog section="bootstrap" />
+        <DiagnosticsPanel />
+      </Tabs.Content>
 
-      <Card class="gap-3 p-4">
-        <h2 class="text-sm font-semibold">{m.settings_browser_pinned()}</h2>
-        <p class="text-muted-foreground text-[13px]">{m.settings_browser_storage_note()}</p>
-        <div class="flex items-center justify-between gap-3">
-          <span class="text-muted-foreground text-[13px]">
-            {m.settings_browser_pinned_count({ count: pinned.pinnedIds.size })}
-          </span>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            disabled={pinned.pinnedIds.size === 0}
-            onclick={() => pinned.clear()}
-          >
-            {m.settings_browser_unpin_all()}
-          </Button>
-        </div>
-      </Card>
-    </Tabs.Content>
+      <Tabs.Content value="machine" class="mt-2 flex flex-col gap-3">
+        <SettingsCatalog section="machine" />
+        <Card class="gap-3 p-4">
+          <div class="flex items-start gap-2">
+            <ShieldIcon class="text-muted-foreground mt-0.5 size-4" />
+            <div class="flex flex-1 flex-col gap-1">
+              <h2 class="font-medium">{m.settings_client_token_title()}</h2>
+              <p class="text-muted-foreground text-[13px]">
+                {m.settings_client_token_description()}
+                <code>~/.flexagent/auth_token</code>
+                {m.settings_client_token_description_ref()}
+              </p>
+              <div class="mt-1">
+                <Button variant="outline" size="sm" onclick={() => (rotateOpen = true)}>
+                  <RefreshCwIcon />
+                  {m.settings_regenerate_token()}
+                </Button>
+              </div>
+            </div>
+          </div>
+        </Card>
+      </Tabs.Content>
 
-    <Tabs.Content value="audit" class="mt-2 flex flex-col gap-3">
-      <AuditLog />
-    </Tabs.Content>
-  </Tabs.Root>
+      <Tabs.Content value="hub" class="mt-2 flex flex-col gap-3">
+        <SettingsCatalog section="hub" />
+        <Card class="gap-3 p-4">
+          <div class="flex items-start gap-2">
+            <KeyRoundIcon class="text-muted-foreground mt-0.5 size-4" />
+            <div class="flex flex-1 flex-col gap-2">
+              <div class="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <h2 class="font-medium">{m.settings_node_pairing_title()}</h2>
+                  <p class="text-muted-foreground text-[13px]">
+                    {m.settings_node_pairing_description()}
+                    (<code>fxg node start</code>, <code>~/.flexagent/node_token</code>)
+                  </p>
+                </div>
+                <div class="flex items-center gap-1.5">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={!isHub || tokens.loading}
+                    onclick={() => void tokens.refresh()}
+                  >
+                    <RefreshCwIcon />
+                    {m.common_refresh()}
+                  </Button>
+                  <Button size="sm" disabled={!isHub} onclick={() => (issueOpen = true)}>
+                    {m.settings_issue_token()}
+                  </Button>
+                </div>
+              </div>
+
+              {#if !isHub}
+                <p class="text-muted-foreground text-[13px]">
+                  {m.settings_node_pairing_hub_only()}
+                  <code>{sync.connection.origin}</code>
+                </p>
+              {:else if (tokens.data ?? []).length === 0}
+                <p class="text-muted-foreground text-[13px]">
+                  {tokens.loading ? m.common_loading() : m.settings_no_node_tokens()}
+                </p>
+              {:else}
+                <ul class="flex list-none flex-col gap-1 p-0 text-[13px]">
+                  {#each tokens.data ?? [] as token (token.node_id)}
+                    <li
+                      class="hover:bg-muted/50 flex flex-wrap items-center gap-2 rounded-md border px-2 py-1.5"
+                    >
+                      <span class="font-medium">{token.node_id}</span>
+                      <span class="text-muted-foreground font-mono">{token.token_prefix}…</span>
+                      <Badge variant="outline" class="text-[11px]"
+                        >{m.settings_badge_issued()}</Badge
+                      >
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        class="text-muted-foreground hover:text-destructive ml-auto"
+                        disabled={revokeBusy}
+                        onclick={() => (revokeTarget = token.node_id)}
+                        title={m.settings_revoke_token()}
+                      >
+                        <Trash2Icon />
+                        <span class="sr-only">
+                          {m.settings_revoke_token_for({ name: token.node_id })}
+                        </span>
+                      </Button>
+                    </li>
+                  {/each}
+                </ul>
+              {/if}
+            </div>
+          </div>
+        </Card>
+      </Tabs.Content>
+
+      <Tabs.Content value="agents" class="mt-2 flex flex-col gap-3">
+        <AgentManager />
+      </Tabs.Content>
+
+      <Tabs.Content value="browser" class="mt-2 flex flex-col gap-3">
+        <Card class="gap-4 p-5">
+          <div class="flex flex-col gap-1">
+            <h2 class="text-sm font-semibold">{m.settings_appearance_theme()}</h2>
+            <p class="text-muted-foreground text-[13px]">{m.settings_appearance_theme_note()}</p>
+          </div>
+          <div class="grid max-w-sm gap-1.5">
+            <select
+              id="browser-theme"
+              aria-label={m.settings_appearance_theme()}
+              class="border-input bg-background h-8 rounded-md border px-2 text-[13px]"
+              value={themePreference}
+              onchange={(event) =>
+                setMode(event.currentTarget.value as "system" | "light" | "dark")}
+            >
+              <option value="system">{m.settings_browser_theme_system()}</option>
+              <option value="light">{m.settings_browser_theme_light()}</option>
+              <option value="dark">{m.settings_browser_theme_dark()}</option>
+            </select>
+          </div>
+        </Card>
+
+        <Card class="gap-4 p-5">
+          <div class="flex flex-col gap-1">
+            <h2 class="text-sm font-semibold">{m.settings_appearance_palette()}</h2>
+            <p class="text-muted-foreground text-[13px]">{m.settings_appearance_palette_note()}</p>
+          </div>
+          <div class="grid gap-2 sm:grid-cols-3">
+            {#each PALETTES as option (option.id)}
+              <button
+                type="button"
+                aria-pressed={theme.palette === option.id}
+                onclick={() => theme.setPalette(option.id)}
+                class={cn(
+                  "flex items-center justify-between gap-2 rounded-lg border px-3 py-2.5 text-left transition-colors",
+                  theme.palette === option.id
+                    ? "border-signal bg-signal-soft/60"
+                    : "border-border hover:border-line-strong hover:bg-muted/50",
+                )}
+              >
+                <span class="flex items-center gap-2">
+                  <span
+                    class="size-3.5 rounded-full border border-black/10"
+                    style={`background:${option.canvas}`}
+                  ></span>
+                  <span
+                    class="size-3.5 rounded-full border border-black/10"
+                    style={`background:${option.ink}`}
+                  ></span>
+                  <span
+                    class="size-3.5 rounded-full border border-black/10"
+                    style={`background:${option.signal}`}
+                  ></span>
+                </span>
+                <span class="text-[13px] font-medium">{paletteLabel(option.id)}</span>
+              </button>
+            {/each}
+          </div>
+          <p class="text-muted-foreground text-[13px]">{m.settings_appearance_storage_note()}</p>
+        </Card>
+
+        <Card class="gap-4 p-5">
+          <div class="flex flex-col gap-1">
+            <h2 class="text-sm font-semibold">{m.settings_browser_send_shortcut()}</h2>
+            <p class="text-muted-foreground text-[13px]">
+              {m.settings_browser_send_shortcut_note()}
+            </p>
+          </div>
+          <div class="grid max-w-sm gap-1.5">
+            <select
+              id="browser-send-shortcut"
+              aria-label={m.settings_browser_send_shortcut()}
+              class="border-input bg-background h-8 rounded-md border px-2 text-[13px]"
+              value={prefs.sendShortcut}
+              onchange={(event) =>
+                prefs.setSendShortcut(event.currentTarget.value as "enter" | "modifier_enter")}
+            >
+              <option value="enter">{m.settings_browser_send_shortcut_enter()}</option>
+              <option value="modifier_enter">{m.settings_browser_send_shortcut_modifier()}</option>
+            </select>
+          </div>
+        </Card>
+
+        <Card class="gap-3 p-4">
+          <h2 class="text-sm font-semibold">{m.settings_browser_pinned()}</h2>
+          <p class="text-muted-foreground text-[13px]">{m.settings_browser_storage_note()}</p>
+          <div class="flex items-center justify-between gap-3">
+            <span class="text-muted-foreground text-[13px]">
+              {m.settings_browser_pinned_count({ count: pinned.pinnedIds.size })}
+            </span>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={pinned.pinnedIds.size === 0}
+              onclick={() => pinned.clear()}
+            >
+              {m.settings_browser_unpin_all()}
+            </Button>
+          </div>
+        </Card>
+      </Tabs.Content>
+
+      <Tabs.Content value="audit" class="mt-2 flex flex-col gap-3">
+        <AuditLog />
+      </Tabs.Content>
+    </Tabs.Root>
+  {/if}
 </div>
 
 <!-- Issue node token -->

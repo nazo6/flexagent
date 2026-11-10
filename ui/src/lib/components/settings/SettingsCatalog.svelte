@@ -16,7 +16,7 @@
 
   type Section = "bootstrap" | "machine" | "hub";
 
-  let { section, query = "" }: { section: Section; query?: string } = $props();
+  let { section }: { section: Section } = $props();
 
   const isHub = $derived(sync.connection.role === "hub");
   const onlineNodes = $derived(sync.nodes.filter((node) => node.is_online));
@@ -287,11 +287,7 @@
       : [],
   );
 
-  const filteredBootstrap = $derived(
-    bootstrapRows.filter((row) =>
-      `${row.label} ${row.value} ${row.source}`.toLowerCase().includes(query.toLowerCase()),
-    ),
-  );
+  const filteredBootstrap = $derived(bootstrapRows);
 </script>
 
 <div class="flex flex-col gap-3">
@@ -335,7 +331,7 @@
       {/each}
       {#if filteredBootstrap.length === 0}
         <p class="text-muted-foreground text-[13px]">
-          {loading ? "Loading…" : "No matching values."}
+          {loading ? "Loading…" : "No values available."}
         </p>
       {/if}
     </Card>
