@@ -204,7 +204,7 @@
       class="flex flex-nowrap items-center gap-0.5 overflow-x-auto font-mono text-[11px] whitespace-nowrap"
     >
       {#each breadcrumbs as crumb, index (crumb.path)}
-        {#if index > 0}
+        {#if index > 0 && !(index === 1 && breadcrumbs[0]?.label === "/")}
           <span class="text-muted-foreground/50">/</span>
         {/if}
         <button

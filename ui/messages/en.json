@@ -697,5 +697,6 @@
   "search_scope_node": "Only sessions on this node are searched.",
   "search_scope_hub": "Only sessions on the hub are searched.",
   "settings_browser_pinned_note": "Pinned sessions are stored in this browser only.",
-  "session_force_stop": "Force stop"
+  "session_force_stop": "Force stop",
+  "projects_worktrees": "Worktrees"
 }

@@ -73,7 +73,7 @@
         onclick={() => onRefreshWorktrees(project.project_id)}
       >
         <RefreshCwIcon class="size-3.5" />
-        Worktree
+        {m.projects_worktrees()}
       </Button>
       <Button
         variant="outline"

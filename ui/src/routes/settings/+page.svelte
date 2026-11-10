@@ -203,7 +203,7 @@
     </section>
   {:else}
     <Tabs.Root value={activeTab} onValueChange={selectTab}>
-      <Tabs.List variant="line" class="w-full overflow-x-auto border-b">
+      <Tabs.List variant="line" class="w-full flex-wrap border-b sm:flex-nowrap">
         <Tabs.Trigger value="bootstrap">Bootstrap</Tabs.Trigger>
         <Tabs.Trigger value="machine">This machine</Tabs.Trigger>
         <Tabs.Trigger value="hub">Hub</Tabs.Trigger>

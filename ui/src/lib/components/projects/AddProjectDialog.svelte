@@ -323,9 +323,14 @@
             {identityLabel()}
           </span>
           <h3 class="text-sm font-semibold">{preview.name}</h3>
-          <code class="text-muted-foreground text-[11px] break-all">{effectiveProjectId}</code>
+          <code class="text-muted-foreground block truncate text-[11px]" title={effectiveProjectId}
+            >{effectiveProjectId}</code
+          >
           {#if preview.canonical_git_url}
-            <p class="text-muted-foreground font-mono text-[11px] break-all">
+            <p
+              class="text-muted-foreground truncate font-mono text-[11px]"
+              title={preview.canonical_git_url}
+            >
               {preview.canonical_git_url}
             </p>
           {/if}
@@ -340,7 +345,12 @@
               {m.projects_worktree_binding()}
             </p>
           {/if}
-          <p class="text-muted-foreground font-mono text-[11px] break-all">{preview.local_path}</p>
+          <p
+            class="text-muted-foreground truncate font-mono text-[11px]"
+            title={preview.local_path}
+          >
+            {preview.local_path}
+          </p>
           <div class="mt-auto flex flex-col gap-1 border-t pt-2 text-[11px] leading-relaxed">
             {#if alreadyAdded}
               <p class="text-muted-foreground">{m.projects_already_added()}</p>
