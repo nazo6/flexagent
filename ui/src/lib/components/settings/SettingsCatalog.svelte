@@ -7,14 +7,13 @@
   import { Label } from "#lib/components/ui/label/index.ts";
   import type {
     NodeSettingsSnapshot,
-    ProjectProfile,
     SecretSummary,
     HubSettingsSnapshot,
   } from "#lib/generated/bindings.ts";
   import { sync } from "#lib/stores/app.svelte.ts";
   import { toast } from "svelte-sonner";
 
-  type Section = "bootstrap" | "machine" | "hub" | "projects";
+  type Section = "bootstrap" | "machine" | "hub";
 
   let { section, query = "" }: { section: Section; query?: string } = $props();
 
@@ -25,7 +24,6 @@
   let nodeSnapshot = $state<NodeSettingsSnapshot | null>(null);
   let hubSnapshot = $state<HubSettingsSnapshot | null>(null);
   let secrets = $state<SecretSummary[]>([]);
-  let profiles = $state<Record<string, ProjectProfile>>({});
   let loading = $state(false);
   let error = $state<string | null>(null);
 
@@ -50,10 +48,6 @@
     description: "",
     value: "",
   });
-
-  // Project profile form
-  let editingProfile = $state<string | null>(null);
-  let profileForm = $state({ setup: "", env: "", revision: 0 });
 
   const targetNode = $derived(isHub ? selectedNode : (sync.connection.systemInfo?.node_id ?? ""));
   const showSecrets = $derived(section === "machine" || (section === "hub" && isHub));
@@ -93,16 +87,6 @@
           targetNode !== "" ? (await sync.connection.client.nodeSecrets(targetNode)).secrets : [];
       } else if (section === "hub" && isHub) {
         secrets = (await sync.connection.client.hubSecrets()).secrets;
-      }
-      if (section === "projects" && isHub) {
-        await sync.refreshProjects();
-        const entries = await Promise.all(
-          sync.projects.map(async (project) => {
-            const profile = await sync.connection.client.projectProfile(project.project_id);
-            return [project.project_id, profile] as const;
-          }),
-        );
-        profiles = Object.fromEntries(entries);
       }
     } catch (cause) {
       error = cause instanceof Error ? cause.message : String(cause);
@@ -231,44 +215,6 @@
           : await sync.connection.client.deleteNodeSecret(targetNode, secret.id);
       secrets = response.secrets;
       toast.success(`Deleted secret "${secret.id}".`);
-    } catch (cause) {
-      toast.error(cause instanceof Error ? cause.message : String(cause));
-    }
-  }
-
-  function startProfile(projectId: string): void {
-    const profile = profiles[projectId];
-    editingProfile = projectId;
-    profileForm = {
-      setup: profile.bootstrap_setup.join("\n"),
-      env: Object.entries(profile.bootstrap_env)
-        .map(([key, value]) => `${key}=${value}`)
-        .join("\n"),
-      revision: profile.revision,
-    };
-  }
-
-  async function saveProfile(projectId: string): Promise<void> {
-    const env: Record<string, string> = {};
-    for (const line of profileForm.env.split("\n")) {
-      const trimmed = line.trim();
-      if (trimmed === "") continue;
-      const index = trimmed.indexOf("=");
-      if (index <= 0) continue;
-      env[trimmed.slice(0, index)] = trimmed.slice(index + 1);
-    }
-    try {
-      const profile = await sync.connection.client.updateProjectProfile(projectId, {
-        bootstrap_setup: profileForm.setup
-          .split("\n")
-          .map((line) => line.trim())
-          .filter((line) => line !== ""),
-        bootstrap_env: env,
-        expected_revision: profileForm.revision,
-      });
-      profiles = { ...profiles, [projectId]: profile };
-      editingProfile = null;
-      toast.success("Saved project profile.");
     } catch (cause) {
       toast.error(cause instanceof Error ? cause.message : String(cause));
     }
@@ -544,73 +490,6 @@
         </div>
       </Card>
     {/if}
-  {:else if section === "projects"}
-    <Card class="gap-3 p-4">
-      <h2 class="font-medium">Project profiles</h2>
-      {#if !isHub}
-        <p class="text-muted-foreground text-[13px]">
-          Bootstrap profiles for temporary VMs are owned by the hub. Open the hub Web UI to edit
-          them.
-        </p>
-      {:else}
-        <p class="text-muted-foreground text-[13px]">
-          Setup commands and environment variables injected into temporary VMs (<code
-            >project_profiles</code
-          >
-          in <code>hub.db</code>).
-        </p>
-        {#each sync.projects as project (project.project_id)}
-          {@const profile = profiles[project.project_id]}
-          <div class="rounded-md border p-2">
-            <div class="flex flex-wrap items-center gap-2">
-              <span class="text-sm font-medium">{project.name}</span>
-              <code class="text-muted-foreground text-[11px]">{project.project_id}</code>
-              <Badge variant="outline" class="text-[11px]">{project.identity.kind}</Badge>
-              <Button
-                variant="outline"
-                size="sm"
-                class="ml-auto"
-                onclick={() => startProfile(project.project_id)}
-              >
-                Edit
-              </Button>
-            </div>
-            {#if editingProfile === project.project_id}
-              <div class="mt-2 grid gap-2">
-                <div class="grid gap-1.5">
-                  <Label for={`setup-${project.project_id}`}>Setup commands (one per line)</Label>
-                  <textarea
-                    id={`setup-${project.project_id}`}
-                    class="border-input bg-background min-h-20 rounded-md border p-2 font-mono text-[13px]"
-                    bind:value={profileForm.setup}></textarea>
-                </div>
-                <div class="grid gap-1.5">
-                  <Label for={`env-${project.project_id}`}>Environment (KEY=VALUE)</Label>
-                  <textarea
-                    id={`env-${project.project_id}`}
-                    class="border-input bg-background min-h-20 rounded-md border p-2 font-mono text-[13px]"
-                    bind:value={profileForm.env}></textarea>
-                </div>
-                <div class="flex gap-2">
-                  <Button size="sm" onclick={() => void saveProfile(project.project_id)}>
-                    Save
-                  </Button>
-                  <Button variant="outline" size="sm" onclick={() => (editingProfile = null)}>
-                    Cancel
-                  </Button>
-                </div>
-              </div>
-            {:else if profile}
-              <p class="text-muted-foreground mt-1 text-[13px]">
-                {profile.bootstrap_setup.length} setup command(s), {Object.keys(
-                  profile.bootstrap_env,
-                ).length} env var(s)
-              </p>
-            {/if}
-          </div>
-        {/each}
-      {/if}
-    </Card>
   {/if}
 
   {#if showSecrets}

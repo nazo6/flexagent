@@ -415,7 +415,7 @@ pub(crate) async fn handle_server_message(
                 .unwrap_or_else(|| PathBuf::from(&local_path));
 
             // Bring the project binding of the working directory up to date
-            // (an ephemeral VM already registered it at bootstrap, but re-register on
+            // (an ephemeral VM already registered it at startup, but re-register on
             //  every path to also refresh `last_used_at`)
             if let Err(err) = state.resolve_and_register_project(&local_path).await {
                 send_command_result(out, command_id, Err(err)).await;

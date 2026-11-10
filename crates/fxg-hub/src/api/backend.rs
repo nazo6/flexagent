@@ -24,8 +24,7 @@ use fxg_protocol::common::{
 use fxg_protocol::events::SessionEventEnvelope;
 use fxg_protocol::node_hub::{NodeRpcRequest, NodeRpcResponse};
 use fxg_protocol::settings::{
-    HubSettingsSnapshot, ProjectProfile, SecretsResponse, UpdateHubSettingsRequest,
-    UpdateProjectProfileRequest, UpsertSecretRequest,
+    HubSettingsSnapshot, SecretsResponse, UpdateHubSettingsRequest, UpsertSecretRequest,
 };
 use fxg_protocol::{CommandId, NodeId, SecretId, SessionId};
 use tokio::sync::broadcast;
@@ -593,26 +592,6 @@ pub trait ClientApiBackend: Clone + Send + Sync + 'static {
         Err(ApiError::from_code(
             ErrorCode::InvalidState,
             "server secrets are only available on the hub",
-        ))
-    }
-
-    /// `GET /api/v1/projects/:project_id/profile` (hub-owned).
-    async fn project_profile(&self, _project_id: &str) -> Result<ProjectProfile, ApiError> {
-        Err(ApiError::from_code(
-            ErrorCode::InvalidState,
-            "project profiles are only available on the hub",
-        ))
-    }
-
-    /// `PUT /api/v1/projects/:project_id/profile` (hub-owned).
-    async fn update_project_profile(
-        &self,
-        _project_id: &str,
-        _request: UpdateProjectProfileRequest,
-    ) -> Result<ProjectProfile, ApiError> {
-        Err(ApiError::from_code(
-            ErrorCode::InvalidState,
-            "project profiles are only available on the hub",
         ))
     }
 

@@ -13,8 +13,8 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
+use crate::SecretId;
 use crate::config::EnvLookup;
-use crate::{ProjectId, SecretId};
 
 crate::open_string_enum! {
     /// Where a bootstrap (process start-up) value came from.
@@ -404,12 +404,14 @@ pub struct ProvisionerDefinition {
     pub command: String,
     /// Command arguments.
     ///
-    /// Placeholders: `{BOOTSTRAP_SCRIPT}` / `{INSTANCE_NAME}` / `{SESSION_ID}`.
+    /// Placeholders: `{INSTANCE_NAME}` / `{SESSION_ID}`.
     pub args: Vec<String>,
     /// Seconds until the idle instance is discarded automatically
     pub idle_timeout_secs: Option<u64>,
     /// Environment variables injected into the process
     pub env: BTreeMap<String, String>,
+    /// Environment variables resolved from the secret store at launch time
+    pub env_secrets: BTreeMap<String, SecretId>,
 }
 
 /// Metadata of a stored user secret (never the value itself).
@@ -472,34 +474,6 @@ impl ProjectIdentity {
             key: None,
         }
     }
-}
-
-/// Per-project bootstrap profile for ephemeral VMs (`project_profiles` in `hub.db`).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
-#[specta(collect)]
-pub struct ProjectProfile {
-    /// Logical project ID
-    pub project_id: ProjectId,
-    /// Setup commands run after `git clone` and tool detection
-    pub bootstrap_setup: Vec<String>,
-    /// Non-secret environment variables injected during setup and execution
-    pub bootstrap_env: BTreeMap<String, String>,
-    /// Optimistic-lock revision
-    pub revision: u64,
-    /// Last update time (Unix epoch ms)
-    pub updated_at: i64,
-}
-
-/// `PUT /api/v1/projects/{project_id}/profile` request.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
-#[specta(collect)]
-pub struct UpdateProjectProfileRequest {
-    /// Setup commands
-    pub bootstrap_setup: Vec<String>,
-    /// Non-secret environment variables
-    pub bootstrap_env: BTreeMap<String, String>,
-    /// Revision the client observed (`REVISION_MISMATCH` on conflict)
-    pub expected_revision: u64,
 }
 
 /// Response of the secret list endpoints.

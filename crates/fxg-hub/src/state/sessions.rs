@@ -181,7 +181,9 @@ impl HubState {
                     project_id: request.project_id.to_string(),
                     project_name: project.name.clone(),
                     node_id: node_id.clone(),
-                    local_path: provisioner::EPHEMERAL_WORKSPACE.to_owned(),
+                    // The workspace is determined by the external environment and
+                    // reported via NodeHello; SessionCreated overwrites this value.
+                    local_path: request.local_path.clone().unwrap_or_default(),
                     git_branch: git_branch.clone(),
                     agent_id: agent_id.clone(),
                     title: format!("{agent_id} @ {}", project.name),

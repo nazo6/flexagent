@@ -30,8 +30,7 @@ use crate::api::{
     PtyChannelEvent, PtySpawnParams, SystemExtras, auth,
 };
 use fxg_protocol::settings::{
-    HubSettingsSnapshot, ProjectProfile, SecretsResponse, UpdateHubSettingsRequest,
-    UpdateProjectProfileRequest, UpsertSecretRequest,
+    HubSettingsSnapshot, SecretsResponse, UpdateHubSettingsRequest, UpsertSecretRequest,
 };
 use fxg_protocol::{NodeId, SecretId};
 
@@ -705,18 +704,6 @@ impl ClientApiBackend for HubState {
         HubState::delete_server_secret(self, secret_id)
             .await
             .map_err(secret_error)
-    }
-
-    async fn project_profile(&self, project_id: &str) -> Result<ProjectProfile, ApiError> {
-        HubState::project_profile(self, project_id).await
-    }
-
-    async fn update_project_profile(
-        &self,
-        project_id: &str,
-        request: UpdateProjectProfileRequest,
-    ) -> Result<ProjectProfile, ApiError> {
-        HubState::update_project_profile(self, project_id, &request).await
     }
 
     async fn kill_switch(

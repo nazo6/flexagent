@@ -510,15 +510,15 @@ export interface ITerminalAdapter {
       Podman / Incus VM / `google-colab-cli` の子プロセス起動と `stderr`
       初期化ログ配信）
   - `{INSTANCE_NAME}` / `{SESSION_ID}` を置換し、プロビジョナー定義の環境変数を注入。
-    `stderr` は `HubWsMessage::BootstrapLog` として UI へエフェメラル配信する。
-    → アーキテクチャ簡素化で `{BOOTSTRAP_SCRIPT}` と `BootstrapLog` は廃止予定。
+    `stderr` は `HubWsMessage::ProvisioningLog` として UI へエフェメラル配信する。
+    → アーキテクチャ簡素化で `{BOOTSTRAP_SCRIPT}` は廃止済み。
 - [x] `fxg internal bootstrap-workspace` の実装（`mise` / `uv`
       単一バイナリの自動取得と、リポジトリ設定ファイルからの完全ステートレスなツール自動構築）
   - `Cargo.toml` / `package.json` / `pyproject.toml` / `mise.toml` /
     `.tool-versions` / `hub.db.project_profiles` からツールを検出して導入し、
     `$FXG_HOME/bootstrap.env` に PATH と環境変数を書き出す。
     → アーキテクチャ簡素化で `bootstrap.rs` / `bootstrap-workspace` /
-    `project_profiles` は廃止予定。ツールチェインはイメージ / VM テンプレート側へ移す。
+    `project_profiles` は廃止済み。ツールチェインはイメージ / VM テンプレート側へ移す。
 - [x] `GIT_ASKPASS` + `GitCredentialRequest`
       パイププロキシによる一時VM内への秘密鍵・トークン非保持化
   - ブートストラップ中は短命トークンを echo する専用ヘルパー、ノード起動後は
@@ -526,7 +526,7 @@ export interface ITerminalAdapter {
     でオンメモリ中継する。
     → アーキテクチャ簡素化で `git-askpass` / `GitCredentialRequest` は廃止予定。
     Provisioner の `env_secrets` とイメージ側の credential helper に移行する。
-- [ ] 外部事前構築済みツール環境への責務分離（`bootstrap.rs` / `bootstrap-workspace` の廃止）
+- [x] 外部事前構築済みツール環境への責務分離（`bootstrap.rs` / `bootstrap-workspace` の廃止）
   - ツールチェインやリポジトリ配置は Dockerfile / VM テンプレート / 起動コマンド側で管理し、`fxg` 内のツール自動導入ロジックを全廃。
 - [ ] 環境変数による Git 認証への一本化（`git-askpass` / `GitCredentialRequest` の廃止）
   - プロビジョナーの `env_secrets` またはコンテナ内設定を利用し、動的認証プロキシを全廃。

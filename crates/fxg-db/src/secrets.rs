@@ -102,22 +102,29 @@ pub async fn used_by(db: &Db, id: &SecretId) -> Result<Vec<String>, DbError> {
             Ok(used)
         }
         DbRole::Hub => {
+            let mut used = Vec::new();
+            for (name, config) in db.provisioners().await? {
+                if config.env_secrets.values().any(|value| value == id) {
+                    used.push(format!("provisioner:{name}"));
+                }
+            }
             let settings = db.hub_settings().await?;
-            let Some(settings) = settings else {
-                return Ok(Vec::new());
-            };
-            Ok(settings
-                .git_credentials
-                .into_iter()
-                .filter(|(_, config)| {
-                    matches!(
-                        config,
-                        fxg_protocol::settings::GitCredentialConfig::Secret { secret_id, .. }
-                            if secret_id == id
-                    )
-                })
-                .map(|(host, _)| host)
-                .collect())
+            if let Some(settings) = settings {
+                used.extend(
+                    settings
+                        .git_credentials
+                        .into_iter()
+                        .filter(|(_, config)| {
+                            matches!(
+                                config,
+                                fxg_protocol::settings::GitCredentialConfig::Secret { secret_id, .. }
+                                    if secret_id == id
+                            )
+                        })
+                        .map(|(host, _)| host),
+                );
+            }
+            Ok(used)
         }
     }
 }

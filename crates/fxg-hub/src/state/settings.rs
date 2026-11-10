@@ -4,12 +4,11 @@ use fxg_protocol::common::ErrorCode;
 
 use crate::api::ApiError;
 use crate::error::HubError;
+use fxg_protocol::SecretId;
 use fxg_protocol::settings::{
-    ConfigSource, HubBootstrapView, HubSettingsSnapshot, ProjectProfile, SecretsResponse,
-    SourcedValue, UpdateHubSettingsRequest, UpdateProjectProfileRequest, UpsertSecretRequest,
-    sourced_option, sourced_string,
+    ConfigSource, HubBootstrapView, HubSettingsSnapshot, SecretsResponse, SourcedValue,
+    UpdateHubSettingsRequest, UpsertSecretRequest, sourced_option, sourced_string,
 };
-use fxg_protocol::{ProjectId, SecretId};
 
 use super::HubState;
 
@@ -164,38 +163,6 @@ impl HubState {
             secrets: fxg_db::secrets::delete_secret(self.db(), &self.inner.options.fxg_home, id)
                 .await?,
         })
-    }
-
-    /// Returns the project bootstrap profile (default when absent).
-    pub async fn project_profile(&self, project_id: &str) -> Result<ProjectProfile, ApiError> {
-        let id = ProjectId::from(project_id);
-        if let Some(profile) = self.db().project_profile(&id).await? {
-            return Ok(profile);
-        }
-        let projects = self.db().list_projects().await?;
-        if !projects.iter().any(|project| project.project_id == id) {
-            return Err(ApiError::not_found(format!(
-                "project not found: {project_id}"
-            )));
-        }
-        Ok(ProjectProfile {
-            project_id: id,
-            bootstrap_setup: Vec::new(),
-            bootstrap_env: Default::default(),
-            revision: 0,
-            updated_at: 0,
-        })
-    }
-
-    /// Updates the project bootstrap profile.
-    pub async fn update_project_profile(
-        &self,
-        project_id: &str,
-        request: &UpdateProjectProfileRequest,
-    ) -> Result<ProjectProfile, ApiError> {
-        let id = ProjectId::from(project_id);
-        let profile = self.db().upsert_project_profile(&id, request).await?;
-        Ok(profile)
     }
 }
 

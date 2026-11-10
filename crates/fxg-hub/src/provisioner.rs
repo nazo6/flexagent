@@ -19,7 +19,7 @@ use std::sync::{Arc, Mutex as StdMutex, RwLock};
 use std::time::{Duration, Instant};
 
 use fxg_protocol::client_api::ProvisionerTestResponse;
-use fxg_protocol::common::{NodeLifecycleStatus, PromptInput, SessionStatus};
+use fxg_protocol::common::{NodeLifecycleStatus, NodeProjectReport, PromptInput, SessionStatus};
 use fxg_protocol::config::DEFAULT_GIT_USERNAME;
 use fxg_protocol::node_hub::{HubToNodeMsg, NodeToHubMsg};
 use fxg_protocol::settings::{GitCredentialConfig, ProvisionerDefinition};
@@ -42,12 +42,8 @@ const DRAIN_TIMEOUT: Duration = Duration::from_secs(60);
 const MONITOR_INTERVAL: Duration = Duration::from_secs(5);
 /// Upper bound for the `provisioners test` handshake wait.
 const TEST_TIMEOUT: Duration = Duration::from_secs(300);
-/// Number of bootstrap log lines kept by `provisioners test`.
+/// Number of provisioning log lines kept by `provisioners test`.
 const TEST_LOG_LINES: usize = 200;
-/// Workspace path inside the temporary VM (must match the generated script).
-pub(crate) const EPHEMERAL_WORKSPACE: &str = "/tmp/workspace";
-/// fxg binary path inside the temporary VM.
-const EPHEMERAL_BINARY: &str = "/tmp/fxg";
 
 /// Runtime state of one temporary VM instance (keyed by node_id).
 struct Instance {
@@ -315,20 +311,6 @@ pub async fn spawn_session(state: &HubState, request: SpawnSessionRequest) -> Re
         }
     }
 
-    // Inject the project bootstrap profile (hub-owned `project_profiles`).
-    if let Ok(Some(profile)) = state
-        .db()
-        .project_profile(&fxg_protocol::ProjectId::from(request.project_id.as_str()))
-        .await
-        && let Ok(json) = serde_json::to_vec(&profile)
-    {
-        use base64::Engine as _;
-        env.push((
-            "FXG_PROJECT_PROFILE_B64".to_owned(),
-            base64::engine::general_purpose::STANDARD.encode(json),
-        ));
-    }
-
     let pending = PendingStart {
         session_id: session_id.clone(),
         project_id: request.project_id.clone(),
@@ -471,10 +453,10 @@ pub async fn provisioner_test(
     }
 
     match outcome {
-        Ok(Ok(hello_node_id)) => Ok(ProvisionerTestResponse {
+        Ok(Ok(handshake)) => Ok(ProvisionerTestResponse {
             name: name.to_owned(),
             ok: true,
-            node_id: Some(hello_node_id.into()),
+            node_id: Some(handshake.node_id.into()),
             log_lines,
             error: None,
         }),
@@ -527,10 +509,20 @@ struct PendingStart {
     extra_args: Option<Vec<String>>,
 }
 
+/// Handshake information reported by an ephemeral node.
+#[derive(Clone, Debug)]
+struct EphemeralHandshake {
+    /// Node ID reported by `NodeHello`
+    node_id: String,
+    /// Projects / workspace bindings reported by `NodeHello`
+    projects: Vec<NodeProjectReport>,
+}
+
 /// Handles obtained after launching the child process.
 struct SpawnHandles {
-    /// Notifies the node ID on NodeHello receipt (closes the channel on failure)
-    hello: Option<oneshot::Receiver<String>>,
+    /// Notifies the handshake information on NodeHello receipt (closes the
+    /// channel on failure)
+    hello: Option<oneshot::Receiver<EphemeralHandshake>>,
     /// Child process termination signal
     terminate: watch::Sender<bool>,
     /// Logs collected by `provisioners test`
@@ -540,10 +532,6 @@ struct SpawnHandles {
 /// Launches the provisioner command and starts the stdin/stdout/stderr pumps.
 async fn spawn_child(state: &HubState, request: SpawnRequest) -> Result<SpawnHandles, ApiError> {
     let manager = state.provisioners().clone();
-    let bootstrap = compose_bootstrap_script(
-        env!("CARGO_PKG_VERSION"),
-        matches!(request.mode, SpawnMode::Session(_)),
-    );
     let instance_name = format!(
         "fxg-eph-{}",
         &request.node_id[..request.node_id.len().min(24)]
@@ -552,12 +540,25 @@ async fn spawn_child(state: &HubState, request: SpawnRequest) -> Result<SpawnHan
     let mut command = Command::new(&request.config.command);
     for arg in &request.config.args {
         command.arg(
-            arg.replace("{BOOTSTRAP_SCRIPT}", &bootstrap)
-                .replace("{INSTANCE_NAME}", &instance_name)
+            arg.replace("{INSTANCE_NAME}", &instance_name)
                 .replace("{SESSION_ID}", &request.node_id),
         );
     }
     for (key, value) in &request.config.env {
+        command.env(key, value);
+    }
+    for (key, secret_id) in &request.config.env_secrets {
+        let value =
+            fxg_db::secrets::read_secret(manager.fxg_home(), fxg_db::secrets::ROLE_HUB, secret_id)
+                .map_err(|err| {
+                    ApiError::internal(format!("failed to read secret {secret_id}: {err}"))
+                })?
+                .ok_or_else(|| {
+                    ApiError::bad_request(format!(
+                        "provisioner {} secret {secret_id} is not configured",
+                        request.provisioner
+                    ))
+                })?;
         command.env(key, value);
     }
     for (key, value) in &request.env {
@@ -608,7 +609,7 @@ async fn spawn_child(state: &HubState, request: SpawnRequest) -> Result<SpawnHan
         .take()
         .ok_or_else(|| ApiError::internal("failed to capture provisioner stderr"))?;
 
-    let (hello_tx, hello_rx) = oneshot::channel::<String>();
+    let (hello_tx, hello_rx) = oneshot::channel::<EphemeralHandshake>();
     let (terminate_tx, terminate_rx) = watch::channel(false);
     let last_activity = Arc::new(StdMutex::new(Instant::now()));
     let test_log: Option<Arc<StdMutex<Vec<String>>>> = match request.mode {
@@ -697,6 +698,7 @@ async fn spawn_child(state: &HubState, request: SpawnRequest) -> Result<SpawnHan
                         };
                         if let NodeToHubMsg::NodeHello {
                             node_id: hello_node_id,
+                            projects,
                             ..
                         } = &message
                             && !attached
@@ -729,8 +731,11 @@ async fn spawn_child(state: &HubState, request: SpawnRequest) -> Result<SpawnHan
                             }
                             if let Some(tx) = hello_tx.take() {
                                 fxg_protocol::discard_with!(
-                                    tx.send(hello_node_id.as_str().to_owned()),
-                                    "report the ephemeral node id to a waiter that may be gone"
+                                    tx.send(EphemeralHandshake {
+                                        node_id: hello_node_id.as_str().to_owned(),
+                                        projects: projects.clone(),
+                                    }),
+                                    "report the ephemeral handshake to a waiter that may be gone"
                                 );
                             }
                         }
@@ -790,16 +795,37 @@ async fn spawn_child(state: &HubState, request: SpawnRequest) -> Result<SpawnHan
     })
 }
 
+/// Selects the workspace path reported by the ephemeral node's `NodeHello`.
+fn workspace_path(project_id: &str, projects: &[NodeProjectReport]) -> Option<String> {
+    fn first_binding(project: &NodeProjectReport) -> Option<String> {
+        project
+            .bindings
+            .iter()
+            .find(|binding| binding.path_exists)
+            .or_else(|| project.bindings.first())
+            .map(|binding| binding.local_path.clone())
+    }
+
+    projects
+        .iter()
+        .find(|project| project.project_id.as_str() == project_id)
+        .and_then(first_binding)
+        .or_else(|| projects.iter().find_map(first_binding))
+}
+
 /// Waits for the handshake and sends `StartSession`.
 async fn await_handshake_and_start(
     state: HubState,
     node_id: String,
-    hello: oneshot::Receiver<String>,
+    hello: oneshot::Receiver<EphemeralHandshake>,
     pending: PendingStart,
 ) {
     let handshake = tokio::time::timeout(HELLO_TIMEOUT, hello).await;
-    let hello_node_id = match handshake {
-        Ok(Ok(hello_node_id)) => hello_node_id,
+    let EphemeralHandshake {
+        node_id: hello_node_id,
+        projects,
+    } = match handshake {
+        Ok(Ok(handshake)) => handshake,
         Ok(Err(_)) => {
             fail_session(
                 &state,
@@ -816,7 +842,7 @@ async fn await_handshake_and_start(
                 "timed out waiting for the ephemeral node handshake",
             )
             .await;
-            drain(&state, &node_id, "bootstrap timeout").await;
+            drain(&state, &node_id, "provisioning timeout").await;
             return;
         }
     };
@@ -828,12 +854,23 @@ async fn await_handshake_and_start(
         );
     }
 
+    let Some(local_path) = workspace_path(&pending.project_id, &projects) else {
+        fail_session(
+            &state,
+            &pending.session_id,
+            "ephemeral node reported no workspace; the provisioner must start `fxg internal stdio --workspace <dir>`",
+        )
+        .await;
+        drain(&state, &node_id, "missing workspace").await;
+        return;
+    };
+
     let command_id = CommandId::from(uuid_v7());
     let message = HubToNodeMsg::StartSession {
         command_id: command_id.clone(),
         session_id: pending.session_id.clone().into(),
         project_id: pending.project_id.clone().into(),
-        local_path: EPHEMERAL_WORKSPACE.to_owned(),
+        local_path,
         agent_id: pending.agent_id.clone(),
         initial_prompt: pending.initial_prompt.clone(),
         initial_config: pending.initial_config.clone(),
@@ -1030,79 +1067,35 @@ pub(crate) fn url_host(url: &str) -> Option<String> {
     None
 }
 
-/// Generates the temporary VM bootstrap script (`{BOOTSTRAP_SCRIPT}`).
-///
-/// Routes all output to `stderr` (`>&2`) and reserves `stdout` for `fxg internal stdio`
-/// protocol traffic.
-fn compose_bootstrap_script(version: &str, clone_workspace: bool) -> String {
-    let clone_step = if clone_workspace {
-        format!(
-            r#"'{}' internal bootstrap-workspace --repo "$FXG_GIT_URL" ${{FXG_GIT_BRANCH:+--branch "$FXG_GIT_BRANCH"}} --dir {} >&2
-if [ -f "$FXG_HOME/bootstrap.env" ]; then . "$FXG_HOME/bootstrap.env"; fi
-exec '{}' internal stdio --ephemeral --workspace {}"#,
-            EPHEMERAL_BINARY, EPHEMERAL_WORKSPACE, EPHEMERAL_BINARY, EPHEMERAL_WORKSPACE
-        )
-    } else {
-        // Connectivity check: skip the clone and only verify the daemon handshake
-        format!(
-            "exec '{}' internal stdio --ephemeral --workspace /tmp",
-            EPHEMERAL_BINARY
-        )
-    };
-
-    format!(
-        r#"set -eu
-export FXG_HOME="${{FXG_HOME:-$HOME/.flexagent}}"
-mkdir -p "$FXG_HOME"
-if ! command -v git >/dev/null 2>&1 || ! command -v curl >/dev/null 2>&1; then
-  if command -v apt-get >/dev/null 2>&1; then
-    (apt-get update && apt-get install -y --no-install-recommends git curl ca-certificates) >&2 || true
-  fi
-fi
-fxg_os=$(uname -s | tr '[:upper:]' '[:lower:]')
-case "$fxg_os" in
-  linux) fxg_os=linux ;;
-  darwin) fxg_os=macos ;;
-  *) fxg_os=linux ;;
-esac
-fxg_arch=$(uname -m)
-case "$fxg_arch" in
-  x86_64|amd64) fxg_arch=x86_64 ;;
-  aarch64|arm64) fxg_arch=aarch64 ;;
-  *) fxg_arch=x86_64 ;;
-esac
-FXG_BINARY_URL="${{FXG_BINARY_URL:-https://github.com/nazo6/flexagent/releases/download/v{version}/fxg-$fxg_os-$fxg_arch}}"
-echo "[fxg-bootstrap] downloading fxg ($fxg_os-$fxg_arch) from $FXG_BINARY_URL" >&2
-curl -fsSL "$FXG_BINARY_URL" -o '{binary}' >&2
-chmod +x '{binary}'
-{clone_step}"#,
-        version = version,
-        binary = EPHEMERAL_BINARY,
-        clone_step = clone_step,
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn bootstrap_script_separates_stdout_and_starts_daemon() {
-        let script = compose_bootstrap_script("9.9.9", true);
-        assert!(script.contains("internal bootstrap-workspace"));
-        assert!(
-            script
-                .contains("exec '/tmp/fxg' internal stdio --ephemeral --workspace /tmp/workspace")
+    fn workspace_path_prefers_the_pending_project() {
+        let binding = |path: &str| fxg_protocol::common::ProjectNodeBinding {
+            local_path: path.to_owned(),
+            is_worktree: false,
+            path_exists: true,
+            git_branch: None,
+            last_used_at: 0,
+        };
+        let project = |id: &str, path: &str| NodeProjectReport {
+            project_id: id.into(),
+            name: id.to_owned(),
+            canonical_git_url: None,
+            identity: fxg_protocol::settings::ProjectIdentity::git_remote(),
+            bindings: vec![binding(path)],
+        };
+        let projects = vec![project("other", "/other"), project("wanted", "/wanted")];
+        assert_eq!(
+            workspace_path("wanted", &projects).as_deref(),
+            Some("/wanted")
         );
-        assert!(script.contains("v9.9.9"));
-        assert!(script.contains(">&2"));
-    }
-
-    #[test]
-    fn test_script_skips_workspace_clone() {
-        let script = compose_bootstrap_script("9.9.9", false);
-        assert!(!script.contains("bootstrap-workspace"));
-        assert!(script.contains("internal stdio --ephemeral --workspace /tmp"));
+        assert_eq!(
+            workspace_path("missing", &projects).as_deref(),
+            Some("/other")
+        );
     }
 
     #[test]

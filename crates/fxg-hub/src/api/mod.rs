@@ -66,9 +66,8 @@ use handlers::sessions::{
 };
 use handlers::settings::{
     browse_fs, delete_node_secret, delete_server_secret, list_agents_node, node_secrets,
-    node_settings, project_profile, server_secrets, settings_server, update_agent_settings,
-    update_hub_settings, update_node_settings, update_project_profile, upsert_node_secret,
-    upsert_server_secret,
+    node_settings, server_secrets, settings_server, update_agent_settings, update_hub_settings,
+    update_node_settings, upsert_node_secret, upsert_server_secret,
 };
 use handlers::stream::{client_ws, pty_ws};
 use handlers::system::{
@@ -237,10 +236,6 @@ pub fn client_router<B: ClientApiBackend>(backend: B, options: ClientApiOptions)
             put(upsert_node_secret::<B>).delete(delete_node_secret::<B>),
         )
         .route("/api/v1/nodes/{node_id}/agents", get(list_agents_node::<B>))
-        .route(
-            "/api/v1/projects/{project_id}/profile",
-            get(project_profile::<B>).put(update_project_profile::<B>),
-        )
         .route("/api/v1/provisioners", get(list_provisioners::<B>))
         .route(
             "/api/v1/provisioners/{provisioner}/test",

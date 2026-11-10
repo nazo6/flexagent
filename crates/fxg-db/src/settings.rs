@@ -1,9 +1,8 @@
-//! Typed settings, secret metadata and project-profile persistence.
+//! Typed settings and secret metadata persistence.
 //!
 //! `node.db` owns `node_settings` / `agent_settings` / `agent_aliases` /
 //! `custom_agents` / `enabled_package_agents` / `project_path_links`.
-//! `hub.db` owns `hub_settings` / `git_credentials` / `provisioners` /
-//! `project_profiles`.
+//! `hub.db` owns `hub_settings` / `git_credentials` / `provisioners`.
 //!
 //! Every mutable single-row/aggregate table carries an explicit `revision`
 //! column; updates take the revision the client observed and fail with
@@ -11,13 +10,13 @@
 
 use std::collections::BTreeMap;
 
+use fxg_protocol::SecretId;
 use fxg_protocol::settings::{
     AgentSettings, CustomAgentConfig, GitCredentialConfig, HubSettings, NodeSettings,
-    ProjectProfile, ProvisionerDefinition, SecretSummary, UpdateAgentSettingsRequest,
-    UpdateHubSettingsRequest, UpdateNodeSettingsRequest, UpdateProjectProfileRequest,
+    ProvisionerDefinition, SecretSummary, UpdateAgentSettingsRequest, UpdateHubSettingsRequest,
+    UpdateNodeSettingsRequest,
 };
 use fxg_protocol::util::now_ms;
-use fxg_protocol::{ProjectId, SecretId};
 use sqlx::SqlitePool;
 
 use crate::error::DbError;
@@ -572,7 +571,8 @@ pub async fn list_provisioners(
 ) -> Result<BTreeMap<String, ProvisionerDefinition>, DbError> {
     let rows = sqlx::query!(
         r#"
-        SELECT name AS "name!", description, command, args_json, idle_timeout_secs, env_json
+        SELECT name AS "name!", description, command, args_json, idle_timeout_secs, env_json,
+               env_secrets_json
           FROM provisioners
          ORDER BY name
         "#,
@@ -590,6 +590,7 @@ pub async fn list_provisioners(
                 args: serde_json::from_str(&row.args_json)?,
                 idle_timeout_secs: row.idle_timeout_secs.and_then(positive_u64),
                 env: serde_json::from_str(&row.env_json)?,
+                env_secrets: serde_json::from_str(&row.env_secrets_json)?,
             },
         );
     }
@@ -603,20 +604,23 @@ pub async fn upsert_provisioner(
 ) -> Result<(), DbError> {
     let args_json = serde_json::to_string(&definition.args)?;
     let env_json = serde_json::to_string(&definition.env)?;
+    let env_secrets_json = serde_json::to_string(&definition.env_secrets)?;
     let idle_timeout_secs = definition
         .idle_timeout_secs
         .map(|value| i64::try_from(value).unwrap_or(i64::MAX));
     sqlx::query!(
         r#"
         INSERT INTO provisioners
-            (name, description, command, args_json, idle_timeout_secs, env_json, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+            (name, description, command, args_json, idle_timeout_secs, env_json,
+             env_secrets_json, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(name) DO UPDATE SET
             description = excluded.description,
             command = excluded.command,
             args_json = excluded.args_json,
             idle_timeout_secs = excluded.idle_timeout_secs,
             env_json = excluded.env_json,
+            env_secrets_json = excluded.env_secrets_json,
             updated_at = excluded.updated_at
         "#,
         definition.name,
@@ -625,6 +629,7 @@ pub async fn upsert_provisioner(
         args_json,
         idle_timeout_secs,
         env_json,
+        env_secrets_json,
         now_ms(),
     )
     .execute(pool)
@@ -638,79 +643,6 @@ pub async fn delete_provisioner(pool: &SqlitePool, name: &str) -> Result<u64, Db
         .execute(pool)
         .await?;
     Ok(result.rows_affected())
-}
-
-// ----------------------------------------------------------------------
-// Project profiles
-// ----------------------------------------------------------------------
-
-/// Returns the bootstrap profile of a project when it exists.
-pub async fn get_project_profile(
-    pool: &SqlitePool,
-    project_id: &ProjectId,
-) -> Result<Option<ProjectProfile>, DbError> {
-    let row = sqlx::query!(
-        r#"
-        SELECT project_id AS "project_id!", bootstrap_setup_json, bootstrap_env_json,
-               revision, updated_at
-          FROM project_profiles
-         WHERE project_id = ?
-        "#,
-        project_id.as_str(),
-    )
-    .fetch_optional(pool)
-    .await?;
-    let Some(row) = row else { return Ok(None) };
-    Ok(Some(ProjectProfile {
-        project_id: row.project_id.into(),
-        bootstrap_setup: serde_json::from_str(&row.bootstrap_setup_json)?,
-        bootstrap_env: serde_json::from_str(&row.bootstrap_env_json)?,
-        revision: revision_u64(row.revision)?,
-        updated_at: row.updated_at,
-    }))
-}
-
-/// Inserts or updates a project profile under an optimistic lock.
-///
-/// A missing row is treated as revision `0`.
-pub async fn upsert_project_profile(
-    pool: &SqlitePool,
-    project_id: &ProjectId,
-    request: &UpdateProjectProfileRequest,
-) -> Result<ProjectProfile, DbError> {
-    let existing = get_project_profile(pool, project_id).await?;
-    let current_revision = existing
-        .as_ref()
-        .map(|profile| profile.revision)
-        .unwrap_or(0);
-    if current_revision != request.expected_revision {
-        return Err(DbError::RevisionMismatch);
-    }
-    let next_revision = current_revision.saturating_add(1);
-    let setup_json = serde_json::to_string(&request.bootstrap_setup)?;
-    let env_json = serde_json::to_string(&request.bootstrap_env)?;
-    sqlx::query!(
-        r#"
-        INSERT INTO project_profiles
-            (project_id, bootstrap_setup_json, bootstrap_env_json, revision, updated_at)
-        VALUES (?, ?, ?, ?, ?)
-        ON CONFLICT(project_id) DO UPDATE SET
-            bootstrap_setup_json = excluded.bootstrap_setup_json,
-            bootstrap_env_json = excluded.bootstrap_env_json,
-            revision = excluded.revision,
-            updated_at = excluded.updated_at
-        "#,
-        project_id.as_str(),
-        setup_json,
-        env_json,
-        i64::try_from(next_revision).unwrap_or(i64::MAX),
-        now_ms(),
-    )
-    .execute(pool)
-    .await?;
-    get_project_profile(pool, project_id)
-        .await?
-        .ok_or_else(|| DbError::InvalidPayload("project profile is missing".to_owned()))
 }
 
 // ----------------------------------------------------------------------

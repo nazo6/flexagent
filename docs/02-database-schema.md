@@ -346,8 +346,8 @@ CREATE INDEX idx_incidents_last_seen ON incidents(last_seen_at DESC);
 - `node.db`: `node_settings` / `agent_settings` / `agent_aliases` /
   `custom_agents` / `enabled_package_agents` / `project_path_links`
 - `hub.db`: `hub_settings` / `provisioners` (`provisioners` は `env_json` /
-  `env_secrets_json` を持つ。`git_credentials` および `project_profiles` は
-  アーキテクチャ簡素化により廃止)
+  `env_secrets_json` を持つ。`project_profiles` は削除済み、`git_credentials` は
+  アーキテクチャ簡素化で廃止予定)
 - 共通: `secrets` (秘密の **メタデータ** のみ。値は
   `~/.flexagent/secrets/{node,hub}/<id>` に `0600` で保存)
 
@@ -356,10 +356,11 @@ CREATE INDEX idx_incidents_last_seen ON incidents(last_seen_at DESC);
 `UPDATE ... WHERE id = 1 AND revision = ?` の単一クエリで楽観的ロックを行います
 (不一致は `REVISION_MISMATCH`)。
 
-> **計画中の migration `0012_architecture_simplification.sql`**:
-> `git_credentials` / `project_profiles` を DROP し、`provisioners.env_secrets_json`
-> を ADD する。`bootstrapping` は `provisioning` に、`bootstrap_log` は
-> `provisioning_log` に更新する。詳細は
+> **アーキテクチャ簡素化の migration**:
+> `0012_provisioner_env_secrets.sql` が `provisioners.env_secrets_json` を ADD し、
+> `0013_remove_project_profiles.sql` が `project_profiles` を DROP する。
+> `git_credentials` の DROP と `bootstrapping` / `bootstrap_log` の改名は後続の
+> migration で行う。詳細は
 > [`changelog/2026-11-10-architecture-simplification.md`](changelog/2026-11-10-architecture-simplification.md)
 > を参照。
 

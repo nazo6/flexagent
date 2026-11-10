@@ -1309,20 +1309,6 @@ export type ProjectPreviewRequest = {
 	local_path: string,
 };
 
-/**  Per-project bootstrap profile for ephemeral VMs (`project_profiles` in `hub.db`). */
-export type ProjectProfile = {
-	/**  Logical project ID */
-	project_id: ProjectId,
-	/**  Setup commands run after `git clone` and tool detection */
-	bootstrap_setup: string[],
-	/**  Non-secret environment variables injected during setup and execution */
-	bootstrap_env: { [key in string]: string },
-	/**  Optimistic-lock revision */
-	revision: number,
-	/**  Last update time (Unix epoch ms) */
-	updated_at: number,
-};
-
 /**  `POST /api/v1/nodes/:node_id/projects/scan` request. */
 export type ProjectScanRequest = {
 	/**  Directory to scan (walks `node_settings.project_scan_dirs` when omitted) */
@@ -1385,13 +1371,15 @@ export type ProvisionerDefinition = {
 	/**
 	 *  Command arguments.
 	 * 
-	 *  Placeholders: `{BOOTSTRAP_SCRIPT}` / `{INSTANCE_NAME}` / `{SESSION_ID}`.
+	 *  Placeholders: `{INSTANCE_NAME}` / `{SESSION_ID}`.
 	 */
 	args?: string[],
 	/**  Seconds until the idle instance is discarded automatically */
 	idle_timeout_secs?: number | null,
 	/**  Environment variables injected into the process */
 	env?: { [key in string]: string },
+	/**  Environment variables resolved from the secret store at launch time */
+	env_secrets?: { [key in string]: SecretId },
 };
 
 /**  An available ephemeral VM / sandbox provisioner (`GET /api/v1/provisioners`). */
@@ -2414,16 +2402,6 @@ export type UpdateNodeSettingsRequest = {
 	project_scan_dirs: string[],
 	/**  Tray residency */
 	tray: boolean | null,
-	/**  Revision the client observed (`REVISION_MISMATCH` on conflict) */
-	expected_revision: number,
-};
-
-/**  `PUT /api/v1/projects/{project_id}/profile` request. */
-export type UpdateProjectProfileRequest = {
-	/**  Setup commands */
-	bootstrap_setup: string[],
-	/**  Non-secret environment variables */
-	bootstrap_env: { [key in string]: string },
 	/**  Revision the client observed (`REVISION_MISMATCH` on conflict) */
 	expected_revision: number,
 };

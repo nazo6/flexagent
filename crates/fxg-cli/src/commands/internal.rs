@@ -26,8 +26,6 @@ pub enum InternalCommands {
     Stdio(StdioArgs),
     /// GIT_ASKPASS helper for the Git credential proxy
     GitAskpass(GitAskpassArgs),
-    /// Zero-touch workspace bootstrap inside ephemeral VMs
-    BootstrapWorkspace(BootstrapWorkspaceArgs),
 }
 
 // ----------------------------------------------------------------------
@@ -127,85 +125,6 @@ fn effective_log_config(
     }
     log.no_color = args.no_color || global.log.no_color;
     log
-}
-
-// ----------------------------------------------------------------------
-// fxg internal bootstrap-workspace
-// ----------------------------------------------------------------------
-
-/// Arguments of `fxg internal bootstrap-workspace` (run by the provisioner inside
-/// an ephemeral VM).
-#[derive(Debug, Args)]
-pub struct BootstrapWorkspaceArgs {
-    /// Git URL to clone from
-    #[usage(long)]
-    repo: String,
-    /// Target branch (defaults to the remote's default branch)
-    #[usage(long)]
-    branch: Option<String>,
-    /// Destination directory (default: /tmp/workspace)
-    #[usage(long)]
-    dir: Option<String>,
-    /// Project profile JSON (setup commands and env) written by the hub
-    #[usage(long)]
-    profile: Option<String>,
-}
-
-impl usage::RunAsync for BootstrapWorkspaceArgs {
-    type Output = Result<()>;
-
-    async fn run_async(self) -> Self::Output {
-        let env = fxg_protocol::config::process_env;
-        let dir = self
-            .dir
-            .clone()
-            .unwrap_or_else(|| "/tmp/workspace".to_owned());
-        let profile = match &self.profile {
-            Some(path) => Some(
-                serde_json::from_str::<fxg_protocol::settings::ProjectProfile>(
-                    &std::fs::read_to_string(path)
-                        .with_context(|| format!("failed to read profile {path}"))?,
-                )
-                .with_context(|| format!("failed to parse project profile {path}"))?,
-            ),
-            None => match env("FXG_PROJECT_PROFILE_B64") {
-                Some(encoded) => {
-                    use base64::Engine as _;
-                    let bytes = base64::engine::general_purpose::STANDARD
-                        .decode(encoded.trim().as_bytes())
-                        .context("failed to decode FXG_PROJECT_PROFILE_B64")?;
-                    Some(
-                        serde_json::from_slice::<fxg_protocol::settings::ProjectProfile>(&bytes)
-                            .context("failed to parse FXG_PROJECT_PROFILE_B64")?,
-                    )
-                }
-                None => None,
-            },
-        };
-        let (setup, profile_env) = profile
-            .map(|profile| (profile.bootstrap_setup, profile.bootstrap_env))
-            .unwrap_or_default();
-        let options = fxg_node::bootstrap::BootstrapOptions {
-            repo: self.repo.clone(),
-            branch: self.branch.clone(),
-            dir: PathBuf::from(&dir),
-            fxg_home: fxg_protocol::config::fxg_home(&env),
-            install_toolchain: true,
-            extra_tools: Vec::new(),
-            setup,
-            env: profile_env,
-        };
-        let outcome = fxg_node::bootstrap::bootstrap_workspace(options)
-            .await
-            .context("bootstrap-workspace failed")?;
-        // stdout is reserved for the protocol, so the result goes to stderr too
-        eprintln!(
-            "[fxg-bootstrap] ready: {} (tools: {})",
-            outcome.dir.display(),
-            outcome.tools.join(", ")
-        );
-        Ok(())
-    }
 }
 
 // ----------------------------------------------------------------------

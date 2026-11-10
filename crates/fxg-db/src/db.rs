@@ -688,23 +688,6 @@ impl Db {
         settings::delete_provisioner(&self.pool, name).await
     }
 
-    /// Returns the bootstrap profile of a project when it exists.
-    pub async fn project_profile(
-        &self,
-        project_id: &fxg_protocol::ProjectId,
-    ) -> Result<Option<fxg_protocol::settings::ProjectProfile>, DbError> {
-        settings::get_project_profile(&self.pool, project_id).await
-    }
-
-    /// Inserts or updates a project profile under an optimistic lock.
-    pub async fn upsert_project_profile(
-        &self,
-        project_id: &fxg_protocol::ProjectId,
-        request: &fxg_protocol::settings::UpdateProjectProfileRequest,
-    ) -> Result<fxg_protocol::settings::ProjectProfile, DbError> {
-        settings::upsert_project_profile(&self.pool, project_id, request).await
-    }
-
     /// Lists secret metadata (values are never stored in the DB).
     pub async fn secrets(&self) -> Result<Vec<fxg_protocol::settings::SecretSummary>, DbError> {
         settings::list_secrets(&self.pool).await

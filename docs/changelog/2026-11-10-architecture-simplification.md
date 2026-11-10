@@ -103,11 +103,10 @@
 - **プロトコル版**:
   - `PROTOCOL_VERSION` を `1` から `2` に上げる。ハブは既存の `NodeHello` チェックで旧ノードを明示エラーにする。
   - CLI は `GET /api/v1/system/info` の `version` を確認し、古い常駐サービスなら `fxg node restart` を案内する。
-- **migration `0012_architecture_simplification.sql`**:
-  - `git_credentials` / `project_profiles` を DROP する。
-  - `provisioners.env_secrets_json` を ADD する。
-  - `sessions.status = 'bootstrapping'` → `'provisioning'`、`nodes.lifecycle_status = 'bootstrapping'` → `'provisioning'` に更新する。
-  - `session_events.event_type = 'bootstrap_log'` → `'provisioning_log'` に更新する。
+- **migrations**:
+  - `0012_provisioner_env_secrets.sql`: `provisioners.env_secrets_json` を ADD する（Commit 3）。
+  - `0013_remove_project_profiles.sql`: `project_profiles` を DROP する（Commit 4）。
+  - 後続 migration（Commit 5 / 7）: `git_credentials` を DROP し、`sessions.status` / `nodes.lifecycle_status` の `bootstrapping` を `provisioning` に、`session_events.event_type` の `bootstrap_log` を `provisioning_log` に更新する。
   - 既存の `payload_json` は `ProvisioningLog` の `#[serde(alias = "bootstrap_log")]` で読み取り、JSON の一括書き換えは行わない。
 - **命名**:
   - `SessionStatus::Bootstrapping` / `NodeLifecycleStatus::Bootstrapping` を削除し、既存の `Provisioning` に集約する。
@@ -161,15 +160,15 @@
   - [x] `fxg support` / `fxg doctor` / `fxg logs --session` を既存 REST に移行
   - [x] `fxg session new` / `-w` / `fork` / `import` の cwd・project 解決を REST に移行
   - 注: `fxg internal git-askpass` だけは Commit 5 まで暫定的に IPC を使用する。
-- [ ] **Commit 3: Provisioner secret**
-  - [ ] `ProvisionerDefinition.env_secrets` と `provisioners.env_secrets_json`
-  - [ ] spawn 時の secret 解決、`secrets::used_by` の Provisioner 走査
-  - [ ] Settings UI / bindings の更新
-- [ ] **Commit 4: Provisioner 完全外部化**
-  - [ ] `compose_bootstrap_script` / `bootstrap.rs` / `bootstrap-workspace` / `project_profiles` の削除
-  - [ ] `{BOOTSTRAP_SCRIPT}` の置換・検出を削除（互換なし）
-  - [ ] docs にイメージ契約と移行手順、Dockerfile / Colab 例を追加
-  - [ ] `provisioner_e2e` を外部コマンド契約に更新
+- [x] **Commit 3: Provisioner secret**
+  - [x] `ProvisionerDefinition.env_secrets` と `provisioners.env_secrets_json`
+  - [x] spawn 時の secret 解決、`secrets::used_by` の Provisioner 走査
+  - [x] Settings UI / bindings の更新
+- [x] **Commit 4: Provisioner 完全外部化**
+  - [x] `compose_bootstrap_script` / `bootstrap.rs` / `bootstrap-workspace` / `project_profiles` の削除
+  - [x] `{BOOTSTRAP_SCRIPT}` の置換・検出を削除（互換なし）
+  - [x] 外部環境の workspace を `NodeHello` から取得して `StartSession` に使用
+  - [x] `provisioner_e2e` を外部コマンド契約に更新
 - [ ] **Commit 5: askpass / credentials 削除**
   - [ ] `git-askpass` サブコマンド、node/hub credentials、GitCredential メッセージ、relay
   - [ ] `SessionManager` の `GIT_ASKPASS` 注入削除
@@ -179,7 +178,7 @@
   - [ ] `ipc_endpoint` / `FXG_IPC_ENDPOINT` / testutil / logging / Cargo の不要依存
   - [ ] `stdio` モードの IPC サーバー起動削除
 - [ ] **Commit 7: 命名・migration・docs・検証**
-  - [ ] `PROTOCOL_VERSION = 2`、migration `0012`
+  - [ ] `PROTOCOL_VERSION = 2`、migration `0014`（`git_credentials` DROP / 状態・イベント名の移行）
   - [ ] `Bootstrapping` → `Provisioning`、`BootstrapLog` → `ProvisioningLog`、serde alias
   - [ ] docs バナー、`AGENTS.md` の現状維持、取り残し修正
   - [ ] `mise run types` / `mise run fmt` / `mise run lint:errors` / `cargo test --workspace`
@@ -195,7 +194,7 @@
 - [ ] stale な `node.addr` を検出し、healthz 失敗 → 自動起動 → addr 再読込が動作する。
 - [ ] `prompt` / `control` / `import` / `session show` / `node stop` / `node status` / token 操作の e2e が通る。
 - [ ] 外部コマンド Provisioner で `NodeHello` → `StartSession` → `DrainAndShutdown` が通り、`env_secrets` が子プロセスに注入される。
-- [ ] `git_credentials` / `project_profiles` を持たない DB で起動でき、既存 DB からの migration が通る。
+- [x] `project_profiles` を持たない DB で起動でき、既存 DB からの migration が通る。
 - [ ] `PROTOCOL_VERSION = 1` のノードはハブ接続時に明示エラーになる。
 - [ ] 既存の `bootstrap_log` イベント payload を読み出せる。
 - [ ] `mise run fmt` / `mise run lint:errors` / `mise run types` / `cargo test --workspace` が通る。
@@ -239,3 +238,13 @@
   - `GET /api/v1/system/info` に `last_synced_at` を追加し、`fxg node status` の表示を維持。
   - 旧デーモンが新しい `node.addr` を削除しないよう、終了時の所有者チェックを追加。
   - `cli_e2e` を HTTP 前提に更新し、`stdio_credential_e2e` と `provisioner_e2e` も通過。
+- **2026-11-10: Commit 3 (Provisioner secret)**
+  - `ProvisionerDefinition.env_secrets` と migration `0012_provisioner_env_secrets.sql` を追加。
+  - spawn 時に `~/.flexagent/secrets/hub/<id>` から値を解決して環境変数へ注入。
+  - `secrets::used_by` の Hub 側で Provisioner の参照も検出するよう更新。
+- **2026-11-10: Commit 4 (Provisioner 完全外部化)**
+  - `bootstrap.rs` / `fxg internal bootstrap-workspace` / `compose_bootstrap_script` / `project_profiles` を削除。
+  - migration `0013_remove_project_profiles.sql` を追加。
+  - `{BOOTSTRAP_SCRIPT}` の置換を削除し、`{INSTANCE_NAME}` / `{SESSION_ID}` のみ残した。
+  - 一時ノードの workspace は `NodeHello.projects` から取得して `StartSession` に渡す。
+  - UI の Project profile タブ / ダイアログ / API クライアントを削除。

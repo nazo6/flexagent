@@ -7,7 +7,6 @@
   import type { ResourceEntry } from "#lib/stores/resource.svelte.ts";
   import EraserIcon from "@lucide/svelte/icons/eraser";
   import GitBranchIcon from "@lucide/svelte/icons/git-branch";
-  import PencilIcon from "@lucide/svelte/icons/pencil";
   import PlayIcon from "@lucide/svelte/icons/play";
   import PlusIcon from "@lucide/svelte/icons/plus";
   import RefreshCwIcon from "@lucide/svelte/icons/refresh-cw";
@@ -19,7 +18,6 @@
     nodeName: (nodeId: string) => string;
     onRefreshWorktrees: (projectId: string) => void;
     onCreateWorktree: (projectId: string) => void;
-    onOpenSettings: (project: ProjectSummary) => void;
     onPrune: (projectId: string) => void;
     onNewSession: (projectId: string, nodeId?: string, path?: string) => void;
     onRemoveWorktree: (projectId: string, worktree: WorktreeInfo) => void;
@@ -31,7 +29,6 @@
     nodeName,
     onRefreshWorktrees,
     onCreateWorktree,
-    onOpenSettings,
     onPrune,
     onNewSession,
     onRemoveWorktree,
@@ -86,16 +83,6 @@
       >
         <PlusIcon class="size-3.5" />
         {m.projects_worktree_add()}
-      </Button>
-      <Button
-        variant="outline"
-        size="sm"
-        class="h-7 text-[11px]"
-        onclick={() => onOpenSettings(project)}
-        title="Project settings"
-      >
-        <PencilIcon class="size-3.5" />
-        Settings
       </Button>
       <Button
         variant="outline"
