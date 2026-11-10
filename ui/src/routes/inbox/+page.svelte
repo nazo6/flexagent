@@ -60,7 +60,7 @@
     </div>
   {:else}
     <section class="flex flex-col gap-2">
-      <div class="flex items-center justify-between">
+      <div class="flex items-center gap-2">
         <h2 class="desk-label">{m.inbox_approvals()}</h2>
         <span class="text-muted-foreground desk-mono text-[11px]">{sorted.length}</span>
       </div>
@@ -99,7 +99,7 @@
     </section>
 
     <section class="flex flex-col gap-2">
-      <div class="flex items-center justify-between">
+      <div class="flex items-center gap-2">
         <h2 class="desk-label">{m.inbox_questions()}</h2>
         <span class="text-muted-foreground desk-mono text-[11px]">{sortedElicitations.length}</span>
       </div>

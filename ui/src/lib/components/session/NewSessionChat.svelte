@@ -1323,8 +1323,12 @@
         <span class="text-destructive">{blockingHint}</span>
       {:else if capabilitiesError !== null && capabilitiesKey === probeKey}
         <span class="text-muted-foreground">{m.new_session_models_unavailable()}</span>
-      {:else}
-        <span class="text-muted-foreground hidden sm:inline">{m.new_session_enter_hint()}</span>
+      {:else if canSubmit}
+        <span class="text-muted-foreground hidden sm:inline">
+          {prefs.sendShortcut === "enter"
+            ? m.new_session_enter_hint()
+            : m.new_session_enter_hint_ctrl()}
+        </span>
         <span class="text-muted-foreground sm:hidden">{m.new_session_tap_hint()}</span>
       {/if}
     </div>

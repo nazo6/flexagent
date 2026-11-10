@@ -401,7 +401,9 @@
 
         <Card class="gap-3 p-4">
           <h2 class="text-sm font-semibold">{m.settings_browser_pinned()}</h2>
-          <p class="text-muted-foreground text-[13px]">{m.settings_browser_storage_note()}</p>
+          <p class="text-muted-foreground text-[13px]">
+            {m.settings_browser_pinned_note()}
+          </p>
           <div class="flex items-center justify-between gap-3">
             <span class="text-muted-foreground text-[13px]">
               {m.settings_browser_pinned_count({ count: pinned.pinnedIds.size })}

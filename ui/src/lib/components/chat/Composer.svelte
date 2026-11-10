@@ -152,18 +152,12 @@
   const placeholderText = $derived.by(() => {
     const isEnter = prefs.sendShortcut === "enter";
     if (isStopped) {
-      return isEnter
-        ? "Stopped: sending resumes automatically (Enter to send)"
-        : m.chat_placeholder_stopped();
+      return isEnter ? m.chat_placeholder_stopped_enter() : m.chat_placeholder_stopped();
     }
     if (isRunning) {
-      return isEnter
-        ? "Enter the next prompt (added to queue; Enter to send)"
-        : m.chat_placeholder_running();
+      return isEnter ? m.chat_placeholder_running_enter() : m.chat_placeholder_running();
     }
-    return isEnter
-      ? "Enter a prompt (Enter to send, Shift+Enter for newline, `/` for commands)"
-      : m.chat_placeholder_idle();
+    return isEnter ? m.chat_placeholder_idle_enter() : m.chat_placeholder_idle();
   });
 
   /** Best-effort MIME type from a file name (mirrors the CLI helper). */

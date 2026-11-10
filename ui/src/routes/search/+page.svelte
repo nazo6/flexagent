@@ -14,7 +14,9 @@
   let searching = $state(false);
   let searched = $state(false);
 
-  const roleLabel = $derived(connection.role === "hub" ? "hub.db" : "node.db");
+  const scopeLabel = $derived(
+    connection.role === "hub" ? m.search_scope_hub() : m.search_scope_node(),
+  );
 
   async function submit(event: SubmitEvent) {
     event.preventDefault();
@@ -65,8 +67,7 @@
     <h1 class="text-xl font-semibold tracking-tight">{m.search_title()}</h1>
     <p class="text-muted-foreground text-[13px]">
       {m.search_description()}
-      {m.search_source_label()}
-      <code class="bg-muted rounded px-1 py-0.5 font-mono text-[11px]">{roleLabel}</code>
+      {scopeLabel}
     </p>
   </div>
 

@@ -491,7 +491,7 @@
           title={m.session_kill_button_title()}
         >
           <SkullIcon class="size-3" />
-          <span class="hidden sm:inline">Kill</span>
+          <span class="hidden sm:inline">{m.session_force_stop()}</span>
         </Button>
 
         <!-- Archive / delete menu -->
