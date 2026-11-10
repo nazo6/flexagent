@@ -484,6 +484,7 @@
       accept="image/*"
       multiple
       class="hidden"
+      aria-label={m.chat_attach_image()}
       onchange={onFileInputChange}
     />
     <div class="flex flex-wrap items-center gap-1 min-w-0">
@@ -614,6 +615,7 @@
     ondrop={onDrop}
     rows={3}
     placeholder={placeholderText}
+    ariaLabel={m.chat_input_label()}
     disabled={sending}
   />
 </ComposerCard>

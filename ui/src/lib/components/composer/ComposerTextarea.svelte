@@ -12,10 +12,13 @@
     onkeydown = undefined,
     onpaste = undefined,
     ondrop = undefined,
+    ariaLabel = "",
   }: {
     /** Prompt text (two-way bound). */
     value?: string;
     placeholder?: string;
+    /** Accessible name of the textarea (defaults to the placeholder). */
+    ariaLabel?: string;
     disabled?: boolean;
     rows?: number;
     /** Minimum height in pixels. */
@@ -52,6 +55,7 @@
   bind:this={textarea}
   bind:value
   {placeholder}
+  aria-label={ariaLabel || placeholder}
   {disabled}
   {rows}
   oninput={resize}

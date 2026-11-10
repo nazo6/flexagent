@@ -233,6 +233,7 @@
     <div class="flex flex-wrap items-center gap-1.5">
       <select
         bind:value={nodeId}
+        aria-label={m.settings_target_node()}
         class="border-input bg-background h-8 rounded-md border px-2 text-[13px]"
         title={m.settings_target_node()}
       >

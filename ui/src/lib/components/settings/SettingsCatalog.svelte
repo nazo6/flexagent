@@ -11,6 +11,7 @@
     HubSettingsSnapshot,
   } from "#lib/generated/bindings.ts";
   import { sync } from "#lib/stores/app.svelte.ts";
+  import { m } from "#lib/paraglide/messages.js";
   import { toast } from "svelte-sonner";
 
   type Section = "bootstrap" | "machine" | "hub";
@@ -468,9 +469,23 @@
         </ul>
       {/if}
       <form class="grid gap-2 sm:grid-cols-4" onsubmit={saveSecret}>
-        <Input placeholder="Key (e.g. OPENAI_API_KEY)" bind:value={secretForm.key} />
-        <Input placeholder="Description (optional)" bind:value={secretForm.description} />
-        <Input type="password" placeholder="Value (write-only)" bind:value={secretForm.value} />
+        <Input
+          placeholder="Key (e.g. OPENAI_API_KEY)"
+          aria-label={m.settings_secret_key_label()}
+          bind:value={secretForm.key}
+        />
+        <Input
+          placeholder="Description (optional)"
+          aria-label={m.settings_secret_description_label()}
+          bind:value={secretForm.description}
+        />
+        <Input
+          type="password"
+          placeholder="Value (write-only)"
+          aria-label={m.settings_secret_value_label()}
+          autocomplete="new-password"
+          bind:value={secretForm.value}
+        />
         <Button type="submit" disabled={secretForm.key.trim() === "" || secretForm.value === ""}>
           Store secret
         </Button>

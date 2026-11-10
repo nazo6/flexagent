@@ -71,7 +71,11 @@
   </div>
 
   <form class="flex max-w-xl items-center gap-2" onsubmit={submit}>
-    <Input bind:value={query} placeholder={m.search_placeholder()} />
+    <Input
+      bind:value={query}
+      placeholder={m.search_placeholder()}
+      aria-label={m.search_input_label()}
+    />
     <Button type="submit" disabled={searching || query.trim() === ""}>
       <SearchIcon />
       {searching ? m.search_searching() : m.search_submit()}

@@ -163,7 +163,12 @@
     </p>
   </div>
 
-  <Input placeholder="Search settings…" bind:value={query} class="max-w-md" />
+  <Input
+    placeholder={m.settings_search_placeholder()}
+    aria-label={m.settings_search_placeholder()}
+    bind:value={query}
+    class="max-w-md"
+  />
 
   <Tabs.Root value={activeTab} onValueChange={selectTab}>
     <Tabs.List variant="line" class="w-full overflow-x-auto border-b">

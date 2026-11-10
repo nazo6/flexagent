@@ -279,6 +279,7 @@
         type="text"
         bind:value={searchQuery}
         placeholder={m.shell_search_placeholder()}
+        aria-label={m.shell_search_placeholder()}
         class="bg-chip placeholder:text-muted-foreground focus-visible:ring-ring/40 h-8 w-full rounded-md border border-border pr-2 pl-7 text-[13px] outline-none focus-visible:ring-2"
       />
     </div>

@@ -1173,6 +1173,7 @@
         onkeydown={onKeydown}
         rows={3}
         placeholder={m.new_session_prompt_placeholder()}
+        ariaLabel={m.new_session_prompt_label()}
         disabled={busy}
       />
 
