@@ -74,21 +74,6 @@ enum Commands {
     Auth(commands::AuthArgs),
     /// [Emergency stop] Force-terminate every local session, child process tree and PTY
     KillAll(commands::KillAllArgs),
-    /// Review and answer pending approval requests (list / approve / reject)
-    #[usage(hide)]
-    Inbox(commands::InboxArgs),
-    /// Logical project management (info / list / link / scan)
-    #[usage(hide)]
-    Project(commands::ProjectArgs),
-    /// Git worktree management (list / add / remove / prune)
-    #[usage(alias = "wt", hide)]
-    Worktree(commands::WorktreeArgs),
-    /// Agent management (list / enable / update / disable / login / logout)
-    #[usage(hide)]
-    Agents(commands::AgentsArgs),
-    /// Inspect ephemeral VM / sandbox provisioners (list / test)
-    #[usage(hide)]
-    Provisioners(commands::ProvisionersArgs),
     /// Internal commands invoked by Git, provisioners, or system integrations
     #[usage(hide)]
     Internal(commands::InternalArgs),

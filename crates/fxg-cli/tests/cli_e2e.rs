@@ -1,9 +1,7 @@
 //! End-to-end tests for the `fxg` CLI.
 //!
 //! The tests actually start `fxg daemon` as a child process and verify that
-//! `fxg project info` / `fxg project list` / `fxg worktree add|list|remove` /
-//! `fxg ps` / `fxg auth token` work **through IPC** (Phase 2 exit criterion:
-//! "after `fxg daemon` starts, each command works through IPC").
+//! `fxg ps` / `fxg auth token` / `fxg kill-all` / `fxg session` work **through IPC**.
 //!
 //! Each test uses a temporary `FXG_HOME` and IPC endpoint, so it never collides
 //! with a real daemon.
@@ -196,76 +194,24 @@ async fn cli_commands_work_through_daemon_ipc() {
     let mut env = TestEnv::new();
     env.start_daemon().await;
 
-    // --- fxg project info ---
-    let repo = env.dir.path().join("repo");
-    init_repo(&repo);
-    let output = env.run(&["project", "info"], Some(&repo));
-    let text = stdout_of(&output);
-    assert!(
-        text.contains("github.com/nazo6/flexagent"),
-        "unexpected project info output: {text}"
-    );
-    assert!(
-        text.contains("git_remote"),
-        "source must be reported: {text}"
-    );
-
-    // --- fxg project info --json ---
-    let output = env.run(&["project", "info", "--json"], Some(&repo));
-    let json: serde_json::Value = serde_json::from_str(&stdout_of(&output)).expect("valid json");
-    assert_eq!(json["project_id"], "github.com/nazo6/flexagent");
-    assert_eq!(json["is_git_repo"], true);
-
-    // --- fxg project list ---
-    let output = env.run(&["project", "list"], Some(&repo));
-    let text = stdout_of(&output);
-    assert!(
-        text.contains("github.com/nazo6/flexagent"),
-        "unexpected project list output: {text}"
-    );
-
-    // --- fxg worktree add / list / remove ---
-    let worktree_dir = env
-        .home
-        .join("worktrees")
-        .join("github.com-nazo6-flexagent")
-        .join("feat-cli-e2e");
-    let output = env.run(&["worktree", "add", "feat/cli-e2e"], Some(&repo));
-    let text = stdout_of(&output);
-    assert!(text.contains("created worktree"), "got: {text}");
-    assert!(worktree_dir.join("README.md").is_file());
-
-    // The alias `fxg wt list` must list them too
-    let output = env.run(&["wt", "list"], Some(&repo));
-    let text = stdout_of(&output);
-    assert!(text.contains("feat/cli-e2e"), "got: {text}");
-    assert!(text.contains("main"), "got: {text}");
-
-    let output = env.run(
-        &["worktree", "remove", "feat/cli-e2e", "--force"],
-        Some(&repo),
-    );
-    let text = stdout_of(&output);
-    assert!(text.contains("removed worktree"), "got: {text}");
-
     // --- fxg ps (there are no sessions yet) ---
-    let output = env.run(&["ps"], Some(&repo));
+    let output = env.run(&["ps"], None);
     let text = stdout_of(&output);
     assert!(text.contains("no sessions"), "got: {text}");
 
     // `fxg session list --json` uses the same path
-    let output = env.run(&["session", "list", "--json"], Some(&repo));
+    let output = env.run(&["session", "list", "--json"], None);
     let json: serde_json::Value = serde_json::from_str(&stdout_of(&output)).expect("valid json");
     assert!(json.as_array().expect("array").is_empty());
 
     // --- fxg auth token (64 hex characters) ---
-    let output = env.run(&["auth", "token"], Some(&repo));
+    let output = env.run(&["auth", "token"], None);
     let token = stdout_of(&output).trim().to_owned();
     assert_eq!(token.len(), 64, "token length: {token}");
     assert!(token.chars().all(|ch| ch.is_ascii_hexdigit()));
 
     // --- fxg kill-all ---
-    let output = env.run(&["kill-all", "--local-only"], Some(&repo));
+    let output = env.run(&["kill-all", "--local-only"], None);
     let text = stdout_of(&output);
     assert!(text.contains("killed 0 session(s)"), "got: {text}");
 
@@ -292,13 +238,13 @@ async fn cli_reports_missing_daemon_when_auto_start_is_disabled() {
 }
 
 /// Verify that the Phase 3 session commands (`session
-/// show|prompt|stop|kill|resume|fork` / `inbox` / `attach`) return errors
+/// show|prompt|stop|kill|resume|fork` / `attach`) return errors
 /// correctly through IPC.
 ///
 /// The tests cover what can be verified without launching a real agent
 /// (argument parsing, IPC round-trips, error codes).
 #[tokio::test]
-async fn phase3_session_and_inbox_commands_roundtrip_through_daemon() {
+async fn phase3_session_commands_roundtrip_through_daemon() {
     let mut env = TestEnv::new();
     // A custom agent that fails to start (for verifying the session recording
     // path). Custom agents are owned by `node.db`.
@@ -320,37 +266,6 @@ async fn phase3_session_and_inbox_commands_roundtrip_through_daemon() {
     env.start_daemon().await;
     let repo = env.dir.path().join("repo");
     init_repo(&repo);
-
-    // --- fxg inbox list (nothing pending) ---
-    let output = env.run(&["inbox", "list"], Some(&repo));
-    let text = stdout_of(&output);
-    assert!(text.contains("no pending approval requests"), "got: {text}");
-
-    let output = env.run(&["inbox", "list", "--json"], Some(&repo));
-    let json: serde_json::Value = serde_json::from_str(&stdout_of(&output)).expect("valid json");
-    assert!(
-        json["requests"]
-            .as_array()
-            .expect("requests array")
-            .is_empty(),
-        "got: {json}"
-    );
-    assert!(
-        json["elicitations"]
-            .as_array()
-            .expect("elicitations array")
-            .is_empty(),
-        "got: {json}"
-    );
-
-    // Responding to a nonexistent request ID is rejected
-    let output = env.run(&["inbox", "approve", "req-unknown"], Some(&repo));
-    assert!(!output.status.success());
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        stderr.contains("pending approval request not found"),
-        "got: {stderr}"
-    );
 
     // --- fxg session show (unknown session) ---
     let unknown = "0195f0ab-0000-7000-8000-000000000000";
@@ -434,7 +349,7 @@ async fn phase3_session_and_inbox_commands_roundtrip_through_daemon() {
 #[tokio::test]
 async fn cli_shows_help_for_missing_subcommand() {
     let env = TestEnv::new();
-    let output = env.run(&["project"], None);
+    let output = env.run(&["session"], None);
     // A missing subcommand is a usage error and prints help to stderr (clap
     // compatible)
     assert!(!output.status.success());
@@ -444,7 +359,7 @@ async fn cli_shows_help_for_missing_subcommand() {
         String::from_utf8_lossy(&output.stderr)
     );
     assert!(
-        text.contains("info") && text.contains("scan"),
+        text.contains("list") && text.contains("show"),
         "container command must show help: {text}"
     );
 }

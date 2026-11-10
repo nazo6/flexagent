@@ -13,16 +13,12 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result, anyhow, bail};
 use fxg_node::IpcClient;
 use fxg_protocol::CommandId;
-use fxg_protocol::client_api::{DiagnosticsResponse, WorktreeInfo};
-use fxg_protocol::common::{
-    ClientSource, ElicitationAction, ElicitationContent, ElicitationRequestEntry,
-    PermissionRequestEntry, ProjectSummary, PromptInput, ResolvedBy, SessionControlAction,
-    SessionSummary,
-};
+use fxg_protocol::client_api::DiagnosticsResponse;
+use fxg_protocol::common::{ClientSource, PromptInput, SessionControlAction, SessionSummary};
 use fxg_protocol::config::{env_keys, fxg_home, process_env};
 use fxg_protocol::ipc::{
     IPC_PROTOCOL_VERSION, IpcOutcome, IpcRequest, IpcRequestKind, IpcResultKind, IpcServerMessage,
-    LocalRequest, LocalResult, ProjectInfo, SessionDetail,
+    LocalRequest, LocalResult, SessionDetail,
 };
 use fxg_protocol::node_server::{NodeRpcRequest, NodeRpcResponse};
 
@@ -277,93 +273,7 @@ impl DaemonClient {
         }
     }
 
-    /// `fxg project info`
-    pub async fn project_info(&mut self, cwd: &Path) -> Result<ProjectInfo> {
-        let command_id = self.command_id();
-        let result = self
-            .request(LocalRequest::ProjectInfo {
-                command_id,
-                cwd: path_to_string(cwd),
-            })
-            .await?;
-        match result {
-            LocalResult::ProjectInfo { project } => Ok(project),
-            other => bail!("unexpected ipc result: {other:?}"),
-        }
-    }
-
-    /// `fxg project list`
-    pub async fn list_projects(&mut self) -> Result<Vec<ProjectSummary>> {
-        let command_id = self.command_id();
-        let result = self
-            .request(LocalRequest::ProjectList { command_id })
-            .await?;
-        match result {
-            LocalResult::Projects { projects } => Ok(projects),
-            other => bail!("unexpected ipc result: {other:?}"),
-        }
-    }
-
-    /// `fxg project link`
-    pub async fn link_project(&mut self, cwd: &Path, project_id: &str) -> Result<Option<String>> {
-        let command_id = self.command_id();
-        let response = self
-            .request_node(
-                command_id,
-                NodeRpcRequest::ProjectLink {
-                    project_id: project_id.into(),
-                    local_path: path_to_string(cwd),
-                },
-            )
-            .await?;
-        match response {
-            NodeRpcResponse::ProjectLink { response } => Ok(Some(format!(
-                "linked {} to {}",
-                response.local_path, response.project_id
-            ))),
-            other => bail!("unexpected ipc result: {other:?}"),
-        }
-    }
-
-    /// `fxg project scan`
-    pub async fn scan_projects(
-        &mut self,
-        dir: Option<String>,
-    ) -> Result<(Vec<ProjectSummary>, Vec<String>)> {
-        let command_id = self.command_id();
-        let response = self
-            .request_node(command_id, NodeRpcRequest::ProjectScan { dir })
-            .await?;
-        match response {
-            NodeRpcResponse::ProjectScan { response } => {
-                Ok((response.projects, response.scanned_dirs))
-            }
-            other => bail!("unexpected ipc result: {other:?}"),
-        }
-    }
-
-    /// `fxg worktree list`
-    pub async fn list_worktrees(
-        &mut self,
-        cwd: Option<String>,
-        project_id: Option<String>,
-    ) -> Result<Vec<WorktreeInfo>> {
-        let command_id = self.command_id();
-        let result = self
-            .request(LocalRequest::WorktreeList {
-                command_id,
-                cwd,
-                project_id: project_id.map(fxg_protocol::ProjectId::from),
-            })
-            .await?;
-        match result {
-            LocalResult::Worktrees { worktrees } => Ok(worktrees),
-            other => bail!("unexpected ipc result: {other:?}"),
-        }
-    }
-
-    /// `fxg worktree add`
-    #[allow(clippy::too_many_arguments)]
+    /// Create or reuse a worktree through daemon IPC (`fxg run -w` / `fxg session fork -w`).
     pub async fn add_worktree(
         &mut self,
         cwd: &Path,
@@ -389,37 +299,6 @@ impl DaemonClient {
             } => Ok((path, branch, created)),
             other => bail!("unexpected ipc result: {other:?}"),
         }
-    }
-
-    /// `fxg worktree remove`
-    pub async fn remove_worktree(
-        &mut self,
-        cwd: &Path,
-        target: &str,
-        force: bool,
-    ) -> Result<Option<String>> {
-        let command_id = self.command_id();
-        let result = self
-            .request(LocalRequest::WorktreeRemove {
-                command_id,
-                cwd: path_to_string(cwd),
-                target: target.to_owned(),
-                force,
-            })
-            .await?;
-        ack_message(result)
-    }
-
-    /// `fxg worktree prune`
-    pub async fn prune_worktrees(&mut self, cwd: &Path) -> Result<Option<String>> {
-        let command_id = self.command_id();
-        let result = self
-            .request(LocalRequest::WorktreePrune {
-                command_id,
-                cwd: path_to_string(cwd),
-            })
-            .await?;
-        ack_message(result)
     }
 
     /// `fxg ps` / `fxg session list`
@@ -613,27 +492,6 @@ impl DaemonClient {
         Ok(())
     }
 
-    /// `fxg inbox approve` / `fxg inbox reject`.
-    pub async fn respond_permission(
-        &mut self,
-        session_id: &str,
-        request_id: &str,
-        selected_option_id: &str,
-    ) -> Result<()> {
-        let command_id = self.command_id();
-        let result = self
-            .request(LocalRequest::RespondPermission {
-                command_id,
-                session_id: session_id.into(),
-                request_id: request_id.to_owned(),
-                selected_option_id: selected_option_id.to_owned(),
-                resolved_by: ResolvedBy::Cli,
-            })
-            .await?;
-        ack_message(result)?;
-        Ok(())
-    }
-
     /// Mode switch / config change / cancel / kill (`fxg session stop|kill`).
     pub async fn control_session(
         &mut self,
@@ -670,49 +528,6 @@ impl DaemonClient {
             LocalResult::SessionDetail(detail) => Ok(*detail),
             other => bail!("unexpected ipc result: {other:?}"),
         }
-    }
-
-    /// `fxg inbox list`
-    pub async fn inbox_list(&mut self) -> Result<Vec<PermissionRequestEntry>> {
-        let command_id = self.command_id();
-        let result = self.request(LocalRequest::InboxList { command_id }).await?;
-        match result {
-            LocalResult::Inbox { requests, .. } => Ok(requests),
-            other => bail!("unexpected ipc result: {other:?}"),
-        }
-    }
-
-    /// List of the questions (elicitations) from `fxg inbox list`.
-    pub async fn inbox_elicitations(&mut self) -> Result<Vec<ElicitationRequestEntry>> {
-        let command_id = self.command_id();
-        let result = self.request(LocalRequest::InboxList { command_id }).await?;
-        match result {
-            LocalResult::Inbox { elicitations, .. } => Ok(elicitations),
-            other => bail!("unexpected ipc result: {other:?}"),
-        }
-    }
-
-    /// `fxg inbox answer` (answer an elicitation).
-    pub async fn respond_elicitation(
-        &mut self,
-        session_id: &str,
-        elicitation_id: &str,
-        action: ElicitationAction,
-        content: Option<ElicitationContent>,
-    ) -> Result<()> {
-        let command_id = self.command_id();
-        let result = self
-            .request(LocalRequest::RespondElicitation {
-                command_id,
-                session_id: session_id.into(),
-                elicitation_id: elicitation_id.to_owned(),
-                action,
-                content,
-                resolved_by: ResolvedBy::Cli,
-            })
-            .await?;
-        ack_message(result)?;
-        Ok(())
     }
 
     /// `fxg session fork`

@@ -11,7 +11,6 @@ use usage::Args;
 
 use crate::client::DaemonClient;
 
-use super::project::*;
 use super::*;
 
 // ----------------------------------------------------------------------
