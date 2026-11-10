@@ -129,6 +129,13 @@ impl usage::RunAsync for HubStartArgs {
         let global = fxg_protocol::config::GlobalConfig::load(&env)
             .context("failed to load ~/.flexagent/config.toml")?;
 
+        if let Ok(client) = HubClient::local(&fxg_protocol::config::process_env) {
+            if client.system_info().await.is_ok() {
+                println!("hub is already running");
+                return Ok(());
+            }
+        }
+
         if crate::service::is_installed(ServiceTarget::Hub) {
             crate::service::start(ServiceTarget::Hub)?;
             println!("hub started (service)");

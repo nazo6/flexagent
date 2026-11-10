@@ -151,6 +151,11 @@ impl usage::RunAsync for NodeStartArgs {
         let global = fxg_protocol::config::GlobalConfig::load(&env)
             .context("failed to load ~/.flexagent/config.toml")?;
 
+        if NodeClient::connect_existing().await.is_ok() {
+            println!("node is already running");
+            return Ok(());
+        }
+
         if crate::service::is_installed(ServiceTarget::Node) {
             crate::service::start(ServiceTarget::Node)?;
             println!("node started (service)");
