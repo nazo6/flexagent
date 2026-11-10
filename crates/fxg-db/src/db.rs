@@ -338,6 +338,29 @@ impl Db {
         queries::session_events_after(&self.pool, session_id, after_cursor, limit).await
     }
 
+    /// Retrieves the most recent events before `before_cursor` (oldest first).
+    ///
+    /// `None` means the end of the log (used for the `fxg session show` tail).
+    pub async fn session_events_before(
+        &self,
+        session_id: &str,
+        before_cursor: Option<u64>,
+        limit: u32,
+    ) -> Result<SessionEventBatch, DbError> {
+        queries::session_events_before(&self.pool, session_id, before_cursor, limit).await
+    }
+
+    /// Returns the total persisted event count and the last `recent` events.
+    pub async fn session_event_tail(
+        &self,
+        session_id: &str,
+        recent: u32,
+    ) -> Result<(u64, Vec<fxg_protocol::events::SessionEventEnvelope>), DbError> {
+        let count = incidents::event_count(&self.pool, session_id).await?;
+        let batch = self.session_events_before(session_id, None, recent).await?;
+        Ok((count, batch.events))
+    }
+
     /// Retrieves events after `after_cursor` across all sessions
     /// (for Client WS replay).
     pub async fn events_after_cursor(

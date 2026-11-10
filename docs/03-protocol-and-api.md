@@ -828,8 +828,9 @@ pub enum HubToNodeMsg {
   新規 Worktree の作成・追加 (`{ branch, new_branch? }`)。
 - `DELETE /api/v1/projects/:project_id/worktrees/:worktree_id`:
   指定 Worktree の削除。
-- `GET /api/v1/sessions/:id/events?after_cursor=0`:
-  指定カーソル以降のイベント履歴取得（`SessionEventBatch` を返却）。
+- `GET /api/v1/sessions/:id/events?after_cursor=&before_cursor=&limit=`:
+  指定カーソル以降のイベント履歴、または `before_cursor` 指定時はその直前の
+  末尾イベントを取得する（`SessionEventBatch` を返却、古い順）。
 - `GET /api/v1/sessions/:id/diff?scope=uncommitted&base=main`:
   ノードのリアルタイムGit差分を取得。
   - `scope=uncommitted` (デフォルト): 現在の作業ツリー未コミット差分
@@ -1050,16 +1051,19 @@ xterm互換アダプター）とノード上の ConPTY / Unix PTY
 
 ### 4.3 追加する REST エンドポイントの契約
 
-- `GET /api/v1/sessions/:id`:
-  セッション詳細 (`SessionDetail`) を返す。型は `fxg-protocol/src/client_api.rs` へ移設する。
+- `GET /api/v1/sessions/:id?recent_events=20`:
+  セッション詳細 (`SessionDetail`) を返す。`recent_events` は末尾イベント数
+  （既定 20、最大 500）。型は `fxg-protocol/src/client_api.rs` へ移設済み。
 - `POST /api/v1/sessions/:id/prompt`:
   body は `{ "command_id": "...", "input": PromptInput, "client_source": ClientSource }`。
   dispatch 後に `CommandResult` を返す。ターン完了は待たず、`--wait` は WS で判定する。
 - `POST /api/v1/sessions/:id/control`:
   body は `{ "command_id": "...", "action": SessionControlAction }`。応答は `CommandResult`。
 - `POST /api/v1/sessions/import`:
-  body は `{ "command_id": "...", "agent_id": "...", "agent_session_id": "...", "cwd": "...", "title": ... }`。
-  応答は `{ "command_id": "...", "session_id": "..." }`。
+  body は `{ "command_id": "...", "node_id": ..., "agent_id": "...", "agent_session_id": "...", "cwd": "...", "title": ... }`。
+  ローカルノードは `cwd` から解決し、`node_id` は省略可（指定時は自ノードと照合）。
+  ハブは `node_id` 必須で対象ノードへ RPC 中継する。応答は
+  `{ "command_id": "...", "session_id": "..." }`。
 - `GET /api/v1/sessions/:id/events?after_cursor=&limit=&before_cursor=`:
   `SessionEventBatch` を返す。`limit` / `before_cursor` は `session show` 用の追加。
 - `POST /api/v1/system/shutdown`:

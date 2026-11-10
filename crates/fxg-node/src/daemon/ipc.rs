@@ -14,11 +14,11 @@ use std::path::{Path, PathBuf};
 
 use fxg_db::SessionFilter;
 use fxg_protocol::CommandId;
+use fxg_protocol::client_api::SessionDetail;
 use fxg_protocol::common::{ErrorCode, ErrorInfo};
-use fxg_protocol::events::SessionEventEnvelope;
 use fxg_protocol::ipc::{
     IPC_PROTOCOL_VERSION, IpcOutcome, IpcRequest, IpcRequestKind, IpcResultKind, IpcServerMessage,
-    LocalRequest, LocalResult, SessionDetail,
+    LocalRequest, LocalResult,
 };
 use fxg_protocol::node_hub::NodeRpcOutcome;
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -522,33 +522,17 @@ async fn handle_local(
             cwd,
             title,
         } => {
-            state
-                .resolve_and_register_project(Path::new(&cwd))
-                .await
-                .map_err(|err| DispatchError::from_node_error(&command_id, err))?;
             let session_id = state
-                .session_manager()
                 .import_session(
                     &command_id,
                     &agent_id,
                     &agent_session_id,
                     Path::new(&cwd),
                     title.as_deref(),
+                    &AuditSource::local(),
                 )
                 .await
                 .map_err(|err| DispatchError::from_node_error(&command_id, err))?;
-            state
-                .record_audit(
-                    fxg_db::audit::actions::SESSION_START,
-                    &AuditSource::local(),
-                    Some(&session_id),
-                    serde_json::json!({
-                        "cwd": cwd,
-                        "agent_id": agent_id,
-                        "imported_agent_session_id": agent_session_id,
-                    }),
-                )
-                .await;
             Ok((
                 command_id,
                 LocalResult::SessionImported {
@@ -633,10 +617,11 @@ async fn handle_local(
                         format!("session not found: {session_id}"),
                     )
                 })?;
-            let (event_count, recent_events) =
-                session_event_tail(state.db(), session_id.as_str(), recent_events)
-                    .await
-                    .map_err(|err| DispatchError::from_node_error(&command_id, err))?;
+            let (event_count, recent_events) = state
+                .db()
+                .session_event_tail(session_id.as_str(), recent_events)
+                .await
+                .map_err(|err| DispatchError::from_node_error(&command_id, err.into()))?;
             let pending_permissions = state
                 .db()
                 .pending_permissions()
@@ -665,38 +650,6 @@ async fn handle_local(
             ))
         }
     }
-}
-
-/// Retrieves the total session event count and the last `recent` entries (oldest first).
-///
-/// Advances to the end in batches while keeping only the most recent entries in a ring buffer.
-async fn session_event_tail(
-    db: &fxg_db::Db,
-    session_id: &str,
-    recent: u32,
-) -> Result<(u64, Vec<SessionEventEnvelope>), NodeError> {
-    const BATCH: u32 = 200;
-    let mut cursor = 0u64;
-    let mut tail: std::collections::VecDeque<SessionEventEnvelope> =
-        std::collections::VecDeque::new();
-    loop {
-        let batch = db.session_events_after(session_id, cursor, BATCH).await?;
-        let fetched = batch.events.len() as u32;
-        if fetched == 0 {
-            break;
-        }
-        cursor = batch.cursor;
-        for event in batch.events {
-            tail.push_back(event);
-            if tail.len() > recent as usize {
-                tail.pop_front();
-            }
-        }
-        if fetched < BATCH {
-            break;
-        }
-    }
-    Ok((cursor, tail.into_iter().collect()))
 }
 
 #[cfg(test)]

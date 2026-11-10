@@ -146,12 +146,12 @@
 
 ## 4. 実装順序（1PR内のコミット）
 
-- [ ] **Commit 1: REST parity**
-  - [ ] `GET /api/v1/sessions/:id`、`POST /api/v1/sessions/:id/prompt`、`POST /api/v1/sessions/:id/control`、`POST /api/v1/sessions/import`
-  - [ ] `GET /api/v1/sessions/:id/events` の `limit` / `before_cursor`
-  - [ ] ローカル `POST /api/v1/system/shutdown` と `DaemonState::request_shutdown`
-  - [ ] `SessionDetail` を `client_api` へ移設、リクエスト / レスポンス型を追加
-  - [ ] `fxg session new` / `-w` 用の cwd → `project_id` 解決フロー
+- [x] **Commit 1: REST parity**
+  - [x] `GET /api/v1/sessions/:id`、`POST /api/v1/sessions/:id/prompt`、`POST /api/v1/sessions/:id/control`、`POST /api/v1/sessions/import`
+  - [x] `GET /api/v1/sessions/:id/events` の `limit` / `before_cursor`
+  - [x] ローカル `POST /api/v1/system/shutdown` と `DaemonState::request_shutdown`
+  - [x] `SessionDetail` を `client_api` へ移設、リクエスト / レスポンス型を追加
+  - [x] cwd → `project_id` は既存の `POST /api/v1/nodes/:id/projects/inspect` で対応可能なことを確認（CLI 結線は Commit 2）
 - [ ] **Commit 2: CLI の HTTP / WS 移行**
   - [ ] `NodeClient` を `reqwest` + `tokio-tungstenite` に書き換え
   - [ ] `node.addr` 読み込み、`/healthz` ポーリング、stale addr / 自動起動
@@ -217,3 +217,15 @@
 - ツールチェインの自動検出・自動導入（`mise` / `uv` / `project_profiles`）。
 - Local IPC / `git-askpass` / 旧 Provisioner 定義の後方互換。
 - ハブを経由しないノード間通信や、新しいネットワークプロトコルの導入。
+
+---
+
+## 8. 実装ログ
+
+- **2026-11-10: Commit 1 (REST parity)**
+  - `GET /api/v1/sessions/:id`、`POST /api/v1/sessions/:id/prompt`、`POST /api/v1/sessions/:id/control`、`POST /api/v1/sessions/import` を追加。
+  - `GET /api/v1/sessions/:id/events` に `before_cursor` を追加し、`SessionDetail` と各リクエスト / レスポンス型を `client_api` へ移設。
+  - `Db::session_event_tail` / `session_events_before` を追加し、`fxg session show` の `event_count` を実際のイベント件数に修正。
+  - ローカルノードの `POST /api/v1/system/shutdown` を実装。
+  - Node RPC に `ImportSession` を追加し、ハブ経由のインポートにも対応。
+  - `fxg-node` の HTTP テストで detail / events / prompt / control / import / shutdown を検証。

@@ -79,6 +79,39 @@ impl DaemonState {
         self.db().record_audit(&audit).await;
     }
 
+    /// Imports an existing agent session and returns the new FXG session ID.
+    ///
+    /// Shared by the local IPC command and the Client REST endpoint so the
+    /// project-binding refresh and audit entry stay identical.
+    pub async fn import_session(
+        &self,
+        command_id: &CommandId,
+        agent_id: &str,
+        agent_session_id: &str,
+        cwd: &Path,
+        title: Option<&str>,
+        source: &AuditSource,
+    ) -> Result<String, NodeError> {
+        self.resolve_and_register_project(cwd).await?;
+        let session_id = self
+            .session_manager()
+            .import_session(command_id, agent_id, agent_session_id, cwd, title)
+            .await?;
+        self.record_audit(
+            fxg_db::audit::actions::SESSION_START,
+            source,
+            Some(&session_id),
+            serde_json::json!({
+                "agent_id": agent_id,
+                "cwd": cwd,
+                "agent_session_id": agent_session_id,
+                "imported": true,
+            }),
+        )
+        .await;
+        Ok(session_id)
+    }
+
     /// Archives/restores a session (shared implementation for IPC / Client REST / hub relay).
     ///
     /// Archiving is a reversible visibility flag; the event log is retained.

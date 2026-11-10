@@ -14,8 +14,8 @@ use fxg_protocol::client_api::{
     PruneWorktreesRequest, PushSubscribeRequest, PushSubscribeResponse, RemoveWorktreeRequest,
     RespondElicitationRequest, RespondElicitationResponse, RespondPermissionRequest,
     RespondPermissionResponse, ResumeSessionRequest, ResumeSessionResponse,
-    RotateAuthTokenResponse, SessionArchiveRequest, SessionArchiveResponse, SupportBundle,
-    SupportBundleConfig, WorktreeInfo, WorktreesResponse,
+    RotateAuthTokenResponse, SessionArchiveRequest, SessionArchiveResponse, SessionImportRequest,
+    SessionImportResponse, SupportBundle, SupportBundleConfig, WorktreeInfo, WorktreesResponse,
 };
 use fxg_protocol::common::{
     AgentAction, ClientSource, CommandResult, ComponentHealth, DiffScope, ErrorCode,
@@ -295,6 +295,21 @@ pub trait ClientApiBackend: Clone + Send + Sync + 'static {
         request: CreateSessionRequest,
         client: ClientInfo,
     ) -> Result<CreateSessionResponse, ApiError>;
+
+    /// `POST /api/v1/sessions/import` (take over an existing agent session).
+    ///
+    /// The default implementation is for endpoints that cannot own an agent
+    /// process (the hub overrides it to relay to the target node).
+    async fn import_session(
+        &self,
+        _request: SessionImportRequest,
+        _client: ClientInfo,
+    ) -> Result<SessionImportResponse, ApiError> {
+        Err(ApiError::from_code(
+            ErrorCode::InvalidState,
+            "session import is not supported by this backend",
+        ))
+    }
 
     /// `POST /api/v1/sessions/:id/permissions/:req_id/respond` (idempotent).
     async fn respond_permission(

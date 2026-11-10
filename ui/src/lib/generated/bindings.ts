@@ -331,6 +331,14 @@ export type ConnectionRole =
 /**  Connected to the node's local web server (`fxg node start`) */
 "local_node";
 
+/**  `POST /api/v1/sessions/:id/control` request. */
+export type ControlSessionRequest = {
+	/**  Correlation ID assigned by the client */
+	command_id: CommandId,
+	/**  Operation to execute */
+	action: SessionControlAction,
+};
+
 /**
  *  `POST /api/v1/sessions` request (start a new session).
  * 
@@ -1689,6 +1697,16 @@ export type SecretsResponse = {
 	secrets: SecretSummary[],
 };
 
+/**  `POST /api/v1/sessions/:id/prompt` request. */
+export type SendPromptRequest = {
+	/**  Correlation ID assigned by the client */
+	command_id: CommandId,
+	/**  Prompt body and attachments */
+	input: PromptInput,
+	/**  Source (`cli` / `web` / `android`) */
+	client_source: string,
+};
+
 /**
  *  `POST /api/v1/sessions/:id/archive` request.
  * 
@@ -1728,6 +1746,20 @@ policy: string } |
 { action: "cancel" } | 
 /**  Terminate the session entirely */
 { action: "kill" };
+
+/**  `GET /api/v1/sessions/:id` response. */
+export type SessionDetail = {
+	/**  The session aggregate */
+	session: SessionSummary,
+	/**  Total number of persisted events */
+	event_count: number,
+	/**  Recent events (oldest first) */
+	recent_events: SessionEventEnvelope[],
+	/**  Permission requests still pending for this session */
+	pending_permissions: PermissionRequestEntry[],
+	/**  Elicitation requests still waiting for an answer for this session */
+	pending_elicitations: ElicitationRequestEntry[],
+};
 
 /**
  *  A batch of events with a cursor (shared by Client WS delivery and the history API).
@@ -1770,6 +1802,35 @@ export type SessionForkSpec = {
 
 /**  ID of a session (UUID v7 assigned by the running node / server). */
 export type SessionId = string;
+
+/**
+ *  `POST /api/v1/sessions/import` request.
+ *  A local node derives the target from `cwd` and ignores `node_id` (or
+ *  validates it when present). The hub requires `node_id` and relays the import
+ *  to that node.
+ */
+export type SessionImportRequest = {
+	/**  Correlation ID assigned by the client */
+	command_id: CommandId,
+	/**  Node that owns the agent session (hub only; omit for a local node) */
+	node_id: NodeId | null,
+	/**  Agent ID (`opencode2` / `antigravity-acp` etc.) */
+	agent_id: string,
+	/**  Agent-side session ID to take over */
+	agent_session_id: string,
+	/**  Working directory */
+	cwd: string,
+	/**  Optional title */
+	title: string | null,
+};
+
+/**  `POST /api/v1/sessions/import` response. */
+export type SessionImportResponse = {
+	/**  ID of the imported session */
+	session_id: SessionId,
+	/**  Correlation ID from the request */
+	command_id: CommandId,
+};
 
 /**  `GET /api/v1/sessions` response. */
 export type SessionListResponse = {

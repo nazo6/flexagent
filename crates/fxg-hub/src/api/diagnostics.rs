@@ -20,8 +20,8 @@ use fxg_protocol::client_api::{
     ConnectionRole, DatabaseStats, DiagnosticsResponse, SupportBundle, SupportBundleConfig,
 };
 use fxg_protocol::common::{
-    ComponentHealth, ComponentName, ComponentState, ErrorCode, ErrorInfo, IncidentEntry,
-    IncidentLevel, IncidentSource, RawJson, SystemStatus, WarningInfo,
+    CommandResult, ComponentHealth, ComponentName, ComponentState, ErrorCode, ErrorInfo,
+    IncidentEntry, IncidentLevel, IncidentSource, RawJson, SystemStatus, WarningInfo,
 };
 use fxg_protocol::util::now_ms;
 
@@ -285,6 +285,34 @@ pub(crate) async fn record_warning<B: ClientApiBackend>(
         None,
     )
     .await;
+}
+
+/// Records the error / warnings attached to a command result.
+///
+/// Shared by the Client WS and the REST prompt / control endpoints so both
+/// transports feed the same incident log.
+pub(crate) async fn record_command_result<B: ClientApiBackend>(
+    backend: &B,
+    result: &CommandResult,
+) {
+    let session_id = result
+        .session_id
+        .as_ref()
+        .map(fxg_protocol::SessionId::as_str);
+    if let Some(error) = result.error.as_ref() {
+        record_info(
+            backend,
+            error,
+            IncidentSource::Api,
+            IncidentLevel::Error,
+            session_id,
+            None,
+        )
+        .await;
+    }
+    for warning in &result.warnings {
+        record_warning(backend, warning, session_id).await;
+    }
 }
 
 /// Extracts a session ID from an API path (`/api/v1/sessions/{id}/...`).

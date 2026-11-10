@@ -12,14 +12,14 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result, anyhow, bail};
 use fxg_node::IpcClient;
 use fxg_protocol::CommandId;
-use fxg_protocol::client_api::{DiagnosticsResponse, SupportBundle};
+use fxg_protocol::client_api::{DiagnosticsResponse, SessionDetail, SupportBundle};
 use fxg_protocol::common::{
     ClientSource, IncidentListResponse, PromptInput, SessionControlAction, SessionSummary,
 };
 use fxg_protocol::config::{env_keys, fxg_home, process_env};
 use fxg_protocol::ipc::{
     IPC_PROTOCOL_VERSION, IpcOutcome, IpcRequest, IpcRequestKind, IpcResultKind, IpcServerMessage,
-    LocalRequest, LocalResult, SessionDetail,
+    LocalRequest, LocalResult,
 };
 use fxg_protocol::node_hub::{NodeRpcRequest, NodeRpcResponse};
 

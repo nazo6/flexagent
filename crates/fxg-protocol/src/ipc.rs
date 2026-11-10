@@ -12,9 +12,9 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::client_api::SessionDetail;
 use crate::common::{
-    ClientSource, ElicitationRequestEntry, ErrorInfo, PermissionRequestEntry, PromptInput,
-    SessionControlAction, SessionSummary, StreamDeltaPayload,
+    ClientSource, ErrorInfo, PromptInput, SessionControlAction, SessionSummary, StreamDeltaPayload,
 };
 use crate::events::SessionEventEnvelope;
 use crate::node_hub::{NodeRpcRequest, NodeRpcResponse};
@@ -384,21 +384,6 @@ pub enum IpcServerMessage {
         /// The delta body
         delta: StreamDeltaPayload,
     },
-}
-
-/// Response body of `fxg session show`.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct SessionDetail {
-    /// The session aggregate
-    pub session: SessionSummary,
-    /// Total number of persisted events
-    pub event_count: u64,
-    /// Recent events (oldest first)
-    pub recent_events: Vec<SessionEventEnvelope>,
-    /// Permission requests still pending for this session
-    pub pending_permissions: Vec<PermissionRequestEntry>,
-    /// Elicitation requests still waiting for an answer for this session
-    pub pending_elicitations: Vec<ElicitationRequestEntry>,
 }
 
 #[cfg(test)]
