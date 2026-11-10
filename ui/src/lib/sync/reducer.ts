@@ -597,8 +597,8 @@ function appendEphemeralItems(builder: TimelineBuilder, sources: TimelineSources
   // reasoning block and the answer that follows it keep their real order while
   // they are still streaming.
   const streamingOrder = sources.streamKeys ?? [
-    ...[...sources.messageDeltas.keys()].map((id) => streamKey("message", id)),
     ...[...sources.thoughtDeltas.keys()].map((id) => streamKey("thought", id)),
+    ...[...sources.messageDeltas.keys()].map((id) => streamKey("message", id)),
     ...[...sources.toolProgress.keys()].map((id) => streamKey("tool", id)),
     ...[...sources.terminalDeltas.keys()].map((id) => streamKey("terminal", id)),
   ];

@@ -257,6 +257,62 @@ describe("tool calls", () => {
       rawOutput: "done",
     });
   });
+
+  it("orders conversation message before a question tool call", () => {
+    const sources = emptySources([
+      makeEvent(1, {
+        type: "agent_message",
+        data: {
+          message_id: "m1",
+          text: "Here is what I plan to do. Which option do you prefer?",
+          is_complete: true,
+        },
+      }),
+      makeEvent(2, {
+        type: "tool_call",
+        data: {
+          tool_call_id: "q1",
+          title: "ask_question",
+          kind: "execute",
+          status: "in_progress",
+          locations: [],
+          diff: null,
+          raw_output: null,
+        },
+      }),
+    ]);
+    const items = buildTimelineItems(sources);
+    expect(items).toHaveLength(2);
+    expect(items[0].kind).toBe("agent");
+    expect(items[1].kind).toBe("tool");
+  });
+
+  it("orders conversation message before an elicitation request", () => {
+    const sources = emptySources([
+      makeEvent(1, {
+        type: "agent_message",
+        data: {
+          message_id: "m1",
+          text: "I need some more information:",
+          is_complete: true,
+        },
+      }),
+      makeEvent(2, {
+        type: "elicitation_request",
+        data: {
+          elicitation_id: "e1",
+          message: "Please choose a config option",
+          mode: "form",
+          requested_schema: { type: "object" },
+          tool_call_id: null,
+        },
+      }),
+    ]);
+    const items = buildTimelineItems(sources);
+    expect(items).toHaveLength(2);
+    expect(items[0].kind).toBe("agent");
+    expect(items[1].kind).toBe("elicitation");
+  });
 });
 
 describe("terminal output", () => {

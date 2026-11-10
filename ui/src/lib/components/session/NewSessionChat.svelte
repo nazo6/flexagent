@@ -321,11 +321,15 @@
       agentTouched = false;
       modeTouched = false;
     }
-    const prefs = untrack(() => loadNewSessionPrefs(project.project_id));
-    if (prefs) {
-      if (!modeTouched && prefs.mode !== "default") sessionMode = prefs.mode;
-      if (!agentTouched && prefs.agent !== "" && availableAgentIds.includes(prefs.agent)) {
-        agentId = prefs.agent;
+    const savedPrefs = untrack(() => loadNewSessionPrefs(project.project_id));
+    if (savedPrefs) {
+      if (!modeTouched && savedPrefs.mode !== "default") sessionMode = savedPrefs.mode;
+      if (
+        !agentTouched &&
+        savedPrefs.agent !== "" &&
+        availableAgentIds.includes(savedPrefs.agent)
+      ) {
+        agentId = savedPrefs.agent;
       }
     }
     prefsResolvedProjectId = project.project_id;

@@ -103,36 +103,36 @@
     }
   });
 
+  function handlePointerMove(e: PointerEvent) {
+    if (!isResizing || !mainContainer) return;
+    const rect = mainContainer.getBoundingClientRect();
+    const pointerX = e.clientX;
+    const rightPixels = rect.right - pointerX;
+    const percentage = (rightPixels / rect.width) * 100;
+    // Clamp between 20% and 75%
+    sidePanelWidth = Math.max(20, Math.min(75, Math.round(percentage)));
+  }
+
+  function handlePointerUp() {
+    if (!isResizing) return;
+    isResizing = false;
+    window.removeEventListener("pointermove", handlePointerMove);
+    window.removeEventListener("pointerup", handlePointerUp);
+    if (typeof localStorage !== "undefined") {
+      try {
+        localStorage.setItem("fxg:session_side_panel_width", String(sidePanelWidth));
+      } catch {
+        // Ignore quota errors
+      }
+    }
+  }
+
   function startResize(event: PointerEvent) {
     if (event.button !== 0) return;
     event.preventDefault();
     isResizing = true;
-
-    function onPointerMove(e: PointerEvent) {
-      if (!mainContainer) return;
-      const rect = mainContainer.getBoundingClientRect();
-      const pointerX = e.clientX;
-      const rightPixels = rect.right - pointerX;
-      const percentage = (rightPixels / rect.width) * 100;
-      // Clamp between 20% and 75%
-      sidePanelWidth = Math.max(20, Math.min(75, Math.round(percentage)));
-    }
-
-    function onPointerUp() {
-      isResizing = false;
-      window.removeEventListener("pointermove", onPointerMove);
-      window.removeEventListener("pointerup", onPointerUp);
-      if (typeof localStorage !== "undefined") {
-        try {
-          localStorage.setItem("fxg:session_side_panel_width", String(sidePanelWidth));
-        } catch {
-          // Ignore quota errors
-        }
-      }
-    }
-
-    window.addEventListener("pointermove", onPointerMove);
-    window.addEventListener("pointerup", onPointerUp);
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp);
   }
 
   // Make the session a priority target for WS delivery, and fall back to REST
