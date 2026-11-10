@@ -34,7 +34,6 @@ pub mod session_manager;
 pub mod sync;
 pub mod worktree;
 
-pub mod credentials;
 pub mod fs_browse;
 
 #[cfg(test)]

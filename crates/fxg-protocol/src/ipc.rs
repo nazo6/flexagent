@@ -231,18 +231,6 @@ pub enum LocalRequest {
         /// Whether to regenerate it
         rotate: bool,
     },
-    /// Resolves git credentials (`fxg internal git-askpass`, used as a `GIT_ASKPASS` helper).
-    ///
-    /// Git operations on an ephemeral VM (`fxg internal stdio`) are relayed through
-    /// this method from the node to the hub (`GitCredentialRequest`),
-    /// which authenticates without leaving the token on the VM disk
-    /// (design: docs/01 §6.4).
-    GitCredential {
-        /// Correlation ID
-        command_id: CommandId,
-        /// Prompt string passed by git (`GIT_ASKPASS`)
-        prompt: String,
-    },
     /// Keep-alive
     Ping {
         /// Correlation ID
@@ -268,7 +256,6 @@ impl LocalRequest {
             | Self::ListSessions { command_id, .. }
             | Self::Shutdown { command_id }
             | Self::AuthToken { command_id, .. }
-            | Self::GitCredential { command_id, .. }
             | Self::Ping { command_id } => command_id,
         }
     }
@@ -339,15 +326,6 @@ pub enum LocalResult {
     AuthToken {
         /// Client authentication token
         token: String,
-    },
-    /// Result of `GitCredential` (in memory only; never written to disk)
-    GitCredential {
-        /// Basic authentication user name
-        username: String,
-        /// Token (`None` when resolution failed)
-        token: Option<String>,
-        /// Failure message
-        error: Option<String>,
     },
     /// A plain success response
     Ack {

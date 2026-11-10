@@ -301,8 +301,6 @@ pub struct NodeSettingsSnapshot {
 pub struct HubSettings {
     /// Web Push contact claim (`mailto:` / `https:`)
     pub vapid_subject: Option<String>,
-    /// Per-host Git credential provider
-    pub git_credentials: BTreeMap<String, GitCredentialConfig>,
     /// Optimistic-lock revision
     pub revision: u64,
     /// Last update time (Unix epoch ms)
@@ -315,8 +313,6 @@ pub struct HubSettings {
 pub struct UpdateHubSettingsRequest {
     /// Web Push contact claim
     pub vapid_subject: Option<String>,
-    /// Per-host Git credential provider
-    pub git_credentials: BTreeMap<String, GitCredentialConfig>,
     /// Revision the client observed (`REVISION_MISMATCH` on conflict)
     pub expected_revision: u64,
 }
@@ -329,49 +325,6 @@ pub struct HubSettingsSnapshot {
     pub bootstrap: HubBootstrapView,
     /// Hub-owned settings
     pub hub: HubSettings,
-}
-
-/// How a temporary VM obtains Git credentials.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
-#[serde(tag = "provider", rename_all = "snake_case")]
-#[specta(collect)]
-pub enum GitCredentialConfig {
-    /// Obtain the token from `gh auth token`.
-    GhCli {
-        /// Basic authentication user name (default: `x-access-token`)
-        #[serde(default)]
-        username: Option<String>,
-    },
-    /// Obtain the token from the given environment variable.
-    Env {
-        /// Basic authentication user name (default: `x-access-token`)
-        #[serde(default)]
-        username: Option<String>,
-        /// Name of the environment variable holding the token
-        token_env: String,
-    },
-    /// Read the token from the secret store (`secrets/server/<id>`).
-    Secret {
-        /// Basic authentication user name (default: `x-access-token`)
-        #[serde(default)]
-        username: Option<String>,
-        /// Referenced secret
-        secret_id: SecretId,
-    },
-}
-
-impl GitCredentialConfig {
-    /// Effective Basic authentication user name.
-    pub fn resolved_username(&self) -> &str {
-        let configured = match self {
-            Self::GhCli { username }
-            | Self::Env { username, .. }
-            | Self::Secret { username, .. } => username.as_deref(),
-        };
-        configured
-            .filter(|value| !value.trim().is_empty())
-            .unwrap_or(crate::config::DEFAULT_GIT_USERNAME)
-    }
 }
 
 /// A custom ACP agent definition (`agent_custom` in `node.db`).

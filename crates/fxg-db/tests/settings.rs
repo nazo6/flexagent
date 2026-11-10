@@ -5,9 +5,8 @@ use std::collections::BTreeMap;
 use fxg_db::{Db, DbError, DbRole};
 use fxg_protocol::SecretId;
 use fxg_protocol::settings::{
-    AgentSettings, ConfigSource, GitCredentialConfig, NodeSettings, ProjectIdentity,
-    ProvisionerDefinition, SourcedValue, UpdateAgentSettingsRequest, UpdateHubSettingsRequest,
-    UpdateNodeSettingsRequest,
+    AgentSettings, ConfigSource, NodeSettings, ProjectIdentity, ProvisionerDefinition,
+    SourcedValue, UpdateAgentSettingsRequest, UpdateHubSettingsRequest, UpdateNodeSettingsRequest,
 };
 
 async fn db() -> Db {
@@ -192,13 +191,6 @@ async fn hub_settings_and_provisioners() {
     let updated = db
         .update_hub_settings(&UpdateHubSettingsRequest {
             vapid_subject: Some("mailto:admin@example.com".to_owned()),
-            git_credentials: BTreeMap::from([(
-                "github.com".to_owned(),
-                GitCredentialConfig::Secret {
-                    username: Some("git".to_owned()),
-                    secret_id: SecretId::new("git-token"),
-                },
-            )]),
             expected_revision: initial.revision,
         })
         .await
@@ -207,14 +199,6 @@ async fn hub_settings_and_provisioners() {
         updated.vapid_subject.as_deref(),
         Some("mailto:admin@example.com")
     );
-    match updated.git_credentials.get("github.com").expect("github") {
-        GitCredentialConfig::Secret { secret_id, .. } => {
-            assert_eq!(secret_id.as_str(), "git-token");
-        }
-        other @ (GitCredentialConfig::GhCli { .. } | GitCredentialConfig::Env { .. }) => {
-            panic!("unexpected provider: {other:?}")
-        }
-    }
 
     db.upsert_provisioner(&ProvisionerDefinition {
         name: "docker".to_owned(),

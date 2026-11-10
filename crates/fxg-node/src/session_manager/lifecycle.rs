@@ -218,23 +218,6 @@ impl SessionManager {
         &self,
         params: StartDriverParams<'_>,
     ) -> Result<StartedDriverSession, NodeError> {
-        // Inject the Git credential proxy (GIT_ASKPASS for ephemeral VMs) into the agent process.
-        // The script is generated at daemon startup and authenticates via
-        // `fxg internal git-askpass` → local IPC → the hub's in-memory relay
-        // (design: docs/01 §6.4).
-        let mut spec = params.spec.clone();
-        let askpass = crate::credentials::askpass_script_path(self.inner.paths.fxg_home());
-        if askpass.exists() {
-            for (key, value) in crate::credentials::git_env(self.inner.paths.fxg_home()) {
-                spec.env.retain(|(k, _)| k != &key);
-                spec.env.push((key, value));
-            }
-        }
-        let params = StartDriverParams {
-            spec: &spec,
-            ..params
-        };
-
         let driver =
             (self.inner.factory)(params.spec).map_err(|err| NodeError::Agent(err.to_string()))?;
         self.remember_driver(&driver);

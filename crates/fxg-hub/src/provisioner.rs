@@ -20,9 +20,8 @@ use std::time::{Duration, Instant};
 
 use fxg_protocol::client_api::ProvisionerTestResponse;
 use fxg_protocol::common::{NodeLifecycleStatus, NodeProjectReport, PromptInput, SessionStatus};
-use fxg_protocol::config::DEFAULT_GIT_USERNAME;
 use fxg_protocol::node_hub::{HubToNodeMsg, NodeToHubMsg};
-use fxg_protocol::settings::{GitCredentialConfig, ProvisionerDefinition};
+use fxg_protocol::settings::ProvisionerDefinition;
 use fxg_protocol::util::uuid_v7;
 use fxg_protocol::{CommandId, NodeId};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter};
@@ -30,7 +29,6 @@ use tokio::process::Command;
 use tokio::sync::{oneshot, watch};
 
 use crate::api::{ApiError, ClientEvent};
-use crate::credentials::resolve_credential;
 use crate::hub;
 use crate::state::HubState;
 
@@ -58,7 +56,6 @@ struct Instance {
 struct ProvisionerInner {
     fxg_home: PathBuf,
     configs: RwLock<BTreeMap<String, ProvisionerDefinition>>,
-    git_credentials: RwLock<BTreeMap<String, GitCredentialConfig>>,
     instances: StdMutex<HashMap<String, Instance>>,
     drain_waiters: StdMutex<HashMap<String, oneshot::Sender<()>>>,
 }
@@ -92,16 +89,11 @@ impl std::fmt::Debug for ProvisionerManager {
 
 impl ProvisionerManager {
     /// Creates the manager from configuration.
-    pub fn new(
-        fxg_home: PathBuf,
-        configs: BTreeMap<String, ProvisionerDefinition>,
-        git_credentials: BTreeMap<String, GitCredentialConfig>,
-    ) -> Self {
+    pub fn new(fxg_home: PathBuf, configs: BTreeMap<String, ProvisionerDefinition>) -> Self {
         Self {
             inner: Arc::new(ProvisionerInner {
                 fxg_home,
                 configs: RwLock::new(configs),
-                git_credentials: RwLock::new(git_credentials),
                 instances: StdMutex::new(HashMap::new()),
                 drain_waiters: StdMutex::new(HashMap::new()),
             }),
@@ -128,31 +120,13 @@ impl ProvisionerManager {
             .ok_or_else(|| ApiError::not_found(format!("provisioner not found: {name}")))
     }
 
-    /// Git Credential Proxy configuration (snapshot).
-    pub fn git_credentials(&self) -> BTreeMap<String, GitCredentialConfig> {
-        self.inner
-            .git_credentials
-            .read()
-            .expect("git credentials lock poisoned")
-            .clone()
-    }
-
-    /// Replaces the provisioner and Git credential sets after a settings update.
-    pub fn apply_settings(
-        &self,
-        configs: BTreeMap<String, ProvisionerDefinition>,
-        git_credentials: BTreeMap<String, GitCredentialConfig>,
-    ) {
+    /// Replaces the provisioner set after a settings update.
+    pub fn apply_settings(&self, configs: BTreeMap<String, ProvisionerDefinition>) {
         *self
             .inner
             .configs
             .write()
             .expect("provisioner configs lock poisoned") = configs;
-        *self
-            .inner
-            .git_credentials
-            .write()
-            .expect("git credentials lock poisoned") = git_credentials;
     }
 
     /// `~/.flexagent` data directory.
@@ -288,27 +262,6 @@ pub async fn spawn_session(state: &HubState, request: SpawnSessionRequest) -> Re
     ];
     if let Some(branch) = request.git_branch.as_deref().filter(|b| !b.is_empty()) {
         env.push(("FXG_GIT_BRANCH".to_owned(), branch.to_owned()));
-    }
-    match resolve_git_token(state, &request.git_url).await {
-        Some(response) => {
-            env.push((
-                "FXG_GIT_USERNAME".to_owned(),
-                if response.username.trim().is_empty() {
-                    DEFAULT_GIT_USERNAME.to_owned()
-                } else {
-                    response.username
-                },
-            ));
-            if let Some(token) = response.token {
-                env.push(("FXG_GIT_TOKEN".to_owned(), token));
-            }
-        }
-        None => {
-            tracing::warn!(
-                git_url = request.git_url,
-                "no git credential configured for the project host; clone may fail"
-            );
-        }
     }
 
     let pending = PendingStart {
@@ -1028,45 +981,6 @@ pub async fn terminate_all(state: &HubState) {
     }
 }
 
-/// Resolves the short-lived token for the Git URL's host (`None` when not found).
-pub(crate) async fn resolve_git_token(
-    state: &HubState,
-    git_url: &str,
-) -> Option<crate::credentials::CredentialResponse> {
-    let host = url_host(git_url)?;
-    let credentials = state.provisioners().git_credentials();
-    let config = credentials.get(&host).or_else(|| credentials.get("*"))?;
-    match resolve_credential(config, state.options().fxg_home.as_path()).await {
-        Ok(response) => Some(response),
-        Err(err) => {
-            tracing::warn!(host, "failed to resolve git credential: {err}");
-            None
-        }
-    }
-}
-
-/// Extracts the host name from a URL (`https://github.com/...` / `git@github.com:...`).
-pub(crate) fn url_host(url: &str) -> Option<String> {
-    if let Some(rest) = url.split("://").nth(1) {
-        let authority = rest.split('/').next()?;
-        let host = authority
-            .rsplit_once('@')
-            .map(|(_, host)| host)
-            .unwrap_or(authority);
-        let host = host.split(':').next()?;
-        return (!host.is_empty()).then(|| host.to_owned());
-    }
-    // SCP form (`git@github.com:owner/repo.git`)
-    if let Some((_, rest)) = url.split_once('@')
-        && let Some((host, _)) = rest.split_once(':')
-        && !host.is_empty()
-        && !host.contains('/')
-    {
-        return Some(host.to_owned());
-    }
-    None
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1096,22 +1010,5 @@ mod tests {
             workspace_path("missing", &projects).as_deref(),
             Some("/other")
         );
-    }
-
-    #[test]
-    fn url_host_extracts_from_https_and_scp_forms() {
-        assert_eq!(
-            url_host("https://github.com/nazo6/flexagent.git").as_deref(),
-            Some("github.com")
-        );
-        assert_eq!(
-            url_host("https://user@gitlab.example.com:8443/x/y").as_deref(),
-            Some("gitlab.example.com")
-        );
-        assert_eq!(
-            url_host("git@github.com:nazo6/flexagent.git").as_deref(),
-            Some("github.com")
-        );
-        assert_eq!(url_host("github.com/nazo6/flexagent"), None);
     }
 }

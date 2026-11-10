@@ -38,9 +38,6 @@
 
   // Hub settings form
   let hubForm = $state({ vapid_subject: "", revision: 0 });
-  let gitCredentials = $state<
-    { host: string; provider: string; username: string; detail: string }[]
-  >([]);
 
   // Secret form
   let secretForm = $state({
@@ -112,17 +109,6 @@
       vapid_subject: hubSnapshot.hub.vapid_subject ?? "",
       revision: hubSnapshot.hub.revision,
     };
-    gitCredentials = Object.entries(hubSnapshot.hub.git_credentials).map(([host, config]) => ({
-      host,
-      provider: config.provider,
-      username: config.username ?? "",
-      detail:
-        config.provider === "env"
-          ? (config as { token_env: string }).token_env
-          : config.provider === "secret"
-            ? (config as { secret_id: string }).secret_id
-            : "",
-    }));
   }
 
   async function saveNode(): Promise<void> {
@@ -150,26 +136,6 @@
     try {
       hubSnapshot = await sync.connection.client.updateHubSettings({
         vapid_subject: hubForm.vapid_subject.trim() === "" ? null : hubForm.vapid_subject.trim(),
-        git_credentials: Object.fromEntries(
-          gitCredentials
-            .filter((entry) => entry.host.trim() !== "")
-            .map((entry) => [
-              entry.host.trim(),
-              entry.provider === "gh_cli"
-                ? { provider: "gh_cli", username: entry.username || null }
-                : entry.provider === "env"
-                  ? {
-                      provider: "env",
-                      username: entry.username || null,
-                      token_env: entry.detail,
-                    }
-                  : {
-                      provider: "secret",
-                      username: entry.username || null,
-                      secret_id: entry.detail,
-                    },
-            ]),
-        ),
         expected_revision: hubForm.revision,
       });
       syncHubForm();
@@ -433,7 +399,7 @@
       <Card class="gap-3 p-4">
         <h2 class="font-medium">Hub</h2>
         <p class="text-muted-foreground text-[13px]">
-          Owned by <code>hub.db</code>: Web Push contact and Git credential providers.
+          Owned by <code>hub.db</code>: the Web Push contact claim.
         </p>
         <div class="grid gap-1.5">
           <Label for="vapid-subject">VAPID subject</Label>
@@ -442,47 +408,6 @@
             placeholder="mailto:admin@example.com"
             bind:value={hubForm.vapid_subject}
           />
-        </div>
-        <div class="flex flex-col gap-2">
-          <Label>Git credentials</Label>
-          {#each gitCredentials as entry, index (index)}
-            <div class="grid gap-2 sm:grid-cols-4">
-              <Input placeholder="github.com" bind:value={entry.host} />
-              <select
-                class="border-input bg-background h-9 rounded-md border px-2 text-sm"
-                bind:value={entry.provider}
-              >
-                <option value="gh_cli">gh CLI</option>
-                <option value="env">Environment</option>
-                <option value="secret">Secret</option>
-              </select>
-              <Input placeholder="username" bind:value={entry.username} />
-              <Input
-                placeholder={entry.provider === "env" ? "TOKEN_ENV" : "SECRET_KEY"}
-                bind:value={entry.detail}
-                disabled={entry.provider === "gh_cli"}
-                list={entry.provider === "secret" ? "hub-secrets-datalist" : undefined}
-              />
-            </div>
-          {/each}
-          <datalist id="hub-secrets-datalist">
-            {#each secrets as s (s.id)}
-              <option value={s.id}>{s.description ? `${s.id} (${s.description})` : s.id}</option>
-            {/each}
-          </datalist>
-          <div>
-            <Button
-              variant="outline"
-              size="sm"
-              onclick={() =>
-                (gitCredentials = [
-                  ...gitCredentials,
-                  { host: "", provider: "gh_cli", username: "", detail: "" },
-                ])}
-            >
-              Add Git credential
-            </Button>
-          </div>
         </div>
         <div class="flex items-center gap-2">
           <Button size="sm" onclick={() => void saveHub()}>Save</Button>

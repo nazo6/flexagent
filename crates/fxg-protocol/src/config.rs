@@ -28,8 +28,6 @@ pub const NODE_TOKEN_FILE_NAME: &str = "node_token";
 pub const NODE_DB_FILE_NAME: &str = "node.db";
 /// File name of the hub DB.
 pub const HUB_DB_FILE_NAME: &str = "hub.db";
-/// Default Basic authentication user name for `GitCredentialRequest`.
-pub const DEFAULT_GIT_USERNAME: &str = "x-access-token";
 /// Definitions of the `FXG_*` environment variable names.
 pub mod env_keys {
     /// `[node] node_id`

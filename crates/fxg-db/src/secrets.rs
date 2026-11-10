@@ -108,22 +108,6 @@ pub async fn used_by(db: &Db, id: &SecretId) -> Result<Vec<String>, DbError> {
                     used.push(format!("provisioner:{name}"));
                 }
             }
-            let settings = db.hub_settings().await?;
-            if let Some(settings) = settings {
-                used.extend(
-                    settings
-                        .git_credentials
-                        .into_iter()
-                        .filter(|(_, config)| {
-                            matches!(
-                                config,
-                                fxg_protocol::settings::GitCredentialConfig::Secret { secret_id, .. }
-                                    if secret_id == id
-                            )
-                        })
-                        .map(|(host, _)| host),
-                );
-            }
             Ok(used)
         }
     }

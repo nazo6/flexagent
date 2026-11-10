@@ -103,11 +103,8 @@ impl HubState {
             .map_err(|err| HubError::Hub(format!("web push init failed: {err}")))?;
         let hub_settings = db.ensure_hub_settings().await?;
         push.set_subject(hub_settings.vapid_subject.as_deref());
-        let provisioners = ProvisionerManager::new(
-            options.fxg_home.clone(),
-            db.provisioners().await?,
-            hub_settings.git_credentials.clone(),
-        );
+        let provisioners =
+            ProvisionerManager::new(options.fxg_home.clone(), db.provisioners().await?);
         Ok(Self {
             inner: Arc::new(HubInner {
                 db,

@@ -159,7 +159,7 @@
   - [x] `fxg session prompt --wait` の WS 購読（`last_node_seq` で replay をフィルタ）
   - [x] `fxg support` / `fxg doctor` / `fxg logs --session` を既存 REST に移行
   - [x] `fxg session new` / `-w` / `fork` / `import` の cwd・project 解決を REST に移行
-  - 注: `fxg internal git-askpass` だけは Commit 5 まで暫定的に IPC を使用する。
+  - 注: `fxg internal git-askpass` は Commit 5 で削除済み。
 - [x] **Commit 3: Provisioner secret**
   - [x] `ProvisionerDefinition.env_secrets` と `provisioners.env_secrets_json`
   - [x] spawn 時の secret 解決、`secrets::used_by` の Provisioner 走査
@@ -169,10 +169,10 @@
   - [x] `{BOOTSTRAP_SCRIPT}` の置換・検出を削除（互換なし）
   - [x] 外部環境の workspace を `NodeHello` から取得して `StartSession` に使用
   - [x] `provisioner_e2e` を外部コマンド契約に更新
-- [ ] **Commit 5: askpass / credentials 削除**
-  - [ ] `git-askpass` サブコマンド、node/hub credentials、GitCredential メッセージ、relay
-  - [ ] `SessionManager` の `GIT_ASKPASS` 注入削除
-  - [ ] `git_credentials` テーブル・API・UI・型
+- [x] **Commit 5: askpass / credentials 削除**
+  - [x] `git-askpass` サブコマンド、node/hub credentials、GitCredential メッセージ、relay
+  - [x] `SessionManager` の `GIT_ASKPASS` 注入削除
+  - [x] `git_credentials` テーブル・API・UI・型
 - [ ] **Commit 6: IPC 削除**
   - [ ] `fxg-protocol/src/ipc.rs`、`daemon/ipc.rs`、`ipc_client.rs`、`ipc_framing.rs`
   - [ ] `ipc_endpoint` / `FXG_IPC_ENDPOINT` / testutil / logging / Cargo の不要依存
@@ -234,10 +234,10 @@
   - `NodeClient` を `reqwest` ベースに書き換え、`node.addr` と認証付き `/system/info` で接続を検証。
   - `session list/show/prompt/stop/cancel/kill/archive/delete/import/fork/resume`、worktree、token、status、support、logs を REST に移行。
   - `fxg session prompt --wait` は `/api/v1/client/ws` を購読し、`last_node_seq` より後ろのイベントだけを表示。
-  - `fxg internal git-askpass` は Commit 5 での削除まで暫定的に IPC ブリッジを使用。
+  - `fxg internal git-askpass` は Commit 5 で削除した。
   - `GET /api/v1/system/info` に `last_synced_at` を追加し、`fxg node status` の表示を維持。
   - 旧デーモンが新しい `node.addr` を削除しないよう、終了時の所有者チェックを追加。
-  - `cli_e2e` を HTTP 前提に更新し、`stdio_credential_e2e` と `provisioner_e2e` も通過。
+  - `cli_e2e` を HTTP 前提に更新し、`stdio_drain_e2e` と `provisioner_e2e` も通過。
 - **2026-11-10: Commit 3 (Provisioner secret)**
   - `ProvisionerDefinition.env_secrets` と migration `0012_provisioner_env_secrets.sql` を追加。
   - spawn 時に `~/.flexagent/secrets/hub/<id>` から値を解決して環境変数へ注入。
@@ -248,3 +248,10 @@
   - `{BOOTSTRAP_SCRIPT}` の置換を削除し、`{INSTANCE_NAME}` / `{SESSION_ID}` のみ残した。
   - 一時ノードの workspace は `NodeHello.projects` から取得して `StartSession` に渡す。
   - UI の Project profile タブ / ダイアログ / API クライアントを削除。
+- **2026-11-10: Commit 5 (askpass / credentials 削除)**
+  - `fxg-node/src/credentials.rs` / `fxg-hub/src/credentials.rs` / `fxg internal git-askpass` を削除。
+  - `NodeToHubMsg::GitCredentialRequest` / `HubToNodeMsg::GitCredentialResponse` と Hub の relay を削除。
+  - `SessionManager` の `GIT_ASKPASS` / `GIT_TERMINAL_PROMPT` 注入を削除。
+  - `GitCredentialConfig` / `DEFAULT_GIT_USERNAME` / `hub_settings.git_credentials` と Settings UI の Git credential 編集を削除。
+  - migration `0014_remove_git_credentials.sql` を追加し、`git_credentials` テーブルを DROP。
+  - `secrets::used_by` は Provisioner の `env_secrets` 参照のみを返すよう変更。

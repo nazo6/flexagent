@@ -524,11 +524,11 @@ export interface ITerminalAdapter {
   - ブートストラップ中は短命トークンを echo する専用ヘルパー、ノード起動後は
     `fxg internal git-askpass`（ローカルIPC）→ `GitCredentialRequest`
     でオンメモリ中継する。
-    → アーキテクチャ簡素化で `git-askpass` / `GitCredentialRequest` は廃止予定。
-    Provisioner の `env_secrets` とイメージ側の credential helper に移行する。
+    → アーキテクチャ簡素化で `git-askpass` / `GitCredentialRequest` は廃止済み。
+    Provisioner の `env_secrets` とイメージ側の credential helper に移行した。
 - [x] 外部事前構築済みツール環境への責務分離（`bootstrap.rs` / `bootstrap-workspace` の廃止）
   - ツールチェインやリポジトリ配置は Dockerfile / VM テンプレート / 起動コマンド側で管理し、`fxg` 内のツール自動導入ロジックを全廃。
-- [ ] 環境変数による Git 認証への一本化（`git-askpass` / `GitCredentialRequest` の廃止）
+- [x] 環境変数による Git 認証への一本化（`git-askpass` / `GitCredentialRequest` の廃止）
   - プロビジョナーの `env_secrets` またはコンテナ内設定を利用し、動的認証プロキシを全廃。
 - [x] `DrainAndShutdown` による一時VM破棄前の未送信イベント完全フラッシュ
   - アイドルタイムアウト（`idle_timeout_secs`）またはセッション終了で Drain

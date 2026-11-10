@@ -114,12 +114,12 @@ pub enum NodeError {
         /// Secret ID
         id: fxg_protocol::SecretId,
     },
-    /// A secret is still referenced by an agent or Git credential
+    /// A secret is still referenced by an agent or provisioner
     #[error("secret {} is in use: {}", id.as_str(), used_by.join(", "))]
     SecretInUse {
         /// Secret ID
         id: fxg_protocol::SecretId,
-        /// Referencing agents / Git hosts
+        /// Referencing agents / provisioners
         used_by: Vec<String>,
     },
     /// The secret ID or value is invalid

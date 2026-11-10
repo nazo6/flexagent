@@ -769,25 +769,6 @@ export type FsEntry = {
 	is_hidden: boolean,
 };
 
-/**  How a temporary VM obtains Git credentials. */
-export type GitCredentialConfig = 
-/**  Obtain the token from `gh auth token`. */
-{ provider: "gh_cli"; 
-/**  Basic authentication user name (default: `x-access-token`) */
-username?: string | null } | 
-/**  Obtain the token from the given environment variable. */
-{ provider: "env"; 
-/**  Basic authentication user name (default: `x-access-token`) */
-username?: string | null; 
-/**  Name of the environment variable holding the token */
-token_env: string } | 
-/**  Read the token from the secret store (`secrets/server/<id>`). */
-{ provider: "secret"; 
-/**  Basic authentication user name (default: `x-access-token`) */
-username?: string | null; 
-/**  Referenced secret */
-secret_id: SecretId };
-
 /**  Execution log of a worktree creation hook. */
 export type HookLogEntry = {
 	/**  Command string that was executed */
@@ -822,8 +803,6 @@ export type HubBootstrapView = {
 export type HubSettings = {
 	/**  Web Push contact claim (`mailto:` / `https:`) */
 	vapid_subject: string | null,
-	/**  Per-host Git credential provider */
-	git_credentials: { [key in string]: GitCredentialConfig },
 	/**  Optimistic-lock revision */
 	revision: number,
 	/**  Last update time (Unix epoch ms) */
@@ -2386,8 +2365,6 @@ export type UpdateAgentSettingsRequest = {
 export type UpdateHubSettingsRequest = {
 	/**  Web Push contact claim */
 	vapid_subject: string | null,
-	/**  Per-host Git credential provider */
-	git_credentials: { [key in string]: GitCredentialConfig },
 	/**  Revision the client observed (`REVISION_MISMATCH` on conflict) */
 	expected_revision: number,
 };

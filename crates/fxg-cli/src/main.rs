@@ -102,10 +102,10 @@ async fn main() -> ExitCode {
             HubCommands::Start(start) => start.logging_options(),
             _ => cli_logging(),
         },
-        Commands::Internal(args) => match &args.command {
-            InternalCommands::Stdio(stdio) => stdio.logging_options(),
-            _ => cli_logging(),
-        },
+        Commands::Internal(args) => {
+            let InternalCommands::Stdio(stdio) = &args.command;
+            stdio.logging_options()
+        }
         _ => cli_logging(),
     };
     logging::init_logging(&logging_options, &global, &fxg_home);

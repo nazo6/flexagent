@@ -207,8 +207,7 @@ struct Inner {
     hub_connected: AtomicBool,
     /// `NodeHello` resend trigger (on worktree changes / project registration)
     hello_refresh: tokio::sync::Notify,
-    /// Git credential proxy (in-memory auth relay for ephemeral VMs)
-    credentials: crate::credentials::CredentialBroker,
+
     /// Process-local delivery counters exposed by diagnostics
     diagnostics_counters: std::sync::Arc<fxg_hub::api::DiagnosticsCounters>,
     /// Shutdown sender used by the local IPC `Shutdown` request (set at startup)
@@ -295,7 +294,6 @@ impl DaemonState {
         );
         let sessions = SessionManager::with_factory(
             bus.clone(),
-            paths.clone(),
             config.node_id.clone(),
             registry,
             driver_factory,
@@ -317,18 +315,10 @@ impl DaemonState {
                 client_events,
                 hub_connected: AtomicBool::new(false),
                 hello_refresh: tokio::sync::Notify::new(),
-                credentials: crate::credentials::CredentialBroker::new(),
                 diagnostics_counters: std::sync::Arc::new(fxg_hub::api::DiagnosticsCounters::new()),
                 shutdown_tx: std::sync::OnceLock::new(),
             }),
         };
-
-        // Generate the GIT_ASKPASS helper injected into agent processes
-        // (Git operations in ephemeral VMs authenticate through this script → local IPC →
-        //  the hub's in-memory relay. Design: docs/01 §6.4)
-        if let Err(err) = crate::credentials::write_askpass_script(state.inner.paths.fxg_home()) {
-            tracing::warn!("failed to write git-askpass script: {err}");
-        }
 
         // Forward session event bus events to the events delivered to Client WS
         // (bus Lagged is recovered by the Client WS loop replaying from the cursor)
@@ -513,11 +503,6 @@ impl DaemonState {
     /// Updates the hub connection state (outbox sync worker only).
     pub fn set_hub_connected(&self, connected: bool) {
         self.inner.hub_connected.store(connected, Ordering::Relaxed);
-    }
-
-    /// Git credential proxy broker.
-    pub fn credentials(&self) -> &crate::credentials::CredentialBroker {
-        &self.inner.credentials
     }
 
     /// Requests a resend of `NodeHello` (reports project bindings on worktree changes etc.).

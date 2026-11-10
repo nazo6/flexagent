@@ -915,37 +915,6 @@ async fn handle_node_message_value(state: &HubState, node_id: &NodeId, message: 
                 .await;
             state.hub().remove_pty(&pty_id).await;
         }
-        NodeToHubMsg::GitCredentialRequest {
-            request_id,
-            repo_url,
-            operation,
-        } => {
-            // Git Credential Proxy (GIT_ASKPASS for temporary VMs): resolve the token in memory
-            // from the configured provider and return it over the stdio pipe (docs/01 §6.4)
-            let response = crate::provisioner::resolve_git_token(state, &repo_url).await;
-            let message = match response {
-                Some(response) => HubToNodeMsg::GitCredentialResponse {
-                    request_id,
-                    username: response.username,
-                    token: response.token,
-                    error: response.error,
-                },
-                None => HubToNodeMsg::GitCredentialResponse {
-                    request_id,
-                    username: fxg_protocol::config::DEFAULT_GIT_USERNAME.to_owned(),
-                    token: None,
-                    error: Some(format!(
-                        "no git credential configured for {repo_url} ({operation})"
-                    )),
-                },
-            };
-            if let Err(err) = state.hub().send(node_id, message).await {
-                tracing::warn!(
-                    node_id = node_id.as_str(),
-                    "failed to send the git credential error to the node: {err:#}"
-                );
-            }
-        }
         NodeToHubMsg::DrainComplete { node_id: drained } => {
             tracing::info!(node_id = node_id.as_str(), "drain complete");
             crate::provisioner::on_drain_complete(state, drained.as_str());

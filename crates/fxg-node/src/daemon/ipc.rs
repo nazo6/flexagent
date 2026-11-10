@@ -453,28 +453,6 @@ async fn handle_local(
             Ok((command_id, LocalResult::AuthToken { token }))
         }
 
-        LocalRequest::GitCredential { command_id, prompt } => {
-            // Git credential proxy: resolve by relaying in memory to the hub
-            // (without leaving the token on disk inside the VM. Design: docs/01 §6.4)
-            let result = match state.credentials().resolve(&prompt).await {
-                Ok(response) => LocalResult::GitCredential {
-                    username: if response.username.is_empty() {
-                        crate::credentials::default_username().to_owned()
-                    } else {
-                        response.username
-                    },
-                    token: response.token,
-                    error: response.error,
-                },
-                Err(err) => LocalResult::GitCredential {
-                    username: crate::credentials::default_username().to_owned(),
-                    token: None,
-                    error: Some(err.to_string()),
-                },
-            };
-            Ok((command_id, result))
-        }
-
         LocalRequest::EnsureSession {
             command_id,
             cwd,

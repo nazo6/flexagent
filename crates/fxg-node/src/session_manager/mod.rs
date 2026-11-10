@@ -34,7 +34,7 @@ use fxg_protocol::util::uuid_v7;
 use tokio::sync::mpsc;
 
 use crate::error::NodeError;
-use crate::paths::NodePaths;
+
 use crate::project;
 use crate::session::SessionEventBus;
 
@@ -203,7 +203,6 @@ pub struct SessionManager {
 
 struct Inner {
     bus: SessionEventBus,
-    paths: NodePaths,
     node_id: String,
     registry: AcpRegistry,
     factory: DriverFactory,
@@ -303,19 +302,13 @@ impl std::fmt::Debug for SessionManager {
 
 impl SessionManager {
     /// Creates a manager.
-    pub fn new(
-        bus: SessionEventBus,
-        paths: NodePaths,
-        node_id: impl Into<String>,
-        registry: AcpRegistry,
-    ) -> Self {
-        Self::with_factory(bus, paths, node_id, registry, default_driver_factory())
+    pub fn new(bus: SessionEventBus, node_id: impl Into<String>, registry: AcpRegistry) -> Self {
+        Self::with_factory(bus, node_id, registry, default_driver_factory())
     }
 
     /// Creates a manager with a replaced driver factory (for tests).
     pub fn with_factory(
         bus: SessionEventBus,
-        paths: NodePaths,
         node_id: impl Into<String>,
         registry: AcpRegistry,
         factory: DriverFactory,
@@ -323,7 +316,6 @@ impl SessionManager {
         Self {
             inner: Arc::new(Inner {
                 bus,
-                paths,
                 node_id: node_id.into(),
                 registry,
                 factory,

@@ -398,16 +398,6 @@ pub enum NodeToHubMsg {
         /// Human-readable message
         message: String,
     },
-    /// In-memory git authentication request from an ephemeral VM (the `GIT_ASKPASS`
-    /// proxy).
-    GitCredentialRequest {
-        /// Correlation ID
-        request_id: String,
-        /// Target repository URL
-        repo_url: String,
-        /// Operation kind (`clone` / `fetch` / `push`)
-        operation: String,
-    },
     /// Notification that a graceful drain completed (after receiving it the central
     /// server discards the child process / VM).
     DrainComplete {
@@ -553,17 +543,6 @@ pub enum HubToNodeMsg {
     PtyKill {
         /// PTY ID
         pty_id: String,
-    },
-    /// Short-lived token response to a `GitCredentialRequest`.
-    GitCredentialResponse {
-        /// Correlation ID
-        request_id: String,
-        /// Basic authentication user name
-        username: String,
-        /// Token (in memory only; never written to the VM disk)
-        token: Option<String>,
-        /// Failure message
-        error: Option<String>,
     },
     /// Request to flush the ephemeral VM before shutdown.
     DrainAndShutdown {

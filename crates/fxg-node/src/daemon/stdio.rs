@@ -5,15 +5,14 @@
 //! Speaks JSON Lines over **`stdin` (`HubToNodeMsg`) / `stdout`
 //! (`NodeToHubMsg`)** of the provisioner command that the hub
 //! (`fxg hub start`) starts as a child process (fully independent of any network
-//! or VPN). Bootstrap and `mise` / `uv` tool installation logs all go to
-//! `stderr`, keeping `stdout` reserved for protocol traffic.
+//! or VPN). Provisioner / environment setup logs all go to `stderr`, keeping
+//! `stdout` reserved for protocol traffic.
 //!
 //! - Uses the same [`SessionManager`](crate::session_manager::SessionManager) /
 //!   event bus / outbox as persistent nodes, with 100% shared message types
 //! - `--workspace <DIR>`: registers the cloned workspace as a project and pins
 //!   `StartSession`'s `local_path` to this directory
 //! - `--ephemeral`: on `DrainAndShutdown`, stops sessions and flushes pending events
-//! - Also starts a local IPC server (`fxg internal git-askpass` → Git credential proxy)
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -116,9 +115,6 @@ pub async fn run_stdio(config: StdioConfig) -> Result<(), NodeError> {
             tracing::debug!("failed to flush stdout at the end of the transport: {err}");
         }
     });
-
-    // Bind the Git credential proxy to this transport
-    state.credentials().attach(out_tx.clone());
 
     // 1. Handshake + flush of unsent events
     let hello = crate::sync::build_hello(&state).await;
@@ -235,7 +231,6 @@ pub async fn run_stdio(config: StdioConfig) -> Result<(), NodeError> {
     if let Err(err) = crate::sync::push_outbox(&state, &out_tx).await {
         tracing::warn!("failed to flush outbox on shutdown: {err}");
     }
-    state.credentials().detach();
     if !state.config().ephemeral {
         // Ephemeral VMs have their node row dropped hub-side, so offline state is only
         // recorded for regular nodes

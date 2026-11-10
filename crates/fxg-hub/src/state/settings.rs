@@ -119,16 +119,14 @@ impl HubState {
         })
     }
 
-    /// Updates hub settings and reloads provisioners / Git credentials / VAPID subject.
+    /// Updates hub settings and reloads provisioners / VAPID subject.
     pub async fn update_hub_settings(
         &self,
         request: &UpdateHubSettingsRequest,
     ) -> Result<HubSettingsSnapshot, HubError> {
         let settings = self.db().update_hub_settings(request).await?;
-        self.provisioners().apply_settings(
-            self.db().provisioners().await?,
-            settings.git_credentials.clone(),
-        );
+        self.provisioners()
+            .apply_settings(self.db().provisioners().await?);
         self.push().set_subject(settings.vapid_subject.as_deref());
         self.hub_settings_snapshot().await
     }

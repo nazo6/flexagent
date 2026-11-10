@@ -2,7 +2,7 @@
 //!
 //! `node.db` owns `node_settings` / `agent_settings` / `agent_aliases` /
 //! `custom_agents` / `enabled_package_agents` / `project_path_links`.
-//! `hub.db` owns `hub_settings` / `git_credentials` / `provisioners`.
+//! `hub.db` owns `hub_settings` / `provisioners`.
 //!
 //! Every mutable single-row/aggregate table carries an explicit `revision`
 //! column; updates take the revision the client observed and fail with
@@ -12,9 +12,8 @@ use std::collections::BTreeMap;
 
 use fxg_protocol::SecretId;
 use fxg_protocol::settings::{
-    AgentSettings, CustomAgentConfig, GitCredentialConfig, HubSettings, NodeSettings,
-    ProvisionerDefinition, SecretSummary, UpdateAgentSettingsRequest, UpdateHubSettingsRequest,
-    UpdateNodeSettingsRequest,
+    AgentSettings, CustomAgentConfig, HubSettings, NodeSettings, ProvisionerDefinition,
+    SecretSummary, UpdateAgentSettingsRequest, UpdateHubSettingsRequest, UpdateNodeSettingsRequest,
 };
 use fxg_protocol::util::now_ms;
 use sqlx::SqlitePool;
@@ -442,7 +441,7 @@ pub async fn ensure_hub_settings(pool: &SqlitePool) -> Result<HubSettings, DbErr
         .ok_or_else(|| DbError::InvalidPayload("hub_settings row is missing".to_owned()))
 }
 
-/// Returns the `hub_settings` row (with Git credentials) when it exists.
+/// Returns the `hub_settings` row when it exists.
 pub async fn get_hub_settings(pool: &SqlitePool) -> Result<Option<HubSettings>, DbError> {
     let row = sqlx::query!(
         r#"SELECT vapid_subject, revision, updated_at FROM hub_settings WHERE id = 1"#,
@@ -452,58 +451,18 @@ pub async fn get_hub_settings(pool: &SqlitePool) -> Result<Option<HubSettings>, 
     let Some(row) = row else { return Ok(None) };
     Ok(Some(HubSettings {
         vapid_subject: row.vapid_subject,
-        git_credentials: list_git_credentials(pool).await?,
         revision: revision_u64(row.revision)?,
         updated_at: row.updated_at,
     }))
 }
 
-/// Lists the configured Git credential providers keyed by host.
-pub async fn list_git_credentials(
-    pool: &SqlitePool,
-) -> Result<BTreeMap<String, GitCredentialConfig>, DbError> {
-    let rows = sqlx::query!(
-        r#"
-        SELECT host AS "host!", provider, username, token_env, secret_id
-          FROM git_credentials
-         ORDER BY host
-        "#,
-    )
-    .fetch_all(pool)
-    .await?;
-    let mut credentials = BTreeMap::new();
-    for row in rows {
-        let config = match row.provider.as_str() {
-            "gh_cli" => GitCredentialConfig::GhCli {
-                username: row.username,
-            },
-            "env" => GitCredentialConfig::Env {
-                username: row.username,
-                token_env: row.token_env.unwrap_or_default(),
-            },
-            "secret" => GitCredentialConfig::Secret {
-                username: row.username,
-                secret_id: SecretId::new(row.secret_id.unwrap_or_default()),
-            },
-            other => {
-                return Err(DbError::InvalidEnumValue(format!(
-                    "git credential provider: {other}"
-                )));
-            }
-        };
-        credentials.insert(row.host, config);
-    }
-    Ok(credentials)
-}
-
-/// Updates hub settings and Git credentials under an optimistic lock.
+/// Updates hub settings under an optimistic lock.
 pub async fn update_hub_settings(
     pool: &SqlitePool,
     request: &UpdateHubSettingsRequest,
 ) -> Result<HubSettings, DbError> {
     let now = now_ms();
     let expected = i64::try_from(request.expected_revision).unwrap_or(i64::MAX);
-    let mut tx = pool.begin().await?;
     let result = sqlx::query!(
         r#"
         UPDATE hub_settings
@@ -514,48 +473,11 @@ pub async fn update_hub_settings(
         now,
         expected,
     )
-    .execute(&mut *tx)
+    .execute(pool)
     .await?;
     if result.rows_affected() == 0 {
         return Err(DbError::RevisionMismatch);
     }
-    sqlx::query!(r#"DELETE FROM git_credentials"#)
-        .execute(&mut *tx)
-        .await?;
-    for (host, config) in &request.git_credentials {
-        let (provider, username, token_env, secret_id) = match config {
-            GitCredentialConfig::GhCli { username } => ("gh_cli", username.clone(), None, None),
-            GitCredentialConfig::Env {
-                username,
-                token_env,
-            } => ("env", username.clone(), Some(token_env.clone()), None),
-            GitCredentialConfig::Secret {
-                username,
-                secret_id,
-            } => (
-                "secret",
-                username.clone(),
-                None,
-                Some(secret_id.as_str().to_owned()),
-            ),
-        };
-        sqlx::query!(
-            r#"
-            INSERT INTO git_credentials
-                (host, provider, username, token_env, secret_id, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?)
-            "#,
-            host,
-            provider,
-            username,
-            token_env,
-            secret_id,
-            now,
-        )
-        .execute(&mut *tx)
-        .await?;
-    }
-    tx.commit().await?;
     get_hub_settings(pool)
         .await?
         .ok_or_else(|| DbError::InvalidPayload("hub_settings row is missing".to_owned()))

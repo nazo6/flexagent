@@ -3,11 +3,6 @@
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
-use fxg_protocol::CommandId;
-use fxg_protocol::ipc::{
-    IPC_PROTOCOL_VERSION, IpcOutcome, IpcRequest, IpcRequestKind, IpcResultKind, IpcServerMessage,
-    LocalRequest, LocalResult,
-};
 use usage::{Args, Subcommands};
 
 /// `fxg internal <command>`
@@ -24,8 +19,6 @@ pub struct InternalArgs {
 pub enum InternalCommands {
     /// Standard I/O pipe (JSON Lines) transport for an ephemeral node
     Stdio(StdioArgs),
-    /// GIT_ASKPASS helper for the Git credential proxy
-    GitAskpass(GitAskpassArgs),
 }
 
 // ----------------------------------------------------------------------
@@ -125,83 +118,4 @@ fn effective_log_config(
     }
     log.no_color = args.no_color || global.log.no_color;
     log
-}
-
-// ----------------------------------------------------------------------
-// fxg internal git-askpass (GIT_ASKPASS helper)
-// ----------------------------------------------------------------------
-
-/// Arguments of `fxg internal git-askpass` (an internal command Git invokes as
-/// `GIT_ASKPASS`).
-#[derive(Debug, Args)]
-pub struct GitAskpassArgs {
-    /// Prompt string passed by Git (`Username for '...'` / `Password for '...'`)
-    prompt: String,
-}
-
-impl usage::RunAsync for GitAskpassArgs {
-    type Output = Result<()>;
-
-    async fn run_async(self) -> Self::Output {
-        let (username, token, error) = git_credential_via_ipc(&self.prompt).await?;
-        if let Some(error) = error {
-            anyhow::bail!("{error}");
-        }
-        let value = if fxg_node::credentials::prompt_wants_username(&self.prompt) {
-            username
-        } else {
-            token.context("no credential token is available for this prompt")?
-        };
-        println!("{value}");
-        Ok(())
-    }
-}
-
-/// Temporary IPC bridge for `fxg internal git-askpass`.
-///
-/// The askpass command is removed together with the credential proxy in the
-/// architecture simplification; until then it still talks to the daemon over
-/// local IPC while all normal CLI commands use HTTP.
-async fn git_credential_via_ipc(prompt: &str) -> Result<(String, Option<String>, Option<String>)> {
-    let command_id = CommandId::from(format!(
-        "cli-askpass-{}-{}",
-        std::process::id(),
-        fxg_protocol::util::uuid_v7()
-    ));
-    let request = IpcRequest {
-        protocol_version: IPC_PROTOCOL_VERSION,
-        request_id: command_id.clone(),
-        request: IpcRequestKind::Local {
-            request: LocalRequest::GitCredential {
-                command_id,
-                prompt: prompt.to_owned(),
-            },
-        },
-    };
-    let endpoint = fxg_node::ipc_endpoint(&fxg_protocol::config::process_env);
-    let mut client = fxg_node::IpcClient::connect(&endpoint)
-        .await
-        .with_context(|| format!("failed to connect to the node at {endpoint}"))?;
-    match client.request(&request).await? {
-        IpcServerMessage::Response {
-            outcome:
-                IpcOutcome::Ok {
-                    result:
-                        IpcResultKind::Local {
-                            result:
-                                LocalResult::GitCredential {
-                                    username,
-                                    token,
-                                    error,
-                                },
-                        },
-                },
-            ..
-        } => Ok((username, token, error)),
-        IpcServerMessage::Response {
-            outcome: IpcOutcome::Err { error },
-            ..
-        } => anyhow::bail!("{}: {}", error.code, error.message),
-        other => anyhow::bail!("unexpected ipc response: {other:?}"),
-    }
 }

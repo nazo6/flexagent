@@ -99,7 +99,6 @@ pub async fn run(
         }
         backoff = (backoff * 2).min(RECONNECT_MAX);
     }
-    state.credentials().detach();
     state.set_hub_connected(false);
     tracing::info!("outbox sync worker stopped");
 }
@@ -126,8 +125,6 @@ async fn connect_once(
 
     // Send queue (shared path for the PTY forwarder / command responses)
     let (out_tx, mut out_rx) = mpsc::channel::<NodeToHubMsg>(SEND_QUEUE_CAPACITY);
-    // Bind the Git credential proxy (the ephemeral VM's GIT_ASKPASS) to this connection
-    state.credentials().attach(out_tx.clone());
 
     // Subscribe to the bus before flushing to avoid missing events
     // (even if events included in the flush are duplicated by live delivery, the
@@ -611,21 +608,6 @@ pub(crate) async fn handle_server_message(
             if let Err(err) = state.pty().kill(&pty_id) {
                 tracing::debug!(pty_id, "remote pty kill failed: {err}");
             }
-        }
-        HubToNodeMsg::GitCredentialResponse {
-            request_id,
-            username,
-            token,
-            error,
-        } => {
-            state.credentials().complete(
-                &request_id,
-                crate::credentials::CredentialResponse {
-                    username,
-                    token,
-                    error,
-                },
-            );
         }
         HubToNodeMsg::DrainAndShutdown { reason } => {
             drain_and_shutdown(state, out, ctx, &reason).await;
