@@ -4,92 +4,114 @@
 
 ## 1. `fxg` CLI コマンド完全リファレンス
 
-CLI は曖昧な暗黙サブコマンド（`fxg <agent>` 短縮形）を設けず、すべて
-**`fxg run <agent>` 等の明示的なサブコマンド体系**に統一します。
+> **Status**: 本節は CLI 再編（`session` / `node` / `hub` 体系）後の仕様を先に定義したものです。実装は同じブランチで後続して行うため、現時点のバイナリのコマンドとは一部異なります。
 
-CLI のパースには **`usage-rs`**（`usage = { package = "usage-rs", version = "7.3",
-features = ["completions"] }`）を使用し、`#[derive(Cli)]` / `#[derive(Args)]` /
-`#[derive(Subcommands)]` + `Run` / `RunWith` でコマンドを定義します（`clap`
-は使用しない）。
-引数なしの **`fxg` 実行はデフォルトサブコマンドとして `fxg web` が実行**され、デーモンが未起動であれば自動でバックグラウンド起動し、トークン付きURLでブラウザを自動オープンします。
+CLI は曖昧な暗黙サブコマンド（`fxg <agent>` 短縮形）を設けず、**`fxg <noun> <verb>` の明示的な体系**に統一します。セッション操作は `session` に集約し、`run` / `ps` のような別名は置きません。プロセスは `node`（ローカル）と `hub`（中央）の2つだけにし、どちらも同じ `start` / `stop` / `restart` / `status` を持ちます。`service` は OS ログイン時の自動起動登録だけを担当し、起動・停止は `node` / `hub` に委譲します。
 
-`__usage_spec__` が出力する KDL spec を単一のソースとして、シェル補完（Bash /
-Zsh / Fish / PowerShell / Nushell）・manpage・Markdown リファレンスを `usage` CLI
-から生成し、本セクションのコマンドリファレンスと同期させます（`usage` CLI は
-`mise.toml` で固定）。
+CLI のパースには **`usage-rs`**（`usage = { package = "usage-rs", version = "7.3", features = ["completions"] }`）を使用し、`#[derive(Cli)]` / `#[derive(Args)]` / `#[derive(Subcommands)]` + `Run` / `RunWith` でコマンドを定義します（`clap` は使用しない）。引数なしの **`fxg` 実行はデフォルトサブコマンドとして `fxg web`（node の Web UI）が実行**され、node が未起動であれば自動でバックグラウンド起動し、トークン付きURLでブラウザを自動オープンします。
 
-Web UI をメインのインターフェースとするローカルファースト設計に基づき、`fxg` の CLI サブコマンドは日常的に使うコアコマンド（起動・セッション管理・デーモン/サーバー常駐サービス・認証・緊急停止）に厳選しています。Web UI 側で完結する管理機能（承認インボックス、論理プロジェクト一覧、Git Worktree一覧、ACPエージェント一覧、VMプロビジョナー一覧）は CLI サブコマンドを廃止し Web UI へ一本化されています（ACP エージェントのログイン/ログアウトだけは対話端末が必要なため `fxg agents login|logout` に残しています）。また、Git連携や一時VM起動等のシステム統合用コマンドは `fxg internal` 配下に集約し非表示 (`#[usage(hide)]`) としています。
+`__usage_spec__` が出力する KDL spec を単一のソースとして、シェル補完（Bash / Zsh / Fish / PowerShell / Nushell）・manpage・Markdown リファレンスを `usage` CLI から生成し、本セクションのコマンドリファレンスと同期させます（`usage` CLI は `mise.toml` で固定）。
 
-### 1.1 コマンド一覧ツリー
+Web UI をメインのインターフェースとするローカルファースト設計に基づき、`fxg` の CLI サブコマンドは日常的に使うコアコマンド（セッション起動・セッション管理・ノード/ハブのプロセス管理・OS常駐登録・認証・診断）に厳選しています。Web UI 側で完結する管理機能（承認インボックス、論理プロジェクト一覧、Git Worktree一覧、ACPエージェント一覧、VMプロビジョナー一覧）は CLI サブコマンドを廃止し Web UI へ一本化されています（ACP エージェントのログイン/ログアウトだけは対話端末が必要なため `fxg agents login|logout` に残しています）。また、Git連携や一時VM起動等のシステム統合用コマンドは `fxg internal` 配下に集約し非表示 (`#[usage(hide)]`) としています。
 
-| コマンド                                    | 説明                                                                                                                                                                              | 主なオプション / 引数                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| :------------------------------------------ | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **`fxg`** (引数なし) / **`fxg web`**        | デーモンを自動起動（未起動時）し、トークン付きURL (`http://127.0.0.1:7860/?token=...`) をデフォルトブラウザで開く（デフォルトサブコマンド）                                       | `--server`: ローカルノードではなく中央サーバーURLを開く（中央サーバー用トークンをローカルが持たない場合は、サーバー上の `auth_token` ファイル（既定: `~/.flexagent/auth_token`。Docker では `docker compose exec server cat /data/auth_token`）を初回入力ダイアログに入力）                                                                                                                                                                                                                                                                                                       |
-| **`fxg run <agent>`**                       | カレントディレクトリ（または指定Worktree/一時VM）で新規セッションを起動し、Web UI をブラウザで自動オープン                                                                        | `-p, --prompt <TEXT>`: 初期プロンプト送信<br/>`--attach <PATH>`: 画像/ファイルを添付 (繰り返し可)<br/>`-w, --worktree <BRANCH>`: Worktreeを作成/再利用して起動<br/>`--base <BRANCH>`: Worktree新規作成時のベースブランチ<br/>`--provisioner <NAME>`: 一時VM (`local-docker`, `colab-pro` 等) で起動（中央サーバーホスト上で起動。中央サーバー必須）<br/>`--mode <MODE>`: 初期モード (`code`, `plan` 等)<br/>`--no-open`: ブラウザ自動オープンを抑制<br/>`-d, --detach`: バックグラウンド起動しセッションIDを出力<br/>`-- <EXTRA_ARGS>...`: エージェントプロセスへのパススルー引数 |
-| **`fxg ps`**                                | 稼働中・最近のセッション一覧を表示（`fxg session list` のエイリアス）                                                                                                             | `-a, --all`: 停止済みセッションも含めて表示<br/>`--archived`: アーカイブ済みセッションも含めて表示<br/>`--project <ID>`: 論理プロジェクトIDでフィルタ<br/>`--node <ID>`: ノードIDでフィルタ<br/>`--json`: JSON形式で出力                                                                                                                                                                                                                                                                                                                                                          |
-| **`fxg session list`**                      | セッション一覧を表示（`fxg ps` と同一）                                                                                                                                           | `-a, --all`, `--archived`, `--project <ID>`, `--node <ID>`, `--json`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| **`fxg session show <id>`**                 | セッション詳細・状態・Worktreeパス・イベント統計を表示                                                                                                                            | `--json`: JSON形式で出力                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| **`fxg session diagnose <id>`**             | セッションの状態とエージェント stderr の末尾を表示                                                                                                                                | `--json`: JSON形式で出力                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| **`fxg logs`**                              | デーモンログ、または `--session` 指定時はそのセッションのエージェント stderr を表示                                                                                               | `--session <ID>`: セッションのエージェント stderr<br/>`-f, --follow`: 追記をフォロー<br/>`--lines <N>`: 表示行数 (既定 100)                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| **`fxg doctor`**                            | 設定・認証トークン・DB・ログ・git のローカル診断を実行                                                                                                                            | `--json`: JSON形式で出力                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| **`fxg diagnostics export`**                | 秘密情報を redaction したサポートバンドル（設定・DB統計・ヘルス・インシデント・ログ末尾）を出力                                                                                   | `-o, --output <PATH>`: 出力先 (省略時は `fxg-support-<epoch>.json`、`-` で stdout)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| **`fxg diagnostics incidents`**             | 永続化された障害インシデントを新しい順に一覧表示                                                                                                                                  | `--limit <N>`: 表示件数 (既定 50)<br/>`--all`: 解決済みも含む<br/>`--json`: JSON形式で出力                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| **`fxg session prompt <id> <text>`**        | 既存セッションへ非対話（ヘッドレス）でプロンプトを送信（停止済みセッションはネイティブ復元で自動再開。非対応エージェントは `RESUME_REQUIRED` となり `fxg session resume` が必要） | `--attach <PATH>`: 画像/ファイルを添付 (繰り返し可)<br/>`--wait`: ターン完了まで待機して出力を表示                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| **`fxg session stop <id>`**                 | 実行中ターンのキャンセル、またはセッションの正常停止                                                                                                                              | `--turn-only`: セッションは維持し現在のターンのみ中断                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| **`fxg session kill <id>`**                 | セッションの子プロセスツリー (Job Object) を強制終了                                                                                                                              | -                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| **`fxg session import <agent-session-id>`** | エージェント側の既存セッションをネイティブ復元で取り込む                                                                                                                          | `--agent <ID>` (必須)<br/>`--cwd <PATH>`: 作業ディレクトリ (既定: カレント)<br/>`--title <TITLE>`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| **`fxg session fork <id>`**                 | ACPネイティブの `session/fork` で現在のセッションを分岐して新規セッションを作成（同一エージェント・同一ノードのみ）                                                               | `-w, --worktree <BRANCH>`: 新規Worktreeへ分岐<br/>`--base <BRANCH>`: Worktree の分岐元<br/>`--no-open`: ブラウザ自動オープンを抑制<br/>`-d, --detach`: バックグラウンド起動                                                                                                                                                                                                                                                                                                                                                                                                       |
-| **`fxg session resume <id>`**               | 停止済みセッションを同じセッションIDのまま再開（ネイティブ復元優先。非対応エージェントは履歴 Replay で継続）し、Web UI をブラウザで自動オープン                                   | `--no-open`: ブラウザ自動オープンを抑制<br/>`-d, --detach`: バックグラウンド起動しセッションIDを出力<br/>`--replay`: ネイティブ復元を試みず履歴 Replay で継続                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| **`fxg session archive <id>`**              | セッションを一覧からアーカイブする（一覧から非表示。イベントログは保持され `unarchive` で復元可能）                                                                               | -                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| **`fxg session unarchive <id>`**            | アーカイブ済みセッションを一覧へ戻す                                                                                                                                              | -                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| **`fxg session delete <id>`**               | セッションを削除する（稼働中は停止してから会話ログ・承認履歴を消去。**復元不能**。Worktree のファイルは削除しない）                                                               | -                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| **`fxg agents login <id>`**                 | エージェントの ACP 認証方法を取得し、ログインする（terminal 型は対話実行、agent 型は `authenticate`）                                                                             | `--method <ID>`: 認証方法を明示（省略時は terminal 型を優先）                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| **`fxg agents logout <id>`**                | エージェントが `auth.logout` を広告している場合にログアウトする                                                                                                                   | -                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| **`fxg daemon`**                            | ノードデーモンをフォアグラウンド起動（任意でタスクトレイ常駐）                                                                                                                    | `--listen <ADDR>`: ローカルHTTP/WSバインド先 (既定 `127.0.0.1:7860`)<br/>`--server-url <WS_URL>`: 中央サーバーWS URL<br/>`--allow-remote-pty`: リモートからのWeb PTY起動を許可<br/>`--stdio`: 標準入出力パイプ (JSON Lines) モードで起動<br/>`--ephemeral`: 一時VMモード (自動Drain & Bundle退避有効)<br/>`--workspace <DIR>`: `--stdio` 時の初期対象ディレクトリ<br/>`--tray`: タスクトレイに常駐する (状態表示・自動起動の登録/解除・Web UI を開く・終了)<br/>`--no-tray`: `[node] tray = true` での常駐を一時的に無効化                                                        |
-| **`fxg server`**                            | 中央サーバーをフォアグラウンド起動                                                                                                                                                | `--listen <ADDR>`: バインド先 (既定 `0.0.0.0:8080`)<br/>`--port <PORT>`: ポート番号上書き                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| **`fxg service <action>`**                  | OSログイン時のバックグラウンド常駐サービス管理 (Win/Mac/Linux/WSL)                                                                                                                | `<action>`: `install` \| `uninstall` \| `start` \| `stop` \| `restart` \| `status`<br/>`--server`: `daemon` ではなく `server` を対象にする                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| **`fxg internal <subcommand>`**             | 内部・システム連携用隠しコマンド（`--help` には非表示）                                                                                                                           | `bootstrap-workspace`: 一時VM内の Zero-Touch 初期化 (`git clone` + `mise`/`uv` ツール自動導入、出力はすべて `stderr`)<br/>`git-askpass <PROMPT>`: `GIT_ASKPASS` ヘルパー (Git が引数に呼び出し、ローカルIPC 経由で Git Credential Proxy から資格情報を取得して 1 行出力)                                                                                                                                                                                                                                                                                                          |
-| **`fxg auth <action>`**                     | 認証トークンの表示・更新                                                                                                                                                          | `<action>`:<br/>`token`: クライアント認証トークン (`auth_token`) を表示<br/>`rotate-token`: `auth_token` を再生成<br/>`node-token issue <node-id>`: ノード個別トークンを発行・表示（中央サーバー上で実行。`nodes.token_hash` にハッシュを保存）<br/>`node-token revoke <node-id>`: ノード個別トークンを失効<br/>`node-token list`: 発行済みノードトークン一覧                                                                                                                                                                                                                     |
-| **`fxg kill-all`**                          | **【緊急停止】** 全ノードの稼働中セッション・子プロセスツリー・一時VM・PTYを即時強制終了                                                                                          | `--local-only`: 中央サーバーへ配信せずローカルノードのみ停止                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+### 1.1 設計原則
 
-### 1.2 代表的なCLI操作例
+- **用語**: ローカルプロセスは `node`、中央プロセスは `hub`。コマンド名・設定名に `daemon` / `server` / `central server` は使わない。
+- **セッション**: 作成・一覧・操作はすべて `fxg session ...`。`run` / `ps` は廃止。
+- **プロセス**: `fxg node start|stop|restart|status` と `fxg hub start|stop|restart|status`。前景起動が既定で、`--detach` でバックグラウンド起動。
+- **常駐**: `fxg service install [node|hub]` は OS ログイン時の登録のみ。unit が登録済みなら `node` / `hub` の各コマンドが systemd / launchd / Task Scheduler に委譲する。
+- **対象の指定**: フラグではなく位置引数（`fxg web hub`、`fxg logs hub`、`fxg service install hub`）。`--server` のような対象フラグは置かない。
+- **緊急停止**: 全ノード一斉の kill switch はハブの Web UI / `POST /api/v1/system/kill-switch` に一本化。CLI の `kill-all` は廃止し、ローカルでは `fxg node stop`（ノードごと停止）を使う。
+
+### 1.2 コマンド一覧
+
+| コマンド                                                                    | 説明                                                                                                                                               | 主なオプション / 引数                                                                                                                                                                                                                            |
+| :-------------------------------------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **`fxg`** (引数なし) / **`fxg web [node\|hub]`**                            | トークン付き URL (`http://127.0.0.1:7860/?token=...`) をデフォルトブラウザで開く（デフォルトサブコマンド）。`hub` を指定するとハブの Web UI を開く | 位置引数: `node` (既定) \| `hub`                                                                                                                                                                                                                 |
+| **`fxg session new <agent>`**                                               | カレントディレクトリ（または指定 Worktree / 一時VM）で新規セッションを起動し、Web UI をブラウザで自動オープン                                      | `-p, --prompt <TEXT>`<br/>`--attach <PATH>` (繰り返し可)<br/>`-w, --worktree <BRANCH>`<br/>`--base <BRANCH>`<br/>`--provisioner <NAME>`<br/>`--mode <MODE>`<br/>`--no-open`<br/>`-q, --quiet`: セッション ID だけを出力<br/>`-- <EXTRA_ARGS>...` |
+| **`fxg session list`**                                                      | 稼働中・最近のセッション一覧を表示                                                                                                                 | `-a, --all`<br/>`--archived`<br/>`--project <ID>`<br/>`--node <ID>`<br/>`--json`                                                                                                                                                                 |
+| **`fxg session show <id>`**                                                 | セッション詳細・状態・Worktree パス・イベント統計を表示                                                                                            | `--events <N>` (既定 20)<br/>`--json`                                                                                                                                                                                                            |
+| **`fxg session prompt <id> <text>`**                                        | 既存セッションへ非対話（ヘッドレス）でプロンプトを送信。停止済みはネイティブ復元で自動再開                                                         | `--attach <PATH>`<br/>`--wait`                                                                                                                                                                                                                   |
+| **`fxg session cancel <id>`**                                               | 実行中ターンだけをキャンセルし、セッションは維持                                                                                                   | -                                                                                                                                                                                                                                                |
+| **`fxg session stop <id>`**                                                 | セッションを正常停止                                                                                                                               | -                                                                                                                                                                                                                                                |
+| **`fxg session kill <id>`**                                                 | セッションの子プロセスツリー (Job Object) を強制終了                                                                                               | -                                                                                                                                                                                                                                                |
+| **`fxg session resume <id>`**                                               | 停止済みセッションを同じ ID のまま再開                                                                                                             | `--no-open`<br/>`-q, --quiet`<br/>`--replay`                                                                                                                                                                                                     |
+| **`fxg session fork <id>`**                                                 | ACP ネイティブの `session/fork` で分岐                                                                                                             | `-w, --worktree <BRANCH>`<br/>`--base <BRANCH>`<br/>`--no-open`<br/>`-q, --quiet`                                                                                                                                                                |
+| **`fxg session import <agent-session-id>`**                                 | エージェント側の既存セッションをネイティブ復元で取り込む                                                                                           | `--agent <ID>` (必須)<br/>`--cwd <PATH>`<br/>`--title <TITLE>`                                                                                                                                                                                   |
+| **`fxg session archive <id>` / `fxg session unarchive <id>`**               | 一覧からアーカイブ / 復元                                                                                                                          | -                                                                                                                                                                                                                                                |
+| **`fxg session delete <id>`**                                               | セッションを削除（会話ログ・承認履歴を消去。**復元不能**）                                                                                         | -                                                                                                                                                                                                                                                |
+| **`fxg node start`**                                                        | ローカルノードを前景起動（任意でタスクトレイ常駐）                                                                                                 | `--detach`<br/>`--tray` / `--no-tray`<br/>`--listen <ADDR>` (既定 `127.0.0.1:7860`)<br/>`--hub-url <WS_URL>`<br/>ログ系オプション                                                                                                                |
+| **`fxg node stop` / `fxg node restart`**                                    | ローカルノードを停止 / 再起動。service 登録済みなら supervisor に委譲                                                                              | -                                                                                                                                                                                                                                                |
+| **`fxg node status`**                                                       | ノードの稼働状態、service 登録、ハブ接続、未同期 Outbox、セッション数を表示                                                                        | `--json`                                                                                                                                                                                                                                         |
+| **`fxg node token show` / `fxg node token rotate`**                         | クライアント認証トークン (`auth_token`) の表示 / 再生成                                                                                            | -                                                                                                                                                                                                                                                |
+| **`fxg hub start`**                                                         | ハブを前景起動                                                                                                                                     | `--detach`<br/>`--listen <ADDR>` (既定 `0.0.0.0:8080`)<br/>`--port <PORT>`<br/>ログ系オプション                                                                                                                                                  |
+| **`fxg hub stop` / `fxg hub restart`**                                      | ハブを停止 / 再起動。service 登録済みなら supervisor に委譲                                                                                        | -                                                                                                                                                                                                                                                |
+| **`fxg hub status`**                                                        | ハブの稼働状態、service 登録、待受アドレス、バージョン、接続ノード数を表示                                                                         | `--json`                                                                                                                                                                                                                                         |
+| **`fxg hub node-token issue <node-id>` / `revoke <node-id>` / `list`**      | ノード個別トークンの発行・失効・一覧（ハブ上で実行）                                                                                               | -                                                                                                                                                                                                                                                |
+| **`fxg service install [node\|hub]` / `fxg service uninstall [node\|hub]`** | OS ログイン時の自動起動を登録 / 解除（既定 `node`）                                                                                                | 位置引数: `node` (既定) \| `hub`                                                                                                                                                                                                                 |
+| **`fxg logs [node\|hub]`**                                                  | ノードログ / ハブのログを表示。`--session` 指定時はそのセッションのエージェント stderr                                                             | 位置引数: `node` (既定) \| `hub`<br/>`--session <ID>` (node のみ)<br/>`-f, --follow`<br/>`--lines <N>`                                                                                                                                           |
+| **`fxg doctor`**                                                            | 設定・認証トークン・DB・ログ・git のローカル診断                                                                                                   | `--json`                                                                                                                                                                                                                                         |
+| **`fxg support bundle`**                                                    | 秘密情報を redaction したサポートバンドルを出力                                                                                                    | `-o, --output <PATH>`                                                                                                                                                                                                                            |
+| **`fxg support incidents`**                                                 | 永続化された障害インシデントを新しい順に一覧表示                                                                                                   | `--limit <N>`<br/>`--all`<br/>`--json`                                                                                                                                                                                                           |
+| **`fxg agents login <id>` / `fxg agents logout <id>`**                      | ACP エージェントの認証 / ログアウト（ローカルノード）                                                                                              | `--method <ID>`                                                                                                                                                                                                                                  |
+| **`fxg internal <subcommand>`**                                             | 内部・システム連携用隠しコマンド（`--help` には非表示）                                                                                            | `stdio`: 標準入出力パイプ (JSON Lines) の一時ノード (`--ephemeral` / `--workspace <DIR>`)<br/>`bootstrap-workspace`: 一時VM内の Zero-Touch 初期化<br/>`git-askpass <PROMPT>`: `GIT_ASKPASS` ヘルパー                                             |
+
+ハブの Web UI を開く場合、ハブの `auth_token`（`~/.flexagent/auth_token`。Docker では
+`docker compose exec hub cat /data/auth_token`）を初回入力ダイアログに入力します。
+
+`fxg session diagnose` は廃止しました。状態は `fxg session show`、エージェント stderr は `fxg logs --session <id>` で確認します。
+
+`fxg session prompt` は停止済みセッションをネイティブ復元で自動再開します。非対応エージェントは `RESUME_REQUIRED` を返すため、`fxg session resume <id> --replay` で履歴 Replay 再開してから送信してください。
+
+### 1.3 代表的な CLI 操作例
 
 ```bash
-# 1. エージェントの起動（カレントディレクトリで起動＆Web UI を自動オープン）
-fxg run claude -p "テストを修正して"             # 初期プロンプト付きで起動
-fxg run claude -p "この画面を直して" --attach shot.png  # 画像を添付して起動
-fxg run antigravity                              # ACP Registry の antigravity-acp を自動取得・起動
-fxg run claude -w feat/auth                    # ~/.flexagent/worktrees/<project>/feat-auth にWorktreeを作成して起動
-fxg run claude --provisioner colab-pro         # Google Colab Pro を一時VMとしてスポーンしセッション起動
-fxg run claude --provisioner local-incus       # ローカル隔離VM (Incus) をスポーンしセッション起動
-fxg run claude -- --model claude-sonnet-4      # エージェント固有のCLI引数をパススルー
-fxg run claude --no-open                       # ブラウザ自動オープンを抑制
+# 1. セッションの起動（カレントディレクトリで起動＆Web UI を自動オープン）
+fxg session new claude -p "テストを修正して"
+fxg session new claude -p "この画面を直して" --attach shot.png
+fxg session new antigravity
+fxg session new claude -w feat/auth
+fxg session new claude --provisioner colab-pro
+fxg session new claude -- --model claude-sonnet-4
+fxg session new claude --no-open
 
 # 2. セッション一覧・履歴操作
-fxg ps                                           # 現在稼働中・最近のセッション一覧を表示
-fxg session fork 0195f0...                        # 現在のセッションをACPネイティブForkで分岐
-fxg session resume 0195f0...                     # 停止したセッションを会話コンテキストを維持して再開
-fxg session archive 0195f0...                    # セッションを一覧からアーカイブ (復元可能)
-fxg session delete 0195f0...                     # セッションを削除 (会話ログを消去。復元不能)
+fxg session list
+fxg session fork 0195f0...
+fxg session resume 0195f0...
+fxg session cancel 0195f0...
+fxg session stop 0195f0...
+fxg session archive 0195f0...
+fxg session delete 0195f0...
 
-# 3. エージェント認証
-fxg agents login claude-code                     # ACP 認証方法を選んでログイン (terminal 型は対話実行)
-fxg agents logout claude-code                    # エージェントが auth.logout を広告していればログアウト
+# 3. エージェント認証・トークン
+fxg agents login claude-code
+fxg agents logout claude-code
+fxg node token show
+fxg hub node-token issue home-win
 
-# 4. デーモン・サーバー・常駐サービス・緊急停止
-fxg daemon --tray                                # デーモンをタスクトレイ常駐で起動
-fxg service install                              # OSログイン時のデーモン自動起動を設定
-fxg service status                               # デーモン状態・中央サーバー接続・未同期Outbox件数を確認
-fxg server --port 8080                           # 中央サーバーを起動
-fxg web                                          # トークン付きURLでブラウザを開く
-fxg kill-all                                     # 【緊急停止】全セッション・子プロセスツリー・PTYを強制終了
+# 4. ノード・ハブ・常駐サービス
+fxg node start --tray          # ノードをタスクトレイ常駐で前景起動
+fxg node status                # 稼働状態・ハブ接続・Outbox を確認
+fxg node stop                  # ノードを停止（全セッションも停止）
+fxg hub start --port 8080      # ハブを前景起動
+fxg hub status                 # ハブの稼働状態を確認
+fxg hub stop                   # ハブを停止
+fxg service install            # OS ログイン時のノード自動起動を登録
+fxg service install hub        # OS ログイン時のハブ自動起動を登録
+fxg web                        # ノードの Web UI を開く
+fxg web hub                    # ハブの Web UI を開く
+
+# 5. 診断
+fxg logs                       # ノードログ
+fxg logs hub                   # ハブのログ
+fxg logs --session 0195f0...   # セッションのエージェント stderr
+fxg doctor
+fxg support bundle -o /tmp/fxg-support.json
+fxg support incidents
 ```
 
-`fxg ps` / `fxg run` / `fxg session ...` などの IPC を使うコマンドは、デーモンが
-起動していない場合に `fxg daemon` をバックグラウンドで自動起動します
-(ログ: `~/.flexagent/logs/daemon.log`)。自動起動を無効化するには
-`FXG_NO_AUTO_DAEMON=1` を設定してください。`fxg daemon` をフォアグラウンドで
-起動している場合や、`fxg service` で常駐させている場合はそちらが優先されます。
+`fxg session ...` / `fxg web` などの IPC を使うコマンドは、ノードが起動していない場合に `fxg node start --detach` 相当で自動起動します（ログ: `~/.flexagent/logs/node.log`）。自動起動を無効化するには `FXG_NO_AUTO_NODE=1` を設定してください。`fxg node start` を前景で起動している場合や、`fxg service install` で常駐させている場合はそちらが優先されます。停止は `fxg node stop` です。
 
 ---
 
@@ -106,24 +128,24 @@ fxg kill-all                                     # 【緊急停止】全セッ�
 | `node.name` / `allow_remote_pty` / `project_scan_dirs` / `tray` | `node.db` (`node_settings`)                                                                 | Client API（ハブは対象ノードへプロキシ）       |
 | エージェント既定値・エイリアス・カスタム定義・npx/uvx 有効化    | `node.db` (`agent_settings` / `agent_aliases` / `custom_agents` / `enabled_package_agents`) | Client API                                     |
 | 明示的な `project_key`                                          | `node.db` (`project_path_links`)                                                            | Client API / Web UI                            |
-| VAPID subject・Git 認証・Provisioner・一時VM Bootstrap          | `server.db`                                                                                 | ハブ Web UI                                    |
-| 秘密の値                                                        | `~/.flexagent/secrets/{node,server}/<id>` (`0600`)                                          | Secret API（書き込み専用）                     |
+| VAPID subject・Git 認証・Provisioner・一時VM Bootstrap          | `hub.db`                                                                                    | ハブ Web UI                                    |
+| 秘密の値                                                        | `~/.flexagent/secrets/{node,hub}/<id>` (`0600`)                                             | Secret API（書き込み専用）                     |
 | 言語・テーマ・ピン留め                                          | ブラウザ `localStorage`                                                                     | Web UI                                         |
 
 ### 2.1 データディレクトリ構成 (`~/.flexagent/`)
 
 ```text
 ~/.flexagent/
-├── config.toml                 # 起動設定のみ (Node / Server / Log)
+├── config.toml                 # 起動設定のみ (Node / Hub / Log)
 ├── auth_token                  # Client 認証トークン (0600)
 ├── node_token                  # Node ペアリングトークン (0600)
-├── vapid.json                  # Web Push VAPID 秘密鍵 (Server用, 0600)
+├── vapid.json                  # Web Push VAPID 秘密鍵 (Hub用, 0600)
 ├── node.db                     # ノード所有の設定 + セッション正データ
-├── server.db                   # サーバー所有の設定 + プロジェクト投影
+├── hub.db                      # ハブ所有の設定 + プロジェクト投影
 ├── cache/registry.json         # ACP Registry キャッシュ
 ├── secrets/
 │   ├── node/<secret-id>        # ノード所有の秘密値 (0600)
-│   └── server/<secret-id>      # サーバー所有の秘密値 (0600)
+│   └── hub/<secret-id>         # ハブ所有の秘密値 (0600)
 └── worktrees/<project>/<branch>/  # 固定の Worktree 作成先
 ```
 
@@ -133,22 +155,22 @@ fxg kill-all                                     # 【緊急停止】全セッ�
 [node]
 node_id = "home-win"
 listen_addr = "127.0.0.1:7860"
-central_server_url = "ws://100.64.0.10:8080/api/v1/node/ws"
+hub_url = "ws://100.64.0.10:8080/api/v1/node/ws"
 
-[server]
+[hub]
 listen_addr = "0.0.0.0:8080"
 allowed_hosts = ["home-server.tailnet-xxxx.ts.net:8080"]
 allowed_origins = ["https://home-server.tailnet-xxxx.ts.net"]
 
 [log]
 level = "info"
-file = "logs/daemon.log"
+file = "logs/node.log"
 format = "text"
 no_color = false
 ```
 
 `node.name` / `allow_remote_pty` / `project_scan_dirs` / `tray`、`[agents]`、
-`[provisioners]`、`[server.git_credentials]`、`vapid_subject` は `config.toml`
+`[provisioners]`、`[hub.git_credentials]`、`vapid_subject` は `config.toml`
 から削除されました。Web UI の設定カタログは現在値と出所
 (`config.toml` / `env` / `cli` / `default`) を読み取り専用で表示します。
 
@@ -156,10 +178,10 @@ no_color = false
 
 - Worktree の作成先は `~/.flexagent/worktrees/{project}/{branch}` に固定です。
   `dir_template` / `copy_files` / `post_create` / `--path` は廃止しました。
-  Worktree の作成は Web UI、または `fxg run <agent> -w <branch> [--base <branch>]`
+  Worktree の作成は Web UI、または `fxg session new <agent> -w <branch> [--base <branch>]`
   / `fxg session fork <id> -w <branch>` から行います。
-- 一時VMの初期化は `server.db` の `project_profiles`
-  (`bootstrap_setup` / `bootstrap_env`) が所有します。サーバーは
+- 一時VMの初期化は `hub.db` の `project_profiles`
+  (`bootstrap_setup` / `bootstrap_env`) が所有します。ハブは
   `FXG_PROJECT_PROFILE_B64` を注入し、`fxg internal bootstrap-workspace` は
   `--profile <path>` またはこの環境変数から `ProjectProfile` を読み取ります。
   ツール検出はリポジトリ内の `mise.toml` / `.tool-versions` / マニフェストのみを
@@ -189,7 +211,7 @@ PCブラウザ、ローカルフォールバック (`localhost:7860`)、およ�
     (モバイルの片手操作・ボトムシートUIと、デスクトップのマルチペインUIをレスポンシブ切替)
 - **状態管理 & 同期**: Svelte 5 Runes (`$state`, `$derived` を用いた
   `*.svelte.ts` クラスベースのカスタム WebSocket 差分同期ストア /
-  **接続先ストア**（中央サーバー / ローカルノード）の `cursor` を保存し、
+  **接続先ストア**（ハブ / ローカルノード）の `cursor` を保存し、
   再接続時に `Subscribe { since_cursor }` で差分再開する。**DB
   再作成・リセット時はカーソルの巻き戻りを検知してタイムラインを破棄し、
   0 から全量を再同期する**。 イベントは `event_id`
@@ -239,7 +261,7 @@ PCブラウザ、ローカルフォールバック (`localhost:7860`)、およ�
    - **ヘッダー**: 実行ノード名（例: `Home-Win` または
      `Colab Pro [Ephemeral]`）、接続状態、バインドされているWorktree（例:
      `feat/auth`）を常時表示。あわせて **同期状態バッジ**（未同期イベント件数 /
-     最終同期時刻。中央サーバー停止中は Outbox 残数を明示）を表示する。
+     最終同期時刻。ハブ停止中は Outbox 残数を明示）を表示する。
      Composer
      からの送信時は、ネイティブ復元対応エージェントなら停止済みセッションでも
      自動で再開して送信される（**Resume
@@ -262,7 +284,7 @@ PCブラウザ、ローカルフォールバック (`localhost:7860`)、およ�
          Queue）。
      - **Diff ペイン (2段階スコープ切替)**:
        - **「セッションの変更 (This Session)」**:
-         このセッションでエージェントが編集したファイル一覧とDiff（ノードがオフラインでも中央サーバーから100%閲覧可能）。
+         このセッションでエージェントが編集したファイル一覧とDiff（ノードがオフラインでもハブから100%閲覧可能）。
        - **「ノードのGit作業ツリー (Worktree Diff)」**:
          ノードにリアルタイム問い合わせる最新差分。
          - `(●) vs Base (main...HEAD)`:
@@ -284,7 +306,7 @@ PCブラウザ、ローカルフォールバック (`localhost:7860`)、およ�
        (エージェントが返す
        `name`) に揃え、未選択時は「既定」を表示する。
 4. **接続先スイッチャー（耐障害性サポート）**:
-   - 通常は中央サーバーへ接続しますが、万が一中央サーバーがダウンしている場合は、画面上部のバナーから登録済みの各ノードのローカルWeb
+   - 通常はハブへ接続しますが、万が一ハブがダウンしている場合は、画面上部のバナーから登録済みの各ノードのローカルWeb
      UI（`http://localhost:7860`）へワンタップで接続先を切り替え。
 5. **緊急キルスイッチ & セキュリティ設定**:
    - 画面ヘッダーに常時表示される **「緊急停止 (Kill Switch)」**
@@ -315,11 +337,11 @@ PCブラウザ、ローカルフォールバック (`localhost:7860`)、およ�
 - **Service Worker (`src/service-worker.ts` / `$service-worker`)**:
   1. **App Shell キャッシュ**: SvelteKit 標準の `$service-worker`
      モジュール（`build`, `files`,
-     `version`）を用いてHTML/JS/CSSをキャッシュし、モバイル回線が不安定な場所や中央サーバー障害時でもUIが即座に立ち上がるようにします。
+     `version`）を用いてHTML/JS/CSSをキャッシュし、モバイル回線が不安定な場所やハブ障害時でもUIが即座に立ち上がるようにします。
      ナビゲーションはネットワーク優先 (オフライン時のみ `index.html`
      へフォールバック) で、
      `/api/**` は常にネットワークへ素通しします。
-  2. **Web Push 受信 & アクションボタン**: 中央サーバーからVAPID Web
+  2. **Web Push 受信 & アクションボタン**: ハブからVAPID Web
      Pushを受信した際、Android通知バナーに以下を表示します：
      - タイトル: `[flexagent] 承認リクエスト (Home-Win)`
      - 本文: `claude: Run "cargo test --workspace"`
@@ -333,7 +355,7 @@ PCブラウザ、ローカルフォールバック (`localhost:7860`)、およ�
 
      Push ペイロードは `PushNotificationPayload`
      (`title` / `body` / `session_id` / `request_id` / `tag` /
-     `allow_option_id` / `reject_option_id`) で、VAPID 鍵は中央サーバーが
+     `allow_option_id` / `reject_option_id`) で、VAPID 鍵はハブが
      `~/.flexagent/vapid.json` に自動生成・永続化します (暗号化は RFC 8291
      aes128gcm / 署名は RFC 8292)。購読は通知許可→`pushManager.subscribe`→
      `POST /api/v1/push/subscribe` の順で確立し、失効した購読 (Push
@@ -398,19 +420,19 @@ export interface ITerminalAdapter {
 の対応は各見出しの括弧書きのとおりです （Milestone 1 は計画の Phase 1〜2
 にまたがり、Milestone 2〜3 はともに Phase 3 に対応）。
 
-### Milestone 1: コアプロトコル・DB・ローカルデーモン基盤 & セキュリティ基礎 (実装計画 Phase 1〜2 対応)
+### Milestone 1: コアプロトコル・DB・ローカルノード基盤 & セキュリティ基礎 (実装計画 Phase 1〜2 対応)
 
 - [x] Cargo Workspace の構築 (`fxg-protocol`, `fxg-db`, `fxg-pty`, `fxg-acp`,
-      `fxg-node`, `fxg-server`, `fxg-cli`) および `mise.toml` タスク定義
+      `fxg-node`, `fxg-hub`, `fxg-cli`) および `mise.toml` タスク定義
       (Phase 1 完了: `mise run check` / `types` / `sqlx:prepare` 等)
-- [x] `node.db` / `server.db` のSQLiteマイグレーション実装
+- [x] `node.db` / `hub.db` のSQLiteマイグレーション実装
       (Phase 1 完了: 単一スキーマ + FTS5 trigram + 投影エンジン。実装は
       `crates/fxg-db/`)
 - [ ] Git Remote URL正規化による論理プロジェクト解決 (Web UI のプロジェクト画面)
-- [ ] Windows Named Pipe / Unix Domain Socket による `fxg` CLI ⇔ `fxg daemon`
+- [ ] Windows Named Pipe / Unix Domain Socket による `fxg` CLI ⇔ `fxg node`
       ローカルIPC疎通
 - [ ] **セキュリティ基礎**:
-  - [ ] `fxg daemon` ローカルAPIの `127.0.0.1:7860`（ループバック）厳格バインド
+  - [ ] `fxg node` ローカルAPIの `127.0.0.1:7860`（ループバック）厳格バインド
   - [ ] 認証トークン生成・永続化 (`~/.flexagent/auth_token`)
   - [ ] Axum ミドルウェアによる `Host` ヘッダ検証 (DNS Rebinding 対策)
   - [ ] WebSocket ハンドシェイク時の `Origin` ヘッダ検証 (CSWSH 対策)
@@ -423,7 +445,7 @@ export interface ITerminalAdapter {
       `binary` / `npx` / `uvx` 起動実装
 - [ ] `agent-client-protocol` クレートを用いた `AcpDriver` 実装（`fs/*`,
       `terminal/*`, `request_permission`, `AvailableCommand` 対応）
-- [ ] `fxg run <agent>` でセッションを起動し、Web UI
+- [ ] `fxg session new <agent>` でセッションを起動し、Web UI
       が自動オープンされる状態にする
 
 ### Milestone 3: 未登録エージェントのローカルコマンド解決 (実装計画 Phase 3 対応)
@@ -431,18 +453,18 @@ export interface ITerminalAdapter {
 - [ ] `which` によるシステムの `PATH` 探索と未登録エージェントの自動起動
 - [ ] ACP stdio 直結による `AcpDriver` 対話動作
 
-### Milestone 4: 中央サーバー & Store-and-Forward 同期 & セキュリティ (実装計画 Phase 4 対応)
+### Milestone 4: ハブ & Store-and-Forward 同期 & セキュリティ (実装計画 Phase 4 対応)
 
-- [x] `fxg server` の Axum WebSocket Hub 実装
-- [x] `fxg daemon` の Outbox Sync Worker 実装（中央サーバーへのOutbound
+- [x] `fxg hub` の Axum WebSocket Hub 実装
+- [x] `fxg node` の Outbox Sync Worker 実装（ハブへのOutbound
       WS接続、切断時のローカル蓄積と再接続時の一括同期）
-- [x] 中央サーバー経由でのリモートコマンドルーティング（`StartSession`,
+- [x] ハブ経由でのリモートコマンドルーティング（`StartSession`,
       `SendPrompt`, `RespondPermission`）
 - [x] **LAN/VPNセキュリティ & 統制**:
-  - [x] Node ⇔ Server 間のペアリングトークン (`node_token`) 認証
+  - [x] Node ⇔ Hub 間のペアリングトークン (`node_token`) 認証
   - [x] `audit_logs` テーブルへの操作監査ログ記録
   - [x] 緊急キルスイッチ (`POST /api/v1/system/kill-switch` /
-        `ServerToNodeMsg::KillAllSessions`) の配信・プロセスツリー即時終了
+        `HubToNodeMsg::KillAllSessions`) の配信・プロセスツリー即時終了
   - [x] ノード設定 `allow_remote_pty` によるWeb PTYリモート起動拒否ハンドリング
 
 ### Milestone 5: 共通 Web UI / Android PWA & Web Push (実装計画 Phase 5 対応)
@@ -468,33 +490,33 @@ export interface ITerminalAdapter {
       VAPID Push通知（Androidバックグラウンド通知＆バナー承認）の実装
 - [x] `fxg service install` による各OS自動起動設定の実装
 
-### Milestone 6: 一時VM・サンドボックスノード (`fxg daemon --stdio` & Zero-Touch Provisioner) (実装計画 Phase 6 対応)
+### Milestone 6: 一時VM・サンドボックスノード (`fxg internal stdio` & Zero-Touch Provisioner) (実装計画 Phase 6 対応)
 
-- [x] `fxg daemon --stdio --ephemeral` による標準入出力パイプ（JSON
+- [x] `fxg internal stdio --ephemeral` による標準入出力パイプ（JSON
       Lines）トランスポート実装
-  - `stdin` = `ServerToNodeMsg` / `stdout` = `NodeToServerMsg`
+  - `stdin` = `HubToNodeMsg` / `stdout` = `NodeToHubMsg`
     （1行1メッセージ）。ログ (`tracing`) は `stderr` のみに出力し、`stdout`
     をプロトコル専用として保護する。`--workspace <DIR>`
     はクローン済みワークスペースをプロジェクトとして登録し、`StartSession` の
     `local_path` をそのディレクトリに固定する。
-- [x] `fxg server` のコマンドテンプレート型プロビジョナー管理（Docker / Rootless
+- [x] `fxg hub` のコマンドテンプレート型プロビジョナー管理（Docker / Rootless
       Podman / Incus VM / `google-colab-cli` の子プロセス起動と `stderr`
       ブートストラップ進捗配信）
   - `{BOOTSTRAP_SCRIPT}` / `{INSTANCE_NAME}` / `{SESSION_ID}`
     を置換し、`FXG_NODE_ID` / `FXG_GIT_URL` / `FXG_GIT_BRANCH` / 短命
-    `FXG_GIT_TOKEN` を注入。`stderr` は `ServerWsMessage::BootstrapLog`
+    `FXG_GIT_TOKEN` を注入。`stderr` は `HubWsMessage::BootstrapLog`
     として UI へエフェメラル配信する。
 - [x] `fxg internal bootstrap-workspace` の実装（`mise` / `uv`
       単一バイナリの自動取得と、リポジトリ設定ファイルからの完全ステートレスなツール自動構築）
   - `Cargo.toml` / `package.json` / `pyproject.toml` / `mise.toml` /
     `.tool-versions` / `.fxg.toml [bootstrap]`（`.fxg.toml` は廃止。現在は
-    `server.db.project_profiles` の `bootstrap_setup` / `bootstrap_env`）
+    `hub.db.project_profiles` の `bootstrap_setup` / `bootstrap_env`）
     からツールを検出して導入し、`$FXG_HOME/bootstrap.env`
-    に PATH と環境変数を書き出す（生成スクリプトが `exec fxg daemon --stdio`
+    に PATH と環境変数を書き出す（生成スクリプトが `exec fxg internal stdio`
     の直前に `source` する）。出力はすべて `stderr`。
 - [x] `GIT_ASKPASS` + `GitCredentialRequest`
       パイププロキシによる一時VM内への秘密鍵・トークン非保持化
-  - ブートストラップ中は短命トークンを echo する専用ヘルパー、デーモン起動後は
+  - ブートストラップ中は短命トークンを echo する専用ヘルパー、ノード起動後は
     `fxg internal git-askpass`（ローカルIPC）→ `GitCredentialRequest`
     でオンメモリ中継する。
 - [x] `DrainAndShutdown` による一時VM破棄前の未送信イベント完全フラッシュ

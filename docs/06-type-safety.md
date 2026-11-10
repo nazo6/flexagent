@@ -1,7 +1,7 @@
 # 型安全性ガイド (`serde_json::Value` / 文字列判定の禁止)
 
 - **日付**: 2026-11-08
-- **対象**: `fxg-protocol`, `fxg-db`, `fxg-acp`, `fxg-node`, `fxg-server`,
+- **対象**: `fxg-protocol`, `fxg-db`, `fxg-acp`, `fxg-node`, `fxg-hub`,
   `fxg-cli`, `ui`
 - **関連**: [`docs/changelog/2026-11-08-type-safety-plan.md`](./changelog/2026-11-08-type-safety-plan.md)
 
@@ -9,7 +9,7 @@
 
 ## 1. 目的
 
-FlexAgent は Node ⇔ Server ⇔ Client の3経路で同じイベントと REST 型を運ぶ。
+FlexAgent は Node ⇔ Hub ⇔ Client の3経路で同じイベントと REST 型を運ぶ。
 ここで `String` の意味判定や生 JSON のフィールドアクセスが混ざると、次の問題が起きる。
 
 - エージェントやピアの新しい値が「既定値」に丸められ、データが失われる。
@@ -170,8 +170,8 @@ impl PermissionOptionKind {
 設定 API / WebSocket に汎用 Key-Value (`SettingKey(String)` + `SettingValue`) を
 作らない。所有者ごとの型付き構造体をそのまま送受信する。
 
-- `NodeSettingsSnapshot` / `ServerSettingsSnapshot` / `NodeSettings` /
-  `AgentSettings` / `ServerSettings` / `SecretSummary` / `ProjectProfile`
+- `NodeSettingsSnapshot` / `HubSettingsSnapshot` / `NodeSettings` /
+  `AgentSettings` / `HubSettings` / `SecretSummary` / `ProjectProfile`
 - `ConfigSource` / `ProjectIdentityKind` / `SecretKind` は `open_string_enum!`
 - `SecretId` は ID newtype（`is_valid()` でファイル名として安全か検証）
 - `SourcedValue<T>` は起動設定の値と出所 (`ConfigSource` + `source_detail`) を

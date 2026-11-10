@@ -1,7 +1,7 @@
 # 01. 全体アーキテクチャ・同期モデル・一時VM・プロジェクト解決
 
 本ドキュメントでは、FlexAgent (`fxg`)
-の通信トポロジー、中央サーバー停止時にも機能するローカルファースト同期（Store-and-Forward）、ネットワーク非依存の一時VM・サンドボックスノード（`fxg daemon --stdio`）、および異なるPC・OS間で同じプロジェクトとして認識する仕組みを定義します。
+の通信トポロジー、ハブ停止時にも機能するローカルファースト同期（Store-and-Forward）、ネットワーク非依存の一時VM・サンドボックスノード（`fxg internal stdio`）、および異なるPC・OS間で同じプロジェクトとして認識する仕組みを定義します。
 
 ---
 
@@ -12,25 +12,25 @@ flowchart TB
     subgraph Clients["クライアント群"]
         AndroidPWA["Android PWA<br/>(Web Push + WS)"]
         Browser["PC Browser / PWA"]
-        CLI["fxg CLI<br/>(`fxg run` 等)"]
+        CLI["fxg CLI<br/>(`fxg session new` 等)"]
     end
 
-    subgraph Central["中央サーバー (`fxg server`) - LAN / VPN限定"]
-        Hub["Axum HTTP / WS Hub (:8080)<br/>(Auth Token / Origin検証)"]
+    subgraph HubGroup["ハブ (`fxg hub`) - LAN / VPN限定"]
+        HubAPI["Axum HTTP / WS Server (:8080)<br/>(Auth Token / Origin検証)"]
         Prov["Stdio Node Provisioner<br/>(docker / incus / colab / ssh)"]
         Push["Web Push (VAPID) Sender"]
-        ServerDB[("server.db (SQLite)<br/>node.db と同一スキーマ")]
-        Hub --> ServerDB
-        Hub --> Push
-        Hub <--> Prov
+        HubDB[("hub.db (SQLite)<br/>node.db と同一スキーマ")]
+        HubAPI --> HubDB
+        HubAPI --> Push
+        HubAPI <--> Prov
     end
 
-    subgraph Node["常駐ノード (`fxg daemon` on Win / Mac / Linux / WSL)"]
+    subgraph Node["常駐ノード (`fxg node start` on Win / Mac / Linux / WSL)"]
         LocalAPI["Local HTTP/WS Server (:7860)<br/>(127.0.0.1 ループバック専用 + Token)"]
         LocalIPC["Local IPC Server<br/>(Named Pipe / Unix Socket)"]
         SyncWorker["Outbox Sync Worker<br/>(Outbound WS Client)"]
         SessionMgr["Session & Agent Manager"]
-        NodeDB[("node.db (SQLite)<br/>server.db と同一スキーマ")]
+        NodeDB[("node.db (SQLite)<br/>hub.db と同一スキーマ")]
 
         LocalIPC --> SessionMgr
         LocalAPI --> SessionMgr
@@ -39,55 +39,55 @@ flowchart TB
     end
 
     subgraph EphemeralNode["一時VM / サンドボックスノード (Docker / Incus / Colab Pro)"]
-        EphDaemon["fxg daemon --stdio --ephemeral"]
+        EphNode["fxg internal stdio --ephemeral"]
         EphAgent["Session & Agent Manager<br/>(+ mise / uv 自動ツール環境)"]
-        EphDaemon <--> EphAgent
+        EphNode <--> EphAgent
     end
 
     CLI <-->|"1. Named Pipe / UDS (最優先・超低遅延)"| LocalIPC
-    Browser <-->|"2a. 通常時: LAN中央サーバー接続 (:8080)"| Hub
+    Browser <-->|"2a. 通常時: LANハブ接続 (:8080)"| HubAPI
     Browser -.->|"2b. 障害時・同一PCローカル直結 (127.0.0.1:7860)"| LocalAPI
-    AndroidPWA <-->|"LAN / VPN (Tailscale等) 経由 WS / Push"| Hub
-    SyncWorker ===>|"3a. 常駐ノード: 常時接続 Outbound WS"| Hub
-    Prov <==>|"3b. 一時ノード: 子プロセス stdin/stdout パイプ (JSON Lines)<br/>(VPN・ポート開放・ネットワーク設定一切不要)"| EphDaemon
+    AndroidPWA <-->|"LAN / VPN (Tailscale等) 経由 WS / Push"| HubAPI
+    SyncWorker ===>|"3a. 常駐ノード: 常時接続 Outbound WS"| HubAPI
+    Prov <==>|"3b. 一時ノード: 子プロセス stdin/stdout パイプ (JSON Lines)<br/>(VPN・ポート開放・ネットワーク設定一切不要)"| EphNode
 ```
 
 ### 各モードの起動方法（単一バイナリ `fxg`）
 
-- **中央サーバー**: 自宅LAN内の常時稼働マシンやミニPC等で
-  `fxg server --port 8080`
+- **ハブ**: 自宅LAN内の常時稼働マシンやミニPC等で
+  `fxg hub start --port 8080`
   を起動（LANまたはプライベートVPN内のみ公開し、パブリック露出は行わない）。
-- **常駐ノードデーモン**: 各開発マシン（Windows, Mac, Linux, WSL）で
-  `fxg daemon` を常駐（デフォルトで `127.0.0.1:7860`
+- **常駐ノード**: 各開発マシン（Windows, Mac, Linux, WSL）で
+  `fxg node start` を常駐（デフォルトで `127.0.0.1:7860`
   のローカルループバックのみバインド）。
-- **一時VM / サンドボックスノード**: 中央サーバーが Docker / Incus / Google
+- **一時VM / サンドボックスノード**: ハブが Docker / Incus / Google
   Colab (`google-colab-cli`)
   等のコマンドを子プロセスとしてスポーンし、その標準入出力パイプ上で
-  `fxg daemon --stdio --ephemeral` を直結起動（CLI の `--provisioner`
-  も中央サーバーの API 経由で要求されるため、中央サーバー必須）。
-- **CLI**: 開発者がターミナルで `fxg run <agent>` を実行。
+  `fxg internal stdio --ephemeral` を直結起動（CLI の `--provisioner`
+  もハブの API 経由で要求されるため、ハブ必須）。
+- **CLI**: 開発者がターミナルで `fxg session new <agent>` を実行。
 
 ---
 
 ## 2. ローカルファースト & Store-and-Forward 同期プロトコル
 
-中央サーバーが単一障害点（SPOF）になることを防ぐため、**すべてのセッション状態とイベントの一次ソース（Primary
-Source of Truth）は実行中のノード (`node.db`)** に置きます。中央サーバー
-(`server.db`) は全ノードの複製兼ルーティングハブとして機能します。
+ハブが単一障害点（SPOF）になることを防ぐため、**すべてのセッション状態とイベントの一次ソース（Primary
+Source of Truth）は実行中のノード (`node.db`)** に置きます。ハブ
+(`hub.db`) は全ノードの複製兼ルーティングハブとして機能します。
 
 この構造は「**スキーマ1本・ログ1本・権威1つ**」の3原則で運用します
 （スキーマ詳細は [`docs/02-database-schema.md`](./02-database-schema.md)）：
 
-1. **スキーマは1本**: `node.db` と `server.db` は同一DDL・同一テーブル名・単一の
+1. **スキーマは1本**: `node.db` と `hub.db` は同一DDL・同一テーブル名・単一の
    マイグレーションセットを共有し、違いは「行のスコープ」と「実行ロール」のみ。
    スキーマ対称性は規約ではなく単一定義で保証する。
 2. **同期はイベントログ1本**:
    セッションのメタデータ（作成・タイトル・ステータス・モード）も
-   `session_events` 上のイベントとして記録し、中央サーバーの `sessions` /
+   `session_events` 上のイベントとして記録し、ハブの `sessions` /
    `permission_requests` はイベントから適用される**投影（projection）** とする。
    `SessionUpsert` のような別系統のメタデータ同期は行わない。
 3. **書き込み権威は1つ**: セッション状態を書き換えられるのは**実行ノードのみ**。
-   中央サーバーはコマンド転送とイベント追記・投影適用のみを行い、セッション状態を
+   ハブはコマンド転送とイベント追記・投影適用のみを行い、セッション状態を
    クライアント要求に応じて直接書き換えない。
 
 ### 2.1 イベントID・順序・カーソルの設計
@@ -102,7 +102,7 @@ Source of Truth）は実行中のノード (`node.db`)** に置きます。中�
 - `cursor`: `session_events.cursor` (AUTOINCREMENT)
   が持つ**そのDBへの取り込み順の連番**。 クライアント（CLI / Web
   UI）の差分再開カーソルとして使用する。`node.db` を購読していれば `node.db` の
-  cursor、`server.db` を購読していれば `server.db` の cursor が基準となる
+  cursor、`hub.db` を購読していれば `hub.db` の cursor が基準となる
   （**接続先ストア以外の cursor は意味を持たない**）。
 - `created_at`: ノード側のローカル時計（Unix epoch
   ms）で記録。複数ノード横断の並び（承認Inbox等）は NTP
@@ -120,48 +120,48 @@ Source of Truth）は実行中のノード (`node.db`)** に置きます。中�
 ```mermaid
 sequenceDiagram
     participant Agent as ACP Agent
-    participant Daemon as fxg daemon (Node)
+    participant Node as fxg node
     participant NodeDB as node.db (SQLite)
     participant LocalClient as Local CLI / Local UI
-    participant Server as fxg server (Central)
+    participant Hub as fxg hub
     participant RemotePWA as Android / Web PWA
 
-    Agent->>Daemon: SessionUpdate (ストリーミング出力)
-    Daemon->>NodeDB: INSERT session_events (node_seq=N) + sessions 更新
-    Daemon->>LocalClient: 即座にIPC / Local WSへ配信 (遅延ゼロ)
+    Agent->>Node: SessionUpdate (ストリーミング出力)
+    Node->>NodeDB: INSERT session_events (node_seq=N) + sessions 更新
+    Node->>LocalClient: 即座にIPC / Local WSへ配信 (遅延ゼロ)
 
-    alt 中央サーバー接続中 (Online)
-        Daemon->>Server: WS: EventBatchPush (synced_up_to_node_seq より後のイベント)
-        Server->>Server: INSERT OR IGNORE into server.db (cursor採番)<br/>+ sessions / permission_requests 投影を同一Txで更新
-        Server->>RemotePWA: WS Broadcast (または Web Push通知)
-        Server-->>Daemon: WS: EventBatchAck (session_id, acked_up_to_node_seq=N)
-        Daemon->>NodeDB: UPDATE sessions SET synced_up_to_node_seq = N
-    else 中央サーバー停止・オフライン (Offline)
-        Note over Daemon,NodeDB: 未ACK分は node.db に蓄積<br/>ローカルCLI / localhost:7860 は通常通り稼働
+    alt ハブ接続中 (Online)
+        Node->>Hub: WS: EventBatchPush (synced_up_to_node_seq より後のイベント)
+        Hub->>Hub: INSERT OR IGNORE into hub.db (cursor採番)<br/>+ sessions / permission_requests 投影を同一Txで更新
+        Hub->>RemotePWA: WS Broadcast (または Web Push通知)
+        Hub-->>Node: WS: EventBatchAck (session_id, acked_up_to_node_seq=N)
+        Node->>NodeDB: UPDATE sessions SET synced_up_to_node_seq = N
+    else ハブ停止・オフライン (Offline)
+        Note over Node,NodeDB: 未ACK分は node.db に蓄積<br/>ローカルCLI / localhost:7860 は通常通り稼働
     end
 
-    Note over Daemon,Server: --- 中央サーバー復旧・WebSocket再接続 ---
-    Daemon->>Server: WS: NodeHello (SessionSyncState 一覧を報告)
-    Server-->>Daemon: WS: ResyncRequest (ハブ側で欠落・遅延のあるセッションのみ)
-    Daemon->>Server: WS: EventBatchPush (synced_up_to_node_seq より後のイベントを一括送信)
-    Server-->>Daemon: WS: EventBatchAck
-    Daemon->>NodeDB: UPDATE sessions SET synced_up_to_node_seq = N
+    Note over Node,Hub: --- ハブ復旧・WebSocket再接続 ---
+    Node->>Hub: WS: NodeHello (SessionSyncState 一覧を報告)
+    Hub-->>Node: WS: ResyncRequest (ハブ側で欠落・遅延のあるセッションのみ)
+    Node->>Hub: WS: EventBatchPush (synced_up_to_node_seq より後のイベントを一括送信)
+    Hub-->>Node: WS: EventBatchAck
+    Node->>NodeDB: UPDATE sessions SET synced_up_to_node_seq = N
 ```
 
 ### 2.3 ストリーミングチャンクの配信と永続化（Compaction）方針
 
 思考過程やメッセージ生成のトークン単位チャンク（`AgentMessage`,
 `AgentThought`）を1トークンずつSQLiteへ `INSERT`
-するとディスクI/OとDBサイズが増大するため、`fxg daemon`
+するとディスクI/OとDBサイズが増大するため、`fxg node`
 は「配信」と「永続化」を分離して処理します：
 
 1. **メモリ上のリアルタイム配信（全チャンク）**:
    チャンクが到着した瞬間、メモリ上のブロードキャストチャネルを通じてローカルIPC
    / Local
-   WS（CLI・ローカルUI）および中央サーバーWebSocket（`LiveStreamDelta`）へ**リアルタイム（遅延なし）**でそのまま流します。この経路はDBを経由しません。
+   WS（CLI・ローカルUI）およびハブWebSocket（`LiveStreamDelta`）へ**リアルタイム（遅延なし）**でそのまま流します。この経路はDBを経由しません。
 2. **SQLiteへの永続化（ターン完了時のみ）**:
    ストリーミング途中（`is_complete = false`）の中間状態は永続化しません。**ターン完了時に完成したイベント（`is_complete = true`）のみ**を、`node_seq`
-   を1つ消費した単一イベントとしてSQLite (`node.db` / `server.db`)
+   を1つ消費した単一イベントとしてSQLite (`node.db` / `hub.db`)
    へ書き込みます。
    - ユーザーメッセージ (`UserMessage`)、ツール呼び出し
      (`ToolCall`)、権限要求/解決 (`PermissionRequest` /
@@ -183,14 +183,14 @@ sequenceDiagram
 - `StatusChanged` / `CapabilitiesUpdated`（既存。ハブ側 `sessions.status` /
   モード・コマンド・設定投影の更新源）
 
-中央サーバーは受信イベントを `INSERT OR IGNORE`
+ハブは受信イベントを `INSERT OR IGNORE`
 で追記すると**同一トランザクション**で `sessions` / `permission_requests`
 の投影を更新します（イベント→カラムの対応表は
 [`docs/02-database-schema.md` §0.3](./02-database-schema.md)）。投影はイベントログから完全に再構築可能であり、
 差分同期の ACK（水位 `synced_up_to_node_seq`）はイベントの ACK
 だけで完結します。
 
-**不変条件**: 中央サーバーはクライアント要求に応じてセッション状態（`sessions` /
+**不変条件**: ハブはクライアント要求に応じてセッション状態（`sessions` /
 `permission_requests`）を直接書き換えない。書き込みは常に「実行ノードへのコマンド転送
 → ノードが状態更新とイベント発行」を経由します（例外はイベント適用の結果としての
 投影更新のみ）。これにより「どちらの値が正か」という判定規則が1つになります。
@@ -208,16 +208,16 @@ sequenceDiagram
 Android PWAやWeb UIから「プロンプト送信 (`prompt`)」「権限承認
 (`respond_permission`)」「中断 (`cancel`)」を行った場合の経路です：
 
-1. **通常時（中央サーバー経由）**: `Android PWA` ➔ `fxg server` ➔ (Outbound
-   WSの逆方向RPC) ➔ `fxg daemon` ➔ `Agent`
-2. **ローカル直結時（中央サーバー停止時）**: `PC CLI` または
-   `localhost:7860 Web UI` ➔ `fxg daemon` ➔ `Agent`
+1. **通常時（ハブ経由）**: `Android PWA` ➔ `fxg hub` ➔ (Outbound
+   WSの逆方向RPC) ➔ `fxg node` ➔ `Agent`
+2. **ローカル直結時（ハブ停止時）**: `PC CLI` または
+   `localhost:7860 Web UI` ➔ `fxg node` ➔ `Agent`
 3. **承認リクエスト (`PermissionRequest`) の競合防止**:
    - エージェントが `session/request_permission` を発行すると、`request_id`
      が生成され `status = 'pending'` となります。
    - スマホ（Android PWA）とPCターミナル（`fxg`
      CLI）の両方に承認プロンプトが表示されます。
-   - **どちらか一方でユーザーが「Approve / Reject」を押した瞬間**、`fxg daemon`
+   - **どちらか一方でユーザーが「Approve / Reject」を押した瞬間**、`fxg node`
      がエージェントへ応答を返すと同時に `PermissionResolved`
      イベントを発行し、もう一方の画面の承認ダイアログを自動的に閉じます。
    - 2番目以降の応答は `request_id` 単位で破棄され、`ALREADY_RESOLVED`
@@ -225,14 +225,14 @@ Android PWAやWeb UIから「プロンプト送信 (`prompt`)」「権限承認
 
 ### 3.1 同期の鮮度と競合解決（マルチクライアント整合性）
 
-ローカル直結 (`localhost:7860`) と中央サーバー経由 (`:8080`)
+ローカル直結 (`localhost:7860`) とハブ経由 (`:8080`)
 の2経路で同一セッションを閲覧・操作しても、**セッション状態の論理的な正解は常にノード
 (`node.db`)
 が一元管理**するため、データの不整合は発生しません。表示タイムラグと操作競合は以下の原則で扱います：
 
 1. **表示鮮度の原則**:
    - ローカル直結: イベント発生と同時（ミリ秒未満〜数ms）に反映。
-   - 中央サーバー経由: ノード→サーバーの同期 + 配信の分だけ遅延する（目安: LAN
+   - ハブ経由: ノード→ハブの同期 + 配信の分だけ遅延する（目安: LAN
      で十数ms、VPN 越しで数十〜数百ms）。この差は許容仕様とし、UI
      は未同期イベント件数（Outbox
      残数）と最終同期時刻を表示して状態を可視化する。
@@ -252,10 +252,10 @@ Android PWAやWeb UIから「プロンプト送信 (`prompt`)」「権限承認
      として破棄する。
    - エージェント実行中（`running`）の `SendPrompt` は、ノード側で Pending Queue
      に蓄積しターン完了後に順次処理する（UI 上も Pending Queue として表示）。
-   - ノードが中央サーバーから切断中のリモートコマンドは到達不能のため、サーバーは即座に
+   - ノードがハブから切断中のリモートコマンドは到達不能のため、ハブは即座に
      `NODE_OFFLINE` エラーを返却する（キューイングしない）。
 4. **コマンド結果の相関**:
-   - `ServerToNodeMsg` の各コマンドに対する `CommandResult` (`command_id` 付き)
+   - `HubToNodeMsg` の各コマンドに対する `CommandResult` (`command_id` 付き)
      は、要求元クライアントへそのまま返却する（成功/失敗・エラーコード）。
 
 ---
@@ -268,7 +268,7 @@ Windows (`D:\ghq\github.com\nazo6\flexagent`)、Linux VPS
 
 ### 4.1 プロジェクトキー (`project_key`) 算出手順
 
-ノード上でセッションを起動（またはプロジェクトスキャン）する際、`fxg daemon`
+ノード上でセッションを起動（またはプロジェクトスキャン）する際、`fxg node`
 は対象ディレクトリ `cwd` に対して以下の優先順位で `project_key` を決定します：
 
 1. **明示リンク (`project_path_links`, 最優先)**: `node.db` の
@@ -302,7 +302,7 @@ Windows (`D:\ghq\github.com\nazo6\flexagent`)、Linux VPS
 
 ### 4.2 スマートフォンからの「パス入力不要」なセッション起動
 
-中央サーバーの `project_node_bindings` テーブルには、各ノードが報告した
+ハブの `project_node_bindings` テーブルには、各ノードが報告した
 `(project_id, node_id, local_path)` の組が記録されています。 これにより、Android
 PWAから新規セッションを開始する際は：
 
@@ -331,15 +331,14 @@ Logical Project (例: github.com/nazo6/flexagent)
       └── Worktree B    (~/.flexagent/worktrees/github.com-nazo6-flexagent/fix-bug)   [branch: fix/bug]    <-- Session #2
 ```
 
-- 各ノードの `fxg daemon` は `git worktree list --porcelain`
+- 各ノードの `fxg node` は `git worktree list --porcelain`
   を定期・起動時に実行し、同一リポジトリに属するすべての
-  Worktree（パス、ブランチ、HEADコミット）を自動検出して中央サーバーへ報告します。
+  Worktree（パス、ブランチ、HEADコミット）を自動検出してハブへ報告します。
 - 検出結果に変化（Worktree の追加・削除・ブランチ切替）があった場合、ノードは
-  `NodeProjectReport` を含む `NodeHello` を再送し、`server.db` の
+  `NodeProjectReport` を含む `NodeHello` を再送し、`hub.db` の
   `project_node_bindings` を更新します。
-- `fxg` が新規作成する Worktree は、親フォルダを散らかさないようデフォルトで
-  `~/.flexagent/worktrees/<project>/<branch>` に集約されます（`config.toml` /
-  `.fxg.toml` の `worktree_dir_template` で変更可能）。
+- `fxg` が新規作成する Worktree は、親フォルダを散らかさないよう
+  `~/.flexagent/worktrees/<project>/<branch>` に固定されます。
 - 各セッションは特定の `(node_id, local_path)`（特定の
   Worktree）にバインドされます。これにより、同一マシン上で複数エージェントを走らせても作業ツリーやブランチの競合が発生しません。
 
@@ -348,10 +347,9 @@ Logical Project (例: github.com/nazo6/flexagent)
 GUI（Web UI / PWA）やCLIから以下のWorktree操作をシームレスに実行できます：
 
 1. **新規Worktree作成とセッション同時起動**:
-   - `fxg run <agent> --worktree feat/new-api` や
+   - `fxg session new <agent> --worktree feat/new-api` や
      GUIの「＋新規Worktreeで開始」から、`git worktree add -b feat/new-api <path> <base_branch>`
-     （および `.fxg.toml` の `copy_files` / `post_create`
-     フック）を自動実行してそのパスでエージェントを立ち上げます。
+     を自動実行してそのパスでエージェントを立ち上げます。
 2. **作業完了後の後片付け**:
    - マージ後またはセッション完了時に、GUIからワンクリックで
      Worktree
@@ -359,7 +357,7 @@ GUI（Web UI / PWA）やCLIから以下のWorktree操作をシームレスに実
 
 ---
 
-## 6. 一時VM・サンドボックスノード (`fxg daemon --stdio` & Zero-Touch Provisioner)
+## 6. 一時VM・サンドボックスノード (`fxg internal stdio` & Zero-Touch Provisioner)
 
 自前サーバー上でホストOSの権限・ファイル（`~/.ssh`
 や他プロジェクト）から隔離された環境でエージェントを動かしたい場合や、**Google
@@ -369,36 +367,36 @@ Node）** をサポートします。
 
 ### 6.1 設計原則：Stdio パイプ直結によるネットワーク・VPN完全非依存
 
-一時VMを立ち上げる際、VM側から中央サーバーへネットワーク経由で折り返し接続（WebSocketコールバック）させようとすると、Tailscale等の特定VPNへのロックインやファイアウォール/NAT越えの複雑な設定が必要になります。
+一時VMを立ち上げる際、VM側からハブへネットワーク経由で折り返し接続（WebSocketコールバック）させようとすると、Tailscale等の特定VPNへのロックインやファイアウォール/NAT越えの複雑な設定が必要になります。
 
-これを根本的に排除するため、一時ノードは **`fxg server`
+これを根本的に排除するため、一時ノードは **`fxg hub`
 が子プロセスとしてスポーンしたプロビジョナーコマンドの標準入出力
-(`stdin / stdout`) 上で直接 `NodeToServerMsg` / `ServerToNodeMsg` (JSON Lines)
-をやり取りする `fxg daemon --stdio` 方式** を採用します。
-プロビジョナーコマンドは常に **中央サーバー (`fxg server`)
-ホスト上**で起動され、 CLI の `fxg run --provisioner` も中央サーバーの API
+(`stdin / stdout`) 上で直接 `NodeToHubMsg` / `HubToNodeMsg` (JSON Lines)
+をやり取りする `fxg internal stdio` 方式** を採用します。
+プロビジョナーコマンドは常に **ハブ (`fxg hub`)
+ホスト上**で起動され、 CLI の `fxg session new --provisioner` もハブの API
 経由で要求されます
-（中央サーバーが停止している環境では一時VM起動は行えません。ノード単独での一時VM起動は非対応です）。
+（ハブが停止している環境では一時VM起動は行えません。ノード単独での一時VM起動は非対応です）。
 
 ```mermaid
 sequenceDiagram
     participant UI as Web UI / CLI
-    participant Server as fxg server (Node Hub)
+    participant Hub as fxg hub
     participant Child as 子プロセス (docker / incus / colab / ssh)
-    participant Eph as 一時VM内 (fxg daemon --stdio)
+    participant Eph as 一時VM内 (fxg internal stdio)
 
-    UI->>Server: 新規セッション要求 (provisioner = "colab-pro" or "local-incus")
-    Server->>Child: コマンド起動 (stdin / stdout / stderr パイプ接続)
+    UI->>Hub: 新規セッション要求 (provisioner = "colab-pro" or "local-incus")
+    Hub->>Child: コマンド起動 (stdin / stdout / stderr パイプ接続)
     Child->>Eph: 1. ブートストラップ実行 (fxg配置 + git clone + mise/uv ツール導入)
-    Eph-->>Server: stderr: セットアップ進捗ログをリアルタイム配信 (UIへ表示)
-    Eph->>Server: stdout: NodeHello (JSON Lines 通信開始)
-    Server->>Eph: stdin: StartSession (エージェント起動・タスク実行)
-    Note over Server,Eph: 通常のWebSocketノードと100%同一のメッセージ型で双方向通信<br/>(Git認証は GitCredentialRequest でこのパイプ経由にプロキシ)
-    Note over Server,Eph: セッション完了 or アイドルタイムアウト (例: 15分)
-    Server->>Eph: stdin: DrainAndShutdown
-    Eph->>Server: stdout: EventBatchPush (未送信ログ全フラッシュ)
-    Eph->>Server: stdout: DrainComplete
-    Server->>Child: パイプ切断・プロセス終了 (VM / コンテナ / Colabランタイムの即時破棄)
+    Eph-->>Hub: stderr: セットアップ進捗ログをリアルタイム配信 (UIへ表示)
+    Eph->>Hub: stdout: NodeHello (JSON Lines 通信開始)
+    Hub->>Eph: stdin: StartSession (エージェント起動・タスク実行)
+    Note over Hub,Eph: 通常のWebSocketノードと100%同一のメッセージ型で双方向通信<br/>(Git認証は GitCredentialRequest でこのパイプ経由にプロキシ)
+    Note over Hub,Eph: セッション完了 or アイドルタイムアウト (例: 15分)
+    Hub->>Eph: stdin: DrainAndShutdown
+    Eph->>Hub: stdout: EventBatchPush (未送信ログ全フラッシュ)
+    Eph->>Hub: stdout: DrainComplete
+    Hub->>Child: パイプ切断・プロセス終了 (VM / コンテナ / Colabランタイムの即時破棄)
 ```
 
 - **ネットワーク設定・VPNロックインの完全排除**:
@@ -412,42 +410,32 @@ sequenceDiagram
   - 初期設計では共有キャッシュボリュームやスナップショットによる状態持ち越しを行わず、**「毎回まっさらな環境を立ち上げ、プリビルドの単一バイナリ群を展開して使い捨てる」**
     完全ステートレス方式とすることで、ロック残留や環境汚染を防ぎます。
 
-### 6.2 コマンドテンプレート型プロビジョナー (`~/.flexagent/config.toml`)
+### 6.2 コマンドテンプレート型プロビジョナー (`hub.db` の `provisioners`)
 
-`fxg` 本体に特定の仮想化基盤やクラウドのSDKをハードコードせず、`config.toml` に
-**「標準入出力で最終的に `fxg daemon --stdio` を起動するコマンド」**
-を定義するだけで任意の環境をプロビジョナーとして登録できます。
+`fxg` 本体に特定の仮想化基盤やクラウドのSDKをハードコードせず、
+**「標準入出力で最終的に `fxg internal stdio` を起動するコマンド」**を
+`hub.db` の `provisioners` に登録するだけで任意の環境をプロビジョナーとして追加できます。
+登録・編集はハブの Web UI（設定 → プロビジョナー）から行います。
 
-```toml
-# ~/.flexagent/config.toml
+`ProvisionerDefinition` は次の項目を持ちます。
 
-# 1. 自前サーバー上の高速コンテナ隔離 (Docker / Rootless Podman)
-[provisioners.local-docker]
-description = "Local isolated Ubuntu container (Docker)"
-command = "docker"
-args = ["run", "--rm", "-i", "ubuntu:24.04", "sh", "-c", "{BOOTSTRAP_SCRIPT}"]
-idle_timeout_secs = 900
+| 項目                | 説明                                                                   |
+| :------------------ | :--------------------------------------------------------------------- |
+| `name`              | プロビジョナー名 (`local-docker` / `colab-pro` 等)                     |
+| `description`       | UI に表示する説明                                                      |
+| `command`           | 実行するコマンド (`docker` / `incus` / `uvx` / `ssh` 等)               |
+| `args`              | 引数。`{BOOTSTRAP_SCRIPT}` / `{INSTANCE_NAME}` / `{SESSION_ID}` を置換 |
+| `idle_timeout_secs` | アイドル状態のインスタンスを破棄するまでの秒数                         |
+| `env`               | 子プロセスへ注入する環境変数                                           |
 
-# 2. 自前サーバー上の完全VM / システムコンテナ隔離 (Incus / LXD)
-[provisioners.local-incus]
-description = "Local KVM MicroVM / LXC (Incus)"
-command = "incus"
-args = ["launch", "--ephemeral", "images:ubuntu/24.04", "{INSTANCE_NAME}", "--", "sh", "-c", "{BOOTSTRAP_SCRIPT}"]
-idle_timeout_secs = 900
-
-# 3. Google Colab Pro オンデマンドGPUノード (google-colab-cli)
-[provisioners.colab-pro]
-description = "Google Colab Pro (T4 GPU Runtime)"
-command = "uvx"
-args = ["google-colab-cli", "ssh", "--gpu", "t4", "--command", "{BOOTSTRAP_SCRIPT}"]
-idle_timeout_secs = 900
-```
+Docker / Incus / Google Colab Pro の代表的な定義は Web UI のプリセットとして
+提供されます。
 
 ### 6.3 Zero-Touch 自動ツールセットアップ (`stderr` ログ分離 + `mise` / `uv`)
 
 手動での環境構築を一切不要にするため、`{BOOTSTRAP_SCRIPT}`
 内では以下の手順が全自動で実行されます。この際、**セットアップの出力はすべて
-`stderr` (`>&2`) にリダイレクト**し、`stdout` は `fxg daemon --stdio`
+`stderr` (`>&2`) にリダイレクト**し、`stdout` は `fxg internal stdio`
 のプロトコル通信専用に保護します。
 
 ```bash
@@ -460,17 +448,17 @@ set -eu
   /tmp/fxg internal bootstrap-workspace --repo "$FXG_GIT_URL" --branch "$FXG_GIT_BRANCH" --dir /tmp/workspace
 } >&2
 
-# セットアップ完了後、stdout/stdin を用いてデーモン通信を開始
-exec /tmp/fxg daemon --stdio --ephemeral --workspace /tmp/workspace
+# セットアップ完了後、stdout/stdin を用いてノード通信を開始
+exec /tmp/fxg internal stdio --ephemeral --workspace /tmp/workspace
 ```
 
-- **ブートストラップ時の環境変数注入**: プロビジョナー起動時に `fxg server` が
+- **ブートストラップ時の環境変数注入**: プロビジョナー起動時に `fxg hub` が
   `FXG_GIT_URL` / `FXG_GIT_BRANCH` および**短命の `FXG_GIT_TOKEN`**
-  を環境変数として注入します。 デーモン起動前の
+  を環境変数として注入します。 ノード起動前の
   `git clone`（`internal bootstrap-workspace` 内）は、`internal bootstrap-workspace`
   が内部で生成する `GIT_ASKPASS` ヘルパー経由で `FXG_GIT_TOKEN` を Git
   に渡します（URL へのトークン埋め込みは行わない）。 トークンは一時VMの
-  Drain・プロセス終了とともに失効します。デーモン起動後（`exec fxg daemon --stdio`
+  Drain・プロセス終了とともに失効します。ノード起動後（`exec fxg internal stdio`
   以降）は §6.4 の `GIT_ASKPASS` プロキシ（stdio パイプ経由の
   `GitCredentialRequest`）に切り替わります。
 
@@ -489,48 +477,48 @@ exec /tmp/fxg daemon --stdio --ephemeral --workspace /tmp/workspace
        ランタイム＆仮想環境構築
      - `mise.toml` / `.tool-versions` ➔ 記載された全ツール
      - 標準必須CLI（`git`, `ripgrep`, `fd`, `jq`, `gh`）
-3. **`.fxg.toml` によるプロジェクト固有初期化（任意）**:
-   - リポジトリに `.fxg.toml` の `[bootstrap]`
-     セクションがある場合は、追加指定された `tools`
-     と初期化コマンド（`setup = ["cargo fetch", "pnpm install --frozen-lockfile"]`
-     等）を自動実行します。
+3. **プロジェクトプロファイルによる追加初期化（任意）**:
+   - ハブの `hub.db.project_profiles` に `bootstrap_setup` /
+     `bootstrap_env` を登録すると、追加の初期化コマンド
+     （例: `cargo fetch`, `pnpm install --frozen-lockfile`）を自動実行し、
+     環境変数を注入します。登録はハブの Web UI から行います。
 
 ### 6.4 秘密情報をVMに残さない Git Credential Proxy と破棄前の成果物退避
 
 1. **Git Credential Proxy（VM内への秘密鍵・PAT配置ゼロ）**:
    - 一時VMやColabのディスクに個人のSSH秘密鍵や恒久的なGitHub
      PATを保存しません。
-   - **ブートストラップ中**（デーモン起動前）: §6.3
+   - **ブートストラップ中**（ノード起動前）: §6.3
      のとおり、プロビジョナー起動時に注入された短命 `FXG_GIT_TOKEN` を
      `bootstrap-workspace` の `GIT_ASKPASS`
      ヘルパー経由で使用します（環境変数はオンメモリで扱い、ディスクには残さない）。
-   - **デーモン起動後**: `fxg daemon --stdio` は自分自身を `GIT_ASKPASS`（および
+   - **ノード起動後**: `fxg internal stdio` は自分自身を `GIT_ASKPASS`（および
      Git credential helper）として設定します。VM内で `git clone` / `git fetch` /
      `git push` が走ると、すでに繋がっている `stdio` パイプ上で
-     `NodeToServerMsg::GitCredentialRequest`
-     を中央サーバーへ送り、中央サーバーから対象リポジトリの認証トークンをオンメモリで受け取ってGitへ渡します。
-     - **実装**: デーモンはエージェントプロセスへ `GIT_ASKPASS`
+     `NodeToHubMsg::GitCredentialRequest`
+     をハブへ送り、ハブから対象リポジトリの認証トークンをオンメモリで受け取ってGitへ渡します。
+     - **実装**: ノードはエージェントプロセスへ `GIT_ASKPASS`
        （`~/.flexagent/git-askpass.sh` → `fxg internal git-askpass <prompt>`）と
-       `GIT_TERMINAL_PROMPT=0` を注入する。ヘルパーはローカルIPC でデーモンへ
-       問い合わせ、デーモンが Node ⇔ Server 接続（WS / stdio 共通）上で
+       `GIT_TERMINAL_PROMPT=0` を注入する。ヘルパーはローカルIPC でノードへ
+       問い合わせ、ノードが Node ⇔ Hub 接続（WS / stdio 共通）上で
        `GitCredentialRequest` を中継する。トークンは
-       `[server.git_credentials.<host>]`（`provider = "gh_cli" | "env"`）
-       からサーバー側で解決する。
+       `[hub.git_credentials.<host>]`（`provider = "gh_cli" | "env"`）
+       からハブ側で解決する。
 2. **破棄前の Graceful Drain（ベストエフォート）**:
-   - 一時VM内のイベントは VM 内の `node.db` に蓄積し、終了時に中央サーバーから
-     `ServerToNodeMsg::DrainAndShutdown`
+   - 一時VM内のイベントは VM 内の `node.db` に蓄積し、終了時にハブから
+     `HubToNodeMsg::DrainAndShutdown`
      を送信して未送信分を一括フラッシュします。
    - **トレードオフ**: Drain 前にクラッシュ・強制終了した場合、VM
      内に未送信のまま残っていたイベントは失われます（VM
      内ディスクごと消滅するため）。この損失は許容仕様とします。
-   - `fxg daemon`
+   - `fxg node`
      は未送信のイベントログをすべてフラッシュ（`EventBatchPush`）した上で
-     `DrainComplete` を送信し、中央サーバーが子プロセス/VMを破棄します。
+     `DrainComplete` を送信し、ハブが子プロセス/VMを破棄します。
    - ワークスペースの退避（Git bundle）と、別ノードへの Context Fork は行いません。
      一時VMセッションの再開・引き継ぎは v2 の将来拡張です。
    - **仮セッション投影**: ブートストラップ中（`NodeHello` 前）も UI
      にセッションを
-     見せるため、中央サーバーは `sessions` 行を `status = 'provisioning'`
+     見せるため、ハブは `sessions` 行を `status = 'provisioning'`
      で先行挿入する（イベントではなく投影行。ノードの `SessionCreated`
      が派生カラムを上書きする。書き込み権威の一元化は維持）。
 
@@ -545,15 +533,15 @@ Hijacking）や不正アクセスを防ぐため、以下の多層防御モデ�
 
 ### 7.1 ネットワーク境界の原則（最小露出）
 
-- **中央サーバー (`fxg server`)**:
+- **ハブ (`fxg hub`)**:
   - 家庭内LAN、社内プライベートLAN、または **Tailscale / WireGuard**
     などのプライベートVPNメッシュ内のみでの接続を前提とします。パブリックインターネットへの直接露出（ルータのポート開放・クラウドのセキュリティグループ全開放等）は行いません。`0.0.0.0`
     バインドはファイアウォール / VPN で隔離されたLAN内に限定して使用します。
-- **ノードデーモン (`fxg daemon`)**:
+- **ノード (`fxg node`)**:
   - ローカルWeb/WSサーバー (`LocalAPI`) は、デフォルトで
     **`127.0.0.1:7860`（ローカルループバックのみ）** に厳格バインドします。
   - 同一LAN内の他端末から直接PCの `:7860`
-    を叩くことはできず、すべてのリモート操作は中央サーバー経由で中継されます。
+    を叩くことはできず、すべてのリモート操作はハブ経由で中継されます。
 
 ### 7.2 ブラウザ固有の攻撃防止（Localhost保護）
 
@@ -563,7 +551,7 @@ Hijacking）や不正アクセスを防ぐため、以下の多層防御モデ�
 
 1. **Host ヘッダ検証 (DNS Rebinding 対策)**:
    - リクエストの `Host` ヘッダを検査し、`localhost:7860`, `127.0.0.1:7860`,
-     または明示的に設定された中央サーバーホスト名以外は `403 Forbidden`
+     または明示的に設定されたハブホスト名以外は `403 Forbidden`
      で即座に拒否します。
 2. **Origin ヘッダ検証 (Cross-Site WebSocket Hijacking 対策)**:
    - WebSocketハンドシェイク（`/api/v1/client/ws`, `/api/v1/pty/ws`）時に
@@ -574,7 +562,7 @@ Hijacking）や不正アクセスを防ぐため、以下の多層防御モデ�
 
 1. **暗号論的トークンの自動生成**:
    - 初回起動時（または
-     `fxg auth generate-token`）、安全な64文字のランダム文字列（`auth_token`）を生成し、`~/.flexagent/auth_token`
+     `fxg node token rotate`）、安全な64文字のランダム文字列（`auth_token`）を生成し、`~/.flexagent/auth_token`
      にパーミッション `0600` で保存します。
 2. **Web UI 初回アクセスとCookieの安全な設定**:
    - ローカルCLIから `fxg web` を実行すると、ワンタイムURL
@@ -587,21 +575,20 @@ Hijacking）や不正アクセスを防ぐため、以下の多層防御モデ�
    - 例外として、接続先種別のみを返す `GET /api/v1/meta` は認証を免除します
      (Host / Origin 検証は適用)。Web UI は接続先種別の判定をこのエンドポイント
      のみで行い（ホスト名等からの推測はしない）、トークン入力ダイアログを
-     中央サーバー / ローカルノードで正しく表示します。
-3. **Node ⇔ Server 間のペアリング認証（ノード個別トークン）**:
-   - 常駐ノードが中央サーバーのWebSocketへ接続する際、`Authorization: Bearer <NODE_TOKEN>`
+     ハブ / ローカルノードで正しく表示します。
+3. **Node ⇔ Hub 間のペアリング認証（ノード個別トークン）**:
+   - 常駐ノードがハブのWebSocketへ接続する際、`Authorization: Bearer <NODE_TOKEN>`
      で認証します。
-   - トークンは**ノードごとに個別発行**します。中央サーバー上で
-     `fxg auth node-token issue <node-id>`
-     を実行するとトークンが生成・表示され、`server.db` の `nodes` テーブルには
+   - トークンは**ノードごとに個別発行**します。ハブ上で
+     `fxg hub node-token issue <node-id>`
+     を実行するとトークンが生成・表示され、`hub.db` の `nodes` テーブルには
      ハッシュ (`token_hash`) のみを保存します。ノード側は表示されたトークンを
-     `~/.flexagent/node_token` （または `config.toml` の
-     `node_token`）へ設定します。
-   - サーバーは `NodeHello` の `node_id`
+     `~/.flexagent/node_token`（または環境変数 `FXG_NODE_TOKEN`）へ設定します。
+   - ハブは `NodeHello` の `node_id`
      がトークン発行対象ノードと一致することを検証し、なりすましを拒否します。
-     漏洩時は `fxg auth node-token revoke <node-id>`
+     漏洩時は `fxg hub node-token revoke <node-id>`
      で個別に失効・再発行できます。
-   - 一時ノードは中央サーバー自身が起動した子プロセスの `stdio`
+   - 一時ノードはハブ自身が起動した子プロセスの `stdio`
      パイプ直結であるため、ネットワーク越しのトークン露出自体が発生しません。
 
 ### 7.4 Web PTY の制限とリモートポリシー
@@ -609,19 +596,22 @@ Hijacking）や不正アクセスを防ぐため、以下の多層防御モデ�
 Web PTY（対話シェル起動）は最も権限が強いため、以下の防御ポリシーを提供します：
 
 - **リモートPTY制御設定 (`allow_remote_pty`)**:
-  - 設定（`~/.flexagent/config.toml`）により、リモート（中央サーバー経由）からの
+  - 設定（`~/.flexagent/config.toml`）により、リモート（ハブ経由）からの
     `PtySpawn` を無効化可能（`allow_remote_pty = false`）。
   - この場合、スマホ等のWebUIからは「エージェントへの指示とツールの承認/却下」のみが行え、自由なシェルの直接実行は遮断されます（ローカル端末直結時のみPTY利用可能）。
 
 ### 7.5 緊急キルスイッチ（Panic Button）と監査ログ
 
 - **キルスイッチ (Panic Button)**:
-  - CLI（`fxg kill-all`）またはWeb
-    UIのヘッダーからワンタップで、現在稼働中の全ノード・全セッションのプロセスツリー（Windows
+  - ハブの Web UI ヘッダーからワンタップで、現在稼働中の全ノード・全セッションのプロセスツリー（Windows
     Job Object / POSIX Process
-    Group）および一時VM子プロセス・PTYを即時強制停止します。
+    Group）および一時VM子プロセス・PTYを即時強制停止します。API は
+    `POST /api/v1/system/kill-switch` で、接続中の全ノードへ `HubToNodeMsg::KillAllSessions`
+    を配信します。
+  - ローカルのノードだけを止めたい場合は `fxg node stop`（ノード本体も停止）を使います。CLI に
+    `kill-all` は置きません（全ノード一斉の緊急停止はハブの kill switch に一本化）。
 - **監査ログ (Audit Log)**:
   - リモートからのプロンプト送信、ツール承認（`PermissionResolved`）、Worktree操作、一時VMプロビジョニング、セッション起動の送信元（IP、クライアント種別、トークンID）をすべてDBへ永続記録します。
-  - 中央サーバー経由の操作は `server.db`、ローカル直結（`localhost:7860` /
+  - ハブ経由の操作は `hub.db`、ローカル直結（`localhost:7860` /
     CLI）の操作は実行ノードの `node.db` にも記録し、どちらのAPI接続でも
     `/api/v1/audit/logs` から参照できるようにします。

@@ -1,12 +1,12 @@
-# 02. データベーススキーマ設計（`node.db` / `server.db` 単一スキーマ）
+# 02. データベーススキーマ設計（`node.db` / `hub.db` 単一スキーマ）
 
 FlexAgentは外部DBミドルウェアを必要としない **SQLite (`sqlx`)**
 を採用し、WALモード (`PRAGMA journal_mode = WAL;`) で動作します。
-E2E暗号化を行わないため、中央サーバー側で会話履歴の構造化クエリおよび
+E2E暗号化を行わないため、ハブ側で会話履歴の構造化クエリおよび
 **FTS5（全文検索）** がそのまま利用可能です。
 
-`node.db`（各ノード: `~/.flexagent/node.db`）と `server.db`（中央サーバー:
-`~/.flexagent/server.db`）は、**同一のDDL・同一のテーブル名・単一のマイグレーションセット**
+`node.db`（各ノード: `~/.flexagent/node.db`）と `hub.db`（ハブ:
+`~/.flexagent/hub.db`）は、**同一のDDL・同一のテーブル名・単一のマイグレーションセット**
 （`crates/fxg-db/migrations/`）から生成される「1つのスキーマ」を共有します。
 両者の違いは **「行のスコープ」と「実行ロール」だけ**
 であり、スキーマ対称性は「規約」ではなく 「単一定義」によって保証されます。
@@ -23,18 +23,18 @@ E2E暗号化を行わないため、中央サーバー側で会話履歴の構�
    （空テーブル・未使用カラムの実害はない）。
 2. **同期はイベントログ1本**:
    セッションのメタデータ（作成・タイトル・ステータス・モード）も
-   `session_events` 上のイベントとして記録する。中央サーバーの `sessions` /
+   `session_events` 上のイベントとして記録する。ハブの `sessions` /
    `permission_requests` はイベントから適用される**投影（projection）** であり、
    別系統のメタデータ同期（旧 `SessionUpsert` /
    `metadata_synced`）は存在しない。
 3. **書き込み権威は1つ**: セッション状態を書き換えられるのは**実行ノードのみ**。
-   中央サーバーは (a) クライアントコマンドの転送 (b)
+   ハブは (a) クライアントコマンドの転送 (b)
    受信イベントの追記と投影適用
    だけを行い、クライアント要求に応じてセッション状態を直接書き換えない。
 
-### 0.2 ロール差分（ノード / 中央サーバー）
+### 0.2 ロール差分（ノード / ハブ）
 
-| 項目                                 | ノード (`node.db`)                                   | 中央サーバー (`server.db`)                                         |
+| 項目                                 | ノード (`node.db`)                                   | ハブ (`hub.db`)                                                    |
 | :----------------------------------- | :--------------------------------------------------- | :----------------------------------------------------------------- |
 | `nodes`                              | 自分自身の1行のみ（FK参照・ローカルUI用）            | 全ノード（`NodeHello` で更新。`token_hash` はハブのみ使用）        |
 | `projects` / `project_node_bindings` | 自ノードが関与する分のみ                             | 全ノード分（ノード報告の集約。ハブが権威）                         |
@@ -50,7 +50,7 @@ E2E暗号化を行わないため、中央サーバー側で会話履歴の構�
 
 ### 0.3 イベント適用と投影
 
-中央サーバーは `EventBatchPush` を受信すると、**同一トランザクション**で
+ハブは `EventBatchPush` を受信すると、**同一トランザクション**で
 イベントを `INSERT OR IGNORE`（`event_id` / `(session_id, node_seq)` の UNIQUE
 制約で 冪等）し、続けて投影を更新します。投影の更新規則は以下で固定です：
 
@@ -100,7 +100,7 @@ SessionDeleted        → sessions.deleted_at = created_at + 本文イベント�
   欠番のない連番のため、水位による表現が成立します。Outbox 抽出は
   `node_seq > synced_up_to_node_seq` の単純な述語になり、ACK 時の更新も O(1)
   です （旧設計の `synced = 0` フラグ + partial index は廃止）。
-- **カーソル (`session_events.cursor`)**: そのDB（`node.db` / `server.db`）が
+- **カーソル (`session_events.cursor`)**: そのDB（`node.db` / `hub.db`）が
   イベントを取り込んだ順の AUTOINCREMENT 連番です。クライアント（CLI / Web
   UI）の 差分再開カーソルとして使用します。**接続先ストア以外の cursor
   は意味を持ちません** （ハブ接続時はハブの cursor、ローカル直結時はノードの
@@ -303,7 +303,7 @@ CREATE INDEX idx_audit_logs_session ON audit_logs(session_id, created_at DESC);
 
 ### 1.0.1 診断インシデント (migration `0011_incidents.sql`)
 
-`incidents` は「ノード / サーバーが自分のエラー境界で観測した障害」を
+`incidents` は「ノード / ハブが自分のエラー境界で観測した障害」を
 保持する、**同期対象外**のリングバッファです。同じ原因
 (`code` + `source` + `session_id` + `node_id`) が未解決のまま
 10 分以内に再発した場合は、行を増やさず `occurrence_count` と
@@ -336,14 +336,14 @@ CREATE INDEX idx_incidents_last_seen ON incidents(last_seen_at DESC);
 
 ### 1.1 設定・秘密・プロファイル (migration `0010_settings_consolidation.sql`)
 
-実行時に変更する設定は所有者の DB にのみ保存します (ノード ⇔ サーバー間で同期・マージしない)。
+実行時に変更する設定は所有者の DB にのみ保存します (ノード ⇔ ハブ間で同期・マージしない)。
 
 - `node.db`: `node_settings` / `agent_settings` / `agent_aliases` /
   `custom_agents` / `enabled_package_agents` / `project_path_links`
-- `server.db`: `server_settings` / `git_credentials` / `provisioners` /
+- `hub.db`: `hub_settings` / `git_credentials` / `provisioners` /
   `project_profiles`
 - 共通: `secrets` (秘密の **メタデータ** のみ。値は
-  `~/.flexagent/secrets/{node,server}/<id>` に `0600` で保存)
+  `~/.flexagent/secrets/{node,hub}/<id>` に `0600` で保存)
 
 単一行テーブルは `id INTEGER PRIMARY KEY CHECK (id = 1)` と
 `revision INTEGER NOT NULL DEFAULT 1` を持ち、更新は
@@ -384,7 +384,7 @@ Truth）とするため、テーブル上の以下のカラムは
   指定時のみ返却されます。イベントログは保持され、`SessionArchived {
   archived: false }` で復元できます。
 - **一時VMの仮セッション行**: 一時VMプロビジョニング中（`NodeHello` 前）は、
-  中央サーバーが `sessions` 行を `status = 'provisioning'`
+  ハブが `sessions` 行を `status = 'provisioning'`
   で先行挿入します（`upsert_provisional_session`。イベントではなく投影行）。
   ノードの `SessionCreated` が upsert で派生カラムを上書きし、以降は通常の
   イベント投影に合流します（全量再構築時には失われ得るベストエフォートの表示用状態）。
@@ -397,7 +397,7 @@ Truth）とするため、テーブル上の以下のカラムは
   単一スキーマ・単一マイグレーションセット・単一のクエリ層を持ち、
   実行ロール（`Node` / `Hub`）パラメータで挙動（Outbox 送信 / 中継 / Push
   等）だけを分岐させます。 ローカルWeb UI（`http://localhost:7860`）が `node.db`
-  を読む際も、中央サーバーWeb UIが `server.db`
+  を読む際も、ハブWeb UIが `hub.db`
   を読む際も、同じJSONレスポンス型（`SessionDetail`,
   `SessionEvent`）を返却できます。
 - **ノードの自己登録**: ノードは起動時に `nodes` テーブルへ自分自身の行を upsert

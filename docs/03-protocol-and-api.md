@@ -1,12 +1,12 @@
 # 03. プロトコル・API・IPC仕様 (`fxg-protocol`)
 
 `crates/fxg-protocol` クレートに定義する共通データ型と、3つの通信経路（① Node ⇔
-Server WebSocket、② Client ⇔ Server/Node HTTP+WS、③ CLI ⇔ Node Local
+Hub WebSocket、② Client ⇔ Hub/Node HTTP+WS、③ CLI ⇔ Node Local
 IPC）のプロトコル仕様です。 クライアント (UI / CLI) が直接扱う型には
 `#[derive(Serialize, Deserialize, specta::Type)]` + `#[specta(collect)]`
 を付与し、`ui/src/lib/generated/bindings.ts`（SvelteKit の
 `$lib/generated/bindings`）へTypeScriptの型定義を自動出力します（設定ファイル
-スキーマ等のサーバー内部型は `specta` export 対象外とする）。
+スキーマ等のハブ内部型は `specta` export 対象外とする）。
 
 ---
 
@@ -30,7 +30,7 @@ pub struct SessionEventEnvelope {
 }
 
 /// カーソルを伴うイベントバッチ (Client WS 配信 / 履歴 API の共通型)
-/// cursor は「配信元ストア (node.db / server.db) への取り込み順」。
+/// cursor は「配信元ストア (node.db / hub.db) への取り込み順」。
 /// クライアントは最後に受信したバッチの cursor を保存し、再接続時に
 /// Subscribe { since_cursor } へ渡す (接続先ストア以外の cursor は意味を持たない)
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -79,7 +79,7 @@ pub enum UnifiedEventPayload {
         attachments: Vec<AttachmentMeta>,
         client_source: String,        // "cli" | "web" | "android" | "resume"
     },
-    /// プロンプト入力（IPC / Client WS / Node⇔Server / REST 共通）
+    /// プロンプト入力（IPC / Client WS / Node⇔Hub / REST 共通）
     PromptInput {
         text: String,
         attachments: Vec<AttachmentMeta>,
@@ -383,7 +383,7 @@ pub enum ErrorCode {
 
 ---
 
-## 2. Node ⇔ Central Server 間プロトコル (WebSocket & Stdio Pipe 共通)
+## 2. Node ⇔ Hub 間プロトコル (WebSocket & Stdio Pipe 共通)
 
 `NodeHello` は `state_revision` (単調増加) と `projects_complete` を含む全量
 スナップショットです。ハブは古い `state_revision` を無視し、
@@ -395,9 +395,9 @@ pub enum ErrorCode {
 ### 2.1 バージョン契約
 
 `NodeHello.protocol_version` に
-`fxg_protocol::node_server::PROTOCOL_VERSION` を載せます。サーバーは最小
+`fxg_protocol::node_hub::PROTOCOL_VERSION` を載せます。ハブは最小
 バージョン未満のノードを `NodeHello` の時点で拒否し、必要なバージョンを
-ログに残して接続を閉じます。ノードと中央サーバーは**同一 `fxg` リリースで
+ログに残して接続を閉じます。ノードとハブは**同一 `fxg` リリースで
 同時に更新する**前提とし、後方互換の分岐は提供しません。旧ノードは
 フィールドを送らないため `0` としてデコードされ、拒否されます。
 
@@ -407,25 +407,25 @@ pub enum ErrorCode {
   `LiveStreamDelta`, `PtyOutput` / `PtyExit` / `PtyError`
 - **セッションコマンド**: `StartSession`, `SendPrompt`, `RespondPermission`,
   `RespondElicitation`, `ControlSession`。結果は `CommandResult` で返します。
-- **汎用 Node RPC**: 上記以外のノード操作は `ServerToNodeMsg::NodeRpc` と
-  `NodeToServerMsg::NodeRpcResult` の1組に集約します。
+- **汎用 Node RPC**: 上記以外のノード操作は `HubToNodeMsg::NodeRpc` と
+  `NodeToHubMsg::NodeRpcResult` の1組に集約します。
 - **ライフサイクル**: `GitCredentialRequest` / `GitCredentialResponse`,
   `DrainAndShutdown`, `DrainComplete`, `KillAllSessions`
 
 常駐ノードと一時VMノードは、トランスポート層が異なるだけで**100%同一のメッセージ型
-(`NodeToServerMsg` / `ServerToNodeMsg`)** を共有します：
+(`NodeToHubMsg` / `HubToNodeMsg`)** を共有します：
 
 - **トランスポート A（常駐ノード用: Outbound WebSocket）**:
-  - **エンドポイント**: `wss://<server-host>/api/v1/node/ws`
+  - **エンドポイント**: `wss://<hub-host>/api/v1/node/ws`
   - **認証**: `Authorization: Bearer <NODE_TOKEN>` ヘッダ（ノード個別トークン。
-    `server.db.nodes.token_hash` と照合し、`NodeHello.node_id`
+    `hub.db.nodes.token_hash` と照合し、`NodeHello.node_id`
     がトークン発行対象ノードと一致することを検証してなりすましを拒否する）
 - **トランスポート B（一時VM・サンドボックスノード用: Stdio Pipe
-  `fxg daemon --stdio`）**:
+  `fxg internal stdio`）**:
   - **チャネル**:
-    中央サーバーが子プロセスとして起動したプロビジョナーコマンド（`docker`,
+    ハブが子プロセスとして起動したプロビジョナーコマンド（`docker`,
     `incus`, `uvx google-colab-cli`, `ssh` 等）の **`stdout`
-    (`NodeToServerMsg`)** および **`stdin` (`ServerToNodeMsg`)**
+    (`NodeToHubMsg`)** および **`stdin` (`HubToNodeMsg`)**
   - **フレーミング**: JSON
     Lines（1メッセージ1行の改行区切りJSON）。ブートストラップや `mise` / `uv`
     によるツール導入ログはすべて **`stderr`** に出力され、`BootstrapLog`
@@ -555,9 +555,9 @@ pub struct ResyncTarget {
     pub from_node_seq: u64, // この値以降 (>=) のイベントを水位に関係なく再送する
 }
 
-/// Node -> Server への送信メッセージ
+/// Node -> Hub への送信メッセージ
 #[serde(tag = "op", rename_all = "snake_case")]
-pub enum NodeToServerMsg {
+pub enum NodeToHubMsg {
     NodeHello {
         node_id: NodeId,
         name: String,
@@ -600,9 +600,9 @@ pub enum NodeToServerMsg {
     DrainComplete { node_id: NodeId },
 }
 
-/// Server -> Node への送信メッセージ
+/// Hub -> Node への送信メッセージ
 #[serde(tag = "op", rename_all = "snake_case")]
-pub enum ServerToNodeMsg {
+pub enum HubToNodeMsg {
     EventBatchAck {
         session_id: SessionId,
         acked_up_to_node_seq: u64,
@@ -673,9 +673,9 @@ pub enum ServerToNodeMsg {
 
 ---
 
-## 3. Client (PWA / Browser) ⇔ Server (または Local Node) API
+## 3. Client (PWA / Browser) ⇔ Hub (または Local Node) API
 
-中央サーバー (`fxg server`) と各ノードのローカルWebサーバー (`fxg daemon` on
+ハブ (`fxg hub`) と各ノードのローカルWebサーバー (`fxg node` on
 `localhost:7860`)
 は**完全に同一のAPIパスとWebSocketフォーマット**を実装します。これにより、PWAフロントエンドは接続先URLを意識せずにどちらにも繋がります。
 
@@ -691,7 +691,7 @@ pub enum ServerToNodeMsg {
      メタ情報 `GET /api/v1/meta` のみ (Host / Origin 検証は適用)。
 2. **Host ヘッダ検証 (DNS Rebinding 防御)**:
    - リクエストの `Host` ヘッダが `localhost:<port>`, `127.0.0.1:<port>`,
-     またはサーバー設定の許可ホスト（例: Tailscale MagicDNS名 /
+     またはハブ設定の許可ホスト（例: Tailscale MagicDNS名 /
      LANホスト名）に一致しない場合、`403 Forbidden` を返却。
 3. **Origin ヘッダ検証 (Cross-Site WebSocket Hijacking 防御)**:
    - WebSocketハンドシェイク時、`Origin`
@@ -701,8 +701,8 @@ pub enum ServerToNodeMsg {
      操作、プロジェクト紐付け (scan / link)、エージェント管理
      (install / update / remove)、ノードトークン発行・失効、クライアントトークン
      再生成は、クライアントIP・UA・トークンIDとともに `audit_logs` に記録。
-   - 記録先は中央サーバー経由の操作が
-     `server.db`、ローカル直結（`localhost:7860` / CLI）の操作が 実行ノードの
+   - 記録先はハブ経由の操作が
+     `hub.db`、ローカル直結（`localhost:7860` / CLI）の操作が 実行ノードの
      `node.db`（どちらも `/api/v1/audit/logs` で参照可能）。
 5. **エラーレスポンスの共通形式**:
    - REST / WS のエラーは
@@ -711,24 +711,24 @@ pub enum ServerToNodeMsg {
 
 ### 3.1 REST API エンドポイント
 
-- `GET /api/v1/meta`: 認証不要の接続先メタ情報。`{ "role": "central_server" |
+- `GET /api/v1/meta`: 認証不要の接続先メタ情報。`{ "role": "hub" |
   "local_node" }` を返却する。Web UI
   は接続先種別の判定をこのエンドポイントのみで行い（認証済み
   `system/info` の `role` やホスト名からは推測しない）、トークン入力ダイアログ
-  の表示（中央サーバー /
+  の表示（ハブ /
   ローカルノード）と確認方法の案内を切り替える。取得失敗は接続エラーとして扱う
   (Host / Origin 検証は適用)。
-- `GET /api/v1/system/info`: 接続先が `central_server` か `local_node`
+- `GET /api/v1/system/info`: 接続先が `hub` か `local_node`
   か、および Web Push の VAPID Public Key を返却。ローカルノード接続時は
   `node_id`（自分のノードID）、`unsynced_event_count`（Outbox 残数）、
-  `central_connected`（中央サーバー接続状態）も返却。UI はこの `node_id` を
+  `hub_connected`（ハブ接続状態）も返却。UI はこの `node_id` を
   `/api/v1/nodes/{node_id}/...` のパスに使う。
 - `GET /healthz` / `GET /readyz`: 認証不要の liveness / readiness。
   `readyz` は DB クエリが成功した場合のみ 200、失敗時は 503 を返す。
 - `GET /api/v1/diagnostics`: 診断情報 (`DiagnosticsResponse`)。エージェントごとの
-  直近 stderr (`agents[].stderr_tail`、最大 200 行)、`daemon_log` のパス、
+  直近 stderr (`agents[].stderr_tail`、最大 200 行)、`node_log` のパス、
   コンポーネントヘルス / ドロップカウンタ (`health: SystemStatus`)、
-  直近の未解決インシデント (`incidents`) を返す。中央サーバーでは
+  直近の未解決インシデント (`incidents`) を返す。ハブでは
   `agents=[]` を返し、`health` は `db` / `migrations` / `http` / `hub` /
   `disk` を報告する。
 - `GET /api/v1/diagnostics/incidents?limit=50&include_resolved=false`:
@@ -739,7 +739,7 @@ pub enum ServerToNodeMsg {
 - `GET /api/v1/diagnostics/bundle`: サポートバンドル (`SupportBundle`)。
   設定 (`config.toml` の安全な項目)、DB 統計、ヘルス、インシデント、
   セッション概要、ログ末尾を含み、トークン / Cookie / プロンプト /
-  ホームディレクトリは**必ず redaction される**。`fxg diagnostics export` と
+  ホームディレクトリは**必ず redaction される**。`fxg support bundle` と
   Web UI の「Export support bundle」が同じエンドポイントを使う。
 - REST のエラー応答には `x-fxg-error-code` ヘッダが付く。診断ミドルウェアは
   このヘッダだけを読み、5xx と復旧可能な 409 / 408 / 429 をインシデントとして
@@ -783,15 +783,15 @@ pub enum ServerToNodeMsg {
   - `GET /api/v1/nodes/:node_id/settings`: `NodeSettingsSnapshot`
   - `PATCH /api/v1/nodes/:node_id/settings/node` / `.../agents`:
     ノード所有設定の更新
-  - `GET/PATCH /api/v1/settings/server`: `ServerSettingsSnapshot` (中央サーバー)
+  - `GET/PATCH /api/v1/settings/hub`: `HubSettingsSnapshot` (ハブ)
   - ローカルノードも自身の `node_id` で同じ `/nodes/{node_id}/...` を使う
     （`GET /api/v1/system/info` の `node_id` で取得する）。
   - 更新は `expected_revision` による楽観的ロック。競合は `REVISION_MISMATCH`。
 - 秘密 (値は書き込み専用。レスポンスは `SecretsResponse` = メタデータのみ):
   - ノード所有: `GET /api/v1/nodes/:node_id/secrets`,
     `PUT/DELETE /api/v1/nodes/:node_id/secrets/:secret_id`
-  - サーバー所有: `GET /api/v1/server/secrets`,
-    `PUT/DELETE /api/v1/server/secrets/:secret_id`
+  - ハブ所有: `GET /api/v1/hub/secrets`,
+    `PUT/DELETE /api/v1/hub/secrets/:secret_id`
   - 参照中の削除は `SECRET_IN_USE`、値ファイル欠損は `SECRET_MISSING`。
 - `GET /api/v1/nodes/:node_id/agents`: 指定ノードの ACP カタログ
   (`GET /api/v1/agents` はローカルノード専用。ハブは代表ノードを選ばない)。
@@ -804,13 +804,13 @@ pub enum ServerToNodeMsg {
   `(agent_id, local_path)` 単位で約10分キャッシュし、同時実行は直列化する。
   認証が必要な場合は通常の `AUTH_REQUIRED` を返す。
 - `GET/PUT /api/v1/projects/:project_id/profile`: 一時VM用 Bootstrap プロファイル
-  (`server.db.project_profiles`)。
+  (`hub.db.project_profiles`)。
 - `GET /api/v1/provisioners`:
   利用可能な一時VM・サンドボックスプロビジョナー一覧（`local-docker`,
   `local-incus`, `colab-pro` 等）を返却。
 - `POST /api/v1/provisioners/:name/test`:
-  指定プロビジョナーの起動と `fxg daemon --stdio` の `NodeHello`
-  ハンドシェイク疎通を検証する（中央サーバーのみ。プロビジョナーはサーバーホスト上で
+  指定プロビジョナーの起動と `fxg internal stdio` の `NodeHello`
+  ハンドシェイク疎通を検証する（ハブのみ。プロビジョナーはハブホスト上で
   子プロセス起動されるため）。`ProvisionerTestResponse`
   (`ok` / `node_id` / `stderr` ログ末尾 / `error`)
   を返却し、検証後は一時環境を破棄する。
@@ -845,32 +845,34 @@ pub enum ServerToNodeMsg {
   非対応の場合は履歴 Replay を注入して継続する。応答は `ResumeSessionResponse`
   (`session_id` / `context_restored`)。稼働中セッションは `INVALID_STATE`、
   一時VMセッションは v1 では `INVALID_STATE`
-  を返却する。中央サーバー経由の場合は
+  を返却する。ハブ経由の場合は
   対象ノードへ `ResumeSession` を中継する (設計: docs/04 §4.1)。
 - `POST /api/v1/sessions/:id/archive`:
   セッションをアーカイブ/復元する (`{ "archived": true | false }`。
   `fxg session archive` / `unarchive` の Web UI 版)。アーカイブは
   一覧からの非表示/復元のみで、イベントログは保持される。応答は
-  `SessionArchiveResponse` (`session_id` / `archived_at`)。中央サーバー
+  `SessionArchiveResponse` (`session_id` / `archived_at`)。ハブ
   経由の場合は対象ノードへ `ArchiveSession` を中継する。
 - `DELETE /api/v1/sessions/:id`:
   セッションを削除する (`fxg session delete` の Web UI 版。204 No Content)。
   稼働中セッションは停止を待ってから `SessionDeleted` (tombstone) を追記し、
   本文イベント・承認履歴をパージする (**復元不能**)。
-  アーカイブ済みでも削除できる。中央サーバー経由の場合は対象ノードへ
+  アーカイブ済みでも削除できる。ハブ経由の場合は対象ノードへ
   `DeleteSession` を中継する。
 - `GET /api/v1/search?q=...&limit=...`: SQLite FTS5 を用いた全セッション
   横断の全文検索。クエリは URL のクエリパラメータのみで受け取り、JSON body は
   受け付けない。
 - `POST /api/v1/push/subscribe`: Android / Desktop PWA の Web Push
-  サブスクリプション登録 (中央サーバーのみ)。VAPID 鍵は初回起動時に
+  サブスクリプション登録 (ハブのみ)。VAPID 鍵は初回起動時に
   `~/.flexagent/vapid.json` へ自動生成され、公開鍵は `GET /api/v1/system/info`
   の `vapid_public_key` (base64url) で配布される。
 - `POST /api/v1/system/kill-switch`: **緊急停止 (Panic
   Button)**。全ノードの稼働中セッション、実行中プロセスツリー、PTYを一括強制終了。
+- `POST /api/v1/system/shutdown`: ハブを graceful shutdown する（`fxg hub stop` が使用。
+  認証必須。再起動は `fxg hub start`）。
 - `GET /api/v1/audit/logs?limit=50`:
-  監査ログ（操作日時、操作種別、送信元IP、クライアント種別）の取得。中央サーバーでは
-  `server.db`、 ローカルノードでは `node.db` の `audit_logs` を参照する。
+  監査ログ（操作日時、操作種別、送信元IP、クライアント種別）の取得。ハブでは
+  `hub.db`、 ローカルノードでは `node.db` の `audit_logs` を参照する。
 - `GET /api/v1/agents`:
   ACP Registry
   カタログとノード別の利用可否を返す (`AgentSummary[]`)。各エージェントは
@@ -879,7 +881,7 @@ pub enum ServerToNodeMsg {
   `managed_versions`、`external_path`、`custom_config` を持つ。`sources` が空 =
   そのノードでは未導入。`npx` / `uvx` は既定では `sources` に含まれず、
   `package_available` が true のものだけ UI から有効化できる。
-  中央サーバーではオンラインのいずれかのノード
+  ハブではオンラインのいずれかのノード
   (`ListAgents` 中継) からカタログを取得し、全ノードの
   `NodeHello.installed_agents`
   を統合して `installed_nodes` (利用可能なノード一覧) を埋める。
@@ -911,26 +913,26 @@ pub enum ServerToNodeMsg {
   旧トークン (Bearer / `fxg_session` Cookie) は即時無効化される。
 - `GET /api/v1/nodes/tokens`:
   発行済みノード個別トークン一覧 (`node_id` + トークンハッシュ先頭 12 文字。
-  平文は保存しない)。中央サーバーのみ。
+  平文は保存しない)。ハブのみ。
 - `POST /api/v1/nodes/tokens`:
   ノード個別トークンを発行
   (`{ node_id }`)。平文トークンは**発行時の応答でのみ**返却し、
-  `server.db.nodes.token_hash` には SHA-256
-  ハッシュを保存する。中央サーバーのみ。
+  `hub.db.nodes.token_hash` には SHA-256
+  ハッシュを保存する。ハブのみ。
   未登録のノードはプレースホルダで登録し `NodeHello` で上書きされる。
 - `DELETE /api/v1/nodes/tokens/:node_id`:
-  ノード個別トークンを失効させる。中央サーバーのみ。
+  ノード個別トークンを失効させる。ハブのみ。
 
 ### 3.2 Client WebSocket (`/api/v1/client/ws`)
 
 1. 接続時にクライアントが
    `Subscribe { since_cursor: Option<u64>, focused_session_id: Option<String> }`
    を送信する。
-   - `since_cursor` は**接続先ストア**（中央サーバーなら
-     `server.db`、ローカルノードなら `node.db`）の `session_events.cursor`
+   - `since_cursor` は**接続先ストア**（ハブなら
+     `hub.db`、ローカルノードなら `node.db`）の `session_events.cursor`
      を指定する。接続先を切り替えた場合は
      もう一方のカーソルは使えないため、`None`（初回全量）から開始する。
-2. サーバー / ノードは該当カーソル以降の未取得イベントを
+2. ハブ / ノードは該当カーソル以降の未取得イベントを
    `SessionEventBatch { events, cursor }`
    として即座に流し、以降はリアルタイムイベント（同バッチ形式および
    `LiveStreamDelta`）をプッシュします。
@@ -950,9 +952,9 @@ pub enum ServerToNodeMsg {
      **REST 専用**とする（冪等な状態変更を1経路にまとめ、WS と REST の
      ペイロード差異をなくす）。REST は `already_resolved` を返す。
    - **一時VMブートストラップログ (`BootstrapLog`)**:
-     一時VMの起動中（`fxg daemon
-     --stdio` の `NodeHello` 前）はノードの `node.db` が存在しないため、中央
-     サーバーがプロビジョナーの `stderr` を `{ op: "bootstrap_log", session_id,
+     一時VMの起動中（`fxg internal stdio`
+     の `NodeHello` 前）はノードの `node.db` が存在しないため、ハブ
+     がプロビジョナーの `stderr` を `{ op: "bootstrap_log", session_id,
      line }` として**エフェメラル配信**する（イベントログには永続化されず、
      再接続時は復元されない）。UI はセッション詳細の「Environment Bootstrap
      Log」カードにリアルタイム表示する。
@@ -974,7 +976,7 @@ xterm互換アダプター）とノード上の ConPTY / Unix PTY
 
 - **セキュリティ制御 (`allow_remote_pty`)**:
   - ノード側設定で `allow_remote_pty = false`
-    の場合、リモート（中央サーバー経由）からの `spawn` 要求に対して
+    の場合、リモート（ハブ経由）からの `spawn` 要求に対して
     `{ op: "error", code: "FORBIDDEN", message: "Remote PTY is disabled on this node by security policy" }`
     を返し、接続を切断します。
 - クライアントから接続時に `{ op: "attach", pty_id: "..." }` または
@@ -986,17 +988,17 @@ xterm互換アダプター）とノード上の ConPTY / Unix PTY
 
 ---
 
-## 4. CLI (`fxg`) ⇔ Local Daemon (`fxg daemon`) 間 ローカルIPC
+## 4. CLI (`fxg`) ⇔ Local Node (`fxg node`) 間 ローカルIPC
 
 - **トランスポート**:
-  - **Windows**: Named Pipe (`\\.\pipe\fxg-daemon-<username>`)
+  - **Windows**: Named Pipe (`\\.\pipe\fxg-node-<username>`)
   - **Linux / macOS / WSL**: Unix Domain Socket
-    (`$XDG_RUNTIME_DIR/fxg/daemon.sock` または `/tmp/fxg-<uid>/daemon.sock`)
+    (`$XDG_RUNTIME_DIR/fxg/node.sock` または `/tmp/fxg-<uid>/node.sock`)
 - **フレーミング**: Length-prefixed JSON（4バイトのリトルエンディアン長さヘッダ
   ＋ JSONペイロード）
-- **バージョン**: 各リクエストは `protocol_version` を持ち、デーモンは
+- **バージョン**: 各リクエストは `protocol_version` を持ち、ノードは
   `IPC_PROTOCOL_VERSION` と一致しない場合に `VERSION_MISMATCH` を返して接続を
-  閉じる。CLI とデーモンは同一 `fxg` バイナリで動作する前提。
+  閉じる。CLI とノードは同一 `fxg` バイナリで動作する前提。
 
 ### 4.1 リクエスト / レスポンス
 
@@ -1008,7 +1010,7 @@ pub struct IpcRequest {
 }
 
 pub enum IpcRequestKind {
-    /// Server ⇔ Node と同じ型をローカルで実行する
+    /// Hub ⇔ Node と同じ型をローカルで実行する
     Node { request: NodeRpcRequest },
     /// CLI 専用のクエリ / セッション操作
     Local { request: LocalRequest },
@@ -1025,13 +1027,13 @@ pub enum IpcResultKind {
 }
 ```
 
-デーモンは `IpcServerMessage::Response { request_id, outcome }` で応答する。
+ノードは `IpcServerMessage::Response { request_id, outcome }` で応答する。
 `EventBatch` / `LiveStreamDelta` は従来どおり非同期でプッシュされる。
 
 ### 4.2 NodeRpc として実行する操作
 
-以下は `ServerToNodeMsg::NodeRpc` と同一の `NodeRpcRequest` /
-`NodeRpcResponse` を使う。デーモンはネットワークを介さずインプロセスで
+以下は `HubToNodeMsg::NodeRpc` と同一の `NodeRpcRequest` /
+`NodeRpcResponse` を使う。ノードはネットワークを介さずインプロセスで
 `rpc::execute` を呼ぶ。
 
 - `ProjectLink`
@@ -1054,6 +1056,6 @@ pub enum IpcResultKind {
   `WorktreePrune`（`cwd` から論理プロジェクトを解決するため CLI 専用）
 - **管理**: `KillAll`, `AuthToken`, `GitCredential`, `Ping`
 
-セッションコマンドは、Node ⇔ Server 側の `CommandResult` と共通化する
+セッションコマンドは、Node ⇔ Hub 側の `CommandResult` と共通化する
 A1.5（保留）の完了後に `NodeRpcRequest` へ移行する余地を残している。
 Worktree 操作は `cwd` 解決が必要なため、現時点ではローカルに残す。
