@@ -561,19 +561,19 @@ export class ApiClient {
   }
 
   /** `GET /api/v1/hub/secrets` (hub-owned). */
-  serverSecrets(): Promise<SecretsResponse> {
+  hubSecrets(): Promise<SecretsResponse> {
     return this.#request("GET", "/api/v1/hub/secrets");
   }
 
   /** `PUT /api/v1/hub/secrets/:id` (write-only). */
-  upsertServerSecret(secretId: string, request: UpsertSecretRequest): Promise<SecretsResponse> {
+  upsertHubSecret(secretId: string, request: UpsertSecretRequest): Promise<SecretsResponse> {
     return this.#request("PUT", `/api/v1/hub/secrets/${encodeURIComponent(secretId)}`, {
       body: request,
     });
   }
 
   /** `DELETE /api/v1/hub/secrets/:id`. */
-  deleteServerSecret(secretId: string): Promise<SecretsResponse> {
+  deleteHubSecret(secretId: string): Promise<SecretsResponse> {
     return this.#request("DELETE", `/api/v1/hub/secrets/${encodeURIComponent(secretId)}`);
   }
 

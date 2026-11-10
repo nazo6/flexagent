@@ -42,21 +42,17 @@ impl HubClient {
         })
     }
 
-    /// Build a client for the hub running on this host (`[hub] listen_addr`).
+    /// Build a client for the hub reachable from this host.
+    ///
+    /// Prefers the address published by a running local hub (`hub.addr`), then
+    /// `[node] hub_url`, then `[hub] listen_addr`.
     pub fn local(env: EnvLookup<'_>) -> Result<Self> {
-        let global = GlobalConfig::load(env).context("failed to load ~/.flexagent/config.toml")?;
-        let listen = global.hub.resolved_listen_addr();
-        let host = match listen.rsplit_once(':') {
-            Some((host, port)) if host.is_empty() || host == "0.0.0.0" => {
-                format!("127.0.0.1:{port}")
-            }
-            _ => listen.to_owned(),
-        };
+        let base = local_hub_base(env)?;
         let token =
             fxg_hub::api::auth::load_or_create_token(&fxg_home(env).join(AUTH_TOKEN_FILE_NAME))
                 .context("failed to load ~/.flexagent/auth_token")?;
         Ok(Self {
-            base: format!("http://{host}"),
+            base,
             token,
             http: reqwest::Client::new(),
         })
@@ -147,6 +143,38 @@ async fn decode<T: serde::de::DeserializeOwned>(response: reqwest::Response) -> 
         );
     }
     serde_json::from_slice(&bytes).context("failed to decode hub response")
+}
+
+/// Normalize a listen address for a loopback HTTP URL.
+fn normalize_listen(addr: &str) -> String {
+    match addr.rsplit_once(':') {
+        Some((host, port)) if host.is_empty() || host == "0.0.0.0" || host == "[::]" => {
+            format!("127.0.0.1:{port}")
+        }
+        _ => addr.to_owned(),
+    }
+}
+
+/// Base URL of the hub reachable from this host.
+///
+/// Prefers the address published by a running local hub (`hub.addr`), then
+/// `[node] hub_url`, then `[hub] listen_addr`.
+pub fn local_hub_base(env: EnvLookup<'_>) -> Result<String> {
+    let home = fxg_home(env);
+    if let Ok(addr) = std::fs::read_to_string(home.join("hub.addr")) {
+        let addr = addr.trim();
+        if !addr.is_empty() {
+            return Ok(format!("http://{}", normalize_listen(addr)));
+        }
+    }
+    let global = GlobalConfig::load(env).context("failed to load ~/.flexagent/config.toml")?;
+    if let Some(url) = global.node.hub_url.as_deref() {
+        return hub_http_url(url);
+    }
+    Ok(format!(
+        "http://{}",
+        normalize_listen(global.hub.resolved_listen_addr())
+    ))
 }
 
 /// Extract the HTTP origin from a Node Hub WS URL (`ws://host:8080/api/v1/node/ws`).

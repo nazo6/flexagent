@@ -14,11 +14,11 @@
   import { sync } from "#lib/stores/app.svelte.ts";
   import { toast } from "svelte-sonner";
 
-  type Section = "bootstrap" | "machine" | "server" | "projects";
+  type Section = "bootstrap" | "machine" | "hub" | "projects";
 
   let { section, query = "" }: { section: Section; query?: string } = $props();
 
-  const isServer = $derived(sync.connection.role === "hub");
+  const isHub = $derived(sync.connection.role === "hub");
   const onlineNodes = $derived(sync.nodes.filter((node) => node.is_online));
 
   let selectedNode = $state("");
@@ -38,8 +38,8 @@
     revision: 0,
   });
 
-  // Server settings form
-  let serverForm = $state({ vapid_subject: "", revision: 0 });
+  // Hub settings form
+  let hubForm = $state({ vapid_subject: "", revision: 0 });
   let gitCredentials = $state<
     { host: string; provider: string; username: string; detail: string }[]
   >([]);
@@ -55,13 +55,11 @@
   let editingProfile = $state<string | null>(null);
   let profileForm = $state({ setup: "", env: "", revision: 0 });
 
-  const targetNode = $derived(
-    isServer ? selectedNode : (sync.connection.systemInfo?.node_id ?? ""),
-  );
-  const showSecrets = $derived(section === "machine" || (section === "server" && isServer));
+  const targetNode = $derived(isHub ? selectedNode : (sync.connection.systemInfo?.node_id ?? ""));
+  const showSecrets = $derived(section === "machine" || (section === "hub" && isHub));
 
   $effect(() => {
-    if (isServer && selectedNode === "" && onlineNodes.length > 0) {
+    if (isHub && selectedNode === "" && onlineNodes.length > 0) {
       selectedNode = onlineNodes[0].node_id;
     }
   });
@@ -84,19 +82,19 @@
           targetNode !== "" ? await sync.connection.client.nodeSettings(targetNode) : null;
         syncNodeForm();
       }
-      if (section === "bootstrap" || section === "machine" || section === "server") {
-        if (isServer) {
+      if (section === "bootstrap" || section === "machine" || section === "hub") {
+        if (isHub) {
           hubSnapshot = await sync.connection.client.hubSettings();
-          syncServerForm();
+          syncHubForm();
         }
       }
       if (section === "machine") {
         secrets =
           targetNode !== "" ? (await sync.connection.client.nodeSecrets(targetNode)).secrets : [];
-      } else if (section === "server" && isServer) {
-        secrets = (await sync.connection.client.serverSecrets()).secrets;
+      } else if (section === "hub" && isHub) {
+        secrets = (await sync.connection.client.hubSecrets()).secrets;
       }
-      if (section === "projects" && isServer) {
+      if (section === "projects" && isHub) {
         await sync.refreshProjects();
         const entries = await Promise.all(
           sync.projects.map(async (project) => {
@@ -124,9 +122,9 @@
     };
   }
 
-  function syncServerForm(): void {
+  function syncHubForm(): void {
     if (!hubSnapshot) return;
-    serverForm = {
+    hubForm = {
       vapid_subject: hubSnapshot.hub.vapid_subject ?? "",
       revision: hubSnapshot.hub.revision,
     };
@@ -164,11 +162,10 @@
     }
   }
 
-  async function saveServer(): Promise<void> {
+  async function saveHub(): Promise<void> {
     try {
       hubSnapshot = await sync.connection.client.updateHubSettings({
-        vapid_subject:
-          serverForm.vapid_subject.trim() === "" ? null : serverForm.vapid_subject.trim(),
+        vapid_subject: hubForm.vapid_subject.trim() === "" ? null : hubForm.vapid_subject.trim(),
         git_credentials: Object.fromEntries(
           gitCredentials
             .filter((entry) => entry.host.trim() !== "")
@@ -189,10 +186,10 @@
                     },
             ]),
         ),
-        expected_revision: serverForm.revision,
+        expected_revision: hubForm.revision,
       });
-      syncServerForm();
-      toast.success("Saved server settings.");
+      syncHubForm();
+      toast.success("Saved hub settings.");
     } catch (cause) {
       toast.error(cause instanceof Error ? cause.message : String(cause));
     }
@@ -207,12 +204,12 @@
         description: secretForm.description.trim() === "" ? null : secretForm.description.trim(),
         value: secretForm.value,
       };
-      if (!(section === "server" && isServer) && targetNode === "") {
+      if (!(section === "hub" && isHub) && targetNode === "") {
         throw new Error("node is not selected");
       }
       const response =
-        section === "server" && isServer
-          ? await sync.connection.client.upsertServerSecret(key, request)
+        section === "hub" && isHub
+          ? await sync.connection.client.upsertHubSecret(key, request)
           : await sync.connection.client.upsertNodeSecret(targetNode, key, request);
       secrets = response.secrets;
       secretForm = { key: "", description: "", value: "" };
@@ -225,12 +222,12 @@
   async function deleteSecret(secret: SecretSummary): Promise<void> {
     if (!confirm(`Delete secret "${secret.id}"?`)) return;
     try {
-      if (!(section === "server" && isServer) && targetNode === "") {
+      if (!(section === "hub" && isHub) && targetNode === "") {
         throw new Error("node is not selected");
       }
       const response =
-        section === "server" && isServer
-          ? await sync.connection.client.deleteServerSecret(secret.id)
+        section === "hub" && isHub
+          ? await sync.connection.client.deleteHubSecret(secret.id)
           : await sync.connection.client.deleteNodeSecret(targetNode, secret.id);
       secrets = response.secrets;
       toast.success(`Deleted secret "${secret.id}".`);
@@ -285,7 +282,7 @@
 
   const bootstrapRows = $derived<Row[]>(
     section === "bootstrap"
-      ? isServer
+      ? isHub
         ? hubSnapshot
           ? [
               {
@@ -385,7 +382,7 @@
 </script>
 
 <div class="flex flex-col gap-3">
-  {#if isServer && (section === "bootstrap" || section === "machine")}
+  {#if isHub && (section === "bootstrap" || section === "machine")}
     <div class="flex flex-wrap items-center gap-2">
       <Label for="catalog-node">Target node</Label>
       <select
@@ -467,11 +464,7 @@
           </div>
         </div>
         <div class="flex items-center gap-2">
-          <Button
-            size="sm"
-            disabled={isServer && targetNode === ""}
-            onclick={() => void saveNode()}
-          >
+          <Button size="sm" disabled={isHub && targetNode === ""} onclick={() => void saveNode()}>
             Save
           </Button>
           <span class="text-muted-foreground text-[13px]">revision {nodeForm.revision}</span>
@@ -482,18 +475,17 @@
         </p>
       {/if}
     </Card>
-  {:else if section === "server"}
-    {#if !isServer}
+  {:else if section === "hub"}
+    {#if !isHub}
       <Card class="gap-2 p-4">
-        <h2 class="font-medium">Server settings</h2>
+        <h2 class="font-medium">Hub settings</h2>
         <p class="text-muted-foreground text-[13px]">
-          Server-owned settings live in the hub's <code>hub.db</code>. Connect to the central server
-          to edit them.
+          Hub-owned settings live in <code>hub.db</code>. Connect to the hub to edit them.
         </p>
       </Card>
     {:else}
       <Card class="gap-3 p-4">
-        <h2 class="font-medium">Server</h2>
+        <h2 class="font-medium">Hub</h2>
         <p class="text-muted-foreground text-[13px]">
           Owned by <code>hub.db</code>: Web Push contact and Git credential providers.
         </p>
@@ -502,7 +494,7 @@
           <Input
             id="vapid-subject"
             placeholder="mailto:admin@example.com"
-            bind:value={serverForm.vapid_subject}
+            bind:value={hubForm.vapid_subject}
           />
         </div>
         <div class="flex flex-col gap-2">
@@ -523,11 +515,11 @@
                 placeholder={entry.provider === "env" ? "TOKEN_ENV" : "SECRET_KEY"}
                 bind:value={entry.detail}
                 disabled={entry.provider === "gh_cli"}
-                list={entry.provider === "secret" ? "server-secrets-datalist" : undefined}
+                list={entry.provider === "secret" ? "hub-secrets-datalist" : undefined}
               />
             </div>
           {/each}
-          <datalist id="server-secrets-datalist">
+          <datalist id="hub-secrets-datalist">
             {#each secrets as s (s.id)}
               <option value={s.id}>{s.description ? `${s.id} (${s.description})` : s.id}</option>
             {/each}
@@ -547,15 +539,15 @@
           </div>
         </div>
         <div class="flex items-center gap-2">
-          <Button size="sm" onclick={() => void saveServer()}>Save</Button>
-          <span class="text-muted-foreground text-[13px]">revision {serverForm.revision}</span>
+          <Button size="sm" onclick={() => void saveHub()}>Save</Button>
+          <span class="text-muted-foreground text-[13px]">revision {hubForm.revision}</span>
         </div>
       </Card>
     {/if}
   {:else if section === "projects"}
     <Card class="gap-3 p-4">
       <h2 class="font-medium">Project profiles</h2>
-      {#if !isServer}
+      {#if !isHub}
         <p class="text-muted-foreground text-[13px]">
           Bootstrap profiles for temporary VMs are owned by the hub. Open the hub Web UI to edit
           them.

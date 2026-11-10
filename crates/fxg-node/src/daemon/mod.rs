@@ -739,6 +739,7 @@ pub struct NodeDaemon {
     http_task: tokio::task::JoinHandle<()>,
     ipc_task: tokio::task::JoinHandle<()>,
     sync_task: Option<tokio::task::JoinHandle<()>>,
+    addr_file: std::path::PathBuf,
 }
 
 impl std::fmt::Debug for NodeDaemon {
@@ -794,6 +795,13 @@ impl NodeDaemon {
             .local_addr()
             .map_err(|err| NodeError::Hub(err.to_string()))?;
 
+        // Publish the bound address so `fxg web` / `session new` can open the
+        // Web UI even when the node was started with a `--listen` override.
+        let addr_file = state.paths().fxg_home().join("node.addr");
+        if let Err(err) = std::fs::write(&addr_file, http_addr.to_string()) {
+            tracing::warn!(path = %addr_file.display(), "failed to write the node address file: {err}");
+        }
+
         let http_state = state.clone();
         let http_shutdown = shutdown_rx.clone();
         let http_task = tokio::spawn(async move {
@@ -841,6 +849,7 @@ impl NodeDaemon {
             http_task,
             ipc_task,
             sync_task,
+            addr_file,
         })
     }
 
@@ -895,6 +904,10 @@ impl NodeDaemon {
         if let Err(err) = self.state.mark_offline().await {
             tracing::warn!("failed to mark node offline: {err}");
         }
+        fxg_protocol::discard_with!(
+            std::fs::remove_file(&self.addr_file),
+            "remove the node address file"
+        );
 
         if let Err(err) = self.http_task.await {
             tracing::error!(task = "http", "http task terminated unexpectedly: {err}");

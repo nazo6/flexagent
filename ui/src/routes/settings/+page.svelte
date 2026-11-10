@@ -30,7 +30,7 @@
   import ShieldIcon from "@lucide/svelte/icons/shield";
   import Trash2Icon from "@lucide/svelte/icons/trash-2";
 
-  const isServer = $derived(sync.connection.role === "hub");
+  const isHub = $derived(sync.connection.role === "hub");
 
   /** Selected settings tab (reflects deep links such as `?tab=agents`). */
   let activeTab = $state(page.url.searchParams.get("tab") ?? "bootstrap");
@@ -65,7 +65,7 @@
   /** Catalog search query (filters bootstrap and settings rows). */
   let query = $state("");
 
-  // --- Node pairing (central server only) ---
+  // --- Node pairing (hub only) ---
   const tokens = createResource<NodeTokenSummary[]>(() => sync.connection.client.nodeTokens(), {
     onError: (error) => toast.error(error instanceof Error ? error.message : String(error)),
   });
@@ -86,7 +86,7 @@
   let rotateBusy = $state(false);
 
   onMount(() => {
-    if (isServer) void tokens.refresh();
+    if (isHub) void tokens.refresh();
   });
 
   async function submitIssue(event: SubmitEvent): Promise<void> {
@@ -166,7 +166,7 @@
       <Tabs.Trigger value="bootstrap">Bootstrap</Tabs.Trigger>
       <Tabs.Trigger value="machine">This machine</Tabs.Trigger>
       <Tabs.Trigger value="projects">Projects</Tabs.Trigger>
-      <Tabs.Trigger value="server">Server</Tabs.Trigger>
+      <Tabs.Trigger value="hub">Hub</Tabs.Trigger>
       <Tabs.Trigger value="agents">{m.settings_tab_agents()}</Tabs.Trigger>
       <Tabs.Trigger value="browser">Browser</Tabs.Trigger>
       <Tabs.Trigger value="audit">{m.settings_tab_audit()}</Tabs.Trigger>
@@ -204,8 +204,8 @@
       <SettingsCatalog section="projects" {query} />
     </Tabs.Content>
 
-    <Tabs.Content value="server" class="mt-2 flex flex-col gap-3">
-      <SettingsCatalog section="server" {query} />
+    <Tabs.Content value="hub" class="mt-2 flex flex-col gap-3">
+      <SettingsCatalog section="hub" {query} />
       <Card class="gap-3 p-4">
         <div class="flex items-start gap-2">
           <KeyRoundIcon class="text-muted-foreground mt-0.5 size-4" />
@@ -222,19 +222,19 @@
                 <Button
                   variant="outline"
                   size="sm"
-                  disabled={!isServer || tokens.loading}
+                  disabled={!isHub || tokens.loading}
                   onclick={() => void tokens.refresh()}
                 >
                   <RefreshCwIcon />
                   {m.common_refresh()}
                 </Button>
-                <Button size="sm" disabled={!isServer} onclick={() => (issueOpen = true)}>
+                <Button size="sm" disabled={!isHub} onclick={() => (issueOpen = true)}>
                   {m.settings_issue_token()}
                 </Button>
               </div>
             </div>
 
-            {#if !isServer}
+            {#if !isHub}
               <p class="text-muted-foreground text-[13px]">
                 {m.settings_node_pairing_hub_only()}
                 <code>{sync.connection.origin}</code>

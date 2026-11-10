@@ -24,6 +24,7 @@ pub struct Hub {
     listen_addr: SocketAddr,
     shutdown_tx: watch::Sender<bool>,
     task: JoinHandle<()>,
+    addr_file: std::path::PathBuf,
 }
 
 impl std::fmt::Debug for Hub {
@@ -45,6 +46,13 @@ impl Hub {
         let bound = listener
             .local_addr()
             .map_err(|err| HubError::Hub(err.to_string()))?;
+
+        // Publish the bound address so `fxg hub status` / `stop` / `web hub`
+        // can reach a hub started with a CLI `--listen` / `--port` override.
+        let addr_file = state.options().fxg_home.join("hub.addr");
+        if let Err(err) = std::fs::write(&addr_file, bound.to_string()) {
+            tracing::warn!(path = %addr_file.display(), "failed to write the hub address file: {err}");
+        }
 
         let (shutdown_tx, mut shutdown_rx) = watch::channel(false);
         state.set_shutdown_sender(shutdown_tx.clone());
@@ -101,6 +109,7 @@ impl Hub {
             listen_addr: bound,
             shutdown_tx,
             task,
+            addr_file,
         })
     }
 
@@ -149,6 +158,10 @@ impl Hub {
                 "server task terminated unexpectedly: {err}"
             );
         }
+        fxg_protocol::discard_with!(
+            std::fs::remove_file(&self.addr_file),
+            "remove the hub address file"
+        );
         tracing::info!("fxg hub start stopped");
     }
 
