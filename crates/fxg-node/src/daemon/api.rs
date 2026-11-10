@@ -67,11 +67,6 @@ impl ClientApiBackend for DaemonState {
         DaemonState::db(self)
     }
 
-    fn request_shutdown(&self) -> bool {
-        DaemonState::request_shutdown(self);
-        true
-    }
-
     fn auth_token(&self) -> String {
         DaemonState::auth_token(self)
     }
