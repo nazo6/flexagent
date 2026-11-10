@@ -1,4 +1,4 @@
-//! `fxg bootstrap-workspace`: zero-touch initialization inside an ephemeral VM.
+//! `fxg internal bootstrap-workspace`: zero-touch initialization inside an ephemeral VM.
 //!
 //! Design: `docs/01-architecture-and-sync.md` §6.3, `docs/05-cli-and-pwa-ui.md` §2.3.
 //!

@@ -1,10 +1,10 @@
 //! Central server REST API client (for the CLI).
 //!
 //! Operations that local IPC (a direct daemon connection) cannot provide —
-//! starting an ephemeral VM provisioner (`fxg run --provisioner`) and checking
-//! reachability (`fxg provisioners test`) — call the central server API named
-//! by `[node] central_server_url` in `config.toml` directly (design: docs/05
-//! §1.1; unavailable while the central server is stopped).
+//! starting an ephemeral VM provisioner (`fxg run --provisioner`) — call the
+//! central server API named by `[node] central_server_url` in `config.toml`
+//! directly (design: docs/05 §1.1; unavailable while the central server is
+//! stopped).
 //!
 //! Authentication uses the Bearer token from `~/.flexagent/auth_token`. When
 //! the CLI runs on the same host as the central server, the same file matches

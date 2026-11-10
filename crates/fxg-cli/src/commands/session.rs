@@ -475,7 +475,7 @@ fn print_and_check_done(
         UnifiedEventPayload::PermissionRequest {
             tool_name, summary, ..
         } => {
-            println!("! pending approval [{tool_name}] {summary} (see `fxg inbox list`) ");
+            println!("! pending approval [{tool_name}] {summary} (review it in the Web UI)");
         }
         UnifiedEventPayload::StatusChanged {
             status,

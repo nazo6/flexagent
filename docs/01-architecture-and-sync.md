@@ -295,8 +295,7 @@ Windows (`D:\ghq\github.com\nazo6\flexagent`)、Linux VPS
    のように相対パス（POSIXスラッシュ正規化）を付与します。
 3. **フォールバック（明示リンクも Git Remote もない）**:
    `local:<node_id>:<folder_name_hash>`
-   としてノード固有プロジェクトを作成します（後からUIや `fxg project link`
-   コマンドで Git 由来と同じ正規IDを設定すれば、リモートを持つ他ノードの
+   としてノード固有プロジェクトを作成します（後から Web UI で Git 由来と同じ正規IDを設定すれば、リモートを持つ他ノードの
    フォルダとマージ可能）。
 4. **表示名の自動導出**: `GitRemote` はリポジトリ名、`UserKey` はキーそのもの、
    `Local` はディレクトリ名。表示名は設定項目として保存しません。
@@ -349,13 +348,12 @@ Logical Project (例: github.com/nazo6/flexagent)
 GUI（Web UI / PWA）やCLIから以下のWorktree操作をシームレスに実行できます：
 
 1. **新規Worktree作成とセッション同時起動**:
-   - `fxg run <agent> --worktree feat/new-api`（または
-     `fxg worktree add feat/new-api`）や
+   - `fxg run <agent> --worktree feat/new-api` や
      GUIの「＋新規Worktreeで開始」から、`git worktree add -b feat/new-api <path> <base_branch>`
      （および `.fxg.toml` の `copy_files` / `post_create`
      フック）を自動実行してそのパスでエージェントを立ち上げます。
 2. **作業完了後の後片付け**:
-   - マージ後またはセッション完了時に、CLI（`fxg worktree remove`）やGUIからワンクリックで
+   - マージ後またはセッション完了時に、GUIからワンクリックで
      Worktree
      ディレクトリを安全にクリーンアップ（`git worktree remove`）できます。
 

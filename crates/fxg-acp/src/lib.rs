@@ -6,7 +6,7 @@
 //!   abstraction for adding agents with custom protocols without changing
 //!   `fxg-node` itself
 //! - [`registry`]: fetching, caching and launch resolution for the ACP Registry
-//!   (`registry.json`), plus install management (`fxg agents ...`)
+//!   (`registry.json`), plus catalog management used by the Web UI
 //! - [`acp`][]: `AcpDriver` (standard ACP agent control via `agent-client-protocol`)
 //! - [`opencode2`][]: `OpenCode2Driver` (`opencode serve` bridge + native TUI attach)
 

@@ -404,7 +404,7 @@ pub(crate) async fn register_ephemeral_node(
         .map_err(ApiError::from)
 }
 
-/// `fxg provisioners test <name>`: validates provisioner startup and the NodeHello handshake.
+/// Provisioner connectivity check: validates provisioner startup and the NodeHello handshake.
 pub async fn provisioner_test(
     state: &ServerState,
     name: &str,

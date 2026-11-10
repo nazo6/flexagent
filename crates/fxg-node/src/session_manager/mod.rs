@@ -165,7 +165,7 @@ pub struct ActiveSessionSummary {
     pub queued_prompts: usize,
 }
 
-/// Pending permission entry for `fxg inbox`.
+/// Pending permission entry (approval inbox).
 #[derive(Debug, Clone, PartialEq)]
 pub struct PendingPermissionSummary {
     /// Target session ID
@@ -180,7 +180,7 @@ pub struct PendingPermissionSummary {
     pub options: Vec<PermissionOption>,
 }
 
-/// Pending elicitation entry for `fxg inbox`.
+/// Pending elicitation entry (approval inbox).
 #[derive(Debug, Clone, PartialEq)]
 pub struct PendingElicitationSummary {
     /// Target session ID
@@ -335,7 +335,7 @@ impl SessionManager {
         }
     }
 
-    /// The registry (used by the CLI's `fxg agents` etc.).
+    /// The ACP registry (used by the Web UI agent catalog and `fxg agents login`).
     pub fn registry(&self) -> &AcpRegistry {
         &self.inner.registry
     }
@@ -500,7 +500,7 @@ impl SessionManager {
         list
     }
 
-    /// List of pending permission requests (`fxg inbox list`).
+    /// List of pending permission requests (approval inbox).
     pub fn pending_permissions(&self) -> Vec<PendingPermissionSummary> {
         let sessions = self.inner.sessions.lock().expect("sessions poisoned");
         let mut list: Vec<PendingPermissionSummary> = sessions
@@ -512,7 +512,7 @@ impl SessionManager {
         list
     }
 
-    /// List of pending elicitations (`fxg inbox list`).
+    /// List of pending elicitations (approval inbox).
     pub fn pending_elicitations(&self) -> Vec<PendingElicitationSummary> {
         let sessions = self.inner.sessions.lock().expect("sessions poisoned");
         let mut list: Vec<PendingElicitationSummary> = sessions

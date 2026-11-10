@@ -17,7 +17,7 @@ use crate::error::NodeError;
 use crate::project::{self, ResolvedProject};
 use crate::worktree;
 
-/// Maximum search depth for the bulk Git repository scan (`fxg project scan`).
+/// Maximum search depth for the bulk Git repository scan (Web UI project scan).
 const SCAN_MAX_DEPTH: usize = 3;
 
 /// Converts an ACP Registry operation error into [`NodeError::Agent`].
@@ -157,7 +157,7 @@ impl DaemonState {
             .await?;
 
         // Do not leave the old project binding behind when re-linking
-        // (e.g. when the project_key is changed via `fxg project link`)
+        // (e.g. when the project_key is changed in the Web UI)
         self.db()
             .delete_other_project_bindings(
                 self.node_id(),
@@ -195,7 +195,7 @@ impl DaemonState {
     }
 
     /// Writes an explicit `project_key` link and applies it immediately
-    /// (`fxg project link` / Client API shared implementation).
+    /// (Client API implementation shared with the Web UI).
     ///
     /// Linking a Worktree records the link on the main Worktree root so that other
     /// Worktrees of the same repository inherit it. Existing sessions of every
@@ -273,7 +273,7 @@ impl DaemonState {
     }
 
     /// Scans and registers Git repositories under the given directory (or
-    /// `node.project_scan_dirs` when omitted) (`fxg project scan`).
+    /// `node.project_scan_dirs` when omitted).
     ///
     /// Returns the list of directories actually scanned.
     pub async fn project_scan(&self, dir: Option<&Path>) -> Result<Vec<String>, NodeError> {
@@ -377,7 +377,7 @@ impl DaemonState {
         Ok(AgentsResponse { agents })
     }
 
-    /// Runs an agent management action and returns a display message (Web UI version of `fxg agents`).
+    /// Runs an agent management action and returns a display message.
     ///
     /// On success, updates the node's own `nodes` row (the list of available agents).
     pub async fn manage_agent(&self, action: &AgentAction) -> Result<String, NodeError> {

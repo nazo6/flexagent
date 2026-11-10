@@ -4,7 +4,7 @@
 //! the central server, reading and writing JSON Lines:
 //!
 //! - Receive `NodeHello` (reporting `is_ephemeral = true` as an ephemeral node)
-//! - `fxg git-askpass` (local IPC) → `GitCredentialRequest` →
+//! - `fxg internal git-askpass` (local IPC) → `GitCredentialRequest` →
 //!   test-side `GitCredentialResponse` → askpass prints the token
 //! - `DrainAndShutdown` → `DrainComplete` → the process exits cleanly
 //!

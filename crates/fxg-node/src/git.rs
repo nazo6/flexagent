@@ -384,7 +384,7 @@ fn strip_prefix_path(path: &str, prefix: &str) -> String {
 /// Recursively searches the given path for Git repositories (directories containing
 /// a `.git` directory).
 ///
-/// Used by `fxg project scan`. Symbolic links are not followed.
+/// Used by the Web UI project scan. Symbolic links are not followed.
 pub fn find_repositories(root: &Path, max_depth: usize) -> Result<Vec<PathBuf>, NodeError> {
     let mut repositories = Vec::new();
     let mut stack = vec![(root.to_path_buf(), 0usize)];

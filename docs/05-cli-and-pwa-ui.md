@@ -7,13 +7,18 @@
 CLI は曖昧な暗黙サブコマンド（`fxg <agent>` 短縮形）を設けず、すべて
 **`fxg run <agent>` 等の明示的なサブコマンド体系**に統一します。
 
-CLI のパースには **`usage-rs`**（`usage = { package = "usage-rs", version = "6",
+CLI のパースには **`usage-rs`**（`usage = { package = "usage-rs", version = "7.3",
 features = ["completions"] }`）を使用し、`#[derive(Cli)]` / `#[derive(Args)]` /
 `#[derive(Subcommands)]` + `Run` / `RunWith` でコマンドを定義します（`clap`
 は使用しない）。
 引数なしの **`fxg` 実行はデフォルトサブコマンドとして `fxg web` が実行**され、デーモンが未起動であれば自動でバックグラウンド起動し、トークン付きURLでブラウザを自動オープンします。
 
-Web UI をメインのインターフェースとするローカルファースト設計に基づき、`fxg` の CLI サブコマンドは日常的に使うコアコマンド（起動・セッション管理・デーモン/サーバー常駐サービス・認証・緊急停止）に厳選しています。Web UI 側で完結する管理機能（承認インボックス、論理プロジェクト一覧、Git Worktree一覧、ACPエージェント一覧/ログイン、VMプロビジョナー一覧）は CLI サブコマンドを廃止し Web UI へ一本化されています。また、Git連携や一時VM起動等のシステム統合用コマンドは `fxg internal` 配下に集約し非表示 (`#[usage(hide)]`) としています。
+`__usage_spec__` が出力する KDL spec を単一のソースとして、シェル補完（Bash /
+Zsh / Fish / PowerShell / Nushell）・manpage・Markdown リファレンスを `usage` CLI
+から生成し、本セクションのコマンドリファレンスと同期させます（`usage` CLI は
+`mise.toml` で固定）。
+
+Web UI をメインのインターフェースとするローカルファースト設計に基づき、`fxg` の CLI サブコマンドは日常的に使うコアコマンド（起動・セッション管理・デーモン/サーバー常駐サービス・認証・緊急停止）に厳選しています。Web UI 側で完結する管理機能（承認インボックス、論理プロジェクト一覧、Git Worktree一覧、ACPエージェント一覧、VMプロビジョナー一覧）は CLI サブコマンドを廃止し Web UI へ一本化されています（ACP エージェントのログイン/ログアウトだけは対話端末が必要なため `fxg agents login|logout` に残しています）。また、Git連携や一時VM起動等のシステム統合用コマンドは `fxg internal` 配下に集約し非表示 (`#[usage(hide)]`) としています。
 
 ### 1.1 コマンド一覧ツリー
 
@@ -36,6 +41,8 @@ Web UI をメインのインターフェースとするローカルファース�
 | **`fxg session archive <id>`**              | セッションを一覧からアーカイブする（一覧から非表示。イベントログは保持され `unarchive` で復元可能）                                                                               | -                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | **`fxg session unarchive <id>`**            | アーカイブ済みセッションを一覧へ戻す                                                                                                                                              | -                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | **`fxg session delete <id>`**               | セッションを削除する（稼働中は停止してから会話ログ・承認履歴を消去。**復元不能**。Worktree のファイルは削除しない）                                                               | -                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| **`fxg agents login <id>`**                 | エージェントの ACP 認証方法を取得し、ログインする（terminal 型は対話実行、agent 型は `authenticate`）                                                                             | `--method <ID>`: 認証方法を明示（省略時は terminal 型を優先）                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| **`fxg agents logout <id>`**                | エージェントが `auth.logout` を広告している場合にログアウトする                                                                                                                   | -                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | **`fxg daemon`**                            | ノードデーモンをフォアグラウンド起動（任意でタスクトレイ常駐）                                                                                                                    | `--listen <ADDR>`: ローカルHTTP/WSバインド先 (既定 `127.0.0.1:7860`)<br/>`--server-url <WS_URL>`: 中央サーバーWS URL<br/>`--allow-remote-pty`: リモートからのWeb PTY起動を許可<br/>`--stdio`: 標準入出力パイプ (JSON Lines) モードで起動<br/>`--ephemeral`: 一時VMモード (自動Drain & Bundle退避有効)<br/>`--workspace <DIR>`: `--stdio` 時の初期対象ディレクトリ<br/>`--tray`: タスクトレイに常駐する (状態表示・自動起動の登録/解除・Web UI を開く・終了)<br/>`--no-tray`: `[node] tray = true` での常駐を一時的に無効化                                                        |
 | **`fxg server`**                            | 中央サーバーをフォアグラウンド起動                                                                                                                                                | `--listen <ADDR>`: バインド先 (既定 `0.0.0.0:8080`)<br/>`--port <PORT>`: ポート番号上書き                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | **`fxg service <action>`**                  | OSログイン時のバックグラウンド常駐サービス管理 (Win/Mac/Linux/WSL)                                                                                                                | `<action>`: `install` \| `uninstall` \| `start` \| `stop` \| `restart` \| `status`<br/>`--server`: `daemon` ではなく `server` を対象にする                                                                                                                                                                                                                                                                                                                                                                                                                                        |
@@ -63,7 +70,11 @@ fxg session resume 0195f0...                     # 停止したセッション�
 fxg session archive 0195f0...                    # セッションを一覧からアーカイブ (復元可能)
 fxg session delete 0195f0...                     # セッションを削除 (会話ログを消去。復元不能)
 
-# 3. デーモン・サーバー・常駐サービス・緊急停止
+# 3. エージェント認証
+fxg agents login claude-code                     # ACP 認証方法を選んでログイン (terminal 型は対話実行)
+fxg agents logout claude-code                    # エージェントが auth.logout を広告していればログアウト
+
+# 4. デーモン・サーバー・常駐サービス・緊急停止
 fxg daemon --tray                                # デーモンをタスクトレイ常駐で起動
 fxg service install                              # OSログイン時のデーモン自動起動を設定
 fxg service status                               # デーモン状態・中央サーバー接続・未同期Outbox件数を確認
@@ -143,10 +154,11 @@ no_color = false
 
 - Worktree の作成先は `~/.flexagent/worktrees/{project}/{branch}` に固定です。
   `dir_template` / `copy_files` / `post_create` / `--path` は廃止しました。
-  `fxg worktree add <branch> [--base <branch>]` のみを受け付けます。
+  Worktree の作成は Web UI、または `fxg run <agent> -w <branch> [--base <branch>]`
+  / `fxg session fork <id> -w <branch>` から行います。
 - 一時VMの初期化は `server.db` の `project_profiles`
   (`bootstrap_setup` / `bootstrap_env`) が所有します。サーバーは
-  `FXG_PROJECT_PROFILE_B64` を注入し、`fxg bootstrap-workspace` は
+  `FXG_PROJECT_PROFILE_B64` を注入し、`fxg internal bootstrap-workspace` は
   `--profile <path>` またはこの環境変数から `ProjectProfile` を読み取ります。
   ツール検出はリポジトリ内の `mise.toml` / `.tool-versions` / マニフェストのみを
   使います。
@@ -392,7 +404,7 @@ export interface ITerminalAdapter {
 - [x] `node.db` / `server.db` のSQLiteマイグレーション実装
       (Phase 1 完了: 単一スキーマ + FTS5 trigram + 投影エンジン。実装は
       `crates/fxg-db/`)
-- [ ] Git Remote URL正規化による論理プロジェクト解決 (`fxg project info`)
+- [ ] Git Remote URL正規化による論理プロジェクト解決 (Web UI のプロジェクト画面)
 - [ ] Windows Named Pipe / Unix Domain Socket による `fxg` CLI ⇔ `fxg daemon`
       ローカルIPC疎通
 - [ ] **セキュリティ基礎**:
@@ -470,7 +482,7 @@ export interface ITerminalAdapter {
     を置換し、`FXG_NODE_ID` / `FXG_GIT_URL` / `FXG_GIT_BRANCH` / 短命
     `FXG_GIT_TOKEN` を注入。`stderr` は `ServerWsMessage::BootstrapLog`
     として UI へエフェメラル配信する。
-- [x] `fxg bootstrap-workspace` の実装（`mise` / `uv`
+- [x] `fxg internal bootstrap-workspace` の実装（`mise` / `uv`
       単一バイナリの自動取得と、リポジトリ設定ファイルからの完全ステートレスなツール自動構築）
   - `Cargo.toml` / `package.json` / `pyproject.toml` / `mise.toml` /
     `.tool-versions` / `.fxg.toml [bootstrap]`（`.fxg.toml` は廃止。現在は
@@ -481,7 +493,7 @@ export interface ITerminalAdapter {
 - [x] `GIT_ASKPASS` + `GitCredentialRequest`
       パイププロキシによる一時VM内への秘密鍵・トークン非保持化
   - ブートストラップ中は短命トークンを echo する専用ヘルパー、デーモン起動後は
-    `fxg git-askpass`（ローカルIPC）→ `GitCredentialRequest`
+    `fxg internal git-askpass`（ローカルIPC）→ `GitCredentialRequest`
     でオンメモリ中継する。
 - [x] `DrainAndShutdown` による一時VM破棄前の未送信イベント完全フラッシュ
   - アイドルタイムアウト（`idle_timeout_secs`）またはセッション終了で Drain
