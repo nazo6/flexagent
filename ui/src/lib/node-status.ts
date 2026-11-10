@@ -38,7 +38,6 @@ export function getNodeAvailability(node: NodeSummary | null | undefined): NodeA
         dotColorClass: "bg-ok",
         badgeVariant: "secondary",
       };
-    case "bootstrapping":
     case "provisioning":
       return {
         isAvailable: false,

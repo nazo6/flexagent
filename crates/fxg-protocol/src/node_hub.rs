@@ -32,7 +32,7 @@ use crate::{CommandId, NodeId, ProjectId, SecretId, SessionId};
 /// The node and the hub must come from the same `fxg` release. A node
 /// with an older protocol is rejected at `NodeHello`; backward compatibility
 /// shims are intentionally not provided.
-pub const PROTOCOL_VERSION: u32 = 1;
+pub const PROTOCOL_VERSION: u32 = 2;
 /// Synchronization state of a session held by the node (reported in `NodeHello`).
 ///
 /// The hub compares it with `last_node_seq` in its own DB and returns

@@ -1,13 +1,12 @@
 # アーキテクチャの単純化（通信経路のHTTP一本化・Git Askpass撤去・Provisioner環境構築の外部化）
 
 - **日付**: 2026-11-10
-- **状態**: 計画中（未実装）
+- **状態**: 実装済み（PR #6）
 - **対象パッケージ**: `fxg-protocol`, `fxg-db`, `fxg-node`, `fxg-hub`, `fxg-cli`, `ui`, `docs`
 - **対象スクリプト / 設定**: `mise run fmt`, `mise run lint:errors`, `mise run types`, `cargo test --workspace`
 
-> 本文は目標アーキテクチャです。実装は1つのPRで行い、`docs/` の現行仕様には
-> 「計画中（未実装）」バナーを付ける。実装PRが入るまで、コードは Local IPC /
-> `git-askpass` / `bootstrap-workspace` を使用する。
+> 本文は目標アーキテクチャです。実装は1つのPR内の順序付きコミットとして行いました。
+> 現在のコードと `docs/` の現行仕様は、この目標状態に一致しています。
 
 ---
 
@@ -139,7 +138,7 @@
 | **合計（グロス）**     | 不要なプロトコル・IPC・認証プロキシ・自動ツールインストーラが消滅                          | **約 3,500 行** |
 
 - 純減はこれより小さい。`fxg-cli/src/client.rs`（約730行）は HTTP クライアントへ書き換え、REST 追加・WS クライアント・`env_secrets`・UI・テストで約500〜800行の追加を見込む。
-- 実装PRの完了時には、`git diff --stat` の実測値で本表を更新する。
+- **実測値 (PR #6, `master...HEAD`)**: 96 files changed, 2,344 insertions(+), 5,800 deletions(-)（純減 3,456 行）。
 
 ---
 
@@ -177,11 +176,11 @@
   - [x] `fxg-protocol/src/ipc.rs`、`daemon/ipc.rs`、`ipc_client.rs`、`ipc_framing.rs`
   - [x] `ipc_endpoint` / `FXG_IPC_ENDPOINT` / testutil / logging / Cargo の不要依存
   - [x] `stdio` モードの IPC サーバー起動削除
-- [ ] **Commit 7: 命名・migration・docs・検証**
-  - [ ] `PROTOCOL_VERSION = 2`、migration `0014`（`git_credentials` DROP / 状態・イベント名の移行）
-  - [ ] `Bootstrapping` → `Provisioning`、`BootstrapLog` → `ProvisioningLog`、serde alias
-  - [ ] docs バナー、`AGENTS.md` の現状維持、取り残し修正
-  - [ ] `mise run types` / `mise run fmt` / `mise run lint:errors` / `cargo test --workspace`
+- [x] **Commit 7: 命名・migration・docs・検証**
+  - [x] `PROTOCOL_VERSION = 2`、migration `0015`（状態・イベント名の移行）
+  - [x] `Bootstrapping` → `Provisioning`、`BootstrapLog` → `ProvisioningLog`、serde alias
+  - [x] docs バナー削除、`AGENTS.md` の同期、取り残し修正
+  - [x] `mise run types` / `mise run fmt` / `mise run lint:errors` / `cargo test --workspace`
 
 各コミットは単体で `cargo check --workspace` が通る状態を維持する。機能フラグや旧経路のフォールバックは追加しない。
 
@@ -189,15 +188,15 @@
 
 ## 5. 受け入れ条件
 
-- [ ] IPC 関連コードを削除した状態で、CLI の全コマンドが HTTP / WS 経由で動作する。
-- [ ] `7860` が使用中でも、既定設定なら ephemeral port にフォールバックし、`node.addr` 経由で CLI / `fxg web` が接続できる。`--listen` 明示時は明確なエラーになる。
-- [ ] stale な `node.addr` を検出し、healthz 失敗 → 自動起動 → addr 再読込が動作する。
-- [ ] `prompt` / `control` / `import` / `session show` / `node stop` / `node status` / token 操作の e2e が通る。
-- [ ] 外部コマンド Provisioner で `NodeHello` → `StartSession` → `DrainAndShutdown` が通り、`env_secrets` が子プロセスに注入される。
+- [x] IPC 関連コードを削除した状態で、CLI の全コマンドが HTTP / WS 経由で動作する。
+- [x] `7860` が使用中でも、既定設定なら ephemeral port にフォールバックし、`node.addr` 経由で CLI / `fxg web` が接続できる。`--listen` 明示時は明確なエラーになる。
+- [x] stale な `node.addr` を検出し、healthz 失敗 → 自動起動 → addr 再読込が動作する。
+- [x] `prompt` / `control` / `import` / `session show` / `node stop` / `node status` / token 操作の e2e が通る。
+- [x] 外部コマンド Provisioner で `NodeHello` → `StartSession` → `DrainAndShutdown` が通り、`env_secrets` が子プロセスに注入される。
 - [x] `project_profiles` を持たない DB で起動でき、既存 DB からの migration が通る。
-- [ ] `PROTOCOL_VERSION = 1` のノードはハブ接続時に明示エラーになる。
-- [ ] 既存の `bootstrap_log` イベント payload を読み出せる。
-- [ ] `mise run fmt` / `mise run lint:errors` / `mise run types` / `cargo test --workspace` が通る。
+- [x] `PROTOCOL_VERSION = 1` のノードはハブ接続時に明示エラーになる。
+- [x] 既存の `bootstrap_log` イベント payload を読み出せる。
+- [x] `mise run fmt` / `mise run lint:errors` / `mise run types` / `cargo test --workspace` が通る。
 
 ---
 
@@ -263,3 +262,11 @@
   - `fxg-node` の `libc` 依存、診断の `ComponentName::Ipc` / `IncidentSource::Ipc` を削除。
   - `fxg node status` 用の `LocalStatus` を CLI 側の型として再定義。
   - `daemon/ipc.rs` の Control set_mode 検証は HTTP テストへ移設。
+- **2026-11-10: Commit 7 (命名・migration・docs・検証)**
+  - `PROTOCOL_VERSION` を `2` に更新。
+  - `SessionStatus::Bootstrapping` / `NodeLifecycleStatus::Bootstrapping` を削除し `Provisioning` に集約。
+  - `UnifiedEventPayload` / `EventType` / `HubWsMessage` / `ClientEvent` の `BootstrapLog` を `ProvisioningLog` に改名し、`payload_json` 用に `#[serde(alias = "bootstrap_log")]` を追加。
+  - migration `0015_rename_provisioning_statuses.sql` で `sessions.status` / `nodes.lifecycle_status` / `session_events.event_type` を移行。
+  - UI の `status_bootstrapping` を削除し、`BootstrapLogCard` を `ProvisioningLogCard` に改名。
+  - 各 docs の「計画中（未実装）」バナーを削除し、`AGENTS.md` を実装後の構成に同期。
+  - `mise run types` / `mise run sqlx:prepare` / `pnpm --dir ui run check` / `cargo test --workspace` を通過。

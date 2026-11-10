@@ -222,7 +222,7 @@ pub struct ProvisionersResponse {
 /// `POST /api/v1/provisioners/:name/test` response (connectivity check).
 ///
 /// Starts the provisioner and verifies up to the `NodeHello` handshake of
-/// `fxg internal stdio` (or reports a failure during bootstrapping).
+/// `fxg internal stdio` (or reports a failure during provisioning).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct ProvisionerTestResponse {
@@ -879,12 +879,13 @@ pub enum HubWsMessage {
         /// The delta body
         delta: StreamDeltaPayload,
     },
-    /// A progress log line of ephemeral VM bootstrapping (`stderr`) (ephemeral).
+    /// A progress log line of ephemeral VM provisioning (`stderr`) (ephemeral).
     ///
-    /// Bootstrapping happens before the ephemeral node's `node.db` exists, so it is
+    /// Provisioning happens before the ephemeral node's `node.db` exists, so it is
     /// streamed directly from the hub instead of being persisted in the
     /// event log.
-    BootstrapLog {
+    #[serde(alias = "bootstrap_log")]
+    ProvisioningLog {
         /// Target session ID
         session_id: SessionId,
         /// A single log line

@@ -228,7 +228,6 @@ pub(super) async fn pump_events(
         previous,
         Some(
             SessionStatus::Provisioning
-                | SessionStatus::Bootstrapping
                 | SessionStatus::Idle
                 | SessionStatus::Running
                 | SessionStatus::WaitingPermission

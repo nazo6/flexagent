@@ -1,10 +1,5 @@
 # 02. データベーススキーマ設計（`node.db` / `hub.db` 単一スキーマ）
 
-> **Status: 計画中（未実装）** — 本ドキュメントは
-> [`changelog/2026-11-10-architecture-simplification.md`](changelog/2026-11-10-architecture-simplification.md)
-> の目標アーキテクチャを記述しています。実装PRが入るまで、現行コードは Local IPC /
-> `git-askpass` / `bootstrap-workspace` を使用します。
-
 FlexAgentは外部DBミドルウェアを必要としない **SQLite (`sqlx`)**
 を採用し、WALモード (`PRAGMA journal_mode = WAL;`) で動作します。
 E2E暗号化を行わないため、ハブ側で会話履歴の構造化クエリおよび
@@ -359,8 +354,9 @@ CREATE INDEX idx_incidents_last_seen ON incidents(last_seen_at DESC);
 > **アーキテクチャ簡素化の migration**:
 > `0012_provisioner_env_secrets.sql` が `provisioners.env_secrets_json` を ADD し、
 > `0013_remove_project_profiles.sql` が `project_profiles` を DROP、
-> `0014_remove_git_credentials.sql` が `git_credentials` を DROP する。
-> `bootstrapping` / `bootstrap_log` の改名は後続の migration で行う。詳細は
+> `0014_remove_git_credentials.sql` が `git_credentials` を DROP、
+> `0015_rename_provisioning_statuses.sql` が `bootstrapping` を `provisioning` に、
+> `bootstrap_log` を `provisioning_log` に更新する。詳細は
 > [`changelog/2026-11-10-architecture-simplification.md`](changelog/2026-11-10-architecture-simplification.md)
 > を参照。
 

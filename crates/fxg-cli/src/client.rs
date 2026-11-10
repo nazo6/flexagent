@@ -708,7 +708,6 @@ fn is_active_status(status: SessionStatus) -> bool {
     matches!(
         status,
         SessionStatus::Provisioning
-            | SessionStatus::Bootstrapping
             | SessionStatus::Idle
             | SessionStatus::Running
             | SessionStatus::WaitingPermission

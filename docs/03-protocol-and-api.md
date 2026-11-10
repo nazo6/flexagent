@@ -1,10 +1,5 @@
 # 03. プロトコル・API仕様 (`fxg-protocol`)
 
-> **Status: 計画中（未実装）** — 本ドキュメントは
-> [`changelog/2026-11-10-architecture-simplification.md`](changelog/2026-11-10-architecture-simplification.md)
-> の目標アーキテクチャを記述しています。実装PRが入るまで、現行コードは Local IPC /
-> `git-askpass` / `bootstrap-workspace` を使用します。
-
 `crates/fxg-protocol` クレートに定義する共通データ型と、2つの通信経路（① Node ⇔
 Hub WebSocket/Stdio、② Client ⇔ Hub/Node HTTP+WS）のプロトコル仕様です。
 CLI (`fxg`) はローカルノードの HTTP REST API / WebSocket（`node.addr`、既定は

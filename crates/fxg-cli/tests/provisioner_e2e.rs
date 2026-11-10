@@ -207,7 +207,7 @@ async fn provisioner_runs_stdio_node_and_drains() {
     // 3. Bootstrap logs are delivered to the Client WS
     let mut bootstrap_lines = Vec::new();
     while let Ok(event) = events.try_recv() {
-        if let ClientEvent::BootstrapLog {
+        if let ClientEvent::ProvisioningLog {
             session_id: event_session,
             line,
         } = event

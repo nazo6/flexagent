@@ -76,7 +76,7 @@ pub fn classify_payload(payload: &UnifiedEventPayload) -> (EventType, Option<Str
             );
             join_parts(parts)
         }
-        UnifiedEventPayload::BootstrapLog { line } => join_parts(vec![line.clone()]),
+        UnifiedEventPayload::ProvisioningLog { line } => join_parts(vec![line.clone()]),
         UnifiedEventPayload::StatusChanged {
             status,
             error_message,

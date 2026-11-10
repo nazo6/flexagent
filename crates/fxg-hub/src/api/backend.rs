@@ -97,8 +97,8 @@ pub enum ClientEvent {
         /// Delta body
         delta: fxg_protocol::common::StreamDeltaPayload,
     },
-    /// Progress log from temporary VM bootstrap (`stderr`) (not persisted)
-    BootstrapLog {
+    /// Progress log from temporary VM provisioning (`stderr`) (not persisted)
+    ProvisioningLog {
         /// Target session ID
         session_id: SessionId,
         /// One log line

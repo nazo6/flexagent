@@ -757,7 +757,7 @@ export function buildTimelineItems(sources: TimelineSources): TimelineItem[] {
 }
 
 // ----------------------------------------------------------------------
-// Metadata extraction helpers (session header, control bar, Bootstrap log)
+// Metadata extraction helpers (session header, control bar, provisioning log)
 // ----------------------------------------------------------------------
 
 /** Session capabilities (the latest applied `CapabilitiesUpdated`). */
@@ -883,13 +883,13 @@ function compactionStatusLabel(status: CompactionStatus, detail: string | null):
 }
 
 /**
- * Extract Bootstrap log lines from the event list (`stderr` output when starting
+ * Extract provisioning log lines from the event list (`stderr` output when starting
  * a temporary VM).
  */
-export function bootstrapLogLines(events: SessionEventEnvelope[], maxLines = 500): string[] {
+export function provisioningLogLines(events: SessionEventEnvelope[], maxLines = 500): string[] {
   const lines: string[] = [];
   for (const event of events) {
-    if (event.payload.type === "bootstrap_log") lines.push(event.payload.data.line);
+    if (event.payload.type === "provisioning_log") lines.push(event.payload.data.line);
   }
   return lines.length > maxLines ? lines.slice(lines.length - maxLines) : lines;
 }

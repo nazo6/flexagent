@@ -21,7 +21,6 @@ const LOCAL_PATH: &str = "/home/nazo/src/flexagent";
 
 const SESSION_STATUSES: &[SessionStatus] = &[
     SessionStatus::Provisioning,
-    SessionStatus::Bootstrapping,
     SessionStatus::Idle,
     SessionStatus::Running,
     SessionStatus::WaitingPermission,
@@ -32,7 +31,6 @@ const SESSION_STATUSES: &[SessionStatus] = &[
 
 const NODE_LIFECYCLE_STATUSES: &[NodeLifecycleStatus] = &[
     NodeLifecycleStatus::Provisioning,
-    NodeLifecycleStatus::Bootstrapping,
     NodeLifecycleStatus::Ready,
     NodeLifecycleStatus::Draining,
     NodeLifecycleStatus::Terminated,
@@ -109,7 +107,7 @@ fn event_types() -> Vec<EventType> {
         EventType::TerminalOutput,
         EventType::TerminalInput,
         EventType::CapabilitiesUpdated,
-        EventType::BootstrapLog,
+        EventType::ProvisioningLog,
         EventType::UsageUpdated,
         EventType::TurnEnded,
         EventType::CompactionUpdated,

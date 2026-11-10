@@ -1,10 +1,5 @@
 # 01. 全体アーキテクチャ・同期モデル・一時VM・プロジェクト解決
 
-> **Status: 計画中（未実装）** — 本ドキュメントは
-> [`changelog/2026-11-10-architecture-simplification.md`](changelog/2026-11-10-architecture-simplification.md)
-> の目標アーキテクチャを記述しています。実装PRが入るまで、現行コードは Local IPC /
-> `git-askpass` / `bootstrap-workspace` を使用します。
-
 本ドキュメントでは、FlexAgent (`fxg`)
 の通信トポロジー、ハブ停止時にも機能するローカルファースト同期（Store-and-Forward）、ネットワーク非依存の一時VM・サンドボックスノード（`fxg internal stdio`）、および異なるPC・OS間で同じプロジェクトとして認識する仕組みを定義します。
 

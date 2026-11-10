@@ -7,7 +7,7 @@
 //!   `NodeToHubMsg` / `HubToNodeMsg` (a direct connection to `fxg internal stdio`)
 //! - Injects `FXG_GIT_URL` / `FXG_GIT_BRANCH` / a short-lived `FXG_GIT_TOKEN` and the ephemeral
 //!   node ID (`FXG_NODE_ID`) as environment variables at provisioner startup
-//! - Streams `stderr` to the UI as `BootstrapLog` (ephemeral)
+//! - Streams `stderr` to the UI as `ProvisioningLog` (ephemeral)
 //! - After the handshake (NodeHello), registers the hub connection before sending
 //!   `StartSession` to start the session (the node is "offline" during bootstrap)
 //! - On idle timeout / when all sessions end, sends `DrainAndShutdown` and discards the child
@@ -616,7 +616,7 @@ async fn spawn_child(state: &HubState, request: SpawnRequest) -> Result<SpawnHan
                         match &pump_session_id {
                             Some(session_id) => {
                                 fxg_protocol::discard_with!(
-                                    pump_state.hub().client_events().send(ClientEvent::BootstrapLog {
+                                    pump_state.hub().client_events().send(ClientEvent::ProvisioningLog {
                                         session_id: session_id.clone().into(),
                                         line,
                                     }),

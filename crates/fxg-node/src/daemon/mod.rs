@@ -607,7 +607,6 @@ impl DaemonState {
         use fxg_protocol::common::SessionStatus;
         vec![
             SessionStatus::Provisioning,
-            SessionStatus::Bootstrapping,
             SessionStatus::Idle,
             SessionStatus::Running,
             SessionStatus::WaitingPermission,

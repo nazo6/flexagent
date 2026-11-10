@@ -179,11 +179,11 @@ pub(crate) async fn handle_client_ws<B: ClientApiBackend>(backend: B, socket: We
                         break;
                     }
                 }
-                Ok(ClientEvent::BootstrapLog { session_id, line }) => {
+                Ok(ClientEvent::ProvisioningLog { session_id, line }) => {
                     // Temporary VM bootstrap log (ephemeral; not persisted)
                     if send_ws_json(
                         &mut sender,
-                        &HubWsMessage::BootstrapLog { session_id, line },
+                        &HubWsMessage::ProvisioningLog { session_id, line },
                     )
                     .await
                     .is_err()

@@ -319,7 +319,7 @@ fn describe_event(payload: &UnifiedEventPayload) -> String {
             Some(message) => format!("status_changed {status} ({message})"),
             None => format!("status_changed {status}"),
         },
-        UnifiedEventPayload::BootstrapLog { line } => {
+        UnifiedEventPayload::ProvisioningLog { line } => {
             format!("bootstrap {}", truncate(line, 60))
         }
         UnifiedEventPayload::UsageUpdated {

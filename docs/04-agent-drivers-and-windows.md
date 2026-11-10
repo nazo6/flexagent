@@ -1,10 +1,5 @@
 # 04. エージェントドライバ実装 (ACP一本化) と Windows 対応詳細
 
-> **Status: 計画中（未実装）** — 本ドキュメントは
-> [`changelog/2026-11-10-architecture-simplification.md`](changelog/2026-11-10-architecture-simplification.md)
-> の目標アーキテクチャを記述しています。実装PRが入るまで、現行コードは Local IPC /
-> `git-askpass` / `bootstrap-workspace` を使用します。
-
 `crates/fxg-acp` および `crates/fxg-pty`
 におけるエージェント制御・プロセス管理の具体的な実装設計です。
 

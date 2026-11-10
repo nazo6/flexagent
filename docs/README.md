@@ -1,10 +1,5 @@
 # FlexAgent (`fxg`) 設計・実装ドキュメント
 
-> **Status: 計画中（未実装）** — 本ドキュメントは
-> [`changelog/2026-11-10-architecture-simplification.md`](changelog/2026-11-10-architecture-simplification.md)
-> の目標アーキテクチャを記述しています。実装PRが入るまで、現行コードは Local IPC /
-> `git-askpass` / `bootstrap-workspace` を使用します。
-
 **FlexAgent (`fxg`)**
 は、ACP（Agent Client
 Protocol）対応コーディングエージェントを「好きな場所から好きな場所で動かせる」セルフホスト型・ローカルファーストのエージェントマネージャです。

@@ -7,8 +7,6 @@ export function sessionStatusLabel(status: SessionStatus): string {
   switch (status) {
     case "provisioning":
       return m.status_provisioning();
-    case "bootstrapping":
-      return m.status_bootstrapping();
     case "idle":
       return m.status_idle();
     case "running":

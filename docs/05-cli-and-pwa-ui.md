@@ -1,10 +1,5 @@
 # 05. CLI (`fxg`) コマンド仕様・設定ファイルスキーマ・PWA フロントエンド設計
 
-> **Status: 計画中（未実装）** — 本ドキュメントは
-> [`changelog/2026-11-10-architecture-simplification.md`](changelog/2026-11-10-architecture-simplification.md)
-> の目標アーキテクチャを記述しています。実装PRが入るまで、現行コードは Local IPC /
-> `git-askpass` / `bootstrap-workspace` を使用します。
-
 ---
 
 ## 1. `fxg` CLI コマンド完全リファレンス
@@ -177,7 +172,7 @@ no_color = false
 `node.name` / `allow_remote_pty` / `project_scan_dirs` / `tray`、`[agents]`、
 `[provisioners]`、`vapid_subject` は `config.toml` から削除されました。
 `[hub.git_credentials]` はアーキテクチャ簡素化で廃止され、Git 認証は
-Provisioner の `env_secrets` に移行します。Web UI の設定カタログは現在値と出所
+Provisioner の `env_secrets` に移行しました。Web UI の設定カタログは現在値と出所
 (`config.toml` / `env` / `cli` / `default`) を読み取り専用で表示します。
 
 `[node] listen_addr` の既定は `127.0.0.1:7860` です。7860 が使用中で明示指定が

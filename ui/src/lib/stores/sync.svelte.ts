@@ -101,12 +101,12 @@ export class SyncStore {
   /** Prompts sent with no `CommandResult` yet (Pending Queue). */
   pendingPrompts = $state(new Map<string, PendingPrompt>());
   /**
-   * Progress logs for ephemeral VM bootstrap (ephemeral; not persisted).
+   * Progress logs for ephemeral VM provisioning (ephemeral; not persisted).
    *
    * The server delivers `stderr` output from before the node's `node.db` exists
-   * as `HubWsMessage::BootstrapLog`. It is not restored on reconnect.
+   * as `HubWsMessage::ProvisioningLog`. It is not restored on reconnect.
    */
-  bootstrapLogs = $state(new Map<string, string[]>());
+  provisioningLogs = $state(new Map<string, string[]>());
 
   #timelines = $state(new Map<string, SessionTimeline>());
   #ws: WebSocket | null = null;
@@ -307,16 +307,16 @@ export class SyncStore {
     return timeline;
   }
 
-  /** Ephemeral bootstrap logs (most recent first, at most 500 lines). */
-  bootstrapLinesFor(sessionId: string): string[] {
-    return this.bootstrapLogs.get(sessionId) ?? [];
+  /** Ephemeral provisioning logs (most recent first, at most 500 lines). */
+  provisioningLinesFor(sessionId: string): string[] {
+    return this.provisioningLogs.get(sessionId) ?? [];
   }
 
-  #appendBootstrapLog(sessionId: string, line: string): void {
-    const current = this.bootstrapLogs.get(sessionId) ?? [];
+  #appendProvisioningLog(sessionId: string, line: string): void {
+    const current = this.provisioningLogs.get(sessionId) ?? [];
     const next = [...current, line];
     if (next.length > 500) next.splice(0, next.length - 500);
-    this.bootstrapLogs.set(sessionId, next);
+    this.provisioningLogs.set(sessionId, next);
   }
 
   /** Open a session (updates the WS priority delivery hint). */
@@ -491,7 +491,7 @@ export class SyncStore {
   async deleteSession(sessionId: string): Promise<void> {
     await this.connection.client.deleteSession(sessionId);
     this.#timelines.delete(sessionId);
-    this.bootstrapLogs.delete(sessionId);
+    this.provisioningLogs.delete(sessionId);
     await Promise.all([this.refreshSessions(), this.refreshInbox()]);
   }
 
@@ -522,8 +522,8 @@ export class SyncStore {
       case "live_stream_delta":
         this.timelineFor(message.session_id).applyDelta(message.delta);
         break;
-      case "bootstrap_log":
-        this.#appendBootstrapLog(message.session_id, message.line);
+      case "provisioning_log":
+        this.#appendProvisioningLog(message.session_id, message.line);
         break;
       case "command_result":
         this.#resolveCommand(message);
@@ -561,7 +561,7 @@ export class SyncStore {
         cursor,
       });
       this.#timelines.clear();
-      this.bootstrapLogs.clear();
+      this.provisioningLogs.clear();
       void this.refreshAll();
     }
 
@@ -583,7 +583,7 @@ export class SyncStore {
           // Deleted sessions disappear from the list and approval Inbox, and the
           // local timeline is discarded (only the tombstone event remains after)
           this.#timelines.delete(event.session_id);
-          this.bootstrapLogs.delete(event.session_id);
+          this.provisioningLogs.delete(event.session_id);
           sessionsDirty = true;
           inboxDirty = true;
           break;
