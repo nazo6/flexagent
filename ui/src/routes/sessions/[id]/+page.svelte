@@ -314,7 +314,7 @@
         {/if}
 
         <div class="flex min-w-0 flex-col gap-0.5">
-          <div class="flex items-center gap-2">
+          <div class="flex min-w-0 items-center gap-2">
             <h1 class="truncate text-[15px] font-semibold tracking-tight">
               {session?.title ?? m.session_title_fallback()}
             </h1>
@@ -323,49 +323,61 @@
             {/if}
           </div>
 
-          <div class="text-muted-foreground flex flex-wrap items-center gap-x-2 text-[11px]">
+          <div
+            class="text-muted-foreground flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px]"
+          >
             <!-- Node availability status -->
             <NodeStatusBadge node={sessionNode} showNodeName={true} />
-            <span class="opacity-40">/</span>
-            <span class="truncate">{session?.project_id}</span>
+            <span class="hidden items-center gap-x-2 sm:inline-flex">
+              <span class="opacity-40">/</span>
+              <span class="truncate">{session?.project_id}</span>
+            </span>
             {#if session?.git_branch}
               <span class="opacity-40">/</span>
-              <span class="font-mono">{session.git_branch}</span>
+              <span class="min-w-0 truncate font-mono">{session.git_branch}</span>
             {/if}
             {#if session?.is_worktree}
               <span class="bg-muted rounded px-1 text-[11px]">wt</span>
             {/if}
             {#if session?.local_path}
-              <span class="opacity-40">/</span>
-              <button
-                type="button"
-                class="hover:text-foreground inline-flex items-center gap-1 font-mono text-[11px] truncate max-w-44 sm:max-w-xs md:max-w-md transition-colors cursor-pointer"
-                title={m.session_working_dir_copy_title({ path: session.local_path })}
-                onclick={() => {
-                  navigator.clipboard.writeText(session.local_path);
-                  toast.success(m.session_working_dir_copied());
-                }}
-              >
-                <FolderIcon class="text-signal size-3.5 shrink-0" />
-                <span class="truncate">{session.local_path}</span>
-              </button>
+              <span class="hidden items-center gap-x-2 sm:inline-flex">
+                <span class="opacity-40">/</span>
+                <button
+                  type="button"
+                  class="hover:text-foreground inline-flex min-w-0 max-w-44 cursor-pointer items-center gap-1 truncate font-mono text-[11px] transition-colors sm:max-w-xs md:max-w-md"
+                  title={m.session_working_dir_copy_title({ path: session.local_path })}
+                  onclick={() => {
+                    navigator.clipboard.writeText(session.local_path);
+                    toast.success(m.session_working_dir_copied());
+                  }}
+                >
+                  <FolderIcon class="text-signal size-3.5 shrink-0" />
+                  <span class="truncate">{session.local_path}</span>
+                </button>
+              </span>
             {/if}
-            <span class="opacity-40">/</span>
-            <span>{session?.agent_id}</span>
+            <span class="hidden items-center gap-x-2 sm:inline-flex">
+              <span class="opacity-40">/</span>
+              <span>{session?.agent_id}</span>
+            </span>
             {#if session?.updated_at}
               <span class="opacity-40">/</span>
-              <span>{formatRelativeTime(session.updated_at)}</span>
+              <span class="shrink-0">{formatRelativeTime(session.updated_at)}</span>
             {/if}
             {#if usage}
-              <span class="opacity-40">/</span>
-              <ContextMeter {usage} />
+              <span class="hidden items-center gap-x-2 sm:inline-flex">
+                <span class="opacity-40">/</span>
+                <ContextMeter {usage} />
+              </span>
             {/if}
           </div>
         </div>
       </div>
 
       <!-- Right: mode switch / pane toggle buttons -->
-      <div class="flex items-center gap-1.5">
+      <div
+        class="order-3 flex w-full flex-wrap items-center gap-1.5 md:order-none md:w-auto md:flex-nowrap"
+      >
         <!-- Mobile: tab switch buttons -->
         <div class="flex rounded-md border bg-muted/30 p-0.5 md:hidden">
           <button
