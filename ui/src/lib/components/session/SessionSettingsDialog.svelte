@@ -146,7 +146,7 @@
             <select
               bind:value={sessionMode}
               onchange={onModeChange}
-              class="border-input bg-background focus-visible:ring-ring/40 h-8 rounded-md border px-2 text-[13px] outline-none focus-visible:ring-1"
+              class="border-input bg-surface-raised focus-visible:ring-ring/40 h-8 rounded-md border px-2 text-[13px] outline-none focus-visible:ring-1"
             >
               <option value="default">{m.new_session_mode_default()}</option>
               <option value="code">{m.new_session_mode_code()}</option>

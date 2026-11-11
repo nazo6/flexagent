@@ -239,7 +239,7 @@
 
   <div class="flex items-center gap-1.5">
     <div
-      class="border-input bg-background flex min-w-0 flex-1 items-center gap-1.5 rounded-md border px-2 py-1"
+      class="border-input bg-surface-raised flex min-w-0 flex-1 items-center gap-1.5 rounded-md border px-2 py-1"
     >
       <SearchIcon class="text-muted-foreground size-3.5 shrink-0" />
       <input

@@ -370,16 +370,16 @@
     <div class="flex flex-col gap-2 px-1 pt-1">
       {#if isStopped}
         <div
-          class="border-warn/25 bg-warn-soft/40 text-warn flex flex-wrap items-center gap-2 rounded-md border px-3 py-1.5 text-[13px]"
+          class="border-warn/25 bg-warn-soft/40 text-warn flex items-center gap-2 rounded-md border px-3 py-1 text-[13px]"
         >
           <AlertTriangleIcon class="size-3.5 shrink-0" />
-          <span>
+          <span class="min-w-0 flex-1 truncate" title={m.chat_stopped_notice()}>
             {m.chat_stopped_notice()}
           </span>
           <Button
             variant="outline"
             size="sm"
-            class="ml-auto h-6 text-[11px]"
+            class="h-6 shrink-0 text-[11px]"
             disabled={sending || resuming}
             title={m.chat_resume_title()}
             onclick={() => void resumeSession()}

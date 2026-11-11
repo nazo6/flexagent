@@ -296,7 +296,7 @@
       <Label for="catalog-node">Target node</Label>
       <select
         id="catalog-node"
-        class="border-input bg-background h-8 rounded-md border px-2 text-[13px]"
+        class="border-input bg-surface-raised h-8 rounded-md border px-2 text-[13px]"
         bind:value={selectedNode}
       >
         {#each onlineNodes as node (node.node_id)}
@@ -352,7 +352,7 @@
             <Label for="node-tray">Tray</Label>
             <select
               id="node-tray"
-              class="border-input bg-background h-9 rounded-md border px-2 text-sm"
+              class="border-input bg-surface-raised h-9 rounded-md border px-2 text-sm"
               bind:value={nodeForm.tray}
             >
               <option value="">Default</option>
@@ -368,7 +368,7 @@
             <Label for="node-scan">Project scan directories (one per line)</Label>
             <textarea
               id="node-scan"
-              class="border-input bg-background min-h-24 rounded-md border p-2 font-mono text-[13px]"
+              class="border-input bg-surface-raised min-h-24 rounded-md border p-2 font-mono text-[13px]"
               bind:value={nodeForm.project_scan_dirs}></textarea>
           </div>
         </div>

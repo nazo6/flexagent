@@ -193,7 +193,7 @@
           {#if property.enum || property.oneOf}
             <select
               id={inputId}
-              class="border-input bg-background h-9 rounded-md border px-2 text-sm"
+              class="border-input bg-surface-raised h-9 rounded-md border px-2 text-sm"
               value={typeof values[key] === "string" ? values[key] : ""}
               onchange={(event) => setString(key, event.currentTarget.value)}
             >

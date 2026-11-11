@@ -145,7 +145,7 @@
         <select
           id="wt-node"
           bind:value={createNodeId}
-          class="border-input bg-background h-9 rounded-md border px-2 text-sm"
+          class="border-input bg-surface-raised h-9 rounded-md border px-2 text-sm"
         >
           {#each nodes as node (node.node_id)}
             <option value={node.node_id} disabled={!node.is_online}>
@@ -230,7 +230,7 @@
       <select
         id="prune-node"
         bind:value={pruneNodeId}
-        class="border-input bg-background h-9 rounded-md border px-2 text-sm"
+        class="border-input bg-surface-raised h-9 rounded-md border px-2 text-sm"
       >
         {#each nodes as node (node.node_id)}
           <option value={node.node_id} disabled={!node.is_online}>

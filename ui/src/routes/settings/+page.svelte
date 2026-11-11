@@ -28,6 +28,7 @@
   import CopyIcon from "@lucide/svelte/icons/copy";
   import KeyRoundIcon from "@lucide/svelte/icons/key-round";
   import RefreshCwIcon from "@lucide/svelte/icons/refresh-cw";
+  import SearchIcon from "@lucide/svelte/icons/search";
   import ShieldIcon from "@lucide/svelte/icons/shield";
   import Trash2Icon from "@lucide/svelte/icons/trash-2";
 
@@ -165,12 +166,17 @@
     </p>
   </div>
 
-  <Input
-    placeholder={m.settings_search_placeholder()}
-    aria-label={m.settings_search_placeholder()}
-    bind:value={query}
-    class="max-w-md"
-  />
+  <div class="relative w-full max-w-md">
+    <SearchIcon
+      class="text-muted-foreground pointer-events-none absolute top-2.5 left-2.5 size-4"
+    />
+    <Input
+      placeholder={m.settings_search_placeholder()}
+      aria-label={m.settings_search_placeholder()}
+      bind:value={query}
+      class="pl-9"
+    />
+  </div>
 
   {#if query.trim() !== ""}
     <section class="flex flex-col gap-2">
@@ -326,7 +332,7 @@
             <select
               id="browser-theme"
               aria-label={m.settings_appearance_theme()}
-              class="border-input bg-background h-8 rounded-md border px-2 text-[13px]"
+              class="border-input bg-surface-raised h-8 rounded-md border px-2 text-[13px]"
               value={themePreference}
               onchange={(event) =>
                 setMode(event.currentTarget.value as "system" | "light" | "dark")}
@@ -388,7 +394,7 @@
             <select
               id="browser-send-shortcut"
               aria-label={m.settings_browser_send_shortcut()}
-              class="border-input bg-background h-8 rounded-md border px-2 text-[13px]"
+              class="border-input bg-surface-raised h-8 rounded-md border px-2 text-[13px]"
               value={prefs.sendShortcut}
               onchange={(event) =>
                 prefs.setSendShortcut(event.currentTarget.value as "enter" | "modifier_enter")}

@@ -197,7 +197,7 @@
       class={cn(
         "flex items-center justify-between rounded-md px-2.5 py-1.5 font-medium transition-colors",
         currentPath === "/"
-          ? "bg-accent text-foreground shadow-[inset_2px_0_0_0_var(--signal)]"
+          ? "bg-signal-soft text-foreground shadow-[inset_2px_0_0_0_var(--signal)]"
           : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
       )}
     >
@@ -213,7 +213,7 @@
       class={cn(
         "flex items-center justify-between rounded-md px-2.5 py-1.5 font-medium transition-colors",
         currentPath.startsWith("/inbox")
-          ? "bg-accent text-foreground shadow-[inset_2px_0_0_0_var(--signal)]"
+          ? "bg-signal-soft text-foreground shadow-[inset_2px_0_0_0_var(--signal)]"
           : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
       )}
     >
@@ -234,7 +234,7 @@
       class={cn(
         "flex items-center gap-2 rounded-md px-2.5 py-1.5 font-medium transition-colors",
         currentPath.startsWith("/projects")
-          ? "bg-accent text-foreground shadow-[inset_2px_0_0_0_var(--signal)]"
+          ? "bg-signal-soft text-foreground shadow-[inset_2px_0_0_0_var(--signal)]"
           : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
       )}
     >
@@ -248,7 +248,7 @@
       class={cn(
         "flex items-center gap-2 rounded-md px-2.5 py-1.5 font-medium transition-colors",
         currentPath.startsWith("/search")
-          ? "bg-accent text-foreground shadow-[inset_2px_0_0_0_var(--signal)]"
+          ? "bg-signal-soft text-foreground shadow-[inset_2px_0_0_0_var(--signal)]"
           : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
       )}
     >
@@ -262,7 +262,7 @@
       class={cn(
         "flex items-center gap-2 rounded-md px-2.5 py-1.5 font-medium transition-colors",
         currentPath.startsWith("/settings")
-          ? "bg-accent text-foreground shadow-[inset_2px_0_0_0_var(--signal)]"
+          ? "bg-signal-soft text-foreground shadow-[inset_2px_0_0_0_var(--signal)]"
           : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
       )}
     >
@@ -463,7 +463,7 @@
               class={cn(
                 "group flex items-center justify-between gap-2 rounded-md px-2 py-1.5 text-[13px] transition-colors",
                 isActive
-                  ? "bg-accent text-foreground shadow-[inset_2px_0_0_0_var(--signal)] font-medium"
+                  ? "bg-signal-soft text-foreground shadow-[inset_2px_0_0_0_var(--signal)] font-medium"
                   : "text-foreground/80 hover:bg-accent/40 hover:text-foreground",
                 isArchived && "opacity-70",
               )}

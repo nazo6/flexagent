@@ -279,6 +279,13 @@
     background: var(--signal-soft);
     color: var(--ink);
   }
+  /* Placeholders are prose, not code: keep them in the sans face even when the
+     field's value is monospace (IDs, commands, environment variables). */
+  input::placeholder,
+  textarea::placeholder {
+    font-family: var(--font-sans);
+    letter-spacing: normal;
+  }
 }
 
 @layer components {
