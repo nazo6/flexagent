@@ -140,6 +140,7 @@
   );
 
   const nodes = $derived(sync.nodes);
+  const onlineNodes = $derived(nodes.filter((node) => node.is_online));
   const selectedNode = $derived(nodes.find((n) => n.node_id === nodeId) ?? null);
   const nodeAvailability = $derived(getNodeAvailability(selectedNode));
   // Agents that can actually be launched on this node (based on the catalog's
@@ -550,6 +551,7 @@
     if (sync.projectsLoading || projects.length === 0 || sync.projectsError !== null) return "";
     if (!isProvisionerMode) {
       if (nodes.length === 0) return m.new_session_no_nodes();
+      if (onlineNodes.length === 0) return m.new_session_no_online_nodes();
       if (selectedNode !== null && !nodeAvailability.isAvailable) {
         return m.new_session_node_unavailable({
           node: selectedNode.name,
@@ -1100,15 +1102,16 @@
               >
                 {m.new_session_node_section()}
               </div>
-              {#if nodes.length === 0}
+              {#if onlineNodes.length === 0}
                 <p class="text-muted-foreground px-2 py-1.5 text-[13px]">
-                  {m.new_session_no_nodes()}
+                  {nodes.length === 0 ? m.new_session_no_nodes() : m.new_session_no_online_nodes()}
                 </p>
               {:else}
                 {#each nodes as node (node.node_id)}
                   {@const availability = getNodeAvailability(node)}
                   <PickerItem
                     selected={!isProvisionerMode && node.node_id === nodeId}
+                    disabled={!node.is_online}
                     onselect={() => selectNode(node.node_id)}
                   >
                     <span class="flex items-center gap-1.5">

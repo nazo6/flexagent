@@ -68,6 +68,17 @@ impl NodeRecord {
         }
     }
 
+    /// Creates a placeholder registration for a paired node that has not connected yet.
+    ///
+    /// The real values are overwritten by `NodeHello` when the node connects. The record is
+    /// offline so the UI does not treat it as available before the first connection.
+    pub fn pending(node_id: impl Into<String>) -> Self {
+        let node_id = node_id.into();
+        let mut record = Self::new(node_id.clone(), node_id, "unknown", "unknown", "unknown");
+        record.is_online = false;
+        record
+    }
+
     /// Sets the list of available agents.
     pub fn with_agents(mut self, agents: Vec<String>) -> Self {
         self.installed_agents = agents;
@@ -584,4 +595,20 @@ pub async fn bump_node_state_revision(pool: &SqlitePool, node_id: &str) -> Resul
     .await?;
     row.map(|row| u64::try_from(row.state_revision).unwrap_or(0))
         .ok_or_else(|| DbError::NodeNotFound(node_id.to_owned()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pending_node_is_registered_offline() {
+        let record = NodeRecord::pending("home-win");
+        assert_eq!(record.node_id, "home-win");
+        assert_eq!(record.name, "home-win");
+        assert!(
+            !record.is_online,
+            "a paired node is offline until NodeHello"
+        );
+    }
 }

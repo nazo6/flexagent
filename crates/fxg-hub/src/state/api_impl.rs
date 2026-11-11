@@ -428,13 +428,7 @@ impl ClientApiBackend for HubState {
         if !nodes.iter().any(|node| node.node_id.as_str() == node_id) {
             self.inner
                 .db
-                .upsert_node(&fxg_db::NodeRecord::new(
-                    node_id.clone(),
-                    node_id.clone(),
-                    "unknown",
-                    "unknown",
-                    "unknown",
-                ))
+                .upsert_node(&fxg_db::NodeRecord::pending(node_id.clone()))
                 .await
                 .map_err(ApiError::from)?;
         }

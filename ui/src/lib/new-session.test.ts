@@ -181,9 +181,9 @@ describe("pickDefaultNode", () => {
     expect(pickDefaultNode([], project([]), [])).toBe("");
   });
 
-  it("uses all nodes when none are online", () => {
+  it("returns an empty selection when no node is online", () => {
     const nodes = [node("n1", false), node("n2", false)];
-    expect(pickDefaultNode(nodes, project([binding("/repo", "n2", 100)]), [])).toBe("n2");
-    expect(pickDefaultNode(nodes, project([]), [])).toBe("n1");
+    expect(pickDefaultNode(nodes, project([binding("/repo", "n2", 100)]), [])).toBe("");
+    expect(pickDefaultNode(nodes, project([]), [])).toBe("");
   });
 });

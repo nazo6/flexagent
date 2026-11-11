@@ -119,16 +119,16 @@ export function projectRecency(
  *
  * Among online nodes, picks the one with the most recent run history (bindings
  * and sessions) for the project. Without history it falls back to the first
- * online node (or all nodes when none are online).
+ * online node. Returns `""` when no node is online (never selects an offline
+ * node, which would only produce `NODE_OFFLINE` errors).
  */
 export function pickDefaultNode(
   nodes: readonly NodeSummary[],
   project: ProjectSummary | null,
   sessions: readonly SessionSummary[],
 ): string {
-  if (nodes.length === 0) return "";
-  const online = nodes.filter((node) => node.is_online);
-  const candidates = online.length > 0 ? online : nodes;
+  const candidates = nodes.filter((node) => node.is_online);
+  if (candidates.length === 0) return "";
   if (project) {
     let best: NodeSummary | null = null;
     let bestRecency = 0;

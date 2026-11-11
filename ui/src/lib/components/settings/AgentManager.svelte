@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, untrack } from "svelte";
   import AgentIcon from "#lib/components/agent/AgentIcon.svelte";
   import * as AlertDialog from "#lib/components/ui/alert-dialog/index.ts";
   import { Badge } from "#lib/components/ui/badge/index.ts";
@@ -90,9 +90,13 @@
   });
 
   // Reload the catalog when the target node changes (the server no longer
-  // returns a representative node's catalog).
+  // returns a representative node's catalog). `loadAgents` reads `loading` and
+  // `nodeId`, so run it untracked; otherwise the loading flag retriggers this
+  // effect and a failing node loops forever.
   $effect(() => {
-    if (nodeId !== "") void loadAgents();
+    const target = nodeId;
+    if (target === "") return;
+    untrack(() => void loadAgents());
   });
 
   function matchesQuery(agent: AgentSummary | RegistryAgentSummary, query: string): boolean {

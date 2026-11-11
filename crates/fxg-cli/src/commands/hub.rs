@@ -376,14 +376,8 @@ impl usage::RunAsync for HubNodeTokenIssueArgs {
             .iter()
             .any(|node| node.node_id.as_str() == self.node_id)
         {
-            db.upsert_node(&fxg_db::NodeRecord::new(
-                self.node_id.clone(),
-                self.node_id.clone(),
-                "unknown",
-                "unknown",
-                "unknown",
-            ))
-            .await?;
+            db.upsert_node(&fxg_db::NodeRecord::pending(self.node_id.clone()))
+                .await?;
         }
         let token = fxg_hub::api::auth::generate_token();
         db.set_node_token_hash(&self.node_id, Some(&fxg_hub::api::auth::hash_token(&token)))

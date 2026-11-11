@@ -247,6 +247,7 @@
   "new_session_no_agents": "No agents available — add one in settings",
   "new_session_no_candidate": "No working directory for {project} is registered on this node. Choose a folder or scan from the project settings.",
   "new_session_no_nodes": "No nodes are connected.",
+  "new_session_no_online_nodes": "No node is online. Start a node or check its connection to the hub.",
   "new_session_no_projects": "No projects yet. Register a project to start a session.",
   "new_session_node_section": "Resident nodes",
   "new_session_node_unavailable": "{node} is {status}.",
