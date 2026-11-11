@@ -230,7 +230,6 @@ impl AgentSettings {
         BTreeMap::from([
             ("claude".to_owned(), "claude-code-acp".to_owned()),
             ("antigravity".to_owned(), "agy".to_owned()),
-            ("gemini".to_owned(), "gemini-cli-acp".to_owned()),
             ("codex".to_owned(), "codex-acp".to_owned()),
         ])
     }

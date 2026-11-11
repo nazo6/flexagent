@@ -284,7 +284,7 @@ pub enum NodeRpcResponse {
     },
     /// Agent management result (`ManageAgent`).
     AgentOp {
-        /// Display message on success (e.g. `imported gemini from the registry`)
+        /// Display message on success (e.g. `imported qwen-code from the registry`)
         message: Option<String>,
     },
     /// Session import result (`ImportSession`).
@@ -878,13 +878,13 @@ mod tests {
 
         let import = NodeRpcRequest::ManageAgent {
             action: AgentAction::ImportRegistryAgent {
-                agent_id: "gemini".into(),
+                agent_id: "qwen-code".into(),
                 extension: Some("opencode".into()),
             },
         };
         let json = serde_json::to_value(&import).unwrap();
         assert_eq!(json["action"]["action"], "import_registry_agent");
-        assert_eq!(json["action"]["agent_id"], "gemini");
+        assert_eq!(json["action"]["agent_id"], "qwen-code");
         assert_eq!(json["action"]["extension"], "opencode");
 
         let result = NodeToHubMsg::NodeRpcResult {

@@ -109,8 +109,10 @@ DROP TABLE IF EXISTS enabled_package_agents;
 
 - `GET /api/v1/agents` の `agents` に Registry-only の行は含まれない。
   Registry の一覧は `registry` に入る。
-- `fxg session new gemini` は builtin の `gemini` が PATH にある場合だけ起動する。
+- `fxg session new qwen-code` は builtin の `qwen` が PATH にある場合だけ起動する。
   無い場合は Registry から import して npx の custom を作る。
+- Gemini CLI は上流で deprecated のため builtin / alias を持たない。必要な場合は
+  Registry の `gemini` を import して custom として使う。
 - import した custom はスナップショットである。Registry の更新は自動反映しない。
   更新する場合は custom を削除して再 import する。
 - 既存の `enabled_package_agents` は migration で削除する。本番未デプロイのため

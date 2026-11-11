@@ -772,6 +772,5 @@ mod tests {
         assert!(ids.contains(builtin::OPENCODE));
         assert!(ids.contains(builtin::OPENCODE_V2));
         assert!(ids.contains(builtin::AGY));
-        assert!(ids.contains(builtin::GEMINI));
     }
 }

@@ -533,7 +533,7 @@ pub struct RegistryAgentSummary {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct AgentOpResponse {
-    /// Message describing the outcome (e.g. `imported gemini from the registry`)
+    /// Message describing the outcome (e.g. `imported qwen-code from the registry`)
     pub message: Option<String>,
 }
 

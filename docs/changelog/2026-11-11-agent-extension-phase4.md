@@ -81,7 +81,7 @@ extension モジュール1個 + provider の backend 指定のみである。
 - `ui/src/lib/components/agent/AgentIcon.svelte` を追加した。
   - `AgentSummary.icon` の `builtin:opencode` を同梱アイコン
     (`ui/static/agents/opencode.png`) に解決する
-  - `builtin:antigravity` / `builtin:gemini` / `builtin:copilot` /
+  - `builtin:antigravity` / `builtin:copilot` /
     `builtin:qwen` / `builtin:cline` / `builtin:auggie` / `builtin:kimi` は
     `agent-glyphs.ts` のインライン SVG で描画し、`currentColor` により
     ライト / ダークテーマへ追従させる
@@ -104,20 +104,26 @@ preset を追加した。
 - `opencode-v2`: `opencode acp` を `OpenCodeV2Extension` で拡張する。
   Registry の `opencode-v2` 行と同じ ID に合成される。
 - `agy`: Antigravity アイコンを追加した。
-- `gemini`: `gemini --acp`
 - `github-copilot-cli`: `copilot --acp`
 - `qwen-code`: `qwen --acp`
 - `cline`: `cline --acp`
 - `auggie`: `auggie --acp`
 - `kimi-code`: `kimi acp`
 
+> Gemini CLI は上流で deprecated のため、後に builtin / alias を削除した。
+> 必要な場合は Registry から import して custom 定義として使う。
+
 `AgentCatalog::list` は、preset の実行ファイルが見つかった場合に Registry 行を
 preset 行で置き換える。これにより、Registry が `npx` しか知らないエージェント
 でも、グローバル導入済みの CLI が一覧・起動の両方で使われる。version と説明は
 Registry の値を維持し、アイコンはビルトインのものを使う。
 
-`--acp` / `acp` は各 CLI の `--help` で確認済み（Gemini / Copilot / Qwen /
-Cline / Auggie / Kimi）。
+> この Registry 行のマージは、後の
+> [`2026-11-11-registry-import.md`](./2026-11-11-registry-import.md) で削除した。
+> 現在の一覧は builtin + custom のみで、Registry は import 専用である。
+
+`--acp` / `acp` は各 CLI の `--help` で確認済み（Copilot / Qwen / Cline /
+Auggie / Kimi）。
 
 ## 3. 実 opencode での確認
 

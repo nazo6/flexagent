@@ -89,16 +89,18 @@ opencode の Tier 2 移行（Phase 4）まで実装済みである。Tier 3 の�
   `value` は元の ACP ID のまま保持するため `set_config` は従来どおり動作する。
 - `AgentSummary.icon` は `builtin:<id>` または URL を返す。Web UI は
   `builtin:opencode` を同梱アイコン (`/agents/opencode.png`) に解決し、
-  `builtin:antigravity` / `builtin:gemini` / `builtin:copilot` /
-  `builtin:qwen` / `builtin:cline` / `builtin:auggie` / `builtin:kimi` を
+  `builtin:antigravity` / `builtin:copilot` / `builtin:qwen` /
+  `builtin:cline` / `builtin:auggie` / `builtin:kimi` を
   インライン SVG（`currentColor`）で描画する。未知のキーや未指定は汎用の
   bot アイコンにフォールバックする。
   `AgentSummary.backend` はエージェント一覧にバッジ
   (`ACP` / `ACP + extension` / `Custom driver`) として表示する。
 - ビルトイン provider は `opencode` / `opencode-v2`（Tier 2）に加え、
-  `agy` / `gemini` / `github-copilot-cli` / `qwen-code` / `cline` /
-  `auggie` / `kimi-code` のネイティブ CLI preset を持つ。一覧・起動は
+  `agy` / `github-copilot-cli` / `qwen-code` / `cline` / `auggie` /
+  `kimi-code` のネイティブ CLI preset を持つ。一覧・起動は
   ビルトインの表示名・アイコン・preset を使う。
+- Gemini CLI は上流で deprecated のため builtin / alias を持たない。
+  必要な場合は Registry から import して custom 定義として使う。
 - builtin にないエージェントは、Web UI の「Import from registry」で
   ACP Registry の配布レシピを custom 定義として保存する。import した
   custom は通常の custom として編集・削除できる。

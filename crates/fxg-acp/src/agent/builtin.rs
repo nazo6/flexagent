@@ -17,8 +17,6 @@ pub const OPENCODE: &str = "opencode";
 pub const OPENCODE_V2: &str = "opencode-v2";
 /// ACP-only Antigravity CLI (`agy acp`).
 pub const AGY: &str = "agy";
-/// ACP-only Gemini CLI (`gemini --acp`).
-pub const GEMINI: &str = "gemini";
 /// ACP-only GitHub Copilot CLI (`copilot --acp`).
 pub const COPILOT: &str = "github-copilot-cli";
 /// ACP-only Qwen Code CLI (`qwen --acp`).
@@ -70,14 +68,6 @@ pub fn providers() -> Vec<Arc<dyn AgentProvider>> {
             AGY,
             &["acp"],
             "builtin:antigravity",
-        ),
-        acp_provider(
-            GEMINI,
-            "Gemini CLI",
-            "Google Gemini CLI in ACP mode",
-            "gemini",
-            &["--acp"],
-            "builtin:gemini",
         ),
         acp_provider(
             COPILOT,
