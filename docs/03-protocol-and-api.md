@@ -1020,28 +1020,29 @@ xterm互換アダプター）とノード上の ConPTY / Unix PTY
 
 ### 4.2 CLI コマンドと REST / WS の対応
 
-| CLI コマンド                           | 使用する REST / WS                                                       | 説明                                                        |
-| :------------------------------------- | :----------------------------------------------------------------------- | :---------------------------------------------------------- |
-| `fxg session new` / `-w`               | `POST /api/v1/nodes/:id/projects/inspect` → `POST /api/v1/sessions`      | cwd から `project_id` を解決。`-w` は `worktree` フィールド |
-| `fxg session list`                     | `GET /api/v1/sessions`                                                   | セッション一覧                                              |
-| `fxg session show`                     | `GET /api/v1/sessions/:id` + `GET /api/v1/sessions/:id/events?limit=...` | 詳細と末尾イベント                                          |
-| `fxg session prompt`                   | `POST /api/v1/sessions/:id/prompt`                                       | dispatch 後に `CommandResult`。`--wait` は WS 購読          |
-| `fxg session stop` / `cancel` / `kill` | `POST /api/v1/sessions/:id/control`                                      | `SessionControlAction`                                      |
-| `fxg session fork`                     | `POST /api/v1/sessions`（`fork` 指定）                                   | ACP ネイティブ Fork                                         |
-| `fxg session resume`                   | `POST /api/v1/sessions/:id/resume`                                       | 停止セッションの再開                                        |
-| `fxg session archive`                  | `POST /api/v1/sessions/:id/archive`                                      | アーカイブ / 復元                                           |
-| `fxg session delete`                   | `DELETE /api/v1/sessions/:id`                                            | セッション削除                                              |
-| `fxg session diff`                     | `GET /api/v1/sessions/:id/diff`                                          | 作業ツリー差分                                              |
-| `fxg session import`                   | `POST /api/v1/sessions/import`                                           | 外部セッションのインポート                                  |
-| `fxg node status`                      | `GET /api/v1/system/info` + `GET /api/v1/sessions`                       | hub 接続状態 / Outbox / 稼働セッション                      |
-| `fxg node stop`                        | `POST /api/v1/system/shutdown`                                           | ローカルノードの graceful shutdown                          |
-| `fxg node access-token show` / `rotate`       | `auth_token` ファイル読み取り / `POST /api/v1/auth/rotate-token`         | トークン表示・再生成                                        |
-| `fxg support bundle` / `incidents`     | `GET /api/v1/diagnostics/bundle` / `GET /api/v1/diagnostics/incidents`   | サポートバンドル / 障害履歴                                 |
-| `fxg doctor` / `fxg logs --session`    | `GET /api/v1/diagnostics`                                                | ローカル診断 / エージェント stderr                          |
-| `fxg agents login` / `logout`          | （API なし）                                                             | ローカルプロセスで実行                                      |
-| リアルタイム出力 / `--wait`            | `/api/v1/client/ws`                                                      | `Subscribe` / `EventBatch` / `LiveStreamDelta`              |
-| `fxg worktree ...`                     | （独立コマンドなし）                                                     | `session new -w` / `fork -w` の内部処理                     |
-| `fxg inbox`                            | （独立コマンドなし）                                                     | Web UI が `/api/v1/inbox` を使用                            |
+| CLI コマンド                            | 使用する REST / WS                                                       | 説明                                                        |
+| :-------------------------------------- | :----------------------------------------------------------------------- | :---------------------------------------------------------- |
+| `fxg session new` / `-w`                | `POST /api/v1/nodes/:id/projects/inspect` → `POST /api/v1/sessions`      | cwd から `project_id` を解決。`-w` は `worktree` フィールド |
+| `fxg session list`                      | `GET /api/v1/sessions`                                                   | セッション一覧                                              |
+| `fxg session show`                      | `GET /api/v1/sessions/:id` + `GET /api/v1/sessions/:id/events?limit=...` | 詳細と末尾イベント                                          |
+| `fxg session prompt`                    | `POST /api/v1/sessions/:id/prompt`                                       | dispatch 後に `CommandResult`。`--wait` は WS 購読          |
+| `fxg session stop` / `cancel` / `kill`  | `POST /api/v1/sessions/:id/control`                                      | `SessionControlAction`                                      |
+| `fxg session fork`                      | `POST /api/v1/sessions`（`fork` 指定）                                   | ACP ネイティブ Fork                                         |
+| `fxg session resume`                    | `POST /api/v1/sessions/:id/resume`                                       | 停止セッションの再開                                        |
+| `fxg session archive`                   | `POST /api/v1/sessions/:id/archive`                                      | アーカイブ / 復元                                           |
+| `fxg session delete`                    | `DELETE /api/v1/sessions/:id`                                            | セッション削除                                              |
+| `fxg session diff`                      | `GET /api/v1/sessions/:id/diff`                                          | 作業ツリー差分                                              |
+| `fxg session import`                    | `POST /api/v1/sessions/import`                                           | 外部セッションのインポート                                  |
+| `fxg node status`                       | `GET /api/v1/system/info` + `GET /api/v1/sessions`                       | hub 接続状態 / Outbox / 稼働セッション                      |
+| `fxg node stop`                         | `POST /api/v1/system/shutdown`                                           | ローカルノードの graceful shutdown                          |
+| `fxg node access-token show` / `rotate` | `auth_token` ファイル読み取り / `POST /api/v1/auth/rotate-token`         | トークン表示・再生成                                        |
+| `fxg node pair` / `fxg node unpair`     | （API なし）                                                             | `node_token` と `[node] hub_url` の一括設定・解除           |
+| `fxg support bundle` / `incidents`      | `GET /api/v1/diagnostics/bundle` / `GET /api/v1/diagnostics/incidents`   | サポートバンドル / 障害履歴                                 |
+| `fxg doctor` / `fxg logs --session`     | `GET /api/v1/diagnostics`                                                | ローカル診断 / エージェント stderr                          |
+| `fxg agents login` / `logout`           | （API なし）                                                             | ローカルプロセスで実行                                      |
+| リアルタイム出力 / `--wait`             | `/api/v1/client/ws`                                                      | `Subscribe` / `EventBatch` / `LiveStreamDelta`              |
+| `fxg worktree ...`                      | （独立コマンドなし）                                                     | `session new -w` / `fork -w` の内部処理                     |
+| `fxg inbox`                             | （独立コマンドなし）                                                     | Web UI が `/api/v1/inbox` を使用                            |
 
 ### 4.3 追加する REST エンドポイントの契約
 

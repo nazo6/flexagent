@@ -5,10 +5,10 @@
 //! ```text
 //! ~/.flexagent/
 //! ├── config.toml            # Global configuration
-//! ├── auth_token             # Client <-> Server/Node auth token (0600)
-//! ├── node_token             # Node <-> Server pairing token (0600)
+//! ├── auth_token             # Web access token for browsers / CLI (0600)
+//! ├── node_token             # Node pairing token for hub <-> node (0600)
 //! ├── node.db                # Local node SQLite DB
-//! ├── hub.db              # Hub SQLite DB
+//! ├── hub.db                # Hub SQLite DB
 //! ├── worktrees/             # Git worktrees created automatically by fxg
 //! ```
 
@@ -47,7 +47,7 @@ impl NodePaths {
         self.fxg_home.join(CONFIG_FILE_NAME)
     }
 
-    /// Client auth token (`auth_token`).
+    /// Client auth token (`auth_token`): Web access token for browsers / CLI.
     pub fn auth_token_path(&self) -> PathBuf {
         self.fxg_home.join(AUTH_TOKEN_FILE_NAME)
     }

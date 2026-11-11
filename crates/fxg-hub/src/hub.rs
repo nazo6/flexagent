@@ -504,7 +504,7 @@ fn offline_error(node_id: &NodeId) -> ApiError {
 // WebSocket handlers
 // ----------------------------------------------------------------------
 
-/// `/api/v1/node/ws` handler (per-node token auth + WS upgrade).
+/// `/api/v1/node/ws` handler (node pairing token auth + WS upgrade).
 pub(crate) async fn node_ws(
     State(state): State<HubState>,
     headers: HeaderMap,
@@ -518,7 +518,7 @@ pub(crate) async fn node_ws(
         return ApiError::new(
             StatusCode::UNAUTHORIZED,
             ErrorCode::Unauthorized,
-            "missing node token",
+            "missing node pairing token",
         )
         .into_response();
     };
@@ -537,7 +537,7 @@ pub(crate) async fn node_ws(
         return ApiError::new(
             StatusCode::UNAUTHORIZED,
             ErrorCode::Unauthorized,
-            "invalid node token",
+            "invalid node pairing token",
         )
         .into_response();
     };

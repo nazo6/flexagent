@@ -235,7 +235,7 @@ pub async fn set_node_online(
     Ok(())
 }
 
-/// Sets the hash of a per-node token (`None` revokes it).
+/// Sets the hash of a node pairing token (`None` revokes it).
 ///
 /// Plaintext tokens are never stored (design: `docs/01-architecture-and-sync.md` §7.3).
 pub async fn set_node_token_hash(
@@ -258,7 +258,7 @@ pub async fn set_node_token_hash(
     Ok(())
 }
 
-/// Returns the list of per-node token hashes `(node_id, token_hash)` (for hub authentication).
+/// Returns the list of node pairing token hashes `(node_id, token_hash)` (for hub authentication).
 ///
 /// Because plaintext tokens are never stored, the hub hashes the presented token and compares
 /// it in constant time (design: `docs/01-architecture-and-sync.md` §7.3).

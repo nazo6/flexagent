@@ -683,7 +683,7 @@ impl DaemonState {
 
 /// Starts the outbox sync worker (returns `None` when no hub URL is set).
 ///
-/// The per-node token is resolved in the order `config.node_token` / `FXG_NODE_TOKEN` →
+/// The node pairing token is resolved in the order `config.node_token` / `FXG_NODE_TOKEN` →
 /// `~/.flexagent/node_token`.
 fn start_sync_worker(
     state: &DaemonState,

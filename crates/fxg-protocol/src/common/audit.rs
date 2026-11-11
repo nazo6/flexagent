@@ -105,7 +105,7 @@ crate::open_string_enum! {
         ProjectLink => "project_link",
         /// Agent managed
         AgentManage => "agent_manage",
-        /// Node token issued / revoked
+        /// Node pairing token issued / revoked
         NodeTokenManage => "node_token_manage",
         /// Client auth token rotated
         AuthTokenRotate => "auth_token_rotate",

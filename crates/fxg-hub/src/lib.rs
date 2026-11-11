@@ -9,7 +9,7 @@
 //!   [`ClientApiBackend`](api::ClientApiBackend) trait that let the local node (`fxg node start`)
 //!   and the hub (`fxg hub start`) expose a **completely identical** REST / Client WS
 //!   / PTY WS surface (design: `docs/03-protocol-and-api.md` §3)
-//! - [`hub`]: Node Hub (per-node token auth, `NodeHello`/`ResyncRequest`, idempotent
+//! - [`hub`]: Node Hub (node pairing token auth, `NodeHello`/`ResyncRequest`, idempotent
 //!   `EventBatchPush` application and ACK, command relay, PTY relay)
 //! - [`push`][]: VAPID Web Push (key generation, subscription management, fan-out of
 //!   approval request notifications)

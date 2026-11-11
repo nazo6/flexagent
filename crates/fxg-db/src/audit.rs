@@ -42,7 +42,7 @@ pub mod actions {
     pub const PROJECT_LINK: AuditAction = AuditAction::ProjectLink;
     /// Agent management (install / update / delete)
     pub const AGENT_MANAGE: AuditAction = AuditAction::AgentManage;
-    /// Node token issuance / revocation
+    /// Node pairing token issuance / revocation
     pub const NODE_TOKEN_MANAGE: AuditAction = AuditAction::NodeTokenManage;
     /// Client auth token regeneration
     pub const AUTH_TOKEN_ROTATE: AuditAction = AuditAction::AuthTokenRotate;

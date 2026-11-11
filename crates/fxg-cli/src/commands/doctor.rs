@@ -3,6 +3,35 @@
 use anyhow::{Result, bail};
 use usage::Args;
 
+/// Files and directories under `~/.flexagent`, with what each one owns.
+const DATA_DIR_FILES: &[(&str, &str)] = &[
+    (
+        "config.toml",
+        "startup settings (bind address, hub address, logs)",
+    ),
+    ("auth_token", "Web access token for browsers and CLI"),
+    (
+        "node_token",
+        "node pairing token (written by `fxg node pair`)",
+    ),
+    ("node.db", "node settings, sessions and audit log"),
+    ("hub.db", "hub settings, project projection and audit log"),
+    (
+        "node.addr",
+        "listen address of the running node (runtime only)",
+    ),
+    (
+        "hub.addr",
+        "listen address of the running hub (runtime only)",
+    ),
+    ("vapid.json", "Web Push VAPID keypair (hub)"),
+    ("secrets/", "write-only secret values (0600)"),
+    ("worktrees/", "Git worktrees created by fxg"),
+    ("cache/", "ACP Registry cache"),
+    ("agents/", "agent binaries installed by fxg"),
+    ("logs/", "process logs"),
+];
+
 /// `fxg doctor`
 #[derive(Debug, Args)]
 pub struct DoctorArgs {
@@ -84,16 +113,42 @@ impl usage::RunAsync for DoctorArgs {
         ));
 
         if self.json {
-            let value: Vec<_> = checks
+            let checks: Vec<_> = checks
                 .iter()
                 .map(|(name, ok, detail)| {
                     serde_json::json!({ "check": name, "ok": ok, "detail": detail })
                 })
                 .collect();
+            let files: Vec<_> = DATA_DIR_FILES
+                .iter()
+                .map(|(name, description)| {
+                    serde_json::json!({
+                        "name": name,
+                        "description": description,
+                        "exists": home.join(name).exists(),
+                    })
+                })
+                .collect();
+            let value = serde_json::json!({
+                "checks": checks,
+                "data_dir": {
+                    "path": home.display().to_string(),
+                    "files": files,
+                },
+            });
             println!("{}", serde_json::to_string_pretty(&value)?);
         } else {
             for (name, ok, detail) in &checks {
                 println!("{} {name}: {detail}", if *ok { "OK  " } else { "FAIL" });
+            }
+            println!("\nData directory: {}", home.display());
+            for (name, description) in DATA_DIR_FILES {
+                let state = if home.join(*name).exists() {
+                    ""
+                } else {
+                    " (not created yet)"
+                };
+                println!("  {name:<16} {description}{state}");
             }
         }
         if checks.iter().any(|(_, ok, _)| !ok) {

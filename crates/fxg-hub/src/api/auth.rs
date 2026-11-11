@@ -1,4 +1,4 @@
-//! Utilities for generating, saving and comparing auth tokens (client token / per-node token).
+//! Utilities for generating, saving and comparing auth tokens (client token / node pairing token).
 //!
 //! Design: `docs/01-architecture-and-sync.md` §7.3.
 //!
@@ -6,7 +6,7 @@
 //!   (`fxg node start`) and the hub (`fxg hub start`) to authenticate Client REST/WS API
 //!   requests (`Authorization: Bearer` / `fxg_session` cookie) (a 64-character random hex
 //!   string is generated on first startup and saved with `0600`).
-//! - **Per-node token** (`~/.flexagent/node_token`): Node ⇔ Hub pairing authentication. The
+//! - **Node pairing token** (`~/.flexagent/node_token`): Node ⇔ Hub pairing authentication. The
 //!   server stores only the [`hash_token`] (SHA-256 hex) in `hub.db.nodes.token_hash`; the
 //!   plaintext is shown only once at issue time.
 

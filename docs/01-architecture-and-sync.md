@@ -535,8 +535,20 @@ Hijacking）や不正アクセスを防ぐため、以下の多層防御モデ�
    - トークンは**ノードごとに個別発行**します。ハブ上で
      `fxg hub pairing-token issue <node-id>`
      を実行するとトークンが生成・表示され、`hub.db` の `nodes` テーブルには
-     ハッシュ (`token_hash`) のみを保存します。ノード側は表示されたトークンを
-     `~/.flexagent/node_token`（または環境変数 `FXG_NODE_TOKEN`）へ設定します。
+     ハッシュ (`token_hash`) のみを保存します。
+   - ノード側では、表示されたトークンを使って次の 1 コマンドを実行します。
+
+     ```sh
+     fxg node pair --hub http://<hub>:8080 --token <NODE_TOKEN>
+     fxg node restart   # 既に起動している場合
+     ```
+
+     `fxg node pair` は `~/.flexagent/node_token` (`0600`) と
+     `config.toml` の `[node] hub_url` をまとめて設定します。`hub_url` には
+     HTTP(S) のアドレスを指定でき、Node Hub の WebSocket エンドポイント
+     (`/api/v1/node/ws`) は自動で導出されます。環境変数
+     `FXG_NODE_TOKEN` を使う場合はこのファイルを省略できます。
+
    - ハブは `NodeHello` の `node_id`
      がトークン発行対象ノードと一致することを検証し、なりすましを拒否します。
      漏洩時は `fxg hub pairing-token revoke <node-id>`

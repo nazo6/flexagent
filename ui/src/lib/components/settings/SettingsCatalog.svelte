@@ -288,6 +288,39 @@
   );
 
   const filteredBootstrap = $derived(bootstrapRows);
+
+  /** Data directory shown by the bootstrap tab (hub or target node). */
+  const dataDir = $derived(
+    isHub
+      ? (hubSnapshot?.bootstrap.fxg_home.value ?? "")
+      : (nodeSnapshot?.bootstrap.fxg_home.value ?? ""),
+  );
+
+  /** Files and directories under `~/.flexagent`, with what each one is for. */
+  const dataFiles = $derived<{ name: string; use: string }[]>(
+    isHub
+      ? [
+          { name: "config.toml", use: "Startup settings (bind address, logs)" },
+          { name: "auth_token", use: "Web access token for browsers and CLI" },
+          { name: "hub.db", use: "Hub settings, project projection and audit log" },
+          { name: "hub.addr", use: "Listen address of the running hub (runtime only)" },
+          { name: "vapid.json", use: "Web Push VAPID keypair" },
+          { name: "secrets/", use: "Write-only secret values (0600)" },
+          { name: "logs/", use: "Process logs" },
+        ]
+      : [
+          { name: "config.toml", use: "Startup settings (bind address, hub address, logs)" },
+          { name: "auth_token", use: "Web access token for browsers and CLI" },
+          { name: "node_token", use: "Node pairing token (set by fxg node pair)" },
+          { name: "node.db", use: "Node settings, sessions and audit log" },
+          { name: "node.addr", use: "Listen address of the running node (runtime only)" },
+          { name: "secrets/", use: "Write-only secret values (0600)" },
+          { name: "worktrees/", use: "Git worktrees created by fxg" },
+          { name: "cache/", use: "ACP Registry cache" },
+          { name: "agents/", use: "Agent binaries installed by fxg" },
+          { name: "logs/", use: "Process logs" },
+        ],
+  );
 </script>
 
 <div class="flex flex-col gap-3">
@@ -337,6 +370,23 @@
           {loading ? "Loading…" : "No values available."}
         </p>
       {/if}
+      <details class="border-t pt-2 text-[13px]">
+        <summary class="hover:text-foreground cursor-pointer font-medium">
+          Data directory contents
+        </summary>
+        <p class="text-muted-foreground mt-1 text-[12px]">
+          Files under <code>{dataDir || "~/.flexagent"}</code>. Runtime files are recreated on
+          start; do not delete a file unless you know what it owns.
+        </p>
+        <ul class="mt-2 flex list-none flex-col gap-1 p-0">
+          {#each dataFiles as file (file.name)}
+            <li class="flex flex-wrap gap-x-2">
+              <code class="min-w-40 font-mono">{file.name}</code>
+              <span class="text-muted-foreground">{file.use}</span>
+            </li>
+          {/each}
+        </ul>
+      </details>
     </Card>
   {:else if section === "machine"}
     <Card class="gap-3 p-4">

@@ -537,7 +537,7 @@ pub struct AgentOpResponse {
     pub message: Option<String>,
 }
 
-/// One entry of `GET /api/v1/nodes/tokens` (an issued per-node token).
+/// One entry of `GET /api/v1/nodes/tokens` (an issued node pairing token).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct NodeTokenSummary {
@@ -551,11 +551,11 @@ pub struct NodeTokenSummary {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct NodeTokensResponse {
-    /// Issued node tokens
+    /// Issued node pairing tokens
     pub tokens: Vec<NodeTokenSummary>,
 }
 
-/// `POST /api/v1/nodes/tokens` request (issue a new node token).
+/// `POST /api/v1/nodes/tokens` request (issue a new node pairing token).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct IssueNodeTokenRequest {

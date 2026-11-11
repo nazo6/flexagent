@@ -233,7 +233,7 @@ impl Db {
         registration::set_provisional_session_status(&self.pool, session_id, status).await
     }
 
-    /// Sets or revokes the hash of a per-node token.
+    /// Sets or revokes the hash of a node pairing token.
     pub async fn set_node_token_hash(
         &self,
         node_id: &str,
@@ -242,7 +242,7 @@ impl Db {
         registration::set_node_token_hash(&self.pool, node_id, token_hash).await
     }
 
-    /// Returns the list of per-node token hashes `(node_id, token_hash)`.
+    /// Returns the list of node pairing token hashes `(node_id, token_hash)`.
     pub async fn list_node_tokens(&self) -> Result<Vec<(String, String)>, DbError> {
         registration::list_node_tokens(&self.pool).await
     }

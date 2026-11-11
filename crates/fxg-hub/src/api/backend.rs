@@ -507,18 +507,18 @@ pub trait ClientApiBackend: Clone + Send + Sync + 'static {
         client: ClientInfo,
     ) -> Result<RotateAuthTokenResponse, ApiError>;
 
-    /// `GET /api/v1/nodes/tokens` (list issued per-node tokens).
+    /// `GET /api/v1/nodes/tokens` (list issued node pairing tokens).
     ///
     /// Hub only. The default local-node implementation returns `INVALID_STATE`
-    /// (node tokens are a server (`hub.db`) concept).
+    /// (node pairing tokens are a server (`hub.db`) concept).
     async fn node_tokens(&self) -> Result<NodeTokensResponse, ApiError> {
         Err(ApiError::from_code(
             ErrorCode::InvalidState,
-            "node tokens are only available on the hub",
+            "node pairing tokens are only available on the hub",
         ))
     }
 
-    /// `POST /api/v1/nodes/tokens` (issue a new node token. Hub only).
+    /// `POST /api/v1/nodes/tokens` (issue a new node pairing token. Hub only).
     async fn issue_node_token(
         &self,
         _request: IssueNodeTokenRequest,
@@ -526,7 +526,7 @@ pub trait ClientApiBackend: Clone + Send + Sync + 'static {
     ) -> Result<IssueNodeTokenResponse, ApiError> {
         Err(ApiError::from_code(
             ErrorCode::InvalidState,
-            "node tokens are only available on the hub",
+            "node pairing tokens are only available on the hub",
         ))
     }
 
@@ -534,7 +534,7 @@ pub trait ClientApiBackend: Clone + Send + Sync + 'static {
     async fn revoke_node_token(&self, _node_id: &str, _client: ClientInfo) -> Result<(), ApiError> {
         Err(ApiError::from_code(
             ErrorCode::InvalidState,
-            "node tokens are only available on the hub",
+            "node pairing tokens are only available on the hub",
         ))
     }
 
