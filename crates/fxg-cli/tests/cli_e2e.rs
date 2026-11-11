@@ -180,7 +180,7 @@ async fn cli_commands_work_through_node_http() {
     assert!(json.as_array().expect("array").is_empty());
 
     // --- fxg node access-token show (64 hex characters) ---
-    let output = env.run(&["node", "token", "show"], None);
+    let output = env.run(&["node", "access-token", "show"], None);
     let token = stdout_of(&output).trim().to_owned();
     assert_eq!(token.len(), 64, "token length: {token}");
     assert!(token.chars().all(|ch| ch.is_ascii_hexdigit()));
