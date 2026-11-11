@@ -445,6 +445,10 @@ fn set_hub_url(path: &std::path::Path, hub_url: Option<&str>) -> Result<()> {
     let mut document: toml_edit::DocumentMut = text
         .parse()
         .with_context(|| format!("failed to parse {}", path.display()))?;
+    if document.is_empty() && hub_url.is_none() {
+        // Nothing to remove and no config file yet: do not create an empty one.
+        return Ok(());
+    }
     if !document.contains_key("node") {
         document.insert("node", toml_edit::Item::Table(toml_edit::Table::new()));
     }
