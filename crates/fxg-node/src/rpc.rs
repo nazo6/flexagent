@@ -251,7 +251,7 @@ async fn execute_inner(
             Ok(NodeRpcResponse::AgentCapabilities { preview })
         }
         NodeRpcRequest::GetNodeSettings => Ok(NodeRpcResponse::NodeSettings {
-            snapshot: Box::new(state.node_settings_snapshot()),
+            snapshot: Box::new(state.node_settings_snapshot().await?),
         }),
         NodeRpcRequest::UpdateNodeSettings { request } => {
             state.update_node_settings(&request).await?;
@@ -264,7 +264,7 @@ async fn execute_inner(
                 )
                 .await;
             Ok(NodeRpcResponse::NodeSettings {
-                snapshot: Box::new(state.node_settings_snapshot()),
+                snapshot: Box::new(state.node_settings_snapshot().await?),
             })
         }
         NodeRpcRequest::UpdateAgentSettings { request } => {
@@ -278,9 +278,24 @@ async fn execute_inner(
                 )
                 .await;
             Ok(NodeRpcResponse::NodeSettings {
-                snapshot: Box::new(state.node_settings_snapshot()),
+                snapshot: Box::new(state.node_settings_snapshot().await?),
             })
         }
+        NodeRpcRequest::UpdatePairing { request } => {
+            state.update_pairing(&request, source).await?;
+            Ok(NodeRpcResponse::NodeSettings {
+                snapshot: Box::new(state.node_settings_snapshot().await?),
+            })
+        }
+        NodeRpcRequest::ClearPairing { expected_revision } => {
+            state.clear_pairing(expected_revision, source).await?;
+            Ok(NodeRpcResponse::NodeSettings {
+                snapshot: Box::new(state.node_settings_snapshot().await?),
+            })
+        }
+        NodeRpcRequest::TestPairing { request } => Ok(NodeRpcResponse::HubLink {
+            status: state.test_pairing(&request).await?,
+        }),
         NodeRpcRequest::GetSecrets => Ok(NodeRpcResponse::Secrets {
             secrets: state.node_secrets().await?,
         }),

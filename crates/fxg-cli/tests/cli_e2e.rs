@@ -266,15 +266,15 @@ async fn phase3_session_commands_roundtrip_through_node() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("NOT_FOUND"), "got: {stderr}");
 
-    // --- fxg session new --provisioner requires the hub (a config error
-    // when unset) ---
+    // --- fxg session new --provisioner needs a reachable hub (the address is
+    // resolved from `hub.addr`, the node pairing, then `[hub] listen_addr`) ---
     let output = env.run(
         &["session", "new", "opencode", "--provisioner", "colab-pro"],
         Some(&repo),
     );
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("hub_url"), "got: {stderr}");
+    assert!(stderr.contains("failed to reach hub"), "got: {stderr}");
 
     // --- Sessions are recorded even when the agent fails to start ---
     let output = env.run(&["session", "new", "broken", "--quiet"], Some(&repo));

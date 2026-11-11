@@ -6,6 +6,7 @@
   import AgentManager from "#lib/components/settings/AgentManager.svelte";
   import AuditLog from "#lib/components/settings/AuditLog.svelte";
   import DiagnosticsPanel from "#lib/components/settings/DiagnosticsPanel.svelte";
+  import PairingPanel from "#lib/components/settings/PairingPanel.svelte";
   import SettingsCatalog from "#lib/components/settings/SettingsCatalog.svelte";
   import { searchSettings, SETTINGS_TAB_LABELS } from "#lib/settings-search.ts";
   import * as AlertDialog from "#lib/components/ui/alert-dialog/index.ts";
@@ -218,6 +219,9 @@
     <Tabs.Root value={activeTab} onValueChange={selectTab}>
       <Tabs.List variant="line" class="w-full flex-wrap border-b sm:flex-nowrap">
         <Tabs.Trigger value="bootstrap">Bootstrap</Tabs.Trigger>
+        {#if !isHub}
+          <Tabs.Trigger value="pairing">{m.settings_tab_pairing()}</Tabs.Trigger>
+        {/if}
         <Tabs.Trigger value="machine">This machine</Tabs.Trigger>
         <Tabs.Trigger value="hub">Hub</Tabs.Trigger>
         <Tabs.Trigger value="agents">{m.settings_tab_agents()}</Tabs.Trigger>
@@ -229,6 +233,12 @@
         <SettingsCatalog section="bootstrap" />
         <DiagnosticsPanel />
       </Tabs.Content>
+
+      {#if !isHub}
+        <Tabs.Content value="pairing" class="mt-2 flex flex-col gap-3">
+          <PairingPanel />
+        </Tabs.Content>
+      {/if}
 
       <Tabs.Content value="machine" class="mt-2 flex flex-col gap-3">
         <SettingsCatalog section="machine" />
@@ -537,9 +547,7 @@
           {m.settings_node_manual_setup()}
         </summary>
         <p class="text-muted-foreground mt-1 text-[12px]">
-          Save the token in <code>~/.flexagent/node_token</code> (0600) and set
-          <code>[node] hub_url</code>
-          in <code>~/.flexagent/config.toml</code>.
+          {m.settings_node_manual_setup_hint()}
         </p>
       </details>
     </div>

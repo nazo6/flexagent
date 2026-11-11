@@ -1069,8 +1069,6 @@ export type NodeBootstrapView = {
 	node_id: SourcedValue<string>,
 	/**  Local HTTP/WS bind address */
 	listen_addr: SourcedValue<string>,
-	/**  Node Hub WebSocket URL (standalone when `None`) */
-	hub_url: SourcedValue<string | null>,
 	/**  Log level */
 	log_level: SourcedValue<string>,
 	/**  Log file destination (empty when disabled) */
@@ -1135,6 +1133,8 @@ export type NodeSettingsSnapshot = {
 	node: NodeSettings,
 	/**  Agent settings */
 	agents: AgentSettings,
+	/**  Hub pairing state */
+	pairing: PairingSettings,
 };
 
 /**  Node information exposed to clients (`GET /api/v1/nodes` / `GET /api/v1/system/info`). */
@@ -1181,6 +1181,26 @@ export type NodeTokensResponse = {
 export type NodesResponse = {
 	/**  Nodes (including online state and ephemeral-node attributes) */
 	nodes: NodeSummary[],
+};
+
+/**
+ *  Node ⇔ hub pairing state (`node.db` + the token file).
+ *
+ *  The pairing is owned by the node: `hub_url` is stored in `node.db` and the
+ *  token is a `0600` file (`~/.flexagent/node_token`). The client API never
+ *  returns the token, only whether it is configured.
+ */
+export type PairingSettings = {
+	/**  Paired hub address (HTTP origin; `None` = standalone) */
+	hub_url: string | null,
+	/**  Whether the pairing token file exists */
+	token_configured: boolean,
+	/**  Optimistic-lock revision */
+	revision: number,
+	/**  Current node ⇔ hub link state */
+	connection: HubLinkStatus,
+	/**  Whether the last `NodeHello` hit the session reporting limit */
+	sessions_truncated: boolean,
 };
 
 /**  An option of a permission approval (ACP `PermissionOption`). */
@@ -2147,6 +2167,14 @@ export type SystemStatus = {
 	counters: DropCounters,
 };
 
+/**  `POST /api/v1/nodes/{node_id}/settings/pairing/test` request. */
+export type TestPairingRequest = {
+	/**  Hub address to try (`http://host:port` or a full WS URL) */
+	hub_url: string,
+	/**  Token to try (omit to use the configured one) */
+	token: string | null,
+};
+
 /**
  *  Reasons an agent stopped a turn that should be surfaced to the user.
  *
@@ -2500,6 +2528,16 @@ export type UpdateNodeSettingsRequest = {
 	project_scan_dirs: string[],
 	/**  Tray residency */
 	tray: boolean | null,
+	/**  Revision the client observed (`REVISION_MISMATCH` on conflict) */
+	expected_revision: number,
+};
+
+/**  `PUT /api/v1/nodes/{node_id}/settings/pairing` request. */
+export type UpdatePairingRequest = {
+	/**  Hub address (`http://host:port`; a full `ws://.../api/v1/node/ws` URL is also accepted) */
+	hub_url: string,
+	/**  Pairing token (omit to keep the current one when the hub address is unchanged) */
+	token: string | null,
 	/**  Revision the client observed (`REVISION_MISMATCH` on conflict) */
 	expected_revision: number,
 };

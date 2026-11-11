@@ -97,6 +97,10 @@ pub struct SessionNewArgs {
     /// the hub)
     #[usage(long)]
     provisioner: Option<String>,
+    /// Hub address used for `--provisioner` (defaults to `hub.addr`, the node's
+    /// pairing, then `[hub] listen_addr`)
+    #[usage(long)]
+    hub: Option<String>,
     /// Arguments passed through to the agent process
     #[usage(value_name = "EXTRA_ARGS", double_dash = "required")]
     extra_args: Vec<String>,
@@ -147,7 +151,7 @@ async fn run_with_provisioner(
     cwd: &Path,
     env: fxg_protocol::config::EnvLookup<'_>,
 ) -> Result<()> {
-    let hub = crate::hub_api::HubClient::from_config(env)?;
+    let hub = crate::hub_api::HubClient::local(env, args.hub.as_deref()).await?;
 
     // Resolve the logical project of the current directory (the Git remote is
     // the source of truth)

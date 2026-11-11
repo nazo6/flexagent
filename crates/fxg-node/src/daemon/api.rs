@@ -212,7 +212,7 @@ impl ClientApiBackend for DaemonState {
             log_file: config.log.file.clone(),
             log_format: config.log.format.clone(),
             node_listen_addr: Some(config.listen_addr.clone()),
-            hub_url: config.hub_url.clone(),
+            hub_url: self.hub_link().hub_url,
             hub_listen_addr: None,
             allowed_hosts: Vec::new(),
             allowed_origins: Vec::new(),

@@ -57,13 +57,16 @@ import type {
   SessionRenameResponse,
   SessionEventBatch,
   SecretsResponse,
+  HubLinkStatus,
   HubSettingsSnapshot,
   SessionSummary,
   SystemInfoResponse,
   WorkspaceDiffResponse,
+  TestPairingRequest,
   UpdateAgentSettingsRequest,
   UpdateNodeSettingsRequest,
   UpdateHubSettingsRequest,
+  UpdatePairingRequest,
   UpsertSecretRequest,
   WorktreeInfo,
   WorktreesResponse,
@@ -524,6 +527,32 @@ export class ApiClient {
   /** `GET /api/v1/nodes/:id/settings` (node-owned, local or relayed). */
   nodeSettings(nodeId: string): Promise<NodeSettingsSnapshot> {
     return this.#request("GET", `/api/v1/nodes/${encodeURIComponent(nodeId)}/settings`);
+  }
+
+  /** `PUT /api/v1/nodes/:id/settings/pairing` (applied immediately). */
+  updatePairing(nodeId: string, request: UpdatePairingRequest): Promise<NodeSettingsSnapshot> {
+    return this.#request("PUT", `/api/v1/nodes/${encodeURIComponent(nodeId)}/settings/pairing`, {
+      body: request,
+    });
+  }
+
+  /** `DELETE /api/v1/nodes/:id/settings/pairing` (requires the observed revision). */
+  clearPairing(
+    nodeId: string,
+    request: { expected_revision: number },
+  ): Promise<NodeSettingsSnapshot> {
+    return this.#request("DELETE", `/api/v1/nodes/${encodeURIComponent(nodeId)}/settings/pairing`, {
+      body: request,
+    });
+  }
+
+  /** `POST /api/v1/nodes/:id/settings/pairing/test` (does not save). */
+  testPairing(nodeId: string, request: TestPairingRequest): Promise<HubLinkStatus> {
+    return this.#request(
+      "POST",
+      `/api/v1/nodes/${encodeURIComponent(nodeId)}/settings/pairing/test`,
+      { body: request },
+    );
   }
 
   /** `PATCH /api/v1/nodes/:id/settings/node` (requires the observed revision). */

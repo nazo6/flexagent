@@ -27,9 +27,30 @@ pub fn role_name(role: DbRole) -> &'static str {
     }
 }
 
+/// Secret ID of the node ⇔ hub pairing token (a system secret).
+pub const SYSTEM_NODE_TOKEN: &str = "system.node_token";
+
+/// Secret ID of the Web access token (a system secret).
+pub const SYSTEM_AUTH_TOKEN: &str = "system.auth_token";
+
+/// Returns the fixed path of a system secret, if `id` is one.
+///
+/// System secrets predate the secret store and keep their `~/.flexagent`
+/// paths (docs/changelog/2026-11-09-settings-consolidation-and-project-identity.md §3.3).
+pub fn system_secret_path(fxg_home: &Path, id: &SecretId) -> Option<PathBuf> {
+    match id.as_str() {
+        SYSTEM_NODE_TOKEN => Some(fxg_home.join("node_token")),
+        SYSTEM_AUTH_TOKEN => Some(fxg_home.join("auth_token")),
+        _ => None,
+    }
+}
+
 /// Returns the value file path for a secret.
 pub fn secret_path(fxg_home: &Path, role: &str, id: &SecretId) -> PathBuf {
-    fxg_home.join("secrets").join(role).join(id.as_str())
+    match system_secret_path(fxg_home, id) {
+        Some(path) => path,
+        None => fxg_home.join("secrets").join(role).join(id.as_str()),
+    }
 }
 
 fn ensure_parent(path: &Path) -> Result<(), DbError> {
@@ -89,6 +110,29 @@ pub fn is_configured(fxg_home: &Path, role: &str, id: &SecretId) -> bool {
     secret_path(fxg_home, role, id).is_file()
 }
 
+/// Registers metadata for a system secret so it appears in the secret list.
+pub async fn ensure_system_secret(
+    db: &Db,
+    id: &SecretId,
+    description: &str,
+) -> Result<(), DbError> {
+    let now = fxg_protocol::util::now_ms();
+    sqlx::query!(
+        r#"
+        INSERT INTO secrets (id, description, created_at, updated_at)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(id) DO NOTHING
+        "#,
+        id.as_str(),
+        description,
+        now,
+        now,
+    )
+    .execute(db.pool())
+    .await?;
+    Ok(())
+}
+
 /// Identifiers of agents or Git hosts that reference a secret.
 pub async fn used_by(db: &Db, id: &SecretId) -> Result<Vec<String>, DbError> {
     match db.role() {
@@ -140,6 +184,12 @@ pub async fn upsert_secret(
             id.as_str()
         )));
     }
+    if system_secret_path(fxg_home, id).is_some() {
+        return Err(DbError::SecretInvalid(format!(
+            "{} is a system secret and cannot be written through the secret API",
+            id.as_str()
+        )));
+    }
     if request.value.is_empty() {
         return Err(DbError::SecretInvalid(
             "secret value must not be empty".to_owned(),
@@ -158,6 +208,12 @@ pub async fn delete_secret(
     fxg_home: &Path,
     id: &SecretId,
 ) -> Result<Vec<SecretSummary>, DbError> {
+    if system_secret_path(fxg_home, id).is_some() {
+        return Err(DbError::SecretInvalid(format!(
+            "{} is a system secret and cannot be deleted through the secret API",
+            id.as_str()
+        )));
+    }
     let referenced = used_by(db, id).await?;
     if !referenced.is_empty() {
         return Err(DbError::SecretInUse {

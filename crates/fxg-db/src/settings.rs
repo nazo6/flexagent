@@ -120,6 +120,89 @@ pub async fn update_node_settings(
 }
 
 // ----------------------------------------------------------------------
+// Node pairing
+// ----------------------------------------------------------------------
+
+/// Node pairing state stored in `node.db` (`node_pairing`).
+///
+/// Only the hub address is persisted here; the pairing token is a secret file
+/// (`~/.flexagent/node_token`) and its presence is reported by the node.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NodePairing {
+    /// Hub address (HTTP origin; the WS endpoint is derived)
+    pub hub_url: Option<String>,
+    /// Optimistic-lock revision
+    pub revision: u64,
+    /// Last update time (Unix epoch ms)
+    pub updated_at: i64,
+}
+
+/// Ensures the single `node_pairing` row exists and returns it.
+pub async fn ensure_node_pairing(pool: &SqlitePool) -> Result<NodePairing, DbError> {
+    sqlx::query!(
+        r#"
+        INSERT INTO node_pairing (id, hub_url, revision, updated_at)
+        VALUES (1, NULL, 1, ?)
+        ON CONFLICT(id) DO NOTHING
+        "#,
+        now_ms(),
+    )
+    .execute(pool)
+    .await?;
+    get_node_pairing(pool)
+        .await?
+        .ok_or_else(|| DbError::InvalidPayload("node_pairing row is missing".to_owned()))
+}
+
+/// Returns the `node_pairing` row when it exists.
+pub async fn get_node_pairing(pool: &SqlitePool) -> Result<Option<NodePairing>, DbError> {
+    let row = sqlx::query!(
+        r#"
+        SELECT hub_url, revision, updated_at
+          FROM node_pairing
+         WHERE id = 1
+        "#,
+    )
+    .fetch_optional(pool)
+    .await?;
+    let Some(row) = row else { return Ok(None) };
+    Ok(Some(NodePairing {
+        hub_url: row.hub_url,
+        revision: revision_u64(row.revision)?,
+        updated_at: row.updated_at,
+    }))
+}
+
+/// Sets (or clears) the hub address under an optimistic lock.
+pub async fn set_node_pairing_hub_url(
+    pool: &SqlitePool,
+    hub_url: Option<&str>,
+    expected_revision: u64,
+) -> Result<NodePairing, DbError> {
+    let expected = i64::try_from(expected_revision).unwrap_or(i64::MAX);
+    let result = sqlx::query!(
+        r#"
+        UPDATE node_pairing
+           SET hub_url = ?,
+               revision = revision + 1,
+               updated_at = ?
+         WHERE id = 1 AND revision = ?
+        "#,
+        hub_url,
+        now_ms(),
+        expected,
+    )
+    .execute(pool)
+    .await?;
+    if result.rows_affected() == 0 {
+        return Err(DbError::RevisionMismatch);
+    }
+    get_node_pairing(pool)
+        .await?
+        .ok_or_else(|| DbError::InvalidPayload("node_pairing row is missing".to_owned()))
+}
+
+// ----------------------------------------------------------------------
 // Agent settings
 // ----------------------------------------------------------------------
 

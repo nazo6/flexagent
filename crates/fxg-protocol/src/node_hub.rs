@@ -11,6 +11,7 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
+use crate::client_api::HubLinkStatus;
 use crate::client_api::{
     AgentCapabilitiesPreview, AgentsResponse, FsBrowseResponse, ProjectLinkResponse,
     ProjectPreview, ProjectScanResponse, ProjectUnlinkResponse, WorktreeInfo,
@@ -22,8 +23,8 @@ use crate::common::{
 };
 use crate::events::SessionEventEnvelope;
 use crate::settings::{
-    NodeSettingsSnapshot, SecretSummary, UpdateAgentSettingsRequest, UpdateNodeSettingsRequest,
-    UpsertSecretRequest,
+    NodeSettingsSnapshot, SecretSummary, TestPairingRequest, UpdateAgentSettingsRequest,
+    UpdateNodeSettingsRequest, UpdatePairingRequest, UpsertSecretRequest,
 };
 use crate::{CommandId, NodeId, ProjectId, SecretId, SessionId};
 
@@ -144,6 +145,21 @@ pub enum NodeRpcRequest {
         /// New values and the observed revision
         request: UpdateAgentSettingsRequest,
     },
+    /// Pair the node with a hub (or change the address / token).
+    UpdatePairing {
+        /// Hub address, optional token and the observed revision
+        request: UpdatePairingRequest,
+    },
+    /// Remove the hub pairing (the outbox is kept).
+    ClearPairing {
+        /// Revision the client observed (`REVISION_MISMATCH` on conflict)
+        expected_revision: u64,
+    },
+    /// Try a hub address / token without saving it.
+    TestPairing {
+        /// Hub address and optional token to try
+        request: TestPairingRequest,
+    },
     /// Fetch the node's secret metadata (values are never returned).
     GetSecrets,
     /// Store a secret value (write-only).
@@ -216,6 +232,8 @@ impl NodeRpcRequest {
             | Self::ResumeSession { .. }
             | Self::DeleteSession { .. } => Duration::from_secs(120),
             Self::ManageAgent { .. } => Duration::from_secs(600),
+            // A pairing test performs a WebSocket handshake with the hub.
+            Self::TestPairing { .. } => Duration::from_secs(15),
             _ => Duration::from_secs(30),
         }
     }
@@ -275,6 +293,11 @@ pub enum NodeRpcResponse {
     NodeSettings {
         /// Snapshot after the operation
         snapshot: Box<NodeSettingsSnapshot>,
+    },
+    /// Node ⇔ hub link state (`TestPairing`).
+    HubLink {
+        /// State after the test
+        status: HubLinkStatus,
     },
     /// Secret metadata after the operation (`GetSecrets` / `UpsertSecret` /
     /// `DeleteSecret`; values are never included).

@@ -48,6 +48,8 @@ pub mod actions {
     pub const AUTH_TOKEN_ROTATE: AuditAction = AuditAction::AuthTokenRotate;
     /// Settings updated
     pub const SETTINGS_UPDATE: AuditAction = AuditAction::SettingsUpdate;
+    /// Hub pairing updated / cleared
+    pub const PAIRING_UPDATE: AuditAction = AuditAction::PairingUpdate;
     /// Secret created / updated / deleted / rotated
     pub const SECRET_MANAGE: AuditAction = AuditAction::SecretManage;
 }

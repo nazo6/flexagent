@@ -392,6 +392,36 @@ impl NodeClient {
         self.post_url(&self.url(path), body).await
     }
 
+    async fn put<B: Serialize, T: DeserializeOwned>(&self, path: &str, body: &B) -> Result<T> {
+        let url = self.url(path);
+        let response = self
+            .http
+            .put(&url)
+            .bearer_auth(&self.token)
+            .json(body)
+            .send()
+            .await
+            .with_context(|| format!("failed to reach the node at {url}"))?;
+        Self::decode(response).await
+    }
+
+    async fn delete_with_body<B: Serialize, T: DeserializeOwned>(
+        &self,
+        path: &str,
+        body: &B,
+    ) -> Result<T> {
+        let url = self.url(path);
+        let response = self
+            .http
+            .delete(&url)
+            .bearer_auth(&self.token)
+            .json(body)
+            .send()
+            .await
+            .with_context(|| format!("failed to reach the node at {url}"))?;
+        Self::decode(response).await
+    }
+
     async fn delete(&self, path: &str) -> Result<()> {
         let url = self.url(path);
         let response = self
@@ -515,6 +545,34 @@ impl NodeClient {
             unsynced_event_count: info.unsynced_event_count.unwrap_or(0),
             last_synced_at: info.last_synced_at,
         })
+    }
+
+    /// `GET /api/v1/nodes/{node_id}/settings` (node settings + hub pairing).
+    pub async fn node_settings(&mut self) -> Result<fxg_protocol::settings::NodeSettingsSnapshot> {
+        let path = format!("/api/v1/nodes/{}/settings", self.node_id);
+        self.get(&path).await
+    }
+
+    /// `PUT /api/v1/nodes/{node_id}/settings/pairing` (applied immediately).
+    pub async fn update_pairing(
+        &mut self,
+        request: &fxg_protocol::settings::UpdatePairingRequest,
+    ) -> Result<fxg_protocol::settings::NodeSettingsSnapshot> {
+        let path = format!("/api/v1/nodes/{}/settings/pairing", self.node_id);
+        self.put(&path, request).await
+    }
+
+    /// `DELETE /api/v1/nodes/{node_id}/settings/pairing`.
+    pub async fn clear_pairing(
+        &mut self,
+        expected_revision: u64,
+    ) -> Result<fxg_protocol::settings::NodeSettingsSnapshot> {
+        let path = format!("/api/v1/nodes/{}/settings/pairing", self.node_id);
+        self.delete_with_body(
+            &path,
+            &serde_json::json!({ "expected_revision": expected_revision }),
+        )
+        .await
     }
 
     /// `fxg node access-token show` / `fxg node access-token rotate`

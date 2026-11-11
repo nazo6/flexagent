@@ -10,6 +10,7 @@ mod api;
 mod auth;
 mod http;
 mod ops;
+mod pairing;
 mod stdio;
 
 use std::net::SocketAddr;
@@ -59,10 +60,6 @@ pub struct DaemonConfig {
     /// When false and the default port is already in use, the daemon falls back
     /// to an ephemeral loopback port.
     pub listen_addr_explicit: bool,
-    /// Node Hub WebSocket URL of the hub (standalone when unset)
-    pub hub_url: Option<String>,
-    /// Per-node pairing token (reads `~/.flexagent/node_token` when omitted)
-    pub node_token: Option<String>,
     /// Whether this is an ephemeral VM / sandbox node (`--ephemeral`; reflected in
     /// NodeHello and the `nodes` row)
     pub ephemeral: bool,
@@ -84,8 +81,6 @@ impl DaemonConfig {
             node_name: node_name.into(),
             listen_addr: fxg_protocol::config::NodeBootstrapConfig::DEFAULT_LISTEN_ADDR.to_owned(),
             listen_addr_explicit: false,
-            hub_url: None,
-            node_token: None,
             ephemeral: false,
             fxg_home: fxg_home.into(),
             log: fxg_protocol::config::LogConfig::default(),
@@ -100,8 +95,6 @@ impl DaemonConfig {
             node_name: hostname(),
             listen_addr: fxg_protocol::config::NodeBootstrapConfig::DEFAULT_LISTEN_ADDR.to_owned(),
             listen_addr_explicit: false,
-            hub_url: env(fxg_protocol::config::env_keys::HUB_URL),
-            node_token: env(fxg_protocol::config::env_keys::NODE_TOKEN),
             ephemeral: false,
             fxg_home: home,
             log: fxg_protocol::config::LogConfig::default(),
@@ -220,6 +213,10 @@ struct Inner {
     client_events: broadcast::Sender<ClientEvent>,
     /// Node ⇔ hub link state (outbox sync worker; `watch` also feeds Client WS)
     hub_link: watch::Sender<HubLinkStatus>,
+    /// Connection target of the outbox sync worker (`None` = standalone)
+    hub_target: watch::Sender<Option<crate::sync::HubTarget>>,
+    /// Whether the last `NodeHello` hit the session reporting limit
+    sessions_truncated: std::sync::atomic::AtomicBool,
     /// `NodeHello` resend trigger (on worktree changes / project registration)
     hello_refresh: tokio::sync::Notify,
 
@@ -319,9 +316,10 @@ impl DaemonState {
             None => SessionManager::new(bus.clone(), config.node_id.clone(), catalog),
         };
 
-        // The sync worker takes over the state right after start-up; while the
-        // pairing exists the link is reported as connecting.
-        let initial_hub_link = match config.hub_url.as_deref() {
+        // Pairing is owned by `node.db`; the supervisor reports the real state
+        // (`Connecting`, or `Failed` when the token is missing).
+        let pairing = db.ensure_node_pairing().await?;
+        let initial_hub_link = match pairing.hub_url.as_deref() {
             Some(url) => HubLinkStatus::new(
                 HubLinkState::Connecting,
                 Some(fxg_protocol::config::hub_http_origin(url)),
@@ -345,6 +343,8 @@ impl DaemonState {
                 started_at: now_ms(),
                 client_events,
                 hub_link: watch::channel(initial_hub_link).0,
+                hub_target: watch::channel(None).0,
+                sessions_truncated: std::sync::atomic::AtomicBool::new(false),
                 hello_refresh: tokio::sync::Notify::new(),
                 diagnostics_counters: std::sync::Arc::new(fxg_hub::api::DiagnosticsCounters::new()),
                 shutdown_tx: std::sync::OnceLock::new(),
@@ -540,6 +540,35 @@ impl DaemonState {
         self.inner.hub_link.send_replace(status);
     }
 
+    /// Current outbox sync target (`None` while standalone).
+    pub fn hub_target(&self) -> Option<crate::sync::HubTarget> {
+        self.inner.hub_target.borrow().clone()
+    }
+
+    /// Subscribes to pairing changes (the supervisor reconnects on every change).
+    pub fn hub_target_updates(&self) -> watch::Receiver<Option<crate::sync::HubTarget>> {
+        self.inner.hub_target.subscribe()
+    }
+
+    /// Replaces the outbox sync target (pairing only).
+    pub(crate) fn set_hub_target(&self, target: Option<crate::sync::HubTarget>) {
+        self.inner.hub_target.send_replace(target);
+    }
+
+    /// Whether the last `NodeHello` hit the session reporting limit.
+    pub fn sessions_truncated(&self) -> bool {
+        self.inner
+            .sessions_truncated
+            .load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Records whether the last `NodeHello` hit the session reporting limit.
+    pub(crate) fn set_sessions_truncated(&self, truncated: bool) {
+        self.inner
+            .sessions_truncated
+            .store(truncated, std::sync::atomic::Ordering::Relaxed);
+    }
+
     /// Requests a resend of `NodeHello` (reports project bindings on worktree changes etc.).
     pub fn trigger_node_hello(&self) {
         self.inner.hello_refresh.notify_one();
@@ -697,34 +726,19 @@ impl DaemonState {
     }
 }
 
-/// Starts the outbox sync worker (returns `None` when no hub URL is set).
+/// Starts the outbox sync supervisor (idle while the node is unpaired).
 ///
-/// The node pairing token is resolved in the order `config.node_token` / `FXG_NODE_TOKEN` →
-/// `~/.flexagent/node_token`.
-fn start_sync_worker(
+/// The pairing (hub address + token) is owned by `node.db` / the token file and
+/// is applied when it changes, so pairing never needs a restart.
+fn start_hub_link(
     state: &DaemonState,
     shutdown_tx: &watch::Sender<bool>,
-) -> Result<Option<tokio::task::JoinHandle<()>>, NodeError> {
-    let Some(url) = state.config().hub_url.clone() else {
-        return Ok(None);
-    };
-    let url = fxg_protocol::config::node_ws_url(&url)?;
-    let token = match state.config().node_token.clone() {
-        Some(token) if !token.trim().is_empty() => token,
-        _ => match std::fs::read_to_string(state.paths().node_token_path()) {
-            Ok(token) if !token.trim().is_empty() => token.trim().to_owned(),
-            _ => {
-                tracing::warn!("hub_url is set but node_token is missing; outbox sync disabled");
-                return Ok(None);
-            }
-        },
-    };
+) -> tokio::task::JoinHandle<()> {
     let state = state.clone();
     let shutdown = shutdown_tx.subscribe();
-    let task = tokio::spawn(async move {
-        crate::sync::run(state, url, token, shutdown).await;
-    });
-    Ok(Some(task))
+    tokio::spawn(async move {
+        crate::sync::supervise(state, shutdown).await;
+    })
 }
 
 /// A started node daemon.
@@ -840,8 +854,11 @@ impl NodeDaemon {
             }
         });
 
-        // Outbox sync worker (started only when a hub URL is configured)
-        let sync_task = start_sync_worker(&state, &shutdown_tx)?;
+        // Outbox sync worker (idle while standalone; reconnects when the pairing changes)
+        if let Err(err) = state.refresh_hub_target().await {
+            tracing::warn!("failed to load the hub pairing; sync stays disabled: {err}");
+        }
+        let sync_task = Some(start_hub_link(&state, &shutdown_tx));
 
         tracing::info!(
             node_id = state.config().node_id,
@@ -1015,6 +1032,63 @@ mod tests {
 
         let err = NodeDaemon::start(config).await.expect_err("must fail");
         assert!(matches!(err, NodeError::Hub(_)), "unexpected error: {err}");
+    }
+
+    #[tokio::test]
+    async fn pairing_is_stored_and_applied_without_restart() {
+        use fxg_protocol::settings::UpdatePairingRequest;
+
+        let (daemon, dir) = start_test_daemon().await;
+        let state = daemon.state();
+        let source = AuditSource::local();
+        let revision = state.pairing_settings().await.expect("pairing").revision;
+        let request = UpdatePairingRequest {
+            hub_url: "http://127.0.0.1:1".to_owned(),
+            token: Some("test-pairing-token".to_owned()),
+            expected_revision: revision,
+        };
+
+        let snapshot = state.update_pairing(&request, &source).await.expect("pair");
+        assert_eq!(snapshot.hub_url.as_deref(), Some("http://127.0.0.1:1"));
+        assert!(snapshot.token_configured);
+        assert_eq!(snapshot.revision, revision + 1);
+        // The sync supervisor receives the new target immediately (no restart).
+        assert!(state.hub_target().is_some());
+        assert!(dir.path().join("node_token").is_file());
+
+        // A stale revision is rejected and does not overwrite the token.
+        let err = state
+            .update_pairing(
+                &UpdatePairingRequest {
+                    hub_url: "http://127.0.0.1:2".to_owned(),
+                    token: Some("other-token".to_owned()),
+                    expected_revision: revision,
+                },
+                &source,
+            )
+            .await
+            .expect_err("stale revision must be rejected");
+        assert!(matches!(
+            err,
+            NodeError::Db(fxg_db::DbError::RevisionMismatch)
+        ));
+        let token = std::fs::read_to_string(dir.path().join("node_token")).expect("token file");
+        assert_eq!(token, "test-pairing-token");
+
+        let cleared = state
+            .clear_pairing(snapshot.revision, &source)
+            .await
+            .expect("clear");
+        assert!(cleared.hub_url.is_none());
+        assert!(!cleared.token_configured);
+        assert!(state.hub_target().is_none());
+        assert!(!dir.path().join("node_token").exists());
+
+        daemon.shutdown();
+        fxg_protocol::discard_with!(
+            tokio::time::timeout(Duration::from_secs(5), daemon.wait()).await,
+            "wait for the daemon to stop"
+        );
     }
 
     #[tokio::test]
