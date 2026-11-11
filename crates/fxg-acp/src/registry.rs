@@ -21,6 +21,7 @@ use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use anyhow::{Context, anyhow};
+use fxg_protocol::client_api::AgentBackendKind;
 use fxg_protocol::settings::{AgentSettings, CustomAgentConfig};
 use serde::{Deserialize, Serialize};
 
@@ -31,7 +32,7 @@ pub const REGISTRY_CACHE_FILE: &str = "registry.json";
 
 /// In-memory catalog state owned by `node.db`.
 #[derive(Debug, Clone, Default)]
-pub struct AgentCatalogData {
+pub struct AgentCatalogState {
     /// Registry URL (`None` = built-in default)
     pub registry_url: Option<String>,
     /// Registry cache TTL in seconds (`None` = built-in default)
@@ -44,7 +45,7 @@ pub struct AgentCatalogData {
     pub enabled_packages: BTreeSet<String>,
 }
 
-impl AgentCatalogData {
+impl AgentCatalogState {
     /// Builds the catalog from the persisted settings.
     pub fn from_settings(
         settings: &AgentSettings,
@@ -199,66 +200,20 @@ pub struct AgentListEntry {
     pub package_available: bool,
     /// Launch sources available on this node (in priority order)
     pub sources: Vec<LocalSource>,
-    /// Custom definition (config.toml / UI-managed)
+    /// Custom definition (node.db / UI-managed)
     pub custom: Option<CustomAgentConfig>,
+    /// How the agent runtime is implemented
+    pub backend: AgentBackendKind,
+    /// Icon URL or built-in asset key
+    pub icon: Option<String>,
 }
 
 impl AgentListEntry {
     /// Whether it can be launched on this node.
     pub fn is_available(&self) -> bool {
-        self.custom.is_some() || !self.sources.is_empty()
-    }
-}
-
-/// A built-in launch preset for a well-known ACP CLI.
-///
-/// A preset is not a distribution channel: it only supplies the correct
-/// arguments when the CLI is already installed on `PATH` (for example
-/// `agy acp`). User custom definitions always take priority.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct AgentPreset {
-    /// Stable agent ID (used by `fxg session new` and `AgentSummary.id`)
-    pub id: &'static str,
-    /// Display name
-    pub display_name: &'static str,
-    /// Executable name on `PATH` (resolved with `which` / `PATHEXT`)
-    pub program: &'static str,
-    /// Arguments that start the CLI's ACP server
-    pub args: &'static [&'static str],
-}
-
-/// Built-in presets for well-known ACP CLIs.
-///
-/// Keep this list small and verified. Agents that are distributed through the
-/// ACP Registry do not need a preset unless their registry `cmd` is not the
-/// user-facing CLI (for example `antigravity-acp` expects a bundled
-/// `agy_acp_server.par`, while the `agy` CLI exposes `agy acp`).
-pub const AGENT_PRESETS: &[AgentPreset] = &[
-    AgentPreset {
-        id: "opencode",
-        display_name: "OpenCode",
-        program: "opencode",
-        args: &["acp"],
-    },
-    AgentPreset {
-        id: "agy",
-        display_name: "Antigravity",
-        program: "agy",
-        args: &["acp"],
-    },
-];
-
-/// Default preset lookup: resolves the executable name on `PATH`.
-fn default_preset_lookup(preset: &AgentPreset) -> Option<PathBuf> {
-    match which::which(preset.program) {
-        Ok(path) => Some(path),
-        Err(err) => {
-            tracing::debug!(
-                program = preset.program,
-                "preset executable was not found on PATH: {err}"
-            );
-            None
-        }
+        self.custom.is_some()
+            || !self.sources.is_empty()
+            || self.backend == AgentBackendKind::Custom
     }
 }
 
@@ -266,53 +221,11 @@ fn default_preset_lookup(preset: &AgentPreset) -> Option<PathBuf> {
 #[derive(Debug, Clone)]
 pub struct AcpRegistry {
     home: PathBuf,
-    catalog: Arc<RwLock<AgentCatalogData>>,
-    /// Preset executable lookup (injectable for tests)
-    preset_lookup: fn(&AgentPreset) -> Option<PathBuf>,
+    catalog: Arc<RwLock<AgentCatalogState>>,
     http: reqwest::Client,
 }
 
 impl AcpRegistry {
-    /// Returns the built-in preset for an agent ID.
-    fn preset(id: &str) -> Option<&'static AgentPreset> {
-        AGENT_PRESETS.iter().find(|preset| preset.id == id)
-    }
-
-    /// Resolves a preset's executable on `PATH`.
-    fn preset_path(&self, preset: &AgentPreset) -> Option<PathBuf> {
-        (self.preset_lookup)(preset)
-    }
-
-    /// Builds a launch spec from a built-in preset without requiring the registry.
-    pub fn preset_launch_spec(&self, name: &str, extra_args: &[String]) -> Option<AgentLaunchSpec> {
-        let id = self.resolve_alias(name);
-        let preset = Self::preset(&id)?;
-        let path = self.preset_path(preset)?;
-        Some(Self::preset_spec(preset, path, extra_args))
-    }
-
-    /// Builds a launch spec from a built-in preset.
-    fn preset_spec(
-        preset: &AgentPreset,
-        program: PathBuf,
-        extra_args: &[String],
-    ) -> AgentLaunchSpec {
-        let mut args = preset
-            .args
-            .iter()
-            .map(|arg| (*arg).to_owned())
-            .collect::<Vec<_>>();
-        args.extend(extra_args.iter().cloned());
-        AgentLaunchSpec {
-            agent_id: preset.id.to_owned(),
-            display_name: preset.display_name.to_owned(),
-            driver_kind: DriverKind::Acp,
-            program,
-            args,
-            env: Vec::new(),
-        }
-    }
-
     /// Creates from `~/.flexagent` and the persisted agent catalog.
     pub fn new(
         home: impl Into<PathBuf>,
@@ -327,12 +240,11 @@ impl AcpRegistry {
             .unwrap_or_else(|_| reqwest::Client::new());
         Self {
             home: home.into(),
-            catalog: Arc::new(RwLock::new(AgentCatalogData::from_settings(
+            catalog: Arc::new(RwLock::new(AgentCatalogState::from_settings(
                 settings,
                 custom,
                 enabled_packages,
             ))),
-            preset_lookup: default_preset_lookup,
             http,
         }
     }
@@ -345,10 +257,10 @@ impl AcpRegistry {
         enabled_packages: Vec<String>,
     ) {
         let mut catalog = self.catalog.write().expect("agent catalog lock poisoned");
-        *catalog = AgentCatalogData::from_settings(settings, custom, enabled_packages);
+        *catalog = AgentCatalogState::from_settings(settings, custom, enabled_packages);
     }
 
-    fn catalog(&self) -> std::sync::RwLockReadGuard<'_, AgentCatalogData> {
+    fn catalog(&self) -> std::sync::RwLockReadGuard<'_, AgentCatalogState> {
         self.catalog.read().expect("agent catalog lock poisoned")
     }
 
@@ -360,6 +272,11 @@ impl AcpRegistry {
     /// Returns custom agent definitions from the DB catalog.
     pub fn custom_agents(&self) -> BTreeMap<String, CustomAgentConfig> {
         self.catalog().custom.clone()
+    }
+
+    /// Returns one custom agent definition.
+    pub fn custom_agent(&self, id: &str) -> Option<CustomAgentConfig> {
+        self.catalog().custom.get(id).cloned()
     }
 
     /// Agent IDs enabled for use via `npx` / `uvx` distribution.
@@ -525,51 +442,35 @@ impl AcpRegistry {
         std::fs::write(&path, json).with_context(|| format!("failed to write {}", path.display()))
     }
 
-    /// Builds the agent list.
-    ///
-    /// With `include_unavailable = false`, only agents launchable on this node are returned.
-    pub fn list(&self, index: &RegistryIndex, include_unavailable: bool) -> Vec<AgentListEntry> {
-        let mut entries = Vec::new();
+    /// Lists custom agent definitions from `node.db`.
+    pub fn custom_entries(&self, index: &RegistryIndex) -> Vec<AgentListEntry> {
+        self.custom_agents()
+            .into_iter()
+            .map(|(id, config)| AgentListEntry {
+                name: config.name.clone().unwrap_or_else(|| id.clone()),
+                registry: index.find(&id).is_some(),
+                backend: AgentBackendKind::Acp,
+                icon: None,
+                id,
+                version: "-".to_owned(),
+                description: None,
+                package_available: false,
+                sources: Vec::new(),
+                custom: Some(config),
+            })
+            .collect()
+    }
+
+    /// Lists registry entries only, skipping IDs overridden by a custom definition.
+    pub fn registry_entries(
+        &self,
+        index: &RegistryIndex,
+        include_unavailable: bool,
+    ) -> Vec<AgentListEntry> {
         let custom = self.custom_agents();
         // `npx` / `uvx` are candidates only when explicitly enabled
         let enabled = self.enabled_package_agents();
-
-        // Custom definitions (config.toml / UI-managed)
-        for (id, config) in &custom {
-            entries.push(AgentListEntry {
-                id: id.clone(),
-                name: config.name.clone().unwrap_or_else(|| id.clone()),
-                version: "-".to_owned(),
-                description: None,
-                registry: index.find(id).is_some(),
-                package_available: false,
-                sources: Vec::new(),
-                custom: Some(config.clone()),
-            });
-        }
-
-        // Built-in presets (known CLI on PATH). Skip IDs already handled by a
-        // custom definition or the registry to avoid duplicate rows.
-        for preset in AGENT_PRESETS {
-            if custom.contains_key(preset.id) || index.find(preset.id).is_some() {
-                continue;
-            }
-            let Some(path) = self.preset_path(preset) else {
-                continue;
-            };
-            entries.push(AgentListEntry {
-                id: preset.id.to_owned(),
-                name: preset.display_name.to_owned(),
-                version: "-".to_owned(),
-                description: Some("Known ACP CLI".to_owned()),
-                registry: false,
-                package_available: false,
-                sources: vec![LocalSource::External(path)],
-                custom: None,
-            });
-        }
-
-        // Registry
+        let mut entries = Vec::new();
         for agent in &index.agents {
             // Prefer a custom definition with the same name (same as launch resolution)
             if custom.contains_key(&agent.id) {
@@ -588,9 +489,10 @@ impl AcpRegistry {
                 package_available: Self::package_runner(agent).is_some(),
                 sources,
                 custom: None,
+                backend: AgentBackendKind::Acp,
+                icon: agent.icon.clone(),
             });
         }
-
         entries
     }
 
@@ -620,64 +522,62 @@ impl AcpRegistry {
         sources
     }
 
-    /// Resolves the launch spec for an agent.
-    ///
-    /// Resolution order: custom definition → built-in preset → existing install
-    /// on `PATH` → `npx` → `uvx`.
-    pub async fn launch_spec(
+    /// Builds a launch spec from a custom definition (`None` when not defined).
+    pub fn custom_launch_spec(
         &self,
-        name: &str,
+        id: &str,
+        extra_args: &[String],
+    ) -> anyhow::Result<Option<AgentLaunchSpec>> {
+        let Some(custom) = self.custom_agents().remove(id) else {
+            return Ok(None);
+        };
+        let mut args = custom.args.clone();
+        args.extend(extra_args.iter().cloned());
+        let mut env: Vec<(String, String)> = custom
+            .env
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        // Resolve `env_secrets` from ~/.flexagent/secrets/node/<id>. A missing
+        // value aborts the launch (never start with an empty token).
+        for (key, secret_id) in &custom.env_secrets {
+            let path = self
+                .home
+                .join("secrets")
+                .join("node")
+                .join(secret_id.as_str());
+            let value = std::fs::read_to_string(&path).map_err(|err| {
+                anyhow!(
+                    "secret {} referenced by {key} is missing ({}): {err}",
+                    secret_id.as_str(),
+                    path.display()
+                )
+            })?;
+            env.push((key.clone(), value.trim_end_matches(['\r', '\n']).to_owned()));
+        }
+        Ok(Some(AgentLaunchSpec {
+            agent_id: id.to_owned(),
+            display_name: custom.name.clone().unwrap_or_else(|| id.to_owned()),
+            driver_kind: DriverKind::Acp,
+            extension: None,
+            program: Some(PathBuf::from(&custom.command)),
+            args,
+            env,
+        }))
+    }
+
+    /// Builds a launch spec from the ACP Registry only.
+    ///
+    /// `npx` / `uvx` do not require explicit enablement for launch resolution.
+    pub async fn registry_launch_spec(
+        &self,
+        id: &str,
         index: &RegistryIndex,
         extra_args: &[String],
     ) -> anyhow::Result<AgentLaunchSpec> {
-        let id = self.resolve_alias(name);
-
-        // 1) Custom definition (takes priority over the registry)
-        if let Some(custom) = self.custom_agents().remove(&id) {
-            let mut args = custom.args.clone();
-            args.extend(extra_args.iter().cloned());
-            let mut env: Vec<(String, String)> = custom
-                .env
-                .iter()
-                .map(|(k, v)| (k.clone(), v.clone()))
-                .collect();
-            // Resolve `env_secrets` from ~/.flexagent/secrets/node/<id>. A missing
-            // value aborts the launch (never start with an empty token).
-            for (key, secret_id) in &custom.env_secrets {
-                let path = self
-                    .home
-                    .join("secrets")
-                    .join("node")
-                    .join(secret_id.as_str());
-                let value = std::fs::read_to_string(&path).map_err(|err| {
-                    anyhow!(
-                        "secret {} referenced by {key} is missing ({}): {err}",
-                        secret_id.as_str(),
-                        path.display()
-                    )
-                })?;
-                env.push((key.clone(), value.trim_end_matches(['\r', '\n']).to_owned()));
-            }
-            return Ok(AgentLaunchSpec {
-                agent_id: id.clone(),
-                display_name: custom.name.clone().unwrap_or_else(|| id.clone()),
-                driver_kind: DriverKind::Acp,
-                program: PathBuf::from(&custom.command),
-                args,
-                env,
-            });
-        }
-
-        // 2) Built-in preset: a known CLI already installed on PATH.
-        if let Some(spec) = self.preset_launch_spec(&id, extra_args) {
-            return Ok(spec);
-        }
-
-        // 3) Registry (only sources usable on this node; `npx` / `uvx` do not require
-        // explicit enablement)
         let agent = index
-            .find(&id)
-            .ok_or_else(|| anyhow!("unknown agent: {name} (registry: {id})"))?;
+            .find(id)
+            .ok_or_else(|| anyhow!("unknown agent: {id}"))?;
         let source = self
             .local_sources(agent, true)
             .into_iter()
@@ -740,7 +640,8 @@ impl AcpRegistry {
             agent_id: agent.id.clone(),
             display_name: agent.name.clone(),
             driver_kind: DriverKind::Acp,
-            program,
+            extension: None,
+            program: Some(program),
             args,
             env: env.into_iter().collect(),
         })
@@ -823,15 +724,13 @@ mod tests {
                 args: vec!["--flag".to_owned()],
                 env: BTreeMap::from([("KEY".to_owned(), "value".to_owned())]),
                 env_secrets: BTreeMap::new(),
+                extension: None,
             },
         )])
     }
 
     fn registry(dir: &Path) -> AcpRegistry {
-        let mut registry = AcpRegistry::new(dir, &settings(), custom_agents(), Vec::new());
-        // Keep tests independent of the host's PATH.
-        registry.preset_lookup = |_| None;
-        registry
+        AcpRegistry::new(dir, &settings(), custom_agents(), Vec::new())
     }
 
     #[test]
@@ -876,13 +775,12 @@ mod tests {
         // Unknown names pass through unchanged
         assert_eq!(registry.resolve_alias("unknown-agent"), "unknown-agent");
 
-        let index: RegistryIndex = serde_json::from_str(FIXTURE).expect("fixture");
-        let spec = tokio::runtime::Runtime::new()
-            .unwrap()
-            .block_on(registry.launch_spec("my-agent", &index, &["--extra".to_owned()]))
-            .expect("custom spec");
+        let spec = registry
+            .custom_launch_spec("my-agent", &["--extra".to_owned()])
+            .expect("custom spec")
+            .expect("custom definition");
         assert_eq!(spec.driver_kind, DriverKind::Acp);
-        assert_eq!(spec.program, PathBuf::from("my-agent"));
+        assert_eq!(spec.program, Some(PathBuf::from("my-agent")));
         assert_eq!(spec.args, vec!["--flag", "--extra"]);
         assert_eq!(spec.env, vec![("KEY".to_owned(), "value".to_owned())]);
     }
@@ -897,7 +795,7 @@ mod tests {
         let spec = registry
             .spec_for_source(agent, LocalSource::Npx, &[])
             .expect("npx spec");
-        assert_eq!(spec.program, PathBuf::from("npx"));
+        assert_eq!(spec.program, Some(PathBuf::from("npx")));
         assert_eq!(spec.args, vec!["-y", "demo-agent@1.2.3", "--acp"]);
         assert_eq!(spec.env, vec![("DEMO".to_owned(), "1".to_owned())]);
     }
@@ -909,7 +807,7 @@ mod tests {
         let index: RegistryIndex = serde_json::from_str(FIXTURE).expect("fixture");
         let err = tokio::runtime::Runtime::new()
             .unwrap()
-            .block_on(registry.launch_spec("demo-bin", &index, &[]))
+            .block_on(registry.registry_launch_spec("demo-bin", &index, &[]))
             .expect_err("must fail");
         assert!(
             err.to_string().contains("not available"),
@@ -924,25 +822,27 @@ mod tests {
         let registry = registry(dir.path());
         let index: RegistryIndex = serde_json::from_str(FIXTURE).expect("fixture");
 
-        // By default only available agents are returned (npx presence is environment-dependent,
-        // so it is not asserted individually)
-        let available = registry.list(&index, false);
-        assert!(
-            available
-                .iter()
-                .any(|entry| entry.id == "my-agent" && entry.custom.is_some())
-        );
-        assert!(available.iter().all(|entry| entry.is_available()));
+        // Custom definitions are always listed and marked available.
+        let custom = registry.custom_entries(&index);
+        assert_eq!(custom.len(), 1);
+        assert_eq!(custom[0].id, "my-agent");
+        assert!(custom[0].custom.is_some());
+        assert!(custom[0].is_available());
+
+        // By default only available registry agents are returned (npx presence is
+        // environment-dependent, so it is not asserted individually).
+        let available = registry.registry_entries(&index, false);
         assert!(!available.iter().any(|entry| entry.id == "demo-bin"));
 
-        // Listing all includes registry entries
-        let all = registry.list(&index, true);
-        assert_eq!(all.len(), 3);
+        // Listing all includes unavailable registry entries.
+        let all = registry.registry_entries(&index, true);
+        assert_eq!(all.len(), 2);
         let demo = all
             .iter()
             .find(|entry| entry.id == "demo-bin")
             .expect("demo-bin");
         assert!(!demo.is_available());
+        assert_eq!(demo.backend, AgentBackendKind::Acp);
     }
 
     #[tokio::test]
@@ -962,6 +862,7 @@ mod tests {
                         "API_KEY".to_owned(),
                         fxg_protocol::SecretId::new("key-1"),
                     )]),
+                    extension: None,
                 },
             ),
             (
@@ -977,11 +878,10 @@ mod tests {
             ),
         ]);
         let registry = AcpRegistry::new(dir.path(), &settings(), custom, Vec::new());
-        let index = RegistryIndex::default();
         let spec = registry
-            .launch_spec("secret-agent", &index, &[])
-            .await
-            .expect("spec");
+            .custom_launch_spec("secret-agent", &[])
+            .expect("spec")
+            .expect("custom definition");
         assert!(spec.env.contains(&("PLAIN".to_owned(), "value".to_owned())));
         assert!(
             spec.env
@@ -990,8 +890,7 @@ mod tests {
 
         // A missing secret must abort the launch instead of starting with an empty value.
         let err = registry
-            .launch_spec("missing-secret-agent", &index, &[])
-            .await
+            .custom_launch_spec("missing-secret-agent", &[])
             .expect_err("missing secret");
         assert!(
             err.to_string().contains("is missing"),
@@ -1006,77 +905,11 @@ mod tests {
         let index: RegistryIndex = serde_json::from_str(FIXTURE).expect("fixture");
         let err = tokio::runtime::Runtime::new()
             .unwrap()
-            .block_on(registry.launch_spec("missing", &index, &[]))
+            .block_on(registry.registry_launch_spec("missing", &index, &[]))
             .expect_err("must fail");
         assert!(
             err.to_string().contains("unknown agent"),
             "unexpected error: {err}"
-        );
-    }
-
-    #[test]
-    fn preset_definitions_are_unique_and_use_acp_arguments() {
-        let mut ids = BTreeSet::new();
-        for preset in AGENT_PRESETS {
-            assert!(ids.insert(preset.id), "duplicate preset id: {}", preset.id);
-            assert!(!preset.program.is_empty());
-            assert_eq!(preset.args, ["acp"]);
-        }
-        assert!(AcpRegistry::preset("agy").is_some());
-        assert!(AcpRegistry::preset("opencode").is_some());
-    }
-
-    #[test]
-    fn builds_preset_spec_with_passthrough_arguments() {
-        let preset = AcpRegistry::preset("agy").expect("agy preset");
-        let spec = AcpRegistry::preset_spec(
-            preset,
-            PathBuf::from("/opt/agy/bin/agy"),
-            &["--verbose".to_owned()],
-        );
-        assert_eq!(spec.agent_id, "agy");
-        assert_eq!(spec.display_name, "Antigravity");
-        assert_eq!(spec.driver_kind, DriverKind::Acp);
-        assert_eq!(spec.program, PathBuf::from("/opt/agy/bin/agy"));
-        assert_eq!(spec.args, vec!["acp", "--verbose"]);
-        assert!(spec.env.is_empty());
-    }
-
-    #[test]
-    fn resolves_preset_alias_to_installed_cli() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let mut registry = AcpRegistry::new(dir.path(), &settings(), custom_agents(), Vec::new());
-        registry.preset_lookup =
-            |preset| (preset.id == "agy").then(|| PathBuf::from("/fake/bin/agy"));
-        let index: RegistryIndex = serde_json::from_str(FIXTURE).expect("fixture");
-
-        let spec = tokio::runtime::Runtime::new()
-            .unwrap()
-            .block_on(registry.launch_spec("antigravity", &index, &[]))
-            .expect("preset spec");
-        assert_eq!(spec.agent_id, "agy");
-        assert_eq!(spec.program, PathBuf::from("/fake/bin/agy"));
-        assert_eq!(spec.args, vec!["acp"]);
-    }
-
-    #[test]
-    fn lists_installed_presets_without_registry_entry() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let mut registry = AcpRegistry::new(dir.path(), &settings(), custom_agents(), Vec::new());
-        registry.preset_lookup =
-            |preset| (preset.id == "agy").then(|| PathBuf::from("/fake/bin/agy"));
-        let index: RegistryIndex = serde_json::from_str(FIXTURE).expect("fixture");
-
-        let entries = registry.list(&index, false);
-        let agy = entries
-            .iter()
-            .find(|entry| entry.id == "agy")
-            .expect("agy preset entry");
-        assert!(!agy.registry);
-        assert!(agy.is_available());
-        assert_eq!(
-            agy.sources,
-            vec![LocalSource::External(PathBuf::from("/fake/bin/agy"))]
         );
     }
 }

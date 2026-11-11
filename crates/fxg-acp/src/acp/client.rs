@@ -30,6 +30,13 @@ pub(super) struct AcpSessionHandle {
     lease: Arc<ProcessLease>,
 }
 
+impl AcpSessionHandle {
+    /// ACP (agent-side) session ID.
+    pub(super) fn session_id(&self) -> &SessionId {
+        &self.acp_session_id
+    }
+}
+
 #[async_trait]
 impl ActiveSessionHandle for AcpSessionHandle {
     async fn send_prompt(&self, input: PromptInput) -> anyhow::Result<()> {

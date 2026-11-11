@@ -1,6 +1,7 @@
 //! `fxg agents` commands (ACP agent authentication).
 
 use anyhow::{Context, Result, bail};
+use fxg_acp::agent::AgentCatalog;
 use fxg_acp::registry::AcpRegistry;
 use fxg_protocol::common::AgentAuthMethodKind;
 use usage::{Args, Subcommands};
@@ -25,18 +26,18 @@ pub enum AgentsCommands {
     Logout(AgentsLogoutArgs),
 }
 
-/// Builds the ACP Registry from the node-owned agent settings.
-async fn acp_registry() -> Result<AcpRegistry> {
+/// Builds the agent catalog from the node-owned settings.
+async fn agent_catalog() -> Result<AgentCatalog> {
     let env = fxg_protocol::config::process_env;
     let paths = fxg_node::NodePaths::from_env(&env);
     let db = node_db(&env).await?;
     let settings = db.ensure_agent_settings().await?;
-    Ok(AcpRegistry::new(
+    Ok(AgentCatalog::new(AcpRegistry::new(
         paths.fxg_home().to_path_buf(),
         &settings,
         db.custom_agents().await?,
         db.enabled_package_agents().await?,
-    ))
+    )))
 }
 
 /// `fxg agents login <id>`
@@ -51,20 +52,21 @@ pub struct AgentsLoginArgs {
 
 /// Resolves a launch spec for `agents login/logout`.
 async fn resolve_agent_launch_spec(
-    registry: &AcpRegistry,
+    catalog: &AgentCatalog,
     id: &str,
 ) -> Result<fxg_acp::AgentLaunchSpec> {
     // Custom definitions and presets are resolved before the registry index,
     // so an offline/missing registry still allows logging in to a local CLI.
-    let index = match registry.index(false).await {
+    let index = match catalog.index(false).await {
         Ok(index) => index,
         Err(err) => {
             tracing::warn!(agent_id = id, "failed to load ACP registry: {err}");
             fxg_acp::registry::RegistryIndex::default()
         }
     };
-    registry
-        .launch_spec(id, &index, &[])
+    let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    catalog
+        .launch_spec(id, &index, &cwd, &[])
         .await
         .with_context(|| format!("cannot launch {id}"))
 }
@@ -111,9 +113,9 @@ impl usage::RunAsync for AgentsLoginArgs {
     type Output = Result<()>;
 
     async fn run_async(self) -> Self::Output {
-        let registry = acp_registry().await?;
-        let id = registry.resolve_alias(&self.id);
-        let spec = resolve_agent_launch_spec(&registry, &id).await?;
+        let catalog = agent_catalog().await?;
+        let id = catalog.resolve_alias(&self.id);
+        let spec = resolve_agent_launch_spec(&catalog, &id).await?;
         let methods = fxg_acp::auth::discover_auth_methods(&spec)
             .await
             .with_context(|| format!("failed to query authentication methods for {id}"))?;
@@ -148,9 +150,9 @@ impl usage::RunAsync for AgentsLogoutArgs {
     type Output = Result<()>;
 
     async fn run_async(self) -> Self::Output {
-        let registry = acp_registry().await?;
-        let id = registry.resolve_alias(&self.id);
-        let spec = resolve_agent_launch_spec(&registry, &id).await?;
+        let catalog = agent_catalog().await?;
+        let id = catalog.resolve_alias(&self.id);
+        let spec = resolve_agent_launch_spec(&catalog, &id).await?;
         fxg_acp::auth::logout(&spec)
             .await
             .with_context(|| format!("failed to log out from {id}"))?;

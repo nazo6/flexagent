@@ -1,5 +1,17 @@
-import type { AgentSource, AgentSummary } from "#lib/generated/bindings.ts";
+import type { AgentBackendKind, AgentSource, AgentSummary } from "#lib/generated/bindings.ts";
 import { m } from "#lib/paraglide/messages.js";
+
+/** Display label for the driver backing an agent. */
+export function agentBackendLabel(backend: AgentBackendKind): string {
+  switch (backend) {
+    case "acp":
+      return m.settings_agent_backend_acp();
+    case "acp_extended":
+      return m.settings_agent_backend_acp_extended();
+    case "custom":
+      return m.settings_agent_backend_custom();
+  }
+}
 
 /** Display label for how the agent is launched. */
 export function agentSourceLabel(source: AgentSource): string {

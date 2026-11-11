@@ -56,8 +56,9 @@
   - `fxg-db`: SQLite (`sqlx`, WAL, FTS5 `tokenize='trigram'`) による `hub.db`
     / `node.db` 管理
   - `fxg-pty`: ConPTY / Unix PTY (`portable-pty`)、Windows Job Object 管理
-  - `fxg-acp`: `AgentDriver` トレイト、`AcpDriver`
-    (`agent-client-protocol`)、ACP Registry、ローカル PATH 実行
+  - `fxg-acp`: `AgentDriver` トレイト、`AcpDriver` / `ExtendedAcpDriver`
+    (`agent-client-protocol`)、`AgentCatalog` / `AgentExtension`、ACP Registry、
+    ローカル PATH 実行
   - `fxg-node`: ノード (ループバック HTTP/WS、Outbox 同期、Git
     Worktree 管理、Shadow Git Tree (`GIT_INDEX_FILE`)
     によるターン単位のスナップショット/Revert)

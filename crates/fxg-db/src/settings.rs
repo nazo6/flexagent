@@ -236,7 +236,7 @@ pub async fn list_custom_agents(
 ) -> Result<BTreeMap<String, CustomAgentConfig>, DbError> {
     let rows = sqlx::query!(
         r#"
-        SELECT agent_id AS "agent_id!", name, command, args_json, env_json, env_secrets_json
+        SELECT agent_id AS "agent_id!", name, command, args_json, env_json, env_secrets_json, extension
           FROM custom_agents
          ORDER BY agent_id
         "#,
@@ -256,6 +256,7 @@ pub async fn list_custom_agents(
                 args,
                 env,
                 env_secrets,
+                extension: row.extension,
             },
         );
     }
@@ -283,14 +284,15 @@ pub async fn upsert_custom_agent(
     sqlx::query!(
         r#"
         INSERT INTO custom_agents
-            (agent_id, name, command, args_json, env_json, env_secrets_json, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+            (agent_id, name, command, args_json, env_json, env_secrets_json, extension, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(agent_id) DO UPDATE SET
             name = excluded.name,
             command = excluded.command,
             args_json = excluded.args_json,
             env_json = excluded.env_json,
             env_secrets_json = excluded.env_secrets_json,
+            extension = excluded.extension,
             updated_at = excluded.updated_at
         "#,
         agent_id,
@@ -299,6 +301,7 @@ pub async fn upsert_custom_agent(
         args_json,
         env_json,
         env_secrets_json,
+        config.extension,
         now_ms(),
     )
     .execute(pool)

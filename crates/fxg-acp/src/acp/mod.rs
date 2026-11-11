@@ -350,11 +350,15 @@ impl AcpDriver {
         event_tx: &mpsc::UnboundedSender<DriverEvent>,
     ) -> anyhow::Result<StartedSession> {
         // Extension resolution for `npx` / `uvx` (Windows PATHEXT support)
-        let program = fxg_pty::resolve_command(&req.launch.program.to_string_lossy(), &req.cwd)
-            .map_err(|err| {
+        let program_path =
+            req.launch.program.as_deref().ok_or_else(|| {
+                anyhow!("agent {} has no executable configured", req.launch.agent_id)
+            })?;
+        let program =
+            fxg_pty::resolve_command(&program_path.to_string_lossy(), &req.cwd).map_err(|err| {
                 anyhow!(
                     "failed to resolve agent program {}: {err}",
-                    req.launch.program.display()
+                    program_path.display()
                 )
             })?;
         let key = LaunchKey::new(&req.launch, program.clone());
@@ -386,9 +390,11 @@ impl AcpDriver {
                         agent = %key.agent_id(),
                         "reusing idle acp agent process"
                     );
+                    let agent_session_id = Some(handle.session_id().to_string());
                     return Ok(StartedSession {
                         handle: Box::new(handle),
                         context_restored,
+                        agent_session_id,
                     });
                 }
                 Err(err) => {
@@ -427,9 +433,11 @@ impl AcpDriver {
         let (handle, context_restored) = process
             .new_session(session_params, event_tx.clone(), lease)
             .await?;
+        let agent_session_id = Some(handle.session_id().to_string());
         Ok(StartedSession {
             handle: Box::new(handle),
             context_restored,
+            agent_session_id,
         })
     }
 }

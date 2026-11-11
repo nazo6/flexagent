@@ -21,10 +21,14 @@ use crate::acp::{client_capabilities, map_auth_method};
 use crate::driver::AgentLaunchSpec;
 
 /// Builds the spawn configuration from a resolved launch spec.
-fn agent_config(spec: &AgentLaunchSpec) -> AcpAgentConfig {
-    AcpAgentConfig::new(spec.program.clone())
+fn agent_config(spec: &AgentLaunchSpec) -> Result<AcpAgentConfig> {
+    let program = spec
+        .program
+        .clone()
+        .ok_or_else(|| anyhow!("agent {} has no executable configured", spec.agent_id))?;
+    Ok(AcpAgentConfig::new(program)
         .args(spec.args.iter().cloned())
-        .envs(spec.env.iter().cloned())
+        .envs(spec.env.iter().cloned()))
 }
 
 /// Initializes a fresh agent process and returns its advertised auth methods.
@@ -32,7 +36,7 @@ pub async fn discover_auth_methods(spec: &AgentLaunchSpec) -> Result<Vec<AgentAu
     let (tx, rx) = oneshot::channel();
     let connected = Client
         .v1()
-        .connect_with(AcpAgent::new(agent_config(spec)), async move |cx| {
+        .connect_with(AcpAgent::new(agent_config(spec)?), async move |cx| {
             let outcome = async {
                 let initialize = cx
                     .send_request(
@@ -71,7 +75,7 @@ pub async fn authenticate(spec: &AgentLaunchSpec, method_id: &str) -> Result<()>
     let (tx, rx) = oneshot::channel();
     let connected = Client
         .v1()
-        .connect_with(AcpAgent::new(agent_config(spec)), async move |cx| {
+        .connect_with(AcpAgent::new(agent_config(spec)?), async move |cx| {
             let outcome = async {
                 let _initialize = cx
                     .send_request(
@@ -107,7 +111,7 @@ pub async fn logout(spec: &AgentLaunchSpec) -> Result<()> {
     let (tx, rx) = oneshot::channel();
     let connected = Client
         .v1()
-        .connect_with(AcpAgent::new(agent_config(spec)), async move |cx| {
+        .connect_with(AcpAgent::new(agent_config(spec)?), async move |cx| {
             let outcome = async {
                 let initialize = cx
                     .send_request(
@@ -153,7 +157,11 @@ pub async fn run_terminal_login(
     if method.kind != AgentAuthMethodKind::Terminal {
         bail!("{} is not a terminal authentication method", method.id);
     }
-    let program = resolve_program(&spec.program)?;
+    let program_path = spec
+        .program
+        .as_deref()
+        .ok_or_else(|| anyhow!("agent {} has no executable configured", spec.agent_id))?;
+    let program = resolve_program(program_path)?;
     let mut args = spec.args.clone();
     args.extend(method.args.iter().cloned());
 

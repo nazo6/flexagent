@@ -17,6 +17,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 
+use fxg_acp::agent::AgentCatalog;
 use fxg_acp::registry::AcpRegistry;
 use fxg_db::{Db, DbRole};
 use fxg_hub::api::ClientEvent;
@@ -29,7 +30,7 @@ use tokio::sync::{broadcast, watch};
 use crate::error::NodeError;
 use crate::paths::NodePaths;
 use crate::session::SessionEventBus;
-use crate::session_manager::{DriverFactory, SessionManager, default_driver_factory};
+use crate::session_manager::{DriverFactory, SessionManager};
 
 pub use auth::{generate_token, token_matches};
 pub use ops::{AuditSource, WorktreeAddOutcome};
@@ -260,17 +261,24 @@ impl DaemonState {
     /// Initializes the state (creates the data directory + loads the auth token +
     /// resolves the node ID).
     pub async fn new(config: DaemonConfig) -> Result<Self, NodeError> {
-        Self::with_driver_factory(config, default_driver_factory()).await
+        Self::build(config, None).await
     }
 
     /// Initializes the state with a replaced agent driver factory.
     ///
-    /// The production path is [`Self::new`] (auto-selects the ACP / OpenCode2 driver).
-    /// Tests inject a mock driver to verify without real processes.
+    /// The production path is [`Self::new`]. Tests inject a mock driver to verify
+    /// without real processes.
     #[doc(hidden)]
     pub async fn with_driver_factory(
-        mut config: DaemonConfig,
+        config: DaemonConfig,
         driver_factory: DriverFactory,
+    ) -> Result<Self, NodeError> {
+        Self::build(config, Some(driver_factory)).await
+    }
+
+    async fn build(
+        mut config: DaemonConfig,
+        driver_factory: Option<DriverFactory>,
     ) -> Result<Self, NodeError> {
         let paths = NodePaths::new(config.fxg_home.clone());
         paths.ensure_dirs()?;
@@ -297,18 +305,18 @@ impl DaemonState {
         let node_settings = db.ensure_node_settings(&config.node_name).await?;
         config.node_name = node_settings.name.clone();
         let agent_settings = db.ensure_agent_settings().await?;
-        let registry = AcpRegistry::new(
+        let catalog = AgentCatalog::new(AcpRegistry::new(
             paths.fxg_home(),
             &agent_settings,
             db.custom_agents().await?,
             db.enabled_package_agents().await?,
-        );
-        let sessions = SessionManager::with_factory(
-            bus.clone(),
-            config.node_id.clone(),
-            registry,
-            driver_factory,
-        );
+        ));
+        let sessions = match driver_factory {
+            Some(factory) => {
+                SessionManager::with_factory(bus.clone(), config.node_id.clone(), catalog, factory)
+            }
+            None => SessionManager::new(bus.clone(), config.node_id.clone(), catalog),
+        };
 
         let (client_events, _) = broadcast::channel(CLIENT_EVENT_CAPACITY);
         let state = Self {
@@ -471,7 +479,7 @@ impl DaemonState {
         let enabled = self.inner.db.enabled_package_agents().await?;
         self.inner
             .sessions
-            .registry()
+            .catalog()
             .apply_catalog(&settings, custom, enabled);
         *self
             .inner
@@ -585,13 +593,13 @@ impl DaemonState {
     /// Resolved with a short timeout so that daemon startup is not blocked even
     /// where fetching/expanding the registry is slow (on failure, only custom definitions).
     pub async fn installed_agents(&self) -> Vec<String> {
-        let registry = self.inner.sessions.registry();
+        let catalog = self.inner.sessions.catalog();
         // Custom definitions do not depend on fetching the registry, so always include them
-        let mut ids: Vec<String> = registry.custom_agents().into_keys().collect();
+        let mut ids: Vec<String> = catalog.custom_agents().into_keys().collect();
         let listed = tokio::time::timeout(std::time::Duration::from_secs(5), async {
-            let index = registry.index(false).await?;
+            let index = catalog.index(false).await?;
             Ok::<_, anyhow::Error>(
-                registry
+                catalog
                     .list(&index, false)
                     .into_iter()
                     .map(|entry| entry.id)
@@ -763,7 +771,8 @@ impl NodeDaemon {
     /// Starts the daemon (creates the data directory, registers the node,
     /// starts listening on the local HTTP/WS).
     pub async fn start(config: DaemonConfig) -> Result<Self, NodeError> {
-        Self::start_with_driver_factory(config, default_driver_factory()).await
+        let state = DaemonState::new(config).await?;
+        Self::start_state(state).await
     }
 
     /// Starts the daemon with a replaced agent driver factory
@@ -774,6 +783,10 @@ impl NodeDaemon {
         driver_factory: DriverFactory,
     ) -> Result<Self, NodeError> {
         let state = DaemonState::with_driver_factory(config, driver_factory).await?;
+        Self::start_state(state).await
+    }
+
+    async fn start_state(state: DaemonState) -> Result<Self, NodeError> {
         state.register_node().await?;
 
         let (shutdown_tx, shutdown_rx) = watch::channel(false);

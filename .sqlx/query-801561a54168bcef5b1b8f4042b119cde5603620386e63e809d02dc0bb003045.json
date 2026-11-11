@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n        SELECT agent_id AS \"agent_id!\", name, command, args_json, env_json, env_secrets_json\n          FROM custom_agents\n         ORDER BY agent_id\n        ",
+  "query": "\n        SELECT agent_id AS \"agent_id!\", name, command, args_json, env_json, env_secrets_json, extension\n          FROM custom_agents\n         ORDER BY agent_id\n        ",
   "describe": {
     "columns": [
       {
@@ -68,6 +68,17 @@
             "name": "env_secrets_json"
           }
         }
+      },
+      {
+        "name": "extension",
+        "ordinal": 6,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "custom_agents",
+            "name": "extension"
+          }
+        }
       }
     ],
     "parameters": {
@@ -79,8 +90,9 @@
       false,
       false,
       false,
-      false
+      false,
+      true
     ]
   },
-  "hash": "f97ef12c03f8c83a0c3fa2e574af111d2e447cf9079fb11211198c64800f42b1"
+  "hash": "801561a54168bcef5b1b8f4042b119cde5603620386e63e809d02dc0bb003045"
 }

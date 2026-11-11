@@ -893,6 +893,8 @@ pub enum HubToNodeMsg {
   `managed_versions`、`external_path`、`custom_config` を持つ。`sources` が空 =
   そのノードでは未導入。`npx` / `uvx` は既定では `sources` に含まれず、
   `package_available` が true のものだけ UI から有効化できる。
+  `backend` (`acp` / `acp_extended` / `custom`) と `icon` は
+  `AgentCatalog` が解決した実行方式と表示アイコンを表す。
   ハブではオンラインのいずれかのノード
   (`ListAgents` 中継) からカタログを取得し、全ノードの
   `NodeHello.installed_agents`
@@ -908,15 +910,16 @@ pub enum HubToNodeMsg {
   指定ノード上の fxg 管理バイナリを削除する (Web UI のエージェント削除)。
 - `PUT /api/v1/nodes/:node_id/agents/custom/:agent_id`:
   カスタム ACP エージェント定義を作成・更新する (body: `CustomAgentConfig` =
-  `{ name, command, args, env }`)。`AgentAction::UpsertCustom`
+  `{ name, command, args, env, env_secrets, extension }`)。`extension` は
+  組み込み extension の ID (`opencode` など) で、指定すると Tier 2 として起動
+  する。未知の ID と予約 ID は保存時に拒否される。`AgentAction::UpsertCustom`
   として中継される。
 - `DELETE /api/v1/nodes/:node_id/agents/custom/:agent_id`:
   UI 管理のカスタム定義を削除する (`AgentAction::RemoveCustom`)。
-  `config.toml` 側の同名定義は残る。
 - `POST /api/v1/nodes/:node_id/agents/:agent_id/package`:
   指定ノードで `npx` / `uvx` 経由の利用を**有効化**する
   (`AgentAction::SetPackageEnabled { enabled: true }`)。
-  有効化状態は `~/.flexagent/enabled_package_agents.json` に保存される。
+  有効化状態は `node.db` の `enabled_package_agents` に保存される。
 - `DELETE /api/v1/nodes/:node_id/agents/:agent_id/package`:
   `npx` / `uvx` 経由の利用を**無効化**する
   (`AgentAction::SetPackageEnabled { enabled: false }`)。実行ファイルは削除しない。

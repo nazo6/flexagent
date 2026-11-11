@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import AgentIcon from "#lib/components/agent/AgentIcon.svelte";
   import * as AlertDialog from "#lib/components/ui/alert-dialog/index.ts";
   import { Badge } from "#lib/components/ui/badge/index.ts";
   import { Button } from "#lib/components/ui/button/index.ts";
@@ -7,12 +8,16 @@
   import * as Dialog from "#lib/components/ui/dialog/index.ts";
   import { Input } from "#lib/components/ui/input/index.ts";
   import { Label } from "#lib/components/ui/label/index.ts";
-  import { agentSourceLabel, agentsAvailableOn, isPackageEnabled } from "#lib/agents.ts";
+  import {
+    agentBackendLabel,
+    agentSourceLabel,
+    agentsAvailableOn,
+    isPackageEnabled,
+  } from "#lib/agents.ts";
   import type { AgentSummary } from "#lib/generated/bindings.ts";
   import { m } from "#lib/paraglide/messages.js";
   import { sync } from "#lib/stores/app.svelte.ts";
   import { toast } from "svelte-sonner";
-  import BotIcon from "@lucide/svelte/icons/bot";
   import PencilIcon from "@lucide/svelte/icons/pencil";
   import PlusIcon from "@lucide/svelte/icons/plus";
   import PackageIcon from "@lucide/svelte/icons/package";
@@ -38,7 +43,7 @@
   let customOpen = $state(false);
   let customBusy = $state(false);
   let customEditId = $state<string | null>(null);
-  let customForm = $state({ id: "", name: "", command: "", args: "", env: "" });
+  let customForm = $state({ id: "", name: "", command: "", args: "", env: "", extension: "" });
 
   const onlineNodes = $derived(sync.nodes.filter((node) => node.is_online));
   const busy = $derived(busyLabel !== null);
@@ -50,6 +55,10 @@
     agents
       .filter((agent) => agent.registry && !isAvailableOn(agent))
       .filter((agent) => matchesQuery(agent, catalogQuery)),
+  );
+  /** Built-in extensions that a custom ACP launch can reference. */
+  const extensionChoices = $derived(
+    agents.filter((agent) => agent.custom_config === null && agent.backend === "acp_extended"),
   );
 
   onMount(() => {
@@ -164,6 +173,7 @@
       command: config?.command ?? "",
       args: (config?.args ?? []).join(" "),
       env: formatEnv(config?.env ?? {}, config?.env_secrets ?? {}),
+      extension: config?.extension ?? "",
     };
     customOpen = true;
   }
@@ -213,6 +223,7 @@
         command: customForm.command.trim(),
         args: customForm.args.split(/\s+/).filter((value) => value !== ""),
         ...parseEnv(customForm.env),
+        extension: customForm.extension === "" ? null : customForm.extension,
       });
       toast.success(result.message ?? m.settings_custom_agent_saved({ name: id }));
       customOpen = false;
@@ -286,7 +297,7 @@
         <div class="flex flex-wrap items-start justify-between gap-2">
           <div class="flex min-w-0 flex-col gap-0.5">
             <div class="flex flex-wrap items-center gap-2">
-              <BotIcon class="text-muted-foreground size-4" />
+              <AgentIcon icon={agent.icon} class="size-4" />
               <h2 class="font-medium">{agent.name}</h2>
               <span class="text-muted-foreground font-mono text-[13px]">{agent.id}</span>
               {#if agent.version !== "-"}
@@ -297,6 +308,9 @@
               <p class="text-muted-foreground text-[13px]">{agent.description}</p>
             {/if}
             <div class="mt-0.5 flex flex-wrap items-center gap-1.5">
+              <Badge variant="secondary" class="text-[11px]">
+                {agentBackendLabel(agent.backend)}
+              </Badge>
               {#each agent.sources as source (source)}
                 <Badge variant="outline" class="text-[11px]">{agentSourceLabel(source)}</Badge>
               {/each}
@@ -385,7 +399,7 @@
           {m.settings_remove_custom_description()}
           <code>{removeTarget?.id}</code>
           {m.settings_remove_custom_description_suffix()}
-          <code>config.toml</code>
+          <code>node.db</code>
           {m.settings_remove_custom_description_tail()}
         {:else}
           {m.settings_remove_package_description()}
@@ -488,7 +502,7 @@
       </Dialog.Title>
       <Dialog.Description>
         {m.settings_custom_description()}
-        <code>~/.flexagent/custom_agents.json</code>
+        <code>node.db</code>
       </Dialog.Description>
     </Dialog.Header>
     <form class="flex flex-col gap-3" onsubmit={submitCustom}>
@@ -510,6 +524,22 @@
           placeholder="My Agent"
           class="text-[13px]"
         />
+      </div>
+      <div class="grid gap-1.5">
+        <Label for="custom-extension">{m.settings_agent_extension()}</Label>
+        <select
+          id="custom-extension"
+          bind:value={customForm.extension}
+          class="border-input bg-background h-8 rounded-md border px-2 text-[13px]"
+        >
+          <option value="">{m.settings_agent_extension_none()}</option>
+          {#each extensionChoices as extension (extension.id)}
+            <option value={extension.id}>{extension.name} ({extension.id})</option>
+          {/each}
+        </select>
+        <p class="text-muted-foreground text-[11px]">
+          {m.settings_agent_extension_hint()}
+        </p>
       </div>
       <div class="grid gap-1.5">
         <Label for="custom-command">{m.settings_command()}</Label>

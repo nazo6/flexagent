@@ -262,6 +262,7 @@ impl AgentDriver for MockAgent {
         Ok(StartedSession {
             handle: Box::new(self.clone()),
             context_restored: can_restore,
+            agent_session_id: None,
         })
     }
 }
