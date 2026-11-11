@@ -459,7 +459,7 @@ export class ApiClient {
   }
 
   // ------------------------------------------------------------------
-  // Agent management / auth tokens (Phase D)
+  // Agent management / access tokens (Phase D)
   // ------------------------------------------------------------------
 
   /** `GET /api/v1/agents` (ACP Registry catalog + node install status). */
@@ -618,7 +618,7 @@ export class ApiClient {
     );
   }
 
-  /** `POST /api/v1/auth/rotate-token` (regenerate the client auth token). */
+  /** `POST /api/v1/auth/rotate-token` (regenerate the Web access token). */
   rotateAuthToken(): Promise<RotateAuthTokenResponse> {
     return this.#request("POST", "/api/v1/auth/rotate-token");
   }
@@ -629,12 +629,12 @@ export class ApiClient {
     return response.tokens;
   }
 
-  /** `POST /api/v1/nodes/tokens` (issue a per-node token; hub only). */
+  /** `POST /api/v1/nodes/tokens` (issue a node pairing token; hub only). */
   issueNodeToken(request: IssueNodeTokenRequest): Promise<IssueNodeTokenResponse> {
     return this.#request("POST", "/api/v1/nodes/tokens", { body: request });
   }
 
-  /** `DELETE /api/v1/nodes/tokens/:node_id` (revoke a per-node token; hub only). */
+  /** `DELETE /api/v1/nodes/tokens/:node_id` (revoke a node pairing token; hub only). */
   async revokeNodeToken(nodeId: string): Promise<void> {
     await this.#request("DELETE", `/api/v1/nodes/tokens/${encodeURIComponent(nodeId)}`);
   }

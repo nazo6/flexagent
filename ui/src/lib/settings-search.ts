@@ -47,11 +47,11 @@ export const SETTINGS_SEARCH_ENTRIES: SettingsSearchEntry[] = [
     keywords: "projects scan folders directories workspace",
   },
   { tab: "machine", label: "Secrets", keywords: "secret key value environment env" },
-  { tab: "machine", label: "Client auth token", keywords: "token auth login password regenerate" },
+  { tab: "machine", label: "Web access token", keywords: "token auth login password regenerate" },
 
   { tab: "hub", label: "Hub settings", keywords: "hub settings central server" },
   { tab: "hub", label: "Node pairing", keywords: "pair node token connect hub" },
-  { tab: "hub", label: "Node tokens", keywords: "token issue revoke node" },
+  { tab: "hub", label: "Pairing tokens", keywords: "token issue revoke node pairing" },
 
   { tab: "agents", label: "ACP agents", keywords: "agent acp opencode install path" },
   { tab: "agents", label: "Agent catalog", keywords: "catalog update agents install" },

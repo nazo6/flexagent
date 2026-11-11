@@ -73,18 +73,24 @@
     onError: (error) => toast.error(error instanceof Error ? error.message : String(error)),
   });
 
-  // Issue a new node token
+  // Issue a new node pairing token
   let issueOpen = $state(false);
   let issueNodeId = $state("");
   let issueBusy = $state(false);
   /** Plaintext token right after issuance (cannot be shown again once this dialog is closed). */
   let issued = $state<IssueNodeTokenResponse | null>(null);
+  /** Copy-paste pairing command for the node (uses this hub's HTTP origin). */
+  const pairCommand = $derived(
+    issued === null
+      ? ""
+      : `fxg node pair --hub ${typeof location === "undefined" ? "" : location.origin} --token ${issued.token}`,
+  );
 
   // Token revocation confirmation
   let revokeTarget = $state<string | null>(null);
   let revokeBusy = $state(false);
 
-  // --- Client auth token ---
+  // --- Web access token ---
   let rotateOpen = $state(false);
   let rotateBusy = $state(false);
 
@@ -257,7 +263,6 @@
                   <h2 class="font-medium">{m.settings_node_pairing_title()}</h2>
                   <p class="text-muted-foreground text-[13px]">
                     {m.settings_node_pairing_description()}
-                    (<code>fxg node start</code>, <code>~/.flexagent/node_token</code>)
                   </p>
                 </div>
                 <div class="flex items-center gap-1.5">
@@ -434,7 +439,7 @@
   {/if}
 </div>
 
-<!-- Issue node token -->
+<!-- Issue node pairing token -->
 <Dialog.Root open={issueOpen} onOpenChange={(open) => (issueOpen = open)}>
   <Dialog.Content class="sm:max-w-md">
     <Dialog.Header>
@@ -471,12 +476,11 @@
 
 <!-- Show the issued plaintext token (one time only) -->
 <Dialog.Root open={issued !== null} onOpenChange={(open) => !open && (issued = null)}>
-  <Dialog.Content class="sm:max-w-md">
+  <Dialog.Content class="sm:max-w-lg">
     <Dialog.Header>
       <Dialog.Title>{m.settings_node_token_issued_title()}</Dialog.Title>
       <Dialog.Description>
         {m.settings_node_token_issued_description()}
-        <code>~/.flexagent/node_token</code>
       </Dialog.Description>
     </Dialog.Header>
     <div class="flex flex-col gap-3">
@@ -488,7 +492,7 @@
         <Label>{m.settings_token()}</Label>
         <div class="flex items-center gap-1.5">
           <code
-            class="bg-muted min-w-0 flex-1 truncate rounded-md border px-2 py-1 font-mono text-[13px]"
+            class="bg-muted min-w-0 flex-1 rounded-md border px-2 py-1 font-mono text-[13px] break-all"
           >
             {issued?.token ?? ""}
           </code>
@@ -504,8 +508,39 @@
           </Button>
         </div>
       </div>
-      <pre
-        class="bg-muted overflow-x-auto rounded-md border p-2 text-[11px] leading-relaxed">{`${m.settings_node_token_save_comment()}\necho "${issued?.token ?? ""}" > ~/.flexagent/node_token`}</pre>
+      <div class="grid gap-2">
+        <Label>{m.settings_node_pair_command_label()}</Label>
+        <div class="flex items-start gap-1.5">
+          <code
+            class="bg-muted min-w-0 flex-1 rounded-md border px-2 py-1 text-[12px] break-all whitespace-pre-wrap"
+          >
+            {pairCommand}
+          </code>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            class="h-8 shrink-0 gap-1.5 px-2.5 text-[13px]"
+            onclick={() => void copyText(pairCommand, m.settings_node_pair_command_label())}
+          >
+            <CopyIcon class="size-3.5" />
+            {m.settings_copy()}
+          </Button>
+        </div>
+        <p class="text-muted-foreground text-[12px]">
+          {m.settings_node_pair_command_hint()}
+        </p>
+      </div>
+      <details class="text-[13px]">
+        <summary class="text-muted-foreground hover:text-foreground cursor-pointer text-[12px]">
+          {m.settings_node_manual_setup()}
+        </summary>
+        <p class="text-muted-foreground mt-1 text-[12px]">
+          Save the token in <code>~/.flexagent/node_token</code> (0600) and set
+          <code>[node] hub_url</code>
+          in <code>~/.flexagent/config.toml</code>.
+        </p>
+      </details>
     </div>
     <Dialog.Footer>
       <Button
@@ -521,7 +556,7 @@
   </Dialog.Content>
 </Dialog.Root>
 
-<!-- Revoke node token confirmation -->
+<!-- Revoke node pairing token confirmation -->
 <AlertDialog.Root
   open={revokeTarget !== null}
   onOpenChange={(open) => !open && (revokeTarget = null)}
