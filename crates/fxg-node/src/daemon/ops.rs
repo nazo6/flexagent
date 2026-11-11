@@ -7,7 +7,7 @@
 
 use std::path::{Path, PathBuf};
 
-use fxg_acp::registry::{AcpRegistry, LocalSource};
+use fxg_acp::registry::LocalSource;
 use fxg_protocol::CommandId;
 use fxg_protocol::client_api::{AgentSource, AgentSummary, AgentsResponse, WorktreeInfo};
 use fxg_protocol::common::{AgentAction, ProjectSummary};
@@ -357,17 +357,13 @@ impl DaemonState {
         Ok(output)
     }
 
-    /// Returns the ACP Registry catalog plus install state (`GET /api/v1/agents`).
+    /// Returns the available agents and registry import candidates
+    /// (`GET /api/v1/agents`).
     pub async fn agents_catalog(&self) -> Result<AgentsResponse, NodeError> {
         let catalog = self.session_manager().catalog();
-        // Custom definitions should still be returnable even if the registry cannot be fetched
-        let index = catalog.index(false).await.unwrap_or_else(|err| {
-            tracing::warn!("failed to load ACP registry: {err:#}");
-            Default::default()
-        });
         let node_id = self.node_id().to_owned();
         let agents = catalog
-            .list(&index, true)
+            .list()
             .into_iter()
             .map(|entry| {
                 let available = entry.is_available();
@@ -377,16 +373,9 @@ impl DaemonState {
                 }
                 let mut external_path = None;
                 for source in &entry.sources {
-                    match source {
-                        LocalSource::External(path) => {
-                            external_path = Some(path.to_string_lossy().into_owned());
-                            sources.push(AgentSource::External);
-                        }
-                        LocalSource::Npx | LocalSource::Uvx => {
-                            if !sources.contains(&AgentSource::Package) {
-                                sources.push(AgentSource::Package);
-                            }
-                        }
+                    if let LocalSource::External(path) = source {
+                        external_path = Some(path.to_string_lossy().into_owned());
+                        sources.push(AgentSource::External);
                     }
                 }
                 AgentSummary {
@@ -395,8 +384,6 @@ impl DaemonState {
                     version: entry.version,
                     description: entry.description,
                     sources,
-                    registry: entry.registry,
-                    package_available: entry.package_available,
                     external_path,
                     custom_config: entry.custom,
                     backend: entry.backend,
@@ -409,7 +396,34 @@ impl DaemonState {
                 }
             })
             .collect();
-        Ok(AgentsResponse { agents })
+
+        // The registry is only used by the import dialog. A failed or slow
+        // fetch must not hide the built-in and custom agents above.
+        let custom_ids: std::collections::BTreeSet<String> =
+            catalog.custom_agents().into_keys().collect();
+        let registry =
+            match tokio::time::timeout(std::time::Duration::from_secs(5), catalog.index(false))
+                .await
+            {
+                Ok(Ok(index)) => index
+                    .agents
+                    .iter()
+                    .map(|agent| {
+                        catalog
+                            .registry()
+                            .import_summary(agent, custom_ids.contains(&agent.id))
+                    })
+                    .collect(),
+                Ok(Err(err)) => {
+                    tracing::warn!("failed to load ACP registry: {err:#}");
+                    Vec::new()
+                }
+                Err(_) => {
+                    tracing::warn!("timed out while loading the ACP registry import catalog");
+                    Vec::new()
+                }
+            };
+        Ok(AgentsResponse { agents, registry })
     }
 
     /// Runs an agent management action and returns a display message.
@@ -470,25 +484,42 @@ impl DaemonState {
                     format!("custom agent {agent_id} is not defined")
                 })
             }
-            AgentAction::SetPackageEnabled { agent_id, enabled } => {
+            AgentAction::ImportRegistryAgent {
+                agent_id,
+                extension,
+            } => {
                 let id = catalog.resolve_alias(agent_id);
-                if !enabled {
-                    self.db().set_package_agent_enabled(&id, false).await?;
-                    self.refresh_agent_catalog().await?;
-                    return Ok(format!("disabled npx/uvx for {id}"));
+                if catalog.is_driver_backed(&id) {
+                    return Err(NodeError::Agent(format!(
+                        "agent id {id} is reserved by a built-in driver"
+                    )));
+                }
+                if catalog.custom_agents().contains_key(&id) {
+                    return Err(NodeError::Agent(format!(
+                        "custom agent {id} already exists; edit or remove it instead"
+                    )));
+                }
+                if let Some(extension) = extension.as_deref()
+                    && catalog.extension(extension).is_none()
+                {
+                    return Err(NodeError::Agent(format!(
+                        "registry agent {id} references an unknown extension: {extension}"
+                    )));
                 }
                 let index = catalog.index(false).await.map_err(agent_error)?;
                 let agent = index.find(&id).ok_or_else(|| {
                     NodeError::Agent(format!("agent not found in registry: {id}"))
                 })?;
-                let runner = AcpRegistry::package_runner(agent).ok_or_else(|| {
-                    NodeError::Agent(format!(
-                        "{id} cannot run via npx/uvx on this node (npx/uvx not found in PATH, or no package distribution)"
-                    ))
-                })?;
-                self.db().set_package_agent_enabled(&id, true).await?;
+                let config = catalog
+                    .registry()
+                    .import_custom_config(agent, extension.clone())
+                    .map_err(agent_error)?;
+                self.db().upsert_custom_agent(&id, &config).await?;
                 self.refresh_agent_catalog().await?;
-                Ok(format!("enabled {id} via {runner}"))
+                Ok(format!(
+                    "imported {id} from the registry ({})",
+                    config.command
+                ))
             }
         }
     }

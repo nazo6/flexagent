@@ -327,7 +327,23 @@ pub struct HubSettingsSnapshot {
     pub hub: HubSettings,
 }
 
-/// A custom ACP agent definition (`agent_custom` in `node.db`).
+/// Where a custom agent definition came from.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+#[specta(collect)]
+pub enum CustomAgentOrigin {
+    /// Created manually through the UI or API.
+    Manual,
+    /// Imported from the ACP Registry catalog.
+    Registry {
+        /// Registry agent ID at import time.
+        id: String,
+        /// Registry version at import time.
+        version: String,
+    },
+}
+
+/// A custom ACP agent definition (`custom_agents` in `node.db`).
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, Type)]
 #[specta(collect)]
 #[serde(default)]
@@ -347,6 +363,12 @@ pub struct CustomAgentConfig {
     /// `None` keeps the agent ACP-only. The ID is validated against the node's
     /// registered extensions when the definition is saved.
     pub extension: Option<String>,
+    /// Description shown in the agent list (copied from the registry on import).
+    pub description: Option<String>,
+    /// Icon URL or built-in asset key (copied from the registry on import).
+    pub icon: Option<String>,
+    /// Provenance of this definition (manual or imported from the registry).
+    pub origin: Option<CustomAgentOrigin>,
 }
 
 /// Definition of an ephemeral VM / sandbox provisioner (`provisioners` in `hub.db`).

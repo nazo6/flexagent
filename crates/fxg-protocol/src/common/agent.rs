@@ -48,18 +48,18 @@ pub enum AgentAction {
         /// Agent ID
         agent_id: String,
         /// Command, arguments and environment variables
-        config: crate::settings::CustomAgentConfig,
+        config: Box<crate::settings::CustomAgentConfig>,
     },
     /// Delete a UI-managed custom agent definition
     RemoveCustom {
         /// Agent ID
         agent_id: String,
     },
-    /// Enable or disable usage through the `npx` / `uvx` distribution
-    SetPackageEnabled {
-        /// Agent ID (aliases allowed)
+    /// Import an ACP Registry entry as a custom agent definition
+    ImportRegistryAgent {
+        /// Registry agent ID
         agent_id: String,
-        /// `true` = show it in the list and use it through `npx` / `uvx`
-        enabled: bool,
+        /// Built-in extension ID to apply (optional)
+        extension: Option<String>,
     },
 }

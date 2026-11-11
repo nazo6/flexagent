@@ -48,6 +48,7 @@ async fn setup() -> (SessionManager, MockAgent, tempfile::TempDir) {
             env: Default::default(),
             env_secrets: Default::default(),
             extension: None,
+            ..Default::default()
         },
     );
     let settings = AgentSettings {
@@ -58,7 +59,7 @@ async fn setup() -> (SessionManager, MockAgent, tempfile::TempDir) {
         revision: 1,
         updated_at: 0,
     };
-    let catalog = AgentCatalog::new(AcpRegistry::new(dir.path(), &settings, custom, Vec::new()));
+    let catalog = AgentCatalog::new(AcpRegistry::new(dir.path(), &settings, custom));
 
     let mock = MockAgent::default();
     let manager = SessionManager::with_factory(bus, "test-node", catalog, mock.factory());
@@ -308,7 +309,7 @@ async fn probe_applies_extension_capability_overlay() {
     )
     .with_backend(AgentBackend::AcpExtended(Arc::new(ProbeExtension)));
     let catalog = AgentCatalog::with_providers(
-        AcpRegistry::new(dir.path(), &settings, BTreeMap::new(), Vec::new()),
+        AcpRegistry::new(dir.path(), &settings, BTreeMap::new()),
         vec![Arc::new(provider)],
     );
 
@@ -390,7 +391,7 @@ async fn full_custom_driver_starts_through_the_catalog() {
     )
     .with_backend(AgentBackend::Custom(Arc::new(mock.clone())));
     let catalog = AgentCatalog::with_providers(
-        AcpRegistry::new(dir.path(), &settings, BTreeMap::new(), Vec::new()),
+        AcpRegistry::new(dir.path(), &settings, BTreeMap::new()),
         vec![Arc::new(provider)],
     );
     let manager = SessionManager::new(bus, "test-node", catalog);
@@ -447,7 +448,7 @@ async fn full_custom_driver_probe_uses_the_catalog_driver() {
     )
     .with_backend(AgentBackend::Custom(Arc::new(mock.clone())));
     let catalog = AgentCatalog::with_providers(
-        AcpRegistry::new(dir.path(), &settings, BTreeMap::new(), Vec::new()),
+        AcpRegistry::new(dir.path(), &settings, BTreeMap::new()),
         vec![Arc::new(provider)],
     );
     let manager = SessionManager::new(bus, "test-node", catalog);

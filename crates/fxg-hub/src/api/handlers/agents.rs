@@ -4,7 +4,7 @@ use axum::Extension;
 use axum::Json;
 use axum::extract::{Path as UrlPath, State};
 use axum::response::{IntoResponse, Response};
-use fxg_protocol::client_api::ProbeAgentRequest;
+use fxg_protocol::client_api::{ImportRegistryAgentRequest, ProbeAgentRequest};
 use fxg_protocol::common::AgentAction;
 use fxg_protocol::settings::CustomAgentConfig;
 
@@ -60,7 +60,10 @@ pub(crate) async fn upsert_custom_agent<B: ClientApiBackend>(
         .backend
         .manage_agent(
             &node_id,
-            AgentAction::UpsertCustom { agent_id, config },
+            AgentAction::UpsertCustom {
+                agent_id,
+                config: Box::new(config),
+            },
             client,
         )
         .await
@@ -85,40 +88,19 @@ pub(crate) async fn remove_custom_agent<B: ClientApiBackend>(
     }
 }
 
-pub(crate) async fn enable_package_agent<B: ClientApiBackend>(
+pub(crate) async fn import_registry_agent<B: ClientApiBackend>(
     State(state): State<ClientApiState<B>>,
     Extension(client): Extension<ClientInfo>,
     UrlPath((node_id, agent_id)): UrlPath<(String, String)>,
+    Json(request): Json<ImportRegistryAgentRequest>,
 ) -> Response {
     match state
         .backend
         .manage_agent(
             &node_id,
-            AgentAction::SetPackageEnabled {
+            AgentAction::ImportRegistryAgent {
                 agent_id,
-                enabled: true,
-            },
-            client,
-        )
-        .await
-    {
-        Ok(response) => Json(response).into_response(),
-        Err(err) => err.into_response(),
-    }
-}
-
-pub(crate) async fn disable_package_agent<B: ClientApiBackend>(
-    State(state): State<ClientApiState<B>>,
-    Extension(client): Extension<ClientInfo>,
-    UrlPath((node_id, agent_id)): UrlPath<(String, String)>,
-) -> Response {
-    match state
-        .backend
-        .manage_agent(
-            &node_id,
-            AgentAction::SetPackageEnabled {
-                agent_id,
-                enabled: false,
+                extension: request.extension,
             },
             client,
         )

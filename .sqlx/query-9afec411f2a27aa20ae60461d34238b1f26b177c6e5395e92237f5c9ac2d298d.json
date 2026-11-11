@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        INSERT INTO custom_agents\n            (agent_id, name, command, args_json, env_json, env_secrets_json, extension,\n             description, icon, origin_json, updated_at)\n        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)\n        ON CONFLICT(agent_id) DO UPDATE SET\n            name = excluded.name,\n            command = excluded.command,\n            args_json = excluded.args_json,\n            env_json = excluded.env_json,\n            env_secrets_json = excluded.env_secrets_json,\n            extension = excluded.extension,\n            description = excluded.description,\n            icon = excluded.icon,\n            origin_json = excluded.origin_json,\n            updated_at = excluded.updated_at\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 11
+    },
+    "nullable": []
+  },
+  "hash": "9afec411f2a27aa20ae60461d34238b1f26b177c6e5395e92237f5c9ac2d298d"
+}

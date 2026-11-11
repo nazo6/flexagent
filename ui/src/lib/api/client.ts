@@ -494,19 +494,16 @@ export class ApiClient {
     );
   }
 
-  /** `POST /api/v1/nodes/:id/agents/:agent_id/package` (enable use via npx/uvx) */
-  enablePackageAgent(nodeId: string, agentId: string): Promise<AgentOpResponse> {
+  /** `POST /api/v1/nodes/:id/agents/registry/:agent_id/import` (create a custom agent). */
+  importRegistryAgent(
+    nodeId: string,
+    agentId: string,
+    extension: string | null = null,
+  ): Promise<AgentOpResponse> {
     return this.#request(
       "POST",
-      `/api/v1/nodes/${encodeURIComponent(nodeId)}/agents/${encodeURIComponent(agentId)}/package`,
-    );
-  }
-
-  /** `DELETE /api/v1/nodes/:id/agents/:agent_id/package` (disable use via npx/uvx) */
-  disablePackageAgent(nodeId: string, agentId: string): Promise<AgentOpResponse> {
-    return this.#request(
-      "DELETE",
-      `/api/v1/nodes/${encodeURIComponent(nodeId)}/agents/${encodeURIComponent(agentId)}/package`,
+      `/api/v1/nodes/${encodeURIComponent(nodeId)}/agents/registry/${encodeURIComponent(agentId)}/import`,
+      { body: { extension } },
     );
   }
 
@@ -592,12 +589,17 @@ export class ApiClient {
     return this.#request("DELETE", `/api/v1/hub/secrets/${encodeURIComponent(secretId)}`);
   }
 
-  /** `GET /api/v1/nodes/:id/agents` (catalog for a specific node). */
-  async nodeAgents(nodeId: string): Promise<AgentSummary[]> {
-    const response = await this.#request<AgentsResponse>(
+  /** `GET /api/v1/nodes/:id/agents` (available agents + registry import candidates). */
+  nodeAgentCatalog(nodeId: string): Promise<AgentsResponse> {
+    return this.#request<AgentsResponse>(
       "GET",
       `/api/v1/nodes/${encodeURIComponent(nodeId)}/agents`,
     );
+  }
+
+  /** `GET /api/v1/nodes/:id/agents` (available agents only). */
+  async nodeAgents(nodeId: string): Promise<AgentSummary[]> {
+    const response = await this.nodeAgentCatalog(nodeId);
     return response.agents;
   }
 

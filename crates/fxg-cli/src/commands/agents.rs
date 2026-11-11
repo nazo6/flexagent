@@ -36,7 +36,6 @@ async fn agent_catalog() -> Result<AgentCatalog> {
         paths.fxg_home().to_path_buf(),
         &settings,
         db.custom_agents().await?,
-        db.enabled_package_agents().await?,
     )))
 }
 
@@ -55,18 +54,9 @@ async fn resolve_agent_launch_spec(
     catalog: &AgentCatalog,
     id: &str,
 ) -> Result<fxg_acp::AgentLaunchSpec> {
-    // Custom definitions and presets are resolved before the registry index,
-    // so an offline/missing registry still allows logging in to a local CLI.
-    let index = match catalog.index(false).await {
-        Ok(index) => index,
-        Err(err) => {
-            tracing::warn!(agent_id = id, "failed to load ACP registry: {err}");
-            fxg_acp::registry::RegistryIndex::default()
-        }
-    };
     let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
     catalog
-        .launch_spec(id, &index, &cwd, &[])
+        .launch_spec(id, &cwd, &[])
         .await
         .with_context(|| format!("cannot launch {id}"))
 }

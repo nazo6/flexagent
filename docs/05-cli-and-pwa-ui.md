@@ -120,15 +120,15 @@ fxg support incidents
 残します。`.fxg.toml`、`custom_agents.json`、`enabled_package_agents.json` は廃止
 しました（本番未デプロイのため移行コマンドはありません）。
 
-| 設定                                                            | 所有者 / 保存場所                                                                           | 変更手段                                       |
-| :-------------------------------------------------------------- | :------------------------------------------------------------------------------------------ | :--------------------------------------------- |
-| 待受アドレス・接続先・ログ・`allowed_hosts` / `allowed_origins` | `config.toml` / `FXG_*` / CLI                                                               | ファイル編集 + 再起動（Web UI は読み取り専用） |
-| `node.name` / `allow_remote_pty` / `project_scan_dirs` / `tray` | `node.db` (`node_settings`)                                                                 | Client API（ハブは対象ノードへプロキシ）       |
-| エージェント既定値・エイリアス・カスタム定義・npx/uvx 有効化    | `node.db` (`agent_settings` / `agent_aliases` / `custom_agents` / `enabled_package_agents`) | Client API                                     |
-| 明示的な `project_key`                                          | `node.db` (`project_path_links`)                                                            | Client API / Web UI                            |
-| VAPID subject・Git 認証・Provisioner・一時VM Bootstrap          | `hub.db`                                                                                    | ハブ Web UI                                    |
-| 秘密の値                                                        | `~/.flexagent/secrets/{node,hub}/<id>` (`0600`)                                             | Secret API（書き込み専用）                     |
-| 言語・テーマ・ピン留め                                          | ブラウザ `localStorage`                                                                     | Web UI                                         |
+| 設定                                                            | 所有者 / 保存場所                                                | 変更手段                                       |
+| :-------------------------------------------------------------- | :--------------------------------------------------------------- | :--------------------------------------------- |
+| 待受アドレス・接続先・ログ・`allowed_hosts` / `allowed_origins` | `config.toml` / `FXG_*` / CLI                                    | ファイル編集 + 再起動（Web UI は読み取り専用） |
+| `node.name` / `allow_remote_pty` / `project_scan_dirs` / `tray` | `node.db` (`node_settings`)                                      | Client API（ハブは対象ノードへプロキシ）       |
+| エージェント既定値・エイリアス・カスタム定義                    | `node.db` (`agent_settings` / `agent_aliases` / `custom_agents`) | Client API                                     |
+| 明示的な `project_key`                                          | `node.db` (`project_path_links`)                                 | Client API / Web UI                            |
+| VAPID subject・Git 認証・Provisioner・一時VM Bootstrap          | `hub.db`                                                         | ハブ Web UI                                    |
+| 秘密の値                                                        | `~/.flexagent/secrets/{node,hub}/<id>` (`0600`)                  | Secret API（書き込み専用）                     |
+| 言語・テーマ・ピン留め                                          | ブラウザ `localStorage`                                          | Web UI                                         |
 
 ### 2.1 データディレクトリ構成 (`~/.flexagent/`)
 
@@ -320,13 +320,12 @@ Android スマートフォン（ホーム画面追加PWA）のすべてを単一
 6. **設定画面（タブ構成）**:
    - **全般**:
      クライアント認証トークンの再生成とノードペアリング（ノード個別トークンの発行・失効）。
-   - **エージェント管理**: ノードで利用可能なエージェント (fxg 管理 / PATH
-     上の既存インストール / npx・uvx / カスタム) を一覧表示し、カタログからの
-     明示インストール・更新・削除と、カスタム ACP
-     エージェントの追加・編集・削除を行う。`npx` / `uvx`
-     配布は既定では一覧に出さず、「カタログから追加」でエージェントごとに
-     有効化・無効化する (状態はノードローカルに保存され、新規セッションの
-     選択肢にも反映される)。
+   - **エージェント管理**: ノードで利用可能なエージェント (builtin の
+     native CLI / カスタム定義) を一覧表示し、カスタム ACP
+     エージェントの追加・編集・削除を行う。builtin にないエージェントは
+     「Import from registry」から ACP Registry の配布レシピを custom 定義として
+     取り込める。binary は `PATH`、npx/uvx はパッケージランナーを使って
+     コマンドを生成し、import 後は通常の custom として編集・削除できる。
    - **監査ログ**: 誰が・いつ・どのLAN/VPN
      IPからどの承認操作やWorktree作成を行ったかをタイムライン形式で確認。
 

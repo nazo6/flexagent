@@ -68,8 +68,9 @@ opencode の Tier 2 移行（Phase 4）まで実装済みである。Tier 3 の�
 
 - エージェント固有の知識は `AgentCatalog` と extension に閉じ込め、
   `SessionManager` と `AcpDriver` には追加しない。
-- `AgentCatalog` が **custom 定義 → builtin provider → ACP Registry** の順で
-  起動定義と backend を解決する。
+- 実行時カタログは **custom 定義 → builtin provider** の順で解決する。
+  ACP Registry は実行時カタログには含めず、custom 定義を import するための
+  テンプレートとしてだけ使う（§2.1・§3.1）。
 - `AgentLaunchSpec` は program / args / env / driver_kind / extension を持つ
   純粋データとし、warm pool のキー（`LaunchKey`）として扱う。extension の
   インスタンスは含めない。
@@ -96,9 +97,11 @@ opencode の Tier 2 移行（Phase 4）まで実装済みである。Tier 3 の�
   (`ACP` / `ACP + extension` / `Custom driver`) として表示する。
 - ビルトイン provider は `opencode` / `opencode-v2`（Tier 2）に加え、
   `agy` / `gemini` / `github-copilot-cli` / `qwen-code` / `cline` /
-  `auggie` / `kimi-code` のネイティブ CLI preset を持つ。Registry が npx
-  しか知らないエージェントでも、CLI が `PATH` にあれば preset を優先し、
-  一覧ではビルトインの表示名・アイコンを使う。
+  `auggie` / `kimi-code` のネイティブ CLI preset を持つ。一覧・起動は
+  ビルトインの表示名・アイコン・preset を使う。
+- builtin にないエージェントは、Web UI の「Import from registry」で
+  ACP Registry の配布レシピを custom 定義として保存する。import した
+  custom は通常の custom として編集・削除できる。
 
 型設計・実装フェーズ・変更対象の詳細は
 [`docs/changelog/2026-11-11-agent-extension-architecture.md`](./changelog/2026-11-11-agent-extension-architecture.md)
@@ -108,44 +111,41 @@ opencode の Tier 2 移行（Phase 4）まで実装済みである。Tier 3 の�
 
 ## 2. 任意ACPエージェント対応 (`AcpDriver` & Registry Manager)
 
-### 2.1 ACP Registry カタログとローカル起動解決
+### 2.1 ACP Registry の import とローカル起動解決
 
-1. **レジストリ取得 (カタログ用途)**:
+1. **レジストリの役割 (import 専用)**:
    - 公式インデックス
      `https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json`
-     を取得し、`~/.flexagent/cache/registry.json` にキャッシュ（TTL
+     を取得し、`~/.flexagent/cache/registry.json` にキャッシュする（TTL
      24時間、Web UI のカタログ更新で即時更新）。
-   - レジストリは「表示名・説明・配布形態を知るためのカタログ」として使い、
-     起動できるのは **このノードに実体があるものだけ** とする (未登録 ID を
-     `PATH` から暗黙解決するフォールバックは行わない。任意のコマンドは
-     §3 のカスタムエージェントとして明示登録する)。
+   - レジストリは **実行時カタログには含めない**。Web UI の
+     「Import from registry」で custom 定義を生成するためのテンプレートとして
+     だけ使う。
+   - `GET /api/v1/agents` は `agents`（builtin + custom）と `registry`
+     （import 候補）を返す。レジストリの取得に失敗、または5秒でタイムアウト
+     しても `agents` は返す。
 2. **起動解決の優先順位 (ローカル優先)**:
    1. カスタム定義 (`node.db` の `custom_agents`)
-   2. **ビルトイン preset**: 既知の CLI が `PATH` にあれば、その ACP
+   2. Tier 3 の full custom provider
+   3. **ビルトイン preset**: 既知の CLI が `PATH` にあれば、その ACP
       起動引数で起動する (`opencode acp` / `agy acp`)。ユーザーが同名の
       custom を定義した場合は custom が優先される。
-   3. `PATH` 上の既存インストール (`which::which`、Windows は `PATHEXT`
-      対応)
-   4. `npx` 配布 (`npx -y <package> <args...>`)
-   5. `uvx` 配布 (`uvx <package> <args...>`)
-   - 代表例: `fxg session new antigravity` は `agy acp`、`fxg session new opencode` は
-     `opencode acp` として起動する（opencode は Tier 2 としてモデル名を補う）。
-     registry の `antigravity-acp` が
-     `agy_acp_server.par` を前提としていても、`agy` CLI が PATH にあれば
-     preset が優先される。
-3. **インストールは明示操作のみ**:
+   - Registry のエージェントを直接起動することはない。`npx` / `uvx` で
+     使いたい場合は、先に import して custom 定義にする。
+   - 代表例: `fxg session new opencode` は `opencode acp`、`fxg session new agy`
+     は `agy acp` として起動する（opencode は Tier 2 としてモデル名を補う）。
+3. **import 時のコマンド変換**:
+   - `binary`: `PATH` 上の CLI が見つかればそのコマンドを使う。見つからなければ
+     「先にインストールしてください」として import 不可にする。
+   - `npx`: `command = npx`, `args = ["-y", <package>, ...]`。
+   - `uvx`: `command = uvx`, `args = [<package>, ...]`。
+   - Registry の `description` / `icon` / `version` を custom にコピーし、
+     `origin = registry { id, version }` として由来を保存する。
+4. **インストールは明示操作のみ**:
    - fxg はバイナリ配布のダウンロード・展開を行わない。binary 配布のみの
-     エージェントは、各ツールの配布元から導入して `PATH` に置くか、custom
-     定義で起動コマンドを指定する。
-   - 未導入のまま起動しようとした場合は、インストール方法を含むエラーを返す
-     (`PATH` に既存インストールがあればそれを使うため、通常は導入不要)。
-   - `npx` / `uvx` は実行時にパッケージマネージャが取得するため、fxg 側では
-     成果物を保持しない (Web UI の無効化の対象外)。
-   - 実体を持たない `npx` / `uvx` 配布は **既定では一覧に出さない**。Web UI の
-     「カタログから追加」でエージェントごとに**有効化**し、状態は
-     `node.db` の `enabled_package_agents` に保存する
-     (`AgentAction::SetPackageEnabled`)。有効化は一覧・選択肢の制御のみで、
-     起動解決 (`launch_spec`) は引き続き `npx` / `uvx` を利用できる。
+     エージェントは、各ツールの配布元から導入して `PATH` に置く。
+   - import した custom はスナップショットである。Registry の更新は自動反映
+     しない。更新する場合は custom を削除して再 import する。
 
 ### 2.2 `agent-client-protocol` クレートを用いた `Client` 実装
 
@@ -212,8 +212,9 @@ ACP Registry に載っていないエージェントや自前の ACP 実装は�
 
 1. **定義方法**:
    - Web UI (設定 > エージェント管理 > カスタム追加) または API から
-     `node.db` の `custom_agents` テーブルへ保存する (`name` / `command` /
-     `args` / `env` / `env_secrets` / `extension`)。
+     `node.db` の `custom_agents` テーブルへ保存する (`name` / `description` /
+     `command` / `args` / `env` / `env_secrets` / `extension` / `icon` /
+     `origin`)。
    - API: `PUT /api/v1/nodes/:node_id/agents/custom/:agent_id` (upsert) /
      `DELETE /api/v1/nodes/:node_id/agents/custom/:agent_id`。
    - 実行時設定はノードの DB にのみ保存し、ハブへ同期しない。
@@ -224,15 +225,23 @@ ACP Registry に載っていないエージェントや自前の ACP 実装は�
      グロブ・`~`・環境変数の展開は行わない。
    - 起動直前に `fxg_pty::resolve_command` が `which` (`PATHEXT`) で解決し、
      `args` / `env` を付けて ACP プロセスとしてスポーンする。
-3. **Tier 2 extension の再利用**:
+3. **Registry からの import**:
+   - `POST /api/v1/nodes/:node_id/agents/registry/:agent_id/import` で、
+     Registry の配布レシピを custom 定義として保存する。
+   - `command` / `args` / `env` はノード上で解決した配布形態（binary / npx /
+     uvx）から生成し、`description` / `icon` / `origin` もコピーする。
+   - 既存 custom、Tier 3 の予約 ID、未知の extension は拒否する。
+   - import 後は通常の custom として編集・削除できる。Registry の更新は自動
+     反映しない。
+4. **Tier 2 extension の再利用**:
    - `CustomAgentConfig.extension` で builtin extension を参照できる（§1.1）。
      指定時は `DriverKind::AcpExtended` となり、custom の起動定義に extension の
      `prepare_launch` を適用する。組み込みの `opencode` extension はモデル名を
      読みやすい表示へ変換する。
    - 未知の extension ID は保存時と起動時に拒否する。
-4. **一覧表示と優先順位**:
+5. **一覧表示と優先順位**:
    - カスタム定義は常に「利用可能」として扱い、`sources: ["custom"]` で返す。
-     同じ ID の builtin / registry より優先し、重複表示しない。
+     同じ ID の builtin より優先し、重複表示しない。
    - extension を参照するカスタム定義は `backend: "acp_extended"` として返す。
    - Tier 3 の builtin ID は予約し、custom 定義による上書きを拒否する。
 

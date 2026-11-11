@@ -256,3 +256,34 @@ fn sourced_value_serializes_with_source() {
     assert_eq!(json["source"], "env");
     assert_eq!(json["source_detail"], "FXG_HOME");
 }
+
+#[tokio::test]
+async fn custom_agent_metadata_and_origin_roundtrip() {
+    let db = db().await;
+    let config = fxg_protocol::settings::CustomAgentConfig {
+        name: Some("Imported".to_owned()),
+        command: "npx".to_owned(),
+        args: vec![
+            "-y".to_owned(),
+            "example@1.0.0".to_owned(),
+            "--acp".to_owned(),
+        ],
+        description: Some("Imported agent".to_owned()),
+        icon: Some("https://example.test/icon.svg".to_owned()),
+        origin: Some(fxg_protocol::settings::CustomAgentOrigin::Registry {
+            id: "example".to_owned(),
+            version: "1.0.0".to_owned(),
+        }),
+        ..Default::default()
+    };
+    db.upsert_custom_agent("example", &config)
+        .await
+        .expect("upsert");
+
+    let agents = db.custom_agents().await.expect("list");
+    let stored = agents.get("example").expect("example");
+    assert_eq!(stored.description, config.description);
+    assert_eq!(stored.icon, config.icon);
+    assert_eq!(stored.origin, config.origin);
+    assert_eq!(stored.args, config.args);
+}

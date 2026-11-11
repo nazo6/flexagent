@@ -183,34 +183,18 @@ impl SessionManager {
         })
     }
 
-    /// Resolves the launch spec (custom/built-in agents need no index).
+    /// Resolves the launch spec (custom / built-in agents only).
     pub(super) async fn resolve_launch_spec(
         &self,
         agent_id: &str,
         cwd: &Path,
         extra_args: &[String],
     ) -> Result<AgentLaunchSpec, NodeError> {
-        match self
-            .inner
+        self.inner
             .catalog
-            .launch_spec(agent_id, &RegistryIndex::default(), cwd, extra_args)
+            .launch_spec(agent_id, cwd, extra_args)
             .await
-        {
-            Ok(spec) => Ok(spec),
-            Err(_) => {
-                let index = self
-                    .inner
-                    .catalog
-                    .index(false)
-                    .await
-                    .map_err(|err| NodeError::Agent(err.to_string()))?;
-                self.inner
-                    .catalog
-                    .launch_spec(agent_id, &index, cwd, extra_args)
-                    .await
-                    .map_err(|err| NodeError::Agent(err.to_string()))
-            }
-        }
+            .map_err(|err| NodeError::Agent(err.to_string()))
     }
 
     /// Launches the driver, registers it in the active list, and starts the event pump.

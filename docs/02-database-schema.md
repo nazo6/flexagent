@@ -339,7 +339,7 @@ CREATE INDEX idx_incidents_last_seen ON incidents(last_seen_at DESC);
 実行時に変更する設定は所有者の DB にのみ保存します (ノード ⇔ ハブ間で同期・マージしない)。
 
 - `node.db`: `node_settings` / `agent_settings` / `agent_aliases` /
-  `custom_agents` / `enabled_package_agents` / `project_path_links`
+  `custom_agents` / `project_path_links`
 - `hub.db`: `hub_settings` / `provisioners` (`provisioners` は `env_json` /
   `env_secrets_json` を持つ。`project_profiles` / `git_credentials` は
   アーキテクチャ簡素化で削除済み)
@@ -359,6 +359,11 @@ CREATE INDEX idx_incidents_last_seen ON incidents(last_seen_at DESC);
 > `bootstrap_log` を `provisioning_log` に更新する。詳細は
 > [`changelog/2026-11-10-architecture-simplification.md`](changelog/2026-11-10-architecture-simplification.md)
 > を参照。
+>
+> `0017_custom_agent_origin.sql` は `custom_agents` に `description` / `icon` /
+> `origin_json` を追加し、npx/uvx の有効化を保持していた
+> `enabled_package_agents` を DROP する。Registry の import は custom 定義として
+> 保存されるため、実行時カタログは `custom_agents` と builtin だけで完結する。
 
 `project_path_links` は `local_path -> project_key` の明示リンクで、Worktree からは
 メイン Worktree のリンクを `git-common-dir` 経由で引き継ぎます。
