@@ -364,6 +364,8 @@ CREATE INDEX idx_incidents_last_seen ON incidents(last_seen_at DESC);
 > `origin_json` を追加し、npx/uvx の有効化を保持していた
 > `enabled_package_agents` を DROP する。Registry の import は custom 定義として
 > 保存されるため、実行時カタログは `custom_agents` と builtin だけで完結する。
+> `0018_drop_default_agent.sql` は未使用の `agent_settings.default_agent` を
+> DROP する。
 
 `project_path_links` は `local_path -> project_key` の明示リンクで、Worktree からは
 メイン Worktree のリンクを `git-common-dir` 経由で引き継ぎます。

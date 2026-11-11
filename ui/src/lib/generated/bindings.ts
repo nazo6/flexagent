@@ -76,13 +76,11 @@ export type AgentOpResponse = {
 
 /**  Node-owned agent settings stored in `node.db` (`agent_settings` / `agent_aliases`). */
 export type AgentSettings = {
-	/**  Default agent ID (`None` = built-in default) */
-	default_agent: string | null,
 	/**  ACP Registry URL (`None` = built-in default) */
 	registry_url: string | null,
 	/**  Registry cache TTL in seconds (`None` = built-in default) */
 	registry_cache_ttl_secs: number | null,
-	/**  Agent name aliases (merged over the built-in defaults) */
+	/**  Agent name aliases (merged over the built-in aliases) */
 	aliases: { [key in string]: string },
 	/**  Optimistic-lock revision */
 	revision: number,
@@ -2450,8 +2448,6 @@ export type UnifiedEventPayload =
 
 /**  `PATCH /api/v1/nodes/{node_id}/settings/agents` request. */
 export type UpdateAgentSettingsRequest = {
-	/**  Default agent ID */
-	default_agent: string | null,
 	/**  ACP Registry URL */
 	registry_url: string | null,
 	/**  Registry cache TTL in seconds */

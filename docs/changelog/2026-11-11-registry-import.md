@@ -67,7 +67,22 @@ DROP TABLE IF EXISTS enabled_package_agents;
 
 `custom_agents` の SELECT / UPSERT に新しい列を追加した。
 
-### 3.3 `fxg-acp`
+migration `0018_drop_default_agent.sql` は `agent_settings.default_agent` を
+削除する。この設定はどこからも適用されず、`DEFAULT_AGENT = "opencode"` という
+エージェント固有の既定値だけが残っていた。クライアントは利用可能な
+エージェントから選択する。
+
+### 3.3 組み込み alias の移動
+
+`AgentSettings::default_aliases` にあったエージェント固有の alias を削除し、
+builtin provider の知識として `builtin::aliases()` に移した。
+
+- `antigravity` → `agy` は builtin alias として維持する
+- `claude` → `claude-code-acp` は Registry に存在しない ID だったため削除する
+- `codex` → `codex-acp` は Registry import 前提の alias のため削除する
+  （必要ならユーザーが alias を設定する）
+
+### 3.4 `fxg-acp`
 
 - `AgentCatalogState` から `enabled_packages` を削除。
 - `AcpRegistry::new` / `apply_catalog` から package enablement を削除。
@@ -79,7 +94,7 @@ DROP TABLE IF EXISTS enabled_package_agents;
   - binary が見つからない場合は unavailable と理由を返す。
 - `registry_entries` / `registry_launch_spec` を削除。
 
-### 3.4 Node / Hub / CLI
+### 3.5 Node / Hub / CLI
 
 - `DaemonState::agents_catalog`:
   - `agents` は builtin + custom のみ。
@@ -93,7 +108,7 @@ DROP TABLE IF EXISTS enabled_package_agents;
 - npx/uvx の package enable/disable エンドポイントを削除。
 - CLI の launch spec 解決から Registry index を削除。
 
-### 3.5 UI
+### 3.6 UI
 
 - エージェント一覧は builtin + custom のみ。
 - 「Import from registry」ダイアログ:
@@ -132,25 +147,27 @@ DROP TABLE IF EXISTS enabled_package_agents;
 
 ## 6. 変更ファイル
 
-| ファイル                                                | 変更内容                                                            |
-| :------------------------------------------------------ | :------------------------------------------------------------------ |
-| `crates/fxg-protocol/src/client_api.rs`                 | `AgentsResponse.registry` / `RegistryAgentSummary` / `AgentSummary` |
-| `crates/fxg-protocol/src/settings.rs`                   | `CustomAgentConfig` metadata / `CustomAgentOrigin`                  |
-| `crates/fxg-protocol/src/common/agent.rs`               | import action / package action 削除                                 |
-| `crates/fxg-db/migrations/0017_custom_agent_origin.sql` | metadata 列 / package table 削除                                    |
-| `crates/fxg-db/src/settings.rs`                         | custom agent の SELECT / UPSERT                                     |
-| `crates/fxg-db/src/db.rs`                               | package enablement API 削除                                         |
-| `crates/fxg-acp/src/registry.rs`                        | import summary / config / catalog state                             |
-| `crates/fxg-acp/src/agent/catalog.rs`                   | builtin + custom の一覧・起動                                       |
-| `crates/fxg-node/src/daemon/ops.rs`                     | agents catalog / import action                                      |
-| `crates/fxg-node/src/daemon/mod.rs`                     | catalog 初期化 / installed agents                                   |
-| `crates/fxg-node/src/session_manager/lifecycle.rs`      | launch spec 簡素化                                                  |
-| `crates/fxg-hub/src/api/mod.rs`                         | import route                                                        |
-| `crates/fxg-hub/src/api/handlers/agents.rs`             | import handler                                                      |
-| `crates/fxg-cli/src/commands/agents.rs`                 | catalog 初期化 / launch spec                                        |
-| `ui/src/lib/components/settings/AgentManager.svelte`    | import dialog / custom metadata                                     |
-| `ui/src/lib/components/agent/AgentIcon.svelte`          | registry icon URL 対応（既存）                                      |
-| `ui/src/lib/agents.ts`                                  | source / distribution ラベル                                        |
-| `ui/messages/en.json`                                   | import の文言                                                       |
-| `ui/src/lib/generated/bindings.ts`                      | 型の再生成                                                          |
-| `.sqlx/`                                                | `mise run sqlx:prepare` の結果                                      |
+| ファイル                                                | 変更内容                                                                  |
+| :------------------------------------------------------ | :------------------------------------------------------------------------ |
+| `crates/fxg-protocol/src/client_api.rs`                 | `AgentsResponse.registry` / `RegistryAgentSummary` / `AgentSummary`       |
+| `crates/fxg-protocol/src/settings.rs`                   | `CustomAgentConfig` metadata / `CustomAgentOrigin` / `default_agent` 削除 |
+| `crates/fxg-protocol/src/common/agent.rs`               | import action / package action 削除                                       |
+| `crates/fxg-db/migrations/0017_custom_agent_origin.sql` | metadata 列 / package table 削除                                          |
+| `crates/fxg-db/migrations/0018_drop_default_agent.sql`  | 未使用の `default_agent` 削除                                             |
+| `crates/fxg-acp/src/agent/builtin.rs`                   | built-in alias                                                            |
+| `crates/fxg-db/src/settings.rs`                         | custom agent の SELECT / UPSERT                                           |
+| `crates/fxg-db/src/db.rs`                               | package enablement API 削除                                               |
+| `crates/fxg-acp/src/registry.rs`                        | import summary / config / catalog state                                   |
+| `crates/fxg-acp/src/agent/catalog.rs`                   | builtin + custom の一覧・起動                                             |
+| `crates/fxg-node/src/daemon/ops.rs`                     | agents catalog / import action                                            |
+| `crates/fxg-node/src/daemon/mod.rs`                     | catalog 初期化 / installed agents                                         |
+| `crates/fxg-node/src/session_manager/lifecycle.rs`      | launch spec 簡素化                                                        |
+| `crates/fxg-hub/src/api/mod.rs`                         | import route                                                              |
+| `crates/fxg-hub/src/api/handlers/agents.rs`             | import handler                                                            |
+| `crates/fxg-cli/src/commands/agents.rs`                 | catalog 初期化 / launch spec                                              |
+| `ui/src/lib/components/settings/AgentManager.svelte`    | import dialog / custom metadata                                           |
+| `ui/src/lib/components/agent/AgentIcon.svelte`          | registry icon URL 対応（既存）                                            |
+| `ui/src/lib/agents.ts`                                  | source / distribution ラベル                                              |
+| `ui/messages/en.json`                                   | import の文言                                                             |
+| `ui/src/lib/generated/bindings.ts`                      | 型の再生成                                                                |
+| `.sqlx/`                                                | `mise run sqlx:prepare` の結果                                            |

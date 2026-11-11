@@ -55,7 +55,6 @@ async fn agent_settings_and_aliases_roundtrip() {
 
     let updated = db
         .update_agent_settings(&UpdateAgentSettingsRequest {
-            default_agent: Some("opencode2".to_owned()),
             registry_url: Some("https://example.test/registry.json".to_owned()),
             registry_cache_ttl_secs: Some(60),
             aliases: BTreeMap::from([("fast".to_owned(), "opencode2".to_owned())]),
@@ -63,7 +62,6 @@ async fn agent_settings_and_aliases_roundtrip() {
         })
         .await
         .expect("update");
-    assert_eq!(updated.default_agent.as_deref(), Some("opencode2"));
     assert_eq!(
         updated.aliases.get("fast").map(String::as_str),
         Some("opencode2")
@@ -72,7 +70,6 @@ async fn agent_settings_and_aliases_roundtrip() {
 
     let err = db
         .update_agent_settings(&UpdateAgentSettingsRequest {
-            default_agent: None,
             registry_url: None,
             registry_cache_ttl_secs: None,
             aliases: BTreeMap::new(),

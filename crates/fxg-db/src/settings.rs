@@ -128,8 +128,8 @@ pub async fn ensure_agent_settings(pool: &SqlitePool) -> Result<AgentSettings, D
     sqlx::query!(
         r#"
         INSERT INTO agent_settings
-            (id, default_agent, registry_url, registry_cache_ttl_secs, revision, updated_at)
-        VALUES (1, NULL, NULL, NULL, 1, ?)
+            (id, registry_url, registry_cache_ttl_secs, revision, updated_at)
+        VALUES (1, NULL, NULL, 1, ?)
         ON CONFLICT(id) DO NOTHING
         "#,
         now_ms(),
@@ -145,7 +145,7 @@ pub async fn ensure_agent_settings(pool: &SqlitePool) -> Result<AgentSettings, D
 pub async fn get_agent_settings(pool: &SqlitePool) -> Result<Option<AgentSettings>, DbError> {
     let row = sqlx::query!(
         r#"
-        SELECT default_agent, registry_url, registry_cache_ttl_secs, revision, updated_at
+        SELECT registry_url, registry_cache_ttl_secs, revision, updated_at
           FROM agent_settings
          WHERE id = 1
         "#,
@@ -155,7 +155,6 @@ pub async fn get_agent_settings(pool: &SqlitePool) -> Result<Option<AgentSetting
     let Some(row) = row else { return Ok(None) };
     let aliases = list_agent_aliases(pool).await?;
     Ok(Some(AgentSettings {
-        default_agent: row.default_agent,
         registry_url: row.registry_url,
         registry_cache_ttl_secs: row.registry_cache_ttl_secs.and_then(positive_u64),
         aliases,
@@ -190,14 +189,12 @@ pub async fn update_agent_settings(
     let result = sqlx::query!(
         r#"
         UPDATE agent_settings
-           SET default_agent = ?,
-               registry_url = ?,
+           SET registry_url = ?,
                registry_cache_ttl_secs = ?,
                revision = revision + 1,
                updated_at = ?
          WHERE id = 1 AND revision = ?
         "#,
-        request.default_agent,
         request.registry_url,
         ttl,
         now,

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        INSERT INTO agent_settings\n            (id, registry_url, registry_cache_ttl_secs, revision, updated_at)\n        VALUES (1, NULL, NULL, 1, ?)\n        ON CONFLICT(id) DO NOTHING\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "815d5d02f0755c1fe83b2a2562e89e80af6936dd7a9952bde7fe1f7208c21e3a"
+}

@@ -52,7 +52,6 @@ async fn setup() -> (SessionManager, MockAgent, tempfile::TempDir) {
         },
     );
     let settings = AgentSettings {
-        default_agent: None,
         registry_url: None,
         registry_cache_ttl_secs: None,
         aliases: Default::default(),
@@ -288,7 +287,6 @@ async fn probe_applies_extension_capability_overlay() {
         .ensure_dirs()
         .expect("dirs");
     let settings = AgentSettings {
-        default_agent: None,
         registry_url: None,
         registry_cache_ttl_secs: None,
         aliases: Default::default(),
@@ -371,7 +369,6 @@ async fn full_custom_driver_starts_through_the_catalog() {
         .ensure_dirs()
         .expect("dirs");
     let settings = AgentSettings {
-        default_agent: None,
         registry_url: None,
         registry_cache_ttl_secs: None,
         aliases: Default::default(),
@@ -419,7 +416,6 @@ async fn full_custom_driver_probe_uses_the_catalog_driver() {
         .ensure_dirs()
         .expect("dirs");
     let settings = AgentSettings {
-        default_agent: None,
         registry_url: None,
         registry_cache_ttl_secs: None,
         aliases: Default::default(),

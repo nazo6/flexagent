@@ -6,6 +6,7 @@
 //! CLI exposes `agy acp`), when a native CLI should be used instead of `npx`,
 //! or when fxg applies an extension.
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use super::opencode::{OpenCodeExtension, OpenCodeV2Extension};
@@ -27,6 +28,11 @@ pub const CLINE: &str = "cline";
 pub const AUGGIE: &str = "auggie";
 /// ACP-only Kimi Code CLI (`kimi acp`).
 pub const KIMI: &str = "kimi-code";
+
+/// Returns the built-in aliases for stable CLI names.
+pub fn aliases() -> BTreeMap<String, String> {
+    BTreeMap::from([("antigravity".to_owned(), AGY.to_owned())])
+}
 
 /// Returns the built-in providers.
 pub fn providers() -> Vec<Arc<dyn AgentProvider>> {

@@ -202,13 +202,11 @@ pub struct UpdateNodeSettingsRequest {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct AgentSettings {
-    /// Default agent ID (`None` = built-in default)
-    pub default_agent: Option<String>,
     /// ACP Registry URL (`None` = built-in default)
     pub registry_url: Option<String>,
     /// Registry cache TTL in seconds (`None` = built-in default)
     pub registry_cache_ttl_secs: Option<u64>,
-    /// Agent name aliases (merged over the built-in defaults)
+    /// Agent name aliases (merged over the built-in aliases)
     pub aliases: BTreeMap<String, String>,
     /// Optimistic-lock revision
     pub revision: u64,
@@ -217,39 +215,11 @@ pub struct AgentSettings {
 }
 
 impl AgentSettings {
-    /// Default value of the default agent.
-    pub const DEFAULT_AGENT: &'static str = "opencode";
     /// Default value of the official ACP registry URL.
     pub const DEFAULT_REGISTRY_URL: &'static str =
         "https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json";
     /// Default value of the registry cache TTL (24 hours).
     pub const DEFAULT_REGISTRY_CACHE_TTL_SECS: u64 = 86_400;
-
-    /// Built-in default aliases.
-    pub fn default_aliases() -> BTreeMap<String, String> {
-        BTreeMap::from([
-            ("claude".to_owned(), "claude-code-acp".to_owned()),
-            ("antigravity".to_owned(), "agy".to_owned()),
-            ("codex".to_owned(), "codex-acp".to_owned()),
-        ])
-    }
-
-    /// Returns the effective aliases: built-ins merged with the configured ones.
-    pub fn resolved_aliases(&self) -> BTreeMap<String, String> {
-        let mut aliases = Self::default_aliases();
-        for (key, value) in &self.aliases {
-            aliases.insert(key.clone(), value.clone());
-        }
-        aliases
-    }
-
-    /// Returns the effective default agent.
-    pub fn resolved_default_agent(&self) -> &str {
-        self.default_agent
-            .as_deref()
-            .filter(|value| !value.trim().is_empty())
-            .unwrap_or(Self::DEFAULT_AGENT)
-    }
 
     /// Returns the effective ACP registry URL.
     pub fn resolved_registry_url(&self) -> &str {
@@ -270,8 +240,6 @@ impl AgentSettings {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct UpdateAgentSettingsRequest {
-    /// Default agent ID
-    pub default_agent: Option<String>,
     /// ACP Registry URL
     pub registry_url: Option<String>,
     /// Registry cache TTL in seconds

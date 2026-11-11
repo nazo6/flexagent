@@ -439,7 +439,6 @@ mod tests {
 
     fn settings() -> AgentSettings {
         AgentSettings {
-            default_agent: None,
             registry_url: None,
             registry_cache_ttl_secs: None,
             aliases: BTreeMap::new(),

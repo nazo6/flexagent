@@ -1,22 +1,11 @@
 {
   "db_name": "SQLite",
-  "query": "\n        SELECT default_agent, registry_url, registry_cache_ttl_secs, revision, updated_at\n          FROM agent_settings\n         WHERE id = 1\n        ",
+  "query": "\n        SELECT registry_url, registry_cache_ttl_secs, revision, updated_at\n          FROM agent_settings\n         WHERE id = 1\n        ",
   "describe": {
     "columns": [
       {
-        "name": "default_agent",
-        "ordinal": 0,
-        "type_info": "Text",
-        "origin": {
-          "Table": {
-            "table": "agent_settings",
-            "name": "default_agent"
-          }
-        }
-      },
-      {
         "name": "registry_url",
-        "ordinal": 1,
+        "ordinal": 0,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -27,7 +16,7 @@
       },
       {
         "name": "registry_cache_ttl_secs",
-        "ordinal": 2,
+        "ordinal": 1,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -38,7 +27,7 @@
       },
       {
         "name": "revision",
-        "ordinal": 3,
+        "ordinal": 2,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -49,7 +38,7 @@
       },
       {
         "name": "updated_at",
-        "ordinal": 4,
+        "ordinal": 3,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -65,10 +54,9 @@
     "nullable": [
       true,
       true,
-      true,
       false,
       false
     ]
   },
-  "hash": "13d4f3202d5a82b46f35d7f576cbca10c0537ad6cda8332616c4774ce72940b7"
+  "hash": "ca02bfd4c6e920cf3dccb17096896a4e2444aeecadeb679fa5ff6d1a85252235"
 }
