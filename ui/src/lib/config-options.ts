@@ -16,7 +16,7 @@ export function configValueToString(value: ConfigOptionValue | null): string {
   return typeof value === "string" ? value : JSON.stringify(value);
 }
 
-/** Resolve a choice's display label (supports booleans, opencode2's `{ providerID, id, name }`, etc.). */
+/** Resolve a choice's display label (supports booleans, object values such as `{ providerID, id, name }`, etc.). */
 function choiceLabel(raw: ConfigOptionValue): string {
   if (typeof raw === "boolean") return raw ? m.lib_config_enabled() : m.lib_config_disabled();
   if (raw !== null && typeof raw === "object" && !Array.isArray(raw)) {

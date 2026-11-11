@@ -3,7 +3,7 @@ import type { ConfigOptionValue } from "#lib/generated/bindings.ts";
 /**
  * Per-device memory for the new session screen (localStorage).
  *
- * Remembers the last used agent / initial mode / OpenCode2 run mode per project.
+ * Remembers the last used agent / initial mode per project.
  * This is a per-device preference and is never stored on the server (node or central server).
  */
 export type SessionModePreference = "default" | "code" | "plan";

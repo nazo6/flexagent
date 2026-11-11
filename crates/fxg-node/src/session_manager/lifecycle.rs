@@ -426,7 +426,7 @@ impl SessionManager {
     /// Resumes a stopped session (`fxg session resume`).
     ///
     /// - Starts the agent under the same `session_id`, preferring native restore
-    ///   (`session/resume` → `session/load` → bind an existing OpenCode2 session).
+    ///   (`session/resume` → `session/load` → bind an existing agent session).
     ///   If restore fails, continues by injecting a history replay.
     /// - Resumability is based on `sessions.active` (the actual running state).
     ///   On forced termination no transition to `stopped` is written, so resuming

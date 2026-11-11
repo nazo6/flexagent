@@ -273,8 +273,8 @@ export type CommandStatus =
  *  Progress of context compaction.
  *
  *  This is the state representation of `UnifiedEventPayload::CompactionUpdated`.
- *  The standard ACP has no API to start a compaction, so only drivers with a
- *  native API (such as `opencode2`'s `POST /api/session/{id}/compact`) emit it.
+ *  The standard ACP has no API to start a compaction, so only drivers or
+ *  extensions with a native API emit it.
  */
 export type CompactionStatus =
 /**  Compaction started */
@@ -358,7 +358,7 @@ export type CreateSessionRequest = {
 	local_path: string | null,
 	/**  Specification used when creating and starting in a new worktree */
 	worktree: WorktreeSpec | null,
-	/**  Agent ID (`opencode2` / `antigravity-acp` etc.) */
+	/**  Agent ID (`opencode` / a custom ID, etc.) */
 	agent_id: string,
 	/**  Initial prompt (text and optional attachments) */
 	initial_prompt: PromptInput | null,
@@ -1863,7 +1863,7 @@ export type SessionImportRequest = {
 	command_id: CommandId,
 	/**  Node that owns the agent session (hub only; omit for a local node) */
 	node_id: NodeId | null,
-	/**  Agent ID (`opencode2` / `antigravity-acp` etc.) */
+	/**  Agent ID (`opencode` / a custom ID, etc.) */
 	agent_id: string,
 	/**  Agent-side session ID to take over */
 	agent_session_id: string,
@@ -1937,7 +1937,7 @@ export type SessionSummary = {
 	git_branch: string | null,
 	/**  Whether it runs inside a worktree */
 	is_worktree: boolean,
-	/**  Agent ID (`opencode2` / `antigravity-acp` etc.) */
+	/**  Agent ID (`opencode` / a custom ID, etc.) */
 	agent_id: string,
 	/**  Session ID inside the agent (fixed by the `SessionAgentBound` event) */
 	agent_session_id: string | null,
@@ -2422,12 +2422,11 @@ export type UnifiedEventPayload =
 /**
  *  Progress of context compaction (persisted).
  *
- *  Normalizes `session.compaction.started` / `.ended` of the `opencode2`
- *  bridge (started with `/compact` or `ControlSession(Compact)`. A compaction
- *  runs as one turn, so `StatusChanged` separately updates the running
- *  indicator). Streaming of the summary body (`session.compaction.delta`) is
- *  ephemeral and not turned into events (the summary stays in the agent's
- *  history).
+ *  Normalizes driver-specific compaction progress (for example a
+ *  `compact` command exposed by an extension). A compaction runs as one
+ *  turn, so `StatusChanged` separately updates the running indicator.
+ *  Streaming of the summary body is ephemeral and not turned into events
+ *  (the summary stays in the agent's history).
  */
 { type: "compaction_updated"; data: {
 	/**  Progress status */

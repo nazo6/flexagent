@@ -140,8 +140,8 @@ impl fmt::Display for TurnStopReason {
 /// Progress of context compaction.
 ///
 /// This is the state representation of `UnifiedEventPayload::CompactionUpdated`.
-/// The standard ACP has no API to start a compaction, so only drivers with a
-/// native API (such as `opencode2`'s `POST /api/session/{id}/compact`) emit it.
+/// The standard ACP has no API to start a compaction, so only drivers or
+/// extensions with a native API emit it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "snake_case")]
 #[specta(collect)]
@@ -190,7 +190,7 @@ pub struct SessionSummary {
     pub git_branch: Option<String>,
     /// Whether it runs inside a worktree
     pub is_worktree: bool,
-    /// Agent ID (`opencode2` / `antigravity-acp` etc.)
+    /// Agent ID (`opencode` / a custom ID, etc.)
     pub agent_id: String,
     /// Session ID inside the agent (fixed by the `SessionAgentBound` event)
     pub agent_session_id: Option<String>,

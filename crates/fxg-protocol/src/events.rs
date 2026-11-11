@@ -319,12 +319,11 @@ pub enum UnifiedEventPayload {
     },
     /// Progress of context compaction (persisted).
     ///
-    /// Normalizes `session.compaction.started` / `.ended` of the `opencode2`
-    /// bridge (started with `/compact` or `ControlSession(Compact)`. A compaction
-    /// runs as one turn, so `StatusChanged` separately updates the running
-    /// indicator). Streaming of the summary body (`session.compaction.delta`) is
-    /// ephemeral and not turned into events (the summary stays in the agent's
-    /// history).
+    /// Normalizes driver-specific compaction progress (for example a
+    /// `compact` command exposed by an extension). A compaction runs as one
+    /// turn, so `StatusChanged` separately updates the running indicator.
+    /// Streaming of the summary body is ephemeral and not turned into events
+    /// (the summary stays in the agent's history).
     CompactionUpdated {
         /// Progress status
         status: CompactionStatus,

@@ -91,7 +91,7 @@ pub(super) async fn build_session(
     // Apply initial configuration (model / thinking level, etc.).
     //
     // The response may contain the refreshed option list: selecting a model can
-    // add dependent options (for example opencode's effort levels) that are not
+    // add dependent options (for example effort levels) that are not
     // part of the `session/new` payload.
     let mut applied_config_options: Option<Vec<SessionConfigOption>> = None;
     for setting in &params.initial_config {

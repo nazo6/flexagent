@@ -630,7 +630,7 @@ pub struct CreateSessionRequest {
     pub local_path: Option<String>,
     /// Specification used when creating and starting in a new worktree
     pub worktree: Option<WorktreeSpec>,
-    /// Agent ID (`opencode2` / `antigravity-acp` etc.)
+    /// Agent ID (`opencode` / a custom ID, etc.)
     pub agent_id: String,
     /// Initial prompt (text and optional attachments)
     pub initial_prompt: Option<PromptInput>,
@@ -704,7 +704,7 @@ pub struct SessionImportRequest {
     pub command_id: CommandId,
     /// Node that owns the agent session (hub only; omit for a local node)
     pub node_id: Option<NodeId>,
-    /// Agent ID (`opencode2` / `antigravity-acp` etc.)
+    /// Agent ID (`opencode` / a custom ID, etc.)
     pub agent_id: String,
     /// Agent-side session ID to take over
     pub agent_session_id: String,

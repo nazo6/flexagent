@@ -120,8 +120,7 @@ pub(super) async fn pump_events(
                         }
                     }
                     UnifiedEventPayload::PermissionResolved { request_id, .. } => {
-                        // Permissions resolved on the driver side (e.g. OpenCode2's
-                        // native TUI) also arrive here. Responses via fxg are already
+                        // Permissions resolved on the driver side (e.g. a native agent UI) also arrive here. Responses via fxg are already
                         // recorded by `SessionManager::respond_permission`,
                         // so only record it if it is still in the pending list.
                         let mut sessions = inner.sessions.lock().expect("sessions poisoned");

@@ -71,7 +71,7 @@ pub enum PushError {
 pub struct PushNotificationPayload {
     /// Notification title (e.g. `[flexagent] Approval request (Home-Win)`)
     pub title: String,
-    /// Notification body (e.g. `opencode2: Run "cargo test --workspace"`)
+    /// Notification body (e.g. `opencode: Run "cargo test --workspace"`)
     pub body: String,
     /// Target session ID
     pub session_id: String,

@@ -286,8 +286,7 @@ fn session_context(contexts: &SessionContexts, session_id: &SessionId) -> Option
     if let Some(context) = contexts.get(&session_id.to_string()) {
         return Some(context.clone());
     }
-    // Some agents (e.g. opencode subagents) send requests with a child session
-    // ID. A process hosts at most one parent session, so fall back to it when
+    // Some agents send requests with a child session ID. A process hosts at most one parent session, so fall back to it when
     // exactly one context is registered.
     if contexts.len() == 1 {
         let context = contexts.values().next().cloned();

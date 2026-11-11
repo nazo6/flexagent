@@ -363,7 +363,7 @@
   /**
    * Model selection applied to the capability probe.
    *
-   * Some agents (for example opencode) publish dependent options such as
+   * Some agents publish dependent options such as
    * `effort` only after a model is selected. Before the first probe the only
    * model key we know is the conventional `model` from the saved preferences.
    */
@@ -511,8 +511,8 @@
     const projectId = selectedProject?.project_id ?? "";
     if (projectId !== "") saveSessionConfigOption(projectId, key, value);
 
-    // Selecting a model can reveal dependent options (for example opencode's
-    // effort levels) that the previous probe did not return.
+    // Selecting a model can reveal dependent options (for example effort
+    // levels) that the previous probe did not return.
     const option = (capabilities?.config_options ?? []).find((candidate) => candidate.key === key);
     if (option !== undefined && isModelOption(option)) {
       void loadAgentCapabilities(true, [{ key, value }]);

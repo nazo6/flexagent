@@ -1,7 +1,7 @@
 /**
  * Human-readable projection of `raw_output` for terminal (`execute`) tools.
  *
- * ACP agents may send structured metadata (OpenCode sends
+ * ACP agents may send structured metadata (for example
  * `{"metadata":{"output":"...","exit":0}}`) or plain text. The UI should show
  * the command output rather than the raw JSON envelope.
  */

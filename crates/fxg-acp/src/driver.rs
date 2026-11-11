@@ -3,7 +3,7 @@
 //! Design: `docs/04-agent-drivers-and-windows.md` §1.
 //!
 //! The `fxg-node` session manager depends only on this trait and hides the
-//! differences between ACP (`AcpDriver`) and OpenCode2 (`OpenCode2Driver`).
+//! differences between ACP (`AcpDriver`), ACP + extension, and full custom drivers.
 //! Drivers emit normalized events ([`UnifiedEventPayload`] /
 //! [`StreamDeltaPayload`]) as [`DriverEvent`]; persistence and delivery are
 //! handled centrally by the session manager (event bus).
@@ -52,7 +52,7 @@ impl std::fmt::Display for DriverKind {
 /// How to launch the agent process (resolved from the ACP Registry / custom definitions).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentLaunchSpec {
-    /// Resolved agent ID (registry id / custom name / `opencode2`)
+    /// Resolved agent ID (built-in / custom)
     pub agent_id: String,
     /// Display name
     pub display_name: String,
@@ -90,7 +90,7 @@ pub struct ResumeRequest {
 }
 
 /// Resume was aborted without creating a fresh session because native restore
-/// (`session/resume` / `session/load` / opencode2 existing-session bind) is unavailable.
+/// (`session/resume` / `session/load` / driver-specific existing-session bind) is unavailable.
 ///
 /// Returned only when [`ResumeRequest::allow_fresh`] is `false`. The caller (the
 /// node) downcasts to this type to detect it and directs the user to an explicit
@@ -141,7 +141,7 @@ pub struct StartedSession {
     /// Handle for operating a started session
     pub handle: Box<dyn ActiveSessionHandle>,
     /// `true` = the agent-side context was restored natively
-    /// (`session/resume` / `session/load` / opencode2 existing-session bind).
+    /// (`session/resume` / `session/load` / driver-specific existing-session bind).
     /// `false` = a fresh agent session was created
     /// (the caller injects history replay to carry the context over).
     pub context_restored: bool,
@@ -197,13 +197,13 @@ pub enum DriverEvent {
 /// [`dispose`]: ActiveSessionHandle::dispose
 #[async_trait]
 pub trait AgentDriver: Send + Sync {
-    /// Driver identifier (`"acp"` / `"opencode2"`).
+    /// Driver identifier (`"acp"` / custom driver ID).
     fn driver_kind(&self) -> DriverKind;
 
     /// Starts a new session and returns an operation handle.
     ///
     /// When `req.resume` is set, the driver attempts native restore
-    /// (`session/resume` / `session/load` / opencode2 existing-session bind) and
+    /// (`session/resume` / `session/load` / driver-specific existing-session bind) and
     /// reports success via [`StartedSession::context_restored`].
     /// Injecting history replay when native restore is unavailable is the caller's responsibility.
     ///
