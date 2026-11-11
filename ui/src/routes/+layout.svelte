@@ -111,11 +111,12 @@
   <div class="bg-background flex min-h-svh items-center justify-center p-6">
     <div class="flex max-w-md flex-col items-center gap-3 text-center">
       <PlugZapIcon class="text-destructive size-8" />
-      <h1 class="text-lg font-semibold">{m.shell_hub_unreachable()}</h1>
+      <h1 class="text-lg font-semibold">{m.shell_server_unreachable()}</h1>
       <p class="text-muted-foreground text-sm">{connection.error}</p>
       <p class="text-muted-foreground text-[13px]">
-        {m.shell_hub_down_hint()}
-        <code>http://localhost:7860</code>{m.shell_hub_down_hint_suffix()}
+        {m.shell_server_down_hint()}
+        <code>{connection.origin}</code>
+        {m.shell_server_down_hint_suffix()}
       </p>
       <div class="flex items-center gap-2">
         <Button variant="outline" onclick={retry}>{m.common_retry()}</Button>
