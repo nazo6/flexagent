@@ -252,7 +252,9 @@ pub fn print_node_banner(
     let log_str = log_file
         .map(|p| p.display().to_string())
         .unwrap_or_else(|| "none".to_owned());
-    let sync_str = hub_url.unwrap_or("standalone (local only)");
+    let sync_str = hub_url
+        .map(fxg_protocol::config::hub_http_origin)
+        .unwrap_or_else(|| "standalone (local only)".to_owned());
 
     if use_color {
         eprintln!(
@@ -268,7 +270,7 @@ pub fn print_node_banner(
             eprintln!("  \x1b[1mWeb UI:\x1b[0m       http://{http_addr}/");
         }
         eprintln!("  \x1b[1mLog File:\x1b[0m     {log_str}");
-        eprintln!("  \x1b[1mOutbox Sync:\x1b[0m  {sync_str}");
+        eprintln!("  \x1b[1mHub:\x1b[0m           {sync_str}");
         eprintln!("  \x1b[2mPress Ctrl+C to stop.\x1b[0m\n");
     } else {
         eprintln!("FlexAgent node v{} started", env!("CARGO_PKG_VERSION"));
@@ -281,7 +283,7 @@ pub fn print_node_banner(
             eprintln!("  Web UI:       http://{http_addr}/");
         }
         eprintln!("  Log File:     {log_str}");
-        eprintln!("  Outbox Sync:  {sync_str}");
+        eprintln!("  Hub:          {sync_str}");
         eprintln!("  Press Ctrl+C to stop.\n");
     }
 }

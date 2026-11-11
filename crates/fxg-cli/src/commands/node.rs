@@ -2,7 +2,7 @@
 
 use std::time::{Duration, Instant};
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use usage::{Args, Subcommands};
 
 use crate::client::NodeClient;
@@ -30,6 +30,10 @@ pub enum NodeCommands {
     Restart(NodeRestartArgs),
     /// Show the local node status
     Status(NodeStatusArgs),
+    /// Pair this node with a hub (writes node_token and [node] hub_url)
+    Pair(NodePairArgs),
+    /// Remove the hub pairing (deletes node_token and clears [node] hub_url)
+    Unpair(NodeUnpairArgs),
     /// Client authentication token
     Token(NodeTokenArgs),
 }
@@ -47,7 +51,7 @@ pub struct NodeStartArgs {
     /// Bind address of the local HTTP/WS server (default: 127.0.0.1:7860)
     #[usage(long)]
     listen: Option<String>,
-    /// Hub WebSocket URL (Outbox sync; standalone when unset)
+    /// Hub address (`http://host:port`; `ws://.../api/v1/node/ws` is also accepted)
     #[usage(long)]
     hub_url: Option<String>,
     /// Reside in the task tray (status / auto-start / Web UI / quit)
@@ -360,6 +364,114 @@ impl usage::RunAsync for NodeStatusArgs {
 }
 
 // ----------------------------------------------------------------------
+// fxg node pair / unpair
+// ----------------------------------------------------------------------
+
+/// `fxg node pair --hub <url> --token <token>`
+#[derive(Debug, Args)]
+pub struct NodePairArgs {
+    /// Hub address (`http://host:port`; a full ws:// URL is also accepted)
+    #[usage(long)]
+    hub: String,
+    /// Pairing token issued on the hub (`fxg hub node-token issue`)
+    #[usage(long)]
+    token: String,
+}
+
+impl usage::RunAsync for NodePairArgs {
+    type Output = Result<()>;
+
+    async fn run_async(self) -> Self::Output {
+        let token = self.token.trim();
+        if token.is_empty() {
+            bail!("the pairing token must not be empty");
+        }
+        let hub_url = fxg_protocol::config::node_ws_url(&self.hub)?;
+        let env = fxg_protocol::config::process_env;
+        let home = fxg_protocol::config::fxg_home(&env);
+        std::fs::create_dir_all(&home)
+            .with_context(|| format!("failed to create {}", home.display()))?;
+
+        let token_path = home.join(fxg_protocol::config::NODE_TOKEN_FILE_NAME);
+        fxg_node::daemon::save_token_file(&token_path, token)
+            .with_context(|| format!("failed to write {}", token_path.display()))?;
+        let config_path = home.join(fxg_protocol::config::CONFIG_FILE_NAME);
+        set_hub_url(&config_path, Some(&hub_url))?;
+
+        println!(
+            "paired with {}",
+            fxg_protocol::config::hub_http_origin(&hub_url)
+        );
+        println!("node token: {}", token_path.display());
+        println!("restart the node to apply: fxg node restart");
+        Ok(())
+    }
+}
+
+/// `fxg node unpair`
+#[derive(Debug, Args)]
+pub struct NodeUnpairArgs {}
+
+impl usage::RunAsync for NodeUnpairArgs {
+    type Output = Result<()>;
+
+    async fn run_async(self) -> Self::Output {
+        let env = fxg_protocol::config::process_env;
+        let home = fxg_protocol::config::fxg_home(&env);
+        let token_path = home.join(fxg_protocol::config::NODE_TOKEN_FILE_NAME);
+        match std::fs::remove_file(&token_path) {
+            Ok(()) => {}
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+            Err(err) => {
+                return Err(err)
+                    .with_context(|| format!("failed to remove {}", token_path.display()));
+            }
+        }
+        let config_path = home.join(fxg_protocol::config::CONFIG_FILE_NAME);
+        set_hub_url(&config_path, None)?;
+        println!("unpaired; the node runs standalone");
+        println!("restart the node to apply: fxg node restart");
+        Ok(())
+    }
+}
+
+/// Sets or removes `[node] hub_url` in `config.toml` (other keys and comments are kept).
+fn set_hub_url(path: &std::path::Path, hub_url: Option<&str>) -> Result<()> {
+    let text = match std::fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(err) => {
+            return Err(err).with_context(|| format!("failed to read {}", path.display()));
+        }
+    };
+    let mut document: toml_edit::DocumentMut = text
+        .parse()
+        .with_context(|| format!("failed to parse {}", path.display()))?;
+    if !document.contains_key("node") {
+        document.insert("node", toml_edit::Item::Table(toml_edit::Table::new()));
+    }
+    let node = document
+        .get_mut("node")
+        .and_then(toml_edit::Item::as_table_mut)
+        .with_context(|| format!("[node] in {} is not a table", path.display()))?;
+    match hub_url {
+        Some(url) => {
+            node.insert("hub_url", toml_edit::value(url));
+        }
+        None => {
+            node.remove("hub_url");
+        }
+    }
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create {}", parent.display()))?;
+    }
+    std::fs::write(path, document.to_string())
+        .with_context(|| format!("failed to write {}", path.display()))?;
+    Ok(())
+}
+
+// ----------------------------------------------------------------------
 // fxg node token
 // ----------------------------------------------------------------------
 
@@ -488,4 +600,37 @@ pub(crate) fn open_session_url(session_id: &str, no_open: bool) -> Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn set_hub_url_keeps_other_settings_and_comments() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(
+            &path,
+            "# keep me\n[log]\nlevel = \"debug\"\n\n[node]\nnode_id = \"n1\"\n",
+        )
+        .unwrap();
+
+        set_hub_url(&path, Some("ws://hub.test:8080/api/v1/node/ws")).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        let document: toml_edit::DocumentMut = text.parse().unwrap();
+        assert_eq!(
+            document["node"]["hub_url"].as_str(),
+            Some("ws://hub.test:8080/api/v1/node/ws")
+        );
+        assert_eq!(document["node"]["node_id"].as_str(), Some("n1"));
+        assert_eq!(document["log"]["level"].as_str(), Some("debug"));
+        assert!(text.contains("# keep me"));
+
+        set_hub_url(&path, None).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        let document: toml_edit::DocumentMut = text.parse().unwrap();
+        assert!(document["node"].get("hub_url").is_none());
+        assert_eq!(document["node"]["node_id"].as_str(), Some("n1"));
+    }
 }

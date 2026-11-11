@@ -817,7 +817,7 @@ impl DaemonState {
             Some(fxg_protocol::config::NodeBootstrapConfig::DEFAULT_LISTEN_ADDR),
             Some("--listen"),
         );
-        let hub_url = sourced_option(
+        let mut hub_url = sourced_option(
             &env,
             self.config().hub_url.clone(),
             fxg_protocol::config::env_keys::HUB_URL,
@@ -825,6 +825,9 @@ impl DaemonState {
             "node.hub_url",
             Some("--hub-url"),
         );
+        hub_url.value = hub_url
+            .value
+            .map(|value| fxg_protocol::config::hub_http_origin(&value));
 
         let log = &self.config().log;
         let log_level = sourced_string(

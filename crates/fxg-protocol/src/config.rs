@@ -58,6 +58,9 @@ pub mod env_keys {
     pub const LOG_NO_COLOR: &str = "FXG_LOG_NO_COLOR";
 }
 
+/// Path of the Node Hub WebSocket endpoint on a hub.
+pub const NODE_WS_PATH: &str = "/api/v1/node/ws";
+
 /// Error raised while loading or parsing configuration.
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
@@ -86,6 +89,14 @@ pub enum ConfigError {
         key: &'static str,
         /// The invalid value
         value: String,
+    },
+    /// Invalid hub address (not an `http(s)://` or `ws(s)://` URL)
+    #[error("invalid hub address {value:?}: {reason}")]
+    InvalidHubUrl {
+        /// The invalid value
+        value: String,
+        /// Why it was rejected
+        reason: String,
     },
 }
 
@@ -140,6 +151,68 @@ fn parse_list(value: &str) -> Vec<String> {
         .filter(|item| !item.is_empty())
         .map(str::to_owned)
         .collect()
+}
+
+/// Converts a user-supplied hub address into the Node Hub WebSocket URL.
+///
+/// `http://host:port` and `https://host:port` are accepted so users do not have
+/// to know the internal `/api/v1/node/ws` endpoint. A full `ws(s)://` URL is
+/// used as-is (the endpoint path is appended when it is missing).
+pub fn node_ws_url(input: &str) -> Result<String, ConfigError> {
+    let value = input.trim().trim_end_matches('/');
+    let (scheme, rest) = value
+        .split_once("://")
+        .ok_or_else(|| ConfigError::InvalidHubUrl {
+            value: input.to_owned(),
+            reason: "expected http://, https://, ws:// or wss://".to_owned(),
+        })?;
+    let scheme_lower = scheme.to_ascii_lowercase();
+    let scheme = match scheme_lower.as_str() {
+        "http" | "ws" => "ws",
+        "https" | "wss" => "wss",
+        other => {
+            return Err(ConfigError::InvalidHubUrl {
+                value: input.to_owned(),
+                reason: format!("unsupported scheme {other:?}"),
+            });
+        }
+    };
+    let rest = rest
+        .split(['?', '#'])
+        .next()
+        .unwrap_or(rest)
+        .trim_end_matches('/');
+    if rest.is_empty() || rest.starts_with('/') {
+        return Err(ConfigError::InvalidHubUrl {
+            value: input.to_owned(),
+            reason: "missing host".to_owned(),
+        });
+    }
+    if rest.ends_with(NODE_WS_PATH) {
+        Ok(format!("{scheme}://{rest}"))
+    } else {
+        Ok(format!("{scheme}://{rest}{NODE_WS_PATH}"))
+    }
+}
+
+/// Returns the HTTP(S) address of a hub for display (`ws://.../api/v1/node/ws` →
+/// `http://...`). Unrecognized values are returned unchanged.
+pub fn hub_http_origin(input: &str) -> String {
+    let value = input.trim();
+    let Some((scheme, rest)) = value.split_once("://") else {
+        return value.to_owned();
+    };
+    let scheme_lower = scheme.to_ascii_lowercase();
+    let scheme = match scheme_lower.as_str() {
+        "ws" => "http",
+        "wss" => "https",
+        other => other,
+    };
+    let rest = rest
+        .trim_end_matches('/')
+        .strip_suffix(NODE_WS_PATH)
+        .unwrap_or_else(|| rest.trim_end_matches('/'));
+    format!("{scheme}://{rest}")
 }
 
 /// Global bootstrap configuration (`~/.flexagent/config.toml`).
@@ -250,8 +323,9 @@ pub struct NodeBootstrapConfig {
     /// Bind address of the local HTTP/WS server
     /// (a loopback address is recommended by the security principles).
     pub listen_addr: Option<String>,
-    /// Node Hub WebSocket URL of the hub
-    /// (when omitted the node runs standalone and locally only).
+    /// Hub address of the hub (`http://host:port`; the Node Hub WebSocket
+    /// endpoint is derived). A full `ws://.../api/v1/node/ws` URL is also
+    /// accepted. When omitted the node runs standalone and locally only.
     pub hub_url: Option<String>,
 }
 
@@ -425,5 +499,57 @@ future_option = "whatever"
             ConfigError::Parse { path: p, .. } => assert_eq!(p, path),
             other => panic!("unexpected error: {other}"),
         }
+    }
+
+    #[test]
+    fn node_ws_url_derives_the_endpoint_from_an_http_address() {
+        assert_eq!(
+            node_ws_url("http://localhost:8080").unwrap(),
+            "ws://localhost:8080/api/v1/node/ws"
+        );
+        assert_eq!(
+            node_ws_url("https://hub.example.com/").unwrap(),
+            "wss://hub.example.com/api/v1/node/ws"
+        );
+        assert_eq!(
+            node_ws_url("ws://localhost:8080").unwrap(),
+            "ws://localhost:8080/api/v1/node/ws"
+        );
+        assert_eq!(
+            node_ws_url("wss://hub.example.com/api/v1/node/ws").unwrap(),
+            "wss://hub.example.com/api/v1/node/ws"
+        );
+    }
+
+    #[test]
+    fn node_ws_url_rejects_unknown_schemes_and_missing_hosts() {
+        assert!(matches!(
+            node_ws_url("localhost:8080"),
+            Err(ConfigError::InvalidHubUrl { .. })
+        ));
+        assert!(matches!(
+            node_ws_url("ftp://localhost:8080"),
+            Err(ConfigError::InvalidHubUrl { .. })
+        ));
+        assert!(matches!(
+            node_ws_url("http://"),
+            Err(ConfigError::InvalidHubUrl { .. })
+        ));
+    }
+
+    #[test]
+    fn hub_http_origin_hides_the_websocket_path() {
+        assert_eq!(
+            hub_http_origin("ws://localhost:8080/api/v1/node/ws"),
+            "http://localhost:8080"
+        );
+        assert_eq!(
+            hub_http_origin("wss://hub.example.com/api/v1/node/ws/"),
+            "https://hub.example.com"
+        );
+        assert_eq!(
+            hub_http_origin("http://localhost:8080"),
+            "http://localhost:8080"
+        );
     }
 }

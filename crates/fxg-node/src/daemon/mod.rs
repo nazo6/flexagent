@@ -32,6 +32,8 @@ use crate::paths::NodePaths;
 use crate::session::SessionEventBus;
 use crate::session_manager::{DriverFactory, SessionManager};
 
+/// Saves a token file with owner-only permissions (`0600` where supported).
+pub use auth::save as save_token_file;
 pub use auth::{generate_token, token_matches};
 pub use ops::{AuditSource, WorktreeAddOutcome};
 pub use stdio::{StdioConfig, run_stdio};
@@ -690,6 +692,7 @@ fn start_sync_worker(
     let Some(url) = state.config().hub_url.clone() else {
         return Ok(None);
     };
+    let url = fxg_protocol::config::node_ws_url(&url)?;
     let token = match state.config().node_token.clone() {
         Some(token) if !token.trim().is_empty() => token,
         _ => match std::fs::read_to_string(state.paths().node_token_path()) {
