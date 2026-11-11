@@ -112,7 +112,7 @@ migration `0018_drop_default_agent.sql` は `agent_settings.default_agent` を
 ### 3.6 UI
 
 - エージェント一覧は builtin + custom のみ。
-- 「Import from registry」ダイアログ:
+- 「Add agent」ダイアログの「From registry」タブ:
   - Registry の name / description / icon / version / distribution を表示
   - import 可能なら「Import」、import 済みなら「Imported」
   - binary-only で CLI が無い場合は理由を表示
