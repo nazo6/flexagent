@@ -17,6 +17,13 @@ use super::extension::{
 #[derive(Debug, Default)]
 pub struct OpenCodeExtension;
 
+/// OpenCode V2 ACP extension.
+///
+/// The v2 registry entry launches the same `opencode acp` binary, so it shares
+/// the model label conversion but keeps its own display name.
+#[derive(Debug, Default)]
+pub struct OpenCodeV2Extension;
+
 #[async_trait]
 impl AgentExtension for OpenCodeExtension {
     fn metadata(&self) -> AgentMetadata {
@@ -34,24 +41,52 @@ impl AgentExtension for OpenCodeExtension {
         _ctx: &super::extension::SessionContext,
         current: &CapabilitiesSnapshot,
     ) -> anyhow::Result<Option<CapabilityOverlay>> {
-        let mut patches = Vec::new();
-        for option in &current.config_options {
-            if !is_model_option(option) {
-                continue;
-            }
-            let mut patched = option.clone();
-            patched.options = option.options.iter().map(transform_model_value).collect();
-            patched.current_value = transform_model_value(&option.current_value);
-            patches.push(ConfigOptionPatch::Replace(patched));
-        }
-        if patches.is_empty() {
-            return Ok(None);
-        }
-        Ok(Some(CapabilityOverlay {
-            config_options: patches,
-            ..Default::default()
-        }))
+        model_label_overlay(current)
     }
+}
+
+#[async_trait]
+impl AgentExtension for OpenCodeV2Extension {
+    fn metadata(&self) -> AgentMetadata {
+        AgentMetadata {
+            name: Some("OpenCode V2".to_owned()),
+            description: Some(
+                "OpenCode V2 via ACP, with readable model labels provided by fxg".to_owned(),
+            ),
+            icon: Some("builtin:opencode".to_owned()),
+        }
+    }
+
+    async fn capabilities(
+        &self,
+        _ctx: &super::extension::SessionContext,
+        current: &CapabilitiesSnapshot,
+    ) -> anyhow::Result<Option<CapabilityOverlay>> {
+        model_label_overlay(current)
+    }
+}
+
+/// Replaces model option values with readable labels.
+fn model_label_overlay(
+    current: &CapabilitiesSnapshot,
+) -> anyhow::Result<Option<CapabilityOverlay>> {
+    let mut patches = Vec::new();
+    for option in &current.config_options {
+        if !is_model_option(option) {
+            continue;
+        }
+        let mut patched = option.clone();
+        patched.options = option.options.iter().map(transform_model_value).collect();
+        patched.current_value = transform_model_value(&option.current_value);
+        patches.push(ConfigOptionPatch::Replace(patched));
+    }
+    if patches.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(CapabilityOverlay {
+        config_options: patches,
+        ..Default::default()
+    }))
 }
 
 /// Whether the option is OpenCode's model selector.
@@ -169,6 +204,13 @@ mod tests {
     use super::*;
     use agent_client_protocol::v1::schema::SessionConfigOptionValue;
     use fxg_protocol::common::{ConfigOptionValue, ModeInfo};
+
+    #[test]
+    fn v2_metadata_keeps_its_own_name() {
+        let metadata = OpenCodeV2Extension.metadata();
+        assert_eq!(metadata.name.as_deref(), Some("OpenCode V2"));
+        assert_eq!(metadata.icon.as_deref(), Some("builtin:opencode"));
+    }
 
     fn option() -> ConfigOptionInfo {
         ConfigOptionInfo {

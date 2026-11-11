@@ -121,6 +121,9 @@ impl AgentCatalog {
         // Full custom providers own their catalog entry and launch path; the
         // registry entry for the same ID is not used.
         let mut custom_backends = BTreeSet::new();
+        // Providers whose native preset is available replace the registry row
+        // (the registry recipe often only knows `npx` for the same ID).
+        let mut preset_backed = BTreeSet::new();
 
         for provider in self.providers.values() {
             let definition = provider.definition();
@@ -131,28 +134,39 @@ impl AgentCatalog {
             let is_custom = matches!(&backend, AgentBackend::Custom(_));
             if is_custom {
                 custom_backends.insert(definition.id.clone());
-            } else if index.find(&definition.id).is_some() {
-                // ACP providers prefer the richer registry entry; metadata is
-                // merged in the final pass below.
+            }
+
+            let registry_agent = index.find(&definition.id);
+            let preset_program = provider
+                .launch_preset()
+                .and_then(|preset| (self.preset_lookup)(preset));
+            if !is_custom && registry_agent.is_some() && preset_program.is_none() {
+                // Keep the registry entry (it may be available via npx/uvx).
                 continue;
             }
 
             let mut sources = Vec::new();
-            if let Some(preset) = provider.launch_preset()
-                && let Some(program) = (self.preset_lookup)(preset)
-            {
+            if let Some(program) = preset_program {
                 sources.push(LocalSource::External(program));
             } else if !is_custom {
                 // ACP providers need a preset when the registry has no entry.
                 continue;
             }
 
+            if !is_custom && registry_agent.is_some() {
+                preset_backed.insert(definition.id.clone());
+            }
+
             entries.push(AgentListEntry {
                 id: definition.id.clone(),
                 name: definition.name.clone(),
-                version: "-".to_owned(),
-                description: definition.description.clone(),
-                registry: index.find(&definition.id).is_some(),
+                version: registry_agent
+                    .map(|agent| agent.version.clone())
+                    .unwrap_or_else(|| "-".to_owned()),
+                description: registry_agent
+                    .and_then(|agent| agent.description.clone())
+                    .or_else(|| definition.description.clone()),
+                registry: registry_agent.is_some(),
                 package_available: false,
                 sources,
                 custom: None,
@@ -165,7 +179,9 @@ impl AgentCatalog {
             self.registry
                 .registry_entries(index, include_unavailable)
                 .into_iter()
-                .filter(|entry| !custom_backends.contains(&entry.id)),
+                .filter(|entry| {
+                    !custom_backends.contains(&entry.id) && !preset_backed.contains(&entry.id)
+                }),
         );
 
         // Merge Tier 2 metadata into preset / registry / custom entries.
@@ -216,7 +232,16 @@ impl AgentCatalog {
                     entry.description = definition.description.clone();
                     entry.icon = definition.icon.clone();
                 }
-                AgentBackend::Acp => {}
+                AgentBackend::Acp => {
+                    // Prefer the built-in display name and bundled icon when
+                    // the registry entry has the same ID. The registry still
+                    // supplies the version and (richer) description.
+                    let definition = provider.definition();
+                    entry.name = definition.name.clone();
+                    if definition.icon.is_some() {
+                        entry.icon = definition.icon.clone();
+                    }
+                }
             }
         }
         entries
@@ -423,6 +448,7 @@ mod tests {
     use crate::agent::extension::{AgentExtension, AgentMetadata};
     use crate::agent::provider::StaticProvider;
     use crate::driver::{DriverEvent, StartSessionRequest, StartedSession};
+    use crate::registry::{PackageDistribution, RegistryAgent, RegistryDistribution};
     use fxg_protocol::client_api::AgentBackendKind;
     use fxg_protocol::settings::CustomAgentConfig;
     use tokio::sync::mpsc;
@@ -816,6 +842,56 @@ mod tests {
     }
 
     #[test]
+    fn preset_backed_registry_entry_uses_the_native_cli() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut catalog = AgentCatalog::new(registry(dir.path()));
+        catalog.preset_lookup =
+            |preset| (preset.program == "gemini").then(|| PathBuf::from("/fake/bin/gemini"));
+        let index = RegistryIndex {
+            version: "1".to_owned(),
+            agents: vec![RegistryAgent {
+                id: "gemini".to_owned(),
+                name: "Gemini CLI".to_owned(),
+                version: "1.2.3".to_owned(),
+                description: Some("Registry description".to_owned()),
+                repository: None,
+                website: None,
+                authors: Vec::new(),
+                license: None,
+                icon: Some("https://example.com/gemini.svg".to_owned()),
+                distribution: RegistryDistribution {
+                    binary: BTreeMap::new(),
+                    npx: Some(PackageDistribution {
+                        package: "@google/gemini-cli".to_owned(),
+                        args: vec!["--acp".to_owned()],
+                        env: BTreeMap::new(),
+                    }),
+                    uvx: None,
+                },
+            }],
+        };
+
+        let entries = catalog.list(&index, false);
+        let entry = entries
+            .iter()
+            .find(|entry| entry.id == "gemini")
+            .expect("gemini entry");
+        assert_eq!(entry.version, "1.2.3");
+        assert_eq!(entry.description.as_deref(), Some("Registry description"));
+        assert_eq!(entry.icon.as_deref(), Some("builtin:gemini"));
+        assert_eq!(entry.backend, AgentBackendKind::Acp);
+        assert_eq!(
+            entry.sources,
+            vec![LocalSource::External(PathBuf::from("/fake/bin/gemini"))]
+        );
+        // The registry row is replaced, not duplicated.
+        assert_eq!(
+            entries.iter().filter(|entry| entry.id == "gemini").count(),
+            1
+        );
+    }
+
+    #[test]
     fn builtin_providers_are_unique_and_use_acp_arguments() {
         let providers = builtin::providers();
         let mut ids = BTreeSet::new();
@@ -823,9 +899,13 @@ mod tests {
             let definition = provider.definition();
             assert!(ids.insert(definition.id.clone()));
             assert!(!definition.name.is_empty());
-            assert_eq!(provider.launch_preset().expect("preset").args, ["acp"]);
+            let preset = provider.launch_preset().expect("preset");
+            assert!(!preset.program.is_empty());
+            assert!(!preset.args.is_empty());
         }
         assert!(ids.contains(builtin::OPENCODE));
+        assert!(ids.contains(builtin::OPENCODE_V2));
         assert!(ids.contains(builtin::AGY));
+        assert!(ids.contains(builtin::GEMINI));
     }
 }

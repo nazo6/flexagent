@@ -81,6 +81,10 @@ extension モジュール1個 + provider の backend 指定のみである。
 - `ui/src/lib/components/agent/AgentIcon.svelte` を追加した。
   - `AgentSummary.icon` の `builtin:opencode` を同梱アイコン
     (`ui/static/agents/opencode.png`) に解決する
+  - `builtin:antigravity` / `builtin:gemini` / `builtin:copilot` /
+    `builtin:qwen` / `builtin:cline` / `builtin:auggie` / `builtin:kimi` は
+    `agent-glyphs.ts` のインライン SVG で描画し、`currentColor` により
+    ライト / ダークテーマへ追従させる
   - `http(s)` / `data:` / ルート相対パスは画像 URL として扱う
   - 未知のキーや未指定は lucide の bot アイコンにフォールバックする
 - エージェント一覧 (`AgentManager.svelte`):
@@ -91,6 +95,29 @@ extension モジュール1個 + provider の backend 指定のみである。
   - Agent ピッカーのトリガーと各候補に `AgentIcon` を表示する
 - `ui/src/lib/agents.ts` / `ui/messages/en.json`:
   - backend ラベルのヘルパーと英語文言を追加した
+
+### 2.5 ビルトイン provider の拡充
+
+ネイティブ CLI が `PATH` にある場合に Registry の `npx` より優先される
+preset を追加した。
+
+- `opencode-v2`: `opencode acp` を `OpenCodeV2Extension` で拡張する。
+  Registry の `opencode-v2` 行と同じ ID に合成される。
+- `agy`: Antigravity アイコンを追加した。
+- `gemini`: `gemini --acp`
+- `github-copilot-cli`: `copilot --acp`
+- `qwen-code`: `qwen --acp`
+- `cline`: `cline --acp`
+- `auggie`: `auggie --acp`
+- `kimi-code`: `kimi acp`
+
+`AgentCatalog::list` は、preset の実行ファイルが見つかった場合に Registry 行を
+preset 行で置き換える。これにより、Registry が `npx` しか知らないエージェント
+でも、グローバル導入済みの CLI が一覧・起動の両方で使われる。version と説明は
+Registry の値を維持し、アイコンはビルトインのものを使う。
+
+`--acp` / `acp` は各 CLI の `--help` で確認済み（Gemini / Copilot / Qwen /
+Cline / Auggie / Kimi）。
 
 ## 3. 実 opencode での確認
 
@@ -130,26 +157,27 @@ opencode v2.2.7（`opencode acp`）で以下を確認した。
 
 ## 5. 変更ファイル
 
-| ファイル                                                   | 変更内容                                                    |
-| :--------------------------------------------------------- | :---------------------------------------------------------- |
-| `crates/fxg-acp/src/agent/opencode.rs`                     | OpenCode extension                                          |
-| `crates/fxg-acp/src/agent/builtin.rs`                      | opencode を Tier 2 に登録                                   |
-| `crates/fxg-acp/src/agent/extension.rs`                    | `CapabilitiesSnapshot`                                      |
-| `crates/fxg-acp/src/agent/extended.rs`                     | overlay の再計算                                            |
-| `crates/fxg-acp/src/agent/catalog.rs`                      | extension レジストリ / custom 解決 / 予約 ID                |
-| `crates/fxg-acp/src/driver.rs`                             | `AgentLaunchSpec.extension`                                 |
-| `crates/fxg-protocol/src/settings.rs`                      | `CustomAgentConfig.extension`                               |
-| `crates/fxg-db/migrations/0016_custom_agent_extension.sql` | `custom_agents.extension`                                   |
-| `crates/fxg-db/src/settings.rs`                            | extension の SELECT / UPSERT                                |
-| `crates/fxg-node/src/daemon/ops.rs`                        | extension / 予約 ID の検証                                  |
-| `ui/src/lib/components/settings/AgentManager.svelte`       | extension 選択 / `node.db` 表記 / アイコン / backend バッジ |
-| `ui/src/lib/components/session/NewSessionChat.svelte`      | Agent ピッカーのアイコン                                    |
-| `ui/src/lib/components/agent/AgentIcon.svelte`             | 組み込みアイコン / URL / フォールバック                     |
-| `ui/src/lib/agents.ts`                                     | backend ラベル                                              |
-| `ui/static/agents/opencode.png`                            | OpenCode アイコン                                           |
-| `ui/messages/en.json`                                      | extension / backend の文言                                  |
-| `ui/src/lib/generated/bindings.ts`                         | 型の再生成                                                  |
-| `.sqlx/`                                                   | `mise run sqlx:prepare` の結果                              |
+| ファイル                                                   | 変更内容                                                       |
+| :--------------------------------------------------------- | :------------------------------------------------------------- |
+| `crates/fxg-acp/src/agent/opencode.rs`                     | OpenCode / OpenCode V2 extension                               |
+| `crates/fxg-acp/src/agent/builtin.rs`                      | opencode を Tier 2 に登録 / ネイティブ preset                  |
+| `crates/fxg-acp/src/agent/extension.rs`                    | `CapabilitiesSnapshot`                                         |
+| `crates/fxg-acp/src/agent/extended.rs`                     | overlay の再計算                                               |
+| `crates/fxg-acp/src/agent/catalog.rs`                      | extension レジストリ / custom 解決 / preset と Registry の合成 |
+| `crates/fxg-acp/src/driver.rs`                             | `AgentLaunchSpec.extension`                                    |
+| `crates/fxg-protocol/src/settings.rs`                      | `CustomAgentConfig.extension`                                  |
+| `crates/fxg-db/migrations/0016_custom_agent_extension.sql` | `custom_agents.extension`                                      |
+| `crates/fxg-db/src/settings.rs`                            | extension の SELECT / UPSERT                                   |
+| `crates/fxg-node/src/daemon/ops.rs`                        | extension / 予約 ID の検証                                     |
+| `ui/src/lib/components/settings/AgentManager.svelte`       | extension 選択 / `node.db` 表記 / アイコン / backend バッジ    |
+| `ui/src/lib/components/session/NewSessionChat.svelte`      | Agent ピッカーのアイコン                                       |
+| `ui/src/lib/components/agent/AgentIcon.svelte`             | 組み込みアイコン / URL / フォールバック                        |
+| `ui/src/lib/components/agent/agent-glyphs.ts`              | インライン SVG（`currentColor`）                               |
+| `ui/src/lib/agents.ts`                                     | backend ラベル                                                 |
+| `ui/static/agents/opencode.png`                            | OpenCode アイコン                                              |
+| `ui/messages/en.json`                                      | extension / backend の文言                                     |
+| `ui/src/lib/generated/bindings.ts`                         | 型の再生成                                                     |
+| `.sqlx/`                                                   | `mise run sqlx:prepare` の結果                                 |
 
 ## 6. 次のフェーズ
 

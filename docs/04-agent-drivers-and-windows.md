@@ -88,9 +88,17 @@ opencode の Tier 2 移行（Phase 4）まで実装済みである。Tier 3 の�
   `value` は元の ACP ID のまま保持するため `set_config` は従来どおり動作する。
 - `AgentSummary.icon` は `builtin:<id>` または URL を返す。Web UI は
   `builtin:opencode` を同梱アイコン (`/agents/opencode.png`) に解決し、
-  未知のキーや未指定は汎用の bot アイコンにフォールバックする。
+  `builtin:antigravity` / `builtin:gemini` / `builtin:copilot` /
+  `builtin:qwen` / `builtin:cline` / `builtin:auggie` / `builtin:kimi` を
+  インライン SVG（`currentColor`）で描画する。未知のキーや未指定は汎用の
+  bot アイコンにフォールバックする。
   `AgentSummary.backend` はエージェント一覧にバッジ
   (`ACP` / `ACP + extension` / `Custom driver`) として表示する。
+- ビルトイン provider は `opencode` / `opencode-v2`（Tier 2）に加え、
+  `agy` / `gemini` / `github-copilot-cli` / `qwen-code` / `cline` /
+  `auggie` / `kimi-code` のネイティブ CLI preset を持つ。Registry が npx
+  しか知らないエージェントでも、CLI が `PATH` にあれば preset を優先し、
+  一覧ではビルトインの表示名・アイコンを使う。
 
 型設計・実装フェーズ・変更対象の詳細は
 [`docs/changelog/2026-11-11-agent-extension-architecture.md`](./changelog/2026-11-11-agent-extension-architecture.md)
