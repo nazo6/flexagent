@@ -74,7 +74,11 @@
           bind:value={scanNodeId}
           class="border-input bg-surface-raised h-9 rounded-md border px-2 text-sm"
         >
-          <option value="">{m.common_no_node_online()}</option>
+          <option value=""
+            >{nodes.some((node) => node.is_online)
+              ? m.settings_select_node()
+              : m.common_no_node_online()}</option
+          >
           {#each nodes as node (node.node_id)}
             <option value={node.node_id} disabled={!node.is_online}>
               {node.name}{node.is_online ? "" : ` ${m.projects_offline_suffix()}`}
