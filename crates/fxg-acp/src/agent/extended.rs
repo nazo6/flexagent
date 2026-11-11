@@ -418,8 +418,11 @@ mod tests {
                 config_options: vec![ConfigOptionPatch::Merge {
                     key: "model".to_owned(),
                     name: Some("Model (enriched)".to_owned()),
-                    options: None,
-                    current: None,
+                    options: Some(vec![
+                        ConfigOptionValue::Select("fast".to_owned()),
+                        ConfigOptionValue::Select("smart".to_owned()),
+                    ]),
+                    current: Some(ConfigOptionValue::Select("smart".to_owned())),
                 }],
                 add_commands: Vec::new(),
             }))
@@ -513,6 +516,11 @@ mod tests {
                 assert_eq!(current_mode.as_deref(), Some("enriched"));
                 assert_eq!(available_modes[0].mode_id, "enriched");
                 assert_eq!(config_options[0].name, "Model (enriched)");
+                assert_eq!(config_options[0].options.len(), 2);
+                assert_eq!(
+                    config_options[0].current_value,
+                    ConfigOptionValue::Select("smart".to_owned())
+                );
             }
             other => panic!("unexpected event: {other:?}"),
         }
