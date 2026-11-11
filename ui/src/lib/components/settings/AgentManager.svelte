@@ -8,6 +8,7 @@
   import * as Dialog from "#lib/components/ui/dialog/index.ts";
   import { Input } from "#lib/components/ui/input/index.ts";
   import { Label } from "#lib/components/ui/label/index.ts";
+  import * as Tabs from "#lib/components/ui/tabs/index.ts";
   import {
     agentBackendLabel,
     agentSourceLabel,
@@ -40,12 +41,12 @@
   /** Pending removal target. */
   let removeTarget = $state<AgentSummary | null>(null);
 
-  // Registry import dialog
-  let catalogOpen = $state(false);
+  // Agent dialog: registry import and the manual definition share one dialog.
+  let agentOpen = $state(false);
+  let agentTab = $state<"registry" | "custom">("custom");
   let catalogQuery = $state("");
 
   // Custom agent definition form (null = create new)
-  let customOpen = $state(false);
   let customBusy = $state(false);
   let customEditId = $state<string | null>(null);
   let customOrigin = $state<CustomAgentOrigin | null>(null);
@@ -70,12 +71,6 @@
   /** IDs already provided by a built-in provider on this node. */
   const builtinIds = $derived(
     new Set(agents.filter((agent) => agent.custom_config === null).map((agent) => agent.id)),
-  );
-  /** Registry agents that can be imported right now. */
-  const importCount = $derived(
-    registryAgents.filter(
-      (agent) => agent.available && !agent.imported && !builtinIds.has(agent.id),
-    ).length,
   );
   /** Built-in extensions that a custom ACP launch can reference. */
   const extensionChoices = $derived(
@@ -132,7 +127,6 @@
     try {
       const result = await sync.connection.client.importRegistryAgent(nodeId, agent.id);
       toast.success(result.message ?? m.settings_catalog_imported({ name: agent.name }));
-      catalogOpen = false;
       await Promise.all([loadAgents(), sync.refreshNodes()]);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
@@ -171,14 +165,38 @@
     }
   }
 
-  /** Open the custom definition form (creates a new agent when `agent` is omitted). */
-  function openCustom(agent: AgentSummary | null): void {
-    const config = agent?.custom_config ?? null;
-    customEditId = agent?.id ?? null;
+  /** Reset the custom definition form (new agent). */
+  function resetCustomForm(): void {
+    customEditId = null;
+    customOrigin = { kind: "manual" };
+    customIcon = null;
+    customForm = {
+      id: "",
+      name: "",
+      description: "",
+      command: "",
+      args: "",
+      env: "",
+      extension: "",
+    };
+  }
+
+  /** Open the agent dialog on the registry tab (new agent). */
+  function openAdd(): void {
+    resetCustomForm();
+    catalogQuery = "";
+    agentTab = "registry";
+    agentOpen = true;
+  }
+
+  /** Open an existing custom definition in the dialog. */
+  function openCustom(agent: AgentSummary): void {
+    const config = agent.custom_config;
+    customEditId = agent.id;
     customOrigin = config?.origin ?? { kind: "manual" };
     customIcon = config?.icon ?? null;
     customForm = {
-      id: agent?.id ?? "",
+      id: agent.id,
       name: config?.name ?? "",
       description: config?.description ?? "",
       command: config?.command ?? "",
@@ -186,7 +204,8 @@
       env: formatEnv(config?.env ?? {}, config?.env_secrets ?? {}),
       extension: config?.extension ?? "",
     };
-    customOpen = true;
+    agentTab = "custom";
+    agentOpen = true;
   }
 
   function formatEnv(env: Record<string, string>, envSecrets: Record<string, string>): string {
@@ -240,7 +259,7 @@
         origin: customOrigin,
       });
       toast.success(result.message ?? m.settings_custom_agent_saved({ name: id }));
-      customOpen = false;
+      agentOpen = false;
       await Promise.all([loadAgents(), sync.refreshNodes()]);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
@@ -259,7 +278,7 @@
       <select
         bind:value={nodeId}
         aria-label={m.settings_target_node()}
-        class="border-input bg-background h-8 rounded-md border px-2 text-[13px]"
+        class="border-input bg-surface-raised h-8 rounded-md border px-2 text-[13px]"
         title={m.settings_target_node()}
       >
         {#each sync.nodes as node (node.node_id)}
@@ -268,23 +287,13 @@
           </option>
         {/each}
       </select>
-      <Button
-        variant="outline"
-        size="sm"
-        disabled={busy || nodeId === ""}
-        onclick={() => void refreshCatalog()}
-        title={m.settings_catalog_refresh_title()}
-      >
-        <RefreshCwIcon />
-        {m.settings_catalog_refresh()}
-      </Button>
       <Button variant="outline" size="sm" disabled={loading} onclick={() => void loadAgents()}>
         <RefreshCwIcon />
         {m.common_refresh()}
       </Button>
-      <Button size="sm" disabled={nodeId === ""} onclick={() => openCustom(null)}>
+      <Button size="sm" disabled={nodeId === ""} onclick={openAdd}>
         <PlusIcon />
-        {m.settings_add_custom()}
+        {m.settings_add_agent()}
       </Button>
     </div>
   </div>
@@ -373,18 +382,6 @@
       </Card>
     {/each}
   {/if}
-
-  <div class="mt-1">
-    <Button
-      variant="outline"
-      size="sm"
-      disabled={nodeId === ""}
-      onclick={() => (catalogOpen = true)}
-    >
-      <PlusIcon />
-      {m.settings_add_from_catalog({ count: importCount })}
-    </Button>
-  </div>
 </div>
 
 <!-- Agent removal confirmation -->
@@ -416,114 +413,151 @@
   </AlertDialog.Content>
 </AlertDialog.Root>
 
-<!-- Catalog dialog (not installed) -->
-<Dialog.Root open={catalogOpen} onOpenChange={(open) => (catalogOpen = open)}>
-  <Dialog.Content class="sm:max-w-2xl">
-    <Dialog.Header>
-      <Dialog.Title>{m.settings_catalog_title()}</Dialog.Title>
-      <Dialog.Description>
-        {m.settings_catalog_description({ name: nodeName(nodeId) })}
-      </Dialog.Description>
-    </Dialog.Header>
-    <div class="flex flex-col gap-3">
-      <div class="relative">
-        <SearchIcon class="text-muted-foreground absolute top-2 left-2 size-4" />
-        <Input
-          bind:value={catalogQuery}
-          placeholder={m.settings_catalog_search_placeholder()}
-          class="h-8 pl-8 text-[13px]"
-        />
-      </div>
-      <div class="flex max-h-[60vh] flex-col gap-2 overflow-y-auto">
-        {#if importable.length === 0}
-          <p class="text-muted-foreground text-sm">
-            {catalogQuery.trim() === ""
-              ? m.settings_catalog_empty()
-              : m.settings_catalog_no_match()}
-          </p>
-        {:else}
-          {#each importable as agent (agent.id)}
-            <div class="flex flex-wrap items-start justify-between gap-2 rounded-md border p-2.5">
-              <div class="flex min-w-0 items-start gap-2">
-                <AgentIcon icon={agent.icon} class="mt-0.5 size-4" />
-                <div class="flex min-w-0 flex-col gap-0.5">
-                  <div class="flex flex-wrap items-center gap-2">
-                    <span class="text-sm font-medium">{agent.name}</span>
-                    <span class="text-muted-foreground font-mono text-[13px]">{agent.id}</span>
-                    <span class="text-muted-foreground text-[13px]">v{agent.version}</span>
-                    {#each agent.distribution as kind (kind)}
-                      <Badge variant="outline" class="text-[11px]">
-                        {registryDistributionLabel(kind)}
-                      </Badge>
-                    {/each}
-                    {#if agent.imported}
-                      <Badge variant="secondary" class="text-[11px]">
-                        {m.settings_catalog_imported_badge()}
-                      </Badge>
-                    {/if}
-                  </div>
-                  {#if agent.description}
-                    <p class="text-muted-foreground text-[13px]">
-                      {agent.description}
-                    </p>
-                  {/if}
-                  {#if !agent.available && agent.unavailable_reason}
-                    <p class="text-muted-foreground text-[11px]">
-                      {agent.unavailable_reason}
-                    </p>
-                  {/if}
-                </div>
-              </div>
-              <div class="flex flex-wrap items-center gap-1.5">
-                {#if agent.imported}
-                  <span class="text-muted-foreground text-[11px]">
-                    {m.settings_catalog_imported_hint()}
-                  </span>
-                {:else if builtinIds.has(agent.id)}
-                  <Badge variant="outline" class="text-[11px]">
-                    {m.settings_catalog_builtin()}
-                  </Badge>
-                {:else if agent.available}
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={busy || nodeId === ""}
-                    onclick={() => void importAgent(agent)}
-                  >
-                    <PlusIcon />
-                    {importingId === agent.id
-                      ? m.settings_catalog_importing({ name: agent.name })
-                      : m.settings_catalog_import()}
-                  </Button>
-                {:else}
-                  <span class="text-muted-foreground text-[11px]">
-                    {m.settings_catalog_unavailable()}
-                  </span>
-                {/if}
-              </div>
-            </div>
-          {/each}
-        {/if}
-      </div>
-    </div>
-  </Dialog.Content>
-</Dialog.Root>
-
-<!-- Custom agent definition dialog -->
-<Dialog.Root open={customOpen} onOpenChange={(open) => (customOpen = open)}>
-  <Dialog.Content class="sm:max-w-lg">
+<!-- Agent dialog: registry import and the manual definition share one surface. -->
+<Dialog.Root open={agentOpen} onOpenChange={(open) => (agentOpen = open)}>
+  <Dialog.Content
+    class="flex max-h-[calc(100dvh-2rem)] flex-col overflow-hidden {agentTab === 'registry' &&
+    customEditId === null
+      ? 'sm:max-w-2xl'
+      : 'sm:max-w-lg'}"
+  >
     <Dialog.Header>
       <Dialog.Title>
         {customEditId === null
-          ? m.settings_add_custom_agent()
+          ? m.settings_add_agent()
           : m.settings_edit_agent({ name: customEditId })}
       </Dialog.Title>
       <Dialog.Description>
-        {m.settings_custom_description()}
-        <code>node.db</code>
+        {#if agentTab === "registry" && customEditId === null}
+          {m.settings_catalog_description({ name: nodeName(nodeId) })}
+        {:else}
+          {m.settings_custom_description()} <code>node.db</code>
+        {/if}
       </Dialog.Description>
     </Dialog.Header>
-    <form class="flex flex-col gap-3" onsubmit={submitCustom}>
+
+    {#if customEditId === null}
+      <Tabs.Root
+        value={agentTab}
+        onValueChange={(value) => (agentTab = value as "registry" | "custom")}
+        class="flex min-h-0 flex-1 flex-col"
+      >
+        <Tabs.List variant="line" class="w-full shrink-0 border-b">
+          <Tabs.Trigger value="registry">{m.settings_add_tab_registry()}</Tabs.Trigger>
+          <Tabs.Trigger value="custom">{m.settings_add_tab_custom()}</Tabs.Trigger>
+        </Tabs.List>
+
+        <Tabs.Content value="registry" class="mt-3 flex min-h-0 flex-1 flex-col gap-3">
+          <div class="flex items-center gap-1.5">
+            <div class="relative min-w-0 flex-1">
+              <SearchIcon class="text-muted-foreground absolute top-2 left-2 size-4" />
+              <Input
+                bind:value={catalogQuery}
+                placeholder={m.settings_catalog_search_placeholder()}
+                aria-label={m.settings_catalog_search_placeholder()}
+                class="h-8 pl-8 text-[13px]"
+              />
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={busy || nodeId === ""}
+              onclick={() => void refreshCatalog()}
+              title={m.settings_catalog_refresh_title()}
+            >
+              <RefreshCwIcon />
+              {busyLabel === null ? m.settings_catalog_refresh() : m.settings_catalog_refreshing()}
+            </Button>
+          </div>
+
+          <div class="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto pr-1">
+            {#if importable.length === 0}
+              <p class="text-muted-foreground text-sm">
+                {catalogQuery.trim() === ""
+                  ? m.settings_catalog_empty()
+                  : m.settings_catalog_no_match()}
+              </p>
+            {:else}
+              {#each importable as agent (agent.id)}
+                <div
+                  class="flex flex-wrap items-start justify-between gap-2 rounded-md border p-2.5"
+                >
+                  <div class="flex min-w-0 items-start gap-2">
+                    <AgentIcon icon={agent.icon} class="mt-0.5 size-4" />
+                    <div class="flex min-w-0 flex-col gap-0.5">
+                      <div class="flex flex-wrap items-center gap-2">
+                        <span class="text-sm font-medium">{agent.name}</span>
+                        <span class="text-muted-foreground font-mono text-[13px]">{agent.id}</span>
+                        <span class="text-muted-foreground text-[13px]">v{agent.version}</span>
+                        {#each agent.distribution as kind (kind)}
+                          <Badge variant="outline" class="text-[11px]">
+                            {registryDistributionLabel(kind)}
+                          </Badge>
+                        {/each}
+                        {#if agent.imported}
+                          <Badge variant="secondary" class="text-[11px]">
+                            {m.settings_catalog_imported_badge()}
+                          </Badge>
+                        {/if}
+                      </div>
+                      {#if agent.description}
+                        <p class="text-muted-foreground text-[13px]">
+                          {agent.description}
+                        </p>
+                      {/if}
+                      {#if !agent.available && agent.unavailable_reason}
+                        <p class="text-muted-foreground text-[11px]">
+                          {agent.unavailable_reason}
+                        </p>
+                      {/if}
+                    </div>
+                  </div>
+                  <div class="flex flex-wrap items-center gap-1.5">
+                    {#if agent.imported}
+                      <span class="text-muted-foreground text-[11px]">
+                        {m.settings_catalog_imported_hint()}
+                      </span>
+                    {:else if builtinIds.has(agent.id)}
+                      <Badge variant="outline" class="text-[11px]">
+                        {m.settings_catalog_builtin()}
+                      </Badge>
+                    {:else if agent.available}
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={busy || nodeId === ""}
+                        onclick={() => void importAgent(agent)}
+                      >
+                        <PlusIcon />
+                        {importingId === agent.id
+                          ? m.settings_catalog_importing({ name: agent.name })
+                          : m.settings_catalog_import()}
+                      </Button>
+                    {:else}
+                      <span class="text-muted-foreground text-[11px]">
+                        {m.settings_catalog_unavailable()}
+                      </span>
+                    {/if}
+                  </div>
+                </div>
+              {/each}
+            {/if}
+          </div>
+        </Tabs.Content>
+
+        <Tabs.Content value="custom" class="mt-3 flex min-h-0 flex-1 flex-col">
+          {@render customAgentForm()}
+        </Tabs.Content>
+      </Tabs.Root>
+    {:else}
+      {@render customAgentForm()}
+    {/if}
+  </Dialog.Content>
+</Dialog.Root>
+
+{#snippet customAgentForm()}
+  <form class="flex min-h-0 flex-1 flex-col gap-3" onsubmit={submitCustom}>
+    <div class="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto pr-1">
       <div class="grid gap-1.5">
         <Label for="custom-id">{m.settings_agent_id()}</Label>
         <Input
@@ -557,7 +591,7 @@
         <select
           id="custom-extension"
           bind:value={customForm.extension}
-          class="border-input bg-background h-8 rounded-md border px-2 text-[13px]"
+          class="border-input bg-surface-raised h-8 rounded-md border px-2 text-[13px]"
         >
           <option value="">{m.settings_agent_extension_none()}</option>
           {#each extensionChoices as extension (extension.id)}
@@ -590,23 +624,24 @@
         />
       </div>
       <div class="grid gap-1.5">
-        <Label for="custom-env">
-          {m.settings_env_vars()} (<code>KEY=VALUE</code>, secret reference
-          <code>KEY=@SECRET_KEY</code>)
-        </Label>
+        <Label for="custom-env">{m.settings_env_vars()}</Label>
+        <p class="text-muted-foreground text-[11px]">
+          {m.settings_env_vars_hint()} <code>KEY=VALUE</code>{m.settings_env_vars_hint_secret()}
+          <code>KEY=@SECRET_KEY</code>
+        </p>
         <textarea
           id="custom-env"
           bind:value={customForm.env}
           rows="3"
-          class="border-input bg-background focus-visible:ring-ring/40 rounded-md border px-2 py-1.5 font-mono text-[13px] outline-none focus-visible:ring-1"
+          class="border-input bg-surface-raised focus-visible:ring-ring/40 rounded-md border px-2 py-1.5 font-mono text-[13px] outline-none focus-visible:ring-1"
           placeholder="LOG_LEVEL=info&#10;OPENAI_API_KEY=@OPENAI_API_KEY"></textarea>
       </div>
-      <Dialog.Footer>
-        <Dialog.Close>{m.common_cancel()}</Dialog.Close>
-        <Button type="submit" disabled={customBusy}>
-          {customBusy ? m.settings_saving() : m.common_save()}
-        </Button>
-      </Dialog.Footer>
-    </form>
-  </Dialog.Content>
-</Dialog.Root>
+    </div>
+    <Dialog.Footer class="shrink-0">
+      <Dialog.Close>{m.common_cancel()}</Dialog.Close>
+      <Button type="submit" disabled={customBusy}>
+        {customBusy ? m.settings_saving() : m.common_save()}
+      </Button>
+    </Dialog.Footer>
+  </form>
+{/snippet}
