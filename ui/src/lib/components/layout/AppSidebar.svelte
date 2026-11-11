@@ -182,8 +182,8 @@
       type="button"
       class="hover:bg-accent text-muted-foreground hover:text-foreground hidden size-7 items-center justify-center rounded-md border md:flex"
       onclick={() => layoutState.toggleSidebar()}
-      title="Toggle sidebar (Ctrl+B)"
-      aria-label="Toggle sidebar"
+      title={m.shell_hide_sidebar()}
+      aria-label={m.shell_hide_sidebar()}
     >
       <PanelLeftCloseIcon class="size-4" />
     </button>

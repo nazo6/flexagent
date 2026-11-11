@@ -17,6 +17,7 @@
   import { ModeWatcher } from "mode-watcher";
   import LoaderCircleIcon from "@lucide/svelte/icons/loader-circle";
   import MenuIcon from "@lucide/svelte/icons/menu";
+  import PanelLeftOpenIcon from "@lucide/svelte/icons/panel-left-open";
   import PlugZapIcon from "@lucide/svelte/icons/plug-zap";
   import PlusIcon from "@lucide/svelte/icons/plus";
 
@@ -130,6 +131,19 @@
     {#if !layoutState.sidebarCollapsed}
       <div class="hidden md:flex md:w-[264px] lg:w-[288px] md:shrink-0 md:h-full">
         <AppSidebar />
+      </div>
+    {:else}
+      <!-- Collapsed rail: keeps a visible way to reopen the sidebar on desktop. -->
+      <div class="hidden w-10 shrink-0 flex-col items-center border-r border-border py-2 md:flex">
+        <button
+          type="button"
+          class="hover:bg-accent text-muted-foreground hover:text-foreground flex size-7 items-center justify-center rounded-md border border-border"
+          onclick={() => layoutState.setSidebarCollapsed(false)}
+          title={m.shell_show_sidebar()}
+          aria-label={m.shell_show_sidebar()}
+        >
+          <PanelLeftOpenIcon class="size-4" />
+        </button>
       </div>
     {/if}
 
