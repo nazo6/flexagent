@@ -1,5 +1,6 @@
 <script lang="ts">
   import { untrack } from "svelte";
+  import { errorMessage } from "#lib/api/error-messages.ts";
   import { Badge } from "#lib/components/ui/badge/index.ts";
   import { Button } from "#lib/components/ui/button/index.ts";
   import { Card } from "#lib/components/ui/card/index.ts";
@@ -87,7 +88,7 @@
         secrets = (await sync.connection.client.hubSecrets()).secrets;
       }
     } catch (cause) {
-      error = cause instanceof Error ? cause.message : String(cause);
+      error = errorMessage(cause);
     } finally {
       loading = false;
     }
@@ -129,7 +130,7 @@
       syncNodeForm();
       toast.success("Saved node settings.");
     } catch (cause) {
-      toast.error(cause instanceof Error ? cause.message : String(cause));
+      toast.error(errorMessage(cause));
     }
   }
 
@@ -142,7 +143,7 @@
       syncHubForm();
       toast.success("Saved hub settings.");
     } catch (cause) {
-      toast.error(cause instanceof Error ? cause.message : String(cause));
+      toast.error(errorMessage(cause));
     }
   }
 
@@ -166,7 +167,7 @@
       secretForm = { key: "", description: "", value: "" };
       toast.success("Secret saved (the value is write-only and never returned).");
     } catch (cause) {
-      toast.error(cause instanceof Error ? cause.message : String(cause));
+      toast.error(errorMessage(cause));
     }
   }
 
@@ -183,7 +184,7 @@
       secrets = response.secrets;
       toast.success(`Deleted secret "${secret.id}".`);
     } catch (cause) {
-      toast.error(cause instanceof Error ? cause.message : String(cause));
+      toast.error(errorMessage(cause));
     }
   }
 

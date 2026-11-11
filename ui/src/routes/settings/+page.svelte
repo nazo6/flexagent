@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { errorMessage } from "#lib/api/error-messages.ts";
   import { goto } from "$app/navigation";
   import { page } from "$app/state";
   import AgentManager from "#lib/components/settings/AgentManager.svelte";
@@ -70,7 +71,7 @@
 
   // --- Node pairing (hub only) ---
   const tokens = createResource<NodeTokenSummary[]>(() => sync.connection.client.nodeTokens(), {
-    onError: (error) => toast.error(error instanceof Error ? error.message : String(error)),
+    onError: (error) => toast.error(errorMessage(error)),
   });
 
   // Issue a new node pairing token
@@ -111,7 +112,7 @@
       await tokens.refresh();
       await sync.refreshNodes();
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : String(error));
+      toast.error(errorMessage(error));
     } finally {
       issueBusy = false;
     }
@@ -127,7 +128,7 @@
       revokeTarget = null;
       await tokens.refresh();
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : String(error));
+      toast.error(errorMessage(error));
     } finally {
       revokeBusy = false;
     }
@@ -153,7 +154,7 @@
       toast.success(m.settings_token_regenerated());
       rotateOpen = false;
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : String(error));
+      toast.error(errorMessage(error));
     } finally {
       rotateBusy = false;
     }

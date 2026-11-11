@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { errorMessage } from "#lib/api/error-messages.ts";
   import { Badge } from "#lib/components/ui/badge/index.ts";
   import { Button } from "#lib/components/ui/button/index.ts";
   import { Card } from "#lib/components/ui/card/index.ts";
@@ -21,7 +22,7 @@
     try {
       diagnostics = await sync.connection.client.diagnostics();
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : String(error));
+      toast.error(errorMessage(error));
     } finally {
       loading = false;
     }
@@ -41,7 +42,7 @@
       URL.revokeObjectURL(url);
       toast.success(m.settings_support_bundle_downloaded());
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : String(error));
+      toast.error(errorMessage(error));
     } finally {
       exporting = false;
     }
@@ -53,7 +54,7 @@
       await load();
       toast.success(m.settings_incident_resolved());
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : String(error));
+      toast.error(errorMessage(error));
     }
   }
 

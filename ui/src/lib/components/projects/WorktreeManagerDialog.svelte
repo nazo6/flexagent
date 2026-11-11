@@ -1,5 +1,6 @@
 <script lang="ts">
   import * as AlertDialog from "#lib/components/ui/alert-dialog/index.ts";
+  import { errorMessage } from "#lib/api/error-messages.ts";
   import * as Dialog from "#lib/components/ui/dialog/index.ts";
   import { Button } from "#lib/components/ui/button/index.ts";
   import { Input } from "#lib/components/ui/input/index.ts";
@@ -81,7 +82,7 @@
       createProjectId = null;
       onChanged(projectId);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : String(error));
+      toast.error(errorMessage(error));
     } finally {
       createBusy = false;
     }
@@ -101,7 +102,7 @@
       removeTarget = null;
       onChanged(target.projectId);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : String(error));
+      toast.error(errorMessage(error));
     } finally {
       removeBusy = false;
     }
@@ -119,7 +120,7 @@
       pruneProjectId = null;
       onChanged(projectId);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : String(error));
+      toast.error(errorMessage(error));
     } finally {
       pruneBusy = false;
     }

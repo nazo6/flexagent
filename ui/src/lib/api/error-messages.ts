@@ -1,5 +1,20 @@
 import type { ErrorCode } from "#lib/generated/bindings.ts";
+import { ApiError } from "#lib/api/errors.ts";
 import { m } from "#lib/paraglide/messages.js";
+
+/**
+ * Localized message for any thrown value.
+ *
+ * Prefers the structured `ErrorCode` (for example `NODE_OFFLINE`) over the
+ * English server fallback, so toasts and banners say what happened in the UI
+ * language.
+ */
+export function errorMessage(error: unknown): string {
+  if (error instanceof ApiError && error.info) {
+    return errorCodeMessage(error.info.code, error.info.params) ?? error.info.message;
+  }
+  return error instanceof Error ? error.message : String(error);
+}
 
 /**
  * Localized label for a structured API error code.

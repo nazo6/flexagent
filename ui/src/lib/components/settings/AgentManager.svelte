@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount, untrack } from "svelte";
+  import { errorMessage } from "#lib/api/error-messages.ts";
   import AgentIcon from "#lib/components/agent/AgentIcon.svelte";
   import * as AlertDialog from "#lib/components/ui/alert-dialog/index.ts";
   import { Badge } from "#lib/components/ui/badge/index.ts";
@@ -119,7 +120,7 @@
       agents = catalog.agents;
       registryAgents = catalog.registry;
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : String(error));
+      toast.error(errorMessage(error));
     } finally {
       loading = false;
     }
@@ -133,7 +134,7 @@
       toast.success(result.message ?? m.settings_catalog_imported({ name: agent.name }));
       await Promise.all([loadAgents(), sync.refreshNodes()]);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : String(error));
+      toast.error(errorMessage(error));
     } finally {
       importingId = null;
     }
@@ -147,7 +148,7 @@
       toast.success(result.message ?? m.settings_catalog_refreshed());
       await Promise.all([loadAgents(), sync.refreshNodes()]);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : String(error));
+      toast.error(errorMessage(error));
     } finally {
       busyLabel = null;
     }
@@ -163,7 +164,7 @@
       removeTarget = null;
       await Promise.all([loadAgents(), sync.refreshNodes()]);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : String(error));
+      toast.error(errorMessage(error));
     } finally {
       busyLabel = null;
     }
@@ -266,7 +267,7 @@
       agentOpen = false;
       await Promise.all([loadAgents(), sync.refreshNodes()]);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : String(error));
+      toast.error(errorMessage(error));
     } finally {
       customBusy = false;
     }

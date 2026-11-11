@@ -1,5 +1,6 @@
 <script lang="ts">
   import * as Dialog from "#lib/components/ui/dialog/index.ts";
+  import { errorMessage } from "#lib/api/error-messages.ts";
   import { Button } from "#lib/components/ui/button/index.ts";
   import { Input } from "#lib/components/ui/input/index.ts";
   import { Label } from "#lib/components/ui/label/index.ts";
@@ -49,7 +50,7 @@
       open = false;
       await sync.refreshProjects();
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : String(error));
+      toast.error(errorMessage(error));
     } finally {
       scanBusy = false;
     }

@@ -248,7 +248,7 @@ impl NodeHub {
                     .tx
                     .send(PendingResponse::Failed {
                         code: ErrorCode::NodeOffline,
-                        message: format!("node {node_id} disconnected"),
+                        message: format!("node is offline: {node_id}"),
                     })
                     .is_err()
             {
@@ -382,7 +382,7 @@ impl NodeHub {
             Ok(Ok(response)) => Ok(response),
             Ok(Err(_canceled)) => Err(ApiError::node_offline(
                 node_id.as_str(),
-                format!("node {node_id} disconnected"),
+                format!("node is offline: {node_id}"),
             )),
             Err(_) => {
                 self.inner.pending.lock().await.remove(correlation_id);
@@ -494,10 +494,7 @@ impl NodeHub {
 
 /// Builds a `NODE_OFFLINE` error.
 fn offline_error(node_id: &NodeId) -> ApiError {
-    ApiError::node_offline(
-        node_id.as_str(),
-        format!("node is not connected: {node_id}"),
-    )
+    ApiError::node_offline(node_id.as_str(), format!("node is offline: {node_id}"))
 }
 
 // ----------------------------------------------------------------------
