@@ -86,6 +86,7 @@
   "common_delete": "Delete",
   "common_load_failed": "Failed to load.",
   "common_loading": "Loading…",
+  "common_no_node_online": "No node online",
   "common_refresh": "Refresh",
   "common_retry": "Retry",
   "common_save": "Save",

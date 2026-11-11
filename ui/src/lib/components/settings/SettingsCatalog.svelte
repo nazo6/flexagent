@@ -293,12 +293,15 @@
 <div class="flex flex-col gap-3">
   {#if isHub && (section === "bootstrap" || section === "machine")}
     <div class="flex flex-wrap items-center gap-2">
-      <Label for="catalog-node">Target node</Label>
+      <Label for={`catalog-node-${section}`}>Target node</Label>
       <select
-        id="catalog-node"
+        id={`catalog-node-${section}`}
         class="border-input bg-surface-raised h-8 rounded-md border px-2 text-[13px]"
         bind:value={selectedNode}
       >
+        {#if onlineNodes.length === 0}
+          <option value="">{m.common_no_node_online()}</option>
+        {/if}
         {#each onlineNodes as node (node.node_id)}
           <option value={node.node_id}>{node.name} ({node.node_id})</option>
         {/each}

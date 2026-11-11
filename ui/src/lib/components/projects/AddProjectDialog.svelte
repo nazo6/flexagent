@@ -270,6 +270,7 @@
           onchange={onNodeChange}
           class="border-input bg-surface-raised focus-visible:ring-ring/40 h-8 w-full max-w-xs rounded-md border px-2 text-[13px] outline-none focus-visible:ring-1"
         >
+          <option value="">{m.common_no_node_online()}</option>
           {#each nodes as node (node.node_id)}
             <option value={node.node_id} disabled={!node.is_online}>
               {node.name}{node.is_online ? "" : ` ${m.projects_offline_suffix()}`}

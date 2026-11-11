@@ -281,6 +281,7 @@
         class="border-input bg-surface-raised h-8 rounded-md border px-2 text-[13px]"
         title={m.settings_target_node()}
       >
+        <option value="">{m.common_no_node_online()}</option>
         {#each sync.nodes as node (node.node_id)}
           <option value={node.node_id} disabled={!node.is_online}>
             {node.name}{node.is_online ? "" : m.settings_node_offline_suffix()}
