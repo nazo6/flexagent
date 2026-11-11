@@ -1035,7 +1035,7 @@ xterm互換アダプター）とノード上の ConPTY / Unix PTY
 | `fxg session import`                   | `POST /api/v1/sessions/import`                                           | 外部セッションのインポート                                  |
 | `fxg node status`                      | `GET /api/v1/system/info` + `GET /api/v1/sessions`                       | hub 接続状態 / Outbox / 稼働セッション                      |
 | `fxg node stop`                        | `POST /api/v1/system/shutdown`                                           | ローカルノードの graceful shutdown                          |
-| `fxg node token show` / `rotate`       | `auth_token` ファイル読み取り / `POST /api/v1/auth/rotate-token`         | トークン表示・再生成                                        |
+| `fxg node access-token show` / `rotate`       | `auth_token` ファイル読み取り / `POST /api/v1/auth/rotate-token`         | トークン表示・再生成                                        |
 | `fxg support bundle` / `incidents`     | `GET /api/v1/diagnostics/bundle` / `GET /api/v1/diagnostics/incidents`   | サポートバンドル / 障害履歴                                 |
 | `fxg doctor` / `fxg logs --session`    | `GET /api/v1/diagnostics`                                                | ローカル診断 / エージェント stderr                          |
 | `fxg agents login` / `logout`          | （API なし）                                                             | ローカルプロセスで実行                                      |

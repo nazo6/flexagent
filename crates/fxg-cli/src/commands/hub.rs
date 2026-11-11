@@ -16,7 +16,7 @@ pub struct HubArgs {
     pub(crate) command: HubCommands,
 }
 
-/// Hub process and node-token commands.
+/// Hub process and node pairing token commands.
 #[derive(Debug, Subcommands)]
 #[usage(run_async)]
 pub enum HubCommands {
@@ -28,8 +28,8 @@ pub enum HubCommands {
     Restart(HubRestartArgs),
     /// Show the hub status
     Status(HubStatusArgs),
-    /// Per-node pairing tokens
-    NodeToken(HubNodeTokenArgs),
+    /// Node pairing tokens (one per node)
+    PairingToken(HubPairingTokenArgs),
 }
 
 // ----------------------------------------------------------------------
@@ -334,37 +334,37 @@ impl usage::RunAsync for HubStatusArgs {
 }
 
 // ----------------------------------------------------------------------
-// fxg hub node-token
+// fxg hub pairing-token
 // ----------------------------------------------------------------------
 
-/// `fxg hub node-token <command>`
+/// `fxg hub pairing-token <command>`
 #[derive(Debug, Args)]
 #[usage(run_async, arg_required_else_help)]
-pub struct HubNodeTokenArgs {
+pub struct HubPairingTokenArgs {
     #[usage(subcommand)]
-    command: HubNodeTokenCommands,
+    command: HubPairingTokenCommands,
 }
 
-/// Per-node pairing token operations (run on the hub host).
+/// Node pairing token operations (run on the hub host).
 #[derive(Debug, Subcommands)]
 #[usage(run_async)]
-pub enum HubNodeTokenCommands {
-    /// Issue and print a per-node token
-    Issue(HubNodeTokenIssueArgs),
-    /// Revoke a per-node token
-    Revoke(HubNodeTokenRevokeArgs),
-    /// List issued node tokens
-    List(HubNodeTokenListArgs),
+pub enum HubPairingTokenCommands {
+    /// Issue and print a node pairing token
+    Issue(HubPairingTokenIssueArgs),
+    /// Revoke a node pairing token
+    Revoke(HubPairingTokenRevokeArgs),
+    /// List issued node pairing tokens
+    List(HubPairingTokenListArgs),
 }
 
-/// `fxg hub node-token issue <node-id>`
+/// `fxg hub pairing-token issue <node-id>`
 #[derive(Debug, Args)]
-pub struct HubNodeTokenIssueArgs {
+pub struct HubPairingTokenIssueArgs {
     /// Target node ID (the `fxg node` node_id)
     node_id: String,
 }
 
-impl usage::RunAsync for HubNodeTokenIssueArgs {
+impl usage::RunAsync for HubPairingTokenIssueArgs {
     type Output = Result<()>;
 
     async fn run_async(self) -> Self::Output {
@@ -385,41 +385,43 @@ impl usage::RunAsync for HubNodeTokenIssueArgs {
         // The plaintext token is shown only once at issuance (the hub stores
         // only the hash)
         println!("{token}");
-        eprintln!("issued a node_token; save it to ~/.flexagent/node_token on the node side.");
+        eprintln!(
+            "issued a pairing token; on that node run: fxg node pair --hub <hub-address> --token <token>"
+        );
         Ok(())
     }
 }
 
-/// `fxg hub node-token revoke <node-id>`
+/// `fxg hub pairing-token revoke <node-id>`
 #[derive(Debug, Args)]
-pub struct HubNodeTokenRevokeArgs {
+pub struct HubPairingTokenRevokeArgs {
     /// Target node ID
     node_id: String,
 }
 
-impl usage::RunAsync for HubNodeTokenRevokeArgs {
+impl usage::RunAsync for HubPairingTokenRevokeArgs {
     type Output = Result<()>;
 
     async fn run_async(self) -> Self::Output {
         let db = open_hub_db().await?;
         db.set_node_token_hash(&self.node_id, None).await?;
-        println!("revoked node token for {}", self.node_id);
+        println!("revoked the pairing token for {}", self.node_id);
         Ok(())
     }
 }
 
-/// `fxg hub node-token list`
+/// `fxg hub pairing-token list`
 #[derive(Debug, Args)]
-pub struct HubNodeTokenListArgs {}
+pub struct HubPairingTokenListArgs {}
 
-impl usage::RunAsync for HubNodeTokenListArgs {
+impl usage::RunAsync for HubPairingTokenListArgs {
     type Output = Result<()>;
 
     async fn run_async(self) -> Self::Output {
         let db = open_hub_db().await?;
         let tokens = db.list_node_tokens().await?;
         if tokens.is_empty() {
-            println!("(no node tokens issued)");
+            println!("(no pairing tokens issued)");
             return Ok(());
         }
         for (node_id, hash) in tokens {

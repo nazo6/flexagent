@@ -1,4 +1,4 @@
-//! `fxg node` commands: local node process lifecycle and client tokens.
+//! `fxg node` commands: local node process lifecycle, pairing and Web access tokens.
 
 use std::time::{Duration, Instant};
 
@@ -18,7 +18,7 @@ pub struct NodeArgs {
     pub(crate) command: NodeCommands,
 }
 
-/// Local node process and token commands.
+/// Local node process, pairing and Web access token commands.
 #[derive(Debug, Subcommands)]
 #[usage(run_async)]
 pub enum NodeCommands {
@@ -34,8 +34,8 @@ pub enum NodeCommands {
     Pair(NodePairArgs),
     /// Remove the hub pairing (deletes node_token and clears [node] hub_url)
     Unpair(NodeUnpairArgs),
-    /// Client authentication token
-    Token(NodeTokenArgs),
+    /// Web access token for browsers and CLI clients
+    AccessToken(NodeAccessTokenArgs),
 }
 
 // ----------------------------------------------------------------------
@@ -373,7 +373,7 @@ pub struct NodePairArgs {
     /// Hub address (`http://host:port`; a full ws:// URL is also accepted)
     #[usage(long)]
     hub: String,
-    /// Pairing token issued on the hub (`fxg hub node-token issue`)
+    /// Pairing token issued on the hub (`fxg hub pairing-token issue`)
     #[usage(long)]
     token: String,
 }
@@ -402,7 +402,7 @@ impl usage::RunAsync for NodePairArgs {
             "paired with {}",
             fxg_protocol::config::hub_http_origin(&hub_url)
         );
-        println!("node token: {}", token_path.display());
+        println!("node pairing token: {}", token_path.display());
         println!("restart the node to apply: fxg node restart");
         Ok(())
     }
@@ -472,32 +472,32 @@ fn set_hub_url(path: &std::path::Path, hub_url: Option<&str>) -> Result<()> {
 }
 
 // ----------------------------------------------------------------------
-// fxg node token
+// fxg node access-token
 // ----------------------------------------------------------------------
 
-/// `fxg node token <command>`
+/// `fxg node access-token <command>`
 #[derive(Debug, Args)]
 #[usage(run_async, arg_required_else_help)]
-pub struct NodeTokenArgs {
+pub struct NodeAccessTokenArgs {
     #[usage(subcommand)]
-    command: NodeTokenCommands,
+    command: NodeAccessTokenCommands,
 }
 
-/// Client authentication token operations.
+/// Web access token operations (for browsers and CLI clients).
 #[derive(Debug, Subcommands)]
 #[usage(run_async)]
-pub enum NodeTokenCommands {
-    /// Show the client authentication token
-    Show(NodeTokenShowArgs),
-    /// Regenerate the client authentication token
-    Rotate(NodeTokenRotateArgs),
+pub enum NodeAccessTokenCommands {
+    /// Show the Web access token
+    Show(NodeAccessTokenShowArgs),
+    /// Regenerate the Web access token
+    Rotate(NodeAccessTokenRotateArgs),
 }
 
-/// `fxg node token show`
+/// `fxg node access-token show`
 #[derive(Debug, Args)]
-pub struct NodeTokenShowArgs {}
+pub struct NodeAccessTokenShowArgs {}
 
-impl usage::RunAsync for NodeTokenShowArgs {
+impl usage::RunAsync for NodeAccessTokenShowArgs {
     type Output = Result<()>;
 
     async fn run_async(self) -> Self::Output {
@@ -507,18 +507,20 @@ impl usage::RunAsync for NodeTokenShowArgs {
     }
 }
 
-/// `fxg node token rotate`
+/// `fxg node access-token rotate`
 #[derive(Debug, Args)]
-pub struct NodeTokenRotateArgs {}
+pub struct NodeAccessTokenRotateArgs {}
 
-impl usage::RunAsync for NodeTokenRotateArgs {
+impl usage::RunAsync for NodeAccessTokenRotateArgs {
     type Output = Result<()>;
 
     async fn run_async(self) -> Self::Output {
         let mut client = NodeClient::connect().await?;
         let token = client.auth_token(true).await?;
         println!("{token}");
-        eprintln!("regenerated the auth token (browsers and other clients must enter it again)");
+        eprintln!(
+            "regenerated the Web access token (browsers and other clients must enter it again)"
+        );
         Ok(())
     }
 }

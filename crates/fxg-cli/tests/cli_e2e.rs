@@ -1,7 +1,7 @@
 //! End-to-end tests for the `fxg` CLI.
 //!
 //! The tests actually start `fxg node start` as a child process and verify that
-//! `fxg session` / `fxg node token` work **through the local HTTP API**.
+//! `fxg session` / `fxg node access-token` work **through the local HTTP API**.
 //!
 //! Each test uses a temporary `FXG_HOME`, so it never collides with a real node.
 
@@ -179,7 +179,7 @@ async fn cli_commands_work_through_node_http() {
     let json: serde_json::Value = serde_json::from_str(&stdout_of(&output)).expect("valid json");
     assert!(json.as_array().expect("array").is_empty());
 
-    // --- fxg node token show (64 hex characters) ---
+    // --- fxg node access-token show (64 hex characters) ---
     let output = env.run(&["node", "token", "show"], None);
     let token = stdout_of(&output).trim().to_owned();
     assert_eq!(token.len(), 64, "token length: {token}");

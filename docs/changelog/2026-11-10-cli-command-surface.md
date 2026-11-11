@@ -34,9 +34,9 @@ CLI のサブコマンドが「セッション操作」「プロセスの前景�
 fxg / fxg web [node|hub]
 fxg session new|list|show|prompt|cancel|stop|kill|resume|fork|import|archive|unarchive|delete
 fxg node start|stop|restart|status
-fxg node token show|rotate
+fxg node access-token show|rotate
 fxg hub start|stop|restart|status
-fxg hub node-token issue|revoke|list
+fxg hub pairing-token issue|revoke|list
 fxg service install|uninstall [node|hub]
 fxg logs [node|hub] [--session <id>]
 fxg doctor

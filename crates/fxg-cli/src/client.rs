@@ -515,7 +515,7 @@ impl NodeClient {
         })
     }
 
-    /// `fxg node token show` / `fxg node token rotate`
+    /// `fxg node access-token show` / `fxg node access-token rotate`
     pub async fn auth_token(&mut self, rotate: bool) -> Result<String> {
         if !rotate {
             return fxg_hub::api::auth::load_or_create_token(&token_path())

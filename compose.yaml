@@ -59,7 +59,7 @@ services:
       FXG_NODE_NAME: "docker"
       # ハブへの Outbox 同期 (WS)。宛先は compose ネットワーク内の `hub`
       FXG_HUB_URL: "ws://hub:8080/api/v1/node/ws"
-      # ペアリングトークン: `docker compose exec hub fxg hub node-token issue docker`
+      # ペアリングトークン: `docker compose exec hub fxg hub pairing-token issue docker`
       # で発行し、`.env` (`FXG_NODE_TOKEN=...`) か環境変数で渡す。
       # 空の場合はローカル専用ノードとして動作する (同期は無効)
       FXG_NODE_TOKEN: "${FXG_NODE_TOKEN:-}"

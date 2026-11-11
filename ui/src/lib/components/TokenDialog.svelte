@@ -74,9 +74,9 @@
             <code>docker compose exec server cat /data/auth_token</code>.
           {:else}
             {m.token_help_node_prefix()} <code>~/.flexagent/auth_token</code>
-            {m.token_help_node_mid()} <code>fxg node token show</code>
+            {m.token_help_node_mid()} <code>fxg node access-token show</code>
             {m.token_help_node_docker()}
-            <code>docker compose exec node fxg node token show</code>).
+            <code>docker compose exec node fxg node access-token show</code>).
           {/if}
         </p>
       </div>

@@ -514,7 +514,7 @@ Hijacking）や不正アクセスを防ぐため、以下の多層防御モデ�
 
 1. **暗号論的トークンの自動生成**:
    - 初回起動時（または
-     `fxg node token rotate`）、安全な64文字のランダム文字列（`auth_token`）を生成し、`~/.flexagent/auth_token`
+     `fxg node access-token rotate`）、安全な64文字のランダム文字列（`auth_token`）を生成し、`~/.flexagent/auth_token`
      にパーミッション `0600` で保存します。
 2. **Web UI 初回アクセスとCookieの安全な設定**:
    - ローカルCLIから `fxg web` を実行すると、`node.addr` のアドレスを使った
@@ -533,13 +533,13 @@ Hijacking）や不正アクセスを防ぐため、以下の多層防御モデ�
    - 常駐ノードがハブのWebSocketへ接続する際、`Authorization: Bearer <NODE_TOKEN>`
      で認証します。
    - トークンは**ノードごとに個別発行**します。ハブ上で
-     `fxg hub node-token issue <node-id>`
+     `fxg hub pairing-token issue <node-id>`
      を実行するとトークンが生成・表示され、`hub.db` の `nodes` テーブルには
      ハッシュ (`token_hash`) のみを保存します。ノード側は表示されたトークンを
      `~/.flexagent/node_token`（または環境変数 `FXG_NODE_TOKEN`）へ設定します。
    - ハブは `NodeHello` の `node_id`
      がトークン発行対象ノードと一致することを検証し、なりすましを拒否します。
-     漏洩時は `fxg hub node-token revoke <node-id>`
+     漏洩時は `fxg hub pairing-token revoke <node-id>`
      で個別に失効・再発行できます。
    - 一時ノードはハブ自身が起動した子プロセスの `stdio`
      パイプ直結であるため、ネットワーク越しのトークン露出自体が発生しません。
