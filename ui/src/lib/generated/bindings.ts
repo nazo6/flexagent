@@ -70,7 +70,7 @@ export type AgentDiagnostics = {
 
 /**  Common response of agent management operations. */
 export type AgentOpResponse = {
-	/**  Message describing the outcome (e.g. `imported gemini from the registry`) */
+	/**  Message describing the outcome (e.g. `imported qwen-code from the registry`) */
 	message: string | null,
 };
 
