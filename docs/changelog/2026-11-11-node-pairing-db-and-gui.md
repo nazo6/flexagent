@@ -232,7 +232,7 @@ pub enum HubLinkState {
 - ペアリングはノード所有の状態なので、`NodeRpcRequest` に `UpdatePairing` /
   `ClearPairing` / `TestPairing` を追加し、`GetNodeSettings` の応答
   （`NodeSettingsSnapshot`）に `pairing` を載せる。更新系は既存の
-  `NodeRpcResponse::Settings` を返し、`TestPairing` だけ
+  `NodeRpcResponse::NodeSettings` を返し、`TestPairing` だけ
   `NodeRpcResponse::HubLink` を返す。ハンドラは `execute_node_rpc` を呼ぶだけで、
   ハブ経由は既存のプロキシがそのまま働く（新しい `ClientApiBackend`
   メソッドは不要）。
@@ -457,9 +457,29 @@ DaemonState
 ## 8. 進捗チェックリスト
 
 - [x] Phase 1: 接続状態の型付き化と 401 の区別
-- [ ] Phase 2: DB 所有化 + ペアリング API + ホット適用
-- [ ] Phase 3: GUI
-- [ ] Phase 4: CLI 付け替え + 診断
+- [x] Phase 2: DB 所有化 + ペアリング API + ホット適用
+- [x] Phase 3: GUI
+- [x] Phase 4: CLI 付け替え + 診断
 - [ ] Phase 5: ハブ切り替えの同期セマンティクス
-- [ ] Phase 6: ドキュメント
-- [ ] 検証（§6）完了
+- [x] Phase 6: ドキュメント
+- [ ] 検証（§6）完了（Phase 5 の項目を除く）
+
+### 実装メモ
+
+- `node_pairing` は migration `0019_node_pairing.sql`（`0011` は既存の
+  `incidents`、以降も既存番号が埋まっていたため末尾に追加）。
+- ペアリング API は `NodeRpcRequest::{UpdatePairing, ClearPairing, TestPairing}`
+  としてノード RPC に載せ、REST ハンドラは既存の `execute_node_rpc` を呼ぶだけ。
+  ハブ経由のプロキシは追加実装なしで動く（未ペアリングのノードには元々届かない）。
+- トークンは固定パス `~/.flexagent/node_token` のまま。`secrets` テーブルに
+  `system.node_token` のメタデータを登録し、汎用 Secret API からは
+  `SECRET_INVALID` で拒否する。
+- `DaemonConfig` から `hub_url` / `node_token` を削除し、環境変数
+  (`FXG_HUB_URL` / `FXG_NODE_TOKEN`) と `--hub-url` も削除した。テストは
+  `node.db` + トークンファイルを seed する。
+- ハブ探索は `--hub` → `hub.addr` → ノード API の `pairing.hub_url` →
+  `[hub] listen_addr`。`fxg web` と `fxg session new` に `--hub` を追加した。
+- 実機確認: hub を起動してトークン発行 → 未起動のノードを `fxg node pair` で
+  ペアリング → `hub: connected`、`unpair` で即 `standalone`、誤トークンで
+  `unauthorized (HTTP 401)` を確認。`config.toml` は生成されず、`node_token` は
+  `0600`。
