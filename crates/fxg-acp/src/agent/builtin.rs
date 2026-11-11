@@ -7,9 +7,10 @@
 
 use std::sync::Arc;
 
-use super::provider::{AgentDefinition, AgentProvider, LaunchPreset, StaticProvider};
+use super::opencode::OpenCodeExtension;
+use super::provider::{AgentBackend, AgentDefinition, AgentProvider, LaunchPreset, StaticProvider};
 
-/// ACP-only OpenCode CLI (`opencode acp`).
+/// OpenCode CLI (`opencode acp`) with the OpenCode extension.
 pub const OPENCODE: &str = "opencode";
 /// ACP-only Antigravity CLI (`agy acp`).
 pub const AGY: &str = "agy";
@@ -17,18 +18,21 @@ pub const AGY: &str = "agy";
 /// Returns the built-in providers.
 pub fn providers() -> Vec<Arc<dyn AgentProvider>> {
     vec![
-        Arc::new(StaticProvider::new(
-            AgentDefinition {
-                id: OPENCODE.to_owned(),
-                name: "OpenCode".to_owned(),
-                description: Some("Known ACP CLI".to_owned()),
-                icon: None,
-            },
-            Some(LaunchPreset {
-                program: OPENCODE,
-                args: &["acp"],
-            }),
-        )),
+        Arc::new(
+            StaticProvider::new(
+                AgentDefinition {
+                    id: OPENCODE.to_owned(),
+                    name: "OpenCode".to_owned(),
+                    description: Some("Known ACP CLI".to_owned()),
+                    icon: Some("builtin:opencode".to_owned()),
+                },
+                Some(LaunchPreset {
+                    program: OPENCODE,
+                    args: &["acp"],
+                }),
+            )
+            .with_backend(AgentBackend::AcpExtended(Arc::new(OpenCodeExtension))),
+        ),
         Arc::new(StaticProvider::new(
             AgentDefinition {
                 id: AGY.to_owned(),

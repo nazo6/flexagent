@@ -1,7 +1,7 @@
 # エージェント実装の3層モデルと拡張基盤（計画）
 
 - **日付**: 2026-11-11
-- **状態**: 実装中（Phase 3 完了 / Phase 4 以降は計画）
+- **状態**: 実装中（Phase 4 完了 / Phase 5 のみ残り）
 - **対象パッケージ**: `fxg-protocol`, `fxg-acp`, `fxg-node`, `fxg-cli`, `ui`,
   `docs`
 - **対象スクリプト**: `mise run fmt`, `mise run lint:errors`,
@@ -157,6 +157,7 @@ pub trait AgentExtension: Send + Sync {
     async fn capabilities(
         &self,
         _ctx: &SessionContext,
+        _current: &CapabilitiesSnapshot,
     ) -> anyhow::Result<Option<CapabilityOverlay>> { Ok(None) }
 
     /// Called after the ACP session is established.
@@ -234,13 +235,13 @@ pub enum ConfigOptionPatch {
 4. どれもなければエラー
 
 custom が同じ ID の builtin / registry を上書きする挙動は維持する。custom 定義は
-常に Tier 1（`Acp`）とし、Tier 2 の差分を再利用したい場合だけ `extension` を
+既定で Tier 1（`Acp`）とし、Tier 2 の差分を再利用したい場合だけ `extension` を
 明示する（§2.6）。
 
-Tier 2 の `prepare_launch` は、preset / registry の起動定義が確定した後に
+Tier 2 の `prepare_launch` は、preset / registry / custom の起動定義が確定した後に
 セッションの cwd とともに適用する。extension 自身が使う資格情報はエージェントの
 env に混ぜず、node の secret store から読む。custom 定義 + extension の組み合わせは
-Phase 4 で追加する。
+実装済みである。
 
 ### 2.5 Tier 2 のイベント合成
 
@@ -283,7 +284,7 @@ flowchart LR
 | builtin Tier 2           | `AcpExtended` | preset / registry + extension      |
 | builtin Tier 3           | `Custom`      | driver 自身                        |
 
-Tier 2 の拡張をユーザー定義でも使えるよう、Phase 4 で次を追加する。
+Tier 2 の拡張をユーザー定義でも使えるよう、次を追加した。
 
 ```rust
 pub struct CustomAgentConfig {
@@ -299,12 +300,13 @@ pub struct CustomAgentConfig {
 }
 ```
 
-- `node.db` の `custom_agents` に `extension TEXT` を追加する
+- `node.db` の `custom_agents` に `extension TEXT` を追加した
+  （migration `0016_custom_agent_extension.sql`）
 - `UpsertCustom` 時に extension ID の存在を検証し、未知なら保存を拒否する
 - 起動時にも再検証し、extension が消えていたら明確なエラーを返す
 - メタデータの優先順位は `custom.name` → `extension.metadata` → ID
 - custom が builtin Tier 2 を上書きし、かつ `extension` 未指定の場合は Tier 1 に
-  なる。UI では「組み込み extension が無効になる」旨を警告する
+  なる。UI の extension 選択で builtin extension を明示できる
 - custom が builtin Tier 3 の ID を使うことは拒否する（D8）
 
 ### 2.7 Tier 3
@@ -413,15 +415,20 @@ overlay が効く。
 
 ### Phase 4: 最初の実例（opencode）
 
-- [ ] `opencode` を Tier 2 に移行する
-- [ ] メタデータ（表示名・アイコン）とモデル名の上書きを実装する
-- [ ] `CustomAgentConfig.extension` と DB migration を追加する
-- [ ] カスタム定義 + builtin extension の組み合わせを検証する
-- [ ] 追加が extension モジュール1個 + 登録1行で済むことを確認する
-- [ ] 必要なら `SessionExtension` の最初の実機能（compact など）を追加する
+- [x] `opencode` を Tier 2 に移行する
+- [x] メタデータ（表示名・アイコン）とモデル名の上書きを実装する
+- [x] `CustomAgentConfig.extension` と DB migration を追加する
+- [x] カスタム定義 + builtin extension の組み合わせを検証する
+- [x] 追加が extension モジュール1個 + 登録1行で済むことを確認する
+- [x] 必要なら `SessionExtension` の最初の実機能（compact など）を追加する
+      （今回は ACP が compact を提供するため追加せず）
 
 完了条件: ユーザー定義の ACP エージェントでも、コードを書かずに Tier 2 の
 モデル名上書きを再利用できる。
+
+実装ログ: 2026-11-11 に完了。詳細は
+[`2026-11-11-agent-extension-phase4.md`](./2026-11-11-agent-extension-phase4.md) を参照。
+実 opencode（v2.2.7）で probe・セッション起動・モデル変更まで確認済み。
 
 ### Phase 5: ドキュメント
 
@@ -445,10 +452,12 @@ overlay が効く。
 | `crates/fxg-node/src/daemon/ops.rs`                        | `AgentSummary.backend` / `icon` の設定                       |
 | `crates/fxg-cli/src/commands/agents.rs`                    | login も `AgentCatalog` 経由にして `prepare_launch` を適用   |
 | `crates/fxg-protocol/src/client_api.rs`                    | `AgentBackendKind`、`AgentSummary.backend` / `icon`          |
-| `crates/fxg-protocol/src/settings.rs`                      | Phase 4: `CustomAgentConfig.extension`                       |
-| `crates/fxg-db/migrations/00xx_custom_agent_extension.sql` | Phase 4: `custom_agents.extension`                           |
-| `ui/src/lib/components/settings/AgentManager.svelte`       | backend バッジ、Phase 4 の extension 選択                    |
+| `crates/fxg-acp/src/agent/opencode.rs`                     | OpenCode extension（metadata / model labels）                |
+| `crates/fxg-protocol/src/settings.rs`                      | `CustomAgentConfig.extension`                                |
+| `crates/fxg-db/migrations/0016_custom_agent_extension.sql` | `custom_agents.extension`                                    |
+| `ui/src/lib/components/settings/AgentManager.svelte`       | カスタム定義の extension 選択                                |
 | `ui/src/lib/generated/bindings.ts`                         | `mise run types` で再生成                                    |
+| `ui/messages/en.json`                                      | extension 選択の文言                                         |
 
 ---
 

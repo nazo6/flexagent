@@ -58,6 +58,12 @@ pub struct AgentLaunchSpec {
     pub display_name: String,
     /// Driver kind (see [`DriverKind`])
     pub driver_kind: DriverKind,
+    /// Built-in extension ID for [`DriverKind::AcpExtended`].
+    ///
+    /// `None` means the extension is selected by `agent_id` (provider-backed
+    /// agents). Custom agents use this field to reference a built-in extension
+    /// whose ID differs from the custom agent ID.
+    pub extension: Option<String>,
     /// Executable (absolute path, or a command name on `PATH`).
     /// `PATH` resolution (`which` / `PATHEXT`) is done by the driver right before launch.
     ///
@@ -344,6 +350,7 @@ mod tests {
             agent_id: "mock".to_owned(),
             display_name: "Mock".to_owned(),
             driver_kind: DriverKind::Other("mock".to_owned()),
+            extension: None,
             program: Some(PathBuf::from("mock")),
             args: vec![],
             env: vec![],

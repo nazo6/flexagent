@@ -274,6 +274,11 @@ impl AcpRegistry {
         self.catalog().custom.clone()
     }
 
+    /// Returns one custom agent definition.
+    pub fn custom_agent(&self, id: &str) -> Option<CustomAgentConfig> {
+        self.catalog().custom.get(id).cloned()
+    }
+
     /// Agent IDs enabled for use via `npx` / `uvx` distribution.
     pub fn enabled_package_agents(&self) -> BTreeSet<String> {
         self.catalog().enabled_packages.clone()
@@ -554,6 +559,7 @@ impl AcpRegistry {
             agent_id: id.to_owned(),
             display_name: custom.name.clone().unwrap_or_else(|| id.to_owned()),
             driver_kind: DriverKind::Acp,
+            extension: None,
             program: Some(PathBuf::from(&custom.command)),
             args,
             env,
@@ -634,6 +640,7 @@ impl AcpRegistry {
             agent_id: agent.id.clone(),
             display_name: agent.name.clone(),
             driver_kind: DriverKind::Acp,
+            extension: None,
             program: Some(program),
             args,
             env: env.into_iter().collect(),
@@ -717,6 +724,7 @@ mod tests {
                 args: vec!["--flag".to_owned()],
                 env: BTreeMap::from([("KEY".to_owned(), "value".to_owned())]),
                 env_secrets: BTreeMap::new(),
+                extension: None,
             },
         )])
     }
@@ -854,6 +862,7 @@ mod tests {
                         "API_KEY".to_owned(),
                         fxg_protocol::SecretId::new("key-1"),
                     )]),
+                    extension: None,
                 },
             ),
             (

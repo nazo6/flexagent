@@ -17,7 +17,7 @@ use fxg_protocol::events::UnifiedEventPayload;
 use tokio::sync::mpsc;
 
 use super::extension::{
-    AgentExtension, CapabilityOverlay, EventDisposition, Hook, SessionContext, SessionExtension,
+    AgentExtension, CapabilitiesSnapshot, EventDisposition, Hook, SessionContext, SessionExtension,
 };
 use crate::driver::{
     ActiveSessionHandle, AgentDriver, DriverEvent, DriverKind, StartSessionRequest, StartedSession,
@@ -192,10 +192,6 @@ async fn run_relay(
     session: Option<Arc<dyn SessionExtension>>,
     context: SessionContext,
 ) {
-    // `Some(None)` means the overlay was requested once and produced nothing
-    // (or failed); do not call the extension again for the same session.
-    let mut overlay: Option<Option<CapabilityOverlay>> = None;
-
     while let Some(mut event) = tap_rx.recv().await {
         if let DriverEvent::Event(UnifiedEventPayload::CapabilitiesUpdated {
             current_mode,
@@ -205,25 +201,28 @@ async fn run_relay(
             ..
         }) = &mut event
         {
-            if overlay.is_none() {
-                overlay = Some(match extension.capabilities(&context).await {
-                    Ok(overlay) => overlay,
-                    Err(err) => {
-                        tracing::warn!(
-                            agent_id = %context.agent_id,
-                            "agent extension capability overlay failed: {err:#}"
-                        );
-                        None
-                    }
-                });
-            }
-            if let Some(Some(overlay)) = &overlay {
-                overlay.apply(
+            // Recompute for every update: a `Replace` patch must be based on
+            // the values currently advertised, not on an earlier snapshot.
+            let snapshot = CapabilitiesSnapshot {
+                current_mode: current_mode.clone(),
+                available_modes: available_modes.clone(),
+                available_commands: available_commands.clone(),
+                config_options: config_options.clone(),
+            };
+            match extension.capabilities(&context, &snapshot).await {
+                Ok(Some(overlay)) => overlay.apply(
                     current_mode,
                     available_modes,
                     available_commands,
                     config_options,
-                );
+                ),
+                Ok(None) => {}
+                Err(err) => {
+                    tracing::warn!(
+                        agent_id = %context.agent_id,
+                        "agent extension capability overlay failed: {err:#}"
+                    );
+                }
             }
         }
 
@@ -268,7 +267,7 @@ mod tests {
     use async_trait::async_trait;
     use fxg_protocol::common::{ConfigOptionCategory, ConfigOptionInfo, ModeInfo};
 
-    use crate::agent::extension::ConfigOptionPatch;
+    use crate::agent::extension::{CapabilityOverlay, ConfigOptionPatch};
     use crate::driver::{AgentLaunchSpec, DriverKind};
 
     fn launch() -> AgentLaunchSpec {
@@ -276,6 +275,7 @@ mod tests {
             agent_id: "demo".to_owned(),
             display_name: "Demo".to_owned(),
             driver_kind: DriverKind::Acp,
+            extension: None,
             program: Some(PathBuf::from("demo")),
             args: Vec::new(),
             env: Vec::new(),
@@ -400,6 +400,7 @@ mod tests {
         async fn capabilities(
             &self,
             ctx: &SessionContext,
+            _current: &CapabilitiesSnapshot,
         ) -> anyhow::Result<Option<CapabilityOverlay>> {
             self.seen_ids
                 .lock()

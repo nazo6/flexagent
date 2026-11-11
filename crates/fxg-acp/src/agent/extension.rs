@@ -24,6 +24,23 @@ pub struct AgentMetadata {
     pub icon: Option<String>,
 }
 
+/// Capability information currently advertised by ACP.
+///
+/// Passed to [`AgentExtension::capabilities`] so an extension can transform
+/// existing values (for example model labels) instead of only adding static
+/// patches.
+#[derive(Debug, Clone, Default)]
+pub struct CapabilitiesSnapshot {
+    /// Current mode
+    pub current_mode: Option<String>,
+    /// Available modes
+    pub available_modes: Vec<ModeInfo>,
+    /// Available slash commands
+    pub available_commands: Vec<CommandInfo>,
+    /// Configuration entries
+    pub config_options: Vec<ConfigOptionInfo>,
+}
+
 /// Session information passed to an extension.
 #[derive(Debug, Clone)]
 pub struct SessionContext {
@@ -59,11 +76,13 @@ pub trait AgentExtension: Send + Sync {
 
     /// Override / augment what ACP advertises (models, modes, config options).
     ///
-    /// Applied to both capability probe results and live `CapabilitiesUpdated`
-    /// events. The overlay is computed once per ACP session.
+    /// Called for every `CapabilitiesUpdated` (including probe sessions) with
+    /// the values currently advertised. Expensive lookups should be cached by
+    /// the extension.
     async fn capabilities(
         &self,
         _ctx: &SessionContext,
+        _current: &CapabilitiesSnapshot,
     ) -> anyhow::Result<Option<CapabilityOverlay>> {
         Ok(None)
     }

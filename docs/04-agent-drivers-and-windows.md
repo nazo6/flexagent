@@ -56,8 +56,9 @@ pub trait ActiveSessionHandle: Send + Sync {
 ACP だけでは、アイコンや起動オプションなどのエージェント固有メタデータや、
 ACP に存在しない機能（独自 API によるモデル名取得など）を扱えない。将来の
 拡張を `agent_id` 分岐なしで追加できるよう、実装を次の3層に分ける。
-Phase 1（`AgentCatalog`）、Phase 2（Tier 2 の基盤）、Phase 3（Tier 3 の基盤）は
-実装済みで、Tier 2 の実エージェント（opencode）と Tier 3 の実例は計画中である。
+Phase 1（`AgentCatalog`）、Phase 2（Tier 2 の基盤）、Phase 3（Tier 3 の基盤）、
+Phase 4（opencode の Tier 2 移行）は実装済みである。Tier 3 の実例はまだ追加して
+いない。
 
 | 層                   | 実行時の実装                           | ACP の再利用 | エージェントごとに追加するコード            |
 | :------------------- | :------------------------------------- | :----------- | :------------------------------------------ |
@@ -200,14 +201,16 @@ ACP Registry に載っていないエージェントや自前の ACP 実装は�
      グロブ・`~`・環境変数の展開は行わない。
    - 起動直前に `fxg_pty::resolve_command` が `which` (`PATHEXT`) で解決し、
      `args` / `env` を付けて ACP プロセスとしてスポーンする。
-3. **Tier 2 extension の再利用（計画）**:
-   - `CustomAgentConfig.extension` で builtin extension を参照できるようにする
-     （§1.1）。指定時は `DriverKind::AcpExtended` となり、custom の起動定義に
-     extension の `prepare_launch` を適用する。
+3. **Tier 2 extension の再利用**:
+   - `CustomAgentConfig.extension` で builtin extension を参照できる（§1.1）。
+     指定時は `DriverKind::AcpExtended` となり、custom の起動定義に extension の
+     `prepare_launch` を適用する。組み込みの `opencode` extension はモデル名を
+     読みやすい表示へ変換する。
    - 未知の extension ID は保存時と起動時に拒否する。
 4. **一覧表示と優先順位**:
    - カスタム定義は常に「利用可能」として扱い、`sources: ["custom"]` で返す。
-   - 同じ ID の builtin / registry より優先し、重複表示しない。
+     同じ ID の builtin / registry より優先し、重複表示しない。
+   - extension を参照するカスタム定義は `backend: "acp_extended"` として返す。
    - Tier 3 の builtin ID は予約し、custom 定義による上書きを拒否する。
 
 ---

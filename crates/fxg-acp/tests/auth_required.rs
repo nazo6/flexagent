@@ -24,6 +24,7 @@ async fn session_new_auth_required_returns_advertised_methods() {
             agent_id: "mock".to_owned(),
             display_name: "Mock".to_owned(),
             driver_kind: DriverKind::Acp,
+            extension: None,
             program: Some(mock_agent_bin()),
             args: vec!["--mode".to_owned(), "auth-required".to_owned()],
             env: Vec::new(),

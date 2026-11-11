@@ -5,8 +5,9 @@ use crate::paths::NodePaths;
 use crate::testutil::MockAgent;
 use fxg_acp::DriverKind;
 use fxg_acp::agent::{
-    AgentBackend, AgentCatalog, AgentDefinition, AgentExtension, CapabilityOverlay,
-    ConfigOptionPatch, ExtendedAcpDriver, LaunchPreset, SessionContext, StaticProvider,
+    AgentBackend, AgentCatalog, AgentDefinition, AgentExtension, CapabilitiesSnapshot,
+    CapabilityOverlay, ConfigOptionPatch, ExtendedAcpDriver, LaunchPreset, SessionContext,
+    StaticProvider,
 };
 use fxg_acp::registry::AcpRegistry;
 use fxg_db::queries::SessionFilter;
@@ -46,6 +47,7 @@ async fn setup() -> (SessionManager, MockAgent, tempfile::TempDir) {
             args: Vec::new(),
             env: Default::default(),
             env_secrets: Default::default(),
+            extension: None,
         },
     );
     let settings = AgentSettings {
@@ -256,6 +258,7 @@ impl AgentExtension for ProbeExtension {
     async fn capabilities(
         &self,
         _ctx: &SessionContext,
+        _current: &CapabilitiesSnapshot,
     ) -> anyhow::Result<Option<CapabilityOverlay>> {
         Ok(Some(CapabilityOverlay {
             modes: Some(vec![ModeInfo {

@@ -244,6 +244,7 @@ mod tests {
                 args: Vec::new(),
                 env: BTreeMap::new(),
                 env_secrets,
+                extension: None,
             },
         )
         .await

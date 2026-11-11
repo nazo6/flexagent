@@ -442,6 +442,18 @@ impl DaemonState {
                         "custom agent {agent_id} requires a non-empty command"
                     )));
                 }
+                if catalog.is_driver_backed(agent_id) {
+                    return Err(NodeError::Agent(format!(
+                        "custom agent id {agent_id} is reserved by a built-in driver"
+                    )));
+                }
+                if let Some(extension) = config.extension.as_deref()
+                    && catalog.extension(extension).is_none()
+                {
+                    return Err(NodeError::Agent(format!(
+                        "custom agent {agent_id} references an unknown extension: {extension}"
+                    )));
+                }
                 self.db().upsert_custom_agent(agent_id, config).await?;
                 self.refresh_agent_catalog().await?;
                 Ok(format!(

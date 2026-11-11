@@ -31,7 +31,8 @@ Phase 2 ではビルトインエージェントを Tier 2 に移行しないた�
 - `AgentExtension`:
   - `metadata()`: 表示名・説明・アイコンの上書き
   - `prepare_launch()`: 起動 args / env の調整（cwd を受け取る）
-  - `capabilities()`: `CapabilityOverlay` の生成
+  - `capabilities()`: 現在の能力情報（`CapabilitiesSnapshot`）を受け取り
+    `CapabilityOverlay` を生成
   - `open_session()`: セッション固有の `SessionExtension` を返す
 - `SessionExtension`:
   - `before_prompt()`: プロンプトの前処理（`Handled` で ACP をスキップ）
@@ -53,7 +54,8 @@ Phase 2 ではビルトインエージェントを Tier 2 に移行しないた�
 - `start_session` で ACP ドライバのイベントを tap し、relay タスクを起動する
 - relay は `CapabilitiesUpdated` に `CapabilityOverlay` を適用し、その後
   `SessionExtension::on_event` に通す
-- overlay はセッションごとに1回だけ計算する（失敗時は再試行しない）
+- overlay は `CapabilitiesUpdated` ごとに現在値から再計算する
+  （現在値に基づく `Replace` が古い値で上書きしないため）
 - overlay / `on_event` の失敗はセッションを落とさず、元の ACP イベントを
   そのまま流す
 - `ActiveSessionHandle` は ACP ハンドルへ委譲し、`send_prompt` /

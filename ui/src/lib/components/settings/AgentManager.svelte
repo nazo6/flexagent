@@ -38,7 +38,7 @@
   let customOpen = $state(false);
   let customBusy = $state(false);
   let customEditId = $state<string | null>(null);
-  let customForm = $state({ id: "", name: "", command: "", args: "", env: "" });
+  let customForm = $state({ id: "", name: "", command: "", args: "", env: "", extension: "" });
 
   const onlineNodes = $derived(sync.nodes.filter((node) => node.is_online));
   const busy = $derived(busyLabel !== null);
@@ -50,6 +50,10 @@
     agents
       .filter((agent) => agent.registry && !isAvailableOn(agent))
       .filter((agent) => matchesQuery(agent, catalogQuery)),
+  );
+  /** Built-in extensions that a custom ACP launch can reference. */
+  const extensionChoices = $derived(
+    agents.filter((agent) => agent.custom_config === null && agent.backend === "acp_extended"),
   );
 
   onMount(() => {
@@ -164,6 +168,7 @@
       command: config?.command ?? "",
       args: (config?.args ?? []).join(" "),
       env: formatEnv(config?.env ?? {}, config?.env_secrets ?? {}),
+      extension: config?.extension ?? "",
     };
     customOpen = true;
   }
@@ -213,6 +218,7 @@
         command: customForm.command.trim(),
         args: customForm.args.split(/\s+/).filter((value) => value !== ""),
         ...parseEnv(customForm.env),
+        extension: customForm.extension === "" ? null : customForm.extension,
       });
       toast.success(result.message ?? m.settings_custom_agent_saved({ name: id }));
       customOpen = false;
@@ -385,7 +391,7 @@
           {m.settings_remove_custom_description()}
           <code>{removeTarget?.id}</code>
           {m.settings_remove_custom_description_suffix()}
-          <code>config.toml</code>
+          <code>node.db</code>
           {m.settings_remove_custom_description_tail()}
         {:else}
           {m.settings_remove_package_description()}
@@ -488,7 +494,7 @@
       </Dialog.Title>
       <Dialog.Description>
         {m.settings_custom_description()}
-        <code>~/.flexagent/custom_agents.json</code>
+        <code>node.db</code>
       </Dialog.Description>
     </Dialog.Header>
     <form class="flex flex-col gap-3" onsubmit={submitCustom}>
@@ -510,6 +516,22 @@
           placeholder="My Agent"
           class="text-[13px]"
         />
+      </div>
+      <div class="grid gap-1.5">
+        <Label for="custom-extension">{m.settings_agent_extension()}</Label>
+        <select
+          id="custom-extension"
+          bind:value={customForm.extension}
+          class="border-input bg-background h-8 rounded-md border px-2 text-[13px]"
+        >
+          <option value="">{m.settings_agent_extension_none()}</option>
+          {#each extensionChoices as extension (extension.id)}
+            <option value={extension.id}>{extension.name} ({extension.id})</option>
+          {/each}
+        </select>
+        <p class="text-muted-foreground text-[11px]">
+          {m.settings_agent_extension_hint()}
+        </p>
       </div>
       <div class="grid gap-1.5">
         <Label for="custom-command">{m.settings_command()}</Label>

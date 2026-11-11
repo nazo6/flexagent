@@ -19,6 +19,7 @@ fn request(mode: &str, fork_from: Option<&str>, cwd: &Path) -> StartSessionReque
             agent_id: "mock".to_owned(),
             display_name: "Mock".to_owned(),
             driver_kind: DriverKind::Acp,
+            extension: None,
             program: Some(mock_agent_bin()),
             args: vec!["--mode".to_owned(), mode.to_owned()],
             env: Vec::new(),

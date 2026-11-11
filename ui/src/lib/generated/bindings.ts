@@ -416,6 +416,13 @@ export type CustomAgentConfig = {
 	env?: { [key in string]: string },
 	/**  Environment variables resolved from the secret store at launch time */
 	env_secrets?: { [key in string]: SecretId },
+	/**
+	 *  Built-in extension ID to apply on top of this custom launch.
+	 *
+	 *  `None` keeps the agent ACP-only. The ID is validated against the node's
+	 *  registered extensions when the definition is saved.
+	 */
+	extension?: string | null,
 };
 
 /**

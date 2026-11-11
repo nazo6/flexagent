@@ -342,6 +342,11 @@ pub struct CustomAgentConfig {
     pub env: BTreeMap<String, String>,
     /// Environment variables resolved from the secret store at launch time
     pub env_secrets: BTreeMap<String, SecretId>,
+    /// Built-in extension ID to apply on top of this custom launch.
+    ///
+    /// `None` keeps the agent ACP-only. The ID is validated against the node's
+    /// registered extensions when the definition is saved.
+    pub extension: Option<String>,
 }
 
 /// Definition of an ephemeral VM / sandbox provisioner (`provisioners` in `hub.db`).
