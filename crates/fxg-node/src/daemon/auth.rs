@@ -1,4 +1,4 @@
-//! Generation and persistence of the client auth token (`~/.flexagent/auth_token`).
+//! Generation and persistence of the Web access token (`~/.flexagent/auth_token`).
 //!
 //! Design: `docs/01-architecture-and-sync.md` §7.3.
 //!

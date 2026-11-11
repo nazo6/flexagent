@@ -107,7 +107,7 @@ crate::open_string_enum! {
         AgentManage => "agent_manage",
         /// Node pairing token issued / revoked
         NodeTokenManage => "node_token_manage",
-        /// Client auth token rotated
+        /// Web access token rotated
         AuthTokenRotate => "auth_token_rotate",
         /// Settings updated
         SettingsUpdate => "settings_update",

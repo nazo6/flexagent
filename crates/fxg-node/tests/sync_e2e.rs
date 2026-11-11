@@ -523,7 +523,7 @@ async fn hub_commands_permissions_and_kill_switch() {
             .path()
             .join(fxg_protocol::config::AUTH_TOKEN_FILE_NAME),
     )
-    .expect("client token");
+    .expect("Web access token");
     let http = reqwest::Client::new();
     let base = format!("http://127.0.0.1:{port}");
 
@@ -933,7 +933,7 @@ async fn hub_resumes_stopped_session() {
             .path()
             .join(fxg_protocol::config::AUTH_TOKEN_FILE_NAME),
     )
-    .expect("client token");
+    .expect("Web access token");
     let http = reqwest::Client::new();
     let base = format!("http://127.0.0.1:{port}");
 
@@ -1112,7 +1112,7 @@ async fn hub_archives_and_deletes_session() {
             .path()
             .join(fxg_protocol::config::AUTH_TOKEN_FILE_NAME),
     )
-    .expect("client token");
+    .expect("Web access token");
     let http = reqwest::Client::new();
     let base = format!("http://127.0.0.1:{port}");
 

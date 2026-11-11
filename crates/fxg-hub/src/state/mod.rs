@@ -52,7 +52,7 @@ pub struct HubState {
 
 struct HubInner {
     db: Db,
-    /// Client auth token (`RwLock` so it can be swapped on rotation).
+    /// Web access token (`RwLock` so it can be swapped on rotation).
     auth_token: std::sync::RwLock<String>,
     hub: NodeHub,
     options: HubOptions,
@@ -88,7 +88,7 @@ impl HubState {
         }
     }
 
-    /// Opens `hub.db`, loads the client auth token and initializes the state.
+    /// Opens `hub.db`, loads the Web access token and initializes the state.
     pub async fn new(options: HubOptions) -> Result<Self, HubError> {
         std::fs::create_dir_all(&options.fxg_home)?;
         let db = Db::open(&fxg_db::hub_db_path(&options.fxg_home), DbRole::Hub).await?;
@@ -164,7 +164,7 @@ impl HubState {
         &self.inner.options
     }
 
-    /// Client auth token.
+    /// Web access token.
     pub fn auth_token(&self) -> String {
         self.inner
             .auth_token
@@ -173,7 +173,7 @@ impl HubState {
             .clone()
     }
 
-    /// Regenerates the client auth token and saves it to disk.
+    /// Regenerates the Web access token and saves it to disk.
     ///
     /// The old token (Bearer / `fxg_session` cookie) is invalidated immediately.
     pub fn rotate_auth_token(&self) -> std::io::Result<String> {

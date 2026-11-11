@@ -66,7 +66,7 @@ enum Commands {
     Doctor(commands::DoctorArgs),
     /// Export a redacted support bundle / list persisted incidents
     Support(commands::SupportArgs),
-    /// Local node process and client tokens
+    /// Local node process and Web access tokens
     Node(commands::NodeArgs),
     /// Hub process and node pairing tokens
     Hub(commands::HubArgs),

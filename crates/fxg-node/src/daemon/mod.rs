@@ -539,7 +539,7 @@ impl DaemonState {
         &self.inner.config.node_id
     }
 
-    /// The current client auth token.
+    /// The current Web access token.
     pub fn auth_token(&self) -> String {
         self.inner
             .token

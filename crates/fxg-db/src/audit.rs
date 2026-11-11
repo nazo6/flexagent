@@ -44,7 +44,7 @@ pub mod actions {
     pub const AGENT_MANAGE: AuditAction = AuditAction::AgentManage;
     /// Node pairing token issuance / revocation
     pub const NODE_TOKEN_MANAGE: AuditAction = AuditAction::NodeTokenManage;
-    /// Client auth token regeneration
+    /// Web access token regeneration
     pub const AUTH_TOKEN_ROTATE: AuditAction = AuditAction::AuthTokenRotate;
     /// Settings updated
     pub const SETTINGS_UPDATE: AuditAction = AuditAction::SettingsUpdate;

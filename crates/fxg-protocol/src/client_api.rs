@@ -584,7 +584,7 @@ pub struct ShutdownResponse {
     pub ok: bool,
 }
 
-/// `POST /api/v1/auth/rotate-token` response (regenerate the client token).
+/// `POST /api/v1/auth/rotate-token` response (regenerate the Web access token).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct RotateAuthTokenResponse {

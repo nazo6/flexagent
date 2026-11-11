@@ -253,7 +253,7 @@ pub trait ClientApiBackend: Clone + Send + Sync + 'static {
         false
     }
 
-    /// Client auth token.
+    /// Web access token.
     fn auth_token(&self) -> String;
 
     /// Kind of connection target (returned by `GET /api/v1/system/info`).
@@ -499,7 +499,7 @@ pub trait ClientApiBackend: Clone + Send + Sync + 'static {
         }
     }
 
-    /// `POST /api/v1/auth/rotate-token` (regenerate the client auth token).
+    /// `POST /api/v1/auth/rotate-token` (regenerate the Web access token).
     ///
     /// The old token is invalidated immediately, so switch to the new token in the response.
     async fn rotate_auth_token(

@@ -47,7 +47,7 @@ impl NodePaths {
         self.fxg_home.join(CONFIG_FILE_NAME)
     }
 
-    /// Client auth token (`auth_token`): Web access token for browsers / CLI.
+    /// Web access token (`auth_token`) for browsers / CLI.
     pub fn auth_token_path(&self) -> PathBuf {
         self.fxg_home.join(AUTH_TOKEN_FILE_NAME)
     }

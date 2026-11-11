@@ -1695,7 +1695,7 @@ export type ResumeSessionResponse = {
 	context_restored: boolean,
 };
 
-/**  `POST /api/v1/auth/rotate-token` response (regenerate the client token). */
+/**  `POST /api/v1/auth/rotate-token` response (regenerate the Web access token). */
 export type RotateAuthTokenResponse = {
 	/**  New client authentication token (the old one is invalidated immediately) */
 	token: string,

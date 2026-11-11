@@ -1,8 +1,8 @@
-//! Utilities for generating, saving and comparing auth tokens (client token / node pairing token).
+//! Utilities for generating, saving and comparing tokens (Web access token / node pairing token).
 //!
 //! Design: `docs/01-architecture-and-sync.md` §7.3.
 //!
-//! - **Client auth token** (`~/.flexagent/auth_token`): used by both the local node
+//! - **Web access token** (`~/.flexagent/auth_token`): used by both the local node
 //!   (`fxg node start`) and the hub (`fxg hub start`) to authenticate Client REST/WS API
 //!   requests (`Authorization: Bearer` / `fxg_session` cookie) (a 64-character random hex
 //!   string is generated on first startup and saved with `0600`).
