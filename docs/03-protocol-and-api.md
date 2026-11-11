@@ -407,7 +407,10 @@ pub enum ErrorCode {
 ### 2.2 メッセージの分類
 
 - **同期・ストリーム**: `EventBatchPush` / `EventBatchAck`, `ResyncRequest`,
-  `LiveStreamDelta`, `PtyOutput` / `PtyExit` / `PtyError`
+  `LiveStreamDelta`, `PtyOutput` / `PtyExit` / `PtyError`。
+  `ResyncRequest` に応じた再送は `EventBatchPush.resync = true` とし、ハブは
+  そのバッチの Web Push 通知を抑止します（履歴の再送で端末を起こさない）。
+  `NodeHello.sessions_truncated` は報告上限に達したことを示します。
 - **セッションコマンド**: `StartSession`, `SendPrompt`, `RespondPermission`,
   `RespondElicitation`, `ControlSession`。結果は `CommandResult` で返します。
 - **汎用 Node RPC**: 上記以外のノード操作は `HubToNodeMsg::NodeRpc` と
@@ -572,8 +575,12 @@ pub enum NodeToHubMsg {
         projects_complete: bool,
         state_revision: u64,
         sessions: Vec<SessionSyncState>,
+        sessions_truncated: bool, // 報告上限 (1000) に達した
     },
-    EventBatchPush { events: Vec<SessionEventEnvelope> },
+    EventBatchPush {
+        events: Vec<SessionEventEnvelope>,
+        resync: bool, // ResyncRequest 由来 (ハブは Web Push を抑止する)
+    },
     LiveStreamDelta {
         session_id: SessionId,
         delta: StreamDeltaPayload,

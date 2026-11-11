@@ -460,9 +460,9 @@ DaemonState
 - [x] Phase 2: DB 所有化 + ペアリング API + ホット適用
 - [x] Phase 3: GUI
 - [x] Phase 4: CLI 付け替え + 診断
-- [ ] Phase 5: ハブ切り替えの同期セマンティクス
+- [x] Phase 5: ハブ切り替えの同期セマンティクス
 - [x] Phase 6: ドキュメント
-- [ ] 検証（§6）完了（Phase 5 の項目を除く）
+- [x] 検証（§6）完了
 
 ### 実装メモ
 
@@ -479,6 +479,11 @@ DaemonState
   `node.db` + トークンファイルを seed する。
 - ハブ探索は `--hub` → `hub.addr` → ノード API の `pairing.hub_url` →
   `[hub] listen_addr`。`fxg web` と `fxg session new` に `--hub` を追加した。
+- `EventBatchPush.resync` は `ResyncRequest` 由来の再送だけ true。ハブは
+  `notify_events` を空にして Web Push を抑止する（クライアント WS への配信は
+  通常どおり）。`NodeHello.sessions_truncated` は上限到達を警告し、
+  `compute_resync` の「別ノード所有」分岐は再送要求ではなくエラーログに変更した
+  （`SessionCreated.node_id` 検証で永久に ACK されないため）。
 - 実機確認: hub を起動してトークン発行 → 未起動のノードを `fxg node pair` で
   ペアリング → `hub: connected`、`unpair` で即 `standalone`、誤トークンで
   `unauthorized (HTTP 401)` を確認。`config.toml` は生成されず、`node_token` は

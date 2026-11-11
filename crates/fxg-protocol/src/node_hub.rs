@@ -382,6 +382,9 @@ pub enum NodeToHubMsg {
         state_revision: u64,
         /// Session sync states
         sessions: Vec<SessionSyncState>,
+        /// Whether `sessions` hit the node's reporting limit (more sessions exist)
+        #[serde(default)]
+        sessions_truncated: bool,
     },
     /// Sends a batch of persisted events (store-and-forward outbox).
     ///
@@ -391,6 +394,10 @@ pub enum NodeToHubMsg {
     EventBatchPush {
         /// Events to send (batches are split per session)
         events: Vec<SessionEventEnvelope>,
+        /// Whether this batch is a full replay requested by `ResyncRequest`
+        /// (the hub suppresses Web Push for historical events)
+        #[serde(default)]
+        resync: bool,
     },
     /// Realtime ephemeral chunk (for fast rendering before the DB flush).
     LiveStreamDelta {
@@ -617,7 +624,10 @@ mod tests {
 
     #[test]
     fn event_batch_push_shape() {
-        let msg = NodeToHubMsg::EventBatchPush { events: vec![] };
+        let msg = NodeToHubMsg::EventBatchPush {
+            events: vec![],
+            resync: false,
+        };
         let json = serde_json::to_value(&msg).unwrap();
         assert_eq!(json["op"], "event_batch_push");
         assert!(json["events"].as_array().unwrap().is_empty());
@@ -644,6 +654,7 @@ mod tests {
                 project_id: "p1".into(),
                 last_node_seq: 3,
             }],
+            sessions_truncated: false,
         };
         let json = serde_json::to_value(&msg).unwrap();
         assert_eq!(json["op"], "node_hello");
@@ -668,6 +679,7 @@ mod tests {
             projects_complete: true,
             state_revision: 0,
             sessions: vec![],
+            sessions_truncated: false,
         };
         let mut json = serde_json::to_value(&msg).unwrap();
         json.as_object_mut().unwrap().remove("protocol_version");

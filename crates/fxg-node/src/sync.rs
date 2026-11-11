@@ -280,7 +280,10 @@ async fn connect_once(
                 Ok(SessionBroadcast::Persisted { event, .. }) => {
                     send_msg(
                         &mut sender,
-                        &NodeToHubMsg::EventBatchPush { events: vec![event] },
+                        &NodeToHubMsg::EventBatchPush {
+                            events: vec![event],
+                            resync: false,
+                        },
                     )
                     .await?;
                 }
@@ -366,14 +369,16 @@ pub(crate) async fn build_hello(state: &DaemonState) -> NodeToHubMsg {
         .list_sessions(&SessionFilter {
             // Archived sessions are also synced (so the resync safety net covers them)
             include_archived: true,
-            limit: Some(HELLO_SESSION_LIMIT),
+            // Fetch one more row to tell "exactly at the limit" from "truncated".
+            limit: Some(HELLO_SESSION_LIMIT.saturating_add(1)),
             ..SessionFilter::default()
         })
         .await
     {
-        Ok(sessions) => {
+        Ok(mut sessions) => {
             let limit = usize::try_from(HELLO_SESSION_LIMIT).unwrap_or(usize::MAX);
-            state.set_sessions_truncated(sessions.len() >= limit);
+            state.set_sessions_truncated(sessions.len() > limit);
+            sessions.truncate(limit);
             sessions
                 .into_iter()
                 .map(|session| SessionSyncState {
@@ -402,6 +407,7 @@ pub(crate) async fn build_hello(state: &DaemonState) -> NodeToHubMsg {
         projects_complete,
         state_revision: state.state_revision().await.unwrap_or(0),
         sessions,
+        sessions_truncated: state.sessions_truncated(),
     }
 }
 
@@ -413,6 +419,7 @@ pub(crate) async fn outbox_messages(state: &DaemonState) -> anyhow::Result<Vec<N
         for chunk in batch.events.chunks(OUTBOX_BATCH_EVENTS) {
             messages.push(NodeToHubMsg::EventBatchPush {
                 events: chunk.to_vec(),
+                resync: false,
             });
         }
     }
@@ -502,6 +509,7 @@ pub(crate) async fn handle_server_message(
                             if out
                                 .send(NodeToHubMsg::EventBatchPush {
                                     events: chunk.to_vec(),
+                                    resync: true,
                                 })
                                 .await
                                 .is_err()

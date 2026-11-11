@@ -580,10 +580,19 @@ async fn handle_node_connection(state: HubState, token_owner: String, socket: We
         projects_complete,
         state_revision,
         sessions,
+        sessions_truncated,
     } = hello
     else {
         unreachable!("hello was matched above");
     };
+
+    if sessions_truncated {
+        tracing::warn!(
+            node_id = node_id.as_str(),
+            reported = sessions.len(),
+            "node reported more sessions than the hello limit; the remaining sessions are not synced"
+        );
+    }
 
     // Reject nodes from a different protocol generation before sending any RPC.
     if protocol_version < fxg_protocol::node_hub::PROTOCOL_VERSION {
@@ -758,6 +767,7 @@ async fn handle_node_message_value(state: &HubState, node_id: &NodeId, message: 
             projects_complete,
             state_revision,
             sessions,
+            sessions_truncated,
         } => {
             // Not a reconnect but an in-flight resend (e.g. after a Worktree change)
             if &hello_node_id != node_id {
@@ -776,6 +786,13 @@ async fn handle_node_message_value(state: &HubState, node_id: &NodeId, message: 
                     "node protocol version is too old; ignoring hello"
                 );
                 return;
+            }
+            if sessions_truncated {
+                tracing::warn!(
+                    node_id = node_id.as_str(),
+                    reported = sessions.len(),
+                    "node reported more sessions than the hello limit"
+                );
             }
             let stored_revision = match state.db().node_state_revision(node_id.as_str()).await {
                 Ok(revision) => revision.unwrap_or(0),
@@ -838,8 +855,8 @@ async fn handle_node_message_value(state: &HubState, node_id: &NodeId, message: 
                 );
             }
         }
-        NodeToHubMsg::EventBatchPush { events } => {
-            apply_event_batch(state, node_id, events).await;
+        NodeToHubMsg::EventBatchPush { events, resync } => {
+            apply_event_batch(state, node_id, events, resync).await;
         }
         NodeToHubMsg::LiveStreamDelta { session_id, delta } => {
             fxg_protocol::discard_with!(
@@ -1020,16 +1037,15 @@ async fn compute_resync(
                 }
             }
             Ok(Some(session)) => {
-                tracing::warn!(
+                // Requesting a full resync here cannot succeed: the hub rejects
+                // `SessionCreated` for a session owned by another node, so the
+                // batch would never be ACKed and the node would retry forever.
+                tracing::error!(
                     session_id = sync.session_id.as_str(),
                     hub_node = session.node_id.as_str(),
                     node_id = node_id.as_str(),
-                    "session is owned by a different node; requesting full resync"
+                    "session is owned by a different node; skipping the resync (node_id conflict)"
                 );
-                targets.push(ResyncTarget {
-                    session_id: sync.session_id.clone(),
-                    from_node_seq: 1,
-                });
             }
             Ok(None) => {
                 // Session unknown to the hub: resend everything, including SessionCreated
@@ -1056,6 +1072,7 @@ async fn apply_event_batch(
     state: &HubState,
     node_id: &NodeId,
     events: Vec<fxg_protocol::events::SessionEventEnvelope>,
+    resync: bool,
 ) {
     // Prevent impersonation: SessionCreated.node_id must match the connecting node
     for event in &events {
@@ -1154,7 +1171,11 @@ async fn apply_event_batch(
     }
 
     // Web Push notifications for approval requests and questions (elicitations)
-    // (sent asynchronously so they do not block the ACK)
+    // (sent asynchronously so they do not block the ACK).
+    // Historical events replayed during a resync must not wake up every device.
+    if resync {
+        notify_events.clear();
+    }
     if !notify_events.is_empty() {
         let push = state.push().clone();
         let db = state.db().clone();
