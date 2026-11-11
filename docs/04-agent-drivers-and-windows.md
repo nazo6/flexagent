@@ -51,6 +51,35 @@ pub trait ActiveSessionHandle: Send + Sync {
 }
 ```
 
+### 1.1 エージェント実装の3層モデル（計画）
+
+ACP だけでは、アイコンや起動オプションなどのエージェント固有メタデータや、
+ACP に存在しない機能（独自 API によるモデル名取得など）を扱えない。将来の
+拡張を `agent_id` 分岐なしで追加できるよう、実装を次の3層に分ける。
+
+| 層                   | 実行時の実装                           | ACP の再利用 | エージェントごとに追加するコード            |
+| :------------------- | :------------------------------------- | :----------- | :------------------------------------------ |
+| Tier 1: ACP only     | `AcpDriver`                            | すべて       | なし（registry / preset / custom 定義のみ） |
+| Tier 2: ACP + custom | `ExtendedAcpDriver` + `AgentExtension` | すべて       | `AgentExtension` の差分のみ                 |
+| Tier 3: Full custom  | `impl AgentDriver`                     | なし         | 起動・イベント変換を含む driver 実装        |
+
+- エージェント固有の知識は `AgentCatalog` と extension に閉じ込め、
+  `SessionManager` と `AcpDriver` には追加しない。
+- `AgentCatalog` が **custom 定義 → builtin provider → ACP Registry** の順で
+  起動定義と backend を解決する。
+- `AgentLaunchSpec` は program / args / env だけの純粋データとし、warm pool
+  のキーとして扱う。extension の状態は含めない。
+- Tier 2 は `ExtendedAcpDriver` が ACP イベントを中継し、
+  `CapabilitiesUpdated` に `CapabilityOverlay` を適用してから
+  `SessionExtension` に通す。capability probe も同じ経路を通る。
+- ユーザー定義のカスタム ACP エージェント（§3）は Tier 1 のまま。
+  将来 `CustomAgentConfig.extension` で builtin extension を参照できるようにする。
+- Tier 3 の builtin ID は予約し、custom 定義による上書きを拒否する。
+
+型設計・実装フェーズ・変更対象の詳細は
+[`docs/changelog/2026-11-11-agent-extension-architecture.md`](./changelog/2026-11-11-agent-extension-architecture.md)
+を参照する。
+
 ---
 
 ## 2. 任意ACPエージェント対応 (`AcpDriver` & Registry Manager)
@@ -67,7 +96,7 @@ pub trait ActiveSessionHandle: Send + Sync {
      `PATH` から暗黙解決するフォールバックは行わない。任意のコマンドは
      §3 のカスタムエージェントとして明示登録する)。
 2. **起動解決の優先順位 (ローカル優先)**:
-   1. カスタム定義 (`config.toml` / `~/.flexagent/custom_agents.json`)
+   1. カスタム定義 (`node.db` の `custom_agents`)
    2. **ビルトイン preset**: 既知の CLI が `PATH` にあれば、その ACP
       起動引数で起動する (`opencode acp` / `agy acp`)。ユーザーが同名の
       custom を定義した場合は custom が優先される。
@@ -89,7 +118,7 @@ pub trait ActiveSessionHandle: Send + Sync {
      成果物を保持しない (Web UI の無効化の対象外)。
    - 実体を持たない `npx` / `uvx` 配布は **既定では一覧に出さない**。Web UI の
      「カタログから追加」でエージェントごとに**有効化**し、状態は
-     `~/.flexagent/enabled_package_agents.json` に保存する
+     `node.db` の `enabled_package_agents` に保存する
      (`AgentAction::SetPackageEnabled`)。有効化は一覧・選択肢の制御のみで、
      起動解決 (`launch_spec`) は引き続き `npx` / `uvx` を利用できる。
 
@@ -157,21 +186,27 @@ ACP Registry に載っていないエージェントや自前の ACP 実装は�
 定義**として登録して起動する。
 
 1. **定義方法**:
-   - `~/.flexagent/config.toml` の `[agents.custom.<id>]`
-     (`name` / `command` / `args` / `env`)。宣言的なブートストラップ用で、
-     ノード再起動時に読み込まれる。
-   - Web UI (設定 > エージェント管理 > カスタム追加) は
-     `~/.flexagent/custom_agents.json` に保存する。同名 ID は UI 管理側が優先。
+   - Web UI (設定 > エージェント管理 > カスタム追加) または API から
+     `node.db` の `custom_agents` テーブルへ保存する (`name` / `command` /
+     `args` / `env` / `env_secrets`)。
    - API: `PUT /api/v1/nodes/:node_id/agents/custom/:agent_id` (upsert) /
      `DELETE /api/v1/nodes/:node_id/agents/custom/:agent_id`。
+   - 実行時設定はノードの DB にのみ保存し、ハブへ同期しない。
 2. **解決と起動**:
+   - カスタム定義は常に Tier 1 (`AcpDriver`) として解決する（§1.1）。
    - `command` は `PATH` 上のコマンド名または絶対パス。シェル経由ではないため
      グロブ・`~`・環境変数の展開は行わない。
    - 起動直前に `fxg_pty::resolve_command` が `which` (`PATHEXT`) で解決し、
      `args` / `env` を付けて ACP プロセスとしてスポーンする。
-3. **一覧表示**:
+3. **Tier 2 extension の再利用（計画）**:
+   - `CustomAgentConfig.extension` で builtin extension を参照できるようにする
+     （§1.1）。指定時は `DriverKind::AcpExtended` となり、custom の起動定義に
+     extension の `prepare_launch` を適用する。
+   - 未知の extension ID は保存時と起動時に拒否する。
+4. **一覧表示と優先順位**:
    - カスタム定義は常に「利用可能」として扱い、`sources: ["custom"]` で返す。
-   - レジストリに同名 ID がある場合はカスタム定義を優先し、重複表示しない。
+   - 同じ ID の builtin / registry より優先し、重複表示しない。
+   - Tier 3 の builtin ID は予約し、custom 定義による上書きを拒否する。
 
 ---
 
