@@ -981,7 +981,7 @@ export type InitialConfig = {
 	value: ConfigOptionValue,
 };
 
-/**  `POST /api/v1/nodes/tokens` request (issue a new node token). */
+/**  `POST /api/v1/nodes/tokens` request (issue a new node pairing token). */
 export type IssueNodeTokenRequest = {
 	/**  Node ID to pair (the node_id of the fxg node start) */
 	node_id: NodeId,
@@ -1138,7 +1138,7 @@ export type NodeSummary = {
 	installed_agents: string[],
 };
 
-/**  One entry of `GET /api/v1/nodes/tokens` (an issued per-node token). */
+/**  One entry of `GET /api/v1/nodes/tokens` (an issued node pairing token). */
 export type NodeTokenSummary = {
 	/**  Target node ID */
 	node_id: NodeId,
@@ -1148,7 +1148,7 @@ export type NodeTokenSummary = {
 
 /**  `GET /api/v1/nodes/tokens` response. */
 export type NodeTokensResponse = {
-	/**  Issued node tokens */
+	/**  Issued node pairing tokens */
 	tokens: NodeTokenSummary[],
 };
 
