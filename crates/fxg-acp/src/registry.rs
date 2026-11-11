@@ -49,14 +49,10 @@ impl AgentCatalogState {
         settings: &AgentSettings,
         custom: BTreeMap<String, CustomAgentConfig>,
     ) -> Self {
-        let mut aliases = crate::agent::builtin::aliases();
-        for (key, value) in &settings.aliases {
-            aliases.insert(key.clone(), value.clone());
-        }
         Self {
             registry_url: settings.registry_url.clone(),
             cache_ttl_secs: settings.registry_cache_ttl_secs,
-            aliases,
+            aliases: settings.aliases.clone(),
             custom,
         }
     }
@@ -778,11 +774,16 @@ mod tests {
     #[test]
     fn resolves_alias_and_custom_priority() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let registry = registry(dir.path());
-        // Built-in alias
-        assert_eq!(registry.resolve_alias("antigravity"), "agy");
-        // Unknown names pass through unchanged (including removed stale aliases)
-        assert_eq!(registry.resolve_alias("claude"), "claude");
+        let mut settings = settings();
+        settings
+            .aliases
+            .insert("fast".to_owned(), "my-agent".to_owned());
+        let registry = AcpRegistry::new(dir.path(), &settings, custom_agents());
+        // User-defined alias
+        assert_eq!(registry.resolve_alias("fast"), "my-agent");
+        // Removed built-in aliases pass through unchanged
+        assert_eq!(registry.resolve_alias("antigravity"), "antigravity");
+        // Unknown names pass through unchanged
         assert_eq!(registry.resolve_alias("unknown-agent"), "unknown-agent");
 
         let spec = registry

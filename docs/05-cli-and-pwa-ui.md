@@ -65,13 +65,13 @@ Web UI をメインのインターフェースとするローカルファース�
 
 ```bash
 # 1. セッションの起動（カレントディレクトリで起動＆Web UI を自動オープン）
-fxg session new claude -p "テストを修正して"
-fxg session new claude -p "この画面を直して" --attach shot.png
-fxg session new antigravity
-fxg session new claude -w feat/auth
-fxg session new claude --provisioner colab-pro
-fxg session new claude -- --model claude-sonnet-4
-fxg session new claude --no-open
+fxg session new opencode -p "テストを修正して"
+fxg session new opencode -p "この画面を直して" --attach shot.png
+fxg session new agy
+fxg session new opencode -w feat/auth
+fxg session new opencode --provisioner colab-pro
+fxg session new opencode -- --model claude-sonnet-4
+fxg session new opencode --no-open
 
 # 2. セッション一覧・履歴操作
 fxg session list

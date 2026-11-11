@@ -72,15 +72,16 @@ migration `0018_drop_default_agent.sql` は `agent_settings.default_agent` を
 エージェント固有の既定値だけが残っていた。クライアントは利用可能な
 エージェントから選択する。
 
-### 3.3 組み込み alias の移動
+### 3.3 組み込み alias の削除
 
-`AgentSettings::default_aliases` にあったエージェント固有の alias を削除し、
-builtin provider の知識として `builtin::aliases()` に移した。
+`AgentSettings::default_aliases` を削除し、builtin 側にも alias を持たない。
 
-- `antigravity` → `agy` は builtin alias として維持する
 - `claude` → `claude-code-acp` は Registry に存在しない ID だったため削除する
 - `codex` → `codex-acp` は Registry import 前提の alias のため削除する
-  （必要ならユーザーが alias を設定する）
+- `antigravity` → `agy` も特別扱いをなくすため削除する
+  （`agy` を直接使うか、ユーザーが alias を設定する）
+
+ユーザーが設定する alias (`agent_aliases`) は引き続き利用できる。
 
 ### 3.4 `fxg-acp`
 
