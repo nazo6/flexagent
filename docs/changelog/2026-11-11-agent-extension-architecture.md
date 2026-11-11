@@ -1,16 +1,17 @@
 # エージェント実装の3層モデルと拡張基盤（計画）
 
 - **日付**: 2026-11-11
-- **状態**: 計画中（未実装）
+- **状態**: 実装中（Phase 1 完了 / Phase 2 以降は計画）
 - **対象パッケージ**: 計画のみ（実装時: `fxg-protocol`, `fxg-acp`, `fxg-node`,
   `fxg-cli`, `ui`, `docs`）
 - **対象スクリプト**: 計画のみ（実装時: `mise run fmt`,
   `mise run lint:errors`, `mise run types`,
   `cargo test --workspace`, `pnpm --dir ui run check`）
 
-> 本文は目標アーキテクチャです。実装は別 PR で行い、このファイルに実装ログを
-> 追記します。現行仕様は [`docs/04-agent-drivers-and-windows.md`](../04-agent-drivers-and-windows.md)
-> を参照してください。
+> 本文は目標アーキテクチャです。docs と実装は同一 PR で管理し、Phase 1 から
+> 順に積み上げます。現行仕様は
+> [`docs/04-agent-drivers-and-windows.md`](../04-agent-drivers-and-windows.md) を
+> 参照してください。
 
 ---
 
@@ -59,7 +60,7 @@ Tier 1 はデータのみ、Tier 3 は driver 1個の追加で完結する。
 | D7  | カスタム定義から builtin extension を参照する `extension` フィールドは Phase 4 で追加する。 |
 | D8  | Tier 3 の builtin ID は予約し、カスタム定義による上書きを拒否する。                         |
 | D9  | プラグインは将来 `AgentProvider` のアダプタとして実装し、Rust trait を ABI にしない。       |
-| D10 | 今回の PR は docs のみ。実装は別 PR で Phase 1 から順に行う。                               |
+| D10 | docs と実装は同一 PR で管理し、Phase 1 から順に積み上げる。                                 |
 
 ### 2.1 全体構造
 
@@ -357,15 +358,18 @@ pub struct AgentSummary {
 
 ### Phase 1: `AgentCatalog` とメタデータ（挙動変更なし）
 
-- [ ] `crates/fxg-acp/src/agent/{mod,catalog,provider}.rs` を追加する
-- [ ] `AGENT_PRESETS` を builtin provider に移す
-- [ ] `AgentLaunchSpec` / `DriverKind` は `Acp` のみのまま
-- [ ] `AgentListEntry` に `backend` / `icon` を追加する
-- [ ] `AgentSummary` に `backend` / `icon` を追加し、bindings を更新する
-- [ ] `SessionManager` の `AcpRegistry` + `DriverFactory` を `AgentCatalog` に置き換える
-- [ ] 解決順位・custom の優先・driver 選択の単体テストを追加する
+- [x] `crates/fxg-acp/src/agent/{mod,catalog,provider}.rs` を追加する
+- [x] `AGENT_PRESETS` を builtin provider に移す
+- [x] `AgentLaunchSpec` / `DriverKind` は `Acp` のみのまま
+- [x] `AgentListEntry` に `backend` / `icon` を追加する
+- [x] `AgentSummary` に `backend` / `icon` を追加し、bindings を更新する
+- [x] `SessionManager` の `AcpRegistry` + `DriverFactory` を `AgentCatalog` に置き換える
+- [x] 解決順位・custom の優先・driver 選択の単体テストを追加する
 
 完了条件: 既存の ACP only エージェントの挙動が変わらず、全テストが通る。
+
+実装ログ: 2026-11-11 に完了。詳細は
+[`2026-11-11-agent-catalog-phase1.md`](./2026-11-11-agent-catalog-phase1.md) を参照。
 
 ### Phase 2: Tier 2 の基盤
 

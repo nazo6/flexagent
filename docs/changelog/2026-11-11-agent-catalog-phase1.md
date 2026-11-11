@@ -9,8 +9,8 @@
   `pnpm --dir ui run check`
 
 > 3層モデル全体の設計は
-> `docs/changelog/2026-11-11-agent-extension-architecture.md`
-> （[PR #7](https://github.com/nazo6/flexagent/pull/7)）を参照。本ファイルは Phase 1
+> [`docs/changelog/2026-11-11-agent-extension-architecture.md`](./2026-11-11-agent-extension-architecture.md)
+> （[PR #8](https://github.com/nazo6/flexagent/pull/8)）を参照。本ファイルは Phase 1
 > の実装記録です。
 
 ---
