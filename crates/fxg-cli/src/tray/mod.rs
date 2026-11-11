@@ -315,7 +315,7 @@ async fn collect_status(state: &DaemonState) -> TrayStatus {
         .map(|sessions| sessions.len())
         .unwrap_or(0);
     TrayStatus {
-        hub_connected: state.hub_connected(),
+        hub_connected: state.hub_link().is_connected(),
         unsynced,
         active_sessions,
     }

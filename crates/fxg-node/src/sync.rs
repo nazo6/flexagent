@@ -24,6 +24,7 @@ use base64::engine::general_purpose::STANDARD as BASE64;
 use futures_util::{SinkExt, StreamExt};
 use fxg_db::SessionFilter;
 use fxg_protocol::CommandId;
+use fxg_protocol::client_api::{HubLinkState, HubLinkStatus};
 use fxg_protocol::node_hub::{HubToNodeMsg, NodeToHubMsg, SessionSyncState};
 use tokio::sync::mpsc;
 use tokio::sync::watch;
@@ -61,67 +62,187 @@ pub(crate) struct CommandContext<'a> {
     pub shutdown: Option<&'a watch::Sender<bool>>,
 }
 
-/// Runs the Outbox sync worker until shutdown.
+/// Connection target of the outbox sync worker (owned by the pairing settings).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HubTarget {
+    /// Node Hub WebSocket URL (derived from the paired HTTP origin)
+    pub ws_url: String,
+    /// Pairing token (never logged)
+    pub token: String,
+}
+
+/// Supervises the Outbox sync worker.
 ///
-/// Started as a task by `NodeDaemon::start`.
-pub async fn run(
-    state: DaemonState,
-    server_url: String,
-    node_token: String,
-    mut shutdown: watch::Receiver<bool>,
-) {
-    let mut backoff = RECONNECT_MIN;
+/// Reconnects whenever the pairing changes (`HubTarget` watch channel) and stays
+/// idle while the node is unpaired, so pairing takes effect without a restart.
+pub async fn supervise(state: DaemonState, mut shutdown: watch::Receiver<bool>) {
+    let mut targets = state.hub_target_updates();
     loop {
         if *shutdown.borrow() {
             break;
         }
 
-        match connect_once(&state, &server_url, &node_token, &mut shutdown).await {
+        let current = targets.borrow().clone();
+        match current {
+            Some(target) => run(&state, &target, &mut targets, &mut shutdown).await,
+            None => {
+                tokio::select! {
+                    result = targets.changed() => {
+                        if result.is_err() {
+                            break;
+                        }
+                    }
+                    _ = shutdown.changed() => break,
+                }
+            }
+        }
+    }
+    tracing::info!("outbox sync worker stopped");
+}
+
+/// Runs one connection target until the pairing changes or the node shuts down.
+async fn run(
+    state: &DaemonState,
+    target: &HubTarget,
+    targets: &mut watch::Receiver<Option<HubTarget>>,
+    shutdown: &mut watch::Receiver<bool>,
+) {
+    let hub_url = Some(fxg_protocol::config::hub_http_origin(&target.ws_url));
+    let mut backoff = RECONNECT_MIN;
+    loop {
+        if *shutdown.borrow() || targets.borrow().as_ref() != Some(target) {
+            break;
+        }
+
+        state.set_hub_link(HubLinkStatus::new(
+            HubLinkState::Connecting,
+            hub_url.clone(),
+            None,
+        ));
+        match connect_once(state, target, targets, shutdown).await {
             Ok(()) => {
                 backoff = RECONNECT_MIN;
+                // The pairing may have changed (unpair / new hub): the outer loop
+                // owns the `Standalone` state, so do not overwrite it.
+                if targets.borrow().as_ref() != Some(target) {
+                    break;
+                }
+                // The connection dropped cleanly; the next attempt follows after the backoff.
+                state.set_hub_link(HubLinkStatus::new(
+                    HubLinkState::Connecting,
+                    hub_url.clone(),
+                    None,
+                ));
             }
             Err(err) => {
                 state
                     .diagnostics_counters()
                     .incr(fxg_hub::api::CounterKind::OutboxRetries);
-                tracing::warn!(url = %server_url, "hub connection failed: {err:#}");
+                let (link_state, message) = classify_failure(&err);
+                tracing::warn!(url = %target.ws_url, "hub connection failed: {message}");
+                state.set_hub_link(HubLinkStatus::new(
+                    link_state,
+                    hub_url.clone(),
+                    Some(message),
+                ));
             }
         }
-        state.set_hub_connected(false);
         if *shutdown.borrow() {
             break;
         }
 
-        // Exponential backoff (interrupted immediately by a shutdown request)
+        // Exponential backoff (interrupted by a shutdown request or a pairing change)
         tokio::select! {
             _ = tokio::time::sleep(backoff) => {}
             _ = shutdown.changed() => break,
+            result = targets.changed() => {
+                if result.is_err() {
+                    break;
+                }
+            }
         }
         backoff = (backoff * 2).min(RECONNECT_MAX);
     }
-    state.set_hub_connected(false);
-    tracing::info!("outbox sync worker stopped");
+}
+
+/// Tries a WebSocket handshake without starting the sync worker (`pairing/test`).
+pub async fn test_connection(ws_url: &str, token: &str) -> HubLinkStatus {
+    let hub_url = Some(fxg_protocol::config::hub_http_origin(ws_url));
+    match tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        probe_connection(ws_url, token),
+    )
+    .await
+    {
+        Ok(Ok(())) => HubLinkStatus::new(HubLinkState::Connected, hub_url, None),
+        Ok(Err(err)) => {
+            let (state, message) = classify_failure(&err);
+            HubLinkStatus::new(state, hub_url, Some(message))
+        }
+        Err(_) => HubLinkStatus::new(
+            HubLinkState::Failed,
+            hub_url,
+            Some("timed out while connecting to the hub".to_owned()),
+        ),
+    }
+}
+
+/// One-shot WebSocket handshake used by [`test_connection`].
+async fn probe_connection(ws_url: &str, token: &str) -> anyhow::Result<()> {
+    use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+
+    let mut request = ws_url.into_client_request()?;
+    request
+        .headers_mut()
+        .insert("Authorization", format!("Bearer {token}").parse()?);
+    let (mut socket, _response) = tokio_tungstenite::connect_async(request).await?;
+    fxg_protocol::discard_with!(socket.close(None).await, "close the pairing probe socket");
+    Ok(())
+}
+
+/// Classifies a failed connection attempt for the UI.
+///
+/// The hub rejects an unknown or revoked pairing token during the WebSocket
+/// handshake with HTTP 401 / 403, which is reported separately from a node that
+/// simply cannot reach the hub.
+pub fn classify_failure(err: &anyhow::Error) -> (HubLinkState, String) {
+    if let Some(tokio_tungstenite::tungstenite::Error::Http(response)) =
+        err.downcast_ref::<tokio_tungstenite::tungstenite::Error>()
+    {
+        let status = response.status().as_u16();
+        if status == 401 || status == 403 {
+            return (
+                HubLinkState::Unauthorized,
+                format!("the hub rejected the pairing token (HTTP {status})"),
+            );
+        }
+    }
+    (HubLinkState::Failed, format!("{err:#}"))
 }
 
 /// Performs one connection's worth of sync with the hub (does not return until the
 /// connection drops).
 async fn connect_once(
     state: &DaemonState,
-    server_url: &str,
-    node_token: &str,
+    target: &HubTarget,
+    targets: &mut watch::Receiver<Option<HubTarget>>,
     shutdown: &mut watch::Receiver<bool>,
 ) -> anyhow::Result<()> {
     use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 
-    let mut request = server_url.into_client_request()?;
+    let mut request = target.ws_url.as_str().into_client_request()?;
     request
         .headers_mut()
-        .insert("Authorization", format!("Bearer {node_token}").parse()?);
+        .insert("Authorization", format!("Bearer {}", target.token).parse()?);
     let (socket, _response) = tokio_tungstenite::connect_async(request).await?;
     let (mut sender, mut receiver) = socket.split();
 
-    state.set_hub_connected(true);
-    tracing::info!(url = %server_url, "connected to hub");
+    state.set_hub_link(HubLinkStatus::new(
+        HubLinkState::Connected,
+        Some(fxg_protocol::config::hub_http_origin(&target.ws_url)),
+        None,
+    ));
+    tracing::info!(url = %target.ws_url, "connected to hub");
 
     // Send queue (shared path for the PTY forwarder / command responses)
     let (out_tx, mut out_rx) = mpsc::channel::<NodeToHubMsg>(SEND_QUEUE_CAPACITY);
@@ -144,6 +265,9 @@ async fn connect_once(
             _ = shutdown.changed() => {
                 return Ok(());
             }
+            _ = targets.changed() => {
+                return Ok(());
+            }
             outgoing = out_rx.recv() => match outgoing {
                 Some(message) => send_msg(&mut sender, &message).await?,
                 None => return Ok(()),
@@ -156,7 +280,10 @@ async fn connect_once(
                 Ok(SessionBroadcast::Persisted { event, .. }) => {
                     send_msg(
                         &mut sender,
-                        &NodeToHubMsg::EventBatchPush { events: vec![event] },
+                        &NodeToHubMsg::EventBatchPush {
+                            events: vec![event],
+                            resync: false,
+                        },
                     )
                     .await?;
                 }
@@ -193,7 +320,7 @@ async fn connect_once(
                     return Ok(());
                 }
                 Some(Err(err)) => {
-                    tracing::warn!(url = %server_url, "hub websocket error: {err}");
+                    tracing::warn!(url = %target.ws_url, "hub websocket error: {err}");
                     return Err(err.into());
                 }
                 _ => {}
@@ -242,19 +369,25 @@ pub(crate) async fn build_hello(state: &DaemonState) -> NodeToHubMsg {
         .list_sessions(&SessionFilter {
             // Archived sessions are also synced (so the resync safety net covers them)
             include_archived: true,
-            limit: Some(HELLO_SESSION_LIMIT),
+            // Fetch one more row to tell "exactly at the limit" from "truncated".
+            limit: Some(HELLO_SESSION_LIMIT.saturating_add(1)),
             ..SessionFilter::default()
         })
         .await
     {
-        Ok(sessions) => sessions
-            .into_iter()
-            .map(|session| SessionSyncState {
-                session_id: session.session_id.clone(),
-                project_id: session.project_id,
-                last_node_seq: session.last_node_seq,
-            })
-            .collect(),
+        Ok(mut sessions) => {
+            let limit = usize::try_from(HELLO_SESSION_LIMIT).unwrap_or(usize::MAX);
+            state.set_sessions_truncated(sessions.len() > limit);
+            sessions.truncate(limit);
+            sessions
+                .into_iter()
+                .map(|session| SessionSyncState {
+                    session_id: session.session_id.clone(),
+                    project_id: session.project_id,
+                    last_node_seq: session.last_node_seq,
+                })
+                .collect()
+        }
         Err(err) => {
             tracing::warn!("failed to list sessions for NodeHello: {err}");
             Vec::new()
@@ -274,6 +407,7 @@ pub(crate) async fn build_hello(state: &DaemonState) -> NodeToHubMsg {
         projects_complete,
         state_revision: state.state_revision().await.unwrap_or(0),
         sessions,
+        sessions_truncated: state.sessions_truncated(),
     }
 }
 
@@ -285,6 +419,7 @@ pub(crate) async fn outbox_messages(state: &DaemonState) -> anyhow::Result<Vec<N
         for chunk in batch.events.chunks(OUTBOX_BATCH_EVENTS) {
             messages.push(NodeToHubMsg::EventBatchPush {
                 events: chunk.to_vec(),
+                resync: false,
             });
         }
     }
@@ -374,6 +509,7 @@ pub(crate) async fn handle_server_message(
                             if out
                                 .send(NodeToHubMsg::EventBatchPush {
                                     events: chunk.to_vec(),
+                                    resync: true,
                                 })
                                 .await
                                 .is_err()

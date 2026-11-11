@@ -22,32 +22,12 @@ pub struct HubClient {
 }
 
 impl HubClient {
-    /// Build a client from `[node] hub_url` and `auth_token` in
-    /// `config.toml`.
-    pub fn from_config(env: EnvLookup<'_>) -> Result<Self> {
-        let global = GlobalConfig::load(env).context("failed to load ~/.flexagent/config.toml")?;
-        let server_url = global
-            .node
-            .hub_url
-            .clone()
-            .context("node.hub_url is not set in config.toml (a hub is required)")?;
-        let base = hub_http_url(&server_url)?;
-        let token =
-            fxg_hub::api::auth::load_or_create_token(&fxg_home(env).join(AUTH_TOKEN_FILE_NAME))
-                .context("failed to load ~/.flexagent/auth_token")?;
-        Ok(Self {
-            base,
-            token,
-            http: reqwest::Client::new(),
-        })
-    }
-
     /// Build a client for the hub reachable from this host.
     ///
-    /// Prefers the address published by a running local hub (`hub.addr`), then
-    /// `[node] hub_url`, then `[hub] listen_addr`.
-    pub fn local(env: EnvLookup<'_>) -> Result<Self> {
-        let base = local_hub_base(env)?;
+    /// Resolution: `hub` → `hub.addr` → the local node's pairing →
+    /// `[hub] listen_addr`.
+    pub async fn local(env: EnvLookup<'_>, hub: Option<&str>) -> Result<Self> {
+        let base = resolve_hub_base(env, hub).await?;
         let token =
             fxg_hub::api::auth::load_or_create_token(&fxg_home(env).join(AUTH_TOKEN_FILE_NAME))
                 .context("failed to load ~/.flexagent/auth_token")?;
@@ -157,9 +137,15 @@ fn normalize_listen(addr: &str) -> String {
 
 /// Base URL of the hub reachable from this host.
 ///
-/// Prefers the address published by a running local hub (`hub.addr`), then
-/// `[node] hub_url`, then `[hub] listen_addr`.
-pub fn local_hub_base(env: EnvLookup<'_>) -> Result<String> {
+/// Resolution order:
+/// 1. `hub` (a `--hub` CLI override)
+/// 2. `hub.addr` (a hub running on this host)
+/// 3. the local node's pairing (`node.db`, read through the client API)
+/// 4. `[hub] listen_addr`
+pub async fn resolve_hub_base(env: EnvLookup<'_>, hub: Option<&str>) -> Result<String> {
+    if let Some(url) = hub.map(str::trim).filter(|url| !url.is_empty()) {
+        return hub_http_url(url);
+    }
     let home = fxg_home(env);
     if let Ok(addr) = std::fs::read_to_string(home.join("hub.addr")) {
         let addr = addr.trim();
@@ -167,10 +153,15 @@ pub fn local_hub_base(env: EnvLookup<'_>) -> Result<String> {
             return Ok(format!("http://{}", normalize_listen(addr)));
         }
     }
-    let global = GlobalConfig::load(env).context("failed to load ~/.flexagent/config.toml")?;
-    if let Some(url) = global.node.hub_url.as_deref() {
-        return hub_http_url(url);
+    // The node owns the pairing, so ask it instead of re-reading files.
+    // `connect_existing` never auto-starts a node from a hub command.
+    if let Ok(mut node) = crate::client::NodeClient::connect_existing().await
+        && let Ok(snapshot) = node.node_settings().await
+        && let Some(url) = snapshot.pairing.hub_url
+    {
+        return Ok(url);
     }
+    let global = GlobalConfig::load(env).context("failed to load ~/.flexagent/config.toml")?;
     Ok(format!(
         "http://{}",
         normalize_listen(global.hub.resolved_listen_addr())

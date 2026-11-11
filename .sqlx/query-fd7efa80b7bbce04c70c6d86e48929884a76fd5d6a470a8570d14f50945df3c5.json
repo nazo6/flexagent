@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        UPDATE node_pairing\n           SET hub_url = ?,\n               revision = revision + 1,\n               updated_at = ?\n         WHERE id = 1 AND revision = ?\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "fd7efa80b7bbce04c70c6d86e48929884a76fd5d6a470a8570d14f50945df3c5"
+}

@@ -163,7 +163,7 @@ mod tests {
         let body = body_json(response).await;
         assert_eq!(body["role"], "local_node");
         assert_eq!(body["version"], crate::daemon::VERSION);
-        assert_eq!(body["hub_connected"], false);
+        assert_eq!(body["hub_link"]["state"], "standalone");
 
         daemon.shutdown();
         tokio::time::timeout(std::time::Duration::from_secs(5), daemon.wait())

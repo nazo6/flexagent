@@ -12,6 +12,7 @@ import type {
   RespondElicitationResponse,
   RespondPermissionResponse,
   ResumeSessionResponse,
+  HubLinkStatus,
   HubWsMessage,
   SessionArchiveResponse,
   SessionRenameResponse,
@@ -91,8 +92,8 @@ export class SyncStore {
   inboxElicitations = $state<ElicitationRequestEntry[]>([]);
   /** Client WS connection state. */
   wsConnected = $state(false);
-  /** Connection state to the central server (only when connected to a local node). */
-  centralConnected = $state<boolean | null>(null);
+  /** Node ⇔ hub link state (only when connected to a local node). */
+  hubLink = $state<HubLinkStatus | null>(null);
   /** Number of unsynced Outbox events. */
   unsyncedEventCount = $state(0);
   /** Last sync time (epoch ms). */
@@ -537,7 +538,7 @@ export class SyncStore {
         this.#resolveCommand(message);
         break;
       case "system_status":
-        this.centralConnected = message.hub_connected;
+        this.hubLink = message.hub_link;
         this.unsyncedEventCount = message.unsynced_event_count;
         this.lastSyncedAt = message.last_synced_at;
         break;

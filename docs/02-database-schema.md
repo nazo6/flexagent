@@ -338,8 +338,8 @@ CREATE INDEX idx_incidents_last_seen ON incidents(last_seen_at DESC);
 
 実行時に変更する設定は所有者の DB にのみ保存します (ノード ⇔ ハブ間で同期・マージしない)。
 
-- `node.db`: `node_settings` / `agent_settings` / `agent_aliases` /
-  `custom_agents` / `project_path_links`
+- `node.db`: `node_settings` / `node_pairing` / `agent_settings` /
+  `agent_aliases` / `custom_agents` / `project_path_links`
 - `hub.db`: `hub_settings` / `provisioners` (`provisioners` は `env_json` /
   `env_secrets_json` を持つ。`project_profiles` / `git_credentials` は
   アーキテクチャ簡素化で削除済み)
@@ -366,6 +366,12 @@ CREATE INDEX idx_incidents_last_seen ON incidents(last_seen_at DESC);
 > 保存されるため、実行時カタログは `custom_agents` と builtin だけで完結する。
 > `0018_drop_default_agent.sql` は未使用の `agent_settings.default_agent` を
 > DROP する。
+>
+> `0019_node_pairing.sql` はノードのハブ接続先を保持する単一行テーブル
+> `node_pairing` を追加する (`hub_url` のみ。トークンは
+> `~/.flexagent/node_token` の `0600` ファイルで、DB には値を保存しない)。
+> ペアリングは `GET/PUT/DELETE /api/v1/nodes/:node_id/settings/pairing` で操作し、
+> `hub_url` は API が即時反映するため `fxg node restart` は不要。
 
 `project_path_links` は `local_path -> project_key` の明示リンクで、Worktree からは
 メイン Worktree のリンクを `git-common-dir` 経由で引き継ぎます。

@@ -822,6 +822,31 @@ export type HubBootstrapView = {
 	log_no_color: SourcedValue<boolean>,
 };
 
+/**  State of the node ⇔ hub link (`GET /api/v1/system/info`). */
+export type HubLinkState =
+/**  No pairing (the node runs standalone / local only) */
+"standalone" |
+/**  A pairing exists and a connection attempt is in progress */
+"connecting" |
+/**  Connected and syncing with the hub */
+"connected" |
+/**  The hub rejected the pairing token (HTTP 401 / 403) */
+"unauthorized" |
+/**  The hub could not be reached or the connection failed */
+"failed";
+
+/**  Snapshot of the node ⇔ hub link. */
+export type HubLinkStatus = {
+	/**  Current state */
+	state: HubLinkState,
+	/**  Hub address (HTTP origin) when a pairing exists */
+	hub_url: string | null,
+	/**  When the current state was entered (Unix epoch ms) */
+	since: number,
+	/**  English detail when `state` is `unauthorized` / `failed` */
+	message: string | null,
+};
+
 /**  Hub-owned settings stored in `hub.db` (`hub_settings`). */
 export type HubSettings = {
 	/**  Web Push contact claim (`mailto:` / `https:`) */
@@ -893,8 +918,8 @@ error?: ErrorInfo | null;
 session_id: SessionId | null } |
 /**  Synchronization state notification (drives the sync badge in the UI). */
 { op: "system_status";
-/**  Whether the hub is connected (when connected to a local node) */
-hub_connected: boolean;
+/**  Node ⇔ hub link state (when connected to a local node) */
+hub_link: HubLinkStatus;
 /**  Number of unsynced outbox events */
 unsynced_event_count: number;
 /**  Last synchronization time (Unix epoch ms) */
@@ -1044,8 +1069,6 @@ export type NodeBootstrapView = {
 	node_id: SourcedValue<string>,
 	/**  Local HTTP/WS bind address */
 	listen_addr: SourcedValue<string>,
-	/**  Node Hub WebSocket URL (standalone when `None`) */
-	hub_url: SourcedValue<string | null>,
 	/**  Log level */
 	log_level: SourcedValue<string>,
 	/**  Log file destination (empty when disabled) */
@@ -1110,6 +1133,8 @@ export type NodeSettingsSnapshot = {
 	node: NodeSettings,
 	/**  Agent settings */
 	agents: AgentSettings,
+	/**  Hub pairing state */
+	pairing: PairingSettings,
 };
 
 /**  Node information exposed to clients (`GET /api/v1/nodes` / `GET /api/v1/system/info`). */
@@ -1156,6 +1181,26 @@ export type NodeTokensResponse = {
 export type NodesResponse = {
 	/**  Nodes (including online state and ephemeral-node attributes) */
 	nodes: NodeSummary[],
+};
+
+/**
+ *  Node ⇔ hub pairing state (`node.db` + the token file).
+ *
+ *  The pairing is owned by the node: `hub_url` is stored in `node.db` and the
+ *  token is a `0600` file (`~/.flexagent/node_token`). The client API never
+ *  returns the token, only whether it is configured.
+ */
+export type PairingSettings = {
+	/**  Paired hub address (HTTP origin; `None` = standalone) */
+	hub_url: string | null,
+	/**  Whether the pairing token file exists */
+	token_configured: boolean,
+	/**  Optimistic-lock revision */
+	revision: number,
+	/**  Current node ⇔ hub link state */
+	connection: HubLinkStatus,
+	/**  Whether the last `NodeHello` hit the session reporting limit */
+	sessions_truncated: boolean,
 };
 
 /**  An option of a permission approval (ACP `PermissionOption`). */
@@ -2106,8 +2151,8 @@ export type SystemInfoResponse = {
 	vapid_public_key: string | null,
 	/**  Number of unsynced outbox events (local node only) */
 	unsynced_event_count: number | null,
-	/**  WebSocket connection state to the hub (local node only) */
-	hub_connected: boolean | null,
+	/**  Node ⇔ hub link state (local node only) */
+	hub_link: HubLinkStatus | null,
 	/**  Last successful synchronization time (Unix epoch ms; local node only) */
 	last_synced_at: number | null,
 };
@@ -2120,6 +2165,14 @@ export type SystemStatus = {
 	components: ComponentHealth[],
 	/**  Delivery drop / retry counters */
 	counters: DropCounters,
+};
+
+/**  `POST /api/v1/nodes/{node_id}/settings/pairing/test` request. */
+export type TestPairingRequest = {
+	/**  Hub address to try (`http://host:port` or a full WS URL) */
+	hub_url: string,
+	/**  Token to try (omit to use the configured one) */
+	token: string | null,
 };
 
 /**
@@ -2475,6 +2528,16 @@ export type UpdateNodeSettingsRequest = {
 	project_scan_dirs: string[],
 	/**  Tray residency */
 	tray: boolean | null,
+	/**  Revision the client observed (`REVISION_MISMATCH` on conflict) */
+	expected_revision: number,
+};
+
+/**  `PUT /api/v1/nodes/{node_id}/settings/pairing` request. */
+export type UpdatePairingRequest = {
+	/**  Hub address (`http://host:port`; a full `ws://.../api/v1/node/ws` URL is also accepted) */
+	hub_url: string,
+	/**  Pairing token (omit to keep the current one when the hub address is unchanged) */
+	token: string | null,
 	/**  Revision the client observed (`REVISION_MISMATCH` on conflict) */
 	expected_revision: number,
 };

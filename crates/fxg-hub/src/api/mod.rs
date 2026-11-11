@@ -65,9 +65,10 @@ use handlers::sessions::{
     search, send_prompt, session_detail, session_diff, session_events,
 };
 use handlers::settings::{
-    browse_fs, delete_node_secret, delete_server_secret, list_agents_node, node_secrets,
-    node_settings, server_secrets, settings_server, update_agent_settings, update_hub_settings,
-    update_node_settings, upsert_node_secret, upsert_server_secret,
+    browse_fs, clear_pairing, delete_node_secret, delete_server_secret, list_agents_node,
+    node_secrets, node_settings, server_secrets, settings_server, test_pairing,
+    update_agent_settings, update_hub_settings, update_node_settings, update_pairing,
+    upsert_node_secret, upsert_server_secret,
 };
 use handlers::stream::{client_ws, pty_ws};
 use handlers::system::{
@@ -228,6 +229,14 @@ pub fn client_router<B: ClientApiBackend>(backend: B, options: ClientApiOptions)
         .route(
             "/api/v1/nodes/{node_id}/settings/agents",
             patch(update_agent_settings::<B>),
+        )
+        .route(
+            "/api/v1/nodes/{node_id}/settings/pairing",
+            put(update_pairing::<B>).delete(clear_pairing::<B>),
+        )
+        .route(
+            "/api/v1/nodes/{node_id}/settings/pairing/test",
+            post(test_pairing::<B>),
         )
         .route("/api/v1/hub/secrets", get(server_secrets::<B>))
         .route(

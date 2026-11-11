@@ -30,6 +30,59 @@ pub enum ConnectionRole {
     LocalNode,
 }
 
+/// State of the node ⇔ hub link (`GET /api/v1/system/info`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+#[specta(collect)]
+pub enum HubLinkState {
+    /// No pairing (the node runs standalone / local only)
+    Standalone,
+    /// A pairing exists and a connection attempt is in progress
+    Connecting,
+    /// Connected and syncing with the hub
+    Connected,
+    /// The hub rejected the pairing token (HTTP 401 / 403)
+    Unauthorized,
+    /// The hub could not be reached or the connection failed
+    Failed,
+}
+
+/// Snapshot of the node ⇔ hub link.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[specta(collect)]
+pub struct HubLinkStatus {
+    /// Current state
+    pub state: HubLinkState,
+    /// Hub address (HTTP origin) when a pairing exists
+    pub hub_url: Option<String>,
+    /// When the current state was entered (Unix epoch ms)
+    pub since: i64,
+    /// English detail when `state` is `unauthorized` / `failed`
+    pub message: Option<String>,
+}
+
+impl HubLinkStatus {
+    /// Standalone state (no pairing configured).
+    pub fn standalone() -> Self {
+        Self::new(HubLinkState::Standalone, None, None)
+    }
+
+    /// Builds a status and stamps the current time.
+    pub fn new(state: HubLinkState, hub_url: Option<String>, message: Option<String>) -> Self {
+        Self {
+            state,
+            hub_url,
+            since: crate::util::now_ms(),
+            message,
+        }
+    }
+
+    /// Whether the node is connected to the hub.
+    pub fn is_connected(&self) -> bool {
+        self.state == HubLinkState::Connected
+    }
+}
+
 /// `GET /api/v1/system/info` response.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
@@ -44,8 +97,8 @@ pub struct SystemInfoResponse {
     pub vapid_public_key: Option<String>,
     /// Number of unsynced outbox events (local node only)
     pub unsynced_event_count: Option<u64>,
-    /// WebSocket connection state to the hub (local node only)
-    pub hub_connected: Option<bool>,
+    /// Node ⇔ hub link state (local node only)
+    pub hub_link: Option<HubLinkStatus>,
     /// Last successful synchronization time (Unix epoch ms; local node only)
     pub last_synced_at: Option<i64>,
 }
@@ -994,8 +1047,8 @@ pub enum HubWsMessage {
     },
     /// Synchronization state notification (drives the sync badge in the UI).
     SystemStatus {
-        /// Whether the hub is connected (when connected to a local node)
-        hub_connected: bool,
+        /// Node ⇔ hub link state (when connected to a local node)
+        hub_link: HubLinkStatus,
         /// Number of unsynced outbox events
         unsynced_event_count: u64,
         /// Last synchronization time (Unix epoch ms)

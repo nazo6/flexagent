@@ -84,9 +84,6 @@ impl usage::RunAsync for StdioArgs {
         if let Some(node_id) = global.node.node_id.clone() {
             config.node_id = node_id;
         }
-        // In stdio mode the hub owns the pipe, so WS sync settings are unused.
-        config.hub_url = None;
-        config.node_token = None;
         config.log = effective_log_config(&global, &self);
 
         let stdio = fxg_node::daemon::StdioConfig {

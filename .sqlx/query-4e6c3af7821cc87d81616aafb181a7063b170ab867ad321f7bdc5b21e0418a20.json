@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        INSERT INTO secrets (id, description, created_at, updated_at)\n        VALUES (?, ?, ?, ?)\n        ON CONFLICT(id) DO NOTHING\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "4e6c3af7821cc87d81616aafb181a7063b170ab867ad321f7bdc5b21e0418a20"
+}

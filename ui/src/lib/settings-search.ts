@@ -7,7 +7,14 @@
  * place that renders the setting.
  */
 
-export type SettingsTab = "bootstrap" | "machine" | "hub" | "agents" | "browser" | "audit";
+export type SettingsTab =
+  | "bootstrap"
+  | "pairing"
+  | "machine"
+  | "hub"
+  | "agents"
+  | "browser"
+  | "audit";
 
 export type SettingsSearchEntry = {
   tab: SettingsTab;
@@ -19,6 +26,7 @@ export type SettingsSearchEntry = {
 
 export const SETTINGS_TAB_LABELS: Record<SettingsTab, string> = {
   bootstrap: "Bootstrap",
+  pairing: "Hub pairing",
   machine: "This machine",
   hub: "Hub",
   agents: "Agents",
@@ -30,7 +38,11 @@ export const SETTINGS_SEARCH_ENTRIES: SettingsSearchEntry[] = [
   { tab: "bootstrap", label: "Data directory", keywords: "path home flexagent directory" },
   { tab: "bootstrap", label: "Node ID", keywords: "node identity id" },
   { tab: "bootstrap", label: "Listen address", keywords: "port host bind address listen" },
-  { tab: "bootstrap", label: "Hub", keywords: "hub url connection central" },
+  {
+    tab: "pairing",
+    label: "Hub pairing",
+    keywords: "hub url token pairing connect central sync",
+  },
   { tab: "bootstrap", label: "Log level", keywords: "log level verbosity debug info trace" },
   { tab: "bootstrap", label: "Log file", keywords: "log file path output" },
   { tab: "bootstrap", label: "Log format", keywords: "log format json text" },

@@ -778,7 +778,7 @@ use fxg_protocol::settings::{
 impl DaemonState {
     /// Builds the typed settings snapshot exposed by
     /// `GET /api/v1/nodes/{node_id}/settings`.
-    pub fn node_settings_snapshot(&self) -> NodeSettingsSnapshot {
+    pub async fn node_settings_snapshot(&self) -> Result<NodeSettingsSnapshot, NodeError> {
         let config = match GlobalConfig::load_from_path(&self.paths().config_path()) {
             Ok(config) => config,
             Err(err) => {
@@ -817,18 +817,6 @@ impl DaemonState {
             Some(fxg_protocol::config::NodeBootstrapConfig::DEFAULT_LISTEN_ADDR),
             Some("--listen"),
         );
-        let mut hub_url = sourced_option(
-            &env,
-            self.config().hub_url.clone(),
-            fxg_protocol::config::env_keys::HUB_URL,
-            config.node.hub_url.clone(),
-            "node.hub_url",
-            Some("--hub-url"),
-        );
-        hub_url.value = hub_url
-            .value
-            .map(|value| fxg_protocol::config::hub_http_origin(&value));
-
         let log = &self.config().log;
         let log_level = sourced_string(
             &env,
@@ -866,12 +854,11 @@ impl DaemonState {
             Some("--no-color"),
         );
 
-        NodeSettingsSnapshot {
+        Ok(NodeSettingsSnapshot {
             bootstrap: NodeBootstrapView {
                 fxg_home,
                 node_id,
                 listen_addr,
-                hub_url,
                 log_level,
                 log_file,
                 log_format,
@@ -879,7 +866,8 @@ impl DaemonState {
             },
             node: self.node_settings(),
             agents: self.agent_settings(),
-        }
+            pairing: self.pairing_settings().await?,
+        })
     }
 
     /// Lists secret metadata with `used_by` and `configured` filled in.

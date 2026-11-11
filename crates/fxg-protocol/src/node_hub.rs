@@ -11,6 +11,7 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
+use crate::client_api::HubLinkStatus;
 use crate::client_api::{
     AgentCapabilitiesPreview, AgentsResponse, FsBrowseResponse, ProjectLinkResponse,
     ProjectPreview, ProjectScanResponse, ProjectUnlinkResponse, WorktreeInfo,
@@ -22,8 +23,8 @@ use crate::common::{
 };
 use crate::events::SessionEventEnvelope;
 use crate::settings::{
-    NodeSettingsSnapshot, SecretSummary, UpdateAgentSettingsRequest, UpdateNodeSettingsRequest,
-    UpsertSecretRequest,
+    NodeSettingsSnapshot, SecretSummary, TestPairingRequest, UpdateAgentSettingsRequest,
+    UpdateNodeSettingsRequest, UpdatePairingRequest, UpsertSecretRequest,
 };
 use crate::{CommandId, NodeId, ProjectId, SecretId, SessionId};
 
@@ -144,6 +145,21 @@ pub enum NodeRpcRequest {
         /// New values and the observed revision
         request: UpdateAgentSettingsRequest,
     },
+    /// Pair the node with a hub (or change the address / token).
+    UpdatePairing {
+        /// Hub address, optional token and the observed revision
+        request: UpdatePairingRequest,
+    },
+    /// Remove the hub pairing (the outbox is kept).
+    ClearPairing {
+        /// Revision the client observed (`REVISION_MISMATCH` on conflict)
+        expected_revision: u64,
+    },
+    /// Try a hub address / token without saving it.
+    TestPairing {
+        /// Hub address and optional token to try
+        request: TestPairingRequest,
+    },
     /// Fetch the node's secret metadata (values are never returned).
     GetSecrets,
     /// Store a secret value (write-only).
@@ -216,6 +232,8 @@ impl NodeRpcRequest {
             | Self::ResumeSession { .. }
             | Self::DeleteSession { .. } => Duration::from_secs(120),
             Self::ManageAgent { .. } => Duration::from_secs(600),
+            // A pairing test performs a WebSocket handshake with the hub.
+            Self::TestPairing { .. } => Duration::from_secs(15),
             _ => Duration::from_secs(30),
         }
     }
@@ -275,6 +293,11 @@ pub enum NodeRpcResponse {
     NodeSettings {
         /// Snapshot after the operation
         snapshot: Box<NodeSettingsSnapshot>,
+    },
+    /// Node ⇔ hub link state (`TestPairing`).
+    HubLink {
+        /// State after the test
+        status: HubLinkStatus,
     },
     /// Secret metadata after the operation (`GetSecrets` / `UpsertSecret` /
     /// `DeleteSecret`; values are never included).
@@ -359,6 +382,9 @@ pub enum NodeToHubMsg {
         state_revision: u64,
         /// Session sync states
         sessions: Vec<SessionSyncState>,
+        /// Whether `sessions` hit the node's reporting limit (more sessions exist)
+        #[serde(default)]
+        sessions_truncated: bool,
     },
     /// Sends a batch of persisted events (store-and-forward outbox).
     ///
@@ -368,6 +394,10 @@ pub enum NodeToHubMsg {
     EventBatchPush {
         /// Events to send (batches are split per session)
         events: Vec<SessionEventEnvelope>,
+        /// Whether this batch is a full replay requested by `ResyncRequest`
+        /// (the hub suppresses Web Push for historical events)
+        #[serde(default)]
+        resync: bool,
     },
     /// Realtime ephemeral chunk (for fast rendering before the DB flush).
     LiveStreamDelta {
@@ -594,7 +624,10 @@ mod tests {
 
     #[test]
     fn event_batch_push_shape() {
-        let msg = NodeToHubMsg::EventBatchPush { events: vec![] };
+        let msg = NodeToHubMsg::EventBatchPush {
+            events: vec![],
+            resync: false,
+        };
         let json = serde_json::to_value(&msg).unwrap();
         assert_eq!(json["op"], "event_batch_push");
         assert!(json["events"].as_array().unwrap().is_empty());
@@ -621,6 +654,7 @@ mod tests {
                 project_id: "p1".into(),
                 last_node_seq: 3,
             }],
+            sessions_truncated: false,
         };
         let json = serde_json::to_value(&msg).unwrap();
         assert_eq!(json["op"], "node_hello");
@@ -645,6 +679,7 @@ mod tests {
             projects_complete: true,
             state_revision: 0,
             sessions: vec![],
+            sessions_truncated: false,
         };
         let mut json = serde_json::to_value(&msg).unwrap();
         json.as_object_mut().unwrap().remove("protocol_version");

@@ -129,7 +129,7 @@ impl usage::RunAsync for HubStartArgs {
         let global = fxg_protocol::config::GlobalConfig::load(&env)
             .context("failed to load ~/.flexagent/config.toml")?;
 
-        if let Ok(client) = HubClient::local(&fxg_protocol::config::process_env)
+        if let Ok(client) = HubClient::local(&fxg_protocol::config::process_env, None).await
             && client.system_info().await.is_ok()
         {
             println!("hub is already running");
@@ -231,7 +231,7 @@ impl usage::RunAsync for HubStopArgs {
             println!("hub stopped (service)");
             return Ok(());
         }
-        let client = HubClient::local(&fxg_protocol::config::process_env)?;
+        let client = HubClient::local(&fxg_protocol::config::process_env, None).await?;
         match client.shutdown().await {
             Ok(()) => println!("hub stopped"),
             Err(_) => println!("hub is not running"),
@@ -253,7 +253,7 @@ impl usage::RunAsync for HubRestartArgs {
             println!("hub restarted (service)");
             return Ok(());
         }
-        if let Ok(client) = HubClient::local(&fxg_protocol::config::process_env) {
+        if let Ok(client) = HubClient::local(&fxg_protocol::config::process_env, None).await {
             fxg_protocol::discard_with!(client.shutdown().await, "stop the hub before restarting");
         }
         let env = fxg_protocol::config::process_env;
@@ -283,7 +283,7 @@ impl usage::RunAsync for HubStatusArgs {
 
     async fn run_async(self) -> Self::Output {
         let service_installed = crate::service::is_installed(ServiceTarget::Hub);
-        let client = HubClient::local(&fxg_protocol::config::process_env)?;
+        let client = HubClient::local(&fxg_protocol::config::process_env, None).await?;
         let info = match client.system_info().await {
             Ok(info) => Some(info),
             Err(err) => {

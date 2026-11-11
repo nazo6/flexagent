@@ -540,14 +540,14 @@ Hijacking）や不正アクセスを防ぐため、以下の多層防御モデ�
 
      ```sh
      fxg node pair --hub http://<hub>:8080 --token <NODE_TOKEN>
-     fxg node restart   # 既に起動している場合
+     # 既に起動中でも即時反映される (再起動は不要)
      ```
 
-     `fxg node pair` は `~/.flexagent/node_token` (`0600`) と
-     `config.toml` の `[node] hub_url` をまとめて設定します。`hub_url` には
+     `fxg node pair` は `~/.flexagent/node_token` (`0600`) と `node.db`
+     (`node_pairing.hub_url`) をまとめて設定します。`hub_url` には
      HTTP(S) のアドレスを指定でき、Node Hub の WebSocket エンドポイント
-     (`/api/v1/node/ws`) は自動で導出されます。環境変数
-     `FXG_NODE_TOKEN` を使う場合はこのファイルを省略できます。
+     (`/api/v1/node/ws`) は自動で導出されます。同じ操作はノードの
+     Web UI の **設定 > ハブ接続** からも行えます。
 
    - ハブは `NodeHello` の `node_id`
      がトークン発行対象ノードと一致することを検証し、なりすましを拒否します。

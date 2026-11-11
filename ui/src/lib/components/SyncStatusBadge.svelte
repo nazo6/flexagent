@@ -14,6 +14,29 @@
   let { class: className }: Props = $props();
 
   const isLocalNode = $derived(connection.role === "local_node");
+  const hubLink = $derived(sync.hubLink ?? connection.systemInfo?.hub_link ?? null);
+  const hubState = $derived(hubLink?.state ?? "standalone");
+
+  function hubStatusLabel(state: string): string {
+    switch (state) {
+      case "connected":
+        return m.shell_connected();
+      case "connecting":
+        return m.shell_hub_connecting();
+      case "unauthorized":
+        return m.shell_hub_unauthorized();
+      case "failed":
+        return m.shell_hub_unreachable();
+      default:
+        return m.shell_disconnected();
+    }
+  }
+
+  function hubStatusVariant(state: string): "secondary" | "outline" | "destructive" {
+    if (state === "connected") return "secondary";
+    if (state === "standalone") return "outline";
+    return "destructive";
+  }
 </script>
 
 <div class={cn("flex flex-wrap items-center gap-1.5 text-[13px]", className)}>
@@ -32,12 +55,11 @@
 
   {#if isLocalNode}
     <Badge
-      variant={sync.centralConnected ? "secondary" : "outline"}
+      variant={hubStatusVariant(hubState)}
       class="px-1.5 py-0 text-[11px] font-normal"
+      title={hubLink?.message ?? undefined}
     >
-      {m.shell_central_status({
-        status: sync.centralConnected ? m.shell_connected() : m.shell_disconnected(),
-      })}
+      {m.shell_central_status({ status: hubStatusLabel(hubState) })}
     </Badge>
     {#if sync.unsyncedEventCount > 0}
       <Badge variant="destructive" class="px-1.5 py-0 text-[11px] font-normal">

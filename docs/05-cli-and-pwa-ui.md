@@ -38,10 +38,10 @@ Web UI をメインのインターフェースとするローカルファース�
 | **`fxg session import <agent-session-id>`**                                 | エージェント側の既存セッションをネイティブ復元で取り込む                                                                                                                                                 | `--agent <ID>` (必須)<br/>`--cwd <PATH>`<br/>`--title <TITLE>`                                                                                                                                                                                   |
 | **`fxg session archive <id>` / `fxg session unarchive <id>`**               | 一覧からアーカイブ / 復元                                                                                                                                                                                | -                                                                                                                                                                                                                                                |
 | **`fxg session delete <id>`**                                               | セッションを削除（会話ログ・承認履歴を消去。**復元不能**）                                                                                                                                               | -                                                                                                                                                                                                                                                |
-| **`fxg node start`**                                                        | ローカルノードを前景起動（任意でタスクトレイ常駐）                                                                                                                                                       | `--detach`<br/>`--tray` / `--no-tray`<br/>`--listen <ADDR>` (既定 `127.0.0.1:7860`)<br/>`--hub-url <HUB_URL>` (`http://host:port`; `ws://` も可)<br/>ログ系オプション                                                                            |
+| **`fxg node start`**                                                        | ローカルノードを前景起動（任意でタスクトレイ常駐）                                                                                                                                                       | `--detach`<br/>`--tray` / `--no-tray`<br/>`--listen <ADDR>` (既定 `127.0.0.1:7860`)<br/>ログ系オプション                                                                                                                                         |
 | **`fxg node stop` / `fxg node restart`**                                    | ローカルノードを停止 / 再起動。service 登録済みなら supervisor に委譲                                                                                                                                    | -                                                                                                                                                                                                                                                |
 | **`fxg node status`**                                                       | ノードの稼働状態、service 登録、ハブ接続、未同期 Outbox、セッション数を表示                                                                                                                              | `--json`                                                                                                                                                                                                                                         |
-| **`fxg node pair --hub <URL> --token <TOKEN>` / `fxg node unpair`**         | ハブとのペアリングを一括設定 / 解除（`node_token` と `[node] hub_url` を更新）                                                                                                                           | `--hub <HTTP_URL>`<br/>`--token <PAIRING_TOKEN>`                                                                                                                                                                                                 |
+| **`fxg node pair --hub <URL> --token <TOKEN>` / `fxg node unpair`**         | ハブとのペアリングを設定 / 解除（`node.db` と `node_token` を更新し、即時反映）                                                                                                                          | `--hub <HTTP_URL>`<br/>`--token <PAIRING_TOKEN>`                                                                                                                                                                                                 |
 | **`fxg node access-token show` / `fxg node access-token rotate`**           | Web アクセストークン (`auth_token`) の表示 / 再生成                                                                                                                                                      | -                                                                                                                                                                                                                                                |
 | **`fxg hub start`**                                                         | ハブを前景起動                                                                                                                                                                                           | `--detach`<br/>`--listen <ADDR>` (既定 `0.0.0.0:8080`)<br/>`--port <PORT>`<br/>ログ系オプション                                                                                                                                                  |
 | **`fxg hub stop` / `fxg hub restart`**                                      | ハブを停止 / 再起動。service 登録済みなら supervisor に委譲                                                                                                                                              | -                                                                                                                                                                                                                                                |
@@ -123,15 +123,16 @@ fxg support incidents
 残します。`.fxg.toml`、`custom_agents.json`、`enabled_package_agents.json` は廃止
 しました（本番未デプロイのため移行コマンドはありません）。
 
-| 設定                                                            | 所有者 / 保存場所                                                | 変更手段                                       |
-| :-------------------------------------------------------------- | :--------------------------------------------------------------- | :--------------------------------------------- |
-| 待受アドレス・接続先・ログ・`allowed_hosts` / `allowed_origins` | `config.toml` / `FXG_*` / CLI                                    | ファイル編集 + 再起動（Web UI は読み取り専用） |
-| `node.name` / `allow_remote_pty` / `project_scan_dirs` / `tray` | `node.db` (`node_settings`)                                      | Client API（ハブは対象ノードへプロキシ）       |
-| エージェント既定値・エイリアス・カスタム定義                    | `node.db` (`agent_settings` / `agent_aliases` / `custom_agents`) | Client API                                     |
-| 明示的な `project_key`                                          | `node.db` (`project_path_links`)                                 | Client API / Web UI                            |
-| VAPID subject・Git 認証・Provisioner・一時VM Bootstrap          | `hub.db`                                                         | ハブ Web UI                                    |
-| 秘密の値                                                        | `~/.flexagent/secrets/{node,hub}/<id>` (`0600`)                  | Secret API（書き込み専用）                     |
-| 言語・テーマ・ピン留め                                          | ブラウザ `localStorage`                                          | Web UI                                         |
+| 設定                                                            | 所有者 / 保存場所                                                | 変更手段                                          |
+| :-------------------------------------------------------------- | :--------------------------------------------------------------- | :------------------------------------------------ |
+| 待受アドレス・ログ・`allowed_hosts` / `allowed_origins`         | `config.toml` / `FXG_*` / CLI                                    | ファイル編集 + 再起動（Web UI は読み取り専用）    |
+| ハブ接続先・ペアリングトークン                                  | `node.db` (`node_pairing`) + `node_token` (`0600`)               | Client API / Web UI（ハブは対象ノードへプロキシ） |
+| `node.name` / `allow_remote_pty` / `project_scan_dirs` / `tray` | `node.db` (`node_settings`)                                      | Client API（ハブは対象ノードへプロキシ）          |
+| エージェント既定値・エイリアス・カスタム定義                    | `node.db` (`agent_settings` / `agent_aliases` / `custom_agents`) | Client API                                        |
+| 明示的な `project_key`                                          | `node.db` (`project_path_links`)                                 | Client API / Web UI                               |
+| VAPID subject・Git 認証・Provisioner・一時VM Bootstrap          | `hub.db`                                                         | ハブ Web UI                                       |
+| 秘密の値                                                        | `~/.flexagent/secrets/{node,hub}/<id>` (`0600`)                  | Secret API（書き込み専用）                        |
+| 言語・テーマ・ピン留め                                          | ブラウザ `localStorage`                                          | Web UI                                            |
 
 ### 2.1 データディレクトリ構成 (`~/.flexagent/`)
 
@@ -156,9 +157,9 @@ fxg support incidents
 
 | ファイル / ディレクトリ  | 用途                                                                          | 所有者・設定方法                                             |
 | :----------------------- | :---------------------------------------------------------------------------- | :----------------------------------------------------------- |
-| `config.toml`            | 待受アドレス、hub アドレス、ログなど起動時だけ必要な設定                      | 手動編集 + 再起動                                            |
+| `config.toml`            | 待受アドレス、ログ、`allowed_hosts` など起動時だけ必要な設定                  | 手動編集 + 再起動                                            |
 | `auth_token`             | Web UI / CLI が hub または node にログインするための **Web アクセストークン** | 初回起動時に自動生成。`fxg node access-token show`（ノード） |
-| `node_token`             | ノードが hub に接続するための **ノードペアリングトークン**                    | `fxg hub pairing-token issue` → `fxg node pair`              |
+| `node_token`             | ノードが hub に接続するための **ノードペアリングトークン**                    | `fxg hub pairing-token issue` → Web UI / `fxg node pair`     |
 | `node.db` / `hub.db`     | 実行時設定、セッション、監査ログ、プロジェクト投影                            | Client API / Web UI                                          |
 | `node.addr` / `hub.addr` | 起動中プロセスの実際の待受アドレス                                            | 実行時のみ。削除しても再生成される                           |
 | `vapid.json`             | Web Push の VAPID 鍵ペア                                                      | Hub が生成                                                   |
@@ -173,17 +174,20 @@ fxg support incidents
 「token」は用途ごとに名前を分けています。接続できないときは、まずこの表で
 どのトークンが必要かを確認してください。
 
-| 呼び名                       | ファイル / 環境変数             | 何のため                                                      | 入手・設定方法                                                                                        |
-| :--------------------------- | :------------------------------ | :------------------------------------------------------------ | :---------------------------------------------------------------------------------------------------- |
-| **Web アクセストークン**     | `auth_token`                    | ブラウザや CLI が **1 つの** hub / node の API にログインする | 自動生成。ノードは `fxg node access-token show`、hub は hub ホストの `~/.flexagent/auth_token`        |
-| **ノードペアリングトークン** | `node_token` / `FXG_NODE_TOKEN` | **ノードを hub に登録する**（hub ⇔ node 間）                  | hub で `fxg hub pairing-token issue <node-id>` → ノードで `fxg node pair --hub <URL> --token <TOKEN>` |
-| その他の秘密                 | `secrets/{node,hub}/<id>`       | エージェントの API キー、Git 認証など                         | Secret API（値は書き込み専用）                                                                        |
+| 呼び名                       | ファイル / 環境変数       | 何のため                                                      | 入手・設定方法                                                                                                                        |
+| :--------------------------- | :------------------------ | :------------------------------------------------------------ | :------------------------------------------------------------------------------------------------------------------------------------ |
+| **Web アクセストークン**     | `auth_token`              | ブラウザや CLI が **1 つの** hub / node の API にログインする | 自動生成。ノードは `fxg node access-token show`、hub は hub ホストの `~/.flexagent/auth_token`                                        |
+| **ノードペアリングトークン** | `node_token`              | **ノードを hub に登録する**（hub ⇔ node 間）                  | hub で `fxg hub pairing-token issue <node-id>` → ノードの Web UI（設定 > ハブ接続）または `fxg node pair --hub <URL> --token <TOKEN>` |
+| その他の秘密                 | `secrets/{node,hub}/<id>` | エージェントの API キー、Git 認証など                         | Secret API（値は書き込み専用）                                                                                                        |
 
 - Web アクセストークンはブラウザの Cookie (`fxg_session`) にも使われます。
 - ノードペアリングトークンは hub の `nodes.token_hash` にハッシュだけが保存され、
   発行時に一度だけ表示されます。
-- `fxg node pair` は `~/.flexagent/node_token` と `[node] hub_url` を同時に設定します。
-  既にノードが起動している場合は `fxg node restart` で反映します。
+- ペアリングはノードが所有します。接続先は `node.db` (`node_pairing`)、トークンは
+  `~/.flexagent/node_token` (`0600`) に保存し、`config.toml` は書き換えません。
+- Web UI の **設定 > ハブ接続** から設定・接続テスト・解除ができます。変更は
+  ノード API 経由で即時反映され、`fxg node restart` は不要です。
+- 環境変数（`FXG_HUB_URL` / `FXG_NODE_TOKEN`）と `--hub-url` は廃止しました。
 
 ### 2.2 `config.toml` スキーマ（起動設定のみ）
 
@@ -191,7 +195,6 @@ fxg support incidents
 [node]
 node_id = "home-win"
 listen_addr = "127.0.0.1:7860"
-hub_url = "http://100.64.0.10:8080"   # ws://.../api/v1/node/ws も可
 
 [hub]
 listen_addr = "0.0.0.0:8080"
@@ -206,7 +209,9 @@ no_color = false
 ```
 
 `node.name` / `allow_remote_pty` / `project_scan_dirs` / `tray`、`[agents]`、
-`[provisioners]`、`vapid_subject` は `config.toml` から削除されました。
+`[provisioners]`、`vapid_subject`、`[node] hub_url` は `config.toml` から削除されました
+（ハブ接続先は `node.db` 所有）。`[node] hub_url` が残っている場合は起動時に警告し、
+`fxg doctor` が失敗として報告します（読み込みはしません）。
 `[hub.git_credentials]` はアーキテクチャ簡素化で廃止され、Git 認証は
 Provisioner の `env_secrets` に移行しました。Web UI の設定カタログは現在値と出所
 (`config.toml` / `env` / `cli` / `default`) を読み取り専用で表示します。
@@ -356,6 +361,11 @@ Android スマートフォン（ホーム画面追加PWA）のすべてを単一
 6. **設定画面（タブ構成）**:
    - **全般**:
      クライアント認証トークンの再生成とノードペアリング（ノード個別トークンの発行・失効）。
+   - **ハブ接続**（ノード接続時のみ）:
+     ハブ URL とペアリングトークンの入力、接続テスト、ペアリング / 解除、
+     接続状態（未設定 / 接続中 / 接続済み / 認証エラー / 接続失敗）と失敗理由の表示、
+     自分の `node_id` のコピー。接続先を変える場合は「全履歴を再送し、
+     旧ハブのデータは残る」旨を表示する。
    - **エージェント管理**: ノードで利用可能なエージェント (builtin の
      native CLI / カスタム定義) を一覧表示し、カスタム ACP
      エージェントの追加・編集・削除を行う。builtin にないエージェントは

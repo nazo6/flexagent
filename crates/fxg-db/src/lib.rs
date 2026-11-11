@@ -52,3 +52,4 @@ pub use outbox::SessionOutboxBatch;
 pub use push::PushSubscriptionRecord;
 pub use queries::SessionFilter;
 pub use registration::{NodeRecord, ProjectBindingRecord, ProjectRecord};
+pub use settings::NodePairing;

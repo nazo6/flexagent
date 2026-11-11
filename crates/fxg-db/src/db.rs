@@ -559,6 +559,25 @@ impl Db {
         settings::update_node_settings(&self.pool, request).await
     }
 
+    /// Ensures the single `node_pairing` row exists and returns it.
+    pub async fn ensure_node_pairing(&self) -> Result<settings::NodePairing, DbError> {
+        settings::ensure_node_pairing(&self.pool).await
+    }
+
+    /// Returns the `node_pairing` row when it exists.
+    pub async fn node_pairing(&self) -> Result<Option<settings::NodePairing>, DbError> {
+        settings::get_node_pairing(&self.pool).await
+    }
+
+    /// Sets (or clears) the paired hub address under an optimistic lock.
+    pub async fn set_node_pairing_hub_url(
+        &self,
+        hub_url: Option<&str>,
+        expected_revision: u64,
+    ) -> Result<settings::NodePairing, DbError> {
+        settings::set_node_pairing_hub_url(&self.pool, hub_url, expected_revision).await
+    }
+
     /// Ensures the single `agent_settings` row exists and returns it.
     pub async fn ensure_agent_settings(
         &self,

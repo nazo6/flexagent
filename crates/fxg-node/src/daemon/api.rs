@@ -14,14 +14,14 @@ use fxg_hub::api::{
 use fxg_protocol::CommandId;
 use fxg_protocol::client_api::{
     AgentDiagnostics, AgentOpResponse, AgentsResponse, ConnectionRole, CreateSessionRequest,
-    CreateSessionResponse, CreateWorktreeRequest, DiagnosticsResponse, KillSwitchResponse,
-    ProjectLinkRequest, ProjectLinkResponse, ProjectScanRequest, ProjectScanResponse,
-    ProjectUnlinkRequest, ProjectUnlinkResponse, ProvisionersResponse, PruneWorktreesRequest,
-    RemoveWorktreeRequest, RespondElicitationRequest, RespondElicitationResponse,
-    RespondPermissionRequest, RespondPermissionResponse, ResumeSessionRequest,
-    ResumeSessionResponse, RotateAuthTokenResponse, SessionArchiveRequest, SessionArchiveResponse,
-    SessionImportRequest, SessionImportResponse, SessionRenameRequest, SessionRenameResponse,
-    SupportBundle, SupportBundleConfig, WorktreeInfo, WorktreesResponse,
+    CreateSessionResponse, CreateWorktreeRequest, DiagnosticsResponse, HubLinkState,
+    KillSwitchResponse, ProjectLinkRequest, ProjectLinkResponse, ProjectScanRequest,
+    ProjectScanResponse, ProjectUnlinkRequest, ProjectUnlinkResponse, ProvisionersResponse,
+    PruneWorktreesRequest, RemoveWorktreeRequest, RespondElicitationRequest,
+    RespondElicitationResponse, RespondPermissionRequest, RespondPermissionResponse,
+    ResumeSessionRequest, ResumeSessionResponse, RotateAuthTokenResponse, SessionArchiveRequest,
+    SessionArchiveResponse, SessionImportRequest, SessionImportResponse, SessionRenameRequest,
+    SessionRenameResponse, SupportBundle, SupportBundleConfig, WorktreeInfo, WorktreesResponse,
 };
 use fxg_protocol::common::{
     AgentAction, CommandResult, ComponentHealth, ComponentName, ComponentState, DiffScope,
@@ -123,28 +123,50 @@ impl ClientApiBackend for DaemonState {
         Some(DaemonState::diagnostics_counters(self))
     }
 
+    /// Pushes node ⇔ hub link changes to subscribed clients (sync badge).
+    fn hub_link_updates(
+        &self,
+    ) -> Option<tokio::sync::watch::Receiver<fxg_protocol::client_api::HubLinkStatus>> {
+        Some(DaemonState::hub_link_updates(self))
+    }
+
     fn fxg_home(&self) -> Option<&std::path::Path> {
         Some(DaemonState::paths(self).fxg_home())
     }
 
     async fn role_health(&self, now: i64) -> Vec<ComponentHealth> {
-        let mut sync = if self.config().hub_url.is_none() {
-            ComponentHealth {
+        let link = self.hub_link();
+        let mut sync = match link.state {
+            HubLinkState::Standalone => ComponentHealth {
                 component: ComponentName::Sync,
                 state: ComponentState::NotMeasured,
                 message: Some("hub is not configured (local-only mode)".to_owned()),
                 last_ok_at: None,
                 last_error_at: None,
-            }
-        } else if self.hub_connected() {
-            ComponentHealth::ok(ComponentName::Sync, now)
-        } else {
-            ComponentHealth::failed(
+            },
+            HubLinkState::Connected => ComponentHealth::ok(ComponentName::Sync, now),
+            HubLinkState::Connecting => ComponentHealth::failed(
                 ComponentName::Sync,
                 ComponentState::Degraded,
-                "not connected to the hub",
+                "connecting to the hub",
                 now,
-            )
+            ),
+            HubLinkState::Unauthorized => ComponentHealth::failed(
+                ComponentName::Sync,
+                ComponentState::Error,
+                link.message
+                    .clone()
+                    .unwrap_or_else(|| "the hub rejected the pairing token".to_owned()),
+                now,
+            ),
+            HubLinkState::Failed => ComponentHealth::failed(
+                ComponentName::Sync,
+                ComponentState::Error,
+                link.message
+                    .clone()
+                    .unwrap_or_else(|| "not connected to the hub".to_owned()),
+                now,
+            ),
         };
         match self.db().unsynced_event_count().await {
             Ok(backlog) if backlog > 1000 => {
@@ -190,7 +212,7 @@ impl ClientApiBackend for DaemonState {
             log_file: config.log.file.clone(),
             log_format: config.log.format.clone(),
             node_listen_addr: Some(config.listen_addr.clone()),
-            hub_url: config.hub_url.clone(),
+            hub_url: self.hub_link().hub_url,
             hub_listen_addr: None,
             allowed_hosts: Vec::new(),
             allowed_origins: Vec::new(),
@@ -214,7 +236,7 @@ impl ClientApiBackend for DaemonState {
         Ok(SystemExtras {
             vapid_public_key: None,
             unsynced_event_count: Some(unsynced),
-            hub_connected: Some(self.hub_connected()),
+            hub_link: Some(self.hub_link()),
             last_synced_at: self.db().last_synced_at().await.map_err(ApiError::from)?,
         })
     }

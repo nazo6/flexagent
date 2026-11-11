@@ -259,11 +259,6 @@
                 source: nodeSnapshot.bootstrap.listen_addr.source,
               },
               {
-                label: "Hub",
-                value: nodeSnapshot.bootstrap.hub_url.value ?? "-",
-                source: nodeSnapshot.bootstrap.hub_url.source,
-              },
-              {
                 label: "Log level",
                 value: nodeSnapshot.bootstrap.log_level.value,
                 source: nodeSnapshot.bootstrap.log_level.source,

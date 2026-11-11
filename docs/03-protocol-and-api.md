@@ -407,7 +407,10 @@ pub enum ErrorCode {
 ### 2.2 メッセージの分類
 
 - **同期・ストリーム**: `EventBatchPush` / `EventBatchAck`, `ResyncRequest`,
-  `LiveStreamDelta`, `PtyOutput` / `PtyExit` / `PtyError`
+  `LiveStreamDelta`, `PtyOutput` / `PtyExit` / `PtyError`。
+  `ResyncRequest` に応じた再送は `EventBatchPush.resync = true` とし、ハブは
+  そのバッチの Web Push 通知を抑止します（履歴の再送で端末を起こさない）。
+  `NodeHello.sessions_truncated` は報告上限に達したことを示します。
 - **セッションコマンド**: `StartSession`, `SendPrompt`, `RespondPermission`,
   `RespondElicitation`, `ControlSession`。結果は `CommandResult` で返します。
 - **汎用 Node RPC**: 上記以外のノード操作は `HubToNodeMsg::NodeRpc` と
@@ -572,8 +575,12 @@ pub enum NodeToHubMsg {
         projects_complete: bool,
         state_revision: u64,
         sessions: Vec<SessionSyncState>,
+        sessions_truncated: bool, // 報告上限 (1000) に達した
     },
-    EventBatchPush { events: Vec<SessionEventEnvelope> },
+    EventBatchPush {
+        events: Vec<SessionEventEnvelope>,
+        resync: bool, // ResyncRequest 由来 (ハブは Web Push を抑止する)
+    },
     LiveStreamDelta {
         session_id: SessionId,
         delta: StreamDeltaPayload,
@@ -775,8 +782,16 @@ pub enum HubToNodeMsg {
   `lifecycle_status`）、利用可能エージェント一覧を返却。
 - 設定 (すべて型付き構造体。汎用 Key-Value は使わない):
   - `GET /api/v1/nodes/:node_id/settings`: `NodeSettingsSnapshot`
+    (`pairing: PairingSettings` を含む。トークン値は返さない)
   - `PATCH /api/v1/nodes/:node_id/settings/node` / `.../agents`:
     ノード所有設定の更新
+  - `PUT /api/v1/nodes/:node_id/settings/pairing`:
+    ハブ接続先 (`hub_url`) とトークンを保存し、即時再接続する
+    (トークン省略は接続先が同じ場合のみ。別ハブへは `AUTH_REQUIRED`)
+  - `DELETE /api/v1/nodes/:node_id/settings/pairing`:
+    ペアリングを解除する (`{ expected_revision }`。outbox は保持)
+  - `POST /api/v1/nodes/:node_id/settings/pairing/test`:
+    保存せずに WebSocket ハンドシェイクだけ試し、`HubLinkStatus` を返す
   - `GET/PATCH /api/v1/settings/hub`: `HubSettingsSnapshot` (ハブ)
   - ローカルノードも自身の `node_id` で同じ `/nodes/{node_id}/...` を使う
     （`GET /api/v1/system/info` の `node_id` で取得する）。
@@ -1002,10 +1017,11 @@ xterm互換アダプター）とノード上の ConPTY / Unix PTY
   - ローカルノード: `node.addr` に記録された `http://127.0.0.1:<port>`。既定は `127.0.0.1:7860`。
     `AddrInUse` かつ `[node] listen_addr` / `--listen` が明示されていない場合のみ
     ephemeral port にフォールバックし、実際のアドレスを `node.addr` に書く。
-  - ハブへ直接接続する場合（`--provisioner` 等）: `hub.addr` → `[node] hub_url` →
+  - ハブへ直接接続する場合（`--provisioner` / `fxg web hub` 等）:
+    `--hub` → `hub.addr` → ローカルノードのペアリング (`pairing.hub_url`) →
     `[hub] listen_addr` の順で解決する。
-  - `FXG_NODE_URL` のような CLI 専用 URL 環境変数は設けない。`FXG_HUB_URL` は
-    ノードがハブへ接続するための設定であり、CLI の接続先オーバーライドではない。
+  - `FXG_NODE_URL` のような CLI 専用 URL 環境変数は設けない。`FXG_HUB_URL` と
+    `FXG_NODE_TOKEN` は廃止し、ペアリングは `node.db` が唯一の保存先になった。
 - **認証**:
   - `~/.flexagent/auth_token` (`0600`) のトークンを読み、
     `Authorization: Bearer <AUTH_TOKEN>` を付与する。

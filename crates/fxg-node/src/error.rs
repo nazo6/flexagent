@@ -80,6 +80,9 @@ pub enum NodeError {
     /// The session is running (busy) and cannot be operated on
     #[error("session is busy: {0}")]
     Busy(String),
+    /// A pairing token is required (no token configured, or the hub changed)
+    #[error("a pairing token is required to pair with this hub")]
+    PairingTokenRequired,
     /// A command with the same `command_id` was already processed (idempotency)
     #[error("duplicate command: {0}")]
     CommandDuplicate(String),
@@ -150,6 +153,7 @@ impl NodeError {
             | Self::CommandDuplicate(_)
             | Self::AlreadyResolved(_)
             | Self::NonPersistableEvent(_)
+            | Self::PairingTokenRequired
             | Self::SecretMissing { .. }
             | Self::SecretInUse { .. }
             | Self::SecretInvalid(_) => IncidentSource::Api,
@@ -167,6 +171,7 @@ impl NodeError {
             | Self::ResumeRequired { .. }
             | Self::ForkUnsupported(_)
             | Self::AuthRequired { .. }
+            | Self::PairingTokenRequired
             | Self::SecretMissing { .. }
             | Self::SecretInUse { .. }
             | Self::SecretInvalid(_) => IncidentLevel::Warning,
@@ -231,6 +236,7 @@ impl NodeError {
             Self::AuthRequired { .. } => ErrorCode::AuthRequired,
             Self::Timeout(_) => ErrorCode::Timeout,
             Self::Busy(_) => ErrorCode::Busy,
+            Self::PairingTokenRequired => ErrorCode::AuthRequired,
             Self::CommandDuplicate(_) => ErrorCode::CommandDuplicate,
             Self::AlreadyResolved(_) => ErrorCode::AlreadyResolved,
             Self::Agent(_) => ErrorCode::AgentLaunchFailed,

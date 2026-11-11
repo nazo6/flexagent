@@ -130,8 +130,6 @@ pub struct NodeBootstrapView {
     pub node_id: SourcedValue<String>,
     /// Local HTTP/WS bind address
     pub listen_addr: SourcedValue<String>,
-    /// Node Hub WebSocket URL (standalone when `None`)
-    pub hub_url: SourcedValue<Option<String>>,
     /// Log level
     pub log_level: SourcedValue<String>,
     /// Log file destination (empty when disabled)
@@ -260,6 +258,50 @@ pub struct NodeSettingsSnapshot {
     pub node: NodeSettings,
     /// Agent settings
     pub agents: AgentSettings,
+    /// Hub pairing state
+    pub pairing: PairingSettings,
+}
+
+/// Node ⇔ hub pairing state (`node.db` + the token file).
+///
+/// The pairing is owned by the node: `hub_url` is stored in `node.db` and the
+/// token is a `0600` file (`~/.flexagent/node_token`). The client API never
+/// returns the token, only whether it is configured.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
+pub struct PairingSettings {
+    /// Paired hub address (HTTP origin; `None` = standalone)
+    pub hub_url: Option<String>,
+    /// Whether the pairing token file exists
+    pub token_configured: bool,
+    /// Optimistic-lock revision
+    pub revision: u64,
+    /// Current node ⇔ hub link state
+    pub connection: crate::client_api::HubLinkStatus,
+    /// Whether the last `NodeHello` hit the session reporting limit
+    pub sessions_truncated: bool,
+}
+
+/// `PUT /api/v1/nodes/{node_id}/settings/pairing` request.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
+pub struct UpdatePairingRequest {
+    /// Hub address (`http://host:port`; a full `ws://.../api/v1/node/ws` URL is also accepted)
+    pub hub_url: String,
+    /// Pairing token (omit to keep the current one when the hub address is unchanged)
+    pub token: Option<String>,
+    /// Revision the client observed (`REVISION_MISMATCH` on conflict)
+    pub expected_revision: u64,
+}
+
+/// `POST /api/v1/nodes/{node_id}/settings/pairing/test` request.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
+pub struct TestPairingRequest {
+    /// Hub address to try (`http://host:port` or a full WS URL)
+    pub hub_url: String,
+    /// Token to try (omit to use the configured one)
+    pub token: Option<String>,
 }
 
 /// Hub-owned settings stored in `hub.db` (`hub_settings`).
@@ -511,46 +553,46 @@ mod tests {
 
     #[test]
     fn sourced_option_attributes_layers() {
-        let env = env_from(&[(env_keys::HUB_URL, "ws://env")]);
+        let env = env_from(&[(env_keys::NODE_LISTEN_ADDR, "127.0.0.1:1111")]);
         let value = sourced_option(
             &env,
-            Some("ws://env".to_owned()),
-            env_keys::HUB_URL,
-            Some("ws://file".to_owned()),
-            "node.hub_url",
-            Some("--hub-url"),
+            Some("127.0.0.1:1111".to_owned()),
+            env_keys::NODE_LISTEN_ADDR,
+            Some("127.0.0.1:2222".to_owned()),
+            "node.listen_addr",
+            Some("--listen"),
         );
         assert_eq!(value.source, ConfigSource::Env);
 
         let env = env_from(&[]);
         let value = sourced_option(
             &env,
-            Some("ws://file".to_owned()),
-            env_keys::HUB_URL,
-            Some("ws://file".to_owned()),
-            "node.hub_url",
-            Some("--hub-url"),
+            Some("127.0.0.1:2222".to_owned()),
+            env_keys::NODE_LISTEN_ADDR,
+            Some("127.0.0.1:2222".to_owned()),
+            "node.listen_addr",
+            Some("--listen"),
         );
         assert_eq!(value.source, ConfigSource::ConfigFile);
 
         let value = sourced_option(
             &env,
-            Some("ws://cli".to_owned()),
-            env_keys::HUB_URL,
-            Some("ws://file".to_owned()),
-            "node.hub_url",
-            Some("--hub-url"),
+            Some("127.0.0.1:3333".to_owned()),
+            env_keys::NODE_LISTEN_ADDR,
+            Some("127.0.0.1:2222".to_owned()),
+            "node.listen_addr",
+            Some("--listen"),
         );
         assert_eq!(value.source, ConfigSource::Cli);
-        assert_eq!(value.source_detail.as_deref(), Some("--hub-url"));
+        assert_eq!(value.source_detail.as_deref(), Some("--listen"));
 
         let value = sourced_option(
             &env,
             None,
-            env_keys::HUB_URL,
-            Some("ws://file".to_owned()),
-            "node.hub_url",
-            Some("--hub-url"),
+            env_keys::NODE_LISTEN_ADDR,
+            Some("127.0.0.1:2222".to_owned()),
+            "node.listen_addr",
+            Some("--listen"),
         );
         assert_eq!(value.source, ConfigSource::Default);
         assert_eq!(value.value, None);

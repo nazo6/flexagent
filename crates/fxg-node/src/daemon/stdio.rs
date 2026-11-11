@@ -185,7 +185,10 @@ pub async fn run_stdio(config: StdioConfig) -> Result<(), NodeError> {
                 Ok(crate::session::SessionBroadcast::Persisted { event, .. }) => {
                     fxg_protocol::discard_with!(
                         out_tx
-                            .send(NodeToHubMsg::EventBatchPush { events: vec![event] })
+                            .send(NodeToHubMsg::EventBatchPush {
+                                events: vec![event],
+                                resync: false,
+                            })
                             .await,
                         "push a persisted event to the hub"
                     );

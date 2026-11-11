@@ -109,7 +109,7 @@ pub(crate) async fn system_info<B: ClientApiBackend>(
         version: state.backend.version().to_owned(),
         vapid_public_key: extras.vapid_public_key,
         unsynced_event_count: extras.unsynced_event_count,
-        hub_connected: extras.hub_connected,
+        hub_link: extras.hub_link,
         last_synced_at: extras.last_synced_at,
     })
     .into_response()

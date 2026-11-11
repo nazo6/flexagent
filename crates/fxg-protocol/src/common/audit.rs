@@ -111,6 +111,8 @@ crate::open_string_enum! {
         AuthTokenRotate => "auth_token_rotate",
         /// Settings updated
         SettingsUpdate => "settings_update",
+        /// Hub pairing updated / cleared
+        PairingUpdate => "pairing_update",
         /// Secret created / updated / deleted / rotated
         SecretManage => "secret_manage",
     }

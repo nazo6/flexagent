@@ -7,12 +7,12 @@ use usage::Args;
 const DATA_DIR_FILES: &[(&str, &str)] = &[
     (
         "config.toml",
-        "startup settings (bind address, hub address, logs)",
+        "startup settings (bind address, logs, allowed hosts)",
     ),
     ("auth_token", "Web access token for browsers and CLI"),
     (
         "node_token",
-        "node pairing token (written by `fxg node pair`)",
+        "node pairing token (written by the pairing API / `fxg node pair`)",
     ),
     ("node.db", "node settings, sessions and audit log"),
     ("hub.db", "hub settings, project projection and audit log"),
@@ -53,6 +53,22 @@ impl usage::RunAsync for DoctorArgs {
             Err(err) => (false, format!("config.toml: {err}")),
         };
         checks.push(("config".to_owned(), config_ok.0, config_ok.1));
+
+        let config_path = home.join(fxg_protocol::config::CONFIG_FILE_NAME);
+        match fxg_protocol::config::legacy_hub_url(&config_path) {
+            Some(url) => checks.push((
+                "pairing".to_owned(),
+                false,
+                format!(
+                    "[node] hub_url in config.toml is ignored ({url}); pair from the Web UI or with `fxg node pair`"
+                ),
+            )),
+            None => checks.push((
+                "pairing".to_owned(),
+                true,
+                "stored in node.db (/api/v1/nodes/{id}/settings/pairing)".to_owned(),
+            )),
+        }
 
         checks.push((
             "home".to_owned(),

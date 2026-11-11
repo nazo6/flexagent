@@ -34,10 +34,6 @@ pub mod env_keys {
     pub const NODE_ID: &str = "FXG_NODE_ID";
     /// `[node] listen_addr`
     pub const NODE_LISTEN_ADDR: &str = "FXG_NODE_LISTEN_ADDR";
-    /// `[node] hub_url`
-    pub const HUB_URL: &str = "FXG_HUB_URL";
-    /// Node pairing token (alternative to `~/.flexagent/node_token`)
-    pub const NODE_TOKEN: &str = "FXG_NODE_TOKEN";
     /// Disable automatic `fxg node start` startup from CLI commands (`1` / `true`)
     pub const NO_AUTO_NODE: &str = "FXG_NO_AUTO_NODE";
     /// Idle seconds before a warm ACP agent process is disposed (0 = keep until shutdown)
@@ -60,6 +56,29 @@ pub mod env_keys {
 
 /// Path of the Node Hub WebSocket endpoint on a hub.
 pub const NODE_WS_PATH: &str = "/api/v1/node/ws";
+
+/// Returns a leftover `[node] hub_url` value in `config.toml`, if any.
+///
+/// The key is no longer part of the schema (the pairing moved to `node.db`), but
+/// a silently ignored connection target is confusing, so callers warn when it is
+/// still present. The value is never used.
+pub fn legacy_hub_url(path: &Path) -> Option<String> {
+    // Diagnostic only: an unreadable or malformed file is reported by the
+    // regular configuration loader, so errors are ignored here.
+    let text = match std::fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(_) => return None,
+    };
+    let document: toml::Value = match toml::from_str(&text) {
+        Ok(document) => document,
+        Err(_) => return None,
+    };
+    document
+        .get("node")?
+        .get("hub_url")?
+        .as_str()
+        .map(str::to_owned)
+}
 
 /// Error raised while loading or parsing configuration.
 #[derive(Debug, thiserror::Error)]
@@ -283,9 +302,6 @@ impl GlobalConfig {
         if let Some(v) = env(env_keys::NODE_LISTEN_ADDR) {
             self.node.listen_addr = Some(v);
         }
-        if let Some(v) = env(env_keys::HUB_URL) {
-            self.node.hub_url = Some(v);
-        }
         if let Some(v) = env(env_keys::HUB_LISTEN_ADDR) {
             self.hub.listen_addr = Some(v);
         }
@@ -323,10 +339,6 @@ pub struct NodeBootstrapConfig {
     /// Bind address of the local HTTP/WS server
     /// (a loopback address is recommended by the security principles).
     pub listen_addr: Option<String>,
-    /// Hub address of the hub (`http://host:port`; the Node Hub WebSocket
-    /// endpoint is derived). A full `ws://.../api/v1/node/ws` URL is also
-    /// accepted. When omitted the node runs standalone and locally only.
-    pub hub_url: Option<String>,
 }
 
 impl NodeBootstrapConfig {
@@ -386,7 +398,6 @@ mod tests {
 [node]
 node_id = "home-win"
 listen_addr = "127.0.0.1:7860"
-hub_url = "ws://100.64.0.10:8080/api/v1/node/ws"
 
 [hub]
 listen_addr = "0.0.0.0:8080"
@@ -435,7 +446,6 @@ future_option = "whatever"
         let env = env_map(&[
             ("FXG_NODE_ID", "override-node"),
             ("FXG_NODE_LISTEN_ADDR", "127.0.0.1:9000"),
-            ("FXG_HUB_URL", "ws://example.test/ws"),
             ("FXG_HUB_LISTEN_ADDR", "0.0.0.0:9090"),
             ("FXG_HUB_ALLOWED_HOSTS", "a.test, b.test ,, c.test"),
             ("FXG_HUB_ALLOWED_ORIGINS", "http://a.test"),
@@ -454,7 +464,6 @@ future_option = "whatever"
         assert!(config.log.no_color);
         assert_eq!(config.node.node_id.as_deref(), Some("override-node"));
         assert_eq!(config.node.resolved_listen_addr(), "127.0.0.1:9000");
-        assert_eq!(config.node.hub_url.as_deref(), Some("ws://example.test/ws"));
         assert_eq!(config.hub.resolved_listen_addr(), "0.0.0.0:9090");
         assert_eq!(config.hub.allowed_hosts, vec!["a.test", "b.test", "c.test"]);
         assert_eq!(config.hub.allowed_origins, vec!["http://a.test"]);

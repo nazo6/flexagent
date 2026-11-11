@@ -6,8 +6,8 @@ use axum::extract::{Path as UrlPath, Query, State};
 use axum::response::{IntoResponse, Response};
 use fxg_protocol::node_hub::{NodeRpcRequest, NodeRpcResponse};
 use fxg_protocol::settings::{
-    SecretsResponse, UpdateAgentSettingsRequest, UpdateHubSettingsRequest,
-    UpdateNodeSettingsRequest, UpsertSecretRequest,
+    SecretsResponse, TestPairingRequest, UpdateAgentSettingsRequest, UpdateHubSettingsRequest,
+    UpdateNodeSettingsRequest, UpdatePairingRequest, UpsertSecretRequest,
 };
 use fxg_protocol::{NodeId, SecretId};
 
@@ -115,6 +115,77 @@ pub(crate) async fn update_agent_settings<B: ClientApiBackend>(
         Ok(_) => ApiError::internal("unexpected node RPC response").into_response(),
         Err(err) => err.into_response(),
     }
+}
+
+pub(crate) async fn update_pairing<B: ClientApiBackend>(
+    State(state): State<ClientApiState<B>>,
+    Extension(client): Extension<ClientInfo>,
+    UrlPath(node_id): UrlPath<String>,
+    Json(request): Json<UpdatePairingRequest>,
+) -> Response {
+    match state
+        .backend
+        .execute_node_rpc(
+            &NodeId::from(node_id),
+            NodeRpcRequest::UpdatePairing { request },
+            Some(client),
+        )
+        .await
+    {
+        Ok(NodeRpcResponse::NodeSettings { snapshot }) => Json(*snapshot).into_response(),
+        Ok(_) => ApiError::internal("unexpected node RPC response").into_response(),
+        Err(err) => err.into_response(),
+    }
+}
+
+pub(crate) async fn clear_pairing<B: ClientApiBackend>(
+    State(state): State<ClientApiState<B>>,
+    Extension(client): Extension<ClientInfo>,
+    UrlPath(node_id): UrlPath<String>,
+    Json(request): Json<ClearPairingBody>,
+) -> Response {
+    match state
+        .backend
+        .execute_node_rpc(
+            &NodeId::from(node_id),
+            NodeRpcRequest::ClearPairing {
+                expected_revision: request.expected_revision,
+            },
+            Some(client),
+        )
+        .await
+    {
+        Ok(NodeRpcResponse::NodeSettings { snapshot }) => Json(*snapshot).into_response(),
+        Ok(_) => ApiError::internal("unexpected node RPC response").into_response(),
+        Err(err) => err.into_response(),
+    }
+}
+
+pub(crate) async fn test_pairing<B: ClientApiBackend>(
+    State(state): State<ClientApiState<B>>,
+    UrlPath(node_id): UrlPath<String>,
+    Json(request): Json<TestPairingRequest>,
+) -> Response {
+    match state
+        .backend
+        .execute_node_rpc(
+            &NodeId::from(node_id),
+            NodeRpcRequest::TestPairing { request },
+            None,
+        )
+        .await
+    {
+        Ok(NodeRpcResponse::HubLink { status }) => Json(status).into_response(),
+        Ok(_) => ApiError::internal("unexpected node RPC response").into_response(),
+        Err(err) => err.into_response(),
+    }
+}
+
+/// `DELETE /api/v1/nodes/{node_id}/settings/pairing` body.
+#[derive(Debug, serde::Deserialize)]
+pub(crate) struct ClearPairingBody {
+    /// Revision the client observed (`REVISION_MISMATCH` on conflict)
+    expected_revision: u64,
 }
 
 pub(crate) async fn node_secrets<B: ClientApiBackend>(

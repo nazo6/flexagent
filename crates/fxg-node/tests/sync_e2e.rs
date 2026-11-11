@@ -33,6 +33,7 @@ use fxg_hub::api::auth::{generate_token, hash_token};
 use fxg_hub::state::HubOptions;
 use fxg_node::daemon::{DaemonConfig, NodeDaemon};
 use fxg_node::session_manager::{DriverFactory, StartSessionParams};
+use fxg_protocol::client_api::HubLinkState;
 use fxg_protocol::common::{
     ClientSource, ErrorCode, PermissionOption, PermissionOptionKind, SessionStatus,
     StreamDeltaPayload,
@@ -209,6 +210,23 @@ async fn write_mock_agent_config(fxg_home: &Path) {
     .expect("register custom agent");
 }
 
+/// Seeds the pairing in `node.db` and the token file (the same state the
+/// pairing API writes).
+async fn seed_pairing(home: &Path, server_url: &str, token: &str) {
+    let db = Db::open(&fxg_db::node_db_path(home), DbRole::Node)
+        .await
+        .expect("node db");
+    let pairing = db.ensure_node_pairing().await.expect("pairing row");
+    let ws_url = fxg_protocol::config::node_ws_url(server_url).expect("ws url");
+    db.set_node_pairing_hub_url(
+        Some(&fxg_protocol::config::hub_http_origin(&ws_url)),
+        pairing.revision,
+    )
+    .await
+    .expect("pairing url");
+    fxg_node::daemon::save_token_file(&home.join("node_token"), token).expect("token file");
+}
+
 /// Starts a test node.
 async fn start_node(
     home: &Path,
@@ -218,10 +236,11 @@ async fn start_node(
     agent: &MockAgent,
 ) -> NodeDaemon {
     write_mock_agent_config(home).await;
+    if let (Some(url), Some(token)) = (&server_url, &node_token) {
+        seed_pairing(home, url, token).await;
+    }
     let mut config = DaemonConfig::new(home.to_path_buf(), node_id, "E2E Node");
     config.listen_addr = "127.0.0.1:0".to_owned();
-    config.hub_url = server_url;
-    config.node_token = node_token;
     NodeDaemon::start_with_driver_factory(config, agent.factory())
         .await
         .expect("start node")
@@ -1289,4 +1308,109 @@ async fn hub_archives_and_deletes_session() {
     tokio::time::timeout(Duration::from_secs(10), server.wait())
         .await
         .expect("server stop");
+}
+
+// ----------------------------------------------------------------------
+// E2E: rejected pairing token
+// ----------------------------------------------------------------------
+
+/// A revoked (or never valid) pairing token is reported as `UNAUTHORIZED` so the
+/// GUI can tell it apart from an unreachable hub.
+#[tokio::test(flavor = "multi_thread")]
+async fn revoked_pairing_token_is_reported_as_unauthorized() {
+    let server_home = tempfile::tempdir().expect("server home");
+    let node_home = tempfile::tempdir().expect("node home");
+
+    let port = reserve_port();
+    let server_url = format!("ws://127.0.0.1:{port}/api/v1/node/ws");
+    // Issue a token, then revoke it (simulates rotating it on the hub).
+    let token = issue_node_token(server_home.path(), "node-1").await;
+    {
+        let db = Db::open(&fxg_db::hub_db_path(server_home.path()), DbRole::Hub)
+            .await
+            .expect("hub db");
+        db.set_node_token_hash("node-1", None)
+            .await
+            .expect("revoke token");
+    }
+
+    let _server = start_hub(server_home.path(), port).await;
+    let agent = MockAgent::default();
+    let node = start_node(
+        node_home.path(),
+        "node-1",
+        Some(server_url),
+        Some(token),
+        &agent,
+    )
+    .await;
+
+    wait_until("unauthorized hub link", Duration::from_secs(20), || async {
+        node.state().hub_link().state == HubLinkState::Unauthorized
+    })
+    .await;
+
+    let link = node.state().hub_link();
+    assert_eq!(link.state, HubLinkState::Unauthorized);
+    assert!(
+        link.message
+            .as_deref()
+            .unwrap_or_default()
+            .contains("pairing token"),
+        "message should explain the rejection: {link:?}"
+    );
+    assert_eq!(link.hub_url, Some(format!("http://127.0.0.1:{port}")));
+
+    node.shutdown();
+}
+
+// ----------------------------------------------------------------------
+// E2E: unpairing takes effect immediately
+// ----------------------------------------------------------------------
+
+/// Clearing the pairing stops syncing and reports `standalone` without a restart
+/// (the sync supervisor must not overwrite the state while it disconnects).
+#[tokio::test(flavor = "multi_thread")]
+async fn unpairing_stops_sync_and_reports_standalone() {
+    let server_home = tempfile::tempdir().expect("server home");
+    let node_home = tempfile::tempdir().expect("node home");
+
+    let port = reserve_port();
+    let server_url = format!("ws://127.0.0.1:{port}/api/v1/node/ws");
+    let token = issue_node_token(server_home.path(), "node-1").await;
+    let _server = start_hub(server_home.path(), port).await;
+
+    let agent = MockAgent::default();
+    let node = start_node(
+        node_home.path(),
+        "node-1",
+        Some(server_url),
+        Some(token),
+        &agent,
+    )
+    .await;
+    wait_until("connected", Duration::from_secs(20), || async {
+        node.state().hub_link().state == HubLinkState::Connected
+    })
+    .await;
+
+    let revision = node
+        .state()
+        .pairing_settings()
+        .await
+        .expect("pairing")
+        .revision;
+    node.state()
+        .clear_pairing(revision, &fxg_node::daemon::AuditSource::local())
+        .await
+        .expect("unpair");
+
+    wait_until("standalone", Duration::from_secs(10), || async {
+        node.state().hub_link().state == HubLinkState::Standalone
+    })
+    .await;
+    assert!(node.state().hub_target().is_none());
+    assert!(!node_home.path().join("node_token").exists());
+
+    node.shutdown();
 }
