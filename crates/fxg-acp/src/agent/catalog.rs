@@ -95,36 +95,58 @@ impl AgentCatalog {
     pub fn list(&self, index: &RegistryIndex, include_unavailable: bool) -> Vec<AgentListEntry> {
         let mut entries = self.registry.custom_entries(index);
         let overridden: BTreeSet<String> = entries.iter().map(|entry| entry.id.clone()).collect();
+        // Full custom providers own their catalog entry and launch path; the
+        // registry entry for the same ID is not used.
+        let mut custom_backends = BTreeSet::new();
 
         for provider in self.providers.values() {
             let definition = provider.definition();
-            if overridden.contains(&definition.id) || index.find(&definition.id).is_some() {
+            if overridden.contains(&definition.id) {
                 continue;
             }
-            let Some(preset) = provider.launch_preset() else {
+            let backend = provider.backend();
+            let is_custom = matches!(&backend, AgentBackend::Custom(_));
+            if is_custom {
+                custom_backends.insert(definition.id.clone());
+            } else if index.find(&definition.id).is_some() {
+                // ACP providers prefer the richer registry entry; metadata is
+                // merged in the final pass below.
                 continue;
-            };
-            let Some(program) = (self.preset_lookup)(preset) else {
+            }
+
+            let mut sources = Vec::new();
+            if let Some(preset) = provider.launch_preset()
+                && let Some(program) = (self.preset_lookup)(preset)
+            {
+                sources.push(LocalSource::External(program));
+            } else if !is_custom {
+                // ACP providers need a preset when the registry has no entry.
                 continue;
-            };
+            }
+
             entries.push(AgentListEntry {
                 id: definition.id.clone(),
                 name: definition.name.clone(),
                 version: "-".to_owned(),
                 description: definition.description.clone(),
-                registry: false,
+                registry: index.find(&definition.id).is_some(),
                 package_available: false,
-                sources: vec![LocalSource::External(program)],
+                sources,
                 custom: None,
-                backend: provider.backend().kind(),
+                backend: backend.kind(),
                 icon: definition.icon.clone(),
             });
         }
 
-        entries.extend(self.registry.registry_entries(index, include_unavailable));
+        entries.extend(
+            self.registry
+                .registry_entries(index, include_unavailable)
+                .into_iter()
+                .filter(|entry| !custom_backends.contains(&entry.id)),
+        );
 
-        // Tier 2 metadata applies to preset and registry entries, but never to a
-        // custom definition (which shadows the built-in provider).
+        // Merge Tier 2 metadata into preset / registry entries. Custom
+        // definitions shadow built-in providers, so they are left untouched.
         for entry in &mut entries {
             if entry.custom.is_some() {
                 continue;
@@ -132,19 +154,28 @@ impl AgentCatalog {
             let Some(provider) = self.providers.get(&entry.id) else {
                 continue;
             };
-            let AgentBackend::AcpExtended(extension) = provider.backend() else {
-                continue;
-            };
-            entry.backend = AgentBackendKind::AcpExtended;
-            let metadata = extension.metadata();
-            if let Some(name) = metadata.name {
-                entry.name = name;
-            }
-            if metadata.description.is_some() {
-                entry.description = metadata.description;
-            }
-            if metadata.icon.is_some() {
-                entry.icon = metadata.icon;
+            match provider.backend() {
+                AgentBackend::AcpExtended(extension) => {
+                    entry.backend = AgentBackendKind::AcpExtended;
+                    let metadata = extension.metadata();
+                    if let Some(name) = metadata.name {
+                        entry.name = name;
+                    }
+                    if metadata.description.is_some() {
+                        entry.description = metadata.description;
+                    }
+                    if metadata.icon.is_some() {
+                        entry.icon = metadata.icon;
+                    }
+                }
+                AgentBackend::Custom(_) => {
+                    entry.backend = AgentBackendKind::Custom;
+                    let definition = provider.definition();
+                    entry.name = definition.name.clone();
+                    entry.description = definition.description.clone();
+                    entry.icon = definition.icon.clone();
+                }
+                AgentBackend::Acp => {}
             }
         }
         entries
@@ -152,7 +183,8 @@ impl AgentCatalog {
 
     /// Resolves the launch spec for an agent.
     ///
-    /// Order: custom definition → built-in preset → ACP Registry.
+    /// Order: custom definition → full custom provider → built-in preset →
+    /// ACP Registry.
     pub async fn launch_spec(
         &self,
         name: &str,
@@ -168,6 +200,11 @@ impl AgentCatalog {
 
         let provider = self.providers.get(&id);
         let backend = provider.map(|provider| provider.backend());
+        if let Some(provider) = provider
+            && matches!(&backend, Some(AgentBackend::Custom(_)))
+        {
+            return Ok(self.custom_driver_spec(provider.as_ref(), extra_args));
+        }
         let driver_kind = backend.as_ref().map(Self::driver_kind);
 
         let mut spec = if let Some(provider) = provider
@@ -198,6 +235,7 @@ impl AgentCatalog {
         match &spec.driver_kind {
             DriverKind::Acp => Ok(Arc::clone(&self.acp)),
             DriverKind::AcpExtended => self.extended_driver(&spec.agent_id),
+            DriverKind::Custom => self.custom_driver(&spec.agent_id),
             DriverKind::Other(other) => Err(anyhow!("unknown driver kind: {other}")),
         }
     }
@@ -207,7 +245,53 @@ impl AgentCatalog {
         match backend {
             AgentBackend::Acp => DriverKind::Acp,
             AgentBackend::AcpExtended(_) => DriverKind::AcpExtended,
+            AgentBackend::Custom(_) => DriverKind::Custom,
         }
+    }
+
+    /// Returns the built-in driver of a full custom provider.
+    fn custom_driver(&self, agent_id: &str) -> anyhow::Result<Arc<dyn AgentDriver>> {
+        let provider = self
+            .providers
+            .get(agent_id)
+            .ok_or_else(|| anyhow!("no provider is registered for agent {agent_id}"))?;
+        let AgentBackend::Custom(driver) = provider.backend() else {
+            return Err(anyhow!("agent {agent_id} is not a full custom driver"));
+        };
+        Ok(driver)
+    }
+
+    /// Builds the launch spec for a full custom driver.
+    ///
+    /// The driver owns the actual launch; the spec only carries the optional
+    /// preset command and pass-through arguments.
+    fn custom_driver_spec(
+        &self,
+        provider: &dyn AgentProvider,
+        extra_args: &[String],
+    ) -> AgentLaunchSpec {
+        let definition = provider.definition();
+        let mut spec = AgentLaunchSpec {
+            agent_id: definition.id.clone(),
+            display_name: definition.name.clone(),
+            driver_kind: DriverKind::Custom,
+            program: None,
+            args: extra_args.to_vec(),
+            env: Vec::new(),
+        };
+        if let Some(preset) = provider.launch_preset()
+            && let Some(program) = (self.preset_lookup)(preset)
+        {
+            let mut args = preset
+                .args
+                .iter()
+                .map(|arg| (*arg).to_owned())
+                .collect::<Vec<_>>();
+            args.extend(extra_args.iter().cloned());
+            spec.program = Some(program);
+            spec.args = args;
+        }
+        spec
     }
 
     /// Returns the cached Tier 2 wrapper for an agent.
@@ -252,7 +336,7 @@ impl AgentCatalog {
             agent_id: definition.id.clone(),
             display_name: definition.name.clone(),
             driver_kind: DriverKind::Acp,
-            program,
+            program: Some(program),
             args,
             env: Vec::new(),
         }
@@ -278,10 +362,29 @@ mod tests {
     use super::*;
     use crate::agent::extension::{AgentExtension, AgentMetadata};
     use crate::agent::provider::StaticProvider;
+    use crate::driver::{DriverEvent, StartSessionRequest, StartedSession};
     use fxg_protocol::client_api::AgentBackendKind;
     use fxg_protocol::settings::CustomAgentConfig;
+    use tokio::sync::mpsc;
 
     struct DummyExtension;
+
+    struct DummyDriver;
+
+    #[async_trait::async_trait]
+    impl AgentDriver for DummyDriver {
+        fn driver_kind(&self) -> DriverKind {
+            DriverKind::Custom
+        }
+
+        async fn start_session(
+            &self,
+            _req: StartSessionRequest,
+            _event_tx: mpsc::UnboundedSender<DriverEvent>,
+        ) -> anyhow::Result<StartedSession> {
+            anyhow::bail!("DummyDriver is not started in catalog tests")
+        }
+    }
 
     #[async_trait::async_trait]
     impl AgentExtension for DummyExtension {
@@ -352,7 +455,7 @@ mod tests {
             ))
             .expect("custom spec");
         assert_eq!(spec.driver_kind, DriverKind::Acp);
-        assert_eq!(spec.program, PathBuf::from("my-agent"));
+        assert_eq!(spec.program, Some(PathBuf::from("my-agent")));
         assert_eq!(spec.args, vec!["--flag", "--extra"]);
         assert_eq!(spec.env, vec![("KEY".to_owned(), "value".to_owned())]);
     }
@@ -387,7 +490,7 @@ mod tests {
             .expect("preset spec");
         assert_eq!(spec.agent_id, "demo");
         assert_eq!(spec.display_name, "Demo");
-        assert_eq!(spec.program, PathBuf::from("/fake/bin/demo"));
+        assert_eq!(spec.program, Some(PathBuf::from("/fake/bin/demo")));
         assert_eq!(spec.args, vec!["acp", "--verbose"]);
         assert!(spec.env.is_empty());
 
@@ -425,7 +528,7 @@ mod tests {
             .block_on(catalog.launch_spec("my-agent", &index(), Path::new("."), &[]))
             .expect("custom");
         assert_eq!(spec.display_name, "My Agent");
-        assert_eq!(spec.program, PathBuf::from("my-agent"));
+        assert_eq!(spec.program, Some(PathBuf::from("my-agent")));
 
         let entries = catalog.list(&index(), false);
         assert_eq!(
@@ -446,7 +549,7 @@ mod tests {
             agent_id: "my-agent".to_owned(),
             display_name: "My Agent".to_owned(),
             driver_kind: DriverKind::Acp,
-            program: PathBuf::from("my-agent"),
+            program: Some(PathBuf::from("my-agent")),
             args: Vec::new(),
             env: Vec::new(),
         };
@@ -500,6 +603,81 @@ mod tests {
         assert_eq!(entry.backend, AgentBackendKind::AcpExtended);
         assert_eq!(entry.name, "Extended (enriched)");
         assert_eq!(entry.icon.as_deref(), Some("builtin:extended"));
+    }
+
+    #[test]
+    fn custom_backend_is_available_without_a_program() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let provider = StaticProvider::new(
+            AgentDefinition {
+                id: "custom".to_owned(),
+                name: "Custom".to_owned(),
+                description: Some("Built-in custom driver".to_owned()),
+                icon: None,
+            },
+            None,
+        )
+        .with_backend(AgentBackend::Custom(Arc::new(DummyDriver)));
+        let catalog = AgentCatalog::with_providers(registry(dir.path()), vec![Arc::new(provider)]);
+
+        let spec = tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(catalog.launch_spec(
+                "custom",
+                &index(),
+                Path::new("."),
+                &["--verbose".to_owned()],
+            ))
+            .expect("custom spec");
+        assert_eq!(spec.driver_kind, DriverKind::Custom);
+        assert!(spec.program.is_none());
+        assert_eq!(spec.args, vec!["--verbose"]);
+
+        let driver = catalog.driver_for(&spec).expect("custom driver");
+        assert_eq!(driver.driver_kind(), DriverKind::Custom);
+
+        let entry = catalog
+            .list(&index(), false)
+            .into_iter()
+            .find(|entry| entry.id == "custom")
+            .expect("custom entry");
+        assert_eq!(entry.backend, AgentBackendKind::Custom);
+        assert!(entry.is_available());
+        assert!(entry.sources.is_empty());
+    }
+
+    #[test]
+    fn custom_backend_uses_its_preset_when_installed() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let provider = StaticProvider::new(
+            AgentDefinition {
+                id: "custom".to_owned(),
+                name: "Custom".to_owned(),
+                description: None,
+                icon: None,
+            },
+            Some(LaunchPreset {
+                program: "custom-cli",
+                args: &["serve"],
+            }),
+        )
+        .with_backend(AgentBackend::Custom(Arc::new(DummyDriver)));
+        let mut catalog =
+            AgentCatalog::with_providers(registry(dir.path()), vec![Arc::new(provider)]);
+        catalog.preset_lookup = |_| Some(PathBuf::from("/fake/bin/custom-cli"));
+
+        let spec = tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(catalog.launch_spec(
+                "custom",
+                &index(),
+                Path::new("."),
+                &["--verbose".to_owned()],
+            ))
+            .expect("custom spec");
+        assert_eq!(spec.driver_kind, DriverKind::Custom);
+        assert_eq!(spec.program, Some(PathBuf::from("/fake/bin/custom-cli")));
+        assert_eq!(spec.args, vec!["serve", "--verbose"]);
     }
 
     #[test]

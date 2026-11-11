@@ -350,11 +350,15 @@ impl AcpDriver {
         event_tx: &mpsc::UnboundedSender<DriverEvent>,
     ) -> anyhow::Result<StartedSession> {
         // Extension resolution for `npx` / `uvx` (Windows PATHEXT support)
-        let program = fxg_pty::resolve_command(&req.launch.program.to_string_lossy(), &req.cwd)
-            .map_err(|err| {
+        let program_path =
+            req.launch.program.as_deref().ok_or_else(|| {
+                anyhow!("agent {} has no executable configured", req.launch.agent_id)
+            })?;
+        let program =
+            fxg_pty::resolve_command(&program_path.to_string_lossy(), &req.cwd).map_err(|err| {
                 anyhow!(
                     "failed to resolve agent program {}: {err}",
-                    req.launch.program.display()
+                    program_path.display()
                 )
             })?;
         let key = LaunchKey::new(&req.launch, program.clone());

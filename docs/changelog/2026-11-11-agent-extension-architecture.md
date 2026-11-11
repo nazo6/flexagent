@@ -1,7 +1,7 @@
 # エージェント実装の3層モデルと拡張基盤（計画）
 
 - **日付**: 2026-11-11
-- **状態**: 実装中（Phase 2 完了 / Phase 3 以降は計画）
+- **状態**: 実装中（Phase 3 完了 / Phase 4 以降は計画）
 - **対象パッケージ**: `fxg-protocol`, `fxg-acp`, `fxg-node`, `fxg-cli`, `ui`,
   `docs`
 - **対象スクリプト**: `mise run fmt`, `mise run lint:errors`,
@@ -310,16 +310,19 @@ pub struct CustomAgentConfig {
 ### 2.7 Tier 3
 
 `AgentProvider` が `AgentBackend::Custom(Arc<dyn AgentDriver>)` を返す経路を
-追加する。driver インスタンスは catalog が所有し、セッション間で共有する。
+追加する。driver インスタンスは provider が所有し、catalog の `driver_for` が
+clone して返す。セッション間で共有される。
 
 - `DriverKind::Custom` は `agent_id` から provider の driver を解決する
 - capability probe は既存の driver 非依存な実装をそのまま使う
 - `shutdown_idle` / `stderr_tail` / `stderr_snapshot` は既存のデフォルト実装を
   利用できる
-- プロセスを持たない driver を許す場合に備え、`AgentLaunchSpec.program` を
-  `Option<PathBuf>` にするかは Phase 3 で判断する。ACP は `Some` を必須とする
+- `AgentLaunchSpec.program` は `Option<PathBuf>` とし、ローカルプロセスを起動
+  しない driver は `None` を受け取れる。ACP は `Some` を必須とする
 - full custom driver は起動・イベント変換・エラー処理の契約を
   `AgentDriver` の doc コメントに明記する
+- Tier 3 provider の一覧エントリは「ドライバが組み込まれている」ため、
+  `sources` が空でも利用可能として扱う
 
 ### 2.8 プラグイン将来像
 
@@ -397,13 +400,16 @@ overlay が効く。
 
 ### Phase 3: Tier 3 の基盤
 
-- [ ] `DriverKind::Custom` を追加する
-- [ ] provider から `Arc<dyn AgentDriver>` を返す経路を追加する
-- [ ] mock full custom driver を `SessionManager` 経由で起動する統合テストを追加する
-- [ ] `AgentLaunchSpec.program` の `Option` 化を判断・実装する
-- [ ] full custom driver の契約を doc コメントに明記する
+- [x] `DriverKind::Custom` を追加する
+- [x] provider から `Arc<dyn AgentDriver>` を返す経路を追加する
+- [x] mock full custom driver を `SessionManager` 経由で起動する統合テストを追加する
+- [x] `AgentLaunchSpec.program` の `Option` 化を判断・実装する
+- [x] full custom driver の契約を doc コメントに明記する
 
 完了条件: ACP に依存しない driver が一覧・起動・probe・shutdown まで通る。
+
+実装ログ: 2026-11-11 に完了。詳細は
+[`2026-11-11-agent-extension-phase3.md`](./2026-11-11-agent-extension-phase3.md) を参照。
 
 ### Phase 4: 最初の実例（opencode）
 

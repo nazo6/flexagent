@@ -276,7 +276,7 @@ mod tests {
             agent_id: "demo".to_owned(),
             display_name: "Demo".to_owned(),
             driver_kind: DriverKind::Acp,
-            program: PathBuf::from("demo"),
+            program: Some(PathBuf::from("demo")),
             args: Vec::new(),
             env: Vec::new(),
         }

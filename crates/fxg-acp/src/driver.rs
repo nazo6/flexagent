@@ -25,6 +25,8 @@ pub enum DriverKind {
     Acp,
     /// ACP agent with fxg-side extensions (`ExtendedAcpDriver`)
     AcpExtended,
+    /// Fully custom driver (the agent ID is in [`AgentLaunchSpec::agent_id`])
+    Custom,
     /// Another driver kind, preserved for diagnostics
     Other(String),
 }
@@ -35,6 +37,7 @@ impl DriverKind {
         match self {
             Self::Acp => "acp",
             Self::AcpExtended => "acp_extended",
+            Self::Custom => "custom",
             Self::Other(other) => other,
         }
     }
@@ -57,7 +60,10 @@ pub struct AgentLaunchSpec {
     pub driver_kind: DriverKind,
     /// Executable (absolute path, or a command name on `PATH`).
     /// `PATH` resolution (`which` / `PATHEXT`) is done by the driver right before launch.
-    pub program: PathBuf,
+    ///
+    /// `None` is allowed for full custom drivers that do not launch a local
+    /// process. ACP drivers require `Some`.
+    pub program: Option<PathBuf>,
     /// Command arguments (base; pass-through arguments go in [`StartSessionRequest::extra_args`])
     pub args: Vec<String>,
     /// Additional environment variables injected into the process (overrides inherited ones)
@@ -110,7 +116,7 @@ pub struct StartSessionRequest {
     pub title: Option<String>,
     /// Working directory (the session's `local_path` / worktree path)
     pub cwd: PathBuf,
-    /// Launch spec (resolved)
+    /// Launch spec (resolved). Full custom drivers may receive `program: None`.
     pub launch: AgentLaunchSpec,
     /// Pass-through arguments for the agent process (`fxg session new <agent> -- ...`)
     pub extra_args: Vec<String>,
@@ -158,7 +164,31 @@ pub enum DriverEvent {
     },
 }
 
-/// Agent driver (ACP / OpenCode2, etc.).
+/// Agent driver (ACP / ACP + extension / full custom).
+///
+/// # Full custom drivers
+///
+/// A driver implements this trait directly when the agent cannot be expressed
+/// as ACP (or ACP plus an extension). The session manager only relies on the
+/// contract below; it does not know the agent's protocol.
+///
+/// - Drivers are shared across the daemon. They must be `Send + Sync` and keep
+///   per-session state in the [`ActiveSessionHandle`] returned by
+///   [`Self::start_session`].
+/// - `start_session` must send normalized [`DriverEvent`]s to `event_tx`.
+///   Persistence, ordering (`node_seq`) and delivery are handled centrally.
+/// - Set [`StartedSession::context_restored`] only when the agent-side context
+///   was restored natively. If it is `false`, the caller injects a history
+///   replay.
+/// - Set [`StartedSession::agent_session_id`] when the driver can restore the
+///   session natively; it is otherwise optional.
+/// - [`AgentLaunchSpec::program`] may be `None` for drivers that do not launch a
+///   local process. ACP drivers require `Some`.
+/// - [`ActiveSessionHandle::shutdown`] closes the session; [`dispose`] (the
+///   default implementation calls `shutdown`) must terminate everything the
+///   driver owns for that session.
+///
+/// [`dispose`]: ActiveSessionHandle::dispose
 #[async_trait]
 pub trait AgentDriver: Send + Sync {
     /// Driver identifier (`"acp"` / `"opencode2"`).
@@ -314,7 +344,7 @@ mod tests {
             agent_id: "mock".to_owned(),
             display_name: "Mock".to_owned(),
             driver_kind: DriverKind::Other("mock".to_owned()),
-            program: PathBuf::from("mock"),
+            program: Some(PathBuf::from("mock")),
             args: vec![],
             env: vec![],
         };

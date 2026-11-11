@@ -350,6 +350,114 @@ async fn probe_applies_extension_capability_overlay() {
 }
 
 #[tokio::test]
+async fn full_custom_driver_starts_through_the_catalog() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db = Db::open_in_memory(DbRole::Node).await.expect("db");
+    db.upsert_node(&fxg_db::NodeRecord::new(
+        "test-node",
+        "Test Node",
+        "linux",
+        "aarch64",
+        "0.1.0",
+    ))
+    .await
+    .expect("node");
+    let bus = SessionEventBus::new(db);
+    NodePaths::new(dir.path().to_path_buf())
+        .ensure_dirs()
+        .expect("dirs");
+    let settings = AgentSettings {
+        default_agent: None,
+        registry_url: None,
+        registry_cache_ttl_secs: None,
+        aliases: Default::default(),
+        revision: 1,
+        updated_at: 0,
+    };
+    let mock = MockAgent::default();
+    mock.set_start_capabilities(AgentCapabilitiesPreview::default());
+    let provider = StaticProvider::new(
+        AgentDefinition {
+            id: "custom".to_owned(),
+            name: "Custom".to_owned(),
+            description: None,
+            icon: None,
+        },
+        None,
+    )
+    .with_backend(AgentBackend::Custom(Arc::new(mock.clone())));
+    let catalog = AgentCatalog::with_providers(
+        AcpRegistry::new(dir.path(), &settings, BTreeMap::new(), Vec::new()),
+        vec![Arc::new(provider)],
+    );
+    let manager = SessionManager::new(bus, "test-node", catalog);
+
+    let outcome = manager
+        .ensure_session(&CommandId::from("c1"), dir.path(), "custom", &[], None)
+        .await
+        .expect("ensure");
+    wait_idle(&manager, &outcome.session_id).await;
+
+    let starts = mock.starts();
+    assert_eq!(starts.len(), 1);
+    assert_eq!(
+        starts[0].cwd,
+        dunce::canonicalize(dir.path()).expect("canonical cwd")
+    );
+}
+
+#[tokio::test]
+async fn full_custom_driver_probe_uses_the_catalog_driver() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db = Db::open_in_memory(DbRole::Node).await.expect("db");
+    let bus = SessionEventBus::new(db);
+    NodePaths::new(dir.path().to_path_buf())
+        .ensure_dirs()
+        .expect("dirs");
+    let settings = AgentSettings {
+        default_agent: None,
+        registry_url: None,
+        registry_cache_ttl_secs: None,
+        aliases: Default::default(),
+        revision: 1,
+        updated_at: 0,
+    };
+    let mock = MockAgent::default();
+    let preview = AgentCapabilitiesPreview {
+        current_mode: Some("code".to_owned()),
+        available_modes: vec![ModeInfo {
+            mode_id: "code".to_owned(),
+            name: "Code".to_owned(),
+            description: None,
+        }],
+        config_options: Vec::new(),
+    };
+    mock.set_start_capabilities(preview.clone());
+    let provider = StaticProvider::new(
+        AgentDefinition {
+            id: "custom".to_owned(),
+            name: "Custom".to_owned(),
+            description: None,
+            icon: None,
+        },
+        None,
+    )
+    .with_backend(AgentBackend::Custom(Arc::new(mock.clone())));
+    let catalog = AgentCatalog::with_providers(
+        AcpRegistry::new(dir.path(), &settings, BTreeMap::new(), Vec::new()),
+        vec![Arc::new(provider)],
+    );
+    let manager = SessionManager::new(bus, "test-node", catalog);
+
+    let probed = manager
+        .probe_agent_capabilities("custom", dir.path(), &[], true)
+        .await
+        .expect("probe");
+    assert_eq!(probed, preview);
+    assert_eq!(mock.starts().len(), 1);
+}
+
+#[tokio::test]
 async fn send_prompt_records_user_message_and_dispatches() {
     let (manager, mock, dir) = setup().await;
     let outcome = manager

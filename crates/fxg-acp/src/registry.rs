@@ -211,7 +211,9 @@ pub struct AgentListEntry {
 impl AgentListEntry {
     /// Whether it can be launched on this node.
     pub fn is_available(&self) -> bool {
-        self.custom.is_some() || !self.sources.is_empty()
+        self.custom.is_some()
+            || !self.sources.is_empty()
+            || self.backend == AgentBackendKind::Custom
     }
 }
 
@@ -552,7 +554,7 @@ impl AcpRegistry {
             agent_id: id.to_owned(),
             display_name: custom.name.clone().unwrap_or_else(|| id.to_owned()),
             driver_kind: DriverKind::Acp,
-            program: PathBuf::from(&custom.command),
+            program: Some(PathBuf::from(&custom.command)),
             args,
             env,
         }))
@@ -632,7 +634,7 @@ impl AcpRegistry {
             agent_id: agent.id.clone(),
             display_name: agent.name.clone(),
             driver_kind: DriverKind::Acp,
-            program,
+            program: Some(program),
             args,
             env: env.into_iter().collect(),
         })
@@ -770,7 +772,7 @@ mod tests {
             .expect("custom spec")
             .expect("custom definition");
         assert_eq!(spec.driver_kind, DriverKind::Acp);
-        assert_eq!(spec.program, PathBuf::from("my-agent"));
+        assert_eq!(spec.program, Some(PathBuf::from("my-agent")));
         assert_eq!(spec.args, vec!["--flag", "--extra"]);
         assert_eq!(spec.env, vec![("KEY".to_owned(), "value".to_owned())]);
     }
@@ -785,7 +787,7 @@ mod tests {
         let spec = registry
             .spec_for_source(agent, LocalSource::Npx, &[])
             .expect("npx spec");
-        assert_eq!(spec.program, PathBuf::from("npx"));
+        assert_eq!(spec.program, Some(PathBuf::from("npx")));
         assert_eq!(spec.args, vec!["-y", "demo-agent@1.2.3", "--acp"]);
         assert_eq!(spec.env, vec![("DEMO".to_owned(), "1".to_owned())]);
     }

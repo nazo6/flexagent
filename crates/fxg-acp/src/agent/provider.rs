@@ -8,6 +8,7 @@ use std::sync::Arc;
 use fxg_protocol::client_api::AgentBackendKind;
 
 use super::extension::AgentExtension;
+use crate::driver::AgentDriver;
 
 /// Static information needed even when the agent is not running.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -42,6 +43,8 @@ pub enum AgentBackend {
     Acp,
     /// ACP plus an fxg-side extension (`ExtendedAcpDriver`)
     AcpExtended(Arc<dyn AgentExtension>),
+    /// Fully custom driver
+    Custom(Arc<dyn AgentDriver>),
 }
 
 impl AgentBackend {
@@ -50,6 +53,7 @@ impl AgentBackend {
         match self {
             Self::Acp => AgentBackendKind::Acp,
             Self::AcpExtended(_) => AgentBackendKind::AcpExtended,
+            Self::Custom(_) => AgentBackendKind::Custom,
         }
     }
 }
