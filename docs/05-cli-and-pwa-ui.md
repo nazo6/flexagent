@@ -210,8 +210,9 @@ no_color = false
 
 `node.name` / `allow_remote_pty` / `project_scan_dirs` / `tray`、`[agents]`、
 `[provisioners]`、`vapid_subject`、`[node] hub_url` は `config.toml` から削除されました
-（ハブ接続先は `node.db` 所有）。`[node] hub_url` が残っている場合は起動時に警告し、
-`fxg doctor` が失敗として報告します（読み込みはしません）。
+（ハブ接続先は `node.db` 所有）。`config.toml` は未知のキーを拒否するため、
+`[node] hub_url` やタイポが残っている場合は起動時に解析エラーになります
+（[`changelog/2026-11-11-strict-config-schema.md`](changelog/2026-11-11-strict-config-schema.md)）。
 `[hub.git_credentials]` はアーキテクチャ簡素化で廃止され、Git 認証は
 Provisioner の `env_secrets` に移行しました。Web UI の設定カタログは現在値と出所
 (`config.toml` / `env` / `cli` / `default`) を読み取り専用で表示します。

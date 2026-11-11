@@ -139,9 +139,9 @@ node.db の node_pairing.hub_url + ~/.flexagent/node_token → ペアあり
 
 - 環境変数と `--hub-url` は廃止する。`DaemonConfig` から `hub_url` / `node_token`
   フィールド自体を削除し、テストも DB を seed する。
-- `config.toml` に `[node] hub_url` が残っていれば **警告ログ** を出し、
-  `fxg doctor` と設定カタログにも「無視されている（削除してください）」と表示する
-  （読み込みはしない）。
+- `config.toml` は未知のキーを拒否するため、`[node] hub_url` が残っていれば
+  起動時に **解析エラー** になる
+  （[`2026-11-11-strict-config-schema.md`](2026-11-11-strict-config-schema.md)）。
 - 保存形式は既存の `fxg node pair` に合わせて **HTTP origin**
   （`http://host:port`）とし、WS エンドポイントは `node_ws_url()` で導出する。
 
@@ -381,7 +381,7 @@ DaemonState
 - `fxg-node`: `DaemonState::pairing_settings` / `update_pairing` / `clear_pairing` /
   `test_pairing`、`rpc.rs` のディスパッチ、`HubLink` supervisor、
   トークンファイル + `secrets` メタデータ、`AUTH_REQUIRED` の返却。
-- `config.toml` の `[node] hub_url` を読まない + 残留時の警告。
+- `config.toml` の `[node] hub_url` を読まない（残っていれば未知キーとして拒否）。
 - `compose.yaml` から `FXG_HUB_URL` / `FXG_NODE_TOKEN` を削除（§4.7 の手順に差し替え）。
 - 完了条件: ペアリング API で接続が即時確立し、unpair で standalone に戻る。
   再起動後も維持される。
@@ -474,6 +474,8 @@ DaemonState
 - トークンは固定パス `~/.flexagent/node_token` のまま。`secrets` テーブルに
   `system.node_token` のメタデータを登録し、汎用 Secret API からは
   `SECRET_INVALID` で拒否する。
+- - `config.toml` は `deny_unknown_fields` になり、`[node] hub_url` やタイポは
+    解析エラーとして拒否する（警告で握り潰さない）。
 - `DaemonConfig` から `hub_url` / `node_token` を削除し、環境変数
   (`FXG_HUB_URL` / `FXG_NODE_TOKEN`) と `--hub-url` も削除した。テストは
   `node.db` + トークンファイルを seed する。

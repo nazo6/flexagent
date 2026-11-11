@@ -57,29 +57,6 @@ pub mod env_keys {
 /// Path of the Node Hub WebSocket endpoint on a hub.
 pub const NODE_WS_PATH: &str = "/api/v1/node/ws";
 
-/// Returns a leftover `[node] hub_url` value in `config.toml`, if any.
-///
-/// The key is no longer part of the schema (the pairing moved to `node.db`), but
-/// a silently ignored connection target is confusing, so callers warn when it is
-/// still present. The value is never used.
-pub fn legacy_hub_url(path: &Path) -> Option<String> {
-    // Diagnostic only: an unreadable or malformed file is reported by the
-    // regular configuration loader, so errors are ignored here.
-    let text = match std::fs::read_to_string(path) {
-        Ok(text) => text,
-        Err(_) => return None,
-    };
-    let document: toml::Value = match toml::from_str(&text) {
-        Ok(document) => document,
-        Err(_) => return None,
-    };
-    document
-        .get("node")?
-        .get("hub_url")?
-        .as_str()
-        .map(str::to_owned)
-}
-
 /// Error raised while loading or parsing configuration.
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
@@ -238,7 +215,7 @@ pub fn hub_http_origin(input: &str) -> String {
 ///
 /// Every field is optional (each has a default value).
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct GlobalConfig {
     /// Logging settings
     pub log: LogConfig,
@@ -316,8 +293,11 @@ impl GlobalConfig {
 }
 
 /// The `[log]` section: logging settings.
+///
+/// Unknown keys are rejected: a typo must not be silently ignored (see
+/// `docs/changelog/2026-11-11-strict-config-schema.md`).
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct LogConfig {
     /// Default log level ("trace" | "debug" | "info" | "warn" | "error")
     pub level: Option<String>,
@@ -331,7 +311,7 @@ pub struct LogConfig {
 
 /// The `[node]` section: local node daemon bootstrap settings.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct NodeBootstrapConfig {
     /// Unique node identifier
     /// (when omitted, a hostname-based slug plus a short ID is assigned on first start).
@@ -356,7 +336,7 @@ impl NodeBootstrapConfig {
 
 /// The `[hub]` section: hub bootstrap settings.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct HubBootstrapConfig {
     /// HTTP/WS bind address of the hub (listen only inside a LAN / VPN).
     pub listen_addr: Option<String>,
@@ -428,16 +408,31 @@ allowed_origins = ["https://home-server.tailnet-xxxx.ts.net"]
     }
 
     #[test]
-    fn unknown_fields_are_ignored_for_forward_compatibility() {
-        let config: GlobalConfig = toml::from_str(
+    fn unknown_fields_are_rejected() {
+        // A typo must not silently fall back to a default value.
+        let err = toml::from_str::<GlobalConfig>(
+            r#"
+[node]
+listen_adrr = "127.0.0.1:9000"
+"#,
+        )
+        .expect_err("unknown keys must be rejected");
+        assert!(err.to_string().contains("listen_adrr"), "got: {err}");
+    }
+
+    #[test]
+    fn leftover_hub_url_is_rejected() {
+        // Pairing moved to `node.db`; a leftover key must fail loudly instead of
+        // being ignored (docs/changelog/2026-11-11-node-pairing-db-and-gui.md).
+        let err = toml::from_str::<GlobalConfig>(
             r#"
 [node]
 node_id = "n1"
-future_option = "whatever"
+hub_url = "http://127.0.0.1:8080"
 "#,
         )
-        .unwrap();
-        assert_eq!(config.node.node_id.as_deref(), Some("n1"));
+        .expect_err("hub_url must be rejected");
+        assert!(err.to_string().contains("hub_url"), "got: {err}");
     }
 
     #[test]

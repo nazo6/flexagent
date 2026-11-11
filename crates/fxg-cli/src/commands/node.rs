@@ -148,14 +148,6 @@ impl usage::RunAsync for NodeStartArgs {
 
     async fn run_async(self) -> Self::Output {
         let env = fxg_protocol::config::process_env;
-        let config_path =
-            fxg_protocol::config::fxg_home(&env).join(fxg_protocol::config::CONFIG_FILE_NAME);
-        if let Some(url) = fxg_protocol::config::legacy_hub_url(&config_path) {
-            eprintln!(
-                "warning: [node] hub_url in {} is ignored ({url}); the pairing is stored in node.db. Pair from the Web UI or with `fxg node pair --hub <URL> --token <TOKEN>`.",
-                config_path.display()
-            );
-        }
         let global = fxg_protocol::config::GlobalConfig::load(&env)
             .context("failed to load ~/.flexagent/config.toml")?;
 

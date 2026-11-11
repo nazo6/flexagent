@@ -54,22 +54,6 @@ impl usage::RunAsync for DoctorArgs {
         };
         checks.push(("config".to_owned(), config_ok.0, config_ok.1));
 
-        let config_path = home.join(fxg_protocol::config::CONFIG_FILE_NAME);
-        match fxg_protocol::config::legacy_hub_url(&config_path) {
-            Some(url) => checks.push((
-                "pairing".to_owned(),
-                false,
-                format!(
-                    "[node] hub_url in config.toml is ignored ({url}); pair from the Web UI or with `fxg node pair`"
-                ),
-            )),
-            None => checks.push((
-                "pairing".to_owned(),
-                true,
-                "stored in node.db (/api/v1/nodes/{id}/settings/pairing)".to_owned(),
-            )),
-        }
-
         checks.push((
             "home".to_owned(),
             true,
