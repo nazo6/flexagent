@@ -5,10 +5,11 @@
 //! - [`driver`]: [`AgentDriver`] / [`ActiveSessionHandle`] traits — the
 //!   abstraction for adding agents with custom protocols without changing
 //!   `fxg-node` itself
-//! - [`registry`]: fetching, caching and launch resolution for the ACP Registry
-//!   (`registry.json`), plus catalog management used by the Web UI
+//! - [`agent`]: agent definitions, built-in providers and the catalog used for
+//!   launch resolution and driver selection
+//! - [`registry`]: fetching and caching the ACP Registry (`registry.json`),
+//!   plus custom agent management used by the Web UI
 //! - [`acp`][]: `AcpDriver` (standard ACP agent control via `agent-client-protocol`)
-//! - [`opencode2`][]: `OpenCode2Driver` (`opencode serve` bridge + native TUI attach)
 
 // Migration baseline: remove this crate-level allow as Phase 1 of
 // `docs/changelog/2026-11-08-type-safety-plan.md` lands.
@@ -18,12 +19,14 @@
 )]
 
 pub mod acp;
+pub mod agent;
 pub mod auth;
 pub mod driver;
 pub mod registry;
 mod warm;
 
 pub use acp::AcpDriver;
+pub use agent::AgentCatalog;
 pub use driver::{
     ActiveSessionHandle, AgentAuthRequired, AgentDriver, AgentLaunchSpec, DriverEvent, DriverKind,
     NativeForkUnavailable, NativeResumeUnavailable, ResumeRequest, StartSessionRequest,

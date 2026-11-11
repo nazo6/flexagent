@@ -17,10 +17,11 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use fxg_acp::registry::{AcpRegistry, RegistryIndex};
+use fxg_acp::agent::AgentCatalog;
+use fxg_acp::registry::RegistryIndex;
 use fxg_acp::{
-    AcpDriver, ActiveSessionHandle, AgentAuthRequired, AgentDriver, AgentLaunchSpec, DriverEvent,
-    DriverKind, NativeForkUnavailable, NativeResumeUnavailable, ResumeRequest,
+    ActiveSessionHandle, AgentAuthRequired, AgentDriver, AgentLaunchSpec, DriverEvent,
+    NativeForkUnavailable, NativeResumeUnavailable, ResumeRequest,
 };
 use fxg_protocol::CommandId;
 use fxg_protocol::client_api::AgentCapabilitiesPreview;
@@ -63,16 +64,9 @@ const STOP_BEFORE_DELETE_TIMEOUT: Duration = Duration::from_secs(30);
 pub type DriverFactory =
     Arc<dyn Fn(&AgentLaunchSpec) -> anyhow::Result<Arc<dyn AgentDriver>> + Send + Sync>;
 
-/// The default driver factory.
-///
-/// Uses [`AcpDriver`] for all agents.
-/// The driver is shared across all sessions.
-pub fn default_driver_factory() -> DriverFactory {
-    let acp: Arc<dyn AgentDriver> = Arc::new(AcpDriver::new());
-    Arc::new(move |spec: &AgentLaunchSpec| match &spec.driver_kind {
-        DriverKind::Acp => Ok(Arc::clone(&acp)),
-        DriverKind::Other(other) => Err(anyhow::anyhow!("unknown driver kind: {other}")),
-    })
+/// Builds the default driver factory from a shared catalog.
+fn catalog_driver_factory(catalog: Arc<AgentCatalog>) -> DriverFactory {
+    Arc::new(move |spec: &AgentLaunchSpec| catalog.driver_for(spec))
 }
 
 /// Result of `ensure_session`.
@@ -204,7 +198,7 @@ pub struct SessionManager {
 struct Inner {
     bus: SessionEventBus,
     node_id: String,
-    registry: AcpRegistry,
+    catalog: Arc<AgentCatalog>,
     factory: DriverFactory,
     sessions: Mutex<Sessions>,
     /// Drivers returned by the factory (shared instances; retained for `shutdown_idle`)
@@ -301,23 +295,34 @@ impl std::fmt::Debug for SessionManager {
 }
 
 impl SessionManager {
-    /// Creates a manager.
-    pub fn new(bus: SessionEventBus, node_id: impl Into<String>, registry: AcpRegistry) -> Self {
-        Self::with_factory(bus, node_id, registry, default_driver_factory())
+    /// Creates a manager with the default catalog-backed driver factory.
+    pub fn new(bus: SessionEventBus, node_id: impl Into<String>, catalog: AgentCatalog) -> Self {
+        let catalog = Arc::new(catalog);
+        let factory = catalog_driver_factory(Arc::clone(&catalog));
+        Self::with_catalog(bus, node_id, catalog, factory)
     }
 
     /// Creates a manager with a replaced driver factory (for tests).
     pub fn with_factory(
         bus: SessionEventBus,
         node_id: impl Into<String>,
-        registry: AcpRegistry,
+        catalog: AgentCatalog,
+        factory: DriverFactory,
+    ) -> Self {
+        Self::with_catalog(bus, node_id, Arc::new(catalog), factory)
+    }
+
+    fn with_catalog(
+        bus: SessionEventBus,
+        node_id: impl Into<String>,
+        catalog: Arc<AgentCatalog>,
         factory: DriverFactory,
     ) -> Self {
         Self {
             inner: Arc::new(Inner {
                 bus,
                 node_id: node_id.into(),
-                registry,
+                catalog,
                 factory,
                 sessions: Mutex::new(Sessions::default()),
                 drivers: Mutex::new(Vec::new()),
@@ -327,9 +332,9 @@ impl SessionManager {
         }
     }
 
-    /// The ACP registry (used by the Web UI agent catalog and `fxg agents login`).
-    pub fn registry(&self) -> &AcpRegistry {
-        &self.inner.registry
+    /// The agent catalog (definitions, launch resolution, driver selection).
+    pub fn catalog(&self) -> &AgentCatalog {
+        &self.inner.catalog
     }
 
     /// Session event bus.

@@ -36,6 +36,15 @@ export type AgentAuthMethodInfo = {
 	env?: { [key in string]: string },
 };
 
+/**  How the agent runtime is implemented. */
+export type AgentBackendKind =
+/**  ACP only (`AcpDriver`) */
+"acp" |
+/**  ACP plus fxg-side extensions */
+"acp_extended" |
+/**  A fully custom `AgentDriver` */
+"custom";
+
 /**
  *  Capabilities returned by starting a temporary ACP session.
  *
@@ -87,7 +96,7 @@ export type AgentSource =
 "external" |
 /**  Execution of an npm / uvx package (fetched at run time) */
 "package" |
-/**  A custom ACP agent defined in `config.toml` or in the UI */
+/**  A custom ACP agent defined in `node.db` */
 "custom";
 
 /**
@@ -118,6 +127,10 @@ export type AgentSummary = {
 	external_path: string | null,
 	/**  Contents of the custom definition (for editing in the UI) */
 	custom_config: CustomAgentConfig | null,
+	/**  How the agent runtime is implemented */
+	backend: AgentBackendKind,
+	/**  Icon URL or built-in asset key */
+	icon: string | null,
 	/**  Nodes where it is available (based on the NodeHello reports) */
 	installed_nodes: string[],
 };

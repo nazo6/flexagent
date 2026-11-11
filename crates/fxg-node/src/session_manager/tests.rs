@@ -3,6 +3,7 @@ use super::replay::*;
 use super::*;
 use crate::paths::NodePaths;
 use crate::testutil::MockAgent;
+use fxg_acp::registry::AcpRegistry;
 use fxg_db::queries::SessionFilter;
 use fxg_db::{Db, DbRole};
 use fxg_protocol::SessionId;
@@ -50,10 +51,10 @@ async fn setup() -> (SessionManager, MockAgent, tempfile::TempDir) {
         revision: 1,
         updated_at: 0,
     };
-    let registry = AcpRegistry::new(dir.path(), &settings, custom, Vec::new());
+    let catalog = AgentCatalog::new(AcpRegistry::new(dir.path(), &settings, custom, Vec::new()));
 
     let mock = MockAgent::default();
-    let manager = SessionManager::with_factory(bus, "test-node", registry, mock.factory());
+    let manager = SessionManager::with_factory(bus, "test-node", catalog, mock.factory());
     (manager, mock, dir)
 }
 

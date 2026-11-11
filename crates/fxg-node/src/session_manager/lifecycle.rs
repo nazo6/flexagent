@@ -189,7 +189,7 @@ impl SessionManager {
     ) -> Result<AgentLaunchSpec, NodeError> {
         match self
             .inner
-            .registry
+            .catalog
             .launch_spec(agent_id, &RegistryIndex::default(), extra_args)
             .await
         {
@@ -197,12 +197,12 @@ impl SessionManager {
             Err(_) => {
                 let index = self
                     .inner
-                    .registry
+                    .catalog
                     .index(false)
                     .await
                     .map_err(|err| NodeError::Agent(err.to_string()))?;
                 self.inner
-                    .registry
+                    .catalog
                     .launch_spec(agent_id, &index, extra_args)
                     .await
                     .map_err(|err| NodeError::Agent(err.to_string()))

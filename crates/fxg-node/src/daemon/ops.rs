@@ -359,14 +359,14 @@ impl DaemonState {
 
     /// Returns the ACP Registry catalog plus install state (`GET /api/v1/agents`).
     pub async fn agents_catalog(&self) -> Result<AgentsResponse, NodeError> {
-        let registry = self.session_manager().registry();
+        let catalog = self.session_manager().catalog();
         // Custom definitions should still be returnable even if the registry cannot be fetched
-        let index = registry.index(false).await.unwrap_or_else(|err| {
+        let index = catalog.index(false).await.unwrap_or_else(|err| {
             tracing::warn!("failed to load ACP registry: {err:#}");
             Default::default()
         });
         let node_id = self.node_id().to_owned();
-        let agents = registry
+        let agents = catalog
             .list(&index, true)
             .into_iter()
             .map(|entry| {
@@ -399,6 +399,8 @@ impl DaemonState {
                     package_available: entry.package_available,
                     external_path,
                     custom_config: entry.custom,
+                    backend: entry.backend,
+                    icon: entry.icon,
                     installed_nodes: if available {
                         vec![node_id.clone()]
                     } else {
@@ -421,10 +423,10 @@ impl DaemonState {
 
     /// The body of [`Self::manage_agent`] (does not update the node row).
     async fn manage_agent_action(&self, action: &AgentAction) -> Result<String, NodeError> {
-        let registry = self.session_manager().registry();
+        let catalog = self.session_manager().catalog();
         match action {
             AgentAction::RefreshCatalog => {
-                registry.index(true).await.map_err(agent_error)?;
+                catalog.index(true).await.map_err(agent_error)?;
                 Ok("refreshed catalog".to_owned())
             }
             AgentAction::UpsertCustom { agent_id, config } => {
@@ -457,13 +459,13 @@ impl DaemonState {
                 })
             }
             AgentAction::SetPackageEnabled { agent_id, enabled } => {
-                let id = registry.resolve_alias(agent_id);
+                let id = catalog.resolve_alias(agent_id);
                 if !enabled {
                     self.db().set_package_agent_enabled(&id, false).await?;
                     self.refresh_agent_catalog().await?;
                     return Ok(format!("disabled npx/uvx for {id}"));
                 }
-                let index = registry.index(false).await.map_err(agent_error)?;
+                let index = catalog.index(false).await.map_err(agent_error)?;
                 let agent = index.find(&id).ok_or_else(|| {
                     NodeError::Agent(format!("agent not found in registry: {id}"))
                 })?;

@@ -440,7 +440,20 @@ pub enum AgentSource {
     External,
     /// Execution of an npm / uvx package (fetched at run time)
     Package,
-    /// A custom ACP agent defined in `config.toml` or in the UI
+    /// A custom ACP agent defined in `node.db`
+    Custom,
+}
+
+/// How the agent runtime is implemented.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+#[specta(collect)]
+pub enum AgentBackendKind {
+    /// ACP only (`AcpDriver`)
+    Acp,
+    /// ACP plus fxg-side extensions
+    AcpExtended,
+    /// A fully custom `AgentDriver`
     Custom,
 }
 
@@ -470,6 +483,10 @@ pub struct AgentSummary {
     pub external_path: Option<String>,
     /// Contents of the custom definition (for editing in the UI)
     pub custom_config: Option<CustomAgentConfig>,
+    /// How the agent runtime is implemented
+    pub backend: AgentBackendKind,
+    /// Icon URL or built-in asset key
+    pub icon: Option<String>,
     /// Nodes where it is available (based on the NodeHello reports)
     pub installed_nodes: Vec<String>,
 }
