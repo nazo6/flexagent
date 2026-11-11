@@ -8,14 +8,16 @@
 //! a separate driver factory.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::PathBuf;
-use std::sync::Arc;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
 use anyhow::anyhow;
+use fxg_protocol::client_api::AgentBackendKind;
 use fxg_protocol::settings::{AgentSettings, CustomAgentConfig};
 
 use super::builtin;
-use super::provider::{AgentDefinition, AgentProvider, LaunchPreset};
+use super::extended::ExtendedAcpDriver;
+use super::provider::{AgentBackend, AgentDefinition, AgentProvider, LaunchPreset};
 use crate::acp::AcpDriver;
 use crate::driver::{AgentDriver, AgentLaunchSpec, DriverKind};
 use crate::registry::{AcpRegistry, AgentListEntry, LocalSource, RegistryIndex};
@@ -25,6 +27,8 @@ pub struct AgentCatalog {
     registry: AcpRegistry,
     providers: BTreeMap<String, Arc<dyn AgentProvider>>,
     acp: Arc<dyn AgentDriver>,
+    /// Tier 2 wrappers, cached so the driver identity stays stable per agent.
+    extended: Mutex<BTreeMap<String, Arc<dyn AgentDriver>>>,
     /// Preset executable lookup (injectable for tests).
     preset_lookup: fn(&LaunchPreset) -> Option<PathBuf>,
 }
@@ -45,6 +49,7 @@ impl AgentCatalog {
             registry,
             providers,
             acp: Arc::new(AcpDriver::new()),
+            extended: Mutex::new(BTreeMap::new()),
             preset_lookup: default_preset_lookup,
         }
     }
@@ -117,6 +122,31 @@ impl AgentCatalog {
         }
 
         entries.extend(self.registry.registry_entries(index, include_unavailable));
+
+        // Tier 2 metadata applies to preset and registry entries, but never to a
+        // custom definition (which shadows the built-in provider).
+        for entry in &mut entries {
+            if entry.custom.is_some() {
+                continue;
+            }
+            let Some(provider) = self.providers.get(&entry.id) else {
+                continue;
+            };
+            let AgentBackend::AcpExtended(extension) = provider.backend() else {
+                continue;
+            };
+            entry.backend = AgentBackendKind::AcpExtended;
+            let metadata = extension.metadata();
+            if let Some(name) = metadata.name {
+                entry.name = name;
+            }
+            if metadata.description.is_some() {
+                entry.description = metadata.description;
+            }
+            if metadata.icon.is_some() {
+                entry.icon = metadata.icon;
+            }
+        }
         entries
     }
 
@@ -127,6 +157,7 @@ impl AgentCatalog {
         &self,
         name: &str,
         index: &RegistryIndex,
+        cwd: &Path,
         extra_args: &[String],
     ) -> anyhow::Result<AgentLaunchSpec> {
         let id = self.registry.resolve_alias(name);
@@ -135,29 +166,73 @@ impl AgentCatalog {
             return Ok(spec);
         }
 
-        if let Some(provider) = self.providers.get(&id)
+        let provider = self.providers.get(&id);
+        let backend = provider.map(|provider| provider.backend());
+        let driver_kind = backend.as_ref().map(Self::driver_kind);
+
+        let mut spec = if let Some(provider) = provider
             && let Some(preset) = provider.launch_preset()
             && let Some(program) = (self.preset_lookup)(preset)
         {
-            return Ok(Self::preset_spec(
-                provider.definition(),
-                preset,
-                program,
-                extra_args,
-            ));
-        }
+            Self::preset_spec(provider.definition(), preset, program, extra_args)
+        } else {
+            self.registry
+                .registry_launch_spec(&id, index, extra_args)
+                .await?
+        };
 
-        self.registry
-            .registry_launch_spec(&id, index, extra_args)
-            .await
+        if let Some(driver_kind) = driver_kind {
+            spec.driver_kind = driver_kind;
+        }
+        if let Some(AgentBackend::AcpExtended(extension)) = &backend {
+            extension.prepare_launch(cwd, &mut spec)?;
+            if let Some(name) = extension.metadata().name {
+                spec.display_name = name;
+            }
+        }
+        Ok(spec)
     }
 
     /// Selects the driver for a resolved launch spec.
     pub fn driver_for(&self, spec: &AgentLaunchSpec) -> anyhow::Result<Arc<dyn AgentDriver>> {
         match &spec.driver_kind {
             DriverKind::Acp => Ok(Arc::clone(&self.acp)),
+            DriverKind::AcpExtended => self.extended_driver(&spec.agent_id),
             DriverKind::Other(other) => Err(anyhow!("unknown driver kind: {other}")),
         }
+    }
+
+    /// Maps a provider backend to a driver kind.
+    fn driver_kind(backend: &AgentBackend) -> DriverKind {
+        match backend {
+            AgentBackend::Acp => DriverKind::Acp,
+            AgentBackend::AcpExtended(_) => DriverKind::AcpExtended,
+        }
+    }
+
+    /// Returns the cached Tier 2 wrapper for an agent.
+    fn extended_driver(&self, agent_id: &str) -> anyhow::Result<Arc<dyn AgentDriver>> {
+        let mut cache = self
+            .extended
+            .lock()
+            .expect("extended driver cache poisoned");
+        if let Some(driver) = cache.get(agent_id) {
+            return Ok(Arc::clone(driver));
+        }
+
+        let provider = self
+            .providers
+            .get(agent_id)
+            .ok_or_else(|| anyhow!("no provider is registered for agent {agent_id}"))?;
+        let AgentBackend::AcpExtended(extension) = provider.backend() else {
+            return Err(anyhow!(
+                "agent {agent_id} is not configured for an ACP extension"
+            ));
+        };
+        let driver: Arc<dyn AgentDriver> =
+            Arc::new(ExtendedAcpDriver::new(Arc::clone(&self.acp), extension));
+        cache.insert(agent_id.to_owned(), Arc::clone(&driver));
+        Ok(driver)
     }
 
     /// Builds a launch spec from a built-in preset.
@@ -201,9 +276,28 @@ fn default_preset_lookup(preset: &LaunchPreset) -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::agent::extension::{AgentExtension, AgentMetadata};
     use crate::agent::provider::StaticProvider;
     use fxg_protocol::client_api::AgentBackendKind;
     use fxg_protocol::settings::CustomAgentConfig;
+
+    struct DummyExtension;
+
+    #[async_trait::async_trait]
+    impl AgentExtension for DummyExtension {
+        fn metadata(&self) -> AgentMetadata {
+            AgentMetadata {
+                name: Some("Extended (enriched)".to_owned()),
+                description: None,
+                icon: Some("builtin:extended".to_owned()),
+            }
+        }
+
+        fn prepare_launch(&self, cwd: &Path, launch: &mut AgentLaunchSpec) -> anyhow::Result<()> {
+            launch.args.push(format!("--cwd={}", cwd.display()));
+            Ok(())
+        }
+    }
 
     fn settings() -> AgentSettings {
         AgentSettings {
@@ -250,7 +344,12 @@ mod tests {
         let catalog = catalog(dir.path());
         let spec = tokio::runtime::Runtime::new()
             .unwrap()
-            .block_on(catalog.launch_spec("my-agent", &index(), &["--extra".to_owned()]))
+            .block_on(catalog.launch_spec(
+                "my-agent",
+                &index(),
+                Path::new("."),
+                &["--extra".to_owned()],
+            ))
             .expect("custom spec");
         assert_eq!(spec.driver_kind, DriverKind::Acp);
         assert_eq!(spec.program, PathBuf::from("my-agent"));
@@ -279,7 +378,12 @@ mod tests {
 
         let spec = tokio::runtime::Runtime::new()
             .unwrap()
-            .block_on(catalog.launch_spec("demo", &index(), &["--verbose".to_owned()]))
+            .block_on(catalog.launch_spec(
+                "demo",
+                &index(),
+                Path::new("."),
+                &["--verbose".to_owned()],
+            ))
             .expect("preset spec");
         assert_eq!(spec.agent_id, "demo");
         assert_eq!(spec.display_name, "Demo");
@@ -318,7 +422,7 @@ mod tests {
 
         let spec = tokio::runtime::Runtime::new()
             .unwrap()
-            .block_on(catalog.launch_spec("my-agent", &index(), &[]))
+            .block_on(catalog.launch_spec("my-agent", &index(), Path::new("."), &[]))
             .expect("custom");
         assert_eq!(spec.display_name, "My Agent");
         assert_eq!(spec.program, PathBuf::from("my-agent"));
@@ -353,6 +457,49 @@ mod tests {
         let mut other = spec;
         other.driver_kind = DriverKind::Other("nope".to_owned());
         assert!(catalog.driver_for(&other).is_err());
+    }
+
+    #[test]
+    fn extended_provider_selects_and_caches_the_wrapper() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let provider = StaticProvider::new(
+            AgentDefinition {
+                id: "extended".to_owned(),
+                name: "Extended".to_owned(),
+                description: None,
+                icon: None,
+            },
+            Some(LaunchPreset {
+                program: "extended",
+                args: &["acp"],
+            }),
+        )
+        .with_backend(AgentBackend::AcpExtended(Arc::new(DummyExtension)));
+        let mut catalog =
+            AgentCatalog::with_providers(registry(dir.path()), vec![Arc::new(provider)]);
+        catalog.preset_lookup = |_| Some(PathBuf::from("/fake/bin/extended"));
+
+        let spec = tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(catalog.launch_spec("extended", &index(), Path::new("."), &[]))
+            .expect("extended spec");
+        assert_eq!(spec.driver_kind, DriverKind::AcpExtended);
+        assert_eq!(spec.display_name, "Extended (enriched)");
+        assert_eq!(spec.args, vec!["acp", "--cwd=."]);
+
+        let driver = catalog.driver_for(&spec).expect("extended driver");
+        assert_eq!(driver.driver_kind(), DriverKind::AcpExtended);
+        let second = catalog.driver_for(&spec).expect("extended driver");
+        assert!(Arc::ptr_eq(&driver, &second));
+
+        let entry = catalog
+            .list(&index(), false)
+            .into_iter()
+            .find(|entry| entry.id == "extended")
+            .expect("extended entry");
+        assert_eq!(entry.backend, AgentBackendKind::AcpExtended);
+        assert_eq!(entry.name, "Extended (enriched)");
+        assert_eq!(entry.icon.as_deref(), Some("builtin:extended"));
     }
 
     #[test]

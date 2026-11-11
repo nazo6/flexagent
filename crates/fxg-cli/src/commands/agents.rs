@@ -64,8 +64,9 @@ async fn resolve_agent_launch_spec(
             fxg_acp::registry::RegistryIndex::default()
         }
     };
+    let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
     catalog
-        .launch_spec(id, &index, &[])
+        .launch_spec(id, &index, &cwd, &[])
         .await
         .with_context(|| format!("cannot launch {id}"))
 }

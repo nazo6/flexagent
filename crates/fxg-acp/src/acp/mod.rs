@@ -386,9 +386,11 @@ impl AcpDriver {
                         agent = %key.agent_id(),
                         "reusing idle acp agent process"
                     );
+                    let agent_session_id = Some(handle.session_id().to_string());
                     return Ok(StartedSession {
                         handle: Box::new(handle),
                         context_restored,
+                        agent_session_id,
                     });
                 }
                 Err(err) => {
@@ -427,9 +429,11 @@ impl AcpDriver {
         let (handle, context_restored) = process
             .new_session(session_params, event_tx.clone(), lease)
             .await?;
+        let agent_session_id = Some(handle.session_id().to_string());
         Ok(StartedSession {
             handle: Box::new(handle),
             context_restored,
+            agent_session_id,
         })
     }
 }

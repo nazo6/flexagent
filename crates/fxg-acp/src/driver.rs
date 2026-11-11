@@ -23,6 +23,8 @@ use tokio::sync::mpsc;
 pub enum DriverKind {
     /// Standard ACP agent (`AcpDriver`)
     Acp,
+    /// ACP agent with fxg-side extensions (`ExtendedAcpDriver`)
+    AcpExtended,
     /// Another driver kind, preserved for diagnostics
     Other(String),
 }
@@ -32,6 +34,7 @@ impl DriverKind {
     pub fn as_str(&self) -> &str {
         match self {
             Self::Acp => "acp",
+            Self::AcpExtended => "acp_extended",
             Self::Other(other) => other,
         }
     }
@@ -130,6 +133,11 @@ pub struct StartedSession {
     /// `false` = a fresh agent session was created
     /// (the caller injects history replay to carry the context over).
     pub context_restored: bool,
+    /// Agent-side session ID (the `SessionAgentBound` value), when known.
+    ///
+    /// Extensions use it to call the agent's own API. `None` for drivers that do
+    /// not expose a stable agent-side ID.
+    pub agent_session_id: Option<String>,
 }
 
 /// Events sent from a driver to the session manager.
@@ -293,6 +301,7 @@ mod tests {
             Ok(StartedSession {
                 handle: Box::new(MockHandle),
                 context_restored: false,
+                agent_session_id: None,
             })
         }
     }

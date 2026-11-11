@@ -1,12 +1,12 @@
 # エージェント実装の3層モデルと拡張基盤（計画）
 
 - **日付**: 2026-11-11
-- **状態**: 実装中（Phase 1 完了 / Phase 2 以降は計画）
-- **対象パッケージ**: 計画のみ（実装時: `fxg-protocol`, `fxg-acp`, `fxg-node`,
-  `fxg-cli`, `ui`, `docs`）
-- **対象スクリプト**: 計画のみ（実装時: `mise run fmt`,
-  `mise run lint:errors`, `mise run types`,
-  `cargo test --workspace`, `pnpm --dir ui run check`）
+- **状態**: 実装中（Phase 2 完了 / Phase 3 以降は計画）
+- **対象パッケージ**: `fxg-protocol`, `fxg-acp`, `fxg-node`, `fxg-cli`, `ui`,
+  `docs`
+- **対象スクリプト**: `mise run fmt`, `mise run lint:errors`,
+  `mise run types`, `cargo test --workspace`,
+  `pnpm --dir ui run check`
 
 > 本文は目標アーキテクチャです。docs と実装は同一 PR で管理し、Phase 1 から
 > 順に積み上げます。現行仕様は
@@ -137,6 +137,8 @@ builtin の `opencode` を上書きした場合、`agent_id` だけでは「拡�
 ### 2.3 Tier 2 の差分 trait
 
 ```rust
+/// One extension instance is shared across sessions. Keep per-session state in
+/// the `SessionExtension` returned by `open_session`.
 #[async_trait]
 pub trait AgentExtension: Send + Sync {
     /// Display overrides (name, icon, description).
@@ -154,14 +156,14 @@ pub trait AgentExtension: Send + Sync {
     /// Applied to both probe results and live CapabilitiesUpdated events.
     async fn capabilities(
         &self,
-        _ctx: &CapabilityContext,
+        _ctx: &SessionContext,
     ) -> anyhow::Result<Option<CapabilityOverlay>> { Ok(None) }
 
     /// Called after the ACP session is established.
     async fn open_session(
         &self,
-        _ctx: SessionContext,
-    ) -> anyhow::Result<Option<Box<dyn SessionExtension>>> { Ok(None) }
+        _ctx: &SessionContext,
+    ) -> anyhow::Result<Option<Arc<dyn SessionExtension>>> { Ok(None) }
 }
 
 #[async_trait]
@@ -179,16 +181,21 @@ pub trait SessionExtension: Send + Sync {
 
     async fn on_event(
         &self,
-        event: DriverEvent,
+        _event: DriverEvent,
     ) -> anyhow::Result<EventDisposition> {
-        Ok(EventDisposition::Emit(event))
+        Ok(EventDisposition::Emit)
     }
 
     async fn shutdown(&self) -> anyhow::Result<()> { Ok(()) }
 }
 
 pub enum Hook { Handled, Fallback }
-pub enum EventDisposition { Emit(DriverEvent), EmitMany(Vec<DriverEvent>), Drop }
+pub enum EventDisposition {
+    Emit,
+    Replace(Box<DriverEvent>),
+    EmitMany(Vec<DriverEvent>),
+    Drop,
+}
 ```
 
 能力情報の上書きは、任意のイベント書き換えではなく型付きの差分にする。
@@ -206,7 +213,7 @@ pub enum ConfigOptionPatch {
     Merge {
         key: String,
         name: Option<String>,
-        options: Vec<ConfigOptionValue>,
+        options: Option<Vec<ConfigOptionValue>>,
         current: Option<ConfigOptionValue>,
     },
     Remove { key: String },
@@ -230,9 +237,10 @@ custom が同じ ID の builtin / registry を上書きする挙動は維持す�
 常に Tier 1（`Acp`）とし、Tier 2 の差分を再利用したい場合だけ `extension` を
 明示する（§2.6）。
 
-Tier 2 の `prepare_launch` は、custom の args / env と `env_secrets` の解決後に
-適用する。extension 自身が使う資格情報はエージェントの env に混ぜず、node の
-secret store から読む。
+Tier 2 の `prepare_launch` は、preset / registry の起動定義が確定した後に
+セッションの cwd とともに適用する。extension 自身が使う資格情報はエージェントの
+env に混ぜず、node の secret store から読む。custom 定義 + extension の組み合わせは
+Phase 4 で追加する。
 
 ### 2.5 Tier 2 のイベント合成
 
@@ -373,16 +381,19 @@ pub struct AgentSummary {
 
 ### Phase 2: Tier 2 の基盤
 
-- [ ] `AgentExtension` / `SessionExtension` / `CapabilityOverlay` を追加する
-- [ ] `ExtendedAcpDriver` とイベント relay を実装する
-- [ ] `DriverKind::AcpExtended` を追加する
-- [ ] `StartedSession.agent_session_id` を追加する
-- [ ] mock extension でモデル追加・表示名変更を検証する
-- [ ] capability probe が上書き結果を返すことを検証する
-- [ ] extension 失敗時に元のイベントが流れることを検証する
+- [x] `AgentExtension` / `SessionExtension` / `CapabilityOverlay` を追加する
+- [x] `ExtendedAcpDriver` とイベント relay を実装する
+- [x] `DriverKind::AcpExtended` を追加する
+- [x] `StartedSession.agent_session_id` を追加する
+- [x] mock extension でモデル追加・表示名変更を検証する
+- [x] capability probe が上書き結果を返すことを検証する
+- [x] extension 失敗時に元のイベントが流れることを検証する
 
 完了条件: 実 ACP エージェントを変更せず、probe と通常セッションの両方で
 overlay が効く。
+
+実装ログ: 2026-11-11 に完了。詳細は
+[`2026-11-11-agent-extension-phase2.md`](./2026-11-11-agent-extension-phase2.md) を参照。
 
 ### Phase 3: Tier 3 の基盤
 

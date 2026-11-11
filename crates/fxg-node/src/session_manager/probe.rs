@@ -155,7 +155,7 @@ impl SessionManager {
             return Ok(preview);
         }
 
-        let spec = self.resolve_launch_spec(agent_id, &[]).await?;
+        let spec = self.resolve_launch_spec(agent_id, &cwd, &[]).await?;
         let driver = (self.inner.factory)(&spec)
             .map_err(|err| NodeError::Agent(format!("failed to select driver: {err}")))?;
         self.remember_driver(&driver);

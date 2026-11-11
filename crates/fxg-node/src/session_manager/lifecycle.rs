@@ -21,7 +21,9 @@ impl SessionManager {
             project::resolve_project(cwd, &self.inner.node_id, self.inner.bus.db()).await?;
         let session_id = uuid_v7();
 
-        let spec = self.resolve_launch_spec(agent_id, extra_args).await?;
+        let spec = self
+            .resolve_launch_spec(agent_id, &resolved.local_path, extra_args)
+            .await?;
 
         // SessionCreated (node_seq = 1)
         let (git_branch, is_worktree) =
@@ -115,7 +117,7 @@ impl SessionManager {
                 .await?;
         let extra_args_vec: Vec<String> = params.extra_args.map(|s| s.to_vec()).unwrap_or_default();
         let spec = self
-            .resolve_launch_spec(effective_agent_id, &extra_args_vec)
+            .resolve_launch_spec(effective_agent_id, &resolved.local_path, &extra_args_vec)
             .await?;
 
         // SessionCreated (node_seq = 1)
@@ -185,12 +187,13 @@ impl SessionManager {
     pub(super) async fn resolve_launch_spec(
         &self,
         agent_id: &str,
+        cwd: &Path,
         extra_args: &[String],
     ) -> Result<AgentLaunchSpec, NodeError> {
         match self
             .inner
             .catalog
-            .launch_spec(agent_id, &RegistryIndex::default(), extra_args)
+            .launch_spec(agent_id, &RegistryIndex::default(), cwd, extra_args)
             .await
         {
             Ok(spec) => Ok(spec),
@@ -203,7 +206,7 @@ impl SessionManager {
                     .map_err(|err| NodeError::Agent(err.to_string()))?;
                 self.inner
                     .catalog
-                    .launch_spec(agent_id, &index, extra_args)
+                    .launch_spec(agent_id, &index, cwd, extra_args)
                     .await
                     .map_err(|err| NodeError::Agent(err.to_string()))
             }
@@ -348,7 +351,9 @@ impl SessionManager {
         }
         let resolved =
             project::resolve_project(cwd, &self.inner.node_id, self.inner.bus.db()).await?;
-        let spec = self.resolve_launch_spec(agent_id, &[]).await?;
+        let spec = self
+            .resolve_launch_spec(agent_id, &resolved.local_path, &[])
+            .await?;
         let session_id = uuid_v7();
         let (git_branch, is_worktree) =
             git_metadata_or_warn(&resolved.local_path, &session_id).await;
@@ -549,7 +554,9 @@ impl SessionManager {
         }
 
         let events = self.load_session_events(session_id).await?;
-        let spec = self.resolve_launch_spec(&session.agent_id, &[]).await?;
+        let spec = self
+            .resolve_launch_spec(&session.agent_id, &cwd, &[])
+            .await?;
 
         // Attempt native restore (the caller injects a replay if it fails)
         let (agent_session_id, allow_fresh) = match mode {
