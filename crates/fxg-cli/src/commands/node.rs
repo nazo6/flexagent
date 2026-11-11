@@ -387,6 +387,7 @@ impl usage::RunAsync for NodePairArgs {
             bail!("the pairing token must not be empty");
         }
         let hub_url = fxg_protocol::config::node_ws_url(&self.hub)?;
+        let display_url = fxg_protocol::config::hub_http_origin(&hub_url);
         let env = fxg_protocol::config::process_env;
         let home = fxg_protocol::config::fxg_home(&env);
         std::fs::create_dir_all(&home)
@@ -396,12 +397,9 @@ impl usage::RunAsync for NodePairArgs {
         fxg_node::daemon::save_token_file(&token_path, token)
             .with_context(|| format!("failed to write {}", token_path.display()))?;
         let config_path = home.join(fxg_protocol::config::CONFIG_FILE_NAME);
-        set_hub_url(&config_path, Some(&hub_url))?;
+        set_hub_url(&config_path, Some(&display_url))?;
 
-        println!(
-            "paired with {}",
-            fxg_protocol::config::hub_http_origin(&hub_url)
-        );
+        println!("paired with {display_url}");
         println!("node pairing token: {}", token_path.display());
         println!("restart the node to apply: fxg node restart");
         Ok(())
