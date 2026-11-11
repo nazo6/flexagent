@@ -51,13 +51,13 @@ pub trait ActiveSessionHandle: Send + Sync {
 }
 ```
 
-### 1.1 エージェント実装の3層モデル（Phase 1 実装済み）
+### 1.1 エージェント実装の3層モデル（実装済み）
 
 ACP だけでは、アイコンや起動オプションなどのエージェント固有メタデータや、
 ACP に存在しない機能（独自 API によるモデル名取得など）を扱えない。将来の
 拡張を `agent_id` 分岐なしで追加できるよう、実装を次の3層に分ける。
-Phase 1（`AgentCatalog`）、Phase 2（Tier 2 の基盤）、Phase 3（Tier 3 の基盤）、
-Phase 4（opencode の Tier 2 移行）は実装済みである。Tier 3 の実例はまだ追加して
+`AgentCatalog`（Phase 1）、Tier 2 の基盤（Phase 2）、Tier 3 の基盤（Phase 3）、
+opencode の Tier 2 移行（Phase 4）まで実装済みである。Tier 3 の実例はまだ追加して
 いない。
 
 | 層                   | 実行時の実装                           | ACP の再利用 | エージェントごとに追加するコード            |
@@ -70,14 +70,22 @@ Phase 4（opencode の Tier 2 移行）は実装済みである。Tier 3 の実�
   `SessionManager` と `AcpDriver` には追加しない。
 - `AgentCatalog` が **custom 定義 → builtin provider → ACP Registry** の順で
   起動定義と backend を解決する。
-- `AgentLaunchSpec` は program / args / env だけの純粋データとし、warm pool
-  のキーとして扱う。extension の状態は含めない。
+- `AgentLaunchSpec` は program / args / env / driver_kind / extension を持つ
+  純粋データとし、warm pool のキー（`LaunchKey`）として扱う。extension の
+  インスタンスは含めない。
 - Tier 2 は `ExtendedAcpDriver` が ACP イベントを中継し、
   `CapabilitiesUpdated` に `CapabilityOverlay` を適用してから
   `SessionExtension` に通す。capability probe も同じ経路を通る。
-- ユーザー定義のカスタム ACP エージェント（§3）は Tier 1 のまま。
-  将来 `CustomAgentConfig.extension` で builtin extension を参照できるようにする。
+  overlay はイベントごとに現在値（`CapabilitiesSnapshot`）から再計算する。
+- ユーザー定義のカスタム ACP エージェント（§3）は既定で Tier 1。
+  `CustomAgentConfig.extension` に builtin extension ID を指定すると
+  `DriverKind::AcpExtended` となり、同じ overlay / メタデータを再利用できる。
+- driver の選択は `AgentLaunchSpec.driver_kind` と `extension` で行う。
+  Tier 2 の `ExtendedAcpDriver` は extension ID ごとに1つだけ生成して共有する。
 - Tier 3 の builtin ID は予約し、custom 定義による上書きを拒否する。
+- 組み込みの `opencode` extension は、ACP が返す `provider/model` を
+  `{ value, name, providerID, id }` に変換して読みやすいモデル名を表示する。
+  `value` は元の ACP ID のまま保持するため `set_config` は従来どおり動作する。
 
 型設計・実装フェーズ・変更対象の詳細は
 [`docs/changelog/2026-11-11-agent-extension-architecture.md`](./changelog/2026-11-11-agent-extension-architecture.md)
@@ -108,7 +116,8 @@ Phase 4（opencode の Tier 2 移行）は実装済みである。Tier 3 の実�
    4. `npx` 配布 (`npx -y <package> <args...>`)
    5. `uvx` 配布 (`uvx <package> <args...>`)
    - 代表例: `fxg session new antigravity` は `agy acp`、`fxg session new opencode` は
-     `opencode acp` として起動する。registry の `antigravity-acp` が
+     `opencode acp` として起動する（opencode は Tier 2 としてモデル名を補う）。
+     registry の `antigravity-acp` が
      `agy_acp_server.par` を前提としていても、`agy` CLI が PATH にあれば
      preset が優先される。
 3. **インストールは明示操作のみ**:
@@ -191,12 +200,13 @@ ACP Registry に載っていないエージェントや自前の ACP 実装は�
 1. **定義方法**:
    - Web UI (設定 > エージェント管理 > カスタム追加) または API から
      `node.db` の `custom_agents` テーブルへ保存する (`name` / `command` /
-     `args` / `env` / `env_secrets`)。
+     `args` / `env` / `env_secrets` / `extension`)。
    - API: `PUT /api/v1/nodes/:node_id/agents/custom/:agent_id` (upsert) /
      `DELETE /api/v1/nodes/:node_id/agents/custom/:agent_id`。
    - 実行時設定はノードの DB にのみ保存し、ハブへ同期しない。
 2. **解決と起動**:
-   - カスタム定義は常に Tier 1 (`AcpDriver`) として解決する（§1.1）。
+   - 既定では Tier 1 (`AcpDriver`) として解決する（§1.1）。`extension` を
+     指定した場合は Tier 2 (`ExtendedAcpDriver`) になる。
    - `command` は `PATH` 上のコマンド名または絶対パス。シェル経由ではないため
      グロブ・`~`・環境変数の展開は行わない。
    - 起動直前に `fxg_pty::resolve_command` が `which` (`PATHEXT`) で解決し、

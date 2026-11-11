@@ -69,7 +69,7 @@ flexagent/
 │   ├── fxg-protocol/           # 共通型定義・ACP正規化イベント・WS/Stdioメッセージ (specta対応)
 │   ├── fxg-db/                 # SQLiteスキーマ管理・クエリレイヤー (hub.db / node.db 共用・分離)
 │   ├── fxg-pty/                # ConPTY/Unix PTY・Windows Job Object・プロセスツリー管理
-│   ├── fxg-acp/                # ACP Registry管理・AcpDriver・ローカル PATH コマンド解決
+│   ├── fxg-acp/                # ACP Registry管理・AcpDriver / ExtendedAcpDriver・AgentCatalog・ローカル PATH コマンド解決
 │   ├── fxg-node/               # ノード実装 (ローカルWeb/WS配信・Outbox同期・Project解決)
 │   ├── fxg-hub/                # ハブ実装 (Axum・ノード管理・イベント集約・Web Push・PWA配信)
 │   └── fxg-cli/                # `fxg` バイナリエントリポイント (CLI / node / hub サブコマンド・Web UI自動オープン)

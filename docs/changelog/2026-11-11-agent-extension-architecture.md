@@ -1,17 +1,16 @@
 # エージェント実装の3層モデルと拡張基盤（計画）
 
 - **日付**: 2026-11-11
-- **状態**: 実装中（Phase 4 完了 / Phase 5 のみ残り）
+- **状態**: 実装済み（Phase 1〜5 完了）
 - **対象パッケージ**: `fxg-protocol`, `fxg-acp`, `fxg-node`, `fxg-cli`, `ui`,
   `docs`
 - **対象スクリプト**: `mise run fmt`, `mise run lint:errors`,
   `mise run types`, `cargo test --workspace`,
   `pnpm --dir ui run check`
 
-> 本文は目標アーキテクチャです。docs と実装は同一 PR で管理し、Phase 1 から
-> 順に積み上げます。現行仕様は
+> 本文は実装済みのアーキテクチャです。現行仕様は
 > [`docs/04-agent-drivers-and-windows.md`](../04-agent-drivers-and-windows.md) を
-> 参照してください。
+> 参照してください。各フェーズの実装記録は §3 のリンク先にあります。
 
 ---
 
@@ -432,9 +431,17 @@ overlay が効く。
 
 ### Phase 5: ドキュメント
 
-- [ ] `docs/04-agent-drivers-and-windows.md` の §1.1 を実装内容に合わせて更新する
-- [ ] このファイルの状態を「実装済み」に変更し、実装ログを追記する
-- [ ] `AGENTS.md` の構成説明に `AgentCatalog` / extension を追記する
+- [x] `docs/04-agent-drivers-and-windows.md` の §1.1 を実装内容に合わせて更新する
+- [x] このファイルの状態を「実装済み」に変更し、実装ログを追記する
+- [x] `AGENTS.md` の構成説明に `AgentCatalog` / extension を追記する
+
+実装ログ: 2026-11-11 に完了。`docs/04` §1.1 / §3、`docs/README.md`、
+`AGENTS.md` を実装済みの内容に更新した。各フェーズの詳細は
+[`2026-11-11-agent-catalog-phase1.md`](./2026-11-11-agent-catalog-phase1.md)、
+[`2026-11-11-agent-extension-phase2.md`](./2026-11-11-agent-extension-phase2.md)、
+[`2026-11-11-agent-extension-phase3.md`](./2026-11-11-agent-extension-phase3.md)、
+[`2026-11-11-agent-extension-phase4.md`](./2026-11-11-agent-extension-phase4.md)
+を参照。
 
 ---
 
@@ -445,7 +452,7 @@ overlay が効く。
 | `crates/fxg-acp/src/agent/mod.rs`                          | `AgentDefinition` / `AgentProvider` / `AgentBackend`         |
 | `crates/fxg-acp/src/agent/catalog.rs`                      | `AgentCatalog`（list / launch_spec / driver_for）            |
 | `crates/fxg-acp/src/agent/extension.rs`                    | `AgentExtension` / `SessionExtension` / `CapabilityOverlay`  |
-| `crates/fxg-acp/src/agent/builtin.rs`                      | `AGENT_PRESETS` の provider 化                               |
+| `crates/fxg-acp/src/agent/builtin.rs`                      | builtin provider の登録（opencode は Tier 2）                |
 | `crates/fxg-acp/src/driver.rs`                             | `DriverKind` の3値化、`StartedSession.agent_session_id`      |
 | `crates/fxg-acp/src/registry.rs`                           | 一覧生成の catalog 移設、`AgentListEntry.backend` / `icon`   |
 | `crates/fxg-node/src/session_manager/mod.rs`               | `AcpRegistry` + `DriverFactory` を `AgentCatalog` に置き換え |
@@ -489,16 +496,19 @@ overlay が効く。
 
 ---
 
-## 6. 実装時に確定する小さな点
+## 6. 実装時に確定した点
 
-- `opencode` の最初の extension はメタデータ + モデル名の上書きに限定する。
-  compact などのセッションフックは、フックの形を検証してから追加する。
-- アイコンの表現は、まず URL または builtin アセットキーの `String` とする。
-  ダークテーマ用の別アイコンが必要になった時点で型を拡張する。
-- `AgentDriver` のクレート分割は、Tier 3 の実装が増えて `fxg-acp` が
+- `opencode` の extension はメタデータ + モデル名の上書きに限定した。compact
+  などのセッションフックは、ACP が同等機能を提供しているため今回は追加して
+  いない。
+- アイコンの表現は URL または builtin アセットキー（`builtin:opencode`）の
+  `String` とした。ダークテーマ用の別アイコンが必要になった時点で型を拡張する。
+- `AgentDriver` のクレート分割は、Tier 3 の実例が増えて `fxg-acp` が
   ACP SDK に依存しない形を保てなくなった時点で行う。
-- `AgentLaunchSpec.program` の `Option` 化は、プロセスを持たない Tier 3 driver を
-  実装する Phase 3 で判断する。
+- `AgentLaunchSpec.program` は Phase 3 で `Option<PathBuf>` とし、プロセスを
+  持たない Tier 3 driver を表現できるようにした。
+- `CapabilityOverlay` は `CapabilitiesUpdated` ごとに現在値から再計算する。
+  1回だけ計算すると、モデル変更後の `Replace` が古い値へ巻き戻すため。
 
 ---
 
