@@ -1,6 +1,7 @@
 <script lang="ts">
   import { goto } from "$app/navigation";
   import { page } from "$app/state";
+  import AgentIcon from "#lib/components/agent/AgentIcon.svelte";
   import * as Dialog from "#lib/components/ui/dialog/index.ts";
   import { Button } from "#lib/components/ui/button/index.ts";
   import { Input } from "#lib/components/ui/input/index.ts";
@@ -49,7 +50,6 @@
   import { toast } from "svelte-sonner";
   import { onMount, untrack } from "svelte";
   import AlertCircleIcon from "@lucide/svelte/icons/alert-circle";
-  import BotIcon from "@lucide/svelte/icons/bot";
   import BoxIcon from "@lucide/svelte/icons/box";
   import CheckCircle2Icon from "@lucide/svelte/icons/check-circle-2";
   import FolderGit2Icon from "@lucide/svelte/icons/folder-git-2";
@@ -810,7 +810,7 @@
 {/snippet}
 
 {#snippet agentIcon()}
-  <BotIcon class="text-muted-foreground size-3.5" />
+  <AgentIcon icon={selectedAgent?.icon ?? null} class="size-3.5" />
 {/snippet}
 
 {#snippet modelIcon()}
@@ -1212,9 +1212,14 @@
                   selected={agent.id === effectiveAgent}
                   onselect={() => selectAgent(agent.id)}
                 >
-                  <span class="block truncate">{agent.name}</span>
-                  <span class="text-muted-foreground block truncate font-mono text-[11px]">
-                    {agent.id} — {agentHint(agent)}
+                  <span class="flex min-w-0 items-center gap-2">
+                    <AgentIcon icon={agent.icon} class="size-4" />
+                    <span class="min-w-0 flex-1">
+                      <span class="block truncate">{agent.name}</span>
+                      <span class="text-muted-foreground block truncate font-mono text-[11px]">
+                        {agent.id} — {agentHint(agent)}
+                      </span>
+                    </span>
                   </span>
                 </PickerItem>
               {/each}

@@ -86,6 +86,11 @@ opencode の Tier 2 移行（Phase 4）まで実装済みである。Tier 3 の�
 - 組み込みの `opencode` extension は、ACP が返す `provider/model` を
   `{ value, name, providerID, id }` に変換して読みやすいモデル名を表示する。
   `value` は元の ACP ID のまま保持するため `set_config` は従来どおり動作する。
+- `AgentSummary.icon` は `builtin:<id>` または URL を返す。Web UI は
+  `builtin:opencode` を同梱アイコン (`/agents/opencode.png`) に解決し、
+  未知のキーや未指定は汎用の bot アイコンにフォールバックする。
+  `AgentSummary.backend` はエージェント一覧にバッジ
+  (`ACP` / `ACP + extension` / `Custom driver`) として表示する。
 
 型設計・実装フェーズ・変更対象の詳細は
 [`docs/changelog/2026-11-11-agent-extension-architecture.md`](./changelog/2026-11-11-agent-extension-architecture.md)

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import AgentIcon from "#lib/components/agent/AgentIcon.svelte";
   import * as AlertDialog from "#lib/components/ui/alert-dialog/index.ts";
   import { Badge } from "#lib/components/ui/badge/index.ts";
   import { Button } from "#lib/components/ui/button/index.ts";
@@ -7,12 +8,16 @@
   import * as Dialog from "#lib/components/ui/dialog/index.ts";
   import { Input } from "#lib/components/ui/input/index.ts";
   import { Label } from "#lib/components/ui/label/index.ts";
-  import { agentSourceLabel, agentsAvailableOn, isPackageEnabled } from "#lib/agents.ts";
+  import {
+    agentBackendLabel,
+    agentSourceLabel,
+    agentsAvailableOn,
+    isPackageEnabled,
+  } from "#lib/agents.ts";
   import type { AgentSummary } from "#lib/generated/bindings.ts";
   import { m } from "#lib/paraglide/messages.js";
   import { sync } from "#lib/stores/app.svelte.ts";
   import { toast } from "svelte-sonner";
-  import BotIcon from "@lucide/svelte/icons/bot";
   import PencilIcon from "@lucide/svelte/icons/pencil";
   import PlusIcon from "@lucide/svelte/icons/plus";
   import PackageIcon from "@lucide/svelte/icons/package";
@@ -292,7 +297,7 @@
         <div class="flex flex-wrap items-start justify-between gap-2">
           <div class="flex min-w-0 flex-col gap-0.5">
             <div class="flex flex-wrap items-center gap-2">
-              <BotIcon class="text-muted-foreground size-4" />
+              <AgentIcon icon={agent.icon} class="size-4" />
               <h2 class="font-medium">{agent.name}</h2>
               <span class="text-muted-foreground font-mono text-[13px]">{agent.id}</span>
               {#if agent.version !== "-"}
@@ -303,6 +308,9 @@
               <p class="text-muted-foreground text-[13px]">{agent.description}</p>
             {/if}
             <div class="mt-0.5 flex flex-wrap items-center gap-1.5">
+              <Badge variant="secondary" class="text-[11px]">
+                {agentBackendLabel(agent.backend)}
+              </Badge>
               {#each agent.sources as source (source)}
                 <Badge variant="outline" class="text-[11px]">{agentSourceLabel(source)}</Badge>
               {/each}

@@ -76,6 +76,22 @@ extension モジュール1個 + provider の backend 指定のみである。
   - カスタムエージェント編集に extension 選択を追加
   - 保存先の古い `custom_agents.json` / `config.toml` 表記を `node.db` に修正
 
+### 2.4 アイコンと backend バッジ
+
+- `ui/src/lib/components/agent/AgentIcon.svelte` を追加した。
+  - `AgentSummary.icon` の `builtin:opencode` を同梱アイコン
+    (`ui/static/agents/opencode.png`) に解決する
+  - `http(s)` / `data:` / ルート相対パスは画像 URL として扱う
+  - 未知のキーや未指定は lucide の bot アイコンにフォールバックする
+- エージェント一覧 (`AgentManager.svelte`):
+  - カードの見出しを `AgentIcon` に置き換えた
+  - `AgentSummary.backend` をバッジで表示する
+    (`ACP` / `ACP + extension` / `Custom driver`)
+- セッション作成画面 (`NewSessionChat.svelte`):
+  - Agent ピッカーのトリガーと各候補に `AgentIcon` を表示する
+- `ui/src/lib/agents.ts` / `ui/messages/en.json`:
+  - backend ラベルのヘルパーと英語文言を追加した
+
 ## 3. 実 opencode での確認
 
 opencode v2.2.7（`opencode acp`）で以下を確認した。
@@ -109,26 +125,32 @@ opencode v2.2.7（`opencode acp`）で以下を確認した。
   - 既存の session manager / sync E2E が回帰しないこと
 - UI:
   - `svelte-check` / `tsc` が通過
+  - `AgentIcon` が `builtin:opencode` を解決し、未指定時に bot アイコンへ
+    フォールバックすること（ブラウザで確認）
 
 ## 5. 変更ファイル
 
-| ファイル                                                   | 変更内容                                     |
-| :--------------------------------------------------------- | :------------------------------------------- |
-| `crates/fxg-acp/src/agent/opencode.rs`                     | OpenCode extension                           |
-| `crates/fxg-acp/src/agent/builtin.rs`                      | opencode を Tier 2 に登録                    |
-| `crates/fxg-acp/src/agent/extension.rs`                    | `CapabilitiesSnapshot`                       |
-| `crates/fxg-acp/src/agent/extended.rs`                     | overlay の再計算                             |
-| `crates/fxg-acp/src/agent/catalog.rs`                      | extension レジストリ / custom 解決 / 予約 ID |
-| `crates/fxg-acp/src/driver.rs`                             | `AgentLaunchSpec.extension`                  |
-| `crates/fxg-protocol/src/settings.rs`                      | `CustomAgentConfig.extension`                |
-| `crates/fxg-db/migrations/0016_custom_agent_extension.sql` | `custom_agents.extension`                    |
-| `crates/fxg-db/src/settings.rs`                            | extension の SELECT / UPSERT                 |
-| `crates/fxg-node/src/daemon/ops.rs`                        | extension / 予約 ID の検証                   |
-| `ui/src/lib/components/settings/AgentManager.svelte`       | extension 選択 / `node.db` 表記              |
-| `ui/messages/en.json`                                      | extension 選択の文言                         |
-| `ui/src/lib/generated/bindings.ts`                         | 型の再生成                                   |
-| `.sqlx/`                                                   | `mise run sqlx:prepare` の結果               |
+| ファイル                                                   | 変更内容                                                    |
+| :--------------------------------------------------------- | :---------------------------------------------------------- |
+| `crates/fxg-acp/src/agent/opencode.rs`                     | OpenCode extension                                          |
+| `crates/fxg-acp/src/agent/builtin.rs`                      | opencode を Tier 2 に登録                                   |
+| `crates/fxg-acp/src/agent/extension.rs`                    | `CapabilitiesSnapshot`                                      |
+| `crates/fxg-acp/src/agent/extended.rs`                     | overlay の再計算                                            |
+| `crates/fxg-acp/src/agent/catalog.rs`                      | extension レジストリ / custom 解決 / 予約 ID                |
+| `crates/fxg-acp/src/driver.rs`                             | `AgentLaunchSpec.extension`                                 |
+| `crates/fxg-protocol/src/settings.rs`                      | `CustomAgentConfig.extension`                               |
+| `crates/fxg-db/migrations/0016_custom_agent_extension.sql` | `custom_agents.extension`                                   |
+| `crates/fxg-db/src/settings.rs`                            | extension の SELECT / UPSERT                                |
+| `crates/fxg-node/src/daemon/ops.rs`                        | extension / 予約 ID の検証                                  |
+| `ui/src/lib/components/settings/AgentManager.svelte`       | extension 選択 / `node.db` 表記 / アイコン / backend バッジ |
+| `ui/src/lib/components/session/NewSessionChat.svelte`      | Agent ピッカーのアイコン                                    |
+| `ui/src/lib/components/agent/AgentIcon.svelte`             | 組み込みアイコン / URL / フォールバック                     |
+| `ui/src/lib/agents.ts`                                     | backend ラベル                                              |
+| `ui/static/agents/opencode.png`                            | OpenCode アイコン                                           |
+| `ui/messages/en.json`                                      | extension / backend の文言                                  |
+| `ui/src/lib/generated/bindings.ts`                         | 型の再生成                                                  |
+| `.sqlx/`                                                   | `mise run sqlx:prepare` の結果                              |
 
 ## 6. 次のフェーズ
 
-- Phase 5: ドキュメントの最終更新（`docs/04` / `AGENTS.md` / 実装ログ）
+- 完了（Phase 5 のドキュメント更新まで実施済み）
