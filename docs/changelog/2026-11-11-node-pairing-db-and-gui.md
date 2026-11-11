@@ -263,11 +263,13 @@ DaemonState
 ```
 
 - `NodeDaemon` 終了時は supervisor を shutdown する（既存 `watch` を流用）。
-- 状態変化は `ClientEvent::SystemStatus` に載せる。`hub_connected: bool` は廃止し、
-  `HubLinkStatus` に置き換える。`ui/src/lib/stores/sync.svelte.ts` の
-  `centralConnected` も `state === "connected"` 相当へ変更する。
-- `SystemInfoResponse.hub_connected` と `ClientEvent::SystemStatus.hub_connected`
-  も同様に置き換える（両方に bool を残さない）。
+- 状態変化は `HubWsMessage::SystemStatus` で Client WS に流す。このメッセージは
+  定義だけがあって送信されておらず、UI の同期バッジが常に「未接続」になっていた
+  ため、`ClientApiBackend::hub_link_updates()`（`watch::Receiver`）を足して
+  `ws.rs` の `select!` から送るようにする。
+- `SystemInfoResponse.hub_connected` を `hub_link: Option<HubLinkStatus>` に置き換え、
+  `ui/src/lib/stores/sync.svelte.ts` の `centralConnected: bool` も
+  `hubLink: HubLinkStatus` に置き換える（bool を残さない）。
 - `role_health` の Sync コンポーネントは `HubLinkState` をそのまま写像する。
 - **接続テスト**は `HubLink` の実装（ハンドシェイク）を共有し、
   401/403 と到達不能を同じ分類で返す。
@@ -359,10 +361,12 @@ DaemonState
 ### Phase 1: 接続状態の型付き化と 401 の区別
 
 - `fxg-protocol`: `HubLinkState` / `HubLinkStatus`、`SystemInfoResponse` /
-  `ClientEvent::SystemStatus` の置き換え。
-- `fxg-node`: `AtomicBool` を `RwLock<HubLinkStatus>` 相当へ。`sync.rs` で
+  `HubWsMessage::SystemStatus` の置き換え。
+- `fxg-node`: `AtomicBool` を `watch::Sender<HubLinkStatus>` へ。`sync.rs` で
   `tungstenite::Error::Http` の status を見て `Unauthorized` を判定。
-- `ui`: `sync.svelte.ts` と接続状態バッジの追随。
+  失効トークンの e2e（`revoked_pairing_token_is_reported_as_unauthorized`）を追加。
+- `fxg-hub`: `SystemExtras` と Client WS の `hub_link_updates` 対応。
+- `ui`: `sync.svelte.ts` と接続状態バッジの追随（`shell_hub_*` の文言を追加）。
 - 完了条件: 失効トークンで `Unauthorized` が UI に出る。既存テストが通る。
 
 ### Phase 2: DB 所有化 + ペアリング API + ホット適用
@@ -452,7 +456,7 @@ DaemonState
 
 ## 8. 進捗チェックリスト
 
-- [ ] Phase 1: 接続状態の型付き化と 401 の区別
+- [x] Phase 1: 接続状態の型付き化と 401 の区別
 - [ ] Phase 2: DB 所有化 + ペアリング API + ホット適用
 - [ ] Phase 3: GUI
 - [ ] Phase 4: CLI 付け替え + 診断

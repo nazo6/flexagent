@@ -14,13 +14,13 @@ mod stdio;
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 
 use fxg_acp::agent::AgentCatalog;
 use fxg_acp::registry::AcpRegistry;
 use fxg_db::{Db, DbRole};
 use fxg_hub::api::ClientEvent;
+use fxg_protocol::client_api::{HubLinkState, HubLinkStatus};
 use fxg_protocol::config::fxg_home;
 use fxg_protocol::settings::{AgentSettings, NodeSettings};
 use fxg_protocol::util::now_ms;
@@ -218,8 +218,8 @@ struct Inner {
     started_at: i64,
     /// Normalized events delivered to Client WS (forwarded from the bus)
     client_events: broadcast::Sender<ClientEvent>,
-    /// Whether the hub's outbox sync worker is connected
-    hub_connected: AtomicBool,
+    /// Node ⇔ hub link state (outbox sync worker; `watch` also feeds Client WS)
+    hub_link: watch::Sender<HubLinkStatus>,
     /// `NodeHello` resend trigger (on worktree changes / project registration)
     hello_refresh: tokio::sync::Notify,
 
@@ -319,6 +319,17 @@ impl DaemonState {
             None => SessionManager::new(bus.clone(), config.node_id.clone(), catalog),
         };
 
+        // The sync worker takes over the state right after start-up; while the
+        // pairing exists the link is reported as connecting.
+        let initial_hub_link = match config.hub_url.as_deref() {
+            Some(url) => HubLinkStatus::new(
+                HubLinkState::Connecting,
+                Some(fxg_protocol::config::hub_http_origin(url)),
+                None,
+            ),
+            None => HubLinkStatus::standalone(),
+        };
+
         let (client_events, _) = broadcast::channel(CLIENT_EVENT_CAPACITY);
         let state = Self {
             inner: Arc::new(Inner {
@@ -333,7 +344,7 @@ impl DaemonState {
                 token: RwLock::new(token),
                 started_at: now_ms(),
                 client_events,
-                hub_connected: AtomicBool::new(false),
+                hub_link: watch::channel(initial_hub_link).0,
                 hello_refresh: tokio::sync::Notify::new(),
                 diagnostics_counters: std::sync::Arc::new(fxg_hub::api::DiagnosticsCounters::new()),
                 shutdown_tx: std::sync::OnceLock::new(),
@@ -514,14 +525,19 @@ impl DaemonState {
         now_ms().saturating_sub(self.inner.started_at)
     }
 
-    /// Whether the hub's outbox sync worker is connected.
-    pub fn hub_connected(&self) -> bool {
-        self.inner.hub_connected.load(Ordering::Relaxed)
+    /// Current node ⇔ hub link state.
+    pub fn hub_link(&self) -> HubLinkStatus {
+        self.inner.hub_link.borrow().clone()
     }
 
-    /// Updates the hub connection state (outbox sync worker only).
-    pub fn set_hub_connected(&self, connected: bool) {
-        self.inner.hub_connected.store(connected, Ordering::Relaxed);
+    /// Subscribes to node ⇔ hub link state changes (Client WS notifications).
+    pub fn hub_link_updates(&self) -> watch::Receiver<HubLinkStatus> {
+        self.inner.hub_link.subscribe()
+    }
+
+    /// Replaces the node ⇔ hub link state (outbox sync worker only).
+    pub fn set_hub_link(&self, status: HubLinkStatus) {
+        self.inner.hub_link.send_replace(status);
     }
 
     /// Requests a resend of `NodeHello` (reports project bindings on worktree changes etc.).

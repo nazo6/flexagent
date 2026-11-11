@@ -24,6 +24,7 @@ use base64::engine::general_purpose::STANDARD as BASE64;
 use futures_util::{SinkExt, StreamExt};
 use fxg_db::SessionFilter;
 use fxg_protocol::CommandId;
+use fxg_protocol::client_api::{HubLinkState, HubLinkStatus};
 use fxg_protocol::node_hub::{HubToNodeMsg, NodeToHubMsg, SessionSyncState};
 use tokio::sync::mpsc;
 use tokio::sync::watch;
@@ -70,24 +71,41 @@ pub async fn run(
     node_token: String,
     mut shutdown: watch::Receiver<bool>,
 ) {
+    let hub_url = Some(fxg_protocol::config::hub_http_origin(&server_url));
     let mut backoff = RECONNECT_MIN;
     loop {
         if *shutdown.borrow() {
             break;
         }
 
+        state.set_hub_link(HubLinkStatus::new(
+            HubLinkState::Connecting,
+            hub_url.clone(),
+            None,
+        ));
         match connect_once(&state, &server_url, &node_token, &mut shutdown).await {
             Ok(()) => {
                 backoff = RECONNECT_MIN;
+                // The connection dropped cleanly; the next attempt follows after the backoff.
+                state.set_hub_link(HubLinkStatus::new(
+                    HubLinkState::Connecting,
+                    hub_url.clone(),
+                    None,
+                ));
             }
             Err(err) => {
                 state
                     .diagnostics_counters()
                     .incr(fxg_hub::api::CounterKind::OutboxRetries);
-                tracing::warn!(url = %server_url, "hub connection failed: {err:#}");
+                let (link_state, message) = classify_failure(&err);
+                tracing::warn!(url = %server_url, "hub connection failed: {message}");
+                state.set_hub_link(HubLinkStatus::new(
+                    link_state,
+                    hub_url.clone(),
+                    Some(message),
+                ));
             }
         }
-        state.set_hub_connected(false);
         if *shutdown.borrow() {
             break;
         }
@@ -99,8 +117,28 @@ pub async fn run(
         }
         backoff = (backoff * 2).min(RECONNECT_MAX);
     }
-    state.set_hub_connected(false);
+    state.set_hub_link(HubLinkStatus::standalone());
     tracing::info!("outbox sync worker stopped");
+}
+
+/// Classifies a failed connection attempt for the UI.
+///
+/// The hub rejects an unknown or revoked pairing token during the WebSocket
+/// handshake with HTTP 401 / 403, which is reported separately from a node that
+/// simply cannot reach the hub.
+fn classify_failure(err: &anyhow::Error) -> (HubLinkState, String) {
+    if let Some(tokio_tungstenite::tungstenite::Error::Http(response)) =
+        err.downcast_ref::<tokio_tungstenite::tungstenite::Error>()
+    {
+        let status = response.status().as_u16();
+        if status == 401 || status == 403 {
+            return (
+                HubLinkState::Unauthorized,
+                format!("the hub rejected the pairing token (HTTP {status})"),
+            );
+        }
+    }
+    (HubLinkState::Failed, format!("{err:#}"))
 }
 
 /// Performs one connection's worth of sync with the hub (does not return until the
@@ -120,7 +158,11 @@ async fn connect_once(
     let (socket, _response) = tokio_tungstenite::connect_async(request).await?;
     let (mut sender, mut receiver) = socket.split();
 
-    state.set_hub_connected(true);
+    state.set_hub_link(HubLinkStatus::new(
+        HubLinkState::Connected,
+        Some(fxg_protocol::config::hub_http_origin(server_url)),
+        None,
+    ));
     tracing::info!(url = %server_url, "connected to hub");
 
     // Send queue (shared path for the PTY forwarder / command responses)

@@ -7,6 +7,7 @@ use usage::{Args, Subcommands};
 
 use crate::client::NodeClient;
 use crate::service::ServiceTarget;
+use fxg_protocol::client_api::HubLinkState;
 
 use super::*;
 
@@ -345,14 +346,20 @@ impl usage::RunAsync for NodeStatusArgs {
             if running.is_some() { "yes" } else { "no" }
         );
         if let Some(status) = running {
-            println!(
-                "hub:       {}",
-                if status.hub_connected {
-                    "connected"
-                } else {
-                    "standalone"
-                }
-            );
+            let state = match status.hub_link.state {
+                HubLinkState::Standalone => "standalone",
+                HubLinkState::Connecting => "connecting",
+                HubLinkState::Connected => "connected",
+                HubLinkState::Unauthorized => "unauthorized",
+                HubLinkState::Failed => "failed",
+            };
+            println!("hub:       {state}");
+            if let Some(message) = status.hub_link.message.as_deref() {
+                println!("           {message}");
+            }
+            if let Some(url) = status.hub_link.hub_url.as_deref() {
+                println!("           {url}");
+            }
             println!("outbox:    {}", status.unsynced_event_count);
             println!("sessions:  {}", status.sessions.len());
             if let Some(last) = status.last_synced_at {

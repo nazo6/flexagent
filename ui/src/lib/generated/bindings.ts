@@ -822,6 +822,31 @@ export type HubBootstrapView = {
 	log_no_color: SourcedValue<boolean>,
 };
 
+/**  State of the node ⇔ hub link (`GET /api/v1/system/info`). */
+export type HubLinkState =
+/**  No pairing (the node runs standalone / local only) */
+"standalone" |
+/**  A pairing exists and a connection attempt is in progress */
+"connecting" |
+/**  Connected and syncing with the hub */
+"connected" |
+/**  The hub rejected the pairing token (HTTP 401 / 403) */
+"unauthorized" |
+/**  The hub could not be reached or the connection failed */
+"failed";
+
+/**  Snapshot of the node ⇔ hub link. */
+export type HubLinkStatus = {
+	/**  Current state */
+	state: HubLinkState,
+	/**  Hub address (HTTP origin) when a pairing exists */
+	hub_url: string | null,
+	/**  When the current state was entered (Unix epoch ms) */
+	since: number,
+	/**  English detail when `state` is `unauthorized` / `failed` */
+	message: string | null,
+};
+
 /**  Hub-owned settings stored in `hub.db` (`hub_settings`). */
 export type HubSettings = {
 	/**  Web Push contact claim (`mailto:` / `https:`) */
@@ -893,8 +918,8 @@ error?: ErrorInfo | null;
 session_id: SessionId | null } |
 /**  Synchronization state notification (drives the sync badge in the UI). */
 { op: "system_status";
-/**  Whether the hub is connected (when connected to a local node) */
-hub_connected: boolean;
+/**  Node ⇔ hub link state (when connected to a local node) */
+hub_link: HubLinkStatus;
 /**  Number of unsynced outbox events */
 unsynced_event_count: number;
 /**  Last synchronization time (Unix epoch ms) */
@@ -2106,8 +2131,8 @@ export type SystemInfoResponse = {
 	vapid_public_key: string | null,
 	/**  Number of unsynced outbox events (local node only) */
 	unsynced_event_count: number | null,
-	/**  WebSocket connection state to the hub (local node only) */
-	hub_connected: boolean | null,
+	/**  Node ⇔ hub link state (local node only) */
+	hub_link: HubLinkStatus | null,
 	/**  Last successful synchronization time (Unix epoch ms; local node only) */
 	last_synced_at: number | null,
 };

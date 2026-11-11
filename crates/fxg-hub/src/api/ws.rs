@@ -6,9 +6,9 @@
 
 use axum::extract::ws::{Message, WebSocket};
 use futures_util::{SinkExt, StreamExt};
-use fxg_protocol::client_api::{ClientWsMessage, HubWsMessage};
+use fxg_protocol::client_api::{ClientWsMessage, HubLinkStatus, HubWsMessage};
 use fxg_protocol::common::{ErrorCode, ErrorInfo, IncidentLevel, IncidentSource};
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, watch};
 
 use super::{ClientApiBackend, ClientCommand, ClientEvent, replay_events, send_ws_json};
 
@@ -22,6 +22,7 @@ pub(crate) async fn handle_client_ws<B: ClientApiBackend>(backend: B, socket: We
     // Subscribe first so events produced during the replay are not missed
     // (events at or below the already replayed cursor are skipped on forwarding).
     let mut subscription = backend.subscribe_client_events();
+    let mut hub_link_rx = backend.hub_link_updates();
     let mut cursor: u64 = 0;
     let mut subscribed = false;
 
@@ -29,6 +30,7 @@ pub(crate) async fn handle_client_ws<B: ClientApiBackend>(backend: B, socket: We
     enum Next {
         Client(Option<Result<Message, axum::Error>>),
         Bus(Box<Result<ClientEvent, broadcast::error::RecvError>>),
+        HubLink(HubLinkStatus),
     }
 
     loop {
@@ -36,6 +38,7 @@ pub(crate) async fn handle_client_ws<B: ClientApiBackend>(backend: B, socket: We
             tokio::select! {
                 incoming = receiver.next() => Next::Client(incoming),
                 event = subscription.recv() => Next::Bus(Box::new(event)),
+                status = next_hub_link(&mut hub_link_rx) => Next::HubLink(status),
             }
         } else {
             Next::Client(receiver.next().await)
@@ -222,6 +225,38 @@ pub(crate) async fn handle_client_ws<B: ClientApiBackend>(backend: B, socket: We
                 }
                 Err(broadcast::error::RecvError::Closed) => break,
             },
+            Next::HubLink(status) => {
+                let (unsynced_event_count, last_synced_at) = match backend.system_extras().await {
+                    Ok(extras) => (
+                        extras.unsynced_event_count.unwrap_or(0),
+                        extras.last_synced_at,
+                    ),
+                    Err(err) => {
+                        tracing::warn!(message = %err.message, "failed to read system extras");
+                        (0, None)
+                    }
+                };
+                let message = HubWsMessage::SystemStatus {
+                    hub_link: status,
+                    unsynced_event_count,
+                    last_synced_at,
+                };
+                if send_ws_json(&mut sender, &message).await.is_err() {
+                    break;
+                }
+            }
         }
+    }
+}
+
+/// Waits for the next node ⇔ hub link change (never resolves on the hub).
+async fn next_hub_link(rx: &mut Option<watch::Receiver<HubLinkStatus>>) -> HubLinkStatus {
+    match rx {
+        Some(receiver) => match receiver.changed().await {
+            Ok(()) => receiver.borrow_and_update().clone(),
+            // The sender is gone; keep the arm waiting instead of spinning.
+            Err(_) => std::future::pending().await,
+        },
+        None => std::future::pending().await,
     }
 }

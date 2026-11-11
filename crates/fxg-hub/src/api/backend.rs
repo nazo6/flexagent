@@ -8,8 +8,8 @@ use fxg_db::Db;
 use fxg_protocol::client_api::{
     AgentCapabilitiesPreview, AgentDiagnostics, AgentOpResponse, AgentsResponse, ConnectionRole,
     CreateSessionRequest, CreateSessionResponse, CreateWorktreeRequest, DiagnosticsResponse,
-    IssueNodeTokenRequest, IssueNodeTokenResponse, KillSwitchResponse, NodeTokensResponse,
-    ProbeAgentRequest, ProjectLinkRequest, ProjectLinkResponse, ProjectPreview,
+    HubLinkStatus, IssueNodeTokenRequest, IssueNodeTokenResponse, KillSwitchResponse,
+    NodeTokensResponse, ProbeAgentRequest, ProjectLinkRequest, ProjectLinkResponse, ProjectPreview,
     ProjectPreviewRequest, ProjectScanRequest, ProjectScanResponse, ProjectUnlinkRequest,
     ProjectUnlinkResponse, ProvisionersResponse, PruneWorktreesRequest, PushSubscribeRequest,
     PushSubscribeResponse, RemoveWorktreeRequest, RespondElicitationRequest,
@@ -75,8 +75,8 @@ pub struct SystemExtras {
     pub vapid_public_key: Option<String>,
     /// Number of unsynced Outbox events (only when connected to a local node)
     pub unsynced_event_count: Option<u64>,
-    /// WebSocket connection state to the hub (only when connected to a local node)
-    pub hub_connected: Option<bool>,
+    /// Node ⇔ hub link state (only when connected to a local node)
+    pub hub_link: Option<HubLinkStatus>,
     /// Last successful synchronization time (Unix epoch ms; local node only)
     pub last_synced_at: Option<i64>,
 }
@@ -219,6 +219,11 @@ pub trait ClientApiBackend: Clone + Send + Sync + 'static {
     /// Role-specific components (sync / hub).
     async fn role_health(&self, _now: i64) -> Vec<ComponentHealth> {
         Vec::new()
+    }
+
+    /// Live node ⇔ hub link updates (local node only; `None` on the hub).
+    fn hub_link_updates(&self) -> Option<tokio::sync::watch::Receiver<HubLinkStatus>> {
+        None
     }
 
     /// Agent stderr tails for diagnostics.

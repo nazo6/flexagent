@@ -33,6 +33,7 @@ use fxg_hub::api::auth::{generate_token, hash_token};
 use fxg_hub::state::HubOptions;
 use fxg_node::daemon::{DaemonConfig, NodeDaemon};
 use fxg_node::session_manager::{DriverFactory, StartSessionParams};
+use fxg_protocol::client_api::HubLinkState;
 use fxg_protocol::common::{
     ClientSource, ErrorCode, PermissionOption, PermissionOptionKind, SessionStatus,
     StreamDeltaPayload,
@@ -1289,4 +1290,58 @@ async fn hub_archives_and_deletes_session() {
     tokio::time::timeout(Duration::from_secs(10), server.wait())
         .await
         .expect("server stop");
+}
+
+// ----------------------------------------------------------------------
+// E2E: rejected pairing token
+// ----------------------------------------------------------------------
+
+/// A revoked (or never valid) pairing token is reported as `UNAUTHORIZED` so the
+/// GUI can tell it apart from an unreachable hub.
+#[tokio::test(flavor = "multi_thread")]
+async fn revoked_pairing_token_is_reported_as_unauthorized() {
+    let server_home = tempfile::tempdir().expect("server home");
+    let node_home = tempfile::tempdir().expect("node home");
+
+    let port = reserve_port();
+    let server_url = format!("ws://127.0.0.1:{port}/api/v1/node/ws");
+    // Issue a token, then revoke it (simulates rotating it on the hub).
+    let token = issue_node_token(server_home.path(), "node-1").await;
+    {
+        let db = Db::open(&fxg_db::hub_db_path(server_home.path()), DbRole::Hub)
+            .await
+            .expect("hub db");
+        db.set_node_token_hash("node-1", None)
+            .await
+            .expect("revoke token");
+    }
+
+    let _server = start_hub(server_home.path(), port).await;
+    let agent = MockAgent::default();
+    let node = start_node(
+        node_home.path(),
+        "node-1",
+        Some(server_url),
+        Some(token),
+        &agent,
+    )
+    .await;
+
+    wait_until("unauthorized hub link", Duration::from_secs(20), || async {
+        node.state().hub_link().state == HubLinkState::Unauthorized
+    })
+    .await;
+
+    let link = node.state().hub_link();
+    assert_eq!(link.state, HubLinkState::Unauthorized);
+    assert!(
+        link.message
+            .as_deref()
+            .unwrap_or_default()
+            .contains("pairing token"),
+        "message should explain the rejection: {link:?}"
+    );
+    assert_eq!(link.hub_url, Some(format!("http://127.0.0.1:{port}")));
+
+    node.shutdown();
 }
