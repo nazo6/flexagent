@@ -519,3 +519,5 @@ overlay が効く。
   変更は実装時に反映）
 - [`docs/06-type-safety.md`](../06-type-safety.md)（`DriverKind` /
   `CapabilityOverlay` は open enum と型付き差分を使う）
+- [`2026-11-11-registry-import.md`](./2026-11-11-registry-import.md)（Registry を
+  import 専用にした後続変更）

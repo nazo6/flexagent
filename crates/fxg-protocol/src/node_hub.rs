@@ -158,7 +158,7 @@ pub enum NodeRpcRequest {
         /// Target secret ID
         id: SecretId,
     },
-    /// Install, update or remove an agent.
+    /// Manage the agent catalog (refresh / custom definitions / registry import).
     ManageAgent {
         /// Operation to execute
         action: AgentAction,
@@ -284,7 +284,7 @@ pub enum NodeRpcResponse {
     },
     /// Agent management result (`ManageAgent`).
     AgentOp {
-        /// Display message on success (e.g. `installed opencode2 0.1.0`)
+        /// Display message on success (e.g. `imported qwen-code from the registry`)
         message: Option<String>,
     },
     /// Session import result (`ImportSession`).
@@ -876,16 +876,16 @@ mod tests {
             refresh
         );
 
-        let set_pkg = NodeRpcRequest::ManageAgent {
-            action: AgentAction::SetPackageEnabled {
-                agent_id: "demo".into(),
-                enabled: true,
+        let import = NodeRpcRequest::ManageAgent {
+            action: AgentAction::ImportRegistryAgent {
+                agent_id: "qwen-code".into(),
+                extension: Some("opencode".into()),
             },
         };
-        let json = serde_json::to_value(&set_pkg).unwrap();
-        assert_eq!(json["action"]["action"], "set_package_enabled");
-        assert_eq!(json["action"]["agent_id"], "demo");
-        assert_eq!(json["action"]["enabled"], true);
+        let json = serde_json::to_value(&import).unwrap();
+        assert_eq!(json["action"]["action"], "import_registry_agent");
+        assert_eq!(json["action"]["agent_id"], "qwen-code");
+        assert_eq!(json["action"]["extension"], "opencode");
 
         let result = NodeToHubMsg::NodeRpcResult {
             request_id: "r1".into(),

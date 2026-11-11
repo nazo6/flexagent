@@ -210,7 +210,7 @@ fn map_config_category(category: &SessionConfigOptionCategory) -> ConfigOptionCa
 /// Converts an FXG config value into the ACP wire value.
 ///
 /// FXG exposes select values as bare strings (for example
-/// `"opencode-go/deepseek-v4.1-flash"`), while ACP serializes the same value as
+/// `"provider/model"`), while ACP serializes the same value as
 /// `{ "value": "..." }`. Deserializing the bare string directly into
 /// [`SessionConfigOptionValue`] fails, so map the scalar shapes explicitly and
 /// only fall back to serde for the tagged (object) forms.

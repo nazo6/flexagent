@@ -1,4 +1,9 @@
-import type { AgentBackendKind, AgentSource, AgentSummary } from "#lib/generated/bindings.ts";
+import type {
+  AgentBackendKind,
+  AgentSource,
+  AgentSummary,
+  RegistryDistributionKind,
+} from "#lib/generated/bindings.ts";
 import { m } from "#lib/paraglide/messages.js";
 
 /** Display label for the driver backing an agent. */
@@ -18,10 +23,20 @@ export function agentSourceLabel(source: AgentSource): string {
   switch (source) {
     case "external":
       return m.settings_agent_source_external();
-    case "package":
-      return "npx/uvx";
     case "custom":
       return m.settings_agent_source_custom();
+  }
+}
+
+/** Display label for a registry distribution form. */
+export function registryDistributionLabel(kind: RegistryDistributionKind): string {
+  switch (kind) {
+    case "binary":
+      return "binary";
+    case "npx":
+      return "npx";
+    case "uvx":
+      return "uvx";
   }
 }
 
@@ -29,7 +44,6 @@ export function agentSourceLabel(source: AgentSource): string {
 export function agentHint(agent: AgentSummary): string {
   if (agent.custom_config !== null) return m.settings_agent_source_custom();
   if (agent.sources.includes("external")) return m.settings_agent_source_external();
-  if (agent.sources.includes("package")) return "npx/uvx";
   return m.settings_not_installed();
 }
 
@@ -42,9 +56,4 @@ export function agentOptionLabel(agent: AgentSummary): string {
 /** Return only the agents available on the node. */
 export function agentsAvailableOn(agents: AgentSummary[], nodeId: string): AgentSummary[] {
   return agents.filter((agent) => agent.installed_nodes.includes(nodeId));
-}
-
-/** Whether usage via `npx` / `uvx` is enabled. */
-export function isPackageEnabled(agent: AgentSummary): boolean {
-  return agent.sources.includes("package");
 }

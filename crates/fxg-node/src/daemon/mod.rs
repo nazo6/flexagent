@@ -309,7 +309,6 @@ impl DaemonState {
             paths.fxg_home(),
             &agent_settings,
             db.custom_agents().await?,
-            db.enabled_package_agents().await?,
         ));
         let sessions = match driver_factory {
             Some(factory) => {
@@ -472,15 +471,14 @@ impl DaemonState {
         Ok(settings)
     }
 
-    /// Reloads custom agents / package enablement from `node.db` into the registry.
+    /// Reloads custom agents from `node.db` into the registry.
     pub async fn refresh_agent_catalog(&self) -> Result<(), NodeError> {
         let settings = self.inner.db.ensure_agent_settings().await?;
         let custom = self.inner.db.custom_agents().await?;
-        let enabled = self.inner.db.enabled_package_agents().await?;
         self.inner
             .sessions
             .catalog()
-            .apply_catalog(&settings, custom, enabled);
+            .apply_catalog(&settings, custom);
         *self
             .inner
             .agent_settings
@@ -588,34 +586,10 @@ impl DaemonState {
         Ok(())
     }
 
-    /// List of available agent IDs (installed from the ACP Registry + custom + externally installed).
-    ///
-    /// Resolved with a short timeout so that daemon startup is not blocked even
-    /// where fetching/expanding the registry is slow (on failure, only custom definitions).
+    /// List of available agent IDs (built-in CLIs on PATH + custom definitions).
     pub async fn installed_agents(&self) -> Vec<String> {
         let catalog = self.inner.sessions.catalog();
-        // Custom definitions do not depend on fetching the registry, so always include them
-        let mut ids: Vec<String> = catalog.custom_agents().into_keys().collect();
-        let listed = tokio::time::timeout(std::time::Duration::from_secs(5), async {
-            let index = catalog.index(false).await?;
-            Ok::<_, anyhow::Error>(
-                catalog
-                    .list(&index, false)
-                    .into_iter()
-                    .map(|entry| entry.id)
-                    .collect::<Vec<_>>(),
-            )
-        })
-        .await;
-        match listed {
-            Ok(Ok(agents)) => ids.extend(agents),
-            Ok(Err(err)) => {
-                tracing::warn!("failed to list installed agents (reporting partial list): {err}");
-            }
-            Err(_) => {
-                tracing::warn!("listing installed agents timed out (reporting partial list)");
-            }
-        }
+        let mut ids: Vec<String> = catalog.list().into_iter().map(|entry| entry.id).collect();
         ids.sort();
         ids.dedup();
         ids

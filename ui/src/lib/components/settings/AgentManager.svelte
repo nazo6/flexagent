@@ -12,30 +12,35 @@
     agentBackendLabel,
     agentSourceLabel,
     agentsAvailableOn,
-    isPackageEnabled,
+    registryDistributionLabel,
   } from "#lib/agents.ts";
-  import type { AgentSummary } from "#lib/generated/bindings.ts";
+  import type {
+    AgentSummary,
+    CustomAgentOrigin,
+    RegistryAgentSummary,
+  } from "#lib/generated/bindings.ts";
   import { m } from "#lib/paraglide/messages.js";
   import { sync } from "#lib/stores/app.svelte.ts";
   import { toast } from "svelte-sonner";
   import PencilIcon from "@lucide/svelte/icons/pencil";
   import PlusIcon from "@lucide/svelte/icons/plus";
-  import PackageIcon from "@lucide/svelte/icons/package";
-  import PowerOffIcon from "@lucide/svelte/icons/power-off";
   import RefreshCwIcon from "@lucide/svelte/icons/refresh-cw";
   import SearchIcon from "@lucide/svelte/icons/search";
   import Trash2Icon from "@lucide/svelte/icons/trash-2";
 
   let agents = $state<AgentSummary[]>([]);
+  let registryAgents = $state<RegistryAgentSummary[]>([]);
   let loading = $state(false);
   /** Target node (catalog source and operation target). */
   let nodeId = $state("");
-  /** Label of the running operation (for example `opencode2 installing…`). null = idle. */
+  /** Label of the running operation (for example `Refreshing catalog…`). null = idle. */
   let busyLabel = $state<string | null>(null);
+  /** Registry agent currently being imported. */
+  let importingId = $state<string | null>(null);
   /** Pending removal target. */
   let removeTarget = $state<AgentSummary | null>(null);
 
-  // Catalog dialog (registry agents not yet installed on this node)
+  // Registry import dialog
   let catalogOpen = $state(false);
   let catalogQuery = $state("");
 
@@ -43,18 +48,34 @@
   let customOpen = $state(false);
   let customBusy = $state(false);
   let customEditId = $state<string | null>(null);
-  let customForm = $state({ id: "", name: "", command: "", args: "", env: "", extension: "" });
+  let customOrigin = $state<CustomAgentOrigin | null>(null);
+  let customIcon = $state<string | null>(null);
+  let customForm = $state({
+    id: "",
+    name: "",
+    description: "",
+    command: "",
+    args: "",
+    env: "",
+    extension: "",
+  });
 
   const onlineNodes = $derived(sync.nodes.filter((node) => node.is_online));
-  const busy = $derived(busyLabel !== null);
+  const busy = $derived(busyLabel !== null || importingId !== null);
 
-  /** Agents available on this node (npx/uvx are included only when enabled). */
+  /** Agents available on this node (built-in + custom). */
   const available = $derived(agentsAvailableOn(agents, nodeId));
-  /** Registry agents not yet available on this node. */
-  const catalogOnly = $derived(
-    agents
-      .filter((agent) => agent.registry && !isAvailableOn(agent))
-      .filter((agent) => matchesQuery(agent, catalogQuery)),
+  /** Registry import candidates matching the search. */
+  const importable = $derived(registryAgents.filter((agent) => matchesQuery(agent, catalogQuery)));
+  /** IDs already provided by a built-in provider on this node. */
+  const builtinIds = $derived(
+    new Set(agents.filter((agent) => agent.custom_config === null).map((agent) => agent.id)),
+  );
+  /** Registry agents that can be imported right now. */
+  const importCount = $derived(
+    registryAgents.filter(
+      (agent) => agent.available && !agent.imported && !builtinIds.has(agent.id),
+    ).length,
   );
   /** Built-in extensions that a custom ACP launch can reference. */
   const extensionChoices = $derived(
@@ -79,11 +100,7 @@
     if (nodeId !== "") void loadAgents();
   });
 
-  function isAvailableOn(agent: AgentSummary): boolean {
-    return agent.installed_nodes.includes(nodeId);
-  }
-
-  function matchesQuery(agent: AgentSummary, query: string): boolean {
+  function matchesQuery(agent: AgentSummary | RegistryAgentSummary, query: string): boolean {
     const needle = query.trim().toLowerCase();
     if (needle === "") return true;
     return [agent.id, agent.name, agent.description ?? ""].some((value) =>
@@ -99,7 +116,9 @@
     if (loading || nodeId === "") return;
     loading = true;
     try {
-      agents = await sync.connection.client.nodeAgents(nodeId);
+      const catalog = await sync.connection.client.nodeAgentCatalog(nodeId);
+      agents = catalog.agents;
+      registryAgents = catalog.registry;
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
     } finally {
@@ -107,26 +126,18 @@
     }
   }
 
-  async function setPackageEnabled(agent: AgentSummary, enabled: boolean): Promise<void> {
-    if (busy || nodeId === "") return;
-    busyLabel = enabled
-      ? m.settings_agent_package_enabling({ name: agent.id })
-      : m.settings_agent_package_disabling({ name: agent.id });
+  async function importAgent(agent: RegistryAgentSummary): Promise<void> {
+    if (busy || nodeId === "" || !agent.available || agent.imported) return;
+    importingId = agent.id;
     try {
-      const result = enabled
-        ? await sync.connection.client.enablePackageAgent(nodeId, agent.id)
-        : await sync.connection.client.disablePackageAgent(nodeId, agent.id);
-      toast.success(
-        result.message ??
-          (enabled
-            ? m.settings_agent_package_enabled({ name: agent.id })
-            : m.settings_agent_package_disabled({ name: agent.id })),
-      );
+      const result = await sync.connection.client.importRegistryAgent(nodeId, agent.id);
+      toast.success(result.message ?? m.settings_catalog_imported({ name: agent.name }));
+      catalogOpen = false;
       await Promise.all([loadAgents(), sync.refreshNodes()]);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
     } finally {
-      busyLabel = null;
+      importingId = null;
     }
   }
 
@@ -146,13 +157,10 @@
 
   async function confirmRemove(): Promise<void> {
     const target = removeTarget;
-    if (target === null || busy || nodeId === "") return;
-    const isCustom = target.custom_config !== null;
+    if (target === null || busy || nodeId === "" || target.custom_config === null) return;
     busyLabel = m.settings_agent_removing({ name: target.id });
     try {
-      const result = isCustom
-        ? await sync.connection.client.removeCustomAgent(nodeId, target.id)
-        : await sync.connection.client.disablePackageAgent(nodeId, target.id);
+      const result = await sync.connection.client.removeCustomAgent(nodeId, target.id);
       toast.success(result.message ?? m.settings_agent_removed({ name: target.id }));
       removeTarget = null;
       await Promise.all([loadAgents(), sync.refreshNodes()]);
@@ -167,9 +175,12 @@
   function openCustom(agent: AgentSummary | null): void {
     const config = agent?.custom_config ?? null;
     customEditId = agent?.id ?? null;
+    customOrigin = config?.origin ?? { kind: "manual" };
+    customIcon = config?.icon ?? null;
     customForm = {
       id: agent?.id ?? "",
       name: config?.name ?? "",
+      description: config?.description ?? "",
       command: config?.command ?? "",
       args: (config?.args ?? []).join(" "),
       env: formatEnv(config?.env ?? {}, config?.env_secrets ?? {}),
@@ -220,10 +231,13 @@
     try {
       const result = await sync.connection.client.upsertCustomAgent(nodeId, id, {
         name: customForm.name.trim() === "" ? null : customForm.name.trim(),
+        description: customForm.description.trim() === "" ? null : customForm.description.trim(),
         command: customForm.command.trim(),
         args: customForm.args.split(/\s+/).filter((value) => value !== ""),
         ...parseEnv(customForm.env),
         extension: customForm.extension === "" ? null : customForm.extension,
+        icon: customIcon,
+        origin: customOrigin,
       });
       toast.success(result.message ?? m.settings_custom_agent_saved({ name: id }));
       customOpen = false;
@@ -323,19 +337,6 @@
           </div>
 
           <div class="flex flex-wrap items-center gap-1.5">
-            {#if isPackageEnabled(agent)}
-              <Button
-                variant="ghost"
-                size="sm"
-                class="text-muted-foreground"
-                disabled={busy || nodeId === ""}
-                onclick={() => void setPackageEnabled(agent, false)}
-                title={m.settings_disable_package_title()}
-              >
-                <PowerOffIcon />
-                {m.settings_disable_package()}
-              </Button>
-            {/if}
             {#if agent.custom_config !== null}
               <Button
                 variant="ghost"
@@ -381,7 +382,7 @@
       onclick={() => (catalogOpen = true)}
     >
       <PlusIcon />
-      {m.settings_add_from_catalog({ count: catalogOnly.length })}
+      {m.settings_add_from_catalog({ count: importCount })}
     </Button>
   </div>
 </div>
@@ -395,17 +396,11 @@
     <AlertDialog.Header>
       <AlertDialog.Title>{m.settings_remove_agent_title()}</AlertDialog.Title>
       <AlertDialog.Description class="text-sm">
-        {#if removeTarget?.custom_config !== null}
-          {m.settings_remove_custom_description()}
-          <code>{removeTarget?.id}</code>
-          {m.settings_remove_custom_description_suffix()}
-          <code>node.db</code>
-          {m.settings_remove_custom_description_tail()}
-        {:else}
-          {m.settings_remove_package_description()}
-          <code>{removeTarget?.id}</code>
-          {m.settings_remove_package_description_tail({ name: nodeName(nodeId) })}
-        {/if}
+        {m.settings_remove_custom_description()}
+        <code>{removeTarget?.id}</code>
+        {m.settings_remove_custom_description_suffix()}
+        <code>node.db</code>
+        {m.settings_remove_custom_description_tail()}
       </AlertDialog.Description>
     </AlertDialog.Header>
     <AlertDialog.Footer>
@@ -440,46 +435,69 @@
         />
       </div>
       <div class="flex max-h-[60vh] flex-col gap-2 overflow-y-auto">
-        {#if catalogOnly.length === 0}
+        {#if importable.length === 0}
           <p class="text-muted-foreground text-sm">
             {catalogQuery.trim() === ""
               ? m.settings_catalog_empty()
               : m.settings_catalog_no_match()}
           </p>
         {:else}
-          {#each catalogOnly as agent (agent.id)}
+          {#each importable as agent (agent.id)}
             <div class="flex flex-wrap items-start justify-between gap-2 rounded-md border p-2.5">
-              <div class="flex min-w-0 flex-col gap-0.5">
-                <div class="flex flex-wrap items-center gap-2">
-                  <span class="text-sm font-medium">{agent.name}</span>
-                  <span class="text-muted-foreground font-mono text-[13px]">{agent.id}</span>
-                  {#if agent.version !== "-"}
+              <div class="flex min-w-0 items-start gap-2">
+                <AgentIcon icon={agent.icon} class="mt-0.5 size-4" />
+                <div class="flex min-w-0 flex-col gap-0.5">
+                  <div class="flex flex-wrap items-center gap-2">
+                    <span class="text-sm font-medium">{agent.name}</span>
+                    <span class="text-muted-foreground font-mono text-[13px]">{agent.id}</span>
                     <span class="text-muted-foreground text-[13px]">v{agent.version}</span>
+                    {#each agent.distribution as kind (kind)}
+                      <Badge variant="outline" class="text-[11px]">
+                        {registryDistributionLabel(kind)}
+                      </Badge>
+                    {/each}
+                    {#if agent.imported}
+                      <Badge variant="secondary" class="text-[11px]">
+                        {m.settings_catalog_imported_badge()}
+                      </Badge>
+                    {/if}
+                  </div>
+                  {#if agent.description}
+                    <p class="text-muted-foreground text-[13px]">
+                      {agent.description}
+                    </p>
                   {/if}
-                  <Badge variant="secondary" class="text-[11px]">{m.settings_not_installed()}</Badge
-                  >
+                  {#if !agent.available && agent.unavailable_reason}
+                    <p class="text-muted-foreground text-[11px]">
+                      {agent.unavailable_reason}
+                    </p>
+                  {/if}
                 </div>
-                {#if agent.description}
-                  <p class="text-muted-foreground text-[13px]">
-                    {agent.description}
-                  </p>
-                {/if}
               </div>
               <div class="flex flex-wrap items-center gap-1.5">
-                {#if agent.package_available}
+                {#if agent.imported}
+                  <span class="text-muted-foreground text-[11px]">
+                    {m.settings_catalog_imported_hint()}
+                  </span>
+                {:else if builtinIds.has(agent.id)}
+                  <Badge variant="outline" class="text-[11px]">
+                    {m.settings_catalog_builtin()}
+                  </Badge>
+                {:else if agent.available}
                   <Button
                     variant="outline"
                     size="sm"
                     disabled={busy || nodeId === ""}
-                    onclick={() => void setPackageEnabled(agent, true)}
-                    title={m.settings_enable_package_title()}
+                    onclick={() => void importAgent(agent)}
                   >
-                    <PackageIcon />
-                    {m.settings_enable_package()}
+                    <PlusIcon />
+                    {importingId === agent.id
+                      ? m.settings_catalog_importing({ name: agent.name })
+                      : m.settings_catalog_import()}
                   </Button>
                 {:else}
                   <span class="text-muted-foreground text-[11px]">
-                    {m.settings_manual_install_required()}
+                    {m.settings_catalog_unavailable()}
                   </span>
                 {/if}
               </div>
@@ -522,6 +540,15 @@
           id="custom-name"
           bind:value={customForm.name}
           placeholder="My Agent"
+          class="text-[13px]"
+        />
+      </div>
+      <div class="grid gap-1.5">
+        <Label for="custom-description">{m.settings_description()}</Label>
+        <Input
+          id="custom-description"
+          bind:value={customForm.description}
+          placeholder="Short description shown in the agent list"
           class="text-[13px]"
         />
       </div>

@@ -51,8 +51,8 @@ use handlers::admin::{
     rotate_auth_token, shutdown,
 };
 use handlers::agents::{
-    disable_package_agent, enable_package_agent, list_agents, probe_agent_config, refresh_catalog,
-    remove_custom_agent, upsert_custom_agent,
+    import_registry_agent, list_agents, probe_agent_config, refresh_catalog, remove_custom_agent,
+    upsert_custom_agent,
 };
 use handlers::projects::{
     add_project, create_worktree, inspect_project, link_project, list_nodes, list_projects,
@@ -198,8 +198,8 @@ pub fn client_router<B: ClientApiBackend>(backend: B, options: ClientApiOptions)
             put(upsert_custom_agent::<B>).delete(remove_custom_agent::<B>),
         )
         .route(
-            "/api/v1/nodes/{node_id}/agents/{agent_id}/package",
-            post(enable_package_agent::<B>).delete(disable_package_agent::<B>),
+            "/api/v1/nodes/{node_id}/agents/registry/{agent_id}/import",
+            post(import_registry_agent::<B>),
         )
         .route(
             "/api/v1/nodes/{node_id}/agents/{agent_id}/probe",

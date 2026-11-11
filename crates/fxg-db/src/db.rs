@@ -605,20 +605,6 @@ impl Db {
         settings::delete_custom_agent(&self.pool, agent_id).await
     }
 
-    /// Lists package agents enabled through `npx` / `uvx`.
-    pub async fn enabled_package_agents(&self) -> Result<Vec<String>, DbError> {
-        settings::list_enabled_package_agents(&self.pool).await
-    }
-
-    /// Enables or disables a package agent.
-    pub async fn set_package_agent_enabled(
-        &self,
-        agent_id: &str,
-        enabled: bool,
-    ) -> Result<(), DbError> {
-        settings::set_package_agent_enabled(&self.pool, agent_id, enabled).await
-    }
-
     /// Returns the explicit project key linked to a local path.
     pub async fn project_key_for_path(&self, local_path: &str) -> Result<Option<String>, DbError> {
         settings::find_project_key(&self.pool, local_path).await

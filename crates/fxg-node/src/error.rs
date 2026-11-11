@@ -52,7 +52,7 @@ pub enum NodeError {
     #[error("invalid session: {0}")]
     InvalidSession(String),
     /// The session is stopped and the agent does not support native resume
-    /// (`session/resume` / `session/load` / binding an existing opencode2 session).
+    /// (`session/resume` / `session/load` / a driver-specific existing-session bind).
     /// An explicit resume with replayed history is required.
     #[error(
         "native resume is not available for {session_id}; resume with replayed history: {reason}"

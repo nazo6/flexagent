@@ -18,7 +18,6 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use fxg_acp::agent::AgentCatalog;
-use fxg_acp::registry::RegistryIndex;
 use fxg_acp::{
     ActiveSessionHandle, AgentAuthRequired, AgentDriver, AgentLaunchSpec, DriverEvent,
     NativeForkUnavailable, NativeResumeUnavailable, ResumeRequest,

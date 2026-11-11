@@ -1,7 +1,7 @@
 //! Typed settings and secret metadata persistence.
 //!
 //! `node.db` owns `node_settings` / `agent_settings` / `agent_aliases` /
-//! `custom_agents` / `enabled_package_agents` / `project_path_links`.
+//! `custom_agents` / `project_path_links`.
 //! `hub.db` owns `hub_settings` / `provisioners`.
 //!
 //! Every mutable single-row/aggregate table carries an explicit `revision`
@@ -12,8 +12,9 @@ use std::collections::BTreeMap;
 
 use fxg_protocol::SecretId;
 use fxg_protocol::settings::{
-    AgentSettings, CustomAgentConfig, HubSettings, NodeSettings, ProvisionerDefinition,
-    SecretSummary, UpdateAgentSettingsRequest, UpdateHubSettingsRequest, UpdateNodeSettingsRequest,
+    AgentSettings, CustomAgentConfig, CustomAgentOrigin, HubSettings, NodeSettings,
+    ProvisionerDefinition, SecretSummary, UpdateAgentSettingsRequest, UpdateHubSettingsRequest,
+    UpdateNodeSettingsRequest,
 };
 use fxg_protocol::util::now_ms;
 use sqlx::SqlitePool;
@@ -127,8 +128,8 @@ pub async fn ensure_agent_settings(pool: &SqlitePool) -> Result<AgentSettings, D
     sqlx::query!(
         r#"
         INSERT INTO agent_settings
-            (id, default_agent, registry_url, registry_cache_ttl_secs, revision, updated_at)
-        VALUES (1, NULL, NULL, NULL, 1, ?)
+            (id, registry_url, registry_cache_ttl_secs, revision, updated_at)
+        VALUES (1, NULL, NULL, 1, ?)
         ON CONFLICT(id) DO NOTHING
         "#,
         now_ms(),
@@ -144,7 +145,7 @@ pub async fn ensure_agent_settings(pool: &SqlitePool) -> Result<AgentSettings, D
 pub async fn get_agent_settings(pool: &SqlitePool) -> Result<Option<AgentSettings>, DbError> {
     let row = sqlx::query!(
         r#"
-        SELECT default_agent, registry_url, registry_cache_ttl_secs, revision, updated_at
+        SELECT registry_url, registry_cache_ttl_secs, revision, updated_at
           FROM agent_settings
          WHERE id = 1
         "#,
@@ -154,7 +155,6 @@ pub async fn get_agent_settings(pool: &SqlitePool) -> Result<Option<AgentSetting
     let Some(row) = row else { return Ok(None) };
     let aliases = list_agent_aliases(pool).await?;
     Ok(Some(AgentSettings {
-        default_agent: row.default_agent,
         registry_url: row.registry_url,
         registry_cache_ttl_secs: row.registry_cache_ttl_secs.and_then(positive_u64),
         aliases,
@@ -189,14 +189,12 @@ pub async fn update_agent_settings(
     let result = sqlx::query!(
         r#"
         UPDATE agent_settings
-           SET default_agent = ?,
-               registry_url = ?,
+           SET registry_url = ?,
                registry_cache_ttl_secs = ?,
                revision = revision + 1,
                updated_at = ?
          WHERE id = 1 AND revision = ?
         "#,
-        request.default_agent,
         request.registry_url,
         ttl,
         now,
@@ -227,7 +225,7 @@ pub async fn update_agent_settings(
 }
 
 // ----------------------------------------------------------------------
-// Custom agents / enabled package agents
+// Custom agents
 // ----------------------------------------------------------------------
 
 /// Lists every custom agent definition.
@@ -236,7 +234,8 @@ pub async fn list_custom_agents(
 ) -> Result<BTreeMap<String, CustomAgentConfig>, DbError> {
     let rows = sqlx::query!(
         r#"
-        SELECT agent_id AS "agent_id!", name, command, args_json, env_json, env_secrets_json, extension
+        SELECT agent_id AS "agent_id!", name, command, args_json, env_json, env_secrets_json,
+               extension, description, icon, origin_json
           FROM custom_agents
          ORDER BY agent_id
         "#,
@@ -248,6 +247,10 @@ pub async fn list_custom_agents(
         let args: Vec<String> = serde_json::from_str(&row.args_json)?;
         let env: BTreeMap<String, String> = serde_json::from_str(&row.env_json)?;
         let env_secrets: BTreeMap<String, SecretId> = serde_json::from_str(&row.env_secrets_json)?;
+        let origin: Option<CustomAgentOrigin> = match row.origin_json {
+            Some(json) => Some(serde_json::from_str(&json)?),
+            None => None,
+        };
         agents.insert(
             row.agent_id,
             CustomAgentConfig {
@@ -257,6 +260,9 @@ pub async fn list_custom_agents(
                 env,
                 env_secrets,
                 extension: row.extension,
+                description: row.description,
+                icon: row.icon,
+                origin,
             },
         );
     }
@@ -281,11 +287,16 @@ pub async fn upsert_custom_agent(
     let args_json = serde_json::to_string(&config.args)?;
     let env_json = serde_json::to_string(&config.env)?;
     let env_secrets_json = serde_json::to_string(&config.env_secrets)?;
+    let origin_json = match &config.origin {
+        Some(origin) => Some(serde_json::to_string(origin)?),
+        None => None,
+    };
     sqlx::query!(
         r#"
         INSERT INTO custom_agents
-            (agent_id, name, command, args_json, env_json, env_secrets_json, extension, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            (agent_id, name, command, args_json, env_json, env_secrets_json, extension,
+             description, icon, origin_json, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(agent_id) DO UPDATE SET
             name = excluded.name,
             command = excluded.command,
@@ -293,6 +304,9 @@ pub async fn upsert_custom_agent(
             env_json = excluded.env_json,
             env_secrets_json = excluded.env_secrets_json,
             extension = excluded.extension,
+            description = excluded.description,
+            icon = excluded.icon,
+            origin_json = excluded.origin_json,
             updated_at = excluded.updated_at
         "#,
         agent_id,
@@ -302,6 +316,9 @@ pub async fn upsert_custom_agent(
         env_json,
         env_secrets_json,
         config.extension,
+        config.description,
+        config.icon,
+        origin_json,
         now_ms(),
     )
     .execute(pool)
@@ -315,45 +332,6 @@ pub async fn delete_custom_agent(pool: &SqlitePool, agent_id: &str) -> Result<u6
         .execute(pool)
         .await?;
     Ok(result.rows_affected())
-}
-
-/// Lists package agents enabled through `npx` / `uvx`.
-pub async fn list_enabled_package_agents(pool: &SqlitePool) -> Result<Vec<String>, DbError> {
-    let rows = sqlx::query!(
-        r#"SELECT agent_id AS "agent_id!" FROM enabled_package_agents ORDER BY agent_id"#
-    )
-    .fetch_all(pool)
-    .await?;
-    Ok(rows.into_iter().map(|row| row.agent_id).collect())
-}
-
-/// Enables or disables a package agent.
-pub async fn set_package_agent_enabled(
-    pool: &SqlitePool,
-    agent_id: &str,
-    enabled: bool,
-) -> Result<(), DbError> {
-    if enabled {
-        sqlx::query!(
-            r#"
-            INSERT INTO enabled_package_agents (agent_id, updated_at)
-            VALUES (?, ?)
-            ON CONFLICT(agent_id) DO UPDATE SET updated_at = excluded.updated_at
-            "#,
-            agent_id,
-            now_ms(),
-        )
-        .execute(pool)
-        .await?;
-    } else {
-        sqlx::query!(
-            r#"DELETE FROM enabled_package_agents WHERE agent_id = ?"#,
-            agent_id,
-        )
-        .execute(pool)
-        .await?;
-    }
-    Ok(())
 }
 
 // ----------------------------------------------------------------------

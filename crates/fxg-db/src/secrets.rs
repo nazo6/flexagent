@@ -245,6 +245,7 @@ mod tests {
                 env: BTreeMap::new(),
                 env_secrets,
                 extension: None,
+                ..Default::default()
             },
         )
         .await

@@ -142,7 +142,7 @@ impl ActiveSessionHandle for AcpSessionHandle {
             .await
             .map_err(|err| anyhow!("failed to set config option: {err}"))?;
         // ACP agents are not required to push a `config_option_update` notification
-        // after a config change, and opencode only returns the new options in the
+        // after a config change, and some agents only return the new options in the
         // response. Publish them so the UI does not keep showing the old value.
         if !response.config_options.is_empty() {
             let payload = {

@@ -13,12 +13,12 @@ config: CustomAgentConfig } |
 { action: "remove_custom";
 /**  Agent ID */
 agent_id: string } |
-/**  Enable or disable usage through the `npx` / `uvx` distribution */
-{ action: "set_package_enabled";
-/**  Agent ID (aliases allowed) */
+/**  Import an ACP Registry entry as a custom agent definition */
+{ action: "import_registry_agent";
+/**  Registry agent ID */
 agent_id: string;
-/**  `true` = show it in the list and use it through `npx` / `uvx` */
-enabled: boolean };
+/**  Built-in extension ID to apply (optional) */
+extension: string | null };
 
 /**  An authentication method advertised by an ACP agent. */
 export type AgentAuthMethodInfo = {
@@ -70,19 +70,17 @@ export type AgentDiagnostics = {
 
 /**  Common response of agent management operations. */
 export type AgentOpResponse = {
-	/**  Message describing the outcome (e.g. `installed opencode2 0.1.0`) */
+	/**  Message describing the outcome (e.g. `imported qwen-code from the registry`) */
 	message: string | null,
 };
 
 /**  Node-owned agent settings stored in `node.db` (`agent_settings` / `agent_aliases`). */
 export type AgentSettings = {
-	/**  Default agent ID (`None` = built-in default) */
-	default_agent: string | null,
 	/**  ACP Registry URL (`None` = built-in default) */
 	registry_url: string | null,
 	/**  Registry cache TTL in seconds (`None` = built-in default) */
 	registry_cache_ttl_secs: number | null,
-	/**  Agent name aliases (merged over the built-in defaults) */
+	/**  Agent name aliases (merged over the built-in aliases) */
 	aliases: { [key in string]: string },
 	/**  Optimistic-lock revision */
 	revision: number,
@@ -94,35 +92,21 @@ export type AgentSettings = {
 export type AgentSource =
 /**  An installation already on PATH (detected with `which`) */
 "external" |
-/**  Execution of an npm / uvx package (fetched at run time) */
-"package" |
-/**  A custom ACP agent defined in `node.db` */
+/**  A custom ACP agent defined in `node.db` (including registry imports) */
 "custom";
 
-/**
- *  A single ACP agent (catalog information plus installation state).
- *
- *  An agent with an empty `sources` is "listed in the catalog but not yet
- *  startable on this node".
- */
+/**  A single ACP agent available on this node (built-in or custom). */
 export type AgentSummary = {
 	/**  Agent ID */
 	id: string,
 	/**  Display name */
 	name: string,
-	/**  Version provided by the registry (`-` for custom agents) */
+	/**  Version (`-` for built-in agents, registry version for imports) */
 	version: string,
 	/**  Description */
 	description: string | null,
 	/**  Launch forms usable on this node (empty = not installed) */
 	sources: AgentSource[],
-	/**  Whether it exists in the ACP Registry catalog */
-	registry: boolean,
-	/**
-	 *  Whether it can run through `npx` / `uvx` (present on PATH).
-	 *  When `true`, the UI's "enable" action can add it to the list.
-	 */
-	package_available: boolean,
 	/**  Executable detected on PATH (only when external) */
 	external_path: string | null,
 	/**  Contents of the custom definition (for editing in the UI) */
@@ -135,10 +119,12 @@ export type AgentSummary = {
 	installed_nodes: string[],
 };
 
-/**  `GET /api/v1/agents` response (ACP Registry catalog plus installation state). */
+/**  `GET /api/v1/agents` response (available agents plus import candidates). */
 export type AgentsResponse = {
-	/**  Every agent of the registry (including built-in and custom ones) */
+	/**  Built-in and custom agents available on this node */
 	agents: AgentSummary[],
+	/**  ACP Registry entries that can be imported as custom agents */
+	registry: RegistryAgentSummary[],
 };
 
 /**
@@ -287,8 +273,8 @@ export type CommandStatus =
  *  Progress of context compaction.
  *
  *  This is the state representation of `UnifiedEventPayload::CompactionUpdated`.
- *  The standard ACP has no API to start a compaction, so only drivers with a
- *  native API (such as `opencode2`'s `POST /api/session/{id}/compact`) emit it.
+ *  The standard ACP has no API to start a compaction, so only drivers or
+ *  extensions with a native API emit it.
  */
 export type CompactionStatus =
 /**  Compaction started */
@@ -372,7 +358,7 @@ export type CreateSessionRequest = {
 	local_path: string | null,
 	/**  Specification used when creating and starting in a new worktree */
 	worktree: WorktreeSpec | null,
-	/**  Agent ID (`opencode2` / `antigravity-acp` etc.) */
+	/**  Agent ID (`opencode` / a custom ID, etc.) */
 	agent_id: string,
 	/**  Initial prompt (text and optional attachments) */
 	initial_prompt: PromptInput | null,
@@ -404,7 +390,7 @@ export type CreateWorktreeRequest = {
 	base_branch: string | null,
 };
 
-/**  A custom ACP agent definition (`agent_custom` in `node.db`). */
+/**  A custom ACP agent definition (`custom_agents` in `node.db`). */
 export type CustomAgentConfig = {
 	/**  Display name */
 	name?: string | null,
@@ -423,7 +409,24 @@ export type CustomAgentConfig = {
 	 *  registered extensions when the definition is saved.
 	 */
 	extension?: string | null,
+	/**  Description shown in the agent list (copied from the registry on import). */
+	description?: string | null,
+	/**  Icon URL or built-in asset key (copied from the registry on import). */
+	icon?: string | null,
+	/**  Provenance of this definition (manual or imported from the registry). */
+	origin?: CustomAgentOrigin | null,
 };
+
+/**  Where a custom agent definition came from. */
+export type CustomAgentOrigin =
+/**  Created manually through the UI or API. */
+{ kind: "manual" } |
+/**  Imported from the ACP Registry catalog. */
+{ kind: "registry";
+/**  Registry agent ID at import time. */
+id: string;
+/**  Registry version at import time. */
+version: string };
 
 /**
  *  Whether the user's data was affected by a failure.
@@ -902,6 +905,12 @@ last_synced_at: number | null } |
 error: ErrorInfo } |
 /**  Response to `Ping` */
 { op: "pong" };
+
+/**  `POST /api/v1/nodes/{node_id}/agents/registry/{agent_id}/import` request. */
+export type ImportRegistryAgentRequest = {
+	/**  Built-in extension ID to apply to the imported custom agent. */
+	extension?: string | null,
+};
 
 /**  `GET /api/v1/inbox` response (unresolved permission requests across all sessions). */
 export type InboxResponse = {
@@ -1581,6 +1590,37 @@ session_id: SessionId | null } |
 /**  Export a support bundle */
 { kind: "export_diagnostics" };
 
+/**  One ACP Registry entry shown in the "import as custom agent" dialog. */
+export type RegistryAgentSummary = {
+	/**  Registry agent ID */
+	id: string,
+	/**  Display name */
+	name: string,
+	/**  Registry version */
+	version: string,
+	/**  Description */
+	description: string | null,
+	/**  Icon URL */
+	icon: string | null,
+	/**  Available distribution forms on this node */
+	distribution: RegistryDistributionKind[],
+	/**  Whether this node can build a launch command from the registry entry */
+	available: boolean,
+	/**  Why `available` is false (missing CLI / package runner) */
+	unavailable_reason: string | null,
+	/**  Whether a custom agent with the same ID already exists */
+	imported: boolean,
+};
+
+/**  How a registry agent can be distributed. */
+export type RegistryDistributionKind =
+/**  A platform-specific binary archive */
+"binary" |
+/**  An npm package executed with `npx` */
+"npx" |
+/**  A Python package executed with `uvx` */
+"uvx";
+
 /**  `DELETE /api/v1/projects/:id/worktrees` request. */
 export type RemoveWorktreeRequest = {
 	/**  Target node ID */
@@ -1823,7 +1863,7 @@ export type SessionImportRequest = {
 	command_id: CommandId,
 	/**  Node that owns the agent session (hub only; omit for a local node) */
 	node_id: NodeId | null,
-	/**  Agent ID (`opencode2` / `antigravity-acp` etc.) */
+	/**  Agent ID (`opencode` / a custom ID, etc.) */
 	agent_id: string,
 	/**  Agent-side session ID to take over */
 	agent_session_id: string,
@@ -1897,7 +1937,7 @@ export type SessionSummary = {
 	git_branch: string | null,
 	/**  Whether it runs inside a worktree */
 	is_worktree: boolean,
-	/**  Agent ID (`opencode2` / `antigravity-acp` etc.) */
+	/**  Agent ID (`opencode` / a custom ID, etc.) */
 	agent_id: string,
 	/**  Session ID inside the agent (fixed by the `SessionAgentBound` event) */
 	agent_session_id: string | null,
@@ -2382,12 +2422,11 @@ export type UnifiedEventPayload =
 /**
  *  Progress of context compaction (persisted).
  *
- *  Normalizes `session.compaction.started` / `.ended` of the `opencode2`
- *  bridge (started with `/compact` or `ControlSession(Compact)`. A compaction
- *  runs as one turn, so `StatusChanged` separately updates the running
- *  indicator). Streaming of the summary body (`session.compaction.delta`) is
- *  ephemeral and not turned into events (the summary stays in the agent's
- *  history).
+ *  Normalizes driver-specific compaction progress (for example a
+ *  `compact` command exposed by an extension). A compaction runs as one
+ *  turn, so `StatusChanged` separately updates the running indicator.
+ *  Streaming of the summary body is ephemeral and not turned into events
+ *  (the summary stays in the agent's history).
  */
 { type: "compaction_updated"; data: {
 	/**  Progress status */
@@ -2408,8 +2447,6 @@ export type UnifiedEventPayload =
 
 /**  `PATCH /api/v1/nodes/{node_id}/settings/agents` request. */
 export type UpdateAgentSettingsRequest = {
-	/**  Default agent ID */
-	default_agent: string | null,
 	/**  ACP Registry URL */
 	registry_url: string | null,
 	/**  Registry cache TTL in seconds */

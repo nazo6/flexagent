@@ -388,12 +388,14 @@ pub struct SessionListResponse {
     pub sessions: Vec<SessionSummary>,
 }
 
-/// `GET /api/v1/agents` response (ACP Registry catalog plus installation state).
+/// `GET /api/v1/agents` response (available agents plus import candidates).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct AgentsResponse {
-    /// Every agent of the registry (including built-in and custom ones)
+    /// Built-in and custom agents available on this node
     pub agents: Vec<AgentSummary>,
+    /// ACP Registry entries that can be imported as custom agents
+    pub registry: Vec<RegistryAgentSummary>,
 }
 
 /// `POST /api/v1/nodes/{node_id}/agents/{agent_id}/probe` request.
@@ -411,6 +413,15 @@ pub struct ProbeAgentRequest {
     /// after a model is selected.
     #[serde(default)]
     pub initial_config: Vec<crate::common::InitialConfig>,
+}
+
+/// `POST /api/v1/nodes/{node_id}/agents/registry/{agent_id}/import` request.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
+#[serde(default)]
+pub struct ImportRegistryAgentRequest {
+    /// Built-in extension ID to apply to the imported custom agent.
+    pub extension: Option<String>,
 }
 
 /// Capabilities returned by starting a temporary ACP session.
@@ -438,9 +449,7 @@ pub struct AgentCapabilitiesPreview {
 pub enum AgentSource {
     /// An installation already on PATH (detected with `which`)
     External,
-    /// Execution of an npm / uvx package (fetched at run time)
-    Package,
-    /// A custom ACP agent defined in `node.db`
+    /// A custom ACP agent defined in `node.db` (including registry imports)
     Custom,
 }
 
@@ -457,10 +466,7 @@ pub enum AgentBackendKind {
     Custom,
 }
 
-/// A single ACP agent (catalog information plus installation state).
-///
-/// An agent with an empty `sources` is "listed in the catalog but not yet
-/// startable on this node".
+/// A single ACP agent available on this node (built-in or custom).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct AgentSummary {
@@ -468,17 +474,12 @@ pub struct AgentSummary {
     pub id: String,
     /// Display name
     pub name: String,
-    /// Version provided by the registry (`-` for custom agents)
+    /// Version (`-` for built-in agents, registry version for imports)
     pub version: String,
     /// Description
     pub description: Option<String>,
     /// Launch forms usable on this node (empty = not installed)
     pub sources: Vec<AgentSource>,
-    /// Whether it exists in the ACP Registry catalog
-    pub registry: bool,
-    /// Whether it can run through `npx` / `uvx` (present on PATH).
-    /// When `true`, the UI's "enable" action can add it to the list.
-    pub package_available: bool,
     /// Executable detected on PATH (only when external)
     pub external_path: Option<String>,
     /// Contents of the custom definition (for editing in the UI)
@@ -491,11 +492,48 @@ pub struct AgentSummary {
     pub installed_nodes: Vec<String>,
 }
 
+/// How a registry agent can be distributed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+#[specta(collect)]
+pub enum RegistryDistributionKind {
+    /// A platform-specific binary archive
+    Binary,
+    /// An npm package executed with `npx`
+    Npx,
+    /// A Python package executed with `uvx`
+    Uvx,
+}
+
+/// One ACP Registry entry shown in the "import as custom agent" dialog.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
+pub struct RegistryAgentSummary {
+    /// Registry agent ID
+    pub id: String,
+    /// Display name
+    pub name: String,
+    /// Registry version
+    pub version: String,
+    /// Description
+    pub description: Option<String>,
+    /// Icon URL
+    pub icon: Option<String>,
+    /// Available distribution forms on this node
+    pub distribution: Vec<RegistryDistributionKind>,
+    /// Whether this node can build a launch command from the registry entry
+    pub available: bool,
+    /// Why `available` is false (missing CLI / package runner)
+    pub unavailable_reason: Option<String>,
+    /// Whether a custom agent with the same ID already exists
+    pub imported: bool,
+}
+
 /// Common response of agent management operations.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct AgentOpResponse {
-    /// Message describing the outcome (e.g. `installed opencode2 0.1.0`)
+    /// Message describing the outcome (e.g. `imported qwen-code from the registry`)
     pub message: Option<String>,
 }
 
@@ -592,7 +630,7 @@ pub struct CreateSessionRequest {
     pub local_path: Option<String>,
     /// Specification used when creating and starting in a new worktree
     pub worktree: Option<WorktreeSpec>,
-    /// Agent ID (`opencode2` / `antigravity-acp` etc.)
+    /// Agent ID (`opencode` / a custom ID, etc.)
     pub agent_id: String,
     /// Initial prompt (text and optional attachments)
     pub initial_prompt: Option<PromptInput>,
@@ -666,7 +704,7 @@ pub struct SessionImportRequest {
     pub command_id: CommandId,
     /// Node that owns the agent session (hub only; omit for a local node)
     pub node_id: Option<NodeId>,
-    /// Agent ID (`opencode2` / `antigravity-acp` etc.)
+    /// Agent ID (`opencode` / a custom ID, etc.)
     pub agent_id: String,
     /// Agent-side session ID to take over
     pub agent_session_id: String,

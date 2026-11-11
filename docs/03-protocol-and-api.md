@@ -886,43 +886,30 @@ pub enum HubToNodeMsg {
   監査ログ（操作日時、操作種別、送信元IP、クライアント種別）の取得。ハブでは
   `hub.db`、 ローカルノードでは `node.db` の `audit_logs` を参照する。
 - `GET /api/v1/agents`:
-  ACP Registry
-  カタログとノード別の利用可否を返す (`AgentSummary[]`)。各エージェントは
-  `sources` (`managed` / `external` / `package` / `custom`)、`installable`、
-  `package_available` (このノードで npx/uvx を有効化できるか)、
-  `managed_versions`、`external_path`、`custom_config` を持つ。`sources` が空 =
-  そのノードでは未導入。`npx` / `uvx` は既定では `sources` に含まれず、
-  `package_available` が true のものだけ UI から有効化できる。
-  `backend` (`acp` / `acp_extended` / `custom`) と `icon` は
-  `AgentCatalog` が解決した実行方式と表示アイコンを表す。
-  ハブではオンラインのいずれかのノード
-  (`ListAgents` 中継) からカタログを取得し、全ノードの
-  `NodeHello.installed_agents`
-  を統合して `installed_nodes` (利用可能なノード一覧) を埋める。
-- `POST /api/v1/nodes/:node_id/agents/:agent_id/install`:
-  指定ノード上で ACP Registry
-  からエージェントを**明示的に**ダウンロード・展開する
-  (Web UI のエージェント導入)。起動時に暗黙ダウンロードは行わない。
-- `POST /api/v1/nodes/:node_id/agents/update`:
-  指定ノードの fxg 管理エージェントを更新する (Web UI のカタログ更新。
-  `{ agent_id: Option<String> }`。省略時は導入済み全件)。
-- `DELETE /api/v1/nodes/:node_id/agents/:agent_id`:
-  指定ノード上の fxg 管理バイナリを削除する (Web UI のエージェント削除)。
+  `{ agents, registry }` を返す。`agents` は **builtin + custom** の利用可能な
+  エージェント (`AgentSummary[]`) で、`sources` (`external` / `custom`)、
+  `external_path`、`custom_config`、`backend` (`acp` / `acp_extended` /
+  `custom`)、`icon` を持つ。`sources` が空 = そのノードでは未導入。
+  `registry` は ACP Registry の import 候補 (`RegistryAgentSummary[]`) で、
+  `distribution` (`binary` / `npx` / `uvx`)、`available`、
+  `unavailable_reason`、`imported` を持つ。Registry の取得に失敗、または
+  5秒でタイムアウトしても `agents` は返す。
+  ハブでは `ListAgents` の結果に全ノードの `NodeHello.installed_agents` を
+  統合して `installed_nodes` (利用可能なノード一覧) を埋める。
 - `PUT /api/v1/nodes/:node_id/agents/custom/:agent_id`:
   カスタム ACP エージェント定義を作成・更新する (body: `CustomAgentConfig` =
-  `{ name, command, args, env, env_secrets, extension }`)。`extension` は
-  組み込み extension の ID (`opencode` など) で、指定すると Tier 2 として起動
-  する。未知の ID と予約 ID は保存時に拒否される。`AgentAction::UpsertCustom`
-  として中継される。
+  `{ name, description, command, args, env, env_secrets, extension, icon,
+  origin }`)。`extension` は組み込み extension の ID (`opencode` など) で、
+  指定すると Tier 2 として起動する。未知の ID と予約 ID は保存時に拒否される。
+  `AgentAction::UpsertCustom` として中継される。
 - `DELETE /api/v1/nodes/:node_id/agents/custom/:agent_id`:
   UI 管理のカスタム定義を削除する (`AgentAction::RemoveCustom`)。
-- `POST /api/v1/nodes/:node_id/agents/:agent_id/package`:
-  指定ノードで `npx` / `uvx` 経由の利用を**有効化**する
-  (`AgentAction::SetPackageEnabled { enabled: true }`)。
-  有効化状態は `node.db` の `enabled_package_agents` に保存される。
-- `DELETE /api/v1/nodes/:node_id/agents/:agent_id/package`:
-  `npx` / `uvx` 経由の利用を**無効化**する
-  (`AgentAction::SetPackageEnabled { enabled: false }`)。実行ファイルは削除しない。
+- `POST /api/v1/nodes/:node_id/agents/registry/:agent_id/import`:
+  ACP Registry のエントリを custom 定義として保存する
+  (`AgentAction::ImportRegistryAgent`)。body は
+  `{ extension: Option<String> }`。binary は `PATH`、npx/uvx はパッケージ
+  ランナーを使ってコマンドを生成する。既存 custom・Tier 3 予約 ID・未知の
+  extension は拒否する。
 - `POST /api/v1/auth/rotate-token`:
   クライアント認証トークン (`auth_token`) を再生成し `{ token }` を返す。
   旧トークン (Bearer / `fxg_session` Cookie) は即時無効化される。
