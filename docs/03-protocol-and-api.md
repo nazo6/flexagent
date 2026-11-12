@@ -825,11 +825,15 @@ pub enum HubToNodeMsg {
 - `GET /api/v1/provisioners`:
   利用可能な一時VM・サンドボックスプロビジョナー一覧（`local-docker`,
   `local-incus`, `colab-pro` 等）を返却。
+- `PUT /api/v1/provisioners/:name`:
+  プロビジョナー定義を作成・更新する (`ProvisionerDefinition`)。ハブのみ。
+- `DELETE /api/v1/provisioners/:name`:
+  プロビジョナー定義を削除する。ハブのみ。
 - `POST /api/v1/provisioners/:name/test`:
   指定プロビジョナーの起動と `fxg internal stdio` の `NodeHello`
   ハンドシェイク疎通を検証する（ハブのみ。プロビジョナーはハブホスト上で
   子プロセス起動されるため）。`ProvisionerTestResponse`
-  (`ok` / `node_id` / `stderr` ログ末尾 / `error`)
+  (`name` / `ok` / `node_id` / `log_lines` / `error`)
   を返却し、検証後は一時環境を破棄する。
 - `GET /api/v1/sessions?project_id=...&status=...&include_archived=true`:
   セッション一覧。削除済み (tombstone) は常に除外され、アーカイブ済みは
@@ -904,7 +908,8 @@ pub enum HubToNodeMsg {
   `~/.flexagent/vapid.json` へ自動生成され、公開鍵は `GET /api/v1/system/info`
   の `vapid_public_key` (base64url) で配布される。
 - `POST /api/v1/system/kill-switch`: **緊急停止 (Panic
-  Button)**。全ノードの稼働中セッション、実行中プロセスツリー、PTYを一括強制終了。
+  Button)**。全ノードの稼働中セッション、実行中プロセスツリー、PTYを一括停止し、
+  一時VMは drain 後に破棄します。
 - `POST /api/v1/system/shutdown`: ハブを graceful shutdown する（`fxg hub stop` が使用。
   認証必須。再起動は `fxg hub start`）。
 - `GET /api/v1/audit/logs?limit=50`:

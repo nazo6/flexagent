@@ -113,11 +113,15 @@ impl PushService {
                 let keys = generate_vapid_keys()?;
                 std::fs::create_dir_all(fxg_home)?;
                 std::fs::write(&path, serde_json::to_string_pretty(&keys)?)?;
+                set_owner_only_permissions(&path)?;
                 tracing::info!(path = %path.display(), "generated vapid keypair");
                 keys
             }
             Err(err) => return Err(err.into()),
         };
+        if let Err(err) = set_owner_only_permissions(&path) {
+            tracing::warn!(path = %path.display(), "failed to restrict vapid key permissions: {err}");
+        }
         let private_bytes = decode_base64(&keys.private_key).ok_or(PushError::InvalidKeys)?;
         let key_pair = match ES256KeyPair::from_bytes(&private_bytes) {
             Ok(key_pair) => key_pair,
@@ -562,6 +566,18 @@ pub async fn notify_turn_finished(
     }
 }
 
+#[cfg(unix)]
+fn set_owner_only_permissions(path: &Path) -> std::io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+}
+
+#[cfg(not(unix))]
+fn set_owner_only_permissions(_path: &Path) -> std::io::Result<()> {
+    // On Windows, follow the ACLs of the user profile directory.
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -605,6 +621,16 @@ mod tests {
         let first = PushService::load_or_create(dir.path()).expect("generate");
         assert!(!first.public_key().is_empty());
         assert!(dir.path().join(VAPID_KEYS_FILE).exists());
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(dir.path().join(VAPID_KEYS_FILE))
+                .expect("metadata")
+                .permissions()
+                .mode()
+                & 0o777;
+            assert_eq!(mode, 0o600);
+        }
         let second = PushService::load_or_create(dir.path()).expect("reload");
         assert_eq!(first.public_key(), second.public_key());
     }

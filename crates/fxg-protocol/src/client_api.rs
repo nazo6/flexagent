@@ -17,7 +17,7 @@ use crate::common::{
 };
 use crate::events::{SessionEventBatch, SessionEventEnvelope};
 use crate::settings::{CustomAgentConfig, ProjectIdentity};
-use crate::{CommandId, NodeId, ProjectId, SessionId};
+use crate::{CommandId, NodeId, ProjectId, SecretId, SessionId};
 
 /// Kind of endpoint (`GET /api/v1/system/info`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
@@ -262,6 +262,8 @@ pub struct ProvisionerSummary {
     pub idle_timeout_secs: Option<u64>,
     /// Environment variables injected into the process
     pub env: std::collections::BTreeMap<String, String>,
+    /// Environment variables resolved from the secret store at launch time
+    pub env_secrets: std::collections::BTreeMap<String, SecretId>,
 }
 
 /// `GET /api/v1/provisioners` response.

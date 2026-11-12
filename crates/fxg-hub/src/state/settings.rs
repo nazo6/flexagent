@@ -2,12 +2,13 @@
 
 use fxg_protocol::common::ErrorCode;
 
-use crate::api::ApiError;
+use crate::api::{ApiError, ClientInfo};
 use crate::error::HubError;
 use fxg_protocol::SecretId;
+use fxg_protocol::client_api::{ProvisionerSummary, ProvisionersResponse};
 use fxg_protocol::settings::{
-    ConfigSource, HubBootstrapView, HubSettingsSnapshot, SecretsResponse, SourcedValue,
-    UpdateHubSettingsRequest, UpsertSecretRequest, sourced_option, sourced_string,
+    ConfigSource, HubBootstrapView, HubSettingsSnapshot, ProvisionerDefinition, SecretsResponse,
+    SourcedValue, UpdateHubSettingsRequest, UpsertSecretRequest, sourced_option, sourced_string,
 };
 
 use super::HubState;
@@ -131,6 +132,78 @@ impl HubState {
         self.hub_settings_snapshot().await
     }
 
+    /// Snapshot of the configured provisioners (`GET /api/v1/provisioners`).
+    pub fn provisioner_summaries(&self) -> ProvisionersResponse {
+        let provisioners = self
+            .provisioners()
+            .configs()
+            .into_iter()
+            .map(|(name, config)| ProvisionerSummary {
+                name,
+                description: config.description,
+                command: config.command,
+                args: config.args,
+                idle_timeout_secs: config.idle_timeout_secs,
+                env: config.env,
+                env_secrets: config.env_secrets,
+            })
+            .collect();
+        ProvisionersResponse { provisioners }
+    }
+
+    /// Creates or updates a provisioner and reloads the in-memory definitions.
+    pub async fn save_provisioner(
+        &self,
+        name: &str,
+        mut definition: ProvisionerDefinition,
+        client: &ClientInfo,
+    ) -> Result<ProvisionersResponse, ApiError> {
+        validate_provisioner(name, &definition)?;
+        definition.name = name.to_owned();
+        self.db()
+            .upsert_provisioner(&definition)
+            .await
+            .map_err(ApiError::from)?;
+        self.provisioners()
+            .apply_settings(self.db().provisioners().await.map_err(ApiError::from)?);
+        self.record_audit(
+            fxg_db::audit::actions::SETTINGS_UPDATE,
+            client,
+            None,
+            serde_json::json!({ "section": "provisioner", "name": name }),
+        )
+        .await;
+        Ok(self.provisioner_summaries())
+    }
+
+    /// Deletes a provisioner and reloads the in-memory definitions.
+    pub async fn remove_provisioner(
+        &self,
+        name: &str,
+        client: &ClientInfo,
+    ) -> Result<(), ApiError> {
+        let removed = self
+            .db()
+            .delete_provisioner(name)
+            .await
+            .map_err(ApiError::from)?;
+        if removed == 0 {
+            return Err(ApiError::not_found(format!(
+                "provisioner not found: {name}"
+            )));
+        }
+        self.provisioners()
+            .apply_settings(self.db().provisioners().await.map_err(ApiError::from)?);
+        self.record_audit(
+            fxg_db::audit::actions::SETTINGS_UPDATE,
+            client,
+            None,
+            serde_json::json!({ "section": "provisioner", "name": name, "deleted": true }),
+        )
+        .await;
+        Ok(())
+    }
+
     /// Lists hub-owned secret metadata.
     pub async fn server_secrets(&self) -> Result<SecretsResponse, HubError> {
         Ok(SecretsResponse {
@@ -164,6 +237,34 @@ impl HubState {
     }
 }
 
+/// Validates a provisioner name and definition before saving it.
+fn validate_provisioner(name: &str, definition: &ProvisionerDefinition) -> Result<(), ApiError> {
+    let valid_name = !name.is_empty()
+        && name.len() <= 64
+        && name
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '-'))
+        && !name.starts_with('.');
+    if !valid_name {
+        return Err(ApiError::bad_request(
+            "invalid provisioner name: use 1-64 characters of [a-zA-Z0-9._-]",
+        ));
+    }
+    if definition.command.trim().is_empty() {
+        return Err(ApiError::bad_request(
+            "provisioner command must not be empty",
+        ));
+    }
+    for (key, secret) in &definition.env_secrets {
+        if key.trim().is_empty() || !secret.is_valid() {
+            return Err(ApiError::bad_request(format!(
+                "invalid env_secrets entry: {key}"
+            )));
+        }
+    }
+    Ok(())
+}
+
 pub(super) fn secret_error(err: HubError) -> ApiError {
     match err {
         HubError::SecretInvalid(message) => ApiError::from_code(ErrorCode::SecretInvalid, message),
@@ -175,5 +276,40 @@ pub(super) fn secret_error(err: HubError) -> ApiError {
             ApiError::from_code(ErrorCode::SecretInvalid, message)
         }
         other => ApiError::internal(other),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn definition(command: &str) -> ProvisionerDefinition {
+        ProvisionerDefinition {
+            command: command.to_owned(),
+            ..ProvisionerDefinition::default()
+        }
+    }
+
+    #[test]
+    fn validates_provisioner_name_and_command() {
+        assert!(validate_provisioner("local-docker", &definition("docker")).is_ok());
+        assert!(validate_provisioner("", &definition("docker")).is_err());
+        assert!(validate_provisioner("../escape", &definition("docker")).is_err());
+        assert!(validate_provisioner("local-docker", &definition("  ")).is_err());
+    }
+
+    #[test]
+    fn validates_env_secret_ids() {
+        let mut valid = definition("docker");
+        valid
+            .env_secrets
+            .insert("GH_TOKEN".to_owned(), SecretId::new("GH_TOKEN"));
+        assert!(validate_provisioner("local-docker", &valid).is_ok());
+
+        let mut invalid = definition("docker");
+        invalid
+            .env_secrets
+            .insert("GH_TOKEN".to_owned(), SecretId::new("../escape"));
+        assert!(validate_provisioner("local-docker", &invalid).is_err());
     }
 }

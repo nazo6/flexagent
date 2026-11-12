@@ -276,6 +276,7 @@ pub async fn spawn_session(state: &HubState, request: SpawnSessionRequest) -> Re
 
     let spawn = SpawnRequest {
         node_id: node_id.clone(),
+        session_id: Some(session_id.clone()),
         provisioner: request.provisioner.clone(),
         config,
         env,
@@ -346,6 +347,7 @@ pub async fn provisioner_test(
 
     let spawn = SpawnRequest {
         node_id: node_id.clone(),
+        session_id: None,
         provisioner: name.to_owned(),
         config,
         env: vec![("FXG_NODE_ID".to_owned(), node_id.clone())],
@@ -436,6 +438,7 @@ pub async fn provisioner_test(
 /// Child process launch request.
 struct SpawnRequest {
     node_id: String,
+    session_id: Option<String>,
     provisioner: String,
     config: ProvisionerDefinition,
     env: Vec<(String, String)>,
@@ -471,6 +474,18 @@ struct EphemeralHandshake {
     projects: Vec<NodeProjectReport>,
 }
 
+/// Replaces the provisioner argument placeholders.
+fn substitute_placeholders(
+    arg: &str,
+    instance_name: &str,
+    session_id: &str,
+    node_id: &str,
+) -> String {
+    arg.replace("{INSTANCE_NAME}", instance_name)
+        .replace("{SESSION_ID}", session_id)
+        .replace("{NODE_ID}", node_id)
+}
+
 /// Handles obtained after launching the child process.
 struct SpawnHandles {
     /// Notifies the handshake information on NodeHello receipt (closes the
@@ -491,11 +506,14 @@ async fn spawn_child(state: &HubState, request: SpawnRequest) -> Result<SpawnHan
     );
 
     let mut command = Command::new(&request.config.command);
+    let session_id = request.session_id.as_deref().unwrap_or(&request.node_id);
     for arg in &request.config.args {
-        command.arg(
-            arg.replace("{INSTANCE_NAME}", &instance_name)
-                .replace("{SESSION_ID}", &request.node_id),
-        );
+        command.arg(substitute_placeholders(
+            arg,
+            &instance_name,
+            session_id,
+            &request.node_id,
+        ));
     }
     for (key, value) in &request.config.env {
         command.env(key, value);
@@ -984,6 +1002,19 @@ pub async fn terminate_all(state: &HubState) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn substitutes_provisioner_placeholders() {
+        assert_eq!(
+            substitute_placeholders(
+                "run --name {INSTANCE_NAME} --label {SESSION_ID} --node {NODE_ID}",
+                "fxg-eph-1",
+                "session-1",
+                "node-1",
+            ),
+            "run --name fxg-eph-1 --label session-1 --node node-1"
+        );
+    }
 
     #[test]
     fn workspace_path_prefers_the_pending_project() {

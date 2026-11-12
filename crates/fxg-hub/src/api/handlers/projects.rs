@@ -10,6 +10,7 @@ use fxg_protocol::client_api::{
     ProjectScanRequest, ProjectUnlinkRequest, ProjectsResponse, PruneWorktreesRequest,
     RemoveWorktreeRequest,
 };
+use fxg_protocol::settings::ProvisionerDefinition;
 
 use crate::api::{ApiError, ClientApiBackend, ClientApiState, ClientInfo};
 
@@ -47,6 +48,35 @@ pub(crate) async fn test_provisioner<B: ClientApiBackend>(
 ) -> Response {
     match state.backend.provisioner_test(&provisioner).await {
         Ok(response) => Json(response).into_response(),
+        Err(err) => err.into_response(),
+    }
+}
+
+/// `PUT /api/v1/provisioners/:name`: creates or updates a provisioner.
+pub(crate) async fn upsert_provisioner<B: ClientApiBackend>(
+    State(state): State<ClientApiState<B>>,
+    Extension(client): Extension<ClientInfo>,
+    UrlPath(provisioner): UrlPath<String>,
+    Json(definition): Json<ProvisionerDefinition>,
+) -> Response {
+    match state
+        .backend
+        .upsert_provisioner(&provisioner, definition, client)
+        .await
+    {
+        Ok(response) => Json(response).into_response(),
+        Err(err) => err.into_response(),
+    }
+}
+
+/// `DELETE /api/v1/provisioners/:name`: removes a provisioner.
+pub(crate) async fn delete_provisioner<B: ClientApiBackend>(
+    State(state): State<ClientApiState<B>>,
+    Extension(client): Extension<ClientInfo>,
+    UrlPath(provisioner): UrlPath<String>,
+) -> Response {
+    match state.backend.delete_provisioner(&provisioner, client).await {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(err) => err.into_response(),
     }
 }

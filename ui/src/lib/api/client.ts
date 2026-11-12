@@ -32,6 +32,7 @@ import type {
   ProjectUnlinkResponse,
   ProjectSummary,
   ProjectsResponse,
+  ProvisionerDefinition,
   ProvisionerSummary,
   ProvisionerTestResponse,
   ProvisionersResponse,
@@ -316,6 +317,24 @@ export class ApiClient {
   async provisioners(): Promise<ProvisionerSummary[]> {
     const response = await this.#request<ProvisionersResponse>("GET", "/api/v1/provisioners");
     return response.provisioners;
+  }
+
+  /** `PUT /api/v1/provisioners/:name` (create or update). */
+  async upsertProvisioner(
+    name: string,
+    definition: ProvisionerDefinition,
+  ): Promise<ProvisionerSummary[]> {
+    const response = await this.#request<ProvisionersResponse>(
+      "PUT",
+      `/api/v1/provisioners/${encodeURIComponent(name)}`,
+      { body: definition },
+    );
+    return response.provisioners;
+  }
+
+  /** `DELETE /api/v1/provisioners/:name`. */
+  async deleteProvisioner(name: string): Promise<void> {
+    await this.#request("DELETE", `/api/v1/provisioners/${encodeURIComponent(name)}`);
   }
 
   /** `POST /api/v1/provisioners/:name/test` (connectivity check). */

@@ -318,10 +318,16 @@ impl usage::RunAsync for NodeStatusArgs {
             }
             Err(_) => None,
         };
-        let address = running
-            .as_ref()
-            .map(|(address, _)| address.clone())
-            .or_else(|| crate::client::local_node_base(&fxg_protocol::config::process_env).ok());
+        let address = match running.as_ref() {
+            Some((address, _)) => Some(address.clone()),
+            None => match crate::client::local_node_base(&fxg_protocol::config::process_env) {
+                Ok(address) => Some(address),
+                Err(err) => {
+                    tracing::debug!("failed to resolve the local node address: {err}");
+                    None
+                }
+            },
+        };
 
         if self.json {
             let value = serde_json::json!({

@@ -220,12 +220,20 @@ async fn wait_for_hub(listen_addr: &str) -> Result<String> {
 /// Reads the bound hub address from `hub.addr`, falling back to `fallback`.
 fn published_hub_addr(fallback: &str) -> String {
     let home = fxg_protocol::config::fxg_home(&fxg_protocol::config::process_env);
-    std::fs::read_to_string(home.join("hub.addr"))
-        .ok()
-        .map(|addr| addr.trim().to_owned())
-        .filter(|addr| !addr.is_empty())
-        .map(|addr| crate::hub_api::normalize_listen(&addr))
-        .unwrap_or_else(|| fallback.to_owned())
+    match std::fs::read_to_string(home.join("hub.addr")) {
+        Ok(raw) => {
+            let addr = raw.trim();
+            if addr.is_empty() {
+                fallback.to_owned()
+            } else {
+                crate::hub_api::normalize_listen(addr)
+            }
+        }
+        Err(err) => {
+            tracing::debug!("failed to read hub.addr: {err}");
+            fallback.to_owned()
+        }
+    }
 }
 
 // ----------------------------------------------------------------------

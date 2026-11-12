@@ -130,7 +130,7 @@ fxg support incidents
 | `node.name` / `allow_remote_pty` / `project_scan_dirs` / `tray` | `node.db` (`node_settings`)                                      | Client API（ハブは対象ノードへプロキシ）          |
 | エージェント既定値・エイリアス・カスタム定義                    | `node.db` (`agent_settings` / `agent_aliases` / `custom_agents`) | Client API                                        |
 | 明示的な `project_key`                                          | `node.db` (`project_path_links`)                                 | Client API / Web UI                               |
-| VAPID subject・Git 認証・Provisioner・一時VM Bootstrap          | `hub.db`                                                         | ハブ Web UI                                       |
+| VAPID subject・Provisioner                                      | `hub.db`                                                         | ハブ Web UI                                       |
 | 秘密の値                                                        | `~/.flexagent/secrets/{node,hub}/<id>` (`0600`)                  | Secret API（書き込み専用）                        |
 | 言語・テーマ・ピン留め                                          | ブラウザ `localStorage`                                          | Web UI                                            |
 
@@ -355,7 +355,8 @@ Android スマートフォン（ホーム画面追加PWA）のすべてを単一
      UI（`http://localhost:7860`）へワンタップで接続先を切り替え。
 5. **緊急キルスイッチ & セキュリティ設定**:
    - 画面ヘッダーに常時表示される **「緊急停止 (Kill Switch)」**
-     ボタン。タップ時に確認モーダルを表示し、全ノードで稼働中の全セッション・プロセスツリー・PTYを即時強制停止。
+     ボタン。タップ時に確認モーダルを表示し、全ノードで稼働中の全セッション・プロセスツリー・PTYを即時停止し、
+     一時VMは drain 後に破棄します。
    - 初回アクセス時または未認証時に表示される
      **「認証トークン入力ダイアログ」**（入力成功時に `fxg_session` Cookie
      を自動保持）。
@@ -368,6 +369,7 @@ Android スマートフォン（ホーム画面追加PWA）のすべてを単一
      - **Process**: `config.toml` の起動設定（読み取り専用）と診断情報。
      - **General**: ハブ設定 (VAPID subject) とクライアント認証トークンの再生成。
      - **Pairing tokens**: ノード個別トークンの発行・失効・一覧。
+     - **Provisioners**: 一時VM・サンドボックスのプロビジョナー定義の追加・編集・削除と接続テスト。
      - **Audit log**: ハブ経由操作の監査ログ。
    - **Node**（ローカルノード接続時は自分のノード、ハブ接続時はオンラインの対象ノード）:
      - **Process**（ローカルノード接続時のみ）: 起動設定と診断情報。
@@ -562,7 +564,7 @@ export interface ITerminalAdapter {
 - [x] `fxg hub` のコマンドテンプレート型プロビジョナー管理（Docker / Rootless
       Podman / Incus VM / `google-colab-cli` の子プロセス起動と `stderr`
       初期化ログ配信）
-  - `{INSTANCE_NAME}` / `{SESSION_ID}` を置換し、プロビジョナー定義の環境変数を注入。
+  - `{INSTANCE_NAME}` / `{SESSION_ID}` / `{NODE_ID}` を置換し、プロビジョナー定義の環境変数を注入。
     `stderr` は `HubWsMessage::ProvisioningLog` として UI へエフェメラル配信する。
     → アーキテクチャ簡素化で `{BOOTSTRAP_SCRIPT}` は廃止済み。
 - [x] `fxg internal bootstrap-workspace` の実装（`mise` / `uv`

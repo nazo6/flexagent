@@ -393,7 +393,7 @@ pub struct ProvisionerDefinition {
     pub command: String,
     /// Command arguments.
     ///
-    /// Placeholders: `{INSTANCE_NAME}` / `{SESSION_ID}`.
+    /// Placeholders: `{INSTANCE_NAME}` / `{SESSION_ID}` / `{NODE_ID}`.
     pub args: Vec<String>,
     /// Seconds until the idle instance is discarded automatically
     pub idle_timeout_secs: Option<u64>,

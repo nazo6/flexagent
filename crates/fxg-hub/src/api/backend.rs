@@ -25,7 +25,8 @@ use fxg_protocol::common::{
 use fxg_protocol::events::SessionEventEnvelope;
 use fxg_protocol::node_hub::{NodeRpcRequest, NodeRpcResponse};
 use fxg_protocol::settings::{
-    HubSettingsSnapshot, SecretsResponse, UpdateHubSettingsRequest, UpsertSecretRequest,
+    HubSettingsSnapshot, ProvisionerDefinition, SecretsResponse, UpdateHubSettingsRequest,
+    UpsertSecretRequest,
 };
 use fxg_protocol::{CommandId, NodeId, SecretId, SessionId};
 use tokio::sync::broadcast;
@@ -565,6 +566,30 @@ pub trait ClientApiBackend: Clone + Send + Sync + 'static {
         Err(ApiError::from_code(
             ErrorCode::InvalidState,
             "provisioners can only be tested on the hub",
+        ))
+    }
+
+    /// `PUT /api/v1/provisioners/:name` (hub only).
+    ///
+    /// The default local-node implementation returns `INVALID_STATE`
+    /// (provisioners are owned by the hub).
+    async fn upsert_provisioner(
+        &self,
+        _name: &str,
+        _definition: ProvisionerDefinition,
+        _client: ClientInfo,
+    ) -> Result<ProvisionersResponse, ApiError> {
+        Err(ApiError::from_code(
+            ErrorCode::InvalidState,
+            "provisioners can only be managed on the hub",
+        ))
+    }
+
+    /// `DELETE /api/v1/provisioners/:name` (hub only).
+    async fn delete_provisioner(&self, _name: &str, _client: ClientInfo) -> Result<(), ApiError> {
+        Err(ApiError::from_code(
+            ErrorCode::InvalidState,
+            "provisioners can only be managed on the hub",
         ))
     }
 

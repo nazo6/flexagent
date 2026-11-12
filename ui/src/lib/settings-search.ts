@@ -20,6 +20,7 @@ export type SettingsTabId =
   | "general"
   | "pairing"
   | "tokens"
+  | "provisioners"
   | "agents"
   | "audit"
   | "appearance";
@@ -44,6 +45,7 @@ export const SETTINGS_TAB_LABELS: Record<SettingsTabId, string> = {
   general: "General",
   pairing: "Hub connection",
   tokens: "Pairing tokens",
+  provisioners: "Provisioners",
   agents: "Agents",
   audit: "Audit log",
   appearance: "Appearance",
@@ -131,6 +133,12 @@ export const SETTINGS_SEARCH_ENTRIES: SettingsSearchEntry[] = [
     tab: "tokens",
     label: "Pairing tokens",
     keywords: "token issue revoke node pairing",
+  },
+  {
+    scope: "hub",
+    tab: "provisioners",
+    label: "Provisioners",
+    keywords: "provisioner docker incus colab vm sandbox ephemeral",
   },
 
   {

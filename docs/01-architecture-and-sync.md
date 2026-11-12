@@ -417,22 +417,22 @@ sequenceDiagram
 `fxg` 本体に特定の仮想化基盤やクラウドのSDKをハードコードせず、
 **「標準入出力で最終的に `fxg internal stdio` を起動するコマンド」**を
 `hub.db` の `provisioners` に登録するだけで任意の環境をプロビジョナーとして追加できます。
-登録・編集はハブの Web UI（設定 → プロビジョナー）から行います。
+登録・編集はハブの Web UI（設定 > Hub > Provisioners）から行います。
 
 `ProvisionerDefinition` は次の項目を持ちます。
 
-| 項目                | 説明                                                     |
-| :------------------ | :------------------------------------------------------- |
-| `name`              | プロビジョナー名 (`local-docker` / `colab-pro` 等)       |
-| `description`       | UI に表示する説明                                        |
-| `command`           | 実行するコマンド (`docker` / `incus` / `uvx` / `ssh` 等) |
-| `args`              | 引数。`{INSTANCE_NAME}` / `{SESSION_ID}` を置換          |
-| `idle_timeout_secs` | アイドル状態のインスタンスを破棄するまでの秒数           |
-| `env`               | 子プロセスへ注入する環境変数                             |
-| `env_secrets`       | 秘密ストアの値を環境変数として注入 (env 名 → secret ID)  |
+| 項目                | 説明                                                          |
+| :------------------ | :------------------------------------------------------------ |
+| `name`              | プロビジョナー名 (`local-docker` / `colab-pro` 等)            |
+| `description`       | UI に表示する説明                                             |
+| `command`           | 実行するコマンド (`docker` / `incus` / `uvx` / `ssh` 等)      |
+| `args`              | 引数。`{INSTANCE_NAME}` / `{SESSION_ID}` / `{NODE_ID}` を置換 |
+| `idle_timeout_secs` | アイドル状態のインスタンスを破棄するまでの秒数                |
+| `env`               | 子プロセスへ注入する環境変数                                  |
+| `env_secrets`       | 秘密ストアの値を環境変数として注入 (env 名 → secret ID)       |
 
-Docker / Incus / Google Colab Pro の代表的な定義は Web UI のプリセットとして
-提供されます。
+Docker / Incus / Google Colab Pro などのコマンド例は、各ツールのドキュメントを
+参照して Provisioners タブに登録します。
 
 ### 6.3 外部環境でのツールセットアップと標準入出力の保護 (`stderr` ログ分離)
 
@@ -569,15 +569,16 @@ Web PTY（対話シェル起動）は最も権限が強いため、以下の防�
 ### 7.5 緊急キルスイッチ（Panic Button）と監査ログ
 
 - **キルスイッチ (Panic Button)**:
-  - ハブの Web UI ヘッダーからワンタップで、現在稼働中の全ノード・全セッションのプロセスツリー（Windows
-    Job Object / POSIX Process
-    Group）および一時VM子プロセス・PTYを即時強制停止します。API は
+  - ハブの Web UI ヘッダーからワンタップで、現在稼働中の全ノード・全セッションを停止し、
+    PTY とプロビジョナーのプロセスツリー（Windows Job Object / POSIX Process
+    Group）を即時停止します。一時VMはセッション停止後に drain し、
+    完了後に破棄されます。API は
     `POST /api/v1/system/kill-switch` で、接続中の全ノードへ `HubToNodeMsg::KillAllSessions`
     を配信します。
   - ローカルのノードだけを止めたい場合は `fxg node stop`（ノード本体も停止）を使います。CLI に
     `kill-all` は置きません（全ノード一斉の緊急停止はハブの kill switch に一本化）。
 - **監査ログ (Audit Log)**:
-  - リモートからのプロンプト送信、ツール承認（`PermissionResolved`）、Worktree操作、一時VMプロビジョニング、セッション起動の送信元（IP、クライアント種別、トークンID）をすべてDBへ永続記録します。
+  - ツール承認（`PermissionResolved`）、Worktree操作、一時VMプロビジョニング、セッション起動の送信元（IP、クライアント種別、認証主体）を `audit_logs` に永続記録します。プロンプト送信は会話履歴の `UserMessage` イベント（`client_source` 付き）として `session_events` に記録します。
   - ハブ経由の操作は `hub.db`、ローカル直結（`localhost:7860` /
     CLI）の操作は実行ノードの `node.db` にも記録し、どちらのAPI接続でも
     `/api/v1/audit/logs` から参照できるようにします。

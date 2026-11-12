@@ -7,6 +7,7 @@
   import AuditLog from "#lib/components/settings/AuditLog.svelte";
   import DiagnosticsPanel from "#lib/components/settings/DiagnosticsPanel.svelte";
   import PairingPanel from "#lib/components/settings/PairingPanel.svelte";
+  import ProvisionerManager from "#lib/components/settings/ProvisionerManager.svelte";
   import SettingsCatalog from "#lib/components/settings/SettingsCatalog.svelte";
   import {
     searchSettings,
@@ -63,6 +64,7 @@
     hub: { scope: "hub", tab: "general" },
     pairing: { scope: "node", tab: "pairing" },
     agents: { scope: "node", tab: "agents" },
+    provisioners: { scope: "hub", tab: "provisioners" },
     browser: { scope: "browser", tab: "appearance" },
     audit: { scope: "current", tab: "audit" },
   };
@@ -71,6 +73,7 @@
     "general",
     "pairing",
     "tokens",
+    "provisioners",
     "agents",
     "audit",
     "appearance",
@@ -85,6 +88,7 @@
       { id: "process", label: m.settings_tab_process() },
       { id: "general", label: m.settings_tab_general() },
       { id: "tokens", label: m.settings_tab_tokens() },
+      { id: "provisioners", label: m.settings_tab_provisioners() },
       { id: "audit", label: m.settings_tab_audit() },
     ],
     node: [
@@ -585,6 +589,10 @@
                 </div>
               </div>
             </Card>
+          </Tabs.Content>
+
+          <Tabs.Content value="provisioners" class="mt-2 flex flex-col gap-3">
+            <ProvisionerManager />
           </Tabs.Content>
 
           <Tabs.Content value="audit" class="mt-2 flex flex-col gap-3">

@@ -1446,7 +1446,7 @@ export type ProvisionerDefinition = {
 	/**
 	 *  Command arguments.
 	 *
-	 *  Placeholders: `{INSTANCE_NAME}` / `{SESSION_ID}`.
+	 *  Placeholders: `{INSTANCE_NAME}` / `{SESSION_ID}` / `{NODE_ID}`.
 	 */
 	args?: string[],
 	/**  Seconds until the idle instance is discarded automatically */
@@ -1471,6 +1471,8 @@ export type ProvisionerSummary = {
 	idle_timeout_secs: number | null,
 	/**  Environment variables injected into the process */
 	env: { [key in string]: string },
+	/**  Environment variables resolved from the secret store at launch time */
+	env_secrets: { [key in string]: SecretId },
 };
 
 /**

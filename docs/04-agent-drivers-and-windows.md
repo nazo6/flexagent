@@ -324,11 +324,14 @@ fxg 側で履歴を組み立て直す Replay フォールバックは行いま�
 
 ### 5.1 Windows Job Object によるプロセスツリー完全終了
 
-Windowsでは `node.exe` や `.cmd` ラッパー経由で起動したエージェントを
+Windowsでは `node.exe` や `.cmd` ラッパー経由で起動したプロセスを
 `Child::kill()`
 しても、孫プロセス（言語サーバーやテストランナー、開発サーバー）が生き残りファイルをロックする問題が多発します。
-これを防ぐため、すべてのエージェントプロセスとターミナルプロセスを **Windows Job
-Object** にバインドします：
+これを防ぐため、fxg が直接起動するターミナル（PTY）とプロビジョナーの子プロセスを
+**Windows Job Object** にバインドします。ACP エージェントプロセスは
+`agent-client-protocol` が起動し、Unix ではプロセスグループ、Windows では
+`CREATE_NO_WINDOW` を使用します。Job Object の対象は PTY とプロビジョナーです。
+以下は実装の抜粋です：
 
 ```rust
 #[cfg(windows)]

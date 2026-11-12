@@ -11,12 +11,12 @@ use fxg_protocol::client_api::{
     CreateWorktreeRequest, IssueNodeTokenRequest, IssueNodeTokenResponse, KillSwitchResponse,
     NodeTokenSummary, NodeTokensResponse, ProjectLinkRequest, ProjectLinkResponse,
     ProjectScanRequest, ProjectScanResponse, ProjectUnlinkRequest, ProjectUnlinkResponse,
-    ProvisionerSummary, ProvisionersResponse, PruneWorktreesRequest, PushSubscribeRequest,
-    PushSubscribeResponse, RemoveWorktreeRequest, RespondElicitationRequest,
-    RespondElicitationResponse, RespondPermissionRequest, RespondPermissionResponse,
-    ResumeSessionRequest, ResumeSessionResponse, RotateAuthTokenResponse, SessionArchiveRequest,
-    SessionArchiveResponse, SessionImportRequest, SessionImportResponse, SessionRenameRequest,
-    SessionRenameResponse, SupportBundleConfig, WorktreeInfo, WorktreesResponse,
+    ProvisionersResponse, PruneWorktreesRequest, PushSubscribeRequest, PushSubscribeResponse,
+    RemoveWorktreeRequest, RespondElicitationRequest, RespondElicitationResponse,
+    RespondPermissionRequest, RespondPermissionResponse, ResumeSessionRequest,
+    ResumeSessionResponse, RotateAuthTokenResponse, SessionArchiveRequest, SessionArchiveResponse,
+    SessionImportRequest, SessionImportResponse, SessionRenameRequest, SessionRenameResponse,
+    SupportBundleConfig, WorktreeInfo, WorktreesResponse,
 };
 use fxg_protocol::common::{
     AgentAction, CommandResult, ComponentHealth, ComponentName, DiffScope, ErrorCode,
@@ -599,7 +599,7 @@ impl ClientApiBackend for HubState {
         &self,
         project_id: &str,
         request: CreateWorktreeRequest,
-        _client: ClientInfo,
+        client: ClientInfo,
     ) -> Result<WorktreeInfo, ApiError> {
         if !self.inner.hub.is_online(&request.node_id).await {
             return Err(ApiError::node_offline(
@@ -613,8 +613,8 @@ impl ClientApiBackend for HubState {
                 NodeRpcRequest::ManageWorktree {
                     project_id: project_id.into(),
                     action: WorktreeAction::Add {
-                        branch: request.branch,
-                        base_branch: request.base_branch,
+                        branch: request.branch.clone(),
+                        base_branch: request.base_branch.clone(),
                     },
                 },
             )
@@ -625,6 +625,20 @@ impl ClientApiBackend for HubState {
             } => info,
             _ => return Err(ApiError::internal("node returned no worktree info")),
         };
+        self.record_audit(
+            fxg_db::audit::actions::WORKTREE_MANAGE,
+            &client,
+            None,
+            serde_json::json!({
+                "action": "add",
+                "project_id": project_id,
+                "node_id": request.node_id,
+                "branch": request.branch,
+                "base_branch": request.base_branch,
+                "path": info.path,
+            }),
+        )
+        .await;
         Ok(info)
     }
 
@@ -632,7 +646,7 @@ impl ClientApiBackend for HubState {
         &self,
         project_id: &str,
         request: RemoveWorktreeRequest,
-        _client: ClientInfo,
+        client: ClientInfo,
     ) -> Result<(), ApiError> {
         if !self.inner.hub.is_online(&request.node_id).await {
             return Err(ApiError::node_offline(
@@ -645,12 +659,25 @@ impl ClientApiBackend for HubState {
             NodeRpcRequest::ManageWorktree {
                 project_id: project_id.into(),
                 action: WorktreeAction::Remove {
-                    path: request.path,
+                    path: request.path.clone(),
                     force: request.force,
                 },
             },
         )
         .await?;
+        self.record_audit(
+            fxg_db::audit::actions::WORKTREE_MANAGE,
+            &client,
+            None,
+            serde_json::json!({
+                "action": "remove",
+                "project_id": project_id,
+                "node_id": request.node_id,
+                "path": request.path,
+                "force": request.force,
+            }),
+        )
+        .await;
         Ok(())
     }
 
@@ -680,20 +707,20 @@ impl ClientApiBackend for HubState {
     }
 
     async fn provisioners(&self) -> Result<ProvisionersResponse, ApiError> {
-        let provisioners = self
-            .provisioners()
-            .configs()
-            .into_iter()
-            .map(|(name, config)| ProvisionerSummary {
-                name,
-                description: config.description,
-                command: config.command,
-                args: config.args,
-                idle_timeout_secs: config.idle_timeout_secs,
-                env: config.env,
-            })
-            .collect();
-        Ok(ProvisionersResponse { provisioners })
+        Ok(self.provisioner_summaries())
+    }
+
+    async fn upsert_provisioner(
+        &self,
+        name: &str,
+        definition: fxg_protocol::settings::ProvisionerDefinition,
+        client: ClientInfo,
+    ) -> Result<ProvisionersResponse, ApiError> {
+        self.save_provisioner(name, definition, &client).await
+    }
+
+    async fn delete_provisioner(&self, name: &str, client: ClientInfo) -> Result<(), ApiError> {
+        self.remove_provisioner(name, &client).await
     }
 
     async fn provisioner_test(
