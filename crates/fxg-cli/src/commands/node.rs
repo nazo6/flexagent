@@ -173,8 +173,10 @@ impl usage::RunAsync for NodeStartArgs {
             }
             let refs: Vec<&str> = args.iter().map(String::as_str).collect();
             let log = crate::spawn::spawn_background(&refs, ServiceTarget::Node.log_name())?;
-            wait_for_node().await?;
-            println!("node started (detached); log: {}", log.display());
+            let client = wait_for_node().await?;
+            println!("node started (detached)");
+            println!("  Address:  {}", client.base());
+            println!("  Log:      {}", log.display());
             return Ok(());
         }
 
@@ -285,8 +287,9 @@ impl usage::RunAsync for NodeRestartArgs {
             client.shutdown().await?;
         }
         crate::spawn::spawn_background(&["node", "start"], ServiceTarget::Node.log_name())?;
-        wait_for_node().await?;
+        let client = wait_for_node().await?;
         println!("node restarted");
+        println!("  Address:  {}", client.base());
         Ok(())
     }
 }
@@ -309,15 +312,23 @@ impl usage::RunAsync for NodeStatusArgs {
     async fn run_async(self) -> Self::Output {
         let service_installed = crate::service::is_installed(ServiceTarget::Node);
         let running = match NodeClient::connect_existing().await {
-            Ok(mut client) => Some(client.local_status().await?),
+            Ok(mut client) => {
+                let address = client.base().to_owned();
+                Some((address, client.local_status().await?))
+            }
             Err(_) => None,
         };
+        let address = running
+            .as_ref()
+            .map(|(address, _)| address.clone())
+            .or_else(|| crate::client::local_node_base(&fxg_protocol::config::process_env).ok());
 
         if self.json {
             let value = serde_json::json!({
                 "service_installed": service_installed,
                 "running": running.is_some(),
-                "status": running,
+                "address": address,
+                "status": running.as_ref().map(|(_, status)| status),
             });
             println!("{}", serde_json::to_string_pretty(&value)?);
             return Ok(());
@@ -335,7 +346,10 @@ impl usage::RunAsync for NodeStatusArgs {
             "running:   {}",
             if running.is_some() { "yes" } else { "no" }
         );
-        if let Some(status) = running {
+        if let Some(address) = address {
+            println!("address:   {address}");
+        }
+        if let Some((_, status)) = running {
             let state = match status.hub_link.state {
                 HubLinkState::Standalone => "standalone",
                 HubLinkState::Connecting => "connecting",

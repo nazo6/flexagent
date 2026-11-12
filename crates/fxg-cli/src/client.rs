@@ -236,6 +236,11 @@ impl NodeClient {
             .with_context(|| format!("node is not running ({base}); start `fxg node start` first"))
     }
 
+    /// Base URL of the connected node (`http://host:port`).
+    pub fn base(&self) -> &str {
+        &self.base
+    }
+
     async fn from_base(base: String) -> Result<Self> {
         let token = fxg_hub::api::auth::load_or_create_token(&token_path())
             .context("failed to load ~/.flexagent/auth_token")?;

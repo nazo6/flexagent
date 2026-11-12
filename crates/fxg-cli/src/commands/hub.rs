@@ -152,10 +152,13 @@ impl usage::RunAsync for HubStartArgs {
                 args.push("--port".to_owned());
                 args.push(port.to_string());
             }
+            let listen_addr = self.resolved_listen_addr(&global);
             let refs: Vec<&str> = args.iter().map(String::as_str).collect();
             let log = crate::spawn::spawn_background(&refs, ServiceTarget::Hub.log_name())?;
-            wait_for_hub(&self.resolved_listen_addr(&global)).await?;
-            println!("hub started (detached); log: {}", log.display());
+            let address = wait_for_hub(&listen_addr).await?;
+            println!("hub started (detached)");
+            println!("  Address:  http://{address}");
+            println!("  Log:      {}", log.display());
             return Ok(());
         }
 
@@ -194,24 +197,35 @@ impl usage::RunAsync for HubStartArgs {
 }
 
 /// Waits until the hub accepts TCP connections (used after `--detach`).
-async fn wait_for_hub(listen_addr: &str) -> Result<()> {
-    let addr = match listen_addr.rsplit_once(':') {
-        Some((host, port)) if host.is_empty() || host == "0.0.0.0" => format!("127.0.0.1:{port}"),
-        _ => listen_addr.to_owned(),
-    };
+///
+/// Returns the address the hub published in `hub.addr` (the actual bound
+/// address) or the requested address when the file is unavailable.
+async fn wait_for_hub(listen_addr: &str) -> Result<String> {
+    let addr = crate::hub_api::normalize_listen(listen_addr);
     let socket: std::net::SocketAddr = addr
         .parse()
         .with_context(|| format!("invalid listen address: {addr}"))?;
     let deadline = Instant::now() + Duration::from_secs(15);
     loop {
         if std::net::TcpStream::connect_timeout(&socket, Duration::from_millis(500)).is_ok() {
-            return Ok(());
+            return Ok(published_hub_addr(&addr));
         }
         if Instant::now() >= deadline {
             anyhow::bail!("hub did not become ready on {addr}");
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
+}
+
+/// Reads the bound hub address from `hub.addr`, falling back to `fallback`.
+fn published_hub_addr(fallback: &str) -> String {
+    let home = fxg_protocol::config::fxg_home(&fxg_protocol::config::process_env);
+    std::fs::read_to_string(home.join("hub.addr"))
+        .ok()
+        .map(|addr| addr.trim().to_owned())
+        .filter(|addr| !addr.is_empty())
+        .map(|addr| crate::hub_api::normalize_listen(&addr))
+        .unwrap_or_else(|| fallback.to_owned())
 }
 
 // ----------------------------------------------------------------------
@@ -259,9 +273,11 @@ impl usage::RunAsync for HubRestartArgs {
         let env = fxg_protocol::config::process_env;
         let global = fxg_protocol::config::GlobalConfig::load(&env)
             .context("failed to load ~/.flexagent/config.toml")?;
+        let listen_addr = global.hub.resolved_listen_addr().to_owned();
         crate::spawn::spawn_background(&["hub", "start"], ServiceTarget::Hub.log_name())?;
-        wait_for_hub(global.hub.resolved_listen_addr()).await?;
+        let address = wait_for_hub(&listen_addr).await?;
         println!("hub restarted");
+        println!("  Address:  http://{address}");
         Ok(())
     }
 }
@@ -284,6 +300,7 @@ impl usage::RunAsync for HubStatusArgs {
     async fn run_async(self) -> Self::Output {
         let service_installed = crate::service::is_installed(ServiceTarget::Hub);
         let client = HubClient::local(&fxg_protocol::config::process_env, None).await?;
+        let address = client.base().to_owned();
         let info = match client.system_info().await {
             Ok(info) => Some(info),
             Err(err) => {
@@ -303,6 +320,7 @@ impl usage::RunAsync for HubStatusArgs {
             let value = serde_json::json!({
                 "service_installed": service_installed,
                 "running": info.is_some(),
+                "address": address,
                 "info": info,
                 "nodes": nodes.map(|nodes| nodes.nodes),
             });
@@ -318,16 +336,14 @@ impl usage::RunAsync for HubStatusArgs {
                 "not installed"
             }
         );
-        match info {
-            Some(info) => {
-                println!("running:   yes");
-                println!("version:   {}", info.version);
-                println!(
-                    "nodes:     {}",
-                    nodes.map(|nodes| nodes.nodes.len()).unwrap_or(0)
-                );
-            }
-            None => println!("running:   no"),
+        println!("running:   {}", if info.is_some() { "yes" } else { "no" });
+        println!("address:   {address}");
+        if let Some(info) = info {
+            println!("version:   {}", info.version);
+            println!(
+                "nodes:     {}",
+                nodes.map(|nodes| nodes.nodes.len()).unwrap_or(0)
+            );
         }
         Ok(())
     }

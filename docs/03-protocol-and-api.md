@@ -1049,7 +1049,7 @@ xterm互換アダプター）とノード上の ConPTY / Unix PTY
 | `fxg session delete`                    | `DELETE /api/v1/sessions/:id`                                            | セッション削除                                              |
 | `fxg session diff`                      | `GET /api/v1/sessions/:id/diff`                                          | 作業ツリー差分                                              |
 | `fxg session import`                    | `POST /api/v1/sessions/import`                                           | 外部セッションのインポート                                  |
-| `fxg node status`                       | `GET /api/v1/system/info` + `GET /api/v1/sessions`                       | hub 接続状態 / Outbox / 稼働セッション                      |
+| `fxg node status`                       | `GET /api/v1/system/info` + `GET /api/v1/sessions`                       | 待受アドレス / hub 接続状態 / Outbox / 稼働セッション       |
 | `fxg node stop`                         | `POST /api/v1/system/shutdown`                                           | ローカルノードの graceful shutdown                          |
 | `fxg node access-token show` / `rotate` | `auth_token` ファイル読み取り / `POST /api/v1/auth/rotate-token`         | トークン表示・再生成                                        |
 | `fxg node pair` / `fxg node unpair`     | （API なし）                                                             | `node_token` と `[node] hub_url` の一括設定・解除           |

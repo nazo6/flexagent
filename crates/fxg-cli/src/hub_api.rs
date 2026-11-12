@@ -38,6 +38,11 @@ impl HubClient {
         })
     }
 
+    /// Base URL of the connected hub (`http://host:port`).
+    pub fn base(&self) -> &str {
+        &self.base
+    }
+
     fn endpoint(&self, path: &str) -> String {
         format!("{}{path}", self.base)
     }
@@ -126,7 +131,7 @@ async fn decode<T: serde::de::DeserializeOwned>(response: reqwest::Response) -> 
 }
 
 /// Normalize a listen address for a loopback HTTP URL.
-fn normalize_listen(addr: &str) -> String {
+pub(crate) fn normalize_listen(addr: &str) -> String {
     match addr.rsplit_once(':') {
         Some((host, port)) if host.is_empty() || host == "0.0.0.0" || host == "[::]" => {
             format!("127.0.0.1:{port}")
