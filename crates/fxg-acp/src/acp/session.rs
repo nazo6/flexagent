@@ -675,7 +675,8 @@ pub(super) async fn acquire_session(
 /// The ACP SDK does not expose a v1 fork builder, so the unstable
 /// `session/fork` request is sent directly. `session/load` then attaches the
 /// returned session to an `ActiveSession`; its replay notifications are
-/// discarded because fxg keeps the canonical history itself.
+/// discarded because the node mirrors the parent's canonical event log into the
+/// fork instead (see `SessionEventBus::copy_conversation_events`).
 pub(super) async fn fork_and_load_session(
     cx: &ConnectionTo<Agent>,
     source_session_id: &str,
@@ -710,8 +711,9 @@ pub(super) async fn fork_and_load_session(
 ///
 /// Per the ACP spec, conversation history replay completes before the load
 /// response, and the SDK buffers notifications from that period into the restored
-/// session. fxg keeps the canonical history in its own event log, so it drains and
-/// drops the queue right after the response to avoid double recording.
+/// session. fxg keeps the canonical history in its own event log (resume already
+/// has it; a fork mirrors the parent's log in the node), so it drains and drops
+/// the queue right after the response to avoid double recording.
 pub(super) fn discard_replay_updates(session: &mut ActiveSession<'static, Agent>) {
     use futures_util::FutureExt;
 

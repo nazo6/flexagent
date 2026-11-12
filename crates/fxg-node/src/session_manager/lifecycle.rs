@@ -167,6 +167,28 @@ impl SessionManager {
             })
             .await?;
 
+        // ACP-native forks inherit the agent-side conversation, but the child's
+        // event log starts empty. Mirror the parent's conversation so the Web UI
+        // and CLI show what the agent already knows (session-scoped meta events
+        // stay with the source).
+        if let Some(source) = fork_source.as_ref() {
+            let copied = self
+                .inner
+                .bus
+                .copy_conversation_events(
+                    source.session_id.as_str(),
+                    params.session_id,
+                    source.last_node_seq,
+                )
+                .await?;
+            tracing::debug!(
+                session_id = params.session_id,
+                source_session_id = source.session_id.as_str(),
+                copied,
+                "copied the inherited fork conversation"
+            );
+        }
+
         // Initial prompt (executed as-is when a session is started remotely)
         if let Some(prompt) = params.initial_prompt.filter(|prompt| !prompt.is_empty())
             && let Err(err) = self
@@ -386,8 +408,8 @@ impl SessionManager {
     ///
     /// - The source session must use the same agent and have an
     ///   `agent_session_id`; otherwise [`NodeError::ForkUnsupported`] is returned.
-    /// - The new session records `parent_session_id` for lineage.
-    /// - No history replay is injected: the agent carries its own context.
+    /// - The new session records `parent_session_id` for lineage and mirrors the
+    ///   parent's conversation events into its own log.
     pub async fn fork(
         &self,
         command_id: &CommandId,

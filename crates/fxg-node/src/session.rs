@@ -217,6 +217,33 @@ impl SessionEventBus {
         Ok(appended.envelope)
     }
 
+    /// Mirrors the conversation events of `source_session_id` into `target_session_id`.
+    ///
+    /// ACP-native forks inherit the agent-side conversation, but the child's fxg
+    /// event log starts empty. Copying the conversation makes the Web UI / CLI
+    /// show the inherited history. Session-scoped meta events are skipped (see
+    /// [`UnifiedEventPayload::is_fork_copyable`]); `up_to_node_seq` bounds the copy
+    /// to the source state at fork time.
+    pub async fn copy_conversation_events(
+        &self,
+        source_session_id: &str,
+        target_session_id: &str,
+        up_to_node_seq: u64,
+    ) -> Result<usize, NodeError> {
+        let appended = self
+            .inner
+            .db
+            .copy_fork_conversation(source_session_id, target_session_id, up_to_node_seq)
+            .await?;
+        for event in &appended {
+            self.broadcast(SessionBroadcast::Persisted {
+                event: event.envelope.clone(),
+                cursor: event.cursor,
+            });
+        }
+        Ok(appended.len())
+    }
+
     /// Delivers a partial delta chunk mid-stream immediately (does not write to the DB).
     pub fn publish_delta(
         &self,

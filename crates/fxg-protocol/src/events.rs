@@ -466,6 +466,31 @@ impl UnifiedEventPayload {
             _ => true,
         }
     }
+
+    /// Whether this payload is part of the conversation and is mirrored into a
+    /// session forked from the one that recorded it.
+    ///
+    /// ACP-native forks inherit the agent-side conversation, but the forked
+    /// session starts with an empty fxg event log. The node copies these
+    /// payloads so the Web UI / CLI show the inherited history.
+    ///
+    /// Session-scoped meta events are excluded: the fork has its own lifecycle,
+    /// title, capabilities and token usage, and replaying approval / elicitation
+    /// requests would make old approvals look pending again.
+    pub const fn is_fork_copyable(&self) -> bool {
+        matches!(
+            self,
+            Self::UserMessage { .. }
+                | Self::AgentMessage { .. }
+                | Self::AgentThought { .. }
+                | Self::ToolCall { .. }
+                | Self::PlanUpdate { .. }
+                | Self::TerminalOutput { .. }
+                | Self::SubagentUpdated { .. }
+                | Self::SubagentMessage { .. }
+                | Self::TurnEnded { .. }
+        )
+    }
 }
 
 #[cfg(test)]
@@ -473,7 +498,7 @@ mod tests {
     use super::*;
     use crate::common::{
         ClientSource, CommandInfo, ConfigOptionInfo, ConfigOptionValue, ElicitationMode, ModeInfo,
-        ResolvedBy,
+        ResolvedBy, ToolCallKind, ToolCallStatus, TurnStopReason,
     };
 
     fn sample_envelope(payload: UnifiedEventPayload) -> SessionEventEnvelope {
@@ -681,6 +706,95 @@ mod tests {
             }
             .is_persistable()
         );
+    }
+
+    #[test]
+    fn fork_copy_rules_keep_conversation_and_drop_session_meta() {
+        let conversation = [
+            UnifiedEventPayload::UserMessage {
+                text: "question".to_owned(),
+                attachments: vec![],
+                client_source: ClientSource::Web,
+            },
+            UnifiedEventPayload::AgentMessage {
+                message_id: "m1".to_owned(),
+                text: "answer".to_owned(),
+                is_complete: true,
+                subagent_id: None,
+            },
+            UnifiedEventPayload::AgentThought {
+                thought_id: "t1".to_owned(),
+                text: "thinking".to_owned(),
+                is_complete: true,
+                subagent_id: None,
+            },
+            UnifiedEventPayload::ToolCall {
+                tool_call_id: "tc1".to_owned(),
+                title: "Read file".to_owned(),
+                kind: ToolCallKind::Read,
+                status: ToolCallStatus::Completed,
+                locations: vec!["src/main.rs".to_owned()],
+                diff: None,
+                raw_output: None,
+                subagent_id: None,
+            },
+            UnifiedEventPayload::PlanUpdate {
+                entries: vec![],
+                subagent_id: None,
+            },
+            UnifiedEventPayload::TerminalOutput {
+                terminal_id: "term1".to_owned(),
+                command: "cargo test".to_owned(),
+                data_b64: String::new(),
+                exit_code: Some(0),
+                subagent_id: None,
+            },
+            UnifiedEventPayload::SubagentMessage {
+                message_id: "sm1".to_owned(),
+                sender_session_id: "root".to_owned(),
+                recipient_session_id: "child".to_owned(),
+                text: "child result".to_owned(),
+                is_complete: true,
+            },
+            UnifiedEventPayload::TurnEnded {
+                reason: TurnStopReason::MaxTokens,
+            },
+        ];
+        for payload in conversation {
+            assert!(
+                payload.is_fork_copyable(),
+                "{} must be copied to a fork",
+                payload.event_type().as_str()
+            );
+        }
+
+        let session_meta = [
+            UnifiedEventPayload::SessionTitleChanged {
+                title: "renamed".to_owned(),
+            },
+            UnifiedEventPayload::SessionAgentBound {
+                agent_session_id: "agent-1".to_owned(),
+            },
+            UnifiedEventPayload::StatusChanged {
+                status: SessionStatus::Idle,
+                error_message: None,
+            },
+            UnifiedEventPayload::UsageUpdated {
+                used_tokens: 1,
+                context_size: 2,
+                cost: None,
+                subagent_id: None,
+            },
+            UnifiedEventPayload::SessionArchived { archived: true },
+            UnifiedEventPayload::SessionDeleted {},
+        ];
+        for payload in session_meta {
+            assert!(
+                !payload.is_fork_copyable(),
+                "{} must not be copied to a fork",
+                payload.event_type().as_str()
+            );
+        }
     }
 
     #[test]

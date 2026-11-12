@@ -15,8 +15,8 @@ use fxg_db::{
 };
 use fxg_protocol::common::{
     ClientSource, CommandInfo, ElicitationAction, ElicitationMode, ElicitationRequestStatus,
-    ModeInfo, PermissionOption, PermissionOptionKind, PermissionRequestStatus, PlanEntry,
-    PlanEntryStatus, ResolvedBy, SessionStatus, UsageCost,
+    EventType, ModeInfo, PermissionOption, PermissionOptionKind, PermissionRequestStatus,
+    PlanEntry, PlanEntryStatus, ResolvedBy, SessionStatus, UsageCost,
 };
 use fxg_protocol::events::{SessionEventEnvelope, UnifiedEventPayload};
 use fxg_protocol::util::{now_ms, uuid_v7};
@@ -1436,6 +1436,103 @@ async fn file_backed_db_persists_across_reopen() {
     assert_eq!(session.title, "New Session");
     assert_eq!(count_events(&db, &session_id).await, 1);
     db.close().await;
+}
+
+#[tokio::test]
+async fn copy_fork_conversation_mirrors_conversation_events_only() {
+    let mut source = Fixture::new(DbRole::Node).await;
+    let created = source.session_created();
+    let user = source.event(UnifiedEventPayload::UserMessage {
+        text: "parent question".to_owned(),
+        attachments: vec![],
+        client_source: ClientSource::Web,
+    });
+    let user_created_at = user.created_at;
+    let answer = source.event(UnifiedEventPayload::AgentMessage {
+        message_id: "parent-message".to_owned(),
+        text: "parent answer".to_owned(),
+        is_complete: true,
+        subagent_id: None,
+    });
+    // Session-scoped meta event: must not be mirrored into the fork.
+    let status = source.event(UnifiedEventPayload::StatusChanged {
+        status: SessionStatus::Idle,
+        error_message: None,
+    });
+    let fork_snapshot = source.seq;
+    source
+        .db
+        .append_events(&[created, user, answer, status])
+        .await
+        .expect("seed source");
+
+    // The fork's own SessionCreated already exists (node_seq = 1).
+    let target_id = uuid_v7();
+    source
+        .db
+        .append_event(&SessionEventEnvelope {
+            event_id: uuid_v7().into(),
+            session_id: target_id.clone().into(),
+            node_seq: 1,
+            created_at: now_ms(),
+            payload: session_created_payload(),
+        })
+        .await
+        .expect("target session");
+
+    // An event recorded after the fork snapshot belongs to a later turn.
+    source
+        .db
+        .append_next_event(
+            &source.session_id,
+            UnifiedEventPayload::UserMessage {
+                text: "after the fork".to_owned(),
+                attachments: vec![],
+                client_source: ClientSource::Web,
+            },
+        )
+        .await
+        .expect("later source event");
+
+    let copied = source
+        .db
+        .copy_fork_conversation(&source.session_id, &target_id, fork_snapshot)
+        .await
+        .expect("copy fork conversation");
+    assert_eq!(copied.len(), 2, "only conversation events are copied");
+    assert_eq!(copied[0].envelope.node_seq, 2);
+    assert_eq!(copied[1].envelope.node_seq, 3);
+
+    let batch = source
+        .db
+        .session_events_after(&target_id, 0, 100)
+        .await
+        .expect("target events");
+    let kinds: Vec<EventType> = batch
+        .events
+        .iter()
+        .map(|e| e.payload.event_type())
+        .collect();
+    assert_eq!(
+        kinds,
+        vec![
+            EventType::SessionCreated,
+            EventType::UserMessage,
+            EventType::AgentMessage
+        ]
+    );
+    let node_seqs: Vec<u64> = batch.events.iter().map(|e| e.node_seq).collect();
+    assert_eq!(node_seqs, vec![1, 2, 3]);
+    // The original event time is preserved so the timeline keeps its order.
+    assert_eq!(batch.events[1].created_at, user_created_at);
+
+    let target = source
+        .db
+        .get_session(&target_id)
+        .await
+        .expect("get target")
+        .expect("target row");
+    assert_eq!(target.last_node_seq, 3);
 }
 
 #[tokio::test]

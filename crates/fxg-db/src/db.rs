@@ -338,6 +338,23 @@ impl Db {
         queries::session_events_after(&self.pool, session_id, after_cursor, limit).await
     }
 
+    /// Copies the conversation of a forked source session into the new session
+    /// (ACP-native fork history mirroring).
+    pub async fn copy_fork_conversation(
+        &self,
+        source_session_id: &str,
+        target_session_id: &str,
+        up_to_node_seq: u64,
+    ) -> Result<Vec<events::AppendedEvent>, DbError> {
+        events::copy_fork_conversation(
+            &self.pool,
+            source_session_id,
+            target_session_id,
+            up_to_node_seq,
+        )
+        .await
+    }
+
     /// Retrieves the most recent events before `before_cursor` (oldest first).
     ///
     /// `None` means the end of the log (used for the `fxg session show` tail).

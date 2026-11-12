@@ -148,29 +148,7 @@ pub async fn append_next_event(
     payload: UnifiedEventPayload,
 ) -> Result<AppendedEvent, DbError> {
     let mut tx = pool.begin().await?;
-
-    // Allocation must always happen through this UPDATE, and the event append must complete
-    // within the same transaction (on rollback, last_node_seq is also rewound, so no gaps
-    // remain).
-    // Appends to deleted sessions (tombstone applied) are rejected
-    // (treated as `SessionNotFound`).
-    let next_node_seq = sqlx::query_scalar!(
-        r#"
-        UPDATE sessions
-           SET last_node_seq = last_node_seq + 1
-         WHERE session_id = ? AND deleted_at IS NULL
-        RETURNING last_node_seq
-        "#,
-        session_id,
-    )
-    .fetch_optional(&mut *tx)
-    .await?;
-    let Some(next_node_seq) = next_node_seq else {
-        return Err(DbError::SessionNotFound(session_id.to_owned()));
-    };
-    let node_seq =
-        u64::try_from(next_node_seq).map_err(|_| DbError::NegativeNodeSeq(next_node_seq))?;
-
+    let node_seq = alloc_next_node_seq(&mut tx, session_id).await?;
     let envelope = SessionEventEnvelope {
         event_id: fxg_protocol::util::uuid_v7().into(),
         session_id: session_id.to_owned().into(),
@@ -188,6 +166,109 @@ pub async fn append_next_event(
         envelope,
         cursor: outcome.cursor,
     })
+}
+
+/// Allocates the session's next `node_seq` inside `tx` (**executing node only**).
+///
+/// The allocation (`sessions.last_node_seq`) and the caller's event append must
+/// complete in the same transaction so a rollback leaves no gaps.
+async fn alloc_next_node_seq(
+    tx: &mut Transaction<'_, Sqlite>,
+    session_id: &str,
+) -> Result<u64, DbError> {
+    // Allocation must always happen through this UPDATE, and the event append must complete
+    // within the same transaction (on rollback, last_node_seq is also rewound, so no gaps
+    // remain).
+    // Appends to deleted sessions (tombstone applied) are rejected
+    // (treated as `SessionNotFound`).
+    let next_node_seq = sqlx::query_scalar!(
+        r#"
+        UPDATE sessions
+           SET last_node_seq = last_node_seq + 1
+         WHERE session_id = ? AND deleted_at IS NULL
+        RETURNING last_node_seq
+        "#,
+        session_id,
+    )
+    .fetch_optional(&mut **tx)
+    .await?;
+    let Some(next_node_seq) = next_node_seq else {
+        return Err(DbError::SessionNotFound(session_id.to_owned()));
+    };
+    u64::try_from(next_node_seq).map_err(|_| DbError::NegativeNodeSeq(next_node_seq))
+}
+
+/// Copies the conversation history of `source_session_id` into `target_session_id`.
+///
+/// ACP-native forks inherit the agent-side conversation, but the forked session's
+/// fxg event log starts empty. Mirroring the conversation makes the Web UI / CLI
+/// show the inherited history. Only payloads where
+/// [`UnifiedEventPayload::is_fork_copyable`] is `true` are copied: session-scoped
+/// meta events (creation, status, capabilities, approvals, usage) stay with the
+/// source.
+///
+/// `node_seq` / `event_id` are assigned anew, while `created_at` is kept so the
+/// timeline keeps the original times. `up_to_node_seq` bounds the copied state to
+/// the source at fork time.
+///
+/// The append is one transaction: the fork gets either its full inherited history
+/// or none of it.
+pub async fn copy_fork_conversation(
+    pool: &SqlitePool,
+    source_session_id: &str,
+    target_session_id: &str,
+    up_to_node_seq: u64,
+) -> Result<Vec<AppendedEvent>, DbError> {
+    // Collect first, outside the append transaction: the source may still be
+    // running and reading must not extend the write lock.
+    const PAGE: u32 = 500;
+    let mut cursor = 0;
+    let mut copied: Vec<(UnifiedEventPayload, i64)> = Vec::new();
+    'pages: loop {
+        let batch =
+            crate::queries::session_events_after(pool, source_session_id, cursor, PAGE).await?;
+        if batch.events.is_empty() {
+            break;
+        }
+        cursor = batch.cursor;
+        for event in batch.events {
+            // `node_seq` grows with the cursor, so everything after the fork
+            // snapshot belongs to later turns.
+            if event.node_seq > up_to_node_seq {
+                break 'pages;
+            }
+            if event.payload.is_fork_copyable() {
+                copied.push((event.payload, event.created_at));
+            }
+        }
+    }
+    if copied.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut tx = pool.begin().await?;
+    let mut appended = Vec::with_capacity(copied.len());
+    for (payload, created_at) in copied {
+        let node_seq = alloc_next_node_seq(&mut tx, target_session_id).await?;
+        let envelope = SessionEventEnvelope {
+            event_id: fxg_protocol::util::uuid_v7().into(),
+            session_id: target_session_id.to_owned().into(),
+            node_seq,
+            created_at,
+            payload,
+        };
+        let outcome = append_event_in_tx(&mut tx, &envelope).await?;
+        debug_assert!(
+            outcome.inserted,
+            "newly allocated node_seq must be inserted"
+        );
+        appended.push(AppendedEvent {
+            envelope,
+            cursor: outcome.cursor,
+        });
+    }
+    tx.commit().await?;
+    Ok(appended)
 }
 
 async fn append_event_in_tx(

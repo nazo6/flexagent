@@ -900,6 +900,31 @@ async fn fork_uses_native_session_fork() {
         )
         .await
         .expect("bind agent session");
+    manager
+        .bus()
+        .record(
+            &source_id,
+            UnifiedEventPayload::UserMessage {
+                text: "parent question".to_owned(),
+                attachments: vec![],
+                client_source: ClientSource::Web,
+            },
+        )
+        .await
+        .expect("record parent question");
+    manager
+        .bus()
+        .record(
+            &source_id,
+            UnifiedEventPayload::AgentMessage {
+                message_id: "parent-message".to_owned(),
+                text: "parent answer".to_owned(),
+                is_complete: true,
+                subagent_id: None,
+            },
+        )
+        .await
+        .expect("record parent answer");
 
     let fork = manager
         .fork(&CommandId::from("c3"), &source_id, None)
@@ -929,7 +954,8 @@ async fn fork_uses_native_session_fork() {
         .expect("fork start");
     assert_eq!(start.fork_from.as_deref(), Some("agent-source-1"));
 
-    // No history replay is injected into the child session.
+    // The parent conversation is mirrored into the child's event log so the UI
+    // shows the history the agent inherited.
     let batch = manager
         .bus()
         .db()
@@ -937,12 +963,31 @@ async fn fork_uses_native_session_fork() {
         .await
         .expect("events");
     assert!(
-        !batch
-            .events
-            .iter()
-            .any(|event| matches!(event.payload, UnifiedEventPayload::UserMessage { .. })),
-        "native fork must not inject a replay prompt"
+        batch.events.iter().any(|event| matches!(
+            &event.payload,
+            UnifiedEventPayload::UserMessage { text, .. } if text == "parent question"
+        )),
+        "the fork must show the parent's user message"
     );
+    assert!(
+        batch.events.iter().any(|event| matches!(
+            &event.payload,
+            UnifiedEventPayload::AgentMessage { text, .. } if text == "parent answer"
+        )),
+        "the fork must show the parent's agent message"
+    );
+    // Session-scoped meta events stay with the source.
+    assert!(
+        !batch.events.iter().any(|event| matches!(
+            &event.payload,
+            UnifiedEventPayload::SessionAgentBound { agent_session_id }
+                if agent_session_id == "agent-source-1"
+        )),
+        "the parent's meta events must not be copied"
+    );
+    // The copied events follow SessionCreated without gaps.
+    let node_seqs: Vec<u64> = batch.events.iter().map(|event| event.node_seq).collect();
+    assert_eq!(node_seqs, (1..=node_seqs.len() as u64).collect::<Vec<_>>());
 
     // The fork's working directory shares the same repository
     // (canonicalize before comparing because macOS resolves `/var` → `/private/var`)
@@ -980,6 +1025,18 @@ async fn start_session_with_fork_from_uses_native_fork() {
         )
         .await
         .expect("bind agent session");
+    manager
+        .bus()
+        .record(
+            &source_id,
+            UnifiedEventPayload::UserMessage {
+                text: "forked context".to_owned(),
+                attachments: vec![],
+                client_source: ClientSource::Web,
+            },
+        )
+        .await
+        .expect("record parent question");
 
     let child_id = fxg_protocol::util::uuid_v7();
     let prompt = PromptInput::text("continue");
@@ -1020,6 +1077,21 @@ async fn start_session_with_fork_from_uses_native_fork() {
     assert!(
         mock.prompts().iter().any(|text| text == "continue"),
         "the initial prompt is sent after the fork"
+    );
+
+    // The parent conversation is mirrored into the child's event log.
+    let batch = manager
+        .bus()
+        .db()
+        .session_events_after(&child_id, 0, 100)
+        .await
+        .expect("events");
+    assert!(
+        batch.events.iter().any(|event| matches!(
+            &event.payload,
+            UnifiedEventPayload::UserMessage { text, .. } if text == "forked context"
+        )),
+        "start_session must copy the source conversation into the fork"
     );
 }
 

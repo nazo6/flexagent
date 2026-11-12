@@ -290,8 +290,13 @@ fxg 側で履歴を組み立て直す Replay フォールバックは行いま�
 - エージェントが `sessionCapabilities.fork` と `loadSession` の両方を広告した場合だけ
   実行できます。未対応の場合は `FORK_UNSUPPORTED` を返し、Web UI では Fork ボタンを
   表示しません（`CapabilitiesUpdated.fork_supported` を `sessions.fork_supported` に投影）。
-- 新しいセッションは `parent_session_id` だけを系譜として記録します。会話はエージェントが
-  保持しているため、Replay 用の `UserMessage` は追加しません。
+- 新しいセッションは `parent_session_id` を系譜として記録し、Fork 元の会話イベント
+  （ユーザー／エージェントメッセージ、思考、ツール呼び出し、計画、ターミナル出力、
+  サブエージェント）を新しいイベントログへ複製します。会話の実体はエージェントが
+  保持しており、この複製は Web UI / CLI が継承した履歴を表示するためのものです。
+  セッション固有のメタイベント（作成・タイトル・状態・能力・承認・利用量）は
+  複製しません。複製範囲は Fork 作成時点の `node_seq`
+  までに限定します。
 - 別ノード・一時VM・別エージェントへの Fork（Git bundle / 履歴引き継ぎ）は行いません。
 
 ### 4.1 セッションのレジューム (Resume)
