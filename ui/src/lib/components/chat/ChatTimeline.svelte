@@ -4,6 +4,7 @@
   import MarkdownText from "#lib/components/MarkdownText.svelte";
   import Self from "./ChatTimeline.svelte";
   import SubagentGroup from "./SubagentGroup.svelte";
+  import ThoughtBlock from "./ThoughtBlock.svelte";
   import ToolCallGroup from "./ToolCallGroup.svelte";
   import { Badge } from "#lib/components/ui/badge/index.ts";
   import { groupTimelineItems } from "#lib/chat-groups.ts";
@@ -13,7 +14,6 @@
   import type { TimelineItem } from "#lib/sync/reducer.ts";
   import AlertTriangleIcon from "@lucide/svelte/icons/alert-triangle";
   import BotIcon from "@lucide/svelte/icons/bot";
-  import BrainIcon from "@lucide/svelte/icons/brain";
   import ClockIcon from "@lucide/svelte/icons/clock";
   import ListChecksIcon from "@lucide/svelte/icons/list-checks";
   import LoaderCircleIcon from "@lucide/svelte/icons/loader-circle";
@@ -48,6 +48,28 @@
    * user action.
    */
   const agentWorking = $derived(status === "running");
+
+  /**
+   * Whether the timeline tail already shows live activity.
+   *
+   * A streaming message / reasoning block or a running tool card carries its own
+   * progress UI, so the generic "agent is working" row would only duplicate it.
+   * It still appears while the agent boots, thinks before the first token, or
+   * waits for something that shows nothing yet.
+   */
+  const tailIsLive = $derived.by(() => {
+    const last = items.at(-1);
+    if (last === undefined) return false;
+    switch (last.kind) {
+      case "agent":
+      case "thought":
+        return last.streaming;
+      case "tool":
+        return last.status === "pending" || last.status === "in_progress";
+      default:
+        return false;
+    }
+  });
 
   function planStatusClass(planStatus: string): string {
     switch (planStatus) {
@@ -128,20 +150,7 @@
             </div>
           </div>
         {:else if item.kind === "thought"}
-          <details class="group">
-            <summary
-              class="text-muted-foreground hover:text-foreground flex cursor-pointer items-center gap-1.5 text-[13px] select-none"
-            >
-              <BrainIcon class="size-3.5" />
-              {m.chat_thought_process()}
-              {#if item.streaming}<span class="animate-pulse">…</span>{/if}
-            </summary>
-            <div
-              class="text-muted-foreground border-line mt-1.5 border-l-2 pl-3 text-[13px] leading-relaxed"
-            >
-              <MarkdownText text={item.text} streaming={item.streaming} />
-            </div>
-          </details>
+          <ThoughtBlock {item} />
         {:else if item.kind === "terminal"}
           <div class="bg-card flex flex-col gap-1.5 rounded-lg border border-border p-3">
             <div class="flex items-center gap-2 text-[13px]">
@@ -224,7 +233,7 @@
     </li>
   {/each}
 
-  {#if agentWorking && !nested}
+  {#if agentWorking && !nested && !tailIsLive}
     <li class="flex gap-2.5" role="status" aria-live="polite">
       <span
         class="bg-signal-soft text-signal mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-md"

@@ -180,6 +180,16 @@ Android スマートフォン（ホーム画面追加PWA）のすべてを単一
   0 から全量を再同期する**。 イベントは `event_id`
   / `(session_id, node_seq)` で upsert し、`LiveStreamDelta` と 永続イベントを
   `message_id` でマージする)
+- **Runes のリアクティブ境界 (Map / Set は Proxy 化されない)**:
+  `$state` が深く Proxy 化するのは plain object と配列だけで、`Map` /
+  `Set` を `$state` に入れても `set()` / `add()` は再描画を起こさない。
+  時間とともに書き換わるコレクションは `svelte/reactivity` の `SvelteMap` /
+  `SvelteSet` を使うか、更新のたびに値ごと再代入する。ストリーミングバッファ
+  (`ui/src/lib/sync/timeline.svelte.ts` の `messageDeltas` / `thoughtDeltas`
+  / `toolProgress` / `terminalDeltas`、`SyncStore` の `pendingPrompts` /
+  `provisioningLogs`) は `SvelteMap` で保持する。この境界を破ると
+  「最初のチャンクだけ表示され、確定イベントで全文が一気に出る」ため、
+  `ui/src/lib/sync/timeline-reactivity.test.svelte.ts` で回帰を防ぐ。
 - **コード・Diff・双方向ターミナル**:
   - **Diff / コード表示**:
     - PC: `monaco-editor` (Monaco Diff Editor: Side-by-side / Inline
@@ -244,8 +254,17 @@ Android スマートフォン（ホーム画面追加PWA）のすべてを単一
          状態）は、最上部に折りたたみ式の **「Provisioner
          Log」カード** を表示し、VM起動やコンテナ初期化の
          `stderr` 出力をリアルタイム表示。
-       - ストリームタイムライン（ユーザー発言、思考プロセス折りたたみ、ツール実行、承認カード、Pending
-         Queue）。
+       - ストリームタイムライン（ユーザー発言、思考プロセス、ツール実行、承認カード、Pending
+         Queue）。`LiveStreamDelta` は届いた順に逐次描画し、確定イベントで
+         同じ位置の本文へ置き換える（描画はチャンク単位で合流させ、トークン
+         単位の delta でも markdown 再パースが過剰にならないようにする）。
+       - 思考プロセスはストリーミング中だけ自動展開し、確定したら自動で
+         折りたたむ（読み手が明示的に開閉した場合はその意思を優先）。折りたたみ
+         時はヘッダーに経過時間と先頭行のプレビューを表示し、展開中の本文は
+         高さを抑えて内側だけ末尾追従する。
+       - 出力の追従スクロールは「末尾付近を読んでいるとき」だけ行い、上に
+         スクロールして過去を読んでいる間は新しい出力で位置を奪わない
+         （自分の発言を送信したときは末尾へ戻る）。
      - **Diff ペイン (2段階スコープ切替)**:
        - **「セッションの変更 (This Session)」**:
          このセッションでエージェントが編集したファイル一覧とDiff（ノードがオフラインでもハブから100%閲覧可能）。

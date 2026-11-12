@@ -6,9 +6,17 @@
    *   It is always rendered as Markdown, so content stays formatted while streaming.
    * - After rendering, `enhanceCodeBlocks` applies shiki highlighting to code
    *   fences asynchronously (debounced until the text settles).
+   * - While streaming, re-rendering is coalesced to at most one markdown parse
+   *   every [`STREAM_RENDER_INTERVAL_MS`]; agents that emit token-level deltas
+   *   would otherwise reparse the whole message dozens of times per second.
+   *   The finalized text is rendered immediately.
    */
+  import { untrack } from "svelte";
   import { enhanceCodeBlocks } from "#lib/highlight.ts";
   import { renderMarkdown } from "#lib/markdown.ts";
+
+  /** Minimum spacing between markdown re-renders while the text is streaming. */
+  const STREAM_RENDER_INTERVAL_MS = 80;
 
   let {
     text,
@@ -18,7 +26,43 @@
 
   let root: HTMLDivElement | undefined = $state(undefined);
 
-  const html = $derived(renderMarkdown(text));
+  /** Text currently converted to HTML (deliberately trails `text` while streaming). */
+  let renderedText = $state(untrack(() => text));
+  let lastRenderAt = 0;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+
+  function render(next: string): void {
+    if (timer !== null) {
+      clearTimeout(timer);
+      timer = null;
+    }
+    if (next === renderedText) return;
+    renderedText = next;
+    lastRenderAt = Date.now();
+  }
+
+  $effect(() => {
+    const next = text;
+    if (!streaming) {
+      render(next);
+      return;
+    }
+    if (timer !== null) return;
+    // Leading edge stayed from the previous render, so only the remainder waits.
+    const wait = Math.max(0, STREAM_RENDER_INTERVAL_MS - (Date.now() - lastRenderAt));
+    timer = setTimeout(() => {
+      timer = null;
+      render(text);
+    }, wait);
+    return () => {
+      if (timer !== null) {
+        clearTimeout(timer);
+        timer = null;
+      }
+    };
+  });
+
+  const html = $derived(renderMarkdown(renderedText));
 
   // Re-apply shiki every time `{@html}` re-renders and rebuilds the DOM.
   // During streaming the DOM changes with each delta, so insert a short debounce
@@ -27,10 +71,10 @@
     const node = root;
     const current = html;
     if (node === undefined || !current.includes("language-")) return;
-    const timer = setTimeout(() => {
+    const highlightTimer = setTimeout(() => {
       void enhanceCodeBlocks(node);
     }, 150);
-    return () => clearTimeout(timer);
+    return () => clearTimeout(highlightTimer);
   });
 </script>
 

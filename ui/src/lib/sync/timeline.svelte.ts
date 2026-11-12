@@ -1,8 +1,10 @@
+import { SvelteMap } from "svelte/reactivity";
 import type { SessionEventEnvelope, StreamDeltaPayload } from "#lib/generated/bindings.ts";
 import {
   clearStreamBuffers,
   insertEventSorted,
   applyStreamDelta,
+  type ThoughtTiming,
   type ToolProgress,
 } from "./reducer";
 
@@ -16,16 +18,27 @@ import {
  * - `$derived` does not live here; consumers (components) compose it. Derived
  *   values inside stores outlive the view and cause `derived_inert`, so this
  *   class holds state only.
+ * - The streaming buffers are [`SvelteMap`], not `$state(new Map())`: Svelte 5
+ *   only proxies plain objects and arrays, so mutating a `Map` held in `$state`
+ *   does not invalidate readers (streamed text would appear only once the
+ *   finalized event arrives).
  */
 export class SessionTimeline {
   readonly sessionId: string;
   events = $state<SessionEventEnvelope[]>([]);
-  messageDeltas = $state(new Map<string, string>());
-  thoughtDeltas = $state(new Map<string, string>());
-  subagentByMessage = $state(new Map<string, string>());
-  subagentByThought = $state(new Map<string, string>());
-  toolProgress = $state(new Map<string, ToolProgress>());
-  terminalDeltas = $state(new Map<string, string>());
+  messageDeltas = new SvelteMap<string, string>();
+  thoughtDeltas = new SvelteMap<string, string>();
+  subagentByMessage = new SvelteMap<string, string>();
+  subagentByThought = new SvelteMap<string, string>();
+  toolProgress = new SvelteMap<string, ToolProgress>();
+  terminalDeltas = new SvelteMap<string, string>();
+  /**
+   * Client-side arrival / completion times of a streamed thought (UI only).
+   *
+   * Kept after the stream is finalized so the collapsed summary can show how
+   * long the agent reasoned.
+   */
+  thoughtTimes = new SvelteMap<string, ThoughtTiming>();
   /** Streaming buffers in the order their first delta arrived (`${kind}:${id}`). */
   streamKeys = $state<string[]>([]);
 
@@ -53,6 +66,7 @@ export class SessionTimeline {
     this.subagentByThought.clear();
     this.toolProgress.clear();
     this.terminalDeltas.clear();
+    this.thoughtTimes.clear();
     this.streamKeys.length = 0;
   }
 }

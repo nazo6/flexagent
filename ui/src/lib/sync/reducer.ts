@@ -25,6 +25,18 @@ export interface ToolProgress {
   output: string;
 }
 
+/**
+ * Client-observed lifetime of a streamed thought (UI only).
+ *
+ * The node never sends timing for reasoning, so the renderer measures it from
+ * the first delta to the finalized `agent_thought` event. `endedAt` stays
+ * `null` while the thought is still streaming.
+ */
+export interface ThoughtTiming {
+  startedAt: number;
+  endedAt: number | null;
+}
+
 /** A prompt that was sent but has no `CommandResult` yet (shown in the pending queue). */
 export interface PendingPrompt {
   commandId: string;
@@ -45,6 +57,8 @@ export interface TimelineSources {
   subagentByThought?: ReadonlyMap<string, string>;
   toolProgress: ReadonlyMap<string, ToolProgress>;
   terminalDeltas: ReadonlyMap<string, string>;
+  /** Client-observed reasoning duration for the collapsed thought summary. */
+  thoughtTimes?: ReadonlyMap<string, ThoughtTiming>;
   pendingPrompts?: ReadonlyMap<string, PendingPrompt>;
   /**
    * Streaming buffers in the order their first delta arrived, as
@@ -62,6 +76,7 @@ export interface MutableStreamBuffers {
   subagentByThought: Map<string, string>;
   toolProgress: Map<string, ToolProgress>;
   terminalDeltas: Map<string, string>;
+  thoughtTimes?: Map<string, ThoughtTiming>;
   streamKeys: string[];
 }
 
@@ -107,6 +122,10 @@ export type TimelineItem =
       createdAt: number;
       text: string;
       streaming: boolean;
+      /** Client-observed first-delta time (null when replayed from history). */
+      startedAt: number | null;
+      /** Client-observed completion time (null while streaming / replayed). */
+      endedAt: number | null;
       subagentId: string | null;
     }
   | {
@@ -261,6 +280,9 @@ export function applyStreamDelta(sources: MutableStreamBuffers, delta: StreamDel
       if (delta.subagent_id) {
         sources.subagentByThought.set(delta.thought_id, delta.subagent_id);
       }
+      if (sources.thoughtTimes && !sources.thoughtTimes.has(delta.thought_id)) {
+        sources.thoughtTimes.set(delta.thought_id, { startedAt: Date.now(), endedAt: null });
+      }
       trackStream(sources, streamKey("thought", delta.thought_id));
       break;
     case "subagent_message_delta":
@@ -308,6 +330,15 @@ export function clearStreamBuffers(
         sources.thoughtDeltas.delete(payload.data.thought_id);
         sources.subagentByThought.delete(payload.data.thought_id);
         untrackStream(sources, streamKey("thought", payload.data.thought_id));
+        // Replacing the entry (rather than mutating it) invalidates the readers:
+        // values inside a reactive map are not deeply reactive.
+        const timing = sources.thoughtTimes?.get(payload.data.thought_id);
+        if (timing && timing.endedAt === null) {
+          sources.thoughtTimes?.set(payload.data.thought_id, {
+            startedAt: timing.startedAt,
+            endedAt: Date.now(),
+          });
+        }
       }
       break;
     case "tool_call":
@@ -352,6 +383,7 @@ interface TimelineBuilder {
   permissionIndex: Map<string, number>;
   elicitationIndex: Map<string, number>;
   subagentMessageIndex: Map<string, number>;
+  thoughtTimes?: ReadonlyMap<string, ThoughtTiming>;
 }
 
 interface TimelineBase {
@@ -416,6 +448,8 @@ function addAgentThought(
     ...base,
     text: payload.data.text,
     streaming: !payload.data.is_complete,
+    startedAt: builder.thoughtTimes?.get(payload.data.thought_id)?.startedAt ?? null,
+    endedAt: builder.thoughtTimes?.get(payload.data.thought_id)?.endedAt ?? null,
     subagentId: payload.data.subagent_id ?? null,
   });
 }
@@ -742,6 +776,7 @@ function appendEphemeralItems(builder: TimelineBuilder, sources: TimelineSources
       case "thought": {
         const text = sources.thoughtDeltas.get(id);
         if (text === undefined) continue;
+        const timing = sources.thoughtTimes?.get(id);
         items.push({
           kind: "thought",
           key: `thought:${id}:stream`,
@@ -749,6 +784,8 @@ function appendEphemeralItems(builder: TimelineBuilder, sources: TimelineSources
           createdAt: items.at(-1)?.createdAt ?? 0,
           text,
           streaming: true,
+          startedAt: timing?.startedAt ?? null,
+          endedAt: timing?.endedAt ?? null,
           subagentId: sources.subagentByThought?.get(id) ?? null,
         });
         break;
@@ -825,6 +862,7 @@ export function buildTimelineItems(sources: TimelineSources): TimelineItem[] {
     permissionIndex: new Map(),
     elicitationIndex: new Map(),
     subagentMessageIndex: new Map(),
+    thoughtTimes: sources.thoughtTimes,
   };
 
   for (const event of sources.events) {

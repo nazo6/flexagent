@@ -26,6 +26,7 @@
     capabilitiesFromEvents,
     latestStatusFromEvents,
     latestUsageFromEvents,
+    type TimelineItem,
   } from "#lib/sync/reducer.ts";
   import { cn } from "#lib/utils.ts";
   import { toast } from "svelte-sonner";
@@ -67,6 +68,7 @@
       subagentByThought: timeline.subagentByThought,
       toolProgress: timeline.toolProgress,
       terminalDeltas: timeline.terminalDeltas,
+      thoughtTimes: timeline.thoughtTimes,
       streamKeys: timeline.streamKeys,
       pendingPrompts: sync.pendingPrompts,
     }),
@@ -95,6 +97,12 @@
   let chatContainer = $state<HTMLDivElement | null>(null);
   let loadedFor = $state<string | null>(null);
   let showScrollBottom = $state(false);
+  /** Whether new output should pull the view along (true while reading the tail). */
+  let followOutput = $state(true);
+  let scrollFrame: number | null = null;
+  /** Distance from the bottom that still counts as "reading the tail". */
+  const FOLLOW_THRESHOLD_PX = 80;
+  let lastUserItemKey: string | null = null;
 
   // View mode (mobile tab switch and desktop right-pane selection)
   let activeTab = $state<ViewMode>("chat");
@@ -168,19 +176,53 @@
     return () => sync.setActiveSession(null);
   });
 
-  // Scroll to the end when a new item is added (unless the user is browsing the past)
-  $effect(() => {
-    const currentItems = items;
-    if (chatContainer !== null && currentItems.length > 0 && !showScrollBottom) {
+  // Follow the tail while the reader is there. Coalesced into one scroll per
+  // frame: streamed deltas rebuild the timeline several times per second.
+  function scheduleScrollToBottom(): void {
+    if (scrollFrame !== null) return;
+    scrollFrame = requestAnimationFrame(() => {
+      scrollFrame = null;
+      if (chatContainer === null || !followOutput) return;
       chatContainer.scrollTop = chatContainer.scrollHeight;
+    });
+  }
+
+  $effect(() => () => {
+    if (scrollFrame !== null) {
+      cancelAnimationFrame(scrollFrame);
+      scrollFrame = null;
     }
   });
+
+  $effect(() => {
+    // Reading both subscribes to the container being mounted and to content
+    // growth (new items as well as streamed text inside an existing item).
+    const container = chatContainer;
+    const currentItems = items;
+    if (container === null || currentItems.length === 0) return;
+    const userItemKey = lastUserKeyOf(currentItems);
+    if (userItemKey !== lastUserItemKey) {
+      // A message was just sent: jump back to the conversation tail.
+      lastUserItemKey = userItemKey;
+      followOutput = true;
+    }
+    if (followOutput) scheduleScrollToBottom();
+  });
+
+  function lastUserKeyOf(currentItems: TimelineItem[]): string | null {
+    for (let index = currentItems.length - 1; index >= 0; index -= 1) {
+      const item = currentItems[index];
+      if (item.kind === "user") return item.key;
+    }
+    return null;
+  }
 
   function handleScroll() {
     if (!chatContainer) return;
     const distanceToBottom =
       chatContainer.scrollHeight - chatContainer.scrollTop - chatContainer.clientHeight;
     showScrollBottom = distanceToBottom > 150;
+    followOutput = distanceToBottom < FOLLOW_THRESHOLD_PX;
   }
 
   let killDialogOpen = $state(false);
@@ -206,6 +248,7 @@
 
   function scrollToBottom() {
     if (!chatContainer) return;
+    followOutput = true;
     chatContainer.scrollTo({
       top: chatContainer.scrollHeight,
       behavior: "smooth",

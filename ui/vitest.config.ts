@@ -14,6 +14,9 @@ export default defineConfig({
     }),
   ],
   resolve: {
+    // Test the browser build of Svelte: runes (`$effect` / `flushSync`) are no-ops
+    // in the server build, so reactivity tests would silently observe nothing.
+    conditions: ["browser"],
     alias: {
       // Resolve SvelteKit's `#lib` alias in Vitest as well
       $lib: new URL("./src/lib", import.meta.url).pathname,
@@ -21,7 +24,7 @@ export default defineConfig({
   },
   test: {
     environment: "happy-dom",
-    include: ["src/**/*.{test,spec}.ts"],
+    include: ["src/**/*.{test,spec}.ts", "src/**/*.{test,spec}.svelte.ts"],
     restoreMocks: true,
   },
 });
