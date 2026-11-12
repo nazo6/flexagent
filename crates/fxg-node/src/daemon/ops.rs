@@ -386,6 +386,8 @@ impl DaemonState {
                     sources,
                     external_path,
                     custom_config: entry.custom,
+                    extension: entry.extension,
+                    capabilities: entry.capabilities,
                     backend: entry.backend,
                     icon: entry.icon,
                     installed_nodes: if available {
@@ -520,6 +522,18 @@ impl DaemonState {
                     "imported {id} from the registry ({})",
                     config.command
                 ))
+            }
+            AgentAction::SetCapabilities {
+                agent_id,
+                capabilities,
+            } => {
+                let id = catalog.resolve_alias(agent_id);
+                if !catalog.has_agent(&id) {
+                    return Err(NodeError::Agent(format!("unknown agent: {id}")));
+                }
+                self.db().set_agent_capabilities(&id, capabilities).await?;
+                self.refresh_agent_catalog().await?;
+                Ok(format!("updated ACP capabilities for {id}"))
             }
         }
     }

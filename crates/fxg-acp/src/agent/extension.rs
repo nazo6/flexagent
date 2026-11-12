@@ -72,12 +72,21 @@ pub enum AcpCapability {
 }
 
 impl AcpCapability {
-    /// Parses a capability name (`subagents`, `plan`, ...).
+    /// Parses a capability name (`subagents`, ...).
     #[must_use]
     pub fn from_name(name: &str) -> Self {
         match name {
             "subagents" => Self::Subagents,
             other => Self::Unknown(other.to_owned()),
+        }
+    }
+
+    /// Capability name used on the wire and in logs.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Subagents => "subagents",
+            Self::Unknown(name) => name,
         }
     }
 }
@@ -104,6 +113,11 @@ impl AcpCapabilitySet {
         self.0.contains(capability)
     }
 
+    /// Removes a capability (no-op when it was not enabled).
+    pub fn remove(&mut self, capability: &AcpCapability) -> bool {
+        self.0.remove(capability)
+    }
+
     /// Iterates over the enabled capabilities.
     pub fn iter(&self) -> impl Iterator<Item = &AcpCapability> {
         self.0.iter()
@@ -119,6 +133,16 @@ impl AcpCapabilitySet {
 impl FromIterator<AcpCapability> for AcpCapabilitySet {
     fn from_iter<T: IntoIterator<Item = AcpCapability>>(iter: T) -> Self {
         Self(iter.into_iter().collect())
+    }
+}
+
+impl From<&fxg_protocol::settings::AgentAcpCapabilities> for AcpCapabilitySet {
+    fn from(capabilities: &fxg_protocol::settings::AgentAcpCapabilities) -> Self {
+        let mut set = Self::new();
+        if capabilities.subagents {
+            set.insert(AcpCapability::Subagents);
+        }
+        set
     }
 }
 
@@ -196,8 +220,13 @@ pub trait AgentExtension: Send + Sync {
     /// ACP connection options (client capabilities, vendor notification methods).
     ///
     /// The returned value is stored in [`AgentLaunchSpec`] so the ACP driver can
-    /// apply it without knowing the extension.
-    fn acp_options(&self) -> AcpExtensionOptions {
+    /// apply it without knowing the extension. `capabilities` is the effective
+    /// per-agent selection, so a vendor feature can follow a capability toggle
+    /// (for example, OpenCode's child-session updates follow `subagents`).
+    fn acp_options(
+        &self,
+        _capabilities: &fxg_protocol::settings::AgentAcpCapabilities,
+    ) -> AcpExtensionOptions {
         AcpExtensionOptions::default()
     }
 

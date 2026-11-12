@@ -539,6 +539,10 @@ pub struct AgentSummary {
     pub external_path: Option<String>,
     /// Contents of the custom definition (for editing in the UI)
     pub custom_config: Option<CustomAgentConfig>,
+    /// Built-in extension ID applied to this agent (`None` = ACP only)
+    pub extension: Option<String>,
+    /// Effective ACP client capabilities advertised on connections
+    pub capabilities: crate::settings::AgentAcpCapabilities,
     /// How the agent runtime is implemented
     pub backend: AgentBackendKind,
     /// Icon URL or built-in asset key

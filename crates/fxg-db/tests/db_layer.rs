@@ -1752,3 +1752,50 @@ async fn session_deleted_for_unknown_session_is_noop() {
     let outcome = db.append_event(&envelope).await.expect("noop");
     assert!(!outcome.inserted);
 }
+
+#[tokio::test]
+async fn agent_capabilities_are_stored_per_agent() {
+    use fxg_protocol::settings::AgentAcpCapabilities;
+
+    let db = Db::open_in_memory(DbRole::Node).await.expect("open db");
+    db.ensure_agent_settings().await.expect("settings");
+    db.set_agent_capabilities("opencode", &AgentAcpCapabilities { subagents: false })
+        .await
+        .expect("set capabilities");
+
+    let settings = db.ensure_agent_settings().await.expect("settings");
+    assert!(!settings.capabilities_for("opencode").subagents);
+    // Agents without an override keep the default.
+    assert!(settings.capabilities_for("claude").subagents);
+
+    // Writing the default back removes the override row.
+    db.set_agent_capabilities("opencode", &AgentAcpCapabilities::default())
+        .await
+        .expect("reset capabilities");
+    let settings = db.ensure_agent_settings().await.expect("settings");
+    assert!(!settings.capabilities.contains_key("opencode"));
+}
+
+#[tokio::test]
+async fn removing_a_custom_agent_drops_its_capabilities() {
+    use fxg_protocol::settings::{AgentAcpCapabilities, CustomAgentConfig};
+
+    let db = Db::open_in_memory(DbRole::Node).await.expect("open db");
+    db.ensure_agent_settings().await.expect("settings");
+    db.upsert_custom_agent(
+        "mine",
+        &CustomAgentConfig {
+            command: "mine".to_owned(),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("custom agent");
+    db.set_agent_capabilities("mine", &AgentAcpCapabilities { subagents: false })
+        .await
+        .expect("set capabilities");
+
+    assert_eq!(db.delete_custom_agent("mine").await.expect("delete"), 1);
+    let settings = db.ensure_agent_settings().await.expect("settings");
+    assert!(!settings.capabilities.contains_key("mine"));
+}

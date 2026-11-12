@@ -41,6 +41,8 @@ pub struct AgentCatalogState {
     pub aliases: BTreeMap<String, String>,
     /// Custom agent definitions
     pub custom: BTreeMap<String, CustomAgentConfig>,
+    /// Per-agent ACP capability overrides (absent = defaults)
+    pub capabilities: BTreeMap<String, fxg_protocol::settings::AgentAcpCapabilities>,
 }
 
 impl AgentCatalogState {
@@ -54,6 +56,7 @@ impl AgentCatalogState {
             cache_ttl_secs: settings.registry_cache_ttl_secs,
             aliases: settings.aliases.clone(),
             custom,
+            capabilities: settings.capabilities.clone(),
         }
     }
 }
@@ -194,6 +197,10 @@ pub struct AgentListEntry {
     pub sources: Vec<LocalSource>,
     /// Custom definition (node.db / UI-managed)
     pub custom: Option<CustomAgentConfig>,
+    /// Built-in extension ID applied to this agent (`None` = ACP only)
+    pub extension: Option<String>,
+    /// Effective ACP client capabilities advertised on connections
+    pub capabilities: fxg_protocol::settings::AgentAcpCapabilities,
     /// How the agent runtime is implemented
     pub backend: AgentBackendKind,
     /// Icon URL or built-in asset key
@@ -265,6 +272,15 @@ impl AcpRegistry {
     /// Returns one custom agent definition.
     pub fn custom_agent(&self, id: &str) -> Option<CustomAgentConfig> {
         self.catalog().custom.get(id).cloned()
+    }
+
+    /// Returns the effective ACP capabilities for an agent.
+    pub fn agent_capabilities(&self, id: &str) -> fxg_protocol::settings::AgentAcpCapabilities {
+        self.catalog()
+            .capabilities
+            .get(id)
+            .cloned()
+            .unwrap_or_default()
     }
 
     /// Runner that can launch the `npx` / `uvx` distribution (`None` if neither exists).
@@ -434,6 +450,8 @@ impl AcpRegistry {
                     Some(CustomAgentOrigin::Registry { version, .. }) => version.clone(),
                     _ => "-".to_owned(),
                 };
+                let extension = config.extension.clone();
+                let capabilities = self.agent_capabilities(&id);
                 AgentListEntry {
                     name: config.name.clone().unwrap_or_else(|| id.clone()),
                     backend: AgentBackendKind::Acp,
@@ -443,6 +461,8 @@ impl AcpRegistry {
                     description: config.description.clone(),
                     sources: Vec::new(),
                     custom: Some(config),
+                    extension,
+                    capabilities,
                 }
             })
             .collect()
@@ -717,6 +737,7 @@ mod tests {
             registry_url: None,
             registry_cache_ttl_secs: None,
             aliases: BTreeMap::new(),
+            capabilities: BTreeMap::new(),
             revision: 1,
             updated_at: 0,
         }

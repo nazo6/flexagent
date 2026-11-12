@@ -80,6 +80,17 @@ opencode の Tier 2 移行（Phase 4）まで実装済みである。Tier 3 の�
   解釈は `OpenCodeExtension` に閉じる。D4 の「`AcpDriver` を変更しない」
   は「エージェント別の分岐を入れない」の意味であり、汎用の ACP seam は
   コアに置く。
+- ビルトイン provider は拡張を `with_extension(<extension ID>, <instance>)`
+  で明示する。extension ID はエージェント ID から暗黙導出しない
+  (`opencode` / `opencode-v2` はそれぞれ同名の ID を持つ)。カスタム定義は
+  この ID を `CustomAgentConfig.extension` に保存し、一覧
+  (`AgentSummary.extension`) にも表示する。
+- ACP capability の広告はエージェント単位で決まる。既定は
+  `AgentAcpCapabilities::default()`（`subagents` ON）で、`node.db` の
+  `agent_capabilities` に行があるエージェントだけ上書きする。値は
+  起動スペック (`AgentLaunchSpec.acp`) に適用され、warm pool のキーにも
+  含まれるため、設定変更後に古い capability で初期化済みのプロセスを
+  再利用しない。UI はエージェント一覧の設定ダイアログから変更する。
 
 型設計・実装フェーズ・変更対象の詳細は
 [`docs/changelog/2026-11-11-agent-extension-architecture.md`](./changelog/2026-11-11-agent-extension-architecture.md)

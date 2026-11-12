@@ -185,6 +185,15 @@ ACP の機能は、接続時にエージェントへ広告する capability で�
 - **UI**: 最初の子イベント位置にサブエージェントブロックを表示し、
   ヘッダーの「Open」から詳細シートを開ける。承認カードには子のタイトルを
   表示する。
+- **per-agent 設定**: `agent_capabilities`（`node.db`）にエージェント単位の
+  `subagents` ON/OFF を保存し、エージェント一覧の設定ダイアログから変更する。
+  opencode は vendor `_meta` で子を公開するため、このトグルは標準 capability と
+  vendor 通知の両方を止める（`acp_options` が実効 capability を受け取る）。
+  既定値と同じ値は行を削除するので、既定を変えれば未設定のエージェントへ
+  即座に反映される。`AgentSummary` は実効 capability と拡張 ID を返す。
+- **ビルトインの拡張 ID**: `with_extension("opencode", ...)` のように
+  ビルトイン provider が拡張 ID を明示し、カタログはその ID で登録する。
+  一覧・設定ダイアログは拡張 ID を表示する。
 - **検証**: `crates/fxg-acp/tests/subagents.rs`（擬似 ACP エージェント）で
   RFD と opencode の子イベントを確認。`cargo test --workspace`,
   `cargo clippy`, `pnpm --dir ui run check`, `pnpm --dir ui run test` が通る。

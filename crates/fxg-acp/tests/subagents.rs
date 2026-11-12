@@ -178,7 +178,7 @@ async fn acp_child_updates_are_tagged_and_announced() {
 #[tokio::test]
 async fn opencode_child_notifications_are_parsed() {
     let extension = Arc::new(OpenCodeExtension);
-    let options = extension.acp_options();
+    let options = extension.acp_options(&Default::default());
     let driver = Arc::new(ExtendedAcpDriver::new(
         Arc::new(AcpDriver::without_pool()),
         extension,

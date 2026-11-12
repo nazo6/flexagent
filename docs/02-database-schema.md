@@ -116,21 +116,21 @@ SessionDeleted        → sessions.deleted_at = tombstone イベントの create
 DDL・カラム・インデックスの正は `crates/fxg-db/migrations/` です。ここでは
 テーブル間の責務と、ノード / ハブのロール差分だけを扱います。
 
-| テーブル                                                                                      | 責務                                                                                                                  |
-| :-------------------------------------------------------------------------------------------- | :-------------------------------------------------------------------------------------------------------------------- |
-| `nodes`                                                                                       | ノード登録簿。ハブは全ノード、ノードは自分自身の1行。`token_hash` はハブのみ使用。                                    |
-| `projects` / `project_node_bindings`                                                          | 論理プロジェクトと、ノード上のローカルパス / Worktree の紐付け。                                                      |
-| `sessions`                                                                                    | セッション状態。ノードが権威、ハブはイベントからの投影。承認ポリシー・使用量・アーカイブ / 削除状態もここに投影する。 |
-| `session_events`                                                                              | Append-only のイベントログ。`cursor` はストアへの取り込み順、`node_seq` はセッション内の論理順。                      |
-| `session_events_fts`                                                                          | `session_events` の FTS5 (trigram) 検索インデックス。                                                                 |
-| `permission_requests` / `elicitation_requests`                                                | 未解決の承認 / 質問を引くための投影テーブル。                                                                         |
-| `push_subscriptions`                                                                          | ハブの Web Push (VAPID) 購読。                                                                                        |
-| `audit_logs`                                                                                  | 各ストアが自分の観測した操作を記録する監査ログ。同期対象外。                                                          |
-| `incidents`                                                                                   | 各ストアのエラー境界が観測した障害のリングバッファ。同期対象外。                                                      |
-| `node_settings` / `agent_settings` / `agent_aliases` / `custom_agents` / `project_path_links` | ノード所有の実行時設定。                                                                                              |
-| `hub_settings` / `provisioners`                                                               | ハブ所有の実行時設定。                                                                                                |
-| `secrets`                                                                                     | 秘密のメタデータ。値は `~/.flexagent/secrets/{node,hub}/<id>` に置く。                                                |
-| `node_pairing`                                                                                | ノードのハブ接続先。トークンは `~/.flexagent/node_token` に置く。                                                     |
+| テーブル                                                                                                             | 責務                                                                                                                  |
+| :------------------------------------------------------------------------------------------------------------------- | :-------------------------------------------------------------------------------------------------------------------- |
+| `nodes`                                                                                                              | ノード登録簿。ハブは全ノード、ノードは自分自身の1行。`token_hash` はハブのみ使用。                                    |
+| `projects` / `project_node_bindings`                                                                                 | 論理プロジェクトと、ノード上のローカルパス / Worktree の紐付け。                                                      |
+| `sessions`                                                                                                           | セッション状態。ノードが権威、ハブはイベントからの投影。承認ポリシー・使用量・アーカイブ / 削除状態もここに投影する。 |
+| `session_events`                                                                                                     | Append-only のイベントログ。`cursor` はストアへの取り込み順、`node_seq` はセッション内の論理順。                      |
+| `session_events_fts`                                                                                                 | `session_events` の FTS5 (trigram) 検索インデックス。                                                                 |
+| `permission_requests` / `elicitation_requests`                                                                       | 未解決の承認 / 質問を引くための投影テーブル。                                                                         |
+| `push_subscriptions`                                                                                                 | ハブの Web Push (VAPID) 購読。                                                                                        |
+| `audit_logs`                                                                                                         | 各ストアが自分の観測した操作を記録する監査ログ。同期対象外。                                                          |
+| `incidents`                                                                                                          | 各ストアのエラー境界が観測した障害のリングバッファ。同期対象外。                                                      |
+| `node_settings` / `agent_settings` / `agent_aliases` / `agent_capabilities` / `custom_agents` / `project_path_links` | ノード所有の実行時設定。                                                                                              |
+| `hub_settings` / `provisioners`                                                                                      | ハブ所有の実行時設定。                                                                                                |
+| `secrets`                                                                                                            | 秘密のメタデータ。値は `~/.flexagent/secrets/{node,hub}/<id>` に置く。                                                |
+| `node_pairing`                                                                                                       | ノードのハブ接続先。トークンは `~/.flexagent/node_token` に置く。                                                     |
 
 ### 1.1 重要な不変条件
 
@@ -146,12 +146,12 @@ DDL・カラム・インデックスの正は `crates/fxg-db/migrations/` です
 
 実行時に変更する設定は所有者の DB にのみ保存し、ノード ⇔ ハブ間で同期・マージしない。
 
-| 設定                                                                                                           | 所有者 / 保存場所                               |
-| :------------------------------------------------------------------------------------------------------------- | :---------------------------------------------- |
-| `node_settings` / `node_pairing` / `agent_settings` / `agent_aliases` / `custom_agents` / `project_path_links` | `node.db`                                       |
-| `hub_settings` / `provisioners`                                                                                | `hub.db`                                        |
-| 秘密のメタデータ                                                                                               | `node.db` / `hub.db` の `secrets`               |
-| 秘密の値                                                                                                       | `~/.flexagent/secrets/{node,hub}/<id>` (`0600`) |
+| 設定                                                                                                                                  | 所有者 / 保存場所                               |
+| :------------------------------------------------------------------------------------------------------------------------------------ | :---------------------------------------------- |
+| `node_settings` / `node_pairing` / `agent_settings` / `agent_aliases` / `agent_capabilities` / `custom_agents` / `project_path_links` | `node.db`                                       |
+| `hub_settings` / `provisioners`                                                                                                       | `hub.db`                                        |
+| 秘密のメタデータ                                                                                                                      | `node.db` / `hub.db` の `secrets`               |
+| 秘密の値                                                                                                                              | `~/.flexagent/secrets/{node,hub}/<id>` (`0600`) |
 
 単一行テーブルは `revision` による楽観的ロックを行い、競合は
 `REVISION_MISMATCH` として返します。マイグレーションの意図は

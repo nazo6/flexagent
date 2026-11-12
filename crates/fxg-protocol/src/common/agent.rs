@@ -62,4 +62,11 @@ pub enum AgentAction {
         /// Built-in extension ID to apply (optional)
         extension: Option<String>,
     },
+    /// Replace the ACP capabilities advertised on connections to one agent
+    SetCapabilities {
+        /// Agent ID
+        agent_id: String,
+        /// Capabilities to advertise
+        capabilities: crate::settings::AgentAcpCapabilities,
+    },
 }

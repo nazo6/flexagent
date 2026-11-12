@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT agent_id, subagents FROM agent_capabilities ORDER BY agent_id",
+  "describe": {
+    "columns": [
+      {
+        "name": "agent_id",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "agent_capabilities",
+            "name": "agent_id"
+          }
+        }
+      },
+      {
+        "name": "subagents",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "agent_capabilities",
+            "name": "subagents"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "93e1e13409c3aa9453dcd24b5d9aa86c39e4000801ab25fa4dbc8ced4595700b"
+}

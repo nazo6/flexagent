@@ -247,14 +247,15 @@ prune します。`sessions` は最大 1000 件で、超過時は
 
 #### エージェント
 
-| Method / Path                                                  | 内容                                               |
-| :------------------------------------------------------------- | :------------------------------------------------- |
-| `GET /api/v1/agents`                                           | ローカルノード専用。`{ agents, registry }`。       |
-| `GET /api/v1/nodes/:node_id/agents`                            | 指定ノードのカタログ。ハブではこちらを使う。       |
-| `POST /api/v1/nodes/:node_id/agents/refresh`                   | Registry キャッシュを更新。                        |
-| `POST /api/v1/nodes/:node_id/agents/:agent_id/probe`           | 一時 ACP セッションで能力を取得。                  |
-| `PUT/DELETE /api/v1/nodes/:node_id/agents/custom/:agent_id`    | カスタム ACP エージェント定義の作成・更新 / 削除。 |
-| `POST /api/v1/nodes/:node_id/agents/registry/:agent_id/import` | Registry エントリを custom 定義として保存。        |
+| Method / Path                                                  | 内容                                                |
+| :------------------------------------------------------------- | :-------------------------------------------------- |
+| `GET /api/v1/agents`                                           | ローカルノード専用。`{ agents, registry }`。        |
+| `GET /api/v1/nodes/:node_id/agents`                            | 指定ノードのカタログ。ハブではこちらを使う。        |
+| `POST /api/v1/nodes/:node_id/agents/refresh`                   | Registry キャッシュを更新。                         |
+| `POST /api/v1/nodes/:node_id/agents/:agent_id/probe`           | 一時 ACP セッションで能力を取得。                   |
+| `PUT /api/v1/nodes/:node_id/agents/:agent_id/capabilities`     | そのエージェントが接続時に広告する ACP capability。 |
+| `PUT/DELETE /api/v1/nodes/:node_id/agents/custom/:agent_id`    | カスタム ACP エージェント定義の作成・更新 / 削除。  |
+| `POST /api/v1/nodes/:node_id/agents/registry/:agent_id/import` | Registry エントリを custom 定義として保存。         |
 
 #### プロビジョナー
 

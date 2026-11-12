@@ -41,8 +41,11 @@ impl AgentExtension for OpenCodeExtension {
         }
     }
 
-    fn acp_options(&self) -> AcpExtensionOptions {
-        opencode_acp_options()
+    fn acp_options(
+        &self,
+        capabilities: &fxg_protocol::settings::AgentAcpCapabilities,
+    ) -> AcpExtensionOptions {
+        opencode_acp_options(capabilities)
     }
 
     fn notification_parser(&self) -> Option<Arc<dyn AcpNotificationParser>> {
@@ -77,8 +80,11 @@ impl AgentExtension for OpenCodeV2Extension {
         }
     }
 
-    fn acp_options(&self) -> AcpExtensionOptions {
-        opencode_acp_options()
+    fn acp_options(
+        &self,
+        capabilities: &fxg_protocol::settings::AgentAcpCapabilities,
+    ) -> AcpExtensionOptions {
+        opencode_acp_options(capabilities)
     }
 
     fn notification_parser(&self) -> Option<Arc<dyn AcpNotificationParser>> {
@@ -102,7 +108,15 @@ impl AgentExtension for OpenCodeV2Extension {
 }
 
 /// OpenCode vendor capability and notification declaration.
-fn opencode_acp_options() -> AcpExtensionOptions {
+///
+/// OpenCode exposes child sessions through its vendor `_meta` rather than the
+/// standard ACP capability, so the per-agent `subagents` toggle gates both.
+fn opencode_acp_options(
+    capabilities: &fxg_protocol::settings::AgentAcpCapabilities,
+) -> AcpExtensionOptions {
+    if !capabilities.subagents {
+        return AcpExtensionOptions::default();
+    }
     AcpExtensionOptions {
         client_meta: Some(RawJson::new(serde_json::json!({
             "opencode/child-session-updates": true

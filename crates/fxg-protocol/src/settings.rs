@@ -196,6 +196,25 @@ pub struct UpdateNodeSettingsRequest {
     pub expected_revision: u64,
 }
 
+/// ACP client capabilities advertised when connecting to an agent.
+///
+/// An absent entry in [`AgentSettings::capabilities`] means the defaults.
+/// Capabilities describe what this client understands, so an agent that does
+/// not know a capability simply ignores it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[specta(collect)]
+#[serde(default)]
+pub struct AgentAcpCapabilities {
+    /// Advertise `clientCapabilities.subagents` (the ACP subagents RFD).
+    pub subagents: bool,
+}
+
+impl Default for AgentAcpCapabilities {
+    fn default() -> Self {
+        Self { subagents: true }
+    }
+}
+
 /// Node-owned agent settings stored in `node.db` (`agent_settings` / `agent_aliases`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
@@ -206,6 +225,9 @@ pub struct AgentSettings {
     pub registry_cache_ttl_secs: Option<u64>,
     /// Agent name aliases (merged over the built-in aliases)
     pub aliases: BTreeMap<String, String>,
+    /// Per-agent ACP capability overrides (key = agent ID; absent = defaults)
+    #[serde(default)]
+    pub capabilities: BTreeMap<String, AgentAcpCapabilities>,
     /// Optimistic-lock revision
     pub revision: u64,
     /// Last update time (Unix epoch ms)
@@ -232,6 +254,20 @@ impl AgentSettings {
         self.registry_cache_ttl_secs
             .unwrap_or(Self::DEFAULT_REGISTRY_CACHE_TTL_SECS)
     }
+
+    /// Returns the effective ACP capabilities for an agent.
+    #[must_use]
+    pub fn capabilities_for(&self, agent_id: &str) -> AgentAcpCapabilities {
+        self.capabilities.get(agent_id).cloned().unwrap_or_default()
+    }
+}
+
+/// `PUT /api/v1/nodes/{node_id}/agents/{agent_id}/capabilities` request.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
+pub struct UpdateAgentCapabilitiesRequest {
+    /// Capabilities to advertise on connections to this agent
+    pub capabilities: AgentAcpCapabilities,
 }
 
 /// `PATCH /api/v1/nodes/{node_id}/settings/agents` request.
@@ -597,5 +633,28 @@ mod tests {
         assert_eq!(value.source, ConfigSource::Default);
         assert_eq!(value.value, None);
         assert_eq!(value.source_detail, None);
+    }
+
+    #[test]
+    fn agent_capabilities_default_to_subagents_on() {
+        assert!(AgentAcpCapabilities::default().subagents);
+
+        // An older snapshot without the field still decodes with the default.
+        let decoded: AgentAcpCapabilities =
+            serde_json::from_str("{}").expect("decode empty capabilities");
+        assert!(decoded.subagents);
+
+        let settings: AgentSettings = serde_json::from_str(
+            r#"{
+                "registry_url": null,
+                "registry_cache_ttl_secs": null,
+                "aliases": {},
+                "revision": 1,
+                "updated_at": 0
+            }"#,
+        )
+        .expect("decode settings");
+        assert!(settings.capabilities.is_empty());
+        assert!(settings.capabilities_for("opencode").subagents);
     }
 }
