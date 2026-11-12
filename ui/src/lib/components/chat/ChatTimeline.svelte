@@ -2,6 +2,7 @@
   import ElicitationCard from "#lib/components/ElicitationCard.svelte";
   import PermissionCard from "#lib/components/PermissionCard.svelte";
   import MarkdownText from "#lib/components/MarkdownText.svelte";
+  import MessageActions from "./MessageActions.svelte";
   import Self from "./ChatTimeline.svelte";
   import SubagentGroup from "./SubagentGroup.svelte";
   import ThoughtBlock from "./ThoughtBlock.svelte";
@@ -10,7 +11,7 @@
   import { groupTimelineItems } from "#lib/chat-groups.ts";
   import { formatEpochMs } from "#lib/format.ts";
   import { m } from "#lib/paraglide/messages.js";
-  import type { SessionStatus } from "#lib/generated/bindings.ts";
+  import type { ForkScope, SessionStatus } from "#lib/generated/bindings.ts";
   import type { TimelineItem } from "#lib/sync/reducer.ts";
   import AlertTriangleIcon from "@lucide/svelte/icons/alert-triangle";
   import BotIcon from "@lucide/svelte/icons/bot";
@@ -27,6 +28,8 @@
     nested = false,
     onsubagent,
     subagentTitle = null,
+    forkScope = null,
+    onfork,
   }: {
     sessionId: string;
     items: TimelineItem[];
@@ -37,6 +40,10 @@
     onsubagent?: (childSessionId: string) => void;
     /** Title of the enclosing subagent (labels its approvals). */
     subagentTitle?: string | null;
+    /** Fork capability reported by the session projection. */
+    forkScope?: ForkScope | null;
+    /** Called when the user chooses "Fork from here" on a message. */
+    onfork?: (item: TimelineItem) => void;
   } = $props();
 
   /**
@@ -83,6 +90,40 @@
   }
 
   const groupedItems = $derived(groupTimelineItems(items, { groupSubagents: !nested }));
+
+  const sessionBusy = $derived(
+    status === "running" || status === "waiting_permission" || status === "waiting_input",
+  );
+
+  /**
+   * Latest message that can represent the current end of the conversation.
+   * `last` scope only enables Fork there; `message` scope (future) enables all.
+   */
+  const lastForkableSeq = $derived.by(() => {
+    for (let index = items.length - 1; index >= 0; index -= 1) {
+      const item = items[index];
+      if (item.kind === "user") return item.seq;
+      // Subagent messages are nested; only the parent conversation end is a
+      // valid "last" fork point for the session.
+      if (item.kind === "agent" && item.subagentId === null && !item.streaming) return item.seq;
+    }
+    return null;
+  });
+
+  function forkState(item: TimelineItem): { canFork: boolean | null; reason: string | null } {
+    if (nested || onfork === undefined || forkScope === null || forkScope === "none") {
+      return { canFork: null, reason: null };
+    }
+    if (sessionBusy || (item.kind === "agent" && item.streaming)) {
+      return { canFork: false, reason: m.chat_action_fork_running() };
+    }
+    if (forkScope === "message") {
+      return { canFork: true, reason: null };
+    }
+    return item.seq === lastForkableSeq
+      ? { canFork: true, reason: null }
+      : { canFork: false, reason: m.chat_action_fork_latest() };
+  }
 </script>
 
 <ul class="flex list-none flex-col gap-4 p-0">
@@ -104,9 +145,16 @@
       {:else}
         {@const item = group.item}
         {#if item.kind === "user"}
-          <div class="flex items-end justify-end gap-1.5">
+          {@const fork = forkState(item)}
+          <div class="message-group group relative flex items-end justify-end gap-1.5">
+            <MessageActions
+              text={item.text}
+              canFork={fork.canFork}
+              forkReason={fork.reason}
+              onfork={() => onfork?.(item)}
+            />
             <div
-              class="bg-user-message text-foreground max-w-[82%] rounded-xl rounded-br-sm px-4 py-2.5"
+              class="bg-user-message text-foreground max-w-[82%] rounded-xl rounded-br-sm py-2.5 pl-4 pr-8 md:pr-4"
             >
               {#if item.attachments.length > 0}
                 <div class="mb-1 flex flex-wrap gap-1.5">
@@ -135,13 +183,20 @@
             </div>
           </div>
         {:else if item.kind === "agent"}
-          <div class="flex gap-2.5">
+          {@const fork = forkState(item)}
+          <div class="message-group group relative flex gap-2.5">
+            <MessageActions
+              text={item.text}
+              canFork={fork.canFork}
+              forkReason={fork.reason}
+              onfork={() => onfork?.(item)}
+            />
             <span
               class="bg-signal-soft text-signal mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-md"
             >
               <BotIcon class="size-3" />
             </span>
-            <div class="min-w-0 max-w-[92%] flex-1">
+            <div class="min-w-0 max-w-[92%] flex-1 pr-8 md:pr-0">
               <MarkdownText
                 text={item.text}
                 streaming={item.streaming}

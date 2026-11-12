@@ -14,6 +14,9 @@
   import ArchiveRestoreIcon from "@lucide/svelte/icons/archive-restore";
   import MoreHorizontalIcon from "@lucide/svelte/icons/more-horizontal";
   import PencilIcon from "@lucide/svelte/icons/pencil";
+  import PlayIcon from "@lucide/svelte/icons/play";
+  import PlusIcon from "@lucide/svelte/icons/plus";
+  import SkullIcon from "@lucide/svelte/icons/skull";
   import Trash2Icon from "@lucide/svelte/icons/trash-2";
 
   interface Props {
@@ -25,9 +28,28 @@
     /** Size classes for the trigger icon. */
     iconClass?: string;
     align?: "start" | "center" | "end";
+    /** `session` adds header-only actions (new session here, resume, force stop). */
+    scope?: "row" | "session";
+    canNewSessionHere?: boolean;
+    onNewSessionHere?: () => void;
+    canResume?: boolean;
+    onResume?: () => void;
+    onForceStop?: () => void;
   }
 
-  let { session, onDeleted, buttonClass, iconClass = "size-3.5", align = "end" }: Props = $props();
+  let {
+    session,
+    onDeleted,
+    buttonClass,
+    iconClass = "size-3.5",
+    align = "end",
+    scope = "row",
+    canNewSessionHere = false,
+    onNewSessionHere,
+    canResume = false,
+    onResume,
+    onForceStop,
+  }: Props = $props();
 
   const archived = $derived(session.archived_at !== null);
   let confirmOpen = $state(false);
@@ -110,7 +132,31 @@
     >
       <MoreHorizontalIcon class={iconClass} />
     </DropdownMenu.Trigger>
-    <DropdownMenu.Content {align} class="w-44">
+    <DropdownMenu.Content {align} class={scope === "session" ? "w-52" : "w-44"}>
+      {#if scope === "session" && (canNewSessionHere || canResume || onForceStop)}
+        {#if canNewSessionHere && onNewSessionHere}
+          <DropdownMenu.Item onSelect={onNewSessionHere}>
+            <PlusIcon />
+            {m.session_new_here()}
+          </DropdownMenu.Item>
+        {/if}
+        {#if canResume && onResume}
+          <DropdownMenu.Item onSelect={onResume}>
+            <PlayIcon />
+            {m.chat_resume()}
+          </DropdownMenu.Item>
+        {/if}
+        {#if onForceStop}
+          {#if canNewSessionHere || canResume}
+            <DropdownMenu.Separator />
+          {/if}
+          <DropdownMenu.Item variant="destructive" onSelect={onForceStop}>
+            <SkullIcon />
+            {m.session_force_stop()}
+          </DropdownMenu.Item>
+        {/if}
+        <DropdownMenu.Separator />
+      {/if}
       <DropdownMenu.Item disabled={busy || renaming} onSelect={openRename}>
         <PencilIcon />
         {m.session_rename_menu()}

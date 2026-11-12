@@ -8,18 +8,15 @@
   import SubagentDetail from "#lib/components/chat/SubagentDetail.svelte";
   import { groupTimelineItems } from "#lib/chat-groups.ts";
   import Composer from "#lib/components/chat/Composer.svelte";
-  import DiffPane from "#lib/components/diff/DiffPane.svelte";
-  import NodeStatusBadge from "#lib/components/NodeStatusBadge.svelte";
-  import SessionActionsMenu from "#lib/components/session/SessionActionsMenu.svelte";
-  import ContextMeter from "#lib/components/session/ContextMeter.svelte";
-  import SessionStatusBadge from "#lib/components/SessionStatusBadge.svelte";
-  import TerminalView from "#lib/components/terminal/TerminalView.svelte";
+  import SessionHeader from "#lib/components/session/SessionHeader.svelte";
+  import SessionPanelHost from "#lib/components/session/SessionPanelHost.svelte";
+  import SessionToolRail from "#lib/components/session/SessionToolRail.svelte";
+  import SessionToolsSheet from "#lib/components/session/SessionToolsSheet.svelte";
   import { Button } from "#lib/components/ui/button/index.ts";
   import { commandErrorMessage } from "#lib/api/client.ts";
   import { m } from "#lib/paraglide/messages.js";
-  import { formatRelativeTime } from "#lib/format.ts";
-  import { supportsFork } from "#lib/fork-scope.ts";
-  import { shortId } from "#lib/session-status.ts";
+  import { forkScopeOf } from "#lib/fork-scope.ts";
+  import type { SessionPanelId } from "#lib/session-panels.ts";
   import { sync } from "#lib/stores/app.svelte.ts";
   import {
     provisioningLogLines,
@@ -34,25 +31,17 @@
   import ArchiveIcon from "@lucide/svelte/icons/archive";
   import { layoutState } from "#lib/stores/layout.svelte.ts";
   import ArrowDownIcon from "@lucide/svelte/icons/arrow-down";
-  import ChevronLeftIcon from "@lucide/svelte/icons/chevron-left";
-  import FileCodeIcon from "@lucide/svelte/icons/file-code";
-  import FolderIcon from "@lucide/svelte/icons/folder";
-  import GitForkIcon from "@lucide/svelte/icons/git-fork";
-  import MenuIcon from "@lucide/svelte/icons/menu";
-  import MessageSquareIcon from "@lucide/svelte/icons/message-square";
-  import PanelLeftOpenIcon from "@lucide/svelte/icons/panel-left-open";
-  import PanelRightCloseIcon from "@lucide/svelte/icons/panel-right-close";
-  import PlayIcon from "@lucide/svelte/icons/play";
-  import PlusIcon from "@lucide/svelte/icons/plus";
   import SkullIcon from "@lucide/svelte/icons/skull";
-  import SquareTerminalIcon from "@lucide/svelte/icons/square-terminal";
-
-  type ViewMode = "chat" | "diff" | "terminal";
 
   const sessionId = $derived(page.params.id ?? "");
   const session = $derived(sync.sessions.find((entry) => entry.session_id === sessionId) ?? null);
   const sessionNode = $derived(
     session ? (sync.nodes.find((n) => n.node_id === session.node_id) ?? null) : null,
+  );
+  const projectName = $derived(
+    session
+      ? (sync.projects.find((project) => project.project_id === session.project_id)?.name ?? null)
+      : null,
   );
 
   const timeline = $derived(sync.timelineFor(sessionId));
@@ -105,9 +94,9 @@
   const FOLLOW_THRESHOLD_PX = 80;
   let lastUserItemKey: string | null = null;
 
-  // View mode (mobile tab switch and desktop right-pane selection)
-  let activeTab = $state<ViewMode>("chat");
-  let sidePanelMode = $state<"diff" | "terminal" | null>(null);
+  // Right tool rail / mobile tool sheet
+  let activePanel = $state<SessionPanelId | null>(null);
+  let toolsSheetOpen = $state(false);
 
   // Desktop resizable right pane
   let mainContainer = $state<HTMLDivElement | null>(null);
@@ -167,6 +156,7 @@
     if (loadedFor !== id) {
       loadedFor = id;
       selectedSubagentId = null;
+      activePanel = null;
       const target = sync.timelineFor(id);
       if (target.events.length === 0) {
         sync.loadSessionEvents(id).catch(() => {
@@ -247,8 +237,8 @@
   /** Show Resume only for sessions where unsupported native restore was detected. */
   const canResume = $derived(resumeRequired && session !== null);
 
-  /** Fork is available only while the agent advertises a supported fork scope. */
-  const canFork = $derived(supportsFork(session));
+  /** Fork capability of the open session. */
+  const forkScope = $derived(forkScopeOf(session));
 
   function scrollToBottom() {
     if (!chatContainer) return;
@@ -260,23 +250,25 @@
     showScrollBottom = false;
   }
 
-  function toggleSidePanel(mode: "diff" | "terminal") {
-    if (sidePanelMode === mode) {
-      sidePanelMode = null;
-    } else {
-      sidePanelMode = mode;
-    }
+  function selectPanel(id: SessionPanelId): void {
+    activePanel = activePanel === id ? null : id;
   }
 
-  function handleForkSession() {
-    if (!sessionId) return;
+  function openPanel(id: SessionPanelId): void {
+    activePanel = id;
+  }
+
+  function handleForkItem(item: TimelineItem): void {
+    if (!sessionId || !session) return;
     const params = new URLSearchParams();
     params.set("fork_session", sessionId);
-    if (session?.project_id) params.set("project", session.project_id);
-    if (session?.agent_id) params.set("agent", session.agent_id);
-    // Start the fork on the same node and working directory (overrides default path resolution)
-    if (session?.node_id) params.set("node", session.node_id);
-    if (session?.local_path) params.set("path", session.local_path);
+    params.set("project", session.project_id);
+    params.set("node", session.node_id);
+    params.set("path", session.local_path);
+    if (session.agent_id) params.set("agent", session.agent_id);
+    // A message-scope agent can fork at a boundary. `last` agents must fork at
+    // the current end, so their request intentionally omits the boundary.
+    if (forkScope === "message") params.set("fork_upto", String(item.seq));
     void goto(`/?${params.toString()}`);
   }
 
@@ -346,223 +338,20 @@
 </svelte:head>
 
 <div class="flex h-full w-full flex-col overflow-hidden bg-background">
-  <!-- Session header -->
-  <header class="bg-card/85 border-b border-border px-4 py-2.5 shrink-0 backdrop-blur">
-    <div class="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
-      <!-- Left: back link + title + node status -->
-      <div class="flex min-w-0 flex-1 items-center gap-2">
-        <!-- Mobile: open sidebar drawer to pick sessions -->
-        <button
-          type="button"
-          class="hover:bg-accent text-muted-foreground hover:text-foreground -ml-1 flex size-7 items-center justify-center rounded-md border md:hidden"
-          onclick={() => layoutState.setMobileDrawer(true)}
-          title={m.shell_open_menu()}
-          aria-label={m.shell_open_menu()}
-        >
-          <MenuIcon class="size-4" />
-        </button>
-
-        <!-- Desktop: expand sidebar when collapsed -->
-        {#if layoutState.sidebarCollapsed}
-          <button
-            type="button"
-            class="hover:bg-accent text-muted-foreground hover:text-foreground -ml-1 hidden size-7 items-center justify-center rounded-md border md:flex"
-            onclick={() => layoutState.toggleSidebar()}
-            title="Open sidebar (Ctrl+B)"
-            aria-label="Open sidebar"
-          >
-            <PanelLeftOpenIcon class="size-4" />
-          </button>
-        {/if}
-
-        <div class="flex min-w-0 flex-col gap-0.5">
-          <div class="flex min-w-0 items-center gap-2">
-            <h1 class="truncate text-[15px] font-semibold tracking-tight">
-              {session?.title ?? m.session_title_fallback()}
-            </h1>
-            {#if currentStatus}
-              <SessionStatusBadge status={currentStatus} />
-            {/if}
-          </div>
-
-          <div
-            class="text-muted-foreground flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px]"
-          >
-            <!-- Node availability status -->
-            <NodeStatusBadge node={sessionNode} showNodeName={true} />
-            <span class="hidden items-center gap-x-2 sm:inline-flex">
-              <span class="opacity-40">/</span>
-              <span class="truncate">{session?.project_id}</span>
-            </span>
-            {#if session?.git_branch}
-              <span class="opacity-40">/</span>
-              <span class="min-w-0 truncate font-mono">{session.git_branch}</span>
-            {/if}
-            {#if session?.is_worktree}
-              <span class="bg-muted rounded px-1 text-[11px]">wt</span>
-            {/if}
-            {#if session?.local_path}
-              <span class="hidden items-center gap-x-2 sm:inline-flex">
-                <span class="opacity-40">/</span>
-                <button
-                  type="button"
-                  class="hover:text-foreground inline-flex min-w-0 max-w-44 cursor-pointer items-center gap-1 truncate font-mono text-[11px] transition-colors sm:max-w-xs md:max-w-md"
-                  title={m.session_working_dir_copy_title({ path: session.local_path })}
-                  onclick={() => {
-                    navigator.clipboard.writeText(session.local_path);
-                    toast.success(m.session_working_dir_copied());
-                  }}
-                >
-                  <FolderIcon class="text-signal size-3.5 shrink-0" />
-                  <span class="truncate">{session.local_path}</span>
-                </button>
-              </span>
-            {/if}
-            <span class="hidden items-center gap-x-2 sm:inline-flex">
-              <span class="opacity-40">/</span>
-              <span>{session?.agent_id}</span>
-            </span>
-            {#if session?.updated_at}
-              <span class="opacity-40">/</span>
-              <span class="shrink-0">{formatRelativeTime(session.updated_at)}</span>
-            {/if}
-            {#if usage}
-              <span class="hidden items-center gap-x-2 sm:inline-flex">
-                <span class="opacity-40">/</span>
-                <ContextMeter {usage} />
-              </span>
-            {/if}
-          </div>
-        </div>
-      </div>
-
-      <!-- Right: mode switch / pane toggle buttons -->
-      <div
-        class="order-3 flex w-full flex-wrap items-center gap-1.5 md:order-none md:w-auto md:flex-nowrap"
-      >
-        <!-- Mobile: tab switch buttons -->
-        <div class="flex rounded-md border bg-muted/30 p-0.5 md:hidden">
-          <button
-            type="button"
-            class={cn(
-              "px-2.5 py-1 text-[13px] font-medium rounded",
-              activeTab === "chat" ? "bg-background text-foreground" : "text-muted-foreground",
-            )}
-            onclick={() => (activeTab = "chat")}
-          >
-            {m.session_tab_chat()}
-          </button>
-          <button
-            type="button"
-            class={cn(
-              "px-2.5 py-1 text-[13px] font-medium rounded",
-              activeTab === "diff" ? "bg-background text-foreground" : "text-muted-foreground",
-            )}
-            onclick={() => (activeTab = "diff")}
-          >
-            Diff
-          </button>
-          <button
-            type="button"
-            class={cn(
-              "px-2.5 py-1 text-[13px] font-medium rounded",
-              activeTab === "terminal" ? "bg-background text-foreground" : "text-muted-foreground",
-            )}
-            onclick={() => (activeTab = "terminal")}
-          >
-            Terminal
-          </button>
-        </div>
-
-        <!-- Desktop: side panel toggles -->
-        <div class="hidden items-center gap-1 md:flex">
-          <Button
-            variant={sidePanelMode === "diff" ? "secondary" : "ghost"}
-            size="sm"
-            class="h-7 text-[13px] gap-1.5"
-            onclick={() => toggleSidePanel("diff")}
-            title={m.session_diff_panel_toggle_title()}
-          >
-            <FileCodeIcon class="size-3.5" />
-            <span>Diff</span>
-          </Button>
-
-          <Button
-            variant={sidePanelMode === "terminal" ? "secondary" : "ghost"}
-            size="sm"
-            class="h-7 text-[13px] gap-1.5"
-            onclick={() => toggleSidePanel("terminal")}
-            title={m.session_terminal_panel_toggle_title()}
-          >
-            <SquareTerminalIcon class="size-3.5" />
-            <span>Terminal</span>
-          </Button>
-        </div>
-
-        <div class="h-4 w-px bg-border/60 mx-0.5 hidden sm:block"></div>
-
-        <!-- Resume button (only for stopped sessions without native restore support) -->
-        {#if canResume}
-          <Button
-            variant="ghost"
-            size="sm"
-            class="h-7 text-[13px] gap-1"
-            disabled={resuming}
-            onclick={handleResumeSession}
-            title={m.session_resume_button_title()}
-          >
-            <PlayIcon class="size-3" />
-            <span class="hidden sm:inline">Resume</span>
-          </Button>
-        {/if}
-
-        <!-- Fork button (only when the agent supports ACP-native session/fork) -->
-        {#if canFork}
-          <Button
-            variant="ghost"
-            size="sm"
-            class="h-7 text-[13px] gap-1"
-            onclick={handleForkSession}
-            title={m.session_fork_button_title()}
-          >
-            <GitForkIcon class="size-3" />
-            <span class="hidden sm:inline">Fork</span>
-          </Button>
-        {/if}
-
-        <!-- New session in the same place (without carrying over history) -->
-        {#if session && sessionNode && !sessionNode.is_ephemeral}
-          <Button
-            variant="ghost"
-            size="sm"
-            class="h-7 text-[13px] gap-1"
-            onclick={handleNewSessionHere}
-            title={m.session_new_here_button_title()}
-          >
-            <PlusIcon class="size-3" />
-            <span class="hidden sm:inline">{m.session_new_here()}</span>
-          </Button>
-        {/if}
-
-        <!-- Kill button (forced termination) -->
-        <Button
-          variant="ghost"
-          size="sm"
-          class="h-7 text-[13px] gap-1 text-destructive hover:bg-destructive/10 hover:text-destructive"
-          onclick={() => (killDialogOpen = true)}
-          title={m.session_kill_button_title()}
-        >
-          <SkullIcon class="size-3" />
-          <span class="hidden sm:inline">{m.session_force_stop()}</span>
-        </Button>
-
-        <!-- Archive / delete menu -->
-        {#if session}
-          <SessionActionsMenu {session} onDeleted={() => void goto("/")} />
-        {/if}
-      </div>
-    </div>
-  </header>
+  <SessionHeader
+    {session}
+    node={sessionNode}
+    status={currentStatus}
+    {usage}
+    {projectName}
+    {canResume}
+    onResume={() => void handleResumeSession()}
+    canNewSessionHere={sessionNode !== null && !sessionNode.is_ephemeral}
+    onNewSessionHere={handleNewSessionHere}
+    onForceStop={() => (killDialogOpen = true)}
+    onOpenTools={() => (toolsSheetOpen = true)}
+    onDeleted={() => void goto("/")}
+  />
 
   <!-- Archived banner -->
   {#if session && session.archived_at !== null}
@@ -620,18 +409,18 @@
   <!-- Main content area -->
   <div
     bind:this={mainContainer}
-    class="flex flex-1 overflow-hidden relative"
+    class="relative flex flex-1 overflow-hidden"
     class:select-none={isResizing}
   >
-    <!-- Chat main area (always on desktop, on mobile only when activeTab === 'chat') -->
+    <!-- Chat column -->
     <div
       class={cn(
-        "flex h-full flex-1 flex-col overflow-hidden",
-        activeTab !== "chat" ? "hidden md:flex" : "flex",
+        "flex h-full min-w-0 flex-1 flex-col overflow-hidden",
+        activePanel !== null && session !== null && "hidden lg:flex",
       )}
     >
       <!-- Scrollable message timeline -->
-      <div class="relative flex-1 min-h-0">
+      <div class="relative min-h-0 flex-1">
         <div
           bind:this={chatContainer}
           onscroll={handleScroll}
@@ -643,6 +432,8 @@
               {sessionId}
               {items}
               status={currentStatus}
+              {forkScope}
+              onfork={handleForkItem}
               onsubagent={(childSessionId) => (selectedSubagentId = childSessionId)}
             />
           </div>
@@ -662,7 +453,7 @@
         {#if showScrollBottom}
           <button
             type="button"
-            class="bg-card text-foreground border-border absolute bottom-4 left-1/2 -translate-x-1/2 z-10 flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[13px] font-medium shadow-md transition-all hover:bg-accent animate-in fade-in zoom-in-95 cursor-pointer"
+            class="bg-card text-foreground border-border hover:bg-accent animate-in fade-in zoom-in-95 absolute bottom-4 left-1/2 z-10 flex -translate-x-1/2 cursor-pointer items-center gap-1.5 rounded-full border px-3 py-1.5 text-[13px] font-medium shadow-md transition-all"
             onclick={scrollToBottom}
           >
             <ArrowDownIcon class="size-3.5" />
@@ -672,7 +463,7 @@
       </div>
 
       <!-- Chat input (Composer) -->
-      <div class="border-t border-border px-4 py-3 md:px-8 shrink-0">
+      <div class="border-border shrink-0 border-t px-4 py-3 md:px-8">
         <div class="mx-auto max-w-[760px]">
           <Composer
             {sessionId}
@@ -688,14 +479,13 @@
       </div>
     </div>
 
-    <!-- Desktop right side panel with resizer (Diff or Terminal) -->
-    {#if sidePanelMode !== null}
-      <!-- Resizer divider -->
+    <!-- Desktop split panel -->
+    {#if activePanel !== null && session !== null}
       <button
         type="button"
         aria-label="Resize panel"
         class={cn(
-          "hidden md:flex w-1.5 cursor-col-resize hover:bg-signal/50 active:bg-signal transition-colors group select-none shrink-0 border-l border-border items-center justify-center -ml-[1px] z-10 outline-none focus-visible:ring-1 focus-visible:ring-signal bg-transparent p-0",
+          "group z-10 -ml-px hidden w-1.5 cursor-col-resize shrink-0 items-center justify-center border-l border-border bg-transparent p-0 outline-none transition-colors select-none hover:bg-signal/50 focus-visible:ring-1 focus-visible:ring-signal active:bg-signal lg:flex",
           isResizing && "bg-signal",
         )}
         onpointerdown={startResize}
@@ -710,58 +500,47 @@
         }}
       >
         <span
-          class="w-0.5 h-8 bg-muted-foreground/30 rounded-full group-hover:bg-signal pointer-events-none"
+          class="bg-muted-foreground/30 group-hover:bg-signal h-8 w-0.5 rounded-full pointer-events-none"
         ></span>
       </button>
 
       <div
-        class="border-border bg-card/40 hidden h-full flex-col overflow-hidden md:flex shrink-0"
+        class="hidden h-full shrink-0 flex-col overflow-hidden lg:flex"
         style="width: {sidePanelWidth}%;"
       >
-        <!-- Side panel header -->
-        <div class="flex items-center justify-between border-b border-border px-3 py-2">
-          <div class="flex items-center gap-2 text-[13px] font-semibold">
-            {#if sidePanelMode === "diff"}
-              <FileCodeIcon class="size-4" />
-              <span>{m.session_diff_panel_title()}</span>
-            {:else}
-              <SquareTerminalIcon class="size-4" />
-              <span>{m.session_terminal_panel_title()}</span>
-            {/if}
-          </div>
-
-          <div class="flex items-center gap-1">
-            <button
-              type="button"
-              class="text-muted-foreground hover:text-foreground ml-1 p-1"
-              onclick={() => (sidePanelMode = null)}
-              title={m.session_close_panel()}
-            >
-              <PanelRightCloseIcon class="size-4" />
-            </button>
-          </div>
-        </div>
-
-        <!-- Side panel content -->
-        <div class="app-scroll flex-1 overflow-y-auto p-3">
-          {#if sidePanelMode === "diff"}
-            <DiffPane {sessionId} {items} />
-          {:else if sidePanelMode === "terminal"}
-            <TerminalView {sessionId} />
-          {/if}
-        </div>
+        <SessionPanelHost
+          panel={activePanel}
+          {sessionId}
+          {items}
+          onclose={() => (activePanel = null)}
+        />
       </div>
     {/if}
 
-    <!-- Mobile full-screen Diff / Terminal (when a tab is selected below md) -->
-    {#if activeTab === "diff"}
-      <div class="flex flex-1 flex-col overflow-y-auto p-3 md:hidden">
-        <DiffPane {sessionId} {items} />
+    <!-- Desktop tool rail -->
+    {#if !layoutState.rightRailCollapsed && session !== null}
+      <div class="hidden h-full lg:flex">
+        <SessionToolRail
+          active={activePanel}
+          onselect={selectPanel}
+          oncollapse={() => layoutState.setRightRailCollapsed(true)}
+        />
       </div>
-    {:else if activeTab === "terminal"}
-      <div class="flex flex-1 flex-col overflow-y-auto p-3 md:hidden">
-        <TerminalView {sessionId} />
+    {/if}
+
+    <!-- Mobile full-screen panel -->
+    {#if activePanel !== null && session !== null}
+      <div class="flex flex-1 flex-col overflow-hidden lg:hidden">
+        <SessionPanelHost
+          panel={activePanel}
+          {sessionId}
+          {items}
+          mobile
+          onclose={() => (activePanel = null)}
+        />
       </div>
     {/if}
   </div>
+
+  <SessionToolsSheet bind:open={toolsSheetOpen} active={activePanel} onselect={openPanel} />
 </div>

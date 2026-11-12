@@ -4,7 +4,8 @@
   import "../app.css";
   import AppSidebar from "#lib/components/layout/AppSidebar.svelte";
   import ConnectionMenu from "#lib/components/ConnectionMenu.svelte";
-  import ErrorBanner from "#lib/components/ErrorBanner.svelte";
+  import ProblemBadge from "#lib/components/ProblemBadge.svelte";
+  import ProblemCenter from "#lib/components/ProblemCenter.svelte";
   import TokenDialog from "#lib/components/TokenDialog.svelte";
   import { Button } from "#lib/components/ui/button/index.ts";
   import * as Sheet from "#lib/components/ui/sheet/index.ts";
@@ -32,8 +33,9 @@
     problems.report("unhandled error", event.reason);
   }
 
-  function onUncaughtError(event: ErrorEvent): void {
-    problems.report("uncaught error", event.error ?? event.message);
+  function onUncaughtError(event: Event): void {
+    const error = event as ErrorEvent;
+    problems.report("uncaught error", error.error ?? error.message);
   }
 
   function onGlobalKeydown(event: KeyboardEvent): void {
@@ -50,15 +52,7 @@
 
   onMount(() => {
     theme.init();
-    window.addEventListener("unhandledrejection", onUnhandledRejection);
-    window.addEventListener("error", onUncaughtError);
-    window.addEventListener("keydown", onGlobalKeydown);
     void initApp();
-    return () => {
-      window.removeEventListener("unhandledrejection", onUnhandledRejection);
-      window.removeEventListener("error", onUncaughtError);
-      window.removeEventListener("keydown", onGlobalKeydown);
-    };
   });
 
   /**
@@ -104,10 +98,18 @@
    */
   const SELF_SCROLLING_ROUTES = new Set(["/", "/sessions/[id]"]);
   const mainScrolls = $derived(!SELF_SCROLLING_ROUTES.has(page.route.id ?? ""));
+  /** Session pages render their own top chrome so mobile has a single header. */
+  const isSessionRoute = $derived(page.route.id === "/sessions/[id]");
 </script>
 
 <ModeWatcher />
+<svelte:window
+  onerror={onUncaughtError}
+  onunhandledrejection={onUnhandledRejection}
+  onkeydown={onGlobalKeydown}
+/>
 <Toaster richColors position="top-center" />
+<ProblemCenter onaction={handleProblemAction} />
 <TokenDialog />
 
 {#if !connection.ready}
@@ -136,14 +138,14 @@
   <div class="bg-background min-h-svh"></div>
 {:else}
   <div class="bg-background text-foreground flex h-svh w-full overflow-hidden">
-    <!-- Desktop sidebar (collapsible on md and up) -->
+    <!-- Desktop sidebar (persistent on lg and up) -->
     {#if !layoutState.sidebarCollapsed}
-      <div class="hidden md:flex md:w-[264px] lg:w-[288px] md:shrink-0 md:h-full">
+      <div class="hidden lg:flex lg:w-[264px] xl:w-[288px] lg:shrink-0 lg:h-full">
         <AppSidebar />
       </div>
     {:else}
       <!-- Collapsed rail: keeps a visible way to reopen the sidebar on desktop. -->
-      <div class="hidden w-10 shrink-0 flex-col items-center border-r border-border py-2 md:flex">
+      <div class="hidden w-10 shrink-0 flex-col items-center border-r border-border py-2 lg:flex">
         <button
           type="button"
           class="hover:bg-accent text-muted-foreground hover:text-foreground flex size-7 items-center justify-center rounded-md border border-border"
@@ -153,6 +155,7 @@
         >
           <PanelLeftOpenIcon class="size-4" />
         </button>
+        <ProblemBadge class="mt-1 size-7 px-0" />
       </div>
     {/if}
 
@@ -165,67 +168,70 @@
 
     <!-- Main area -->
     <div class="flex flex-1 flex-col h-full overflow-hidden">
-      <!-- Mobile top bar (visible below md) -->
-      <header
-        class="bg-background/85 flex items-center justify-between border-b border-border px-3 py-2 backdrop-blur md:hidden shrink-0"
-      >
-        <button
-          type="button"
-          class="hover:bg-accent flex size-8 items-center justify-center rounded-md border text-muted-foreground"
-          onclick={() => layoutState.setMobileDrawer(true)}
-          aria-label={m.shell_open_menu()}
+      <!-- Mobile top bar (visible below lg; session pages own their header) -->
+      {#if !isSessionRoute}
+        <header
+          class="bg-background/85 flex items-center justify-between border-b border-border px-3 py-2 backdrop-blur lg:hidden shrink-0"
         >
-          <MenuIcon class="size-4" />
-        </button>
-
-        <div class="flex min-w-0 items-center gap-2">
-          <a href="/" class="flex items-center gap-1.5 font-semibold text-sm">
-            <div
-              class="bg-primary text-primary-foreground flex size-6 items-center justify-center rounded-md font-mono text-[11px] font-bold"
-            >
-              fxg
-            </div>
-            <span>FlexAgent</span>
-          </a>
-          <ConnectionMenu variant="scope-compact" align="end" />
-        </div>
-
-        {#if sync.inbox.length > 0}
-          <a
-            href="/inbox"
-            class="hover:bg-accent relative flex size-8 items-center justify-center rounded-md border text-muted-foreground"
-            title={m.shell_approval_inbox()}
-            aria-label={m.shell_approval_inbox()}
-          >
-            <InboxIcon class="size-4" />
-            <span
-              class="bg-destructive text-destructive-foreground absolute -top-1 -right-1 flex size-4 items-center justify-center rounded-full text-[10px] font-bold leading-none"
-            >
-              {sync.inbox.length}
-            </span>
-          </a>
-        {:else if page.url.pathname === "/"}
-          <a
-            href="/search"
+          <button
+            type="button"
             class="hover:bg-accent flex size-8 items-center justify-center rounded-md border text-muted-foreground"
-            title={m.shell_full_text_search()}
-            aria-label={m.shell_full_text_search()}
+            onclick={() => layoutState.setMobileDrawer(true)}
+            aria-label={m.shell_open_menu()}
           >
-            <SearchIcon class="size-4" />
-          </a>
-        {:else}
-          <a
-            href="/"
-            class="hover:bg-accent flex size-8 items-center justify-center rounded-md border text-muted-foreground"
-            title={m.shell_new_session()}
-            aria-label={m.shell_new_session()}
-          >
-            <PlusIcon class="size-4" />
-          </a>
-        {/if}
-      </header>
+            <MenuIcon class="size-4" />
+          </button>
 
-      <ErrorBanner onaction={handleProblemAction} />
+          <div class="flex min-w-0 items-center gap-2">
+            <a href="/" class="flex items-center gap-1.5 font-semibold text-sm">
+              <div
+                class="bg-primary text-primary-foreground flex size-6 items-center justify-center rounded-md font-mono text-[11px] font-bold"
+              >
+                fxg
+              </div>
+              <span>FlexAgent</span>
+            </a>
+            <ConnectionMenu variant="scope-compact" align="end" />
+          </div>
+
+          <div class="flex items-center gap-1">
+            <ProblemBadge class="size-8 px-0" />
+            {#if sync.inbox.length > 0}
+              <a
+                href="/inbox"
+                class="hover:bg-accent relative flex size-8 items-center justify-center rounded-md border text-muted-foreground"
+                title={m.shell_approval_inbox()}
+                aria-label={m.shell_approval_inbox()}
+              >
+                <InboxIcon class="size-4" />
+                <span
+                  class="bg-destructive text-destructive-foreground absolute -top-1 -right-1 flex size-4 items-center justify-center rounded-full text-[10px] font-bold leading-none"
+                >
+                  {sync.inbox.length}
+                </span>
+              </a>
+            {:else if page.url.pathname === "/"}
+              <a
+                href="/search"
+                class="hover:bg-accent flex size-8 items-center justify-center rounded-md border text-muted-foreground"
+                title={m.shell_full_text_search()}
+                aria-label={m.shell_full_text_search()}
+              >
+                <SearchIcon class="size-4" />
+              </a>
+            {:else}
+              <a
+                href="/"
+                class="hover:bg-accent flex size-8 items-center justify-center rounded-md border text-muted-foreground"
+                title={m.shell_new_session()}
+                aria-label={m.shell_new_session()}
+              >
+                <PlusIcon class="size-4" />
+              </a>
+            {/if}
+          </div>
+        </header>
+      {/if}
 
       <main class="relative flex-1 overflow-y-auto" class:app-scroll={mainScrolls}>
         {@render children()}

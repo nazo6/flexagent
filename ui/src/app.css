@@ -323,4 +323,31 @@
     border: 1px solid var(--line);
     border-radius: var(--radius-lg);
   }
+  /*
+   * Message actions: show the full toolbar on pointer devices that can hover,
+   * and a single "more" trigger on touch screens. The toolbar is opacity-only
+   * so showing it never changes the message height.
+   */
+  .message-actions-touch {
+    display: flex;
+  }
+  .message-actions-desktop {
+    display: none;
+  }
+  @media (hover: hover) and (pointer: fine) {
+    .message-actions-touch {
+      display: none;
+    }
+    .message-actions-desktop {
+      display: flex;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 120ms ease;
+    }
+    .message-group:hover .message-actions-desktop,
+    .message-group:focus-within .message-actions-desktop {
+      opacity: 1;
+      pointer-events: auto;
+    }
+  }
 }
