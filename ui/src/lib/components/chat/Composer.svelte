@@ -1,21 +1,18 @@
 <script lang="ts">
   import { Button } from "#lib/components/ui/button/index.ts";
+  import * as DropdownMenu from "#lib/components/ui/dropdown-menu/index.ts";
   import ComposerCard from "#lib/components/composer/ComposerCard.svelte";
   import ComposerSendButton from "#lib/components/composer/ComposerSendButton.svelte";
   import ComposerTextarea from "#lib/components/composer/ComposerTextarea.svelte";
   import ConfigOptionPicker from "#lib/components/composer/ConfigOptionPicker.svelte";
-  import PickerItem from "#lib/components/composer/PickerItem.svelte";
-  import PickerPill from "#lib/components/composer/PickerPill.svelte";
+  import ModePicker from "#lib/components/composer/ModePicker.svelte";
   import FolderBrowserDialog from "#lib/components/fs/FolderBrowserDialog.svelte";
-  import NodeStatusBadge from "#lib/components/NodeStatusBadge.svelte";
-  import { encodeBytesToBase64 } from "#lib/base64.ts";
+  import { createComposerAttachments } from "#lib/composer-attachments.svelte.ts";
   import { orderedConfigOptions } from "#lib/config-options.ts";
-  import { getNodeAvailability } from "#lib/node-status.ts";
   import { saveSessionConfigOption, shouldSubmitOnEnter } from "#lib/session-prefs.ts";
   import { prefs } from "#lib/stores/prefs.svelte.ts";
   import { m } from "#lib/paraglide/messages.js";
   import type {
-    AttachmentMeta,
     NodeSummary,
     SessionControlAction,
     SessionStatus,
@@ -23,16 +20,17 @@
   import { sync } from "#lib/stores/app.svelte.ts";
   import { problems } from "#lib/stores/problems.svelte.ts";
   import type { SessionCapabilities } from "#lib/sync/reducer.ts";
+  import { getNodeAvailability } from "#lib/node-status.ts";
   import { toast } from "svelte-sonner";
   import AlertTriangleIcon from "@lucide/svelte/icons/alert-triangle";
   import BanIcon from "@lucide/svelte/icons/ban";
   import FileIcon from "@lucide/svelte/icons/file";
   import LoaderCircleIcon from "@lucide/svelte/icons/loader-circle";
   import Minimize2Icon from "@lucide/svelte/icons/minimize-2";
+  import MoreHorizontalIcon from "@lucide/svelte/icons/more-horizontal";
   import PaperclipIcon from "@lucide/svelte/icons/paperclip";
   import ShieldCheckIcon from "@lucide/svelte/icons/shield-check";
   import SlashIcon from "@lucide/svelte/icons/slash";
-  import SlidersHorizontalIcon from "@lucide/svelte/icons/sliders-horizontal";
   import XIcon from "@lucide/svelte/icons/x";
 
   let {
@@ -62,11 +60,12 @@
   let sending = $state(false);
   let controlBusy = $state(false);
   let resuming = $state(false);
-  let attachments = $state<AttachmentMeta[]>([]);
   let fileBrowserOpen = $state(false);
   let fileInput = $state<HTMLInputElement | null>(null);
   let autoApprove = $state(false);
-  const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
+
+  const composer = createComposerAttachments();
+  const attachments = $derived(composer.attachments);
 
   $effect(() => {
     autoApprove = permissionPolicy === "auto_allow_all";
@@ -105,26 +104,6 @@
 
   const nodeAvail = $derived(getNodeAvailability(node));
 
-  /** Mode selector choices (value = mode_id, label = the name reported by the agent). */
-  const modeItems = $derived(
-    (capabilities?.availableModes ?? []).map((mode) => ({
-      value: mode.mode_id,
-      label: mode.name.trim() === "" ? mode.mode_id : mode.name,
-      description: mode.description,
-    })),
-  );
-
-  /** Current mode (an ID that is not among the choices is treated as unselected). */
-  const currentMode = $derived(capabilities?.currentMode ?? null);
-  const selectedMode = $derived(
-    currentMode !== null && modeItems.some((item) => item.value === currentMode)
-      ? currentMode
-      : undefined,
-  );
-  const selectedModeLabel = $derived(
-    modeItems.find((item) => item.value === selectedMode)?.label ?? "",
-  );
-
   /** Agent config options (model / thought level / agent-specific), newest first. */
   const configOptions = $derived(orderedConfigOptions(capabilities?.configOptions ?? []));
 
@@ -145,6 +124,9 @@
     capabilities?.availableCommands.some((command) => command.name === "compact") ?? false,
   );
 
+  /** Keep the overflow menu visible only when it has at least one item. */
+  const hasMoreActions = $derived(node !== null || (canCompact && !isStopped));
+
   function applyCommand(name: string) {
     text = `/${name} `;
   }
@@ -160,91 +142,10 @@
     return isEnter ? m.chat_placeholder_idle_enter() : m.chat_placeholder_idle();
   });
 
-  /** Best-effort MIME type from a file name (mirrors the CLI helper). */
-  function guessMime(fileName: string): string {
-    const extension = fileName.split(".").pop()?.toLowerCase() ?? "";
-    switch (extension) {
-      case "png":
-        return "image/png";
-      case "jpg":
-      case "jpeg":
-        return "image/jpeg";
-      case "gif":
-        return "image/gif";
-      case "webp":
-        return "image/webp";
-      case "svg":
-        return "image/svg+xml";
-      case "pdf":
-        return "application/pdf";
-      case "json":
-        return "application/json";
-      case "md":
-        return "text/markdown";
-      case "txt":
-      case "log":
-        return "text/plain";
-      default:
-        return "application/octet-stream";
-    }
-  }
-
-  async function addImageFiles(files: FileList | File[]) {
-    for (const file of Array.from(files)) {
-      if (!file.type.startsWith("image/")) {
-        toast.error(m.chat_attachment_image_only());
-        continue;
-      }
-      if (file.size > MAX_ATTACHMENT_BYTES) {
-        toast.error(m.chat_attachment_too_large({ limit: MAX_ATTACHMENT_BYTES / (1024 * 1024) }));
-        continue;
-      }
-      const bytes = new Uint8Array(await file.arrayBuffer());
-      attachments.push({
-        file_name: file.name || "image",
-        mime_type: file.type || guessMime(file.name),
-        size_bytes: file.size,
-        local_path: null,
-        data_b64: encodeBytesToBase64(bytes),
-      });
-    }
-  }
-
-  function addLocalFile(path: string) {
-    const fileName = path.split(/[\\/]/).pop() ?? "attachment";
-    attachments.push({
-      file_name: fileName,
-      mime_type: guessMime(fileName),
-      size_bytes: 0,
-      local_path: path,
-      data_b64: null,
-    });
-  }
-
-  function removeAttachment(index: number) {
-    attachments = attachments.filter((_, current) => current !== index);
-  }
-
-  function onPaste(event: ClipboardEvent) {
-    const files = event.clipboardData?.files;
-    if (files && files.length > 0) {
-      event.preventDefault();
-      void addImageFiles(files);
-    }
-  }
-
-  function onDrop(event: DragEvent) {
-    event.preventDefault();
-    const files = event.dataTransfer?.files;
-    if (files && files.length > 0) {
-      void addImageFiles(files);
-    }
-  }
-
   function onFileInputChange(event: Event) {
     const files = (event.currentTarget as HTMLInputElement).files;
     if (files) {
-      void addImageFiles(files);
+      void composer.addImageFiles(files);
       (event.currentTarget as HTMLInputElement).value = "";
     }
   }
@@ -271,7 +172,7 @@
         return;
       }
       text = "";
-      attachments = [];
+      composer.clear();
       resumeRequired = false;
     } catch (error) {
       // Keep the composer text so the user can retry without retyping.
@@ -360,10 +261,6 @@
     await send();
   }
 </script>
-
-{#snippet modeIcon()}
-  <SlidersHorizontalIcon class="text-muted-foreground size-3.5" />
-{/snippet}
 
 <ComposerCard>
   {#snippet above()}
@@ -460,7 +357,7 @@
                 type="button"
                 class="text-muted-foreground hover:text-foreground"
                 title={m.chat_attachment_remove()}
-                onclick={() => removeAttachment(index)}
+                onclick={() => composer.remove(index)}
               >
                 <XIcon class="size-3.5" />
               </button>
@@ -471,7 +368,33 @@
     </div>
   {/snippet}
 
-  {#snippet toolbar()}
+  {#snippet selectors()}
+    {#if capabilities && capabilities.availableModes.length > 0}
+      <ModePicker
+        modes={capabilities.availableModes}
+        value={capabilities.currentMode}
+        class="shrink-0"
+        onchange={(modeId) => {
+          if (modeId !== null) void runControl({ action: "set_mode", mode_id: modeId });
+        }}
+      />
+    {/if}
+
+    {#each configOptions as option (option.key)}
+      <ConfigOptionPicker
+        {option}
+        class="shrink-0"
+        onchange={(value) =>
+          void runControl({
+            action: "set_config",
+            key: option.key,
+            value,
+          })}
+      />
+    {/each}
+  {/snippet}
+
+  {#snippet actions()}
     <input
       bind:this={fileInput}
       type="file"
@@ -481,132 +404,88 @@
       aria-label={m.chat_attach_image()}
       onchange={onFileInputChange}
     />
-    <div class="flex flex-wrap items-center gap-1 min-w-0">
-      <Button
-        variant="ghost"
-        size="icon-sm"
-        class="rounded-full"
-        title={m.chat_attach_image()}
-        aria-label={m.chat_attach_image()}
-        onclick={() => fileInput?.click()}
-      >
-        <PaperclipIcon class="size-4" />
-      </Button>
-      {#if node}
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          class="rounded-full"
-          title={m.chat_attach_file()}
-          aria-label={m.chat_attach_file()}
-          onclick={() => (fileBrowserOpen = true)}
+    <Button
+      variant="ghost"
+      size="icon-sm"
+      class="rounded-full"
+      title={m.chat_attach_image()}
+      aria-label={m.chat_attach_image()}
+      onclick={() => fileInput?.click()}
+    >
+      <PaperclipIcon class="size-4" />
+    </Button>
+    {#if !sync.wsConnected}
+      <span class="text-danger text-[11px]">{m.chat_connection_lost()}</span>
+    {/if}
+    <Button
+      variant="outline"
+      size="sm"
+      class={`h-7 rounded-full px-2 text-xs gap-1 ${
+        autoApprove ? "border-signal/40 bg-signal-soft text-signal hover:bg-signal-soft" : ""
+      }`}
+      disabled={controlBusy || sending}
+      title={m.chat_auto_approve_title()}
+      aria-label={m.chat_auto_approve_title()}
+      onclick={() => void toggleAutoApprove()}
+    >
+      <ShieldCheckIcon class="size-3.5" />
+      <span class="hidden sm:inline">{m.chat_auto_approve()}</span>
+    </Button>
+    {#if hasMoreActions}
+      <DropdownMenu.Root>
+        <DropdownMenu.Trigger
+          class="text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:ring-ring/40 inline-flex size-7 shrink-0 items-center justify-center rounded-full outline-none transition-colors focus-visible:ring-2"
+          title={m.composer_more_options()}
+          aria-label={m.composer_more_options()}
         >
-          <FileIcon class="size-4" />
-        </Button>
-      {/if}
-      {#if node}
-        <NodeStatusBadge
-          {node}
-          showNodeName={true}
-          showLabel={false}
-          class="hidden shrink-0 sm:inline-flex"
-        />
-      {/if}
-      {#if capabilities && capabilities.availableModes.length > 0}
-        <PickerPill
-          label={m.chat_mode_label()}
-          value={selectedModeLabel}
-          icon={modeIcon}
-          contentClass="w-[min(20rem,calc(100vw-1.5rem))]"
-        >
-          <div class="max-h-72 overflow-y-auto p-1">
-            {#each modeItems as item (item.value)}
-              <PickerItem
-                selected={item.value === selectedMode}
-                onselect={() => void runControl({ action: "set_mode", mode_id: item.value })}
-              >
-                <span class="block truncate">{item.label}</span>
-                {#if item.description}
-                  <span class="text-muted-foreground block truncate text-[11px]">
-                    {item.description}
-                  </span>
-                {/if}
-              </PickerItem>
-            {/each}
-          </div>
-        </PickerPill>
-      {/if}
-
-      {#each configOptions as option (option.key)}
-        <ConfigOptionPicker
-          {option}
-          onchange={(value) =>
-            void runControl({
-              action: "set_config",
-              key: option.key,
-              value,
-            })}
-        />
-      {/each}
-    </div>
-
-    <div class="ml-auto flex shrink-0 items-center gap-1">
-      {#if !sync.wsConnected}
-        <span class="text-danger text-[11px]">{m.chat_connection_lost()}</span>
-      {/if}
+          <MoreHorizontalIcon class="size-4" />
+        </DropdownMenu.Trigger>
+        <DropdownMenu.Content align="end" class="w-52">
+          {#if node}
+            <DropdownMenu.Item onSelect={() => (fileBrowserOpen = true)}>
+              <FileIcon />
+              {m.chat_attach_file()}
+            </DropdownMenu.Item>
+          {/if}
+          {#if canCompact && !isStopped}
+            <DropdownMenu.Item
+              disabled={controlBusy || sending}
+              title={m.chat_compact_title()}
+              onSelect={() => void requestCompact()}
+            >
+              <Minimize2Icon />
+              {m.chat_compact()}
+            </DropdownMenu.Item>
+          {/if}
+        </DropdownMenu.Content>
+      </DropdownMenu.Root>
+    {/if}
+    {#if isRunning}
       <Button
-        variant="outline"
+        variant="destructive"
         size="sm"
-        class={`h-7 rounded-full px-2 text-xs gap-1 ${
-          autoApprove ? "border-signal/40 bg-signal-soft text-signal hover:bg-signal-soft" : ""
-        }`}
-        disabled={controlBusy || sending}
-        title={m.chat_auto_approve_title()}
-        onclick={() => void toggleAutoApprove()}
+        class="h-7 rounded-full px-2.5 text-xs"
+        disabled={controlBusy}
+        title={m.chat_stop_title()}
+        onclick={() => void runControl({ action: "cancel" })}
       >
-        <ShieldCheckIcon class="size-3.5" />
-        <span class="hidden sm:inline">{m.chat_auto_approve()}</span>
+        <BanIcon class="size-3.5" />
+        {controlBusy ? m.chat_stopping() : m.chat_stop()}
       </Button>
-      {#if canCompact && !isStopped}
-        <Button
-          variant="ghost"
-          size="sm"
-          class="h-7 rounded-full px-2 text-xs"
-          disabled={controlBusy || sending}
-          title={m.chat_compact_title()}
-          onclick={() => void requestCompact()}
-        >
-          <Minimize2Icon class="size-3.5" />
-          <span class="hidden sm:inline">{m.chat_compact()}</span>
-        </Button>
-      {/if}
-      {#if isRunning}
-        <Button
-          variant="destructive"
-          size="sm"
-          class="h-7 rounded-full px-2.5 text-xs"
-          disabled={controlBusy}
-          title={m.chat_stop_title()}
-          onclick={() => void runControl({ action: "cancel" })}
-        >
-          <BanIcon class="size-3.5" />
-          {controlBusy ? m.chat_stopping() : m.chat_stop()}
-        </Button>
-      {/if}
-      <ComposerSendButton
-        busy={sending}
-        disabled={sending || (text.trim() === "" && attachments.length === 0)}
-        title={sending ? m.chat_sending() : isRunning ? m.chat_queue() : m.chat_send()}
-        onclick={() => void send()}
-      />
-    </div>
+    {/if}
+    <ComposerSendButton
+      busy={sending}
+      disabled={sending || (text.trim() === "" && attachments.length === 0)}
+      title={sending ? m.chat_sending() : isRunning ? m.chat_queue() : m.chat_send()}
+      onclick={() => void send()}
+    />
   {/snippet}
 
   <ComposerTextarea
     bind:value={text}
     onkeydown={onKeydown}
-    onpaste={onPaste}
-    ondrop={onDrop}
+    onpaste={composer.onPaste}
+    ondrop={composer.onDrop}
     rows={3}
     placeholder={placeholderText}
     ariaLabel={m.chat_input_label()}
@@ -619,5 +498,5 @@
   nodeId={node?.node_id ?? ""}
   files={true}
   title={m.chat_attach_file()}
-  onSelect={addLocalFile}
+  onSelect={composer.addLocalFile}
 />

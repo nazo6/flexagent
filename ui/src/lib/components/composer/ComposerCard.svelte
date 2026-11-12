@@ -4,14 +4,22 @@
 
   let {
     above = undefined,
-    toolbar = undefined,
+    selectors = undefined,
+    actions = undefined,
     class: className = "",
     children,
   }: {
     /** Content above the input (for example workspace pills or notices). */
     above?: Snippet;
-    /** Content below the input, separated by a border (selectors and actions). */
-    toolbar?: Snippet;
+    /**
+     * Selectors below the input (agent / mode / model / other options).
+     *
+     * The row scrolls horizontally instead of wrapping, so the action cluster
+     * on the right never moves.
+     */
+    selectors?: Snippet;
+    /** Actions below the input, pinned to the right and never wrapped. */
+    actions?: Snippet;
     class?: string;
     /** The input area (usually a `ComposerTextarea`). */
     children?: Snippet;
@@ -28,11 +36,21 @@
     {@render above()}
   {/if}
   {@render children?.()}
-  {#if toolbar}
-    <div
-      class="border-border flex flex-wrap items-center justify-between gap-x-1.5 gap-y-2 border-t px-0.5 pt-1.5"
-    >
-      {@render toolbar()}
+  {#if selectors || actions}
+    <div class="border-border flex items-center gap-1.5 border-t px-0.5 pt-1.5">
+      <div class="relative min-w-0 flex-1">
+        <div
+          class="flex items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        >
+          {@render selectors?.()}
+        </div>
+        <div
+          class="from-card pointer-events-none absolute inset-y-0 right-0 w-8 bg-gradient-to-l to-transparent"
+        ></div>
+      </div>
+      <div class="flex shrink-0 items-center gap-1">
+        {@render actions?.()}
+      </div>
     </div>
   {/if}
 </div>

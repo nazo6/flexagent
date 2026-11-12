@@ -22,6 +22,7 @@
     showRefresh = false,
     onrefresh,
     disabled = false,
+    class: className = "",
   }: {
     option: ConfigOptionInfo;
     /** Controlled value; when omitted, the option's current value is used. */
@@ -30,6 +31,7 @@
     showRefresh?: boolean;
     onrefresh?: () => void;
     disabled?: boolean;
+    class?: string;
   } = $props();
 
   let open = $state(false);
@@ -76,6 +78,7 @@
   {disabled}
   showLabel={!isModelOption(option)}
   bind:open
+  class={className}
   contentClass="w-[min(20rem,calc(100vw-1.5rem))] p-0"
 >
   <div class="flex flex-col">

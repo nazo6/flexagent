@@ -5,14 +5,17 @@
   import * as Dialog from "#lib/components/ui/dialog/index.ts";
   import { Button } from "#lib/components/ui/button/index.ts";
   import { Input } from "#lib/components/ui/input/index.ts";
+  import { Label } from "#lib/components/ui/label/index.ts";
   import FolderBrowserDialog from "#lib/components/fs/FolderBrowserDialog.svelte";
   import ComposerCard from "#lib/components/composer/ComposerCard.svelte";
+  import ComposerMoreButton from "#lib/components/composer/ComposerMoreButton.svelte";
   import ComposerSendButton from "#lib/components/composer/ComposerSendButton.svelte";
   import ComposerTextarea from "#lib/components/composer/ComposerTextarea.svelte";
   import ConfigOptionPicker from "#lib/components/composer/ConfigOptionPicker.svelte";
+  import ModePicker from "#lib/components/composer/ModePicker.svelte";
   import PickerItem from "#lib/components/composer/PickerItem.svelte";
   import PickerPill from "#lib/components/composer/PickerPill.svelte";
-  import SessionSettingsDialog from "./SessionSettingsDialog.svelte";
+  import { createComposerAttachments } from "#lib/composer-attachments.svelte.ts";
   import { agentHint, agentsAvailableOn } from "#lib/agents.ts";
   import type {
     AgentCapabilitiesPreview,
@@ -53,11 +56,12 @@
   import AlertCircleIcon from "@lucide/svelte/icons/alert-circle";
   import BoxIcon from "@lucide/svelte/icons/box";
   import CheckCircle2Icon from "@lucide/svelte/icons/check-circle-2";
+  import FileIcon from "@lucide/svelte/icons/file";
   import FolderGit2Icon from "@lucide/svelte/icons/folder-git-2";
   import GitBranchIcon from "@lucide/svelte/icons/git-branch";
   import GitForkIcon from "@lucide/svelte/icons/git-fork";
   import LoaderCircleIcon from "@lucide/svelte/icons/loader-circle";
-  import Settings2Icon from "@lucide/svelte/icons/settings-2";
+  import PaperclipIcon from "@lucide/svelte/icons/paperclip";
   import SparklesIcon from "@lucide/svelte/icons/sparkles";
   import ServerIcon from "@lucide/svelte/icons/server";
   import XCircleIcon from "@lucide/svelte/icons/x-circle";
@@ -87,15 +91,20 @@
   let baseBranch = $state("");
   let promptText = $state("");
   let busy = $state(false);
-  let showSettings = $state(false);
   let browserOpen = $state(false);
+  let fileBrowserOpen = $state(false);
+  let fileInput = $state<HTMLInputElement | null>(null);
   let useCustomPath = $state(false);
+
+  const composer = createComposerAttachments();
+  const attachments = $derived(composer.attachments);
 
   // Picker popovers
   let projectOpen = $state(false);
   let directoryOpen = $state(false);
   let environmentOpen = $state(false);
   let agentOpen = $state(false);
+  let moreOpen = $state(false);
 
   // Default resolution control: track the first application of URL params and node selection
   let nodeTouched = $state(false);
@@ -649,6 +658,7 @@
 
   async function runProvisionerTest(name: string) {
     if (testBusy || !name) return;
+    environmentOpen = false;
     testBusy = true;
     testResult = null;
     testDialogOpen = true;
@@ -706,9 +716,12 @@
               }
             : null,
         agent_id: effectiveAgent,
-        initial_prompt: promptToSend === "" ? null : { text: promptToSend, attachments: [] },
+        initial_prompt:
+          promptToSend === "" && attachments.length === 0
+            ? null
+            : { text: promptToSend, attachments: [...attachments] },
         initial_config: initialConfig(),
-        mode: sessionMode === "default" ? null : sessionMode,
+        mode: isProvisionerMode || sessionMode === "default" ? null : sessionMode,
         extra_args: extraArgs,
         fork: forkSessionId
           ? {
@@ -725,6 +738,7 @@
             : m.new_session_started(),
       );
       await sync.refreshSessions();
+      composer.clear();
       await goto(`/sessions/${response.session_id}`);
     } catch (error) {
       // The form state (including the prompt) is intentionally kept so the
@@ -801,7 +815,7 @@
   function selectProvisioner(name: string): void {
     runTarget = "provisioner";
     provisionerName = name;
-    environmentOpen = false;
+    // Keep the popover open: it also hosts the clone branch and connectivity test.
   }
 
   function selectAgent(id: string): void {
@@ -837,6 +851,18 @@
   function openFolderBrowser(): void {
     directoryOpen = false;
     browserOpen = true;
+  }
+
+  function openFileBrowser(): void {
+    fileBrowserOpen = true;
+  }
+
+  function onFileInputChange(event: Event): void {
+    const files = (event.currentTarget as HTMLInputElement).files;
+    if (files) {
+      void composer.addImageFiles(files);
+      (event.currentTarget as HTMLInputElement).value = "";
+    }
   }
 </script>
 
@@ -1018,6 +1044,12 @@
                     >{m.new_session_new_worktree()}</span
                   >
                   <Input bind:value={branch} placeholder="feat/new-task" class="h-8 text-[13px]" />
+                </div>
+                <div class="flex flex-col gap-1">
+                  <span class="text-muted-foreground text-[11px]"
+                    >{m.new_session_base_branch()}</span
+                  >
+                  <Input bind:value={baseBranch} placeholder="main" class="h-8 text-[13px]" />
                 </div>
                 <p class="text-muted-foreground text-[11px]">
                   {m.new_session_worktree_description()}
@@ -1215,31 +1247,104 @@
                     {m.new_session_provisioner_config_hint()}
                   </p>
                 {/if}
+
+                {#if isProvisionerMode && selectedProvisioner !== null}
+                  <div class="mt-2 flex flex-col gap-2 border-t px-2 pt-2">
+                    <div class="flex flex-col gap-1">
+                      <span class="text-muted-foreground text-[11px]">
+                        {m.new_session_clone_branch()}
+                      </span>
+                      <Input
+                        bind:value={branch}
+                        placeholder={m.new_session_clone_branch_placeholder()}
+                        class="h-8 text-[13px]"
+                      />
+                    </div>
+                    <div class="flex items-center justify-between gap-2">
+                      <span class="text-muted-foreground min-w-0 truncate text-[11px]">
+                        {selectedProvisioner.name}
+                      </span>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        class="h-7 shrink-0 px-2 text-[13px]"
+                        disabled={testBusy}
+                        title={m.new_session_provisioner_test_button_title()}
+                        onclick={() => void runProvisionerTest(provisionerName)}
+                      >
+                        {m.new_session_test()}
+                      </Button>
+                    </div>
+                  </div>
+                {/if}
               </div>
             </div>
           </PickerPill>
+
+          {#if attachments.length > 0}
+            <div class="flex w-full flex-wrap gap-2 pt-1">
+              {#each attachments as attachment, index (index)}
+                <div
+                  class="bg-chip border-border flex items-center gap-1.5 rounded-md border px-2 py-1 text-[13px]"
+                >
+                  {#if attachment.data_b64}
+                    <img
+                      src={`data:${attachment.mime_type};base64,${attachment.data_b64}`}
+                      alt={attachment.file_name}
+                      class="size-8 rounded object-cover"
+                    />
+                  {:else}
+                    <FileIcon class="text-muted-foreground size-3.5" />
+                  {/if}
+                  <span class="max-w-40 truncate">{attachment.file_name}</span>
+                  <button
+                    type="button"
+                    class="text-muted-foreground hover:text-foreground"
+                    title={m.chat_attachment_remove()}
+                    onclick={() => composer.remove(index)}
+                  >
+                    <XIcon class="size-3.5" />
+                  </button>
+                </div>
+              {/each}
+            </div>
+          {/if}
         </div>
       {/snippet}
 
       <ComposerTextarea
         bind:value={promptText}
         onkeydown={onKeydown}
+        onpaste={composer.onPaste}
+        ondrop={composer.onDrop}
         rows={3}
         placeholder={m.new_session_prompt_placeholder()}
         ariaLabel={m.new_session_prompt_label()}
         disabled={busy}
       />
 
-      {#snippet toolbar()}
+      {#snippet selectors()}
         <PickerPill
           label={m.new_session_agent()}
           value={agentLabel}
           icon={agentIcon}
+          class="shrink-0"
           contentClass="w-[min(20rem,calc(100vw-1.5rem))]"
           bind:open={agentOpen}
           disabled={forkSessionId !== ""}
         >
-          {#if catalogLoading}
+          {#if manualAgent}
+            <div class="flex flex-col gap-2 p-2">
+              <Input
+                bind:value={agentId}
+                oninput={onManualAgentInput}
+                placeholder={m.new_session_agent_id_placeholder()}
+                class="h-8 font-mono text-[13px]"
+                disabled={forkSessionId !== ""}
+              />
+              <p class="text-muted-foreground text-[11px]">{m.new_session_agent_choose_hint()}</p>
+            </div>
+          {:else if catalogLoading}
             <p class="text-muted-foreground flex items-center gap-1.5 px-2 py-2 text-[13px]">
               <LoaderCircleIcon class="size-3.5 animate-spin" />
               {m.common_loading()}
@@ -1279,6 +1384,14 @@
             </div>
           {/if}
           <div class="border-t p-1">
+            <button
+              type="button"
+              class="text-muted-foreground hover:bg-accent hover:text-accent-foreground block w-full rounded-md px-2 py-1.5 text-left text-[13px] disabled:pointer-events-none disabled:opacity-50"
+              disabled={forkSessionId !== ""}
+              onclick={() => (manualAgent = !manualAgent)}
+            >
+              {manualAgent ? m.new_session_choose_from_list() : m.new_session_enter_id()}
+            </button>
             <a
               href="/settings?tab=agents"
               class="text-muted-foreground hover:bg-accent hover:text-accent-foreground block rounded-md px-2 py-1.5 text-[13px]"
@@ -1288,11 +1401,29 @@
           </div>
         </PickerPill>
 
+        {#if !isProvisionerMode}
+          {#if probeKey !== "" && (capabilitiesLoading || capabilitiesKey !== probeKey)}
+            <ModePicker modes={[]} loading class="shrink-0" onchange={() => {}} />
+          {:else if availableModes !== null && availableModes.length > 0}
+            <ModePicker
+              modes={availableModes}
+              value={sessionMode === "default" ? null : sessionMode}
+              allowDefault
+              class="shrink-0"
+              onchange={(modeId) => {
+                sessionMode = modeId ?? "default";
+                onSessionModeChange();
+              }}
+            />
+          {/if}
+        {/if}
+
         {#if isProvisionerMode}
           <PickerPill
             label={m.new_session_model()}
             value={m.new_session_models_after_start()}
             icon={modelIcon}
+            class="shrink-0"
             disabled
           />
         {:else if probeKey !== "" && (capabilitiesLoading || capabilitiesKey !== probeKey)}
@@ -1300,6 +1431,7 @@
             label={m.new_session_model()}
             value={m.new_session_models_loading()}
             icon={modelIcon}
+            class="shrink-0"
             loading
             disabled
           />
@@ -1308,6 +1440,7 @@
             <ConfigOptionPicker
               {option}
               value={selectedConfigValues[option.key]}
+              class="shrink-0"
               onchange={(value) => changeConfigOption(option.key, value)}
               showRefresh={isModelOption(option)}
               onrefresh={() => void loadAgentCapabilities(true)}
@@ -1318,6 +1451,7 @@
             label={m.new_session_model()}
             value={m.new_session_model_default()}
             icon={modelIcon}
+            class="shrink-0"
             contentClass="w-72 p-0"
           >
             <div class="flex flex-col gap-2 p-2 text-[13px]">
@@ -1338,6 +1472,7 @@
             label={m.new_session_model()}
             value={m.new_session_model_default()}
             icon={modelIcon}
+            class="shrink-0"
             contentClass="w-72 p-2"
           >
             <p class="text-muted-foreground text-[13px]">{m.new_session_models_empty()}</p>
@@ -1347,22 +1482,67 @@
             label={m.new_session_model()}
             value={m.new_session_model_default()}
             icon={modelIcon}
+            class="shrink-0"
             disabled
           />
         {/if}
+      {/snippet}
 
-        <span class="flex-1"></span>
-
+      {#snippet actions()}
+        <input
+          bind:this={fileInput}
+          type="file"
+          accept="image/*"
+          multiple
+          class="hidden"
+          aria-label={m.chat_attach_image()}
+          onchange={onFileInputChange}
+        />
         <Button
           variant="ghost"
           size="icon-sm"
-          class="text-muted-foreground hover:text-foreground rounded-full"
-          title={m.new_session_settings_title()}
-          aria-label={m.new_session_settings_title()}
-          onclick={() => (showSettings = true)}
+          class="rounded-full"
+          title={m.chat_attach_image()}
+          aria-label={m.chat_attach_image()}
+          onclick={() => fileInput?.click()}
         >
-          <Settings2Icon class="size-4" />
+          <PaperclipIcon class="size-4" />
         </Button>
+
+        <ComposerMoreButton
+          label={m.composer_more_options()}
+          active={extraArgsText.trim() !== ""}
+          bind:open={moreOpen}
+          contentClass="w-[min(20rem,calc(100vw-2rem))]"
+        >
+          <div class="flex flex-col gap-2 p-2">
+            {#if !isProvisionerMode && nodeId !== ""}
+              <button
+                type="button"
+                class="hover:bg-accent flex items-center gap-2 rounded-md px-1.5 py-1.5 text-left text-[13px]"
+                onclick={() => {
+                  moreOpen = false;
+                  openFileBrowser();
+                }}
+              >
+                <FileIcon class="text-muted-foreground size-4" />
+                {m.chat_attach_file()}
+              </button>
+              <div class="border-t"></div>
+            {/if}
+            <div class="flex flex-col gap-1">
+              <Label for="new-session-extra-args" class="text-muted-foreground text-[11px]">
+                {m.new_session_extra_args()}
+              </Label>
+              <Input
+                id="new-session-extra-args"
+                bind:value={extraArgsText}
+                placeholder={m.new_session_extra_args_placeholder()}
+                class="h-8 font-mono text-[13px]"
+              />
+            </div>
+          </div>
+        </ComposerMoreButton>
 
         <ComposerSendButton
           {busy}
@@ -1403,23 +1583,12 @@
   }}
 />
 
-<SessionSettingsDialog
-  bind:open={showSettings}
-  bind:pathMode
-  bind:branch
-  bind:baseBranch
-  bind:sessionMode
-  bind:extraArgsText
-  bind:manualAgent
-  bind:agentId
-  {isProvisionerMode}
-  modes={availableModes ?? []}
-  forkActive={forkSessionId !== ""}
-  {provisionerName}
-  {testBusy}
-  onTest={() => void runProvisionerTest(provisionerName)}
-  onModeChange={onSessionModeChange}
-  onAgentIdInput={onManualAgentInput}
+<FolderBrowserDialog
+  bind:open={fileBrowserOpen}
+  {nodeId}
+  files={true}
+  title={m.chat_attach_file()}
+  onSelect={composer.addLocalFile}
 />
 
 <Dialog.Root bind:open={testDialogOpen}>
