@@ -44,9 +44,10 @@ impl AgentDriver for ExtendedAcpDriver {
 
     async fn start_session(
         &self,
-        req: StartSessionRequest,
+        mut req: StartSessionRequest,
         event_tx: mpsc::UnboundedSender<DriverEvent>,
     ) -> anyhow::Result<StartedSession> {
+        req.acp_parser = self.extension.notification_parser();
         let session_id = req.session_id.clone();
         let agent_id = req.launch.agent_id.clone();
         let cwd = req.cwd.clone();
@@ -279,6 +280,7 @@ mod tests {
             program: Some(PathBuf::from("demo")),
             args: Vec::new(),
             env: Vec::new(),
+            acp: Default::default(),
         }
     }
 
@@ -293,6 +295,7 @@ mod tests {
             resume: None,
             fork_from: None,
             initial_config: Vec::new(),
+            acp_parser: None,
         }
     }
 

@@ -5,6 +5,8 @@
   import * as AlertDialog from "#lib/components/ui/alert-dialog/index.ts";
   import ProvisioningLogCard from "#lib/components/ProvisioningLogCard.svelte";
   import ChatTimeline from "#lib/components/chat/ChatTimeline.svelte";
+  import SubagentDetail from "#lib/components/chat/SubagentDetail.svelte";
+  import { groupTimelineItems } from "#lib/chat-groups.ts";
   import Composer from "#lib/components/chat/Composer.svelte";
   import DiffPane from "#lib/components/diff/DiffPane.svelte";
   import NodeStatusBadge from "#lib/components/NodeStatusBadge.svelte";
@@ -61,6 +63,8 @@
       events: timeline.events,
       messageDeltas: timeline.messageDeltas,
       thoughtDeltas: timeline.thoughtDeltas,
+      subagentByMessage: timeline.subagentByMessage,
+      subagentByThought: timeline.subagentByThought,
       toolProgress: timeline.toolProgress,
       terminalDeltas: timeline.terminalDeltas,
       streamKeys: timeline.streamKeys,
@@ -76,6 +80,16 @@
     const persisted = provisioningLogLines(timeline.events);
     const live = sync.provisioningLinesFor(sessionId);
     return live.length === 0 ? persisted : [...new Set([...persisted, ...live])];
+  });
+
+  let selectedSubagentId = $state<string | null>(null);
+  const selectedSubagent = $derived.by(() => {
+    if (!selectedSubagentId) return null;
+    const group = groupTimelineItems(items).find(
+      (candidate) =>
+        candidate.kind === "subagent" && candidate.subagent.childSessionId === selectedSubagentId,
+    );
+    return group?.kind === "subagent" ? group : null;
   });
 
   let chatContainer = $state<HTMLDivElement | null>(null);
@@ -143,6 +157,7 @@
     sync.setActiveSession(id);
     if (loadedFor !== id) {
       loadedFor = id;
+      selectedSubagentId = null;
       const target = sync.timelineFor(id);
       if (target.events.length === 0) {
         sync.loadSessionEvents(id).catch(() => {
@@ -577,9 +592,24 @@
         >
           <div class="mx-auto flex max-w-[760px] flex-col gap-4">
             <ProvisioningLogCard lines={provisioningLines} />
-            <ChatTimeline {sessionId} {items} status={currentStatus} />
+            <ChatTimeline
+              {sessionId}
+              {items}
+              status={currentStatus}
+              onsubagent={(childSessionId) => (selectedSubagentId = childSessionId)}
+            />
           </div>
         </div>
+
+        {#if selectedSubagent}
+          <SubagentDetail
+            {sessionId}
+            subagent={selectedSubagent.subagent}
+            items={selectedSubagent.items}
+            status={currentStatus}
+            onclose={() => (selectedSubagentId = null)}
+          />
+        {/if}
 
         <!-- Jump to bottom button -->
         {#if showScrollBottom}

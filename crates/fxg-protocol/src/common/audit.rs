@@ -49,6 +49,10 @@ crate::open_string_enum! {
         ProvisioningLog => "provisioning_log",
         /// Usage updated
         UsageUpdated => "usage_updated",
+        /// Subagent announced or updated
+        SubagentUpdated => "subagent_updated",
+        /// Message exchanged with a subagent
+        SubagentMessage => "subagent_message",
         /// Turn ended
         TurnEnded => "turn_ended",
         /// Compaction updated

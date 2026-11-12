@@ -63,6 +63,8 @@ Client ⇔ Hub / Local Node（HTTP / WebSocket）で共有する型を定義し�
 | `CapabilitiesUpdated`                        | モード・コマンド・設定。`sessions.current_mode` などの投影。  |
 | `ProvisioningLog`                            | 一時VMのプロビジョニングログ。                                |
 | `UsageUpdated`                               | コンテキスト使用量・コスト。`sessions.usage_json`（最新値）。 |
+| `SubagentUpdated`                            | 子セッションの作成・状態更新。`sessions` 行は作らない。       |
+| `SubagentMessage`                            | 親子間メッセージ。送信元 / 宛先で方向を保持する。             |
 | `TurnEnded`                                  | 正常終了以外のターン終了理由。                                |
 | `CompactionUpdated`                          | コンテキスト圧縮の進行状況。                                  |
 | `StatusChanged`                              | セッション状態。`sessions.status`。                           |
@@ -85,6 +87,46 @@ Client ⇔ Hub / Local Node（HTTP / WebSocket）で共有する型を定義し�
 `ErrorInfo` は `code` / `message` / `details` / `retryable` / `recovery` /
 `data_safety` / `request_id` を運びます。REST / WS のエラー本文は
 `{ "error": { "code", "message", ... } }` に統一します。
+
+### 1.6 サブエージェント (subagent) セッション
+
+サブエージェントは fxg の独立セッションではありません。親セッションの
+イベントストリームに、子セッション由来のイベントとしてタグ付きで混在させます。
+ACP 標準の subagents RFD と opencode の独自拡張（child session updates）は
+どちらも同じ正規化イベントへ変換し、UI は発生元を意識しません。
+
+不変条件:
+
+- `SubagentUpdated` は子セッションの作成・メタデータ更新・状態を表す。
+  同じ `child_session_id` への追記で更新し、最初のイベントは必ず子の
+  他のイベントより先に永続化される。
+- 子に由来する `AgentMessage` / `AgentThought` / `ToolCall` /
+  `PermissionRequest` / `ElicitationRequest` / `TerminalOutput` /
+  `PlanUpdate` / `UsageUpdated` は `subagent_id` を持つ。`subagent_id` の
+  ないイベントは親セッションのものとして扱う。
+- 子のイベントは親の `sessions` 投影（`status` / `usage_json` /
+  `current_mode` / `title`）を書き換えない。親の投影は `subagent_id` を
+  持たないイベントだけで更新する。
+- サブエージェントは `sessions` 行を持たず、`session/list` にも現れない。
+  親セッションをアーカイブ・削除したときは、子のイベントも同じログとして
+  扱う。
+- `SubagentMessage` は親子間のメッセージを表し、送信元・宛先の
+  `session_id` で方向を保持する。ストリーミング中は delta として配信し、
+  完成したイベントだけを永続化する（`AgentMessage` と同じ境界）。
+- 再接続・ハブ同期・リプレイは通常のイベント列と同じ経路を使う。UI は
+  `SubagentUpdated` と `subagent_id` から子のツリーとタイムラインを
+  再構築する。
+
+正規化の発生源:
+
+- ACP 標準の `subagents` RFD: 親セッション宛の `subagent_update`、
+  子セッション宛の `session/update`、`session_message` /
+  `session_message_chunk`。
+- opencode: `opencode/session/child_update` 拡張通知。
+
+どちらも `crates/fxg-acp/src/acp/mapping.rs` で同じイベントへ変換します。
+型の正は `crates/fxg-protocol/src/events.rs`、UI の型は生成済み
+`ui/src/lib/generated/bindings.ts` です。
 
 ---
 

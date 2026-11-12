@@ -140,6 +140,7 @@ impl Fixture {
                     },
                 ],
                 details: serde_json::json!({ "command": "cargo test --workspace" }).into(),
+                subagent_id: None,
             }),
             self.event(UnifiedEventPayload::PermissionResolved {
                 request_id: "req-1".to_owned(),
@@ -420,6 +421,7 @@ async fn usage_projection_tracks_latest_and_rebuilds() {
         used_tokens: 1_000,
         context_size: 100_000,
         cost: None,
+        subagent_id: None,
     });
     // The second update fully overwrites the first (keeps the latest, not cumulative)
     let second = fixture.event(UnifiedEventPayload::UsageUpdated {
@@ -429,6 +431,7 @@ async fn usage_projection_tracks_latest_and_rebuilds() {
             amount: 0.045,
             currency: "USD".to_owned(),
         }),
+        subagent_id: None,
     });
     fixture
         .db
@@ -474,6 +477,7 @@ async fn permission_rejection_is_projected_from_option_kind() {
             kind: PermissionOptionKind::RejectOnce,
         }],
         details: serde_json::json!({}).into(),
+        subagent_id: None,
     });
     fixture
         .db
@@ -519,6 +523,7 @@ async fn elicitation_projection_tracks_pending_and_resolved() {
         }))
         .expect("schema"),
         tool_call_id: Some("tool-1".to_owned()),
+        subagent_id: None,
     });
     fixture
         .db
@@ -768,11 +773,13 @@ async fn fts_search_matches_text_and_excludes_binary_events() {
         command: "cargo test".to_owned(),
         data_b64: "c2VjcmV0LXRva2VuLXZhbHVl".to_owned(), // "secret-token-value"
         exit_code: Some(0),
+        subagent_id: None,
     });
     let message = fixture.event(UnifiedEventPayload::AgentMessage {
         message_id: "m-1".to_owned(),
         text: "Fixed the OpenCode2Driver connection".to_owned(),
         is_complete: true,
+        subagent_id: None,
     });
     fixture
         .db
@@ -846,6 +853,7 @@ async fn fts_index_stays_in_sync_on_regenerate_and_delete() {
         message_id: "m-1".to_owned(),
         text: "Applied the migration".to_owned(),
         is_complete: true,
+        subagent_id: None,
     });
     fixture
         .db
@@ -1080,6 +1088,7 @@ async fn session_filters_and_plan_projection() {
             title: "Add tests".to_owned(),
             status: PlanEntryStatus::Pending,
         }],
+        subagent_id: None,
     });
     let stopped = fixture.event(UnifiedEventPayload::StatusChanged {
         status: SessionStatus::Stopped,
@@ -1529,6 +1538,7 @@ async fn non_persistable_events_are_rejected_on_batch_append() {
         message_id: "m1".to_owned(),
         text: "partial".to_owned(),
         is_complete: false,
+        subagent_id: None,
     });
 
     let err = fixture
@@ -1557,6 +1567,7 @@ async fn non_persistable_events_are_rejected_on_batch_append() {
         message_id: "m1".to_owned(),
         text: "complete".to_owned(),
         is_complete: true,
+        subagent_id: None,
     };
     fixture
         .db
@@ -1740,4 +1751,32 @@ async fn session_deleted_for_unknown_session_is_noop() {
     };
     let outcome = db.append_event(&envelope).await.expect("noop");
     assert!(!outcome.inserted);
+}
+
+#[tokio::test]
+async fn custom_agent_capabilities_roundtrip() {
+    use fxg_protocol::settings::{AgentAcpCapabilities, CustomAgentConfig};
+
+    let db = Db::open_in_memory(DbRole::Node).await.expect("open db");
+    db.upsert_custom_agent(
+        "mine",
+        &CustomAgentConfig {
+            command: "mine".to_owned(),
+            capabilities: AgentAcpCapabilities { subagents: false },
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("custom agent");
+
+    let agents = db.custom_agents().await.expect("agents");
+    assert!(!agents["mine"].capabilities.subagents);
+
+    // A definition written without the field still reads as the default.
+    sqlx::query(r#"UPDATE custom_agents SET capabilities_json = '{}' WHERE agent_id = 'mine'"#)
+        .execute(db.pool())
+        .await
+        .expect("rewrite capabilities");
+    let agents = db.custom_agents().await.expect("agents");
+    assert!(agents["mine"].capabilities.subagents);
 }

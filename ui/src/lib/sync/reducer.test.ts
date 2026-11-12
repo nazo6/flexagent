@@ -35,6 +35,8 @@ function emptySources(events: SessionEventEnvelope[] = []): TimelineSources & Mu
     events,
     messageDeltas: new Map(),
     thoughtDeltas: new Map(),
+    subagentByMessage: new Map(),
+    subagentByThought: new Map(),
     toolProgress: new Map(),
     terminalDeltas: new Map(),
     streamKeys: [],

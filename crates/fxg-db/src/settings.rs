@@ -12,9 +12,9 @@ use std::collections::BTreeMap;
 
 use fxg_protocol::SecretId;
 use fxg_protocol::settings::{
-    AgentSettings, CustomAgentConfig, CustomAgentOrigin, HubSettings, NodeSettings,
-    ProvisionerDefinition, SecretSummary, UpdateAgentSettingsRequest, UpdateHubSettingsRequest,
-    UpdateNodeSettingsRequest,
+    AgentAcpCapabilities, AgentSettings, CustomAgentConfig, CustomAgentOrigin, HubSettings,
+    NodeSettings, ProvisionerDefinition, SecretSummary, UpdateAgentSettingsRequest,
+    UpdateHubSettingsRequest, UpdateNodeSettingsRequest,
 };
 use fxg_protocol::util::now_ms;
 use sqlx::SqlitePool;
@@ -318,7 +318,7 @@ pub async fn list_custom_agents(
     let rows = sqlx::query!(
         r#"
         SELECT agent_id AS "agent_id!", name, command, args_json, env_json, env_secrets_json,
-               extension, description, icon, origin_json
+               extension, description, icon, origin_json, capabilities_json
           FROM custom_agents
          ORDER BY agent_id
         "#,
@@ -334,6 +334,7 @@ pub async fn list_custom_agents(
             Some(json) => Some(serde_json::from_str(&json)?),
             None => None,
         };
+        let capabilities: AgentAcpCapabilities = serde_json::from_str(&row.capabilities_json)?;
         agents.insert(
             row.agent_id,
             CustomAgentConfig {
@@ -346,6 +347,7 @@ pub async fn list_custom_agents(
                 description: row.description,
                 icon: row.icon,
                 origin,
+                capabilities,
             },
         );
     }
@@ -374,12 +376,13 @@ pub async fn upsert_custom_agent(
         Some(origin) => Some(serde_json::to_string(origin)?),
         None => None,
     };
+    let capabilities_json = serde_json::to_string(&config.capabilities)?;
     sqlx::query!(
         r#"
         INSERT INTO custom_agents
             (agent_id, name, command, args_json, env_json, env_secrets_json, extension,
-             description, icon, origin_json, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             description, icon, origin_json, capabilities_json, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(agent_id) DO UPDATE SET
             name = excluded.name,
             command = excluded.command,
@@ -390,6 +393,7 @@ pub async fn upsert_custom_agent(
             description = excluded.description,
             icon = excluded.icon,
             origin_json = excluded.origin_json,
+            capabilities_json = excluded.capabilities_json,
             updated_at = excluded.updated_at
         "#,
         agent_id,
@@ -402,6 +406,7 @@ pub async fn upsert_custom_agent(
         config.description,
         config.icon,
         origin_json,
+        capabilities_json,
         now_ms(),
     )
     .execute(pool)

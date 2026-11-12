@@ -9,12 +9,16 @@
 use std::sync::Arc;
 
 use super::opencode::{OpenCodeExtension, OpenCodeV2Extension};
-use super::provider::{AgentBackend, AgentDefinition, AgentProvider, LaunchPreset, StaticProvider};
+use super::provider::{AgentDefinition, AgentProvider, LaunchPreset, StaticProvider};
 
 /// OpenCode CLI (`opencode acp`) with the OpenCode extension.
 pub const OPENCODE: &str = "opencode";
 /// OpenCode V2 registry entry (`opencode acp`) with the OpenCode extension.
 pub const OPENCODE_V2: &str = "opencode-v2";
+/// Extension ID applied to [`OPENCODE`].
+pub const OPENCODE_EXTENSION: &str = "opencode";
+/// Extension ID applied to [`OPENCODE_V2`].
+pub const OPENCODE_V2_EXTENSION: &str = "opencode-v2";
 /// ACP-only Antigravity CLI (`agy acp`).
 pub const AGY: &str = "agy";
 /// ACP-only GitHub Copilot CLI (`copilot --acp`).
@@ -44,7 +48,7 @@ pub fn providers() -> Vec<Arc<dyn AgentProvider>> {
                     args: &["acp"],
                 }),
             )
-            .with_backend(AgentBackend::AcpExtended(Arc::new(OpenCodeExtension))),
+            .with_extension(OPENCODE_EXTENSION, Arc::new(OpenCodeExtension)),
         ),
         Arc::new(
             StaticProvider::new(
@@ -59,7 +63,7 @@ pub fn providers() -> Vec<Arc<dyn AgentProvider>> {
                     args: &["acp"],
                 }),
             )
-            .with_backend(AgentBackend::AcpExtended(Arc::new(OpenCodeV2Extension))),
+            .with_extension(OPENCODE_V2_EXTENSION, Arc::new(OpenCodeV2Extension)),
         ),
         acp_provider(
             AGY,

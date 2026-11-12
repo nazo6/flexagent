@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use super::terminal::*;
 use super::*;
 use agent_client_protocol::v1::schema::{SessionConfigSelectOption, SessionConfigSelectOptions};
@@ -323,107 +325,141 @@ pub(super) fn is_mode_option(option: &ConfigOptionInfo) -> bool {
         || (option.category.is_none() && option.key == "mode")
 }
 
-/// Accumulates streaming chunks and emits completion events when the stream changes.
+/// Accumulates streaming chunks per session scope (parent or subagent).
 ///
 /// Only completion events are persisted (docs/01 §2.3), and they consume a
 /// `node_seq` at the moment they are emitted. A stream must therefore be
 /// finalized as soon as the agent moves on to a different stream, otherwise the
-/// reasoning would be recorded after the answer it preceded.
+/// reasoning would be recorded after the answer it preceded. The scope is part
+/// of the key so concurrently running subagents do not finalize each other's
+/// streams.
 #[derive(Debug, Default)]
 pub(super) struct StreamingAccumulator {
-    pub(super) message: Option<(String, String)>,
-    pub(super) thought: Option<(String, String)>,
+    pub(super) messages: BTreeMap<Option<String>, (String, String)>,
+    pub(super) thoughts: BTreeMap<Option<String>, (String, String)>,
+    /// Sender / recipient of a session message, keyed by message ID (used to
+    /// attach direction to chunks that arrive after the upsert).
+    pub(super) session_messages: BTreeMap<String, (String, String)>,
 }
 
 impl StreamingAccumulator {
     pub(super) fn reset(&mut self) {
-        self.message = None;
-        self.thought = None;
+        self.messages.clear();
+        self.thoughts.clear();
+        self.session_messages.clear();
     }
 
-    pub(super) fn finish_message(&mut self) -> Option<UnifiedEventPayload> {
-        self.message
-            .take()
-            .map(|(message_id, text)| UnifiedEventPayload::AgentMessage {
+    pub(super) fn finish_message(
+        &mut self,
+        subagent_id: &Option<String>,
+    ) -> Option<UnifiedEventPayload> {
+        self.messages.remove(subagent_id).map(|(message_id, text)| {
+            UnifiedEventPayload::AgentMessage {
                 message_id,
                 text,
                 is_complete: true,
-            })
+                subagent_id: subagent_id.clone(),
+            }
+        })
     }
 
-    pub(super) fn finish_thought(&mut self) -> Option<UnifiedEventPayload> {
-        self.thought
-            .take()
-            .map(|(thought_id, text)| UnifiedEventPayload::AgentThought {
+    pub(super) fn finish_thought(
+        &mut self,
+        subagent_id: &Option<String>,
+    ) -> Option<UnifiedEventPayload> {
+        self.thoughts.remove(subagent_id).map(|(thought_id, text)| {
+            UnifiedEventPayload::AgentThought {
                 thought_id,
                 text,
                 is_complete: true,
-            })
+                subagent_id: subagent_id.clone(),
+            }
+        })
     }
 
-    /// Appends a message chunk. Returns the completion events for any stream that
-    /// ended before this message started (a thought, or a message with another ID).
+    /// Appends a message chunk. Returns completion events for streams that
+    /// ended before this message started within the same scope.
     pub(super) fn push_message(
         &mut self,
+        subagent_id: Option<String>,
         message_id: String,
         delta: &str,
     ) -> Vec<UnifiedEventPayload> {
         let mut out = Vec::new();
         // Reasoning always precedes the answer it belongs to.
-        out.extend(self.finish_thought());
+        out.extend(self.finish_thought(&subagent_id));
         if self
-            .message
-            .as_ref()
+            .messages
+            .get(&subagent_id)
             .is_some_and(|(id, _)| *id != message_id)
         {
-            out.extend(self.finish_message());
+            out.extend(self.finish_message(&subagent_id));
         }
-        match &mut self.message {
+        match self.messages.get_mut(&subagent_id) {
             Some((_, text)) => text.push_str(delta),
-            None => self.message = Some((message_id, delta.to_owned())),
+            None => {
+                self.messages
+                    .insert(subagent_id, (message_id, delta.to_owned()));
+            }
         }
         out
     }
 
-    /// Appends a thought chunk. Returns the completion events for any stream that
-    /// ended before this thought started (a message, or a thought with another ID).
+    /// Appends a thought chunk. Returns completion events for streams that
+    /// ended before this thought started within the same scope.
     pub(super) fn push_thought(
         &mut self,
+        subagent_id: Option<String>,
         thought_id: String,
         delta: &str,
     ) -> Vec<UnifiedEventPayload> {
         let mut out = Vec::new();
-        out.extend(self.finish_message());
+        out.extend(self.finish_message(&subagent_id));
         if self
-            .thought
-            .as_ref()
+            .thoughts
+            .get(&subagent_id)
             .is_some_and(|(id, _)| *id != thought_id)
         {
-            out.extend(self.finish_thought());
+            out.extend(self.finish_thought(&subagent_id));
         }
-        match &mut self.thought {
+        match self.thoughts.get_mut(&subagent_id) {
             Some((_, text)) => text.push_str(delta),
-            None => self.thought = Some((thought_id, delta.to_owned())),
+            None => {
+                self.thoughts
+                    .insert(subagent_id, (thought_id, delta.to_owned()));
+            }
         }
         out
     }
 
-    /// Takes the accumulated message / thought as completion events.
+    /// Takes every accumulated stream as completion events.
     pub(super) fn finish_all(&mut self) -> Vec<UnifiedEventPayload> {
         let mut out = Vec::new();
         // Defensive ordering: reasoning precedes the answer within a turn.
-        out.extend(self.finish_thought());
-        out.extend(self.finish_message());
+        let scopes: Vec<Option<String>> = self.thoughts.keys().cloned().collect();
+        for scope in scopes {
+            out.extend(self.finish_thought(&scope));
+        }
+        let scopes: Vec<Option<String>> = self.messages.keys().cloned().collect();
+        for scope in scopes {
+            out.extend(self.finish_message(&scope));
+        }
         out
     }
 }
 
 /// Converts a `session/update` notification into a list of [`DriverEvent`]s.
+///
+/// `subagent_id` is `None` for the root session and `Some(child)` for a child
+/// session. Child-originated events are tagged, and capability updates from a
+/// child never overwrite the parent's capabilities.
 pub(super) fn map_session_update(
     update: SessionUpdate,
+    subagent_id: Option<&str>,
     accumulator: &mut StreamingAccumulator,
     capabilities: &mut SessionCapabilitiesState,
 ) -> Vec<DriverEvent> {
+    let scope = subagent_id.map(str::to_owned);
     let mut events = Vec::new();
     match update {
         SessionUpdate::UserMessageChunk(_) => {
@@ -438,12 +474,13 @@ pub(super) fn map_session_update(
                 let message_id = message_id
                     .map(|id| id.to_string())
                     .unwrap_or_else(|| "acp-message".to_owned());
-                for finished in accumulator.push_message(message_id.clone(), &text) {
+                for finished in accumulator.push_message(scope.clone(), message_id.clone(), &text) {
                     events.push(DriverEvent::Event(finished));
                 }
                 events.push(DriverEvent::Delta(StreamDeltaPayload::AgentMessageDelta {
                     message_id,
                     text_delta: text,
+                    subagent_id: scope,
                 }));
             }
         }
@@ -456,20 +493,24 @@ pub(super) fn map_session_update(
                 let thought_id = message_id
                     .map(|id| id.to_string())
                     .unwrap_or_else(|| "acp-thought".to_owned());
-                for finished in accumulator.push_thought(thought_id.clone(), &text) {
+                for finished in accumulator.push_thought(scope.clone(), thought_id.clone(), &text) {
                     events.push(DriverEvent::Event(finished));
                 }
                 events.push(DriverEvent::Delta(StreamDeltaPayload::AgentThoughtDelta {
                     thought_id,
                     text_delta: text,
+                    subagent_id: scope,
                 }));
             }
         }
         SessionUpdate::ToolCall(tool_call) => {
-            events.push(DriverEvent::Event(tool_call_event(&tool_call)));
+            events.push(DriverEvent::Event(tool_call_event(&tool_call, subagent_id)));
         }
         SessionUpdate::ToolCallUpdate(update) => {
-            events.push(DriverEvent::Event(tool_call_update_event(&update)));
+            events.push(DriverEvent::Event(tool_call_update_event(
+                &update,
+                subagent_id,
+            )));
         }
         SessionUpdate::Plan(plan) => {
             let entries = plan
@@ -484,9 +525,14 @@ pub(super) fn map_session_update(
                 .collect();
             events.push(DriverEvent::Event(UnifiedEventPayload::PlanUpdate {
                 entries,
+                subagent_id: subagent_id.map(str::to_owned),
             }));
         }
         SessionUpdate::AvailableCommandsUpdate(update) => {
+            if subagent_id.is_some() {
+                tracing::trace!("ignoring child available_commands_update");
+                return events;
+            }
             let commands = update
                 .available_commands
                 .iter()
@@ -505,14 +551,27 @@ pub(super) fn map_session_update(
             events.push(DriverEvent::Event(capabilities.to_payload()));
         }
         SessionUpdate::CurrentModeUpdate(update) => {
+            if subagent_id.is_some() {
+                tracing::trace!("ignoring child current_mode_update");
+                return events;
+            }
             capabilities.current_mode = Some(update.current_mode_id.to_string());
             events.push(DriverEvent::Event(capabilities.to_payload()));
         }
         SessionUpdate::ConfigOptionUpdate(update) => {
+            if subagent_id.is_some() {
+                tracing::trace!("ignoring child config_option_update");
+                return events;
+            }
             capabilities.set_config_options(&update.config_options);
             events.push(DriverEvent::Event(capabilities.to_payload()));
         }
         SessionUpdate::SessionInfoUpdate(update) => {
+            // A child's title must not rename the parent session.
+            if subagent_id.is_some() {
+                tracing::trace!("ignoring child session_info_update");
+                return events;
+            }
             if let Some(title) = update.title.value() {
                 let trimmed = title.trim();
                 if !trimmed.is_empty() {
@@ -532,7 +591,60 @@ pub(super) fn map_session_update(
                     amount: cost.amount,
                     currency: cost.currency,
                 }),
+                subagent_id: subagent_id.map(str::to_owned),
             }));
+        }
+        SessionUpdate::SubagentUpdate(_) => {
+            // Announcements need the root/child state and are handled by the
+            // session loop (see `ChildSessions`).
+        }
+        SessionUpdate::SessionMessage(message) => {
+            let sender = message
+                .sender_session_id
+                .value()
+                .map(ToString::to_string)
+                .unwrap_or_default();
+            let recipient = message
+                .recipient_session_id
+                .value()
+                .map(ToString::to_string)
+                .unwrap_or_default();
+            let message_id = message.message_id.to_string();
+            let text = message
+                .content
+                .value()
+                .map(|content| content_text(content))
+                .unwrap_or_default();
+            if !text.is_empty() {
+                accumulator
+                    .session_messages
+                    .insert(message_id.clone(), (sender.clone(), recipient.clone()));
+                events.push(DriverEvent::Event(UnifiedEventPayload::SubagentMessage {
+                    message_id,
+                    sender_session_id: sender,
+                    recipient_session_id: recipient,
+                    text,
+                    is_complete: true,
+                }));
+            }
+        }
+        SessionUpdate::SessionMessageChunk(chunk) => {
+            let message_id = chunk.message_id.to_string();
+            let (sender, recipient) = accumulator
+                .session_messages
+                .get(&message_id)
+                .cloned()
+                .unwrap_or_default();
+            if let ContentBlock::Text(TextContent { text, .. }) = chunk.content {
+                events.push(DriverEvent::Delta(
+                    StreamDeltaPayload::SubagentMessageDelta {
+                        message_id,
+                        sender_session_id: sender,
+                        recipient_session_id: recipient,
+                        text_delta: text,
+                    },
+                ));
+            }
         }
         // `SessionUpdate` is #[non_exhaustive]
         other => {
@@ -542,10 +654,26 @@ pub(super) fn map_session_update(
     events
 }
 
+/// Joins the text blocks of an inter-session message.
+fn content_text(content: &[ContentBlock]) -> String {
+    content
+        .iter()
+        .filter_map(|block| match block {
+            ContentBlock::Text(TextContent { text, .. }) => Some(text.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 /// Converts an ACP `ToolCall` into a normalized event.
-pub(super) fn tool_call_event(tool_call: &ToolCall) -> UnifiedEventPayload {
+pub(super) fn tool_call_event(
+    tool_call: &ToolCall,
+    subagent_id: Option<&str>,
+) -> UnifiedEventPayload {
     let (diff, _, text_content) = tool_call_contents(&tool_call.content);
     UnifiedEventPayload::ToolCall {
+        subagent_id: subagent_id.map(str::to_owned),
         tool_call_id: tool_call.tool_call_id.to_string(),
         title: tool_call.title.clone(),
         kind: tool_kind(tool_call.kind),
@@ -565,7 +693,10 @@ pub(super) fn tool_call_event(tool_call: &ToolCall) -> UnifiedEventPayload {
 }
 
 /// Converts an ACP `ToolCallUpdate` into a normalized event (appended to the same `tool_call_id`).
-pub(super) fn tool_call_update_event(update: &ToolCallUpdate) -> UnifiedEventPayload {
+pub(super) fn tool_call_update_event(
+    update: &ToolCallUpdate,
+    subagent_id: Option<&str>,
+) -> UnifiedEventPayload {
     let fields = &update.fields;
     let (diff, locations, text_content) = fields
         .content
@@ -600,6 +731,7 @@ pub(super) fn tool_call_update_event(update: &ToolCallUpdate) -> UnifiedEventPay
             .as_ref()
             .map(|value| value.to_string())
             .or_else(|| (!text_content.is_empty()).then(|| text_content.join("\n"))),
+        subagent_id: subagent_id.map(str::to_owned),
     }
 }
 

@@ -47,8 +47,15 @@ impl AgentCatalog {
         let mut extensions = BTreeMap::new();
         let mut provider_map = BTreeMap::new();
         for provider in providers {
-            if let AgentBackend::AcpExtended(extension) = provider.backend() {
-                extensions.insert(provider.definition().id.clone(), extension);
+            let backend = provider.backend();
+            if let AgentBackend::AcpExtended(extension) = &backend {
+                // Providers declare their extension ID explicitly. The agent ID
+                // remains a fallback for test providers built directly from a
+                // backend.
+                let extension_id = provider
+                    .extension_id()
+                    .map_or_else(|| provider.definition().id.clone(), str::to_owned);
+                extensions.insert(extension_id, Arc::clone(extension));
             }
             provider_map.insert(provider.definition().id.clone(), provider);
         }
@@ -140,6 +147,8 @@ impl AgentCatalog {
                 description: definition.description.clone(),
                 sources,
                 custom: None,
+                extension: provider.extension_id().map(str::to_owned),
+                capabilities: fxg_protocol::settings::AgentAcpCapabilities::default(),
                 backend: backend.kind(),
                 icon: definition.icon.clone(),
             });
@@ -216,6 +225,7 @@ impl AgentCatalog {
             let Some(mut spec) = self.registry.custom_launch_spec(&id, extra_args)? else {
                 return Err(anyhow!("custom agent {id} disappeared while resolving"));
             };
+            let capabilities = custom.capabilities.clone();
             if let Some(extension_id) = custom.extension.as_deref() {
                 let extension = self.extension(extension_id).ok_or_else(|| {
                     anyhow!("custom agent {id} references an unknown extension: {extension_id}")
@@ -223,12 +233,14 @@ impl AgentCatalog {
                 spec.driver_kind = DriverKind::AcpExtended;
                 spec.extension = Some(extension_id.to_owned());
                 extension.prepare_launch(cwd, &mut spec)?;
+                spec.acp = extension.acp_options(&capabilities);
                 if custom.name.is_none()
                     && let Some(name) = extension.metadata().name
                 {
                     spec.display_name = name;
                 }
             }
+            Self::apply_capabilities(&mut spec, capabilities);
             return Ok(spec);
         }
 
@@ -251,16 +263,40 @@ impl AgentCatalog {
                 preset.program
             )
         })?;
+        let capabilities = fxg_protocol::settings::AgentAcpCapabilities::default();
         let mut spec = Self::preset_spec(provider.definition(), preset, program, extra_args);
         spec.driver_kind = Self::driver_kind(&backend);
         if let AgentBackend::AcpExtended(extension) = &backend {
-            spec.extension = Some(id.clone());
+            spec.extension = Some(
+                provider
+                    .extension_id()
+                    .map_or_else(|| id.clone(), str::to_owned),
+            );
             extension.prepare_launch(cwd, &mut spec)?;
+            spec.acp = extension.acp_options(&capabilities);
             if let Some(name) = extension.metadata().name {
                 spec.display_name = name;
             }
         }
+        Self::apply_capabilities(&mut spec, capabilities);
         Ok(spec)
+    }
+
+    /// Applies the per-agent ACP capability selection to a launch spec.
+    ///
+    /// Only capabilities the setting knows about are touched, so capabilities
+    /// contributed by an extension survive untouched.
+    fn apply_capabilities(
+        spec: &mut AgentLaunchSpec,
+        capabilities: fxg_protocol::settings::AgentAcpCapabilities,
+    ) {
+        use crate::agent::extension::AcpCapability;
+
+        if capabilities.subagents {
+            spec.acp.capabilities.insert(AcpCapability::Subagents);
+        } else {
+            spec.acp.capabilities.remove(&AcpCapability::Subagents);
+        }
     }
 
     /// Selects the driver for a resolved launch spec.
@@ -315,6 +351,7 @@ impl AgentCatalog {
             program: None,
             args: extra_args.to_vec(),
             env: Vec::new(),
+            acp: Default::default(),
         };
         if let Some(preset) = provider.launch_preset()
             && let Some(program) = (self.preset_lookup)(preset)
@@ -374,6 +411,7 @@ impl AgentCatalog {
             program: Some(program),
             args,
             env: Vec::new(),
+            acp: Default::default(),
         }
     }
 }
@@ -526,6 +564,177 @@ mod tests {
     }
 
     #[test]
+    fn per_agent_capabilities_apply_to_the_launch_spec() {
+        use crate::agent::extension::AcpCapability;
+        use fxg_protocol::settings::AgentAcpCapabilities;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let provider = StaticProvider::new(
+            AgentDefinition {
+                id: "demo".to_owned(),
+                name: "Demo".to_owned(),
+                description: None,
+                icon: None,
+            },
+            Some(LaunchPreset {
+                program: "demo",
+                args: &["acp"],
+            }),
+        );
+        let custom = BTreeMap::from([(
+            "demo".to_owned(),
+            CustomAgentConfig {
+                command: "demo".to_owned(),
+                capabilities: AgentAcpCapabilities { subagents: false },
+                ..Default::default()
+            },
+        )]);
+        let mut catalog = AgentCatalog::with_providers(
+            AcpRegistry::new(dir.path(), &settings(), custom),
+            vec![Arc::new(provider)],
+        );
+        catalog.preset_lookup = |_| Some(PathBuf::from("/fake/bin/demo"));
+
+        let spec = tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(catalog.launch_spec("demo", Path::new("."), &[]))
+            .expect("spec");
+        assert!(!spec.acp.capabilities.contains(&AcpCapability::Subagents));
+
+        let entry = catalog
+            .list()
+            .into_iter()
+            .find(|entry| entry.id == "demo")
+            .expect("demo entry");
+        assert!(!entry.capabilities.subagents);
+        assert_eq!(entry.extension, None);
+    }
+
+    #[test]
+    fn providers_declare_their_extension_id_explicitly() {
+        struct SharedExtension;
+
+        #[async_trait::async_trait]
+        impl AgentExtension for SharedExtension {}
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let provider = StaticProvider::new(
+            AgentDefinition {
+                id: "demo".to_owned(),
+                name: "Demo".to_owned(),
+                description: None,
+                icon: None,
+            },
+            Some(LaunchPreset {
+                program: "demo",
+                args: &["acp"],
+            }),
+        )
+        .with_extension("shared-extension", Arc::new(SharedExtension));
+        let mut catalog =
+            AgentCatalog::with_providers(registry(dir.path()), vec![Arc::new(provider)]);
+        catalog.preset_lookup = |_| Some(PathBuf::from("/fake/bin/demo"));
+
+        let spec = tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(catalog.launch_spec("demo", Path::new("."), &[]))
+            .expect("spec");
+        assert_eq!(spec.extension.as_deref(), Some("shared-extension"));
+        assert_eq!(spec.driver_kind, DriverKind::AcpExtended);
+        assert!(catalog.extension("shared-extension").is_some());
+
+        let entry = catalog
+            .list()
+            .into_iter()
+            .find(|entry| entry.id == "demo")
+            .expect("demo entry");
+        assert_eq!(entry.extension.as_deref(), Some("shared-extension"));
+    }
+
+    #[test]
+    fn subagents_toggle_gates_vendor_child_notifications() {
+        use crate::agent::extension::AcpCapability;
+        use crate::agent::opencode::OpenCodeExtension;
+        use fxg_protocol::settings::AgentAcpCapabilities;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let provider = StaticProvider::new(
+            AgentDefinition {
+                id: "opencode".to_owned(),
+                name: "OpenCode".to_owned(),
+                description: None,
+                icon: None,
+            },
+            Some(LaunchPreset {
+                program: "opencode",
+                args: &["acp"],
+            }),
+        )
+        .with_extension("opencode", Arc::new(OpenCodeExtension));
+        let on_custom = BTreeMap::from([(
+            "opencode".to_owned(),
+            CustomAgentConfig {
+                command: "opencode".to_owned(),
+                extension: Some("opencode".to_owned()),
+                capabilities: AgentAcpCapabilities { subagents: true },
+                ..Default::default()
+            },
+        )]);
+        let mut on = AgentCatalog::with_providers(
+            AcpRegistry::new(dir.path(), &settings(), on_custom),
+            vec![Arc::new(provider)],
+        );
+        on.preset_lookup = |_| Some(PathBuf::from("/fake/bin/opencode"));
+        let spec = tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(on.launch_spec("opencode", Path::new("."), &[]))
+            .expect("spec");
+        assert!(spec.acp.capabilities.contains(&AcpCapability::Subagents));
+        assert!(spec.acp.client_meta.is_some());
+        assert!(
+            spec.acp
+                .notifications
+                .iter()
+                .any(|method| method == "opencode/session/child_update")
+        );
+
+        let off_custom = BTreeMap::from([(
+            "opencode".to_owned(),
+            CustomAgentConfig {
+                command: "opencode".to_owned(),
+                extension: Some("opencode".to_owned()),
+                capabilities: AgentAcpCapabilities { subagents: false },
+                ..Default::default()
+            },
+        )]);
+        let provider = StaticProvider::new(
+            AgentDefinition {
+                id: "opencode".to_owned(),
+                name: "OpenCode".to_owned(),
+                description: None,
+                icon: None,
+            },
+            Some(LaunchPreset {
+                program: "opencode",
+                args: &["acp"],
+            }),
+        )
+        .with_extension("opencode", Arc::new(OpenCodeExtension));
+        let mut off = AgentCatalog::with_providers(
+            AcpRegistry::new(dir.path(), &settings(), off_custom),
+            vec![Arc::new(provider)],
+        );
+        off.preset_lookup = |_| Some(PathBuf::from("/fake/bin/opencode"));
+        let spec = tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(off.launch_spec("opencode", Path::new("."), &[]))
+            .expect("spec");
+        assert!(!spec.acp.capabilities.contains(&AcpCapability::Subagents));
+        assert!(spec.acp.client_meta.is_none());
+        assert!(spec.acp.notifications.is_empty());
+    }
+
+    #[test]
     fn custom_definition_shadows_a_builtin_preset() {
         let dir = tempfile::tempdir().expect("tempdir");
         let provider = StaticProvider::new(
@@ -574,6 +783,7 @@ mod tests {
             program: Some(PathBuf::from("my-agent")),
             args: Vec::new(),
             env: Vec::new(),
+            acp: Default::default(),
         };
         let first = catalog.driver_for(&spec).expect("driver");
         let second = catalog.driver_for(&spec).expect("driver");

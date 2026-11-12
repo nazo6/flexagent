@@ -1,5 +1,11 @@
 use super::mapping::*;
+use super::subagent::map_state_update;
+use super::subagent::{ChildNotificationHandler, ChildSessions, SessionIngress};
 use super::*;
+use crate::agent::extension::{AcpCapability, AcpExtensionOptions};
+use fxg_protocol::events::SubagentStatus;
+
+use agent_client_protocol::v1::schema::SubagentCapabilities;
 
 /// Reason the turn loop ended.
 pub(super) enum ServeOutcome {
@@ -79,6 +85,7 @@ pub(super) async fn build_session(
         SessionContext {
             cwd: params.cwd.clone(),
             events: events.clone(),
+            subagent_id: None,
         },
     );
     fxg_protocol::discard_with!(
@@ -227,35 +234,54 @@ pub(super) async fn build_session(
 }
 
 /// Turn loop for one session (serializes prompt sends with update reads).
+#[allow(clippy::too_many_arguments)]
 pub(super) async fn serve_session(
     mut session: ActiveSession<'static, Agent>,
     mut cmd_rx: mpsc::UnboundedReceiver<AcpCommand>,
     events: &mpsc::UnboundedSender<DriverEvent>,
     capabilities_state: Arc<Mutex<SessionCapabilitiesState>>,
     prompt_capabilities: &PromptCapabilities,
+    contexts: SessionContexts,
+    root_cwd: PathBuf,
+    ingress_tx: mpsc::UnboundedSender<SessionIngress>,
+    mut ingress_rx: mpsc::UnboundedReceiver<SessionIngress>,
+    guards: Vec<agent_client_protocol::DynamicHandlerGuard<Agent>>,
 ) -> ServeOutcome {
-    let mut accumulator = StreamingAccumulator::default();
-    while let Some(command) = cmd_rx.recv().await {
-        match command {
-            AcpCommand::Prompt(input) => {
-                accumulator.reset();
-                fxg_protocol::discard_with!(
-                    events.send(DriverEvent::Event(UnifiedEventPayload::StatusChanged {
-                        status: fxg_protocol::common::SessionStatus::Running,
-                        error_message: None,
-                    })),
-                    "notify event subscribers"
-                );
+    let root_id = session.session_id().clone();
+    let mut runtime = SessionRuntime::new(
+        root_id,
+        events,
+        capabilities_state,
+        contexts,
+        ingress_tx,
+        root_cwd,
+        guards,
+    );
+
+    loop {
+        #[allow(clippy::large_enum_variant, reason = "short-lived select result")]
+        enum Selected {
+            Command(Option<AcpCommand>),
+            Ingress(Option<SessionIngress>),
+        }
+        let selected = tokio::select! {
+            command = cmd_rx.recv() => Selected::Command(command),
+            ingress = ingress_rx.recv() => Selected::Ingress(ingress),
+        };
+        match selected {
+            Selected::Command(Some(AcpCommand::Prompt(input))) => {
+                runtime.accumulator.reset();
+                runtime.send_payload(UnifiedEventPayload::StatusChanged {
+                    status: fxg_protocol::common::SessionStatus::Running,
+                    error_message: None,
+                });
                 let blocks = match prompt_blocks(input, prompt_capabilities) {
                     Ok(blocks) => blocks,
                     Err(err) => {
-                        fxg_protocol::discard_with!(
-                            events.send(DriverEvent::Event(UnifiedEventPayload::StatusChanged {
-                                status: fxg_protocol::common::SessionStatus::Error,
-                                error_message: Some(format!("invalid prompt: {err}")),
-                            })),
-                            "notify event subscribers"
-                        );
+                        runtime.send_payload(UnifiedEventPayload::StatusChanged {
+                            status: fxg_protocol::common::SessionStatus::Error,
+                            error_message: Some(format!("invalid prompt: {err}")),
+                        });
                         return ServeOutcome::Fatal(err);
                     }
                 };
@@ -263,68 +289,59 @@ pub(super) async fn serve_session(
                     return ServeOutcome::Fatal(err.into());
                 }
                 loop {
-                    match session.read_update().await {
-                        Ok(SessionMessage::PromptResponse(response)) => {
-                            for payload in accumulator.finish_all() {
-                                fxg_protocol::discard_with!(
-                                    events.send(DriverEvent::Event(payload)),
-                                    "notify event subscribers"
-                                );
+                    #[allow(clippy::large_enum_variant, reason = "short-lived select result")]
+                    enum TurnSelected {
+                        Read(Result<SessionMessage, agent_client_protocol::Error>),
+                        Ingress(Option<SessionIngress>),
+                    }
+                    let selected = tokio::select! {
+                        result = session.read_update() => TurnSelected::Read(result),
+                        ingress = ingress_rx.recv() => TurnSelected::Ingress(ingress),
+                    };
+                    match selected {
+                        TurnSelected::Ingress(ingress) => {
+                            if let Some(ingress) = ingress {
+                                runtime.handle_ingress(ingress, &session);
+                            }
+                        }
+                        TurnSelected::Read(Ok(SessionMessage::PromptResponse(response))) => {
+                            // Drain child / vendor notifications that arrived before the
+                            // prompt response but were not selected yet.
+                            while let Ok(ingress) = ingress_rx.try_recv() {
+                                runtime.handle_ingress(ingress, &session);
+                            }
+                            for payload in runtime.accumulator.finish_all() {
+                                runtime.send_payload(payload);
                             }
                             match response {
                                 Ok(resp) => {
                                     let reason = resp.stop_reason;
                                     tracing::debug!(?reason, "acp turn finished");
                                     if let Some(payload) = turn_ended_event(reason) {
-                                        fxg_protocol::discard_with!(
-                                            events.send(DriverEvent::Event(payload)),
-                                            "notify event subscribers"
-                                        );
+                                        runtime.send_payload(payload);
                                     }
                                 }
                                 Err(err) => {
                                     let message = format!("agent turn failed: {err}");
                                     tracing::warn!("{message}");
-                                    fxg_protocol::discard_with!(
-                                        events.send(DriverEvent::Event(
-                                            UnifiedEventPayload::StatusChanged {
-                                                status: fxg_protocol::common::SessionStatus::Error,
-                                                error_message: Some(message),
-                                            },
-                                        )),
-                                        "notify event subscribers"
-                                    );
+                                    runtime.send_payload(UnifiedEventPayload::StatusChanged {
+                                        status: fxg_protocol::common::SessionStatus::Error,
+                                        error_message: Some(message),
+                                    });
                                     break;
                                 }
                             }
-                            fxg_protocol::discard_with!(
-                                events.send(DriverEvent::Event(
-                                    UnifiedEventPayload::StatusChanged {
-                                        status: fxg_protocol::common::SessionStatus::Idle,
-                                        error_message: None,
-                                    },
-                                )),
-                                "notify event subscribers"
-                            );
+                            runtime.send_payload(UnifiedEventPayload::StatusChanged {
+                                status: fxg_protocol::common::SessionStatus::Idle,
+                                error_message: None,
+                            });
                             break;
                         }
-                        Ok(SessionMessage::Message(dispatch)) => {
-                            let acc = &mut accumulator;
-                            let ev = events;
-                            let caps = Arc::clone(&capabilities_state);
+                        TurnSelected::Read(Ok(SessionMessage::Message(dispatch))) => {
+                            let mut notification = None;
                             let result = MatchDispatch::new(dispatch.into_raw())
-                                .if_notification(async move |notification: SessionNotification| {
-                                    let mapped = {
-                                        let mut caps =
-                                            caps.lock().expect("session capabilities poisoned");
-                                        map_session_update(notification.update, acc, &mut caps)
-                                    };
-                                    for event in mapped {
-                                        fxg_protocol::discard_with!(
-                                            ev.send(event),
-                                            "notify event subscribers"
-                                        );
-                                    }
+                                .if_notification(async |notification_in: SessionNotification| {
+                                    notification = Some(notification_in);
                                     Ok(())
                                 })
                                 .await
@@ -332,17 +349,203 @@ pub(super) async fn serve_session(
                             if let Err(err) = result {
                                 return ServeOutcome::Fatal(err.into());
                             }
+                            if let Some(notification) = notification {
+                                runtime.handle_update(notification.update, None, &session);
+                            }
                         }
                         // `SessionMessage` is #[non_exhaustive]
-                        Ok(_) => {}
-                        Err(err) => return ServeOutcome::Fatal(err.into()),
+                        TurnSelected::Read(Ok(_)) => {}
+                        TurnSelected::Read(Err(err)) => {
+                            return ServeOutcome::Fatal(err.into());
+                        }
                     }
                 }
             }
-            AcpCommand::Shutdown => break,
+            Selected::Command(Some(AcpCommand::Shutdown)) | Selected::Command(None) => break,
+            Selected::Ingress(ingress) => {
+                if let Some(ingress) = ingress {
+                    runtime.handle_ingress(ingress, &session);
+                }
+            }
         }
     }
     ServeOutcome::Closed
+}
+
+/// Per-session state for the parent / child event streams.
+struct SessionRuntime<'a> {
+    events: &'a mpsc::UnboundedSender<DriverEvent>,
+    capabilities: Arc<Mutex<SessionCapabilitiesState>>,
+    ingress_tx: mpsc::UnboundedSender<SessionIngress>,
+    accumulator: StreamingAccumulator,
+    children: ChildSessions,
+    guards: Vec<agent_client_protocol::DynamicHandlerGuard<Agent>>,
+}
+
+impl<'a> SessionRuntime<'a> {
+    fn new(
+        root_id: SessionId,
+        events: &'a mpsc::UnboundedSender<DriverEvent>,
+        capabilities: Arc<Mutex<SessionCapabilitiesState>>,
+        contexts: SessionContexts,
+        ingress_tx: mpsc::UnboundedSender<SessionIngress>,
+        root_cwd: PathBuf,
+        guards: Vec<agent_client_protocol::DynamicHandlerGuard<Agent>>,
+    ) -> Self {
+        Self {
+            events,
+            capabilities,
+            ingress_tx,
+            accumulator: StreamingAccumulator::default(),
+            children: ChildSessions::new(root_id.to_string(), root_cwd, contexts),
+            guards,
+        }
+    }
+
+    fn send_payload(&self, payload: UnifiedEventPayload) {
+        fxg_protocol::discard_with!(
+            self.events.send(DriverEvent::Event(payload)),
+            "notify event subscribers"
+        );
+    }
+
+    fn send_driver_event(&self, event: DriverEvent) {
+        fxg_protocol::discard_with!(self.events.send(event), "notify event subscribers");
+    }
+
+    /// Normalizes one `session/update` from the root or a child.
+    fn handle_update(
+        &mut self,
+        update: SessionUpdate,
+        subagent_id: Option<&str>,
+        session: &ActiveSession<'static, Agent>,
+    ) {
+        if let SessionUpdate::SubagentUpdate(announcement) = update {
+            self.announce(announcement, subagent_id, session);
+            return;
+        }
+
+        let mapped = {
+            let mut capabilities = self
+                .capabilities
+                .lock()
+                .expect("session capabilities poisoned");
+            map_session_update(
+                update,
+                subagent_id,
+                &mut self.accumulator,
+                &mut capabilities,
+            )
+        };
+        for event in mapped {
+            self.send_driver_event(event);
+        }
+    }
+
+    /// Handles work routed from a dynamic handler.
+    fn handle_ingress(&mut self, ingress: SessionIngress, session: &ActiveSession<'static, Agent>) {
+        match ingress {
+            SessionIngress::Child(notification) => {
+                let child = notification.session_id.to_string();
+                if self.children.get(&child).is_none() {
+                    self.upsert_child(
+                        &child,
+                        None,
+                        0,
+                        None,
+                        None,
+                        None,
+                        Some(SubagentStatus::Running),
+                        session,
+                    );
+                }
+                self.handle_update(notification.update, Some(&child), session);
+            }
+            SessionIngress::Vendor(update) => {
+                let child = update.child_session_id.clone();
+                self.upsert_child(
+                    &child,
+                    update.parent_session_id.as_deref(),
+                    update.depth,
+                    update.title.clone(),
+                    None,
+                    update.cwd.clone(),
+                    update.state.clone(),
+                    session,
+                );
+                if let Some(inner) = update.update {
+                    self.handle_update(inner, Some(&child), session);
+                }
+            }
+        }
+    }
+
+    /// UPserts child metadata and registers its routing / filesystem context.
+    #[allow(clippy::too_many_arguments)]
+    fn upsert_child(
+        &mut self,
+        child: &str,
+        parent: Option<&str>,
+        depth: u32,
+        title: Option<String>,
+        description: Option<String>,
+        cwd: Option<PathBuf>,
+        status: Option<SubagentStatus>,
+        session: &ActiveSession<'static, Agent>,
+    ) {
+        let previous = self.children.get(child).cloned();
+        let info = self
+            .children
+            .upsert(child, parent, depth, title, description, cwd, status);
+        self.children
+            .insert_context(child, info.cwd.clone(), self.events.clone());
+        if self.children.mark_registered(child) {
+            let handler = ChildNotificationHandler::new(child.to_owned(), self.ingress_tx.clone());
+            match session.connection().add_dynamic_handler(handler) {
+                Ok(guard) => self.guards.push(guard),
+                Err(err) => {
+                    tracing::warn!(
+                        child = child,
+                        "failed to register child session notification handler: {err}"
+                    );
+                }
+            }
+        }
+        // Vendors resend status on every update; only announce real changes so the
+        // parent log does not fill with duplicate `subagent_updated` events.
+        if previous.as_ref() == Some(&info) {
+            return;
+        }
+        self.send_payload(UnifiedEventPayload::SubagentUpdated {
+            child_session_id: child.to_owned(),
+            parent_session_id: Some(info.parent),
+            depth: info.depth,
+            title: info.title,
+            description: info.description,
+            status: info.status,
+        });
+    }
+
+    /// Handles a standard ACP `subagent_update` announcement.
+    fn announce(
+        &mut self,
+        update: agent_client_protocol::v1::schema::SubagentUpdate,
+        enclosing: Option<&str>,
+        session: &ActiveSession<'static, Agent>,
+    ) {
+        let child = update.session_id.to_string();
+        let status = update.state.value().map(map_state_update);
+        self.upsert_child(
+            &child,
+            enclosing,
+            0,
+            update.title.value().cloned(),
+            update.description.value().cloned(),
+            update.cwd.value().cloned(),
+            status,
+            session,
+        );
+    }
 }
 
 /// Decides how to acquire the session from the `resume` selection and agent capabilities.
@@ -528,12 +731,31 @@ pub(super) fn discard_replay_updates(session: &mut ActiveSession<'static, Agent>
 ///
 /// `auth.terminal` is enabled because fxg can reproduce the configured agent
 /// invocation in an interactive terminal (`fxg agents login`).
-pub(crate) fn client_capabilities() -> ClientCapabilities {
-    ClientCapabilities::new()
+pub(crate) fn client_capabilities(acp: &AcpExtensionOptions) -> ClientCapabilities {
+    let mut capabilities = ClientCapabilities::new()
         .fs(FileSystemCapabilities::new()
             .read_text_file(true)
             .write_text_file(true))
         .terminal(true)
         .auth(AuthCapabilities::new().terminal(true))
-        .elicitation(ElicitationCapabilities::new().form(ElicitationFormCapabilities::new()))
+        .elicitation(ElicitationCapabilities::new().form(ElicitationFormCapabilities::new()));
+
+    if let Some(meta) = &acp.client_meta
+        && let serde_json::Value::Object(map) = meta.as_value()
+    {
+        capabilities = capabilities.meta(map.clone());
+    }
+
+    for capability in acp.capabilities.iter() {
+        match capability {
+            AcpCapability::Subagents => {
+                capabilities = capabilities.subagents(Some(SubagentCapabilities::new()));
+            }
+            AcpCapability::Unknown(name) => {
+                tracing::warn!(capability = name, "unknown ACP capability ignored");
+            }
+        }
+    }
+
+    capabilities
 }

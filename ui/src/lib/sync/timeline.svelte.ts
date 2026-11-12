@@ -22,6 +22,8 @@ export class SessionTimeline {
   events = $state<SessionEventEnvelope[]>([]);
   messageDeltas = $state(new Map<string, string>());
   thoughtDeltas = $state(new Map<string, string>());
+  subagentByMessage = $state(new Map<string, string>());
+  subagentByThought = $state(new Map<string, string>());
   toolProgress = $state(new Map<string, ToolProgress>());
   terminalDeltas = $state(new Map<string, string>());
   /** Streaming buffers in the order their first delta arrived (`${kind}:${id}`). */
@@ -47,6 +49,8 @@ export class SessionTimeline {
   clearStreams(): void {
     this.messageDeltas.clear();
     this.thoughtDeltas.clear();
+    this.subagentByMessage.clear();
+    this.subagentByThought.clear();
     this.toolProgress.clear();
     this.terminalDeltas.clear();
     this.streamKeys.length = 0;

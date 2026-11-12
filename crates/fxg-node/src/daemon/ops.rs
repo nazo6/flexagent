@@ -386,6 +386,8 @@ impl DaemonState {
                     sources,
                     external_path,
                     custom_config: entry.custom,
+                    extension: entry.extension,
+                    capabilities: entry.capabilities,
                     backend: entry.backend,
                     icon: entry.icon,
                     installed_nodes: if available {

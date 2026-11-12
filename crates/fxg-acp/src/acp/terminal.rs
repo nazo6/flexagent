@@ -161,6 +161,7 @@ pub(super) async fn create_terminal(
     pty: Arc<fxg_pty::PtySessionManager>,
     terminals: Arc<TerminalRegistry>,
     events: mpsc::UnboundedSender<DriverEvent>,
+    subagent_id: Option<String>,
     request: CreateTerminalRequest,
     responder: agent_client_protocol::v1::Responder<CreateTerminalResponse>,
 ) -> Result<(), agent_client_protocol::Error> {
@@ -189,6 +190,7 @@ pub(super) async fn create_terminal(
             let events_for_task = events.clone();
             let command_for_task = command_line.clone();
             let terminal_id_for_task = terminal_id.clone();
+            let subagent_id_for_task = subagent_id.clone();
             fxg_protocol::spawn_guarded!("terminal output collector", async move {
                 loop {
                     match receiver.recv().await {
@@ -225,6 +227,7 @@ pub(super) async fn create_terminal(
                                         command: command_for_task.clone(),
                                         data_b64: base64_encode(&data),
                                         exit_code,
+                                        subagent_id: subagent_id_for_task.clone(),
                                     },
                                 )),
                                 "notify event subscribers"

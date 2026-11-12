@@ -223,22 +223,23 @@ fn plan_resume_without_ids_is_fresh() {
 fn accumulator_emits_completed_message_on_id_switch() {
     let mut acc = StreamingAccumulator::default();
     let mut caps = SessionCapabilitiesState::default();
-    let events = map_session_update(text_chunk("こん", Some("m1")), &mut acc, &mut caps); // allow-japanese: streaming chunk split across multibyte text
+    let events = map_session_update(text_chunk("こん", Some("m1")), None, &mut acc, &mut caps); // allow-japanese: streaming chunk split across multibyte text
     assert_eq!(events.len(), 1);
     assert!(matches!(events[0], DriverEvent::Delta(_)));
 
     // Same ID: delta only
-    let events = map_session_update(text_chunk("にちは", Some("m1")), &mut acc, &mut caps); // allow-japanese: streaming chunk split across multibyte text
+    let events = map_session_update(text_chunk("にちは", Some("m1")), None, &mut acc, &mut caps); // allow-japanese: streaming chunk split across multibyte text
     assert_eq!(events.len(), 1);
 
     // Different ID: completion event for the previous message + new delta
-    let events = map_session_update(text_chunk("次", Some("m2")), &mut acc, &mut caps); // allow-japanese: multibyte streaming chunk fixture
+    let events = map_session_update(text_chunk("次", Some("m2")), None, &mut acc, &mut caps); // allow-japanese: multibyte streaming chunk fixture
     assert_eq!(events.len(), 2);
     match &events[0] {
         DriverEvent::Event(UnifiedEventPayload::AgentMessage {
             message_id,
             text,
             is_complete,
+            ..
         }) => {
             assert_eq!(message_id, "m1");
             assert_eq!(text, "こんにちは"); // allow-japanese: expected accumulation of multibyte chunks
@@ -265,8 +266,8 @@ fn accumulator_emits_completed_message_on_id_switch() {
 fn message_chunks_without_id_accumulate_into_single_message() {
     let mut acc = StreamingAccumulator::default();
     let mut caps = SessionCapabilitiesState::default();
-    map_session_update(text_chunk("a", None), &mut acc, &mut caps);
-    map_session_update(text_chunk("b", None), &mut acc, &mut caps);
+    map_session_update(text_chunk("a", None), None, &mut acc, &mut caps);
+    map_session_update(text_chunk("b", None), None, &mut acc, &mut caps);
     let finished = acc.finish_all();
     assert_eq!(finished.len(), 1);
     match &finished[0] {
@@ -285,19 +286,25 @@ fn thought_is_completed_before_the_answer_that_follows_it() {
     let mut acc = StreamingAccumulator::default();
     let mut caps = SessionCapabilitiesState::default();
 
-    let events = map_session_update(thought_chunk("thinking", Some("m1")), &mut acc, &mut caps);
+    let events = map_session_update(
+        thought_chunk("thinking", Some("m1")),
+        None,
+        &mut acc,
+        &mut caps,
+    );
     assert_eq!(events.len(), 1);
     assert!(matches!(events[0], DriverEvent::Delta(_)));
 
     // The first message chunk must finalize the reasoning stream so its
     // completion event is recorded before the answer.
-    let events = map_session_update(text_chunk("answer", Some("m1")), &mut acc, &mut caps);
+    let events = map_session_update(text_chunk("answer", Some("m1")), None, &mut acc, &mut caps);
     assert_eq!(events.len(), 2);
     match &events[0] {
         DriverEvent::Event(UnifiedEventPayload::AgentThought {
             thought_id,
             text,
             is_complete,
+            ..
         }) => {
             assert_eq!(thought_id, "m1");
             assert_eq!(text, "thinking");
@@ -323,8 +330,15 @@ fn finish_all_emits_thought_before_message() {
     // Defensive ordering for a state that the chunk APIs no longer produce
     // (both streams still open at turn end).
     let mut acc = StreamingAccumulator {
-        message: Some(("m1".to_owned(), "answer".to_owned())),
-        thought: Some(("t1".to_owned(), "thinking".to_owned())),
+        messages: std::collections::BTreeMap::from([(
+            None,
+            ("m1".to_owned(), "answer".to_owned()),
+        )]),
+        thoughts: std::collections::BTreeMap::from([(
+            None,
+            ("t1".to_owned(), "thinking".to_owned()),
+        )]),
+        ..Default::default()
     };
     let finished = acc.finish_all();
     assert_eq!(finished.len(), 2);
@@ -343,8 +357,13 @@ fn thought_after_message_finalizes_the_message_first() {
     let mut acc = StreamingAccumulator::default();
     let mut caps = SessionCapabilitiesState::default();
 
-    map_session_update(text_chunk("answer", Some("m1")), &mut acc, &mut caps);
-    let events = map_session_update(thought_chunk("thinking", Some("m2")), &mut acc, &mut caps);
+    map_session_update(text_chunk("answer", Some("m1")), None, &mut acc, &mut caps);
+    let events = map_session_update(
+        thought_chunk("thinking", Some("m2")),
+        None,
+        &mut acc,
+        &mut caps,
+    );
     assert_eq!(events.len(), 2);
     assert!(matches!(
         events[0],
@@ -367,7 +386,7 @@ fn maps_tool_call_with_diff_content() {
         .locations(vec![
             agent_client_protocol::v1::schema::ToolCallLocation::new("src/lib.rs"),
         ]);
-    let payload = tool_call_event(&tool_call);
+    let payload = tool_call_event(&tool_call, None);
     match payload {
         UnifiedEventPayload::ToolCall {
             tool_call_id,
@@ -398,9 +417,9 @@ fn maps_plan_update() {
     )]);
     let mut acc = StreamingAccumulator::default();
     let mut caps = SessionCapabilitiesState::default();
-    let events = map_session_update(SessionUpdate::Plan(plan), &mut acc, &mut caps);
+    let events = map_session_update(SessionUpdate::Plan(plan), None, &mut acc, &mut caps);
     match &events[0] {
-        DriverEvent::Event(UnifiedEventPayload::PlanUpdate { entries }) => {
+        DriverEvent::Event(UnifiedEventPayload::PlanUpdate { entries, .. }) => {
             assert_eq!(entries.len(), 1);
             assert_eq!(entries[0].title, "Run tests");
             assert_eq!(entries[0].status, FxgPlanEntryStatus::InProgress);
@@ -446,6 +465,7 @@ fn maps_session_info_update() {
     let mut caps = SessionCapabilitiesState::default();
     let events = map_session_update(
         SessionUpdate::SessionInfoUpdate(update),
+        None,
         &mut acc,
         &mut caps,
     );
@@ -482,6 +502,7 @@ fn capabilities_partial_updates_preserve_existing_state() {
         AvailableCommandsUpdate::new(vec![AvailableCommand::new("review", "Review code")]);
     let events = map_session_update(
         SessionUpdate::AvailableCommandsUpdate(cmd_update),
+        None,
         &mut acc,
         &mut caps,
     );
@@ -505,6 +526,7 @@ fn capabilities_partial_updates_preserve_existing_state() {
     let mode_update = CurrentModeUpdate::new("code");
     let events = map_session_update(
         SessionUpdate::CurrentModeUpdate(mode_update),
+        None,
         &mut acc,
         &mut caps,
     );
@@ -637,13 +659,14 @@ fn maps_usage_update_to_event() {
         SessionUpdate::UsageUpdate(UsageUpdate::new(53_000, 200_000).cost(Cost::new(0.045, "USD")));
     let mut acc = StreamingAccumulator::default();
     let mut caps = SessionCapabilitiesState::default();
-    let events = map_session_update(update, &mut acc, &mut caps);
+    let events = map_session_update(update, None, &mut acc, &mut caps);
     assert_eq!(events.len(), 1);
     match &events[0] {
         DriverEvent::Event(UnifiedEventPayload::UsageUpdated {
             used_tokens,
             context_size,
             cost,
+            ..
         }) => {
             assert_eq!(*used_tokens, 53_000);
             assert_eq!(*context_size, 200_000);
@@ -698,7 +721,8 @@ fn maps_agent_and_terminal_auth_methods() {
 
 #[test]
 fn client_capabilities_advertise_terminal_auth() {
-    let capabilities = client_capabilities();
+    let capabilities =
+        client_capabilities(&crate::agent::extension::AcpExtensionOptions::default());
     assert!(capabilities.terminal);
     assert!(capabilities.auth.terminal);
 }
@@ -892,6 +916,7 @@ fn config_option_update_refreshes_mode_projection() {
 
     let events = map_session_update(
         SessionUpdate::ConfigOptionUpdate(update),
+        None,
         &mut acc,
         &mut caps,
     );
@@ -911,4 +936,44 @@ fn config_option_update_refreshes_mode_projection() {
         }
         other => panic!("unexpected event: {other:?}"),
     }
+}
+
+#[test]
+fn child_updates_are_tagged_and_do_not_touch_parent_capabilities() {
+    use agent_client_protocol::v1::schema::{AvailableCommand, AvailableCommandsUpdate};
+
+    let mut acc = StreamingAccumulator::default();
+    let mut caps = SessionCapabilitiesState::default();
+
+    let events = map_session_update(
+        text_chunk("child output", Some("child-m1")),
+        Some("child-1"),
+        &mut acc,
+        &mut caps,
+    );
+    assert_eq!(events.len(), 1);
+    assert!(matches!(
+        &events[0],
+        DriverEvent::Delta(StreamDeltaPayload::AgentMessageDelta { subagent_id: Some(child), .. })
+            if child == "child-1"
+    ));
+
+    let finished = acc.finish_all();
+    assert!(matches!(
+        &finished[0],
+        UnifiedEventPayload::AgentMessage { subagent_id: Some(child), text, .. }
+            if child == "child-1" && text == "child output"
+    ));
+
+    let caps_before = caps.available_commands.clone();
+    let events = map_session_update(
+        SessionUpdate::AvailableCommandsUpdate(AvailableCommandsUpdate::new(vec![
+            AvailableCommand::new("child-cmd", "Child command"),
+        ])),
+        Some("child-1"),
+        &mut acc,
+        &mut caps,
+    );
+    assert!(events.is_empty());
+    assert_eq!(caps.available_commands, caps_before);
 }

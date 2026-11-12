@@ -20,6 +20,7 @@
     details = null,
     resolved = null,
     createdAt = null,
+    subagentTitle = null,
   }: {
     sessionId: string;
     requestId: string;
@@ -29,6 +30,7 @@
     details?: unknown;
     resolved?: { selectedOptionId: string; resolvedBy: string } | null;
     createdAt?: number | null;
+    subagentTitle?: string | null;
   } = $props();
 
   let busyOptionId = $state<string | null>(null);
@@ -68,6 +70,9 @@
       <div class="flex items-center gap-2">
         <ShieldCheckIcon class="text-muted-foreground size-4 shrink-0" />
         <span class="desk-mono text-[11px] font-medium">{toolName}</span>
+        {#if subagentTitle}
+          <Badge variant="outline">{m.chat_subagent_title()}: {subagentTitle}</Badge>
+        {/if}
         {#if resolved}
           <Badge variant="secondary">
             {resolved.selectedOptionId} ({resolved.resolvedBy})

@@ -196,6 +196,25 @@ pub struct UpdateNodeSettingsRequest {
     pub expected_revision: u64,
 }
 
+/// ACP client capabilities advertised when connecting to an agent.
+///
+/// Capabilities describe what this client understands, so an agent that does
+/// not know a capability simply ignores it. Built-in agents use the defaults
+/// (see also [`crate::client_api::AgentSummary::capabilities`]).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[specta(collect)]
+#[serde(default)]
+pub struct AgentAcpCapabilities {
+    /// Advertise `clientCapabilities.subagents` (the ACP subagents RFD).
+    pub subagents: bool,
+}
+
+impl Default for AgentAcpCapabilities {
+    fn default() -> Self {
+        Self { subagents: true }
+    }
+}
+
 /// Node-owned agent settings stored in `node.db` (`agent_settings` / `agent_aliases`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
@@ -378,6 +397,9 @@ pub struct CustomAgentConfig {
     pub icon: Option<String>,
     /// Provenance of this definition (manual or imported from the registry).
     pub origin: Option<CustomAgentOrigin>,
+    /// ACP client capabilities advertised on connections to this agent
+    #[serde(default)]
+    pub capabilities: AgentAcpCapabilities,
 }
 
 /// Definition of an ephemeral VM / sandbox provisioner (`provisioners` in `hub.db`).
@@ -597,5 +619,26 @@ mod tests {
         assert_eq!(value.source, ConfigSource::Default);
         assert_eq!(value.value, None);
         assert_eq!(value.source_detail, None);
+    }
+
+    #[test]
+    fn agent_capabilities_default_to_subagents_on() {
+        assert!(AgentAcpCapabilities::default().subagents);
+
+        // An older snapshot without the field still decodes with the default.
+        let decoded: AgentAcpCapabilities =
+            serde_json::from_str("{}").expect("decode empty capabilities");
+        assert!(decoded.subagents);
+
+        let custom: CustomAgentConfig = serde_json::from_str(
+            r#"{
+                "command": "opencode",
+                "args": [],
+                "env": {},
+                "env_secrets": {}
+            }"#,
+        )
+        .expect("decode custom agent");
+        assert!(custom.capabilities.subagents);
     }
 }

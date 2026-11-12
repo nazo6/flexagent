@@ -221,6 +221,7 @@ impl SessionManager {
                     resume: params.resume.clone(),
                     fork_from: params.fork_from.map(str::to_owned),
                     initial_config: params.initial_config.clone(),
+                    acp_parser: None,
                 },
                 event_tx.clone(),
             )

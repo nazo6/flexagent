@@ -171,6 +171,7 @@ impl SessionManager {
             resume: None,
             fork_from: None,
             initial_config: initial_config.to_vec(),
+            acp_parser: None,
         };
 
         let started = match tokio::time::timeout(

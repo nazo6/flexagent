@@ -277,7 +277,7 @@ fn describe_event(payload: &UnifiedEventPayload) -> String {
         UnifiedEventPayload::ToolCall { title, status, .. } => {
             format!("tool_call [{status}] {}", truncate(title, 60))
         }
-        UnifiedEventPayload::PlanUpdate { entries } => {
+        UnifiedEventPayload::PlanUpdate { entries, .. } => {
             format!("plan_update entries={}", entries.len())
         }
         UnifiedEventPayload::PermissionRequest {
@@ -326,6 +326,7 @@ fn describe_event(payload: &UnifiedEventPayload) -> String {
             used_tokens,
             context_size,
             cost,
+            ..
         } => {
             let tokens = format!("usage {used_tokens}/{context_size}");
             match cost {
@@ -339,6 +340,24 @@ fn describe_event(payload: &UnifiedEventPayload) -> String {
         UnifiedEventPayload::CompactionUpdated { status, .. } => {
             format!("compaction_updated {status}")
         }
+        UnifiedEventPayload::SubagentUpdated {
+            child_session_id,
+            title,
+            status,
+            ..
+        } => format!(
+            "subagent_updated {child_session_id} [{status}] {}",
+            truncate(title.as_deref().unwrap_or(""), 60)
+        ),
+        UnifiedEventPayload::SubagentMessage {
+            sender_session_id,
+            recipient_session_id,
+            text,
+            ..
+        } => format!(
+            "subagent_message {sender_session_id} -> {recipient_session_id} {}",
+            truncate(text, 60)
+        ),
     }
 }
 

@@ -2,6 +2,8 @@
   import ElicitationCard from "#lib/components/ElicitationCard.svelte";
   import PermissionCard from "#lib/components/PermissionCard.svelte";
   import MarkdownText from "#lib/components/MarkdownText.svelte";
+  import Self from "./ChatTimeline.svelte";
+  import SubagentGroup from "./SubagentGroup.svelte";
   import ToolCallGroup from "./ToolCallGroup.svelte";
   import { Badge } from "#lib/components/ui/badge/index.ts";
   import { groupTimelineItems } from "#lib/chat-groups.ts";
@@ -22,11 +24,19 @@
     sessionId,
     items,
     status = null,
+    nested = false,
+    onsubagent,
+    subagentTitle = null,
   }: {
     sessionId: string;
     items: TimelineItem[];
     /** Session status (derived from events). Used for the running indicator. */
     status?: SessionStatus | null;
+    /** Nested rendering inside a subagent block (disables subagent grouping). */
+    nested?: boolean;
+    onsubagent?: (childSessionId: string) => void;
+    /** Title of the enclosing subagent (labels its approvals). */
+    subagentTitle?: string | null;
   } = $props();
 
   /**
@@ -50,13 +60,24 @@
     }
   }
 
-  const groupedItems = $derived(groupTimelineItems(items));
+  const groupedItems = $derived(groupTimelineItems(items, { groupSubagents: !nested }));
 </script>
 
 <ul class="flex list-none flex-col gap-4 p-0">
   {#each groupedItems as group (group.key)}
     <li>
-      {#if group.kind === "tools"}
+      {#if group.kind === "subagent"}
+        <SubagentGroup subagent={group.subagent} onopen={onsubagent}>
+          <Self
+            {sessionId}
+            items={group.items}
+            {status}
+            nested
+            {onsubagent}
+            subagentTitle={group.subagent.title ?? group.subagent.description ?? null}
+          />
+        </SubagentGroup>
+      {:else if group.kind === "tools"}
         <ToolCallGroup tools={group.tools} />
       {:else}
         {@const item = group.item}
@@ -145,6 +166,7 @@
             details={item.details}
             resolved={item.resolved}
             createdAt={item.createdAt}
+            {subagentTitle}
           />
         {:else if item.kind === "elicitation"}
           <ElicitationCard
@@ -166,6 +188,13 @@
                 <li class={planStatusClass(entry.status)}>{entry.title}</li>
               {/each}
             </ul>
+          </div>
+        {:else if item.kind === "subagent_message"}
+          <div class="border-border bg-card/60 rounded-lg border px-3 py-2 text-[13px]">
+            <p class="text-muted-foreground mb-1 text-[11px]">
+              {item.senderSessionId} → {item.recipientSessionId}
+            </p>
+            <MarkdownText text={item.text} streaming={item.streaming} />
           </div>
         {:else if item.kind === "notice"}
           <div
@@ -195,7 +224,7 @@
     </li>
   {/each}
 
-  {#if agentWorking}
+  {#if agentWorking && !nested}
     <li class="flex gap-2.5" role="status" aria-live="polite">
       <span
         class="bg-signal-soft text-signal mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-md"
@@ -212,7 +241,7 @@
   {/if}
 </ul>
 
-{#if items.length === 0 && !agentWorking}
+{#if items.length === 0 && !agentWorking && !nested}
   <p class="text-muted-foreground text-[13px]">
     {m.chat_empty_timeline()}
   </p>

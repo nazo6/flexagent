@@ -40,6 +40,9 @@ export interface TimelineSources {
   events: SessionEventEnvelope[];
   messageDeltas: ReadonlyMap<string, string>;
   thoughtDeltas: ReadonlyMap<string, string>;
+  /** Subagent that owns each streaming message / thought. */
+  subagentByMessage?: ReadonlyMap<string, string>;
+  subagentByThought?: ReadonlyMap<string, string>;
   toolProgress: ReadonlyMap<string, ToolProgress>;
   terminalDeltas: ReadonlyMap<string, string>;
   pendingPrompts?: ReadonlyMap<string, PendingPrompt>;
@@ -55,6 +58,8 @@ export interface TimelineSources {
 export interface MutableStreamBuffers {
   messageDeltas: Map<string, string>;
   thoughtDeltas: Map<string, string>;
+  subagentByMessage: Map<string, string>;
+  subagentByThought: Map<string, string>;
   toolProgress: Map<string, ToolProgress>;
   terminalDeltas: Map<string, string>;
   streamKeys: string[];
@@ -93,6 +98,7 @@ export type TimelineItem =
       createdAt: number;
       text: string;
       streaming: boolean;
+      subagentId: string | null;
     }
   | {
       kind: "thought";
@@ -101,6 +107,7 @@ export type TimelineItem =
       createdAt: number;
       text: string;
       streaming: boolean;
+      subagentId: string | null;
     }
   | {
       kind: "tool";
@@ -114,6 +121,7 @@ export type TimelineItem =
       locations: string[];
       diff: FileDiff | null;
       rawOutput: string | null;
+      subagentId: string | null;
     }
   | {
       kind: "terminal";
@@ -124,6 +132,7 @@ export type TimelineItem =
       command: string;
       output: string;
       exitCode: number | null;
+      subagentId: string | null;
     }
   | {
       kind: "permission";
@@ -136,6 +145,7 @@ export type TimelineItem =
       options: PermissionOption[];
       details: RawJson;
       resolved: { selectedOptionId: string; resolvedBy: string } | null;
+      subagentId: string | null;
     }
   | {
       kind: "elicitation";
@@ -149,6 +159,7 @@ export type TimelineItem =
       mode: string;
       requestedSchema: ElicitationSchema;
       resolved: { action: ElicitationAction; resolvedBy: string } | null;
+      subagentId: string | null;
     }
   | {
       kind: "plan";
@@ -156,6 +167,31 @@ export type TimelineItem =
       seq: number;
       createdAt: number;
       entries: PlanEntry[];
+      subagentId: string | null;
+    }
+  | {
+      kind: "subagent";
+      key: string;
+      seq: number;
+      createdAt: number;
+      childSessionId: string;
+      parentSessionId: string | null;
+      depth: number;
+      title: string | null;
+      description: string | null;
+      status: string;
+    }
+  | {
+      kind: "subagent_message";
+      key: string;
+      seq: number;
+      createdAt: number;
+      messageId: string;
+      senderSessionId: string;
+      recipientSessionId: string;
+      text: string;
+      streaming: boolean;
+      subagentId: string | null;
     }
   | {
       kind: "notice";
@@ -212,6 +248,9 @@ export function applyStreamDelta(sources: MutableStreamBuffers, delta: StreamDel
         delta.message_id,
         (sources.messageDeltas.get(delta.message_id) ?? "") + delta.text_delta,
       );
+      if (delta.subagent_id) {
+        sources.subagentByMessage.set(delta.message_id, delta.subagent_id);
+      }
       trackStream(sources, streamKey("message", delta.message_id));
       break;
     case "agent_thought_delta":
@@ -219,7 +258,14 @@ export function applyStreamDelta(sources: MutableStreamBuffers, delta: StreamDel
         delta.thought_id,
         (sources.thoughtDeltas.get(delta.thought_id) ?? "") + delta.text_delta,
       );
+      if (delta.subagent_id) {
+        sources.subagentByThought.set(delta.thought_id, delta.subagent_id);
+      }
       trackStream(sources, streamKey("thought", delta.thought_id));
+      break;
+    case "subagent_message_delta":
+      // Inter-session messages are rendered from their completed upsert; the
+      // chunk is intentionally not shown live yet.
       break;
     case "tool_call_progress": {
       const current = sources.toolProgress.get(delta.tool_call_id) ?? {
@@ -253,12 +299,14 @@ export function clearStreamBuffers(
     case "agent_message":
       if (payload.data.is_complete) {
         sources.messageDeltas.delete(payload.data.message_id);
+        sources.subagentByMessage.delete(payload.data.message_id);
         untrackStream(sources, streamKey("message", payload.data.message_id));
       }
       break;
     case "agent_thought":
       if (payload.data.is_complete) {
         sources.thoughtDeltas.delete(payload.data.thought_id);
+        sources.subagentByThought.delete(payload.data.thought_id);
         untrackStream(sources, streamKey("thought", payload.data.thought_id));
       }
       break;
@@ -297,11 +345,13 @@ function appendTerminalText(current: string, addition: string): string {
  * are appended at the end.
  */
 interface TimelineBuilder {
+  sessionId: string;
   items: TimelineItem[];
   toolIndex: Map<string, number>;
   terminalIndex: Map<string, number>;
   permissionIndex: Map<string, number>;
   elicitationIndex: Map<string, number>;
+  subagentMessageIndex: Map<string, number>;
 }
 
 interface TimelineBase {
@@ -322,6 +372,8 @@ type PlanUpdatePayload = Extract<UnifiedEventPayload, { type: "plan_update" }>;
 type StatusChangedPayload = Extract<UnifiedEventPayload, { type: "status_changed" }>;
 type TurnEndedPayload = Extract<UnifiedEventPayload, { type: "turn_ended" }>;
 type CompactionUpdatedPayload = Extract<UnifiedEventPayload, { type: "compaction_updated" }>;
+type SubagentUpdatedPayload = Extract<UnifiedEventPayload, { type: "subagent_updated" }>;
+type SubagentMessagePayload = Extract<UnifiedEventPayload, { type: "subagent_message" }>;
 
 function addUserMessage(
   builder: TimelineBuilder,
@@ -349,6 +401,7 @@ function addAgentMessage(
     ...base,
     text: payload.data.text,
     streaming: !payload.data.is_complete,
+    subagentId: payload.data.subagent_id ?? null,
   });
 }
 
@@ -363,6 +416,7 @@ function addAgentThought(
     ...base,
     text: payload.data.text,
     streaming: !payload.data.is_complete,
+    subagentId: payload.data.subagent_id ?? null,
   });
 }
 
@@ -386,6 +440,7 @@ function upsertToolCall(
       locations: payload.data.locations,
       diff: payload.data.diff,
       rawOutput: payload.data.raw_output,
+      subagentId: payload.data.subagent_id ?? null,
     });
     return;
   }
@@ -399,6 +454,7 @@ function upsertToolCall(
       locations: payload.data.locations.length > 0 ? payload.data.locations : prev.locations,
       diff: payload.data.diff ?? prev.diff,
       rawOutput: payload.data.raw_output ?? prev.rawOutput,
+      subagentId: payload.data.subagent_id ?? prev.subagentId,
     };
   }
 }
@@ -420,6 +476,7 @@ function upsertTerminalOutput(
       command: payload.data.command,
       output,
       exitCode: payload.data.exit_code,
+      subagentId: payload.data.subagent_id ?? null,
     });
     return;
   }
@@ -429,6 +486,7 @@ function upsertTerminalOutput(
       ...existing,
       output: appendTerminalText(existing.output, output),
       exitCode: payload.data.exit_code ?? existing.exitCode,
+      subagentId: payload.data.subagent_id ?? existing.subagentId,
     };
   }
 }
@@ -449,6 +507,7 @@ function addPermissionRequest(
     options: payload.data.options,
     details: payload.data.details,
     resolved: null,
+    subagentId: payload.data.subagent_id ?? null,
   });
 }
 
@@ -500,6 +559,7 @@ function addElicitationRequest(
     mode: payload.data.mode,
     requestedSchema: payload.data.requested_schema,
     resolved: null,
+    subagentId: payload.data.subagent_id ?? null,
   });
 }
 
@@ -545,6 +605,60 @@ function addPlanUpdate(
     key: `plan:${base.seq}`,
     ...base,
     entries: payload.data.entries,
+    subagentId: payload.data.subagent_id ?? null,
+  });
+}
+
+function addSubagentUpdated(
+  builder: TimelineBuilder,
+  payload: SubagentUpdatedPayload,
+  base: TimelineBase,
+): void {
+  builder.items.push({
+    kind: "subagent",
+    key: `subagent:${payload.data.child_session_id}`,
+    ...base,
+    childSessionId: payload.data.child_session_id,
+    parentSessionId: payload.data.parent_session_id,
+    depth: payload.data.depth,
+    title: payload.data.title,
+    description: payload.data.description,
+    status: payload.data.status,
+  });
+}
+
+function addSubagentMessage(
+  builder: TimelineBuilder,
+  payload: SubagentMessagePayload,
+  base: TimelineBase,
+): void {
+  const sender = payload.data.sender_session_id;
+  const recipient = payload.data.recipient_session_id;
+  const subagentId =
+    sender === builder.sessionId ? recipient : recipient === builder.sessionId ? sender : null;
+  const existing = builder.subagentMessageIndex.get(payload.data.message_id);
+  if (existing !== undefined) {
+    const item = builder.items[existing];
+    if (item.kind === "subagent_message") {
+      builder.items[existing] = {
+        ...item,
+        text: payload.data.text,
+        streaming: !payload.data.is_complete,
+      };
+    }
+    return;
+  }
+  builder.subagentMessageIndex.set(payload.data.message_id, builder.items.length);
+  builder.items.push({
+    kind: "subagent_message",
+    key: `subagent-message:${payload.data.message_id}`,
+    ...base,
+    messageId: payload.data.message_id,
+    senderSessionId: sender,
+    recipientSessionId: recipient,
+    text: payload.data.text,
+    streaming: !payload.data.is_complete,
+    subagentId,
   });
 }
 
@@ -621,6 +735,7 @@ function appendEphemeralItems(builder: TimelineBuilder, sources: TimelineSources
           createdAt: items.at(-1)?.createdAt ?? 0,
           text,
           streaming: true,
+          subagentId: sources.subagentByMessage?.get(id) ?? null,
         });
         break;
       }
@@ -634,6 +749,7 @@ function appendEphemeralItems(builder: TimelineBuilder, sources: TimelineSources
           createdAt: items.at(-1)?.createdAt ?? 0,
           text,
           streaming: true,
+          subagentId: sources.subagentByThought?.get(id) ?? null,
         });
         break;
       }
@@ -652,6 +768,7 @@ function appendEphemeralItems(builder: TimelineBuilder, sources: TimelineSources
           locations: [],
           diff: null,
           rawOutput: progress.output === "" ? null : progress.output,
+          subagentId: null,
         });
         break;
       }
@@ -678,6 +795,7 @@ function appendEphemeralItems(builder: TimelineBuilder, sources: TimelineSources
             command: "",
             output,
             exitCode: null,
+            subagentId: null,
           });
         }
         break;
@@ -700,11 +818,13 @@ function appendEphemeralItems(builder: TimelineBuilder, sources: TimelineSources
 
 export function buildTimelineItems(sources: TimelineSources): TimelineItem[] {
   const builder: TimelineBuilder = {
+    sessionId: sources.sessionId,
     items: [],
     toolIndex: new Map(),
     terminalIndex: new Map(),
     permissionIndex: new Map(),
     elicitationIndex: new Map(),
+    subagentMessageIndex: new Map(),
   };
 
   for (const event of sources.events) {
@@ -749,6 +869,12 @@ export function buildTimelineItems(sources: TimelineSources): TimelineItem[] {
         break;
       case "compaction_updated":
         addCompactionUpdate(builder, payload, base);
+        break;
+      case "subagent_updated":
+        addSubagentUpdated(builder, payload, base);
+        break;
+      case "subagent_message":
+        addSubagentMessage(builder, payload, base);
         break;
       default:
         break;
@@ -839,7 +965,9 @@ export function latestStatusFromEvents(
 export function latestPlanFromEvents(events: SessionEventEnvelope[]): PlanEntry[] | null {
   for (let i = events.length - 1; i >= 0; i -= 1) {
     const payload = events[i].payload;
-    if (payload.type === "plan_update") return payload.data.entries;
+    if (payload.type === "plan_update" && !payload.data.subagent_id) {
+      return payload.data.entries;
+    }
   }
   return null;
 }
@@ -848,7 +976,7 @@ export function latestPlanFromEvents(events: SessionEventEnvelope[]): PlanEntry[
 export function latestUsageFromEvents(events: SessionEventEnvelope[]): SessionUsage | null {
   for (let i = events.length - 1; i >= 0; i -= 1) {
     const payload = events[i].payload;
-    if (payload.type === "usage_updated") {
+    if (payload.type === "usage_updated" && !payload.data.subagent_id) {
       return {
         used_tokens: payload.data.used_tokens,
         context_size: payload.data.context_size,

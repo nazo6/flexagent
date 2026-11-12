@@ -76,7 +76,7 @@
 | G7  | P1   | 診断                   | agent stderr は debug ログのみ。incidents / health / `fxg doctor` / `fxg logs` 未実装                                                    | 起動失敗・ターン失敗の原因が追えない                                          |
 | G8  | P1   | 完了通知               | Web Push は permission / elicitation のみ                                                                                                | 長いターンの完了を待てない                                                    |
 | G9  | P2   | Windows プロセスツリー | ACP プロセスは SDK が spawn し、Windows では root のみ kill。fxg の Job Object に載っていない                                            | ラッパー / MCP / LSP の子プロセスが残る可能性                                 |
-| G10 | P2   | 子セッション           | opencode の `child-session-updates` や agy の multi-agent 機能で、未登録の ACP session ID からの更新・承認を扱えない                     | subagent / teamwork の承認が cancel される可能性                              |
+| G10 | P2   | 子セッション           | 未知の ACP session ID からの要求は単一コンテキストへフォールバック済み。子の正規化・表示は未対応                                         | 子の会話が親に混ざる / 見えない。承認の出所が分からない                       |
 | G11 | P2   | ツール出力             | `ToolCallContent::Content` / `Terminal` を捨て、`terminal_id` とツールカードを紐付けない                                                 | ツールの詳細が見えない場合がある                                              |
 | G12 | P2   | 既定値                 | `session-prefs` は agent + mode のみ                                                                                                     | モデル / thinking level を毎回選ぶ                                            |
 | G13 | P2   | CLI                    | TUI 廃止。`session prompt --wait` はポーリングで非ストリーミング                                                                         | ターミナル中心だと物足りない                                                  |
@@ -629,6 +629,12 @@ opencode は `_meta.opencode/child-session-updates`、agy は `teamwork` /
 - **検証**: 実機で opencode の `task` / agy の `teamwork` を実行し、
   承認が親の Inbox に出ることを確認する。擬似 ACP エージェントで
   子 session ID の permission を返す統合テストも追加する。
+
+> **2026-11-12 追記**: 中期案を
+> [`2026-11-12-subagents.md`](./2026-11-12-subagents.md) として実装した。
+> opencode の vendor 拡張と ACP 標準 subagents RFD を同じ正規化イベントに
+> 載せ、子は独立セッションにせず、親タイムラインのサブエージェントブロックと
+> 詳細ビューで表示する。agy は子セッションを公開しないため対象外。
 
 ### 7.3 G11: ツール出力の完全化
 

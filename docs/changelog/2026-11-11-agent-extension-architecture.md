@@ -48,18 +48,18 @@ Tier 1 はデータのみ、Tier 3 は driver 1個の追加で完結する。
 
 ### 2.0 決定サマリ
 
-| ID  | 決定                                                                                        |
-| :-- | :------------------------------------------------------------------------------------------ |
-| D1  | エージェント実装を Tier 1 / Tier 2 / Tier 3 の3層に分ける。                                 |
-| D2  | エージェント固有の知識は `AgentCatalog` と extension に閉じ込める。                         |
-| D3  | `AgentLaunchSpec` は program / args / env だけの純粋データとし、warm pool のキーにする。    |
-| D4  | Tier 2 は `AcpDriver` を変更せず、汎用デコレータ `ExtendedAcpDriver` で合成する。           |
-| D5  | 能力情報の上書きは自由な JSON ではなく、型付きの `CapabilityOverlay` で行う。               |
-| D6  | ユーザー定義のカスタム ACP エージェントは Tier 1 のまま維持する。                           |
-| D7  | カスタム定義から builtin extension を参照する `extension` フィールドは Phase 4 で追加する。 |
-| D8  | Tier 3 の builtin ID は予約し、カスタム定義による上書きを拒否する。                         |
-| D9  | プラグインは将来 `AgentProvider` のアダプタとして実装し、Rust trait を ABI にしない。       |
-| D10 | docs と実装は同一 PR で管理し、Phase 1 から順に積み上げる。                                 |
+| ID  | 決定                                                                                                                                             |
+| :-- | :----------------------------------------------------------------------------------------------------------------------------------------------- |
+| D1  | エージェント実装を Tier 1 / Tier 2 / Tier 3 の3層に分ける。                                                                                      |
+| D2  | エージェント固有の知識は `AgentCatalog` と extension に閉じ込める。                                                                              |
+| D3  | `AgentLaunchSpec` は program / args / env / ACP options の純粋データとし、warm pool のキーにする。                                               |
+| D4  | Tier 2 は**エージェント別の分岐**を `AcpDriver` に入れない。ACP の共有機能は汎用 seam として `AcpDriver` に置き、固有部分は extension に閉じる。 |
+| D5  | 能力情報の上書きは自由な JSON ではなく、型付きの `CapabilityOverlay` で行う。                                                                    |
+| D6  | ユーザー定義のカスタム ACP エージェントは Tier 1 のまま維持する。                                                                                |
+| D7  | カスタム定義から builtin extension を参照する `extension` フィールドは Phase 4 で追加する。                                                      |
+| D8  | Tier 3 の builtin ID は予約し、カスタム定義による上書きを拒否する。                                                                              |
+| D9  | プラグインは将来 `AgentProvider` のアダプタとして実装し、Rust trait を ABI にしない。                                                            |
+| D10 | docs と実装は同一 PR で管理し、Phase 1 から順に積み上げる。                                                                                      |
 
 ### 2.1 全体構造
 
@@ -222,6 +222,35 @@ pub enum ConfigOptionPatch {
 
 モデル名の上書きは「`Select(id)` の値は変えず、表示名や選択肢だけを差し替える」
 ことが多いため、`Merge` を基本にすると安全である。
+
+#### 2.3.1 ACP edge hooks（サブエージェント）
+
+ACP のサブエージェント対応では、extension が「ACP 接続の縁」に必要な情報を
+提供し、`AcpDriver` が受信・順序・正規化を担う。extension に追加するのは
+次の純データ / トレイトである（型の正はソース）。
+
+- `AcpExtensionOptions`:
+  - `initialize` に足す `clientCapabilities._meta`
+  - 受信する独自通知の method 名
+  - 有効にする `AcpCapabilitySet`（`subagents` / 将来の ACP capability）
+- `AcpNotificationParser`: 独自通知の `(method, params)` を、子セッションの
+  更新 (`AcpChildUpdate`) へ変換する。
+- `SessionExtension` の追加フック: 生の ACP 通知の観測、子ラベル付与などの
+  正規化後のイベント処理。
+
+`AcpDriver` 側の責務は次のとおり。
+
+- root 宛の通知と子宛の通知を分離し、子は子ごとの dynamic handler で受ける。
+- 独自通知は extension が宣言した method だけを受ける
+  （builder の catch-all は root の `session/update` を奪うので使わない）。
+- 子の `cwd` を `SessionContexts` に登録し、fs / terminal / permission 要求を
+  子のコンテキストで解決する。
+- 子イベントを親と同じストリーミング結合に合流させ、`subagent_id` を付ける。
+
+opencode の vendor 拡張は `OpenCodeExtension` に、ACP 標準の subagents RFD は
+`fxg-acp` のコアに置く。ACP の必要な unstable feature は依存で常に有効化し、
+広告する capability は `AcpCapability` / `AcpCapabilitySet` と実行時設定で
+制御する。これにより、`AcpDriver` にエージェント名の分岐を足さない。
 
 ### 2.4 起動解決
 

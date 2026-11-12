@@ -41,7 +41,9 @@ pub async fn discover_auth_methods(spec: &AgentLaunchSpec) -> Result<Vec<AgentAu
                 let initialize = cx
                     .send_request(
                         InitializeRequest::new(ProtocolVersion::V1)
-                            .client_capabilities(client_capabilities())
+                            .client_capabilities(client_capabilities(
+                                &crate::agent::extension::AcpExtensionOptions::default(),
+                            ))
                             .client_info(Implementation::new("fxg", env!("CARGO_PKG_VERSION"))),
                     )
                     .block_task()
@@ -80,7 +82,9 @@ pub async fn authenticate(spec: &AgentLaunchSpec, method_id: &str) -> Result<()>
                 let _initialize = cx
                     .send_request(
                         InitializeRequest::new(ProtocolVersion::V1)
-                            .client_capabilities(client_capabilities())
+                            .client_capabilities(client_capabilities(
+                                &crate::agent::extension::AcpExtensionOptions::default(),
+                            ))
                             .client_info(Implementation::new("fxg", env!("CARGO_PKG_VERSION"))),
                     )
                     .block_task()
@@ -116,7 +120,9 @@ pub async fn logout(spec: &AgentLaunchSpec) -> Result<()> {
                 let initialize = cx
                     .send_request(
                         InitializeRequest::new(ProtocolVersion::V1)
-                            .client_capabilities(client_capabilities())
+                            .client_capabilities(client_capabilities(
+                                &crate::agent::extension::AcpExtensionOptions::default(),
+                            ))
                             .client_info(Implementation::new("fxg", env!("CARGO_PKG_VERSION"))),
                     )
                     .block_task()

@@ -28,12 +28,14 @@ async fn session_new_auth_required_returns_advertised_methods() {
             program: Some(mock_agent_bin()),
             args: vec!["--mode".to_owned(), "auth-required".to_owned()],
             env: Vec::new(),
+            acp: Default::default(),
         },
         extra_args: Vec::new(),
         initial_mode: None,
         resume: None,
         fork_from: None,
         initial_config: Vec::new(),
+        acp_parser: None,
     };
 
     let err = match driver.start_session(request, events).await {

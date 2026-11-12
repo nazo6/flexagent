@@ -42,6 +42,10 @@ pub(crate) struct LaunchKey {
     program: PathBuf,
     args: Vec<String>,
     env: Vec<(String, String)>,
+    /// Canonical form of the ACP connection options (client capabilities,
+    /// vendor metadata and notification methods). A settings change must not
+    /// reuse a process initialized with the old capabilities.
+    acp: String,
 }
 
 impl LaunchKey {
@@ -50,11 +54,23 @@ impl LaunchKey {
         let mut env = spec.env.clone();
         // Normalize so that environment variable ordering does not produce a different key
         env.sort();
+        let acp = serde_json::json!({
+            "meta": spec.acp.client_meta.as_ref().map(|meta| meta.as_value()),
+            "notifications": &spec.acp.notifications,
+            "capabilities": spec
+                .acp
+                .capabilities
+                .iter()
+                .map(crate::agent::extension::AcpCapability::as_str)
+                .collect::<Vec<_>>(),
+        })
+        .to_string();
         Self {
             agent_id: spec.agent_id.clone(),
             program,
             args: spec.args.clone(),
             env,
+            acp,
         }
     }
 
@@ -207,6 +223,7 @@ mod tests {
             program: PathBuf::from("agent.exe"),
             args: Vec::new(),
             env: Vec::new(),
+            acp: String::new(),
         }
     }
 

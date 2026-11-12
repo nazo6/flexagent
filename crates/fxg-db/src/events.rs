@@ -517,6 +517,7 @@ pub(crate) async fn apply_projections(
             summary,
             options,
             details,
+            ..
         } => {
             let details_json = serde_json::to_string(&StoredPermissionDetails {
                 details: details.clone(),
@@ -584,6 +585,7 @@ pub(crate) async fn apply_projections(
             mode,
             requested_schema,
             tool_call_id,
+            ..
         } => {
             let schema_json = serde_json::to_string(requested_schema)?;
             sqlx::query!(
@@ -646,6 +648,7 @@ pub(crate) async fn apply_projections(
             used_tokens,
             context_size,
             cost,
+            subagent_id: None,
         } => {
             let usage_json = serde_json::to_string(&SessionUsage {
                 used_tokens: *used_tokens,
@@ -739,6 +742,12 @@ pub(crate) async fn apply_projections(
         | UnifiedEventPayload::TerminalOutput { .. }
         | UnifiedEventPayload::TerminalInput { .. }
         | UnifiedEventPayload::ProvisioningLog { .. }
+        | UnifiedEventPayload::UsageUpdated {
+            subagent_id: Some(_),
+            ..
+        }
+        | UnifiedEventPayload::SubagentUpdated { .. }
+        | UnifiedEventPayload::SubagentMessage { .. }
         | UnifiedEventPayload::TurnEnded { .. }
         | UnifiedEventPayload::CompactionUpdated { .. } => {}
     }

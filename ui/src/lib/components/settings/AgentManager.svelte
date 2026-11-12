@@ -62,6 +62,7 @@
     args: "",
     env: "",
     extension: "",
+    subagents: true,
   });
 
   const busy = $derived(busyLabel !== null || importingId !== null);
@@ -75,9 +76,13 @@
     new Set(agents.filter((agent) => agent.custom_config === null).map((agent) => agent.id)),
   );
   /** Built-in extensions that a custom ACP launch can reference. */
-  const extensionChoices = $derived(
-    agents.filter((agent) => agent.custom_config === null && agent.backend === "acp_extended"),
-  );
+  const extensionChoices = $derived.by(() => {
+    const byId = new Map<string, string>();
+    for (const agent of agents) {
+      if (agent.extension !== null) byId.set(agent.extension, agent.name);
+    }
+    return [...byId].map(([id, name]) => ({ id, name }));
+  });
 
   onMount(() => {
     void loadAgents();
@@ -185,6 +190,7 @@
       args: "",
       env: "",
       extension: "",
+      subagents: true,
     };
   }
 
@@ -210,6 +216,7 @@
       args: (config?.args ?? []).join(" "),
       env: formatEnv(config?.env ?? {}, config?.env_secrets ?? {}),
       extension: config?.extension ?? "",
+      subagents: agent.capabilities.subagents ?? true,
     };
     agentTab = "custom";
     agentOpen = true;
@@ -262,6 +269,7 @@
         args: customForm.args.split(/\s+/).filter((value) => value !== ""),
         ...parseEnv(customForm.env),
         extension: customForm.extension === "" ? null : customForm.extension,
+        capabilities: { subagents: customForm.subagents },
         icon: customIcon,
         origin: customOrigin,
       });
@@ -326,6 +334,16 @@
             <div class="mt-0.5 flex flex-wrap items-center gap-1.5">
               <Badge variant="secondary" class="text-[11px]">
                 {agentBackendLabel(agent.backend)}
+              </Badge>
+              {#if agent.extension !== null}
+                <Badge variant="outline" class="text-[11px]">
+                  {m.settings_agent_extension()}: {agent.extension}
+                </Badge>
+              {/if}
+              <Badge variant="outline" class="text-[11px]">
+                {agent.capabilities.subagents === false
+                  ? m.settings_agent_capabilities_subagents_off()
+                  : m.settings_agent_capabilities_subagents()}
               </Badge>
               {#each agent.sources as source (source)}
                 <Badge variant="outline" class="text-[11px]">{agentSourceLabel(source)}</Badge>
@@ -607,6 +625,31 @@
         <p class="text-muted-foreground text-[11px]">
           {m.settings_agent_extension_hint()}
         </p>
+      </div>
+      <div class="flex items-start justify-between gap-3">
+        <div class="flex min-w-0 flex-col gap-0.5">
+          <Label for="custom-subagents">{m.settings_agent_capabilities_subagents()}</Label>
+          <p class="text-muted-foreground text-[11px]">
+            {m.settings_agent_capabilities_subagents_hint()}
+          </p>
+        </div>
+        <button
+          id="custom-subagents"
+          type="button"
+          role="switch"
+          aria-checked={customForm.subagents}
+          aria-label={m.settings_agent_capabilities_subagents()}
+          class={customForm.subagents
+            ? "bg-signal relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors"
+            : "bg-muted relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors"}
+          onclick={() => (customForm.subagents = !customForm.subagents)}
+        >
+          <span
+            class={customForm.subagents
+              ? "bg-background size-4 translate-x-4 rounded-full shadow transition-transform"
+              : "bg-background size-4 translate-x-0.5 rounded-full shadow transition-transform"}
+          ></span>
+        </button>
       </div>
       <div class="grid gap-1.5">
         <Label for="custom-command">{m.settings_command()}</Label>

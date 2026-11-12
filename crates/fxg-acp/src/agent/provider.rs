@@ -72,6 +72,14 @@ pub trait AgentProvider: Send + Sync {
     fn backend(&self) -> AgentBackend {
         AgentBackend::Acp
     }
+
+    /// Stable built-in extension ID applied by this provider (`None` = ACP only).
+    ///
+    /// Custom definitions reference extensions by this ID, so it must not be
+    /// derived from the agent ID at the call site.
+    fn extension_id(&self) -> Option<&'static str> {
+        None
+    }
 }
 
 /// A provider built from static data.
@@ -79,6 +87,7 @@ pub struct StaticProvider {
     definition: AgentDefinition,
     preset: Option<LaunchPreset>,
     backend: AgentBackend,
+    extension_id: Option<&'static str>,
 }
 
 impl StaticProvider {
@@ -88,12 +97,27 @@ impl StaticProvider {
             definition,
             preset,
             backend: AgentBackend::Acp,
+            extension_id: None,
         }
     }
 
     /// Replaces the runtime backend (for example an ACP extension).
+    ///
+    /// Providers that declare an extension should prefer [`Self::with_extension`]
+    /// so the adapters and the extension ID stay in sync.
     pub fn with_backend(mut self, backend: AgentBackend) -> Self {
         self.backend = backend;
+        self
+    }
+
+    /// Applies a built-in extension and records its stable ID.
+    pub fn with_extension(
+        mut self,
+        extension_id: &'static str,
+        extension: Arc<dyn AgentExtension>,
+    ) -> Self {
+        self.extension_id = Some(extension_id);
+        self.backend = AgentBackend::AcpExtended(extension);
         self
     }
 }
@@ -109,5 +133,9 @@ impl AgentProvider for StaticProvider {
 
     fn backend(&self) -> AgentBackend {
         self.backend.clone()
+    }
+
+    fn extension_id(&self) -> Option<&'static str> {
+        self.extension_id
     }
 }
