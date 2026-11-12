@@ -367,7 +367,7 @@
 
 <ComposerCard>
   {#snippet above()}
-    <div class="flex flex-col gap-2 px-1 pt-1">
+    <div class="flex flex-col gap-2 px-1">
       {#if isStopped}
         <div
           class="border-warn/25 bg-warn-soft/40 text-warn flex items-center gap-2 rounded-md border px-3 py-1 text-[13px]"

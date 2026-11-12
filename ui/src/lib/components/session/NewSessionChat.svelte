@@ -941,7 +941,7 @@
 
     <ComposerCard>
       {#snippet above()}
-        <div class="flex flex-wrap items-center gap-1.5 px-1 pt-1">
+        <div class="flex flex-wrap items-center gap-1.5 px-1">
           <PickerPill
             label={m.new_session_project()}
             value={projectLabel}

@@ -64,7 +64,7 @@
   ondragover={onDragOver}
   {ondrop}
   class={cn(
-    "placeholder:text-muted-foreground w-full resize-none overflow-y-auto bg-transparent px-2 py-3 text-sm leading-relaxed outline-none disabled:cursor-not-allowed disabled:opacity-50",
+    "placeholder:text-muted-foreground w-full resize-none overflow-y-auto bg-transparent px-2 py-2 text-sm leading-relaxed outline-none disabled:cursor-not-allowed disabled:opacity-50",
     className,
   )}
   style="min-height: {minHeight}px; max-height: {maxHeight}px;"></textarea>
