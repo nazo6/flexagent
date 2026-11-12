@@ -46,6 +46,8 @@
 
   const isHub = $derived(sync.connection.role === "hub");
   const onlineNodes = $derived(sync.nodes.filter((node) => node.is_online));
+  /** Node settings need a target; through the hub that means an online node. */
+  const nodeScopeAvailable = $derived(!isHub || onlineNodes.length > 0);
 
   /**
    * Settings scopes: the hub (server), a node (machine), and this browser.
@@ -113,9 +115,13 @@
     {
       id: "node",
       label: m.settings_scope_node(),
-      description: isHub ? m.settings_scope_node_desc_hub() : m.settings_scope_node_desc(),
+      description: !nodeScopeAvailable
+        ? m.settings_scope_node_unavailable()
+        : isHub
+          ? m.settings_scope_node_desc_hub()
+          : m.settings_scope_node_desc(),
       icon: CpuIcon,
-      disabled: false,
+      disabled: !nodeScopeAvailable,
     },
     {
       id: "browser",
@@ -163,14 +169,22 @@
 
   // Keep the location valid when the role or the available tabs change.
   $effect(() => {
+    let changed = false;
     if (activeScope === "hub" && !isHub) {
       activeScope = "node";
+      changed = true;
+    }
+    // Without an online node there is nothing to edit in the node scope.
+    if (activeScope === "node" && !nodeScopeAvailable) {
+      activeScope = "hub";
+      changed = true;
     }
     const tabs = tabsByScope[activeScope];
     if (!tabs.some((tab) => tab.id === activeTab)) {
       activeTab = tabs[0]?.id ?? "general";
-      writeUrl();
+      changed = true;
     }
+    if (changed) writeUrl();
   });
 
   function writeUrl(): void {
