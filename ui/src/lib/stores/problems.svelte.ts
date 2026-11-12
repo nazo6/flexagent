@@ -10,13 +10,15 @@ import {
 /**
  * Central store for user-visible problems.
  *
- * Errors reported here survive navigation and are rendered by `ErrorBanner`,
+ * Errors reported here survive navigation and are rendered by `ProblemCenter`,
  * unlike toasts which disappear. Repeated failures with the same context /
  * code / message replace the existing entry instead of piling up.
  */
 export class ProblemStore {
   /** Newest first. */
   problems = $state<AppProblem[]>([]);
+  /** Whether the problem center sheet is open. */
+  centerOpen = $state(false);
 
   #counter = 0;
 
@@ -50,6 +52,16 @@ export class ProblemStore {
     this.problems = [];
   }
 
+  /** Opens the problem center. */
+  openCenter(): void {
+    this.centerOpen = true;
+  }
+
+  /** Closes the problem center. */
+  closeCenter(): void {
+    this.centerOpen = false;
+  }
+
   /** Replaces an identical problem (same key) or prepends a new one. */
   #upsert(problem: AppProblem): AppProblem {
     const others = this.problems.filter((candidate) => candidate.key !== problem.key);
@@ -58,7 +70,7 @@ export class ProblemStore {
   }
 }
 
-/** Singleton consumed by `ErrorBanner`, stores and `+layout.svelte`. */
+/** Singleton consumed by `ProblemCenter`, stores and `+layout.svelte`. */
 export const problems = new ProblemStore();
 
 export type { AppProblem, ProblemSeverity };

@@ -743,6 +743,7 @@ impl NodeClient {
             extra_args: None,
             fork: Some(SessionForkSpec {
                 from_session_id: session_id.into(),
+                up_to_node_seq: None,
             }),
         };
         let response = self

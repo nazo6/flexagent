@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type {
   SessionEventEnvelope,
   StreamDeltaPayload,
@@ -39,6 +39,7 @@ function emptySources(events: SessionEventEnvelope[] = []): TimelineSources & Mu
     subagentByThought: new Map(),
     toolProgress: new Map(),
     terminalDeltas: new Map(),
+    thoughtTimes: new Map(),
     streamKeys: [],
   };
 }
@@ -140,6 +141,35 @@ describe("streaming agent messages", () => {
       text: "Hello world!",
       streaming: false,
     });
+  });
+
+  it("measures how long a thought was streamed", () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(1_000);
+      const sources = emptySources();
+      applyStreamDelta(sources, {
+        delta_type: "agent_thought_delta",
+        thought_id: "t1",
+        text_delta: "thinking",
+      });
+
+      let thought = buildTimelineItems(sources)[0];
+      expect(thought).toMatchObject({ kind: "thought", startedAt: 1_000, endedAt: null });
+
+      vi.setSystemTime(4_500);
+      const complete = makeEvent(1, {
+        type: "agent_thought",
+        data: { thought_id: "t1", text: "thinking", is_complete: true },
+      });
+      insertEventSorted(sources.events, complete);
+      clearStreamBuffers(complete, sources);
+
+      thought = buildTimelineItems(sources)[0];
+      expect(thought).toMatchObject({ kind: "thought", startedAt: 1_000, endedAt: 4_500 });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

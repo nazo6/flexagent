@@ -286,10 +286,17 @@ fxg 側で履歴を組み立て直す Replay フォールバックは行いま�
 
 - 対象は **同じエージェント・同じノード上にあるセッション** のみです。現在のセッション全体を
   分岐し、新しい `session_id` を作成します。任意のメッセージ地点を指定した Fork は
-  ACP に存在しないため提供しません。
+  ACP に存在しないため、現時点では提供しません。
 - エージェントが `sessionCapabilities.fork` と `loadSession` の両方を広告した場合だけ
   実行できます。未対応の場合は `FORK_UNSUPPORTED` を返し、Web UI では Fork ボタンを
-  表示しません（`CapabilitiesUpdated.fork_supported` を `sessions.fork_supported` に投影）。
+  表示しません（`CapabilitiesUpdated.fork_scope` を `sessions.fork_scope` に投影）。
+- `fork_scope` は `none` / `last` / `message` の3値です。ACP ネイティブの
+  `session/fork` は現在の会話末尾しか分岐できないため、現行実装は `last` を広告します。
+  `message` は将来の ACP 拡張（メッセージ境界の指定）に対応したエージェントだけが
+  広告できます。
+- `SessionForkSpec.up_to_node_seq` は Fork 元の `node_seq` を指定します。`last` の
+  セッションでは末尾以外の値を指定すると `FORK_SCOPE_UNSUPPORTED` を返します。
+  `message` 対応エージェントでは、この値までを Fork 先のイベントログに複製します。
 - 新しいセッションは `parent_session_id` を系譜として記録し、Fork 元の会話イベント
   （ユーザー／エージェントメッセージ、思考、ツール呼び出し、計画、ターミナル出力、
   サブエージェント）を新しいイベントログへ複製します。会話の実体はエージェントが

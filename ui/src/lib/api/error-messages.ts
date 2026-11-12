@@ -69,6 +69,8 @@ export function errorCodeMessage(
       return m.error_worktree_conflict();
     case "FORK_UNSUPPORTED":
       return m.error_fork_unsupported();
+    case "FORK_SCOPE_UNSUPPORTED":
+      return m.error_fork_scope_unsupported();
     case "SYNC_BACKLOG":
       return m.error_sync_backlog();
     case "DB_CORRUPT":

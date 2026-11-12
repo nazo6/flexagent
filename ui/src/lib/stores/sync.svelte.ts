@@ -1,3 +1,4 @@
+import { SvelteMap } from "svelte/reactivity";
 import { ApiError } from "#lib/api/errors.ts";
 import type {
   ClientWsMessage,
@@ -101,16 +102,20 @@ export class SyncStore {
   /** Currently open session (WS priority delivery hint). */
   activeSessionId = $state<string | null>(null);
   /** Prompts sent with no `CommandResult` yet (Pending Queue). */
-  pendingPrompts = $state(new Map<string, PendingPrompt>());
+  pendingPrompts = new SvelteMap<string, PendingPrompt>();
   /**
    * Progress logs for ephemeral VM provisioning (ephemeral; not persisted).
    *
    * The server delivers `stderr` output from before the node's `node.db` exists
    * as `HubWsMessage::ProvisioningLog`. It is not restored on reconnect.
+   *
+   * These (and `pendingPrompts`) are [`SvelteMap`]: Svelte 5 does not proxy
+   * `Map` inside `$state`, so mutating one would not re-render its consumers.
    */
-  provisioningLogs = $state(new Map<string, string[]>());
+  provisioningLogs = new SvelteMap<string, string[]>();
 
-  #timelines = $state(new Map<string, SessionTimeline>());
+  /** Identity cache for the per-session timelines (not reactive state). */
+  #timelines = new Map<string, SessionTimeline>();
   #ws: WebSocket | null = null;
   #stopped = true;
   #reconnectDelayMs = 1_000;

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n                UPDATE sessions\n                   SET current_mode = COALESCE(?, current_mode),\n                       available_modes_json = COALESCE(?, available_modes_json),\n                       available_commands_json = COALESCE(?, available_commands_json),\n                       config_options_json = COALESCE(?, config_options_json),\n                       fork_scope = COALESCE(?, fork_scope),\n                       updated_at = MAX(updated_at, ?),\n                       last_node_seq = MAX(last_node_seq, ?)\n                 WHERE session_id = ?\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 8
+    },
+    "nullable": []
+  },
+  "hash": "c0ec2454c9a84676b3205b0a17332b2a052f63b2bdf36a3dd9ed40bb3b27c7e9"
+}

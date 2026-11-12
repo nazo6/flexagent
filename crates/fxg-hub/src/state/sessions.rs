@@ -321,6 +321,7 @@ impl HubState {
                     fork_from_session_id: fork_source
                         .as_ref()
                         .map(|source| source.session_id.clone()),
+                    fork_up_to_node_seq: request.fork.as_ref().and_then(|fork| fork.up_to_node_seq),
                 },
             )
             .await?;

@@ -63,6 +63,7 @@ impl ApiError {
             | ErrorCode::CommandDuplicate
             | ErrorCode::ResumeRequired
             | ErrorCode::ForkUnsupported
+            | ErrorCode::ForkScopeUnsupported
             | ErrorCode::AuthRequired
             | ErrorCode::WorktreeConflict
             | ErrorCode::AgentNotInstalled

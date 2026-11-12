@@ -9,6 +9,7 @@
   import { cn } from "#lib/utils.ts";
   import { m } from "#lib/paraglide/messages.js";
   import ConnectionMenu from "#lib/components/ConnectionMenu.svelte";
+  import ProblemBadge from "#lib/components/ProblemBadge.svelte";
   import SessionActionsMenu from "#lib/components/session/SessionActionsMenu.svelte";
   import type { SessionSummary } from "#lib/generated/bindings.ts";
   import { layoutState } from "#lib/stores/layout.svelte.ts";
@@ -178,7 +179,7 @@
     </a>
     <button
       type="button"
-      class="hover:bg-accent text-muted-foreground hover:text-foreground hidden size-7 items-center justify-center rounded-md border md:flex"
+      class="hover:bg-accent text-muted-foreground hover:text-foreground hidden size-7 items-center justify-center rounded-md border lg:flex"
       onclick={() => layoutState.toggleSidebar()}
       title={m.shell_hide_sidebar()}
       aria-label={m.shell_hide_sidebar()}
@@ -433,8 +434,9 @@
     {/if}
   </div>
 
-  <!-- Footer: connection target selector with its link status -->
-  <div class="border-border border-t p-2">
+  <!-- Footer: problems and the connection target selector -->
+  <div class="border-border flex flex-col gap-2 border-t p-2">
+    <ProblemBadge label class="w-full justify-start" />
     <ConnectionMenu variant="scope" />
   </div>
 </aside>

@@ -10,7 +10,7 @@
   import RefreshCwIcon from "@lucide/svelte/icons/refresh-cw";
   import TriangleAlertIcon from "@lucide/svelte/icons/triangle-alert";
 
-  let { sessionId }: { sessionId: string } = $props();
+  let { sessionId, fill = false }: { sessionId: string; fill?: boolean } = $props();
 
   type Status = "disconnected" | "connecting" | "connected" | "exited" | "blocked" | "failed";
 
@@ -183,7 +183,7 @@
   });
 </script>
 
-<div class="flex flex-col gap-2">
+<div class={fill ? "flex h-full min-h-0 flex-col gap-2" : "flex flex-col gap-2"}>
   <div class="flex flex-wrap items-center gap-2 text-[13px]">
     <Badge
       variant={status === "connected"
@@ -238,7 +238,9 @@
 
   <div
     bind:this={container}
-    class="h-[50svh] min-h-48 w-full overflow-hidden rounded-lg border border-border bg-[#17140f] p-1.5"
+    class={fill
+      ? "min-h-0 w-full flex-1 overflow-hidden rounded-lg border border-border bg-[#17140f] p-1.5"
+      : "h-[50svh] min-h-48 w-full overflow-hidden rounded-lg border border-border bg-[#17140f] p-1.5"}
   ></div>
 
   <!-- Mobile virtual key bar (hidden on desktop) -->

@@ -246,7 +246,7 @@ impl AgentDriver for MockAgent {
                         available_modes: capabilities.available_modes,
                         available_commands: Vec::new(),
                         config_options: capabilities.config_options,
-                        fork_supported: None,
+                        fork_scope: None,
                     }
                 )),
                 "send capabilities to the probe"

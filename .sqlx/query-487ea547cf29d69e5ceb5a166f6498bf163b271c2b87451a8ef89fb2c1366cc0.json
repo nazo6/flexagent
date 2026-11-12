@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n        SELECT session_id AS \"session_id!\",\n               project_id, node_id, local_path, git_branch,\n               is_worktree AS \"is_worktree: bool\",\n               agent_id, agent_session_id, parent_session_id AS \"parent_session_id: SessionId\",\n               title, status AS \"status: SessionStatus\", current_mode,\n               permission_policy AS \"permission_policy: PermissionPolicy\", usage_json,\n               last_node_seq, fork_supported AS \"fork_supported: bool\", created_at, updated_at,\n               archived_at\n          FROM sessions\n         WHERE deleted_at IS NULL\n         ORDER BY updated_at DESC\n        ",
+  "query": "\n        SELECT session_id AS \"session_id!\",\n               project_id, node_id, local_path, git_branch,\n               is_worktree AS \"is_worktree: bool\",\n               agent_id, agent_session_id, parent_session_id AS \"parent_session_id: SessionId\",\n               title, status AS \"status: SessionStatus\", current_mode,\n               permission_policy AS \"permission_policy: PermissionPolicy\", usage_json,\n               last_node_seq, fork_scope AS \"fork_scope: ForkScope\", created_at, updated_at,\n               archived_at\n          FROM sessions\n         WHERE deleted_at IS NULL\n         ORDER BY updated_at DESC\n        ",
   "describe": {
     "columns": [
       {
@@ -169,13 +169,13 @@
         }
       },
       {
-        "name": "fork_supported: bool",
+        "name": "fork_scope: ForkScope",
         "ordinal": 15,
-        "type_info": "Integer",
+        "type_info": "Text",
         "origin": {
           "Table": {
             "table": "sessions",
-            "name": "fork_supported"
+            "name": "fork_scope"
           }
         }
       },
@@ -238,5 +238,5 @@
       true
     ]
   },
-  "hash": "4e7c1638b83c0dac87c07be230586fc84d5f24eb801235d68d66b91bbed1d858"
+  "hash": "487ea547cf29d69e5ceb5a166f6498bf163b271c2b87451a8ef89fb2c1366cc0"
 }

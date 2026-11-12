@@ -64,7 +64,7 @@ SessionAgentBound     → sessions.agent_session_id
 StatusChanged         → sessions.status
 CapabilitiesUpdated   → sessions.current_mode / available_modes_json /
                         available_commands_json / config_options_json /
-                        fork_supported
+                        fork_scope
 UsageUpdated          → sessions.usage_json (最新の used / size / cost。
                         累積ではなく最新の `usage_update` を上書き)
 すべてのイベント      → sessions.last_node_seq = 適用済み最大 node_seq

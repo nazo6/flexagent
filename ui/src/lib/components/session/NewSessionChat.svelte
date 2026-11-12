@@ -122,6 +122,7 @@
 
   // Fork inheritance
   let forkSessionId = $state("");
+  let forkUpToNodeSeq = $state<number | null>(null);
 
   // Launch options
   let sessionMode = $state<SessionModePreference>("default");
@@ -309,6 +310,9 @@
     const forkSession = page.url.searchParams.get("fork_session");
     if (forkSession) {
       forkSessionId = forkSession;
+      const forkUptoRaw = page.url.searchParams.get("fork_upto");
+      const forkUpto = forkUptoRaw === null ? Number.NaN : Number(forkUptoRaw);
+      forkUpToNodeSeq = Number.isSafeInteger(forkUpto) && forkUpto >= 0 ? forkUpto : null;
     }
     const agentParam = page.url.searchParams.get("agent");
     if (agentParam) {
@@ -726,6 +730,7 @@
         fork: forkSessionId
           ? {
               from_session_id: forkSessionId,
+              up_to_node_seq: forkUpToNodeSeq,
             }
           : null,
       });
@@ -928,6 +933,7 @@
           class="h-6 shrink-0 px-2 text-[13px]"
           onclick={() => {
             forkSessionId = "";
+            forkUpToNodeSeq = null;
           }}
         >
           <XIcon class="mr-1 size-3.5" />

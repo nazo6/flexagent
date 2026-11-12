@@ -76,7 +76,7 @@ function session(
     current_mode: null,
     usage: null,
     last_node_seq: 1,
-    fork_supported: false,
+    fork_scope: "none",
     created_at: updated_at,
     updated_at,
     archived_at: null,

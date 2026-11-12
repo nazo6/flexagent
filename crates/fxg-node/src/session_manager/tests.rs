@@ -1085,6 +1085,46 @@ async fn fork_uses_native_session_fork() {
 }
 
 #[tokio::test]
+async fn fork_rejects_a_boundary_before_the_latest_event() {
+    let (manager, mock, dir) = setup().await;
+    let (repo, source_id) = setup_repo_session(&manager, &dir).await;
+    manager
+        .bus()
+        .record(
+            &source_id,
+            UnifiedEventPayload::SessionAgentBound {
+                agent_session_id: "agent-source-boundary".to_owned(),
+            },
+        )
+        .await
+        .expect("bind agent session");
+
+    let child_id = fxg_protocol::util::uuid_v7();
+    let err = manager
+        .start_session(StartSessionParams {
+            command_id: &CommandId::from("c-fork-boundary"),
+            session_id: &child_id,
+            local_path: &repo,
+            agent_id: "mock",
+            initial_prompt: None,
+            initial_config: &[],
+            mode: None,
+            extra_args: None,
+            fork_from_session_id: Some(&source_id),
+            fork_up_to_node_seq: Some(1),
+        })
+        .await
+        .expect_err("ACP-native forks cannot fork before the latest event");
+    assert!(matches!(err, NodeError::ForkScopeUnsupported(_)));
+    assert!(
+        mock.starts()
+            .iter()
+            .all(|start| start.session_id != child_id),
+        "the rejected fork must not start an agent session"
+    );
+}
+
+#[tokio::test]
 async fn fork_requires_agent_session_binding() {
     let (manager, _mock, dir) = setup().await;
     let (_repo, source_id) = setup_repo_session(&manager, &dir).await;
@@ -1136,6 +1176,7 @@ async fn start_session_with_fork_from_uses_native_fork() {
             mode: None,
             extra_args: None,
             fork_from_session_id: Some(&source_id),
+            fork_up_to_node_seq: None,
         })
         .await
         .expect("start forked session");
@@ -1632,6 +1673,7 @@ async fn start_session_uses_initial_prompt_for_title() {
             mode: None,
             extra_args: None,
             fork_from_session_id: None,
+            fork_up_to_node_seq: None,
         })
         .await
         .expect("start");

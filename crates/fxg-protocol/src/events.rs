@@ -23,8 +23,8 @@ use crate::{EventId, NodeId, ProjectId, SessionId};
 use crate::common::{
     AttachmentMeta, ClientSource, CommandInfo, CompactionStatus, ConfigOptionInfo,
     ElicitationAction, ElicitationContent, ElicitationMode, ElicitationSchema, EventType, FileDiff,
-    ModeInfo, PermissionOption, PlanEntry, RawJson, ResolvedBy, SessionStatus, ToolCallKind,
-    ToolCallStatus, TurnStopReason, UsageCost,
+    ForkScope, ModeInfo, PermissionOption, PlanEntry, RawJson, ResolvedBy, SessionStatus,
+    ToolCallKind, ToolCallStatus, TurnStopReason, UsageCost,
 };
 
 /// Envelope of a session event (the unit of persistence and synchronization).
@@ -322,11 +322,11 @@ pub enum UnifiedEventPayload {
         available_commands: Vec<CommandInfo>,
         /// Configuration entries (model selection etc.)
         config_options: Vec<ConfigOptionInfo>,
-        /// Whether the agent supports ACP-native `session/fork` + `session/load`.
+        /// Scope of ACP-native session forking supported by the agent.
         /// `None` keeps the existing value (events recorded before this field
         /// existed).
         #[serde(default)]
-        fork_supported: Option<bool>,
+        fork_scope: Option<ForkScope>,
     },
     /// A progress log line of ephemeral VM provisioning (`stderr`).
     #[serde(alias = "bootstrap_log")]
@@ -581,7 +581,7 @@ mod tests {
                     ConfigOptionValue::Select("haiku".to_owned()),
                 ],
             }],
-            fork_supported: None,
+            fork_scope: None,
         };
         let json = serde_json::to_value(&payload).unwrap();
         assert_eq!(json["type"], "capabilities_updated");

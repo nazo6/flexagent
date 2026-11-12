@@ -2,18 +2,20 @@
   import ElicitationCard from "#lib/components/ElicitationCard.svelte";
   import PermissionCard from "#lib/components/PermissionCard.svelte";
   import MarkdownText from "#lib/components/MarkdownText.svelte";
+  import ForkOrigin from "./ForkOrigin.svelte";
+  import MessageActions from "./MessageActions.svelte";
   import Self from "./ChatTimeline.svelte";
   import SubagentGroup from "./SubagentGroup.svelte";
+  import ThoughtBlock from "./ThoughtBlock.svelte";
   import ToolCallGroup from "./ToolCallGroup.svelte";
   import { Badge } from "#lib/components/ui/badge/index.ts";
-  import { groupTimelineItems } from "#lib/chat-groups.ts";
-  import { formatEpochMs } from "#lib/format.ts";
+  import { groupTimelineItems, type TimelineGroup } from "#lib/chat-groups.ts";
+  import { formatClockTime, formatEpochMs } from "#lib/format.ts";
   import { m } from "#lib/paraglide/messages.js";
-  import type { SessionStatus } from "#lib/generated/bindings.ts";
+  import type { ForkScope, SessionStatus } from "#lib/generated/bindings.ts";
   import type { TimelineItem } from "#lib/sync/reducer.ts";
   import AlertTriangleIcon from "@lucide/svelte/icons/alert-triangle";
   import BotIcon from "@lucide/svelte/icons/bot";
-  import BrainIcon from "@lucide/svelte/icons/brain";
   import ClockIcon from "@lucide/svelte/icons/clock";
   import ListChecksIcon from "@lucide/svelte/icons/list-checks";
   import LoaderCircleIcon from "@lucide/svelte/icons/loader-circle";
@@ -27,6 +29,11 @@
     nested = false,
     onsubagent,
     subagentTitle = null,
+    forkScope = null,
+    forkFrom = null,
+    forkFromTitle = null,
+    forkAfterSeq = null,
+    onfork,
   }: {
     sessionId: string;
     items: TimelineItem[];
@@ -37,6 +44,16 @@
     onsubagent?: (childSessionId: string) => void;
     /** Title of the enclosing subagent (labels its approvals). */
     subagentTitle?: string | null;
+    /** Fork capability reported by the session projection. */
+    forkScope?: ForkScope | null;
+    /** Parent session ID when this session is a fork. */
+    forkFrom?: string | null;
+    /** Title of the parent session (falls back to a short ID). */
+    forkFromTitle?: string | null;
+    /** `node_seq` of the last event copied from the parent. */
+    forkAfterSeq?: number | null;
+    /** Called when the user chooses "Fork from here" on a message. */
+    onfork?: (item: TimelineItem) => void;
   } = $props();
 
   /**
@@ -48,6 +65,28 @@
    * user action.
    */
   const agentWorking = $derived(status === "running");
+
+  /**
+   * Whether the timeline tail already shows live activity.
+   *
+   * A streaming message / reasoning block or a running tool card carries its own
+   * progress UI, so the generic "agent is working" row would only duplicate it.
+   * It still appears while the agent boots, thinks before the first token, or
+   * waits for something that shows nothing yet.
+   */
+  const tailIsLive = $derived.by(() => {
+    const last = items.at(-1);
+    if (last === undefined) return false;
+    switch (last.kind) {
+      case "agent":
+      case "thought":
+        return last.streaming;
+      case "tool":
+        return last.status === "pending" || last.status === "in_progress";
+      default:
+        return false;
+    }
+  });
 
   function planStatusClass(planStatus: string): string {
     switch (planStatus) {
@@ -61,9 +100,65 @@
   }
 
   const groupedItems = $derived(groupTimelineItems(items, { groupSubagents: !nested }));
+
+  function groupMaxSeq(group: TimelineGroup): number {
+    switch (group.kind) {
+      case "subagent":
+        return Math.max(group.subagent.seq, ...group.items.map((item) => item.seq));
+      case "tools":
+        return Math.max(...group.tools.map((tool) => tool.seq));
+      default:
+        return group.item.seq;
+    }
+  }
+
+  /** Group after which the fork origin marker is rendered. */
+  const forkAfterGroupKey = $derived.by(() => {
+    if (forkFrom === null || forkAfterSeq === null) return null;
+    let key: string | null = null;
+    for (const group of groupedItems) {
+      if (groupMaxSeq(group) <= forkAfterSeq) key = group.key;
+      else break;
+    }
+    return key;
+  });
+
+  const sessionBusy = $derived(
+    status === "running" || status === "waiting_permission" || status === "waiting_input",
+  );
+
+  /**
+   * Latest message that can represent the current end of the conversation.
+   * `last` scope only enables Fork there; `message` scope (future) enables all.
+   */
+  const lastForkableSeq = $derived.by(() => {
+    for (let index = items.length - 1; index >= 0; index -= 1) {
+      const item = items[index];
+      if (item.kind === "user") return item.seq;
+      // Subagent messages are nested; only the parent conversation end is a
+      // valid "last" fork point for the session.
+      if (item.kind === "agent" && item.subagentId === null && !item.streaming) return item.seq;
+    }
+    return null;
+  });
+
+  function forkState(item: TimelineItem): { canFork: boolean | null; reason: string | null } {
+    if (nested || onfork === undefined || forkScope === null || forkScope === "none") {
+      return { canFork: null, reason: null };
+    }
+    if (sessionBusy || (item.kind === "agent" && item.streaming)) {
+      return { canFork: false, reason: m.chat_action_fork_running() };
+    }
+    if (forkScope === "message") {
+      return { canFork: true, reason: null };
+    }
+    return item.seq === lastForkableSeq
+      ? { canFork: true, reason: null }
+      : { canFork: false, reason: m.chat_action_fork_latest() };
+  }
 </script>
 
-<ul class="flex list-none flex-col gap-4 p-0">
+<ul class="flex list-none flex-col gap-9 p-0">
   {#each groupedItems as group (group.key)}
     <li>
       {#if group.kind === "subagent"}
@@ -82,7 +177,8 @@
       {:else}
         {@const item = group.item}
         {#if item.kind === "user"}
-          <div class="flex items-end justify-end gap-1.5">
+          {@const fork = forkState(item)}
+          <div class="message-group group relative flex items-end justify-end gap-1.5">
             <div
               class="bg-user-message text-foreground max-w-[82%] rounded-xl rounded-br-sm px-4 py-2.5"
             >
@@ -107,13 +203,20 @@
                 </div>
               {/if}
               <p class="text-sm whitespace-pre-wrap">{item.text}</p>
-              <p class="text-muted-foreground desk-mono mt-1 text-right text-[11px]">
-                {item.clientSource} &middot; {formatEpochMs(item.createdAt)}
-              </p>
             </div>
+            <MessageActions
+              text={item.text}
+              canFork={fork.canFork}
+              forkReason={fork.reason}
+              prominent={item.seq === lastForkableSeq}
+              meta={`${item.clientSource} · ${formatClockTime(item.createdAt)}`}
+              metaTitle={formatEpochMs(item.createdAt)}
+              onfork={() => onfork?.(item)}
+            />
           </div>
         {:else if item.kind === "agent"}
-          <div class="flex gap-2.5">
+          {@const fork = forkState(item)}
+          <div class="message-group group relative flex gap-2.5">
             <span
               class="bg-signal-soft text-signal mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-md"
             >
@@ -126,22 +229,16 @@
                 class="text-sm leading-relaxed"
               />
             </div>
+            <MessageActions
+              text={item.text}
+              canFork={fork.canFork}
+              forkReason={fork.reason}
+              prominent={item.seq === lastForkableSeq}
+              onfork={() => onfork?.(item)}
+            />
           </div>
         {:else if item.kind === "thought"}
-          <details class="group">
-            <summary
-              class="text-muted-foreground hover:text-foreground flex cursor-pointer items-center gap-1.5 text-[13px] select-none"
-            >
-              <BrainIcon class="size-3.5" />
-              {m.chat_thought_process()}
-              {#if item.streaming}<span class="animate-pulse">…</span>{/if}
-            </summary>
-            <div
-              class="text-muted-foreground border-line mt-1.5 border-l-2 pl-3 text-[13px] leading-relaxed"
-            >
-              <MarkdownText text={item.text} streaming={item.streaming} />
-            </div>
-          </details>
+          <ThoughtBlock {item} />
         {:else if item.kind === "terminal"}
           <div class="bg-card flex flex-col gap-1.5 rounded-lg border border-border p-3">
             <div class="flex items-center gap-2 text-[13px]">
@@ -222,9 +319,14 @@
         {/if}
       {/if}
     </li>
+    {#if forkFrom !== null && group.key === forkAfterGroupKey}
+      <li>
+        <ForkOrigin parentSessionId={forkFrom} title={forkFromTitle} />
+      </li>
+    {/if}
   {/each}
 
-  {#if agentWorking && !nested}
+  {#if agentWorking && !nested && !tailIsLive}
     <li class="flex gap-2.5" role="status" aria-live="polite">
       <span
         class="bg-signal-soft text-signal mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-md"

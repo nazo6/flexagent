@@ -100,6 +100,8 @@ pub struct StartSessionParams<'a> {
     pub extra_args: Option<&'a [String]>,
     /// Source session to fork natively (ACP `session/fork` + `session/load`).
     pub fork_from_session_id: Option<&'a str>,
+    /// Source `node_seq` to fork at (`None` = the current end).
+    pub fork_up_to_node_seq: Option<u64>,
 }
 
 /// Resume request for a stopped session ([`SessionManager::resume`]).
