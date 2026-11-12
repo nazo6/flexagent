@@ -6,6 +6,7 @@
   import { Card } from "#lib/components/ui/card/index.ts";
   import { Input } from "#lib/components/ui/input/index.ts";
   import { Label } from "#lib/components/ui/label/index.ts";
+  import * as Select from "#lib/components/ui/select/index.ts";
   import type {
     NodeSettingsSnapshot,
     SecretSummary,
@@ -180,6 +181,12 @@
     } catch (cause) {
       toast.error(errorMessage(cause));
     }
+  }
+
+  function trayLabel(value: string): string {
+    if (value === "true") return "Enabled";
+    if (value === "false") return "Disabled";
+    return "Default";
   }
 
   function sourceBadge(source: string): string {
@@ -376,15 +383,25 @@
           </div>
           <div class="grid gap-1.5">
             <Label for="node-tray">Tray</Label>
-            <select
-              id="node-tray"
-              class="border-input bg-surface-raised h-9 rounded-md border px-2 text-sm"
-              bind:value={nodeForm.tray}
+            <Select.Root
+              type="single"
+              value={nodeForm.tray === "" ? "default" : nodeForm.tray}
+              onValueChange={(value) =>
+                (nodeForm.tray = value === "default" ? "" : (value as "true" | "false"))}
             >
-              <option value="">Default</option>
-              <option value="true">Enabled</option>
-              <option value="false">Disabled</option>
-            </select>
+              <Select.Trigger id="node-tray" size="sm" class="w-full text-[13px]">
+                <span>{trayLabel(nodeForm.tray)}</span>
+              </Select.Trigger>
+              <Select.Content>
+                <Select.Item value="default" label="Default" class="text-[13px]">
+                  Default
+                </Select.Item>
+                <Select.Item value="true" label="Enabled" class="text-[13px]">Enabled</Select.Item>
+                <Select.Item value="false" label="Disabled" class="text-[13px]">
+                  Disabled
+                </Select.Item>
+              </Select.Content>
+            </Select.Root>
           </div>
           <label class="flex items-center gap-2 text-sm">
             <input type="checkbox" bind:checked={nodeForm.allow_remote_pty} />

@@ -230,6 +230,23 @@
   /** Theme preference stored in this browser (`system` / `light` / `dark`). */
   const themePreference = $derived(userPrefersMode.current);
 
+  function themeModeLabel(value: string): string {
+    switch (value) {
+      case "light":
+        return m.settings_browser_theme_light();
+      case "dark":
+        return m.settings_browser_theme_dark();
+      default:
+        return m.settings_browser_theme_system();
+    }
+  }
+
+  function shortcutLabel(value: string): string {
+    return value === "modifier_enter"
+      ? m.settings_browser_send_shortcut_modifier()
+      : m.settings_browser_send_shortcut_enter();
+  }
+
   function paletteLabel(id: PaletteId): string {
     switch (id) {
       case "bone":
@@ -629,18 +646,43 @@
                 </p>
               </div>
               <div class="grid max-w-sm gap-1.5">
-                <select
-                  id="browser-theme"
-                  aria-label={m.settings_appearance_theme()}
-                  class="border-input bg-surface-raised h-8 rounded-md border px-2 text-[13px]"
-                  value={themePreference}
-                  onchange={(event) =>
-                    setMode(event.currentTarget.value as "system" | "light" | "dark")}
+                <Select.Root
+                  type="single"
+                  value={themePreference ?? "system"}
+                  onValueChange={(value) => setMode(value as "system" | "light" | "dark")}
                 >
-                  <option value="system">{m.settings_browser_theme_system()}</option>
-                  <option value="light">{m.settings_browser_theme_light()}</option>
-                  <option value="dark">{m.settings_browser_theme_dark()}</option>
-                </select>
+                  <Select.Trigger
+                    id="browser-theme"
+                    size="sm"
+                    class="w-full text-[13px]"
+                    aria-label={m.settings_appearance_theme()}
+                  >
+                    <span>{themeModeLabel(themePreference ?? "system")}</span>
+                  </Select.Trigger>
+                  <Select.Content>
+                    <Select.Item
+                      value="system"
+                      label={m.settings_browser_theme_system()}
+                      class="text-[13px]"
+                    >
+                      {m.settings_browser_theme_system()}
+                    </Select.Item>
+                    <Select.Item
+                      value="light"
+                      label={m.settings_browser_theme_light()}
+                      class="text-[13px]"
+                    >
+                      {m.settings_browser_theme_light()}
+                    </Select.Item>
+                    <Select.Item
+                      value="dark"
+                      label={m.settings_browser_theme_dark()}
+                      class="text-[13px]"
+                    >
+                      {m.settings_browser_theme_dark()}
+                    </Select.Item>
+                  </Select.Content>
+                </Select.Root>
               </div>
             </Card>
 
@@ -695,19 +737,37 @@
                 </p>
               </div>
               <div class="grid max-w-sm gap-1.5">
-                <select
-                  id="browser-send-shortcut"
-                  aria-label={m.settings_browser_send_shortcut()}
-                  class="border-input bg-surface-raised h-8 rounded-md border px-2 text-[13px]"
+                <Select.Root
+                  type="single"
                   value={prefs.sendShortcut}
-                  onchange={(event) =>
-                    prefs.setSendShortcut(event.currentTarget.value as "enter" | "modifier_enter")}
+                  onValueChange={(value) =>
+                    prefs.setSendShortcut(value as "enter" | "modifier_enter")}
                 >
-                  <option value="enter">{m.settings_browser_send_shortcut_enter()}</option>
-                  <option value="modifier_enter"
-                    >{m.settings_browser_send_shortcut_modifier()}</option
+                  <Select.Trigger
+                    id="browser-send-shortcut"
+                    size="sm"
+                    class="w-full text-[13px]"
+                    aria-label={m.settings_browser_send_shortcut()}
                   >
-                </select>
+                    <span>{shortcutLabel(prefs.sendShortcut)}</span>
+                  </Select.Trigger>
+                  <Select.Content>
+                    <Select.Item
+                      value="enter"
+                      label={m.settings_browser_send_shortcut_enter()}
+                      class="text-[13px]"
+                    >
+                      {m.settings_browser_send_shortcut_enter()}
+                    </Select.Item>
+                    <Select.Item
+                      value="modifier_enter"
+                      label={m.settings_browser_send_shortcut_modifier()}
+                      class="text-[13px]"
+                    >
+                      {m.settings_browser_send_shortcut_modifier()}
+                    </Select.Item>
+                  </Select.Content>
+                </Select.Root>
               </div>
             </Card>
 

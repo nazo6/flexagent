@@ -9,6 +9,7 @@
   import * as Dialog from "#lib/components/ui/dialog/index.ts";
   import { Input } from "#lib/components/ui/input/index.ts";
   import { Label } from "#lib/components/ui/label/index.ts";
+  import * as Select from "#lib/components/ui/select/index.ts";
   import * as Tabs from "#lib/components/ui/tabs/index.ts";
   import {
     agentBackendLabel,
@@ -91,6 +92,12 @@
     if (target === "") return;
     untrack(() => void loadAgents());
   });
+
+  function extensionLabel(value: string): string {
+    if (value === "") return m.settings_agent_extension_none();
+    const extension = extensionChoices.find((candidate) => candidate.id === value);
+    return extension ? `${extension.name} (${extension.id})` : value;
+  }
 
   function matchesQuery(agent: AgentSummary | RegistryAgentSummary, query: string): boolean {
     const needle = query.trim().toLowerCase();
@@ -574,16 +581,29 @@
       </div>
       <div class="grid gap-1.5">
         <Label for="custom-extension">{m.settings_agent_extension()}</Label>
-        <select
-          id="custom-extension"
-          bind:value={customForm.extension}
-          class="border-input bg-surface-raised h-8 rounded-md border px-2 text-[13px]"
+        <Select.Root
+          type="single"
+          value={customForm.extension === "" ? "none" : customForm.extension}
+          onValueChange={(value) => (customForm.extension = value === "none" ? "" : String(value))}
         >
-          <option value="">{m.settings_agent_extension_none()}</option>
-          {#each extensionChoices as extension (extension.id)}
-            <option value={extension.id}>{extension.name} ({extension.id})</option>
-          {/each}
-        </select>
+          <Select.Trigger id="custom-extension" size="sm" class="w-full text-[13px]">
+            <span>{extensionLabel(customForm.extension)}</span>
+          </Select.Trigger>
+          <Select.Content>
+            <Select.Item value="none" label={m.settings_agent_extension_none()} class="text-[13px]">
+              {m.settings_agent_extension_none()}
+            </Select.Item>
+            {#each extensionChoices as extension (extension.id)}
+              <Select.Item
+                value={extension.id}
+                label={`${extension.name} (${extension.id})`}
+                class="text-[13px]"
+              >
+                {extension.name} ({extension.id})
+              </Select.Item>
+            {/each}
+          </Select.Content>
+        </Select.Root>
         <p class="text-muted-foreground text-[11px]">
           {m.settings_agent_extension_hint()}
         </p>
