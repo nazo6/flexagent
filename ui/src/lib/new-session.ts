@@ -7,7 +7,33 @@
  *    recent sessions (a fallback for sessions started before binding
  *    registration was introduced)
  */
-import type { NodeSummary, ProjectSummary, SessionSummary } from "#lib/generated/bindings.ts";
+import type {
+  ModeInfo,
+  NodeSummary,
+  ProjectSummary,
+  SessionSummary,
+} from "#lib/generated/bindings.ts";
+
+/** One initial-mode choice on the new session screen. */
+export interface ModeChoice {
+  /** Mode ID sent as `CreateSessionRequest.mode` */
+  value: string;
+  /** Display label (the agent-provided name, falling back to the ID) */
+  label: string;
+}
+
+/**
+ * Build the initial-mode choices from the probed agent's modes.
+ *
+ * Mode IDs are agent-specific, so an empty list means "no choice yet": callers
+ * must not guess well-known IDs (`code` / `plan`) before the probe answers.
+ */
+export function modeChoices(modes: readonly ModeInfo[]): ModeChoice[] {
+  return modes.map((mode) => ({
+    value: mode.mode_id,
+    label: mode.name.trim() === "" ? mode.mode_id : mode.name,
+  }));
+}
 
 /** Working directory candidate (for display and selection in the UI). */
 export interface PathCandidate {

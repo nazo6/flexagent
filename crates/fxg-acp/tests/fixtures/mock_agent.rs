@@ -4,6 +4,8 @@
 //! - `--mode auth-required`: returns advertised terminal auth in initialize, rejects `session/new`
 //! - `--mode fork`: returns `fork` capability in initialize, handles `session/fork`, `session/load`, and `session/new`
 //! - `--mode no-fork`: returns no `fork` capability in initialize, handles `session/new`
+//! - `--mode modes-as-config`: exposes build/plan as `configOptions[category = mode]`
+//!   (like OpenCode) and rejects `session/set_mode`
 
 #![allow(
     clippy::disallowed_types,
@@ -35,6 +37,7 @@ fn main() {
             .get("method")
             .and_then(Value::as_str)
             .unwrap_or_default();
+        let params = request.get("params").cloned().unwrap_or(Value::Null);
 
         let response = match (mode.as_str(), method) {
             ("auth-required", "initialize") => json!({
@@ -114,6 +117,45 @@ fn main() {
                     "sessionId": "source-session"
                 }
             }),
+            ("modes-as-config", "initialize") => json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "result": {
+                    "protocolVersion": 1,
+                    "agentCapabilities": {},
+                    "authMethods": []
+                }
+            }),
+            ("modes-as-config", "session/new") => json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "result": {
+                    "sessionId": "mode-session",
+                    "configOptions": mode_config_options("build")
+                }
+            }),
+            ("modes-as-config", "session/set_config_option") => {
+                let value = params
+                    .get("value")
+                    .and_then(Value::as_str)
+                    .unwrap_or("build");
+                json!({
+                    "jsonrpc": "2.0",
+                    "id": id,
+                    "result": {
+                        "configOptions": mode_config_options(value)
+                    }
+                })
+            }
+            // OpenCode rejects `session/set_mode` for mode IDs from config options
+            ("modes-as-config", "session/set_mode") => json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "error": {
+                    "code": -32602,
+                    "message": "mode not found"
+                }
+            }),
             _ => json!({
                 "jsonrpc": "2.0",
                 "id": id,
@@ -131,6 +173,39 @@ fn main() {
             }
         }
     }
+}
+
+/// Config options for `--mode modes-as-config` (model + selectable mode).
+fn mode_config_options(current_mode: &str) -> Value {
+    json!([
+        {
+            "id": "model",
+            "name": "Model",
+            "category": "model",
+            "type": "select",
+            "currentValue": "m1",
+            "options": [{ "value": "m1", "name": "Model 1" }]
+        },
+        {
+            "id": "mode",
+            "name": "Session Mode",
+            "category": "mode",
+            "type": "select",
+            "currentValue": current_mode,
+            "options": [
+                {
+                    "value": "build",
+                    "name": "Build",
+                    "description": "The default agent."
+                },
+                {
+                    "value": "plan",
+                    "name": "Plan",
+                    "description": "Read-only planning."
+                }
+            ]
+        }
+    ])
 }
 
 fn parse_mode() -> String {

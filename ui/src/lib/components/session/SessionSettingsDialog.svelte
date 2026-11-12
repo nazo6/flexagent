@@ -4,6 +4,8 @@
   import { Input } from "#lib/components/ui/input/index.ts";
   import { Label } from "#lib/components/ui/label/index.ts";
   import type { SessionModePreference } from "#lib/session-prefs.ts";
+  import type { ModeInfo } from "#lib/generated/bindings.ts";
+  import { modeChoices } from "#lib/new-session.ts";
   import { m } from "#lib/paraglide/messages.js";
   import BotIcon from "@lucide/svelte/icons/bot";
   import FolderGit2Icon from "@lucide/svelte/icons/folder-git-2";
@@ -21,6 +23,7 @@
     extraArgsText = $bindable(""),
     manualAgent = $bindable(false),
     agentId = $bindable(""),
+    modes = [],
     isProvisionerMode,
     forkActive = false,
     provisionerName,
@@ -37,6 +40,8 @@
     extraArgsText?: string;
     manualAgent?: boolean;
     agentId?: string;
+    /** Modes reported by the probed agent (empty until it answers). */
+    modes?: ModeInfo[];
     isProvisionerMode: boolean;
     /** A fork locks the agent to the source session's agent. */
     forkActive?: boolean;
@@ -46,6 +51,22 @@
     onModeChange?: () => void;
     onAgentIdInput?: () => void;
   } = $props();
+
+  /**
+   * Initial-mode choices.
+   *
+   * Only the probed agent's modes are offered: mode IDs are agent-specific, so
+   * guessing well-known IDs before the probe answers can send one the agent
+   * does not have.
+   */
+  const modeOptions = $derived(modeChoices(modes));
+
+  /** Value shown by the picker (a saved mode appears once the agent offers it). */
+  const modeSelectValue = $derived(
+    sessionMode === "default" || modeOptions.some((option) => option.value === sessionMode)
+      ? sessionMode
+      : "default",
+  );
 </script>
 
 <Dialog.Root bind:open>
@@ -144,13 +165,17 @@
           <div class="flex flex-col gap-1">
             <Label>{m.new_session_initial_mode()}</Label>
             <select
-              bind:value={sessionMode}
-              onchange={onModeChange}
+              value={modeSelectValue}
+              onchange={(event) => {
+                sessionMode = event.currentTarget.value;
+                onModeChange?.();
+              }}
               class="border-input bg-surface-raised focus-visible:ring-ring/40 h-8 rounded-md border px-2 text-[13px] outline-none focus-visible:ring-1"
             >
               <option value="default">{m.new_session_mode_default()}</option>
-              <option value="code">{m.new_session_mode_code()}</option>
-              <option value="plan">{m.new_session_mode_plan()}</option>
+              {#each modeOptions as option (option.value)}
+                <option value={option.value}>{option.label}</option>
+              {/each}
             </select>
           </div>
           <div class="flex flex-col gap-1">

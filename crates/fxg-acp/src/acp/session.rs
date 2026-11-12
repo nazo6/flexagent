@@ -122,16 +122,42 @@ pub(super) async fn build_session(
     }
 
     // Apply the initial mode
-    if let Some(mode_id) = params.initial_mode.as_ref()
-        && let Err(err) = cx
-            .send_request(SetSessionModeRequest::new(
-                acp_session_id.clone(),
-                mode_id.clone(),
-            ))
-            .block_task()
-            .await
-    {
-        tracing::warn!("failed to set initial mode {mode_id}: {err}");
+    //
+    // ACP supersedes Session Modes with Session Config Options: agents such as
+    // OpenCode only report the selector as `configOptions[category = mode]` and
+    // reject those IDs in `session/set_mode`, so use whichever channel the agent
+    // reports.
+    let mode_option = mode_config_option(acquired.config_options.as_deref().unwrap_or_default());
+    let mode_via_config = mode_option.is_some();
+    let mut initial_mode_applied = false;
+    if let Some(mode_id) = params.initial_mode.as_ref() {
+        let result = match mode_option {
+            Some(option) => cx
+                .send_request(SetSessionConfigOptionRequest::new(
+                    acp_session_id.clone(),
+                    option.id.clone(),
+                    SessionConfigOptionValue::value_id(mode_id.clone()),
+                ))
+                .block_task()
+                .await
+                .map(|response| {
+                    if !response.config_options.is_empty() {
+                        applied_config_options = Some(response.config_options);
+                    }
+                }),
+            None => cx
+                .send_request(SetSessionModeRequest::new(
+                    acp_session_id.clone(),
+                    mode_id.clone(),
+                ))
+                .block_task()
+                .await
+                .map(|_| ()),
+        };
+        match result {
+            Ok(()) => initial_mode_applied = true,
+            Err(err) => tracing::warn!("failed to set initial mode {mode_id}: {err}"),
+        }
     }
 
     // Publish modes, slash commands and config options.
@@ -139,7 +165,7 @@ pub(super) async fn build_session(
     // `session/new` reports the agent defaults; reflect the initial values we
     // just applied so the first `CapabilitiesUpdated` matches the session state
     // (the agent usually does not emit a config update for `set_config_option`).
-    let (modes, commands, mut config_options) = session_capabilities(
+    let (modes, mut current_mode, mut config_options) = session_capabilities(
         acquired.modes.as_ref(),
         applied_config_options
             .as_deref()
@@ -153,14 +179,21 @@ pub(super) async fn build_session(
             option.current_value = setting.value.clone();
         }
     }
-    let current_mode = acquired
-        .modes
-        .as_ref()
-        .map(|state| state.current_mode_id.to_string());
+    // `session/new` reports the mode from before the initial mode was applied.
+    if initial_mode_applied && let Some(mode_id) = params.initial_mode.as_ref() {
+        current_mode = Some(mode_id.clone());
+        if mode_via_config
+            && let Some(option) = config_options
+                .iter_mut()
+                .find(|option| is_mode_option(option))
+        {
+            option.current_value = ConfigOptionValue::Select(mode_id.clone());
+        }
+    }
     let capabilities_state = SessionCapabilitiesState {
         current_mode: current_mode.clone(),
         available_modes: modes.clone(),
-        available_commands: commands.clone(),
+        available_commands: Vec::new(),
         config_options: config_options.clone(),
         fork_supported: Some(
             agent_capabilities.session_capabilities.fork.is_some()
@@ -168,7 +201,6 @@ pub(super) async fn build_session(
         ),
     };
     if !modes.is_empty()
-        || !commands.is_empty()
         || !config_options.is_empty()
         || current_mode.is_some()
         || capabilities_state.fork_supported.is_some()

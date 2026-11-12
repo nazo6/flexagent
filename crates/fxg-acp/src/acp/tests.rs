@@ -787,3 +787,128 @@ fn stderr_registry_is_bounded_and_per_agent() {
     assert_eq!(registry.tail("opencode"), vec!["other"]);
     assert_eq!(registry.snapshot().len(), 2);
 }
+
+/// Builds a `category: mode` select option the way OpenCode reports build/plan.
+fn mode_config_option(current: &str, modes: &[(&str, &str)]) -> SessionConfigOption {
+    use agent_client_protocol::v1::schema::SessionConfigSelectOption;
+
+    SessionConfigOption::select(
+        "mode",
+        "Session Mode",
+        current.to_owned(),
+        modes
+            .iter()
+            .map(|(id, name)| SessionConfigSelectOption::new((*id).to_owned(), (*name).to_owned()))
+            .collect::<Vec<_>>(),
+    )
+    .category(agent_client_protocol::v1::schema::SessionConfigOptionCategory::Mode)
+}
+
+#[test]
+fn session_capabilities_derives_modes_from_config_options() {
+    let options = vec![
+        SessionConfigOption::select(
+            "model",
+            "Model",
+            "m1",
+            vec![
+                agent_client_protocol::v1::schema::SessionConfigSelectOption::new("m1", "Model 1"),
+            ],
+        ),
+        mode_config_option("build", &[("build", "Build"), ("plan", "Plan")]),
+    ];
+    let (modes, current_mode, config_options) = session_capabilities(None, Some(&options));
+
+    assert_eq!(current_mode.as_deref(), Some("build"));
+    assert_eq!(
+        modes,
+        vec![
+            ModeInfo {
+                mode_id: "build".to_owned(),
+                name: "Build".to_owned(),
+                description: None,
+            },
+            ModeInfo {
+                mode_id: "plan".to_owned(),
+                name: "Plan".to_owned(),
+                description: None,
+            },
+        ]
+    );
+    assert_eq!(config_options.len(), 2);
+}
+
+#[test]
+fn session_capabilities_prefers_config_option_over_legacy_modes() {
+    // ACP: clients that support config options SHOULD ignore `modes` when both
+    // are present.
+    let legacy_modes: SessionModeState = serde_json::from_value(serde_json::json!({
+        "currentModeId": "ask",
+        "availableModes": [{ "id": "ask", "name": "Ask" }],
+    }))
+    .expect("session mode state fixture");
+    let options = vec![mode_config_option(
+        "plan",
+        &[("build", "Build"), ("plan", "Plan")],
+    )];
+
+    let (modes, current_mode, _) = session_capabilities(Some(&legacy_modes), Some(&options));
+
+    assert_eq!(current_mode.as_deref(), Some("plan"));
+    assert_eq!(
+        modes
+            .iter()
+            .map(|mode| mode.mode_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["build", "plan"]
+    );
+}
+
+#[test]
+fn config_option_update_refreshes_mode_projection() {
+    use agent_client_protocol::v1::schema::ConfigOptionUpdate;
+
+    let mut caps = SessionCapabilitiesState {
+        current_mode: Some("build".to_owned()),
+        available_modes: vec![
+            ModeInfo {
+                mode_id: "build".to_owned(),
+                name: "Build".to_owned(),
+                description: Some("The default agent".to_owned()),
+            },
+            ModeInfo {
+                mode_id: "plan".to_owned(),
+                name: "Plan".to_owned(),
+                description: None,
+            },
+        ],
+        ..Default::default()
+    };
+    let mut acc = StreamingAccumulator::default();
+    let update = ConfigOptionUpdate::new(vec![mode_config_option(
+        "plan",
+        &[("build", "Build"), ("plan", "Plan")],
+    )]);
+
+    let events = map_session_update(
+        SessionUpdate::ConfigOptionUpdate(update),
+        &mut acc,
+        &mut caps,
+    );
+
+    assert_eq!(events.len(), 1);
+    match &events[0] {
+        DriverEvent::Event(UnifiedEventPayload::CapabilitiesUpdated {
+            current_mode,
+            available_modes,
+            ..
+        }) => {
+            assert_eq!(current_mode.as_deref(), Some("plan"));
+            // The update carries the agent's labels and keeps both modes
+            assert_eq!(available_modes.len(), 2);
+            assert_eq!(available_modes[0].name, "Build");
+            assert_eq!(available_modes[1].name, "Plan");
+        }
+        other => panic!("unexpected event: {other:?}"),
+    }
+}

@@ -1,5 +1,6 @@
 use super::terminal::*;
 use super::*;
+use agent_client_protocol::v1::schema::{SessionConfigSelectOption, SessionConfigSelectOptions};
 
 /// Turns ACP `StopReason` values that should be surfaced to the user into events.
 ///
@@ -15,30 +16,80 @@ pub(super) fn turn_ended_event(reason: StopReason) -> Option<UnifiedEventPayload
     Some(UnifiedEventPayload::TurnEnded { reason })
 }
 
-/// Extracts the session's modes, commands and config options.
+/// Extracts the session's mode state and config options.
+///
+/// ACP supersedes Session Modes with Session Config Options, and agents such as
+/// OpenCode only report the selector as `configOptions[category = mode]`, so the
+/// config option takes precedence over the legacy `modes` field.
 pub(super) fn session_capabilities(
     modes: Option<&SessionModeState>,
     config_options: Option<&[SessionConfigOption]>,
-) -> (Vec<ModeInfo>, Vec<CommandInfo>, Vec<ConfigOptionInfo>) {
-    let modes = modes
-        .map(|state| {
-            state
-                .available_modes
-                .iter()
-                .map(|mode| ModeInfo {
-                    mode_id: mode.id.to_string(),
-                    name: mode.name.clone(),
-                    description: mode.description.clone(),
-                })
-                .collect()
-        })
-        .unwrap_or_default();
+) -> (Vec<ModeInfo>, Option<String>, Vec<ConfigOptionInfo>) {
+    let (available_modes, current_mode) = mode_config_option(config_options.unwrap_or_default())
+        .and_then(mode_state_from_config)
+        .unwrap_or_else(|| {
+            (
+                modes
+                    .map(|state| {
+                        state
+                            .available_modes
+                            .iter()
+                            .map(|mode| ModeInfo {
+                                mode_id: mode.id.to_string(),
+                                name: mode.name.clone(),
+                                description: mode.description.clone(),
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+                modes.map(|state| state.current_mode_id.to_string()),
+            )
+        });
     let config_options = config_options
         .map(|options| options.iter().map(map_config_option).collect())
         .unwrap_or_default();
-    // Slash commands arrive via session/update (AvailableCommandsUpdate), so this
-    // starts empty (later notifications update it)
-    (modes, Vec::new(), config_options)
+    // Slash commands arrive via session/update (AvailableCommandsUpdate), so they
+    // are not part of the session/new payload.
+    (available_modes, current_mode, config_options)
+}
+
+/// The config option that carries the session mode, if the agent reports one.
+///
+/// Categories are UX hints (ACP: clients MUST handle missing or unknown
+/// categories), so an uncategorized option named `mode` is accepted as well,
+/// matching the Web UI.
+pub(super) fn mode_config_option(options: &[SessionConfigOption]) -> Option<&SessionConfigOption> {
+    options.iter().find(|option| {
+        option.category.as_ref() == Some(&SessionConfigOptionCategory::Mode)
+            || (option.category.is_none() && option.id.to_string() == "mode")
+    })
+}
+
+/// Projects a mode selector config option into FXG's mode list / current mode.
+fn mode_state_from_config(option: &SessionConfigOption) -> Option<(Vec<ModeInfo>, Option<String>)> {
+    let SessionConfigKind::Select(select) = &option.kind else {
+        return None;
+    };
+    let to_mode = |value: &SessionConfigSelectOption| ModeInfo {
+        mode_id: value.value.to_string(),
+        name: value.name.clone(),
+        description: value.description.clone(),
+    };
+    let mut modes = Vec::new();
+    match &select.options {
+        SessionConfigSelectOptions::Ungrouped(values) => {
+            modes.extend(values.iter().map(to_mode));
+        }
+        SessionConfigSelectOptions::Grouped(groups) => {
+            modes.extend(groups.iter().flat_map(|group| &group.options).map(to_mode));
+        }
+        // `SessionConfigSelectOptions` is non-exhaustive
+        _ => {}
+    }
+    if modes.is_empty() {
+        return None;
+    }
+    Some((modes, Some(select.current_value.to_string())))
 }
 
 /// Builds ACP content blocks from a prompt and its attachments.
@@ -246,6 +297,30 @@ impl SessionCapabilitiesState {
             fork_supported: self.fork_supported,
         }
     }
+
+    /// Replaces the config options, keeping the mode projection in sync.
+    ///
+    /// Agents that expose modes as a config option (ACP's current model) own the
+    /// mode list and current mode, so `config_option_update` must refresh both.
+    pub(super) fn set_config_options(&mut self, options: &[SessionConfigOption]) {
+        self.config_options = options.iter().map(map_config_option).collect();
+        let Some((modes, current_mode)) =
+            mode_config_option(options).and_then(mode_state_from_config)
+        else {
+            return;
+        };
+        self.available_modes = modes;
+        if current_mode.is_some() {
+            self.current_mode = current_mode;
+        }
+    }
+}
+
+/// Whether the option is the session mode selector (the ACP category, or the
+/// conventional `mode` key when the agent omits categories).
+pub(super) fn is_mode_option(option: &ConfigOptionInfo) -> bool {
+    option.category.as_ref() == Some(&ConfigOptionCategory::Mode)
+        || (option.category.is_none() && option.key == "mode")
 }
 
 /// Accumulates streaming chunks and emits completion events when the stream changes.
@@ -434,11 +509,7 @@ pub(super) fn map_session_update(
             events.push(DriverEvent::Event(capabilities.to_payload()));
         }
         SessionUpdate::ConfigOptionUpdate(update) => {
-            capabilities.config_options = update
-                .config_options
-                .iter()
-                .map(map_config_option)
-                .collect();
+            capabilities.set_config_options(&update.config_options);
             events.push(DriverEvent::Event(capabilities.to_payload()));
         }
         SessionUpdate::SessionInfoUpdate(update) => {

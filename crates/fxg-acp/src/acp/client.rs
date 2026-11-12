@@ -117,6 +117,26 @@ impl ActiveSessionHandle for AcpSessionHandle {
     }
 
     async fn set_mode(&self, mode_id: String) -> anyhow::Result<()> {
+        // ACP supersedes Session Modes with Session Config Options, and agents
+        // such as OpenCode only expose the selector as `configOptions[category =
+        // mode]` (their `session/set_mode` rejects those IDs). Route the change
+        // through the same channel the agent reports.
+        let mode_key = {
+            let capabilities = self
+                .capabilities
+                .lock()
+                .expect("session capabilities poisoned");
+            capabilities
+                .config_options
+                .iter()
+                .find(|option| is_mode_option(option))
+                .map(|option| option.key.clone())
+        };
+        if let Some(key) = mode_key {
+            return self
+                .set_config(key, ConfigOptionValue::Select(mode_id))
+                .await;
+        }
         self.conn
             .send_request(SetSessionModeRequest::new(
                 self.acp_session_id.clone(),
@@ -150,11 +170,7 @@ impl ActiveSessionHandle for AcpSessionHandle {
                     .capabilities
                     .lock()
                     .expect("session capabilities poisoned");
-                capabilities.config_options = response
-                    .config_options
-                    .iter()
-                    .map(map_config_option)
-                    .collect();
+                capabilities.set_config_options(&response.config_options);
                 capabilities.to_payload()
             };
             let events = self.events.lock().expect("session events poisoned").clone();

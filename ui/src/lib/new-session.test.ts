@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { NodeSummary, ProjectSummary, SessionSummary } from "#lib/generated/bindings.ts";
 import {
   buildPathCandidates,
+  modeChoices,
   pickDefaultCandidate,
   pickDefaultNode,
   projectRecency,
@@ -185,5 +186,19 @@ describe("pickDefaultNode", () => {
     const nodes = [node("n1", false), node("n2", false)];
     expect(pickDefaultNode(nodes, project([binding("/repo", "n2", 100)]), [])).toBe("");
     expect(pickDefaultNode(nodes, project([]), [])).toBe("");
+  });
+
+  it("offers only the modes reported by the agent", () => {
+    // Nothing is guessed before the probe answers
+    expect(modeChoices([])).toEqual([]);
+    expect(
+      modeChoices([
+        { mode_id: "build", name: "Build", description: "The default agent." },
+        { mode_id: "plan", name: " ", description: null },
+      ]),
+    ).toEqual([
+      { value: "build", label: "Build" },
+      { value: "plan", label: "plan" },
+    ]);
   });
 });

@@ -19,6 +19,7 @@
     AgentSummary,
     ConfigOptionValue,
     InitialConfig,
+    ModeInfo,
     ProvisionerSummary,
     ProvisionerTestResponse,
   } from "#lib/generated/bindings.ts";
@@ -307,6 +308,9 @@
       manualAgent = !availableAgentIds.includes(agentParam);
       // Deep links take precedence over memory
       agentTouched = true;
+      // Mode IDs are agent-specific: the remembered mode may belong to another agent
+      modeTouched = true;
+      sessionMode = "default";
     }
     urlAgentApplied = true;
   });
@@ -404,6 +408,27 @@
   const configOptions = $derived(
     capabilitiesKey === probeKey ? orderedConfigOptions(capabilities?.config_options ?? []) : [],
   );
+
+  /**
+   * Modes reported by the probed agent (`null` while it has not answered yet).
+   *
+   * The initial-mode choices come from the agent instead of a fixed list, so
+   * agent-specific IDs (OpenCode's `build`, for example) are passed through
+   * unchanged.
+   */
+  const availableModes = $derived<ModeInfo[] | null>(
+    capabilitiesKey === probeKey && capabilities !== null
+      ? (capabilities.available_modes ?? [])
+      : null,
+  );
+
+  // Drop a remembered mode that the probed agent does not offer (for example one
+  // saved while another agent was selected).
+  $effect(() => {
+    if (availableModes === null || sessionMode === "default") return;
+    if (availableModes.some((mode) => mode.mode_id === sessionMode)) return;
+    sessionMode = "default";
+  });
 
   function sameConfig(left: InitialConfig[], right: InitialConfig[]): boolean {
     return JSON.stringify(left) === JSON.stringify(right);
@@ -759,6 +784,8 @@
   }
 
   function selectAgent(id: string): void {
+    // Mode IDs are agent-specific: a selection for the previous agent no longer applies.
+    if (id !== agentId) sessionMode = "default";
     agentId = id;
     manualAgent = false;
     agentTouched = true;
@@ -767,6 +794,8 @@
 
   function onManualAgentInput(): void {
     agentTouched = true;
+    // The ID being typed is a different agent until proven otherwise.
+    sessionMode = "default";
   }
 
   function onSessionModeChange(): void {
@@ -1363,6 +1392,7 @@
   bind:manualAgent
   bind:agentId
   {isProvisionerMode}
+  modes={availableModes ?? []}
   forkActive={forkSessionId !== ""}
   {provisionerName}
   {testBusy}

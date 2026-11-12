@@ -36,6 +36,16 @@ describe("session prefs", () => {
       agent: "claude-code",
       mode: "plan",
     });
+    // Agent-specific mode IDs are kept verbatim
+    saveNewSessionPrefs(
+      "github.com/nazo6/flexagent",
+      { agent: "opencode", mode: "build" },
+      storage,
+    );
+    expect(loadNewSessionPrefs("github.com/nazo6/flexagent", storage)).toEqual({
+      agent: "opencode",
+      mode: "build",
+    });
     expect(loadNewSessionPrefs("github.com/nazo6/other", storage)).toBeNull();
   });
 
@@ -48,15 +58,12 @@ describe("session prefs", () => {
     expect(loadNewSessionPrefs("p", null)).toBeNull();
   });
 
-  it("ignores invalid JSON and invalid enum values", () => {
+  it("ignores invalid JSON and non-string mode values", () => {
     const storage = memoryStorage();
     storage.setItem("fxg:new_session_prefs:p", "{not json");
     expect(loadNewSessionPrefs("p", storage)).toBeNull();
 
-    storage.setItem("fxg:new_session_prefs:p", JSON.stringify({ mode: "bogus", agent: 42 }));
-    expect(loadNewSessionPrefs("p", storage)).toBeNull();
-
-    storage.setItem("fxg:new_session_prefs:p", JSON.stringify({ agent: "acp-x", mode: "bogus" }));
+    storage.setItem("fxg:new_session_prefs:p", JSON.stringify({ agent: "acp-x", mode: 42 }));
     expect(loadNewSessionPrefs("p", storage)).toEqual({
       agent: "acp-x",
       mode: "default",

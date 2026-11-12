@@ -6,7 +6,12 @@ import type { ConfigOptionValue } from "#lib/generated/bindings.ts";
  * Remembers the last used agent / initial mode per project.
  * This is a per-device preference and is never stored on the server (node or central server).
  */
-export type SessionModePreference = "default" | "code" | "plan";
+
+/**
+ * Initial mode preference: `default` (let the agent decide) or any mode ID the
+ * selected agent reports (for example OpenCode's `build` / `plan`).
+ */
+export type SessionModePreference = string;
 
 /** Startup settings restored by the new session screen. */
 export interface NewSessionPrefs {
@@ -18,7 +23,6 @@ export interface NewSessionPrefs {
 
 const KEY_PREFIX = "fxg:new_session_prefs:";
 const CONFIG_KEY_PREFIX = "fxg:session_config:";
-const SESSION_MODES: readonly SessionModePreference[] = ["default", "code", "plan"];
 
 /** Resolve `localStorage` (SSR / tests can inject a replacement). */
 function resolveStorage(storage?: Storage | null): Storage | null {
@@ -27,7 +31,7 @@ function resolveStorage(storage?: Storage | null): Storage | null {
 }
 
 function isSessionMode(value: unknown): value is SessionModePreference {
-  return SESSION_MODES.includes(value as SessionModePreference);
+  return typeof value === "string" && value !== "";
 }
 
 /**

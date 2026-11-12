@@ -165,6 +165,12 @@ ACPでは、エディタやオーケストレータ側が **`acp::Client` トレ
     スラッシュコマンド一覧を更新し、UIとCLIの補完リストに反映。
   - `CurrentModeUpdate` / `ConfigOptionUpdate` ➔
     現在のモードやモデル設定選択肢をUIへ同期。
+    ACP は Session Modes を Session Config Options に置き換えつつあり、
+    OpenCode のように `modes` を返さず `category = "mode"` の
+    `configOption` だけでモードを提示するエージェントが存在する。
+    `fxg-acp` は両方を同じ `ModeInfo` / `current_mode` に正規化し
+    (`session_capabilities`)、`set_mode` はモード用 `configOption` があれば
+    `session/set_config_option`、無ければ従来の `session/set_mode` に振り分ける。
   - `UsageUpdate` ➔ コンテキスト使用量 (`used` / `size`) と累積コスト
     (`cost`) を `UnifiedEventPayload::UsageUpdated` として記録する (ハブ側
     `sessions.usage_json` 投影。累積ではなく最新値を保持)。
@@ -481,5 +487,9 @@ ACP は `initialize` ではモデル一覧を返さず、`session/new` のレス
 - **制約**: 一時VMはノード起動前なのでプローブできない。また、エージェント側に
   空のセッションが残る実装がある (ACP にセッションを作らない一覧 API はない)。
 - **新規セッション UI**: モデル pill は常に表示し、取得中は `Default` のまま開始を
-  ブロックしない。`category = "mode"` の `configOption` は既存の
-  `CreateSessionRequest.mode` と重複するため、モデル pill 列には出さない。
+  ブロックしない。初期モードの選択肢はプローブ結果の `available_modes`
+  (ACP `modes` と `category = "mode"` の `configOption` を正規化したもの) から
+  生成する。モード ID はエージェント固有のため、プローブ前は推測の ID を出さず
+  `Default` のみを表示し、エージェントを変更したときは選択を `Default` に戻す。
+  `category = "mode"` の `configOption` はモード専用の pill に投影されるため、
+  モデル pill 列には出さない。
