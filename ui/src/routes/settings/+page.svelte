@@ -40,7 +40,6 @@
   import SearchIcon from "@lucide/svelte/icons/search";
   import ShieldIcon from "@lucide/svelte/icons/shield";
   import Trash2Icon from "@lucide/svelte/icons/trash-2";
-  import ConnectionMenu from "#lib/components/ConnectionMenu.svelte";
   import CpuIcon from "@lucide/svelte/icons/cpu";
   import PaletteIcon from "@lucide/svelte/icons/palette";
   import ServerIcon from "@lucide/svelte/icons/server";
@@ -335,14 +334,11 @@
 </svelte:head>
 
 <div class="desk-page">
-  <div class="flex flex-wrap items-start justify-between gap-3">
-    <div class="flex flex-col gap-1">
-      <h1 class="text-xl font-semibold tracking-tight">{m.settings_title()}</h1>
-      <p class="text-muted-foreground text-[13px]">
-        {m.settings_subtitle()}
-      </p>
-    </div>
-    <ConnectionMenu variant="scope" class="min-w-44" align="end" />
+  <div class="flex flex-col gap-1">
+    <h1 class="text-xl font-semibold tracking-tight">{m.settings_title()}</h1>
+    <p class="text-muted-foreground text-[13px]">
+      {m.settings_subtitle()}
+    </p>
   </div>
 
   <div class="relative w-full max-w-md">
