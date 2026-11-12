@@ -62,7 +62,12 @@
     let models: import("monaco-editor").editor.ITextModel[] = [];
 
     void (async () => {
-      const monaco = await import("monaco-editor");
+      // Import only the editor core and the basic-languages tokenizers: the
+      // full `monaco-editor` entry also bundles the TypeScript / CSS / HTML /
+      // JSON language services and their workers, which a read-only diff
+      // viewer does not need.
+      const monaco = await import("monaco-editor/editor/editor.api");
+      await import("monaco-editor/basic-languages/monaco.contribution");
       const EditorWorker = (await import("monaco-editor/editor/editor.worker?worker")).default;
       (self as unknown as { MonacoEnvironment: { getWorker: () => Worker } }).MonacoEnvironment = {
         getWorker: () => new EditorWorker(),

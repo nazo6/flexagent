@@ -47,8 +47,16 @@ export default defineConfig({
       outdir: "./src/lib/paraglide",
       emitTsDeclarations: true,
       strategy: ["baseLocale"],
+      // Per-locale modules: one module per locale instead of one per message.
+      // Per-message modules make Vite resolve 1601 virtual modules, which slows
+      // down the dev server startup and the build without shrinking the bundle.
+      outputStructure: "locale-modules",
     }),
   ],
+  build: {
+    // Monaco and shiki are lazily loaded chunks, not part of the initial load.
+    chunkSizeWarningLimit: 3000,
+  },
   optimizeDeps: {
     // lucide has a very large number of per-icon deep imports, so lazy
     // discovery triggers dependency re-optimization (forced reload) each time;

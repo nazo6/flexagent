@@ -10,6 +10,7 @@ export default defineConfig({
       outdir: "./src/lib/paraglide",
       emitTsDeclarations: true,
       strategy: ["baseLocale"],
+      outputStructure: "locale-modules",
     }),
   ],
   resolve: {

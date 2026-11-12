@@ -17,7 +17,7 @@
     "test:watch": "vitest",
     "lint": "oxlint && oxlint --config ./.oxlintrc.paraglide.json .",
     "lint:i18n": "oxlint --config ./.oxlintrc.paraglide.json .",
-    "i18n:compile": "paraglide-js compile --project ./project.inlang --outdir ./src/lib/paraglide --emit-ts-declarations",
+    "i18n:compile": "paraglide-js compile --project ./project.inlang --outdir ./src/lib/paraglide --emit-ts-declarations --output-structure locale-modules",
     "icons": "node scripts/generate-icons.mjs"
   },
   "dependencies": {
