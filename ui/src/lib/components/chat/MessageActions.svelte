@@ -12,12 +12,24 @@
     canFork: boolean | null;
     /** Why Fork is disabled (shown as a tooltip). */
     forkReason?: string | null;
-    /** Keep the row visible even on pointer devices (used for the latest message). */
+    /** Keep the actions visible even on pointer devices (used for the latest message). */
     prominent?: boolean;
+    /** Metadata shown at the right end of the boundary row. */
+    meta?: string | null;
+    /** Full value shown when hovering the metadata (for example a full date). */
+    metaTitle?: string | null;
     onfork?: () => void;
   }
 
-  let { text, canFork, forkReason = null, prominent = false, onfork }: Props = $props();
+  let {
+    text,
+    canFork,
+    forkReason = null,
+    prominent = false,
+    meta = null,
+    metaTitle = null,
+    onfork,
+  }: Props = $props();
 
   const forkTitle = $derived(
     canFork === true ? m.chat_action_fork() : (forkReason ?? m.chat_action_fork_unavailable()),
@@ -42,8 +54,10 @@
   class="message-actions absolute inset-x-0 -bottom-9 z-10 flex h-9 items-center gap-2"
   class:message-actions-prominent={prominent}
 >
-  <span class="bg-border/60 h-px flex-1"></span>
-  <div class="bg-popover border-border flex items-center gap-0.5 rounded-md border p-0 shadow-sm">
+  <span class="message-actions-content bg-border/60 h-px flex-1"></span>
+  <div
+    class="message-actions-content bg-popover border-border flex items-center gap-0.5 rounded-md border p-0 shadow-sm"
+  >
     <Button
       size="xs"
       variant="ghost"
@@ -70,5 +84,13 @@
       </Button>
     {/if}
   </div>
-  <span class="bg-border/60 h-px flex-1"></span>
+  <span class="message-actions-content bg-border/60 h-px flex-1"></span>
+  {#if meta}
+    <span
+      class="text-muted-foreground desk-mono pointer-events-none max-w-[45%] shrink-0 truncate text-[11px]"
+      title={metaTitle ?? meta}
+    >
+      {meta}
+    </span>
+  {/if}
 </div>

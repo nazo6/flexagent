@@ -10,7 +10,7 @@
   import ToolCallGroup from "./ToolCallGroup.svelte";
   import { Badge } from "#lib/components/ui/badge/index.ts";
   import { groupTimelineItems, type TimelineGroup } from "#lib/chat-groups.ts";
-  import { formatEpochMs } from "#lib/format.ts";
+  import { formatClockTime, formatEpochMs } from "#lib/format.ts";
   import { m } from "#lib/paraglide/messages.js";
   import type { ForkScope, SessionStatus } from "#lib/generated/bindings.ts";
   import type { TimelineItem } from "#lib/sync/reducer.ts";
@@ -179,13 +179,6 @@
         {#if item.kind === "user"}
           {@const fork = forkState(item)}
           <div class="message-group group relative flex items-end justify-end gap-1.5">
-            <MessageActions
-              text={item.text}
-              canFork={fork.canFork}
-              forkReason={fork.reason}
-              prominent={item.seq === lastForkableSeq}
-              onfork={() => onfork?.(item)}
-            />
             <div
               class="bg-user-message text-foreground max-w-[82%] rounded-xl rounded-br-sm px-4 py-2.5"
             >
@@ -210,21 +203,20 @@
                 </div>
               {/if}
               <p class="text-sm whitespace-pre-wrap">{item.text}</p>
-              <p class="text-muted-foreground desk-mono mt-1 text-right text-[11px]">
-                {item.clientSource} &middot; {formatEpochMs(item.createdAt)}
-              </p>
             </div>
-          </div>
-        {:else if item.kind === "agent"}
-          {@const fork = forkState(item)}
-          <div class="message-group group relative flex gap-2.5">
             <MessageActions
               text={item.text}
               canFork={fork.canFork}
               forkReason={fork.reason}
               prominent={item.seq === lastForkableSeq}
+              meta={`${item.clientSource} · ${formatClockTime(item.createdAt)}`}
+              metaTitle={formatEpochMs(item.createdAt)}
               onfork={() => onfork?.(item)}
             />
+          </div>
+        {:else if item.kind === "agent"}
+          {@const fork = forkState(item)}
+          <div class="message-group group relative flex gap-2.5">
             <span
               class="bg-signal-soft text-signal mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-md"
             >
@@ -237,6 +229,13 @@
                 class="text-sm leading-relaxed"
               />
             </div>
+            <MessageActions
+              text={item.text}
+              canFork={fork.canFork}
+              forkReason={fork.reason}
+              prominent={item.seq === lastForkableSeq}
+              onfork={() => onfork?.(item)}
+            />
           </div>
         {:else if item.kind === "thought"}
           <ThoughtBlock {item} />

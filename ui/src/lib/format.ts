@@ -19,6 +19,14 @@ export function formatEpochMs(ms: number | null | undefined): string {
   );
 }
 
+/** Format epoch ms as a local time of day (`HH:mm`). */
+export function formatClockTime(ms: number | null | undefined): string {
+  if (ms == null) return "-";
+  const date = new Date(ms);
+  if (Number.isNaN(date.getTime())) return "-";
+  return `${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
+}
+
 function pad2(value: number): string {
   return String(value).padStart(2, "0");
 }
