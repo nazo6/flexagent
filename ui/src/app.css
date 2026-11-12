@@ -332,17 +332,29 @@
   .message-actions {
     display: flex;
     opacity: 1;
+    /* The transparent gap itself is the hover target, so the controls appear
+       even when the pointer is between two messages. */
+    pointer-events: auto;
   }
   @media (hover: hover) and (pointer: fine) {
     .message-actions {
       opacity: 0;
-      pointer-events: none;
       transition: opacity 120ms ease;
     }
+    /* Keep hidden buttons inert until the row is revealed. */
+    .message-actions > * {
+      pointer-events: none;
+    }
     .message-group:hover .message-actions,
-    .message-group:focus-within .message-actions,
+    .message-actions:hover,
+    .message-actions:focus-within,
     .message-actions-prominent {
       opacity: 1;
+    }
+    .message-group:hover .message-actions > *,
+    .message-actions:hover > *,
+    .message-actions:focus-within > *,
+    .message-actions-prominent > * {
       pointer-events: auto;
     }
   }
