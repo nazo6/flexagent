@@ -209,19 +209,19 @@ ACP のセッション更新は `sessionId` を持つが、`agent-client-protoco
   permission 要求を子のコンテキストで解決する。子を告知しないエージェントの
   ために「登録済みコンテキストが 1 つだけなら親へフォールバック」も残す。
 
-`initialize` で広告する client capability は `AcpCapabilitySet` として設定から
-受け取り、未知の名前を捨てずに保持する。ACP 標準の `subagents` は unstable
-RFD のため、実行時設定で広告を gate し、既定 ON / kill switch を持つ。
-opencode は `_meta` の vendor capability を使う。どちらも有効化すると、子は
-独立セッションにはならず、親タイムラインのサブエージェントブロック /
-詳細ビューとして表示される。
+`initialize` で広告する client capability はエージェント定義ごとの
+`AcpExtensionOptions` が持ち、`AcpCapabilitySet` として未知の名前を捨てずに
+保持する。ACP 標準の `subagents` は既定で ON（unstable RFD）。opencode は
+`_meta` の vendor capability も広告する。どちらも有効化すると、子は独立
+セッションにはならず、親タイムラインのサブエージェントブロック / 詳細ビュー
+として表示される。
 
 ACP の必要な unstable feature（`unstable_session_fork` /
 `unstable_subagents`）は `agent-client-protocol` の依存で常に有効化する。
 ビルド時に分離したい場合だけ Cargo feature を追加する。広告する capability は
-実行時の `AcpCapability` / `AcpCapabilitySet` で制御し、
-`FXG_ACP_CAPABILITIES` で上書きする。将来 ACP の capability を増やすときは
-variant と mapping を追加する。エージェントごとの分岐は extension にのみ置く。
+起動ごとの `AcpCapability` / `AcpCapabilitySet` で決め、プロセス全体の環境変数
+では上書きしない。将来 ACP の capability を増やすときは variant と mapping を
+追加する。エージェントごとの分岐は extension にのみ置く。
 
 ---
 

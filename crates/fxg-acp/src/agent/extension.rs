@@ -82,24 +82,6 @@ impl AcpCapability {
     }
 }
 
-/// Capabilities requested by the `FXG_ACP_CAPABILITIES` environment variable.
-///
-/// `None` means the variable is unset (use the per-agent defaults). An empty
-/// string disables every capability (kill switch).
-#[must_use]
-pub fn configured_capabilities() -> Option<AcpCapabilitySet> {
-    let Ok(raw) = std::env::var("FXG_ACP_CAPABILITIES") else {
-        return None;
-    };
-    Some(
-        raw.split(',')
-            .map(str::trim)
-            .filter(|name| !name.is_empty())
-            .map(AcpCapability::from_name)
-            .collect(),
-    )
-}
-
 /// Set of ACP client capabilities advertised on a connection.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct AcpCapabilitySet(BTreeSet<AcpCapability>);
@@ -480,5 +462,24 @@ mod tests {
         assert_eq!(model.options.len(), 2);
         assert!(config.iter().any(|entry| entry.key == "reasoning"));
         assert!(!config.iter().any(|entry| entry.key == "obsolete"));
+    }
+
+    #[test]
+    fn default_capabilities_are_per_launch_and_keep_unknown_names() {
+        // Subagents are advertised by default; an agent definition can replace
+        // the set, and a name from a newer build survives the round trip.
+        let default = AcpExtensionOptions::default();
+        assert!(default.capabilities.contains(&AcpCapability::Subagents));
+
+        let disabled = AcpExtensionOptions {
+            capabilities: AcpCapabilitySet::new(),
+            ..Default::default()
+        };
+        assert!(!disabled.capabilities.contains(&AcpCapability::Subagents));
+
+        assert_eq!(
+            AcpCapability::from_name("future_thing"),
+            AcpCapability::Unknown("future_thing".to_owned())
+        );
     }
 }

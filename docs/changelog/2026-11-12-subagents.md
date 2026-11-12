@@ -61,13 +61,14 @@ ACP の機能は、接続時にエージェントへ広告する capability で�
   （`unstable_session_fork` / `unstable_subagents`）は依存で常に有効化する。
   ビルド時に分離したい場合だけ `fxg-acp` の Cargo feature を追加する。
 - **Runtime**: `AcpCapabilitySet`（未知の名前を保持する open enum の集合）を
-  設定から受け取り、`initialize` の client capabilities に反映する。既定は
-  `subagents` を ON。`FXG_ACP_CAPABILITIES=subagents` のように上書きでき、
-  空文字で全無効（kill switch）になる。未知の capability は警告して無視する。
+  エージェント定義の `AcpExtensionOptions` として受け取り、`initialize` の
+  client capabilities に反映する。既定は `subagents` を ON。未知の
+  capability は警告して無視する。プロセス全体の環境変数では上書きしない
+  （capability は接続ごと、つまりエージェントごとに決まるもの）。
 - 拡張は `AcpExtensionOptions` で `clientCapabilities._meta`、受信する独自
   通知の method、追加の capability を提供できる。
-- ACP 標準の `subagents` は unstable RFD のため、実行時設定で広告を
-  gate し、kill switch を持つ。
+- ACP 標準の `subagents` は unstable RFD のため、既定 ON としつつ
+  エージェント定義ごとに外せる形にしておく。
 
 ### 3.2 通知ルーティング
 
@@ -180,7 +181,7 @@ ACP の機能は、接続時にエージェントへ広告する capability で�
   `SubagentUpdated` は送らない。
 - **ACP RFD**: `clientCapabilities.subagents` を既定で広告し、
   `subagent_update` / 子 `session/update` / `session_message` を処理する。
-  `FXG_ACP_CAPABILITIES` で上書き・無効化できる。
+  広告するかどうかはエージェント定義の `AcpExtensionOptions` が持つ。
 - **UI**: 最初の子イベント位置にサブエージェントブロックを表示し、
   ヘッダーの「Open」から詳細シートを開ける。承認カードには子のタイトルを
   表示する。

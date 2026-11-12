@@ -740,16 +740,13 @@ pub(crate) fn client_capabilities(acp: &AcpExtensionOptions) -> ClientCapabiliti
         .auth(AuthCapabilities::new().terminal(true))
         .elicitation(ElicitationCapabilities::new().form(ElicitationFormCapabilities::new()));
 
-    let advertised = crate::agent::extension::configured_capabilities()
-        .unwrap_or_else(|| acp.capabilities.clone());
-
     if let Some(meta) = &acp.client_meta
         && let serde_json::Value::Object(map) = meta.as_value()
     {
         capabilities = capabilities.meta(map.clone());
     }
 
-    for capability in advertised.iter() {
+    for capability in acp.capabilities.iter() {
         match capability {
             AcpCapability::Subagents => {
                 capabilities = capabilities.subagents(Some(SubagentCapabilities::new()));
