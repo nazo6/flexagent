@@ -158,7 +158,7 @@ impl HandleDispatchFrom<Agent> for ChildNotificationHandler {
 }
 
 /// Known child session metadata.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct ChildInfo {
     /// Immediate parent session ID.
     pub(super) parent: String,
@@ -280,7 +280,6 @@ impl Drop for ChildSessions {
 }
 
 /// Maps an ACP child work state to the normalized status.
-#[cfg(feature = "acp-subagents")]
 pub(super) fn map_state_update(
     state: &agent_client_protocol::v1::schema::StateUpdate,
 ) -> SubagentStatus {

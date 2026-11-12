@@ -594,12 +594,10 @@ pub(super) fn map_session_update(
                 subagent_id: subagent_id.map(str::to_owned),
             }));
         }
-        #[cfg(feature = "acp-subagents")]
         SessionUpdate::SubagentUpdate(_) => {
             // Announcements need the root/child state and are handled by the
             // session loop (see `ChildSessions`).
         }
-        #[cfg(feature = "acp-subagents")]
         SessionUpdate::SessionMessage(message) => {
             let sender = message
                 .sender_session_id
@@ -630,7 +628,6 @@ pub(super) fn map_session_update(
                 }));
             }
         }
-        #[cfg(feature = "acp-subagents")]
         SessionUpdate::SessionMessageChunk(chunk) => {
             let message_id = chunk.message_id.to_string();
             let (sender, recipient) = accumulator
@@ -658,7 +655,6 @@ pub(super) fn map_session_update(
 }
 
 /// Joins the text blocks of an inter-session message.
-#[cfg(feature = "acp-subagents")]
 fn content_text(content: &[ContentBlock]) -> String {
     content
         .iter()

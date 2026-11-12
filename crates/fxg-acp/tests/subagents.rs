@@ -215,4 +215,18 @@ async fn opencode_child_notifications_are_parsed() {
         )),
         "opencode child message was not parsed: {events:#?}"
     );
+
+    // The vendor resends the same status with each update; unchanged state must
+    // not produce another announcement.
+    let announcements = updates
+        .iter()
+        .filter(|payload| {
+            matches!(
+                payload,
+                UnifiedEventPayload::SubagentUpdated { child_session_id, .. }
+                    if child_session_id == "child-open"
+            )
+        })
+        .count();
+    assert_eq!(announcements, 1, "duplicate announcements: {updates:#?}");
 }

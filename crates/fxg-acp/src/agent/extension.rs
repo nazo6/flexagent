@@ -67,8 +67,6 @@ pub struct SessionContext {
 pub enum AcpCapability {
     /// ACP subagents RFD (`clientCapabilities.subagents`).
     Subagents,
-    /// Plan operations (`clientCapabilities.plan`).
-    Plan,
     /// A capability added by a newer fxg / ACP schema.
     Unknown(String),
 }
@@ -79,7 +77,6 @@ impl AcpCapability {
     pub fn from_name(name: &str) -> Self {
         match name {
             "subagents" => Self::Subagents,
-            "plan" => Self::Plan,
             other => Self::Unknown(other.to_owned()),
         }
     }
@@ -159,9 +156,7 @@ pub struct AcpExtensionOptions {
 
 impl Default for AcpExtensionOptions {
     fn default() -> Self {
-        #[allow(unused_mut, reason = "the capability is compiled in by default")]
         let mut capabilities = AcpCapabilitySet::new();
-        #[cfg(feature = "acp-subagents")]
         capabilities.insert(AcpCapability::Subagents);
         Self {
             client_meta: None,

@@ -1,14 +1,10 @@
 use super::mapping::*;
-#[cfg(feature = "acp-subagents")]
 use super::subagent::map_state_update;
 use super::subagent::{ChildNotificationHandler, ChildSessions, SessionIngress};
 use super::*;
 use crate::agent::extension::{AcpCapability, AcpExtensionOptions};
 use fxg_protocol::events::SubagentStatus;
 
-#[cfg(feature = "acp-plan")]
-use agent_client_protocol::v1::schema::PlanCapabilities;
-#[cfg(feature = "acp-subagents")]
 use agent_client_protocol::v1::schema::SubagentCapabilities;
 
 /// Reason the turn loop ended.
@@ -424,7 +420,6 @@ impl<'a> SessionRuntime<'a> {
         subagent_id: Option<&str>,
         session: &ActiveSession<'static, Agent>,
     ) {
-        #[cfg(feature = "acp-subagents")]
         if let SessionUpdate::SubagentUpdate(announcement) = update {
             self.announce(announcement, subagent_id, session);
             return;
@@ -498,6 +493,7 @@ impl<'a> SessionRuntime<'a> {
         status: Option<SubagentStatus>,
         session: &ActiveSession<'static, Agent>,
     ) {
+        let previous = self.children.get(child).cloned();
         let info = self
             .children
             .upsert(child, parent, depth, title, description, cwd, status);
@@ -515,6 +511,11 @@ impl<'a> SessionRuntime<'a> {
                 }
             }
         }
+        // Vendors resend status on every update; only announce real changes so the
+        // parent log does not fill with duplicate `subagent_updated` events.
+        if previous.as_ref() == Some(&info) {
+            return;
+        }
         self.send_payload(UnifiedEventPayload::SubagentUpdated {
             child_session_id: child.to_owned(),
             parent_session_id: Some(info.parent),
@@ -526,7 +527,6 @@ impl<'a> SessionRuntime<'a> {
     }
 
     /// Handles a standard ACP `subagent_update` announcement.
-    #[cfg(feature = "acp-subagents")]
     fn announce(
         &mut self,
         update: agent_client_protocol::v1::schema::SubagentUpdate,
@@ -752,20 +752,7 @@ pub(crate) fn client_capabilities(acp: &AcpExtensionOptions) -> ClientCapabiliti
     for capability in advertised.iter() {
         match capability {
             AcpCapability::Subagents => {
-                #[cfg(feature = "acp-subagents")]
-                {
-                    capabilities = capabilities.subagents(Some(SubagentCapabilities::new()));
-                }
-                #[cfg(not(feature = "acp-subagents"))]
-                tracing::warn!("ACP subagents capability is configured but not compiled in");
-            }
-            AcpCapability::Plan => {
-                #[cfg(feature = "acp-plan")]
-                {
-                    capabilities = capabilities.plan(Some(PlanCapabilities::new()));
-                }
-                #[cfg(not(feature = "acp-plan"))]
-                tracing::warn!("ACP plan capability is configured but not compiled in");
+                capabilities = capabilities.subagents(Some(SubagentCapabilities::new()));
             }
             AcpCapability::Unknown(name) => {
                 tracing::warn!(capability = name, "unknown ACP capability ignored");

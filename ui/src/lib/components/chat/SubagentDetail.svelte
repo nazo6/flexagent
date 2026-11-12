@@ -35,7 +35,7 @@
 ></button>
 <dialog
   open
-  class="bg-background border-border fixed inset-y-0 right-0 z-50 m-0 flex h-full w-full max-w-2xl flex-col border-l p-0 shadow-xl"
+  class="bg-background border-border fixed inset-y-0 right-0 left-auto z-50 m-0 flex h-full w-full max-w-2xl flex-col border-l p-0 shadow-xl"
   aria-label={m.chat_subagent_title()}
 >
   <header class="border-border flex items-center gap-2 border-b px-4 py-3">

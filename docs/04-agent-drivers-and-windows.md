@@ -211,14 +211,17 @@ ACP のセッション更新は `sessionId` を持つが、`agent-client-protoco
 
 `initialize` で広告する client capability は `AcpCapabilitySet` として設定から
 受け取り、未知の名前を捨てずに保持する。ACP 標準の `subagents` は unstable
-RFD のため、`agent-client-protocol` の Cargo feature と実行時設定の両方で
-gate し、既定 ON / kill switch を持つ。opencode は `_meta` の vendor
-capability を使う。どちらも有効化すると、子は独立セッションにはならず、
-親タイムラインのサブエージェントブロック / 詳細ビューとして表示される。
+RFD のため、実行時設定で広告を gate し、既定 ON / kill switch を持つ。
+opencode は `_meta` の vendor capability を使う。どちらも有効化すると、子は
+独立セッションにはならず、親タイムラインのサブエージェントブロック /
+詳細ビューとして表示される。
 
-将来 ACP の unstable feature を増やすときは、`fxg-acp` の Cargo feature
-（`acp-all` に追加）と `AcpCapability` の variant・mapping を追加する。
-エージェントごとの分岐は extension にのみ置く。
+ACP の必要な unstable feature（`unstable_session_fork` /
+`unstable_subagents`）は `agent-client-protocol` の依存で常に有効化する。
+ビルド時に分離したい場合だけ Cargo feature を追加する。広告する capability は
+実行時の `AcpCapability` / `AcpCapabilitySet` で制御し、
+`FXG_ACP_CAPABILITIES` で上書きする。将来 ACP の capability を増やすときは
+variant と mapping を追加する。エージェントごとの分岐は extension にのみ置く。
 
 ---
 

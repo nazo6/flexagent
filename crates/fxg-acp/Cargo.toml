@@ -34,14 +34,5 @@ which = { workspace = true }
 [dev-dependencies]
 tempfile = { workspace = true }
 
-[features]
-default = ["acp-session-fork", "acp-subagents"]
-acp-all = ["acp-plan", "acp-session-fork", "acp-subagents"]
-acp-plan = ["agent-client-protocol/unstable_plan_operations"]
-# ACP unstable features supported by fxg-acp. Add new features here and to
-# `acp-all` so a single build flag can enable every supported extension.
-acp-session-fork = ["agent-client-protocol/unstable_session_fork"]
-acp-subagents = ["agent-client-protocol/unstable_subagents"]
-
 [lints]
 workspace = true

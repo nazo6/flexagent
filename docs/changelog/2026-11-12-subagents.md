@@ -53,24 +53,21 @@ agy の内部 teamwork は ACP に子セッションを公開しないため対�
 
 ## 3. 設計
 
-### 3.1 ACP feature の 2 層
+### 3.1 ACP capability の広告
 
-ACP の機能は、ビルド時に有効にする Cargo feature と、接続時にエージェントへ
-広告する capability で分ける。
+ACP の機能は、接続時にエージェントへ広告する capability で制御する。
 
-- **Cargo**: `fxg-acp` が `acp-session-fork` / `acp-subagents` /
-  `acp-plan` などの feature を持ち、`acp-all` でまとめる。workspace の
-  `agent-client-protocol` 依存は `process` だけを持ち、unstable feature は
-  `fxg-acp` が所有する。将来の追加は `acp-all` に 1 行足す。
+- **Cargo**: `agent-client-protocol` の必要な unstable feature
+  （`unstable_session_fork` / `unstable_subagents`）は依存で常に有効化する。
+  ビルド時に分離したい場合だけ `fxg-acp` の Cargo feature を追加する。
 - **Runtime**: `AcpCapabilitySet`（未知の名前を保持する open enum の集合）を
   設定から受け取り、`initialize` の client capabilities に反映する。既定は
-  `subagents` を ON。`FXG_ACP_CAPABILITIES=subagents,plan` のように上書きでき、
-  空文字で全無効（kill switch）になる。未知の capability は警告して無視し、
-  ビルドに無い feature は「設定にあるが未コンパイル」として警告する。
+  `subagents` を ON。`FXG_ACP_CAPABILITIES=subagents` のように上書きでき、
+  空文字で全無効（kill switch）になる。未知の capability は警告して無視する。
 - 拡張は `AcpExtensionOptions` で `clientCapabilities._meta`、受信する独自
   通知の method、追加の capability を提供できる。
-- ACP 標準の `subagents` は unstable RFD のため、feature と実行時設定の
-  両方で gate し、kill switch を持つ。
+- ACP 標準の `subagents` は unstable RFD のため、実行時設定で広告を
+  gate し、kill switch を持つ。
 
 ### 3.2 通知ルーティング
 
@@ -178,7 +175,9 @@ ACP の機能は、ビルド時に有効にする Cargo feature と、接続時�
   を追加し、子宛 `session/update` は子ごとの dynamic handler、vendor 通知は
   method handler で受ける。子は `SessionContexts` に `cwd` 付きで登録する。
 - **opencode**: `opencode/session/child_update` を解析し、子の text / tool /
-  承認を正規化する。`_meta` の child ID で承認をタグ付けする。
+  承認を正規化する。`_meta` の child ID で承認をタグ付けする。vendor は
+  更新のたびに同じ status を再送するため、内容が変わらない
+  `SubagentUpdated` は送らない。
 - **ACP RFD**: `clientCapabilities.subagents` を既定で広告し、
   `subagent_update` / 子 `session/update` / `session_message` を処理する。
   `FXG_ACP_CAPABILITIES` で上書き・無効化できる。

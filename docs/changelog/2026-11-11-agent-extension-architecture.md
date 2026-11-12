@@ -248,9 +248,9 @@ ACP のサブエージェント対応では、extension が「ACP 接続の縁�
 - 子イベントを親と同じストリーミング結合に合流させ、`subagent_id` を付ける。
 
 opencode の vendor 拡張は `OpenCodeExtension` に、ACP 標準の subagents RFD は
-`fxg-acp` のコアに置く。これにより、将来の ACP feature 追加は Cargo feature
-（`acp-all`）と `AcpCapability` の variant・mapping の追加で済み、
-`AcpDriver` にエージェント名の分岐を足さない。
+`fxg-acp` のコアに置く。ACP の必要な unstable feature は依存で常に有効化し、
+広告する capability は `AcpCapability` / `AcpCapabilitySet` と実行時設定で
+制御する。これにより、`AcpDriver` にエージェント名の分岐を足さない。
 
 ### 2.4 起動解決
 
