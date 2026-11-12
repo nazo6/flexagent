@@ -252,7 +252,7 @@
     if (!sessionId || killing) return;
     killing = true;
     try {
-      const result = await sync.controlSession(sessionId, { action: "kill" });
+      const result = await sync.controlSession(sessionId, { action: "dispose" });
       if (result.success) {
         toast.success(m.session_kill_success());
         killDialogOpen = false;

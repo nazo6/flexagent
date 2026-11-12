@@ -1838,8 +1838,10 @@ value: ConfigOptionValue } |
 policy: string } |
 /**  Interrupt the current turn */
 { action: "cancel" } |
-/**  Terminate the session entirely */
-{ action: "kill" };
+/**  End the session and return the agent process to the reuse pool */
+{ action: "kill" } |
+/**  Force-terminate the session and its process tree */
+{ action: "dispose" };
 
 /**  `GET /api/v1/sessions/:id` response. */
 export type SessionDetail = {

@@ -374,6 +374,8 @@ pub enum SessionControlAction {
     },
     /// Interrupt the current turn
     Cancel,
-    /// Terminate the session entirely
+    /// End the session and return the agent process to the reuse pool
     Kill,
+    /// Force-terminate the session and its process tree
+    Dispose,
 }

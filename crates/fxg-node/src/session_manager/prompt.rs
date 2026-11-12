@@ -215,6 +215,10 @@ impl SessionManager {
                 .shutdown()
                 .await
                 .map_err(|err| NodeError::Hub(format!("failed to shutdown: {err:#}"))),
+            SessionControlAction::Dispose => handle
+                .dispose()
+                .await
+                .map_err(|err| NodeError::Hub(format!("failed to dispose: {err:#}"))),
         }
     }
 }

@@ -341,13 +341,23 @@ pub struct ConfigOptionInfo {
 #[serde(rename_all = "snake_case")]
 pub enum SessionStatus { Provisioning, Idle, Running, WaitingPermission, WaitingInput, Stopped, Error }
 
+/// セッション単位の承認ポリシー
+#[serde(rename_all = "snake_case")]
+pub enum PermissionPolicy {
+    Ask,
+    AutoAllowAll,
+}
+
 #[serde(tag = "action", rename_all = "snake_case")]
 pub enum SessionControlAction {
     SetMode { mode_id: String },
     SetConfig { key: String, value: serde_json::Value },
+    SetPermissionPolicy { policy: PermissionPolicy },
     Cancel,
-    Compact,  // コンテキスト圧縮 (要約)。対応ドライバのみ (既定は未対応エラー)
+    /// セッションを終了し、エージェントプロセスを再利用プールへ返す
     Kill,
+    /// セッションとプロセスツリーを強制終了する
+    Dispose,
 }
 
 #[serde(tag = "action", rename_all = "snake_case")]
@@ -833,7 +843,7 @@ pub enum HubToNodeMsg {
 - `POST /api/v1/sessions/:id/prompt`:
   セッションへのプロンプト送信 (`PromptInput`, `client_source: ClientSource`)。応答は `CommandResult`。
 - `POST /api/v1/sessions/:id/control`:
-  セッション制御 (`action: SessionControlAction` 例: `abort`, `pause`)。応答は `CommandResult`。
+  セッション制御 (`action: SessionControlAction` 例: `cancel`, `kill`, `set_mode`)。応答は `CommandResult`。
 - `POST /api/v1/sessions/import`:
   外部 ACP セッションやトランスクリプトのインポート。応答は `SessionImportResponse`。
 - `GET /api/v1/projects/:project_id/worktrees`:

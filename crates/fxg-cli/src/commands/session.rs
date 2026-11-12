@@ -543,7 +543,7 @@ impl usage::RunAsync for SessionKillArgs {
     async fn run_async(self) -> Self::Output {
         let mut client = NodeClient::connect().await?;
         client
-            .control_session(&self.session_id, SessionControlAction::Kill)
+            .control_session(&self.session_id, SessionControlAction::Dispose)
             .await?;
         println!(
             "killed session process tree ({})",
