@@ -116,6 +116,71 @@ export function saveSessionConfigOption(
   }
 }
 
+const MODEL_FAVORITES_KEY_PREFIX = "fxg:model_favorites:";
+
+/**
+ * Load the favorite model keys for one agent.
+ *
+ * Keys are [`modelChoiceKey`](../config-options.ts) values. Unknown or
+ * malformed entries are dropped so a corrupt preference cannot break the
+ * picker.
+ */
+export function loadModelFavorites(agentId: string, storage?: Storage | null): string[] {
+  const store = resolveStorage(storage);
+  if (store === null || agentId === "") return [];
+  const raw = store.getItem(MODEL_FAVORITES_KEY_PREFIX + agentId);
+  if (raw === null) return [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    const seen = new Set<string>();
+    const result: string[] = [];
+    for (const value of parsed) {
+      if (typeof value !== "string" || value === "" || seen.has(value)) continue;
+      seen.add(value);
+      result.push(value);
+    }
+    return result;
+  } catch {
+    return [];
+  }
+}
+
+/** Persist the favorite model keys for one agent (per-device preference). */
+export function saveModelFavorites(
+  agentId: string,
+  favorites: readonly string[],
+  storage?: Storage | null,
+): void {
+  const store = resolveStorage(storage);
+  if (store === null || agentId === "") return;
+  try {
+    store.setItem(MODEL_FAVORITES_KEY_PREFIX + agentId, JSON.stringify(favorites));
+  } catch {
+    // Do not persist when localStorage is disabled or over quota
+  }
+}
+
+/**
+ * Toggle one model favorite and return the updated list.
+ *
+ * Disappeared models stay in the list so the favorite is restored if the
+ * agent offers the model again.
+ */
+export function toggleModelFavorite(
+  agentId: string,
+  key: string,
+  storage?: Storage | null,
+): string[] {
+  if (agentId === "" || key === "") return loadModelFavorites(agentId, storage);
+  const current = loadModelFavorites(agentId, storage);
+  const next = current.includes(key)
+    ? current.filter((favorite) => favorite !== key)
+    : [...current, key];
+  saveModelFavorites(agentId, next, storage);
+  return next;
+}
+
 export type SendShortcut = "enter" | "modifier_enter";
 
 const SHORTCUT_KEY = "fxg:send_shortcut";

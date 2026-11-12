@@ -40,6 +40,7 @@
     status = null,
     permissionPolicy = null,
     projectId = "",
+    agentId = "",
     /**
      * The last send failed because native restore is unsupported
      * (`RESUME_REQUIRED`). Normally false (sending resumes a stopped session
@@ -53,6 +54,8 @@
     status?: SessionStatus | null;
     permissionPolicy?: string | null;
     projectId?: string;
+    /** Agent ID used to scope favorite models. */
+    agentId?: string;
     resumeRequired?: boolean;
   } = $props();
 
@@ -384,6 +387,7 @@
       <ConfigOptionPicker
         {option}
         class="shrink-0"
+        favoriteScope={agentId}
         onchange={(value) =>
           void runControl({
             action: "set_config",

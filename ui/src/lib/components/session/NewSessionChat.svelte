@@ -1441,6 +1441,7 @@
               {option}
               value={selectedConfigValues[option.key]}
               class="shrink-0"
+              favoriteScope={effectiveAgent}
               onchange={(value) => changeConfigOption(option.key, value)}
               showRefresh={isModelOption(option)}
               onrefresh={() => void loadAgentCapabilities(true)}

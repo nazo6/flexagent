@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  loadModelFavorites,
   loadNewSessionPrefs,
   loadSendShortcutPreference,
   loadSessionConfig,
@@ -7,6 +8,7 @@ import {
   saveSendShortcutPreference,
   saveSessionConfigOption,
   shouldSubmitOnEnter,
+  toggleModelFavorite,
 } from "./session-prefs";
 
 /** Minimal Storage implementation for tests (mimics localStorage in Node). */
@@ -79,6 +81,37 @@ describe("session prefs", () => {
       thought_level: "high",
     });
     expect(loadSessionConfig("other", storage)).toEqual({});
+  });
+
+  it("toggles model favorites per agent", () => {
+    const storage = memoryStorage();
+    expect(loadModelFavorites("agent-a", storage)).toEqual([]);
+
+    expect(toggleModelFavorite("agent-a", "openai/gpt-5", storage)).toEqual(["openai/gpt-5"]);
+    expect(toggleModelFavorite("agent-a", "anthropic/claude", storage)).toEqual([
+      "openai/gpt-5",
+      "anthropic/claude",
+    ]);
+    // Another agent keeps its own list
+    expect(loadModelFavorites("agent-b", storage)).toEqual([]);
+
+    expect(toggleModelFavorite("agent-a", "openai/gpt-5", storage)).toEqual(["anthropic/claude"]);
+    expect(loadModelFavorites("agent-a", storage)).toEqual(["anthropic/claude"]);
+  });
+
+  it("drops malformed favorite entries", () => {
+    const storage = memoryStorage();
+    storage.setItem("fxg:model_favorites:agent-a", JSON.stringify(["a", 42, "", "a", "b"]));
+    expect(loadModelFavorites("agent-a", storage)).toEqual(["a", "b"]);
+
+    storage.setItem("fxg:model_favorites:agent-a", "{not json");
+    expect(loadModelFavorites("agent-a", storage)).toEqual([]);
+
+    storage.setItem("fxg:model_favorites:agent-a", JSON.stringify({ a: 1 }));
+    expect(loadModelFavorites("agent-a", storage)).toEqual([]);
+
+    expect(loadModelFavorites("", storage)).toEqual([]);
+    expect(loadModelFavorites("agent-a", null)).toEqual([]);
   });
 
   it("handles send shortcut preference and shouldSubmitOnEnter", () => {

@@ -6,6 +6,7 @@ import {
   configChoices,
   configValueToString,
   isModelOption,
+  modelChoiceKey,
   orderedConfigOptions,
   resolveConfigChoice,
   resolveInitialConfig,
@@ -154,6 +155,26 @@ describe("configChoiceDescription", () => {
   it("returns null for primitive values", () => {
     expect(configChoiceDescription("plan")).toBeNull();
     expect(configChoiceDescription(true)).toBeNull();
+  });
+});
+
+describe("modelChoiceKey", () => {
+  it("uses providerID/id for model objects", () => {
+    expect(modelChoiceKey({ providerID: "opencode", id: "gpt-5", name: "GPT-5" })).toBe(
+      "opencode/gpt-5",
+    );
+  });
+
+  it("keeps the identity when the display name changes", () => {
+    expect(modelChoiceKey({ providerID: "opencode", id: "gpt-5", name: "GPT-5" })).toBe(
+      modelChoiceKey({ providerID: "opencode", id: "gpt-5", name: "GPT-5 (renamed)" }),
+    );
+  });
+
+  it("falls back to the id or the serialized value", () => {
+    expect(modelChoiceKey({ id: "gpt-5" })).toBe("gpt-5");
+    expect(modelChoiceKey("gpt-5")).toBe("gpt-5");
+    expect(modelChoiceKey(true)).toBe("true");
   });
 });
 

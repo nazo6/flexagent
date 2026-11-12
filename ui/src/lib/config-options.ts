@@ -66,6 +66,26 @@ export function configChoiceDescription(raw: ConfigOptionValue): string | null {
   return null;
 }
 
+/**
+ * Stable identity of a model choice.
+ *
+ * Model values are usually objects such as `{ providerID, id, name }`. The
+ * display name can change between agent versions, so favorites must key on
+ * `providerID/id` instead of the serialized choice value.
+ */
+export function modelChoiceKey(raw: ConfigOptionValue): string {
+  if (raw !== null && typeof raw === "object" && !Array.isArray(raw)) {
+    const record = raw as Record<string, JsonValue>;
+    const provider = record.providerID;
+    const id = record.id;
+    if (typeof provider === "string" && provider !== "" && typeof id === "string" && id !== "") {
+      return `${provider}/${id}`;
+    }
+    if (typeof id === "string" && id !== "") return id;
+  }
+  return configValueToString(raw);
+}
+
 /** Whether the option is the agent's model selector. */
 export function isModelOption(option: ConfigOptionInfo): boolean {
   // Some agents omit the ACP category; `model` is the conventional key.

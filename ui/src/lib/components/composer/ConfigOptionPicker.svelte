@@ -5,9 +5,12 @@
     configChoiceDescription,
     configChoices,
     isModelOption,
+    modelChoiceKey,
     resolveConfigChoice,
     selectedConfigValue,
+    type ConfigOptionChoice,
   } from "#lib/config-options.ts";
+  import { loadModelFavorites, toggleModelFavorite } from "#lib/session-prefs.ts";
   import { m } from "#lib/paraglide/messages.js";
   import type { ConfigOptionInfo, ConfigOptionValue } from "#lib/generated/bindings.ts";
   import BrainIcon from "@lucide/svelte/icons/brain";
@@ -22,6 +25,7 @@
     showRefresh = false,
     onrefresh,
     disabled = false,
+    favoriteScope = "",
     class: className = "",
   }: {
     option: ConfigOptionInfo;
@@ -31,6 +35,8 @@
     showRefresh?: boolean;
     onrefresh?: () => void;
     disabled?: boolean;
+    /** Agent ID used to scope favorite models (empty disables favorites). */
+    favoriteScope?: string;
     class?: string;
   } = $props();
 
@@ -38,6 +44,7 @@
   let query = $state("");
   /** Optimistically reflect the choice until the agent reports the new value. */
   let selected = $state<ConfigOptionValue | null>(null);
+  let favorites = $state<string[]>([]);
 
   $effect(() => {
     selected = value !== undefined ? value : option.current_value;
@@ -45,6 +52,11 @@
 
   $effect(() => {
     if (!open) query = "";
+  });
+
+  // Favorites are a per-device preference scoped to the selected agent.
+  $effect(() => {
+    favorites = favoriteScope === "" ? [] : loadModelFavorites(favoriteScope);
   });
 
   const choices = $derived(configChoices(option.options));
@@ -60,7 +72,21 @@
       );
     });
   });
+  const favoriteKeys = $derived(new Set(favorites));
+  const isFavoriteChoice = (choice: ConfigOptionChoice): boolean =>
+    favoriteKeys.has(modelChoiceKey(choice.raw));
+  const showStar = $derived(isModelOption(option) && favoriteScope !== "");
+  // Only the model picker groups choices; other options keep the agent's order.
+  const favoriteChoices = $derived(showStar ? filteredChoices.filter(isFavoriteChoice) : []);
+  const otherChoices = $derived(
+    showStar ? filteredChoices.filter((choice) => !isFavoriteChoice(choice)) : filteredChoices,
+  );
   const showSearch = $derived(choices.length > 8);
+
+  function toggleFavorite(choice: ConfigOptionChoice): void {
+    if (favoriteScope === "") return;
+    favorites = toggleModelFavorite(favoriteScope, modelChoiceKey(choice.raw));
+  }
 </script>
 
 {#snippet icon()}
@@ -69,6 +95,32 @@
   {:else}
     <BrainIcon class="text-muted-foreground size-3.5" />
   {/if}
+{/snippet}
+
+{#snippet choiceRow(choice: ConfigOptionChoice)}
+  {@const favorited = isFavoriteChoice(choice)}
+  <PickerItem
+    selected={choice.value === current}
+    favorite={showStar
+      ? {
+          active: favorited,
+          label: favorited ? m.composer_model_favorite_remove() : m.composer_model_favorite_add(),
+          onToggle: () => toggleFavorite(choice),
+        }
+      : null}
+    onselect={() => {
+      selected = choice.raw;
+      onchange(resolveConfigChoice(choices, choice.value));
+      open = false;
+    }}
+  >
+    <span class="block truncate">{choice.label}</span>
+    {#if configChoiceDescription(choice.raw)}
+      <span class="text-muted-foreground block truncate text-[11px]">
+        {configChoiceDescription(choice.raw)}
+      </span>
+    {/if}
+  </PickerItem>
 {/snippet}
 
 <PickerPill
@@ -100,27 +152,29 @@
     {/if}
 
     <div class="max-h-72 overflow-y-auto p-1">
-      {#each filteredChoices as choice (choice.value)}
-        <PickerItem
-          selected={choice.value === current}
-          onselect={() => {
-            selected = choice.raw;
-            onchange(resolveConfigChoice(choices, choice.value));
-            open = false;
-          }}
-        >
-          <span class="block truncate">{choice.label}</span>
-          {#if configChoiceDescription(choice.raw)}
-            <span class="text-muted-foreground block truncate text-[11px]">
-              {configChoiceDescription(choice.raw)}
-            </span>
-          {/if}
-        </PickerItem>
-      {:else}
+      {#if favoriteChoices.length > 0}
+        <p class="text-muted-foreground px-2 py-1 text-[11px] font-medium">
+          {m.composer_model_favorites()}
+        </p>
+        {#each favoriteChoices as choice (choice.value)}
+          {@render choiceRow(choice)}
+        {/each}
+      {/if}
+      {#if otherChoices.length > 0}
+        {#if favoriteChoices.length > 0}
+          <p class="text-muted-foreground mt-1 border-t px-2 pt-2 pb-1 text-[11px] font-medium">
+            {m.composer_models_other()}
+          </p>
+        {/if}
+        {#each otherChoices as choice (choice.value)}
+          {@render choiceRow(choice)}
+        {/each}
+      {/if}
+      {#if filteredChoices.length === 0}
         <p class="text-muted-foreground px-2 py-3 text-center text-[13px]">
           {m.composer_no_matching_options()}
         </p>
-      {/each}
+      {/if}
     </div>
 
     {#if showRefresh}

@@ -634,6 +634,7 @@
             status={currentStatus}
             permissionPolicy={session?.permission_policy ?? null}
             projectId={session?.project_id ?? ""}
+            agentId={session?.agent_id ?? ""}
             bind:resumeRequired
           />
         </div>
