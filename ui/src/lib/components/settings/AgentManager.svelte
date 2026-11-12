@@ -106,15 +106,18 @@
 
   async function loadAgents(): Promise<void> {
     if (loading || nodeId === "") return;
+    // Capture the target: it can change while the request is in flight.
+    const target = nodeId;
     loading = true;
     try {
-      const catalog = await sync.connection.client.nodeAgentCatalog(nodeId);
+      const catalog = await sync.connection.client.nodeAgentCatalog(target);
       agents = catalog.agents;
       registryAgents = catalog.registry;
     } catch (error) {
       toast.error(errorMessage(error));
     } finally {
       loading = false;
+      if (nodeId !== target) void loadAgents();
     }
   }
 

@@ -48,16 +48,21 @@
 
   async function load(): Promise<void> {
     if (targetNode === "" || loading) return;
+    // Capture the target: it can change while the request is in flight.
+    const node = targetNode;
     loading = true;
     error = null;
     try {
-      snapshot = await sync.connection.client.nodeSettings(targetNode);
+      snapshot = await sync.connection.client.nodeSettings(node);
+      // Do not overwrite what the user is typing if the target moved on.
+      if (targetNode !== node) return;
       hubUrl = snapshot.pairing.hub_url ?? "";
       token = "";
     } catch (cause) {
       error = errorMessage(cause);
     } finally {
       loading = false;
+      if (targetNode !== node) void load();
     }
   }
 

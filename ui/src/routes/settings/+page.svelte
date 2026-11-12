@@ -115,13 +115,9 @@
     {
       id: "node",
       label: m.settings_scope_node(),
-      description: !nodeScopeAvailable
-        ? m.settings_scope_node_unavailable()
-        : isHub
-          ? m.settings_scope_node_desc_hub()
-          : m.settings_scope_node_desc(),
+      description: isHub ? m.settings_scope_node_desc_hub() : m.settings_scope_node_desc(),
       icon: CpuIcon,
-      disabled: !nodeScopeAvailable,
+      disabled: false,
     },
     {
       id: "browser",
@@ -172,11 +168,6 @@
     let changed = false;
     if (activeScope === "hub" && !isHub) {
       activeScope = "node";
-      changed = true;
-    }
-    // Without an online node there is nothing to edit in the node scope.
-    if (activeScope === "node" && !nodeScopeAvailable) {
-      activeScope = "hub";
       changed = true;
     }
     const tabs = tabsByScope[activeScope];
@@ -423,7 +414,7 @@
       {/each}
     </div>
 
-    {#if activeScope === "node" && isHub}
+    {#if activeScope === "node" && isHub && nodeScopeAvailable}
       <div
         class="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-muted/30 px-3 py-2"
       >
@@ -445,126 +436,34 @@
       </div>
     {/if}
 
-    <Tabs.Root value={activeTab} onValueChange={selectTab}>
-      <Tabs.List variant="line" class="w-full flex-wrap border-b sm:flex-nowrap">
-        {#each tabsByScope[activeScope] as tab (tab.id)}
-          <Tabs.Trigger value={tab.id}>{tab.label}</Tabs.Trigger>
-        {/each}
-      </Tabs.List>
+    {#if activeScope === "node" && !nodeScopeAvailable}
+      <Card class="gap-3 p-5">
+        <div class="flex items-start gap-2">
+          <CpuIcon class="text-muted-foreground mt-0.5 size-4 shrink-0" />
+          <div class="flex flex-col gap-1">
+            <h2 class="font-medium">{m.settings_node_empty_title()}</h2>
+            <p class="text-muted-foreground text-[13px]">
+              {m.settings_node_empty_description()}
+            </p>
+          </div>
+        </div>
+      </Card>
+    {:else}
+      <Tabs.Root value={activeTab} onValueChange={selectTab}>
+        <Tabs.List variant="line" class="w-full flex-wrap border-b sm:flex-nowrap">
+          {#each tabsByScope[activeScope] as tab (tab.id)}
+            <Tabs.Trigger value={tab.id}>{tab.label}</Tabs.Trigger>
+          {/each}
+        </Tabs.List>
 
-      {#if activeScope === "hub"}
-        <Tabs.Content value="process" class="mt-2 flex flex-col gap-3">
-          <SettingsCatalog section="bootstrap" />
-          <DiagnosticsPanel />
-        </Tabs.Content>
-
-        <Tabs.Content value="general" class="mt-2 flex flex-col gap-3">
-          <SettingsCatalog section="hub" />
-          <Card class="gap-3 p-4">
-            <div class="flex items-start gap-2">
-              <ShieldIcon class="text-muted-foreground mt-0.5 size-4" />
-              <div class="flex flex-1 flex-col gap-1">
-                <h2 class="font-medium">{m.settings_client_token_title()}</h2>
-                <p class="text-muted-foreground text-[13px]">
-                  {m.settings_client_token_description()}
-                  <code>~/.flexagent/auth_token</code>
-                  {m.settings_client_token_description_ref()}
-                </p>
-                <div class="mt-1">
-                  <Button variant="outline" size="sm" onclick={() => (rotateOpen = true)}>
-                    <RefreshCwIcon />
-                    {m.settings_regenerate_token()}
-                  </Button>
-                </div>
-              </div>
-            </div>
-          </Card>
-        </Tabs.Content>
-
-        <Tabs.Content value="tokens" class="mt-2 flex flex-col gap-3">
-          <Card class="gap-3 p-4">
-            <div class="flex items-start gap-2">
-              <KeyRoundIcon class="text-muted-foreground mt-0.5 size-4" />
-              <div class="flex flex-1 flex-col gap-2">
-                <div class="flex flex-wrap items-center justify-between gap-2">
-                  <div>
-                    <h2 class="font-medium">{m.settings_node_pairing_title()}</h2>
-                    <p class="text-muted-foreground text-[13px]">
-                      {m.settings_node_pairing_description()}
-                    </p>
-                  </div>
-                  <div class="flex items-center gap-1.5">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={!isHub || tokens.loading}
-                      onclick={() => void tokens.refresh()}
-                    >
-                      <RefreshCwIcon />
-                      {m.common_refresh()}
-                    </Button>
-                    <Button size="sm" disabled={!isHub} onclick={() => (issueOpen = true)}>
-                      {m.settings_issue_token()}
-                    </Button>
-                  </div>
-                </div>
-
-                {#if !isHub}
-                  <p class="text-muted-foreground text-[13px]">
-                    {m.settings_node_pairing_hub_only()}
-                    <code>{sync.connection.origin}</code>
-                  </p>
-                {:else if (tokens.data ?? []).length === 0}
-                  <p class="text-muted-foreground text-[13px]">
-                    {tokens.loading ? m.common_loading() : m.settings_no_node_tokens()}
-                  </p>
-                {:else}
-                  <ul class="flex list-none flex-col gap-1 p-0 text-[13px]">
-                    {#each tokens.data ?? [] as token (token.node_id)}
-                      <li
-                        class="hover:bg-muted/50 flex flex-wrap items-center gap-2 rounded-md border px-2 py-1.5"
-                      >
-                        <span class="font-medium">{token.node_id}</span>
-                        <span class="text-muted-foreground font-mono">{token.token_prefix}…</span>
-                        <Badge variant="outline" class="text-[11px]"
-                          >{m.settings_badge_issued()}</Badge
-                        >
-                        <Button
-                          variant="ghost"
-                          size="icon-sm"
-                          class="text-muted-foreground hover:text-destructive ml-auto"
-                          disabled={revokeBusy}
-                          onclick={() => (revokeTarget = token.node_id)}
-                          title={m.settings_revoke_token()}
-                        >
-                          <Trash2Icon />
-                          <span class="sr-only">
-                            {m.settings_revoke_token_for({ name: token.node_id })}
-                          </span>
-                        </Button>
-                      </li>
-                    {/each}
-                  </ul>
-                {/if}
-              </div>
-            </div>
-          </Card>
-        </Tabs.Content>
-
-        <Tabs.Content value="audit" class="mt-2 flex flex-col gap-3">
-          <AuditLog />
-        </Tabs.Content>
-      {:else if activeScope === "node"}
-        {#if !isHub}
+        {#if activeScope === "hub"}
           <Tabs.Content value="process" class="mt-2 flex flex-col gap-3">
             <SettingsCatalog section="bootstrap" />
             <DiagnosticsPanel />
           </Tabs.Content>
-        {/if}
 
-        <Tabs.Content value="general" class="mt-2 flex flex-col gap-3">
-          <SettingsCatalog section="machine" />
-          {#if !isHub}
+          <Tabs.Content value="general" class="mt-2 flex flex-col gap-3">
+            <SettingsCatalog section="hub" />
             <Card class="gap-3 p-4">
               <div class="flex items-start gap-2">
                 <ShieldIcon class="text-muted-foreground mt-0.5 size-4" />
@@ -584,132 +483,243 @@
                 </div>
               </div>
             </Card>
-          {/if}
-        </Tabs.Content>
+          </Tabs.Content>
 
-        <Tabs.Content value="pairing" class="mt-2 flex flex-col gap-3">
-          <PairingPanel />
-        </Tabs.Content>
+          <Tabs.Content value="tokens" class="mt-2 flex flex-col gap-3">
+            <Card class="gap-3 p-4">
+              <div class="flex items-start gap-2">
+                <KeyRoundIcon class="text-muted-foreground mt-0.5 size-4" />
+                <div class="flex flex-1 flex-col gap-2">
+                  <div class="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <h2 class="font-medium">{m.settings_node_pairing_title()}</h2>
+                      <p class="text-muted-foreground text-[13px]">
+                        {m.settings_node_pairing_description()}
+                      </p>
+                    </div>
+                    <div class="flex items-center gap-1.5">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={!isHub || tokens.loading}
+                        onclick={() => void tokens.refresh()}
+                      >
+                        <RefreshCwIcon />
+                        {m.common_refresh()}
+                      </Button>
+                      <Button size="sm" disabled={!isHub} onclick={() => (issueOpen = true)}>
+                        {m.settings_issue_token()}
+                      </Button>
+                    </div>
+                  </div>
 
-        <Tabs.Content value="agents" class="mt-2 flex flex-col gap-3">
-          <AgentManager />
-        </Tabs.Content>
+                  {#if !isHub}
+                    <p class="text-muted-foreground text-[13px]">
+                      {m.settings_node_pairing_hub_only()}
+                      <code>{sync.connection.origin}</code>
+                    </p>
+                  {:else if (tokens.data ?? []).length === 0}
+                    <p class="text-muted-foreground text-[13px]">
+                      {tokens.loading ? m.common_loading() : m.settings_no_node_tokens()}
+                    </p>
+                  {:else}
+                    <ul class="flex list-none flex-col gap-1 p-0 text-[13px]">
+                      {#each tokens.data ?? [] as token (token.node_id)}
+                        <li
+                          class="hover:bg-muted/50 flex flex-wrap items-center gap-2 rounded-md border px-2 py-1.5"
+                        >
+                          <span class="font-medium">{token.node_id}</span>
+                          <span class="text-muted-foreground font-mono">{token.token_prefix}…</span>
+                          <Badge variant="outline" class="text-[11px]"
+                            >{m.settings_badge_issued()}</Badge
+                          >
+                          <Button
+                            variant="ghost"
+                            size="icon-sm"
+                            class="text-muted-foreground hover:text-destructive ml-auto"
+                            disabled={revokeBusy}
+                            onclick={() => (revokeTarget = token.node_id)}
+                            title={m.settings_revoke_token()}
+                          >
+                            <Trash2Icon />
+                            <span class="sr-only">
+                              {m.settings_revoke_token_for({ name: token.node_id })}
+                            </span>
+                          </Button>
+                        </li>
+                      {/each}
+                    </ul>
+                  {/if}
+                </div>
+              </div>
+            </Card>
+          </Tabs.Content>
 
-        {#if !isHub}
           <Tabs.Content value="audit" class="mt-2 flex flex-col gap-3">
             <AuditLog />
           </Tabs.Content>
-        {/if}
-      {:else}
-        <Tabs.Content value="appearance" class="mt-2 flex flex-col gap-3">
-          <Card class="gap-4 p-5">
-            <div class="flex flex-col gap-1">
-              <h2 class="text-sm font-semibold">{m.settings_appearance_theme()}</h2>
-              <p class="text-muted-foreground text-[13px]">{m.settings_appearance_theme_note()}</p>
-            </div>
-            <div class="grid max-w-sm gap-1.5">
-              <select
-                id="browser-theme"
-                aria-label={m.settings_appearance_theme()}
-                class="border-input bg-surface-raised h-8 rounded-md border px-2 text-[13px]"
-                value={themePreference}
-                onchange={(event) =>
-                  setMode(event.currentTarget.value as "system" | "light" | "dark")}
-              >
-                <option value="system">{m.settings_browser_theme_system()}</option>
-                <option value="light">{m.settings_browser_theme_light()}</option>
-                <option value="dark">{m.settings_browser_theme_dark()}</option>
-              </select>
-            </div>
-          </Card>
+        {:else if activeScope === "node"}
+          {#if !isHub}
+            <Tabs.Content value="process" class="mt-2 flex flex-col gap-3">
+              <SettingsCatalog section="bootstrap" />
+              <DiagnosticsPanel />
+            </Tabs.Content>
+          {/if}
 
-          <Card class="gap-4 p-5">
-            <div class="flex flex-col gap-1">
-              <h2 class="text-sm font-semibold">{m.settings_appearance_palette()}</h2>
+          <Tabs.Content value="general" class="mt-2 flex flex-col gap-3">
+            <SettingsCatalog section="machine" nodeId={targetNode} />
+            {#if !isHub}
+              <Card class="gap-3 p-4">
+                <div class="flex items-start gap-2">
+                  <ShieldIcon class="text-muted-foreground mt-0.5 size-4" />
+                  <div class="flex flex-1 flex-col gap-1">
+                    <h2 class="font-medium">{m.settings_client_token_title()}</h2>
+                    <p class="text-muted-foreground text-[13px]">
+                      {m.settings_client_token_description()}
+                      <code>~/.flexagent/auth_token</code>
+                      {m.settings_client_token_description_ref()}
+                    </p>
+                    <div class="mt-1">
+                      <Button variant="outline" size="sm" onclick={() => (rotateOpen = true)}>
+                        <RefreshCwIcon />
+                        {m.settings_regenerate_token()}
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              </Card>
+            {/if}
+          </Tabs.Content>
+
+          <Tabs.Content value="pairing" class="mt-2 flex flex-col gap-3">
+            <PairingPanel nodeId={targetNode} />
+          </Tabs.Content>
+
+          <Tabs.Content value="agents" class="mt-2 flex flex-col gap-3">
+            <AgentManager nodeId={targetNode} />
+          </Tabs.Content>
+
+          {#if !isHub}
+            <Tabs.Content value="audit" class="mt-2 flex flex-col gap-3">
+              <AuditLog />
+            </Tabs.Content>
+          {/if}
+        {:else}
+          <Tabs.Content value="appearance" class="mt-2 flex flex-col gap-3">
+            <Card class="gap-4 p-5">
+              <div class="flex flex-col gap-1">
+                <h2 class="text-sm font-semibold">{m.settings_appearance_theme()}</h2>
+                <p class="text-muted-foreground text-[13px]">
+                  {m.settings_appearance_theme_note()}
+                </p>
+              </div>
+              <div class="grid max-w-sm gap-1.5">
+                <select
+                  id="browser-theme"
+                  aria-label={m.settings_appearance_theme()}
+                  class="border-input bg-surface-raised h-8 rounded-md border px-2 text-[13px]"
+                  value={themePreference}
+                  onchange={(event) =>
+                    setMode(event.currentTarget.value as "system" | "light" | "dark")}
+                >
+                  <option value="system">{m.settings_browser_theme_system()}</option>
+                  <option value="light">{m.settings_browser_theme_light()}</option>
+                  <option value="dark">{m.settings_browser_theme_dark()}</option>
+                </select>
+              </div>
+            </Card>
+
+            <Card class="gap-4 p-5">
+              <div class="flex flex-col gap-1">
+                <h2 class="text-sm font-semibold">{m.settings_appearance_palette()}</h2>
+                <p class="text-muted-foreground text-[13px]">
+                  {m.settings_appearance_palette_note()}
+                </p>
+              </div>
+              <div class="grid gap-2 sm:grid-cols-3">
+                {#each PALETTES as option (option.id)}
+                  <button
+                    type="button"
+                    aria-pressed={theme.palette === option.id}
+                    onclick={() => theme.setPalette(option.id)}
+                    class={cn(
+                      "flex items-center justify-between gap-2 rounded-lg border px-3 py-2.5 text-left transition-colors",
+                      theme.palette === option.id
+                        ? "border-signal bg-signal-soft/60"
+                        : "border-border hover:border-line-strong hover:bg-muted/50",
+                    )}
+                  >
+                    <span class="flex items-center gap-2">
+                      <span
+                        class="size-3.5 rounded-full border border-black/10"
+                        style={`background:${option.canvas}`}
+                      ></span>
+                      <span
+                        class="size-3.5 rounded-full border border-black/10"
+                        style={`background:${option.ink}`}
+                      ></span>
+                      <span
+                        class="size-3.5 rounded-full border border-black/10"
+                        style={`background:${option.signal}`}
+                      ></span>
+                    </span>
+                    <span class="text-[13px] font-medium">{paletteLabel(option.id)}</span>
+                  </button>
+                {/each}
+              </div>
               <p class="text-muted-foreground text-[13px]">
-                {m.settings_appearance_palette_note()}
+                {m.settings_appearance_storage_note()}
               </p>
-            </div>
-            <div class="grid gap-2 sm:grid-cols-3">
-              {#each PALETTES as option (option.id)}
-                <button
+            </Card>
+
+            <Card class="gap-4 p-5">
+              <div class="flex flex-col gap-1">
+                <h2 class="text-sm font-semibold">{m.settings_browser_send_shortcut()}</h2>
+                <p class="text-muted-foreground text-[13px]">
+                  {m.settings_browser_send_shortcut_note()}
+                </p>
+              </div>
+              <div class="grid max-w-sm gap-1.5">
+                <select
+                  id="browser-send-shortcut"
+                  aria-label={m.settings_browser_send_shortcut()}
+                  class="border-input bg-surface-raised h-8 rounded-md border px-2 text-[13px]"
+                  value={prefs.sendShortcut}
+                  onchange={(event) =>
+                    prefs.setSendShortcut(event.currentTarget.value as "enter" | "modifier_enter")}
+                >
+                  <option value="enter">{m.settings_browser_send_shortcut_enter()}</option>
+                  <option value="modifier_enter"
+                    >{m.settings_browser_send_shortcut_modifier()}</option
+                  >
+                </select>
+              </div>
+            </Card>
+
+            <Card class="gap-3 p-4">
+              <h2 class="text-sm font-semibold">{m.settings_browser_pinned()}</h2>
+              <p class="text-muted-foreground text-[13px]">
+                {m.settings_browser_pinned_note()}
+              </p>
+              <div class="flex items-center justify-between gap-3">
+                <span class="text-muted-foreground text-[13px]">
+                  {m.settings_browser_pinned_count({ count: pinned.pinnedIds.size })}
+                </span>
+                <Button
                   type="button"
-                  aria-pressed={theme.palette === option.id}
-                  onclick={() => theme.setPalette(option.id)}
-                  class={cn(
-                    "flex items-center justify-between gap-2 rounded-lg border px-3 py-2.5 text-left transition-colors",
-                    theme.palette === option.id
-                      ? "border-signal bg-signal-soft/60"
-                      : "border-border hover:border-line-strong hover:bg-muted/50",
-                  )}
+                  variant="outline"
+                  size="sm"
+                  disabled={pinned.pinnedIds.size === 0}
+                  onclick={() => pinned.clear()}
                 >
-                  <span class="flex items-center gap-2">
-                    <span
-                      class="size-3.5 rounded-full border border-black/10"
-                      style={`background:${option.canvas}`}
-                    ></span>
-                    <span
-                      class="size-3.5 rounded-full border border-black/10"
-                      style={`background:${option.ink}`}
-                    ></span>
-                    <span
-                      class="size-3.5 rounded-full border border-black/10"
-                      style={`background:${option.signal}`}
-                    ></span>
-                  </span>
-                  <span class="text-[13px] font-medium">{paletteLabel(option.id)}</span>
-                </button>
-              {/each}
-            </div>
-            <p class="text-muted-foreground text-[13px]">{m.settings_appearance_storage_note()}</p>
-          </Card>
-
-          <Card class="gap-4 p-5">
-            <div class="flex flex-col gap-1">
-              <h2 class="text-sm font-semibold">{m.settings_browser_send_shortcut()}</h2>
-              <p class="text-muted-foreground text-[13px]">
-                {m.settings_browser_send_shortcut_note()}
-              </p>
-            </div>
-            <div class="grid max-w-sm gap-1.5">
-              <select
-                id="browser-send-shortcut"
-                aria-label={m.settings_browser_send_shortcut()}
-                class="border-input bg-surface-raised h-8 rounded-md border px-2 text-[13px]"
-                value={prefs.sendShortcut}
-                onchange={(event) =>
-                  prefs.setSendShortcut(event.currentTarget.value as "enter" | "modifier_enter")}
-              >
-                <option value="enter">{m.settings_browser_send_shortcut_enter()}</option>
-                <option value="modifier_enter">{m.settings_browser_send_shortcut_modifier()}</option
-                >
-              </select>
-            </div>
-          </Card>
-
-          <Card class="gap-3 p-4">
-            <h2 class="text-sm font-semibold">{m.settings_browser_pinned()}</h2>
-            <p class="text-muted-foreground text-[13px]">
-              {m.settings_browser_pinned_note()}
-            </p>
-            <div class="flex items-center justify-between gap-3">
-              <span class="text-muted-foreground text-[13px]">
-                {m.settings_browser_pinned_count({ count: pinned.pinnedIds.size })}
-              </span>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                disabled={pinned.pinnedIds.size === 0}
-                onclick={() => pinned.clear()}
-              >
-                {m.settings_browser_unpin_all()}
-              </Button>
-            </div>
-          </Card>
-        </Tabs.Content>
-      {/if}
-    </Tabs.Root>
+                  {m.settings_browser_unpin_all()}
+                </Button>
+              </div>
+            </Card>
+          </Tabs.Content>
+        {/if}
+      </Tabs.Root>
+    {/if}
   {/if}
 </div>
 

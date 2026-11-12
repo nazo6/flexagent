@@ -59,12 +59,13 @@
 
   async function load(): Promise<void> {
     if (loading) return;
+    // Capture the target: it can change while the requests are in flight.
+    const node = targetNode;
     loading = true;
     error = null;
     try {
       if (section === "bootstrap" || section === "machine") {
-        nodeSnapshot =
-          targetNode !== "" ? await sync.connection.client.nodeSettings(targetNode) : null;
+        nodeSnapshot = node !== "" ? await sync.connection.client.nodeSettings(node) : null;
         syncNodeForm();
       }
       if (section === "bootstrap" || section === "machine" || section === "hub") {
@@ -74,8 +75,7 @@
         }
       }
       if (section === "machine") {
-        secrets =
-          targetNode !== "" ? (await sync.connection.client.nodeSecrets(targetNode)).secrets : [];
+        secrets = node !== "" ? (await sync.connection.client.nodeSecrets(node)).secrets : [];
       } else if (section === "hub" && isHub) {
         secrets = (await sync.connection.client.hubSecrets()).secrets;
       }
@@ -83,6 +83,8 @@
       error = errorMessage(cause);
     } finally {
       loading = false;
+      // The target changed while loading; retry now that the guard is released.
+      if (targetNode !== node) void load();
     }
   }
 
