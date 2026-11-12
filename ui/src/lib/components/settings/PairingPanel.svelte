@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from "svelte";
   import { errorMessage } from "#lib/api/error-messages.ts";
   import { Badge } from "#lib/components/ui/badge/index.ts";
   import { Button } from "#lib/components/ui/button/index.ts";
@@ -33,10 +34,11 @@
   );
 
   $effect(() => {
-    // Reload when the node identity becomes known or the pairing revision changes.
-    const key = `${nodeId}:${pairing?.revision ?? -1}`;
-    void key;
-    void load();
+    // Load once the node identity is known. Do not read `snapshot` here: `load()`
+    // assigns it, which would retrigger the effect and overwrite the form while
+    // the user types. Save/clear already refresh the snapshot from the response.
+    if (nodeId === "") return;
+    untrack(() => void load());
   });
 
   async function load(): Promise<void> {
