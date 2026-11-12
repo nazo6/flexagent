@@ -9,9 +9,7 @@
   import { cn } from "#lib/utils.ts";
   import { m } from "#lib/paraglide/messages.js";
   import ConnectionMenu from "#lib/components/ConnectionMenu.svelte";
-  import KillSwitchButton from "#lib/components/KillSwitchButton.svelte";
   import SessionActionsMenu from "#lib/components/session/SessionActionsMenu.svelte";
-  import SyncStatusBadge from "#lib/components/SyncStatusBadge.svelte";
   import type { SessionSummary } from "#lib/generated/bindings.ts";
   import { layoutState } from "#lib/stores/layout.svelte.ts";
   import PanelLeftCloseIcon from "@lucide/svelte/icons/panel-left-close";
@@ -187,11 +185,6 @@
     >
       <PanelLeftCloseIcon class="size-4" />
     </button>
-  </div>
-
-  <!-- What this UI is connected to; opens the target switcher -->
-  <div class="border-b border-border px-2.5 py-2">
-    <ConnectionMenu variant="scope" />
   </div>
 
   <!-- Quick navigation -->
@@ -440,12 +433,9 @@
     {/if}
   </div>
 
-  <!-- Footer: sync status and the emergency stop -->
-  <div class="border-border flex flex-col gap-2 border-t p-2">
-    <div class="flex flex-wrap items-center justify-between gap-1.5">
-      <SyncStatusBadge />
-      <KillSwitchButton class="h-7 text-[11px]" />
-    </div>
+  <!-- Footer: connection target selector with its link status -->
+  <div class="border-border border-t p-2">
+    <ConnectionMenu variant="scope" />
   </div>
 </aside>
 

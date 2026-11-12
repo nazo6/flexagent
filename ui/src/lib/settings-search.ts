@@ -92,6 +92,12 @@ export const SETTINGS_SEARCH_ENTRIES: SettingsSearchEntry[] = [
     label: "Component health",
     keywords: "health status db http sync disk",
   },
+  {
+    scope: "current",
+    tab: "process",
+    label: "Emergency stop",
+    keywords: "kill switch stop all sessions processes pty emergency",
+  },
 
   { scope: "node", tab: "general", label: "Display name", keywords: "name label node title" },
   { scope: "node", tab: "general", label: "Tray", keywords: "tray menu bar background" },

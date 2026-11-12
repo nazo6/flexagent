@@ -5,7 +5,8 @@
   import { Button } from "#lib/components/ui/button/index.ts";
   import { Input } from "#lib/components/ui/input/index.ts";
   import { Label } from "#lib/components/ui/label/index.ts";
-  import { connection, logoutAndStop } from "#lib/stores/app.svelte.ts";
+  import { connection, logoutAndStop, sync } from "#lib/stores/app.svelte.ts";
+  import { formatRelativeTime } from "#lib/format.ts";
   import {
     disablePushNotifications,
     enablePushNotifications,
@@ -17,6 +18,7 @@
   import BellOffIcon from "@lucide/svelte/icons/bell-off";
   import CableIcon from "@lucide/svelte/icons/cable";
   import ChevronDownIcon from "@lucide/svelte/icons/chevron-down";
+  import ClockIcon from "@lucide/svelte/icons/clock";
   import LogOutIcon from "@lucide/svelte/icons/log-out";
   import PlusIcon from "@lucide/svelte/icons/plus";
   import ServerIcon from "@lucide/svelte/icons/server";
@@ -159,6 +161,12 @@
       <span class="truncate">{originLabel}</span>
       <span class="text-muted-foreground ml-auto text-[13px]">{roleLabel}</span>
     </DropdownMenu.Item>
+    {#if sync.lastSyncedAt !== null}
+      <DropdownMenu.Item disabled>
+        <ClockIcon />
+        <span>{m.shell_synced_relative({ time: formatRelativeTime(sync.lastSyncedAt) })}</span>
+      </DropdownMenu.Item>
+    {/if}
     <DropdownMenu.Separator />
     {#if connection.availableTargets.length > 0}
       <DropdownMenu.Label>{m.connection_targets_label()}</DropdownMenu.Label>

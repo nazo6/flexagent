@@ -531,6 +531,8 @@
   "settings_diagnostics_description": "Download agent stderr tails, the node log path and local diagnostics as JSON.",
   "settings_diagnostics_downloaded": "Diagnostics downloaded",
   "settings_diagnostics_title": "Diagnostics",
+  "settings_emergency_stop_description": "Immediately force-stop running sessions, process trees, and PTYs on every node. The action is recorded in the audit log.",
+  "settings_emergency_stop_title": "Emergency stop",
   "settings_export_support_bundle": "Export support bundle",
   "settings_health_degraded": "Degraded",
   "settings_health_error": "Error",

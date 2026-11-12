@@ -6,6 +6,7 @@
   import AgentManager from "#lib/components/settings/AgentManager.svelte";
   import AuditLog from "#lib/components/settings/AuditLog.svelte";
   import DiagnosticsPanel from "#lib/components/settings/DiagnosticsPanel.svelte";
+  import KillSwitchButton from "#lib/components/KillSwitchButton.svelte";
   import PairingPanel from "#lib/components/settings/PairingPanel.svelte";
   import ProvisionerManager from "#lib/components/settings/ProvisionerManager.svelte";
   import SettingsCatalog from "#lib/components/settings/SettingsCatalog.svelte";
@@ -43,6 +44,7 @@
   import ShieldIcon from "@lucide/svelte/icons/shield";
   import Trash2Icon from "@lucide/svelte/icons/trash-2";
   import CpuIcon from "@lucide/svelte/icons/cpu";
+  import OctagonXIcon from "@lucide/svelte/icons/octagon-x";
   import PaletteIcon from "@lucide/svelte/icons/palette";
   import ServerIcon from "@lucide/svelte/icons/server";
 
@@ -496,6 +498,7 @@
           <Tabs.Content value="process" class="mt-2 flex flex-col gap-3">
             <SettingsCatalog section="bootstrap" />
             <DiagnosticsPanel />
+            {@render emergencyStopCard()}
           </Tabs.Content>
 
           <Tabs.Content value="general" class="mt-2 flex flex-col gap-3">
@@ -603,6 +606,7 @@
             <Tabs.Content value="process" class="mt-2 flex flex-col gap-3">
               <SettingsCatalog section="bootstrap" />
               <DiagnosticsPanel />
+              {@render emergencyStopCard()}
             </Tabs.Content>
           {/if}
 
@@ -805,6 +809,23 @@
     {/if}
   {/if}
 </div>
+
+{#snippet emergencyStopCard()}
+  <Card class="border-destructive/40 gap-3 p-4">
+    <div class="flex flex-wrap items-start justify-between gap-3">
+      <div class="flex items-start gap-2">
+        <OctagonXIcon class="text-destructive mt-0.5 size-4 shrink-0" />
+        <div class="flex flex-col gap-1">
+          <h2 class="font-medium">{m.settings_emergency_stop_title()}</h2>
+          <p class="text-muted-foreground text-[13px]">
+            {m.settings_emergency_stop_description()}
+          </p>
+        </div>
+      </div>
+      <KillSwitchButton />
+    </div>
+  </Card>
+{/snippet}
 
 <!-- Issue node pairing token -->
 <Dialog.Root open={issueOpen} onOpenChange={(open) => (issueOpen = open)}>
