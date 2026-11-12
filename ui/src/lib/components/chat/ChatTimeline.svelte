@@ -2,13 +2,14 @@
   import ElicitationCard from "#lib/components/ElicitationCard.svelte";
   import PermissionCard from "#lib/components/PermissionCard.svelte";
   import MarkdownText from "#lib/components/MarkdownText.svelte";
+  import ForkOrigin from "./ForkOrigin.svelte";
   import MessageActions from "./MessageActions.svelte";
   import Self from "./ChatTimeline.svelte";
   import SubagentGroup from "./SubagentGroup.svelte";
   import ThoughtBlock from "./ThoughtBlock.svelte";
   import ToolCallGroup from "./ToolCallGroup.svelte";
   import { Badge } from "#lib/components/ui/badge/index.ts";
-  import { groupTimelineItems } from "#lib/chat-groups.ts";
+  import { groupTimelineItems, type TimelineGroup } from "#lib/chat-groups.ts";
   import { formatEpochMs } from "#lib/format.ts";
   import { m } from "#lib/paraglide/messages.js";
   import type { ForkScope, SessionStatus } from "#lib/generated/bindings.ts";
@@ -29,6 +30,9 @@
     onsubagent,
     subagentTitle = null,
     forkScope = null,
+    forkFrom = null,
+    forkFromTitle = null,
+    forkAfterSeq = null,
     onfork,
   }: {
     sessionId: string;
@@ -42,6 +46,12 @@
     subagentTitle?: string | null;
     /** Fork capability reported by the session projection. */
     forkScope?: ForkScope | null;
+    /** Parent session ID when this session is a fork. */
+    forkFrom?: string | null;
+    /** Title of the parent session (falls back to a short ID). */
+    forkFromTitle?: string | null;
+    /** `node_seq` of the last event copied from the parent. */
+    forkAfterSeq?: number | null;
     /** Called when the user chooses "Fork from here" on a message. */
     onfork?: (item: TimelineItem) => void;
   } = $props();
@@ -91,6 +101,28 @@
 
   const groupedItems = $derived(groupTimelineItems(items, { groupSubagents: !nested }));
 
+  function groupMaxSeq(group: TimelineGroup): number {
+    switch (group.kind) {
+      case "subagent":
+        return Math.max(group.subagent.seq, ...group.items.map((item) => item.seq));
+      case "tools":
+        return Math.max(...group.tools.map((tool) => tool.seq));
+      default:
+        return group.item.seq;
+    }
+  }
+
+  /** Group after which the fork origin marker is rendered. */
+  const forkAfterGroupKey = $derived.by(() => {
+    if (forkFrom === null || forkAfterSeq === null) return null;
+    let key: string | null = null;
+    for (const group of groupedItems) {
+      if (groupMaxSeq(group) <= forkAfterSeq) key = group.key;
+      else break;
+    }
+    return key;
+  });
+
   const sessionBusy = $derived(
     status === "running" || status === "waiting_permission" || status === "waiting_input",
   );
@@ -126,7 +158,7 @@
   }
 </script>
 
-<ul class="flex list-none flex-col gap-6 p-0">
+<ul class="flex list-none flex-col gap-9 p-0">
   {#each groupedItems as group (group.key)}
     <li>
       {#if group.kind === "subagent"}
@@ -288,6 +320,11 @@
         {/if}
       {/if}
     </li>
+    {#if forkFrom !== null && group.key === forkAfterGroupKey}
+      <li>
+        <ForkOrigin parentSessionId={forkFrom} title={forkFromTitle} />
+      </li>
+    {/if}
   {/each}
 
   {#if agentWorking && !nested && !tailIsLive}

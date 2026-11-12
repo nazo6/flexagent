@@ -462,6 +462,7 @@
   "session_diff_panel_title": "Changes (Diff)",
   "session_diff_panel_toggle_title": "Toggle the code diff panel on the right",
   "session_fork_button_title": "Fork into a new session, carrying over this session's history",
+  "session_fork_origin": "Forked from {title}",
   "session_jump_to_latest": "Jump to latest",
   "session_kill_action": "Force stop",
   "session_kill_button_title": "Force-stop the session's child process tree",

@@ -39,7 +39,7 @@
   pointer devices that can hover.
 -->
 <div
-  class="message-actions absolute inset-x-0 -bottom-6 z-10 items-center gap-2"
+  class="message-actions absolute inset-x-0 -bottom-8 z-10 items-center gap-2"
   class:message-actions-prominent={prominent}
 >
   <span class="bg-border/60 h-px flex-1"></span>

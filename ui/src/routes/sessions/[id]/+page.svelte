@@ -63,6 +63,20 @@
       pendingPrompts: sync.pendingPrompts,
     }),
   );
+  const forkFromTitle = $derived(
+    session?.parent_session_id
+      ? (sync.sessions.find((entry) => entry.session_id === session.parent_session_id)?.title ??
+          null)
+      : null,
+  );
+  /** Last event copied from the parent (copied events keep the parent timestamps). */
+  const forkAfterSeq = $derived.by(() => {
+    if (!session?.parent_session_id) return null;
+    for (let index = items.length - 1; index >= 0; index -= 1) {
+      if (items[index].createdAt < session.created_at) return items[index].seq;
+    }
+    return null;
+  });
   const capabilities = $derived(capabilitiesFromEvents(timeline.events));
   // Prefer the latest usage derived from events, and fall back to the session list (projection) value.
   const usage = $derived(latestUsageFromEvents(timeline.events) ?? session?.usage ?? null);
@@ -424,7 +438,7 @@
         <div
           bind:this={chatContainer}
           onscroll={handleScroll}
-          class="app-scroll-centered h-full overflow-y-auto px-4 pt-5 pb-8 md:px-8"
+          class="app-scroll-centered h-full overflow-y-auto px-4 pt-5 pb-10 md:px-8"
         >
           <div class="mx-auto flex max-w-[760px] flex-col gap-4">
             <ProvisioningLogCard lines={provisioningLines} />
@@ -433,6 +447,9 @@
               {items}
               status={currentStatus}
               {forkScope}
+              forkFrom={session?.parent_session_id ?? null}
+              {forkFromTitle}
+              {forkAfterSeq}
               onfork={handleForkItem}
               onsubagent={(childSessionId) => (selectedSubagentId = childSessionId)}
             />
