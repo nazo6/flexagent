@@ -979,7 +979,6 @@ mod tests {
             assert!(!preset.args.is_empty());
         }
         assert!(ids.contains(builtin::OPENCODE));
-        assert!(ids.contains(builtin::OPENCODE_V2));
         assert!(ids.contains(builtin::AGY));
     }
 }

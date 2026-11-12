@@ -63,10 +63,11 @@ opencode の Tier 2 移行（Phase 4）まで実装済みである。Tier 3 の�
   bot アイコンにフォールバックする。
   `AgentSummary.backend` はエージェント一覧にバッジ
   (`ACP` / `ACP + extension` / `Custom driver`) として表示する。
-- ビルトイン provider は `opencode` / `opencode-v2`（Tier 2）に加え、
+- ビルトイン provider は `opencode`（Tier 2）に加え、
   `agy` / `github-copilot-cli` / `qwen-code` / `cline` / `auggie` /
   `kimi-code` のネイティブ CLI preset を持つ。一覧・起動は
-  ビルトインの表示名・アイコン・preset を使う。
+  ビルトインの表示名・アイコン・preset を使う。opencode は v2 の CLI 名が
+  `opencode` であるため、`opencode-v2` のような別 ID を持たない。
 - Gemini CLI は上流で deprecated のため builtin / alias を持たない。
   必要な場合は Registry から import して custom 定義として使う。
 - builtin にないエージェントは、Web UI の「Import from registry」で
@@ -81,8 +82,7 @@ opencode の Tier 2 移行（Phase 4）まで実装済みである。Tier 3 の�
   は「エージェント別の分岐を入れない」の意味であり、汎用の ACP seam は
   コアに置く。
 - ビルトイン provider は拡張を `with_extension(<extension ID>, <instance>)`
-  で明示する。extension ID はエージェント ID から暗黙導出しない
-  (`opencode` / `opencode-v2` はそれぞれ同名の ID を持つ)。カスタム定義は
+  で明示する。extension ID はエージェント ID から暗黙導出しない。カスタム定義は
   この ID を `CustomAgentConfig.extension` に保存し、一覧
   (`AgentSummary.extension`) にも表示する。
 - ACP capability の広告は接続ごとに決まる。ビルトインは

@@ -22,13 +22,6 @@ use crate::driver::DriverEvent;
 #[derive(Debug, Default)]
 pub struct OpenCodeExtension;
 
-/// OpenCode V2 ACP extension.
-///
-/// The v2 registry entry launches the same `opencode acp` binary, so it shares
-/// the model label conversion but keeps its own display name.
-#[derive(Debug, Default)]
-pub struct OpenCodeV2Extension;
-
 #[async_trait]
 impl AgentExtension for OpenCodeExtension {
     fn metadata(&self) -> AgentMetadata {
@@ -36,45 +29,6 @@ impl AgentExtension for OpenCodeExtension {
             name: Some("OpenCode".to_owned()),
             description: Some(
                 "OpenCode via ACP, with readable model labels provided by fxg".to_owned(),
-            ),
-            icon: Some("builtin:opencode".to_owned()),
-        }
-    }
-
-    fn acp_options(
-        &self,
-        capabilities: &fxg_protocol::settings::AgentAcpCapabilities,
-    ) -> AcpExtensionOptions {
-        opencode_acp_options(capabilities)
-    }
-
-    fn notification_parser(&self) -> Option<Arc<dyn AcpNotificationParser>> {
-        Some(Arc::new(OpenCodeNotificationParser))
-    }
-
-    async fn capabilities(
-        &self,
-        _ctx: &super::extension::SessionContext,
-        current: &CapabilitiesSnapshot,
-    ) -> anyhow::Result<Option<CapabilityOverlay>> {
-        model_label_overlay(current)
-    }
-
-    async fn open_session(
-        &self,
-        _ctx: &super::extension::SessionContext,
-    ) -> anyhow::Result<Option<Arc<dyn SessionExtension>>> {
-        Ok(Some(Arc::new(OpenCodeSessionExtension)))
-    }
-}
-
-#[async_trait]
-impl AgentExtension for OpenCodeV2Extension {
-    fn metadata(&self) -> AgentMetadata {
-        AgentMetadata {
-            name: Some("OpenCode V2".to_owned()),
-            description: Some(
-                "OpenCode V2 via ACP, with readable model labels provided by fxg".to_owned(),
             ),
             icon: Some("builtin:opencode".to_owned()),
         }
@@ -380,9 +334,9 @@ mod tests {
     use fxg_protocol::common::{ConfigOptionValue, ModeInfo};
 
     #[test]
-    fn v2_metadata_keeps_its_own_name() {
-        let metadata = OpenCodeV2Extension.metadata();
-        assert_eq!(metadata.name.as_deref(), Some("OpenCode V2"));
+    fn metadata_uses_the_opencode_name() {
+        let metadata = OpenCodeExtension.metadata();
+        assert_eq!(metadata.name.as_deref(), Some("OpenCode"));
         assert_eq!(metadata.icon.as_deref(), Some("builtin:opencode"));
     }
 
