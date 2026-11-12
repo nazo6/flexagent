@@ -23,6 +23,7 @@
   import * as Dialog from "#lib/components/ui/dialog/index.ts";
   import { Input } from "#lib/components/ui/input/index.ts";
   import { Label } from "#lib/components/ui/label/index.ts";
+  import * as Select from "#lib/components/ui/select/index.ts";
   import * as Tabs from "#lib/components/ui/tabs/index.ts";
   import type { IssueNodeTokenResponse, NodeTokenSummary } from "#lib/generated/bindings.ts";
   import { m } from "#lib/paraglide/messages.js";
@@ -162,6 +163,11 @@
 
   /** Node the Node scope writes to (empty while none is online). */
   const targetNode = $derived(isHub ? selectedNode : (sync.connection.systemInfo?.node_id ?? ""));
+  /** Label of the selected node in the target dropdown. */
+  const selectedNodeLabel = $derived.by(() => {
+    const node = onlineNodes.find((candidate) => candidate.node_id === selectedNode);
+    return node ? `${node.name} (${node.node_id})` : selectedNode;
+  });
 
   // Keep the location valid when the role or the available tabs change.
   $effect(() => {
@@ -420,18 +426,27 @@
       >
         <CpuIcon class="text-muted-foreground size-4" />
         <Label for="settings-target-node">{m.settings_target_node()}</Label>
-        <select
-          id="settings-target-node"
-          class="border-input bg-surface-raised h-8 rounded-md border px-2 text-[13px]"
-          bind:value={selectedNode}
-        >
-          {#if onlineNodes.length === 0}
-            <option value="">{m.common_no_node_online()}</option>
-          {/if}
-          {#each onlineNodes as node (node.node_id)}
-            <option value={node.node_id}>{node.name} ({node.node_id})</option>
-          {/each}
-        </select>
+        <Select.Root type="single" bind:value={selectedNode}>
+          <Select.Trigger
+            id="settings-target-node"
+            size="sm"
+            class="min-w-52 text-[13px]"
+            aria-label={m.settings_target_node()}
+          >
+            <span class="truncate">{selectedNodeLabel}</span>
+          </Select.Trigger>
+          <Select.Content>
+            {#each onlineNodes as node (node.node_id)}
+              <Select.Item
+                value={node.node_id}
+                label={`${node.name} (${node.node_id})`}
+                class="text-[13px]"
+              >
+                {node.name} ({node.node_id})
+              </Select.Item>
+            {/each}
+          </Select.Content>
+        </Select.Root>
         <span class="text-muted-foreground text-[12px]">{m.settings_node_scope_hint()}</span>
       </div>
     {/if}
