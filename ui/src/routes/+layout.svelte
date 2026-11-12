@@ -4,7 +4,6 @@
   import "../app.css";
   import AppSidebar from "#lib/components/layout/AppSidebar.svelte";
   import ConnectionMenu from "#lib/components/ConnectionMenu.svelte";
-  import ConnectionScopeBadge from "#lib/components/ConnectionScopeBadge.svelte";
   import ErrorBanner from "#lib/components/ErrorBanner.svelte";
   import TokenDialog from "#lib/components/TokenDialog.svelte";
   import { Button } from "#lib/components/ui/button/index.ts";
@@ -180,7 +179,7 @@
             </div>
             <span>FlexAgent</span>
           </a>
-          <ConnectionScopeBadge compact />
+          <ConnectionMenu variant="scope-compact" align="end" />
         </div>
 
         {#if sync.inbox.length > 0}

@@ -22,13 +22,20 @@
   import ServerIcon from "@lucide/svelte/icons/server";
   import { cn } from "#lib/utils.ts";
   import { m } from "#lib/paraglide/messages.js";
+  import ConnectionScopeBadge from "#lib/components/ConnectionScopeBadge.svelte";
 
   interface Props {
     class?: string;
     align?: "start" | "center" | "end";
+    /**
+     * Trigger style. `button` is the plain outlined button (error screen),
+     * `scope` renders the Hub/Node identity badge as the dropdown trigger and
+     * `scope-compact` its single-line variant.
+     */
+    variant?: "button" | "scope" | "scope-compact";
   }
 
-  let { class: className, align = "start" }: Props = $props();
+  let { class: className, align = "start", variant = "button" }: Props = $props();
 
   let addOpen = $state(false);
   let newLabel = $state("");
@@ -109,19 +116,41 @@
 <DropdownMenu.Root>
   <DropdownMenu.Trigger>
     {#snippet child({ props })}
-      <Button
-        variant="outline"
-        size="sm"
-        {...props}
-        class={cn("gap-1.5 text-[13px]", className)}
-        title={m.connection_current_target_tooltip({ role: roleLabel, origin: originLabel })}
-      >
-        <div class="flex items-center gap-1.5 min-w-0">
-          <ServerIcon class="size-3.5 shrink-0 text-muted-foreground" />
-          <span class="truncate">{roleLabel}</span>
-        </div>
-        <ChevronDownIcon class="size-3 text-muted-foreground/70 shrink-0 ml-auto" />
-      </Button>
+      {#if variant === "button"}
+        <Button
+          variant="outline"
+          size="sm"
+          {...props}
+          class={cn("gap-1.5 text-[13px]", className)}
+          title={m.connection_current_target_tooltip({ role: roleLabel, origin: originLabel })}
+        >
+          <div class="flex items-center gap-1.5 min-w-0">
+            <ServerIcon class="size-3.5 shrink-0 text-muted-foreground" />
+            <span class="truncate">{roleLabel}</span>
+          </div>
+          <ChevronDownIcon class="size-3 text-muted-foreground/70 shrink-0 ml-auto" />
+        </Button>
+      {:else}
+        <button
+          {...props}
+          class={cn(
+            "group relative block w-full rounded-md text-left outline-none transition-opacity hover:opacity-85 focus-visible:ring-2 focus-visible:ring-ring/40",
+            className,
+          )}
+          title={m.connection_current_target_tooltip({ role: roleLabel, origin: originLabel })}
+          aria-label={m.connection_current_target()}
+        >
+          <ConnectionScopeBadge
+            compact={variant === "scope-compact"}
+            class={variant === "scope" ? "w-full pr-6" : "w-full"}
+          />
+          {#if variant === "scope"}
+            <ChevronDownIcon
+              class="text-muted-foreground/70 pointer-events-none absolute top-1/2 right-2 size-3 -translate-y-1/2 transition-transform group-data-[state=open]:rotate-180"
+            />
+          {/if}
+        </button>
+      {/if}
     {/snippet}
   </DropdownMenu.Trigger>
   <DropdownMenu.Content {align} class="w-80">

@@ -9,7 +9,6 @@
   import { cn } from "#lib/utils.ts";
   import { m } from "#lib/paraglide/messages.js";
   import ConnectionMenu from "#lib/components/ConnectionMenu.svelte";
-  import ConnectionScopeBadge from "#lib/components/ConnectionScopeBadge.svelte";
   import KillSwitchButton from "#lib/components/KillSwitchButton.svelte";
   import SessionActionsMenu from "#lib/components/session/SessionActionsMenu.svelte";
   import SyncStatusBadge from "#lib/components/SyncStatusBadge.svelte";
@@ -190,9 +189,9 @@
     </button>
   </div>
 
-  <!-- What this UI is connected to (hub server or a node) -->
+  <!-- What this UI is connected to; opens the target switcher -->
   <div class="border-b border-border px-2.5 py-2">
-    <ConnectionScopeBadge class="w-full" />
+    <ConnectionMenu variant="scope" />
   </div>
 
   <!-- Quick navigation -->
@@ -441,9 +440,8 @@
     {/if}
   </div>
 
-  <!-- Footer: connection menu and status -->
+  <!-- Footer: sync status and the emergency stop -->
   <div class="border-border flex flex-col gap-2 border-t p-2">
-    <ConnectionMenu class="w-full justify-between" />
     <div class="flex flex-wrap items-center justify-between gap-1.5">
       <SyncStatusBadge />
       <KillSwitchButton class="h-7 text-[11px]" />

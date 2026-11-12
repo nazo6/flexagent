@@ -40,7 +40,7 @@
   import SearchIcon from "@lucide/svelte/icons/search";
   import ShieldIcon from "@lucide/svelte/icons/shield";
   import Trash2Icon from "@lucide/svelte/icons/trash-2";
-  import ConnectionScopeBadge from "#lib/components/ConnectionScopeBadge.svelte";
+  import ConnectionMenu from "#lib/components/ConnectionMenu.svelte";
   import CpuIcon from "@lucide/svelte/icons/cpu";
   import PaletteIcon from "@lucide/svelte/icons/palette";
   import ServerIcon from "@lucide/svelte/icons/server";
@@ -342,7 +342,7 @@
         {m.settings_subtitle()}
       </p>
     </div>
-    <ConnectionScopeBadge class="min-w-44" />
+    <ConnectionMenu variant="scope" class="min-w-44" align="end" />
   </div>
 
   <div class="relative w-full max-w-md">

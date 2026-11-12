@@ -55,7 +55,7 @@
   </span>
 {:else}
   {@const ScopeIcon = icon}
-  <div
+  <span
     class={cn(
       "flex min-w-0 items-center gap-2 rounded-md border px-2 py-1.5",
       isHub ? "border-signal/50 bg-signal-soft/60" : "border-border bg-muted/40",
@@ -68,5 +68,5 @@
       <span class="text-[10px] font-semibold tracking-wider uppercase">{label}</span>
       <span class="text-muted-foreground truncate text-[11px]">{detail}</span>
     </span>
-  </div>
+  </span>
 {/if}
