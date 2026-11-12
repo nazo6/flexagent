@@ -223,6 +223,7 @@ impl AgentCatalog {
                 spec.driver_kind = DriverKind::AcpExtended;
                 spec.extension = Some(extension_id.to_owned());
                 extension.prepare_launch(cwd, &mut spec)?;
+                spec.acp = extension.acp_options();
                 if custom.name.is_none()
                     && let Some(name) = extension.metadata().name
                 {
@@ -256,6 +257,7 @@ impl AgentCatalog {
         if let AgentBackend::AcpExtended(extension) = &backend {
             spec.extension = Some(id.clone());
             extension.prepare_launch(cwd, &mut spec)?;
+            spec.acp = extension.acp_options();
             if let Some(name) = extension.metadata().name {
                 spec.display_name = name;
             }
@@ -315,6 +317,7 @@ impl AgentCatalog {
             program: None,
             args: extra_args.to_vec(),
             env: Vec::new(),
+            acp: Default::default(),
         };
         if let Some(preset) = provider.launch_preset()
             && let Some(program) = (self.preset_lookup)(preset)
@@ -374,6 +377,7 @@ impl AgentCatalog {
             program: Some(program),
             args,
             env: Vec::new(),
+            acp: Default::default(),
         }
     }
 }
@@ -574,6 +578,7 @@ mod tests {
             program: Some(PathBuf::from("my-agent")),
             args: Vec::new(),
             env: Vec::new(),
+            acp: Default::default(),
         };
         let first = catalog.driver_for(&spec).expect("driver");
         let second = catalog.driver_for(&spec).expect("driver");

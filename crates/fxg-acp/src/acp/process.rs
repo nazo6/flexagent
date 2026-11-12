@@ -13,7 +13,7 @@ impl ProcessHandle {
     /// Creates a new session and returns the handle plus native restore status.
     pub(super) async fn new_session(
         &self,
-        params: SessionParams,
+        params: Box<SessionParams>,
         events: mpsc::UnboundedSender<DriverEvent>,
         lease: Arc<ProcessLease>,
     ) -> anyhow::Result<(AcpSessionHandle, bool)> {
@@ -146,6 +146,7 @@ pub(super) fn spawn_agent_process(
     agent: AcpAgent,
     agent_id: String,
     stderr: StderrRegistry,
+    acp: crate::agent::extension::AcpExtensionOptions,
 ) -> (Arc<ProcessHandle>, oneshot::Receiver<anyhow::Result<()>>) {
     let (control_tx, control_rx) = mpsc::unbounded_channel();
     let (ready_tx, ready_rx) = oneshot::channel();
@@ -154,6 +155,7 @@ pub(super) fn spawn_agent_process(
             agent,
             agent_id,
             stderr,
+            acp,
             ready_tx,
             control_rx,
         })

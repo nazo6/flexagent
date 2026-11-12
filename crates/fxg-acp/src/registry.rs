@@ -601,6 +601,7 @@ impl AcpRegistry {
             program: Some(PathBuf::from(&custom.command)),
             args,
             env,
+            acp: Default::default(),
         }))
     }
 
@@ -650,6 +651,7 @@ impl AcpRegistry {
             program: Some(program),
             args,
             env: env.into_iter().collect(),
+            acp: Default::default(),
         })
     }
 

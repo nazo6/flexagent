@@ -631,7 +631,7 @@ opencode は `_meta.opencode/child-session-updates`、agy は `teamwork` /
   子 session ID の permission を返す統合テストも追加する。
 
 > **2026-11-12 追記**: 中期案を
-> [`2026-11-12-subagents.md`](./2026-11-12-subagents.md) として実装する。
+> [`2026-11-12-subagents.md`](./2026-11-12-subagents.md) として実装した。
 > opencode の vendor 拡張と ACP 標準 subagents RFD を同じ正規化イベントに
 > 載せ、子は独立セッションにせず、親タイムラインのサブエージェントブロックと
 > 詳細ビューで表示する。agy は子セッションを公開しないため対象外。

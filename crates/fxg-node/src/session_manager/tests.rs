@@ -658,6 +658,7 @@ async fn auto_approve_policy_responds_to_permission_requests() {
             },
         ],
         details: serde_json::json!({}).into(),
+        subagent_id: None,
     }));
     for _ in 0..100 {
         if !mock.permissions().is_empty() {
@@ -691,6 +692,7 @@ async fn permission_resolution_is_idempotent() {
             kind: PermissionOptionKind::AllowOnce,
         }],
         details: serde_json::json!({}).into(),
+        subagent_id: None,
     }));
     for _ in 0..100 {
         if !manager.pending_permissions().is_empty() {
@@ -748,6 +750,7 @@ async fn elicitation_resolution_is_idempotent() {
             }))
             .expect("schema"),
             tool_call_id: None,
+            subagent_id: None,
         },
     ));
     for _ in 0..100 {
@@ -820,6 +823,7 @@ async fn driver_resolved_elicitation_clears_pending() {
             )
             .expect("schema"),
             tool_call_id: None,
+            subagent_id: None,
         },
     ));
     for _ in 0..100 {

@@ -2066,11 +2066,25 @@ export type StreamDeltaPayload =
 /**  Message ID (corresponds to `AgentMessage.message_id`) */
 message_id: string;
 /**  Appended text */
-text_delta: string } |
+text_delta: string;
+/**  Subagent that produced this delta (`None` = the parent session) */
+subagent_id?: string | null } |
 /**  Incremental text of the reasoning process */
 { delta_type: "agent_thought_delta";
 /**  Thought ID (corresponds to `AgentThought.thought_id`) */
 thought_id: string;
+/**  Appended text */
+text_delta: string;
+/**  Subagent that produced this delta (`None` = the parent session) */
+subagent_id?: string | null } |
+/**  Incremental text of a message between the parent session and a subagent */
+{ delta_type: "subagent_message_delta";
+/**  Message ID (corresponds to `SubagentMessage.message_id`) */
+message_id: string;
+/**  Session that sent the message */
+sender_session_id: string;
+/**  Session that received the message */
+recipient_session_id: string;
 /**  Appended text */
 text_delta: string } |
 /**  Progress update of a tool call */
@@ -2264,6 +2278,8 @@ export type UnifiedEventPayload =
 	text: string,
 	/**  Whether it is complete (only `true` is persisted) */
 	is_complete: boolean,
+	/**  Subagent that produced this message (`None` = the parent session) */
+	subagent_id?: string | null,
 } } |
 /**
  *  The reasoning process of the agent (thinking).
@@ -2277,6 +2293,8 @@ export type UnifiedEventPayload =
 	text: string,
 	/**  Whether it is complete */
 	is_complete: boolean,
+	/**  Subagent that produced this thought (`None` = the parent session) */
+	subagent_id?: string | null,
 } } |
 /**
  *  A tool call and its state, including file diffs.
@@ -2299,11 +2317,15 @@ export type UnifiedEventPayload =
 	diff: FileDiff | null,
 	/**  Raw output (optional) */
 	raw_output: string | null,
+	/**  Subagent that produced this tool call (`None` = the parent session) */
+	subagent_id?: string | null,
 } } |
 /**  The execution plan of the agent (ACP Plan). */
 { type: "plan_update"; data: {
 	/**  Plan entries */
 	entries: PlanEntry[],
+	/**  Subagent that produced this plan (`None` = the parent session) */
+	subagent_id?: string | null,
 } } |
 /**
  *  A permission approval request from the agent
@@ -2320,6 +2342,8 @@ export type UnifiedEventPayload =
 	options: PermissionOption[],
 	/**  Arguments and diff details */
 	details: RawJson,
+	/**  Subagent that requested the approval (`None` = the parent session) */
+	subagent_id?: string | null,
 } } |
 /**
  *  The outcome of a permission request.
@@ -2355,6 +2379,8 @@ export type UnifiedEventPayload =
 	requested_schema: ElicitationSchema,
 	/**  Related tool call ID (optional) */
 	tool_call_id: string | null,
+	/**  Subagent that requested the input (`None` = the parent session) */
+	subagent_id?: string | null,
 } } |
 /**  The outcome of a structured input request (accept / decline / cancel). */
 { type: "elicitation_resolved"; data: {
@@ -2405,6 +2431,8 @@ export type UnifiedEventPayload =
 	data_b64: string,
 	/**  Exit code (once execution finished) */
 	exit_code: number | null,
+	/**  Subagent that produced this output (`None` = the parent session) */
+	subagent_id?: string | null,
 } } |
 /**
  *  A stdin write to an interactive command (Web UI -> agent PTY).
@@ -2464,6 +2492,47 @@ export type UnifiedEventPayload =
 	context_size: number,
 	/**  Accumulated cost (only when reported by the agent) */
 	cost: UsageCost | null,
+	/**  Subagent that reported this usage (`None` = the parent session) */
+	subagent_id?: string | null,
+} } |
+/**
+ *  Announcement or upsert of a subagent (child) session.
+ *
+ *  Child-originated events carry `subagent_id`; this event is the only
+ *  source of the child's title, depth, and state. It never creates a
+ *  `sessions` row.
+ */
+{ type: "subagent_updated"; data: {
+	/**  Agent-side session ID of the child */
+	child_session_id: string,
+	/**  Agent-side session ID of the immediate parent */
+	parent_session_id: string | null,
+	/**  Nesting depth (1 = a direct child of the root session) */
+	depth: number,
+	/**  Display title for the child */
+	title: string | null,
+	/**  Role / purpose of the child */
+	description: string | null,
+	/**  Current lifecycle state of the child */
+	status: string,
+} } |
+/**
+ *  A message exchanged between the parent session and a subagent.
+ *
+ *  Only complete messages (`is_complete = true`) are persisted; streaming
+ *  text is delivered as `StreamDeltaPayload::SubagentMessageDelta`.
+ */
+{ type: "subagent_message"; data: {
+	/**  Message ID (corresponds to `StreamDeltaPayload::SubagentMessageDelta`) */
+	message_id: string,
+	/**  Session that sent the message */
+	sender_session_id: string,
+	/**  Session that received the message */
+	recipient_session_id: string,
+	/**  Message body */
+	text: string,
+	/**  Whether it is complete */
+	is_complete: boolean,
 } } |
 /**
  *  A turn was cut off for a reason other than normal completion (ACP `StopReason`).

@@ -74,6 +74,9 @@ pub struct AgentLaunchSpec {
     pub args: Vec<String>,
     /// Additional environment variables injected into the process (overrides inherited ones)
     pub env: Vec<(String, String)>,
+    /// ACP connection options contributed by an extension (client capabilities,
+    /// vendor notification methods). Kept as plain data for the warm-pool key.
+    pub acp: crate::agent::extension::AcpExtensionOptions,
 }
 
 /// Resume selection from an existing agent session ([`StartSessionRequest::resume`]).
@@ -134,6 +137,8 @@ pub struct StartSessionRequest {
     pub fork_from: Option<String>,
     /// Initial configuration applied after `session/new`
     pub initial_config: Vec<fxg_protocol::common::InitialConfig>,
+    /// ACP-only: parser for vendor subagent notifications (set by the extension layer).
+    pub acp_parser: Option<std::sync::Arc<dyn crate::agent::extension::AcpNotificationParser>>,
 }
 
 /// Result of [`AgentDriver::start_session`].
@@ -331,6 +336,7 @@ mod tests {
                     message_id: "m1".to_owned(),
                     text: "hello".to_owned(),
                     is_complete: true,
+                    subagent_id: None,
                 }))
                 .expect("event_tx");
             assert_eq!(req.launch.driver_kind, DriverKind::Other("mock".to_owned()));
@@ -354,6 +360,7 @@ mod tests {
             program: Some(PathBuf::from("mock")),
             args: vec![],
             env: vec![],
+            acp: Default::default(),
         };
         let handle = driver
             .start_session(
@@ -367,6 +374,7 @@ mod tests {
                     resume: None,
                     fork_from: None,
                     initial_config: Vec::new(),
+                    acp_parser: None,
                 },
                 tx,
             )

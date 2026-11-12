@@ -30,7 +30,7 @@ use specta::Type;
 ///
 /// Use this only at a declared boundary (tool arguments, error details, audit
 /// details, ...). Domain data must be parsed into a typed struct or enum.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(transparent)]
 #[specta(transparent)]
 pub struct RawJson(pub serde_json::Value);

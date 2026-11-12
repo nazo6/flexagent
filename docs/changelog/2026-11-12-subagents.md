@@ -1,7 +1,7 @@
 # サブエージェント表示（opencode 拡張 + ACP subagents RFD）
 
 - **日付**: 2026-11-12
-- **状態**: 設計・実装中
+- **状態**: 実装済み（擬似 ACP エージェントで検証）
 - **対象パッケージ**: `fxg-protocol`, `fxg-acp`, `fxg-node`, `fxg-cli`, `ui`,
   `docs`
 - **対象スクリプト**: `mise run fmt`, `mise run types`,
@@ -64,8 +64,9 @@ ACP の機能は、ビルド時に有効にする Cargo feature と、接続時�
   `fxg-acp` が所有する。将来の追加は `acp-all` に 1 行足す。
 - **Runtime**: `AcpCapabilitySet`（未知の名前を保持する open enum の集合）を
   設定から受け取り、`initialize` の client capabilities に反映する。既定は
-  `subagents` を ON。未知の capability は警告して無視し、ビルドに無い
-  feature は「設定にあるが未コンパイル」として警告する。
+  `subagents` を ON。`FXG_ACP_CAPABILITIES=subagents,plan` のように上書きでき、
+  空文字で全無効（kill switch）になる。未知の capability は警告して無視し、
+  ビルドに無い feature は「設定にあるが未コンパイル」として警告する。
 - 拡張は `AcpExtensionOptions` で `clientCapabilities._meta`、受信する独自
   通知の method、追加の capability を提供できる。
 - ACP 標準の `subagents` は unstable RFD のため、feature と実行時設定の
@@ -168,7 +169,28 @@ ACP の機能は、ビルド時に有効にする Cargo feature と、接続時�
 - agy など、ACP に子セッションを公開しないエージェントの内部 teamwork 表示。
 - 子の会話を親とは別の DB / 検索インデックスに分離すること。
 
-## 7. リスク
+## 7. 実装ログ
+
+- **プロトコル**: `SubagentUpdated` / `SubagentMessage` と `subagent_id` を
+  イベント・delta に追加した。子 usage は親の `sessions.usage_json` 投影に
+  反映しない。
+- **ACP seam**: `AcpExtensionOptions` / `AcpCapabilitySet` / notification parser
+  を追加し、子宛 `session/update` は子ごとの dynamic handler、vendor 通知は
+  method handler で受ける。子は `SessionContexts` に `cwd` 付きで登録する。
+- **opencode**: `opencode/session/child_update` を解析し、子の text / tool /
+  承認を正規化する。`_meta` の child ID で承認をタグ付けする。
+- **ACP RFD**: `clientCapabilities.subagents` を既定で広告し、
+  `subagent_update` / 子 `session/update` / `session_message` を処理する。
+  `FXG_ACP_CAPABILITIES` で上書き・無効化できる。
+- **UI**: 最初の子イベント位置にサブエージェントブロックを表示し、
+  ヘッダーの「Open」から詳細シートを開ける。承認カードには子のタイトルを
+  表示する。
+- **検証**: `crates/fxg-acp/tests/subagents.rs`（擬似 ACP エージェント）で
+  RFD と opencode の子イベントを確認。`cargo test --workspace`,
+  `cargo clippy`, `pnpm --dir ui run check`, `pnpm --dir ui run test` が通る。
+  実 opencode の `task` は手動確認項目として残る。
+
+## 8. リスク
 
 - ACP の subagents RFD は unstable。型・意味が変わる可能性があるため、
   feature と実行時設定で隔離する。

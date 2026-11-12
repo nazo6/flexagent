@@ -439,6 +439,7 @@ mod tests {
                     message_id: "m1".to_owned(),
                     text: "partial".to_owned(),
                     is_complete: false,
+                    subagent_id: None,
                 },
             )
             .await
@@ -472,6 +473,7 @@ mod tests {
                     message_id: "m1".to_owned(),
                     text: "complete".to_owned(),
                     is_complete: true,
+                    subagent_id: None,
                 },
             )
             .await
@@ -489,6 +491,7 @@ mod tests {
             StreamDeltaPayload::AgentMessageDelta {
                 message_id: "m1".to_owned(),
                 text_delta: "Hel".to_owned(),
+                subagent_id: None,
             },
         );
         bus.publish_delta(
@@ -496,6 +499,7 @@ mod tests {
             StreamDeltaPayload::AgentMessageDelta {
                 message_id: "m1".to_owned(),
                 text_delta: "lo".to_owned(),
+                subagent_id: None,
             },
         );
 

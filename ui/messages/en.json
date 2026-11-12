@@ -787,5 +787,13 @@
   "session_rename_title": "Rename session",
   "session_rename_description": "Give this session a name that is easier to recognise in the sidebar.",
   "session_rename_placeholder": "Session title",
-  "session_renamed": "Session renamed."
+  "session_renamed": "Session renamed.",
+  "chat_subagent_running": "Subagent running…",
+  "chat_subagent_requires_action": "Needs approval",
+  "chat_subagent_completed": "Completed",
+  "chat_subagent_failed": "Failed",
+  "chat_subagent_cancelled": "Cancelled",
+  "chat_subagent_open": "Open",
+  "chat_subagent_close": "Close",
+  "chat_subagent_title": "Subagent"
 }

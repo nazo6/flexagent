@@ -23,12 +23,14 @@ fn request(mode: &str, fork_from: Option<&str>, cwd: &Path) -> StartSessionReque
             program: Some(mock_agent_bin()),
             args: vec!["--mode".to_owned(), mode.to_owned()],
             env: Vec::new(),
+            acp: Default::default(),
         },
         extra_args: Vec::new(),
         initial_mode: None,
         resume: None,
         fork_from: fork_from.map(str::to_owned),
         initial_config: Vec::new(),
+        acp_parser: None,
     }
 }
 

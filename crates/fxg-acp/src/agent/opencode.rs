@@ -6,12 +6,17 @@
 //!
 //! Design: `docs/changelog/2026-11-11-agent-extension-phase4.md`.
 
+use std::sync::Arc;
+
 use async_trait::async_trait;
 use fxg_protocol::common::{ConfigOptionCategory, ConfigOptionInfo, ConfigOptionValue, RawJson};
+use fxg_protocol::events::{SubagentStatus, UnifiedEventPayload};
 
 use super::extension::{
-    AgentExtension, AgentMetadata, CapabilitiesSnapshot, CapabilityOverlay, ConfigOptionPatch,
+    AcpChildUpdate, AcpExtensionOptions, AcpNotificationParser, AgentExtension, AgentMetadata,
+    CapabilitiesSnapshot, CapabilityOverlay, ConfigOptionPatch, EventDisposition, SessionExtension,
 };
+use crate::driver::DriverEvent;
 
 /// OpenCode ACP extension.
 #[derive(Debug, Default)]
@@ -36,12 +41,27 @@ impl AgentExtension for OpenCodeExtension {
         }
     }
 
+    fn acp_options(&self) -> AcpExtensionOptions {
+        opencode_acp_options()
+    }
+
+    fn notification_parser(&self) -> Option<Arc<dyn AcpNotificationParser>> {
+        Some(Arc::new(OpenCodeNotificationParser))
+    }
+
     async fn capabilities(
         &self,
         _ctx: &super::extension::SessionContext,
         current: &CapabilitiesSnapshot,
     ) -> anyhow::Result<Option<CapabilityOverlay>> {
         model_label_overlay(current)
+    }
+
+    async fn open_session(
+        &self,
+        _ctx: &super::extension::SessionContext,
+    ) -> anyhow::Result<Option<Arc<dyn SessionExtension>>> {
+        Ok(Some(Arc::new(OpenCodeSessionExtension)))
     }
 }
 
@@ -57,12 +77,152 @@ impl AgentExtension for OpenCodeV2Extension {
         }
     }
 
+    fn acp_options(&self) -> AcpExtensionOptions {
+        opencode_acp_options()
+    }
+
+    fn notification_parser(&self) -> Option<Arc<dyn AcpNotificationParser>> {
+        Some(Arc::new(OpenCodeNotificationParser))
+    }
+
     async fn capabilities(
         &self,
         _ctx: &super::extension::SessionContext,
         current: &CapabilitiesSnapshot,
     ) -> anyhow::Result<Option<CapabilityOverlay>> {
         model_label_overlay(current)
+    }
+
+    async fn open_session(
+        &self,
+        _ctx: &super::extension::SessionContext,
+    ) -> anyhow::Result<Option<Arc<dyn SessionExtension>>> {
+        Ok(Some(Arc::new(OpenCodeSessionExtension)))
+    }
+}
+
+/// OpenCode vendor capability and notification declaration.
+fn opencode_acp_options() -> AcpExtensionOptions {
+    AcpExtensionOptions {
+        client_meta: Some(RawJson::new(serde_json::json!({
+            "opencode/child-session-updates": true
+        }))),
+        notifications: vec!["opencode/session/child_update".to_owned()],
+        ..Default::default()
+    }
+}
+
+/// Parser for `opencode/session/child_update` notifications.
+#[derive(Debug, Default)]
+struct OpenCodeNotificationParser;
+
+impl AcpNotificationParser for OpenCodeNotificationParser {
+    fn methods(&self) -> &'static [&'static str] {
+        &["opencode/session/child_update"]
+    }
+
+    fn parse(&self, _method: &str, params: &RawJson) -> Option<AcpChildUpdate> {
+        #[derive(serde::Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct ChildUpdate {
+            #[allow(dead_code)]
+            root_session_id: String,
+            child_session_id: String,
+            parent_session_id: Option<String>,
+            #[serde(default)]
+            depth: u32,
+            title: Option<String>,
+            #[serde(flatten)]
+            kind: ChildUpdateKind,
+        }
+
+        #[derive(serde::Deserialize)]
+        #[serde(tag = "type", rename_all = "snake_case")]
+        enum ChildUpdateKind {
+            Update {
+                update: Box<agent_client_protocol::v1::schema::SessionUpdate>,
+            },
+            Status {
+                status: String,
+            },
+        }
+
+        let Ok(payload) = serde_json::from_value::<ChildUpdate>(params.as_value().clone()) else {
+            return None;
+        };
+        let (state, update) = match payload.kind {
+            ChildUpdateKind::Update { update } => (None, Some(*update)),
+            ChildUpdateKind::Status { status } => (Some(map_child_status(&status)), None),
+        };
+        Some(AcpChildUpdate {
+            child_session_id: payload.child_session_id,
+            parent_session_id: payload.parent_session_id,
+            depth: payload.depth,
+            title: payload.title,
+            cwd: None,
+            state,
+            update,
+        })
+    }
+}
+
+/// Maps OpenCode child status strings to the normalized status.
+fn map_child_status(status: &str) -> SubagentStatus {
+    match status {
+        "created" | "running" => SubagentStatus::Running,
+        "completed" => SubagentStatus::Completed,
+        "interrupted" | "cancelled" => SubagentStatus::Cancelled,
+        "failed" => SubagentStatus::Failed,
+        other => SubagentStatus::Unknown(other.to_owned()),
+    }
+}
+
+/// Tags child permission requests with the vendor `_meta` child ID.
+#[derive(Debug, Default)]
+struct OpenCodeSessionExtension;
+
+#[async_trait]
+impl SessionExtension for OpenCodeSessionExtension {
+    async fn on_event(&self, event: DriverEvent) -> anyhow::Result<EventDisposition> {
+        let DriverEvent::Event(UnifiedEventPayload::PermissionRequest {
+            subagent_id: None,
+            details,
+            ..
+        }) = &event
+        else {
+            return Ok(EventDisposition::Emit);
+        };
+        let Some(child_id) = details
+            .as_value()
+            .get("_meta")
+            .and_then(|meta| meta.get("opencode/child-session"))
+            .and_then(|child| child.get("id"))
+            .and_then(|id| id.as_str())
+        else {
+            return Ok(EventDisposition::Emit);
+        };
+        let child_id = child_id.to_owned();
+        let DriverEvent::Event(UnifiedEventPayload::PermissionRequest {
+            request_id,
+            tool_name,
+            summary,
+            options,
+            details,
+            subagent_id: _,
+        }) = event
+        else {
+            unreachable!("matched above");
+        };
+        Ok(EventDisposition::Replace(Box::new(DriverEvent::Event(
+            UnifiedEventPayload::PermissionRequest {
+                request_id,
+                tool_name,
+                summary,
+                options,
+                details,
+                subagent_id: Some(child_id),
+            },
+        ))))
     }
 }
 
@@ -302,6 +462,7 @@ mod tests {
                         program: Some(std::path::PathBuf::from("opencode")),
                         args: vec!["acp".to_owned()],
                         env: Vec::new(),
+                        acp: Default::default(),
                     },
                 },
                 &current,

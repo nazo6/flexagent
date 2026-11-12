@@ -70,6 +70,22 @@ impl SessionEventBatch {
     }
 }
 
+crate::open_string_enum! {
+    /// Lifecycle state of a subagent (child) session.
+    pub enum SubagentStatus {
+        /// The child is running.
+        Running => "running",
+        /// The child is waiting for user action (approval / elicitation).
+        RequiresAction => "requires_action",
+        /// The child finished its work.
+        Completed => "completed",
+        /// The child failed.
+        Failed => "failed",
+        /// The child was cancelled.
+        Cancelled => "cancelled",
+    }
+}
+
 /// The body of a normalized session event.
 ///
 /// Based on the event model of ACP (`agent-client-protocol-schema`), with
@@ -134,6 +150,9 @@ pub enum UnifiedEventPayload {
         text: String,
         /// Whether it is complete (only `true` is persisted)
         is_complete: bool,
+        /// Subagent that produced this message (`None` = the parent session)
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        subagent_id: Option<String>,
     },
     /// The reasoning process of the agent (thinking).
     ///
@@ -145,6 +164,9 @@ pub enum UnifiedEventPayload {
         text: String,
         /// Whether it is complete
         is_complete: bool,
+        /// Subagent that produced this thought (`None` = the parent session)
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        subagent_id: Option<String>,
     },
     /// A tool call and its state, including file diffs.
     ///
@@ -165,11 +187,17 @@ pub enum UnifiedEventPayload {
         diff: Option<FileDiff>,
         /// Raw output (optional)
         raw_output: Option<String>,
+        /// Subagent that produced this tool call (`None` = the parent session)
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        subagent_id: Option<String>,
     },
     /// The execution plan of the agent (ACP Plan).
     PlanUpdate {
         /// Plan entries
         entries: Vec<PlanEntry>,
+        /// Subagent that produced this plan (`None` = the parent session)
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        subagent_id: Option<String>,
     },
     /// A permission approval request from the agent
     /// (ACP `session/request_permission`).
@@ -184,6 +212,9 @@ pub enum UnifiedEventPayload {
         options: Vec<PermissionOption>,
         /// Arguments and diff details
         details: RawJson,
+        /// Subagent that requested the approval (`None` = the parent session)
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        subagent_id: Option<String>,
     },
     /// The outcome of a permission request.
     ///
@@ -215,6 +246,9 @@ pub enum UnifiedEventPayload {
         requested_schema: ElicitationSchema,
         /// Related tool call ID (optional)
         tool_call_id: Option<String>,
+        /// Subagent that requested the input (`None` = the parent session)
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        subagent_id: Option<String>,
     },
     /// The outcome of a structured input request (accept / decline / cancel).
     ElicitationResolved {
@@ -259,6 +293,9 @@ pub enum UnifiedEventPayload {
         data_b64: String,
         /// Exit code (once execution finished)
         exit_code: Option<i32>,
+        /// Subagent that produced this output (`None` = the parent session)
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        subagent_id: Option<String>,
     },
     /// A stdin write to an interactive command (Web UI -> agent PTY).
     ///
@@ -307,6 +344,44 @@ pub enum UnifiedEventPayload {
         context_size: u64,
         /// Accumulated cost (only when reported by the agent)
         cost: Option<UsageCost>,
+        /// Subagent that reported this usage (`None` = the parent session)
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        subagent_id: Option<String>,
+    },
+    /// Announcement or upsert of a subagent (child) session.
+    ///
+    /// Child-originated events carry `subagent_id`; this event is the only
+    /// source of the child's title, depth, and state. It never creates a
+    /// `sessions` row.
+    SubagentUpdated {
+        /// Agent-side session ID of the child
+        child_session_id: String,
+        /// Agent-side session ID of the immediate parent
+        parent_session_id: Option<String>,
+        /// Nesting depth (1 = a direct child of the root session)
+        depth: u32,
+        /// Display title for the child
+        title: Option<String>,
+        /// Role / purpose of the child
+        description: Option<String>,
+        /// Current lifecycle state of the child
+        status: SubagentStatus,
+    },
+    /// A message exchanged between the parent session and a subagent.
+    ///
+    /// Only complete messages (`is_complete = true`) are persisted; streaming
+    /// text is delivered as `StreamDeltaPayload::SubagentMessageDelta`.
+    SubagentMessage {
+        /// Message ID (corresponds to `StreamDeltaPayload::SubagentMessageDelta`)
+        message_id: String,
+        /// Session that sent the message
+        sender_session_id: String,
+        /// Session that received the message
+        recipient_session_id: String,
+        /// Message body
+        text: String,
+        /// Whether it is complete
+        is_complete: bool,
     },
     /// A turn was cut off for a reason other than normal completion (ACP `StopReason`).
     ///
@@ -369,6 +444,8 @@ impl UnifiedEventPayload {
             Self::CapabilitiesUpdated { .. } => EventType::CapabilitiesUpdated,
             Self::ProvisioningLog { .. } => EventType::ProvisioningLog,
             Self::UsageUpdated { .. } => EventType::UsageUpdated,
+            Self::SubagentUpdated { .. } => EventType::SubagentUpdated,
+            Self::SubagentMessage { .. } => EventType::SubagentMessage,
             Self::TurnEnded { .. } => EventType::TurnEnded,
             Self::CompactionUpdated { .. } => EventType::CompactionUpdated,
             Self::StatusChanged { .. } => EventType::StatusChanged,
@@ -383,9 +460,9 @@ impl UnifiedEventPayload {
     pub const fn is_persistable(&self) -> bool {
         match self {
             Self::TerminalInput { .. } => false,
-            Self::AgentMessage { is_complete, .. } | Self::AgentThought { is_complete, .. } => {
-                *is_complete
-            }
+            Self::AgentMessage { is_complete, .. }
+            | Self::AgentThought { is_complete, .. }
+            | Self::SubagentMessage { is_complete, .. } => *is_complete,
             _ => true,
         }
     }
@@ -504,6 +581,7 @@ mod tests {
             }))
             .expect("schema"),
             tool_call_id: Some("tool-1".to_owned()),
+            subagent_id: None,
         };
         let json = serde_json::to_value(&payload).unwrap();
         assert_eq!(json["type"], "elicitation_request");
@@ -549,7 +627,11 @@ mod tests {
             EventType::SessionCreated
         );
         assert_eq!(
-            UnifiedEventPayload::PlanUpdate { entries: vec![] }.event_type(),
+            UnifiedEventPayload::PlanUpdate {
+                entries: vec![],
+                subagent_id: None,
+            }
+            .event_type(),
             EventType::Plan
         );
         assert_eq!(
@@ -576,6 +658,7 @@ mod tests {
                 message_id: "m".into(),
                 text: "partial".into(),
                 is_complete: false,
+                subagent_id: None,
             }
             .is_persistable()
         );
@@ -584,6 +667,7 @@ mod tests {
                 message_id: "m".into(),
                 text: "done".into(),
                 is_complete: true,
+                subagent_id: None,
             }
             .is_persistable()
         );
@@ -593,9 +677,50 @@ mod tests {
                 command: "cargo test".into(),
                 data_b64: "".into(),
                 exit_code: Some(0),
+                subagent_id: None,
             }
             .is_persistable()
         );
+    }
+
+    #[test]
+    fn subagent_events_are_tagged_and_persistable() {
+        let updated = UnifiedEventPayload::SubagentUpdated {
+            child_session_id: "child-1".to_owned(),
+            parent_session_id: Some("root".to_owned()),
+            depth: 1,
+            title: Some("Explore".to_owned()),
+            description: None,
+            status: SubagentStatus::Running,
+        };
+        assert_eq!(updated.event_type(), EventType::SubagentUpdated);
+        assert!(updated.is_persistable());
+        let json = serde_json::to_value(&updated).unwrap();
+        assert_eq!(json["type"], "subagent_updated");
+        assert_eq!(json["data"]["status"], "running");
+        assert_eq!(
+            serde_json::from_value::<UnifiedEventPayload>(json).unwrap(),
+            updated
+        );
+
+        let message = UnifiedEventPayload::AgentMessage {
+            message_id: "m1".to_owned(),
+            text: "child output".to_owned(),
+            is_complete: true,
+            subagent_id: Some("child-1".to_owned()),
+        };
+        let json = serde_json::to_value(&message).unwrap();
+        assert_eq!(json["data"]["subagent_id"], "child-1");
+
+        let incomplete = UnifiedEventPayload::SubagentMessage {
+            message_id: "sm1".to_owned(),
+            sender_session_id: "root".to_owned(),
+            recipient_session_id: "child-1".to_owned(),
+            text: "partial".to_owned(),
+            is_complete: false,
+        };
+        assert!(!incomplete.is_persistable());
+        assert_eq!(incomplete.event_type(), EventType::SubagentMessage);
     }
 
     #[test]

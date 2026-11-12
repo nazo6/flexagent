@@ -76,6 +76,7 @@ mod client;
 mod mapping;
 mod process;
 mod session;
+mod subagent;
 mod terminal;
 
 pub(crate) use mapping::map_auth_method;
@@ -231,7 +232,7 @@ enum ProcessCommand {
     /// Create a new session and start its turn loop
     NewSession {
         /// Session creation parameters
-        params: SessionParams,
+        params: Box<SessionParams>,
         /// Event sender for the session
         events: mpsc::UnboundedSender<DriverEvent>,
         /// Process lease held by the session
@@ -263,6 +264,8 @@ struct SessionParams {
     fork_from: Option<String>,
     /// Initial configuration applied after `session/new`
     initial_config: Vec<fxg_protocol::common::InitialConfig>,
+    /// Parser for vendor subagent notifications (set by the extension layer).
+    acp_parser: Option<Arc<dyn crate::agent::extension::AcpNotificationParser>>,
 }
 
 /// Per-session shared information (handlers look it up by the ACP session_id).
@@ -275,6 +278,8 @@ struct SessionContext {
     cwd: PathBuf,
     /// Event sender (status updates, approvals, fs change notifications)
     events: mpsc::UnboundedSender<DriverEvent>,
+    /// Subagent that owns this context (`None` = the root session)
+    subagent_id: Option<String>,
 }
 
 /// ACP session ID → session information.
@@ -368,6 +373,7 @@ impl AcpDriver {
             resume: req.resume.clone(),
             fork_from: req.fork_from.clone(),
             initial_config: req.initial_config.clone(),
+            acp_parser: req.acp_parser.clone(),
         };
 
         // 1) Reuse an idle process (just session/new on an initialized connection)
@@ -380,7 +386,7 @@ impl AcpDriver {
                 Some(Arc::clone(pool)),
             ));
             match process
-                .new_session(session_params.clone(), event_tx.clone(), lease)
+                .new_session(Box::new(session_params.clone()), event_tx.clone(), lease)
                 .await
             {
                 Ok((handle, context_restored)) => {
@@ -420,6 +426,7 @@ impl AcpDriver {
             AcpAgent::new(config),
             req.launch.agent_id.clone(),
             self.stderr.clone(),
+            req.launch.acp.clone(),
         );
         ready_rx
             .await
@@ -430,7 +437,7 @@ impl AcpDriver {
             self.pool.clone(),
         ));
         let (handle, context_restored) = process
-            .new_session(session_params, event_tx.clone(), lease)
+            .new_session(Box::new(session_params), event_tx.clone(), lease)
             .await?;
         let agent_session_id = Some(handle.session_id().to_string());
         Ok(StartedSession {

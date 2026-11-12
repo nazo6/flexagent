@@ -19,7 +19,7 @@ fxg-pty = { path = "crates/fxg-pty" }
 fxg-ui-assets = { path = "crates/fxg-ui-assets" }
 
 # 外部クレート (バージョンは cargo add / cargo outdated で解決する。手書きしない)
-agent-client-protocol = { version = "5.0.0", features = ["process", "unstable_session_fork"] }
+agent-client-protocol = { version = "5.0.0", features = ["process"] }
 anyhow = "1.0.104"
 async-trait = "0.1.92"
 axum = { version = "0.8.9", features = ["ws"] }

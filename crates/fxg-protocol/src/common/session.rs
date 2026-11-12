@@ -241,11 +241,28 @@ pub enum StreamDeltaPayload {
         message_id: String,
         /// Appended text
         text_delta: String,
+        /// Subagent that produced this delta (`None` = the parent session)
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        subagent_id: Option<String>,
     },
     /// Incremental text of the reasoning process
     AgentThoughtDelta {
         /// Thought ID (corresponds to `AgentThought.thought_id`)
         thought_id: String,
+        /// Appended text
+        text_delta: String,
+        /// Subagent that produced this delta (`None` = the parent session)
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        subagent_id: Option<String>,
+    },
+    /// Incremental text of a message between the parent session and a subagent
+    SubagentMessageDelta {
+        /// Message ID (corresponds to `SubagentMessage.message_id`)
+        message_id: String,
+        /// Session that sent the message
+        sender_session_id: String,
+        /// Session that received the message
+        recipient_session_id: String,
         /// Appended text
         text_delta: String,
     },

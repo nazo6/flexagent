@@ -33,6 +33,7 @@ pub fn classify_payload(payload: &UnifiedEventPayload) -> (EventType, Option<Str
         }
         UnifiedEventPayload::AgentMessage { text, .. } => join_parts(vec![text.clone()]),
         UnifiedEventPayload::AgentThought { text, .. } => join_parts(vec![text.clone()]),
+        UnifiedEventPayload::SubagentMessage { text, .. } => join_parts(vec![text.clone()]),
         UnifiedEventPayload::ToolCall {
             title,
             locations,
@@ -46,7 +47,7 @@ pub fn classify_payload(payload: &UnifiedEventPayload) -> (EventType, Option<Str
             }
             join_parts(parts)
         }
-        UnifiedEventPayload::PlanUpdate { entries } => join_parts(
+        UnifiedEventPayload::PlanUpdate { entries, .. } => join_parts(
             entries
                 .iter()
                 .map(|entry| format!("{} {}", entry.title, entry.status))
@@ -91,6 +92,7 @@ pub fn classify_payload(payload: &UnifiedEventPayload) -> (EventType, Option<Str
         UnifiedEventPayload::SessionCreated { .. }
         | UnifiedEventPayload::SessionAgentBound { .. }
         | UnifiedEventPayload::UsageUpdated { .. }
+        | UnifiedEventPayload::SubagentUpdated { .. }
         | UnifiedEventPayload::CompactionUpdated { .. }
         | UnifiedEventPayload::TurnEnded { .. }
         | UnifiedEventPayload::PermissionResolved { .. }
@@ -178,6 +180,7 @@ mod tests {
                 deletions: 0,
             }),
             raw_output: Some("test result: FAILED".to_owned()),
+            subagent_id: None,
         };
         let (event_type, text) = classify_payload(&payload);
         assert_eq!(event_type, EventType::ToolCall);
@@ -194,6 +197,7 @@ mod tests {
             command: "ls".to_owned(),
             data_b64: "GVsbG8=".to_owned(),
             exit_code: None,
+            subagent_id: None,
         };
         assert_eq!(classify_payload(&output).1, None);
 
@@ -216,6 +220,7 @@ mod tests {
                 kind: PermissionOptionKind::AllowOnce,
             }],
             details: serde_json::json!({}).into(),
+            subagent_id: None,
         };
         let (event_type, text) = classify_payload(&payload);
         assert_eq!(event_type, EventType::PermissionRequest);
@@ -230,6 +235,7 @@ mod tests {
                 title: "Add tests".to_owned(),
                 status: PlanEntryStatus::InProgress,
             }],
+            subagent_id: None,
         };
         assert_eq!(classify_payload(&plan).0, EventType::Plan);
         assert!(classify_payload(&plan).1.unwrap().contains("Add tests"));
@@ -270,6 +276,7 @@ mod tests {
             message_id: "m".to_owned(),
             text: long,
             is_complete: true,
+            subagent_id: None,
         };
         let text = classify_payload(&payload).1.unwrap();
         assert_eq!(text.chars().count(), MAX_SEARCHABLE_CHARS + 1); // + ellipsis character
@@ -282,6 +289,7 @@ mod tests {
             message_id: "m".to_owned(),
             text: "   ".to_owned(),
             is_complete: true,
+            subagent_id: None,
         };
         assert_eq!(classify_payload(&payload).1, None);
     }

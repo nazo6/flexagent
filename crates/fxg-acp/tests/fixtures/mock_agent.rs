@@ -39,6 +39,21 @@ fn main() {
             .unwrap_or_default();
         let params = request.get("params").cloned().unwrap_or(Value::Null);
 
+        if method == "session/prompt" && matches!(mode.as_str(), "subagents" | "opencode-subagents")
+        {
+            send_child_updates(&mut stdout, &mode);
+            std::thread::sleep(std::time::Duration::from_millis(150));
+            write_line(
+                &mut stdout,
+                &json!({
+                    "jsonrpc": "2.0",
+                    "id": id,
+                    "result": { "stopReason": "end_turn" }
+                }),
+            );
+            continue;
+        }
+
         let response = match (mode.as_str(), method) {
             ("auth-required", "initialize") => json!({
                 "jsonrpc": "2.0",
@@ -147,6 +162,22 @@ fn main() {
                     }
                 })
             }
+            ("subagents" | "opencode-subagents", "initialize") => json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "result": {
+                    "protocolVersion": 1,
+                    "agentCapabilities": {},
+                    "authMethods": []
+                }
+            }),
+            ("subagents" | "opencode-subagents", "session/new") => json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "result": {
+                    "sessionId": "root-session"
+                }
+            }),
             // OpenCode rejects `session/set_mode` for mode IDs from config options
             ("modes-as-config", "session/set_mode") => json!({
                 "jsonrpc": "2.0",
@@ -166,12 +197,118 @@ fn main() {
             }),
         };
 
-        if let Ok(mut out) = serde_json::to_vec(&response) {
-            out.push(b'\n');
-            if stdout.write_all(&out).is_err() || stdout.flush().is_err() {
-                break;
-            }
+        write_line(&mut stdout, &response);
+    }
+}
+
+/// Writes one JSON-RPC line.
+fn write_line(stdout: &mut io::Stdout, value: &Value) {
+    if let Ok(mut out) = serde_json::to_vec(value) {
+        out.push(b'\n');
+        if stdout.write_all(&out).is_err() {
+            return;
         }
+        if stdout.flush().is_err() {
+            // Best-effort: the process is exiting on the next failed write.
+        }
+    }
+}
+
+/// Sends the child-session notifications used by the subagent integration tests.
+fn send_child_updates(stdout: &mut io::Stdout, mode: &str) {
+    match mode {
+        "subagents" => {
+            write_line(
+                stdout,
+                &json!({
+                    "jsonrpc": "2.0",
+                    "method": "session/update",
+                    "params": {
+                        "sessionId": "root-session",
+                        "update": {
+                            "sessionUpdate": "subagent_update",
+                            "sessionId": "child-rfd",
+                            "title": "Explore",
+                            "description": "RFD child",
+                            "state": { "state": "running" }
+                        }
+                    }
+                }),
+            );
+            // Give the client a moment to register the child handler.
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            write_line(
+                stdout,
+                &json!({
+                    "jsonrpc": "2.0",
+                    "method": "session/update",
+                    "params": {
+                        "sessionId": "child-rfd",
+                        "update": {
+                            "sessionUpdate": "agent_message_chunk",
+                            "messageId": "child-rfd-m1",
+                            "content": { "type": "text", "text": "hello from the child" }
+                        }
+                    }
+                }),
+            );
+            write_line(
+                stdout,
+                &json!({
+                    "jsonrpc": "2.0",
+                    "method": "session/update",
+                    "params": {
+                        "sessionId": "child-rfd",
+                        "update": {
+                            "sessionUpdate": "tool_call",
+                            "toolCallId": "child-rfd-t1",
+                            "title": "Read file",
+                            "kind": "read",
+                            "status": "pending"
+                        }
+                    }
+                }),
+            );
+        }
+        "opencode-subagents" => {
+            write_line(
+                stdout,
+                &json!({
+                    "jsonrpc": "2.0",
+                    "method": "opencode/session/child_update",
+                    "params": {
+                        "rootSessionId": "root-session",
+                        "childSessionId": "child-open",
+                        "parentSessionId": "root-session",
+                        "depth": 1,
+                        "title": "Explore",
+                        "type": "status",
+                        "status": "running"
+                    }
+                }),
+            );
+            write_line(
+                stdout,
+                &json!({
+                    "jsonrpc": "2.0",
+                    "method": "opencode/session/child_update",
+                    "params": {
+                        "rootSessionId": "root-session",
+                        "childSessionId": "child-open",
+                        "parentSessionId": "root-session",
+                        "depth": 1,
+                        "title": "Explore",
+                        "type": "update",
+                        "update": {
+                            "sessionUpdate": "agent_message_chunk",
+                            "messageId": "child-open-m1",
+                            "content": { "type": "text", "text": "child says hi" }
+                        }
+                    }
+                }),
+            );
+        }
+        _ => {}
     }
 }
 

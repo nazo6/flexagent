@@ -333,11 +333,13 @@ async fn create_session_with_events(
     agent.emit(DriverEvent::Delta(StreamDeltaPayload::AgentMessageDelta {
         message_id: "m1".to_owned(),
         text_delta: "po".to_owned(),
+        subagent_id: None,
     }));
     agent.emit(DriverEvent::Event(UnifiedEventPayload::AgentMessage {
         message_id: "m1".to_owned(),
         text: format!("pong {label}"),
         is_complete: true,
+        subagent_id: None,
     }));
     session_id
 }
@@ -647,6 +649,7 @@ async fn hub_commands_permissions_and_kill_switch() {
             },
         ],
         details: json!({ "command": "cargo test" }).into(),
+        subagent_id: None,
     }));
     wait_until(
         "permission visible in inbox",

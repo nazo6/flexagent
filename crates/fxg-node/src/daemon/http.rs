@@ -399,6 +399,7 @@ mod tests {
             fxg_protocol::common::StreamDeltaPayload::AgentMessageDelta {
                 message_id: "m1".to_owned(),
                 text_delta: "Hel".to_owned(),
+                subagent_id: None,
             },
         );
         match next_ws_message(&mut socket).await {

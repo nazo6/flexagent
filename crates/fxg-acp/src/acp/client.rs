@@ -1,6 +1,7 @@
 use super::mapping::*;
 use super::process::*;
 use super::session::*;
+use super::subagent::*;
 use super::terminal::*;
 use super::*;
 
@@ -307,6 +308,8 @@ pub(super) struct AcpProcessTaskParams {
     pub(super) agent: AcpAgent,
     /// Agent ID (diagnostics key)
     pub(super) agent_id: String,
+    /// ACP connection options (client capabilities / vendor notifications)
+    pub(super) acp: crate::agent::extension::AcpExtensionOptions,
     /// Recent stderr buffer shared with the driver
     pub(super) stderr: StderrRegistry,
     /// Process ready (initialize complete) notification
@@ -327,6 +330,7 @@ pub(super) async fn run_acp_process(
     let AcpProcessTaskParams {
         agent,
         agent_id,
+        acp,
         stderr,
         ready_tx,
         mut control_rx,
@@ -389,6 +393,7 @@ pub(super) async fn run_acp_process(
                             details: serde_json::to_value(&request.tool_call)
                                 .unwrap_or(serde_json::Value::Null)
                                 .into(),
+                            subagent_id: context.subagent_id.clone(),
                         })),
                         "notify event subscribers"
                     );
@@ -483,6 +488,7 @@ pub(super) async fn run_acp_process(
                                         locations: vec![path_string],
                                         diff: Some(diff),
                                         raw_output: None,
+                                        subagent_id: context.subagent_id.clone(),
                                     },
                                 )),
                                 "notify event subscribers"
@@ -512,6 +518,7 @@ pub(super) async fn run_acp_process(
                         pty.clone(),
                         terminals.clone(),
                         context.events.clone(),
+                        context.subagent_id.clone(),
                         request,
                         responder,
                     )
@@ -663,6 +670,7 @@ pub(super) async fn run_acp_process(
                                 mode: FxgElicitationMode::Form,
                                 requested_schema: schema.clone(),
                                 tool_call_id: scope.tool_call_id.as_ref().map(|id| id.to_string()),
+                                subagent_id: context.subagent_id.clone(),
                             },
                         )),
                         "notify event subscribers"
@@ -745,7 +753,7 @@ pub(super) async fn run_acp_process(
             let initialize = match cx
                 .send_request(
                     InitializeRequest::new(ProtocolVersion::V1)
-                        .client_capabilities(client_capabilities())
+                        .client_capabilities(client_capabilities(&acp))
                         .client_info(Implementation::new("fxg", env!("CARGO_PKG_VERSION"))),
                 )
                 .block_task()
@@ -829,12 +837,28 @@ pub(super) async fn run_acp_process(
                 }
 
                 // 3) Turn loop (serializes prompt sends with update reads)
+                let (ingress_tx, ingress_rx) = mpsc::unbounded_channel();
+                let mut guards = Vec::new();
+                if let Some(parser) = params.acp_parser.clone() {
+                    let handler = VendorNotificationHandler::new(parser, ingress_tx.clone());
+                    match cx.add_dynamic_handler(handler) {
+                        Ok(guard) => guards.push(guard),
+                        Err(err) => {
+                            tracing::warn!("failed to register vendor notification handler: {err}");
+                        }
+                    }
+                }
                 let outcome = serve_session(
                     session,
                     cmd_rx,
                     &events,
                     capabilities_state,
                     &prompt_capabilities,
+                    Arc::clone(&contexts),
+                    params.cwd.clone(),
+                    ingress_tx,
+                    ingress_rx,
+                    guards,
                 )
                 .await;
                 contexts

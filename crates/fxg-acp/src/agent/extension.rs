@@ -3,13 +3,15 @@
 //! Design: `docs/04-agent-drivers-and-windows.md` §1.1 and
 //! `docs/changelog/2026-11-11-agent-extension-architecture.md`.
 
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use fxg_protocol::common::{
-    CommandInfo, ConfigOptionInfo, ConfigOptionValue, ModeInfo, PromptInput,
+    CommandInfo, ConfigOptionInfo, ConfigOptionValue, ModeInfo, PromptInput, RawJson,
 };
+use fxg_protocol::events::SubagentStatus;
 
 use crate::driver::{AgentLaunchSpec, DriverEvent};
 
@@ -56,6 +58,146 @@ pub struct SessionContext {
     pub launch: AgentLaunchSpec,
 }
 
+/// ACP client capability that an extension can advertise.
+///
+/// Unknown names are preserved so a newer configuration does not silently
+/// enable a capability that this build does not understand.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AcpCapability {
+    /// ACP subagents RFD (`clientCapabilities.subagents`).
+    Subagents,
+    /// Plan operations (`clientCapabilities.plan`).
+    Plan,
+    /// A capability added by a newer fxg / ACP schema.
+    Unknown(String),
+}
+
+impl AcpCapability {
+    /// Parses a capability name (`subagents`, `plan`, ...).
+    #[must_use]
+    pub fn from_name(name: &str) -> Self {
+        match name {
+            "subagents" => Self::Subagents,
+            "plan" => Self::Plan,
+            other => Self::Unknown(other.to_owned()),
+        }
+    }
+}
+
+/// Capabilities requested by the `FXG_ACP_CAPABILITIES` environment variable.
+///
+/// `None` means the variable is unset (use the per-agent defaults). An empty
+/// string disables every capability (kill switch).
+#[must_use]
+pub fn configured_capabilities() -> Option<AcpCapabilitySet> {
+    let Ok(raw) = std::env::var("FXG_ACP_CAPABILITIES") else {
+        return None;
+    };
+    Some(
+        raw.split(',')
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .map(AcpCapability::from_name)
+            .collect(),
+    )
+}
+
+/// Set of ACP client capabilities advertised on a connection.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AcpCapabilitySet(BTreeSet<AcpCapability>);
+
+impl AcpCapabilitySet {
+    /// Creates an empty capability set.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Adds a capability.
+    pub fn insert(&mut self, capability: AcpCapability) -> bool {
+        self.0.insert(capability)
+    }
+
+    /// Whether the capability is enabled.
+    #[must_use]
+    pub fn contains(&self, capability: &AcpCapability) -> bool {
+        self.0.contains(capability)
+    }
+
+    /// Iterates over the enabled capabilities.
+    pub fn iter(&self) -> impl Iterator<Item = &AcpCapability> {
+        self.0.iter()
+    }
+
+    /// Whether no capability is enabled.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+impl FromIterator<AcpCapability> for AcpCapabilitySet {
+    fn from_iter<T: IntoIterator<Item = AcpCapability>>(iter: T) -> Self {
+        Self(iter.into_iter().collect())
+    }
+}
+
+/// ACP connection options contributed by an extension.
+///
+/// This is plain data so it can live in [`AgentLaunchSpec`] and the warm-pool
+/// key. The agent-specific parser is passed separately per session.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AcpExtensionOptions {
+    /// Additional `clientCapabilities._meta` entries.
+    pub client_meta: Option<RawJson>,
+    /// Custom notification method names the extension wants to receive.
+    pub notifications: Vec<String>,
+    /// Client capabilities to advertise.
+    pub capabilities: AcpCapabilitySet,
+}
+
+impl Default for AcpExtensionOptions {
+    fn default() -> Self {
+        #[allow(unused_mut, reason = "the capability is compiled in by default")]
+        let mut capabilities = AcpCapabilitySet::new();
+        #[cfg(feature = "acp-subagents")]
+        capabilities.insert(AcpCapability::Subagents);
+        Self {
+            client_meta: None,
+            notifications: Vec::new(),
+            capabilities,
+        }
+    }
+}
+
+/// A child-session update parsed from a vendor notification.
+#[derive(Debug, Clone)]
+pub struct AcpChildUpdate {
+    /// Agent-side session ID of the child.
+    pub child_session_id: String,
+    /// Agent-side session ID of the parent (when reported).
+    pub parent_session_id: Option<String>,
+    /// Nesting depth reported by the vendor (0 = unknown).
+    pub depth: u32,
+    /// Display title for the child.
+    pub title: Option<String>,
+    /// Working directory of the child (when reported).
+    pub cwd: Option<PathBuf>,
+    /// Lifecycle state (status-only updates).
+    pub state: Option<SubagentStatus>,
+    /// Inner ACP update to normalize.
+    pub update: Option<agent_client_protocol::v1::schema::SessionUpdate>,
+}
+
+/// Parses vendor-specific subagent notifications into a generic child update.
+pub trait AcpNotificationParser: Send + Sync + std::fmt::Debug {
+    /// Notification methods handled by this parser.
+    fn methods(&self) -> &'static [&'static str];
+    /// Parses one notification. Returns `None` when the payload is unknown.
+    fn parse(&self, method: &str, params: &RawJson) -> Option<AcpChildUpdate>;
+}
+
 /// ACP extension (Tier 2): metadata, launch adjustments and capability overrides.
 ///
 /// One extension instance is shared across sessions. Keep per-session state in
@@ -72,6 +214,19 @@ pub trait AgentExtension: Send + Sync {
     /// The resulting spec is also the warm-pool key, so keep it plain data.
     fn prepare_launch(&self, _cwd: &Path, _launch: &mut AgentLaunchSpec) -> anyhow::Result<()> {
         Ok(())
+    }
+
+    /// ACP connection options (client capabilities, vendor notification methods).
+    ///
+    /// The returned value is stored in [`AgentLaunchSpec`] so the ACP driver can
+    /// apply it without knowing the extension.
+    fn acp_options(&self) -> AcpExtensionOptions {
+        AcpExtensionOptions::default()
+    }
+
+    /// Parser for vendor-specific subagent notifications.
+    fn notification_parser(&self) -> Option<Arc<dyn AcpNotificationParser>> {
+        None
     }
 
     /// Override / augment what ACP advertises (models, modes, config options).

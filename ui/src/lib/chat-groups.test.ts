@@ -15,6 +15,7 @@ function tool(toolCallId: string): ToolItem {
     locations: [],
     diff: null,
     rawOutput: null,
+    subagentId: null,
   };
 }
 
@@ -30,10 +31,11 @@ function question(elicitationId: string, toolCallId: string | null): TimelineIte
     mode: "form",
     requestedSchema: { type: "object", properties: {} },
     resolved: null,
+    subagentId: null,
   };
 }
 
-function message(text: string): TimelineItem {
+function message(text: string, subagentId: string | null = null): TimelineItem {
   return {
     kind: "agent",
     key: `agent:${text}`,
@@ -41,6 +43,22 @@ function message(text: string): TimelineItem {
     createdAt: 0,
     text,
     streaming: false,
+    subagentId,
+  };
+}
+
+function subagent(childSessionId: string): TimelineItem {
+  return {
+    kind: "subagent",
+    key: `subagent:${childSessionId}`,
+    seq: 2,
+    createdAt: 0,
+    childSessionId,
+    parentSessionId: null,
+    depth: 1,
+    title: "Explore",
+    description: null,
+    status: "running",
   };
 }
 
@@ -66,6 +84,20 @@ describe("groupTimelineItems", () => {
     expect(groups.map((group) => group.kind)).toEqual(["tools", "single", "tools"]);
     expect(groups[0]).toMatchObject({ kind: "tools", tools: [{ toolCallId: "t1" }] });
     expect(groups[2]).toMatchObject({ kind: "tools", tools: [{ toolCallId: "t2" }] });
+  });
+
+  it("collects child items into a subagent block", () => {
+    const groups = groupTimelineItems([
+      message("parent"),
+      subagent("child-1"),
+      message("child", "child-1"),
+      message("parent again"),
+    ]);
+    expect(groups.map((group) => group.kind)).toEqual(["single", "subagent", "single"]);
+    const group = groups[1];
+    if (group.kind !== "subagent") throw new Error("expected subagent group");
+    expect(group.subagent.title).toBe("Explore");
+    expect(group.items.map((item) => item.kind === "agent" && item.text)).toEqual(["child"]);
   });
 
   it("keeps the tool call when the question has no linked tool call", () => {
