@@ -15,8 +15,13 @@
   import PlugZapIcon from "@lucide/svelte/icons/plug-zap";
   import UnplugIcon from "@lucide/svelte/icons/unplug";
 
-  /** Node ID of the connected local node (the pairing endpoint is node-local). */
-  const nodeId = $derived(sync.connection.systemInfo?.node_id ?? "");
+  /**
+   * Node to edit. The settings page passes the selected node when connected to
+   * the hub; defaults to the local node.
+   */
+  let { nodeId = "" }: { nodeId?: string } = $props();
+
+  const targetNode = $derived(nodeId !== "" ? nodeId : (sync.connection.systemInfo?.node_id ?? ""));
 
   let snapshot = $state<NodeSettingsSnapshot | null>(null);
   let loading = $state(false);
@@ -37,16 +42,16 @@
     // Load once the node identity is known. Do not read `snapshot` here: `load()`
     // assigns it, which would retrigger the effect and overwrite the form while
     // the user types. Save/clear already refresh the snapshot from the response.
-    if (nodeId === "") return;
+    if (targetNode === "") return;
     untrack(() => void load());
   });
 
   async function load(): Promise<void> {
-    if (nodeId === "" || loading) return;
+    if (targetNode === "" || loading) return;
     loading = true;
     error = null;
     try {
-      snapshot = await sync.connection.client.nodeSettings(nodeId);
+      snapshot = await sync.connection.client.nodeSettings(targetNode);
       hubUrl = snapshot.pairing.hub_url ?? "";
       token = "";
     } catch (cause) {
@@ -82,7 +87,7 @@
     busy = true;
     tested = null;
     try {
-      const status = await sync.connection.client.testPairing(nodeId, {
+      const status = await sync.connection.client.testPairing(targetNode, {
         hub_url: hubUrl.trim(),
         token: token.trim() === "" ? null : token.trim(),
       });
@@ -103,7 +108,7 @@
     if (busy || hubUrl.trim() === "" || snapshot === null) return;
     busy = true;
     try {
-      snapshot = await sync.connection.client.updatePairing(nodeId, {
+      snapshot = await sync.connection.client.updatePairing(targetNode, {
         hub_url: hubUrl.trim(),
         token: token.trim() === "" ? null : token.trim(),
         expected_revision: snapshot.pairing.revision,
@@ -122,7 +127,7 @@
     if (busy || snapshot === null) return;
     busy = true;
     try {
-      snapshot = await sync.connection.client.clearPairing(nodeId, {
+      snapshot = await sync.connection.client.clearPairing(targetNode, {
         expected_revision: snapshot.pairing.revision,
       });
       hubUrl = "";
@@ -138,7 +143,7 @@
 
   async function copyNodeId(): Promise<void> {
     try {
-      await navigator.clipboard.writeText(nodeId);
+      await navigator.clipboard.writeText(targetNode);
       toast.success(m.settings_copied({ name: m.settings_pairing_node_id() }));
     } catch {
       toast.error(m.settings_copy_failed());
@@ -169,7 +174,7 @@
 
       <div class="flex flex-wrap items-center gap-2 text-[13px]">
         <span class="text-muted-foreground">{m.settings_pairing_node_id()}</span>
-        <code class="text-[12px]">{nodeId}</code>
+        <code class="text-[12px]">{targetNode}</code>
         <Button variant="ghost" size="sm" onclick={copyNodeId}>
           <CopyIcon />
           {m.settings_pairing_copy_node_id()}

@@ -9,6 +9,7 @@
   import { cn } from "#lib/utils.ts";
   import { m } from "#lib/paraglide/messages.js";
   import ConnectionMenu from "#lib/components/ConnectionMenu.svelte";
+  import ConnectionScopeBadge from "#lib/components/ConnectionScopeBadge.svelte";
   import KillSwitchButton from "#lib/components/KillSwitchButton.svelte";
   import SessionActionsMenu from "#lib/components/session/SessionActionsMenu.svelte";
   import SyncStatusBadge from "#lib/components/SyncStatusBadge.svelte";
@@ -187,6 +188,11 @@
     >
       <PanelLeftCloseIcon class="size-4" />
     </button>
+  </div>
+
+  <!-- What this UI is connected to (hub server or a node) -->
+  <div class="border-b border-border px-2.5 py-2">
+    <ConnectionScopeBadge class="w-full" />
   </div>
 
   <!-- Quick navigation -->

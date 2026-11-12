@@ -30,11 +30,12 @@
   import SearchIcon from "@lucide/svelte/icons/search";
   import Trash2Icon from "@lucide/svelte/icons/trash-2";
 
+  /** Target node passed by the settings page (catalog source and operation target). */
+  let { nodeId = "" }: { nodeId?: string } = $props();
+
   let agents = $state<AgentSummary[]>([]);
   let registryAgents = $state<RegistryAgentSummary[]>([]);
   let loading = $state(false);
-  /** Target node (catalog source and operation target). */
-  let nodeId = $state("");
   /** Label of the running operation (for example `Refreshing catalog…`). null = idle. */
   let busyLabel = $state<string | null>(null);
   /** Registry agent currently being imported. */
@@ -62,7 +63,6 @@
     extension: "",
   });
 
-  const onlineNodes = $derived(sync.nodes.filter((node) => node.is_online));
   const busy = $derived(busyLabel !== null || importingId !== null);
 
   /** Agents available on this node (built-in + custom). */
@@ -80,14 +80,6 @@
 
   onMount(() => {
     void loadAgents();
-  });
-
-  // Default online node selection (set on update because the node list is empty right after
-  // connecting)
-  $effect(() => {
-    if (nodeId === "" && onlineNodes.length > 0) {
-      nodeId = onlineNodes[0].node_id;
-    }
   });
 
   // Reload the catalog when the target node changes (the server no longer
@@ -280,21 +272,6 @@
       {m.settings_agents_description()}
     </p>
     <div class="flex flex-wrap items-center gap-1.5">
-      <select
-        bind:value={nodeId}
-        aria-label={m.settings_target_node()}
-        class="border-input bg-surface-raised h-8 rounded-md border px-2 text-[13px]"
-        title={m.settings_target_node()}
-      >
-        <option value=""
-          >{onlineNodes.length === 0 ? m.common_no_node_online() : m.settings_select_node()}</option
-        >
-        {#each sync.nodes as node (node.node_id)}
-          <option value={node.node_id} disabled={!node.is_online}>
-            {node.name}{node.is_online ? "" : m.settings_node_offline_suffix()}
-          </option>
-        {/each}
-      </select>
       <Button variant="outline" size="sm" disabled={loading} onclick={() => void loadAgents()}>
         <RefreshCwIcon />
         {m.common_refresh()}
@@ -310,12 +287,10 @@
     <p class="text-muted-foreground text-[13px]">{busyLabel}</p>
   {/if}
 
-  {#if onlineNodes.length === 0 && sync.nodes.length > 0}
+  {#if nodeId === ""}
     <p class="text-muted-foreground text-sm">
-      {m.settings_no_online_nodes()}
+      {sync.nodes.length > 0 ? m.settings_no_online_nodes() : m.settings_select_node()}
     </p>
-  {:else if nodeId === ""}
-    <p class="text-muted-foreground text-sm">{m.settings_select_node()}</p>
   {:else if loading && agents.length === 0}
     <p class="text-muted-foreground text-sm">{m.settings_registry_loading()}</p>
   {:else if available.length === 0}

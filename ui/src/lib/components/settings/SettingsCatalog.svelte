@@ -17,12 +17,10 @@
 
   type Section = "bootstrap" | "machine" | "hub";
 
-  let { section }: { section: Section } = $props();
+  let { section, nodeId = "" }: { section: Section; nodeId?: string } = $props();
 
   const isHub = $derived(sync.connection.role === "hub");
-  const onlineNodes = $derived(sync.nodes.filter((node) => node.is_online));
 
-  let selectedNode = $state("");
   let nodeSnapshot = $state<NodeSettingsSnapshot | null>(null);
   let hubSnapshot = $state<HubSettingsSnapshot | null>(null);
   let secrets = $state<SecretSummary[]>([]);
@@ -48,14 +46,8 @@
     value: "",
   });
 
-  const targetNode = $derived(isHub ? selectedNode : (sync.connection.systemInfo?.node_id ?? ""));
+  const targetNode = $derived(isHub ? nodeId : (sync.connection.systemInfo?.node_id ?? ""));
   const showSecrets = $derived(section === "machine" || (section === "hub" && isHub));
-
-  $effect(() => {
-    if (isHub && selectedNode === "" && onlineNodes.length > 0) {
-      selectedNode = onlineNodes[0].node_id;
-    }
-  });
 
   $effect(() => {
     // Track only the keys; `load` itself must not become an effect dependency
@@ -320,27 +312,10 @@
 </script>
 
 <div class="flex flex-col gap-3">
-  {#if isHub && (section === "bootstrap" || section === "machine")}
-    <div class="flex flex-wrap items-center gap-2">
-      <Label for={`catalog-node-${section}`}>Target node</Label>
-      <select
-        id={`catalog-node-${section}`}
-        class="border-input bg-surface-raised h-8 rounded-md border px-2 text-[13px]"
-        bind:value={selectedNode}
-      >
-        {#if onlineNodes.length === 0}
-          <option value="">{m.common_no_node_online()}</option>
-        {/if}
-        {#each onlineNodes as node (node.node_id)}
-          <option value={node.node_id}>{node.name} ({node.node_id})</option>
-        {/each}
-      </select>
-      {#if selectedNode === ""}
-        <span class="text-muted-foreground text-[13px]">
-          No node is online. Node settings are read-only while offline.
-        </span>
-      {/if}
-    </div>
+  {#if isHub && section === "machine" && targetNode === ""}
+    <p class="text-muted-foreground text-[13px]">
+      {m.common_no_node_online()}
+    </p>
   {/if}
 
   {#if error}
@@ -386,10 +361,10 @@
     </Card>
   {:else if section === "machine"}
     <Card class="gap-3 p-4">
-      <h2 class="font-medium">This machine</h2>
+      <h2 class="font-medium">Node settings</h2>
       <p class="text-muted-foreground text-[13px]">
-        Owned by <code>node.db</code>. The hub proxies writes to the target node; offline nodes are
-        read-only.
+        Owned by <code>node.db</code> on the target node. Through the hub, writes are proxied and offline
+        nodes are read-only.
       </p>
       {#if nodeSnapshot}
         <div class="grid gap-3 sm:grid-cols-2">

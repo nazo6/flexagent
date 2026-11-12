@@ -4,6 +4,7 @@
   import "../app.css";
   import AppSidebar from "#lib/components/layout/AppSidebar.svelte";
   import ConnectionMenu from "#lib/components/ConnectionMenu.svelte";
+  import ConnectionScopeBadge from "#lib/components/ConnectionScopeBadge.svelte";
   import ErrorBanner from "#lib/components/ErrorBanner.svelte";
   import TokenDialog from "#lib/components/TokenDialog.svelte";
   import { Button } from "#lib/components/ui/button/index.ts";
@@ -170,14 +171,17 @@
           <MenuIcon class="size-4" />
         </button>
 
-        <a href="/" class="flex items-center gap-1.5 font-semibold text-sm">
-          <div
-            class="bg-primary text-primary-foreground flex size-6 items-center justify-center rounded-md font-mono text-[11px] font-bold"
-          >
-            fxg
-          </div>
-          <span>FlexAgent</span>
-        </a>
+        <div class="flex min-w-0 items-center gap-2">
+          <a href="/" class="flex items-center gap-1.5 font-semibold text-sm">
+            <div
+              class="bg-primary text-primary-foreground flex size-6 items-center justify-center rounded-md font-mono text-[11px] font-bold"
+            >
+              fxg
+            </div>
+            <span>FlexAgent</span>
+          </a>
+          <ConnectionScopeBadge compact />
+        </div>
 
         {#if sync.inbox.length > 0}
           <a
