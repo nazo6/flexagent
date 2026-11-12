@@ -217,13 +217,12 @@ Android PWAやWeb UIから「プロンプト送信 (`prompt`)」「権限承認
 3. **承認リクエスト (`PermissionRequest`) の競合防止**:
    - エージェントが `session/request_permission` を発行すると、`request_id`
      が生成され `status = 'pending'` となります。
-   - スマホ（Android PWA）とPCターミナル（`fxg`
-     CLI）の両方に承認プロンプトが表示されます。
+   - スマホ（Android PWA）とPCブラウザ（Web UI）の両方に承認プロンプトが表示されます。
    - **どちらか一方でユーザーが「Approve / Reject」を押した瞬間**、`fxg node`
      がエージェントへ応答を返すと同時に `PermissionResolved`
      イベントを発行し、もう一方の画面の承認ダイアログを自動的に閉じます。
-   - 2番目以降の応答は `request_id` 単位で破棄され、`ALREADY_RESOLVED`
-     エラーが返却されます（エージェントへの応答は常に1回のみ）。
+   - 2番目以降の応答は `request_id` 単位で破棄され、API は
+     `already_resolved = true` として扱います（エージェントへの応答は常に1回のみ）。
 
 ### 3.1 同期の鮮度と競合解決（マルチクライアント整合性）
 
@@ -280,8 +279,7 @@ Windows (`D:\ghq\github.com\nazo6\flexagent`)、Linux VPS
    正規IDはそのままプロジェクトIDになります。`flexagent-local` のような
    単純キーは `user:<project_key>` 名前空間に保存します。完全一致がない場合は
    Git ルートまで親ディレクトリを遡り、Git Worktree の場合は
-   `git rev-parse --git-common-dir` からメイン Worktree のリンクも探します。
-   `.fxg.toml` は廃止されました。
+   `git worktree list --porcelain` のメイン Worktree からリンクも探します。
 2. **Git Remote URL の正規化（デフォルト自動解決）**:
    `git rev-parse --show-toplevel`
    でGitルートを特定し、`git config --get remote.origin.url`
@@ -296,8 +294,9 @@ Windows (`D:\ghq\github.com\nazo6\flexagent`)、Linux VPS
    モノレポ等でGitルートのサブディレクトリで起動された場合は、`github.com/nazo6/flexagent#packages/sub`
    のように相対パス（POSIXスラッシュ正規化）を付与します。
 3. **フォールバック（明示リンクも Git Remote もない）**:
-   `local:<node_id>:<folder_name_hash>`
-   としてノード固有プロジェクトを作成します（後から Web UI で Git 由来と同じ正規IDを設定すれば、リモートを持つ他ノードの
+   `local:<node_id>:<hash>`
+   としてノード固有プロジェクトを作成します。`hash` は正規化した絶対パスの
+   FNV-1a です（後から Web UI で Git 由来と同じ正規IDを設定すれば、リモートを持つ他ノードの
    フォルダとマージ可能）。
 4. **表示名の自動導出**: `GitRemote` はリポジトリ名、`UserKey` はキーそのもの、
    `Local` はディレクトリ名。表示名は設定項目として保存しません。
@@ -333,9 +332,10 @@ Logical Project (例: github.com/nazo6/flexagent)
       └── Worktree B    (~/.flexagent/worktrees/github.com-nazo6-flexagent/fix-bug)   [branch: fix/bug]    <-- Session #2
 ```
 
-- 各ノードの `fxg node` は `git worktree list --porcelain`
-  を定期・起動時に実行し、同一リポジトリに属するすべての
-  Worktree（パス、ブランチ、HEADコミット）を自動検出してハブへ報告します。
+- 各ノードの `fxg node` は、セッション起動・プロジェクト追加・Worktree 操作の
+  タイミングで `git worktree list --porcelain` を実行し、同一リポジトリに属する
+  Worktree（パス、ブランチ）を検出してハブへ報告します。HEAD は必要時に
+  ノードの Worktree API から取得します。
 - 検出結果に変化（Worktree の追加・削除・ブランチ切替）があった場合、ノードは
   `NodeProjectReport` を含む `NodeHello` を再送し、`hub.db` の
   `project_node_bindings` を更新します。
@@ -448,12 +448,11 @@ Docker / Incus / Google Colab Pro などのコマンド例は、各ツールの�
 ### 6.4 環境変数による Git 認証と破棄前の成果物退避
 
 1. **環境変数による Git 認証 (外部注入方式)**:
-   - Git 認証のための `GIT_ASKPASS` ヘルパーコマンド（`fxg internal git-askpass`）や、Node ⇔ Hub 間の `GitCredentialRequest` / `GitCredentialResponse` プロキシ機構は設けていません。
    - 一時VMやコンテナ環境で Git 操作を行う場合、Provisioner の `env_secrets` で
      `GH_TOKEN` などの秘密値を環境変数として注入し、イメージ / 起動コマンド側で
      `gh auth setup-git`、credential helper、SSH agent のいずれかを設定します。
      `GH_TOKEN` を Git が自動で読むわけではないため、環境側の設定が必須です。
-   - 常駐ノード（`fxg node`）でも開発者自身の既存の Git 認証（SSH 鍵、Git Credential Manager 等）がそのまま透過的に利用されます。
+   - 常駐ノード（`fxg node`）では開発者自身の既存の Git 認証（SSH 鍵、Git Credential Manager 等）がそのまま透過的に利用されます。
 2. **破棄前の Graceful Drain（ベストエフォート）**:
    - 一時VM内のイベントは VM 内の `node.db` に蓄積し、終了時にハブから
      `HubToNodeMsg::DrainAndShutdown`
@@ -490,9 +489,11 @@ Hijacking）や不正アクセスを防ぐため、以下の多層防御モデ�
   - ローカルWeb/WSサーバー (`LocalAPI`) は、デフォルトで
     **`127.0.0.1:7860`（ローカルループバックのみ）** に厳格バインドします。
     7860 が使用中の場合はループバックの ephemeral port にフォールバックし、
-    実際のアドレスは `node.addr` に記録します。
+    実際のアドレスは `node.addr` に記録します。明示的な `--listen` /
+    `[node] listen_addr` がある場合はそのアドレスに従います。
   - 同一LAN内の他端末から直接PCのローカルAPI
-    を叩くことはできず、すべてのリモート操作はハブ経由で中継されます。
+    を叩くことはできず、すべてのリモート操作はハブ経由で中継されます
+    （明示的に LAN アドレスへバインドした場合を除く）。
 
 ### 7.2 ブラウザ固有の攻撃防止（Localhost保護）
 
@@ -518,17 +519,18 @@ Hijacking）や不正アクセスを防ぐため、以下の多層防御モデ�
      にパーミッション `0600` で保存します。
 2. **Web UI 初回アクセスとCookieの安全な設定**:
    - ローカルCLIから `fxg web` を実行すると、`node.addr` のアドレスを使った
-     ワンタイムURL `http://<node.addr のアドレス>/?token=<AUTH_TOKEN>`
+     トークン付きURL `http://<node.addr のアドレス>/?token=<AUTH_TOKEN>`
      （既定は `http://localhost:7860/?token=<AUTH_TOKEN>`）がブラウザで開かれます。
-   - サーバーはトークンを検証後、`Set-Cookie: fxg_session=<TOKEN>; HttpOnly; SameSite=Strict; Path=/`
+   - Web UI は URL のトークンで `POST /api/v1/auth/login` を呼び、サーバーは
+     トークンを検証後、`Set-Cookie: fxg_session=<TOKEN>; HttpOnly; SameSite=Strict; Path=/`
      を発行します。以降のリクエストはCookieまたは
      `Authorization: Bearer <AUTH_TOKEN>`
      ヘッダでのみ受け付け、未認証アクセスはローカルであっても `401 Unauthorized`
      で遮断します。
-   - 例外として、接続先種別のみを返す `GET /api/v1/meta` は認証を免除します
-     (Host / Origin 検証は適用)。Web UI は接続先種別の判定をこのエンドポイント
-     のみで行い（ホスト名等からの推測はしない）、トークン入力ダイアログを
-     ハブ / ローカルノードで正しく表示します。
+   - 認証不要のエンドポイントは、接続先種別を返す `GET /api/v1/meta` と
+     `GET /healthz` / `GET /readyz` です (Host / Origin 検証は適用)。Web UI は
+     接続先種別の判定を `GET /api/v1/meta` のみで行い（ホスト名等からの推測はしない）、
+     トークン入力ダイアログをハブ / ローカルノードで正しく表示します。
 3. **Node ⇔ Hub 間のペアリング認証（ノード個別トークン）**:
    - 常駐ノードがハブのWebSocketへ接続する際、`Authorization: Bearer <NODE_TOKEN>`
      で認証します。

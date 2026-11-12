@@ -25,8 +25,7 @@ E2E暗号化を行わないため、ハブ側で会話履歴の構造化クエ�
    セッションのメタデータ（作成・タイトル・ステータス・モード）も
    `session_events` 上のイベントとして記録する。ハブの `sessions` /
    `permission_requests` はイベントから適用される**投影（projection）** であり、
-   別系統のメタデータ同期（旧 `SessionUpsert` /
-   `metadata_synced`）は存在しない。
+   別系統のメタデータ同期は存在しない。
 3. **書き込み権威は1つ**: セッション状態を書き換えられるのは**実行ノードのみ**。
    ハブは (a) クライアントコマンドの転送 (b)
    受信イベントの追記と投影適用
@@ -100,7 +99,7 @@ SessionDeleted        → sessions.deleted_at = created_at + 本文イベント�
   は実行ノードだけが採番する
   欠番のない連番のため、水位による表現が成立します。Outbox 抽出は
   `node_seq > synced_up_to_node_seq` の単純な述語になり、ACK 時の更新も O(1)
-  です （旧設計の `synced = 0` フラグ + partial index は廃止）。
+  です。
 - **カーソル (`session_events.cursor`)**: そのDB（`node.db` / `hub.db`）が
   イベントを取り込んだ順の AUTOINCREMENT 連番です。クライアント（CLI / Web
   UI）の 差分再開カーソルとして使用します。**接続先ストア以外の cursor
@@ -111,275 +110,52 @@ SessionDeleted        → sessions.deleted_at = created_at + 本文イベント�
 
 ---
 
-## 1. 共通スキーマ DDL
+## 1. テーブル構成と責務
 
-```sql
-PRAGMA journal_mode = WAL;
-PRAGMA foreign_keys = ON;
+DDL・カラム・インデックスの正は `crates/fxg-db/migrations/` です。ここでは
+テーブル間の責務と、ノード / ハブのロール差分だけを扱います。
 
--- 1. ノード登録簿
---    ノード側: 自分自身の1行のみ（FK参照・ローカルUI表示用。起動時に upsert）
---    ハブ側: 全ノード（NodeHello で更新されるハブ権威データ。token_hash はハブのみ使用）
-CREATE TABLE nodes (
-    node_id         TEXT PRIMARY KEY,               -- UUID または 固定スラッグ (例: "win-desktop", "eph-0195...")
-    name            TEXT NOT NULL,                  -- 表示名 (例: "Home Windows PC", "Colab Pro (T4)")
-    os              TEXT NOT NULL,                  -- "windows" | "linux" | "macos"
-    arch            TEXT NOT NULL,                  -- "x86_64" | "aarch64"
-    version         TEXT NOT NULL,                  -- fxg バイナリバージョン
-    token_hash      TEXT,                           -- ノード個別 node_token のハッシュ (SHA-256)。NULL は未発行
-    token_issued_at INTEGER,                        -- トークン最終発行日時 (Unix epoch ms, 任意)
-    installed_agents_json TEXT NOT NULL DEFAULT '[]', -- 利用可能なエージェントID一覧 (JSON配列)
-    is_ephemeral    INTEGER NOT NULL DEFAULT 0,     -- 0: 常駐ノード, 1: 一時VM/コンテナノード
-    provisioner     TEXT,                           -- 一時ノードのプロビジョナー識別子 (例: "local-docker", "local-incus", "colab-pro")
-    lifecycle_status TEXT NOT NULL DEFAULT 'ready', -- 'provisioning' | 'ready' | 'draining' | 'terminated' | 'error'
-    idle_timeout_secs INTEGER,                      -- アイドル自動破棄までの秒数 (一時ノード用、例: 900)
-    is_online       INTEGER NOT NULL DEFAULT 0,     -- 1: 接続中, 0: 切断
-    last_seen_at    INTEGER NOT NULL,               -- Unix epoch (ms)
-    created_at      INTEGER NOT NULL,
-    state_revision  INTEGER NOT NULL DEFAULT 0      -- NodeHello 全量レポートの単調増加リビジョン
-);
+| テーブル                                                                                      | 責務                                                                                                                  |
+| :-------------------------------------------------------------------------------------------- | :-------------------------------------------------------------------------------------------------------------------- |
+| `nodes`                                                                                       | ノード登録簿。ハブは全ノード、ノードは自分自身の1行。`token_hash` はハブのみ使用。                                    |
+| `projects` / `project_node_bindings`                                                          | 論理プロジェクトと、ノード上のローカルパス / Worktree の紐付け。                                                      |
+| `sessions`                                                                                    | セッション状態。ノードが権威、ハブはイベントからの投影。承認ポリシー・使用量・アーカイブ / 削除状態もここに投影する。 |
+| `session_events`                                                                              | Append-only のイベントログ。`cursor` はストアへの取り込み順、`node_seq` はセッション内の論理順。                      |
+| `session_events_fts`                                                                          | `session_events` の FTS5 (trigram) 検索インデックス。                                                                 |
+| `permission_requests` / `elicitation_requests`                                                | 未解決の承認 / 質問を引くための投影テーブル。                                                                         |
+| `push_subscriptions`                                                                          | ハブの Web Push (VAPID) 購読。                                                                                        |
+| `audit_logs`                                                                                  | 各ストアが自分の観測した操作を記録する監査ログ。同期対象外。                                                          |
+| `incidents`                                                                                   | 各ストアのエラー境界が観測した障害のリングバッファ。同期対象外。                                                      |
+| `node_settings` / `agent_settings` / `agent_aliases` / `custom_agents` / `project_path_links` | ノード所有の実行時設定。                                                                                              |
+| `hub_settings` / `provisioners`                                                               | ハブ所有の実行時設定。                                                                                                |
+| `secrets`                                                                                     | 秘密のメタデータ。値は `~/.flexagent/secrets/{node,hub}/<id>` に置く。                                                |
+| `node_pairing`                                                                                | ノードのハブ接続先。トークンは `~/.flexagent/node_token` に置く。                                                     |
 
--- 2. 論理プロジェクトテーブル
---    ノード側: 自ノードが関与する分のみ / ハブ側: 全ノード分の集約（ハブ権威）
-CREATE TABLE projects (
-    project_id      TEXT PRIMARY KEY,               -- 正規化キー (例: "github.com/nazo6/flexagent")
-    name            TEXT NOT NULL,                  -- 表示名 (例: "flexagent")
-    canonical_git_url TEXT,                         -- 正規化元Git URL
-    identity_kind   TEXT NOT NULL DEFAULT 'local',  -- 'git_remote' | 'user_key' | 'local'
-    project_key     TEXT,                           -- identity_kind = 'user_key' のときのキー
-    created_at      INTEGER NOT NULL,
-    updated_at      INTEGER NOT NULL
-);
+### 1.1 重要な不変条件
 
--- 3. プロジェクト × ノードのローカルパス紐付け (Worktree 含む)
-CREATE TABLE project_node_bindings (
-    project_id      TEXT NOT NULL REFERENCES projects(project_id) ON DELETE CASCADE,
-    node_id         TEXT NOT NULL REFERENCES nodes(node_id) ON DELETE CASCADE,
-    local_path      TEXT NOT NULL,                  -- 例: "D:\ghq\github.com\nazo6\flexagent" または Worktree パス
-    is_worktree     INTEGER NOT NULL DEFAULT 0,     -- 1: Git Worktree, 0: メインリポジトリ
-    path_exists     INTEGER NOT NULL DEFAULT 1,     -- 最終報告時点でノード上に実在するか (0: 見つからない)
-    git_branch      TEXT,                           -- 最終確認時のGitブランチ (例: "main", "feat/auth")
-    last_used_at    INTEGER NOT NULL,
-    PRIMARY KEY (project_id, node_id, local_path)
-);
+- `session_events` は `event_id` と `(session_id, node_seq)` で一意。
+- `sessions.last_node_seq` はノードでは永続化済み最新、ハブでは投影に適用済み最大。
+- `sessions.synced_up_to_node_seq` はノード専用の ACK 水位。ハブでは未使用。
+- `sessions.deleted_at` は tombstone。行は残し、本文イベントと承認 / 質問をパージする。
+- `sessions.archived_at` は可逆な可視性フラグ。
+- `sessions.permission_policy` は `ask` / `auto_allow_all`。
+- `incidents` は同じ `(code, source, session_id, node_id)` の未解決障害を10分以内なら集約し、14日・最大1000行で保持する。
 
--- 4. セッション
---    ノード側: 自分のセッション（権威。直接書き込む）
---    ハブ側: 全ノード分の投影（イベント適用と同一トランザクションでのみ更新）
-CREATE TABLE sessions (
-    session_id      TEXT PRIMARY KEY,               -- UUID v7
-    project_id      TEXT NOT NULL REFERENCES projects(project_id),
-    node_id         TEXT NOT NULL REFERENCES nodes(node_id),
-    local_path      TEXT NOT NULL,                  -- 実行ディレクトリ (Worktree パス含む)
-    git_branch      TEXT,                           -- 起動時点のスナップショット（ライブ値は Worktree API から取得）
-    is_worktree     INTEGER NOT NULL DEFAULT 0,     -- Worktree 内での実行か
-    agent_id        TEXT NOT NULL,                  -- "claude-code" | "antigravity-acp" 等
-    agent_session_id TEXT,                          -- エージェント内部のセッションID (SessionAgentBound イベントで確定)
-    parent_session_id TEXT REFERENCES sessions(session_id), -- Fork元のセッションID
-    title           TEXT NOT NULL DEFAULT 'New Session',
-    status          TEXT NOT NULL,                  -- 'provisioning' | 'idle' | 'running' | 'waiting_permission' | 'waiting_input' | 'stopped' | 'error'
-    current_mode    TEXT,                           -- ACP SessionMode (例: 'code', 'plan')
-    available_modes_json    TEXT NOT NULL DEFAULT '[]', -- ACP ModeInfo[]
-    available_commands_json TEXT NOT NULL DEFAULT '[]', -- ACP AvailableCommand[]
-    config_options_json     TEXT NOT NULL DEFAULT '[]', -- ACP ConfigOption[]
-    usage_json      TEXT,                           -- SessionUsage (最新の usage_update。NULL = 未受信)
-    permission_policy TEXT NOT NULL DEFAULT 'ask',  -- セッション単位の承認ポリシー ('ask' | 'auto_allow_all')
-    fork_supported  INTEGER NOT NULL DEFAULT 0,     -- エージェントがACPネイティブForkに対応しているか
-    last_node_seq   INTEGER NOT NULL DEFAULT 0,     -- ノード: 永続化済み最新 node_seq（採番は +1）/ ハブ: 投影に適用済み最大 node_seq
-    synced_up_to_node_seq INTEGER NOT NULL DEFAULT 0, -- ノード専用: ハブが ACK した水位（ハブ側は常に 0 で未使用）
-    archived_at     INTEGER,                        -- アーカイブ日時 (NULL = 未アーカイブ)。既定の一覧から除外される (可逆)
-    deleted_at      INTEGER,                        -- 削除 (tombstone) 日時 (NULL = 有効)。行は同期整合のため残す (復元不能)
-    created_at      INTEGER NOT NULL,
-    updated_at      INTEGER NOT NULL
-);
+### 1.2 設定の所有者
 
-CREATE INDEX idx_sessions_project_updated ON sessions(project_id, updated_at DESC);
-CREATE INDEX idx_sessions_status ON sessions(status);
-CREATE INDEX idx_sessions_node_updated ON sessions(node_id, updated_at DESC);
+実行時に変更する設定は所有者の DB にのみ保存し、ノード ⇔ ハブ間で同期・マージしない。
 
--- 5. セッションイベント履歴 (Append-Only Event Log)
---    ノード側: 自分のセッションのイベント / ハブ側: 全ノードのイベント（冪等追記）
-CREATE TABLE session_events (
-    cursor          INTEGER PRIMARY KEY AUTOINCREMENT, -- このDBへの取り込み順 (クライアント差分再開カーソル)
-    event_id        TEXT NOT NULL UNIQUE,           -- UUID v7 (冪等適用・重複排除)
-    session_id      TEXT NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
-    node_seq        INTEGER NOT NULL,               -- セッション内の順序番号 (1, 2, 3...)。実行ノードのみが採番
-    event_type      TEXT NOT NULL,                  -- 'session_created' | 'session_title_changed' | 'session_agent_bound' | 'user_message' | 'agent_message' | 'agent_thought' | 'tool_call' | 'plan' | 'permission_request' | 'permission_resolved' | 'elicitation_request' | 'elicitation_resolved' | 'session_archived' | 'session_permission_policy_changed' | 'session_deleted' | 'terminal_output' | 'capabilities_updated' | 'provisioning_log' | 'usage_updated' | 'turn_ended' | 'compaction_updated' | 'status_change'
-    payload_json    TEXT NOT NULL,                  -- 構造化ペイロード (UnifiedEventPayload のJSON。正データ)
-    searchable_text TEXT,                           -- FTS5全文検索用のプレーンテキスト抽出 (受信時に payload_json から生成。terminal_output 等のバイナリ系は対象外)
-    created_at      INTEGER NOT NULL,
-    UNIQUE(session_id, node_seq)
-);
+| 設定                                                                                                           | 所有者 / 保存場所                               |
+| :------------------------------------------------------------------------------------------------------------- | :---------------------------------------------- |
+| `node_settings` / `node_pairing` / `agent_settings` / `agent_aliases` / `custom_agents` / `project_path_links` | `node.db`                                       |
+| `hub_settings` / `provisioners`                                                                                | `hub.db`                                        |
+| 秘密のメタデータ                                                                                               | `node.db` / `hub.db` の `secrets`               |
+| 秘密の値                                                                                                       | `~/.flexagent/secrets/{node,hub}/<id>` (`0600`) |
 
-CREATE INDEX idx_session_events_session_seq ON session_events(session_id, node_seq ASC);
-
--- 6. FTS5 全文検索インデックス (会話・思考・ファイルパス・コマンド履歴の高速検索)
-CREATE VIRTUAL TABLE session_events_fts USING fts5(
-    session_id UNINDEXED,
-    event_type UNINDEXED,
-    searchable_text,
-    content='session_events',
-    content_rowid='cursor',
-    tokenize='trigram'                              -- 日本語・コード識別子の部分一致に強い trigram トークナイザ
-);
-
--- FTS5 外部コンテンツテーブルの同期トリガー (INSERT / DELETE / UPDATE)
-CREATE TRIGGER session_events_fts_ai AFTER INSERT ON session_events BEGIN
-    INSERT INTO session_events_fts(rowid, session_id, event_type, searchable_text)
-    VALUES (new.cursor, new.session_id, new.event_type, new.searchable_text);
-END;
-CREATE TRIGGER session_events_fts_ad AFTER DELETE ON session_events BEGIN
-    INSERT INTO session_events_fts(session_events_fts, rowid, session_id, event_type, searchable_text)
-    VALUES ('delete', old.cursor, old.session_id, old.event_type, old.searchable_text);
-END;
-CREATE TRIGGER session_events_fts_au AFTER UPDATE ON session_events BEGIN
-    INSERT INTO session_events_fts(session_events_fts, rowid, session_id, event_type, searchable_text)
-    VALUES ('delete', old.cursor, old.session_id, old.event_type, old.searchable_text);
-    INSERT INTO session_events_fts(rowid, session_id, event_type, searchable_text)
-    VALUES (new.cursor, new.session_id, new.event_type, new.searchable_text);
-END;
-
--- 7. 承認Inbox（イベントから適用される投影。未解決 Permission Request の高速一覧用）
-CREATE TABLE permission_requests (
-    request_id      TEXT PRIMARY KEY,               -- ACP request id
-    session_id      TEXT NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
-    node_id         TEXT NOT NULL REFERENCES nodes(node_id), -- ノード側は自分自身の node_id
-    tool_name       TEXT NOT NULL,                  -- 例: "terminal/create", "fs/write_text_file"
-    summary         TEXT NOT NULL,                  -- 例: "Run command: cargo test"
-    details_json    TEXT NOT NULL,                  -- 引数やDiff詳細、選択肢 (options)
-    status          TEXT NOT NULL DEFAULT 'pending',-- 'pending' | 'approved' | 'rejected' | 'cancelled'
-    resolved_by     TEXT,                           -- 'cli' | 'web' | 'android_push'
-    created_at      INTEGER NOT NULL,
-    resolved_at     INTEGER
-);
-
-CREATE INDEX idx_permission_pending ON permission_requests(status) WHERE status = 'pending';
-
--- 7b. 質問Inbox (elicitation の投影。未解決 Elicitation Request の高速一覧用)
-CREATE TABLE elicitation_requests (
-    elicitation_id  TEXT PRIMARY KEY,               -- ACP elicitation id (form は JSON-RPC request id)
-    session_id      TEXT NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
-    node_id         TEXT NOT NULL REFERENCES nodes(node_id), -- ノード側は自分自身の node_id
-    message         TEXT NOT NULL,                  -- ユーザーへ提示するメッセージ
-    mode            TEXT NOT NULL DEFAULT 'form',   -- 'form' | 'url' (Phase 1 は form のみ)
-    schema_json     TEXT NOT NULL DEFAULT '{}',     -- form モードの requestedSchema
-    tool_call_id    TEXT,                           -- 関連するツール呼び出しID (任意)
-    status          TEXT NOT NULL DEFAULT 'pending',-- 'pending' | 'accepted' | 'declined' | 'cancelled'
-    content_json    TEXT NOT NULL DEFAULT 'null',   -- accept 時の回答内容
-    resolved_by     TEXT,                           -- 'cli' | 'web' | 'android_push' | 'system'
-    created_at      INTEGER NOT NULL,
-    resolved_at     INTEGER
-);
-
-CREATE INDEX idx_elicitation_pending ON elicitation_requests(status) WHERE status = 'pending';
-
--- 8. Web Push (VAPID) サブスクリプション管理（ハブ専用。ノード側は常に空）
-CREATE TABLE push_subscriptions (
-    id               INTEGER PRIMARY KEY AUTOINCREMENT,
-    endpoint        TEXT NOT NULL UNIQUE,
-    p256dh          TEXT NOT NULL,
-    auth            TEXT NOT NULL,
-    device_name     TEXT,                           -- 例: "Pixel 9 Chrome PWA"
-    created_at      INTEGER NOT NULL
-);
-
--- 9. 監査ログ (Audit Log)
---    各ストアが「自分の観測した操作」のみを記録する（同期対象外）
-CREATE TABLE audit_logs (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    action          TEXT NOT NULL,                  -- 'session_start' | 'permission_resolved' | 'elicitation_resolved' | 'pty_spawn' | 'kill_switch' | 'worktree_manage'
-    session_id      TEXT,                           -- 関連セッションID (任意)
-    node_id         TEXT,                           -- 対象ノードID (任意。ノード側は自分自身)
-    client_ip       TEXT NOT NULL,                  -- 送信元IPアドレス (LAN/VPN IP)
-    client_user_agent TEXT,                         -- クライアントUser-Agent
-    auth_subject    TEXT NOT NULL,                  -- トークン識別子または認証主体
-    details_json    TEXT NOT NULL DEFAULT '{}',     -- 実行内容詳細 (実行コマンド、承認オプション等)
-    created_at      INTEGER NOT NULL
-);
-
-CREATE INDEX idx_audit_logs_action ON audit_logs(action, created_at DESC);
-CREATE INDEX idx_audit_logs_session ON audit_logs(session_id, created_at DESC);
-```
-
----
-
-### 1.0.1 診断インシデント (migration `0011_incidents.sql`)
-
-`incidents` は「ノード / ハブが自分のエラー境界で観測した障害」を
-保持する、**同期対象外**のリングバッファです。同じ原因
-(`code` + `source` + `session_id` + `node_id`) が未解決のまま
-10 分以内に再発した場合は、行を増やさず `occurrence_count` と
-`last_seen_at` を更新します。保持期間は 14 日、最大 1000 行です。
-
-```sql
-CREATE TABLE incidents (
-    id                INTEGER PRIMARY KEY AUTOINCREMENT,
-    created_at        INTEGER NOT NULL,
-    last_seen_at      INTEGER NOT NULL,
-    level             TEXT NOT NULL,                 -- 'info' | 'warning' | 'error'
-    code              TEXT NOT NULL,                 -- ErrorCode
-    summary           TEXT NOT NULL,                 -- 英語のフォールバック説明
-    details_json      TEXT NOT NULL DEFAULT '{}',    -- 境界ごとの技術情報 (RawJson)
-    session_id        TEXT,
-    node_id           TEXT,
-    request_id        TEXT,                          -- REST / command の相関ID
-    source            TEXT NOT NULL,                 -- 'api' | 'agent' | 'sync' | 'git' | ...
-    occurrence_count  INTEGER NOT NULL DEFAULT 1,
-    resolved_at       INTEGER
-);
-
-CREATE INDEX idx_incidents_created ON incidents(created_at DESC);
-CREATE INDEX idx_incidents_group
-    ON incidents(code, source, session_id, node_id, resolved_at);
-CREATE INDEX idx_incidents_last_seen ON incidents(last_seen_at DESC);
-```
-
----
-
-### 1.1 設定・秘密・プロファイル (migration `0010_settings_consolidation.sql`)
-
-実行時に変更する設定は所有者の DB にのみ保存します (ノード ⇔ ハブ間で同期・マージしない)。
-
-- `node.db`: `node_settings` / `node_pairing` / `agent_settings` /
-  `agent_aliases` / `custom_agents` / `project_path_links`
-- `hub.db`: `hub_settings` / `provisioners` (`provisioners` は `env_json` /
-  `env_secrets_json` を持つ。`project_profiles` / `git_credentials` は
-  アーキテクチャ簡素化で削除済み)
-- 共通: `secrets` (秘密の **メタデータ** のみ。値は
-  `~/.flexagent/secrets/{node,hub}/<id>` に `0600` で保存)
-
-単一行テーブルは `id INTEGER PRIMARY KEY CHECK (id = 1)` と
-`revision INTEGER NOT NULL DEFAULT 1` を持ち、更新は
-`UPDATE ... WHERE id = 1 AND revision = ?` の単一クエリで楽観的ロックを行います
-(不一致は `REVISION_MISMATCH`)。
-
-> **アーキテクチャ簡素化の migration**:
-> `0012_provisioner_env_secrets.sql` が `provisioners.env_secrets_json` を ADD し、
-> `0013_remove_project_profiles.sql` が `project_profiles` を DROP、
-> `0014_remove_git_credentials.sql` が `git_credentials` を DROP、
-> `0015_rename_provisioning_statuses.sql` が `bootstrapping` を `provisioning` に、
-> `bootstrap_log` を `provisioning_log` に更新する。詳細は
-> [`changelog/2026-11-10-architecture-simplification.md`](changelog/2026-11-10-architecture-simplification.md)
-> を参照。
->
-> `0016_custom_agent_extension.sql` は `custom_agents` に `extension` を追加する。
-> `0017_custom_agent_origin.sql` は `custom_agents` に `description` / `icon` /
-> `origin_json` を追加し、npx/uvx の有効化を保持していた
-> `enabled_package_agents` を DROP する。Registry の import は custom 定義として
-> 保存されるため、実行時カタログは `custom_agents` と builtin だけで完結する。
-> `0018_drop_default_agent.sql` は未使用の `agent_settings.default_agent` を
-> DROP する。
->
-> `0019_node_pairing.sql` はノードのハブ接続先を保持する単一行テーブル
-> `node_pairing` を追加する (`hub_url` のみ。トークンは
-> `~/.flexagent/node_token` の `0600` ファイルで、DB には値を保存しない)。
-> ペアリングは `GET/PUT/DELETE /api/v1/nodes/:node_id/settings/pairing` で操作し、
-> `hub_url` は API が即時反映するため `fxg node restart` は不要。
-
-`project_path_links` は `local_path -> project_key` の明示リンクで、Worktree からは
-メイン Worktree のリンクを `git-common-dir` 経由で引き継ぎます。
-`projects.identity_kind` / `projects.project_key` は解決結果の表示用で、
-`project_id` は `user:<key>` / 正規化 Git URL / `local:<node_id>:<hash>` のいずれかです。
+単一行テーブルは `revision` による楽観的ロックを行い、競合は
+`REVISION_MISMATCH` として返します。マイグレーションの意図は
+[`changelog/2026-11-10-architecture-simplification.md`](changelog/2026-11-10-architecture-simplification.md)
+を参照してください。
 
 ## 2. 正データと派生カラム
 

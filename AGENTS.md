@@ -25,8 +25,10 @@
   (`node.addr`、既定 `127.0.0.1:7860`) のみを使用し、Local IPC (Named Pipe /
   UDS) は持たない。
 - **Windows ファーストクラス対応**:
-  - 子プロセス・PTY は必ず **Windows Job Object (`win32job`)**
-    にバインドし、親終了時にプロセスツリーごと確実に終了させる。
+  - PTY とプロビジョナーの子プロセスは **Windows Job Object (`win32job`)**
+    にバインドし、親終了時にプロセスツリーごと確実に終了させる。ACP
+    エージェントは `agent-client-protocol` が起動し、Unix はプロセスグループ、
+    Windows は `CREATE_NO_WINDOW` で管理する。
   - コマンド解決には `which::which_in` (`PATHEXT` 対応) を使用し、パス正規化には
     UNC プレフィックス (`\\?\`) を回避するため必ず **`dunce::canonicalize`**
     を使用する。
@@ -82,19 +84,43 @@
   通信トポロジー、Outbox同期、論理プロジェクト・Worktree解決、一時VM
   (`fxg internal stdio`)、セキュリティ
 - [`docs/02-database-schema.md`](docs/02-database-schema.md): `hub.db` /
-  `node.db` の SQLite スキーマ定義
+  `node.db` のスキーマ原則・投影・ロール差分（DDL の正は
+  `crates/fxg-db/migrations/`）
 - [`docs/03-protocol-and-api.md`](docs/03-protocol-and-api.md): `fxg-protocol`
-  型定義、WS/Stdio メッセージ、REST API エンドポイント
+  のプロトコル設計、WS/Stdio の意味、REST API の境界（型の正は
+  `crates/fxg-protocol/` と生成済み bindings）
 - [`docs/04-agent-drivers-and-windows.md`](docs/04-agent-drivers-and-windows.md):
   `AgentDriver`、ACP / `opencode2` 統合、Shadow Git Revert/Fork、Windows
   固有実装
-- [`docs/05-cli-and-pwa-ui.md`](docs/05-cli-and-pwa-ui.md): CLI
-  コマンド完全リファレンス、設定の所有者 (`config.toml` は起動設定のみ、
-  実行時設定は `node.db` / `hub.db`)、秘密ストア、PWA / Web Push 設計
+- [`docs/05-cli-and-pwa-ui.md`](docs/05-cli-and-pwa-ui.md): CLI の設計原則
+  （コマンドの正は `fxg --help` / `__usage_spec__`）、設定の所有者
+  (`config.toml` は起動設定のみ、実行時設定は `node.db` / `hub.db`)、
+  秘密ストア、PWA / Web Push 設計
 - [`docs/06-type-safety.md`](docs/06-type-safety.md): 型安全性ガイド
   (open enum / `RawJson` / 文字列判定の禁止 / clippy による境界検査)
 - [`docs/changelog/2026-09-30-implementation-plan.md`](docs/changelog/2026-09-30-implementation-plan.md):
   フェーズ別の段階的実装プラン・進捗管理
+
+### 3.1 ドキュメントにコードを複製しない
+
+`docs/` は設計意図・責務・不変条件を説明する場所とし、実装のコピーを置かない。
+
+- **正となるソース**:
+  - DDL・カラム: `crates/fxg-db/migrations/`
+  - プロトコル型・enum・REST の型: `crates/fxg-protocol/` と
+    `ui/src/lib/generated/bindings.ts`
+  - CLI のコマンド・引数: `fxg --help` / `fxg <noun> --help` /
+    `__usage_spec__`
+  - 設定スキーマ: `crates/fxg-protocol/src/config.rs` / `settings.rs`
+- **docs に書くこと**:
+  - なぜその構造か、どの責務を持つか、どの不変条件を守るか
+  - 利用者が誤解しやすい境界・制約・トレードオフ
+  - ソースへのリンクと、必要な最小限の要約
+- **docs に書かないこと**:
+  - 全カラムの DDL、全コマンドの引数表、型定義の全文コピー
+  - 実装の抜粋（更新時に古くなるもの）
+- 振る舞いを変えたときは、対応する docs の「責務」「不変条件」だけを更新する。
+  詳細はソースと生成物を正とする。
 
 ## 4. 開発ルール・ワークフロー
 

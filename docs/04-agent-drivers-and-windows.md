@@ -8,48 +8,16 @@
 ## 1. `AgentDriver` トレイトによる抽象化
 
 すべてのアクション・対話は `AgentDriver` 非同期トレイトで統一します。
+型・メソッドの正は `crates/fxg-acp/src/driver.rs` です。
 
-```rust
-#[async_trait::async_trait]
-pub trait AgentDriver: Send + Sync {
-    /// ドライバ識別子 ("acp")
-    fn driver_kind(&self) -> &'static str;
-
-    /// セッションを起動し、イベント送出用のストリーム/ハンドルを返す。
-    /// `req.resume` 指定時はネイティブ復元 (`session/resume` / `session/load`)
-    /// を試み、成否を `StartedSession::context_restored` で返す (§4.1)
-    async fn start_session(
-        &self,
-        req: StartSessionRequest,
-        event_tx: mpsc::Sender<DriverEvent>,
-    ) -> anyhow::Result<StartedSession>;
-}
-
-#[async_trait::async_trait]
-pub trait ActiveSessionHandle: Send + Sync {
-    /// プロンプト（通常メッセージまたはスラッシュコマンド）の送信
-    async fn send_prompt(&self, text: String) -> anyhow::Result<()>;
-
-    /// 権限リクエストへの応答
-    async fn respond_permission(
-        &self,
-        request_id: String,
-        selected_option_id: String,
-    ) -> anyhow::Result<()>;
-
-    /// モード変更 (`plan`, `code` 等)
-    async fn set_mode(&self, mode_id: String) -> anyhow::Result<()>;
-
-    /// 設定変更 (モデル選択等)
-    async fn set_config(&self, key: String, value: serde_json::Value) -> anyhow::Result<()>;
-
-    /// 現在のターンの中断 (Interrupt / Cancel)
-    async fn cancel_turn(&self) -> anyhow::Result<()>;
-
-    /// セッションプロセスの完全終了
-    async fn shutdown(&self) -> anyhow::Result<()>;
-}
-```
+- `AgentDriver::start_session(req, event_tx)` は `StartedSession` を返します。
+  `StartedSession` は操作ハンドル、`context_restored`、`agent_session_id` を持ちます。
+- `ActiveSessionHandle` は `send_prompt(PromptInput)`、`respond_permission`、
+  `respond_elicitation`、`set_mode`、`set_config`、`cancel_turn`、`dispose`、
+  `shutdown` を提供します。
+- `dispose` はプロセスツリーを含めて終了し、`shutdown` はセッションを閉じて
+  プロセスを再利用プールへ返します。
+- `DriverKind` は `Acp` / `AcpExtended` / `Custom` / `Other` です。
 
 ### 1.1 エージェント実装の3層モデル（実装済み）
 
@@ -137,12 +105,13 @@ opencode の Tier 2 移行（Phase 4）まで実装済みである。Tier 3 の�
    - 代表例: `fxg session new opencode` は `opencode acp`、`fxg session new agy`
      は `agy acp` として起動する（opencode は Tier 2 としてモデル名を補う）。
 3. **import 時のコマンド変換**:
-   - `binary`: `PATH` 上の CLI が見つかればそのコマンドを使う。見つからなければ
-     「先にインストールしてください」として import 不可にする。
+   - `binary`: `PATH` 上の CLI が見つかればそのコマンドを使う。`PATH` に無く
+     npx / uvx 配布があれば、その配布形態で起動する。binary のみで `PATH` に
+     無い場合は import 不可にする。
    - `npx`: `command = npx`, `args = ["-y", <package>, ...]`。
    - `uvx`: `command = uvx`, `args = [<package>, ...]`。
-   - Registry の `description` / `icon` / `version` を custom にコピーし、
-     `origin = registry { id, version }` として由来を保存する。
+   - Registry の `description` / `icon` を custom にコピーし、`version` は
+     `origin = registry { id, version }` として保存する。
 4. **インストールは明示操作のみ**:
    - fxg はバイナリ配布のダウンロード・展開を行わない。binary 配布のみの
      エージェントは、各ツールの配布元から導入して `PATH` に置く。
@@ -154,7 +123,7 @@ opencode の Tier 2 移行（Phase 4）まで実装済みである。Tier 3 の�
 ACPでは、エディタやオーケストレータ側が **`acp::Client` トレイト**
 を実装してサブプロセスの `stdin/stdout` に接続します。
 
-`fxg-acp` の `FxgAcpClient` が処理する主要コールバック：
+`fxg-acp` の ACP client handlers が処理する主要コールバック：
 
 - **`session_update(notification)`**:
   - `AgentMessageChunk`, `AgentThoughtChunk` ➔
@@ -320,6 +289,49 @@ fxg 側で履歴を組み立て直す Replay フォールバックは行いま�
 
 ---
 
+### 4.2 承認ポリシー (`PermissionPolicy`)
+
+セッション単位で `ask` / `auto_allow_all` を切り替えられます。
+`auto_allow_all` では、エージェントが `request_permission` で提示した
+`allow_*` オプション (`allow_always` を優先) をノードが自動選択し、
+`PermissionResolved` を `resolved_by = "auto"` として記録します。
+ポリシーは `SessionPermissionPolicyChanged` イベントで
+`sessions.permission_policy` に投影され、Web UI の Composer の
+`Auto` トグルから変更できます。
+
+### 4.3 プロジェクト別の初期設定
+
+Web UI はプロジェクトごとに最後に選択した `configOptions`
+(モデル / thinking level 等) を localStorage に保存し、新規セッション作成時に
+`CreateSessionRequest.initial_config` として送ります。ノードは
+`session/new` 後に `session/set_config_option` を順に送って適用します。
+
+### 4.4 新規セッション前の能力プローブ
+
+ACP は `initialize` ではモデル一覧を返さず、`session/new` のレスポンスに含まれる
+`configOptions` が唯一の情報源です。そこで Web UI は
+`POST /api/v1/nodes/:node_id/agents/:agent_id/probe` を呼び、ノードが
+**一時的な ACP セッション**を1回だけ開始して能力を取得します。
+
+- **DB 非汚染**: プローブは `SessionManager::probe_agent_capabilities` が
+  driver を直接使い、`sessions` 行やイベントを記録しない。
+- **ウォームプール再利用**: 既存の `AcpDriver` / warm pool を使うため、プローブで
+  起動したプロセスを実セッションが再利用でき、初回起動コストを相殺できる。
+- **キャッシュ**: `(agent_id, local_path, initial_config)` 単位で約10分保持する。実セッションの
+  `CapabilitiesUpdated` でもキャッシュを更新する。同時プローブは直列化する。
+  UI の「Refresh」は `force: true` でキャッシュを迂回する。
+- **失敗時**: `AUTH_REQUIRED` は通常のログイン復旧導線へ流す。タイムアウトや
+  起動失敗時も新規セッション自体は開始でき、モデルはエージェント既定値を使う。
+- **制約**: 一時VMはノード起動前なのでプローブできない。また、エージェント側に
+  空のセッションが残る実装がある (ACP にセッションを作らない一覧 API はない)。
+- **新規セッション UI**: モデル pill は常に表示し、取得中は `Default` のまま開始を
+  ブロックしない。初期モードの選択肢はプローブ結果の `available_modes`
+  (ACP `modes` と `category = "mode"` の `configOption` を正規化したもの) から
+  生成する。モード ID はエージェント固有のため、プローブ前は推測の ID を出さず
+  `Default` のみを表示し、エージェントを変更したときは選択を `Default` に戻す。
+  `category = "mode"` の `configOption` はモード専用の pill に投影されるため、
+  モデル pill 列には出さない。
+
 ## 5. Windows サポートと PTY 双方向制御 (`crates/fxg-pty`)
 
 ### 5.1 Windows Job Object によるプロセスツリー完全終了
@@ -331,37 +343,15 @@ Windowsでは `node.exe` や `.cmd` ラッパー経由で起動したプロセ�
 **Windows Job Object** にバインドします。ACP エージェントプロセスは
 `agent-client-protocol` が起動し、Unix ではプロセスグループ、Windows では
 `CREATE_NO_WINDOW` を使用します。Job Object の対象は PTY とプロビジョナーです。
-以下は実装の抜粋です：
-
-```rust
-#[cfg(windows)]
-pub struct WinJobGuard {
-    job: win32job::Job,
-}
-
-#[cfg(windows)]
-impl WinJobGuard {
-    pub fn new_kill_on_close() -> anyhow::Result<Self> {
-        let job = win32job::Job::create()?;
-        let mut info = job.query_extended_limit_info()?;
-        info.limit_kill_on_job_close(); // ノード終了時・Drop時に孫プロセスまで確実にKill
-        job.set_extended_limit_info(&info)?;
-        Ok(Self { job })
-    }
-
-    pub fn assign_process(&self, process_handle: std::os::windows::io::RawHandle) -> anyhow::Result<()> {
-        self.job.assign_process(process_handle as isize)?;
-        Ok(())
-    }
-}
-```
+実装は `crates/fxg-pty/src/proc.rs` の `WinJobGuard` / `ProcessTreeGuard` です。
+Job Object は `kill_on_job_close` を設定し、起動したプロセスを `assign_process` で
+割り当てます。
 
 ### 5.2 コマンド解決 (`which` + `PATHEXT`) とパス正規化 (`dunce`)
 
 - **コマンド解決**: `npx`, `uvx`, `claude` などを起動する際、必ず
-  `which::which_in(cmd, env::var_os("PATH"), &cwd)`
-  を通すことで、`claude.cmd` や `npx.cmd` の拡張子を確実に解決してから
-  `tokio::process::Command` に渡します。
+  `fxg_pty::resolve_command` が `which::which_in(cmd, env::var_os("PATH"), &cwd)`
+  を通すことで、`claude.cmd` や `npx.cmd` の拡張子を確実に解決します。
 - **UNCパス回避**: Windowsで `std::fs::canonicalize` を使うと `\\?\D:\ghq\...`
   というUNCプレフィックスが付き、Node.js製エージェントや外部ツールがパス解釈に失敗することがあります。そのため、パス正規化には必ず
   **`dunce::canonicalize`** を使用し、通常の `D:\ghq\...` 形式を維持します。
@@ -381,7 +371,7 @@ GUI (Web UI / スマホPWA)
   マネージャ (`ConPtyStartupHandshake`) が照会へ応答し、照会シーケンスは
   出力から除去します (アプリ自身が発行する 2 回目以降の照会は、フロントエンド
   が応答できるよう透過させます)。
-- **非同期ストリーミング**: PTY の Master `Read` を非同期ループで読み取り
+- **ストリーミング**: PTY の Master `Read` を専用の読み取りスレッドで読み取り
   WebSocket (`PtyOutput`) へブロードキャストし、クライアントからのキー入力
   (`PtyInput`) を Master `Write` に即時フラッシュ。終了検知は子プロセスの
   `wait()` 専用スレッドが担い、`Exit` は残存出力の配信完了後に配信します
@@ -396,10 +386,11 @@ GUI (Web UI / スマホPWA)
 ### 5.4 バックグラウンド常駐化 (`fxg service`)
 
 `fxg service install [node|hub]` コマンドにより、各OS標準のユーザー権限バックグラウンドサービスとして
-ノードまたはハブを登録します（既定は `node`）。`service` は **OS への登録・解除**を担当し
-（`install` は登録後に起動する）、起動・停止・状態確認は `fxg node start|stop|status` /
-`fxg hub start|stop|status` が行います。unit が登録済みの場合、これらのコマンドは
-systemd / launchd / Task Scheduler に委譲します。
+ノードまたはハブを登録します（既定は `node`）。`service` は **OS への登録・解除**を担当します。
+Linux / macOS は登録時に起動し、Windows は次回ログオン時に起動します。
+起動・停止・再起動は `fxg node start|stop|restart` / `fxg hub start|stop|restart`
+が行い、unit が登録済みの場合は systemd / launchd / Task Scheduler に委譲します。
+`fxg node status` / `fxg hub status` は service 登録と HTTP の状態を表示します。
 
 - **Windows**: タスクスケジューラ（ログオン時実行・コンソールウィンドウ非表示
   `CREATE_NO_WINDOW`）またはスタートアップ登録。
@@ -455,46 +446,3 @@ systemd / launchd / Task Scheduler に委譲します。
   すべてトレイを作成したスレッド上で行う（ノードとはチャネルで連携）。
 - **フェイルセーフ**: トレイを作成できない環境では警告のみでノードは稼働を
   継続する（起動の成否はノード本体と独立）。
-
-### 4.4 承認ポリシー (`PermissionPolicy`)
-
-セッション単位で `ask` / `auto_allow_all` を切り替えられます。
-`auto_allow_all` では、エージェントが `request_permission` で提示した
-`allow_*` オプション (`allow_always` を優先) をノードが自動選択し、
-`PermissionResolved` を `resolved_by = "auto"` として記録します。
-ポリシーは `SessionPermissionPolicyChanged` イベントで
-`sessions.permission_policy` に投影され、Web UI の Composer の
-`Auto` トグルから変更できます。
-
-### 4.5 プロジェクト別の初期設定
-
-Web UI はプロジェクトごとに最後に選択した `configOptions`
-(モデル / thinking level 等) を localStorage に保存し、新規セッション作成時に
-`CreateSessionRequest.initial_config` として送ります。ノードは
-`session/new` 後に `session/set_config_option` を順に送って適用します。
-
-### 4.6 新規セッション前の能力プローブ
-
-ACP は `initialize` ではモデル一覧を返さず、`session/new` のレスポンスに含まれる
-`configOptions` が唯一の情報源です。そこで Web UI は
-`POST /api/v1/nodes/:node_id/agents/:agent_id/probe` を呼び、ノードが
-**一時的な ACP セッション**を1回だけ開始して能力を取得します。
-
-- **DB 非汚染**: プローブは `SessionManager::probe_agent_capabilities` が
-  driver を直接使い、`sessions` 行やイベントを記録しない。
-- **ウォームプール再利用**: 既存の `AcpDriver` / warm pool を使うため、プローブで
-  起動したプロセスを実セッションが再利用でき、初回起動コストを相殺できる。
-- **キャッシュ**: `(agent_id, local_path)` 単位で約10分保持する。実セッションの
-  `CapabilitiesUpdated` でもキャッシュを更新する。同時プローブは直列化する。
-  UI の「Refresh」は `force: true` でキャッシュを迂回する。
-- **失敗時**: `AUTH_REQUIRED` は通常のログイン復旧導線へ流す。タイムアウトや
-  起動失敗時も新規セッション自体は開始でき、モデルはエージェント既定値を使う。
-- **制約**: 一時VMはノード起動前なのでプローブできない。また、エージェント側に
-  空のセッションが残る実装がある (ACP にセッションを作らない一覧 API はない)。
-- **新規セッション UI**: モデル pill は常に表示し、取得中は `Default` のまま開始を
-  ブロックしない。初期モードの選択肢はプローブ結果の `available_modes`
-  (ACP `modes` と `category = "mode"` の `configOption` を正規化したもの) から
-  生成する。モード ID はエージェント固有のため、プローブ前は推測の ID を出さず
-  `Default` のみを表示し、エージェントを変更したときは選択を `Default` に戻す。
-  `category = "mode"` の `configOption` はモード専用の pill に投影されるため、
-  モデル pill 列には出さない。

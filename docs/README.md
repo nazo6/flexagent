@@ -43,15 +43,23 @@ Protocol）対応コーディングエージェントを「好きな場所から
 
 ---
 
+## ドキュメントの役割
+
+`docs/` は設計意図・責務・不変条件を説明します。DDL は
+`crates/fxg-db/migrations/`、CLI は `fxg --help` / `__usage_spec__`、
+プロトコル型は `crates/fxg-protocol/` と `ui/src/lib/generated/bindings.ts` を
+正とし、ここには詳細を複製しません。振る舞いを変えたときは、対応する
+「責務」「不変条件」だけを更新してください。
+
 ## ドキュメント構成
 
 | ドキュメント                                                             | 内容                                                                                                                                     |
 | :----------------------------------------------------------------------- | :--------------------------------------------------------------------------------------------------------------------------------------- |
 | **[01-architecture-and-sync.md](./01-architecture-and-sync.md)**         | 全体トポロジー、ローカルファースト同期、一時VMノード (`fxg internal stdio` & 外部環境でのツール構築)、論理プロジェクト解決、セキュリティ |
-| **[02-database-schema.md](./02-database-schema.md)**                     | `node.db` / `hub.db` 共通の単一SQLiteスキーマ（ロール差分・イベント投影）・FTS5検索・監査ログ                                            |
-| **[03-protocol-and-api.md](./03-protocol-and-api.md)**                   | 共通型 (`fxg-protocol`)、Node⇔Hub間通信 (WS & Stdio)、Client API、ローカル HTTP/WS                                                       |
+| **[02-database-schema.md](./02-database-schema.md)**                     | `node.db` / `hub.db` のスキーマ原則・ロール差分・イベント投影・FTS5検索（DDL の正は `crates/fxg-db/migrations/`）                        |
+| **[03-protocol-and-api.md](./03-protocol-and-api.md)**                   | プロトコルの境界・不変条件、Node⇔Hub間通信 (WS & Stdio)、Client API（型の正は `crates/fxg-protocol/`）                                   |
 | **[04-agent-drivers-and-windows.md](./04-agent-drivers-and-windows.md)** | `AgentDriver` トレイト、エージェント実装の3層モデル、ACP Registry・PATH探索、ACPネイティブFork/Resume、Windows固有実装                   |
-| **[05-cli-and-pwa-ui.md](./05-cli-and-pwa-ui.md)**                       | `fxg` CLIコマンド完全リファレンス、設定ファイルスキーマ (`config.toml`)、PWA + Web Push 設計                                             |
+| **[05-cli-and-pwa-ui.md](./05-cli-and-pwa-ui.md)**                       | `fxg` CLI の設計原則（コマンドの正は `fxg --help`）、設定ファイルスキーマ (`config.toml`)、PWA + Web Push 設計                           |
 | **[06-type-safety.md](./06-type-safety.md)**                             | 型安全性ガイド (open enum / `RawJson` / 文字列判定の禁止 / `lint:typed` / 移行状況)                                                      |
 
 ---
@@ -72,6 +80,7 @@ flexagent/
 │   ├── fxg-acp/                # ACP Registry管理・AcpDriver / ExtendedAcpDriver・AgentCatalog・ローカル PATH コマンド解決
 │   ├── fxg-node/               # ノード実装 (ローカルWeb/WS配信・Outbox同期・Project解決)
 │   ├── fxg-hub/                # ハブ実装 (Axum・ノード管理・イベント集約・Web Push・PWA配信)
+│   ├── fxg-ui-assets/          # `ui/build` を rust-embed でバイナリに同梱
 │   └── fxg-cli/                # `fxg` バイナリエントリポイント (CLI / node / hub サブコマンド・Web UI自動オープン)
 └── ui/                         # 共通フロントエンド (SvelteKit / Svelte 5 SPA + TypeScript + Tailwind v4 + shadcn-svelte)
     ├── package.json            # パッケージ管理: pnpm / 品質管理: oxlint, oxfmt, svelte-check, Vitest
@@ -79,7 +88,8 @@ flexagent/
     ├── static/
     │   └── manifest.webmanifest
     └── src/
-        ├── service-worker.ts   # Web Push & オフラインApp Shellキャッシュ ($service-worker)
+        ├── service-worker/
+        │   └── index.ts        # Web Push & オフラインApp Shellキャッシュ ($app/manifest)
         ├── lib/
         └── routes/
 ```
