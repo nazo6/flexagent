@@ -72,6 +72,14 @@ opencode の Tier 2 移行（Phase 4）まで実装済みである。Tier 3 の�
 - builtin にないエージェントは、Web UI の「Import from registry」で
   ACP Registry の配布レシピを custom 定義として保存する。import した
   custom は通常の custom として編集・削除できる。
+- ACP 接続の縁に必要な差分（`initialize` の
+  `clientCapabilities._meta`、受信する独自通知の method、有効にする ACP
+  capability の集合）は、`AgentExtension` が純データ
+  (`AcpExtensionOptions`) として返す。`AcpDriver` は通知の受信・順序・
+  子セッションのコンテキスト管理・正規化だけを行い、opencode 固有の
+  解釈は `OpenCodeExtension` に閉じる。D4 の「`AcpDriver` を変更しない」
+  は「エージェント別の分岐を入れない」の意味であり、汎用の ACP seam は
+  コアに置く。
 
 型設計・実装フェーズ・変更対象の詳細は
 [`docs/changelog/2026-11-11-agent-extension-architecture.md`](./changelog/2026-11-11-agent-extension-architecture.md)
@@ -179,6 +187,38 @@ ACPでは、エディタやオーケストレータ側が **`acp::Client` トレ
   `terminal_kill`**:
   - `fxg-pty` クレートを呼び出し、ConPTY (Windows) または Unix PTY
     でコマンドを実行し、出力をリアルタイムにストリーム配信。
+
+### 2.3 サブエージェントのルーティング
+
+ACP のセッション更新は `sessionId` を持つが、`agent-client-protocol` の
+セッションルーターは **root セッション宛の通知だけ** を `serve_session` に
+流す。子セッション宛の通知は通常の経路では捨てられるため、fxg は次のように
+扱う。
+
+- root 宛の `session/update` は従来どおり `ActiveSession` が受ける。
+- 子セッション宛の `session/update` は、`subagent_update` で子を知った時点で
+  子ごとの dynamic handler を登録して受ける。ハンドラは子の ID 以外を
+  `Handled::No` にして root の経路を壊さない。
+- opencode の `opencode/session/child_update` のような独自通知は、extension が
+  宣言した method だけを method handler で受ける。builder の catch-all は
+  root の `session/update` を奪うため使わない。
+- 受けた子イベントは親と同じ accumulation（ストリーミング結合）に合流させ、
+  `subagent_id` を付けて正規化する。子の状態は `SubagentUpdated` で表し、
+  親の `StatusChanged` や `sessions` 投影を書き換えない。
+- `SessionContexts` には子の `cwd` を登録し、子からの fs / terminal /
+  permission 要求を子のコンテキストで解決する。子を告知しないエージェントの
+  ために「登録済みコンテキストが 1 つだけなら親へフォールバック」も残す。
+
+`initialize` で広告する client capability は `AcpCapabilitySet` として設定から
+受け取り、未知の名前を捨てずに保持する。ACP 標準の `subagents` は unstable
+RFD のため、`agent-client-protocol` の Cargo feature と実行時設定の両方で
+gate し、既定 ON / kill switch を持つ。opencode は `_meta` の vendor
+capability を使う。どちらも有効化すると、子は独立セッションにはならず、
+親タイムラインのサブエージェントブロック / 詳細ビューとして表示される。
+
+将来 ACP の unstable feature を増やすときは、`fxg-acp` の Cargo feature
+（`acp-all` に追加）と `AcpCapability` の variant・mapping を追加する。
+エージェントごとの分岐は extension にのみ置く。
 
 ---
 
