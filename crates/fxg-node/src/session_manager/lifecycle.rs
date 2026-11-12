@@ -315,6 +315,17 @@ impl SessionManager {
 
         let context_restored = started.context_restored;
         let handle: Arc<dyn ActiveSessionHandle> = Arc::from(started.handle);
+        // Restore the persisted approval policy so a resumed session keeps the
+        // setting the clients already show (and auto-approved turns stay consistent).
+        let permission_policy = self
+            .inner
+            .bus
+            .db()
+            .get_session(params.session_id)
+            .await?
+            .map_or_else(PermissionPolicy::default, |session| {
+                session.permission_policy
+            });
         {
             let mut sessions = self.inner.sessions.lock().expect("sessions poisoned");
             sessions.active.insert(
@@ -329,7 +340,7 @@ impl SessionManager {
                     pending_permissions: HashMap::new(),
                     pending_elicitations: HashMap::new(),
                     has_custom_title: params.has_custom_title,
-                    permission_policy: PermissionPolicy::Ask,
+                    permission_policy,
                 },
             );
         }

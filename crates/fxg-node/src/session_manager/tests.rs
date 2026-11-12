@@ -673,6 +673,91 @@ async fn auto_approve_policy_responds_to_permission_requests() {
 }
 
 #[tokio::test]
+async fn permission_policy_can_be_set_while_stopped() {
+    let (manager, mock, dir) = setup().await;
+    let (_repo, session_id) = setup_stopped_session(&manager, &mock, &dir, "stopped policy").await;
+
+    manager
+        .control(
+            &CommandId::from("c-policy-stopped"),
+            &session_id,
+            &SessionControlAction::SetPermissionPolicy {
+                policy: PermissionPolicy::AutoAllowAll,
+            },
+        )
+        .await
+        .expect("set policy while stopped");
+
+    let row = manager
+        .bus()
+        .db()
+        .get_session(&session_id)
+        .await
+        .expect("query")
+        .expect("session row");
+    assert_eq!(row.permission_policy, PermissionPolicy::AutoAllowAll);
+}
+
+#[tokio::test]
+async fn resume_restores_permission_policy() {
+    let (manager, mock, dir) = setup().await;
+    let (_repo, session_id) = setup_stopped_session(&manager, &mock, &dir, "policy resume").await;
+
+    manager
+        .control(
+            &CommandId::from("c-policy-stopped"),
+            &session_id,
+            &SessionControlAction::SetPermissionPolicy {
+                policy: PermissionPolicy::AutoAllowAll,
+            },
+        )
+        .await
+        .expect("set policy while stopped");
+
+    mock.set_resume_supported(true);
+    manager
+        .resume(ResumeParams {
+            command_id: &CommandId::from("c-resume-policy"),
+            session_id: &session_id,
+            force_replay: false,
+        })
+        .await
+        .expect("resume");
+    wait_idle(&manager, &session_id).await;
+
+    // The restored policy auto-approves the next permission request.
+    mock.emit(DriverEvent::Event(UnifiedEventPayload::PermissionRequest {
+        request_id: "req-restored".to_owned(),
+        tool_name: "terminal".to_owned(),
+        summary: "Run tests".to_owned(),
+        options: vec![
+            PermissionOption {
+                option_id: "allow_once".to_owned(),
+                name: "Allow once".to_owned(),
+                kind: fxg_protocol::common::PermissionOptionKind::AllowOnce,
+            },
+            PermissionOption {
+                option_id: "reject".to_owned(),
+                name: "Reject".to_owned(),
+                kind: fxg_protocol::common::PermissionOptionKind::RejectOnce,
+            },
+        ],
+        details: serde_json::json!({}).into(),
+        subagent_id: None,
+    }));
+    for _ in 0..100 {
+        if !mock.permissions().is_empty() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    assert_eq!(
+        mock.permissions(),
+        vec![("req-restored".to_owned(), "allow_once".to_owned())]
+    );
+}
+
+#[tokio::test]
 async fn permission_resolution_is_idempotent() {
     let (manager, mock, dir) = setup().await;
     let outcome = manager

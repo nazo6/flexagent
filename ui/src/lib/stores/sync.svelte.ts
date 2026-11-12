@@ -586,6 +586,7 @@ export class SyncStore {
         case "status_changed":
         case "capabilities_updated":
         case "session_archived":
+        case "session_permission_policy_changed":
           sessionsDirty = true;
           break;
         case "session_deleted":

@@ -165,7 +165,30 @@ impl SessionManager {
             return Err(NodeError::CommandDuplicate(command_id.to_string()));
         }
 
-        // Do not hold the lock across await (clone the handle, then operate)
+        // The approval policy is session metadata owned by the node rather than a
+        // driver operation, so it can be changed while the session is stopped
+        // (e.g. before resuming) and applies from the next turn onward.
+        if let SessionControlAction::SetPermissionPolicy { policy } = action {
+            {
+                let mut sessions = self.inner.sessions.lock().expect("sessions poisoned");
+                if let Some(session) = sessions.active.get_mut(session_id) {
+                    session.permission_policy = policy.clone();
+                }
+            }
+            self.inner
+                .bus
+                .record(
+                    session_id,
+                    UnifiedEventPayload::SessionPermissionPolicyChanged {
+                        policy: policy.clone(),
+                    },
+                )
+                .await?;
+            return Ok(());
+        }
+
+        // The remaining actions operate on the running agent, so the session must
+        // be active. Do not hold the lock across await (clone the handle, then operate)
         let (handle, is_busy) = {
             let sessions = self.inner.sessions.lock().expect("sessions poisoned");
             let session = sessions.active.get(session_id).ok_or_else(|| {
@@ -182,23 +205,8 @@ impl SessionManager {
                 .set_config(key.clone(), value.clone())
                 .await
                 .map_err(|err| NodeError::Hub(format!("failed to set config: {err:#}"))),
-            SessionControlAction::SetPermissionPolicy { policy } => {
-                {
-                    let mut sessions = self.inner.sessions.lock().expect("sessions poisoned");
-                    if let Some(session) = sessions.active.get_mut(session_id) {
-                        session.permission_policy = policy.clone();
-                    }
-                }
-                self.inner
-                    .bus
-                    .record(
-                        session_id,
-                        UnifiedEventPayload::SessionPermissionPolicyChanged {
-                            policy: policy.clone(),
-                        },
-                    )
-                    .await?;
-                Ok(())
+            SessionControlAction::SetPermissionPolicy { .. } => {
+                unreachable!("the approval policy is handled before the active-session lookup")
             }
             // Compaction runs as a single turn, so allow it while busy
             SessionControlAction::Cancel => {
