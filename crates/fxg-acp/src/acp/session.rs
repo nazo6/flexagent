@@ -238,6 +238,74 @@ pub(super) async fn build_session(
     ))
 }
 
+/// Quiet period after the last background update before its stream is finalized.
+///
+/// ACP agents may send `session/update` notifications after the prompt response
+/// (a background task, or a subagent that reports back to the root session).
+/// Those streams have no `PromptResponse` to finalize them, so the idle loop
+/// closes them once the agent has been quiet for this long. Too short a delay
+/// splits a slow stream into several messages; too long delays the display.
+const IDLE_FLUSH_DELAY: Duration = Duration::from_millis(500);
+
+/// Reads the root-session notification from a dispatch, ignoring requests.
+async fn take_session_notification(
+    dispatch: agent_client_protocol::v1::Dispatch,
+) -> Result<Option<SessionNotification>, agent_client_protocol::Error> {
+    let mut notification = None;
+    MatchDispatch::new(dispatch.into_raw())
+        .if_notification(async |notification_in: SessionNotification| {
+            notification = Some(notification_in);
+            Ok(())
+        })
+        .await
+        .otherwise_ignore()?;
+    Ok(notification)
+}
+
+/// Handles one root-session message received while no turn is active.
+///
+/// Returns `true` when a notification was mapped (the idle flush deadline should
+/// then be refreshed).
+async fn handle_idle_message(
+    runtime: &mut SessionRuntime<'_>,
+    session: &ActiveSession<'static, Agent>,
+    message: SessionMessage,
+) -> Result<bool, agent_client_protocol::Error> {
+    match message {
+        SessionMessage::Message(dispatch) => {
+            let Some(notification) = take_session_notification(dispatch).await? else {
+                return Ok(false);
+            };
+            runtime.handle_update(notification.update, None, session);
+            Ok(true)
+        }
+        SessionMessage::PromptResponse(_) => {
+            // Responses are consumed by the turn loop; a stray one carries no
+            // state for the idle loop.
+            tracing::debug!("ignoring a prompt response outside a turn");
+            Ok(false)
+        }
+        // `SessionMessage` is #[non_exhaustive]
+        _ => Ok(false),
+    }
+}
+
+/// Consumes updates that were already delivered while idle.
+///
+/// `select!` may pick the next prompt even when a notification is queued; draining
+/// first keeps those updates in the previous context instead of the new turn.
+async fn drain_idle_updates(
+    runtime: &mut SessionRuntime<'_>,
+    session: &mut ActiveSession<'static, Agent>,
+) -> Result<(), agent_client_protocol::Error> {
+    use futures_util::FutureExt;
+
+    while let Some(result) = session.read_update().now_or_never() {
+        handle_idle_message(runtime, session, result?).await?;
+    }
+    Ok(())
+}
+
 /// Turn loop for one session (serializes prompt sends with update reads).
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn serve_session(
@@ -263,18 +331,37 @@ pub(super) async fn serve_session(
         guards,
     );
 
+    // Finalization deadline for background updates received while idle.
+    let mut idle_flush_at: Option<tokio::time::Instant> = None;
+
     loop {
         #[allow(clippy::large_enum_variant, reason = "short-lived select result")]
         enum Selected {
             Command(Option<AcpCommand>),
             Ingress(Option<SessionIngress>),
+            Read(Result<SessionMessage, agent_client_protocol::Error>),
+            FlushIdle,
         }
+        // Set while idle: the deadline to finalize streams accumulated from
+        // background updates. `None` disables the branch.
+        let flush_at = idle_flush_at.unwrap_or_else(tokio::time::Instant::now);
         let selected = tokio::select! {
             command = cmd_rx.recv() => Selected::Command(command),
             ingress = ingress_rx.recv() => Selected::Ingress(ingress),
+            result = session.read_update() => Selected::Read(result),
+            () = tokio::time::sleep_until(flush_at), if idle_flush_at.is_some() => Selected::FlushIdle,
         };
         match selected {
             Selected::Command(Some(AcpCommand::Prompt(input))) => {
+                idle_flush_at = None;
+                // Consume updates delivered while idle, then persist them as the
+                // previous context before this turn starts.
+                if let Err(err) = drain_idle_updates(&mut runtime, &mut session).await {
+                    return ServeOutcome::Fatal(err.into());
+                }
+                for payload in runtime.accumulator.finish_all() {
+                    runtime.send_payload(payload);
+                }
                 runtime.accumulator.reset();
                 runtime.send_payload(UnifiedEventPayload::StatusChanged {
                     status: fxg_protocol::common::SessionStatus::Running,
@@ -343,19 +430,12 @@ pub(super) async fn serve_session(
                             break;
                         }
                         TurnSelected::Read(Ok(SessionMessage::Message(dispatch))) => {
-                            let mut notification = None;
-                            let result = MatchDispatch::new(dispatch.into_raw())
-                                .if_notification(async |notification_in: SessionNotification| {
-                                    notification = Some(notification_in);
-                                    Ok(())
-                                })
-                                .await
-                                .otherwise_ignore();
-                            if let Err(err) = result {
-                                return ServeOutcome::Fatal(err.into());
-                            }
-                            if let Some(notification) = notification {
-                                runtime.handle_update(notification.update, None, &session);
+                            match take_session_notification(dispatch).await {
+                                Ok(Some(notification)) => {
+                                    runtime.handle_update(notification.update, None, &session);
+                                }
+                                Ok(None) => {}
+                                Err(err) => return ServeOutcome::Fatal(err.into()),
                             }
                         }
                         // `SessionMessage` is #[non_exhaustive]
@@ -370,6 +450,25 @@ pub(super) async fn serve_session(
             Selected::Ingress(ingress) => {
                 if let Some(ingress) = ingress {
                     runtime.handle_ingress(ingress, &session);
+                    // A child / vendor update arrived while idle: postpone the
+                    // finalization until the stream goes quiet.
+                    idle_flush_at = Some(tokio::time::Instant::now() + IDLE_FLUSH_DELAY);
+                }
+            }
+            Selected::Read(Ok(message)) => {
+                match handle_idle_message(&mut runtime, &session, message).await {
+                    Ok(true) => {
+                        idle_flush_at = Some(tokio::time::Instant::now() + IDLE_FLUSH_DELAY);
+                    }
+                    Ok(false) => {}
+                    Err(err) => return ServeOutcome::Fatal(err.into()),
+                }
+            }
+            Selected::Read(Err(err)) => return ServeOutcome::Fatal(err.into()),
+            Selected::FlushIdle => {
+                idle_flush_at = None;
+                for payload in runtime.accumulator.finish_all() {
+                    runtime.send_payload(payload);
                 }
             }
         }

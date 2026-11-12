@@ -463,7 +463,21 @@ pub(super) fn map_session_update(
     let mut events = Vec::new();
     match update {
         SessionUpdate::UserMessageChunk(_) => {
-            // User messages are already recorded by the manager as `UserMessage`
+            // User messages are already recorded by the manager as `UserMessage`.
+            // The echo marks the start of a turn: a background report that arrived
+            // before it (agy's teamwork only flushes its follow-up when the next
+            // prompt starts) belongs to the previous context, so finalize it as its
+            // own message instead of merging it into this turn's answer.
+            let mut finished = Vec::new();
+            if let Some(payload) = accumulator.finish_thought(&scope) {
+                finished.push(payload);
+            }
+            if let Some(payload) = accumulator.finish_message(&scope) {
+                finished.push(payload);
+            }
+            for payload in finished {
+                events.push(DriverEvent::Event(payload));
+            }
         }
         SessionUpdate::AgentMessageChunk(ContentChunk {
             content,

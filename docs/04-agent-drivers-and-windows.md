@@ -208,6 +208,16 @@ ACP のセッション更新は `sessionId` を持つが、`agent-client-protoco
 扱う。
 
 - root 宛の `session/update` は従来どおり `ActiveSession` が受ける。
+- root 宛の更新はターン終了後も読み続ける。エージェントによってはプロンプト
+  応答の後にバックグラウンドの報告を送る（agy の teamwork など）ため、
+  アイドル中も `read_update` を select に含める。`PromptResponse` が無いので、
+  最後の更新から一定時間（`IDLE_FLUSH_DELAY`）静かになった時点で結合中の
+  ストリームを完了イベントとして確定する。次のプロンプト開始時にも保留分を
+  確定してから送る。
+- `user_message_chunk`（ターン先頭のユーザーメッセージ echo）を境界として、
+  それ以前に蓄積した root のストリームを確定する。agy のように「次の
+  プロンプトが来るまでバックグラウンドの報告を送らない」エージェントでは、
+  報告が新ターンの回答と連結されるのを防ぐ。
 - 子セッション宛の `session/update` は、`subagent_update` で子を知った時点で
   子ごとの dynamic handler を登録して受ける。ハンドラは子の ID 以外を
   `Handled::No` にして root の経路を壊さない。

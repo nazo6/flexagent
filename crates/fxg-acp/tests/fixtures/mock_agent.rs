@@ -6,6 +6,8 @@
 //! - `--mode no-fork`: returns no `fork` capability in initialize, handles `session/new`
 //! - `--mode modes-as-config`: exposes build/plan as `configOptions[category = mode]`
 //!   (like OpenCode) and rejects `session/set_mode`
+//! - `--mode late-updates`: emits a background report after the prompt response,
+//!   and flushes a queued report before the next turn's user-message echo
 
 #![allow(
     clippy::disallowed_types,
@@ -20,6 +22,7 @@ fn main() {
     let mode = parse_mode();
     let stdin = io::stdin();
     let mut stdout = io::stdout();
+    let mut prompt_count = 0usize;
 
     for line in stdin.lock().lines() {
         let Ok(line) = line else { break };
@@ -38,6 +41,12 @@ fn main() {
             .and_then(Value::as_str)
             .unwrap_or_default();
         let params = request.get("params").cloned().unwrap_or(Value::Null);
+
+        if method == "session/prompt" && mode == "late-updates" {
+            prompt_count += 1;
+            send_late_updates(&mut stdout, id, prompt_count);
+            continue;
+        }
 
         if method == "session/prompt" && matches!(mode.as_str(), "subagents" | "opencode-subagents")
         {
@@ -171,11 +180,20 @@ fn main() {
                     "authMethods": []
                 }
             }),
-            ("subagents" | "opencode-subagents", "session/new") => json!({
+            ("subagents" | "opencode-subagents" | "late-updates", "session/new") => json!({
                 "jsonrpc": "2.0",
                 "id": id,
                 "result": {
                     "sessionId": "root-session"
+                }
+            }),
+            ("late-updates", "initialize") => json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "result": {
+                    "protocolVersion": 1,
+                    "agentCapabilities": {},
+                    "authMethods": []
                 }
             }),
             // OpenCode rejects `session/set_mode` for mode IDs from config options
@@ -310,6 +328,95 @@ fn send_child_updates(stdout: &mut io::Stdout, mode: &str) {
         }
         _ => {}
     }
+}
+
+/// Sends background updates for the idle-update integration tests.
+///
+/// The first prompt answers normally and then emits a report after the prompt
+/// response (like agy's teamwork follow-up). Later prompts replay a queued
+/// report before the user-message echo, mimicking an agent that only forwards
+/// idle output once the next prompt starts.
+fn send_late_updates(stdout: &mut io::Stdout, id: &Value, prompt_count: usize) {
+    if prompt_count == 1 {
+        write_line(
+            stdout,
+            &json!({
+                "jsonrpc": "2.0",
+                "method": "session/update",
+                "params": {
+                    "sessionId": "root-session",
+                    "update": {
+                        "sessionUpdate": "agent_message_chunk",
+                        "content": { "type": "text", "text": "first answer" }
+                    }
+                }
+            }),
+        );
+        write_line(
+            stdout,
+            &json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "result": { "stopReason": "end_turn" }
+            }),
+        );
+        // A background task reports back after the turn has ended.
+        std::thread::spawn(|| {
+            std::thread::sleep(std::time::Duration::from_millis(250));
+            let mut out = io::stdout();
+            for text in ["late result", " done"] {
+                write_line(
+                    &mut out,
+                    &json!({
+                        "jsonrpc": "2.0",
+                        "method": "session/update",
+                        "params": {
+                            "sessionId": "root-session",
+                            "update": {
+                                "sessionUpdate": "agent_message_chunk",
+                                "content": { "type": "text", "text": text }
+                            }
+                        }
+                    }),
+                );
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+        });
+        return;
+    }
+
+    // A queued report flushed only now, before the new turn's echo.
+    for update in [
+        json!({
+            "sessionUpdate": "agent_message_chunk",
+            "content": { "type": "text", "text": "queued prelude" }
+        }),
+        json!({
+            "sessionUpdate": "user_message_chunk",
+            "content": { "type": "text", "text": "second" }
+        }),
+        json!({
+            "sessionUpdate": "agent_message_chunk",
+            "content": { "type": "text", "text": "next answer" }
+        }),
+    ] {
+        write_line(
+            stdout,
+            &json!({
+                "jsonrpc": "2.0",
+                "method": "session/update",
+                "params": { "sessionId": "root-session", "update": update }
+            }),
+        );
+    }
+    write_line(
+        stdout,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "result": { "stopReason": "end_turn" }
+        }),
+    );
 }
 
 /// Config options for `--mode modes-as-config` (model + selectable mode).
