@@ -209,7 +209,7 @@
         {/if}
         <button
           type="button"
-          class="text-muted-foreground hover:text-foreground max-w-40 truncate rounded px-1 py-0.5 hover:bg-muted"
+          class="text-muted-foreground hover:text-foreground hover:bg-accent max-w-40 truncate rounded px-1 py-0.5"
           onclick={() => void loadDirectory(crumb.path)}
           title={crumb.path}
         >
@@ -225,7 +225,7 @@
       {#each quickPaths as quick (quick.path)}
         <button
           type="button"
-          class="bg-muted/50 hover:bg-muted text-muted-foreground hover:text-foreground max-w-56 truncate rounded-full border px-2 py-0.5 text-[11px]"
+          class="bg-muted/50 hover:bg-accent text-muted-foreground hover:text-foreground max-w-56 truncate rounded-full border px-2 py-0.5 text-[11px]"
           onclick={() => void loadDirectory(quick.path)}
           title={quick.description ?? quick.path}
         >
@@ -296,7 +296,7 @@
               tabindex="0"
               class="group flex cursor-pointer items-center justify-between rounded px-2 py-1.5 text-[13px] transition-colors select-none {isSelected
                 ? 'bg-primary/15 text-primary font-medium'
-                : 'hover:bg-muted text-foreground/90'}"
+                : 'hover:bg-accent text-foreground/90'}"
               onclick={() => handleSelectEntry(entry)}
               ondblclick={() => handleOpenEntry(entry)}
               onkeydown={(event) => {
@@ -319,7 +319,7 @@
               {#if entry.is_dir}
                 <button
                   type="button"
-                  class="hover:bg-background/80 text-muted-foreground hover:text-foreground rounded p-1 opacity-0 transition-opacity group-hover:opacity-100"
+                  class="hover:bg-foreground/10 text-muted-foreground hover:text-foreground rounded p-1 opacity-0 transition-opacity group-hover:opacity-100"
                   title={m.fs_open_folder()}
                   onclick={(event) => {
                     event.stopPropagation();
