@@ -494,7 +494,7 @@ fn capabilities_partial_updates_preserve_existing_state() {
         }],
         available_commands: Vec::new(),
         config_options: Vec::new(),
-        fork_supported: None,
+        fork_scope: None,
     };
 
     // Existing current_mode / available_modes are preserved when a command list update arrives

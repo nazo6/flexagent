@@ -56,7 +56,7 @@ use async_trait::async_trait;
 use fxg_protocol::common::{
     AgentAuthMethodInfo, AgentAuthMethodKind, CommandInfo, ConfigOptionCategory, ConfigOptionInfo,
     ConfigOptionValue, ElicitationContent, ElicitationMode as FxgElicitationMode,
-    ElicitationPropertyKind, ElicitationSchema, ElicitationValue, FileDiff, ModeInfo,
+    ElicitationPropertyKind, ElicitationSchema, ElicitationValue, FileDiff, ForkScope, ModeInfo,
     PermissionOption, PermissionOptionKind as FxgPermissionOptionKind, PlanEntry,
     PlanEntryStatus as FxgPlanEntryStatus, PromptInput, StreamDeltaPayload,
     ToolCallKind as FxgToolCallKind, ToolCallStatus as FxgToolCallStatus, TurnStopReason,

@@ -848,6 +848,7 @@ async fn await_handshake_and_start(
         mode: pending.mode.clone(),
         extra_args: pending.extra_args.clone(),
         fork_from_session_id: None,
+        fork_up_to_node_seq: None,
     };
     match state
         .hub()

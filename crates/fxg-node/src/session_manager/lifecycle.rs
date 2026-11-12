@@ -108,6 +108,34 @@ impl SessionManager {
             })?),
             None => None,
         };
+        // The ACP-native fork path can only fork the agent's current state. A
+        // boundary earlier than the latest event is therefore not supported yet;
+        // reject it explicitly so clients can disable that Fork action instead of
+        // silently producing a fork that contains later history.
+        let fork_up_to_node_seq = match (fork_source.as_ref(), params.fork_up_to_node_seq) {
+            (Some(source), Some(up_to)) => {
+                if up_to > source.last_node_seq {
+                    return Err(NodeError::InvalidSession(format!(
+                        "fork boundary {up_to} is beyond the source's latest event {}",
+                        source.last_node_seq
+                    )));
+                }
+                if up_to != source.last_node_seq {
+                    return Err(NodeError::ForkScopeUnsupported(format!(
+                        "the agent can only fork at the current end of the source session ({}), not at {up_to}",
+                        source.last_node_seq
+                    )));
+                }
+                up_to
+            }
+            (Some(source), None) => source.last_node_seq,
+            (None, Some(_)) => {
+                return Err(NodeError::InvalidState(
+                    "a fork boundary was provided without a source session".to_owned(),
+                ));
+            }
+            (None, None) => 0,
+        };
         let effective_agent_id = fork_source
             .as_ref()
             .map_or(params.agent_id, |source| source.agent_id.as_str());
@@ -178,7 +206,7 @@ impl SessionManager {
                 .copy_conversation_events(
                     source.session_id.as_str(),
                     params.session_id,
-                    source.last_node_seq,
+                    fork_up_to_node_seq,
                 )
                 .await?;
             tracing::debug!(
@@ -453,6 +481,7 @@ impl SessionManager {
             mode: None,
             extra_args: None,
             fork_from_session_id: Some(source.session_id.as_str()),
+            fork_up_to_node_seq: None,
         })
         .await
     }

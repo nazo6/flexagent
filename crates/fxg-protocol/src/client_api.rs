@@ -667,6 +667,9 @@ pub struct WorktreeSpec {
 pub struct SessionForkSpec {
     /// Source session ID
     pub from_session_id: SessionId,
+    /// Source `node_seq` to fork at. `None` means the current end of the source
+    /// session (the only boundary supported by ACP-native forks today).
+    pub up_to_node_seq: Option<u64>,
 }
 
 /// `POST /api/v1/sessions` request (start a new session).

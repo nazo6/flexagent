@@ -96,6 +96,7 @@ impl EnumParseError {
 #[cfg(feature = "sqlx")]
 crate::impl_sqlx_text!(
     SessionStatus,
+    ForkScope,
     NodeLifecycleStatus,
     PermissionRequestStatus,
     ElicitationRequestStatus,

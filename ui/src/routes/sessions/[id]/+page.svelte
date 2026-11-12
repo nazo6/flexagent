@@ -18,6 +18,7 @@
   import { commandErrorMessage } from "#lib/api/client.ts";
   import { m } from "#lib/paraglide/messages.js";
   import { formatRelativeTime } from "#lib/format.ts";
+  import { supportsFork } from "#lib/fork-scope.ts";
   import { shortId } from "#lib/session-status.ts";
   import { sync } from "#lib/stores/app.svelte.ts";
   import {
@@ -245,6 +246,9 @@
 
   /** Show Resume only for sessions where unsupported native restore was detected. */
   const canResume = $derived(resumeRequired && session !== null);
+
+  /** Fork is available only while the agent advertises a supported fork scope. */
+  const canFork = $derived(supportsFork(session));
 
   function scrollToBottom() {
     if (!chatContainer) return;
@@ -513,7 +517,7 @@
         {/if}
 
         <!-- Fork button (only when the agent supports ACP-native session/fork) -->
-        {#if session?.fork_supported}
+        {#if canFork}
           <Button
             variant="ghost"
             size="sm"

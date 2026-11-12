@@ -513,6 +513,8 @@ pub enum HubToNodeMsg {
         /// Source session to fork natively (ACP `session/fork` + `session/load`).
         /// The fork must run on the node that owns the source session.
         fork_from_session_id: Option<SessionId>,
+        /// Source `node_seq` to fork at. `None` means the current end.
+        fork_up_to_node_seq: Option<u64>,
     },
     /// Sends a prompt (including slash commands and attachments).
     SendPrompt {

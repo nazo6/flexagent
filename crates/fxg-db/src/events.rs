@@ -549,7 +549,7 @@ pub(crate) async fn apply_projections(
             available_modes,
             available_commands,
             config_options,
-            fork_supported,
+            fork_scope,
         } => {
             let available_modes_json = if available_modes.is_empty() {
                 None
@@ -575,7 +575,7 @@ pub(crate) async fn apply_projections(
                        available_modes_json = COALESCE(?, available_modes_json),
                        available_commands_json = COALESCE(?, available_commands_json),
                        config_options_json = COALESCE(?, config_options_json),
-                       fork_supported = COALESCE(?, fork_supported),
+                       fork_scope = COALESCE(?, fork_scope),
                        updated_at = MAX(updated_at, ?),
                        last_node_seq = MAX(last_node_seq, ?)
                  WHERE session_id = ?
@@ -584,7 +584,7 @@ pub(crate) async fn apply_projections(
                 available_modes_json,
                 available_commands_json,
                 config_options_json,
-                *fork_supported,
+                fork_scope.as_ref().map(|scope| scope.as_str()),
                 envelope.created_at,
                 node_seq,
                 envelope.session_id,
@@ -951,7 +951,7 @@ pub async fn rebuild_projections(pool: &SqlitePool) -> Result<(), DbError> {
                config_options_json = '[]',
                usage_json = NULL,
                agent_session_id = NULL,
-               fork_supported = 0,
+               fork_scope = 'none',
                archived_at = NULL,
                deleted_at = NULL,
                last_node_seq = 0,

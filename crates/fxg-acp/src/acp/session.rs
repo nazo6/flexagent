@@ -202,15 +202,20 @@ pub(super) async fn build_session(
         available_modes: modes.clone(),
         available_commands: Vec::new(),
         config_options: config_options.clone(),
-        fork_supported: Some(
-            agent_capabilities.session_capabilities.fork.is_some()
-                && agent_capabilities.load_session,
+        fork_scope: Some(
+            if agent_capabilities.session_capabilities.fork.is_some()
+                && agent_capabilities.load_session
+            {
+                ForkScope::Last
+            } else {
+                ForkScope::None
+            },
         ),
     };
     if !modes.is_empty()
         || !config_options.is_empty()
         || current_mode.is_some()
-        || capabilities_state.fork_supported.is_some()
+        || capabilities_state.fork_scope.is_some()
     {
         fxg_protocol::discard_with!(
             events.send(DriverEvent::Event(capabilities_state.to_payload())),

@@ -9,7 +9,7 @@ use crate::{NodeId, ProjectId, SessionId};
 
 use super::acp::PermissionPolicy;
 use super::project::{NodeLifecycleStatus, NodeSummary, ProjectSummary};
-use super::session::{SessionStatus, SessionSummary};
+use super::session::{ForkScope, SessionStatus, SessionSummary};
 
 impl SessionSummary {
     /// Builds a fully populated idle session for tests.
@@ -30,7 +30,7 @@ impl SessionSummary {
             permission_policy: PermissionPolicy::default(),
             usage: None,
             last_node_seq: 0,
-            fork_supported: false,
+            fork_scope: ForkScope::None,
             created_at: 0,
             updated_at: 0,
             archived_at: None,

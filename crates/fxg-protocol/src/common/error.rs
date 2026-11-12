@@ -39,6 +39,8 @@ pub enum ErrorCode {
     /// The agent does not support the ACP-native `session/fork` + `session/load`
     /// pair, so the session cannot be forked.
     ForkUnsupported,
+    /// The agent does not support forking at the requested conversation boundary.
+    ForkScopeUnsupported,
     /// The agent requires authentication before a session can be created.
     /// The advertised methods are carried in [`ErrorInfo::details`].
     AuthRequired,
@@ -107,6 +109,7 @@ impl ErrorCode {
         Self::InvalidState,
         Self::ResumeRequired,
         Self::ForkUnsupported,
+        Self::ForkScopeUnsupported,
         Self::AuthRequired,
         Self::PtyDisabled,
         Self::CommandDuplicate,
@@ -147,6 +150,7 @@ impl ErrorCode {
             Self::InvalidState => "INVALID_STATE",
             Self::ResumeRequired => "RESUME_REQUIRED",
             Self::ForkUnsupported => "FORK_UNSUPPORTED",
+            Self::ForkScopeUnsupported => "FORK_SCOPE_UNSUPPORTED",
             Self::AuthRequired => "AUTH_REQUIRED",
             Self::PtyDisabled => "PTY_DISABLED",
             Self::CommandDuplicate => "COMMAND_DUPLICATE",
@@ -209,6 +213,7 @@ impl FromStr for ErrorCode {
             "INVALID_STATE" => Ok(Self::InvalidState),
             "RESUME_REQUIRED" => Ok(Self::ResumeRequired),
             "FORK_UNSUPPORTED" => Ok(Self::ForkUnsupported),
+            "FORK_SCOPE_UNSUPPORTED" => Ok(Self::ForkScopeUnsupported),
             "AUTH_REQUIRED" => Ok(Self::AuthRequired),
             "PTY_DISABLED" => Ok(Self::PtyDisabled),
             "COMMAND_DUPLICATE" => Ok(Self::CommandDuplicate),
@@ -536,6 +541,7 @@ mod tests {
             ErrorCode::InvalidState,
             ErrorCode::ResumeRequired,
             ErrorCode::ForkUnsupported,
+            ErrorCode::ForkScopeUnsupported,
             ErrorCode::PtyDisabled,
             ErrorCode::CommandDuplicate,
             ErrorCode::NotFound,
@@ -617,7 +623,7 @@ mod tests {
         let troubleshooting = std::fs::read_to_string(workspace.join("docs/troubleshooting.md"))
             .expect("read docs/troubleshooting.md");
 
-        assert_eq!(ErrorCode::ALL.len(), 35, "update ALL when adding a code");
+        assert_eq!(ErrorCode::ALL.len(), 36, "update ALL when adding a code");
         for code in ErrorCode::ALL {
             let snake = code.as_str().to_ascii_lowercase();
             let message_key = format!("error_{snake}");

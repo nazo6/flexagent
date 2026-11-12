@@ -726,6 +726,7 @@
         fork: forkSessionId
           ? {
               from_session_id: forkSessionId,
+              up_to_node_seq: null,
             }
           : null,
       });

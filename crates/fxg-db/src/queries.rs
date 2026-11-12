@@ -28,9 +28,9 @@
 
 use fxg_protocol::common::{
     AuditAction, AuditLogEntry, ElicitationMode, ElicitationRequestEntry, ElicitationRequestStatus,
-    EventType, NodeLifecycleStatus, NodeSummary, PermissionPolicy, PermissionRequestEntry,
-    PermissionRequestStatus, ProjectBindingSummary, ProjectSummary, ResolvedBy, SearchHit,
-    SessionStatus, SessionSummary, SessionUsage,
+    EventType, ForkScope, NodeLifecycleStatus, NodeSummary, PermissionPolicy,
+    PermissionRequestEntry, PermissionRequestStatus, ProjectBindingSummary, ProjectSummary,
+    ResolvedBy, SearchHit, SessionStatus, SessionSummary, SessionUsage,
 };
 use fxg_protocol::events::SessionEventBatch;
 use fxg_protocol::settings::ProjectIdentityKind;
@@ -75,7 +75,7 @@ pub async fn list_sessions(
                agent_id, agent_session_id, parent_session_id AS "parent_session_id: SessionId",
                title, status AS "status: SessionStatus", current_mode,
                permission_policy AS "permission_policy: PermissionPolicy", usage_json,
-               last_node_seq, fork_supported AS "fork_supported: bool", created_at, updated_at,
+               last_node_seq, fork_scope AS "fork_scope: ForkScope", created_at, updated_at,
                archived_at
           FROM sessions
          WHERE deleted_at IS NULL
@@ -131,7 +131,7 @@ pub async fn get_session(
                agent_id, agent_session_id, parent_session_id AS "parent_session_id: SessionId",
                title, status AS "status: SessionStatus", current_mode,
                permission_policy AS "permission_policy: PermissionPolicy", usage_json,
-               last_node_seq, fork_supported AS "fork_supported: bool", created_at, updated_at,
+               last_node_seq, fork_scope AS "fork_scope: ForkScope", created_at, updated_at,
                archived_at
           FROM sessions
          WHERE session_id = ? AND deleted_at IS NULL
@@ -731,7 +731,7 @@ struct SessionRow {
     permission_policy: PermissionPolicy,
     usage_json: Option<String>,
     last_node_seq: i64,
-    fork_supported: bool,
+    fork_scope: ForkScope,
     created_at: i64,
     updated_at: i64,
     archived_at: Option<i64>,
@@ -761,7 +761,7 @@ impl SessionRow {
                 .map_err(|err| DbError::InvalidEnumValue(err.to_string()))?,
             last_node_seq: u64::try_from(self.last_node_seq)
                 .map_err(|_| DbError::NegativeNodeSeq(self.last_node_seq))?,
-            fork_supported: self.fork_supported,
+            fork_scope: self.fork_scope,
             created_at: self.created_at,
             updated_at: self.updated_at,
             archived_at: self.archived_at,

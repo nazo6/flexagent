@@ -15,8 +15,8 @@ use fxg_db::{
 };
 use fxg_protocol::common::{
     ClientSource, CommandInfo, ElicitationAction, ElicitationMode, ElicitationRequestStatus,
-    EventType, ModeInfo, PermissionOption, PermissionOptionKind, PermissionRequestStatus,
-    PlanEntry, PlanEntryStatus, ResolvedBy, SessionStatus, UsageCost,
+    EventType, ForkScope, ModeInfo, PermissionOption, PermissionOptionKind,
+    PermissionRequestStatus, PlanEntry, PlanEntryStatus, ResolvedBy, SessionStatus, UsageCost,
 };
 use fxg_protocol::events::{SessionEventEnvelope, UnifiedEventPayload};
 use fxg_protocol::util::{now_ms, uuid_v7};
@@ -116,7 +116,7 @@ impl Fixture {
                     input_hint: None,
                 }],
                 config_options: vec![],
-                fork_supported: Some(true),
+                fork_scope: Some(ForkScope::Last),
             }),
             self.event(UnifiedEventPayload::UserMessage {
                 text: "Fix the authentication error".to_owned(),
@@ -382,7 +382,7 @@ async fn capabilities_partial_update_keeps_available_modes_projection() {
         }],
         available_commands: vec![],
         config_options: vec![],
-        fork_supported: None,
+        fork_scope: None,
     });
     // Partial updates without modes (commands only) do not overwrite available_modes
     let commands = fixture.event(UnifiedEventPayload::CapabilitiesUpdated {
@@ -394,7 +394,7 @@ async fn capabilities_partial_update_keeps_available_modes_projection() {
             input_hint: None,
         }],
         config_options: vec![],
-        fork_supported: None,
+        fork_scope: None,
     });
     fixture
         .db
@@ -411,6 +411,41 @@ async fn capabilities_partial_update_keeps_available_modes_projection() {
     let rebuilt = available_modes(&fixture.db, &fixture.session_id).await;
     assert_eq!(rebuilt.len(), 1);
     assert_eq!(rebuilt[0].mode_id, "plan");
+}
+
+#[tokio::test]
+async fn fork_scope_projection_tracks_latest_and_rebuilds() {
+    let mut fixture = Fixture::new(DbRole::Node).await;
+    let created = fixture.session_created();
+    let caps = fixture.event(UnifiedEventPayload::CapabilitiesUpdated {
+        current_mode: None,
+        available_modes: vec![],
+        available_commands: vec![],
+        config_options: vec![],
+        fork_scope: Some(ForkScope::Last),
+    });
+    fixture
+        .db
+        .append_events(&[created, caps])
+        .await
+        .expect("append");
+
+    let session = fixture
+        .db
+        .get_session(&fixture.session_id)
+        .await
+        .expect("query")
+        .expect("session");
+    assert_eq!(session.fork_scope, ForkScope::Last);
+
+    fixture.db.rebuild_projections().await.expect("rebuild");
+    let rebuilt = fixture
+        .db
+        .get_session(&fixture.session_id)
+        .await
+        .expect("query")
+        .expect("session");
+    assert_eq!(rebuilt.fork_scope, ForkScope::Last);
 }
 
 #[tokio::test]

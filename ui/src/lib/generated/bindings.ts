@@ -676,6 +676,8 @@ export type ErrorCode =
  *  pair, so the session cannot be forked.
  */
 "FORK_UNSUPPORTED" |
+/**  The agent does not support forking at the requested conversation boundary. */
+"FORK_SCOPE_UNSUPPORTED" |
 /**
  *  The agent requires authentication before a session can be created.
  *  The advertised methods are carried in [`ErrorInfo::details`].
@@ -781,6 +783,20 @@ export type FileDiff = {
 	/**  Number of deleted lines */
 	deletions: number,
 };
+
+/**
+ *  Scope of native session forking supported by the agent.
+ *
+ *  Stored in `sessions.fork_scope`; an unknown database value fails to decode
+ *  instead of being treated as a default.
+ */
+export type ForkScope =
+/**  Native forking is not supported. */
+"none" |
+/**  Only the current end of the conversation can be forked. */
+"last" |
+/**  Any completed message boundary can be forked. */
+"message";
 
 /**  Query parameters of `GET /api/v1/nodes/:id/fs/browse`. */
 export type FsBrowseQuery = {
@@ -1914,6 +1930,11 @@ export type SessionEventEnvelope = {
 export type SessionForkSpec = {
 	/**  Source session ID */
 	from_session_id: SessionId,
+	/**
+	 *  Source `node_seq` to fork at. `None` means the current end of the source
+	 *  session (the only boundary supported by ACP-native forks today).
+	 */
+	up_to_node_seq: number | null,
 };
 
 /**  ID of a session (UUID v7 assigned by the running node / server). */
@@ -2027,8 +2048,8 @@ export type SessionSummary = {
 	usage: SessionUsage | null,
 	/**  Latest persisted `node_seq` (node) / highest `node_seq` applied to the projection (hub) */
 	last_node_seq: number,
-	/**  Whether the agent supports ACP-native `session/fork` + `session/load` */
-	fork_supported?: boolean,
+	/**  Scope of ACP-native session forking supported by the agent. */
+	fork_scope?: ForkScope,
 	/**  Creation time (Unix epoch ms) */
 	created_at: number,
 	/**  Last update time (Unix epoch ms) */
@@ -2482,11 +2503,11 @@ export type UnifiedEventPayload =
 	/**  Configuration entries (model selection etc.) */
 	config_options: ConfigOptionInfo[],
 	/**
-	 *  Whether the agent supports ACP-native `session/fork` + `session/load`.
+	 *  Scope of ACP-native session forking supported by the agent.
 	 *  `None` keeps the existing value (events recorded before this field
 	 *  existed).
 	 */
-	fork_supported?: boolean | null,
+	fork_scope?: ForkScope | null,
 } } |
 /**  A progress log line of ephemeral VM provisioning (`stderr`). */
 { type: "provisioning_log"; data: {

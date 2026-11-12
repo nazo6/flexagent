@@ -66,6 +66,9 @@ pub enum NodeError {
     /// The agent does not support the ACP-native `session/fork` + `session/load`.
     #[error("native session fork is not available: {0}")]
     ForkUnsupported(String),
+    /// The agent cannot fork at the requested conversation boundary.
+    #[error("session fork scope is not supported: {0}")]
+    ForkScopeUnsupported(String),
     /// The agent requires authentication before a session can be created
     #[error("agent {agent_id} requires authentication")]
     AuthRequired {
@@ -149,6 +152,7 @@ impl NodeError {
             | Self::InvalidSession(_)
             | Self::ResumeRequired { .. }
             | Self::ForkUnsupported(_)
+            | Self::ForkScopeUnsupported(_)
             | Self::Busy(_)
             | Self::CommandDuplicate(_)
             | Self::AlreadyResolved(_)
@@ -170,6 +174,7 @@ impl NodeError {
             | Self::InvalidState(_)
             | Self::ResumeRequired { .. }
             | Self::ForkUnsupported(_)
+            | Self::ForkScopeUnsupported(_)
             | Self::AuthRequired { .. }
             | Self::PairingTokenRequired
             | Self::SecretMissing { .. }
@@ -233,6 +238,7 @@ impl NodeError {
             }
             Self::ResumeRequired { .. } => ErrorCode::ResumeRequired,
             Self::ForkUnsupported(_) => ErrorCode::ForkUnsupported,
+            Self::ForkScopeUnsupported(_) => ErrorCode::ForkScopeUnsupported,
             Self::AuthRequired { .. } => ErrorCode::AuthRequired,
             Self::Timeout(_) => ErrorCode::Timeout,
             Self::Busy(_) => ErrorCode::Busy,

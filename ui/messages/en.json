@@ -147,6 +147,7 @@
   "error_db_corrupt": "The database contains invalid data. Run diagnostics before continuing.",
   "error_disk_full": "The device is out of disk space.",
   "error_forbidden": "This operation is not allowed.",
+  "error_fork_scope_unsupported": "This agent can only fork at the current end of the conversation.",
   "error_fork_unsupported": "This agent does not support ACP-native session forking.",
   "error_git_failed": "A Git operation failed. Check the repository state and try again.",
   "error_git_unavailable": "Git is not available on the node.",

@@ -286,7 +286,7 @@ pub(super) struct SessionCapabilitiesState {
     pub(super) available_modes: Vec<ModeInfo>,
     pub(super) available_commands: Vec<CommandInfo>,
     pub(super) config_options: Vec<ConfigOptionInfo>,
-    pub(super) fork_supported: Option<bool>,
+    pub(super) fork_scope: Option<ForkScope>,
 }
 
 impl SessionCapabilitiesState {
@@ -296,7 +296,7 @@ impl SessionCapabilitiesState {
             available_modes: self.available_modes.clone(),
             available_commands: self.available_commands.clone(),
             config_options: self.config_options.clone(),
-            fork_supported: self.fork_supported,
+            fork_scope: self.fork_scope,
         }
     }
 

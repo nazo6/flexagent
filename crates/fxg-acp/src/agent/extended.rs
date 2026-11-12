@@ -316,7 +316,7 @@ mod tests {
                 current_value: ConfigOptionValue::Select("fast".to_owned()),
                 options: vec![ConfigOptionValue::Select("fast".to_owned())],
             }],
-            fork_supported: None,
+            fork_scope: None,
         }
     }
 

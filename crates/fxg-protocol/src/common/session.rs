@@ -69,6 +69,58 @@ impl FromStr for SessionStatus {
     }
 }
 
+/// Scope of native session forking supported by the agent.
+///
+/// Stored in `sessions.fork_scope`; an unknown database value fails to decode
+/// instead of being treated as a default.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+#[specta(collect)]
+pub enum ForkScope {
+    /// Native forking is not supported.
+    #[default]
+    None,
+    /// Only the current end of the conversation can be forked.
+    Last,
+    /// Any completed message boundary can be forked.
+    Message,
+}
+
+impl ForkScope {
+    /// String representation used in the DB / JSON.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Last => "last",
+            Self::Message => "message",
+        }
+    }
+
+    /// Whether the agent supports forking at all.
+    pub const fn is_supported(self) -> bool {
+        !matches!(self, Self::None)
+    }
+}
+
+impl fmt::Display for ForkScope {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl FromStr for ForkScope {
+    type Err = EnumParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "none" => Ok(Self::None),
+            "last" => Ok(Self::Last),
+            "message" => Ok(Self::Message),
+            other => Err(EnumParseError::new("fork scope", other)),
+        }
+    }
+}
+
 /// Execution log of a worktree creation hook.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[specta(collect)]
@@ -212,9 +264,9 @@ pub struct SessionSummary {
     pub usage: Option<SessionUsage>,
     /// Latest persisted `node_seq` (node) / highest `node_seq` applied to the projection (hub)
     pub last_node_seq: u64,
-    /// Whether the agent supports ACP-native `session/fork` + `session/load`
+    /// Scope of ACP-native session forking supported by the agent.
     #[serde(default)]
-    pub fork_supported: bool,
+    pub fork_scope: ForkScope,
     /// Creation time (Unix epoch ms)
     pub created_at: i64,
     /// Last update time (Unix epoch ms)

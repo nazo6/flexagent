@@ -538,6 +538,7 @@ pub(crate) async fn handle_server_message(
             mode,
             extra_args,
             fork_from_session_id,
+            fork_up_to_node_seq,
         } => {
             // An ephemeral VM (`fxg internal stdio --workspace`) is pinned to the cloned directory
             // (the hub does not know the path inside the VM, so the requested
@@ -569,6 +570,7 @@ pub(crate) async fn handle_server_message(
                     fork_from_session_id: fork_from_session_id
                         .as_ref()
                         .map(fxg_protocol::SessionId::as_str),
+                    fork_up_to_node_seq,
                 })
                 .await
                 .map(|_| ());

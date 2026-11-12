@@ -315,6 +315,7 @@ async fn create_session_with_events(
             mode: None,
             extra_args: None,
             fork_from_session_id: None,
+            fork_up_to_node_seq: None,
         })
         .await
         .expect("start session");
@@ -977,6 +978,7 @@ async fn hub_resumes_stopped_session() {
             mode: None,
             extra_args: None,
             fork_from_session_id: None,
+            fork_up_to_node_seq: None,
         })
         .await
         .expect("start session");
