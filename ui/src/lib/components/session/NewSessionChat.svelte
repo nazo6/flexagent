@@ -434,6 +434,18 @@
     return JSON.stringify(left) === JSON.stringify(right);
   }
 
+  /** Whether two selected config maps hold the same keys and values. */
+  function sameConfigMap(
+    left: Record<string, ConfigOptionValue>,
+    right: Record<string, ConfigOptionValue>,
+  ): boolean {
+    const keys = Object.keys(left);
+    if (keys.length !== Object.keys(right).length) return false;
+    return keys.every(
+      (key) => key in right && JSON.stringify(left[key]) === JSON.stringify(right[key]),
+    );
+  }
+
   function applyCapabilities(
     key: string,
     preview: AgentCapabilitiesPreview,
@@ -444,7 +456,13 @@
     capabilitiesLoading = false;
     const projectId = selectedProject?.project_id ?? "";
     const saved = projectId === "" ? {} : loadSessionConfig(projectId);
-    selectedConfigValues = resolveInitialConfig(preview.config_options ?? [], saved);
+    const resolved = resolveInitialConfig(preview.config_options ?? [], saved);
+    // Replacing the object invalidates every reader even when the selection did
+    // not change. The probe effect applies cached results synchronously, so a
+    // needless replacement there would make the effect re-run forever.
+    if (!sameConfigMap(resolved, selectedConfigValues)) {
+      selectedConfigValues = resolved;
+    }
 
     // The probe may have used no model (first visit) or a remembered model that
     // is no longer available. Probe once more with the model actually selected
@@ -526,10 +544,13 @@
       capabilitiesError = null;
       selectedConfigValues = {};
     }
-    void loadAgentCapabilities(
-      false,
-      untrack(() => currentModelConfig()),
-    );
+    // Apply a cached probe inside `untrack`: the cache-hit path runs
+    // synchronously and writes `capabilities` / `selectedConfigValues`. If this
+    // effect subscribed to those writes it would re-run, take the same cache hit
+    // again and loop until Svelte throws `effect_update_depth_exceeded`.
+    untrack(() => {
+      void loadAgentCapabilities(false, currentModelConfig());
+    });
   });
 
   function changeConfigOption(key: string, value: ConfigOptionValue): void {
