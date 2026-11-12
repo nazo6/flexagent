@@ -588,7 +588,7 @@
         <div
           bind:this={chatContainer}
           onscroll={handleScroll}
-          class="h-full overflow-y-auto px-4 py-5 md:px-8"
+          class="app-scroll-centered h-full overflow-y-auto px-4 py-5 md:px-8"
         >
           <div class="mx-auto flex max-w-[760px] flex-col gap-4">
             <ProvisioningLogCard lines={provisioningLines} />
@@ -695,7 +695,7 @@
         </div>
 
         <!-- Side panel content -->
-        <div class="flex-1 overflow-y-auto p-3">
+        <div class="app-scroll flex-1 overflow-y-auto p-3">
           {#if sidePanelMode === "diff"}
             <DiffPane {sessionId} {items} />
           {:else if sidePanelMode === "terminal"}

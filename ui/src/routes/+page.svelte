@@ -7,6 +7,6 @@
   <title>{m.shell_new_session_page_title()}</title>
 </svelte:head>
 
-<div class="h-full overflow-y-auto">
+<div class="app-scroll-centered h-full overflow-y-auto">
   <NewSessionChat />
 </div>

@@ -96,6 +96,14 @@
   async function retry() {
     await initApp();
   }
+
+  /**
+   * Routes that fill the viewport and scroll inside themselves. `<main>` never
+   * scrolls on these routes, so reserving a scrollbar gutter for it would only
+   * leave dead space on the right.
+   */
+  const SELF_SCROLLING_ROUTES = new Set(["/", "/sessions/[id]"]);
+  const mainScrolls = $derived(!SELF_SCROLLING_ROUTES.has(page.route.id ?? ""));
 </script>
 
 <ModeWatcher />
@@ -219,7 +227,7 @@
 
       <ErrorBanner onaction={handleProblemAction} />
 
-      <main class="app-scroll relative flex-1 overflow-y-auto">
+      <main class="relative flex-1 overflow-y-auto" class:app-scroll={mainScrolls}>
         {@render children()}
       </main>
     </div>

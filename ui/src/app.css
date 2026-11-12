@@ -300,6 +300,14 @@
   .app-scroll {
     scrollbar-gutter: stable;
   }
+  /*
+   * Scroll areas with centered content (chat timelines): reserve the gutter on
+   * both edges so an appearing scrollbar does not shift the column, and the
+   * column stays centered instead of being pushed left by half a scrollbar.
+   */
+  .app-scroll-centered {
+    scrollbar-gutter: stable both-edges;
+  }
   .desk-page-narrow {
     @apply mx-auto flex w-full max-w-[760px] flex-col gap-5 px-4 py-6 md:py-8;
   }

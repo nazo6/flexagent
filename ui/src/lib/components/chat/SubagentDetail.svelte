@@ -48,7 +48,7 @@
       <XIcon class="size-4" />
     </Button>
   </header>
-  <div class="min-h-0 flex-1 overflow-y-auto px-4 py-4">
+  <div class="app-scroll min-h-0 flex-1 overflow-y-auto px-4 py-4">
     <ChatTimeline {sessionId} {items} {status} nested subagentTitle={title} />
   </div>
 </dialog>
