@@ -151,7 +151,7 @@ sequenceDiagram
     Node->>NodeDB: UPDATE sessions SET synced_up_to_node_seq = N
 ```
 
-### 2.3 ストリーミングチャンクの配信と永続化（Compaction）方針
+### 2.3 ストリーミングチャンクの配信と永続化方針
 
 思考過程やメッセージ生成のトークン単位チャンク（`AgentMessage`,
 `AgentThought`）を1トークンずつSQLiteへ `INSERT`
@@ -161,8 +161,11 @@ sequenceDiagram
 1. **メモリ上のリアルタイム配信（全チャンク）**:
    チャンクが到着した瞬間、メモリ上のブロードキャストチャネルを通じて Local
    WS（CLI・ローカルUI）およびハブWebSocket（`LiveStreamDelta`）へ**リアルタイム（遅延なし）**でそのまま流します。この経路はDBを経由しません。
-2. **SQLiteへの永続化（ターン完了時のみ）**:
-   ストリーミング途中（`is_complete = false`）の中間状態は永続化しません。**ターン完了時に完成したイベント（`is_complete = true`）のみ**を、`node_seq`
+2. **SQLiteへの永続化（ストリーム境界またはターン完了時）**:
+   ストリーミング途中（`is_complete = false`）の中間状態は永続化しません。
+   思考からメッセージへの切り替えや `message_id` / `thought_id` の変更など、
+   **ストリームの境界**、またはターン完了時に、完成したイベント
+   （`is_complete = true`）を `node_seq`
    を1つ消費した単一イベントとしてSQLite (`node.db` / `hub.db`)
    へ書き込みます。
    - ユーザーメッセージ (`UserMessage`)、ツール呼び出し
@@ -180,7 +183,7 @@ sequenceDiagram
 
 - `SessionCreated`（生成直後、`node_seq = 1`。プロジェクト・パス・エージェント・Fork元などを含む）
 - `SessionTitleChanged`（UI/CLI
-  からのリネーム。コマンドとして実行ノードに到達してから発行）
+  からのリネーム、および最初のプロンプトからの自動タイトル生成。コマンドとして実行ノードに到達してから発行）
 - `SessionAgentBound`（ACP セッション確立後の `agent_session_id` 確定）
 - `StatusChanged` / `CapabilitiesUpdated`（既存。ハブ側 `sessions.status` /
   モード・コマンド・設定投影の更新源）
@@ -509,7 +512,8 @@ Hijacking）や不正アクセスを防ぐため、以下の多層防御モデ�
 2. **Origin ヘッダ検証 (Cross-Site WebSocket Hijacking 対策)**:
    - WebSocketハンドシェイク（`/api/v1/client/ws`, `/api/v1/pty/ws`）時に
      `Origin` ヘッダを検証し、許可されていない外部ドメイン（例:
-     `http://evil.com`）からの接続を一切受け付けません。
+     `http://evil.com`）からの接続を拒否します。`Origin` を持たない
+     非ブラウザクライアントは許可します。
 
 ### 7.3 認証トークンモデルとCookie注入
 

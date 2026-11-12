@@ -76,7 +76,8 @@ ElicitationResolved   → elicitation_requests.status / content_json / resolved_
                         resolved_at
 SessionArchived       → sessions.archived_at (archived = false で NULL に戻す)
 SessionPermissionPolicyChanged → sessions.permission_policy
-SessionDeleted        → sessions.deleted_at = created_at + 本文イベントのパージ
+SessionDeleted        → sessions.deleted_at = tombstone イベントの created_at
+                        + 本文イベントのパージ
                         (本イベント (tombstone) と sessions 行は残す)
 ```
 
