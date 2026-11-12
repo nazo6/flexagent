@@ -198,9 +198,9 @@ pub struct UpdateNodeSettingsRequest {
 
 /// ACP client capabilities advertised when connecting to an agent.
 ///
-/// An absent entry in [`AgentSettings::capabilities`] means the defaults.
 /// Capabilities describe what this client understands, so an agent that does
-/// not know a capability simply ignores it.
+/// not know a capability simply ignores it. Built-in agents use the defaults
+/// (see also [`crate::client_api::AgentSummary::capabilities`]).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 #[serde(default)]
@@ -225,9 +225,6 @@ pub struct AgentSettings {
     pub registry_cache_ttl_secs: Option<u64>,
     /// Agent name aliases (merged over the built-in aliases)
     pub aliases: BTreeMap<String, String>,
-    /// Per-agent ACP capability overrides (key = agent ID; absent = defaults)
-    #[serde(default)]
-    pub capabilities: BTreeMap<String, AgentAcpCapabilities>,
     /// Optimistic-lock revision
     pub revision: u64,
     /// Last update time (Unix epoch ms)
@@ -254,20 +251,6 @@ impl AgentSettings {
         self.registry_cache_ttl_secs
             .unwrap_or(Self::DEFAULT_REGISTRY_CACHE_TTL_SECS)
     }
-
-    /// Returns the effective ACP capabilities for an agent.
-    #[must_use]
-    pub fn capabilities_for(&self, agent_id: &str) -> AgentAcpCapabilities {
-        self.capabilities.get(agent_id).cloned().unwrap_or_default()
-    }
-}
-
-/// `PUT /api/v1/nodes/{node_id}/agents/{agent_id}/capabilities` request.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
-#[specta(collect)]
-pub struct UpdateAgentCapabilitiesRequest {
-    /// Capabilities to advertise on connections to this agent
-    pub capabilities: AgentAcpCapabilities,
 }
 
 /// `PATCH /api/v1/nodes/{node_id}/settings/agents` request.
@@ -414,6 +397,9 @@ pub struct CustomAgentConfig {
     pub icon: Option<String>,
     /// Provenance of this definition (manual or imported from the registry).
     pub origin: Option<CustomAgentOrigin>,
+    /// ACP client capabilities advertised on connections to this agent
+    #[serde(default)]
+    pub capabilities: AgentAcpCapabilities,
 }
 
 /// Definition of an ephemeral VM / sandbox provisioner (`provisioners` in `hub.db`).
@@ -644,17 +630,15 @@ mod tests {
             serde_json::from_str("{}").expect("decode empty capabilities");
         assert!(decoded.subagents);
 
-        let settings: AgentSettings = serde_json::from_str(
+        let custom: CustomAgentConfig = serde_json::from_str(
             r#"{
-                "registry_url": null,
-                "registry_cache_ttl_secs": null,
-                "aliases": {},
-                "revision": 1,
-                "updated_at": 0
+                "command": "opencode",
+                "args": [],
+                "env": {},
+                "env_secrets": {}
             }"#,
         )
-        .expect("decode settings");
-        assert!(settings.capabilities.is_empty());
-        assert!(settings.capabilities_for("opencode").subagents);
+        .expect("decode custom agent");
+        assert!(custom.capabilities.subagents);
     }
 }

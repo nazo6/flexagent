@@ -1,7 +1,7 @@
 //! Typed settings and secret metadata persistence.
 //!
 //! `node.db` owns `node_settings` / `agent_settings` / `agent_aliases` /
-//! `agent_capabilities` / `custom_agents` / `project_path_links`.
+//! `custom_agents` / `project_path_links`.
 //! `hub.db` owns `hub_settings` / `provisioners`.
 //!
 //! Every mutable single-row/aggregate table carries an explicit `revision`
@@ -237,71 +237,13 @@ pub async fn get_agent_settings(pool: &SqlitePool) -> Result<Option<AgentSetting
     .await?;
     let Some(row) = row else { return Ok(None) };
     let aliases = list_agent_aliases(pool).await?;
-    let capabilities = list_agent_capabilities(pool).await?;
     Ok(Some(AgentSettings {
         registry_url: row.registry_url,
         registry_cache_ttl_secs: row.registry_cache_ttl_secs.and_then(positive_u64),
         aliases,
-        capabilities,
         revision: revision_u64(row.revision)?,
         updated_at: row.updated_at,
     }))
-}
-
-/// Lists explicit per-agent ACP capability overrides.
-pub async fn list_agent_capabilities(
-    pool: &SqlitePool,
-) -> Result<BTreeMap<String, AgentAcpCapabilities>, DbError> {
-    let rows =
-        sqlx::query!(r#"SELECT agent_id, subagents FROM agent_capabilities ORDER BY agent_id"#)
-            .fetch_all(pool)
-            .await?;
-    Ok(rows
-        .into_iter()
-        .map(|row| {
-            (
-                row.agent_id,
-                AgentAcpCapabilities {
-                    subagents: row.subagents != 0,
-                },
-            )
-        })
-        .collect())
-}
-
-/// Replaces the capability override for one agent.
-///
-/// A value equal to the defaults deletes the row so a later default change
-/// applies to this agent as well.
-pub async fn set_agent_capabilities(
-    pool: &SqlitePool,
-    agent_id: &str,
-    capabilities: &AgentAcpCapabilities,
-) -> Result<(), DbError> {
-    if *capabilities == AgentAcpCapabilities::default() {
-        sqlx::query!(
-            r#"DELETE FROM agent_capabilities WHERE agent_id = ?"#,
-            agent_id
-        )
-        .execute(pool)
-        .await?;
-        return Ok(());
-    }
-    sqlx::query!(
-        r#"
-        INSERT INTO agent_capabilities (agent_id, subagents, updated_at)
-        VALUES (?, ?, ?)
-        ON CONFLICT(agent_id) DO UPDATE SET
-            subagents = excluded.subagents,
-            updated_at = excluded.updated_at
-        "#,
-        agent_id,
-        i64::from(capabilities.subagents),
-        now_ms(),
-    )
-    .execute(pool)
-    .await?;
-    Ok(())
 }
 
 /// Lists the configured agent aliases.
@@ -376,7 +318,7 @@ pub async fn list_custom_agents(
     let rows = sqlx::query!(
         r#"
         SELECT agent_id AS "agent_id!", name, command, args_json, env_json, env_secrets_json,
-               extension, description, icon, origin_json
+               extension, description, icon, origin_json, capabilities_json
           FROM custom_agents
          ORDER BY agent_id
         "#,
@@ -392,6 +334,7 @@ pub async fn list_custom_agents(
             Some(json) => Some(serde_json::from_str(&json)?),
             None => None,
         };
+        let capabilities: AgentAcpCapabilities = serde_json::from_str(&row.capabilities_json)?;
         agents.insert(
             row.agent_id,
             CustomAgentConfig {
@@ -404,6 +347,7 @@ pub async fn list_custom_agents(
                 description: row.description,
                 icon: row.icon,
                 origin,
+                capabilities,
             },
         );
     }
@@ -432,12 +376,13 @@ pub async fn upsert_custom_agent(
         Some(origin) => Some(serde_json::to_string(origin)?),
         None => None,
     };
+    let capabilities_json = serde_json::to_string(&config.capabilities)?;
     sqlx::query!(
         r#"
         INSERT INTO custom_agents
             (agent_id, name, command, args_json, env_json, env_secrets_json, extension,
-             description, icon, origin_json, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             description, icon, origin_json, capabilities_json, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(agent_id) DO UPDATE SET
             name = excluded.name,
             command = excluded.command,
@@ -448,6 +393,7 @@ pub async fn upsert_custom_agent(
             description = excluded.description,
             icon = excluded.icon,
             origin_json = excluded.origin_json,
+            capabilities_json = excluded.capabilities_json,
             updated_at = excluded.updated_at
         "#,
         agent_id,
@@ -460,6 +406,7 @@ pub async fn upsert_custom_agent(
         config.description,
         config.icon,
         origin_json,
+        capabilities_json,
         now_ms(),
     )
     .execute(pool)
@@ -469,17 +416,9 @@ pub async fn upsert_custom_agent(
 
 /// Deletes a custom agent definition (returns the number of deleted rows).
 pub async fn delete_custom_agent(pool: &SqlitePool, agent_id: &str) -> Result<u64, DbError> {
-    let mut tx = pool.begin().await?;
     let result = sqlx::query!(r#"DELETE FROM custom_agents WHERE agent_id = ?"#, agent_id)
-        .execute(&mut *tx)
+        .execute(pool)
         .await?;
-    sqlx::query!(
-        r#"DELETE FROM agent_capabilities WHERE agent_id = ?"#,
-        agent_id
-    )
-    .execute(&mut *tx)
-    .await?;
-    tx.commit().await?;
     Ok(result.rows_affected())
 }
 

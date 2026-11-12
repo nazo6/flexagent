@@ -523,18 +523,6 @@ impl DaemonState {
                     config.command
                 ))
             }
-            AgentAction::SetCapabilities {
-                agent_id,
-                capabilities,
-            } => {
-                let id = catalog.resolve_alias(agent_id);
-                if !catalog.has_agent(&id) {
-                    return Err(NodeError::Agent(format!("unknown agent: {id}")));
-                }
-                self.db().set_agent_capabilities(&id, capabilities).await?;
-                self.refresh_agent_catalog().await?;
-                Ok(format!("updated ACP capabilities for {id}"))
-            }
         }
     }
 

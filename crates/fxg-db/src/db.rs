@@ -592,15 +592,6 @@ impl Db {
         settings::get_agent_settings(&self.pool).await
     }
 
-    /// Replaces the ACP capability override for one agent.
-    pub async fn set_agent_capabilities(
-        &self,
-        agent_id: &str,
-        capabilities: &fxg_protocol::settings::AgentAcpCapabilities,
-    ) -> Result<(), DbError> {
-        settings::set_agent_capabilities(&self.pool, agent_id, capabilities).await
-    }
-
     /// Updates agent settings and aliases under an optimistic lock.
     pub async fn update_agent_settings(
         &self,

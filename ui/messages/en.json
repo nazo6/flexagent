@@ -796,11 +796,7 @@
   "chat_subagent_open": "Open",
   "chat_subagent_close": "Close",
   "chat_subagent_title": "Subagent",
-  "settings_agent_capabilities": "ACP capabilities",
-  "settings_agent_capabilities_title": "ACP capabilities for {name}",
-  "settings_agent_capabilities_description": "Choose which ACP client capabilities fxg advertises when it connects to this agent. The change applies to new connections.",
   "settings_agent_capabilities_subagents": "Subagents",
   "settings_agent_capabilities_subagents_hint": "Advertise the ACP subagents RFD so the agent can expose child sessions in this timeline.",
-  "settings_agent_capabilities_subagents_off": "Subagents off",
-  "settings_agent_capabilities_saved": "Updated ACP capabilities for {name}."
+  "settings_agent_capabilities_subagents_off": "Subagents off"
 }

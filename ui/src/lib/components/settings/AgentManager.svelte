@@ -29,7 +29,6 @@
   import PlusIcon from "@lucide/svelte/icons/plus";
   import RefreshCwIcon from "@lucide/svelte/icons/refresh-cw";
   import SearchIcon from "@lucide/svelte/icons/search";
-  import Settings2Icon from "@lucide/svelte/icons/settings-2";
   import Trash2Icon from "@lucide/svelte/icons/trash-2";
 
   /** Target node passed by the settings page (catalog source and operation target). */
@@ -44,10 +43,6 @@
   let importingId = $state<string | null>(null);
   /** Pending removal target. */
   let removeTarget = $state<AgentSummary | null>(null);
-  /** Agent whose ACP capabilities are being edited. */
-  let capabilityTarget = $state<AgentSummary | null>(null);
-  let capabilityForm = $state({ subagents: true });
-  let capabilityBusy = $state(false);
 
   // Agent dialog: registry import and the manual definition share one dialog.
   let agentOpen = $state(false);
@@ -67,6 +62,7 @@
     args: "",
     env: "",
     extension: "",
+    subagents: true,
   });
 
   const busy = $derived(busyLabel !== null || importingId !== null);
@@ -165,30 +161,6 @@
     }
   }
 
-  /** Open the per-agent ACP capability dialog. */
-  function openCapabilities(agent: AgentSummary): void {
-    capabilityTarget = agent;
-    capabilityForm = { subagents: agent.capabilities.subagents ?? true };
-  }
-
-  async function saveCapabilities(): Promise<void> {
-    const target = capabilityTarget;
-    if (target === null || capabilityBusy || nodeId === "") return;
-    capabilityBusy = true;
-    try {
-      const result = await sync.connection.client.updateAgentCapabilities(nodeId, target.id, {
-        capabilities: capabilityForm,
-      });
-      toast.success(result.message ?? m.settings_agent_capabilities_saved({ name: target.name }));
-      capabilityTarget = null;
-      await loadAgents();
-    } catch (error) {
-      toast.error(errorMessage(error));
-    } finally {
-      capabilityBusy = false;
-    }
-  }
-
   async function confirmRemove(): Promise<void> {
     const target = removeTarget;
     if (target === null || busy || nodeId === "" || target.custom_config === null) return;
@@ -218,6 +190,7 @@
       args: "",
       env: "",
       extension: "",
+      subagents: true,
     };
   }
 
@@ -243,6 +216,7 @@
       args: (config?.args ?? []).join(" "),
       env: formatEnv(config?.env ?? {}, config?.env_secrets ?? {}),
       extension: config?.extension ?? "",
+      subagents: agent.capabilities.subagents ?? true,
     };
     agentTab = "custom";
     agentOpen = true;
@@ -295,6 +269,7 @@
         args: customForm.args.split(/\s+/).filter((value) => value !== ""),
         ...parseEnv(customForm.env),
         extension: customForm.extension === "" ? null : customForm.extension,
+        capabilities: { subagents: customForm.subagents },
         icon: customIcon,
         origin: customOrigin,
       });
@@ -365,11 +340,11 @@
                   {m.settings_agent_extension()}: {agent.extension}
                 </Badge>
               {/if}
-              {#if agent.capabilities.subagents === false}
-                <Badge variant="outline" class="text-[11px]">
-                  {m.settings_agent_capabilities_subagents_off()}
-                </Badge>
-              {/if}
+              <Badge variant="outline" class="text-[11px]">
+                {agent.capabilities.subagents === false
+                  ? m.settings_agent_capabilities_subagents_off()
+                  : m.settings_agent_capabilities_subagents()}
+              </Badge>
               {#each agent.sources as source (source)}
                 <Badge variant="outline" class="text-[11px]">{agentSourceLabel(source)}</Badge>
               {/each}
@@ -382,20 +357,6 @@
           </div>
 
           <div class="flex flex-wrap items-center gap-1.5">
-            {#if agent.backend !== "custom"}
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                disabled={busy || nodeId === ""}
-                onclick={() => openCapabilities(agent)}
-                title={m.settings_agent_capabilities()}
-              >
-                <Settings2Icon />
-                <span class="sr-only">
-                  {m.settings_agent_capabilities_title({ name: agent.name })}
-                </span>
-              </Button>
-            {/if}
             {#if agent.custom_config !== null}
               <Button
                 variant="ghost"
@@ -433,62 +394,6 @@
     {/each}
   {/if}
 </div>
-
-<!-- Per-agent ACP capability dialog -->
-<Dialog.Root
-  open={capabilityTarget !== null}
-  onOpenChange={(open) => !open && (capabilityTarget = null)}
->
-  <Dialog.Content class="sm:max-w-md">
-    <Dialog.Header>
-      <Dialog.Title>
-        {m.settings_agent_capabilities_title({ name: capabilityTarget?.name ?? "" })}
-      </Dialog.Title>
-      <Dialog.Description>
-        {m.settings_agent_capabilities_description()}
-      </Dialog.Description>
-    </Dialog.Header>
-    <div class="flex flex-col gap-3">
-      {#if capabilityTarget?.extension}
-        <p class="text-muted-foreground text-[13px]">
-          {m.settings_agent_extension()}: <code>{capabilityTarget.extension}</code>
-        </p>
-      {/if}
-      <div class="flex items-start justify-between gap-3">
-        <div class="flex min-w-0 flex-col gap-0.5">
-          <span class="text-[13px] font-medium">
-            {m.settings_agent_capabilities_subagents()}
-          </span>
-          <span class="text-muted-foreground text-[11px]">
-            {m.settings_agent_capabilities_subagents_hint()}
-          </span>
-        </div>
-        <button
-          type="button"
-          role="switch"
-          aria-checked={capabilityForm.subagents}
-          aria-label={m.settings_agent_capabilities_subagents()}
-          class={capabilityForm.subagents
-            ? "bg-signal relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors"
-            : "bg-muted relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors"}
-          onclick={() => (capabilityForm.subagents = !capabilityForm.subagents)}
-        >
-          <span
-            class={capabilityForm.subagents
-              ? "bg-background size-4 translate-x-4 rounded-full shadow transition-transform"
-              : "bg-background size-4 translate-x-0.5 rounded-full shadow transition-transform"}
-          ></span>
-        </button>
-      </div>
-    </div>
-    <Dialog.Footer>
-      <Dialog.Close>{m.common_cancel()}</Dialog.Close>
-      <Button disabled={capabilityBusy} onclick={() => void saveCapabilities()}>
-        {capabilityBusy ? m.settings_saving() : m.common_save()}
-      </Button>
-    </Dialog.Footer>
-  </Dialog.Content>
-</Dialog.Root>
 
 <!-- Agent removal confirmation -->
 <AlertDialog.Root
@@ -720,6 +625,31 @@
         <p class="text-muted-foreground text-[11px]">
           {m.settings_agent_extension_hint()}
         </p>
+      </div>
+      <div class="flex items-start justify-between gap-3">
+        <div class="flex min-w-0 flex-col gap-0.5">
+          <Label for="custom-subagents">{m.settings_agent_capabilities_subagents()}</Label>
+          <p class="text-muted-foreground text-[11px]">
+            {m.settings_agent_capabilities_subagents_hint()}
+          </p>
+        </div>
+        <button
+          id="custom-subagents"
+          type="button"
+          role="switch"
+          aria-checked={customForm.subagents}
+          aria-label={m.settings_agent_capabilities_subagents()}
+          class={customForm.subagents
+            ? "bg-signal relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors"
+            : "bg-muted relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors"}
+          onclick={() => (customForm.subagents = !customForm.subagents)}
+        >
+          <span
+            class={customForm.subagents
+              ? "bg-background size-4 translate-x-4 rounded-full shadow transition-transform"
+              : "bg-background size-4 translate-x-0.5 rounded-full shadow transition-transform"}
+          ></span>
+        </button>
       </div>
       <div class="grid gap-1.5">
         <Label for="custom-command">{m.settings_command()}</Label>

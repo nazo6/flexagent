@@ -74,11 +74,6 @@ impl AgentCatalog {
         self.extensions.get(id).cloned()
     }
 
-    /// Whether an agent (built-in, custom or full driver) is known.
-    pub fn has_agent(&self, id: &str) -> bool {
-        self.providers.contains_key(id) || self.registry.custom_agent(id).is_some()
-    }
-
     /// Whether the ID is owned by a full custom driver.
     ///
     /// Such IDs are reserved: a user custom definition cannot replace the
@@ -153,7 +148,7 @@ impl AgentCatalog {
                 sources,
                 custom: None,
                 extension: provider.extension_id().map(str::to_owned),
-                capabilities: self.registry.agent_capabilities(&definition.id),
+                capabilities: fxg_protocol::settings::AgentAcpCapabilities::default(),
                 backend: backend.kind(),
                 icon: definition.icon.clone(),
             });
@@ -230,7 +225,7 @@ impl AgentCatalog {
             let Some(mut spec) = self.registry.custom_launch_spec(&id, extra_args)? else {
                 return Err(anyhow!("custom agent {id} disappeared while resolving"));
             };
-            let capabilities = self.registry.agent_capabilities(&id);
+            let capabilities = custom.capabilities.clone();
             if let Some(extension_id) = custom.extension.as_deref() {
                 let extension = self.extension(extension_id).ok_or_else(|| {
                     anyhow!("custom agent {id} references an unknown extension: {extension_id}")
@@ -268,7 +263,7 @@ impl AgentCatalog {
                 preset.program
             )
         })?;
-        let capabilities = self.registry.agent_capabilities(&id);
+        let capabilities = fxg_protocol::settings::AgentAcpCapabilities::default();
         let mut spec = Self::preset_spec(provider.definition(), preset, program, extra_args);
         spec.driver_kind = Self::driver_kind(&backend);
         if let AgentBackend::AcpExtended(extension) = &backend {
@@ -485,7 +480,6 @@ mod tests {
             registry_url: None,
             registry_cache_ttl_secs: None,
             aliases: BTreeMap::new(),
-            capabilities: BTreeMap::new(),
             revision: 1,
             updated_at: 0,
         }
@@ -587,12 +581,16 @@ mod tests {
                 args: &["acp"],
             }),
         );
-        let mut settings = settings();
-        settings
-            .capabilities
-            .insert("demo".to_owned(), AgentAcpCapabilities { subagents: false });
+        let custom = BTreeMap::from([(
+            "demo".to_owned(),
+            CustomAgentConfig {
+                command: "demo".to_owned(),
+                capabilities: AgentAcpCapabilities { subagents: false },
+                ..Default::default()
+            },
+        )]);
         let mut catalog = AgentCatalog::with_providers(
-            AcpRegistry::new(dir.path(), &settings, BTreeMap::new()),
+            AcpRegistry::new(dir.path(), &settings(), custom),
             vec![Arc::new(provider)],
         );
         catalog.preset_lookup = |_| Some(PathBuf::from("/fake/bin/demo"));
@@ -673,13 +671,17 @@ mod tests {
             }),
         )
         .with_extension("opencode", Arc::new(OpenCodeExtension));
-        let mut on_settings = settings();
-        on_settings.capabilities.insert(
+        let on_custom = BTreeMap::from([(
             "opencode".to_owned(),
-            AgentAcpCapabilities { subagents: true },
-        );
+            CustomAgentConfig {
+                command: "opencode".to_owned(),
+                extension: Some("opencode".to_owned()),
+                capabilities: AgentAcpCapabilities { subagents: true },
+                ..Default::default()
+            },
+        )]);
         let mut on = AgentCatalog::with_providers(
-            AcpRegistry::new(dir.path(), &on_settings, BTreeMap::new()),
+            AcpRegistry::new(dir.path(), &settings(), on_custom),
             vec![Arc::new(provider)],
         );
         on.preset_lookup = |_| Some(PathBuf::from("/fake/bin/opencode"));
@@ -696,11 +698,15 @@ mod tests {
                 .any(|method| method == "opencode/session/child_update")
         );
 
-        let mut off_settings = settings();
-        off_settings.capabilities.insert(
+        let off_custom = BTreeMap::from([(
             "opencode".to_owned(),
-            AgentAcpCapabilities { subagents: false },
-        );
+            CustomAgentConfig {
+                command: "opencode".to_owned(),
+                extension: Some("opencode".to_owned()),
+                capabilities: AgentAcpCapabilities { subagents: false },
+                ..Default::default()
+            },
+        )]);
         let provider = StaticProvider::new(
             AgentDefinition {
                 id: "opencode".to_owned(),
@@ -715,7 +721,7 @@ mod tests {
         )
         .with_extension("opencode", Arc::new(OpenCodeExtension));
         let mut off = AgentCatalog::with_providers(
-            AcpRegistry::new(dir.path(), &off_settings, BTreeMap::new()),
+            AcpRegistry::new(dir.path(), &settings(), off_custom),
             vec![Arc::new(provider)],
         );
         off.preset_lookup = |_| Some(PathBuf::from("/fake/bin/opencode"));

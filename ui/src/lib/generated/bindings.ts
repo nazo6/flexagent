@@ -2,9 +2,9 @@
 /**
  *  ACP client capabilities advertised when connecting to an agent.
  *
- *  An absent entry in [`AgentSettings::capabilities`] means the defaults.
  *  Capabilities describe what this client understands, so an agent that does
- *  not know a capability simply ignores it.
+ *  not know a capability simply ignores it. Built-in agents use the defaults
+ *  (see also [`crate::client_api::AgentSummary::capabilities`]).
  */
 export type AgentAcpCapabilities = {
 	/**  Advertise `clientCapabilities.subagents` (the ACP subagents RFD). */
@@ -30,13 +30,7 @@ agent_id: string } |
 /**  Registry agent ID */
 agent_id: string;
 /**  Built-in extension ID to apply (optional) */
-extension: string | null } |
-/**  Replace the ACP capabilities advertised on connections to one agent */
-{ action: "set_capabilities";
-/**  Agent ID */
-agent_id: string;
-/**  Capabilities to advertise */
-capabilities: AgentAcpCapabilities };
+extension: string | null };
 
 /**  An authentication method advertised by an ACP agent. */
 export type AgentAuthMethodInfo = {
@@ -100,8 +94,6 @@ export type AgentSettings = {
 	registry_cache_ttl_secs: number | null,
 	/**  Agent name aliases (merged over the built-in aliases) */
 	aliases: { [key in string]: string },
-	/**  Per-agent ACP capability overrides (key = agent ID; absent = defaults) */
-	capabilities?: { [key in string]: AgentAcpCapabilities },
 	/**  Optimistic-lock revision */
 	revision: number,
 	/**  Last update time (Unix epoch ms) */
@@ -439,6 +431,8 @@ export type CustomAgentConfig = {
 	icon?: string | null,
 	/**  Provenance of this definition (manual or imported from the registry). */
 	origin?: CustomAgentOrigin | null,
+	/**  ACP client capabilities advertised on connections to this agent */
+	capabilities?: AgentAcpCapabilities,
 };
 
 /**  Where a custom agent definition came from. */
@@ -2594,12 +2588,6 @@ export type UnifiedEventPayload =
 	/**  Message for the error case */
 	error_message: string | null,
 } };
-
-/**  `PUT /api/v1/nodes/{node_id}/agents/{agent_id}/capabilities` request. */
-export type UpdateAgentCapabilitiesRequest = {
-	/**  Capabilities to advertise on connections to this agent */
-	capabilities: AgentAcpCapabilities,
-};
 
 /**  `PATCH /api/v1/nodes/{node_id}/settings/agents` request. */
 export type UpdateAgentSettingsRequest = {

@@ -52,7 +52,7 @@ use handlers::admin::{
 };
 use handlers::agents::{
     import_registry_agent, list_agents, probe_agent_config, refresh_catalog, remove_custom_agent,
-    update_agent_capabilities, upsert_custom_agent,
+    upsert_custom_agent,
 };
 use handlers::projects::{
     add_project, create_worktree, delete_provisioner, inspect_project, link_project, list_nodes,
@@ -201,10 +201,6 @@ pub fn client_router<B: ClientApiBackend>(backend: B, options: ClientApiOptions)
         .route(
             "/api/v1/nodes/{node_id}/agents/registry/{agent_id}/import",
             post(import_registry_agent::<B>),
-        )
-        .route(
-            "/api/v1/nodes/{node_id}/agents/{agent_id}/capabilities",
-            put(update_agent_capabilities::<B>),
         )
         .route(
             "/api/v1/nodes/{node_id}/agents/{agent_id}/probe",

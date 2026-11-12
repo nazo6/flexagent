@@ -6,7 +6,7 @@ use axum::extract::{Path as UrlPath, State};
 use axum::response::{IntoResponse, Response};
 use fxg_protocol::client_api::{ImportRegistryAgentRequest, ProbeAgentRequest};
 use fxg_protocol::common::AgentAction;
-use fxg_protocol::settings::{CustomAgentConfig, UpdateAgentCapabilitiesRequest};
+use fxg_protocol::settings::CustomAgentConfig;
 
 use crate::api::{ClientApiBackend, ClientApiState, ClientInfo};
 
@@ -101,29 +101,6 @@ pub(crate) async fn import_registry_agent<B: ClientApiBackend>(
             AgentAction::ImportRegistryAgent {
                 agent_id,
                 extension: request.extension,
-            },
-            client,
-        )
-        .await
-    {
-        Ok(response) => Json(response).into_response(),
-        Err(err) => err.into_response(),
-    }
-}
-
-pub(crate) async fn update_agent_capabilities<B: ClientApiBackend>(
-    State(state): State<ClientApiState<B>>,
-    Extension(client): Extension<ClientInfo>,
-    UrlPath((node_id, agent_id)): UrlPath<(String, String)>,
-    Json(request): Json<UpdateAgentCapabilitiesRequest>,
-) -> Response {
-    match state
-        .backend
-        .manage_agent(
-            &node_id,
-            AgentAction::SetCapabilities {
-                agent_id,
-                capabilities: request.capabilities,
             },
             client,
         )

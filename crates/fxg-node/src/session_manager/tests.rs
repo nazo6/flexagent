@@ -55,7 +55,6 @@ async fn setup() -> (SessionManager, MockAgent, tempfile::TempDir) {
         registry_url: None,
         registry_cache_ttl_secs: None,
         aliases: BTreeMap::new(),
-        capabilities: BTreeMap::new(),
         revision: 1,
         updated_at: 0,
     };
@@ -291,7 +290,6 @@ async fn probe_applies_extension_capability_overlay() {
         registry_url: None,
         registry_cache_ttl_secs: None,
         aliases: BTreeMap::new(),
-        capabilities: BTreeMap::new(),
         revision: 1,
         updated_at: 0,
     };
@@ -374,7 +372,6 @@ async fn full_custom_driver_starts_through_the_catalog() {
         registry_url: None,
         registry_cache_ttl_secs: None,
         aliases: BTreeMap::new(),
-        capabilities: BTreeMap::new(),
         revision: 1,
         updated_at: 0,
     };
@@ -422,7 +419,6 @@ async fn full_custom_driver_probe_uses_the_catalog_driver() {
         registry_url: None,
         registry_cache_ttl_secs: None,
         aliases: BTreeMap::new(),
-        capabilities: BTreeMap::new(),
         revision: 1,
         updated_at: 0,
     };

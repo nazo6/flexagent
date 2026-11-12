@@ -64,7 +64,6 @@ import type {
   SystemInfoResponse,
   WorkspaceDiffResponse,
   TestPairingRequest,
-  UpdateAgentCapabilitiesRequest,
   UpdateAgentSettingsRequest,
   UpdateNodeSettingsRequest,
   UpdateHubSettingsRequest,
@@ -506,19 +505,6 @@ export class ApiClient {
       "PUT",
       `/api/v1/nodes/${encodeURIComponent(nodeId)}/agents/custom/${encodeURIComponent(agentId)}`,
       { body: config },
-    );
-  }
-
-  /** `PUT /api/v1/nodes/:id/agents/:agent_id/capabilities` (per-agent ACP capabilities) */
-  updateAgentCapabilities(
-    nodeId: string,
-    agentId: string,
-    request: UpdateAgentCapabilitiesRequest,
-  ): Promise<AgentOpResponse> {
-    return this.#request(
-      "PUT",
-      `/api/v1/nodes/${encodeURIComponent(nodeId)}/agents/${encodeURIComponent(agentId)}/capabilities`,
-      { body: request },
     );
   }
 

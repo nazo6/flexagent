@@ -41,8 +41,6 @@ pub struct AgentCatalogState {
     pub aliases: BTreeMap<String, String>,
     /// Custom agent definitions
     pub custom: BTreeMap<String, CustomAgentConfig>,
-    /// Per-agent ACP capability overrides (absent = defaults)
-    pub capabilities: BTreeMap<String, fxg_protocol::settings::AgentAcpCapabilities>,
 }
 
 impl AgentCatalogState {
@@ -56,7 +54,6 @@ impl AgentCatalogState {
             cache_ttl_secs: settings.registry_cache_ttl_secs,
             aliases: settings.aliases.clone(),
             custom,
-            capabilities: settings.capabilities.clone(),
         }
     }
 }
@@ -274,15 +271,6 @@ impl AcpRegistry {
         self.catalog().custom.get(id).cloned()
     }
 
-    /// Returns the effective ACP capabilities for an agent.
-    pub fn agent_capabilities(&self, id: &str) -> fxg_protocol::settings::AgentAcpCapabilities {
-        self.catalog()
-            .capabilities
-            .get(id)
-            .cloned()
-            .unwrap_or_default()
-    }
-
     /// Runner that can launch the `npx` / `uvx` distribution (`None` if neither exists).
     pub fn package_runner(agent: &RegistryAgent) -> Option<&'static str> {
         if agent.distribution.npx.is_some() && which::which("npx").is_ok() {
@@ -451,7 +439,7 @@ impl AcpRegistry {
                     _ => "-".to_owned(),
                 };
                 let extension = config.extension.clone();
-                let capabilities = self.agent_capabilities(&id);
+                let capabilities = config.capabilities.clone();
                 AgentListEntry {
                     name: config.name.clone().unwrap_or_else(|| id.clone()),
                     backend: AgentBackendKind::Acp,
@@ -519,6 +507,7 @@ impl AcpRegistry {
             extension,
             description: agent.description.clone(),
             icon: agent.icon.clone(),
+            capabilities: Default::default(),
             origin: Some(CustomAgentOrigin::Registry {
                 id: agent.id.clone(),
                 version: agent.version.clone(),
@@ -737,7 +726,6 @@ mod tests {
             registry_url: None,
             registry_cache_ttl_secs: None,
             aliases: BTreeMap::new(),
-            capabilities: BTreeMap::new(),
             revision: 1,
             updated_at: 0,
         }
