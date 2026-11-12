@@ -126,7 +126,7 @@
   }
 </script>
 
-<ul class="flex list-none flex-col gap-4 p-0">
+<ul class="flex list-none flex-col gap-6 p-0">
   {#each groupedItems as group (group.key)}
     <li>
       {#if group.kind === "subagent"}
@@ -151,10 +151,11 @@
               text={item.text}
               canFork={fork.canFork}
               forkReason={fork.reason}
+              prominent={item.seq === lastForkableSeq}
               onfork={() => onfork?.(item)}
             />
             <div
-              class="bg-user-message text-foreground max-w-[82%] rounded-xl rounded-br-sm py-2.5 pl-4 pr-8 md:pr-4"
+              class="bg-user-message text-foreground max-w-[82%] rounded-xl rounded-br-sm px-4 py-2.5"
             >
               {#if item.attachments.length > 0}
                 <div class="mb-1 flex flex-wrap gap-1.5">
@@ -189,6 +190,7 @@
               text={item.text}
               canFork={fork.canFork}
               forkReason={fork.reason}
+              prominent={item.seq === lastForkableSeq}
               onfork={() => onfork?.(item)}
             />
             <span
@@ -196,7 +198,7 @@
             >
               <BotIcon class="size-3" />
             </span>
-            <div class="min-w-0 max-w-[92%] flex-1 pr-8 md:pr-0">
+            <div class="min-w-0 max-w-[92%] flex-1">
               <MarkdownText
                 text={item.text}
                 streaming={item.streaming}

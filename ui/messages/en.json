@@ -1,9 +1,9 @@
 {
   "$schema": "https://inlang.com/schema/inlang-message-format",
-  "chat_action_actions": "Message actions",
   "chat_action_copied": "Copied",
   "chat_action_copy": "Copy",
   "chat_action_fork": "Fork from here",
+  "chat_action_fork_short": "Fork",
   "chat_action_fork_latest": "This agent can only fork from the latest message.",
   "chat_action_fork_running": "Wait until the current turn finishes before forking.",
   "chat_action_fork_unavailable": "This agent does not support forking.",

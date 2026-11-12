@@ -424,7 +424,7 @@
         <div
           bind:this={chatContainer}
           onscroll={handleScroll}
-          class="app-scroll-centered h-full overflow-y-auto px-4 py-5 md:px-8"
+          class="app-scroll-centered h-full overflow-y-auto px-4 pt-5 pb-8 md:px-8"
         >
           <div class="mx-auto flex max-w-[760px] flex-col gap-4">
             <ProvisioningLogCard lines={provisioningLines} />
