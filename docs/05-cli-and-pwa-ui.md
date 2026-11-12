@@ -31,8 +31,8 @@ Web UI をメインのインターフェースとするローカルファース�
 | **`fxg session show <id>`**                                                 | セッション詳細・状態・Worktree パス・イベント統計を表示                                                                                                                                                  | `--events <N>` (既定 20)<br/>`--json`                                                                                                                                                                                                            |
 | **`fxg session prompt <id> <text>`**                                        | 既存セッションへ非対話（ヘッドレス）でプロンプトを送信。停止済みはネイティブ復元で自動再開                                                                                                               | `--attach <PATH>`<br/>`--wait`                                                                                                                                                                                                                   |
 | **`fxg session cancel <id>`**                                               | 実行中ターンだけをキャンセルし、セッションは維持                                                                                                                                                         | -                                                                                                                                                                                                                                                |
-| **`fxg session stop <id>`**                                                 | セッションを正常停止                                                                                                                                                                                     | -                                                                                                                                                                                                                                                |
-| **`fxg session kill <id>`**                                                 | セッションの子プロセスツリー (Job Object) を強制終了                                                                                                                                                     | -                                                                                                                                                                                                                                                |
+| **`fxg session stop <id>`**                                                 | セッションを終了する（実行中のターンを停止）                                                                                                                                                             | -                                                                                                                                                                                                                                                |
+| **`fxg session kill <id>`**                                                 | セッションのプロセスツリーを強制終了する                                                                                                                                                                 | -                                                                                                                                                                                                                                                |
 | **`fxg session resume <id>`**                                               | 停止済みセッションを同じ ID のまま再開                                                                                                                                                                   | `--no-open`<br/>`-q, --quiet`<br/>`--replay`                                                                                                                                                                                                     |
 | **`fxg session fork <id>`**                                                 | ACP ネイティブの `session/fork` で分岐                                                                                                                                                                   | `-w, --worktree <BRANCH>`<br/>`--base <BRANCH>`<br/>`--no-open`<br/>`-q, --quiet`                                                                                                                                                                |
 | **`fxg session import <agent-session-id>`**                                 | エージェント側の既存セッションをネイティブ復元で取り込む                                                                                                                                                 | `--agent <ID>` (必須)<br/>`--cwd <PATH>`<br/>`--title <TITLE>`                                                                                                                                                                                   |
@@ -295,9 +295,11 @@ Android スマートフォン（ホーム画面追加PWA）のすべてを単一
    - 「＋新規セッション」ボタンから、以下のいずれかを選択して起動：
      - **常駐ノードの既存Worktree**、または
        **「新規Worktree（ブランチ名指定）を作成して起動」**
-     - **「＋一時VMをスポーンして起動（Local Docker / Local Incus VM / Google
-       Colab Pro）」**（選択したブランチを自動クローンし、`mise`/`uv`
-       で必要ツールを自動セットアップして開始）
+     - **「＋一時VMをスポーンして起動（例: Local Docker / Local Incus VM / Google
+       Colab Pro）」**。リポジトリの clone やツールのセットアップは、プロビジョナーの
+       起動コマンド / コンテナイメージ / VM テンプレート側で行います。fxg は
+       `FXG_GIT_URL` / `FXG_GIT_BRANCH` などの環境変数を渡しますが、clone や
+       `mise` / `uv` の自動導入は行いません。
    - 不要になったWorktreeの削除もここから実行。ACPネイティブForkに対応した
      エージェントのセッションは、セッション詳細の Fork から同じノード上に分岐できる。
 3. **セッション詳細（チャット & ワークスペース）画面**:
@@ -359,22 +361,32 @@ Android スマートフォン（ホーム画面追加PWA）のすべてを単一
      を自動保持）。
    - ノード側でリモートPTYが無効化（`allow_remote_pty = false`）されている場合、Terminalペインに「リモートPTYはセキュリティポリシーにより無効化されています。ローカル端末（`localhost:7860`
      または CLI）からご利用ください」と安全にフォールバック表示。
-6. **設定画面（タブ構成）**:
-   - **全般**:
-     クライアント認証トークンの再生成とノードペアリング（ノード個別トークンの発行・失効）。
-   - **ハブ接続**（ノード接続時のみ）:
-     ハブ URL とペアリングトークンの入力、接続テスト、ペアリング / 解除、
-     接続状態（未設定 / 接続中 / 接続済み / 認証エラー / 接続失敗）と失敗理由の表示、
-     自分の `node_id` のコピー。接続先を変える場合は「全履歴を再送し、
-     旧ハブのデータは残る」旨を表示する。
-   - **エージェント管理**: ノードで利用可能なエージェント (builtin の
-     native CLI / カスタム定義) を一覧表示し、カスタム ACP
-     エージェントの追加・編集・削除を行う。builtin にないエージェントは
-     「Import from registry」から ACP Registry の配布レシピを custom 定義として
-     取り込める。binary は `PATH`、npx/uvx はパッケージランナーを使って
-     コマンドを生成し、import 後は通常の custom として編集・削除できる。
-   - **監査ログ**: 誰が・いつ・どのLAN/VPN
-     IPからどの承認操作やWorktree作成を行ったかをタイムライン形式で確認。
+6. **設定画面（スコープ + タブ構成）**:
+   設定は所有者ごとに **Hub** / **Node** / **Browser** の3スコープに分かれ、
+   スコープごとにタブが切り替わります。
+   - **Hub**（ハブ接続時のみ）:
+     - **Process**: `config.toml` の起動設定（読み取り専用）と診断情報。
+     - **General**: ハブ設定 (VAPID subject) とクライアント認証トークンの再生成。
+     - **Pairing tokens**: ノード個別トークンの発行・失効・一覧。
+     - **Audit log**: ハブ経由操作の監査ログ。
+   - **Node**（ローカルノード接続時は自分のノード、ハブ接続時はオンラインの対象ノード）:
+     - **Process**（ローカルノード接続時のみ）: 起動設定と診断情報。
+     - **General**: 表示名 / `allow_remote_pty` / `project_scan_dirs` / `tray` などの
+       ノード所有設定。ローカルノード接続時はクライアント認証トークンの再生成も可能。
+     - **Hub pairing**: ハブ URL とペアリングトークンの入力、接続テスト、
+       ペアリング / 解除、接続状態（未設定 / 接続中 / 接続済み / 認証エラー /
+       接続失敗）と失敗理由の表示、自分の `node_id` のコピー。接続先を変える場合は
+       「全履歴を再送し、変更前のハブのデータは残る」旨を表示する。
+     - **Agents**: ノードで利用可能なエージェント (builtin の native CLI /
+       カスタム定義) を一覧表示し、カスタム ACP エージェントの追加・編集・削除を行う。
+       builtin にないエージェントは「Import from registry」から ACP Registry の
+       配布レシピを custom 定義として取り込める。binary は `PATH`、npx/uvx は
+       パッケージランナーを使ってコマンドを生成し、import 後は通常の custom として
+       編集・削除できる。
+     - **Audit log**（ローカルノード接続時のみ）: ローカル直結操作の監査ログ。
+   - **Browser**:
+     - **Appearance**: テーマ（システム / ライト / ダーク）、パレット、
+       送信ショートカット、ピン留めの管理。
 
 ### 3.3 Android PWA & Web Push (VAPID) の実装詳細
 

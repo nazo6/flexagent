@@ -76,6 +76,7 @@ ElicitationRequest    → elicitation_requests 行を upsert (status = 'pending'
 ElicitationResolved   → elicitation_requests.status / content_json / resolved_by /
                         resolved_at
 SessionArchived       → sessions.archived_at (archived = false で NULL に戻す)
+SessionPermissionPolicyChanged → sessions.permission_policy
 SessionDeleted        → sessions.deleted_at = created_at + 本文イベントのパージ
                         (本イベント (tombstone) と sessions 行は残す)
 ```
@@ -182,6 +183,7 @@ CREATE TABLE sessions (
     available_commands_json TEXT NOT NULL DEFAULT '[]', -- ACP AvailableCommand[]
     config_options_json     TEXT NOT NULL DEFAULT '[]', -- ACP ConfigOption[]
     usage_json      TEXT,                           -- SessionUsage (最新の usage_update。NULL = 未受信)
+    permission_policy TEXT NOT NULL DEFAULT 'ask',  -- セッション単位の承認ポリシー ('ask' | 'auto_allow_all')
     fork_supported  INTEGER NOT NULL DEFAULT 0,     -- エージェントがACPネイティブForkに対応しているか
     last_node_seq   INTEGER NOT NULL DEFAULT 0,     -- ノード: 永続化済み最新 node_seq（採番は +1）/ ハブ: 投影に適用済み最大 node_seq
     synced_up_to_node_seq INTEGER NOT NULL DEFAULT 0, -- ノード専用: ハブが ACK した水位（ハブ側は常に 0 で未使用）
@@ -202,7 +204,7 @@ CREATE TABLE session_events (
     event_id        TEXT NOT NULL UNIQUE,           -- UUID v7 (冪等適用・重複排除)
     session_id      TEXT NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
     node_seq        INTEGER NOT NULL,               -- セッション内の順序番号 (1, 2, 3...)。実行ノードのみが採番
-    event_type      TEXT NOT NULL,                  -- 'session_created' | 'session_title_changed' | 'session_agent_bound' | 'user_message' | 'agent_message' | 'agent_thought' | 'tool_call' | 'plan' | 'permission_request' | 'permission_resolved' | 'elicitation_request' | 'elicitation_resolved' | 'session_archived' | 'session_deleted' | 'terminal_output' | 'status_change' | 'capabilities_updated' | 'provisioning_log'
+    event_type      TEXT NOT NULL,                  -- 'session_created' | 'session_title_changed' | 'session_agent_bound' | 'user_message' | 'agent_message' | 'agent_thought' | 'tool_call' | 'plan' | 'permission_request' | 'permission_resolved' | 'elicitation_request' | 'elicitation_resolved' | 'session_archived' | 'session_permission_policy_changed' | 'session_deleted' | 'terminal_output' | 'capabilities_updated' | 'provisioning_log' | 'usage_updated' | 'turn_ended' | 'compaction_updated' | 'status_change'
     payload_json    TEXT NOT NULL,                  -- 構造化ペイロード (UnifiedEventPayload のJSON。正データ)
     searchable_text TEXT,                           -- FTS5全文検索用のプレーンテキスト抽出 (受信時に payload_json から生成。terminal_output 等のバイナリ系は対象外)
     created_at      INTEGER NOT NULL,
@@ -360,6 +362,7 @@ CREATE INDEX idx_incidents_last_seen ON incidents(last_seen_at DESC);
 > [`changelog/2026-11-10-architecture-simplification.md`](changelog/2026-11-10-architecture-simplification.md)
 > を参照。
 >
+> `0016_custom_agent_extension.sql` は `custom_agents` に `extension` を追加する。
 > `0017_custom_agent_origin.sql` は `custom_agents` に `description` / `icon` /
 > `origin_json` を追加し、npx/uvx の有効化を保持していた
 > `enabled_package_agents` を DROP する。Registry の import は custom 定義として

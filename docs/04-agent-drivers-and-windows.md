@@ -416,9 +416,11 @@ systemd / launchd / Task Scheduler に委譲します。
 ### 5.5 タスクトレイ常駐 (`fxg node start --tray`)
 
 `fxg node start --tray` で起動すると、ノードはタスクトレイに常駐し、メニューから
-状態確認と操作ができます（既定は無効。`~/.flexagent/config.toml` の
-`[node] tray = true` で常時有効化、`--no-tray` で一時的に無効化）。
-`fxg internal stdio`（一時VM・プロビジョナー）では常に無効です。
+状態確認と操作ができます（既定は無効）。常時有効化はノードの Web UI
+（設定 > ノード > 一般の Tray）または Client API で `node.db` の
+`node_settings.tray` を `true` にするか、`fxg node start --tray` を使います。
+`--no-tray` は起動時の一時的な無効化です。`fxg internal stdio`
+（一時VM・プロビジョナー）では常に無効です。
 
 - **メニュー**:
   - ステータス表示: ハブ接続状態（●接続中 / ○スタンドアロン）、
