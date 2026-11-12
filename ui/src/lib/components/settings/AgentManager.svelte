@@ -318,8 +318,8 @@
   {:else}
     {#each available as agent (agent.id)}
       <Card class="gap-2 p-4">
-        <div class="flex flex-wrap items-start justify-between gap-2">
-          <div class="flex min-w-0 flex-col gap-0.5">
+        <div class="flex items-start gap-2">
+          <div class="flex min-w-0 flex-1 flex-col gap-0.5">
             <div class="flex flex-wrap items-center gap-2">
               <AgentIcon icon={agent.icon} class="size-4" />
               <h2 class="font-medium">{agent.name}</h2>
@@ -356,7 +356,7 @@
             {/if}
           </div>
 
-          <div class="flex flex-wrap items-center gap-1.5">
+          <div class="flex shrink-0 items-center gap-1.5">
             {#if agent.custom_config !== null}
               <Button
                 variant="ghost"
@@ -490,12 +490,10 @@
               </p>
             {:else}
               {#each importable as agent (agent.id)}
-                <div
-                  class="flex flex-wrap items-start justify-between gap-2 rounded-md border p-2.5"
-                >
-                  <div class="flex min-w-0 items-start gap-2">
+                <div class="flex items-start gap-2 rounded-md border p-2.5">
+                  <div class="flex min-w-0 flex-1 items-start gap-2">
                     <AgentIcon icon={agent.icon} class="mt-0.5 size-4" />
-                    <div class="flex min-w-0 flex-col gap-0.5">
+                    <div class="flex min-w-0 flex-1 flex-col gap-0.5">
                       <div class="flex flex-wrap items-center gap-2">
                         <span class="text-sm font-medium">{agent.name}</span>
                         <span class="text-muted-foreground font-mono text-[13px]">{agent.id}</span>
@@ -523,7 +521,7 @@
                       {/if}
                     </div>
                   </div>
-                  <div class="flex flex-wrap items-center gap-1.5">
+                  <div class="flex shrink-0 items-center gap-1.5">
                     {#if agent.imported}
                       <span class="text-muted-foreground text-[11px]">
                         {m.settings_catalog_imported_hint()}
