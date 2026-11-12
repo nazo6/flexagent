@@ -59,7 +59,7 @@
   const healthText = $derived.by(() => {
     const parts = [sync.wsConnected ? m.shell_connected() : m.shell_disconnected()];
     if (isLocalNode) {
-      parts.push(m.shell_central_status({ status: hubStatusLabel(hubState) }));
+      parts.push(m.shell_hub_status({ status: hubStatusLabel(hubState) }));
     }
     if (sync.unsyncedEventCount > 0) {
       parts.push(m.shell_unsynced_count({ count: sync.unsyncedEventCount }));
