@@ -219,7 +219,7 @@
 
       <ErrorBanner onaction={handleProblemAction} />
 
-      <main class="relative flex-1 overflow-y-auto">
+      <main class="app-scroll relative flex-1 overflow-y-auto">
         {@render children()}
       </main>
     </div>

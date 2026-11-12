@@ -293,6 +293,13 @@
   .desk-page {
     @apply mx-auto flex w-full max-w-[1120px] flex-col gap-5 px-4 py-6 md:px-8 md:py-8;
   }
+  /*
+   * Main scroll area: always reserve the scrollbar gutter so switching tabs or
+   * pages with different heights does not shift the layout horizontally.
+   */
+  .app-scroll {
+    scrollbar-gutter: stable;
+  }
   .desk-page-narrow {
     @apply mx-auto flex w-full max-w-[760px] flex-col gap-5 px-4 py-6 md:py-8;
   }
