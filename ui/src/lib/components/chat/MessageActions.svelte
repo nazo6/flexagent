@@ -45,6 +45,18 @@
   }
 </script>
 
+{#snippet metaLabel(hidden: boolean)}
+  <span
+    class="text-muted-foreground desk-mono pointer-events-none max-w-[45%] min-w-0 truncate text-[11px]"
+    class:shrink-0={!hidden}
+    class:invisible={hidden}
+    aria-hidden={hidden ? "true" : undefined}
+    title={hidden ? undefined : (metaTitle ?? meta)}
+  >
+    {meta}
+  </span>
+{/snippet}
+
 <!--
   The action row is the normal-flow boundary below a message. Its own height
   becomes the space under the message, so the layout follows its content instead
@@ -55,6 +67,14 @@
   class="message-actions flex w-full items-center gap-2"
   class:message-actions-prominent={prominent}
 >
+  <!--
+    A hidden copy of the metadata balances the row, so the action cluster keeps
+    the same centered position whether or not a message shows metadata. Only the
+    hidden copy shrinks, so on narrow rows the visible metadata stays readable.
+  -->
+  {#if meta}
+    {@render metaLabel(true)}
+  {/if}
   <span class="message-actions-content bg-border/60 h-px flex-1"></span>
   <div
     class="message-actions-content bg-popover border-border flex items-center gap-0.5 rounded-md border p-0 shadow-sm"
@@ -87,11 +107,6 @@
   </div>
   <span class="message-actions-content bg-border/60 h-px flex-1"></span>
   {#if meta}
-    <span
-      class="text-muted-foreground desk-mono pointer-events-none max-w-[45%] shrink-0 truncate text-[11px]"
-      title={metaTitle ?? meta}
-    >
-      {meta}
-    </span>
+    {@render metaLabel(false)}
   {/if}
 </div>
