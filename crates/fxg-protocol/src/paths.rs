@@ -409,8 +409,13 @@ mod tests {
     #[test]
     fn os_layout_uses_the_application_directory() {
         let roots = Roots::from_os();
-        assert!(roots.config().ends_with(APP_DIR_NAME));
-        assert!(roots.data().ends_with(APP_DIR_NAME));
-        assert!(roots.cache().ends_with(APP_DIR_NAME));
+        for root in [roots.config(), roots.data(), roots.cache()] {
+            assert!(
+                root.components()
+                    .any(|component| component.as_os_str() == APP_DIR_NAME),
+                "{} must contain the application directory",
+                root.display()
+            );
+        }
     }
 }
