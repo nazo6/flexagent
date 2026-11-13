@@ -386,6 +386,13 @@ Android スマートフォン（ホーム画面追加PWA）のすべてを単一
      ボタンは付けず、タップでアプリのセッション / Inbox を開きます
      (`allow_option_id` / `reject_option_id` は `null`)。
 
+  4. **ターン完了の通知**: ハブが `Running` を観測したセッションが `Idle` /
+     `Error` になった場合に `[flexagent] Turn finished (<node>) — <session title>`
+     を送ります。`Running` を観測していない `Idle`（セッション作成直後や重複イベント）
+     と resync の履歴再生では送りません。`Running` の追跡はハブ状態で行い、
+     ハブ再起動時は `hub.db` の実行中セッションから復元します。アクションボタンは
+     無く、タップでセッションを開きます。
+
 ### 3.4 統合 Web ターミナルと抽象化設計 (`ITerminalAdapter`)
 
 Webターミナルは、GhosttyのネイティブVTエミュレーション精度とCanvas
