@@ -4,13 +4,6 @@ use std::path::PathBuf;
 
 use fxg_protocol::common::{IncidentLevel, IncidentSource};
 
-/// Windows `ERROR_PIPE_BUSY` (231).
-///
-/// Every instance of the named pipe is connected, so `WaitNamedPipe` should be used.
-/// Defined here because both the hub and the client refer to it.
-#[cfg(windows)]
-pub(crate) const PIPE_BUSY: i32 = 231;
-
 /// Node daemon error.
 #[derive(Debug, thiserror::Error)]
 pub enum NodeError {
