@@ -798,7 +798,7 @@ pub(super) async fn run_acp_process(
                 // Build the session. On failure the connection health is unknown, so
                 // return the error and shut the process down (the caller falls back
                 // to a cold start).
-                let (session, acp_session_id, context_restored, capabilities_state) =
+                let (session, acp_session_id, context_restored, capabilities_state, replayed) =
                     match build_session(
                         &cx,
                         &agent_capabilities,
@@ -859,6 +859,7 @@ pub(super) async fn run_acp_process(
                     ingress_tx,
                     ingress_rx,
                     guards,
+                    replayed,
                 )
                 .await;
                 contexts

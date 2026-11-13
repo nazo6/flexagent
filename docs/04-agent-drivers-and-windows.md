@@ -208,6 +208,16 @@ ACP のセッション更新は `sessionId` を持つが、`agent-client-protoco
 扱う。
 
 - root 宛の `session/update` は従来どおり `ActiveSession` が受ける。
+- root 宛の更新はターン終了後も読み続ける。エージェントによってはプロンプト
+  応答の後にバックグラウンドの報告を送る（agy の teamwork など）ため、
+  アイドル中も `read_update` を select に含める。`PromptResponse` が無いので、
+  最後の更新から一定時間（`IDLE_FLUSH_DELAY`）静かになった時点で結合中の
+  ストリームを完了イベントとして確定する。次のプロンプト開始時にも保留分を
+  確定してから送る。
+- `user_message_chunk`（ターン先頭のユーザーメッセージ echo）を境界として、
+  それ以前に蓄積した root のストリームを確定する。agy のように「次の
+  プロンプトが来るまでバックグラウンドの報告を送らない」エージェントでは、
+  報告が新ターンの回答と連結されるのを防ぐ。
 - 子セッション宛の `session/update` は、`subagent_update` で子を知った時点で
   子ごとの dynamic handler を登録して受ける。ハンドラは子の ID 以外を
   `Handled::No` にして root の経路を壊さない。
@@ -403,6 +413,36 @@ ACP は `initialize` ではモデル一覧を返さず、`session/new` のレス
   `Default` のみを表示し、エージェントを変更したときは選択を `Default` に戻す。
   `category = "mode"` の `configOption` はモード専用の pill に投影されるため、
   モデル pill 列には出さない。
+
+### 4.5 外部セッションの発見と取り込み（手動同期）
+
+ACP `session/list`（安定）を使い、fxg がまだ管理していないエージェント側の
+セッションを一覧し、明示操作で取り込む。方針は **「発見は自動相当（読み取り
+専用）、取り込みは明示」** であり、バックグラウンドで勝手に fxg セッションを
+作らない。
+
+- **発見**: ノードはエージェントを短命プロセスで起動し、`initialize` の
+  `sessionCapabilities.list` を確認して `session/list` をカーソルでページング
+  する。`session/new` は作らない。結果は短時間キャッシュし、UI の「今すぐ
+  同期」はキャッシュを迂回する。エージェントごとにタイムアウトと全体予算を
+  設け、1つの失敗で全体を落とさず `agents[].error` として返す。
+- **取り込み**: 一覧には `imported_session_id`（既存 fxg セッション）を付け、
+  UI は「開く」を出す。未取り込みのみ `POST /api/v1/sessions/import` を呼ぶ。
+  外部 CLI が同じセッションを使用中の二重クライアントを避けるため、自動では
+  取り込まない。
+- **履歴ミラー**: `mirror_history: true` は `session/resume` より
+  `session/load` を優先する。`session/load` の replay 通知は live と同じ
+  正規化経路へ流し、`Import` モードでのみ replay のユーザーメッセージを
+  `client_source = "import"` の `UserMessage` として生成する（live ターンは
+  従来どおり manager が記録する）。`loadSession` 非対応なら
+  `HISTORY_UNAVAILABLE` を返し、クライアントは履歴なしの取り込みに切り替える。
+- **重複排除とロールバック**: 生きている `(agent_id, agent_session_id)` を
+  重複とみなす。取り込みの起動に失敗した行は `SessionDeleted` でロールバックし、
+  幽霊セッションを残さない。
+- **制約**: `session/list` 非対応のエージェントは ACP 経由では発見できない。
+  各ツールのローカル保存を直接読むフォールバックは持たない。replay には
+  メッセージ単位のタイムスタンプが無いため、取り込んだイベントの時刻は
+  取り込み時刻になる（表示順は `node_seq` で保たれる）。
 
 ## 5. Windows サポートと PTY 双方向制御 (`crates/fxg-pty`)
 

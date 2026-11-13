@@ -58,6 +58,31 @@ pub struct SessionFilter {
 /// Context character count for LIKE search and snippet generation.
 const SNIPPET_CONTEXT_CHARS: usize = 40;
 
+/// Finds the live session that already owns an agent-side session.
+///
+/// Deleted (tombstone) sessions are ignored so a rolled-back / removed import is
+/// offered again on the next discovery.
+pub async fn find_session_by_agent_session(
+    pool: &SqlitePool,
+    agent_id: &str,
+    agent_session_id: &str,
+) -> Result<Option<String>, DbError> {
+    let session_id = sqlx::query_scalar!(
+        r#"
+        SELECT session_id AS "session_id!"
+          FROM sessions
+         WHERE agent_id = ? AND agent_session_id = ? AND deleted_at IS NULL
+         ORDER BY updated_at DESC
+         LIMIT 1
+        "#,
+        agent_id,
+        agent_session_id,
+    )
+    .fetch_optional(pool)
+    .await?;
+    Ok(session_id)
+}
+
 /// Retrieves the session list (descending by update time).
 ///
 /// Deleted (tombstone) sessions are always excluded. Archived sessions are excluded when

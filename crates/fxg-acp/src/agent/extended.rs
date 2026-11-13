@@ -42,6 +42,14 @@ impl AgentDriver for ExtendedAcpDriver {
         DriverKind::AcpExtended
     }
 
+    async fn list_sessions(
+        &self,
+        launch: &crate::driver::AgentLaunchSpec,
+        cwd: &std::path::Path,
+    ) -> anyhow::Result<crate::driver::AgentSessionList> {
+        self.base.list_sessions(launch, cwd).await
+    }
+
     async fn start_session(
         &self,
         mut req: StartSessionRequest,

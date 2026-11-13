@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        SELECT session_id AS \"session_id!\"\n          FROM sessions\n         WHERE agent_id = ? AND agent_session_id = ? AND deleted_at IS NULL\n         ORDER BY updated_at DESC\n         LIMIT 1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "session_id!",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "sessions",
+            "name": "session_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "a4357c1bbad0afbfa50f752cc51565463cc0d8177e6dae9f0cb4968c97a3f913"
+}

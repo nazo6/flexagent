@@ -280,6 +280,45 @@ pub(crate) async fn import_session<B: ClientApiBackend>(
     }
 }
 
+/// `GET /api/v1/sessions/external` query.
+#[derive(Debug, serde::Deserialize)]
+pub(crate) struct ExternalSessionQuery {
+    /// Node to query (hub only; omitted on a local node)
+    node_id: Option<String>,
+    /// Comma-separated agent IDs (omitted = every available agent)
+    agent: Option<String>,
+    /// Bypass the node's short-lived discovery cache
+    #[serde(default)]
+    force: bool,
+}
+
+/// `GET /api/v1/sessions/external`
+pub(crate) async fn list_external_sessions<B: ClientApiBackend>(
+    State(state): State<ClientApiState<B>>,
+    Query(query): Query<ExternalSessionQuery>,
+) -> Response {
+    let agents: Vec<String> = query
+        .agent
+        .as_deref()
+        .map(|agent| {
+            agent
+                .split(',')
+                .map(str::trim)
+                .filter(|agent| !agent.is_empty())
+                .map(str::to_owned)
+                .collect()
+        })
+        .unwrap_or_default();
+    match state
+        .backend
+        .list_external_sessions(query.node_id.as_deref(), &agents, query.force)
+        .await
+    {
+        Ok(response) => Json(response).into_response(),
+        Err(err) => err.into_response(),
+    }
+}
+
 pub(crate) async fn respond_permission<B: ClientApiBackend>(
     State(state): State<ClientApiState<B>>,
     Extension(client): Extension<ClientInfo>,

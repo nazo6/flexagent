@@ -319,6 +319,15 @@ impl Db {
         queries::get_session(&self.pool, session_id).await
     }
 
+    /// Finds the live session that already owns an agent-side session.
+    pub async fn find_session_by_agent_session(
+        &self,
+        agent_id: &str,
+        agent_session_id: &str,
+    ) -> Result<Option<String>, DbError> {
+        queries::find_session_by_agent_session(&self.pool, agent_id, agent_session_id).await
+    }
+
     /// Resolves the default execution directory path (binding first, then latest session).
     pub async fn resolve_default_local_path(
         &self,

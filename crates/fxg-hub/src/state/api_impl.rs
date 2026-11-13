@@ -8,15 +8,15 @@ use fxg_db::{Db, PushSubscriptionRecord};
 use fxg_protocol::CommandId;
 use fxg_protocol::client_api::{
     AgentOpResponse, AgentsResponse, ConnectionRole, CreateSessionRequest, CreateSessionResponse,
-    CreateWorktreeRequest, IssueNodeTokenRequest, IssueNodeTokenResponse, KillSwitchResponse,
-    NodeTokenSummary, NodeTokensResponse, ProjectLinkRequest, ProjectLinkResponse,
-    ProjectScanRequest, ProjectScanResponse, ProjectUnlinkRequest, ProjectUnlinkResponse,
-    ProvisionersResponse, PruneWorktreesRequest, PushSubscribeRequest, PushSubscribeResponse,
-    RemoveWorktreeRequest, RespondElicitationRequest, RespondElicitationResponse,
-    RespondPermissionRequest, RespondPermissionResponse, ResumeSessionRequest,
-    ResumeSessionResponse, RotateAuthTokenResponse, SessionArchiveRequest, SessionArchiveResponse,
-    SessionImportRequest, SessionImportResponse, SessionRenameRequest, SessionRenameResponse,
-    SupportBundleConfig, WorktreeInfo, WorktreesResponse,
+    CreateWorktreeRequest, ExternalSessionListResponse, IssueNodeTokenRequest,
+    IssueNodeTokenResponse, KillSwitchResponse, NodeTokenSummary, NodeTokensResponse,
+    ProjectLinkRequest, ProjectLinkResponse, ProjectScanRequest, ProjectScanResponse,
+    ProjectUnlinkRequest, ProjectUnlinkResponse, ProvisionersResponse, PruneWorktreesRequest,
+    PushSubscribeRequest, PushSubscribeResponse, RemoveWorktreeRequest, RespondElicitationRequest,
+    RespondElicitationResponse, RespondPermissionRequest, RespondPermissionResponse,
+    ResumeSessionRequest, ResumeSessionResponse, RotateAuthTokenResponse, SessionArchiveRequest,
+    SessionArchiveResponse, SessionImportRequest, SessionImportResponse, SessionRenameRequest,
+    SessionRenameResponse, SupportBundleConfig, WorktreeInfo, WorktreesResponse,
 };
 use fxg_protocol::common::{
     AgentAction, CommandResult, ComponentHealth, ComponentName, DiffScope, ErrorCode,
@@ -491,6 +491,7 @@ impl ClientApiBackend for HubState {
                     agent_session_id: request.agent_session_id.clone(),
                     cwd: request.cwd.clone(),
                     title: request.title.clone(),
+                    mirror_history: request.mirror_history,
                 },
             )
             .await?;
@@ -514,6 +515,30 @@ impl ClientApiBackend for HubState {
             session_id,
             command_id: request.command_id,
         })
+    }
+
+    async fn list_external_sessions(
+        &self,
+        node_id: Option<&str>,
+        agents: &[String],
+        force: bool,
+    ) -> Result<ExternalSessionListResponse, ApiError> {
+        let node_id = node_id.ok_or_else(|| {
+            ApiError::bad_request("node_id is required to list external sessions through the hub")
+        })?;
+        let response = self
+            .node_rpc(
+                &fxg_protocol::NodeId::from(node_id),
+                NodeRpcRequest::ListExternalSessions {
+                    agents: agents.to_vec(),
+                    force,
+                },
+            )
+            .await?;
+        match response {
+            NodeRpcResponse::ExternalSessions { response } => Ok(response),
+            _ => Err(ApiError::internal("unexpected node RPC response")),
+        }
     }
 
     async fn respond_permission(

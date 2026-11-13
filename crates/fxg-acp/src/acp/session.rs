@@ -33,6 +33,7 @@ pub(super) async fn build_session(
     SessionId,
     bool,
     Arc<Mutex<SessionCapabilitiesState>>,
+    Vec<SessionNotification>,
 )> {
     // Acquire the session (native fork / new / session/resume / session/load)
     let acquired = if let Some(source_id) = params.fork_from.as_deref() {
@@ -76,8 +77,13 @@ pub(super) async fn build_session(
             Err(err) => return Err(anyhow!("failed to create acp session: {err}")),
         }
     };
-    let session = acquired.session;
-    let context_restored = acquired.is_resumed;
+    let AcquiredSession {
+        session,
+        is_resumed: context_restored,
+        modes: acquired_modes,
+        config_options: acquired_config_options,
+        replayed,
+    } = acquired;
     let acp_session_id = session.session_id().clone();
     // Register session information (referenced by the fs / terminal handlers)
     contexts.lock().expect("session contexts poisoned").insert(
@@ -134,7 +140,7 @@ pub(super) async fn build_session(
     // OpenCode only report the selector as `configOptions[category = mode]` and
     // reject those IDs in `session/set_mode`, so use whichever channel the agent
     // reports.
-    let mode_option = mode_config_option(acquired.config_options.as_deref().unwrap_or_default());
+    let mode_option = mode_config_option(acquired_config_options.as_deref().unwrap_or_default());
     let mode_via_config = mode_option.is_some();
     let mut initial_mode_applied = false;
     if let Some(mode_id) = params.initial_mode.as_ref() {
@@ -173,10 +179,10 @@ pub(super) async fn build_session(
     // just applied so the first `CapabilitiesUpdated` matches the session state
     // (the agent usually does not emit a config update for `set_config_option`).
     let (modes, mut current_mode, mut config_options) = session_capabilities(
-        acquired.modes.as_ref(),
+        acquired_modes.as_ref(),
         applied_config_options
             .as_deref()
-            .or(acquired.config_options.as_deref()),
+            .or(acquired_config_options.as_deref()),
     );
     for setting in &params.initial_config {
         if let Some(option) = config_options
@@ -235,7 +241,76 @@ pub(super) async fn build_session(
         acp_session_id,
         context_restored,
         Arc::new(Mutex::new(capabilities_state)),
+        replayed,
     ))
+}
+
+/// Quiet period after the last background update before its stream is finalized.
+///
+/// ACP agents may send `session/update` notifications after the prompt response
+/// (a background task, or a subagent that reports back to the root session).
+/// Those streams have no `PromptResponse` to finalize them, so the idle loop
+/// closes them once the agent has been quiet for this long. Too short a delay
+/// splits a slow stream into several messages; too long delays the display.
+const IDLE_FLUSH_DELAY: Duration = Duration::from_millis(500);
+
+/// Reads the root-session notification from a dispatch, ignoring requests.
+async fn take_session_notification(
+    dispatch: agent_client_protocol::v1::Dispatch,
+) -> Result<Option<SessionNotification>, agent_client_protocol::Error> {
+    let mut notification = None;
+    MatchDispatch::new(dispatch.into_raw())
+        .if_notification(async |notification_in: SessionNotification| {
+            notification = Some(notification_in);
+            Ok(())
+        })
+        .await
+        .otherwise_ignore()?;
+    Ok(notification)
+}
+
+/// Handles one root-session message received while no turn is active.
+///
+/// Returns `true` when a notification was mapped (the idle flush deadline should
+/// then be refreshed).
+async fn handle_idle_message(
+    runtime: &mut SessionRuntime<'_>,
+    session: &ActiveSession<'static, Agent>,
+    message: SessionMessage,
+) -> Result<bool, agent_client_protocol::Error> {
+    match message {
+        SessionMessage::Message(dispatch) => {
+            let Some(notification) = take_session_notification(dispatch).await? else {
+                return Ok(false);
+            };
+            runtime.handle_update(notification.update, None, session);
+            Ok(true)
+        }
+        SessionMessage::PromptResponse(_) => {
+            // Responses are consumed by the turn loop; a stray one carries no
+            // state for the idle loop.
+            tracing::debug!("ignoring a prompt response outside a turn");
+            Ok(false)
+        }
+        // `SessionMessage` is #[non_exhaustive]
+        _ => Ok(false),
+    }
+}
+
+/// Consumes updates that were already delivered while idle.
+///
+/// `select!` may pick the next prompt even when a notification is queued; draining
+/// first keeps those updates in the previous context instead of the new turn.
+async fn drain_idle_updates(
+    runtime: &mut SessionRuntime<'_>,
+    session: &mut ActiveSession<'static, Agent>,
+) -> Result<(), agent_client_protocol::Error> {
+    use futures_util::FutureExt;
+
+    while let Some(result) = session.read_update().now_or_never() {
+        handle_idle_message(runtime, session, result?).await?;
+    }
+    Ok(())
 }
 
 /// Turn loop for one session (serializes prompt sends with update reads).
@@ -251,6 +326,7 @@ pub(super) async fn serve_session(
     ingress_tx: mpsc::UnboundedSender<SessionIngress>,
     mut ingress_rx: mpsc::UnboundedReceiver<SessionIngress>,
     guards: Vec<agent_client_protocol::DynamicHandlerGuard<Agent>>,
+    replayed: Vec<SessionNotification>,
 ) -> ServeOutcome {
     let root_id = session.session_id().clone();
     let mut runtime = SessionRuntime::new(
@@ -263,18 +339,48 @@ pub(super) async fn serve_session(
         guards,
     );
 
+    // Imported history: replay notifications captured from `session/load` are
+    // normalized through the same path as live updates and finalized before the
+    // turn loop starts. Deltas are dropped (they are ephemeral and would flood
+    // subscribers with the whole history).
+    for notification in replayed {
+        runtime.handle_update_with_mode(notification.update, None, &session, UpdateMode::Import);
+    }
+    for payload in runtime.accumulator.finish_all() {
+        runtime.send_payload(payload);
+    }
+
+    // Finalization deadline for background updates received while idle.
+    let mut idle_flush_at: Option<tokio::time::Instant> = None;
+
     loop {
         #[allow(clippy::large_enum_variant, reason = "short-lived select result")]
         enum Selected {
             Command(Option<AcpCommand>),
             Ingress(Option<SessionIngress>),
+            Read(Result<SessionMessage, agent_client_protocol::Error>),
+            FlushIdle,
         }
+        // Set while idle: the deadline to finalize streams accumulated from
+        // background updates. `None` disables the branch.
+        let flush_at = idle_flush_at.unwrap_or_else(tokio::time::Instant::now);
         let selected = tokio::select! {
             command = cmd_rx.recv() => Selected::Command(command),
             ingress = ingress_rx.recv() => Selected::Ingress(ingress),
+            result = session.read_update() => Selected::Read(result),
+            () = tokio::time::sleep_until(flush_at), if idle_flush_at.is_some() => Selected::FlushIdle,
         };
         match selected {
             Selected::Command(Some(AcpCommand::Prompt(input))) => {
+                idle_flush_at = None;
+                // Consume updates delivered while idle, then persist them as the
+                // previous context before this turn starts.
+                if let Err(err) = drain_idle_updates(&mut runtime, &mut session).await {
+                    return ServeOutcome::Fatal(err.into());
+                }
+                for payload in runtime.accumulator.finish_all() {
+                    runtime.send_payload(payload);
+                }
                 runtime.accumulator.reset();
                 runtime.send_payload(UnifiedEventPayload::StatusChanged {
                     status: fxg_protocol::common::SessionStatus::Running,
@@ -343,19 +449,12 @@ pub(super) async fn serve_session(
                             break;
                         }
                         TurnSelected::Read(Ok(SessionMessage::Message(dispatch))) => {
-                            let mut notification = None;
-                            let result = MatchDispatch::new(dispatch.into_raw())
-                                .if_notification(async |notification_in: SessionNotification| {
-                                    notification = Some(notification_in);
-                                    Ok(())
-                                })
-                                .await
-                                .otherwise_ignore();
-                            if let Err(err) = result {
-                                return ServeOutcome::Fatal(err.into());
-                            }
-                            if let Some(notification) = notification {
-                                runtime.handle_update(notification.update, None, &session);
+                            match take_session_notification(dispatch).await {
+                                Ok(Some(notification)) => {
+                                    runtime.handle_update(notification.update, None, &session);
+                                }
+                                Ok(None) => {}
+                                Err(err) => return ServeOutcome::Fatal(err.into()),
                             }
                         }
                         // `SessionMessage` is #[non_exhaustive]
@@ -370,6 +469,25 @@ pub(super) async fn serve_session(
             Selected::Ingress(ingress) => {
                 if let Some(ingress) = ingress {
                     runtime.handle_ingress(ingress, &session);
+                    // A child / vendor update arrived while idle: postpone the
+                    // finalization until the stream goes quiet.
+                    idle_flush_at = Some(tokio::time::Instant::now() + IDLE_FLUSH_DELAY);
+                }
+            }
+            Selected::Read(Ok(message)) => {
+                match handle_idle_message(&mut runtime, &session, message).await {
+                    Ok(true) => {
+                        idle_flush_at = Some(tokio::time::Instant::now() + IDLE_FLUSH_DELAY);
+                    }
+                    Ok(false) => {}
+                    Err(err) => return ServeOutcome::Fatal(err.into()),
+                }
+            }
+            Selected::Read(Err(err)) => return ServeOutcome::Fatal(err.into()),
+            Selected::FlushIdle => {
+                idle_flush_at = None;
+                for payload in runtime.accumulator.finish_all() {
+                    runtime.send_payload(payload);
                 }
             }
         }
@@ -425,6 +543,20 @@ impl<'a> SessionRuntime<'a> {
         subagent_id: Option<&str>,
         session: &ActiveSession<'static, Agent>,
     ) {
+        self.handle_update_with_mode(update, subagent_id, session, UpdateMode::Live);
+    }
+
+    /// Normalizes one update with an explicit source mode.
+    ///
+    /// `Import` keeps the replayed user messages (the manager has not recorded
+    /// them) and drops streaming deltas.
+    fn handle_update_with_mode(
+        &mut self,
+        update: SessionUpdate,
+        subagent_id: Option<&str>,
+        session: &ActiveSession<'static, Agent>,
+        mode: UpdateMode,
+    ) {
         if let SessionUpdate::SubagentUpdate(announcement) = update {
             self.announce(announcement, subagent_id, session);
             return;
@@ -435,14 +567,18 @@ impl<'a> SessionRuntime<'a> {
                 .capabilities
                 .lock()
                 .expect("session capabilities poisoned");
-            map_session_update(
+            map_session_update_with_mode(
                 update,
                 subagent_id,
                 &mut self.accumulator,
                 &mut capabilities,
+                mode,
             )
         };
         for event in mapped {
+            if mode == UpdateMode::Import && matches!(event, DriverEvent::Delta(_)) {
+                continue;
+            }
             self.send_driver_event(event);
         }
     }
@@ -558,8 +694,13 @@ impl<'a> SessionRuntime<'a> {
 pub(super) enum ResumePlan {
     /// `session/resume` (no history replay)
     Resume(String),
-    /// `session/load` (replay notifications are discarded)
-    Load(String),
+    /// `session/load` (replay notifications are discarded unless `capture`)
+    Load {
+        /// Agent-side session ID
+        agent_session_id: String,
+        /// Keep the replay notifications for the caller (explicit import)
+        capture: bool,
+    },
     /// Create a fresh session (the caller injects history replay)
     Fresh,
 }
@@ -592,11 +733,28 @@ pub(super) fn plan_resume(
         };
     };
 
+    if resume.capture_history {
+        // Importing an external session must replay the agent's history. Prefer
+        // `session/load` even when `session/resume` exists (resume sends none).
+        if capabilities.load_session {
+            return Ok(ResumePlan::Load {
+                agent_session_id,
+                capture: true,
+            });
+        }
+        return Err(HistoryCaptureUnavailable(format!(
+            "agent does not support session/load (agent_session_id={agent_session_id})"
+        ))
+        .into());
+    }
     if capabilities.session_capabilities.resume.is_some() {
         return Ok(ResumePlan::Resume(agent_session_id));
     }
     if capabilities.load_session {
-        return Ok(ResumePlan::Load(agent_session_id));
+        return Ok(ResumePlan::Load {
+            agent_session_id,
+            capture: false,
+        });
     }
     if resume.allow_fresh {
         return Ok(ResumePlan::Fresh);
@@ -612,6 +770,8 @@ pub(super) struct AcquiredSession {
     is_resumed: bool,
     modes: Option<SessionModeState>,
     config_options: Option<Vec<SessionConfigOption>>,
+    /// Replay notifications captured from `session/load` (empty otherwise).
+    replayed: Vec<SessionNotification>,
 }
 
 /// Acquires a session (following [`ResumePlan`]).
@@ -637,6 +797,7 @@ pub(super) async fn acquire_session(
                 is_resumed: false,
                 modes: response.modes,
                 config_options: response.config_options,
+                replayed: Vec::new(),
             })
         }
         ResumePlan::Resume(agent_session_id) => {
@@ -652,9 +813,13 @@ pub(super) async fn acquire_session(
                 is_resumed: true,
                 modes: response.modes,
                 config_options: response.config_options,
+                replayed: Vec::new(),
             })
         }
-        ResumePlan::Load(agent_session_id) => {
+        ResumePlan::Load {
+            agent_session_id,
+            capture,
+        } => {
             let SessionSetup {
                 mut session,
                 response,
@@ -664,12 +829,13 @@ pub(super) async fn acquire_session(
                 .block_task()
                 .start_session()
                 .await?;
-            discard_replay_updates(&mut session);
+            let replayed = drain_replay_updates(&mut session, capture).await;
             Ok(AcquiredSession {
                 session,
                 is_resumed: true,
                 modes: response.modes,
                 config_options: response.config_options,
+                replayed,
             })
         }
     }
@@ -703,35 +869,62 @@ pub(super) async fn fork_and_load_session(
         .block_task()
         .start_session()
         .await?;
-    discard_replay_updates(&mut session);
+    drain_replay_updates(&mut session, false).await;
     Ok(AcquiredSession {
         session,
         is_resumed: true,
         modes: response.modes.or(fork.modes),
         config_options: response.config_options.or(fork.config_options),
+        replayed: Vec::new(),
     })
 }
 
-/// Discards replay notifications that arrived before the `session/load` response.
+/// Drains replay notifications buffered before the `session/load` response.
 ///
 /// Per the ACP spec, conversation history replay completes before the load
 /// response, and the SDK buffers notifications from that period into the restored
-/// session. fxg keeps the canonical history in its own event log (resume already
-/// has it; a fork mirrors the parent's log in the node), so it drains and drops
-/// the queue right after the response to avoid double recording.
-pub(super) fn discard_replay_updates(session: &mut ActiveSession<'static, Agent>) {
+/// session. `capture` keeps them for an explicit import (the node feeds them to
+/// the event log); otherwise they are dropped because fxg already has the
+/// canonical history (resume) or mirrors the parent's log (fork).
+pub(super) async fn drain_replay_updates(
+    session: &mut ActiveSession<'static, Agent>,
+    capture: bool,
+) -> Vec<SessionNotification> {
     use futures_util::FutureExt;
 
+    let mut replayed = Vec::new();
     let mut discarded = 0usize;
-    while let Some(result) = session.read_update().now_or_never() {
-        if result.is_err() {
+    loop {
+        let Some(result) = session.read_update().now_or_never() else {
             break;
+        };
+        match result {
+            Ok(SessionMessage::Message(dispatch)) => {
+                if capture {
+                    match take_session_notification(dispatch).await {
+                        Ok(Some(notification)) => replayed.push(notification),
+                        Ok(None) => {}
+                        Err(err) => {
+                            tracing::warn!("failed to decode a session/load replay update: {err}");
+                            break;
+                        }
+                    }
+                } else {
+                    discarded += 1;
+                }
+            }
+            // `SessionMessage` is #[non_exhaustive]
+            Ok(_) => {}
+            Err(err) => {
+                tracing::debug!("session/load replay ended: {err}");
+                break;
+            }
         }
-        discarded += 1;
     }
     if discarded > 0 {
         tracing::debug!(discarded, "discarded session/load replay updates");
     }
+    replayed
 }
 
 /// Client capabilities advertised to every ACP agent.

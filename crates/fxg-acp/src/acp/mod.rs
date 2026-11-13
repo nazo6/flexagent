@@ -67,12 +67,14 @@ use fxg_protocol::util::uuid_v7;
 use tokio::sync::{mpsc, oneshot, watch};
 
 use crate::driver::{
-    ActiveSessionHandle, AgentAuthRequired, AgentDriver, DriverEvent, NativeForkUnavailable,
-    NativeResumeUnavailable, ResumeRequest, StartSessionRequest, StartedSession,
+    ActiveSessionHandle, AgentAuthRequired, AgentDriver, DriverEvent, HistoryCaptureUnavailable,
+    NativeForkUnavailable, NativeResumeUnavailable, ResumeRequest, StartSessionRequest,
+    StartedSession,
 };
 use crate::warm::{DEFAULT_WARM_IDLE, LaunchKey, WarmPool, WarmProcess};
 
 mod client;
+mod list;
 mod mapping;
 mod process;
 mod session;
@@ -335,6 +337,14 @@ impl AgentDriver for AcpDriver {
             Some(pool) => pool.shutdown_idle().await,
             None => 0,
         }
+    }
+
+    async fn list_sessions(
+        &self,
+        launch: &crate::driver::AgentLaunchSpec,
+        cwd: &Path,
+    ) -> anyhow::Result<crate::driver::AgentSessionList> {
+        list::list_sessions(launch, cwd).await
     }
 
     fn stderr_tail(&self, agent_id: &str) -> Vec<String> {

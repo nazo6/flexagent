@@ -755,6 +755,50 @@ pub struct ControlSessionRequest {
     pub action: SessionControlAction,
 }
 
+/// One session that exists on the agent side and can be imported.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
+pub struct ExternalSessionSummary {
+    /// Agent that owns the session (`opencode` / a custom ID, etc.)
+    pub agent_id: String,
+    /// Agent-side session ID (`session/list` `sessionId`)
+    pub agent_session_id: String,
+    /// Working directory recorded by the agent
+    pub cwd: String,
+    /// Human-readable title reported by the agent
+    pub title: Option<String>,
+    /// ISO 8601 timestamp of the last activity reported by the agent
+    pub updated_at: Option<String>,
+    /// fxg session that already owns this agent session (`None` = not imported)
+    pub imported_session_id: Option<SessionId>,
+}
+
+/// Discovery state for one agent (capabilities and listing failure).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
+pub struct ExternalSessionAgentInfo {
+    /// Agent ID
+    pub agent_id: String,
+    /// Display name
+    pub name: String,
+    /// Whether the agent advertises ACP `session/list`
+    pub supports_list: bool,
+    /// Whether the agent can replay history (`loadSession`) on import
+    pub supports_history: bool,
+    /// Failure while inspecting or listing this agent (`None` = success)
+    pub error: Option<ErrorInfo>,
+}
+
+/// `GET /api/v1/sessions/external` response.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
+pub struct ExternalSessionListResponse {
+    /// Agent sessions that are not managed by fxg yet
+    pub sessions: Vec<ExternalSessionSummary>,
+    /// Per-agent discovery results (including unsupported / failed agents)
+    pub agents: Vec<ExternalSessionAgentInfo>,
+}
+
 /// `POST /api/v1/sessions/import` request.
 /// A local node derives the target from `cwd` and ignores `node_id` (or
 /// validates it when present). The hub requires `node_id` and relays the import
@@ -774,6 +818,12 @@ pub struct SessionImportRequest {
     pub cwd: String,
     /// Optional title
     pub title: Option<String>,
+    /// Capture the history replayed by ACP `session/load` into the fxg event log.
+    ///
+    /// Defaults to `false` so existing CLI / API callers keep the metadata-only
+    /// import behavior.
+    #[serde(default)]
+    pub mirror_history: bool,
 }
 
 /// `POST /api/v1/sessions/import` response.

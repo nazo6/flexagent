@@ -75,6 +75,7 @@ mod tests {
     use axum::http::Request as HttpRequest;
     use axum::http::{StatusCode, header};
     use axum::response::Response;
+    use fxg_acp::AgentSessionInfo;
     use fxg_protocol::client_api::HubWsMessage;
     use fxg_protocol::common::ErrorCode;
     use http_body_util::BodyExt;
@@ -782,6 +783,48 @@ mod tests {
                 .as_ref()
                 .is_some_and(|resume| resume.agent_session_id.as_deref() == Some("agent-9"))
         }));
+
+        daemon.shutdown();
+        tokio::time::timeout(std::time::Duration::from_secs(5), daemon.wait())
+            .await
+            .expect("stop");
+    }
+
+    #[tokio::test]
+    async fn rest_external_sessions_lists_agent_sessions() {
+        let (daemon, mock, dir) = test_session_daemon().await;
+        mock.set_external_sessions(
+            vec![AgentSessionInfo {
+                session_id: "external-1".to_owned(),
+                cwd: dir.path().to_path_buf(),
+                title: Some("External".to_owned()),
+                updated_at: Some("2026-11-12T10:00:00Z".to_owned()),
+            }],
+            true,
+        );
+        let app = router(daemon.state().clone(), daemon.http_addr());
+        let host = host_of(&daemon);
+        let token = daemon.state().auth_token();
+
+        let response = app
+            .oneshot(get(
+                &host,
+                "/api/v1/sessions/external?agent=mock&force=true",
+                Some(&token),
+            ))
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = body_json(response).await;
+        let sessions = body["sessions"].as_array().expect("sessions");
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0]["agent_id"], "mock");
+        assert_eq!(sessions[0]["agent_session_id"], "external-1");
+        assert_eq!(sessions[0]["title"], "External");
+        let agents = body["agents"].as_array().expect("agents");
+        assert_eq!(agents.len(), 1);
+        assert_eq!(agents[0]["supports_list"], true);
+        assert_eq!(agents[0]["supports_history"], true);
 
         daemon.shutdown();
         tokio::time::timeout(std::time::Duration::from_secs(5), daemon.wait())

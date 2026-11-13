@@ -679,6 +679,11 @@ export type ErrorCode =
 /**  The agent does not support forking at the requested conversation boundary. */
 "FORK_SCOPE_UNSUPPORTED" |
 /**
+ *  The agent cannot replay an existing session's history (`session/load`),
+ *  so it cannot be imported together with its conversation.
+ */
+"HISTORY_UNAVAILABLE" |
+/**
  *  The agent requires authentication before a session can be created.
  *  The advertised methods are carried in [`ErrorInfo::details`].
  */
@@ -767,6 +772,44 @@ export type ErrorInfo = {
 
 /**  ID of a persisted session event (UUID v7). */
 export type EventId = string;
+
+/**  Discovery state for one agent (capabilities and listing failure). */
+export type ExternalSessionAgentInfo = {
+	/**  Agent ID */
+	agent_id: string,
+	/**  Display name */
+	name: string,
+	/**  Whether the agent advertises ACP `session/list` */
+	supports_list: boolean,
+	/**  Whether the agent can replay history (`loadSession`) on import */
+	supports_history: boolean,
+	/**  Failure while inspecting or listing this agent (`None` = success) */
+	error: ErrorInfo | null,
+};
+
+/**  `GET /api/v1/sessions/external` response. */
+export type ExternalSessionListResponse = {
+	/**  Agent sessions that are not managed by fxg yet */
+	sessions: ExternalSessionSummary[],
+	/**  Per-agent discovery results (including unsupported / failed agents) */
+	agents: ExternalSessionAgentInfo[],
+};
+
+/**  One session that exists on the agent side and can be imported. */
+export type ExternalSessionSummary = {
+	/**  Agent that owns the session (`opencode` / a custom ID, etc.) */
+	agent_id: string,
+	/**  Agent-side session ID (`session/list` `sessionId`) */
+	agent_session_id: string,
+	/**  Working directory recorded by the agent */
+	cwd: string,
+	/**  Human-readable title reported by the agent */
+	title: string | null,
+	/**  ISO 8601 timestamp of the last activity reported by the agent */
+	updated_at: string | null,
+	/**  fxg session that already owns this agent session (`None` = not imported) */
+	imported_session_id: SessionId | null,
+};
 
 /**  Unified diff information of a file change. */
 export type FileDiff = {
@@ -1959,6 +2002,13 @@ export type SessionImportRequest = {
 	cwd: string,
 	/**  Optional title */
 	title: string | null,
+	/**
+	 *  Capture the history replayed by ACP `session/load` into the fxg event log.
+	 *
+	 *  Defaults to `false` so existing CLI / API callers keep the metadata-only
+	 *  import behavior.
+	 */
+	mirror_history?: boolean,
 };
 
 /**  `POST /api/v1/sessions/import` response. */

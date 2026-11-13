@@ -11,6 +11,7 @@ import type {
   CustomAgentConfig,
   DiffScope,
   ErrorInfo,
+  ExternalSessionListResponse,
   FsBrowseResponse,
   InboxResponse,
   InitialConfig,
@@ -54,6 +55,8 @@ import type {
   SearchResponse,
   SessionArchiveRequest,
   SessionArchiveResponse,
+  SessionImportRequest,
+  SessionImportResponse,
   SessionRenameRequest,
   SessionRenameResponse,
   SessionEventBatch,
@@ -379,6 +382,25 @@ export class ApiClient {
   /** `POST /api/v1/sessions` (start a new session). */
   createSession(request: CreateSessionRequest): Promise<CreateSessionResponse> {
     return this.#request("POST", "/api/v1/sessions", { body: request });
+  }
+
+  /** `POST /api/v1/sessions/import` (take over an existing agent session). */
+  importSession(request: SessionImportRequest): Promise<SessionImportResponse> {
+    return this.#request("POST", "/api/v1/sessions/import", { body: request });
+  }
+
+  /** `GET /api/v1/sessions/external` (sessions that already exist on the agent side). */
+  listExternalSessions(
+    options: { nodeId?: string; agents?: string[]; force?: boolean } = {},
+  ): Promise<ExternalSessionListResponse> {
+    const query: QueryParams = {
+      node_id: options.nodeId,
+      force: options.force ?? false,
+    };
+    if (options.agents && options.agents.length > 0) {
+      query.agent = options.agents.join(",");
+    }
+    return this.#request("GET", "/api/v1/sessions/external", { query });
   }
 
   /** `GET /api/v1/sessions/:id/events?after_cursor=` */
