@@ -41,11 +41,14 @@ E2E暗号化を行わないため、ハブ側で会話履歴の構造化クエ�
 | `session_events`                     | 自分のセッションのイベント。水位より後が Outbox 対象 | 全イベントの冪等追記。`cursor` はハブ配信用カーソル                |
 | `session_events_fts`                 | ローカル直結UIの検索用                               | 全セッション横断検索用                                             |
 | `permission_requests`                | 自分のセッション分の投影                             | 全会話分の投影（グローバル承認 Inbox）                             |
-| `push_subscriptions`                 | 空（未使用）                                         | PWA 購読管理（VAPID）                                              |
+| `push_subscriptions`                 | 空（未使用）                                         | PWA 購読管理（VAPID、`client_id` で端末に紐付け）                  |
 | `audit_logs`                         | ローカル直結操作（CLI / `localhost:7860`）の記録     | ハブ経由操作の記録（同期対象外。各ストアが自分の観測事実のみ記録） |
 | `incidents`                          | ノード自身のエラー境界で観測した障害                 | ハブ自身のエラー境界で観測した障害（同期対象外）                   |
 | `sessions.synced_up_to_node_seq`     | 使用（ハブが ACK した水位）                          | 未使用（常に 0）                                                   |
 | `sessions.last_node_seq`             | 永続化済み最新の `node_seq`（次はこの値 + 1 を採番） | 投影に適用済みの最大 `node_seq`                                    |
+
+クライアントの可視 / フォーカス状態（Presence）は通知先の一時判定にのみ使い、
+DB には保存しない。ハブ再起動後は空になり、通知のフォールバックが適用される。
 
 ### 0.3 イベント適用と投影
 
