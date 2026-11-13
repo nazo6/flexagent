@@ -13,7 +13,6 @@ import type {
   ErrorInfo,
   ExternalSessionListResponse,
   FsBrowseResponse,
-  InboxResponse,
   InitialConfig,
   IssueNodeTokenRequest,
   IssueNodeTokenResponse,
@@ -419,11 +418,6 @@ export class ApiClient {
     return this.#request("GET", `/api/v1/sessions/${encodeURIComponent(sessionId)}/diff`, {
       query: { scope, base },
     });
-  }
-
-  /** `GET /api/v1/inbox` (unresolved approvals / questions) */
-  inbox(): Promise<InboxResponse> {
-    return this.#request<InboxResponse>("GET", "/api/v1/inbox");
   }
 
   /** `POST /api/v1/sessions/:id/permissions/:req_id/respond` (idempotent). */

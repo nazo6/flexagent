@@ -165,20 +165,23 @@ async fn thoughts_are_finalized_before_elicitation_and_permission_requests() {
     tokio::time::timeout(TEST_TIMEOUT, async {
         while let Some(event) = rx.recv().await {
             if let DriverEvent::Event(payload) = event {
-                match payload {
-                    UnifiedEventPayload::AgentMessage {
-                        text,
-                        is_complete: true,
-                        ..
-                    } if text == "all done" => finished_answer = true,
-                    UnifiedEventPayload::StatusChanged {
-                        status: SessionStatus::Idle,
-                        ..
-                    } if finished_answer => {
-                        went_idle = true;
-                        break;
+                if let UnifiedEventPayload::AgentMessage {
+                    text,
+                    is_complete: true,
+                    ..
+                } = &payload
+                {
+                    if text == "all done" {
+                        finished_answer = true;
                     }
-                    _ => {}
+                } else if let UnifiedEventPayload::StatusChanged {
+                    status: SessionStatus::Idle,
+                    ..
+                } = &payload
+                    && finished_answer
+                {
+                    went_idle = true;
+                    break;
                 }
             }
         }

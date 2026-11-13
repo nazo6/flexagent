@@ -10,6 +10,8 @@
     SessionUsage,
   } from "#lib/generated/bindings.ts";
   import { m } from "#lib/paraglide/messages.js";
+  import { sessionNeedsAttention } from "#lib/session-status.ts";
+  import { sync } from "#lib/stores/app.svelte.ts";
   import { layoutState } from "#lib/stores/layout.svelte.ts";
   import MenuIcon from "@lucide/svelte/icons/menu";
   import PanelLeftOpenIcon from "@lucide/svelte/icons/panel-left-open";
@@ -45,6 +47,11 @@
     onOpenTools,
     onDeleted,
   }: Props = $props();
+
+  const otherAttentionCount = $derived(
+    sync.sessions.filter((s) => s.session_id !== session?.session_id && sessionNeedsAttention(s))
+      .length,
+  );
 </script>
 
 <header class="wco-titlebar bg-card/85 border-border shrink-0 border-b backdrop-blur">
@@ -54,24 +61,38 @@
     <!-- Mobile: open the session drawer -->
     <button
       type="button"
-      class="hover:bg-accent text-muted-foreground hover:text-foreground flex size-7 shrink-0 items-center justify-center rounded-md border lg:hidden"
+      class="hover:bg-accent text-muted-foreground hover:text-foreground relative flex size-7 shrink-0 items-center justify-center rounded-md border lg:hidden"
       onclick={() => layoutState.setMobileDrawer(true)}
       title={m.shell_open_menu()}
       aria-label={m.shell_open_menu()}
     >
       <MenuIcon class="size-4" />
+      {#if otherAttentionCount > 0}
+        <span
+          class="bg-destructive text-destructive-foreground absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] leading-none font-bold"
+        >
+          {otherAttentionCount > 99 ? "99+" : otherAttentionCount}
+        </span>
+      {/if}
     </button>
 
     <!-- Desktop: restore the collapsed sidebar -->
     {#if layoutState.sidebarCollapsed}
       <button
         type="button"
-        class="hover:bg-accent text-muted-foreground hover:text-foreground hidden size-7 shrink-0 items-center justify-center rounded-md border lg:flex"
+        class="hover:bg-accent text-muted-foreground hover:text-foreground relative hidden size-7 shrink-0 items-center justify-center rounded-md border lg:flex"
         onclick={() => layoutState.toggleSidebar()}
         title={m.shell_show_sidebar()}
         aria-label={m.shell_show_sidebar()}
       >
         <PanelLeftOpenIcon class="size-4" />
+        {#if otherAttentionCount > 0}
+          <span
+            class="bg-destructive text-destructive-foreground absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] leading-none font-bold"
+          >
+            {otherAttentionCount > 99 ? "99+" : otherAttentionCount}
+          </span>
+        {/if}
       </button>
     {/if}
 

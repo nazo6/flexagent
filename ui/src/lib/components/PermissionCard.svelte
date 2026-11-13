@@ -53,7 +53,6 @@
       } else {
         toast.success(m.chat_permission_sent());
       }
-      await sync.refreshInbox();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
     } finally {

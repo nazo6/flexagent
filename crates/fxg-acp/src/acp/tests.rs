@@ -1145,3 +1145,43 @@ fn child_updates_are_tagged_and_do_not_touch_parent_capabilities() {
     assert!(events.is_empty());
     assert_eq!(caps.available_commands, caps_before);
 }
+
+#[test]
+fn next_status_after_request_keeps_waiting_when_other_requests_remain() {
+    let permissions: PermissionRegistry = Arc::new(Mutex::new(HashMap::new()));
+    let elicitations: ElicitationRegistry = Arc::new(Mutex::new(HashMap::new()));
+
+    assert_eq!(
+        client::next_status_after_request(&permissions, &elicitations),
+        fxg_protocol::common::SessionStatus::Running
+    );
+
+    let (elicit_tx, _elicit_rx) = oneshot::channel();
+    elicitations.lock().expect("lock").insert(
+        "e1".to_owned(),
+        PendingElicitation {
+            sender: elicit_tx,
+            schema: elicitation_schema(),
+        },
+    );
+    assert_eq!(
+        client::next_status_after_request(&permissions, &elicitations),
+        fxg_protocol::common::SessionStatus::WaitingInput
+    );
+
+    let (perm_tx, _perm_rx) = oneshot::channel();
+    permissions
+        .lock()
+        .expect("lock")
+        .insert("p1".to_owned(), perm_tx);
+    assert_eq!(
+        client::next_status_after_request(&permissions, &elicitations),
+        fxg_protocol::common::SessionStatus::WaitingPermission
+    );
+
+    permissions.lock().expect("lock").remove("p1");
+    assert_eq!(
+        client::next_status_after_request(&permissions, &elicitations),
+        fxg_protocol::common::SessionStatus::WaitingInput
+    );
+}

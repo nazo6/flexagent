@@ -23,8 +23,8 @@
   import PlusIcon from "@lucide/svelte/icons/plus";
 
   import { page } from "$app/state";
+  import { sessionNeedsAttention } from "#lib/session-status.ts";
   import { layoutState } from "#lib/stores/layout.svelte.ts";
-  import InboxIcon from "@lucide/svelte/icons/inbox";
   import SearchIcon from "@lucide/svelte/icons/search";
 
   let { children } = $props();
@@ -100,6 +100,12 @@
   const mainScrolls = $derived(!SELF_SCROLLING_ROUTES.has(page.route.id ?? ""));
   /** Session pages render their own top chrome so mobile has a single header. */
   const isSessionRoute = $derived(page.route.id === "/sessions/[id]");
+  const activeSessionId = $derived(isSessionRoute ? (page.params.id ?? null) : null);
+  const attentionCount = $derived(sync.sessions.filter(sessionNeedsAttention).length);
+  const railAttentionCount = $derived(
+    sync.sessions.filter((s) => s.session_id !== activeSessionId && sessionNeedsAttention(s))
+      .length,
+  );
 </script>
 
 <ModeWatcher />
@@ -167,12 +173,19 @@
       >
         <button
           type="button"
-          class="hover:bg-accent text-muted-foreground hover:text-foreground flex size-7 items-center justify-center rounded-md border border-border"
+          class="hover:bg-accent text-muted-foreground hover:text-foreground relative flex size-7 items-center justify-center rounded-md border border-border"
           onclick={() => layoutState.setSidebarCollapsed(false)}
           title={m.shell_show_sidebar()}
           aria-label={m.shell_show_sidebar()}
         >
           <PanelLeftOpenIcon class="size-4" />
+          {#if railAttentionCount > 0}
+            <span
+              class="bg-destructive text-destructive-foreground absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] leading-none font-bold"
+            >
+              {railAttentionCount > 99 ? "99+" : railAttentionCount}
+            </span>
+          {/if}
         </button>
         <ProblemBadge class="mt-1 size-7 px-0" />
       </div>
@@ -194,11 +207,18 @@
         >
           <button
             type="button"
-            class="hover:bg-accent flex size-8 items-center justify-center rounded-md border text-muted-foreground"
+            class="hover:bg-accent relative flex size-8 items-center justify-center rounded-md border text-muted-foreground"
             onclick={() => layoutState.setMobileDrawer(true)}
             aria-label={m.shell_open_menu()}
           >
             <MenuIcon class="size-4" />
+            {#if attentionCount > 0}
+              <span
+                class="bg-destructive text-destructive-foreground absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] leading-none font-bold"
+              >
+                {attentionCount > 99 ? "99+" : attentionCount}
+              </span>
+            {/if}
           </button>
 
           <div class="flex min-w-0 items-center gap-2">
@@ -215,21 +235,7 @@
 
           <div class="flex items-center gap-1">
             <ProblemBadge class="size-8 px-0" />
-            {#if sync.inbox.length > 0}
-              <a
-                href="/inbox"
-                class="hover:bg-accent relative flex size-8 items-center justify-center rounded-md border text-muted-foreground"
-                title={m.shell_approval_inbox()}
-                aria-label={m.shell_approval_inbox()}
-              >
-                <InboxIcon class="size-4" />
-                <span
-                  class="bg-destructive text-destructive-foreground absolute -top-1 -right-1 flex size-4 items-center justify-center rounded-full text-[10px] font-bold leading-none"
-                >
-                  {sync.inbox.length}
-                </span>
-              </a>
-            {:else if page.url.pathname === "/"}
+            {#if page.url.pathname === "/"}
               <a
                 href="/search"
                 class="hover:bg-accent flex size-8 items-center justify-center rounded-md border text-muted-foreground"

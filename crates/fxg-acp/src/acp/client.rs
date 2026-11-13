@@ -271,7 +271,7 @@ pub(super) fn cancel_pending_permissions(permissions: &PermissionRegistry) {
 /// unresolved elicitations with cancel when a turn is interrupted).
 ///
 /// When `events` is provided, also emits `ElicitationResolved` to clear the
-/// waiting-for-input state in the UI / Inbox (responses via fxg are already
+/// waiting-for-input state in the UI (responses via fxg are already
 /// recorded by the manager, so this only records driver-side auto-resolution).
 pub(super) fn cancel_pending_elicitations(
     elicitations: &ElicitationRegistry,
@@ -321,6 +321,27 @@ async fn flush_session_streams(
             "wait for streaming accumulator flush"
         );
     }
+}
+
+pub(super) fn next_status_after_request(
+    permissions: &PermissionRegistry,
+    elicitations: &ElicitationRegistry,
+) -> fxg_protocol::common::SessionStatus {
+    if !permissions
+        .lock()
+        .expect("permission registry poisoned")
+        .is_empty()
+    {
+        return fxg_protocol::common::SessionStatus::WaitingPermission;
+    }
+    if !elicitations
+        .lock()
+        .expect("elicitation registry poisoned")
+        .is_empty()
+    {
+        return fxg_protocol::common::SessionStatus::WaitingInput;
+    }
+    fxg_protocol::common::SessionStatus::Running
 }
 
 fn elicitation_response(outcome: ElicitationOutcome) -> CreateElicitationResponse {
@@ -384,6 +405,7 @@ pub(super) async fn run_acp_process(
         .on_receive_request(
             {
                 let permissions = Arc::clone(&permissions);
+                let elicitations = Arc::clone(&elicitations);
                 let contexts = Arc::clone(&contexts);
                 async move |request: RequestPermissionRequest, responder, cx| {
                     // If the session is already closed (race), fail safe and
@@ -418,6 +440,8 @@ pub(super) async fn run_acp_process(
                         .lock()
                         .expect("permission registry poisoned")
                         .insert(request_id.clone(), decision_tx);
+                    let permissions = Arc::clone(&permissions);
+                    let elicitations = Arc::clone(&elicitations);
                     cx.spawn(async move {
                         flush_session_streams(context.ingress.as_ref()).await;
                         match decision_rx.try_recv() {
@@ -459,7 +483,7 @@ pub(super) async fn run_acp_process(
                         fxg_protocol::discard_with!(
                             context.events.send(DriverEvent::Event(
                                 UnifiedEventPayload::StatusChanged {
-                                    status: fxg_protocol::common::SessionStatus::Running,
+                                    status: next_status_after_request(&permissions, &elicitations),
                                     error_message: None,
                                 },
                             )),
@@ -660,6 +684,7 @@ pub(super) async fn run_acp_process(
         )
         .on_receive_request(
             {
+                let permissions = Arc::clone(&permissions);
                 let elicitations = Arc::clone(&elicitations);
                 let contexts = Arc::clone(&contexts);
                 async move |request: CreateElicitationRequest, responder, cx| {
@@ -716,6 +741,8 @@ pub(super) async fn run_acp_process(
                                 schema: schema.clone(),
                             },
                         );
+                    let permissions = Arc::clone(&permissions);
+                    let elicitations = Arc::clone(&elicitations);
                     cx.spawn(async move {
                         flush_session_streams(context.ingress.as_ref()).await;
                         match decision_rx.try_recv() {
@@ -754,7 +781,7 @@ pub(super) async fn run_acp_process(
                         fxg_protocol::discard_with!(
                             context.events.send(DriverEvent::Event(
                                 UnifiedEventPayload::StatusChanged {
-                                    status: fxg_protocol::common::SessionStatus::Running,
+                                    status: next_status_after_request(&permissions, &elicitations),
                                     error_message: None,
                                 },
                             )),
