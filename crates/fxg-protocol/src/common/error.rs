@@ -41,6 +41,9 @@ pub enum ErrorCode {
     ForkUnsupported,
     /// The agent does not support forking at the requested conversation boundary.
     ForkScopeUnsupported,
+    /// The agent cannot replay an existing session's history (`session/load`),
+    /// so it cannot be imported together with its conversation.
+    HistoryUnavailable,
     /// The agent requires authentication before a session can be created.
     /// The advertised methods are carried in [`ErrorInfo::details`].
     AuthRequired,
@@ -110,6 +113,7 @@ impl ErrorCode {
         Self::ResumeRequired,
         Self::ForkUnsupported,
         Self::ForkScopeUnsupported,
+        Self::HistoryUnavailable,
         Self::AuthRequired,
         Self::PtyDisabled,
         Self::CommandDuplicate,
@@ -151,6 +155,7 @@ impl ErrorCode {
             Self::ResumeRequired => "RESUME_REQUIRED",
             Self::ForkUnsupported => "FORK_UNSUPPORTED",
             Self::ForkScopeUnsupported => "FORK_SCOPE_UNSUPPORTED",
+            Self::HistoryUnavailable => "HISTORY_UNAVAILABLE",
             Self::AuthRequired => "AUTH_REQUIRED",
             Self::PtyDisabled => "PTY_DISABLED",
             Self::CommandDuplicate => "COMMAND_DUPLICATE",
@@ -214,6 +219,7 @@ impl FromStr for ErrorCode {
             "RESUME_REQUIRED" => Ok(Self::ResumeRequired),
             "FORK_UNSUPPORTED" => Ok(Self::ForkUnsupported),
             "FORK_SCOPE_UNSUPPORTED" => Ok(Self::ForkScopeUnsupported),
+            "HISTORY_UNAVAILABLE" => Ok(Self::HistoryUnavailable),
             "AUTH_REQUIRED" => Ok(Self::AuthRequired),
             "PTY_DISABLED" => Ok(Self::PtyDisabled),
             "COMMAND_DUPLICATE" => Ok(Self::CommandDuplicate),
@@ -623,7 +629,7 @@ mod tests {
         let troubleshooting = std::fs::read_to_string(workspace.join("docs/troubleshooting.md"))
             .expect("read docs/troubleshooting.md");
 
-        assert_eq!(ErrorCode::ALL.len(), 36, "update ALL when adding a code");
+        assert_eq!(ErrorCode::ALL.len(), 37, "update ALL when adding a code");
         for code in ErrorCode::ALL {
             let snake = code.as_str().to_ascii_lowercase();
             let message_key = format!("error_{snake}");

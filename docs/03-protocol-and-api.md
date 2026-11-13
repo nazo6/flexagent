@@ -267,22 +267,23 @@ prune します。`sessions` は最大 1000 件で、超過時は
 
 #### セッション
 
-| Method / Path                                                    | 内容                                                                       |
-| :--------------------------------------------------------------- | :------------------------------------------------------------------------- |
-| `GET /api/v1/sessions`                                           | 一覧。`project_id` / `node_id` / `status` / `include_archived` / `limit`。 |
-| `POST /api/v1/sessions`                                          | 新規セッション（常駐ノード / プロビジョナー / Worktree / Fork）。          |
-| `GET /api/v1/sessions/:id`                                       | 詳細。`recent_events`（既定 20、最大 500）。                               |
-| `GET /api/v1/sessions/:id/events`                                | 履歴。`after_cursor` / `before_cursor` / `limit`。                         |
-| `POST /api/v1/sessions/:id/prompt`                               | `{ command_id, input, client_source }`。`CommandResult`。                  |
-| `POST /api/v1/sessions/:id/control`                              | `{ command_id, action }`。`CommandResult`。                                |
-| `GET /api/v1/sessions/:id/diff`                                  | `scope=uncommitted` / `scope=branch`。                                     |
-| `POST /api/v1/sessions/import`                                   | 既存エージェントセッションの取り込み。                                     |
-| `POST /api/v1/sessions/:id/permissions/:request_id/respond`      | 承認応答。解決済みは `200 { already_resolved: true }`。                    |
-| `POST /api/v1/sessions/:id/elicitations/:elicitation_id/respond` | 質問応答。解決済みは `200 { already_resolved: true }`。                    |
-| `POST /api/v1/sessions/:id/resume`                               | 停止セッションの再開。                                                     |
-| `POST /api/v1/sessions/:id/title`                                | タイトル変更。                                                             |
-| `POST /api/v1/sessions/:id/archive`                              | アーカイブ / 復元。                                                        |
-| `DELETE /api/v1/sessions/:id`                                    | 削除（tombstone）。                                                        |
+| Method / Path                                                    | 内容                                                                        |
+| :--------------------------------------------------------------- | :-------------------------------------------------------------------------- |
+| `GET /api/v1/sessions`                                           | 一覧。`project_id` / `node_id` / `status` / `include_archived` / `limit`。  |
+| `POST /api/v1/sessions`                                          | 新規セッション（常駐ノード / プロビジョナー / Worktree / Fork）。           |
+| `GET /api/v1/sessions/:id`                                       | 詳細。`recent_events`（既定 20、最大 500）。                                |
+| `GET /api/v1/sessions/:id/events`                                | 履歴。`after_cursor` / `before_cursor` / `limit`。                          |
+| `POST /api/v1/sessions/:id/prompt`                               | `{ command_id, input, client_source }`。`CommandResult`。                   |
+| `POST /api/v1/sessions/:id/control`                              | `{ command_id, action }`。`CommandResult`。                                 |
+| `GET /api/v1/sessions/:id/diff`                                  | `scope=uncommitted` / `scope=branch`。                                      |
+| `POST /api/v1/sessions/import`                                   | 既存エージェントセッションの取り込み（`mirror_history` で履歴を複製）。     |
+| `GET /api/v1/sessions/external`                                  | エージェント側の未取り込みセッション一覧（`node_id` / `agent` / `force`）。 |
+| `POST /api/v1/sessions/:id/permissions/:request_id/respond`      | 承認応答。解決済みは `200 { already_resolved: true }`。                     |
+| `POST /api/v1/sessions/:id/elicitations/:elicitation_id/respond` | 質問応答。解決済みは `200 { already_resolved: true }`。                     |
+| `POST /api/v1/sessions/:id/resume`                               | 停止セッションの再開。                                                      |
+| `POST /api/v1/sessions/:id/title`                                | タイトル変更。                                                              |
+| `POST /api/v1/sessions/:id/archive`                              | アーカイブ / 復元。                                                         |
+| `DELETE /api/v1/sessions/:id`                                    | 削除（tombstone）。                                                         |
 
 #### 検索 / Inbox / Push / 監査
 

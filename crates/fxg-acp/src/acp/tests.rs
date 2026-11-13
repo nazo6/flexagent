@@ -27,6 +27,16 @@ fn thought_chunk(text: &str, message_id: Option<&str>) -> SessionUpdate {
     SessionUpdate::AgentThoughtChunk(serde_json::from_value(value).expect("content chunk fixture"))
 }
 
+fn user_chunk(text: &str, message_id: Option<&str>) -> SessionUpdate {
+    let mut value = serde_json::json!({
+        "content": { "type": "text", "text": text },
+    });
+    if let Some(id) = message_id {
+        value["messageId"] = serde_json::Value::String(id.to_owned());
+    }
+    SessionUpdate::UserMessageChunk(serde_json::from_value(value).expect("content chunk fixture"))
+}
+
 /// Builds `AgentCapabilities` from a combination of capabilities.
 fn agent_capabilities(load_session: bool, resume: bool) -> AgentCapabilities {
     // `AgentCapabilities` is non_exhaustive, so build it from default
@@ -43,6 +53,7 @@ fn resume_request(agent_session_id: Option<&str>, allow_fresh: bool) -> ResumeRe
     ResumeRequest {
         agent_session_id: agent_session_id.map(str::to_owned),
         allow_fresh,
+        capture_history: false,
     }
 }
 
@@ -169,7 +180,7 @@ fn plan_resume_prefers_session_resume_over_load() {
     let resume = resume_request(Some("ses_1"), true);
     match plan_resume(&capabilities, Some(&resume)).expect("plan") {
         ResumePlan::Resume(id) => assert_eq!(id, "ses_1"),
-        ResumePlan::Load(_) | ResumePlan::Fresh => {
+        ResumePlan::Load { .. } | ResumePlan::Fresh => {
             panic!("session/resume must be preferred")
         }
     }
@@ -181,7 +192,13 @@ fn plan_resume_falls_back_to_load_then_fresh() {
     let capabilities = agent_capabilities(true, false);
     let resume = resume_request(Some("ses_1"), true);
     match plan_resume(&capabilities, Some(&resume)).expect("plan") {
-        ResumePlan::Load(id) => assert_eq!(id, "ses_1"),
+        ResumePlan::Load {
+            agent_session_id,
+            capture,
+        } => {
+            assert_eq!(agent_session_id, "ses_1");
+            assert!(!capture);
+        }
         ResumePlan::Resume(_) | ResumePlan::Fresh => panic!("session/load expected"),
     }
 
@@ -196,6 +213,34 @@ fn plan_resume_falls_back_to_load_then_fresh() {
     let resume = resume_request(Some("ses_1"), false);
     let err = plan_resume(&capabilities, Some(&resume)).expect_err("native-only must fail");
     assert!(err.downcast_ref::<NativeResumeUnavailable>().is_some());
+}
+
+#[test]
+fn plan_resume_capture_prefers_load() {
+    let capabilities = agent_capabilities(true, true);
+    let mut resume = resume_request(Some("ses_1"), false);
+    resume.capture_history = true;
+    match plan_resume(&capabilities, Some(&resume)).expect("plan") {
+        ResumePlan::Load {
+            agent_session_id,
+            capture,
+        } => {
+            assert_eq!(agent_session_id, "ses_1");
+            assert!(capture);
+        }
+        ResumePlan::Resume(_) | ResumePlan::Fresh => {
+            panic!("capture must use session/load even when resume exists")
+        }
+    }
+}
+
+#[test]
+fn plan_resume_capture_requires_load() {
+    let capabilities = agent_capabilities(false, true);
+    let mut resume = resume_request(Some("ses_1"), false);
+    resume.capture_history = true;
+    let err = plan_resume(&capabilities, Some(&resume)).expect_err("load is required");
+    assert!(err.downcast_ref::<HistoryCaptureUnavailable>().is_some());
 }
 
 #[test]
@@ -260,6 +305,67 @@ fn accumulator_emits_completed_message_on_id_switch() {
         }
         other => panic!("unexpected payload: {other:?}"),
     }
+}
+
+#[test]
+fn import_replay_accumulates_user_and_agent_messages() {
+    let mut acc = StreamingAccumulator::default();
+    let mut caps = SessionCapabilitiesState::default();
+    let mut events = Vec::new();
+    for update in [
+        user_chunk("hello ", Some("u1")),
+        user_chunk("world", Some("u1")),
+        text_chunk("hi", Some("a1")),
+        text_chunk(" there", Some("a1")),
+    ] {
+        events.extend(map_session_update_with_mode(
+            update,
+            None,
+            &mut acc,
+            &mut caps,
+            UpdateMode::Import,
+        ));
+    }
+    events.extend(acc.finish_all().into_iter().map(DriverEvent::Event));
+
+    let payloads: Vec<_> = events
+        .into_iter()
+        .filter_map(|event| match event {
+            DriverEvent::Event(payload) => Some(payload),
+            DriverEvent::Delta(_) | DriverEvent::Failed { .. } => None,
+        })
+        .collect();
+
+    assert_eq!(payloads.len(), 2);
+    match &payloads[0] {
+        UnifiedEventPayload::UserMessage {
+            text,
+            client_source,
+            ..
+        } => {
+            assert_eq!(text, "hello world");
+            assert_eq!(*client_source, fxg_protocol::common::ClientSource::Import);
+        }
+        other => panic!("unexpected payload: {other:?}"),
+    }
+    match &payloads[1] {
+        UnifiedEventPayload::AgentMessage { text, .. } => assert_eq!(text, "hi there"),
+        other => panic!("unexpected payload: {other:?}"),
+    }
+}
+
+#[test]
+fn live_updates_ignore_user_message_chunks() {
+    let mut acc = StreamingAccumulator::default();
+    let mut caps = SessionCapabilitiesState::default();
+    let events = map_session_update(
+        user_chunk("already recorded", None),
+        None,
+        &mut acc,
+        &mut caps,
+    );
+    assert!(events.is_empty());
+    assert!(acc.finish_all().is_empty());
 }
 
 #[test]

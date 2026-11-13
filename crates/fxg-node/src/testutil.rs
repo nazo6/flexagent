@@ -15,8 +15,8 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use fxg_acp::{
-    ActiveSessionHandle, AgentDriver, AgentLaunchSpec, DriverEvent, DriverKind, ResumeRequest,
-    StartSessionRequest, StartedSession,
+    ActiveSessionHandle, AgentDriver, AgentLaunchSpec, AgentSessionInfo, AgentSessionList,
+    DriverEvent, DriverKind, ResumeRequest, StartSessionRequest, StartedSession,
 };
 use fxg_protocol::client_api::AgentCapabilitiesPreview;
 use fxg_protocol::common::{InitialConfig, SessionStatus};
@@ -117,6 +117,10 @@ struct MockAgentInner {
     resume_supported: AtomicBool,
     /// Capabilities emitted right after `session/new` (capability probe tests)
     start_capabilities: Mutex<Option<AgentCapabilitiesPreview>>,
+    /// Sessions reported by `session/list` (external session discovery tests)
+    external_sessions: Mutex<Vec<AgentSessionInfo>>,
+    /// Whether the mock agent can replay history (`loadSession`)
+    external_history: AtomicBool,
 }
 
 impl MockAgent {
@@ -149,6 +153,22 @@ impl MockAgent {
             .start_capabilities
             .lock()
             .expect("start capabilities") = Some(capabilities);
+    }
+
+    /// Sets the sessions returned by `session/list`.
+    pub(crate) fn set_external_sessions(
+        &self,
+        sessions: Vec<AgentSessionInfo>,
+        supports_history: bool,
+    ) {
+        *self
+            .inner
+            .external_sessions
+            .lock()
+            .expect("external sessions") = sessions;
+        self.inner
+            .external_history
+            .store(supports_history, Ordering::SeqCst);
     }
 
     /// List of sent prompts.
@@ -199,6 +219,22 @@ impl AgentDriver for MockAgent {
         DriverKind::Other("mock".to_owned())
     }
 
+    async fn list_sessions(
+        &self,
+        _launch: &AgentLaunchSpec,
+        _cwd: &std::path::Path,
+    ) -> anyhow::Result<AgentSessionList> {
+        Ok(AgentSessionList {
+            sessions: self
+                .inner
+                .external_sessions
+                .lock()
+                .expect("external sessions")
+                .clone(),
+            supports_history: self.inner.external_history.load(Ordering::SeqCst),
+        })
+    }
+
     async fn start_session(
         &self,
         req: StartSessionRequest,
@@ -225,6 +261,10 @@ impl AgentDriver for MockAgent {
             .lock()
             .expect("events")
             .push(event_tx.clone());
+        let bound_agent_session = req
+            .resume
+            .as_ref()
+            .and_then(|resume| resume.agent_session_id.clone());
         self.inner.starts.lock().expect("starts").push(MockStart {
             session_id: req.session_id,
             cwd: req.cwd,
@@ -232,6 +272,14 @@ impl AgentDriver for MockAgent {
             fork_from: req.fork_from,
             initial_config: req.initial_config,
         });
+        if let Some(agent_session_id) = bound_agent_session.clone() {
+            fxg_protocol::discard_with!(
+                event_tx.send(DriverEvent::Event(UnifiedEventPayload::SessionAgentBound {
+                    agent_session_id
+                })),
+                "send the agent session binding"
+            );
+        }
         if let Some(capabilities) = self
             .inner
             .start_capabilities
@@ -262,7 +310,7 @@ impl AgentDriver for MockAgent {
         Ok(StartedSession {
             handle: Box::new(self.clone()),
             context_restored: can_restore,
-            agent_session_id: None,
+            agent_session_id: bound_agent_session,
         })
     }
 }

@@ -71,6 +71,8 @@ export function errorCodeMessage(
       return m.error_fork_unsupported();
     case "FORK_SCOPE_UNSUPPORTED":
       return m.error_fork_scope_unsupported();
+    case "HISTORY_UNAVAILABLE":
+      return m.error_history_unavailable();
     case "SYNC_BACKLOG":
       return m.error_sync_backlog();
     case "DB_CORRUPT":

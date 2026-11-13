@@ -20,7 +20,7 @@ use std::time::{Duration, Instant};
 use fxg_acp::agent::AgentCatalog;
 use fxg_acp::{
     ActiveSessionHandle, AgentAuthRequired, AgentDriver, AgentLaunchSpec, DriverEvent,
-    NativeForkUnavailable, NativeResumeUnavailable, ResumeRequest,
+    HistoryCaptureUnavailable, NativeForkUnavailable, NativeResumeUnavailable, ResumeRequest,
 };
 use fxg_protocol::CommandId;
 use fxg_protocol::client_api::AgentCapabilitiesPreview;
@@ -208,6 +208,17 @@ struct Inner {
     probe_cache: Mutex<HashMap<ProbeKey, ProbeCacheEntry>>,
     /// Serializes probe startups (the UI probes a single agent at a time).
     probe_lock: tokio::sync::Mutex<()>,
+    /// Cached external-session discovery (manual refresh bypasses it).
+    external_cache: Mutex<Option<ExternalCacheEntry>>,
+}
+
+/// Cached external-session discovery result.
+#[derive(Debug, Clone)]
+struct ExternalCacheEntry {
+    /// Full (unfiltered) discovery response
+    response: fxg_protocol::client_api::ExternalSessionListResponse,
+    /// Time the entry was cached
+    cached_at: Instant,
 }
 
 /// Cache key for agent capability probes.
@@ -329,6 +340,7 @@ impl SessionManager {
                 drivers: Mutex::new(Vec::new()),
                 probe_cache: Mutex::new(HashMap::new()),
                 probe_lock: tokio::sync::Mutex::new(()),
+                external_cache: Mutex::new(None),
             }),
         }
     }
@@ -559,6 +571,7 @@ impl SessionManager {
 }
 
 mod approval;
+mod external;
 mod lifecycle;
 mod probe;
 mod prompt;

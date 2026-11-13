@@ -325,6 +325,16 @@ pub(super) fn is_mode_option(option: &ConfigOptionInfo) -> bool {
         || (option.category.is_none() && option.key == "mode")
 }
 
+/// Where a `session/update` came from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum UpdateMode {
+    /// A live turn / background update (user messages are recorded by the manager).
+    Live,
+    /// History replayed by `session/load` for an explicit import (user messages
+    /// come from the replay and must be recorded).
+    Import,
+}
+
 /// Accumulates streaming chunks per session scope (parent or subagent).
 ///
 /// Only completion events are persisted (docs/01 §2.3), and they consume a
@@ -337,6 +347,8 @@ pub(super) fn is_mode_option(option: &ConfigOptionInfo) -> bool {
 pub(super) struct StreamingAccumulator {
     pub(super) messages: BTreeMap<Option<String>, (String, String)>,
     pub(super) thoughts: BTreeMap<Option<String>, (String, String)>,
+    /// Replayed user messages (import only; empty during live turns).
+    pub(super) user_messages: BTreeMap<Option<String>, (String, String)>,
     /// Sender / recipient of a session message, keyed by message ID (used to
     /// attach direction to chunks that arrive after the upsert).
     pub(super) session_messages: BTreeMap<String, (String, String)>,
@@ -346,7 +358,21 @@ impl StreamingAccumulator {
     pub(super) fn reset(&mut self) {
         self.messages.clear();
         self.thoughts.clear();
+        self.user_messages.clear();
         self.session_messages.clear();
+    }
+
+    pub(super) fn finish_user_message(
+        &mut self,
+        subagent_id: &Option<String>,
+    ) -> Option<UnifiedEventPayload> {
+        self.user_messages
+            .remove(subagent_id)
+            .map(|(_message_id, text)| UnifiedEventPayload::UserMessage {
+                text,
+                attachments: Vec::new(),
+                client_source: fxg_protocol::common::ClientSource::Import,
+            })
     }
 
     pub(super) fn finish_message(
@@ -386,6 +412,8 @@ impl StreamingAccumulator {
         delta: &str,
     ) -> Vec<UnifiedEventPayload> {
         let mut out = Vec::new();
+        // A replayed user message precedes the answer it belongs to.
+        out.extend(self.finish_user_message(&subagent_id));
         // Reasoning always precedes the answer it belongs to.
         out.extend(self.finish_thought(&subagent_id));
         if self
@@ -414,6 +442,7 @@ impl StreamingAccumulator {
         delta: &str,
     ) -> Vec<UnifiedEventPayload> {
         let mut out = Vec::new();
+        out.extend(self.finish_user_message(&subagent_id));
         out.extend(self.finish_message(&subagent_id));
         if self
             .thoughts
@@ -432,9 +461,43 @@ impl StreamingAccumulator {
         out
     }
 
+    /// Appends a replayed user message chunk (import only).
+    ///
+    /// Returns completion events for the previous turn's answer / reasoning and
+    /// for a previous user message with a different ID.
+    pub(super) fn push_user_message(
+        &mut self,
+        subagent_id: Option<String>,
+        message_id: String,
+        delta: &str,
+    ) -> Vec<UnifiedEventPayload> {
+        let mut out = Vec::new();
+        out.extend(self.finish_thought(&subagent_id));
+        out.extend(self.finish_message(&subagent_id));
+        if self
+            .user_messages
+            .get(&subagent_id)
+            .is_some_and(|(id, _)| *id != message_id)
+        {
+            out.extend(self.finish_user_message(&subagent_id));
+        }
+        match self.user_messages.get_mut(&subagent_id) {
+            Some((_, text)) => text.push_str(delta),
+            None => {
+                self.user_messages
+                    .insert(subagent_id, (message_id, delta.to_owned()));
+            }
+        }
+        out
+    }
+
     /// Takes every accumulated stream as completion events.
     pub(super) fn finish_all(&mut self) -> Vec<UnifiedEventPayload> {
         let mut out = Vec::new();
+        let scopes: Vec<Option<String>> = self.user_messages.keys().cloned().collect();
+        for scope in scopes {
+            out.extend(self.finish_user_message(&scope));
+        }
         // Defensive ordering: reasoning precedes the answer within a turn.
         let scopes: Vec<Option<String>> = self.thoughts.keys().cloned().collect();
         for scope in scopes {
@@ -448,35 +511,69 @@ impl StreamingAccumulator {
     }
 }
 
-/// Converts a `session/update` notification into a list of [`DriverEvent`]s.
+/// Converts a live `session/update` notification into a list of [`DriverEvent`]s.
 ///
 /// `subagent_id` is `None` for the root session and `Some(child)` for a child
 /// session. Child-originated events are tagged, and capability updates from a
 /// child never overwrite the parent's capabilities.
+#[cfg(test)]
 pub(super) fn map_session_update(
     update: SessionUpdate,
     subagent_id: Option<&str>,
     accumulator: &mut StreamingAccumulator,
     capabilities: &mut SessionCapabilitiesState,
 ) -> Vec<DriverEvent> {
+    map_session_update_with_mode(
+        update,
+        subagent_id,
+        accumulator,
+        capabilities,
+        UpdateMode::Live,
+    )
+}
+
+/// Converts a `session/update` notification with an explicit source mode.
+pub(super) fn map_session_update_with_mode(
+    update: SessionUpdate,
+    subagent_id: Option<&str>,
+    accumulator: &mut StreamingAccumulator,
+    capabilities: &mut SessionCapabilitiesState,
+    mode: UpdateMode,
+) -> Vec<DriverEvent> {
     let scope = subagent_id.map(str::to_owned);
     let mut events = Vec::new();
     match update {
-        SessionUpdate::UserMessageChunk(_) => {
-            // User messages are already recorded by the manager as `UserMessage`.
-            // The echo marks the start of a turn: a background report that arrived
-            // before it (agy's teamwork only flushes its follow-up when the next
-            // prompt starts) belongs to the previous context, so finalize it as its
-            // own message instead of merging it into this turn's answer.
-            let mut finished = Vec::new();
-            if let Some(payload) = accumulator.finish_thought(&scope) {
-                finished.push(payload);
-            }
-            if let Some(payload) = accumulator.finish_message(&scope) {
-                finished.push(payload);
-            }
-            for payload in finished {
-                events.push(DriverEvent::Event(payload));
+        SessionUpdate::UserMessageChunk(ContentChunk {
+            content,
+            message_id,
+            ..
+        }) => {
+            if mode == UpdateMode::Import {
+                if let ContentBlock::Text(TextContent { text, .. }) = content {
+                    let message_id = message_id
+                        .map(|id| id.to_string())
+                        .unwrap_or_else(|| "acp-user-message".to_owned());
+                    for finished in accumulator.push_user_message(scope.clone(), message_id, &text)
+                    {
+                        events.push(DriverEvent::Event(finished));
+                    }
+                }
+            } else {
+                // User messages are already recorded by the manager as `UserMessage`.
+                // The echo marks the start of a turn: a background report that arrived
+                // before it (agy's teamwork only flushes its follow-up when the next
+                // prompt starts) belongs to the previous context, so finalize it as its
+                // own message instead of merging it into this turn's answer.
+                let mut finished = Vec::new();
+                if let Some(payload) = accumulator.finish_thought(&scope) {
+                    finished.push(payload);
+                }
+                if let Some(payload) = accumulator.finish_message(&scope) {
+                    finished.push(payload);
+                }
+                for payload in finished {
+                    events.push(DriverEvent::Event(payload));
+                }
             }
         }
         SessionUpdate::AgentMessageChunk(ContentChunk {

@@ -11,6 +11,7 @@
   import ConnectionMenu from "#lib/components/ConnectionMenu.svelte";
   import ProblemBadge from "#lib/components/ProblemBadge.svelte";
   import SessionActionsMenu from "#lib/components/session/SessionActionsMenu.svelte";
+  import ExternalSessionsDialog from "#lib/components/session/ExternalSessionsDialog.svelte";
   import type { SessionSummary } from "#lib/generated/bindings.ts";
   import { layoutState } from "#lib/stores/layout.svelte.ts";
   import PanelLeftCloseIcon from "@lucide/svelte/icons/panel-left-close";
@@ -21,6 +22,7 @@
   import FolderGit2Icon from "@lucide/svelte/icons/folder-git-2";
   import FolderIcon from "@lucide/svelte/icons/folder";
   import GitBranchIcon from "@lucide/svelte/icons/git-branch";
+  import HistoryIcon from "@lucide/svelte/icons/history";
   import InboxIcon from "@lucide/svelte/icons/inbox";
   import PinIcon from "@lucide/svelte/icons/pin";
   import PlusIcon from "@lucide/svelte/icons/plus";
@@ -37,6 +39,7 @@
   let collapsedProjects = $state<Record<string, boolean>>({});
   let showAttentionSection = $state(true);
   let showArchivedSection = $state(false);
+  let externalOpen = $state(false);
 
   const currentPath = $derived(page.url.pathname);
   const activeSessionId = $derived(
@@ -241,6 +244,15 @@
       <span>{m.shell_projects()}</span>
     </a>
 
+    <button
+      type="button"
+      onclick={() => (externalOpen = true)}
+      class="text-muted-foreground hover:bg-accent/50 hover:text-foreground flex items-center gap-2 rounded-md px-2.5 py-1.5 text-left font-medium transition-colors"
+    >
+      <HistoryIcon class="size-4" />
+      <span>{m.shell_external_sessions()}</span>
+    </button>
+
     <a
       href="/search"
       onclick={handleLinkClick}
@@ -440,6 +452,8 @@
     <ConnectionMenu variant="scope" />
   </div>
 </aside>
+
+<ExternalSessionsDialog bind:open={externalOpen} />
 
 {#snippet sessionRow(session: SessionSummary)}
   {@const isActive = activeSessionId === session.session_id}

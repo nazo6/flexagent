@@ -14,8 +14,8 @@ use fxg_hub::api::{
 use fxg_protocol::CommandId;
 use fxg_protocol::client_api::{
     AgentDiagnostics, AgentOpResponse, AgentsResponse, ConnectionRole, CreateSessionRequest,
-    CreateSessionResponse, CreateWorktreeRequest, DiagnosticsResponse, HubLinkState,
-    KillSwitchResponse, ProjectLinkRequest, ProjectLinkResponse, ProjectScanRequest,
+    CreateSessionResponse, CreateWorktreeRequest, DiagnosticsResponse, ExternalSessionListResponse,
+    HubLinkState, KillSwitchResponse, ProjectLinkRequest, ProjectLinkResponse, ProjectScanRequest,
     ProjectScanResponse, ProjectUnlinkRequest, ProjectUnlinkResponse, ProvisionersResponse,
     PruneWorktreesRequest, RemoveWorktreeRequest, RespondElicitationRequest,
     RespondElicitationResponse, RespondPermissionRequest, RespondPermissionResponse,
@@ -438,6 +438,7 @@ impl ClientApiBackend for DaemonState {
             &request.agent_session_id,
             Path::new(&request.cwd),
             request.title.as_deref(),
+            request.mirror_history,
             &source,
         )
         .await
@@ -446,6 +447,25 @@ impl ClientApiBackend for DaemonState {
             session_id: session_id.into(),
             command_id: request.command_id,
         })
+    }
+
+    async fn list_external_sessions(
+        &self,
+        node_id: Option<&str>,
+        agents: &[String],
+        force: bool,
+    ) -> Result<ExternalSessionListResponse, ApiError> {
+        if let Some(node_id) = node_id
+            && node_id != self.node_id()
+        {
+            return Err(ApiError::bad_request(format!(
+                "requested node {node_id} but this node is {}",
+                self.node_id()
+            )));
+        }
+        DaemonState::list_external_sessions(self, agents, force)
+            .await
+            .map_err(api_error)
     }
 
     async fn respond_permission(

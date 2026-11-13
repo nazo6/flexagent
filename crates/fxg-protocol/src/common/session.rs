@@ -402,6 +402,8 @@ crate::open_string_enum! {
         Android => "android",
         /// History injected when resuming a session
         Resume => "resume",
+        /// History imported from an existing agent session
+        Import => "import",
     }
 }
 

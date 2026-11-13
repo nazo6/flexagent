@@ -189,6 +189,18 @@ pub enum NodeRpcRequest {
         cwd: String,
         /// Optional title
         title: Option<String>,
+        /// Mirror the history replayed by `session/load`
+        #[serde(default)]
+        mirror_history: bool,
+    },
+    /// List sessions that exist on the agent side (ACP `session/list`).
+    ListExternalSessions {
+        /// Agent IDs to inspect (empty = every available agent)
+        #[serde(default)]
+        agents: Vec<String>,
+        /// Bypass the node's short-lived discovery cache
+        #[serde(default)]
+        force: bool,
     },
     /// Resume a stopped session.
     ResumeSession {
@@ -229,6 +241,7 @@ impl NodeRpcRequest {
             | Self::ListAgents
             | Self::ProbeAgentConfig { .. }
             | Self::ImportSession { .. }
+            | Self::ListExternalSessions { .. }
             | Self::ResumeSession { .. }
             | Self::DeleteSession { .. } => Duration::from_secs(120),
             Self::ManageAgent { .. } => Duration::from_secs(600),
@@ -314,6 +327,11 @@ pub enum NodeRpcResponse {
     SessionImported {
         /// ID of the imported session
         session_id: SessionId,
+    },
+    /// External session discovery result (`ListExternalSessions`).
+    ExternalSessions {
+        /// Sessions and per-agent discovery state
+        response: crate::client_api::ExternalSessionListResponse,
     },
     /// Session resume result (`ResumeSession`).
     Resume {
@@ -759,6 +777,7 @@ mod tests {
                 agent_session_id: "agent-9".into(),
                 cwd: "/tmp/repo".into(),
                 title: Some("Imported".into()),
+                mirror_history: true,
             },
         };
         let json = serde_json::to_value(&msg).unwrap();
@@ -816,6 +835,7 @@ mod tests {
                 agent_session_id: "agent-9".into(),
                 cwd: "/tmp/repo".into(),
                 title: None,
+                mirror_history: false,
             }
             .timeout(),
             Duration::from_secs(120)

@@ -3,6 +3,7 @@ use super::replay::*;
 use super::*;
 use crate::paths::NodePaths;
 use crate::testutil::MockAgent;
+use fxg_acp::AgentSessionInfo;
 use fxg_acp::DriverKind;
 use fxg_acp::agent::{
     AgentBackend, AgentCatalog, AgentDefinition, AgentExtension, CapabilitiesSnapshot,
@@ -948,6 +949,7 @@ async fn import_session_records_and_resumes_an_existing_agent_session() {
             "agent-session-1",
             dir.path(),
             Some("Imported"),
+            false,
         )
         .await
         .expect("import");
@@ -967,6 +969,95 @@ async fn import_session_records_and_resumes_an_existing_agent_session() {
         .expect("query")
         .expect("session");
     assert_eq!(session.title, "Imported");
+}
+
+#[tokio::test]
+async fn list_external_sessions_marks_already_imported_sessions() {
+    let (manager, mock, dir) = setup().await;
+    mock.set_resume_supported(true);
+    mock.set_external_sessions(
+        vec![
+            AgentSessionInfo {
+                session_id: "external-1".to_owned(),
+                cwd: dir.path().to_path_buf(),
+                title: Some("External one".to_owned()),
+                updated_at: Some("2026-11-12T10:00:00Z".to_owned()),
+            },
+            AgentSessionInfo {
+                session_id: "external-2".to_owned(),
+                cwd: dir.path().to_path_buf(),
+                title: None,
+                updated_at: None,
+            },
+        ],
+        true,
+    );
+
+    let response = manager
+        .list_external_sessions(&["mock".to_owned()], true)
+        .await
+        .expect("list external");
+    assert_eq!(response.sessions.len(), 2);
+    assert!(response.agents.iter().any(|agent| {
+        agent.agent_id == "mock" && agent.supports_list && agent.supports_history
+    }));
+    assert!(
+        response
+            .sessions
+            .iter()
+            .all(|session| session.imported_session_id.is_none())
+    );
+
+    let session_id = manager
+        .import_session(
+            &CommandId::from("c-import-external"),
+            "mock",
+            "external-1",
+            dir.path(),
+            Some("External one"),
+            false,
+        )
+        .await
+        .expect("import");
+
+    // The `SessionAgentBound` projection is written by the event pump; wait for
+    // it so discovery sees the imported session deterministically.
+    for _ in 0..100 {
+        if manager
+            .bus()
+            .db()
+            .find_session_by_agent_session("mock", "external-1")
+            .await
+            .expect("lookup")
+            .is_some()
+        {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+
+    let response = manager
+        .list_external_sessions(&["mock".to_owned()], true)
+        .await
+        .expect("list external");
+    let imported = response
+        .sessions
+        .iter()
+        .find(|session| session.agent_session_id == "external-1")
+        .expect("external-1");
+    assert_eq!(
+        imported.imported_session_id.as_ref().map(SessionId::as_str),
+        Some(session_id.as_str())
+    );
+    assert!(
+        response
+            .sessions
+            .iter()
+            .find(|session| session.agent_session_id == "external-2")
+            .expect("external-2")
+            .imported_session_id
+            .is_none()
+    );
 }
 
 #[tokio::test]

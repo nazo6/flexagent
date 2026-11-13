@@ -347,6 +347,7 @@ async fn execute_inner(
             agent_session_id,
             cwd,
             title,
+            mirror_history,
         } => {
             let session_id = state
                 .import_session(
@@ -355,12 +356,17 @@ async fn execute_inner(
                     &agent_session_id,
                     Path::new(&cwd),
                     title.as_deref(),
+                    mirror_history,
                     source,
                 )
                 .await?;
             Ok(NodeRpcResponse::SessionImported {
                 session_id: session_id.into(),
             })
+        }
+        NodeRpcRequest::ListExternalSessions { agents, force } => {
+            let response = state.list_external_sessions(&agents, force).await?;
+            Ok(NodeRpcResponse::ExternalSessions { response })
         }
         NodeRpcRequest::ResumeSession {
             session_id,

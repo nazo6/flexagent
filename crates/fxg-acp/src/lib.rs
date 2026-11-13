@@ -28,7 +28,8 @@ mod warm;
 pub use acp::AcpDriver;
 pub use agent::AgentCatalog;
 pub use driver::{
-    ActiveSessionHandle, AgentAuthRequired, AgentDriver, AgentLaunchSpec, DriverEvent, DriverKind,
-    NativeForkUnavailable, NativeResumeUnavailable, ResumeRequest, StartSessionRequest,
-    StartedSession,
+    ActiveSessionHandle, AgentAuthRequired, AgentDriver, AgentLaunchSpec, AgentSessionInfo,
+    AgentSessionList, DriverEvent, DriverKind, ExternalSessionsUnsupported,
+    HistoryCaptureUnavailable, NativeForkUnavailable, NativeResumeUnavailable, ResumeRequest,
+    StartSessionRequest, StartedSession,
 };

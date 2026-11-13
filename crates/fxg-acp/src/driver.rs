@@ -90,6 +90,12 @@ pub struct ResumeRequest {
     /// Whether creating a fresh session is allowed when native restore is unavailable
     /// (`false` returns [`NativeResumeUnavailable`]).
     pub allow_fresh: bool,
+    /// Capture the conversation history replayed by ACP `session/load` into the
+    /// event log (used by explicit imports of external sessions).
+    ///
+    /// When `true`, `session/load` is preferred over `session/resume`, and the
+    /// driver returns `HistoryCaptureUnavailable` if the agent cannot load.
+    pub capture_history: bool,
 }
 
 /// Resume was aborted without creating a fresh session because native restore
@@ -114,6 +120,11 @@ pub struct AgentAuthRequired(pub Vec<fxg_protocol::common::AgentAuthMethodInfo>)
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("native session fork is not available: {0}")]
 pub struct NativeForkUnavailable(pub String);
+
+/// History capture was requested but the agent cannot replay it (`session/load`).
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("agent cannot replay session history: {0}")]
+pub struct HistoryCaptureUnavailable(pub String);
 
 /// Session start request.
 #[derive(Debug, Clone)]
@@ -219,6 +230,18 @@ pub trait AgentDriver: Send + Sync {
         event_tx: mpsc::UnboundedSender<DriverEvent>,
     ) -> anyhow::Result<StartedSession>;
 
+    /// Lists sessions that already exist on the agent side (ACP `session/list`).
+    ///
+    /// The default implementation reports [`ExternalSessionsUnsupported`] so
+    /// full custom drivers and test doubles keep working without the capability.
+    async fn list_sessions(
+        &self,
+        _launch: &AgentLaunchSpec,
+        _cwd: &std::path::Path,
+    ) -> anyhow::Result<AgentSessionList> {
+        Err(ExternalSessionsUnsupported.into())
+    }
+
     /// Disposes all idle agent processes (those not attached to a session).
     ///
     /// Called by `the hub kill switch` / node shutdown. Drivers that keep processes alive
@@ -238,6 +261,33 @@ pub trait AgentDriver: Send + Sync {
         BTreeMap::new()
     }
 }
+
+/// One session that already exists on the agent side.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentSessionInfo {
+    /// Agent-side session ID
+    pub session_id: String,
+    /// Working directory recorded by the agent
+    pub cwd: PathBuf,
+    /// Human-readable title (when the agent reports one)
+    pub title: Option<String>,
+    /// ISO 8601 timestamp of the last activity (when the agent reports one)
+    pub updated_at: Option<String>,
+}
+
+/// Result of [`AgentDriver::list_sessions`].
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AgentSessionList {
+    /// Sessions reported by the agent
+    pub sessions: Vec<AgentSessionInfo>,
+    /// Whether the agent can replay history on `session/load`
+    pub supports_history: bool,
+}
+
+/// The agent does not implement ACP `session/list`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("agent does not support session/list")]
+pub struct ExternalSessionsUnsupported;
 
 /// Operation handle for a started session.
 #[async_trait]

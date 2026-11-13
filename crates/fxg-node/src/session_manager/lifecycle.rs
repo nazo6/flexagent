@@ -312,6 +312,15 @@ impl SessionManager {
                     );
                     return Err(NodeError::ForkUnsupported(unavailable.0.clone()));
                 }
+                // An explicit history capture asked for `session/load`, but the
+                // agent cannot replay the session.
+                if let Some(unavailable) = err.downcast_ref::<HistoryCaptureUnavailable>() {
+                    tracing::info!(
+                        session_id = params.session_id,
+                        "session history is not available: {unavailable}"
+                    );
+                    return Err(NodeError::HistoryUnavailable(unavailable.0.clone()));
+                }
                 // In native-only auto-resume (`allow_fresh = false`), return
                 // "native restore unavailable" to the caller while leaving the session stopped
                 // (do not implicitly run a history replay; prompt for an explicit Resume)
@@ -391,6 +400,7 @@ impl SessionManager {
         agent_session_id: &str,
         cwd: &Path,
         title: Option<&str>,
+        mirror_history: bool,
     ) -> Result<String, NodeError> {
         if !self.begin_command(command_id) {
             return Err(NodeError::CommandDuplicate(command_id.to_string()));
@@ -404,6 +414,7 @@ impl SessionManager {
         let (git_branch, is_worktree) =
             git_metadata_or_warn(&resolved.local_path, &session_id).await;
         let title = title
+            .filter(|title| !title.trim().is_empty())
             .map(str::to_owned)
             .unwrap_or_else(|| format!("{} (imported)", spec.display_name));
         self.inner
@@ -423,22 +434,44 @@ impl SessionManager {
                 },
             )
             .await?;
-        self.start_driver_session(StartDriverParams {
-            session_id: &session_id,
-            title: &title,
-            cwd: &resolved.local_path,
-            spec: &spec,
-            extra_args: Vec::new(),
-            initial_mode: None,
-            has_custom_title: true,
-            resume: Some(ResumeRequest {
-                agent_session_id: Some(agent_session_id.to_owned()),
-                allow_fresh: false,
-            }),
-            fork_from: None,
-            initial_config: Vec::new(),
-        })
-        .await?;
+        if let Err(err) = self
+            .start_driver_session(StartDriverParams {
+                session_id: &session_id,
+                title: &title,
+                cwd: &resolved.local_path,
+                spec: &spec,
+                extra_args: Vec::new(),
+                initial_mode: None,
+                has_custom_title: true,
+                resume: Some(ResumeRequest {
+                    agent_session_id: Some(agent_session_id.to_owned()),
+                    allow_fresh: false,
+                    capture_history: mirror_history,
+                }),
+                fork_from: None,
+                initial_config: Vec::new(),
+            })
+            .await
+        {
+            // A failed import must not leave an empty session behind (the UI
+            // imports lazily, so a ghost row would look like a successful import).
+            tracing::warn!(
+                session_id = %session_id,
+                "session import failed; rolling back the created session: {err}"
+            );
+            if let Err(cleanup) = self
+                .inner
+                .bus
+                .record(&session_id, UnifiedEventPayload::SessionDeleted {})
+                .await
+            {
+                tracing::warn!(
+                    session_id = %session_id,
+                    "failed to roll back the imported session: {cleanup:#}"
+                );
+            }
+            return Err(err);
+        }
         Ok(session_id)
     }
 
@@ -626,6 +659,7 @@ impl SessionManager {
                 resume: Some(ResumeRequest {
                     agent_session_id,
                     allow_fresh,
+                    capture_history: false,
                 }),
                 fork_from: None,
                 initial_config: Vec::new(),

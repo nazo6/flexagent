@@ -319,6 +319,22 @@ pub trait ClientApiBackend: Clone + Send + Sync + 'static {
         ))
     }
 
+    /// `GET /api/v1/sessions/external` (sessions that already exist on the agent side).
+    ///
+    /// The default implementation is for endpoints that cannot own an agent
+    /// process (the hub overrides it to relay to the target node).
+    async fn list_external_sessions(
+        &self,
+        _node_id: Option<&str>,
+        _agents: &[String],
+        _force: bool,
+    ) -> Result<fxg_protocol::client_api::ExternalSessionListResponse, ApiError> {
+        Err(ApiError::from_code(
+            ErrorCode::InvalidState,
+            "external session discovery is not supported by this backend",
+        ))
+    }
+
     /// `POST /api/v1/sessions/:id/permissions/:req_id/respond` (idempotent).
     async fn respond_permission(
         &self,

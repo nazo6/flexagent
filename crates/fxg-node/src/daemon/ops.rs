@@ -83,6 +83,10 @@ impl DaemonState {
     ///
     /// Shared by the Client REST endpoint and the hub relay so the
     /// project-binding refresh and audit entry stay identical.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "shared REST / RPC entry point; grouping the fields would duplicate the request type"
+    )]
     pub async fn import_session(
         &self,
         command_id: &CommandId,
@@ -90,12 +94,20 @@ impl DaemonState {
         agent_session_id: &str,
         cwd: &Path,
         title: Option<&str>,
+        mirror_history: bool,
         source: &AuditSource,
     ) -> Result<String, NodeError> {
         self.resolve_and_register_project(cwd).await?;
         let session_id = self
             .session_manager()
-            .import_session(command_id, agent_id, agent_session_id, cwd, title)
+            .import_session(
+                command_id,
+                agent_id,
+                agent_session_id,
+                cwd,
+                title,
+                mirror_history,
+            )
             .await?;
         self.record_audit(
             fxg_db::audit::actions::SESSION_START,
@@ -106,10 +118,22 @@ impl DaemonState {
                 "cwd": cwd,
                 "agent_session_id": agent_session_id,
                 "imported": true,
+                "mirror_history": mirror_history,
             }),
         )
         .await;
         Ok(session_id)
+    }
+
+    /// Lists sessions that already exist on the agent side (ACP `session/list`).
+    pub async fn list_external_sessions(
+        &self,
+        agents: &[String],
+        force: bool,
+    ) -> Result<fxg_protocol::client_api::ExternalSessionListResponse, NodeError> {
+        self.session_manager()
+            .list_external_sessions(agents, force)
+            .await
     }
 
     /// Archives/restores a session (shared implementation for Client REST / hub relay).

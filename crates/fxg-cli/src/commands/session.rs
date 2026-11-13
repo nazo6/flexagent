@@ -127,6 +127,8 @@ pub enum SessionCommands {
     Fork(SessionForkArgs),
     /// Import an existing agent session (native resume)
     Import(SessionImportArgs),
+    /// List sessions that already exist on the agent side
+    External(SessionExternalArgs),
     /// Archive a session from the list (restorable)
     Archive(SessionArchiveArgs),
     /// Move an archived session back into the list
@@ -586,6 +588,9 @@ pub struct SessionImportArgs {
     /// Session title
     #[usage(long)]
     title: Option<String>,
+    /// Replay the agent's conversation history into the imported session
+    #[usage(long)]
+    mirror_history: bool,
 }
 
 impl usage::RunAsync for SessionImportArgs {
@@ -606,9 +611,62 @@ impl usage::RunAsync for SessionImportArgs {
                 &self.agent_session_id,
                 &cwd,
                 self.title.as_deref(),
+                self.mirror_history,
             )
             .await?;
         println!("imported session: {session_id}");
+        Ok(())
+    }
+}
+
+/// `fxg session external`
+#[derive(Debug, Args)]
+pub struct SessionExternalArgs {
+    /// Agent ID (omit for every available agent)
+    #[usage(long)]
+    agent: Option<String>,
+    /// Bypass the node's discovery cache
+    #[usage(long)]
+    force: bool,
+    /// Print the raw JSON response
+    #[usage(long)]
+    json: bool,
+}
+
+impl usage::RunAsync for SessionExternalArgs {
+    type Output = Result<()>;
+
+    async fn run_async(self) -> Self::Output {
+        let mut client = NodeClient::connect().await?;
+        let response = client
+            .list_external_sessions(self.agent.as_deref(), self.force)
+            .await?;
+        if self.json {
+            println!("{}", serde_json::to_string_pretty(&response)?);
+            return Ok(());
+        }
+        if response.sessions.is_empty() {
+            println!("no external sessions found");
+        }
+        for session in &response.sessions {
+            let title = session.title.as_deref().unwrap_or("(untitled)");
+            let imported = session
+                .imported_session_id
+                .as_ref()
+                .map(|id| format!(" (imported: {id})"))
+                .unwrap_or_default();
+            println!(
+                "{} [{}] {} {}{}",
+                session.agent_id, session.agent_session_id, session.cwd, title, imported
+            );
+        }
+        for agent in &response.agents {
+            if let Some(error) = &agent.error {
+                eprintln!("{}: {} ({:?})", agent.agent_id, error.message, error.code);
+            } else if !agent.supports_list {
+                eprintln!("{}: session/list is not supported", agent.agent_id);
+            }
+        }
         Ok(())
     }
 }

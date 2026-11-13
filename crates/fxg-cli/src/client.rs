@@ -632,6 +632,7 @@ impl NodeClient {
         agent_session_id: &str,
         cwd: &str,
         title: Option<&str>,
+        mirror_history: bool,
     ) -> Result<String> {
         let command_id = self.command_id();
         let response: SessionImportResponse = self
@@ -644,10 +645,32 @@ impl NodeClient {
                     agent_session_id: agent_session_id.to_owned(),
                     cwd: cwd.to_owned(),
                     title: title.map(str::to_owned),
+                    mirror_history,
                 },
             )
             .await?;
         Ok(response.session_id.to_string())
+    }
+
+    /// `GET /api/v1/sessions/external` (sessions that already exist on the agent side).
+    pub async fn list_external_sessions(
+        &mut self,
+        agent: Option<&str>,
+        force: bool,
+    ) -> Result<fxg_protocol::client_api::ExternalSessionListResponse> {
+        let mut path = "/api/v1/sessions/external".to_owned();
+        let mut query = Vec::new();
+        if let Some(agent) = agent {
+            query.push(format!("agent={agent}"));
+        }
+        if force {
+            query.push("force=true".to_owned());
+        }
+        if !query.is_empty() {
+            path.push('?');
+            path.push_str(&query.join("&"));
+        }
+        self.get(&path).await
     }
 
     /// `fxg doctor` / `fxg logs --session` (local diagnostics).

@@ -63,6 +63,20 @@ fn main() {
             continue;
         }
 
+        // `session/load` replays the conversation before the response (ACP spec).
+        if method == "session/load" && mode == "list" {
+            send_list_replay(&mut stdout);
+            write_line(
+                &mut stdout,
+                &json!({
+                    "jsonrpc": "2.0",
+                    "id": id,
+                    "result": { "sessionId": "external-1" }
+                }),
+            );
+            continue;
+        }
+
         let response = match (mode.as_str(), method) {
             ("auth-required", "initialize") => json!({
                 "jsonrpc": "2.0",
@@ -123,6 +137,53 @@ fn main() {
                     "sessionId": "source-session"
                 }
             }),
+            ("list", "initialize") => json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "result": {
+                    "protocolVersion": 1,
+                    "agentCapabilities": {
+                        "loadSession": true,
+                        "sessionCapabilities": {
+                            "list": {}
+                        }
+                    },
+                    "authMethods": []
+                }
+            }),
+            ("list", "session/list") => {
+                if params.get("cursor").and_then(Value::as_str) == Some("page-2") {
+                    json!({
+                        "jsonrpc": "2.0",
+                        "id": id,
+                        "result": {
+                            "sessions": [
+                                {
+                                    "sessionId": "external-2",
+                                    "cwd": "/tmp",
+                                    "title": "Second external session"
+                                }
+                            ]
+                        }
+                    })
+                } else {
+                    json!({
+                        "jsonrpc": "2.0",
+                        "id": id,
+                        "result": {
+                            "sessions": [
+                                {
+                                    "sessionId": "external-1",
+                                    "cwd": "/tmp",
+                                    "title": "First external session",
+                                    "updatedAt": "2026-11-12T10:00:00Z"
+                                }
+                            ],
+                            "nextCursor": "page-2"
+                        }
+                    })
+                }
+            }
             ("no-fork", "initialize") => json!({
                 "jsonrpc": "2.0",
                 "id": id,
@@ -229,6 +290,37 @@ fn write_line(stdout: &mut io::Stdout, value: &Value) {
         if stdout.flush().is_err() {
             // Best-effort: the process is exiting on the next failed write.
         }
+    }
+}
+
+/// Sends the history replay used by the external-session import integration test.
+fn send_list_replay(stdout: &mut io::Stdout) {
+    for (update, session_id) in [
+        (
+            json!({
+                "sessionUpdate": "user_message_chunk",
+                "messageId": "u1",
+                "content": { "type": "text", "text": "hello from history" }
+            }),
+            "external-1",
+        ),
+        (
+            json!({
+                "sessionUpdate": "agent_message_chunk",
+                "messageId": "a1",
+                "content": { "type": "text", "text": "reply from history" }
+            }),
+            "external-1",
+        ),
+    ] {
+        write_line(
+            stdout,
+            &json!({
+                "jsonrpc": "2.0",
+                "method": "session/update",
+                "params": { "sessionId": session_id, "update": update }
+            }),
+        );
     }
 }
 
