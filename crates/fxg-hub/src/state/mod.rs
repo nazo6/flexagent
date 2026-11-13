@@ -22,7 +22,7 @@ use crate::api::{ApiError, ClientApiBackend, ClientEvent, ClientInfo, auth};
 use crate::error::HubError;
 use crate::hub::NodeHub;
 use crate::provisioner::ProvisionerManager;
-use crate::push::PushService;
+use crate::push::{PushService, RunningTurns};
 
 use fxg_protocol::NodeId;
 
@@ -58,6 +58,8 @@ struct HubInner {
     options: HubOptions,
     client_events: broadcast::Sender<ClientEvent>,
     push: PushService,
+    /// Sessions whose current turn has been observed as `Running` (completion notifications).
+    running_turns: RunningTurns,
     provisioners: ProvisionerManager,
     diagnostics_counters: std::sync::Arc<crate::api::DiagnosticsCounters>,
     /// Shutdown sender used by `POST /api/v1/system/shutdown` (set at startup)
@@ -103,6 +105,18 @@ impl HubState {
             .map_err(|err| HubError::Hub(format!("web push init failed: {err}")))?;
         let hub_settings = db.ensure_hub_settings().await?;
         push.set_subject(hub_settings.vapid_subject.as_deref());
+        // Seed completion-notification tracking so a turn that started before the hub
+        // restarted still produces a notification when it ends.
+        let running_turns = RunningTurns::from_session_ids(
+            db.list_sessions(&fxg_db::SessionFilter {
+                statuses: vec![fxg_protocol::common::SessionStatus::Running],
+                include_archived: true,
+                ..fxg_db::SessionFilter::default()
+            })
+            .await?
+            .into_iter()
+            .map(|session| session.session_id.as_str().to_owned()),
+        );
         let provisioners =
             ProvisionerManager::new(options.fxg_home.clone(), db.provisioners().await?);
         Ok(Self {
@@ -113,6 +127,7 @@ impl HubState {
                 options,
                 client_events,
                 push,
+                running_turns,
                 provisioners,
                 diagnostics_counters: std::sync::Arc::new(crate::api::DiagnosticsCounters::new()),
                 shutdown_tx: std::sync::OnceLock::new(),
@@ -147,6 +162,11 @@ impl HubState {
     /// VAPID Web Push delivery service.
     pub fn push(&self) -> &PushService {
         &self.inner.push
+    }
+
+    /// Tracks sessions whose turn is running (for completion notifications).
+    pub(crate) fn running_turns(&self) -> &RunningTurns {
+        &self.inner.running_turns
     }
 
     /// Process-local delivery counters exposed by diagnostics.

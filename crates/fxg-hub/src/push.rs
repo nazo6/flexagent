@@ -337,6 +337,88 @@ pub fn turn_finished_notification(
     }
 }
 
+/// Tracks sessions whose current turn was observed as `Running`.
+///
+/// Live sync delivers one event per `EventBatchPush`, so the `Running` and `Idle` statuses of a
+/// turn normally arrive in separate `apply_event_batch` calls. Keeping the set in hub state (and
+/// seeding it from `hub.db` at startup) makes the Running → Idle transition observable across
+/// batches and hub restarts.
+#[derive(Debug, Default)]
+pub(crate) struct RunningTurns {
+    sessions: std::sync::Mutex<std::collections::HashSet<String>>,
+}
+
+impl RunningTurns {
+    /// Seeds the tracker with sessions that are already running at startup.
+    pub(crate) fn from_session_ids(ids: impl IntoIterator<Item = String>) -> Self {
+        Self {
+            sessions: std::sync::Mutex::new(ids.into_iter().collect()),
+        }
+    }
+
+    /// Records that a turn started.
+    fn mark_running(&self, session_id: &str) {
+        self.sessions
+            .lock()
+            .expect("running turns lock poisoned")
+            .insert(session_id.to_owned());
+    }
+
+    /// Records that a turn ended and returns whether it had been observed as running.
+    fn finish(&self, session_id: &str) -> bool {
+        self.sessions
+            .lock()
+            .expect("running turns lock poisoned")
+            .remove(session_id)
+    }
+}
+
+/// Selects the newly inserted events that should produce a Web Push notification.
+///
+/// A turn-finished notification is selected only when a `Running` status was observed first
+/// (including across separate batches). `resync` batches still update the running set so a later
+/// live transition is recognized, but never notify: replaying history must not wake devices.
+pub(crate) fn notification_events(
+    events: &[fxg_protocol::events::SessionEventEnvelope],
+    running: &RunningTurns,
+    resync: bool,
+) -> Vec<fxg_protocol::events::SessionEventEnvelope> {
+    use fxg_protocol::common::SessionStatus;
+    use fxg_protocol::events::UnifiedEventPayload;
+
+    let mut notify = Vec::new();
+    for event in events {
+        match &event.payload {
+            UnifiedEventPayload::PermissionRequest { .. }
+            | UnifiedEventPayload::ElicitationRequest { .. } => {
+                if !resync {
+                    notify.push(event.clone());
+                }
+            }
+            UnifiedEventPayload::StatusChanged { status, .. } => match status {
+                SessionStatus::Running => running.mark_running(event.session_id.as_str()),
+                SessionStatus::Idle | SessionStatus::Error => {
+                    let finished = running.finish(event.session_id.as_str());
+                    if finished && !resync {
+                        notify.push(event.clone());
+                    }
+                }
+                // A stopped session no longer has a running turn; do not notify (the stop is
+                // user-initiated) but drop the stale entry.
+                SessionStatus::Stopped => {
+                    running.finish(event.session_id.as_str());
+                }
+                _ => {}
+            },
+            UnifiedEventPayload::SessionDeleted {} => {
+                running.finish(event.session_id.as_str());
+            }
+            _ => {}
+        }
+    }
+    notify
+}
+
 /// Sends one payload to every subscription (expired subscriptions are deleted). Failures only
 /// produce a warning log.
 async fn send_to_subscriptions(
@@ -740,5 +822,197 @@ mod tests {
         assert_eq!(payload.tag, "fxg-turn-session-1");
         assert!(payload.allow_option_id.is_none());
         assert!(payload.reject_option_id.is_none());
+    }
+
+    fn event(
+        session_id: &str,
+        node_seq: u64,
+        payload: fxg_protocol::events::UnifiedEventPayload,
+    ) -> fxg_protocol::events::SessionEventEnvelope {
+        fxg_protocol::events::SessionEventEnvelope {
+            event_id: fxg_protocol::EventId::new(format!("event-{node_seq}")),
+            session_id: fxg_protocol::SessionId::new(session_id),
+            node_seq,
+            created_at: 0,
+            payload,
+        }
+    }
+
+    fn status_event(
+        session_id: &str,
+        node_seq: u64,
+        status: fxg_protocol::common::SessionStatus,
+    ) -> fxg_protocol::events::SessionEventEnvelope {
+        event(
+            session_id,
+            node_seq,
+            fxg_protocol::events::UnifiedEventPayload::StatusChanged {
+                status,
+                error_message: None,
+            },
+        )
+    }
+
+    fn permission_event(
+        session_id: &str,
+        node_seq: u64,
+    ) -> fxg_protocol::events::SessionEventEnvelope {
+        event(
+            session_id,
+            node_seq,
+            fxg_protocol::events::UnifiedEventPayload::PermissionRequest {
+                request_id: "req-1".to_owned(),
+                tool_name: "terminal/create".to_owned(),
+                summary: "run cargo test".to_owned(),
+                options: Vec::new(),
+                details: fxg_protocol::common::RawJson::default(),
+                subagent_id: None,
+            },
+        )
+    }
+
+    fn elicitation_event(
+        session_id: &str,
+        node_seq: u64,
+    ) -> fxg_protocol::events::SessionEventEnvelope {
+        event(
+            session_id,
+            node_seq,
+            fxg_protocol::events::UnifiedEventPayload::ElicitationRequest {
+                elicitation_id: "elic-1".to_owned(),
+                message: "Which strategy?".to_owned(),
+                mode: fxg_protocol::common::ElicitationMode::Form,
+                requested_schema: fxg_protocol::common::ElicitationSchema {
+                    schema_type: fxg_protocol::common::ElicitationSchemaType::Object,
+                    title: None,
+                    description: None,
+                    properties: Default::default(),
+                    required: None,
+                    extra: Default::default(),
+                },
+                tool_call_id: None,
+                subagent_id: None,
+            },
+        )
+    }
+
+    #[test]
+    fn turn_finished_requires_running_observed_in_a_previous_batch() {
+        use fxg_protocol::common::SessionStatus;
+
+        let running = RunningTurns::default();
+        // Live sync sends one event per batch, so Running and Idle arrive separately.
+        assert!(
+            notification_events(
+                &[status_event("session-1", 1, SessionStatus::Running)],
+                &running,
+                false
+            )
+            .is_empty()
+        );
+        let finished = notification_events(
+            &[status_event("session-1", 2, SessionStatus::Idle)],
+            &running,
+            false,
+        );
+        assert_eq!(finished.len(), 1);
+        // A second Idle without a new turn must not notify again.
+        assert!(
+            notification_events(
+                &[status_event("session-1", 3, SessionStatus::Idle)],
+                &running,
+                false
+            )
+            .is_empty()
+        );
+    }
+
+    #[test]
+    fn turn_finished_uses_state_seeded_from_the_database() {
+        use fxg_protocol::common::SessionStatus;
+
+        // A hub restart seeds the set from running sessions in hub.db.
+        let running = RunningTurns::from_session_ids(["session-1".to_owned()]);
+        let finished = notification_events(
+            &[status_event("session-1", 2, SessionStatus::Error)],
+            &running,
+            false,
+        );
+        assert_eq!(finished.len(), 1);
+    }
+
+    #[test]
+    fn resync_updates_running_state_without_notifying() {
+        use fxg_protocol::common::SessionStatus;
+
+        let running = RunningTurns::default();
+        assert!(
+            notification_events(
+                &[status_event("session-1", 1, SessionStatus::Running)],
+                &running,
+                true
+            )
+            .is_empty()
+        );
+        assert!(
+            notification_events(
+                &[status_event("session-1", 2, SessionStatus::Idle)],
+                &running,
+                true
+            )
+            .is_empty()
+        );
+        // The resync already consumed the transition; no stale completion is emitted.
+        assert!(
+            notification_events(
+                &[status_event("session-1", 3, SessionStatus::Idle)],
+                &running,
+                false
+            )
+            .is_empty()
+        );
+    }
+
+    #[test]
+    fn stopping_a_running_session_clears_state_without_notifying() {
+        use fxg_protocol::common::SessionStatus;
+
+        let running = RunningTurns::default();
+        notification_events(
+            &[status_event("session-1", 1, SessionStatus::Running)],
+            &running,
+            false,
+        );
+        assert!(
+            notification_events(
+                &[status_event("session-1", 2, SessionStatus::Stopped)],
+                &running,
+                false
+            )
+            .is_empty()
+        );
+        // A later Idle must not be treated as the end of the stopped turn.
+        assert!(
+            notification_events(
+                &[status_event("session-1", 3, SessionStatus::Idle)],
+                &running,
+                false
+            )
+            .is_empty()
+        );
+    }
+
+    #[test]
+    fn permissions_and_questions_are_notification_targets() {
+        let events = [
+            permission_event("session-1", 1),
+            elicitation_event("session-1", 2),
+        ];
+        let selected = notification_events(&events, &RunningTurns::default(), false);
+        assert_eq!(selected.len(), 2);
+        assert!(
+            notification_events(&events, &RunningTurns::default(), true).is_empty(),
+            "resync must not wake devices"
+        );
     }
 }
