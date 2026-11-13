@@ -1,6 +1,7 @@
 <script lang="ts">
   import { getNodeAvailability } from "#lib/node-status.ts";
   import type { NodeSummary } from "#lib/generated/bindings.ts";
+  import { sync } from "#lib/stores/app.svelte.ts";
   import { cn } from "#lib/utils.ts";
 
   interface Props {
@@ -17,7 +18,7 @@
     class: className = "",
   }: Props = $props();
 
-  const availability = $derived(getNodeAvailability(node));
+  const availability = $derived(getNodeAvailability(node, sync.wsConnected));
 </script>
 
 <div

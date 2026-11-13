@@ -459,7 +459,7 @@
   {@const isActive = activeSessionId === session.session_id}
   {@const isArchived = session.archived_at !== null}
   {@const node = getNode(session.node_id)}
-  {@const nodeAvail = getNodeAvailability(node)}
+  {@const nodeAvail = getNodeAvailability(node, sync.wsConnected)}
   {@const isPinned = pinned.isPinned(session.session_id)}
   <li>
     <Tooltip.Provider delayDuration={400}>

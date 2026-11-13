@@ -51,7 +51,7 @@
   const nodes = $derived(sync.nodes);
   const onlineNodes = $derived(nodes.filter((node) => node.is_online));
   const selectedNode = $derived(nodes.find((node) => node.node_id === selectedNodeId) ?? null);
-  const selectedAvailability = $derived(getNodeAvailability(selectedNode));
+  const selectedAvailability = $derived(getNodeAvailability(selectedNode, sync.wsConnected));
 
   function pathBasename(path: string): string {
     const parts = path.split(/[\\/]/).filter(Boolean);

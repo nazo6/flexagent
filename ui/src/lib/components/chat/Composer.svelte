@@ -105,7 +105,7 @@
     }
   });
 
-  const nodeAvail = $derived(getNodeAvailability(node));
+  const nodeAvail = $derived(getNodeAvailability(node, sync.wsConnected));
 
   /** Agent config options (model / thought level / agent-specific), newest first. */
   const configOptions = $derived(orderedConfigOptions(capabilities?.configOptions ?? []));

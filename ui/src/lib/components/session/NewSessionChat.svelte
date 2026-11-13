@@ -153,7 +153,7 @@
   const nodes = $derived(sync.nodes);
   const onlineNodes = $derived(nodes.filter((node) => node.is_online));
   const selectedNode = $derived(nodes.find((n) => n.node_id === nodeId) ?? null);
-  const nodeAvailability = $derived(getNodeAvailability(selectedNode));
+  const nodeAvailability = $derived(getNodeAvailability(selectedNode, sync.wsConnected));
   // Agents that can actually be launched on this node (based on the catalog's
   // installed_nodes; npx/uvx distributed agents are included only once enabled
   // via "add from catalog")
@@ -1196,10 +1196,10 @@
                 </p>
               {:else}
                 {#each nodes as node (node.node_id)}
-                  {@const availability = getNodeAvailability(node)}
+                  {@const availability = getNodeAvailability(node, sync.wsConnected)}
                   <PickerItem
                     selected={!isProvisionerMode && node.node_id === nodeId}
-                    disabled={!node.is_online}
+                    disabled={!availability.isAvailable}
                     onselect={() => selectNode(node.node_id)}
                   >
                     <span class="flex items-center gap-1.5">

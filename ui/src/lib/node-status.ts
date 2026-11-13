@@ -10,8 +10,24 @@ export interface NodeAvailability {
 
 /**
  * Determine a node's availability and return properties for UI display.
+ *
+ * `connected` is this client's link to the server (`sync.wsConnected`). While
+ * the link is down the cached node snapshot is stale, so every node is reported
+ * as disconnected instead of keeping a green "Online" that no longer holds.
  */
-export function getNodeAvailability(node: NodeSummary | null | undefined): NodeAvailability {
+export function getNodeAvailability(
+  node: NodeSummary | null | undefined,
+  connected: boolean,
+): NodeAvailability {
+  if (!connected) {
+    return {
+      isAvailable: false,
+      statusText: m.shell_disconnected(),
+      dotColorClass: "bg-danger",
+      badgeVariant: "outline",
+    };
+  }
+
   if (!node) {
     return {
       isAvailable: false,
