@@ -798,7 +798,7 @@ use fxg_protocol::SecretId;
 use fxg_protocol::config::{GlobalConfig, process_env};
 use fxg_protocol::settings::{
     ConfigSource, NodeBootstrapView, NodeSettingsSnapshot, SecretSummary, SourcedValue,
-    UpsertSecretRequest, sourced_option, sourced_string,
+    UpsertSecretRequest, sourced_list, sourced_option, sourced_string,
 };
 
 impl DaemonState {
@@ -843,6 +843,20 @@ impl DaemonState {
             Some(fxg_protocol::config::NodeBootstrapConfig::DEFAULT_LISTEN_ADDR),
             Some("--listen"),
         );
+        let allowed_hosts = sourced_list(
+            &env,
+            self.config().allowed_hosts.clone(),
+            fxg_protocol::config::env_keys::NODE_ALLOWED_HOSTS,
+            &config.node.allowed_hosts,
+            "node.allowed_hosts",
+        );
+        let allowed_origins = sourced_list(
+            &env,
+            self.config().allowed_origins.clone(),
+            fxg_protocol::config::env_keys::NODE_ALLOWED_ORIGINS,
+            &config.node.allowed_origins,
+            "node.allowed_origins",
+        );
         let log = &self.config().log;
         let log_level = sourced_string(
             &env,
@@ -885,6 +899,8 @@ impl DaemonState {
                 fxg_home,
                 node_id,
                 listen_addr,
+                allowed_hosts,
+                allowed_origins,
                 log_level,
                 log_file,
                 log_format,

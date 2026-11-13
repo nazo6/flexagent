@@ -214,8 +214,8 @@ impl ClientApiBackend for DaemonState {
             node_listen_addr: Some(config.listen_addr.clone()),
             hub_url: self.hub_link().hub_url,
             hub_listen_addr: None,
-            allowed_hosts: Vec::new(),
-            allowed_origins: Vec::new(),
+            allowed_hosts: config.allowed_hosts.clone(),
+            allowed_origins: config.allowed_origins.clone(),
         }
     }
 

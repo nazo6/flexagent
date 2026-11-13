@@ -117,6 +117,9 @@ CLI のコマンド・引数の正は `fxg --help` / `fxg <noun> --help` と
 [node]
 node_id = "home-win"
 listen_addr = "127.0.0.1:7860"
+# ループバック以外のホスト名（リバースプロキシ / node 単体運用）で公開する場合のみ
+allowed_hosts = ["home-win.tailnet-xxxx.ts.net"]
+allowed_origins = ["https://home-win.tailnet-xxxx.ts.net"]
 
 [hub]
 listen_addr = "0.0.0.0:8080"
@@ -138,10 +141,19 @@ no_color = false
 Git 認証は Provisioner の `env_secrets` で注入します。Web UI の設定カタログは
 現在値と出所 (`config.toml` / `env` / `cli` / `default`) を読み取り専用で表示します。
 
+`allowed_hosts` / `allowed_origins` は、Host ヘッダ検証（DNS Rebinding 対策）と
+WebSocket の `Origin` 検証（CSWSH 対策）の許可リストです（ハブは `[hub]`、
+ノードは `[node]`）。いずれも**完全一致**で判定し、既定は空（ループバック /
+同一オリジンのみ許可）です。ブラウザは既定ポート以外ではポート番号を付ける
+ため、`:8443` のような非標準ポートで公開する場合はポート込みで記載してください。
+`allowed_origins` は `https://host` 形式（スキーム必須）です。これらは起動時に
+読み込まれ、変更にはプロセス再起動が必要です（Web UI は読み取り専用）。
+
 `[node] listen_addr` の既定は `127.0.0.1:7860` です。7860 が使用中で明示指定が
 ない場合は ephemeral port にフォールバックし、実際のアドレスは
 `~/.flexagent/node.addr` に記録されます。CLI・`fxg web`・ブラウザのローカル直結は
-このファイルを優先します。
+このファイルを優先します。ワイルドカード（`0.0.0.0` / `[::]`）で bind した場合、
+CLI と `fxg web` は `127.0.0.1` に読み替えて接続します。
 
 ### 2.3 Worktree と 一時VM環境
 

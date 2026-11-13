@@ -60,6 +60,10 @@ pub struct DaemonConfig {
     /// When false and the default port is already in use, the daemon falls back
     /// to an ephemeral loopback port.
     pub listen_addr_explicit: bool,
+    /// Hosts allowed in addition to the loopback family (`[node] allowed_hosts`)
+    pub allowed_hosts: Vec<String>,
+    /// Origins allowed in addition to the same origin (`[node] allowed_origins`)
+    pub allowed_origins: Vec<String>,
     /// Whether this is an ephemeral VM / sandbox node (`--ephemeral`; reflected in
     /// NodeHello and the `nodes` row)
     pub ephemeral: bool,
@@ -81,6 +85,8 @@ impl DaemonConfig {
             node_name: node_name.into(),
             listen_addr: fxg_protocol::config::NodeBootstrapConfig::DEFAULT_LISTEN_ADDR.to_owned(),
             listen_addr_explicit: false,
+            allowed_hosts: Vec::new(),
+            allowed_origins: Vec::new(),
             ephemeral: false,
             fxg_home: fxg_home.into(),
             log: fxg_protocol::config::LogConfig::default(),
@@ -95,6 +101,8 @@ impl DaemonConfig {
             node_name: hostname(),
             listen_addr: fxg_protocol::config::NodeBootstrapConfig::DEFAULT_LISTEN_ADDR.to_owned(),
             listen_addr_explicit: false,
+            allowed_hosts: Vec::new(),
+            allowed_origins: Vec::new(),
             ephemeral: false,
             fxg_home: home,
             log: fxg_protocol::config::LogConfig::default(),

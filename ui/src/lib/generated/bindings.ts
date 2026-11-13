@@ -1146,6 +1146,10 @@ export type NodeBootstrapView = {
 	node_id: SourcedValue<string>,
 	/**  Local HTTP/WS bind address */
 	listen_addr: SourcedValue<string>,
+	/**  Extra allowed `Host` values (DNS rebinding defense) */
+	allowed_hosts: SourcedValue<string[]>,
+	/**  Extra allowed WebSocket `Origin` values (CSWSH defense) */
+	allowed_origins: SourcedValue<string[]>,
 	/**  Log level */
 	log_level: SourcedValue<string>,
 	/**  Log file destination (empty when disabled) */
@@ -2232,9 +2236,9 @@ export type SupportBundleConfig = {
 	hub_url: string | null,
 	/**  Hub bind address */
 	hub_listen_addr: string | null,
-	/**  Extra allowed hosts (hub) */
+	/**  Extra allowed hosts (the owner's `allowed_hosts`) */
 	allowed_hosts: string[],
-	/**  Extra allowed origins (hub) */
+	/**  Extra allowed origins (the owner's `allowed_origins`) */
 	allowed_origins: string[],
 };
 

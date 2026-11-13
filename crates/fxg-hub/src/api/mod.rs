@@ -97,22 +97,11 @@ pub struct ClientApiOptions {
     /// The port actually bound (for Host / Origin validation of localhost / 127.0.0.1)
     pub port: u16,
     /// Hosts allowed in addition to the `localhost` family
-    /// (the hub's `server.allowed_hosts`)
+    /// (the hub's `[hub] allowed_hosts`, the node's `[node] allowed_hosts`)
     pub extra_allowed_hosts: Vec<String>,
     /// Origins allowed in addition to the same origin
-    /// (the hub's `server.allowed_origins`)
+    /// (the hub's `[hub] allowed_origins`, the node's `[node] allowed_origins`)
     pub extra_allowed_origins: Vec<String>,
-}
-
-impl ClientApiOptions {
-    /// For a local node (loopback only).
-    pub fn local(port: u16) -> Self {
-        Self {
-            port,
-            extra_allowed_hosts: Vec::new(),
-            extra_allowed_origins: Vec::new(),
-        }
-    }
 }
 
 /// Shared state for the router.

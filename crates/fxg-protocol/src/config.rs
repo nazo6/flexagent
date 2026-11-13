@@ -34,6 +34,10 @@ pub mod env_keys {
     pub const NODE_ID: &str = "FXG_NODE_ID";
     /// `[node] listen_addr`
     pub const NODE_LISTEN_ADDR: &str = "FXG_NODE_LISTEN_ADDR";
+    /// `[node] allowed_hosts` (comma separated)
+    pub const NODE_ALLOWED_HOSTS: &str = "FXG_NODE_ALLOWED_HOSTS";
+    /// `[node] allowed_origins` (comma separated)
+    pub const NODE_ALLOWED_ORIGINS: &str = "FXG_NODE_ALLOWED_ORIGINS";
     /// Disable automatic `fxg node start` startup from CLI commands (`1` / `true`)
     pub const NO_AUTO_NODE: &str = "FXG_NO_AUTO_NODE";
     /// Idle seconds before a warm ACP agent process is disposed (0 = keep until shutdown)
@@ -140,7 +144,8 @@ fn parse_bool_env(key: &'static str, value: &str) -> Result<bool, ConfigError> {
     }
 }
 
-fn parse_list(value: &str) -> Vec<String> {
+/// Splits a comma separated environment variable value (empty items dropped).
+pub(crate) fn parse_list(value: &str) -> Vec<String> {
     value
         .split(',')
         .map(str::trim)
@@ -279,6 +284,12 @@ impl GlobalConfig {
         if let Some(v) = env(env_keys::NODE_LISTEN_ADDR) {
             self.node.listen_addr = Some(v);
         }
+        if let Some(v) = env(env_keys::NODE_ALLOWED_HOSTS) {
+            self.node.allowed_hosts = parse_list(&v);
+        }
+        if let Some(v) = env(env_keys::NODE_ALLOWED_ORIGINS) {
+            self.node.allowed_origins = parse_list(&v);
+        }
         if let Some(v) = env(env_keys::HUB_LISTEN_ADDR) {
             self.hub.listen_addr = Some(v);
         }
@@ -319,6 +330,13 @@ pub struct NodeBootstrapConfig {
     /// Bind address of the local HTTP/WS server
     /// (a loopback address is recommended by the security principles).
     pub listen_addr: Option<String>,
+    /// Extra host names allowed by the DNS rebinding defense (Host header
+    /// validation) besides the loopback family. Set these when the local Web UI
+    /// is reached through a reverse proxy or from another device.
+    pub allowed_hosts: Vec<String>,
+    /// Extra origins allowed by the CSWSH defense (WebSocket Origin validation)
+    /// besides the same origin.
+    pub allowed_origins: Vec<String>,
 }
 
 impl NodeBootstrapConfig {
@@ -378,6 +396,8 @@ mod tests {
 [node]
 node_id = "home-win"
 listen_addr = "127.0.0.1:7860"
+allowed_hosts = ["fxg-laptop.tailnet-xxxx.ts.net"]
+allowed_origins = ["https://fxg-laptop.tailnet-xxxx.ts.net"]
 
 [hub]
 listen_addr = "0.0.0.0:8080"
@@ -399,6 +419,14 @@ allowed_origins = ["https://home-server.tailnet-xxxx.ts.net"]
         );
         assert_eq!(config.hub.allowed_hosts.len(), 2);
         assert_eq!(config.hub.allowed_origins.len(), 1);
+        assert_eq!(
+            config.node.allowed_hosts,
+            vec!["fxg-laptop.tailnet-xxxx.ts.net"]
+        );
+        assert_eq!(
+            config.node.allowed_origins,
+            vec!["https://fxg-laptop.tailnet-xxxx.ts.net"]
+        );
     }
 
     #[test]
@@ -441,6 +469,8 @@ hub_url = "http://127.0.0.1:8080"
         let env = env_map(&[
             ("FXG_NODE_ID", "override-node"),
             ("FXG_NODE_LISTEN_ADDR", "127.0.0.1:9000"),
+            ("FXG_NODE_ALLOWED_HOSTS", "node-a.test,node-b.test"),
+            ("FXG_NODE_ALLOWED_ORIGINS", "https://node-a.test"),
             ("FXG_HUB_LISTEN_ADDR", "0.0.0.0:9090"),
             ("FXG_HUB_ALLOWED_HOSTS", "a.test, b.test ,, c.test"),
             ("FXG_HUB_ALLOWED_ORIGINS", "http://a.test"),
@@ -459,6 +489,11 @@ hub_url = "http://127.0.0.1:8080"
         assert!(config.log.no_color);
         assert_eq!(config.node.node_id.as_deref(), Some("override-node"));
         assert_eq!(config.node.resolved_listen_addr(), "127.0.0.1:9000");
+        assert_eq!(
+            config.node.allowed_hosts,
+            vec!["node-a.test", "node-b.test"]
+        );
+        assert_eq!(config.node.allowed_origins, vec!["https://node-a.test"]);
         assert_eq!(config.hub.resolved_listen_addr(), "0.0.0.0:9090");
         assert_eq!(config.hub.allowed_hosts, vec!["a.test", "b.test", "c.test"]);
         assert_eq!(config.hub.allowed_origins, vec!["http://a.test"]);

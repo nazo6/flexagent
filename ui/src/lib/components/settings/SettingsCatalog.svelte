@@ -260,6 +260,16 @@
                 source: nodeSnapshot.bootstrap.listen_addr.source,
               },
               {
+                label: "Allowed hosts",
+                value: nodeSnapshot.bootstrap.allowed_hosts.value.join(", ") || "-",
+                source: nodeSnapshot.bootstrap.allowed_hosts.source,
+              },
+              {
+                label: "Allowed origins",
+                value: nodeSnapshot.bootstrap.allowed_origins.value.join(", ") || "-",
+                source: nodeSnapshot.bootstrap.allowed_origins.source,
+              },
+              {
                 label: "Log level",
                 value: nodeSnapshot.bootstrap.log_level.value,
                 source: nodeSnapshot.bootstrap.log_level.source,

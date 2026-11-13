@@ -8,7 +8,8 @@ use fxg_protocol::SecretId;
 use fxg_protocol::client_api::{ProvisionerSummary, ProvisionersResponse};
 use fxg_protocol::settings::{
     ConfigSource, HubBootstrapView, HubSettingsSnapshot, ProvisionerDefinition, SecretsResponse,
-    SourcedValue, UpdateHubSettingsRequest, UpsertSecretRequest, sourced_option, sourced_string,
+    SourcedValue, UpdateHubSettingsRequest, UpsertSecretRequest, sourced_list, sourced_option,
+    sourced_string,
 };
 
 use super::HubState;
@@ -47,12 +48,24 @@ impl HubState {
             self.inner.options.listen_addr.clone(),
             fxg_protocol::config::env_keys::HUB_LISTEN_ADDR,
             config.hub.listen_addr.clone(),
-            "server.listen_addr",
+            "hub.listen_addr",
             Some(fxg_protocol::config::HubBootstrapConfig::DEFAULT_LISTEN_ADDR),
             Some("--listen"),
         );
-        let allowed_hosts = self.inner.options.allowed_hosts.clone();
-        let allowed_origins = self.inner.options.allowed_origins.clone();
+        let allowed_hosts = sourced_list(
+            &env,
+            self.inner.options.allowed_hosts.clone(),
+            fxg_protocol::config::env_keys::HUB_ALLOWED_HOSTS,
+            &config.hub.allowed_hosts,
+            "hub.allowed_hosts",
+        );
+        let allowed_origins = sourced_list(
+            &env,
+            self.inner.options.allowed_origins.clone(),
+            fxg_protocol::config::env_keys::HUB_ALLOWED_ORIGINS,
+            &config.hub.allowed_origins,
+            "hub.allowed_origins",
+        );
         let log = &self.inner.options.log;
         let log_level = sourced_string(
             &env,
@@ -93,24 +106,8 @@ impl HubState {
             bootstrap: HubBootstrapView {
                 fxg_home,
                 listen_addr,
-                allowed_hosts: SourcedValue::new(
-                    allowed_hosts,
-                    if config.hub.allowed_hosts.is_empty() {
-                        ConfigSource::Default
-                    } else {
-                        ConfigSource::ConfigFile
-                    },
-                    Some("server.allowed_hosts"),
-                ),
-                allowed_origins: SourcedValue::new(
-                    allowed_origins,
-                    if config.hub.allowed_origins.is_empty() {
-                        ConfigSource::Default
-                    } else {
-                        ConfigSource::ConfigFile
-                    },
-                    Some("server.allowed_origins"),
-                ),
+                allowed_hosts,
+                allowed_origins,
                 log_level,
                 log_file,
                 log_format,

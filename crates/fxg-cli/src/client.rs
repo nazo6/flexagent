@@ -69,12 +69,15 @@ fn auto_node_enabled() -> bool {
 
 /// Base URL of the local node (`node.addr`, then `[node] listen_addr`, then
 /// the default loopback address).
+///
+/// A wildcard bind address is replaced with loopback: the CLI always talks to the
+/// process on this machine, never through the LAN address it may also listen on.
 pub(crate) fn local_node_base(env: EnvLookup<'_>) -> Result<String> {
     let home = fxg_home(env);
     if let Ok(addr) = std::fs::read_to_string(home.join("node.addr")) {
         let addr = addr.trim();
         if !addr.is_empty() {
-            return Ok(format!("http://{addr}"));
+            return Ok(format!("http://{}", crate::hub_api::normalize_listen(addr)));
         }
     }
     let global = GlobalConfig::load(env).context("failed to load ~/.flexagent/config.toml")?;
@@ -83,7 +86,10 @@ pub(crate) fn local_node_base(env: EnvLookup<'_>) -> Result<String> {
         .listen_addr
         .clone()
         .unwrap_or_else(|| "127.0.0.1:7860".to_owned());
-    Ok(format!("http://{listen}"))
+    Ok(format!(
+        "http://{}",
+        crate::hub_api::normalize_listen(&listen)
+    ))
 }
 
 fn token_path() -> PathBuf {

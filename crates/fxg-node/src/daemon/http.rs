@@ -48,10 +48,17 @@ pub async fn serve(
 
 /// Builds the router (`pub(crate)` so tests can use it directly).
 ///
-/// Local nodes only allow loopback (`localhost` / `127.0.0.1` / `[::1]`)
-/// (DNS rebinding / CSWSH mitigation; design: `docs/01` §7.1).
+/// Loopback (`localhost` / `127.0.0.1` / `[::1]`) is always allowed (DNS
+/// rebinding / CSWSH mitigation; design: `docs/01` §7.1–§7.2). `DaemonConfig`
+/// adds the explicitly configured hosts / origins so the local Web UI can also
+/// be reached through a reverse proxy or from another device.
 pub(crate) fn router(daemon: DaemonState, http_addr: SocketAddr) -> Router {
-    client_router(daemon, ClientApiOptions::local(http_addr.port()))
+    let options = ClientApiOptions {
+        port: http_addr.port(),
+        extra_allowed_hosts: daemon.config().allowed_hosts.clone(),
+        extra_allowed_origins: daemon.config().allowed_origins.clone(),
+    };
+    client_router(daemon, options)
 }
 
 #[cfg(test)]
@@ -285,6 +292,58 @@ mod tests {
             }
             other => panic!("unexpected error: {other}"),
         }
+
+        daemon.shutdown();
+        tokio::time::timeout(std::time::Duration::from_secs(5), daemon.wait())
+            .await
+            .expect("stop");
+    }
+
+    #[tokio::test]
+    async fn accepts_configured_host_and_origin() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut config = DaemonConfig::new(dir.path().to_path_buf(), "proxy-node", "Proxy Node");
+        config.listen_addr = "127.0.0.1:0".to_owned();
+        config.allowed_hosts = vec!["node.example.com".to_owned()];
+        config.allowed_origins = vec!["https://node.example.com".to_owned()];
+        let daemon = NodeDaemon::start(config).await.expect("start");
+        let host = host_of(&daemon);
+        let token = daemon.state().auth_token();
+
+        // A Host listed in `[node] allowed_hosts` is accepted
+        let app = router(daemon.state().clone(), daemon.http_addr());
+        let request = HttpRequest::builder()
+            .method("GET")
+            .uri("/api/v1/system/info")
+            .header(header::HOST, "node.example.com")
+            .header(header::AUTHORIZATION, format!("Bearer {token}"))
+            .body(Body::empty())
+            .expect("request");
+        let response = app.oneshot(request).await.expect("response");
+        assert_eq!(response.status(), StatusCode::OK);
+
+        // The same applies to the WS handshake Origin (`[node] allowed_origins`)
+        use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+
+        let mut request = format!("ws://{host}/api/v1/client/ws")
+            .into_client_request()
+            .expect("ws request");
+        request
+            .headers_mut()
+            .insert("Host", "node.example.com".parse().expect("header value"));
+        request.headers_mut().insert(
+            "Origin",
+            "https://node.example.com".parse().expect("header value"),
+        );
+        request.headers_mut().insert(
+            "Authorization",
+            format!("Bearer {token}").parse().expect("header value"),
+        );
+        let (mut socket, response) = tokio_tungstenite::connect_async(request)
+            .await
+            .expect("handshake");
+        assert_eq!(response.status(), 101);
+        socket.close(None).await.expect("close");
 
         daemon.shutdown();
         tokio::time::timeout(std::time::Duration::from_secs(5), daemon.wait())

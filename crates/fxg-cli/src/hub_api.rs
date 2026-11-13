@@ -194,6 +194,14 @@ mod tests {
     use super::*;
 
     #[test]
+    fn normalize_listen_replaces_wildcard_hosts_with_loopback() {
+        assert_eq!(normalize_listen("127.0.0.1:7860"), "127.0.0.1:7860");
+        assert_eq!(normalize_listen("0.0.0.0:7860"), "127.0.0.1:7860");
+        assert_eq!(normalize_listen("[::]:7860"), "127.0.0.1:7860");
+        assert_eq!(normalize_listen(":7860"), "127.0.0.1:7860");
+    }
+
+    #[test]
     fn hub_http_url_converts_ws_endpoint() {
         assert_eq!(
             hub_http_url("ws://192.168.1.5:8080/api/v1/node/ws").expect("url"),

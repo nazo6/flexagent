@@ -159,9 +159,9 @@ pub struct SupportBundleConfig {
     pub hub_url: Option<String>,
     /// Hub bind address
     pub hub_listen_addr: Option<String>,
-    /// Extra allowed hosts (hub)
+    /// Extra allowed hosts (the owner's `allowed_hosts`)
     pub allowed_hosts: Vec<String>,
-    /// Extra allowed origins (hub)
+    /// Extra allowed origins (the owner's `allowed_origins`)
     pub allowed_origins: Vec<String>,
 }
 

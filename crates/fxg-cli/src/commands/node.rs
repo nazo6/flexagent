@@ -112,6 +112,8 @@ impl NodeStartArgs {
             config.listen_addr = listen;
             config.listen_addr_explicit = true;
         }
+        config.allowed_hosts = global.node.allowed_hosts.clone();
+        config.allowed_origins = global.node.allowed_origins.clone();
         config.log = self.effective_log_config(global);
         config
     }
@@ -539,9 +541,13 @@ fn start_tray(daemon: &fxg_node::daemon::NodeDaemon) -> Option<crate::tray::Tray
 // ----------------------------------------------------------------------
 
 /// Build the tokenized URL of the local Web UI (shared by `fxg web` and the
-/// tray).
+/// tray). A wildcard bind address is replaced with loopback so the browser opens
+/// the local process rather than `0.0.0.0`.
 pub(crate) fn local_web_url(listen_addr: &str, token: &str) -> String {
-    format!("http://{listen_addr}/?token={token}")
+    format!(
+        "http://{}/?token={token}",
+        crate::hub_api::normalize_listen(listen_addr)
+    )
 }
 
 /// Build the tokenized Web UI URL for a specific session.

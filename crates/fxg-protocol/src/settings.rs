@@ -120,6 +120,27 @@ pub fn sourced_option(
     SourcedValue::new(Some(value), ConfigSource::Cli, cli_flag)
 }
 
+/// Resolves the origin of an effective bootstrap string list.
+///
+/// `effective` is the already merged value (environment > `config.toml`). Lists
+/// have no CLI layer today, so a value that matches neither the environment nor
+/// the file is attributed to the built-in default (an empty list).
+pub fn sourced_list(
+    env: EnvLookup<'_>,
+    effective: Vec<String>,
+    env_key: &str,
+    file_value: &[String],
+    config_key: &str,
+) -> SourcedValue<Vec<String>> {
+    if env(env_key).is_some_and(|value| crate::config::parse_list(&value) == effective) {
+        return SourcedValue::new(effective, ConfigSource::Env, Some(env_key));
+    }
+    if !effective.is_empty() && file_value == effective.as_slice() {
+        return SourcedValue::new(effective, ConfigSource::ConfigFile, Some(config_key));
+    }
+    SourcedValue::new(effective, ConfigSource::Default, Option::<&str>::None)
+}
+
 /// Read-only bootstrap view of a local node (`config.toml` / env / CLI).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
@@ -130,6 +151,10 @@ pub struct NodeBootstrapView {
     pub node_id: SourcedValue<String>,
     /// Local HTTP/WS bind address
     pub listen_addr: SourcedValue<String>,
+    /// Extra allowed `Host` values (DNS rebinding defense)
+    pub allowed_hosts: SourcedValue<Vec<String>>,
+    /// Extra allowed WebSocket `Origin` values (CSWSH defense)
+    pub allowed_origins: SourcedValue<Vec<String>>,
     /// Log level
     pub log_level: SourcedValue<String>,
     /// Log file destination (empty when disabled)
@@ -618,6 +643,45 @@ mod tests {
         );
         assert_eq!(value.source, ConfigSource::Default);
         assert_eq!(value.value, None);
+        assert_eq!(value.source_detail, None);
+    }
+
+    #[test]
+    fn sourced_list_attributes_layers() {
+        let env = env_from(&[(env_keys::NODE_ALLOWED_HOSTS, "a.test, b.test")]);
+        let value = sourced_list(
+            &env,
+            vec!["a.test".to_owned(), "b.test".to_owned()],
+            env_keys::NODE_ALLOWED_HOSTS,
+            &["a.test".to_owned(), "b.test".to_owned()],
+            "node.allowed_hosts",
+        );
+        assert_eq!(value.source, ConfigSource::Env);
+        assert_eq!(
+            value.source_detail.as_deref(),
+            Some(env_keys::NODE_ALLOWED_HOSTS)
+        );
+
+        let env = env_from(&[]);
+        let value = sourced_list(
+            &env,
+            vec!["a.test".to_owned()],
+            env_keys::NODE_ALLOWED_HOSTS,
+            &["a.test".to_owned()],
+            "node.allowed_hosts",
+        );
+        assert_eq!(value.source, ConfigSource::ConfigFile);
+        assert_eq!(value.source_detail.as_deref(), Some("node.allowed_hosts"));
+
+        let value = sourced_list(
+            &env,
+            Vec::new(),
+            env_keys::NODE_ALLOWED_HOSTS,
+            &[],
+            "node.allowed_hosts",
+        );
+        assert_eq!(value.source, ConfigSource::Default);
+        assert!(value.value.is_empty());
         assert_eq!(value.source_detail, None);
     }
 
