@@ -11,6 +11,7 @@
     disablePushNotifications,
     enablePushNotifications,
     pushCapability,
+    syncPushSubscription,
     type PushCapability,
   } from "#lib/push.ts";
   import { toast } from "svelte-sonner";
@@ -56,7 +57,13 @@
 
   // Push capability depends on the connected backend, so check it on first mount
   onMount(() => {
-    void refreshPush();
+    // Backfill `client_id` for subscriptions registered before client
+    // identities existed, then refresh the capability state.
+    void syncPushSubscription()
+      .catch(() => {
+        // Registration is best effort; the UI still shows the local state.
+      })
+      .finally(() => void refreshPush());
   });
 
   async function refreshPush() {

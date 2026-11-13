@@ -21,6 +21,7 @@ use tokio::sync::{broadcast, watch};
 use crate::api::{ApiError, ClientApiBackend, ClientEvent, ClientInfo, auth};
 use crate::error::HubError;
 use crate::hub::NodeHub;
+use crate::presence::PresenceRegistry;
 use crate::provisioner::ProvisionerManager;
 use crate::push::{PushService, RunningTurns};
 
@@ -60,6 +61,8 @@ struct HubInner {
     push: PushService,
     /// Sessions whose current turn has been observed as `Running` (completion notifications).
     running_turns: RunningTurns,
+    /// Client tab visibility / focus (Web Push targeting; process-local).
+    presence: std::sync::Arc<PresenceRegistry>,
     provisioners: ProvisionerManager,
     diagnostics_counters: std::sync::Arc<crate::api::DiagnosticsCounters>,
     /// Shutdown sender used by `POST /api/v1/system/shutdown` (set at startup)
@@ -128,6 +131,7 @@ impl HubState {
                 client_events,
                 push,
                 running_turns,
+                presence: std::sync::Arc::new(PresenceRegistry::default()),
                 provisioners,
                 diagnostics_counters: std::sync::Arc::new(crate::api::DiagnosticsCounters::new()),
                 shutdown_tx: std::sync::OnceLock::new(),
@@ -167,6 +171,11 @@ impl HubState {
     /// Tracks sessions whose turn is running (for completion notifications).
     pub(crate) fn running_turns(&self) -> &RunningTurns {
         &self.inner.running_turns
+    }
+
+    /// Client tab visibility / focus (Web Push targeting).
+    pub(crate) fn presence(&self) -> &std::sync::Arc<PresenceRegistry> {
+        &self.inner.presence
     }
 
     /// Process-local delivery counters exposed by diagnostics.

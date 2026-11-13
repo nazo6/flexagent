@@ -287,19 +287,19 @@ prune します。`sessions` は最大 1000 件で、超過時は
 
 #### 検索 / Inbox / Push / 監査
 
-| Method / Path                        | 内容                        |
-| :----------------------------------- | :-------------------------- |
-| `GET /api/v1/inbox`                  | 未解決の承認 / 質問の一覧。 |
-| `GET /api/v1/search?q=...&limit=...` | FTS5 全文検索。             |
-| `POST /api/v1/push/subscribe`        | Web Push 購読（ハブのみ）。 |
-| `GET /api/v1/audit/logs?limit=...`   | 監査ログ。                  |
+| Method / Path                        | 内容                                                      |
+| :----------------------------------- | :-------------------------------------------------------- |
+| `GET /api/v1/inbox`                  | 未解決の承認 / 質問の一覧。                               |
+| `GET /api/v1/search?q=...&limit=...` | FTS5 全文検索。                                           |
+| `POST /api/v1/push/subscribe`        | Web Push 購読（ハブのみ）。`client_id` で端末に紐付ける。 |
+| `GET /api/v1/audit/logs?limit=...`   | 監査ログ。                                                |
 
 ### 3.2 Client WebSocket (`/api/v1/client/ws`)
 
 クライアントは接続時に `Subscribe { since_cursor, focused_session_id }` を送ります。
 `since_cursor` は接続先ストアの `session_events.cursor` です。
 
-- 上り: `Subscribe` / `SendPrompt` / `ControlSession` / `Ping`。
+- 上り: `Subscribe` / `SendPrompt` / `ControlSession` / `Presence` / `Ping`。
 - 下り: `EventBatch` / `LiveStreamDelta` / `ProvisioningLog` / `CommandResult` /
   `SystemStatus` / `Error` / `Pong`。
 - 承認 / 質問の回答、Resume / Archive / Delete は REST 専用。
@@ -308,6 +308,23 @@ prune します。`sessions` は最大 1000 件で、超過時は
 - `since_cursor` がストア末尾より大きい場合は無効として 0 から再同期する。
   カーソルの巻き戻りを検知したら、保存済みタイムラインを破棄して REST 投影を
   再取得する。
+
+#### Presence と Web Push の宛先
+
+`Presence { client_id, tab_id, visible, focused, focused_session_id }` は、
+接続直後・可視 / フォーカス変化・ハートビートで送ります。ハブはこれをもとに
+「いま使われている端末」を判定し、Web Push の宛先を選びます。
+
+- `client_id` はブラウザプロファイル / インストール済み PWA の単位で、
+  クライアントが生成して永続化する。認証情報ではなく、通知の宛先選択にのみ使う。
+- `tab_id` は Client WS 接続ごとに生成し、切断時にハブがプレゼンスを削除する。
+- ハブはサーバー受信時刻で鮮度を判定する。最後の受信から 90 秒を過ぎたタブは
+  inactive となり、クライアントの時計ずれの影響を受けない。
+- 既定の宛先は **active なクライアントのみ**。active が 0 台のときは全購読へ
+  フォールバックする（設定で変更予定）。
+- 通知対象セッションを開いているアクティブなタブには送らない
+  （`focused_session_id` による抑止）。
+- ローカルノードは Presence を無視する（Web Push はハブ専用）。
 
 ### 3.3 Client PTY WebSocket (`/api/v1/pty/ws`)
 

@@ -1,5 +1,6 @@
 import { SvelteMap } from "svelte/reactivity";
 import { ApiError } from "#lib/api/errors.ts";
+import { clientId, newTabId } from "#lib/client-identity.ts";
 import type {
   ClientWsMessage,
   CommandResult,
@@ -124,6 +125,9 @@ export class SyncStore {
   #pendingCommands = new Map<string, PendingCommand>();
   #sessionsRefreshQueued = false;
   #inboxRefreshQueued = false;
+  /** ID of this tab (one Client WS connection). */
+  #tabId = newTabId();
+  #presenceTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(connection: ConnectionStore) {
     this.connection = connection;
@@ -137,6 +141,7 @@ export class SyncStore {
   start(): void {
     if (!this.#stopped) return;
     this.#stopped = false;
+    this.#attachPresence();
     this.#connect();
     void this.refreshAll();
   }
@@ -148,9 +153,64 @@ export class SyncStore {
       clearTimeout(this.#reconnectTimer);
       this.#reconnectTimer = null;
     }
+    this.#detachPresence();
+    // Best effort: the server also removes presence when the WS closes.
+    this.#sendPresence(false, false);
     this.#ws?.close();
     this.#ws = null;
     this.wsConnected = false;
+  }
+
+  /** Whether the document is visible (true during SSR / tests). */
+  #isDocumentVisible(): boolean {
+    return typeof document === "undefined" || document.visibilityState === "visible";
+  }
+
+  /** Whether the window has focus (true during SSR / tests). */
+  #isDocumentFocused(): boolean {
+    return typeof document === "undefined" ? true : document.hasFocus();
+  }
+
+  /** Reports this tab's visibility / focus for Web Push targeting. */
+  #sendPresence(visible = this.#isDocumentVisible(), focused = this.#isDocumentFocused()): void {
+    this.#send({
+      op: "presence",
+      client_id: clientId(),
+      tab_id: this.#tabId,
+      visible,
+      focused,
+      focused_session_id: this.activeSessionId,
+    });
+  }
+
+  #onVisibilityChange = () => this.#sendPresence();
+  #onFocus = () => this.#sendPresence();
+  #onBlur = () => this.#sendPresence();
+  #onPageShow = () => this.#sendPresence();
+  #onPageHide = () => this.#sendPresence(false, false);
+
+  #attachPresence(): void {
+    if (typeof document === "undefined" || this.#presenceTimer !== null) return;
+    document.addEventListener("visibilitychange", this.#onVisibilityChange);
+    window.addEventListener("focus", this.#onFocus);
+    window.addEventListener("blur", this.#onBlur);
+    window.addEventListener("pageshow", this.#onPageShow);
+    window.addEventListener("pagehide", this.#onPageHide);
+    this.#presenceTimer = setInterval(() => this.#sendPresence(), 30_000);
+  }
+
+  #detachPresence(): void {
+    if (typeof document !== "undefined") {
+      document.removeEventListener("visibilitychange", this.#onVisibilityChange);
+      window.removeEventListener("focus", this.#onFocus);
+      window.removeEventListener("blur", this.#onBlur);
+      window.removeEventListener("pageshow", this.#onPageShow);
+      window.removeEventListener("pagehide", this.#onPageHide);
+    }
+    if (this.#presenceTimer !== null) {
+      clearInterval(this.#presenceTimer);
+      this.#presenceTimer = null;
+    }
   }
 
   /** Stop once and reconnect (e.g. right after login). */
@@ -177,6 +237,7 @@ export class SyncStore {
         since_cursor: this.#cursor,
         focused_session_id: this.activeSessionId,
       });
+      this.#sendPresence();
       void this.refreshAll();
     });
     ws.addEventListener("message", (event: MessageEvent) => {
@@ -334,6 +395,7 @@ export class SyncStore {
       since_cursor: this.#cursor,
       focused_session_id: sessionId,
     });
+    this.#sendPresence();
   }
 
   /**

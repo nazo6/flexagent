@@ -28,10 +28,11 @@ use fxg_protocol::settings::{
     HubSettingsSnapshot, ProvisionerDefinition, SecretsResponse, UpdateHubSettingsRequest,
     UpsertSecretRequest,
 };
-use fxg_protocol::{CommandId, NodeId, SecretId, SessionId};
+use fxg_protocol::{ClientId, CommandId, NodeId, SecretId, SessionId, TabId};
 use tokio::sync::broadcast;
 
 use super::{ApiError, PtyChannelError, PtyChannelEvent, PtySpawnParams, header_str};
+use crate::presence::ClientPresence;
 
 /// Information about the connected client (for audit logs).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -134,7 +135,7 @@ pub enum ClientCommand {
 }
 
 impl ClientCommand {
-    /// Extracts a command from a WS message (`Subscribe` / `Ping` yield `None`).
+    /// Extracts a command from a WS message (`Subscribe` / `Presence` / `Ping` yield `None`).
     pub fn from_message(message: &fxg_protocol::client_api::ClientWsMessage) -> Option<Self> {
         use fxg_protocol::client_api::ClientWsMessage;
         match message {
@@ -158,7 +159,9 @@ impl ClientCommand {
                 session_id: session_id.clone(),
                 action: action.clone(),
             }),
-            ClientWsMessage::Subscribe { .. } | ClientWsMessage::Ping => None,
+            ClientWsMessage::Subscribe { .. }
+            | ClientWsMessage::Presence { .. }
+            | ClientWsMessage::Ping => None,
         }
     }
 
@@ -206,6 +209,15 @@ pub trait ClientApiBackend: Clone + Send + Sync + 'static {
     fn diagnostics_counters(&self) -> Option<&super::DiagnosticsCounters> {
         None
     }
+
+    /// Records the visibility / focus state of a client tab (Web Push targeting).
+    ///
+    /// The hub keeps this in memory; a local node ignores it because Web Push is
+    /// hub-only.
+    fn record_client_presence(&self, _presence: ClientPresence) {}
+
+    /// Removes a client tab when its WS connection closes (hub only).
+    fn clear_client_presence(&self, _client_id: &ClientId, _tab_id: &TabId) {}
 
     /// Data directory (`~/.flexagent`) when the endpoint owns one.
     fn fxg_home(&self) -> Option<&std::path::Path> {

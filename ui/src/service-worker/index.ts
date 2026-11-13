@@ -17,6 +17,7 @@
 
 import { version } from "$app/env";
 import { assets, immutable } from "$app/manifest";
+import { readClientIdFromIndexedDb } from "#lib/client-identity.ts";
 import { urlBase64ToUint8Array } from "#lib/push-keys.ts";
 
 declare const self: ServiceWorkerGlobalScope;
@@ -244,6 +245,11 @@ self.addEventListener("pushsubscriptionchange", (event) => {
           console.error("[fxg] push subscription has no encryption keys");
           return;
         }
+        const storedClientId = await readClientIdFromIndexedDb();
+        if (storedClientId === null) {
+          console.error("[fxg] client ID is not available for push re-subscription");
+          return;
+        }
         const response = await fetch("/api/v1/push/subscribe", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -253,6 +259,7 @@ self.addEventListener("pushsubscriptionchange", (event) => {
             p256dh: keys.p256dh,
             auth: keys.auth,
             device_name: self.navigator.userAgent,
+            client_id: storedClientId,
           }),
         });
         if (!response.ok) {

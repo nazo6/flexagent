@@ -1,3 +1,4 @@
+import { clientId } from "#lib/client-identity.ts";
 import type { SystemInfoResponse } from "#lib/generated/bindings.ts";
 import { m } from "#lib/paraglide/messages.js";
 import { connection } from "#lib/stores/app.svelte.ts";
@@ -11,6 +12,9 @@ import { isValidVapidKey, urlBase64ToUint8Array } from "./push-keys";
  * `POST /api/v1/push/subscribe`. The Approve / Reject actions on the notification
  * banner call the API directly from the Service Worker (`src/service-worker.ts`).
  */
+
+/** Whether the current subscription has been registered with this client ID. */
+let registrationSynced = false;
 
 export interface PushCapability {
   /** Whether this browser supports Service Worker / Push API */
@@ -104,12 +108,48 @@ export async function enablePushNotifications(): Promise<void> {
     p256dh,
     auth,
     device_name: navigator.userAgent,
+    client_id: clientId(),
   });
+  registrationSynced = true;
+}
+
+/**
+ * Re-register an existing subscription with the server.
+ *
+ * This backfills `client_id` for subscriptions created before client identities
+ * existed and keeps the device association current after an upgrade.
+ */
+export async function syncPushSubscription(): Promise<void> {
+  if (registrationSynced) return;
+  if (
+    !hasPushSupport() ||
+    typeof Notification === "undefined" ||
+    Notification.permission !== "granted"
+  )
+    return;
+  const info = await systemInfo();
+  if (info?.vapid_public_key == null) return;
+
+  const registration = await navigator.serviceWorker.ready;
+  const subscription = await registration.pushManager.getSubscription();
+  if (subscription === null) return;
+  const keys = subscription.toJSON().keys ?? {};
+  if (!keys.p256dh || !keys.auth) return;
+
+  await connection.client.pushSubscribe({
+    endpoint: subscription.endpoint,
+    p256dh: keys.p256dh,
+    auth: keys.auth,
+    device_name: navigator.userAgent,
+    client_id: clientId(),
+  });
+  registrationSynced = true;
 }
 
 /** Unsubscribe this device (the server entry expires naturally on 404/410). */
 export async function disablePushNotifications(): Promise<void> {
   if (!hasPushSupport()) return;
+  registrationSynced = false;
   const registration = await navigator.serviceWorker.ready;
   const subscription = await registration.pushManager.getSubscription();
   await subscription?.unsubscribe();
