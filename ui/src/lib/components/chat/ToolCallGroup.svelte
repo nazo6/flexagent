@@ -96,36 +96,36 @@
   <!-- Group header -->
   <button
     type="button"
-    class="hover:bg-accent/40 flex w-full items-center justify-between px-3 py-2 text-left font-medium select-none"
+    class="hover:bg-accent/40 flex w-full items-center justify-between px-2.5 py-1 text-left text-[12px] font-medium select-none"
     onclick={toggleOpen}
   >
-    <div class="flex items-center gap-2">
-      <div class="text-muted-foreground flex items-center gap-1.5">
+    <div class="flex items-center gap-1.5">
+      <div class="text-muted-foreground flex items-center gap-1">
         {#if isOpen}
-          <ChevronDownIcon class="size-3.5" />
+          <ChevronDownIcon class="size-3" />
         {:else}
-          <ChevronRightIcon class="size-3.5" />
+          <ChevronRightIcon class="size-3" />
         {/if}
-        <WrenchIcon class="size-3.5" />
+        <WrenchIcon class="size-3" />
       </div>
       <span class="font-medium text-foreground">
         {m.chat_tool_calls({ count: tools.length })}
       </span>
     </div>
 
-    <div class="flex items-center gap-2">
+    <div class="flex items-center gap-1.5">
       {#if hasInProgress}
         <span class="flex items-center gap-1 text-signal text-[11px]">
-          <LoaderCircleIcon class="size-3.5 animate-spin" />
+          <LoaderCircleIcon class="size-3 animate-spin" />
           <span>{m.chat_tool_running()}</span>
         </span>
       {:else if hasFailed}
         <span class="flex items-center gap-1 text-destructive text-[11px]">
-          <CircleXIcon class="size-3.5" />
+          <CircleXIcon class="size-3" />
           <span>{m.chat_tool_error()}</span>
         </span>
       {:else if allCompleted}
-        <CircleCheckIcon class="size-4 text-ok" />
+        <CircleCheckIcon class="size-3.5 text-ok" />
       {/if}
     </div>
   </button>
@@ -156,7 +156,7 @@
             role="button"
             tabindex="0"
             class={cn(
-              "flex items-start justify-between gap-2 px-3 py-2 text-[13px] transition-colors",
+              "flex items-start justify-between gap-2 px-2.5 py-1 text-[12px] transition-colors",
               hasDetailContent ? "cursor-pointer hover:bg-accent/30" : "cursor-default",
             )}
             onclick={(e) => {
@@ -169,19 +169,19 @@
               }
             }}
           >
-            <div class="flex min-w-0 flex-1 flex-col gap-1">
+            <div class="flex min-w-0 flex-1 flex-col gap-0.5">
               <div class="flex min-w-0 items-center gap-2">
                 <!-- Icon -->
                 {#if tool.toolKind === "read"}
-                  <FileSearchIcon class="text-muted-foreground size-3.5 shrink-0" />
+                  <FileSearchIcon class="text-muted-foreground size-3 shrink-0" />
                 {:else if tool.toolKind === "edit"}
-                  <PencilIcon class="text-muted-foreground size-3.5 shrink-0" />
+                  <PencilIcon class="text-muted-foreground size-3 shrink-0" />
                 {:else if tool.toolKind === "execute"}
-                  <SquareTerminalIcon class="text-muted-foreground size-3.5 shrink-0" />
+                  <SquareTerminalIcon class="text-muted-foreground size-3 shrink-0" />
                 {:else if tool.toolKind === "search"}
-                  <SearchIcon class="text-muted-foreground size-3.5 shrink-0" />
+                  <SearchIcon class="text-muted-foreground size-3 shrink-0" />
                 {:else}
-                  <HammerIcon class="text-muted-foreground size-3.5 shrink-0" />
+                  <HammerIcon class="text-muted-foreground size-3 shrink-0" />
                 {/if}
 
                 <!-- Tool name badge (Read, Edit, Terminal, Search, etc.) -->
@@ -205,7 +205,7 @@
 
               <!-- Terminal result preview (visible without expanding the detail) -->
               {#if result !== null && result.preview !== ""}
-                <div class="flex min-w-0 items-center gap-1.5 pl-5.5">
+                <div class="flex min-w-0 items-center gap-1.5 pl-5">
                   <CornerDownRightIcon class="text-muted-foreground size-3 shrink-0" />
                   <span
                     class={cn(
@@ -225,7 +225,7 @@
             </div>
 
             <!-- Status & expand toggle -->
-            <div class="mt-0.5 ml-2 flex shrink-0 items-center gap-2">
+            <div class="mt-0.5 ml-1.5 flex shrink-0 items-center gap-1.5">
               {#if isTerminal && result !== null}
                 {#if tool.status === "in_progress"}
                   <LoaderCircleIcon class="size-3 animate-spin text-signal" />
@@ -250,13 +250,13 @@
               {:else if tool.status === "in_progress"}
                 <LoaderCircleIcon class="size-3 animate-spin text-signal" />
               {:else if tool.status === "completed"}
-                <CircleCheckIcon class="size-3.5 text-ok" />
+                <CircleCheckIcon class="size-3 text-ok" />
               {:else if tool.status === "failed"}
-                <CircleXIcon class="size-3.5 text-destructive" />
+                <CircleXIcon class="size-3 text-destructive" />
               {/if}
 
               {#if hasDetailContent}
-                <span class="text-muted-foreground text-[11px]">
+                <span class="text-muted-foreground text-[10px]">
                   {isExpanded ? "▲" : "▼"}
                 </span>
               {/if}

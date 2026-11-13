@@ -64,7 +64,7 @@
   on hover / focus on pointer devices that can hover.
 -->
 <div
-  class="message-actions flex w-full items-center gap-2"
+  class="message-actions flex w-full items-center gap-2 pt-2"
   class:message-actions-prominent={prominent}
 >
   <!--
@@ -77,12 +77,12 @@
   {/if}
   <span class="message-actions-content bg-border/60 h-px flex-1"></span>
   <div
-    class="message-actions-content bg-popover border-border flex items-center gap-0.5 rounded-md border p-0 shadow-sm"
+    class="message-actions-content border-border/60 flex items-center gap-0.5 rounded-md border bg-transparent p-0"
   >
     <Button
       size="xs"
       variant="ghost"
-      class="gap-1 px-2"
+      class="text-muted-foreground hover:text-foreground gap-1 px-2 font-normal"
       title={m.chat_action_copy()}
       aria-label={m.chat_action_copy()}
       onclick={() => void copy()}
@@ -94,7 +94,7 @@
       <Button
         size="xs"
         variant="ghost"
-        class="gap-1 px-2"
+        class="text-muted-foreground hover:text-foreground gap-1 px-2 font-normal"
         title={forkTitle}
         aria-label={forkTitle}
         disabled={!canFork}
