@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n        SELECT endpoint, p256dh, auth, device_name\n          FROM push_subscriptions\n         ORDER BY created_at ASC\n        ",
+  "query": "\n        SELECT endpoint, p256dh, auth, device_name,\n               client_id AS \"client_id: ClientId\"\n          FROM push_subscriptions\n         ORDER BY created_at ASC\n        ",
   "describe": {
     "columns": [
       {
@@ -46,6 +46,17 @@
             "name": "device_name"
           }
         }
+      },
+      {
+        "name": "client_id: ClientId",
+        "ordinal": 4,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "push_subscriptions",
+            "name": "client_id"
+          }
+        }
       }
     ],
     "parameters": {
@@ -55,8 +66,9 @@
       false,
       false,
       false,
+      true,
       true
     ]
   },
-  "hash": "a24d3db1449f197a388b47ed65af1c7331bf255d9e66d46f06fa0192590715ef"
+  "hash": "975317aa93e532ffba229f210017c571b4b20e37b8ceeec47e5bf60b2dd8cace"
 }

@@ -17,7 +17,7 @@ use crate::common::{
 };
 use crate::events::{SessionEventBatch, SessionEventEnvelope};
 use crate::settings::{CustomAgentConfig, ProjectIdentity};
-use crate::{CommandId, NodeId, ProjectId, SecretId, SessionId};
+use crate::{ClientId, CommandId, NodeId, ProjectId, SecretId, SessionId, TabId};
 
 /// Kind of endpoint (`GET /api/v1/system/info`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
@@ -974,6 +974,8 @@ pub struct PushSubscribeRequest {
     pub auth: String,
     /// Device name (e.g. `Pixel 9 Chrome PWA`)
     pub device_name: Option<String>,
+    /// Browser profile / installed PWA ID (the notification target)
+    pub client_id: ClientId,
 }
 
 /// `POST /api/v1/push/subscribe` response.
@@ -1055,6 +1057,22 @@ pub enum ClientWsMessage {
         session_id: SessionId,
         /// Operation to execute
         action: SessionControlAction,
+    },
+    /// Reports the visibility / focus state of this tab (Web Push targeting).
+    ///
+    /// The hub keeps this in memory and uses it to decide which push subscriptions
+    /// receive notifications. Nodes ignore it (Web Push is hub-only).
+    Presence {
+        /// Browser profile / installed PWA ID
+        client_id: ClientId,
+        /// Connection (tab) ID
+        tab_id: TabId,
+        /// Whether the document is visible
+        visible: bool,
+        /// Whether the window has focus
+        focused: bool,
+        /// Session currently open in this tab
+        focused_session_id: Option<SessionId>,
     },
     /// Keep-alive
     Ping,

@@ -4,6 +4,7 @@
 //! Subscriptions are keyed per device by `endpoint`, and keys are updated on re-registration
 //! (design: `docs/03-protocol-and-api.md` §3.1, `docs/05-cli-and-pwa-ui.md` §3.3).
 
+use fxg_protocol::ClientId;
 use fxg_protocol::util::now_ms;
 use sqlx::SqlitePool;
 
@@ -20,6 +21,9 @@ pub struct PushSubscriptionRecord {
     pub auth: String,
     /// Device name (e.g. `Pixel 9 Chrome PWA`)
     pub device_name: Option<String>,
+    /// Browser profile / installed PWA ID (`None` for subscriptions registered before
+    /// client IDs existed; the next registration backfills it)
+    pub client_id: Option<ClientId>,
 }
 
 /// Registers or updates a subscription (same `endpoint` overwrites the keys).
@@ -29,17 +33,19 @@ pub async fn upsert_push_subscription(
 ) -> Result<(), DbError> {
     sqlx::query!(
         r#"
-        INSERT INTO push_subscriptions (endpoint, p256dh, auth, device_name, created_at)
-        VALUES (?, ?, ?, ?, ?)
+        INSERT INTO push_subscriptions (endpoint, p256dh, auth, device_name, client_id, created_at)
+        VALUES (?, ?, ?, ?, ?, ?)
         ON CONFLICT(endpoint) DO UPDATE SET
             p256dh = excluded.p256dh,
             auth = excluded.auth,
-            device_name = excluded.device_name
+            device_name = excluded.device_name,
+            client_id = COALESCE(excluded.client_id, push_subscriptions.client_id)
         "#,
         record.endpoint,
         record.p256dh,
         record.auth,
         record.device_name.as_deref(),
+        record.client_id.as_ref(),
         now_ms(),
     )
     .execute(pool)
@@ -54,7 +60,8 @@ pub async fn list_push_subscriptions(
     let rows = sqlx::query_as!(
         PushSubscriptionRow,
         r#"
-        SELECT endpoint, p256dh, auth, device_name
+        SELECT endpoint, p256dh, auth, device_name,
+               client_id AS "client_id: ClientId"
           FROM push_subscriptions
          ORDER BY created_at ASC
         "#,
@@ -69,6 +76,7 @@ pub async fn list_push_subscriptions(
             p256dh: row.p256dh,
             auth: row.auth,
             device_name: row.device_name,
+            client_id: row.client_id,
         })
         .collect())
 }
@@ -93,4 +101,5 @@ struct PushSubscriptionRow {
     p256dh: String,
     auth: String,
     device_name: Option<String>,
+    client_id: Option<ClientId>,
 }

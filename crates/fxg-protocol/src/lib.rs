@@ -36,7 +36,7 @@ pub mod node_hub;
 pub mod settings;
 pub mod util;
 
-pub use ids::{CommandId, EventId, NodeId, ProjectId, SecretId, SessionId};
+pub use ids::{ClientId, CommandId, EventId, NodeId, ProjectId, SecretId, SessionId, TabId};
 
 /// Generates the TypeScript definitions used by the UI (`cargo test -p fxg-protocol export_bindings`).
 ///

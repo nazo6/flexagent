@@ -11,16 +11,21 @@
 //!   [`web_push_native`] (`p256` / `aes-gcm` / `hkdf`) and do not depend on OpenSSL. HTTP
 //!   delivery uses the workspace `reqwest`.
 
+use std::collections::HashSet;
 use std::path::Path;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use base64::Engine as _;
 use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
 use fxg_db::{Db, PushSubscriptionRecord};
+use fxg_protocol::{ClientId, SessionId};
 use serde::{Deserialize, Serialize};
 use web_push_native::jwt_simple::algorithms::ES256KeyPair;
 use web_push_native::p256::elliptic_curve::sec1::ToEncodedPoint;
 use web_push_native::{Auth, WebPushBuilder};
+
+use crate::presence::PresenceRegistry;
 
 /// VAPID key file name (`~/.flexagent/vapid.json`).
 pub const VAPID_KEYS_FILE: &str = "vapid.json";
@@ -337,6 +342,122 @@ pub fn turn_finished_notification(
     }
 }
 
+/// How Web Push chooses target devices.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code, reason = "Phase 3 reads the policy from hub settings")]
+pub(crate) enum TargetPolicy {
+    /// Every subscription.
+    All,
+    /// Clients with a visible, focused tab (fallback applies when none).
+    ActiveOnly,
+    /// Active clients plus clients that were active within the recent window.
+    ActiveOrRecent,
+    /// The client that was active most recently.
+    MostRecent,
+}
+
+/// Notification delivery targeting.
+///
+/// These are defaults for Phase 2; hub settings (Phase 3) will provide the values.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct NotificationTargeting {
+    /// Target policy
+    pub policy: TargetPolicy,
+    /// Window for [`TargetPolicy::ActiveOrRecent`]
+    pub recent_window: Duration,
+    /// Send to every subscription when the policy has no target
+    pub fallback_all: bool,
+    /// Do not notify a client that currently has the target session open
+    pub suppress_focused_session: bool,
+}
+
+impl Default for NotificationTargeting {
+    fn default() -> Self {
+        Self {
+            policy: TargetPolicy::ActiveOnly,
+            recent_window: Duration::from_secs(600),
+            fallback_all: true,
+            suppress_focused_session: true,
+        }
+    }
+}
+
+/// Resolves the client IDs to notify, or `None` when every subscription is eligible.
+fn target_clients(
+    presence: &PresenceRegistry,
+    targeting: &NotificationTargeting,
+    now: Instant,
+) -> Option<HashSet<ClientId>> {
+    let clients = match targeting.policy {
+        TargetPolicy::All => return None,
+        TargetPolicy::ActiveOnly => presence.active_clients_at(now),
+        TargetPolicy::ActiveOrRecent => presence.recent_clients_at(now, targeting.recent_window),
+        TargetPolicy::MostRecent => presence.most_recent_client_at(now).into_iter().collect(),
+    };
+    if clients.is_empty() {
+        return if targeting.fallback_all {
+            None
+        } else {
+            Some(HashSet::new())
+        };
+    }
+    Some(clients)
+}
+
+/// Selects the subscriptions that should receive a notification for `session_id`.
+///
+/// Subscriptions registered before `client_id` existed are only eligible when every
+/// subscription is targeted (policy `All` or the no-active-client fallback).
+fn select_subscriptions<'a>(
+    subscriptions: &'a [PushSubscriptionRecord],
+    presence: &PresenceRegistry,
+    session_id: &SessionId,
+    targeting: &NotificationTargeting,
+    now: Instant,
+) -> Vec<&'a PushSubscriptionRecord> {
+    let focused = if targeting.suppress_focused_session {
+        presence.clients_focused_on_at(session_id, now)
+    } else {
+        HashSet::new()
+    };
+    let clients = target_clients(presence, targeting, now);
+    subscriptions
+        .iter()
+        .filter(|subscription| {
+            if subscription
+                .client_id
+                .as_ref()
+                .is_some_and(|client_id| focused.contains(client_id))
+            {
+                return false;
+            }
+            match &clients {
+                None => true,
+                Some(clients) => subscription
+                    .client_id
+                    .as_ref()
+                    .is_some_and(|client_id| clients.contains(client_id)),
+            }
+        })
+        .collect()
+}
+
+/// Selects the subscriptions for one session at the current time.
+fn targets_for_session<'a>(
+    subscriptions: &'a [PushSubscriptionRecord],
+    presence: &PresenceRegistry,
+    session_id: &str,
+    targeting: &NotificationTargeting,
+) -> Vec<&'a PushSubscriptionRecord> {
+    select_subscriptions(
+        subscriptions,
+        presence,
+        &SessionId::new(session_id),
+        targeting,
+        Instant::now(),
+    )
+}
+
 /// Tracks sessions whose current turn was observed as `Running`.
 ///
 /// Live sync delivers one event per `EventBatchPush`, so the `Running` and `Idle` statuses of a
@@ -424,11 +545,11 @@ pub(crate) fn notification_events(
 async fn send_to_subscriptions(
     push: &PushService,
     db: &Db,
-    subscriptions: &[PushSubscriptionRecord],
+    subscriptions: &[&PushSubscriptionRecord],
     payload: &PushNotificationPayload,
     counters: Option<&crate::api::DiagnosticsCounters>,
 ) {
-    for subscription in subscriptions {
+    for subscription in subscriptions.iter().copied() {
         match push.send(subscription, payload).await {
             Ok(PushSendOutcome::Sent) => {
                 tracing::debug!(endpoint = %subscription.endpoint, request_id = %payload.request_id, "push sent");
@@ -453,9 +574,11 @@ async fn send_to_subscriptions(
 ///
 /// Expired subscriptions (`404` / `410`) are deleted. Failures only produce a warning log and
 /// processing continues.
-pub async fn notify_permission_requests(
+pub(crate) async fn notify_permission_requests(
     push: &PushService,
     db: &Db,
+    presence: &PresenceRegistry,
+    targeting: &NotificationTargeting,
     events: &[fxg_protocol::events::SessionEventEnvelope],
     counters: Option<&crate::api::DiagnosticsCounters>,
 ) {
@@ -523,7 +646,11 @@ pub async fn notify_permission_requests(
             &options,
         );
 
-        send_to_subscriptions(push, db, &subscriptions, &payload, counters).await;
+        let selected = targets_for_session(&subscriptions, presence, &session_id, targeting);
+        if selected.is_empty() {
+            continue;
+        }
+        send_to_subscriptions(push, db, &selected, &payload, counters).await;
     }
 }
 
@@ -531,9 +658,11 @@ pub async fn notify_permission_requests(
 ///
 /// Expired subscriptions (`404` / `410`) are deleted. Failures only produce a warning log and
 /// processing continues.
-pub async fn notify_elicitations(
+pub(crate) async fn notify_elicitations(
     push: &PushService,
     db: &Db,
+    presence: &PresenceRegistry,
+    targeting: &NotificationTargeting,
     events: &[fxg_protocol::events::SessionEventEnvelope],
     counters: Option<&crate::api::DiagnosticsCounters>,
 ) {
@@ -589,14 +718,20 @@ pub async fn notify_elicitations(
             &message,
         );
 
-        send_to_subscriptions(push, db, &subscriptions, &payload, counters).await;
+        let selected = targets_for_session(&subscriptions, presence, &session_id, targeting);
+        if selected.is_empty() {
+            continue;
+        }
+        send_to_subscriptions(push, db, &selected, &payload, counters).await;
     }
 }
 
 /// Sends a completion notification for finished turns.
-pub async fn notify_turn_finished(
+pub(crate) async fn notify_turn_finished(
     push: &PushService,
     db: &Db,
+    presence: &PresenceRegistry,
+    targeting: &NotificationTargeting,
     events: &[fxg_protocol::events::SessionEventEnvelope],
     counters: Option<&crate::api::DiagnosticsCounters>,
 ) {
@@ -644,7 +779,11 @@ pub async fn notify_turn_finished(
         let node_label = session.node_id.to_string();
         let payload =
             turn_finished_notification(&session_id, Some(&session.title), &node_label, failed);
-        send_to_subscriptions(push, db, &subscriptions, &payload, counters).await;
+        let selected = targets_for_session(&subscriptions, presence, &session_id, targeting);
+        if selected.is_empty() {
+            continue;
+        }
+        send_to_subscriptions(push, db, &selected, &payload, counters).await;
     }
 }
 
@@ -693,6 +832,7 @@ mod tests {
             p256dh: URL_SAFE_NO_PAD.encode(public.as_bytes()),
             auth: URL_SAFE_NO_PAD.encode(auth_bytes),
             device_name: Some("test device".to_owned()),
+            client_id: None,
         };
         (record, secret, auth)
     }
@@ -1014,5 +1154,210 @@ mod tests {
             notification_events(&events, &RunningTurns::default(), true).is_empty(),
             "resync must not wake devices"
         );
+    }
+
+    fn subscription(endpoint: &str, client: Option<&str>) -> PushSubscriptionRecord {
+        PushSubscriptionRecord {
+            endpoint: endpoint.to_owned(),
+            p256dh: "p256dh".to_owned(),
+            auth: "auth".to_owned(),
+            device_name: None,
+            client_id: client.map(ClientId::new),
+        }
+    }
+
+    fn targeting(policy: TargetPolicy) -> NotificationTargeting {
+        NotificationTargeting {
+            policy,
+            ..NotificationTargeting::default()
+        }
+    }
+
+    fn record_presence(
+        registry: &PresenceRegistry,
+        client: &str,
+        tab: &str,
+        visible: bool,
+        focused: bool,
+        session: Option<&str>,
+        at: Instant,
+    ) {
+        registry.record_at(
+            crate::presence::ClientPresence {
+                client_id: ClientId::new(client),
+                tab_id: fxg_protocol::TabId::new(tab),
+                visible,
+                focused,
+                focused_session_id: session.map(SessionId::new),
+            },
+            at,
+        );
+    }
+
+    #[test]
+    fn all_policy_targets_every_subscription() {
+        let subscriptions = [
+            subscription("legacy", None),
+            subscription("c1", Some("client-1")),
+        ];
+        let targets = select_subscriptions(
+            &subscriptions,
+            &PresenceRegistry::default(),
+            &SessionId::new("session-1"),
+            &targeting(TargetPolicy::All),
+            Instant::now(),
+        );
+        assert_eq!(targets.len(), 2);
+    }
+
+    #[test]
+    fn active_only_targets_only_active_clients() {
+        let registry = PresenceRegistry::default();
+        let now = Instant::now();
+        record_presence(&registry, "client-1", "tab-1", true, true, None, now);
+        record_presence(&registry, "client-2", "tab-2", true, false, None, now);
+        let subscriptions = [
+            subscription("c1", Some("client-1")),
+            subscription("c2", Some("client-2")),
+            subscription("legacy", None),
+        ];
+        let targets = select_subscriptions(
+            &subscriptions,
+            &registry,
+            &SessionId::new("session-1"),
+            &targeting(TargetPolicy::ActiveOnly),
+            now,
+        );
+        assert_eq!(targets.len(), 1);
+        assert_eq!(targets[0].endpoint, "c1");
+    }
+
+    #[test]
+    fn active_only_falls_back_to_all_when_no_client_is_active() {
+        let subscriptions = [
+            subscription("legacy", None),
+            subscription("c1", Some("client-1")),
+        ];
+        let targets = select_subscriptions(
+            &subscriptions,
+            &PresenceRegistry::default(),
+            &SessionId::new("session-1"),
+            &targeting(TargetPolicy::ActiveOnly),
+            Instant::now(),
+        );
+        assert_eq!(targets.len(), 2);
+    }
+
+    #[test]
+    fn active_only_without_fallback_targets_nothing() {
+        let subscriptions = [subscription("c1", Some("client-1"))];
+        let selected = NotificationTargeting {
+            fallback_all: false,
+            ..NotificationTargeting::default()
+        };
+        let targets = select_subscriptions(
+            &subscriptions,
+            &PresenceRegistry::default(),
+            &SessionId::new("session-1"),
+            &selected,
+            Instant::now(),
+        );
+        assert!(targets.is_empty());
+    }
+
+    #[test]
+    fn active_or_recent_includes_a_client_that_was_blurred() {
+        let registry = PresenceRegistry::default();
+        let now = Instant::now();
+        record_presence(&registry, "client-1", "tab-1", true, true, None, now);
+        record_presence(&registry, "client-2", "tab-2", true, true, None, now);
+        record_presence(
+            &registry,
+            "client-2",
+            "tab-2",
+            true,
+            false,
+            None,
+            now + Duration::from_secs(10),
+        );
+        let subscriptions = [
+            subscription("c1", Some("client-1")),
+            subscription("c2", Some("client-2")),
+        ];
+        let later = now + Duration::from_secs(60);
+        let targets = select_subscriptions(
+            &subscriptions,
+            &registry,
+            &SessionId::new("session-1"),
+            &targeting(TargetPolicy::ActiveOrRecent),
+            later,
+        );
+        assert_eq!(targets.len(), 2);
+    }
+
+    #[test]
+    fn most_recent_targets_only_the_latest_client() {
+        let registry = PresenceRegistry::default();
+        let now = Instant::now();
+        record_presence(&registry, "client-1", "tab-1", true, true, None, now);
+        record_presence(
+            &registry,
+            "client-2",
+            "tab-2",
+            true,
+            true,
+            None,
+            now + Duration::from_secs(5),
+        );
+        let subscriptions = [
+            subscription("c1", Some("client-1")),
+            subscription("c2", Some("client-2")),
+        ];
+        let targets = select_subscriptions(
+            &subscriptions,
+            &registry,
+            &SessionId::new("session-1"),
+            &targeting(TargetPolicy::MostRecent),
+            now + Duration::from_secs(10),
+        );
+        assert_eq!(targets.len(), 1);
+        assert_eq!(targets[0].endpoint, "c2");
+    }
+
+    #[test]
+    fn focused_session_is_suppressed_for_the_open_client() {
+        let registry = PresenceRegistry::default();
+        let now = Instant::now();
+        record_presence(
+            &registry,
+            "client-1",
+            "tab-1",
+            true,
+            true,
+            Some("session-1"),
+            now,
+        );
+        record_presence(
+            &registry,
+            "client-2",
+            "tab-2",
+            true,
+            true,
+            Some("session-2"),
+            now,
+        );
+        let subscriptions = [
+            subscription("c1", Some("client-1")),
+            subscription("c2", Some("client-2")),
+        ];
+        let targets = select_subscriptions(
+            &subscriptions,
+            &registry,
+            &SessionId::new("session-1"),
+            &targeting(TargetPolicy::All),
+            now,
+        );
+        assert_eq!(targets.len(), 1);
+        assert_eq!(targets[0].endpoint, "c2");
     }
 }

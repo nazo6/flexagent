@@ -29,6 +29,7 @@
 pub mod api;
 mod error;
 pub mod hub;
+pub mod presence;
 mod process;
 pub mod provisioner;
 pub mod push;

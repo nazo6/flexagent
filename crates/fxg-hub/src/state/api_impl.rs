@@ -33,10 +33,11 @@ use crate::api::{
 use fxg_protocol::settings::{
     HubSettingsSnapshot, SecretsResponse, UpdateHubSettingsRequest, UpsertSecretRequest,
 };
-use fxg_protocol::{NodeId, SecretId};
+use fxg_protocol::{ClientId, NodeId, SecretId, TabId};
 
 use super::HubState;
 use super::settings::secret_error;
+use crate::presence::ClientPresence;
 
 #[async_trait]
 impl ClientApiBackend for HubState {
@@ -59,6 +60,14 @@ impl ClientApiBackend for HubState {
 
     fn diagnostics_counters(&self) -> Option<&crate::api::DiagnosticsCounters> {
         Some(HubState::diagnostics_counters(self))
+    }
+
+    fn record_client_presence(&self, presence: ClientPresence) {
+        self.presence().record(presence);
+    }
+
+    fn clear_client_presence(&self, client_id: &ClientId, tab_id: &TabId) {
+        self.presence().clear(client_id, tab_id);
     }
 
     fn fxg_home(&self) -> Option<&std::path::Path> {
@@ -845,6 +854,7 @@ impl ClientApiBackend for HubState {
             p256dh: request.p256dh.clone(),
             auth: request.auth.clone(),
             device_name: request.device_name.clone(),
+            client_id: Some(request.client_id.clone()),
         };
         fxg_db::push::upsert_push_subscription(self.inner.db.pool(), &record)
             .await

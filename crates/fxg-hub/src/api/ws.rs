@@ -8,9 +8,11 @@ use axum::extract::ws::{Message, WebSocket};
 use futures_util::{SinkExt, StreamExt};
 use fxg_protocol::client_api::{ClientWsMessage, HubLinkStatus, HubWsMessage};
 use fxg_protocol::common::{ErrorCode, ErrorInfo, IncidentLevel, IncidentSource};
+use fxg_protocol::{ClientId, TabId};
 use tokio::sync::{broadcast, watch};
 
 use super::{ClientApiBackend, ClientCommand, ClientEvent, replay_events, send_ws_json};
+use crate::presence::ClientPresence;
 
 /// Number of events per WS replay batch.
 pub const REPLAY_BATCH_SIZE: u32 = 500;
@@ -25,6 +27,8 @@ pub(crate) async fn handle_client_ws<B: ClientApiBackend>(backend: B, socket: We
     let mut hub_link_rx = backend.hub_link_updates();
     let mut cursor: u64 = 0;
     let mut subscribed = false;
+    // Last presence key of this connection, removed when the WS closes.
+    let mut presence_key: Option<(ClientId, TabId)> = None;
 
     /// The next event to wait for in `select`.
     enum Next {
@@ -94,6 +98,28 @@ pub(crate) async fn handle_client_ws<B: ClientApiBackend>(backend: B, socket: We
                             break;
                         }
                         subscribed = true;
+                    }
+                    Ok(ClientWsMessage::Presence {
+                        client_id,
+                        tab_id,
+                        visible,
+                        focused,
+                        focused_session_id,
+                    }) => {
+                        let key = (client_id.clone(), tab_id.clone());
+                        if presence_key.as_ref() != Some(&key)
+                            && let Some((old_client_id, old_tab_id)) = presence_key.take()
+                        {
+                            backend.clear_client_presence(&old_client_id, &old_tab_id);
+                        }
+                        backend.record_client_presence(ClientPresence {
+                            client_id,
+                            tab_id,
+                            visible,
+                            focused,
+                            focused_session_id,
+                        });
+                        presence_key = Some(key);
                     }
                     Ok(ClientWsMessage::Ping) => {
                         if send_ws_json(&mut sender, &HubWsMessage::Pong)
@@ -246,6 +272,10 @@ pub(crate) async fn handle_client_ws<B: ClientApiBackend>(backend: B, socket: We
                 }
             }
         }
+    }
+
+    if let Some((client_id, tab_id)) = presence_key {
+        backend.clear_client_presence(&client_id, &tab_id);
     }
 }
 
