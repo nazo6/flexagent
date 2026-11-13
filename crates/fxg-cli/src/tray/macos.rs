@@ -50,7 +50,7 @@ pub async fn run_node_if_requested(command: &Commands) -> Option<ExitCode> {
     let env = fxg_protocol::config::process_env;
     // If the config cannot be loaded, leave it to the normal path (which reports
     // the error)
-    let global = fxg_protocol::config::GlobalConfig::load(&env).ok()?;
+    let global = fxg_protocol::config::NodeConfig::load(&env).ok()?;
     let tray_configured = crate::commands::load_tray_setting(&env).await;
     if !args.tray_requested(tray_configured) {
         return None;
@@ -59,10 +59,7 @@ pub async fn run_node_if_requested(command: &Commands) -> Option<ExitCode> {
 }
 
 /// Run `fxg node start --tray` (macOS). Does not return until the node stops.
-fn run_node_with_tray(
-    args: &NodeStartArgs,
-    global: &fxg_protocol::config::GlobalConfig,
-) -> ExitCode {
+fn run_node_with_tray(args: &NodeStartArgs, global: &fxg_protocol::config::NodeConfig) -> ExitCode {
     let config = args.node_config_from(global);
 
     // The node body (tokio) starts on a worker thread (tao owns the main

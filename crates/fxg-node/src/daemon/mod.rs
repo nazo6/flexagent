@@ -4,7 +4,7 @@
 //!
 //! - **Local HTTP/WS server** (strictly bound to `127.0.0.1:7860`):
 //!   serves the client API (REST + Client WS) ([`http`])
-//! - **Authentication**: Bearer / Cookie authentication via `~/.flexagent/auth_token` ([`auth`])
+//! - **Authentication**: Bearer / Cookie authentication via `<data>/node/auth_token` ([`auth`])
 
 mod api;
 mod auth;
@@ -14,22 +14,20 @@ mod pairing;
 mod stdio;
 
 use std::net::SocketAddr;
-use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
 use fxg_acp::agent::AgentCatalog;
 use fxg_acp::registry::AcpRegistry;
-use fxg_db::{Db, DbRole};
+use fxg_db::Db;
 use fxg_hub::api::ClientEvent;
 use fxg_protocol::client_api::{HubLinkState, HubLinkStatus};
-use fxg_protocol::config::fxg_home;
+use fxg_protocol::paths::{Paths, Role};
 use fxg_protocol::settings::{AgentSettings, NodeSettings};
 use fxg_protocol::util::now_ms;
 use fxg_pty::PtySessionManager;
 use tokio::sync::{broadcast, watch};
 
 use crate::error::NodeError;
-use crate::paths::NodePaths;
 use crate::session::SessionEventBus;
 use crate::session_manager::{DriverFactory, SessionManager};
 
@@ -67,44 +65,39 @@ pub struct DaemonConfig {
     /// Whether this is an ephemeral VM / sandbox node (`--ephemeral`; reflected in
     /// NodeHello and the `nodes` row)
     pub ephemeral: bool,
-    /// Data directory (`~/.flexagent`)
-    pub fxg_home: PathBuf,
+    /// Role-scoped config/data/state/cache/log paths
+    pub paths: Paths,
     /// Effective logging settings (for the read-only settings catalog)
     pub log: fxg_protocol::config::LogConfig,
 }
 
 impl DaemonConfig {
     /// Builds the default configuration (`node_id` / `node_name` are values resolved by the caller).
-    pub fn new(
-        fxg_home: impl Into<PathBuf>,
-        node_id: impl Into<String>,
-        node_name: impl Into<String>,
-    ) -> Self {
+    pub fn new(paths: Paths, node_id: impl Into<String>, node_name: impl Into<String>) -> Self {
         Self {
             node_id: node_id.into(),
             node_name: node_name.into(),
-            listen_addr: fxg_protocol::config::NodeBootstrapConfig::DEFAULT_LISTEN_ADDR.to_owned(),
+            listen_addr: fxg_protocol::config::NodeConfig::DEFAULT_LISTEN_ADDR.to_owned(),
             listen_addr_explicit: false,
             allowed_hosts: Vec::new(),
             allowed_origins: Vec::new(),
             ephemeral: false,
-            fxg_home: fxg_home.into(),
+            paths,
             log: fxg_protocol::config::LogConfig::default(),
         }
     }
 
-    /// Builds the configuration by resolving the data directory from the environment.
+    /// Builds the configuration by resolving the role paths from the environment.
     pub fn from_env(env: fxg_protocol::config::EnvLookup<'_>) -> Self {
-        let home = fxg_home(env);
         Self {
             node_id: String::new(),
             node_name: hostname(),
-            listen_addr: fxg_protocol::config::NodeBootstrapConfig::DEFAULT_LISTEN_ADDR.to_owned(),
+            listen_addr: fxg_protocol::config::NodeConfig::DEFAULT_LISTEN_ADDR.to_owned(),
             listen_addr_explicit: false,
             allowed_hosts: Vec::new(),
             allowed_origins: Vec::new(),
             ephemeral: false,
-            fxg_home: home,
+            paths: Paths::resolve(env, Role::Node),
             log: fxg_protocol::config::LogConfig::default(),
         }
     }
@@ -209,7 +202,7 @@ struct Inner {
     bus: SessionEventBus,
     pty: PtySessionManager,
     sessions: SessionManager,
-    paths: NodePaths,
+    paths: Paths,
     config: DaemonConfig,
     /// Node-owned settings (`node_settings` in `node.db`)
     node_settings: RwLock<NodeSettings>,
@@ -287,9 +280,9 @@ impl DaemonState {
         mut config: DaemonConfig,
         driver_factory: Option<DriverFactory>,
     ) -> Result<Self, NodeError> {
-        let paths = NodePaths::new(config.fxg_home.clone());
+        let paths = config.paths.clone();
         paths.ensure_dirs()?;
-        let db = Db::open(&paths.node_db_path(), DbRole::Node).await?;
+        let db = Db::open(&paths.db_path(), Role::Node).await?;
 
         // Node ID: resolve in the order configured value → existing DB row → new auto-assigned ID
         if config.node_id.trim().is_empty() {
@@ -301,19 +294,18 @@ impl DaemonState {
         if config.node_name.trim().is_empty() {
             config.node_name = hostname();
         }
-        config.fxg_home = paths.fxg_home().to_path_buf();
 
         let token = auth::load_or_create(&paths.auth_token_path())?;
         let bus = SessionEventBus::new(db.clone()).with_node_id(config.node_id.clone());
         // Reconcile the state of sessions lost when the previous daemon exited
         reconcile_stale_sessions(&bus).await?;
 
-        // Runtime settings are owned by `node.db`; `config.toml` only bootstraps the process.
+        // Runtime settings are owned by `node.db`; `node.toml` only bootstraps the process.
         let node_settings = db.ensure_node_settings(&config.node_name).await?;
         config.node_name = node_settings.name.clone();
         let agent_settings = db.ensure_agent_settings().await?;
         let catalog = AgentCatalog::new(AcpRegistry::new(
-            paths.fxg_home(),
+            paths.clone(),
             &agent_settings,
             db.custom_agents().await?,
         ));
@@ -417,8 +409,8 @@ impl DaemonState {
         &self.inner.sessions
     }
 
-    /// Path resolution for the data directory.
-    pub fn paths(&self) -> &NodePaths {
+    /// Role-scoped path resolution.
+    pub fn paths(&self) -> &Paths {
         &self.inner.paths
     }
 
@@ -839,7 +831,7 @@ impl NodeDaemon {
 
         // Publish the bound address so `fxg web` / `session new` can open the
         // Web UI even when the node was started with a `--listen` override.
-        let addr_file = state.paths().fxg_home().join("node.addr");
+        let addr_file = state.paths().addr_path();
         if let Err(err) = std::fs::write(&addr_file, http_addr.to_string()) {
             tracing::warn!(path = %addr_file.display(), "failed to write the node address file: {err}");
         }
@@ -988,19 +980,26 @@ mod tests {
     }
 
     #[test]
-    fn daemon_config_from_env_uses_fxg_home() {
+    fn daemon_config_from_env_resolves_role_paths() {
         let env = env_map(&[("FXG_HOME", "/tmp/fxg-test-home")]);
         let config = DaemonConfig::from_env(&|key| env.get(key).cloned());
-        assert_eq!(config.fxg_home, PathBuf::from("/tmp/fxg-test-home"));
+        assert_eq!(
+            config.paths.db_path(),
+            std::path::PathBuf::from("/tmp/fxg-test-home/data/node/node.db")
+        );
         assert_eq!(
             config.listen_addr,
-            fxg_protocol::config::NodeBootstrapConfig::DEFAULT_LISTEN_ADDR
+            fxg_protocol::config::NodeConfig::DEFAULT_LISTEN_ADDR
         );
     }
 
     async fn start_test_daemon() -> (NodeDaemon, tempfile::TempDir) {
         let dir = tempfile::tempdir().expect("tempdir");
-        let mut config = DaemonConfig::new(dir.path().to_path_buf(), "test-node", "Test Node");
+        let mut config = DaemonConfig::new(
+            Paths::portable(dir.path(), Role::Node),
+            "test-node",
+            "Test Node",
+        );
         // Tests use an ephemeral port to avoid port conflicts
         config.listen_addr = "127.0.0.1:0".to_owned();
         let daemon = NodeDaemon::start(config).await.expect("start daemon");
@@ -1013,7 +1012,11 @@ mod tests {
         let occupied_port = occupied.local_addr().expect("addr").port();
 
         let dir = tempfile::tempdir().expect("tempdir");
-        let mut config = DaemonConfig::new(dir.path().to_path_buf(), "fallback-node", "Fallback");
+        let mut config = DaemonConfig::new(
+            Paths::portable(dir.path(), Role::Node),
+            "fallback-node",
+            "Fallback",
+        );
         config.listen_addr = format!("127.0.0.1:{occupied_port}");
         config.listen_addr_explicit = false;
 
@@ -1034,7 +1037,11 @@ mod tests {
         let occupied_port = occupied.local_addr().expect("addr").port();
 
         let dir = tempfile::tempdir().expect("tempdir");
-        let mut config = DaemonConfig::new(dir.path().to_path_buf(), "explicit-node", "Explicit");
+        let mut config = DaemonConfig::new(
+            Paths::portable(dir.path(), Role::Node),
+            "explicit-node",
+            "Explicit",
+        );
         config.listen_addr = format!("127.0.0.1:{occupied_port}");
         config.listen_addr_explicit = true;
 
@@ -1062,7 +1069,11 @@ mod tests {
         assert_eq!(snapshot.revision, revision + 1);
         // The sync supervisor receives the new target immediately (no restart).
         assert!(state.hub_target().is_some());
-        assert!(dir.path().join("node_token").is_file());
+        assert!(
+            Paths::portable(dir.path(), Role::Node)
+                .node_token_path()
+                .is_file()
+        );
 
         // A stale revision is rejected and does not overwrite the token.
         let err = state
@@ -1080,7 +1091,9 @@ mod tests {
             err,
             NodeError::Db(fxg_db::DbError::RevisionMismatch)
         ));
-        let token = std::fs::read_to_string(dir.path().join("node_token")).expect("token file");
+        let token =
+            std::fs::read_to_string(Paths::portable(dir.path(), Role::Node).node_token_path())
+                .expect("token file");
         assert_eq!(token, "test-pairing-token");
 
         let cleared = state
@@ -1090,7 +1103,11 @@ mod tests {
         assert!(cleared.hub_url.is_none());
         assert!(!cleared.token_configured);
         assert!(state.hub_target().is_none());
-        assert!(!dir.path().join("node_token").exists());
+        assert!(
+            !Paths::portable(dir.path(), Role::Node)
+                .node_token_path()
+                .exists()
+        );
 
         daemon.shutdown();
         fxg_protocol::discard_with!(
@@ -1124,7 +1141,7 @@ mod tests {
     #[tokio::test]
     async fn reconcile_marks_stale_sessions_stopped() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let db = Db::open_in_memory(DbRole::Node).await.expect("db");
+        let db = Db::open_in_memory(Role::Node).await.expect("db");
         db.upsert_node(&fxg_db::NodeRecord::new(
             "test-node",
             "Test Node",
@@ -1166,14 +1183,18 @@ mod tests {
     #[tokio::test]
     async fn daemon_reuses_node_id_from_database() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let mut config = DaemonConfig::new(dir.path().to_path_buf(), "persisted-node", "Node");
+        let mut config = DaemonConfig::new(
+            Paths::portable(dir.path(), Role::Node),
+            "persisted-node",
+            "Node",
+        );
         config.listen_addr = "127.0.0.1:0".to_owned();
         let daemon = NodeDaemon::start(config).await.expect("start");
         daemon.shutdown();
         daemon.wait().await;
 
         // Restarting without a node_id still uses the same ID
-        let mut config = DaemonConfig::new(dir.path().to_path_buf(), "", "");
+        let mut config = DaemonConfig::new(Paths::portable(dir.path(), Role::Node), "", "");
         config.listen_addr = "127.0.0.1:0".to_owned();
         let daemon = NodeDaemon::start(config).await.expect("restart");
         assert_eq!(daemon.state().node_id(), "persisted-node");
@@ -1201,8 +1222,12 @@ mod tests {
     #[tokio::test]
     async fn kill_all_stops_agent_sessions() {
         let dir = tempfile::tempdir().expect("tempdir");
-        crate::testutil::write_mock_agent_config(dir.path()).await;
-        let mut config = DaemonConfig::new(dir.path().to_path_buf(), "kill-node", "Kill Node");
+        crate::testutil::write_mock_agent_config(&Paths::portable(dir.path(), Role::Node)).await;
+        let mut config = DaemonConfig::new(
+            Paths::portable(dir.path(), Role::Node),
+            "kill-node",
+            "Kill Node",
+        );
         config.listen_addr = "127.0.0.1:0".to_owned();
         let mock = crate::testutil::MockAgent::default();
         let daemon = NodeDaemon::start_with_driver_factory(config, mock.factory())

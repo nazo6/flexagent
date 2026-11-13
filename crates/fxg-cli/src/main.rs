@@ -33,6 +33,8 @@ mod spawn;
 mod tray;
 
 use commands::{HubCommands, InternalCommands, NodeCommands};
+use fxg_protocol::config::{HubConfig, LogConfig, NodeConfig};
+use fxg_protocol::paths::{Paths, Role};
 
 /// Root command of `fxg`.
 #[derive(Debug, Cli)]
@@ -82,14 +84,24 @@ async fn main() -> ExitCode {
     let cli = Fxg::parse();
 
     let env = fxg_protocol::config::process_env;
-    let fxg_home = fxg_protocol::config::fxg_home(&env);
-    let global = match fxg_protocol::config::GlobalConfig::load(&env) {
+    let role = match &cli.command {
+        Commands::Hub(_) => Role::Hub,
+        _ => Role::Node,
+    };
+    let paths = Paths::resolve(&env, role);
+    let log_config = match role {
+        Role::Node => NodeConfig::load(&env).map(|config| config.log),
+        Role::Hub => HubConfig::load(&env).map(|config| config.log),
+    };
+    let log_config = match log_config {
         Ok(config) => config,
         Err(err) => {
             // Logging is not initialized yet, so report this on stderr. Commands
             // that need the configuration fail with the same error later.
-            eprintln!("fxg: failed to load config (using defaults for logging): {err}");
-            fxg_protocol::config::GlobalConfig::default()
+            eprintln!(
+                "fxg: failed to load {role} configuration (using defaults for logging): {err}"
+            );
+            LogConfig::default()
         }
     };
 
@@ -108,7 +120,7 @@ async fn main() -> ExitCode {
         }
         _ => cli_logging(),
     };
-    logging::init_logging(&logging_options, &global, &fxg_home);
+    logging::init_logging(&logging_options, &log_config, &paths);
 
     // On macOS the tray (NSStatusItem) must be created and driven on the main
     // thread's event loop, so `fxg node start --tray` hands the main thread over

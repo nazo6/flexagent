@@ -85,12 +85,17 @@ mod tests {
     use fxg_acp::AgentSessionInfo;
     use fxg_protocol::client_api::HubWsMessage;
     use fxg_protocol::common::ErrorCode;
+    use fxg_protocol::paths::{Paths, Role};
     use http_body_util::BodyExt;
     use tower::ServiceExt;
 
     async fn test_daemon() -> (NodeDaemon, tempfile::TempDir) {
         let dir = tempfile::tempdir().expect("tempdir");
-        let mut config = DaemonConfig::new(dir.path().to_path_buf(), "http-node", "HTTP Node");
+        let mut config = DaemonConfig::new(
+            Paths::portable(dir.path(), Role::Node),
+            "http-node",
+            "HTTP Node",
+        );
         config.listen_addr = "127.0.0.1:0".to_owned();
         let daemon = NodeDaemon::start(config).await.expect("start");
         (daemon, dir)
@@ -302,7 +307,11 @@ mod tests {
     #[tokio::test]
     async fn accepts_configured_host_and_origin() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let mut config = DaemonConfig::new(dir.path().to_path_buf(), "proxy-node", "Proxy Node");
+        let mut config = DaemonConfig::new(
+            Paths::portable(dir.path(), Role::Node),
+            "proxy-node",
+            "Proxy Node",
+        );
         config.listen_addr = "127.0.0.1:0".to_owned();
         config.allowed_hosts = vec!["node.example.com".to_owned()];
         config.allowed_origins = vec!["https://node.example.com".to_owned()];
@@ -612,9 +621,12 @@ mod tests {
     /// Starts a daemon with the mock agent driver for session REST tests.
     async fn test_session_daemon() -> (NodeDaemon, crate::testutil::MockAgent, tempfile::TempDir) {
         let dir = tempfile::tempdir().expect("tempdir");
-        crate::testutil::write_mock_agent_config(dir.path()).await;
-        let mut config =
-            DaemonConfig::new(dir.path().to_path_buf(), "session-node", "Session Node");
+        crate::testutil::write_mock_agent_config(&Paths::portable(dir.path(), Role::Node)).await;
+        let mut config = DaemonConfig::new(
+            Paths::portable(dir.path(), Role::Node),
+            "session-node",
+            "Session Node",
+        );
         config.listen_addr = "127.0.0.1:0".to_owned();
         let mock = crate::testutil::MockAgent::default();
         let daemon = NodeDaemon::start_with_driver_factory(config, mock.factory())

@@ -4,9 +4,9 @@
 //! §2.2/§2.3.
 //!
 //! - Worktrees created by `fxg` are aggregated under
-//!   `~/.flexagent/worktrees/<project>/<branch>` by default so that the parent folder
+//!   `<data>/node/worktrees/<project>/<branch>` by default so that the parent folder
 //!   is not cluttered (`worktree_dir_template` can change this).
-//! - The destination is fixed to `~/.flexagent/worktrees/{project}/{branch}`.
+//! - The destination is fixed to `<data>/node/worktrees/{project}/{branch}`.
 //! - Detection uses `git worktree list --porcelain` and lists every worktree including
 //!   the main repository.
 
@@ -100,8 +100,8 @@ pub fn parse_worktree_list(output: &str) -> Vec<WorktreeEntry> {
 /// Input used to resolve placeholders in the worktree location template.
 #[derive(Debug, Clone)]
 pub struct WorktreePathContext {
-    /// `~/.flexagent`
-    pub fxg_home: PathBuf,
+    /// `<data>/node/worktrees`
+    pub worktrees_dir: PathBuf,
     /// Logical project ID (`github.com/nazo6/flexagent`, etc.)
     pub project_id: String,
     /// Path of the main repository
@@ -135,8 +135,8 @@ pub fn slugify_branch(branch: &str) -> String {
 
 /// Resolves `worktree_dir_template`.
 ///
-/// Available placeholders: `{fxg_home}` / `{project}` / `{repo}` / `{repo_parent}` /
-/// `{branch}`.
+/// Available placeholders: `{worktrees_dir}` / `{project}` / `{repo}` /
+/// `{repo_parent}` / `{branch}`.
 pub fn resolve_worktree_dir(template: &str, ctx: &WorktreePathContext) -> PathBuf {
     let repo_name = ctx
         .repo_path
@@ -150,7 +150,7 @@ pub fn resolve_worktree_dir(template: &str, ctx: &WorktreePathContext) -> PathBu
         .unwrap_or_default();
 
     let resolved = template
-        .replace("{fxg_home}", &ctx.fxg_home.to_string_lossy())
+        .replace("{worktrees_dir}", &ctx.worktrees_dir.to_string_lossy())
         .replace("{project}", &slugify_project(&ctx.project_id))
         .replace("{repo_parent}", &repo_parent)
         .replace("{repo}", &repo_name)
@@ -169,8 +169,8 @@ pub struct WorktreeAddRequest<'a> {
     pub branch: &'a str,
     /// Base branch (current HEAD if omitted)
     pub base_branch: Option<&'a str>,
-    /// `~/.flexagent`
-    pub fxg_home: &'a Path,
+    /// `<data>/node/worktrees`
+    pub worktrees_dir: &'a Path,
 }
 
 /// Result of creating a worktree.
@@ -206,11 +206,11 @@ pub async fn ensure_worktree(
         });
     }
 
-    // Fixed destination: ~/.flexagent/worktrees/{project}/{branch}
+    // Fixed destination: <data>/node/worktrees/{project}/{branch}
     let path = resolve_worktree_dir(
-        "{fxg_home}/worktrees/{project}/{branch}",
+        "{worktrees_dir}/{project}/{branch}",
         &WorktreePathContext {
-            fxg_home: request.fxg_home.to_path_buf(),
+            worktrees_dir: request.worktrees_dir.to_path_buf(),
             project_id: request.project_id.to_owned(),
             repo_path: request.repo.to_path_buf(),
             branch: request.branch.to_owned(),
@@ -301,7 +301,7 @@ mod tests {
 
     fn add_request<'a>(
         repo: &'a Path,
-        fxg_home: &'a Path,
+        worktrees_dir: &'a Path,
         branch: &'a str,
     ) -> WorktreeAddRequest<'a> {
         WorktreeAddRequest {
@@ -309,7 +309,7 @@ mod tests {
             project_id: "github.com/nazo6/flexagent",
             branch,
             base_branch: None,
-            fxg_home,
+            worktrees_dir,
         }
     }
 
@@ -356,13 +356,13 @@ detached
     #[test]
     fn resolves_template_placeholders() {
         let ctx = WorktreePathContext {
-            fxg_home: PathBuf::from("/home/nazo/.flexagent"),
+            worktrees_dir: PathBuf::from("/home/nazo/.flexagent/worktrees"),
             project_id: "github.com/nazo6/flexagent".to_owned(),
             repo_path: PathBuf::from("/home/nazo/src/flexagent"),
             branch: "feat/auth".to_owned(),
         };
         assert_eq!(
-            resolve_worktree_dir("{fxg_home}/worktrees/{project}/{branch}", &ctx),
+            resolve_worktree_dir("{worktrees_dir}/{project}/{branch}", &ctx),
             PathBuf::from("/home/nazo/.flexagent/worktrees/github.com-nazo6-flexagent/feat-auth")
         );
         assert_eq!(
@@ -377,18 +377,18 @@ detached
     async fn creates_and_removes_worktree_at_fixed_path() {
         let dir = tempfile::tempdir().expect("tempdir");
         let repo = dir.path().join("repo");
-        let home = dir.path().join("fxg-home");
+        let worktrees = dir.path().join("worktrees");
         std::fs::create_dir_all(&repo).expect("mkdir repo");
         testutil::init_test_repo(&repo).await;
 
-        let request = add_request(&repo, &home, "feat/auth");
+        let request = add_request(&repo, &worktrees, "feat/auth");
         let outcome = ensure_worktree(&request).await.expect("ensure");
 
         assert!(outcome.created);
         assert_eq!(
             outcome.path,
             fxg_pty::canonicalize(
-                home.join("worktrees")
+                worktrees
                     .join("github.com-nazo6-flexagent")
                     .join("feat-auth")
             )
@@ -427,7 +427,7 @@ detached
     async fn base_branch_is_used_for_new_branch() {
         let dir = tempfile::tempdir().expect("tempdir");
         let repo = dir.path().join("repo");
-        let home = dir.path().join("fxg-home");
+        let worktrees = dir.path().join("worktrees");
         std::fs::create_dir_all(&repo).expect("mkdir");
         testutil::init_test_repo(&repo).await;
         // Create a base branch derived from main
@@ -448,7 +448,7 @@ detached
             project_id: "github.com/nazo6/flexagent",
             branch: "feat/from-develop",
             base_branch: Some("develop"),
-            fxg_home: &home,
+            worktrees_dir: &worktrees,
         };
         let outcome = ensure_worktree(&request).await.expect("ensure");
         assert!(

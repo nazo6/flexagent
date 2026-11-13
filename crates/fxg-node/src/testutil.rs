@@ -52,13 +52,13 @@ pub(crate) async fn init_test_repo_with_remote(dir: &Path, remote_url: &str) {
         .expect("git remote add");
 }
 
-/// Registers a test custom agent (`mock`) in `node.db` under `fxg_home`.
+/// Registers a test custom agent (`mock`) in `node.db` under the role paths.
 ///
 /// `EnsureSession` through the daemon resolves launch specs from the DB-owned
 /// catalog, so even mock driver tests need an agent definition.
-pub(crate) async fn write_mock_agent_config(fxg_home: &Path) {
-    std::fs::create_dir_all(fxg_home).expect("mkdir home");
-    let db = fxg_db::Db::open(&fxg_db::node_db_path(fxg_home), fxg_db::DbRole::Node)
+pub(crate) async fn write_mock_agent_config(paths: &fxg_protocol::paths::Paths) {
+    paths.ensure_dirs().expect("create role dirs");
+    let db = fxg_db::Db::open(&paths.db_path(), fxg_protocol::paths::Role::Node)
         .await
         .expect("open node db");
     db.upsert_custom_agent(

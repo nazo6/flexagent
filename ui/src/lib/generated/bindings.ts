@@ -879,10 +879,10 @@ export type HookLogEntry = {
 	output: string,
 };
 
-/**  Read-only bootstrap view of the hub (`config.toml` / env / CLI). */
+/**  Read-only bootstrap view of the hub (`hub.toml` / env / CLI). */
 export type HubBootstrapView = {
-	/**  Data directory (`FXG_HOME`) */
-	fxg_home: SourcedValue<string>,
+	/**  Hub data directory (`<data>/hub`) */
+	data_dir: SourcedValue<string>,
 	/**  HTTP/WS bind address */
 	listen_addr: SourcedValue<string>,
 	/**  Extra allowed `Host` values (DNS rebinding defense) */
@@ -1098,7 +1098,7 @@ export type IssueNodeTokenRequest = {
 export type IssueNodeTokenResponse = {
 	/**  Target node ID */
 	node_id: NodeId,
-	/**  The issued plaintext token (stored in `~/.flexagent/node_token`) */
+	/**  The issued plaintext token (stored in `<data>/node/node_token`) */
 	token: string,
 };
 
@@ -1138,10 +1138,10 @@ export type ModeInfo = {
 	description: string | null,
 };
 
-/**  Read-only bootstrap view of a local node (`config.toml` / env / CLI). */
+/**  Read-only bootstrap view of a local node (`node.toml` / env / CLI). */
 export type NodeBootstrapView = {
-	/**  Data directory (`FXG_HOME`) */
-	fxg_home: SourcedValue<string>,
+	/**  Node data directory (`<data>/node`) */
+	data_dir: SourcedValue<string>,
 	/**  Node ID */
 	node_id: SourcedValue<string>,
 	/**  Local HTTP/WS bind address */
@@ -1268,7 +1268,7 @@ export type NodesResponse = {
  *  Node ⇔ hub pairing state (`node.db` + the token file).
  *
  *  The pairing is owned by the node: `hub_url` is stored in `node.db` and the
- *  token is a `0600` file (`~/.flexagent/node_token`). The client API never
+ *  token is a `0600` file (`<data>/node/node_token`). The client API never
  *  returns the token, only whether it is configured.
  */
 export type PairingSettings = {
@@ -1851,7 +1851,7 @@ export type SearchResponse = {
 	hits: SearchHit[],
 };
 
-/**  ID of a secret stored in `~/.flexagent/secrets/{node,hub}/<id>`. */
+/**  ID of a secret stored in `<data>/{node,hub}/secrets/<id>`. */
 export type SecretId = string;
 
 /**  Metadata of a stored user secret (never the value itself). */
@@ -2142,7 +2142,7 @@ export type SourcedValue<T> = {
 	value: T,
 	/**  Which layer supplied the value */
 	source: string,
-	/**  Environment variable name / config.toml key / CLI flag (when known) */
+	/**  Environment variable name / configuration key / CLI flag (when known) */
 	source_detail: string | null,
 };
 
@@ -2222,8 +2222,8 @@ export type SupportBundle = {
 
 /**  Redacted bootstrap configuration included in a support bundle. */
 export type SupportBundleConfig = {
-	/**  `FXG_HOME` after replacing the user's home directory with `~` */
-	fxg_home: string,
+	/**  Data directory after replacing the user's home directory with `~` */
+	data_dir: string,
 	/**  Log level */
 	log_level: string | null,
 	/**  Log file destination */

@@ -18,53 +18,55 @@ impl HubState {
     /// Builds the typed settings snapshot exposed by `GET /api/v1/settings/hub`.
     pub async fn hub_settings_snapshot(&self) -> Result<HubSettingsSnapshot, HubError> {
         let settings = self.db().ensure_hub_settings().await?;
-        let config = match fxg_protocol::config::GlobalConfig::load_from_path(
-            &self
-                .inner
-                .options
-                .fxg_home
-                .join(fxg_protocol::config::CONFIG_FILE_NAME),
+        let config = match fxg_protocol::config::HubConfig::load_from_path(
+            &self.inner.options.paths.config_path(),
+            &fxg_protocol::config::process_env,
         ) {
             Ok(config) => config,
             Err(err) => {
-                tracing::warn!("failed to read config.toml for the settings view: {err}");
-                fxg_protocol::config::GlobalConfig::default()
+                tracing::warn!("failed to read hub.toml for the settings view: {err}");
+                fxg_protocol::config::HubConfig::default()
             }
         };
         let env = fxg_protocol::config::process_env;
-        let fxg_home_source = if env(fxg_protocol::config::ENV_FXG_HOME).is_some() {
+        let data_dir_source = if env(fxg_protocol::paths::ENV_FXG_HOME).is_some() {
             ConfigSource::Env
         } else {
             ConfigSource::Default
         };
-        let fxg_home = SourcedValue::new(
-            self.inner.options.fxg_home.to_string_lossy().into_owned(),
-            fxg_home_source.clone(),
-            (fxg_home_source == ConfigSource::Env)
-                .then(|| fxg_protocol::config::ENV_FXG_HOME.to_owned()),
+        let data_dir = SourcedValue::new(
+            self.inner
+                .options
+                .paths
+                .data_dir()
+                .to_string_lossy()
+                .into_owned(),
+            data_dir_source.clone(),
+            (data_dir_source == ConfigSource::Env)
+                .then(|| fxg_protocol::paths::ENV_FXG_HOME.to_owned()),
         );
         let listen_addr = sourced_string(
             &env,
             self.inner.options.listen_addr.clone(),
             fxg_protocol::config::env_keys::HUB_LISTEN_ADDR,
-            config.hub.listen_addr.clone(),
-            "hub.listen_addr",
-            Some(fxg_protocol::config::HubBootstrapConfig::DEFAULT_LISTEN_ADDR),
+            config.listen_addr.clone(),
+            "listen_addr",
+            Some(fxg_protocol::config::HubConfig::DEFAULT_LISTEN_ADDR),
             Some("--listen"),
         );
         let allowed_hosts = sourced_list(
             &env,
             self.inner.options.allowed_hosts.clone(),
             fxg_protocol::config::env_keys::HUB_ALLOWED_HOSTS,
-            &config.hub.allowed_hosts,
-            "hub.allowed_hosts",
+            &config.allowed_hosts,
+            "allowed_hosts",
         );
         let allowed_origins = sourced_list(
             &env,
             self.inner.options.allowed_origins.clone(),
             fxg_protocol::config::env_keys::HUB_ALLOWED_ORIGINS,
-            &config.hub.allowed_origins,
-            "hub.allowed_origins",
+            &config.allowed_origins,
+            "allowed_origins",
         );
         let log = &self.inner.options.log;
         let log_level = sourced_string(
@@ -104,7 +106,7 @@ impl HubState {
         );
         Ok(HubSettingsSnapshot {
             bootstrap: HubBootstrapView {
-                fxg_home,
+                data_dir,
                 listen_addr,
                 allowed_hosts,
                 allowed_origins,
@@ -204,7 +206,7 @@ impl HubState {
     /// Lists hub-owned secret metadata.
     pub async fn server_secrets(&self) -> Result<SecretsResponse, HubError> {
         Ok(SecretsResponse {
-            secrets: fxg_db::secrets::list_secrets(self.db(), &self.inner.options.fxg_home).await?,
+            secrets: fxg_db::secrets::list_secrets(self.db(), &self.inner.options.paths).await?,
         })
     }
 
@@ -217,7 +219,7 @@ impl HubState {
         Ok(SecretsResponse {
             secrets: fxg_db::secrets::upsert_secret(
                 self.db(),
-                &self.inner.options.fxg_home,
+                &self.inner.options.paths,
                 id,
                 request,
             )
@@ -228,7 +230,7 @@ impl HubState {
     /// Deletes a hub-owned secret.
     pub async fn delete_server_secret(&self, id: &SecretId) -> Result<SecretsResponse, HubError> {
         Ok(SecretsResponse {
-            secrets: fxg_db::secrets::delete_secret(self.db(), &self.inner.options.fxg_home, id)
+            secrets: fxg_db::secrets::delete_secret(self.db(), &self.inner.options.paths, id)
                 .await?,
         })
     }

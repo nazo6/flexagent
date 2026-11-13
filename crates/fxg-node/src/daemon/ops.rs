@@ -643,12 +643,13 @@ impl DaemonState {
             )));
         }
 
+        let worktrees_dir = self.paths().worktrees_dir();
         let outcome = worktree::ensure_worktree(&worktree::WorktreeAddRequest {
             repo: &repo_root,
             project_id: &resolved.project_id,
             branch,
             base_branch: base_branch.as_deref(),
-            fxg_home: self.paths().fxg_home(),
+            worktrees_dir: &worktrees_dir,
         })
         .await?;
 
@@ -795,7 +796,7 @@ impl DaemonState {
 // ----------------------------------------------------------------------
 
 use fxg_protocol::SecretId;
-use fxg_protocol::config::{GlobalConfig, process_env};
+use fxg_protocol::config::{NodeConfig, process_env};
 use fxg_protocol::settings::{
     ConfigSource, NodeBootstrapView, NodeSettingsSnapshot, SecretSummary, SourcedValue,
     UpsertSecretRequest, sourced_list, sourced_option, sourced_string,
@@ -805,32 +806,32 @@ impl DaemonState {
     /// Builds the typed settings snapshot exposed by
     /// `GET /api/v1/nodes/{node_id}/settings`.
     pub async fn node_settings_snapshot(&self) -> Result<NodeSettingsSnapshot, NodeError> {
-        let config = match GlobalConfig::load_from_path(&self.paths().config_path()) {
+        let config = match NodeConfig::load_from_path(&self.paths().config_path(), &process_env) {
             Ok(config) => config,
             Err(err) => {
-                tracing::warn!("failed to read config.toml for the settings view: {err}");
-                GlobalConfig::default()
+                tracing::warn!("failed to read node.toml for the settings view: {err}");
+                NodeConfig::default()
             }
         };
         let env = process_env;
-        let fxg_home_source = if env(fxg_protocol::config::ENV_FXG_HOME).is_some() {
+        let data_dir_source = if env(fxg_protocol::paths::ENV_FXG_HOME).is_some() {
             ConfigSource::Env
         } else {
             ConfigSource::Default
         };
-        let fxg_home = SourcedValue::new(
-            self.paths().fxg_home().to_string_lossy().into_owned(),
-            fxg_home_source.clone(),
-            (fxg_home_source == ConfigSource::Env)
-                .then(|| fxg_protocol::config::ENV_FXG_HOME.to_owned()),
+        let data_dir = SourcedValue::new(
+            self.paths().data_dir().to_string_lossy().into_owned(),
+            data_dir_source.clone(),
+            (data_dir_source == ConfigSource::Env)
+                .then(|| fxg_protocol::paths::ENV_FXG_HOME.to_owned()),
         );
 
         let node_id = sourced_string(
             &env,
             self.config().node_id.clone(),
             fxg_protocol::config::env_keys::NODE_ID,
-            config.node.node_id.clone(),
-            "node.node_id",
+            config.node_id.clone(),
+            "node_id",
             None,
             None,
         );
@@ -838,24 +839,24 @@ impl DaemonState {
             &env,
             self.config().listen_addr.clone(),
             fxg_protocol::config::env_keys::NODE_LISTEN_ADDR,
-            config.node.listen_addr.clone(),
-            "node.listen_addr",
-            Some(fxg_protocol::config::NodeBootstrapConfig::DEFAULT_LISTEN_ADDR),
+            config.listen_addr.clone(),
+            "listen_addr",
+            Some(NodeConfig::DEFAULT_LISTEN_ADDR),
             Some("--listen"),
         );
         let allowed_hosts = sourced_list(
             &env,
             self.config().allowed_hosts.clone(),
             fxg_protocol::config::env_keys::NODE_ALLOWED_HOSTS,
-            &config.node.allowed_hosts,
-            "node.allowed_hosts",
+            &config.allowed_hosts,
+            "allowed_hosts",
         );
         let allowed_origins = sourced_list(
             &env,
             self.config().allowed_origins.clone(),
             fxg_protocol::config::env_keys::NODE_ALLOWED_ORIGINS,
-            &config.node.allowed_origins,
-            "node.allowed_origins",
+            &config.allowed_origins,
+            "allowed_origins",
         );
         let log = &self.config().log;
         let log_level = sourced_string(
@@ -896,7 +897,7 @@ impl DaemonState {
 
         Ok(NodeSettingsSnapshot {
             bootstrap: NodeBootstrapView {
-                fxg_home,
+                data_dir,
                 node_id,
                 listen_addr,
                 allowed_hosts,
@@ -914,7 +915,7 @@ impl DaemonState {
 
     /// Lists secret metadata with `used_by` and `configured` filled in.
     pub async fn node_secrets(&self) -> Result<Vec<SecretSummary>, NodeError> {
-        Ok(fxg_db::secrets::list_secrets(self.db(), self.paths().fxg_home()).await?)
+        Ok(fxg_db::secrets::list_secrets(self.db(), self.paths()).await?)
     }
 
     /// Stores a node-owned secret (write-only).
@@ -923,11 +924,11 @@ impl DaemonState {
         id: &SecretId,
         request: &UpsertSecretRequest,
     ) -> Result<Vec<SecretSummary>, NodeError> {
-        Ok(fxg_db::secrets::upsert_secret(self.db(), self.paths().fxg_home(), id, request).await?)
+        Ok(fxg_db::secrets::upsert_secret(self.db(), self.paths(), id, request).await?)
     }
 
     /// Deletes a node-owned secret after checking references.
     pub async fn delete_node_secret(&self, id: &SecretId) -> Result<Vec<SecretSummary>, NodeError> {
-        Ok(fxg_db::secrets::delete_secret(self.db(), self.paths().fxg_home(), id).await?)
+        Ok(fxg_db::secrets::delete_secret(self.db(), self.paths(), id).await?)
     }
 }

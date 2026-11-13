@@ -37,13 +37,16 @@
     `agent_settings` / `custom_agents` / `project_path_links` は `node.db`、
     `hub_settings` / `provisioners` は `hub.db`)。ノード ⇔ ハブ間で設定を
     同期・マージしない。
-  - `config.toml` は待受アドレス・接続先・ログ・セキュリティ境界のみ。
+  - `node.toml` / `hub.toml` は待受アドレス・許可リスト・ログ・セキュリティ境界のみ。
     `.fxg.toml` と旧 JSON 設定ファイルは廃止。
-  - 秘密の値は `~/.flexagent/secrets/{node,hub}/<id>` (`0600`) に置き、
+  - 設定・データ・実行時状態・ログ・キャッシュは OS 標準ルート
+    (`dirs`) 配下に置き、`node` / `hub` のロール別に分ける
+    (詳細は [`docs/05-cli-and-pwa-ui.md`](docs/05-cli-and-pwa-ui.md) §2.1)。
+  - 秘密の値は `<data>/{node,hub}/secrets/<id>` (`0600`) に置き、
     DB にはメタデータだけを保存する。API は書き込み専用で値を返さない。
   - プロジェクト同一性は `project_path_links` → Git リモート → `local:` の順で
     解決し、表示名は自動導出する。Worktree の作成先は
-    `~/.flexagent/worktrees/{project}/{branch}` に固定。
+    `<data>/node/worktrees/{project}/{branch}` に固定。
 - **セキュリティ原則**:
   - `fxg node start` のローカルHTTP/WSは `127.0.0.1:7860` のみにバインドする。
   - 全HTTP/WSエンドポイントでトークン認証 (`Bearer` または
@@ -94,7 +97,7 @@
   固有実装
 - [`docs/05-cli-and-pwa-ui.md`](docs/05-cli-and-pwa-ui.md): CLI の設計原則
   （コマンドの正は `fxg --help` / `__usage_spec__`）、設定の所有者
-  (`config.toml` は起動設定のみ、実行時設定は `node.db` / `hub.db`)、
+  (`node.toml` / `hub.toml` は起動設定のみ、実行時設定は `node.db` / `hub.db`)、
   秘密ストア、PWA / Web Push 設計
 - [`docs/06-type-safety.md`](docs/06-type-safety.md): 型安全性ガイド
   (open enum / `RawJson` / 文字列判定の禁止 / clippy による境界検査)

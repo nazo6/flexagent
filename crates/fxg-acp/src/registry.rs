@@ -6,7 +6,7 @@
 //!
 //! - Caches the official index (default
 //!   `https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json`)
-//!   to `~/.flexagent/cache/registry.json`
+//!   to `<cache>/node/registry.json`
 //!   (default TTL 24 hours; the Web UI catalog refresh forces a refresh).
 //! - Launch resolution is local-first: custom agent →
 //!   built-in preset → registry import.
@@ -22,13 +22,11 @@ use std::time::Duration;
 
 use anyhow::{Context, anyhow};
 use fxg_protocol::client_api::{AgentBackendKind, RegistryAgentSummary, RegistryDistributionKind};
+use fxg_protocol::paths::{Paths, REGISTRY_CACHE_FILE_NAME};
 use fxg_protocol::settings::{AgentSettings, CustomAgentConfig, CustomAgentOrigin};
 use serde::{Deserialize, Serialize};
 
 use crate::driver::{AgentLaunchSpec, DriverKind};
-
-/// Cache file name (`~/.flexagent/cache/registry.json`).
-pub const REGISTRY_CACHE_FILE: &str = "registry.json";
 
 /// In-memory catalog state owned by `node.db`.
 #[derive(Debug, Clone, Default)]
@@ -216,15 +214,15 @@ impl AgentListEntry {
 /// ACP Registry management (fetch, cache, import).
 #[derive(Debug, Clone)]
 pub struct AcpRegistry {
-    home: PathBuf,
+    paths: Paths,
     catalog: Arc<RwLock<AgentCatalogState>>,
     http: reqwest::Client,
 }
 
 impl AcpRegistry {
-    /// Creates from `~/.flexagent` and the persisted agent catalog.
+    /// Creates from the node's role paths and the persisted agent catalog.
     pub fn new(
-        home: impl Into<PathBuf>,
+        paths: Paths,
         settings: &AgentSettings,
         custom: BTreeMap<String, CustomAgentConfig>,
     ) -> Self {
@@ -234,7 +232,7 @@ impl AcpRegistry {
             .build()
             .unwrap_or_else(|_| reqwest::Client::new());
         Self {
-            home: home.into(),
+            paths,
             catalog: Arc::new(RwLock::new(AgentCatalogState::from_settings(
                 settings, custom,
             ))),
@@ -256,9 +254,9 @@ impl AcpRegistry {
         self.catalog.read().expect("agent catalog lock poisoned")
     }
 
-    /// Cache file path (`~/.flexagent/cache/registry.json`).
+    /// Cache file path (`<cache>/node/registry.json`).
     pub fn cache_path(&self) -> PathBuf {
-        self.home.join("cache").join(REGISTRY_CACHE_FILE)
+        self.paths.cache_dir().join(REGISTRY_CACHE_FILE_NAME)
     }
 
     /// Returns custom agent definitions from the DB catalog.
@@ -585,14 +583,10 @@ impl AcpRegistry {
             .iter()
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect();
-        // Resolve `env_secrets` from ~/.flexagent/secrets/node/<id>. A missing
+        // Resolve `env_secrets` from `<data>/node/secrets/<id>`. A missing
         // value aborts the launch (never start with an empty token).
         for (key, secret_id) in &custom.env_secrets {
-            let path = self
-                .home
-                .join("secrets")
-                .join("node")
-                .join(secret_id.as_str());
+            let path = self.paths.secrets_dir().join(secret_id.as_str());
             let value = std::fs::read_to_string(&path).map_err(|err| {
                 anyhow!(
                     "secret {} referenced by {key} is missing ({}): {err}",
@@ -685,6 +679,8 @@ fn clean_cmd(cmd: &str) -> PathBuf {
 mod tests {
     use std::path::Path;
 
+    use fxg_protocol::paths::Role;
+
     use super::*;
 
     const FIXTURE: &str = r#"
@@ -747,7 +743,11 @@ mod tests {
     }
 
     fn registry(dir: &Path) -> AcpRegistry {
-        AcpRegistry::new(dir, &settings(), custom_agents())
+        AcpRegistry::new(
+            Paths::portable(dir, Role::Node),
+            &settings(),
+            custom_agents(),
+        )
     }
 
     #[test]
@@ -789,7 +789,11 @@ mod tests {
         settings
             .aliases
             .insert("fast".to_owned(), "my-agent".to_owned());
-        let registry = AcpRegistry::new(dir.path(), &settings, custom_agents());
+        let registry = AcpRegistry::new(
+            Paths::portable(dir.path(), Role::Node),
+            &settings,
+            custom_agents(),
+        );
         // User-defined alias
         assert_eq!(registry.resolve_alias("fast"), "my-agent");
         // Removed built-in aliases pass through unchanged
@@ -888,8 +892,9 @@ mod tests {
     #[tokio::test]
     async fn custom_agent_env_secrets_are_resolved_from_the_store() {
         let dir = tempfile::tempdir().expect("tempdir");
-        std::fs::create_dir_all(dir.path().join("secrets/node")).expect("mkdir");
-        std::fs::write(dir.path().join("secrets/node/key-1"), "secret-value\n").expect("write");
+        let paths = Paths::portable(dir.path(), Role::Node);
+        std::fs::create_dir_all(paths.secrets_dir()).expect("mkdir");
+        std::fs::write(paths.secrets_dir().join("key-1"), "secret-value\n").expect("write");
         let custom = BTreeMap::from([
             (
                 "secret-agent".to_owned(),
@@ -918,7 +923,7 @@ mod tests {
                 },
             ),
         ]);
-        let registry = AcpRegistry::new(dir.path(), &settings(), custom);
+        let registry = AcpRegistry::new(paths, &settings(), custom);
         let spec = registry
             .custom_launch_spec("secret-agent", &[])
             .expect("spec")

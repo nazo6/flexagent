@@ -10,7 +10,7 @@
 
 use fxg_db::audit::actions;
 use fxg_db::{
-    AuditLogRecord, Db, DbError, DbRole, NodeRecord, ProjectBindingRecord, ProjectRecord,
+    AuditLogRecord, Db, DbError, NodeRecord, ProjectBindingRecord, ProjectRecord, Role,
     SessionFilter,
 };
 use fxg_protocol::common::{
@@ -34,12 +34,12 @@ struct Fixture {
 }
 
 impl Fixture {
-    async fn new(role: DbRole) -> Self {
+    async fn new(role: Role) -> Self {
         let session_id = uuid_v7();
         Self::with_session_id(role, session_id).await
     }
 
-    async fn with_session_id(role: DbRole, session_id: String) -> Self {
+    async fn with_session_id(role: Role, session_id: String) -> Self {
         let db = Db::open_in_memory(role).await.expect("open in-memory db");
         db.upsert_node(
             &NodeRecord::new(NODE_ID, "Test Node", "linux", "aarch64", "0.1.0")
@@ -188,7 +188,7 @@ async fn available_modes(db: &Db, session_id: &str) -> Vec<ModeInfo> {
 
 #[tokio::test]
 async fn migrations_create_single_schema_with_fts_and_triggers() {
-    let db = Db::open_in_memory(DbRole::Node).await.expect("migrate");
+    let db = Db::open_in_memory(Role::Node).await.expect("migrate");
 
     let tables: Vec<String> = sqlx::query_scalar(
         r#"SELECT name FROM sqlite_master WHERE type IN ('table','virtual table') ORDER BY name"#,
@@ -235,7 +235,7 @@ async fn migrations_create_single_schema_with_fts_and_triggers() {
 
 #[tokio::test]
 async fn event_application_is_idempotent() {
-    let mut fixture = Fixture::new(DbRole::Node).await;
+    let mut fixture = Fixture::new(Role::Node).await;
     let created = fixture.session_created();
 
     let first = fixture
@@ -278,7 +278,7 @@ async fn event_application_is_idempotent() {
 
 #[tokio::test]
 async fn duplicate_session_created_does_not_revert_title() {
-    let mut fixture = Fixture::new(DbRole::Node).await;
+    let mut fixture = Fixture::new(Role::Node).await;
     let created = fixture.session_created();
     let title_changed = fixture.event(UnifiedEventPayload::SessionTitleChanged {
         title: "Fix authentication error".to_owned(),
@@ -312,7 +312,7 @@ async fn duplicate_session_created_does_not_revert_title() {
 
 #[tokio::test]
 async fn event_application_updates_session_projections() {
-    let mut fixture = Fixture::new(DbRole::Node).await;
+    let mut fixture = Fixture::new(Role::Node).await;
     fixture.seed_typical_stream().await;
 
     let summary = fixture
@@ -371,7 +371,7 @@ async fn event_application_updates_session_projections() {
 
 #[tokio::test]
 async fn capabilities_partial_update_keeps_available_modes_projection() {
-    let mut fixture = Fixture::new(DbRole::Node).await;
+    let mut fixture = Fixture::new(Role::Node).await;
     let created = fixture.session_created();
     let modes = fixture.event(UnifiedEventPayload::CapabilitiesUpdated {
         current_mode: Some("plan".to_owned()),
@@ -415,7 +415,7 @@ async fn capabilities_partial_update_keeps_available_modes_projection() {
 
 #[tokio::test]
 async fn fork_scope_projection_tracks_latest_and_rebuilds() {
-    let mut fixture = Fixture::new(DbRole::Node).await;
+    let mut fixture = Fixture::new(Role::Node).await;
     let created = fixture.session_created();
     let caps = fixture.event(UnifiedEventPayload::CapabilitiesUpdated {
         current_mode: None,
@@ -450,7 +450,7 @@ async fn fork_scope_projection_tracks_latest_and_rebuilds() {
 
 #[tokio::test]
 async fn usage_projection_tracks_latest_and_rebuilds() {
-    let mut fixture = Fixture::new(DbRole::Node).await;
+    let mut fixture = Fixture::new(Role::Node).await;
     let created = fixture.session_created();
     let first = fixture.event(UnifiedEventPayload::UsageUpdated {
         used_tokens: 1_000,
@@ -500,7 +500,7 @@ async fn usage_projection_tracks_latest_and_rebuilds() {
 
 #[tokio::test]
 async fn permission_rejection_is_projected_from_option_kind() {
-    let mut fixture = Fixture::new(DbRole::Node).await;
+    let mut fixture = Fixture::new(Role::Node).await;
     let created = fixture.session_created();
     let request = fixture.event(UnifiedEventPayload::PermissionRequest {
         request_id: "req-reject".to_owned(),
@@ -543,7 +543,7 @@ async fn permission_rejection_is_projected_from_option_kind() {
 
 #[tokio::test]
 async fn elicitation_projection_tracks_pending_and_resolved() {
-    let mut fixture = Fixture::new(DbRole::Node).await;
+    let mut fixture = Fixture::new(Role::Node).await;
     let created = fixture.session_created();
     let request = fixture.event(UnifiedEventPayload::ElicitationRequest {
         elicitation_id: "elic-1".to_owned(),
@@ -625,7 +625,7 @@ async fn elicitation_projection_tracks_pending_and_resolved() {
 
 #[tokio::test]
 async fn rebuild_projections_matches_incremental_apply() {
-    let mut fixture = Fixture::new(DbRole::Hub).await;
+    let mut fixture = Fixture::new(Role::Hub).await;
     fixture.seed_typical_stream().await;
     // Add a second session (equivalent to a fork) to verify rebuilding multiple sessions
     let parent_session_id = fixture.session_id.clone();
@@ -718,7 +718,7 @@ async fn rebuild_projections_matches_incremental_apply() {
 
 #[tokio::test]
 async fn outbox_watermark_extraction_and_ack() {
-    let mut fixture = Fixture::new(DbRole::Node).await;
+    let mut fixture = Fixture::new(Role::Node).await;
     let events = fixture.seed_typical_stream().await;
 
     // Until ACKed, all events are in the outbox (batched per session)
@@ -796,7 +796,7 @@ async fn outbox_watermark_extraction_and_ack() {
 
 #[tokio::test]
 async fn fts_search_matches_text_and_excludes_binary_events() {
-    let mut fixture = Fixture::new(DbRole::Node).await;
+    let mut fixture = Fixture::new(Role::Node).await;
     let created = fixture.session_created();
     let user = fixture.event(UnifiedEventPayload::UserMessage {
         text: "認証エラーのデバッグをお願いします".to_owned(), // allow-japanese: CJK full-text search test
@@ -882,7 +882,7 @@ async fn fts_search_matches_text_and_excludes_binary_events() {
 
 #[tokio::test]
 async fn fts_index_stays_in_sync_on_regenerate_and_delete() {
-    let mut fixture = Fixture::new(DbRole::Node).await;
+    let mut fixture = Fixture::new(Role::Node).await;
     let created = fixture.session_created();
     let message = fixture.event(UnifiedEventPayload::AgentMessage {
         message_id: "m-1".to_owned(),
@@ -947,7 +947,7 @@ async fn fts_index_stays_in_sync_on_regenerate_and_delete() {
 
 #[tokio::test]
 async fn session_events_after_paginates_by_cursor() {
-    let mut fixture = Fixture::new(DbRole::Node).await;
+    let mut fixture = Fixture::new(Role::Node).await;
     fixture.seed_typical_stream().await;
 
     let page1 = fixture
@@ -994,8 +994,8 @@ async fn session_events_after_paginates_by_cursor() {
 #[tokio::test]
 async fn node_and_hub_return_identical_client_responses() {
     let session_id = uuid_v7();
-    let mut node_fixture = Fixture::with_session_id(DbRole::Node, session_id.clone()).await;
-    let hub_fixture = Fixture::with_session_id(DbRole::Hub, session_id.clone()).await;
+    let mut node_fixture = Fixture::with_session_id(Role::Node, session_id.clone()).await;
+    let hub_fixture = Fixture::with_session_id(Role::Hub, session_id.clone()).await;
 
     let events = node_fixture.seed_typical_stream().await;
     hub_fixture
@@ -1115,7 +1115,7 @@ async fn node_and_hub_return_identical_client_responses() {
 
 #[tokio::test]
 async fn session_filters_and_plan_projection() {
-    let mut fixture = Fixture::new(DbRole::Node).await;
+    let mut fixture = Fixture::new(Role::Node).await;
     let created = fixture.session_created();
     let plan = fixture.event(UnifiedEventPayload::PlanUpdate {
         entries: vec![PlanEntry {
@@ -1189,7 +1189,7 @@ async fn session_filters_and_plan_projection() {
 
 #[tokio::test]
 async fn registration_upserts_and_audit_logs() {
-    let fixture = Fixture::new(DbRole::Hub).await;
+    let fixture = Fixture::new(Role::Hub).await;
 
     // Update node information
     fixture
@@ -1305,7 +1305,7 @@ async fn registration_upserts_and_audit_logs() {
 
 #[tokio::test]
 async fn default_local_path_prefers_recent_binding_then_session_history() {
-    let fixture = Fixture::new(DbRole::Hub).await;
+    let fixture = Fixture::new(Role::Hub).await;
 
     // Add a Worktree binding (almost the same time as the main repo → tie-break favors main)
     fixture
@@ -1430,10 +1430,10 @@ async fn default_local_path_prefers_recent_binding_then_session_history() {
 #[tokio::test]
 async fn file_backed_db_persists_across_reopen() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let path = fxg_db::node_db_path(dir.path());
+    let path = dir.path().join("node").join("node.db");
     let session_id = uuid_v7();
 
-    let db = Db::open(&path, DbRole::Node).await.expect("open file db");
+    let db = Db::open(&path, Role::Node).await.expect("open file db");
     db.upsert_node(&NodeRecord::new(
         NODE_ID,
         "Test Node",
@@ -1462,7 +1462,7 @@ async fn file_backed_db_persists_across_reopen() {
     .expect("append");
     db.close().await;
 
-    let db = Db::open(&path, DbRole::Node).await.expect("reopen");
+    let db = Db::open(&path, Role::Node).await.expect("reopen");
     let session = db
         .get_session(&session_id)
         .await
@@ -1475,7 +1475,7 @@ async fn file_backed_db_persists_across_reopen() {
 
 #[tokio::test]
 async fn copy_fork_conversation_mirrors_conversation_events_only() {
-    let mut source = Fixture::new(DbRole::Node).await;
+    let mut source = Fixture::new(Role::Node).await;
     let created = source.session_created();
     let user = source.event(UnifiedEventPayload::UserMessage {
         text: "parent question".to_owned(),
@@ -1572,7 +1572,7 @@ async fn copy_fork_conversation_mirrors_conversation_events_only() {
 
 #[tokio::test]
 async fn append_next_event_allocates_gap_free_sequences() {
-    let mut fixture = Fixture::new(DbRole::Node).await;
+    let mut fixture = Fixture::new(Role::Node).await;
     let created = fixture.session_created();
     fixture
         .db
@@ -1664,7 +1664,7 @@ async fn append_next_event_allocates_gap_free_sequences() {
 
 #[tokio::test]
 async fn non_persistable_events_are_rejected_on_batch_append() {
-    let mut fixture = Fixture::new(DbRole::Node).await;
+    let mut fixture = Fixture::new(Role::Node).await;
     let created = fixture.session_created();
     let partial = fixture.event(UnifiedEventPayload::AgentMessage {
         message_id: "m1".to_owned(),
@@ -1711,7 +1711,7 @@ async fn non_persistable_events_are_rejected_on_batch_append() {
 
 #[tokio::test]
 async fn session_archiving_hides_from_default_list_and_is_reversible() {
-    let mut fixture = Fixture::new(DbRole::Node).await;
+    let mut fixture = Fixture::new(Role::Node).await;
     fixture.seed_typical_stream().await;
 
     let archived = fixture.event(UnifiedEventPayload::SessionArchived { archived: true });
@@ -1780,7 +1780,7 @@ async fn session_archiving_hides_from_default_list_and_is_reversible() {
 
 #[tokio::test]
 async fn session_deletion_purges_content_and_keeps_tombstone() {
-    let mut fixture = Fixture::new(DbRole::Node).await;
+    let mut fixture = Fixture::new(Role::Node).await;
     fixture.seed_typical_stream().await;
     // Sync all events before deleting (only the tombstone goes into the outbox)
     fixture
@@ -1873,7 +1873,7 @@ async fn session_deletion_purges_content_and_keeps_tombstone() {
 async fn session_deleted_for_unknown_session_is_noop() {
     // A tombstone for an unknown session (e.g. from a resync response) must not cause an
     // FK violation
-    let db = Db::open_in_memory(DbRole::Hub).await.expect("open db");
+    let db = Db::open_in_memory(Role::Hub).await.expect("open db");
     let envelope = SessionEventEnvelope {
         event_id: uuid_v7().into(),
         session_id: uuid_v7().into(),
@@ -1889,7 +1889,7 @@ async fn session_deleted_for_unknown_session_is_noop() {
 async fn custom_agent_capabilities_roundtrip() {
     use fxg_protocol::settings::{AgentAcpCapabilities, CustomAgentConfig};
 
-    let db = Db::open_in_memory(DbRole::Node).await.expect("open db");
+    let db = Db::open_in_memory(Role::Node).await.expect("open db");
     db.upsert_custom_agent(
         "mine",
         &CustomAgentConfig {

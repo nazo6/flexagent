@@ -325,12 +325,14 @@ prune します。`sessions` は最大 1000 件で、超過時は
 CLI (`fxg`) はローカルノードのループバック HTTP / WS API を使います。
 プラットフォーム固有の Local IPC はありません。
 
-- 接続先: `node.addr`（既定 `127.0.0.1:7860`）。7860 が使用中で明示指定が
-  ない場合は ephemeral port にフォールバックし、実際のアドレスを
-  `node.addr` に書き出す。
+- 接続先: `<state>/node/node.addr`（既定 `127.0.0.1:7860`）。7860 が
+  使用中で明示指定がない場合は ephemeral port にフォールバックし、実際の
+  アドレスを同じファイルに書き出す。
 - ハブへ直接接続する場合（`--provisioner` / `fxg web hub` 等）は
-  `--hub` → `hub.addr` → ノードのペアリング → `[hub] listen_addr` の順で解決する。
-- 認証: `~/.flexagent/auth_token` を読み、`Authorization: Bearer` を付与する。
+  `--hub` → `<state>/hub/hub.addr` → ノードのペアリング →
+  `hub.toml` の `listen_addr` の順で解決する。
+- 認証: `<data>/node/auth_token`（ハブへ接続する場合は
+  `<data>/hub/auth_token`）を読み、`Authorization: Bearer` を付与する。
 - `node.addr` が stale な場合は `system/info` で疎通を確認し、必要なら
   `fxg node start --detach` 相当で自動起動する。`FXG_NO_AUTO_NODE=1` で無効化する。
 

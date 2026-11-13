@@ -287,15 +287,15 @@ impl SessionEventBus {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fxg_db::DbRole;
     use fxg_protocol::common::{SessionStatus, StreamDeltaPayload};
     use fxg_protocol::events::UnifiedEventPayload;
+    use fxg_protocol::paths::Role;
 
     const NODE_ID: &str = "test-node";
     const PROJECT_ID: &str = "github.com/nazo6/flexagent";
 
     async fn setup() -> (SessionEventBus, String) {
-        let db = Db::open_in_memory(DbRole::Node).await.expect("db");
+        let db = Db::open_in_memory(Role::Node).await.expect("db");
         db.upsert_node(&fxg_db::NodeRecord::new(
             NODE_ID,
             "Test Node",
@@ -337,7 +337,7 @@ mod tests {
 
     #[tokio::test]
     async fn create_session_starts_at_node_seq_one() {
-        let db = Db::open_in_memory(DbRole::Node).await.expect("db");
+        let db = Db::open_in_memory(Role::Node).await.expect("db");
         db.upsert_node(&fxg_db::NodeRecord::new(
             NODE_ID,
             "Test Node",

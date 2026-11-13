@@ -202,8 +202,8 @@
           ? [
               {
                 label: "Data directory",
-                value: hubSnapshot.bootstrap.fxg_home.value,
-                source: hubSnapshot.bootstrap.fxg_home.source,
+                value: hubSnapshot.bootstrap.data_dir.value,
+                source: hubSnapshot.bootstrap.data_dir.source,
               },
               {
                 label: "Listen address",
@@ -246,8 +246,8 @@
           ? [
               {
                 label: "Data directory",
-                value: nodeSnapshot.bootstrap.fxg_home.value,
-                source: nodeSnapshot.bootstrap.fxg_home.source,
+                value: nodeSnapshot.bootstrap.data_dir.value,
+                source: nodeSnapshot.bootstrap.data_dir.source,
               },
               {
                 label: "Node ID",
@@ -299,33 +299,25 @@
   /** Data directory shown by the bootstrap tab (hub or target node). */
   const dataDir = $derived(
     isHub
-      ? (hubSnapshot?.bootstrap.fxg_home.value ?? "")
-      : (nodeSnapshot?.bootstrap.fxg_home.value ?? ""),
+      ? (hubSnapshot?.bootstrap.data_dir.value ?? "")
+      : (nodeSnapshot?.bootstrap.data_dir.value ?? ""),
   );
 
-  /** Files and directories under `~/.flexagent`, with what each one is for. */
+  /** Files and directories in the role data directory, with what each one is for. */
   const dataFiles = $derived<{ name: string; use: string }[]>(
     isHub
       ? [
-          { name: "config.toml", use: "Startup settings (bind address, logs)" },
-          { name: "auth_token", use: "Web access token for browsers and CLI" },
+          { name: "auth_token", use: "Hub-only Web access token for browsers and CLI" },
           { name: "hub.db", use: "Hub settings, project projection and audit log" },
-          { name: "hub.addr", use: "Listen address of the running hub (runtime only)" },
           { name: "vapid.json", use: "Web Push VAPID keypair" },
           { name: "secrets/", use: "Write-only secret values (0600)" },
-          { name: "logs/", use: "Process logs" },
         ]
       : [
-          { name: "config.toml", use: "Startup settings (bind address, hub address, logs)" },
-          { name: "auth_token", use: "Web access token for browsers and CLI" },
+          { name: "auth_token", use: "Node-only Web access token for browsers and CLI" },
           { name: "node_token", use: "Node pairing token (set by fxg node pair)" },
           { name: "node.db", use: "Node settings, sessions and audit log" },
-          { name: "node.addr", use: "Listen address of the running node (runtime only)" },
           { name: "secrets/", use: "Write-only secret values (0600)" },
           { name: "worktrees/", use: "Git worktrees created by fxg" },
-          { name: "cache/", use: "ACP Registry cache" },
-          { name: "agents/", use: "Agent binaries installed by fxg" },
-          { name: "logs/", use: "Process logs" },
         ],
   );
 </script>
@@ -345,8 +337,8 @@
     <Card class="gap-2 p-4">
       <h2 class="font-medium">Bootstrap (read-only)</h2>
       <p class="text-muted-foreground text-[13px]">
-        Process start-up values from config.toml, environment variables and CLI flags. Change them
-        in the file and restart the process.
+        Process start-up values from node.toml / hub.toml, environment variables and CLI flags.
+        Change them in the file and restart the process.
       </p>
       {#each filteredBootstrap as row (row.label)}
         <div class="flex flex-wrap items-center gap-2 border-b py-1.5 last:border-b-0">
@@ -365,8 +357,9 @@
           Data directory contents
         </summary>
         <p class="text-muted-foreground mt-1 text-[12px]">
-          Files under <code>{dataDir || "~/.flexagent"}</code>. Runtime files are recreated on
-          start; do not delete a file unless you know what it owns.
+          Files under <code>{dataDir || "the data directory"}</code>. Settings, runtime files and
+          logs live in their own roots; <code>fxg doctor</code> lists every path. Runtime files are recreated
+          on start; do not delete a file unless you know what it owns.
         </p>
         <ul class="mt-2 flex list-none flex-col gap-1 p-0">
           {#each dataFiles as file (file.name)}
@@ -471,9 +464,10 @@
     <Card class="gap-3 p-4">
       <h2 class="font-medium">Secrets</h2>
       <p class="text-muted-foreground text-[13px]">
-        Key-value secrets stored in <code>~/.flexagent/secrets/</code>. Values are write-only and
-        never returned by the API. Reference them in custom agents as <code>@KEY</code> or in
-        provisioner environment variables as <code>KEY</code>.
+        Key-value secrets stored in the role data directory under <code>secrets/</code>. Values are
+        write-only and never returned by the API. Reference them in custom agents as
+        <code>@KEY</code>
+        or in provisioner environment variables as <code>KEY</code>.
       </p>
       {#if secrets.length > 0}
         <ul class="flex list-none flex-col gap-1 p-0 text-[13px]">

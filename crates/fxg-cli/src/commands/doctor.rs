@@ -1,36 +1,8 @@
 //! `fxg doctor` command.
 
 use anyhow::{Result, bail};
+use fxg_protocol::paths::{Paths, Role};
 use usage::Args;
-
-/// Files and directories under `~/.flexagent`, with what each one owns.
-const DATA_DIR_FILES: &[(&str, &str)] = &[
-    (
-        "config.toml",
-        "startup settings (bind address, logs, allowed hosts)",
-    ),
-    ("auth_token", "Web access token for browsers and CLI"),
-    (
-        "node_token",
-        "node pairing token (written by the pairing API / `fxg node pair`)",
-    ),
-    ("node.db", "node settings, sessions and audit log"),
-    ("hub.db", "hub settings, project projection and audit log"),
-    (
-        "node.addr",
-        "listen address of the running node (runtime only)",
-    ),
-    (
-        "hub.addr",
-        "listen address of the running hub (runtime only)",
-    ),
-    ("vapid.json", "Web Push VAPID keypair (hub)"),
-    ("secrets/", "write-only secret values (0600)"),
-    ("worktrees/", "Git worktrees created by fxg"),
-    ("cache/", "ACP Registry cache"),
-    ("agents/", "agent binaries installed by fxg"),
-    ("logs/", "process logs"),
-];
 
 /// `fxg doctor`
 #[derive(Debug, Args)]
@@ -40,44 +12,108 @@ pub struct DoctorArgs {
     json: bool,
 }
 
+/// One path in the doctor report.
+struct PathEntry {
+    name: &'static str,
+    path: std::path::PathBuf,
+}
+
+/// Lists the role-scoped paths a user may need to inspect.
+fn role_paths(paths: &Paths) -> Vec<PathEntry> {
+    let mut entries = vec![
+        PathEntry {
+            name: "config",
+            path: paths.config_path(),
+        },
+        PathEntry {
+            name: "database",
+            path: paths.db_path(),
+        },
+        PathEntry {
+            name: "auth_token",
+            path: paths.auth_token_path(),
+        },
+        PathEntry {
+            name: "secrets",
+            path: paths.secrets_dir(),
+        },
+        PathEntry {
+            name: "addr",
+            path: paths.addr_path(),
+        },
+        PathEntry {
+            name: "logs",
+            path: paths.log_dir(),
+        },
+        PathEntry {
+            name: "cache",
+            path: paths.cache_dir(),
+        },
+    ];
+    match paths.role() {
+        Role::Node => {
+            entries.push(PathEntry {
+                name: "node_token",
+                path: paths.node_token_path(),
+            });
+            entries.push(PathEntry {
+                name: "worktrees",
+                path: paths.worktrees_dir(),
+            });
+        }
+        Role::Hub => {
+            entries.push(PathEntry {
+                name: "vapid",
+                path: paths.vapid_path(),
+            });
+        }
+    }
+    entries
+}
+
 impl usage::RunAsync for DoctorArgs {
     type Output = Result<()>;
 
     async fn run_async(self) -> Self::Output {
         let env = fxg_protocol::config::process_env;
-        let home = fxg_protocol::config::fxg_home(&env);
+        let node = Paths::resolve(&env, Role::Node);
+        let hub = Paths::resolve(&env, Role::Hub);
         let mut checks: Vec<(String, bool, String)> = Vec::new();
 
-        let config_ok = match fxg_protocol::config::GlobalConfig::load(&env) {
-            Ok(_) => (true, "config.toml is readable".to_owned()),
-            Err(err) => (false, format!("config.toml: {err}")),
+        let node_config = fxg_protocol::config::NodeConfig::load(&env);
+        let hub_config = fxg_protocol::config::HubConfig::load(&env);
+        let config_ok = match (&node_config, &hub_config) {
+            (Ok(_), Ok(_)) => (true, "node.toml / hub.toml are readable".to_owned()),
+            (Err(err), _) => (false, format!("node.toml: {err}")),
+            (_, Err(err)) => (false, format!("hub.toml: {err}")),
         };
         checks.push(("config".to_owned(), config_ok.0, config_ok.1));
 
         checks.push((
-            "home".to_owned(),
+            "node data".to_owned(),
             true,
-            if home.is_dir() {
-                home.display().to_string()
+            if node.data_dir().is_dir() {
+                node.data_dir().display().to_string()
             } else {
-                format!("{} (created on first node start)", home.display())
+                format!(
+                    "{} (created on first node start)",
+                    node.data_dir().display()
+                )
             },
         ));
-
-        let token_path = home.join(fxg_protocol::config::AUTH_TOKEN_FILE_NAME);
         checks.push((
-            "auth_token".to_owned(),
+            "hub data".to_owned(),
             true,
-            if token_path.is_file() {
-                token_path.display().to_string()
+            if hub.data_dir().is_dir() {
+                hub.data_dir().display().to_string()
             } else {
-                format!("{} (created on first node start)", token_path.display())
+                format!("{} (created on first hub start)", hub.data_dir().display())
             },
         ));
 
-        let db_path = home.join("node.db");
+        let db_path = node.db_path();
         let db_ok = if db_path.is_file() {
-            match fxg_db::Db::open(&db_path, fxg_db::DbRole::Node).await {
+            match fxg_db::Db::open(&db_path, Role::Node).await {
                 Ok(_) => (true, "node.db opened".to_owned()),
                 Err(err) => (false, format!("node.db: {err}")),
             }
@@ -86,14 +122,13 @@ impl usage::RunAsync for DoctorArgs {
         };
         checks.push(("database".to_owned(), db_ok.0, db_ok.1));
 
-        let log_path = home.join("logs").join("node.log");
         checks.push((
             "logs".to_owned(),
             true,
-            if log_path.is_file() {
-                log_path.display().to_string()
+            if node.log_path().is_file() {
+                node.log_path().display().to_string()
             } else {
-                format!("{} (not created yet)", log_path.display())
+                format!("{} (not created yet)", node.log_path().display())
             },
         ));
 
@@ -112,6 +147,7 @@ impl usage::RunAsync for DoctorArgs {
             },
         ));
 
+        let roles = [(Role::Node, &node), (Role::Hub, &hub)];
         if self.json {
             let checks: Vec<_> = checks
                 .iter()
@@ -119,36 +155,56 @@ impl usage::RunAsync for DoctorArgs {
                     serde_json::json!({ "check": name, "ok": ok, "detail": detail })
                 })
                 .collect();
-            let files: Vec<_> = DATA_DIR_FILES
+            let layouts: Vec<_> = roles
                 .iter()
-                .map(|(name, description)| {
+                .map(|(role, paths)| {
+                    let entries: Vec<_> = role_paths(paths)
+                        .into_iter()
+                        .map(|entry| {
+                            serde_json::json!({
+                                "name": entry.name,
+                                "path": entry.path.display().to_string(),
+                                "exists": entry.path.exists(),
+                            })
+                        })
+                        .collect();
                     serde_json::json!({
-                        "name": name,
-                        "description": description,
-                        "exists": home.join(name).exists(),
+                        "role": role.as_str(),
+                        "roots": {
+                            "config": paths.roots().config().display().to_string(),
+                            "data": paths.roots().data().display().to_string(),
+                            "state": paths.roots().state().display().to_string(),
+                            "logs": paths.roots().logs().display().to_string(),
+                            "cache": paths.roots().cache().display().to_string(),
+                        },
+                        "paths": entries,
                     })
                 })
                 .collect();
             let value = serde_json::json!({
                 "checks": checks,
-                "data_dir": {
-                    "path": home.display().to_string(),
-                    "files": files,
-                },
+                "layouts": layouts,
             });
             println!("{}", serde_json::to_string_pretty(&value)?);
         } else {
             for (name, ok, detail) in &checks {
                 println!("{} {name}: {detail}", if *ok { "OK  " } else { "FAIL" });
             }
-            println!("\nData directory: {}", home.display());
-            for (name, description) in DATA_DIR_FILES {
-                let state = if home.join(*name).exists() {
-                    ""
-                } else {
-                    " (not created yet)"
-                };
-                println!("  {name:<16} {description}{state}");
+            for (role, paths) in roles {
+                println!("\n{} paths:", role);
+                println!("  roots: config={}", paths.roots().config().display());
+                println!("         data={}", paths.roots().data().display());
+                println!("         state={}", paths.roots().state().display());
+                println!("         logs={}", paths.roots().logs().display());
+                println!("         cache={}", paths.roots().cache().display());
+                for entry in role_paths(paths) {
+                    let state = if entry.path.exists() {
+                        ""
+                    } else {
+                        " (not created yet)"
+                    };
+                    println!("  {:<12} {}{}", entry.name, entry.path.display(), state);
+                }
             }
         }
         if checks.iter().any(|(_, ok, _)| !ok) {

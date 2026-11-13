@@ -9,12 +9,12 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::time::Duration;
 
-use fxg_db::{Db, DbRole};
+use fxg_db::Db;
 use fxg_hub::Hub;
 use fxg_hub::api::{ClientApiBackend, ClientEvent};
 use fxg_hub::state::HubOptions;
 use fxg_protocol::client_api::{CreateSessionRequest, CreateSessionResponse, NodesResponse};
-use fxg_protocol::config::AUTH_TOKEN_FILE_NAME;
+use fxg_protocol::paths::{Paths, Role};
 use fxg_protocol::settings::ProvisionerDefinition;
 
 /// Run a Git command (panics on failure).
@@ -61,12 +61,13 @@ async fn provisioner_runs_stdio_node_and_drains() {
     git(&repo, &["add", "-A"]);
     git(&repo, &["commit", "-q", "-m", "initial"]);
 
-    // config.toml of the child process (the ephemeral node): define a
+    // node.toml of the child process (the ephemeral node): define a
     // nonexistent mock agent so StartSession fails deterministically (verifying
     // the stdio path and error propagation)
     std::fs::create_dir_all(&node_home).expect("mkdir node home");
+    let node_paths = Paths::portable(&node_home, Role::Node);
     // Define the mock custom agent in the ephemeral node's DB.
-    let node_db = Db::open(&fxg_db::node_db_path(&node_home), DbRole::Node)
+    let node_db = Db::open(&node_paths.db_path(), Role::Node)
         .await
         .expect("open node db");
     node_db
@@ -84,9 +85,12 @@ async fn provisioner_runs_stdio_node_and_drains() {
 
     // Register the project on the hub side (`canonical_git_url` is required)
     let project_id = "github.com/nazo6/flexagent";
-    let db = Db::open(&fxg_db::hub_db_path(&server_home), DbRole::Hub)
-        .await
-        .expect("open server db");
+    let db = Db::open(
+        &Paths::portable(&server_home, Role::Hub).db_path(),
+        Role::Hub,
+    )
+    .await
+    .expect("open server db");
     db.upsert_project(&fxg_db::registration::ProjectRecord {
         project_id: project_id.into(),
         name: "flexagent".to_owned(),
@@ -118,15 +122,18 @@ async fn provisioner_runs_stdio_node_and_drains() {
         )]),
         env_secrets: BTreeMap::new(),
     };
-    let db = Db::open(&fxg_db::hub_db_path(&server_home), DbRole::Hub)
-        .await
-        .expect("open server db");
+    let db = Db::open(
+        &Paths::portable(&server_home, Role::Hub).db_path(),
+        Role::Hub,
+    )
+    .await
+    .expect("open server db");
     db.upsert_provisioner(&provisioner)
         .await
         .expect("register provisioner");
     drop(db);
     let server = Hub::start(HubOptions {
-        fxg_home: server_home.clone(),
+        paths: Paths::portable(&server_home, Role::Hub),
         listen_addr: "127.0.0.1:0".to_owned(),
         allowed_hosts: Vec::new(),
         allowed_origins: Vec::new(),
@@ -135,8 +142,10 @@ async fn provisioner_runs_stdio_node_and_drains() {
     .await
     .expect("start server");
     let addr = server.listen_addr();
-    let token = fxg_hub::api::auth::load_or_create_token(&server_home.join(AUTH_TOKEN_FILE_NAME))
-        .expect("token");
+    let token = fxg_hub::api::auth::load_or_create_token(
+        &Paths::portable(&server_home, Role::Hub).auth_token_path(),
+    )
+    .expect("token");
     let http = reqwest::Client::new();
 
     // Subscribe to bootstrap logs (ephemeral events)

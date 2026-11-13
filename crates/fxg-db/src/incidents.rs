@@ -438,7 +438,8 @@ pub async fn support_bundle_sessions(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::{Db, DbRole};
+    use crate::Role;
+    use crate::db::Db;
 
     fn record(summary: &str) -> IncidentRecord {
         IncidentRecord::new(
@@ -452,7 +453,7 @@ mod tests {
     }
 
     async fn db() -> Db {
-        Db::open_in_memory(DbRole::Node).await.expect("db")
+        Db::open_in_memory(Role::Node).await.expect("db")
     }
 
     #[tokio::test]

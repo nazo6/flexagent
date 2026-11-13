@@ -145,8 +145,8 @@ pub struct IncidentQuery {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct SupportBundleConfig {
-    /// `FXG_HOME` after replacing the user's home directory with `~`
-    pub fxg_home: String,
+    /// Data directory after replacing the user's home directory with `~`
+    pub data_dir: String,
     /// Log level
     pub log_level: Option<String>,
     /// Log file destination
@@ -631,7 +631,7 @@ pub struct IssueNodeTokenRequest {
 pub struct IssueNodeTokenResponse {
     /// Target node ID
     pub node_id: NodeId,
-    /// The issued plaintext token (stored in `~/.flexagent/node_token`)
+    /// The issued plaintext token (stored in `<data>/node/node_token`)
     pub token: String,
 }
 

@@ -9,7 +9,7 @@
 //!
 //! # Modules
 //!
-//! - `paths`: `~/.flexagent/` path resolution
+//! - `paths`: role-scoped path resolution lives in `fxg_protocol::paths`
 //! - `git`: `git` CLI wrapper
 //! - `project`: logical project (`project_key`) resolution
 //! - `worktree`: Git Worktree detection, creation, removal, and hook execution
@@ -27,7 +27,6 @@
 pub mod daemon;
 pub mod error;
 pub mod git;
-pub mod paths;
 pub mod project;
 pub mod session;
 pub mod session_manager;
@@ -42,7 +41,6 @@ mod testutil;
 pub(crate) mod rpc;
 
 pub use error::NodeError;
-pub use paths::NodePaths;
 pub use project::{ResolvedProject, normalize_git_url, resolve_project};
 pub use session::{SessionBroadcast, SessionEventBus};
 pub use worktree::{

@@ -126,7 +126,7 @@ pub async fn update_node_settings(
 /// Node pairing state stored in `node.db` (`node_pairing`).
 ///
 /// Only the hub address is persisted here; the pairing token is a secret file
-/// (`~/.flexagent/node_token`) and its presence is reported by the node.
+/// (`<data>/node/node_token`) and its presence is reported by the node.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NodePairing {
     /// Hub address (HTTP origin; the WS endpoint is derived)

@@ -16,7 +16,7 @@ Protocol）対応コーディングエージェントを「好きな場所から
 2. **ローカルファースト & 遅延同期 (Store-and-Forward)**:
    - 各ノード（PC / VPS / WSL）がローカルSQLite (`node.db`)
      とローカルWeb UI (`http://localhost:7860`。7860 が使用中の場合は空きポートへ
-     フォールバックし、実際のアドレスは `node.addr` に記録)
+     フォールバックし、実際のアドレスは `<state>/node/node.addr` に記録)
      を持ち、ハブが停止していても100%自立稼働します。ハブ復旧時に未送信イベントを自動同期します。
 3. **UIの完全統一 (Web / Desktop / Android PWA)**:
    - PCブラウザもAndroid端末も、単一の **PWA (Progressive Web App) + Web Push
@@ -59,7 +59,7 @@ Protocol）対応コーディングエージェントを「好きな場所から
 | **[02-database-schema.md](./02-database-schema.md)**                     | `node.db` / `hub.db` のスキーマ原則・ロール差分・イベント投影・FTS5検索（DDL の正は `crates/fxg-db/migrations/`）                        |
 | **[03-protocol-and-api.md](./03-protocol-and-api.md)**                   | プロトコルの境界・不変条件、Node⇔Hub間通信 (WS & Stdio)、Client API（型の正は `crates/fxg-protocol/`）                                   |
 | **[04-agent-drivers-and-windows.md](./04-agent-drivers-and-windows.md)** | `AgentDriver` トレイト、エージェント実装の3層モデル、ACP Registry・PATH探索、ACPネイティブFork/Resume、Windows固有実装                   |
-| **[05-cli-and-pwa-ui.md](./05-cli-and-pwa-ui.md)**                       | `fxg` CLI の設計原則（コマンドの正は `fxg --help`）、設定ファイルスキーマ (`config.toml`)、PWA + Web Push 設計                           |
+| **[05-cli-and-pwa-ui.md](./05-cli-and-pwa-ui.md)**                       | `fxg` CLI の設計原則（コマンドの正は `fxg --help`）、設定ファイルスキーマ (`node.toml` / `hub.toml`)、PWA + Web Push 設計                |
 | **[06-type-safety.md](./06-type-safety.md)**                             | 型安全性ガイド (open enum / `RawJson` / 文字列判定の禁止 / `lint:typed` / 移行状況)                                                      |
 
 ---

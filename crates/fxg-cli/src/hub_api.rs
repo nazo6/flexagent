@@ -2,17 +2,17 @@
 //!
 //! Operations that only the hub provides —
 //! starting an ephemeral VM provisioner (`fxg session new --provisioner`) — call the
-//! hub API named by `[node] hub_url` in `config.toml`
-//! directly (design: docs/05 §1.1; unavailable while the hub is
-//! stopped).
+//! hub API named by the local node's pairing (`node.db`) directly (design:
+//! docs/05 §1.1; unavailable while the hub is stopped).
 //!
-//! Authentication uses the Bearer token from `~/.flexagent/auth_token`. When
-//! the CLI runs on the same host as the hub, the same file matches
-//! the hub token, so authentication works as-is.
+//! Authentication uses the Bearer token from the hub's
+//! `<data>/hub/auth_token`. When the CLI runs on the same host as the
+//! hub, that file matches the hub token, so authentication works as-is.
 
 use anyhow::{Context, Result, bail};
 use fxg_protocol::client_api::{ApiErrorResponse, CreateSessionRequest, CreateSessionResponse};
-use fxg_protocol::config::{AUTH_TOKEN_FILE_NAME, EnvLookup, GlobalConfig, fxg_home};
+use fxg_protocol::config::{EnvLookup, HubConfig};
+use fxg_protocol::paths::{Paths, Role};
 
 /// Hub REST client.
 pub struct HubClient {
@@ -25,12 +25,13 @@ impl HubClient {
     /// Build a client for the hub reachable from this host.
     ///
     /// Resolution: `hub` → `hub.addr` → the local node's pairing →
-    /// `[hub] listen_addr`.
+    /// `hub.toml` `listen_addr`.
     pub async fn local(env: EnvLookup<'_>, hub: Option<&str>) -> Result<Self> {
         let base = resolve_hub_base(env, hub).await?;
-        let token =
-            fxg_hub::api::auth::load_or_create_token(&fxg_home(env).join(AUTH_TOKEN_FILE_NAME))
-                .context("failed to load ~/.flexagent/auth_token")?;
+        let token = fxg_hub::api::auth::load_or_create_token(
+            &Paths::resolve(env, Role::Hub).auth_token_path(),
+        )
+        .context("failed to load the hub's auth_token")?;
         Ok(Self {
             base,
             token,
@@ -146,13 +147,12 @@ pub(crate) fn normalize_listen(addr: &str) -> String {
 /// 1. `hub` (a `--hub` CLI override)
 /// 2. `hub.addr` (a hub running on this host)
 /// 3. the local node's pairing (`node.db`, read through the client API)
-/// 4. `[hub] listen_addr`
+/// 4. `hub.toml` `listen_addr`
 pub async fn resolve_hub_base(env: EnvLookup<'_>, hub: Option<&str>) -> Result<String> {
     if let Some(url) = hub.map(str::trim).filter(|url| !url.is_empty()) {
         return hub_http_url(url);
     }
-    let home = fxg_home(env);
-    if let Ok(addr) = std::fs::read_to_string(home.join("hub.addr")) {
+    if let Ok(addr) = std::fs::read_to_string(Paths::resolve(env, Role::Hub).addr_path()) {
         let addr = addr.trim();
         if !addr.is_empty() {
             return Ok(format!("http://{}", normalize_listen(addr)));
@@ -166,10 +166,10 @@ pub async fn resolve_hub_base(env: EnvLookup<'_>, hub: Option<&str>) -> Result<S
     {
         return Ok(url);
     }
-    let global = GlobalConfig::load(env).context("failed to load ~/.flexagent/config.toml")?;
+    let config = HubConfig::load(env).context("failed to load hub.toml")?;
     Ok(format!(
         "http://{}",
-        normalize_listen(global.hub.resolved_listen_addr())
+        normalize_listen(config.resolved_listen_addr())
     ))
 }
 

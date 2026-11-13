@@ -1,10 +1,10 @@
-//! Node ⇔ hub pairing (owned by `node.db` and `~/.flexagent/node_token`).
+//! Node ⇔ hub pairing (owned by `node.db` and `<data>/node/node_token`).
 //!
 //! Design: `docs/changelog/2026-11-11-node-pairing-db-and-gui.md` §4.
 //!
 //! - The hub address is stored in `node.db` (`node_pairing`), so it is a
 //!   runtime setting like every other node-owned value.
-//! - The token is a secret and stays in the fixed `~/.flexagent/node_token`
+//! - The token is a secret and stays in the fixed `<data>/node/node_token`
 //!   (`0600`); the client API is write-only and never returns it.
 //! - Saving or clearing the pairing restarts the sync supervisor immediately
 //!   (no `fxg node restart`).

@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use fxg_db::{Db, DbError, DbRole};
+use fxg_db::{Db, DbError, Role};
 use fxg_protocol::SecretId;
 use fxg_protocol::settings::{
     AgentSettings, ConfigSource, NodeSettings, ProjectIdentity, ProvisionerDefinition,
@@ -10,7 +10,7 @@ use fxg_protocol::settings::{
 };
 
 async fn db() -> Db {
-    Db::open_in_memory(DbRole::Node).await.expect("db")
+    Db::open_in_memory(Role::Node).await.expect("db")
 }
 
 fn node_settings_request(revision: u64, name: &str) -> UpdateNodeSettingsRequest {
@@ -114,7 +114,7 @@ async fn project_path_links_are_upserted_and_deleted() {
 
 #[tokio::test]
 async fn prune_removes_unreported_bindings_and_relinks_sessions() {
-    let node = DbRole::Hub;
+    let node = Role::Hub;
     let db = Db::open_in_memory(node).await.expect("db");
     db.upsert_node(&fxg_db::NodeRecord::new(
         "node-a", "Node A", "linux", "x86_64", "0.1.0",
@@ -182,7 +182,7 @@ async fn prune_removes_unreported_bindings_and_relinks_sessions() {
 
 #[tokio::test]
 async fn hub_settings_and_provisioners() {
-    let db = Db::open_in_memory(DbRole::Hub).await.expect("db");
+    let db = Db::open_in_memory(Role::Hub).await.expect("db");
     let initial = db.ensure_hub_settings().await.expect("ensure");
 
     let updated = db

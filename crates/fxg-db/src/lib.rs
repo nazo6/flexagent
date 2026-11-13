@@ -2,7 +2,7 @@
 //!
 //! `node.db` (each node) and `hub.db` (the hub) share the same schema
 //! generated from [a single migration set](./migrations). The only differences are the
-//! "row scope" and the "execution role" ([`DbRole`]).
+//! "row scope" and the "execution role" ([`Role`]).
 //!
 //! See
 //! [`docs/02-database-schema.md`](https://github.com/nazo6/flexagent/blob/master/docs/02-database-schema.md)
@@ -41,8 +41,9 @@ pub mod settings;
 
 mod db;
 
-pub use db::{Db, DbRole, hub_db_path, node_db_path};
+pub use db::Db;
 pub use error::DbError;
+pub use fxg_protocol::paths::Role;
 
 // Re-exported types (keeps imports on the caller side short)
 pub use audit::AuditLogRecord;

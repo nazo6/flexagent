@@ -220,9 +220,13 @@ async fn phase3_session_commands_roundtrip_through_node() {
     // A custom agent that fails to start (for verifying the session recording
     // path). Custom agents are owned by `node.db`.
     {
-        let db = fxg_db::Db::open(&fxg_db::node_db_path(&env.home), fxg_db::DbRole::Node)
-            .await
-            .expect("open node db");
+        let db = fxg_db::Db::open(
+            &fxg_protocol::paths::Paths::portable(&env.home, fxg_protocol::paths::Role::Node)
+                .db_path(),
+            fxg_protocol::paths::Role::Node,
+        )
+        .await
+        .expect("open node db");
         db.upsert_custom_agent(
             "broken",
             &fxg_protocol::settings::CustomAgentConfig {

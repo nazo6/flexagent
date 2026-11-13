@@ -1,31 +1,20 @@
-//! Role-scoped user secret store (`~/.flexagent/secrets/{node,hub}/<id>`).
+//! Role-scoped user secret store (`<data>/<role>/secrets/<id>`).
 //!
 //! Secret values are stored as plaintext files with mode `0600` on Unix and
 //! restricted ACLs on Windows. They never enter the SQLite database or log lines;
 //! the database holds only metadata (`secrets` table: key, description, timestamps).
 //!
-//! Node and Hub share the same implementation parameterized by role.
+//! Node and Hub share the same implementation parameterized by [`Paths`], which
+//! scopes every value to the owning role.
 
 use std::path::{Path, PathBuf};
 
 use fxg_protocol::SecretId;
+use fxg_protocol::paths::{Paths, Role};
 use fxg_protocol::settings::{SecretSummary, UpsertSecretRequest};
 
-use crate::db::{Db, DbRole};
+use crate::db::Db;
 use crate::error::DbError;
-
-/// Directory name owned by a local node.
-pub const ROLE_NODE: &str = "node";
-/// Directory name owned by the hub.
-pub const ROLE_HUB: &str = "hub";
-
-/// Maps a database role to its secrets sub-directory name.
-pub fn role_name(role: DbRole) -> &'static str {
-    match role {
-        DbRole::Node => ROLE_NODE,
-        DbRole::Hub => ROLE_HUB,
-    }
-}
 
 /// Secret ID of the node ⇔ hub pairing token (a system secret).
 pub const SYSTEM_NODE_TOKEN: &str = "system.node_token";
@@ -33,24 +22,18 @@ pub const SYSTEM_NODE_TOKEN: &str = "system.node_token";
 /// Secret ID of the Web access token (a system secret).
 pub const SYSTEM_AUTH_TOKEN: &str = "system.auth_token";
 
-/// Returns the fixed path of a system secret, if `id` is one.
-///
-/// System secrets predate the secret store and keep their `~/.flexagent`
-/// paths (docs/changelog/2026-11-09-settings-consolidation-and-project-identity.md §3.3).
-pub fn system_secret_path(fxg_home: &Path, id: &SecretId) -> Option<PathBuf> {
+/// Returns the fixed path of a system secret, if `id` is one for this role.
+pub fn system_secret_path(paths: &Paths, id: &SecretId) -> Option<PathBuf> {
     match id.as_str() {
-        SYSTEM_NODE_TOKEN => Some(fxg_home.join("node_token")),
-        SYSTEM_AUTH_TOKEN => Some(fxg_home.join("auth_token")),
+        SYSTEM_NODE_TOKEN if paths.role() == Role::Node => Some(paths.node_token_path()),
+        SYSTEM_AUTH_TOKEN => Some(paths.auth_token_path()),
         _ => None,
     }
 }
 
 /// Returns the value file path for a secret.
-pub fn secret_path(fxg_home: &Path, role: &str, id: &SecretId) -> PathBuf {
-    match system_secret_path(fxg_home, id) {
-        Some(path) => path,
-        None => fxg_home.join("secrets").join(role).join(id.as_str()),
-    }
+pub fn secret_path(paths: &Paths, id: &SecretId) -> PathBuf {
+    system_secret_path(paths, id).unwrap_or_else(|| paths.secrets_dir().join(id.as_str()))
 }
 
 fn ensure_parent(path: &Path) -> Result<(), DbError> {
@@ -73,21 +56,16 @@ fn set_owner_only(_path: &Path) -> Result<(), DbError> {
 }
 
 /// Writes a secret value (creating parent directories if needed) with mode `0600`.
-pub fn write_secret(
-    fxg_home: &Path,
-    role: &str,
-    id: &SecretId,
-    value: &str,
-) -> Result<(), DbError> {
-    let path = secret_path(fxg_home, role, id);
+pub fn write_secret(paths: &Paths, id: &SecretId, value: &str) -> Result<(), DbError> {
+    let path = secret_path(paths, id);
     ensure_parent(&path)?;
     std::fs::write(&path, value).map_err(DbError::Io)?;
     set_owner_only(&path)
 }
 
 /// Reads a secret value (`None` when the file is missing).
-pub fn read_secret(fxg_home: &Path, role: &str, id: &SecretId) -> Result<Option<String>, DbError> {
-    let path = secret_path(fxg_home, role, id);
+pub fn read_secret(paths: &Paths, id: &SecretId) -> Result<Option<String>, DbError> {
+    let path = secret_path(paths, id);
     match std::fs::read_to_string(&path) {
         Ok(value) => Ok(Some(value)),
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),
@@ -96,8 +74,8 @@ pub fn read_secret(fxg_home: &Path, role: &str, id: &SecretId) -> Result<Option<
 }
 
 /// Deletes a secret value file (missing files are not treated as errors).
-pub fn delete_secret_file(fxg_home: &Path, role: &str, id: &SecretId) -> Result<(), DbError> {
-    let path = secret_path(fxg_home, role, id);
+pub fn delete_secret_file(paths: &Paths, id: &SecretId) -> Result<(), DbError> {
+    let path = secret_path(paths, id);
     match std::fs::remove_file(&path) {
         Ok(()) => Ok(()),
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
@@ -106,8 +84,8 @@ pub fn delete_secret_file(fxg_home: &Path, role: &str, id: &SecretId) -> Result<
 }
 
 /// Returns whether the value file exists on disk.
-pub fn is_configured(fxg_home: &Path, role: &str, id: &SecretId) -> bool {
-    secret_path(fxg_home, role, id).is_file()
+pub fn is_configured(paths: &Paths, id: &SecretId) -> bool {
+    secret_path(paths, id).is_file()
 }
 
 /// Registers metadata for a system secret so it appears in the secret list.
@@ -136,7 +114,7 @@ pub async fn ensure_system_secret(
 /// Identifiers of agents or Git hosts that reference a secret.
 pub async fn used_by(db: &Db, id: &SecretId) -> Result<Vec<String>, DbError> {
     match db.role() {
-        DbRole::Node => {
+        Role::Node => {
             let mut used = Vec::new();
             for (agent_id, config) in db.custom_agents().await? {
                 if config.env_secrets.values().any(|value| value == id) {
@@ -145,7 +123,7 @@ pub async fn used_by(db: &Db, id: &SecretId) -> Result<Vec<String>, DbError> {
             }
             Ok(used)
         }
-        DbRole::Hub => {
+        Role::Hub => {
             let mut used = Vec::new();
             for (name, config) in db.provisioners().await? {
                 if config.env_secrets.values().any(|value| value == id) {
@@ -157,12 +135,12 @@ pub async fn used_by(db: &Db, id: &SecretId) -> Result<Vec<String>, DbError> {
     }
 }
 
-/// Lists secret metadata for the given database and data directory.
-pub async fn list_secrets(db: &Db, fxg_home: &Path) -> Result<Vec<SecretSummary>, DbError> {
-    let role = role_name(db.role());
+/// Lists secret metadata for the given database and role paths.
+pub async fn list_secrets(db: &Db, paths: &Paths) -> Result<Vec<SecretSummary>, DbError> {
+    debug_assert_eq!(db.role(), paths.role());
     let mut secrets = db.secrets().await?;
     for secret in &mut secrets {
-        secret.configured = is_configured(fxg_home, role, &secret.id);
+        secret.configured = is_configured(paths, &secret.id);
         secret.used_by = used_by(db, &secret.id).await?;
         if !secret.configured {
             secret.updated_at = None;
@@ -174,7 +152,7 @@ pub async fn list_secrets(db: &Db, fxg_home: &Path) -> Result<Vec<SecretSummary>
 /// Stores a secret value and its metadata (write-only API).
 pub async fn upsert_secret(
     db: &Db,
-    fxg_home: &Path,
+    paths: &Paths,
     id: &SecretId,
     request: &UpsertSecretRequest,
 ) -> Result<Vec<SecretSummary>, DbError> {
@@ -184,7 +162,7 @@ pub async fn upsert_secret(
             id.as_str()
         )));
     }
-    if system_secret_path(fxg_home, id).is_some() {
+    if system_secret_path(paths, id).is_some() {
         return Err(DbError::SecretInvalid(format!(
             "{} is a system secret and cannot be written through the secret API",
             id.as_str()
@@ -195,20 +173,19 @@ pub async fn upsert_secret(
             "secret value must not be empty".to_owned(),
         ));
     }
-    let role = role_name(db.role());
-    write_secret(fxg_home, role, id, &request.value)?;
+    write_secret(paths, id, &request.value)?;
     db.upsert_secret_metadata(id, request.description.as_deref())
         .await?;
-    list_secrets(db, fxg_home).await
+    list_secrets(db, paths).await
 }
 
 /// Deletes a secret after verifying it is not referenced by any configuration.
 pub async fn delete_secret(
     db: &Db,
-    fxg_home: &Path,
+    paths: &Paths,
     id: &SecretId,
 ) -> Result<Vec<SecretSummary>, DbError> {
-    if system_secret_path(fxg_home, id).is_some() {
+    if system_secret_path(paths, id).is_some() {
         return Err(DbError::SecretInvalid(format!(
             "{} is a system secret and cannot be deleted through the secret API",
             id.as_str()
@@ -221,10 +198,9 @@ pub async fn delete_secret(
             used_by: referenced,
         });
     }
-    let role = role_name(db.role());
-    delete_secret_file(fxg_home, role, id)?;
+    delete_secret_file(paths, id)?;
     db.delete_secret_metadata(id).await?;
-    list_secrets(db, fxg_home).await
+    list_secrets(db, paths).await
 }
 
 #[cfg(test)]
@@ -236,11 +212,12 @@ mod tests {
     #[tokio::test]
     async fn write_read_delete_and_configured_flag() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let db = Db::open_in_memory(DbRole::Node).await.expect("db");
+        let paths = Paths::portable(dir.path(), Role::Node);
+        let db = Db::open_in_memory(Role::Node).await.expect("db");
         let id = SecretId::new("agent_key");
         let secrets = upsert_secret(
             &db,
-            dir.path(),
+            &paths,
             &id,
             &UpsertSecretRequest {
                 description: Some("Agent key".to_owned()),
@@ -253,14 +230,14 @@ mod tests {
         assert!(secrets[0].configured);
         assert_eq!(secrets[0].description.as_deref(), Some("Agent key"));
         assert_eq!(
-            read_secret(dir.path(), ROLE_NODE, &id).unwrap().as_deref(),
+            read_secret(&paths, &id).unwrap().as_deref(),
             Some("secret-value")
         );
 
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            let mode = std::fs::metadata(secret_path(dir.path(), ROLE_NODE, &id))
+            let mode = std::fs::metadata(secret_path(&paths, &id))
                 .unwrap()
                 .permissions()
                 .mode()
@@ -268,19 +245,20 @@ mod tests {
             assert_eq!(mode, 0o600);
         }
 
-        let secrets = delete_secret(&db, dir.path(), &id).await.expect("delete");
+        let secrets = delete_secret(&db, &paths, &id).await.expect("delete");
         assert!(secrets.is_empty());
-        assert!(!is_configured(dir.path(), ROLE_NODE, &id));
+        assert!(!is_configured(&paths, &id));
     }
 
     #[tokio::test]
     async fn referenced_secret_cannot_be_deleted() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let db = Db::open_in_memory(DbRole::Node).await.expect("db");
+        let paths = Paths::portable(dir.path(), Role::Node);
+        let db = Db::open_in_memory(Role::Node).await.expect("db");
         let id = SecretId::new("openai_key");
         upsert_secret(
             &db,
-            dir.path(),
+            &paths,
             &id,
             &UpsertSecretRequest {
                 description: None,
@@ -307,9 +285,7 @@ mod tests {
         .await
         .expect("upsert agent");
 
-        let err = delete_secret(&db, dir.path(), &id)
-            .await
-            .expect_err("in use");
+        let err = delete_secret(&db, &paths, &id).await.expect_err("in use");
         assert!(matches!(err, DbError::SecretInUse { .. }));
     }
 }

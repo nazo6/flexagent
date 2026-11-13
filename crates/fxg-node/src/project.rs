@@ -374,14 +374,15 @@ pub async fn resolve_project(
 mod tests {
     use super::*;
     use crate::testutil;
-    use fxg_db::{Db, DbRole};
+    use fxg_db::Db;
+    use fxg_protocol::paths::Role;
 
     fn canonical(path: &Path) -> PathBuf {
         fxg_pty::canonicalize(path).expect("canonicalize")
     }
 
     async fn test_db() -> Db {
-        Db::open_in_memory(DbRole::Node).await.expect("db")
+        Db::open_in_memory(Role::Node).await.expect("db")
     }
 
     #[test]

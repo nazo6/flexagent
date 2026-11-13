@@ -510,7 +510,7 @@
                   <h2 class="font-medium">{m.settings_client_token_title()}</h2>
                   <p class="text-muted-foreground text-[13px]">
                     {m.settings_client_token_description()}
-                    <code>~/.flexagent/auth_token</code>
+                    <code>&lt;data&gt;/flexagent/{isHub ? "hub" : "node"}/auth_token</code>
                     {m.settings_client_token_description_ref()}
                   </p>
                   <div class="mt-1">
@@ -620,7 +620,7 @@
                     <h2 class="font-medium">{m.settings_client_token_title()}</h2>
                     <p class="text-muted-foreground text-[13px]">
                       {m.settings_client_token_description()}
-                      <code>~/.flexagent/auth_token</code>
+                      <code>&lt;data&gt;/flexagent/{isHub ? "hub" : "node"}/auth_token</code>
                       {m.settings_client_token_description_ref()}
                     </p>
                     <div class="mt-1">
