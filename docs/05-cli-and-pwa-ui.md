@@ -266,12 +266,10 @@ Android スマートフォン（ホーム画面追加PWA）のすべてを単一
 
 ### 3.2 主要画面構成
 
-1. **グローバル承認 Inbox 画面 (バッジ通知付き)**:
-   - 全ノード・全セッションで現在 `waiting_permission`
-     になっているリクエストを一箇所に集約。
-   - コマンド実行（例:
-     `cargo test`）やファイル変更のDiffをその場でプレビューし、ワンタップで
-     **Approve / Allow Always / Reject** を応答。
+1. **サイドバー & 注意喚起（Needs attention）**:
+   - 専用の承認 Inbox 画面は持たず、`SessionSummary.status`（`waiting_permission` / `waiting_input` / `error`）を単一のソースとしてサイドバー上部の「Needs attention」とプロジェクト別待機件数バッジ・各セッション行の左アクセント＆コンパクトピルで強調表示する。
+   - モバイルのメニューボタンと折りたたみ時のデスクトップサイドバーボタンにも要対応件数バッジを表示する。
+   - コマンド実行（例: `cargo test`）やファイル変更の承認、および質問フォームへの回答は、該当セッションのチャット画面内のインラインカードで直接行う。
 2. **プロジェクト & Worktree 一覧画面**:
    - 論理プロジェクト（例: `github.com/nazo6/flexagent`）ごとにグループ化。
    - 各ノード上の **Git Worktree
@@ -459,7 +457,7 @@ Android スマートフォン（ホーム画面追加PWA）のすべてを単一
   3. **質問 (elicitation) の通知**: エージェントが質問した場合も
      `[flexagent] Question (<node>) — <session title>` として通知します。form の回答はアプリ内
      でしか行えないため、承認のような `[Approve]` / `[Reject]`
-     ボタンは付けず、タップでアプリのセッション / Inbox を開きます
+     ボタンは付けず、タップでアプリのセッションを開きます
      (`allow_option_id` / `reject_option_id` は `null`)。
 
   4. **ターン完了の通知**: ハブが `Running` を観測したセッションが `Idle` /
@@ -560,7 +558,7 @@ Webターミナルは、GhosttyのネイティブVTエミュレーション精�
       の構築と `rust-embed` による `fxg` バイナリへの組み込み
       (`fxg-ui-assets` クレート + 共通ルーターの SPA フォールバック)
 - [x] セッション画面の実装:
-  - [x] チャットタイムライン（思考折りたたみ・スラッシュコマンド補完・承認Inbox）
+  - [x] チャットタイムライン（思考折りたたみ・スラッシュコマンド補完・承認・質問カード）
   - [x] 2階層 Diff ビューア（セッション編集差分 + Worktree リアルタイムGit差分:
         `vs Base` / `vs HEAD`）
   - [x] 双方向 Web ターミナル（`ITerminalAdapter` 抽象化 + `ghostty-web` 実装 +

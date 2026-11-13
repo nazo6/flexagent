@@ -4,6 +4,12 @@
   import * as Tooltip from "#lib/components/ui/tooltip/index.ts";
   import { formatRelativeTimeCompact } from "#lib/format.ts";
   import { getNodeAvailability } from "#lib/node-status.ts";
+  import {
+    isWaitingSessionStatus,
+    sessionAttentionBadgeLabel,
+    sessionNeedsAttention,
+    sessionStatusLabel,
+  } from "#lib/session-status.ts";
   import { pinned } from "#lib/stores/pinned.svelte.ts";
   import { sync } from "#lib/stores/app.svelte.ts";
   import { cn } from "#lib/utils.ts";
@@ -23,7 +29,6 @@
   import FolderIcon from "@lucide/svelte/icons/folder";
   import GitBranchIcon from "@lucide/svelte/icons/git-branch";
   import HistoryIcon from "@lucide/svelte/icons/history";
-  import InboxIcon from "@lucide/svelte/icons/inbox";
   import PinIcon from "@lucide/svelte/icons/pin";
   import PlusIcon from "@lucide/svelte/icons/plus";
   import SearchIcon from "@lucide/svelte/icons/search";
@@ -81,21 +86,12 @@
       .toSorted((a, b) => (b.archived_at ?? 0) - (a.archived_at ?? 0)),
   );
 
-  const pendingSessionIds = $derived(new Set(sync.inbox.map((req) => req.session_id)));
-
-  // Sessions needing attention across all projects (pending approvals are included even when archived)
-  const needsAttentionSessions = $derived.by(() => {
-    const attention = new Map<string, SessionSummary>();
-    for (const session of sync.sessions) {
-      if (pendingSessionIds.has(session.session_id)) {
-        attention.set(session.session_id, session);
-      }
-    }
-    for (const session of filteredSessions) {
-      if (session.status === "error") attention.set(session.session_id, session);
-    }
-    return [...attention.values()];
-  });
+  // Sessions needing attention across all projects (waiting sessions stay visible even when archived)
+  const needsAttentionSessions = $derived(
+    sync.sessions
+      .filter((session) => sessionNeedsAttention(session))
+      .toSorted((a, b) => b.updated_at - a.updated_at),
+  );
 
   interface ProjectSessionGroup {
     projectId: string;
@@ -136,7 +132,7 @@
         continue;
       }
 
-      const pendingCount = projSessions.filter((s) => pendingSessionIds.has(s.session_id)).length;
+      const pendingCount = projSessions.filter((s) => isWaitingSessionStatus(s.status)).length;
       const runningCount = projSessions.filter((s) => s.status === "running").length;
 
       groups.push({
@@ -210,27 +206,6 @@
         <PlusIcon class="size-4" />
         <span>{m.shell_new_session()}</span>
       </div>
-    </a>
-
-    <a
-      href="/inbox"
-      onclick={handleLinkClick}
-      class={cn(
-        "flex items-center justify-between rounded-md px-2.5 py-1.5 font-medium transition-colors",
-        currentPath.startsWith("/inbox")
-          ? "bg-signal-soft text-foreground shadow-[inset_2px_0_0_0_var(--signal)]"
-          : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
-      )}
-    >
-      <div class="flex items-center gap-2">
-        <InboxIcon class="size-4" />
-        <span>{m.shell_approval_inbox()}</span>
-      </div>
-      {#if sync.inbox.length > 0}
-        <Badge variant="destructive" class="px-1.5 py-0 text-[11px] leading-tight">
-          {sync.inbox.length}
-        </Badge>
-      {/if}
     </a>
 
     <a
@@ -461,6 +436,9 @@
 {#snippet sessionRow(session: SessionSummary)}
   {@const isActive = activeSessionId === session.session_id}
   {@const isArchived = session.archived_at !== null}
+  {@const isWaiting = isWaitingSessionStatus(session.status)}
+  {@const isAttention = sessionNeedsAttention(session)}
+  {@const attentionLabel = isAttention ? sessionAttentionBadgeLabel(session.status) : null}
   {@const node = getNode(session.node_id)}
   {@const nodeAvail = getNodeAvailability(node, sync.wsConnected)}
   {@const isPinned = pinned.isPinned(session.session_id)}
@@ -477,8 +455,12 @@
                 "group flex items-center justify-between gap-2 rounded-md px-2 py-1.5 text-[13px] transition-colors",
                 isActive
                   ? "bg-signal-soft text-foreground shadow-[inset_2px_0_0_0_var(--signal)] font-medium"
-                  : "text-foreground/80 hover:bg-accent/40 hover:text-foreground",
-                isArchived && "opacity-70",
+                  : isWaiting
+                    ? "bg-warn-soft/75 text-foreground shadow-[inset_2px_0_0_0_var(--warn)] font-medium hover:bg-warn-soft"
+                    : isAttention
+                      ? "bg-danger-soft/75 text-foreground shadow-[inset_2px_0_0_0_var(--danger)] font-medium hover:bg-danger-soft"
+                      : "text-foreground/80 hover:bg-accent/40 hover:text-foreground",
+                isArchived && !isWaiting && "opacity-70",
               )}
             >
               <!-- Node status dot -->
@@ -486,6 +468,17 @@
 
               <!-- Title -->
               <span class="min-w-0 flex-1 truncate">{session.title}</span>
+
+              {#if attentionLabel}
+                <span
+                  class={cn(
+                    "shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold leading-none",
+                    isWaiting ? "bg-warn/15 text-warn" : "bg-danger/15 text-danger",
+                  )}
+                >
+                  {attentionLabel}
+                </span>
+              {/if}
 
               <div class="flex shrink-0 items-center gap-1.5 text-muted-foreground text-[11px]">
                 <!-- Archive / delete menu -->
@@ -542,6 +535,8 @@
           <span class="text-background/70 flex items-center gap-1.5">
             <span class={cn("size-1.5 shrink-0 rounded-full", nodeAvail.dotColorClass)}></span>
             <span class="truncate">
+              {sessionStatusLabel(session.status)}
+              {" · "}
               {m.shell_node_status({
                 node: node?.name ?? session.node_id,
                 status: nodeAvail.statusText,

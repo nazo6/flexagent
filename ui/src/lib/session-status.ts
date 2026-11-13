@@ -1,6 +1,38 @@
 import type { BadgeVariant } from "#lib/components/ui/badge/index.ts";
-import type { SessionStatus } from "#lib/generated/bindings.ts";
+import type { SessionStatus, SessionSummary } from "#lib/generated/bindings.ts";
 import { m } from "#lib/paraglide/messages.js";
+
+/** Whether a session status is waiting for a user decision (approval or structured input). */
+export function isWaitingSessionStatus(status: SessionStatus): boolean {
+  return status === "waiting_permission" || status === "waiting_input";
+}
+
+/**
+ * Whether a session should be surfaced in the "Needs attention" group / badges.
+ *
+ * Waiting sessions stay visible even when archived so a paused agent cannot be
+ * hidden accidentally; error sessions are shown only while unarchived.
+ */
+export function sessionNeedsAttention(session: SessionSummary): boolean {
+  return (
+    isWaitingSessionStatus(session.status) ||
+    (session.archived_at === null && session.status === "error")
+  );
+}
+
+/** Compact label for attention badges inside narrow session rows. */
+export function sessionAttentionBadgeLabel(status: SessionStatus): string | null {
+  switch (status) {
+    case "waiting_permission":
+      return m.shell_badge_approval();
+    case "waiting_input":
+      return m.shell_badge_input();
+    case "error":
+      return m.status_error();
+    default:
+      return null;
+  }
+}
 
 /** English label for a session status. */
 export function sessionStatusLabel(status: SessionStatus): string {

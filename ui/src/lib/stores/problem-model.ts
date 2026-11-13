@@ -18,7 +18,7 @@ export interface AppProblem {
   /** Deduplication key (context + code + message). */
   key: string;
   severity: ProblemSeverity;
-  /** Where the failure happened (`sessions`, `inbox`, `send prompt`, ...). */
+  /** Where the failure happened (`sessions`, `nodes`, `send prompt`, ...). */
   context: string;
   /** Localized message (falls back to the English server message). */
   message: string;

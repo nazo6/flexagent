@@ -4,10 +4,8 @@ import type {
   ClientWsMessage,
   CommandResult,
   ElicitationAction,
-  ElicitationRequestEntry,
   ElicitationValue,
   NodeSummary,
-  PermissionRequestEntry,
   ProjectSummary,
   PromptInput,
   RespondElicitationResponse,
@@ -68,7 +66,7 @@ function readCursor(): number | null {
  * - It persists the `cursor` of the last received batch and resumes
  *   incrementally on reconnect (one cursor per target store; switching targets
  *   is an origin navigation, so localStorage is naturally isolated per origin).
- * - Session projections (`sessions`), the approval Inbox and the node list are
+ * - Session projections (`sessions`) and the node list are
  *   re-fetched from their REST APIs when events are applied (kept consistent
  *   with the hub-side projection).
  */
@@ -86,11 +84,6 @@ export class SyncStore {
   projects = $state<ProjectSummary[]>([]);
   projectsLoading = $state(false);
   projectsError = $state<string | null>(null);
-  inbox = $state<PermissionRequestEntry[]>([]);
-  inboxLoading = $state(false);
-  inboxError = $state<string | null>(null);
-  /** Pending elicitations (questions) across all sessions. */
-  inboxElicitations = $state<ElicitationRequestEntry[]>([]);
   /** Client WS connection state. */
   wsConnected = $state(false);
   /** Node ⇔ hub link state (only when connected to a local node). */
@@ -123,7 +116,6 @@ export class SyncStore {
   #cursor: number | null = readCursor();
   #pendingCommands = new Map<string, PendingCommand>();
   #sessionsRefreshQueued = false;
-  #inboxRefreshQueued = false;
 
   constructor(connection: ConnectionStore) {
     this.connection = connection;
@@ -210,12 +202,7 @@ export class SyncStore {
   // ------------------------------------------------------------------
 
   async refreshAll(): Promise<void> {
-    await Promise.all([
-      this.refreshSessions(),
-      this.refreshNodes(),
-      this.refreshProjects(),
-      this.refreshInbox(),
-    ]);
+    await Promise.all([this.refreshSessions(), this.refreshNodes(), this.refreshProjects()]);
   }
 
   async refreshSessions(): Promise<void> {
@@ -261,36 +248,12 @@ export class SyncStore {
     }
   }
 
-  async refreshInbox(): Promise<void> {
-    this.inboxLoading = true;
-    try {
-      const inbox = await this.connection.client.inbox();
-      this.inbox = inbox.requests;
-      this.inboxElicitations = inbox.elicitations;
-      this.inboxError = null;
-    } catch (error) {
-      this.inboxError = errorMessage(error);
-      this.#warn("inbox", error);
-    } finally {
-      this.inboxLoading = false;
-    }
-  }
-
   #queueSessionsRefresh(): void {
     if (this.#sessionsRefreshQueued) return;
     this.#sessionsRefreshQueued = true;
     queueMicrotask(() => {
       this.#sessionsRefreshQueued = false;
       void this.refreshSessions();
-    });
-  }
-
-  #queueInboxRefresh(): void {
-    if (this.#inboxRefreshQueued) return;
-    this.#inboxRefreshQueued = true;
-    queueMicrotask(() => {
-      this.#inboxRefreshQueued = false;
-      void this.refreshInbox();
     });
   }
 
@@ -506,7 +469,7 @@ export class SyncStore {
     await this.connection.client.deleteSession(sessionId);
     this.#timelines.delete(sessionId);
     this.provisioningLogs.delete(sessionId);
-    await Promise.all([this.refreshSessions(), this.refreshInbox()]);
+    await this.refreshSessions();
   }
 
   #resolveCommand(result: CommandResult): void {
@@ -580,7 +543,6 @@ export class SyncStore {
     }
 
     let sessionsDirty = false;
-    let inboxDirty = false;
     for (const event of events) {
       const timeline = this.timelineFor(event.session_id);
       if (!timeline.applyEvent(event)) continue;
@@ -595,16 +557,11 @@ export class SyncStore {
           sessionsDirty = true;
           break;
         case "session_deleted":
-          // Deleted sessions disappear from the list and approval Inbox, and the
+          // Deleted sessions disappear from the list, and the
           // local timeline is discarded (only the tombstone event remains after)
           this.#timelines.delete(event.session_id);
           this.provisioningLogs.delete(event.session_id);
           sessionsDirty = true;
-          inboxDirty = true;
-          break;
-        case "permission_request":
-        case "permission_resolved":
-          inboxDirty = true;
           break;
         default:
           break;
@@ -617,6 +574,5 @@ export class SyncStore {
       }
     }
     if (sessionsDirty) this.#queueSessionsRefresh();
-    if (inboxDirty) this.#queueInboxRefresh();
   }
 }

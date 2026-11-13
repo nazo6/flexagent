@@ -203,7 +203,7 @@ async function showFailure(payload: PushPayload, message: string): Promise<void>
 
 /** Focus an existing app window, or open a new one. */
 async function openApp(sessionId: string | undefined): Promise<void> {
-  const target = sessionId ? `/sessions/${sessionId}` : "/inbox";
+  const target = sessionId ? `/sessions/${sessionId}` : "/";
   const windows = await self.clients.matchAll({
     type: "window",
     includeUncontrolled: true,

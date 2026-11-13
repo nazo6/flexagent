@@ -836,16 +836,6 @@ pub struct SessionImportResponse {
     pub command_id: CommandId,
 }
 
-/// `GET /api/v1/inbox` response (unresolved permission requests across all sessions).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
-#[specta(collect)]
-pub struct InboxResponse {
-    /// Unresolved (`pending`) permission requests
-    pub requests: Vec<PermissionRequestEntry>,
-    /// Unresolved (`pending`) elicitation (structured input) requests
-    pub elicitations: Vec<ElicitationRequestEntry>,
-}
-
 /// `POST /api/v1/sessions/:id/permissions/:req_id/respond` request.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]

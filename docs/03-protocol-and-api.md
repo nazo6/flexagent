@@ -285,11 +285,10 @@ prune します。`sessions` は最大 1000 件で、超過時は
 | `POST /api/v1/sessions/:id/archive`                              | アーカイブ / 復元。                                                         |
 | `DELETE /api/v1/sessions/:id`                                    | 削除（tombstone）。                                                         |
 
-#### 検索 / Inbox / Push / 監査
+#### 検索 / Push / 監査
 
 | Method / Path                        | 内容                        |
 | :----------------------------------- | :-------------------------- |
-| `GET /api/v1/inbox`                  | 未解決の承認 / 質問の一覧。 |
 | `GET /api/v1/search?q=...&limit=...` | FTS5 全文検索。             |
 | `POST /api/v1/push/subscribe`        | Web Push 購読（ハブのみ）。 |
 | `GET /api/v1/audit/logs?limit=...`   | 監査ログ。                  |

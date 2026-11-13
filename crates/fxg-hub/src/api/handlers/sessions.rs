@@ -1,4 +1,4 @@
-//! Session listing, events, diffs, inbox, search and lifecycle actions.
+//! Session listing, events, diffs, search and lifecycle actions.
 
 use std::str::FromStr;
 
@@ -9,10 +9,10 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use fxg_db::SessionFilter;
 use fxg_protocol::client_api::{
-    AuditLogsResponse, ControlSessionRequest, CreateSessionRequest, InboxResponse,
-    RespondElicitationRequest, RespondPermissionRequest, ResumeSessionRequest, SearchResponse,
-    SendPromptRequest, SessionArchiveRequest, SessionDetail, SessionImportRequest,
-    SessionListResponse, SessionRenameRequest,
+    AuditLogsResponse, ControlSessionRequest, CreateSessionRequest, RespondElicitationRequest,
+    RespondPermissionRequest, ResumeSessionRequest, SearchResponse, SendPromptRequest,
+    SessionArchiveRequest, SessionDetail, SessionImportRequest, SessionListResponse,
+    SessionRenameRequest,
 };
 use fxg_protocol::common::{DiffScope, SessionStatus};
 
@@ -164,21 +164,6 @@ pub(crate) async fn session_diff<B: ClientApiBackend>(
     {
         Ok(diff) => Json(diff).into_response(),
         Err(err) => err.into_response(),
-    }
-}
-
-pub(crate) async fn inbox<B: ClientApiBackend>(State(state): State<ClientApiState<B>>) -> Response {
-    let db = state.backend.db();
-    match (
-        db.pending_permissions().await,
-        db.pending_elicitations().await,
-    ) {
-        (Ok(requests), Ok(elicitations)) => Json(InboxResponse {
-            requests,
-            elicitations,
-        })
-        .into_response(),
-        (Err(err), _) | (_, Err(err)) => ApiError::from(err).into_response(),
     }
 }
 

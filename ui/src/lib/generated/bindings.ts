@@ -1014,14 +1014,6 @@ export type ImportRegistryAgentRequest = {
 	extension?: string | null,
 };
 
-/**  `GET /api/v1/inbox` response (unresolved permission requests across all sessions). */
-export type InboxResponse = {
-	/**  Unresolved (`pending`) permission requests */
-	requests: PermissionRequestEntry[],
-	/**  Unresolved (`pending`) elicitation (structured input) requests */
-	elicitations: ElicitationRequestEntry[],
-};
-
 /**
  *  A persisted diagnostic incident.
  *

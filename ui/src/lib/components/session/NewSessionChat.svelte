@@ -53,7 +53,6 @@
   import { problems } from "#lib/stores/problems.svelte.ts";
   import { toast } from "svelte-sonner";
   import { onMount, untrack } from "svelte";
-  import AlertCircleIcon from "@lucide/svelte/icons/alert-circle";
   import BoxIcon from "@lucide/svelte/icons/box";
   import CheckCircle2Icon from "@lucide/svelte/icons/check-circle-2";
   import FileIcon from "@lucide/svelte/icons/file";
@@ -939,23 +938,6 @@
           <XIcon class="mr-1 size-3.5" />
           {m.new_session_fork_clear()}
         </Button>
-      </div>
-    {/if}
-
-    {#if sync.inbox.length > 0}
-      <div
-        class="border-destructive/30 bg-destructive/10 text-destructive flex items-center justify-between gap-2 rounded-lg border p-3 text-[13px]"
-      >
-        <span class="flex items-center gap-2">
-          <AlertCircleIcon class="size-4 shrink-0" />
-          <span>{m.inbox_approvals()} ({sync.inbox.length})</span>
-        </span>
-        <a
-          href="/inbox"
-          class="bg-destructive text-destructive-foreground hover:bg-destructive/90 rounded-md px-2.5 py-1 text-[12px] font-medium transition-colors"
-        >
-          {m.shell_approval_inbox()}
-        </a>
       </div>
     {/if}
 
