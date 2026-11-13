@@ -2,6 +2,7 @@
   import ElicitationCard from "#lib/components/ElicitationCard.svelte";
   import PermissionCard from "#lib/components/PermissionCard.svelte";
   import MarkdownText from "#lib/components/MarkdownText.svelte";
+  import ActivityBlock from "./ActivityBlock.svelte";
   import ForkOrigin from "./ForkOrigin.svelte";
   import MessageActions from "./MessageActions.svelte";
   import Self from "./ChatTimeline.svelte";
@@ -9,7 +10,12 @@
   import ThoughtBlock from "./ThoughtBlock.svelte";
   import ToolCallGroup from "./ToolCallGroup.svelte";
   import { Badge } from "#lib/components/ui/badge/index.ts";
-  import { groupTimelineItems, type TimelineGroup } from "#lib/chat-groups.ts";
+  import {
+    groupActivitySections,
+    groupTimelineItems,
+    type TimelineEntry,
+    type TimelineGroup,
+  } from "#lib/chat-groups.ts";
   import { formatClockTime, formatEpochMs } from "#lib/format.ts";
   import { m } from "#lib/paraglide/messages.js";
   import type { ForkScope, SessionStatus } from "#lib/generated/bindings.ts";
@@ -123,6 +129,23 @@
     return key;
   });
 
+  /** Rendered rows: activity runs are folded once, the rest stay one row each. */
+  const timelineEntries = $derived(groupActivitySections(groupedItems, forkAfterGroupKey));
+
+  /**
+   * Key of the entry that holds the work of the running turn. It starts open so
+   * the reader sees progress, and folds once the answer takes over the tail.
+   */
+  const liveEntryKey = $derived(
+    status === "running" && !nested ? (timelineEntries.at(-1)?.key ?? null) : null,
+  );
+
+  function endsWithFork(entry: TimelineEntry): boolean {
+    if (forkFrom === null || forkAfterGroupKey === null) return false;
+    const last = entry.kind === "activity" ? entry.groups.at(-1) : entry;
+    return last?.key === forkAfterGroupKey;
+  }
+
   const sessionBusy = $derived(
     status === "running" || status === "waiting_permission" || status === "waiting_input",
   );
@@ -158,176 +181,190 @@
   }
 </script>
 
+{#snippet groupContent(group: TimelineGroup)}
+  {#if group.kind === "subagent"}
+    <SubagentGroup subagent={group.subagent} onopen={onsubagent}>
+      <Self
+        {sessionId}
+        items={group.items}
+        {status}
+        nested
+        {onsubagent}
+        subagentTitle={group.subagent.title ?? group.subagent.description ?? null}
+      />
+    </SubagentGroup>
+  {:else if group.kind === "tools"}
+    <ToolCallGroup tools={group.tools} />
+  {:else}
+    {@const item = group.item}
+    {#if item.kind === "user"}
+      {@const fork = forkState(item)}
+      <div class="message-group">
+        <div class="flex justify-end">
+          <div
+            class="bg-user-message text-foreground max-w-[82%] rounded-xl rounded-br-sm px-4 py-2.5"
+          >
+            {#if item.attachments.length > 0}
+              <div class="mb-1 flex flex-wrap gap-1.5">
+                {#each item.attachments as attachment (attachment.file_name + (attachment.local_path ?? ""))}
+                  {#if attachment.data_b64 && attachment.mime_type.startsWith("image/")}
+                    <img
+                      src={`data:${attachment.mime_type};base64,${attachment.data_b64}`}
+                      alt={attachment.file_name}
+                      class="max-h-40 rounded-md object-contain"
+                    />
+                  {:else}
+                    <span
+                      class="bg-background/60 inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px]"
+                    >
+                      <PaperclipIcon class="size-2.5" />
+                      {attachment.file_name}
+                    </span>
+                  {/if}
+                {/each}
+              </div>
+            {/if}
+            <p class="text-sm whitespace-pre-wrap">{item.text}</p>
+          </div>
+        </div>
+        <MessageActions
+          text={item.text}
+          canFork={fork.canFork}
+          forkReason={fork.reason}
+          prominent={item.seq === lastForkableSeq}
+          meta={`${item.clientSource} · ${formatClockTime(item.createdAt)}`}
+          metaTitle={formatEpochMs(item.createdAt)}
+          onfork={() => onfork?.(item)}
+        />
+      </div>
+    {:else if item.kind === "agent"}
+      {@const fork = forkState(item)}
+      <div class="message-group">
+        <div class="flex gap-2.5">
+          <span
+            class="bg-signal-soft text-signal mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-md"
+          >
+            <BotIcon class="size-3" />
+          </span>
+          <div class="min-w-0 max-w-[92%] flex-1">
+            <MarkdownText
+              text={item.text}
+              streaming={item.streaming}
+              class="text-sm leading-relaxed"
+            />
+          </div>
+        </div>
+        <MessageActions
+          text={item.text}
+          canFork={fork.canFork}
+          forkReason={fork.reason}
+          prominent={item.seq === lastForkableSeq}
+          onfork={() => onfork?.(item)}
+        />
+      </div>
+    {:else if item.kind === "thought"}
+      <ThoughtBlock {item} />
+    {:else if item.kind === "terminal"}
+      <div class="bg-card flex flex-col gap-1.5 rounded-lg border border-border p-3">
+        <div class="flex items-center gap-2 text-[13px]">
+          <SquareTerminalIcon class="text-muted-foreground size-4" />
+          <span class="desk-mono">{item.command === "" ? item.terminalId : item.command}</span>
+          {#if item.exitCode !== null}
+            <Badge variant={item.exitCode === 0 ? "secondary" : "destructive"}>
+              exit {item.exitCode}
+            </Badge>
+          {/if}
+        </div>
+        <pre
+          class="bg-muted/40 max-h-56 overflow-auto rounded-md border border-border p-2.5 font-mono text-[13px] leading-relaxed whitespace-pre-wrap">{item.output}</pre>
+      </div>
+    {:else if item.kind === "permission"}
+      <PermissionCard
+        {sessionId}
+        requestId={item.requestId}
+        toolName={item.toolName}
+        summary={item.summary}
+        options={item.options}
+        details={item.details}
+        resolved={item.resolved}
+        createdAt={item.createdAt}
+        {subagentTitle}
+      />
+    {:else if item.kind === "elicitation"}
+      <ElicitationCard
+        {sessionId}
+        elicitationId={item.elicitationId}
+        message={item.message}
+        requestedSchema={item.requestedSchema}
+        resolved={item.resolved}
+        createdAt={item.createdAt}
+      />
+    {:else if item.kind === "plan"}
+      <div class="bg-card flex flex-col gap-1.5 rounded-lg border border-border p-3">
+        <div class="flex items-center gap-2 text-[13px] font-medium">
+          <ListChecksIcon class="size-4" />
+          {m.chat_plan()}
+        </div>
+        <ul class="flex list-none flex-col gap-1 p-0 text-sm">
+          {#each item.entries as entry (entry.id)}
+            <li class={planStatusClass(entry.status)}>{entry.title}</li>
+          {/each}
+        </ul>
+      </div>
+    {:else if item.kind === "subagent_message"}
+      <div class="border-border bg-card/60 rounded-lg border px-3 py-2 text-[13px]">
+        <p class="text-muted-foreground mb-1 text-[11px]">
+          {item.senderSessionId} → {item.recipientSessionId}
+        </p>
+        <MarkdownText text={item.text} streaming={item.streaming} />
+      </div>
+    {:else if item.kind === "notice"}
+      <div
+        class="flex items-start gap-2 rounded-lg border p-3 text-sm {item.tone === 'error'
+          ? 'border-danger/30 bg-danger-soft/50 text-danger'
+          : item.tone === 'warning'
+            ? 'border-warn/30 bg-warn-soft/50 text-warn'
+            : 'border-border bg-card text-foreground'}"
+      >
+        {#if item.tone === "error" || item.tone === "warning"}
+          <AlertTriangleIcon class="mt-0.5 size-4 shrink-0" />
+        {:else}
+          <ClockIcon class="text-muted-foreground mt-0.5 size-4 shrink-0" />
+        {/if}
+        <p class="whitespace-pre-wrap">{item.text}</p>
+      </div>
+    {:else if item.kind === "pending"}
+      <div class="text-muted-foreground flex items-center gap-2 text-sm" role="status">
+        <LoaderCircleIcon class="text-signal size-4 animate-spin" />
+        <span>
+          {m.chat_pending_label()}:
+          <span class="whitespace-pre-wrap">{item.text}</span>
+        </span>
+      </div>
+    {/if}
+  {/if}
+{/snippet}
+
 <!--
   Spacing lives in `.timeline-list` (app.css): blocks share one base gap, while
   a message group contributes its in-flow boundary row as the space below it.
 -->
 <ul class="timeline-list list-none p-0">
-  {#each groupedItems as group (group.key)}
+  {#each timelineEntries as entry (entry.key)}
     <li>
-      {#if group.kind === "subagent"}
-        <SubagentGroup subagent={group.subagent} onopen={onsubagent}>
-          <Self
-            {sessionId}
-            items={group.items}
-            {status}
-            nested
-            {onsubagent}
-            subagentTitle={group.subagent.title ?? group.subagent.description ?? null}
-          />
-        </SubagentGroup>
-      {:else if group.kind === "tools"}
-        <ToolCallGroup tools={group.tools} />
+      {#if entry.kind === "activity"}
+        <ActivityBlock section={entry} live={entry.key === liveEntryKey}>
+          <ul class="timeline-list list-none p-0">
+            {#each entry.groups as inner (inner.key)}
+              <li>{@render groupContent(inner)}</li>
+            {/each}
+          </ul>
+        </ActivityBlock>
       {:else}
-        {@const item = group.item}
-        {#if item.kind === "user"}
-          {@const fork = forkState(item)}
-          <div class="message-group">
-            <div class="flex justify-end">
-              <div
-                class="bg-user-message text-foreground max-w-[82%] rounded-xl rounded-br-sm px-4 py-2.5"
-              >
-                {#if item.attachments.length > 0}
-                  <div class="mb-1 flex flex-wrap gap-1.5">
-                    {#each item.attachments as attachment (attachment.file_name + (attachment.local_path ?? ""))}
-                      {#if attachment.data_b64 && attachment.mime_type.startsWith("image/")}
-                        <img
-                          src={`data:${attachment.mime_type};base64,${attachment.data_b64}`}
-                          alt={attachment.file_name}
-                          class="max-h-40 rounded-md object-contain"
-                        />
-                      {:else}
-                        <span
-                          class="bg-background/60 inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px]"
-                        >
-                          <PaperclipIcon class="size-2.5" />
-                          {attachment.file_name}
-                        </span>
-                      {/if}
-                    {/each}
-                  </div>
-                {/if}
-                <p class="text-sm whitespace-pre-wrap">{item.text}</p>
-              </div>
-            </div>
-            <MessageActions
-              text={item.text}
-              canFork={fork.canFork}
-              forkReason={fork.reason}
-              prominent={item.seq === lastForkableSeq}
-              meta={`${item.clientSource} · ${formatClockTime(item.createdAt)}`}
-              metaTitle={formatEpochMs(item.createdAt)}
-              onfork={() => onfork?.(item)}
-            />
-          </div>
-        {:else if item.kind === "agent"}
-          {@const fork = forkState(item)}
-          <div class="message-group">
-            <div class="flex gap-2.5">
-              <span
-                class="bg-signal-soft text-signal mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-md"
-              >
-                <BotIcon class="size-3" />
-              </span>
-              <div class="min-w-0 max-w-[92%] flex-1">
-                <MarkdownText
-                  text={item.text}
-                  streaming={item.streaming}
-                  class="text-sm leading-relaxed"
-                />
-              </div>
-            </div>
-            <MessageActions
-              text={item.text}
-              canFork={fork.canFork}
-              forkReason={fork.reason}
-              prominent={item.seq === lastForkableSeq}
-              onfork={() => onfork?.(item)}
-            />
-          </div>
-        {:else if item.kind === "thought"}
-          <ThoughtBlock {item} />
-        {:else if item.kind === "terminal"}
-          <div class="bg-card flex flex-col gap-1.5 rounded-lg border border-border p-3">
-            <div class="flex items-center gap-2 text-[13px]">
-              <SquareTerminalIcon class="text-muted-foreground size-4" />
-              <span class="desk-mono">{item.command === "" ? item.terminalId : item.command}</span>
-              {#if item.exitCode !== null}
-                <Badge variant={item.exitCode === 0 ? "secondary" : "destructive"}>
-                  exit {item.exitCode}
-                </Badge>
-              {/if}
-            </div>
-            <pre
-              class="bg-muted/40 max-h-56 overflow-auto rounded-md border border-border p-2.5 font-mono text-[13px] leading-relaxed whitespace-pre-wrap">{item.output}</pre>
-          </div>
-        {:else if item.kind === "permission"}
-          <PermissionCard
-            {sessionId}
-            requestId={item.requestId}
-            toolName={item.toolName}
-            summary={item.summary}
-            options={item.options}
-            details={item.details}
-            resolved={item.resolved}
-            createdAt={item.createdAt}
-            {subagentTitle}
-          />
-        {:else if item.kind === "elicitation"}
-          <ElicitationCard
-            {sessionId}
-            elicitationId={item.elicitationId}
-            message={item.message}
-            requestedSchema={item.requestedSchema}
-            resolved={item.resolved}
-            createdAt={item.createdAt}
-          />
-        {:else if item.kind === "plan"}
-          <div class="bg-card flex flex-col gap-1.5 rounded-lg border border-border p-3">
-            <div class="flex items-center gap-2 text-[13px] font-medium">
-              <ListChecksIcon class="size-4" />
-              {m.chat_plan()}
-            </div>
-            <ul class="flex list-none flex-col gap-1 p-0 text-sm">
-              {#each item.entries as entry (entry.id)}
-                <li class={planStatusClass(entry.status)}>{entry.title}</li>
-              {/each}
-            </ul>
-          </div>
-        {:else if item.kind === "subagent_message"}
-          <div class="border-border bg-card/60 rounded-lg border px-3 py-2 text-[13px]">
-            <p class="text-muted-foreground mb-1 text-[11px]">
-              {item.senderSessionId} → {item.recipientSessionId}
-            </p>
-            <MarkdownText text={item.text} streaming={item.streaming} />
-          </div>
-        {:else if item.kind === "notice"}
-          <div
-            class="flex items-start gap-2 rounded-lg border p-3 text-sm {item.tone === 'error'
-              ? 'border-danger/30 bg-danger-soft/50 text-danger'
-              : item.tone === 'warning'
-                ? 'border-warn/30 bg-warn-soft/50 text-warn'
-                : 'border-border bg-card text-foreground'}"
-          >
-            {#if item.tone === "error" || item.tone === "warning"}
-              <AlertTriangleIcon class="mt-0.5 size-4 shrink-0" />
-            {:else}
-              <ClockIcon class="text-muted-foreground mt-0.5 size-4 shrink-0" />
-            {/if}
-            <p class="whitespace-pre-wrap">{item.text}</p>
-          </div>
-        {:else if item.kind === "pending"}
-          <div class="text-muted-foreground flex items-center gap-2 text-sm" role="status">
-            <LoaderCircleIcon class="text-signal size-4 animate-spin" />
-            <span>
-              {m.chat_pending_label()}:
-              <span class="whitespace-pre-wrap">{item.text}</span>
-            </span>
-          </div>
-        {/if}
+        {@render groupContent(entry)}
       {/if}
     </li>
-    {#if forkFrom !== null && group.key === forkAfterGroupKey}
+    {#if forkFrom !== null && endsWithFork(entry)}
       <li>
         <ForkOrigin parentSessionId={forkFrom} title={forkFromTitle} />
       </li>

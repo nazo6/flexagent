@@ -19,9 +19,16 @@
     children: Snippet;
   } = $props();
 
-  let open = $state(true);
-
+  let userToggled = $state(false);
+  let userIsOpen = $state(false);
   const running = $derived(subagent.status === "running");
+  /** Open while the child works; fold once it is done (same idiom as thoughts). */
+  const open = $derived(userToggled ? userIsOpen : running);
+
+  function toggle(): void {
+    userToggled = true;
+    userIsOpen = !open;
+  }
   const statusLabel = $derived.by(() => {
     switch (subagent.status) {
       case "running":
@@ -51,7 +58,8 @@
     <button
       type="button"
       class="hover:bg-accent/40 flex min-w-0 flex-1 items-center gap-2 rounded px-1 py-0.5 text-left"
-      onclick={() => (open = !open)}
+      aria-expanded={open}
+      onclick={toggle}
     >
       {#if open}
         <ChevronDownIcon class="text-muted-foreground size-3.5 shrink-0" />

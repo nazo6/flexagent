@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { groupTimelineItems, type ToolItem } from "./chat-groups.ts";
+import { groupActivitySections, groupTimelineItems, type ToolItem } from "./chat-groups.ts";
 import type { TimelineItem } from "./sync/reducer.ts";
 
 function tool(toolCallId: string): ToolItem {
@@ -62,6 +62,36 @@ function subagent(childSessionId: string): TimelineItem {
   };
 }
 
+function thought(text: string): TimelineItem {
+  return {
+    kind: "thought",
+    key: `thought:${text}`,
+    seq: 2,
+    createdAt: 0,
+    text,
+    streaming: false,
+    startedAt: null,
+    endedAt: null,
+    subagentId: null,
+  };
+}
+
+function permission(requestId: string): TimelineItem {
+  return {
+    kind: "permission",
+    key: `permission:${requestId}`,
+    seq: 2,
+    createdAt: 0,
+    requestId,
+    toolName: "shell",
+    summary: "Run cargo test",
+    options: [],
+    details: null,
+    resolved: null,
+    subagentId: null,
+  };
+}
+
 describe("groupTimelineItems", () => {
   it("groups consecutive tool calls", () => {
     const groups = groupTimelineItems([tool("t1"), tool("t2"), message("done")]);
@@ -103,5 +133,45 @@ describe("groupTimelineItems", () => {
   it("keeps the tool call when the question has no linked tool call", () => {
     const groups = groupTimelineItems([tool("q1"), question("e1", null)]);
     expect(groups.map((group) => group.kind)).toEqual(["tools", "single"]);
+  });
+});
+
+describe("groupActivitySections", () => {
+  it("folds a run of intermediate work into one section", () => {
+    const groups = groupTimelineItems([
+      thought("looking"),
+      tool("t1"),
+      tool("t2"),
+      subagent("child-1"),
+      message("done"),
+    ]);
+    const entries = groupActivitySections(groups);
+    expect(entries.map((entry) => entry.kind)).toEqual(["activity", "single"]);
+    const section = entries[0];
+    if (section.kind !== "activity") throw new Error("expected activity section");
+    expect(section.groups.map((group) => group.kind)).toEqual(["single", "tools", "subagent"]);
+    expect(section.counts).toEqual({ tools: 2, thoughts: 1, subagents: 1, steps: 0 });
+  });
+
+  it("leaves a single collapsible block on its own row", () => {
+    const entries = groupActivitySections(groupTimelineItems([tool("t1"), tool("t2")]));
+    expect(entries.map((entry) => entry.kind)).toEqual(["tools"]);
+  });
+
+  it("keeps approvals outside the fold", () => {
+    const entries = groupActivitySections(
+      groupTimelineItems([thought("planning"), tool("t1"), permission("p1"), tool("t2")]),
+    );
+    expect(entries.map((entry) => entry.kind)).toEqual(["activity", "single", "tools"]);
+    expect(entries[1]).toMatchObject({ kind: "single", item: { kind: "permission" } });
+  });
+
+  it("ends a run after the fork origin boundary", () => {
+    const groups = groupTimelineItems([thought("before"), thought("after"), tool("t1")]);
+    const entries = groupActivitySections(groups, groups[0].key);
+    expect(entries.map((entry) => entry.kind)).toEqual(["single", "activity"]);
+    const section = entries[1];
+    if (section.kind !== "activity") throw new Error("expected activity section");
+    expect(section.counts).toEqual({ tools: 1, thoughts: 1, subagents: 0, steps: 0 });
   });
 });

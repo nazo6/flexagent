@@ -7,6 +7,7 @@
   "chat_action_fork_latest": "This agent can only fork from the latest message.",
   "chat_action_fork_running": "Wait until the current turn finishes before forking.",
   "chat_action_fork_unavailable": "This agent does not support forking.",
+  "chat_activity_steps": "Steps ({count})",
   "chat_agent_working": "The agent is working…",
   "chat_attach_file": "Attach file from node",
   "chat_attach_image": "Attach image",
