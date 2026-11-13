@@ -1103,10 +1103,9 @@ async fn apply_event_batch(
         }
     }
 
-    // Web Push notification targets (newly applied approval requests / finished turns)
-    let mut notify_events: Vec<fxg_protocol::events::SessionEventEnvelope> = Vec::new();
-    let mut running_sessions: std::collections::BTreeSet<String> =
-        std::collections::BTreeSet::new();
+    // Newly inserted events. Notification targets are selected after all batches apply so the
+    // running-turn state sees the whole message in order.
+    let mut inserted_events: Vec<fxg_protocol::events::SessionEventEnvelope> = Vec::new();
 
     for (session_id, batch) in batches {
         let acked_up_to_node_seq = batch.last().map(|event| event.node_seq).unwrap_or(0);
@@ -1121,26 +1120,7 @@ async fn apply_event_batch(
                             }),
                             "broadcast a persisted event to clients"
                         );
-                        match &event.payload {
-                            fxg_protocol::events::UnifiedEventPayload::PermissionRequest {
-                                ..
-                            } => notify_events.push(event.clone()),
-                            fxg_protocol::events::UnifiedEventPayload::StatusChanged {
-                                status: fxg_protocol::common::SessionStatus::Running,
-                                ..
-                            } => {
-                                running_sessions.insert(event.session_id.to_string());
-                            }
-                            fxg_protocol::events::UnifiedEventPayload::StatusChanged {
-                                status:
-                                    fxg_protocol::common::SessionStatus::Idle
-                                    | fxg_protocol::common::SessionStatus::Error,
-                                ..
-                            } if running_sessions.remove(event.session_id.as_str()) => {
-                                notify_events.push(event.clone());
-                            }
-                            _ => {}
-                        }
+                        inserted_events.push(event.clone());
                     }
                 }
                 if let Err(err) = state
@@ -1170,12 +1150,12 @@ async fn apply_event_batch(
         }
     }
 
-    // Web Push notifications for approval requests and questions (elicitations)
-    // (sent asynchronously so they do not block the ACK).
-    // Historical events replayed during a resync must not wake up every device.
-    if resync {
-        notify_events.clear();
-    }
+    // Web Push notifications for approvals, questions and finished turns.
+    // Sent asynchronously so they do not block the ACK. Historical events replayed during a
+    // resync still update the running-turn state but never wake up devices
+    // (`push::notification_events`).
+    let notify_events =
+        crate::push::notification_events(&inserted_events, state.running_turns(), resync);
     if !notify_events.is_empty() {
         let push = state.push().clone();
         let db = state.db().clone();
