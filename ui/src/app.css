@@ -16,6 +16,7 @@
  */
 :root {
   --radius: 0.75rem;
+  color-scheme: light;
 
   /* Bone: the default warm neutral + amber signal. */
   --canvas: oklch(0.972 0.006 85);
@@ -76,6 +77,7 @@
 }
 
 .dark {
+  color-scheme: dark;
   --canvas: oklch(0.17 0.008 70);
   --surface: oklch(0.205 0.009 70);
   --surface-raised: oklch(0.235 0.01 70);
@@ -369,6 +371,94 @@
     .message-actions-prominent .message-actions-content {
       opacity: 1;
       pointer-events: auto;
+    }
+  }
+}
+
+/*
+ * Window Controls Overlay (installed desktop PWA).
+ *
+ * `display_override: ["window-controls-overlay", ...]` removes the operating
+ * system title bar and lets the app draw into that strip. The existing top
+ * chrome becomes the title bar: the sidebar header on the left and the route
+ * header (session header or the shell strip) on the right. Vertical space is
+ * saved because those headers no longer sit below a separate native title bar.
+ *
+ * These rules stay outside `@layer` so they win over Tailwind's height and
+ * display utilities without `!important`.
+ *
+ * `titlebar-area-x` is the left inset and
+ * `100vw - x - width` is the right inset, so the same rules work whether the
+ * native controls sit on the left (macOS) or the right (Windows/Linux).
+ */
+@media (display-mode: window-controls-overlay) {
+  :root {
+    /* Keep the compact header tall enough for its 28px controls even on
+       platforms with a shorter native title bar. */
+    --wco-titlebar-height: max(2rem, env(titlebar-area-height, 2rem));
+    --wco-controls-left: env(titlebar-area-x, 0px);
+    --wco-controls-right: max(
+      0px,
+      calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw))
+    );
+  }
+
+  /* The title bar strip is the window drag handle; its controls stay usable. */
+  .wco-titlebar {
+    -webkit-app-region: drag;
+    app-region: drag;
+  }
+  .wco-titlebar
+    :is(a, button, input, select, textarea, label, [role="button"], [contenteditable="true"]) {
+    -webkit-app-region: no-drag;
+    app-region: no-drag;
+  }
+
+  .wco-titlebar-bar,
+  .wco-titlebar-row,
+  .wco-sidebar-header,
+  .wco-main-titlebar,
+  .wco-fallback-titlebar {
+    height: var(--wco-titlebar-height);
+  }
+
+  .wco-fallback-titlebar {
+    display: block;
+  }
+
+  .wco-titlebar-bar,
+  .wco-titlebar-row {
+    padding-block: 0;
+    padding-inline-start: calc(var(--wco-controls-left) + 0.75rem);
+    padding-inline-end: calc(var(--wco-controls-right) + 0.75rem);
+  }
+
+  .wco-sidebar-header {
+    padding-block: 0;
+    padding-inline-start: calc(var(--wco-controls-left) + 0.875rem);
+  }
+
+  @media (min-width: 1024px) {
+    .wco-titlebar-row {
+      padding-inline-start: 1rem;
+      padding-inline-end: calc(var(--wco-controls-right) + 1rem);
+    }
+
+    /* Routes without their own header get a drag strip so content never runs
+       underneath the native window controls. */
+    .wco-main-titlebar {
+      display: block;
+    }
+
+    /* Collapsed rail: the native controls can be wider than the 2.5rem rail,
+       so the main header absorbs the remaining overlap. */
+    .wco-sidebar-collapsed .wco-titlebar-row,
+    .wco-sidebar-collapsed .wco-main-titlebar {
+      padding-inline-start: max(1rem, calc(var(--wco-controls-left) - 2.5rem + 1rem));
+    }
+
+    .wco-sidebar-rail {
+      padding-top: var(--wco-titlebar-height);
     }
   }
 }

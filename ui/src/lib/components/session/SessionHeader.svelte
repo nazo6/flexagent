@@ -47,8 +47,10 @@
   }: Props = $props();
 </script>
 
-<header class="bg-card/85 border-border shrink-0 border-b backdrop-blur">
-  <div class="flex h-12 items-center gap-2 px-3 lg:px-4">
+<header class="wco-titlebar bg-card/85 border-border shrink-0 border-b backdrop-blur">
+  <!-- In an installed desktop PWA this row also serves as the window title bar
+       (Window Controls Overlay); see the `.wco-*` rules in app.css. -->
+  <div class="wco-titlebar-row flex h-12 items-center gap-2 px-3 lg:px-4">
     <!-- Mobile: open the session drawer -->
     <button
       type="button"

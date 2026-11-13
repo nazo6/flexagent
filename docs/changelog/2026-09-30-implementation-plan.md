@@ -979,6 +979,12 @@
         ジョブ (fmt, clippy, sqlx, ts-rs, ui, test (ubuntu / macos /
         windows-latest)) が完全成功 (Stage 3 の3コミット + Stage 4 の1コミットを
         まとめてプッシュして検証)。
+  - 2026-11-13: デスクトップ PWA の Window Controls Overlay 対応。
+    `display_override` を追加し、インストール済みデスクトップ Chromium では
+    OS のタイトルバーをアプリの既存トップバー (サイドバーヘッダー /
+    セッションヘッダー / シェルバー) に統合した。`env(titlebar-area-*)` から
+    高さと左右インセットを算出し、`app-region` の drag / no-drag を CSS
+    のみで切り替える。非対応環境は従来の `standalone` にフォールバックする。
 
 ---
 

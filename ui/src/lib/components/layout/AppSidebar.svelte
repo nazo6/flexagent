@@ -166,8 +166,11 @@
 </script>
 
 <aside class="bg-sidebar flex h-full w-full flex-col border-r border-border">
-  <!-- Sidebar header -->
-  <div class="flex items-center justify-between border-b border-border px-3.5 py-3">
+  <!-- Sidebar header. In a Window Controls Overlay window this is the left
+       half of the title bar; see the `.wco-*` rules in app.css. -->
+  <div
+    class="wco-titlebar wco-sidebar-header flex items-center justify-between border-b border-border px-3.5 py-3"
+  >
     <a
       href="/"
       class="flex items-center gap-2.5 font-semibold tracking-tight hover:opacity-80 transition-opacity"

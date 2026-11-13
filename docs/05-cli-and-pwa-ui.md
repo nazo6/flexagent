@@ -352,8 +352,24 @@ Android スマートフォン（ホーム画面追加PWA）のすべてを単一
 ### 3.3 Android PWA & Web Push (VAPID) の実装詳細
 
 - **`manifest.webmanifest`**: `"display": "standalone"`,
+  `"display_override": ["window-controls-overlay", "standalone"]`,
   `"theme_color": "#f7f5f0"`
   を設定し、Androidでネイティブアプリ同等のフルスクリーン起動を実現。
+- **デスクトップ PWA のタイトルバー統合 (Window Controls Overlay)**:
+  - インストール済みのデスクトップ Chromium では OS のタイトルバーを消し、
+    アプリの既存トップバーをそのままタイトルバーとして使う。サイドバー
+    ヘッダー・セッションヘッダー・シェルのモバイルバーが
+    `env(titlebar-area-*)` に合わせて高さと左右インセットを調整するため、
+    OS タイトルバーとアプリのトップバーで縦方向を二重に消費しない。
+  - タイトルバー領域はウィンドウのドラッグ面とし、内部のリンク・ボタン・
+    入力欄はドラッグ対象から除外する。ネイティブの最小化/最大化/閉じるが
+    左 (macOS) でも右 (Windows/Linux) でも、`titlebar-area-x` と幅から
+    左右のインセットを算出して重なりを避ける。
+  - `Window Controls Overlay` 非対応環境 (Android PWA、通常のブラウザタブ、
+    非対応ブラウザ) は従来の `standalone` / 通常レイアウトへフォールバック
+    する。切り替えはメディアクエリと `env()` のフォールバック値だけで行い、
+    実行時のレイアウト分岐を持ち込まない (スタイルの正は
+    `ui/src/app.css` の `.wco-*`)。
 - **Service Worker (`ui/src/service-worker/index.ts` / `$app/manifest`)**:
   1. **App Shell キャッシュ**: SvelteKit 標準の `$app/manifest`（`assets` /
      `immutable`）と `$app/env`（`version`）を用いてHTML/JS/CSSをキャッシュし、モバイル回線が不安定な場所やハブ障害時でもUIが即座に立ち上がるようにします。
