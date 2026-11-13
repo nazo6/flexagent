@@ -125,7 +125,7 @@ pub(crate) async fn build_system_status<B: ClientApiBackend>(backend: &B) -> Sys
 
     components.push(ComponentHealth::ok(ComponentName::Http, now));
     components.extend(backend.role_health(now).await);
-    components.push(disk_health(backend.fxg_home(), now));
+    components.push(disk_health(backend.data_dir().as_deref(), now));
 
     // Recent unresolved incidents make the matching component degraded / failing.
     let since = now - HEALTH_INCIDENT_WINDOW_MS;
@@ -254,7 +254,7 @@ pub(crate) async fn record_info<B: ClientApiBackend>(
             "params": info.params,
             "details": info.details,
         })));
-    record.details = redact_json(&record.details, backend.fxg_home());
+    record.details = redact_json(&record.details, backend.data_dir().as_deref());
     backend.db().record_incident_best_effort(&record).await;
 }
 
@@ -372,12 +372,12 @@ pub(crate) async fn build_support_bundle<B: ClientApiBackend>(
             .map_err(super::ApiError::from)?,
         ConnectionRole::Hub => 0,
     };
-    let home = backend.fxg_home();
-    let database_file = database_file_path(backend);
+    let home = backend.data_dir();
+    let database_file = backend.db_path();
     let database = DatabaseStats {
         path: database_file
             .as_ref()
-            .map(|path| redact_text(&path.to_string_lossy(), home))
+            .map(|path| redact_text(&path.to_string_lossy(), home.as_deref()))
             .unwrap_or_default(),
         size_bytes: database_file
             .as_ref()
@@ -388,18 +388,18 @@ pub(crate) async fn build_support_bundle<B: ClientApiBackend>(
         incidents: counts.incidents,
         pending_outbox_events,
     };
-    let config = redact_config(backend.support_bundle_config(), home);
+    let config = redact_config(backend.support_bundle_config(), home.as_deref());
     let logs = backend
         .support_bundle_logs(SUPPORT_BUNDLE_LOG_LINES)
         .into_iter()
-        .map(|line| redact_text(&line, home))
+        .map(|line| redact_text(&line, home.as_deref()))
         .collect();
     Ok(SupportBundle {
         generated_at: now_ms(),
         version: backend.version().to_owned(),
         role: backend.connection_role(),
         config,
-        diagnostics: redact_diagnostics(diagnostics, home),
+        diagnostics: redact_diagnostics(diagnostics, home.as_deref()),
         database,
         sessions,
         logs,
@@ -417,12 +417,9 @@ pub(crate) async fn build_diagnostics<B: ClientApiBackend>(
         .await
         .map_err(super::ApiError::from)?;
     let agents = backend.agent_diagnostics();
-    let node_log = backend.fxg_home().map(|home| {
-        home.join("logs")
-            .join(backend.log_file_name())
-            .to_string_lossy()
-            .into_owned()
-    });
+    let node_log = backend
+        .log_path()
+        .map(|path| path.to_string_lossy().into_owned());
     Ok(DiagnosticsResponse {
         node_id: backend
             .local_node_id()
@@ -436,18 +433,9 @@ pub(crate) async fn build_diagnostics<B: ClientApiBackend>(
     })
 }
 
-fn database_file_path<B: ClientApiBackend>(backend: &B) -> Option<std::path::PathBuf> {
-    let home = backend.fxg_home()?;
-    let file = match backend.connection_role() {
-        ConnectionRole::LocalNode => fxg_protocol::config::NODE_DB_FILE_NAME,
-        ConnectionRole::Hub => fxg_protocol::config::HUB_DB_FILE_NAME,
-    };
-    Some(home.join(file))
-}
-
 fn redact_config(config: SupportBundleConfig, home: Option<&Path>) -> SupportBundleConfig {
     SupportBundleConfig {
-        fxg_home: redact_text(&config.fxg_home, home),
+        data_dir: redact_text(&config.data_dir, home),
         log_level: config.log_level.map(|value| redact_text(&value, home)),
         log_file: config.log_file.map(|value| redact_text(&value, home)),
         log_format: config.log_format.map(|value| redact_text(&value, home)),
@@ -628,9 +616,9 @@ mod tests {
 
     #[test]
     fn redacts_home_directory() {
-        let text = "/home/alice/.flexagent/logs/node.log";
+        let text = "/home/alice/.local/state/flexagent/node/node.log";
         let redacted = redact_text(text, Some(Path::new("/home/alice")));
-        assert_eq!(redacted, "~/.flexagent/logs/node.log");
+        assert_eq!(redacted, "~/.local/state/flexagent/node/node.log");
     }
 
     #[test]

@@ -437,8 +437,13 @@ mod tests {
     use crate::agent::provider::StaticProvider;
     use crate::driver::{DriverEvent, StartSessionRequest, StartedSession};
     use fxg_protocol::client_api::AgentBackendKind;
+    use fxg_protocol::paths::{Paths, Role};
     use fxg_protocol::settings::CustomAgentConfig;
     use tokio::sync::mpsc;
+
+    fn portable_paths(dir: &std::path::Path) -> Paths {
+        Paths::portable(dir, Role::Node)
+    }
 
     struct DummyExtension;
 
@@ -501,7 +506,7 @@ mod tests {
     }
 
     fn registry(dir: &std::path::Path) -> AcpRegistry {
-        AcpRegistry::new(dir, &settings(), custom_agents())
+        AcpRegistry::new(portable_paths(dir), &settings(), custom_agents())
     }
 
     fn catalog(dir: &std::path::Path) -> AgentCatalog {
@@ -590,7 +595,7 @@ mod tests {
             },
         )]);
         let mut catalog = AgentCatalog::with_providers(
-            AcpRegistry::new(dir.path(), &settings(), custom),
+            AcpRegistry::new(portable_paths(dir.path()), &settings(), custom),
             vec![Arc::new(provider)],
         );
         catalog.preset_lookup = |_| Some(PathBuf::from("/fake/bin/demo"));
@@ -681,7 +686,7 @@ mod tests {
             },
         )]);
         let mut on = AgentCatalog::with_providers(
-            AcpRegistry::new(dir.path(), &settings(), on_custom),
+            AcpRegistry::new(portable_paths(dir.path()), &settings(), on_custom),
             vec![Arc::new(provider)],
         );
         on.preset_lookup = |_| Some(PathBuf::from("/fake/bin/opencode"));
@@ -721,7 +726,7 @@ mod tests {
         )
         .with_extension("opencode", Arc::new(OpenCodeExtension));
         let mut off = AgentCatalog::with_providers(
-            AcpRegistry::new(dir.path(), &settings(), off_custom),
+            AcpRegistry::new(portable_paths(dir.path()), &settings(), off_custom),
             vec![Arc::new(provider)],
         );
         off.preset_lookup = |_| Some(PathBuf::from("/fake/bin/opencode"));
@@ -919,7 +924,11 @@ mod tests {
                 ..Default::default()
             },
         )]);
-        let catalog = AgentCatalog::new(AcpRegistry::new(dir.path(), &settings(), custom));
+        let catalog = AgentCatalog::new(AcpRegistry::new(
+            portable_paths(dir.path()),
+            &settings(),
+            custom,
+        ));
 
         let spec = tokio::runtime::Runtime::new()
             .unwrap()
@@ -954,7 +963,11 @@ mod tests {
                 ..Default::default()
             },
         )]);
-        let catalog = AgentCatalog::new(AcpRegistry::new(dir.path(), &settings(), custom));
+        let catalog = AgentCatalog::new(AcpRegistry::new(
+            portable_paths(dir.path()),
+            &settings(),
+            custom,
+        ));
 
         let err = tokio::runtime::Runtime::new()
             .unwrap()

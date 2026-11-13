@@ -1,9 +1,9 @@
-//! Generation and persistence of the Web access token (`~/.flexagent/auth_token`).
+//! Generation and persistence of the Web access token (`<data>/node/auth_token`).
 //!
 //! Design: `docs/01-architecture-and-sync.md` §7.3.
 //!
 //! - On first start, a **64-character random string** (a 32-byte random value in
-//!   hex form) is generated and stored in `~/.flexagent/auth_token` with
+//!   hex form) is generated and stored in `<data>/node/auth_token` with
 //!   permission `0600`.
 //! - Subsequent requests authenticate with `Authorization: Bearer <token>` or
 //!   `Cookie: fxg_session=<token>`.
@@ -71,7 +71,7 @@ fn set_owner_only_permissions(path: &Path) -> Result<(), NodeError> {
 
 #[cfg(not(unix))]
 fn set_owner_only_permissions(_path: &Path) -> Result<(), NodeError> {
-    // On Windows, rely on the ACL of the user profile directory (`~/.flexagent`)
+    // On Windows, rely on the ACL of the user profile / data directory
     // (additional ACL handling is covered by `fxg service install` in Phase 5).
     Ok(())
 }

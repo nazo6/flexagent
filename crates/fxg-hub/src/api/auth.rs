@@ -2,11 +2,11 @@
 //!
 //! Design: `docs/01-architecture-and-sync.md` §7.3.
 //!
-//! - **Web access token** (`~/.flexagent/auth_token`): used by both the local node
-//!   (`fxg node start`) and the hub (`fxg hub start`) to authenticate Client REST/WS API
+//! - **Web access token** (`<data>/{node,hub}/auth_token`): owned by each role
+//!   (`fxg node start` / `fxg hub start`) and used to authenticate Client REST/WS API
 //!   requests (`Authorization: Bearer` / `fxg_session` cookie) (a 64-character random hex
 //!   string is generated on first startup and saved with `0600`).
-//! - **Node pairing token** (`~/.flexagent/node_token`): Node ⇔ Hub pairing authentication. The
+//! - **Node pairing token** (`<data>/node/node_token`): Node ⇔ Hub pairing authentication. The
 //!   server stores only the [`hash_token`] (SHA-256 hex) in `hub.db.nodes.token_hash`; the
 //!   plaintext is shown only once at issue time.
 
@@ -82,7 +82,7 @@ fn set_owner_only_permissions(path: &Path) -> std::io::Result<()> {
 
 #[cfg(not(unix))]
 fn set_owner_only_permissions(_path: &Path) -> std::io::Result<()> {
-    // On Windows, follow the ACLs of the user profile directory (`~/.flexagent`)
+    // On Windows, follow the ACLs of the user profile / data directory
     // (additional ACL handling is covered by `fxg service install`).
     Ok(())
 }

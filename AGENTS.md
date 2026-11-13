@@ -42,11 +42,11 @@
   - 設定・データ・実行時状態・ログ・キャッシュは OS 標準ルート
     (`dirs`) 配下に置き、`node` / `hub` のロール別に分ける
     (詳細は [`docs/05-cli-and-pwa-ui.md`](docs/05-cli-and-pwa-ui.md) §2.1)。
-  - 秘密の値は `<data>/flexagent/{node,hub}/secrets/<id>` (`0600`) に置き、
+  - 秘密の値は `<data>/{node,hub}/secrets/<id>` (`0600`) に置き、
     DB にはメタデータだけを保存する。API は書き込み専用で値を返さない。
   - プロジェクト同一性は `project_path_links` → Git リモート → `local:` の順で
     解決し、表示名は自動導出する。Worktree の作成先は
-    `<data>/flexagent/node/worktrees/{project}/{branch}` に固定。
+    `<data>/node/worktrees/{project}/{branch}` に固定。
 - **セキュリティ原則**:
   - `fxg node start` のローカルHTTP/WSは `127.0.0.1:7860` のみにバインドする。
   - 全HTTP/WSエンドポイントでトークン認証 (`Bearer` または

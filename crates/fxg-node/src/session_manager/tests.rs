@@ -1,7 +1,6 @@
 use super::prompt::*;
 use super::replay::*;
 use super::*;
-use crate::paths::NodePaths;
 use crate::testutil::MockAgent;
 use fxg_acp::AgentSessionInfo;
 use fxg_acp::DriverKind;
@@ -11,19 +10,20 @@ use fxg_acp::agent::{
     StaticProvider,
 };
 use fxg_acp::registry::AcpRegistry;
+use fxg_db::Db;
 use fxg_db::queries::SessionFilter;
-use fxg_db::{Db, DbRole};
 use fxg_protocol::SessionId;
 use fxg_protocol::client_api::AgentCapabilitiesPreview;
 use fxg_protocol::common::{
     ConfigOptionCategory, ConfigOptionInfo, ConfigOptionValue, EventType, InitialConfig, ModeInfo,
     PermissionOptionKind,
 };
+use fxg_protocol::paths::{Paths, Role};
 use fxg_protocol::settings::{AgentSettings, CustomAgentConfig};
 
 async fn setup() -> (SessionManager, MockAgent, tempfile::TempDir) {
     let dir = tempfile::tempdir().expect("tempdir");
-    let db = Db::open_in_memory(DbRole::Node).await.expect("db");
+    let db = Db::open_in_memory(Role::Node).await.expect("db");
     db.upsert_node(&fxg_db::NodeRecord::new(
         "test-node",
         "Test Node",
@@ -34,7 +34,7 @@ async fn setup() -> (SessionManager, MockAgent, tempfile::TempDir) {
     .await
     .expect("node");
     let bus = SessionEventBus::new(db);
-    NodePaths::new(dir.path().to_path_buf())
+    Paths::portable(dir.path(), Role::Node)
         .ensure_dirs()
         .expect("dirs");
 
@@ -59,7 +59,11 @@ async fn setup() -> (SessionManager, MockAgent, tempfile::TempDir) {
         revision: 1,
         updated_at: 0,
     };
-    let catalog = AgentCatalog::new(AcpRegistry::new(dir.path(), &settings, custom));
+    let catalog = AgentCatalog::new(AcpRegistry::new(
+        Paths::portable(dir.path(), Role::Node),
+        &settings,
+        custom,
+    ));
 
     let mock = MockAgent::default();
     let manager = SessionManager::with_factory(bus, "test-node", catalog, mock.factory());
@@ -282,9 +286,9 @@ impl AgentExtension for ProbeExtension {
 #[tokio::test]
 async fn probe_applies_extension_capability_overlay() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let db = Db::open_in_memory(DbRole::Node).await.expect("db");
+    let db = Db::open_in_memory(Role::Node).await.expect("db");
     let bus = SessionEventBus::new(db);
-    NodePaths::new(dir.path().to_path_buf())
+    Paths::portable(dir.path(), Role::Node)
         .ensure_dirs()
         .expect("dirs");
     let settings = AgentSettings {
@@ -308,7 +312,11 @@ async fn probe_applies_extension_capability_overlay() {
     )
     .with_backend(AgentBackend::AcpExtended(Arc::new(ProbeExtension)));
     let catalog = AgentCatalog::with_providers(
-        AcpRegistry::new(dir.path(), &settings, BTreeMap::new()),
+        AcpRegistry::new(
+            Paths::portable(dir.path(), Role::Node),
+            &settings,
+            BTreeMap::new(),
+        ),
         vec![Arc::new(provider)],
     );
 
@@ -355,7 +363,7 @@ async fn probe_applies_extension_capability_overlay() {
 #[tokio::test]
 async fn full_custom_driver_starts_through_the_catalog() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let db = Db::open_in_memory(DbRole::Node).await.expect("db");
+    let db = Db::open_in_memory(Role::Node).await.expect("db");
     db.upsert_node(&fxg_db::NodeRecord::new(
         "test-node",
         "Test Node",
@@ -366,7 +374,7 @@ async fn full_custom_driver_starts_through_the_catalog() {
     .await
     .expect("node");
     let bus = SessionEventBus::new(db);
-    NodePaths::new(dir.path().to_path_buf())
+    Paths::portable(dir.path(), Role::Node)
         .ensure_dirs()
         .expect("dirs");
     let settings = AgentSettings {
@@ -389,7 +397,11 @@ async fn full_custom_driver_starts_through_the_catalog() {
     )
     .with_backend(AgentBackend::Custom(Arc::new(mock.clone())));
     let catalog = AgentCatalog::with_providers(
-        AcpRegistry::new(dir.path(), &settings, BTreeMap::new()),
+        AcpRegistry::new(
+            Paths::portable(dir.path(), Role::Node),
+            &settings,
+            BTreeMap::new(),
+        ),
         vec![Arc::new(provider)],
     );
     let manager = SessionManager::new(bus, "test-node", catalog);
@@ -411,9 +423,9 @@ async fn full_custom_driver_starts_through_the_catalog() {
 #[tokio::test]
 async fn full_custom_driver_probe_uses_the_catalog_driver() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let db = Db::open_in_memory(DbRole::Node).await.expect("db");
+    let db = Db::open_in_memory(Role::Node).await.expect("db");
     let bus = SessionEventBus::new(db);
-    NodePaths::new(dir.path().to_path_buf())
+    Paths::portable(dir.path(), Role::Node)
         .ensure_dirs()
         .expect("dirs");
     let settings = AgentSettings {
@@ -445,7 +457,11 @@ async fn full_custom_driver_probe_uses_the_catalog_driver() {
     )
     .with_backend(AgentBackend::Custom(Arc::new(mock.clone())));
     let catalog = AgentCatalog::with_providers(
-        AcpRegistry::new(dir.path(), &settings, BTreeMap::new()),
+        AcpRegistry::new(
+            Paths::portable(dir.path(), Role::Node),
+            &settings,
+            BTreeMap::new(),
+        ),
         vec![Arc::new(provider)],
     );
     let manager = SessionManager::new(bus, "test-node", catalog);

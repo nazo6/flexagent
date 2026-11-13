@@ -10,7 +10,8 @@
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 
-use fxg_protocol::config::{GlobalConfig, LogConfig};
+use fxg_protocol::config::LogConfig;
+use fxg_protocol::paths::Paths;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{EnvFilter, Layer};
@@ -92,7 +93,7 @@ fn resolve_filter(opts: &LoggingOptions, config: &LogConfig) -> EnvFilter {
         return EnvFilter::new(format!("fxg={level},{level}"));
     }
 
-    // 3. `level` from the configuration file (config.toml)
+    // 3. `level` from the configuration file (node.toml / hub.toml)
     if let Some(level) = config.level.as_deref() {
         let level = level.trim().to_ascii_lowercase();
         return EnvFilter::new(format!("fxg={level},{level}"));
@@ -115,14 +116,14 @@ fn resolve_filter(opts: &LoggingOptions, config: &LogConfig) -> EnvFilter {
 pub fn resolve_log_file_path(
     opts: &LoggingOptions,
     config: &LogConfig,
-    fxg_home: &Path,
+    paths: &Paths,
 ) -> Option<PathBuf> {
     // 1. CLI option
     if let Some(path_str) = opts.log_file.as_deref() {
         if path_str == "-" || path_str.eq_ignore_ascii_case("none") || path_str.is_empty() {
             return None;
         }
-        return Some(resolve_relative_path(path_str, fxg_home));
+        return Some(resolve_relative_path(path_str, &paths.log_dir()));
     }
 
     // 2. Configuration file
@@ -130,18 +131,16 @@ pub fn resolve_log_file_path(
         if path_str == "-" || path_str.eq_ignore_ascii_case("none") || path_str.is_empty() {
             return None;
         }
-        return Some(resolve_relative_path(path_str, fxg_home));
+        return Some(resolve_relative_path(path_str, &paths.log_dir()));
     }
 
     // 3. Default behavior:
-    //    For a resident Node / Hub process outside stdio mode, use
-    //    ~/.flexagent/logs/<kind>.log automatically.
+    //    For a resident Node / Hub process outside stdio mode, use the role's log file.
     if opts.is_stdio {
         return None;
     }
     match opts.kind {
-        CommandLogKind::Node => Some(fxg_home.join("logs").join("node.log")),
-        CommandLogKind::Hub => Some(fxg_home.join("logs").join("hub.log")),
+        CommandLogKind::Node | CommandLogKind::Hub => Some(paths.log_path()),
         CommandLogKind::Cli => None,
     }
 }
@@ -156,21 +155,17 @@ fn resolve_relative_path(path_str: &str, base: &Path) -> PathBuf {
 }
 
 /// Initialize logging.
-pub fn init_logging(
-    opts: &LoggingOptions,
-    global: &GlobalConfig,
-    fxg_home: &Path,
-) -> Option<PathBuf> {
-    let use_color = should_use_color(opts.no_color, global.log.no_color);
-    let filter = resolve_filter(opts, &global.log);
+pub fn init_logging(opts: &LoggingOptions, config: &LogConfig, paths: &Paths) -> Option<PathBuf> {
+    let use_color = should_use_color(opts.no_color, config.no_color);
+    let filter = resolve_filter(opts, config);
     let is_json = opts
         .log_format
         .as_deref()
-        .or(global.log.format.as_deref())
+        .or(config.format.as_deref())
         .map(|f| f.eq_ignore_ascii_case("json"))
         .unwrap_or(false);
 
-    let log_file_path = resolve_log_file_path(opts, &global.log, fxg_home);
+    let log_file_path = resolve_log_file_path(opts, config, paths);
 
     // Log file layer (ANSI color forcibly disabled)
     let file_layer = if let Some(ref path) = log_file_path {
@@ -185,8 +180,9 @@ pub fn init_logging(
         let file_name = path
             .file_name()
             .and_then(|n| n.to_str())
-            .unwrap_or("node.log");
-        let dir = path.parent().unwrap_or(fxg_home);
+            .unwrap_or("fxg.log");
+        let fallback_dir = paths.log_dir();
+        let dir = path.parent().unwrap_or(fallback_dir.as_path());
         let appender = tracing_appender::rolling::never(dir, file_name);
 
         if is_json {
@@ -291,7 +287,7 @@ pub fn print_node_banner(
 /// Print the hub startup banner to stderr.
 pub fn print_hub_banner(
     http_addr: &str,
-    fxg_home: &Path,
+    paths: &Paths,
     log_file: Option<&Path>,
     auth_token: Option<&str>,
     use_color: bool,
@@ -312,7 +308,10 @@ pub fn print_hub_banner(
         } else {
             eprintln!("  \x1b[1mWeb UI:\x1b[0m       http://{http_addr}/");
         }
-        eprintln!("  \x1b[1mData Dir:\x1b[0m     {}", fxg_home.display());
+        eprintln!(
+            "  \x1b[1mData Dir:\x1b[0m     {}",
+            paths.data_dir().display()
+        );
         eprintln!("  \x1b[1mLog File:\x1b[0m     {log_str}");
         eprintln!("  \x1b[2mPress Ctrl+C to stop.\x1b[0m\n");
     } else {
@@ -324,7 +323,7 @@ pub fn print_hub_banner(
         } else {
             eprintln!("  Web UI:       http://{http_addr}/");
         }
-        eprintln!("  Data Dir:     {}", fxg_home.display());
+        eprintln!("  Data Dir:     {}", paths.data_dir().display());
         eprintln!("  Log File:     {log_str}");
         eprintln!("  Press Ctrl+C to stop.\n");
     }
@@ -333,6 +332,7 @@ pub fn print_hub_banner(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use fxg_protocol::paths::{Paths, Role};
 
     #[test]
     fn should_use_color_honors_explicit_flags() {
@@ -358,22 +358,24 @@ mod tests {
     #[test]
     fn resolve_log_file_path_handles_dash() {
         let dir = tempfile::tempdir().unwrap();
+        let paths = Paths::portable(dir.path(), Role::Node);
         let mut opts = LoggingOptions::default();
         let config = LogConfig::default();
 
         opts.log_file = Some("-".to_owned());
-        assert_eq!(resolve_log_file_path(&opts, &config, dir.path()), None);
+        assert_eq!(resolve_log_file_path(&opts, &config, &paths), None);
 
         opts.log_file = Some("custom.log".to_owned());
         assert_eq!(
-            resolve_log_file_path(&opts, &config, dir.path()),
-            Some(dir.path().join("custom.log"))
+            resolve_log_file_path(&opts, &config, &paths),
+            Some(paths.log_dir().join("custom.log"))
         );
     }
 
     #[test]
     fn print_banners_do_not_panic() {
         let dir = tempfile::tempdir().unwrap();
+        let paths = Paths::portable(dir.path(), Role::Hub);
         print_node_banner(
             "node_test",
             "127.0.0.1:7860",
@@ -383,13 +385,7 @@ mod tests {
             true,
         );
         print_node_banner("node_test", "127.0.0.1:7860", None, None, None, false);
-        print_hub_banner(
-            "0.0.0.0:8080",
-            dir.path(),
-            None,
-            Some("test_token_123"),
-            true,
-        );
-        print_hub_banner("0.0.0.0:8080", dir.path(), None, None, false);
+        print_hub_banner("0.0.0.0:8080", &paths, None, Some("test_token_123"), true);
+        print_hub_banner("0.0.0.0:8080", &paths, None, None, false);
     }
 }

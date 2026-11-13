@@ -5,8 +5,8 @@ FlexAgentは外部DBミドルウェアを必要としない **SQLite (`sqlx`)**
 E2E暗号化を行わないため、ハブ側で会話履歴の構造化クエリおよび
 **FTS5（全文検索）** がそのまま利用可能です。
 
-`node.db`（各ノード: `<data>/flexagent/node/node.db`）と `hub.db`（ハブ:
-`<data>/flexagent/hub/hub.db`）は、**同一のDDL・同一のテーブル名・単一のマイグレーションセット**
+`node.db`（各ノード: `<data>/node/node.db`）と `hub.db`（ハブ:
+`<data>/hub/hub.db`）は、**同一のDDL・同一のテーブル名・単一のマイグレーションセット**
 （`crates/fxg-db/migrations/`）から生成される「1つのスキーマ」を共有します。
 両者の違いは **「行のスコープ」と「実行ロール」だけ**
 であり、スキーマ対称性は「規約」ではなく 「単一定義」によって保証されます。
@@ -129,8 +129,8 @@ DDL・カラム・インデックスの正は `crates/fxg-db/migrations/` です
 | `incidents`                                                                                   | 各ストアのエラー境界が観測した障害のリングバッファ。同期対象外。                                                      |
 | `node_settings` / `agent_settings` / `agent_aliases` / `custom_agents` / `project_path_links` | ノード所有の実行時設定。                                                                                              |
 | `hub_settings` / `provisioners`                                                               | ハブ所有の実行時設定。                                                                                                |
-| `secrets`                                                                                     | 秘密のメタデータ。値は `<data>/flexagent/{node,hub}/secrets/<id>` に置く。                                            |
-| `node_pairing`                                                                                | ノードのハブ接続先。トークンは `<data>/flexagent/node/node_token` に置く。                                            |
+| `secrets`                                                                                     | 秘密のメタデータ。値は `<data>/{node,hub}/secrets/<id>` に置く。                                                      |
+| `node_pairing`                                                                                | ノードのハブ接続先。トークンは `<data>/node/node_token` に置く。                                                      |
 
 ### 1.1 重要な不変条件
 
@@ -146,12 +146,12 @@ DDL・カラム・インデックスの正は `crates/fxg-db/migrations/` です
 
 実行時に変更する設定は所有者の DB にのみ保存し、ノード ⇔ ハブ間で同期・マージしない。
 
-| 設定                                                                                                           | 所有者 / 保存場所                                   |
-| :------------------------------------------------------------------------------------------------------------- | :-------------------------------------------------- |
-| `node_settings` / `node_pairing` / `agent_settings` / `agent_aliases` / `custom_agents` / `project_path_links` | `node.db`                                           |
-| `hub_settings` / `provisioners`                                                                                | `hub.db`                                            |
-| 秘密のメタデータ                                                                                               | `node.db` / `hub.db` の `secrets`                   |
-| 秘密の値                                                                                                       | `<data>/flexagent/{node,hub}/secrets/<id>` (`0600`) |
+| 設定                                                                                                           | 所有者 / 保存場所                         |
+| :------------------------------------------------------------------------------------------------------------- | :---------------------------------------- |
+| `node_settings` / `node_pairing` / `agent_settings` / `agent_aliases` / `custom_agents` / `project_path_links` | `node.db`                                 |
+| `hub_settings` / `provisioners`                                                                                | `hub.db`                                  |
+| 秘密のメタデータ                                                                                               | `node.db` / `hub.db` の `secrets`         |
+| 秘密の値                                                                                                       | `<data>/{node,hub}/secrets/<id>` (`0600`) |
 
 単一行テーブルは `revision` による楽観的ロックを行い、競合は
 `REVISION_MISMATCH` として返します。マイグレーションの意図は

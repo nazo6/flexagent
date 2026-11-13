@@ -49,7 +49,7 @@ impl Hub {
 
         // Publish the bound address so `fxg hub status` / `stop` / `web hub`
         // can reach a hub started with a CLI `--listen` / `--port` override.
-        let addr_file = state.options().fxg_home.join("hub.addr");
+        let addr_file = state.options().paths.addr_path();
         if let Err(err) = std::fs::write(&addr_file, bound.to_string()) {
             tracing::warn!(path = %addr_file.display(), "failed to write the hub address file: {err}");
         }
@@ -100,7 +100,7 @@ impl Hub {
 
         tracing::info!(
             addr = %bound,
-            fxg_home = %server_state.options().fxg_home.display(),
+            data_dir = %server_state.options().paths.data_dir().display(),
             "fxg hub start started"
         );
 

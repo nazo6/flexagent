@@ -61,7 +61,7 @@ pub struct NodeStartArgs {
     /// Log level (trace | debug | info | warn | error)
     #[usage(long)]
     pub(crate) log_level: Option<String>,
-    /// Log file destination (default: ~/.flexagent/logs/node.log)
+    /// Log file destination (default: <logs>/node/node.log)
     #[usage(long)]
     pub(crate) log_file: Option<String>,
     /// Disable writing to the log file
@@ -94,36 +94,36 @@ impl NodeStartArgs {
         }
     }
 
-    /// Build the node config from the loaded global config.
+    /// Build the node config from the loaded `node.toml`.
     pub(crate) fn node_config_from(
         &self,
-        global: &fxg_protocol::config::GlobalConfig,
+        config_file: &fxg_protocol::config::NodeConfig,
     ) -> fxg_node::daemon::DaemonConfig {
         let env = fxg_protocol::config::process_env;
         let mut config = fxg_node::daemon::DaemonConfig::from_env(&env);
-        if let Some(node_id) = global.node.node_id.clone() {
+        if let Some(node_id) = config_file.node_id.clone() {
             config.node_id = node_id;
         }
         if let Some(listen) = self
             .listen
             .clone()
-            .or_else(|| global.node.listen_addr.clone())
+            .or_else(|| config_file.listen_addr.clone())
         {
             config.listen_addr = listen;
             config.listen_addr_explicit = true;
         }
-        config.allowed_hosts = global.node.allowed_hosts.clone();
-        config.allowed_origins = global.node.allowed_origins.clone();
-        config.log = self.effective_log_config(global);
+        config.allowed_hosts = config_file.allowed_hosts.clone();
+        config.allowed_origins = config_file.allowed_origins.clone();
+        config.log = self.effective_log_config(config_file);
         config
     }
 
-    /// Effective logging settings after CLI > env > config.toml precedence.
+    /// Effective logging settings after CLI > env > node.toml precedence.
     fn effective_log_config(
         &self,
-        global: &fxg_protocol::config::GlobalConfig,
+        config_file: &fxg_protocol::config::NodeConfig,
     ) -> fxg_protocol::config::LogConfig {
-        let mut log = global.log.clone();
+        let mut log = config_file.log.clone();
         if let Some(level) = self.log_level.clone() {
             log.level = Some(level);
         }
@@ -135,7 +135,7 @@ impl NodeStartArgs {
         if let Some(format) = self.log_format.clone() {
             log.format = Some(format);
         }
-        log.no_color = self.no_color || global.log.no_color;
+        log.no_color = self.no_color || config_file.log.no_color;
         log
     }
 
@@ -150,8 +150,8 @@ impl usage::RunAsync for NodeStartArgs {
 
     async fn run_async(self) -> Self::Output {
         let env = fxg_protocol::config::process_env;
-        let global = fxg_protocol::config::GlobalConfig::load(&env)
-            .context("failed to load ~/.flexagent/config.toml")?;
+        let config_file =
+            fxg_protocol::config::NodeConfig::load(&env).context("failed to load node.toml")?;
 
         if NodeClient::connect_existing().await.is_ok() {
             println!("node is already running");
@@ -174,7 +174,11 @@ impl usage::RunAsync for NodeStartArgs {
                 args.push("--tray".to_owned());
             }
             let refs: Vec<&str> = args.iter().map(String::as_str).collect();
-            let log = crate::spawn::spawn_background(&refs, ServiceTarget::Node.log_name())?;
+            let log = crate::spawn::spawn_background(
+                &refs,
+                fxg_protocol::paths::Role::Node,
+                ServiceTarget::Node.log_name(),
+            )?;
             let client = wait_for_node().await?;
             println!("node started (detached)");
             println!("  Address:  {}", client.base());
@@ -184,17 +188,17 @@ impl usage::RunAsync for NodeStartArgs {
 
         let tray_configured = load_tray_setting(&env).await;
         let tray_enabled = self.tray_requested(tray_configured);
-        let config = self.node_config_from(&global);
+        let config = self.node_config_from(&config_file);
         let node = fxg_node::daemon::NodeDaemon::start(config)
             .await
             .context("fxg node start failed")?;
 
         let log_file = crate::logging::resolve_log_file_path(
             &self.logging_options(),
-            &global.log,
-            node.state().paths().fxg_home(),
+            &config_file.log,
+            node.state().paths(),
         );
-        let use_color = crate::logging::should_use_color(self.no_color, global.log.no_color);
+        let use_color = crate::logging::should_use_color(self.no_color, config_file.log.no_color);
         let auth_token = if cfg!(debug_assertions) {
             Some(node.state().auth_token())
         } else {
@@ -288,7 +292,11 @@ impl usage::RunAsync for NodeRestartArgs {
         if let Ok(mut client) = NodeClient::connect_existing().await {
             client.shutdown().await?;
         }
-        crate::spawn::spawn_background(&["node", "start"], ServiceTarget::Node.log_name())?;
+        crate::spawn::spawn_background(
+            &["node", "start"],
+            fxg_protocol::paths::Role::Node,
+            ServiceTarget::Node.log_name(),
+        )?;
         let client = wait_for_node().await?;
         println!("node restarted");
         println!("  Address:  {}", client.base());
@@ -554,9 +562,10 @@ pub(crate) fn local_web_url(listen_addr: &str, token: &str) -> String {
 pub(crate) fn local_session_web_url(session_id: &str) -> Result<String> {
     let env = fxg_protocol::config::process_env;
     let token = fxg_hub::api::auth::load_or_create_token(
-        &fxg_protocol::config::fxg_home(&env).join(fxg_protocol::config::AUTH_TOKEN_FILE_NAME),
+        &fxg_protocol::paths::Paths::resolve(&env, fxg_protocol::paths::Role::Node)
+            .auth_token_path(),
     )
-    .context("failed to load ~/.flexagent/auth_token")?;
+    .context("failed to load the node's auth_token")?;
     let base = crate::client::local_node_base(&env)?;
     Ok(format!("{base}/sessions/{session_id}?token={token}"))
 }

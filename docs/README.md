@@ -16,7 +16,7 @@ Protocol）対応コーディングエージェントを「好きな場所から
 2. **ローカルファースト & 遅延同期 (Store-and-Forward)**:
    - 各ノード（PC / VPS / WSL）がローカルSQLite (`node.db`)
      とローカルWeb UI (`http://localhost:7860`。7860 が使用中の場合は空きポートへ
-     フォールバックし、実際のアドレスは `<state>/flexagent/node/node.addr` に記録)
+     フォールバックし、実際のアドレスは `<state>/node/node.addr` に記録)
      を持ち、ハブが停止していても100%自立稼働します。ハブ復旧時に未送信イベントを自動同期します。
 3. **UIの完全統一 (Web / Desktop / Android PWA)**:
    - PCブラウザもAndroid端末も、単一の **PWA (Progressive Web App) + Web Push

@@ -21,7 +21,7 @@ crate::open_string_enum! {
     pub enum ConfigSource {
         /// Built-in default
         Default => "default",
-        /// `~/.flexagent/config.toml`
+        /// `node.toml` / `hub.toml`
         ConfigFile => "config_file",
         /// `FXG_*` environment variable
         Env => "env",
@@ -50,7 +50,7 @@ pub struct SourcedValue<T> {
     pub value: T,
     /// Which layer supplied the value
     pub source: ConfigSource,
-    /// Environment variable name / config.toml key / CLI flag (when known)
+    /// Environment variable name / configuration key / CLI flag (when known)
     pub source_detail: Option<String>,
 }
 
@@ -67,12 +67,12 @@ impl<T> SourcedValue<T> {
 
 /// Resolves the origin of an effective bootstrap string.
 ///
-/// `effective` is the already merged value (CLI > env > `config.toml`). The
+/// `effective` is the already merged value (CLI > env > config file). The
 /// origin is attributed by checking the layers in the order environment →
 /// configuration file → built-in default, falling back to the CLI flag.
 ///
 /// The environment lookup is injected so tests do not depend on the process
-/// environment (same convention as [`crate::config::GlobalConfig`]).
+/// environment (same convention as [`crate::config::NodeConfig`]).
 pub fn sourced_string(
     env: EnvLookup<'_>,
     effective: String,
@@ -122,7 +122,7 @@ pub fn sourced_option(
 
 /// Resolves the origin of an effective bootstrap string list.
 ///
-/// `effective` is the already merged value (environment > `config.toml`). Lists
+/// `effective` is the already merged value (environment > config file). Lists
 /// have no CLI layer today, so a value that matches neither the environment nor
 /// the file is attributed to the built-in default (an empty list).
 pub fn sourced_list(
@@ -141,12 +141,12 @@ pub fn sourced_list(
     SourcedValue::new(effective, ConfigSource::Default, Option::<&str>::None)
 }
 
-/// Read-only bootstrap view of a local node (`config.toml` / env / CLI).
+/// Read-only bootstrap view of a local node (`node.toml` / env / CLI).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct NodeBootstrapView {
-    /// Data directory (`FXG_HOME`)
-    pub fxg_home: SourcedValue<String>,
+    /// Node data directory (`<data>/node`)
+    pub data_dir: SourcedValue<String>,
     /// Node ID
     pub node_id: SourcedValue<String>,
     /// Local HTTP/WS bind address
@@ -165,12 +165,12 @@ pub struct NodeBootstrapView {
     pub log_no_color: SourcedValue<bool>,
 }
 
-/// Read-only bootstrap view of the hub (`config.toml` / env / CLI).
+/// Read-only bootstrap view of the hub (`hub.toml` / env / CLI).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]
 pub struct HubBootstrapView {
-    /// Data directory (`FXG_HOME`)
-    pub fxg_home: SourcedValue<String>,
+    /// Hub data directory (`<data>/hub`)
+    pub data_dir: SourcedValue<String>,
     /// HTTP/WS bind address
     pub listen_addr: SourcedValue<String>,
     /// Extra allowed `Host` values (DNS rebinding defense)
@@ -309,7 +309,7 @@ pub struct NodeSettingsSnapshot {
 /// Node ⇔ hub pairing state (`node.db` + the token file).
 ///
 /// The pairing is owned by the node: `hub_url` is stored in `node.db` and the
-/// token is a `0600` file (`~/.flexagent/node_token`). The client API never
+/// token is a `0600` file (`<data>/node/node_token`). The client API never
 /// returns the token, only whether it is configured.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[specta(collect)]

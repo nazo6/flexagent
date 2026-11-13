@@ -207,14 +207,19 @@ pub trait ClientApiBackend: Clone + Send + Sync + 'static {
         None
     }
 
-    /// Data directory (`~/.flexagent`) when the endpoint owns one.
-    fn fxg_home(&self) -> Option<&std::path::Path> {
+    /// Role data directory when the endpoint owns one.
+    fn data_dir(&self) -> Option<std::path::PathBuf> {
         None
     }
 
-    /// Log file name inside `<fxg_home>/logs` (`node.log` / `hub.log`).
-    fn log_file_name(&self) -> &'static str {
-        "node.log"
+    /// Database file path of the endpoint.
+    fn db_path(&self) -> Option<std::path::PathBuf> {
+        None
+    }
+
+    /// Diagnostic log path of the endpoint.
+    fn log_path(&self) -> Option<std::path::PathBuf> {
+        None
     }
 
     /// Role-specific components (sync / hub).

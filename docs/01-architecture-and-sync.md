@@ -53,7 +53,7 @@ flowchart TB
 > ローカル HTTP/WS の待受は既定で `127.0.0.1:7860`。7860 が使用中で
 > `--listen` / `node.toml` の `listen_addr` が明示されていない場合のみ、`127.0.0.1:0`
 > （ephemeral port）へフォールバックし、実際のアドレスを
-> `<state>/flexagent/node/node.addr` に書き出す。
+> `<state>/node/node.addr` に書き出す。
 > CLI・`fxg web`・ブラウザのローカル直結はこのファイルを優先する。
 
 ### 各モードの起動方法（単一バイナリ `fxg`）
@@ -332,8 +332,8 @@ PWAから新規セッションを開始する際は：
 Logical Project (例: github.com/nazo6/flexagent)
  └── Node (例: Home-Win)
       ├── Main Worktree (D:\ghq\...\flexagent)                                    [branch: main]
-      ├── Worktree A    (<data>/flexagent/node/worktrees/github.com-nazo6-flexagent/feat-auth) [branch: feat/auth]  <-- Session #1
-      └── Worktree B    (<data>/flexagent/node/worktrees/github.com-nazo6-flexagent/fix-bug)   [branch: fix/bug]    <-- Session #2
+      ├── Worktree A    (<data>/node/worktrees/github.com-nazo6-flexagent/feat-auth) [branch: feat/auth]  <-- Session #1
+      └── Worktree B    (<data>/node/worktrees/github.com-nazo6-flexagent/fix-bug)   [branch: fix/bug]    <-- Session #2
 ```
 
 - 各ノードの `fxg node` は、セッション起動・プロジェクト追加・Worktree 操作の
@@ -344,7 +344,7 @@ Logical Project (例: github.com/nazo6/flexagent)
   `NodeProjectReport` を含む `NodeHello` を再送し、`hub.db` の
   `project_node_bindings` を更新します。
 - `fxg` が新規作成する Worktree は、親フォルダを散らかさないよう
-  `<data>/flexagent/node/worktrees/<project>/<branch>` に固定されます。
+  `<data>/node/worktrees/<project>/<branch>` に固定されます。
 - 各セッションは特定の `(node_id, local_path)`（特定の
   Worktree）にバインドされます。これにより、同一マシン上で複数エージェントを走らせても作業ツリーやブランチの競合が発生しません。
 
@@ -493,7 +493,7 @@ Hijacking）や不正アクセスを防ぐため、以下の多層防御モデ�
   - ローカルWeb/WSサーバー (`LocalAPI`) は、デフォルトで
     **`127.0.0.1:7860`（ローカルループバックのみ）** に厳格バインドします。
     7860 が使用中の場合はループバックの ephemeral port にフォールバックし、
-    実際のアドレスは `<state>/flexagent/node/node.addr` に記録します。
+    実際のアドレスは `<state>/node/node.addr` に記録します。
     明示的な `--listen` / `node.toml` の `listen_addr` がある場合はその
     アドレスに従います。
   - 同一LAN内の他端末から直接PCのローカルAPI
@@ -531,7 +531,7 @@ Hijacking）や不正アクセスを防ぐため、以下の多層防御モデ�
 
 1. **暗号論的トークンの自動生成**:
    - 初回起動時（または
-     `fxg node access-token rotate`）、安全な64文字のランダム文字列（`auth_token`）を生成し、ノードは `<data>/flexagent/node/auth_token`、ハブは `<data>/flexagent/hub/auth_token`
+     `fxg node access-token rotate`）、安全な64文字のランダム文字列（`auth_token`）を生成し、ノードは `<data>/node/auth_token`、ハブは `<data>/hub/auth_token`
      にパーミッション `0600` で保存します。
 2. **Web UI 初回アクセスとCookieの安全な設定**:
    - ローカルCLIから `fxg web` を実行すると、`node.addr` のアドレスを使った
@@ -561,7 +561,7 @@ Hijacking）や不正アクセスを防ぐため、以下の多層防御モデ�
      # 既に起動中でも即時反映される (再起動は不要)
      ```
 
-     `fxg node pair` は `<data>/flexagent/node/node_token` (`0600`) と `node.db`
+     `fxg node pair` は `<data>/node/node_token` (`0600`) と `node.db`
      (`node_pairing.hub_url`) をまとめて設定します。`hub_url` には
      HTTP(S) のアドレスを指定でき、Node Hub の WebSocket エンドポイント
      (`/api/v1/node/ws`) は自動で導出されます。同じ操作はノードの

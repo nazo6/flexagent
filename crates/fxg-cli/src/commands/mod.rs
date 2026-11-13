@@ -37,8 +37,8 @@ use crate::client::NodeClient;
 
 /// Opens `node.db` (CLI-side reads of the DB-owned settings).
 async fn node_db(env: fxg_protocol::config::EnvLookup<'_>) -> Result<fxg_db::Db> {
-    let paths = fxg_node::NodePaths::from_env(env);
-    Ok(fxg_db::Db::open(&paths.node_db_path(), fxg_db::DbRole::Node).await?)
+    let paths = fxg_protocol::paths::Paths::resolve(env, fxg_protocol::paths::Role::Node);
+    Ok(fxg_db::Db::open(&paths.db_path(), fxg_protocol::paths::Role::Node).await?)
 }
 
 /// Create or reuse a worktree and return its path (`fxg session new -w` /

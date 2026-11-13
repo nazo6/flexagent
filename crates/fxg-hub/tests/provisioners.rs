@@ -7,11 +7,12 @@
 
 use fxg_hub::Hub;
 use fxg_hub::state::HubOptions;
+use fxg_protocol::paths::{Paths, Role};
 
 async fn start_hub() -> (tempfile::TempDir, Hub) {
     let home = tempfile::tempdir().expect("home");
     let server = Hub::start(HubOptions {
-        fxg_home: home.path().to_path_buf(),
+        paths: Paths::portable(home.path(), Role::Hub),
         listen_addr: "127.0.0.1:0".to_owned(),
         allowed_hosts: Vec::new(),
         allowed_origins: Vec::new(),
@@ -23,7 +24,7 @@ async fn start_hub() -> (tempfile::TempDir, Hub) {
 }
 
 fn auth_token(home: &tempfile::TempDir) -> String {
-    std::fs::read_to_string(home.path().join("auth_token"))
+    std::fs::read_to_string(Paths::portable(home.path(), Role::Hub).auth_token_path())
         .expect("auth token")
         .trim()
         .to_owned()

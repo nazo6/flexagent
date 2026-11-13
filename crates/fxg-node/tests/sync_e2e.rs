@@ -27,7 +27,7 @@ use fxg_acp::{
     ActiveSessionHandle, AgentDriver, AgentLaunchSpec, DriverEvent, DriverKind,
     StartSessionRequest, StartedSession,
 };
-use fxg_db::{Db, DbRole};
+use fxg_db::Db;
 use fxg_hub::Hub;
 use fxg_hub::api::auth::{generate_token, hash_token};
 use fxg_hub::state::HubOptions;
@@ -39,6 +39,7 @@ use fxg_protocol::common::{
     StreamDeltaPayload,
 };
 use fxg_protocol::events::UnifiedEventPayload;
+use fxg_protocol::paths::{Paths, Role};
 use fxg_protocol::{CommandId, NodeId};
 use serde_json::json;
 use tokio::sync::mpsc;
@@ -193,9 +194,10 @@ async fn init_repo(dir: &Path) {
 }
 
 /// Registers the mock agent definition in the node's `node.db`.
-async fn write_mock_agent_config(fxg_home: &Path) {
-    std::fs::create_dir_all(fxg_home).expect("mkdir home");
-    let db = Db::open(&fxg_db::node_db_path(fxg_home), DbRole::Node)
+async fn write_mock_agent_config(home: &Path) {
+    let paths = Paths::portable(home, Role::Node);
+    paths.ensure_dirs().expect("create role dirs");
+    let db = Db::open(&paths.db_path(), Role::Node)
         .await
         .expect("open node db");
     db.upsert_custom_agent(
@@ -213,7 +215,8 @@ async fn write_mock_agent_config(fxg_home: &Path) {
 /// Seeds the pairing in `node.db` and the token file (the same state the
 /// pairing API writes).
 async fn seed_pairing(home: &Path, server_url: &str, token: &str) {
-    let db = Db::open(&fxg_db::node_db_path(home), DbRole::Node)
+    let paths = Paths::portable(home, Role::Node);
+    let db = Db::open(&paths.db_path(), Role::Node)
         .await
         .expect("node db");
     let pairing = db.ensure_node_pairing().await.expect("pairing row");
@@ -224,7 +227,7 @@ async fn seed_pairing(home: &Path, server_url: &str, token: &str) {
     )
     .await
     .expect("pairing url");
-    fxg_node::daemon::save_token_file(&home.join("node_token"), token).expect("token file");
+    fxg_node::daemon::save_token_file(&paths.node_token_path(), token).expect("token file");
 }
 
 /// Starts a test node.
@@ -239,7 +242,7 @@ async fn start_node(
     if let (Some(url), Some(token)) = (&server_url, &node_token) {
         seed_pairing(home, url, token).await;
     }
-    let mut config = DaemonConfig::new(home.to_path_buf(), node_id, "E2E Node");
+    let mut config = DaemonConfig::new(Paths::portable(home, Role::Node), node_id, "E2E Node");
     config.listen_addr = "127.0.0.1:0".to_owned();
     NodeDaemon::start_with_driver_factory(config, agent.factory())
         .await
@@ -249,7 +252,7 @@ async fn start_node(
 /// Starts the hub.
 async fn start_hub(home: &Path, port: u16) -> Hub {
     Hub::start(HubOptions {
-        fxg_home: home.to_path_buf(),
+        paths: Paths::portable(home, Role::Hub),
         listen_addr: format!("127.0.0.1:{port}"),
         allowed_hosts: Vec::new(),
         allowed_origins: Vec::new(),
@@ -261,9 +264,12 @@ async fn start_hub(home: &Path, port: u16) -> Hub {
 
 /// Opens the hub DB (`hub.db`) and issues a node-specific token.
 async fn issue_node_token(server_home: &Path, node_id: &str) -> String {
-    let db = Db::open(&fxg_db::hub_db_path(server_home), DbRole::Hub)
-        .await
-        .expect("open server db");
+    let db = Db::open(
+        &Paths::portable(server_home, Role::Hub).db_path(),
+        Role::Hub,
+    )
+    .await
+    .expect("open server db");
     db.upsert_node(&fxg_db::NodeRecord::new(
         node_id, node_id, "test", "test", "0.1.0",
     ))
@@ -397,15 +403,24 @@ async fn offline_events_sync_without_loss_or_duplication() {
     })
     .await;
 
-    let server_db = Db::open(&fxg_db::hub_db_path(server_home.path()), DbRole::Hub)
-        .await
-        .expect("server db");
-    let node_a_db = Db::open(&fxg_db::node_db_path(node_a_home.path()), DbRole::Node)
-        .await
-        .expect("node a db");
-    let node_b_db = Db::open(&fxg_db::node_db_path(node_b_home.path()), DbRole::Node)
-        .await
-        .expect("node b db");
+    let server_db = Db::open(
+        &Paths::portable(server_home.path(), Role::Hub).db_path(),
+        Role::Hub,
+    )
+    .await
+    .expect("server db");
+    let node_a_db = Db::open(
+        &Paths::portable(node_a_home.path(), Role::Node).db_path(),
+        Role::Node,
+    )
+    .await
+    .expect("node a db");
+    let node_b_db = Db::open(
+        &Paths::portable(node_b_home.path(), Role::Node).db_path(),
+        Role::Node,
+    )
+    .await
+    .expect("node b db");
 
     let node_a_last = node_a_db
         .get_session(&session_a)
@@ -534,16 +549,20 @@ async fn hub_commands_permissions_and_kill_switch() {
     })
     .await;
 
-    let server_db = Db::open(&fxg_db::hub_db_path(server_home.path()), DbRole::Hub)
-        .await
-        .expect("server db");
-    let node_db = Db::open(&fxg_db::node_db_path(node_home.path()), DbRole::Node)
-        .await
-        .expect("node db");
+    let server_db = Db::open(
+        &Paths::portable(server_home.path(), Role::Hub).db_path(),
+        Role::Hub,
+    )
+    .await
+    .expect("server db");
+    let node_db = Db::open(
+        &Paths::portable(node_home.path(), Role::Node).db_path(),
+        Role::Node,
+    )
+    .await
+    .expect("node db");
     let client_token = fxg_hub::api::auth::load_or_create_token(
-        &server_home
-            .path()
-            .join(fxg_protocol::config::AUTH_TOKEN_FILE_NAME),
+        &Paths::portable(server_home.path(), Role::Hub).auth_token_path(),
     )
     .expect("Web access token");
     let http = reqwest::Client::new();
@@ -945,16 +964,20 @@ async fn hub_resumes_stopped_session() {
     })
     .await;
 
-    let server_db = Db::open(&fxg_db::hub_db_path(server_home.path()), DbRole::Hub)
-        .await
-        .expect("server db");
-    let node_db = Db::open(&fxg_db::node_db_path(node_home.path()), DbRole::Node)
-        .await
-        .expect("node db");
+    let server_db = Db::open(
+        &Paths::portable(server_home.path(), Role::Hub).db_path(),
+        Role::Hub,
+    )
+    .await
+    .expect("server db");
+    let node_db = Db::open(
+        &Paths::portable(node_home.path(), Role::Node).db_path(),
+        Role::Node,
+    )
+    .await
+    .expect("node db");
     let client_token = fxg_hub::api::auth::load_or_create_token(
-        &server_home
-            .path()
-            .join(fxg_protocol::config::AUTH_TOKEN_FILE_NAME),
+        &Paths::portable(server_home.path(), Role::Hub).auth_token_path(),
     )
     .expect("Web access token");
     let http = reqwest::Client::new();
@@ -1125,16 +1148,20 @@ async fn hub_archives_and_deletes_session() {
     })
     .await;
 
-    let server_db = Db::open(&fxg_db::hub_db_path(server_home.path()), DbRole::Hub)
-        .await
-        .expect("server db");
-    let node_db = Db::open(&fxg_db::node_db_path(node_home.path()), DbRole::Node)
-        .await
-        .expect("node db");
+    let server_db = Db::open(
+        &Paths::portable(server_home.path(), Role::Hub).db_path(),
+        Role::Hub,
+    )
+    .await
+    .expect("server db");
+    let node_db = Db::open(
+        &Paths::portable(node_home.path(), Role::Node).db_path(),
+        Role::Node,
+    )
+    .await
+    .expect("node db");
     let client_token = fxg_hub::api::auth::load_or_create_token(
-        &server_home
-            .path()
-            .join(fxg_protocol::config::AUTH_TOKEN_FILE_NAME),
+        &Paths::portable(server_home.path(), Role::Hub).auth_token_path(),
     )
     .expect("Web access token");
     let http = reqwest::Client::new();
@@ -1331,9 +1358,12 @@ async fn revoked_pairing_token_is_reported_as_unauthorized() {
     // Issue a token, then revoke it (simulates rotating it on the hub).
     let token = issue_node_token(server_home.path(), "node-1").await;
     {
-        let db = Db::open(&fxg_db::hub_db_path(server_home.path()), DbRole::Hub)
-            .await
-            .expect("hub db");
+        let db = Db::open(
+            &Paths::portable(server_home.path(), Role::Hub).db_path(),
+            Role::Hub,
+        )
+        .await
+        .expect("hub db");
         db.set_node_token_hash("node-1", None)
             .await
             .expect("revoke token");
@@ -1415,7 +1445,11 @@ async fn unpairing_stops_sync_and_reports_standalone() {
     })
     .await;
     assert!(node.state().hub_target().is_none());
-    assert!(!node_home.path().join("node_token").exists());
+    assert!(
+        !Paths::portable(node_home.path(), Role::Node)
+            .node_token_path()
+            .exists()
+    );
 
     node.shutdown();
 }

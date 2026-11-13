@@ -1,52 +1,46 @@
-//! Process bootstrap configuration (`~/.flexagent/config.toml`).
+//! Process bootstrap configuration (`node.toml` / `hub.toml`).
 //!
 //! Design: `docs/05-cli-and-pwa-ui.md` §2 and
-//! `docs/changelog/2026-11-09-settings-consolidation-and-project-identity.md`.
+//! `docs/changelog/2026-11-13-data-directory-layout.md`.
 //!
 //! Only values that are needed **before** the DB opens live here: bind addresses,
-//! the hub URL and logging. Everything changed at runtime (node
+//! allowed hosts/origins and logging. Everything changed at runtime (node
 //! settings, agent definitions, provisioners, project profiles, secrets) is owned
 //! by `node.db` / `hub.db` and edited through the client API.
+//!
+//! Each role reads only its own file (`<config>/node.toml` or
+//! `hub.toml`), so node and hub bootstrap settings cannot be mixed.
 //!
 //! These are hub/CLI internal types and are excluded from `specta` export
 //! (the convention is that only types exposed to clients get
 //! `#[specta(collect)]`).
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
-/// Environment variable that changes the data directory (`~/.flexagent`).
-pub const ENV_FXG_HOME: &str = "FXG_HOME";
-/// Global configuration file name.
-pub const CONFIG_FILE_NAME: &str = "config.toml";
-/// File name of the client authentication token.
-pub const AUTH_TOKEN_FILE_NAME: &str = "auth_token";
-/// File name of the per-node pairing token.
-pub const NODE_TOKEN_FILE_NAME: &str = "node_token";
-/// File name of the node-local DB.
-pub const NODE_DB_FILE_NAME: &str = "node.db";
-/// File name of the hub DB.
-pub const HUB_DB_FILE_NAME: &str = "hub.db";
+use crate::paths::{Paths, Role};
+
 /// Definitions of the `FXG_*` environment variable names.
 pub mod env_keys {
-    /// `[node] node_id`
+    /// `node.toml` `node_id`
     pub const NODE_ID: &str = "FXG_NODE_ID";
-    /// `[node] listen_addr`
+    /// `node.toml` `listen_addr`
     pub const NODE_LISTEN_ADDR: &str = "FXG_NODE_LISTEN_ADDR";
-    /// `[node] allowed_hosts` (comma separated)
+    /// `node.toml` `allowed_hosts` (comma separated)
     pub const NODE_ALLOWED_HOSTS: &str = "FXG_NODE_ALLOWED_HOSTS";
-    /// `[node] allowed_origins` (comma separated)
+    /// `node.toml` `allowed_origins` (comma separated)
     pub const NODE_ALLOWED_ORIGINS: &str = "FXG_NODE_ALLOWED_ORIGINS";
     /// Disable automatic `fxg node start` startup from CLI commands (`1` / `true`)
     pub const NO_AUTO_NODE: &str = "FXG_NO_AUTO_NODE";
     /// Idle seconds before a warm ACP agent process is disposed (0 = keep until shutdown)
     pub const AGENT_WARM_IDLE_SECS: &str = "FXG_AGENT_WARM_IDLE_SECS";
-    /// `[hub] listen_addr`
+    /// `hub.toml` `listen_addr`
     pub const HUB_LISTEN_ADDR: &str = "FXG_HUB_LISTEN_ADDR";
-    /// `[hub] allowed_hosts` (comma separated)
+    /// `hub.toml` `allowed_hosts` (comma separated)
     pub const HUB_ALLOWED_HOSTS: &str = "FXG_HUB_ALLOWED_HOSTS";
-    /// `[hub] allowed_origins` (comma separated)
+    /// `hub.toml` `allowed_origins` (comma separated)
     pub const HUB_ALLOWED_ORIGINS: &str = "FXG_HUB_ALLOWED_ORIGINS";
     /// `[log] level` ("trace" | "debug" | "info" | "warn" | "error")
     pub const LOG_LEVEL: &str = "FXG_LOG_LEVEL";
@@ -68,7 +62,7 @@ pub enum ConfigError {
     #[error("failed to read config file {path}: {source}")]
     Io {
         /// Affected path
-        path: PathBuf,
+        path: std::path::PathBuf,
         /// Original I/O error
         #[source]
         source: std::io::Error,
@@ -77,7 +71,7 @@ pub enum ConfigError {
     #[error("failed to parse config file {path}: {source}")]
     Parse {
         /// Affected path
-        path: PathBuf,
+        path: std::path::PathBuf,
         /// Original parse error
         #[source]
         source: Box<toml::de::Error>,
@@ -119,20 +113,6 @@ pub fn process_env(key: &str) -> Option<String> {
     }
 }
 
-/// Resolves the FlexAgent data directory (`~/.flexagent`).
-///
-/// If the [`ENV_FXG_HOME`] environment variable is set it takes precedence;
-/// otherwise `~/.flexagent` is returned (`./.flexagent` if the home directory
-/// cannot be resolved).
-pub fn fxg_home(env: EnvLookup<'_>) -> PathBuf {
-    if let Some(value) = env(ENV_FXG_HOME).filter(|v| !v.trim().is_empty()) {
-        return PathBuf::from(value);
-    }
-    dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".flexagent")
-}
-
 fn parse_bool_env(key: &'static str, value: &str) -> Result<bool, ConfigError> {
     match value.trim().to_ascii_lowercase().as_str() {
         "1" | "true" | "yes" | "on" => Ok(true),
@@ -152,6 +132,24 @@ pub(crate) fn parse_list(value: &str) -> Vec<String> {
         .filter(|item| !item.is_empty())
         .map(str::to_owned)
         .collect()
+}
+
+/// Reads a configuration file (returns defaults when it does not exist).
+fn read_config<T>(path: &Path) -> Result<T, ConfigError>
+where
+    T: DeserializeOwned + Default,
+{
+    match std::fs::read_to_string(path) {
+        Ok(text) => toml::from_str(&text).map_err(|source| ConfigError::Parse {
+            path: path.to_path_buf(),
+            source: Box::new(source),
+        }),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(T::default()),
+        Err(source) => Err(ConfigError::Io {
+            path: path.to_path_buf(),
+            source,
+        }),
+    }
 }
 
 /// Converts a user-supplied hub address into the Node Hub WebSocket URL.
@@ -216,94 +214,7 @@ pub fn hub_http_origin(input: &str) -> String {
     format!("{scheme}://{rest}")
 }
 
-/// Global bootstrap configuration (`~/.flexagent/config.toml`).
-///
-/// Every field is optional (each has a default value).
-#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
-pub struct GlobalConfig {
-    /// Logging settings
-    pub log: LogConfig,
-    /// Local node daemon bootstrap settings (`fxg node start`)
-    pub node: NodeBootstrapConfig,
-    /// Hub bootstrap settings (`fxg hub`)
-    pub hub: HubBootstrapConfig,
-}
-
-impl GlobalConfig {
-    /// Reads `config.toml` from the [data directory](fxg_home) using the real
-    /// environment variables and applies the `FXG_*` overrides.
-    ///
-    /// Returns the default configuration when the file does not exist.
-    pub fn load(env: EnvLookup<'_>) -> Result<Self, ConfigError> {
-        let home = fxg_home(env);
-        Self::load_from_dir(&home, env)
-    }
-
-    /// Reads `config.toml` from the given directory and applies the `FXG_*` overrides.
-    pub fn load_from_dir(dir: &Path, env: EnvLookup<'_>) -> Result<Self, ConfigError> {
-        let mut config = Self::load_from_path(&dir.join(CONFIG_FILE_NAME))?;
-        config.apply_env_overrides(env)?;
-        Ok(config)
-    }
-
-    /// Reads `config.toml` at the given path.
-    ///
-    /// Returns the default configuration when the file does not exist.
-    pub fn load_from_path(path: &Path) -> Result<Self, ConfigError> {
-        match std::fs::read_to_string(path) {
-            Ok(text) => toml::from_str(&text).map_err(|source| ConfigError::Parse {
-                path: path.to_path_buf(),
-                source: Box::new(source),
-            }),
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(Self::default()),
-            Err(source) => Err(ConfigError::Io {
-                path: path.to_path_buf(),
-                source,
-            }),
-        }
-    }
-
-    /// Applies the overrides from the `FXG_*` environment variables.
-    pub fn apply_env_overrides(&mut self, env: EnvLookup<'_>) -> Result<(), ConfigError> {
-        if let Some(v) = env(env_keys::LOG_LEVEL) {
-            self.log.level = Some(v);
-        }
-        if let Some(v) = env(env_keys::LOG_FILE) {
-            self.log.file = Some(v);
-        }
-        if let Some(v) = env(env_keys::LOG_FORMAT) {
-            self.log.format = Some(v);
-        }
-        if let Some(v) = env(env_keys::LOG_NO_COLOR) {
-            self.log.no_color = parse_bool_env(env_keys::LOG_NO_COLOR, &v)?;
-        }
-        if let Some(v) = env(env_keys::NODE_ID) {
-            self.node.node_id = Some(v);
-        }
-        if let Some(v) = env(env_keys::NODE_LISTEN_ADDR) {
-            self.node.listen_addr = Some(v);
-        }
-        if let Some(v) = env(env_keys::NODE_ALLOWED_HOSTS) {
-            self.node.allowed_hosts = parse_list(&v);
-        }
-        if let Some(v) = env(env_keys::NODE_ALLOWED_ORIGINS) {
-            self.node.allowed_origins = parse_list(&v);
-        }
-        if let Some(v) = env(env_keys::HUB_LISTEN_ADDR) {
-            self.hub.listen_addr = Some(v);
-        }
-        if let Some(v) = env(env_keys::HUB_ALLOWED_HOSTS) {
-            self.hub.allowed_hosts = parse_list(&v);
-        }
-        if let Some(v) = env(env_keys::HUB_ALLOWED_ORIGINS) {
-            self.hub.allowed_origins = parse_list(&v);
-        }
-        Ok(())
-    }
-}
-
-/// The `[log]` section: logging settings.
+/// The `[log]` section: logging settings (owned by each role).
 ///
 /// Unknown keys are rejected: a typo must not be silently ignored (see
 /// `docs/changelog/2026-11-11-strict-config-schema.md`).
@@ -312,7 +223,8 @@ impl GlobalConfig {
 pub struct LogConfig {
     /// Default log level ("trace" | "debug" | "info" | "warn" | "error")
     pub level: Option<String>,
-    /// Log file destination (relative paths start at ~/.flexagent; an empty string disables it)
+    /// Log file destination (relative paths start at the role's log directory;
+    /// an empty string disables it)
     pub file: Option<String>,
     /// Log output format ("text" | "json")
     pub format: Option<String>,
@@ -320,10 +232,26 @@ pub struct LogConfig {
     pub no_color: bool,
 }
 
-/// The `[node]` section: local node daemon bootstrap settings.
+fn apply_log_overrides(log: &mut LogConfig, env: EnvLookup<'_>) -> Result<(), ConfigError> {
+    if let Some(value) = env(env_keys::LOG_LEVEL) {
+        log.level = Some(value);
+    }
+    if let Some(value) = env(env_keys::LOG_FILE) {
+        log.file = Some(value);
+    }
+    if let Some(value) = env(env_keys::LOG_FORMAT) {
+        log.format = Some(value);
+    }
+    if let Some(value) = env(env_keys::LOG_NO_COLOR) {
+        log.no_color = parse_bool_env(env_keys::LOG_NO_COLOR, &value)?;
+    }
+    Ok(())
+}
+
+/// Local node bootstrap configuration (`node.toml`).
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
-pub struct NodeBootstrapConfig {
+pub struct NodeConfig {
     /// Unique node identifier
     /// (when omitted, a hostname-based slug plus a short ID is assigned on first start).
     pub node_id: Option<String>,
@@ -337,9 +265,11 @@ pub struct NodeBootstrapConfig {
     /// Extra origins allowed by the CSWSH defense (WebSocket Origin validation)
     /// besides the same origin.
     pub allowed_origins: Vec<String>,
+    /// Logging settings
+    pub log: LogConfig,
 }
 
-impl NodeBootstrapConfig {
+impl NodeConfig {
     /// Default bind address of the local HTTP/WS server (strictly bound to loopback).
     pub const DEFAULT_LISTEN_ADDR: &'static str = "127.0.0.1:7860";
 
@@ -347,24 +277,58 @@ impl NodeBootstrapConfig {
     pub fn resolved_listen_addr(&self) -> &str {
         self.listen_addr
             .as_deref()
-            .filter(|v| !v.trim().is_empty())
+            .filter(|value| !value.trim().is_empty())
             .unwrap_or(Self::DEFAULT_LISTEN_ADDR)
+    }
+
+    /// Reads `node.toml` from the OS/portable config root and applies `FXG_NODE_*` /
+    /// `FXG_LOG_*` overrides. Returns defaults when the file does not exist.
+    pub fn load(env: EnvLookup<'_>) -> Result<Self, ConfigError> {
+        let paths = Paths::resolve(env, Role::Node);
+        Self::load_from_path(&paths.config_path(), env)
+    }
+
+    /// Reads `node.toml` at the given path and applies the environment overrides.
+    pub fn load_from_path(path: &Path, env: EnvLookup<'_>) -> Result<Self, ConfigError> {
+        let mut config: Self = read_config(path)?;
+        config.apply_env_overrides(env)?;
+        Ok(config)
+    }
+
+    /// Applies the overrides from the `FXG_NODE_*` and `FXG_LOG_*` environment variables.
+    pub fn apply_env_overrides(&mut self, env: EnvLookup<'_>) -> Result<(), ConfigError> {
+        apply_log_overrides(&mut self.log, env)?;
+        if let Some(value) = env(env_keys::NODE_ID) {
+            self.node_id = Some(value);
+        }
+        if let Some(value) = env(env_keys::NODE_LISTEN_ADDR) {
+            self.listen_addr = Some(value);
+        }
+        if let Some(value) = env(env_keys::NODE_ALLOWED_HOSTS) {
+            self.allowed_hosts = parse_list(&value);
+        }
+        if let Some(value) = env(env_keys::NODE_ALLOWED_ORIGINS) {
+            self.allowed_origins = parse_list(&value);
+        }
+        Ok(())
     }
 }
 
-/// The `[hub]` section: hub bootstrap settings.
-#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+/// Hub bootstrap configuration (`hub.toml`).
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
-pub struct HubBootstrapConfig {
+pub struct HubConfig {
     /// HTTP/WS bind address of the hub (listen only inside a LAN / VPN).
     pub listen_addr: Option<String>,
     /// Extra host names allowed by the DNS rebinding defense (Host header validation).
     pub allowed_hosts: Vec<String>,
     /// Extra origins allowed by the CSWSH defense (WebSocket Origin validation) besides the same origin.
     pub allowed_origins: Vec<String>,
+    /// Logging settings
+    pub log: LogConfig,
 }
 
-impl HubBootstrapConfig {
+impl HubConfig {
     /// Default bind address of the hub.
     ///
     /// Never expose it directly to the public internet; listen only inside a LAN
@@ -375,8 +339,37 @@ impl HubBootstrapConfig {
     pub fn resolved_listen_addr(&self) -> &str {
         self.listen_addr
             .as_deref()
-            .filter(|v| !v.trim().is_empty())
+            .filter(|value| !value.trim().is_empty())
             .unwrap_or(Self::DEFAULT_LISTEN_ADDR)
+    }
+
+    /// Reads `hub.toml` from the OS/portable config root and applies `FXG_HUB_*` /
+    /// `FXG_LOG_*` overrides. Returns defaults when the file does not exist.
+    pub fn load(env: EnvLookup<'_>) -> Result<Self, ConfigError> {
+        let paths = Paths::resolve(env, Role::Hub);
+        Self::load_from_path(&paths.config_path(), env)
+    }
+
+    /// Reads `hub.toml` at the given path and applies the environment overrides.
+    pub fn load_from_path(path: &Path, env: EnvLookup<'_>) -> Result<Self, ConfigError> {
+        let mut config: Self = read_config(path)?;
+        config.apply_env_overrides(env)?;
+        Ok(config)
+    }
+
+    /// Applies the overrides from the `FXG_HUB_*` and `FXG_LOG_*` environment variables.
+    pub fn apply_env_overrides(&mut self, env: EnvLookup<'_>) -> Result<(), ConfigError> {
+        apply_log_overrides(&mut self.log, env)?;
+        if let Some(value) = env(env_keys::HUB_LISTEN_ADDR) {
+            self.listen_addr = Some(value);
+        }
+        if let Some(value) = env(env_keys::HUB_ALLOWED_HOSTS) {
+            self.allowed_hosts = parse_list(&value);
+        }
+        if let Some(value) = env(env_keys::HUB_ALLOWED_ORIGINS) {
+            self.allowed_origins = parse_list(&value);
+        }
+        Ok(())
     }
 }
 
@@ -388,59 +381,88 @@ mod tests {
     fn env_map(pairs: &[(&str, &str)]) -> HashMap<String, String> {
         pairs
             .iter()
-            .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+            .map(|(key, value)| ((*key).to_owned(), (*value).to_owned()))
             .collect()
     }
 
-    const SAMPLE_GLOBAL_CONFIG: &str = r#"
-[node]
+    const SAMPLE_NODE_CONFIG: &str = r#"
 node_id = "home-win"
 listen_addr = "127.0.0.1:7860"
 allowed_hosts = ["fxg-laptop.tailnet-xxxx.ts.net"]
 allowed_origins = ["https://fxg-laptop.tailnet-xxxx.ts.net"]
 
-[hub]
+[log]
+level = "debug"
+file = "node.log"
+format = "text"
+no_color = false
+"#;
+
+    const SAMPLE_HUB_CONFIG: &str = r#"
 listen_addr = "0.0.0.0:8080"
 allowed_hosts = ["home-server.tailnet-xxxx.ts.net:8080", "192.168.1.50:8080"]
 allowed_origins = ["https://home-server.tailnet-xxxx.ts.net"]
+
+[log]
+level = "info"
+file = "hub.log"
+format = "json"
 "#;
 
     #[test]
-    fn parses_full_global_config() {
-        let config: GlobalConfig = toml::from_str(SAMPLE_GLOBAL_CONFIG).unwrap();
-        assert_eq!(config.node.node_id.as_deref(), Some("home-win"));
+    fn parses_node_config() {
+        let config: NodeConfig = toml::from_str(SAMPLE_NODE_CONFIG).unwrap();
+        assert_eq!(config.node_id.as_deref(), Some("home-win"));
+        assert_eq!(config.resolved_listen_addr(), "127.0.0.1:7860");
+        assert_eq!(config.allowed_hosts.len(), 1);
         assert_eq!(
-            config.node.resolved_listen_addr(),
-            NodeBootstrapConfig::DEFAULT_LISTEN_ADDR
-        );
-        assert_eq!(
-            config.hub.resolved_listen_addr(),
-            HubBootstrapConfig::DEFAULT_LISTEN_ADDR
-        );
-        assert_eq!(config.hub.allowed_hosts.len(), 2);
-        assert_eq!(config.hub.allowed_origins.len(), 1);
-        assert_eq!(
-            config.node.allowed_hosts,
-            vec!["fxg-laptop.tailnet-xxxx.ts.net"]
-        );
-        assert_eq!(
-            config.node.allowed_origins,
+            config.allowed_origins,
             vec!["https://fxg-laptop.tailnet-xxxx.ts.net"]
         );
+        assert_eq!(config.log.level.as_deref(), Some("debug"));
+        assert_eq!(config.log.file.as_deref(), Some("node.log"));
     }
 
     #[test]
-    fn defaults_are_applied_when_sections_are_missing() {
-        let config: GlobalConfig = toml::from_str("").unwrap();
-        assert_eq!(config, GlobalConfig::default());
+    fn parses_hub_config() {
+        let config: HubConfig = toml::from_str(SAMPLE_HUB_CONFIG).unwrap();
+        assert_eq!(config.resolved_listen_addr(), "0.0.0.0:8080");
+        assert_eq!(config.allowed_hosts.len(), 2);
+        assert_eq!(config.log.format.as_deref(), Some("json"));
+    }
+
+    #[test]
+    fn defaults_are_applied_when_fields_are_missing() {
+        assert_eq!(
+            toml::from_str::<NodeConfig>("").unwrap(),
+            NodeConfig::default()
+        );
+        assert_eq!(
+            toml::from_str::<HubConfig>("").unwrap(),
+            HubConfig::default()
+        );
+        assert_eq!(
+            NodeConfig::default().resolved_listen_addr(),
+            NodeConfig::DEFAULT_LISTEN_ADDR
+        );
+        assert_eq!(
+            HubConfig::default().resolved_listen_addr(),
+            HubConfig::DEFAULT_LISTEN_ADDR
+        );
     }
 
     #[test]
     fn unknown_fields_are_rejected() {
-        // A typo must not silently fall back to a default value.
-        let err = toml::from_str::<GlobalConfig>(
+        let err = toml::from_str::<NodeConfig>(
             r#"
-[node]
+listen_adrr = "127.0.0.1:9000"
+"#,
+        )
+        .expect_err("unknown keys must be rejected");
+        assert!(err.to_string().contains("listen_adrr"), "got: {err}");
+
+        let err = toml::from_str::<HubConfig>(
+            r#"
 listen_adrr = "127.0.0.1:9000"
 "#,
         )
@@ -452,9 +474,8 @@ listen_adrr = "127.0.0.1:9000"
     fn leftover_hub_url_is_rejected() {
         // Pairing moved to `node.db`; a leftover key must fail loudly instead of
         // being ignored (docs/changelog/2026-11-11-node-pairing-db-and-gui.md).
-        let err = toml::from_str::<GlobalConfig>(
+        let err = toml::from_str::<NodeConfig>(
             r#"
-[node]
 node_id = "n1"
 hub_url = "http://127.0.0.1:8080"
 "#,
@@ -464,16 +485,13 @@ hub_url = "http://127.0.0.1:8080"
     }
 
     #[test]
-    fn env_overrides_are_applied() {
-        let mut config: GlobalConfig = toml::from_str(SAMPLE_GLOBAL_CONFIG).unwrap();
+    fn node_env_overrides_are_applied() {
+        let mut config: NodeConfig = toml::from_str(SAMPLE_NODE_CONFIG).unwrap();
         let env = env_map(&[
             ("FXG_NODE_ID", "override-node"),
             ("FXG_NODE_LISTEN_ADDR", "127.0.0.1:9000"),
             ("FXG_NODE_ALLOWED_HOSTS", "node-a.test,node-b.test"),
             ("FXG_NODE_ALLOWED_ORIGINS", "https://node-a.test"),
-            ("FXG_HUB_LISTEN_ADDR", "0.0.0.0:9090"),
-            ("FXG_HUB_ALLOWED_HOSTS", "a.test, b.test ,, c.test"),
-            ("FXG_HUB_ALLOWED_ORIGINS", "http://a.test"),
             ("FXG_LOG_LEVEL", "debug"),
             ("FXG_LOG_FILE", "custom.log"),
             ("FXG_LOG_FORMAT", "json"),
@@ -487,53 +505,55 @@ hub_url = "http://127.0.0.1:8080"
         assert_eq!(config.log.file.as_deref(), Some("custom.log"));
         assert_eq!(config.log.format.as_deref(), Some("json"));
         assert!(config.log.no_color);
-        assert_eq!(config.node.node_id.as_deref(), Some("override-node"));
-        assert_eq!(config.node.resolved_listen_addr(), "127.0.0.1:9000");
-        assert_eq!(
-            config.node.allowed_hosts,
-            vec!["node-a.test", "node-b.test"]
-        );
-        assert_eq!(config.node.allowed_origins, vec!["https://node-a.test"]);
-        assert_eq!(config.hub.resolved_listen_addr(), "0.0.0.0:9090");
-        assert_eq!(config.hub.allowed_hosts, vec!["a.test", "b.test", "c.test"]);
-        assert_eq!(config.hub.allowed_origins, vec!["http://a.test"]);
+        assert_eq!(config.node_id.as_deref(), Some("override-node"));
+        assert_eq!(config.resolved_listen_addr(), "127.0.0.1:9000");
+        assert_eq!(config.allowed_hosts, vec!["node-a.test", "node-b.test"]);
+        assert_eq!(config.allowed_origins, vec!["https://node-a.test"]);
     }
 
     #[test]
-    fn fxg_home_prefers_env_then_falls_back_to_home_dir() {
-        let env = env_map(&[("FXG_HOME", "/tmp/fxg-test-home")]);
-        assert_eq!(
-            fxg_home(&|key| env.get(key).cloned()),
-            PathBuf::from("/tmp/fxg-test-home")
-        );
+    fn hub_env_overrides_are_applied() {
+        let mut config: HubConfig = toml::from_str(SAMPLE_HUB_CONFIG).unwrap();
+        let env = env_map(&[
+            ("FXG_HUB_LISTEN_ADDR", "0.0.0.0:9090"),
+            ("FXG_HUB_ALLOWED_HOSTS", "a.test, b.test ,, c.test"),
+            ("FXG_HUB_ALLOWED_ORIGINS", "http://a.test"),
+            ("FXG_LOG_NO_COLOR", "true"),
+        ]);
+        config
+            .apply_env_overrides(&|key| env.get(key).cloned())
+            .unwrap();
 
-        let empty = env_map(&[]);
-        let fallback = fxg_home(&|key| empty.get(key).cloned());
-        assert!(fallback.ends_with(".flexagent"));
+        assert_eq!(config.resolved_listen_addr(), "0.0.0.0:9090");
+        assert_eq!(config.allowed_hosts, vec!["a.test", "b.test", "c.test"]);
+        assert_eq!(config.allowed_origins, vec!["http://a.test"]);
+        assert!(config.log.no_color);
     }
 
     #[test]
     fn missing_config_file_yields_defaults() {
         let dir = tempfile::tempdir().unwrap();
-        let config = GlobalConfig::load_from_dir(dir.path(), &|_| None).unwrap();
-        assert_eq!(config, GlobalConfig::default());
+        let path = dir.path().join("node.toml");
+        let config = NodeConfig::load_from_path(&path, &|_| None).unwrap();
+        assert_eq!(config, NodeConfig::default());
     }
 
     #[test]
-    fn loads_config_file_from_directory_with_env_overrides() {
+    fn loads_config_file_from_path_with_env_overrides() {
         let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join(CONFIG_FILE_NAME), SAMPLE_GLOBAL_CONFIG).unwrap();
+        let path = dir.path().join("node.toml");
+        std::fs::write(&path, SAMPLE_NODE_CONFIG).unwrap();
         let env = env_map(&[("FXG_NODE_ID", "from-env")]);
-        let config = GlobalConfig::load_from_dir(dir.path(), &|key| env.get(key).cloned()).unwrap();
-        assert_eq!(config.node.node_id.as_deref(), Some("from-env"));
+        let config = NodeConfig::load_from_path(&path, &|key| env.get(key).cloned()).unwrap();
+        assert_eq!(config.node_id.as_deref(), Some("from-env"));
     }
 
     #[test]
     fn invalid_toml_reports_parse_error_with_path() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join(CONFIG_FILE_NAME);
+        let path = dir.path().join("node.toml");
         std::fs::write(&path, "this is not = valid toml [").unwrap();
-        let err = GlobalConfig::load_from_path(&path).unwrap_err();
+        let err = NodeConfig::load_from_path(&path, &|_| None).unwrap_err();
         match err {
             ConfigError::Parse { path: p, .. } => assert_eq!(p, path),
             other => panic!("unexpected error: {other}"),

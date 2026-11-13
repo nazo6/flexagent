@@ -130,8 +130,16 @@ impl ClientApiBackend for DaemonState {
         Some(DaemonState::hub_link_updates(self))
     }
 
-    fn fxg_home(&self) -> Option<&std::path::Path> {
-        Some(DaemonState::paths(self).fxg_home())
+    fn data_dir(&self) -> Option<std::path::PathBuf> {
+        Some(DaemonState::paths(self).data_dir())
+    }
+
+    fn db_path(&self) -> Option<std::path::PathBuf> {
+        Some(DaemonState::paths(self).db_path())
+    }
+
+    fn log_path(&self) -> Option<std::path::PathBuf> {
+        Some(DaemonState::paths(self).log_path())
     }
 
     async fn role_health(&self, now: i64) -> Vec<ComponentHealth> {
@@ -204,8 +212,8 @@ impl ClientApiBackend for DaemonState {
     fn support_bundle_config(&self) -> SupportBundleConfig {
         let config = self.config();
         SupportBundleConfig {
-            fxg_home: DaemonState::paths(self)
-                .fxg_home()
+            data_dir: DaemonState::paths(self)
+                .data_dir()
                 .to_string_lossy()
                 .into_owned(),
             log_level: config.log.level.clone(),
@@ -220,10 +228,7 @@ impl ClientApiBackend for DaemonState {
     }
 
     fn support_bundle_logs(&self, lines: usize) -> Vec<String> {
-        let path = DaemonState::paths(self)
-            .fxg_home()
-            .join("logs")
-            .join("node.log");
+        let path = DaemonState::paths(self).log_path();
         fxg_hub::api::log_tail(&path, lines)
     }
 

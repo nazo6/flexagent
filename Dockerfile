@@ -66,12 +66,12 @@ RUN apt-get update \
 
 COPY --from=build /usr/local/bin/fxg /usr/local/bin/fxg
 
-# データディレクトリ (`~/.flexagent` 相当) を FXG_HOME=/data に固定し、
-# named volume で永続化する (hub.db / node.db / config.toml / worktrees 等)
-ENV FXG_HOME=/data
-RUN install --directory --owner=fxg --group=fxg --mode=0750 /data
-VOLUME ["/data"]
-WORKDIR /data
+# データディレクトリを FXG_HOME=/var/lib/flexagent に固定し、named volume で
+# 永続化する。配下は {config,data,state,logs,cache}/{node,hub} に分かれる。
+ENV FXG_HOME=/var/lib/flexagent
+RUN install --directory --owner=fxg --group=fxg --mode=0750 /var/lib/flexagent
+VOLUME ["/var/lib/flexagent"]
+WORKDIR /var/lib/flexagent
 USER fxg
 
 # `fxg hub start` の既定待受 (0.0.0.0:8080)。コンテナ内部から `fxg node start` を

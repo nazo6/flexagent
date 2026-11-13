@@ -48,16 +48,16 @@ CLI のコマンド・引数の正は `fxg --help` / `fxg <noun> --help` と
 所有者の DB に型付き構造で保存し、`node.toml` / `hub.toml` にはプロセス起動時に
 必要な値だけを残します。
 
-| 設定                                                            | 所有者 / 保存場所                                                        | 変更手段                                          |
-| :-------------------------------------------------------------- | :----------------------------------------------------------------------- | :------------------------------------------------ |
-| 待受アドレス・ログ・`allowed_hosts` / `allowed_origins`         | `node.toml` / `hub.toml` / `FXG_*` / CLI                                 | ファイル編集 + 再起動（Web UI は読み取り専用）    |
-| ハブ接続先・ペアリングトークン                                  | `node.db` (`node_pairing`) + `<data>/flexagent/node/node_token` (`0600`) | Client API / Web UI（ハブは対象ノードへプロキシ） |
-| `node.name` / `allow_remote_pty` / `project_scan_dirs` / `tray` | `node.db` (`node_settings`)                                              | Client API（ハブは対象ノードへプロキシ）          |
-| エージェント既定値・エイリアス・カスタム定義                    | `node.db` (`agent_settings` / `agent_aliases` / `custom_agents`)         | Client API                                        |
-| 明示的な `project_key`                                          | `node.db` (`project_path_links`)                                         | Client API / Web UI                               |
-| VAPID subject・Provisioner                                      | `hub.db`                                                                 | ハブ Web UI                                       |
-| 秘密の値                                                        | `<data>/flexagent/{node,hub}/secrets/<id>` (`0600`)                      | Secret API（書き込み専用）                        |
-| 言語・テーマ・ピン留め                                          | ブラウザ `localStorage`                                                  | Web UI                                            |
+| 設定                                                            | 所有者 / 保存場所                                                | 変更手段                                          |
+| :-------------------------------------------------------------- | :--------------------------------------------------------------- | :------------------------------------------------ |
+| 待受アドレス・ログ・`allowed_hosts` / `allowed_origins`         | `node.toml` / `hub.toml` / `FXG_*` / CLI                         | ファイル編集 + 再起動（Web UI は読み取り専用）    |
+| ハブ接続先・ペアリングトークン                                  | `node.db` (`node_pairing`) + `<data>/node/node_token` (`0600`)   | Client API / Web UI（ハブは対象ノードへプロキシ） |
+| `node.name` / `allow_remote_pty` / `project_scan_dirs` / `tray` | `node.db` (`node_settings`)                                      | Client API（ハブは対象ノードへプロキシ）          |
+| エージェント既定値・エイリアス・カスタム定義                    | `node.db` (`agent_settings` / `agent_aliases` / `custom_agents`) | Client API                                        |
+| 明示的な `project_key`                                          | `node.db` (`project_path_links`)                                 | Client API / Web UI                               |
+| VAPID subject・Provisioner                                      | `hub.db`                                                         | ハブ Web UI                                       |
+| 秘密の値                                                        | `<data>/{node,hub}/secrets/<id>` (`0600`)                        | Secret API（書き込み専用）                        |
+| 言語・テーマ・ピン留め                                          | ブラウザ `localStorage`                                          | Web UI                                            |
 
 ### 2.1 データディレクトリ構成
 
@@ -78,11 +78,11 @@ Linux では XDG にログ用のクラスがないため、`<logs>` は `<state>
 `$FXG_HOME/{config,data,state,logs,cache}` を使います（portable モード）。
 
 ```text
-<config>/flexagent/
+<config>/
 ├── node.toml                       # ノードの起動設定のみ
 └── hub.toml                        # ハブの起動設定のみ
 
-<data>/flexagent/
+<data>/
 ├── node/
 │   ├── node.db                     # ノード所有の設定 + セッション正データ
 │   ├── auth_token                  # ノード専用の Web アクセストークン (0600)
@@ -95,18 +95,18 @@ Linux では XDG にログ用のクラスがないため、`<logs>` は `<state>
     ├── vapid.json                  # Web Push VAPID 秘密鍵 (0600)
     └── secrets/<secret-id>         # ハブ所有の秘密値 (0600)
 
-<state>/flexagent/
+<state>/
 ├── node/
 │   ├── node.addr                   # 稼働中ノードの待受アドレス (実行時のみ)
 │   └── start.lock                  # CLI の自動起動ロック
 └── hub/
     └── hub.addr                    # 稼働中ハブの待受アドレス (実行時のみ)
 
-<logs>/flexagent/
+<logs>/
 ├── node/node.log
 └── hub/hub.log
 
-<cache>/flexagent/node/registry.json  # ACP Registry キャッシュ
+<cache>/node/registry.json  # ACP Registry キャッシュ
 ```
 
 | ファイル / ディレクトリ      | 用途                                                                           | 所有者・設定方法                                             |
@@ -129,7 +129,7 @@ Linux では XDG にログ用のクラスがないため、`<logs>` は `<state>
 
 | 呼び名                       | ファイル / 環境変数          | 何のため                                                            | 入手・設定方法                                                                                                                        |
 | :--------------------------- | :--------------------------- | :------------------------------------------------------------------ | :------------------------------------------------------------------------------------------------------------------------------------ |
-| **Web アクセストークン**     | `<data>/<role>/auth_token`   | ブラウザや CLI が **そのロールの** hub / node の API にログインする | 自動生成。ノードは `fxg node access-token show`、hub は hub ホストの `<data>/flexagent/hub/auth_token`                                |
+| **Web アクセストークン**     | `<data>/<role>/auth_token`   | ブラウザや CLI が **そのロールの** hub / node の API にログインする | 自動生成。ノードは `fxg node access-token show`、hub は hub ホストの `<data>/hub/auth_token`                                          |
 | **ノードペアリングトークン** | `<data>/node/node_token`     | **ノードを hub に登録する**（hub ⇔ node 間）                        | hub で `fxg hub pairing-token issue <node-id>` → ノードの Web UI（設定 > ハブ接続）または `fxg node pair --hub <URL> --token <TOKEN>` |
 | その他の秘密                 | `<data>/<role>/secrets/<id>` | エージェントの API キー、Git 認証など                               | Secret API（値は書き込み専用）                                                                                                        |
 
@@ -139,7 +139,7 @@ Linux では XDG にログ用のクラスがないため、`<logs>` は `<state>
 - ノードペアリングトークンは hub の `nodes.token_hash` にハッシュだけが保存され、
   発行時に一度だけ表示されます。
 - ペアリングはノードが所有します。接続先は `node.db` (`node_pairing`)、トークンは
-  `<data>/flexagent/node/node_token` (`0600`) に保存し、`node.toml` は
+  `<data>/node/node_token` (`0600`) に保存し、`node.toml` は
   書き換えません。
 - Web UI の **設定 > ハブ接続** から設定・接続テスト・解除ができます。変更は
   ノード API 経由で即時反映され、`fxg node restart` は不要です。
@@ -147,7 +147,7 @@ Linux では XDG にログ用のクラスがないため、`<logs>` は `<state>
 ### 2.2 `node.toml` / `hub.toml` スキーマ（起動設定のみ）
 
 ```toml
-# <config>/flexagent/node.toml
+# <config>/node.toml
 node_id = "home-win"
 listen_addr = "127.0.0.1:7860"
 # ループバック以外のホスト名（リバースプロキシ / node 単体運用）で公開する場合のみ
@@ -156,20 +156,20 @@ allowed_origins = ["https://home-win.tailnet-xxxx.ts.net"]
 
 [log]
 level = "info"
-file = "node.log"      # 相対パスは <logs>/flexagent/node/ 基準
+file = "node.log"      # 相対パスは <logs>/node/ 基準
 format = "text"
 no_color = false
 ```
 
 ```toml
-# <config>/flexagent/hub.toml
+# <config>/hub.toml
 listen_addr = "0.0.0.0:8080"
 allowed_hosts = ["home-server.tailnet-xxxx.ts.net:8080"]
 allowed_origins = ["https://home-server.tailnet-xxxx.ts.net"]
 
 [log]
 level = "info"
-file = "hub.log"       # 相対パスは <logs>/flexagent/hub/ 基準
+file = "hub.log"       # 相対パスは <logs>/hub/ 基準
 format = "text"
 no_color = false
 ```
@@ -193,14 +193,14 @@ WebSocket の `Origin` 検証（CSWSH 対策）の許可リストです（ハブ
 
 `node.toml` の `listen_addr` の既定は `127.0.0.1:7860` です。7860 が使用中で
 明示指定がない場合は ephemeral port にフォールバックし、実際のアドレスは
-`<state>/flexagent/node/node.addr` に記録されます。CLI・`fxg web`・
+`<state>/node/node.addr` に記録されます。CLI・`fxg web`・
 ブラウザのローカル直結はこのファイルを優先します。ワイルドカード
 （`0.0.0.0` / `[::]`）で bind した場合、CLI と `fxg web` は `127.0.0.1` に
 読み替えて接続します。
 
 ### 2.3 Worktree と 一時VM環境
 
-- Worktree の作成先は `<data>/flexagent/node/worktrees/{project}/{branch}` に固定です。
+- Worktree の作成先は `<data>/node/worktrees/{project}/{branch}` に固定です。
   Worktree の作成は Web UI、または `fxg session new <agent> -w <branch> [--base <branch>]`
   / `fxg session fork <id> -w <branch>` から行います。
 - 一時VMの環境構築・ツールセットアップは、コンテナイメージやVMテンプレート、またはプロビジョナーのコマンド定義で外部管理されます。`fxg` 自身はスクリプト合成やツール自動検出を行わず、`fxg internal stdio` は与えられたワークスペース上でプロトコル通信に専念します。
@@ -451,7 +451,7 @@ Android スマートフォン（ホーム画面追加PWA）のすべてを単一
      Push ペイロードは `PushNotificationPayload`
      (`title` / `body` / `session_id` / `request_id` / `tag` /
      `allow_option_id` / `reject_option_id`) で、VAPID 鍵はハブが
-     `<data>/flexagent/hub/vapid.json` に自動生成・永続化します (暗号化は RFC 8291
+     `<data>/hub/vapid.json` に自動生成・永続化します (暗号化は RFC 8291
      aes128gcm / 署名は RFC 8292)。購読は通知許可→`pushManager.subscribe`→
      `POST /api/v1/push/subscribe` の順で確立し、失効した購読 (Push
      サービスの `404` / `410`) は送信時に自動削除されます。

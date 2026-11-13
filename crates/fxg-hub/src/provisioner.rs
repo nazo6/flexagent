@@ -2,7 +2,7 @@
 //!
 //! Design: `docs/01-architecture-and-sync.md` §6.1–§6.4, `docs/05-cli-and-pwa-ui.md` §2.2.
 //!
-//! - Launches the command defined under `[provisioners.<name>]` in `config.toml` as a child
+//! - Launches the command defined under `[provisioners.<name>]` in `hub.db` as a child
 //!   process and uses its `stdin` / `stdout` as the JSON Lines transport for
 //!   `NodeToHubMsg` / `HubToNodeMsg` (a direct connection to `fxg internal stdio`)
 //! - Injects `FXG_GIT_URL` / `FXG_GIT_BRANCH` / a short-lived `FXG_GIT_TOKEN` and the ephemeral
@@ -13,8 +13,8 @@
 //! - On idle timeout / when all sessions end, sends `DrainAndShutdown` and discards the child
 //!   process (VM/container) after `DrainComplete`
 
+use fxg_protocol::paths::Paths;
 use std::collections::{BTreeMap, HashMap};
-use std::path::PathBuf;
 use std::sync::{Arc, Mutex as StdMutex, RwLock};
 use std::time::{Duration, Instant};
 
@@ -54,7 +54,7 @@ struct Instance {
 }
 
 struct ProvisionerInner {
-    fxg_home: PathBuf,
+    paths: Paths,
     configs: RwLock<BTreeMap<String, ProvisionerDefinition>>,
     instances: StdMutex<HashMap<String, Instance>>,
     drain_waiters: StdMutex<HashMap<String, oneshot::Sender<()>>>,
@@ -89,10 +89,10 @@ impl std::fmt::Debug for ProvisionerManager {
 
 impl ProvisionerManager {
     /// Creates the manager from configuration.
-    pub fn new(fxg_home: PathBuf, configs: BTreeMap<String, ProvisionerDefinition>) -> Self {
+    pub fn new(paths: Paths, configs: BTreeMap<String, ProvisionerDefinition>) -> Self {
         Self {
             inner: Arc::new(ProvisionerInner {
-                fxg_home,
+                paths,
                 configs: RwLock::new(configs),
                 instances: StdMutex::new(HashMap::new()),
                 drain_waiters: StdMutex::new(HashMap::new()),
@@ -129,9 +129,9 @@ impl ProvisionerManager {
             .expect("provisioner configs lock poisoned") = configs;
     }
 
-    /// `~/.flexagent` data directory.
-    pub fn fxg_home(&self) -> &std::path::Path {
-        &self.inner.fxg_home
+    /// `<data>/hub` data directory.
+    pub fn paths(&self) -> &Paths {
+        &self.inner.paths
     }
 
     /// Whether this is a running temporary node (an active instance exists).
@@ -519,17 +519,14 @@ async fn spawn_child(state: &HubState, request: SpawnRequest) -> Result<SpawnHan
         command.env(key, value);
     }
     for (key, secret_id) in &request.config.env_secrets {
-        let value =
-            fxg_db::secrets::read_secret(manager.fxg_home(), fxg_db::secrets::ROLE_HUB, secret_id)
-                .map_err(|err| {
-                    ApiError::internal(format!("failed to read secret {secret_id}: {err}"))
-                })?
-                .ok_or_else(|| {
-                    ApiError::bad_request(format!(
-                        "provisioner {} secret {secret_id} is not configured",
-                        request.provisioner
-                    ))
-                })?;
+        let value = fxg_db::secrets::read_secret(manager.paths(), secret_id)
+            .map_err(|err| ApiError::internal(format!("failed to read secret {secret_id}: {err}")))?
+            .ok_or_else(|| {
+                ApiError::bad_request(format!(
+                    "provisioner {} secret {secret_id} is not configured",
+                    request.provisioner
+                ))
+            })?;
         command.env(key, value);
     }
     for (key, value) in &request.env {

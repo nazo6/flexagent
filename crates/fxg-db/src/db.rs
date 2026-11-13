@@ -1,61 +1,28 @@
 //! SQLite connection management and migration application.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::Duration;
 
 use fxg_protocol::common::{
     AuditLogEntry, ElicitationRequestEntry, NodeSummary, PermissionRequestEntry, ProjectSummary,
     SearchHit, SessionSummary,
 };
-use fxg_protocol::config::{HUB_DB_FILE_NAME, NODE_DB_FILE_NAME};
 use fxg_protocol::events::{SessionEventBatch, SessionEventEnvelope, UnifiedEventPayload};
+use fxg_protocol::paths::Role;
 use sqlx::SqlitePool;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
 
 use crate::error::DbError;
 use crate::{audit, events, incidents, outbox, queries, registration, settings};
 
-/// Execution role of a DB.
-///
-/// `node.db` / `hub.db` share the same schema, and behavioral differences branch on this
-/// role (role-based branching appears in outbox sync, relaying, Web Push, etc. from Phase 4
-/// onward).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DbRole {
-    /// Each node's local DB (`node.db`). The **authority** for session state.
-    Node,
-    /// Hub DB (`hub.db`). Only updates **projections** via event application.
-    Hub,
-}
-
-impl DbRole {
-    /// Role name (`node` / `hub`).
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Node => "node",
-            Self::Hub => "hub",
-        }
-    }
-}
-
-/// Returns the path to `~/.flexagent/node.db`.
-pub fn node_db_path(fxg_home: &Path) -> PathBuf {
-    fxg_home.join(NODE_DB_FILE_NAME)
-}
-
-/// Returns the path to `~/.flexagent/hub.db`.
-pub fn hub_db_path(fxg_home: &Path) -> PathBuf {
-    fxg_home.join(HUB_DB_FILE_NAME)
-}
-
 /// SQLite DB handle (connection pool + execution role).
 ///
-/// `SqlitePool` only clones a handle (Arc), so `Db` itself is also cheap to clone
-/// (used for shared daemon state, etc.).
+/// `Db` is cheap to clone (the pool is an `Arc` handle), so it is shared by the
+/// daemon state and the API layer.
 #[derive(Clone)]
 pub struct Db {
     pool: SqlitePool,
-    role: DbRole,
+    role: Role,
 }
 
 impl Db {
@@ -63,7 +30,7 @@ impl Db {
     ///
     /// WAL mode / `foreign_keys = ON` / `busy_timeout` are applied to every connection
     /// (`PRAGMA` inside migrations has no effect within a transaction).
-    pub async fn open(path: &Path, role: DbRole) -> Result<Self, DbError> {
+    pub async fn open(path: &Path, role: Role) -> Result<Self, DbError> {
         if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
             std::fs::create_dir_all(parent)?;
         }
@@ -85,7 +52,7 @@ impl Db {
     ///
     /// Because in-memory DBs are independent per connection, the pool is pinned to a single
     /// connection.
-    pub async fn open_in_memory(role: DbRole) -> Result<Self, DbError> {
+    pub async fn open_in_memory(role: Role) -> Result<Self, DbError> {
         let options = SqliteConnectOptions::new()
             .in_memory(true)
             .foreign_keys(true)
@@ -97,7 +64,7 @@ impl Db {
         Self::from_pool(pool, role).await
     }
 
-    async fn from_pool(pool: SqlitePool, role: DbRole) -> Result<Self, DbError> {
+    async fn from_pool(pool: SqlitePool, role: Role) -> Result<Self, DbError> {
         sqlx::migrate!("./migrations").run(&pool).await?;
         Ok(Self { pool, role })
     }
@@ -108,7 +75,7 @@ impl Db {
     }
 
     /// Returns the execution role.
-    pub fn role(&self) -> DbRole {
+    pub fn role(&self) -> Role {
         self.role
     }
 

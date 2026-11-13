@@ -11,11 +11,11 @@
 //! - `sessions`: session lifecycle operations and their resolution helpers
 //! - `api_impl`: `ClientApiBackend` implementation (relay, PTY, server-only operations)
 
-use std::path::PathBuf;
 use std::sync::Arc;
 
-use fxg_db::{Db, DbRole};
+use fxg_db::Db;
 use fxg_protocol::node_hub::{NodeRpcRequest, NodeRpcResponse};
+use fxg_protocol::paths::{Paths, Role};
 use tokio::sync::{broadcast, watch};
 
 use crate::api::{ApiError, ClientApiBackend, ClientEvent, ClientInfo, auth};
@@ -32,8 +32,8 @@ const CLIENT_EVENT_CAPACITY: usize = 2048;
 /// Startup options for the hub.
 #[derive(Debug, Clone)]
 pub struct HubOptions {
-    /// Data directory (`~/.flexagent`)
-    pub fxg_home: PathBuf,
+    /// Role-scoped config/data/state/cache/log paths
+    pub paths: Paths,
     /// HTTP/WS bind address (default `0.0.0.0:8080`)
     pub listen_addr: String,
     /// Hosts allowed in addition to `localhost` / `127.0.0.1`
@@ -92,16 +92,12 @@ impl HubState {
 
     /// Opens `hub.db`, loads the Web access token and initializes the state.
     pub async fn new(options: HubOptions) -> Result<Self, HubError> {
-        std::fs::create_dir_all(&options.fxg_home)?;
-        let db = Db::open(&fxg_db::hub_db_path(&options.fxg_home), DbRole::Hub).await?;
-        let auth_token = auth::load_or_create_token(
-            &options
-                .fxg_home
-                .join(fxg_protocol::config::AUTH_TOKEN_FILE_NAME),
-        )?;
+        options.paths.ensure_dirs()?;
+        let db = Db::open(&options.paths.db_path(), Role::Hub).await?;
+        let auth_token = auth::load_or_create_token(&options.paths.auth_token_path())?;
         let (client_events, _) = broadcast::channel(CLIENT_EVENT_CAPACITY);
         let hub = NodeHub::new(db.clone(), client_events.clone());
-        let push = PushService::load_or_create(&options.fxg_home)
+        let push = PushService::load_or_create(&options.paths)
             .map_err(|err| HubError::Hub(format!("web push init failed: {err}")))?;
         let hub_settings = db.ensure_hub_settings().await?;
         push.set_subject(hub_settings.vapid_subject.as_deref());
@@ -117,8 +113,7 @@ impl HubState {
             .into_iter()
             .map(|session| session.session_id.as_str().to_owned()),
         );
-        let provisioners =
-            ProvisionerManager::new(options.fxg_home.clone(), db.provisioners().await?);
+        let provisioners = ProvisionerManager::new(options.paths.clone(), db.provisioners().await?);
         Ok(Self {
             inner: Arc::new(HubInner {
                 db,
@@ -198,14 +193,7 @@ impl HubState {
     /// The old token (Bearer / `fxg_session` cookie) is invalidated immediately.
     pub fn rotate_auth_token(&self) -> std::io::Result<String> {
         let token = auth::generate_token();
-        auth::save_token(
-            &self
-                .inner
-                .options
-                .fxg_home
-                .join(fxg_protocol::config::AUTH_TOKEN_FILE_NAME),
-            &token,
-        )?;
+        auth::save_token(&self.inner.options.paths.auth_token_path(), &token)?;
         *self.inner.auth_token.write().expect("auth token poisoned") = token.clone();
         Ok(token)
     }

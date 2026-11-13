@@ -51,7 +51,7 @@ pub struct HubStartArgs {
     /// Log level (trace | debug | info | warn | error)
     #[usage(long)]
     pub(crate) log_level: Option<String>,
-    /// Log file destination (default: ~/.flexagent/logs/hub.log)
+    /// Log file destination (default: <logs>/hub/hub.log)
     #[usage(long)]
     pub(crate) log_file: Option<String>,
     /// Disable writing to the log file
@@ -66,12 +66,12 @@ pub struct HubStartArgs {
 }
 
 impl HubStartArgs {
-    /// Effective logging settings after CLI > config.toml precedence.
+    /// Effective logging settings after CLI > hub.toml precedence.
     fn effective_log_config(
         &self,
-        global: &fxg_protocol::config::GlobalConfig,
+        config_file: &fxg_protocol::config::HubConfig,
     ) -> fxg_protocol::config::LogConfig {
-        let mut log = global.log.clone();
+        let mut log = config_file.log.clone();
         if let Some(level) = self.log_level.clone() {
             log.level = Some(level);
         }
@@ -83,7 +83,7 @@ impl HubStartArgs {
         if let Some(format) = self.log_format.clone() {
             log.format = Some(format);
         }
-        log.no_color = self.no_color || global.log.no_color;
+        log.no_color = self.no_color || config_file.log.no_color;
         log
     }
 
@@ -105,11 +105,11 @@ impl HubStartArgs {
         }
     }
 
-    fn resolved_listen_addr(&self, global: &fxg_protocol::config::GlobalConfig) -> String {
+    fn resolved_listen_addr(&self, config_file: &fxg_protocol::config::HubConfig) -> String {
         let mut listen_addr = self
             .listen
             .clone()
-            .unwrap_or_else(|| global.hub.resolved_listen_addr().to_owned());
+            .unwrap_or_else(|| config_file.resolved_listen_addr().to_owned());
         if let Some(port) = self.port {
             let host = listen_addr
                 .rsplit_once(':')
@@ -126,8 +126,8 @@ impl usage::RunAsync for HubStartArgs {
 
     async fn run_async(self) -> Self::Output {
         let env = fxg_protocol::config::process_env;
-        let global = fxg_protocol::config::GlobalConfig::load(&env)
-            .context("failed to load ~/.flexagent/config.toml")?;
+        let config_file =
+            fxg_protocol::config::HubConfig::load(&env).context("failed to load hub.toml")?;
 
         if let Ok(client) = HubClient::local(&fxg_protocol::config::process_env, None).await
             && client.system_info().await.is_ok()
@@ -152,9 +152,13 @@ impl usage::RunAsync for HubStartArgs {
                 args.push("--port".to_owned());
                 args.push(port.to_string());
             }
-            let listen_addr = self.resolved_listen_addr(&global);
+            let listen_addr = self.resolved_listen_addr(&config_file);
             let refs: Vec<&str> = args.iter().map(String::as_str).collect();
-            let log = crate::spawn::spawn_background(&refs, ServiceTarget::Hub.log_name())?;
+            let log = crate::spawn::spawn_background(
+                &refs,
+                fxg_protocol::paths::Role::Hub,
+                ServiceTarget::Hub.log_name(),
+            )?;
             let address = wait_for_hub(&listen_addr).await?;
             println!("hub started (detached)");
             println!("  Address:  http://{address}");
@@ -162,22 +166,25 @@ impl usage::RunAsync for HubStartArgs {
             return Ok(());
         }
 
-        let listen_addr = self.resolved_listen_addr(&global);
+        let listen_addr = self.resolved_listen_addr(&config_file);
+        let paths = fxg_protocol::paths::Paths::resolve(&env, fxg_protocol::paths::Role::Hub);
         let options = fxg_hub::HubOptions {
-            fxg_home: fxg_protocol::config::fxg_home(&env),
+            paths: paths.clone(),
             listen_addr,
-            allowed_hosts: global.hub.allowed_hosts.clone(),
-            allowed_origins: global.hub.allowed_origins.clone(),
-            log: self.effective_log_config(&global),
+            allowed_hosts: config_file.allowed_hosts.clone(),
+            allowed_origins: config_file.allowed_origins.clone(),
+            log: self.effective_log_config(&config_file),
         };
-        let fxg_home = options.fxg_home.clone();
         let hub = fxg_hub::Hub::start(options)
             .await
             .context("fxg hub start failed")?;
 
-        let log_file =
-            crate::logging::resolve_log_file_path(&self.logging_options(), &global.log, &fxg_home);
-        let use_color = crate::logging::should_use_color(self.no_color, global.log.no_color);
+        let log_file = crate::logging::resolve_log_file_path(
+            &self.logging_options(),
+            &config_file.log,
+            &paths,
+        );
+        let use_color = crate::logging::should_use_color(self.no_color, config_file.log.no_color);
         let auth_token = if cfg!(debug_assertions) {
             Some(hub.state().auth_token())
         } else {
@@ -185,7 +192,7 @@ impl usage::RunAsync for HubStartArgs {
         };
         crate::logging::print_hub_banner(
             &hub.listen_addr().to_string(),
-            &fxg_home,
+            &paths,
             log_file.as_deref(),
             auth_token.as_deref(),
             use_color,
@@ -219,8 +226,10 @@ async fn wait_for_hub(listen_addr: &str) -> Result<String> {
 
 /// Reads the bound hub address from `hub.addr`, falling back to `fallback`.
 fn published_hub_addr(fallback: &str) -> String {
-    let home = fxg_protocol::config::fxg_home(&fxg_protocol::config::process_env);
-    match std::fs::read_to_string(home.join("hub.addr")) {
+    let env = fxg_protocol::config::process_env;
+    let addr_path =
+        fxg_protocol::paths::Paths::resolve(&env, fxg_protocol::paths::Role::Hub).addr_path();
+    match std::fs::read_to_string(addr_path) {
         Ok(raw) => {
             let addr = raw.trim();
             if addr.is_empty() {
@@ -279,10 +288,14 @@ impl usage::RunAsync for HubRestartArgs {
             fxg_protocol::discard_with!(client.shutdown().await, "stop the hub before restarting");
         }
         let env = fxg_protocol::config::process_env;
-        let global = fxg_protocol::config::GlobalConfig::load(&env)
-            .context("failed to load ~/.flexagent/config.toml")?;
-        let listen_addr = global.hub.resolved_listen_addr().to_owned();
-        crate::spawn::spawn_background(&["hub", "start"], ServiceTarget::Hub.log_name())?;
+        let config_file =
+            fxg_protocol::config::HubConfig::load(&env).context("failed to load hub.toml")?;
+        let listen_addr = config_file.resolved_listen_addr().to_owned();
+        crate::spawn::spawn_background(
+            &["hub", "start"],
+            fxg_protocol::paths::Role::Hub,
+            ServiceTarget::Hub.log_name(),
+        )?;
         let address = wait_for_hub(&listen_addr).await?;
         println!("hub restarted");
         println!("  Address:  http://{address}");
@@ -456,10 +469,10 @@ impl usage::RunAsync for HubPairingTokenListArgs {
     }
 }
 
-/// Open the hub DB (`~/.flexagent/hub.db`).
+/// Open the hub DB (`<data>/hub/hub.db`).
 async fn open_hub_db() -> Result<fxg_db::Db> {
     let env = fxg_protocol::config::process_env;
-    let home = fxg_protocol::config::fxg_home(&env);
-    let db = fxg_db::Db::open(&fxg_db::hub_db_path(&home), fxg_db::DbRole::Hub).await?;
+    let paths = fxg_protocol::paths::Paths::resolve(&env, fxg_protocol::paths::Role::Hub);
+    let db = fxg_db::Db::open(&paths.db_path(), fxg_protocol::paths::Role::Hub).await?;
     Ok(db)
 }

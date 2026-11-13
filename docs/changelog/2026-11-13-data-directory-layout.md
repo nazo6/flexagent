@@ -1,7 +1,7 @@
 # データディレクトリ構成の刷新（OS 標準ルート + node/hub 分離）
 
 - **日付**: 2026-11-13
-- **状態**: 計画（実装前）
+- **状態**: 実装済み（2026-11-13）
 - **対象パッケージ（予定）**: `fxg-protocol`, `fxg-db`, `fxg-node`, `fxg-hub`,
   `fxg-acp`, `fxg-cli`, `ui`
 - **対象スクリプト / 設定（予定）**: `mise run fmt`, `mise run types`,
@@ -54,11 +54,11 @@
 以下は Linux の既定。macOS / Windows は §3.2 のルートに同じ構造を置く。
 
 ```text
-<config>/flexagent/
+<config>/
 ├── node.toml                       # ノードの起動設定のみ
 └── hub.toml                        # ハブの起動設定のみ
 
-<data>/flexagent/                   # 0700
+<data>/                   # 0700
 ├── node/
 │   ├── node.db  (+ -wal / -shm)
 │   ├── auth_token                  # 0600  ノード専用の Web アクセストークン
@@ -71,18 +71,18 @@
     ├── vapid.json                  # 0600
     └── secrets/<id>                # 0600  ハブ所有の秘密値
 
-<state>/flexagent/
+<state>/
 ├── node/
 │   ├── node.addr                   # 起動中ノードの待受アドレス
 │   └── start.lock                  # CLI の自動起動ロック
 └── hub/
     └── hub.addr
 
-<logs>/flexagent/
+<logs>/
 ├── node/node.log
 └── hub/hub.log
 
-<cache>/flexagent/node/registry.json
+<cache>/node/registry.json
 ```
 
 - Linux では XDG にログ用のクラスがないため、`<logs>` は `<state>` と同じ
@@ -101,13 +101,13 @@
 
 ### 3.2 OS ごとのルート
 
-| クラス     | Linux (XDG)                  | macOS                                     | Windows                         |
-| :--------- | :--------------------------- | :---------------------------------------- | :------------------------------ |
-| 設定       | `$XDG_CONFIG_HOME/flexagent` | `~/Library/Application Support/flexagent` | `%APPDATA%\flexagent`           |
-| データ     | `$XDG_DATA_HOME/flexagent`   | `~/Library/Application Support/flexagent` | `%LOCALAPPDATA%\flexagent`      |
-| 実行時     | `$XDG_STATE_HOME/flexagent`  | `~/Library/Application Support/flexagent` | `%LOCALAPPDATA%\flexagent`      |
-| ログ       | `$XDG_STATE_HOME/flexagent`  | `~/Library/Logs/flexagent`                | `%LOCALAPPDATA%\flexagent\logs` |
-| キャッシュ | `$XDG_CACHE_HOME/flexagent`  | `~/Library/Caches/flexagent`              | `%LOCALAPPDATA%\flexagent`      |
+| クラス     | Linux (XDG)                  | macOS                                     | Windows                          |
+| :--------- | :--------------------------- | :---------------------------------------- | :------------------------------- |
+| 設定       | `$XDG_CONFIG_HOME/flexagent` | `~/Library/Application Support/flexagent` | `%APPDATA%\flexagent`            |
+| データ     | `$XDG_DATA_HOME/flexagent`   | `~/Library/Application Support/flexagent` | `%LOCALAPPDATA%\flexagent`       |
+| 実行時     | `$XDG_STATE_HOME/flexagent`  | `~/Library/Application Support/flexagent` | `%LOCALAPPDATA%\flexagent`       |
+| ログ       | `$XDG_STATE_HOME/flexagent`  | `~/Library/Logs/flexagent`                | `%LOCALAPPDATA%\flexagent\logs`  |
+| キャッシュ | `$XDG_CACHE_HOME/flexagent`  | `~/Library/Caches/flexagent`              | `%LOCALAPPDATA%\flexagent\cache` |
 
 - 既存依存の `dirs` 7 で解決できるため、新しいクレートは追加しない。
 - `dirs::state_dir()` は macOS / Windows で `None` を返すため、その場合は
@@ -191,7 +191,7 @@ $FXG_HOME/
 - 読み込みは対象ロールのファイルだけ。`FXG_LOG_*` はプロセスごとに
   自分の設定へ適用する。
 - `[log] file` の相対パスはロールのログディレクトリ
-  (`<logs>/flexagent/<role>/`) を基準に解決する。
+  (`<logs>/<role>/`) を基準に解決する。
 - 未知キーを拒否する現在の方針（`deny_unknown_fields`）は維持する。
 
 ### 4.3 トークンの分離
@@ -318,3 +318,25 @@ $FXG_HOME/
 - worktree ルートの設定可能化（必要になったら別途）
 - Windows の追加 ACL 操作
 - ハブとノードの設定同期・マージ（現行方針どおり行わない）
+
+## 10. 実装メモ（2026-11-13）
+
+計画どおり、同一 PR 内で実装した。実装上の確定事項は次のとおり。
+
+- `fxg-protocol::paths` に `Role` / `Roots` / `Paths` を追加し、`fxg-db::DbRole` を
+  `Role` に統合した。`secrets` の `role: &str` も廃止し、`Paths` を受け取る。
+- 設定ファイルは `node.toml` / `hub.toml` に分割し、`NodeConfig` / `HubConfig` が
+  自分のファイルだけを読む。`[log] file` の相対パスはロールのログディレクトリ
+  （`<logs>/<role>/`）基準。
+- `NodeBootstrapView` / `HubBootstrapView` / `SupportBundleConfig` の `fxg_home`
+  フィールドを `data_dir` に改名した。`ClientApiBackend` には `data_dir()` /
+  `db_path()` / `log_path()` を追加し、診断が DB・ログの実パスを返す。
+- Worktree の作成先は `{worktrees_dir}/{project}/{branch}`（`Paths::worktrees_dir()`）
+  に固定。プレースホルダは `{fxg_home}` から `{worktrees_dir}` に変更した。
+- `node.start.lock` は実行時ディレクトリ（`<state>/node/start.lock`）へ移した。
+- 未使用だった `agents/` のパスヘルパーを削除した。
+- Docker は `FXG_HOME=/var/lib/flexagent` に変更し、`config` / `data` / `state` /
+  `logs` / `cache` のサブディレクトリを永続化する。
+- 初回デプロイ前の方針どおり、旧レイアウトの移行・警告は実装していない。
+- 検証は `cargo test --workspace` / `cargo clippy --workspace --all-targets` /
+  `cargo fmt --all --check` / `mise run types` / `pnpm --dir ui run check`。

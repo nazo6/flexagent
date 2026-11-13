@@ -61,12 +61,16 @@ impl ClientApiBackend for HubState {
         Some(HubState::diagnostics_counters(self))
     }
 
-    fn fxg_home(&self) -> Option<&std::path::Path> {
-        Some(&self.inner.options.fxg_home)
+    fn data_dir(&self) -> Option<std::path::PathBuf> {
+        Some(self.inner.options.paths.data_dir())
     }
 
-    fn log_file_name(&self) -> &'static str {
-        "hub.log"
+    fn db_path(&self) -> Option<std::path::PathBuf> {
+        Some(self.inner.options.paths.db_path())
+    }
+
+    fn log_path(&self) -> Option<std::path::PathBuf> {
+        Some(self.inner.options.paths.log_path())
     }
 
     async fn role_health(&self, now: i64) -> Vec<ComponentHealth> {
@@ -77,7 +81,13 @@ impl ClientApiBackend for HubState {
         let allowed_hosts = self.inner.options.allowed_hosts.clone();
         let allowed_origins = self.inner.options.allowed_origins.clone();
         SupportBundleConfig {
-            fxg_home: self.inner.options.fxg_home.to_string_lossy().into_owned(),
+            data_dir: self
+                .inner
+                .options
+                .paths
+                .data_dir()
+                .to_string_lossy()
+                .into_owned(),
             log_level: self.inner.options.log.level.clone(),
             log_file: self.inner.options.log.file.clone(),
             log_format: self.inner.options.log.format.clone(),
@@ -89,7 +99,7 @@ impl ClientApiBackend for HubState {
     }
 
     fn support_bundle_logs(&self, lines: usize) -> Vec<String> {
-        let path = self.inner.options.fxg_home.join("logs").join("hub.log");
+        let path = self.inner.options.paths.log_path();
         crate::api::diagnostics::log_tail(&path, lines)
     }
 

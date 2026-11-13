@@ -6,7 +6,7 @@
 use std::collections::HashSet;
 
 use fxg_db::registration::ProvisionalSessionRecord;
-use fxg_db::{AuditLogRecord, Db, DbRole, NodeRecord};
+use fxg_db::{AuditLogRecord, Db, NodeRecord, Role};
 use fxg_protocol::common::{
     AuditAction, ElicitationMode, ElicitationRequestEntry, ElicitationRequestStatus, EventType,
     NodeLifecycleStatus, NodeSummary, PermissionRequestEntry, PermissionRequestStatus, ResolvedBy,
@@ -118,7 +118,7 @@ fn event_types() -> Vec<EventType> {
 
 /// Opens an in-memory node DB and creates one provisional session.
 async fn fixture() -> (Db, String) {
-    let db = Db::open_in_memory(DbRole::Node)
+    let db = Db::open_in_memory(Role::Node)
         .await
         .expect("open in-memory db");
     db.upsert_node(&NodeRecord::new(

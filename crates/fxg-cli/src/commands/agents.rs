@@ -29,11 +29,11 @@ pub enum AgentsCommands {
 /// Builds the agent catalog from the node-owned settings.
 async fn agent_catalog() -> Result<AgentCatalog> {
     let env = fxg_protocol::config::process_env;
-    let paths = fxg_node::NodePaths::from_env(&env);
+    let paths = fxg_protocol::paths::Paths::resolve(&env, fxg_protocol::paths::Role::Node);
     let db = node_db(&env).await?;
     let settings = db.ensure_agent_settings().await?;
     Ok(AgentCatalog::new(AcpRegistry::new(
-        paths.fxg_home().to_path_buf(),
+        paths,
         &settings,
         db.custom_agents().await?,
     )))

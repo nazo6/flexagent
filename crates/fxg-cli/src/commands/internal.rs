@@ -38,7 +38,7 @@ pub struct StdioArgs {
     /// Log level (trace | debug | info | warn | error)
     #[usage(long)]
     pub(crate) log_level: Option<String>,
-    /// Log file destination (default: ~/.flexagent/logs/node.log)
+    /// Log file destination (default: <logs>/node/node.log)
     #[usage(long)]
     pub(crate) log_file: Option<String>,
     /// Disable writing to the log file
@@ -77,11 +77,11 @@ impl usage::RunAsync for StdioArgs {
 
     async fn run_async(self) -> Self::Output {
         let env = fxg_protocol::config::process_env;
-        let global = fxg_protocol::config::GlobalConfig::load(&env)
-            .context("failed to load ~/.flexagent/config.toml")?;
+        let global =
+            fxg_protocol::config::NodeConfig::load(&env).context("failed to load node.toml")?;
 
         let mut config = fxg_node::daemon::DaemonConfig::from_env(&env);
-        if let Some(node_id) = global.node.node_id.clone() {
+        if let Some(node_id) = global.node_id.clone() {
             config.node_id = node_id;
         }
         config.log = effective_log_config(&global, &self);
@@ -98,7 +98,7 @@ impl usage::RunAsync for StdioArgs {
 }
 
 fn effective_log_config(
-    global: &fxg_protocol::config::GlobalConfig,
+    global: &fxg_protocol::config::NodeConfig,
     args: &StdioArgs,
 ) -> fxg_protocol::config::LogConfig {
     let mut log = global.log.clone();

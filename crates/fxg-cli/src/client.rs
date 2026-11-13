@@ -1,7 +1,7 @@
 //! Local node HTTP / WebSocket client and CLI output helpers.
 //!
 //! The `fxg` CLI drives the local daemon through its loopback HTTP API
-//! (`fxg node start`). The address is published in `~/.flexagent/node.addr`;
+//! (`fxg node start`). The address is published in `<state>/node/node.addr`;
 //! a stale file is discarded by probing `GET /api/v1/meta` and auto-starting the
 //! node when allowed (`FXG_NO_AUTO_NODE=1` disables auto-start).
 
@@ -22,9 +22,8 @@ use fxg_protocol::common::{
     ClientSource, CommandResult, IncidentListResponse, PromptInput, SessionControlAction,
     SessionStatus, SessionSummary,
 };
-use fxg_protocol::config::{
-    AUTH_TOKEN_FILE_NAME, EnvLookup, GlobalConfig, env_keys, fxg_home, process_env,
-};
+use fxg_protocol::config::{EnvLookup, NodeConfig, env_keys, process_env};
+use fxg_protocol::paths::{Paths, Role};
 use fxg_protocol::{NodeId, ProjectId};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -67,47 +66,42 @@ fn auto_node_enabled() -> bool {
     )
 }
 
-/// Base URL of the local node (`node.addr`, then `[node] listen_addr`, then
+/// Base URL of the local node (`node.addr`, then `node.toml` `listen_addr`, then
 /// the default loopback address).
 ///
 /// A wildcard bind address is replaced with loopback: the CLI always talks to the
 /// process on this machine, never through the LAN address it may also listen on.
 pub(crate) fn local_node_base(env: EnvLookup<'_>) -> Result<String> {
-    let home = fxg_home(env);
-    if let Ok(addr) = std::fs::read_to_string(home.join("node.addr")) {
+    let paths = Paths::resolve(env, Role::Node);
+    if let Ok(addr) = std::fs::read_to_string(paths.addr_path()) {
         let addr = addr.trim();
         if !addr.is_empty() {
             return Ok(format!("http://{}", crate::hub_api::normalize_listen(addr)));
         }
     }
-    let global = GlobalConfig::load(env).context("failed to load ~/.flexagent/config.toml")?;
-    let listen = global
-        .node
-        .listen_addr
-        .clone()
-        .unwrap_or_else(|| "127.0.0.1:7860".to_owned());
+    let config = NodeConfig::load(env).context("failed to load node.toml")?;
     Ok(format!(
         "http://{}",
-        crate::hub_api::normalize_listen(&listen)
+        crate::hub_api::normalize_listen(config.resolved_listen_addr())
     ))
 }
 
 fn token_path() -> PathBuf {
-    fxg_home(&process_env).join(AUTH_TOKEN_FILE_NAME)
+    Paths::resolve(&process_env, Role::Node).auth_token_path()
 }
 
 /// Starts `fxg node start` in the background once.
 ///
 /// Returns the node log path so the caller can include it in an error message.
 fn ensure_node_started() -> Result<PathBuf> {
-    let home = fxg_home(&process_env);
-    let log_path = home.join("logs").join("node.log");
+    let paths = Paths::resolve(&process_env, Role::Node);
+    let log_path = paths.log_path();
     if let Some(parent) = log_path.parent() {
         std::fs::create_dir_all(parent)
             .with_context(|| format!("failed to create {}", parent.display()))?;
     }
 
-    let lock_path = home.join("node.start.lock");
+    let lock_path = paths.start_lock_path();
     for attempt in 0..2 {
         match std::fs::OpenOptions::new()
             .write(true)
@@ -119,7 +113,8 @@ fn ensure_node_started() -> Result<PathBuf> {
                     writeln!(lock, "{}", std::process::id()),
                     "best-effort pid note in the node startup lock"
                 );
-                let spawn_result = crate::spawn::spawn_background(&["node", "start"], "node.log");
+                let spawn_result =
+                    crate::spawn::spawn_background(&["node", "start"], Role::Node, "node.log");
                 remove_start_lock(&lock_path);
                 spawn_result?;
                 return Ok(log_path);
@@ -249,7 +244,7 @@ impl NodeClient {
 
     async fn from_base(base: String) -> Result<Self> {
         let token = fxg_hub::api::auth::load_or_create_token(&token_path())
-            .context("failed to load ~/.flexagent/auth_token")?;
+            .context("failed to load <data>/node/auth_token")?;
         let http = reqwest::Client::builder()
             .timeout(Duration::from_secs(60))
             .build()
@@ -590,7 +585,7 @@ impl NodeClient {
     pub async fn auth_token(&mut self, rotate: bool) -> Result<String> {
         if !rotate {
             return fxg_hub::api::auth::load_or_create_token(&token_path())
-                .context("failed to load ~/.flexagent/auth_token");
+                .context("failed to load <data>/node/auth_token");
         }
         let response: RotateAuthTokenResponse = self
             .post("/api/v1/auth/rotate-token", &serde_json::json!({}))

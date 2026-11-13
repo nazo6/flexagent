@@ -8,7 +8,8 @@
 //! - `common`: shared helper types and error codes
 //! - `node_hub`: Node <-> Hub messages (shared by WS / Stdio)
 //! - `client_api`: Client REST / Client WS / PTY WS messages
-//! - `config`: process bootstrap configuration (`config.toml`)
+//! - `config`: process bootstrap configuration (`node.toml` / `hub.toml`)
+//! - `paths`: OS/portable directory resolution and role-scoped paths
 //! - `settings`: typed settings snapshots, secret metadata and project identity
 //! - `util`: time and ID generation helpers
 //!
@@ -33,6 +34,7 @@ pub mod config;
 pub mod events;
 pub mod ids;
 pub mod node_hub;
+pub mod paths;
 pub mod settings;
 pub mod util;
 

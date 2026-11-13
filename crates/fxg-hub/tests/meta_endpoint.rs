@@ -11,11 +11,12 @@
 
 use fxg_hub::Hub;
 use fxg_hub::state::HubOptions;
+use fxg_protocol::paths::{Paths, Role};
 
 async fn start_hub() -> (tempfile::TempDir, Hub) {
     let home = tempfile::tempdir().expect("home");
     let server = Hub::start(HubOptions {
-        fxg_home: home.path().to_path_buf(),
+        paths: Paths::portable(home.path(), Role::Hub),
         listen_addr: "127.0.0.1:0".to_owned(),
         allowed_hosts: Vec::new(),
         allowed_origins: Vec::new(),
@@ -77,7 +78,7 @@ async fn other_endpoints_still_require_token() {
 }
 
 fn auth_token(home: &tempfile::TempDir) -> String {
-    std::fs::read_to_string(home.path().join("auth_token"))
+    std::fs::read_to_string(Paths::portable(home.path(), Role::Hub).auth_token_path())
         .expect("auth token")
         .trim()
         .to_owned()
@@ -86,9 +87,12 @@ fn auth_token(home: &tempfile::TempDir) -> String {
 #[tokio::test(flavor = "multi_thread")]
 async fn diagnostics_expose_health_and_persisted_incidents() {
     let (home, server) = start_hub().await;
-    let db = fxg_db::Db::open(&fxg_db::hub_db_path(home.path()), fxg_db::DbRole::Hub)
-        .await
-        .expect("db");
+    let db = fxg_db::Db::open(
+        &Paths::portable(home.path(), Role::Hub).db_path(),
+        Role::Hub,
+    )
+    .await
+    .expect("db");
     db.record_incident(
         &fxg_db::IncidentRecord::new(
             fxg_protocol::common::IncidentLevel::Error,
@@ -152,7 +156,7 @@ async fn support_bundle_is_redacted() {
     let text = response.text().await.expect("body");
     assert!(!text.contains(&token), "the auth token must not leak");
     let bundle: serde_json::Value = serde_json::from_str(&text).expect("json");
-    assert_eq!(bundle["config"]["fxg_home"], "~");
+    assert_eq!(bundle["config"]["data_dir"], "~");
     assert!(
         bundle["database"]["path"]
             .as_str()

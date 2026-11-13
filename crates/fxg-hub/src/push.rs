@@ -2,8 +2,9 @@
 //!
 //! Design: `docs/03-protocol-and-api.md` §3.1, `docs/05-cli-and-pwa-ui.md` §3.3.
 //!
-//! - The VAPID key pair is generated on first startup and stored in `~/.flexagent/vapid.json`
-//!   (the public key is distributed via `vapid_public_key` in `GET /api/v1/system/info`).
+//! - The VAPID key pair is generated on first startup and stored in
+//!   `<data>/hub/vapid.json` (the public key is distributed via `vapid_public_key`
+//!   in `GET /api/v1/system/info`).
 //! - When an approval request (a `PermissionRequest` event) is applied, a notification is
 //!   fanned out to every registered subscription. For Approve / Reject on the Android
 //!   notification banner, the Service Worker calls `POST .../permissions/:req_id/respond`.
@@ -17,12 +18,13 @@ use std::sync::Arc;
 use base64::Engine as _;
 use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
 use fxg_db::{Db, PushSubscriptionRecord};
+use fxg_protocol::paths::Paths;
 use serde::{Deserialize, Serialize};
 use web_push_native::jwt_simple::algorithms::ES256KeyPair;
 use web_push_native::p256::elliptic_curve::sec1::ToEncodedPoint;
 use web_push_native::{Auth, WebPushBuilder};
 
-/// VAPID key file name (`~/.flexagent/vapid.json`).
+/// VAPID key file name (`vapid.json`).
 pub const VAPID_KEYS_FILE: &str = "vapid.json";
 
 /// VAPID `sub` claim (contact).
@@ -104,14 +106,16 @@ pub struct PushService {
 }
 
 impl PushService {
-    /// Loads `~/.flexagent/vapid.json` (generating and saving it if absent).
-    pub fn load_or_create(fxg_home: &Path) -> Result<Self, PushError> {
-        let path = fxg_home.join(VAPID_KEYS_FILE);
+    /// Loads the hub's VAPID key pair (generating and saving it if absent).
+    pub fn load_or_create(paths: &Paths) -> Result<Self, PushError> {
+        let path = paths.vapid_path();
         let keys = match std::fs::read_to_string(&path) {
             Ok(raw) => serde_json::from_str::<VapidKeys>(&raw)?,
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
                 let keys = generate_vapid_keys()?;
-                std::fs::create_dir_all(fxg_home)?;
+                if let Some(parent) = path.parent() {
+                    std::fs::create_dir_all(parent)?;
+                }
                 std::fs::write(&path, serde_json::to_string_pretty(&keys)?)?;
                 set_owner_only_permissions(&path)?;
                 tracing::info!(path = %path.display(), "generated vapid keypair");
@@ -664,10 +668,15 @@ fn set_owner_only_permissions(_path: &Path) -> std::io::Result<()> {
 mod tests {
     use super::*;
     use fxg_protocol::common::{PermissionOption, PermissionOptionKind};
+    use fxg_protocol::paths::Role;
+
+    fn hub_paths(dir: &Path) -> Paths {
+        Paths::portable(dir, Role::Hub)
+    }
 
     fn test_service() -> (PushService, tempfile::TempDir) {
         let dir = tempfile::tempdir().expect("tempdir");
-        let service = PushService::load_or_create(dir.path()).expect("push service");
+        let service = PushService::load_or_create(&hub_paths(dir.path())).expect("push service");
         (service, dir)
     }
 
@@ -700,20 +709,20 @@ mod tests {
     #[test]
     fn vapid_keys_are_persisted_and_reloaded() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let first = PushService::load_or_create(dir.path()).expect("generate");
+        let first = PushService::load_or_create(&hub_paths(dir.path())).expect("generate");
         assert!(!first.public_key().is_empty());
-        assert!(dir.path().join(VAPID_KEYS_FILE).exists());
+        assert!(hub_paths(dir.path()).vapid_path().exists());
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            let mode = std::fs::metadata(dir.path().join(VAPID_KEYS_FILE))
+            let mode = std::fs::metadata(hub_paths(dir.path()).vapid_path())
                 .expect("metadata")
                 .permissions()
                 .mode()
                 & 0o777;
             assert_eq!(mode, 0o600);
         }
-        let second = PushService::load_or_create(dir.path()).expect("reload");
+        let second = PushService::load_or_create(&hub_paths(dir.path())).expect("reload");
         assert_eq!(first.public_key(), second.public_key());
     }
 

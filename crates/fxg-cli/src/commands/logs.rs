@@ -34,7 +34,12 @@ impl usage::RunAsync for LogsArgs {
         };
 
         let env = fxg_protocol::config::process_env;
-        let home = fxg_protocol::config::fxg_home(&env);
+        let role = if target == "hub" {
+            fxg_protocol::paths::Role::Hub
+        } else {
+            fxg_protocol::paths::Role::Node
+        };
+        let paths = fxg_protocol::paths::Paths::resolve(&env, role);
 
         if let Some(session_id) = self.session.as_deref() {
             if target != "node" {
@@ -59,11 +64,7 @@ impl usage::RunAsync for LogsArgs {
             return Ok(());
         }
 
-        let path = home.join("logs").join(if target == "hub" {
-            "hub.log"
-        } else {
-            "node.log"
-        });
+        let path = paths.log_path();
         if !path.exists() {
             println!("({target} log not found: {})", path.display());
             return Ok(());

@@ -1,5 +1,5 @@
 # - データは named volume に永続化する (`fxg-hub-data` = ハブ / `fxg-node-data` =
-#   ノード。どちらも `FXG_HOME` = `/data`)。
+#   ノード。どちらも `FXG_HOME` = `/var/lib/flexagent`)。
 # - `hub` は `fxg hub start`、`node` は `fxg node start` として起動する。
 #   ノードにリポジトリを登録する: Web UI のプロジェクト画面から /workspace をスキャンする
 
@@ -23,7 +23,7 @@ services:
     ports:
       - "8080:8080"
     volumes:
-      - fxg-hub-data:/data
+      - fxg-hub-data:/var/lib/flexagent
     environment:
       # コンテナ内の待受アドレス (既定: 0.0.0.0:8080)。変更する場合は `ports` と揃える
       FXG_HUB_LISTEN_ADDR: "0.0.0.0:8080"
@@ -46,8 +46,8 @@ services:
       # ループバックへ公開する (ホストで `fxg node start` を起動していると 7860 が競合する)
       - "127.0.0.1:7860:7860"
     volumes:
-      # ノードのデータ (`node.db` / `auth_token` / `worktrees` / `snapshots` 等)
-      - fxg-node-data:/data
+      # ノードのデータ (`data/node/` 配下の node.db / auth_token / worktrees 等)
+      - fxg-node-data:/var/lib/flexagent
       # エージェントに操作させるリポジトリ群 (ホスト側のパスは `FXG_WORKSPACE` で指定)
       - ${FXG_WORKSPACE:-./workspace}:/workspace
     environment:
@@ -62,7 +62,7 @@ services:
       #   1. ホストのブラウザで http://127.0.0.1:7860 → 設定 → ハブ接続 から
       #      ハブ URL (`http://hub:8080`) とトークンを入力する
       #   2. トークンを `./node_token` に置いて
-      #      `- ./node_token:/data/node_token` でマウントする (rw)
+      #      `- ./node_token:/var/lib/flexagent/data/node/node_token` でマウントする (rw)
       # トークンは `docker compose exec hub fxg hub pairing-token issue docker`
       # で発行する。反映に再起動は不要。
       # 中央サーバー経由 (Web UI / PWA) からの対話型 PTY を許可する場合は true

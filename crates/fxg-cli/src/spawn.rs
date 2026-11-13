@@ -4,13 +4,14 @@ use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
 use anyhow::{Context, Result};
+use fxg_protocol::paths::{Paths, Role};
 
-/// Spawns `fxg <args...>` detached with its stdio redirected to
-/// `~/.flexagent/logs/<log_name>` and returns the log path.
-pub fn spawn_background(args: &[&str], log_name: &str) -> Result<PathBuf> {
+/// Spawns `fxg <args...>` detached with its stdio redirected to the role's
+/// `<logs>/<role>/<log_name>` and returns the log path.
+pub fn spawn_background(args: &[&str], role: Role, log_name: &str) -> Result<PathBuf> {
     let env = fxg_protocol::config::process_env;
-    let home = fxg_protocol::config::fxg_home(&env);
-    let log_path = home.join("logs").join(log_name);
+    let paths = Paths::resolve(&env, role);
+    let log_path = paths.log_dir().join(log_name);
     if let Some(parent) = log_path.parent() {
         std::fs::create_dir_all(parent)
             .with_context(|| format!("failed to create {}", parent.display()))?;
