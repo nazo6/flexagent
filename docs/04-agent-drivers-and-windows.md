@@ -106,7 +106,7 @@ opencode の Tier 2 移行（Phase 4）まで実装済みである。Tier 3 の�
 1. **レジストリの役割 (import 専用)**:
    - 公式インデックス
      `https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json`
-     を取得し、`~/.flexagent/cache/registry.json` にキャッシュする（TTL
+     を取得し、`<cache>/flexagent/node/registry.json` にキャッシュする（TTL
      24時間、Web UI のカタログ更新で即時更新）。
    - レジストリは **実行時カタログには含めない**。Web UI の
      「Import from registry」で custom 定義を生成するためのテンプレートとして

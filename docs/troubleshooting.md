@@ -15,7 +15,8 @@ UI のエラーバナー「Details」からは、このページの対応する�
 
 `request_id` はレスポンスヘッダ `x-request-id` と、ハブの `http_request` スパンにも入る。
 まずはこれをキーにログを検索する。ノード側のログは `fxg logs`、ハブ側は `fxg logs hub`、
-または `~/.flexagent/logs/` を確認する。
+または `<logs>/flexagent/<role>/<role>.log` を確認する。実際のパスは `fxg doctor` が
+表示する（ルートの一覧は [`05-cli-and-pwa-ui.md`](./05-cli-and-pwa-ui.md) §2.1）。
 
 ## エラー処理の規約（開発者向け）
 
@@ -34,7 +35,7 @@ UI のエラーバナー「Details」からは、このページの対応する�
 ## UNAUTHORIZED
 
 - **原因**: トークンが無い・失効した・別の接続先のトークンを使っている。
-- **確認**: `~/.flexagent/auth_token` と、URL の `?token=` / Cookie `fxg_session`。
+- **確認**: 接続先のロールの `<data>/flexagent/<role>/auth_token` と、URL の `?token=` / Cookie `fxg_session`。
 - **復旧**: 接続メニューからトークンを入れ直す。接続先でトークンを再生成した場合は
   すべてのクライアントで再ログインが必要。
 
@@ -129,7 +130,7 @@ UI のエラーバナー「Details」からは、このページの対応する�
 
 ## CONFIG_INVALID
 
-- **原因**: `~/.flexagent/config.toml` が不正。
+- **原因**: `node.toml` / `hub.toml` が不正。
 - **確認**: エラーのパスと行。`fxg doctor` で検査する。
 - **復旧**: 設定を修正する。
 
@@ -215,7 +216,7 @@ UI のエラーバナー「Details」からは、このページの対応する�
 ## DISK_FULL
 
 - **原因**: ディスク容量不足（DB / ログ / スナップショット / ワークスペース）。
-- **確認**: `df -h` と `~/.flexagent` の使用量。
+- **確認**: `df -h` と `<data>` / `<state>` の使用量。
 - **復旧**: 空き容量を確保してから再試行する。
 
 ## PERMISSION_DENIED
