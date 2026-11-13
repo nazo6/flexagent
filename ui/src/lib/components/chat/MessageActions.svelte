@@ -46,12 +46,13 @@
 </script>
 
 <!--
-  The action row lives in the gap between messages, on the message boundary.
-  It is always present on touch screens and fades in on hover / focus on
-  pointer devices that can hover.
+  The action row is the normal-flow boundary below a message. Its own height
+  becomes the space under the message, so the layout follows its content instead
+  of a reserved magic number. It is always present on touch screens and fades in
+  on hover / focus on pointer devices that can hover.
 -->
 <div
-  class="message-actions absolute inset-x-0 -bottom-9 z-10 flex h-9 items-center gap-2"
+  class="message-actions flex w-full items-center gap-2"
   class:message-actions-prominent={prominent}
 >
   <span class="message-actions-content bg-border/60 h-px flex-1"></span>

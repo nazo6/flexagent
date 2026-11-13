@@ -324,14 +324,33 @@
     border-radius: var(--radius-lg);
   }
   /*
+   * Timeline rhythm.
+   *
+   * Every block gets the same compact base gap. A message group carries its
+   * boundary row in normal flow, so the row's measured height (not a hardcoded
+   * padding) replaces the gap below the message.
+   */
+  .timeline-list {
+    /* Follow the app spacing scale instead of a one-off pixel value. */
+    --timeline-gap: calc(var(--spacing) * 3);
+    display: flex;
+    flex-direction: column;
+  }
+  .timeline-list > li + li {
+    margin-top: var(--timeline-gap);
+  }
+  /* A message's in-flow boundary row already separates it from the next block. */
+  .timeline-list > li:has(> .message-group > .message-actions) + li {
+    margin-top: 0;
+  }
+  /*
    * Message actions live on the boundary between messages. Touch screens show
    * them permanently; pointer devices that can hover reveal them on hover /
-   * focus. The row is absolute inside the message gap, so it never changes the
-   * message height.
+   * focus. The row is in normal flow, so showing it never changes the layout.
    */
   .message-actions {
     display: flex;
-    /* The transparent gap itself is the hover target, so the controls appear
+    /* The transparent row itself is the hover target, so the controls appear
        even when the pointer is between two messages. */
     pointer-events: auto;
   }

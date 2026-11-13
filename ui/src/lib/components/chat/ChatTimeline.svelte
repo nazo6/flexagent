@@ -158,7 +158,11 @@
   }
 </script>
 
-<ul class="flex list-none flex-col gap-9 p-0">
+<!--
+  Spacing lives in `.timeline-list` (app.css): blocks share one base gap, while
+  a message group contributes its in-flow boundary row as the space below it.
+-->
+<ul class="timeline-list list-none p-0">
   {#each groupedItems as group (group.key)}
     <li>
       {#if group.kind === "subagent"}
@@ -178,31 +182,33 @@
         {@const item = group.item}
         {#if item.kind === "user"}
           {@const fork = forkState(item)}
-          <div class="message-group group relative flex items-end justify-end gap-1.5">
-            <div
-              class="bg-user-message text-foreground max-w-[82%] rounded-xl rounded-br-sm px-4 py-2.5"
-            >
-              {#if item.attachments.length > 0}
-                <div class="mb-1 flex flex-wrap gap-1.5">
-                  {#each item.attachments as attachment (attachment.file_name + (attachment.local_path ?? ""))}
-                    {#if attachment.data_b64 && attachment.mime_type.startsWith("image/")}
-                      <img
-                        src={`data:${attachment.mime_type};base64,${attachment.data_b64}`}
-                        alt={attachment.file_name}
-                        class="max-h-40 rounded-md object-contain"
-                      />
-                    {:else}
-                      <span
-                        class="bg-background/60 inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px]"
-                      >
-                        <PaperclipIcon class="size-2.5" />
-                        {attachment.file_name}
-                      </span>
-                    {/if}
-                  {/each}
-                </div>
-              {/if}
-              <p class="text-sm whitespace-pre-wrap">{item.text}</p>
+          <div class="message-group">
+            <div class="flex justify-end">
+              <div
+                class="bg-user-message text-foreground max-w-[82%] rounded-xl rounded-br-sm px-4 py-2.5"
+              >
+                {#if item.attachments.length > 0}
+                  <div class="mb-1 flex flex-wrap gap-1.5">
+                    {#each item.attachments as attachment (attachment.file_name + (attachment.local_path ?? ""))}
+                      {#if attachment.data_b64 && attachment.mime_type.startsWith("image/")}
+                        <img
+                          src={`data:${attachment.mime_type};base64,${attachment.data_b64}`}
+                          alt={attachment.file_name}
+                          class="max-h-40 rounded-md object-contain"
+                        />
+                      {:else}
+                        <span
+                          class="bg-background/60 inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px]"
+                        >
+                          <PaperclipIcon class="size-2.5" />
+                          {attachment.file_name}
+                        </span>
+                      {/if}
+                    {/each}
+                  </div>
+                {/if}
+                <p class="text-sm whitespace-pre-wrap">{item.text}</p>
+              </div>
             </div>
             <MessageActions
               text={item.text}
@@ -216,18 +222,20 @@
           </div>
         {:else if item.kind === "agent"}
           {@const fork = forkState(item)}
-          <div class="message-group group relative flex gap-2.5">
-            <span
-              class="bg-signal-soft text-signal mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-md"
-            >
-              <BotIcon class="size-3" />
-            </span>
-            <div class="min-w-0 max-w-[92%] flex-1">
-              <MarkdownText
-                text={item.text}
-                streaming={item.streaming}
-                class="text-sm leading-relaxed"
-              />
+          <div class="message-group">
+            <div class="flex gap-2.5">
+              <span
+                class="bg-signal-soft text-signal mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-md"
+              >
+                <BotIcon class="size-3" />
+              </span>
+              <div class="min-w-0 max-w-[92%] flex-1">
+                <MarkdownText
+                  text={item.text}
+                  streaming={item.streaming}
+                  class="text-sm leading-relaxed"
+                />
+              </div>
             </div>
             <MessageActions
               text={item.text}
