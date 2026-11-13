@@ -491,6 +491,19 @@ impl StreamingAccumulator {
         out
     }
 
+    /// Finalizes every open stream for a single scope in timeline order.
+    pub(super) fn finish_scope(
+        &mut self,
+        subagent_id: &Option<String>,
+    ) -> Vec<UnifiedEventPayload> {
+        let mut out = Vec::new();
+        out.extend(self.finish_user_message(subagent_id));
+        // Defensive ordering: reasoning precedes the answer within a turn.
+        out.extend(self.finish_thought(subagent_id));
+        out.extend(self.finish_message(subagent_id));
+        out
+    }
+
     /// Takes every accumulated stream as completion events.
     pub(super) fn finish_all(&mut self) -> Vec<UnifiedEventPayload> {
         let mut out = Vec::new();
@@ -564,14 +577,7 @@ pub(super) fn map_session_update_with_mode(
                 // before it (agy's teamwork only flushes its follow-up when the next
                 // prompt starts) belongs to the previous context, so finalize it as its
                 // own message instead of merging it into this turn's answer.
-                let mut finished = Vec::new();
-                if let Some(payload) = accumulator.finish_thought(&scope) {
-                    finished.push(payload);
-                }
-                if let Some(payload) = accumulator.finish_message(&scope) {
-                    finished.push(payload);
-                }
-                for payload in finished {
+                for payload in accumulator.finish_scope(&scope) {
                     events.push(DriverEvent::Event(payload));
                 }
             }
@@ -615,6 +621,9 @@ pub(super) fn map_session_update_with_mode(
             }
         }
         SessionUpdate::ToolCall(tool_call) => {
+            for payload in accumulator.finish_scope(&scope) {
+                events.push(DriverEvent::Event(payload));
+            }
             events.push(DriverEvent::Event(tool_call_event(&tool_call, subagent_id)));
         }
         SessionUpdate::ToolCallUpdate(update) => {
@@ -624,6 +633,9 @@ pub(super) fn map_session_update_with_mode(
             )));
         }
         SessionUpdate::Plan(plan) => {
+            for payload in accumulator.finish_scope(&scope) {
+                events.push(DriverEvent::Event(payload));
+            }
             let entries = plan
                 .entries
                 .iter()

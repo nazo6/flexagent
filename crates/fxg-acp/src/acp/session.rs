@@ -27,6 +27,7 @@ pub(super) async fn build_session(
     params: &SessionParams,
     events: &mpsc::UnboundedSender<DriverEvent>,
     contexts: &SessionContexts,
+    ingress_tx: &mpsc::UnboundedSender<SessionIngress>,
     auth_methods: &[AgentAuthMethodInfo],
 ) -> anyhow::Result<(
     ActiveSession<'static, Agent>,
@@ -92,6 +93,7 @@ pub(super) async fn build_session(
             cwd: params.cwd.clone(),
             events: events.clone(),
             subagent_id: None,
+            ingress: Some(ingress_tx.clone()),
         },
     );
     fxg_protocol::discard_with!(
@@ -313,6 +315,99 @@ async fn drain_idle_updates(
     Ok(())
 }
 
+/// Drains pending root/ingress updates, finalizes all buffered streams, and
+/// notifies any waiting [`SessionIngress::Flush`] callers.
+///
+/// If a `PromptResponse` is encountered while draining the active turn's root
+/// channel, it is returned so the turn loop can complete the turn normally.
+async fn flush_streams_for_request(
+    runtime: &mut SessionRuntime<'_>,
+    session: &mut ActiveSession<'static, Agent>,
+    ingress_rx: &mut mpsc::UnboundedReceiver<SessionIngress>,
+    initial_ack: oneshot::Sender<()>,
+) -> Result<
+    Option<Result<agent_client_protocol::v1::schema::PromptResponse, agent_client_protocol::Error>>,
+    agent_client_protocol::Error,
+> {
+    use futures_util::FutureExt;
+
+    let mut acks = vec![initial_ack];
+    let mut prompt_response = None;
+    while let Some(result) = session.read_update().now_or_never() {
+        match result? {
+            SessionMessage::Message(dispatch) => {
+                if let Some(notification) = take_session_notification(dispatch).await? {
+                    runtime.handle_update(notification.update, None, session);
+                }
+            }
+            SessionMessage::PromptResponse(response) => {
+                prompt_response = Some(response);
+                break;
+            }
+            _ => {}
+        }
+    }
+    while let Ok(item) = ingress_rx.try_recv() {
+        match item {
+            SessionIngress::Flush(ack) => acks.push(ack),
+            other => runtime.handle_ingress(other, session),
+        }
+    }
+    for payload in runtime.accumulator.finish_all() {
+        runtime.send_payload(payload);
+    }
+    for ack in acks {
+        fxg_protocol::discard_with!(ack.send(()), "acknowledge stream flush");
+    }
+    Ok(prompt_response)
+}
+
+/// Drains remaining ingress events, finalizes open streams, and emits the turn-end status.
+fn finish_turn(
+    runtime: &mut SessionRuntime<'_>,
+    session: &ActiveSession<'static, Agent>,
+    ingress_rx: &mut mpsc::UnboundedReceiver<SessionIngress>,
+    response: Result<
+        agent_client_protocol::v1::schema::PromptResponse,
+        agent_client_protocol::Error,
+    >,
+) {
+    let mut acks = Vec::new();
+    while let Ok(ingress) = ingress_rx.try_recv() {
+        match ingress {
+            SessionIngress::Flush(ack) => acks.push(ack),
+            other => runtime.handle_ingress(other, session),
+        }
+    }
+    for payload in runtime.accumulator.finish_all() {
+        runtime.send_payload(payload);
+    }
+    for ack in acks {
+        fxg_protocol::discard_with!(ack.send(()), "acknowledge stream flush");
+    }
+    match response {
+        Ok(resp) => {
+            let reason = resp.stop_reason;
+            tracing::debug!(?reason, "acp turn finished");
+            if let Some(payload) = turn_ended_event(reason) {
+                runtime.send_payload(payload);
+            }
+            runtime.send_payload(UnifiedEventPayload::StatusChanged {
+                status: fxg_protocol::common::SessionStatus::Idle,
+                error_message: None,
+            });
+        }
+        Err(err) => {
+            let message = format!("agent turn failed: {err}");
+            tracing::warn!("{message}");
+            runtime.send_payload(UnifiedEventPayload::StatusChanged {
+                status: fxg_protocol::common::SessionStatus::Error,
+                error_message: Some(message),
+            });
+        }
+    }
+}
+
 /// Turn loop for one session (serializes prompt sends with update reads).
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn serve_session(
@@ -410,42 +505,30 @@ pub(super) async fn serve_session(
                         ingress = ingress_rx.recv() => TurnSelected::Ingress(ingress),
                     };
                     match selected {
+                        TurnSelected::Ingress(Some(SessionIngress::Flush(ack))) => {
+                            match flush_streams_for_request(
+                                &mut runtime,
+                                &mut session,
+                                &mut ingress_rx,
+                                ack,
+                            )
+                            .await
+                            {
+                                Ok(Some(response)) => {
+                                    finish_turn(&mut runtime, &session, &mut ingress_rx, response);
+                                    break;
+                                }
+                                Ok(None) => {}
+                                Err(err) => return ServeOutcome::Fatal(err.into()),
+                            }
+                        }
                         TurnSelected::Ingress(ingress) => {
                             if let Some(ingress) = ingress {
                                 runtime.handle_ingress(ingress, &session);
                             }
                         }
                         TurnSelected::Read(Ok(SessionMessage::PromptResponse(response))) => {
-                            // Drain child / vendor notifications that arrived before the
-                            // prompt response but were not selected yet.
-                            while let Ok(ingress) = ingress_rx.try_recv() {
-                                runtime.handle_ingress(ingress, &session);
-                            }
-                            for payload in runtime.accumulator.finish_all() {
-                                runtime.send_payload(payload);
-                            }
-                            match response {
-                                Ok(resp) => {
-                                    let reason = resp.stop_reason;
-                                    tracing::debug!(?reason, "acp turn finished");
-                                    if let Some(payload) = turn_ended_event(reason) {
-                                        runtime.send_payload(payload);
-                                    }
-                                }
-                                Err(err) => {
-                                    let message = format!("agent turn failed: {err}");
-                                    tracing::warn!("{message}");
-                                    runtime.send_payload(UnifiedEventPayload::StatusChanged {
-                                        status: fxg_protocol::common::SessionStatus::Error,
-                                        error_message: Some(message),
-                                    });
-                                    break;
-                                }
-                            }
-                            runtime.send_payload(UnifiedEventPayload::StatusChanged {
-                                status: fxg_protocol::common::SessionStatus::Idle,
-                                error_message: None,
-                            });
+                            finish_turn(&mut runtime, &session, &mut ingress_rx, response);
                             break;
                         }
                         TurnSelected::Read(Ok(SessionMessage::Message(dispatch))) => {
@@ -466,6 +549,15 @@ pub(super) async fn serve_session(
                 }
             }
             Selected::Command(Some(AcpCommand::Shutdown)) | Selected::Command(None) => break,
+            Selected::Ingress(Some(SessionIngress::Flush(ack))) => {
+                idle_flush_at = None;
+                if let Err(err) =
+                    flush_streams_for_request(&mut runtime, &mut session, &mut ingress_rx, ack)
+                        .await
+                {
+                    return ServeOutcome::Fatal(err.into());
+                }
+            }
             Selected::Ingress(ingress) => {
                 if let Some(ingress) = ingress {
                     runtime.handle_ingress(ingress, &session);
@@ -518,9 +610,9 @@ impl<'a> SessionRuntime<'a> {
         Self {
             events,
             capabilities,
-            ingress_tx,
+            ingress_tx: ingress_tx.clone(),
             accumulator: StreamingAccumulator::default(),
-            children: ChildSessions::new(root_id.to_string(), root_cwd, contexts),
+            children: ChildSessions::new(root_id.to_string(), root_cwd, contexts, ingress_tx),
             guards,
         }
     }
@@ -617,6 +709,12 @@ impl<'a> SessionRuntime<'a> {
                 if let Some(inner) = update.update {
                     self.handle_update(inner, Some(&child), session);
                 }
+            }
+            SessionIngress::Flush(ack) => {
+                for payload in self.accumulator.finish_all() {
+                    self.send_payload(payload);
+                }
+                fxg_protocol::discard_with!(ack.send(()), "acknowledge stream flush");
             }
         }
     }

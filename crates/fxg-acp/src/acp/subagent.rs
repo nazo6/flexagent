@@ -15,7 +15,7 @@ use std::sync::Arc;
 use agent_client_protocol::v1::schema::SessionNotification;
 use agent_client_protocol::{Agent, ConnectionTo, Dispatch, HandleDispatchFrom, Handled};
 use fxg_protocol::events::SubagentStatus;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 
 use super::SessionContexts;
 use crate::agent::extension::{AcpChildUpdate, AcpNotificationParser};
@@ -27,6 +27,8 @@ pub(super) enum SessionIngress {
     Child(SessionNotification),
     /// A vendor notification parsed into a generic child update.
     Vendor(AcpChildUpdate),
+    /// Flushes any buffered streaming updates before a blocking request is emitted.
+    Flush(oneshot::Sender<()>),
 }
 
 /// Claims vendor-specific notification methods declared by an extension.
@@ -181,16 +183,23 @@ pub(super) struct ChildSessions {
     by_id: HashMap<String, ChildInfo>,
     registered: HashSet<String>,
     contexts: SessionContexts,
+    ingress_tx: mpsc::UnboundedSender<SessionIngress>,
 }
 
 impl ChildSessions {
-    pub(super) fn new(root: String, root_cwd: PathBuf, contexts: SessionContexts) -> Self {
+    pub(super) fn new(
+        root: String,
+        root_cwd: PathBuf,
+        contexts: SessionContexts,
+        ingress_tx: mpsc::UnboundedSender<SessionIngress>,
+    ) -> Self {
         Self {
             root,
             root_cwd,
             by_id: HashMap::new(),
             registered: HashSet::new(),
             contexts,
+            ingress_tx,
         }
     }
 
@@ -220,6 +229,7 @@ impl ChildSessions {
                     cwd,
                     events,
                     subagent_id: Some(child.to_owned()),
+                    ingress: Some(self.ingress_tx.clone()),
                 },
             );
     }

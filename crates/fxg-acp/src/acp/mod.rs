@@ -282,6 +282,8 @@ struct SessionContext {
     events: mpsc::UnboundedSender<DriverEvent>,
     /// Subagent that owns this context (`None` = the root session)
     subagent_id: Option<String>,
+    /// Ingress channel to flush buffered streams on the turn loop before blocking requests
+    ingress: Option<mpsc::UnboundedSender<subagent::SessionIngress>>,
 }
 
 /// ACP session ID → session information.

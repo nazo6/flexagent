@@ -302,6 +302,39 @@ pub(super) fn cancel_pending_elicitations(
         }
     }
 }
+
+/// Flushes open streaming chunks on the session turn loop before emitting a
+/// blocking approval or elicitation request so preceding thoughts/text are persisted.
+async fn flush_session_streams(
+    ingress: Option<&mpsc::UnboundedSender<super::subagent::SessionIngress>>,
+) {
+    let Some(tx) = ingress else {
+        return;
+    };
+    let (ack_tx, ack_rx) = oneshot::channel();
+    if tx
+        .send(super::subagent::SessionIngress::Flush(ack_tx))
+        .is_ok()
+    {
+        fxg_protocol::discard_with!(
+            tokio::time::timeout(std::time::Duration::from_secs(1), ack_rx).await,
+            "wait for streaming accumulator flush"
+        );
+    }
+}
+
+fn elicitation_response(outcome: ElicitationOutcome) -> CreateElicitationResponse {
+    match outcome {
+        ElicitationOutcome::Accept(content) => CreateElicitationResponse::new(
+            AcpElicitationAction::Accept(ElicitationAcceptAction::new().content(content)),
+        ),
+        ElicitationOutcome::Decline => {
+            CreateElicitationResponse::new(AcpElicitationAction::Decline)
+        }
+        ElicitationOutcome::Cancel => CreateElicitationResponse::new(AcpElicitationAction::Cancel),
+    }
+}
+
 /// Launch parameters for `run_acp_process`.
 pub(super) struct AcpProcessTaskParams {
     /// Agent to launch
@@ -360,7 +393,6 @@ pub(super) async fn run_acp_process(
                             RequestPermissionOutcome::Cancelled,
                         ));
                     };
-                    let events = context.events.clone();
                     let request_id = responder.id().to_string();
                     let options = request
                         .options
@@ -376,40 +408,56 @@ pub(super) async fn run_acp_process(
                         .title
                         .clone()
                         .unwrap_or_else(|| request.tool_call.tool_call_id.to_string());
+                    let tool_name = tool.name.clone().unwrap_or_else(|| "tool".to_owned());
+                    let details = serde_json::to_value(&request.tool_call)
+                        .unwrap_or(serde_json::Value::Null)
+                        .into();
 
-                    fxg_protocol::discard_with!(
-                        events.send(DriverEvent::Event(UnifiedEventPayload::StatusChanged {
-                            status: fxg_protocol::common::SessionStatus::WaitingPermission,
-                            error_message: None,
-                        })),
-                        "notify event subscribers"
-                    );
-                    fxg_protocol::discard_with!(
-                        events.send(DriverEvent::Event(UnifiedEventPayload::PermissionRequest {
-                            request_id: request_id.clone(),
-                            tool_name: tool.name.clone().unwrap_or_else(|| "tool".to_owned()),
-                            summary,
-                            options,
-                            details: serde_json::to_value(&request.tool_call)
-                                .unwrap_or(serde_json::Value::Null)
-                                .into(),
-                            subagent_id: context.subagent_id.clone(),
-                        })),
-                        "notify event subscribers"
-                    );
-
-                    let (decision_tx, decision_rx) = oneshot::channel();
+                    let (decision_tx, mut decision_rx) = oneshot::channel();
                     permissions
                         .lock()
                         .expect("permission registry poisoned")
-                        .insert(request_id, decision_tx);
-                    let events_for_task = context.events.clone();
+                        .insert(request_id.clone(), decision_tx);
                     cx.spawn(async move {
+                        flush_session_streams(context.ingress.as_ref()).await;
+                        match decision_rx.try_recv() {
+                            Ok(outcome) => {
+                                return responder.respond(RequestPermissionResponse::new(outcome));
+                            }
+                            Err(oneshot::error::TryRecvError::Closed) => {
+                                return responder.respond(RequestPermissionResponse::new(
+                                    RequestPermissionOutcome::Cancelled,
+                                ));
+                            }
+                            Err(oneshot::error::TryRecvError::Empty) => {}
+                        }
+                        fxg_protocol::discard_with!(
+                            context.events.send(DriverEvent::Event(
+                                UnifiedEventPayload::StatusChanged {
+                                    status: fxg_protocol::common::SessionStatus::WaitingPermission,
+                                    error_message: None,
+                                },
+                            )),
+                            "notify event subscribers"
+                        );
+                        fxg_protocol::discard_with!(
+                            context.events.send(DriverEvent::Event(
+                                UnifiedEventPayload::PermissionRequest {
+                                    request_id,
+                                    tool_name,
+                                    summary,
+                                    options,
+                                    details,
+                                    subagent_id: context.subagent_id,
+                                },
+                            )),
+                            "notify event subscribers"
+                        );
                         let outcome = decision_rx
                             .await
                             .unwrap_or(RequestPermissionOutcome::Cancelled);
                         fxg_protocol::discard_with!(
-                            events_for_task.send(DriverEvent::Event(
+                            context.events.send(DriverEvent::Event(
                                 UnifiedEventPayload::StatusChanged {
                                     status: fxg_protocol::common::SessionStatus::Running,
                                     error_message: None,
@@ -654,44 +702,57 @@ pub(super) async fn run_acp_process(
                     // Form mode has no protocol-level elicitation id, so use the
                     // JSON-RPC request id as the elicitation id (same as approvals).
                     let elicitation_id = responder.id().to_string();
-                    let events = context.events.clone();
-                    fxg_protocol::discard_with!(
-                        events.send(DriverEvent::Event(UnifiedEventPayload::StatusChanged {
-                            status: fxg_protocol::common::SessionStatus::WaitingInput,
-                            error_message: None,
-                        })),
-                        "notify event subscribers"
-                    );
-                    fxg_protocol::discard_with!(
-                        events.send(DriverEvent::Event(
-                            UnifiedEventPayload::ElicitationRequest {
-                                elicitation_id: elicitation_id.clone(),
-                                message: request.message.clone(),
-                                mode: FxgElicitationMode::Form,
-                                requested_schema: schema.clone(),
-                                tool_call_id: scope.tool_call_id.as_ref().map(|id| id.to_string()),
-                                subagent_id: context.subagent_id.clone(),
-                            },
-                        )),
-                        "notify event subscribers"
-                    );
+                    let message = request.message.clone();
+                    let tool_call_id = scope.tool_call_id.as_ref().map(|id| id.to_string());
 
-                    let (decision_tx, decision_rx) = oneshot::channel();
+                    let (decision_tx, mut decision_rx) = oneshot::channel();
                     elicitations
                         .lock()
                         .expect("elicitation registry poisoned")
                         .insert(
-                            elicitation_id,
+                            elicitation_id.clone(),
                             PendingElicitation {
                                 sender: decision_tx,
-                                schema,
+                                schema: schema.clone(),
                             },
                         );
-                    let events_for_task = context.events.clone();
                     cx.spawn(async move {
+                        flush_session_streams(context.ingress.as_ref()).await;
+                        match decision_rx.try_recv() {
+                            Ok(outcome) => {
+                                return responder.respond(elicitation_response(outcome));
+                            }
+                            Err(oneshot::error::TryRecvError::Closed) => {
+                                return responder
+                                    .respond(elicitation_response(ElicitationOutcome::Cancel));
+                            }
+                            Err(oneshot::error::TryRecvError::Empty) => {}
+                        }
+                        fxg_protocol::discard_with!(
+                            context.events.send(DriverEvent::Event(
+                                UnifiedEventPayload::StatusChanged {
+                                    status: fxg_protocol::common::SessionStatus::WaitingInput,
+                                    error_message: None,
+                                },
+                            )),
+                            "notify event subscribers"
+                        );
+                        fxg_protocol::discard_with!(
+                            context.events.send(DriverEvent::Event(
+                                UnifiedEventPayload::ElicitationRequest {
+                                    elicitation_id,
+                                    message,
+                                    mode: FxgElicitationMode::Form,
+                                    requested_schema: schema,
+                                    tool_call_id,
+                                    subagent_id: context.subagent_id,
+                                },
+                            )),
+                            "notify event subscribers"
+                        );
                         let outcome = decision_rx.await.unwrap_or(ElicitationOutcome::Cancel);
                         fxg_protocol::discard_with!(
-                            events_for_task.send(DriverEvent::Event(
+                            context.events.send(DriverEvent::Event(
                                 UnifiedEventPayload::StatusChanged {
                                     status: fxg_protocol::common::SessionStatus::Running,
                                     error_message: None,
@@ -699,20 +760,7 @@ pub(super) async fn run_acp_process(
                             )),
                             "notify event subscribers"
                         );
-                        let response = match outcome {
-                            ElicitationOutcome::Accept(content) => {
-                                CreateElicitationResponse::new(AcpElicitationAction::Accept(
-                                    ElicitationAcceptAction::new().content(content),
-                                ))
-                            }
-                            ElicitationOutcome::Decline => {
-                                CreateElicitationResponse::new(AcpElicitationAction::Decline)
-                            }
-                            ElicitationOutcome::Cancel => {
-                                CreateElicitationResponse::new(AcpElicitationAction::Cancel)
-                            }
-                        };
-                        responder.respond(response)
+                        responder.respond(elicitation_response(outcome))
                     })?;
                     Ok(())
                 }
@@ -798,6 +846,7 @@ pub(super) async fn run_acp_process(
                 // Build the session. On failure the connection health is unknown, so
                 // return the error and shut the process down (the caller falls back
                 // to a cold start).
+                let (ingress_tx, ingress_rx) = mpsc::unbounded_channel();
                 let (session, acp_session_id, context_restored, capabilities_state, replayed) =
                     match build_session(
                         &cx,
@@ -805,6 +854,7 @@ pub(super) async fn run_acp_process(
                         &params,
                         &events,
                         &contexts,
+                        &ingress_tx,
                         &auth_methods,
                     )
                     .await
@@ -837,7 +887,6 @@ pub(super) async fn run_acp_process(
                 }
 
                 // 3) Turn loop (serializes prompt sends with update reads)
-                let (ingress_tx, ingress_rx) = mpsc::unbounded_channel();
                 let mut guards = Vec::new();
                 if let Some(parser) = params.acp_parser.clone() {
                     let handler = VendorNotificationHandler::new(parser, ingress_tx.clone());

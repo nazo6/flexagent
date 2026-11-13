@@ -8,6 +8,8 @@
 //!   (like OpenCode) and rejects `session/set_mode`
 //! - `--mode late-updates`: emits a background report after the prompt response,
 //!   and flushes a queued report before the next turn's user-message echo
+//! - `--mode thought-before-requests`: emits `agent_thought_chunk` right before
+//!   `elicitation/create` and `session/request_permission` without ending the turn
 
 #![allow(
     clippy::disallowed_types,
@@ -21,11 +23,11 @@ use serde_json::{Value, json};
 fn main() {
     let mode = parse_mode();
     let stdin = io::stdin();
+    let mut lines = stdin.lock().lines();
     let mut stdout = io::stdout();
     let mut prompt_count = 0usize;
 
-    for line in stdin.lock().lines() {
-        let Ok(line) = line else { break };
+    while let Some(Ok(line)) = lines.next() {
         let line = line.trim();
         if line.is_empty() {
             continue;
@@ -41,6 +43,11 @@ fn main() {
             .and_then(Value::as_str)
             .unwrap_or_default();
         let params = request.get("params").cloned().unwrap_or(Value::Null);
+
+        if method == "session/prompt" && mode == "thought-before-requests" {
+            handle_thought_before_requests(&mut lines, &mut stdout, id);
+            continue;
+        }
 
         if method == "session/prompt" && mode == "late-updates" {
             prompt_count += 1;
@@ -241,14 +248,17 @@ fn main() {
                     "authMethods": []
                 }
             }),
-            ("subagents" | "opencode-subagents" | "late-updates", "session/new") => json!({
+            (
+                "subagents" | "opencode-subagents" | "late-updates" | "thought-before-requests",
+                "session/new",
+            ) => json!({
                 "jsonrpc": "2.0",
                 "id": id,
                 "result": {
                     "sessionId": "root-session"
                 }
             }),
-            ("late-updates", "initialize") => json!({
+            ("late-updates" | "thought-before-requests", "initialize") => json!({
                 "jsonrpc": "2.0",
                 "id": id,
                 "result": {
@@ -509,6 +519,127 @@ fn send_late_updates(stdout: &mut io::Stdout, id: &Value, prompt_count: usize) {
             "result": { "stopReason": "end_turn" }
         }),
     );
+}
+
+/// Emits thoughts right before `elicitation/create` and `session/request_permission`
+/// and waits for the client's responses before completing the turn.
+fn handle_thought_before_requests<R: BufRead>(
+    lines: &mut io::Lines<R>,
+    stdout: &mut io::Stdout,
+    prompt_id: &Value,
+) {
+    write_line(
+        stdout,
+        &json!({
+            "jsonrpc": "2.0",
+            "method": "session/update",
+            "params": {
+                "sessionId": "root-session",
+                "update": {
+                    "sessionUpdate": "agent_thought_chunk",
+                    "messageId": "t-question",
+                    "content": { "type": "text", "text": "thinking before question" }
+                }
+            }
+        }),
+    );
+    write_line(
+        stdout,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": "req-elicit-1",
+            "method": "elicitation/create",
+            "params": {
+                "sessionId": "root-session",
+                "mode": "form",
+                "message": "Choose option",
+                "requestedSchema": {
+                    "type": "object",
+                    "properties": {
+                        "choice": { "type": "string" }
+                    },
+                    "required": ["choice"]
+                }
+            }
+        }),
+    );
+    wait_for_response(lines, "req-elicit-1");
+
+    write_line(
+        stdout,
+        &json!({
+            "jsonrpc": "2.0",
+            "method": "session/update",
+            "params": {
+                "sessionId": "root-session",
+                "update": {
+                    "sessionUpdate": "agent_thought_chunk",
+                    "messageId": "t-perm",
+                    "content": { "type": "text", "text": "thinking before permission" }
+                }
+            }
+        }),
+    );
+    write_line(
+        stdout,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": "req-perm-1",
+            "method": "session/request_permission",
+            "params": {
+                "sessionId": "root-session",
+                "toolCall": {
+                    "toolCallId": "tc-perm-1",
+                    "title": "Run check"
+                },
+                "options": [
+                    { "optionId": "allow_once", "name": "Allow", "kind": "allow_once" }
+                ]
+            }
+        }),
+    );
+    wait_for_response(lines, "req-perm-1");
+
+    write_line(
+        stdout,
+        &json!({
+            "jsonrpc": "2.0",
+            "method": "session/update",
+            "params": {
+                "sessionId": "root-session",
+                "update": {
+                    "sessionUpdate": "agent_message_chunk",
+                    "messageId": "m-done",
+                    "content": { "type": "text", "text": "all done" }
+                }
+            }
+        }),
+    );
+    write_line(
+        stdout,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": prompt_id,
+            "result": { "stopReason": "end_turn" }
+        }),
+    );
+}
+
+fn wait_for_response<R: BufRead>(lines: &mut io::Lines<R>, expected_id: &str) {
+    while let Some(Ok(line)) = lines.next() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let Ok(value) = serde_json::from_str::<Value>(trimmed) else {
+            continue;
+        };
+        if value.get("id").and_then(Value::as_str) == Some(expected_id)
+            && (value.get("result").is_some() || value.get("error").is_some())
+        {
+            return;
+        }
+    }
 }
 
 /// Config options for `--mode modes-as-config` (model + selectable mode).

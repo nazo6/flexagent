@@ -482,6 +482,68 @@ fn thought_after_message_finalizes_the_message_first() {
 }
 
 #[test]
+fn thought_and_message_are_completed_before_tool_call_and_plan() {
+    let mut acc = StreamingAccumulator::default();
+    let mut caps = SessionCapabilitiesState::default();
+
+    map_session_update(
+        thought_chunk("thinking first", Some("t1")),
+        None,
+        &mut acc,
+        &mut caps,
+    );
+    let events = map_session_update(
+        SessionUpdate::ToolCall(ToolCall::new("tc-1", "Run command")),
+        None,
+        &mut acc,
+        &mut caps,
+    );
+    assert_eq!(events.len(), 2);
+    assert!(matches!(
+        &events[0],
+        DriverEvent::Event(UnifiedEventPayload::AgentThought {
+            text,
+            is_complete: true,
+            ..
+        }) if text == "thinking first"
+    ));
+    assert!(matches!(
+        &events[1],
+        DriverEvent::Event(UnifiedEventPayload::ToolCall { tool_call_id, .. }) if tool_call_id == "tc-1"
+    ));
+
+    map_session_update(
+        text_chunk("planning next", Some("m1")),
+        None,
+        &mut acc,
+        &mut caps,
+    );
+    let events = map_session_update(
+        SessionUpdate::Plan(Plan::new(vec![AcpPlanEntry::new(
+            "Step 1",
+            PlanEntryPriority::Medium,
+            AcpPlanEntryStatus::Pending,
+        )])),
+        None,
+        &mut acc,
+        &mut caps,
+    );
+    assert_eq!(events.len(), 2);
+    assert!(matches!(
+        &events[0],
+        DriverEvent::Event(UnifiedEventPayload::AgentMessage {
+            text,
+            is_complete: true,
+            ..
+        }) if text == "planning next"
+    ));
+    assert!(matches!(
+        &events[1],
+        DriverEvent::Event(UnifiedEventPayload::PlanUpdate { .. })
+    ));
+}
+
+#[test]
 fn maps_tool_call_with_diff_content() {
     let tool_call = ToolCall::new("t-1", "Edit file")
         .kind(ToolKind::Edit)
