@@ -16,7 +16,7 @@
   import BellOffIcon from "@lucide/svelte/icons/bell-off";
   import ExternalLinkIcon from "@lucide/svelte/icons/external-link";
 
-  let { onOpenVapidSubject }: { onOpenVapidSubject?: () => void } = $props();
+  let { vapidSubjectHref }: { vapidSubjectHref?: string } = $props();
 
   let push = $state<PushCapability | null>(null);
   let loading = $state(true);
@@ -147,8 +147,8 @@
         {/if}
       </Button>
 
-      {#if onOpenVapidSubject && connection.role !== null}
-        <Button type="button" variant="ghost" size="sm" onclick={onOpenVapidSubject}>
+      {#if vapidSubjectHref && connection.role !== null}
+        <Button href={vapidSubjectHref} variant="ghost" size="sm">
           {m.settings_notifications_vapid_link()}
         </Button>
       {/if}

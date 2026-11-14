@@ -48,6 +48,7 @@
   } from "#lib/session-prefs.ts";
   import { prefs } from "#lib/stores/prefs.svelte.ts";
   import { getNodeAvailability } from "#lib/node-status.ts";
+  import { nodeSettingsPath, resolveDefaultNodeId } from "#lib/settings-routes.ts";
   import { m } from "#lib/paraglide/messages.js";
   import { sync } from "#lib/stores/app.svelte.ts";
   import { problems } from "#lib/stores/problems.svelte.ts";
@@ -162,6 +163,17 @@
   const effectiveAgent = $derived(agentId.trim());
 
   const isProvisionerMode = $derived(runTarget === "provisioner");
+  const agentsSettingsHref = $derived(
+    nodeSettingsPath(
+      "agents",
+      (!isProvisionerMode && nodeId !== "" ? nodeId : null) ??
+        resolveDefaultNodeId(
+          sync.connection.role === "hub",
+          nodes,
+          sync.connection.systemInfo?.node_id,
+        ),
+    ),
+  );
   const selectedProvisioner = $derived(
     provisioners.find((p) => p.name === provisionerName) ?? provisioners[0] ?? null,
   );
@@ -1381,7 +1393,7 @@
               {manualAgent ? m.new_session_choose_from_list() : m.new_session_enter_id()}
             </button>
             <a
-              href="/settings?tab=agents"
+              href={agentsSettingsHref}
               class="text-muted-foreground hover:bg-accent hover:text-accent-foreground block rounded-md px-2 py-1.5 text-[13px]"
             >
               {m.new_session_manage_agents()}

@@ -12,19 +12,9 @@
  * there is a single place that renders the setting.
  */
 
-export type SettingsScope = "hub" | "node" | "browser";
-export type SettingsScopeRef = SettingsScope | "current";
+import type { SettingsScope, SettingsScopeRef, SettingsTabId } from "./settings-routes.ts";
 
-export type SettingsTabId =
-  | "process"
-  | "general"
-  | "pairing"
-  | "tokens"
-  | "provisioners"
-  | "agents"
-  | "audit"
-  | "appearance"
-  | "notifications";
+export type { SettingsScope, SettingsScopeRef, SettingsTabId };
 
 export type SettingsSearchEntry = {
   scope: SettingsScopeRef;
