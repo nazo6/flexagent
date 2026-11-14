@@ -23,7 +23,8 @@ export type SettingsTabId =
   | "provisioners"
   | "agents"
   | "audit"
-  | "appearance";
+  | "appearance"
+  | "notifications";
 
 export type SettingsSearchEntry = {
   scope: SettingsScopeRef;
@@ -49,6 +50,7 @@ export const SETTINGS_TAB_LABELS: Record<SettingsTabId, string> = {
   agents: "Agents",
   audit: "Audit log",
   appearance: "Appearance",
+  notifications: "Notifications",
 };
 
 export const SETTINGS_SEARCH_ENTRIES: SettingsSearchEntry[] = [
@@ -196,6 +198,12 @@ export const SETTINGS_SEARCH_ENTRIES: SettingsSearchEntry[] = [
     tab: "appearance",
     label: "Pinned sessions",
     keywords: "pin pinned sidebar sessions",
+  },
+  {
+    scope: "browser",
+    tab: "notifications",
+    label: "Web Push notifications",
+    keywords: "push notifications web push browser alert permission banner",
   },
 
   { scope: "current", tab: "audit", label: "Audit log", keywords: "audit log history events" },

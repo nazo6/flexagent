@@ -13,7 +13,9 @@ import { isValidVapidKey, urlBase64ToUint8Array } from "./push-keys";
  */
 
 export interface PushCapability {
-  /** Whether this browser supports Service Worker / Push API */
+  /** Whether the current page is in a browser secure context (HTTPS or localhost) */
+  secureContext: boolean;
+  /** Whether this browser supports Service Worker / Push API with an active registration */
   supported: boolean;
   /** Notification permission state */
   permission: NotificationPermission;
@@ -25,10 +27,22 @@ export interface PushCapability {
 
 function hasPushSupport(): boolean {
   return (
+    typeof window !== "undefined" &&
+    window.isSecureContext &&
     typeof navigator !== "undefined" &&
     "serviceWorker" in navigator &&
-    typeof PushManager !== "undefined"
+    typeof PushManager !== "undefined" &&
+    typeof Notification !== "undefined"
   );
+}
+
+async function activeServiceWorkerRegistration(): Promise<ServiceWorkerRegistration | null> {
+  if (!hasPushSupport()) return null;
+  // Check getRegistration() first because navigator.serviceWorker.ready never
+  // resolves when no Service Worker is registered (e.g. Vite dev builds).
+  const registered = await navigator.serviceWorker.getRegistration();
+  if (!registered) return null;
+  return navigator.serviceWorker.ready;
 }
 
 async function systemInfo(): Promise<SystemInfoResponse | null> {
@@ -41,19 +55,22 @@ async function systemInfo(): Promise<SystemInfoResponse | null> {
 
 /** Get the current Web Push support status. */
 export async function pushCapability(): Promise<PushCapability> {
+  const secureContext = typeof window !== "undefined" ? window.isSecureContext : false;
   const info = await systemInfo();
   const serverEnabled = (info?.vapid_public_key ?? null) !== null;
-  if (!hasPushSupport()) {
+  const registration = await activeServiceWorkerRegistration();
+  if (!registration) {
     return {
+      secureContext,
       supported: false,
-      permission: "denied",
+      permission: typeof Notification !== "undefined" ? Notification.permission : "denied",
       subscribed: false,
       serverEnabled,
     };
   }
-  const registration = await navigator.serviceWorker.ready;
   const subscription = await registration.pushManager.getSubscription();
   return {
+    secureContext,
     supported: true,
     permission: Notification.permission,
     subscribed: subscription !== null,
@@ -67,7 +84,8 @@ export async function pushCapability(): Promise<PushCapability> {
  * Throws an `Error` with a localized message on failure.
  */
 export async function enablePushNotifications(): Promise<void> {
-  if (!hasPushSupport()) {
+  const registration = await activeServiceWorkerRegistration();
+  if (!registration) {
     throw new Error(m.push_unsupported_browser());
   }
   const info = await systemInfo();
@@ -85,7 +103,6 @@ export async function enablePushNotifications(): Promise<void> {
     throw new Error(m.push_permission_denied());
   }
 
-  const registration = await navigator.serviceWorker.ready;
   const subscription =
     (await registration.pushManager.getSubscription()) ??
     (await registration.pushManager.subscribe({
@@ -109,8 +126,8 @@ export async function enablePushNotifications(): Promise<void> {
 
 /** Unsubscribe this device (the server entry expires naturally on 404/410). */
 export async function disablePushNotifications(): Promise<void> {
-  if (!hasPushSupport()) return;
-  const registration = await navigator.serviceWorker.ready;
+  const registration = await activeServiceWorkerRegistration();
+  if (!registration) return;
   const subscription = await registration.pushManager.getSubscription();
   await subscription?.unsubscribe();
 }

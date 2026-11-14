@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { onMount } from "svelte";
   import * as Dialog from "#lib/components/ui/dialog/index.ts";
   import * as DropdownMenu from "#lib/components/ui/dropdown-menu/index.ts";
   import { Button } from "#lib/components/ui/button/index.ts";
@@ -7,15 +6,7 @@
   import { Label } from "#lib/components/ui/label/index.ts";
   import { connection, logoutAndStop, sync } from "#lib/stores/app.svelte.ts";
   import { formatRelativeTime } from "#lib/format.ts";
-  import {
-    disablePushNotifications,
-    enablePushNotifications,
-    pushCapability,
-    type PushCapability,
-  } from "#lib/push.ts";
   import { toast } from "svelte-sonner";
-  import BellIcon from "@lucide/svelte/icons/bell";
-  import BellOffIcon from "@lucide/svelte/icons/bell-off";
   import CableIcon from "@lucide/svelte/icons/cable";
   import ChevronDownIcon from "@lucide/svelte/icons/chevron-down";
   import ClockIcon from "@lucide/svelte/icons/clock";
@@ -42,8 +33,6 @@
   let addOpen = $state(false);
   let newLabel = $state("");
   let newUrl = $state("");
-  let push = $state<PushCapability | null>(null);
-  let pushBusy = $state(false);
 
   const roleLabel = $derived(
     connection.role === "hub"
@@ -53,38 +42,6 @@
         : m.connection_role_disconnected(),
   );
   const originLabel = $derived(connection.origin || m.connection_same_origin());
-
-  // Push capability depends on the connected backend, so check it on first mount
-  onMount(() => {
-    void refreshPush();
-  });
-
-  async function refreshPush() {
-    try {
-      push = await pushCapability();
-    } catch {
-      push = null;
-    }
-  }
-
-  async function togglePush() {
-    if (push === null || pushBusy) return;
-    pushBusy = true;
-    try {
-      if (push.subscribed) {
-        await disablePushNotifications();
-        toast(m.connection_push_disabled_toast());
-      } else {
-        await enablePushNotifications();
-        toast.success(m.connection_push_enabled_toast());
-      }
-      await refreshPush();
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : String(error));
-    } finally {
-      pushBusy = false;
-    }
-  }
 
   function addTarget(event: SubmitEvent) {
     event.preventDefault();
@@ -183,18 +140,7 @@
       <PlusIcon />
       {m.connection_add_target_example()}
     </DropdownMenu.Item>
-    {#if push !== null && push.supported && push.serverEnabled}
-      <DropdownMenu.Separator />
-      <DropdownMenu.Item disabled={pushBusy} onSelect={() => void togglePush()}>
-        {#if push.subscribed}
-          <BellOffIcon />
-          {m.connection_push_disable()}
-        {:else}
-          <BellIcon />
-          {m.connection_push_enable()}
-        {/if}
-      </DropdownMenu.Item>
-    {/if}
+    <DropdownMenu.Separator />
     <DropdownMenu.Item onSelect={logout}>
       <LogOutIcon />
       {m.connection_logout()}

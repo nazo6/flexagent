@@ -7,6 +7,7 @@
   import AuditLog from "#lib/components/settings/AuditLog.svelte";
   import DiagnosticsPanel from "#lib/components/settings/DiagnosticsPanel.svelte";
   import KillSwitchButton from "#lib/components/KillSwitchButton.svelte";
+  import NotificationsPanel from "#lib/components/settings/NotificationsPanel.svelte";
   import PairingPanel from "#lib/components/settings/PairingPanel.svelte";
   import ProvisionerManager from "#lib/components/settings/ProvisionerManager.svelte";
   import SettingsCatalog from "#lib/components/settings/SettingsCatalog.svelte";
@@ -79,6 +80,7 @@
     "agents",
     "audit",
     "appearance",
+    "notifications",
   ];
 
   function resolveScope(ref: SettingsScope | "current"): SettingsScope {
@@ -100,7 +102,10 @@
       { id: "agents", label: m.settings_tab_agents() },
       ...(isHub ? [] : [{ id: "audit" as const, label: m.settings_tab_audit() }]),
     ],
-    browser: [{ id: "appearance", label: m.settings_tab_appearance() }],
+    browser: [
+      { id: "appearance", label: m.settings_tab_appearance() },
+      { id: "notifications", label: m.settings_tab_notifications() },
+    ],
   });
 
   const scopeOptions = $derived<
@@ -803,6 +808,16 @@
                 </Button>
               </div>
             </Card>
+          </Tabs.Content>
+
+          <Tabs.Content value="notifications" class="mt-2 flex flex-col gap-3">
+            <NotificationsPanel
+              onOpenVapidSubject={() => {
+                activeScope = isHub ? "hub" : "node";
+                activeTab = "general";
+                writeUrl();
+              }}
+            />
           </Tabs.Content>
         {/if}
       </Tabs.Root>

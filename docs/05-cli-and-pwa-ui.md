@@ -407,6 +407,8 @@ Android スマートフォン（ホーム画面追加PWA）のすべてを単一
    - **Browser**:
      - **Appearance**: テーマ（システム / ライト / ダーク）、パレット、
        送信ショートカット、ピン留めの管理。
+     - **Notifications**: 現在接続中のバックエンド（Origin）に対する本ブラウザの
+       Web Push 通知の有効化・無効化と許可状態の確認。
 
 ### 3.3 Android PWA & Web Push (VAPID) の実装詳細
 
