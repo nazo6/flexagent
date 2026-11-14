@@ -71,23 +71,63 @@
   type PathMode = "existing" | "new_worktree";
   type RunTarget = "node" | "provisioner";
 
-  let selectedProjectId = $state("");
-  let nodeId = $state("");
+  /**
+   * Deep-link parameters, read once when the screen is created.
+   *
+   * The URL is an entry point, not a reactive input: applying it again while
+   * the user edits the form would overwrite their selections.
+   */
+  const initialUrl = untrack(() => {
+    const params = page.url.searchParams;
+    const forkUptoRaw = params.get("fork_upto");
+    const forkUpto = forkUptoRaw === null ? Number.NaN : Number(forkUptoRaw);
+    return {
+      project: params.get("project") ?? "",
+      node: params.get("node") ?? "",
+      path: params.get("path") ?? "",
+      forkSession: params.get("fork_session") ?? "",
+      forkUpTo: Number.isSafeInteger(forkUpto) && forkUpto >= 0 ? forkUpto : null,
+      agent: params.get("agent") ?? "",
+    };
+  });
+
+  /** Project explicitly chosen by the user (empty = deep link or first project). */
+  let chosenProjectId = $state("");
+  /** Node explicitly chosen by the user (`null` = follow the default resolution). */
+  let chosenNodeId = $state<string | null>(null);
+  /** Whether the deep-linked node still applies (cleared once the user changes project). */
+  let deepLinkNodeActive = $state(initialUrl.node !== "");
+  /** Working directory explicitly chosen by the user (empty = default candidate). */
+  let chosenPath = $state(initialUrl.path);
+  /** Agent explicitly chosen by the user (empty = remembered / first available). */
+  let chosenAgentId = $state(initialUrl.agent);
+  /**
+   * Initial mode explicitly chosen by the user (`null` = remembered mode).
+   * A deep-linked agent starts from its own default because mode IDs are
+   * agent-specific.
+   */
+  let chosenMode = $state<SessionModePreference | null>(initialUrl.agent === "" ? null : "default");
+  /**
+   * Manual agent-ID input (`null` = follow the catalog).
+   *
+   * A deep link to an agent missing from the catalog starts in manual mode; the
+   * user's toggle (or a catalog selection) fixes the choice afterwards.
+   */
+  let manualAgentChoice = $state<boolean | null>(initialUrl.agent === "" ? false : null);
+
   let runTarget = $state<RunTarget>("node");
   let provisionerName = $state("");
   const provisioners = $state<ProvisionerSummary[]>([]);
-  let agentId = $state("");
-  /** Enter the ID directly even when a catalog is available. */
-  let manualAgent = $state(false);
   /** ACP Registry catalog + per-node availability. */
   let catalog = $state<AgentSummary[]>([]);
   let catalogLoading = $state(true);
   let catalogError = $state<string | null>(null);
+  /** Node whose catalog is currently loaded (never mix two nodes' lists). */
+  let catalogNodeId = $state("");
   /** Guards against stale responses when the node changes / the user retries. */
   let catalogGeneration = 0;
   let provisionerLoadError = $state<string | null>(null);
   let pathMode = $state<PathMode>("existing");
-  let localPath = $state("");
   let branch = $state("");
   let baseBranch = $state("");
   const draft = composerDrafts.get(NEW_SESSION_DRAFT_ID);
@@ -96,7 +136,7 @@
   let browserOpen = $state(false);
   let fileBrowserOpen = $state(false);
   let fileInput = $state<HTMLInputElement | null>(null);
-  let useCustomPath = $state(false);
+  let useCustomPath = $state(initialUrl.path !== "");
 
   const composer = createComposerAttachments(draft.attachments);
   const attachments = $derived(composer.attachments);
@@ -117,26 +157,11 @@
   let agentOpen = $state(false);
   let moreOpen = $state(false);
 
-  // Default resolution control: track the first application of URL params and node selection
-  let nodeTouched = $state(false);
-  let urlProjectApplied = $state(false);
-  let urlNodeApplied = $state(false);
-  let urlAgentApplied = $state(false);
-  let lastAutoPathKey = "";
-
-  // Per-device memory (scoped to a project): tracked so nothing is saved before restoring
-  let prefsProjectId = "";
-  /** Project whose saved preferences have been applied (empty until the catalog is ready). */
-  let prefsResolvedProjectId = $state("");
-  let agentTouched = $state(false);
-  let modeTouched = $state(false);
-
   // Fork inheritance
-  let forkSessionId = $state("");
-  let forkUpToNodeSeq = $state<number | null>(null);
+  let forkSessionId = $state(initialUrl.forkSession);
+  let forkUpToNodeSeq = $state<number | null>(initialUrl.forkUpTo);
 
   // Launch options
-  let sessionMode = $state<SessionModePreference>("default");
   let extraArgsText = $state("");
 
   // Agent capability probe (models / modes)
@@ -145,8 +170,6 @@
   let capabilitiesLoading = $state(false);
   let capabilitiesError = $state<string | null>(null);
   let capabilitiesGeneration = 0;
-  /** Key whose probe is currently rendered (cleared immediately on selection changes). */
-  let lastProbeKey = "";
   /** Per-screen probe cache so re-selecting the same agent is instant. */
   const capabilitiesCache = new Map<string, AgentCapabilitiesPreview>();
   let selectedConfigValues = $state<Record<string, ConfigOptionValue>>({});
@@ -158,22 +181,76 @@
 
   const projects = $derived(sync.projects);
   const selectedProject = $derived(
-    projects.find((p) => p.project_id === selectedProjectId) ?? projects[0] ?? null,
+    projects.find((project) => project.project_id === chosenProjectId) ??
+      projects.find((project) => project.project_id === initialUrl.project) ??
+      projects[0] ??
+      null,
   );
 
+  const isProvisionerMode = $derived(runTarget === "provisioner");
   const nodes = $derived(sync.nodes);
   const onlineNodes = $derived(nodes.filter((node) => node.is_online));
+  /** Deep-link node, only once it exists in the current node list. */
+  const deepLinkNodeId = $derived(
+    deepLinkNodeActive &&
+      initialUrl.node !== "" &&
+      nodes.some((node) => node.node_id === initialUrl.node)
+      ? initialUrl.node
+      : "",
+  );
+  const defaultNodeId = $derived.by(() => {
+    if (nodes.length === 0) return "";
+    if (deepLinkNodeId !== "") return deepLinkNodeId;
+    // Read the project and node list reactively (so a project / node change
+    // re-resolves the default), but not session history: session activity
+    // reorders candidates and must not move the selection.
+    const project = selectedProject;
+    return pickDefaultNode(
+      nodes,
+      project,
+      untrack(() => sync.sessions),
+    );
+  });
+  const nodeId = $derived(
+    chosenNodeId !== null && nodes.some((node) => node.node_id === chosenNodeId)
+      ? chosenNodeId
+      : defaultNodeId,
+  );
   const selectedNode = $derived(nodes.find((n) => n.node_id === nodeId) ?? null);
   const nodeAvailability = $derived(getNodeAvailability(selectedNode, sync.wsConnected));
+  /** Whether `catalog` belongs to the current node (never mix two nodes' lists). */
+  const catalogReady = $derived(nodeId !== "" && catalogNodeId === nodeId);
   // Agents that can actually be launched on this node (based on the catalog's
   // installed_nodes; npx/uvx distributed agents are included only once enabled
   // via "add from catalog")
-  const availableAgents = $derived(agentsAvailableOn(catalog, nodeId));
+  const availableAgents = $derived(catalogReady ? agentsAvailableOn(catalog, nodeId) : []);
   const availableAgentIds = $derived(availableAgents.map((agent) => agent.id));
-  const selectedAgent = $derived(availableAgents.find((agent) => agent.id === agentId) ?? null);
-  const effectiveAgent = $derived(agentId.trim());
+  /** Remembered agent for the project, as long as this node still offers it. */
+  const rememberedAgent = $derived.by(() => {
+    const projectId = selectedProject?.project_id ?? "";
+    if (projectId === "" || !catalogReady) return "";
+    const saved = loadNewSessionPrefs(projectId);
+    return saved !== null && availableAgentIds.includes(saved.agent) ? saved.agent : "";
+  });
+  const effectiveAgent = $derived(
+    chosenAgentId.trim() !== ""
+      ? chosenAgentId.trim()
+      : rememberedAgent !== ""
+        ? rememberedAgent
+        : (availableAgentIds[0] ?? ""),
+  );
+  const selectedAgent = $derived(
+    availableAgents.find((agent) => agent.id === effectiveAgent) ?? null,
+  );
+  /**
+   * Whether to show the free-form agent ID input instead of the catalog list.
+   * Until the user (or a selection) fixes the choice, a deep-linked agent that
+   * the loaded catalog does not contain starts in manual mode.
+   */
+  const manualAgent = $derived(
+    manualAgentChoice ?? (catalogReady && !availableAgentIds.includes(initialUrl.agent)),
+  );
 
-  const isProvisionerMode = $derived(runTarget === "provisioner");
   const agentsSettingsHref = $derived(
     nodeSettingsPath(
       "agents",
@@ -220,10 +297,12 @@
       const list = await sync.connection.client.nodeAgents(target);
       if (generation !== catalogGeneration) return;
       catalog = list;
+      catalogNodeId = target;
       catalogError = null;
     } catch (error) {
       if (generation !== catalogGeneration) return;
       catalog = [];
+      catalogNodeId = target;
       catalogError = error instanceof Error ? error.message : String(error);
       problems.report("load agents", error);
     } finally {
@@ -247,45 +326,34 @@
     void loadAgentCatalog(target);
   });
 
-  // The URL `project` is applied only once (it must not overwrite later manual selections)
-  $effect(() => {
-    if (urlProjectApplied || projects.length === 0) return;
-    const urlProject = page.url.searchParams.get("project");
-    selectedProjectId =
-      urlProject && projects.some((p) => p.project_id === urlProject)
-        ? urlProject
-        : selectedProjectId || projects[0].project_id;
-    urlProjectApplied = true;
-  });
-
-  // Default to an online node with run history for the project
-  // (stop following once the user has chosen a node)
-  $effect(() => {
-    if (nodeTouched || nodes.length === 0) return;
-    const defaultNode = untrack(() => pickDefaultNode(nodes, selectedProject, sync.sessions));
-    if (defaultNode !== "" && defaultNode !== nodeId) nodeId = defaultNode;
-  });
-
-  // URL `node` / `path` (deep link) are applied only once
-  $effect(() => {
-    if (urlNodeApplied || nodes.length === 0) return;
-    const urlNode = page.url.searchParams.get("node");
-    if (urlNode && nodes.some((n) => n.node_id === urlNode)) {
-      nodeId = urlNode;
-      nodeTouched = true;
-    }
-    const urlPath = page.url.searchParams.get("path");
-    if (urlPath) {
-      localPath = urlPath;
-      useCustomPath = true;
-    }
-    urlNodeApplied = true;
-  });
-
   // Resolve working directory candidates (bindings + recent sessions) in last-used order
   const pathCandidates = $derived.by(() =>
     buildPathCandidates(selectedProject, nodeId, sync.sessions),
   );
+  /**
+   * Pin the automatic path per project × node (and its empty → ready
+   * transition). Session updates reorder candidates but must not replace the
+   * directory the user is about to use.
+   */
+  const autoPathKey = $derived(
+    `${selectedProject?.project_id ?? ""}\u0000${nodeId}\u0000${pathCandidates.length === 0 ? "empty" : "ready"}`,
+  );
+  const defaultPath = $derived.by(() => {
+    void autoPathKey;
+    return untrack(() => pickDefaultCandidate(pathCandidates)?.path ?? "");
+  });
+  /** Selected working directory (explicit choice, or the pinned default). */
+  const localPath = $derived.by(() => {
+    // A typed / browsed path is used as-is; a picked candidate only while it
+    // still exists in the list (otherwise fall back to the default).
+    if (chosenPath !== "" && (useCustomPath || pathCandidates.some((c) => c.path === chosenPath))) {
+      return chosenPath;
+    }
+    if (defaultPath !== "" && pathCandidates.some((candidate) => candidate.path === defaultPath)) {
+      return defaultPath;
+    }
+    return pickDefaultCandidate(pathCandidates)?.path ?? "";
+  });
   const selectedCandidate = $derived(
     pathCandidates.find((candidate) => candidate.path === localPath) ?? null,
   );
@@ -297,97 +365,6 @@
         buildPathCandidates(selectedProject, node.node_id, sync.sessions).length > 0,
     ),
   );
-
-  // Default candidate selection: update only when the project × node changes or the
-  // current value disappears from the candidates (keep the selection when the
-  // candidate order shifts due to session updates)
-  $effect(() => {
-    if (isProvisionerMode || useCustomPath) return;
-    const key = `${selectedProject?.project_id ?? ""}|${nodeId}`;
-    const containsCurrent = pathCandidates.some((candidate) => candidate.path === localPath);
-    if (
-      key === lastAutoPathKey &&
-      (containsCurrent || (localPath === "" && pathCandidates.length === 0))
-    ) {
-      return;
-    }
-    lastAutoPathKey = key;
-    if (!containsCurrent) localPath = pickDefaultCandidate(pathCandidates)?.path ?? "";
-  });
-
-  // Default agent: pick the first one usable on this node when nothing is selected.
-  // Wait until the per-project preference has been restored so a stored agent is
-  // not briefly replaced (and probed) before the preference is applied.
-  $effect(() => {
-    if (agentId !== "" || isProvisionerMode || selectedProject === null) return;
-    if (prefsResolvedProjectId !== selectedProject.project_id) return;
-    const first = availableAgentIds[0];
-    if (first !== undefined) agentId = first;
-  });
-
-  // URL `fork_session` / `agent` are applied only once (after the node catalog is loaded, so
-  // an agent from the link is recognized as a dropdown entry instead of a manual ID)
-  $effect(() => {
-    if (urlAgentApplied || nodes.length === 0 || catalogLoading) return;
-    const forkSession = page.url.searchParams.get("fork_session");
-    if (forkSession) {
-      forkSessionId = forkSession;
-      const forkUptoRaw = page.url.searchParams.get("fork_upto");
-      const forkUpto = forkUptoRaw === null ? Number.NaN : Number(forkUptoRaw);
-      forkUpToNodeSeq = Number.isSafeInteger(forkUpto) && forkUpto >= 0 ? forkUpto : null;
-    }
-    const agentParam = page.url.searchParams.get("agent");
-    if (agentParam) {
-      agentId = agentParam;
-      // Show IDs missing from the list in the input field so they are visible
-      manualAgent = !availableAgentIds.includes(agentParam);
-      // Deep links take precedence over memory
-      agentTouched = true;
-      // Mode IDs are agent-specific: the remembered mode may belong to another agent
-      modeTouched = true;
-      sessionMode = "default";
-    }
-    urlAgentApplied = true;
-  });
-
-  // Per-device memory: restore the previous launch settings when the project changes
-  // (restoration must not overwrite items the user explicitly changed)
-  $effect(() => {
-    const project = selectedProject;
-    if (!project || catalogLoading) return;
-    if (project.project_id !== prefsProjectId) {
-      prefsProjectId = project.project_id;
-      prefsResolvedProjectId = "";
-      agentTouched = false;
-      modeTouched = false;
-    }
-    const savedPrefs = untrack(() => loadNewSessionPrefs(project.project_id));
-    if (savedPrefs) {
-      if (!modeTouched && savedPrefs.mode !== "default") sessionMode = savedPrefs.mode;
-      if (
-        !agentTouched &&
-        savedPrefs.agent !== "" &&
-        availableAgentIds.includes(savedPrefs.agent)
-      ) {
-        agentId = savedPrefs.agent;
-      }
-    }
-    prefsResolvedProjectId = project.project_id;
-  });
-
-  // Persist changes to the launch settings on the local device.
-  //
-  // Only explicit user changes are saved: the initial default agent / mode must
-  // not overwrite the restored per-project preference before the catalog has
-  // loaded (`agentTouched` / `modeTouched`).
-  $effect(() => {
-    void agentId;
-    void sessionMode;
-    if (!agentTouched && !modeTouched) return;
-    const projectId = selectedProject?.project_id ?? "";
-    if (projectId === "" || projectId !== prefsProjectId || isProvisionerMode) return;
-    persistPrefs();
-  });
 
   /** Working directory used to probe the agent for models. */
   const probePath = $derived(
@@ -432,6 +409,7 @@
   /** Stable key for the probe target (node / agent / working directory). */
   const probeKey = $derived(
     isProvisionerMode ||
+      !catalogReady ||
       !nodeAvailability.isAvailable ||
       nodeId === "" ||
       effectiveAgent === "" ||
@@ -459,12 +437,23 @@
       : null,
   );
 
-  // Drop a remembered mode that the probed agent does not offer (for example one
-  // saved while another agent was selected).
-  $effect(() => {
-    if (availableModes === null || sessionMode === "default") return;
-    if (availableModes.some((mode) => mode.mode_id === sessionMode)) return;
-    sessionMode = "default";
+  /**
+   * Remembered initial mode for the project (agent-specific IDs are not mixed).
+   */
+  const rememberedMode = $derived.by(() => {
+    const projectId = selectedProject?.project_id ?? "";
+    if (projectId === "" || !catalogReady) return "default" as SessionModePreference;
+    return loadNewSessionPrefs(projectId)?.mode ?? "default";
+  });
+
+  /**
+   * Initial mode sent with the session. A remembered mode the probed agent does
+   * not offer is ignored instead of failing `session/set_mode`.
+   */
+  const sessionMode = $derived.by<SessionModePreference>(() => {
+    const proposed = chosenMode ?? rememberedMode;
+    if (proposed === "default" || availableModes === null) return proposed;
+    return availableModes.some((mode) => mode.mode_id === proposed) ? proposed : "default";
   });
 
   function sameConfig(left: InitialConfig[], right: InitialConfig[]): boolean {
@@ -563,7 +552,6 @@
   $effect(() => {
     const key = probeKey;
     if (key === "") {
-      lastProbeKey = "";
       capabilitiesGeneration += 1;
       capabilities = null;
       capabilitiesKey = "";
@@ -572,16 +560,13 @@
       selectedConfigValues = {};
       return;
     }
-    if (key !== lastProbeKey) {
-      lastProbeKey = key;
-      // Drop the previous agent's/path's options immediately; the new probe
-      // starts from a clean loading state.
-      capabilities = null;
-      capabilitiesKey = "";
-      capabilitiesLoading = true;
-      capabilitiesError = null;
-      selectedConfigValues = {};
-    }
+    // Drop the previous agent's/path's options immediately; the new probe
+    // starts from a clean loading state.
+    capabilities = null;
+    capabilitiesKey = "";
+    capabilitiesLoading = true;
+    capabilitiesError = null;
+    selectedConfigValues = {};
     // Apply a cached probe inside `untrack`: the cache-hit path runs
     // synchronously and writes `capabilities` / `selectedConfigValues`. If this
     // effect subscribed to those writes it would re-run, take the same cache hit
@@ -786,23 +771,11 @@
     }
   }
 
-  /** On project change: re-resolve the default node and default path. */
-  function onProjectChange() {
-    nodeTouched = false;
-    useCustomPath = false;
-  }
-
-  /** On node change: re-resolve the default path since paths are per-node. */
-  function onNodeChange() {
-    nodeTouched = true;
-    useCustomPath = false;
-  }
-
-  /** Save the previous launch settings to the local device (scoped to the project). */
+  /** Save the launch settings for this project (best effort, local device only). */
   function persistPrefs() {
     const projectId = selectedProject?.project_id ?? "";
     // Do not remember ephemeral VMs because agent availability differs per node
-    if (projectId === "" || projectId !== prefsProjectId || isProvisionerMode) return;
+    if (projectId === "" || isProvisionerMode) return;
     saveNewSessionPrefs(projectId, {
       agent: effectiveAgent,
       mode: sessionMode,
@@ -831,15 +804,23 @@
   }
 
   function selectProject(projectId: string): void {
-    selectedProjectId = projectId;
-    onProjectChange();
+    chosenProjectId = projectId;
+    // Everything else is project-scoped: re-resolve node, path and memory.
+    chosenNodeId = null;
+    deepLinkNodeActive = false;
+    chosenPath = "";
+    chosenAgentId = "";
+    chosenMode = null;
+    manualAgentChoice = false;
+    useCustomPath = false;
     projectOpen = false;
   }
 
   function selectNode(id: string): void {
     runTarget = "node";
-    nodeId = id;
-    onNodeChange();
+    chosenNodeId = id;
+    chosenPath = "";
+    useCustomPath = false;
     environmentOpen = false;
   }
 
@@ -851,32 +832,36 @@
 
   function selectAgent(id: string): void {
     // Mode IDs are agent-specific: a selection for the previous agent no longer applies.
-    if (id !== agentId) sessionMode = "default";
-    agentId = id;
-    manualAgent = false;
-    agentTouched = true;
+    if (id !== effectiveAgent) chosenMode = "default";
+    chosenAgentId = id;
+    manualAgentChoice = false;
     agentOpen = false;
+    persistPrefs();
   }
 
   function onManualAgentInput(): void {
-    agentTouched = true;
+    manualAgentChoice = true;
     // The ID being typed is a different agent until proven otherwise.
-    sessionMode = "default";
+    chosenMode = "default";
+    persistPrefs();
   }
 
-  function onSessionModeChange(): void {
-    modeTouched = true;
+  /** Switch between the catalog list and the free-form agent ID input. */
+  function toggleManualAgent(): void {
+    manualAgentChoice = !manualAgent;
+    // Start from the agent currently in effect instead of an empty field.
+    if (manualAgentChoice && chosenAgentId === "") chosenAgentId = effectiveAgent;
   }
 
   function selectPath(path: string): void {
-    localPath = path;
+    chosenPath = path;
     useCustomPath = false;
     directoryOpen = false;
   }
 
   function resetPathToDefault(): void {
+    chosenPath = "";
     useCustomPath = false;
-    localPath = pickDefaultCandidate(pathCandidates)?.path ?? "";
   }
 
   function openFolderBrowser(): void {
@@ -1083,7 +1068,7 @@
             {:else if useCustomPath}
               <div class="flex flex-col gap-2 p-2">
                 <Input
-                  bind:value={localPath}
+                  bind:value={chosenPath}
                   placeholder={m.new_session_path_placeholder()}
                   class="h-8 font-mono text-[13px]"
                   autofocus
@@ -1137,7 +1122,10 @@
                 <button
                   type="button"
                   class="text-muted-foreground hover:bg-accent hover:text-accent-foreground rounded-md px-2 py-1.5 text-[11px]"
-                  onclick={() => (useCustomPath = true)}
+                  onclick={() => {
+                    if (chosenPath === "") chosenPath = localPath;
+                    useCustomPath = true;
+                  }}
                 >
                   {m.new_session_enter_path()}
                 </button>
@@ -1351,7 +1339,7 @@
           {#if manualAgent}
             <div class="flex flex-col gap-2 p-2">
               <Input
-                bind:value={agentId}
+                bind:value={chosenAgentId}
                 oninput={onManualAgentInput}
                 placeholder={m.new_session_agent_id_placeholder()}
                 class="h-8 font-mono text-[13px]"
@@ -1403,7 +1391,7 @@
               type="button"
               class="text-muted-foreground hover:bg-accent hover:text-accent-foreground block w-full rounded-md px-2 py-1.5 text-left text-[13px] disabled:pointer-events-none disabled:opacity-50"
               disabled={forkSessionId !== ""}
-              onclick={() => (manualAgent = !manualAgent)}
+              onclick={toggleManualAgent}
             >
               {manualAgent ? m.new_session_choose_from_list() : m.new_session_enter_id()}
             </button>
@@ -1426,8 +1414,8 @@
               allowDefault
               class="shrink-0"
               onchange={(modeId) => {
-                sessionMode = modeId ?? "default";
-                onSessionModeChange();
+                chosenMode = modeId ?? "default";
+                persistPrefs();
               }}
             />
           {/if}
@@ -1594,7 +1582,7 @@
   {nodeId}
   initialPath={localPath}
   onSelect={(path) => {
-    localPath = path;
+    chosenPath = path;
     useCustomPath = true;
   }}
 />

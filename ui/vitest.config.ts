@@ -20,6 +20,8 @@ export default defineConfig({
     alias: {
       // Resolve SvelteKit's `#lib` alias in Vitest as well
       $lib: new URL("./src/lib", import.meta.url).pathname,
+      "$app/state": new URL("./src/test/app-state-stub.ts", import.meta.url).pathname,
+      "$app/navigation": new URL("./src/test/app-navigation-stub.ts", import.meta.url).pathname,
     },
   },
   test: {
