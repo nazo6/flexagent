@@ -32,73 +32,15 @@ function newStore(storage = new MemoryStorage()): {
 }
 
 describe("WorkspaceDockStore", () => {
-  it("opens a tool, activates it and expands the dock", () => {
+  it("opens a fixed tool and expands the dock", () => {
     const { store } = newStore();
     store.setContext(context("s1"));
 
     expect(store.isOpen).toBe(false);
-    store.openTool("changes");
+    store.openTool("files");
 
-    expect(store.tabs).toHaveLength(1);
-    expect(store.activeTool).toBe("changes");
+    expect(store.activeTool).toBe("files");
     expect(store.isOpen).toBe(true);
-  });
-
-  it("does not duplicate a singleton tool", () => {
-    const { store } = newStore();
-    store.setContext(context("s1"));
-
-    store.openTool("terminal");
-    store.openTool("changes");
-    store.openTool("terminal");
-
-    expect(store.tabs).toHaveLength(2);
-    expect(store.activeTool).toBe("terminal");
-  });
-
-  it("keeps tabs when another session in the same workspace opens", () => {
-    const { store } = newStore();
-    store.setContext(context("s1", "/repo"));
-    store.openTool("terminal");
-
-    store.setContext(context("s2", "/repo"));
-
-    expect(store.tabs).toHaveLength(1);
-    expect(store.context?.sessionId).toBe("s2");
-    expect(store.isOpen).toBe(true);
-  });
-
-  it("swaps the tab set when the workspace changes", () => {
-    const { store } = newStore();
-    store.setContext(context("s1", "/repo"));
-    store.openTool("terminal");
-
-    store.setContext(context("s2", "/worktree"));
-    expect(store.tabs).toHaveLength(0);
-    expect(store.isOpen).toBe(false);
-
-    store.setContext(context("s3", "/repo"));
-    expect(store.tabs).toHaveLength(1);
-    expect(store.activeTool).toBe("terminal");
-  });
-
-  it("activates a neighbor after closing the active tab", () => {
-    const { store } = newStore();
-    store.setContext(context("s1"));
-    store.openTool("terminal");
-    store.openTool("changes");
-
-    const changesId = store.activeTabId;
-    expect(changesId).not.toBeNull();
-    store.closeTab(changesId ?? "");
-
-    expect(store.activeTool).toBe("terminal");
-    expect(store.isOpen).toBe(true);
-
-    store.closeTab(store.activeTabId ?? "");
-    expect(store.tabs).toHaveLength(0);
-    expect(store.activeTabId).toBeNull();
-    expect(store.collapsed).toBe(true);
   });
 
   it("toggles the dock when the active tool is selected again", () => {
@@ -108,18 +50,103 @@ describe("WorkspaceDockStore", () => {
 
     store.toggleTool("terminal");
     expect(store.collapsed).toBe(true);
-    expect(store.tabs).toHaveLength(1);
+    expect(store.activeTool).toBe("terminal");
 
     store.toggleTool("terminal");
     expect(store.collapsed).toBe(false);
     expect(store.activeTool).toBe("terminal");
   });
 
-  it("restores tabs, the active tab and the width", () => {
+  it("keeps state when another session in the same workspace opens", () => {
+    const { store } = newStore();
+    store.setContext(context("s1", "/repo"));
+    store.openTool("files");
+    store.openFile("/repo/src/main.ts", "view");
+
+    store.setContext(context("s2", "/repo"));
+
+    expect(store.activeTool).toBe("files");
+    expect(store.files).toHaveLength(1);
+    expect(store.context?.sessionId).toBe("s2");
+  });
+
+  it("swaps the state when the workspace changes", () => {
+    const { store } = newStore();
+    store.setContext(context("s1", "/repo"));
+    store.openTool("terminal");
+
+    store.setContext(context("s2", "/worktree"));
+    expect(store.activeTool).toBeNull();
+    expect(store.isOpen).toBe(false);
+
+    store.setContext(context("s3", "/repo"));
+    expect(store.activeTool).toBe("terminal");
+    expect(store.isOpen).toBe(true);
+  });
+
+  it("opens, focuses and updates file previews inside Files", () => {
+    const { store } = newStore();
+    store.setContext(context("s1"));
+
+    store.openFile("/repo/src/main.ts", "view");
+    expect(store.activeTool).toBe("files");
+    expect(store.activeFile).toBe("/repo/src/main.ts");
+    expect(store.activeFileTab?.mode).toBe("view");
+    expect(store.activeFileTab?.scope).toBe("uncommitted");
+
+    store.openFile("/repo/src/main.ts", "diff", "branch_base");
+    expect(store.files).toHaveLength(1);
+    expect(store.activeFileTab?.mode).toBe("diff");
+    expect(store.activeFileTab?.scope).toBe("branch_base");
+
+    store.openFile("/repo/src/other.ts", "view");
+    expect(store.files).toHaveLength(2);
+    expect(store.activeFile).toBe("/repo/src/other.ts");
+
+    store.activateFile("/repo/src/main.ts");
+    expect(store.activeFile).toBe("/repo/src/main.ts");
+    expect(store.activeFileTab?.mode).toBe("diff");
+
+    store.setFileMode("/repo/src/main.ts", "view");
+    expect(store.activeFileTab?.mode).toBe("view");
+  });
+
+  it("selects a neighbor after closing the active file preview", () => {
+    const { store } = newStore();
+    store.setContext(context("s1"));
+    store.openFile("/repo/a.ts", "view");
+    store.openFile("/repo/b.ts", "view");
+    store.openFile("/repo/c.ts", "view");
+
+    store.activateFile("/repo/b.ts");
+    store.closeFile("/repo/b.ts");
+    expect(store.activeFile).toBe("/repo/c.ts");
+
+    store.closeFile("/repo/a.ts");
+    store.closeFile("/repo/c.ts");
+    expect(store.files).toHaveLength(0);
+    expect(store.activeFile).toBeNull();
+    expect(store.activeTool).toBe("files");
+  });
+
+  it("toggles the Files tree and remembers the choice", () => {
+    const { store } = newStore();
+    store.setContext(context("s1"));
+
+    expect(store.treeVisible).toBe(true);
+    store.setTreeVisible(false);
+    expect(store.treeVisible).toBe(false);
+
+    store.openTool("changes");
+    expect(store.treeVisible).toBe(false);
+  });
+
+  it("restores the active tool, files, tree and width", () => {
     const { store, storage } = newStore();
     store.setContext(context("s1"));
-    store.openTool("terminal");
-    store.openTool("changes");
+    store.openFile("/repo/src/main.ts", "diff", "branch_base");
+    store.openFile("/repo/README.md", "view");
+    store.setTreeVisible(false);
     store.setWidth(60);
     store.commitWidth();
 
@@ -127,27 +154,35 @@ describe("WorkspaceDockStore", () => {
     restored.setContext(context("s2"));
 
     expect(restored.width).toBe(60);
-    expect(restored.tabs.map((tab) => tab.tool)).toEqual(["terminal", "changes"]);
-    expect(restored.activeTool).toBe("changes");
-    expect(restored.isOpen).toBe(true);
+    expect(restored.activeTool).toBe("files");
+    expect(restored.treeVisible).toBe(false);
+    expect(restored.activeFile).toBe("/repo/README.md");
+    expect(restored.files.map((file) => file.path)).toEqual([
+      "/repo/src/main.ts",
+      "/repo/README.md",
+    ]);
+    expect(restored.files[0]?.mode).toBe("diff");
+    expect(restored.files[0]?.scope).toBe("branch_base");
   });
 
-  it("drops unknown and duplicate persisted tabs", () => {
+  it("drops invalid persisted tools and file entries", () => {
     const storage = new MemoryStorage();
     storage.setItem(
       STORAGE_KEY,
       JSON.stringify({
-        version: 1,
+        version: 2,
         width: 42,
         workspaces: {
           [workspaceDockKey("node-1", "/repo")]: {
-            tabs: [
-              { tool: "unknown", resource: null },
-              { tool: "terminal", resource: null },
-              { tool: "terminal", resource: null },
+            activeTool: "file",
+            files: [
+              { path: "", mode: "view", scope: "uncommitted" },
+              { path: "/repo/a.ts", mode: "bogus", scope: "bogus" },
+              { path: "/repo/a.ts", mode: "diff", scope: "branch_base" },
             ],
-            activeIndex: 99,
+            activeFile: "/repo/missing.ts",
             collapsed: false,
+            treeVisible: false,
             updatedAt: 1,
           },
         },
@@ -157,9 +192,14 @@ describe("WorkspaceDockStore", () => {
     const store = new WorkspaceDockStore(storage);
     store.setContext(context("s1"));
 
-    expect(store.tabs.map((tab) => tab.tool)).toEqual(["terminal"]);
-    expect(store.activeTool).toBe("terminal");
-    expect(store.isOpen).toBe(true);
+    expect(store.activeTool).toBeNull();
+    expect(store.isOpen).toBe(false);
+    expect(store.files).toHaveLength(1);
+    expect(store.files[0]?.path).toBe("/repo/a.ts");
+    expect(store.files[0]?.mode).toBe("view");
+    expect(store.files[0]?.scope).toBe("uncommitted");
+    expect(store.activeFile).toBe("/repo/a.ts");
+    expect(store.treeVisible).toBe(false);
   });
 
   it("ignores storage written by an unknown version", () => {
@@ -170,7 +210,8 @@ describe("WorkspaceDockStore", () => {
     store.setContext(context("s1"));
 
     expect(store.width).toBe(42);
-    expect(store.tabs).toHaveLength(0);
+    expect(store.activeTool).toBeNull();
+    expect(store.files).toHaveLength(0);
   });
 
   it("clamps the width", () => {
@@ -197,6 +238,18 @@ describe("WorkspaceDockStore", () => {
     expect(store.workspaces[workspaceDockKey("node-1", "/repo/13")]).toBeDefined();
   });
 
+  it("caps open file previews", () => {
+    const { store } = newStore();
+    store.setContext(context("s1"));
+    for (let index = 0; index < 10; index += 1) {
+      store.openFile(`/repo/src/file-${index}.ts`, "view");
+    }
+
+    expect(store.files.length).toBeLessThanOrEqual(8);
+    expect(store.activeFile).toBe("/repo/src/file-9.ts");
+    expect(store.files.some((file) => file.path === "/repo/src/file-9.ts")).toBe(true);
+  });
+
   it("clears the current workspace when the context is removed", () => {
     const { store } = newStore();
     store.setContext(context("s1"));
@@ -206,82 +259,6 @@ describe("WorkspaceDockStore", () => {
     expect(store.isOpen).toBe(false);
 
     store.setContext(context("s2"));
-    expect(store.tabs).toHaveLength(1);
-  });
-
-  it("opens file tabs once and switches their mode", () => {
-    const { store } = newStore();
-    store.setContext(context("s1"));
-
-    store.openFile("/repo/src/main.ts", "view");
-    expect(store.activeTool).toBe("file");
-    expect(store.activeTab?.resource).toBe("/repo/src/main.ts");
-    expect(store.activeTab?.mode).toBe("view");
-    expect(store.activeTab?.scope).toBe("uncommitted");
-
-    store.openFile("/repo/src/main.ts", "diff", "branch_base");
-    expect(store.tabs).toHaveLength(1);
-    expect(store.activeTab?.mode).toBe("diff");
-    expect(store.activeTab?.scope).toBe("branch_base");
-
-    store.openFile("/repo/src/other.ts", "view");
-    expect(store.tabs).toHaveLength(2);
-    expect(store.activeTab?.resource).toBe("/repo/src/other.ts");
-
-    const first = store.tabs[0];
-    expect(first).toBeDefined();
-    store.setTabMode(first?.id ?? "", "diff");
-    expect(store.tabs[0]?.mode).toBe("diff");
-  });
-
-  it("persists file tabs with their mode", () => {
-    const { store, storage } = newStore();
-    store.setContext(context("s1"));
-    store.openFile("/repo/src/main.ts", "diff", "branch_base");
-
-    const restored = new WorkspaceDockStore(storage);
-    restored.setContext(context("s2"));
-
-    expect(restored.tabs).toHaveLength(1);
-    expect(restored.tabs[0]?.tool).toBe("file");
-    expect(restored.tabs[0]?.resource).toBe("/repo/src/main.ts");
-    expect(restored.tabs[0]?.mode).toBe("diff");
-    expect(restored.tabs[0]?.scope).toBe("branch_base");
-  });
-
-  it("drops file tabs without a resource when restoring", () => {
-    const storage = new MemoryStorage();
-    storage.setItem(
-      STORAGE_KEY,
-      JSON.stringify({
-        version: 1,
-        width: 42,
-        workspaces: {
-          [workspaceDockKey("node-1", "/repo")]: {
-            tabs: [{ tool: "file", resource: null, mode: "view" }],
-            activeIndex: 0,
-            collapsed: false,
-            updatedAt: 1,
-          },
-        },
-      }),
-    );
-
-    const store = new WorkspaceDockStore(storage);
-    store.setContext(context("s1"));
-    expect(store.tabs).toHaveLength(0);
-  });
-
-  it("caps file tabs while keeping singleton tools", () => {
-    const { store } = newStore();
-    store.setContext(context("s1"));
-    store.openTool("terminal");
-    for (let index = 0; index < 10; index += 1) {
-      store.openFile(`/repo/src/file-${index}.ts`, "view");
-    }
-
-    expect(store.tabs.length).toBeLessThanOrEqual(8);
-    expect(store.tabs.some((tab) => tab.tool === "terminal")).toBe(true);
-    expect(store.tabs.some((tab) => tab.resource === "/repo/src/file-9.ts")).toBe(true);
+    expect(store.activeTool).toBe("terminal");
   });
 });

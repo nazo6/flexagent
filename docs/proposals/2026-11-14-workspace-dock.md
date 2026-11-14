@@ -15,13 +15,13 @@
 
 ## 0. 結論
 
-- セッション画面の右ペインを、**workspace スコープのタブ式ツールドック**にする。
+- セッション画面の右ペインを、**workspace スコープのツールドック**にする。
   - **workspace**: `(node_id, canonical local_path)`。ターミナルと同じ同一性。
-  - **レール**: ツールの起動器。パネル選択の状態は持たない。
-  - **タブ**: ツールのインスタンス。同一性は `tool + resource`（`File` はパス、`Changes` / `Terminal` は singleton）。
-- ドックのタブ構成・アクティブタブ・幅・開閉は **workspace ごと**に保持し、セッション切替では閉じない。
+  - **外側のツールは Files / Changes / Terminal の固定**。切替はデスクトップのレールとモバイルのセッションヘッダーのアイコンで行う。
+  - **Files はツリー + プレビュー**。プレビュー内に可変ファイルタブを持ち、中クリックで閉じられる。外側に可変タブは持たない。
+- ドックの状態（アクティブツール、Files のツリー表示、開いているファイル、モード / スコープ、幅、開閉）は **workspace ごと**に保持し、セッション切替では閉じない。
   - 現在の `activePanel = null` リセットを廃止する。
-- ツールは **Files / Changes / File / Terminal**。Files と Changes は `git status` を共有し、変更行から File タブを開く。File タブ内で `Diff | Edit` を切り替える。
+- ツールは **Files / Changes / Terminal**。File プレビューは Files の中にあり、Changes の行やチャットの tool diff から Files のプレビューにファイルを開く。プレビュー内で `View | Diff` を切り替える。
 - ファイルアクセスの境界は **workspace の git toplevel（worktree ならその worktree）配下**。worktree / メイン repo / 別 worktree をまたがない。
 - Phase 1 のファイル API は **ローカル接続のみ**。ハブ経由での読み書きは設定で解禁するまで無効にする。
 - 段階は Phase 0（UI 基盤）→ Phase 1（閲覧と連携）→ Phase 2（編集）→ Phase 3（更新検知・追加ツール）。
@@ -44,58 +44,54 @@
 - **session**: workspace の来歴。ドックに現在の `session_id` を渡すだけで、ドックの寿命を決めない。
 - **access root**: ノードがリクエストごとに解決する、workspace root の実パス。パス検証は常にこの配下で行う。
 
-### 2.2 タブモデル
+### 2.2 ツールモデル
 
-- タブは **ツール種別** と **リソース** の組で識別する。
-  - `Changes`: singleton（workspace に 1 つ）。
-  - `Terminal`: singleton（workspace に 1 つ）。
-  - `Files`: singleton のエクスプローラ。ファイルを開く操作だけを行う。
-  - `File`: リソースはパス。同じパスのタブは再利用する。
+- **外側のツール** は 3 つの固定 singleton。
+  - `Files`: ツリー + ファイルプレビュー。
+  - `Changes`: セッション / worktree / branch の変更一覧。
+  - `Terminal`: workspace の PTY。
+- **Files 内のファイルタブ** はリソース（絶対パス）ごとに 1 つ。同一パスのタブは再利用し、`mode`（`view` / `diff`）と `scope`（`uncommitted` / `branch_base`）を持つ。
+- 外側のツール切替はレール / モバイルヘッダーのアイコンで行う。ドックのヘッダーはアクティブツール名と閉じるボタンだけを持ち、外側の可変タブは持たない。
 - ツールはレジストリに定義する。追加はレジストリと描画分岐で完結させ、`SessionPanelId` のような排他的な union を UI 全体に配らない。
-- ツールの定義は次を持つ（型の正は実装）。
-  - `id` / `label` / `icon`
-  - レールに出すか（`Files` / `Changes` / `Terminal` を出し、`File` は出さない）
-  - singleton か、リソース必須か
-  - 非アクティブでもマウントを維持するか（ターミナル用）
-- タブは開いた順に並べる。ピン留めや並べ替えは Phase 3 以降。
-- 上限は 8。超えたら最も古い非アクティブタブを閉じる。singleton は常に残す。
+- ファイルタブは開いた順に並べる。上限は 8。超えたら最も古いタブを閉じる。並べ替え / ピン留めは Phase 3 以降。
 
 ### 2.3 状態と永続化
 
 - ドックの状態はアプリレベルの store に置く。
-  - workspace キーごとの `tabs`（tool / resource / mode）、`activeTabId`、`collapsed`。
+  - workspace キーごとの `activeTool`、`treeVisible`、`files`（path / mode / scope）、`activeFile`、`collapsed`。
   - ユーザー共通の `width`（既存の割合ベースを `clamp(22rem, N%, 75%)` で使う）。
-- `localStorage` に保存するのはタブのメタデータと幅だけ。ファイル内容・未保存バッファ・スクロール位置は保存しない。
-  - リロード後、File タブは再読込し、Terminal タブは attach + replay で復元する。
+- `localStorage` に保存するのはツール / ファイルのメタデータと幅だけ。ファイル内容・未保存バッファ・スクロール位置は保存しない。
+  - リロード後、File プレビューは再読込し、Terminal は attach + replay で復元する。
 - 保存対象は直近の workspace 数件に制限し、削除済みワークスペースのエントリは読み込み時に捨てる。
 - workspace が変わったときだけ、保存 → 対象 workspace の状態を読み込む。同じ workspace のセッション移動では何もしない。
-- Changes の選択ファイルやフィルタはセッション画面の store に持たせ、タブ切替で失わない。workspace をまたぐとリセットする。
+- Changes のスコープや Files のツリー表示は workspace ごとに保持し、外側ツールを切り替えても失わない。
 - 初回の workspace は畳んだ状態から始める。右ペインを勝手に開かない。
 
 ### 2.4 ライフサイクル
 
-- **ドックを開く**: レールのアイコンでツールを開く、または既存タブをアクティブにする。
-- **タブを閉じる**: 最後のタブを閉じたらドックを畳む。ターミナルのタブを閉じた場合は unmount して detach する（PTY は残る）。
-- **セッション切替**: 同じ workspace ならタブと PTY を維持する。別 workspace なら旧ドックを unmount（ターミナルは detach）し、新 workspace の状態を読み込む。
+- **ドックを開く**: レール / モバイルヘッダーのアイコンでアクティブツールを切り替える。同じツールの再選択はドックを畳む。
+- **ドックを閉じる**: ヘッダー / オーバーレイの閉じるボタンで畳む。アクティブツールとファイルタブは保持し、次回は同じ状態で開く。外側ツールを「閉じる」概念はない。
+- **ファイルタブを閉じる**: Files 内のタブだけが閉じる。最後のファイルタブを閉じてもドックは畳まず、ツリーと空のプレビューを残す。ターミナルは外側ツールを切り替えても unmount しない。
+- **セッション切替**: 同じ workspace ならアクティブツール・ファイルタブ・PTY を維持する。別 workspace なら旧状態を保存し、新 workspace の状態を読み込む。
 - **ドックを畳む**: ターミナルは unmount → detach。再度開くと `open` が冪等に attach + replay する。
-- **ターミナルのタブ切替**: ドックが開いている間はターミナルを hidden でマウントしたままにし、WS を維持する。再アクティブ時に `fit()` と resize を送る。
+- **外側ツールの切替**: ドックが開いている間、ターミナルは hidden でマウントしたままにし、WS を維持する。再アクティブ時に `fit()` と resize を送る。
   - 非表示中に 0 サイズで fit しない。active 復帰時に再 fit する。
-  - 他のツールは active なタブだけをマウントする。File の未保存バッファは store に持たせる。
-- **worktree 削除**: 該当 workspace のタブを閉じる。PTY の kill はターミナル側の worktree 連動に従う。
-- **ノード切断**: タブは残し、内容を読み取り専用にする。保存は失敗させ、復帰後に再試行させる。
+  - Files / Changes も hidden でマウントを維持し、ツリー・スコープ・選択ファイルを保つ。File プレビューは active なときだけマウントし、store の mode / scope から再読込する。
+- **worktree 削除**: 該当 workspace の状態を破棄する。PTY の kill はターミナル側の worktree 連動に従う。
+- **ノード切断**: ツールとファイルタブは残し、内容を読み取り専用にする。保存は失敗させ、復帰後に再試行させる。
 
 ### 2.5 UI 構成
 
-- **レール（右端）**: ツールのアイコン。バッジ（Changes の件数、Terminal の実行中など）を出す。最下部にレール自体を隠すボタン。ドックの開閉はタブバー右端のボタンで行う。
-- **タブバー**: アイコン + 短いラベル + 未保存ドット + 閉じる。File タブは basename を表示し、tooltip にフルパス。オーバーフローは横スクロール。
-- **ツールバー**: タブの下にツール固有の操作を置く。
-  - Files: パンくず、更新、隠しファイル / 変更のみの切替。
-  - Changes: スコープ（Session / Worktree / Branch）、更新、フィルタ。
-  - File: パンくず、`Diff | Edit`、保存、競合表示。
-  - Terminal: 接続状態、再接続、新しいシェル。
+- **レール（右端）**: Files / Changes / Terminal のアイコン。バッジ（Changes の件数、Terminal の実行中など）を出す。最下部にレール自体を隠すボタン。
+- **ドックヘッダー**: アクティブツールのアイコン + 名前 + 閉じるボタン。外側のタブバーは持たない。
+- **Files**: 上部ツールバー（更新、隠しファイル / 重いディレクトリ / 変更のみ / ツリー表示の切替、root パス）と、ツリー + プレビューの 2 ペイン。
+  - デスクトップはツリーを隠してプレビューを全幅にできる。モバイルはツリー ↔ プレビューを戻るボタンで切り替える。
+  - プレビュー上部にファイルタブ（basename、閉じる、中クリック）。その下に `View | Diff`、スコープ、Markdown Preview / Source、更新、Git status を置く。
+- **Changes**: スコープ（Session / Worktree / Branch）、更新。行クリックで Files のプレビューにファイルを開く。
+- **Terminal**: 接続状態、再接続、新しいシェル。
 - **デスクトップ**: チャットとドックの分割。既存のリサイズハンドルを維持する。ドックは `hidden lg:flex`。
-- **モバイル**: セッションヘッダーの Changes / Terminal アイコンから**1 タップ**で開く。会話の上に**背景を暗くしたオーバーレイ**としてタブバー付きのドックを出し、オーバーレイの外側（背景）のタップ、または右上の閉じるボタンで畳む。会話は背後に残すが、`inert` にして操作・フォーカスの対象から外す。ツールが増えた場合は、ドック内の `+` からツールシートを開く。デスクトップとモバイルのスロットはビューポートで切り替え、片方だけをマウントする。
-- **タブのアクセシビリティ**: `role="tablist"` / `role="tab"` / `aria-selected` とし、左右キーで移動できるようにする。
+- **モバイル**: セッションヘッダーの Files / Changes / Terminal アイコンから**1 タップ**で開く。会話の上に**背景を暗くしたオーバーレイ**としてドックを出し、オーバーレイの外側（背景）のタップ、または右上の閉じるボタンで畳む。会話は背後に残すが、`inert` にして操作・フォーカスの対象から外す。デスクトップとモバイルのスロットはビューポートで切り替え、片方だけをマウントする。
+- **ファイルタブのアクセシビリティ**: `role="tablist"` / `role="tab"` / `aria-selected` とし、左右キーで移動できるようにする。
 - チャットが主、ドックが従。エージェントの作業中にタブを勝手に切り替えない。更新はバッジと未読ドットで知らせる。
 
 ## 3. ツール
@@ -119,19 +115,19 @@
   - **Session**: 現在のセッションが編集したファイル。
   - **Worktree: vs HEAD**: 未コミットの変更。
   - **Worktree: vs Base**: base branch との累積差分。
-- 一覧の +/- は `git diff --numstat` から取る。worktree 全体の unified diff は一覧のためには取得しない。
+- Session / Branch の +/- は diff の `FileDiff` から、Worktree は `git status` のバッジを表示する。worktree 全体の unified diff は一覧のためには取得しない（numstat は Phase 3）。
 - ファイルを選択したときに初めて単一ファイルの diff を取得する。大きなリポジトリでも一覧が軽い。
-- 行をクリックすると File タブを Diff モードで開く。Diff は File タブのツールバーで切り替えられる。
-- ファイルがディスク上に存在しない（削除済み）場合は、diff のみの読み取り専用タブとして開く。
+- 行をクリックすると Files ツールのプレビューを Diff モードで開く。Diff はプレビューのツールバーで切り替えられる。
+- ファイルがディスク上に存在しない（削除済み）場合は、diff のみの読み取り専用プレビューとして開く。
 
-### 3.3 File
+### 3.3 File preview（Files 内）
 
-- 1 タブ = 1 パス。タブ内で `Diff | Edit` を切り替える。
-- **View**: デスクトップは Monaco の読み取り専用、モバイルは Shiki。大きすぎるファイル・バイナリは案内表示。
+- 1 ファイルタブ = 1 パス。プレビュー内で `Diff | Edit` を切り替える。
+- **View**: Shiki の読み取り専用表示。Markdown は Preview / Source を切り替える。大きすぎるファイル・バイナリは案内表示。
 - **Diff**: 単一ファイルの unified diff。既存の `DiffViewer` の表示規則を踏襲する。
 - **Edit**（Phase 2）:
   - Monaco の通常エディタ。言語は拡張子から解決する（既存の `MonacoDiff` と同じ対応表を使う）。
-  - 未保存はタブにドットを出す。`Cmd/Ctrl+S` で保存。
+  - 未保存はファイルタブにドットを出す。`Cmd/Ctrl+S` で保存。
   - 保存は楽観ロック。読み込み時のハッシュが変わっていたら `CONFLICT` とし、上書き・再読込を選ばせる。
   - 外部変更を検知したらバナーで知らせ、保存時に必ず確認する。
   - モバイルの編集は Phase 2 では無効（閲覧のみ）とし、必要になったら対応する。
@@ -141,12 +137,12 @@
 
 - workspace に 1 つ。既存の `TerminalView` をツールとして包む。
 - ツールバーに接続状態・再接続・新しいシェルを置く。既存のステータスバッジと仮想キーバーは維持する。
-- ドックが開いている間は hidden でもソケットを維持し、タブ切替で PTY を detach しない。ドックを閉じたときだけ detach する。
+- ドックが開いている間は hidden でもソケットを維持し、外側ツールの切替で PTY を detach しない。ドックを閉じたときだけ detach する。
 - 再接続は既存の `open`（冪等）と replay を使う。新しいシェルは明示操作のときだけ。
 
 ### 3.5 将来のツール
 
-レジストリに追加するだけで、レール・モバイルシート・タブバーに現れる形にする。
+レジストリに追加するだけで、レール / モバイルヘッダーに現れる形にする。
 
 - Workspace search（grep）
 - Tests / tasks（プロジェクトのタスクランナー）
@@ -229,21 +225,21 @@ Phase 1 では **ローカル接続（ループバック）からのみ** ファ
 
 - `ui/src/lib/dock/` にツールレジストリを追加する。
 - `ui/src/lib/stores/dock.svelte.ts` に workspace キーの状態と永続化を実装する。
-- `DockHost` / `DockTabBar` / `DockRail` / `DockToolsSheet` を追加する。
+- 固定ツールの `DockHost` / `DockRail` を追加する。Files 内のファイルタブは Phase 1 で追加する。
 - `session-panels.ts` / `SessionPanelHost.svelte` / `SessionToolRail.svelte` / `SessionToolsSheet.svelte` を削除し、ドックへ一本化する（ラッパーを残さない）。
 - セッション画面の `activePanel` と幅のローカル state を削除し、ドック store に移す。
 - 既存の Changes / Terminal をツールとして移植する。
 - Terminal に active 制御を追加し、非表示中の fit を避ける。ドックを閉じたときだけ detach する。
-- モバイルのツールシートと全画面ドックを維持する。片肺マウントの不変条件を守る。
-- Vitest で store を検証する（workspace 切替、singleton の重複、永続化、タブ上限、復元時の不正エントリ）。
-- 受け入れ: 同じ workspace のセッション移動で Terminal が閉じない / リロードでタブが戻る / 別 workspace でタブセットが切り替わる / 最後のタブでドックが畳まれる。
+- モバイルのヘッダーランチャーとオーバーレイを維持する。片肺マウントの不変条件を守る。
+- Vitest で store を検証する（workspace 切替、永続化、ファイルタブ上限、復元時の不正エントリ）。
+- 受け入れ: 同じ workspace のセッション移動で Terminal が閉じない / リロードでツール状態が戻る / 別 workspace で状態が切り替わる / ドックを閉じてもツール状態が残る。
 
 ### Phase 1: 閲覧と連携
 
 - ノード / ハブに workspace fs / git status / 単一ファイル diff API を追加する（ローカル接続のみ）。
 - Files ツリーと git status の装飾、変更のみフィルタを実装する。
 - Changes を git status + セッション diff の統合一覧にし、単一ファイル diff を遅延取得する。
-- File タブ（View / Diff）と、Changes / Files / チャットからの導線を実装する。
+- Files 内のファイルプレビュー（View / Diff）と、Changes / Files / チャットからの導線を実装する。
 - 削除済みファイル・バイナリ・大きすぎるファイル・ノードオフラインの表示を整える。
 - 受け入れ: Files から開いたファイルが Changes と同じ変更状態を示す / worktree の外に出られない / ハブ経由では明示的に無効。
 
@@ -258,42 +254,42 @@ Phase 1 では **ローカル接続（ループバック）からのみ** ファ
 
 - ノードのファイル監視と WS 通知（debounce）を追加する。
 - チャットの差分から File タブの該当行へジャンプする。
-- 画像ファイルのプレビュー、タブの並べ替え・ピン留め、workspace search などの追加ツール。
+- 画像ファイルのプレビュー、ファイルタブの並べ替え・ピン留め、workspace search などの追加ツール。
 - プロジェクト画面から worktree ごとのドックを開く導線。
 - ターミナルのシェル統合（cwd 追跡）と「ここでターミナルを開く」。
 
 ## 7. 不変条件
 
 1. ドックの状態キーは `(node_id, canonical local_path)`。プロジェクトやセッションをキーにしない。
-2. セッション切替はドックの寿命を決めない。workspace が変わったときだけタブセットを入れ替える。
+2. セッション切替はドックの寿命を決めない。workspace が変わったときだけツール状態を入れ替える。
 3. 同じ workspace のターミナルは 1 本。既存の workspace スコープと参照カウント / TTL をそのまま使う。
 4. ターミナルはドックが開いている間だけ hidden 保持し、ドックを閉じたら detach する。ソケット切断では kill しない。
 5. デスクトップとモバイルのスロットは片方だけをマウントする。1 つの `TerminalView` は最大 1 つの PTY に接続する。
 6. ファイル API は登録済み workspace の access root 配下だけを扱う。worktree / メイン repo / 別 worktree をまたがない。
 7. Phase 1 のファイル API はローカル接続のみ。ハブ経由は明示的に拒否する。
 8. 書き込みは既存ファイルに限定し、期待ハッシュが一致したときだけ成功する。作成・削除・リネームは今回の範囲外。
-9. タブのメタデータだけを localStorage に保存する。内容・未保存バッファは保存しない。
+9. ツール / ファイルのメタデータだけを localStorage に保存する。内容・未保存バッファは保存しない。
 10. ツールの追加はレジストリと描画分岐で行い、排他的な `SessionPanelId` を復活させない。
 
 ## 8. 受け入れ条件（全体）
 
-- 同じ workspace の別セッションへ移動しても、開いていたタブとターミナルのシェルが残る。
-- 別 workspace へ移動すると、その workspace のタブセットに切り替わる。ターミナルもその worktree の PTY になる。
-- リロード後、タブ構成が復元され、Terminal は attach + replay で scrollback が戻る。
+- 同じ workspace の別セッションへ移動しても、アクティブツール・開いていたファイルタブ・ターミナルのシェルが残る。
+- 別 workspace へ移動すると、その workspace のツール状態に切り替わる。ターミナルもその worktree の PTY になる。
+- リロード後、アクティブツールとファイルタブが復元され、Terminal は attach + replay で scrollback が戻る。
 - Files の変更バッジと Changes の一覧が同じ `git status` を示す。
-- Changes の行から File タブを開き、Diff と Edit を切り替えられる。
+- Changes の行から Files のプレビューにファイルを開き、View と Diff を切り替えられる（Edit は Phase 2）。
 - worktree A のセッションからメイン repo / worktree B のファイルを開こうとすると拒否される。
 - ハブ経由では Files が無効になり、理由とローカル接続の案内が出る。
-- ノードがオフラインでも、既に開いているタブの内容は読み取り専用で保持される。保存は失敗し、復帰後に再試行できる。
+- ノードがオフラインでも、既に開いているプレビューの内容は読み取り専用で保持される。保存は失敗し、復帰後に再試行できる。
 - ファイル保存後、Changes の件数とバッジが更新される。
 - デスクトップ / モバイルをまたいでも PTY が二重に起動しない。
 
 ## 9. リスクと代替
 
-- **タブの複雑さ**: 状態が増える。Phase 0 で store とテストを先に固め、ツールは 2 つから始める。代替として単一パネル + クイック切替があるが、ファイルと Changes を行き来する主要動線で現在位置を失う。
+- **ファイルタブの複雑さ**: 外側ツールは固定にし、可変タブは Files 内に限定した。ツリーとプレビューの状態が増えるため、store のテストで永続化・上限・不正エントリを固める。
 - **workspace ごとの状態増加**: localStorage のサイズと古いエントリ。直近数件に制限し、読み込み時に不正・削除済みを捨てる。
-- **非表示ターミナルのリソース**: ドックを開いている間は WS を維持する。ドックを閉じたら detach して TTL に戻す。タブ切替のたびに再接続する代替は、replay のちらつきと入力遅延が出る。
-- **Monaco のメモリ**: File タブごとにモデルを持つ。閉じたら dispose し、タブ上限を守る。モバイルは Shiki で回避する。
+- **非表示ターミナルのリソース**: ドックを開いている間は WS を維持する。ドックを閉じたら detach して TTL に戻す。外側ツール切替のたびに再接続する代替は、replay のちらつきと入力遅延が出る。
+- **Monaco のメモリ**: File プレビューごとにモデルを持つ。閉じたら dispose し、ファイルタブ上限を守る。モバイルは Shiki で回避する。
 - **パス検証の穴**: Git toplevel を境界にすると、サブディレクトリセッションが repo 全体に触れる。登録済み workspace から解決した root だけを許可し、worktree / メイン repo の分離をテストする。
 - **シンボリックリンク**: 外へ出るリンクを拒否すると、モノレポの一部が開けないことがある。セキュリティを優先し、必要ならリンク先が root 内のものだけ許可する。
 - **大きなディレクトリ**: `node_modules` などの一覧で UI が固まる。ignore と件数上限で防ぐ。必要なら `ignore` クレートを追加する。
@@ -304,30 +300,34 @@ Phase 1 では **ローカル接続（ループバック）からのみ** ファ
 
 ## 10. 未決事項
 
-- Git toplevel をファイル境界にする際、workspace の登録判定を `session.local_path` まで含めるか、binding のみにするか（実装時に既存の登録経路を確認する）。
 - `ignore` クレートを追加するか、`git check-ignore` をディレクトリ単位で呼ぶか。
-- File タブの言語解決を MonacoDiff の対応表と共有するか、別モジュールに切り出すか。
+- ツリーとプレビューの分割比をドラッグで変更できるようにするか。
 - モバイルでの編集を将来的に許可するか。
 - ハブ経由の読み取りを解禁する際の設定名と既定値（`allow_remote_fs` / read-only / read-write）。
-- タブの並べ替え・ピン留めを Phase 3 に入れるか。
+- ファイルタブの並べ替え・ピン留めを Phase 3 に入れるか。
 
 ## 11. 実装状況
 
 ### Phase 0 (2026-11-14 実装済み)
 
-- `ui/src/lib/stores/dock.svelte.ts`: workspace キーのタブ状態、永続化、タブ上限、
-  workspace 上限、壊れたエントリの破棄。
-- `ui/src/lib/dock/registry.ts`: Changes / Terminal のツール定義。
-- `ui/src/lib/components/dock/`: `DockHost` / `DockTabBar` / `DockRail` /
-  `DockToolsSheet` / `ChangesTool` / `TerminalTool`。
-- モバイルは `SessionHeader` に Changes / Terminal のランチャーアイコンを置き、
-  1 タップで開けるようにした。ツールシートはドック内の `+` から開く。
+- `ui/src/lib/stores/dock.svelte.ts`: workspace キーのアクティブツール / Files 状態、
+  永続化、ファイルタブ上限、workspace 上限、壊れたエントリの破棄。
+- `ui/src/lib/dock/registry.ts`: Files / Changes / Terminal の固定ツール定義。
+- `ui/src/lib/components/dock/`: `DockHost`（固定ツールのヘッダー + 本体）/
+  `DockRail` / `ChangesTool` / `TerminalTool`。外側の可変タブバーとツールシートは
+  持たない。
+- モバイルは `SessionHeader` に Files / Changes / Terminal のランチャーアイコンを
+  置き、1 タップで開けるようにした。
 - セッション画面から `activePanel` と幅のローカル state を削除し、旧
   `SessionPanelHost` / `SessionToolRail` / `SessionToolsSheet` / `session-panels.ts`
   を削除した。
 - `TerminalView` に `active` を追加し、非アクティブ時は hidden でマウントを維持、
   再アクティブ時に fit / resize、ドックを閉じたときだけ detach する。
 - `docs/07` §3.2 / §4 と changelog に Phase 0 の確定仕様を反映した。
+
+> 当初は外側も可変タブ（Files / Changes / Terminal / File）にしていたが、
+> ファイルが増えるとツール切替が埋もれるため、外側を固定し、可変ファイルタブを
+> Files の中へ移すハイブリッドに変更した（2026-11-14）。
 
 ### Phase 1 (2026-11-14 実装済み)
 
@@ -339,10 +339,11 @@ Phase 1 では **ローカル接続（ループバック）からのみ** ファ
   ディレクトリ一覧、UTF-8 テキスト（2 MiB 上限）、バイナリ / 超過の列挙、
   `git status --porcelain=v2 -z`、単一ファイル diff、未追跡ファイルの
   合成 diff を実装した。ハブ経由の workspace RPC は `FORBIDDEN` にする。
-- `ui`: Files ツリー、git status バッジ、変更のみ一覧、File タブ
-  （Shiki の View / 単一ファイル Diff）、Changes の Session / Worktree / Branch
-  一覧を追加した。ハブ接続時は Files を無効化し、Changes は従来のインライン
-  Diff にフォールバックする。
+- `ui`: Files ツリー + プレビュー、git status バッジ、変更のみ一覧、ファイルタブ
+  （Shiki の View / 単一ファイル Diff / Markdown Preview / Source）、Changes の
+  Session / Worktree / Branch 一覧を追加した。Changes / チャットからは Files の
+  プレビューにファイルを開く。ハブ接続時は Files を無効化し、Changes は従来の
+  インライン Diff にフォールバックする。
 - テスト: status パーサー、`.git` 拒否、ディレクトリ一覧、未追跡 diff、
   workspace 境界（登録外パス / サブディレクトリ / シンボリックリンク脱出）を
   Rust で検証した。

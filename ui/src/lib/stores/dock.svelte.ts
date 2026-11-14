@@ -1,39 +1,34 @@
-import {
-  DOCK_TOOLS,
-  dockTool,
-  isDockToolId,
-  type DockLauncherId,
-  type DockToolId,
-} from "#lib/dock/registry.ts";
+import { isDockToolId, type DockLauncherId, type DockToolId } from "#lib/dock/registry.ts";
 
-/** Session context handed to the dock. The workspace, not the session, owns the tabs. */
+/** Session context handed to the dock. The workspace, not the session, owns the tools. */
 export interface DockContext {
   sessionId: string;
   nodeId: string;
   localPath: string;
 }
 
-/** How a file tab is displayed. */
+/** How a file preview is displayed. */
 export type DockFileMode = "view" | "diff";
 
-/** Diff scope remembered by a file tab. */
+/** Diff scope remembered by a file preview. */
 export type DockDiffScope = "uncommitted" | "branch_base";
 
-/** One open tool instance. `resource` is an absolute file path for file tabs. */
-export interface DockTab {
-  id: string;
-  tool: DockToolId;
-  resource: string | null;
-  /** File tabs only. */
-  mode: DockFileMode | null;
-  /** File tabs only: scope used when showing the diff. */
-  scope: DockDiffScope | null;
+/** One open file preview inside the Files tool. */
+export interface DockFileTab {
+  path: string;
+  mode: DockFileMode;
+  scope: DockDiffScope;
 }
 
 export interface DockWorkspace {
-  tabs: DockTab[];
-  activeTabId: string | null;
+  /** Fixed outer tool currently shown (`null` = the dock is closed). */
+  activeTool: DockToolId | null;
   collapsed: boolean;
+  /** Whether the Files tree is visible next to the preview. */
+  treeVisible: boolean;
+  /** Open file previews inside Files. */
+  files: DockFileTab[];
+  activeFile: string | null;
   updatedAt: number;
 }
 
@@ -44,25 +39,26 @@ export interface DockStorage {
 }
 
 const STORAGE_KEY = "fxg:workspace_dock";
-const STORAGE_VERSION = 1;
-/** Keep the most recently used workspaces; each one carries a few tabs. */
+const STORAGE_VERSION = 2;
+/** Keep the most recently used workspaces; each one carries a few file previews. */
 const MAX_WORKSPACES = 12;
-const MAX_TABS = 8;
+const MAX_FILES = 8;
 export const MIN_DOCK_WIDTH = 20;
 export const MAX_DOCK_WIDTH = 75;
 const DEFAULT_WIDTH = 42;
 
-interface PersistedTab {
-  tool: DockToolId;
-  resource: string | null;
-  mode: DockFileMode | null;
-  scope: DockDiffScope | null;
+interface PersistedFile {
+  path: string;
+  mode: DockFileMode;
+  scope: DockDiffScope;
 }
 
 interface PersistedWorkspace {
-  tabs: PersistedTab[];
-  activeIndex: number;
+  activeTool: DockToolId | null;
   collapsed: boolean;
+  treeVisible: boolean;
+  files: PersistedFile[];
+  activeFile: string | null;
   updatedAt: number;
 }
 
@@ -85,21 +81,20 @@ export function workspaceDockKey(nodeId: string, localPath: string): string {
   return `${nodeId}\u0000${localPath}`;
 }
 
-function tabKey(tool: DockToolId, resource: string | null): string {
-  return `${tool}\u0000${resource ?? ""}`;
-}
-
-function isSingleton(tool: DockToolId): boolean {
-  return DOCK_TOOLS.find((candidate) => candidate.id === tool)?.singleton ?? true;
-}
-
 function clampWidth(value: number): number {
   if (!Number.isFinite(value)) return DEFAULT_WIDTH;
   return Math.max(MIN_DOCK_WIDTH, Math.min(MAX_DOCK_WIDTH, value));
 }
 
 function emptyWorkspace(): DockWorkspace {
-  return { tabs: [], activeTabId: null, collapsed: true, updatedAt: Date.now() };
+  return {
+    activeTool: null,
+    collapsed: true,
+    treeVisible: true,
+    files: [],
+    activeFile: null,
+    updatedAt: Date.now(),
+  };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -108,46 +103,36 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 /** Restores and validates one persisted workspace; unknown tools are dropped. */
 function restoreWorkspace(value: unknown): DockWorkspace | null {
-  if (!isRecord(value) || !Array.isArray(value.tabs)) return null;
+  if (!isRecord(value)) return null;
 
-  const tabs: DockTab[] = [];
-  for (const raw of value.tabs) {
-    if (!isRecord(raw)) continue;
-    const tool = raw.tool;
-    if (!isDockToolId(tool)) continue;
-    const resource =
-      tool === "file" && typeof raw.resource === "string" && raw.resource.length > 0
-        ? raw.resource
-        : null;
-    if (tool === "file" && resource === null) continue;
-    const mode: DockFileMode | null =
-      tool === "file" ? (raw.mode === "diff" ? "diff" : "view") : null;
-    const scope: DockDiffScope | null =
-      tool === "file" ? (raw.scope === "branch_base" ? "branch_base" : "uncommitted") : null;
-    const id = tabKey(tool, resource);
-    if (tabs.some((tab) => tab.id === id)) continue;
-    if (isSingleton(tool) && tabs.some((tab) => tab.tool === tool)) continue;
-    tabs.push({ id, tool, resource, mode, scope });
-    if (tabs.length >= MAX_TABS) break;
+  const activeTool = isDockToolId(value.activeTool) ? value.activeTool : null;
+  const files: DockFileTab[] = [];
+  if (Array.isArray(value.files)) {
+    for (const raw of value.files) {
+      if (!isRecord(raw) || typeof raw.path !== "string" || raw.path.length === 0) continue;
+      if (files.some((file) => file.path === raw.path)) continue;
+      const mode: DockFileMode = raw.mode === "diff" ? "diff" : "view";
+      const scope: DockDiffScope = raw.scope === "branch_base" ? "branch_base" : "uncommitted";
+      files.push({ path: raw.path, mode, scope });
+      if (files.length >= MAX_FILES) break;
+    }
   }
+  const activeFile =
+    typeof value.activeFile === "string" && files.some((file) => file.path === value.activeFile)
+      ? value.activeFile
+      : (files[0]?.path ?? null);
 
   const updatedAt =
     typeof value.updatedAt === "number" && Number.isFinite(value.updatedAt)
       ? value.updatedAt
       : Date.now();
-  if (tabs.length === 0) {
-    return { ...emptyWorkspace(), updatedAt };
-  }
 
-  const activeIndex =
-    typeof value.activeIndex === "number" && Number.isInteger(value.activeIndex)
-      ? value.activeIndex
-      : 0;
-  const activeTab = tabs[Math.max(0, Math.min(activeIndex, tabs.length - 1))] ?? tabs[0];
   return {
-    tabs,
-    activeTabId: activeTab?.id ?? null,
-    collapsed: value.collapsed !== false,
+    activeTool,
+    collapsed: activeTool === null ? true : value.collapsed !== false,
+    treeVisible: value.treeVisible !== false,
+    files,
+    activeFile,
     updatedAt,
   };
 }
@@ -211,17 +196,15 @@ function serialize(workspaces: Record<string, DockWorkspace>, width: number): st
       entries.map(([key, workspace]) => [
         key,
         {
-          tabs: workspace.tabs.map((tab) => ({
-            tool: tab.tool,
-            resource: tab.resource,
-            mode: tab.mode,
-            scope: tab.scope,
+          activeTool: workspace.activeTool,
+          collapsed: workspace.collapsed || workspace.activeTool === null,
+          treeVisible: workspace.treeVisible,
+          files: workspace.files.map((file) => ({
+            path: file.path,
+            mode: file.mode,
+            scope: file.scope,
           })),
-          activeIndex: Math.max(
-            0,
-            workspace.tabs.findIndex((tab) => tab.id === workspace.activeTabId),
-          ),
-          collapsed: workspace.collapsed || workspace.tabs.length === 0,
+          activeFile: workspace.activeFile,
           updatedAt: workspace.updatedAt,
         } satisfies PersistedWorkspace,
       ]),
@@ -231,17 +214,20 @@ function serialize(workspaces: Record<string, DockWorkspace>, width: number): st
 }
 
 /**
- * Workspace-scoped tab state for the session side pane.
+ * Workspace-scoped state for the session side pane.
  *
- * The workspace (`node_id` + canonical local path) owns the tabs; a session is
- * only the context passed to the active tools. Switching sessions inside one
- * workspace therefore keeps the terminal and any open tool alive.
+ * Outer tools (Files / Changes / Terminal) are fixed. Files owns a tree and a
+ * preview, with variable file tabs inside the preview. A session is only the
+ * context passed to the active tools; switching sessions inside one workspace
+ * keeps the terminal and the Files state alive.
  */
 export class WorkspaceDockStore {
   width = $state(DEFAULT_WIDTH);
   workspaces = $state<Record<string, DockWorkspace>>({});
   currentKey = $state<string | null>(null);
   context = $state<DockContext | null>(null);
+  /** Increments on every openFile (used by mobile to reveal the preview). */
+  fileOpenVersion = $state(0);
 
   private storage: DockStorage | null;
 
@@ -256,22 +242,8 @@ export class WorkspaceDockStore {
     return this.currentKey === null ? null : (this.workspaces[this.currentKey] ?? null);
   }
 
-  get tabs(): DockTab[] {
-    return this.workspace?.tabs ?? [];
-  }
-
-  get activeTabId(): string | null {
-    return this.workspace?.activeTabId ?? null;
-  }
-
-  get activeTab(): DockTab | null {
-    const workspace = this.workspace;
-    if (workspace === null) return null;
-    return workspace.tabs.find((tab) => tab.id === workspace.activeTabId) ?? null;
-  }
-
   get activeTool(): DockToolId | null {
-    return this.activeTab?.tool ?? null;
+    return this.workspace?.activeTool ?? null;
   }
 
   get collapsed(): boolean {
@@ -280,10 +252,28 @@ export class WorkspaceDockStore {
 
   get isOpen(): boolean {
     const workspace = this.workspace;
-    return workspace !== null && !workspace.collapsed && workspace.tabs.length > 0;
+    return workspace !== null && !workspace.collapsed && workspace.activeTool !== null;
   }
 
-  /** Points the dock at a session. Only a workspace change swaps the tab set. */
+  get treeVisible(): boolean {
+    return this.workspace?.treeVisible ?? true;
+  }
+
+  get files(): DockFileTab[] {
+    return this.workspace?.files ?? [];
+  }
+
+  get activeFile(): string | null {
+    return this.workspace?.activeFile ?? null;
+  }
+
+  get activeFileTab(): DockFileTab | null {
+    const workspace = this.workspace;
+    if (workspace === null || workspace.activeFile === null) return null;
+    return workspace.files.find((file) => file.path === workspace.activeFile) ?? null;
+  }
+
+  /** Points the dock at a session. Only a workspace change swaps the state. */
   setContext(context: DockContext | null): void {
     this.context = context;
     if (context === null) {
@@ -298,86 +288,10 @@ export class WorkspaceDockStore {
     }
   }
 
-  /** Opens a launcher tool or focuses its existing tab. */
+  /** Shows a fixed outer tool. */
   openTool(toolId: DockLauncherId): void {
     if (this.currentKey === null) return;
-    const definition = dockTool(toolId);
-    this.update((workspace) => {
-      const existing = definition.singleton
-        ? workspace.tabs.find((tab) => tab.tool === toolId)
-        : undefined;
-      if (existing !== undefined) {
-        return { ...workspace, activeTabId: existing.id, collapsed: false };
-      }
-
-      const tab: DockTab = {
-        id: tabKey(toolId, null),
-        tool: toolId,
-        resource: null,
-        mode: null,
-        scope: null,
-      };
-      const tabs = trimTabs([...workspace.tabs, tab], tab.id, workspace.activeTabId);
-      return { ...workspace, tabs, activeTabId: tab.id, collapsed: false };
-    });
-  }
-
-  /** Opens a file tab (or focuses it and switches its display mode / diff scope). */
-  openFile(path: string, mode: DockFileMode = "view", scope: DockDiffScope = "uncommitted"): void {
-    if (this.currentKey === null) return;
-    const id = tabKey("file", path);
-    this.update((workspace) => {
-      const existing = workspace.tabs.find((tab) => tab.id === id);
-      if (existing !== undefined) {
-        return {
-          ...workspace,
-          tabs: workspace.tabs.map((tab) => (tab.id === id ? { ...tab, mode, scope } : tab)),
-          activeTabId: id,
-          collapsed: false,
-        };
-      }
-
-      const tab: DockTab = { id, tool: "file", resource: path, mode, scope };
-      const tabs = trimTabs([...workspace.tabs, tab], tab.id, workspace.activeTabId);
-      return { ...workspace, tabs, activeTabId: tab.id, collapsed: false };
-    });
-  }
-
-  /** Switches one file tab between view and diff. */
-  setTabMode(id: string, mode: DockFileMode): void {
-    const workspace = this.workspace;
-    if (workspace === null) return;
-    const tab = workspace.tabs.find((candidate) => candidate.id === id);
-    if (tab === undefined || tab.tool !== "file" || tab.mode === mode) return;
-    this.update((current) => ({
-      ...current,
-      tabs: current.tabs.map((candidate) =>
-        candidate.id === id ? { ...candidate, mode } : candidate,
-      ),
-    }));
-  }
-
-  activateTab(id: string): void {
-    const workspace = this.workspace;
-    if (workspace === null || !workspace.tabs.some((tab) => tab.id === id)) return;
-    if (workspace.activeTabId === id && !workspace.collapsed) return;
-    this.update((current) => ({ ...current, activeTabId: id, collapsed: false }));
-  }
-
-  closeTab(id: string): void {
-    const workspace = this.workspace;
-    if (workspace === null) return;
-    const index = workspace.tabs.findIndex((tab) => tab.id === id);
-    if (index === -1) return;
-
-    const tabs = workspace.tabs.filter((tab) => tab.id !== id);
-    if (tabs.length === 0) {
-      this.update((current) => ({ ...current, tabs: [], activeTabId: null, collapsed: true }));
-      return;
-    }
-    const next = tabs[Math.min(index, tabs.length - 1)] ?? tabs[0];
-    const activeTabId = workspace.activeTabId === id ? (next?.id ?? null) : workspace.activeTabId;
-    this.update((current) => ({ ...current, tabs, activeTabId, collapsed: false }));
+    this.update((workspace) => ({ ...workspace, activeTool: toolId, collapsed: false }));
   }
 
   /** Rail behavior: focus the tool, or collapse the dock when it is already active. */
@@ -391,6 +305,72 @@ export class WorkspaceDockStore {
 
   collapse(): void {
     this.setCollapsed(true);
+  }
+
+  setTreeVisible(visible: boolean): void {
+    const workspace = this.workspace;
+    if (workspace === null || workspace.treeVisible === visible) return;
+    this.update((current) => ({ ...current, treeVisible: visible }));
+  }
+
+  /** Opens a file preview inside Files (or focuses and updates an existing one). */
+  openFile(path: string, mode: DockFileMode = "view", scope: DockDiffScope = "uncommitted"): void {
+    if (this.currentKey === null) return;
+    this.fileOpenVersion += 1;
+    this.update((workspace) => {
+      const existing = workspace.files.find((file) => file.path === path);
+      const files =
+        existing === undefined
+          ? trimFiles([...workspace.files, { path, mode, scope }], path)
+          : workspace.files.map((file) => (file.path === path ? { ...file, mode, scope } : file));
+      return {
+        ...workspace,
+        files,
+        activeFile: path,
+        activeTool: "files",
+        collapsed: false,
+      };
+    });
+  }
+
+  activateFile(path: string): void {
+    const workspace = this.workspace;
+    if (workspace === null || !workspace.files.some((file) => file.path === path)) return;
+    if (workspace.activeFile === path && workspace.activeTool === "files" && !workspace.collapsed) {
+      return;
+    }
+    this.update((current) => ({
+      ...current,
+      activeFile: path,
+      activeTool: "files",
+      collapsed: false,
+    }));
+  }
+
+  closeFile(path: string): void {
+    const workspace = this.workspace;
+    if (workspace === null) return;
+    const index = workspace.files.findIndex((file) => file.path === path);
+    if (index === -1) return;
+    const files = workspace.files.filter((file) => file.path !== path);
+    const activeFile =
+      workspace.activeFile === path
+        ? (files[Math.min(index, files.length - 1)]?.path ?? null)
+        : workspace.activeFile;
+    this.update((current) => ({ ...current, files, activeFile }));
+  }
+
+  setFileMode(path: string, mode: DockFileMode): void {
+    const workspace = this.workspace;
+    if (workspace === null) return;
+    const file = workspace.files.find((candidate) => candidate.path === path);
+    if (file === undefined || file.mode === mode) return;
+    this.update((current) => ({
+      ...current,
+      files: current.files.map((candidate) =>
+        candidate.path === path ? { ...candidate, mode } : candidate,
+      ),
+    }));
   }
 
   setWidth(percent: number): void {
@@ -431,13 +411,11 @@ export class WorkspaceDockStore {
   }
 }
 
-/** Keeps tabs under the cap by dropping the oldest inactive, non-singleton tab. */
-function trimTabs(tabs: DockTab[], keepId: string, activeId: string | null): DockTab[] {
-  let next = tabs;
-  while (next.length > MAX_TABS) {
-    const index = next.findIndex(
-      (tab) => tab.id !== keepId && tab.id !== activeId && !isSingleton(tab.tool),
-    );
+/** Keeps file previews under the cap by dropping the oldest non-active one. */
+function trimFiles(files: DockFileTab[], keepPath: string): DockFileTab[] {
+  let next = files;
+  while (next.length > MAX_FILES) {
+    const index = next.findIndex((file) => file.path !== keepPath);
     if (index === -1) break;
     next = [...next.slice(0, index), ...next.slice(index + 1)];
   }

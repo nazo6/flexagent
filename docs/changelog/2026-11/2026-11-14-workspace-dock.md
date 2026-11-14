@@ -8,6 +8,10 @@
   - [`docs/proposals/2026-11-14-workspace-dock.md`](../../proposals/2026-11-14-workspace-dock.md)
   - [`docs/07-web-ui-and-pwa.md`](../../07-web-ui-and-pwa.md) §3.2, §4
 
+> 2026-11-14 のレイアウト更新で、外側は固定ツール、可変タブは Files 内へ移した。
+> 現在の構造は [`2026-11-14-files-tree-preview.md`](./2026-11-14-files-tree-preview.md)
+> を正とする。
+
 ## 背景
 
 右ペインは `diff | terminal` を `SessionPanelHost` が `{#if}` で分岐するだけの構造で、

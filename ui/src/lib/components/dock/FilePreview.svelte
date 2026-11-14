@@ -2,17 +2,16 @@
   import CodeView from "#lib/components/dock/CodeView.svelte";
   import GitStatusBadge from "#lib/components/dock/GitStatusBadge.svelte";
   import DiffViewer from "#lib/components/diff/DiffViewer.svelte";
+  import MarkdownText from "#lib/components/MarkdownText.svelte";
   import { errorMessage } from "#lib/api/error-messages.ts";
-  import { basename } from "#lib/dock/paths.ts";
   import type {
     DockContext,
     DockDiffScope,
     DockFileMode,
-    DockTab,
+    DockFileTab,
   } from "#lib/stores/dock.svelte.ts";
   import { dock } from "#lib/stores/dock.svelte.ts";
   import { sync } from "#lib/stores/app.svelte.ts";
-  import MarkdownText from "#lib/components/MarkdownText.svelte";
   import type {
     WorkspaceDiffResponse,
     WorkspaceFileView,
@@ -21,22 +20,29 @@
   import { formatBytes } from "#lib/format.ts";
   import { m } from "#lib/paraglide/messages.js";
   import { cn } from "#lib/utils.ts";
+  import ChevronLeftIcon from "@lucide/svelte/icons/chevron-left";
   import EyeIcon from "@lucide/svelte/icons/eye";
   import FileCodeIcon from "@lucide/svelte/icons/file-code";
-  import FileIcon from "@lucide/svelte/icons/file";
   import LoaderCircleIcon from "@lucide/svelte/icons/loader-circle";
   import RefreshCwIcon from "@lucide/svelte/icons/refresh-cw";
 
-  let { ctx, tab }: { ctx: DockContext; tab: DockTab } = $props();
+  interface Props {
+    ctx: DockContext;
+    tab: DockFileTab;
+    mobile?: boolean;
+    /** Mobile: show the tree again. */
+    onback: () => void;
+  }
+
+  let { ctx, tab, mobile = false, onback }: Props = $props();
 
   const remote = $derived(sync.connection.role === "hub");
-  const path = $derived(tab.resource ?? "");
-  const mode = $derived<DockFileMode>(tab.mode ?? "view");
-  const scope = $derived<DockDiffScope>(tab.scope ?? "uncommitted");
+  const path = $derived(tab.path);
+  const mode = $derived<DockFileMode>(tab.mode);
+  const scope = $derived<DockDiffScope>(tab.scope);
   const isMarkdown = $derived(/\.(md|markdown|mdx)$/i.test(path));
 
   let markdownPreview = $state(true);
-
   let view = $state<WorkspaceFileView | null>(null);
   let diff = $state<WorkspaceDiffResponse | null>(null);
   let viewLoading = $state(false);
@@ -120,6 +126,18 @@
 </script>
 
 <div class="border-border flex h-9 shrink-0 items-center gap-1 border-b px-1.5">
+  {#if mobile}
+    <button
+      type="button"
+      class="text-muted-foreground hover:bg-accent hover:text-foreground flex size-7 shrink-0 items-center justify-center rounded-md transition-colors"
+      title={m.dock_files_title()}
+      aria-label={m.dock_files_title()}
+      onclick={onback}
+    >
+      <ChevronLeftIcon class="size-4" />
+    </button>
+  {/if}
+
   <div class="bg-muted flex items-center rounded-md p-0.5">
     {#each ["view", "diff"] as candidate (candidate)}
       <button
@@ -131,7 +149,7 @@
             : "text-muted-foreground hover:text-foreground",
         )}
         aria-pressed={mode === candidate}
-        onclick={() => dock.setTabMode(tab.id, candidate as DockFileMode)}
+        onclick={() => dock.setFileMode(tab.path, candidate as DockFileMode)}
       >
         {candidate === "view" ? m.dock_file_view() : m.dock_file_diff()}
       </button>
@@ -168,12 +186,7 @@
     <RefreshCwIcon class="size-3.5" />
   </button>
 
-  <span
-    class="text-muted-foreground ml-auto flex min-w-0 items-center gap-1 truncate font-mono text-[11px]"
-    title={path}
-  >
-    <FileIcon class="size-3 shrink-0" />
-    <span class="truncate">{basename(path)}</span>
+  <span class="ml-auto flex shrink-0 items-center">
     {#if fileStatus !== null}
       <GitStatusBadge status={fileStatus} />
     {/if}

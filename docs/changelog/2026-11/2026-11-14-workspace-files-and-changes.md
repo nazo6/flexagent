@@ -10,6 +10,10 @@
   - [`docs/03-protocol-and-api.md`](../../03-protocol-and-api.md) §3.1
   - [`docs/07-web-ui-and-pwa.md`](../../07-web-ui-and-pwa.md) §3.2
 
+> 2026-11-14 のレイアウト更新で、File タブは外側ではなく Files 内のプレビューに
+> 移動した。現在の構造は
+> [`2026-11-14-files-tree-preview.md`](./2026-11-14-files-tree-preview.md) を正とする。
+
 ## 背景
 
 Phase 0 で右ペインを workspace スコープのタブ式ドックにした。Phase 1 では

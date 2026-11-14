@@ -11,7 +11,6 @@
   import SessionHeader from "#lib/components/session/SessionHeader.svelte";
   import DockHost from "#lib/components/dock/DockHost.svelte";
   import DockRail from "#lib/components/dock/DockRail.svelte";
-  import DockToolsSheet from "#lib/components/dock/DockToolsSheet.svelte";
   import { Button } from "#lib/components/ui/button/index.ts";
   import { commandErrorMessage } from "#lib/api/client.ts";
   import { m } from "#lib/paraglide/messages.js";
@@ -51,10 +50,8 @@
       : { sessionId: session.session_id, nodeId: session.node_id, localPath: session.local_path },
   );
   const isDockOpen = $derived(dock.isOpen && dockContext !== null);
-  /** Highlight a launcher only while the dock is visible and a file tab is not active. */
-  const visibleLauncher = $derived(
-    dock.isOpen && dock.activeTool !== "file" ? dock.activeTool : null,
-  );
+  /** Highlight the active launcher only while the dock is visible. */
+  const visibleLauncher = $derived(dock.isOpen ? dock.activeTool : null);
 
   const timeline = $derived(sync.timelineFor(sessionId));
   const currentStatus = $derived(
@@ -120,9 +117,6 @@
   const FOLLOW_THRESHOLD_PX = 80;
   let lastUserItemKey: string | null = null;
 
-  // Right workspace dock / mobile tool sheet
-  let toolsSheetOpen = $state(false);
-
   // Desktop resizable right pane
   let mainContainer = $state<HTMLDivElement | null>(null);
   let isResizing = $state(false);
@@ -173,8 +167,9 @@
     window.addEventListener("pointerup", handlePointerUp);
   }
 
-  // The workspace owns the dock tabs; the session only supplies tool context.
-  // Switching sessions inside one workspace must not reset open tabs.
+  // The workspace owns the dock state; the session only supplies tool context.
+  // Switching sessions inside one workspace must not reset the active tool or
+  // open file previews.
   $effect(() => {
     dock.setContext(dockContext);
   });
@@ -276,11 +271,6 @@
       behavior: "smooth",
     });
     showScrollBottom = false;
-  }
-
-  function handleSelectTool(tool: DockLauncherId): void {
-    dock.openTool(tool);
-    toolsSheetOpen = false;
   }
 
   /** Mobile header: open the tool, or close the dock when it is already active. */
@@ -546,12 +536,7 @@
         class="hidden h-full shrink-0 flex-col overflow-hidden lg:flex"
         style="width: clamp(22rem, {dock.width}%, 75%);"
       >
-        <DockHost
-          {ctx}
-          {items}
-          oncollapse={() => dock.collapse()}
-          ontools={() => (toolsSheetOpen = true)}
-        />
+        <DockHost {ctx} {items} oncollapse={() => dock.collapse()} />
       </div>
     {/if}
 
@@ -581,17 +566,9 @@
         <div
           class="bg-card border-border animate-in fade-in slide-in-from-bottom-2 absolute inset-x-2 top-6 bottom-2 flex flex-col overflow-hidden rounded-xl border shadow-2xl duration-150"
         >
-          <DockHost
-            {ctx}
-            {items}
-            mobile
-            oncollapse={() => dock.collapse()}
-            ontools={() => (toolsSheetOpen = true)}
-          />
+          <DockHost {ctx} {items} mobile oncollapse={() => dock.collapse()} />
         </div>
       </div>
     {/if}
   </div>
-
-  <DockToolsSheet bind:open={toolsSheetOpen} active={visibleLauncher} onselect={handleSelectTool} />
 </div>
