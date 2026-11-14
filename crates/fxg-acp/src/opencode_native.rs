@@ -1029,11 +1029,10 @@ async fn spawn_server(
         }
     };
     #[cfg(windows)]
-    if let Some(guard) = guard.as_ref() {
-        use std::os::windows::io::AsRawHandle;
-        if let Err(err) = guard.attach_raw_handle(child.as_raw_handle()) {
-            tracing::warn!("failed to bind opencode serve to a Windows Job Object: {err}");
-        }
+    if let Some(guard) = guard.as_ref()
+        && let Err(err) = guard.attach_raw_handle(child.raw_handle())
+    {
+        tracing::warn!("failed to bind opencode serve to a Windows Job Object: {err}");
     }
 
     let stdout = child
