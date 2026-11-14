@@ -55,7 +55,6 @@
   {icon}
   {loading}
   disabled={disabled || loading}
-  showLabel
   class={className}
   bind:open
   contentClass="w-[min(20rem,calc(100vw-1.5rem))]"

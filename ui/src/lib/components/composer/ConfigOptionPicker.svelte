@@ -141,7 +141,6 @@
   value={currentChoice?.label ?? option.name}
   {icon}
   {disabled}
-  showLabel={!isModelOption(option)}
   bind:open
   onopenchange={(next) => {
     if (!next) query = "";

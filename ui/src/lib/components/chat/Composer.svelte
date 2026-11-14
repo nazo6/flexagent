@@ -490,14 +490,18 @@
     {#if isRunning}
       <Button
         variant="destructive"
-        size="sm"
-        class="h-7 rounded-full px-2.5 text-xs"
+        size="icon-sm"
+        class="rounded-full"
         disabled={controlBusy}
         title={m.chat_stop_title()}
+        aria-label={controlBusy ? m.chat_stopping() : m.chat_stop()}
         onclick={() => void runControl({ action: "cancel" })}
       >
-        <BanIcon class="size-3.5" />
-        {controlBusy ? m.chat_stopping() : m.chat_stop()}
+        {#if controlBusy}
+          <LoaderCircleIcon class="size-4 animate-spin" />
+        {:else}
+          <BanIcon class="size-4" />
+        {/if}
       </Button>
     {/if}
     <ComposerSendButton

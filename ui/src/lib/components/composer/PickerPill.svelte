@@ -11,7 +11,6 @@
     icon = undefined,
     disabled = false,
     loading = false,
-    showLabel = false,
     class: className = "",
     contentClass = "",
     open = $bindable(false),
@@ -26,8 +25,6 @@
     icon?: Snippet;
     disabled?: boolean;
     loading?: boolean;
-    /** Show the label before the value (useful for less self-explanatory options). */
-    showLabel?: boolean;
     class?: string;
     contentClass?: string;
     open?: boolean;
@@ -51,9 +48,6 @@
     {#if value === ""}
       <span class="text-muted-foreground truncate">{label}</span>
     {:else}
-      {#if showLabel}
-        <span class="text-muted-foreground shrink-0">{label}</span>
-      {/if}
       <span class="truncate">{value}</span>
     {/if}
     {#if loading}
