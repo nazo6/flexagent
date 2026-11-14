@@ -28,7 +28,7 @@
 
 <div
   class={cn(
-    "bg-card focus-within:border-signal/50 focus-within:ring-signal/15 rounded-lg border border-border p-2.5 transition-[border-color,box-shadow] focus-within:ring-2",
+    "bg-card focus-within:border-signal/50 focus-within:ring-signal/15 rounded-lg border border-border p-2 transition-[border-color,box-shadow] focus-within:ring-2",
     className,
   )}
 >
@@ -37,7 +37,7 @@
   {/if}
   {@render children?.()}
   {#if selectors || actions}
-    <div class="border-border flex items-center gap-1.5 border-t px-0.5 pt-1.5">
+    <div class="border-border flex items-center gap-1.5 border-t px-0.5 pt-1">
       <div class="relative min-w-0 flex-1">
         <div
           class="flex items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"

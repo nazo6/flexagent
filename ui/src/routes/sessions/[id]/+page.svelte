@@ -435,7 +435,7 @@
         <div
           bind:this={chatContainer}
           onscroll={handleScroll}
-          class="app-scroll-centered h-full overflow-y-auto px-4 pt-5 pb-10 md:px-8"
+          class="app-scroll-centered h-full overflow-y-auto px-4 pt-5 pb-6 md:px-8"
         >
           <div class="mx-auto flex max-w-[760px] flex-col gap-4">
             <ProvisioningLogCard lines={provisioningLines} />
@@ -477,18 +477,20 @@
       </div>
 
       <!-- Chat input (Composer) -->
-      <div class="border-border shrink-0 border-t px-4 py-3 md:px-8">
+      <div class="border-border shrink-0 border-t px-4 py-2 md:px-8">
         <div class="mx-auto max-w-[760px]">
-          <Composer
-            {sessionId}
-            {capabilities}
-            node={sessionNode}
-            status={currentStatus}
-            permissionPolicy={session?.permission_policy ?? null}
-            projectId={session?.project_id ?? ""}
-            agentId={session?.agent_id ?? ""}
-            bind:resumeRequired
-          />
+          {#key sessionId}
+            <Composer
+              {sessionId}
+              {capabilities}
+              node={sessionNode}
+              status={currentStatus}
+              permissionPolicy={session?.permission_policy ?? null}
+              projectId={session?.project_id ?? ""}
+              agentId={session?.agent_id ?? ""}
+              bind:resumeRequired
+            />
+          {/key}
         </div>
       </div>
     </div>

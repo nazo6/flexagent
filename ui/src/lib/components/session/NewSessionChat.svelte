@@ -46,6 +46,7 @@
     shouldSubmitOnEnter,
     type SessionModePreference,
   } from "#lib/session-prefs.ts";
+  import { composerDrafts, NEW_SESSION_DRAFT_ID } from "#lib/stores/composer-drafts.ts";
   import { prefs } from "#lib/stores/prefs.svelte.ts";
   import { getNodeAvailability } from "#lib/node-status.ts";
   import { nodeSettingsPath, resolveDefaultNodeId } from "#lib/settings-routes.ts";
@@ -89,15 +90,25 @@
   let localPath = $state("");
   let branch = $state("");
   let baseBranch = $state("");
-  let promptText = $state("");
+  const draft = composerDrafts.get(NEW_SESSION_DRAFT_ID);
+  let promptText = $state(draft.text);
   let busy = $state(false);
   let browserOpen = $state(false);
   let fileBrowserOpen = $state(false);
   let fileInput = $state<HTMLInputElement | null>(null);
   let useCustomPath = $state(false);
 
-  const composer = createComposerAttachments();
+  const composer = createComposerAttachments(draft.attachments);
   const attachments = $derived(composer.attachments);
+
+  // Keep the prompt while the user visits another screen and comes back.
+  $effect(() => {
+    composerDrafts.setText(NEW_SESSION_DRAFT_ID, promptText);
+  });
+
+  $effect(() => {
+    composerDrafts.setAttachments(NEW_SESSION_DRAFT_ID, attachments);
+  });
 
   // Picker popovers
   let projectOpen = $state(false);
@@ -756,7 +767,9 @@
             : m.new_session_started(),
       );
       await sync.refreshSessions();
+      promptText = "";
       composer.clear();
+      composerDrafts.clear(NEW_SESSION_DRAFT_ID);
       await goto(`/sessions/${response.session_id}`);
     } catch (error) {
       // The form state (including the prompt) is intentionally kept so the

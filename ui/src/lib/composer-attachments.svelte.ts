@@ -39,10 +39,10 @@ function guessMime(fileName: string): string {
  * Attachment state shared by the new-session and session composers.
  *
  * Images are transported inline (`data_b64`); local files are referenced by
- * their absolute path on the node.
+ * their absolute path on the node. `initial` restores a previously kept draft.
  */
-export function createComposerAttachments() {
-  let attachments = $state<AttachmentMeta[]>([]);
+export function createComposerAttachments(initial: AttachmentMeta[] = []) {
+  let attachments = $state<AttachmentMeta[]>([...initial]);
 
   async function addImageFiles(files: FileList | File[]): Promise<void> {
     for (const file of Array.from(files)) {

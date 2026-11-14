@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from "svelte";
   import { Button } from "#lib/components/ui/button/index.ts";
   import * as DropdownMenu from "#lib/components/ui/dropdown-menu/index.ts";
   import ComposerCard from "#lib/components/composer/ComposerCard.svelte";
@@ -10,6 +11,7 @@
   import { createComposerAttachments } from "#lib/composer-attachments.svelte.ts";
   import { orderedConfigOptions } from "#lib/config-options.ts";
   import { saveSessionConfigOption, shouldSubmitOnEnter } from "#lib/session-prefs.ts";
+  import { composerDrafts } from "#lib/stores/composer-drafts.ts";
   import { prefs } from "#lib/stores/prefs.svelte.ts";
   import { m } from "#lib/paraglide/messages.js";
   import type {
@@ -59,7 +61,10 @@
     resumeRequired?: boolean;
   } = $props();
 
-  let text = $state("");
+  // The session page keys this component by `sessionId`, so the initial value
+  // is the right one for the whole lifetime of this instance.
+  const draft = untrack(() => composerDrafts.get(sessionId));
+  let text = $state(draft.text);
   let sending = $state(false);
   let controlBusy = $state(false);
   let resuming = $state(false);
@@ -67,8 +72,18 @@
   let fileInput = $state<HTMLInputElement | null>(null);
   let autoApprove = $state(false);
 
-  const composer = createComposerAttachments();
+  const composer = createComposerAttachments(draft.attachments);
   const attachments = $derived(composer.attachments);
+
+  // Mirror edits into the draft store so leaving the screen (or switching to
+  // another session) does not discard the prompt.
+  $effect(() => {
+    composerDrafts.setText(sessionId, text);
+  });
+
+  $effect(() => {
+    composerDrafts.setAttachments(sessionId, attachments);
+  });
 
   $effect(() => {
     autoApprove = permissionPolicy === "auto_allow_all";
@@ -490,7 +505,9 @@
     onkeydown={onKeydown}
     onpaste={composer.onPaste}
     ondrop={composer.onDrop}
-    rows={3}
+    rows={2}
+    minHeight={52}
+    maxHeight={160}
     placeholder={placeholderText}
     ariaLabel={m.chat_input_label()}
     disabled={sending}
