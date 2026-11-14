@@ -1,5 +1,6 @@
 <script lang="ts">
   import { goto } from "$app/navigation";
+  import { ApiError } from "#lib/api/errors.ts";
   import { errorCodeMessage, errorMessage } from "#lib/api/error-messages.ts";
   import { Badge } from "#lib/components/ui/badge/index.ts";
   import { Button } from "#lib/components/ui/button/index.ts";
@@ -105,9 +106,12 @@
     return m.external_sessions_updated({ time: formatRelativeTime(parsed) });
   }
 
-  async function importSession(session: ExternalSessionSummary) {
+  async function importSession(
+    session: ExternalSessionSummary,
+    options: { mirrorHistory?: boolean } = {},
+  ) {
     const agent = agentInfo.get(session.agent_id);
-    const mirrorHistory = agent?.supports_history ?? false;
+    const mirrorHistory = options.mirrorHistory ?? agent?.supports_history ?? false;
     const key = `${session.agent_id}:${session.agent_session_id}`;
     importing = key;
     try {
@@ -125,7 +129,18 @@
       await Promise.all([sync.refreshSessions(), sync.refreshProjects()]);
       await goto(`/sessions/${result.session_id}`);
     } catch (err) {
-      toast.error(errorMessage(err));
+      // The agent accepted `session/load` but replayed no history. Offer the
+      // explicit no-history import instead of creating an empty session silently.
+      if (mirrorHistory && err instanceof ApiError && err.code === "HISTORY_UNAVAILABLE") {
+        toast.error(errorMessage(err), {
+          action: {
+            label: m.external_sessions_import_no_history(),
+            onClick: () => void importSession(session, { mirrorHistory: false }),
+          },
+        });
+      } else {
+        toast.error(errorMessage(err));
+      }
     } finally {
       importing = null;
     }

@@ -89,6 +89,29 @@ pub(super) async fn build_session<'a>(
         config_options: acquired_config_options,
         replayed,
     } = acquired;
+    let capture_history = params
+        .resume
+        .as_ref()
+        .is_some_and(|resume| resume.capture_history);
+    // An import must not silently create an empty session when the agent
+    // accepted `session/load` but replayed no conversation history. Metadata
+    // updates (capabilities, title) alone do not prove that the history was
+    // restored, so require at least one history-bearing update.
+    if capture_history
+        && !replayed
+            .iter()
+            .any(|notification| is_history_update(&notification.update))
+    {
+        let agent_session_id = params
+            .resume
+            .as_ref()
+            .and_then(|resume| resume.agent_session_id.as_deref())
+            .unwrap_or("unknown");
+        return Err(HistoryCaptureUnavailable(format!(
+            "agent returned no history from session/load (agent_session_id={agent_session_id})"
+        ))
+        .into());
+    }
     let acp_session_id = session.session_id().clone();
     // Register session information (referenced by the fs / terminal handlers)
     contexts.lock().expect("session contexts poisoned").insert(
@@ -271,10 +294,7 @@ pub(super) async fn build_session<'a>(
         context_restored,
         capabilities_state,
         runtime,
-        capture_history: params
-            .resume
-            .as_ref()
-            .is_some_and(|resume| resume.capture_history),
+        capture_history,
     })
 }
 
@@ -951,11 +971,6 @@ pub(super) async fn acquire_session(
                 .start_session()
                 .await?;
             let replayed = drain_replay_updates(&mut session, capture).await;
-            if capture && replayed.is_empty() {
-                tracing::warn!(
-                    "session/load completed with 0 buffered replay notifications; waiting for any post-response history updates"
-                );
-            }
             Ok(AcquiredSession {
                 session,
                 is_resumed: true,
@@ -1005,6 +1020,31 @@ pub(super) async fn fork_and_load_session(
     })
 }
 
+/// How long to wait for replay notifications the SDK delivers just after the
+/// `session/load` response.
+///
+/// The ACP spec says replay completes before the response; the grace period only
+/// covers SDK scheduling of buffered notifications. Conversation history itself
+/// is never expected to arrive later.
+const IMPORT_REPLAY_GRACE: Duration = Duration::from_millis(500);
+
+/// Whether a replayed `session/update` carries conversation history.
+///
+/// Agents may send capability / metadata updates during `session/load` even
+/// when they cannot restore the conversation, so an import that receives only
+/// those still has no history to mirror.
+fn is_history_update(update: &SessionUpdate) -> bool {
+    !matches!(
+        update,
+        SessionUpdate::AvailableCommandsUpdate(_)
+            | SessionUpdate::CurrentModeUpdate(_)
+            | SessionUpdate::ConfigOptionUpdate(_)
+            | SessionUpdate::SessionInfoUpdate(_)
+            | SessionUpdate::UsageUpdate(_)
+            | SessionUpdate::Notice(_)
+    )
+}
+
 /// Drains replay notifications buffered before the `session/load` response.
 ///
 /// Per the ACP spec, conversation history replay completes before the load
@@ -1012,6 +1052,10 @@ pub(super) async fn fork_and_load_session(
 /// session. `capture` keeps them for an explicit import (the node feeds them to
 /// the event log); otherwise they are dropped because fxg already has the
 /// canonical history (resume) or mirrors the parent's log (fork).
+///
+/// For an import, if no history-bearing update arrived before the response,
+/// waits briefly for buffered notifications that the SDK delivers just after it.
+/// Later background updates remain the idle loop's responsibility.
 pub(super) async fn drain_replay_updates(
     session: &mut ActiveSession<'static, Agent>,
     capture: bool,
@@ -1020,10 +1064,7 @@ pub(super) async fn drain_replay_updates(
 
     let mut replayed = Vec::new();
     let mut discarded = 0usize;
-    loop {
-        let Some(result) = session.read_update().now_or_never() else {
-            break;
-        };
+    while let Some(result) = session.read_update().now_or_never() {
         match result {
             Ok(SessionMessage::Message(dispatch)) => {
                 if capture {
@@ -1032,7 +1073,6 @@ pub(super) async fn drain_replay_updates(
                         Ok(None) => {}
                         Err(err) => {
                             tracing::warn!("failed to decode a session/load replay update: {err}");
-                            continue;
                         }
                     }
                 } else {
@@ -1044,6 +1084,41 @@ pub(super) async fn drain_replay_updates(
             Err(err) => {
                 tracing::debug!("session/load replay ended: {err}");
                 break;
+            }
+        }
+    }
+    if capture
+        && !replayed
+            .iter()
+            .any(|notification| is_history_update(&notification.update))
+    {
+        let deadline = tokio::time::Instant::now() + IMPORT_REPLAY_GRACE;
+        loop {
+            let Ok(result) = tokio::time::timeout_at(deadline, session.read_update()).await else {
+                break;
+            };
+            match result {
+                Ok(SessionMessage::Message(dispatch)) => {
+                    match take_session_notification(dispatch).await {
+                        Ok(Some(notification)) => {
+                            let has_history = is_history_update(&notification.update);
+                            replayed.push(notification);
+                            if has_history {
+                                break;
+                            }
+                        }
+                        Ok(None) => {}
+                        Err(err) => {
+                            tracing::warn!("failed to decode a session/load replay update: {err}");
+                        }
+                    }
+                }
+                // `SessionMessage` is #[non_exhaustive]
+                Ok(_) => {}
+                Err(err) => {
+                    tracing::debug!("session/load replay ended: {err}");
+                    break;
+                }
             }
         }
     }

@@ -84,6 +84,20 @@ fn main() {
             continue;
         }
 
+        // `session/load` succeeds but replays no history (the agent accepted the
+        // request yet could not restore the conversation).
+        if method == "session/load" && mode == "empty-history" {
+            write_line(
+                &mut stdout,
+                &json!({
+                    "jsonrpc": "2.0",
+                    "id": id,
+                    "result": { "sessionId": "external-1" }
+                }),
+            );
+            continue;
+        }
+
         let response = match (mode.as_str(), method) {
             ("auth-required", "initialize") => json!({
                 "jsonrpc": "2.0",
@@ -144,7 +158,7 @@ fn main() {
                     "sessionId": "source-session"
                 }
             }),
-            ("list", "initialize") => json!({
+            ("list" | "empty-history", "initialize") => json!({
                 "jsonrpc": "2.0",
                 "id": id,
                 "result": {

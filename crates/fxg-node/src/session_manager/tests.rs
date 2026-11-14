@@ -988,6 +988,53 @@ async fn import_session_records_and_resumes_an_existing_agent_session() {
 }
 
 #[tokio::test]
+async fn import_session_fails_when_history_capture_is_empty() {
+    let (manager, mock, dir) = setup().await;
+    mock.set_resume_supported(true);
+    mock.set_history_capture_fails(true);
+
+    let err = manager
+        .import_session(
+            &CommandId::from("c-import-empty-history"),
+            "mock",
+            "agent-empty-history-1",
+            dir.path(),
+            Some("Empty"),
+            true,
+        )
+        .await
+        .expect_err("import must not succeed without history");
+    assert!(
+        matches!(err, NodeError::HistoryUnavailable(_)),
+        "unexpected error: {err}"
+    );
+
+    // The failed import is rolled back, so no ghost session remains.
+    for _ in 0..100 {
+        let sessions = manager
+            .bus()
+            .db()
+            .list_sessions(&SessionFilter::default())
+            .await
+            .expect("sessions");
+        if sessions.iter().all(|session| session.title != "Empty") {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    let sessions = manager
+        .bus()
+        .db()
+        .list_sessions(&SessionFilter::default())
+        .await
+        .expect("sessions");
+    assert!(
+        sessions.iter().all(|session| session.title != "Empty"),
+        "the failed import left a ghost session: {sessions:#?}"
+    );
+}
+
+#[tokio::test]
 async fn list_external_sessions_marks_already_imported_sessions() {
     let (manager, mock, dir) = setup().await;
     mock.set_resume_supported(true);

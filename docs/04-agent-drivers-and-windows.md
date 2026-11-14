@@ -435,8 +435,10 @@ ACP `session/list`（安定）を使い、fxg がまだ管理していないエ�
   `session/load` を優先する。`session/load` の replay 通知は live と同じ
   正規化経路へ流し、`Import` モードでのみ replay のユーザーメッセージを
   `client_source = "import"` の `UserMessage` として生成する（live ターンは
-  従来どおり manager が記録する）。`loadSession` 非対応なら
-  `HISTORY_UNAVAILABLE` を返し、クライアントは履歴なしの取り込みに切り替える。
+  従来どおり manager が記録する）。`loadSession` 非対応、または
+  `session/load` が成功しても履歴を 1 件も replay しなかった場合は
+  `HISTORY_UNAVAILABLE` を返し、空のセッションを黙って作らない。クライアントは
+  履歴なしの取り込みに切り替える。
 - **重複排除とロールバック**: 生きている `(agent_id, agent_session_id)` を
   重複とみなす。取り込みの起動に失敗した行は `SessionDeleted` でロールバックし、
   幽霊セッションを残さない。

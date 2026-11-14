@@ -123,6 +123,8 @@ struct MockAgentInner {
     external_history: AtomicBool,
     /// Events emitted during `start_session` when `capture_history` is requested
     start_replay_events: Mutex<Vec<UnifiedEventPayload>>,
+    /// Whether `capture_history` requests fail because the agent replays nothing
+    history_capture_fails: AtomicBool,
 }
 
 impl MockAgent {
@@ -180,6 +182,13 @@ impl MockAgent {
             .start_replay_events
             .lock()
             .expect("start replay events") = events;
+    }
+
+    /// Makes `capture_history` fail as if `session/load` replayed no history.
+    pub(crate) fn set_history_capture_fails(&self, fails: bool) {
+        self.inner
+            .history_capture_fails
+            .store(fails, Ordering::SeqCst);
     }
 
     /// List of sent prompts.
@@ -267,6 +276,16 @@ impl AgentDriver for MockAgent {
                 fxg_acp::NativeResumeUnavailable("mock resume unsupported".to_owned()).into(),
             );
         }
+        let capturing_history = req
+            .resume
+            .as_ref()
+            .is_some_and(|resume| resume.capture_history);
+        if capturing_history && self.inner.history_capture_fails.load(Ordering::SeqCst) {
+            return Err(fxg_acp::HistoryCaptureUnavailable(
+                "mock agent replayed no history".to_owned(),
+            )
+            .into());
+        }
         self.inner
             .events
             .lock()
@@ -276,10 +295,6 @@ impl AgentDriver for MockAgent {
             .resume
             .as_ref()
             .and_then(|resume| resume.agent_session_id.clone());
-        let capturing_history = req
-            .resume
-            .as_ref()
-            .is_some_and(|resume| resume.capture_history);
         self.inner.starts.lock().expect("starts").push(MockStart {
             session_id: req.session_id,
             cwd: req.cwd,
