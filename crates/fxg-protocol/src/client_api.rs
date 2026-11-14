@@ -93,9 +93,9 @@ pub struct SystemInfoResponse {
     pub node_id: Option<NodeId>,
     /// fxg binary version
     pub version: String,
-    /// VAPID public key for Web Push (hub only)
+    /// VAPID public key for Web Push
     pub vapid_public_key: Option<String>,
-    /// Number of unsynced outbox events (local node only)
+    /// Number of unsynced outbox events (paired local node only; `None` while standalone)
     pub unsynced_event_count: Option<u64>,
     /// Node ⇔ hub link state (local node only)
     pub hub_link: Option<HubLinkStatus>,

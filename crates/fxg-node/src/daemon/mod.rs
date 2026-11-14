@@ -20,6 +20,7 @@ use fxg_acp::agent::AgentCatalog;
 use fxg_acp::registry::AcpRegistry;
 use fxg_db::Db;
 use fxg_hub::api::ClientEvent;
+use fxg_hub::push::{PushService, RunningTurns};
 use fxg_protocol::client_api::{HubLinkState, HubLinkStatus};
 use fxg_protocol::paths::{Paths, Role};
 use fxg_protocol::settings::{AgentSettings, NodeSettings};
@@ -212,6 +213,10 @@ struct Inner {
     started_at: i64,
     /// Normalized events delivered to Client WS (forwarded from the bus)
     client_events: broadcast::Sender<ClientEvent>,
+    /// VAPID Web Push sender for standalone / direct-node subscriptions
+    push: PushService,
+    /// Tracks turns observed as `Running` for turn-finished Web Push notifications
+    running_turns: RunningTurns,
     /// Node ⇔ hub link state (outbox sync worker; `watch` also feeds Client WS)
     hub_link: watch::Sender<HubLinkStatus>,
     /// Connection target of the outbox sync worker (`None` = standalone)
@@ -303,6 +308,10 @@ impl DaemonState {
         // Runtime settings are owned by `node.db`; `node.toml` only bootstraps the process.
         let node_settings = db.ensure_node_settings(&config.node_name).await?;
         config.node_name = node_settings.name.clone();
+        let push = PushService::load_or_create(&paths)
+            .map_err(|err| NodeError::InvalidState(format!("web push init failed: {err}")))?;
+        push.set_subject(node_settings.vapid_subject.as_deref());
+        let running_turns = RunningTurns::default();
         let agent_settings = db.ensure_agent_settings().await?;
         let catalog = AgentCatalog::new(AcpRegistry::new(
             paths.clone(),
@@ -342,6 +351,8 @@ impl DaemonState {
                 token: RwLock::new(token),
                 started_at: now_ms(),
                 client_events,
+                push,
+                running_turns,
                 hub_link: watch::channel(initial_hub_link).0,
                 hub_target: watch::channel(None).0,
                 sessions_truncated: std::sync::atomic::AtomicBool::new(false),
@@ -356,10 +367,21 @@ impl DaemonState {
         let mut bus_rx = state.inner.bus.subscribe();
         let client_tx = state.inner.client_events.clone();
         let counters = state.diagnostics_counters_arc();
+        let push = state.inner.push.clone();
+        let push_db = state.inner.db.clone();
+        let running_turns = state.inner.running_turns.clone();
         fxg_protocol::spawn_guarded!("local client event forwarder", async move {
             loop {
                 match bus_rx.recv().await {
                     Ok(crate::session::SessionBroadcast::Persisted { event, cursor }) => {
+                        fxg_hub::push::dispatch_notifications(
+                            &push,
+                            &push_db,
+                            &running_turns,
+                            std::slice::from_ref(&event),
+                            false,
+                            Some(counters.clone()),
+                        );
                         fxg_protocol::discard_with!(
                             client_tx.send(ClientEvent::Persisted {
                                 event: Box::new(event),
@@ -463,6 +485,9 @@ impl DaemonState {
             .node_settings
             .write()
             .expect("node settings lock poisoned") = settings.clone();
+        self.inner
+            .push
+            .set_subject(settings.vapid_subject.as_deref());
         self.bump_state_revision().await?;
         Ok(settings)
     }
@@ -523,6 +548,11 @@ impl DaemonState {
     /// Milliseconds elapsed since startup.
     pub fn uptime_ms(&self) -> i64 {
         now_ms().saturating_sub(self.inner.started_at)
+    }
+
+    /// VAPID Web Push sender.
+    pub(crate) fn push(&self) -> &PushService {
+        &self.inner.push
     }
 
     /// Current node ⇔ hub link state.

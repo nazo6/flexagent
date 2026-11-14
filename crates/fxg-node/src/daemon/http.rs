@@ -927,6 +927,112 @@ mod tests {
             .expect("stop");
     }
 
+    #[tokio::test]
+    async fn standalone_node_exposes_web_push_and_hides_unsynced_count() {
+        let (daemon, _dir) = test_daemon().await;
+        let app = router(daemon.state().clone(), daemon.http_addr());
+        let host = host_of(&daemon);
+        let token = daemon.state().auth_token();
+
+        let info_response = app
+            .clone()
+            .oneshot(get(&host, "/api/v1/system/info", Some(&token)))
+            .await
+            .expect("system info");
+        assert_eq!(info_response.status(), StatusCode::OK);
+        let info = body_json(info_response).await;
+        assert!(
+            info["vapid_public_key"]
+                .as_str()
+                .is_some_and(|key| !key.is_empty()),
+            "standalone node must advertise vapid_public_key: {info}"
+        );
+        assert!(
+            info["unsynced_event_count"].is_null(),
+            "standalone node must not report unsynced_event_count: {info}"
+        );
+
+        let subscribe_response = app
+            .oneshot(post_json(
+                &host,
+                "/api/v1/push/subscribe",
+                Some(&token),
+                r#"{"endpoint":"https://push.example/sub/1","p256dh":"k","auth":"a","device_name":"phone"}"#,
+            ))
+            .await
+            .expect("push subscribe");
+        assert_eq!(subscribe_response.status(), StatusCode::OK);
+        assert_eq!(body_json(subscribe_response).await["ok"], true);
+
+        let subscriptions = daemon
+            .state()
+            .db()
+            .list_push_subscriptions()
+            .await
+            .expect("list subscriptions");
+        assert_eq!(subscriptions.len(), 1);
+        assert_eq!(subscriptions[0].endpoint, "https://push.example/sub/1");
+
+        daemon.shutdown();
+        tokio::time::timeout(std::time::Duration::from_secs(5), daemon.wait())
+            .await
+            .expect("stop");
+    }
+
+    #[tokio::test]
+    async fn standalone_role_health_ignores_outbox_backlog_threshold() {
+        let (daemon, _dir) = test_daemon().await;
+        let state = daemon.state();
+        let session_id = fxg_protocol::util::uuid_v7();
+        let project_id = fxg_protocol::util::uuid_v7();
+        state
+            .bus()
+            .create_session(
+                &session_id,
+                fxg_protocol::events::UnifiedEventPayload::SessionCreated {
+                    node_id: state.node_id().to_owned().into(),
+                    project_id: project_id.into(),
+                    project_name: "repo".to_owned(),
+                    local_path: "/tmp/repo".to_owned(),
+                    git_branch: None,
+                    is_worktree: false,
+                    agent_id: "mock".to_owned(),
+                    parent_session_id: None,
+                    title: "Backlog test".to_owned(),
+                },
+            )
+            .await
+            .expect("create session");
+
+        // Simulate > 1000 unsynced events in standalone mode.
+        let batch: Vec<_> = (2_u64..=1005)
+            .map(|seq| fxg_protocol::events::SessionEventEnvelope {
+                event_id: fxg_protocol::util::uuid_v7().into(),
+                session_id: session_id.clone().into(),
+                node_seq: seq,
+                created_at: 1000 + i64::try_from(seq).unwrap_or(0),
+                payload: fxg_protocol::events::UnifiedEventPayload::SessionTitleChanged {
+                    title: format!("Title {seq}"),
+                },
+            })
+            .collect();
+        state.db().append_events(&batch).await.expect("append");
+        assert!(state.db().unsynced_event_count().await.expect("count") > 1000);
+
+        let health =
+            <super::DaemonState as fxg_hub::api::ClientApiBackend>::role_health(state, 2000).await;
+        assert_eq!(health.len(), 1);
+        assert_eq!(
+            health[0].state,
+            fxg_protocol::common::ComponentState::NotMeasured
+        );
+
+        daemon.shutdown();
+        tokio::time::timeout(std::time::Duration::from_secs(5), daemon.wait())
+            .await
+            .expect("stop");
+    }
+
     /// Receives the next `HubWsMessage` from the WS (with a timeout).
     async fn next_ws_message<S>(socket: &mut S) -> HubWsMessage
     where

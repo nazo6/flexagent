@@ -34,6 +34,7 @@
     allow_remote_pty: false,
     project_scan_dirs: "",
     tray: "" as "" | "true" | "false",
+    vapid_subject: "",
     revision: 0,
   });
 
@@ -96,6 +97,7 @@
       allow_remote_pty: nodeSnapshot.node.allow_remote_pty,
       project_scan_dirs: nodeSnapshot.node.project_scan_dirs.join("\n"),
       tray: nodeSnapshot.node.tray === null ? "" : nodeSnapshot.node.tray ? "true" : "false",
+      vapid_subject: nodeSnapshot.node.vapid_subject ?? "",
       revision: nodeSnapshot.node.revision,
     };
   }
@@ -117,6 +119,7 @@
         .map((line) => line.trim())
         .filter((line) => line !== ""),
       tray: nodeForm.tray === "" ? null : nodeForm.tray === "true",
+      vapid_subject: nodeForm.vapid_subject.trim() === "" ? null : nodeForm.vapid_subject.trim(),
       expected_revision: nodeForm.revision,
     };
     try {
@@ -316,6 +319,7 @@
           { name: "auth_token", use: "Node-only Web access token for browsers and CLI" },
           { name: "node_token", use: "Node pairing token (set by fxg node pair)" },
           { name: "node.db", use: "Node settings, sessions and audit log" },
+          { name: "vapid.json", use: "Web Push VAPID keypair" },
           { name: "secrets/", use: "Write-only secret values (0600)" },
           { name: "worktrees/", use: "Git worktrees created by fxg" },
         ],
@@ -410,6 +414,14 @@
             <input type="checkbox" bind:checked={nodeForm.allow_remote_pty} />
             Allow remote Web PTY
           </label>
+          <div class="grid gap-1.5 sm:col-span-2">
+            <Label for="node-vapid-subject">VAPID subject</Label>
+            <Input
+              id="node-vapid-subject"
+              placeholder="mailto:admin@example.com"
+              bind:value={nodeForm.vapid_subject}
+            />
+          </div>
           <div class="grid gap-1.5 sm:col-span-2">
             <Label for="node-scan">Project scan directories (one per line)</Label>
             <textarea

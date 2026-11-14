@@ -110,6 +110,12 @@ export const SETTINGS_SEARCH_ENTRIES: SettingsSearchEntry[] = [
   {
     scope: "node",
     tab: "general",
+    label: "VAPID subject",
+    keywords: "vapid push notification contact email mailto",
+  },
+  {
+    scope: "node",
+    tab: "general",
     label: "Project scan directories",
     keywords: "projects scan folders directories workspace",
   },
@@ -122,6 +128,12 @@ export const SETTINGS_SEARCH_ENTRIES: SettingsSearchEntry[] = [
   },
 
   { scope: "hub", tab: "general", label: "Hub settings", keywords: "hub settings central server" },
+  {
+    scope: "hub",
+    tab: "general",
+    label: "VAPID subject",
+    keywords: "vapid push notification contact email mailto",
+  },
   {
     scope: "hub",
     tab: "general",

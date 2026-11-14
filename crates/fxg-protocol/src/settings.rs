@@ -199,6 +199,8 @@ pub struct NodeSettings {
     pub project_scan_dirs: Vec<String>,
     /// Tray residency on start-up (`None` = default: disabled)
     pub tray: Option<bool>,
+    /// Web Push contact claim (`mailto:` / `https:`) for standalone node Web Push
+    pub vapid_subject: Option<String>,
     /// Optimistic-lock revision
     pub revision: u64,
     /// Last update time (Unix epoch ms)
@@ -217,6 +219,8 @@ pub struct UpdateNodeSettingsRequest {
     pub project_scan_dirs: Vec<String>,
     /// Tray residency
     pub tray: Option<bool>,
+    /// Web Push contact claim (`mailto:` / `https:`)
+    pub vapid_subject: Option<String>,
     /// Revision the client observed (`REVISION_MISMATCH` on conflict)
     pub expected_revision: u64,
 }

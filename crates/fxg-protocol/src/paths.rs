@@ -261,7 +261,7 @@ impl Paths {
         self.data_dir().join(WORKTREES_DIR_NAME)
     }
 
-    /// Web Push VAPID key pair (`<data>/hub/vapid.json`).
+    /// Web Push VAPID key pair (`<data>/<role>/vapid.json`).
     pub fn vapid_path(&self) -> PathBuf {
         self.data_dir().join(VAPID_KEYS_FILE_NAME)
     }

@@ -17,11 +17,12 @@ use fxg_protocol::client_api::{
     CreateSessionResponse, CreateWorktreeRequest, DiagnosticsResponse, ExternalSessionListResponse,
     HubLinkState, KillSwitchResponse, ProjectLinkRequest, ProjectLinkResponse, ProjectScanRequest,
     ProjectScanResponse, ProjectUnlinkRequest, ProjectUnlinkResponse, ProvisionersResponse,
-    PruneWorktreesRequest, RemoveWorktreeRequest, RespondElicitationRequest,
-    RespondElicitationResponse, RespondPermissionRequest, RespondPermissionResponse,
-    ResumeSessionRequest, ResumeSessionResponse, RotateAuthTokenResponse, SessionArchiveRequest,
-    SessionArchiveResponse, SessionImportRequest, SessionImportResponse, SessionRenameRequest,
-    SessionRenameResponse, SupportBundle, SupportBundleConfig, WorktreeInfo, WorktreesResponse,
+    PruneWorktreesRequest, PushSubscribeRequest, PushSubscribeResponse, RemoveWorktreeRequest,
+    RespondElicitationRequest, RespondElicitationResponse, RespondPermissionRequest,
+    RespondPermissionResponse, ResumeSessionRequest, ResumeSessionResponse,
+    RotateAuthTokenResponse, SessionArchiveRequest, SessionArchiveResponse, SessionImportRequest,
+    SessionImportResponse, SessionRenameRequest, SessionRenameResponse, SupportBundle,
+    SupportBundleConfig, WorktreeInfo, WorktreesResponse,
 };
 use fxg_protocol::common::{
     AgentAction, CommandResult, ComponentHealth, ComponentName, ComponentState, DiffScope,
@@ -176,23 +177,25 @@ impl ClientApiBackend for DaemonState {
                 now,
             ),
         };
-        match self.db().unsynced_event_count().await {
-            Ok(backlog) if backlog > 1000 => {
-                sync = ComponentHealth::failed(
-                    ComponentName::Sync,
-                    ComponentState::Degraded,
-                    format!("{backlog} events are waiting in the outbox"),
-                    now,
-                );
-            }
-            Ok(_) => {}
-            Err(err) => {
-                sync = ComponentHealth::failed(
-                    ComponentName::Sync,
-                    ComponentState::Error,
-                    format!("failed to read the outbox backlog: {err}"),
-                    now,
-                );
+        if !matches!(link.state, HubLinkState::Standalone) {
+            match self.db().unsynced_event_count().await {
+                Ok(backlog) if backlog > 1000 => {
+                    sync = ComponentHealth::failed(
+                        ComponentName::Sync,
+                        ComponentState::Degraded,
+                        format!("{backlog} events are waiting in the outbox"),
+                        now,
+                    );
+                }
+                Ok(_) => {}
+                Err(err) => {
+                    sync = ComponentHealth::failed(
+                        ComponentName::Sync,
+                        ComponentState::Error,
+                        format!("failed to read the outbox backlog: {err}"),
+                        now,
+                    );
+                }
             }
         }
         vec![sync]
@@ -233,15 +236,21 @@ impl ClientApiBackend for DaemonState {
     }
 
     async fn system_extras(&self) -> Result<SystemExtras, ApiError> {
-        let unsynced = self
-            .db()
-            .unsynced_event_count()
-            .await
-            .map_err(ApiError::from)?;
+        let hub_link = self.hub_link();
+        let unsynced_event_count = if matches!(hub_link.state, HubLinkState::Standalone) {
+            None
+        } else {
+            Some(
+                self.db()
+                    .unsynced_event_count()
+                    .await
+                    .map_err(ApiError::from)?,
+            )
+        };
         Ok(SystemExtras {
-            vapid_public_key: None,
-            unsynced_event_count: Some(unsynced),
-            hub_link: Some(self.hub_link()),
+            vapid_public_key: Some(self.push().public_key().to_owned()),
+            unsynced_event_count,
+            hub_link: Some(hub_link),
             last_synced_at: self.db().last_synced_at().await.map_err(ApiError::from)?,
         })
     }
@@ -943,6 +952,14 @@ impl ClientApiBackend for DaemonState {
             )));
         }
         self.agents_catalog().await.map_err(api_error)
+    }
+
+    async fn push_subscribe(
+        &self,
+        request: PushSubscribeRequest,
+        client: ClientInfo,
+    ) -> Result<PushSubscribeResponse, ApiError> {
+        fxg_hub::push::register_subscription(self.db(), &request, &client).await
     }
 
     async fn kill_switch(

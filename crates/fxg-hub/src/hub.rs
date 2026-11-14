@@ -1154,17 +1154,12 @@ async fn apply_event_batch(
     // Sent asynchronously so they do not block the ACK. Historical events replayed during a
     // resync still update the running-turn state but never wake up devices
     // (`push::notification_events`).
-    let notify_events =
-        crate::push::notification_events(&inserted_events, state.running_turns(), resync);
-    if !notify_events.is_empty() {
-        let push = state.push().clone();
-        let db = state.db().clone();
-        let counters = state.diagnostics_counters_arc();
-        fxg_protocol::spawn_guarded!("web push notification", async move {
-            crate::push::notify_permission_requests(&push, &db, &notify_events, Some(&counters))
-                .await;
-            crate::push::notify_elicitations(&push, &db, &notify_events, Some(&counters)).await;
-            crate::push::notify_turn_finished(&push, &db, &notify_events, Some(&counters)).await;
-        });
-    }
+    crate::push::dispatch_notifications(
+        state.push(),
+        state.db(),
+        state.running_turns(),
+        &inserted_events,
+        resync,
+        Some(state.diagnostics_counters_arc()),
+    );
 }

@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n        SELECT name, allow_remote_pty, project_scan_dirs_json, tray, revision, updated_at\n          FROM node_settings\n         WHERE id = 1\n        ",
+  "query": "\n        SELECT name, allow_remote_pty, project_scan_dirs_json, tray, vapid_subject, revision, updated_at\n          FROM node_settings\n         WHERE id = 1\n        ",
   "describe": {
     "columns": [
       {
@@ -48,8 +48,19 @@
         }
       },
       {
-        "name": "revision",
+        "name": "vapid_subject",
         "ordinal": 4,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "node_settings",
+            "name": "vapid_subject"
+          }
+        }
+      },
+      {
+        "name": "revision",
+        "ordinal": 5,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -60,7 +71,7 @@
       },
       {
         "name": "updated_at",
-        "ordinal": 5,
+        "ordinal": 6,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -78,9 +89,10 @@
       false,
       false,
       true,
+      true,
       false,
       false
     ]
   },
-  "hash": "a6a59a8452b7db662babbcf7830b77a432815f2e9dc6e2b57a0a5f1bf0358a20"
+  "hash": "d9b8e2c435de38083e3aaf7ca206ecc61754aa3d2232e50713b8f1452d646d6a"
 }
