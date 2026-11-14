@@ -24,6 +24,12 @@
 
   import { page } from "$app/state";
   import { sessionNeedsAttention } from "#lib/session-status.ts";
+  import {
+    hubSettingsPath,
+    nodeSettingsPath,
+    resolveDefaultNodeId,
+    settingsHomePath,
+  } from "#lib/settings-routes.ts";
   import { layoutState } from "#lib/stores/layout.svelte.ts";
   import SearchIcon from "@lucide/svelte/icons/search";
 
@@ -62,6 +68,8 @@
    * of the fix itself stays in that screen (Phase 5 will add bespoke handlers).
    */
   function handleProblemAction(problem: AppProblem, action: RecoveryAction): void {
+    const isHub = connection.role === "hub";
+    const defaultNodeId = resolveDefaultNodeId(isHub, sync.nodes, connection.systemInfo?.node_id);
     switch (action.kind) {
       case "retry":
         void sync.refreshAll();
@@ -74,14 +82,20 @@
         void goto(`/sessions/${action.session_id}`);
         break;
       case "reinstall_agent":
-      case "open_config":
-      case "select_online_node":
-      case "recreate_worktree":
-      case "export_diagnostics":
-        void goto("/settings");
+        void goto(nodeSettingsPath("agents", action.node_id));
         break;
       case "login_agent":
-        void goto("/settings?tab=agents");
+        void goto(nodeSettingsPath("agents", defaultNodeId));
+        break;
+      case "export_diagnostics":
+        void goto(isHub ? hubSettingsPath("process") : nodeSettingsPath("process", defaultNodeId));
+        break;
+      case "select_online_node":
+        void goto(nodeSettingsPath("general", defaultNodeId));
+        break;
+      case "open_config":
+      case "recreate_worktree":
+        void goto(settingsHomePath(isHub, defaultNodeId));
         break;
     }
     problems.dismiss(problem.id);
