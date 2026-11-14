@@ -15,27 +15,31 @@ pub(super) enum ServeOutcome {
     Fatal(anyhow::Error),
 }
 
+/// Result of [`build_session`] passed into the turn loop.
+pub(super) struct BuiltSession<'a> {
+    pub(super) session: ActiveSession<'static, Agent>,
+    pub(super) acp_session_id: SessionId,
+    pub(super) context_restored: bool,
+    pub(super) capabilities_state: Arc<Mutex<SessionCapabilitiesState>>,
+    pub(super) runtime: SessionRuntime<'a>,
+    pub(super) capture_history: bool,
+}
+
 /// Creates and initializes a session (`session/new` | `session/resume` | `session/load`).
 ///
 /// Registers session information in [`SessionContexts`] (referenced by the fs /
-/// terminal handlers), applies the initial mode, and publishes modes / commands /
-/// config options.
-#[allow(clippy::type_complexity)]
-pub(super) async fn build_session(
+/// terminal handlers), applies the initial mode, normalizes any captured replay
+/// history, and publishes modes / commands / config options before marking the
+/// session idle.
+pub(super) async fn build_session<'a>(
     cx: &ConnectionTo<Agent>,
     agent_capabilities: &AgentCapabilities,
     params: &SessionParams,
-    events: &mpsc::UnboundedSender<DriverEvent>,
+    events: &'a mpsc::UnboundedSender<DriverEvent>,
     contexts: &SessionContexts,
     ingress_tx: &mpsc::UnboundedSender<SessionIngress>,
     auth_methods: &[AgentAuthMethodInfo],
-) -> anyhow::Result<(
-    ActiveSession<'static, Agent>,
-    SessionId,
-    bool,
-    Arc<Mutex<SessionCapabilitiesState>>,
-    Vec<SessionNotification>,
-)> {
+) -> anyhow::Result<BuiltSession<'a>> {
     // Acquire the session (native fork / new / session/resume / session/load)
     let acquired = if let Some(source_id) = params.fork_from.as_deref() {
         if agent_capabilities.session_capabilities.fork.is_none()
@@ -230,6 +234,29 @@ pub(super) async fn build_session(
             "notify event subscribers"
         );
     }
+    let capabilities_state = Arc::new(Mutex::new(capabilities_state));
+    let mut runtime = SessionRuntime::new(
+        acp_session_id.clone(),
+        events,
+        Arc::clone(&capabilities_state),
+        Arc::clone(contexts),
+        ingress_tx.clone(),
+        params.cwd.clone(),
+        Vec::new(),
+    );
+
+    // Imported history: replay notifications captured from `session/load` are
+    // normalized through the same path as live updates and finalized before
+    // emitting `Idle` (so callers and the event pump observe all replayed
+    // events prior to readiness). Deltas are dropped because they are
+    // ephemeral and would flood subscribers with the whole history.
+    for notification in replayed {
+        runtime.handle_update_with_mode(notification.update, None, &session, UpdateMode::Import);
+    }
+    for payload in runtime.accumulator.finish_all() {
+        runtime.send_payload(payload);
+    }
+
     fxg_protocol::discard_with!(
         events.send(DriverEvent::Event(UnifiedEventPayload::StatusChanged {
             status: fxg_protocol::common::SessionStatus::Idle,
@@ -238,13 +265,17 @@ pub(super) async fn build_session(
         "notify event subscribers"
     );
 
-    Ok((
+    Ok(BuiltSession {
         session,
         acp_session_id,
         context_restored,
-        Arc::new(Mutex::new(capabilities_state)),
-        replayed,
-    ))
+        capabilities_state,
+        runtime,
+        capture_history: params
+            .resume
+            .as_ref()
+            .is_some_and(|resume| resume.capture_history),
+    })
 }
 
 /// Quiet period after the last background update before its stream is finalized.
@@ -279,13 +310,14 @@ async fn handle_idle_message(
     runtime: &mut SessionRuntime<'_>,
     session: &ActiveSession<'static, Agent>,
     message: SessionMessage,
+    mode: UpdateMode,
 ) -> Result<bool, agent_client_protocol::Error> {
     match message {
         SessionMessage::Message(dispatch) => {
             let Some(notification) = take_session_notification(dispatch).await? else {
                 return Ok(false);
             };
-            runtime.handle_update(notification.update, None, session);
+            runtime.handle_update_with_mode(notification.update, None, session, mode);
             Ok(true)
         }
         SessionMessage::PromptResponse(_) => {
@@ -306,11 +338,12 @@ async fn handle_idle_message(
 async fn drain_idle_updates(
     runtime: &mut SessionRuntime<'_>,
     session: &mut ActiveSession<'static, Agent>,
+    mode: UpdateMode,
 ) -> Result<(), agent_client_protocol::Error> {
     use futures_util::FutureExt;
 
     while let Some(result) = session.read_update().now_or_never() {
-        handle_idle_message(runtime, session, result?).await?;
+        handle_idle_message(runtime, session, result?, mode).await?;
     }
     Ok(())
 }
@@ -409,41 +442,21 @@ fn finish_turn(
 }
 
 /// Turn loop for one session (serializes prompt sends with update reads).
-#[allow(clippy::too_many_arguments)]
 pub(super) async fn serve_session(
     mut session: ActiveSession<'static, Agent>,
     mut cmd_rx: mpsc::UnboundedReceiver<AcpCommand>,
-    events: &mpsc::UnboundedSender<DriverEvent>,
-    capabilities_state: Arc<Mutex<SessionCapabilitiesState>>,
     prompt_capabilities: &PromptCapabilities,
-    contexts: SessionContexts,
-    root_cwd: PathBuf,
-    ingress_tx: mpsc::UnboundedSender<SessionIngress>,
     mut ingress_rx: mpsc::UnboundedReceiver<SessionIngress>,
-    guards: Vec<agent_client_protocol::DynamicHandlerGuard<Agent>>,
-    replayed: Vec<SessionNotification>,
+    mut runtime: SessionRuntime<'_>,
+    capture_history: bool,
 ) -> ServeOutcome {
-    let root_id = session.session_id().clone();
-    let mut runtime = SessionRuntime::new(
-        root_id,
-        events,
-        capabilities_state,
-        contexts,
-        ingress_tx,
-        root_cwd,
-        guards,
-    );
-
-    // Imported history: replay notifications captured from `session/load` are
-    // normalized through the same path as live updates and finalized before the
-    // turn loop starts. Deltas are dropped (they are ephemeral and would flood
-    // subscribers with the whole history).
-    for notification in replayed {
-        runtime.handle_update_with_mode(notification.update, None, &session, UpdateMode::Import);
-    }
-    for payload in runtime.accumulator.finish_all() {
-        runtime.send_payload(payload);
-    }
+    // Preserve `UpdateMode::Import` for any late replay notifications delivered
+    // while idle before the user sends the first prompt.
+    let mut idle_update_mode = if capture_history {
+        UpdateMode::Import
+    } else {
+        UpdateMode::Live
+    };
 
     // Finalization deadline for background updates received while idle.
     let mut idle_flush_at: Option<tokio::time::Instant> = None;
@@ -470,9 +483,12 @@ pub(super) async fn serve_session(
                 idle_flush_at = None;
                 // Consume updates delivered while idle, then persist them as the
                 // previous context before this turn starts.
-                if let Err(err) = drain_idle_updates(&mut runtime, &mut session).await {
+                if let Err(err) =
+                    drain_idle_updates(&mut runtime, &mut session, idle_update_mode).await
+                {
                     return ServeOutcome::Fatal(err.into());
                 }
+                idle_update_mode = UpdateMode::Live;
                 for payload in runtime.accumulator.finish_all() {
                     runtime.send_payload(payload);
                 }
@@ -567,7 +583,7 @@ pub(super) async fn serve_session(
                 }
             }
             Selected::Read(Ok(message)) => {
-                match handle_idle_message(&mut runtime, &session, message).await {
+                match handle_idle_message(&mut runtime, &session, message, idle_update_mode).await {
                     Ok(true) => {
                         idle_flush_at = Some(tokio::time::Instant::now() + IDLE_FLUSH_DELAY);
                     }
@@ -588,13 +604,13 @@ pub(super) async fn serve_session(
 }
 
 /// Per-session state for the parent / child event streams.
-struct SessionRuntime<'a> {
+pub(super) struct SessionRuntime<'a> {
     events: &'a mpsc::UnboundedSender<DriverEvent>,
     capabilities: Arc<Mutex<SessionCapabilitiesState>>,
     ingress_tx: mpsc::UnboundedSender<SessionIngress>,
     accumulator: StreamingAccumulator,
     children: ChildSessions,
-    guards: Vec<agent_client_protocol::DynamicHandlerGuard<Agent>>,
+    pub(super) guards: Vec<agent_client_protocol::DynamicHandlerGuard<Agent>>,
 }
 
 impl<'a> SessionRuntime<'a> {
@@ -928,6 +944,11 @@ pub(super) async fn acquire_session(
                 .start_session()
                 .await?;
             let replayed = drain_replay_updates(&mut session, capture).await;
+            if capture && replayed.is_empty() {
+                tracing::warn!(
+                    "session/load completed with 0 buffered replay notifications; waiting for any post-response history updates"
+                );
+            }
             Ok(AcquiredSession {
                 session,
                 is_resumed: true,
@@ -1004,7 +1025,7 @@ pub(super) async fn drain_replay_updates(
                         Ok(None) => {}
                         Err(err) => {
                             tracing::warn!("failed to decode a session/load replay update: {err}");
-                            break;
+                            continue;
                         }
                     }
                 } else {

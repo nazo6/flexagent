@@ -121,6 +121,8 @@ struct MockAgentInner {
     external_sessions: Mutex<Vec<AgentSessionInfo>>,
     /// Whether the mock agent can replay history (`loadSession`)
     external_history: AtomicBool,
+    /// Events emitted during `start_session` when `capture_history` is requested
+    start_replay_events: Mutex<Vec<UnifiedEventPayload>>,
 }
 
 impl MockAgent {
@@ -169,6 +171,15 @@ impl MockAgent {
         self.inner
             .external_history
             .store(supports_history, Ordering::SeqCst);
+    }
+
+    /// Sets replay events emitted before `Idle` when `capture_history` is true.
+    pub(crate) fn set_start_replay_events(&self, events: Vec<UnifiedEventPayload>) {
+        *self
+            .inner
+            .start_replay_events
+            .lock()
+            .expect("start replay events") = events;
     }
 
     /// List of sent prompts.
@@ -265,6 +276,10 @@ impl AgentDriver for MockAgent {
             .resume
             .as_ref()
             .and_then(|resume| resume.agent_session_id.clone());
+        let capturing_history = req
+            .resume
+            .as_ref()
+            .is_some_and(|resume| resume.capture_history);
         self.inner.starts.lock().expect("starts").push(MockStart {
             session_id: req.session_id,
             cwd: req.cwd,
@@ -280,13 +295,13 @@ impl AgentDriver for MockAgent {
                 "send the agent session binding"
             );
         }
-        if let Some(capabilities) = self
+        let emitted_capabilities = self
             .inner
             .start_capabilities
             .lock()
             .expect("start capabilities")
-            .clone()
-        {
+            .clone();
+        if let Some(capabilities) = emitted_capabilities.clone() {
             fxg_protocol::discard_with!(
                 event_tx.send(DriverEvent::Event(
                     UnifiedEventPayload::CapabilitiesUpdated {
@@ -299,6 +314,22 @@ impl AgentDriver for MockAgent {
                 )),
                 "send capabilities to the probe"
             );
+        }
+        if capturing_history {
+            let replay = self
+                .inner
+                .start_replay_events
+                .lock()
+                .expect("start replay events")
+                .clone();
+            for payload in replay {
+                fxg_protocol::discard_with!(
+                    event_tx.send(DriverEvent::Event(payload)),
+                    "send replay event"
+                );
+            }
+        }
+        if emitted_capabilities.is_some() || capturing_history {
             fxg_protocol::discard_with!(
                 event_tx.send(DriverEvent::Event(UnifiedEventPayload::StatusChanged {
                     status: SessionStatus::Idle,

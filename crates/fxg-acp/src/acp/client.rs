@@ -874,29 +874,35 @@ pub(super) async fn run_acp_process(
                 // return the error and shut the process down (the caller falls back
                 // to a cold start).
                 let (ingress_tx, ingress_rx) = mpsc::unbounded_channel();
-                let (session, acp_session_id, context_restored, capabilities_state, replayed) =
-                    match build_session(
-                        &cx,
-                        &agent_capabilities,
-                        &params,
-                        &events,
-                        &contexts,
-                        &ingress_tx,
-                        &auth_methods,
-                    )
-                    .await
-                    {
-                        Ok(built) => built,
-                        Err(err) => {
-                            if ready.send(Err(err)).is_err() {
-                                tracing::debug!(
-                                    "session waiter dropped before the start failure was reported"
-                                );
-                            }
-                            lease.mark_dispose();
-                            break;
+                let BuiltSession {
+                    session,
+                    acp_session_id,
+                    context_restored,
+                    capabilities_state,
+                    mut runtime,
+                    capture_history,
+                } = match build_session(
+                    &cx,
+                    &agent_capabilities,
+                    &params,
+                    &events,
+                    &contexts,
+                    &ingress_tx,
+                    &auth_methods,
+                )
+                .await
+                {
+                    Ok(built) => built,
+                    Err(err) => {
+                        if ready.send(Err(err)).is_err() {
+                            tracing::debug!(
+                                "session waiter dropped before the start failure was reported"
+                            );
                         }
-                    };
+                        lease.mark_dispose();
+                        break;
+                    }
+                };
                 let session_end_tx = lease.take_session_end_sender();
                 let handle = AcpSessionHandle {
                     acp_session_id: acp_session_id.clone(),
@@ -914,11 +920,10 @@ pub(super) async fn run_acp_process(
                 }
 
                 // 3) Turn loop (serializes prompt sends with update reads)
-                let mut guards = Vec::new();
                 if let Some(parser) = params.acp_parser.clone() {
                     let handler = VendorNotificationHandler::new(parser, ingress_tx.clone());
                     match cx.add_dynamic_handler(handler) {
-                        Ok(guard) => guards.push(guard),
+                        Ok(guard) => runtime.guards.push(guard),
                         Err(err) => {
                             tracing::warn!("failed to register vendor notification handler: {err}");
                         }
@@ -927,15 +932,10 @@ pub(super) async fn run_acp_process(
                 let outcome = serve_session(
                     session,
                     cmd_rx,
-                    &events,
-                    capabilities_state,
                     &prompt_capabilities,
-                    Arc::clone(&contexts),
-                    params.cwd.clone(),
-                    ingress_tx,
                     ingress_rx,
-                    guards,
-                    replayed,
+                    runtime,
+                    capture_history,
                 )
                 .await;
                 contexts

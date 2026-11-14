@@ -385,10 +385,30 @@ impl SessionManager {
         // Event pump
         let inner = Arc::clone(&self.inner);
         let pump_session_id = params.session_id.to_owned();
+        let (flushed_tx, flushed_rx) = if params
+            .resume
+            .as_ref()
+            .is_some_and(|resume| resume.capture_history)
+        {
+            let (tx, rx) = tokio::sync::oneshot::channel();
+            (Some(tx), Some(rx))
+        } else {
+            (None, None)
+        };
         fxg_protocol::spawn_guarded!(
             "session event pump",
-            pump_events(inner, pump_session_id, event_rx)
+            pump_events(inner, pump_session_id, event_rx, flushed_tx)
         );
+        if let Some(rx) = flushed_rx
+            && tokio::time::timeout(Duration::from_secs(5), rx)
+                .await
+                .is_err()
+        {
+            tracing::warn!(
+                session_id = %params.session_id,
+                "timed out waiting for initial imported events to flush to node.db"
+            );
+        }
         Ok(StartedDriverSession { context_restored })
     }
     /// Imports an existing agent session by recording its agent-side ID and

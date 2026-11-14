@@ -171,12 +171,9 @@
       loadedFor = id;
       selectedSubagentId = null;
       activePanel = null;
-      const target = sync.timelineFor(id);
-      if (target.events.length === 0) {
-        sync.loadSessionEvents(id).catch(() => {
-          /* Ignore: the WS replay will make it visible once it arrives. */
-        });
-      }
+      sync.loadSessionEvents(id).catch(() => {
+        /* Ignore: the WS replay will make it visible once it arrives. */
+      });
     }
     return () => sync.setActiveSession(null);
   });

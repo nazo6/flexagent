@@ -1854,3 +1854,58 @@ async fn first_prompt_updates_default_title() {
         .expect("session");
     assert_eq!(second_row.title, "Implement login page");
 }
+
+#[tokio::test]
+async fn import_session_flushes_replayed_events_before_returning() {
+    let (manager, mock, dir) = setup().await;
+    mock.set_resume_supported(true);
+    mock.set_start_replay_events(vec![
+        UnifiedEventPayload::UserMessage {
+            text: "earlier prompt".to_owned(),
+            attachments: Vec::new(),
+            client_source: ClientSource::Import,
+        },
+        UnifiedEventPayload::AgentMessage {
+            message_id: "replay-1".to_owned(),
+            text: "earlier answer".to_owned(),
+            is_complete: true,
+            subagent_id: None,
+        },
+    ]);
+
+    let session_id = manager
+        .import_session(
+            &CommandId::from("c-import-flush"),
+            "mock",
+            "agent-ext-flush-1",
+            dir.path(),
+            None,
+            true,
+        )
+        .await
+        .expect("import succeeds");
+
+    // Imported history must already be queryable in node.db without sleeping.
+    let batch = manager
+        .bus()
+        .db()
+        .session_events_after(&session_id, 0, 100)
+        .await
+        .expect("events");
+    assert!(
+        batch.events.iter().any(|event| matches!(
+            &event.payload,
+            UnifiedEventPayload::UserMessage { text, .. } if text == "earlier prompt"
+        )),
+        "expected replayed user message in node.db immediately after import, got: {:?}",
+        batch.events
+    );
+    assert!(
+        batch.events.iter().any(|event| matches!(
+            &event.payload,
+            UnifiedEventPayload::AgentMessage { text, .. } if text == "earlier answer"
+        )),
+        "expected replayed agent message in node.db immediately after import, got: {:?}",
+        batch.events
+    );
+}

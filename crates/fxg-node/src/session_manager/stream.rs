@@ -6,6 +6,7 @@ pub(super) async fn pump_events(
     inner: Arc<Inner>,
     session_id: String,
     mut event_rx: mpsc::UnboundedReceiver<DriverEvent>,
+    mut initial_flushed: Option<tokio::sync::oneshot::Sender<()>>,
 ) {
     while let Some(event) = event_rx.recv().await {
         match event {
@@ -33,8 +34,13 @@ pub(super) async fn pump_events(
                         "failed to record the driver failure: {err}"
                     );
                 }
+                if let Some(tx) = initial_flushed.take() {
+                    fxg_protocol::discard_with!(tx.send(()), "notify initial event flush");
+                }
             }
             DriverEvent::Event(payload) => {
+                let is_status_changed =
+                    matches!(&payload, UnifiedEventPayload::StatusChanged { .. });
                 match &payload {
                     UnifiedEventPayload::StatusChanged {
                         status,
@@ -209,8 +215,14 @@ pub(super) async fn pump_events(
                         tracing::warn!(session_id = %session_id, "failed to persist driver event: {err:#}");
                     }
                 }
+                if is_status_changed && let Some(tx) = initial_flushed.take() {
+                    fxg_protocol::discard_with!(tx.send(()), "notify initial event flush");
+                }
             }
         }
+    }
+    if let Some(tx) = initial_flushed.take() {
+        fxg_protocol::discard_with!(tx.send(()), "notify initial event flush");
     }
     // Channel closed = the driver (agent process) exited.
     // The transition to `Stopped` must also be reflected in the DB `sessions`
