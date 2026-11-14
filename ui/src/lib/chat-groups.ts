@@ -12,6 +12,10 @@ function subagentIdOf(item: TimelineItem): string | null {
   return "subagentId" in item ? item.subagentId : null;
 }
 
+function isAutoApprovedPermission(item: TimelineItem): boolean {
+  return item.kind === "permission" && item.resolved?.resolvedBy === "auto";
+}
+
 interface GroupOptions {
   /**
    * Whether items tagged with `subagentId` are collected into a subagent block.
@@ -122,7 +126,9 @@ export function groupActivitySections(
  *
  * Tool calls that only exist to trigger a question are omitted: the
  * elicitation card (`item.kind === "elicitation"`) already shows the question,
- * and the linked tool call carries no extra information.
+ * and the linked tool call carries no extra information. Auto-approved
+ * permission requests are likewise omitted so they do not duplicate the tool
+ * rows or split consecutive tool calls when auto-approve is enabled.
  */
 export function groupTimelineItems(
   items: TimelineItem[],
@@ -139,6 +145,7 @@ export function groupTimelineItems(
   const subagentItems = new Map<string, TimelineItem[]>();
   if (groupSubagents) {
     for (const item of items) {
+      if (isAutoApprovedPermission(item)) continue;
       if (item.kind === "subagent") {
         subagentMeta.set(item.childSessionId, item);
       } else if (subagentIdOf(item)) {
@@ -190,6 +197,9 @@ export function groupTimelineItems(
   };
 
   for (const item of items) {
+    if (isAutoApprovedPermission(item)) {
+      continue;
+    }
     if (groupSubagents && item.kind === "subagent") {
       flushTools();
       emitSubagent(item.childSessionId, item);

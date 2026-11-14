@@ -574,6 +574,7 @@ function resolvePermission(
     selectedOptionId: payload.data.selected_option_id,
     resolvedBy: payload.data.resolved_by,
   });
+  if (payload.data.resolved_by === "auto") return;
   builder.items.push({
     kind: "notice",
     key: `permission-resolved:${payload.data.request_id}`,

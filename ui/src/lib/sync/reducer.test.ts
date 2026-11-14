@@ -464,8 +464,8 @@ describe("permissions", () => {
       }),
     ]);
     const items = buildTimelineItems(sources);
-    const permission = items.find((item) => item.kind === "permission");
-    expect(permission).toMatchObject({
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({
       kind: "permission",
       requestId: "req-1",
       resolved: { selectedOptionId: "allow_once", resolvedBy: "auto" },

@@ -76,7 +76,10 @@ function thought(text: string): TimelineItem {
   };
 }
 
-function permission(requestId: string): TimelineItem {
+function permission(
+  requestId: string,
+  resolved: { selectedOptionId: string; resolvedBy: string } | null = null,
+): TimelineItem {
   return {
     kind: "permission",
     key: `permission:${requestId}`,
@@ -87,7 +90,7 @@ function permission(requestId: string): TimelineItem {
     summary: "Run cargo test",
     options: [],
     details: null,
-    resolved: null,
+    resolved,
     subagentId: null,
   };
 }
@@ -133,6 +136,24 @@ describe("groupTimelineItems", () => {
   it("keeps the tool call when the question has no linked tool call", () => {
     const groups = groupTimelineItems([tool("q1"), question("e1", null)]);
     expect(groups.map((group) => group.kind)).toEqual(["tools", "single"]);
+  });
+
+  it("omits auto-approved permissions without splitting consecutive tool calls", () => {
+    const groups = groupTimelineItems([
+      tool("t1"),
+      permission("p1", { selectedOptionId: "allow_once", resolvedBy: "auto" }),
+      tool("t2"),
+      permission("p2", { selectedOptionId: "allow_once", resolvedBy: "user" }),
+    ]);
+    expect(groups.map((group) => group.kind)).toEqual(["tools", "single"]);
+    expect(groups[0]).toMatchObject({
+      kind: "tools",
+      tools: [{ toolCallId: "t1" }, { toolCallId: "t2" }],
+    });
+    expect(groups[1]).toMatchObject({
+      kind: "single",
+      item: { kind: "permission", requestId: "p2" },
+    });
   });
 });
 
