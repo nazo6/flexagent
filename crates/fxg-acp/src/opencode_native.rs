@@ -1029,8 +1029,8 @@ async fn spawn_server(
         }
     };
     #[cfg(windows)]
-    if let Some(guard) = guard.as_ref()
-        && let Err(err) = guard.attach_raw_handle(child.raw_handle())
+    if let (Some(guard), Some(handle)) = (guard.as_ref(), child.raw_handle())
+        && let Err(err) = guard.attach_raw_handle(handle)
     {
         tracing::warn!("failed to bind opencode serve to a Windows Job Object: {err}");
     }
