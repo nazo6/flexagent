@@ -16,19 +16,44 @@ export function configValueToString(value: ConfigOptionValue | null): string {
   return typeof value === "string" ? value : JSON.stringify(value);
 }
 
-/** Resolve a choice's display label (supports booleans, object values such as `{ providerID, id, name }`, etc.). */
+/** Provider part of a `provider/model` value, when present. */
+function providerFromValue(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const separator = value.indexOf("/");
+  if (separator <= 0 || separator === value.length - 1) return null;
+  return value.slice(0, separator);
+}
+
+/**
+ * Stable identity of a config value.
+ *
+ * ACP reports select options as `{ value, name, description }`. Matching on
+ * the wire value keeps saved preferences and favorites working even when the
+ * agent changes only the display label.
+ */
+export function configValueKey(value: ConfigOptionValue | null): string {
+  if (value !== null && typeof value === "object" && !Array.isArray(value)) {
+    const raw = (value as Record<string, JsonValue>).value;
+    if (typeof raw === "string" && raw !== "") return raw;
+  }
+  return configValueToString(value);
+}
+
+/** Resolve a choice's display label (supports booleans and ACP choices). */
 function choiceLabel(raw: ConfigOptionValue): string {
   if (typeof raw === "boolean") return raw ? m.lib_config_enabled() : m.lib_config_disabled();
   if (raw !== null && typeof raw === "object" && !Array.isArray(raw)) {
     const record = raw as Record<string, JsonValue>;
+    const value = record.value;
     const name = record.name;
-    if (typeof name === "string" && name !== "") return name;
-    const provider = record.providerID;
-    const id = record.id;
-    if (typeof provider === "string" && typeof id === "string") {
-      return `${provider}/${id}`;
+    if (typeof name === "string" && name !== "") {
+      const provider = providerFromValue(value);
+      if (provider !== null && name.startsWith(`${provider}/`)) {
+        return name.slice(provider.length + 1);
+      }
+      return name;
     }
-    if (typeof id === "string" && id !== "") return id;
+    if (typeof value === "string" && value !== "") return value;
   }
   return configValueToString(raw);
 }
@@ -37,9 +62,9 @@ function choiceLabel(raw: ConfigOptionValue): string {
  * Convert `ConfigOptionInfo.options` into Select choices.
  *
  * `null` values are excluded because they cannot be selected. Object values
- * (such as model references `{ providerID, id, name }`) use their JSON string
- * as the Select value and are restored to the original object by
- * [`resolveConfigChoice`] when submitting `set_config`.
+ * (such as ACP choices `{ value, name }`) use their JSON string as the Select
+ * value and are restored to the original object by [`resolveConfigChoice`]
+ * when submitting `set_config`.
  */
 export function configChoices(options: ConfigOptionValue[]): ConfigOptionChoice[] {
   return options.map((raw) => ({
@@ -58,9 +83,11 @@ export function configChoices(options: ConfigOptionValue[]): ConfigOptionChoice[
 export function configChoiceDescription(raw: ConfigOptionValue): string | null {
   if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return null;
   const record = raw as Record<string, JsonValue>;
-  const provider = record.providerID;
+  const description = record.description;
+  if (typeof description === "string" && description.trim() !== "") return description;
   const name = record.name;
-  if (typeof provider === "string" && provider !== "" && typeof name === "string" && name !== "") {
+  const provider = providerFromValue(record.value);
+  if (provider !== null && typeof name === "string" && name.startsWith(`${provider}/`)) {
     return provider;
   }
   return null;
@@ -69,21 +96,12 @@ export function configChoiceDescription(raw: ConfigOptionValue): string | null {
 /**
  * Stable identity of a model choice.
  *
- * Model values are usually objects such as `{ providerID, id, name }`. The
- * display name can change between agent versions, so favorites must key on
- * `providerID/id` instead of the serialized choice value.
+ * Model values are ACP choices `{ value, name }`. The display name can change
+ * between agent versions, so favorites must key on the wire value instead of
+ * the serialized choice.
  */
 export function modelChoiceKey(raw: ConfigOptionValue): string {
-  if (raw !== null && typeof raw === "object" && !Array.isArray(raw)) {
-    const record = raw as Record<string, JsonValue>;
-    const provider = record.providerID;
-    const id = record.id;
-    if (typeof provider === "string" && provider !== "" && typeof id === "string" && id !== "") {
-      return `${provider}/${id}`;
-    }
-    if (typeof id === "string" && id !== "") return id;
-  }
-  return configValueToString(raw);
+  return configValueKey(raw);
 }
 
 /** Whether the option is the agent's model selector. */
@@ -143,10 +161,11 @@ export function resolveInitialConfig(
     if (!isComposerConfigOption(option)) continue;
     const choices = configChoices(option.options);
     const savedValue = saved[option.key];
-    result[option.key] =
-      savedValue !== undefined && selectedConfigValue(choices, savedValue) !== undefined
-        ? savedValue
-        : option.current_value;
+    const savedChoice =
+      savedValue === undefined
+        ? undefined
+        : choices.find((choice) => configValueKey(choice.raw) === configValueKey(savedValue));
+    result[option.key] = savedChoice?.raw ?? option.current_value;
   }
   return result;
 }
@@ -156,7 +175,10 @@ export function resolveConfigChoice(
   choices: ConfigOptionChoice[],
   value: string,
 ): ConfigOptionValue {
-  return choices.find((choice) => choice.value === value)?.raw ?? value;
+  const selected =
+    choices.find((candidate) => candidate.value === value) ??
+    choices.find((candidate) => configValueKey(candidate.raw) === value);
+  return selected?.raw ?? value;
 }
 
 /**
@@ -170,6 +192,6 @@ export function selectedConfigValue(
   choices: ConfigOptionChoice[],
   currentValue: ConfigOptionValue | null,
 ): string | undefined {
-  const value = configValueToString(currentValue);
-  return choices.some((choice) => choice.value === value) ? value : undefined;
+  const key = configValueKey(currentValue);
+  return choices.find((choice) => configValueKey(choice.raw) === key)?.value;
 }

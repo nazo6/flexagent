@@ -229,7 +229,15 @@ pub(super) async fn build_session<'a>(
                 .iter_mut()
                 .find(|option| is_mode_option(option))
         {
-            option.current_value = ConfigOptionValue::Select(mode_id.clone());
+            // Keep the label from the agent's option list when the mode exists.
+            option.current_value = option
+                .options
+                .iter()
+                .find(|choice| choice.select_value() == Some(mode_id.as_str()))
+                .cloned()
+                .unwrap_or_else(|| {
+                    ConfigOptionValue::Choice(ConfigOptionChoice::from_value(mode_id.clone()))
+                });
         }
     }
     let capabilities_state = SessionCapabilitiesState {

@@ -54,10 +54,11 @@ use agent_client_protocol::{AcpAgent, AcpAgentConfig, Agent, Client};
 use anyhow::{Context, anyhow, bail};
 use async_trait::async_trait;
 use fxg_protocol::common::{
-    AgentAuthMethodInfo, AgentAuthMethodKind, CommandInfo, ConfigOptionCategory, ConfigOptionInfo,
-    ConfigOptionValue, ElicitationContent, ElicitationMode as FxgElicitationMode,
-    ElicitationPropertyKind, ElicitationSchema, ElicitationValue, FileDiff, ForkScope, ModeInfo,
-    PermissionOption, PermissionOptionKind as FxgPermissionOptionKind, PlanEntry,
+    AgentAuthMethodInfo, AgentAuthMethodKind, CommandInfo, ConfigOptionCategory,
+    ConfigOptionChoice, ConfigOptionInfo, ConfigOptionValue, ElicitationContent,
+    ElicitationMode as FxgElicitationMode, ElicitationPropertyKind, ElicitationSchema,
+    ElicitationValue, FileDiff, ForkScope, ModeInfo, PermissionOption,
+    PermissionOptionKind as FxgPermissionOptionKind, PlanEntry,
     PlanEntryStatus as FxgPlanEntryStatus, PromptInput, StreamDeltaPayload,
     ToolCallKind as FxgToolCallKind, ToolCallStatus as FxgToolCallStatus, TurnStopReason,
     UsageCost,

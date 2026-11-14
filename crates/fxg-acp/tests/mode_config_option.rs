@@ -104,8 +104,25 @@ async fn modes_come_from_config_options_and_set_mode_uses_set_config() {
             .iter()
             .find(|option| option.key == "mode")
             .map(|option| &option.current_value),
-        Some(&fxg_protocol::common::ConfigOptionValue::Select(
-            "plan".to_owned()
+        Some(&fxg_protocol::common::ConfigOptionValue::Choice(
+            fxg_protocol::common::ConfigOptionChoice {
+                value: "plan".to_owned(),
+                name: "Plan".to_owned(),
+                description: Some("Read-only planning.".to_owned()),
+            }
+        ))
+    );
+    assert_eq!(
+        config_options
+            .iter()
+            .find(|option| option.key == "model")
+            .map(|option| &option.current_value),
+        Some(&fxg_protocol::common::ConfigOptionValue::Choice(
+            fxg_protocol::common::ConfigOptionChoice {
+                value: "m1".to_owned(),
+                name: "Model 1".to_owned(),
+                description: None,
+            }
         ))
     );
 

@@ -760,24 +760,44 @@ fn maps_grouped_select_options() {
     );
     assert_eq!(
         mapped.current_value,
-        ConfigOptionValue::Select("gpt-4".to_owned())
+        ConfigOptionValue::Choice(fxg_protocol::common::ConfigOptionChoice {
+            value: "gpt-4".to_owned(),
+            name: "GPT-4".to_owned(),
+            description: None,
+        })
     );
     assert_eq!(
         mapped.options,
         vec![
-            ConfigOptionValue::Select("gpt-4".to_owned()),
-            ConfigOptionValue::Select("gpt-3.5".to_owned()),
-            ConfigOptionValue::Select("claude-3".to_owned()),
+            ConfigOptionValue::Choice(fxg_protocol::common::ConfigOptionChoice {
+                value: "gpt-4".to_owned(),
+                name: "GPT-4".to_owned(),
+                description: None,
+            }),
+            ConfigOptionValue::Choice(fxg_protocol::common::ConfigOptionChoice {
+                value: "gpt-3.5".to_owned(),
+                name: "GPT-3.5".to_owned(),
+                description: None,
+            }),
+            ConfigOptionValue::Choice(fxg_protocol::common::ConfigOptionChoice {
+                value: "claude-3".to_owned(),
+                name: "Claude 3".to_owned(),
+                description: None,
+            }),
         ]
     );
 }
 
 #[test]
-fn parses_bare_config_value_ids() {
-    let value = parse_config_value(ConfigOptionValue::Select(
-        "opencode-go/deepseek-v4.1-flash".to_owned(),
+fn parses_choice_config_values_as_wire_ids() {
+    let value = parse_config_value(ConfigOptionValue::Choice(
+        fxg_protocol::common::ConfigOptionChoice {
+            value: "opencode-go/deepseek-v4.1-flash".to_owned(),
+            name: "DeepSeek V4.1 Flash".to_owned(),
+            description: None,
+        },
     ))
-    .expect("bare string config value");
+    .expect("choice config value");
     assert_eq!(
         value.as_value_id().map(ToString::to_string).as_deref(),
         Some("opencode-go/deepseek-v4.1-flash")

@@ -4,6 +4,7 @@ import { m } from "#lib/paraglide/messages.js";
 import {
   configChoiceDescription,
   configChoices,
+  configValueKey,
   configValueToString,
   isModelOption,
   modelChoiceKey,
@@ -50,13 +51,9 @@ describe("configValueToString", () => {
     expect(configValueToString(42)).toBe("42");
     expect(configValueToString(true)).toBe("true");
     expect(configValueToString(null)).toBe("null");
-    expect(
-      configValueToString({
-        providerID: "opencode",
-        id: "gpt-5",
-        name: "GPT-5",
-      }),
-    ).toBe('{"providerID":"opencode","id":"gpt-5","name":"GPT-5"}');
+    expect(configValueToString({ value: "opencode/gpt-5", name: "GPT-5" })).toBe(
+      '{"value":"opencode/gpt-5","name":"GPT-5"}',
+    );
   });
 });
 
@@ -79,38 +76,41 @@ describe("configChoices", () => {
     ]);
   });
 
-  it("labels object options by name and keeps the raw object", () => {
+  it("labels ACP choices by name and keeps the raw object", () => {
     const choices = configChoices([
-      { providerID: "opencode", id: "gpt-5", name: "GPT-5" },
-      { providerID: "anthropic", id: "claude", name: "Claude" },
+      { value: "opencode/gpt-5", name: "GPT-5" },
+      { value: "anthropic/claude", name: "Claude" },
     ]);
     expect(choices.map((choice) => choice.label)).toEqual(["GPT-5", "Claude"]);
-    expect(choices[0].value).toBe('{"providerID":"opencode","id":"gpt-5","name":"GPT-5"}');
-    expect(choices[0].raw).toEqual({
-      providerID: "opencode",
-      id: "gpt-5",
-      name: "GPT-5",
-    });
+    expect(choices[0].value).toBe('{"value":"opencode/gpt-5","name":"GPT-5"}');
+    expect(choices[0].raw).toEqual({ value: "opencode/gpt-5", name: "GPT-5" });
   });
 
-  it("falls back to provider/id or id when name is missing", () => {
-    expect(configChoices([{ providerID: "opencode", id: "gpt-5" }])[0].label).toBe(
-      "opencode/gpt-5",
-    );
-    expect(configChoices([{ id: "gpt-5" }])[0].label).toBe("gpt-5");
+  it("falls back to the wire value when name is empty", () => {
+    expect(configChoices([{ value: "opencode/gpt-5", name: "" }])[0].label).toBe("opencode/gpt-5");
+  });
+
+  it("uses ACP choice names and strips the provider prefix", () => {
+    const choices = configChoices([
+      { value: "opencode/beam-free", name: "opencode/Beam Free" },
+      { value: "gemini-4-argon", name: "Gemini 4 Argon" },
+      { value: "build", name: "Build", description: "The default agent." },
+    ]);
+    expect(choices.map((choice) => choice.label)).toEqual(["Beam Free", "Gemini 4 Argon", "Build"]);
   });
 });
 
 describe("resolveConfigChoice", () => {
   const choices: ConfigOptionChoice[] = configChoices([
     "plan",
-    { providerID: "opencode", id: "gpt-5", name: "GPT-5" },
+    { value: "opencode/gpt-5", name: "GPT-5" },
   ]);
 
   it("restores the raw object from the JSON value", () => {
-    expect(
-      resolveConfigChoice(choices, '{"providerID":"opencode","id":"gpt-5","name":"GPT-5"}'),
-    ).toEqual({ providerID: "opencode", id: "gpt-5", name: "GPT-5" });
+    expect(resolveConfigChoice(choices, '{"value":"opencode/gpt-5","name":"GPT-5"}')).toEqual({
+      value: "opencode/gpt-5",
+      name: "GPT-5",
+    });
   });
 
   it("restores primitive choices as-is", () => {
@@ -120,34 +120,45 @@ describe("resolveConfigChoice", () => {
   it("falls back to the raw string for unknown values", () => {
     expect(resolveConfigChoice(choices, "unknown")).toBe("unknown");
   });
+
+  it("resolves a saved bare value to the current metadata choice", () => {
+    const acpChoices = configChoices([{ value: "opencode/gpt-5", name: "opencode/GPT-5" }]);
+    expect(resolveConfigChoice(acpChoices, "opencode/gpt-5")).toEqual({
+      value: "opencode/gpt-5",
+      name: "opencode/GPT-5",
+    });
+  });
 });
 
 describe("selectedConfigValue", () => {
   const choices: ConfigOptionChoice[] = configChoices([
     "plan",
-    { providerID: "opencode", id: "gpt-5", name: "GPT-5" },
+    { value: "opencode/gpt-5", name: "GPT-5" },
   ]);
 
   it("returns the select value for a known current value", () => {
     expect(selectedConfigValue(choices, "plan")).toBe("plan");
-    expect(
-      selectedConfigValue(choices, {
-        providerID: "opencode",
-        id: "gpt-5",
-        name: "GPT-5",
-      }),
-    ).toBe('{"providerID":"opencode","id":"gpt-5","name":"GPT-5"}');
+    expect(selectedConfigValue(choices, { value: "opencode/gpt-5", name: "GPT-5" })).toBe(
+      '{"value":"opencode/gpt-5","name":"GPT-5"}',
+    );
   });
 
   it("returns undefined for unset (null) or unknown values", () => {
     expect(selectedConfigValue(choices, null)).toBeUndefined();
     expect(selectedConfigValue(choices, "unknown")).toBeUndefined();
   });
+
+  it("matches a saved bare value against a metadata choice", () => {
+    const acpChoices = configChoices([{ value: "opencode/gpt-5", name: "opencode/GPT-5" }]);
+    expect(selectedConfigValue(acpChoices, "opencode/gpt-5")).toBe(
+      configValueToString({ value: "opencode/gpt-5", name: "opencode/GPT-5" }),
+    );
+  });
 });
 
 describe("configChoiceDescription", () => {
-  it("returns the provider for model objects", () => {
-    expect(configChoiceDescription({ providerID: "anthropic", id: "claude", name: "Claude" })).toBe(
+  it("returns the provider for model choices", () => {
+    expect(configChoiceDescription({ value: "anthropic/claude", name: "anthropic/Claude" })).toBe(
       "anthropic",
     );
   });
@@ -156,23 +167,42 @@ describe("configChoiceDescription", () => {
     expect(configChoiceDescription("plan")).toBeNull();
     expect(configChoiceDescription(true)).toBeNull();
   });
+
+  it("prefers the ACP description, then the provider of a model", () => {
+    expect(
+      configChoiceDescription({
+        value: "build",
+        name: "Build",
+        description: "The default agent.",
+      }),
+    ).toBe("The default agent.");
+    expect(
+      configChoiceDescription({ value: "opencode/beam-free", name: "opencode/Beam Free" }),
+    ).toBe("opencode");
+    expect(configChoiceDescription({ value: "gemini-4-argon", name: "Gemini 4 Argon" })).toBeNull();
+  });
+});
+
+describe("configValueKey", () => {
+  it("uses the wire value of a choice and serialized primitives", () => {
+    expect(configValueKey({ value: "opencode/gpt-5", name: "GPT-5" })).toBe("opencode/gpt-5");
+    expect(configValueKey("gpt-5")).toBe("gpt-5");
+    expect(configValueKey(true)).toBe("true");
+  });
 });
 
 describe("modelChoiceKey", () => {
-  it("uses providerID/id for model objects", () => {
-    expect(modelChoiceKey({ providerID: "opencode", id: "gpt-5", name: "GPT-5" })).toBe(
-      "opencode/gpt-5",
-    );
+  it("uses the wire value of a model choice", () => {
+    expect(modelChoiceKey({ value: "opencode/gpt-5", name: "GPT-5" })).toBe("opencode/gpt-5");
   });
 
   it("keeps the identity when the display name changes", () => {
-    expect(modelChoiceKey({ providerID: "opencode", id: "gpt-5", name: "GPT-5" })).toBe(
-      modelChoiceKey({ providerID: "opencode", id: "gpt-5", name: "GPT-5 (renamed)" }),
+    expect(modelChoiceKey({ value: "opencode/gpt-5", name: "GPT-5" })).toBe(
+      modelChoiceKey({ value: "opencode/gpt-5", name: "GPT-5 (renamed)" }),
     );
   });
 
-  it("falls back to the id or the serialized value", () => {
-    expect(modelChoiceKey({ id: "gpt-5" })).toBe("gpt-5");
+  it("falls back to the serialized value", () => {
     expect(modelChoiceKey("gpt-5")).toBe("gpt-5");
     expect(modelChoiceKey(true)).toBe("true");
   });
@@ -232,6 +262,20 @@ describe("resolveInitialConfig", () => {
   it("falls back to the agent current value when the saved value is stale", () => {
     expect(resolveInitialConfig([modelOption], { model: "removed-model" })).toEqual({
       model: "gpt-5",
+    });
+  });
+
+  it("upgrades a saved bare value to the current ACP choice", () => {
+    const option: ConfigOptionInfo = {
+      ...modelOption,
+      current_value: { value: "opencode/gpt-5", name: "opencode/GPT-5" },
+      options: [
+        { value: "opencode/gpt-5", name: "opencode/GPT-5" },
+        { value: "opencode/gpt-4", name: "opencode/GPT-4" },
+      ],
+    };
+    expect(resolveInitialConfig([option], { model: "opencode/gpt-4" })).toEqual({
+      model: { value: "opencode/gpt-4", name: "opencode/GPT-4" },
     });
   });
 

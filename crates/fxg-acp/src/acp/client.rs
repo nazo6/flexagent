@@ -135,7 +135,10 @@ impl ActiveSessionHandle for AcpSessionHandle {
         };
         if let Some(key) = mode_key {
             return self
-                .set_config(key, ConfigOptionValue::Select(mode_id))
+                .set_config(
+                    key,
+                    ConfigOptionValue::Choice(ConfigOptionChoice::from_value(mode_id)),
+                )
                 .await;
         }
         self.conn

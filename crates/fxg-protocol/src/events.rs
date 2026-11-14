@@ -575,10 +575,20 @@ mod tests {
                 name: "Model".to_owned(),
                 description: Some("Model used for the session".to_owned()),
                 category: Some(crate::common::ConfigOptionCategory::Model),
-                current_value: ConfigOptionValue::Select("sonnet".to_owned()),
+                current_value: ConfigOptionValue::Choice(crate::common::ConfigOptionChoice {
+                    value: "sonnet".to_owned(),
+                    name: "Claude Sonnet".to_owned(),
+                    description: None,
+                }),
                 options: vec![
-                    ConfigOptionValue::Select("sonnet".to_owned()),
-                    ConfigOptionValue::Select("haiku".to_owned()),
+                    ConfigOptionValue::Choice(crate::common::ConfigOptionChoice {
+                        value: "sonnet".to_owned(),
+                        name: "Claude Sonnet".to_owned(),
+                        description: Some("Balanced".to_owned()),
+                    }),
+                    ConfigOptionValue::Choice(crate::common::ConfigOptionChoice::from_value(
+                        "haiku",
+                    )),
                 ],
             }],
             fork_scope: None,

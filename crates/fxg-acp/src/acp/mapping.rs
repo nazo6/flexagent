@@ -206,25 +206,29 @@ pub(crate) fn map_auth_method(method: &AuthMethod) -> AgentAuthMethodInfo {
 /// Converts an ACP config option into FXG's display type.
 pub(super) fn map_config_option(option: &SessionConfigOption) -> ConfigOptionInfo {
     let (current_value, options) = match &option.kind {
-        SessionConfigKind::Select(select) => (
-            ConfigOptionValue::Select(select.current_value.to_string()),
-            match &select.options {
-                agent_client_protocol::v1::schema::SessionConfigSelectOptions::Ungrouped(
-                    values,
-                ) => values
-                    .iter()
-                    .map(|value| ConfigOptionValue::Select(value.value.to_string()))
-                    .collect(),
-                agent_client_protocol::v1::schema::SessionConfigSelectOptions::Grouped(groups) => {
-                    groups
-                        .iter()
-                        .flat_map(|group| &group.options)
-                        .map(|value| ConfigOptionValue::Select(value.value.to_string()))
-                        .collect()
+        SessionConfigKind::Select(select) => {
+            let values: Vec<&SessionConfigSelectOption> = match &select.options {
+                SessionConfigSelectOptions::Ungrouped(values) => values.iter().collect(),
+                SessionConfigSelectOptions::Grouped(groups) => {
+                    groups.iter().flat_map(|group| &group.options).collect()
                 }
+                // `SessionConfigSelectOptions` is non-exhaustive
                 _ => Vec::new(),
-            },
-        ),
+            };
+            let current_id = select.current_value.to_string();
+            let current_value = values
+                .iter()
+                .find(|value| value.value.to_string() == current_id)
+                .map_or_else(
+                    || ConfigOptionValue::Choice(ConfigOptionChoice::from_value(current_id)),
+                    |value| ConfigOptionValue::Choice(map_choice(value)),
+                );
+            let options = values
+                .iter()
+                .map(|value| ConfigOptionValue::Choice(map_choice(value)))
+                .collect();
+            (current_value, options)
+        }
         SessionConfigKind::Boolean(boolean) => (
             ConfigOptionValue::Boolean(boolean.current_value),
             vec![
@@ -244,6 +248,15 @@ pub(super) fn map_config_option(option: &SessionConfigOption) -> ConfigOptionInf
         category: option.category.as_ref().map(map_config_category),
         current_value,
         options,
+    }
+}
+
+/// Converts one ACP select option into FXG's display choice.
+fn map_choice(value: &SessionConfigSelectOption) -> ConfigOptionChoice {
+    ConfigOptionChoice {
+        value: value.value.to_string(),
+        name: value.name.clone(),
+        description: value.description.clone(),
     }
 }
 
@@ -271,7 +284,7 @@ pub(super) fn parse_config_value(
     value: ConfigOptionValue,
 ) -> anyhow::Result<SessionConfigOptionValue> {
     match value {
-        ConfigOptionValue::Select(id) => Ok(SessionConfigOptionValue::value_id(id)),
+        ConfigOptionValue::Choice(choice) => Ok(SessionConfigOptionValue::value_id(choice.value)),
         ConfigOptionValue::Boolean(enabled) => Ok(SessionConfigOptionValue::boolean(enabled)),
         ConfigOptionValue::Unknown(raw) => {
             serde_json::from_value(raw.into_inner()).map_err(Into::into)

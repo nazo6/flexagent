@@ -484,17 +484,61 @@ pub struct CommandInfo {
     pub input_hint: Option<String>,
 }
 
+/// A selectable configuration value with the display metadata reported by ACP.
+///
+/// ACP reports select options as `{ value, name, description }`. Keeping the
+/// label next to the wire value avoids re-deriving model names in agent
+/// extensions.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
+pub struct ConfigOptionChoice {
+    /// Wire value sent back to the agent
+    pub value: String,
+    /// Display name
+    pub name: String,
+    /// Optional description
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+}
+
+impl ConfigOptionChoice {
+    /// Builds a choice that carries a wire value without display metadata.
+    ///
+    /// Used for internal values (for example routing a mode through
+    /// `set_config`) where the agent's option list is not involved.
+    #[must_use]
+    pub fn from_value(value: impl Into<String>) -> Self {
+        let value = value.into();
+        Self {
+            name: value.clone(),
+            value,
+            description: None,
+        }
+    }
+}
+
 /// Value of an agent configuration entry.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[serde(untagged)]
 #[specta(collect)]
 pub enum ConfigOptionValue {
-    /// Select / model ID
-    Select(String),
+    /// Select / model choice with the display metadata reported by ACP
+    Choice(ConfigOptionChoice),
     /// Boolean toggle
     Boolean(bool),
-    /// Agent-specific value preserved as-is (e.g. `{ providerID, id, name }`)
+    /// Agent-specific value preserved as-is (e.g. `{ type, value }`)
     Unknown(RawJson),
+}
+
+impl ConfigOptionValue {
+    /// Wire ID for select-like values, if any.
+    #[must_use]
+    pub fn select_value(&self) -> Option<&str> {
+        match self {
+            Self::Choice(choice) => Some(&choice.value),
+            Self::Boolean(_) | Self::Unknown(_) => None,
+        }
+    }
 }
 
 crate::open_string_enum! {
@@ -588,4 +632,34 @@ pub struct ElicitationRequestEntry {
     pub resolved_at: Option<i64>,
     /// Who resolved it (`cli` / `web` / `android_push`)
     pub resolved_by: Option<ResolvedBy>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn config_option_values_accept_choice_and_unknown_shapes() {
+        let choice: ConfigOptionValue = serde_json::from_value(serde_json::json!({
+            "value": "opencode/beam-free",
+            "name": "opencode/Beam Free",
+            "description": "Free model",
+        }))
+        .expect("choice value");
+        assert_eq!(choice.select_value(), Some("opencode/beam-free"));
+        let serialized = serde_json::to_value(&choice).expect("serialize");
+        assert_eq!(serialized["value"], "opencode/beam-free");
+        assert_eq!(serialized["name"], "opencode/Beam Free");
+
+        let value_only = ConfigOptionValue::Choice(ConfigOptionChoice::from_value("fast"));
+        assert_eq!(value_only.select_value(), Some("fast"));
+
+        let agent_specific: ConfigOptionValue = serde_json::from_value(serde_json::json!({
+            "type": "future",
+            "value": "custom",
+        }))
+        .expect("agent-specific value");
+        assert!(matches!(agent_specific, ConfigOptionValue::Unknown(_)));
+        assert_eq!(agent_specific.select_value(), None);
+    }
 }

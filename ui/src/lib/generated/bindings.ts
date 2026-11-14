@@ -314,6 +314,22 @@ export type ComponentHealth = {
 	last_error_at?: number | null,
 };
 
+/**
+ *  A selectable configuration value with the display metadata reported by ACP.
+ *
+ *  ACP reports select options as `{ value, name, description }`. Keeping the
+ *  label next to the wire value avoids re-deriving model names in agent
+ *  extensions.
+ */
+export type ConfigOptionChoice = {
+	/**  Wire value sent back to the agent */
+	value: string,
+	/**  Display name */
+	name: string,
+	/**  Optional description */
+	description?: string | null,
+};
+
 /**  Information about an agent configuration entry (model selection etc.). */
 export type ConfigOptionInfo = {
 	/**  Configuration key */
@@ -332,11 +348,11 @@ export type ConfigOptionInfo = {
 
 /**  Value of an agent configuration entry. */
 export type ConfigOptionValue =
-/**  Select / model ID */
-string |
+/**  Select / model choice with the display metadata reported by ACP */
+ConfigOptionChoice |
 /**  Boolean toggle */
 boolean |
-/**  Agent-specific value preserved as-is (e.g. `{ providerID, id, name }`) */
+/**  Agent-specific value preserved as-is (e.g. `{ type, value }`) */
 RawJson;
 
 /**  Kind of endpoint (`GET /api/v1/system/info`). */

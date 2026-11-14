@@ -15,9 +15,13 @@ use fxg_db::queries::SessionFilter;
 use fxg_protocol::SessionId;
 use fxg_protocol::client_api::AgentCapabilitiesPreview;
 use fxg_protocol::common::{
-    ConfigOptionCategory, ConfigOptionInfo, ConfigOptionValue, EventType, InitialConfig, ModeInfo,
-    PermissionOptionKind, PermissionRequestStatus, ResolvedBy,
+    ConfigOptionCategory, ConfigOptionChoice, ConfigOptionInfo, ConfigOptionValue, EventType,
+    InitialConfig, ModeInfo, PermissionOptionKind, PermissionRequestStatus, ResolvedBy,
 };
+
+fn choice(value: &str) -> ConfigOptionValue {
+    ConfigOptionValue::Choice(ConfigOptionChoice::from_value(value))
+}
 use fxg_protocol::paths::{Paths, Role};
 use fxg_protocol::settings::{AgentSettings, CustomAgentConfig};
 
@@ -192,11 +196,8 @@ async fn probe_agent_capabilities_returns_options_and_caches() {
             name: "Model".to_owned(),
             description: Some("Model used for the session".to_owned()),
             category: Some(ConfigOptionCategory::Model),
-            current_value: ConfigOptionValue::Select("gpt-5".to_owned()),
-            options: vec![
-                ConfigOptionValue::Select("gpt-5".to_owned()),
-                ConfigOptionValue::Select("gpt-4".to_owned()),
-            ],
+            current_value: choice("gpt-5"),
+            options: vec![choice("gpt-5"), choice("gpt-4")],
         }],
     };
     mock.set_start_capabilities(preview.clone());
@@ -238,7 +239,7 @@ async fn probe_agent_capabilities_returns_options_and_caches() {
     // temporary session so dependent options (effort, ...) can be discovered.
     let model_config = vec![InitialConfig {
         key: "model".to_owned(),
-        value: ConfigOptionValue::Select("gpt-4".to_owned()),
+        value: choice("gpt-4"),
     }];
     let _ = manager
         .probe_agent_capabilities("mock", dir.path(), &model_config, false)
@@ -346,8 +347,8 @@ async fn probe_applies_extension_capability_overlay() {
             name: "Model".to_owned(),
             description: None,
             category: Some(ConfigOptionCategory::Model),
-            current_value: ConfigOptionValue::Select("gpt-5".to_owned()),
-            options: vec![ConfigOptionValue::Select("gpt-5".to_owned())],
+            current_value: choice("gpt-5"),
+            options: vec![choice("gpt-5")],
         }],
     });
 

@@ -413,7 +413,11 @@ impl CapabilityOverlay {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fxg_protocol::common::ConfigOptionCategory;
+    use fxg_protocol::common::{ConfigOptionCategory, ConfigOptionChoice};
+
+    fn choice(value: &str) -> ConfigOptionValue {
+        ConfigOptionValue::Choice(ConfigOptionChoice::from_value(value))
+    }
 
     fn option(key: &str, name: &str, values: &[&str]) -> ConfigOptionInfo {
         ConfigOptionInfo {
@@ -421,11 +425,8 @@ mod tests {
             name: name.to_owned(),
             description: None,
             category: Some(ConfigOptionCategory::Model),
-            current_value: ConfigOptionValue::Select(values[0].to_owned()),
-            options: values
-                .iter()
-                .map(|value| ConfigOptionValue::Select((*value).to_owned()))
-                .collect(),
+            current_value: choice(values[0]),
+            options: values.iter().map(|value| choice(value)).collect(),
         }
     }
 
@@ -464,11 +465,8 @@ mod tests {
                 ConfigOptionPatch::Merge {
                     key: "model".to_owned(),
                     name: Some("Model (enriched)".to_owned()),
-                    options: Some(vec![
-                        ConfigOptionValue::Select("fast".to_owned()),
-                        ConfigOptionValue::Select("smart".to_owned()),
-                    ]),
-                    current: Some(ConfigOptionValue::Select("smart".to_owned())),
+                    options: Some(vec![choice("fast"), choice("smart")]),
+                    current: Some(choice("smart")),
                 },
                 ConfigOptionPatch::Replace(option("reasoning", "Reasoning", &["low", "high"])),
                 ConfigOptionPatch::Remove {

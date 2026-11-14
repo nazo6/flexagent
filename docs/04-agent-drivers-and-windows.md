@@ -22,7 +22,7 @@
 ### 1.1 エージェント実装の3層モデル
 
 ACP だけでは、アイコンや起動オプションなどのエージェント固有メタデータや、
-ACP に存在しない機能（独自 API によるモデル名取得など）を扱えない。将来の
+ACP に存在しない機能（独自 API によるモデル一覧の取得など）を扱えない。将来の
 拡張を `agent_id` 分岐なしで追加できるよう、実装を次の3層に分ける。
 現在は `AgentCatalog`、Tier 2 (`ExtendedAcpDriver` + `AgentExtension`)、
 Tier 3 (`impl AgentDriver`) の基盤を持ち、`opencode` は Tier 2 で実装している。
@@ -51,9 +51,13 @@ Tier 3 (`impl AgentDriver`) の基盤を持ち、`opencode` は Tier 2 で実装
 - driver の選択は `AgentLaunchSpec.driver_kind` と `extension` で行う。
   Tier 2 の `ExtendedAcpDriver` は extension ID ごとに1つだけ生成して共有する。
 - Tier 3 の builtin ID は予約し、custom 定義による上書きを拒否する。
-- 組み込みの `opencode` extension は、ACP が返す `provider/model` を
-  `{ value, name, providerID, id }` に変換して読みやすいモデル名を表示する。
-  `value` は元の ACP ID のまま保持するため `set_config` は従来どおり動作する。
+- ACP の config option は `{ value, name, description }` を返すため、fxg は
+  これを `ConfigOptionChoice` として保持する。モデル名や説明を extension で
+  再生成せず、`value` だけを `set_config` に送る。表示名の provider prefix 除去
+  などは UI の汎用処理で行う。
+- 組み込みの `opencode` extension は、ACP では扱えない vendor 差分
+  (`opencode/session/child_update` の子セッション更新と、権限要求への子 ID 付与)
+  だけを担当する。
 - `AgentSummary.icon` は `builtin:<id>` または URL を返す。Web UI は
   `builtin:opencode` を同梱アイコン (`/agents/opencode.png`) に解決し、
   `builtin:antigravity` / `builtin:copilot` / `builtin:qwen` /
@@ -117,7 +121,7 @@ Tier 3 (`impl AgentDriver`) の基盤を持ち、`opencode` は Tier 2 で実装
    - Registry のエージェントを直接起動することはない。`npx` / `uvx` で
      使いたい場合は、先に import して custom 定義にする。
    - 代表例: `fxg session new opencode` は `opencode acp`、`fxg session new agy`
-     は `agy acp` として起動する（opencode は Tier 2 としてモデル名を補う）。
+     は `agy acp` として起動する。
 3. **import 時のコマンド変換**:
    - `binary`: `PATH` 上の CLI が見つかればそのコマンドを使う。`PATH` に無く
      npx / uvx 配布があれば、その配布形態で起動する。binary のみで `PATH` に
@@ -272,8 +276,8 @@ ACP Registry に載っていないエージェントや自前の ACP 実装は�
 4. **Tier 2 extension の再利用**:
    - `CustomAgentConfig.extension` で builtin extension を参照できる（§1.1）。
      指定時は `DriverKind::AcpExtended` となり、custom の起動定義に extension の
-     `prepare_launch` を適用する。組み込みの `opencode` extension はモデル名を
-     読みやすい表示へ変換する。
+     `prepare_launch` を適用する。組み込みの `opencode` extension は子セッション
+     更新と権限のタグ付けを追加する。
    - 未知の extension ID は保存時と起動時に拒否する。
 5. **一覧表示と優先順位**:
    - カスタム定義は常に「利用可能」として扱い、`sources: ["custom"]` で返す。
