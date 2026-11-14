@@ -156,6 +156,8 @@
   "dock_file_diff": "Diff",
   "dock_file_loading": "Loading file…",
   "dock_file_no_changes": "No changes in this file.",
+  "dock_file_preview": "Preview",
+  "dock_file_source": "Source",
   "dock_file_title": "File",
   "dock_file_too_large": "This file is too large to display ({size}).",
   "dock_file_view": "View",

@@ -54,7 +54,9 @@ Files ツリーと File タブを追加し、Changes の一覧からファイル
   - Files ツリー: 遅延読み込み、git status バッジ、隠しファイル / 重い
     ディレクトリの表示切替、変更のみ一覧、シンボリックリンク表示。
   - File タブ: Shiki の読み取り専用 View、単一ファイル Diff、バイナリ /
-    大きすぎる / 削除済みの案内。
+    大きすぎる / 削除済みの案内。Git status バッジ、Markdown の Preview / Source
+    切替、長い行でもコード背景がスクロール幅に追従する表示、タブの中クリック
+    クローズを追加した。
   - Changes: Session / Worktree / Branch の 3 スコープ。行クリックで File タブを
     Diff モードで開く。ハブ接続時は従来のインライン Diff にフォールバックする。
   - モバイルヘッダーとデスクトップレールに Files を追加した。

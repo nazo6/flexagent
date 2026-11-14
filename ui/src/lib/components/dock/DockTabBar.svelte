@@ -75,6 +75,16 @@
           title={tab.resource ?? definition.label()}
           onclick={() => onactivate(tab.id)}
           onkeydown={(event) => handleKeydown(event, index)}
+          onmousedown={(event) => {
+            // Prevent the browser's middle-click autoscroll; close on auxclick.
+            if (event.button === 1) event.preventDefault();
+          }}
+          onauxclick={(event) => {
+            if (event.button !== 1) return;
+            event.preventDefault();
+            event.stopPropagation();
+            onclose(tab.id);
+          }}
         >
           <Icon class="size-3.5 shrink-0" />
           <span class="max-w-40 truncate">{dockTabLabel(tab)}</span>

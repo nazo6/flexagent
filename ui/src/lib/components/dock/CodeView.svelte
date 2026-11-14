@@ -31,7 +31,7 @@
 
 {#if html !== null}
   <div
-    class="h-full overflow-auto rounded-md border text-[12px] [&_code]:block [&_code]:min-w-max [&_pre]:p-2 [&_pre]:font-mono [&_pre]:leading-relaxed"
+    class="h-full overflow-auto rounded-md border text-[12px] [&_code]:block [&_code]:min-w-max [&_pre]:min-w-full [&_pre]:w-max [&_pre]:p-2 [&_pre]:font-mono [&_pre]:leading-relaxed"
   >
     {@html html}
   </div>

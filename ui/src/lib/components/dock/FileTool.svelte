@@ -1,5 +1,6 @@
 <script lang="ts">
   import CodeView from "#lib/components/dock/CodeView.svelte";
+  import GitStatusBadge from "#lib/components/dock/GitStatusBadge.svelte";
   import DiffViewer from "#lib/components/diff/DiffViewer.svelte";
   import { errorMessage } from "#lib/api/error-messages.ts";
   import { basename } from "#lib/dock/paths.ts";
@@ -11,10 +12,17 @@
   } from "#lib/stores/dock.svelte.ts";
   import { dock } from "#lib/stores/dock.svelte.ts";
   import { sync } from "#lib/stores/app.svelte.ts";
-  import type { WorkspaceDiffResponse, WorkspaceFileView } from "#lib/generated/bindings.ts";
+  import MarkdownText from "#lib/components/MarkdownText.svelte";
+  import type {
+    WorkspaceDiffResponse,
+    WorkspaceFileView,
+    WorkspaceGitFileStatus,
+  } from "#lib/generated/bindings.ts";
   import { formatBytes } from "#lib/format.ts";
   import { m } from "#lib/paraglide/messages.js";
   import { cn } from "#lib/utils.ts";
+  import EyeIcon from "@lucide/svelte/icons/eye";
+  import FileCodeIcon from "@lucide/svelte/icons/file-code";
   import FileIcon from "@lucide/svelte/icons/file";
   import LoaderCircleIcon from "@lucide/svelte/icons/loader-circle";
   import RefreshCwIcon from "@lucide/svelte/icons/refresh-cw";
@@ -25,6 +33,9 @@
   const path = $derived(tab.resource ?? "");
   const mode = $derived<DockFileMode>(tab.mode ?? "view");
   const scope = $derived<DockDiffScope>(tab.scope ?? "uncommitted");
+  const isMarkdown = $derived(/\.(md|markdown|mdx)$/i.test(path));
+
+  let markdownPreview = $state(true);
 
   let view = $state<WorkspaceFileView | null>(null);
   let diff = $state<WorkspaceDiffResponse | null>(null);
@@ -32,9 +43,11 @@
   let diffLoading = $state(false);
   let viewError = $state<string | null>(null);
   let diffError = $state<string | null>(null);
+  let fileStatus = $state<WorkspaceGitFileStatus | null>(null);
   let refreshToken = $state(0);
   let viewGeneration = 0;
   let diffGeneration = 0;
+  let statusGeneration = 0;
 
   const selectedDiff = $derived(diff?.files.at(0) ?? null);
 
@@ -45,12 +58,24 @@
     const token = refreshToken;
     void token;
     if (currentPath === "" || remote) return;
+    void loadFileStatus(currentPath);
     if (currentMode === "view") {
       void loadView(currentPath);
     } else {
       void loadDiff(currentPath, currentScope);
     }
   });
+
+  async function loadFileStatus(filePath: string): Promise<void> {
+    const token = ++statusGeneration;
+    try {
+      const result = await sync.connection.client.workspaceGitStatus(ctx.nodeId, ctx.localPath);
+      if (token !== statusGeneration) return;
+      fileStatus = result.entries.find((entry) => entry.absolute_path === filePath)?.status ?? null;
+    } catch {
+      if (token === statusGeneration) fileStatus = null;
+    }
+  }
 
   async function loadView(filePath: string): Promise<void> {
     const token = ++viewGeneration;
@@ -117,6 +142,20 @@
     <span class="text-muted-foreground shrink-0 text-[10px] font-medium tracking-wide uppercase">
       {scope === "branch_base" ? m.dock_changes_scope_branch() : m.dock_changes_scope_worktree()}
     </span>
+  {:else if isMarkdown}
+    <button
+      type="button"
+      class="text-muted-foreground hover:bg-accent hover:text-foreground flex size-7 shrink-0 items-center justify-center rounded-md transition-colors"
+      title={markdownPreview ? m.dock_file_source() : m.dock_file_preview()}
+      aria-label={markdownPreview ? m.dock_file_source() : m.dock_file_preview()}
+      onclick={() => (markdownPreview = !markdownPreview)}
+    >
+      {#if markdownPreview}
+        <FileCodeIcon class="size-3.5" />
+      {:else}
+        <EyeIcon class="size-3.5" />
+      {/if}
+    </button>
   {/if}
 
   <button
@@ -135,6 +174,9 @@
   >
     <FileIcon class="size-3 shrink-0" />
     <span class="truncate">{basename(path)}</span>
+    {#if fileStatus !== null}
+      <GitStatusBadge status={fileStatus} />
+    {/if}
   </span>
 </div>
 
@@ -155,7 +197,13 @@
   {:else if view !== null}
     <div class="min-h-0 flex-1 overflow-hidden p-2">
       {#if view.content.kind === "text"}
-        <CodeView path={view.path} text={view.content.text} />
+        {#if isMarkdown && markdownPreview}
+          <div class="app-scroll h-full overflow-y-auto rounded-md border p-4">
+            <MarkdownText text={view.content.text} />
+          </div>
+        {:else}
+          <CodeView path={view.path} text={view.content.text} />
+        {/if}
       {:else if view.content.kind === "binary"}
         <p
           class="text-muted-foreground flex h-full items-center justify-center p-4 text-center text-[12px]"
