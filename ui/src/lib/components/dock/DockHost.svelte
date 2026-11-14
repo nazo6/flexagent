@@ -44,10 +44,7 @@
         id={`dock-panel-${index}`}
         role="tabpanel"
         aria-labelledby={`dock-tab-${index}`}
-        class={cn(
-          "min-h-0 flex-1 flex-col overflow-hidden",
-          isActive ? "flex" : "hidden",
-        )}
+        class={cn("min-h-0 flex-1 flex-col overflow-hidden", isActive ? "flex" : "hidden")}
       >
         {#if keepMounted || isActive}
           {#if tab.tool === "terminal"}

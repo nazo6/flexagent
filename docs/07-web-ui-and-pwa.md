@@ -69,10 +69,11 @@ Settings 画面の中間パス（`/settings`, `/settings/hub`, `/settings/nodes`
      - 連続する思考・ツール実行・サブエージェント・端末出力・Plan は「作業ブロック」として 1 行に集約・折りたたみ（承認・入力要求・通知は折りたたまず常に表示）。
      - サブエージェントは `SubagentUpdated` と `subagent_id` から親タイムライン内にツリー・インラインカードとして再構築する。
      - 境界行のアクションから Copy / Fork from here を実行可能（Fork 先ではコピー履歴末尾に元セッションへのリンクを表示）。
-   - **Workspace Dock（右レール / モバイル全画面）**:
+   - **Workspace Dock（右レール / モバイルオーバーレイ）**:
      - 右ペインは workspace（`node_id` + canonical `local_path`）スコープのタブ式ツールドック。タブ構成・アクティブタブ・幅・開閉を workspace ごとに保持し、セッション切替では閉じない。workspace が変わったときだけタブセットを入れ替える。
      - レールはツールの起動器で、Changes / Terminal を singleton タブとして開く。現在はこの 2 つで、Files / File タブは今後追加する。
      - タブバー（タブの切替・閉じる）とツール固有のツールバーを分離する。最後のタブを閉じるとドックを畳む。
+     - モバイルでは会話の上に背景を暗くしたオーバーレイとして開き、背景タップまたは右上の閉じるボタンで畳む。会話は背後に残すが `inert` にして操作対象から外す。
      - **Changes**: **This Session**（セッション内の編集差分。ノードがオフラインでも閲覧可）と **Worktree Diff**（`vs Base` / `vs HEAD`。PC は `monaco-editor`、モバイルは `shiki`）。
      - **Terminal**: 統合 Web PTY（§4）。ドックが開いている間は非アクティブでもマウントを維持し、PTY の attach を保つ。
 3. **統一コンポーザー**:

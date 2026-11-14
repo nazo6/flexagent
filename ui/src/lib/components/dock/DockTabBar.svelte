@@ -3,7 +3,6 @@
   import type { DockTab } from "#lib/stores/dock.svelte.ts";
   import { m } from "#lib/paraglide/messages.js";
   import { cn } from "#lib/utils.ts";
-  import ChevronLeftIcon from "@lucide/svelte/icons/chevron-left";
   import PanelRightCloseIcon from "@lucide/svelte/icons/panel-right-close";
   import XIcon from "@lucide/svelte/icons/x";
 
@@ -97,7 +96,7 @@
     onclick={oncollapse}
   >
     {#if mobile}
-      <ChevronLeftIcon class="size-4" />
+      <XIcon class="size-4" />
     {:else}
       <PanelRightCloseIcon class="size-4" />
     {/if}

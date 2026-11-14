@@ -435,12 +435,11 @@
     class="relative flex flex-1 overflow-hidden"
     class:select-none={isResizing}
   >
-    <!-- Chat column -->
+    <!-- Chat column. On mobile the dock is an overlay, so the chat stays
+         rendered (and dimmed) behind it; `inert` keeps it out of the tab order. -->
     <div
-      class={cn(
-        "flex h-full min-w-0 flex-1 flex-col overflow-hidden",
-        isDockOpen && "hidden lg:flex",
-      )}
+      class="flex h-full min-w-0 flex-1 flex-col overflow-hidden"
+      inert={isDockOpen && !desktopLayout}
     >
       <!-- Scrollable message timeline -->
       <div class="relative min-h-0 flex-1">
@@ -554,11 +553,23 @@
       </div>
     {/if}
 
-    <!-- Mobile full-screen dock -->
+    <!-- Mobile dock overlay. The inset panel and the dimmed, blurred backdrop
+         make it obvious that this is a layer above the conversation. -->
     {#if isDockOpen && dockContext !== null && !desktopLayout}
       {@const ctx = dockContext}
-      <div class="flex flex-1 flex-col overflow-hidden lg:hidden">
-        <DockHost {ctx} {items} mobile oncollapse={() => dock.collapse()} />
+      <div class="absolute inset-0 z-20 lg:hidden">
+        <button
+          type="button"
+          tabindex="-1"
+          aria-label={m.session_close_panel()}
+          class="bg-background/60 animate-in fade-in absolute inset-0 cursor-default backdrop-blur-[2px] duration-150"
+          onclick={() => dock.collapse()}
+        ></button>
+        <div
+          class="bg-card border-border animate-in fade-in slide-in-from-bottom-2 absolute inset-x-2 top-6 bottom-2 flex flex-col overflow-hidden rounded-xl border shadow-2xl duration-150"
+        >
+          <DockHost {ctx} {items} mobile oncollapse={() => dock.collapse()} />
+        </div>
       </div>
     {/if}
   </div>
