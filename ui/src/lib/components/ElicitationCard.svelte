@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from "svelte";
   import { Badge } from "#lib/components/ui/badge/index.ts";
   import { Button } from "#lib/components/ui/button/index.ts";
   import { Input } from "#lib/components/ui/input/index.ts";
@@ -38,14 +39,10 @@
   const properties = $derived(Object.entries(requestedSchema.properties ?? {}));
   const required = $derived(new Set(requestedSchema.required ?? []));
 
-  let values = $state<Record<string, FormValue>>({});
-  let busyAction = $state<ElicitationAction | null>(null);
-
-  // Seed initial values from the schema (default / empty)
-  // (does not read `values`, so updating them does not re-run this effect)
-  $effect(() => {
+  /** Seed the form from the schema (default / empty) for this elicitation. */
+  function initialValues(schema: ElicitationSchema): Record<string, FormValue> {
     const next: Record<string, FormValue> = {};
-    for (const [key, property] of Object.entries(requestedSchema.properties ?? {})) {
+    for (const [key, property] of Object.entries(schema.properties ?? {})) {
       if (property.default !== undefined) {
         next[key] = property.default as FormValue;
       } else if (property.type === "boolean") {
@@ -56,8 +53,12 @@
         next[key] = "";
       }
     }
-    values = next;
-  });
+    return next;
+  }
+
+  // A card is created per elicitation, so the schema is fixed for its lifetime.
+  let values = $state<Record<string, FormValue>>(untrack(() => initialValues(requestedSchema)));
+  let busyAction = $state<ElicitationAction | null>(null);
 
   const missingRequired = $derived(
     [...required].filter((key) => {

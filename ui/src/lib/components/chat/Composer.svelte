@@ -70,7 +70,18 @@
   let resuming = $state(false);
   let fileBrowserOpen = $state(false);
   let fileInput = $state<HTMLInputElement | null>(null);
-  let autoApprove = $state(false);
+  /**
+   * Policy choice made by this click, shown until the session projection
+   * reports the new one. The derived value below drops it once the reported
+   * policy changes, so no effect has to mirror the prop into local state.
+   */
+  let optimisticPolicy = $state<{ base: string | null; value: boolean } | null>(null);
+
+  const autoApprove = $derived(
+    optimisticPolicy !== null && optimisticPolicy.base === permissionPolicy
+      ? optimisticPolicy.value
+      : permissionPolicy === "auto_allow_all",
+  );
 
   const composer = createComposerAttachments(draft.attachments);
   const attachments = $derived(composer.attachments);
@@ -85,21 +96,18 @@
     composerDrafts.setAttachments(sessionId, attachments);
   });
 
-  $effect(() => {
-    autoApprove = permissionPolicy === "auto_allow_all";
-  });
-
   async function toggleAutoApprove() {
     const policy = autoApprove ? "ask" : "auto_allow_all";
+    optimisticPolicy = { base: permissionPolicy, value: policy === "auto_allow_all" };
     const result = await sync.controlSession(sessionId, {
       action: "set_permission_policy",
       policy,
     });
     if (!result.success) {
+      optimisticPolicy = null;
       if (result.error) problems.reportInfo("permission policy", result.error);
       return;
     }
-    autoApprove = policy === "auto_allow_all";
     toast.info(autoApprove ? m.chat_auto_approve_enabled() : m.chat_auto_approve_disabled());
   }
 

@@ -32,20 +32,28 @@
   let selectedPath = $state("");
   let pickerLoading = $state(false);
 
-  $effect(() => {
-    if (open) selectedPath = "";
-  });
+  function close(): void {
+    // A dialog can be reopened programmatically, which does not emit
+    // `onOpenChange`, so clear the pending selection on every close path.
+    selectedPath = "";
+    open = false;
+  }
 
   function handleConfirm(): void {
     const target = selectedPath || pickerPath;
     if (target) {
       onSelect(target);
-      open = false;
+      close();
     }
   }
 </script>
 
-<Dialog.Root bind:open>
+<Dialog.Root
+  bind:open
+  onOpenChange={(next) => {
+    if (!next) selectedPath = "";
+  }}
+>
   <Dialog.Content class="flex max-h-[85vh] flex-col gap-3 p-4 sm:max-w-xl">
     <Dialog.Header class="gap-1">
       <Dialog.Title class="flex items-center gap-2 text-base font-semibold">
@@ -85,7 +93,7 @@
     </div>
 
     <Dialog.Footer class="gap-2 sm:gap-2">
-      <Button variant="outline" size="sm" class="h-8 text-[13px]" onclick={() => (open = false)}>
+      <Button variant="outline" size="sm" class="h-8 text-[13px]" onclick={close}>
         {m.common_cancel()}
       </Button>
       <Button

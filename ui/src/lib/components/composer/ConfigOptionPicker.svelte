@@ -42,21 +42,27 @@
 
   let open = $state(false);
   let query = $state("");
-  /** Optimistically reflect the choice until the agent reports the new value. */
-  let selected = $state<ConfigOptionValue | null>(null);
-  let favorites = $state<string[]>([]);
+  /**
+   * Optimistic choice picked by the user, kept until the agent reports a new
+   * value. It is not cleared by an effect: once the base value changes (the
+   * `set_config` result arrives), the derived value below ignores it.
+   */
+  let optimistic = $state<{ base: ConfigOptionValue | null; value: ConfigOptionValue } | null>(
+    null,
+  );
+  /** Bumped when the favorite list is written so the derived list reloads. */
+  let favoritesRevision = $state(0);
 
-  $effect(() => {
-    selected = value !== undefined ? value : option.current_value;
-  });
-
-  $effect(() => {
-    if (!open) query = "";
-  });
+  /** Value reported by the agent (or the controlled prop). */
+  const base = $derived(value !== undefined ? value : option.current_value);
+  const selected = $derived(
+    optimistic !== null && Object.is(optimistic.base, base) ? optimistic.value : base,
+  );
 
   // Favorites are a per-device preference scoped to the selected agent.
-  $effect(() => {
-    favorites = favoriteScope === "" ? [] : loadModelFavorites(favoriteScope);
+  const favorites = $derived.by(() => {
+    void favoritesRevision;
+    return favoriteScope === "" ? [] : loadModelFavorites(favoriteScope);
   });
 
   const choices = $derived(configChoices(option.options));
@@ -85,7 +91,14 @@
 
   function toggleFavorite(choice: ConfigOptionChoice): void {
     if (favoriteScope === "") return;
-    favorites = toggleModelFavorite(favoriteScope, modelChoiceKey(choice.raw));
+    toggleModelFavorite(favoriteScope, modelChoiceKey(choice.raw));
+    favoritesRevision += 1;
+  }
+
+  /** Programmatic closes do not emit `onOpenChange`, so reset the search here. */
+  function closePicker(): void {
+    open = false;
+    query = "";
   }
 </script>
 
@@ -109,9 +122,9 @@
         }
       : null}
     onselect={() => {
-      selected = choice.raw;
+      optimistic = { base, value: choice.raw };
       onchange(resolveConfigChoice(choices, choice.value));
-      open = false;
+      closePicker();
     }}
   >
     <span class="block truncate">{choice.label}</span>
@@ -130,6 +143,9 @@
   {disabled}
   showLabel={!isModelOption(option)}
   bind:open
+  onopenchange={(next) => {
+    if (!next) query = "";
+  }}
   class={className}
   contentClass="w-[min(20rem,calc(100vw-1.5rem))] p-0"
 >
@@ -182,7 +198,7 @@
         type="button"
         class="text-muted-foreground hover:bg-accent hover:text-accent-foreground flex items-center gap-1.5 border-t px-3 py-2 text-[13px] transition-colors"
         onclick={() => {
-          open = false;
+          closePicker();
           onrefresh?.();
         }}
       >

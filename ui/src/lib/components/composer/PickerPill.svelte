@@ -15,6 +15,7 @@
     class: className = "",
     contentClass = "",
     open = $bindable(false),
+    onopenchange = undefined,
     children,
   }: {
     /** Accessible name (for example "Project" or "Model"). */
@@ -30,11 +31,13 @@
     class?: string;
     contentClass?: string;
     open?: boolean;
+    /** Called whenever the popover opens or closes. */
+    onopenchange?: (open: boolean) => void;
     children?: Snippet;
   } = $props();
 </script>
 
-<Popover.Root bind:open>
+<Popover.Root bind:open onOpenChange={onopenchange}>
   <Popover.Trigger
     {disabled}
     class={cn(

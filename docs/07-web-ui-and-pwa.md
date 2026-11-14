@@ -17,6 +17,10 @@ PC ブラウザ、ローカル直結 (`node.addr`、既定 `localhost:7860`)、�
   - イベントは `event_id` / `(session_id, node_seq)` で upsert し、`LiveStreamDelta` と永続イベントを `message_id` でマージする。
 - **Runes のリアクティブ境界 (`Map` / `Set`)**:
   - `$state` が深く Proxy 化するのは plain object と配列だけのため、時間とともに書き換わるコレクション（`messageDeltas` / `thoughtDeltas` / `toolProgress` / `terminalDeltas` / `pendingPrompts` / `provisioningLogs` 等）は `svelte/reactivity` の `SvelteMap` / `SvelteSet` を使うか、更新のたびに値ごと再代入する（`ui/src/lib/sync/timeline-reactivity.test.svelte.ts` で回帰防止）。
+- **`$effect` の使い分け**:
+  - `$effect` は DOM・タイマー・ネットワーク・`localStorage` など外部系への副作用に限定する。
+  - prop をローカル state に写す、既定値を選ぶ、URL パラメータを反映するといった「値から値を作る」処理は `$derived` と明示的な上書き状態で表す。effect で「適用済みフラグ」を立てる初期化も行わない。
+  - effect が読んだ state を同じ effect で書かない。避けられない場合は `untrack` で読み取り依存を切る。ストアのアクション（`setActiveSession` など）は内部で `untrack` し、呼び出し元の effect に意図しない依存を作らない。
 
 ---
 
