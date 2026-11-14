@@ -3,7 +3,7 @@
 -- Only the hub address lives here. The pairing token is a secret and stays in
 -- `~/.flexagent/node_token` (0600). Both values are owned by the node and edited
 -- through the client API
--- (docs/changelog/2026-11-11-node-pairing-db-and-gui.md).
+-- (docs/proposals/2026-11-11-node-pairing-db-and-gui.md).
 
 CREATE TABLE node_pairing (
     id          INTEGER PRIMARY KEY CHECK (id = 1),

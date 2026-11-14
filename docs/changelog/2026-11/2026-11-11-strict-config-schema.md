@@ -5,8 +5,8 @@
 - **対象スクリプト / 設定**: `mise run fmt`, `mise run lint:errors`,
   `cargo test --workspace`
 - **関連ドキュメント**:
-  - [`docs/05-cli-and-pwa-ui.md`](../05-cli-and-pwa-ui.md) §2.2
-  - [`2026-11-11-node-pairing-db-and-gui.md`](2026-11-11-node-pairing-db-and-gui.md)
+  - [`docs/05-cli-and-pwa-ui.md`](../../05-cli-and-config.md) §2.2
+  - [`2026-11-11-node-pairing-db-and-gui.md`](../../proposals/2026-11-11-node-pairing-db-and-gui.md)
 
 ## 背景
 

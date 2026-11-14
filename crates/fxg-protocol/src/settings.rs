@@ -1,6 +1,6 @@
 //! Typed settings, secret metadata and project identity types.
 //!
-//! Design: `docs/changelog/2026-11-09-settings-consolidation-and-project-identity.md`.
+//! Design: `docs/proposals/2026-11-09-settings-consolidation-and-project-identity.md`.
 //!
 //! Settings are never sent as a generic key/value container. Each owner (node,
 //! server, bootstrap file, browser) exposes its own typed snapshot, and the Web UI

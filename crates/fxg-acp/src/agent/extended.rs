@@ -6,7 +6,7 @@
 //! [`SessionExtension`].
 //!
 //! Design: `docs/04-agent-drivers-and-windows.md` §1.1 and
-//! `docs/changelog/2026-11-11-agent-extension-architecture.md`.
+//! `docs/proposals/2026-11-11-agent-extension-architecture.md`.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;

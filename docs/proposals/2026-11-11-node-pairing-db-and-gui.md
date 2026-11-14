@@ -11,9 +11,9 @@
   - [`docs/01-architecture-and-sync.md`](../01-architecture-and-sync.md) §2.2, §7.3
   - [`docs/02-database-schema.md`](../02-database-schema.md)
   - [`docs/03-protocol-and-api.md`](../03-protocol-and-api.md)
-  - [`docs/05-cli-and-pwa-ui.md`](../05-cli-and-pwa-ui.md) §2, §3.2
+  - [`docs/05-cli-and-pwa-ui.md`](../05-cli-and-config.md) §2, §3.2
   - [`2026-11-09-settings-consolidation-and-project-identity.md`](2026-11-09-settings-consolidation-and-project-identity.md) §3.3
-  - [`2026-11-11-node-pairing-ux.md`](2026-11-11-node-pairing-ux.md)
+  - [`2026-11-11-node-pairing-ux.md`](../changelog/2026-11/2026-11-11-node-pairing-ux.md)
 
 ---
 
@@ -141,7 +141,7 @@ node.db の node_pairing.hub_url + ~/.flexagent/node_token → ペアあり
   フィールド自体を削除し、テストも DB を seed する。
 - `config.toml` は未知のキーを拒否するため、`[node] hub_url` が残っていれば
   起動時に **解析エラー** になる
-  （[`2026-11-11-strict-config-schema.md`](2026-11-11-strict-config-schema.md)）。
+  （[`2026-11-11-strict-config-schema.md`](../changelog/2026-11/2026-11-11-strict-config-schema.md)）。
 - 保存形式は既存の `fxg node pair` に合わせて **HTTP origin**
   （`http://host:port`）とし、WS エンドポイントは `node_ws_url()` で導出する。
 

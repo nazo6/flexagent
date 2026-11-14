@@ -1,7 +1,7 @@
 //! Agent catalog: definitions, launch resolution and driver selection.
 //!
 //! Design: `docs/04-agent-drivers-and-windows.md` §1.1 (planned in
-//! `docs/changelog/2026-11-11-agent-extension-architecture.md`).
+//! `docs/proposals/2026-11-11-agent-extension-architecture.md`).
 //!
 //! The catalog is the only place that knows about agent-specific launch
 //! definitions. `SessionManager` depends on it instead of on `AcpRegistry` and

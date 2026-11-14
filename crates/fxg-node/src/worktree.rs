@@ -1,6 +1,6 @@
 //! Resolving, creating, and removing Git worktrees.
 //!
-//! Design: `docs/01-architecture-and-sync.md` §5, `docs/05-cli-and-pwa-ui.md`
+//! Design: `docs/01-architecture-and-sync.md` §5, `docs/05-cli-and-config.md`
 //! §2.2/§2.3.
 //!
 //! - Worktrees created by `fxg` are aggregated under

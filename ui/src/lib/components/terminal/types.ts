@@ -5,7 +5,7 @@ export interface TerminalDimensions {
 }
 
 /**
- * Abstraction interface for the web terminal (docs/05 §3.4).
+ * Abstraction interface for the web terminal (docs/07-web-ui-and-pwa.md §4).
  *
  * `ghostty-web` (WASM / Canvas) is the standard implementation; this keeps the
  * renderer replaceable (for example with a DOM renderer such as `wterm`) and

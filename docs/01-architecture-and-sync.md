@@ -74,6 +74,14 @@ flowchart TB
   もハブの API 経由で要求されるため、ハブ必須）。
 - **CLI**: 開発者がターミナルで `fxg session new <agent>` を実行。
 
+### 運用トポロジーの 3 パターン
+
+| パターン                     | 構成                                                                      | 主な用途・特徴                                                                                                |
+| :--------------------------- | :------------------------------------------------------------------------ | :------------------------------------------------------------------------------------------------------------ |
+| **Hub + 複数 Node**          | `fxg hub` + 1 台以上の `fxg node`                                         | 標準構成。全ノード横断検索、一時 VM、中央 Web Push を利用可能                                                 |
+| **シングルノード直結**       | `fxg node` 単体（`allowed_hosts` / `allowed_origins` + リバースプロキシ） | ハブ不要。ノード自身が Web UI・Web Push (`<data>/node/vapid.json`) を提供し、Outbox 警告は抑止 (`Standalone`) |
+| **一時 VM / サンドボックス** | `fxg hub` + `fxg internal stdio --ephemeral`                              | Docker / Incus / Colab 等を `stdin/stdout` パイプ直結で起動し、終了時に `DrainAndShutdown` 後に破棄           |
+
 ---
 
 ## 2. ローカルファースト & Store-and-Forward 同期プロトコル

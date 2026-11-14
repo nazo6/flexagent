@@ -254,7 +254,7 @@ impl ProcessTreeGuard {
 /// As a result, processes inside wrapper launchers may be orphaned (the official
 /// ACP SDK handles this by killing the process group, but that terminates the
 /// root as well, so the wrapper's cleanup does not run). Details:
-/// `docs/changelog/2026-10-01-antigravity-startup.md`.
+/// `docs/proposals/2026-10-01-antigravity-startup.md`.
 #[cfg(not(windows))]
 impl ProcessTreeGuard {
     /// Does nothing on Unix, which has no Job Object equivalent (API

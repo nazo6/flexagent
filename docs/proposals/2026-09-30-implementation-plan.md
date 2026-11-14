@@ -26,7 +26,7 @@
   - [`docs/04-agent-drivers-and-windows.md`](../04-agent-drivers-and-windows.md):
     `AgentDriver`、ACP / `opencode2` 統合、Shadow Git Revert/Fork、Windows
     固有実装
-  - [`docs/05-cli-and-pwa-ui.md`](../05-cli-and-pwa-ui.md): CLI
+  - [`docs/05-cli-and-pwa-ui.md`](../05-cli-and-config.md): CLI
     コマンド完全リファレンス、設定ファイルスキーマ (`config.toml` /
     `.fxg.toml`)、PWA / Web Push 設計、ターミナル抽象化 (`ITerminalAdapter`)
 - **依存関係は自分の記憶に頼らず、常に最新のクレート/ライブラリを確認して導入する**:
@@ -52,7 +52,7 @@
     `RunWith`（async コマンド）で定義
   - `__usage_spec__` から KDL spec を出力し、`usage` CLI で manpage / Markdown
     リファレンス / シェル補完を生成して
-    [`docs/05-cli-and-pwa-ui.md`](../05-cli-and-pwa-ui.md) §1
+    [`docs/05-cli-and-pwa-ui.md`](../05-cli-and-config.md) §1
     のコマンドリファレンスと同期する
 - **フォーマッタは言語ごとに固定する (mise 管理)**:
   - Rust = `rustfmt` (`cargo fmt`) / Markdown = `dprint`
@@ -221,7 +221,7 @@
   - プロトコル・通信メッセージ・IPC型 (`ts-rs`):
     [`docs/03-protocol-and-api.md` §1〜§4](../03-protocol-and-api.md)
   - 設定ファイルスキーマ (`config.toml` / `.fxg.toml`) & `~/.flexagent/` 構成:
-    [`docs/05-cli-and-pwa-ui.md` §2.1〜§2.3](../05-cli-and-pwa-ui.md)
+    [`docs/05-cli-and-pwa-ui.md` §2.1〜§2.3](../05-cli-and-config.md)
 - **タスクリスト**:
   - [x] Cargo Workspace (`Cargo.toml` 全7クレート構成) と
         `mise.toml`（ビルド・`ts-rs` 型出力・lint・format タスク）の初期構築。
@@ -337,18 +337,18 @@
     [`docs/01-architecture-and-sync.md` §2.3](../01-architecture-and-sync.md)
   - 論理プロジェクト解決 & Git Worktree 管理:
     [`docs/01-architecture-and-sync.md` §4, §5](../01-architecture-and-sync.md),
-    [`docs/05-cli-and-pwa-ui.md` §2.2, §2.3](../05-cli-and-pwa-ui.md)
+    [`docs/05-cli-and-pwa-ui.md` §2.2, §2.3](../05-cli-and-config.md)
   - セキュリティ基礎 (Loopbackバインド・Token・Host/Origin検証):
     [`docs/01-architecture-and-sync.md` §7.1〜§7.3](../01-architecture-and-sync.md),
     [`docs/03-protocol-and-api.md` §3.0](../03-protocol-and-api.md),
-    [`docs/05-cli-and-pwa-ui.md` §4 Milestone 1](../05-cli-and-pwa-ui.md)
+    [`docs/05-cli-and-pwa-ui.md` §4 Milestone 1](../05-cli-and-config.md)
   - CLI ⇔ Daemon ローカルIPC (Named Pipe / UDS):
     [`docs/03-protocol-and-api.md` §4](../03-protocol-and-api.md)
   - Shadow Git Tree (`GIT_INDEX_FILE` + `git write-tree`):
     [`docs/04-agent-drivers-and-windows.md` §4.1](../04-agent-drivers-and-windows.md)
   - Windows Job Object / `which` (`PATHEXT`) / `dunce` / `PtySessionManager`:
     [`docs/04-agent-drivers-and-windows.md` §5.1〜§5.3](../04-agent-drivers-and-windows.md)
-  - CLI コマンド仕様: [`docs/05-cli-and-pwa-ui.md` §1](../05-cli-and-pwa-ui.md)
+  - CLI コマンド仕様: [`docs/05-cli-and-pwa-ui.md` §1](../05-cli-and-config.md)
 - **タスクリスト**:
   - [x] `fxg-pty`: Windows Job Object (`WinJobGuard`
         による親終了時の孫プロセス確実Kill)、`which::which_in` (`PATHEXT`
@@ -502,7 +502,7 @@
     [`docs/04-agent-drivers-and-windows.md` §3](../04-agent-drivers-and-windows.md)
   - セッション Revert & Fork:
     [`docs/04-agent-drivers-and-windows.md` §4](../04-agent-drivers-and-windows.md)
-  - CLI コマンド仕様: [`docs/05-cli-and-pwa-ui.md` §1](../05-cli-and-pwa-ui.md)
+  - CLI コマンド仕様: [`docs/05-cli-and-pwa-ui.md` §1](../05-cli-and-config.md)
 - **タスクリスト**:
   - [x] `fxg-acp`: `AgentDriver` / `ActiveSessionHandle` トレイト定義
   - [x] `fxg-acp`: ACP Registry (`registry.json` / `[agents.custom.*]`)
@@ -742,7 +742,7 @@
   単一バイナリ配信を完成させる。
 - **参照ドキュメント**:
   - フロントエンド技術スタック・画面構成・PWA/Web Push・`ITerminalAdapter`:
-    [`docs/05-cli-and-pwa-ui.md` §3.1〜§3.4](../05-cli-and-pwa-ui.md)
+    [`docs/05-cli-and-pwa-ui.md` §3.1〜§3.4](../05-cli-and-config.md)
   - バックグラウンド常駐化 (`fxg service`):
     [`docs/04-agent-drivers-and-windows.md` §5.4](../04-agent-drivers-and-windows.md)
 - **タスクリスト**:
@@ -997,12 +997,12 @@
   - 一時VMアーキテクチャ・プロビジョナー設定（中央サーバーホスト上で起動）・`fxg bootstrap-workspace`・Bootstrap
     短命トークン認証・Git Credential Proxy・Graceful Drain（ベストエフォート）:
     [`docs/01-architecture-and-sync.md` §6.1〜§6.4](../01-architecture-and-sync.md),
-    [`docs/05-cli-and-pwa-ui.md` §2.2, §2.3](../05-cli-and-pwa-ui.md)
+    [`docs/05-cli-and-pwa-ui.md` §2.2, §2.3](../05-cli-and-config.md)
   - Stdio トランスポート & メッセージ (`GitCredentialRequest`,
     `WorkspaceBundleUpload`, `DrainAndShutdown`):
     [`docs/03-protocol-and-api.md` §2](../03-protocol-and-api.md)
   - UI Bootstrap Log 表示 & CLI `--provisioner` 起動:
-    [`docs/05-cli-and-pwa-ui.md` §1, §3.2, §4 Milestone 6](../05-cli-and-pwa-ui.md)
+    [`docs/05-cli-and-pwa-ui.md` §1, §3.2, §4 Milestone 6](../05-cli-and-config.md)
 - **タスクリスト**:
   - [x] `fxg-node`: `fxg daemon --stdio --ephemeral` 実装（`NodeToServerMsg` /
         `ServerToNodeMsg` を `stdin/stdout` JSON Lines

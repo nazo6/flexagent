@@ -4,7 +4,7 @@
 //! The `#[derive(Cli)]` / `Args` / `Subcommands` declarations are the single
 //! source of truth, and the KDL spec, shell completions, manpage and Markdown
 //! reference are generated from `__usage_spec__` (design:
-//! `docs/05-cli-and-pwa-ui.md` §1).
+//! `docs/05-cli-and-config.md` §1).
 //!
 //! The CLI is organized around sessions (`fxg session ...`), the local node
 //! (`fxg node ...`), the hub (`fxg hub ...`), and the OS autostart service
@@ -12,7 +12,7 @@
 //! `support`) and the hidden `internal` namespace.
 
 // Migration baseline: remove this crate-level allow as Phase 1 of
-// `docs/changelog/2026-11-08-type-safety-plan.md` lands.
+// `docs/proposals/2026-11-08-type-safety-plan.md` lands.
 #![allow(
     clippy::wildcard_enum_match_arm,
     reason = "type-safety migration baseline; see docs/06-type-safety.md"

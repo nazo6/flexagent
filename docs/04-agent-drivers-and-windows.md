@@ -19,14 +19,13 @@
   プロセスを再利用プールへ返します。
 - `DriverKind` は `Acp` / `AcpExtended` / `Custom` / `Other` です。
 
-### 1.1 エージェント実装の3層モデル（実装済み）
+### 1.1 エージェント実装の3層モデル
 
 ACP だけでは、アイコンや起動オプションなどのエージェント固有メタデータや、
 ACP に存在しない機能（独自 API によるモデル名取得など）を扱えない。将来の
 拡張を `agent_id` 分岐なしで追加できるよう、実装を次の3層に分ける。
-`AgentCatalog`（Phase 1）、Tier 2 の基盤（Phase 2）、Tier 3 の基盤（Phase 3）、
-opencode の Tier 2 移行（Phase 4）まで実装済みである。Tier 3 の実例はまだ追加して
-いない。
+現在は `AgentCatalog`、Tier 2 (`ExtendedAcpDriver` + `AgentExtension`)、
+Tier 3 (`impl AgentDriver`) の基盤と `opencode` の Tier 2 移行まで実装済みである。
 
 | 層                   | 実行時の実装                           | ACP の再利用 | エージェントごとに追加するコード            |
 | :------------------- | :------------------------------------- | :----------- | :------------------------------------------ |
@@ -92,10 +91,6 @@ opencode の Tier 2 移行（Phase 4）まで実装済みである。Tier 3 の�
   含まれるため、設定変更後に古い capability で初期化済みのプロセスを
   再利用しない。UI は custom agent の編集フォームで変更し、一覧では全員の
   有効な capability をバッジで表示する。
-
-型設計・実装フェーズ・変更対象の詳細は
-[`docs/changelog/2026-11-11-agent-extension-architecture.md`](./changelog/2026-11-11-agent-extension-architecture.md)
-を参照する。
 
 ---
 
@@ -534,11 +529,11 @@ Linux / macOS は登録時に起動し、Windows は次回ログオン時に起�
   - 「ログイン時に自動起動」: `fxg service install` / `uninstall` と同一実装の
     チェック項目（登録後は実状態を再確認して表示を同期）
   - 「Web UI を開く」: `fxg web` と同じトークン付き URL を既定ブラウザで開く
-  - 「終了」: `NodeDaemon` の graceful shutdown（エージェント/PTY 停止 →
+  - 「終了」: ノードの graceful shutdown（エージェント/PTY 停止 →
     `nodes.is_online = 0` 記録）を実行して終了
 - **アイコン**: `ui/static/icon-192.png` を 32×32 へ縮小し、右下に接続状態ドット
   （緑=ハブ接続中 / グレー=スタンドアロン）を合成する。
-- **状態の取得元**: プロセス内の `DaemonState`（`node.db` / 同期ワーカー）を直接
+- **状態の取得元**: プロセス内のノード状態（`node.db` / 同期ワーカー）を直接
   参照する（HTTP を経由しない）。
 - **OS 別実装**（`tray-icon` はイベントループを自前で持たないため）:
   - **Windows** (`crates/fxg-cli/src/tray/windows.rs`): 専用スレッドで Win32

@@ -2,7 +2,7 @@
 //!
 //! Used only by the hub (Web Push notifications for Android / Desktop PWA).
 //! Subscriptions are keyed per device by `endpoint`, and keys are updated on re-registration
-//! (design: `docs/03-protocol-and-api.md` §3.1, `docs/05-cli-and-pwa-ui.md` §3.3).
+//! (design: `docs/03-protocol-and-api.md` §3.1, `docs/07-web-ui-and-pwa.md` §3.3).
 
 use fxg_protocol::util::now_ms;
 use sqlx::SqlitePool;

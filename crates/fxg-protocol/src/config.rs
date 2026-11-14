@@ -1,7 +1,7 @@
 //! Process bootstrap configuration (`node.toml` / `hub.toml`).
 //!
-//! Design: `docs/05-cli-and-pwa-ui.md` §2 and
-//! `docs/changelog/2026-11-13-data-directory-layout.md`.
+//! Design: `docs/05-cli-and-config.md` §2 and
+//! `docs/proposals/2026-11-13-data-directory-layout.md`.
 //!
 //! Only values that are needed **before** the DB opens live here: bind addresses,
 //! allowed hosts/origins and logging. Everything changed at runtime (node
@@ -217,7 +217,7 @@ pub fn hub_http_origin(input: &str) -> String {
 /// The `[log]` section: logging settings (owned by each role).
 ///
 /// Unknown keys are rejected: a typo must not be silently ignored (see
-/// `docs/changelog/2026-11-11-strict-config-schema.md`).
+/// `docs/changelog/2026-11/2026-11-11-strict-config-schema.md`).
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct LogConfig {
@@ -473,7 +473,7 @@ listen_adrr = "127.0.0.1:9000"
     #[test]
     fn leftover_hub_url_is_rejected() {
         // Pairing moved to `node.db`; a leftover key must fail loudly instead of
-        // being ignored (docs/changelog/2026-11-11-node-pairing-db-and-gui.md).
+        // being ignored (docs/proposals/2026-11-11-node-pairing-db-and-gui.md).
         let err = toml::from_str::<NodeConfig>(
             r#"
 node_id = "n1"

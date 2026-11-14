@@ -5,7 +5,7 @@
 //! management, and the Outbox sync worker.
 //!
 //! Design: `docs/01-architecture-and-sync.md` / `docs/04-agent-drivers-and-windows.md`
-//! / `docs/05-cli-and-pwa-ui.md`.
+//! / `docs/05-cli-and-config.md`.
 //!
 //! # Modules
 //!
@@ -18,7 +18,7 @@
 
 #![warn(missing_docs)]
 // Migration baseline: remove this crate-level allow as Phase 1 of
-// `docs/changelog/2026-11-08-type-safety-plan.md` lands.
+// `docs/proposals/2026-11-08-type-safety-plan.md` lands.
 #![allow(
     clippy::wildcard_enum_match_arm,
     reason = "type-safety migration baseline; see docs/06-type-safety.md"

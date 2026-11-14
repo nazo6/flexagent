@@ -1,6 +1,6 @@
 //! Resolution of the config, data, state, cache and log directories.
 //!
-//! Design: `docs/05-cli-and-pwa-ui.md` §2.1.
+//! Design: `docs/05-cli-and-config.md` §2.1.
 //!
 //! Every path is derived from a [`Role`] and five roots:
 //!

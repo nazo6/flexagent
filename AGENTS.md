@@ -41,7 +41,7 @@
     `.fxg.toml` と旧 JSON 設定ファイルは廃止。
   - 設定・データ・実行時状態・ログ・キャッシュは OS 標準ルート
     (`dirs`) 配下に置き、`node` / `hub` のロール別に分ける
-    (詳細は [`docs/05-cli-and-pwa-ui.md`](docs/05-cli-and-pwa-ui.md) §2.1)。
+    (詳細は [`docs/05-cli-and-config.md`](docs/05-cli-and-config.md) §2.1)。
   - 秘密の値は `<data>/{node,hub}/secrets/<id>` (`0600`) に置き、
     DB にはメタデータだけを保存する。API は書き込み専用で値を返さない。
   - プロジェクト同一性は `project_path_links` → Git リモート → `local:` の順で
@@ -65,8 +65,7 @@
     (`agent-client-protocol`)、`AgentCatalog` / `AgentExtension`、ACP Registry
     （custom 定義の import 用）、ローカル PATH 実行
   - `fxg-node`: ノード (ループバック HTTP/WS、Outbox 同期、Git
-    Worktree 管理、Shadow Git Tree (`GIT_INDEX_FILE`)
-    によるターン単位のスナップショット/Revert)
+    Worktree 管理、ACP ネイティブ Fork/Resume)
   - `fxg-hub`: ハブ (Axum、Node Hub、VAPID Web Push、Stdio
     Provisioner、監査ログ)
   - `fxg-cli`: `fxg` バイナリエントリポイント (セッション開始時に Web UI
@@ -93,16 +92,22 @@
   のプロトコル設計、WS/Stdio の意味、REST API の境界（型の正は
   `crates/fxg-protocol/` と生成済み bindings）
 - [`docs/04-agent-drivers-and-windows.md`](docs/04-agent-drivers-and-windows.md):
-  `AgentDriver`、ACP / `opencode2` 統合、Shadow Git Revert/Fork、Windows
+  `AgentDriver`、ACP / 3層拡張モデル、ACP ネイティブ Fork/Resume、Windows
   固有実装
-- [`docs/05-cli-and-pwa-ui.md`](docs/05-cli-and-pwa-ui.md): CLI の設計原則
+- [`docs/05-cli-and-config.md`](docs/05-cli-and-config.md): CLI の設計原則
   （コマンドの正は `fxg --help` / `__usage_spec__`）、設定の所有者
   (`node.toml` / `hub.toml` は起動設定のみ、実行時設定は `node.db` / `hub.db`)、
-  秘密ストア、PWA / Web Push 設計
+  秘密ストア、ディレクトリ構成
 - [`docs/06-type-safety.md`](docs/06-type-safety.md): 型安全性ガイド
   (open enum / `RawJson` / 文字列判定の禁止 / clippy による境界検査)
-- [`docs/changelog/2026-09-30-implementation-plan.md`](docs/changelog/2026-09-30-implementation-plan.md):
-  フェーズ別の段階的実装プラン・進捗管理
+- [`docs/07-web-ui-and-pwa.md`](docs/07-web-ui-and-pwa.md): Web UI / Desk
+  デザインシステム、URL ルーティング、Web ターミナル、PWA / Web Push 設計
+- [`docs/troubleshooting.md`](docs/troubleshooting.md): 診断・インシデント基盤と
+  `ErrorCode` ごとの対処リファレンス
+- [`docs/development.md`](docs/development.md): 開発ワークフロー (`mise` タスク)・
+  型/DB スキーマ同期・言語ポリシー・i18n
+- [`docs/proposals/README.md`](docs/proposals/README.md): 設計提案・実装計画
+- [`docs/changelog/README.md`](docs/changelog/README.md): 月別実装ログ
 
 ### 3.1 ドキュメントにコードを複製しない
 
@@ -136,7 +141,7 @@
   - `fxg-protocol` の doc コメントは `specta` 経由で
     `ui/src/lib/generated/bindings.ts` に出力されるため、英語化の効果は UI
     側の型ドキュメントにも及ぶ (生成物は直接編集しない)。
-  - `docs/` と `docs/changelog/` は**日本語のまま維持**する。
+  - `docs/` 配下全体（ステート docs・`proposals/`・`changelog/`）は**日本語のまま維持**する。
   - 多バイト境界のテストなど意図的に日本語を残す行には
     `// allow-japanese: <理由>` を付ける。
   - 英語化は**挙動変更・リファクタと混ぜず、クレート単位の独立したコミット**で行う
@@ -163,11 +168,8 @@
   - `mise run lint:errors` を通す。既存違反の allow は理由付きで記録し、
     移行フェーズで削除する。
   - 詳細: [`docs/06-type-safety.md`](docs/06-type-safety.md)
-- **変更履歴 (Changelog) と実装プランの記録**:
-  - **初期実装期間中 (Phase 1 〜 Phase 6)**: 新しい changelog
-    ファイルは作成せず、[`docs/changelog/2026-09-30-implementation-plan.md`](docs/changelog/2026-09-30-implementation-plan.md)
-    を参照し、実装の進行に合わせて同ファイル内のチェックリストおよび「実装ログ /
-    進捗メモ」を順次更新すること。
-  - **初期実装完了後**: 大きな機能追加・リファクタリング時は
-    `docs/changelog/YYYY-MM-DD-title.md`
-    に記録する（同セッション内の更新は同ファイルに追記）。冒頭に **日付・対象パッケージ・対象スクリプト** を明記すること。
+- **変更履歴 (Changelog) と設計提案 (Proposal) の記録**:
+  - 複数クレートに跨がる設計変更や複数フェーズの実装計画は `docs/proposals/YYYY-MM-DD-title.md`
+    に記録し、完了時にステート docs へ仕様を昇格させてステータスを `Implemented` にする。
+  - 意味のある機能追加・DB マイグレーション・設計判断は `docs/changelog/YYYY-MM/YYYY-MM-DD-title.md`
+    に記録する（単発の微修正は Git コミットに任せ作成しない）。冒頭に **日付・対象パッケージ・対象スクリプト** を明記すること。

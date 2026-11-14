@@ -1,7 +1,7 @@
 //! `fxg service` — register the OS login autostart service.
 //!
 //! Design: `docs/04-agent-drivers-and-windows.md` §5.4,
-//! `docs/05-cli-and-pwa-ui.md` §1.
+//! `docs/05-cli-and-config.md` §1.
 //!
 //! - **Windows**: Task Scheduler (runs at logon; no console window is shown)
 //! - **Linux / WSL**: `~/.config/systemd/user/<name>.service` + `systemctl --user`

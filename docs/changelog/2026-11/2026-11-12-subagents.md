@@ -11,8 +11,8 @@
 > 型・enum・REST の正は `crates/fxg-protocol/` と生成済み bindings、ACP の
 > イベント処理は `crates/fxg-acp/` を参照。本文は設計意図と不変条件だけを
 > 説明する。全体のイベントモデルは
-> [`docs/03-protocol-and-api.md`](../03-protocol-and-api.md)、ドライバ構成は
-> [`docs/04-agent-drivers-and-windows.md`](../04-agent-drivers-and-windows.md)
+> [`docs/03-protocol-and-api.md`](../../03-protocol-and-api.md)、ドライバ構成は
+> [`docs/04-agent-drivers-and-windows.md`](../../04-agent-drivers-and-windows.md)
 > を参照。
 
 ---

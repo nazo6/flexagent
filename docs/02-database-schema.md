@@ -40,7 +40,7 @@ E2E暗号化を行わないため、ハブ側で会話履歴の構造化クエ�
 | `sessions`                           | **権威**。自分のセッションのみ。直接書き込む         | **投影**。全ノード分。イベント適用でのみ更新                       |
 | `session_events`                     | 自分のセッションのイベント。水位より後が Outbox 対象 | 全イベントの冪等追記。`cursor` はハブ配信用カーソル                |
 | `session_events_fts`                 | ローカル直結UIの検索用                               | 全セッション横断検索用                                             |
-| `permission_requests`                | 自分のセッション分の投影                             | 全会話分の投影（グローバル承認 Inbox）                             |
+| `permission_requests`                | 自分のセッション分の投影                             | 全会話分の投影（未解決の承認）                                     |
 | `push_subscriptions`                 | ノード直結 PWA 購読管理（VAPID。ハブとは独立）       | ハブ接続 PWA 購読管理（VAPID）                                     |
 | `audit_logs`                         | ローカル直結操作（CLI / `localhost:7860`）の記録     | ハブ経由操作の記録（同期対象外。各ストアが自分の観測事実のみ記録） |
 | `incidents`                          | ノード自身のエラー境界で観測した障害                 | ハブ自身のエラー境界で観測した障害（同期対象外）                   |
@@ -154,9 +154,7 @@ DDL・カラム・インデックスの正は `crates/fxg-db/migrations/` です
 | 秘密の値                                                                                                       | `<data>/{node,hub}/secrets/<id>` (`0600`) |
 
 単一行テーブルは `revision` による楽観的ロックを行い、競合は
-`REVISION_MISMATCH` として返します。マイグレーションの意図は
-[`changelog/2026-11-10-architecture-simplification.md`](changelog/2026-11-10-architecture-simplification.md)
-を参照してください。
+`REVISION_MISMATCH` として返します。
 
 ## 2. 正データと派生カラム
 

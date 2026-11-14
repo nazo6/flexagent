@@ -4,7 +4,7 @@
 //! `provider/model` ID. This extension adds a human-readable label and a
 //! secondary provider label without changing the value sent back to ACP.
 //!
-//! Design: `docs/changelog/2026-11-11-agent-extension-phase4.md`.
+//! Design: `docs/changelog/2026-11/2026-11-11-agent-extension-phase4.md`.
 
 use std::sync::Arc;
 

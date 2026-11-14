@@ -1,7 +1,7 @@
 //! Identity resolution for logical projects (`Logical Project`).
 //!
 //! Design: `docs/01-architecture-and-sync.md` §4 and
-//! `docs/changelog/2026-11-09-settings-consolidation-and-project-identity.md` §3.1.
+//! `docs/proposals/2026-11-09-settings-consolidation-and-project-identity.md` §3.1.
 //!
 //! Resolution order:
 //! 1. Explicit `project_path_links` entry (exact path, then ancestors up to the

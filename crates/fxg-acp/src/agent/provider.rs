@@ -1,7 +1,7 @@
 //! Agent definitions, launch presets and backend selection.
 //!
 //! Design: `docs/04-agent-drivers-and-windows.md` §1.1 (planned in
-//! `docs/changelog/2026-11-11-agent-extension-architecture.md`).
+//! `docs/proposals/2026-11-11-agent-extension-architecture.md`).
 
 use std::sync::Arc;
 

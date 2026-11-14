@@ -5,10 +5,10 @@
 - **対象スクリプト / 設定**: `mise run fmt`, `mise run types`, `mise run lint:errors`,
   `cargo test --workspace`, `pnpm --dir ui run check`
 - **関連ドキュメント**:
-  - [`docs/01-architecture-and-sync.md`](../01-architecture-and-sync.md) §1 / §3.1
-  - [`docs/02-database-schema.md`](../02-database-schema.md) §0.2 / §1
-  - [`docs/03-protocol-and-api.md`](../03-protocol-and-api.md) §3.1
-  - [`docs/05-cli-and-pwa-ui.md`](../05-cli-and-pwa-ui.md) §2 / §3.3
+  - [`docs/01-architecture-and-sync.md`](../../01-architecture-and-sync.md) §1 / §3.1
+  - [`docs/02-database-schema.md`](../../02-database-schema.md) §0.2 / §1
+  - [`docs/03-protocol-and-api.md`](../../03-protocol-and-api.md) §3.1
+  - [`docs/05-cli-and-pwa-ui.md`](../../05-cli-and-config.md) §2 / §3.3
 
 ## 背景
 

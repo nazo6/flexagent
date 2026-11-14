@@ -8,7 +8,7 @@
   `cargo test -p fxg-protocol -p fxg-hub`
 
 > 3層モデル全体の設計は
-> [`docs/changelog/2026-11-11-agent-extension-architecture.md`](./2026-11-11-agent-extension-architecture.md)
+> [`docs/changelog/2026-11-11-agent-extension-architecture.md`](../../proposals/2026-11-11-agent-extension-architecture.md)
 > を参照。本ファイルは Phase 2 の実装記録です。
 
 ---

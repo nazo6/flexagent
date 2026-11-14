@@ -5,8 +5,8 @@
 - **対象スクリプト / 設定**: `mise run fmt`, `mise run types`, `mise run lint:errors`,
   `cargo test --workspace`, `pnpm --dir ui run check`
 - **関連ドキュメント**:
-  - [`docs/01-architecture-and-sync.md`](../01-architecture-and-sync.md) §7.1 / §7.2
-  - [`docs/05-cli-and-pwa-ui.md`](../05-cli-and-pwa-ui.md) §2.2
+  - [`docs/01-architecture-and-sync.md`](../../01-architecture-and-sync.md) §7.1 / §7.2
+  - [`docs/05-cli-and-pwa-ui.md`](../../05-cli-and-config.md) §2.2
 
 ## 背景
 

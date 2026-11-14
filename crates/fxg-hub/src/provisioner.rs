@@ -1,6 +1,6 @@
 //! Provisioner management for temporary VM / sandbox nodes (on the hub host).
 //!
-//! Design: `docs/01-architecture-and-sync.md` §6.1–§6.4, `docs/05-cli-and-pwa-ui.md` §2.2.
+//! Design: `docs/01-architecture-and-sync.md` §6.1–§6.4, `docs/05-cli-and-config.md` §2.2.
 //!
 //! - Launches the command defined under `[provisioners.<name>]` in `hub.db` as a child
 //!   process and uses its `stdin` / `stdout` as the JSON Lines transport for

@@ -2,7 +2,7 @@
 //! plus custom agent management.
 //!
 //! Design: `docs/04-agent-drivers-and-windows.md` §2,
-//! catalog commands: `docs/05-cli-and-pwa-ui.md` §1 (Web UI agent settings).
+//! catalog commands: `docs/05-cli-and-config.md` §1 (Web UI agent settings).
 //!
 //! - Caches the official index (default
 //!   `https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json`)

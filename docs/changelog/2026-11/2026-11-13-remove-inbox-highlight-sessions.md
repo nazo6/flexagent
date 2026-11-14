@@ -6,8 +6,8 @@
   `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`,
   `pnpm --dir ui run check`, `pnpm --dir ui run lint`, `pnpm --dir ui run test`
 - **関連ドキュメント**:
-  - [`docs/03-protocol-and-api.md`](../03-protocol-and-api.md) §2.1
-  - [`docs/05-cli-and-pwa-ui.md`](../05-cli-and-pwa-ui.md) §3.2 / §5.1
+  - [`docs/03-protocol-and-api.md`](../../03-protocol-and-api.md) §2.1
+  - [`docs/05-cli-and-pwa-ui.md`](../../05-cli-and-config.md) §3.2 / §5.1
 
 ## 背景
 

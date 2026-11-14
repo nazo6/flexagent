@@ -1,6 +1,6 @@
 //! VAPID Web Push delivery (hub / standalone node).
 //!
-//! Design: `docs/03-protocol-and-api.md` §3.1, `docs/05-cli-and-pwa-ui.md` §3.3.
+//! Design: `docs/03-protocol-and-api.md` §3.1, `docs/07-web-ui-and-pwa.md` §3.3.
 //!
 //! - The VAPID key pair is generated on first startup and stored in
 //!   `<data>/<role>/vapid.json` (the public key is distributed via `vapid_public_key`

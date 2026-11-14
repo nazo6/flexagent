@@ -87,6 +87,8 @@ Client ⇔ Hub / Local Node（HTTP / WebSocket）で共有する型を定義し�
 `ErrorInfo` は `code` / `message` / `details` / `retryable` / `recovery` /
 `data_safety` / `request_id` を運びます。REST / WS のエラー本文は
 `{ "error": { "code", "message", ... } }` に統一します。
+REST 応答には `x-request-id` および `x-fxg-error-code` ヘッダが付与され、
+インシデント記録とログ相関に使われます。
 
 ### 1.6 サブエージェント (subagent) セッション
 

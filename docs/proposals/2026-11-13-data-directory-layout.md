@@ -8,7 +8,7 @@
   `mise run lint:errors`, `cargo test --workspace`, `cargo clippy --workspace --all-targets`,
   `pnpm --dir ui run check`, `docker compose build`
 - **関連ドキュメント**:
-  - [`docs/05-cli-and-pwa-ui.md`](../05-cli-and-pwa-ui.md) §2（実装時に更新）
+  - [`docs/05-cli-and-pwa-ui.md`](../05-cli-and-config.md) §2（実装時に更新）
   - [`docs/01-architecture-and-sync.md`](../01-architecture-and-sync.md) §7（トークン）
   - [`docs/02-database-schema.md`](../02-database-schema.md)（DB の保存先）
   - [`docs/troubleshooting.md`](../troubleshooting.md)（パス案内）

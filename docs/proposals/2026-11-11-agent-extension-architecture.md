@@ -410,7 +410,7 @@ pub struct AgentSummary {
 完了条件: 既存の ACP only エージェントの挙動が変わらず、全テストが通る。
 
 実装ログ: 2026-11-11 に完了。詳細は
-[`2026-11-11-agent-catalog-phase1.md`](./2026-11-11-agent-catalog-phase1.md) を参照。
+[`2026-11-11-agent-catalog-phase1.md`](../changelog/2026-11/2026-11-11-agent-catalog-phase1.md) を参照。
 
 ### Phase 2: Tier 2 の基盤
 
@@ -426,7 +426,7 @@ pub struct AgentSummary {
 overlay が効く。
 
 実装ログ: 2026-11-11 に完了。詳細は
-[`2026-11-11-agent-extension-phase2.md`](./2026-11-11-agent-extension-phase2.md) を参照。
+[`2026-11-11-agent-extension-phase2.md`](../changelog/2026-11/2026-11-11-agent-extension-phase2.md) を参照。
 
 ### Phase 3: Tier 3 の基盤
 
@@ -439,7 +439,7 @@ overlay が効く。
 完了条件: ACP に依存しない driver が一覧・起動・probe・shutdown まで通る。
 
 実装ログ: 2026-11-11 に完了。詳細は
-[`2026-11-11-agent-extension-phase3.md`](./2026-11-11-agent-extension-phase3.md) を参照。
+[`2026-11-11-agent-extension-phase3.md`](../changelog/2026-11/2026-11-11-agent-extension-phase3.md) を参照。
 
 ### Phase 4: 最初の実例（opencode）
 
@@ -455,7 +455,7 @@ overlay が効く。
 モデル名上書きを再利用できる。
 
 実装ログ: 2026-11-11 に完了。詳細は
-[`2026-11-11-agent-extension-phase4.md`](./2026-11-11-agent-extension-phase4.md) を参照。
+[`2026-11-11-agent-extension-phase4.md`](../changelog/2026-11/2026-11-11-agent-extension-phase4.md) を参照。
 実 opencode（v2.2.7）で probe・セッション起動・モデル変更まで確認済み。
 
 ### Phase 5: ドキュメント
@@ -466,10 +466,10 @@ overlay が効く。
 
 実装ログ: 2026-11-11 に完了。`docs/04` §1.1 / §3、`docs/README.md`、
 `AGENTS.md` を実装済みの内容に更新した。各フェーズの詳細は
-[`2026-11-11-agent-catalog-phase1.md`](./2026-11-11-agent-catalog-phase1.md)、
-[`2026-11-11-agent-extension-phase2.md`](./2026-11-11-agent-extension-phase2.md)、
-[`2026-11-11-agent-extension-phase3.md`](./2026-11-11-agent-extension-phase3.md)、
-[`2026-11-11-agent-extension-phase4.md`](./2026-11-11-agent-extension-phase4.md)
+[`2026-11-11-agent-catalog-phase1.md`](../changelog/2026-11/2026-11-11-agent-catalog-phase1.md)、
+[`2026-11-11-agent-extension-phase2.md`](../changelog/2026-11/2026-11-11-agent-extension-phase2.md)、
+[`2026-11-11-agent-extension-phase3.md`](../changelog/2026-11/2026-11-11-agent-extension-phase3.md)、
+[`2026-11-11-agent-extension-phase4.md`](../changelog/2026-11/2026-11-11-agent-extension-phase4.md)
 を参照。
 
 ---
@@ -548,5 +548,5 @@ overlay が効く。
   変更は実装時に反映）
 - [`docs/06-type-safety.md`](../06-type-safety.md)（`DriverKind` /
   `CapabilityOverlay` は open enum と型付き差分を使う）
-- [`2026-11-11-registry-import.md`](./2026-11-11-registry-import.md)（Registry を
+- [`2026-11-11-registry-import.md`](../changelog/2026-11/2026-11-11-registry-import.md)（Registry を
   import 専用にした後続変更）

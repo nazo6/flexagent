@@ -9,7 +9,7 @@
 
 ## 背景
 
-[`2026-11-08-error-handling-and-recovery-plan.md`](2026-11-08-error-handling-and-recovery-plan.md)
+[`2026-11-08-error-handling-and-recovery-plan.md`](../../proposals/2026-11-08-error-handling-and-recovery-plan.md)
 の Phase 1 / 2 / 2.5 と、daily-driver 側の診断取得経路
 （`/healthz` / `/readyz` / `/api/v1/diagnostics` / `fxg doctor` /
 `fxg logs` / `fxg session diagnose` / エージェント stderr リング）は

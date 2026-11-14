@@ -1,7 +1,7 @@
 //! Serving the Web UI (`ui/build`) embedded with `rust-embed`.
 //!
 //! As the fallback of the shared router used by `fxg hub start` / `fxg node start`, every non-API
-//! path is served as the SPA (design: `docs/05-cli-and-pwa-ui.md`).
+//! path is served as the SPA (design: `docs/07-web-ui-and-pwa.md`).
 //!
 //! - Because this sits outside the authentication middleware, the UI assets themselves are
 //!   served without a token (the API returns 401 and the UI prompts for a token).

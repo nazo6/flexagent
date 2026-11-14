@@ -13,7 +13,7 @@
   - [`docs/01-architecture-and-sync.md`](../01-architecture-and-sync.md)
   - [`docs/02-database-schema.md`](../02-database-schema.md)
   - [`docs/03-protocol-and-api.md`](../03-protocol-and-api.md)
-  - [`docs/05-cli-and-pwa-ui.md`](../05-cli-and-pwa-ui.md)
+  - [`docs/05-cli-and-pwa-ui.md`](../05-cli-and-config.md)
   - [`docs/06-type-safety.md`](../06-type-safety.md)
   - [`docs/changelog/2026-11-08-type-safety-plan.md`](2026-11-08-type-safety-plan.md)
   - [`docs/changelog/2026-11-09-daily-driver-gaps.md`](2026-11-09-daily-driver-gaps.md)

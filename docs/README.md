@@ -53,14 +53,20 @@ Protocol）対応コーディングエージェントを「好きな場所から
 
 ## ドキュメント構成
 
-| ドキュメント                                                             | 内容                                                                                                                                     |
-| :----------------------------------------------------------------------- | :--------------------------------------------------------------------------------------------------------------------------------------- |
-| **[01-architecture-and-sync.md](./01-architecture-and-sync.md)**         | 全体トポロジー、ローカルファースト同期、一時VMノード (`fxg internal stdio` & 外部環境でのツール構築)、論理プロジェクト解決、セキュリティ |
-| **[02-database-schema.md](./02-database-schema.md)**                     | `node.db` / `hub.db` のスキーマ原則・ロール差分・イベント投影・FTS5検索（DDL の正は `crates/fxg-db/migrations/`）                        |
-| **[03-protocol-and-api.md](./03-protocol-and-api.md)**                   | プロトコルの境界・不変条件、Node⇔Hub間通信 (WS & Stdio)、Client API（型の正は `crates/fxg-protocol/`）                                   |
-| **[04-agent-drivers-and-windows.md](./04-agent-drivers-and-windows.md)** | `AgentDriver` トレイト、エージェント実装の3層モデル、ACP Registry・PATH探索、ACPネイティブFork/Resume、Windows固有実装                   |
-| **[05-cli-and-pwa-ui.md](./05-cli-and-pwa-ui.md)**                       | `fxg` CLI の設計原則（コマンドの正は `fxg --help`）、設定ファイルスキーマ (`node.toml` / `hub.toml`)、PWA + Web Push 設計                |
-| **[06-type-safety.md](./06-type-safety.md)**                             | 型安全性ガイド (open enum / `RawJson` / 文字列判定の禁止 / `lint:typed` / 移行状況)                                                      |
+| ドキュメント                                                             | 内容                                                                                                                   |
+| :----------------------------------------------------------------------- | :--------------------------------------------------------------------------------------------------------------------- |
+| **[01-architecture-and-sync.md](./01-architecture-and-sync.md)**         | 全体トポロジー、ローカルファースト同期、一時VMノード (`fxg internal stdio`)、論理プロジェクト解決、セキュリティ        |
+| **[02-database-schema.md](./02-database-schema.md)**                     | `node.db` / `hub.db` のスキーマ原則・ロール差分・イベント投影・FTS5検索（DDL の正は `crates/fxg-db/migrations/`）      |
+| **[03-protocol-and-api.md](./03-protocol-and-api.md)**                   | プロトコルの境界・不変条件、Node⇔Hub間通信 (WS & Stdio)、Client API（型の正は `crates/fxg-protocol/`）                 |
+| **[04-agent-drivers-and-windows.md](./04-agent-drivers-and-windows.md)** | `AgentDriver` トレイト、エージェント実装の3層モデル、ACP Registry・PATH探索、ACPネイティブFork/Resume、Windows固有実装 |
+| **[05-cli-and-config.md](./05-cli-and-config.md)**                       | `fxg` CLI の設計原則（コマンドの正は `fxg --help`）、設定所有権、ディレクトリ構成、`node.toml` / `hub.toml`            |
+| **[06-type-safety.md](./06-type-safety.md)**                             | 型安全性ガイド (`open_string_enum!` / `RawJson` / 文字列判定の禁止 / `lint:errors`)                                    |
+| **[07-web-ui-and-pwa.md](./07-web-ui-and-pwa.md)**                       | Web UI / Desk デザインシステム・URL ルーティング・統一コンポーザー・Web ターミナル・Android PWA & Web Push             |
+| **[troubleshooting.md](./troubleshooting.md)**                           | 診断・インシデント基盤・サポートバンドルおよび `ErrorCode` ごとの対処リファレンス                                      |
+| **[development.md](./development.md)**                                   | 開発ワークフロー（`mise` タスク）・型/DB スキーマ同期・言語ポリシー・i18n (`paraglide-js`)                             |
+| **[backlog.md](./backlog.md)**                                           | 過去の計画から抽出した未完了タスク・技術的負債の一覧                                                                   |
+| **[proposals/](./proposals/README.md)**                                  | 複数クレートに跨がる設計提案・計画・ADR・調査メモ                                                                      |
+| **[changelog/](./changelog/README.md)**                                  | 月別（`YYYY-MM/`）の確定した実装ログ                                                                                   |
 
 ---
 

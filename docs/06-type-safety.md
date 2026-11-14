@@ -3,7 +3,7 @@
 - **日付**: 2026-11-08
 - **対象**: `fxg-protocol`, `fxg-db`, `fxg-acp`, `fxg-node`, `fxg-hub`,
   `fxg-cli`, `ui`
-- **関連**: [`docs/changelog/2026-11-08-type-safety-plan.md`](./changelog/2026-11-08-type-safety-plan.md)
+- **関連**: [`docs/proposals/2026-11-08-type-safety-plan.md`](./proposals/2026-11-08-type-safety-plan.md)
 
 ---
 
@@ -204,11 +204,9 @@ impl PermissionOptionKind {
 )]
 ```
 
-新しいファイルや、まだ allow していないファイルでの使用は clippy が拒否する。
-Phase 2/3 で該当ファイルを型化したら allow を削除する。
-
-`clippy::wildcard_enum_match_arm` も、既存違反があるクレートは crate ルートの
-allow でベースライン化している。Phase 1 で enum 化が進んだら削除する。
+新設ファイルや既存ファイルでこれらの型を扱う際は、境界で型化する。
+ファイル単位の `#![allow(..., reason = "...")]` は型化が完了したモジュールから
+順次削除する。
 
 ### 4.2 specta の型同期
 
@@ -247,18 +245,6 @@ UI 側で `status: string` のような独自型を作らず、生成型を使�
 
 ---
 
-## 7. 移行状況
+## 7. 適用状況と残課題
 
-| フェーズ | 内容                                           | 状態                                                                  |
-| :------- | :--------------------------------------------- | :-------------------------------------------------------------------- |
-| Phase 0  | 方針・clippy 基盤                              | 完了                                                                  |
-| Phase 1  | `PermissionOptionKind` などの enum 化          | 完了                                                                  |
-| Phase 2  | `RawJson` / elicitation / config / provisioner | 完了                                                                  |
-| Phase 3  | DB row / event_type / audit action             | 完了                                                                  |
-| Phase 4  | ID newtype                                     | Tier A+B 完了（CommandId / NodeId / SessionId / EventId / ProjectId） |
-
-ファイル単位の `#![allow(...)]` と crate ルートの wildcard allow は、
-Phase 1〜3 の完了に合わせて削除する。Phase 1 で enum 化した
-`PermissionOptionKind` / `ToolCallKind` / `ToolCallStatus` / `AuditAction` /
-`EventType` などは `open_string_enum!` で定義し、未知値を `Unknown(String)`
-として保持する。
+`PermissionOptionKind` / `ToolCallKind` / `ToolCallStatus` / `AuditAction` / `EventType` 等の主要ドメイン値は `open_string_enum!` で型化済み（未知値は `Unknown(String)` 保持）、非構造化ペイロードは `RawJson`、主要 ID（`CommandId` / `NodeId` / `SessionId` / `EventId` / `ProjectId`）は newtype 化済みです。残る ID newtype 化やベースライン allow の削除は [`docs/backlog.md`](./backlog.md) で管理します。

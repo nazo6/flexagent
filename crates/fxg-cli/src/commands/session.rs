@@ -2,7 +2,7 @@
 //!
 //! The `usage` derives are the single source of truth; the KDL spec, shell
 //! completions, manpage and Markdown reference are generated from
-//! `__usage_spec__` (design: `docs/05-cli-and-pwa-ui.md` §1).
+//! `__usage_spec__` (design: `docs/05-cli-and-config.md` §1).
 
 use anyhow::{Context, Result, bail};
 use futures_util::{SinkExt, StreamExt};

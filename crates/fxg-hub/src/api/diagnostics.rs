@@ -1,6 +1,6 @@
 //! Diagnostics: component health, incident recording and support bundles.
 //!
-//! Design: `docs/changelog/2026-11-08-error-handling-and-recovery-plan.md`
+//! Design: `docs/proposals/2026-11-08-error-handling-and-recovery-plan.md`
 //! Phase 3. Node and server share this layer so both endpoints report the same
 //! health shape and produce the same redacted support bundle.
 

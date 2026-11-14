@@ -1,6 +1,6 @@
 //! Node ⇔ hub pairing (owned by `node.db` and `<data>/node/node_token`).
 //!
-//! Design: `docs/changelog/2026-11-11-node-pairing-db-and-gui.md` §4.
+//! Design: `docs/proposals/2026-11-11-node-pairing-db-and-gui.md` §4.
 //!
 //! - The hub address is stored in `node.db` (`node_pairing`), so it is a
 //!   runtime setting like every other node-owned value.

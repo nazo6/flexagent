@@ -658,5 +658,5 @@ Phase 1・2・2.5 は完了。以下は未着手で、Phase 3 以降で対応す
   プロトコル・REST / WS API・エラーコード
 - [`docs/04-agent-drivers-and-windows.md`](../04-agent-drivers-and-windows.md):
   `AgentDriver`・ACP エラー・Shadow Git Revert
-- [`docs/05-cli-and-pwa-ui.md`](../05-cli-and-pwa-ui.md):
+- [`docs/05-cli-and-pwa-ui.md`](../05-cli-and-config.md):
   CLI コマンド・設定・PWA
