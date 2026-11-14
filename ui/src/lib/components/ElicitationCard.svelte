@@ -149,12 +149,10 @@
   }
 </script>
 
-<div
-  class="bg-card border-border flex flex-col gap-3 rounded-lg border border-l-2 border-l-signal p-3"
->
+<div class="bg-card border-border flex flex-col gap-3 rounded-lg border p-3">
   <div class="flex min-w-0 flex-col gap-1">
     <div class="flex items-center gap-2">
-      <CircleHelpIcon class="text-muted-foreground size-4 shrink-0" />
+      <CircleHelpIcon class="text-signal size-4 shrink-0" />
       <span class="text-[13px] font-medium">{m.chat_elicitation_heading()}</span>
       {#if resolved}
         <Badge variant="secondary">

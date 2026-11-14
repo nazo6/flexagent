@@ -45,6 +45,7 @@
   "chat_pending_label": "Waiting to send",
   "chat_permission_details": "Details (command / diff)",
   "chat_permission_failed": "Failed to send the approval response.",
+  "chat_permission_required": "Permission required",
   "chat_permission_sent": "Response sent",
   "chat_placeholder_idle": "Enter a prompt (Ctrl+Enter to send, Enter for newline, `/` for commands)",
   "chat_input_label": "Message the agent",

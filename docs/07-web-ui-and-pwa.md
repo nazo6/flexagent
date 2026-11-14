@@ -26,10 +26,11 @@ PC ブラウザ、ローカル直結 (`node.addr`、既定 `localhost:7860`)、�
 
 - **3 層トークン構成**:
   1. **Design constants**: type scale（11px 大文字ラベル / 12px メタデータ / 13px UI / 14px 本文）、spacing、radius（pill = full / control = 8px / surface = 12px / dialog = 14px）、border（1px ヘアライン主体）、layout、motion。
-  2. **Semantic roles**: `--canvas` / `--surface` / `--sidebar-bg` / `--ink` / `--muted-ink` / `--line` / `--chip` / `--signal`（選択状態の 2px 左ルールやフォーカスリング用）/ `--ok` / `--warn` / `--danger`。
+  2. **Semantic roles**: `--canvas` / `--surface` / `--sidebar-bg` / `--ink` / `--muted-ink` / `--line` / `--chip` / `--signal`（選択面の tint やフォーカスリング用）/ `--ok` / `--warn` / `--danger`。
   3. **shadcn mapping**: `--background` / `--card` / `--border` / `--ring` / `--primary` 等を semantic role へ写像。
 - **プリセット**: **Bone**（暖色ニュートラル + 琥珀、既定）、**Graphite**（冷色ニュートラル + コバルト）、**Moss**（緑寄りニュートラル + モス）の 3 種（各 light / dark）。端末ごとの `localStorage["fxg:palette"]` に保存し、サーバーへは同期しない。
 - **表示規則**: 機械的文字列（branch / path / ID / model / 時刻）のみ mono フォント。ステータスは色だけでなくラベル・アイコンを併記する。ターミナルと Shiki コードテーマは可読性優先で固定テーマを維持する。
+- **選択・状態の表現**: 選択は `signal-soft` の塗りと文字ウェイト、要対応はインラインのステータスアイコンとピル、カードや折りたたみは 1px の全面ボーダーで示す。左端のアクセントバーは使わない。
 
 ---
 
@@ -52,7 +53,7 @@ Settings 画面の中間パス（`/settings`, `/settings/hub`, `/settings/nodes`
 ### 3.2 主要画面仕様
 
 1. **サイドバー & 注意喚起（Needs attention）**:
-   - 専用の承認 Inbox 画面は持たず、`SessionSummary.status`（`waiting_permission` / `waiting_input` / `error`）を単一ソースとして、サイドバー上部の「Needs attention」・プロジェクト別件数バッジ・各セッション行の左アクセント＆ピルで強調表示する。
+   - 専用の承認 Inbox 画面は持たず、`SessionSummary.status`（`waiting_permission` / `waiting_input` / `error`）を単一ソースとして、サイドバー上部の「Needs attention」・プロジェクト別件数バッジ・各セッション行のステータスアイコン＆ピルで強調表示する。
    - 承認・質問への回答は該当セッションのチャット内インラインカードで行う。
 2. **セッション詳細（チャット & ワークスペース）**:
    - **ヘッダー**: タイトル、実行ステータス、コンテキストピル（実行ノード・ブランチ）のみ常時表示し、詳細メタデータ（node 接続状態・作業ディレクトリ・agent・mode・権限ポリシー・使用量・ID・Fork 元）は「Session details」ポップオーバーに集約。

@@ -25,7 +25,7 @@
         class={cn(
           "flex size-8 items-center justify-center rounded-md transition-colors",
           active === panel.id
-            ? "bg-signal-soft text-signal shadow-[inset_2px_0_0_0_var(--signal)]"
+            ? "bg-signal-soft text-signal"
             : "text-muted-foreground hover:bg-accent hover:text-foreground",
         )}
         title={panel.label()}

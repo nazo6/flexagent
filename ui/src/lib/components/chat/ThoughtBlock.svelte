@@ -104,7 +104,7 @@
   {#if isOpen}
     <div
       bind:this={body}
-      class="text-muted-foreground border-line mt-1.5 max-h-64 overflow-y-auto border-l-2 pl-3 text-[13px] leading-relaxed"
+      class="text-muted-foreground border-line mt-1.5 max-h-64 overflow-y-auto rounded-md border p-2.5 text-[13px] leading-relaxed"
     >
       <MarkdownText text={item.text} streaming={item.streaming} />
     </div>

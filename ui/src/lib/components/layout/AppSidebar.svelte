@@ -34,6 +34,7 @@
   import PlusIcon from "@lucide/svelte/icons/plus";
   import SearchIcon from "@lucide/svelte/icons/search";
   import SettingsIcon from "@lucide/svelte/icons/settings";
+  import TriangleAlertIcon from "@lucide/svelte/icons/triangle-alert";
 
   interface Props {
     onNavigate?: () => void;
@@ -195,7 +196,7 @@
       class={cn(
         "flex items-center justify-between rounded-md px-2.5 py-1.5 font-medium transition-colors",
         currentPath === "/"
-          ? "bg-signal-soft text-foreground shadow-[inset_2px_0_0_0_var(--signal)]"
+          ? "bg-signal-soft text-foreground"
           : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
       )}
     >
@@ -211,7 +212,7 @@
       class={cn(
         "flex items-center gap-2 rounded-md px-2.5 py-1.5 font-medium transition-colors",
         currentPath.startsWith("/projects")
-          ? "bg-signal-soft text-foreground shadow-[inset_2px_0_0_0_var(--signal)]"
+          ? "bg-signal-soft text-foreground"
           : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
       )}
     >
@@ -234,7 +235,7 @@
       class={cn(
         "flex items-center gap-2 rounded-md px-2.5 py-1.5 font-medium transition-colors",
         currentPath.startsWith("/search")
-          ? "bg-signal-soft text-foreground shadow-[inset_2px_0_0_0_var(--signal)]"
+          ? "bg-signal-soft text-foreground"
           : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
       )}
     >
@@ -248,7 +249,7 @@
       class={cn(
         "flex items-center gap-2 rounded-md px-2.5 py-1.5 font-medium transition-colors",
         currentPath.startsWith("/settings")
-          ? "bg-signal-soft text-foreground shadow-[inset_2px_0_0_0_var(--signal)]"
+          ? "bg-signal-soft text-foreground"
           : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
       )}
     >
@@ -451,17 +452,25 @@
               class={cn(
                 "group flex items-center justify-between gap-2 rounded-md px-2 py-1.5 text-[13px] transition-colors",
                 isActive
-                  ? "bg-signal-soft text-foreground shadow-[inset_2px_0_0_0_var(--signal)] font-medium"
+                  ? "bg-signal-soft text-foreground font-medium"
                   : isWaiting
-                    ? "bg-warn-soft/75 text-foreground shadow-[inset_2px_0_0_0_var(--warn)] font-medium hover:bg-warn-soft"
+                    ? "text-foreground font-semibold hover:bg-warn-soft/50"
                     : isAttention
-                      ? "bg-danger-soft/75 text-foreground shadow-[inset_2px_0_0_0_var(--danger)] font-medium hover:bg-danger-soft"
+                      ? "text-foreground font-semibold hover:bg-danger-soft/50"
                       : "text-foreground/80 hover:bg-accent/40 hover:text-foreground",
                 isArchived && !isWaiting && "opacity-70",
               )}
             >
               <!-- Node status dot -->
               <span class={cn("size-1.5 shrink-0 rounded-full", nodeAvail.dotColorClass)}></span>
+
+              {#if isAttention}
+                {#if isWaiting}
+                  <TriangleAlertIcon class="text-warn size-3.5 shrink-0" aria-hidden="true" />
+                {:else}
+                  <AlertCircleIcon class="text-danger size-3.5 shrink-0" aria-hidden="true" />
+                {/if}
+              {/if}
 
               <!-- Title -->
               <span class="min-w-0 flex-1 truncate">{session.title}</span>

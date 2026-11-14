@@ -138,7 +138,7 @@
       {:else}
         <ul class="flex list-none flex-col gap-2 p-0">
           {#each diagnostics.incidents as incident (incident.id)}
-            <li class="flex flex-col gap-1 border-l-2 border-[--danger] pl-3">
+            <li class="border-border flex flex-col gap-1 rounded-md border p-2.5">
               <div class="flex flex-wrap items-center gap-2 text-[13px]">
                 <Badge variant={incident.level === "error" ? "destructive" : "secondary"}>
                   {incident.code}

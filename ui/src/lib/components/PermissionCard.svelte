@@ -60,12 +60,13 @@
   }
 </script>
 
-<div
-  class="bg-card border-border flex flex-col gap-3 rounded-lg border border-l-2 border-l-warn p-3"
->
+<div class="bg-card border-border flex flex-col gap-3 rounded-lg border p-3">
   <div class="flex min-w-0 flex-col gap-1">
     <div class="flex items-center gap-2">
       <ShieldCheckIcon class="text-muted-foreground size-4 shrink-0" />
+      <span class="text-warn text-[11px] font-semibold tracking-wider uppercase">
+        {m.chat_permission_required()}
+      </span>
       <span class="desk-mono text-[11px] font-medium">{toolName}</span>
       {#if subagentTitle}
         <Badge variant="outline">{m.chat_subagent_title()}: {subagentTitle}</Badge>

@@ -67,7 +67,7 @@
   </button>
 
   {#if isOpen}
-    <div class="border-line mt-1.5 border-l-2 pl-3">
+    <div class="border-line mt-1.5 rounded-md border p-2.5">
       {@render children()}
     </div>
   {/if}
