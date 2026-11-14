@@ -4,6 +4,8 @@ use anyhow::{Result, bail};
 use fxg_protocol::paths::{Paths, Role};
 use usage::Args;
 
+use crate::output::{KvList, KvRow};
+
 /// `fxg doctor`
 #[derive(Debug, Args)]
 pub struct DoctorArgs {
@@ -188,19 +190,44 @@ impl usage::RunAsync for DoctorArgs {
             }
             for (role, paths) in roles {
                 println!("\n{} paths:", role);
-                println!("  roots: config={}", paths.roots().config().display());
-                println!("         data={}", paths.roots().data().display());
-                println!("         state={}", paths.roots().state().display());
-                println!("         logs={}", paths.roots().logs().display());
-                println!("         cache={}", paths.roots().cache().display());
+                println!(
+                    "{}",
+                    KvList::new()
+                        .indent(2)
+                        .gap(1)
+                        .field(
+                            "roots:",
+                            format!("config={}", paths.roots().config().display()),
+                        )
+                        .push(KvRow::continuation(format!(
+                            "data={}",
+                            paths.roots().data().display()
+                        )))
+                        .push(KvRow::continuation(format!(
+                            "state={}",
+                            paths.roots().state().display()
+                        )))
+                        .push(KvRow::continuation(format!(
+                            "logs={}",
+                            paths.roots().logs().display()
+                        )))
+                        .push(KvRow::continuation(format!(
+                            "cache={}",
+                            paths.roots().cache().display()
+                        )))
+                        .render(false)
+                );
+                let mut path_list = KvList::new().indent(2);
                 for entry in role_paths(paths) {
                     let state = if entry.path.exists() {
                         ""
                     } else {
                         " (not created yet)"
                     };
-                    println!("  {:<12} {}{}", entry.name, entry.path.display(), state);
+                    path_list =
+                        path_list.field(entry.name, format!("{}{}", entry.path.display(), state));
                 }
+                println!("{}", path_list.render(false));
             }
         }
         if checks.iter().any(|(_, ok, _)| !ok) {

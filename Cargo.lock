@@ -1615,6 +1615,7 @@ dependencies = [
  "fxg-node",
  "fxg-protocol",
  "libc",
+ "nu-ansi-term",
  "opener",
  "png",
  "reqwest",

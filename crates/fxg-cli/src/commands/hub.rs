@@ -6,6 +6,7 @@ use anyhow::{Context, Result};
 use usage::{Args, Subcommands};
 
 use crate::hub_api::HubClient;
+use crate::output::KvList;
 use crate::service::ServiceTarget;
 
 /// `fxg hub <command>`
@@ -161,8 +162,14 @@ impl usage::RunAsync for HubStartArgs {
             )?;
             let address = wait_for_hub(&listen_addr).await?;
             println!("hub started (detached)");
-            println!("  Address:  http://{address}");
-            println!("  Log:      {}", log.display());
+            println!(
+                "{}",
+                KvList::new()
+                    .indent(2)
+                    .field("Address:", format!("http://{address}"))
+                    .field("Log:", log.display().to_string())
+                    .render(false)
+            );
             return Ok(());
         }
 
@@ -298,7 +305,13 @@ impl usage::RunAsync for HubRestartArgs {
         )?;
         let address = wait_for_hub(&listen_addr).await?;
         println!("hub restarted");
-        println!("  Address:  http://{address}");
+        println!(
+            "{}",
+            KvList::new()
+                .indent(2)
+                .field("Address:", format!("http://{address}"))
+                .render(false)
+        );
         Ok(())
     }
 }
@@ -349,23 +362,27 @@ impl usage::RunAsync for HubStatusArgs {
             return Ok(());
         }
 
-        println!(
-            "service:   {}",
-            if service_installed {
-                "installed"
-            } else {
-                "not installed"
-            }
-        );
-        println!("running:   {}", if info.is_some() { "yes" } else { "no" });
-        println!("address:   {address}");
+        let mut list = KvList::new()
+            .field(
+                "service:",
+                if service_installed {
+                    "installed"
+                } else {
+                    "not installed"
+                },
+            )
+            .field("running:", if info.is_some() { "yes" } else { "no" })
+            .field("address:", address);
         if let Some(info) = info {
-            println!("version:   {}", info.version);
-            println!(
-                "nodes:     {}",
-                nodes.map(|nodes| nodes.nodes.len()).unwrap_or(0)
+            list = list.field("version:", info.version).field(
+                "nodes:",
+                nodes
+                    .map(|nodes| nodes.nodes.len())
+                    .unwrap_or(0)
+                    .to_string(),
             );
         }
+        println!("{}", list.render(false));
         Ok(())
     }
 }

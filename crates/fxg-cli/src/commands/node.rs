@@ -6,6 +6,7 @@ use anyhow::{Context, Result, bail};
 use usage::{Args, Subcommands};
 
 use crate::client::NodeClient;
+use crate::output::{KvList, KvRow};
 use crate::service::ServiceTarget;
 use fxg_protocol::client_api::HubLinkState;
 
@@ -181,8 +182,14 @@ impl usage::RunAsync for NodeStartArgs {
             )?;
             let client = wait_for_node().await?;
             println!("node started (detached)");
-            println!("  Address:  {}", client.base());
-            println!("  Log:      {}", log.display());
+            println!(
+                "{}",
+                KvList::new()
+                    .indent(2)
+                    .field("Address:", client.base())
+                    .field("Log:", log.display().to_string())
+                    .render(false)
+            );
             return Ok(());
         }
 
@@ -299,7 +306,13 @@ impl usage::RunAsync for NodeRestartArgs {
         )?;
         let client = wait_for_node().await?;
         println!("node restarted");
-        println!("  Address:  {}", client.base());
+        println!(
+            "{}",
+            KvList::new()
+                .indent(2)
+                .field("Address:", client.base())
+                .render(false)
+        );
         Ok(())
     }
 }
@@ -350,20 +363,18 @@ impl usage::RunAsync for NodeStatusArgs {
             return Ok(());
         }
 
-        println!(
-            "service:   {}",
-            if service_installed {
-                "installed"
-            } else {
-                "not installed"
-            }
-        );
-        println!(
-            "running:   {}",
-            if running.is_some() { "yes" } else { "no" }
-        );
+        let mut list = KvList::new()
+            .field(
+                "service:",
+                if service_installed {
+                    "installed"
+                } else {
+                    "not installed"
+                },
+            )
+            .field("running:", if running.is_some() { "yes" } else { "no" });
         if let Some(address) = address {
-            println!("address:   {address}");
+            list = list.field("address:", address);
         }
         if let Some((_, status)) = running {
             let state = match status.hub_link.state {
@@ -373,19 +384,21 @@ impl usage::RunAsync for NodeStatusArgs {
                 HubLinkState::Unauthorized => "unauthorized",
                 HubLinkState::Failed => "failed",
             };
-            println!("hub:       {state}");
+            list = list.field("hub:", state);
             if let Some(message) = status.hub_link.message.as_deref() {
-                println!("           {message}");
+                list = list.push(KvRow::continuation(message));
             }
             if let Some(url) = status.hub_link.hub_url.as_deref() {
-                println!("           {url}");
+                list = list.push(KvRow::continuation(url));
             }
-            println!("outbox:    {}", status.unsynced_event_count);
-            println!("sessions:  {}", status.sessions.len());
+            list = list
+                .field("outbox:", status.unsynced_event_count.to_string())
+                .field("sessions:", status.sessions.len().to_string());
             if let Some(last) = status.last_synced_at {
-                println!("synced:    {}", crate::client::format_unix_ms_utc(last));
+                list = list.field("synced:", crate::client::format_unix_ms_utc(last));
             }
         }
+        println!("{}", list.render(false));
         Ok(())
     }
 }

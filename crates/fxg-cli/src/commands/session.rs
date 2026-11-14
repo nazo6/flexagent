@@ -12,6 +12,7 @@ use fxg_protocol::events::UnifiedEventPayload;
 use usage::Args;
 
 use crate::client::{NodeClient, format_unix_ms_utc, print_table, short_id, truncate};
+use crate::output::KvList;
 
 use super::*;
 
@@ -218,9 +219,11 @@ impl usage::RunAsync for SessionShowArgs {
             ("CREATED", format_unix_ms_utc(session.created_at)),
             ("UPDATED", format_unix_ms_utc(session.updated_at)),
         ];
+        let mut list = KvList::new().gap(1);
         for (label, value) in fields {
-            println!("{label:<9}{value}");
+            list = list.field(label, value);
         }
+        println!("{}", list.render(false));
 
         if !detail.pending_permissions.is_empty() {
             println!("\nPending approvals:");

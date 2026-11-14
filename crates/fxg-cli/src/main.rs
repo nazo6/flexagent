@@ -28,6 +28,7 @@ mod client;
 mod commands;
 mod hub_api;
 pub mod logging;
+mod output;
 mod service;
 mod spawn;
 mod tray;
