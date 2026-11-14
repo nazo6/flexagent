@@ -42,7 +42,6 @@
   "chat_mode_label": "Mode",
   "chat_node_unavailable": "The execution node ({name}) is currently {status}. Prompts are processed once the node is back.",
   "chat_not_selected": "Not selected",
-  "chat_open_session": "Open session",
   "chat_pending_label": "Waiting to send",
   "chat_permission_details": "Details (command / diff)",
   "chat_permission_failed": "Failed to send the approval response.",

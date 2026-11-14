@@ -7,7 +7,6 @@
   import { sync } from "#lib/stores/app.svelte.ts";
   import { toast } from "svelte-sonner";
   import CheckIcon from "@lucide/svelte/icons/check";
-  import ChevronRightIcon from "@lucide/svelte/icons/chevron-right";
   import ShieldCheckIcon from "@lucide/svelte/icons/shield-check";
   import XIcon from "@lucide/svelte/icons/x";
 
@@ -64,31 +63,22 @@
 <div
   class="bg-card border-border flex flex-col gap-3 rounded-lg border border-l-2 border-l-warn p-3"
 >
-  <div class="flex flex-wrap items-start justify-between gap-2">
-    <div class="flex min-w-0 flex-col gap-1">
-      <div class="flex items-center gap-2">
-        <ShieldCheckIcon class="text-muted-foreground size-4 shrink-0" />
-        <span class="desk-mono text-[11px] font-medium">{toolName}</span>
-        {#if subagentTitle}
-          <Badge variant="outline">{m.chat_subagent_title()}: {subagentTitle}</Badge>
-        {/if}
-        {#if resolved}
-          <Badge variant="secondary">
-            {resolved.selectedOptionId} ({resolved.resolvedBy})
-          </Badge>
-        {:else if createdAt !== null}
-          <span class="text-muted-foreground text-[11px]">{formatRelativeTime(createdAt)}</span>
-        {/if}
-      </div>
-      <p class="text-sm break-words">{summary}</p>
+  <div class="flex min-w-0 flex-col gap-1">
+    <div class="flex items-center gap-2">
+      <ShieldCheckIcon class="text-muted-foreground size-4 shrink-0" />
+      <span class="desk-mono text-[11px] font-medium">{toolName}</span>
+      {#if subagentTitle}
+        <Badge variant="outline">{m.chat_subagent_title()}: {subagentTitle}</Badge>
+      {/if}
+      {#if resolved}
+        <Badge variant="secondary">
+          {resolved.selectedOptionId} ({resolved.resolvedBy})
+        </Badge>
+      {:else if createdAt !== null}
+        <span class="text-muted-foreground text-[11px]">{formatRelativeTime(createdAt)}</span>
+      {/if}
     </div>
-    <a
-      href={`/sessions/${sessionId}`}
-      class="text-muted-foreground hover:text-foreground flex shrink-0 items-center gap-0.5 text-[11px]"
-    >
-      {m.chat_open_session()}
-      <ChevronRightIcon class="size-3" />
-    </a>
+    <p class="text-sm break-words">{summary}</p>
   </div>
 
   {#if detailsJson !== null}

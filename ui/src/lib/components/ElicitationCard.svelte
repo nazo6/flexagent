@@ -13,7 +13,6 @@
   import { m } from "#lib/paraglide/messages.js";
   import { sync } from "#lib/stores/app.svelte.ts";
   import { toast } from "svelte-sonner";
-  import ChevronRightIcon from "@lucide/svelte/icons/chevron-right";
   import CircleHelpIcon from "@lucide/svelte/icons/circle-help";
   import SendIcon from "@lucide/svelte/icons/send";
   import XIcon from "@lucide/svelte/icons/x";
@@ -153,28 +152,19 @@
 <div
   class="bg-card border-border flex flex-col gap-3 rounded-lg border border-l-2 border-l-signal p-3"
 >
-  <div class="flex flex-wrap items-start justify-between gap-2">
-    <div class="flex min-w-0 flex-col gap-1">
-      <div class="flex items-center gap-2">
-        <CircleHelpIcon class="text-muted-foreground size-4 shrink-0" />
-        <span class="text-[13px] font-medium">{m.chat_elicitation_heading()}</span>
-        {#if resolved}
-          <Badge variant="secondary">
-            {resolvedLabel[resolved.action]} ({resolved.resolvedBy})
-          </Badge>
-        {:else if createdAt !== null}
-          <span class="text-muted-foreground text-[13px]">{formatRelativeTime(createdAt)}</span>
-        {/if}
-      </div>
-      <p class="text-sm break-words">{message}</p>
+  <div class="flex min-w-0 flex-col gap-1">
+    <div class="flex items-center gap-2">
+      <CircleHelpIcon class="text-muted-foreground size-4 shrink-0" />
+      <span class="text-[13px] font-medium">{m.chat_elicitation_heading()}</span>
+      {#if resolved}
+        <Badge variant="secondary">
+          {resolvedLabel[resolved.action]} ({resolved.resolvedBy})
+        </Badge>
+      {:else if createdAt !== null}
+        <span class="text-muted-foreground text-[13px]">{formatRelativeTime(createdAt)}</span>
+      {/if}
     </div>
-    <a
-      href={`/sessions/${sessionId}`}
-      class="text-muted-foreground hover:text-foreground flex shrink-0 items-center gap-0.5 text-[13px]"
-    >
-      {m.chat_open_session()}
-      <ChevronRightIcon class="size-3" />
-    </a>
+    <p class="text-sm break-words">{message}</p>
   </div>
 
   {#if resolved === null}
