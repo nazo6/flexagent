@@ -381,6 +381,8 @@ interface TimelineBuilder {
   toolIndex: Map<string, number>;
   terminalIndex: Map<string, number>;
   permissionIndex: Map<string, number>;
+  /** Resolutions observed before their request (older builds recorded them out of order). */
+  permissionResolutions: Map<string, { selectedOptionId: string; resolvedBy: string }>;
   elicitationIndex: Map<string, number>;
   subagentMessageIndex: Map<string, number>;
   thoughtTimes?: ReadonlyMap<string, ThoughtTiming>;
@@ -530,6 +532,8 @@ function addPermissionRequest(
   payload: PermissionRequestPayload,
   base: TimelineBase,
 ): void {
+  const resolved = builder.permissionResolutions.get(payload.data.request_id) ?? null;
+  builder.permissionResolutions.delete(payload.data.request_id);
   builder.permissionIndex.set(payload.data.request_id, builder.items.length);
   builder.items.push({
     kind: "permission",
@@ -540,7 +544,7 @@ function addPermissionRequest(
     summary: payload.data.summary,
     options: payload.data.options,
     details: payload.data.details,
-    resolved: null,
+    resolved,
     subagentId: payload.data.subagent_id ?? null,
   });
 }
@@ -564,6 +568,11 @@ function resolvePermission(
     }
     return;
   }
+  // Keep the resolution so a later request item is rendered as already resolved.
+  builder.permissionResolutions.set(payload.data.request_id, {
+    selectedOptionId: payload.data.selected_option_id,
+    resolvedBy: payload.data.resolved_by,
+  });
   builder.items.push({
     kind: "notice",
     key: `permission-resolved:${payload.data.request_id}`,
@@ -860,6 +869,7 @@ export function buildTimelineItems(sources: TimelineSources): TimelineItem[] {
     toolIndex: new Map(),
     terminalIndex: new Map(),
     permissionIndex: new Map(),
+    permissionResolutions: new Map(),
     elicitationIndex: new Map(),
     subagentMessageIndex: new Map(),
     thoughtTimes: sources.thoughtTimes,

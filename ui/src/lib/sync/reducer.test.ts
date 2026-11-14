@@ -441,6 +441,36 @@ describe("permissions", () => {
       resolved: { selectedOptionId: "allow_once", resolvedBy: "android_push" },
     });
   });
+
+  it("applies a resolution recorded before its request", () => {
+    const sources = emptySources([
+      makeEvent(1, {
+        type: "permission_resolved",
+        data: {
+          request_id: "req-1",
+          selected_option_id: "allow_once",
+          resolved_by: "auto",
+        },
+      }),
+      makeEvent(2, {
+        type: "permission_request",
+        data: {
+          request_id: "req-1",
+          tool_name: "terminal/create",
+          summary: 'Run "cargo test"',
+          options: [{ option_id: "allow_once", name: "Allow", kind: "allow_once" }],
+          details: null,
+        },
+      }),
+    ]);
+    const items = buildTimelineItems(sources);
+    const permission = items.find((item) => item.kind === "permission");
+    expect(permission).toMatchObject({
+      kind: "permission",
+      requestId: "req-1",
+      resolved: { selectedOptionId: "allow_once", resolvedBy: "auto" },
+    });
+  });
 });
 
 describe("elicitations", () => {

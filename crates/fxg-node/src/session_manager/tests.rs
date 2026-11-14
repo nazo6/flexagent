@@ -16,7 +16,7 @@ use fxg_protocol::SessionId;
 use fxg_protocol::client_api::AgentCapabilitiesPreview;
 use fxg_protocol::common::{
     ConfigOptionCategory, ConfigOptionInfo, ConfigOptionValue, EventType, InitialConfig, ModeInfo,
-    PermissionOptionKind,
+    PermissionOptionKind, PermissionRequestStatus, ResolvedBy,
 };
 use fxg_protocol::paths::{Paths, Role};
 use fxg_protocol::settings::{AgentSettings, CustomAgentConfig};
@@ -686,6 +686,31 @@ async fn auto_approve_policy_responds_to_permission_requests() {
     assert_eq!(
         mock.permissions(),
         vec![("req-auto".to_owned(), "allow_once".to_owned())]
+    );
+
+    // The request must be persisted before its resolution, otherwise the projection
+    // stays pending and clients keep showing an actionable approval card.
+    let mut entry = None;
+    for _ in 0..100 {
+        entry = manager
+            .bus()
+            .db()
+            .find_permission_request("req-auto")
+            .await
+            .expect("permission row");
+        if entry
+            .as_ref()
+            .is_some_and(|entry| entry.status == PermissionRequestStatus::Approved)
+        {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    let entry = entry.expect("permission row");
+    assert_eq!(entry.status, PermissionRequestStatus::Approved);
+    assert_eq!(
+        entry.resolved_by,
+        Some(ResolvedBy::Unknown("auto".to_owned()))
     );
 }
 

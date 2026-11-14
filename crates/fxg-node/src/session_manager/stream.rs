@@ -41,6 +41,7 @@ pub(super) async fn pump_events(
             DriverEvent::Event(payload) => {
                 let is_status_changed =
                     matches!(&payload, UnifiedEventPayload::StatusChanged { .. });
+                let mut auto_permission: Option<(String, String)> = None;
                 match &payload {
                     UnifiedEventPayload::StatusChanged {
                         status,
@@ -55,73 +56,23 @@ pub(super) async fn pump_events(
                         options,
                         ..
                     } => {
-                        let auto_option = {
-                            let mut sessions = inner.sessions.lock().expect("sessions poisoned");
-                            if let Some(session) = sessions.active.get_mut(&session_id) {
-                                session.pending_permissions.insert(
-                                    request_id.clone(),
-                                    PendingPermissionSummary {
-                                        session_id: session_id.clone(),
-                                        request_id: request_id.clone(),
-                                        tool_name: tool_name.clone(),
-                                        summary: summary.clone(),
-                                        options: options.clone(),
-                                    },
-                                );
-                                (session.permission_policy == PermissionPolicy::AutoAllowAll)
-                                    .then(|| {
-                                        options
-                                            .iter()
-                                            .find(|option| option.kind.is_allow())
-                                            .map(|option| option.option_id.clone())
-                                    })
-                                    .flatten()
-                            } else {
-                                None
-                            }
-                        };
-                        if let Some(option_id) = auto_option {
-                            let handle = inner
-                                .sessions
-                                .lock()
-                                .expect("sessions poisoned")
-                                .active
-                                .get(&session_id)
-                                .map(|session| Arc::clone(&session.handle));
-                            if let Some(handle) = handle {
-                                if let Err(err) = handle
-                                    .respond_permission(request_id.clone(), option_id.clone())
-                                    .await
-                                {
-                                    tracing::warn!(session_id, "auto-approval failed: {err:#}");
-                                } else {
-                                    inner
-                                        .sessions
-                                        .lock()
-                                        .expect("sessions poisoned")
-                                        .active
-                                        .get_mut(&session_id)
-                                        .map(|session| {
-                                            session.pending_permissions.remove(request_id)
-                                        });
-                                    if let Err(err) = inner
-                                        .bus
-                                        .record(
-                                            &session_id,
-                                            UnifiedEventPayload::PermissionResolved {
-                                                request_id: request_id.clone(),
-                                                selected_option_id: option_id,
-                                                resolved_by: ResolvedBy::Unknown("auto".to_owned()),
-                                            },
-                                        )
-                                        .await
-                                    {
-                                        tracing::warn!(
-                                            session_id,
-                                            "failed to record auto-approval: {err}"
-                                        );
-                                    }
-                                }
+                        let mut sessions = inner.sessions.lock().expect("sessions poisoned");
+                        if let Some(session) = sessions.active.get_mut(&session_id) {
+                            session.pending_permissions.insert(
+                                request_id.clone(),
+                                PendingPermissionSummary {
+                                    session_id: session_id.clone(),
+                                    request_id: request_id.clone(),
+                                    tool_name: tool_name.clone(),
+                                    summary: summary.clone(),
+                                    options: options.clone(),
+                                },
+                            );
+                            if session.permission_policy == PermissionPolicy::AutoAllowAll {
+                                auto_permission = options
+                                    .iter()
+                                    .find(|option| option.kind.is_allow())
+                                    .map(|option| (request_id.clone(), option.option_id.clone()));
                             }
                         }
                     }
@@ -210,7 +161,13 @@ pub(super) async fn pump_events(
                     _ => {}
                 }
                 match inner.bus.record(&session_id, payload).await {
-                    Ok(_) => maybe_dispatch_queued(&inner, &session_id).await,
+                    Ok(_) => {
+                        if let Some((request_id, option_id)) = auto_permission {
+                            auto_respond_permission(&inner, &session_id, request_id, option_id)
+                                .await;
+                        }
+                        maybe_dispatch_queued(&inner, &session_id).await;
+                    }
                     Err(err) => {
                         tracing::warn!(session_id = %session_id, "failed to persist driver event: {err:#}");
                     }
@@ -263,6 +220,56 @@ pub(super) async fn pump_events(
     {
         let mut sessions = inner.sessions.lock().expect("sessions poisoned");
         sessions.active.remove(&session_id);
+    }
+}
+
+/// Auto-approves a permission request according to the session policy.
+///
+/// The request must already be recorded: recording the resolution first would leave the
+/// `permission_requests` projection pending (and show stale approval buttons in the UI).
+async fn auto_respond_permission(
+    inner: &Arc<Inner>,
+    session_id: &str,
+    request_id: String,
+    option_id: String,
+) {
+    let handle = inner
+        .sessions
+        .lock()
+        .expect("sessions poisoned")
+        .active
+        .get(session_id)
+        .map(|session| Arc::clone(&session.handle));
+    let Some(handle) = handle else {
+        return;
+    };
+    if let Err(err) = handle
+        .respond_permission(request_id.clone(), option_id.clone())
+        .await
+    {
+        // Keep the request pending so the user can still decide manually.
+        tracing::warn!(session_id, "auto-approval failed: {err:#}");
+        return;
+    }
+    {
+        let mut sessions = inner.sessions.lock().expect("sessions poisoned");
+        if let Some(session) = sessions.active.get_mut(session_id) {
+            session.pending_permissions.remove(&request_id);
+        }
+    }
+    if let Err(err) = inner
+        .bus
+        .record(
+            session_id,
+            UnifiedEventPayload::PermissionResolved {
+                request_id,
+                selected_option_id: option_id,
+                resolved_by: ResolvedBy::Unknown("auto".to_owned()),
+            },
+        )
+        .await
+    {
+        tracing::warn!(session_id, "failed to record auto-approval: {err}");
     }
 }
 

@@ -4,6 +4,7 @@
   import type { PermissionOption } from "#lib/generated/bindings.ts";
   import { formatRelativeTime } from "#lib/format.ts";
   import { m } from "#lib/paraglide/messages.js";
+  import { permissionOptionLabel } from "#lib/session-status.ts";
   import { sync } from "#lib/stores/app.svelte.ts";
   import { toast } from "svelte-sonner";
   import CheckIcon from "@lucide/svelte/icons/check";
@@ -38,6 +39,32 @@
     details === null || details === undefined ? null : JSON.stringify(details, null, 2),
   );
 
+  const resolvedOption = $derived(
+    resolved === null
+      ? null
+      : (options.find((option) => option.option_id === resolved.selectedOptionId) ?? null),
+  );
+  const resolvedIsReject = $derived(resolvedOption?.kind.startsWith("reject") ?? false);
+  const autoResolved = $derived(resolved?.resolvedBy === "auto");
+  const heading = $derived(
+    resolved === null
+      ? m.chat_permission_required()
+      : autoResolved
+        ? m.chat_permission_auto_approved()
+        : resolvedIsReject
+          ? m.chat_permission_denied()
+          : m.chat_permission_granted(),
+  );
+  const headingTone = $derived(
+    resolved === null
+      ? "text-warn"
+      : resolvedIsReject
+        ? "text-danger"
+        : autoResolved
+          ? "text-muted-foreground"
+          : "text-signal",
+  );
+
   function isAllowOption(kind: string): boolean {
     return kind.startsWith("allow");
   }
@@ -63,18 +90,20 @@
 <div class="bg-card border-border flex flex-col gap-3 rounded-lg border p-3">
   <div class="flex min-w-0 flex-col gap-1">
     <div class="flex items-center gap-2">
-      <ShieldCheckIcon class="text-muted-foreground size-4 shrink-0" />
-      <span class="text-warn text-[11px] font-semibold tracking-wider uppercase">
-        {m.chat_permission_required()}
+      <ShieldCheckIcon class="size-4 shrink-0 {headingTone}" />
+      <span class="text-[11px] font-semibold tracking-wider uppercase {headingTone}">
+        {heading}
       </span>
       <span class="desk-mono text-[11px] font-medium">{toolName}</span>
       {#if subagentTitle}
         <Badge variant="outline">{m.chat_subagent_title()}: {subagentTitle}</Badge>
       {/if}
-      {#if resolved}
+      {#if resolvedOption}
         <Badge variant="secondary">
-          {resolved.selectedOptionId} ({resolved.resolvedBy})
+          {permissionOptionLabel(resolvedOption.name, resolvedOption.kind)}
         </Badge>
+      {:else if resolved}
+        <Badge variant="secondary">{resolved.selectedOptionId}</Badge>
       {:else if createdAt !== null}
         <span class="text-muted-foreground text-[11px]">{formatRelativeTime(createdAt)}</span>
       {/if}
