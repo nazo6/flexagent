@@ -793,6 +793,7 @@
   "shell_start_new_session_in_project": "Start a new session in {project}",
   "shell_start_session": "Start a session",
   "shell_synced_relative": "Synced {time}",
+  "shell_unread": "Unread messages",
   "shell_unpin": "Unpin",
   "shell_unsynced_count": "Unsynced: {count}",
   "status_active": "Active",

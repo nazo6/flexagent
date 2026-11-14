@@ -441,6 +441,7 @@
   {@const node = getNode(session.node_id)}
   {@const nodeAvail = getNodeAvailability(node, sync.wsConnected)}
   {@const isPinned = pinned.isPinned(session.session_id)}
+  {@const isUnread = sync.hasUnread(session.session_id)}
   <li>
     <Tooltip.Provider delayDuration={400}>
       <Tooltip.Root>
@@ -462,8 +463,21 @@
                 isArchived && !isWaiting && "opacity-70",
               )}
             >
-              <!-- Node status dot -->
-              <span class={cn("size-1.5 shrink-0 rounded-full", nodeAvail.dotColorClass)}></span>
+              <!-- Node health is only worth a dot when the node cannot serve
+                   the session; healthy rows stay visually quiet. -->
+              {#if !nodeAvail.isAvailable}
+                <span class={cn("size-1.5 shrink-0 rounded-full", nodeAvail.dotColorClass)}></span>
+              {/if}
+
+              <!-- Completed agent output the user has not opened yet -->
+              {#if isUnread}
+                <span
+                  class="bg-signal size-1.5 shrink-0 rounded-full"
+                  role="img"
+                  title={m.shell_unread()}
+                  aria-label={m.shell_unread()}
+                ></span>
+              {/if}
 
               <!-- The agent is answering / working right now -->
               {#if session.status === "running"}

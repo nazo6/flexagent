@@ -1,4 +1,4 @@
-import { SvelteMap } from "svelte/reactivity";
+import { SvelteMap, SvelteSet } from "svelte/reactivity";
 import { ApiError } from "#lib/api/errors.ts";
 import type {
   ClientWsMessage,
@@ -27,6 +27,8 @@ import type { PendingPrompt } from "#lib/sync/reducer.ts";
 import type { ConnectionStore } from "./connection.svelte";
 
 const CURSOR_KEY = "fxg.sync.cursor";
+/** Per-device read / unread state for the sidebar. */
+const READ_STATE_KEY = "fxg.session_read";
 /** Timeout for waiting on a `CommandResult`. */
 const COMMAND_TIMEOUT_MS = 30_000;
 /**
@@ -56,6 +58,45 @@ function readCursor(): number | null {
   if (raw === null) return null;
   const value = Number.parseInt(raw, 10);
   return Number.isFinite(value) && value >= 0 ? value : null;
+}
+
+interface ReadState {
+  /** Highest `node_seq` the user has seen per session. */
+  read: Map<string, number>;
+  /** Sessions with a completed agent message the user has not seen yet. */
+  unread: string[];
+}
+
+/** Load the per-device read state (invalid entries are dropped). */
+function readReadState(): ReadState {
+  const empty: ReadState = { read: new Map(), unread: [] };
+  if (typeof localStorage === "undefined") return empty;
+  try {
+    const raw = localStorage.getItem(READ_STATE_KEY);
+    if (raw === null) return empty;
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return empty;
+    const record = parsed as Record<string, unknown>;
+
+    const read = new Map<string, number>();
+    const storedRead = record.read;
+    if (typeof storedRead === "object" && storedRead !== null && !Array.isArray(storedRead)) {
+      for (const [sessionId, seq] of Object.entries(storedRead as Record<string, unknown>)) {
+        if (sessionId !== "" && typeof seq === "number" && Number.isSafeInteger(seq) && seq >= 0) {
+          read.set(sessionId, seq);
+        }
+      }
+    }
+
+    const unread = Array.isArray(record.unread)
+      ? record.unread.filter(
+          (sessionId): sessionId is string => typeof sessionId === "string" && sessionId !== "",
+        )
+      : [];
+    return { read, unread };
+  } catch {
+    return empty;
+  }
 }
 
 /**
@@ -96,6 +137,8 @@ export class SyncStore {
   activeSessionId = $state<string | null>(null);
   /** Prompts sent with no `CommandResult` yet (Pending Queue). */
   pendingPrompts = new SvelteMap<string, PendingPrompt>();
+  /** Sessions with unread completed agent messages (per-device state). */
+  unreadSessions = new SvelteSet<string>();
   /**
    * Progress logs for ephemeral VM provisioning (ephemeral; not persisted).
    *
@@ -117,9 +160,16 @@ export class SyncStore {
   #pendingCommands = new Map<string, PendingCommand>();
   #sessionsRefreshQueued = false;
   #projectsRefreshQueued = false;
+  #readSeqs: Map<string, number>;
+  #readStatePersistQueued = false;
+  /** Whether the first session listing has initialized the read state. */
+  #sessionsInitialized = false;
 
   constructor(connection: ConnectionStore) {
     this.connection = connection;
+    const readState = readReadState();
+    this.#readSeqs = readState.read;
+    for (const sessionId of readState.unread) this.unreadSessions.add(sessionId);
   }
 
   // ------------------------------------------------------------------
@@ -214,6 +264,18 @@ export class SyncStore {
         includeArchived: true,
         limit: 200,
       });
+      if (!this.#sessionsInitialized) {
+        // Mark sessions that this device has never opened as read, so a first
+        // visit does not flag the entire history as unread.
+        let changed = false;
+        for (const session of this.sessions) {
+          if (this.#readSeqs.has(session.session_id)) continue;
+          this.#readSeqs.set(session.session_id, session.last_node_seq);
+          changed = true;
+        }
+        this.#sessionsInitialized = true;
+        if (changed) this.#queueReadStatePersist();
+      }
       this.sessionsError = null;
     } catch (error) {
       this.sessionsError = errorMessage(error);
@@ -299,9 +361,102 @@ export class SyncStore {
     this.provisioningLogs.set(sessionId, next);
   }
 
+  /**
+   * Whether a session has unread completed agent messages.
+   *
+   * Read state is per device (`localStorage`); it is not synced to the node or
+   * hub, so another browser may still show the session as unread.
+   */
+  hasUnread(sessionId: string): boolean {
+    return this.unreadSessions.has(sessionId);
+  }
+
+  /** Mark a session as read up to its latest known event. */
+  markSessionRead(sessionId: string): void {
+    const latest = this.#latestSessionSeq(sessionId);
+    const previous = this.#readSeqs.get(sessionId) ?? 0;
+    if (latest > previous) this.#readSeqs.set(sessionId, latest);
+    const removed = this.unreadSessions.delete(sessionId);
+    if (latest > previous || removed) this.#queueReadStatePersist();
+  }
+
+  /** Highest `node_seq` known for a session (summary or local timeline). */
+  #latestSessionSeq(sessionId: string): number {
+    const summary = this.sessions.find((session) => session.session_id === sessionId);
+    const events = this.#timelines.get(sessionId)?.events;
+    const lastEventSeq =
+      events !== undefined && events.length > 0 ? events[events.length - 1].node_seq : 0;
+    return Math.max(summary?.last_node_seq ?? 0, lastEventSeq);
+  }
+
+  /**
+   * Update read state from a newly applied persisted event.
+   *
+   * Only completed agent messages create unread state; other events simply
+   * advance the read watermark while the session is open.
+   */
+  #trackReadState(event: SessionEventEnvelope): void {
+    if (event.session_id === this.activeSessionId) {
+      const previous = this.#readSeqs.get(event.session_id) ?? 0;
+      if (event.node_seq > previous) {
+        this.#readSeqs.set(event.session_id, event.node_seq);
+        this.#queueReadStatePersist();
+      }
+      return;
+    }
+    if (event.payload.type !== "agent_message" || !event.payload.data.is_complete) return;
+    const readSeq = this.#readSeqs.get(event.session_id);
+    if (readSeq === undefined) {
+      // Before the first session listing we cannot tell whether this is an old
+      // replayed session or one created while the app was closed.
+      if (!this.#sessionsInitialized) return;
+    } else if (event.node_seq <= readSeq) {
+      return;
+    }
+    this.#unmarkRead(event.session_id);
+  }
+
+  #unmarkRead(sessionId: string): void {
+    if (this.unreadSessions.has(sessionId)) return;
+    this.unreadSessions.add(sessionId);
+    this.#queueReadStatePersist();
+  }
+
+  #forgetSessionReadState(sessionId: string): void {
+    const removed = this.unreadSessions.delete(sessionId);
+    const hadRead = this.#readSeqs.delete(sessionId);
+    if (removed || hadRead) this.#queueReadStatePersist();
+  }
+
+  #queueReadStatePersist(): void {
+    if (this.#readStatePersistQueued) return;
+    this.#readStatePersistQueued = true;
+    queueMicrotask(() => {
+      this.#readStatePersistQueued = false;
+      this.#persistReadState();
+    });
+  }
+
+  #persistReadState(): void {
+    if (typeof localStorage === "undefined") return;
+    const read: Record<string, number> = {};
+    for (const [sessionId, seq] of this.#readSeqs) read[sessionId] = seq;
+    try {
+      localStorage.setItem(
+        READ_STATE_KEY,
+        JSON.stringify({ read, unread: [...this.unreadSessions] }),
+      );
+    } catch {
+      // Ignore quota / disabled storage: read state is a convenience only.
+    }
+  }
+
   /** Open a session (updates the WS priority delivery hint). */
   setActiveSession(sessionId: string | null): void {
+    const previous = this.activeSessionId;
+    if (previous !== null && previous !== sessionId) this.markSessionRead(previous);
     this.activeSessionId = sessionId;
+    if (sessionId !== null) this.markSessionRead(sessionId);
     this.#send({
       op: "subscribe",
       since_cursor: this.#cursor,
@@ -318,7 +473,9 @@ export class SyncStore {
     const timeline = this.timelineFor(sessionId);
     try {
       const batch = await this.connection.client.sessionEvents(sessionId, 0, 5_000);
-      for (const event of batch.events) timeline.applyEvent(event);
+      for (const event of batch.events) {
+        if (timeline.applyEvent(event)) this.#trackReadState(event);
+      }
     } catch (error) {
       this.#warn(`session events (${sessionId})`, error);
       throw error;
@@ -479,6 +636,7 @@ export class SyncStore {
     await this.connection.client.deleteSession(sessionId);
     this.#timelines.delete(sessionId);
     this.provisioningLogs.delete(sessionId);
+    this.#forgetSessionReadState(sessionId);
     await this.refreshSessions();
   }
 
@@ -560,6 +718,7 @@ export class SyncStore {
     for (const event of events) {
       const timeline = this.timelineFor(event.session_id);
       if (!timeline.applyEvent(event)) continue;
+      this.#trackReadState(event);
       switch (event.payload.type) {
         case "session_created":
           sessionsDirty = true;
@@ -578,6 +737,7 @@ export class SyncStore {
           // local timeline is discarded (only the tombstone event remains after)
           this.#timelines.delete(event.session_id);
           this.provisioningLogs.delete(event.session_id);
+          this.#forgetSessionReadState(event.session_id);
           sessionsDirty = true;
           projectsDirty = true;
           break;
