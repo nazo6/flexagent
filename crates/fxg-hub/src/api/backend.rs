@@ -106,6 +106,8 @@ pub enum ClientEvent {
         /// One log line
         line: String,
     },
+    /// Project registry or node bindings changed on the server
+    ProjectsUpdated,
 }
 
 /// Session operation command over Client WS (excluding `Subscribe` / `Ping`).

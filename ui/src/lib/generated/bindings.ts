@@ -1006,7 +1006,9 @@ last_synced_at: number | null } |
 /**  Structured error */
 error: ErrorInfo } |
 /**  Response to `Ping` */
-{ op: "pong" };
+{ op: "pong" } |
+/**  Project list or node bindings changed (triggers a `GET /api/v1/projects` refresh). */
+{ op: "projects_updated" };
 
 /**  `POST /api/v1/nodes/{node_id}/agents/registry/{agent_id}/import` request. */
 export type ImportRegistryAgentRequest = {

@@ -116,6 +116,7 @@ export class SyncStore {
   #cursor: number | null = readCursor();
   #pendingCommands = new Map<string, PendingCommand>();
   #sessionsRefreshQueued = false;
+  #projectsRefreshQueued = false;
 
   constructor(connection: ConnectionStore) {
     this.connection = connection;
@@ -254,6 +255,15 @@ export class SyncStore {
     queueMicrotask(() => {
       this.#sessionsRefreshQueued = false;
       void this.refreshSessions();
+    });
+  }
+
+  #queueProjectsRefresh(): void {
+    if (this.#projectsRefreshQueued) return;
+    this.#projectsRefreshQueued = true;
+    queueMicrotask(() => {
+      this.#projectsRefreshQueued = false;
+      void this.refreshProjects();
     });
   }
 
@@ -521,6 +531,9 @@ export class SyncStore {
         break;
       case "pong":
         break;
+      case "projects_updated":
+        this.#queueProjectsRefresh();
+        break;
       default:
         console.warn("[fxg] unknown client ws message", message);
         break;
@@ -543,11 +556,15 @@ export class SyncStore {
     }
 
     let sessionsDirty = false;
+    let projectsDirty = false;
     for (const event of events) {
       const timeline = this.timelineFor(event.session_id);
       if (!timeline.applyEvent(event)) continue;
       switch (event.payload.type) {
         case "session_created":
+          sessionsDirty = true;
+          projectsDirty = true;
+          break;
         case "session_title_changed":
         case "session_agent_bound":
         case "status_changed":
@@ -562,6 +579,7 @@ export class SyncStore {
           this.#timelines.delete(event.session_id);
           this.provisioningLogs.delete(event.session_id);
           sessionsDirty = true;
+          projectsDirty = true;
           break;
         default:
           break;
@@ -574,5 +592,6 @@ export class SyncStore {
       }
     }
     if (sessionsDirty) this.#queueSessionsRefresh();
+    if (projectsDirty) this.#queueProjectsRefresh();
   }
 }

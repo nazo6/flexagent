@@ -194,6 +194,14 @@ pub(crate) async fn handle_client_ws<B: ClientApiBackend>(backend: B, socket: We
                         break;
                     }
                 }
+                Ok(ClientEvent::ProjectsUpdated) => {
+                    if send_ws_json(&mut sender, &HubWsMessage::ProjectsUpdated)
+                        .await
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
                 Err(broadcast::error::RecvError::Lagged(skipped)) => {
                     // When the subscription lags, fetch history again from the cursor
                     if let Some(counters) = backend.diagnostics_counters() {

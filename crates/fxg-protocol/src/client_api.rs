@@ -1110,6 +1110,8 @@ pub enum HubWsMessage {
     },
     /// Response to `Ping`
     Pong,
+    /// Project list or node bindings changed (triggers a `GET /api/v1/projects` refresh).
+    ProjectsUpdated,
 }
 
 /// Client -> Endpoint (`/api/v1/pty/ws`) message.

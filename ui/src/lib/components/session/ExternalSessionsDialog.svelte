@@ -122,6 +122,7 @@
       });
       toast.success(m.external_sessions_imported_toast());
       open = false;
+      await Promise.all([sync.refreshSessions(), sync.refreshProjects()]);
       await goto(`/sessions/${result.session_id}`);
     } catch (err) {
       toast.error(errorMessage(err));

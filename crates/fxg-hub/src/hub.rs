@@ -655,21 +655,17 @@ async fn handle_node_connection(state: HubState, token_owner: String, socket: We
         fxg_protocol::discard_with!(sender.close().await, "close the node websocket");
         return;
     }
-    if stale_report {
-        tracing::warn!(
-            node_id = node_id.as_str(),
-            state_revision,
-            stored_revision,
-            "ignoring stale NodeHello report"
-        );
-    } else if let Err(err) =
-        apply_project_reports(&state, &node_id, &projects, projects_complete, &sessions).await
-    {
-        tracing::warn!(
-            node_id = node_id.as_str(),
-            "failed to apply project reports: {err}"
-        );
-    }
+    sync_project_reports(
+        &state,
+        &node_id,
+        stale_report,
+        state_revision,
+        stored_revision,
+        &projects,
+        projects_complete,
+        &sessions,
+    )
+    .await;
 
     // 3. Register the connection
     let (tx, mut rx) = mpsc::channel(NODE_CHANNEL_CAPACITY);
@@ -826,21 +822,17 @@ async fn handle_node_message_value(state: &HubState, node_id: &NodeId, message: 
                     "failed to update node from hello: {err}"
                 );
             }
-            if stale_report {
-                tracing::warn!(
-                    node_id = node_id.as_str(),
-                    state_revision,
-                    stored_revision,
-                    "ignoring stale NodeHello report"
-                );
-            } else if let Err(err) =
-                apply_project_reports(state, node_id, &projects, projects_complete, &sessions).await
-            {
-                tracing::warn!(
-                    node_id = node_id.as_str(),
-                    "failed to apply project reports: {err}"
-                );
-            }
+            sync_project_reports(
+                state,
+                node_id,
+                stale_report,
+                state_revision,
+                stored_revision,
+                &projects,
+                projects_complete,
+                &sessions,
+            )
+            .await;
             let targets = compute_resync(state, node_id, &sessions).await;
             if !targets.is_empty()
                 && let Err(err) = state
@@ -946,6 +938,47 @@ pub(crate) async fn handle_stdio_message(
     message: NodeToHubMsg,
 ) {
     handle_node_message_value(state, node_id, message).await;
+}
+
+/// Applies `NodeHello` project reports when the revision is current and notifies
+/// connected UI clients on success.
+#[allow(clippy::too_many_arguments)]
+async fn sync_project_reports(
+    state: &HubState,
+    node_id: &NodeId,
+    stale_report: bool,
+    state_revision: u64,
+    stored_revision: u64,
+    projects: &[fxg_protocol::common::NodeProjectReport],
+    projects_complete: bool,
+    sessions: &[fxg_protocol::node_hub::SessionSyncState],
+) {
+    if stale_report {
+        tracing::warn!(
+            node_id = node_id.as_str(),
+            state_revision,
+            stored_revision,
+            "ignoring stale NodeHello report"
+        );
+        return;
+    }
+    match apply_project_reports(state, node_id, projects, projects_complete, sessions).await {
+        Ok(()) => {
+            fxg_protocol::discard_with!(
+                state
+                    .hub()
+                    .client_events()
+                    .send(ClientEvent::ProjectsUpdated),
+                "notify clients that projects or bindings updated"
+            );
+        }
+        Err(err) => {
+            tracing::warn!(
+                node_id = node_id.as_str(),
+                "failed to apply project reports: {err}"
+            );
+        }
+    }
 }
 
 /// Applies `NodeHello` project reports to `projects` / `project_node_bindings`.
@@ -1162,4 +1195,84 @@ async fn apply_event_batch(
         resync,
         Some(state.diagnostics_counters_arc()),
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use fxg_protocol::common::{NodeProjectReport, ProjectNodeBinding};
+    use fxg_protocol::paths::{Paths, Role};
+    use fxg_protocol::settings::{ProjectIdentity, ProjectIdentityKind};
+
+    #[tokio::test]
+    async fn sync_project_reports_updates_db_and_notifies_clients() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let state = HubState::new(crate::state::HubOptions {
+            paths: Paths::portable(dir.path(), Role::Hub),
+            listen_addr: "127.0.0.1:0".to_owned(),
+            allowed_hosts: Vec::new(),
+            allowed_origins: Vec::new(),
+            log: Default::default(),
+        })
+        .await
+        .expect("hub state");
+
+        let mut rx = state.hub().client_events().subscribe();
+        let node_id = NodeId::from("node-1");
+        state
+            .db()
+            .upsert_node(&fxg_db::NodeRecord {
+                node_id: node_id.as_str().to_owned(),
+                name: "node-1".to_owned(),
+                os: "linux".to_owned(),
+                arch: "x86_64".to_owned(),
+                version: "0.1.0".to_owned(),
+                installed_agents: Vec::new(),
+                is_ephemeral: false,
+                provisioner: None,
+                lifecycle_status: fxg_protocol::common::NodeLifecycleStatus::Ready,
+                idle_timeout_secs: None,
+                is_online: true,
+                state_revision: 1,
+            })
+            .await
+            .expect("upsert node");
+        let project_id = fxg_protocol::ProjectId::from("local:node-1:abc");
+        let reports = vec![NodeProjectReport {
+            project_id: project_id.clone(),
+            name: "demo-repo".to_owned(),
+            canonical_git_url: None,
+            identity: ProjectIdentity {
+                kind: ProjectIdentityKind::Local,
+                key: Some("node-1:abc".to_owned()),
+            },
+            bindings: vec![ProjectNodeBinding {
+                local_path: "/tmp/demo-repo".to_owned(),
+                is_worktree: false,
+                path_exists: true,
+                git_branch: Some("main".to_owned()),
+                last_used_at: 100,
+            }],
+        }];
+
+        // Stale reports are ignored and must not emit notifications or write projects.
+        sync_project_reports(&state, &node_id, true, 1, 2, &reports, false, &[]).await;
+        assert!(matches!(
+            rx.try_recv(),
+            Err(broadcast::error::TryRecvError::Empty)
+        ));
+        assert!(state.db().list_projects().await.expect("list").is_empty());
+
+        // Current reports write the project + binding and broadcast ProjectsUpdated.
+        sync_project_reports(&state, &node_id, false, 2, 1, &reports, false, &[]).await;
+        let event = rx.try_recv().expect("ProjectsUpdated event");
+        assert!(matches!(event, ClientEvent::ProjectsUpdated));
+
+        let projects = state.db().list_projects().await.expect("list");
+        assert_eq!(projects.len(), 1);
+        assert_eq!(projects[0].project_id, project_id);
+        assert_eq!(projects[0].name, "demo-repo");
+        assert_eq!(projects[0].bindings.len(), 1);
+        assert_eq!(projects[0].bindings[0].local_path, "/tmp/demo-repo");
+    }
 }
