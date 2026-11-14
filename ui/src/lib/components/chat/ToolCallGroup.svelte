@@ -247,7 +247,7 @@
                   {m.chat_tool_target_files()}
                 </span>
                 <ul class="flex flex-col gap-0.5 font-mono text-muted-foreground p-0 list-none">
-                  {#each tool.locations as loc (loc)}
+                  {#each tool.locations as loc, index (`${index}:${loc}`)}
                     <li class="truncate">{loc}</li>
                   {/each}
                 </ul>

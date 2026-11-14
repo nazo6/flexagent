@@ -532,6 +532,7 @@ function addPermissionRequest(
   payload: PermissionRequestPayload,
   base: TimelineBase,
 ): void {
+  if (builder.permissionIndex.has(payload.data.request_id)) return;
   const resolved = builder.permissionResolutions.get(payload.data.request_id) ?? null;
   builder.permissionResolutions.delete(payload.data.request_id);
   builder.permissionIndex.set(payload.data.request_id, builder.items.length);
@@ -591,6 +592,7 @@ function addElicitationRequest(
   payload: ElicitationRequestPayload,
   base: TimelineBase,
 ): void {
+  if (builder.elicitationIndex.has(payload.data.elicitation_id)) return;
   builder.elicitationIndex.set(payload.data.elicitation_id, builder.items.length);
   builder.items.push({
     kind: "elicitation",

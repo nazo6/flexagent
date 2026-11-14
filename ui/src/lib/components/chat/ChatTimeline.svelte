@@ -206,7 +206,7 @@
           >
             {#if item.attachments.length > 0}
               <div class="mb-1 flex flex-wrap gap-1.5">
-                {#each item.attachments as attachment (attachment.file_name + (attachment.local_path ?? ""))}
+                {#each item.attachments as attachment, index (`${index}:${attachment.file_name}:${attachment.local_path ?? ""}`)}
                   {#if attachment.data_b64 && attachment.mime_type.startsWith("image/")}
                     <img
                       src={`data:${attachment.mime_type};base64,${attachment.data_b64}`}
@@ -306,7 +306,7 @@
           {m.chat_plan()}
         </div>
         <ul class="flex list-none flex-col gap-1 p-0 text-sm">
-          {#each item.entries as entry (entry.id)}
+          {#each item.entries as entry, index (`${index}:${entry.id}`)}
             <li class={planStatusClass(entry.status)}>{entry.title}</li>
           {/each}
         </ul>
