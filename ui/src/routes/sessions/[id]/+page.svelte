@@ -281,6 +281,11 @@
     toolsSheetOpen = false;
   }
 
+  /** Mobile header: open the tool, or close the dock when it is already active. */
+  function handleToggleTool(tool: DockToolId): void {
+    dock.toggleTool(tool);
+  }
+
   function handleForkItem(item: TimelineItem): void {
     if (!sessionId || !session) return;
     const params = new URLSearchParams();
@@ -372,7 +377,8 @@
     canNewSessionHere={sessionNode !== null && !sessionNode.is_ephemeral}
     onNewSessionHere={handleNewSessionHere}
     onForceStop={() => (killDialogOpen = true)}
-    onOpenTools={() => (toolsSheetOpen = true)}
+    activeTool={visibleTool}
+    onToggleTool={handleToggleTool}
     onDeleted={() => void goto("/")}
   />
 
@@ -538,7 +544,12 @@
         class="hidden h-full shrink-0 flex-col overflow-hidden lg:flex"
         style="width: clamp(22rem, {dock.width}%, 75%);"
       >
-        <DockHost {ctx} {items} oncollapse={() => dock.collapse()} />
+        <DockHost
+          {ctx}
+          {items}
+          oncollapse={() => dock.collapse()}
+          ontools={() => (toolsSheetOpen = true)}
+        />
       </div>
     {/if}
 
@@ -568,7 +579,13 @@
         <div
           class="bg-card border-border animate-in fade-in slide-in-from-bottom-2 absolute inset-x-2 top-6 bottom-2 flex flex-col overflow-hidden rounded-xl border shadow-2xl duration-150"
         >
-          <DockHost {ctx} {items} mobile oncollapse={() => dock.collapse()} />
+          <DockHost
+            {ctx}
+            {items}
+            mobile
+            oncollapse={() => dock.collapse()}
+            ontools={() => (toolsSheetOpen = true)}
+          />
         </div>
       </div>
     {/if}

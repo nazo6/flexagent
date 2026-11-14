@@ -4,6 +4,7 @@
   import { m } from "#lib/paraglide/messages.js";
   import { cn } from "#lib/utils.ts";
   import PanelRightCloseIcon from "@lucide/svelte/icons/panel-right-close";
+  import PlusIcon from "@lucide/svelte/icons/plus";
   import XIcon from "@lucide/svelte/icons/x";
 
   interface Props {
@@ -13,9 +14,19 @@
     onactivate: (id: string) => void;
     onclose: (id: string) => void;
     oncollapse: () => void;
+    /** Opens the tool picker (mobile only). */
+    ontools: () => void;
   }
 
-  let { tabs, activeTabId, mobile = false, onactivate, onclose, oncollapse }: Props = $props();
+  let {
+    tabs,
+    activeTabId,
+    mobile = false,
+    onactivate,
+    onclose,
+    oncollapse,
+    ontools,
+  }: Props = $props();
 
   function selectRelative(index: number, offset: number): void {
     const nextIndex = (index + offset + tabs.length) % tabs.length;
@@ -87,6 +98,18 @@
       </div>
     {/each}
   </div>
+
+  {#if mobile}
+    <button
+      type="button"
+      class="text-muted-foreground hover:bg-accent hover:text-foreground flex size-7 shrink-0 items-center justify-center rounded-md transition-colors"
+      title={m.session_tools_title()}
+      aria-label={m.session_tools_title()}
+      onclick={ontools}
+    >
+      <PlusIcon class="size-3.5" />
+    </button>
+  {/if}
 
   <button
     type="button"

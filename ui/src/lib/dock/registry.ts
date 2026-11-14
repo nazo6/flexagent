@@ -43,6 +43,11 @@ export const DOCK_TOOLS: readonly DockToolDefinition[] = [
   },
 ];
 
+/** Tools shown in the desktop rail and the mobile header. */
+export const DOCK_LAUNCHERS: readonly DockToolDefinition[] = DOCK_TOOLS.filter(
+  (tool) => tool.launcher,
+);
+
 export function dockTool(id: DockToolId): DockToolDefinition {
   const tool = DOCK_TOOLS.find((candidate) => candidate.id === id);
   if (tool === undefined) {

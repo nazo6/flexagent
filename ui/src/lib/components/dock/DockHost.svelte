@@ -13,10 +13,12 @@
     items: TimelineItem[];
     mobile?: boolean;
     oncollapse: () => void;
+    /** Opens the tool picker from the mobile tab bar. */
+    ontools: () => void;
     class?: string;
   }
 
-  let { ctx, items, mobile = false, oncollapse, class: className = "" }: Props = $props();
+  let { ctx, items, mobile = false, oncollapse, ontools, class: className = "" }: Props = $props();
 </script>
 
 <section
@@ -34,6 +36,7 @@
     onactivate={(id) => dock.activateTab(id)}
     onclose={(id) => dock.closeTab(id)}
     {oncollapse}
+    {ontools}
   />
 
   <div class="relative flex min-h-0 flex-1 flex-col overflow-hidden">

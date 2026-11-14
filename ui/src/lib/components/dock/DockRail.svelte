@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { DOCK_TOOLS, type DockToolId } from "#lib/dock/registry.ts";
+  import { DOCK_LAUNCHERS, type DockToolId } from "#lib/dock/registry.ts";
   import { m } from "#lib/paraglide/messages.js";
   import { cn } from "#lib/utils.ts";
   import PanelRightCloseIcon from "@lucide/svelte/icons/panel-right-close";
@@ -11,8 +11,6 @@
   }
 
   let { active, onselect, oncollapse }: Props = $props();
-
-  const launchers = DOCK_TOOLS.filter((tool) => tool.launcher);
 </script>
 
 <nav
@@ -20,7 +18,7 @@
   aria-label={m.session_tools_title()}
 >
   <div class="flex flex-col items-center gap-1">
-    {#each launchers as tool (tool.id)}
+    {#each DOCK_LAUNCHERS as tool (tool.id)}
       {@const Icon = tool.icon}
       <button
         type="button"

@@ -1,6 +1,6 @@
 <script lang="ts">
   import * as Sheet from "#lib/components/ui/sheet/index.ts";
-  import { DOCK_TOOLS, type DockToolId } from "#lib/dock/registry.ts";
+  import { DOCK_LAUNCHERS, type DockToolId } from "#lib/dock/registry.ts";
   import { m } from "#lib/paraglide/messages.js";
   import { cn } from "#lib/utils.ts";
 
@@ -11,8 +11,6 @@
   }
 
   let { open = $bindable(false), active, onselect }: Props = $props();
-
-  const launchers = DOCK_TOOLS.filter((tool) => tool.launcher);
 </script>
 
 <Sheet.Root bind:open>
@@ -23,7 +21,7 @@
     </Sheet.Header>
 
     <div class="flex flex-col gap-1 px-3 pb-4">
-      {#each launchers as tool (tool.id)}
+      {#each DOCK_LAUNCHERS as tool (tool.id)}
         {@const Icon = tool.icon}
         <button
           type="button"
