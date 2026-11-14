@@ -155,6 +155,9 @@ JSON Lines）は、トランスポートだけが異なり、同じ `NodeToHubMs
   `LiveStreamDelta`、`PtyOutput` / `PtyExit` / `PtyError`。
   `ResyncRequest` 由来の再送は `EventBatchPush.resync = true` とし、Web Push を
   抑止する。
+- **Web ターミナル**: `PtySpawn` / `PtyOpened` / `PtyOpenFailed`、`PtyAttach` /
+  `PtyDetach`、`PtyInput` / `PtyResize` / `PtyKill`。`PtySpawn` は冪等で、
+  既存の workspace ターミナルがあれば `PtyOpened.attached = true` を返す。
 - **セッションコマンド**: `StartSession`、`SendPrompt`、`RespondPermission`、
   `RespondElicitation`、`ControlSession`。結果は `CommandResult`。
 - **汎用 Node RPC**: `NodeRpc` / `NodeRpcResult`。Git、Worktree、プロジェクト、
@@ -179,6 +182,7 @@ prune します。`sessions` は最大 1000 件で、超過時は
 | 設定           | `GetNodeSettings` / `UpdateNodeSettings` / `UpdateAgentSettings` / `UpdatePairing` / `ClearPairing` / `TestPairing` |
 | 秘密           | `GetSecrets` / `UpsertSecret` / `DeleteSecret`                                                                      |
 | セッション     | `ResumeSession` / `RenameSession` / `ArchiveSession` / `DeleteSession`                                              |
+| ターミナル     | `ListTerminals`                                                                                                     |
 
 成功時は `NodeRpcOutcome::Ok { response }`、失敗時は
 `NodeRpcOutcome::Err { error: ErrorInfo }` を返します。ハブは `ErrorCode` を
@@ -312,12 +316,22 @@ prune します。`sessions` は最大 1000 件で、超過時は
 
 ### 3.3 Client PTY WebSocket (`/api/v1/pty/ws`)
 
-`ghostty-web` などのターミナルとノードの PTY を直結します。
+`ghostty-web` などのターミナルを、workspace（`(node_id, path)`）の PTY に接続します。
 
-- クライアント: `attach` / `spawn` / `input` / `resize` / `kill`。
-- サーバー: `spawned` / `output` / `exit` / `error`。
-- ノード設定 `allow_remote_pty = false` のとき、リモートからの `spawn` は
-  `PTY_DISABLED` を返す。ローカル端末直結では PTY を利用できる。
+- クライアント: `open` / `attach` / `input` / `resize` / `kill`。
+- サーバー: `opened` / `output` / `exit` / `error`。
+- `open` は冪等です。同じ workspace に既存のシェルがあれば attach し、`opened`
+  の `attached = true` で返します。パスはノードに登録済みのプロジェクト binding
+  （または既存セッションの `local_path`）と**完全一致**する必要があり、
+  サブディレクトリは開けません。
+- socket を閉じても PTY は kill されません（detach）。無操作 TTL（既定 30 分）の
+  経過、明示 `kill`、プロセス終了、キルスイッチでのみ終了します。
+- `output` はシーケンス番号を持ち、attach 直後に保持済み出力（リングバッファ）が
+  先に届きます。購読が遅れて取りこぼした分はこの snapshot で補われます。
+- ノード設定 `allow_remote_pty = false` のとき、ハブ経由の `open` は
+  `PTY_DISABLED` を返します。ローカル直結では利用できます。
+- 実行中のターミナル一覧は `GET /api/v1/terminals?node_id=...` で取得します。
+  ノードのメモリ上のレジストリが正で、ノード再起動後に空になるのは正常です。
 
 ---
 

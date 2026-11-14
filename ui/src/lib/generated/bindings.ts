@@ -1587,25 +1587,31 @@ export type PruneWorktreesRequest = {
  *  Client -> Endpoint (`/api/v1/pty/ws`) message.
  *
  *  A bidirectional stream channel that connects the terminal of the Web UI / mobile
- *  PWA directly to the ConPTY / Unix PTY on the node. When the node setting
- *  `allow_remote_pty = false` is in effect, `spawn` from remote (through the
+ *  PWA directly to the ConPTY / Unix PTY on the node. Terminals are scoped to a
+ *  workspace (`node_id` + `path`): opening the same workspace again attaches to
+ *  the running shell instead of starting another one. When the node setting
+ *  `allow_remote_pty = false` is in effect, `open` from remote (through the
  *  hub) is rejected.
  */
 export type PtyClientMessage =
-/**  Attach to an existing PTY */
-{ op: "attach";
-/**  PTY ID */
-pty_id: string } |
-/**  Start a new PTY */
-{ op: "spawn";
-/**  Target session ID */
-session_id: SessionId;
+/**  Open the terminal of a workspace (idempotent: attaches when it is running). */
+{ op: "open";
+/**  Node that owns the workspace */
+node_id: NodeId;
+/**  Workspace directory (canonical path of a registered project binding) */
+path: string;
+/**  Session that opened the terminal (origin, not ownership) */
+session_id: SessionId | null;
 /**  Number of columns */
 cols: number;
 /**  Number of rows */
 rows: number;
-/**  Shell command (defaults to the default shell) */
-shell_cmd: string | null } |
+/**  Replace a running terminal with a new shell */
+new: boolean } |
+/**  Attach to an existing PTY by ID */
+{ op: "attach";
+/**  PTY ID */
+pty_id: string } |
 /**  Send keystrokes */
 { op: "input";
 /**  Input bytes (Base64) */
@@ -1621,14 +1627,24 @@ rows: number } |
 
 /**  Endpoint -> Client (`/api/v1/pty/ws`) message. */
 export type PtyServerMessage =
-/**  The PTY has started (subsequent output belongs to the attached PTY ID) */
-{ op: "spawned";
-/**  ID of the started PTY */
-pty_id: string } |
-/**  PTY output */
+/**  The PTY was opened (subsequent output belongs to the attached PTY ID) */
+{ op: "opened";
+/**  PTY ID */
+pty_id: string;
+/**  Canonical workspace path */
+path: string;
+/**  Whether an existing terminal was reused instead of starting a new one */
+attached: boolean;
+/**  Number of columns */
+cols: number;
+/**  Number of rows */
+rows: number } |
+/**  PTY output (a sequence of retained output may precede the live stream) */
 { op: "output";
 /**  Output bytes (Base64) */
-data_b64: string } |
+data_b64: string;
+/**  Sequence number of this chunk (0-based, monotonic per PTY) */
+seq: number } |
 /**  The PTY process exited */
 { op: "exit";
 /**  Exit code */
@@ -1637,7 +1653,7 @@ exit_code: number | null } |
  *  Error notification.
  *
  *  `code` is not an `ErrorCode` but a string specific to the PTY channel
- *  (e.g. `"FORBIDDEN"` when remote PTY is disabled).
+ *  (e.g. `"PTY_DISABLED"` when remote PTY is disabled).
  */
 { op: "error";
 /**  Error code string */
@@ -2272,6 +2288,40 @@ export type SystemStatus = {
 	components: ComponentHealth[],
 	/**  Delivery drop / retry counters */
 	counters: DropCounters,
+};
+
+/**  One running terminal (`GET /api/v1/terminals`). */
+export type TerminalSummary = {
+	/**  PTY ID */
+	pty_id: string,
+	/**  Node that runs the terminal */
+	node_id: NodeId,
+	/**  Canonical workspace path */
+	path: string,
+	/**  Session that opened the terminal (origin; may be gone) */
+	session_id: SessionId | null,
+	/**  OS process ID of the shell */
+	pid: number | null,
+	/**  Current columns */
+	cols: number,
+	/**  Current rows */
+	rows: number,
+	/**  Number of attached clients */
+	attached_clients: number,
+	/**  Creation time (Unix epoch ms) */
+	created_at: number,
+};
+
+/**  Query parameters of `GET /api/v1/terminals`. */
+export type TerminalsQuery = {
+	/**  Node whose running terminals are listed */
+	node_id: NodeId,
+};
+
+/**  Running terminals (`GET /api/v1/terminals`). */
+export type TerminalsResponse = {
+	/**  Running terminals on the node */
+	terminals: TerminalSummary[],
 };
 
 /**  `POST /api/v1/nodes/{node_id}/settings/pairing/test` request. */

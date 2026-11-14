@@ -238,6 +238,65 @@ impl DaemonState {
         Ok(projects)
     }
 
+    /// Resolves and validates the working directory of a workspace terminal.
+    ///
+    /// Only registered workspaces may run a shell: a project binding
+    /// (`project_node_bindings`), an explicit path link (`project_path_links`) or
+    /// the `local_path` of an existing session. The check is an exact match on
+    /// the canonical path, so a subdirectory of an allowed workspace is rejected.
+    pub async fn validate_terminal_path(&self, path: &str) -> Result<PathBuf, NodeError> {
+        let canonical = fxg_pty::canonicalize(path).map_err(|err| {
+            NodeError::InvalidState(format!("terminal path is not accessible: {err}"))
+        })?;
+        if !canonical.is_dir() {
+            return Err(NodeError::InvalidState(format!(
+                "terminal path is not a directory: {}",
+                canonical.display()
+            )));
+        }
+
+        let mut allowed = std::collections::HashSet::new();
+        for project in self.db().list_projects().await? {
+            for binding in project.bindings {
+                if binding.node_id.as_str() == self.node_id()
+                    && let Ok(path) = fxg_pty::canonicalize(&binding.local_path)
+                {
+                    allowed.insert(path);
+                }
+            }
+        }
+        for (local_path, _) in self.db().project_path_links().await? {
+            if let Ok(path) = fxg_pty::canonicalize(&local_path) {
+                allowed.insert(path);
+            }
+        }
+        if allowed.contains(&canonical) {
+            return Ok(canonical);
+        }
+
+        // Sessions remember the path they were created with; this keeps a live
+        // session usable after its binding was removed.
+        let sessions = self
+            .db()
+            .list_sessions(&fxg_db::SessionFilter {
+                include_archived: true,
+                ..fxg_db::SessionFilter::default()
+            })
+            .await?;
+        let known_session_path = sessions.iter().any(|session| {
+            session.node_id.as_str() == self.node_id()
+                && fxg_pty::canonicalize(&session.local_path).is_ok_and(|path| path == canonical)
+        });
+        if known_session_path {
+            return Ok(canonical);
+        }
+
+        Err(NodeError::InvalidState(format!(
+            "path is not a registered workspace: {}",
+            canonical.display()
+        )))
+    }
+
     /// Writes `path_exists` (live value) into this node's bindings.
     ///
     /// The node-side DB only holds this node's bindings, so other nodes are not checked.

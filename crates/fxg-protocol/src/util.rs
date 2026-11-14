@@ -1,6 +1,85 @@
 //! Small utilities such as time and ID generation.
 
+use std::collections::VecDeque;
 use std::time::{SystemTime, UNIX_EPOCH};
+
+/// Default capacity of the per-terminal output log (bytes).
+pub const PTY_OUTPUT_LOG_CAPACITY: usize = 256 * 1024;
+
+/// Bounded byte log of terminal output used for attach-time replay.
+///
+/// Every pushed chunk gets a monotonically increasing sequence number. A
+/// [`snapshot`](Self::snapshot) returns the retained bytes together with the
+/// sequence number of the next chunk, so a subscriber can drop live chunks that
+/// the snapshot already covers.
+///
+/// The log keeps only the tail; a truncated snapshot may start in the middle of
+/// an ANSI escape sequence, which terminals tolerate.
+#[derive(Debug)]
+pub struct PtyOutputLog {
+    capacity: usize,
+    data: VecDeque<u8>,
+    next_seq: u64,
+}
+
+impl Default for PtyOutputLog {
+    fn default() -> Self {
+        Self::with_default_capacity()
+    }
+}
+
+impl PtyOutputLog {
+    /// Creates a log with an explicit capacity (at least 1 byte).
+    pub fn new(capacity: usize) -> Self {
+        Self {
+            capacity: capacity.max(1),
+            data: VecDeque::new(),
+            next_seq: 0,
+        }
+    }
+
+    /// Creates a log with [`PTY_OUTPUT_LOG_CAPACITY`].
+    pub fn with_default_capacity() -> Self {
+        Self::new(PTY_OUTPUT_LOG_CAPACITY)
+    }
+
+    /// Appends a chunk and returns its sequence number.
+    pub fn push(&mut self, data: &[u8]) -> u64 {
+        let seq = self.next_seq;
+        self.next_seq = self.next_seq.saturating_add(1);
+        self.data.extend(data.iter().copied());
+        let excess = self.data.len().saturating_sub(self.capacity);
+        if excess > 0 {
+            self.data.drain(..excess);
+        }
+        seq
+    }
+
+    /// Returns the retained bytes and the sequence number of the next chunk.
+    pub fn snapshot(&self) -> (Vec<u8>, u64) {
+        (self.data.iter().copied().collect(), self.next_seq)
+    }
+
+    /// Sequence number the next pushed chunk will receive.
+    pub fn next_seq(&self) -> u64 {
+        self.next_seq
+    }
+
+    /// Number of retained bytes.
+    pub fn len(&self) -> usize {
+        self.data.len()
+    }
+
+    /// Whether nothing is retained.
+    pub fn is_empty(&self) -> bool {
+        self.data.is_empty()
+    }
+
+    /// Capacity in bytes.
+    pub fn capacity(&self) -> usize {
+        self.capacity
+    }
+}
 
 /// Returns the current time as Unix epoch milliseconds.
 ///
@@ -122,5 +201,34 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_millis(2));
         let b = uuid_v7();
         assert!(a < b, "UUID v7 should be lexicographically ordered");
+    }
+
+    #[test]
+    fn pty_output_log_assigns_monotonic_sequence_numbers() {
+        let mut log = PtyOutputLog::new(64);
+        assert_eq!(log.push(b"a"), 0);
+        assert_eq!(log.push(b"b"), 1);
+        let (bytes, next) = log.snapshot();
+        assert_eq!(bytes, b"ab");
+        assert_eq!(next, 2);
+    }
+
+    #[test]
+    fn pty_output_log_keeps_only_the_tail() {
+        let mut log = PtyOutputLog::new(4);
+        log.push(b"hello");
+        log.push(b"!");
+        let (bytes, _) = log.snapshot();
+        assert_eq!(bytes, b"llo!");
+        assert_eq!(log.len(), 4);
+    }
+
+    #[test]
+    fn pty_output_log_handles_chunks_larger_than_the_capacity() {
+        let mut log = PtyOutputLog::new(3);
+        log.push(b"0123456789");
+        let (bytes, next) = log.snapshot();
+        assert_eq!(bytes, b"789");
+        assert_eq!(next, 1);
     }
 }

@@ -217,6 +217,11 @@ struct Inner {
     push: PushService,
     /// Tracks turns observed as `Running` for turn-finished Web Push notifications
     running_turns: RunningTurns,
+    /// PTY attachments held by the current hub connection (`pty_id` -> clients).
+    ///
+    /// The hub cannot send a detach when its link drops, so the node resets these
+    /// counts when the connection ends.
+    hub_pty_attachments: std::sync::Mutex<std::collections::HashMap<String, usize>>,
     /// Node ⇔ hub link state (outbox sync worker; `watch` also feeds Client WS)
     hub_link: watch::Sender<HubLinkStatus>,
     /// Connection target of the outbox sync worker (`None` = standalone)
@@ -353,6 +358,7 @@ impl DaemonState {
                 client_events,
                 push,
                 running_turns,
+                hub_pty_attachments: std::sync::Mutex::new(std::collections::HashMap::new()),
                 hub_link: watch::channel(initial_hub_link).0,
                 hub_target: watch::channel(None).0,
                 sessions_truncated: std::sync::atomic::AtomicBool::new(false),
@@ -693,6 +699,57 @@ impl DaemonState {
         ]
     }
 
+    /// Records that the current hub connection attached a client to a PTY.
+    pub(crate) fn track_hub_pty_attach(&self, pty_id: &str) {
+        let mut attachments = self
+            .inner
+            .hub_pty_attachments
+            .lock()
+            .expect("hub pty attachments poisoned");
+        *attachments.entry(pty_id.to_owned()).or_default() += 1;
+    }
+
+    /// Records that a hub client detached from a PTY.
+    pub(crate) fn track_hub_pty_detach(&self, pty_id: &str) {
+        let mut attachments = self
+            .inner
+            .hub_pty_attachments
+            .lock()
+            .expect("hub pty attachments poisoned");
+        let Some(count) = attachments.get_mut(pty_id) else {
+            return;
+        };
+        *count = count.saturating_sub(1);
+        if *count == 0 {
+            attachments.remove(pty_id);
+        }
+    }
+
+    /// Forgets the attachments of a PTY that no longer exists.
+    pub(crate) fn forget_hub_pty(&self, pty_id: &str) {
+        self.inner
+            .hub_pty_attachments
+            .lock()
+            .expect("hub pty attachments poisoned")
+            .remove(pty_id);
+    }
+
+    /// Detaches every client held by the (now closed) hub connection.
+    pub(crate) fn detach_hub_ptys(&self) {
+        let attachments = std::mem::take(
+            &mut *self
+                .inner
+                .hub_pty_attachments
+                .lock()
+                .expect("hub pty attachments poisoned"),
+        );
+        for (pty_id, count) in attachments {
+            for _ in 0..count {
+                self.inner.pty.detach(&pty_id);
+            }
+        }
+    }
+
     /// Forcefully terminates all sessions and PTYs on the local node (emergency kill switch).
     ///
     /// - PTYs: [`PtySessionManager::kill_all`] (on Windows, terminates the entire
@@ -713,6 +770,11 @@ impl DaemonState {
         use fxg_protocol::events::UnifiedEventPayload;
 
         let killed_ptys = self.inner.pty.kill_all();
+        self.inner
+            .hub_pty_attachments
+            .lock()
+            .expect("hub pty attachments poisoned")
+            .clear();
 
         // Stop agent processes (including their process trees).
         let stopped_agents = self.inner.sessions.shutdown_all().await;
@@ -1233,6 +1295,262 @@ mod tests {
             .expect("read token file");
         assert_eq!(on_disk.trim(), after);
 
+        daemon.shutdown();
+        daemon.wait().await;
+    }
+
+    #[tokio::test]
+    async fn terminal_paths_must_be_registered_workspaces() {
+        let (daemon, dir) = start_test_daemon().await;
+        let workdir = dir.path().join("workspace");
+        std::fs::create_dir_all(&workdir).expect("mkdir");
+        let workspace = workdir.to_string_lossy().into_owned();
+
+        assert!(
+            daemon
+                .state()
+                .validate_terminal_path(&workspace)
+                .await
+                .is_err(),
+            "an unregistered directory must be rejected"
+        );
+
+        daemon
+            .state()
+            .resolve_and_register_project(&workdir)
+            .await
+            .expect("register project");
+        assert!(
+            daemon
+                .state()
+                .validate_terminal_path(&workspace)
+                .await
+                .is_ok()
+        );
+
+        // A subdirectory is not a workspace of its own.
+        let subdir = workdir.join("sub");
+        std::fs::create_dir_all(&subdir).expect("mkdir subdir");
+        assert!(
+            daemon
+                .state()
+                .validate_terminal_path(&subdir.to_string_lossy())
+                .await
+                .is_err(),
+            "subdirectories must not be opened as their own workspace"
+        );
+
+        daemon.shutdown();
+        daemon.wait().await;
+    }
+
+    #[tokio::test]
+    async fn opening_the_same_workspace_reuses_the_terminal() {
+        use fxg_hub::api::ClientApiBackend as _;
+
+        let (daemon, dir) = start_test_daemon().await;
+        let workdir = dir.path().join("workspace");
+        std::fs::create_dir_all(&workdir).expect("mkdir");
+        daemon
+            .state()
+            .resolve_and_register_project(&workdir)
+            .await
+            .expect("register project");
+        let path = workdir.to_string_lossy().into_owned();
+        let params = fxg_hub::api::PtyOpenParams {
+            pty_id: "pty-a".to_owned(),
+            node_id: daemon.state().node_id().into(),
+            path: path.clone(),
+            session_id: None,
+            cols: 80,
+            rows: 24,
+            new: false,
+            remote: false,
+        };
+
+        let first = daemon.state().pty_open(params.clone()).await.expect("open");
+        assert!(!first.attached);
+        let second = daemon
+            .state()
+            .pty_open(fxg_hub::api::PtyOpenParams {
+                pty_id: "pty-b".to_owned(),
+                ..params
+            })
+            .await
+            .expect("reopen");
+        assert!(second.attached);
+        assert_eq!(first.pty_id, second.pty_id);
+        assert_eq!(daemon.state().pty().list().len(), 1);
+
+        let terminals = daemon.state().pty().list();
+        // The node canonicalizes the workspace path (e.g. `/var` → `/private/var`
+        // on macOS, 8.3 short names on Windows).
+        let canonical = fxg_pty::canonicalize(&workdir).expect("canonical workspace");
+        assert_eq!(terminals[0].path, canonical);
+        assert_eq!(terminals[0].attached, 2);
+
+        daemon.state().pty_detach(&first.pty_id).await;
+        assert_eq!(daemon.state().pty().list()[0].attached, 1);
+        daemon.state().pty_detach(&first.pty_id).await;
+        assert_eq!(daemon.state().pty().list()[0].attached, 0);
+
+        daemon.shutdown();
+        daemon.wait().await;
+    }
+
+    #[tokio::test]
+    async fn pty_ws_replays_retained_output_after_reattach() {
+        use base64::Engine as _;
+        use futures_util::{SinkExt, StreamExt};
+        use fxg_protocol::client_api::{PtyClientMessage, PtyServerMessage};
+        use std::time::Duration;
+        use tokio_tungstenite::tungstenite::Message as WsMessage;
+        use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+
+        async fn next_message(
+            socket: &mut tokio_tungstenite::WebSocketStream<
+                tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+            >,
+        ) -> PtyServerMessage {
+            loop {
+                let message = tokio::time::timeout(Duration::from_secs(15), socket.next())
+                    .await
+                    .expect("pty ws timed out")
+                    .expect("pty ws closed")
+                    .expect("pty ws error");
+                if let WsMessage::Text(text) = message {
+                    return serde_json::from_str(&text).expect("valid pty message");
+                }
+            }
+        }
+
+        let (daemon, dir) = start_test_daemon().await;
+        let workdir = dir.path().join("workspace");
+        std::fs::create_dir_all(&workdir).expect("mkdir");
+        daemon
+            .state()
+            .resolve_and_register_project(&workdir)
+            .await
+            .expect("register project");
+        let open = serde_json::to_string(&PtyClientMessage::Open {
+            node_id: daemon.state().node_id().into(),
+            path: workdir.to_string_lossy().into_owned(),
+            session_id: None,
+            cols: 80,
+            rows: 24,
+            new: false,
+        })
+        .expect("open message");
+        let addr = daemon.http_addr();
+        let url = format!("ws://{addr}/api/v1/pty/ws");
+        let token = daemon.state().auth_token();
+
+        // First connection: spawn the workspace shell.
+        let mut request = url.as_str().into_client_request().expect("ws request");
+        request.headers_mut().insert(
+            "authorization",
+            format!("Bearer {token}").parse().expect("auth header"),
+        );
+        let (mut socket, _) = tokio_tungstenite::connect_async(request)
+            .await
+            .expect("connect ws");
+        socket
+            .send(WsMessage::Text(open.clone().into()))
+            .await
+            .expect("send open");
+        let pty_id = match next_message(&mut socket).await {
+            PtyServerMessage::Opened {
+                pty_id, attached, ..
+            } => {
+                assert!(!attached);
+                pty_id
+            }
+            other => panic!("expected opened, got {other:?}"),
+        };
+
+        let input = serde_json::to_string(&PtyClientMessage::Input {
+            data_b64: base64::engine::general_purpose::STANDARD.encode(b"printf 'marker-42\n'\n"),
+        })
+        .expect("input message");
+        socket
+            .send(WsMessage::Text(input.into()))
+            .await
+            .expect("send input");
+
+        // Drain until the shell produced the marker.
+        let mut saw_marker = false;
+        for _ in 0..40 {
+            if let PtyServerMessage::Output { data_b64, .. } = next_message(&mut socket).await {
+                let data = base64::engine::general_purpose::STANDARD
+                    .decode(data_b64.as_bytes())
+                    .expect("base64");
+                if String::from_utf8_lossy(&data).contains("marker-42") {
+                    saw_marker = true;
+                    break;
+                }
+            }
+        }
+        assert!(saw_marker, "the shell output was not received");
+        drop(socket);
+
+        // The socket close only detaches the client.
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while daemon
+            .state()
+            .pty()
+            .list()
+            .first()
+            .is_some_and(|info| info.attached > 0)
+            && std::time::Instant::now() < deadline
+        {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+
+        // Second connection: the same workspace reuses the shell and replays the
+        // retained output before any new input.
+        let mut request = url.as_str().into_client_request().expect("ws request");
+        request.headers_mut().insert(
+            "authorization",
+            format!("Bearer {token}").parse().expect("auth header"),
+        );
+        let (mut socket, _) = tokio_tungstenite::connect_async(request)
+            .await
+            .expect("reconnect ws");
+        socket
+            .send(WsMessage::Text(open.into()))
+            .await
+            .expect("send open");
+        let opened = next_message(&mut socket).await;
+        match &opened {
+            PtyServerMessage::Opened {
+                pty_id: reused,
+                attached,
+                ..
+            } => {
+                assert!(attached);
+                assert_eq!(reused, &pty_id);
+            }
+            other => panic!("expected opened, got {other:?}"),
+        }
+
+        let mut replayed = String::new();
+        for _ in 0..40 {
+            if let PtyServerMessage::Output { data_b64, .. } = next_message(&mut socket).await {
+                let data = base64::engine::general_purpose::STANDARD
+                    .decode(data_b64.as_bytes())
+                    .expect("base64");
+                replayed.push_str(&String::from_utf8_lossy(&data));
+                if replayed.contains("marker-42") {
+                    break;
+                }
+            }
+        }
+        assert!(
+            replayed.contains("marker-42"),
+            "retained output was not replayed: {replayed:?}"
+        );
+
+        drop(socket);
         daemon.shutdown();
         daemon.wait().await;
     }

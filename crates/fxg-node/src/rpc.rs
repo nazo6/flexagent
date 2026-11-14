@@ -8,7 +8,8 @@ use std::path::{Path, PathBuf};
 
 use fxg_protocol::CommandId;
 use fxg_protocol::client_api::{
-    ProjectLinkResponse, ProjectScanResponse, ProjectUnlinkResponse, WorktreeInfo,
+    ProjectLinkResponse, ProjectScanResponse, ProjectUnlinkResponse, TerminalSummary,
+    TerminalsResponse, WorktreeInfo,
 };
 use fxg_protocol::common::WorktreeAction;
 use fxg_protocol::node_hub::{NodeRpcOutcome, NodeRpcRequest, NodeRpcResponse};
@@ -237,6 +238,27 @@ async fn execute_inner(
         NodeRpcRequest::ListAgents => {
             let response = state.agents_catalog().await?;
             Ok(NodeRpcResponse::Agents { response })
+        }
+        NodeRpcRequest::ListTerminals => {
+            let terminals = state
+                .pty()
+                .list()
+                .into_iter()
+                .map(|info| TerminalSummary {
+                    pty_id: info.pty_id,
+                    node_id: state.node_id().into(),
+                    path: info.path.to_string_lossy().into_owned(),
+                    session_id: info.session_id.map(Into::into),
+                    pid: info.pid,
+                    cols: info.cols,
+                    rows: info.rows,
+                    attached_clients: info.attached,
+                    created_at: info.created_at,
+                })
+                .collect();
+            Ok(NodeRpcResponse::Terminals {
+                response: TerminalsResponse { terminals },
+            })
         }
         NodeRpcRequest::ProbeAgentConfig {
             agent_id,

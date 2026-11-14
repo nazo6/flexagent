@@ -1453,3 +1453,239 @@ async fn unpairing_stops_sync_and_reports_standalone() {
 
     node.shutdown();
 }
+
+// ----------------------------------------------------------------------
+// E2E test: the hub relays a workspace terminal with replay
+// ----------------------------------------------------------------------
+
+#[tokio::test(flavor = "multi_thread")]
+async fn hub_relays_workspace_terminal_and_replays_output() {
+    use base64::Engine as _;
+    use futures_util::{SinkExt, StreamExt};
+    use fxg_protocol::client_api::{PtyClientMessage, PtyServerMessage, TerminalsResponse};
+    use fxg_protocol::settings::UpdateNodeSettingsRequest;
+    use tokio_tungstenite::tungstenite::Message as WsMessage;
+    use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+
+    async fn next_message(
+        socket: &mut tokio_tungstenite::WebSocketStream<
+            tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+        >,
+    ) -> PtyServerMessage {
+        loop {
+            let message = tokio::time::timeout(Duration::from_secs(15), socket.next())
+                .await
+                .expect("pty ws timed out")
+                .expect("pty ws closed")
+                .expect("pty ws error");
+            if let WsMessage::Text(text) = message {
+                return serde_json::from_str(&text).expect("valid pty message");
+            }
+        }
+    }
+
+    let server_home = tempfile::tempdir().expect("server home");
+    let node_home = tempfile::tempdir().expect("node home");
+    let repo = tempfile::tempdir().expect("repo");
+    init_repo(repo.path()).await;
+
+    let port = reserve_port();
+    let server_url = format!("ws://127.0.0.1:{port}/api/v1/node/ws");
+    let node_token = issue_node_token(server_home.path(), "node-1").await;
+    let agent = MockAgent::default();
+
+    let server = start_hub(server_home.path(), port).await;
+    let node = start_node(
+        node_home.path(),
+        "node-1",
+        Some(server_url),
+        Some(node_token),
+        &agent,
+    )
+    .await;
+    wait_until("node connected", Duration::from_secs(30), || async {
+        server
+            .state()
+            .hub()
+            .is_online(&NodeId::from("node-1"))
+            .await
+    })
+    .await;
+
+    // Remote PTY is disabled by default; enable it for this node.
+    let snapshot = node
+        .state()
+        .node_settings_snapshot()
+        .await
+        .expect("node settings");
+    node.state()
+        .update_node_settings(&UpdateNodeSettingsRequest {
+            name: snapshot.node.name.clone(),
+            allow_remote_pty: true,
+            project_scan_dirs: snapshot.node.project_scan_dirs.clone(),
+            tray: snapshot.node.tray,
+            vapid_subject: snapshot.node.vapid_subject.clone(),
+            expected_revision: snapshot.node.revision,
+        })
+        .await
+        .expect("enable remote pty");
+
+    node.state()
+        .resolve_and_register_project(repo.path())
+        .await
+        .expect("resolve project");
+
+    let client_token = fxg_hub::api::auth::load_or_create_token(
+        &Paths::portable(server_home.path(), Role::Hub).auth_token_path(),
+    )
+    .expect("Web access token");
+    let url = format!("ws://127.0.0.1:{port}/api/v1/pty/ws");
+    let open = serde_json::to_string(&PtyClientMessage::Open {
+        node_id: NodeId::from("node-1"),
+        path: repo.path().to_string_lossy().into_owned(),
+        session_id: None,
+        cols: 80,
+        rows: 24,
+        new: false,
+    })
+    .expect("open message");
+
+    // First connection: the hub spawns the terminal on the node.
+    let mut request = url.as_str().into_client_request().expect("ws request");
+    request.headers_mut().insert(
+        "authorization",
+        format!("Bearer {client_token}")
+            .parse()
+            .expect("auth header"),
+    );
+    let (mut socket, _) = tokio_tungstenite::connect_async(request)
+        .await
+        .expect("connect hub pty ws");
+    socket
+        .send(WsMessage::Text(open.clone().into()))
+        .await
+        .expect("send open");
+    let pty_id = match next_message(&mut socket).await {
+        PtyServerMessage::Opened {
+            pty_id, attached, ..
+        } => {
+            assert!(!attached, "the first open must spawn a terminal");
+            pty_id
+        }
+        other => panic!("expected opened, got {other:?}"),
+    };
+
+    socket
+        .send(WsMessage::Text(
+            serde_json::to_string(&PtyClientMessage::Input {
+                data_b64: base64::engine::general_purpose::STANDARD
+                    .encode(b"printf 'hub-marker-7\\n'\n"),
+            })
+            .expect("input message")
+            .into(),
+        ))
+        .await
+        .expect("send input");
+
+    let mut saw_marker = false;
+    for _ in 0..40 {
+        if let PtyServerMessage::Output { data_b64, .. } = next_message(&mut socket).await {
+            let data = base64::engine::general_purpose::STANDARD
+                .decode(data_b64.as_bytes())
+                .expect("base64");
+            if String::from_utf8_lossy(&data).contains("hub-marker-7") {
+                saw_marker = true;
+                break;
+            }
+        }
+    }
+    assert!(saw_marker, "output was not relayed through the hub");
+    drop(socket);
+
+    wait_until(
+        "node detached the hub client",
+        Duration::from_secs(10),
+        || async {
+            node.state()
+                .pty()
+                .list()
+                .first()
+                .is_none_or(|info| info.attached == 0)
+        },
+    )
+    .await;
+
+    // The running terminal is listed through the hub.
+    let http = reqwest::Client::new();
+    let listed = http
+        .get(format!(
+            "http://127.0.0.1:{port}/api/v1/terminals?node_id=node-1"
+        ))
+        .bearer_auth(&client_token)
+        .send()
+        .await
+        .expect("terminals request")
+        .error_for_status()
+        .expect("terminals status")
+        .json::<TerminalsResponse>()
+        .await
+        .expect("terminals body");
+    assert!(
+        listed.terminals.iter().any(|entry| entry.pty_id == pty_id),
+        "the hub must list the running terminal: {listed:?}"
+    );
+
+    // Second connection: same workspace → same shell + replayed output.
+    let mut request = url.as_str().into_client_request().expect("ws request");
+    request.headers_mut().insert(
+        "authorization",
+        format!("Bearer {client_token}")
+            .parse()
+            .expect("auth header"),
+    );
+    let (mut socket, _) = tokio_tungstenite::connect_async(request)
+        .await
+        .expect("reconnect hub pty ws");
+    socket
+        .send(WsMessage::Text(open.into()))
+        .await
+        .expect("send open");
+    match next_message(&mut socket).await {
+        PtyServerMessage::Opened {
+            pty_id: reused,
+            attached,
+            ..
+        } => {
+            assert!(attached, "the second open must reuse the terminal");
+            assert_eq!(reused, pty_id);
+        }
+        other => panic!("expected opened, got {other:?}"),
+    }
+
+    let mut replayed = String::new();
+    for _ in 0..40 {
+        if let PtyServerMessage::Output { data_b64, .. } = next_message(&mut socket).await {
+            let data = base64::engine::general_purpose::STANDARD
+                .decode(data_b64.as_bytes())
+                .expect("base64");
+            replayed.push_str(&String::from_utf8_lossy(&data));
+            if replayed.contains("hub-marker-7") {
+                break;
+            }
+        }
+    }
+    assert!(
+        replayed.contains("hub-marker-7"),
+        "the hub did not replay retained output: {replayed:?}"
+    );
+
+    drop(socket);
+    node.shutdown();
+    tokio::time::timeout(Duration::from_secs(10), node.wait())
+        .await
+        .expect("node stop");
+    server.shutdown();
+    tokio::time::timeout(Duration::from_secs(10), server.wait())
+        .await
+        .expect("server stop");
+}

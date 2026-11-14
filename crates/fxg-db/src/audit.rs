@@ -32,6 +32,8 @@ pub mod actions {
     pub const ELICITATION_RESOLVED: AuditAction = AuditAction::ElicitationResolved;
     /// Web PTY spawned
     pub const PTY_SPAWN: AuditAction = AuditAction::PtySpawn;
+    /// Web PTY terminated by a client
+    pub const PTY_KILL: AuditAction = AuditAction::PtyKill;
     /// Emergency kill switch executed
     pub const KILL_SWITCH: AuditAction = AuditAction::KillSwitch;
     /// Worktree operation (create / delete)

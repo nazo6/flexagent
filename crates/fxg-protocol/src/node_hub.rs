@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use crate::client_api::HubLinkStatus;
 use crate::client_api::{
     AgentCapabilitiesPreview, AgentsResponse, FsBrowseResponse, ProjectLinkResponse,
-    ProjectPreview, ProjectScanResponse, ProjectUnlinkResponse, WorktreeInfo,
+    ProjectPreview, ProjectScanResponse, ProjectUnlinkResponse, TerminalsResponse, WorktreeInfo,
 };
 use crate::common::{
     AgentAction, ClientSource, DataSafety, DiffScope, ElicitationContent, ErrorInfo,
@@ -33,7 +33,7 @@ use crate::{CommandId, NodeId, ProjectId, SecretId, SessionId};
 /// The node and the hub must come from the same `fxg` release. A node
 /// with an older protocol is rejected at `NodeHello`; backward compatibility
 /// shims are intentionally not provided.
-pub const PROTOCOL_VERSION: u32 = 2;
+pub const PROTOCOL_VERSION: u32 = 3;
 /// Synchronization state of a session held by the node (reported in `NodeHello`).
 ///
 /// The hub compares it with `last_node_seq` in its own DB and returns
@@ -117,6 +117,8 @@ pub enum NodeRpcRequest {
     },
     /// Fetch the ACP Registry catalog plus installation state.
     ListAgents,
+    /// List the running workspace terminals of the node.
+    ListTerminals,
     /// Probe an agent by starting a temporary ACP session.
     ///
     /// ACP only reports model choices in the `session/new` response, so this
@@ -296,6 +298,11 @@ pub enum NodeRpcResponse {
         /// Catalog plus installation state
         response: AgentsResponse,
     },
+    /// Running terminals (`ListTerminals`).
+    Terminals {
+        /// Running terminals of the node
+        response: TerminalsResponse,
+    },
     /// Agent capabilities from a temporary ACP session (`ProbeAgentConfig`).
     AgentCapabilities {
         /// Modes and configuration entries reported by the agent
@@ -448,6 +455,37 @@ pub enum NodeToHubMsg {
         /// Output bytes (Base64)
         data_b64: String,
     },
+    /// Result of [`HubToNodeMsg::PtySpawn`].
+    ///
+    /// The node assigns or reuses the PTY ID and returns the retained output so
+    /// the hub can seed its replay log before live chunks arrive.
+    PtyOpened {
+        /// Correlation ID of the spawn request
+        request_id: CommandId,
+        /// Actual PTY ID (an existing terminal is reused for the same workspace)
+        pty_id: String,
+        /// Canonical workspace path
+        path: String,
+        /// Number of columns
+        cols: u16,
+        /// Number of rows
+        rows: u16,
+        /// Whether an existing terminal was reused
+        attached: bool,
+        /// Retained output (Base64)
+        snapshot_b64: String,
+    },
+    /// Failure of [`HubToNodeMsg::PtySpawn`] (before the PTY exists).
+    PtyOpenFailed {
+        /// Correlation ID of the spawn request
+        request_id: CommandId,
+        /// Proposed PTY ID
+        pty_id: String,
+        /// Error code string
+        code: String,
+        /// Human-readable message
+        message: String,
+    },
     /// Notification that the PTY process exited.
     PtyExit {
         /// PTY ID
@@ -582,18 +620,35 @@ pub enum HubToNodeMsg {
         /// Operation to execute
         action: SessionControlAction,
     },
-    /// Request to start a workspace web terminal (PTY).
+    /// Request to open the workspace web terminal (PTY).
+    ///
+    /// Opening the same workspace again attaches to the running terminal. The
+    /// node answers with [`NodeToHubMsg::PtyOpened`].
     PtySpawn {
-        /// PTY ID
+        /// Correlation ID for the reply
+        request_id: CommandId,
+        /// Proposed PTY ID (reused when the workspace already has a terminal)
         pty_id: String,
-        /// Target session ID
-        session_id: SessionId,
+        /// Workspace directory
+        path: String,
+        /// Session that opened the terminal (origin)
+        session_id: Option<SessionId>,
         /// Number of columns
         cols: u16,
         /// Number of rows
         rows: u16,
-        /// Shell command (defaults to the default shell)
-        shell_cmd: Option<String>,
+        /// Replace a running terminal with a new shell
+        new: bool,
+    },
+    /// Marks an additional client as attached to the PTY.
+    PtyAttach {
+        /// PTY ID
+        pty_id: String,
+    },
+    /// Marks a client as detached (the PTY stays alive until its idle timeout).
+    PtyDetach {
+        /// PTY ID
+        pty_id: String,
     },
     /// Sends user input (keystrokes) to the PTY.
     PtyInput {
@@ -766,6 +821,42 @@ mod tests {
         assert_eq!(json["outcome"]["response"]["context_restored"], false);
         let decoded: NodeToHubMsg = serde_json::from_value(json).unwrap();
         assert_eq!(decoded, msg);
+    }
+
+    #[test]
+    fn pty_open_envelope_shape() {
+        let spawn = HubToNodeMsg::PtySpawn {
+            request_id: "c1".into(),
+            pty_id: "p1".into(),
+            path: "/home/u/repo".into(),
+            session_id: Some("s1".into()),
+            cols: 80,
+            rows: 24,
+            new: false,
+        };
+        let json = serde_json::to_value(&spawn).unwrap();
+        assert_eq!(json["op"], "pty_spawn");
+        assert_eq!(json["request_id"], "c1");
+        assert_eq!(json["path"], "/home/u/repo");
+        assert_eq!(serde_json::from_value::<HubToNodeMsg>(json).unwrap(), spawn);
+
+        let opened = NodeToHubMsg::PtyOpened {
+            request_id: "c1".into(),
+            pty_id: "p1".into(),
+            path: "/home/u/repo".into(),
+            cols: 80,
+            rows: 24,
+            attached: true,
+            snapshot_b64: "aGk=".into(),
+        };
+        let json = serde_json::to_value(&opened).unwrap();
+        assert_eq!(json["op"], "pty_opened");
+        assert_eq!(json["attached"], true);
+        assert_eq!(json["snapshot_b64"], "aGk=");
+        assert_eq!(
+            serde_json::from_value::<NodeToHubMsg>(json).unwrap(),
+            opened
+        );
     }
 
     #[test]

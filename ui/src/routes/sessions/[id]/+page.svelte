@@ -546,6 +546,8 @@
         <SessionPanelHost
           panel={activePanel}
           {sessionId}
+          nodeId={session.node_id}
+          localPath={session.local_path}
           {items}
           onclose={() => (activePanel = null)}
         />
@@ -569,6 +571,8 @@
         <SessionPanelHost
           panel={activePanel}
           {sessionId}
+          nodeId={session.node_id}
+          localPath={session.local_path}
           {items}
           mobile
           onclose={() => (activePanel = null)}
