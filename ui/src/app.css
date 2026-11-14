@@ -450,15 +450,10 @@
       display: block;
     }
 
-    /* Collapsed rail: the native controls can be wider than the 2.5rem rail,
-       so the main header absorbs the remaining overlap. */
-    .wco-sidebar-collapsed .wco-titlebar-row,
-    .wco-sidebar-collapsed .wco-main-titlebar {
-      padding-inline-start: max(1rem, calc(var(--wco-controls-left) - 2.5rem + 1rem));
-    }
-
-    .wco-sidebar-rail {
-      padding-top: var(--wco-titlebar-height);
+    /* Collapsed: the main header starts at the window edge, so it clears the
+       native controls itself instead of relying on a sidebar rail. */
+    .wco-sidebar-collapsed .wco-titlebar-row {
+      padding-inline-start: calc(var(--wco-controls-left) + 1rem);
     }
   }
 }

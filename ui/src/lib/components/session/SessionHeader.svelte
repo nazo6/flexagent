@@ -110,7 +110,11 @@
     </div>
 
     <div class="flex shrink-0 items-center gap-1">
-      <ProblemBadge class="size-7 px-0 lg:hidden" />
+      <!-- On desktop the sidebar footer owns the badge; when the sidebar is
+           collapsed this header is the only remaining place for it. -->
+      <ProblemBadge
+        class={layoutState.sidebarCollapsed ? "size-7 px-0" : "size-7 px-0 lg:hidden"}
+      />
       {#if session}
         <button
           type="button"

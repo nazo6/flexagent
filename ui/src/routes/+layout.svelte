@@ -115,12 +115,7 @@
   const mainScrolls = $derived(!SELF_SCROLLING_ROUTES.has(page.route.id ?? ""));
   /** Session pages render their own top chrome so mobile has a single header. */
   const isSessionRoute = $derived(page.route.id === "/sessions/[id]");
-  const activeSessionId = $derived(isSessionRoute ? (page.params.id ?? null) : null);
   const attentionCount = $derived(sync.sessions.filter(sessionNeedsAttention).length);
-  const railAttentionCount = $derived(
-    sync.sessions.filter((s) => s.session_id !== activeSessionId && sessionNeedsAttention(s))
-      .length,
-  );
 </script>
 
 <ModeWatcher />
@@ -181,29 +176,6 @@
       <div class="hidden lg:flex lg:w-[264px] xl:w-[288px] lg:shrink-0 lg:h-full">
         <AppSidebar />
       </div>
-    {:else}
-      <!-- Collapsed rail: keeps a visible way to reopen the sidebar on desktop. -->
-      <div
-        class="wco-titlebar wco-sidebar-rail hidden w-10 shrink-0 flex-col items-center border-r border-border py-2 lg:flex"
-      >
-        <button
-          type="button"
-          class="hover:bg-accent text-muted-foreground hover:text-foreground relative flex size-7 items-center justify-center rounded-md border border-border"
-          onclick={() => layoutState.setSidebarCollapsed(false)}
-          title={m.shell_show_sidebar()}
-          aria-label={m.shell_show_sidebar()}
-        >
-          <PanelLeftOpenIcon class="size-4" />
-          {#if railAttentionCount > 0}
-            <span
-              class="bg-destructive text-destructive-foreground absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] leading-none font-bold"
-            >
-              {railAttentionCount > 99 ? "99+" : railAttentionCount}
-            </span>
-          {/if}
-        </button>
-        <ProblemBadge class="mt-1 size-7 px-0" />
-      </div>
     {/if}
 
     <!-- Mobile drawer (Sheet) -->
@@ -214,7 +186,34 @@
     </Sheet.Root>
 
     <!-- Main area -->
-    <div class="flex flex-1 flex-col h-full overflow-hidden">
+    <div class="relative flex h-full flex-1 flex-col overflow-hidden">
+      <!-- Desktop: a floating control reopens the collapsed sidebar without
+           reserving a full-height rail. Session pages place this control in
+           their own header instead, so only one toggle is ever visible. -->
+      {#if layoutState.sidebarCollapsed && !isSessionRoute}
+        <div
+          class="pointer-events-none absolute top-1 left-1 z-20 hidden flex-col items-center gap-1.5 lg:flex"
+        >
+          <button
+            type="button"
+            class="hover:bg-accent text-muted-foreground hover:text-foreground pointer-events-auto relative flex size-7 items-center justify-center rounded-md border border-border bg-background/85 backdrop-blur"
+            onclick={() => layoutState.setSidebarCollapsed(false)}
+            title={m.shell_show_sidebar()}
+            aria-label={m.shell_show_sidebar()}
+          >
+            <PanelLeftOpenIcon class="size-4" />
+            {#if attentionCount > 0}
+              <span
+                class="bg-destructive text-destructive-foreground absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] leading-none font-bold"
+              >
+                {attentionCount > 99 ? "99+" : attentionCount}
+              </span>
+            {/if}
+          </button>
+          <ProblemBadge class="pointer-events-auto size-7 px-0" />
+        </div>
+      {/if}
+
       <!-- Mobile top bar (visible below lg; session pages own their header) -->
       {#if !isSessionRoute}
         <header
