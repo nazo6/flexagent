@@ -394,7 +394,9 @@
    *
    * Some agents publish dependent options such as
    * `effort` only after a model is selected. Before the first probe the only
-   * model key we know is the conventional `model` from the saved preferences.
+   * model key we know is the conventional `model` remembered for this project
+   * and agent. It is scoped by agent because model values are agent-specific
+   * (OpenCode expects `provider/model`, Gemini CLI uses bare IDs).
    */
   function currentModelConfig(): InitialConfig[] {
     if (capabilities !== null) {
@@ -406,8 +408,8 @@
       return value === undefined ? [] : [{ key: option.key, value }];
     }
     const projectId = selectedProject?.project_id ?? "";
-    if (projectId === "") return [];
-    const saved = loadSessionConfig(projectId)["model"];
+    if (projectId === "" || effectiveAgent === "") return [];
+    const saved = loadSessionConfig(projectId, effectiveAgent)["model"];
     return saved === undefined ? [] : [{ key: "model", value: saved }];
   }
 
@@ -479,7 +481,8 @@
     capabilitiesKey = key;
     capabilitiesLoading = false;
     const projectId = selectedProject?.project_id ?? "";
-    const saved = projectId === "" ? {} : loadSessionConfig(projectId);
+    const saved =
+      projectId === "" || effectiveAgent === "" ? {} : loadSessionConfig(projectId, effectiveAgent);
     const resolved = resolveInitialConfig(preview.config_options ?? [], saved);
     // Replacing the object invalidates every reader even when the selection did
     // not change. The probe effect applies cached results synchronously, so a
@@ -580,7 +583,9 @@
   function changeConfigOption(key: string, value: ConfigOptionValue): void {
     selectedConfigValues = { ...selectedConfigValues, [key]: value };
     const projectId = selectedProject?.project_id ?? "";
-    if (projectId !== "") saveSessionConfigOption(projectId, key, value);
+    if (projectId !== "" && effectiveAgent !== "") {
+      saveSessionConfigOption(projectId, effectiveAgent, key, value);
+    }
 
     // Selecting a model can reveal dependent options (for example effort
     // levels) that the previous probe did not return.
@@ -591,17 +596,14 @@
   }
 
   function initialConfig(): { key: string; value: ConfigOptionValue }[] {
-    // Never send an option list that belongs to a different agent / path.
-    if (probeKey !== "" && capabilitiesKey !== probeKey) return [];
-    if (capabilities !== null) {
-      return Object.entries(selectedConfigValues).map(([key, value]) => ({ key, value }));
-    }
-    const projectId = selectedProject?.project_id ?? "";
-    if (projectId === "") return [];
-    return Object.entries(loadSessionConfig(projectId)).map(([key, value]) => ({
-      key,
-      value,
-    }));
+    // Only send options that the current agent reported and that were validated
+    // against its choices. Without a completed probe we cannot tell whether a
+    // remembered value still exists for this agent (or even belongs to it), and
+    // the agent rejects the whole `set_config_option` request when a model is
+    // unknown. A missing value is better than a failed application: the agent
+    // then keeps its own default.
+    if (probeKey === "" || capabilities === null || capabilitiesKey !== probeKey) return [];
+    return Object.entries(selectedConfigValues).map(([key, value]) => ({ key, value }));
   }
 
   const canSubmit = $derived(

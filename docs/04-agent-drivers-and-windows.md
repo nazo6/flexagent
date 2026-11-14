@@ -377,10 +377,17 @@ fxg 側で履歴を組み立て直す Replay フォールバックは行いま�
 
 ### 4.3 プロジェクト別の初期設定
 
-Web UI はプロジェクトごとに最後に選択した `configOptions`
-(モデル / thinking level 等) を localStorage に保存し、新規セッション作成時に
-`CreateSessionRequest.initial_config` として送ります。ノードは
-`session/new` 後に `session/set_config_option` を順に送って適用します。
+Web UI はプロジェクトとエージェントの組み合わせごとに最後に選択した
+`configOptions` (モデル / thinking level 等) を localStorage に保存し、
+新規セッション作成時に `CreateSessionRequest.initial_config` として送ります。
+ノードは `session/new` 後に `session/set_config_option` を順に送って適用します。
+
+モデル値をエージェントごとに分けるのは、値の形式がエージェント固有だからです。
+たとえば OpenCode は `provider/model` を要求し、`provider/` の付かない ID は
+`session/set_config_option` で拒否されます。他エージェントの値を混ぜると、
+能力プローブの `initial_config` が失敗し、適用できないモデルが残ります。
+`initial_config` には、現在のエージェントのプローブ結果と照合済みの値だけを
+送ります (プローブできなかった場合はエージェント既定値を使う)。
 
 ### 4.4 新規セッション前の能力プローブ
 

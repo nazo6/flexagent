@@ -72,15 +72,42 @@ describe("session prefs", () => {
     });
   });
 
-  it("round-trips per-project config values", () => {
+  it("round-trips per-project, per-agent config values", () => {
     const storage = memoryStorage();
-    saveSessionConfigOption("p", "model", "opencode-go/deepseek-v4.1-flash", storage);
-    saveSessionConfigOption("p", "thought_level", "high", storage);
-    expect(loadSessionConfig("p", storage)).toEqual({
+    saveSessionConfigOption("p", "opencode", "model", "opencode-go/deepseek-v4.1-flash", storage);
+    saveSessionConfigOption("p", "opencode", "thought_level", "high", storage);
+    expect(loadSessionConfig("p", "opencode", storage)).toEqual({
       model: "opencode-go/deepseek-v4.1-flash",
       thought_level: "high",
     });
-    expect(loadSessionConfig("other", storage)).toEqual({});
+    // Another agent, another project, or no agent keeps its own memory
+    expect(loadSessionConfig("p", "gemini", storage)).toEqual({});
+    expect(loadSessionConfig("other", "opencode", storage)).toEqual({});
+    expect(loadSessionConfig("p", "", storage)).toEqual({});
+  });
+
+  it("keeps config keys apart when IDs contain colons", () => {
+    const storage = memoryStorage();
+    saveSessionConfigOption("local:box:1", "a:b", "model", "provider/model", storage);
+    expect(loadSessionConfig("local:box:1", "a:b", storage)).toEqual({
+      model: "provider/model",
+    });
+    expect(loadSessionConfig("local:box:1:a", "b", storage)).toEqual({});
+  });
+
+  it("does not save config without an agent", () => {
+    const storage = memoryStorage();
+    saveSessionConfigOption("p", "", "model", "provider/model", storage);
+    expect(loadSessionConfig("p", "", storage)).toEqual({});
+    expect(storage.getItem("fxg:session_config:p:")).toBeNull();
+  });
+
+  it("ignores the legacy project-wide config", () => {
+    const storage = memoryStorage();
+    // Written by versions before model memory was scoped by agent. The agent
+    // cannot be recovered, so it must not leak into another agent's probe.
+    storage.setItem("fxg:session_config:p", JSON.stringify({ model: "gemini-3.8-flash" }));
+    expect(loadSessionConfig("p", "opencode", storage)).toEqual({});
   });
 
   it("toggles model favorites per agent", () => {

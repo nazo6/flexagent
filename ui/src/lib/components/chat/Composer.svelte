@@ -54,7 +54,7 @@
     status?: SessionStatus | null;
     permissionPolicy?: string | null;
     projectId?: string;
-    /** Agent ID used to scope favorite models. */
+    /** Agent ID used to scope favorite models and remembered configuration. */
     agentId?: string;
     resumeRequired?: boolean;
   } = $props();
@@ -205,8 +205,8 @@
         }
       } else if (action.action === "cancel") {
         toast.info(m.chat_cancel_requested());
-      } else if (action.action === "set_config" && projectId !== "") {
-        saveSessionConfigOption(projectId, action.key, action.value);
+      } else if (action.action === "set_config" && projectId !== "" && agentId !== "") {
+        saveSessionConfigOption(projectId, agentId, action.key, action.value);
       }
     } catch (error) {
       problems.report("session control", error);

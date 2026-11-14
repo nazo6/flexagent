@@ -127,7 +127,8 @@ export function orderedConfigOptions(options: readonly ConfigOptionInfo[]): Conf
 }
 
 /**
- * Build the initial config map from probed options and per-project memory.
+ * Build the initial config map from probed options and per-project, per-agent
+ * memory.
  *
  * A saved value is used only when it is still one of the agent's choices;
  * otherwise the agent's current value is used. Options without choices are

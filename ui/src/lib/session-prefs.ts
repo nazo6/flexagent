@@ -3,7 +3,8 @@ import type { ConfigOptionValue } from "#lib/generated/bindings.ts";
 /**
  * Per-device memory for the new session screen (localStorage).
  *
- * Remembers the last used agent / initial mode per project.
+ * Remembers the last used agent / initial mode per project, and the model /
+ * thinking level per project and agent.
  * This is a per-device preference and is never stored on the server (node or central server).
  */
 
@@ -80,14 +81,29 @@ export function saveNewSessionPrefs(
   }
 }
 
-/** Load the last used session configuration (model / thinking level) for a project. */
+/**
+ * Storage key for one agent's configuration in a project.
+ *
+ * The agent is part of the key because model values are agent-specific: a bare
+ * model ID remembered for one agent (for example Gemini CLI's
+ * `gemini-3.8-flash`) is not a valid `provider/model` choice for OpenCode, and
+ * sending it makes the agent reject the initial `set_config_option` request.
+ * The agent ID is encoded so the delimiter cannot clash with IDs that contain
+ * colons.
+ */
+function sessionConfigKey(projectId: string, agentId: string): string {
+  return `${CONFIG_KEY_PREFIX}${projectId}:${encodeURIComponent(agentId)}`;
+}
+
+/** Load the last used configuration (model / thinking level) for a project and agent. */
 export function loadSessionConfig(
   projectId: string,
+  agentId: string,
   storage?: Storage | null,
 ): Record<string, ConfigOptionValue> {
   const store = resolveStorage(storage);
-  if (store === null || projectId === "") return {};
-  const raw = store.getItem(CONFIG_KEY_PREFIX + projectId);
+  if (store === null || projectId === "" || agentId === "") return {};
+  const raw = store.getItem(sessionConfigKey(projectId, agentId));
   if (raw === null) return {};
   try {
     const parsed: unknown = JSON.parse(raw);
@@ -98,19 +114,20 @@ export function loadSessionConfig(
   }
 }
 
-/** Persist one configuration value for a project (per-device preference). */
+/** Persist one configuration value for a project and agent (per-device preference). */
 export function saveSessionConfigOption(
   projectId: string,
+  agentId: string,
   key: string,
   value: ConfigOptionValue,
   storage?: Storage | null,
 ): void {
   const store = resolveStorage(storage);
-  if (store === null || projectId === "" || key === "") return;
+  if (store === null || projectId === "" || agentId === "" || key === "") return;
   try {
-    const config = loadSessionConfig(projectId, store);
+    const config = loadSessionConfig(projectId, agentId, store);
     config[key] = value;
-    store.setItem(CONFIG_KEY_PREFIX + projectId, JSON.stringify(config));
+    store.setItem(sessionConfigKey(projectId, agentId), JSON.stringify(config));
   } catch {
     // Do not persist when localStorage is disabled or over quota
   }
