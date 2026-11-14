@@ -4,7 +4,7 @@
 //! `settings.rs`.
 
 use async_trait::async_trait;
-use fxg_db::{Db, PushSubscriptionRecord};
+use fxg_db::Db;
 use fxg_protocol::CommandId;
 use fxg_protocol::client_api::{
     AgentOpResponse, AgentsResponse, ConnectionRole, CreateSessionRequest, CreateSessionResponse,
@@ -847,25 +847,7 @@ impl ClientApiBackend for HubState {
         request: PushSubscribeRequest,
         client: ClientInfo,
     ) -> Result<PushSubscribeResponse, ApiError> {
-        if request.endpoint.trim().is_empty() {
-            return Err(ApiError::bad_request("endpoint is required"));
-        }
-        let record = PushSubscriptionRecord {
-            endpoint: request.endpoint.clone(),
-            p256dh: request.p256dh.clone(),
-            auth: request.auth.clone(),
-            device_name: request.device_name.clone(),
-        };
-        fxg_db::push::upsert_push_subscription(self.inner.db.pool(), &record)
-            .await
-            .map_err(ApiError::from)?;
-        tracing::info!(
-            endpoint = %record.endpoint,
-            device = record.device_name.as_deref().unwrap_or("unknown"),
-            client_ip = %client.ip,
-            "registered web push subscription"
-        );
-        Ok(PushSubscribeResponse { ok: true })
+        crate::push::register_subscription(&self.inner.db, &request, &client).await
     }
 
     async fn pty_spawn(&self, params: PtySpawnParams) -> Result<(), PtyChannelError> {

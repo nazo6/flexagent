@@ -208,20 +208,20 @@ prune します。`sessions` は最大 1000 件で、超過時は
 
 #### システム / 認証
 
-| Method / Path                                    | 内容                                                                                                           |
-| :----------------------------------------------- | :------------------------------------------------------------------------------------------------------------- |
-| `GET /api/v1/meta`                               | 認証不要。`role`（`hub` / `local_node`）を返す。                                                               |
-| `GET /api/v1/system/info`                        | `role` / `version` / `vapid_public_key` / `node_id` / `unsynced_event_count` / `hub_link` / `last_synced_at`。 |
-| `GET /healthz` / `GET /readyz`                   | 認証不要の liveness / readiness。                                                                              |
-| `GET /api/v1/diagnostics`                        | エージェント stderr、ログパス、ヘルス、未解決インシデント。                                                    |
-| `GET /api/v1/diagnostics/incidents`              | 永続化されたインシデント一覧（`limit` / `include_resolved`）。                                                 |
-| `POST /api/v1/diagnostics/incidents/:id/resolve` | インシデントを解決済みにする。                                                                                 |
-| `GET /api/v1/diagnostics/bundle`                 | redaction 済みサポートバンドル。                                                                               |
-| `POST /api/v1/auth/login` / `logout`             | トークン入力と Cookie 発行 / 失効。                                                                            |
-| `POST /api/v1/auth/rotate-token`                 | クライアント認証トークンを再生成。                                                                             |
-| `GET/PATCH /api/v1/settings/hub`                 | ハブ設定（VAPID subject）。                                                                                    |
-| `POST /api/v1/system/kill-switch`                | `{ reason }`。全ノードへ `KillAllSessions` を配信し、`{ notified_nodes }` を返す。                             |
-| `POST /api/v1/system/shutdown`                   | ハブ / ノードの graceful shutdown。                                                                            |
+| Method / Path                                    | 内容                                                                                                                                                |
+| :----------------------------------------------- | :-------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /api/v1/meta`                               | 認証不要。`role`（`hub` / `local_node`）を返す。                                                                                                    |
+| `GET /api/v1/system/info`                        | `role` / `version` / `vapid_public_key` / `node_id` / `unsynced_event_count`（ノードのスタンドアロン時は `null`） / `hub_link` / `last_synced_at`。 |
+| `GET /healthz` / `GET /readyz`                   | 認証不要の liveness / readiness。                                                                                                                   |
+| `GET /api/v1/diagnostics`                        | エージェント stderr、ログパス、ヘルス、未解決インシデント。                                                                                         |
+| `GET /api/v1/diagnostics/incidents`              | 永続化されたインシデント一覧（`limit` / `include_resolved`）。                                                                                      |
+| `POST /api/v1/diagnostics/incidents/:id/resolve` | インシデントを解決済みにする。                                                                                                                      |
+| `GET /api/v1/diagnostics/bundle`                 | redaction 済みサポートバンドル。                                                                                                                    |
+| `POST /api/v1/auth/login` / `logout`             | トークン入力と Cookie 発行 / 失効。                                                                                                                 |
+| `POST /api/v1/auth/rotate-token`                 | クライアント認証トークンを再生成。                                                                                                                  |
+| `GET/PATCH /api/v1/settings/hub`                 | ハブ設定（VAPID subject）。                                                                                                                         |
+| `POST /api/v1/system/kill-switch`                | `{ reason }`。全ノードへ `KillAllSessions` を配信し、`{ notified_nodes }` を返す。                                                                  |
+| `POST /api/v1/system/shutdown`                   | ハブ / ノードの graceful shutdown。                                                                                                                 |
 
 #### プロジェクト / Worktree / ノード
 
@@ -287,11 +287,11 @@ prune します。`sessions` は最大 1000 件で、超過時は
 
 #### 検索 / Push / 監査
 
-| Method / Path                        | 内容                        |
-| :----------------------------------- | :-------------------------- |
-| `GET /api/v1/search?q=...&limit=...` | FTS5 全文検索。             |
-| `POST /api/v1/push/subscribe`        | Web Push 購読（ハブのみ）。 |
-| `GET /api/v1/audit/logs?limit=...`   | 監査ログ。                  |
+| Method / Path                        | 内容                                       |
+| :----------------------------------- | :----------------------------------------- |
+| `GET /api/v1/search?q=...&limit=...` | FTS5 全文検索。                            |
+| `POST /api/v1/push/subscribe`        | Web Push 購読（ハブ / ノード双方で有効）。 |
+| `GET /api/v1/audit/logs?limit=...`   | 監査ログ。                                 |
 
 ### 3.2 Client WebSocket (`/api/v1/client/ws`)
 

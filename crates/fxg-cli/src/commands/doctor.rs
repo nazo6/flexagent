@@ -49,24 +49,20 @@ fn role_paths(paths: &Paths) -> Vec<PathEntry> {
             name: "cache",
             path: paths.cache_dir(),
         },
+        PathEntry {
+            name: "vapid",
+            path: paths.vapid_path(),
+        },
     ];
-    match paths.role() {
-        Role::Node => {
-            entries.push(PathEntry {
-                name: "node_token",
-                path: paths.node_token_path(),
-            });
-            entries.push(PathEntry {
-                name: "worktrees",
-                path: paths.worktrees_dir(),
-            });
-        }
-        Role::Hub => {
-            entries.push(PathEntry {
-                name: "vapid",
-                path: paths.vapid_path(),
-            });
-        }
+    if paths.role() == Role::Node {
+        entries.push(PathEntry {
+            name: "node_token",
+            path: paths.node_token_path(),
+        });
+        entries.push(PathEntry {
+            name: "worktrees",
+            path: paths.worktrees_dir(),
+        });
     }
     entries
 }

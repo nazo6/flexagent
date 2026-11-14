@@ -1192,6 +1192,8 @@ export type NodeSettings = {
 	project_scan_dirs: string[],
 	/**  Tray residency on start-up (`None` = default: disabled) */
 	tray: boolean | null,
+	/**  Web Push contact claim (`mailto:` / `https:`) for standalone node Web Push */
+	vapid_subject: string | null,
 	/**  Optimistic-lock revision */
 	revision: number,
 	/**  Last update time (Unix epoch ms) */
@@ -2250,9 +2252,9 @@ export type SystemInfoResponse = {
 	node_id: NodeId | null,
 	/**  fxg binary version */
 	version: string,
-	/**  VAPID public key for Web Push (hub only) */
+	/**  VAPID public key for Web Push */
 	vapid_public_key: string | null,
-	/**  Number of unsynced outbox events (local node only) */
+	/**  Number of unsynced outbox events (paired local node only; `None` while standalone) */
 	unsynced_event_count: number | null,
 	/**  Node ⇔ hub link state (local node only) */
 	hub_link: HubLinkStatus | null,
@@ -2686,6 +2688,8 @@ export type UpdateNodeSettingsRequest = {
 	project_scan_dirs: string[],
 	/**  Tray residency */
 	tray: boolean | null,
+	/**  Web Push contact claim (`mailto:` / `https:`) */
+	vapid_subject: string | null,
 	/**  Revision the client observed (`REVISION_MISMATCH` on conflict) */
 	expected_revision: number,
 };

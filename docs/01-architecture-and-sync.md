@@ -26,12 +26,14 @@ flowchart TB
     end
 
     subgraph Node["常駐ノード (`fxg node start` on Win / Mac / Linux / WSL)"]
-        LocalAPI["Local HTTP/WS Server (:7860)<br/>(127.0.0.1 ループバック専用 + Token)"]
+        LocalAPI["Local HTTP/WS Server (:7860)<br/>(Token / Host・Origin検証)"]
+        NodePush["Web Push (VAPID) Sender"]
         SyncWorker["Outbox Sync Worker<br/>(Outbound WS Client)"]
         SessionMgr["Session & Agent Manager"]
         NodeDB[("node.db (SQLite)<br/>hub.db と同一スキーマ")]
 
         LocalAPI --> SessionMgr
+        LocalAPI --> NodePush
         SessionMgr --> NodeDB
         NodeDB --> SyncWorker
     end
@@ -44,8 +46,9 @@ flowchart TB
 
     CLI <-->|"1. Local HTTP REST / WS (既定 127.0.0.1:7860 / 衝突時は動的ポート)"| LocalAPI
     Browser <-->|"2a. 通常時: LANハブ接続 (:8080)"| HubAPI
-    Browser -.->|"2b. 障害時・同一PCローカル直結 (127.0.0.1:7860)"| LocalAPI
-    AndroidPWA <-->|"LAN / VPN (Tailscale等) 経由 WS / Push"| HubAPI
+    Browser -.->|"2b. シングルノード / 障害時直結 (:7860 / TLSプロキシ)"| LocalAPI
+    AndroidPWA <-->|"LAN / VPN (Tailscale等) 経由 WS / Push (ハブまたは単独ノード)"| HubAPI
+    AndroidPWA -.->|"シングルノード直結 (WS / Push)"| LocalAPI
     SyncWorker ===>|"3a. 常駐ノード: 常時接続 Outbound WS"| HubAPI
     Prov <==>|"3b. 一時ノード: 子プロセス stdin/stdout パイプ (JSON Lines)<br/>(VPN・ポート開放・ネットワーク設定一切不要)"| EphNode
 ```
@@ -240,7 +243,9 @@ Android PWAやWeb UIから「プロンプト送信 (`prompt`)」「権限承認
    - ハブ経由: ノード→ハブの同期 + 配信の分だけ遅延する（目安: LAN
      で十数ms、VPN 越しで数十〜数百ms）。この差は許容仕様とし、UI
      は未同期イベント件数（Outbox
-     残数）と最終同期時刻を表示して状態を可視化する。
+     残数）と最終同期時刻を表示して状態を可視化する。ハブ未設定のスタンドアロン運用では
+     将来ペアリングしたときに備えて Outbox 自体は DB 上に保持しつつ、`system/info`
+     の未同期件数・ヘルス劣化判定・UI の未同期バッジは抑制する。
 2. **重複排除と順序付け**:
    - クライアントは受信イベントを `event_id` / `(session_id, node_seq)` をキーに
      upsert し、重複配信（`LiveStreamDelta`

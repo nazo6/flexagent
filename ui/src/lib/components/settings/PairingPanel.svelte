@@ -1,6 +1,7 @@
 <script lang="ts">
   import { untrack } from "svelte";
   import { errorMessage } from "#lib/api/error-messages.ts";
+  import { hubLinkLabel } from "#lib/node-status.ts";
   import { Badge } from "#lib/components/ui/badge/index.ts";
   import { Button } from "#lib/components/ui/button/index.ts";
   import { Card } from "#lib/components/ui/card/index.ts";
@@ -67,18 +68,7 @@
   }
 
   function linkStateLabel(value: HubLinkState): string {
-    switch (value) {
-      case "connected":
-        return m.shell_connected();
-      case "connecting":
-        return m.shell_hub_connecting();
-      case "unauthorized":
-        return m.shell_hub_unauthorized();
-      case "failed":
-        return m.shell_hub_unreachable();
-      default:
-        return m.shell_disconnected();
-    }
+    return hubLinkLabel(value);
   }
 
   function linkVariant(value: HubLinkState): "secondary" | "outline" | "destructive" {

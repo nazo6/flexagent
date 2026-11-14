@@ -1,5 +1,6 @@
 <script lang="ts">
   import { connection, sync } from "#lib/stores/app.svelte.ts";
+  import { hubLinkLabel } from "#lib/node-status.ts";
   import { cn } from "#lib/utils.ts";
   import { m } from "#lib/paraglide/messages.js";
   import CpuIcon from "@lucide/svelte/icons/cpu";
@@ -40,28 +41,17 @@
   const hubLink = $derived(sync.hubLink ?? connection.systemInfo?.hub_link ?? null);
   const hubState = $derived(hubLink?.state ?? "standalone");
 
-  function hubStatusLabel(state: string): string {
-    switch (state) {
-      case "connected":
-        return m.shell_connected();
-      case "connecting":
-        return m.shell_hub_connecting();
-      case "unauthorized":
-        return m.shell_hub_unauthorized();
-      case "failed":
-        return m.shell_hub_unreachable();
-      default:
-        return m.shell_disconnected();
-    }
-  }
-
   /** Link health of this client and, on a node, of the node's hub link. */
   const healthText = $derived.by(() => {
     const parts = [sync.wsConnected ? m.shell_connected() : m.shell_disconnected()];
     if (isLocalNode) {
-      parts.push(m.shell_hub_status({ status: hubStatusLabel(hubState) }));
+      parts.push(
+        hubState === "standalone"
+          ? hubLinkLabel("standalone")
+          : m.shell_hub_status({ status: hubLinkLabel(hubState) }),
+      );
     }
-    if (sync.unsyncedEventCount > 0) {
+    if (hubState !== "standalone" && sync.unsyncedEventCount > 0) {
       parts.push(m.shell_unsynced_count({ count: sync.unsyncedEventCount }));
     }
     return parts.join(" · ");

@@ -1,5 +1,21 @@
-import type { NodeLifecycleStatus, NodeSummary } from "#lib/generated/bindings.ts";
+import type { HubLinkState, NodeLifecycleStatus, NodeSummary } from "#lib/generated/bindings.ts";
 import { m } from "#lib/paraglide/messages.js";
+
+/** Localized label for a node's link state to the hub. */
+export function hubLinkLabel(state: HubLinkState) {
+  switch (state) {
+    case "connected":
+      return m.shell_connected();
+    case "connecting":
+      return m.shell_hub_connecting();
+    case "unauthorized":
+      return m.shell_hub_unauthorized();
+    case "failed":
+      return m.shell_hub_unreachable();
+    case "standalone":
+      return m.shell_hub_standalone();
+  }
+}
 
 export interface NodeAvailability {
   isAvailable: boolean;

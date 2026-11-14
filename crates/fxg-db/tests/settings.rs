@@ -19,6 +19,7 @@ fn node_settings_request(revision: u64, name: &str) -> UpdateNodeSettingsRequest
         allow_remote_pty: true,
         project_scan_dirs: vec!["/src".to_owned()],
         tray: Some(false),
+        vapid_subject: Some("mailto:node@example.com".to_owned()),
         expected_revision: revision,
     }
 }
@@ -29,6 +30,7 @@ async fn node_settings_use_optimistic_revision() {
     let initial: NodeSettings = db.ensure_node_settings("Node").await.expect("ensure");
     assert_eq!(initial.revision, 1);
     assert_eq!(initial.name, "Node");
+    assert_eq!(initial.vapid_subject, None);
 
     let updated = db
         .update_node_settings(&node_settings_request(1, "Renamed"))
@@ -36,6 +38,10 @@ async fn node_settings_use_optimistic_revision() {
         .expect("update");
     assert_eq!(updated.name, "Renamed");
     assert!(updated.allow_remote_pty);
+    assert_eq!(
+        updated.vapid_subject.as_deref(),
+        Some("mailto:node@example.com")
+    );
     assert_eq!(updated.revision, 2);
 
     // A stale revision must not overwrite the newer value.

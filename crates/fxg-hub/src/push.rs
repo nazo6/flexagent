@@ -1,9 +1,9 @@
-//! VAPID Web Push delivery (hub).
+//! VAPID Web Push delivery (hub / standalone node).
 //!
 //! Design: `docs/03-protocol-and-api.md` §3.1, `docs/05-cli-and-pwa-ui.md` §3.3.
 //!
 //! - The VAPID key pair is generated on first startup and stored in
-//!   `<data>/hub/vapid.json` (the public key is distributed via `vapid_public_key`
+//!   `<data>/<role>/vapid.json` (the public key is distributed via `vapid_public_key`
 //!   in `GET /api/v1/system/info`).
 //! - When an approval request (a `PermissionRequest` event) is applied, a notification is
 //!   fanned out to every registered subscription. For Approve / Reject on the Android
@@ -347,16 +347,17 @@ pub fn turn_finished_notification(
 /// turn normally arrive in separate `apply_event_batch` calls. Keeping the set in hub state (and
 /// seeding it from `hub.db` at startup) makes the Running → Idle transition observable across
 /// batches and hub restarts.
-#[derive(Debug, Default)]
-pub(crate) struct RunningTurns {
-    sessions: std::sync::Mutex<std::collections::HashSet<String>>,
+/// Tracks sessions whose current turn has been observed as `Running`.
+#[derive(Debug, Default, Clone)]
+pub struct RunningTurns {
+    sessions: Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
 }
 
 impl RunningTurns {
     /// Seeds the tracker with sessions that are already running at startup.
-    pub(crate) fn from_session_ids(ids: impl IntoIterator<Item = String>) -> Self {
+    pub fn from_session_ids(ids: impl IntoIterator<Item = String>) -> Self {
         Self {
-            sessions: std::sync::Mutex::new(ids.into_iter().collect()),
+            sessions: Arc::new(std::sync::Mutex::new(ids.into_iter().collect())),
         }
     }
 
@@ -375,6 +376,56 @@ impl RunningTurns {
             .expect("running turns lock poisoned")
             .remove(session_id)
     }
+}
+
+/// Validates and stores a browser Web Push subscription in `db`.
+pub async fn register_subscription(
+    db: &Db,
+    request: &fxg_protocol::client_api::PushSubscribeRequest,
+    client: &crate::api::ClientInfo,
+) -> Result<fxg_protocol::client_api::PushSubscribeResponse, crate::api::ApiError> {
+    if request.endpoint.trim().is_empty() {
+        return Err(crate::api::ApiError::bad_request("endpoint is required"));
+    }
+    let record = PushSubscriptionRecord {
+        endpoint: request.endpoint.clone(),
+        p256dh: request.p256dh.clone(),
+        auth: request.auth.clone(),
+        device_name: request.device_name.clone(),
+    };
+    fxg_db::push::upsert_push_subscription(db.pool(), &record)
+        .await
+        .map_err(crate::api::ApiError::from)?;
+    tracing::info!(
+        endpoint = %record.endpoint,
+        device = record.device_name.as_deref().unwrap_or("unknown"),
+        client_ip = %client.ip,
+        "registered web push subscription"
+    );
+    Ok(fxg_protocol::client_api::PushSubscribeResponse { ok: true })
+}
+
+/// Filters `events` for notification-worthy transitions and dispatches Web Push
+/// notifications asynchronously without blocking the caller.
+pub fn dispatch_notifications(
+    push: &PushService,
+    db: &Db,
+    running: &RunningTurns,
+    events: &[fxg_protocol::events::SessionEventEnvelope],
+    resync: bool,
+    counters: Option<Arc<crate::api::DiagnosticsCounters>>,
+) {
+    let notify_events = notification_events(events, running, resync);
+    if notify_events.is_empty() {
+        return;
+    }
+    let push = push.clone();
+    let db = db.clone();
+    fxg_protocol::spawn_guarded!("web push notification", async move {
+        notify_permission_requests(&push, &db, &notify_events, counters.as_deref()).await;
+        notify_elicitations(&push, &db, &notify_events, counters.as_deref()).await;
+        notify_turn_finished(&push, &db, &notify_events, counters.as_deref()).await;
+    });
 }
 
 /// Selects the newly inserted events that should produce a Web Push notification.

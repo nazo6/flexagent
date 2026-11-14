@@ -72,9 +72,9 @@ impl ClientInfo {
 /// Role-specific fields of `GET /api/v1/system/info`.
 #[derive(Debug, Clone, Default)]
 pub struct SystemExtras {
-    /// VAPID public key for Web Push (hub only)
+    /// VAPID public key for Web Push
     pub vapid_public_key: Option<String>,
-    /// Number of unsynced Outbox events (only when connected to a local node)
+    /// Number of unsynced Outbox events (paired local node only; `None` while standalone)
     pub unsynced_event_count: Option<u64>,
     /// Node ⇔ hub link state (only when connected to a local node)
     pub hub_link: Option<HubLinkStatus>,
@@ -680,19 +680,11 @@ pub trait ClientApiBackend: Clone + Send + Sync + 'static {
     ) -> Result<KillSwitchResponse, ApiError>;
 
     /// `POST /api/v1/push/subscribe` (register a Web Push subscription).
-    ///
-    /// Hub only (Phase 5). The default local-node implementation returns
-    /// `INVALID_STATE`.
     async fn push_subscribe(
         &self,
-        _request: PushSubscribeRequest,
-        _client: ClientInfo,
-    ) -> Result<PushSubscribeResponse, ApiError> {
-        Err(ApiError::from_code(
-            ErrorCode::InvalidState,
-            "web push is only available on the hub",
-        ))
-    }
+        request: PushSubscribeRequest,
+        client: ClientInfo,
+    ) -> Result<PushSubscribeResponse, ApiError>;
 
     // ------------------------------------------------------------------
     // PTY WS (`/api/v1/pty/ws`)
