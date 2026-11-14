@@ -2838,6 +2838,12 @@ truncated: boolean;
 content_hash: string } |
 /**  Binary file (NUL bytes or invalid UTF-8) */
 { kind: "binary" } |
+/**  Raster image (PNG / JPEG / GIF / WebP / BMP / AVIF / ICO) */
+{ kind: "image";
+/**  MIME type of the image */
+mime: string;
+/**  Image bytes (Base64) */
+data_b64: string } |
 /**  File larger than the read limit */
 { kind: "too_large";
 /**  Size in bytes */
@@ -2851,7 +2857,7 @@ export type WorkspaceFileView = {
 	size: number,
 	/**  Last modification time (Unix epoch ms) */
 	modified_at: number | null,
-	/**  Text, binary or too large */
+	/**  Text, image, binary or too large */
 	content: WorkspaceFileContent,
 };
 

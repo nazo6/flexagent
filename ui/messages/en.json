@@ -168,6 +168,7 @@
   "dock_files_hide_tree": "Hide files",
   "dock_files_loading": "Loading files…",
   "dock_files_refresh": "Refresh",
+  "dock_files_resize_tree": "Resize file tree",
   "dock_files_remote_disabled": "Files are available only when connected directly to the node.",
   "dock_files_remote_hint": "Open the node's local address (for example localhost:7860) to browse its files.",
   "dock_files_show_hidden": "Show hidden files",

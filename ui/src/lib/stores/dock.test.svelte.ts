@@ -141,6 +141,29 @@ describe("WorkspaceDockStore", () => {
     expect(store.treeVisible).toBe(false);
   });
 
+  it("resizes and persists the Files tree width", () => {
+    const { store, storage } = newStore();
+    store.setContext(context("s1"));
+    expect(store.treeWidth).toBe(38);
+
+    store.setTreeWidth(52);
+    expect(store.treeWidth).toBe(52);
+
+    store.setTreeWidth(5);
+    expect(store.treeWidth).toBe(20);
+
+    store.setTreeWidth(90);
+    expect(store.treeWidth).toBe(60);
+
+    store.setTreeWidth(Number.NaN);
+    expect(store.treeWidth).toBe(38);
+
+    store.setTreeWidth(45);
+    const restored = new WorkspaceDockStore(storage);
+    restored.setContext(context("s2"));
+    expect(restored.treeWidth).toBe(45);
+  });
+
   it("starts each workspace with one terminal tab", () => {
     const { store } = newStore();
     store.setContext(context("s1"));

@@ -1374,6 +1374,13 @@ pub enum WorkspaceFileContent {
     },
     /// Binary file (NUL bytes or invalid UTF-8)
     Binary,
+    /// Raster image (PNG / JPEG / GIF / WebP / BMP / AVIF / ICO)
+    Image {
+        /// MIME type of the image
+        mime: String,
+        /// Image bytes (Base64)
+        data_b64: String,
+    },
     /// File larger than the read limit
     TooLarge {
         /// Size in bytes
@@ -1391,7 +1398,7 @@ pub struct WorkspaceFileView {
     pub size: u64,
     /// Last modification time (Unix epoch ms)
     pub modified_at: Option<i64>,
-    /// Text, binary or too large
+    /// Text, image, binary or too large
     pub content: WorkspaceFileContent,
 }
 

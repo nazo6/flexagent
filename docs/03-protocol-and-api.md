@@ -232,29 +232,29 @@ prune します。`sessions` は最大 1000 件で、超過時は
 
 #### プロジェクト / Worktree / ノード
 
-| Method / Path                                                      | 内容                                                               |
-| :----------------------------------------------------------------- | :----------------------------------------------------------------- |
-| `GET /api/v1/projects`                                             | 論理プロジェクトとノード / Worktree バインディング。               |
-| `GET/POST/DELETE /api/v1/projects/:project_id/worktrees`           | 一覧 / 作成 / 削除。DELETE は body `{ node_id, path, force }`。    |
-| `POST /api/v1/projects/:project_id/worktrees/prune`                | `git worktree prune`。body `{ node_id }`。                         |
-| `POST /api/v1/nodes/:node_id/projects/inspect`                     | パスのプロジェクト同一性を読み取り専用で解決。                     |
-| `POST /api/v1/nodes/:node_id/projects/add`                         | パスを検出してバインディングを登録。                               |
-| `POST /api/v1/nodes/:node_id/projects/scan`                        | ディレクトリ配下を一括スキャン。                                   |
-| `POST /api/v1/nodes/:node_id/projects/link`                        | 任意ディレクトリを論理プロジェクトへ手動紐付け。                   |
-| `POST /api/v1/nodes/:node_id/projects/unlink`                      | バインディングを削除。                                             |
-| `GET /api/v1/nodes`                                                | ノード一覧、オンライン状態、一時ノード属性、利用可能エージェント。 |
-| `GET /api/v1/nodes/:node_id/fs/browse`                             | ノードのファイルシステム閲覧（フォルダピッカー用）。               |
-| `GET /api/v1/nodes/:node_id/workspace/fs/list`                     | 登録済み workspace 内のディレクトリ一覧。                          |
-| `GET /api/v1/nodes/:node_id/workspace/fs/file`                     | workspace 内のファイル内容（テキスト / バイナリ / 大きすぎる）。   |
-| `GET /api/v1/nodes/:node_id/workspace/git/status`                  | workspace の `git status`（branch / ahead / behind / 変更一覧）。  |
-| `GET /api/v1/nodes/:node_id/workspace/git/diff`                    | workspace または 1 ファイルの diff（scope / base / file）。        |
-| `GET /api/v1/nodes/:node_id/settings`                              | ノード設定スナップショット（トークン値は返さない）。               |
-| `PATCH /api/v1/nodes/:node_id/settings/node` / `.../agents`        | ノード所有設定の更新。                                             |
-| `PUT/DELETE /api/v1/nodes/:node_id/settings/pairing`               | ハブ接続先の保存 / 解除。                                          |
-| `POST /api/v1/nodes/:node_id/settings/pairing/test`                | 保存せずに WebSocket ハンドシェイクを試す。                        |
-| `GET /api/v1/nodes/:node_id/secrets` / `PUT/DELETE .../:secret_id` | ノード所有の秘密メタデータ。値は返さない。                         |
-| `GET /api/v1/hub/secrets` / `PUT/DELETE .../:secret_id`            | ハブ所有の秘密メタデータ。                                         |
-| `GET /api/v1/nodes/tokens` / `POST` / `DELETE .../:node_id`        | ノード個別トークンの一覧 / 発行 / 失効（ハブのみ）。               |
+| Method / Path                                                      | 内容                                                                    |
+| :----------------------------------------------------------------- | :---------------------------------------------------------------------- |
+| `GET /api/v1/projects`                                             | 論理プロジェクトとノード / Worktree バインディング。                    |
+| `GET/POST/DELETE /api/v1/projects/:project_id/worktrees`           | 一覧 / 作成 / 削除。DELETE は body `{ node_id, path, force }`。         |
+| `POST /api/v1/projects/:project_id/worktrees/prune`                | `git worktree prune`。body `{ node_id }`。                              |
+| `POST /api/v1/nodes/:node_id/projects/inspect`                     | パスのプロジェクト同一性を読み取り専用で解決。                          |
+| `POST /api/v1/nodes/:node_id/projects/add`                         | パスを検出してバインディングを登録。                                    |
+| `POST /api/v1/nodes/:node_id/projects/scan`                        | ディレクトリ配下を一括スキャン。                                        |
+| `POST /api/v1/nodes/:node_id/projects/link`                        | 任意ディレクトリを論理プロジェクトへ手動紐付け。                        |
+| `POST /api/v1/nodes/:node_id/projects/unlink`                      | バインディングを削除。                                                  |
+| `GET /api/v1/nodes`                                                | ノード一覧、オンライン状態、一時ノード属性、利用可能エージェント。      |
+| `GET /api/v1/nodes/:node_id/fs/browse`                             | ノードのファイルシステム閲覧（フォルダピッカー用）。                    |
+| `GET /api/v1/nodes/:node_id/workspace/fs/list`                     | 登録済み workspace 内のディレクトリ一覧。                               |
+| `GET /api/v1/nodes/:node_id/workspace/fs/file`                     | workspace 内のファイル内容（テキスト / 画像 / バイナリ / 大きすぎる）。 |
+| `GET /api/v1/nodes/:node_id/workspace/git/status`                  | workspace の `git status`（branch / ahead / behind / 変更一覧）。       |
+| `GET /api/v1/nodes/:node_id/workspace/git/diff`                    | workspace または 1 ファイルの diff（scope / base / file）。             |
+| `GET /api/v1/nodes/:node_id/settings`                              | ノード設定スナップショット（トークン値は返さない）。                    |
+| `PATCH /api/v1/nodes/:node_id/settings/node` / `.../agents`        | ノード所有設定の更新。                                                  |
+| `PUT/DELETE /api/v1/nodes/:node_id/settings/pairing`               | ハブ接続先の保存 / 解除。                                               |
+| `POST /api/v1/nodes/:node_id/settings/pairing/test`                | 保存せずに WebSocket ハンドシェイクを試す。                             |
+| `GET /api/v1/nodes/:node_id/secrets` / `PUT/DELETE .../:secret_id` | ノード所有の秘密メタデータ。値は返さない。                              |
+| `GET /api/v1/hub/secrets` / `PUT/DELETE .../:secret_id`            | ハブ所有の秘密メタデータ。                                              |
+| `GET /api/v1/nodes/tokens` / `POST` / `DELETE .../:node_id`        | ノード個別トークンの一覧 / 発行 / 失効（ハブのみ）。                    |
 
 `workspace/*` は **直接ノードへ接続したクライアント専用**です。ハブ経由の
 リクエストはノードが `FORBIDDEN` で拒否します。パスは登録済み workspace

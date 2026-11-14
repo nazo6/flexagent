@@ -1725,6 +1725,24 @@ mod tests {
             _ => panic!("expected text file"),
         }
 
+        // A registered image extension is returned as a data-ready image, not binary.
+        let png = path.join("pixel.png");
+        std::fs::write(
+            &png,
+            b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89",
+        )
+        .expect("write png");
+        let image = workspace::read_workspace_file(daemon.state(), &png.to_string_lossy())
+            .await
+            .expect("read image");
+        match image.content {
+            WorkspaceFileContent::Image { mime, data_b64 } => {
+                assert_eq!(mime, "image/png");
+                assert!(!data_b64.is_empty());
+            }
+            _ => panic!("expected image file"),
+        }
+
         let status = workspace::workspace_git_status(daemon.state(), &path_str)
             .await
             .expect("status");

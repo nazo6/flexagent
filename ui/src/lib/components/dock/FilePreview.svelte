@@ -217,6 +217,14 @@
         {:else}
           <CodeView path={view.path} text={view.content.text} />
         {/if}
+      {:else if view.content.kind === "image"}
+        <div class="flex h-full items-center justify-center overflow-auto rounded-md border p-2">
+          <img
+            src={`data:${view.content.mime};base64,${view.content.data_b64}`}
+            alt={path}
+            class="max-h-full max-w-full object-contain"
+          />
+        </div>
       {:else if view.content.kind === "binary"}
         <p
           class="text-muted-foreground flex h-full items-center justify-center p-4 text-center text-[12px]"

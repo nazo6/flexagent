@@ -34,6 +34,8 @@ export interface DockWorkspace {
   collapsed: boolean;
   /** Whether the Files tree is visible next to the preview. */
   treeVisible: boolean;
+  /** Width of the Files tree as a percentage of the Files pane. */
+  treeWidth: number;
   /** Open file previews inside Files. */
   files: DockFileTab[];
   activeFile: string | null;
@@ -58,6 +60,9 @@ const MAX_WORKSPACES = 12;
 const MAX_FILES = 8;
 export const MAX_TERMINALS = 8;
 const FIRST_TERMINAL_ID = "terminal-1";
+export const MIN_TREE_WIDTH = 20;
+export const MAX_TREE_WIDTH = 60;
+const DEFAULT_TREE_WIDTH = 38;
 export const MIN_DOCK_WIDTH = 20;
 export const MAX_DOCK_WIDTH = 75;
 const DEFAULT_WIDTH = 42;
@@ -77,6 +82,7 @@ interface PersistedWorkspace {
   activeTool: DockToolId | null;
   collapsed: boolean;
   treeVisible: boolean;
+  treeWidth: number;
   files: PersistedFile[];
   activeFile: string | null;
   terminals: PersistedTerminal[];
@@ -109,11 +115,17 @@ function clampWidth(value: number): number {
   return Math.max(MIN_DOCK_WIDTH, Math.min(MAX_DOCK_WIDTH, value));
 }
 
+function clampTreeWidth(value: number): number {
+  if (!Number.isFinite(value)) return DEFAULT_TREE_WIDTH;
+  return Math.max(MIN_TREE_WIDTH, Math.min(MAX_TREE_WIDTH, value));
+}
+
 function emptyWorkspace(): DockWorkspace {
   return {
     activeTool: null,
     collapsed: true,
     treeVisible: true,
+    treeWidth: DEFAULT_TREE_WIDTH,
     files: [],
     activeFile: null,
     terminals: [{ id: FIRST_TERMINAL_ID, seq: 1 }],
@@ -196,6 +208,9 @@ function restoreWorkspace(value: unknown): DockWorkspace | null {
     activeTool,
     collapsed: activeTool === null ? true : value.collapsed !== false,
     treeVisible: value.treeVisible !== false,
+    treeWidth: clampTreeWidth(
+      typeof value.treeWidth === "number" ? value.treeWidth : DEFAULT_TREE_WIDTH,
+    ),
     files,
     activeFile,
     terminals,
@@ -267,6 +282,7 @@ function serialize(workspaces: Record<string, DockWorkspace>, width: number): st
           activeTool: workspace.activeTool,
           collapsed: workspace.collapsed || workspace.activeTool === null,
           treeVisible: workspace.treeVisible,
+          treeWidth: workspace.treeWidth,
           files: workspace.files.map((file) => ({
             path: file.path,
             mode: file.mode,
@@ -331,6 +347,10 @@ export class WorkspaceDockStore {
 
   get treeVisible(): boolean {
     return this.workspace?.treeVisible ?? true;
+  }
+
+  get treeWidth(): number {
+    return this.workspace?.treeWidth ?? DEFAULT_TREE_WIDTH;
   }
 
   get files(): DockFileTab[] {
@@ -399,6 +419,14 @@ export class WorkspaceDockStore {
     const workspace = this.workspace;
     if (workspace === null || workspace.treeVisible === visible) return;
     this.update((current) => ({ ...current, treeVisible: visible }));
+  }
+
+  setTreeWidth(percent: number): void {
+    const workspace = this.workspace;
+    if (workspace === null) return;
+    const next = clampTreeWidth(percent);
+    if (next === workspace.treeWidth) return;
+    this.update((current) => ({ ...current, treeWidth: next }));
   }
 
   /**

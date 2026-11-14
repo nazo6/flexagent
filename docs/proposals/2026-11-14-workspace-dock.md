@@ -256,9 +256,9 @@ Phase 1 では **ローカル接続（ループバック）からのみ** ファ
 
 ### Phase 3: 仕上げ
 
-- ノードのファイル監視と WS 通知（debounce）を追加する。
+- ファイル監視と WS 通知（debounce）を追加する。
 - チャットの差分から File タブの該当行へジャンプする。
-- 画像ファイルのプレビュー、ファイルタブの並べ替え・ピン留め、workspace search などの追加ツール。
+- ファイルタブの並べ替え・ピン留め、workspace search などの追加ツール。
 - プロジェクト画面から worktree ごとのドックを開く導線。
 - ターミナルのシェル統合（cwd 追跡）と「ここでターミナルを開く」。
 
@@ -311,7 +311,6 @@ Phase 1 では **ローカル接続（ループバック）からのみ** ファ
 ## 10. 未決事項
 
 - `ignore` クレートを追加するか、`git check-ignore` をディレクトリ単位で呼ぶか。
-- ツリーとプレビューの分割比をドラッグで変更できるようにするか。
 - モバイルでの編集を将来的に許可するか。
 - ハブ経由の読み取りを解禁する際の設定名と既定値（`allow_remote_fs` / read-only / read-write）。
 - ファイルタブの並べ替え・ピン留めを Phase 3 に入れるか。
@@ -353,15 +352,18 @@ Phase 1 では **ローカル接続（ループバック）からのみ** ファ
   `git status --porcelain=v2 -z`、単一ファイル diff、未追跡ファイルの
   合成 diff を実装した。ハブ経由の workspace RPC は `FORBIDDEN` にする。
 - `ui`: Files ツリー + プレビュー、git status バッジ、変更のみ一覧、ファイルタブ
-  （Shiki の View / 単一ファイル Diff / Markdown Preview / Source）、Changes の
+  （Shiki の View / 単一ファイル Diff / Markdown Preview / Source / 画像）、Changes の
   Session / Worktree / Branch 一覧を追加した。Changes / チャットからは Files の
   プレビューにファイルを開く。ハブ接続時は Files を無効化し、Changes は従来の
   インライン Diff にフォールバックする。
+- フォローアップ (2026-11-14): ツリー / プレビューの分割比をドラッグで変更し、
+  workspace ごとに保持するようにした。PNG / JPEG / GIF / WebP / BMP / AVIF / ICO を
+  data URL で画像プレビューする。
 - テスト: status パーサー、`.git` 拒否、ディレクトリ一覧、未追跡 diff、
   workspace 境界（登録外パス / サブディレクトリ / シンボリックリンク脱出）を
   Rust で検証した。
 
-**Phase 1 の既知の制約**: 編集は未対応。画像のプレビューは未対応。
+**Phase 1 の既知の制約**: 編集は未対応。SVG は画像ではなくテキストとして表示する。
 `.gitignore` の完全な解釈はせず、UI が既定の重いディレクトリを隠す。ワークスペース
 監視による自動更新は未対応（手動更新 / タブ表示時 / ターン完了時）。
 

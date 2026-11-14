@@ -8,6 +8,8 @@
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD as BASE64;
 use fxg_protocol::client_api::{
     WorkspaceEntryKind, WorkspaceFileContent, WorkspaceFileView, WorkspaceFsEntry,
     WorkspaceFsListResponse, WorkspaceGitEntry, WorkspaceGitFileStatus, WorkspaceGitStatusResponse,
@@ -102,6 +104,17 @@ pub async fn read_workspace_file(
             modified_at,
             content: WorkspaceFileContent::TooLarge {
                 size: bytes.len() as u64,
+            },
+        });
+    }
+    if let Some(mime) = image_mime(&resolved.path) {
+        return Ok(WorkspaceFileView {
+            path,
+            size: bytes.len() as u64,
+            modified_at,
+            content: WorkspaceFileContent::Image {
+                mime: mime.to_owned(),
+                data_b64: BASE64.encode(&bytes),
             },
         });
     }
@@ -618,10 +631,37 @@ fn classify_status(x: char, y: char, untracked: bool, conflicted: bool) -> Works
     }
 }
 
+/// MIME type for a raster image extension the browser can render in an `<img>`.
+///
+/// SVG is intentionally excluded: it is served as text so embedded scripts can
+/// never become an image document.
+fn image_mime(path: &Path) -> Option<&'static str> {
+    let extension = path.extension()?.to_str()?.to_ascii_lowercase();
+    match extension.as_str() {
+        "png" => Some("image/png"),
+        "jpg" | "jpeg" => Some("image/jpeg"),
+        "gif" => Some("image/gif"),
+        "webp" => Some("image/webp"),
+        "bmp" => Some("image/bmp"),
+        "avif" => Some("image/avif"),
+        "ico" => Some("image/x-icon"),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::fs;
+
+    #[test]
+    fn image_extensions_map_to_renderable_mime_types() {
+        assert_eq!(image_mime(Path::new("a.PNG")), Some("image/png"));
+        assert_eq!(image_mime(Path::new("a.jpeg")), Some("image/jpeg"));
+        assert_eq!(image_mime(Path::new("a.webp")), Some("image/webp"));
+        assert_eq!(image_mime(Path::new("a.svg")), None);
+        assert_eq!(image_mime(Path::new("a.txt")), None);
+    }
 
     #[test]
     fn status_parser_handles_ordinary_untracked_and_renamed_entries() {

@@ -6,7 +6,7 @@
   import { errorMessage } from "#lib/api/error-messages.ts";
   import { basename } from "#lib/dock/paths.ts";
   import type { DockContext } from "#lib/stores/dock.svelte.ts";
-  import { dock } from "#lib/stores/dock.svelte.ts";
+  import { dock, MAX_TREE_WIDTH, MIN_TREE_WIDTH } from "#lib/stores/dock.svelte.ts";
   import { sync } from "#lib/stores/app.svelte.ts";
   import type {
     WorkspaceFsEntry,
@@ -75,6 +75,12 @@
   let statusError = $state<string | null>(null);
   let refreshToken = $state(0);
   let generation = 0;
+
+  /** Files split: live drag width until release, then commit to the store. */
+  let splitContainer = $state<HTMLDivElement | null>(null);
+  let draggingTree = $state(false);
+  let dragTreeWidth = $state<number | null>(null);
+  const treeWidth = $derived(dragTreeWidth ?? dock.treeWidth);
 
   const activePreview = $derived(dock.activeFileTab);
   const showTree = $derived(
@@ -252,6 +258,33 @@
     refreshToken += 1;
   }
 
+  function startResize(event: PointerEvent): void {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    draggingTree = true;
+    dragTreeWidth = dock.treeWidth;
+    (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+  }
+
+  function moveResize(event: PointerEvent): void {
+    if (!draggingTree || splitContainer === null) return;
+    const rect = splitContainer.getBoundingClientRect();
+    if (rect.width <= 0) return;
+    const percent = ((event.clientX - rect.left) / rect.width) * 100;
+    dragTreeWidth = Math.min(MAX_TREE_WIDTH, Math.max(MIN_TREE_WIDTH, percent));
+  }
+
+  function endResize(event: PointerEvent): void {
+    if (!draggingTree) return;
+    draggingTree = false;
+    const element = event.currentTarget as HTMLElement;
+    if (element.hasPointerCapture(event.pointerId)) {
+      element.releasePointerCapture(event.pointerId);
+    }
+    if (dragTreeWidth !== null) dock.setTreeWidth(dragTreeWidth);
+    dragTreeWidth = null;
+  }
+
   function isDirectory(entry: WorkspaceFsEntry): boolean {
     return entry.kind === "directory";
   }
@@ -354,13 +387,14 @@
       </div>
     {/if}
 
-    <div class="flex min-h-0 flex-1">
+    <div bind:this={splitContainer} class="flex min-h-0 flex-1">
       {#if showTree}
         <div
           class={cn(
             "flex min-h-0 flex-col",
-            mobile ? "w-full" : "w-[38%] min-w-[180px] max-w-[320px] border-r border-border",
+            mobile ? "w-full" : "min-w-[160px] max-w-[70%] shrink-0 border-r border-border",
           )}
+          style={mobile ? undefined : `width:${treeWidth}%`}
         >
           <div class="app-scroll min-h-0 flex-1 overflow-y-auto p-1">
             {#if error !== null}
@@ -460,6 +494,24 @@
               {/if}
             {/if}
           </div>
+        </div>
+      {/if}
+
+      {#if showTree && !mobile}
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          aria-label={m.dock_files_resize_tree()}
+          class={cn(
+            "group relative w-1.5 shrink-0 cursor-col-resize touch-none transition-colors",
+            draggingTree ? "bg-signal/50" : "hover:bg-accent",
+          )}
+          onpointerdown={startResize}
+          onpointermove={moveResize}
+          onpointerup={endResize}
+          onpointercancel={endResize}
+        >
+          <span class="bg-border absolute inset-y-0 left-1/2 w-px -translate-x-1/2"></span>
         </div>
       {/if}
 
