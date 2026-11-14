@@ -274,6 +274,18 @@ prune します。`sessions` は最大 1000 件で、超過時は
 | `PUT/DELETE /api/v1/nodes/:node_id/agents/custom/:agent_id`    | カスタム ACP エージェント定義の作成・更新 / 削除。 |
 | `POST /api/v1/nodes/:node_id/agents/registry/:agent_id/import` | Registry エントリを custom 定義として保存。        |
 
+#### OpenCode ネイティブ管理（ローカルノード専用）
+
+`opencode` の Tier 3 ドライバは、実行中 OpenCode v2 の管理情報をローカル
+ノード API として提供する。ハブ経由の backend は明示エラーを返し、
+credential の値は決して返さない。
+
+| Method / Path                                            | 内容                                                    |
+| :------------------------------------------------------- | :------------------------------------------------------ |
+| `GET /api/v1/nodes/:node_id/opencode`                    | agents / models / providers / MCP / skills / commands。 |
+| `PUT/DELETE /api/v1/nodes/:node_id/opencode/mcp/:name`   | MCP 定義の追加・更新 / 削除。                           |
+| `POST /api/v1/nodes/:node_id/opencode/mcp/:name/:action` | `connect` / `disconnect`。                              |
+
 #### プロビジョナー
 
 | Method / Path                          | 内容                                      |

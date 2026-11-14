@@ -57,6 +57,8 @@ crate::open_string_enum! {
         TurnEnded => "turn_ended",
         /// Compaction updated
         CompactionUpdated => "compaction_updated",
+        /// Conversation reverted to a previous boundary
+        SessionReverted => "session_reverted",
         /// Session status changed
         StatusChanged => "status_change",
     }

@@ -22,6 +22,7 @@ pub mod acp;
 pub mod agent;
 pub mod auth;
 pub mod driver;
+pub mod opencode_native;
 pub mod registry;
 mod warm;
 

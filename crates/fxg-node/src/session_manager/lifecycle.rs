@@ -58,6 +58,7 @@ impl SessionManager {
                 has_custom_title: false,
                 resume: None,
                 fork_from: None,
+                fork_before_message_id: None,
                 initial_config: Vec::new(),
             })
             .await?;
@@ -112,6 +113,7 @@ impl SessionManager {
         // boundary earlier than the latest event is therefore not supported yet;
         // reject it explicitly so clients can disable that Fork action instead of
         // silently producing a fork that contains later history.
+        let mut fork_before_message_id = None;
         let fork_up_to_node_seq = match (fork_source.as_ref(), params.fork_up_to_node_seq) {
             (Some(source), Some(up_to)) => {
                 if up_to > source.last_node_seq {
@@ -121,10 +123,20 @@ impl SessionManager {
                     )));
                 }
                 if up_to != source.last_node_seq {
-                    return Err(NodeError::ForkScopeUnsupported(format!(
-                        "the agent can only fork at the current end of the source session ({}), not at {up_to}",
-                        source.last_node_seq
-                    )));
+                    if !source.fork_scope.supports_message_boundary() {
+                        return Err(NodeError::ForkScopeUnsupported(format!(
+                            "the agent can only fork at the current end of the source session ({}), not at {up_to}",
+                            source.last_node_seq
+                        )));
+                    }
+                    fork_before_message_id = self
+                        .next_agent_message_id_after(source.session_id.as_str(), up_to)
+                        .await?;
+                    if fork_before_message_id.is_none() {
+                        return Err(NodeError::ForkScopeUnsupported(format!(
+                            "no agent message boundary is available after {up_to}"
+                        )));
+                    }
                 }
                 up_to
             }
@@ -191,6 +203,7 @@ impl SessionManager {
                 has_custom_title,
                 resume: None,
                 fork_from: fork_from.as_deref(),
+                fork_before_message_id,
                 initial_config: params.initial_config.to_vec(),
             })
             .await?;
@@ -233,6 +246,39 @@ impl SessionManager {
         })
     }
 
+    /// Returns the first agent-side user message ID after `after_node_seq`.
+    async fn next_agent_message_id_after(
+        &self,
+        session_id: &str,
+        after_node_seq: u64,
+    ) -> Result<Option<String>, NodeError> {
+        let mut cursor = 0;
+        loop {
+            let batch = self
+                .inner
+                .bus
+                .db()
+                .session_events_after(session_id, cursor, EVENT_LOAD_BATCH)
+                .await?;
+            if batch.events.is_empty() {
+                return Ok(None);
+            }
+            cursor = batch.cursor;
+            for event in batch.events {
+                if event.node_seq <= after_node_seq {
+                    continue;
+                }
+                if let UnifiedEventPayload::UserMessage {
+                    agent_message_id: Some(id),
+                    ..
+                } = event.payload
+                {
+                    return Ok(Some(id));
+                }
+            }
+        }
+    }
+
     /// Resolves the launch spec (custom / built-in agents only).
     pub(super) async fn resolve_launch_spec(
         &self,
@@ -270,6 +316,7 @@ impl SessionManager {
                     initial_mode: params.initial_mode.clone(),
                     resume: params.resume.clone(),
                     fork_from: params.fork_from.map(str::to_owned),
+                    fork_before_message_id: params.fork_before_message_id.clone(),
                     initial_config: params.initial_config.clone(),
                     acp_parser: None,
                 },
@@ -469,6 +516,7 @@ impl SessionManager {
                     capture_history: mirror_history,
                 }),
                 fork_from: None,
+                fork_before_message_id: None,
                 initial_config: Vec::new(),
             })
             .await
@@ -682,6 +730,7 @@ impl SessionManager {
                     capture_history: false,
                 }),
                 fork_from: None,
+                fork_before_message_id: None,
                 initial_config: Vec::new(),
             })
             .await?;

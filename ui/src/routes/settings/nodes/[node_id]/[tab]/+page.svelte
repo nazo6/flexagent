@@ -1,6 +1,7 @@
 <script lang="ts">
   import AgentManager from "#lib/components/settings/AgentManager.svelte";
   import AuditLog from "#lib/components/settings/AuditLog.svelte";
+  import OpenCodeSettings from "#lib/components/settings/OpenCodeSettings.svelte";
   import ClientTokenCard from "#lib/components/settings/ClientTokenCard.svelte";
   import PairingPanel from "#lib/components/settings/PairingPanel.svelte";
   import ProcessSettingsPanel from "#lib/components/settings/ProcessSettingsPanel.svelte";
@@ -40,6 +41,8 @@
   <PairingPanel nodeId={data.nodeId} />
 {:else if data.tab === "agents"}
   <AgentManager nodeId={data.nodeId} />
+{:else if data.tab === "opencode"}
+  <OpenCodeSettings nodeId={data.nodeId} />
 {:else if data.tab === "audit"}
   <AuditLog />
 {/if}

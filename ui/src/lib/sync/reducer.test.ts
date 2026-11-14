@@ -636,6 +636,7 @@ describe("metadata helpers", () => {
           available_modes: [],
           available_commands: [],
           config_options: [],
+          native_features: ["revert", "steer"],
         },
       }),
     ];
@@ -659,6 +660,7 @@ describe("metadata helpers", () => {
           options: ["gpt-4", "gpt-3.5"],
         },
       ],
+      nativeFeatures: ["revert", "steer"],
     });
   });
 });
@@ -797,5 +799,47 @@ describe("compaction notices", () => {
       tone: "error",
       text: "Summarization failed",
     });
+  });
+});
+
+describe("session revert", () => {
+  it("hides the conversation between the boundary and the revert event", () => {
+    const sources = emptySources([
+      makeEvent(1, {
+        type: "user_message",
+        data: { text: "first", attachments: [], client_source: "web" },
+      }),
+      makeEvent(2, {
+        type: "agent_message",
+        data: { message_id: "m1", text: "first answer", is_complete: true, subagent_id: null },
+      }),
+      makeEvent(3, {
+        type: "user_message",
+        data: { text: "second", attachments: [], client_source: "web" },
+      }),
+      makeEvent(4, {
+        type: "agent_message",
+        data: { message_id: "m2", text: "second answer", is_complete: true, subagent_id: null },
+      }),
+      makeEvent(5, {
+        type: "session_reverted",
+        data: { up_to_node_seq: 2, files: true },
+      }),
+      makeEvent(6, {
+        type: "user_message",
+        data: { text: "third", attachments: [], client_source: "web" },
+      }),
+    ]);
+    const items = buildTimelineItems(sources);
+    expect(items.filter((item) => item.kind === "user").map((item) => item.text)).toEqual([
+      "first",
+      "third",
+    ]);
+    expect(items.filter((item) => item.kind === "agent").map((item) => item.text)).toEqual([
+      "first answer",
+    ]);
+    expect(items.some((item) => item.kind === "notice" && item.text.includes("reverted"))).toBe(
+      true,
+    );
   });
 });

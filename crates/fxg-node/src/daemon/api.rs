@@ -15,7 +15,8 @@ use fxg_protocol::CommandId;
 use fxg_protocol::client_api::{
     AgentDiagnostics, AgentOpResponse, AgentsResponse, ConnectionRole, CreateSessionRequest,
     CreateSessionResponse, CreateWorktreeRequest, DiagnosticsResponse, ExternalSessionListResponse,
-    HubLinkState, KillSwitchResponse, ProjectLinkRequest, ProjectLinkResponse, ProjectScanRequest,
+    HubLinkState, KillSwitchResponse, OpenCodeManagementSnapshot, OpenCodeMcpAction,
+    OpenCodeMcpDefinition, ProjectLinkRequest, ProjectLinkResponse, ProjectScanRequest,
     ProjectScanResponse, ProjectUnlinkRequest, ProjectUnlinkResponse, ProvisionersResponse,
     PruneWorktreesRequest, PushSubscribeRequest, PushSubscribeResponse, RemoveWorktreeRequest,
     RespondElicitationRequest, RespondElicitationResponse, RespondPermissionRequest,
@@ -43,6 +44,14 @@ fn api_error(err: NodeError) -> ApiError {
     ApiError::from_code(err.error_code(), err.to_string())
 }
 
+/// Converts an OpenCode management failure into an API error.
+fn opencode_error(err: anyhow::Error) -> ApiError {
+    ApiError::from_code(
+        fxg_protocol::common::ErrorCode::InvalidState,
+        format!("OpenCode request failed: {err:#}"),
+    )
+}
+
 /// Converts a `ClientInfo` into the audit log source.
 fn audit_source(client: &ClientInfo) -> AuditSource {
     AuditSource {
@@ -54,6 +63,18 @@ fn audit_source(client: &ClientInfo) -> AuditSource {
 }
 
 impl DaemonState {
+    /// Rejects a request for another node (these endpoints are node-local).
+    fn ensure_local_node(&self, node_id: &str) -> Result<(), ApiError> {
+        if node_id == self.node_id() {
+            Ok(())
+        } else {
+            Err(ApiError::bad_request(format!(
+                "requested node {node_id} but this node is {}",
+                self.node_id()
+            )))
+        }
+    }
+
     /// Shared diagnostics payload (REST).
     pub async fn diagnostics_response(&self) -> Result<DiagnosticsResponse, ApiError> {
         <Self as ClientApiBackend>::diagnostics(self).await
@@ -953,6 +974,69 @@ impl ClientApiBackend for DaemonState {
             )));
         }
         self.agents_catalog().await.map_err(api_error)
+    }
+
+    async fn opencode_management(
+        &self,
+        node_id: &str,
+    ) -> Result<OpenCodeManagementSnapshot, ApiError> {
+        self.ensure_local_node(node_id)?;
+        let client =
+            match fxg_acp::opencode_native::OpenCodeNativeDriver::connect_management().await {
+                Ok(client) => client,
+                Err(err) => {
+                    tracing::debug!("OpenCode management is unavailable: {err:#}");
+                    return Ok(OpenCodeManagementSnapshot::unavailable());
+                }
+            };
+        client.management_snapshot().await.map_err(opencode_error)
+    }
+
+    async fn opencode_mcp_action(
+        &self,
+        node_id: &str,
+        name: &str,
+        action: OpenCodeMcpAction,
+    ) -> Result<OpenCodeManagementSnapshot, ApiError> {
+        self.ensure_local_node(node_id)?;
+        let client = fxg_acp::opencode_native::OpenCodeNativeDriver::connect_management()
+            .await
+            .map_err(opencode_error)?;
+        client
+            .mcp_action(name, action)
+            .await
+            .map_err(opencode_error)?;
+        client.management_snapshot().await.map_err(opencode_error)
+    }
+
+    async fn opencode_mcp_upsert(
+        &self,
+        node_id: &str,
+        name: &str,
+        definition: OpenCodeMcpDefinition,
+    ) -> Result<OpenCodeManagementSnapshot, ApiError> {
+        self.ensure_local_node(node_id)?;
+        let client = fxg_acp::opencode_native::OpenCodeNativeDriver::connect_management()
+            .await
+            .map_err(opencode_error)?;
+        client
+            .upsert_mcp(name, &definition)
+            .await
+            .map_err(opencode_error)?;
+        client.management_snapshot().await.map_err(opencode_error)
+    }
+
+    async fn opencode_mcp_remove(
+        &self,
+        node_id: &str,
+        name: &str,
+    ) -> Result<OpenCodeManagementSnapshot, ApiError> {
+        self.ensure_local_node(node_id)?;
+        let client = fxg_acp::opencode_native::OpenCodeNativeDriver::connect_management()
+            .await
+            .map_err(opencode_error)?;
+        client.remove_mcp(name).await.map_err(opencode_error)?;
+        client.management_snapshot().await.map_err(opencode_error)
     }
 
     async fn push_subscribe(

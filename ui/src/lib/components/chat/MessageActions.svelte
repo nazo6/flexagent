@@ -4,6 +4,7 @@
   import { toast } from "svelte-sonner";
   import CopyIcon from "@lucide/svelte/icons/copy";
   import GitForkIcon from "@lucide/svelte/icons/git-fork";
+  import Undo2Icon from "@lucide/svelte/icons/undo-2";
 
   interface Props {
     /** Plain text copied by the Copy action. */
@@ -12,6 +13,11 @@
     canFork: boolean | null;
     /** Why Fork is disabled (shown as a tooltip). */
     forkReason?: string | null;
+    /** `null` hides the Revert action entirely. */
+    canRevert?: boolean | null;
+    /** Why Revert is disabled (shown as a tooltip). */
+    revertReason?: string | null;
+    onrevert?: () => void;
     /** Keep the actions visible even on pointer devices (used for the latest message). */
     prominent?: boolean;
     /** Metadata shown at the right end of the boundary row. */
@@ -25,14 +31,22 @@
     text,
     canFork,
     forkReason = null,
+    canRevert = null,
+    revertReason = null,
     prominent = false,
     meta = null,
     metaTitle = null,
     onfork,
+    onrevert,
   }: Props = $props();
 
   const forkTitle = $derived(
     canFork === true ? m.chat_action_fork() : (forkReason ?? m.chat_action_fork_unavailable()),
+  );
+  const revertTitle = $derived(
+    canRevert === true
+      ? m.chat_action_revert()
+      : (revertReason ?? m.chat_action_revert_unavailable()),
   );
 
   async function copy(): Promise<void> {
@@ -90,6 +104,20 @@
       <CopyIcon class="size-3" />
       {m.chat_action_copy()}
     </Button>
+    {#if canRevert !== null}
+      <Button
+        size="xs"
+        variant="ghost"
+        class="text-muted-foreground hover:text-foreground gap-1 px-2 font-normal"
+        title={revertTitle}
+        aria-label={revertTitle}
+        disabled={!canRevert}
+        onclick={() => onrevert?.()}
+      >
+        <Undo2Icon class="size-3" />
+        {m.chat_action_revert()}
+      </Button>
+    {/if}
     {#if canFork !== null}
       <Button
         size="xs"

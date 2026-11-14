@@ -9,7 +9,8 @@ use fxg_protocol::client_api::{
     AgentCapabilitiesPreview, AgentDiagnostics, AgentOpResponse, AgentsResponse, ConnectionRole,
     CreateSessionRequest, CreateSessionResponse, CreateWorktreeRequest, DiagnosticsResponse,
     HubLinkStatus, IssueNodeTokenRequest, IssueNodeTokenResponse, KillSwitchResponse,
-    NodeTokensResponse, ProbeAgentRequest, ProjectLinkRequest, ProjectLinkResponse, ProjectPreview,
+    NodeTokensResponse, OpenCodeManagementSnapshot, OpenCodeMcpAction, OpenCodeMcpDefinition,
+    ProbeAgentRequest, ProjectLinkRequest, ProjectLinkResponse, ProjectPreview,
     ProjectPreviewRequest, ProjectScanRequest, ProjectScanResponse, ProjectUnlinkRequest,
     ProjectUnlinkResponse, ProvisionersResponse, PruneWorktreesRequest, PushSubscribeRequest,
     PushSubscribeResponse, RemoveWorktreeRequest, RespondElicitationRequest,
@@ -673,6 +674,55 @@ pub trait ClientApiBackend: Clone + Send + Sync + 'static {
         Err(ApiError::from_code(
             ErrorCode::InvalidState,
             "agent listing for a specific node is only available on the hub",
+        ))
+    }
+
+    /// `GET /api/v1/nodes/:node_id/opencode` (native integration snapshot).
+    async fn opencode_management(
+        &self,
+        _node_id: &str,
+    ) -> Result<OpenCodeManagementSnapshot, ApiError> {
+        Err(ApiError::from_code(
+            ErrorCode::InvalidState,
+            "OpenCode management is only available on the local node",
+        ))
+    }
+
+    /// `POST /api/v1/nodes/:node_id/opencode/mcp/:name/:action`.
+    async fn opencode_mcp_action(
+        &self,
+        _node_id: &str,
+        _name: &str,
+        _action: OpenCodeMcpAction,
+    ) -> Result<OpenCodeManagementSnapshot, ApiError> {
+        Err(ApiError::from_code(
+            ErrorCode::InvalidState,
+            "OpenCode management is only available on the local node",
+        ))
+    }
+
+    /// `PUT /api/v1/nodes/:node_id/opencode/mcp/:name`.
+    async fn opencode_mcp_upsert(
+        &self,
+        _node_id: &str,
+        _name: &str,
+        _definition: OpenCodeMcpDefinition,
+    ) -> Result<OpenCodeManagementSnapshot, ApiError> {
+        Err(ApiError::from_code(
+            ErrorCode::InvalidState,
+            "OpenCode management is only available on the local node",
+        ))
+    }
+
+    /// `DELETE /api/v1/nodes/:node_id/opencode/mcp/:name`.
+    async fn opencode_mcp_remove(
+        &self,
+        _node_id: &str,
+        _name: &str,
+    ) -> Result<OpenCodeManagementSnapshot, ApiError> {
+        Err(ApiError::from_code(
+            ErrorCode::InvalidState,
+            "OpenCode management is only available on the local node",
         ))
     }
 

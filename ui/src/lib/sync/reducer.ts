@@ -885,7 +885,18 @@ export function buildTimelineItems(sources: TimelineSources): TimelineItem[] {
     thoughtTimes: sources.thoughtTimes,
   };
 
+  // A revert hides the events between its boundary and the revert event.
+  // Events recorded after the revert (new turns) stay visible.
+  const revertIntervals = sources.events.flatMap((event) =>
+    event.payload.type === "session_reverted"
+      ? [{ from: event.payload.data.up_to_node_seq, to: event.node_seq }]
+      : [],
+  );
+  const isReverted = (seq: number) =>
+    revertIntervals.some((interval) => seq > interval.from && seq < interval.to);
+
   for (const event of sources.events) {
+    if (isReverted(event.node_seq)) continue;
     const payload = event.payload;
     const base: TimelineBase = { seq: event.node_seq, createdAt: event.created_at };
     switch (payload.type) {
@@ -928,6 +939,18 @@ export function buildTimelineItems(sources: TimelineSources): TimelineItem[] {
       case "compaction_updated":
         addCompactionUpdate(builder, payload, base);
         break;
+      case "session_reverted":
+        builder.items.push({
+          kind: "notice",
+          key: `reverted:${base.seq}`,
+          ...base,
+          text: m.timeline_session_reverted({
+            seq: String(payload.data.up_to_node_seq),
+            files: payload.data.files ? "yes" : "no",
+          }),
+          tone: "info",
+        });
+        break;
       case "subagent_updated":
         addSubagentUpdated(builder, payload, base);
         break;
@@ -953,6 +976,7 @@ export interface SessionCapabilities {
   availableModes: ModeInfo[];
   availableCommands: CommandInfo[];
   configOptions: ConfigOptionInfo[];
+  nativeFeatures: string[];
 }
 
 /** Restore the latest capabilities from the event list (null when absent). */
@@ -962,11 +986,13 @@ export function capabilitiesFromEvents(events: SessionEventEnvelope[]): SessionC
   let availableModes: ModeInfo[] = [];
   let availableCommands: CommandInfo[] = [];
   let configOptions: ConfigOptionInfo[] = [];
+  let nativeFeatures: string[] = [];
 
   let hasMode = false;
   let hasModes = false;
   let hasCommands = false;
   let hasOptions = false;
+  let hasFeatures = false;
 
   for (let i = events.length - 1; i >= 0; i -= 1) {
     const payload = events[i].payload;
@@ -988,7 +1014,11 @@ export function capabilitiesFromEvents(events: SessionEventEnvelope[]): SessionC
         configOptions = payload.data.config_options;
         hasOptions = true;
       }
-      if (hasMode && hasModes && hasCommands && hasOptions) {
+      if (!hasFeatures && (payload.data.native_features?.length ?? 0) > 0) {
+        nativeFeatures = payload.data.native_features ?? [];
+        hasFeatures = true;
+      }
+      if (hasMode && hasModes && hasCommands && hasOptions && hasFeatures) {
         break;
       }
     }
@@ -1000,6 +1030,7 @@ export function capabilitiesFromEvents(events: SessionEventEnvelope[]): SessionC
     availableModes,
     availableCommands,
     configOptions,
+    nativeFeatures,
   };
 }
 

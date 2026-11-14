@@ -170,6 +170,7 @@ impl SessionManager {
             initial_mode: None,
             resume: None,
             fork_from: None,
+            fork_before_message_id: None,
             initial_config: initial_config.to_vec(),
             acp_parser: None,
         };

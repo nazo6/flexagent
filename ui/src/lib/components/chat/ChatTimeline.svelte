@@ -40,6 +40,8 @@
     forkFromTitle = null,
     forkAfterSeq = null,
     onfork,
+    canRevert = false,
+    onrevert,
   }: {
     sessionId: string;
     items: TimelineItem[];
@@ -60,6 +62,10 @@
     forkAfterSeq?: number | null;
     /** Called when the user chooses "Fork from here" on a message. */
     onfork?: (item: TimelineItem) => void;
+    /** Whether the agent supports reverting the conversation. */
+    canRevert?: boolean;
+    /** Called when the user chooses "Revert to here" on a message. */
+    onrevert?: (item: TimelineItem) => void;
   } = $props();
 
   /**
@@ -165,6 +171,16 @@
     return null;
   });
 
+  const revertState = $derived.by(() => {
+    if (nested || onrevert === undefined || !canRevert) {
+      return { canRevert: null as boolean | null, reason: null as string | null };
+    }
+    if (sessionBusy) {
+      return { canRevert: false, reason: m.chat_action_revert_running() };
+    }
+    return { canRevert: true, reason: null };
+  });
+
   function forkState(item: TimelineItem): { canFork: boolean | null; reason: string | null } {
     if (nested || onfork === undefined || forkScope === null || forkScope === "none") {
       return { canFork: null, reason: null };
@@ -231,10 +247,13 @@
           text={item.text}
           canFork={fork.canFork}
           forkReason={fork.reason}
+          canRevert={revertState.canRevert}
+          revertReason={revertState.reason}
           prominent={item.seq === lastForkableSeq}
           meta={`${item.clientSource} · ${formatClockTime(item.createdAt)}`}
           metaTitle={formatEpochMs(item.createdAt)}
           onfork={() => onfork?.(item)}
+          onrevert={() => onrevert?.(item)}
         />
       </div>
     {:else if item.kind === "agent"}
@@ -258,8 +277,11 @@
           text={item.text}
           canFork={fork.canFork}
           forkReason={fork.reason}
+          canRevert={revertState.canRevert}
+          revertReason={revertState.reason}
           prominent={item.seq === lastForkableSeq}
           onfork={() => onfork?.(item)}
+          onrevert={() => onrevert?.(item)}
         />
       </div>
     {:else if item.kind === "thought"}

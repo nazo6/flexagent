@@ -918,6 +918,7 @@ fn client_capabilities_advertise_terminal_auth() {
 #[test]
 fn prompt_blocks_sends_images_when_supported() {
     let input = PromptInput {
+        agent_message_id: None,
         text: "look".to_owned(),
         attachments: vec![fxg_protocol::common::AttachmentMeta {
             file_name: "shot.png".to_owned(),
@@ -936,6 +937,7 @@ fn prompt_blocks_sends_images_when_supported() {
 #[test]
 fn prompt_blocks_falls_back_to_text_without_image_support() {
     let input = PromptInput {
+        agent_message_id: None,
         text: String::new(),
         attachments: vec![fxg_protocol::common::AttachmentMeta {
             file_name: "shot.png".to_owned(),
@@ -954,6 +956,7 @@ fn prompt_blocks_falls_back_to_text_without_image_support() {
 #[test]
 fn prompt_blocks_links_non_image_files() {
     let input = PromptInput {
+        agent_message_id: None,
         text: "see this".to_owned(),
         attachments: vec![fxg_protocol::common::AttachmentMeta {
             file_name: "notes.md".to_owned(),

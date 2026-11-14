@@ -38,6 +38,7 @@ export const SETTINGS_TAB_LABELS: Record<SettingsTabId, string> = {
   tokens: "Pairing tokens",
   provisioners: "Provisioners",
   agents: "Agents",
+  opencode: "OpenCode",
   audit: "Audit log",
   appearance: "Appearance",
   notifications: "Notifications",

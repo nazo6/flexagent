@@ -57,6 +57,7 @@ use handlers::agents::{
     import_registry_agent, list_agents, probe_agent_config, refresh_catalog, remove_custom_agent,
     upsert_custom_agent,
 };
+use handlers::opencode::{management as opencode_management, mcp_action, mcp_remove, mcp_upsert};
 use handlers::projects::{
     add_project, create_worktree, delete_provisioner, inspect_project, link_project, list_nodes,
     list_projects, list_provisioners, list_worktrees, prune_worktrees, remove_worktree,
@@ -212,6 +213,18 @@ pub fn client_router<B: ClientApiBackend>(backend: B, options: ClientApiOptions)
         )
         .route("/api/v1/auth/rotate-token", post(rotate_auth_token::<B>))
         .route("/api/v1/nodes", get(list_nodes::<B>))
+        .route(
+            "/api/v1/nodes/{node_id}/opencode",
+            get(opencode_management::<B>),
+        )
+        .route(
+            "/api/v1/nodes/{node_id}/opencode/mcp/{name}",
+            put(mcp_upsert::<B>).delete(mcp_remove::<B>),
+        )
+        .route(
+            "/api/v1/nodes/{node_id}/opencode/mcp/{name}/{action}",
+            post(mcp_action::<B>),
+        )
         .route("/api/v1/nodes/{node_id}/fs/browse", get(browse_fs::<B>))
         .route(
             "/api/v1/nodes/{node_id}/workspace/fs/list",

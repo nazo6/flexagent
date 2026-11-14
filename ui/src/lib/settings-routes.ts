@@ -11,7 +11,14 @@ export type SettingsScope = "hub" | "node" | "browser";
 export type SettingsScopeRef = SettingsScope | "current";
 
 export const HUB_TABS = ["general", "process", "tokens", "provisioners", "audit"] as const;
-export const NODE_TABS_ALL = ["general", "process", "pairing", "agents", "audit"] as const;
+export const NODE_TABS_ALL = [
+  "general",
+  "process",
+  "pairing",
+  "agents",
+  "opencode",
+  "audit",
+] as const;
 export const NODE_TABS_HUB = ["general", "pairing", "agents"] as const;
 export const BROWSER_TABS = ["appearance", "notifications"] as const;
 
