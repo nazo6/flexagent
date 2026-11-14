@@ -32,7 +32,11 @@
     elicitationId: string;
     message: string;
     requestedSchema: ElicitationSchema;
-    resolved?: { action: ElicitationAction; resolvedBy: string } | null;
+    resolved?: {
+      action: ElicitationAction;
+      resolvedBy: string;
+      content: Record<string, ElicitationValue> | null;
+    } | null;
     createdAt?: number | null;
   } = $props();
 
@@ -75,6 +79,32 @@
     decline: m.chat_elicitation_declined(),
     cancel: m.chat_elicitation_cancelled(),
   };
+
+  function optionLabel(property: ElicitationProperty | undefined, value: string): string {
+    return (property?.oneOf ?? []).find((option) => option.const === value)?.title ?? value;
+  }
+
+  function formatValue(property: ElicitationProperty | undefined, value: ElicitationValue): string {
+    if (typeof value === "string") return optionLabel(property, value);
+    if (typeof value === "boolean") return value ? m.chat_yes() : m.chat_no();
+    if (typeof value === "number") return String(value);
+    if (Array.isArray(value))
+      return value
+        .map((item) => (typeof item === "string" ? optionLabel(property, item) : String(item)))
+        .join(", ");
+    return JSON.stringify(value);
+  }
+
+  /** Answers to show after `accept` (empty while the question is open). */
+  const answerRows = $derived.by(() => {
+    if (resolved === null || resolved.action !== "accept" || resolved.content === null) return [];
+    const schemaProperties = requestedSchema.properties ?? {};
+    return Object.entries(resolved.content).map(([key, value]) => ({
+      key,
+      label: schemaProperties[key]?.title ?? key,
+      value: formatValue(schemaProperties[key], value),
+    }));
+  });
 
   function enumOptions(property: ElicitationProperty): { value: string; label: string }[] {
     if (property.enum && property.enum.length > 0) {
@@ -165,6 +195,22 @@
     </div>
     <p class="text-sm break-words">{message}</p>
   </div>
+
+  {#if answerRows.length > 0}
+    <div class="bg-muted/50 border-border flex flex-col gap-2 rounded-md border p-2">
+      <span class="text-muted-foreground text-[11px] font-medium">
+        {m.chat_elicitation_your_answer()}
+      </span>
+      <dl class="flex flex-col gap-1.5">
+        {#each answerRows as row (row.key)}
+          <div class="flex flex-col gap-0.5">
+            <dt class="text-muted-foreground text-[13px]">{row.label}</dt>
+            <dd class="text-sm break-words whitespace-pre-wrap">{row.value}</dd>
+          </div>
+        {/each}
+      </dl>
+    </div>
+  {/if}
 
   {#if resolved === null}
     <div class="flex flex-col gap-3">

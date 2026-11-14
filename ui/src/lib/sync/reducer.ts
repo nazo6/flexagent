@@ -5,6 +5,7 @@ import type {
   ConfigOptionInfo,
   ElicitationAction,
   ElicitationSchema,
+  ElicitationValue,
   FileDiff,
   ModeInfo,
   PermissionOption,
@@ -177,7 +178,12 @@ export type TimelineItem =
       message: string;
       mode: string;
       requestedSchema: ElicitationSchema;
-      resolved: { action: ElicitationAction; resolvedBy: string } | null;
+      /** `content` holds the user's answers for `accept` (null on decline / cancel). */
+      resolved: {
+        action: ElicitationAction;
+        resolvedBy: string;
+        content: Record<string, ElicitationValue> | null;
+      } | null;
       subagentId: string | null;
     }
   | {
@@ -623,6 +629,7 @@ function resolveElicitation(
         resolved: {
           action: payload.data.action,
           resolvedBy: payload.data.resolved_by,
+          content: payload.data.content,
         },
       };
     }

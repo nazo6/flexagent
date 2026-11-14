@@ -507,7 +507,41 @@ describe("elicitations", () => {
       elicitationId: "elic-1",
       toolCallId: "q1",
       message: "Which strategy should we use?",
-      resolved: { action: "accept", resolvedBy: "web" },
+      resolved: { action: "accept", resolvedBy: "web", content: { strategy: "a" } },
+    });
+  });
+
+  it("marks declined questions without answer content", () => {
+    const sources = emptySources([
+      makeEvent(1, {
+        type: "elicitation_request",
+        data: {
+          elicitation_id: "elic-2",
+          message: "Which strategy should we use?",
+          mode: "form",
+          requested_schema: {
+            type: "object",
+            properties: { strategy: { type: "string", enum: ["a", "b"] } },
+            required: ["strategy"],
+          },
+          tool_call_id: null,
+        },
+      }),
+      makeEvent(2, {
+        type: "elicitation_resolved",
+        data: {
+          elicitation_id: "elic-2",
+          action: "decline",
+          content: null,
+          resolved_by: "web",
+        },
+      }),
+    ]);
+    const items = buildTimelineItems(sources);
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({
+      kind: "elicitation",
+      resolved: { action: "decline", resolvedBy: "web", content: null },
     });
   });
 
