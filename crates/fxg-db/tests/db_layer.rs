@@ -117,11 +117,13 @@ impl Fixture {
                 }],
                 config_options: vec![],
                 fork_scope: Some(ForkScope::Last),
+                native_features: Vec::new(),
             }),
             self.event(UnifiedEventPayload::UserMessage {
                 text: "Fix the authentication error".to_owned(),
                 attachments: vec![],
                 client_source: ClientSource::Cli,
+                agent_message_id: None,
             }),
             self.event(UnifiedEventPayload::PermissionRequest {
                 request_id: "req-1".to_owned(),
@@ -383,6 +385,7 @@ async fn capabilities_partial_update_keeps_available_modes_projection() {
         available_commands: vec![],
         config_options: vec![],
         fork_scope: None,
+        native_features: Vec::new(),
     });
     // Partial updates without modes (commands only) do not overwrite available_modes
     let commands = fixture.event(UnifiedEventPayload::CapabilitiesUpdated {
@@ -395,6 +398,7 @@ async fn capabilities_partial_update_keeps_available_modes_projection() {
         }],
         config_options: vec![],
         fork_scope: None,
+        native_features: Vec::new(),
     });
     fixture
         .db
@@ -423,6 +427,7 @@ async fn fork_scope_projection_tracks_latest_and_rebuilds() {
         available_commands: vec![],
         config_options: vec![],
         fork_scope: Some(ForkScope::Last),
+        native_features: Vec::new(),
     });
     fixture
         .db
@@ -647,6 +652,7 @@ async fn rebuild_projections_matches_incremental_apply() {
         text: "This is a forked session".to_owned(),
         attachments: vec![],
         client_source: ClientSource::Web,
+        agent_message_id: None,
     });
     fixture
         .db
@@ -802,6 +808,7 @@ async fn fts_search_matches_text_and_excludes_binary_events() {
         text: "認証エラーのデバッグをお願いします".to_owned(), // allow-japanese: CJK full-text search test
         attachments: vec![],
         client_source: ClientSource::Cli,
+        agent_message_id: None,
     });
     let terminal = fixture.event(UnifiedEventPayload::TerminalOutput {
         terminal_id: "term-1".to_owned(),
@@ -1481,6 +1488,7 @@ async fn copy_fork_conversation_mirrors_conversation_events_only() {
         text: "parent question".to_owned(),
         attachments: vec![],
         client_source: ClientSource::Web,
+        agent_message_id: None,
     });
     let user_created_at = user.created_at;
     let answer = source.event(UnifiedEventPayload::AgentMessage {
@@ -1524,6 +1532,7 @@ async fn copy_fork_conversation_mirrors_conversation_events_only() {
                 text: "after the fork".to_owned(),
                 attachments: vec![],
                 client_source: ClientSource::Web,
+                agent_message_id: None,
             },
         )
         .await
@@ -1601,6 +1610,7 @@ async fn append_next_event_allocates_gap_free_sequences() {
                 text: "Continue".to_owned(),
                 attachments: vec![],
                 client_source: ClientSource::Cli,
+                agent_message_id: None,
             },
         )
         .await
@@ -1843,6 +1853,7 @@ async fn session_deletion_purges_content_and_keeps_tombstone() {
             text: "event received after deletion".to_owned(),
             attachments: vec![],
             client_source: ClientSource::Web,
+            agent_message_id: None,
         },
     };
     let outcome = fixture

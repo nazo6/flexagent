@@ -1490,6 +1490,140 @@ pub struct WorkspaceGitDiffQuery {
     pub file: Option<String>,
 }
 
+/// Native OpenCode integration snapshot (local node only).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
+pub struct OpenCodeManagementSnapshot {
+    /// Whether an OpenCode v2 service is reachable on this node.
+    pub available: bool,
+    /// Reported OpenCode version.
+    pub version: Option<String>,
+    /// Primary agents (OpenCode `mode != subagent`).
+    pub agents: Vec<OpenCodeAgentSummary>,
+    /// Models with their selectable variants.
+    pub models: Vec<OpenCodeModelSummary>,
+    /// Providers / integrations known to OpenCode.
+    pub providers: Vec<OpenCodeProviderSummary>,
+    /// MCP server status.
+    pub mcp_servers: Vec<OpenCodeMcpSummary>,
+    /// Installed skills.
+    pub skills: Vec<OpenCodeSkillSummary>,
+    /// Available slash commands.
+    pub commands: Vec<crate::common::CommandInfo>,
+}
+
+impl OpenCodeManagementSnapshot {
+    /// An empty snapshot when OpenCode is not running.
+    #[must_use]
+    pub fn unavailable() -> Self {
+        Self {
+            available: false,
+            version: None,
+            agents: Vec::new(),
+            models: Vec::new(),
+            providers: Vec::new(),
+            mcp_servers: Vec::new(),
+            skills: Vec::new(),
+            commands: Vec::new(),
+        }
+    }
+}
+
+/// One OpenCode primary agent.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
+pub struct OpenCodeAgentSummary {
+    /// Agent ID
+    pub id: String,
+    /// Display name
+    pub name: String,
+    /// Description
+    pub description: Option<String>,
+    /// Agent mode (`primary` / `all`)
+    pub mode: String,
+}
+
+/// One OpenCode model.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
+pub struct OpenCodeModelSummary {
+    /// Model ID
+    pub id: String,
+    /// Provider ID
+    pub provider_id: String,
+    /// Display name
+    pub name: String,
+    /// Whether the model is enabled
+    pub enabled: bool,
+    /// Selectable reasoning / thinking variants
+    pub variants: Vec<String>,
+}
+
+/// One OpenCode provider / integration.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
+pub struct OpenCodeProviderSummary {
+    /// Provider ID
+    pub id: String,
+    /// Display name
+    pub name: String,
+    /// Activation state (`enabled` / `auto` / ...)
+    pub activation: Option<String>,
+    /// Provider package
+    pub package: Option<String>,
+}
+
+/// One MCP server reported by OpenCode.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
+pub struct OpenCodeMcpSummary {
+    /// Server name
+    pub name: String,
+    /// Connection status (`connected` / `disabled` / `failed` / ...)
+    pub status: String,
+    /// Error message when the connection failed
+    pub error: Option<String>,
+}
+
+/// One installed OpenCode skill.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
+pub struct OpenCodeSkillSummary {
+    /// Skill ID
+    pub id: String,
+    /// Display name
+    pub name: String,
+    /// Description
+    pub description: Option<String>,
+}
+
+/// MCP management action.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+#[specta(collect)]
+pub enum OpenCodeMcpAction {
+    /// Connect the server
+    Connect,
+    /// Disconnect the server
+    Disconnect,
+}
+
+/// MCP server definition used when adding a server from the UI.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[specta(collect)]
+pub struct OpenCodeMcpDefinition {
+    /// Transport type (`local` / `remote`)
+    pub kind: String,
+    /// Command and arguments for local servers
+    pub command: Vec<String>,
+    /// Environment variables for local servers
+    pub environment: std::collections::BTreeMap<String, String>,
+    /// Remote URL for remote servers
+    pub url: Option<String>,
+    /// Whether the server is enabled
+    pub enabled: bool,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

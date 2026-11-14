@@ -99,6 +99,7 @@ pub fn classify_payload(payload: &UnifiedEventPayload) -> (EventType, Option<Str
         | UnifiedEventPayload::ElicitationResolved { .. }
         | UnifiedEventPayload::SessionArchived { .. }
         | UnifiedEventPayload::SessionPermissionPolicyChanged { .. }
+        | UnifiedEventPayload::SessionReverted { .. }
         | UnifiedEventPayload::SessionDeleted {}
         | UnifiedEventPayload::TerminalOutput { .. }
         | UnifiedEventPayload::TerminalInput { .. } => None,
@@ -155,6 +156,7 @@ mod tests {
                 data_b64: None,
             }],
             client_source: ClientSource::Cli,
+            agent_message_id: None,
         };
         let (event_type, text) = classify_payload(&payload);
         assert_eq!(event_type, EventType::UserMessage);

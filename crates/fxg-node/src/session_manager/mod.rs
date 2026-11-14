@@ -286,6 +286,8 @@ struct StartDriverParams<'a> {
     resume: Option<ResumeRequest>,
     /// Source ACP session ID for a native `session/fork`
     fork_from: Option<&'a str>,
+    /// Native drivers: fork before this agent-side message
+    fork_before_message_id: Option<String>,
     /// Initial configuration applied after `session/new`
     initial_config: Vec<fxg_protocol::common::InitialConfig>,
 }

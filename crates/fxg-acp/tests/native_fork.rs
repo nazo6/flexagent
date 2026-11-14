@@ -29,6 +29,7 @@ fn request(mode: &str, fork_from: Option<&str>, cwd: &Path) -> StartSessionReque
         initial_mode: None,
         resume: None,
         fork_from: fork_from.map(str::to_owned),
+        fork_before_message_id: None,
         initial_config: Vec::new(),
         acp_parser: None,
     }

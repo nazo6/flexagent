@@ -87,6 +87,7 @@
     return null;
   });
   const capabilities = $derived(capabilitiesFromEvents(timeline.events));
+  const canRevert = $derived(capabilities?.nativeFeatures.includes("revert") ?? false);
   // Prefer the latest usage derived from events, and fall back to the session list (projection) value.
   const usage = $derived(latestUsageFromEvents(timeline.events) ?? session?.usage ?? null);
   // Merge persistent events (ProvisioningLog synced after a turn completes) with the
@@ -278,6 +279,25 @@
     dock.toggleTool(tool);
   }
 
+  /** Revert the native conversation to the selected message boundary. */
+  async function handleRevertItem(item: TimelineItem): Promise<void> {
+    if (!sessionId) return;
+    try {
+      const result = await sync.controlSession(sessionId, {
+        action: "revert",
+        up_to_node_seq: item.seq,
+        files: true,
+      });
+      if (result.success) {
+        toast.success(m.chat_action_reverted());
+      } else {
+        toast.error(commandErrorMessage(result.error) ?? m.chat_action_revert_failed());
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+    }
+  }
+
   function handleForkItem(item: TimelineItem): void {
     if (!sessionId || !session) return;
     const params = new URLSearchParams();
@@ -457,6 +477,8 @@
               {forkFromTitle}
               {forkAfterSeq}
               onfork={handleForkItem}
+              {canRevert}
+              onrevert={handleRevertItem}
               onsubagent={(childSessionId) => (selectedSubagentId = childSessionId)}
             />
           </div>

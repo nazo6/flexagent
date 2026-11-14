@@ -146,6 +146,9 @@ pub struct StartSessionRequest {
     pub resume: Option<ResumeRequest>,
     /// Source ACP session ID for a native `session/fork` (`None` = no fork)
     pub fork_from: Option<String>,
+    /// Native drivers: fork before this agent-side message (exclusive).
+    /// `None` copies the full history.
+    pub fork_before_message_id: Option<String>,
     /// Initial configuration applied after `session/new`
     pub initial_config: Vec<fxg_protocol::common::InitialConfig>,
     /// ACP-only: parser for vendor subagent notifications (set by the extension layer).
@@ -292,6 +295,13 @@ pub struct ExternalSessionsUnsupported;
 /// Operation handle for a started session.
 #[async_trait]
 pub trait ActiveSessionHandle: Send + Sync {
+    /// Whether the node assigns `PromptInput.agent_message_id` before sending.
+    ///
+    /// Native drivers that target individual messages (revert / fork) return
+    /// `true`; the node then records the same ID on `UserMessage`.
+    fn assigns_message_ids(&self) -> bool {
+        false
+    }
     /// Send a prompt (including slash commands and attachments).
     async fn send_prompt(&self, input: PromptInput) -> anyhow::Result<()>;
     /// Respond to a permission request (`ALREADY_RESOLVED` detection is handled by the manager).
@@ -316,6 +326,21 @@ pub trait ActiveSessionHandle: Send + Sync {
     async fn set_mode(&self, mode_id: String) -> anyhow::Result<()>;
     /// Change configuration (model selection, etc.).
     async fn set_config(&self, key: String, value: ConfigOptionValue) -> anyhow::Result<()>;
+    /// Whether prompts sent while a turn is running are accepted by the agent
+    /// (server-side steer / queue) instead of being queued by the node.
+    fn supports_steering(&self) -> bool {
+        false
+    }
+    /// Revert the agent-side conversation to before `agent_message_id`.
+    ///
+    /// The default implementation reports that native revert is unavailable.
+    async fn revert_to_message(&self, _agent_message_id: &str, _files: bool) -> anyhow::Result<()> {
+        anyhow::bail!("revert is not supported by this driver")
+    }
+    /// Start a manual context compaction.
+    async fn compact_context(&self) -> anyhow::Result<()> {
+        anyhow::bail!("compaction is not supported by this driver")
+    }
     /// Cancel the current turn.
     async fn cancel_turn(&self) -> anyhow::Result<()>;
     /// Fully terminates the session process (including the process tree).
@@ -423,6 +448,7 @@ mod tests {
                     initial_mode: None,
                     resume: None,
                     fork_from: None,
+                    fork_before_message_id: None,
                     initial_config: Vec::new(),
                     acp_parser: None,
                 },

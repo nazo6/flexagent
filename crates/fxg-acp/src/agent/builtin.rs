@@ -9,11 +9,14 @@
 use std::sync::Arc;
 
 use super::opencode::OpenCodeExtension;
-use super::provider::{AgentDefinition, AgentProvider, LaunchPreset, StaticProvider};
+use super::provider::{AgentBackend, AgentDefinition, AgentProvider, LaunchPreset, StaticProvider};
+use crate::opencode_native::OpenCodeNativeDriver;
 
-/// OpenCode CLI (`opencode acp`) with the OpenCode extension.
+/// OpenCode native driver (Tier 3, OpenCode v2 HTTP + SSE).
 pub const OPENCODE: &str = "opencode";
-/// Extension ID applied to [`OPENCODE`].
+/// OpenCode through ACP, kept as a fallback for older CLI builds.
+pub const OPENCODE_ACP: &str = "opencode-acp";
+/// Extension ID applied to [`OPENCODE_ACP`].
 pub const OPENCODE_EXTENSION: &str = "opencode";
 /// ACP-only Antigravity CLI (`agy acp`).
 pub const AGY: &str = "agy";
@@ -36,7 +39,24 @@ pub fn providers() -> Vec<Arc<dyn AgentProvider>> {
                 AgentDefinition {
                     id: OPENCODE.to_owned(),
                     name: "OpenCode".to_owned(),
-                    description: Some("Known ACP CLI".to_owned()),
+                    description: Some(
+                        "OpenCode v2 native driver (revert, fork, steering, MCP)".to_owned(),
+                    ),
+                    icon: Some("builtin:opencode".to_owned()),
+                },
+                Some(LaunchPreset {
+                    program: OPENCODE,
+                    args: &["serve"],
+                }),
+            )
+            .with_backend(AgentBackend::Custom(Arc::new(OpenCodeNativeDriver::new()))),
+        ),
+        Arc::new(
+            StaticProvider::new(
+                AgentDefinition {
+                    id: OPENCODE_ACP.to_owned(),
+                    name: "OpenCode (ACP)".to_owned(),
+                    description: Some("OpenCode through ACP (fallback)".to_owned()),
                     icon: Some("builtin:opencode".to_owned()),
                 },
                 Some(LaunchPreset {

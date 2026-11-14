@@ -47,6 +47,7 @@ fn request(launch: AgentLaunchSpec, cwd: &Path) -> StartSessionRequest {
         initial_mode: None,
         resume: None,
         fork_from: None,
+        fork_before_message_id: None,
         initial_config: Vec::new(),
         acp_parser: None,
     }

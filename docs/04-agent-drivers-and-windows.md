@@ -25,7 +25,9 @@ ACP だけでは、アイコンや起動オプションなどのエージェン�
 ACP に存在しない機能（独自 API によるモデル一覧の取得など）を扱えない。将来の
 拡張を `agent_id` 分岐なしで追加できるよう、実装を次の3層に分ける。
 現在は `AgentCatalog`、Tier 2 (`ExtendedAcpDriver` + `AgentExtension`)、
-Tier 3 (`impl AgentDriver`) の基盤を持ち、`opencode` は Tier 2 で実装している。
+Tier 3 (`impl AgentDriver`) を持ち、`opencode` は Tier 3
+(`OpenCodeNativeDriver`) で実装している。ACP 経路は `opencode-acp` として
+フォールバック用に残す。
 
 | 層                   | 実行時の実装                           | ACP の再利用 | エージェントごとに追加するコード            |
 | :------------------- | :------------------------------------- | :----------- | :------------------------------------------ |
@@ -55,9 +57,21 @@ Tier 3 (`impl AgentDriver`) の基盤を持ち、`opencode` は Tier 2 で実装
   これを `ConfigOptionChoice` として保持する。モデル名や説明を extension で
   再生成せず、`value` だけを `set_config` に送る。表示名の provider prefix 除去
   などは UI の汎用処理で行う。
-- 組み込みの `opencode` extension は、ACP では扱えない vendor 差分
-  (`opencode/session/child_update` の子セッション更新と、権限要求への子 ID 付与)
-  だけを担当する。
+- 組み込みの `opencode` extension は `opencode-acp` の ACP 経路で使う。
+  ACP では扱えない vendor 差分 (`opencode/session/child_update` の子セッション
+  更新と、権限要求への子 ID 付与) を担当する。
+- `opencode` (Tier 3) は OpenCode v2 の HTTP + SSE を一次インターフェースとし、
+  ACP では表現できない revert、メッセージ境界 fork、実行中入力 (steer)、
+  compact、provider / MCP / skill / command の管理を提供する。実装は
+  `crates/fxg-acp/src/opencode_native.rs`。セッションは OpenCode 側の
+  ストアを一次ソースとし、fxg は正規化イベントを `node.db` に記録する。
+- `UserMessage.agent_message_id` はネイティブドライバが発行するメッセージ ID
+  で、`SessionControlAction::Revert` とメッセージ境界 fork の対象解決に使う。
+- `CapabilitiesUpdated.native_features` はドライバが実装する追加操作
+  (`revert` / `steer` / `compact`) をクライアントへ伝える。
+- 管理 API (`/api/v1/nodes/:id/opencode`) は**ローカルノード限定**で、
+  provider / model / MCP / skill / command の読み取りと MCP の追加・接続・
+  削除を行う。credential の値は返さない。
 - `AgentSummary.icon` は `builtin:<id>` または URL を返す。Web UI は
   `builtin:opencode` を同梱アイコン (`/agents/opencode.png`) に解決し、
   `builtin:antigravity` / `builtin:copilot` / `builtin:qwen` /
@@ -66,7 +80,7 @@ Tier 3 (`impl AgentDriver`) の基盤を持ち、`opencode` は Tier 2 で実装
   bot アイコンにフォールバックする。
   `AgentSummary.backend` はエージェント一覧にバッジ
   (`ACP` / `ACP + extension` / `Custom driver`) として表示する。
-- ビルトイン provider は `opencode`（Tier 2）に加え、
+- ビルトイン provider は `opencode`（Tier 3）と `opencode-acp`（Tier 2）に加え、
   `agy` / `github-copilot-cli` / `qwen-code` / `cline` / `auggie` /
   `kimi-code` のネイティブ CLI preset を持つ。一覧・起動は
   ビルトインの表示名・アイコン・preset を使う。opencode は v2 の CLI 名が
@@ -120,8 +134,9 @@ Tier 3 (`impl AgentDriver`) の基盤を持ち、`opencode` は Tier 2 で実装
       custom を定義した場合は custom が優先される。
    - Registry のエージェントを直接起動することはない。`npx` / `uvx` で
      使いたい場合は、先に import して custom 定義にする。
-   - 代表例: `fxg session new opencode` は `opencode acp`、`fxg session new agy`
-     は `agy acp` として起動する。
+   - 代表例: `fxg session new opencode` は OpenCode v2 のネイティブドライバ
+     （`opencode serve`）を使い、`fxg session new opencode-acp` は
+     `opencode acp`、`fxg session new agy` は `agy acp` として起動する。
 3. **import 時のコマンド変換**:
    - `binary`: `PATH` 上の CLI が見つかればそのコマンドを使う。`PATH` に無く
      npx / uvx 配布があれば、その配布形態で起動する。binary のみで `PATH` に
@@ -313,6 +328,9 @@ fxg 側で履歴を組み立て直す Replay フォールバックは行いま�
   複製しません。複製範囲は Fork 作成時点の `node_seq`
   までに限定します。
 - 別ノード・一時VM・別エージェントへの Fork（Git bundle / 履歴引き継ぎ）は行いません。
+- ネイティブドライバが `fork_scope = message` を広告する場合（OpenCode v2）、
+  任意のメッセージ境界から Fork できる。ノードは境界の次の
+  `UserMessage.agent_message_id` を `fork { before }` として渡す。
 
 ### 4.1 セッションのレジューム (Resume)
 

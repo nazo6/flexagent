@@ -1173,6 +1173,7 @@ async fn fork_uses_native_session_fork() {
                 text: "parent question".to_owned(),
                 attachments: vec![],
                 client_source: ClientSource::Web,
+                agent_message_id: None,
             },
         )
         .await
@@ -1338,6 +1339,7 @@ async fn start_session_with_fork_from_uses_native_fork() {
                 text: "forked context".to_owned(),
                 attachments: vec![],
                 client_source: ClientSource::Web,
+                agent_message_id: None,
             },
         )
         .await
@@ -1937,6 +1939,7 @@ async fn import_session_flushes_replayed_events_before_returning() {
             text: "earlier prompt".to_owned(),
             attachments: Vec::new(),
             client_source: ClientSource::Import,
+            agent_message_id: None,
         },
         UnifiedEventPayload::AgentMessage {
             message_id: "replay-1".to_owned(),
@@ -1981,4 +1984,250 @@ async fn import_session_flushes_replayed_events_before_returning() {
         "expected replayed agent message in node.db immediately after import, got: {:?}",
         batch.events
     );
+}
+
+#[tokio::test]
+async fn native_steering_dispatches_while_busy() {
+    let (manager, mock, dir) = setup().await;
+    mock.set_steering(true);
+    let outcome = manager
+        .ensure_session(&CommandId::from("c-steer-1"), dir.path(), "mock", &[], None)
+        .await
+        .expect("ensure");
+    wait_idle(&manager, &outcome.session_id).await;
+
+    manager
+        .send_prompt(
+            &CommandId::from("c-steer-2"),
+            &outcome.session_id,
+            &PromptInput::text("first"),
+            ClientSource::Cli,
+        )
+        .await
+        .expect("first");
+    manager
+        .send_prompt(
+            &CommandId::from("c-steer-3"),
+            &outcome.session_id,
+            &PromptInput::text("second"),
+            ClientSource::Web,
+        )
+        .await
+        .expect("steered while busy");
+
+    assert_eq!(mock.prompts(), vec!["first", "second"]);
+    let summary = manager
+        .list_active()
+        .into_iter()
+        .find(|session| session.session_id == outcome.session_id)
+        .expect("active");
+    assert_eq!(summary.queued_prompts, 0, "native steering must not queue");
+}
+
+#[tokio::test]
+async fn native_revert_targets_the_agent_message_and_records_the_boundary() {
+    let (manager, mock, dir) = setup().await;
+    mock.set_assigns_message_ids(true);
+    let outcome = manager
+        .ensure_session(
+            &CommandId::from("c-revert-1"),
+            dir.path(),
+            "mock",
+            &[],
+            None,
+        )
+        .await
+        .expect("ensure");
+    wait_idle(&manager, &outcome.session_id).await;
+
+    manager
+        .send_prompt(
+            &CommandId::from("c-revert-2"),
+            &outcome.session_id,
+            &PromptInput::text("undo me"),
+            ClientSource::Cli,
+        )
+        .await
+        .expect("prompt");
+    let user_seq = wait_user_message(&manager, &outcome.session_id, "undo me").await;
+    mock.emit(DriverEvent::Event(UnifiedEventPayload::StatusChanged {
+        status: SessionStatus::Idle,
+        error_message: None,
+    }));
+    wait_not_busy(&manager, &outcome.session_id).await;
+
+    let events = manager
+        .bus()
+        .db()
+        .session_events_after(&outcome.session_id, 0, 100)
+        .await
+        .expect("events");
+    let agent_message_id = events
+        .events
+        .iter()
+        .find_map(|event| match &event.payload {
+            UnifiedEventPayload::UserMessage {
+                text,
+                agent_message_id,
+                ..
+            } if text == "undo me" => agent_message_id.clone(),
+            _ => None,
+        })
+        .expect("assigned agent message id");
+
+    manager
+        .control(
+            &CommandId::from("c-revert-3"),
+            &outcome.session_id,
+            &SessionControlAction::Revert {
+                up_to_node_seq: user_seq,
+                files: true,
+            },
+        )
+        .await
+        .expect("revert");
+
+    assert_eq!(mock.reverts(), vec![(agent_message_id, true)]);
+    wait_event_type(&manager, &outcome.session_id, EventType::SessionReverted).await;
+    let events = manager
+        .bus()
+        .db()
+        .session_events_after(&outcome.session_id, 0, 100)
+        .await
+        .expect("events");
+    assert!(events.events.iter().any(|event| matches!(
+        &event.payload,
+        UnifiedEventPayload::SessionReverted {
+            up_to_node_seq,
+            files: true,
+        } if *up_to_node_seq == user_seq
+    )));
+}
+
+#[tokio::test]
+async fn message_scope_fork_passes_the_next_agent_message_boundary() {
+    let (manager, mock, dir) = setup().await;
+    let (repo, source_id) = setup_repo_session(&manager, &dir).await;
+    mock.set_fork_scope(fxg_protocol::common::ForkScope::Message);
+    mock.set_assigns_message_ids(true);
+
+    // Re-create the source with message IDs by starting through the manager.
+    let source = manager
+        .ensure_session(&CommandId::from("c-fork-msg-1"), &repo, "mock", &[], None)
+        .await
+        .expect("source");
+    wait_idle(&manager, &source.session_id).await;
+    manager
+        .bus()
+        .record(
+            &source.session_id,
+            UnifiedEventPayload::SessionAgentBound {
+                agent_session_id: "agent-msg-source".to_owned(),
+            },
+        )
+        .await
+        .expect("bind source agent session");
+    manager
+        .send_prompt(
+            &CommandId::from("c-fork-msg-2"),
+            &source.session_id,
+            &PromptInput::text("first turn"),
+            ClientSource::Cli,
+        )
+        .await
+        .expect("first");
+    let first_seq = wait_user_message(&manager, &source.session_id, "first turn").await;
+    mock.emit(DriverEvent::Event(UnifiedEventPayload::StatusChanged {
+        status: SessionStatus::Idle,
+        error_message: None,
+    }));
+    wait_not_busy(&manager, &source.session_id).await;
+
+    manager
+        .send_prompt(
+            &CommandId::from("c-fork-msg-3"),
+            &source.session_id,
+            &PromptInput::text("second turn"),
+            ClientSource::Cli,
+        )
+        .await
+        .expect("second");
+    wait_user_message(&manager, &source.session_id, "second turn").await;
+    mock.emit(DriverEvent::Event(UnifiedEventPayload::StatusChanged {
+        status: SessionStatus::Idle,
+        error_message: None,
+    }));
+    wait_not_busy(&manager, &source.session_id).await;
+
+    let events = manager
+        .bus()
+        .db()
+        .session_events_after(&source.session_id, 0, 100)
+        .await
+        .expect("events");
+    let second_id = events
+        .events
+        .iter()
+        .find_map(|event| match &event.payload {
+            UnifiedEventPayload::UserMessage {
+                text,
+                agent_message_id,
+                ..
+            } if text == "second turn" => agent_message_id.clone(),
+            _ => None,
+        })
+        .expect("second message id");
+
+    let child_id = fxg_protocol::util::uuid_v7();
+    manager
+        .start_session(StartSessionParams {
+            command_id: &CommandId::from("c-fork-msg-4"),
+            session_id: &child_id,
+            local_path: &repo,
+            agent_id: "mock",
+            initial_prompt: None,
+            initial_config: &[],
+            mode: None,
+            extra_args: None,
+            fork_from_session_id: Some(&source.session_id),
+            fork_up_to_node_seq: Some(first_seq),
+        })
+        .await
+        .expect("message-scope fork");
+
+    let start = mock
+        .starts()
+        .into_iter()
+        .find(|start| start.session_id == child_id)
+        .expect("fork start");
+    assert_eq!(
+        start.fork_before_message_id.as_deref(),
+        Some(second_id.as_str())
+    );
+    let _ = source_id;
+}
+
+#[tokio::test]
+async fn native_compact_control_calls_the_driver() {
+    let (manager, mock, dir) = setup().await;
+    let outcome = manager
+        .ensure_session(
+            &CommandId::from("c-compact-1"),
+            dir.path(),
+            "mock",
+            &[],
+            None,
+        )
+        .await
+        .expect("ensure");
+    wait_idle(&manager, &outcome.session_id).await;
+    manager
+        .control(
+            &CommandId::from("c-compact-2"),
+            &outcome.session_id,
+            &SessionControlAction::Compact,
+        )
+        .await
+        .expect("compact");
+    assert_eq!(mock.compactions(), 1);
 }

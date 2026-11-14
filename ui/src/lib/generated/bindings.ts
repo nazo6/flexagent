@@ -1276,6 +1276,105 @@ export type NodesResponse = {
 	nodes: NodeSummary[],
 };
 
+/**  One OpenCode primary agent. */
+export type OpenCodeAgentSummary = {
+	/**  Agent ID */
+	id: string,
+	/**  Display name */
+	name: string,
+	/**  Description */
+	description: string | null,
+	/**  Agent mode (`primary` / `all`) */
+	mode: string,
+};
+
+/**  Native OpenCode integration snapshot (local node only). */
+export type OpenCodeManagementSnapshot = {
+	/**  Whether an OpenCode v2 service is reachable on this node. */
+	available: boolean,
+	/**  Reported OpenCode version. */
+	version: string | null,
+	/**  Primary agents (OpenCode `mode != subagent`). */
+	agents: OpenCodeAgentSummary[],
+	/**  Models with their selectable variants. */
+	models: OpenCodeModelSummary[],
+	/**  Providers / integrations known to OpenCode. */
+	providers: OpenCodeProviderSummary[],
+	/**  MCP server status. */
+	mcp_servers: OpenCodeMcpSummary[],
+	/**  Installed skills. */
+	skills: OpenCodeSkillSummary[],
+	/**  Available slash commands. */
+	commands: CommandInfo[],
+};
+
+/**  MCP management action. */
+export type OpenCodeMcpAction =
+/**  Connect the server */
+"connect" |
+/**  Disconnect the server */
+"disconnect";
+
+/**  MCP server definition used when adding a server from the UI. */
+export type OpenCodeMcpDefinition = {
+	/**  Transport type (`local` / `remote`) */
+	kind: string,
+	/**  Command and arguments for local servers */
+	command: string[],
+	/**  Environment variables for local servers */
+	environment: { [key in string]: string },
+	/**  Remote URL for remote servers */
+	url: string | null,
+	/**  Whether the server is enabled */
+	enabled: boolean,
+};
+
+/**  One MCP server reported by OpenCode. */
+export type OpenCodeMcpSummary = {
+	/**  Server name */
+	name: string,
+	/**  Connection status (`connected` / `disabled` / `failed` / ...) */
+	status: string,
+	/**  Error message when the connection failed */
+	error: string | null,
+};
+
+/**  One OpenCode model. */
+export type OpenCodeModelSummary = {
+	/**  Model ID */
+	id: string,
+	/**  Provider ID */
+	provider_id: string,
+	/**  Display name */
+	name: string,
+	/**  Whether the model is enabled */
+	enabled: boolean,
+	/**  Selectable reasoning / thinking variants */
+	variants: string[],
+};
+
+/**  One OpenCode provider / integration. */
+export type OpenCodeProviderSummary = {
+	/**  Provider ID */
+	id: string,
+	/**  Display name */
+	name: string,
+	/**  Activation state (`enabled` / `auto` / ...) */
+	activation: string | null,
+	/**  Provider package */
+	package: string | null,
+};
+
+/**  One installed OpenCode skill. */
+export type OpenCodeSkillSummary = {
+	/**  Skill ID */
+	id: string,
+	/**  Display name */
+	name: string,
+	/**  Description */
+	description: string | null,
+};
+
 /**
  *  Node ⇔ hub pairing state (`node.db` + the token file).
  *
@@ -1526,6 +1625,13 @@ export type PromptInput = {
 	text: string,
 	/**  Attached images / files */
 	attachments?: AttachmentMeta[],
+	/**
+	 *  Agent-side message ID assigned by the node for native drivers.
+	 *
+	 *  Clients never set this; the node forwards it to the driver so the
+	 *  recorded `UserMessage` can be targeted by revert / fork.
+	 */
+	agent_message_id?: string | null,
 };
 
 /**  Definition of an ephemeral VM / sandbox provisioner (`provisioners` in `hub.db`). */
@@ -1950,6 +2056,19 @@ value: ConfigOptionValue } |
 { action: "set_permission_policy";
 /**  New policy */
 policy: string } |
+/**
+ *  Revert the conversation to a previous event boundary.
+ *
+ *  Native drivers also support restoring the workspace files changed after
+ *  the boundary (`files = true`).
+ */
+{ action: "revert";
+/**  Last `node_seq` that remains visible */
+up_to_node_seq: number;
+/**  Whether to restore workspace files as well */
+files: boolean } |
+/**  Compact the agent context (summarize and replace the history). */
+{ action: "compact" } |
 /**  Interrupt the current turn */
 { action: "cancel" } |
 /**  End the session and return the agent process to the reuse pool */
@@ -2422,6 +2541,12 @@ export type UnifiedEventPayload =
 	attachments: AttachmentMeta[],
 	/**  Source (`cli` / `web` / `android` / `resume`) */
 	client_source: string,
+	/**
+	 *  Agent-side message ID when the driver can assign/observe one.
+	 *
+	 *  Native drivers use it to target a message (revert, fork boundary).
+	 */
+	agent_message_id?: string | null,
 } } |
 /**
  *  A reply message from the agent.
@@ -2627,6 +2752,8 @@ export type UnifiedEventPayload =
 	 *  existed).
 	 */
 	fork_scope?: ForkScope | null,
+	/**  Optional native-only session operations (empty for ACP agents). */
+	native_features?: string[],
 } } |
 /**  A progress log line of ephemeral VM provisioning (`stderr`). */
 { type: "provisioning_log"; data: {
@@ -2717,6 +2844,19 @@ export type UnifiedEventPayload =
 	status: CompactionStatus,
 	/**  Extra information such as the failure reason (optional) */
 	detail: string | null,
+} } |
+/**
+ *  The conversation was reverted to a previous boundary.
+ *
+ *  The event log is append-only: conversation events with a `node_seq` in
+ *  `(up_to_node_seq, this event's node_seq)` are hidden by clients. New
+ *  turns recorded after this event remain visible.
+ */
+{ type: "session_reverted"; data: {
+	/**  Last `node_seq` that remains visible (the revert boundary) */
+	up_to_node_seq: number,
+	/**  Whether the agent also restored workspace files */
+	files: boolean,
 } } |
 /**
  *  A change of the session status. The update source of the hub-side

@@ -5,6 +5,7 @@
 
 pub(super) mod admin;
 pub(super) mod agents;
+pub(super) mod opencode;
 pub(super) mod projects;
 pub(super) mod sessions;
 pub(super) mod settings;

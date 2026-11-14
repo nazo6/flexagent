@@ -10,7 +10,7 @@
 )]
 
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
@@ -95,6 +95,8 @@ pub(crate) struct MockStart {
     pub resume: Option<ResumeRequest>,
     /// Source ACP session ID for a native fork
     pub fork_from: Option<String>,
+    /// Native fork boundary (before this agent message)
+    pub fork_before_message_id: Option<String>,
     /// Initial configuration applied after `session/new`
     pub initial_config: Vec<InitialConfig>,
 }
@@ -125,6 +127,16 @@ struct MockAgentInner {
     start_replay_events: Mutex<Vec<UnifiedEventPayload>>,
     /// Whether `capture_history` requests fail because the agent replays nothing
     history_capture_fails: AtomicBool,
+    /// Whether the mock accepts prompts while a turn is running
+    steering: AtomicBool,
+    /// Whether the mock assigns agent-side message IDs
+    assigns_message_ids: AtomicBool,
+    /// Recorded reverts (`agent_message_id`, `files`)
+    reverts: Mutex<Vec<(String, bool)>>,
+    /// Number of compaction requests
+    compactions: AtomicUsize,
+    /// Fork scope emitted in the start capabilities
+    fork_scope: Mutex<Option<fxg_protocol::common::ForkScope>>,
 }
 
 impl MockAgent {
@@ -182,6 +194,33 @@ impl MockAgent {
             .start_replay_events
             .lock()
             .expect("start replay events") = events;
+    }
+
+    /// Sets whether prompts are accepted while a turn is running.
+    pub(crate) fn set_steering(&self, steering: bool) {
+        self.inner.steering.store(steering, Ordering::SeqCst);
+    }
+
+    /// Sets whether prompts receive agent-side message IDs.
+    pub(crate) fn set_assigns_message_ids(&self, assigns: bool) {
+        self.inner
+            .assigns_message_ids
+            .store(assigns, Ordering::SeqCst);
+    }
+
+    /// Recorded native reverts.
+    pub(crate) fn reverts(&self) -> Vec<(String, bool)> {
+        self.inner.reverts.lock().expect("reverts").clone()
+    }
+
+    /// Number of compaction requests.
+    pub(crate) fn compactions(&self) -> usize {
+        self.inner.compactions.load(Ordering::SeqCst)
+    }
+
+    /// Sets the fork scope advertised by the start capabilities.
+    pub(crate) fn set_fork_scope(&self, scope: fxg_protocol::common::ForkScope) {
+        *self.inner.fork_scope.lock().expect("fork scope") = Some(scope);
     }
 
     /// Makes `capture_history` fail as if `session/load` replayed no history.
@@ -300,6 +339,7 @@ impl AgentDriver for MockAgent {
             cwd: req.cwd,
             resume: req.resume,
             fork_from: req.fork_from,
+            fork_before_message_id: req.fork_before_message_id,
             initial_config: req.initial_config,
         });
         if let Some(agent_session_id) = bound_agent_session.clone() {
@@ -316,6 +356,7 @@ impl AgentDriver for MockAgent {
             .lock()
             .expect("start capabilities")
             .clone();
+        let fork_scope = *self.inner.fork_scope.lock().expect("fork scope");
         if let Some(capabilities) = emitted_capabilities.clone() {
             fxg_protocol::discard_with!(
                 event_tx.send(DriverEvent::Event(
@@ -324,10 +365,25 @@ impl AgentDriver for MockAgent {
                         available_modes: capabilities.available_modes,
                         available_commands: Vec::new(),
                         config_options: capabilities.config_options,
-                        fork_scope: None,
+                        fork_scope,
+                        native_features: Vec::new(),
                     }
                 )),
                 "send capabilities to the probe"
+            );
+        } else if fork_scope.is_some() {
+            fxg_protocol::discard_with!(
+                event_tx.send(DriverEvent::Event(
+                    UnifiedEventPayload::CapabilitiesUpdated {
+                        current_mode: None,
+                        available_modes: Vec::new(),
+                        available_commands: Vec::new(),
+                        config_options: Vec::new(),
+                        fork_scope,
+                        native_features: Vec::new(),
+                    }
+                )),
+                "send the fork scope capability"
             );
         }
         if capturing_history {
@@ -344,7 +400,7 @@ impl AgentDriver for MockAgent {
                 );
             }
         }
-        if emitted_capabilities.is_some() || capturing_history {
+        if emitted_capabilities.is_some() || capturing_history || fork_scope.is_some() {
             fxg_protocol::discard_with!(
                 event_tx.send(DriverEvent::Event(UnifiedEventPayload::StatusChanged {
                     status: SessionStatus::Idle,
@@ -363,6 +419,14 @@ impl AgentDriver for MockAgent {
 
 #[async_trait]
 impl ActiveSessionHandle for MockAgent {
+    fn supports_steering(&self) -> bool {
+        self.inner.steering.load(Ordering::SeqCst)
+    }
+
+    fn assigns_message_ids(&self) -> bool {
+        self.inner.assigns_message_ids.load(Ordering::SeqCst)
+    }
+
     async fn send_prompt(&self, input: fxg_protocol::common::PromptInput) -> anyhow::Result<()> {
         self.inner.prompts.lock().expect("prompts").push(input.text);
         Ok(())
@@ -405,6 +469,20 @@ impl ActiveSessionHandle for MockAgent {
         _key: String,
         _value: fxg_protocol::common::ConfigOptionValue,
     ) -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    async fn revert_to_message(&self, agent_message_id: &str, files: bool) -> anyhow::Result<()> {
+        self.inner
+            .reverts
+            .lock()
+            .expect("reverts")
+            .push((agent_message_id.to_owned(), files));
+        Ok(())
+    }
+
+    async fn compact_context(&self) -> anyhow::Result<()> {
+        self.inner.compactions.fetch_add(1, Ordering::SeqCst);
         Ok(())
     }
 

@@ -42,15 +42,15 @@ PC ブラウザ、ローカル直結 (`node.addr`、既定 `localhost:7860`)、�
 
 ### 3.1 URL ルーティング契約
 
-| パス                              | 用途                                                                        |
-| :-------------------------------- | :-------------------------------------------------------------------------- |
-| `/`                               | 新規セッション作成（統一コンポーザー）                                      |
-| `/projects`                       | 論理プロジェクト & 各ノードの Git Worktree 一覧・作成・削除                 |
-| `/search`                         | FTS5 全文検索（3 文字以上または LIKE フォールバック）                       |
-| `/sessions/[id]`                  | セッション詳細（チャット・ワークスペースドック）                            |
-| `/settings/hub/[tab]`             | Hub スコープ設定（`general`, `process`, `tokens`, `provisioners`, `audit`） |
-| `/settings/nodes/[node_id]/[tab]` | Node スコープ設定（`general`, `process`, `pairing`, `agents`, `audit`）     |
-| `/settings/browser/[tab]`         | Browser スコープ設定（`appearance`, `notifications`）                       |
+| パス                              | 用途                                                                                |
+| :-------------------------------- | :---------------------------------------------------------------------------------- |
+| `/`                               | 新規セッション作成（統一コンポーザー）                                              |
+| `/projects`                       | 論理プロジェクト & 各ノードの Git Worktree 一覧・作成・削除                         |
+| `/search`                         | FTS5 全文検索（3 文字以上または LIKE フォールバック）                               |
+| `/sessions/[id]`                  | セッション詳細（チャット・ワークスペースドック）                                    |
+| `/settings/hub/[tab]`             | Hub スコープ設定（`general`, `process`, `tokens`, `provisioners`, `audit`）         |
+| `/settings/nodes/[node_id]/[tab]` | Node スコープ設定（`general`, `process`, `pairing`, `agents`, `opencode`, `audit`） |
+| `/settings/browser/[tab]`         | Browser スコープ設定（`appearance`, `notifications`）                               |
 
 Settings 画面の中間パス（`/settings`, `/settings/hub`, `/settings/nodes`, `/settings/nodes/[node_id]`, `/settings/browser`）のみデフォルト先へ `replaceState: true` で補完リダイレクトし、タブ・スコープ切替は通常のブラウザ履歴に積む。利用不可なスコープやオフラインノードは画面内に案内を表示する。
 
@@ -67,6 +67,9 @@ Settings 画面の中間パス（`/settings`, `/settings/hub`, `/settings/nodes`
      - `provisioning` 状態時は「Provisioner Log」カードに `stderr` をリアルタイム表示。
      - `LiveStreamDelta` を逐次描画し、確定イベントで置換。思考プロセスはストリーミング中のみ自動展開し、確定後に自動折りたたみ（ユーザーの手動開閉を優先）。
      - 連続する思考・ツール実行・サブエージェント・端末出力・Plan は「作業ブロック」として 1 行に集約・折りたたみ（承認・入力要求・通知は折りたたまず常に表示）。
+   - `native_features` に `revert` があるエージェントでは、メッセージ境界の
+     「Revert to here」を表示する。revert は `SessionReverted` を境界として
+     区間をタイムラインから隠し、それ以降の新しいターンは表示する。
      - サブエージェントは `SubagentUpdated` と `subagent_id` から親タイムライン内にツリー・インラインカードとして再構築する。
      - 境界行のアクションから Copy / Fork from here を実行可能（Fork 先ではコピー履歴末尾に元セッションへのリンクを表示）。
    - **Workspace Dock（右レール / モバイルオーバーレイ）**:

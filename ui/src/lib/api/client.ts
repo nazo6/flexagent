@@ -23,6 +23,9 @@ import type {
   NodeTokenSummary,
   NodeTokensResponse,
   NodesResponse,
+  OpenCodeManagementSnapshot,
+  OpenCodeMcpAction,
+  OpenCodeMcpDefinition,
   ProjectLinkRequest,
   ProjectLinkResponse,
   ProjectPreview,
@@ -272,6 +275,45 @@ export class ApiClient {
   /** `POST /api/v1/diagnostics/incidents/:id/resolve`. */
   resolveIncident(id: number): Promise<void> {
     return this.#request("POST", `/api/v1/diagnostics/incidents/${id}/resolve`);
+  }
+
+  /** `GET /api/v1/nodes/:nodeId/opencode` (local node only). */
+  openCodeManagement(nodeId: string): Promise<OpenCodeManagementSnapshot> {
+    return this.#request("GET", `/api/v1/nodes/${encodeURIComponent(nodeId)}/opencode`);
+  }
+
+  /** `POST /api/v1/nodes/:nodeId/opencode/mcp/:name/connect|disconnect`. */
+  openCodeMcpAction(
+    nodeId: string,
+    name: string,
+    action: OpenCodeMcpAction,
+  ): Promise<OpenCodeManagementSnapshot> {
+    return this.#request(
+      "POST",
+      `/api/v1/nodes/${encodeURIComponent(nodeId)}/opencode/mcp/${encodeURIComponent(name)}/${action}`,
+      { body: {} },
+    );
+  }
+
+  /** `PUT /api/v1/nodes/:nodeId/opencode/mcp/:name`. */
+  upsertOpenCodeMcp(
+    nodeId: string,
+    name: string,
+    definition: OpenCodeMcpDefinition,
+  ): Promise<OpenCodeManagementSnapshot> {
+    return this.#request(
+      "PUT",
+      `/api/v1/nodes/${encodeURIComponent(nodeId)}/opencode/mcp/${encodeURIComponent(name)}`,
+      { body: definition },
+    );
+  }
+
+  /** `DELETE /api/v1/nodes/:nodeId/opencode/mcp/:name`. */
+  removeOpenCodeMcp(nodeId: string, name: string): Promise<OpenCodeManagementSnapshot> {
+    return this.#request(
+      "DELETE",
+      `/api/v1/nodes/${encodeURIComponent(nodeId)}/opencode/mcp/${encodeURIComponent(name)}`,
+    );
   }
 
   /** `GET /api/v1/nodes/:id/fs/browse` */

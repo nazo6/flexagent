@@ -76,6 +76,7 @@
       ...(isHub ? [] : [{ id: "process" as const, label: m.settings_tab_process() }]),
       { id: "pairing", label: m.settings_tab_pairing() },
       { id: "agents", label: m.settings_tab_agents() },
+      ...(isHub ? [] : [{ id: "opencode" as const, label: m.settings_tab_opencode() }]),
       ...(isHub ? [] : [{ id: "audit" as const, label: m.settings_tab_audit() }]),
     ],
     browser: [
