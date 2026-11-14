@@ -31,3 +31,4 @@
 | [2026-11-11-node-pairing-db-and-gui.md](./2026-11-11-node-pairing-db-and-gui.md)                                         | ノード側ペアリングの DB 所有化と GUI 化                       | `Implemented`           | `01` §7.3, `02` §1, `05` §2              |
 | [2026-11-13-data-directory-layout.md](./2026-11-13-data-directory-layout.md)                                             | データディレクトリ構成の刷新（OS 標準ルート + node/hub 分離） | `Implemented`           | `05` §2.1                                |
 | [2026-11-14-terminal-workspace-scope.md](./2026-11-14-terminal-workspace-scope.md)                                       | ターミナルの workspace スコープ化と寿命分離                   | `Partially Implemented` | `03` §3.3, `07` §4                       |
+| [2026-11-14-workspace-dock.md](./2026-11-14-workspace-dock.md)                                                           | 右ペインの Workspace Dock 化（タブ式ツールドック）            | `In Progress`           | `03`, `07`, `backlog.md`                 |
