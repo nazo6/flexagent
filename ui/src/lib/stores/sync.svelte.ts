@@ -1,3 +1,4 @@
+import { untrack } from "svelte";
 import { SvelteMap, SvelteSet } from "svelte/reactivity";
 import { ApiError } from "#lib/api/errors.ts";
 import type {
@@ -453,14 +454,22 @@ export class SyncStore {
 
   /** Open a session (updates the WS priority delivery hint). */
   setActiveSession(sessionId: string | null): void {
-    const previous = this.activeSessionId;
-    if (previous !== null && previous !== sessionId) this.markSessionRead(previous);
-    this.activeSessionId = sessionId;
-    if (sessionId !== null) this.markSessionRead(sessionId);
-    this.#send({
-      op: "subscribe",
-      since_cursor: this.#cursor,
-      focused_session_id: sessionId,
+    // This is called from the session page's effect, whose cleanup resets the
+    // active session. Tracking the reads below (the previous ID and the
+    // read-state bookkeeping) would make that effect depend on the state it
+    // writes: the cleanup would set the ID back to null and every pass would
+    // write a different value, looping until Svelte throws
+    // `effect_update_depth_exceeded`.
+    untrack(() => {
+      const previous = this.activeSessionId;
+      if (previous !== null && previous !== sessionId) this.markSessionRead(previous);
+      this.activeSessionId = sessionId;
+      if (sessionId !== null) this.markSessionRead(sessionId);
+      this.#send({
+        op: "subscribe",
+        since_cursor: this.#cursor,
+        focused_session_id: sessionId,
+      });
     });
   }
 
