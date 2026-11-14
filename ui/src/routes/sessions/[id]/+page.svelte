@@ -116,6 +116,18 @@
   let mainContainer = $state<HTMLDivElement | null>(null);
   let sidePanelWidth = $state(42); // default percentage
   let isResizing = $state(false);
+  /**
+   * The side panel has a desktop slot (split pane) and a mobile slot
+   * (full-screen). Only the slot matching the viewport is rendered, because
+   * mounting both started two terminals — and therefore two PTYs — at once.
+   * `lg` is 64rem in Tailwind.
+   */
+  const DESKTOP_LAYOUT_QUERY = "(min-width: 64rem)";
+  let desktopLayout = $state(
+    typeof window === "undefined" || typeof window.matchMedia !== "function"
+      ? true
+      : window.matchMedia(DESKTOP_LAYOUT_QUERY).matches,
+  );
 
   onMount(() => {
     if (typeof localStorage !== "undefined") {
@@ -127,6 +139,13 @@
         }
       }
     }
+
+    if (typeof window.matchMedia !== "function") return;
+    const query = window.matchMedia(DESKTOP_LAYOUT_QUERY);
+    desktopLayout = query.matches;
+    const onChange = (event: MediaQueryListEvent) => (desktopLayout = event.matches);
+    query.addEventListener("change", onChange);
+    return () => query.removeEventListener("change", onChange);
   });
 
   function handlePointerMove(e: PointerEvent) {
@@ -496,7 +515,7 @@
     </div>
 
     <!-- Desktop split panel -->
-    {#if activePanel !== null && session !== null}
+    {#if activePanel !== null && session !== null && desktopLayout}
       <button
         type="button"
         aria-label="Resize panel"
@@ -545,7 +564,7 @@
     {/if}
 
     <!-- Mobile full-screen panel -->
-    {#if activePanel !== null && session !== null}
+    {#if activePanel !== null && session !== null && !desktopLayout}
       <div class="flex flex-1 flex-col overflow-hidden lg:hidden">
         <SessionPanelHost
           panel={activePanel}

@@ -89,6 +89,8 @@ Settings 画面の中間パス（`/settings`, `/settings/hub`, `/settings/nodes`
 Web ターミナルは `ghostty-web`（WASM 版 `libghostty-vt` + Canvas 2D）を標準採用し、UI と実装を疎結合にするため `ui/src/lib/components/terminal/types.ts` の `ITerminalAdapter`（`mount` / `clear` / `write` / `onData` / `onResize` / `fit` / `focus` / `dispose`）を介して利用します。
 
 - ノードの ConPTY / Unix PTY と `/api/v1/pty/ws` で直結し、`TerminalView.svelte` が `$effect` で `sessionId` 変化を監視して再接続する。
+- **IME 入力の不変条件**: `ghostty-web` は入力用の隠し `textarea` ではなく `contenteditable` なラッパーにフォーカスし、ラッパーで `beforeinput` を打ち消す（`textarea` からバブリングする分も止まる）上に、変換中 (`isComposing` / `keyCode === 229`) のキーをすべて破棄する。このため `GhosttyWebAdapter` がフォーカスを `textarea` へ移し、`beforeinput` を `textarea` で止めて挿入を許可したうえで、挿入されたテキストを `input`（`compositionend` が先に来る場合の取りこぼしも）から 1 回だけ送る。変換中テキストはカーソルセルに自前で描画する。
+- **1 パネル 1 PTY**: サイドパネルはデスクトップ用（分割ペイン）とモバイル用（全画面）のスロットをビューポートで切り替えて**片方だけ**マウントする。両方をマウントすると `TerminalView` が 2 つ動き、1 回のオープンで PTY（＝シェル）が 2 つ起動する。
 - モバイル向けに仮想キーバー（`Ctrl`, `Esc`, `Tab`, 矢印キー等）を提供。
 - ノード側で `allow_remote_pty = false`（ハブ経由時）の場合は、ローカル端末（`localhost:7860` / CLI）からの利用を案内するフォールバック表示を行う。
 
