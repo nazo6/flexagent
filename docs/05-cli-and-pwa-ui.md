@@ -48,16 +48,16 @@ CLI のコマンド・引数の正は `fxg --help` / `fxg <noun> --help` と
 所有者の DB に型付き構造で保存し、`node.toml` / `hub.toml` にはプロセス起動時に
 必要な値だけを残します。
 
-| 設定                                                            | 所有者 / 保存場所                                                | 変更手段                                          |
-| :-------------------------------------------------------------- | :--------------------------------------------------------------- | :------------------------------------------------ |
-| 待受アドレス・ログ・`allowed_hosts` / `allowed_origins`         | `node.toml` / `hub.toml` / `FXG_*` / CLI                         | ファイル編集 + 再起動（Web UI は読み取り専用）    |
-| ハブ接続先・ペアリングトークン                                  | `node.db` (`node_pairing`) + `<data>/node/node_token` (`0600`)   | Client API / Web UI（ハブは対象ノードへプロキシ） |
-| `node.name` / `allow_remote_pty` / `project_scan_dirs` / `tray` | `node.db` (`node_settings`)                                      | Client API（ハブは対象ノードへプロキシ）          |
-| エージェント既定値・エイリアス・カスタム定義                    | `node.db` (`agent_settings` / `agent_aliases` / `custom_agents`) | Client API                                        |
-| 明示的な `project_key`                                          | `node.db` (`project_path_links`)                                 | Client API / Web UI                               |
-| VAPID subject・Provisioner                                      | `hub.db`                                                         | ハブ Web UI                                       |
-| 秘密の値                                                        | `<data>/{node,hub}/secrets/<id>` (`0600`)                        | Secret API（書き込み専用）                        |
-| 言語・テーマ・ピン留め                                          | ブラウザ `localStorage`                                          | Web UI                                            |
+| 設定                                                                              | 所有者 / 保存場所                                                | 変更手段                                          |
+| :-------------------------------------------------------------------------------- | :--------------------------------------------------------------- | :------------------------------------------------ |
+| 待受アドレス・ログ・`allowed_hosts` / `allowed_origins`                           | `node.toml` / `hub.toml` / `FXG_*` / CLI                         | ファイル編集 + 再起動（Web UI は読み取り専用）    |
+| ハブ接続先・ペアリングトークン                                                    | `node.db` (`node_pairing`) + `<data>/node/node_token` (`0600`)   | Client API / Web UI（ハブは対象ノードへプロキシ） |
+| `node.name` / `allow_remote_pty` / `project_scan_dirs` / `tray` / `vapid_subject` | `node.db` (`node_settings`)                                      | Client API（ハブは対象ノードへプロキシ）          |
+| エージェント既定値・エイリアス・カスタム定義                                      | `node.db` (`agent_settings` / `agent_aliases` / `custom_agents`) | Client API                                        |
+| 明示的な `project_key`                                                            | `node.db` (`project_path_links`)                                 | Client API / Web UI                               |
+| VAPID subject（ハブ用）・Provisioner                                              | `hub.db`                                                         | ハブ Web UI                                       |
+| 秘密の値                                                                          | `<data>/{node,hub}/secrets/<id>` (`0600`)                        | Secret API（書き込み専用）                        |
+| 言語・テーマ・ピン留め                                                            | ブラウザ `localStorage`                                          | Web UI                                            |
 
 ### 2.1 データディレクトリ構成
 
@@ -87,6 +87,7 @@ Linux では XDG にログ用のクラスがないため、`<logs>` は `<state>
 │   ├── node.db                     # ノード所有の設定 + セッション正データ
 │   ├── auth_token                  # ノード専用の Web アクセストークン (0600)
 │   ├── node_token                  # ハブ接続用のペアリングトークン (0600)
+│   ├── vapid.json                  # ノード単体運用向け Web Push VAPID 秘密鍵 (0600)
 │   ├── secrets/<secret-id>         # ノード所有の秘密値 (0600)
 │   └── worktrees/<project>/<branch>/  # 固定の Worktree 作成先
 └── hub/
@@ -116,7 +117,7 @@ Linux では XDG にログ用のクラスがないため、`<logs>` は `<state>
 | `<data>/node/node_token`     | ノードが hub に接続するための **ノードペアリングトークン**                     | `fxg hub pairing-token issue` → Web UI / `fxg node pair`     |
 | `<data>/<role>/<role>.db`    | 実行時設定、セッション、監査ログ、プロジェクト投影                             | Client API / Web UI                                          |
 | `<state>/<role>/<role>.addr` | 起動中プロセスの実際の待受アドレス                                             | 実行時のみ。削除しても再生成される                           |
-| `<data>/hub/vapid.json`      | Web Push の VAPID 鍵ペア                                                       | Hub が生成                                                   |
+| `<data>/<role>/vapid.json`   | Web Push の VAPID 鍵ペア                                                       | 各ロールが初回起動時に生成                                   |
 | `<data>/<role>/secrets/<id>` | エージェント・Git などの秘密値（書き込み専用、`0600`）                         | Secret API                                                   |
 | `<data>/node/worktrees/`     | fxg が作成した Git Worktree                                                    | `fxg session new -w` / `fork -w`                             |
 | `<cache>/node/`              | ACP Registry のキャッシュ                                                      | 自動                                                         |
@@ -174,9 +175,9 @@ format = "text"
 no_color = false
 ```
 
-`node.name` / `allow_remote_pty` / `project_scan_dirs` / `tray`、`[agents]`、
-`[provisioners]`、`vapid_subject`、ハブ接続先は `node.db` / `hub.db` で
-管理します。`node.toml` / `hub.toml` は起動設定のみを持ち、未知のキーを拒否するため、
+`node.name` / `allow_remote_pty` / `project_scan_dirs` / `tray` / `vapid_subject`、
+`[agents]`、ハブ接続先は `node.db` で、`[provisioners]` とハブ用 `vapid_subject` は
+`hub.db` で管理します。`node.toml` / `hub.toml` は起動設定のみを持ち、未知のキーを拒否するため、
 タイポが残っている場合は起動時に解析エラーになります
 （[`changelog/2026-11-11-strict-config-schema.md`](changelog/2026-11-11-strict-config-schema.md)）。
 Git 認証は Provisioner の `env_secrets` で注入します。Web UI の設定カタログは
@@ -434,7 +435,7 @@ Android スマートフォン（ホーム画面追加PWA）のすべてを単一
      ナビゲーションはネットワーク優先 (オフライン時のみ `index.html`
      へフォールバック) で、
      `/api/**` は常にネットワークへ素通しします。
-  2. **Web Push 受信 & アクションボタン**: ハブからVAPID Web
+  2. **Web Push 受信 & アクションボタン**: 接続先（ハブまたは単独ノード）からVAPID Web
      Pushを受信した際、Android通知バナーに以下を表示します：
      - タイトル: `[flexagent] Approval request (<node>) — <session title>`
      - 本文: `<tool name>: <summary>`
@@ -448,10 +449,12 @@ Android スマートフォン（ホーム画面追加PWA）のすべてを単一
 
      Push ペイロードは `PushNotificationPayload`
      (`title` / `body` / `session_id` / `request_id` / `tag` /
-     `allow_option_id` / `reject_option_id`) で、VAPID 鍵はハブが
-     `<data>/hub/vapid.json` に自動生成・永続化します (暗号化は RFC 8291
+     `allow_option_id` / `reject_option_id`) で、VAPID 鍵は各ロール（ハブ / ノード）が
+     `<data>/<role>/vapid.json` に自動生成・永続化します (暗号化は RFC 8291
      aes128gcm / 署名は RFC 8292)。購読は通知許可→`pushManager.subscribe`→
-     `POST /api/v1/push/subscribe` の順で確立し、失効した購読 (Push
+     `POST /api/v1/push/subscribe` の順で確立し、接続先ごとの `push_subscriptions`
+     へ独立して登録されます（ノードがハブへペアリングされた場合も、ノード自身の
+     `push_subscriptions` への配信は独立して継続します）。失効した購読 (Push
      サービスの `404` / `410`) は送信時に自動削除されます。
 
   3. **質問 (elicitation) の通知**: エージェントが質問した場合も
@@ -460,11 +463,11 @@ Android スマートフォン（ホーム画面追加PWA）のすべてを単一
      ボタンは付けず、タップでアプリのセッションを開きます
      (`allow_option_id` / `reject_option_id` は `null`)。
 
-  4. **ターン完了の通知**: ハブが `Running` を観測したセッションが `Idle` /
+  4. **ターン完了の通知**: 接続先（ハブまたはノード）が `Running` を観測したセッションが `Idle` /
      `Error` になった場合に `[flexagent] Turn finished (<node>) — <session title>`
      を送ります。`Running` を観測していない `Idle`（セッション作成直後や重複イベント）
-     と resync の履歴再生では送りません。`Running` の追跡はハブ状態で行い、
-     ハブ再起動時は `hub.db` の実行中セッションから復元します。アクションボタンは
+     と resync の履歴再生では送りません。`Running` の追跡はハブ・ノードそれぞれの
+     インメモリ状態で行い、起動時は自ストア（`hub.db` / `node.db`）の実行中セッションから復元します。アクションボタンは
      無く、タップでセッションを開きます。
 
 ### 3.4 統合 Web ターミナルと抽象化設計 (`ITerminalAdapter`)
