@@ -20,12 +20,16 @@
 
   let userToggled = $state(false);
   let userIsOpen = $state(false);
-  const isOpen = $derived(userToggled ? userIsOpen : item.streaming);
+  // A derived boolean (rather than reading `item.streaming` in the effect)
+  // keeps the ticker from restarting whenever a delta replaces the item object.
+  const streaming = $derived(item.streaming);
+  const isOpen = $derived(userToggled ? userIsOpen : streaming);
 
   /** Ticks while streaming so the elapsed time in the summary stays current. */
   let now = $state(Date.now());
   $effect(() => {
-    if (!item.streaming) return;
+    if (!streaming) return;
+    now = Date.now();
     const timer = setInterval(() => (now = Date.now()), 500);
     return () => clearInterval(timer);
   });
@@ -33,7 +37,7 @@
   /** Elapsed reasoning time (null when replayed from history without live deltas). */
   const seconds = $derived.by(() => {
     if (item.startedAt === null) return null;
-    const end = item.endedAt ?? (item.streaming ? now : item.startedAt);
+    const end = item.endedAt ?? (streaming ? now : item.startedAt);
     return Math.max(0, Math.round((end - item.startedAt) / 1000));
   });
   const duration = $derived.by(() => {
@@ -63,7 +67,6 @@
   // Keep the reasoning body pinned to its own bottom while it streams in.
   $effect(() => {
     const element = body;
-    const streaming = item.streaming;
     const text = item.text;
     if (element === null || !streaming || text === "") return;
     element.scrollTop = element.scrollHeight;
@@ -89,12 +92,12 @@
     {/if}
     <BrainIcon class="size-3.5 shrink-0" />
     <span class="shrink-0 font-medium">
-      {item.streaming ? m.chat_thought_streaming() : m.chat_thought_process()}
+      {streaming ? m.chat_thought_streaming() : m.chat_thought_process()}
     </span>
     {#if duration !== null}
       <span class="text-muted-foreground/70 shrink-0 text-[11px] tabular-nums">{duration}</span>
     {/if}
-    {#if item.streaming}
+    {#if streaming}
       <span class="text-signal shrink-0 animate-pulse">…</span>
     {:else if preview !== null}
       <span class="text-muted-foreground/60 min-w-0 flex-1 truncate text-left">{preview}</span>
@@ -106,7 +109,7 @@
       bind:this={body}
       class="text-muted-foreground border-line mt-1.5 max-h-64 overflow-y-auto rounded-md border p-2.5 text-[13px] leading-relaxed"
     >
-      <MarkdownText text={item.text} streaming={item.streaming} />
+      <MarkdownText text={item.text} {streaming} />
     </div>
   {/if}
 </div>

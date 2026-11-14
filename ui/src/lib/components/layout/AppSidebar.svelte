@@ -30,6 +30,7 @@
   import FolderIcon from "@lucide/svelte/icons/folder";
   import GitBranchIcon from "@lucide/svelte/icons/git-branch";
   import HistoryIcon from "@lucide/svelte/icons/history";
+  import LoaderCircleIcon from "@lucide/svelte/icons/loader-circle";
   import PinIcon from "@lucide/svelte/icons/pin";
   import PlusIcon from "@lucide/svelte/icons/plus";
   import SearchIcon from "@lucide/svelte/icons/search";
@@ -354,7 +355,7 @@
                 <a
                   href={`/?project=${encodeURIComponent(group.projectId)}`}
                   onclick={handleLinkClick}
-                  class="opacity-0 group-hover/proj:opacity-100 hover:bg-accent text-muted-foreground hover:text-foreground rounded p-0.5 transition-opacity"
+                  class="hover:bg-accent text-muted-foreground/60 hover:text-foreground rounded p-0.5 transition-colors"
                   title={m.shell_start_new_session_in_project({ project: group.projectName })}
                 >
                   <PlusIcon class="size-3" />
@@ -464,6 +465,18 @@
               <!-- Node status dot -->
               <span class={cn("size-1.5 shrink-0 rounded-full", nodeAvail.dotColorClass)}></span>
 
+              <!-- The agent is answering / working right now -->
+              {#if session.status === "running"}
+                <span
+                  class="text-signal shrink-0"
+                  role="img"
+                  title={m.status_running()}
+                  aria-label={m.status_running()}
+                >
+                  <LoaderCircleIcon class="size-3.5 animate-spin" aria-hidden="true" />
+                </span>
+              {/if}
+
               {#if isAttention}
                 {#if isWaiting}
                   <TriangleAlertIcon class="text-warn size-3.5 shrink-0" aria-hidden="true" />
@@ -486,32 +499,49 @@
                 </span>
               {/if}
 
-              <div class="flex shrink-0 items-center gap-1.5 text-muted-foreground text-[11px]">
-                <!-- Archive / delete menu -->
-                <SessionActionsMenu
-                  {session}
-                  align="end"
-                  buttonClass="opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
-                />
-
-                <!-- Pin button -->
-                <button
-                  type="button"
-                  class={cn(
-                    "hover:text-foreground p-0.5 transition-opacity",
-                    isPinned ? "opacity-100 text-signal" : "opacity-0 group-hover:opacity-100",
-                  )}
-                  title={isPinned ? m.shell_unpin() : m.shell_pin()}
-                  onclick={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    pinned.toggle(session.session_id);
-                  }}
+              <div class="flex shrink-0 items-center text-muted-foreground text-[11px]">
+                <!-- Resting metadata. Hidden while the actions are open so the
+                     two clusters never take horizontal space at the same time. -->
+                <span
+                  class="flex items-center gap-1.5 group-hover:hidden group-focus-within:hidden"
                 >
-                  <PinIcon class="size-3" fill={isPinned ? "currentColor" : "none"} />
-                </button>
+                  {#if isPinned}
+                    <PinIcon
+                      class="text-signal size-3 shrink-0"
+                      fill="currentColor"
+                      aria-hidden="true"
+                    />
+                  {/if}
+                  <span class="tabular-nums">
+                    {formatRelativeTimeCompact(session.updated_at)}
+                  </span>
+                </span>
 
-                <span>{formatRelativeTimeCompact(session.updated_at)}</span>
+                <!-- Actions. Zero-width until hover/focus: they stay focusable
+                     from the keyboard but do not truncate the title at rest. -->
+                <div
+                  class="flex w-0 shrink-0 items-center gap-1 overflow-hidden opacity-0 transition-opacity group-hover:ml-1.5 group-hover:w-auto group-hover:opacity-100 group-focus-within:ml-1.5 group-focus-within:w-auto group-focus-within:opacity-100"
+                >
+                  <!-- Archive / delete menu -->
+                  <SessionActionsMenu {session} align="end" iconClass="size-3.5" />
+
+                  <!-- Pin button -->
+                  <button
+                    type="button"
+                    class={cn(
+                      "hover:text-foreground p-0.5 transition-colors",
+                      isPinned && "text-signal",
+                    )}
+                    title={isPinned ? m.shell_unpin() : m.shell_pin()}
+                    onclick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      pinned.toggle(session.session_id);
+                    }}
+                  >
+                    <PinIcon class="size-3" fill={isPinned ? "currentColor" : "none"} />
+                  </button>
+                </div>
               </div>
             </a>
           {/snippet}

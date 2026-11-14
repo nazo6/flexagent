@@ -53,7 +53,7 @@ Settings 画面の中間パス（`/settings`, `/settings/hub`, `/settings/nodes`
 ### 3.2 主要画面仕様
 
 1. **サイドバー & 注意喚起（Needs attention）**:
-   - 専用の承認 Inbox 画面は持たず、`SessionSummary.status`（`waiting_permission` / `waiting_input` / `error`）を単一ソースとして、サイドバー上部の「Needs attention」・プロジェクト別件数バッジ・各セッション行のステータスアイコン＆ピルで強調表示する。
+   - 専用の承認 Inbox 画面は持たず、`SessionSummary.status`（`waiting_permission` / `waiting_input` / `error`）を単一ソースとして、サイドバー上部の「Needs attention」・プロジェクト別件数バッジ・各セッション行のステータスアイコン＆ピルで強調表示する。`running` は signal 色の回転インジケータで実行中を常時示し、`idle` とは区別する。
    - 承認・質問への回答は該当セッションのチャット内インラインカードで行う。
    - デスクトップでサイドバーを閉じても、左端に全高のレールは残さない。セッション詳細ではヘッダー左の再表示ボタン、それ以外の画面ではメイン領域左上に重ねた再表示ボタン（未対応件数バッジ付き）が担い、同時に開閉ボタンが 2 つ表示されることはない。
 2. **セッション詳細（チャット & ワークスペース）**:
