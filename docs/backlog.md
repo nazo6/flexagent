@@ -41,7 +41,8 @@
 
 - [ ] プロジェクト画面から workspace のターミナルを開く導線と、リロード後の自動復元（`GET /api/v1/terminals` を UI で利用する）
 - [ ] worktree 削除時に、そのパスの workspace ターミナルを連動して kill する
-- [ ] 複数ターミナル（タブ）、共有中バッジ、read-only モード、複数クライアントの resize 調停
+- [x] 複数ターミナル（タブ、workspace + `terminal_id` で独立シェル）
+- [ ] 共有中バッジ、read-only モード、複数クライアントの resize 調停
 - [ ] 無操作 TTL とリングバッファ上限を `node_settings` で変更可能にする（現状は定数）
 - [ ] 終了済みターミナルの直近 1 世代（exit code + scrollback）を表示する
 - [ ] UI から明示的にシェルを起動し直す「New shell」操作（プロトコルは `open { new: true }` に対応済み）
