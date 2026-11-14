@@ -1362,6 +1362,7 @@ mod tests {
             node_id: daemon.state().node_id().into(),
             path: path.clone(),
             session_id: None,
+            terminal_id: Some("tab-1".to_owned()),
             cols: 80,
             rows: 24,
             new: false,
@@ -1393,6 +1394,64 @@ mod tests {
         assert_eq!(daemon.state().pty().list()[0].attached, 1);
         daemon.state().pty_detach(&first.pty_id).await;
         assert_eq!(daemon.state().pty().list()[0].attached, 0);
+
+        daemon.shutdown();
+        daemon.wait().await;
+    }
+
+    #[tokio::test]
+    async fn different_terminal_ids_open_separate_shells() {
+        use fxg_hub::api::ClientApiBackend as _;
+
+        let (daemon, dir) = start_test_daemon().await;
+        let workdir = dir.path().join("workspace");
+        std::fs::create_dir_all(&workdir).expect("mkdir");
+        daemon
+            .state()
+            .resolve_and_register_project(&workdir)
+            .await
+            .expect("register project");
+        let params = fxg_hub::api::PtyOpenParams {
+            pty_id: "pty-a".to_owned(),
+            node_id: daemon.state().node_id().into(),
+            path: workdir.to_string_lossy().into_owned(),
+            session_id: None,
+            terminal_id: Some("tab-1".to_owned()),
+            cols: 80,
+            rows: 24,
+            new: false,
+            remote: false,
+        };
+
+        let first = daemon
+            .state()
+            .pty_open(params.clone())
+            .await
+            .expect("open first");
+        let second = daemon
+            .state()
+            .pty_open(fxg_hub::api::PtyOpenParams {
+                pty_id: "pty-b".to_owned(),
+                terminal_id: Some("tab-2".to_owned()),
+                ..params.clone()
+            })
+            .await
+            .expect("open second");
+        assert!(!first.attached);
+        assert!(!second.attached);
+        assert_ne!(first.pty_id, second.pty_id);
+        assert_eq!(daemon.state().pty().list().len(), 2);
+
+        let reopened = daemon
+            .state()
+            .pty_open(fxg_hub::api::PtyOpenParams {
+                pty_id: "pty-c".to_owned(),
+                ..params
+            })
+            .await
+            .expect("reopen first");
+        assert!(reopened.attached);
+        assert_eq!(reopened.pty_id, first.pty_id);
 
         daemon.shutdown();
         daemon.wait().await;
@@ -1436,6 +1495,7 @@ mod tests {
             node_id: daemon.state().node_id().into(),
             path: workdir.to_string_lossy().into_owned(),
             session_id: None,
+            terminal_id: Some("tab-1".to_owned()),
             cols: 80,
             rows: 24,
             new: false,

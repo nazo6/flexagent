@@ -156,8 +156,9 @@ JSON Lines）は、トランスポートだけが異なり、同じ `NodeToHubMs
   `ResyncRequest` 由来の再送は `EventBatchPush.resync = true` とし、Web Push を
   抑止する。
 - **Web ターミナル**: `PtySpawn` / `PtyOpened` / `PtyOpenFailed`、`PtyAttach` /
-  `PtyDetach`、`PtyInput` / `PtyResize` / `PtyKill`。`PtySpawn` は冪等で、
-  既存の workspace ターミナルがあれば `PtyOpened.attached = true` を返す。
+  `PtyDetach`、`PtyInput` / `PtyResize` / `PtyKill`。`PtySpawn` は workspace と
+  `terminal_id` の組に対して冪等で、既存のターミナルがあれば
+  `PtyOpened.attached = true` を返す。
 - **セッションコマンド**: `StartSession`、`SendPrompt`、`RespondPermission`、
   `RespondElicitation`、`ControlSession`。結果は `CommandResult`。
 - **汎用 Node RPC**: `NodeRpc` / `NodeRpcResult`。Git、Worktree、プロジェクト、
@@ -327,16 +328,20 @@ prune します。`sessions` は最大 1000 件で、超過時は
 
 ### 3.3 Client PTY WebSocket (`/api/v1/pty/ws`)
 
-`ghostty-web` などのターミナルを、workspace（`(node_id, path)`）の PTY に接続します。
+`ghostty-web` などのターミナルを、workspace（`(node_id, path)`）と
+クライアント側の terminal ID の組で識別する PTY に接続します。
 
 - クライアント: `open` / `attach` / `input` / `resize` / `kill`。
 - サーバー: `opened` / `output` / `exit` / `error`。
-- `open` は冪等です。同じ workspace に既存のシェルがあれば attach し、`opened`
-  の `attached = true` で返します。パスはノードに登録済みのプロジェクト binding
-  （または既存セッションの `local_path`）と**完全一致**する必要があり、
-  サブディレクトリは開けません。
+- `open` は冪等です。同じ workspace + `terminal_id` に既存のシェルがあれば
+  attach し、`opened` の `attached = true` で返します。`terminal_id` が違えば
+  同じ workspace でも別のシェルになります（`terminal_id` 省略時は従来の
+  単一ターミナル）。パスはノードに登録済みのプロジェクト binding（または
+  既存セッションの `local_path`）と**完全一致**する必要があり、サブディレクトリは
+  開けません。
 - socket を閉じても PTY は kill されません（detach）。無操作 TTL（既定 30 分）の
-  経過、明示 `kill`、プロセス終了、キルスイッチでのみ終了します。
+  経過、明示 `kill`、プロセス終了、キルスイッチでのみ終了します。UI がタブを
+  閉じたときは `kill` を送ります。
 - `output` はシーケンス番号を持ち、attach 直後に保持済み出力（リングバッファ）が
   先に届きます。購読が遅れて取りこぼした分はこの snapshot で補われます。
 - ノード設定 `allow_remote_pty = false` のとき、ハブ経由の `open` は

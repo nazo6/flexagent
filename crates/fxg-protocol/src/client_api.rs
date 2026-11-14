@@ -1118,10 +1118,11 @@ pub enum HubWsMessage {
 ///
 /// A bidirectional stream channel that connects the terminal of the Web UI / mobile
 /// PWA directly to the ConPTY / Unix PTY on the node. Terminals are scoped to a
-/// workspace (`node_id` + `path`): opening the same workspace again attaches to
-/// the running shell instead of starting another one. When the node setting
-/// `allow_remote_pty = false` is in effect, `open` from remote (through the
-/// hub) is rejected.
+/// workspace (`node_id` + `path`) and a client-side terminal ID: opening the
+/// same combination again attaches to the running shell instead of starting
+/// another one, while different terminal IDs are separate shells. When the node
+/// setting `allow_remote_pty = false` is in effect, `open` from remote (through
+/// the hub) is rejected.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[serde(tag = "op", rename_all = "snake_case")]
 #[specta(collect)]
@@ -1134,6 +1135,9 @@ pub enum PtyClientMessage {
         path: String,
         /// Session that opened the terminal (origin, not ownership)
         session_id: Option<SessionId>,
+        /// Terminal tab identity inside the workspace (`None` = legacy single terminal)
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        terminal_id: Option<String>,
         /// Number of columns
         cols: u16,
         /// Number of rows
@@ -1527,6 +1531,7 @@ mod tests {
             node_id: "home-win".into(),
             path: "/home/u/ghq/github.com/nazo6/flexagent".into(),
             session_id: Some("s1".into()),
+            terminal_id: Some("tab-1".into()),
             cols: 80,
             rows: 24,
             new: false,

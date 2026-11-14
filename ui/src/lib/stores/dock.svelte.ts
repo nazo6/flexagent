@@ -20,6 +20,14 @@ export interface DockFileTab {
   scope: DockDiffScope;
 }
 
+/** One shell tab inside the Terminal tool. */
+export interface DockTerminalTab {
+  /** Stable ID sent to the node; identifies the shell inside the workspace. */
+  id: string;
+  /** Creation ordinal, shown as the tab label. */
+  seq: number;
+}
+
 export interface DockWorkspace {
   /** Fixed outer tool currently shown (`null` = the dock is closed). */
   activeTool: DockToolId | null;
@@ -29,6 +37,11 @@ export interface DockWorkspace {
   /** Open file previews inside Files. */
   files: DockFileTab[];
   activeFile: string | null;
+  /** Shell tabs inside Terminal. */
+  terminals: DockTerminalTab[];
+  activeTerminal: string | null;
+  /** Next terminal ordinal (labels stay stable when a tab closes). */
+  terminalSeq: number;
   updatedAt: number;
 }
 
@@ -43,6 +56,8 @@ const STORAGE_VERSION = 2;
 /** Keep the most recently used workspaces; each one carries a few file previews. */
 const MAX_WORKSPACES = 12;
 const MAX_FILES = 8;
+export const MAX_TERMINALS = 8;
+const FIRST_TERMINAL_ID = "terminal-1";
 export const MIN_DOCK_WIDTH = 20;
 export const MAX_DOCK_WIDTH = 75;
 const DEFAULT_WIDTH = 42;
@@ -53,12 +68,20 @@ interface PersistedFile {
   scope: DockDiffScope;
 }
 
+interface PersistedTerminal {
+  id: string;
+  seq: number;
+}
+
 interface PersistedWorkspace {
   activeTool: DockToolId | null;
   collapsed: boolean;
   treeVisible: boolean;
   files: PersistedFile[];
   activeFile: string | null;
+  terminals: PersistedTerminal[];
+  activeTerminal: string | null;
+  terminalSeq: number;
   updatedAt: number;
 }
 
@@ -93,6 +116,9 @@ function emptyWorkspace(): DockWorkspace {
     treeVisible: true,
     files: [],
     activeFile: null,
+    terminals: [{ id: FIRST_TERMINAL_ID, seq: 1 }],
+    activeTerminal: FIRST_TERMINAL_ID,
+    terminalSeq: 2,
     updatedAt: Date.now(),
   };
 }
@@ -101,11 +127,50 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+/** Restores shell tabs; a v2 entry without the field keeps one default tab. */
+function restoreTerminals(value: Record<string, unknown>): {
+  terminals: DockTerminalTab[];
+  activeTerminal: string | null;
+  terminalSeq: number;
+} {
+  const terminals: DockTerminalTab[] = [];
+  if (Array.isArray(value.terminals)) {
+    for (const raw of value.terminals) {
+      if (!isRecord(raw) || typeof raw.id !== "string" || raw.id.length === 0) continue;
+      if (terminals.some((terminal) => terminal.id === raw.id)) continue;
+      const seq =
+        typeof raw.seq === "number" && Number.isInteger(raw.seq) && raw.seq > 0 ? raw.seq : 1;
+      terminals.push({ id: raw.id, seq });
+      if (terminals.length >= MAX_TERMINALS) break;
+    }
+  } else if (value.terminals === undefined) {
+    terminals.push({ id: FIRST_TERMINAL_ID, seq: 1 });
+  }
+
+  const maxSeq = terminals.reduce((max, terminal) => Math.max(max, terminal.seq), 0);
+  const storedSeq =
+    typeof value.terminalSeq === "number" && Number.isInteger(value.terminalSeq)
+      ? Math.max(1, value.terminalSeq)
+      : 1;
+  const activeTerminal =
+    typeof value.activeTerminal === "string" &&
+    terminals.some((terminal) => terminal.id === value.activeTerminal)
+      ? value.activeTerminal
+      : (terminals[0]?.id ?? null);
+
+  return {
+    terminals,
+    activeTerminal,
+    terminalSeq: Math.max(maxSeq + 1, storedSeq),
+  };
+}
+
 /** Restores and validates one persisted workspace; unknown tools are dropped. */
 function restoreWorkspace(value: unknown): DockWorkspace | null {
   if (!isRecord(value)) return null;
 
   const activeTool = isDockToolId(value.activeTool) ? value.activeTool : null;
+  const { terminals, activeTerminal, terminalSeq } = restoreTerminals(value);
   const files: DockFileTab[] = [];
   if (Array.isArray(value.files)) {
     for (const raw of value.files) {
@@ -133,6 +198,9 @@ function restoreWorkspace(value: unknown): DockWorkspace | null {
     treeVisible: value.treeVisible !== false,
     files,
     activeFile,
+    terminals,
+    activeTerminal,
+    terminalSeq,
     updatedAt,
   };
 }
@@ -205,6 +273,12 @@ function serialize(workspaces: Record<string, DockWorkspace>, width: number): st
             scope: file.scope,
           })),
           activeFile: workspace.activeFile,
+          terminals: workspace.terminals.map((terminal) => ({
+            id: terminal.id,
+            seq: terminal.seq,
+          })),
+          activeTerminal: workspace.activeTerminal,
+          terminalSeq: workspace.terminalSeq,
           updatedAt: workspace.updatedAt,
         } satisfies PersistedWorkspace,
       ]),
@@ -273,6 +347,20 @@ export class WorkspaceDockStore {
     return workspace.files.find((file) => file.path === workspace.activeFile) ?? null;
   }
 
+  get terminals(): DockTerminalTab[] {
+    return this.workspace?.terminals ?? [];
+  }
+
+  get activeTerminal(): string | null {
+    return this.workspace?.activeTerminal ?? null;
+  }
+
+  get activeTerminalTab(): DockTerminalTab | null {
+    const workspace = this.workspace;
+    if (workspace === null || workspace.activeTerminal === null) return null;
+    return workspace.terminals.find((terminal) => terminal.id === workspace.activeTerminal) ?? null;
+  }
+
   /** Points the dock at a session. Only a workspace change swaps the state. */
   setContext(context: DockContext | null): void {
     this.context = context;
@@ -311,6 +399,46 @@ export class WorkspaceDockStore {
     const workspace = this.workspace;
     if (workspace === null || workspace.treeVisible === visible) return;
     this.update((current) => ({ ...current, treeVisible: visible }));
+  }
+
+  /**
+   * Adds and focuses a shell tab. Returns `null` when the workspace has reached
+   * the cap; labels use a stable ordinal so closing a tab does not rename others.
+   */
+  openTerminal(): string | null {
+    const workspace = this.workspace;
+    if (workspace === null || workspace.terminals.length >= MAX_TERMINALS) return null;
+    const seq = workspace.terminalSeq;
+    const id = `terminal-${seq}`;
+    this.update((current) => ({
+      ...current,
+      terminals: [...current.terminals, { id, seq }],
+      activeTerminal: id,
+      terminalSeq: seq + 1,
+      activeTool: "terminal",
+      collapsed: false,
+    }));
+    return id;
+  }
+
+  activateTerminal(id: string): void {
+    const workspace = this.workspace;
+    if (workspace === null || !workspace.terminals.some((terminal) => terminal.id === id)) return;
+    if (workspace.activeTerminal === id) return;
+    this.update((current) => ({ ...current, activeTerminal: id }));
+  }
+
+  closeTerminal(id: string): void {
+    const workspace = this.workspace;
+    if (workspace === null) return;
+    const index = workspace.terminals.findIndex((terminal) => terminal.id === id);
+    if (index === -1) return;
+    const terminals = workspace.terminals.filter((terminal) => terminal.id !== id);
+    const activeTerminal =
+      workspace.activeTerminal === id
+        ? (terminals[Math.min(index, terminals.length - 1)]?.id ?? null)
+        : workspace.activeTerminal;
+    this.update((current) => ({ ...current, terminals, activeTerminal }));
   }
 
   /** Opens a file preview inside Files (or focuses and updates an existing one). */

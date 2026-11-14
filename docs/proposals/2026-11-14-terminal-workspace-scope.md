@@ -65,7 +65,8 @@ cwd が常に一意になる。プロジェクトは workspace をまとめて�
 
 - **workspace**: `(node_id, canonicalize 済みの local_path)`。ターミナルの
   スコープキー。
-- **terminal**: workspace 上の PTY セッション。既定では workspace ごとに 1 本。
+- **terminal**: workspace 上の PTY セッション。`terminal_id` ごとに独立し、
+  既定では workspace に 1 本。
 - **origin session**: ターミナルを開いたセッション。所有権ではなく来歴。
 
 ## 3. 設計
@@ -80,8 +81,9 @@ cwd が常に一意になる。プロジェクトは workspace をまとめて�
   `pty_id` は attach / 操作のハンドルとしてのみ使う。
 - 既定では **1 workspace = 1 terminal**。同一 workspace への `open` は
   新しいシェルを作らず既存 PTY への attach を返す（冪等）。
-- 複数ターミナル (タブ) は Phase 3。その場合も workspace キー +
-  terminal 連番で表し、workspace の既定ターミナルは 1 本のままにする。
+- 複数ターミナル (タブ) は 2026-11-14 に実装した。workspace キーとクライアント
+  生成の `terminal_id` で表し、同じ `terminal_id` への `open` は既存 PTY に
+  attach する。workspace の既定ターミナルは 1 本のまま。
 
 ### 3.2 ライフサイクル
 

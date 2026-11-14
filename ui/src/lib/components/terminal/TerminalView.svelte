@@ -14,15 +14,21 @@
     sessionId,
     nodeId,
     path,
+    terminalId,
     fill = false,
     active = true,
+    onregister,
   }: {
     sessionId: string;
     nodeId: string;
     path: string;
+    /** Stable tab identity inside the workspace; identifies this shell on the node. */
+    terminalId: string;
     fill?: boolean;
     /** Whether the terminal is the visible dock tab. Hidden terminals stay attached. */
     active?: boolean;
+    /** Receives a hook that kills the shell before the tab is removed. */
+    onregister?: (kill: () => void) => void;
   } = $props();
 
   type Status = "disconnected" | "connecting" | "connected" | "exited" | "blocked" | "failed";
@@ -38,7 +44,7 @@
   let connectedWorkspace: string | null = null;
 
   function workspaceKey(): string {
-    return `${nodeId}\u0000${path}`;
+    return `${nodeId}\u0000${path}\u0000${terminalId}`;
   }
 
   /** Mobile virtual key bar (tapping sends an escape sequence). */
@@ -125,6 +131,7 @@
           node_id: nodeId,
           path,
           session_id: sessionId,
+          terminal_id: terminalId,
           cols: dims.cols,
           rows: dims.rows,
           new: false,
@@ -219,6 +226,10 @@
       send({ op: "resize", cols, rows });
     });
     connect();
+    onregister?.(() => {
+      send({ op: "kill" });
+      socket?.close();
+    });
 
     return () => {
       disposed = true;

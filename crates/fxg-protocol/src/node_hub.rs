@@ -523,7 +523,8 @@ pub enum NodeToHubMsg {
     PtyOpened {
         /// Correlation ID of the spawn request
         request_id: CommandId,
-        /// Actual PTY ID (an existing terminal is reused for the same workspace)
+        /// Actual PTY ID (an existing terminal is reused for the same workspace
+        /// and terminal ID)
         pty_id: String,
         /// Canonical workspace path
         path: String,
@@ -683,17 +684,20 @@ pub enum HubToNodeMsg {
     },
     /// Request to open the workspace web terminal (PTY).
     ///
-    /// Opening the same workspace again attaches to the running terminal. The
-    /// node answers with [`NodeToHubMsg::PtyOpened`].
+    /// Opening the same workspace and terminal ID again attaches to the running
+    /// terminal. The node answers with [`NodeToHubMsg::PtyOpened`].
     PtySpawn {
         /// Correlation ID for the reply
         request_id: CommandId,
-        /// Proposed PTY ID (reused when the workspace already has a terminal)
+        /// Proposed PTY ID (reused when the workspace terminal already exists)
         pty_id: String,
         /// Workspace directory
         path: String,
         /// Session that opened the terminal (origin)
         session_id: Option<SessionId>,
+        /// Terminal tab identity inside the workspace (`None` = legacy single terminal)
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        terminal_id: Option<String>,
         /// Number of columns
         cols: u16,
         /// Number of rows
@@ -891,6 +895,7 @@ mod tests {
             pty_id: "p1".into(),
             path: "/home/u/repo".into(),
             session_id: Some("s1".into()),
+            terminal_id: Some("tab-1".into()),
             cols: 80,
             rows: 24,
             new: false,
@@ -899,6 +904,7 @@ mod tests {
         assert_eq!(json["op"], "pty_spawn");
         assert_eq!(json["request_id"], "c1");
         assert_eq!(json["path"], "/home/u/repo");
+        assert_eq!(json["terminal_id"], "tab-1");
         assert_eq!(serde_json::from_value::<HubToNodeMsg>(json).unwrap(), spawn);
 
         let opened = NodeToHubMsg::PtyOpened {

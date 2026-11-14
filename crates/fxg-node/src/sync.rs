@@ -718,12 +718,22 @@ pub(crate) async fn handle_server_message(
             pty_id,
             path,
             session_id,
+            terminal_id,
             cols,
             rows,
             new,
         } => {
             handle_remote_pty_spawn(
-                state, out, request_id, pty_id, path, session_id, cols, rows, new,
+                state,
+                out,
+                request_id,
+                pty_id,
+                path,
+                session_id,
+                terminal_id,
+                cols,
+                rows,
+                new,
             )
             .await;
         }
@@ -813,6 +823,7 @@ async fn handle_remote_pty_spawn(
     pty_id: String,
     path: String,
     session_id: Option<fxg_protocol::SessionId>,
+    terminal_id: Option<String>,
     cols: u16,
     rows: u16,
     new: bool,
@@ -824,6 +835,7 @@ async fn handle_remote_pty_spawn(
         node_id: state.node_id().into(),
         path,
         session_id,
+        terminal_id,
         cols,
         rows,
         new,

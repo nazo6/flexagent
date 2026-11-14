@@ -1604,10 +1604,11 @@ export type PruneWorktreesRequest = {
  *
  *  A bidirectional stream channel that connects the terminal of the Web UI / mobile
  *  PWA directly to the ConPTY / Unix PTY on the node. Terminals are scoped to a
- *  workspace (`node_id` + `path`): opening the same workspace again attaches to
- *  the running shell instead of starting another one. When the node setting
- *  `allow_remote_pty = false` is in effect, `open` from remote (through the
- *  hub) is rejected.
+ *  workspace (`node_id` + `path`) and a client-side terminal ID: opening the
+ *  same combination again attaches to the running shell instead of starting
+ *  another one, while different terminal IDs are separate shells. When the node
+ *  setting `allow_remote_pty = false` is in effect, `open` from remote (through
+ *  the hub) is rejected.
  */
 export type PtyClientMessage =
 /**  Open the terminal of a workspace (idempotent: attaches when it is running). */
@@ -1618,6 +1619,8 @@ node_id: NodeId;
 path: string;
 /**  Session that opened the terminal (origin, not ownership) */
 session_id: SessionId | null;
+/**  Terminal tab identity inside the workspace (`None` = legacy single terminal) */
+terminal_id?: string | null;
 /**  Number of columns */
 cols: number;
 /**  Number of rows */

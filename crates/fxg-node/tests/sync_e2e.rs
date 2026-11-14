@@ -1567,6 +1567,7 @@ async fn hub_relays_workspace_terminal_and_replays_output() {
         node_id: NodeId::from("node-1"),
         path: repo.path().to_string_lossy().into_owned(),
         session_id: None,
+        terminal_id: Some("tab-1".to_owned()),
         cols: 80,
         rows: 24,
         new: false,

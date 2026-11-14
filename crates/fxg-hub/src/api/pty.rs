@@ -112,6 +112,8 @@ pub struct PtyOpenParams {
     pub path: String,
     /// Session that opened the terminal (origin)
     pub session_id: Option<SessionId>,
+    /// Terminal tab identity inside the workspace (`None` = legacy single terminal)
+    pub terminal_id: Option<String>,
     /// Number of columns
     pub cols: u16,
     /// Number of rows
@@ -171,6 +173,7 @@ pub(crate) async fn handle_pty_ws<B: ClientApiBackend>(backend: B, socket: WebSo
                         node_id,
                         path,
                         session_id,
+                        terminal_id,
                         cols,
                         rows,
                         new,
@@ -192,6 +195,7 @@ pub(crate) async fn handle_pty_ws<B: ClientApiBackend>(backend: B, socket: WebSo
                             node_id,
                             path,
                             session_id,
+                            terminal_id,
                             cols,
                             rows,
                             new,

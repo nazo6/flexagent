@@ -141,6 +141,71 @@ describe("WorkspaceDockStore", () => {
     expect(store.treeVisible).toBe(false);
   });
 
+  it("starts each workspace with one terminal tab", () => {
+    const { store } = newStore();
+    store.setContext(context("s1"));
+
+    expect(store.terminals).toHaveLength(1);
+    expect(store.activeTerminal).toBe(store.terminals[0]?.id);
+    expect(store.terminals[0]?.seq).toBe(1);
+  });
+
+  it("opens, focuses and closes terminal tabs", () => {
+    const { store } = newStore();
+    store.setContext(context("s1"));
+    const first = store.terminals[0];
+    if (first === undefined) throw new Error("missing default terminal");
+
+    const secondId = store.openTerminal();
+    expect(secondId).not.toBeNull();
+    expect(store.terminals).toHaveLength(2);
+    expect(store.activeTerminal).toBe(secondId);
+    expect(store.terminals[1]?.seq).toBe(2);
+
+    store.activateTerminal(first.id);
+    expect(store.activeTerminal).toBe(first.id);
+
+    store.closeTerminal(first.id);
+    expect(store.terminals).toHaveLength(1);
+    expect(store.activeTerminal).toBe(secondId);
+
+    store.closeTerminal(secondId ?? "");
+    expect(store.terminals).toHaveLength(0);
+    expect(store.activeTerminal).toBeNull();
+
+    const reopened = store.openTerminal();
+    expect(reopened).toBe("terminal-3");
+    expect(store.terminals[0]?.seq).toBe(3);
+  });
+
+  it("caps terminal tabs", () => {
+    const { store } = newStore();
+    store.setContext(context("s1"));
+
+    while (store.terminals.length < 8) {
+      expect(store.openTerminal()).not.toBeNull();
+    }
+    expect(store.openTerminal()).toBeNull();
+    expect(store.terminals).toHaveLength(8);
+  });
+
+  it("restores terminal tabs without renaming closed ones", () => {
+    const { store, storage } = newStore();
+    store.setContext(context("s1"));
+    store.openTerminal();
+    store.openTerminal();
+    const tabs = store.terminals;
+    store.activateTerminal(tabs[0]?.id ?? "");
+    store.closeTerminal(tabs[1]?.id ?? "");
+
+    const restored = new WorkspaceDockStore(storage);
+    restored.setContext(context("s2"));
+
+    expect(restored.terminals.map((terminal) => terminal.id)).toEqual([tabs[0]?.id, tabs[2]?.id]);
+    expect(restored.activeTerminal).toBe(tabs[0]?.id);
+    expect(restored.openTerminal()).toBe("terminal-4");
+  });
+
   it("restores the active tool, files, tree and width", () => {
     const { store, storage } = newStore();
     store.setContext(context("s1"));
@@ -200,6 +265,9 @@ describe("WorkspaceDockStore", () => {
     expect(store.files[0]?.scope).toBe("uncommitted");
     expect(store.activeFile).toBe("/repo/a.ts");
     expect(store.treeVisible).toBe(false);
+    // A v2 entry written before terminal tabs existed keeps one default tab.
+    expect(store.terminals).toHaveLength(1);
+    expect(store.activeTerminal).toBe(store.terminals[0]?.id);
   });
 
   it("ignores storage written by an unknown version", () => {

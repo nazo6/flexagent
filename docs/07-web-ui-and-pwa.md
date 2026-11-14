@@ -76,7 +76,7 @@ Settings 画面の中間パス（`/settings`, `/settings/hub`, `/settings/nodes`
      - **Files**: workspace の Git toplevel（非 Git なら workspace パス）を起点にした遅延読み込みのツリーと、ファイルプレビューの 2 ペイン。`git status` の変更バッジ、隠しファイル / 重いディレクトリの表示切替、変更のみの一覧を持つ。デスクトップではツリーを隠してプレビューを全幅にでき、モバイルではツリー ↔ プレビューを戻るボタンで切り替える。**直接ノードへ接続している場合のみ**利用でき、ハブ経由では理由を表示する。
      - **File preview（Files 内）**: プレビュー上部にファイルタブ（可変・中クリックで閉じる）を持つ。`View` は Shiki の読み取り専用表示（Markdown は Preview / Source を切替）、`Diff` は単一ファイルの diff（PC は `monaco-editor`、モバイルは `shiki`）。Git status バッジを表示し、バイナリ・大きすぎるファイル・削除済みファイルを区別する。
      - **Changes**: `Session`（セッション内の tool diff）/ `Worktree`（`git status`）/ `Branch`（base との累積 diff）の 3 スコープ。行をクリックすると Files ツールのプレビューにファイルを開く（Diff モード）。Session の編集差分はノードがオフラインでも閲覧できる。ハブ経由では従来のインライン Diff にフォールバックする。
-     - **Terminal**: 統合 Web PTY（§4）。ドックが開いている間は非アクティブでもマウントを維持し、PTY の attach を保つ。
+     - **Terminal**: workspace の統合 Web PTY（§4）。タブごとに独立したシェルを持ち、`+` で追加、× / 中クリックで閉じる。ドックが開いている間は非アクティブのタブもマウントを維持し、PTY の attach を保つ。
 3. **統一コンポーザー**:
    - 新規セッション画面とセッション詳細画面で同一コンポーザーを使用。「文脈行（新規のみ）→ 入力 → セレクタ行（Agent / Mode / Model / その他）→ アクション行（添付 / 自動承認 / その他 / 中断 / 送信）」の順を固定し、未存在項目は非表示にするだけで位置を動かさない。
    - セッション詳細の入力欄は既定 2 行（内容に応じて自動伸長、上限あり）とし、会話タイムラインへ縦スペースを優先配分する。
@@ -92,11 +92,26 @@ Settings 画面の中間パス（`/settings`, `/settings/hub`, `/settings/nodes`
 
 Web ターミナルは `ghostty-web`（WASM 版 `libghostty-vt` + Canvas 2D）を標準採用し、UI と実装を疎結合にするため `ui/src/lib/components/terminal/types.ts` の `ITerminalAdapter`（`mount` / `clear` / `write` / `onData` / `onResize` / `fit` / `focus` / `dispose`）を介して利用します。
 
-- ターミナルのスコープは **workspace**（`(node_id, session.local_path)`）です。セッションはターミナルの所有者ではなく**origin**で、同じ worktree の別セッションへ切り替えても接続は維持されます（`TerminalView.svelte` は `sessionId` ではなく workspace キーの変化で再接続します）。
-- `/api/v1/pty/ws` の `open` は冪等で、既存のシェルがあれば attach します。ドックを閉じる・リロードすると socket は閉じますが、ノード側は **detach** するだけでシェルは残ります（無操作 TTL の既定は 30 分）。同じ workspace のセッション切替では socket を維持します。
+- ターミナルのスコープは **workspace**（`(node_id, session.local_path)`）と
+  **terminal ID** の組です。セッションはターミナルの所有者ではなく**origin**で、
+  同じ worktree の別セッションへ切り替えても接続は維持されます（`TerminalView.svelte`
+  は `sessionId` ではなく workspace + terminal ID の変化で再接続します）。
+- `/api/v1/pty/ws` の `open` は workspace + terminal ID に対して冪等で、既存の
+  シェルがあれば attach します。タブを増やすと terminal ID が変わるため、同じ
+  workspace に独立したシェルが複数できます。ドックを閉じる・リロードすると socket
+  は閉じますが、ノード側は **detach** するだけでシェルは残ります（無操作 TTL の
+  既定は 30 分）。同じ workspace のセッション切替では socket を維持します。
 - attach 時は保持済み出力（リングバッファ + シーケンス番号）が先に送られるため、開き直すと scrollback が復元されます。UI は再描画の重複を避けるため、再接続前に端末バッファを clear します。
-- **1 パネル 1 PTY**: ドックはデスクトップ用（分割ペイン）とモバイル用（全画面）のスロットをビューポートで切り替えて**片方だけ**マウントする。両方をマウントすると `TerminalView` が 2 つ動き、1 回のオープンで PTY（＝シェル）が 2 つ起動する。
-- **タブ切替と detach**: ドックが開いている間、非アクティブの Terminal タブは `hidden` でマウントしたままにし、タブ切替で PTY を detach しない。再アクティブ時に `fit()` と resize を送る。ドック自体を閉じたときだけ unmount → detach し、再度開くと `open` が冪等に attach + replay する。
+- **1 表示 1 PTY**: ドックはデスクトップ用（分割ペイン）とモバイル用（全画面）の
+  スロットをビューポートで切り替えて**片方だけ**マウントします。両方をマウント
+  すると同じ `terminal_id` の `TerminalView` が 2 つ動き、同じシェルへ 2 つの
+  socket が attach して resize とフォーカスが競合します。ターミナルのタブ自体は
+  複数持てますが、各タブの表示は 1 つだけです。
+- **タブ切替と detach**: ドックが開いている間、非アクティブのターミナルタブは
+  `hidden` でマウントしたままにし、タブ切替や外側ツールの切替で PTY を detach
+  しない。再アクティブ時に `fit()` と resize を送る。タブを閉じたときは `kill`
+  を送る。ドック自体を閉じたときだけ unmount → detach し、再度開くと `open` が
+  冪等に attach + replay する。
 - **IME 入力の不変条件**: `ghostty-web` は入力用の隠し `textarea` ではなく `contenteditable` なラッパーにフォーカスし、ラッパーで `beforeinput` を打ち消す（`textarea` からバブリングする分も止まる）上に、変換中 (`isComposing` / `keyCode === 229`) のキーをすべて破棄する。このため `GhosttyWebAdapter` がフォーカスを `textarea` へ移し、`beforeinput` を `textarea` で止めて挿入を許可したうえで、挿入されたテキストを `input`（`compositionend` が先に来る場合の取りこぼしも）から 1 回だけ送る。変換中テキストはカーソルセルに自前で描画する。
 - ウィンドウ幅がデスクトップ / モバイルの境界（`64rem`）をまたいで再マウントされても、dispose は detach のみなので PTY は作り直されません。
 - モバイル向けに仮想キーバー（`Ctrl`, `Esc`, `Tab`, 矢印キー等）を提供。
