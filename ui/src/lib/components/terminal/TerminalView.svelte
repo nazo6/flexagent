@@ -15,11 +15,14 @@
     nodeId,
     path,
     fill = false,
+    active = true,
   }: {
     sessionId: string;
     nodeId: string;
     path: string;
     fill?: boolean;
+    /** Whether the terminal is the visible dock tab. Hidden terminals stay attached. */
+    active?: boolean;
   } = $props();
 
   type Status = "disconnected" | "connecting" | "connected" | "exited" | "blocked" | "failed";
@@ -76,13 +79,9 @@
       case "opened":
         status = "connected";
         statusMessage = null;
-        adapter?.focus();
-        // The retained terminal may have been created at another size (other tab,
-        // reattach after a reload).
-        {
-          const dims = adapter?.fit();
-          if (dims) send({ op: "resize", cols: dims.cols, rows: dims.rows });
-        }
+        // A hidden terminal has no layout to fit against, so it is sized when
+        // its tab becomes active (see the effect below).
+        if (active) syncViewport();
         break;
       case "output":
         adapter?.write(decodeBase64ToBytes(message.data_b64));
@@ -117,7 +116,9 @@
 
     ws.addEventListener("open", () => {
       if (socket !== ws || disposed) return;
-      const dims = adapter?.fit() ?? { cols: 80, rows: 24 };
+      // Hidden terminals have no measured size; the resize after activation
+      // brings the PTY to the real dimensions.
+      const dims = active ? (adapter?.fit() ?? { cols: 80, rows: 24 }) : { cols: 80, rows: 24 };
       if (
         !send({
           op: "open",
@@ -160,6 +161,14 @@
     });
   }
 
+  /** Fits the visible terminal and tells the node about the new size. */
+  function syncViewport(): void {
+    if (!active) return;
+    const dims = adapter?.fit() ?? { cols: 80, rows: 24 };
+    send({ op: "resize", cols: dims.cols, rows: dims.rows });
+    adapter?.focus();
+  }
+
   function reconnect(): void {
     // The server replays the retained output on attach, so start from a clean
     // screen to avoid duplicating what is already rendered.
@@ -184,6 +193,20 @@
     connectedWorkspace = key;
     if (initial) return; // onMount performs the initial connection
     reconnect();
+  });
+
+  // Refit when the terminal becomes the visible dock tab. When it is hidden,
+  // drop focus so keystrokes do not reach an unattended PTY.
+  $effect(() => {
+    if (active) {
+      const frame = requestAnimationFrame(() => syncViewport());
+      return () => cancelAnimationFrame(frame);
+    }
+    const focused = document.activeElement;
+    if (container !== null && focused instanceof HTMLElement && container.contains(focused)) {
+      focused.blur();
+    }
+    return;
   });
 
   onMount(() => {

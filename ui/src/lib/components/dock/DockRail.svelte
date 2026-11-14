@@ -1,16 +1,18 @@
 <script lang="ts">
-  import { SESSION_PANELS, type SessionPanelId } from "#lib/session-panels.ts";
+  import { DOCK_TOOLS, type DockToolId } from "#lib/dock/registry.ts";
   import { m } from "#lib/paraglide/messages.js";
   import { cn } from "#lib/utils.ts";
   import PanelRightCloseIcon from "@lucide/svelte/icons/panel-right-close";
 
   interface Props {
-    active: SessionPanelId | null;
-    onselect: (id: SessionPanelId) => void;
+    active: DockToolId | null;
+    onselect: (id: DockToolId) => void;
     oncollapse: () => void;
   }
 
   let { active, onselect, oncollapse }: Props = $props();
+
+  const launchers = DOCK_TOOLS.filter((tool) => tool.launcher);
 </script>
 
 <nav
@@ -18,20 +20,20 @@
   aria-label={m.session_tools_title()}
 >
   <div class="flex flex-col items-center gap-1">
-    {#each SESSION_PANELS as panel (panel.id)}
-      {@const Icon = panel.icon}
+    {#each launchers as tool (tool.id)}
+      {@const Icon = tool.icon}
       <button
         type="button"
         class={cn(
           "flex size-8 items-center justify-center rounded-md transition-colors",
-          active === panel.id
+          active === tool.id
             ? "bg-signal-soft text-signal"
             : "text-muted-foreground hover:bg-accent hover:text-foreground",
         )}
-        title={panel.label()}
-        aria-label={panel.label()}
-        aria-pressed={active === panel.id}
-        onclick={() => onselect(panel.id)}
+        title={tool.label()}
+        aria-label={tool.label()}
+        aria-pressed={active === tool.id}
+        onclick={() => onselect(tool.id)}
       >
         <Icon class="size-4" />
       </button>

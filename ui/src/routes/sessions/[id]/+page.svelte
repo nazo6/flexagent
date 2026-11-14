@@ -9,14 +9,15 @@
   import { groupTimelineItems } from "#lib/chat-groups.ts";
   import Composer from "#lib/components/chat/Composer.svelte";
   import SessionHeader from "#lib/components/session/SessionHeader.svelte";
-  import SessionPanelHost from "#lib/components/session/SessionPanelHost.svelte";
-  import SessionToolRail from "#lib/components/session/SessionToolRail.svelte";
-  import SessionToolsSheet from "#lib/components/session/SessionToolsSheet.svelte";
+  import DockHost from "#lib/components/dock/DockHost.svelte";
+  import DockRail from "#lib/components/dock/DockRail.svelte";
+  import DockToolsSheet from "#lib/components/dock/DockToolsSheet.svelte";
   import { Button } from "#lib/components/ui/button/index.ts";
   import { commandErrorMessage } from "#lib/api/client.ts";
   import { m } from "#lib/paraglide/messages.js";
   import { forkScopeOf } from "#lib/fork-scope.ts";
-  import type { SessionPanelId } from "#lib/session-panels.ts";
+  import type { DockToolId } from "#lib/dock/registry.ts";
+  import { dock } from "#lib/stores/dock.svelte.ts";
   import { sync } from "#lib/stores/app.svelte.ts";
   import {
     provisioningLogLines,
@@ -43,6 +44,15 @@
       ? (sync.projects.find((project) => project.project_id === session.project_id)?.name ?? null)
       : null,
   );
+  /** Current session as dock context; the workspace key is derived from node + path. */
+  const dockContext = $derived(
+    session === null
+      ? null
+      : { sessionId: session.session_id, nodeId: session.node_id, localPath: session.local_path },
+  );
+  const isDockOpen = $derived(dock.isOpen && dockContext !== null);
+  /** Highlight a tool only while the dock is actually visible. */
+  const visibleTool = $derived(dock.isOpen ? dock.activeTool : null);
 
   const timeline = $derived(sync.timelineFor(sessionId));
   const currentStatus = $derived(
@@ -108,13 +118,11 @@
   const FOLLOW_THRESHOLD_PX = 80;
   let lastUserItemKey: string | null = null;
 
-  // Right tool rail / mobile tool sheet
-  let activePanel = $state<SessionPanelId | null>(null);
+  // Right workspace dock / mobile tool sheet
   let toolsSheetOpen = $state(false);
 
   // Desktop resizable right pane
   let mainContainer = $state<HTMLDivElement | null>(null);
-  let sidePanelWidth = $state(42); // default percentage
   let isResizing = $state(false);
   /**
    * The side panel has a desktop slot (split pane) and a mobile slot
@@ -130,16 +138,6 @@
   );
 
   onMount(() => {
-    if (typeof localStorage !== "undefined") {
-      const saved = localStorage.getItem("fxg:session_side_panel_width");
-      if (saved) {
-        const num = parseFloat(saved);
-        if (!isNaN(num) && num >= 20 && num <= 80) {
-          sidePanelWidth = num;
-        }
-      }
-    }
-
     if (typeof window.matchMedia !== "function") return;
     const query = window.matchMedia(DESKTOP_LAYOUT_QUERY);
     desktopLayout = query.matches;
@@ -154,8 +152,7 @@
     const pointerX = e.clientX;
     const rightPixels = rect.right - pointerX;
     const percentage = (rightPixels / rect.width) * 100;
-    // Clamp between 20% and 75%
-    sidePanelWidth = Math.max(20, Math.min(75, Math.round(percentage)));
+    dock.setWidth(Math.round(percentage));
   }
 
   function handlePointerUp() {
@@ -163,13 +160,7 @@
     isResizing = false;
     window.removeEventListener("pointermove", handlePointerMove);
     window.removeEventListener("pointerup", handlePointerUp);
-    if (typeof localStorage !== "undefined") {
-      try {
-        localStorage.setItem("fxg:session_side_panel_width", String(sidePanelWidth));
-      } catch {
-        // Ignore quota errors
-      }
-    }
+    dock.commitWidth();
   }
 
   function startResize(event: PointerEvent) {
@@ -180,6 +171,12 @@
     window.addEventListener("pointerup", handlePointerUp);
   }
 
+  // The workspace owns the dock tabs; the session only supplies tool context.
+  // Switching sessions inside one workspace must not reset open tabs.
+  $effect(() => {
+    dock.setContext(dockContext);
+  });
+
   // Make the session a priority target for WS delivery, and fall back to REST
   // loading when the history has not been fetched yet.
   $effect(() => {
@@ -189,7 +186,6 @@
     if (loadedFor !== id) {
       loadedFor = id;
       selectedSubagentId = null;
-      activePanel = null;
       sync.loadSessionEvents(id).catch(() => {
         /* Ignore: the WS replay will make it visible once it arrives. */
       });
@@ -280,12 +276,9 @@
     showScrollBottom = false;
   }
 
-  function selectPanel(id: SessionPanelId): void {
-    activePanel = activePanel === id ? null : id;
-  }
-
-  function openPanel(id: SessionPanelId): void {
-    activePanel = id;
+  function handleSelectTool(tool: DockToolId): void {
+    dock.openTool(tool);
+    toolsSheetOpen = false;
   }
 
   function handleForkItem(item: TimelineItem): void {
@@ -446,7 +439,7 @@
     <div
       class={cn(
         "flex h-full min-w-0 flex-1 flex-col overflow-hidden",
-        activePanel !== null && session !== null && "hidden lg:flex",
+        isDockOpen && "hidden lg:flex",
       )}
     >
       <!-- Scrollable message timeline -->
@@ -514,11 +507,12 @@
       </div>
     </div>
 
-    <!-- Desktop split panel -->
-    {#if activePanel !== null && session !== null && desktopLayout}
+    <!-- Desktop workspace dock -->
+    {#if isDockOpen && dockContext !== null && desktopLayout}
+      {@const ctx = dockContext}
       <button
         type="button"
-        aria-label="Resize panel"
+        aria-label={m.dock_resize()}
         class={cn(
           "group z-10 -ml-px hidden w-1.5 cursor-col-resize shrink-0 items-center justify-center border-l border-border bg-transparent p-0 outline-none transition-colors select-none hover:bg-signal/50 focus-visible:ring-1 focus-visible:ring-signal active:bg-signal lg:flex",
           isResizing && "bg-signal",
@@ -527,10 +521,12 @@
         onkeydown={(e) => {
           if (e.key === "ArrowLeft") {
             e.preventDefault();
-            sidePanelWidth = Math.min(75, sidePanelWidth + 2);
+            dock.setWidth(dock.width + 2);
+            dock.commitWidth();
           } else if (e.key === "ArrowRight") {
             e.preventDefault();
-            sidePanelWidth = Math.max(20, sidePanelWidth - 2);
+            dock.setWidth(dock.width - 2);
+            dock.commitWidth();
           }
         }}
       >
@@ -541,45 +537,31 @@
 
       <div
         class="hidden h-full shrink-0 flex-col overflow-hidden lg:flex"
-        style="width: {sidePanelWidth}%;"
+        style="width: clamp(22rem, {dock.width}%, 75%);"
       >
-        <SessionPanelHost
-          panel={activePanel}
-          {sessionId}
-          nodeId={session.node_id}
-          localPath={session.local_path}
-          {items}
-          onclose={() => (activePanel = null)}
-        />
+        <DockHost {ctx} {items} oncollapse={() => dock.collapse()} />
       </div>
     {/if}
 
     <!-- Desktop tool rail -->
     {#if !layoutState.rightRailCollapsed && session !== null}
       <div class="hidden h-full lg:flex">
-        <SessionToolRail
-          active={activePanel}
-          onselect={selectPanel}
+        <DockRail
+          active={visibleTool}
+          onselect={(id) => dock.toggleTool(id)}
           oncollapse={() => layoutState.setRightRailCollapsed(true)}
         />
       </div>
     {/if}
 
-    <!-- Mobile full-screen panel -->
-    {#if activePanel !== null && session !== null && !desktopLayout}
+    <!-- Mobile full-screen dock -->
+    {#if isDockOpen && dockContext !== null && !desktopLayout}
+      {@const ctx = dockContext}
       <div class="flex flex-1 flex-col overflow-hidden lg:hidden">
-        <SessionPanelHost
-          panel={activePanel}
-          {sessionId}
-          nodeId={session.node_id}
-          localPath={session.local_path}
-          {items}
-          mobile
-          onclose={() => (activePanel = null)}
-        />
+        <DockHost {ctx} {items} mobile oncollapse={() => dock.collapse()} />
       </div>
     {/if}
   </div>
 
-  <SessionToolsSheet bind:open={toolsSheetOpen} active={activePanel} onselect={openPanel} />
+  <DockToolsSheet bind:open={toolsSheetOpen} active={visibleTool} onselect={handleSelectTool} />
 </div>

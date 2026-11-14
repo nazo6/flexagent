@@ -86,7 +86,7 @@
 
 ### 2.5 UI 構成
 
-- **レール（右端）**: ツールのアイコン。バッジ（Changes の件数、Terminal の実行中など）を出す。最下部にドックを畳むボタン。
+- **レール（右端）**: ツールのアイコン。バッジ（Changes の件数、Terminal の実行中など）を出す。最下部にレール自体を隠すボタン。ドックの開閉はタブバー右端のボタンで行う。
 - **タブバー**: アイコン + 短いラベル + 未保存ドット + 閉じる。File タブは basename を表示し、tooltip にフルパス。オーバーフローは横スクロール。
 - **ツールバー**: タブの下にツール固有の操作を置く。
   - Files: パンくず、更新、隠しファイル / 変更のみの切替。
@@ -313,4 +313,20 @@ Phase 1 では **ローカル接続（ループバック）からのみ** ファ
 
 ## 11. 実装状況
 
-Phase 0 から着手する。実装が進んだ時点で、確定した仕様を `docs/07` / `docs/03` / `docs/01` に昇格し、この Proposal のステータスを更新する。
+### Phase 0 (2026-11-14 実装済み)
+
+- `ui/src/lib/stores/dock.svelte.ts`: workspace キーのタブ状態、永続化、タブ上限、
+  workspace 上限、壊れたエントリの破棄。
+- `ui/src/lib/dock/registry.ts`: Changes / Terminal のツール定義。
+- `ui/src/lib/components/dock/`: `DockHost` / `DockTabBar` / `DockRail` /
+  `DockToolsSheet` / `ChangesTool` / `TerminalTool`。
+- セッション画面から `activePanel` と幅のローカル state を削除し、旧
+  `SessionPanelHost` / `SessionToolRail` / `SessionToolsSheet` / `session-panels.ts`
+  を削除した。
+- `TerminalView` に `active` を追加し、非アクティブ時は hidden でマウントを維持、
+  再アクティブ時に fit / resize、ドックを閉じたときだけ detach する。
+- `docs/07` §3.2 / §4 と changelog に Phase 0 の確定仕様を反映した。
+
+Phase 1 以降（Files / git status / 単一ファイル diff / エディタ）は未着手。
+実装が進んだ時点で、確定した仕様を `docs/07` / `docs/03` / `docs/01` に昇格し、
+この Proposal のステータスを更新する。

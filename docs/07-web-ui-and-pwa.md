@@ -47,7 +47,7 @@ PC ブラウザ、ローカル直結 (`node.addr`、既定 `localhost:7860`)、�
 | `/`                               | 新規セッション作成（統一コンポーザー）                                      |
 | `/projects`                       | 論理プロジェクト & 各ノードの Git Worktree 一覧・作成・削除                 |
 | `/search`                         | FTS5 全文検索（3 文字以上または LIKE フォールバック）                       |
-| `/sessions/[id]`                  | セッション詳細（チャット・2 段階 Diff・Web ターミナル）                     |
+| `/sessions/[id]`                  | セッション詳細（チャット・ワークスペースドック）                            |
 | `/settings/hub/[tab]`             | Hub スコープ設定（`general`, `process`, `tokens`, `provisioners`, `audit`） |
 | `/settings/nodes/[node_id]/[tab]` | Node スコープ設定（`general`, `process`, `pairing`, `agents`, `audit`）     |
 | `/settings/browser/[tab]`         | Browser スコープ設定（`appearance`, `notifications`）                       |
@@ -69,10 +69,12 @@ Settings 画面の中間パス（`/settings`, `/settings/hub`, `/settings/nodes`
      - 連続する思考・ツール実行・サブエージェント・端末出力・Plan は「作業ブロック」として 1 行に集約・折りたたみ（承認・入力要求・通知は折りたたまず常に表示）。
      - サブエージェントは `SubagentUpdated` と `subagent_id` から親タイムライン内にツリー・インラインカードとして再構築する。
      - 境界行のアクションから Copy / Fork from here を実行可能（Fork 先ではコピー履歴末尾に元セッションへのリンクを表示）。
-   - **Diff ペイン（右レール / モバイルシート）**:
-     - **This Session**: セッション内でエージェントが編集した差分（ノードがオフラインでも閲覧可）。
-     - **Worktree Diff**: ノードへのリアルタイム問い合わせ（`vs Base (main...HEAD)` / `vs HEAD (Uncommitted)`）。PC は `monaco-editor`、モバイルは `shiki`。
-   - **Terminal ペイン（右レール / モバイルシート）**: 統合 Web PTY（§4）。
+   - **Workspace Dock（右レール / モバイル全画面）**:
+     - 右ペインは workspace（`node_id` + canonical `local_path`）スコープのタブ式ツールドック。タブ構成・アクティブタブ・幅・開閉を workspace ごとに保持し、セッション切替では閉じない。workspace が変わったときだけタブセットを入れ替える。
+     - レールはツールの起動器で、Changes / Terminal を singleton タブとして開く。現在はこの 2 つで、Files / File タブは今後追加する。
+     - タブバー（タブの切替・閉じる）とツール固有のツールバーを分離する。最後のタブを閉じるとドックを畳む。
+     - **Changes**: **This Session**（セッション内の編集差分。ノードがオフラインでも閲覧可）と **Worktree Diff**（`vs Base` / `vs HEAD`。PC は `monaco-editor`、モバイルは `shiki`）。
+     - **Terminal**: 統合 Web PTY（§4）。ドックが開いている間は非アクティブでもマウントを維持し、PTY の attach を保つ。
 3. **統一コンポーザー**:
    - 新規セッション画面とセッション詳細画面で同一コンポーザーを使用。「文脈行（新規のみ）→ 入力 → セレクタ行（Agent / Mode / Model / その他）→ アクション行（添付 / 自動承認 / その他 / 中断 / 送信）」の順を固定し、未存在項目は非表示にするだけで位置を動かさない。
    - セッション詳細の入力欄は既定 2 行（内容に応じて自動伸長、上限あり）とし、会話タイムラインへ縦スペースを優先配分する。
@@ -89,9 +91,10 @@ Settings 画面の中間パス（`/settings`, `/settings/hub`, `/settings/nodes`
 Web ターミナルは `ghostty-web`（WASM 版 `libghostty-vt` + Canvas 2D）を標準採用し、UI と実装を疎結合にするため `ui/src/lib/components/terminal/types.ts` の `ITerminalAdapter`（`mount` / `clear` / `write` / `onData` / `onResize` / `fit` / `focus` / `dispose`）を介して利用します。
 
 - ターミナルのスコープは **workspace**（`(node_id, session.local_path)`）です。セッションはターミナルの所有者ではなく**origin**で、同じ worktree の別セッションへ切り替えても接続は維持されます（`TerminalView.svelte` は `sessionId` ではなく workspace キーの変化で再接続します）。
-- `/api/v1/pty/ws` の `open` は冪等で、既存のシェルがあれば attach します。パネルを閉じる・リロードする・セッションを切り替えると socket は閉じますが、ノード側は **detach** するだけでシェルは残ります（無操作 TTL の既定は 30 分）。
+- `/api/v1/pty/ws` の `open` は冪等で、既存のシェルがあれば attach します。ドックを閉じる・リロードすると socket は閉じますが、ノード側は **detach** するだけでシェルは残ります（無操作 TTL の既定は 30 分）。同じ workspace のセッション切替では socket を維持します。
 - attach 時は保持済み出力（リングバッファ + シーケンス番号）が先に送られるため、開き直すと scrollback が復元されます。UI は再描画の重複を避けるため、再接続前に端末バッファを clear します。
-- **1 パネル 1 PTY**: サイドパネルはデスクトップ用（分割ペイン）とモバイル用（全画面）のスロットをビューポートで切り替えて**片方だけ**マウントする。両方をマウントすると `TerminalView` が 2 つ動き、1 回のオープンで PTY（＝シェル）が 2 つ起動する。
+- **1 パネル 1 PTY**: ドックはデスクトップ用（分割ペイン）とモバイル用（全画面）のスロットをビューポートで切り替えて**片方だけ**マウントする。両方をマウントすると `TerminalView` が 2 つ動き、1 回のオープンで PTY（＝シェル）が 2 つ起動する。
+- **タブ切替と detach**: ドックが開いている間、非アクティブの Terminal タブは `hidden` でマウントしたままにし、タブ切替で PTY を detach しない。再アクティブ時に `fit()` と resize を送る。ドック自体を閉じたときだけ unmount → detach し、再度開くと `open` が冪等に attach + replay する。
 - **IME 入力の不変条件**: `ghostty-web` は入力用の隠し `textarea` ではなく `contenteditable` なラッパーにフォーカスし、ラッパーで `beforeinput` を打ち消す（`textarea` からバブリングする分も止まる）上に、変換中 (`isComposing` / `keyCode === 229`) のキーをすべて破棄する。このため `GhosttyWebAdapter` がフォーカスを `textarea` へ移し、`beforeinput` を `textarea` で止めて挿入を許可したうえで、挿入されたテキストを `input`（`compositionend` が先に来る場合の取りこぼしも）から 1 回だけ送る。変換中テキストはカーソルセルに自前で描画する。
 - ウィンドウ幅がデスクトップ / モバイルの境界（`64rem`）をまたいで再マウントされても、dispose は detach のみなので PTY は作り直されません。
 - モバイル向けに仮想キーバー（`Ctrl`, `Esc`, `Tab`, 矢印キー等）を提供。
