@@ -278,8 +278,8 @@
     line-height: 1.55;
   }
   ::selection {
-    background: var(--signal-soft);
-    color: var(--ink);
+    background: var(--signal);
+    color: var(--signal-ink);
   }
   /* Placeholders are prose, not code: keep them in the sans face even when the
      field's value is monospace (IDs, commands, environment variables). */
