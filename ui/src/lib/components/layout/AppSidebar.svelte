@@ -14,6 +14,7 @@
   import { sync } from "#lib/stores/app.svelte.ts";
   import { cn } from "#lib/utils.ts";
   import { m } from "#lib/paraglide/messages.js";
+  import BrandIcon from "#lib/components/BrandIcon.svelte";
   import ConnectionMenu from "#lib/components/ConnectionMenu.svelte";
   import ProblemBadge from "#lib/components/ProblemBadge.svelte";
   import SessionActionsMenu from "#lib/components/session/SessionActionsMenu.svelte";
@@ -172,11 +173,7 @@
       class="flex items-center gap-2.5 font-semibold tracking-tight hover:opacity-80 transition-opacity"
       onclick={handleLinkClick}
     >
-      <div
-        class="bg-primary text-primary-foreground flex size-7 items-center justify-center rounded-md font-mono text-[11px] font-bold"
-      >
-        fxg
-      </div>
+      <BrandIcon class="size-7" />
       <span class="text-sm">FlexAgent</span>
     </a>
     <button

@@ -3,6 +3,7 @@
   import { onMount } from "svelte";
   import "../app.css";
   import AppSidebar from "#lib/components/layout/AppSidebar.svelte";
+  import BrandIcon from "#lib/components/BrandIcon.svelte";
   import ConnectionMenu from "#lib/components/ConnectionMenu.svelte";
   import ProblemBadge from "#lib/components/ProblemBadge.svelte";
   import ProblemCenter from "#lib/components/ProblemCenter.svelte";
@@ -237,11 +238,7 @@
 
           <div class="flex min-w-0 items-center gap-2">
             <a href="/" class="flex items-center gap-1.5 font-semibold text-sm">
-              <div
-                class="bg-primary text-primary-foreground flex size-6 items-center justify-center rounded-md font-mono text-[11px] font-bold"
-              >
-                fxg
-              </div>
+              <BrandIcon class="size-6" />
               <span>FlexAgent</span>
             </a>
             <ConnectionMenu variant="scope-compact" align="end" />
