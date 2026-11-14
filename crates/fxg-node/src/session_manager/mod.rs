@@ -544,19 +544,21 @@ impl SessionManager {
                 .map(|(session_id, session)| (session_id, session.handle))
                 .collect()
         };
-        let mut stopped = Vec::with_capacity(handles.len());
-        for (session_id, handle) in handles {
-            // Discard completely instead of keeping it warm
-            // (`shutdown` returns it to the pool, so do not use it)
-            if let Err(err) = handle.dispose().await {
-                tracing::warn!(session_id = %session_id, "failed to shutdown: {err:#}");
-            }
-            stopped.push(session_id);
-        }
+        let stopped = futures_util::future::join_all(handles.into_iter().map(
+            |(session_id, handle)| async move {
+                // Discard completely instead of keeping it warm
+                // (`shutdown` returns it to the pool, so do not use it)
+                if let Err(err) = handle.dispose().await {
+                    tracing::warn!(session_id = %session_id, "failed to shutdown: {err:#}");
+                }
+                session_id
+            },
+        ))
+        .await;
         // Also discard idle (warm) processes to empty the pool
         let drivers: Vec<Arc<dyn AgentDriver>> =
             { self.inner.drivers.lock().expect("drivers poisoned").clone() };
-        for driver in drivers {
+        futures_util::future::join_all(drivers.into_iter().map(|driver| async move {
             let disposed = driver.shutdown_idle().await;
             if disposed > 0 {
                 tracing::info!(
@@ -565,7 +567,8 @@ impl SessionManager {
                     "disposed idle agent processes"
                 );
             }
-        }
+        }))
+        .await;
         stopped
     }
 }

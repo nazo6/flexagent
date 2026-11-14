@@ -192,3 +192,49 @@ async fn thoughts_are_finalized_before_elicitation_and_permission_requests() {
 
     started.handle.shutdown().await.expect("shutdown");
 }
+
+#[tokio::test]
+async fn dispose_while_paused_on_elicitation_completes_without_hanging() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let started = Arc::new(AcpDriver::without_pool())
+        .start_session(
+            StartSessionRequest {
+                session_id: "s-dispose".to_owned(),
+                title: None,
+                cwd: dir.path().to_path_buf(),
+                launch: launch(),
+                extra_args: Vec::new(),
+                initial_mode: None,
+                resume: None,
+                fork_from: None,
+                initial_config: Vec::new(),
+                acp_parser: None,
+            },
+            tx,
+        )
+        .await
+        .expect("start");
+
+    started
+        .handle
+        .send_prompt(PromptInput::text("go"))
+        .await
+        .expect("prompt");
+
+    tokio::time::timeout(TEST_TIMEOUT, async {
+        while let Some(event) = rx.recv().await {
+            if let DriverEvent::Event(UnifiedEventPayload::ElicitationRequest { .. }) = event {
+                return;
+            }
+        }
+        panic!("driver closed before elicitation request");
+    })
+    .await
+    .expect("timed out waiting for elicitation request");
+
+    tokio::time::timeout(TEST_TIMEOUT, started.handle.dispose())
+        .await
+        .expect("dispose timed out while turn was paused on elicitation")
+        .expect("dispose");
+}

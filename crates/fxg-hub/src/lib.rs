@@ -35,5 +35,5 @@ pub mod push;
 pub mod state;
 
 pub use error::HubError;
-pub use process::Hub;
+pub use process::{Hub, await_shutdown_task, spawn_ctrl_c_handler};
 pub use state::{HubOptions, HubState};

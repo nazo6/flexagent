@@ -211,30 +211,48 @@ impl ActiveSessionHandle for AcpSessionHandle {
         // Close the session and return the process to the reuse pool (disposal is
         // [`Self::dispose`])
         let session_end = self.lease.take_session_end_receiver();
+        // Unblock any in-flight permission or elicitation waiters before waiting
+        // for the turn loop to end (otherwise a prompt paused on approval would
+        // deadlock shutdown).
+        cancel_pending_permissions(&self.permissions);
+        let events_snapshot = self.events.lock().expect("session events poisoned").clone();
+        cancel_pending_elicitations(&self.elicitations, events_snapshot.as_ref());
         fxg_protocol::discard_with!(
             self.commands.send(AcpCommand::Shutdown),
             "send a command to the ACP session"
         );
         if let Some(session_end) = session_end {
-            // Wait for the turn loop to end (returns Err immediately if the loop never
-            // started or failed)
-            fxg_protocol::discard_with!(session_end.await, "wait for the ACP turn loop to end");
-        }
-        // Best-effort logical close (the process is kept for the warm pool).
-        match tokio::time::timeout(
-            std::time::Duration::from_secs(5),
-            self.conn
-                .send_request(CloseSessionRequest::new(self.acp_session_id.clone()))
-                .block_task(),
-        )
-        .await
-        {
-            Ok(Ok(_)) => {}
-            Ok(Err(err)) => {
-                tracing::debug!(session_id = %self.acp_session_id, "session/close failed: {err}");
+            const TURN_LOOP_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
+            if tokio::time::timeout(TURN_LOOP_SHUTDOWN_TIMEOUT, session_end)
+                .await
+                .is_err()
+            {
+                tracing::warn!(
+                    session_id = %self.acp_session_id,
+                    timeout = ?TURN_LOOP_SHUTDOWN_TIMEOUT,
+                    "timed out waiting for the ACP turn loop to end; disposing process"
+                );
+                self.lease.mark_dispose();
             }
-            Err(_) => {
-                tracing::debug!(session_id = %self.acp_session_id, "session/close timed out");
+        }
+        // Best-effort logical close when returning the process to the warm pool;
+        // when disposing the process anyway, skip waiting for `session/close`.
+        if !self.lease.dispose_requested.load(Ordering::SeqCst) {
+            match tokio::time::timeout(
+                Duration::from_secs(5),
+                self.conn
+                    .send_request(CloseSessionRequest::new(self.acp_session_id.clone()))
+                    .block_task(),
+            )
+            .await
+            {
+                Ok(Ok(_)) => {}
+                Ok(Err(err)) => {
+                    tracing::debug!(session_id = %self.acp_session_id, "session/close failed: {err}");
+                }
+                Err(_) => {
+                    tracing::debug!(session_id = %self.acp_session_id, "session/close timed out");
+                }
             }
         }
         for terminal_id in self.pty.list() {

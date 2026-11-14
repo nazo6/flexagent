@@ -513,14 +513,21 @@ pub(super) async fn serve_session(
                 loop {
                     #[allow(clippy::large_enum_variant, reason = "short-lived select result")]
                     enum TurnSelected {
+                        Command(Option<AcpCommand>),
                         Read(Result<SessionMessage, agent_client_protocol::Error>),
                         Ingress(Option<SessionIngress>),
                     }
                     let selected = tokio::select! {
+                        command = cmd_rx.recv() => TurnSelected::Command(command),
                         result = session.read_update() => TurnSelected::Read(result),
                         ingress = ingress_rx.recv() => TurnSelected::Ingress(ingress),
                     };
                     match selected {
+                        TurnSelected::Command(Some(AcpCommand::Shutdown))
+                        | TurnSelected::Command(None) => return ServeOutcome::Closed,
+                        TurnSelected::Command(Some(AcpCommand::Prompt(_))) => {
+                            tracing::warn!("ignoring ACP prompt received while a turn is active");
+                        }
                         TurnSelected::Ingress(Some(SessionIngress::Flush(ack))) => {
                             match flush_streams_for_request(
                                 &mut runtime,

@@ -169,9 +169,12 @@ impl<P: WarmProcess> WarmPool<P> {
             state.idle.drain().map(|(_, entry)| entry.process).collect()
         };
         let count = drained.len();
-        for process in drained {
-            process.dispose().await;
-        }
+        futures_util::future::join_all(
+            drained
+                .into_iter()
+                .map(|process| async move { process.dispose().await }),
+        )
+        .await;
         count
     }
 }

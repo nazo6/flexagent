@@ -36,15 +36,27 @@ impl ProcessHandle {
 
     /// Terminates the process and waits for teardown to finish (immediate if already done).
     pub(super) async fn dispose_process(&self) {
+        const PROCESS_DISPOSE_TIMEOUT: Duration = Duration::from_secs(5);
         fxg_protocol::discard_with!(
             self.control_tx.send(ProcessCommand::Dispose),
             "request process disposal"
         );
         let join = self.join.lock().expect("process join poisoned").take();
-        if let Some(join) = join
-            && let Err(err) = join.await
-        {
-            tracing::warn!("acp process task terminated unexpectedly: {err}");
+        if let Some(mut join) = join {
+            match tokio::time::timeout(PROCESS_DISPOSE_TIMEOUT, &mut join).await {
+                Ok(Ok(())) => {}
+                Ok(Err(err)) => {
+                    tracing::warn!("acp process task terminated unexpectedly: {err}");
+                }
+                Err(_) => {
+                    tracing::warn!(
+                        timeout = ?PROCESS_DISPOSE_TIMEOUT,
+                        "timed out waiting for acp process teardown; aborting task"
+                    );
+                    join.abort();
+                    fxg_protocol::discard_with!(join.await, "await aborted acp process task");
+                }
+            }
         }
     }
 }

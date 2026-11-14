@@ -169,13 +169,24 @@ impl ActiveSessionHandle for ExtendedSessionHandle {
         self.inner.cancel_turn().await
     }
 
+    async fn dispose(&self) -> anyhow::Result<()> {
+        self.shutdown_extension().await;
+        self.inner.dispose().await
+    }
+
     async fn shutdown(&self) -> anyhow::Result<()> {
+        self.shutdown_extension().await;
+        self.inner.shutdown().await
+    }
+}
+
+impl ExtendedSessionHandle {
+    async fn shutdown_extension(&self) {
         if let Some(session) = &self.session
             && let Err(err) = session.shutdown().await
         {
             tracing::warn!("agent session extension shutdown failed: {err:#}");
         }
-        self.inner.shutdown().await
     }
 }
 
@@ -331,6 +342,7 @@ mod tests {
     #[derive(Default)]
     struct FakeBase {
         prompts: Arc<Mutex<Vec<String>>>,
+        disposed: Arc<std::sync::atomic::AtomicBool>,
     }
 
     #[async_trait]
@@ -358,6 +370,7 @@ mod tests {
             Ok(StartedSession {
                 handle: Box::new(FakeHandle {
                     prompts: Arc::clone(&self.prompts),
+                    disposed: Arc::clone(&self.disposed),
                 }),
                 context_restored: false,
                 agent_session_id: Some(agent_session_id),
@@ -367,6 +380,7 @@ mod tests {
 
     struct FakeHandle {
         prompts: Arc<Mutex<Vec<String>>>,
+        disposed: Arc<std::sync::atomic::AtomicBool>,
     }
 
     #[async_trait]
@@ -393,6 +407,12 @@ mod tests {
         }
 
         async fn cancel_turn(&self) -> anyhow::Result<()> {
+            Ok(())
+        }
+
+        async fn dispose(&self) -> anyhow::Result<()> {
+            self.disposed
+                .store(true, std::sync::atomic::Ordering::SeqCst);
             Ok(())
         }
 
@@ -470,13 +490,16 @@ mod tests {
         driver: ExtendedAcpDriver,
         prompts: Arc<Mutex<Vec<String>>>,
         seen_ids: Arc<Mutex<Vec<Option<String>>>>,
+        disposed: Arc<std::sync::atomic::AtomicBool>,
     }
 
     fn fake_driver(fail_capabilities: bool) -> FakeHarness {
         let prompts = Arc::new(Mutex::new(Vec::new()));
         let seen_ids = Arc::new(Mutex::new(Vec::new()));
+        let disposed = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let base = Arc::new(FakeBase {
             prompts: Arc::clone(&prompts),
+            disposed: Arc::clone(&disposed),
         });
         let extension = Arc::new(FakeExtension {
             seen_ids: Arc::clone(&seen_ids),
@@ -486,6 +509,7 @@ mod tests {
             driver: ExtendedAcpDriver::new(base, extension),
             prompts,
             seen_ids,
+            disposed,
         }
     }
 
@@ -589,6 +613,20 @@ mod tests {
             .await
             .expect("start");
         started.handle.shutdown().await.expect("shutdown");
+        assert!(!harness.disposed.load(std::sync::atomic::Ordering::SeqCst));
+    }
+
+    #[tokio::test]
+    async fn dispose_calls_the_base_handle_dispose() {
+        let harness = fake_driver(false);
+        let (event_tx, _event_rx) = mpsc::unbounded_channel();
+        let started = harness
+            .driver
+            .start_session(request(), event_tx)
+            .await
+            .expect("start");
+        started.handle.dispose().await.expect("dispose");
+        assert!(harness.disposed.load(std::sync::atomic::Ordering::SeqCst));
     }
 
     #[test]

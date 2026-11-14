@@ -873,16 +873,7 @@ impl NodeDaemon {
         });
 
         // Request shutdown on Ctrl-C
-        let signal_tx = shutdown_tx.clone();
-        fxg_protocol::spawn_guarded!("ctrl-c handler", async move {
-            if tokio::signal::ctrl_c().await.is_ok() {
-                tracing::info!("received Ctrl-C, shutting down");
-                fxg_protocol::discard_with!(
-                    signal_tx.send(true),
-                    "request node shutdown after Ctrl-C"
-                );
-            }
-        });
+        fxg_hub::spawn_ctrl_c_handler(shutdown_tx.clone());
 
         // Outbox sync worker (idle while standalone; reconnects when the pairing changes)
         if let Err(err) = state.refresh_hub_target().await {
@@ -964,13 +955,10 @@ impl NodeDaemon {
             );
         }
 
-        if let Err(err) = self.http_task.await {
-            tracing::error!(task = "http", "http task terminated unexpectedly: {err}");
-        }
-        if let Some(sync_task) = self.sync_task
-            && let Err(err) = sync_task.await
-        {
-            tracing::error!(task = "sync", "sync task terminated unexpectedly: {err}");
+        let task_timeout = std::time::Duration::from_secs(3);
+        fxg_hub::await_shutdown_task("http", self.http_task, task_timeout).await;
+        if let Some(sync_task) = self.sync_task {
+            fxg_hub::await_shutdown_task("sync", sync_task, task_timeout).await;
         }
         tracing::info!("fxg node start stopped");
     }
