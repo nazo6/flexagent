@@ -138,24 +138,23 @@ fn browse_directory(dir: &Path) -> Result<FsBrowseResponse, NodeError> {
     })
 }
 
-/// Determines whether the entry has the hidden attribute.
+/// Determines whether the entry is hidden (dot-prefixed, or hidden on Windows).
+#[cfg(not(windows))]
 fn is_entry_hidden(entry: &fs::DirEntry) -> bool {
+    entry.file_name().to_string_lossy().starts_with('.')
+}
+
+/// Determines whether the entry is hidden (dot-prefixed, or hidden on Windows).
+#[cfg(windows)]
+fn is_entry_hidden(entry: &fs::DirEntry) -> bool {
+    use std::os::windows::fs::MetadataExt;
+
+    const FILE_ATTRIBUTE_HIDDEN: u32 = 0x2;
     let name = entry.file_name();
-    let name_str = name.to_string_lossy();
-    if name_str.starts_with('.') {
-        return true;
-    }
-    #[cfg(windows)]
-    {
-        use std::os::windows::fs::MetadataExt;
-        if let Ok(meta) = entry.metadata() {
-            const FILE_ATTRIBUTE_HIDDEN: u32 = 0x2;
-            if meta.file_attributes() & FILE_ATTRIBUTE_HIDDEN != 0 {
-                return true;
-            }
-        }
-    }
-    false
+    name.to_string_lossy().starts_with('.')
+        || entry
+            .metadata()
+            .is_ok_and(|meta| meta.file_attributes() & FILE_ATTRIBUTE_HIDDEN != 0)
 }
 
 #[cfg(windows)]
